@@ -6739,13 +6739,27 @@ function hitMonster(m, dmg, isCrit, skill) {
     });
   }
 
+  // Tier-based colour & size so the eye can read damage magnitude at a glance —
+  // each tier up feels like a new reward, driving the "chase the bigger number" loop.
+  const tier = finalDmg >= 500 ? 3 : finalDmg >= 200 ? 2 : finalDmg >= 80 ? 1 : 0;
+  const tierColor = isCrit
+    ? (tier >= 3 ? '#ffb347' : '#ffdd44')
+    : ['#ffffff', '#ffd888', '#ff9e55', '#ff5544'][tier];
+  const critSize = Math.min(38, 22 + Math.floor(finalDmg / 14));
+  const normalSize = Math.min(30, 13 + Math.floor(finalDmg / 10));
+  const life = isCrit ? 58 : (tier >= 2 ? 52 : 46);
   game.damageNumbers.push({
-    x: m.x + m.w/2 + (Math.random() - 0.5) * 10,
-    y: m.y - 5, vy: -2.2 - Math.random(),
-    text: isCrit ? finalDmg + '!' : finalDmg, life: 46,
-    color: isCrit ? '#ffdd44' : (finalDmg > 80 ? '#ff9966' : '#ffffff'),
-    size: isCrit ? Math.min(34, 20 + Math.floor(finalDmg / 15)) : Math.min(28, 13 + Math.floor(finalDmg / 10)),
-    crit: isCrit
+    x: m.x + m.w/2 + (Math.random() - 0.5) * 12,
+    y: m.y - 5,
+    vx: (Math.random() - 0.5) * 1.8,
+    vy: -2.4 - Math.random() * 0.9,
+    text: (isCrit ? finalDmg.toLocaleString() + '!' : finalDmg.toLocaleString()),
+    life, maxLife: life,
+    color: tierColor,
+    size: isCrit ? critSize : normalSize,
+    crit: isCrit,
+    big: tier >= 2,
+    wobbleDir: Math.random() < 0.5 ? -1 : 1,
   });
 
   // Lifesteal (powerup + equipment)
@@ -7460,7 +7474,9 @@ function updateParticles(dt) {
   }
   for (let i = game.damageNumbers.length - 1; i >= 0; i--) {
     const d = game.damageNumbers[i];
-    d.y += d.vy; d.vy += 0.15; d.life -= 1;
+    d.y += d.vy; d.vy += 0.15;
+    if (d.vx) { d.x += d.vx; d.vx *= 0.92; }
+    d.life -= 1;
     if (d.life <= 0) game.damageNumbers.splice(i, 1);
   }
   if (game.afterImages.length > MAX_AFTERIMAGES) {
@@ -12710,17 +12726,70 @@ function drawParticles() {
 
 function drawDamageNumbers() {
   ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
   const camX = game.camera.x;
   for (const d of game.damageNumbers) {
     const sx = d.x - camX;
-    if (sx < -60 || sx > W + 60 || d.y < -30 || d.y > H + 30) continue;
-    ctx.font = `bold ${d.size || 14}px sans-serif`;
-    const alpha = d.life < 20 ? d.life / 20 : 1;
+    if (sx < -80 || sx > W + 80 || d.y < -50 || d.y > H + 50) continue;
+
+    // Backfill spawn-time fields so legacy pushes still juice correctly.
+    if (d.maxLife === undefined) d.maxLife = d.life + 1;
+    if (d.wobbleDir === undefined) d.wobbleDir = (d.x | 0) % 2 ? 1 : -1;
+    const age = d.maxLife - d.life;
+    const baseSize = d.size || 14;
+
+    // Pop-in: easeOutBack from ~0.4x overshooting to settle at 1x (8 frames).
+    let scale = 1;
+    if (age < 8) {
+      const t = age / 8;
+      const s = 1.70158;
+      const back = 1 + (t - 1) * (t - 1) * ((s + 1) * (t - 1) + s);
+      scale = 0.4 + back * 0.6;
+    }
+    // Tail end: shrink-and-fade together for a satisfying "poof".
+    const fadeFrames = Math.min(14, Math.max(6, Math.floor(d.maxLife * 0.32)));
+    let alpha = 1;
+    if (d.life < fadeFrames) {
+      const t = d.life / fadeFrames;
+      scale *= 0.75 + 0.25 * t;
+      alpha = t;
+    }
+    // Early rotation wobble — settles to 0 within ~10 frames.
+    let rot = 0;
+    if (age < 10) {
+      rot = Math.sin(age * 0.9) * 0.14 * (1 - age / 10) * d.wobbleDir;
+    }
+
+    ctx.save();
+    ctx.translate(sx, d.y);
+    if (rot) ctx.rotate(rot);
+    if (scale !== 1) ctx.scale(scale, scale);
     ctx.globalAlpha = alpha;
-    ctx.fillStyle = '#000';
-    ctx.fillText(d.text, sx + 1, d.y + 1);
-    ctx.fillStyle = d.color;
-    ctx.fillText(d.text, sx, d.y);
+    ctx.font = `bold ${baseSize}px sans-serif`;
+
+    // Dopamine layer: crits and big hits get a coloured glow that reads as "impact".
+    if (d.crit) {
+      ctx.shadowColor = d.color || '#ffdd44';
+      ctx.shadowBlur = 18;
+    } else if (d.big) {
+      ctx.shadowColor = d.color || '#ffaa55';
+      ctx.shadowBlur = 10;
+    }
+    // Thick black outline keeps numbers readable over any background.
+    ctx.lineWidth = d.crit ? 4.5 : 3;
+    ctx.strokeStyle = '#000';
+    ctx.strokeText(d.text, 0, 0);
+    // Inner bright stroke on crits gives that "embossed gold" feel.
+    if (d.crit) {
+      ctx.shadowBlur = 0;
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#fff7b0';
+      ctx.strokeText(d.text, 0, 0);
+    }
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = d.color || '#ffffff';
+    ctx.fillText(d.text, 0, 0);
+    ctx.restore();
   }
   ctx.globalAlpha = 1;
 }
