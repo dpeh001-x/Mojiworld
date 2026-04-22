@@ -16,6 +16,18 @@
 - Fast-forward `main` from the feature branch when the user explicitly asks to push to main. Never force-push `main`.
 - Syntax-check by extracting `<script>` from `maple_game.html` into a temp file and running `node --check` before committing.
 
+## Preview branch
+
+A dedicated `preview` branch holds whatever build is currently under review so reviewers always bookmark the same URL:
+
+- Play URL: `https://raw.githack.com/dpeh001-x/LevelX/preview/maple_game.html`
+- Changelog URL: `https://raw.githack.com/dpeh001-x/LevelX/preview/CHANGELOG.html`
+
+Behaviour:
+- Only update `preview` when the user explicitly asks (e.g. "push a preview", "update the preview"). Not automatic on every push.
+- `preview` is force-overwritten each time — safe to force-push with lease, it carries no durable history.
+- Fast-forward `preview` from the current branch tip (or a chosen commit), not via merge commits.
+
 ## File layout
 
 - `maple_game.html` — the entire game in one file (canvas, HUD, systems, logic).
