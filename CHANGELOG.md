@@ -30,7 +30,7 @@ Three commits on top of `main` (v0.9.8). All gameplay changes are contained in `
 
 ## Phase 2 — Retention hooks
 
-**🏆 Achievements + codex** (press `C`)
+**🏆 Achievements + codex** (press `N`)
 - 12 milestones tracked in `game.achievements`, persisted via Phase 1 schema.
 - Modal shows unlocked/locked rows, live kill counter, best-ever combo (`game.comboRecord`).
 - Hooks fire from `killMonster`, level-up, `bumpCombo`, and `attemptEnhance`.
@@ -100,7 +100,7 @@ Or drop the file into any static server / preview. No install step.
 1. **Save.** Pick a class, reach level 2, kill a mob, refresh. Expect `Welcome back!` toast + same level/mesos/map (you'll land in town).
 2. **Audio.** Hit a mob → tick. Land a crit → bright two-tone. Level-up → 3-note rise. `M` toggles mute.
 3. **Daily.** Banner top-right shows progress. Complete the challenge → reward toast.
-4. **Codex.** Press `C` — 12 achievements, live kill count, best combo. Kill the first mob → `First Blood` unlocks.
+4. **Codex.** Press `N` — 12 achievements, live kill count, best combo. Kill the first mob → `First Blood` unlocks.
 5. **Respec.** Open attributes (`U`), click Respec, confirm → AP refunded, milestones cleared.
 6. **Prestige.** Dev console (hold `1+2+3`) → set level 50 → kill a mob → ascend prompt. After: L1 with permanent ×1.3 XP / ×1.3 DMG.
 7. **Combos.** Farm a weak mob past 50 / 100 / 150 hits — three escalating buffs.
@@ -110,7 +110,7 @@ Or drop the file into any static server / preview. No install step.
 
 | Key | Action |
 |---|---|
-| `C` | Open codex / achievements |
+| `N` | Open codex / achievements |
 | `U` | Character sheet (attributes, respec) |
 | `K` | Skill tree |
 | `B` | Inventory |
