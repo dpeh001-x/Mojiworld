@@ -918,7 +918,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.10.0';
+const GAME_VERSION = 'v0.10.1';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -2120,6 +2120,7 @@ const player = {
   invulnerable:0, rushTimer:0, rushDir:1,
   dodgeTimer:0, dodgeCD:0, dodgeDir:1,
   blockTimer:0, blockCD:0, parryWindow:0,
+  somersault:0, somersaultDir:1,
   hitStun:0,
   quickDashTimer:0, quickDashDir:1,
   lastTapKey:null, lastTapTime:0,
@@ -3152,6 +3153,7 @@ function loadMap(id, entryX) {
   game.afterImages = [];
   game.ambient = [];
   game.smoothFx = [];
+  game.minions = [];
   game.npcs = (game.mapData.npcs || []).map(n => ({ ...n, y: 436 }));
   game.portals = game.mapData.portals || [];
   if (entryX !== undefined) {
@@ -3716,6 +3718,8 @@ function updatePlayer(dt) {
     // Hold still while blocking
     player.vx *= 0.5;
   }
+  // Somersault spin animation timer
+  if (player.somersault > 0) player.somersault -= dt;
 
   // Cooldowns
   if (player.attackCooldown > 0) player.attackCooldown -= dt;
@@ -4181,6 +4185,144 @@ function masterSkillFlourish(x, y, facing) {
 // ============ Skill implementations ============
 // Per-map gravity multiplier (Gravitos arena = 3x)
 function gravMul() { return (game.mapData && game.mapData.gravityMul) || 1; }
+
+// =========================================================================
+// WARLOCK UNDEAD MINIONS — raised allies from soulSiphon / darkPulse
+// =========================================================================
+function raiseMinion(x, y, type, life) {
+  if (!game.minions) game.minions = [];
+  game.minions.push({
+    x: x - 12, y: y - 20, w: 24, h: 32,
+    type, life: life || 10000, maxLife: life || 10000,
+    vx: 0, vy: 0, facing: player.facing,
+    atk: Math.max(4, Math.floor(getAtk() * 0.35)),
+    cd: 0,
+    spawn: 18,   // rise-from-ground animation timer
+  });
+  // Ground rise burst
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * Math.PI * 2;
+    game.particles.push({
+      x: x, y: y + 10,
+      vx: Math.cos(a) * 3, vy: -Math.abs(Math.sin(a)) * 2 - 1,
+      life: 26, color: i % 2 ? '#9944cc' : '#3a1a5a', size: 3
+    });
+  }
+}
+
+function updateMinions(dt) {
+  if (!game.minions) return;
+  for (let i = game.minions.length - 1; i >= 0; i--) {
+    const mn = game.minions[i];
+    mn.life -= dt;
+    if (mn.spawn > 0) { mn.spawn -= 1; continue; }
+    if (mn.life <= 0) {
+      // Puff of smoke on expire
+      for (let j = 0; j < 10; j++) {
+        game.particles.push({
+          x: mn.x + mn.w/2, y: mn.y + mn.h/2,
+          vx: (Math.random()-0.5) * 3, vy: -Math.random() * 2,
+          life: 24, color: '#6a3a88', size: 3
+        });
+      }
+      game.minions.splice(i, 1); continue;
+    }
+    // Seek nearest living enemy
+    let tgt = null, bestD = 9999;
+    for (const m of game.monsters) {
+      if (m.currentHp <= 0) continue;
+      const d = Math.hypot((m.x + m.w/2) - (mn.x + mn.w/2), (m.y + m.h/2) - (mn.y + mn.h/2));
+      if (d < bestD) { bestD = d; tgt = m; }
+    }
+    if (tgt) {
+      const dx = (tgt.x + tgt.w/2) - (mn.x + mn.w/2);
+      mn.facing = Math.sign(dx) || 1;
+      mn.vx += Math.sign(dx) * 0.25;
+      if (Math.abs(mn.vx) > 2.2) mn.vx = Math.sign(mn.vx) * 2.2;
+    } else {
+      mn.vx *= 0.9;
+    }
+    // Gravity
+    mn.vy += 0.5;
+    if (mn.vy > 10) mn.vy = 10;
+    mn.x += mn.vx;
+    mn.y += mn.vy;
+    checkPlatformCollision(mn);
+    // Contact damage every 400 ms
+    mn.cd -= dt;
+    if (mn.cd <= 0 && tgt && Math.hypot((tgt.x + tgt.w/2) - (mn.x + mn.w/2), (tgt.y + tgt.h/2) - (mn.y + mn.h/2)) < 30) {
+      hitMonster(tgt, mn.atk, false, 'minion');
+      mn.cd = 400;
+      // Small slash FX
+      spawnSmoothImpact(tgt.x + tgt.w/2, tgt.y + tgt.h/2, '#9944cc');
+    }
+  }
+}
+
+function drawMinions() {
+  if (!game.minions) return;
+  const camX = game.camera.x;
+  for (const mn of game.minions) {
+    const sx = (mn.x - camX) | 0;
+    const sy = mn.y | 0;
+    if (sx + mn.w < 0 || sx > W) continue;
+    const alpha = mn.life < 1200 ? Math.max(0, mn.life / 1200) : 1;
+    ctx.globalAlpha = alpha;
+    // Rise animation — slide up from under
+    const riseOffset = mn.spawn > 0 ? mn.spawn * 1.2 : 0;
+    const yOff = sy + riseOffset;
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(sx + mn.w/2, sy + mn.h, 10, 2.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (mn.type === 'skeleton') {
+      // Bony body — white bones with purple soul core
+      ctx.fillStyle = '#2a1a28';
+      ctx.fillRect(sx + 6, yOff + 10, 12, 22);
+      ctx.fillStyle = '#e8e0d8';
+      ctx.fillRect(sx + 7, yOff + 10, 10, 20);
+      // Skull
+      ctx.fillStyle = '#2a1a28';
+      ctx.fillRect(sx + 4, yOff, 16, 14);
+      ctx.fillStyle = '#f0e8d8';
+      ctx.fillRect(sx + 5, yOff + 1, 14, 12);
+      // Eye sockets — glowing purple
+      ctx.fillStyle = '#9944cc';
+      ctx.fillRect(sx + 7, yOff + 5, 3, 3);
+      ctx.fillRect(sx + 14, yOff + 5, 3, 3);
+      // Jaw gap
+      ctx.fillStyle = '#2a1a28';
+      ctx.fillRect(sx + 9, yOff + 11, 6, 2);
+    } else {
+      // Zombie — green rotting
+      ctx.fillStyle = '#1a2a18';
+      ctx.fillRect(sx + 5, yOff + 10, 14, 22);
+      ctx.fillStyle = '#5a7a3a';
+      ctx.fillRect(sx + 6, yOff + 10, 12, 20);
+      ctx.fillStyle = '#3a5a28';
+      ctx.fillRect(sx + 6, yOff + 10, 3, 20);
+      // Head
+      ctx.fillStyle = '#1a2a18';
+      ctx.fillRect(sx + 4, yOff, 16, 14);
+      ctx.fillStyle = '#7a9a5a';
+      ctx.fillRect(sx + 5, yOff + 1, 14, 12);
+      // Red eyes
+      ctx.fillStyle = '#ff4422';
+      ctx.fillRect(sx + 7, yOff + 5, 2, 2);
+      ctx.fillRect(sx + 15, yOff + 5, 2, 2);
+    }
+    // Purple soul aura drifting
+    if (game.time % 6 === 0) {
+      game.particles.push({
+        x: sx + mn.w/2 + camX, y: yOff + 4,
+        vx: (Math.random() - 0.5) * 0.5, vy: -0.5 - Math.random(),
+        life: 18, color: '#9944cc', size: 2
+      });
+    }
+    ctx.globalAlpha = 1;
+  }
+}
 
 // Archer aim — holding UP/DOWN tilts projectiles ~28°
 // =========================================================================
@@ -5379,34 +5521,67 @@ const SKILL_FNS = {
     }, i * 150));
     flash(0.25);
   },
-  // Warlock
+  // Warlock — iconic necromancy kit
   soulSiphon: () => {
+    // Raise 2 skeletal minions from tormented enemies, drain HP+MP
     let drained = 0;
+    const victims = [];
     for (const m of game.monsters) {
-      if (m.currentHp<=0) continue;
-      if (Math.abs(m.x - player.x) < 240 && Math.abs(m.y - player.y) < 140) {
-        const dmg = Math.floor(getAtk() * 1.3 + 10);
+      if (m.currentHp <= 0) continue;
+      if (Math.abs(m.x - player.x) < 260 && Math.abs(m.y - player.y) < 160) {
+        const dmg = Math.floor(getAtk() * 1.4 + 12);
         hitMonster(m, dmg, rollCrit(), 'siphon');
-        drained += Math.floor(dmg * 0.4);
+        drained += Math.floor(dmg * 0.45);
+        victims.push(m);
+        // Purple soul strand pulling toward caster
+        for (let i = 0; i < 8; i++) {
+          game.particles.push({
+            x: m.x + m.w/2, y: m.y + m.h/2,
+            vx: (player.x - m.x) * 0.03, vy: (player.y - m.y) * 0.03 - 1,
+            life: 34, color: i % 2 ? '#c466ff' : '#ffffff', size: 3
+          });
+        }
       }
     }
     player.mp = Math.min(getMaxMp(), player.mp + drained);
     player.hp = Math.min(getMaxHp(), player.hp + Math.floor(drained * 0.5));
-    for (const m of game.monsters) {
-      if (m.currentHp<=0) continue;
-      const d = Math.abs(m.x - player.x);
-      if (d < 240) {
-        for (let i=0;i<6;i++) game.particles.push({x:m.x+m.w/2,y:m.y+m.h/2,vx:(player.x-m.x)*0.02,vy:(player.y-m.y)*0.02-2,life:30,color:'#aa44ff',size:3});
-      }
+    // Spawn 2 raised skeletons from the first 2 victims (or near caster if none)
+    const spawnCount = Math.min(2, Math.max(1, victims.length));
+    for (let i = 0; i < spawnCount; i++) {
+      const src = victims[i];
+      const mx = src ? (src.x + src.w/2) : (player.x + player.w/2 + (i - 0.5) * 30);
+      raiseMinion(mx, src ? src.y : player.y, 'skeleton', 10000);
     }
+    showToast(`Soul Siphon — raised ${spawnCount} thrall${spawnCount > 1 ? 's' : ''}!`, 'epic');
+    flash(0.3); addShake(4);
   },
   darkPulse: () => {
+    // Ultimate — erupting nova of shadow that raises a skeleton legion
     const prevLS = player.mods.lifesteal;
     player.mods.lifesteal = Math.max(0.5, player.mods.lifesteal);
-    performAround(160, 2.5, { color:'#aa66ff', kb:6 });
+    performAround(220, 3.0, { color:'#9944cc', kb:7 });
     player.mods.lifesteal = prevLS;
-    for (let i=0;i<50;i++){ const a=(i/50)*Math.PI*2; game.particles.push({x:player.x+player.w/2,y:player.y+player.h/2,vx:Math.cos(a)*9,vy:Math.sin(a)*9,life:40,color:'#9944cc',size:3}); }
-    flash(0.4); addShake(7);
+    // Big purple nova
+    spawnSmoothExplosion(player.x + player.w/2, player.y + player.h/2, 240, '#c466ff', '#44186633', { life: 36 });
+    for (let i = 0; i < 60; i++) {
+      const a = (i / 60) * Math.PI * 2;
+      game.particles.push({
+        x: player.x + player.w/2, y: player.y + player.h/2,
+        vx: Math.cos(a) * 11, vy: Math.sin(a) * 11,
+        life: 44, color: i % 2 ? '#9944cc' : '#ffffff', size: 3
+      });
+    }
+    // Raise 5 undead in a semicircle in front of the caster
+    const cx = player.x + player.w/2, cy = player.y + player.h/2;
+    for (let i = 0; i < 5; i++) {
+      const a = (i - 2) * 0.45;
+      const mx = cx + player.facing * (60 + i * 12) + Math.cos(a) * 40;
+      const ty = cy + Math.sin(a) * 30;
+      const type = i % 2 === 0 ? 'skeleton' : 'zombie';
+      raiseMinion(mx, ty, type, 12000);
+    }
+    showToast('DARK PULSE — legion risen!', 'legendary');
+    flash(0.55); addShake(10);
   },
 
   // Archer
@@ -5419,6 +5594,7 @@ const SKILL_FNS = {
       w: 18, h: 6, life: 45,
       damage: getAtk() * 1.3 + 4, owner: 'player', skill: 'arrow', color: '#ddaa66',
       _enh: player._enh,
+      gravity: 0.32,                   // slightly heavier drop than default 0.20
     };
     game.projectiles.push(p);
     // Small explosive-arrow sprite follows the shot for a snappy tracer
@@ -5459,20 +5635,40 @@ const SKILL_FNS = {
     flash(0.15);
   },
   evadeRoll: () => {
+    // Detect "moving back" intent — held direction is opposite the facing
+    const k = game.keys;
+    const movingBack = (player.facing > 0 && k['arrowleft']) || (player.facing < 0 && k['arrowright']);
     const tx = Math.min(game.mapData.worldWidth - player.w, Math.max(0, player.x - player.facing * 120));
     for (let i=0;i<14;i++) { game.particles.push({x:player.x+player.w/2,y:player.y+player.h,vx:player.facing*(1+Math.random()*3),vy:-1-Math.random()*2,life:20,color:'#ccffcc',size:2}); }
     player.x = tx;
-    player.vy = -4;
-    player.invulnerable = Math.max(player.invulnerable, 350);
-    // Fire 2 arrows flat horizontal with mild gravity — explode after ~100px with knockback
+    // Backward-movement triggers a somersault — big upward launch + spin flag
+    if (movingBack) {
+      player.vy = -11;
+      player.somersault = 520;              // ms of spin animation
+      player.somersaultDir = -player.facing;
+      showToast('Somersault!', 'rare');
+      // Extra ring of dust kicking up at launch
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI;
+        game.particles.push({
+          x: player.x + player.w/2, y: player.y + player.h,
+          vx: Math.cos(a) * 4, vy: -Math.sin(a) * 3 - 1,
+          life: 24, color: '#e0f5e0', size: 2
+        });
+      }
+    } else {
+      player.vy = -4;
+    }
+    player.invulnerable = Math.max(player.invulnerable, 420);
+    // Fire 2 flat-horizontal arrows (unchanged)
     for (let i = 0; i < 2; i++) {
       game.projectiles.push({
         x: player.x + (player.facing > 0 ? player.w : -18),
         y: player.y + 12 + i * 8,
         vx: player.facing * 14, vy: 0,
-        w: 20, h: 6, life: 8,                 // ~112px then detonates
+        w: 20, h: 6, life: 8,
         damage: getAtk() * 1.0 + 4, owner: 'player', skill: 'arrow', color: '#ffdd88',
-        gravity: 0.08,                         // mild gravity
+        gravity: 0.08,
         selfExplode: true, explode: 70, explodeKb: 6,
         _enh: player._enh,
       });
@@ -5523,29 +5719,41 @@ const SKILL_FNS = {
   },
   // Sniper
   deadeye: () => {
+    // Marksman precision shot — almost no gravity, laser-straight
+    const { cosA, sinA } = getArcherAim();
     game.projectiles.push({
       x: player.x + (player.facing > 0 ? player.w : -30), y: player.y + 18,
-      vx: player.facing * 18, vy: 0, w: 36, h: 8, life: 200,
+      vx: player.facing * 20 * cosA, vy: sinA * 20,
+      w: 36, h: 8, life: 200,
       damage: getAtk() * 4 + 30, owner: 'player', skill: 'deadeye', pierce: true,
       alwaysCrit: true, color: '#ffcc66',
+      gravity: 0.02,                   // very very mild gravity
     });
-    flash(0.2);
+    // Aiming laser trail for the first few frames
+    spawnSmoothBeam(player.x + player.w/2, player.y + 22, player.facing > 0 ? 0 : Math.PI,
+      320, 3, '#ffdd44', { life: 10 });
+    flash(0.25);
   },
   arrowRain: () => {
+    // Larger AoE — wider spread, more arrows, longer duration
     const cx = player.x + player.w/2 + player.facing * 200;
-    spawnFx('archer','arrowRain', cx, 420, 1, { scale: 0.9, frameMs: 80 });
-    for (let i = 0; i < 12; i++) {
+    spawnFx('archer','arrowRain', cx, 420, 1, { scale: 1.25, frameMs: 80 });
+    const count = 22;
+    const spread = 320;   // wider
+    for (let i = 0; i < count; i++) {
       setTimeout(() => {
         if (player.hp <= 0) return;
-        const ox = cx + (Math.random() - 0.5) * 180;
+        const ox = cx + (Math.random() - 0.5) * spread;
         game.projectiles.push({
-          x: ox, y: -20, vx: (Math.random()-0.5) * 1.5, vy: 14,
-          w: 10, h: 18, life: 90, damage: getAtk() * 1.8 + 8,
+          x: ox, y: -20, vx: (Math.random()-0.5) * 1.8, vy: 15,
+          w: 10, h: 18, life: 110, damage: getAtk() * 1.8 + 8,
           owner: 'player', skill: 'rainArrow', color: '#ddaa66',
         });
-      }, i * 60);
+      }, i * 45);
     }
-    addShake(4);
+    // Target ring on ground showing the drop zone
+    spawnSmoothExplosion(cx, 470, spread * 0.55, '#ffdd88', '#ffaa4488', { life: 40 });
+    addShake(6);
   },
   // Ranger
   wildBond: () => {
@@ -6070,8 +6278,9 @@ function performBolt() {
 function performMeteor() {
   const cx = player.x + player.w/2 + player.facing * 80;
   game.hazards.push({
-    x: cx - 100, y: 0, w: 200, h: H, type: 'meteor_warn',
-    life: 50, maxLife: 50, fireAt: 50, cx
+    x: cx - 180, y: 0, w: 360, h: H, type: 'meteor_warn',
+    life: 50, maxLife: 50, fireAt: 50, cx,
+    radius: 180,
   });
 }
 
@@ -7521,24 +7730,33 @@ function updateProjectiles(dt) {
     const h = game.hazards[i];
     h.life -= 1;
     if (h.type === 'meteor_warn' && h.life === 0) {
-      // Meteor strike
+      // Meteor strike — wider blast radius for Archmage Q
       const damage = getAtk() * 4 + 30;
-      const hbox = { x: h.cx - 90, y: 0, w: 180, h: H };
+      const radius = 180;   // was 90 half-width -> 180
+      const hbox = { x: h.cx - radius, y: 0, w: radius * 2, h: H };
       for (const m of game.monsters) {
         if (m.currentHp <= 0) continue;
         if (aabb(hbox, m)) {
+          // Falloff — full damage inside 120 px, halved at the outer edge
+          const dx = Math.abs((m.x + m.w/2) - h.cx);
+          const falloff = dx < 120 ? 1 : 1 - Math.min(1, (dx - 120) / (radius - 120)) * 0.5;
           const crit = rollCrit();
-          const dmg = Math.floor((damage + Math.random() * 20) * (crit ? getCritDmg() : 1));
+          const dmg = Math.floor((damage * falloff + Math.random() * 20) * (crit ? getCritDmg() : 1));
           hitMonster(m, dmg, crit, 'meteor');
           m.vy = -4;
+          m.vx += Math.sign((m.x + m.w/2) - h.cx) * 4 * falloff;
         }
       }
-      addShake(18); flash(0.6); addHitStop(120);
-      for (let j = 0; j < 50; j++) {
+      addShake(22); flash(0.7); addHitStop(140);
+      // Modern gradient blast + lens flare
+      spawnSmoothExplosion(h.cx, 460, radius, '#ffdd66', '#ff443388', { life: 34 });
+      spawnSmoothImpact(h.cx, 440, '#ffaa44');
+      for (let j = 0; j < 80; j++) {
         game.particles.push({
-          x: h.cx + (Math.random() - 0.5) * 160, y: 400 + Math.random() * 60,
-          vx: (Math.random() - 0.5) * 8, vy: -Math.random() * 8,
-          life: 40, color: j < 25 ? '#ff6633' : '#ffdd44', size: 3 + Math.random() * 4
+          x: h.cx + (Math.random() - 0.5) * radius * 2,
+          y: 400 + Math.random() * 60,
+          vx: (Math.random() - 0.5) * 10, vy: -Math.random() * 10,
+          life: 48, color: j < 40 ? '#ff6633' : '#ffdd44', size: 3 + Math.random() * 4
         });
       }
       game.hazards.splice(i, 1);
@@ -10282,6 +10500,14 @@ function _chibiApply(sx, sy) {
   ctx.translate(footX, footY);
   // 10% bigger overall with chibi proportions (wider + slightly taller)
   ctx.scale(1.19, 0.97);
+  // Somersault rotation — flip around the body center during evadeRoll-back
+  if (player.somersault > 0) {
+    const t = 1 - player.somersault / 520;
+    const ang = t * Math.PI * 2 * (player.somersaultDir || 1);
+    ctx.translate(0, -player.h / 2);   // pivot near torso center instead of feet
+    ctx.rotate(ang);
+    ctx.translate(0, player.h / 2);
+  }
   ctx.translate(-footX, -footY);
   // Lift the whole figure 4 px so the bigger body doesn't clip the ground
   ctx.translate(0, -4);
@@ -12721,14 +12947,15 @@ function drawHazards() {
       }
     }
     else if (h.type === 'meteor_warn') {
-      // Warning circle
+      // Warning circle — matches the meteor's blast radius
       const prog = 1 - h.life / h.maxLife;
+      const rad = h.radius || 90;
       ctx.fillStyle = `rgba(255, 80, 40, ${0.15 + prog * 0.4})`;
-      ctx.fillRect(sx - 90, 450, 180, 35);
+      ctx.fillRect(sx - rad, 450, rad * 2, 35);
       ctx.strokeStyle = `rgba(255, 200, 60, 0.8)`;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.ellipse(sx, 470, 90, 12, 0, 0, Math.PI * 2);
+      ctx.ellipse(sx, 470, rad, 14, 0, 0, Math.PI * 2);
       ctx.stroke();
       // Incoming meteor
       ctx.fillStyle = '#ff4422';
@@ -13096,6 +13323,7 @@ function loop(time) {
     updatePlayer(dt);
     updateMonsters(dt);
     updateProjectiles(dt);
+    updateMinions(dt);
     updateParticles(dt);
     updateFxInstances(dt);
     updateSmoothFx(dt);
@@ -13104,6 +13332,7 @@ function loop(time) {
     updateCamera();
   } else if (player.hp > 0) {
     updateCamera();
+    updateMinions(dt);
     updateParticles(dt);
     updateFxInstances(dt);
     updateSmoothFx(dt);
@@ -13147,6 +13376,7 @@ function loop(time) {
   drawProjectiles();
   drawHazards();
   drawAfterImages();
+  drawMinions();
   drawPlayer();
   drawPet();
   drawParticles();
