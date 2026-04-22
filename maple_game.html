@@ -623,7 +623,7 @@
   <div id="top-ui">
     <div id="stats">
       <div>Lv.<span id="level">1</span> <span id="class">Warrior</span>
-        <span style="color:#ffcc55;margin-left:6px;">AP:<span id="skill-points">0</span></span></div>
+        <span style="color:#ffcc55;margin-left:6px;">LP:<span id="skill-points">0</span></span></div>
       <div class="bar"><div class="bar-fill hp-fill" id="hp-bar" style="width:100%"></div><div class="bar-text" id="hp-text">100/100</div></div>
       <div class="bar"><div class="bar-fill mp-fill" id="mp-bar" style="width:100%"></div><div class="bar-text" id="mp-text">50/50</div></div>
       <div class="bar"><div class="bar-fill exp-fill" id="exp-bar" style="width:0%"></div><div class="bar-text" id="exp-text">0/100</div></div>
@@ -740,9 +740,8 @@
           <h3>Menus & Items</h3>
           <div class="kb"><span>Interact / Talk</span><span><kbd>F</kbd></span></div>
           <div class="kb"><span>Inventory</span><span><kbd>B</kbd></span></div>
-          <div class="kb"><span>Skill Tree</span><span><kbd>K</kbd></span></div>
+          <div class="kb"><span>Level Up Panel</span><span><kbd>K</kbd> / <kbd>U</kbd></span></div>
           <div class="kb"><span>Change Job / Master</span><span><kbd>0</kbd></span></div>
-          <div class="kb"><span>Character Sheet</span><span><kbd>U</kbd></span></div>
           <div class="kb"><span>Dev Console</span><span><kbd>1</kbd>+<kbd>2</kbd>+<kbd>3</kbd></span></div>
           <div class="kb"><span>Help Panel</span><span><kbd>?</kbd></span></div>
           <div class="kb"><span>HP Potion</span><span><kbd>R</kbd></span></div>
@@ -918,7 +917,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.10.5';
+const GAME_VERSION = 'v0.11.0';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -2287,17 +2286,17 @@ window.addEventListener('keydown', e => {
   if (k === 'arrowup' && !game.paused && player.hp > 0 && player.hitStun <= 0) tryPortal();
   if (k === 'b') toggleModal('inventory-modal', renderInventory);
   if (k === 'k') {
-    // Skill tree — works anywhere, not just town
+    // Skill tree removed — K now opens the Level Up panel for quick access
     if (player.cls && !game.paused && player.hp > 0) {
-      openSkillTree();
+      openLevelUpPanel();
     } else if (!player.cls) {
       showToast('Pick a class first', 'common');
     }
   }
   if (k === 'u') {
-    // Character sheet / attribute allocation
+    // Character sheet (Level Up panel — replaces attribute allocation)
     if (player.cls && !game.paused && player.hp > 0) {
-      openAttributes();
+      openLevelUpPanel();
     } else if (!player.cls) {
       showToast('Pick a class first', 'common');
     }
@@ -3277,9 +3276,9 @@ function applyPowerupOrb(o) {
   const given = [];
   for (let i = 0; i < stacks; i++) {
     const pw = i === 0 ? o.pw : POWERUPS[Math.floor(Math.random() * POWERUPS.length)];
-    pw.apply(player);
-    given.push(pw.name);
+    if (acquirePowerup(pw)) given.push(pw.name);
   }
+  if (given.length === 0) { given.push('(Powerup slots full — boon declined)'); }
   showToast(`${given.join(' + ')}`, o.rarity);
   flash(0.3);
   addShake(3);
@@ -7994,7 +7993,7 @@ function openNPC(npc) {
     opts.push({ t:'Enhance Gear ✦', cb:() => { closeDialog(); openEnhancementModal(); } });
   } else if (npc.role === 'skills') {
     text = `You have ${player.skillPoints} attribute point${player.skillPoints === 1 ? '' : 's'}. Spend them at the character sheet (U) or skill tree (K).`;
-    opts.push({ t:'Skill Tree ✦', cb:() => { closeDialog(); openSkillTree(); } });
+    opts.push({ t:'Level Up ✦', cb:() => { closeDialog(); openLevelUpPanel(); } });
     opts.push({ t:'Train Stats', cb:() => { closeDialog(); openSkillsModal(); } });
   } else if (npc.role === 'sage') {
     text = 'The road is long. For 1500 Lumens, I can offer you a random boon.';
@@ -8507,6 +8506,93 @@ function openAttributes() {
 }
 
 // =========================================================================
+// LEVEL UP POINTS — simplified replacement for the skill tree / AP system
+// Each level grants 1 LP; spend on direct stat boosts. Values are capped
+// per stat so players can't infinitely stack any one lane.
+// =========================================================================
+const LEVELUP_OPTIONS = [
+  { id:'hp',    label:'+20 Max HP',    cost: 1, cap: 40, apply: () => { player.maxHp += 20; player.hp = getMaxHp(); } },
+  { id:'mp',    label:'+10 Max MP',    cost: 1, cap: 40, apply: () => { player.maxMp += 10; player.mp = getMaxMp(); } },
+  { id:'atk',   label:'+2 ATK',        cost: 1, cap: 30, apply: () => { player.baseAtk += 2; } },
+  { id:'def',   label:'+2 DEF',        cost: 1, cap: 30, apply: () => { player.baseDef += 2; } },
+  { id:'crit',  label:'+1% Crit',      cost: 1, cap: 25, apply: () => { player.baseCrit = (player.baseCrit || 5) + 1; } },
+  { id:'speed', label:'+0.15 Speed',   cost: 2, cap: 10, apply: () => { player.baseSpeed += 0.15; } },
+];
+
+function openLevelUpPanel() {
+  if (!player._levelUpSpent) player._levelUpSpent = {};
+  const modal = document.getElementById('attributes-modal');
+  const body = modal.querySelector('.modal');
+  body.innerHTML = `
+    <button class="close-btn" onclick="closeAllModals()">✕</button>
+    <h2>✦ Level Up Points ✦</h2>
+    <div style="text-align:center; margin-bottom:8px; color:#bbb; font-size:12px;">
+      Spend LP to permanently boost a stat. Each lane has a cap to keep your build honest.
+    </div>
+    <div style="text-align:center; margin-bottom:12px;">
+      Available: <span class="gold" id="lp-remaining">${player.skillPoints}</span>
+    </div>
+    <div id="lp-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;"></div>
+    <div id="lp-powerup" style="margin-top:14px; padding:10px; background:rgba(0,0,0,0.35); border-radius:6px; font-size:12px; color:#cfd; line-height:1.5;"></div>
+  `;
+  renderLevelUp();
+  modal.style.display = 'flex';
+  game.paused = true;
+}
+
+function renderLevelUp() {
+  const grid = document.getElementById('lp-grid');
+  if (!grid) return;
+  if (!player._levelUpSpent) player._levelUpSpent = {};
+  grid.innerHTML = '';
+  for (const o of LEVELUP_OPTIONS) {
+    const spent = player._levelUpSpent[o.id] || 0;
+    const atCap = spent >= o.cap;
+    const canAfford = player.skillPoints >= o.cost && !atCap;
+    const card = document.createElement('div');
+    card.style.cssText = `
+      padding:10px; border-radius:6px;
+      background: rgba(0,0,0,0.35);
+      border: 1px solid ${atCap ? '#4a6a4a' : canAfford ? '#ffcc66' : '#555'};
+      cursor: ${canAfford ? 'pointer' : 'not-allowed'};
+      opacity: ${atCap ? 0.55 : canAfford ? 1 : 0.65};
+    `;
+    card.innerHTML = `
+      <div style="font-weight:bold; color:${atCap ? '#88dd88' : '#fff'}; margin-bottom:4px;">
+        ${o.label}
+      </div>
+      <div style="font-size:11px; color:#bbb;">
+        ${o.cost} LP · Invested ${spent}/${o.cap}${atCap ? ' · MAXED' : ''}
+      </div>
+    `;
+    if (canAfford) {
+      card.onclick = () => {
+        if (player.skillPoints < o.cost) return;
+        player.skillPoints -= o.cost;
+        player._levelUpSpent[o.id] = spent + 1;
+        o.apply();
+        renderLevelUp();
+        updateUI();
+      };
+    }
+    grid.appendChild(card);
+  }
+  // Derived stats + powerup cap summary
+  const pw = document.getElementById('lp-powerup');
+  if (pw) {
+    const pcount = (player._powerups && player._powerups.length) || 0;
+    pw.innerHTML = `
+      <b style="color:#ffcc66;">Current stats</b><br>
+      HP ${getMaxHp()} · MP ${getMaxMp()} · ATK ${getAtk()} · DEF ${getDef()} · Crit ${getCrit()}% · Speed ${getSpeed().toFixed(1)}
+      <br><br><b style="color:#ffcc66;">Powerup slots</b><br>
+      ${pcount} / ${POWERUP_CAP} boons active — extra powerups beyond the cap will refresh existing ones.
+    `;
+  }
+  const rem = document.getElementById('lp-remaining');
+  if (rem) rem.textContent = player.skillPoints;
+}
+
+// =========================================================================
 // DEVELOPER CONSOLE
 // =========================================================================
 function devLog(msg) {
@@ -8977,10 +9063,45 @@ function useQuickPotion(which) {
 // =========================================================================
 // POWERUPS
 // =========================================================================
+// Cap how many stacking perks a run can carry. Beyond this, new choices
+// rotate out the weakest existing boon so nobody ends up with infinite
+// stacked buffs. Sage shop purchases beyond the cap are refunded.
+const POWERUP_CAP = 8;
+const POWERUP_SAME_CAP = 3;   // same powerup ID can stack at most 3 times
+
+// Returns 'ok' | 'dup-cap' | 'total-cap' — tells the caller if acquisition
+// is allowed. When total-cap, still allow replacing the oldest boon.
+function canTakePowerup(pw) {
+  if (!player._powerups) player._powerups = [];
+  const dup = player._powerups.filter(id => id === pw.id).length;
+  if (dup >= POWERUP_SAME_CAP) return 'dup-cap';
+  if (player._powerups.length >= POWERUP_CAP) return 'total-cap';
+  return 'ok';
+}
+
+function acquirePowerup(pw) {
+  if (!player._powerups) player._powerups = [];
+  const status = canTakePowerup(pw);
+  if (status === 'dup-cap') {
+    showToast(`${pw.name} is maxed (3x)`, 'rare');
+    return false;
+  }
+  if (status === 'total-cap') {
+    // Drop the oldest slot to make room
+    player._powerups.shift();
+    showToast('Powerup slots full — oldest replaced', 'rare');
+  }
+  pw.apply(player);
+  player._powerups.push(pw.id);
+  return true;
+}
+
 function showPowerupChoice() {
   const opts = document.getElementById('powerup-options');
   opts.innerHTML = '';
-  const shuffled = POWERUPS.slice().sort(() => Math.random() - 0.5);
+  // Filter out powerups you've already maxed at POWERUP_SAME_CAP
+  const pool = POWERUPS.filter(p => canTakePowerup(p) !== 'dup-cap');
+  const shuffled = (pool.length ? pool : POWERUPS).slice().sort(() => Math.random() - 0.5);
   const pick = shuffled.slice(0, 3);
   for (const pw of pick) {
     const card = document.createElement('div');
@@ -8991,8 +9112,9 @@ function showPowerupChoice() {
       <div class="desc">${pw.desc}</div>
     `;
     card.onclick = () => {
-      pw.apply(player);
-      showToast(`${pw.name} acquired!`, 'epic');
+      if (acquirePowerup(pw)) {
+        showToast(`${pw.name} acquired!`, 'epic');
+      }
       closeAllModals();
     };
     opts.appendChild(card);
@@ -9003,10 +9125,15 @@ function showPowerupChoice() {
 
 function buyRandomPowerup() {
   if (player.mesos < 1500) { showToast('Not enough Lumens!', 'rare'); return; }
-  player.mesos -= 1500;
   const pw = POWERUPS[Math.floor(Math.random() * POWERUPS.length)];
-  pw.apply(player);
-  showToast(`${pw.name} — ${pw.desc}`, 'epic');
+  if (canTakePowerup(pw) === 'dup-cap') {
+    showToast(`${pw.name} already maxed — try again`, 'rare');
+    return;
+  }
+  player.mesos -= 1500;
+  if (acquirePowerup(pw)) {
+    showToast(`${pw.name} — ${pw.desc}`, 'epic');
+  }
 }
 
 function showPowerupShop() {
