@@ -741,6 +741,7 @@
           <div class="kb"><span>Interact / Talk</span><span><kbd>F</kbd></span></div>
           <div class="kb"><span>Inventory</span><span><kbd>B</kbd></span></div>
           <div class="kb"><span>Skill Tree</span><span><kbd>K</kbd></span></div>
+          <div class="kb"><span>Change Job / Master</span><span><kbd>0</kbd></span></div>
           <div class="kb"><span>Character Sheet</span><span><kbd>U</kbd></span></div>
           <div class="kb"><span>Dev Console</span><span><kbd>1</kbd>+<kbd>2</kbd>+<kbd>3</kbd></span></div>
           <div class="kb"><span>Help Panel</span><span><kbd>?</kbd></span></div>
@@ -917,7 +918,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.9.8';
+const GAME_VERSION = 'v0.9.9';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -2280,6 +2281,13 @@ window.addEventListener('keydown', e => {
       showToast('Pick a class first', 'common');
     }
   }
+  if (k === '0') {
+    // Job change / skill unlock hub — re-pick jobs/masters any time
+    if (!player.cls) { showToast('Pick a class first', 'common'); return; }
+    if (game.paused || player.hp <= 0) return;
+    resetJobAndMaster();
+    openAdvancement();
+  }
   // Dev console — 1+2+3 held together
   if (k === '1' || k === '2' || k === '3') {
     if (game.keys['1'] && game.keys['2'] && game.keys['3'] && !game._devComboFired) {
@@ -2425,6 +2433,39 @@ function openClassSelect() {
   document.getElementById('class-select-modal').style.display = 'flex';
   game.paused = true;
 }
+// Undo whatever stats were added by picking a job/master so the player can
+// re-pick without double-stacking stats. Skills tied to the old job/master
+// drop out automatically via skillsForClass.
+function resetJobAndMaster() {
+  if (player.master) {
+    const m = MASTERS[player.master];
+    if (m && m.stats) {
+      if (m.stats.hp)    { player.maxHp -= m.stats.hp; player.hp = Math.min(player.hp, getMaxHp()); }
+      if (m.stats.mp)    { player.maxMp -= m.stats.mp; player.mp = Math.min(player.mp, getMaxMp()); }
+      if (m.stats.atk)   player.baseAtk -= m.stats.atk;
+      if (m.stats.def)   player.baseDef -= m.stats.def;
+      if (m.stats.crit)  player.baseCrit = (player.baseCrit || 5) - m.stats.crit;
+      if (m.stats.speed) player.baseSpeed -= m.stats.speed;
+      if (m.stats.jump)  player.baseJump -= m.stats.jump;
+    }
+    player.master = null;
+  }
+  if (player.job) {
+    const j = JOBS[player.job];
+    if (j && j.stats) {
+      if (j.stats.hp)    { player.maxHp -= j.stats.hp; player.hp = Math.min(player.hp, getMaxHp()); }
+      if (j.stats.mp)    { player.maxMp -= j.stats.mp; player.mp = Math.min(player.mp, getMaxMp()); }
+      if (j.stats.atk)   player.baseAtk -= j.stats.atk;
+      if (j.stats.def)   player.baseDef -= j.stats.def;
+      if (j.stats.crit)  player.baseCrit = (player.baseCrit || 5) - j.stats.crit;
+      if (j.stats.speed) player.baseSpeed -= j.stats.speed;
+    }
+    player.job = null;
+  }
+  // Clear learned skill-tree nodes so job-gated tree branches re-grant cleanly
+  player.skillCooldowns = {};
+}
+
 function openAdvancement() {
   const c = CLASSES[player.cls];
   if (!c) return;
@@ -2450,6 +2491,8 @@ function openAdvancement() {
       applyJob(jobId);
       document.getElementById('advancement-modal').style.display = 'none';
       game.paused = false;
+      // Chain straight into master advancement after job pick (any level)
+      setTimeout(() => { openMasterAdvancement(); }, 400);
     };
     opts.appendChild(card);
   }
@@ -2482,7 +2525,10 @@ function applyMaster(masterId) {
 
 function openMasterAdvancement() {
   const job = JOBS[player.job];
-  if (!job || !job.masters) return;
+  if (!job) return;
+  // Derive master options from MASTERS entries whose `from` matches this job
+  const masterList = Object.keys(MASTERS).filter(id => MASTERS[id].from === player.job);
+  if (!masterList.length) return;
   const opts = document.getElementById('advancement-options');
   opts.innerHTML = '';
   // Update title for master tier
@@ -2491,7 +2537,7 @@ function openMasterAdvancement() {
   const subEl = document.querySelector('#advancement-modal div[style*="bbb"]');
   if (subEl) subEl.textContent = 'Your legend is etched in fate. Pick your mastery.';
 
-  for (const masterId of job.masters) {
+  for (const masterId of masterList) {
     const m = MASTERS[masterId];
     const card = document.createElement('div');
     card.className = 'class-card';
