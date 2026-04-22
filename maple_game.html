@@ -918,7 +918,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.10.2';
+const GAME_VERSION = 'v0.10.3';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -1662,10 +1662,10 @@ const monsterTypes = {
   mummy:    { name:'Duneborn Mummy',  w:38, h:48, color:'#d8c090', shell:'#8a6a40', hp:320, atk:34, exp:170, mesos:80, speed:0.5, jump:0, shoot:'mdark',     shootCd:2800 },
   skeleton: { name:'Bone Archer',     w:36, h:46, color:'#e8e0d0', shell:'#2a2030', hp:220, atk:28, exp:140, mesos:65, speed:0.7, jump:2, shoot:'msplinter', shootCd:2200 },
   wraith:   { name:'Pale Wraith',     w:40, h:50, color:'#aaccee', shell:'#3a4a6a', hp:280, atk:36, exp:180, mesos:90, speed:1.1, jump:0, shoot:'mdark',     shootCd:2000 },
-  king:     { name:'Gelmonarch',      w:64, h:56, color:'#66ccff', shell:'#3388cc', hp:1200,atk:40, exp:700, mesos:400,speed:0.8, jump:8,  boss:true },
-  mushmom:  { name:'Queen Fungara',   w:76, h:86, color:'#f0d8a8', shell:'#aa2244', hp:2500,atk:50, exp:1500,mesos:1000,speed:0.6,jump:6,  boss:true },
-  aetherion:{ name:'Aetherion, the Shardfather', w:160, h:160, color:'#7a5aee', shell:'#c8a8ff', hp:18000,atk:90, exp:12000,mesos:8000,speed:0.5,jump:0, boss:true, superBoss:true },
-  gravitos: { name:'Gravitos, the Weight-Bearer', w:180, h:180, color:'#1a0a2e', shell:'#6634a8', hp:28000, atk:110, exp:18000, mesos:12000, speed:0.4, jump:0, boss:true, superBoss:true, hyperBoss:true },
+  king:     { name:'Gelmonarch',      w:64, h:56, color:'#66ccff', shell:'#3388cc', hp:2000,atk:55, exp:1000,mesos:600, speed:1.1, jump:10, boss:true },
+  mushmom:  { name:'Queen Fungara',   w:76, h:86, color:'#f0d8a8', shell:'#aa2244', hp:4200,atk:68, exp:2200,mesos:1500,speed:0.9, jump:8,  boss:true },
+  aetherion:{ name:'Aetherion, the Shardfather', w:160, h:160, color:'#7a5aee', shell:'#c8a8ff', hp:28000,atk:125, exp:16000,mesos:11000,speed:0.8,jump:0, boss:true, superBoss:true },
+  gravitos: { name:'Gravitos, the Weight-Bearer', w:180, h:180, color:'#1a0a2e', shell:'#6634a8', hp:45000, atk:160, exp:26000, mesos:18000, speed:1.4, jump:0, boss:true, superBoss:true, hyperBoss:true },
 };
 
 // =========================================================================
@@ -6734,26 +6734,137 @@ function bossAI(m, dt, distToPlayer) {
         audio.play('crit');
       }
     }
-    // Hover with slow drift toward player
+    // Hover with aggressive drift toward player (much faster than before)
     m.vy = Math.sin(game.time * 0.03) * 0.6;
     const dxg = (player.x + player.w/2) - (m.x + m.w/2);
-    m.vx += Math.sign(dxg) * 0.03;
-    if (Math.abs(m.vx) > 1.2) m.vx = Math.sign(m.vx) * 1.2;
+    m.vx += Math.sign(dxg) * 0.08;
+    const driftCap = phase === 3 ? 3.0 : phase === 2 ? 2.2 : 1.6;
+    if (Math.abs(m.vx) > driftCap) m.vx = Math.sign(m.vx) * driftCap;
 
-    const cycleBase = phase === 1 ? 2200 : phase === 2 ? 1600 : 1050;
+    const cycleBase = phase === 1 ? 1600 : phase === 2 ? 1100 : 650;
 
     if (m.patternState === 'idle') {
       if (m.patternTimer > cycleBase) {
         const roll = Math.random();
         if (phase === 1) {
-          m.patternState = roll < 0.45 ? 'crush' : roll < 0.8 ? 'slam' : 'pull';
+          // phase 1 introduces laser and zip as core threats
+          m.patternState = roll < 0.28 ? 'laser' : roll < 0.50 ? 'zip' : roll < 0.75 ? 'crush' : 'slam';
         } else if (phase === 2) {
-          m.patternState = roll < 0.30 ? 'crush' : roll < 0.55 ? 'slam' : roll < 0.8 ? 'pull' : 'wave';
+          m.patternState = roll < 0.22 ? 'laser' : roll < 0.42 ? 'zip' : roll < 0.60 ? 'crush' : roll < 0.78 ? 'slam' : 'wave';
         } else {
-          m.patternState = roll < 0.25 ? 'crush' : roll < 0.50 ? 'slam' : roll < 0.75 ? 'wave' : 'blackhole';
+          m.patternState = roll < 0.22 ? 'laser' : roll < 0.40 ? 'zip' : roll < 0.58 ? 'slam' : roll < 0.76 ? 'wave' : 'blackhole';
         }
         m.patternTimer = 0;
       }
+    } else if (m.patternState === 'laser') {
+      // LASER SWEEP — charge, paint a warning beam, then fire tracking lasers
+      const chargeTime = phase === 3 ? 350 : 500;
+      if (m.patternTimer < chargeTime) {
+        // Charge-up particles swirling into the eye
+        if (game.time % 2 === 0) {
+          const a = Math.random() * Math.PI * 2;
+          const r = 80 + Math.random() * 30;
+          game.particles.push({
+            x: m.x + m.w/2 + Math.cos(a) * r,
+            y: m.y + m.h/2 + Math.sin(a) * r,
+            vx: -Math.cos(a) * 5, vy: -Math.sin(a) * 5,
+            life: 18, color: '#ff44ff', size: 3
+          });
+        }
+      } else if (!m._laserFired) {
+        m._laserFired = true;
+        const shots = phase === 3 ? 5 : phase === 2 ? 3 : 2;
+        for (let i = 0; i < shots; i++) {
+          setTimeout(() => {
+            if (m.currentHp <= 0) return;
+            const bx = m.x + m.w/2;
+            const by = m.y + m.h/2;
+            const px = player.x + player.w/2;
+            const py = player.y + player.h/2;
+            const ang = Math.atan2(py - by, px - bx);
+            const speed = phase === 3 ? 14 : 11;
+            game.projectiles.push({
+              x: bx, y: by,
+              vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed,
+              w: 28, h: 10, life: 120,
+              damage: m.atk * 0.95, owner: 'enemy', skill: 'voidbeam',
+              color: '#ff66ff', pierce: true, noGravity: true,
+              stunHit: 1800,                   // long stun on connect
+            });
+            addShake(5); flash(0.15);
+          }, i * 180);
+        }
+        showToast('✦ LASER SWEEP', phase === 3 ? 'legendary' : 'epic');
+      }
+      const laserDur = chargeTime + (phase === 3 ? 1100 : 700);
+      if (m.patternTimer > laserDur) { m.patternState = 'idle'; m.patternTimer = 0; m._laserFired = false; }
+    } else if (m.patternState === 'zip') {
+      // ZIP — teleport across the map then dive at the player
+      if (m.patternTimer < 220 && !m._zipPrep) {
+        m._zipPrep = true;
+        // Vanish particle burst at current position
+        for (let i = 0; i < 28; i++) {
+          const a = (i / 28) * Math.PI * 2;
+          game.particles.push({
+            x: m.x + m.w/2, y: m.y + m.h/2,
+            vx: Math.cos(a) * 6, vy: Math.sin(a) * 6,
+            life: 24, color: i % 2 ? '#aa44ff' : '#ffffff', size: 3
+          });
+        }
+        // Pick a new position — opposite edge of the arena from the player
+        const w2 = game.mapData.worldWidth;
+        const playerSide = (player.x + player.w/2) < w2 / 2 ? 1 : -1;  // 1 = player on left
+        const targetX = playerSide > 0 ? w2 - m.w - 60 : 60;
+        m.x = targetX;
+        m.y = 120 + Math.random() * 140;
+        m.vx = 0; m.vy = 0;
+        // Reappear burst
+        for (let i = 0; i < 28; i++) {
+          const a = (i / 28) * Math.PI * 2;
+          game.particles.push({
+            x: m.x + m.w/2, y: m.y + m.h/2,
+            vx: Math.cos(a) * 5, vy: Math.sin(a) * 5,
+            life: 24, color: i % 2 ? '#ff88ff' : '#ffffff', size: 3
+          });
+        }
+        showToast('▸▸ GRAVITOS ZIPS', 'epic');
+        addShake(8); flash(0.2);
+      } else if (m.patternTimer < 260) {
+        m.vx = 0; m.vy = 0;
+      } else if (m.patternTimer < 260 + (phase === 3 ? 520 : 720)) {
+        // Accelerate toward player like a comet
+        const bx = m.x + m.w/2, by = m.y + m.h/2;
+        const px = player.x + player.w/2, py = player.y + player.h/2;
+        const dxp = px - bx, dyp = py - by;
+        const dist = Math.hypot(dxp, dyp) || 1;
+        const accel = phase === 3 ? 2.0 : 1.4;
+        m.vx += (dxp / dist) * accel;
+        m.vy += (dyp / dist) * accel;
+        const vc = phase === 3 ? 22 : 17;
+        if (Math.abs(m.vx) > vc) m.vx = Math.sign(m.vx) * vc;
+        if (Math.abs(m.vy) > vc) m.vy = Math.sign(m.vy) * vc;
+        // Contact damage + stun on collide
+        if (aabb(m, player) && player.invulnerable <= 0) {
+          const dmg = Math.max(1, Math.floor(m.atk * 1.3 - getDef() * 0.4));
+          player.hp -= (player._god ? 0 : dmg);
+          player.hitStun = 800;
+          player.invulnerable = 900;
+          player.vx = Math.sign(m.vx) * 9;
+          player.vy = -5;
+          game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: dmg, life: 44, color:'#ff4466', size: 18 });
+          addShake(14); flash(0.35); addHitStop(100);
+          m.patternTimer = 9999;    // end pattern after hit
+        }
+        // Trail
+        if (game.time % 2 === 0) {
+          game.particles.push({
+            x: bx - Math.sign(m.vx) * m.w/2, y: by,
+            vx: -m.vx * 0.2, vy: -m.vy * 0.2,
+            life: 22, color: '#cc66ff', size: 4
+          });
+        }
+      }
+      if (m.patternTimer > 1400) { m.patternState = 'idle'; m.patternTimer = 0; m._zipPrep = false; }
     } else if (m.patternState === 'crush') {
       // Gravity Crush — 3-5 ground telegraph columns then crush damage
       if (m.patternTimer > 500 && !m._crushFired) {
@@ -6786,10 +6897,14 @@ function bossAI(m, dt, distToPlayer) {
           for (const mm of game.monsters) { /* ignore */ }
           // Damage player if nearby
           if (Math.abs((player.x + player.w/2) - cx) < 180 && player.invulnerable <= 0) {
-            const dmg = Math.max(1, Math.floor(m.atk * 1.1 - getDef() * 0.5));
+            const dmg = Math.max(1, Math.floor(m.atk * 1.3 - getDef() * 0.4));
             player.hp -= (player._god ? 0 : dmg);
-            player.hitStun = 160;
-            game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: dmg, life: 40, color:'#ff4444', size: 16 });
+            player.hitStun = 900;                        // long stun — easy to stun
+            player.invulnerable = 900;
+            player.vx = Math.sign((player.x + player.w/2) - cx) * 8;
+            player.vy = -5;
+            game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: dmg, life: 44, color:'#ff4444', size: 18 });
+            addShake(10);
           }
           // Ground wave particles
           for (let i = 0; i < 40; i++) {
@@ -6826,18 +6941,19 @@ function bossAI(m, dt, distToPlayer) {
       }
       if (m.patternTimer > 1000) { m.patternState = 'idle'; m.patternTimer = 0; }
     } else if (m.patternState === 'wave') {
-      // Weight wave — horizontal shockwaves along ground left+right
+      // Weight wave — horizontal shockwaves along ground, now with heavy stun
       if (m.patternTimer > 400 && !m._waveFired) {
         m._waveFired = true;
         for (const dir of [-1, 1]) {
           game.projectiles.push({
             x: m.x + m.w/2, y: 460,
-            vx: dir * 9, vy: 0, w: 30, h: 24, life: 140,
-            damage: m.atk * 0.9, owner: 'enemy', skill: 'shock',
+            vx: dir * 11, vy: 0, w: 34, h: 28, life: 150,
+            damage: m.atk * 1.0, owner: 'enemy', skill: 'shock',
             color: '#aa44ff', pierce: true, noGravity: true,
+            stunHit: 1200,
           });
         }
-        addShake(6); flash(0.15);
+        addShake(8); flash(0.2);
       }
       if (m.patternTimer > 900) { m.patternState = 'idle'; m.patternTimer = 0; m._waveFired = false; }
     } else if (m.patternState === 'blackhole') {
@@ -7683,9 +7799,10 @@ function updateProjectiles(dt) {
         player.hp -= (player._god ? 0 : dmg);
         player.lastHitTime = game.time;
         const stunMul = 1 - getStunResist();
-        // Shorter stagger on ranged hits — player stays mobile
-        player.hitStun = 200 * stunMul;
-        player.invulnerable = 700;
+        // stunHit override lets specific boss projectiles stun harder (e.g. Gravitos lasers)
+        const stunBase = p.stunHit || 200;
+        player.hitStun = stunBase * stunMul;
+        player.invulnerable = Math.max(player.invulnerable, Math.min(1500, stunBase + 400));
         player.attacking = false;
         player.attackTimer = 0;
         player.rushTimer = 0;
