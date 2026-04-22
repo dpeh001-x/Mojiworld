@@ -900,6 +900,12 @@ const game = {
   critStreak: 0, critStreakTimer: 0,
   bossIntro: null,
   flashOverlay: 0,
+  // Persistence — stable schema for any future cross-session features
+  comboRecord: 0,
+  achievements: {},
+  dailyState: null,
+  prestige: null,
+  muted: false,
 };
 
 // =========================================================================
@@ -2223,6 +2229,7 @@ window.addEventListener('keydown', e => {
   }
   if (k === '?' || k === '/') openHelp();
   if (k === 'escape') closeAllModals();
+  if (k === 'm') audio.toggleMute();
   // Quick potion use
   if (k === 'r') useQuickPotion('hp');
   if (k === 't') useQuickPotion('mp');
@@ -2341,10 +2348,12 @@ function openClassSelect() {
       <div class="cls-jobs">→ ${jobs}</div>
     `;
     card.onclick = () => {
+      audio.init();
       applyClass(id);
       document.getElementById('class-select-modal').style.display = 'none';
       game.paused = false;
       showToast(`You are a ${c.name}!`, 'epic');
+      saveState();
     };
     opts.appendChild(card);
   }
@@ -2448,6 +2457,116 @@ function openMasterAdvancement() {
 function addShake(amount) { game.shake = Math.min(24, game.shake + amount); }
 function addHitStop(ms) { game.hitStop = Math.max(game.hitStop, ms); }
 function flash(a) { game.flashOverlay = Math.max(game.flashOverlay, a); }
+
+// =========================================================================
+// SAVE / LOAD (localStorage, versioned)
+// =========================================================================
+const SAVE_KEY = 'levelx_save_v1';
+const SAVE_VERSION = 1;
+const PLAYER_SAVE_FIELDS = [
+  'cls','job','master','level','exp','expToNext',
+  'hp','maxHp','mp','maxMp','mesos','baseAtk','baseDef',
+  'attrs','skillPoints','milestonesUnlocked','treeUnlocked','tree',
+  'mods','equipped','inventory','consumables','look','pet','baseCrit','baseSpeed','baseJump'
+];
+const GAME_SAVE_FIELDS = [
+  'currentMap','bossDefeated','kills','achievements',
+  'dailyState','prestige','comboRecord','muted'
+];
+function saveState() {
+  try {
+    const pick = (obj, keys) => {
+      const out = {};
+      for (const k of keys) if (obj[k] !== undefined) out[k] = obj[k];
+      return out;
+    };
+    const s = {
+      v: SAVE_VERSION, t: Date.now(),
+      player: pick(player, PLAYER_SAVE_FIELDS),
+      game:   pick(game,   GAME_SAVE_FIELDS),
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(s));
+  } catch (e) { /* quota / private-mode: silent */ }
+}
+function hasSave() {
+  try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; }
+}
+function loadState() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY); if (!raw) return false;
+    const s = JSON.parse(raw);
+    if (!s || s.v !== SAVE_VERSION || !s.player || !s.player.cls) return false;
+    Object.assign(player, s.player);
+    Object.assign(game,   s.game || {});
+    // Re-derive any transient state — never load into a dead/capped state
+    const maxHp = getMaxHp(), maxMp = getMaxMp();
+    player.hp = (!player.hp || player.hp <= 0) ? maxHp : Math.min(player.hp, maxHp);
+    player.mp = (!player.mp || player.mp <= 0) ? maxMp : Math.min(player.mp, maxMp);
+    // Always land in town on continue (avoids reloading mid-boss into a killbox)
+    loadMap('town', 300);
+    game.currentMap = 'town';
+    if (typeof renderSkillBar === 'function') renderSkillBar();
+    audio.muted = !!game.muted;
+    // Clean transient runtime state
+    game.paused = false;
+    game.dying = 0;
+    game.hitStop = 0;
+    game.combo = 0; game.comboTimer = 0; game.comboMult = 1;
+    return true;
+  } catch (e) { return false; }
+}
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+}
+
+// =========================================================================
+// AUDIO — Web Audio synthesized SFX (hit / crit / levelup / death)
+// Must init on a user gesture to satisfy autoplay policy.
+// =========================================================================
+const audio = {
+  ctx: null, muted: false,
+  init() {
+    if (this.ctx) {
+      if (this.ctx.state === 'suspended') this.ctx.resume();
+      return;
+    }
+    try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch (e) { this.ctx = null; }
+  },
+  env(freq, dur, type, peak, slide) {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = type || 'square';
+    o.frequency.setValueAtTime(freq, t);
+    if (slide) {
+      const end = Math.max(30, freq + slide);
+      try { o.frequency.exponentialRampToValueAtTime(end, t + dur); } catch (e) {}
+    }
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak || 0.15), t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(this.ctx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  },
+  play(kind) {
+    if (!this.ctx || this.muted) return;
+    if (kind === 'hit')        this.env(240, 0.07, 'square',   0.09, -80);
+    else if (kind === 'crit')  { this.env(520, 0.10, 'square',   0.14,  120); this.env(780, 0.12, 'triangle', 0.07,  200); }
+    else if (kind === 'levelup') {
+      this.env(523, 0.12, 'triangle', 0.16, 0);
+      setTimeout(() => this.env(659, 0.12, 'triangle', 0.16, 0), 100);
+      setTimeout(() => this.env(784, 0.22, 'triangle', 0.18, 0), 200);
+    }
+    else if (kind === 'death') this.env(180, 0.45, 'sawtooth', 0.18, -120);
+  },
+  toggleMute() {
+    this.muted = !this.muted;
+    game.muted = this.muted;
+    saveState();
+    if (typeof showToast === 'function') showToast(this.muted ? '🔇 Muted' : '🔊 Unmuted', 'common');
+  }
+};
 
 function bumpCombo(n = 1) {
   game.combo += n;
@@ -3589,6 +3708,7 @@ function triggerDeath() {
     lostMesos > 0 ? `Lost ${lostMesos} 💰` : '';
   ov.classList.remove('on'); void ov.offsetWidth; ov.classList.add('on');
   flash(0.4); addShake(12);
+  audio.play('death');
   // Death burst
   for (let i = 0; i < 40; i++) {
     const a = Math.random() * Math.PI * 2;
@@ -3624,6 +3744,7 @@ function respawnAtTown() {
   if (lost > 0) showToast(`💀 Defeated! Lost ${lost} Lumens`, 'rare');
   else showToast('💀 Defeated!', 'rare');
   flash(0.3);
+  saveState();
 }
 
 function isReady(id) {
@@ -6297,6 +6418,7 @@ function hitMonster(m, dmg, isCrit, skill) {
     bumpCombo(1);
     addShake(isCrit ? 5 : 1.8);
     addHitStop(isCrit ? 55 : 18);
+    audio.play(isCrit ? 'crit' : 'hit');
     if (isCrit) {
       game.critStreak++;
       game.critStreakTimer = 2500;
@@ -6535,6 +6657,8 @@ function killMonster(m) {
     if (player.level === 20 && player.job && !player.master) {
       setTimeout(() => openMasterAdvancement(), 600);
     }
+    audio.play('levelup');
+    saveState();
   }
 
   game.monsters.splice(idx, 1);
@@ -6543,6 +6667,7 @@ function killMonster(m) {
     game.bossDefeated[game.currentMap] = true;
     showToast(`${m.name} defeated! Choose a powerup!`, 'legendary');
     setTimeout(() => showPowerupChoice(), 1500);
+    saveState();
   } else if (m.isMiniBoss) {
     showToast(`${m.name} slain! The land rests... for now.`, 'epic');
     flash(0.3); addShake(6);
@@ -12366,6 +12491,12 @@ function loop(time) {
   lastTime = time;
   game.time++;
 
+  // Throttled autosave (every ~15s of wall time) — only after a class is chosen
+  if (player.cls && (time - (game._lastSave || 0) > 15000)) {
+    saveState();
+    game._lastSave = time;
+  }
+
   // Hit-stop: freeze gameplay briefly
   const frozen = game.hitStop > 0;
   if (frozen) game.hitStop -= dt;
@@ -12564,9 +12695,19 @@ function drawSuperBossBar() {
 // BOOT
 // =========================================================================
 loadCharacterAssets();
-loadMap('town', 300);
-openClassSelect();
+// Any user gesture (click or key) initializes audio (satisfies autoplay policy)
+window.addEventListener('keydown',    () => audio.init(), { once: true });
+window.addEventListener('pointerdown', () => audio.init(), { once: true });
+if (!loadState()) {
+  loadMap('town', 300);
+  openClassSelect();
+} else {
+  showToast('Welcome back!', 'epic');
+}
 renderSkillBar();
+// Safety net: save when the tab is hidden or closed
+window.addEventListener('visibilitychange', () => { if (document.hidden && player.cls) saveState(); });
+window.addEventListener('beforeunload',     () => { if (player.cls) saveState(); });
 requestAnimationFrame(loop);
 </script>
 </body>
