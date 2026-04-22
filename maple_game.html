@@ -917,7 +917,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.11.0';
+const GAME_VERSION = 'v0.11.1';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -1023,20 +1023,20 @@ const SKILLS = {
 
   // ============ MASTER SIGNATURES (slot p, level 20+) ============
   // Warrior path
-  warlord_warcry:     { name:'Grand Warcry',       icon:'📯', cls:'warrior', job:'berserker', master:'warlord',     slot:'x', mp:30, cd:10000, desc:'Stacking ATK per recent kill; heals self & pet.' },
-  doombringer_apoc:   { name:'Apocalypse Swing',   icon:'💀', cls:'warrior', job:'berserker', master:'doombringer', slot:'x', mp:60, cd:18000, desc:'Hits all enemies; damage scales with missing HP.' },
+  warlord_warcry:     { name:'Warlord\'s Banner',  icon:'📯', cls:'warrior', job:'berserker', master:'warlord',     slot:'x', mp:30, cd:10000, desc:'6s banner: ATK, heal, and +50% range on every skill.' },
+  doombringer_apoc:   { name:'Blade of Calamity',  icon:'⚔️', cls:'warrior', job:'berserker', master:'doombringer', slot:'x', mp:60, cd:18000, desc:'Summon a colossal sword that cleaves forward 5 times.' },
   crusader_aegis:     { name:'Divine Aegis',       icon:'✝️', cls:'warrior', job:'knight',    master:'crusader',    slot:'x', mp:45, cd:14000, desc:'Heal 60% + damage barrier for 6s.' },
   dragoon_skylance:   { name:'Sky Lance',          icon:'🐉', cls:'warrior', job:'knight',    master:'dragoon',     slot:'x', mp:35, cd:9000,  desc:'Leap up, slam down with piercing force.' },
   // Rogue path
-  shadowlord_clones:  { name:'Shadow Clones',      icon:'👥', cls:'rogue', job:'ninja',    master:'shadowlord',  slot:'x', mp:40, cd:11000, desc:'3 mirrored rapid strikes.' },
-  shinobi_seal:       { name:'Five-Element Seal',  icon:'🎴', cls:'rogue', job:'ninja',    master:'shinobi',     slot:'x', mp:35, cd:9000,  desc:'Random elemental curse to all nearby.' },
-  nightreaper_mark:   { name:'Death Mark',         icon:'🗡️', cls:'rogue', job:'assassin', master:'nightreaper', slot:'x', mp:25, cd:7000,  desc:'Mark target; kill restores full MP.' },
+  shadowlord_clones:  { name:'Mirror Shadow',      icon:'👥', cls:'rogue', job:'ninja',    master:'shadowlord',  slot:'x', mp:40, cd:11000, desc:'8s mirror clone — copies your every move.' },
+  shinobi_seal:       { name:'Kage Rush',          icon:'🎴', cls:'rogue', job:'ninja',    master:'shinobi',     slot:'x', mp:35, cd:9000,  desc:'Zip across the map slashing in rapid succession.' },
+  nightreaper_mark:   { name:'Ricochet Daggers',   icon:'🗡️', cls:'rogue', job:'assassin', master:'nightreaper', slot:'x', mp:25, cd:7000,  desc:'7 forward daggers that ricochet off enemies and walls.' },
   phantom_cut:        { name:'Dimensional Cut',    icon:'👻', cls:'rogue', job:'assassin', master:'phantom',     slot:'x', mp:30, cd:8000,  desc:'Teleport-strike ignoring defense; always crits.' },
   // Mage path
   sage_meteorshower:  { name:'Meteor Shower',      icon:'📜', cls:'mage', job:'archmage', master:'sage',         slot:'x', mp:55, cd:16000, desc:'5 meteors rain over an area.' },
   elementalist_cascade:{ name:'Prismatic Cascade', icon:'🌈', cls:'mage', job:'archmage', master:'elementalist', slot:'x', mp:50, cd:14000, desc:'Four elements in amplifying sequence.' },
-  lich_harvest:       { name:'Soul Harvest',       icon:'👹', cls:'mage', job:'warlock',  master:'lich',         slot:'x', mp:40, cd:15000, desc:'Full refill; kills grow max HP for 15s.' },
-  hexmaster_grandhex: { name:'Grand Hex',          icon:'🧿', cls:'mage', job:'warlock',  master:'hexmaster',    slot:'x', mp:35, cd:10000, desc:'Stack curses; 5 stacks = explosion.' },
+  lich_harvest:       { name:'Soul Vortex',        icon:'👹', cls:'mage', job:'warlock',  master:'lich',         slot:'x', mp:40, cd:60000, desc:'Open a 30s vacuum pool that siphons life from enemies.' },
+  hexmaster_grandhex: { name:'Grand Hex',          icon:'🧿', cls:'mage', job:'warlock',  master:'hexmaster',    slot:'x', mp:35, cd:20000, desc:'Freeze every enemy 2s and apply a slow poison DOT.' },
   // Archer path
   marksman_oneshot:   { name:'One Shot One Kill',  icon:'🎯', cls:'archer', job:'sniper', master:'marksman',    slot:'x', mp:50, cd:12000, desc:'Guaranteed crit piercing; 12% instakill.' },
   ballista_volley:    { name:'Siege Volley',       icon:'🛡️', cls:'archer', job:'sniper', master:'ballista',    slot:'x', mp:45, cd:11000, desc:'Heavy piercing line shots; break defense.' },
@@ -3740,6 +3740,37 @@ function updatePlayer(dt) {
   }
   // Somersault spin animation timer
   if (player.somersault > 0) player.somersault -= dt;
+  // Shadow Clone tick — runs player-mimicking damage without re-triggering the real skill
+  if (player._clone) {
+    player._clone.life -= dt;
+    // Periodic slash — every 600ms, shadow lashes out in front of its offset
+    player._clone.lastAction -= dt;
+    if (player._clone.lastAction <= 0) {
+      player._clone.lastAction = 600;
+      const cx = player.x + player._clone.offsetX + player.w/2;
+      const cy = player.y + player.h/2;
+      const hitbox = {
+        x: player.facing > 0 ? cx : cx - 80,
+        y: cy - player.h/2, w: 80, h: player.h + 20,
+      };
+      for (const m of game.monsters) {
+        if (m.currentHp <= 0) continue;
+        if (aabb(hitbox, m)) {
+          hitMonster(m, Math.floor(getAtk() * 0.9), false, 'shadow');
+        }
+      }
+    }
+    // Drifting purple sparkles
+    if (game.time % 3 === 0) {
+      game.particles.push({
+        x: player.x + player._clone.offsetX + player.w/2 + (Math.random()-0.5)*player.w,
+        y: player.y + Math.random() * player.h,
+        vx: 0, vy: -0.5 - Math.random(),
+        life: 22, color: '#8844cc', size: 2
+      });
+    }
+    if (player._clone.life <= 0) player._clone = null;
+  }
 
   // Cooldowns
   if (player.attackCooldown > 0) player.attackCooldown -= dt;
@@ -4152,6 +4183,10 @@ function castSkill(id) {
   // Cinematic flourish for master-tier skills (3rd advancement)
   if (s.master) {
     masterSkillFlourish(player.x + player.w/2, player.y + player.h/2, player.facing);
+  }
+  // Shadowlord clone mimic — queue this skill for the clone to replay
+  if (player._clone && id !== 'shadowlord_clones') {
+    player._clone.actionQueue.push({ fireAt: game.time + 8, id });
   }
   const f = SKILL_FNS[id];
   if (f) f();
@@ -5529,80 +5564,113 @@ const SKILL_FNS = {
   // Archmage
   meteor: () => performMeteor(),
   elemental: () => {
-    // Chain: 3 projectiles with different elements
-    const elems = [{c:'#ff6622', s:'fire'}, {c:'#88ccff', s:'ice', freeze:1200}, {c:'#ffee44', s:'lightning'}];
-    elems.forEach((e, i) => setTimeout(() => {
-      if (player.hp <= 0) return;
-      game.projectiles.push({
-        x: player.x + (player.facing > 0 ? player.w : -24), y: player.y + 18,
-        vx: player.facing * (8 + i), vy: 0, w: 22, h: 18, life: 100,
-        damage: getAtk() * 2.6 + 15, owner: 'player', skill: e.s, color: e.c,
-        explode: e.s === 'fire' ? 50 : 0, freeze: e.freeze || 0,
-      });
-    }, i * 150));
-    flash(0.25);
+    // CHAIN LIGHTNING — zig-zag between up to 6 enemies, stunning each
+    const hit = new Set();
+    const visited = [];
+    let current = null, best = Infinity;
+    const px0 = player.x + player.w/2, py0 = player.y + player.h/2;
+    // Start with nearest living enemy within 400 px
+    for (const m of game.monsters) {
+      if (m.currentHp <= 0) continue;
+      const d = Math.hypot((m.x + m.w/2) - px0, (m.y + m.h/2) - py0);
+      if (d < best && d < 450) { best = d; current = m; }
+    }
+    const nodes = [{ x: px0, y: py0 }];
+    const maxChain = 6;
+    let prev = { x: px0, y: py0 };
+    for (let step = 0; step < maxChain; step++) {
+      if (!current) break;
+      hit.add(current);
+      const cx = current.x + current.w/2, cy = current.y + current.h/2;
+      nodes.push({ x: cx, y: cy });
+      // Damage + stun + burn scale down slightly each jump
+      const jumpMul = 1 - step * 0.08;
+      const dmg = Math.floor(getAtk() * 2.4 * jumpMul + 12);
+      hitMonster(current, dmg, true, 'lightning');
+      current.stunTimer = Math.max(current.stunTimer || 0, 1600);
+      current.burnTimer = 1500;
+      current.burnDmg = Math.max(4, Math.floor(getAtk() * 0.06));
+      spawnSmoothImpact(cx, cy, '#ffee66');
+      // Smooth beam between prev and current
+      const ang = Math.atan2(cy - prev.y, cx - prev.x);
+      const len = Math.hypot(cx - prev.x, cy - prev.y);
+      spawnSmoothBeam(prev.x, prev.y, ang, len, 5, '#ffee66', { life: 18 });
+      // Jagged lightning particles along the arc
+      const segs = Math.max(4, Math.floor(len / 20));
+      for (let s = 0; s < segs; s++) {
+        const t = s / segs;
+        game.particles.push({
+          x: prev.x + (cx - prev.x) * t + (Math.random() - 0.5) * 14,
+          y: prev.y + (cy - prev.y) * t + (Math.random() - 0.5) * 14,
+          vx: 0, vy: 0, life: 12, color: s % 2 ? '#ffffff' : '#ffee66', size: 2
+        });
+      }
+      prev = { x: cx, y: cy };
+      // Find next target
+      let next = null, nbest = Infinity;
+      for (const m of game.monsters) {
+        if (m.currentHp <= 0 || hit.has(m)) continue;
+        const d = Math.hypot((m.x + m.w/2) - cx, (m.y + m.h/2) - cy);
+        if (d < nbest && d < 300) { nbest = d; next = m; }
+      }
+      current = next;
+    }
+    showToast(`CHAIN LIGHTNING x${hit.size}`, 'legendary');
+    flash(0.4); addShake(8); addHitStop(100);
   },
-  // Warlock — iconic necromancy kit
+  // Warlock — iconic necromancy kit (toned down)
   soulSiphon: () => {
-    // Raise 2 skeletal minions from tormented enemies, drain HP+MP
+    // Drain HP+MP, raise a single skeletal thrall
     let drained = 0;
     const victims = [];
     for (const m of game.monsters) {
       if (m.currentHp <= 0) continue;
-      if (Math.abs(m.x - player.x) < 260 && Math.abs(m.y - player.y) < 160) {
-        const dmg = Math.floor(getAtk() * 1.4 + 12);
+      if (Math.abs(m.x - player.x) < 220 && Math.abs(m.y - player.y) < 140) {
+        const dmg = Math.floor(getAtk() * 0.9 + 8);
         hitMonster(m, dmg, rollCrit(), 'siphon');
-        drained += Math.floor(dmg * 0.45);
+        drained += Math.floor(dmg * 0.3);
         victims.push(m);
-        // Purple soul strand pulling toward caster
-        for (let i = 0; i < 8; i++) {
+        for (let i = 0; i < 6; i++) {
           game.particles.push({
             x: m.x + m.w/2, y: m.y + m.h/2,
             vx: (player.x - m.x) * 0.03, vy: (player.y - m.y) * 0.03 - 1,
-            life: 34, color: i % 2 ? '#c466ff' : '#ffffff', size: 3
+            life: 30, color: i % 2 ? '#c466ff' : '#ffffff', size: 3
           });
         }
       }
     }
     player.mp = Math.min(getMaxMp(), player.mp + drained);
-    player.hp = Math.min(getMaxHp(), player.hp + Math.floor(drained * 0.5));
-    // Spawn 2 raised skeletons from the first 2 victims (or near caster if none)
-    const spawnCount = Math.min(2, Math.max(1, victims.length));
-    for (let i = 0; i < spawnCount; i++) {
-      const src = victims[i];
-      const mx = src ? (src.x + src.w/2) : (player.x + player.w/2 + (i - 0.5) * 30);
-      raiseMinion(mx, src ? src.y : player.y, 'skeleton', 10000);
+    player.hp = Math.min(getMaxHp(), player.hp + Math.floor(drained * 0.4));
+    // Raise 1 thrall (was up to 2)
+    if (victims.length > 0) {
+      const src = victims[0];
+      raiseMinion(src.x + src.w/2, src.y, 'skeleton', 8000);
     }
-    showToast(`Soul Siphon — raised ${spawnCount} thrall${spawnCount > 1 ? 's' : ''}!`, 'epic');
-    flash(0.3); addShake(4);
+    showToast(`Soul Siphon`, 'epic');
+    flash(0.2); addShake(3);
   },
   darkPulse: () => {
-    // Ultimate — erupting nova of shadow that raises a skeleton legion
-    const prevLS = player.mods.lifesteal;
-    player.mods.lifesteal = Math.max(0.5, player.mods.lifesteal);
-    performAround(220, 3.0, { color:'#9944cc', kb:7 });
-    player.mods.lifesteal = prevLS;
-    // Big purple nova
-    spawnSmoothExplosion(player.x + player.w/2, player.y + player.h/2, 240, '#c466ff', '#44186633', { life: 36 });
-    for (let i = 0; i < 60; i++) {
-      const a = (i / 60) * Math.PI * 2;
+    // Reduced AoE and scaling, raises fewer undead
+    performAround(180, 2.0, { color:'#9944cc', kb:5 });
+    spawnSmoothExplosion(player.x + player.w/2, player.y + player.h/2, 180, '#c466ff', '#44186633', { life: 30 });
+    for (let i = 0; i < 40; i++) {
+      const a = (i / 40) * Math.PI * 2;
       game.particles.push({
         x: player.x + player.w/2, y: player.y + player.h/2,
-        vx: Math.cos(a) * 11, vy: Math.sin(a) * 11,
-        life: 44, color: i % 2 ? '#9944cc' : '#ffffff', size: 3
+        vx: Math.cos(a) * 9, vy: Math.sin(a) * 9,
+        life: 38, color: i % 2 ? '#9944cc' : '#ffffff', size: 3
       });
     }
-    // Raise 5 undead in a semicircle in front of the caster
+    // Raise 3 undead (was 5)
     const cx = player.x + player.w/2, cy = player.y + player.h/2;
-    for (let i = 0; i < 5; i++) {
-      const a = (i - 2) * 0.45;
-      const mx = cx + player.facing * (60 + i * 12) + Math.cos(a) * 40;
-      const ty = cy + Math.sin(a) * 30;
-      const type = i % 2 === 0 ? 'skeleton' : 'zombie';
-      raiseMinion(mx, ty, type, 12000);
+    for (let i = 0; i < 3; i++) {
+      const a = (i - 1) * 0.5;
+      const mx = cx + player.facing * (60 + i * 14) + Math.cos(a) * 30;
+      const ty = cy + Math.sin(a) * 20;
+      raiseMinion(mx, ty, i % 2 === 0 ? 'skeleton' : 'zombie', 9000);
     }
-    showToast('DARK PULSE — legion risen!', 'legendary');
-    flash(0.55); addShake(10);
+    showToast('DARK PULSE', 'legendary');
+    flash(0.35); addShake(7);
   },
 
   // Archer
@@ -5805,45 +5873,69 @@ const SKILL_FNS = {
     const stacks = Math.min(8, recent);
     player.buffs.warCry = 12000;
     player.buffs.bloodlust = 12000;
-    // Massive self + pet heal
+    // 6s Warlord's Banner buff — stored on player, read by performMelee +
+    // performAround to scale skill range +50%
+    player._warlordBanner = game.time + 12000;
     player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.25 + stacks * 20));
     if (player.pet) player.pet.hp = Math.min(300, player.pet.hp + 80);
     if (player.pack) for (const w of player.pack) w.hp = Math.min(300, w.hp + 80);
-    // Self strike
-    performAround(180, 2.2 + stacks * 0.15, { color:'#ff8844', kb:5 });
-    showToast(`WARCRY! ×${stacks} rage stacks`, 'legendary');
-    flash(0.4); addShake(10);
-    for (let i = 0; i < 50; i++) {
-      const a = (i / 50) * Math.PI * 2;
+    performAround(200, 2.2 + stacks * 0.15, { color:'#ff8844', kb:5 });
+    showToast(`WARLORD'S BANNER — +50% range, ×${stacks}`, 'legendary');
+    flash(0.5); addShake(10);
+    // Banner icon — vertical gold shaft + flag plants beside caster
+    for (let i = 0; i < 60; i++) {
+      const a = (i / 60) * Math.PI * 2;
       game.particles.push({
         x: player.x + player.w/2, y: player.y + player.h/2,
-        vx: Math.cos(a) * 8, vy: Math.sin(a) * 8,
-        life: 50, color: '#ff7733', size: 3
+        vx: Math.cos(a) * 9, vy: Math.sin(a) * 9,
+        life: 58, color: i % 2 ? '#ffaa44' : '#ffee88', size: 3
       });
     }
   },
 
   doombringer_apoc: () => {
-    const missing = 1 - (player.hp / getMaxHp());
-    const mult = 1.5 + missing * 3.5; // up to 5x at 1 HP
-    for (const m of game.monsters) {
-      if (m.currentHp <= 0) continue;
-      const dmg = Math.floor(getAtk() * 3.5 * mult);
-      hitMonster(m, dmg, true, 'apoc');
-      m.vy -= 4;
+    // Summon a colossal sword in front of the player that slashes forward
+    // 5 times over 900ms. Each slash hits a 220x100 zone ahead.
+    const dir = player.facing;
+    const strikes = 5;
+    player.invulnerable = Math.max(player.invulnerable, 900);
+    for (let i = 0; i < strikes; i++) {
+      setTimeout(() => {
+        if (player.hp <= 0 || game.paused) return;
+        const cx = player.x + player.w/2 + dir * (80 + i * 10);
+        const cy = player.y + player.h/2;
+        // Big arcing slash hitbox
+        const hitbox = {
+          x: cx - 110, y: cy - 50, w: 220, h: 100,
+        };
+        for (const m of game.monsters) {
+          if (m.currentHp <= 0) continue;
+          if (aabb(hitbox, m)) {
+            const crit = rollCrit() || i === strikes - 1;
+            const dmg = Math.floor(getAtk() * 2.4 * (crit ? getCritDmg() : 1));
+            hitMonster(m, dmg, crit, 'apoc');
+            m.vx += dir * 5;
+            m.vy -= 2;
+          }
+        }
+        // Smooth crescent + impact
+        spawnSmoothSlash(cx, cy, dir > 0 ? 0 : Math.PI, 130, '#ffcc66',
+          { thickness: 10 + i, spread: Math.PI * 0.9, life: 20 });
+        spawnSmoothImpact(cx, cy, '#ffee88');
+        addShake(6 + i); flash(0.18 + i * 0.04);
+      }, i * 150);
     }
-    showToast(`APOCALYPSE x${mult.toFixed(1)}!`, 'legendary');
-    addShake(22); flash(0.8); addHitStop(140);
-    for (let i = 0; i < 80; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = Math.random() * 300;
+    // Giant sword silhouette drawn as particles stacked vertically
+    for (let j = 0; j < 30; j++) {
+      const py = player.y - 40 + j * 3;
       game.particles.push({
-        x: player.x + player.w/2 + Math.cos(a) * r,
-        y: player.y + player.h/2 + Math.sin(a) * r,
-        vx: Math.cos(a) * (Math.random()*8), vy: Math.sin(a) * (Math.random()*8) - 3,
-        life: 60, color: i < 40 ? '#cc0033' : '#ff6644', size: 3 + Math.random() * 3
+        x: player.x + player.w/2 + dir * 70,
+        y: py, vx: 0, vy: 0,
+        life: 26, color: j < 24 ? '#e8e8f0' : '#c0a868', size: 4
       });
     }
+    showToast('BLADE OF CALAMITY', 'legendary');
+    addShake(20); flash(0.6); addHitStop(140);
   },
 
   crusader_aegis: () => {
@@ -5880,76 +5972,98 @@ const SKILL_FNS = {
   },
 
   shadowlord_clones: () => {
-    // 3 mirrored strikes at staggered delays
-    for (let i = 0; i < 3; i++) {
-      setTimeout(() => {
-        if (player.hp <= 0) return;
-        const off = (i - 1) * 30;
-        const hitbox = {
-          x: player.facing > 0 ? player.x + player.w - 5 + off : player.x - 105 + off,
-          y: player.y - 10, w: 110, h: player.h + 20
-        };
-        for (const m of game.monsters) {
-          if (m.currentHp <= 0) continue;
-          if (aabb(hitbox, m)) hitMonster(m, Math.floor(getAtk() * 1.8), true, 'shadow');
-        }
-        game.afterImages.push({
-          x: player.x + off, y: player.y, facing: player.facing,
-          state: 'attack', life: 24, maxLife: 24,
-          color: 'rgba(160,100,220,0.55)'
-        });
-        addShake(2);
-      }, i * 110);
+    // Spawn a mirror clone that mimics the player's actions for 8 seconds.
+    // Stored on the player; tracked every frame to replay recent actions.
+    player._clone = {
+      life: 8000, maxLife: 8000,
+      offsetX: -player.facing * 60,    // shadow trails behind
+      actionQueue: [],
+      lastAction: 0,
+    };
+    showToast('MIRROR SHADOW — 8s mimic', 'legendary');
+    // Summon burst
+    for (let i = 0; i < 36; i++) {
+      const a = (i / 36) * Math.PI * 2;
+      game.particles.push({
+        x: player.x + player.w/2, y: player.y + player.h/2,
+        vx: Math.cos(a) * 6, vy: Math.sin(a) * 6,
+        life: 42, color: i % 2 ? '#8844cc' : '#ffffff', size: 3
+      });
     }
-    flash(0.2);
+    flash(0.35); addShake(6);
   },
 
   shinobi_seal: () => {
-    for (const m of game.monsters) {
-      if (m.currentHp <= 0) continue;
-      if (Math.abs(m.x - (player.x + player.w/2)) < 360 && Math.abs(m.y - player.y) < 200) {
-        const r = Math.random();
-        if (r < 0.2) m.freezeTimer = 2500;
-        else if (r < 0.4) { m.burnTimer = 5000; m.burnDmg = Math.max(4, Math.floor(getAtk() * 0.2)); }
-        else if (r < 0.6) m.stunTimer = 2000;
-        else if (r < 0.8) { m.burnTimer = 4000; m.burnDmg = Math.max(8, Math.floor(getAtk() * 0.3)); }
-        else { m.vx += (Math.random() - 0.5) * 6; m.vy -= 4; m.stunTimer = 1200; }
-        hitMonster(m, Math.floor(getAtk() * 1.4), false, 'seal');
-        // Seal talisman visual
-        for (let i = 0; i < 6; i++) {
-          game.particles.push({
-            x: m.x + m.w/2, y: m.y + m.h/2,
-            vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3,
-            life: 40, color: ['#ff6622','#88ccff','#ffee44','#aa55ff','#55ffaa'][Math.floor(Math.random()*5)],
-            size: 3
-          });
+    // KAGE RUSH — rocket horizontally across the arena with repeat slashes
+    const startX = player.x;
+    const wMax = game.mapData.worldWidth;
+    const destX = player.facing > 0 ? wMax - player.w - 40 : 40;
+    player.invulnerable = Math.max(player.invulnerable, 900);
+    player.vy = 0;
+    const totalSteps = 14;
+    const hitIds = new Set();
+    for (let i = 0; i < totalSteps; i++) {
+      setTimeout(() => {
+        if (player.hp <= 0 || game.paused) return;
+        const t = (i + 1) / totalSteps;
+        player.x = startX + (destX - startX) * t;
+        player.y = player.y;
+        player.vx = 0; player.vy = 0;
+        player.facing = destX > startX ? 1 : -1;
+        // Slash hitbox in a 160-wide strip around the player
+        const hitbox = {
+          x: player.x - 80, y: player.y - 10,
+          w: player.w + 160, h: player.h + 20,
+        };
+        for (const m of game.monsters) {
+          if (m.currentHp <= 0) continue;
+          if (aabb(hitbox, m) && !hitIds.has(m.type + (m.x|0))) {
+            hitMonster(m, Math.floor(getAtk() * 1.7), rollCrit(), 'melee');
+            m.vx += player.facing * 3;
+            spawnSmoothImpact(m.x + m.w/2, m.y + m.h/2, '#ff99aa');
+            hitIds.add(m.type + (m.x|0));
+          }
         }
-      }
+        // Slash streak behind
+        spawnSmoothSlash(player.x + player.w/2 - player.facing * 30,
+          player.y + player.h/2, player.facing > 0 ? 0 : Math.PI,
+          90, '#ff88cc', { thickness: 4, life: 12 });
+        // Afterimage
+        game.afterImages.push({
+          x: player.x - player.facing * 20, y: player.y,
+          facing: player.facing, state: 'attack',
+          life: 22, maxLife: 22, color: 'rgba(200,120,220,0.55)'
+        });
+        addShake(1);
+      }, i * 35);
     }
-    showToast('FIVE-ELEMENT SEAL', 'epic');
-    addShake(5);
+    showToast('KAGE RUSH', 'legendary');
+    addShake(6); flash(0.25);
   },
 
   nightreaper_mark: () => {
-    let target = null, best = Infinity;
-    for (const m of game.monsters) {
-      if (m.currentHp <= 0) continue;
-      const d = Math.hypot((m.x + m.w/2) - (player.x + player.w/2),
-                            (m.y + m.h/2) - (player.y + player.h/2));
-      if (d < best && d < 500) { best = d; target = m; }
-    }
-    if (target) {
-      target.deathMark = 12000;
-      hitMonster(target, Math.floor(getAtk() * 2.8), true, 'mark');
-      for (let i = 0; i < 20; i++) {
-        game.particles.push({
-          x: target.x + target.w/2, y: target.y + target.h/2,
-          vx: (Math.random() - 0.5) * 4, vy: -1 - Math.random() * 2,
-          life: 60, color: '#aa44aa', size: 3
+    // Fire 7 daggers forward — each bounces up to 3 times off enemies/walls
+    const shots = 7;
+    for (let i = 0; i < shots; i++) {
+      setTimeout(() => {
+        if (player.hp <= 0 || game.paused) return;
+        const spread = (i - (shots - 1) / 2) * 0.06;
+        game.projectiles.push({
+          x: player.x + (player.facing > 0 ? player.w : -12),
+          y: player.y + 16 + (i % 2) * 4,
+          vx: player.facing * 14, vy: spread * 12,
+          w: 20, h: 8, life: 140,
+          damage: getAtk() * 1.6 + 6,
+          owner: 'player', skill: 'dagger', color: '#ff66aa',
+          pierce: false, noGravity: true,
+          ricochet: 3,                       // read in projectile update to bounce
+          hitSet: new Set(),
         });
-      }
-      showToast('DEATH MARKED', 'epic');
+      }, i * 55);
     }
+    showToast('RICOCHET DAGGERS', 'epic');
+    spawnSmoothBeam(player.x + player.w/2, player.y + 22, player.facing > 0 ? 0 : Math.PI, 160, 4, '#ff66aa', { life: 10 });
+    flash(0.2); addShake(4);
   },
 
   phantom_cut: () => {
@@ -6024,53 +6138,53 @@ const SKILL_FNS = {
   },
 
   lich_harvest: () => {
-    player.buffs.lich = 15000;
-    player.hp = getMaxHp();
-    player.mp = getMaxMp();
-    showToast('SOUL HARVEST — kills grow you', 'legendary');
-    // Pulse
+    // SOUL VORTEX — drop a 30s vacuum pool that pulls enemies and siphons HP/MP
+    const cx = player.x + player.w/2 + player.facing * 40;
+    const cy = player.y + player.h - 20;
+    game.hazards.push({
+      type: 'soul_vortex', cx, x: cx - 100, y: cy - 20, w: 200, h: 100,
+      life: 30000, maxLife: 30000,
+      atk: getAtk() * 0.45,
+      tick: 0,
+    });
+    showToast('SOUL VORTEX — 30s life pool', 'legendary');
+    // Open animation
     for (let i = 0; i < 50; i++) {
       const a = (i / 50) * Math.PI * 2;
       game.particles.push({
-        x: player.x + player.w/2, y: player.y + player.h/2,
-        vx: Math.cos(a) * 6, vy: Math.sin(a) * 6,
-        life: 60, color: '#66cc66', size: 3
+        x: cx, y: cy,
+        vx: Math.cos(a) * 8, vy: Math.sin(a) * 6,
+        life: 50, color: i % 2 ? '#66cc66' : '#224422', size: 3
       });
     }
-    flash(0.3);
+    spawnSmoothExplosion(cx, cy, 140, '#66ff88', '#1a3a1a44', { life: 32 });
+    flash(0.4); addShake(10);
   },
 
   hexmaster_grandhex: () => {
-    const affected = [];
+    // GRAND HEX — every living enemy on the map is frozen 2s and afflicted
+    // with a slow poison DOT that ticks for 8 seconds.
+    let count = 0;
     for (const m of game.monsters) {
       if (m.currentHp <= 0) continue;
-      if (Math.abs(m.x - player.x) < 420 && Math.abs(m.y - player.y) < 260) {
-        m.curses = (m.curses || 0) + 1;
-        affected.push(m);
-        if (m.curses >= 5) {
-          const dmg = Math.floor(getAtk() * 7);
-          hitMonster(m, dmg, true, 'grandhex');
-          m.curses = 0;
-          // Spread to nearby
-          for (const m2 of game.monsters) {
-            if (m2 === m || m2.currentHp <= 0) continue;
-            if (Math.abs(m2.x - m.x) < 240) {
-              m2.curses = (m2.curses || 0) + 2;
-              for (let i = 0; i < 8; i++) game.particles.push({
-                x: m.x + m.w/2, y: m.y + m.h/2,
-                vx: (m2.x - m.x) * 0.04, vy: (m2.y - m.y) * 0.04 - 1,
-                life: 40, color: '#a5f', size: 3
-              });
-            }
-          }
-          addShake(6); flash(0.25);
-        } else {
-          m.burnTimer = 4500;
-          m.burnDmg = Math.max(4, Math.floor(getAtk() * 0.12 * m.curses));
-        }
+      m.freezeTimer = Math.max(m.freezeTimer || 0, 2000);
+      m.burnTimer = 8000;
+      m.burnDmg = Math.max(3, Math.floor(getAtk() * 0.08));
+      m._poisonGrandHex = true;            // visual tint flag
+      count++;
+      // Poison aura rise
+      for (let i = 0; i < 4; i++) {
+        game.particles.push({
+          x: m.x + m.w/2 + (Math.random() - 0.5) * m.w,
+          y: m.y + m.h, vx: (Math.random() - 0.5) * 0.6,
+          vy: -0.5 - Math.random(),
+          life: 30, color: i % 2 ? '#88ff44' : '#aa66cc', size: 2
+        });
       }
     }
-    if (affected.length) showToast(`Grand Hex x${affected.length}`, 'epic');
+    showToast(`GRAND HEX x${count}`, 'legendary');
+    spawnSmoothExplosion(player.x + player.w/2, player.y + player.h/2, 260, '#aa66cc', '#33115533', { life: 36 });
+    flash(0.55); addShake(12); addHitStop(120);
   },
 
   marksman_oneshot: () => {
@@ -6142,6 +6256,8 @@ function performMelee(range, dmgPct, opts = {}) {
     dmgPct *= (enh.basicDmg || 1);
     range *= (enh.rangeMul || 1);
   }
+  // Warlord's Banner — +50% range on every melee skill
+  if (player._warlordBanner && game.time < player._warlordBanner) range *= 1.5;
   const hitbox = {
     x: player.facing > 0 ? player.x + player.w - 5 : player.x - range + 5,
     y: player.y - 5, w: range, h: player.h + 10
@@ -6194,6 +6310,7 @@ function performAround(radius, dmgPct, opts = {}) {
     dmgPct *= (enh.basicDmg || 1);
     radius *= (enh.rangeMul || 1);
   }
+  if (player._warlordBanner && game.time < player._warlordBanner) radius *= 1.5;
   const hitbox = {
     x: player.x + player.w/2 - radius, y: player.y + player.h/2 - radius,
     w: radius * 2, h: radius * 2
@@ -6395,11 +6512,13 @@ function updateMonsters(dt) {
     // Burn DoT
     if (m.burnTimer > 0) {
       m.burnTimer -= dt;
-      if (m.animTimer % 15 < dt) {
+      // Slower DOT cadence — tick every ~40 frames instead of 15 so fights
+      // aren't overwhelmed by spam burn numbers
+      if (m.animTimer % 40 < dt) {
         m.currentHp -= m.burnDmg;
         game.damageNumbers.push({
           x: m.x + m.w/2, y: m.y - 5, vy: -1,
-          text: m.burnDmg, life: 30, color: '#ff6622', size: 11
+          text: m.burnDmg, life: 34, color: m._poisonGrandHex ? '#88ff44' : '#ff6622', size: 12
         });
         if (m.currentHp <= 0) { killMonster(m); continue; }
       }
@@ -7684,6 +7803,37 @@ function updateProjectiles(dt) {
           }
           hitMonster(m, dmg, crit, p.skill || 'bolt');
           hitIds.add(m);
+          // Nightreaper ricochet — bounce to the next nearest foe
+          if (p.ricochet && p.ricochet > 0) {
+            if (!p.hitSet) p.hitSet = new Set();
+            p.hitSet.add(m);
+            let next = null, best = Infinity;
+            for (const m2 of game.monsters) {
+              if (m2 === m || m2.currentHp <= 0 || p.hitSet.has(m2)) continue;
+              const d = Math.hypot((m2.x + m2.w/2) - (m.x + m.w/2),
+                                    (m2.y + m2.h/2) - (m.y + m.h/2));
+              if (d < best && d < 260) { best = d; next = m2; }
+            }
+            if (next) {
+              // Redirect velocity toward next target
+              const ang = Math.atan2((next.y + next.h/2) - p.y,
+                                      (next.x + next.w/2) - p.x);
+              const spd = Math.hypot(p.vx, p.vy);
+              p.vx = Math.cos(ang) * spd;
+              p.vy = Math.sin(ang) * spd;
+              p.ricochet -= 1;
+              p.life = Math.max(p.life, 40);
+              hit = false;                   // don't kill the projectile
+              // Trailing sparkle ricochet pop
+              for (let k = 0; k < 6; k++) {
+                game.particles.push({
+                  x: p.x, y: p.y,
+                  vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3,
+                  life: 14, color: '#ff99dd', size: 2
+                });
+              }
+            }
+          }
           // Ice splash — AoE on hit for Ice Spike
           if (p.aoeOnHit && !p._aoeFired) {
             p._aoeFired = true;
@@ -7898,6 +8048,36 @@ function updateProjectiles(dt) {
         });
       }
       game.hazards.splice(i, 1);
+    } else if (h.type === 'soul_vortex') {
+      // SOUL VORTEX — pull enemies in, drain their HP and return it to caster
+      const cx = h.cx, cy = h.y + h.h/2;
+      h.tick = (h.tick || 0) + 1;
+      for (const m of game.monsters) {
+        if (m.currentHp <= 0) continue;
+        const dxp = cx - (m.x + m.w/2), dyp = cy - (m.y + m.h/2);
+        const dist = Math.hypot(dxp, dyp);
+        if (dist < 180) {
+          // Pull inward
+          const force = 0.5 * (1 - dist / 180);
+          m.vx += (dxp / (dist || 1)) * force;
+          m.vy += (dyp / (dist || 1)) * force * 0.6;
+          // Tick drain every 12 frames
+          if (h.tick % 12 === 0) {
+            const dmg = Math.max(1, Math.floor(h.atk));
+            hitMonster(m, dmg, false, 'vortex');
+            player.hp = Math.min(getMaxHp(), player.hp + Math.floor(dmg * 0.3));
+            // Green drain thread
+            for (let k = 0; k < 3; k++) {
+              game.particles.push({
+                x: m.x + m.w/2, y: m.y + m.h/2,
+                vx: (cx - m.x) * 0.02, vy: (cy - m.y) * 0.02 - 0.5,
+                life: 26, color: '#66ff88', size: 2
+              });
+            }
+          }
+        }
+      }
+      if (h.life <= 0) game.hazards.splice(i, 1);
     } else if (h.life <= 0) {
       game.hazards.splice(i, 1);
     }
@@ -13415,6 +13595,38 @@ function drawHazards() {
         });
       }
     }
+    else if (h.type === 'soul_vortex') {
+      // Swirling green life-pool on the ground
+      const t = game.time * 0.06;
+      const fade = Math.min(1, h.life / 4000);
+      const cy = h.y + h.h/2;
+      // Pool
+      ctx.fillStyle = `rgba(40,90,40,${0.55 * fade})`;
+      ctx.beginPath();
+      ctx.ellipse(sx, cy, 100, 28, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgba(110,220,130,${0.55 * fade})`;
+      ctx.beginPath();
+      ctx.ellipse(sx, cy, 85, 20, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Rotating green rings
+      for (let i = 0; i < 4; i++) {
+        const a = t + i * Math.PI / 2;
+        ctx.strokeStyle = `rgba(130,255,160,${0.5 * fade})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(sx, cy, 80 - i * 12, 18 - i * 3, 0, a, a + Math.PI);
+        ctx.stroke();
+      }
+      // Rising wisp particles
+      if (game.time % 4 === 0) {
+        game.particles.push({
+          x: h.cx + (Math.random() - 0.5) * 160,
+          y: cy, vx: (Math.random() - 0.5) * 0.4, vy: -1 - Math.random(),
+          life: 40, color: '#88ff99', size: 2
+        });
+      }
+    }
     else if (h.type === 'blackhole') {
       // Swirling event horizon that pulls the player in and ticks damage
       const t = game.time * 0.12;
@@ -13595,7 +13807,8 @@ function drawDamageNumbers() {
     if (d.maxLife === undefined) d.maxLife = d.life + 1;
     if (d.wobbleDir === undefined) d.wobbleDir = (d.x | 0) % 2 ? 1 : -1;
     const age = d.maxLife - d.life;
-    const baseSize = d.size || 14;
+    // Slightly larger default font so numbers read from across the screen
+    const baseSize = (d.size || 14) + 3;
 
     // Pop-in: easeOutBack from ~0.4x overshooting to settle at 1x (8 frames).
     let scale = 1;
@@ -13624,7 +13837,8 @@ function drawDamageNumbers() {
     if (rot) ctx.rotate(rot);
     if (scale !== 1) ctx.scale(scale, scale);
     ctx.globalAlpha = alpha;
-    ctx.font = `bold ${baseSize}px sans-serif`;
+    // Nicer rounded geometric display font with heavier weight for pop
+    ctx.font = `900 ${baseSize}px 'Trebuchet MS', 'Arial Black', sans-serif`;
 
     // Dopamine layer: crits and big hits get a coloured glow that reads as "impact".
     if (d.crit) {
