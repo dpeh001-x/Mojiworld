@@ -636,7 +636,8 @@
 
   <div id="controls">
     Press <kbd>?</kbd> for Controls &nbsp;·&nbsp;
-    <kbd>F</kbd> Talk &nbsp;·&nbsp; <kbd>B</kbd> Bag &nbsp;·&nbsp; <kbd>R</kbd>/<kbd>T</kbd> Pots
+    <kbd>F</kbd> Talk &nbsp;·&nbsp; <kbd>B</kbd> Bag &nbsp;·&nbsp; <kbd>R</kbd>/<kbd>T</kbd> Pots &nbsp;·&nbsp;
+    <kbd>C</kbd> Codex &nbsp;·&nbsp; <kbd>M</kbd> Mute
   </div>
 
   <div id="skill-bar"></div>
@@ -783,7 +784,39 @@
       </div>
       <div id="attr-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;"></div>
       <div id="attr-derived" style="margin-top:12px; padding:10px; background:rgba(0,0,0,0.35); border-radius:6px; font-size:12px; color:#cfd; line-height:1.6;"></div>
+      <div style="margin-top:12px; text-align:center;">
+        <button id="respec-btn" onclick="respec()"
+                style="padding:8px 16px; background:#5a3a6a; color:#ffddff; border:1px solid #9a7aaa; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">
+          ⟳ Respec (refund AP + reset perks)
+        </button>
+        <div id="respec-cost" style="margin-top:4px; font-size:10px; color:#aaa;"></div>
+      </div>
     </div>
+  </div>
+
+  <div id="codex-modal" class="modal-overlay">
+    <div class="modal" style="position:relative; min-width:520px; max-width:620px;">
+      <button class="close-btn" onclick="closeAllModals()">✕</button>
+      <h2>📖 Codex</h2>
+      <div style="display:flex; justify-content:space-around; margin-bottom:12px; font-size:12px; color:#ddd;">
+        <div>Achievements: <span class="gold" id="codex-progress">0 / 0</span></div>
+        <div>👹 Kills: <span class="gold" id="codex-kills">0</span></div>
+        <div>⚡ Best combo: <span class="gold" id="codex-combo-best">0</span></div>
+      </div>
+      <div id="codex-list" style="max-height:360px; overflow-y:auto; padding-right:4px;"></div>
+    </div>
+  </div>
+
+  <div id="daily-banner" style="position:absolute; top:58px; right:12px; padding:8px 12px; background:rgba(20,14,34,0.82); border:1px solid #776; border-radius:8px; font-size:11px; color:#eee; min-width:200px; display:none; pointer-events:none;">
+    <div style="color:#ffdd88; font-weight:bold; font-size:11px; margin-bottom:3px;">🌅 Daily Challenge</div>
+    <div id="daily-desc" style="margin-bottom:4px; color:#cfd;"></div>
+    <div style="display:flex; gap:6px; align-items:center;">
+      <div style="flex:1; height:5px; background:rgba(0,0,0,0.45); border-radius:3px; overflow:hidden;">
+        <div id="daily-bar" style="height:100%; background:linear-gradient(90deg,#66ccff,#88ffcc); width:0%;"></div>
+      </div>
+      <div id="daily-progress" style="min-width:52px; text-align:right; font-size:10px; color:#cfd;">0 / 0</div>
+    </div>
+    <div id="daily-streak" style="margin-top:3px; font-size:10px; color:#ffcc88;">Streak 0</div>
   </div>
 
   <div id="taxi-modal" class="modal-overlay">
@@ -2056,7 +2089,8 @@ const player = {
   // Attributes (AP) — Str/Vit/Agi/Int/Wis/Lck
   attrs: { str:5, vit:5, agi:5, int:5, wis:5, lck:5 },
   // Buffs: each is a timer (ms remaining)
-  buffs: { warCry:0, bloodlust:0, guardian:0, holyShield:0, eagleEye:0, smokeBomb:0, sleight:0, rampage:0 },
+  buffs: { warCry:0, bloodlust:0, guardian:0, holyShield:0, eagleEye:0, smokeBomb:0, sleight:0, rampage:0,
+           comboAtk:0, comboXp:0 },
   pet: null, // ranger companion
   jumpBufferTimer: 0,
   invulnerable:0, rushTimer:0, rushDir:1,
@@ -2107,6 +2141,7 @@ function getAtk()  {
   if (player.buffs.warCry > 0)   pct += 0.55;
   if (player.buffs.bloodlust > 0) pct += 0.4;
   if (player.buffs.rampage > 0)   pct += 0.8;
+  if (player.buffs.comboAtk > 0)  pct += 0.5;
   // Berserker passive: +% ATK below HP threshold
   if (player.job === 'berserker') {
     const hpP = player.hp / getMaxHp();
@@ -2124,7 +2159,9 @@ function getAtk()  {
   if (treeHas('m_surge')) {
     pct += (player.mp / getMaxMp());
   }
-  return Math.floor(base * pct);
+  // Prestige damage multiplier (permanent, stacking per ascension)
+  const pDmg = (game.prestige && game.prestige.dmgMult) || 1;
+  return Math.floor(base * pct * pDmg);
 }
 function getDef()  {
   let d = player.baseDef + player.mods.def + getEquipBonus('def') + Math.floor(attrEff(attr('vit')) * 0.5);
@@ -2230,6 +2267,9 @@ window.addEventListener('keydown', e => {
   if (k === '?' || k === '/') openHelp();
   if (k === 'escape') closeAllModals();
   if (k === 'm') audio.toggleMute();
+  if (k === 'c') {
+    if (player.cls && !game.paused && player.hp > 0) openCodex();
+  }
   // Quick potion use
   if (k === 'r') useQuickPotion('hp');
   if (k === 't') useQuickPotion('mp');
@@ -2353,6 +2393,7 @@ function openClassSelect() {
       document.getElementById('class-select-modal').style.display = 'none';
       game.paused = false;
       showToast(`You are a ${c.name}!`, 'epic');
+      checkDaily();
       saveState();
     };
     opts.appendChild(card);
@@ -2512,6 +2553,9 @@ function loadState() {
     game.dying = 0;
     game.hitStop = 0;
     game.combo = 0; game.comboTimer = 0; game.comboMult = 1;
+    // Daily rollover + achievement re-check on return
+    try { checkDaily(); } catch(e) {}
+    try { checkAchievements(); } catch(e) {}
     return true;
   } catch (e) { return false; }
 }
@@ -2568,15 +2612,215 @@ const audio = {
   }
 };
 
+// =========================================================================
+// FEEL HELPER — rarity-keyed loot bursts + near-miss shimmer (Phase 3.3)
+// =========================================================================
+function emitRarityBurst(x, y, rarity) {
+  const col = { legendary:'#ffb24a', epic:'#c68aff', rare:'#66aaff', common:'#cfd3d8' }[rarity] || null;
+  if (!col) return;
+  const count = rarity === 'legendary' ? 40 : rarity === 'epic' ? 24 : 14;
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const sp = 2 + Math.random() * 4;
+    game.particles.push({
+      x: x, y: y,
+      vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 2,
+      life: 40 + Math.random() * 20,
+      color: col, size: 2 + Math.random() * 2
+    });
+  }
+  if (rarity === 'legendary') { flash(0.35); addShake(5); audio.play('levelup'); }
+  else if (rarity === 'epic') { flash(0.18); addShake(2.5); }
+  else if (rarity === 'rare') { flash(0.08); }
+}
+function emitNearMiss(x, y) {
+  for (let i = 0; i < 6; i++) {
+    const a = Math.random() * Math.PI * 2;
+    game.particles.push({
+      x: x, y: y,
+      vx: Math.cos(a) * 1.5, vy: Math.sin(a) * 1.5 - 1,
+      life: 22 + Math.random() * 10,
+      color: '#9aa0aa', size: 1.5 + Math.random()
+    });
+  }
+}
+
+// =========================================================================
+// ACHIEVEMENTS (codex) — unlockable milestones tracked in game.achievements
+// =========================================================================
+const ACHIEVEMENTS = [
+  { id:'firstBlood',   name:'First Blood',      desc:'Defeat 1 enemy',                   test:()=>game.kills>=1 },
+  { id:'slayer100',    name:'Slayer',           desc:'Defeat 100 enemies',               test:()=>game.kills>=100 },
+  { id:'exterminator', name:'Exterminator',     desc:'Defeat 1000 enemies',              test:()=>game.kills>=1000 },
+  { id:'bossHunter',   name:'Boss Hunter',      desc:'Defeat 3 different bosses',        test:()=>Object.keys(game.bossDefeated||{}).length>=3 },
+  { id:'lv10',         name:'Adept',            desc:'Reach level 10',                   test:()=>player.level>=10 },
+  { id:'lv20',         name:'Apprentice',       desc:'Reach level 20',                   test:()=>player.level>=20 },
+  { id:'lv50',         name:'Master',           desc:'Reach level 50',                   test:()=>player.level>=50 },
+  { id:'legendary',    name:'Legendary Find',   desc:'Possess a legendary item',         test:()=>player.inventory.some(i=>i && i.rarity==='legendary') },
+  { id:'combo50',      name:'Combo Striker',    desc:'Reach a 50-hit combo',             test:()=>(game.comboRecord||0)>=50 },
+  { id:'combo100',     name:'Centurion',        desc:'Reach a 100-hit combo',            test:()=>(game.comboRecord||0)>=100 },
+  { id:'starforged',   name:'Starforged',       desc:'Enhance an item to ★5',            test:()=>player.inventory.concat(Object.values(player.equipped||{})).some(i=>i && i.stars>=5) },
+  { id:'ascendant',    name:'Ascendant',        desc:'Complete your first ascension',    test:()=>(game.prestige && game.prestige.count>=1) },
+];
+function checkAchievements() {
+  if (!game.achievements) game.achievements = {};
+  let unlocked = 0;
+  for (const a of ACHIEVEMENTS) {
+    if (!game.achievements[a.id] && a.test && a.test()) {
+      game.achievements[a.id] = Date.now();
+      showToast('🏆 ' + a.name + ' — ' + a.desc, 'legendary');
+      flash(0.25); audio.play('levelup');
+      unlocked++;
+    }
+  }
+  if (unlocked > 0) saveState();
+}
+function openCodex() {
+  const modal = document.getElementById('codex-modal');
+  if (!modal) return;
+  const list = document.getElementById('codex-list');
+  const total = ACHIEVEMENTS.length;
+  const done  = ACHIEVEMENTS.filter(a => game.achievements && game.achievements[a.id]).length;
+  document.getElementById('codex-progress').textContent = `${done} / ${total}`;
+  document.getElementById('codex-kills').textContent = game.kills|0;
+  document.getElementById('codex-combo-best').textContent = game.comboRecord|0;
+  list.innerHTML = '';
+  for (const a of ACHIEVEMENTS) {
+    const row = document.createElement('div');
+    const ok = !!(game.achievements && game.achievements[a.id]);
+    row.style.cssText = `display:flex; gap:10px; padding:8px 10px; margin-bottom:4px; border-radius:6px;
+      background:${ok ? 'rgba(70,140,90,0.22)' : 'rgba(40,40,50,0.35)'};
+      border-left:3px solid ${ok ? '#88dd66' : '#555'};`;
+    row.innerHTML = `
+      <div style="font-size:18px; width:24px; text-align:center;">${ok ? '✓' : '·'}</div>
+      <div style="flex:1;">
+        <div style="font-weight:bold; color:${ok ? '#cfe9a8' : '#aaa'}; font-size:13px;">${a.name}</div>
+        <div style="font-size:11px; color:${ok ? '#a8c4a0' : '#888'};">${a.desc}</div>
+      </div>`;
+    list.appendChild(row);
+  }
+  modal.style.display = 'flex';
+  game.paused = true;
+}
+
+// =========================================================================
+// DAILY — login bonus + rotating challenge (deterministic UTC-day rotation)
+// =========================================================================
+const DAILY_CHALLENGES = [
+  { id:'kill50',   desc:'Defeat 50 enemies today',     goal:50, track:'kills',   reward:{ mesos:500, sp:1 } },
+  { id:'reach15',  desc:'Reach level 15 (account)',    goal:15, track:'level',   reward:{ mesos:800 } },
+  { id:'enhance1', desc:'Enhance any item once',       goal:1,  track:'enhance', reward:{ mesos:600, sp:1 } },
+  { id:'combo30',  desc:'Land a 30-hit combo',         goal:30, track:'combo',   reward:{ mesos:700 } },
+];
+function dailyIndex() { return Math.floor(Date.now() / 86400000); }
+function checkDaily() {
+  if (!player.cls) return;
+  const day = dailyIndex();
+  if (!game.dailyState || game.dailyState.day !== day) {
+    const prev = game.dailyState;
+    const c = DAILY_CHALLENGES[day % DAILY_CHALLENGES.length];
+    const streak = (prev && (day - prev.day === 1)) ? (prev.streak || 0) + 1 : 1;
+    const bonus = 200 * Math.min(7, streak);
+    player.mesos += bonus;
+    showToast(`🌅 Daily login +${bonus} Lumens (streak ${streak})`, 'epic');
+    flash(0.2); audio.play('levelup');
+    game.dailyState = { day, streak, challenge: c.id, progress: 0, claimed: false };
+    saveState();
+  }
+  tickDaily('level', player.level);
+}
+function tickDaily(kind, n) {
+  const d = game.dailyState; if (!d || d.claimed) return;
+  const c = DAILY_CHALLENGES.find(x => x.id === d.challenge);
+  if (!c || c.track !== kind) return;
+  const add = (typeof n === 'number') ? n : 1;
+  d.progress = (kind === 'level' || kind === 'combo')
+    ? Math.max(d.progress || 0, add)
+    : (d.progress || 0) + add;
+  if (d.progress >= c.goal) {
+    d.claimed = true;
+    if (c.reward.mesos) player.mesos += c.reward.mesos;
+    if (c.reward.sp)    player.skillPoints += c.reward.sp;
+    showToast('✔ Daily challenge complete!', 'legendary');
+    flash(0.35); audio.play('levelup');
+    saveState();
+  }
+}
+
+// =========================================================================
+// RESPEC — refund attributes + reset milestone perks for a Lumen cost
+// =========================================================================
+function respec() {
+  const cost = 2000 * Math.max(1, player.level - 5);
+  if (player.mesos < cost) { showToast(`Need ${cost} Lumens to respec`, 'rare'); return; }
+  if (!confirm(`Refund all attribute points and reset milestone perks for ${cost} Lumens?`)) return;
+  player.mesos -= cost;
+  const keys = Object.keys(player.attrs || {});
+  const total = keys.reduce((a,k) => a + (player.attrs[k]||0), 0);
+  const base  = 5 * keys.length;
+  player.skillPoints += Math.max(0, total - base);
+  player.attrs = { str:5, vit:5, agi:5, int:5, wis:5, lck:5 };
+  player.milestonesUnlocked = {};
+  player.hp = getMaxHp(); player.mp = getMaxMp();
+  if (typeof renderAttributes === 'function') renderAttributes();
+  showToast('⟳ Attributes and perks reset.', 'epic');
+  flash(0.25); addShake(4); saveState();
+}
+
+// =========================================================================
+// PRESTIGE — "Ascension" at level 50: reset to L1 with permanent bonuses
+// =========================================================================
+function offerPrestige() {
+  if (player.level < 50 || game._prestigeOffered) return;
+  game._prestigeOffered = true;
+  const p = game.prestige || { count:0, xpMult:1, dmgMult:1, bonusAP:0 };
+  const nextCount = p.count + 1;
+  const msg = `ASCEND?\n\nReach level 50 again from scratch, keeping these permanent bonuses:\n` +
+              `• +30% XP gain  (→ x${(p.xpMult + 0.30).toFixed(2)})\n` +
+              `• +30% damage   (→ x${(p.dmgMult + 0.30).toFixed(2)})\n` +
+              `• +1 starting attribute point  (→ +${p.bonusAP + 1})\n\n` +
+              `Ascension #${nextCount}. Your inventory, equipment, and bosses reset.`;
+  if (!confirm(msg)) { game._prestigeOffered = false; return; }
+  p.count++; p.xpMult += 0.30; p.dmgMult += 0.30; p.bonusAP += 1;
+  game.prestige = p;
+  // Reset progression
+  player.level = 1; player.exp = 0; player.expToNext = 100;
+  player.maxHp = 100; player.maxMp = 50;
+  player.baseAtk = 12; player.baseDef = 5;
+  player.skillPoints = p.bonusAP;
+  player.attrs = { str:5, vit:5, agi:5, int:5, wis:5, lck:5 };
+  player.milestonesUnlocked = {};
+  player.treeUnlocked = {}; player.tree = {};
+  player.job = null; player.master = null;
+  player.inventory = [];
+  player.equipped = { weapon:null, armor:null, accessory:null };
+  player.mesos = 200;
+  player.consumables = { hp_s: 5, mp_s: 3 };
+  game.bossDefeated = {};
+  player.hp = getMaxHp(); player.mp = getMaxMp();
+  showToast(`✨ ASCENSION ${p.count} — you begin anew`, 'legendary');
+  flash(0.7); addShake(16); audio.play('levelup');
+  saveState();
+  setTimeout(() => location.reload(), 1200);
+}
+
 function bumpCombo(n = 1) {
+  const prev = game.combo;
   game.combo += n;
   game.comboTimer = 2600;
   game.comboMult = Math.min(5, 1 + Math.floor(game.combo / 5) * 0.15);
+  game.comboRecord = Math.max(game.comboRecord || 0, game.combo);
+  tickDaily('combo', game.combo);
   const el = document.getElementById('combo-meter');
   if (el) {
     el.style.opacity = 1;
     el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
   }
+  // Milestone buffs — cross 50 / 100 / 150 for escalating rewards
+  const cross = (at) => prev < at && game.combo >= at;
+  if (cross(50))  { player.buffs.comboAtk = 8000;  showToast('⚡ COMBO 50 — +50% ATK 8s', 'epic');                         flash(0.25); addShake(4); audio.play('crit'); }
+  if (cross(100)) { player._guaranteedCrit = 3;    showToast('✦ COMBO 100 — next 3 hits guaranteed crit!', 'legendary');  flash(0.4);  addShake(6); audio.play('crit'); }
+  if (cross(150)) { player.buffs.comboXp = 10000;  showToast('★ COMBO 150 — +100% XP 10s!', 'legendary');                 flash(0.5);  addShake(8); audio.play('levelup'); }
 }
 function resetCombo() {
   if (game.combo > 0) {
@@ -3756,7 +4000,10 @@ function isReady(id) {
   if (player.mp < s.mp) return false;
   return true;
 }
-function rollCrit() { return Math.random() * 100 < getCrit(); }
+function rollCrit() {
+  if ((player._guaranteedCrit || 0) > 0) { player._guaranteedCrit--; return true; }
+  return Math.random() * 100 < getCrit();
+}
 
 // Dispatches by id
 function castSkill(id) {
@@ -5732,6 +5979,12 @@ function updateMonsters(dt) {
   const camX = game.camera.x;
   const ACTIVE_PAD = 400; // update monsters within ±400px of viewport
   for (const m of game.monsters) {
+    // Squash/stretch decay back toward 1.0 (snappy exp ease)
+    if (m.scaleX !== undefined && m.scaleX !== 1) {
+      m.scaleX += (1 - m.scaleX) * 0.22;
+      m.scaleY += (1 - m.scaleY) * 0.22;
+      if (Math.abs(m.scaleX - 1) < 0.01) { m.scaleX = 1; m.scaleY = 1; }
+    }
     // Skip expensive AI for faraway non-bosses
     const dx = (m.x + m.w/2) - (camX + W/2);
     const far = Math.abs(dx) > W/2 + ACTIVE_PAD;
@@ -5947,10 +6200,12 @@ function bossAI(m, dt, distToPlayer) {
       m.patternState = 'idle';
       if (phase === 2) {
         showToast('⚡ AETHERION SHIFTS — reality fractures', 'legendary');
-        flash(0.5); addShake(10);
+        flash(0.5); addShake(10); addHitStop(90);
+        audio.play('crit');
       } else if (phase === 3) {
         showToast('💀 AETHERION UNLEASHED — final form!', 'legendary');
         flash(0.7); addShake(16); addHitStop(150);
+        audio.play('crit');
       }
     }
     // Hover in place with subtle drift
@@ -6109,10 +6364,12 @@ function bossAI(m, dt, distToPlayer) {
       m.patternState = 'idle';
       if (phase === 2) {
         showToast('🌑 GRAVITOS COLLAPSES — density rises', 'legendary');
-        flash(0.5); addShake(10);
+        flash(0.5); addShake(10); addHitStop(90);
+        audio.play('crit');
       } else if (phase === 3) {
         showToast('🕳 EVENT HORIZON — everything falls', 'legendary');
         flash(0.7); addShake(16); addHitStop(160);
+        audio.play('crit');
       }
     }
     // Hover with slow drift toward player
@@ -6411,13 +6668,19 @@ function hitMonster(m, dmg, isCrit, skill) {
   // Elite resistance scales their HP, damage stays normal
   m.currentHp -= finalDmg;
   m.hitFlash = 100;
+  // Squash & stretch — visual impact pop (decayed back to 1.0 each frame in updateMonsters)
+  m.scaleX = isCrit ? 1.22 : 1.14;
+  m.scaleY = isCrit ? 0.74 : 0.82;
   if (skill !== 'thorns') m.aggroTarget = player;
 
   // Feel
   if (skill !== 'thorns') {
     bumpCombo(1);
-    addShake(isCrit ? 5 : 1.8);
+    // Damage-scaled shake on top of the crit base (addShake caps at 24 internally)
+    addShake((isCrit ? 5 : 1.8) + Math.min(6, finalDmg / 200));
     addHitStop(isCrit ? 55 : 18);
+    // Impact flash — thin on basics, thicker on crits
+    flash(isCrit ? 0.35 : 0.1);
     audio.play(isCrit ? 'crit' : 'hit');
     if (isCrit) {
       game.critStreak++;
@@ -6445,7 +6708,7 @@ function hitMonster(m, dmg, isCrit, skill) {
     y: m.y - 5, vy: -2.2 - Math.random(),
     text: isCrit ? finalDmg + '!' : finalDmg, life: 46,
     color: isCrit ? '#ffdd44' : (finalDmg > 80 ? '#ff9966' : '#ffffff'),
-    size: isCrit ? 20 : (finalDmg > 50 ? 16 : 13),
+    size: isCrit ? Math.min(34, 20 + Math.floor(finalDmg / 15)) : Math.min(28, 13 + Math.floor(finalDmg / 10)),
     crit: isCrit
   });
 
@@ -6508,6 +6771,8 @@ function killMonster(m) {
   const idx = game.monsters.indexOf(m);
   if (idx < 0) return;
   game.kills++;
+  tickDaily('kills');
+  checkAchievements();
   // Milestone: Mana Font — skill kill refunds 5% max MP
   if (hasMilestone('manaFont') && m._killedBySkill) {
     const refund = Math.floor(getMaxMp() * 0.05);
@@ -6541,7 +6806,9 @@ function killMonster(m) {
   }
   // Reward scales with combo — caps influence via sqrt to avoid runaway
   const comboBonus = 1 + Math.min(1, (game.comboMult - 1) * 0.6);
-  player.exp += Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus);
+  const prestigeXp = (game.prestige && game.prestige.xpMult) || 1;
+  const comboXpMult = (player.buffs.comboXp > 0) ? 2 : 1;
+  player.exp += Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult);
   // Killstreak toast milestones
   if (game.combo > 0 && game.combo % 15 === 0) {
     showToast(`${game.combo} HIT COMBO!`, 'epic');
@@ -6589,7 +6856,10 @@ function killMonster(m) {
         x: m.x + m.w/2, y: m.y + m.h/2, vy: -6,
         type: 'item', item, life: 900
       });
+      emitRarityBurst(m.x + m.w/2, m.y + m.h/2, item.rarity);
     }
+  } else if (tier < 2 && itemRoll < dropChance + 0.04) {
+    emitNearMiss(m.x + m.w/2, m.y + m.h/2);
   }
   // Random chance for an orb to drop from kills (not bosses)
   if (tier !== 2) {
@@ -6610,6 +6880,7 @@ function killMonster(m) {
           y: m.y + m.h/2, vy: -5 - Math.random()*3,
           type: 'item', item: extra, life: 1000
         });
+        emitRarityBurst(m.x + m.w/2, m.y + m.h/2, extra.rarity);
       }
     }
   }
@@ -6658,7 +6929,13 @@ function killMonster(m) {
       setTimeout(() => openMasterAdvancement(), 600);
     }
     audio.play('levelup');
+    tickDaily('level', player.level);
+    checkAchievements();
     saveState();
+    // Prestige offer at the level cap
+    if (player.level >= 50 && !game._prestigeOffered) {
+      setTimeout(() => offerPrestige(), 900);
+    }
   }
 
   game.monsters.splice(idx, 1);
@@ -6667,6 +6944,7 @@ function killMonster(m) {
     game.bossDefeated[game.currentMap] = true;
     showToast(`${m.name} defeated! Choose a powerup!`, 'legendary');
     setTimeout(() => showPowerupChoice(), 1500);
+    checkAchievements();
     saveState();
   } else if (m.isMiniBoss) {
     showToast(`${m.name} slain! The land rests... for now.`, 'epic');
@@ -6681,6 +6959,7 @@ function killMonster(m) {
         x: m.x + m.w/2, y: m.y + m.h/2, vy: -7,
         type:'item', item: bonus, life: 1000
       });
+      emitRarityBurst(m.x + m.w/2, m.y + m.h/2, bonus.rarity);
     }
     // Guaranteed epic powerup orb
     spawnPowerupOrb(m.x + m.w/2, m.y + m.h/2, 'epic');
@@ -6741,6 +7020,7 @@ function triggerSuperBossDeath(m) {
         y: m.y + m.h/2, vy: -6 - Math.random()*5,
         type:'item', item: leg, life: 1800,
       });
+      emitRarityBurst(m.x + m.w/2, m.y + m.h/2, 'legendary');
     }
   }
   for (let i = 0; i < 2; i++) {
@@ -6751,6 +7031,7 @@ function triggerSuperBossDeath(m) {
         y: m.y + m.h/2, vy: -4 - Math.random()*4,
         type:'item', item: extra, life: 1800,
       });
+      emitRarityBurst(m.x + m.w/2, m.y + m.h/2, extra.rarity);
     }
   }
 
@@ -6774,8 +7055,9 @@ function triggerSuperBossDeath(m) {
     );
   }
 
-  // Huge EXP bonus on top of normal
-  player.exp += Math.floor(m.exp * 0.5);
+  // Huge EXP bonus on top of normal (prestige-scaled)
+  const _pXp = (game.prestige && game.prestige.xpMult) || 1;
+  player.exp += Math.floor(m.exp * 0.5 * _pXp);
 
   // Dramatic toast — staggered messages
   showToast('THE SHARDFATHER FALLS!', 'legendary');
@@ -7374,6 +7656,9 @@ function attemptEnhance(item) {
     item.stars = star + 1;
     showToast(`★ ${item.name} → ${item.stars} stars!`, item.stars >= 8 ? 'legendary' : item.stars >= 5 ? 'epic' : 'rare');
     flash(0.4); addShake(4);
+    tickDaily('enhance');
+    checkAchievements();
+    saveState();
     // Golden sparkle burst on player
     for (let i = 0; i < 30; i++) {
       const a = (i / 30) * Math.PI * 2;
@@ -8236,8 +8521,9 @@ function closeAllModals() {
   const cs = document.getElementById('class-select-modal');
   const av = document.getElementById('advancement-modal');
   if (cs.style.display === 'flex' || av.style.display === 'flex') return;
-  for (const id of ['shop-modal','inventory-modal','skills-modal','powerup-modal','help-modal','enhance-modal','skilltree-modal','attributes-modal','dev-modal','taxi-modal']) {
-    document.getElementById(id).style.display = 'none';
+  for (const id of ['shop-modal','inventory-modal','skills-modal','powerup-modal','help-modal','enhance-modal','skilltree-modal','attributes-modal','dev-modal','taxi-modal','codex-modal']) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
   }
   document.getElementById('dialog').style.display = 'none';
   game.paused = false;
@@ -12480,6 +12766,36 @@ function updateUI() {
   // Low HP vignette
   const vg = document.getElementById('low-hp-vignette');
   if (player.inRage) vg.classList.add('on'); else vg.classList.remove('on');
+
+  // Daily challenge banner
+  const banner = document.getElementById('daily-banner');
+  if (banner) {
+    const d = game.dailyState;
+    if (d && player.cls) {
+      const c = DAILY_CHALLENGES.find(x => x.id === d.challenge);
+      if (c) {
+        banner.style.display = 'block';
+        const pct = Math.min(100, (d.progress / c.goal) * 100);
+        const descEl = document.getElementById('daily-desc');
+        const barEl  = document.getElementById('daily-bar');
+        const progEl = document.getElementById('daily-progress');
+        const strkEl = document.getElementById('daily-streak');
+        if (descEl) descEl.textContent = c.desc;
+        if (barEl)  barEl.style.width = pct + '%';
+        if (progEl) progEl.textContent = d.claimed ? '✔ Claimed' : `${Math.min(d.progress, c.goal)} / ${c.goal}`;
+        if (strkEl) strkEl.textContent = `Streak ${d.streak || 1}${d.claimed ? ' · done' : ''}`;
+      }
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+
+  // Respec cost hint (updates while the attributes modal is open)
+  const respecCost = document.getElementById('respec-cost');
+  if (respecCost) {
+    const c = 2000 * Math.max(1, player.level - 5);
+    respecCost.textContent = `Cost: ${c} Lumens (you have ${player.mesos})`;
+  }
 }
 
 // =========================================================================
@@ -12598,7 +12914,20 @@ function loop(time) {
   drawPortals();
   drawNPCs();
   drawDrops();
-  for (const m of game.monsters) drawMonster(m);
+  for (const m of game.monsters) {
+    if (m.scaleX !== undefined && m.scaleX !== 1) {
+      const cx = (m.x + m.w/2) - game.camera.x;
+      const by = m.y + m.h;
+      ctx.save();
+      ctx.translate(cx, by);
+      ctx.scale(m.scaleX, m.scaleY || 1);
+      ctx.translate(-cx, -by);
+      drawMonster(m);
+      ctx.restore();
+    } else {
+      drawMonster(m);
+    }
+  }
   drawProjectiles();
   drawHazards();
   drawAfterImages();
