@@ -22,6 +22,14 @@ Default to smaller-than-you-think batches. Stream timeouts happen above ~150 lin
 
 ## Mobile UI branch (automated)
 
+### Hard rule: never touch non-mobile code on this branch
+
+On `mobile-ui-pass`, **only edit mobile code** — the safe zones in `maple_game.html` listed below, plus mobile-specific files (`MOBILE_CHANGELOG.html`, `.claude/hooks/mobile-*.py`). Do not modify gameplay code, even if it "would fix the bug" or "is only one line". The collaborator's work on `main` moves fast; any mobile-branch edit outside the safe zones risks a rebase conflict.
+
+If a user request cannot be satisfied without touching non-mobile code (gameplay logic, class/job/skill systems, combat, save format, etc.), **stop and explicitly flag it to the user** before doing any work. Describe which file + line range would need to change, why, and offer to either (a) skip that part of the request, or (b) do it on a different branch. Never silently cross the line.
+
+### Automated hooks
+
 The `mobile-ui-pass` branch has two extra hooks (scoped to that branch only — they no-op on other branches):
 
 - `.claude/hooks/mobile-pre-push.py` — PreToolUse on Bash. Before a `git push` runs, auto-fetches origin/main and rebases. Blocks the push with a clear conflict list if the rebase would collide with the collaborator's gameplay changes on main. Skipped if the working tree is dirty.
