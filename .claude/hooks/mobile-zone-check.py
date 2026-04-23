@@ -19,6 +19,7 @@ SAFE_ZONES = [
     (7, 10),      # mobile meta tags
     (33, 33),     # body touch-action
     (65, 322),    # MOBILE CONTROLS (v5) CSS
+    (326, 407),   # #rotate-nag CSS + nag-portrait media query
     (472, 593),   # MOBILE TOUCH CONTROLS CSS
     (1135, 1155), # rotate-to-landscape nag + #mobile-ctrl HUD
     (1464, 1500), # MOBILE CONTROL DECK DOM
