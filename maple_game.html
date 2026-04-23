@@ -1690,7 +1690,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.23.0';
+const GAME_VERSION = 'v0.23.1';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -1794,8 +1794,10 @@ const SKILLS = {
   evadeRoll:    { name:'Evade Roll',     icon:'🤸', cls:'archer', slot:'e', mp:6,  cd:750,  desc:'Back flip + 2 shot.' },
   eagleEye:     { name:'Eagle Eye',      icon:'🦅', cls:'archer', slot:'w', mp:16, cd:7000, desc:'+40% crit chance for 8s.' },
   // Sniper
-  deadeye:      { name:'Strafe Volley',  icon:'🏹', cls:'archer', job:'sniper', slot:'q', mp:26, cd:3800,  desc:'Short sideways hop + 3 piercing arrows fired in quick succession — high / mid / low lanes.' },
-  snipe_railgun:{ name:'Railshot',       icon:'💠', cls:'archer', job:'sniper', slot:'s', mp:16, cd:1300, desc:'Instant piercing rail that hits every foe in a flat line; each consecutive hit empowers the next.' },
+  // v0.23.1 — Sniper X (slot s) reverts to the archer default MultiShot (its
+  // old `snipe_railgun` was too OP for an early slot). Railshot moves to F
+  // (slot q) with a longer CD + higher MP cost to match job-signature tier.
+  snipe_railgun:{ name:'Railshot',       icon:'💠', cls:'archer', job:'sniper', slot:'q', mp:28, cd:4200, desc:'Instant piercing rail along the facing direction — hits every foe in a flat line. Each consecutive hit empowers the next.' },
   arrowRain:    { name:'Arrow Rain',     icon:'🌧️', cls:'archer', job:'sniper', slot:'c', mp:42, cd:9000,  desc:'Ultimate: Rain arrows over an area.' },
   // Ranger
   wildBond:     { name:'Wild Bond',      icon:'🐺', cls:'archer', job:'ranger', slot:'q', mp:30, cd:10000, desc:'Summon a wolf companion for 15s.' },
@@ -1841,7 +1843,7 @@ const CLASSES = {
     desc:'Glass-cannon striker. Obliterates single targets but dies fast.',
     stats:{ hp:75, mp:50, atk:15, def:3, crit:25, speed:5.2, jump:12 },
     perk: { name:'Shadowstep', desc:'Dodge CD halved. Dash is fully invincible. +35% damage for 1s after dodging.' },
-    identity: { name:'Momentum', desc:'Movement fills a gauge (0-100). Skills spend it for up to +100% damage. Stop moving → it drains fast.' },
+    identity: { name:'Momentum', desc:'Movement fills a gauge (0-100). Skills spend it for up to +50% damage. Stop moving → it drains fast.' },
     jobs:['ninja','assassin'],
   },
   mage: {
@@ -2128,19 +2130,21 @@ const KEY_TO_SLOT = {
 const SLOT_TO_KEY = {};
 for (const k in KEY_TO_SLOT) SLOT_TO_KEY[KEY_TO_SLOT[k]] = k.toUpperCase();
 
-// v0.23 — skills unlock on a level cadence instead of all at once. Every 5
-// levels a new slot lights up. Maps slot id → minimum player.level required
-// to cast it. Job advancement (Lv 25) gates slot q; master (Lv 50) gates x.
+// v0.23.1 — skills unlock on a 5-level cadence, with the first bump at
+// Lv 5 (not 6). Each unlock moved -1 from the initial v0.23 values so
+// slots land on clean multiples of 5. Job-signature (q) lines up with
+// JOB_ADVANCE_LEVEL (25); master-signature (x) is one level below
+// MASTER_ADVANCE_LEVEL (49) so by the time you advance at 50 it's live.
 // A (block / parry) is a separate key and always available.
 const SLOT_LEVEL_REQ = {
   d: 1,   // Z — basic attack: Lv 1
-  s: 6,   // X — skill 2: Lv 6
-  a: 11,  // S — skill 3: Lv 11
-  e: 16,  // C — skill 4: Lv 16
-  w: 21,  // D — skill 5: Lv 21
-  q: 26,  // F — job signature: Lv 26 (also needs 1st advancement)
-  c: 31,  // V — job ultimate: Lv 31 (also needs 1st advancement)
-  x: 50,  // G — master signature: Lv 50 (also needs 2nd advancement)
+  s: 5,   // X — skill 2: Lv 5
+  a: 10,  // S — skill 3: Lv 10
+  e: 15,  // C — skill 4: Lv 15
+  w: 20,  // D — skill 5: Lv 20
+  q: 25,  // F — job signature: Lv 25 (aligned with 1st advancement)
+  c: 30,  // V — job ultimate: Lv 30
+  x: 49,  // G — master signature: Lv 49 (master advance at 50)
 };
 const JOB_ADVANCE_LEVEL    = 25;
 const MASTER_ADVANCE_LEVEL = 50;
@@ -3499,6 +3503,26 @@ window.addEventListener('keydown', e => {
   if (k === '9' && !game.paused) {
     resetSave();
   }
+  // v0.23.1 — press `-` to open the job / master selection page any time.
+  // Closes on a second press (toggle behaviour like K/U/I).
+  if (k === '-' || k === '_') {
+    if (!player.cls) { showToast('Pick a class first', 'common'); return; }
+    if (player.hp <= 0) return;
+    const adv = document.getElementById('advancement-modal');
+    if (adv && adv.style.display === 'flex') {
+      adv.style.display = 'none';
+      game.paused = false;
+      return;
+    }
+    closeAllModals();
+    // If the player has no job yet, offer the 1st advancement. Otherwise
+    // let them re-pick at any level (resetJobAndMaster) so jobs aren't a
+    // one-and-done trap.
+    if (!player.job || !player.master) {
+      if (typeof resetJobAndMaster === 'function') resetJobAndMaster();
+    }
+    openAdvancement();
+  }
   if (k === '0') {
     // v0.23 — dev max-out: jump to Lv 50, auto-advance job + master so
     // every single slot (Z X S C D F V G) is unlocked immediately. Great
@@ -3552,20 +3576,29 @@ window.addEventListener('keydown', e => {
   if (k === 'escape') closeAllModals();
   if (k === 'm') audio.toggleMute();
   if (k === 'n') {
-    // N is the primary "Talk to NPC" key — if any NPC is in talk range,
-    // open their dialog; otherwise fall through to the Codex. Pressing N
-    // again with the same window open closes it (works for both branches).
+    // N is a context key (v0.23.1): priority is
+    //   nearby chest → open it
+    //   nearby NPC   → talk
+    //   otherwise    → open the Codex
+    // Pressing N while any of the resulting modals are open closes them.
     if (player.cls && player.hp > 0) {
-      // If the dialog OR codex is already showing, a second N press closes.
       const dlg = document.getElementById('dialog');
       const cdx = document.getElementById('codex-modal');
       if ((dlg && dlg.style.display === 'flex') || (cdx && cdx.style.display === 'flex')) {
         closeAllModals();
       } else {
         const pcx = player.x + player.w / 2;
-        const nearNpc = game.npcs && game.npcs.find(npc => Math.abs(pcx - npc.x) < 60);
-        if (nearNpc) openNPC(nearNpc);
-        else openCodex();
+        // Chest first — matches MapleStory's "look at the thing you're on"
+        const nearChest = (game.chests || []).find(c => !c.opened &&
+          Math.abs((player.x + player.w/2) - (c.x + c.w/2)) < 40 &&
+          Math.abs((player.y + player.h) - (c.y + c.h)) < 60);
+        if (nearChest) {
+          openChest(nearChest);
+        } else {
+          const nearNpc = game.npcs && game.npcs.find(npc => Math.abs(pcx - npc.x) < 60);
+          if (nearNpc) openNPC(nearNpc);
+          else openCodex();
+        }
       }
     }
   }
@@ -4250,107 +4283,123 @@ function _mnote(name) {
 // Rest is denoted by 0.
 const REST = 0;
 // Each track: { beat: ms per beat, lead: [note, beats], bass: [note, beats], leadWave, bassWave, leadVol, bassVol }
+// v0.23.1 — soothing piano-classical rework. All leads/basses now use sine
+// (piano-adjacent fundamental), tempos slowed, volumes softened, and the
+// envelope (see _tone) gets a longer attack + release for legato feel.
+// Melodic phrases are simple arpeggios over minor / major chord roots.
 const MUSIC_TRACKS = {
   town: {
-    beat: 300,
-    leadWave: 'triangle', bassWave: 'sine',
-    leadVol: 0.05, bassVol: 0.035,
+    // Slow pastoral C-major arpeggios, like a lullaby
+    beat: 480,
+    leadWave: 'sine', bassWave: 'sine',
+    leadVol: 0.045, bassVol: 0.028,
+    piano: true,
     lead: [
-      ['E5',1],['G5',1],['A5',1],['G5',1], ['E5',1],['C5',1],['D5',1],['E5',1],
-      ['G5',1],['A5',1],['B5',1],['A5',1], ['G5',2],['E5',2],
-      ['A5',1],['G5',1],['E5',1],['D5',1], ['C5',2],['D5',1],['E5',1],
-      ['G5',1],['E5',1],['D5',1],['C5',1], ['G4',2],[REST,2],
+      ['E5',2],['G5',2], ['C6',2],['G5',2],
+      ['F5',2],['A5',2], ['C6',2],['A5',2],
+      ['D5',2],['G5',2], ['B5',2],['G5',2],
+      ['E5',4],         ['C5',4],
     ],
     bass: [
-      ['C3',2],['G3',2], ['C3',2],['G3',2],
-      ['A3',2],['E3',2], ['G3',2],['C4',2],
-      ['F3',2],['C3',2], ['G3',2],['C3',2],
-      ['F3',2],['C3',2], ['G3',2],['C3',2],
+      ['C3',4],['G3',4],
+      ['F3',4],['A3',4],
+      ['G3',4],['D3',4],
+      ['C3',4],['C3',4],
     ],
   },
   forest: {
-    beat: 240,
-    leadWave: 'square', bassWave: 'triangle',
-    leadVol: 0.04, bassVol: 0.03,
+    // Rolling A-minor / C-major arpeggio — gentle overworld
+    beat: 440,
+    leadWave: 'sine', bassWave: 'sine',
+    leadVol: 0.04, bassVol: 0.026,
+    piano: true,
     lead: [
-      ['D5',1],['F5',1],['A5',1],['D6',1], ['C6',1],['A5',1],['F5',1],['D5',1],
-      ['E5',1],['G5',1],['B5',1],['E6',1], ['D6',1],['B5',1],['G5',1],['E5',1],
-      ['F5',2],['A5',1],['C6',1],         ['D6',2],['A5',2],
-      ['G5',1],['F5',1],['E5',1],['D5',1], ['D5',2],[REST,2],
+      ['A4',2],['C5',2],['E5',2],['A5',2],
+      ['G4',2],['C5',2],['E5',2],['G5',2],
+      ['F4',2],['A4',2],['C5',2],['F5',2],
+      ['E4',2],['G4',2],['B4',2],['E5',2],
     ],
     bass: [
-      ['D3',2],['A3',2], ['D3',2],['A3',2],
-      ['E3',2],['B3',2], ['E3',2],['B3',2],
-      ['F3',2],['C4',2], ['D3',2],['A3',2],
-      ['G3',2],['D3',2], ['A3',2],['D3',2],
+      ['A2',4],['A2',4],
+      ['C3',4],['C3',4],
+      ['F2',4],['F2',4],
+      ['E2',4],['E2',4],
     ],
   },
   mushroom: {
-    beat: 260,
-    leadWave: 'sawtooth', bassWave: 'sine',
-    leadVol: 0.035, bassVol: 0.03,
+    // D-minor — contemplative, soft
+    beat: 520,
+    leadWave: 'sine', bassWave: 'sine',
+    leadVol: 0.038, bassVol: 0.025,
+    piano: true,
     lead: [
-      ['A4',1],['B4',1],['C5',1],['D5',1], ['E5',2],['D5',1],['C5',1],
-      ['B4',1],['A4',1],['G4',1],['A4',1], ['B4',2],[REST,2],
-      ['E5',1],['D5',1],['C5',1],['B4',1], ['A4',2],['G4',2],
-      ['A4',1],['B4',1],['C5',1],['D5',1], ['A4',2],[REST,2],
+      ['D5',3],['F5',3], ['A5',2],
+      ['G5',3],['F5',3], ['D5',2],
+      ['A4',3],['C5',3], ['F5',2],
+      ['D5',4],          ['D5',4],
     ],
     bass: [
-      ['A2',2],['E3',2], ['A2',2],['E3',2],
-      ['D3',2],['A2',2], ['E3',2],['A2',2],
-      ['F3',2],['C3',2], ['G3',2],['D3',2],
-      ['A2',2],['E3',2], ['A2',2],['A2',2],
+      ['D2',4],['A2',4],
+      ['G2',4],['D2',4],
+      ['A2',4],['F2',4],
+      ['D2',4],['D2',4],
     ],
   },
   boss: {
-    beat: 180,
-    leadWave: 'square', bassWave: 'sawtooth',
-    leadVol: 0.04, bassVol: 0.04,
+    // C-minor — dramatic but still calm. Low strings feel.
+    beat: 420,
+    leadWave: 'sine', bassWave: 'sine',
+    leadVol: 0.042, bassVol: 0.032,
+    piano: true,
     lead: [
-      ['C5',1],['D#5',1],['G5',1],['D#5',1], ['C5',1],['G4',1],['C5',2],
-      ['G4',1],['A#4',1],['D5',1],['A#4',1], ['G4',1],['D4',1],['G4',2],
-      ['D#5',1],['F5',1],['G5',1],['F5',1], ['D#5',1],['D5',1],['C5',2],
-      ['G4',2],['C5',2],                    ['C5',2],[REST,2],
+      ['C5',2],['D#5',2],['G5',2],['C6',2],
+      ['A#5',2],['G5',2],['D#5',2],['C5',2],
+      ['G4',2],['A#4',2],['D5',2],['G5',2],
+      ['C5',4],          ['C5',4],
     ],
     bass: [
-      ['C2',2],['G2',2], ['C2',2],['G2',2],
-      ['G2',2],['D3',2], ['G2',2],['D3',2],
-      ['F2',2],['C3',2], ['G2',2],['D3',2],
-      ['C2',2],['G2',2], ['C2',2],['C2',2],
+      ['C2',4],['G2',4],
+      ['F2',4],['C3',4],
+      ['G2',4],['D3',4],
+      ['C2',4],['C2',4],
     ],
   },
   zodiac: {
-    beat: 220,
-    leadWave: 'triangle', bassWave: 'sine',
-    leadVol: 0.035, bassVol: 0.03,
+    // Shimmering A-minor → C-major — cosmic, pensive
+    beat: 500,
+    leadWave: 'sine', bassWave: 'sine',
+    leadVol: 0.036, bassVol: 0.024,
+    piano: true,
     lead: [
-      ['A4',2],['C5',2], ['E5',1],['A5',1],['G5',2],
-      ['F5',2],['E5',2], ['D5',1],['C5',1],['A4',2],
-      ['E5',1],['G5',1],['A5',2], ['C6',2],['B5',2],
-      ['A5',2],['G5',2], ['E5',2],[REST,2],
+      ['A4',2],['C5',2],['E5',2],['A5',2],
+      ['F5',2],['E5',2],['C5',2],['A4',2],
+      ['E5',2],['G5',2],['B5',2],['D6',2],
+      ['C6',4],         ['A5',4],
     ],
     bass: [
-      ['A2',2],['E3',2], ['A2',2],['E3',2],
-      ['F2',2],['C3',2], ['A2',2],['E3',2],
-      ['G2',2],['D3',2], ['A2',2],['E3',2],
-      ['F2',2],['C3',2], ['A2',2],['A2',2],
+      ['A2',4],['E3',4],
+      ['F2',4],['C3',4],
+      ['G2',4],['D3',4],
+      ['A2',4],['A2',4],
     ],
   },
   tower: {
-    beat: 200,
-    leadWave: 'square', bassWave: 'triangle',
-    leadVol: 0.035, bassVol: 0.035,
+    // Slow ascending G-major — the climb feel, but reverent
+    beat: 460,
+    leadWave: 'sine', bassWave: 'sine',
+    leadVol: 0.038, bassVol: 0.028,
+    piano: true,
     lead: [
-      ['C5',1],['E5',1],['G5',1],['C6',1], ['B5',1],['G5',1],['E5',1],['C5',1],
-      ['D5',1],['F5',1],['A5',1],['D6',1], ['C6',1],['A5',1],['F5',1],['D5',1],
-      ['E5',1],['G5',1],['B5',1],['E6',1], ['D6',1],['B5',1],['G5',1],['E5',1],
-      ['F5',2],['E5',2], ['D5',2],['C5',2],
+      ['G4',2],['B4',2],['D5',2],['G5',2],
+      ['A4',2],['C5',2],['E5',2],['A5',2],
+      ['B4',2],['D5',2],['G5',2],['B5',2],
+      ['G5',4],         ['D5',4],
     ],
     bass: [
-      ['C3',2],['G3',2], ['C3',2],['G3',2],
-      ['D3',2],['A3',2], ['D3',2],['A3',2],
-      ['E3',2],['B3',2], ['E3',2],['B3',2],
-      ['F3',2],['G3',2], ['C3',2],['C3',2],
+      ['G2',4],['D3',4],
+      ['A2',4],['E3',4],
+      ['B2',4],['G3',4],
+      ['G2',4],['G2',4],
     ],
   },
 };
@@ -4436,19 +4485,49 @@ const music = {
   },
   _tone(freq, when, dur, wave, vol) {
     if (!this.ctx || !freq || freq <= 0) return;
-    const o = this.ctx.createOscillator();
-    const g = this.ctx.createGain();
-    o.type = wave || 'triangle';
-    o.frequency.setValueAtTime(freq, when);
-    // Short envelope: quick attack, gentle decay, brief release
+    const isPiano = (this.current && MUSIC_TRACKS[this.current] && MUSIC_TRACKS[this.current].piano);
     const peak = vol || 0.04;
-    g.gain.setValueAtTime(0.0001, when);
-    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), when + 0.01);
-    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak * 0.55), when + dur * 0.65);
-    g.gain.exponentialRampToValueAtTime(0.0001, when + dur * 0.95);
-    o.connect(g); g.connect(this.gain);
-    o.start(when);
-    o.stop(when + dur + 0.05);
+    // Piano-like timbre: fundamental sine + a quiet octave partial for a
+    // warmer "struck string" feel. Longer attack / soft release = legato.
+    const fundamental = this.ctx.createOscillator();
+    const gEnv = this.ctx.createGain();
+    fundamental.type = wave || 'sine';
+    fundamental.frequency.setValueAtTime(freq, when);
+    // Envelope — piano-ish if requested
+    if (isPiano) {
+      const attack = 0.02, bodyEnd = dur * 0.85, releaseEnd = dur * 1.1;
+      gEnv.gain.setValueAtTime(0.0001, when);
+      gEnv.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), when + attack);
+      // Slow decay → gentle plateau
+      gEnv.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak * 0.38), when + bodyEnd);
+      gEnv.gain.exponentialRampToValueAtTime(0.0001, when + releaseEnd);
+    } else {
+      gEnv.gain.setValueAtTime(0.0001, when);
+      gEnv.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), when + 0.01);
+      gEnv.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak * 0.55), when + dur * 0.65);
+      gEnv.gain.exponentialRampToValueAtTime(0.0001, when + dur * 0.95);
+    }
+    fundamental.connect(gEnv);
+    gEnv.connect(this.gain);
+    fundamental.start(when);
+    fundamental.stop(when + dur + 0.12);
+
+    if (isPiano) {
+      // Quiet octave overtone for body — a second sine one octave up at
+      // ~25% amplitude. Gives the sine a "piano" bell-tone quality.
+      const over = this.ctx.createOscillator();
+      const oEnv = this.ctx.createGain();
+      over.type = 'sine';
+      over.frequency.setValueAtTime(freq * 2, when);
+      const oPeak = peak * 0.22;
+      oEnv.gain.setValueAtTime(0.0001, when);
+      oEnv.gain.exponentialRampToValueAtTime(Math.max(0.0002, oPeak), when + 0.015);
+      oEnv.gain.exponentialRampToValueAtTime(0.0001, when + dur * 0.7);
+      over.connect(oEnv);
+      oEnv.connect(this.gain);
+      over.start(when);
+      over.stop(when + dur + 0.08);
+    }
   },
 };
 
@@ -6380,11 +6459,13 @@ function _computeClassSkillMul(skillId) {
     return 1 + power;  // 1× at 0%, 2× at 100%
   }
 
-  // Rogue — spend most of the momentum for a damage bonus
+  // Rogue — spend most of the momentum for a damage bonus (v0.23.1: halved).
+  // Max bonus capped at +50% (was +100%) so rogue's momentum is a smooth
+  // uplift rather than a doubler on top of already-high base crit.
   if (player.cls === 'rogue') {
     const m = player._momentum || 0;
     player._momentum = Math.max(0, m - 60);
-    return 1 + m / 100;
+    return 1 + m / 200;
   }
 
   // Mage — chain cast detection + visual ping for the new cast
@@ -15403,7 +15484,7 @@ function drawChests() {
         ctx.fillStyle = '#ffdd44';
         ctx.font = 'bold 12px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('[F] Open', sx + c.w/2, c.y - 6 + t);
+        ctx.fillText('[N] Open', sx + c.w/2, c.y - 6 + t);
       }
     } else {
       // ---- Opened — flipped lid + dark interior ----
