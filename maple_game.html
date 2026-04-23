@@ -207,6 +207,25 @@
   .mc-basic:active {
     background: linear-gradient(180deg, rgba(220,90,110,0.95), rgba(120,40,60,0.95));
   }
+  .mc-defense-row {
+    display: flex; gap: 6px; pointer-events: none;
+  }
+  .mc-block {
+    width: 54px; height: 54px; font-size: 22px;
+    border-color: #88ccff;
+    background: linear-gradient(180deg, rgba(70,120,200,0.82), rgba(30,60,120,0.85));
+  }
+  .mc-block:active {
+    background: linear-gradient(180deg, rgba(120,180,255,0.95), rgba(60,100,180,0.95));
+  }
+  .mc-dodge {
+    width: 54px; height: 54px; font-size: 22px;
+    border-color: #88dd88;
+    background: linear-gradient(180deg, rgba(80,160,90,0.82), rgba(30,80,40,0.85));
+  }
+  .mc-dodge:active {
+    background: linear-gradient(180deg, rgba(140,220,150,0.95), rgba(60,130,80,0.95));
+  }
   .mc-skill-grid {
     display: grid; grid-template-columns: repeat(4, 44px); gap: 6px;
   }
@@ -272,6 +291,14 @@
   .skill-slot.locked { opacity: 0.3; filter: grayscale(1); }
   .skill-slot.ready { border-color: #88ccff; box-shadow: 0 0 6px rgba(120,180,255,0.5); }
   .skill-slot.cost-high { border-color: #c44; }
+  /* Defensive dock slot — Block / Parry at the A key, sits left of the skills */
+  .skill-slot.defense {
+    border-color: #88ccff;
+    background: linear-gradient(180deg, rgba(40,60,110,0.75), rgba(20,30,60,0.85));
+    margin-right: 6px;
+  }
+  .skill-slot.defense.ready { box-shadow: 0 0 8px rgba(120,180,255,0.65); }
+  .skill-slot.defense .skill-mp { color: #aaddff; }
   .skill-icon { font-size: 22px; margin-top: 2px; }
   .skill-key { font-size: 10px; color: #ffee88; font-weight: bold; }
   .skill-mp { font-size: 9px; color: #88bbff; }
@@ -786,7 +813,11 @@
          letter (matches the skill bar UI). -->
     <div class="mc-actions">
       <button class="mc-btn mc-jump"   data-mkey=" "  aria-label="Jump">⤒</button>
-      <button class="mc-btn mc-basic"  data-mkey="z"  aria-label="Basic attack">D</button>
+      <div class="mc-defense-row">
+        <button class="mc-btn mc-basic"  data-mkey="z"     aria-label="Basic attack">D</button>
+        <button class="mc-btn mc-block"  data-mkey="a"     aria-label="Block / Parry">🛡</button>
+        <button class="mc-btn mc-dodge"  data-mkey="shift" aria-label="Dodge">💨</button>
+      </div>
       <div class="mc-skill-grid">
         <button class="mc-btn mc-skill" data-mkey="x" aria-label="Skill S">S</button>
         <button class="mc-btn mc-skill" data-mkey="s" aria-label="Skill A">A</button>
@@ -804,6 +835,7 @@
       <button class="mc-btn mc-pot mc-hp" data-mkey="pageup"   aria-label="HP potion">♥</button>
       <button class="mc-btn mc-pot mc-mp" data-mkey="pagedown" aria-label="MP potion">◆</button>
       <button class="mc-btn mc-menu"      data-mkey="u"        aria-label="Level up">↑</button>
+      <button class="mc-btn mc-menu"      data-mkey="i"        aria-label="Skills reference">📖</button>
       <button class="mc-btn mc-menu"      data-mkey="b"        aria-label="Inventory">🎒</button>
     </div>
     <!-- Toggle to hide/show controls when using a keyboard on a touch laptop -->
@@ -922,6 +954,7 @@
           <div class="kb"><span>Interact / Talk</span><span><kbd>F</kbd></span></div>
           <div class="kb"><span>Inventory</span><span><kbd>B</kbd></span></div>
           <div class="kb"><span>Level Up Panel</span><span><kbd>K</kbd> / <kbd>U</kbd></span></div>
+          <div class="kb"><span>Skills Reference</span><span><kbd>I</kbd></span></div>
           <div class="kb"><span>Change Job / Master</span><span><kbd>0</kbd></span></div>
           <div class="kb"><span>Dev Console</span><span><kbd>1</kbd>+<kbd>2</kbd>+<kbd>3</kbd></span></div>
           <div class="kb"><span>Help Panel</span><span><kbd>?</kbd></span></div>
@@ -1118,7 +1151,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.14.0';
+const GAME_VERSION = 'v0.14.1';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -2688,6 +2721,11 @@ window.addEventListener('keydown', e => {
     } else if (!player.cls) {
       showToast('Pick a class first', 'common');
     }
+  }
+  if (k === 'i') {
+    // Skills reference — lists A-V hotkeys + current skill + brief desc
+    if (player.cls) openSkillsReference();
+    else showToast('Pick a class first', 'common');
   }
   if (k === '0') {
     // Job change / skill unlock hub — re-pick jobs/masters any time
@@ -9838,6 +9876,109 @@ const LEVELUP_OPTIONS = [
   { id:'crit',  label:'+1% Crit',      cost: 1, cap: 25, apply: () => { player.baseCrit = (player.baseCrit || 5) + 1; } },
   { id:'speed', label:'+0.15 Speed',   cost: 2, cap: 10, apply: () => { player.baseSpeed += 0.15; } },
 ];
+
+// =========================================================================
+// SKILLS REFERENCE MODAL (I key)
+// Lists every keyboard binding in the A–V range with the current skill /
+// action it triggers plus a brief description. Lets players learn their
+// kit at a glance without tabbing between help + skill bar.
+// =========================================================================
+function openSkillsReference() {
+  const modal = document.getElementById('attributes-modal');
+  const body = modal.querySelector('.modal');
+  const kit = skillsForClass(player.cls, player.job, player.master);
+  const slotSkill = (slot) => {
+    let best = null, bestScore = -1;
+    for (const id in kit) {
+      const s = kit[id];
+      if (s.slot !== slot) continue;
+      const sc = (s.master ? 4 : 0) + (s.job ? 2 : 0);
+      if (sc > bestScore) { bestScore = sc; best = s; }
+    }
+    return best;
+  };
+  // Build one row per A-V binding — combines in-game actions and skill casts
+  const rows = [
+    { key:'A',     label:'Block / Parry',     desc:'Hold to mitigate 70% damage. 400 ms perfect-timing parry = stun + counter window.', kind:'defense' },
+    { key:'B',     label:'Inventory',         desc:'Open the gear / consumable inventory.', kind:'menu' },
+    { key:'C',     label:'Skill (Slot E)',    desc:null, slot:'e', kind:'skill' },
+    { key:'D',     label:'Skill (Slot W)',    desc:null, slot:'w', kind:'skill' },
+    { key:'F',     label:'Interact / Skill Q',desc:'Talk to NPC, open chest, pick up. Also casts the Q skill when a target isn\'t in range.', slot:'q', kind:'skill' },
+    { key:'G',     label:'Master Signature',  desc:null, slot:'x', kind:'skill' },
+    { key:'H',     label:'—',                 desc:'(unbound)', kind:'unbound' },
+    { key:'I',     label:'Skills Reference',  desc:'This panel.', kind:'menu' },
+    { key:'J',     label:'—',                 desc:'(unbound)', kind:'unbound' },
+    { key:'K',     label:'Level Up Panel',    desc:'Spend LP into HP / MP / ATK / DEF / Crit / Speed lanes.', kind:'menu' },
+    { key:'L',     label:'—',                 desc:'(unbound)', kind:'unbound' },
+    { key:'M',     label:'Mute audio',        desc:'Toggle sound effects on/off.', kind:'menu' },
+    { key:'N',     label:'Codex',             desc:'Achievement + bestiary progress tracker.', kind:'menu' },
+    { key:'O',     label:'—',                 desc:'(unbound)', kind:'unbound' },
+    { key:'P',     label:'—',                 desc:'(unbound)', kind:'unbound' },
+    { key:'Q',     label:'—',                 desc:'(unbound)', kind:'unbound' },
+    { key:'R',     label:'HP Potion (alias)', desc:'Alternative to PgUp — use HP potion; auto-buys with gold if none.', kind:'item' },
+    { key:'S',     label:'Skill (Slot A)',    desc:null, slot:'a', kind:'skill' },
+    { key:'T',     label:'MP Potion (alias)', desc:'Alternative to PgDn — use MP potion; auto-buys with gold if none.', kind:'item' },
+    { key:'U',     label:'Level Up Panel',    desc:'Open the radar stat chart + LP spending screen.', kind:'menu' },
+    { key:'V',     label:'Job Ultimate',      desc:null, slot:'c', kind:'skill' },
+  ];
+  const kindCol = { skill:'#ffcc66', defense:'#88ccff', menu:'#aaddff', item:'#ff99aa', unbound:'#666' };
+
+  body.innerHTML = `
+    <button class="close-btn" onclick="closeAllModals()">✕</button>
+    <h2>📖 Skills Reference</h2>
+    <div style="text-align:center; margin-bottom:8px; color:#bbb; font-size:12px;">
+      Every A–V hotkey for your current class + active job + master.<br>
+      <span style="color:#888">Press</span> <kbd style="background:#333;padding:1px 6px;border-radius:3px;border:1px solid #555;color:#fff">I</kbd>
+      <span style="color:#888">any time to reopen.</span>
+    </div>
+    <div id="skills-ref-grid" style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px;
+         max-height:440px; overflow-y:auto; padding:4px;"></div>
+  `;
+  const grid = body.querySelector('#skills-ref-grid');
+  for (const r of rows) {
+    const card = document.createElement('div');
+    card.style.cssText = `
+      display:flex; gap:10px; align-items:flex-start;
+      padding:8px 10px; border-radius:6px;
+      background: rgba(0,0,0,0.35);
+      border:1px solid ${kindCol[r.kind]}55;
+    `;
+    // Key chip
+    const chip = `<div style="
+      min-width:34px; height:34px; flex:0 0 34px;
+      border:1px solid ${kindCol[r.kind]}; border-radius:6px;
+      background:rgba(0,0,0,0.45); color:${kindCol[r.kind]};
+      display:flex; align-items:center; justify-content:center;
+      font-weight:bold; font-family:monospace;
+    ">${r.key}</div>`;
+    // Label + desc
+    let label = r.label, desc = r.desc || '';
+    let costBadge = '';
+    if (r.slot) {
+      const s = slotSkill(r.slot);
+      if (s) {
+        label = `${s.icon || '•'}  ${s.name}`;
+        desc  = s.desc || '';
+        if (s.mp)  costBadge += `<span style="color:#88bbff;">${s.mp} MP</span> · `;
+        if (s.cd)  costBadge += `<span style="color:#ffcc66;">${(s.cd/1000).toFixed(1)}s CD</span>`;
+      } else {
+        label = `(Slot ${r.slot.toUpperCase()} — ${r.slot === 'x' ? 'Unlocks at Master (Lv 20)' : 'Unlocks at job advancement (Lv 10)'})`;
+        desc = '';
+        card.style.opacity = 0.5;
+      }
+    }
+    card.innerHTML = chip + `
+      <div style="flex:1; min-width:0;">
+        <div style="color:#fff; font-weight:bold; font-size:13px; margin-bottom:2px;">${label}</div>
+        ${costBadge ? `<div style="font-size:10px; margin-bottom:3px;">${costBadge}</div>` : ''}
+        <div style="color:#bbb; font-size:11px; line-height:1.4;">${desc}</div>
+      </div>
+    `;
+    grid.appendChild(card);
+  }
+  modal.style.display = 'flex';
+  game.paused = true;
+}
 
 function openLevelUpPanel() {
   if (!player._levelUpSpent) player._levelUpSpent = {};
@@ -18033,6 +18174,29 @@ function drawDamageNumbers() {
 function renderSkillBar() {
   const bar = document.getElementById('skill-bar');
   bar.innerHTML = '';
+  // Defensive slot at the left edge — Block / Parry on the A keyboard key.
+  // Non-skill action but belongs in the dock so players always see it.
+  const blockSlot = document.createElement('div');
+  blockSlot.className = 'skill-slot defense';
+  const onBlockCd = (player.blockCD || 0) > 0;
+  const blocking  = (player.blockTimer || 0) > 0;
+  const parrying  = (player.parryWindow || 0) > 0;
+  if (!onBlockCd && !blocking) blockSlot.classList.add('ready');
+  blockSlot.innerHTML = `
+    <div class="skill-key">A</div>
+    <div class="skill-icon">${parrying ? '⚡' : blocking ? '🛡' : '🛡'}</div>
+    <div class="skill-mp">${onBlockCd ? (player.blockCD / 1000).toFixed(1) + 's' : 'Block'}</div>
+  `;
+  if (onBlockCd) {
+    const frac = Math.min(1, player.blockCD / 2000);
+    const cdDiv = document.createElement('div');
+    cdDiv.className = 'skill-cd';
+    cdDiv.style.height = (frac * 100) + '%';
+    cdDiv.textContent = (player.blockCD / 1000).toFixed(1);
+    blockSlot.appendChild(cdDiv);
+  }
+  blockSlot.title = 'Block / Parry — hold to mitigate 70% damage; perfect timing triggers a parry (400ms window).';
+  bar.appendChild(blockSlot);
   const kit = skillsForClass(player.cls, player.job, player.master);
   for (const slotId of ['d','s','a','e','w','q','c','x']) {
     const slot = document.createElement('div');
