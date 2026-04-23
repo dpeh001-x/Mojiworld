@@ -1,12 +1,24 @@
 # 🗡️ LevelX — Shardfall Expedition
 
-A 2D action-platformer RPG with roguelite elements. Four classes, eight job advancements, sixteen master classes, skill trees, affix-roll loot, star enhancement, procedural dungeons, and mini-bosses.
+A 2D action-platformer RPG with roguelite elements. Four classes, eight job advancements, sixteen master classes, skill trees, affix-roll loot, star enhancement, procedural dungeons, and mini-bosses. **v0.24.0 adds optional multiplayer** — run the server in `server/` and friends can join your room to run around and chat together.
 
 ## 🎮 Play
 
-**Open `maple_game.html` in a browser.** No build step, no server.
+**Open `maple_game.html` in a browser.** Solo play needs no setup.
 
 Live play URL (once GitHub Pages is enabled): **https://dpeh001-x.github.io/LevelX/maple_game.html**
+
+## 🌐 Multiplayer (optional, v0.24.0)
+
+```sh
+cd server
+npm install
+npm start         # [levelx-server] listening on port 8080
+```
+
+In the game, click **🌐 Multi** (top-right of the HUD), enter `ws://localhost:8080`, pick a name + room, hit **Connect**. Share the URL + room name with a friend. See `server/README.md` for Fly.io / Railway / VPS deploy instructions and the full protocol table.
+
+**Scope.** Presence + chat + emote relay across everyone in the same room. Combat and mobs are still per-client — two players next to the same Slippy are each fighting their own. Server-authoritative combat is the next milestone.
 
 ## 🎯 Controls
 
