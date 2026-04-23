@@ -42,17 +42,24 @@
     box-shadow: 0 0 50px rgba(150, 100, 230, 0.5);
     overflow: hidden;
     /* Canvas is authored at 960x560; scale the whole wrapper to fit screen.
-       JS sets --game-scale in _fitGameToViewport so we keep the 16:9-ish
-       aspect ratio without distorting child positions. */
+       _fitGameToViewport sets --game-scale-x / --game-scale-y. In portrait
+       and desktop these are equal (aspect-preserving). In mobile landscape
+       they differ — the wrapper stretches to fill the whole viewport. */
     width: 960px; height: 560px;
     transform-origin: center top;
-    transform: scale(var(--game-scale, 1));
+    transform: scale(var(--game-scale-x, var(--game-scale, 1)),
+                     var(--game-scale-y, var(--game-scale, 1)));
     flex: 0 0 auto;
   }
   /* On narrow phones or touch devices: edge-to-edge wrapper, no border */
   @media (pointer: coarse), (max-width: 900px) {
     body { padding: 0; }
     .game-wrapper { border-width: 0; border-radius: 0; box-shadow: none; }
+  }
+  /* In mobile landscape, anchor the wrapper from the top-left corner so
+     the stretched transform fills viewport without off-canvas bias. */
+  body.mc-landscape .game-wrapper {
+    transform-origin: top left;
   }
 
   /* ===========================================================
@@ -219,33 +226,56 @@
   }
 
   /* ---- PORTRAIT LAYOUT ------------------------------------------
-     D-pad stacked ABOVE face buttons on the right thumb zone.
-     Potions stacked top-right edge for quick reach.              */
+     Thumb-rest diagonal: D-pad raised on the LEFT (lower-left thumb),
+     face buttons on the RIGHT at screen-bottom (lower-right thumb).
+     The vertical offset between the two clusters prevents them from
+     visually crowding each other on narrow phones, and keeps both
+     thumbs within natural travel distance.                          */
   @media (pointer: coarse) and (orientation: portrait),
          (max-width: 900px) and (orientation: portrait) {
-    body.mc-portrait {
-      padding-bottom: 0 !important;    /* no reserved bar */
-    }
-    /* D-pad pinned to the LEFT, middle-lower (above face buttons stack
-       position → actually both on LEFT side, D-pad on top) */
+    body.mc-portrait { padding-bottom: 0 !important; }
+    /* D-pad left side, raised so it doesn't crowd the face cluster */
     .mobile-deck .mc-dpad {
-      left: calc(14px + env(safe-area-inset-left));
-      bottom: calc(240px + env(safe-area-inset-bottom));
+      left: calc(10px + env(safe-area-inset-left));
+      bottom: calc(40px + env(safe-area-inset-bottom));
       top: auto !important;
     }
-    /* Face buttons pinned to the RIGHT */
+    /* Face buttons right side, tucked into the bottom-right corner */
     .mc-actions {
-      right: calc(14px + env(safe-area-inset-right));
-      bottom: calc(20px + env(safe-area-inset-bottom));
+      right: calc(10px + env(safe-area-inset-right));
+      bottom: calc(16px + env(safe-area-inset-bottom));
       top: auto !important;
     }
-    /* Potions + menu stack vertically on the TOP-LEFT corner so they
-       don't collide with either control cluster. */
+    /* Potions + menu — top-right row, compact */
     .mobile-ctrl .mc-pots {
-      top: calc(56px + env(safe-area-inset-top)) !important;
-      right: calc(14px + env(safe-area-inset-right)) !important;
-      flex-direction: column !important;
+      top: calc(12px + env(safe-area-inset-top)) !important;
+      right: calc(12px + env(safe-area-inset-right)) !important;
+      flex-direction: row !important;
+      gap: 6px !important;
     }
+    /* Slightly compact sizes vs the old "bigger is better" — thumbs
+       actually prefer medium circles; oversized buttons eat screen. */
+    .mobile-deck .mc-dpad          { width: 156px !important; height: 156px !important; }
+    .mobile-deck .mc-dpad::before  { inset: 22px; }
+    .mobile-deck .mc-dpad .mc-btn  { width: 46px !important; height: 46px !important; font-size: 18px !important; }
+    .mobile-deck .mc-dpad .mc-up    { top: 10px;    left: 55px; }
+    .mobile-deck .mc-dpad .mc-down  { bottom: 10px; left: 55px; }
+    .mobile-deck .mc-dpad .mc-left  { top: 55px;    left: 10px; }
+    .mobile-deck .mc-dpad .mc-right { top: 55px;    right: 10px; }
+    .mc-actions {
+      grid-template-columns: 54px 54px 54px !important;
+      grid-template-rows: 54px 54px 54px !important;
+      width: 184px !important; height: 184px !important;
+      gap: 11px !important;
+    }
+    .mc-jump, .mc-defense-row .mc-basic, .mc-skill-grid .mc-btn {
+      width: 54px !important; height: 54px !important;
+    }
+    .mc-jump                    { font-size: 24px !important; }
+    .mc-defense-row .mc-basic   { font-size: 18px !important; width: 58px !important; height: 58px !important; }
+    .mc-skill-grid .mc-btn      { font-size: 15px !important; }
+    .mobile-ctrl .mc-pot,
+    .mobile-ctrl .mc-menu       { width: 44px !important; height: 44px !important; font-size: 17px !important; }
   }
 
   /* ---- LANDSCAPE LAYOUT -----------------------------------------
@@ -1467,7 +1497,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.16.1';
+const GAME_VERSION = 'v0.16.2';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -3213,13 +3243,23 @@ function _fitGameToViewport() {
   // doesn't reserve any layout space, so game canvas fills the whole
   // viewport. No deck subtraction.
   document.body.classList.toggle('mc-portrait', isTouchOrNarrow && !isLandscape);
-  // Allow a small amount of stretch on mobile — fills ~10% more screen
-  // without visible gameplay distortion.
-  const scaleBase = Math.min(availW / GAME_W, availH / GAME_H);
-  const scale = isTouchOrNarrow
-    ? Math.min(scaleBase * 1.04, availW / GAME_W, availH / GAME_H)
-    : scaleBase;
-  wrap.style.setProperty('--game-scale', scale.toFixed(4));
+  // Mobile landscape — STRETCH the game to fill the viewport completely
+  // (independent X/Y scales). Slight aspect-ratio distortion is accepted
+  // in exchange for using every pixel of the phone screen. Desktop and
+  // portrait still get the aspect-preserving minimum fit.
+  const sx = availW / GAME_W;
+  const sy = availH / GAME_H;
+  if (isTouchOrNarrow && isLandscape) {
+    wrap.style.setProperty('--game-scale',   Math.max(sx, sy).toFixed(4));
+    wrap.style.setProperty('--game-scale-x', sx.toFixed(4));
+    wrap.style.setProperty('--game-scale-y', sy.toFixed(4));
+  } else {
+    const base = Math.min(sx, sy);
+    const scale = isTouchOrNarrow ? Math.min(base * 1.04, sx, sy) : base;
+    wrap.style.setProperty('--game-scale',   scale.toFixed(4));
+    wrap.style.setProperty('--game-scale-x', scale.toFixed(4));
+    wrap.style.setProperty('--game-scale-y', scale.toFixed(4));
+  }
 
   // Portrait nag — encourage landscape on narrow phones.
   const isPortrait = !isLandscape;
