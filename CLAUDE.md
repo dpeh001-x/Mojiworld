@@ -1,5 +1,28 @@
 # LevelX — project conventions for Claude
 
+## Mobile UI branch (automated)
+
+The `mobile-ui-pass` branch has two extra hooks (scoped to that branch only — they no-op on other branches):
+
+- `.claude/hooks/mobile-pre-push.py` — PreToolUse on Bash. Before a `git push` runs, auto-fetches origin/main and rebases. Blocks the push with a clear conflict list if the rebase would collide with the collaborator's gameplay changes on main. Skipped if the working tree is dirty.
+- `.claude/hooks/mobile-zone-check.py` — PostToolUse on Edit/Write/MultiEdit of `maple_game.html`. Warns (never blocks) when an edit lands outside the mobile "safe zones" — contiguous line ranges where mobile code is isolated from gameplay code. Safe zones live inline in the script; keep them in sync when refactoring.
+
+### Mobile safe zones in `maple_game.html`
+
+These are the only line ranges where mobile work is conflict-resistant against ongoing gameplay edits on main:
+
+| Range | Content |
+| --- | --- |
+| 7–10 | mobile meta tags |
+| 33 | `touch-action: manipulation` on body |
+| 65–322 | `MOBILE CONTROLS (v5)` CSS |
+| 472–593 | `MOBILE TOUCH CONTROLS` CSS |
+| 1135–1155 | rotate-to-landscape nag + `#mobile-ctrl` HUD overlay |
+| 1464–1500 | `MOBILE CONTROL DECK` DOM |
+| 3317–3744 | `MOBILE / TOUCH CONTROLS` JS + `FULLSCREEN FIT` JS |
+
+Edits outside these ranges still work — the zone hook only warns; it never blocks. But expect a rebase conflict if the collaborator touched the same lines.
+
 ## Session start (automated)
 
 A `SessionStart` hook (`.claude/hooks/session-start.sh`, registered in `.claude/settings.json`) runs `git fetch origin` and fast-forwards / rebases the current branch onto `origin/main` before the session begins. This compensates for human collaborators pushing to `main` between sessions.
