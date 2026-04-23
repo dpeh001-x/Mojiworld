@@ -43,12 +43,12 @@ These are the only line ranges where mobile work is conflict-resistant against o
 | --- | --- |
 | 7–10 | mobile meta tags |
 | 33 | `touch-action: manipulation` on body |
-| 65–334 | `MOBILE CONTROLS (v5)` CSS |
-| 338–419 | `#rotate-nag` CSS + portrait-nag media query |
-| 484–605 | `MOBILE TOUCH CONTROLS` CSS |
-| 1147–1167 | rotate-to-landscape nag + `#mobile-ctrl` HUD overlay |
-| 1476–1512 | `MOBILE CONTROL DECK` DOM |
-| 3612–3797 | `MOBILE / TOUCH CONTROLS` JS + `FULLSCREEN FIT` JS |
+| 65–410 | `MOBILE CONTROLS (v5)` CSS |
+| 412–448 | `#rotate-nag` CSS + portrait-nag media query |
+| 561–694 | `MOBILE TOUCH CONTROLS` CSS |
+| 1343–1363 | rotate-to-landscape nag + `#mobile-ctrl` HUD overlay |
+| 1686–1714 | `MOBILE CONTROL DECK` DOM |
+| 3641–3888 | `MOBILE / TOUCH CONTROLS` JS + `FULLSCREEN FIT` JS |
 
 Edits outside these ranges still work — the zone hook only warns; it never blocks. But expect a rebase conflict if the collaborator touched the same lines.
 

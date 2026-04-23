@@ -141,13 +141,17 @@
         0 1px 2px rgba(0,0,0,0.3) !important;
     }
 
-    /* --- D-pad (transparent plate — just the 4 buttons visible) --- */
+    /* --- D-pad (smart floating pad — single touch target, thumb-angle
+           resolves to cardinal direction; drag-to-reverse works without
+           lifting finger. Visual 4-button layout preserved for clarity;
+           active direction mirrors the :active style via .mc-active.) --- */
     .mobile-deck .mc-dpad {
       position: fixed !important;
       width: 168px !important; height: 168px !important;
       background: none !important;
       box-shadow: none !important;
-      pointer-events: none;
+      pointer-events: auto;
+      touch-action: none;
     }
     .mobile-deck .mc-dpad::before {
       content: "";
@@ -162,7 +166,19 @@
       border-radius: 12px !important;
       font-size: 20px !important;
       position: absolute !important;
-      pointer-events: auto;
+      /* Buttons are visual-only; the .mc-dpad container captures input
+         so drags between arrows don't lose tracking. */
+      pointer-events: none;
+      transition: background 0.05s, transform 0.05s;
+    }
+    /* Mirror :active styling when the smart-dpad JS marks a direction
+       as the current resolved input (set from pointermove handler). */
+    .mobile-deck .mc-dpad .mc-btn.mc-active {
+      background: rgba(255,255,255,0.42) !important;
+      transform: scale(0.92) !important;
+      box-shadow:
+        inset 0 0 8px rgba(0,0,0,0.35),
+        0 1px 2px rgba(0,0,0,0.3) !important;
     }
     .mobile-deck .mc-dpad .mc-up    { top: 10px;    left: 59px; }
     .mobile-deck .mc-dpad .mc-down  { bottom: 10px; left: 59px; }
@@ -3882,19 +3898,82 @@ function _mkeyBind(btn) {
   btn.addEventListener('contextmenu', e => e.preventDefault());
 }
 
+// Smart floating d-pad — the .mc-dpad container is a single touch
+// target; the thumb's angle from center resolves to one of 4 cardinal
+// directions. Drag mid-press to reverse without lifting. Individual
+// arrow buttons inside are visual-only (pointer-events: none via CSS).
+function _wireSmartDpad() {
+  const pad = document.querySelector('#mobile-deck .mc-dpad');
+  if (!pad || pad._smartWired) return;
+  pad._smartWired = true;
+  const DEAD = 14; // dead-zone radius in px — thumb on center → no dir
+  const DIR_KEY = { up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright' };
+  const DIR_SEL = { up: '.mc-up', down: '.mc-down', left: '.mc-left', right: '.mc-right' };
+  let activeDir = null;
+  let activePointerId = null;
+  const resolve = (ev) => {
+    const r = pad.getBoundingClientRect();
+    const dx = ev.clientX - (r.left + r.width / 2);
+    const dy = ev.clientY - (r.top + r.height / 2);
+    if (Math.hypot(dx, dy) < DEAD) return null;
+    if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 'right' : 'left';
+    return dy > 0 ? 'down' : 'up';
+  };
+  const setDir = (next) => {
+    if (next === activeDir) return;
+    if (activeDir) {
+      _mkeyDispatch('keyup', DIR_KEY[activeDir]);
+      const b = pad.querySelector(DIR_SEL[activeDir]);
+      if (b) b.classList.remove('mc-active');
+    }
+    activeDir = next;
+    if (next) {
+      if (!audio.ctx) audio.init();
+      _mkeyDispatch('keydown', DIR_KEY[next]);
+      const b = pad.querySelector(DIR_SEL[next]);
+      if (b) b.classList.add('mc-active');
+    }
+  };
+  pad.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    activePointerId = ev.pointerId;
+    try { pad.setPointerCapture(activePointerId); } catch (e) {}
+    setDir(resolve(ev));
+  }, { passive: false });
+  pad.addEventListener('pointermove', (ev) => {
+    if (ev.pointerId !== activePointerId) return;
+    ev.preventDefault();
+    setDir(resolve(ev));
+  }, { passive: false });
+  const end = (ev) => {
+    if (ev.pointerId !== activePointerId) return;
+    ev.preventDefault();
+    setDir(null);
+    activePointerId = null;
+  };
+  pad.addEventListener('pointerup', end, { passive: false });
+  pad.addEventListener('pointercancel', end, { passive: false });
+  pad.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
 // Wire up all mobile buttons once DOM is ready.
 function _initMobileControls() {
   // Bind buttons in BOTH the in-wrapper HUD (pots) and the outside deck
-  // (D-pad + actions). Same dispatch path for all.
+  // (D-pad + actions). Same dispatch path for all — except d-pad arrow
+  // buttons, which are visual-only and handled by _wireSmartDpad.
   const roots = [
     document.getElementById('mobile-ctrl'),
     document.getElementById('mobile-deck'),
   ].filter(Boolean);
   for (const root of roots) {
-    root.querySelectorAll('.mc-btn').forEach(_mkeyBind);
+    root.querySelectorAll('.mc-btn').forEach(btn => {
+      if (btn.closest('.mc-dpad')) return;
+      _mkeyBind(btn);
+    });
     // Block page-scroll / iOS rubber-band on the control regions
     root.addEventListener('touchmove', e => { e.preventDefault(); }, { passive: false });
   }
+  _wireSmartDpad();
   const toggle = document.getElementById('mobile-ctrl-toggle');
   if (toggle) {
     toggle.onclick = () => {

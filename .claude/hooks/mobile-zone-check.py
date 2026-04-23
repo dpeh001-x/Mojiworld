@@ -18,12 +18,12 @@ import json, os, re, subprocess, sys
 SAFE_ZONES = [
     (7, 10),      # mobile meta tags
     (33, 33),     # body touch-action
-    (65, 334),    # MOBILE CONTROLS (v5) CSS
-    (338, 419),   # #rotate-nag CSS + nag-portrait media query
-    (484, 605),   # MOBILE TOUCH CONTROLS CSS
-    (1147, 1167), # rotate-to-landscape nag + #mobile-ctrl HUD
-    (1476, 1512), # MOBILE CONTROL DECK DOM
-    (3612, 3797), # MOBILE / TOUCH CONTROLS JS + FULLSCREEN FIT
+    (65, 410),    # MOBILE CONTROLS (v5) CSS
+    (412, 448),   # #rotate-nag CSS + nag-portrait media query
+    (561, 694),   # MOBILE TOUCH CONTROLS CSS
+    (1343, 1363), # rotate-to-landscape nag + #mobile-ctrl HUD DOM
+    (1686, 1714), # MOBILE CONTROL DECK DOM
+    (3641, 3888), # MOBILE / TOUCH CONTROLS JS + FULLSCREEN FIT
 ]
 SAFE_STR = ", ".join(f"{s}-{e}" if s != e else f"{s}" for s, e in SAFE_ZONES)
 
