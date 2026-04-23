@@ -23,6 +23,16 @@ These are the only line ranges where mobile work is conflict-resistant against o
 
 Edits outside these ranges still work — the zone hook only warns; it never blocks. But expect a rebase conflict if the collaborator touched the same lines.
 
+### Mobile preview link (durable)
+
+After any push that lands on `mobile-ui-pass`, always surface the playtest URL in the next user-facing reply:
+
+```
+▶ Mobile preview: https://raw.githack.com/dpeh001-x/LevelX/mobile-ui-pass/maple_game.html
+```
+
+Single-file static HTML + raw.githack serves the latest branch tip with the correct MIME, so the URL never changes — reviewers / iPhone testers bookmark once.
+
 ## Session start (automated)
 
 A `SessionStart` hook (`.claude/hooks/session-start.sh`, registered in `.claude/settings.json`) runs `git fetch origin` and fast-forwards / rebases the current branch onto `origin/main` before the session begins. This compensates for human collaborators pushing to `main` between sessions.
