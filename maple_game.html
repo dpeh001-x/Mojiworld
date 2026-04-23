@@ -1499,7 +1499,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.17.0';
+const GAME_VERSION = 'v0.17.1';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -2900,6 +2900,7 @@ const player = {
   cosmetics: { hair: {}, cape: {}, weapon: {} },
   attacking:false, attackTimer:0, attackCooldown:0,
   skillCooldowns: {}, skillPoints: 0,
+  _pendingTimeouts: [],  // ids queued by scheduleSkillTimer; cleared on death/respawn/mapChange
   // Attributes (AP) — Str/Vit/Agi/Int/Wis/Lck
   attrs: { str:5, vit:5, agi:5, int:5, wis:5, lck:5 },
   // Buffs: each is a timer (ms remaining)
@@ -3591,6 +3592,8 @@ const GAME_SAVE_FIELDS = [
 ];
 function saveState() {
   try {
+    // audio.muted is the single source of truth; sync the serialization mirror here
+    if (typeof audio !== 'undefined' && audio) game.muted = !!audio.muted;
     const pick = (obj, keys) => {
       const out = {};
       for (const k of keys) if (obj[k] !== undefined) out[k] = obj[k];
@@ -3618,6 +3621,23 @@ function loadState() {
     const maxHp = getMaxHp(), maxMp = getMaxMp();
     player.hp = (!player.hp || player.hp <= 0) ? maxHp : Math.min(player.hp, maxHp);
     player.mp = (!player.mp || player.mp <= 0) ? maxMp : Math.min(player.mp, maxMp);
+    // Wipe any persisted buff timers so save-then-reload can't extend a
+    // 15s Bloodlust into a permanent one. Same for transient skill state.
+    if (player.buffs) { for (const k in player.buffs) player.buffs[k] = 0; }
+    player._bloodstorm = 0;
+    player._bloodstormNextTick = 0;
+    player._aegis = null;
+    player._clones = null;
+    player._pendingTimeouts = [];
+    player.invulnerable = 0;
+    player.rushTimer = 0;
+    player.dodgeTimer = 0;
+    player.blockTimer = 0;
+    player.parryWindow = 0;
+    player.hitStun = 0;
+    player.attacking = false;
+    player.attackTimer = 0;
+    player.inRage = false;
     // Always land in town on continue (avoids reloading mid-boss into a killbox)
     loadMap('town', 300);
     game.currentMap = 'town';
@@ -3692,12 +3712,40 @@ const audio = {
     else if (kind === 'pickup')      { this.env(760, 0.06, 'triangle', 0.10, 180); }
   },
   toggleMute() {
+    // audio.muted is the sole source of truth; saveState() mirrors it into game.muted
     this.muted = !this.muted;
-    game.muted = this.muted;
     saveState();
     if (typeof showToast === 'function') showToast(this.muted ? '🔇 Muted' : '🔊 Unmuted', 'common');
   }
 };
+
+// =========================================================================
+// SKILL TIMER TRACKING — any deferred skill side-effect (damage ticks,
+// projectile volleys, tether bursts) should go through scheduleSkillTimer
+// so triggerDeath / respawnAtTown / loadMap can cancel the queue and stop
+// dead skills from continuing to apply effects after the player is gone.
+// =========================================================================
+function scheduleSkillTimer(fn, ms) {
+  const id = setTimeout(() => {
+    // Drop self from the tracked list before firing, so long chains of
+    // scheduled ticks don't grow the array indefinitely.
+    const arr = player._pendingTimeouts;
+    if (arr) {
+      const idx = arr.indexOf(id);
+      if (idx !== -1) arr.splice(idx, 1);
+    }
+    try { fn(); } catch (e) { /* swallow — a dead callback shouldn't crash the frame */ }
+  }, ms);
+  if (!player._pendingTimeouts) player._pendingTimeouts = [];
+  player._pendingTimeouts.push(id);
+  return id;
+}
+function cancelPendingSkillTimers() {
+  const arr = player._pendingTimeouts;
+  if (!arr || !arr.length) return;
+  for (const id of arr) clearTimeout(id);
+  arr.length = 0;
+}
 
 // =========================================================================
 // FEEL HELPER — rarity-keyed loot bursts + near-miss shimmer (Phase 3.3)
@@ -4210,6 +4258,9 @@ function _variedMapData(id) {
 function loadMap(id, entryX) {
   // Reset per-map milestone flags
   player._miracleUsedThisMap = false;
+  // Any pending skill timers belong to the previous map — cancel them so
+  // volleys / tether bursts / follow-up strikes don't bleed into the new map.
+  if (typeof cancelPendingSkillTimers === 'function') cancelPendingSkillTimers();
   // Track visited maps for the taxi system
   if (!game.visitedMaps) game.visitedMaps = {};
   game.visitedMaps[id] = true;
@@ -5344,6 +5395,14 @@ function updatePlayer(dt) {
 
 function triggerDeath() {
   game.dying = 1600;
+  // Clear transient combat state — otherwise hovering orbs, shadow clones,
+  // and bloodstorm shockwaves survive death and keep firing on the corpse
+  player._bloodstorm = 0;
+  player._bloodstormNextTick = 0;
+  player._aegis = null;
+  player._clones = null;
+  // Cancel any queued skill setTimeout callbacks
+  cancelPendingSkillTimers();
   const lostMesos = Math.floor(player.mesos * 0.5);
   game._pendingLoss = lostMesos;
   const ov = document.getElementById('death-overlay');
@@ -5378,6 +5437,13 @@ function respawnAtTown() {
   player.attacking = false;
   player.attackTimer = 0;
   player.inRage = false;
+  // Wipe all timed combat state; triggerDeath() already cleared these but
+  // respawn is also invoked on world resets where triggerDeath didn't run.
+  player._bloodstorm = 0;
+  player._bloodstormNextTick = 0;
+  player._aegis = null;
+  player._clones = null;
+  cancelPendingSkillTimers();
   for (const k in player.buffs) player.buffs[k] = 0;
   resetCombo();
   loadMap('town', 300);
@@ -6022,7 +6088,7 @@ const SKILL_FNS = {
       { yShift:  28, color: '#ffaa66', dmg: 2.2, dy:  3, stun: 500 },   // low + the big one
     ];
     LANES.forEach((lane, i) => {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
         addShake(i === 2 ? 7 : 3);
         flash(i === 2 ? 0.22 : 0.12);
@@ -6062,7 +6128,7 @@ const SKILL_FNS = {
     player.vy = -13;                  // strong leap up
     player.invulnerable = Math.max(player.invulnerable, 1100);
     // Play Earthbreaker sprite at impact (~1000ms after cast — matches slam timer)
-    setTimeout(() => spawnFx('warrior','earthbreaker',
+    scheduleSkillTimer(() => spawnFx('warrior','earthbreaker',
       player.x + player.w/2 + player.facing * 80, 478, player.facing,
       { scale: 0.55, frameMs: 70 }), 1000);
     // Launch burst — ground debris ring
@@ -6076,7 +6142,7 @@ const SKILL_FNS = {
     }
     // Apex hang — spin charge particles swirling around player while airborne
     for (let k = 0; k < 5; k++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
         // Continue floating near apex by capping vy
         if (player.vy > -1) player.vy = -1;
@@ -6096,13 +6162,13 @@ const SKILL_FNS = {
       }, 180 + k * 90);
     }
     // Dive phase — forceful slam downward
-    setTimeout(() => {
+    scheduleSkillTimer(() => {
       if (player.hp <= 0 || game.paused) return;
       player.vy = 22;                 // steeper slam
       flash(0.18);
       // Afterimages streaking down
       for (let k = 0; k < 4; k++) {
-        setTimeout(() => {
+        scheduleSkillTimer(() => {
           game.afterImages.push({
             x: player.x, y: player.y, facing: player.facing,
             state:'attack', life: 22, maxLife: 22,
@@ -6112,7 +6178,7 @@ const SKILL_FNS = {
       }
     }, 700);
     // Impact — wide front smash with triple shockwave ring burst
-    setTimeout(() => {
+    scheduleSkillTimer(() => {
       if (player.hp <= 0 || game.paused) return;
       addShake(18); flash(0.45); addHitStop(130);
       const reach = 220;
@@ -6146,7 +6212,7 @@ const SKILL_FNS = {
       // Triple radial shockwave ring, each a slightly different color/speed
       const ringColors = ['#ffffff', '#ffddaa', '#ffaa55'];
       for (let r = 0; r < 3; r++) {
-        setTimeout(() => {
+        scheduleSkillTimer(() => {
           for (let i = 0; i < 28; i++) {
             const a = (i / 28) * Math.PI * 2;
             game.particles.push({
@@ -6180,7 +6246,7 @@ const SKILL_FNS = {
     addShake(4); flash(0.15);
     // Fire trail DoT ticks during the dash
     for (let i = 0; i < 6; i++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
         const cx = player.x + player.w/2, cy = player.y + player.h/2;
         for (const m of game.monsters) {
@@ -6202,7 +6268,7 @@ const SKILL_FNS = {
     }
     // Afterimage contrail
     for (let k = 0; k < 5; k++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         game.afterImages.push({
           x: player.x, y: player.y, facing: player.facing,
           state:'attack', life: 16, maxLife: 16,
@@ -6276,7 +6342,7 @@ const SKILL_FNS = {
       { scale: 1.0, frameMs: 70, follow: player, followOffY: -8 });
     const rounds = 8;
     for (let i = 0; i < rounds; i++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
         performAround(150, 1.1, { color:'#ff4466', kb:5 });
         // Radial fire spokes
@@ -6320,7 +6386,7 @@ const SKILL_FNS = {
     // Three expanding light waves that damage enemies
     const cx = player.x + player.w/2, cy = player.y + player.h/2;
     for (let w = 0; w < 3; w++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
         for (const m of game.monsters) {
           if (m.currentHp <= 0) continue;
@@ -6387,7 +6453,7 @@ const SKILL_FNS = {
         { delay: 200, dmg: 2.4, crit: true,  col: '#ff3366' },    // finisher
       ];
       STABS.forEach((s, i) => {
-        setTimeout(() => {
+        scheduleSkillTimer(() => {
           if (tgt.currentHp <= 0 || player.hp <= 0 || game.paused) return;
           const base = Math.floor(getAtk() * s.dmg + Math.random() * 4);
           const dmg = Math.floor(base * (s.crit ? getCritDmg() : 1));
@@ -6417,7 +6483,7 @@ const SKILL_FNS = {
         { y: -22, dmg: 1.4, col: '#ffaaff' },
         { y:  22, dmg: 1.8, col: '#ff66cc' },
       ];
-      LANES.forEach((l, i) => setTimeout(() => {
+      LANES.forEach((l, i) => scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
         performMelee(160, l.dmg, { color: l.col, burst: 10, kb: 4, tall: 18, yShift: l.y });
       }, i * 85));
@@ -6497,7 +6563,7 @@ const SKILL_FNS = {
     // Drop a smoke cloud hazard at landing (ticks 3 damage waves)
     const cloudX = tx + player.w/2;
     for (let tick = 0; tick < 3; tick++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
         for (const m of game.monsters) {
           if (m.currentHp <= 0) continue;
@@ -6564,7 +6630,7 @@ const SKILL_FNS = {
     const pivotAt = 3;
     const stepMs = 36;                  // faster than before — ~220ms total
     for (let i = 0; i < strikes; i++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
         if (myId !== game._flurryId) return;   // cancelled by a newer Flurry
 
@@ -6721,7 +6787,7 @@ const SKILL_FNS = {
         });
       }
       addShake(5); flash(0.18);
-      setTimeout(() => doHit(n + 1), 140);
+      scheduleSkillTimer(() => doHit(n + 1), 140);
     };
     doHit(0);
     player.invulnerable = Math.max(player.invulnerable, 500);
@@ -6731,7 +6797,7 @@ const SKILL_FNS = {
     const radius = 260;
     const waves = 3;
     for (let w = 0; w < waves; w++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
         for (const m of game.monsters) {
           if (m.currentHp <= 0) continue;
@@ -6763,7 +6829,7 @@ const SKILL_FNS = {
     const cx = player.x + player.w/2, cy = player.y + player.h/2;
     spawnFx('thief','smokeScreen', cx, cy, player.facing, { scale: 0.9, frameMs: 80 });
     for (let tick = 0; tick < 4; tick++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         for (const m of game.monsters) {
           if (m.currentHp <= 0) continue;
           if (Math.abs((m.x + m.w/2) - cx) < 110 && Math.abs((m.y + m.h/2) - cy) < 80) {
@@ -6803,7 +6869,7 @@ const SKILL_FNS = {
     let stolen = 0;
     for (let i = 0; i < maxChain; i++) {
       const tgt = targets[i].m;
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused || tgt.currentHp <= 0) return;
         const oldX = player.x, oldY = player.y;
         player.x = tgt.x + (tgt.facing > 0 ? -player.w - 4 : tgt.w + 4);
@@ -6836,7 +6902,7 @@ const SKILL_FNS = {
         });
       }, i * 120);
     }
-    setTimeout(() => {
+    scheduleSkillTimer(() => {
       if (stolen > 0) {
         player.mesos += stolen;
         showToast(`Stole ${stolen}💰!`, 'legendary');
@@ -7213,7 +7279,7 @@ const SKILL_FNS = {
     const count = 22;
     const spread = 320;   // wider
     for (let i = 0; i < count; i++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0) return;
         const ox = cx + (Math.random() - 0.5) * spread;
         game.projectiles.push({
@@ -7236,7 +7302,7 @@ const SKILL_FNS = {
   elementalArrows: () => {
     const colors = ['#ff5522', '#88ccff', '#ffee44', '#aa55ff', '#55ffaa'];
     for (let i = 0; i < 10; i++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0) return;
         const c = colors[i % colors.length];
         game.projectiles.push({
@@ -7283,7 +7349,7 @@ const SKILL_FNS = {
     const strikes = 5;
     player.invulnerable = Math.max(player.invulnerable, 900);
     for (let i = 0; i < strikes; i++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
         const cx = player.x + player.w/2 + dir * (80 + i * 10);
         const cy = player.y + player.h/2;
@@ -7428,7 +7494,7 @@ const SKILL_FNS = {
     const totalSteps = 14;
     const hitIds = new Set();
     for (let i = 0; i < totalSteps; i++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
         const t = (i + 1) / totalSteps;
         player.x = startX + (destX - startX) * t;
@@ -7470,7 +7536,7 @@ const SKILL_FNS = {
     // Fire 7 daggers forward — each bounces up to 3 times off enemies/walls
     const shots = 7;
     for (let i = 0; i < shots; i++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
         const spread = (i - (shots - 1) / 2) * 0.06;
         game.projectiles.push({
@@ -7528,7 +7594,7 @@ const SKILL_FNS = {
 
   sage_meteorshower: () => {
     for (let i = 0; i < 5; i++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0) return;
         const ox = player.x + player.w/2 + player.facing * (80 + i * 70);
         game.hazards.push({
@@ -7547,7 +7613,7 @@ const SKILL_FNS = {
       { c:'#ffee44', s:'lightning',              m: 3.5 },
       { c:'#aa44cc', s:'void',                    m: 4.5 },
     ];
-    elems.forEach((e, i) => setTimeout(() => {
+    elems.forEach((e, i) => scheduleSkillTimer(() => {
       if (player.hp <= 0) return;
       game.projectiles.push({
         x: player.x + (player.facing > 0 ? player.w : -24), y: player.y + 18,
@@ -7624,7 +7690,7 @@ const SKILL_FNS = {
 
   ballista_volley: () => {
     for (let i = 0; i < 4; i++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0) return;
         game.projectiles.push({
           x: player.x + (player.facing > 0 ? player.w : -40),
@@ -7658,7 +7724,7 @@ const SKILL_FNS = {
     const targets = game.monsters.filter(m => m.currentHp > 0 &&
       Math.abs(m.x - player.x) < 900 && Math.abs(m.y - player.y) < 400);
     for (let i = 0; i < 5; i++) {
-      setTimeout(() => {
+      scheduleSkillTimer(() => {
         if (player.hp <= 0) return;
         const target = targets[i % Math.max(1, targets.length)] || null;
         game.projectiles.push({
@@ -9623,24 +9689,39 @@ const MAX_DMG_NUMBERS = 40;
 const MAX_AFTERIMAGES = 25;
 
 function updateParticles(dt) {
-  // Cap particle count — drop oldest if over budget
-  if (game.particles.length > MAX_PARTICLES) {
-    game.particles.splice(0, game.particles.length - MAX_PARTICLES);
+  // Advance + compact via write-index (O(n)) — replaces the old per-dead
+  // splice(i,1) that turned a 500-particle frame into O(n^2). Surviving
+  // particles shift down into slots vacated by expired ones in a single pass.
+  {
+    const arr = game.particles;
+    let w = 0;
+    for (let r = 0; r < arr.length; r++) {
+      const p = arr[r];
+      p.x += p.vx; p.y += p.vy; p.vy += (p.gravity != null ? p.gravity : 0.15); p.life -= 1;
+      if (p.life > 0) {
+        if (w !== r) arr[w] = p;
+        w++;
+      }
+    }
+    if (w !== arr.length) arr.length = w;
+    // Cap — drop oldest when over budget (splice is only paid in overflow frames)
+    if (arr.length > MAX_PARTICLES) arr.splice(0, arr.length - MAX_PARTICLES);
   }
-  for (let i = game.particles.length - 1; i >= 0; i--) {
-    const p = game.particles[i];
-    p.x += p.vx; p.y += p.vy; p.vy += (p.gravity != null ? p.gravity : 0.15); p.life -= 1;
-    if (p.life <= 0) game.particles.splice(i, 1);
-  }
-  if (game.damageNumbers.length > MAX_DMG_NUMBERS) {
-    game.damageNumbers.splice(0, game.damageNumbers.length - MAX_DMG_NUMBERS);
-  }
-  for (let i = game.damageNumbers.length - 1; i >= 0; i--) {
-    const d = game.damageNumbers[i];
-    d.y += d.vy; d.vy += 0.15;
-    if (d.vx) { d.x += d.vx; d.vx *= 0.92; }
-    d.life -= 1;
-    if (d.life <= 0) game.damageNumbers.splice(i, 1);
+  {
+    const arr = game.damageNumbers;
+    let w = 0;
+    for (let r = 0; r < arr.length; r++) {
+      const d = arr[r];
+      d.y += d.vy; d.vy += 0.15;
+      if (d.vx) { d.x += d.vx; d.vx *= 0.92; }
+      d.life -= 1;
+      if (d.life > 0) {
+        if (w !== r) arr[w] = d;
+        w++;
+      }
+    }
+    if (w !== arr.length) arr.length = w;
+    if (arr.length > MAX_DMG_NUMBERS) arr.splice(0, arr.length - MAX_DMG_NUMBERS);
   }
   if (game.afterImages.length > MAX_AFTERIMAGES) {
     game.afterImages.splice(0, game.afterImages.length - MAX_AFTERIMAGES);
