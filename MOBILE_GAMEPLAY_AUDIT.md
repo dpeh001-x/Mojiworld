@@ -184,13 +184,71 @@ Each item ships as an atomic commit. All land inside mobile safe zones.
 
 ## Phase 2 — Structural additions (2–4hr)
 
-_Filled in below._
+### P2.1 · Unified "Next Goal" mobile HUD widget 🟢 M
+- **Psychology levers:** Progress overview (+4), Completion bias (+2), Near-miss (+2), Loss aversion (+1)
+- **What:** A single 28-40px pill in top-right stack that cycles (every ~5s) through the player's nearest milestone: next job/master level, next achievement (by lowest remaining %), next cosmetic unlock, nearest daily quest goal, nearest skill-tree unlock. Each entry shows "→ Target (X of Y)".
+- **Implementation:** New `<div id="goal-chip">` in DOM safe zone 1147–1167. CSS in safe zone 65–334. JS tick in safe zone 3612–3797 reads existing state (`player.level`, `player.dailyState`, `game.achievements`, `game.bestiary`) — pure read layer, no writes.
+- **Data sources (all existing, no save migration):**
+  - Job/master: `player.level` vs `JOB_ADVANCE_LEVEL` / `MASTER_ADVANCE_LEVEL`.
+  - Achievements: `game.achievements` vs `ACHIEVEMENTS` definitions.
+  - Bestiary cosmetics: `game.bestiary` vs `COSMETICS` (lines 11843-11862).
+  - Daily: `player.dailyState`.
+- **Why it works:** Agent B's biggest gap. Pulls the 4 weakest levers simultaneously. Highest-ROI single item in the audit.
+
+### P2.2 · Achievement / bestiary progress in-line on kill 🟢 M
+- **Psychology levers:** Completion bias (+3), Near-miss (+2)
+- **What:** After monster death, peek ahead in the achievement + bestiary tables to see if this kill contributed to a goal within 5 of completion. If yes, subtle toast: `'🦂 9/10 — one more for Ember Cape!'`
+- **Implementation:** MutationObserver on `game.bestiary` counts (or periodic delta-check on a mobile JS tick, polling once per second). All reads, no writes.
+- **Anchor:** `game.bestiary` (line 11868–11871), `trackPickup()` (11867), `COSMETICS` definitions (11843–11862).
+- **Note:** If bestiary updates are sync-only via gameplay code, a periodic delta-detect loop in mobile safe zone is equivalent — uses 0% CPU at idle.
+
+### P2.3 · First-run mobile coach marks 🟢 M
+- **Psychology levers:** Friction reduction, Onboarding conversion
+- **What:** After the class-select modal closes for the first time, overlay 3 pointer arrows (one per mobile button cluster) with labels — "← move", "attack", "menu ↑". Each auto-dismisses on first relevant button press or 5s timeout. Never shows again (localStorage flag).
+- **Implementation:** Mobile-only DOM in safe zone 1147–1167; CSS in safe zone 65–334 or 338–419; JS listener in safe zone 3612–3797.
+- **Anchor:** Existing `body.forced-modal` observer can be extended — detect transition-off on `#class-select-modal` and fire once if `!localStorage.getItem('_mobileCoachSeen')`.
+- **Why it works:** Agent C estimates ~10% of new mobile players bounce before learning controls.
+
+### P2.4 · Streak-at-risk notification + countdown 🟡 M
+- **Psychology levers:** Loss aversion (+3), FOMO (+3), Re-engagement (+3)
+- **What:** Combines P1.5 (countdown) + P1.8 (at-risk toast) + adds: if browser `Notification` permission is granted, fire a push ~1h before UTC midnight when `player.dailyState.streak > 2`. Escalate from passive banner → pulsing banner → notification → (when reset imminent) full-screen overlay on next load.
+- **Implementation:** `Notification.requestPermission()` gated behind an explicit opt-in button we add to the daily banner. All timing data already in save. Persistent timer via `setInterval` in mobile init.
+- **Note:** Browser notification API is fully standards-based, no backend needed.
+
+### P2.5 · Haptic + audio cue on silent pickups 🟡 M
+- **Psychology levers:** Variable-ratio (+2), Flow (+1)
+- **What:** MutationObserver on boon inventory array; when a new entry appears, fire `navigator.vibrate(40)` + `audio.play('pickup')` (reuse existing sound). Catches G7 (silent pickups).
+- **Implementation:** Mobile safe zone JS.
+- **Reuse:** `audio.play` exists globally.
+
+### P2.6 · Progressive-Web-App manifest + install prompt 🟢 M
+- **Psychology levers:** Re-engagement (+4)
+- **What:** Add `manifest.webmanifest` (new file at repo root) + `<link rel="manifest">` in `<head>`. Register a minimal service worker (in-repo file) that caches the single HTML and enables home-screen install. No offline-game support initially — just the install prompt.
+- **Implementation:** New files; `<head>` edit at line 5-15 (mobile meta-tags safe zone). Service worker script referenced by `<script>` tag that could sit at end-of-body.
+- **Note:** iOS Safari doesn't auto-prompt, but "Add to Home Screen" from the share sheet will produce a standalone PWA. Android Chrome auto-prompts.
+- **Scope check:** `<head>` edits around lines 5-15 are inside the mobile meta-tag safe zone 7-10. Safe.
 
 ---
 
 ## Phase 3 — Big bets (6hr+)
 
-_Filled in below._
+### P3.1 · Full mobile-only "Companion Panel" 🟢 L
+- **Psychology levers:** Progress overview (+4), Endowment (+2), Identity (+2), Completion bias (+3)
+- **What:** A slide-up panel (accessed by tapping a new ☰ button in the mobile HUD) that consolidates all progression on one screen: character name + look, level + XP, skill points waiting, next advancement ETA, 3 nearest achievements, 3 nearest cosmetic unlocks, daily quest + streak + countdown, recent PBs (combo, tower, super-boss clear time), cosmetics owned.
+- **Implementation:** New DOM node in safe zone 1476–1512, full-width slide-up animation. Reads every existing state field. No writes.
+- **Why it works:** Collapses 5 different menu modals into a single thumb-friendly view. Desktop doesn't need it — menu keys are fine there.
+
+### P3.2 · Persistent mobile meta-progression mini-dashboard via tab title 🟡 L
+- **Psychology levers:** Re-engagement (+3), Social proof (+1)
+- **What:** A rotating tab-title system that periodically updates to show the most urgent/rewarding pending action: `⭐ Lv12` → `✨ +1 SP ready` → `🔥 3-day streak` → `⚔ Boss ready` → cycle. Uses `document.visibilityState === 'hidden'` to switch into "attention mode" with animated ellipsis.
+- **Implementation:** ~80 lines of JS in mobile safe zone. `visibilitychange` listener + `setInterval` for title rotation while hidden. Dataset of message rules (what to show when).
+- **Why it works:** Most mobile players have LevelX in a background tab after a session. This is the single re-engagement surface that works on iOS Safari without notification permission.
+
+### P3.3 · Mobile-native replay / share card 🟡 L
+- **Psychology levers:** Social proof (+3), Identity (+2)
+- **What:** On boss kill or new PB, capture a 1600x900 canvas snapshot via `canvas.toBlob`, overlay the hero name + stats + kill time, offer native share sheet via `navigator.share({ files: [...] })`. On desktop / unsupported browsers, just download.
+- **Implementation:** New canvas composer function in mobile safe zone, triggered by hooking existing "new record" toast events via MutationObserver. No gameplay-code edits.
+- **Why it works:** Free social proof — every shared card is organic acquisition.
 
 ---
 
