@@ -424,6 +424,15 @@
       font-size: 10px !important;
       padding: 6px 9px !important;
     }
+    /* P1.8 — 3-second pulse on the daily banner when streak is
+       at risk (less than 2h until UTC midnight, unclaimed). */
+    #daily-banner.daily-pulse {
+      animation: daily-pulse 0.6s ease-in-out 5;
+    }
+    @keyframes daily-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255,170,80,0);  border-color: #776;   }
+      50%      { box-shadow: 0 0 14px 2px rgba(255,170,80,0.7); border-color: #ffaa55; }
+    }
     /* P1.4 — near-level XP pulse. .xp-near toggled from JS when
        player.exp / player.expToNext > 0.9 so the bar draws the eye
        in the last stretch of each level. Pure CSS glow loop; no
@@ -4158,6 +4167,45 @@ window.addEventListener('load', _fitGameToViewport);
       lastSeenLevel = null;
     }
   });
+})();
+
+// =================================================================
+// P1.8 — Streak-at-risk toast on load. If the player has a streak
+// of 2+ that isn't already claimed today and less than 2 hours
+// remain before UTC midnight, fire a warning toast and pulse the
+// daily banner. Turns passive streaks into loss-aversion cues
+// (~2× the behavioural pull of gain).
+(function _wireStreakAtRisk() {
+  const msUntilNextUtcMidnight = () => {
+    const now = new Date();
+    const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+    return next - now.getTime();
+  };
+  const check = () => {
+    if (typeof game === 'undefined' || !game || !game.dailyState) return false;
+    const d = game.dailyState;
+    if ((d.streak | 0) < 2) return true;  // no streak to protect
+    if (d.claimed) return true;           // already safe today
+    const ms = msUntilNextUtcMidnight();
+    if (ms <= 0 || ms >= 2 * 3600 * 1000) return true;
+    const h = Math.max(1, Math.ceil(ms / 3600000));
+    if (typeof showToast === 'function') {
+      showToast('⚠ ' + h + 'h left to keep your ' + d.streak + '-day streak', 'rare');
+    }
+    const banner = document.getElementById('daily-banner');
+    if (banner) {
+      banner.classList.add('daily-pulse');
+      setTimeout(() => banner.classList.remove('daily-pulse'), 3100);
+    }
+    return true;
+  };
+  // Save load is async-ish. Poll every 500ms for up to 5s waiting for
+  // game.dailyState to populate; bail silently if it never does.
+  let tries = 0;
+  const iv = setInterval(() => {
+    tries++;
+    if (check() || tries >= 10) clearInterval(iv);
+  }, 500);
 })();
 
 // =================================================================
