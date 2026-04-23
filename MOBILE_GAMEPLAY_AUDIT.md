@@ -65,7 +65,41 @@ Scores reflect the **mobile player's** experience, not desktop. A category scori
 
 ## Cross-confirmed gaps
 
-_Filled in below._
+Gaps flagged independently by ≥2 agents. Anchored by file + line in `maple_game.html`.
+
+### G1 · Level-up is visually loud, but the *skill-point gain* is silent
+- Agents A + C agree: `gainExp()` at `maple_game.html:10706–10744` spawns 30 particles + DOM `.level-up` element + `audio.play('levelup')`, but **no toast** for "+1 Skill Point" (line 10724: `player.skillPoints += 1`).
+- Mobile impact: the player sees fireworks but doesn't learn they can now spend a point. Menu access is a 2-tap cost they won't make without a prompt.
+
+### G2 · XP bar fills silently between kills
+- Agent A: `killMonster` (line 10550–10636) adds XP with zero dedicated feedback — only the HUD bar increments.
+- On a 320px iPhone viewport the bar is ~200px wide; incremental gains are sub-pixel for several kills.
+
+### G3 · Particles/damage-numbers routinely spawn under the mobile button clusters
+- Agent A: monster death → 15 particles at `m.x + m.w/2, m.y + m.h/2`. Damage numbers at `player.x + 14, player.y - 14`.
+- D-pad zone: canvas X 0–156, Y 404–560. Face buttons: X 776–960, Y 376–560.
+- Combat commonly happens in the bottom quadrants; feedback vanishes behind translucent button overlays.
+
+### G4 · Progression systems are entirely menu-gated on mobile
+- Agent B: job advancement countdown (invisible pre-Lv 25), master/prestige race at 50, skill-tree AP-available cue, milestone unlocks on stat thresholds, bestiary cosmetic-unlock counters, achievement progress — **none** surface a "next up" affordance on the HUD.
+- Agent C adds: daily banner (`#daily-banner` line 1577) defaults to `display:none`, so the *only* progression actively surfaced on mobile fails to show unless toggled.
+
+### G5 · No re-engagement layer exists
+- Agent C: static `<title>` (line 5) never updates. No `manifest.json`, no service worker, no `navigator.serviceWorker.register()`, no `Notification` permission flow.
+- Rotate-nag dismissal isn't localStorage-persisted (line 3767–3769) — it resets every refresh.
+- Result: a closed tab is a lost player.
+
+### G6 · Death overlay is passive and unresponsive
+- Agent C: `#death-overlay` (lines 1030–1066) has `pointer-events: none`, no respawn button, 1.6s fade.
+- Agents A + C flag this as an anti-flow moment on mobile where input feels frozen.
+
+### G7 · Silent pickups
+- Agent A: powerup orbs (`spawnPowerupOrb:5152`) play no sound and fire no toast on collection — the player only learns they picked something up by opening the boons menu.
+- Enhancement *failure* (line 11661) fires a plain toast with no rarity color — visually identical to any minor notification.
+
+### G8 · Daily reset has no visible countdown
+- Agents B + C: `dailyIndex()` at line 4595 uses `Math.floor(Date.now() / 86400000)` — UTC midnight boundary. Nothing on mobile HUD tells the player when it flips.
+- Combined with G5: a player with a 3-day streak has zero mobile signal of "come back in 4h to preserve it."
 
 ---
 
