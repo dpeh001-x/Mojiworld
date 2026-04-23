@@ -47,6 +47,13 @@
     pointer-events: none;
     z-index: 41;
   }
+  .swatch-row { display:inline-flex; gap:4px; }
+  .swatch-row .sw {
+    width:22px; height:22px; border-radius:4px;
+    border:2px solid transparent; cursor:pointer;
+    image-rendering:pixelated;
+  }
+  .swatch-row .sw.sel { border-color:#ffdd66; box-shadow:0 0 4px #ffcc44; }
   canvas {
     display: block;
     image-rendering: pixelated;
@@ -114,6 +121,19 @@
     font-size: 15px; font-weight: bold; border: 1px solid #8866aa;
     text-shadow: 1px 1px 2px #000;
   }
+  #tower-hud {
+    position: absolute; top: 46px; left: 50%; transform: translateX(-50%);
+    background: linear-gradient(135deg, rgba(40,20,70,0.9), rgba(80,30,120,0.85));
+    padding: 6px 16px; border-radius: 12px;
+    font-size: 12px; border: 1px solid #aa77ee;
+    text-shadow: 1px 1px 2px #000;
+    box-shadow: 0 0 10px rgba(170,120,255,0.4);
+    white-space: nowrap;
+  }
+  #tower-hud .floor { color: #ffee88; font-weight: bold; font-size: 14px; }
+  #tower-hud .mod   { color: #ff99cc; font-weight: bold; }
+  #tower-hud .best  { color: #88ddff; font-size: 11px; margin-left: 8px; }
+  #tower-hud .waves { color: #ddd; margin-left: 8px; }
 
   #controls {
     position: absolute; bottom: 84px; left: 10px;
@@ -632,6 +652,8 @@
 
   <div id="map-label">Everdawn Village</div>
 
+  <div id="tower-hud" style="display:none"></div>
+
   <div id="version-tag" title="LevelX build version — updates with every release">v0.4.0</div>
 
   <div id="minimap">
@@ -757,16 +779,36 @@
   </div>
 
   <div id="class-select-modal" class="modal-overlay">
-    <div class="modal" style="min-width:720px;">
+    <div class="modal" style="min-width:760px;">
       <h2>Create Your Hero</h2>
       <div style="color:#bbb; text-align:center; font-size:12px; margin-bottom:10px;">
-        Pick gender and class — you'll advance to a job at level 10
+        Name, look, and class — you'll advance to a job at level 10
       </div>
-      <div style="text-align:center; margin-bottom:12px;">
-        <div style="font-size:12px; color:#ffcc88; margin-bottom:6px;">Gender</div>
+      <div style="text-align:center; margin-bottom:10px;">
+        <div style="font-size:12px; color:#ffcc88; margin-bottom:4px;">Name</div>
+        <input id="hero-name-input" maxlength="14" placeholder="Hero"
+          style="padding:6px 10px; width:200px; text-align:center; font-size:14px;
+                 background:rgba(0,0,0,0.45); color:#ffeabf; border:1px solid #a98; border-radius:4px;">
+      </div>
+      <div style="text-align:center; margin-bottom:8px;">
+        <div style="font-size:12px; color:#ffcc88; margin-bottom:4px;">Gender</div>
         <div id="gender-row" style="display:inline-flex; gap:10px;">
           <button class="gender-btn selected" data-gender="male">♂ Male</button>
           <button class="gender-btn" data-gender="female">♀ Female</button>
+        </div>
+      </div>
+      <div style="display:flex; gap:28px; justify-content:center; margin-bottom:10px; font-size:11px;">
+        <div>
+          <div style="color:#ffcc88; margin-bottom:3px;">Hair</div>
+          <div id="swatch-hair" class="swatch-row"></div>
+        </div>
+        <div>
+          <div style="color:#ffcc88; margin-bottom:3px;">Skin</div>
+          <div id="swatch-skin" class="swatch-row"></div>
+        </div>
+        <div>
+          <div style="color:#ffcc88; margin-bottom:3px;">Eye</div>
+          <div id="swatch-eye" class="swatch-row"></div>
         </div>
       </div>
       <div id="class-options" style="display:flex; gap:10px;"></div>
@@ -917,7 +959,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.11.1';
+const GAME_VERSION = 'v0.12.1';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -962,6 +1004,12 @@ const game = {
   dailyState: null,
   prestige: null,
   muted: false,
+  // Bestiary: { [monsterType]: killCount }. Drives cosmetic unlocks.
+  bestiary: {},
+  // Tower mode persistent best floor
+  towerBestFloor: 0,
+  // Tower runtime state (not persisted)
+  tower: null,
 };
 
 // =========================================================================
@@ -970,78 +1018,79 @@ const game = {
 // Skill definitions. cls = class, job = required advancement, slot = key binding (j/k/l/u/i/o/h)
 const SKILLS = {
   // ============ WARRIOR ============
-  slash:        { name:'Slash',          icon:'🗡️', cls:'warrior', slot:'d', mp:0,  cd:380,  desc:'Heavy sword sweep — slow but long reach.' },
-  powerStrike:  { name:'Power Strike',   icon:'💥', cls:'warrior', slot:'s', mp:10, cd:820,  desc:'Heavy cleave. 220% ATK + stun.' },
-  groundSlam:   { name:'Ground Slam',    icon:'💢', cls:'warrior', slot:'a', mp:14, cd:1100, desc:'Shockwave AoE all around you.' },
-  rush:         { name:'Rush',           icon:'🏃', cls:'warrior', slot:'e', mp:12, cd:1100, desc:'Dash forward, pierce enemies.' },
-  warCry:       { name:'War Cry',        icon:'📣', cls:'warrior', slot:'w', mp:18, cd:8000, desc:'+50% ATK for 6s. Battle roar.' },
+  slash:        { name:'Slash',          icon:'🗡️', cls:'warrior', slot:'d', mp:0,  cd:360,  desc:'Heavy sword sweep — slow but long reach.' },
+  powerStrike:  { name:'Power Strike',   icon:'💥', cls:'warrior', slot:'s', mp:10, cd:720,  desc:'Heavy cleave. 220% ATK + stun.' },
+  groundSlam:   { name:'Ground Slam',    icon:'💢', cls:'warrior', slot:'a', mp:14, cd:1000, desc:'Shockwave AoE all around you.' },
+  rush:         { name:'Rush',           icon:'🏃', cls:'warrior', slot:'e', mp:12, cd:900,  desc:'Dash forward, pierce enemies.' },
+  warCry:       { name:'War Cry',        icon:'📣', cls:'warrior', slot:'w', mp:18, cd:7000, desc:'+50% ATK for 6s. Battle roar.' },
   // Berserker
-  bloodlust:    { name:'Bloodlust',      icon:'🩸', cls:'warrior', job:'berserker', slot:'q', mp:22, cd:6000,  desc:'Lifesteal + speed for 6s.' },
-  rampage:      { name:'Rampage',        icon:'🌪️', cls:'warrior', job:'berserker', slot:'c', mp:45, cd:11000, desc:'Ultimate: 3s spinning AoE.' },
+  bloodlust:    { name:'Bloodlust',      icon:'🩸', cls:'warrior', job:'berserker', slot:'q', mp:22, cd:5500,  desc:'Lifesteal + speed for 6s.' },
+  rampage:      { name:'Rampage',        icon:'🌪️', cls:'warrior', job:'berserker', slot:'c', mp:45, cd:10000, desc:'Ultimate: 3s spinning AoE.' },
   // Knight
-  guardian:     { name:'Guardian',       icon:'🛡️', cls:'warrior', job:'knight',    slot:'q', mp:18, cd:6000,  desc:'80% damage reduction 5s.' },
-  holyShield:   { name:'Holy Shield',    icon:'✨', cls:'warrior', job:'knight',    slot:'c', mp:45, cd:12000, desc:'Ultimate: Invuln + reflect 4s.' },
+  guardian:     { name:'Guardian',       icon:'🛡️', cls:'warrior', job:'knight',    slot:'q', mp:18, cd:5500,  desc:'80% damage reduction 5s.' },
+  holyShield:   { name:'Holy Shield',    icon:'✨', cls:'warrior', job:'knight',    slot:'c', mp:45, cd:11000, desc:'Ultimate: Invuln + reflect 4s.' },
 
   // ============ ROGUE ============
-  stab:         { name:'Stab',           icon:'🔪', cls:'rogue', slot:'d', mp:0,  cd:170,  desc:'Lightning dagger thrust — faster than most.' },
-  backstab:     { name:'Backstab',       icon:'🩸', cls:'rogue', slot:'s', mp:8,  cd:780,  desc:'2× damage from behind.' },
-  throwDagger:  { name:'Throw Dagger',   icon:'🎯', cls:'rogue', slot:'a', mp:6,  cd:800,  desc:'Fast dagger projectile.' },
-  smokeDash:    { name:'Smoke Dash',     icon:'💨', cls:'rogue', slot:'e', mp:14, cd:900,  desc:'Blink forward, strike along path.' },
-  flurry:       { name:'Flurry',         icon:'🌀', cls:'rogue', slot:'w', mp:18, cd:1000, desc:'Lightning V-slash — cancels any skill.' },
+  stab:         { name:'Stab',           icon:'🔪', cls:'rogue', slot:'d', mp:0,  cd:150,  desc:'Lightning dagger thrust — faster than most.' },
+  backstab:     { name:'Backstab',       icon:'🩸', cls:'rogue', slot:'s', mp:8,  cd:650,  desc:'2× damage from behind.' },
+  throwDagger:  { name:'Throw Dagger',   icon:'🎯', cls:'rogue', slot:'a', mp:6,  cd:650,  desc:'Fast dagger projectile.' },
+  smokeDash:    { name:'Smoke Dash',     icon:'💨', cls:'rogue', slot:'e', mp:14, cd:750,  desc:'Blink forward, strike along path.' },
+  flurry:       { name:'Flurry',         icon:'🌀', cls:'rogue', slot:'w', mp:18, cd:900,  desc:'Lightning V-slash — cancels any skill.' },
   // Ninja
-  shadowStrike: { name:'Shadow Strike',  icon:'🥷', cls:'rogue', job:'ninja',    slot:'q', mp:22, cd:4000,  desc:'Teleport behind target, guaranteed crit.' },
-  deathBlossom: { name:'Death Blossom',  icon:'🌸', cls:'rogue', job:'ninja',    slot:'c', mp:50, cd:11000, desc:'Ultimate: Strike all nearby enemies.' },
+  shadowStrike: { name:'Shadow Strike',  icon:'🥷', cls:'rogue', job:'ninja',    slot:'q', mp:22, cd:3500,  desc:'Teleport behind target, guaranteed crit.' },
+  deathBlossom: { name:'Death Blossom',  icon:'🌸', cls:'rogue', job:'ninja',    slot:'c', mp:50, cd:10000, desc:'Ultimate: Strike all nearby enemies.' },
   // Assassin
-  smokeBomb:    { name:'Smoke Bomb',     icon:'☁️', cls:'rogue', job:'assassin', slot:'q', mp:20, cd:5500,  desc:'Invuln + heal 30% for 3s.' },
-  sleight:      { name:'Sleight of Hand',icon:'🪄', cls:'rogue', job:'assassin', slot:'c', mp:35, cd:9000,  desc:'Ultimate: Steal Lumens & buff self.' },
+  smokeBomb:    { name:'Smoke Bomb',     icon:'☁️', cls:'rogue', job:'assassin', slot:'q', mp:20, cd:5000,  desc:'Invuln + heal 30% for 3s.' },
+  sleight:      { name:'Sleight of Hand',icon:'🪄', cls:'rogue', job:'assassin', slot:'c', mp:35, cd:8500,  desc:'Ultimate: Steal Lumens & buff self.' },
 
   // ============ MAGE ============
-  magicBolt:    { name:'Magic Bolt',     icon:'✨', cls:'mage', slot:'d', mp:4,  cd:230,  desc:'Arcane projectile — short recast.' },
-  fireball:     { name:'Fireball',       icon:'🔥', cls:'mage', slot:'s', mp:14, cd:920,  desc:'Explodes on impact.' },
-  iceSpike:     { name:'Ice Spike',      icon:'❄️', cls:'mage', slot:'a', mp:12, cd:700,  desc:'Freezes target on hit.' },
-  blink:        { name:'Blink',          icon:'🌀', cls:'mage', slot:'e', mp:10, cd:750,  desc:'Short teleport in facing direction.' },
-  arcaneBurst:  { name:'Arcane Burst',   icon:'💥', cls:'mage', slot:'w', mp:22, cd:1600, desc:'AoE explosion around you.' },
+  magicBolt:    { name:'Magic Bolt',     icon:'✨', cls:'mage', slot:'d', mp:4,  cd:210,  desc:'Arcane projectile — short recast.' },
+  fireball:     { name:'Fireball',       icon:'🔥', cls:'mage', slot:'s', mp:14, cd:800,  desc:'Explodes on impact.' },
+  iceSpike:     { name:'Ice Spike',      icon:'❄️', cls:'mage', slot:'a', mp:12, cd:650,  desc:'Freezes target on hit.' },
+  blink:        { name:'Blink',          icon:'🌀', cls:'mage', slot:'e', mp:10, cd:650,  desc:'Short teleport in facing direction.' },
+  arcaneBurst:  { name:'Arcane Burst',   icon:'💥', cls:'mage', slot:'w', mp:22, cd:1400, desc:'AoE explosion around you.' },
   // Archmage
-  meteor:       { name:'Meteor',         icon:'☄️', cls:'mage', job:'archmage', slot:'q', mp:35, cd:4000,  desc:'Call a meteor from above.' },
-  elemental:    { name:'Elemental Convergence', icon:'🌟', cls:'mage', job:'archmage', slot:'c', mp:55, cd:12000, desc:'Ultimate: Fire+Ice+Lightning chain.' },
+  meteor:       { name:'Meteor',         icon:'☄️', cls:'mage', job:'archmage', slot:'q', mp:35, cd:3500,  desc:'Call a meteor from above.' },
+  elemental:    { name:'Elemental Convergence', icon:'🌟', cls:'mage', job:'archmage', slot:'c', mp:55, cd:10500, desc:'Ultimate: Fire+Ice+Lightning chain.' },
   // Warlock
-  soulSiphon:   { name:'Soul Siphon',    icon:'💀', cls:'mage', job:'warlock',  slot:'q', mp:12, cd:4000,  desc:'Drain HP from enemies → MP.' },
-  darkPulse:    { name:'Dark Pulse',     icon:'🖤', cls:'mage', job:'warlock',  slot:'c', mp:45, cd:10000, desc:'Ultimate: Large AoE with full lifesteal.' },
+  soulSiphon:   { name:'Soul Siphon',    icon:'💀', cls:'mage', job:'warlock',  slot:'q', mp:12, cd:3500,  desc:'Drain HP from enemies → MP.' },
+  darkPulse:    { name:'Dark Pulse',     icon:'🖤', cls:'mage', job:'warlock',  slot:'c', mp:45, cd:9500,  desc:'Ultimate: Large AoE with full lifesteal.' },
 
   // ============ ARCHER ============
-  arrowShot:    { name:'Arrow Shot',     icon:'🏹', cls:'archer', slot:'d', mp:2,  cd:290,  desc:'Fire an arrow.' },
-  multiShot:    { name:'Multi Shot',     icon:'🎋', cls:'archer', slot:'s', mp:10, cd:820,  desc:'3 arrow spread.' },
-  chargedShot:  { name:'Charged Shot',   icon:'⚡', cls:'archer', slot:'a', mp:14, cd:1100, desc:'Big piercing arrow.' },
-  evadeRoll:    { name:'Evade Roll',     icon:'🤸', cls:'archer', slot:'e', mp:6,  cd:900,  desc:'Back flip + 2 shot.' },
-  eagleEye:     { name:'Eagle Eye',      icon:'🦅', cls:'archer', slot:'w', mp:16, cd:8000, desc:'+40% crit chance for 8s.' },
+  arrowShot:    { name:'Arrow Shot',     icon:'🏹', cls:'archer', slot:'d', mp:2,  cd:260,  desc:'Fire an arrow.' },
+  multiShot:    { name:'Multi Shot',     icon:'🎋', cls:'archer', slot:'s', mp:10, cd:700,  desc:'3 arrow spread.' },
+  chargedShot:  { name:'Charged Shot',   icon:'⚡', cls:'archer', slot:'a', mp:14, cd:950,  desc:'Big piercing arrow.' },
+  evadeRoll:    { name:'Evade Roll',     icon:'🤸', cls:'archer', slot:'e', mp:6,  cd:750,  desc:'Back flip + 2 shot.' },
+  eagleEye:     { name:'Eagle Eye',      icon:'🦅', cls:'archer', slot:'w', mp:16, cd:7000, desc:'+40% crit chance for 8s.' },
   // Sniper
-  deadeye:      { name:'Deadeye',        icon:'🎯', cls:'archer', job:'sniper', slot:'q', mp:22, cd:4000,  desc:'Guaranteed crit piercing shot.' },
-  arrowRain:    { name:'Arrow Rain',     icon:'🌧️', cls:'archer', job:'sniper', slot:'c', mp:42, cd:9500,  desc:'Ultimate: Rain arrows over an area.' },
+  deadeye:      { name:'Deadeye',        icon:'🎯', cls:'archer', job:'sniper', slot:'q', mp:22, cd:3500,  desc:'Guaranteed crit piercing shot.' },
+  snipe_railgun:{ name:'Railshot',       icon:'💠', cls:'archer', job:'sniper', slot:'s', mp:16, cd:1300, desc:'Instant piercing rail that hits every foe in a flat line; each consecutive hit empowers the next.' },
+  arrowRain:    { name:'Arrow Rain',     icon:'🌧️', cls:'archer', job:'sniper', slot:'c', mp:42, cd:9000,  desc:'Ultimate: Rain arrows over an area.' },
   // Ranger
-  wildBond:     { name:'Wild Bond',      icon:'🐺', cls:'archer', job:'ranger', slot:'q', mp:30, cd:12000, desc:'Summon a wolf companion for 15s.' },
-  elementalArrows:{ name:'Elemental Arrows', icon:'🌈', cls:'archer', job:'ranger', slot:'c', mp:40, cd:9500,  desc:'Ultimate: Barrage of magic arrows.' },
+  wildBond:     { name:'Wild Bond',      icon:'🐺', cls:'archer', job:'ranger', slot:'q', mp:30, cd:10000, desc:'Summon a wolf companion for 15s.' },
+  elementalArrows:{ name:'Elemental Arrows', icon:'🌈', cls:'archer', job:'ranger', slot:'c', mp:40, cd:8500,  desc:'Ultimate: Barrage of magic arrows.' },
 
   // ============ MASTER SIGNATURES (slot p, level 20+) ============
   // Warrior path
-  warlord_warcry:     { name:'Warlord\'s Banner',  icon:'📯', cls:'warrior', job:'berserker', master:'warlord',     slot:'x', mp:30, cd:10000, desc:'6s banner: ATK, heal, and +50% range on every skill.' },
-  doombringer_apoc:   { name:'Blade of Calamity',  icon:'⚔️', cls:'warrior', job:'berserker', master:'doombringer', slot:'x', mp:60, cd:18000, desc:'Summon a colossal sword that cleaves forward 5 times.' },
-  crusader_aegis:     { name:'Divine Aegis',       icon:'✝️', cls:'warrior', job:'knight',    master:'crusader',    slot:'x', mp:45, cd:14000, desc:'Heal 60% + damage barrier for 6s.' },
-  dragoon_skylance:   { name:'Sky Lance',          icon:'🐉', cls:'warrior', job:'knight',    master:'dragoon',     slot:'x', mp:35, cd:9000,  desc:'Leap up, slam down with piercing force.' },
+  warlord_warcry:     { name:'Warlord\'s Banner',  icon:'📯', cls:'warrior', job:'berserker', master:'warlord',     slot:'x', mp:30, cd:9500,  desc:'6s banner: ATK, heal, and +50% range on every skill.' },
+  doombringer_apoc:   { name:'Blade of Calamity',  icon:'⚔️', cls:'warrior', job:'berserker', master:'doombringer', slot:'x', mp:60, cd:16000, desc:'Summon a colossal sword that cleaves forward 5 times.' },
+  crusader_aegis:     { name:'Divine Aegis',       icon:'✝️', cls:'warrior', job:'knight',    master:'crusader',    slot:'x', mp:45, cd:13000, desc:'Heal 60% + damage barrier for 6s.' },
+  dragoon_skylance:   { name:'Sky Lance',          icon:'🐉', cls:'warrior', job:'knight',    master:'dragoon',     slot:'x', mp:35, cd:8000,  desc:'Leap up, slam down with piercing force.' },
   // Rogue path
-  shadowlord_clones:  { name:'Mirror Shadow',      icon:'👥', cls:'rogue', job:'ninja',    master:'shadowlord',  slot:'x', mp:40, cd:11000, desc:'8s mirror clone — copies your every move.' },
-  shinobi_seal:       { name:'Kage Rush',          icon:'🎴', cls:'rogue', job:'ninja',    master:'shinobi',     slot:'x', mp:35, cd:9000,  desc:'Zip across the map slashing in rapid succession.' },
-  nightreaper_mark:   { name:'Ricochet Daggers',   icon:'🗡️', cls:'rogue', job:'assassin', master:'nightreaper', slot:'x', mp:25, cd:7000,  desc:'7 forward daggers that ricochet off enemies and walls.' },
-  phantom_cut:        { name:'Dimensional Cut',    icon:'👻', cls:'rogue', job:'assassin', master:'phantom',     slot:'x', mp:30, cd:8000,  desc:'Teleport-strike ignoring defense; always crits.' },
+  shadowlord_clones:  { name:'Mirror Shadow',      icon:'👥', cls:'rogue', job:'ninja',    master:'shadowlord',  slot:'x', mp:40, cd:10000, desc:'8s mirror clone — copies your every move.' },
+  shinobi_seal:       { name:'Kage Rush',          icon:'🎴', cls:'rogue', job:'ninja',    master:'shinobi',     slot:'x', mp:35, cd:8500,  desc:'Zip across the map slashing in rapid succession.' },
+  nightreaper_mark:   { name:'Ricochet Daggers',   icon:'🗡️', cls:'rogue', job:'assassin', master:'nightreaper', slot:'x', mp:25, cd:6500,  desc:'7 forward daggers that ricochet off enemies and walls.' },
+  phantom_cut:        { name:'Dimensional Cut',    icon:'👻', cls:'rogue', job:'assassin', master:'phantom',     slot:'x', mp:30, cd:7500,  desc:'Teleport-strike ignoring defense; always crits.' },
   // Mage path
-  sage_meteorshower:  { name:'Meteor Shower',      icon:'📜', cls:'mage', job:'archmage', master:'sage',         slot:'x', mp:55, cd:16000, desc:'5 meteors rain over an area.' },
-  elementalist_cascade:{ name:'Prismatic Cascade', icon:'🌈', cls:'mage', job:'archmage', master:'elementalist', slot:'x', mp:50, cd:14000, desc:'Four elements in amplifying sequence.' },
+  sage_meteorshower:  { name:'Meteor Shower',      icon:'📜', cls:'mage', job:'archmage', master:'sage',         slot:'x', mp:55, cd:14000, desc:'5 meteors rain over an area.' },
+  elementalist_cascade:{ name:'Prismatic Cascade', icon:'🌈', cls:'mage', job:'archmage', master:'elementalist', slot:'x', mp:50, cd:13000, desc:'Four elements in amplifying sequence.' },
   lich_harvest:       { name:'Soul Vortex',        icon:'👹', cls:'mage', job:'warlock',  master:'lich',         slot:'x', mp:40, cd:60000, desc:'Open a 30s vacuum pool that siphons life from enemies.' },
-  hexmaster_grandhex: { name:'Grand Hex',          icon:'🧿', cls:'mage', job:'warlock',  master:'hexmaster',    slot:'x', mp:35, cd:20000, desc:'Freeze every enemy 2s and apply a slow poison DOT.' },
+  hexmaster_grandhex: { name:'Grand Hex',          icon:'🧿', cls:'mage', job:'warlock',  master:'hexmaster',    slot:'x', mp:35, cd:18000, desc:'Freeze every enemy 2s and apply a slow poison DOT.' },
   // Archer path
-  marksman_oneshot:   { name:'One Shot One Kill',  icon:'🎯', cls:'archer', job:'sniper', master:'marksman',    slot:'x', mp:50, cd:12000, desc:'Guaranteed crit piercing; 12% instakill.' },
-  ballista_volley:    { name:'Siege Volley',       icon:'🛡️', cls:'archer', job:'sniper', master:'ballista',    slot:'x', mp:45, cd:11000, desc:'Heavy piercing line shots; break defense.' },
-  beastmaster_pack:   { name:'Call of the Wild',   icon:'🐾', cls:'archer', job:'ranger', master:'beastmaster', slot:'x', mp:50, cd:20000, desc:'Summon 3 wolves at once.' },
-  skyhunter_gale:     { name:'Gale Storm',         icon:'🦅', cls:'archer', job:'ranger', master:'skyhunter',   slot:'x', mp:45, cd:12000, desc:'5 homing arrows that cannot miss.' },
+  marksman_oneshot:   { name:'One Shot One Kill',  icon:'🎯', cls:'archer', job:'sniper', master:'marksman',    slot:'x', mp:50, cd:11000, desc:'Guaranteed crit piercing; 12% instakill.' },
+  ballista_volley:    { name:'Siege Volley',       icon:'🛡️', cls:'archer', job:'sniper', master:'ballista',    slot:'x', mp:45, cd:10000, desc:'Heavy piercing line shots; break defense.' },
+  beastmaster_pack:   { name:'Call of the Wild',   icon:'🐾', cls:'archer', job:'ranger', master:'beastmaster', slot:'x', mp:50, cd:17000, desc:'Summon 3 wolves at once.' },
+  skyhunter_gale:     { name:'Gale Storm',         icon:'🦅', cls:'archer', job:'ranger', master:'skyhunter',   slot:'x', mp:45, cd:11000, desc:'5 homing arrows that cannot miss.' },
 };
 
 // Classes with base stat profiles and starting kit
@@ -1303,10 +1352,16 @@ function skillsForClass(cls, job, master) {
 }
 function skillBySlot(slot) {
   const kit = skillsForClass(player.cls, player.job, player.master);
+  // Pick the most-specific skill for the slot: master > job > class
+  let best = null;
+  let bestScore = -1;
   for (const id in kit) {
-    if (kit[id].slot === slot) return { id, def: kit[id] };
+    if (kit[id].slot !== slot) continue;
+    const s = kit[id];
+    const score = (s.master ? 4 : 0) + (s.job ? 2 : 0);
+    if (score > bestScore) { bestScore = score; best = { id, def: s }; }
   }
-  return null;
+  return best;
 }
 
 // =========================================================================
@@ -2096,10 +2151,35 @@ const MAPS = {
       {type:'mushmom', count:1, boss:true},
     ],
   },
+  // Tower of Ascension — infinite-floor mode. Waves of escalating monsters,
+  // rotating modifiers every 3 floors. Best floor persists across runs.
+  tower: {
+    name:'Tower of Ascension',
+    sky:['#05030a','#1a0a2a','#44226a'],
+    worldWidth: 1500,
+    levelReq: 5,
+    isTower: true,
+    platforms: [
+      {x:0,  y:480, w:1500, h:60, type:'ground'},
+      {x:120,y:380, w:180,  h:12, type:'platform'},
+      {x:1200,y:380,w:180,  h:12, type:'platform'},
+      {x:500,y:320, w:200,  h:12, type:'platform'},
+      {x:800,y:320, w:200,  h:12, type:'platform'},
+      {x:650,y:230, w:200,  h:12, type:'platform'},
+      {x:260,y:200, w:150,  h:12, type:'platform'},
+      {x:1090,y:200,w:150,  h:12, type:'platform'},
+    ],
+    portals: [
+      {x:80, dest:'town', name:'◀ Exit Tower'},
+    ],
+    spawns: [],   // tower handles its own spawning
+  },
 };
 
 // Add one extra portal to forest to reach slime cave
 MAPS.forest.portals.push({x:1200, dest:'slimeCave', name:'⬇ Gelwater Grotto'});
+// Add a Tower portal from town (upstairs — centered between bazaar buildings)
+MAPS.town.portals.push({x:960, dest:'tower', name:'⬆ Tower of Ascension'});
 
 // =========================================================================
 // PLAYER — fixed sprite dimensions (body box). Used everywhere.
@@ -2112,13 +2192,17 @@ const SPRITE_H = 44;
 const player = {
   x:100, y:400, vx:0, vy:0, w:SPRITE_W, h:SPRITE_H, facing:1,
   look: {
-    gender: 'male',          // 'male' | 'female'
+    name:      '',           // player-chosen name (optional)
+    gender:    'male',       // 'male' | 'female'
     hairColor: '#3a1f0a',    // base
     hairHi:    '#7a4a2a',    // highlight
+    hairStyle: 'default',    // cosmetic hair style unlock
     skin:      '#f0c090',    // base
     skinHi:    '#ffd8a8',
     skinShd:   '#d89868',
     eyeColor:  '#1a0804',
+    cape:      null,         // cosmetic cape unlock (null = none)
+    weaponSkin:null,         // cosmetic weapon skin unlock
   },
   onGround:false, dropThrough:false, dropTimer:0,
   hp:100, maxHp:100, mp:50, maxMp:50,
@@ -2127,6 +2211,10 @@ const player = {
   cls: 'warrior', job: null, master: null,
   treeUnlocked: {},  // skill tree unlock map
   tree: {},          // flags set by tree apply() functions
+  // Cosmetic unlocks — earned from bestiary thresholds + achievements.
+  // Each key maps to a set of unlocked IDs. Unlocked cosmetics show up in the
+  // cosmetic picker alongside the base options.
+  cosmetics: { hair: {}, cape: {}, weapon: {} },
   attacking:false, attackTimer:0, attackCooldown:0,
   skillCooldowns: {}, skillPoints: 0,
   // Attributes (AP) — Str/Vit/Agi/Int/Wis/Lck
@@ -2419,6 +2507,42 @@ function openClassSelect() {
       };
     });
   }
+  // Wire up name input + cosmetic swatches
+  const nameInput = document.getElementById('hero-name-input');
+  if (nameInput && !nameInput._wired) {
+    nameInput._wired = true;
+    nameInput.value = (player.look && player.look.name) || '';
+    nameInput.oninput = () => { player.look.name = nameInput.value.trim() || ''; };
+  }
+  const paletteMap = {
+    hair: ['#3a1f0a','#8b5a2b','#e3c589','#b22222','#202020','#4a2488'],
+    skin: ['#f0c090','#e4b07a','#c89870','#a67f4e','#8b5a3c','#5c3820'],
+    eye:  ['#1a0804','#2e6b3a','#2a5ab8','#884422','#4a1a88','#1a1a1a'],
+  };
+  for (const k of ['hair','skin','eye']) {
+    const row = document.getElementById('swatch-' + k);
+    if (!row || row._wired) continue;
+    row._wired = true;
+    const lookKey = k === 'hair' ? 'hairColor' : k === 'skin' ? 'skin' : 'eyeColor';
+    for (const col of paletteMap[k]) {
+      const sw = document.createElement('div');
+      sw.className = 'sw';
+      sw.style.background = col;
+      if (player.look[lookKey] === col) sw.classList.add('sel');
+      sw.onclick = () => {
+        row.querySelectorAll('.sw').forEach(e => e.classList.remove('sel'));
+        sw.classList.add('sel');
+        player.look[lookKey] = col;
+        if (k === 'hair') {
+          player.look.hairHi = _mixHex(col, '#ffffff', 0.25);
+        } else if (k === 'skin') {
+          player.look.skinHi = _mixHex(col, '#ffffff', 0.25);
+          player.look.skinShd = _mixHex(col, '#000000', 0.25);
+        }
+      };
+      row.appendChild(sw);
+    }
+  }
   const opts = document.getElementById('class-options');
   opts.innerHTML = '';
   for (const id in CLASSES) {
@@ -2599,11 +2723,13 @@ const PLAYER_SAVE_FIELDS = [
   'cls','job','master','level','exp','expToNext',
   'hp','maxHp','mp','maxMp','mesos','baseAtk','baseDef',
   'attrs','skillPoints','milestonesUnlocked','treeUnlocked','tree',
-  'mods','equipped','inventory','consumables','look','pet','baseCrit','baseSpeed','baseJump'
+  'mods','equipped','inventory','consumables','look','pet','baseCrit','baseSpeed','baseJump',
+  'cosmetics'
 ];
 const GAME_SAVE_FIELDS = [
   'currentMap','bossDefeated','kills','achievements',
-  'dailyState','prestige','comboRecord','muted'
+  'dailyState','prestige','comboRecord','muted',
+  'bestiary','towerBestFloor'
 ];
 function saveState() {
   try {
@@ -2694,6 +2820,18 @@ const audio = {
       setTimeout(() => this.env(784, 0.22, 'triangle', 0.18, 0), 200);
     }
     else if (kind === 'death') this.env(180, 0.45, 'sawtooth', 0.18, -120);
+    // Silent-reward feedback sfx:
+    else if (kind === 'potion_hp')   { this.env(700, 0.08, 'triangle', 0.12, 200); this.env(1000, 0.12, 'sine', 0.09, 300); }
+    else if (kind === 'potion_mp')   { this.env(460, 0.10, 'triangle', 0.12, 280); this.env(680, 0.14, 'sine', 0.10, 260); }
+    else if (kind === 'meso')        { this.env(880, 0.06, 'square',   0.10, 200); this.env(1320, 0.08, 'triangle', 0.07, 160); }
+    else if (kind === 'mp_refund')   { this.env(600, 0.10, 'triangle', 0.10, 380); this.env(820, 0.12, 'sine', 0.08, 260); }
+    else if (kind === 'cd_refund')   { this.env(520, 0.08, 'triangle', 0.10, 300); this.env(760, 0.10, 'triangle', 0.08, 200); }
+    else if (kind === 'chest_open')  {
+      this.env(420, 0.10, 'triangle', 0.14, 250);
+      setTimeout(() => this.env(620, 0.12, 'triangle', 0.15, 200), 80);
+      setTimeout(() => this.env(880, 0.16, 'sine',     0.16, 180), 170);
+    }
+    else if (kind === 'pickup')      { this.env(760, 0.06, 'triangle', 0.10, 180); }
   },
   toggleMute() {
     this.muted = !this.muted;
@@ -3217,10 +3355,17 @@ function loadMap(id, entryX) {
   game.miniBossWarned = false;
   // Re-arm Second Wind on map change
   if (player.tree && player.tree.secondWind) player.tree.secondWindReady = true;
-  if (!game.mapData.isTown && !game.mapData.isBossArena) {
+  if (!game.mapData.isTown && !game.mapData.isBossArena && !game.mapData.isTower) {
     game.miniBossTimer = 60000 + Math.floor(Math.random() * 30000); // 60-90s
   } else {
     game.miniBossTimer = 0;
+  }
+
+  // Tower initialization — start a fresh climb when entering
+  if (game.mapData.isTower) {
+    startTower();
+  } else {
+    game.tower = null;
   }
 
   document.getElementById('map-label').textContent = game.mapData.name;
@@ -3394,8 +3539,12 @@ function openChest(c) {
   } else {
     showToast(`Chest: ${mesos}💰 + potions`, c.tier === 'gold' ? 'epic' : c.tier === 'silver' ? 'rare' : 'common');
   }
+  // Silent-reward feedback — 3-note chime + sparkle burst scaled to tier
+  audio.play('chest_open');
+  if (c.tier === 'gold' || c.tier === 'silver') audio.play('levelup');
   // Burst
-  for (let i = 0; i < 30; i++) {
+  const burstN = c.tier === 'gold' ? 50 : c.tier === 'silver' ? 40 : 30;
+  for (let i = 0; i < burstN; i++) {
     game.particles.push({
       x: c.x + c.w/2, y: c.y + c.h/2,
       vx: (Math.random() - 0.5) * 10, vy: -Math.random() * 8 - 2,
@@ -3403,8 +3552,21 @@ function openChest(c) {
       size: 2 + Math.random() * 3
     });
   }
-  addShake(4);
-  flash(0.25);
+  // Upward rising sparkles for a moment of ceremony
+  for (let i = 0; i < 12; i++) {
+    setTimeout(() => {
+      game.particles.push({
+        x: c.x + c.w/2 + (Math.random() - 0.5) * 24, y: c.y,
+        vx: (Math.random() - 0.5) * 1.2, vy: -2 - Math.random() * 2,
+        life: 60, color: c.tier === 'gold' ? '#ffee88' : '#ddeeff',
+        size: 2 + Math.random() * 1.5
+      });
+    }, i * 20);
+  }
+  addShake(c.tier === 'gold' ? 7 : c.tier === 'silver' ? 5 : 4);
+  flash(c.tier === 'gold' ? 0.35 : 0.25);
+  // Hook for cosmetic unlock tracking
+  trackPickup('chest', { tier: c.tier });
 }
 
 function spawnFromMap(type, boss) {
@@ -3429,8 +3591,11 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   const t = monsterTypes[type];
   // Elite roll (not for bosses / miniboss)
   const isElite = !isBoss && !isMiniBoss && Math.random() < 0.13;
-  const hpMult  = isBoss ? 1 : (isMiniBoss ? 5   : isElite ? 3   : 1);
-  const atkMult = isBoss ? 1 : (isMiniBoss ? 2   : isElite ? 1.5 : 1);
+  // Tower escalation multipliers compound on top of regular tiering
+  const towerHp  = game.tower ? (game._towerHpMul  || 1) : 1;
+  const towerAtk = game.tower ? (game._towerAtkMul || 1) : 1;
+  const hpMult  = (isBoss ? 1 : (isMiniBoss ? 5   : isElite ? 3   : 1)) * towerHp;
+  const atkMult = (isBoss ? 1 : (isMiniBoss ? 2   : isElite ? 1.5 : 1)) * towerAtk;
   const expMult = isBoss ? 1 : (isMiniBoss ? 5   : isElite ? 2.2 : 1);
   const mesMult = isBoss ? 1 : (isMiniBoss ? 4   : isElite ? 2.5 : 1);
   const sizeMul = isBoss ? 1 : (isMiniBoss ? 1.6 : isElite ? 1.25: 1);
@@ -3995,21 +4160,41 @@ function updatePlayer(dt) {
         player.mesos += amt;
         game.particles.push({ x:d.x, y:d.y, vx:0, vy:-2, life:30,
           color:'#ffdd44', size:3, text:'+' + amt });
+        // Silent-reward feedback — big mesos get audio + toast
+        if (amt >= 40) audio.play('meso');
+        if (amt >= 120) showToast(`+${amt} 💰`, amt >= 400 ? 'epic' : 'rare');
       } else if (d.type === 'potion_hp') {
         player.hp = Math.min(getMaxHp(), player.hp + d.value);
         game.damageNumbers.push({ x:player.x+14, y:player.y, vy:-1.5,
           text:'+' + d.value, life:40, color:'#44ff44' });
+        audio.play('potion_hp');
+        showToast(`+${d.value} HP`, 'common');
+        for (let k = 0; k < 8; k++) {
+          game.particles.push({ x: player.x + player.w/2, y: player.y + player.h/2,
+            vx: (Math.random()-0.5)*4, vy: -2 - Math.random()*2,
+            life: 26, color: '#66ff88', size: 2 });
+        }
       } else if (d.type === 'potion_mp') {
         player.mp = Math.min(getMaxMp(), player.mp + d.value);
         game.damageNumbers.push({ x:player.x+14, y:player.y, vy:-1.5,
           text:'+' + d.value, life:40, color:'#4488ff' });
+        audio.play('potion_mp');
+        showToast(`+${d.value} MP`, 'common');
+        for (let k = 0; k < 8; k++) {
+          game.particles.push({ x: player.x + player.w/2, y: player.y + player.h/2,
+            vx: (Math.random()-0.5)*4, vy: -2 - Math.random()*2,
+            life: 26, color: '#66aaff', size: 2 });
+        }
       } else if (d.type === 'item') {
         player.inventory.push(d.item);
+        audio.play('pickup');
         if (tryAutoEquip(d.item)) {
           // showGearChange handles the popup; skip the generic toast
         } else {
           showToast(`Looted ${d.item.name}`, d.item.rarity);
         }
+        // Progress bestiary/achievement hooks for cosmetic unlocks
+        trackPickup('item', d.item);
       }
       game.drops.splice(i, 1); continue;
     }
@@ -4147,6 +4332,11 @@ function rollCrit() {
 function castSkill(id) {
   const s = SKILLS[id];
   if (!s) return;
+  // Tower: Basic Attacks Only modifier — block all non-'d' skills
+  if (towerBasicOnly() && s.slot !== 'd') {
+    showToast('🗼 Basic attacks only!', 'common');
+    return;
+  }
   // Stamp current basic-skill enhancement for any effect this cast triggers
   player._enh = (!s.job && !s.master && player.job && JOB_ENHANCE[player.job]) ? JOB_ENHANCE[player.job] : null;
   let cost = s.mp;
@@ -4845,7 +5035,7 @@ const SKILL_FNS = {
           const crit = rollCrit();
           const dmg = Math.floor((getAtk() * 2.3 + Math.random() * 12) * (crit ? getCritDmg() : 1));
           hitMonster(m, dmg, crit, 'melee');
-          m.vx += player.facing * 10;
+          m.vx += player.facing * 14;
           m.vy -= 4;
           m.stunTimer = Math.max(m.stunTimer || 0, 750);
         }
@@ -5294,7 +5484,7 @@ const SKILL_FNS = {
             const crit = rollCrit();
             const dmg = Math.floor((getAtk() * 0.6 + Math.random() * 4) * (crit ? getCritDmg() : 1));
             hitMonster(m, dmg, crit, 'melee');
-            m.vx += player.facing * 4;
+            m.vx += player.facing * 6;
             m.vy += (i < pivotAt ? 2 : -3);
             // Rainbow hit-flash at contact
             for (let j = 0; j < 6; j++) {
@@ -5789,7 +5979,7 @@ const SKILL_FNS = {
         const crit = rollCrit();
         const dmg = Math.floor((getAtk() * 1.1 + Math.random() * 4) * (crit ? getCritDmg() : 1));
         hitMonster(m, dmg, crit, 'melee');
-        m.vx += player.facing * 7;
+        m.vx += player.facing * 10;
         m.vy -= 2;
         m.stunTimer = Math.max(m.stunTimer || 0, 200);
       }
@@ -5822,6 +6012,62 @@ const SKILL_FNS = {
     spawnSmoothBeam(player.x + player.w/2, player.y + 22, player.facing > 0 ? 0 : Math.PI,
       320, 3, '#ffdd44', { life: 10 });
     flash(0.25);
+  },
+  // Sniper — signature S skill: instant piercing rail, escalating damage per hit
+  snipe_railgun: () => {
+    const sx = player.x + player.w/2;
+    const sy = player.y + 24;
+    const dir = player.facing;
+    const maxRange = 900;
+    // Sweep every monster in a narrow horizontal lane from player
+    const lane = 54;
+    const hits = [];
+    for (const m of game.monsters) {
+      if (!m || m.currentHp <= 0) continue;
+      const ecx = m.x + m.w/2;
+      const ecy = m.y + m.h/2;
+      if (Math.abs(ecy - sy) > lane) continue;
+      if (dir > 0 && ecx < sx - 20) continue;
+      if (dir < 0 && ecx > sx + 20) continue;
+      if (Math.abs(ecx - sx) > maxRange) continue;
+      hits.push({ m, dist: Math.abs(ecx - sx) });
+    }
+    hits.sort((a, b) => a.dist - b.dist);
+    const baseAtk = getAtk();
+    hits.forEach((h, i) => {
+      // Each consecutive hit empowers the next: +30% per link
+      const stackMul = 1 + i * 0.30;
+      const dmg = Math.floor((baseAtk * 3.2 + 25) * stackMul * getCritDmg());
+      hitMonster(h.m, dmg, true, 'railshot');
+      h.m.vx += dir * 14;
+      // Electric spark particles at impact
+      for (let k = 0; k < 8; k++) {
+        game.particles.push({
+          x: h.m.x + h.m.w/2, y: h.m.y + h.m.h/2,
+          vx: (Math.random() - 0.5) * 6,
+          vy: (Math.random() - 0.5) * 6,
+          life: 24, color: i % 2 ? '#aaddff' : '#ffffff', size: 2
+        });
+      }
+      spawnSmoothExplosion(h.m.x + h.m.w/2, h.m.y + h.m.h/2, 28 + i * 4,
+        '#aaddff', '#4488ff88', { life: 18 });
+    });
+    // Main rail beam — thick bright core + soft halo
+    spawnSmoothBeam(sx, sy, dir > 0 ? 0 : Math.PI, maxRange, 8, '#ffffff', { life: 14 });
+    spawnSmoothBeam(sx, sy, dir > 0 ? 0 : Math.PI, maxRange, 16, '#66ccff', { life: 18 });
+    spawnSmoothBeam(sx, sy, dir > 0 ? 0 : Math.PI, maxRange, 24, '#4488ff55', { life: 22 });
+    // Muzzle burst at player
+    spawnSmoothExplosion(sx + dir * 20, sy, 36, '#ffffff', '#88ddff88', { life: 22 });
+    for (let k = 0; k < 16; k++) {
+      game.particles.push({
+        x: sx + dir * 22, y: sy + (Math.random() - 0.5) * 8,
+        vx: dir * (-3 - Math.random() * 3),
+        vy: (Math.random() - 0.5) * 4,
+        life: 28, color: k % 2 ? '#aaddff' : '#ffee88', size: 2
+      });
+    }
+    addShake(8); flash(0.35);
+    if (hits.length >= 3) showToast(`${hits.length}x rail chain!`, 'epic');
   },
   arrowRain: () => {
     // Larger AoE — wider spread, more arrows, longer duration
@@ -6019,7 +6265,7 @@ const SKILL_FNS = {
           if (m.currentHp <= 0) continue;
           if (aabb(hitbox, m) && !hitIds.has(m.type + (m.x|0))) {
             hitMonster(m, Math.floor(getAtk() * 1.7), rollCrit(), 'melee');
-            m.vx += player.facing * 3;
+            m.vx += player.facing * 5;
             spawnSmoothImpact(m.x + m.w/2, m.y + m.h/2, '#ff99aa');
             hitIds.add(m.type + (m.x|0));
           }
@@ -6272,7 +6518,7 @@ function performMelee(range, dmgPct, opts = {}) {
       const dmg = Math.floor((getAtk() * dmgPct + Math.random() * 6) * (crit ? getCritDmg() : 1));
       hitMonster(m, dmg, crit, 'melee');
       applyEnhOnHit(m, dmg, enh);
-      if (opts.kb) m.vx += player.facing * opts.kb;
+      if (opts.kb) m.vx += player.facing * opts.kb * 1.35; // global knockback boost
       if (opts.vy) m.vy += opts.vy;
       if (opts.stun) m.stunTimer = Math.max(m.stunTimer || 0, opts.stun);
       // Bright modern impact flash at each hit
@@ -6326,9 +6572,10 @@ function performAround(radius, dmgPct, opts = {}) {
       applyEnhOnHit(m, dmg, enh);
       spawnSmoothImpact(m.x + m.w/2, m.y + m.h/2, opts.color || '#ffffff');
       if (opts.kb) {
+        const kb = opts.kb * 1.35; // global knockback boost
         const ang = Math.atan2(dy, dx);
-        m.vx += Math.cos(ang) * opts.kb;
-        m.vy -= Math.abs(Math.sin(ang) * opts.kb * 0.5);
+        m.vx += Math.cos(ang) * kb;
+        m.vy -= Math.abs(Math.sin(ang) * kb * 0.5);
       }
     }
   }
@@ -6531,15 +6778,16 @@ function updateMonsters(dt) {
       bossAI(m, dt, distToPlayer);
     } else {
       // Regular AI
+      const _tSpd = towerSpeedMul();
       if (m.aggroTarget && distToPlayer < 500 && yDiff < 200) {
         const dir = (player.x + player.w/2) - (m.x + m.w/2);
         m.facing = dir > 0 ? 1 : -1;
-        m.vx += m.facing * 0.1;
-        if (Math.abs(m.vx) > m.speed * 1.5) m.vx = m.facing * m.speed * 1.5;
+        m.vx += m.facing * 0.1 * _tSpd;
+        if (Math.abs(m.vx) > m.speed * 1.5 * _tSpd) m.vx = m.facing * m.speed * 1.5 * _tSpd;
         if (m.jump > 0 && m.onGround && Math.random() < 0.02) m.vy = -m.jump;
       } else {
         if (Math.random() < 0.003) m.facing *= -1;
-        m.vx = m.facing * m.speed;
+        m.vx = m.facing * m.speed * _tSpd;
         if (m.onGround) {
           const checkX = m.x + (m.facing > 0 ? m.w + 5 : -5);
           const checkY = m.y + m.h + 5;
@@ -6587,6 +6835,19 @@ function updateMonsters(dt) {
       // Block reduces damage by 70% (outside parry window)
       if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); triggerBlock(); }
       if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * 0.82));
+      // Tower: Glass Hero — +50% damage taken
+      if (game.tower) dmg = Math.ceil(dmg * towerPlayerTakeMul());
+      // Tower: Vampiric Foes — attacker heals for 20% of damage dealt
+      if (towerVampiric() && m.currentHp > 0) {
+        const heal = Math.floor(dmg * 0.20);
+        m.currentHp = Math.min(m.maxHp, m.currentHp + heal);
+        if (heal > 0) {
+          game.damageNumbers.push({
+            x: m.x + m.w/2 - 12, y: m.y - 6, vy: -2,
+            text: '+' + heal + ' HP', life: 28, color: '#ff88aa', size: 12
+          });
+        }
+      }
       // Skill tree: Mana Shield — consume MP first (2 MP : 1 HP)
       if (player.tree.manaShield && player.mp > 0) {
         const mpAbsorb = Math.min(player.mp, dmg * 2);
@@ -7227,10 +7488,19 @@ function hitMonster(m, dmg, isCrit, skill) {
     }
     // Skill tree — Spellweaver: crits reduce cooldowns by 1s
     if (player.tree.spellweaver && isCrit) {
+      let refunded = 0;
       for (const id in player.skillCooldowns) {
         if (player.skillCooldowns[id] > 0) {
           player.skillCooldowns[id] = Math.max(0, player.skillCooldowns[id] - 1000);
+          refunded++;
         }
+      }
+      if (refunded > 0) {
+        audio.play('cd_refund');
+        game.damageNumbers.push({
+          x: player.x + 14, y: player.y - 26, vy: -2,
+          text: '-1s CD', life: 32, color: '#ffcc88', size: 12
+        });
       }
     }
     // Skill tree — Elemental Chain: spells chain to 2 more enemies at 50%
@@ -7262,6 +7532,8 @@ function hitMonster(m, dmg, isCrit, skill) {
   }
   // Apply combo multiplier to player damage
   let finalDmg = Math.max(1, skill === 'thorns' ? dmg : Math.floor(dmg * game.comboMult));
+  // Tower: Glass Hero mod gives +50% player damage
+  if (skill !== 'thorns' && game.tower) finalDmg = Math.floor(finalDmg * towerPlayerDmgMul());
   // Elite resistance scales their HP, damage stays normal
   m.currentHp -= finalDmg;
   m.hitFlash = 100;
@@ -7384,6 +7656,11 @@ function killMonster(m) {
   game.kills++;
   tickDaily('kills');
   checkAchievements();
+  // Bestiary tracking drives cosmetic unlocks
+  trackPickup('kill', { type: m.type });
+  if (m.isBoss) trackPickup('boss', { id: m.type });
+  // Tower — progress the wave
+  if (game.tower) _towerOnKill(m);
   // Milestone: Mana Font — skill kill refunds 5% max MP
   if (hasMilestone('manaFont') && m._killedBySkill) {
     const refund = Math.floor(getMaxMp() * 0.05);
@@ -7392,6 +7669,7 @@ function killMonster(m) {
       x: player.x + 14, y: player.y - 14, vy: -2,
       text: '+' + refund + ' MP', life: 32, color: '#88ccff', size: 13
     });
+    audio.play('mp_refund');
   }
   // Master mechanics on kill
   if (m.deathMark > 0) {
@@ -8541,6 +8819,242 @@ const MILESTONES = {
 };
 
 function hasMilestone(id) { return !!(player.milestonesUnlocked && player.milestonesUnlocked[id]); }
+
+// =========================================================================
+// COSMETIC UNLOCKS — hair styles, capes, weapon skins earned from bestiary
+// progress and achievements. These are purely cosmetic overlays on drawCute-
+// Character; no stats attached.
+// =========================================================================
+const COSMETICS = {
+  hair: [
+    { id:'flame',   name:'Flame Tips',   desc:'Kill 50 mushrooms',        req:{ bestiary:{ mushroom:50 } },  swatch:'#ff5522' },
+    { id:'mint',    name:'Mint Frost',   desc:'Kill 30 slimes',           req:{ bestiary:{ slime:30 } },     swatch:'#66ffaa' },
+    { id:'twilight',name:'Twilight',     desc:'Kill 20 wraiths',          req:{ bestiary:{ wraith:20 } },    swatch:'#6644aa' },
+    { id:'royal',   name:'Royal Gold',   desc:'Open 5 gold chests',       req:{ chests:{ gold:5 } },         swatch:'#ffcc44' },
+  ],
+  cape: [
+    { id:'shadow',  name:'Shadow Cape',  desc:'Kill 25 horned mushrooms', req:{ bestiary:{ horny:25 } },     swatch:'#2a1a3a', accent:'#6a4a8a' },
+    { id:'ember',   name:'Ember Cape',   desc:'Kill 10 scorpions',        req:{ bestiary:{ scorpion:10 } },  swatch:'#cc3322', accent:'#ff8844' },
+    { id:'frost',   name:'Frost Cape',   desc:'Reach tower floor 10',     req:{ tower:10 },                  swatch:'#4488cc', accent:'#aaddff' },
+    { id:'astral',  name:'Astral Cape',  desc:'Reach tower floor 25',     req:{ tower:25 },                  swatch:'#332266', accent:'#aa88ff' },
+  ],
+  weapon: [
+    { id:'crystal', name:'Crystal Blade',desc:'Defeat Aetherion',         req:{ boss:'aetherion' },          swatch:'#aaddff' },
+    { id:'void',    name:'Void Edge',    desc:'Defeat Gravitos',          req:{ boss:'gravitos' },           swatch:'#8844cc' },
+    { id:'sunfire', name:'Sunfire',      desc:'Reach tower floor 15',     req:{ tower:15 },                  swatch:'#ffaa22' },
+    { id:'heirloom',name:'Heirloom',     desc:'Open 10 silver chests',    req:{ chests:{ silver:10 } },      swatch:'#ddccaa' },
+  ],
+};
+
+// Track pickup/kill events for cosmetic-unlock progress.
+// `source` is one of: 'kill' | 'item' | 'chest' | 'boss' | 'tower'.
+// `info` carries the extra context (monster type, chest tier, boss id, etc.).
+function trackPickup(source, info) {
+  if (!game.bestiary) game.bestiary = {};
+  if (!player.cosmetics) player.cosmetics = { hair:{}, cape:{}, weapon:{} };
+  if (source === 'kill' && info && info.type) {
+    game.bestiary[info.type] = (game.bestiary[info.type] || 0) + 1;
+  } else if (source === 'chest' && info && info.tier) {
+    game.bestiary['_chest_' + info.tier] = (game.bestiary['_chest_' + info.tier] || 0) + 1;
+  } else if (source === 'boss' && info && info.id) {
+    game.bestiary['_boss_' + info.id] = 1;
+  } else if (source === 'tower' && info && info.floor) {
+    game.towerBestFloor = Math.max(game.towerBestFloor || 0, info.floor);
+  }
+  checkCosmeticUnlocks();
+}
+
+function _cosmeticReqMet(req) {
+  if (!req) return false;
+  if (req.bestiary) {
+    for (const k in req.bestiary) {
+      if ((game.bestiary[k] || 0) < req.bestiary[k]) return false;
+    }
+  }
+  if (req.chests) {
+    for (const tier in req.chests) {
+      if ((game.bestiary['_chest_' + tier] || 0) < req.chests[tier]) return false;
+    }
+  }
+  if (req.boss && !game.bestiary['_boss_' + req.boss]) return false;
+  if (req.tower && (game.towerBestFloor || 0) < req.tower) return false;
+  return true;
+}
+
+function checkCosmeticUnlocks() {
+  let any = false;
+  for (const cat of ['hair','cape','weapon']) {
+    if (!player.cosmetics[cat]) player.cosmetics[cat] = {};
+    for (const c of COSMETICS[cat]) {
+      if (player.cosmetics[cat][c.id]) continue;
+      if (_cosmeticReqMet(c.req)) {
+        player.cosmetics[cat][c.id] = true;
+        showToast(`🎁 Unlocked ${cat}: ${c.name}!`, 'epic');
+        audio.play('levelup');
+        any = true;
+      }
+    }
+  }
+  if (any) saveState();
+}
+
+// =========================================================================
+// TOWER OF ASCENSION — infinite-floor mode
+// Rotating modifiers every 3 floors, mobs scale up each floor, best floor
+// persists. Waves are cleared to advance.
+// =========================================================================
+const TOWER_MODIFIERS = [
+  { id:'none',    name:'Standard',           desc:'No modifier.' },
+  { id:'basicOnly',name:'Basic Attacks Only',desc:'Skills disabled — only basic attack.' },
+  { id:'fast',    name:'Double Time',        desc:'Enemies move 2× speed.' },
+  { id:'regen',   name:'Vampiric Foes',      desc:'Enemies heal when they damage you.' },
+  { id:'swarm',   name:'Swarm',              desc:'+50% enemies per wave.' },
+  { id:'fragile', name:'Glass Hero',         desc:'You take 50% more damage but deal 50% more.' },
+  { id:'burning', name:'Burning Floor',      desc:'Periodic heat pulses damage everyone not moving.' },
+  { id:'dim',     name:'Dim Light',          desc:'Enemies gain +25% HP.' },
+];
+// Monster pool by difficulty tier
+const TOWER_TIER_POOLS = [
+  ['snail','slime'],                                 // tier 0 (floors 1-3)
+  ['slime','mushroom','orange'],                     // tier 1 (4-6)
+  ['mushroom','orange','horny'],                     // tier 2 (7-9)
+  ['horny','stump','zombie'],                        // tier 3 (10-12)
+  ['zombie','mummy','skeleton'],                     // tier 4 (13-15)
+  ['mummy','skeleton','wraith'],                     // tier 5 (16-18)
+  ['wraith','scorpion','horny'],                     // tier 6 (19-21)
+  ['scorpion','wraith','zombie','stump'],            // tier 7 (22+)
+];
+
+function startTower() {
+  game.tower = {
+    floor: 1,
+    modifier: 'none',
+    modifierName: 'Standard',
+    waveRemaining: 0,
+    waveTotal: 0,
+    transition: 0,       // ms lockout between floors
+    introShown: false,
+  };
+  showToast('🗼 Tower of Ascension', 'legendary');
+  audio.play('levelup');
+  _towerBeginFloor();
+}
+
+function _towerPickModifier(floor) {
+  // No modifier on floor 1-2, then rotate every 3 floors (stable per run seed)
+  if (floor <= 2) return TOWER_MODIFIERS[0];
+  const idx = (Math.floor((floor - 3) / 3) + 1) % TOWER_MODIFIERS.length;
+  // Skip 'none' after floor 2
+  return TOWER_MODIFIERS[idx === 0 ? 1 : idx];
+}
+
+function _towerBeginFloor() {
+  const t = game.tower;
+  if (!t) return;
+  const mod = _towerPickModifier(t.floor);
+  t.modifier = mod.id;
+  t.modifierName = mod.name;
+  // Mob pool scales with floor
+  const tierIdx = Math.min(TOWER_TIER_POOLS.length - 1, Math.floor((t.floor - 1) / 3));
+  const pool = TOWER_TIER_POOLS[tierIdx];
+  // Wave size: floor mod swarm boosts, otherwise 3 + floor/3
+  let waveSize = 3 + Math.floor(t.floor / 3);
+  if (mod.id === 'swarm') waveSize = Math.ceil(waveSize * 1.5);
+  // Scale mob HP/damage subtly via tower multipliers (read by hitMonster/damage calls)
+  game._towerHpMul  = 1 + (t.floor - 1) * 0.18;
+  game._towerAtkMul = 1 + (t.floor - 1) * 0.12;
+  if (mod.id === 'dim')     game._towerHpMul *= 1.25;
+  if (mod.id === 'fast')    game._towerSpeedMul = 2.0; else game._towerSpeedMul = 1.0;
+  if (mod.id === 'fragile') game._towerPlayerDmgMul = 1.5, game._towerPlayerTakeMul = 1.5;
+  else                       game._towerPlayerDmgMul = 1.0, game._towerPlayerTakeMul = 1.0;
+  // Spawn wave
+  t.waveRemaining = waveSize;
+  t.waveTotal = waveSize;
+  const plats = game.mapData.platforms.filter(p => p.type === 'platform');
+  for (let i = 0; i < waveSize; i++) {
+    const type = pool[Math.floor(Math.random() * pool.length)];
+    const p = plats.length && Math.random() < 0.55
+      ? plats[Math.floor(Math.random() * plats.length)] : null;
+    const x = p ? p.x + Math.random() * (p.w - 30) : 80 + Math.random() * (game.mapData.worldWidth - 160);
+    const y = p ? p.y - 40 : 440;
+    spawnMonster(x, y, type, false, false);
+  }
+  // Floor banner
+  showToast(`Floor ${t.floor} — ${mod.name}`, t.floor % 5 === 0 ? 'legendary' : 'epic');
+  flash(0.25);
+  addShake(4);
+}
+
+function _towerOnKill(m) {
+  const t = game.tower;
+  if (!t) return;
+  t.waveRemaining = Math.max(0, t.waveRemaining - 1);
+  if (t.waveRemaining <= 0) {
+    // Clear — advance floor
+    const cleared = t.floor;
+    const wasBest = (game.towerBestFloor || 0);
+    game.towerBestFloor = Math.max(wasBest, cleared);
+    if (game.towerBestFloor > wasBest) {
+      showToast(`🏆 NEW BEST FLOOR: ${game.towerBestFloor}!`, 'legendary');
+      audio.play('levelup');
+    }
+    // Hook for unlocks
+    trackPickup('tower', { floor: cleared });
+    // Reward: heal burst + MP
+    player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.15));
+    player.mp = Math.min(getMaxMp(), player.mp + Math.floor(getMaxMp() * 0.20));
+    game.damageNumbers.push({
+      x: player.x + 14, y: player.y - 30, vy: -2,
+      text: 'FLOOR CLEAR!', life: 60, color: '#ffee88', size: 20
+    });
+    audio.play('levelup');
+    flash(0.35); addShake(6);
+    t.floor++;
+    t.transition = 1800;
+    setTimeout(_towerBeginFloor, 1800);
+    saveState();
+  }
+}
+
+// Per-frame tower maintenance — called from the main update loop.
+function updateTower(dt) {
+  const hud = document.getElementById('tower-hud');
+  if (!game.tower) {
+    if (hud) hud.style.display = 'none';
+    return;
+  }
+  const t = game.tower;
+  if (t.transition > 0) t.transition -= dt;
+  // Burning Floor mod — periodic damage to stationary player
+  if (t.modifier === 'burning' && Math.abs(player.vx) < 0.5 && (game.time % 120) === 0 && player.hp > 0) {
+    const dmg = Math.floor(getMaxHp() * 0.04);
+    player.hp = Math.max(1, player.hp - dmg);
+    flash(0.15);
+    game.damageNumbers.push({ x: player.x + 8, y: player.y - 4, vy:-1.5,
+      text: '-' + dmg, life: 30, color: '#ff6644', size: 13 });
+  }
+  // HUD
+  if (hud) {
+    const remaining = Math.max(0, t.waveRemaining);
+    const total = t.waveTotal;
+    hud.style.display = 'block';
+    hud.innerHTML =
+      `<span class="floor">🗼 Floor ${t.floor}</span>` +
+      ` · <span class="mod">${t.modifierName}</span>` +
+      `<span class="waves">${total - remaining}/${total} cleared</span>` +
+      `<span class="best">best: ${game.towerBestFloor || 0}</span>`;
+  }
+}
+
+// Query helpers used by the rest of the engine
+function towerBasicOnly() {
+  return !!(game.tower && game.tower.modifier === 'basicOnly');
+}
+function towerSpeedMul()  { return game._towerSpeedMul  || 1; }
+function towerHpMul()     { return game._towerHpMul     || 1; }
+function towerPlayerDmgMul()  { return game._towerPlayerDmgMul  || 1; }
+function towerPlayerTakeMul() { return game._towerPlayerTakeMul || 1; }
+function towerVampiric()  { return !!(game.tower && game.tower.modifier === 'regen'); }
 
 function checkMilestones() {
   if (!player.milestonesUnlocked) player.milestonesUnlocked = {};
@@ -10983,6 +11497,29 @@ function _spawnPlayerTrail() {
   });
 }
 
+// Draw player's chosen name + level above their head (in screen coords, post-chibi restore).
+function _drawPlayerNameTag(sx, sy) {
+  const name = (player.look && player.look.name) || '';
+  const lvl  = player.level || 1;
+  const label = name ? `${name}  Lv${lvl}` : `Lv${lvl}`;
+  ctx.save();
+  ctx.font = 'bold 11px "Trebuchet MS", sans-serif';
+  ctx.textAlign = 'center';
+  const tw = ctx.measureText(label).width + 10;
+  const tx = sx + player.w / 2;
+  const ty = sy - 10;
+  // Tag backdrop
+  ctx.fillStyle = 'rgba(20,14,30,0.72)';
+  ctx.fillRect(tx - tw / 2, ty - 10, tw, 14);
+  ctx.strokeStyle = 'rgba(255,220,140,0.55)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(tx - tw / 2 + 0.5, ty - 10 + 0.5, tw - 1, 13);
+  // Text
+  ctx.fillStyle = '#ffeeaa';
+  ctx.fillText(label, tx, ty);
+  ctx.restore();
+}
+
 function drawPlayer() {
   const sx = Math.round(player.x - game.camera.x);
   const sy = Math.round(player.y);
@@ -11029,12 +11566,14 @@ function drawPlayer() {
     }
     _chibiRestore();
     _drawCuteFaceOverlay(sx, sy);
+    _drawPlayerNameTag(sx, sy);
     return;
   }
   // --- Cute chibi character (procedural, uses CUTE_PAL + CUTE_CLASS_COLORS) ---
   drawCuteCharacter(sx, sy);
   _chibiRestore();
   _drawCuteFaceOverlay(sx, sy);
+  _drawPlayerNameTag(sx, sy);
   return;
   /* legacy elaborate renderer kept below for reference — unreachable */
   if (false) {
@@ -11799,6 +12338,663 @@ function _drawCuteFaceOverlay(sx, sy) {
   ctx.restore();
 }
 
+// Unified cute chibi mob renderer — 2-shade flat style, 1px stroke, no gradients.
+// Used for all grunt mobs; bosses keep their signature draws.
+// =========================================================================
+// CUTE MOB RENDERER — Dragon Quest-inspired cel-shading
+// Hard 2-tone lighting, thick 2 px outer stroke, iconic per-type silhouettes,
+// glossy anime eyes with a large highlight. No gradients.
+// =========================================================================
+
+// Cel-shade helper — fill a path with base color, then clip & fill the
+// lower-right half with the shade color for that crisp 2-tone lighting.
+// The light source is assumed to be upper-left (-1, -1 normalized).
+function _celFillPath(pathFn, base, shade, cx, cy, r) {
+  ctx.save();
+  // Base layer
+  ctx.fillStyle = base;
+  pathFn();
+  ctx.fill();
+  // Clip to the same silhouette and fill the shadow wedge
+  ctx.save();
+  ctx.beginPath();
+  pathFn();
+  ctx.clip();
+  ctx.fillStyle = shade;
+  ctx.beginPath();
+  // Shadow polygon — a diagonal cut from upper-right to lower-left
+  ctx.moveTo(cx - r * 1.4, cy + r * 0.15);
+  ctx.lineTo(cx + r * 1.4, cy - r * 0.55);
+  ctx.lineTo(cx + r * 1.6, cy + r * 1.6);
+  ctx.lineTo(cx - r * 1.6, cy + r * 1.6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+  ctx.restore();
+}
+
+// Thick outer stroke along a path — DQ-style 2 px black contour.
+function _celStroke(pathFn, color, width) {
+  ctx.save();
+  ctx.strokeStyle = color || '#150818';
+  ctx.lineWidth = width || 2;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  pathFn();
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Glossy anime-style eye: white sclera, dark pupil, two white highlights.
+function _celEye(cx, cy, r, f, stroke, pupilCol, evil) {
+  // Sclera
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  // Outline
+  ctx.strokeStyle = stroke; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  // Pupil — tall oval for anime look, shifted by facing
+  const px = cx + f * (r * 0.35);
+  const py = cy + 0.3;
+  ctx.fillStyle = pupilCol || stroke;
+  ctx.beginPath(); ctx.ellipse(px, py, r * 0.55, r * 0.72, 0, 0, Math.PI * 2); ctx.fill();
+  // Evil red iris glow
+  if (evil) {
+    ctx.fillStyle = '#ff3355';
+    ctx.beginPath(); ctx.ellipse(px, py, r * 0.40, r * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2a0008';
+    ctx.beginPath(); ctx.ellipse(px, py, r * 0.22, r * 0.32, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  // Main glossy highlight (upper-left)
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.ellipse(px - r * 0.25, py - r * 0.35, r * 0.30, r * 0.40, 0, 0, Math.PI * 2); ctx.fill();
+  // Small secondary highlight
+  ctx.beginPath(); ctx.arc(px + r * 0.25, py + r * 0.25, r * 0.12, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawCuteMob(m, sx, sy) {
+  const t      = m.type;
+  const f      = m.facing || 1;
+  const bob    = Math.sin(m.animTimer * 0.02) * 1.5;
+  const cx     = sx + m.w / 2;
+  const cy     = sy + m.h / 2 + bob;
+  const base   = m.color || '#a0c890';
+  const shade  = _mixHex(base, '#1a0818', 0.40);   // cel-shade tone (not pure black)
+  const stroke = '#1a0818';                         // near-black outline
+  const acc    = m.shell || _mixHex(base, '#000000', 0.45);
+  const accShd = _mixHex(acc, '#1a0818', 0.40);
+  const meanTypes = new Set(['horny','stump','zombie','skeleton','scorpion','wraith','mummy']);
+  const evil = meanTypes.has(t);
+
+  // ===== DISPATCH — each type gets an iconic silhouette =====
+  if (t === 'slime') { _drawDQSlime(m, sx, sy, cx, cy, f, base, shade, stroke, evil); return; }
+  if (t === 'snail') { _drawDQSnail(m, sx, sy, cx, cy, f, base, shade, acc, accShd, stroke, evil); return; }
+  if (t === 'mushroom' || t === 'orange') { _drawDQMushroom(m, sx, sy, cx, cy, f, base, shade, acc, accShd, stroke, evil, t === 'orange'); return; }
+  if (t === 'horny')   { _drawDQHorny(m, sx, sy, cx, cy, f, base, shade, acc, accShd, stroke); return; }
+  if (t === 'stump')   { _drawDQStump(m, sx, sy, cx, cy, f, base, shade, acc, accShd, stroke); return; }
+  if (t === 'zombie')  { _drawDQZombie(m, sx, sy, cx, cy, f, base, shade, acc, accShd, stroke); return; }
+  if (t === 'mummy')   { _drawDQMummy(m, sx, sy, cx, cy, f, base, shade, stroke); return; }
+  if (t === 'skeleton'){ _drawDQSkeleton(m, sx, sy, cx, cy, f, stroke); return; }
+  if (t === 'wraith')  { _drawDQWraith(m, sx, sy, cx, cy, f, base, shade, stroke); return; }
+  if (t === 'scorpion'){ _drawDQScorpion(m, sx, sy, cx, cy, f, base, shade, acc, accShd, stroke); return; }
+
+  // Fallback — generic chibi blob
+  _drawDQBlob(m, sx, sy, cx, cy, f, base, shade, stroke, evil);
+}
+
+// ---- SLIME — iconic teardrop shape ----
+function _drawDQSlime(m, sx, sy, cx, cy, f, base, shade, stroke, evil) {
+  const sq = Math.sin(m.animTimer * 0.03) * 1.5;
+  const bodyW = m.w * 0.48 + sq;
+  const bodyH = m.h * 0.55 - sq;
+  const byTop = sy + m.h - bodyH * 2 + 2;
+  const byMid = sy + m.h - bodyH;
+  const byBot = sy + m.h - 2;
+  const path = () => {
+    ctx.beginPath();
+    // Teardrop: rounded bottom, pointed top
+    ctx.moveTo(cx, byTop - 2);
+    ctx.quadraticCurveTo(cx + bodyW * 0.5, byTop + 2, cx + bodyW, byMid);
+    ctx.quadraticCurveTo(cx + bodyW * 1.05, byBot, cx + bodyW * 0.7, byBot);
+    ctx.quadraticCurveTo(cx, byBot + 2, cx - bodyW * 0.7, byBot);
+    ctx.quadraticCurveTo(cx - bodyW * 1.05, byBot, cx - bodyW, byMid);
+    ctx.quadraticCurveTo(cx - bodyW * 0.5, byTop + 2, cx, byTop - 2);
+    ctx.closePath();
+  };
+  _celFillPath(path, base, shade, cx, (byTop + byBot) / 2, bodyW);
+  _celStroke(path, stroke, 2);
+  // Big eyes
+  const eyeR = 4.2, eyeY = byMid - 2;
+  _celEye(cx - bodyW * 0.38, eyeY, eyeR, f, stroke, null, evil);
+  _celEye(cx + bodyW * 0.38, eyeY, eyeR, f, stroke, null, evil);
+  // Happy DQ smile
+  ctx.strokeStyle = stroke; ctx.lineWidth = 1.8;
+  ctx.beginPath(); ctx.arc(cx, eyeY + 5, 3.5, 0.15, Math.PI - 0.15); ctx.stroke();
+  // Gloss spot on body
+  ctx.fillStyle = '#ffffff80';
+  ctx.beginPath(); ctx.ellipse(cx - bodyW * 0.45, byMid - 3, bodyW * 0.18, 2, -0.4, 0, Math.PI * 2); ctx.fill();
+}
+
+// ---- SNAIL — DQ-style round shell on a stubby body ----
+function _drawDQSnail(m, sx, sy, cx, cy, f, base, shade, acc, accShd, stroke, evil) {
+  const bodyCY = sy + m.h - 8;
+  const bodyW = m.w * 0.46;
+  // Body foot (squat oval)
+  const bodyPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx - bodyW, bodyCY + 2);
+    ctx.quadraticCurveTo(cx - bodyW - 3, bodyCY + 6, cx - bodyW * 0.6, bodyCY + 7);
+    ctx.lineTo(cx + bodyW * 0.8, bodyCY + 7);
+    ctx.quadraticCurveTo(cx + bodyW + 3, bodyCY + 6, cx + bodyW + 2, bodyCY);
+    ctx.quadraticCurveTo(cx + bodyW * 0.4, bodyCY - 6, cx - bodyW * 0.6, bodyCY - 5);
+    ctx.quadraticCurveTo(cx - bodyW - 2, bodyCY - 3, cx - bodyW, bodyCY + 2);
+    ctx.closePath();
+  };
+  _celFillPath(bodyPath, base, shade, cx, bodyCY, bodyW);
+  _celStroke(bodyPath, stroke, 2);
+  // Round shell on back
+  const scx = cx + f * -3, scy = sy + 10, sR = Math.min(13, m.w * 0.42);
+  const shellPath = () => { ctx.beginPath(); ctx.arc(scx, scy, sR, 0, Math.PI * 2); ctx.closePath(); };
+  _celFillPath(shellPath, acc, accShd, scx, scy, sR);
+  _celStroke(shellPath, stroke, 2);
+  // Spiral — two concentric circles
+  ctx.strokeStyle = stroke; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(scx - 2, scy - 1, sR * 0.55, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(scx - 3, scy - 2, sR * 0.25, 0, Math.PI * 2); ctx.stroke();
+  // Gloss highlight on shell
+  ctx.fillStyle = '#ffffff60';
+  ctx.beginPath(); ctx.ellipse(scx - sR * 0.45, scy - sR * 0.55, sR * 0.3, sR * 0.18, -0.4, 0, Math.PI * 2); ctx.fill();
+  // Eyes with antenna stalks
+  const eyeY = bodyCY - 6;
+  ctx.strokeStyle = stroke; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(cx + f * 4, bodyCY - 2); ctx.lineTo(cx + f * 6, eyeY - 4); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx + f * 9, bodyCY - 3); ctx.lineTo(cx + f * 11, eyeY - 6); ctx.stroke();
+  _celEye(cx + f * 6, eyeY - 4, 3, f, stroke, null, evil);
+  _celEye(cx + f * 11, eyeY - 6, 3, f, stroke, null, evil);
+  // Smile
+  ctx.strokeStyle = stroke; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(cx + f * 2, bodyCY, 2.5, 0.2, Math.PI - 0.2); ctx.stroke();
+}
+
+// ---- MUSHROOM / ORANGE MUSHROOM — dome cap + stubby body ----
+function _drawDQMushroom(m, sx, sy, cx, cy, f, base, shade, acc, accShd, stroke, evil, isOrange) {
+  // Body (stem) — rounded trapezoid
+  const byTop = sy + 16, byBot = sy + m.h - 2;
+  const bW = m.w * 0.36;
+  const bodyPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx - bW, byTop);
+    ctx.quadraticCurveTo(cx - bW - 2, (byTop + byBot) / 2, cx - bW * 0.95, byBot - 2);
+    ctx.quadraticCurveTo(cx - bW * 0.6, byBot + 2, cx, byBot + 2);
+    ctx.quadraticCurveTo(cx + bW * 0.6, byBot + 2, cx + bW * 0.95, byBot - 2);
+    ctx.quadraticCurveTo(cx + bW + 2, (byTop + byBot) / 2, cx + bW, byTop);
+    ctx.closePath();
+  };
+  _celFillPath(bodyPath, base, shade, cx, (byTop + byBot) / 2, bW);
+  _celStroke(bodyPath, stroke, 2);
+  // Cap — big round dome
+  const capCY = sy + 13;
+  const capW = m.w * 0.55;
+  const capPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx - capW, capCY + 2);
+    ctx.quadraticCurveTo(cx - capW, capCY - capW * 0.9, cx, capCY - capW * 0.75);
+    ctx.quadraticCurveTo(cx + capW, capCY - capW * 0.9, cx + capW, capCY + 2);
+    ctx.quadraticCurveTo(cx + capW * 0.6, capCY + 5, cx, capCY + 5);
+    ctx.quadraticCurveTo(cx - capW * 0.6, capCY + 5, cx - capW, capCY + 2);
+    ctx.closePath();
+  };
+  _celFillPath(capPath, acc, accShd, cx, capCY, capW);
+  _celStroke(capPath, stroke, 2);
+  // Polka dots on cap
+  ctx.fillStyle = '#ffffff';
+  const dotCol = () => { ctx.strokeStyle = stroke; ctx.lineWidth = 1.2; };
+  [[-8, -6, 3], [6, -3, 2.5], [-2, -10, 2]].forEach(([dx, dy, r]) => {
+    ctx.beginPath(); ctx.arc(cx + dx, capCY + dy, r, 0, Math.PI * 2); ctx.fill();
+    dotCol(); ctx.beginPath(); ctx.arc(cx + dx, capCY + dy, r, 0, Math.PI * 2); ctx.stroke();
+  });
+  // Eyes on stem
+  const eyeY = byTop + 5;
+  _celEye(cx - 5, eyeY, 3.5, f, stroke, null, isOrange);
+  _celEye(cx + 5, eyeY, 3.5, f, stroke, null, isOrange);
+  // Smile / frown
+  ctx.strokeStyle = stroke; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  if (isOrange) ctx.arc(cx, eyeY + 7, 2.5, Math.PI + 0.3, -0.3);  // orange is grumpy
+  else ctx.arc(cx, eyeY + 6, 2.5, 0.2, Math.PI - 0.2);
+  ctx.stroke();
+  // Blush
+  if (!isOrange) {
+    ctx.fillStyle = 'rgba(255,150,170,0.55)';
+    ctx.beginPath(); ctx.arc(cx - 9, eyeY + 4, 1.8, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + 9, eyeY + 4, 1.8, 0, Math.PI * 2); ctx.fill();
+  }
+  // Little feet
+  ctx.fillStyle = stroke;
+  ctx.fillRect(cx - bW, byBot, 5, 3);
+  ctx.fillRect(cx + bW - 5, byBot, 5, 3);
+}
+
+// ---- HORNED MUSHROOM — evil purple cap with bone horns ----
+function _drawDQHorny(m, sx, sy, cx, cy, f, base, shade, acc, accShd, stroke) {
+  // Stem body
+  const byTop = sy + 20, byBot = sy + m.h - 2;
+  const bW = m.w * 0.36;
+  const bodyPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx - bW, byTop);
+    ctx.quadraticCurveTo(cx - bW - 2, (byTop + byBot) / 2, cx - bW * 0.9, byBot - 2);
+    ctx.quadraticCurveTo(cx - bW * 0.5, byBot + 2, cx, byBot + 2);
+    ctx.quadraticCurveTo(cx + bW * 0.5, byBot + 2, cx + bW * 0.9, byBot - 2);
+    ctx.quadraticCurveTo(cx + bW + 2, (byTop + byBot) / 2, cx + bW, byTop);
+    ctx.closePath();
+  };
+  _celFillPath(bodyPath, base, shade, cx, (byTop + byBot) / 2, bW);
+  _celStroke(bodyPath, stroke, 2);
+  // Horns (bone-white, triangular, point outward)
+  const hornPath = (dir) => {
+    ctx.beginPath();
+    ctx.moveTo(cx + dir * 10, sy + 8);
+    ctx.lineTo(cx + dir * 15, sy - 4);
+    ctx.lineTo(cx + dir * 6, sy + 5);
+    ctx.closePath();
+  };
+  ctx.fillStyle = '#efe0b0';
+  hornPath(-1); ctx.fill();
+  hornPath(1);  ctx.fill();
+  ctx.fillStyle = '#a08858';
+  ctx.save(); ctx.beginPath(); hornPath(-1); ctx.clip();
+  ctx.fillRect(cx - 13, sy - 1, 10, 12); ctx.restore();
+  ctx.save(); ctx.beginPath(); hornPath(1); ctx.clip();
+  ctx.fillRect(cx + 5, sy - 1, 10, 12); ctx.restore();
+  _celStroke(() => hornPath(-1), stroke, 1.8);
+  _celStroke(() => hornPath(1),  stroke, 1.8);
+  // Evil dark-purple cap
+  const capCY = sy + 16, capW = m.w * 0.52;
+  const capPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx - capW, capCY + 3);
+    ctx.quadraticCurveTo(cx - capW, capCY - capW * 0.85, cx, capCY - capW * 0.75);
+    ctx.quadraticCurveTo(cx + capW, capCY - capW * 0.85, cx + capW, capCY + 3);
+    ctx.quadraticCurveTo(cx + capW * 0.6, capCY + 6, cx, capCY + 6);
+    ctx.quadraticCurveTo(cx - capW * 0.6, capCY + 6, cx - capW, capCY + 3);
+    ctx.closePath();
+  };
+  _celFillPath(capPath, acc, accShd, cx, capCY, capW);
+  _celStroke(capPath, stroke, 2);
+  // Evil red eyes with glow
+  const eyeY = byTop + 5;
+  // Red glow halo behind eyes
+  ctx.fillStyle = 'rgba(255,40,80,0.35)';
+  ctx.beginPath(); ctx.arc(cx - 5, eyeY, 5.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx + 5, eyeY, 5.5, 0, Math.PI * 2); ctx.fill();
+  _celEye(cx - 5, eyeY, 3.3, f, stroke, null, true);
+  _celEye(cx + 5, eyeY, 3.3, f, stroke, null, true);
+  // Angry brow
+  ctx.strokeStyle = stroke; ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - 10, eyeY - 4); ctx.lineTo(cx - 2,  eyeY - 2);
+  ctx.moveTo(cx + 10, eyeY - 4); ctx.lineTo(cx + 2,  eyeY - 2);
+  ctx.stroke();
+  // Sharp fang mouth
+  ctx.fillStyle = stroke;
+  ctx.fillRect(cx - 3, eyeY + 5, 6, 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.moveTo(cx - 2, eyeY + 5); ctx.lineTo(cx - 1, eyeY + 8); ctx.lineTo(cx, eyeY + 5); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(cx + 1, eyeY + 5); ctx.lineTo(cx + 2, eyeY + 8); ctx.lineTo(cx + 3, eyeY + 5); ctx.closePath(); ctx.fill();
+  // Clawed feet
+  ctx.fillStyle = stroke;
+  ctx.fillRect(cx - bW, byBot, 5, 3);
+  ctx.fillRect(cx + bW - 5, byBot, 5, 3);
+}
+
+// ---- STUMP — woody barrel with angry face ----
+function _drawDQStump(m, sx, sy, cx, cy, f, base, shade, acc, accShd, stroke) {
+  // Main body (barrel)
+  const byTop = sy + 8, byBot = sy + m.h - 2;
+  const bW = m.w * 0.44;
+  const bodyPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx - bW, byTop);
+    ctx.quadraticCurveTo(cx - bW - 2, (byTop + byBot) / 2, cx - bW, byBot - 2);
+    ctx.quadraticCurveTo(cx - bW * 0.6, byBot + 2, cx, byBot + 2);
+    ctx.quadraticCurveTo(cx + bW * 0.6, byBot + 2, cx + bW, byBot - 2);
+    ctx.quadraticCurveTo(cx + bW + 2, (byTop + byBot) / 2, cx + bW, byTop);
+    ctx.closePath();
+  };
+  _celFillPath(bodyPath, base, shade, cx, (byTop + byBot) / 2, bW);
+  _celStroke(bodyPath, stroke, 2);
+  // Bark grain lines
+  ctx.strokeStyle = shade; ctx.lineWidth = 1.4;
+  for (let i = 0; i < 4; i++) {
+    const lx = cx - bW * 0.7 + i * (bW * 0.5);
+    ctx.beginPath();
+    ctx.moveTo(lx, byTop + 4);
+    ctx.quadraticCurveTo(lx + 2, (byTop + byBot) / 2, lx, byBot - 4);
+    ctx.stroke();
+  }
+  // Top cross-section — wood rings
+  ctx.fillStyle = stroke;
+  ctx.beginPath(); ctx.ellipse(cx, byTop, bW, 5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = acc;
+  ctx.beginPath(); ctx.ellipse(cx, byTop, bW - 1.5, 4, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = accShd;
+  ctx.beginPath(); ctx.ellipse(cx + 1, byTop + 0.5, (bW - 1.5) * 0.6, 2.2, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = stroke; ctx.lineWidth = 1;
+  for (let r = 1.5; r < bW - 1; r += 2.5) {
+    ctx.beginPath(); ctx.ellipse(cx, byTop, r, Math.max(1.2, r * 4 / bW), 0, 0, Math.PI * 2); ctx.stroke();
+  }
+  // Leaf sprout
+  ctx.fillStyle = '#6cbb4a';
+  ctx.beginPath(); ctx.ellipse(cx + 4, byTop - 3, 4, 2.5, -0.3, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = stroke; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.ellipse(cx + 4, byTop - 3, 4, 2.5, -0.3, 0, Math.PI * 2); ctx.stroke();
+  // Angry red eyes
+  const eyeY = byTop + 11;
+  ctx.fillStyle = 'rgba(255,60,60,0.3)';
+  ctx.beginPath(); ctx.arc(cx - 6, eyeY, 5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx + 6, eyeY, 5, 0, Math.PI * 2); ctx.fill();
+  _celEye(cx - 6, eyeY, 3.3, f, stroke, null, true);
+  _celEye(cx + 6, eyeY, 3.3, f, stroke, null, true);
+  // Angry brow
+  ctx.strokeStyle = stroke; ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - 11, eyeY - 4); ctx.lineTo(cx - 2, eyeY - 2);
+  ctx.moveTo(cx + 11, eyeY - 4); ctx.lineTo(cx + 2, eyeY - 2);
+  ctx.stroke();
+  // Scowl with teeth
+  ctx.strokeStyle = stroke; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(cx, eyeY + 9, 4, Math.PI + 0.25, -0.25); ctx.stroke();
+  ctx.fillStyle = '#f0e0b0';
+  ctx.fillRect(cx - 3, eyeY + 5, 1.5, 2);
+  ctx.fillRect(cx + 1.5, eyeY + 5, 1.5, 2);
+}
+
+// ---- ZOMBIE (rotted mushroom) ----
+function _drawDQZombie(m, sx, sy, cx, cy, f, base, shade, acc, accShd, stroke) {
+  // Rotted stem body (similar to horny but greener/darker)
+  const byTop = sy + 18, byBot = sy + m.h - 2;
+  const bW = m.w * 0.36;
+  const bodyPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx - bW, byTop);
+    ctx.quadraticCurveTo(cx - bW - 2, (byTop + byBot) / 2, cx - bW * 0.9, byBot - 2);
+    ctx.quadraticCurveTo(cx - bW * 0.5, byBot + 2, cx, byBot + 2);
+    ctx.quadraticCurveTo(cx + bW * 0.5, byBot + 2, cx + bW * 0.9, byBot - 2);
+    ctx.quadraticCurveTo(cx + bW + 2, (byTop + byBot) / 2, cx + bW, byTop);
+    ctx.closePath();
+  };
+  _celFillPath(bodyPath, base, shade, cx, (byTop + byBot) / 2, bW);
+  _celStroke(bodyPath, stroke, 2);
+  // Rotted cap (drippy)
+  const capCY = sy + 14, capW = m.w * 0.52;
+  const capPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx - capW, capCY + 4);
+    ctx.quadraticCurveTo(cx - capW, capCY - capW * 0.8, cx, capCY - capW * 0.72);
+    ctx.quadraticCurveTo(cx + capW, capCY - capW * 0.8, cx + capW, capCY + 4);
+    // Drippy bottom edge
+    ctx.quadraticCurveTo(cx + capW * 0.7, capCY + 8, cx + capW * 0.4, capCY + 5);
+    ctx.quadraticCurveTo(cx + capW * 0.15, capCY + 9, cx - capW * 0.15, capCY + 6);
+    ctx.quadraticCurveTo(cx - capW * 0.4, capCY + 10, cx - capW * 0.7, capCY + 6);
+    ctx.closePath();
+  };
+  _celFillPath(capPath, acc, accShd, cx, capCY, capW);
+  _celStroke(capPath, stroke, 2);
+  // Rot holes (dark)
+  ctx.fillStyle = '#1a0f14';
+  ctx.beginPath(); ctx.arc(cx - 7, capCY - 2, 2.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx + 6, capCY - 4, 2, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#4a7a3a';
+  ctx.beginPath(); ctx.arc(cx - 7, capCY - 2, 1.2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx + 6, capCY - 4, 1, 0, Math.PI * 2); ctx.fill();
+  // Dead X eyes
+  const eyeY = byTop + 5;
+  ctx.strokeStyle = stroke; ctx.lineWidth = 2;
+  for (const ex of [cx - 6, cx + 6]) {
+    ctx.beginPath(); ctx.moveTo(ex - 2.5, eyeY - 2.5); ctx.lineTo(ex + 2.5, eyeY + 2.5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ex + 2.5, eyeY - 2.5); ctx.lineTo(ex - 2.5, eyeY + 2.5); ctx.stroke();
+  }
+  // Drooling tongue
+  ctx.fillStyle = '#4a7a3a';
+  ctx.fillRect(cx - 2, eyeY + 5, 4, 4);
+  ctx.strokeStyle = stroke; ctx.lineWidth = 1.5;
+  ctx.strokeRect(cx - 2, eyeY + 5, 4, 4);
+  ctx.fillStyle = '#7abb4a';
+  ctx.fillRect(cx - 1, eyeY + 9, 2, 2);
+}
+
+// ---- MUMMY — bandaged round pal ----
+function _drawDQMummy(m, sx, sy, cx, cy, f, base, shade, stroke) {
+  const bodyR = Math.min(m.w, m.h) * 0.44;
+  const bodyCY = sy + m.h / 2 + 2;
+  const path = () => { ctx.beginPath(); ctx.arc(cx, bodyCY, bodyR, 0, Math.PI * 2); ctx.closePath(); };
+  _celFillPath(path, base, shade, cx, bodyCY, bodyR);
+  _celStroke(path, stroke, 2);
+  // Bandage wraps — diagonal strips
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, bodyCY, bodyR - 1, 0, Math.PI * 2); ctx.clip();
+  ctx.strokeStyle = '#ece0b4'; ctx.lineWidth = 3;
+  for (let i = 0; i < 5; i++) {
+    const y = bodyCY - bodyR + i * (bodyR * 0.48);
+    ctx.beginPath();
+    ctx.moveTo(cx - bodyR - 5, y);
+    ctx.lineTo(cx + bodyR + 5, y + 3);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#b8a680'; ctx.lineWidth = 1;
+  for (let i = 0; i < 5; i++) {
+    const y = bodyCY - bodyR + i * (bodyR * 0.48) + 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - bodyR - 5, y);
+    ctx.lineTo(cx + bodyR + 5, y + 3);
+    ctx.stroke();
+  }
+  ctx.restore();
+  // Eye slits (one covered, one glowing)
+  const eyeY = bodyCY - 2;
+  ctx.fillStyle = stroke;
+  ctx.fillRect(cx - 8, eyeY - 2, 7, 4);
+  // Right eye visible
+  _celEye(cx + 6, eyeY, 3.3, f, stroke, null, true);
+}
+
+// ---- SKELETON — skull + ribcage ----
+function _drawDQSkeleton(m, sx, sy, cx, cy, f, stroke) {
+  const base = '#e8e0c8', shade = '#a89a78';
+  // Skull head
+  const headR = m.w * 0.32;
+  const headCY = sy + headR + 3;
+  const headPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx - headR, headCY);
+    ctx.quadraticCurveTo(cx - headR, headCY - headR * 1.1, cx, headCY - headR * 1.05);
+    ctx.quadraticCurveTo(cx + headR, headCY - headR * 1.1, cx + headR, headCY);
+    ctx.quadraticCurveTo(cx + headR * 0.85, headCY + headR * 0.6, cx + headR * 0.55, headCY + headR * 0.7);
+    ctx.lineTo(cx + headR * 0.4, headCY + headR * 1.0);
+    ctx.lineTo(cx - headR * 0.4, headCY + headR * 1.0);
+    ctx.lineTo(cx - headR * 0.55, headCY + headR * 0.7);
+    ctx.quadraticCurveTo(cx - headR * 0.85, headCY + headR * 0.6, cx - headR, headCY);
+    ctx.closePath();
+  };
+  _celFillPath(headPath, base, shade, cx, headCY, headR);
+  _celStroke(headPath, stroke, 2);
+  // Hollow eye sockets (large, menacing)
+  ctx.fillStyle = stroke;
+  ctx.beginPath(); ctx.ellipse(cx - headR * 0.42, headCY, headR * 0.32, headR * 0.38, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(cx + headR * 0.42, headCY, headR * 0.32, headR * 0.38, 0, 0, Math.PI * 2); ctx.fill();
+  // Glowing red pupils
+  ctx.fillStyle = '#ff4466';
+  ctx.beginPath(); ctx.arc(cx - headR * 0.42 + f * 1.5, headCY + 0.5, headR * 0.12, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx + headR * 0.42 + f * 1.5, headCY + 0.5, headR * 0.12, 0, Math.PI * 2); ctx.fill();
+  // Nose triangle
+  ctx.fillStyle = stroke;
+  ctx.beginPath();
+  ctx.moveTo(cx, headCY + 2);
+  ctx.lineTo(cx - 2, headCY + 6);
+  ctx.lineTo(cx + 2, headCY + 6);
+  ctx.closePath(); ctx.fill();
+  // Teeth row
+  ctx.fillStyle = stroke;
+  ctx.fillRect(cx - headR * 0.5, headCY + headR * 0.72, headR, 2);
+  for (let i = 0; i < 4; i++) {
+    ctx.fillRect(cx - headR * 0.45 + i * headR * 0.3, headCY + headR * 0.74, 1, 3);
+  }
+  // Ribcage body (simple bars)
+  const bodyTop = sy + headR * 2 + 4, bodyBot = sy + m.h - 2;
+  const bW = m.w * 0.28;
+  const bodyPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx - bW, bodyTop);
+    ctx.quadraticCurveTo(cx - bW - 1, (bodyTop + bodyBot) / 2, cx - bW + 1, bodyBot);
+    ctx.lineTo(cx + bW - 1, bodyBot);
+    ctx.quadraticCurveTo(cx + bW + 1, (bodyTop + bodyBot) / 2, cx + bW, bodyTop);
+    ctx.closePath();
+  };
+  _celFillPath(bodyPath, base, shade, cx, (bodyTop + bodyBot) / 2, bW);
+  _celStroke(bodyPath, stroke, 2);
+  // Rib lines
+  ctx.strokeStyle = stroke; ctx.lineWidth = 1.3;
+  for (let i = 0; i < 3; i++) {
+    const ry = bodyTop + 3 + i * 4;
+    ctx.beginPath();
+    ctx.moveTo(cx - bW + 1, ry); ctx.quadraticCurveTo(cx, ry + 1.5, cx + bW - 1, ry);
+    ctx.stroke();
+  }
+  // Spine
+  ctx.beginPath(); ctx.moveTo(cx, bodyTop + 2); ctx.lineTo(cx, bodyBot - 2); ctx.stroke();
+}
+
+// ---- WRAITH — ghostly robed figure ----
+function _drawDQWraith(m, sx, sy, cx, cy, f, base, shade, stroke) {
+  // Robed ghost — rounded top, wavy bottom
+  const byTop = sy + 6, byBot = sy + m.h - 2;
+  const bW = m.w * 0.44;
+  const t = Math.sin(m.animTimer * 0.04) * 2;
+  const path = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx - bW, byTop + bW * 0.4);
+    ctx.quadraticCurveTo(cx - bW, byTop - bW * 0.1, cx, byTop - bW * 0.15);
+    ctx.quadraticCurveTo(cx + bW, byTop - bW * 0.1, cx + bW, byTop + bW * 0.4);
+    ctx.lineTo(cx + bW, byBot - 6);
+    // Wavy bottom (ghost tail)
+    ctx.quadraticCurveTo(cx + bW * 0.75, byBot + t,      cx + bW * 0.50, byBot - 4);
+    ctx.quadraticCurveTo(cx + bW * 0.25, byBot + t + 2,  cx,             byBot - 4);
+    ctx.quadraticCurveTo(cx - bW * 0.25, byBot + t,      cx - bW * 0.50, byBot - 4);
+    ctx.quadraticCurveTo(cx - bW * 0.75, byBot + t + 2,  cx - bW,        byBot - 6);
+    ctx.closePath();
+  };
+  // Semi-transparent ghostly fill
+  ctx.save();
+  ctx.globalAlpha = 0.85;
+  _celFillPath(path, base, shade, cx, (byTop + byBot) / 2, bW);
+  ctx.restore();
+  _celStroke(path, stroke, 2);
+  // Glow halo behind
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = base + '22';
+  ctx.beginPath(); ctx.arc(cx, (byTop + byBot) / 2, bW + 6, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  // Hollow glowing eyes
+  const eyeY = byTop + bW * 0.35;
+  ctx.fillStyle = stroke;
+  ctx.beginPath(); ctx.ellipse(cx - 5, eyeY, 3.2, 4, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(cx + 5, eyeY, 3.2, 4, 0, 0, Math.PI * 2); ctx.fill();
+  // Glowing pupils
+  ctx.fillStyle = '#aaffee';
+  ctx.beginPath(); ctx.arc(cx - 5 + f * 1, eyeY, 1.3, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx + 5 + f * 1, eyeY, 1.3, 0, Math.PI * 2); ctx.fill();
+  // Small glow highlight
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(Math.round(cx - 5 + f * 1) - 1, Math.round(eyeY) - 1, 1, 1);
+  ctx.fillRect(Math.round(cx + 5 + f * 1) - 1, Math.round(eyeY) - 1, 1, 1);
+}
+
+// ---- SCORPION — carapace + tail + claws ----
+function _drawDQScorpion(m, sx, sy, cx, cy, f, base, shade, acc, accShd, stroke) {
+  // Body (flatter oval)
+  const bodyCY = sy + m.h * 0.62;
+  const bW = m.w * 0.42, bH = m.h * 0.28;
+  const bodyPath = () => { ctx.beginPath(); ctx.ellipse(cx, bodyCY, bW, bH, 0, 0, Math.PI * 2); ctx.closePath(); };
+  _celFillPath(bodyPath, base, shade, cx, bodyCY, bW);
+  _celStroke(bodyPath, stroke, 2);
+  // Segmented carapace lines
+  ctx.strokeStyle = shade; ctx.lineWidth = 1.3;
+  for (let i = -2; i <= 2; i++) {
+    const sx2 = cx + i * (bW * 0.3);
+    ctx.beginPath();
+    ctx.moveTo(sx2, bodyCY - bH + 2);
+    ctx.quadraticCurveTo(sx2, bodyCY, sx2, bodyCY + bH - 2);
+    ctx.stroke();
+  }
+  // Claws (two pincers at front)
+  const clawY = bodyCY - 2;
+  const clawX = cx + f * (bW + 4);
+  for (const side of [-1, 1]) {
+    const pcx = cx + side * (bW + 3);
+    const pcy = bodyCY + 2;
+    const clawPath = () => {
+      ctx.beginPath();
+      ctx.moveTo(pcx, pcy);
+      ctx.quadraticCurveTo(pcx + side * 6, pcy - 5, pcx + side * 8, pcy - 2);
+      ctx.lineTo(pcx + side * 6, pcy + 1);
+      ctx.quadraticCurveTo(pcx + side * 4, pcy + 3, pcx, pcy);
+      ctx.closePath();
+    };
+    _celFillPath(clawPath, acc, accShd, pcx, pcy, 4);
+    _celStroke(clawPath, stroke, 1.8);
+  }
+  // Segmented tail curled over back
+  const tailSeg = 5;
+  let tx = cx + f * -bW * 0.4, ty = bodyCY - bH;
+  for (let i = 0; i < tailSeg; i++) {
+    const rad = 4 - i * 0.4;
+    const angle = -Math.PI * 0.5 + i * 0.4 * f;
+    tx += Math.cos(angle) * 4 * f;
+    ty += Math.sin(angle) * 4;
+    const segPath = () => { ctx.beginPath(); ctx.arc(tx, ty, rad, 0, Math.PI * 2); ctx.closePath(); };
+    _celFillPath(segPath, acc, accShd, tx, ty, rad);
+    _celStroke(segPath, stroke, 1.6);
+  }
+  // Stinger at end
+  ctx.fillStyle = '#ffee88';
+  ctx.beginPath();
+  ctx.moveTo(tx, ty - 1);
+  ctx.lineTo(tx + f * 4, ty - 5);
+  ctx.lineTo(tx + f * 2, ty + 1);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = stroke; ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Eyes on top of carapace
+  const eyeY = bodyCY - bH + 1;
+  _celEye(cx - 3, eyeY, 2.8, f, stroke, null, true);
+  _celEye(cx + 3, eyeY, 2.8, f, stroke, null, true);
+  // Tiny legs dots
+  ctx.fillStyle = stroke;
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 3; i++) {
+      ctx.fillRect(cx + side * (bW - 2) - 1, bodyCY + bH - 2 + i * 2, 2, 2);
+    }
+  }
+}
+
+// ---- Generic chibi blob fallback ----
+function _drawDQBlob(m, sx, sy, cx, cy, f, base, shade, stroke, evil) {
+  const bodyR = Math.min(m.w, m.h) * 0.42;
+  const bodyCY = sy + m.h / 2 + 2;
+  const path = () => { ctx.beginPath(); ctx.arc(cx, bodyCY, bodyR, 0, Math.PI * 2); ctx.closePath(); };
+  _celFillPath(path, base, shade, cx, bodyCY, bodyR);
+  _celStroke(path, stroke, 2);
+  _celEye(cx - bodyR * 0.45, bodyCY - 2, 3.5, f, stroke, null, evil);
+  _celEye(cx + bodyR * 0.45, bodyCY - 2, 3.5, f, stroke, null, evil);
+  ctx.strokeStyle = stroke; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  if (evil) ctx.arc(cx, bodyCY + 6, 2.5, Math.PI + 0.3, -0.3);
+  else      ctx.arc(cx, bodyCY + 5, 2.5, 0.2, Math.PI - 0.2);
+  ctx.stroke();
+}
+
 function drawMonster(m) {
   const sx = m.x - game.camera.x;
   const sy = m.y;
@@ -11883,20 +13079,12 @@ function drawMonster(m) {
   ctx.save();
   if (flashOn) ctx.filter = 'brightness(2.5)';
 
-  if (m.type === 'snail') drawSnail(m, sx, sy);
-  else if (m.type === 'slime') drawSlime(m, sx, sy);
-  else if (m.type === 'mushroom' || m.type === 'orange') drawMushroom(m, sx, sy);
-  else if (m.type === 'horny') drawHorny(m, sx, sy);
-  else if (m.type === 'stump') drawStump(m, sx, sy);
-  else if (m.type === 'zombie') drawZombie(m, sx, sy);
-  else if (m.type === 'mummy')    drawMummy(m, sx, sy);
-  else if (m.type === 'skeleton') drawSkeletonMob(m, sx, sy);
-  else if (m.type === 'wraith')   drawWraith(m, sx, sy);
-  else if (m.type === 'scorpion') drawScorpion(m, sx, sy);
-  else if (m.type === 'king') drawKingSlime(m, sx, sy);
+  // Bosses keep signature visuals; all grunts use unified cute chibi renderer
+  if (m.type === 'king') drawKingSlime(m, sx, sy);
   else if (m.type === 'mushmom') drawMushmom(m, sx, sy);
   else if (m.type === 'aetherion') drawAetherion(m, sx, sy);
   else if (m.type === 'gravitos') drawGravitos(m, sx, sy);
+  else drawCuteMob(m, sx, sy);
 
   // Burn effect
   if (m.burnTimer > 0) {
@@ -14064,6 +15252,7 @@ function loop(time) {
     updateSmoothFx(dt);
     updatePowerupOrbs(dt);
     updateAmbient();
+    updateTower(dt);
     updateCamera();
   } else if (player.hp > 0) {
     updateCamera();
