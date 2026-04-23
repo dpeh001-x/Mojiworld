@@ -8,7 +8,9 @@ _Scope: mobile-only improvements implementable in the `mobile-ui-pass` branch's 
 
 ## Top 3 — if you do nothing else
 
-_Filled in below._
+1. **P2.1 Unified "Next Goal" mobile HUD widget** — pulls 4 psychology levers at once and closes the single biggest gap (G4).
+2. **P1.1 Tab-title badge + P3.2 rotating visibility-change title** — the *only* re-engagement surface that works in iOS Safari without notification permission. Currently at 1/10.
+3. **P1.3 + P1.5 + P1.8** (3-item bundle) — rotate-nag persistence, daily countdown, streak-at-risk. Together fix both loss-aversion (5→8) and FOMO (3→6) for one hour of total work.
 
 ---
 
@@ -105,7 +107,31 @@ Gaps flagged independently by ≥2 agents. Anchored by file + line in `maple_gam
 
 ## ROI-ranked action list
 
-_Filled in below._
+Ordered high → low ROI (psychology-lever-points gained ÷ effort hours). Impact legend: 🟢 high · 🟡 medium · ⚪ nice-to-have.
+
+| Rank | ID | Title | Impact | Effort | Levers pulled | ROI |
+|---|---|---|---|---|---|---|
+| 1 | P2.1 | Unified "Next Goal" widget | 🟢 | M (3h) | Progress overview +4, Completion +2, Near-miss +2, Loss +1 | ⭐⭐⭐ |
+| 2 | P1.1 | Tab-title badge on level-up | 🟢 | S (20m) | Re-engagement +3, Completion +1 | ⭐⭐⭐ |
+| 3 | P1.3 | Rotate-nag persistence | 🟢 | S (15m) | Friction removal (quit-point kill) | ⭐⭐⭐ |
+| 4 | P1.5 | Daily-banner visible + countdown | 🟢 | S (30m) | FOMO +3, Loss aversion +2 | ⭐⭐⭐ |
+| 5 | P1.8 | Streak-at-risk toast | 🟢 | S (40m) | Loss aversion +3, Re-engagement +2 | ⭐⭐⭐ |
+| 6 | P1.4 | XP-bar near-level pulse | 🟢 | S (25m) | Near-miss +3 | ⭐⭐⭐ |
+| 7 | P1.9 | Next-advancement chip | 🟢 | S (40m) | Progress overview +3 | ⭐⭐⭐ |
+| 8 | P2.6 | PWA manifest + install | 🟢 | M (3h) | Re-engagement +4 | ⭐⭐ |
+| 9 | P2.3 | Mobile coach marks | 🟢 | M (4h) | Onboarding conversion | ⭐⭐ |
+| 10 | P3.2 | Rotating visibility-change tab title | 🟡 | L (8h) | Re-engagement +3, Social proof +1 | ⭐⭐ |
+| 11 | P2.2 | Achievement/bestiary inline progress | 🟢 | M (3h) | Completion +3, Near-miss +2 | ⭐⭐ |
+| 12 | P2.4 | Streak-at-risk notification push | 🟡 | M (4h) | Loss +3, FOMO +3, Re-engagement +3 | ⭐⭐ |
+| 13 | P1.7 | Haptic on legendary drop | 🟡 | S (30m) | Variable-ratio +2 | ⭐⭐ |
+| 14 | P1.10 | Death overlay tap-to-respawn | 🟢 | S (30m) | Flow +2 | ⭐⭐ |
+| 15 | P2.5 | Haptic + audio on silent pickups | 🟡 | M (2h) | Variable-ratio +2, Flow +1 | ⭐⭐ |
+| 16 | P1.6 | Damage-number reposition | 🟡 | S (45m) | Flow +2 | ⭐⭐ |
+| 17 | P1.2 | Skill-point toast (via observer) | 🟢 | S (1h) | Near-miss +2, Completion +2 | ⭐ (needs hard-rule decision) |
+| 18 | P3.1 | Companion panel | 🟢 | L (8h) | Progress +4, Endowment +2, Identity +2, Completion +3 | ⭐⭐ |
+| 19 | P3.3 | Mobile share card | 🟡 | L (10h) | Social proof +3, Identity +2 | ⭐ |
+
+**Recommended ship sequence:** top 7 (P2.1 + 6 Phase-1 items) ships in ~5-6 hours total and lifts scores on 6 of 12 levers. That's weekend-one material.
 
 ---
 
@@ -254,16 +280,87 @@ Each item ships as an atomic commit. All land inside mobile safe zones.
 
 ## Critical files + existing APIs
 
-_Filled in below._
+### Mobile safe zones (editable — per `CLAUDE.md` + `.claude/hooks/mobile-zone-check.py`)
+
+| Range | Content | Used by |
+|---|---|---|
+| 7–10 | mobile meta tags | P2.6 (PWA manifest link) |
+| 33 | body `touch-action` | — |
+| 65–334 | MOBILE CONTROLS (v5) CSS | P1.4 (XP pulse), P1.5, P1.9, P2.1, P2.3 |
+| 338–419 | `#rotate-nag` CSS + portrait-nag media query | P1.3, P1.10 |
+| 484–605 | MOBILE TOUCH CONTROLS CSS | — |
+| 1147–1167 | rotate-to-landscape nag + `#mobile-ctrl` HUD overlay | P1.9, P2.1, P2.3, P3.1 |
+| 1476–1512 | MOBILE CONTROL DECK DOM | P3.1 (companion panel mount point) |
+| 3612–3797 | MOBILE / TOUCH CONTROLS JS + FULLSCREEN FIT | All Phase-1 JS (P1.1, P1.3, P1.4, P1.5, P1.7, P1.8, P1.9, P1.10), all Phase-2 JS, P3.2, P3.3 |
+
+### Existing APIs to reuse (no new abstractions)
+
+- `showToast(text, rarity)` — toast notifications. Rarity values: `'common' | 'rare' | 'epic' | 'legendary'`. Anchored around lines 2330-2400.
+- `audio.play('levelup' | 'pickup' | etc.)` — sound cues; globals on `audio`.
+- `flash(alpha)`, `addShake(n)`, `addHitStop(ms)` — feel helpers (lines 4042-4044).
+- `player.exp`, `player.expToNext`, `player.level`, `player.skillPoints`, `player.dailyState`, `game.achievements`, `game.bestiary`, `game.prestige`, `game.towerBestFloor` — all read-only from the mobile layer.
+- `document.body.classList` — already used for `forced-modal`, `mc-portrait`, `mc-landscape`, `nag-portrait`, `hide-mobile-ctrl`. Add `xp-near`, `streak-risk`, `adv-ready` for new triggers.
+- `localStorage` — save key is `'levelx_save_v1'`. For new mobile-only flags, **prefix all keys with `_mobile_`** to avoid clashing with the main save format. No migration needed since these are pure-mobile additions.
+
+### Save format — do not touch
+
+- `PLAYER_SAVE_FIELDS` (line 4051) and `GAME_SAVE_FIELDS` (line 4060) are shared with main. Never add fields here from the mobile branch.
+- Any new persistent state goes to dedicated `localStorage` keys with the `_mobile_` prefix.
 
 ---
 
 ## Verification plan
 
-_Filled in below._
+Per-item and end-to-end checks. Every commit should include a `verification:` block matching this pattern.
+
+### Per-item verification
+
+- **P1.1 Tab-title badge:** Level up, switch tabs, confirm title becomes `⭐ Lv N — LevelX`. Switch back, confirm revert.
+- **P1.3 Rotate-nag persistence:** Dismiss nag, reload page, confirm no re-nag. Delete `localStorage._mobileNagDismissed`, confirm nag returns.
+- **P1.4 XP-bar pulse:** Set `player.exp` so ratio > 0.9, confirm CSS `xp-near` class applied and animation fires. Drop ratio, confirm class removed.
+- **P1.5 Daily countdown:** Open banner at 00:30 UTC, confirm countdown shows ~23h. At 23:50 UTC, confirm ~10m. Loop over midnight rollover.
+- **P1.8 Streak-at-risk:** Set `player.dailyState.streak = 5` + set clock to 22:00 UTC. Reload, confirm toast. Set streak to 1, confirm no toast. Set time to 10:00 UTC with streak 5, confirm no toast.
+- **P1.9 Next-advancement chip:** At Lv 10 expect `→ Job in 15`. At Lv 25 expect `→ Master in 25`. At Lv 55 expect `→ Ascend in N` or hidden.
+- **P2.1 Next-goal widget:** Confirm cycles every 5s across all active tracks. Confirm no stale data when daily quest flips. Confirm mobile-only (hidden on desktop).
+- **P2.6 PWA:** Chrome Android: add-to-home-screen prompt surfaces. iOS Safari: share sheet → "Add to Home Screen" produces standalone app. Service worker registers without errors.
+
+### End-to-end smoke
+
+Per the v2 guardrails, each commit includes a short `verification:` block. Also run:
+
+```bash
+# JS syntax check on the extracted <script> block:
+awk '/<script>/{flag=1;next}/<\/script>/{flag=0}flag' maple_game.html > /tmp/x.js
+node --check /tmp/x.js
+```
+
+### Regression risk
+
+All changes land inside mobile safe zones. Worst case: a mobile HUD element misbehaves — revert a single commit, no gameplay impact. Zero-risk for desktop: every new behavior is gated by either `@media (pointer: coarse)` or `window.matchMedia('(pointer: coarse)').matches`.
+
+### Changelog discipline
+
+Every shipped commit on `mobile-ui-pass` adds an entry to `MOBILE_CHANGELOG.html` matching existing styling (pill tag `bug`/`feat`/`polish`, `<kbd>` for keys). Audit items are `feat` unless they fix a reported issue.
 
 ---
 
 ## Psychology-lever glossary
 
-_Filled in below._
+Terse definitions for the 12 levers scored above.
+
+1. **Variable-ratio reinforcement** — rewards whose timing/magnitude are random. Slot machines; loot boxes. Drives the highest sustained engagement of any schedule.
+2. **Loss aversion** — the pain of losing X is ~2× the pleasure of gaining X. Streaks, decay, expiring buffs, warnings.
+3. **Completion bias** — humans are compelled to finish started sets. Collection shelves, owned-ticks, "8/10" counters.
+4. **Social proof** — seeing others do / want something raises your own desire. Leaderboards, rivals, "X% of players".
+5. **FOMO (fear of missing out)** — time-limited content triggers urgency. Events, daily-resets, seasonal cosmetics.
+6. **Endowment effect** — you value things more when you own them. Naming, customizing, long-term persistence.
+7. **Progress overview** — a single glanceable "what's next" reduces cognitive load; absence creates dead zones.
+8. **Near-miss reinforcement** — the last 10% of a goal feels more rewarding than the first 10%. Louder bars near cap.
+9. **Re-engagement** — surfaces outside the game that pull the player back. Push, email, tab title, home-screen icon.
+10. **Mastery curve** — escalating challenge matched to growing skill. Too easy → bored; too hard → quit.
+11. **Flow state** — a tight action loop with continuous feedback that feels timeless. Broken by UI interruptions.
+12. **Identity / self-expression** — the player can make themselves visible. Cosmetics, titles, shareables.
+
+---
+
+_Audit built 2026-04-23 from 3 parallel Explore agents. All Phase-1/2 items are implementable inside mobile safe zones; Phase-3 items include notes on which fragments would require gameplay-code edits if any. Hard-rule flags are called out per item. Questions or corrections: open an issue or ping via the PR._
