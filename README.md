@@ -27,7 +27,7 @@ Live play URL (once GitHub Pages is enabled): **https://dpeh001-x.github.io/Leve
 | Skill tree | `K` |
 | Character sheet | `U` |
 | Help panel | `?` |
-| HP / MP potion | `R` / `T` |
+| HP / MP potion (buys with gold if none) | `PgUp` / `PgDn` |
 
 Press `?` in-game for a full live keybind panel that shows your current class skills.
 

@@ -766,8 +766,8 @@
           <div class="kb"><span>Change Job / Master</span><span><kbd>0</kbd></span></div>
           <div class="kb"><span>Dev Console</span><span><kbd>1</kbd>+<kbd>2</kbd>+<kbd>3</kbd></span></div>
           <div class="kb"><span>Help Panel</span><span><kbd>?</kbd></span></div>
-          <div class="kb"><span>HP Potion</span><span><kbd>R</kbd></span></div>
-          <div class="kb"><span>MP Potion</span><span><kbd>T</kbd></span></div>
+          <div class="kb"><span>HP Potion</span><span><kbd>PgUp</kbd></span></div>
+          <div class="kb"><span>MP Potion</span><span><kbd>PgDn</kbd></span></div>
           <div class="kb"><span>Close Menus</span><span><kbd>Esc</kbd></span></div>
         </div>
         <div class="help-skills">
@@ -959,7 +959,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.13.1';
+const GAME_VERSION = 'v0.13.2';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -2551,9 +2551,10 @@ window.addEventListener('keydown', e => {
     // 'c' was avoided — it collides with the 'c' skill slot
     if (player.cls && !game.paused && player.hp > 0) openCodex();
   }
-  // Quick potion use
-  if (k === 'r') useQuickPotion('hp');
-  if (k === 't') useQuickPotion('mp');
+  // Quick potion use (PgUp = HP, PgDn = MP; legacy R / T kept as aliases).
+  // If the player has no matching potion, deduct gold to buy-and-use directly.
+  if (k === 'pageup' || k === 'r')   useQuickPotion('hp');
+  if (k === 'pagedown' || k === 't') useQuickPotion('mp');
   // Dodge roll (Shift or V)
   // V is now the Job Ultimate skill slot — dodge only on Shift
   if (k === 'shift' && !game.paused && player.hp > 0 && player.hitStun <= 0 && player.dodgeCD <= 0 && player.dodgeTimer <= 0) {
@@ -10026,32 +10027,79 @@ function useConsumable(id) {
 }
 
 function useQuickPotion(which) {
-  // Use smallest available first
-  const pool = POTION_ITEMS.filter(p => p.type === which);
+  // Pool of same-type potions, sorted by value ascending — we use the
+  // smallest available first to avoid wasting the big heals.
+  const pool = POTION_ITEMS.filter(p => p.type === which && p.id !== 'full')
+    .sort((a, b) => a.value - b.value);
+  const _applyPurify = () => {
+    if (!hasMilestone('purifyingPulse')) return;
+    player.hitStun = 0;
+    player.burnTimer = 0; player.burnDmg = 0;
+    player.freezeTimer = 0; player.stunTimer = 0;
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * Math.PI * 2;
+      game.particles.push({
+        x: player.x + player.w/2, y: player.y + player.h/2,
+        vx: Math.cos(a) * 4, vy: Math.sin(a) * 4,
+        life: 30, color: '#88ffcc', size: 3
+      });
+    }
+    game.damageNumbers.push({
+      x: player.x - 8, y: player.y - 10, vy: -2,
+      text: 'PURIFY', life: 35, color: '#88ffcc', size: 13
+    });
+  };
+
+  // 1) Use an existing potion if we have any.
   for (const p of pool) {
     if (player.consumables[p.id] > 0) {
       useConsumable(p.id);
-      // Milestone: Purifying Pulse — potion clears your debuffs
-      if (hasMilestone('purifyingPulse')) {
-        player.hitStun = 0;
-        player.burnTimer = 0; player.burnDmg = 0;
-        player.freezeTimer = 0; player.stunTimer = 0;
-        for (let i = 0; i < 24; i++) {
-          const a = (i / 24) * Math.PI * 2;
-          game.particles.push({
-            x: player.x + player.w/2, y: player.y + player.h/2,
-            vx: Math.cos(a) * 4, vy: Math.sin(a) * 4,
-            life: 30, color: '#88ffcc', size: 3
-          });
-        }
-        game.damageNumbers.push({
-          x: player.x - 8, y: player.y - 10, vy: -2,
-          text: 'PURIFY', life: 35, color: '#88ffcc', size: 13
-        });
-      }
+      _applyPurify();
       return;
     }
   }
+
+  // 2) Fallback — buy-and-use directly from Lumens (gold). Pick the smallest
+  // potion we can afford. If we can't afford any, show a toast.
+  const affordable = pool.filter(p => player.mesos >= p.price);
+  if (!affordable.length) {
+    if (pool.length) {
+      showToast(`Need ${pool[0].price} 💰 for ${pool[0].name}`, 'common');
+      audio.play('hit');
+    }
+    return;
+  }
+  const pick = affordable[0];
+  player.mesos -= pick.price;
+  // Apply the potion effect inline (avoids bumping inventory for a single tick)
+  if (pick.type === 'hp') {
+    player.hp = Math.min(getMaxHp(), player.hp + pick.value);
+    game.damageNumbers.push({
+      x: player.x + 14, y: player.y, vy: -1.5,
+      text: '+' + pick.value, life: 40, color: '#44ff44', size: 14
+    });
+    audio.play('potion_hp');
+    showToast(`${pick.icon} Auto-bought for ${pick.price}💰`, 'common');
+  } else if (pick.type === 'mp') {
+    player.mp = Math.min(getMaxMp(), player.mp + pick.value);
+    game.damageNumbers.push({
+      x: player.x + 14, y: player.y, vy: -1.5,
+      text: '+' + pick.value, life: 40, color: '#4488ff', size: 14
+    });
+    audio.play('potion_mp');
+    showToast(`${pick.icon} Auto-bought for ${pick.price}💰`, 'common');
+  }
+  // Sparkle burst to read the purchase clearly
+  for (let k = 0; k < 8; k++) {
+    game.particles.push({
+      x: player.x + player.w/2, y: player.y + player.h/2,
+      vx: (Math.random() - 0.5) * 4, vy: -2 - Math.random() * 2,
+      life: 26,
+      color: pick.type === 'hp' ? '#66ff88' : '#66aaff',
+      size: 2
+    });
+  }
+  _applyPurify();
 }
 
 // =========================================================================
@@ -10275,43 +10323,179 @@ function drawBackground() {
     return;
   }
 
-  // --- BLAND BACKGROUND — one simple mountain silhouette + flat clouds ---
-  ctx.fillStyle = '#8a9aa8';
+  // --- AESTHETIC BACKGROUND — layered parallax sky ---
+  // Pick a tonal palette based on the map's sky to keep continuity with the
+  // sky gradient painted above. Darker maps get moonlight, lighter maps sun.
+  const skyBottom = game.mapData.sky[2];
+  const isDark = _hexLuma(skyBottom) < 90;
+  const _cam = game.camera.x;
+
+  // ---- Celestial disc (sun or moon) ----
+  const discX = W * 0.75 - _cam * 0.02;
+  const discY = 110;
+  // Soft glow halo (additive)
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const halo = ctx.createRadialGradient(discX, discY, 10, discX, discY, 110);
+  halo.addColorStop(0, isDark ? 'rgba(200,220,255,0.38)' : 'rgba(255,240,180,0.42)');
+  halo.addColorStop(0.6, isDark ? 'rgba(150,180,255,0.12)' : 'rgba(255,200,120,0.18)');
+  halo.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = halo;
+  ctx.fillRect(discX - 120, discY - 120, 240, 240);
+  ctx.restore();
+  // Disc itself
+  ctx.fillStyle = isDark ? '#eef0ff' : '#fff6c8';
+  ctx.beginPath(); ctx.arc(discX, discY, 38, 0, Math.PI * 2); ctx.fill();
+  // Crescent shadow on a moon
+  if (isDark) {
+    ctx.fillStyle = game.mapData.sky[1];
+    ctx.beginPath(); ctx.arc(discX + 12, discY - 6, 34, 0, Math.PI * 2); ctx.fill();
+  } else {
+    // Warm inner core on a sun
+    ctx.fillStyle = '#ffcc66';
+    ctx.beginPath(); ctx.arc(discX, discY, 24, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // ---- Starfield overlay (dark maps only) ----
+  if (isDark) {
+    ctx.save();
+    for (let i = 0; i < 50; i++) {
+      const sx = ((i * 37 + _cam * 0.03) % (W + 100)) - 50;
+      const sy = (i * 19) % 280;
+      const tw = 0.45 + Math.sin(game.time * 0.04 + i) * 0.35;
+      ctx.globalAlpha = tw;
+      ctx.fillStyle = i % 4 === 0 ? '#ffddaa' : '#ffffff';
+      ctx.fillRect(sx, sy, 1, 1);
+    }
+    ctx.restore();
+  }
+
+  // ---- Distant mountain range (far parallax, muted) ----
+  const farCol = _mixHex(game.mapData.sky[1], '#ffffff', 0.12);
+  ctx.fillStyle = farCol;
   ctx.beginPath();
   ctx.moveTo(-10, H);
-  const pts = [];
-  for (let x = -60; x <= W + 120; x += 80) {
-    const wx = x + game.camera.x * 0.08;
-    const h = 55 + Math.sin(wx * 0.008) * 30;
-    pts.push({ x, y: 400 - h });
+  const farPts = [];
+  for (let x = -60; x <= W + 120; x += 120) {
+    const wx = x + _cam * 0.04;
+    const h = 80 + Math.sin(wx * 0.006) * 42 + Math.cos(wx * 0.013) * 18;
+    farPts.push({ x, y: 380 - h });
   }
-  ctx.lineTo(pts[0].x, pts[0].y);
-  for (let i = 1; i < pts.length - 1; i++) {
-    const xc = (pts[i].x + pts[i+1].x) / 2;
-    const yc = (pts[i].y + pts[i+1].y) / 2;
-    ctx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+  ctx.lineTo(farPts[0].x, farPts[0].y);
+  for (let i = 1; i < farPts.length - 1; i++) {
+    const xc = (farPts[i].x + farPts[i+1].x) / 2;
+    const yc = (farPts[i].y + farPts[i+1].y) / 2;
+    ctx.quadraticCurveTo(farPts[i].x, farPts[i].y, xc, yc);
   }
-  ctx.lineTo(pts[pts.length-1].x, pts[pts.length-1].y);
-  ctx.lineTo(W + 20, H);
-  ctx.closePath();
-  ctx.fill();
+  ctx.lineTo(farPts[farPts.length-1].x, farPts[farPts.length-1].y);
+  ctx.lineTo(W + 20, H); ctx.closePath(); ctx.fill();
 
-  // Minimal flat clouds
-  ctx.fillStyle = 'rgba(255,255,255,0.82)';
+  // ---- Mid mountain range with snow caps ----
+  const midCol = _mixHex(game.mapData.sky[1], '#203040', 0.45);
+  ctx.fillStyle = midCol;
+  ctx.beginPath();
+  ctx.moveTo(-10, H);
+  const midPts = [];
+  for (let x = -60; x <= W + 120; x += 80) {
+    const wx = x + _cam * 0.08;
+    const h = 55 + Math.sin(wx * 0.008) * 30 + Math.cos(wx * 0.017) * 14;
+    midPts.push({ x, y: 400 - h });
+  }
+  ctx.lineTo(midPts[0].x, midPts[0].y);
+  for (let i = 1; i < midPts.length - 1; i++) {
+    const xc = (midPts[i].x + midPts[i+1].x) / 2;
+    const yc = (midPts[i].y + midPts[i+1].y) / 2;
+    ctx.quadraticCurveTo(midPts[i].x, midPts[i].y, xc, yc);
+  }
+  ctx.lineTo(midPts[midPts.length-1].x, midPts[midPts.length-1].y);
+  ctx.lineTo(W + 20, H); ctx.closePath(); ctx.fill();
+  // Snow caps on the mid range peaks
+  ctx.fillStyle = isDark ? '#b8c4e0' : '#f4f0e8';
+  for (let i = 1; i < midPts.length - 1; i++) {
+    const a = midPts[i - 1], b = midPts[i], c = midPts[i + 1];
+    if (b.y < a.y && b.y < c.y) {
+      ctx.beginPath();
+      ctx.moveTo(b.x - 14, b.y + 8);
+      ctx.lineTo(b.x, b.y - 2);
+      ctx.lineTo(b.x + 14, b.y + 8);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  // ---- Treeline silhouette (foreground parallax) ----
+  const treeCol = _mixHex(game.mapData.sky[2], '#10181c', 0.55);
+  ctx.fillStyle = treeCol;
+  for (let i = 0; i < 20; i++) {
+    const tx = ((i * 68 - _cam * 0.18) % (W + 200)) - 80;
+    const th = 44 + (i % 3) * 14;
+    const ty = 432;
+    // Simple triangle tree
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(tx + 16, ty - th);
+    ctx.lineTo(tx + 32, ty);
+    ctx.closePath();
+    ctx.fill();
+    // Second tier tuft for layered pines
+    ctx.beginPath();
+    ctx.moveTo(tx + 3, ty - th * 0.45);
+    ctx.lineTo(tx + 16, ty - th * 1.05);
+    ctx.lineTo(tx + 29, ty - th * 0.45);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // ---- Soft aesthetic clouds (rounded, 2-tone) ----
   for (const cl of clouds) {
     cl.x -= cl.speed;
-    if (cl.x + cl.size < -game.camera.x * 0.15) cl.x = game.camera.x * 0.15 + W + 100;
-    const sx = cl.x - game.camera.x * 0.15;
+    if (cl.x + cl.size < -_cam * 0.15) cl.x = _cam * 0.15 + W + 100;
+    const sx = cl.x - _cam * 0.15;
+    // Cloud base (lit)
+    ctx.fillStyle = isDark ? 'rgba(180,200,255,0.45)' : 'rgba(255,250,240,0.85)';
     ctx.beginPath();
-    ctx.arc(sx, cl.y, cl.size * 0.5, 0, Math.PI * 2);
-    ctx.arc(sx + cl.size * 0.4, cl.y, cl.size * 0.4, 0, Math.PI * 2);
-    ctx.arc(sx + cl.size * 0.8, cl.y, cl.size * 0.45, 0, Math.PI * 2);
+    ctx.arc(sx, cl.y, cl.size * 0.55, 0, Math.PI * 2);
+    ctx.arc(sx + cl.size * 0.4, cl.y, cl.size * 0.45, 0, Math.PI * 2);
+    ctx.arc(sx + cl.size * 0.8, cl.y, cl.size * 0.5, 0, Math.PI * 2);
+    ctx.arc(sx + cl.size * 1.2, cl.y, cl.size * 0.4, 0, Math.PI * 2);
     ctx.fill();
+    // Underside shadow — softer 2-tone
+    ctx.fillStyle = isDark ? 'rgba(100,120,180,0.45)' : 'rgba(200,180,200,0.55)';
+    ctx.beginPath();
+    ctx.arc(sx + 4, cl.y + cl.size * 0.25, cl.size * 0.4, 0, Math.PI * 2);
+    ctx.arc(sx + cl.size * 0.5, cl.y + cl.size * 0.3, cl.size * 0.38, 0, Math.PI * 2);
+    ctx.arc(sx + cl.size * 1.0, cl.y + cl.size * 0.28, cl.size * 0.34, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ---- Birds silhouetted (only on bright maps, far away) ----
+  if (!isDark) {
+    ctx.fillStyle = 'rgba(40,30,50,0.55)';
+    for (let i = 0; i < 4; i++) {
+      const bx = ((i * 240 - _cam * 0.12 + game.time * 0.3) % (W + 200)) - 100;
+      const by = 75 + (i * 23) % 60;
+      const wing = Math.sin(game.time * 0.15 + i) * 3;
+      // Two-stroke bird
+      ctx.beginPath();
+      ctx.moveTo(bx - 6, by + wing);
+      ctx.quadraticCurveTo(bx - 3, by - 3, bx, by);
+      ctx.quadraticCurveTo(bx + 3, by - 3, bx + 6, by + wing);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(40,30,50,0.7)';
+      ctx.stroke();
+    }
   }
 
   // Town buildings
   if (game.mapData.isTown) drawTownDecor();
   if (game.mapData.isBossArena) drawBossDecor();
+}
+
+// Luma helper — used to decide sun vs moon based on sky colour.
+function _hexLuma(hex) {
+  const p = parseInt(hex.slice(1), 16);
+  const r = (p >> 16) & 0xff, g = (p >> 8) & 0xff, b = p & 0xff;
+  return 0.299 * r + 0.587 * g + 0.114 * b;
 }
 
 // Subway carriage interior — long rectangular train car seen from the side.
@@ -10771,11 +10955,27 @@ function _mixHex(a, b, t) {
 
 // --- Simple high-rise town skyline ---
 function drawTownDecor() {
-  // Flat plaza walkway under buildings
-  ctx.fillStyle = '#c6bfae';
-  ctx.fillRect(0, 470, 1100 - game.camera.x, 12);
+  // Cel-shaded plaza walkway under buildings — lit top band, shadow band,
+  // then a darker "curb" strip. Visible across the town width; uses a
+  // parallax-light camera shift so the walkway scrolls with the world.
+  const wWidth = 1100 - game.camera.x;
+  // Lit top band
+  ctx.fillStyle = '#d6cfbe';
+  ctx.fillRect(0, 470, wWidth, 8);
+  // Crisp cel seam
+  ctx.fillStyle = '#7a6a48';
+  ctx.fillRect(0, 478, wWidth, 1);
+  // Shadow band
   ctx.fillStyle = '#a89e8a';
-  ctx.fillRect(0, 482, 1100 - game.camera.x, 4);
+  ctx.fillRect(0, 479, wWidth, 7);
+  // Darker curb at the very bottom
+  ctx.fillStyle = '#5a4a30';
+  ctx.fillRect(0, 486, wWidth, 2);
+  // Sparse cobble tiles — dashed tone seam every ~44 px for readability
+  for (let x = 0; x < wWidth; x += 44) {
+    ctx.fillStyle = '#6a5a3a';
+    ctx.fillRect(x - (game.camera.x | 0) % 44, 472, 1, 6);
+  }
 
   // 6 tall high-rise blocks — matches the 6 NPC shops
   const blocks = [
@@ -10791,24 +10991,17 @@ function drawTownDecor() {
     const sx = b.x - game.camera.x;
     if (sx + b.w < 0 || sx > W) continue;
     const top = 480 - b.h;
-    const OUT = '#1a0818';         // unified outline colour (matches chars/mobs)
     const shadBand = b.w * 0.32;   // how much of the building is the shadow side
 
-    // ---- DQ cel-shaded building body ----
-    // Thick 2 px outline
-    ctx.fillStyle = OUT;
-    ctx.fillRect(sx - 2, top - 2, b.w + 4, b.h + 2);
+    // ---- Building body (outline-free, pure 2-tone flats) ----
     // Lit main wall
     ctx.fillStyle = b.wall;
     ctx.fillRect(sx, top, b.w, b.h);
-    // Hard 2-tone cel shadow on the right side — single crisp vertical line
+    // Hard 2-tone cel shadow on the right side — single crisp vertical tone break
     ctx.fillStyle = b.shd;
     ctx.fillRect(sx + b.w - shadBand, top, shadBand, b.h);
-    // Thin black separator between lit and shadow (DQ "light seam")
-    ctx.fillStyle = OUT;
-    ctx.fillRect(sx + b.w - shadBand, top, 1, b.h);
 
-    // ---- Window grid ----
+    // ---- Window grid (outline-free, soft 2-tone) ----
     const cols = 4;
     const rows = Math.floor((b.h - 40) / 30);
     for (let r = 0; r < rows; r++) {
@@ -10816,76 +11009,58 @@ function drawTownDecor() {
         const wx = sx + 12 + c * 22;
         const wy = top + 20 + r * 30;
         const onShadow = (wx + 8) > sx + b.w - shadBand;
-        // Outline
-        ctx.fillStyle = OUT;
-        ctx.fillRect(wx - 1, wy - 1, 18, 16);
-        // Lit (varies per window)
+        // Lit window (varies per window to suggest occupancy)
         const isLit = ((b.x + r * 7 + c * 3) % 4) < 2;
         ctx.fillStyle = isLit ? '#ffeecc' : '#5a6678';
         ctx.fillRect(wx, wy, 16, 14);
-        // Shadow half (if window sits on shadow side)
+        // Shadow half if window sits on shadow side (tone-match building cel)
         if (onShadow) {
-          ctx.fillStyle = _mixHex(isLit ? '#ffeecc' : '#5a6678', '#000000', 0.35);
+          ctx.fillStyle = _mixHex(isLit ? '#ffeecc' : '#5a6678', '#000000', 0.30);
           ctx.fillRect(wx + 7, wy, 9, 14);
         }
-        // Single vertical divider
-        ctx.fillStyle = OUT;
-        ctx.fillRect(wx + 7, wy, 2, 14);
+        // Subtle vertical divider — same tone as window frame shadow
+        ctx.fillStyle = _mixHex(isLit ? '#ffeecc' : '#5a6678', '#000000', 0.45);
+        ctx.fillRect(wx + 7, wy, 1, 14);
       }
     }
 
-    // ---- Entrance door (2-tone cel) ----
+    // ---- Entrance door (outline-free 2-tone) ----
     const dx = sx + b.w / 2 - 9;
-    // Outline
-    ctx.fillStyle = OUT;
-    ctx.fillRect(dx - 2, 480 - 32, 22, 32);
-    // Lit door
     ctx.fillStyle = b.accent;
     ctx.fillRect(dx, 480 - 30, 18, 30);
-    // Shadow side of door
     ctx.fillStyle = _mixHex(b.accent, '#000000', 0.35);
     ctx.fillRect(dx + 10, 480 - 30, 8, 30);
-    // Thin seam
-    ctx.fillStyle = OUT;
-    ctx.fillRect(dx + 10, 480 - 30, 1, 30);
-    // Door handle
+    // Brass handle
     ctx.fillStyle = '#f0e0a0';
     ctx.fillRect(dx + 14, 480 - 18, 2, 2);
 
-    // ---- Rooftop parapet ----
-    ctx.fillStyle = OUT;
-    ctx.fillRect(sx - 3, top - 5, b.w + 6, 5);
+    // ---- Rooftop parapet (thin tone bar, no outline) ----
     ctx.fillStyle = b.wall;
     ctx.fillRect(sx - 1, top - 4, b.w + 2, 2);
     ctx.fillStyle = b.shd;
     ctx.fillRect(sx + b.w - shadBand, top - 4, shadBand + 1, 2);
+    // Thin cornice stripe underneath for silhouette crispness
+    ctx.fillStyle = _mixHex(b.shd, '#000000', 0.25);
+    ctx.fillRect(sx - 1, top - 2, b.w + 2, 2);
 
     // Roof antenna / AC unit
     if (b.h > 260) {
-      ctx.fillStyle = OUT;
-      ctx.fillRect(sx + b.w / 2 - 2, top - 24, 4, 20);
       ctx.fillStyle = '#5a5a5a';
       ctx.fillRect(sx + b.w / 2 - 1, top - 22, 2, 18);
       ctx.fillStyle = '#ff3344';
       ctx.fillRect(sx + b.w / 2 - 2, top - 22, 4, 2);
     } else {
-      ctx.fillStyle = OUT;
-      ctx.fillRect(sx + 17, top - 11, 18, 8);
       ctx.fillStyle = '#5a5a5a';
       ctx.fillRect(sx + 18, top - 10, 16, 6);
       ctx.fillStyle = '#3a3a3a';
       ctx.fillRect(sx + 25, top - 10, 9, 6);
     }
 
-    // ---- Shop sign plaque (cel 2-tone) ----
-    ctx.fillStyle = OUT;
-    ctx.fillRect(dx - 13, 480 - 51, 46, 16);
+    // ---- Shop sign plaque (2-tone, no outline) ----
     ctx.fillStyle = b.accent;
     ctx.fillRect(dx - 12, 480 - 50, 44, 14);
     ctx.fillStyle = _mixHex(b.accent, '#000000', 0.35);
     ctx.fillRect(dx - 12, 480 - 43, 44, 7);
-    ctx.fillStyle = OUT;
-    ctx.fillRect(dx - 12, 480 - 43, 44, 1);
     ctx.font = 'bold 13px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#ffffff';
@@ -11474,15 +11649,30 @@ function drawPlatforms() {
     if (sx + p.w < 0 || sx > W) continue;
     if (p.type === 'ground') {
       // ---- DQ cel-shaded ground ----
-      // Dirt base (lit tone)
-      ctx.fillStyle = '#8b6f47';
-      ctx.fillRect(sx, p.y + 6, p.w, p.h);
-      // Hard shadow band (lower half darker)
-      ctx.fillStyle = '#5a4027';
-      ctx.fillRect(sx, p.y + 16, p.w, p.h - 10);
-      // Sharp seam between the two
-      ctx.fillStyle = OUT;
-      ctx.fillRect(sx, p.y + 16, p.w, 1);
+      // Dirt body: three distinct cel bands — lit top, shadow mid, deep bottom
+      ctx.fillStyle = '#a08050';                     // sunlit band just under grass
+      ctx.fillRect(sx, p.y + 6, p.w, 6);
+      ctx.fillStyle = OUT;                           // seam #1
+      ctx.fillRect(sx, p.y + 12, p.w, 1);
+      ctx.fillStyle = '#7a5a38';                     // midtone band
+      ctx.fillRect(sx, p.y + 13, p.w, 14);
+      ctx.fillStyle = OUT;                           // seam #2
+      ctx.fillRect(sx, p.y + 27, p.w, 1);
+      ctx.fillStyle = '#4a3018';                     // deep shadow band (undersoil)
+      ctx.fillRect(sx, p.y + 28, p.w, p.h - 22);
+      // Pebble motes in the lit band — 1px dark dots spaced out
+      for (let i = 0; i < p.w; i += 22) {
+        const ox = (i + (i * 5) % 7);
+        const oy = 7 + ((i * 3) % 4);
+        ctx.fillStyle = '#5a3f20';
+        ctx.fillRect(sx + ox, p.y + oy, 2, 1);
+      }
+      // Faint root tufts in the shadow band
+      for (let i = 0; i < p.w; i += 48) {
+        const ox = (i + (i * 7) % 13);
+        ctx.fillStyle = '#2a1a08';
+        ctx.fillRect(sx + ox, p.y + 20, 1, 5);
+      }
       // Grass top — 2 flat tones only
       ctx.fillStyle = '#6cb847';
       ctx.fillRect(sx, p.y + 1, p.w, 6);
@@ -11810,7 +12000,6 @@ function drawAfterImages() {
 }
 
 function drawPortals() {
-  const OUT = '#1a0818';
   for (const po of game.portals) {
     const sx = po.x - game.camera.x;
     if (sx + 60 < 0 || sx - 60 > W) continue;
@@ -11818,75 +12007,98 @@ function drawPortals() {
     ctx.save();
     ctx.translate(sx, 420);
 
-    // ---- Cel-shaded stone portal frame ----
-    // Thick outer outline
-    ctx.fillStyle = OUT;
+    // ---- Outer halo (additive, soft) ----
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const halo = ctx.createRadialGradient(0, 0, 10, 0, 0, 70);
+    halo.addColorStop(0, 'rgba(180,150,255,0.45)');
+    halo.addColorStop(0.6, 'rgba(120,90,200,0.18)');
+    halo.addColorStop(1, 'rgba(40,20,70,0)');
+    ctx.fillStyle = halo;
     ctx.beginPath();
-    ctx.ellipse(0, 0, 34, 54, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, 70, 80, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Stone frame (lit)
-    ctx.fillStyle = '#7a6a90';
+    ctx.restore();
+
+    // ---- Translucent stone frame (no outline) ----
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    // Lit stone ring
+    ctx.fillStyle = '#8a7aa8';
     ctx.beginPath();
     ctx.ellipse(0, 0, 32, 52, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Hard 2-tone shadow wedge on the frame (upper-left light)
+    // Cutout for the portal interior (erase middle)
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 26, 46, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    // Soft shadow wedge clipped to frame
     ctx.save();
     ctx.beginPath();
     ctx.ellipse(0, 0, 32, 52, 0, 0, Math.PI * 2);
     ctx.clip();
-    ctx.fillStyle = '#3a2a50';
+    ctx.fillStyle = 'rgba(40,20,60,0.45)';
     ctx.beginPath();
     ctx.moveTo(-50, 10); ctx.lineTo(40, -30);
     ctx.lineTo(55, 60); ctx.lineTo(-55, 60);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
+    ctx.restore();
 
-    // Inner magical swirl (flat 2-tone, no gradient)
-    ctx.fillStyle = OUT;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 27, 47, 0, 0, Math.PI * 2);
-    ctx.fill();
+    // ---- Translucent magical swirl interior ----
+    ctx.save();
+    ctx.globalAlpha = 0.60;
     ctx.fillStyle = '#aa88ff';
     ctx.beginPath();
     ctx.ellipse(0, 0, 26, 46, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#6644aa';
+    // Darker inner plate
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = '#553399';
     ctx.beginPath();
-    ctx.ellipse(4, 4, 22, 40, 0, 0, Math.PI * 2);
+    ctx.ellipse(3, 4, 22, 40, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Crisp cel seam at swirl edge
-    ctx.strokeStyle = OUT; ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 26, 46, 0, 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.restore();
 
-    // Rotating inner flats — 3 layered arcs as "magic swirl"
+    // ---- Rotating interior arcs (additive, translucent) ----
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
     for (let i = 0; i < 3; i++) {
       const ang = t * 0.5 + i * Math.PI * 2 / 3;
-      ctx.fillStyle = i === 0 ? '#ccaaff' : i === 1 ? '#8866cc' : '#442288';
+      ctx.globalAlpha = 0.38;
+      ctx.fillStyle = i === 0 ? '#ccaaff' : i === 1 ? '#9977dd' : '#7755bb';
       ctx.beginPath();
       ctx.ellipse(Math.cos(ang) * 6, Math.sin(ang) * 12, 10, 18, 0, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.restore();
 
-    // Stone frame rivets at cardinal positions
-    ctx.fillStyle = OUT;
-    for (const [rx, ry] of [[0, -50], [0, 50], [-30, 0], [30, 0]]) {
-      ctx.beginPath(); ctx.arc(rx, ry, 3, 0, Math.PI * 2); ctx.fill();
-    }
+    // Subtle rivets at cardinal positions (translucent)
+    ctx.save();
+    ctx.globalAlpha = 0.55;
     ctx.fillStyle = '#aaa8bc';
     for (const [rx, ry] of [[0, -50], [0, 50], [-30, 0], [30, 0]]) {
-      ctx.beginPath(); ctx.arc(rx, ry, 1.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(rx, ry, 2, 0, Math.PI * 2); ctx.fill();
     }
+    ctx.restore();
 
-    // Sparkles floating inside
-    for (let i = 0; i < 4; i++) {
-      const a = (t + i) % (Math.PI * 2);
+    // Sparkles floating inside (bright, additive)
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 5; i++) {
+      const a = (t + i * 1.1) % (Math.PI * 2);
       const rx = Math.cos(a) * 18, ry = Math.sin(a * 1.3) * 34;
+      ctx.globalAlpha = 0.7 + Math.sin(t * 2 + i) * 0.25;
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(Math.round(rx) - 1, Math.round(ry) - 1, 2, 2);
     }
+    ctx.restore();
+
     ctx.restore();
 
     // Label
