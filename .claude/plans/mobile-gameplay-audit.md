@@ -20,7 +20,7 @@ LevelX currently ships a functional mobile control deck, fullscreen-fit scaling,
 
 ## Current-state summary
 
-Mobile shell is working (touch controls, scaling, modal tap-fix, reset button, HUD overlap fix). What's missing is the feedback + retention layer. See [MOBILE_GAMEPLAY_AUDIT.md](../../MOBILE_GAMEPLAY_AUDIT.md) "Executive summary" for the full picture.
+Mobile shell is working (touch controls, scaling, modal tap-fix, reset button, HUD overlap fix). What's missing is the feedback + retention layer. See [MOBILE_GAMEPLAY_AUDIT.html](../../MOBILE_GAMEPLAY_AUDIT.html) "Executive summary" for the full picture.
 
 | Area | Status | Notes |
 |---|---|---|
@@ -35,7 +35,7 @@ Mobile shell is working (touch controls, scaling, modal tap-fix, reset button, H
 
 ## Identified gaps (cross-confirmed by all 3 agents)
 
-Full list with anchors in [MOBILE_GAMEPLAY_AUDIT.md § Cross-confirmed gaps](../../MOBILE_GAMEPLAY_AUDIT.md#cross-confirmed-gaps). Summary:
+Full list with anchors in [MOBILE_GAMEPLAY_AUDIT.html § Cross-confirmed gaps](../../MOBILE_GAMEPLAY_AUDIT.html#gaps). Summary:
 
 - **G1** — Level-up fireworks loud; skill-point gain silent.
 - **G2** — XP bar fills silently between kills.
@@ -48,7 +48,7 @@ Full list with anchors in [MOBILE_GAMEPLAY_AUDIT.md § Cross-confirmed gaps](../
 
 ## Recommendations
 
-See [MOBILE_GAMEPLAY_AUDIT.md](../../MOBILE_GAMEPLAY_AUDIT.md) for full rationale per item; condensed list here:
+See [MOBILE_GAMEPLAY_AUDIT.html](../../MOBILE_GAMEPLAY_AUDIT.html) for full rationale per item; condensed list here:
 
 ### Phase 1 — Quick wins (<1hr each)
 
@@ -80,7 +80,7 @@ See [MOBILE_GAMEPLAY_AUDIT.md](../../MOBILE_GAMEPLAY_AUDIT.md) for full rational
 
 ## Ranked ship order (by ROI)
 
-See [MOBILE_GAMEPLAY_AUDIT.md § ROI-ranked action list](../../MOBILE_GAMEPLAY_AUDIT.md#roi-ranked-action-list) for the full table. Top 3:
+See [MOBILE_GAMEPLAY_AUDIT.html § ROI-ranked action list](../../MOBILE_GAMEPLAY_AUDIT.html#roi) for the full table. Top 3:
 
 1. **P2.1** — unified Next-Goal widget
 2. **P1.1** — tab-title badge
@@ -91,11 +91,11 @@ See [MOBILE_GAMEPLAY_AUDIT.md § ROI-ranked action list](../../MOBILE_GAMEPLAY_A
 - `maple_game.html` — the single file. Edit only inside the safe zones in the `.claude/hooks/mobile-zone-check.py` table.
 - Reuse `showToast`, `audio.play`, `flash`, `addShake`, existing body-classes.
 - Save-format additions: `localStorage` keys with `_mobile_` prefix only. Never touch `PLAYER_SAVE_FIELDS` (line 4051) or `GAME_SAVE_FIELDS` (line 4060).
-- Full reuse map in [MOBILE_GAMEPLAY_AUDIT.md § Critical files](../../MOBILE_GAMEPLAY_AUDIT.md#critical-files--existing-apis).
+- Full reuse map in [MOBILE_GAMEPLAY_AUDIT.html § Critical files](../../MOBILE_GAMEPLAY_AUDIT.html#files).
 
 ## Verification plan
 
-Per-item checks in [MOBILE_GAMEPLAY_AUDIT.md § Verification plan](../../MOBILE_GAMEPLAY_AUDIT.md#verification-plan). Summary:
+Per-item checks in [MOBILE_GAMEPLAY_AUDIT.html § Verification plan](../../MOBILE_GAMEPLAY_AUDIT.html#verify). Summary:
 
 - **Pre-commit:** extract `<script>` and `node --check`.
 - **Post-commit:** load `raw.githack` preview on an iPhone-sized viewport, verify the specific trigger fires.
