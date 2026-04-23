@@ -1499,7 +1499,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.16.3';
+const GAME_VERSION = 'v0.17.0';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -1564,7 +1564,7 @@ const SKILLS = {
   rush:         { name:'Rush',           icon:'🏃', cls:'warrior', slot:'e', mp:12, cd:900,  desc:'Dash forward, pierce enemies.' },
   warCry:       { name:'War Cry',        icon:'📣', cls:'warrior', slot:'w', mp:18, cd:7000, desc:'+50% ATK for 6s. Battle roar.' },
   // Berserker
-  bloodlust:    { name:'Bloodlust',      icon:'🩸', cls:'warrior', job:'berserker', slot:'q', mp:22, cd:5500,  desc:'Lifesteal + speed for 6s.' },
+  bloodlust:    { name:'Bloodlust',      icon:'🩸', cls:'warrior', job:'berserker', slot:'q', mp:22, cd:20000, desc:'15 s rage (+ATK, lifesteal, speed). 10 s of outward shockwaves that rip nearby foes.' },
   rampage:      { name:'Rampage',        icon:'🌪️', cls:'warrior', job:'berserker', slot:'c', mp:45, cd:10000, desc:'Ultimate: 3s spinning AoE.' },
   // Knight
   guardian:     { name:'Guardian',       icon:'🛡️', cls:'warrior', job:'knight',    slot:'q', mp:18, cd:5500,  desc:'80% damage reduction 5s.' },
@@ -2839,7 +2839,9 @@ for (const z of ZODIAC_SIGNS) {
 }
 
 // Add a Zodiac hub portal from town (leftmost edge of bazaar)
-MAPS.town.portals.push({x:20, dest:'zodiacHall', name:'⭐ Zodiac Sanctum'});
+// Zodiac Sanctum portal — sits above the Amnesiac NPC (x:440 in town.npcs)
+// so players find it once they're used to talking with him.
+MAPS.town.portals.push({x:440, dest:'zodiacHall', name:'⭐ Zodiac Sanctum'});
 
 // Zodiac Hall — a hub map with 12 portals, one to each sign
 MAPS.zodiacHall = {
@@ -4856,6 +4858,42 @@ function updatePlayer(dt) {
   // Divine Aegis — 5 hovering holy orbs pendulum in and out, striking
   // enemies in their path. Damage reduction is applied in hitMonster-style
   // incoming damage sites via towerPlayerTakeMul-like check elsewhere.
+  // Bloodlust shockwave tick — while _bloodstorm > 0, fire an outward
+  // projectile ring every 400 ms that damages all nearby foes. Expires
+  // after 10 s regardless of the 15 s rage buff.
+  if (player._bloodstorm && player._bloodstorm > 0) {
+    player._bloodstorm -= dt;
+    player._bloodstormNextTick -= dt;
+    if (player._bloodstormNextTick <= 0) {
+      player._bloodstormNextTick = 400;
+      const cx = player.x + player.w / 2;
+      const cy = player.y + player.h / 2;
+      // 10-projectile ring around the player
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2;
+        game.projectiles.push({
+          x: cx, y: cy,
+          vx: Math.cos(a) * 7, vy: Math.sin(a) * 7,
+          w: 20, h: 20, life: 30,
+          damage: getAtk() * 0.7 + 5,
+          owner: 'player', skill: 'bloodwave', color: '#ff3355', noGravity: true,
+          pierce: true,
+        });
+      }
+      // Red radial burst visual
+      for (let i = 0; i < 20; i++) {
+        const a = (i / 20) * Math.PI * 2;
+        game.particles.push({
+          x: cx, y: cy,
+          vx: Math.cos(a) * 6, vy: Math.sin(a) * 6,
+          life: 28, color: i % 2 ? '#ff3355' : '#aa2244', size: 3
+        });
+      }
+      addShake(3);
+    }
+    if (player._bloodstorm <= 0) player._bloodstorm = 0;
+  }
+
   if (player._aegis) {
     const aegis = player._aegis;
     aegis.life -= dt;
@@ -6205,20 +6243,26 @@ const SKILL_FNS = {
   },
   // Berserker
   bloodlust: () => {
-    player.buffs.bloodlust = 7000;
-    // Instantly heal 20% and refill MP for 20%
-    player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.20));
-    player.mp = Math.min(getMaxMp(), player.mp + Math.floor(getMaxMp() * 0.20));
-    showToast('BLOODLUST — lifesteal + speed!', 'legendary');
-    flash(0.4); addShake(6);
-    // Blood spiral particles
+    // Bloodlust — 15 s of lifesteal / speed / ATK buff, with 10 s of
+    // continuous outward shockwaves that rip nearby foes every 400 ms.
+    // 20 s cooldown (set in SKILLS definition).
+    player.buffs.bloodlust = 15000;                  // 15 s rage
+    player._bloodstorm     = 10000;                  // 10 s shockwave tick
+    player._bloodstormNextTick = 0;
+    // Instant surge — heal / MP refund + big cast burst
+    player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.25));
+    player.mp = Math.min(getMaxMp(), player.mp + Math.floor(getMaxMp() * 0.25));
+    showToast('BLOODLUST — 15 s rage · 10 s shockwaves!', 'legendary');
+    flash(0.5); addShake(10); addHitStop(60);
+    audio.play('crit');
+    // Initial blood spiral burst
     for (let i = 0; i < 40; i++) {
       const a = (i / 40) * Math.PI * 4;
       game.particles.push({
         x: player.x + player.w/2 + Math.cos(a) * 20,
         y: player.y + player.h/2 + Math.sin(a) * 20,
-        vx: Math.cos(a) * 4, vy: Math.sin(a) * 4 - 1,
-        life: 45, color: i % 2 ? '#ff2244' : '#aa0022', size: 3
+        vx: Math.cos(a) * 5, vy: Math.sin(a) * 5 - 1,
+        life: 48, color: i % 2 ? '#ff2244' : '#aa0022', size: 3
       });
     }
   },
@@ -11709,26 +11753,47 @@ function drawBackground() {
     ctx.fill();
   }
 
-  // ---- Soft aesthetic clouds (rounded, 2-tone) ----
+  // ---- Cute chibi clouds (rounded, 2-tone, with tiny blush + smile) ----
   for (const cl of clouds) {
     cl.x -= cl.speed;
     if (cl.x + cl.size < -_cam * 0.15) cl.x = _cam * 0.15 + W + 100;
     const sx = cl.x - _cam * 0.15;
-    // Cloud base (lit)
-    ctx.fillStyle = isDark ? 'rgba(180,200,255,0.45)' : 'rgba(255,250,240,0.85)';
+    const cy = cl.y;
+    // Cloud body (lit) — 4 stacked circles for plumpness
+    ctx.fillStyle = isDark ? 'rgba(200,215,255,0.55)' : 'rgba(255,252,245,0.92)';
     ctx.beginPath();
-    ctx.arc(sx, cl.y, cl.size * 0.55, 0, Math.PI * 2);
-    ctx.arc(sx + cl.size * 0.4, cl.y, cl.size * 0.45, 0, Math.PI * 2);
-    ctx.arc(sx + cl.size * 0.8, cl.y, cl.size * 0.5, 0, Math.PI * 2);
-    ctx.arc(sx + cl.size * 1.2, cl.y, cl.size * 0.4, 0, Math.PI * 2);
+    ctx.arc(sx, cy, cl.size * 0.55, 0, Math.PI * 2);
+    ctx.arc(sx + cl.size * 0.4, cy, cl.size * 0.48, 0, Math.PI * 2);
+    ctx.arc(sx + cl.size * 0.8, cy, cl.size * 0.52, 0, Math.PI * 2);
+    ctx.arc(sx + cl.size * 1.2, cy, cl.size * 0.42, 0, Math.PI * 2);
     ctx.fill();
     // Underside shadow — softer 2-tone
-    ctx.fillStyle = isDark ? 'rgba(100,120,180,0.45)' : 'rgba(200,180,200,0.55)';
+    ctx.fillStyle = isDark ? 'rgba(120,140,210,0.50)' : 'rgba(210,195,210,0.65)';
     ctx.beginPath();
-    ctx.arc(sx + 4, cl.y + cl.size * 0.25, cl.size * 0.4, 0, Math.PI * 2);
-    ctx.arc(sx + cl.size * 0.5, cl.y + cl.size * 0.3, cl.size * 0.38, 0, Math.PI * 2);
-    ctx.arc(sx + cl.size * 1.0, cl.y + cl.size * 0.28, cl.size * 0.34, 0, Math.PI * 2);
+    ctx.arc(sx + 4, cy + cl.size * 0.28, cl.size * 0.40, 0, Math.PI * 2);
+    ctx.arc(sx + cl.size * 0.5, cy + cl.size * 0.32, cl.size * 0.38, 0, Math.PI * 2);
+    ctx.arc(sx + cl.size * 1.0, cy + cl.size * 0.30, cl.size * 0.34, 0, Math.PI * 2);
     ctx.fill();
+    // Cute face — only on roughly half of the clouds, and only bright maps
+    if (!isDark && (cl.size | 0) % 2 === 0) {
+      const fx = sx + cl.size * 0.5;
+      // Eyes (small black dots)
+      ctx.fillStyle = '#1a0818';
+      ctx.fillRect(fx - cl.size * 0.25, cy - 2, 2, 2);
+      ctx.fillRect(fx + cl.size * 0.15, cy - 2, 2, 2);
+      // Pink blush cheeks
+      ctx.fillStyle = 'rgba(255,150,170,0.55)';
+      ctx.beginPath();
+      ctx.arc(fx - cl.size * 0.38, cy + 2, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath();
+      ctx.arc(fx + cl.size * 0.30, cy + 2, 2.5, 0, Math.PI * 2); ctx.fill();
+      // Tiny smile
+      ctx.strokeStyle = '#1a0818';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(fx - cl.size * 0.05, cy + 3, 2.5, 0.2, Math.PI - 0.2);
+      ctx.stroke();
+    }
   }
 
   // ---- Birds silhouetted (only on bright maps, far away) ----
@@ -12861,94 +12926,164 @@ function drawTownDecor() {
     ctx.fillRect(x - (game.camera.x | 0) % 44, 472, 1, 6);
   }
 
-  // 6 tall high-rise blocks — matches the 6 NPC shops
+  // 6 humble village cottages — short, homely, steep thatched roofs.
+  // One cottage per NPC. Positions still line up with the NPC x values.
   const blocks = [
-    { x: 110, w: 120, h: 260, wall: '#dfe4ea', shd: '#a9b0ba', accent: '#6b8fcc', sign: '🧪', name: 'POTIONS' },
-    { x: 250, w: 120, h: 310, wall: '#dcdbe3', shd: '#a0a0b0', accent: '#4a6688', sign: '⚔️', name: 'FORGE'   },
-    { x: 390, w: 120, h: 230, wall: '#e0d8c8', shd: '#b0a890', accent: '#cc8844', sign: '📘', name: 'SKILLS'  },
-    { x: 530, w: 120, h: 290, wall: '#dcd2e4', shd: '#a89cb0', accent: '#8844cc', sign: '✨', name: 'SAGE'    },
-    { x: 670, w: 120, h: 250, wall: '#d4dcc8', shd: '#9aa488', accent: '#66aa66', sign: '🏡', name: 'INN'     },
-    { x: 810, w: 120, h: 330, wall: '#e4d8be', shd: '#b0a280', accent: '#d88a44', sign: '🐪', name: 'CARAVAN' },
+    { x: 110, w: 110, h: 110, wall: '#e8dcc4', shd: '#b8a984', roof: '#aa4844', roofShd: '#6a1e1a', accent: '#ff99bb', sign: '🧪' },
+    { x: 250, w: 110, h: 105, wall: '#e0d2b0', shd: '#b0a080', roof: '#5a6aa0', roofShd: '#2a3a60', accent: '#cccccc', sign: '⚔️' },
+    { x: 390, w: 110, h: 115, wall: '#d8c8a0', shd: '#a89878', roof: '#cc8a44', roofShd: '#8a5420', accent: '#ffcc66', sign: '📘' },
+    { x: 530, w: 110, h: 120, wall: '#d8c8e8', shd: '#a898bc', roof: '#6a4488', roofShd: '#3a2058', accent: '#cc99ff', sign: '✨' },
+    { x: 670, w: 110, h: 108, wall: '#d4dcc0', shd: '#9aa488', roof: '#4a8a4a', roofShd: '#1a5a1a', accent: '#88ccaa', sign: '🏡' },
+    { x: 810, w: 110, h: 112, wall: '#f0d8a8', shd: '#b8a078', roof: '#c88844', roofShd: '#884818', accent: '#ffdd88', sign: '🐪' },
   ];
 
   for (const b of blocks) {
     const sx = b.x - game.camera.x;
     if (sx + b.w < 0 || sx > W) continue;
-    const top = 480 - b.h;
-    const shadBand = b.w * 0.32;   // how much of the building is the shadow side
+    const wallTop = 480 - b.h;                // where walls begin
+    const eave = wallTop - 6;                 // eave line under roof
+    const roofPeak = eave - 54;               // peak of the thatched roof
 
-    // ---- Building body (outline-free, pure 2-tone flats) ----
-    // Lit main wall
+    // ---- Walls (cel-shaded 2-tone) ----
     ctx.fillStyle = b.wall;
-    ctx.fillRect(sx, top, b.w, b.h);
-    // Hard 2-tone cel shadow on the right side — single crisp vertical tone break
+    ctx.fillRect(sx, wallTop, b.w, b.h);
+    // Right-side shadow band
+    const shadBand = b.w * 0.30;
     ctx.fillStyle = b.shd;
-    ctx.fillRect(sx + b.w - shadBand, top, shadBand, b.h);
+    ctx.fillRect(sx + b.w - shadBand, wallTop, shadBand, b.h);
+    // Stone foundation — bottom 10 px of wall darker
+    ctx.fillStyle = _mixHex(b.wall, '#000000', 0.40);
+    ctx.fillRect(sx, 470, b.w, 10);
 
-    // ---- Window grid (outline-free, soft 2-tone) ----
-    const cols = 4;
-    const rows = Math.floor((b.h - 40) / 30);
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const wx = sx + 12 + c * 22;
-        const wy = top + 20 + r * 30;
-        const onShadow = (wx + 8) > sx + b.w - shadBand;
-        // Lit window (varies per window to suggest occupancy)
-        const isLit = ((b.x + r * 7 + c * 3) % 4) < 2;
-        ctx.fillStyle = isLit ? '#ffeecc' : '#5a6678';
-        ctx.fillRect(wx, wy, 16, 14);
-        // Shadow half if window sits on shadow side (tone-match building cel)
-        if (onShadow) {
-          ctx.fillStyle = _mixHex(isLit ? '#ffeecc' : '#5a6678', '#000000', 0.30);
-          ctx.fillRect(wx + 7, wy, 9, 14);
-        }
-        // Subtle vertical divider — same tone as window frame shadow
-        ctx.fillStyle = _mixHex(isLit ? '#ffeecc' : '#5a6678', '#000000', 0.45);
-        ctx.fillRect(wx + 7, wy, 1, 14);
+    // ---- Half-timber beams (vertical + diagonal) — cozy cottage detail ----
+    ctx.fillStyle = _mixHex(b.shd, '#000000', 0.55);
+    // Vertical posts at edges
+    ctx.fillRect(sx + 4,        wallTop, 3, b.h - 2);
+    ctx.fillRect(sx + b.w - 7,  wallTop, 3, b.h - 2);
+    // Horizontal lintel
+    ctx.fillRect(sx + 4, wallTop + 8, b.w - 8, 2);
+    // Diagonal brace (lower-left to upper-mid) — pixel-staircase
+    for (let k = 0; k < 12; k++) {
+      ctx.fillRect(sx + 8 + k * 2, wallTop + b.h - 14 - k * 2, 2, 2);
+    }
+
+    // ---- Window — cozy single window with yellow glow ----
+    const wx = sx + b.w / 2 - 18;
+    const wy = wallTop + 22;
+    // Frame
+    ctx.fillStyle = _mixHex(b.shd, '#000000', 0.55);
+    ctx.fillRect(wx - 2, wy - 2, 40, 30);
+    // Warm-lit glass
+    ctx.fillStyle = '#ffddaa';
+    ctx.fillRect(wx, wy, 36, 26);
+    // Window cross-frame
+    ctx.fillStyle = _mixHex(b.shd, '#000000', 0.55);
+    ctx.fillRect(wx, wy + 12, 36, 2);         // horizontal mullion
+    ctx.fillRect(wx + 17, wy, 2, 26);         // vertical mullion
+    // Warmer glow spot
+    ctx.fillStyle = '#fff5cc';
+    ctx.fillRect(wx + 4, wy + 2, 12, 8);
+    // Flower box under the window
+    ctx.fillStyle = _mixHex(b.wall, '#000000', 0.45);
+    ctx.fillRect(wx - 2, wy + 28, 40, 6);
+    ctx.fillStyle = '#4a6a22';                // greenery
+    ctx.fillRect(wx - 1, wy + 26, 38, 3);
+    // Little flowers — 3 per box
+    const flowerCols = ['#ff88aa', '#ffee66', '#cc99ff'];
+    for (let f = 0; f < 3; f++) {
+      ctx.fillStyle = flowerCols[(b.x + f) % 3];
+      ctx.fillRect(wx + 4 + f * 12, wy + 24, 3, 3);
+    }
+
+    // ---- Door (wooden, arched top) ----
+    const dx = sx + b.w / 2 - 10;
+    const dTop = 480 - 38;
+    // Frame
+    ctx.fillStyle = _mixHex(b.shd, '#000000', 0.55);
+    ctx.fillRect(dx - 2, dTop - 4, 24, 42);
+    // Lit wood
+    ctx.fillStyle = b.accent;
+    ctx.fillRect(dx, dTop, 20, 38);
+    // Arched top (two small rects for curve approximation)
+    ctx.fillRect(dx + 2, dTop - 3, 16, 3);
+    ctx.fillRect(dx + 5, dTop - 5, 10, 2);
+    // Shadow side of door
+    ctx.fillStyle = _mixHex(b.accent, '#000000', 0.45);
+    ctx.fillRect(dx + 11, dTop, 9, 38);
+    // Door planks (vertical lines)
+    ctx.fillStyle = _mixHex(b.accent, '#000000', 0.55);
+    ctx.fillRect(dx + 6, dTop + 2, 1, 34);
+    ctx.fillRect(dx + 13, dTop + 2, 1, 34);
+    // Door handle
+    ctx.fillStyle = '#f0d06a';
+    ctx.fillRect(dx + 15, dTop + 18, 2, 2);
+
+    // ---- Thatched roof (triangular, with strand texture) ----
+    // Lit face
+    ctx.fillStyle = b.roof;
+    ctx.beginPath();
+    ctx.moveTo(sx - 6,      eave);
+    ctx.lineTo(sx + b.w / 2, roofPeak);
+    ctx.lineTo(sx + b.w + 6, eave);
+    ctx.closePath();
+    ctx.fill();
+    // Shadow face on right
+    ctx.fillStyle = b.roofShd;
+    ctx.beginPath();
+    ctx.moveTo(sx + b.w / 2, roofPeak);
+    ctx.lineTo(sx + b.w + 6, eave);
+    ctx.lineTo(sx + b.w / 2, eave);
+    ctx.closePath();
+    ctx.fill();
+    // Thatch strands — short dashed lines along the roof slope
+    ctx.fillStyle = _mixHex(b.roof, '#000000', 0.35);
+    for (let s = 0; s < 12; s++) {
+      const yOff = eave - 4 - s * 4;
+      const rowWidth = (eave - yOff) * (b.w * 0.5 + 12) / 54;
+      for (let k = 0; k < rowWidth; k += 8) {
+        ctx.fillRect(sx + b.w / 2 - rowWidth + k, yOff, 4, 1);
       }
     }
+    // Ridge cap — dark strip along the roof peak
+    ctx.fillStyle = _mixHex(b.roofShd, '#000000', 0.45);
+    ctx.fillRect(sx + b.w / 2 - 4, roofPeak, 8, 4);
 
-    // ---- Entrance door (outline-free 2-tone) ----
-    const dx = sx + b.w / 2 - 9;
-    ctx.fillStyle = b.accent;
-    ctx.fillRect(dx, 480 - 30, 18, 30);
-    ctx.fillStyle = _mixHex(b.accent, '#000000', 0.35);
-    ctx.fillRect(dx + 10, 480 - 30, 8, 30);
-    // Brass handle
-    ctx.fillStyle = '#f0e0a0';
-    ctx.fillRect(dx + 14, 480 - 18, 2, 2);
-
-    // ---- Rooftop parapet (thin tone bar, no outline) ----
-    ctx.fillStyle = b.wall;
-    ctx.fillRect(sx - 1, top - 4, b.w + 2, 2);
-    ctx.fillStyle = b.shd;
-    ctx.fillRect(sx + b.w - shadBand, top - 4, shadBand + 1, 2);
-    // Thin cornice stripe underneath for silhouette crispness
-    ctx.fillStyle = _mixHex(b.shd, '#000000', 0.25);
-    ctx.fillRect(sx - 1, top - 2, b.w + 2, 2);
-
-    // Roof antenna / AC unit
-    if (b.h > 260) {
-      ctx.fillStyle = '#5a5a5a';
-      ctx.fillRect(sx + b.w / 2 - 1, top - 22, 2, 18);
-      ctx.fillStyle = '#ff3344';
-      ctx.fillRect(sx + b.w / 2 - 2, top - 22, 4, 2);
-    } else {
-      ctx.fillStyle = '#5a5a5a';
-      ctx.fillRect(sx + 18, top - 10, 16, 6);
-      ctx.fillStyle = '#3a3a3a';
-      ctx.fillRect(sx + 25, top - 10, 9, 6);
+    // ---- Chimney + smoke curl ----
+    const chX = sx + b.w * 0.22;
+    const chTop = wallTop - 28;
+    ctx.fillStyle = _mixHex(b.shd, '#000000', 0.30);
+    ctx.fillRect(chX, chTop, 12, 24);
+    ctx.fillStyle = _mixHex(b.shd, '#000000', 0.50);
+    ctx.fillRect(chX, chTop, 12, 4);
+    // Smoke puffs — 3 small circles rising, animated
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    const sT = (game.time * 0.4 + b.x) % 60;
+    for (let p = 0; p < 3; p++) {
+      const puffY = chTop - 10 - (sT + p * 18) * 0.8;
+      const puffX = chX + 6 + Math.sin((game.time * 0.03 + p) * 1.2) * 4;
+      const rad = 4 + p * 0.8;
+      ctx.beginPath();
+      ctx.arc(puffX, puffY, rad, 0, Math.PI * 2);
+      ctx.fill();
     }
 
-    // ---- Shop sign plaque (2-tone, no outline) ----
+    // ---- Hanging shop sign ----
+    const signX = sx + b.w / 2 - 22;
+    const signY = wallTop + b.h - 60;
+    // Rope
+    ctx.fillStyle = '#3a2808';
+    ctx.fillRect(signX + 22, signY - 10, 1, 10);
+    // Wooden plaque
+    ctx.fillStyle = _mixHex(b.accent, '#000000', 0.20);
+    ctx.fillRect(signX, signY, 44, 22);
     ctx.fillStyle = b.accent;
-    ctx.fillRect(dx - 12, 480 - 50, 44, 14);
-    ctx.fillStyle = _mixHex(b.accent, '#000000', 0.35);
-    ctx.fillRect(dx - 12, 480 - 43, 44, 7);
-    ctx.font = 'bold 13px sans-serif';
+    ctx.fillRect(signX + 1, signY + 1, 42, 14);
+    ctx.fillStyle = _mixHex(b.accent, '#000000', 0.45);
+    ctx.fillRect(signX + 1, signY + 15, 42, 7);
+    ctx.font = 'bold 15px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(b.sign, dx + 10, 480 - 39);
+    ctx.fillText(b.sign, signX + 22, signY + 14);
   }
 }
 
@@ -13093,54 +13228,87 @@ function drawPlatforms() {
     const sx = p.x - game.camera.x;
     if (sx + p.w < 0 || sx > W) continue;
     if (p.type === 'ground') {
-      // ---- DQ cel-shaded ground ----
-      // Dirt body: three distinct cel bands — lit top, shadow mid, deep bottom
-      ctx.fillStyle = '#a08050';                     // sunlit band just under grass
-      ctx.fillRect(sx, p.y + 6, p.w, 6);
-      ctx.fillStyle = OUT;                           // seam #1
-      ctx.fillRect(sx, p.y + 12, p.w, 1);
-      ctx.fillStyle = '#7a5a38';                     // midtone band
-      ctx.fillRect(sx, p.y + 13, p.w, 14);
-      ctx.fillStyle = OUT;                           // seam #2
-      ctx.fillRect(sx, p.y + 27, p.w, 1);
-      ctx.fillStyle = '#4a3018';                     // deep shadow band (undersoil)
-      ctx.fillRect(sx, p.y + 28, p.w, p.h - 22);
-      // Pebble motes in the lit band — 1px dark dots spaced out
-      for (let i = 0; i < p.w; i += 22) {
-        const ox = (i + (i * 5) % 7);
-        const oy = 7 + ((i * 3) % 4);
-        ctx.fillStyle = '#5a3f20';
-        ctx.fillRect(sx + ox, p.y + oy, 2, 1);
-      }
-      // Faint root tufts in the shadow band
-      for (let i = 0; i < p.w; i += 48) {
-        const ox = (i + (i * 7) % 13);
-        ctx.fillStyle = '#2a1a08';
-        ctx.fillRect(sx + ox, p.y + 20, 1, 5);
-      }
-      // Grass top — 2 flat tones only
-      ctx.fillStyle = '#6cb847';
-      ctx.fillRect(sx, p.y + 1, p.w, 6);
-      ctx.fillStyle = '#8ad860';
-      ctx.fillRect(sx, p.y, p.w, 3);
-      // Sharp black seam between grass and dirt
+      // ---- CUTE cel-shaded ground (matches monster aesthetic) ----
+      // Dirt body — 2 soft pastel tones + thicker outline seam
+      ctx.fillStyle = '#c89470';                     // warm honey-dirt top
+      ctx.fillRect(sx, p.y + 6, p.w, 10);
       ctx.fillStyle = OUT;
-      ctx.fillRect(sx, p.y + 7, p.w, 1);
-      // Grass tufts (sparse) — single flat colour each
-      for (let i = 0; i < p.w; i += 14) {
-        const h = 3 + (i % 3 === 0 ? 2 : 0);
-        ctx.fillStyle = '#8ad860';
-        ctx.fillRect(sx + i + ((i * 3) % 5), p.y - h, 1, h);
+      ctx.fillRect(sx, p.y + 16, p.w, 1);
+      ctx.fillStyle = '#8a6042';                     // deep soil
+      ctx.fillRect(sx, p.y + 17, p.w, p.h - 11);
+      // Round pebbles in the lit band — tiny circles, 2-tone
+      for (let i = 0; i < p.w; i += 34) {
+        const ox = (i + (i * 5) % 11);
+        const py = p.y + 10 + ((i * 3) % 3);
+        // Pebble shadow
+        ctx.fillStyle = '#6a4028';
+        ctx.beginPath(); ctx.arc(sx + ox, py + 1, 2.5, 0, Math.PI * 2); ctx.fill();
+        // Pebble body
+        ctx.fillStyle = '#a87650';
+        ctx.beginPath(); ctx.arc(sx + ox, py, 2.5, 0, Math.PI * 2); ctx.fill();
+        // Pebble highlight
+        ctx.fillStyle = '#e8c090';
+        ctx.fillRect(sx + ox - 1, py - 1, 1, 1);
       }
-      // Occasional flower (flat 2-tone)
-      for (let i = 0; i < p.w; i += 110) {
-        const fx = sx + i + ((i * 3) % 15);
-        const fc = (i % 3 === 0) ? '#ffee88' : (i % 3 === 1) ? '#ff88aa' : '#cc88ff';
-        ctx.fillStyle = fc;
-        ctx.fillRect(fx - 1, p.y - 2, 3, 1);
-        ctx.fillRect(fx, p.y - 3, 1, 1);
-        ctx.fillStyle = '#ffaa22';
-        ctx.fillRect(fx, p.y - 2, 1, 1);
+      // Little "roots" — curved squiggles in the undersoil
+      ctx.strokeStyle = '#5a3020'; ctx.lineWidth = 1;
+      for (let i = 0; i < p.w; i += 72) {
+        const ox = (i + (i * 7) % 13);
+        ctx.beginPath();
+        ctx.moveTo(sx + ox, p.y + 22);
+        ctx.quadraticCurveTo(sx + ox + 3, p.y + 28, sx + ox + 1, p.y + 34);
+        ctx.stroke();
+      }
+      // Grass top — softer 2-tone with wavy edge
+      ctx.fillStyle = '#4a9a34';                     // deeper mid-green
+      ctx.fillRect(sx, p.y + 3, p.w, 6);
+      ctx.fillStyle = '#86d64f';                     // bright cute green
+      ctx.fillRect(sx, p.y, p.w, 5);
+      // WAVY top edge — scalloped grass line using small arcs
+      ctx.fillStyle = '#86d64f';
+      for (let i = 0; i < p.w; i += 10) {
+        ctx.beginPath();
+        ctx.arc(sx + i + 5, p.y, 4.5, Math.PI, 0);
+        ctx.fill();
+      }
+      // Crisp black seam between grass and dirt
+      ctx.fillStyle = OUT;
+      ctx.fillRect(sx, p.y + 9, p.w, 1);
+      // Sprinkled shiny grass tufts — bigger 2-tone blades
+      for (let i = 0; i < p.w; i += 22) {
+        const tx = sx + i + ((i * 3) % 7);
+        const th = 5 + (i % 2);
+        // Shadow side
+        ctx.fillStyle = '#4a9a34';
+        ctx.fillRect(tx + 1, p.y - th, 1, th);
+        // Lit side
+        ctx.fillStyle = '#a8ff66';
+        ctx.fillRect(tx, p.y - th, 1, th);
+      }
+      // Cute chibi flowers — every ~90 px, a tiny plump flower with face
+      for (let i = 0; i < p.w; i += 90) {
+        const fx = sx + i + ((i * 5) % 18);
+        const fy = p.y - 4;
+        const palette = (i / 90) % 3;
+        const petal = palette < 1 ? '#ff9ab8' : palette < 2 ? '#ffd76b' : '#bb8cff';
+        const petalShd = _mixHex(petal, '#000000', 0.25);
+        // 4 petals
+        ctx.fillStyle = petal;
+        ctx.beginPath(); ctx.arc(fx - 2, fy - 2, 2, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(fx + 2, fy - 2, 2, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(fx - 2, fy + 2, 2, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(fx + 2, fy + 2, 2, 0, Math.PI * 2); ctx.fill();
+        // Shadow side on right two petals
+        ctx.fillStyle = petalShd;
+        ctx.beginPath(); ctx.arc(fx + 2, fy - 2, 2, -Math.PI/3, Math.PI/3); ctx.fill();
+        ctx.beginPath(); ctx.arc(fx + 2, fy + 2, 2, -Math.PI/3, Math.PI/3); ctx.fill();
+        // Yellow core
+        ctx.fillStyle = '#ffdd44';
+        ctx.beginPath(); ctx.arc(fx, fy, 1.8, 0, Math.PI * 2); ctx.fill();
+        // Tiny cute face — 2 dots
+        ctx.fillStyle = OUT;
+        ctx.fillRect(fx - 1, fy - 1, 1, 1);
+        ctx.fillRect(fx + 1, fy - 1, 1, 1);
       }
     } else {
       // ---- DQ cel-shaded wood platform ----
