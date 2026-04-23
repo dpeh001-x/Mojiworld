@@ -3,18 +3,36 @@
 <head>
 <meta charset="UTF-8">
 <title>LevelX — Shardfall Expedition</title>
+<!-- Full-screen viewport on mobile: device-width, locked zoom, notch-safe -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0a1e">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    /* iOS Safari's dynamic viewport — trims away url bar / home indicator */
+    height: 100dvh;
+  }
   body {
     background: #0a0a1e;
     font-family: 'Trebuchet MS', sans-serif;
     display: flex;
     justify-content: center;
     align-items: center;
-    min-height: 100vh;
     color: #fff;
     overflow: hidden;
     user-select: none;
+    /* Lock the page so mobile browsers can't rubber-band / scroll */
+    position: fixed; inset: 0;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    /* Respect iPhone notch safe areas */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+             env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
   .game-wrapper {
     position: relative;
@@ -22,6 +40,55 @@
     border-radius: 8px;
     box-shadow: 0 0 50px rgba(150, 100, 230, 0.5);
     overflow: hidden;
+    /* Canvas is authored at 960x560; scale the whole wrapper to fit screen.
+       JS sets --game-scale in _fitGameToViewport so we keep the 16:9-ish
+       aspect ratio without distorting child positions. */
+    width: 960px; height: 560px;
+    transform-origin: center center;
+    transform: scale(var(--game-scale, 1));
+  }
+  /* On narrow phones ensure the scale transform doesn't leave scrollable
+     space outside the wrapper */
+  @media (pointer: coarse), (max-width: 900px) {
+    body { padding: 0; }       /* safe-area still respected via inset calc below */
+    .game-wrapper { border-width: 0; border-radius: 0; box-shadow: none; }
+  }
+
+  /* Portrait orientation on phones — game stays playable but the landscape
+     nag overlay encourages a rotate for a better view. */
+  #rotate-nag {
+    display: none;
+    position: fixed; inset: 0; z-index: 100;
+    background: radial-gradient(circle, #1a1030, #05030a 80%);
+    color: #ffeecc;
+    flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+    font: 14px 'Trebuchet MS', sans-serif;
+    padding: 24px;
+    pointer-events: auto;
+  }
+  #rotate-nag .icon {
+    font-size: 58px;
+    animation: rotate-hint 2.2s ease-in-out infinite;
+    margin-bottom: 12px;
+  }
+  #rotate-nag h2 {
+    font-size: 20px; color: #ffcc66; margin-bottom: 6px;
+  }
+  #rotate-nag p { max-width: 280px; color: #ccc; line-height: 1.5; }
+  #rotate-nag button {
+    margin-top: 20px; padding: 10px 22px; font-size: 14px;
+    background: #2a1f45; color: #ffdd88;
+    border: 1px solid #8866aa; border-radius: 20px;
+    cursor: pointer; font-family: inherit;
+  }
+  @keyframes rotate-hint {
+    0%, 30%   { transform: rotate(0deg); }
+    50%, 80%  { transform: rotate(-90deg); }
+    100%      { transform: rotate(0deg); }
+  }
+  @media (orientation: portrait) and (max-width: 768px) {
+    body.nag-portrait #rotate-nag { display: flex; }
   }
   /* Very faint scanline for texture only — modern games keep it ≤ 4% alpha */
   .game-wrapper::before {
@@ -798,6 +865,14 @@
 
   <div id="tower-hud" style="display:none"></div>
 
+  <!-- =================== ROTATE-TO-LANDSCAPE NAG (mobile portrait) =================== -->
+  <div id="rotate-nag">
+    <div class="icon">📱</div>
+    <h2>Rotate your phone</h2>
+    <p>LevelX looks best in landscape. Turn your device sideways for the full-screen experience — you can always dismiss this for portrait play.</p>
+    <button onclick="document.body.classList.remove('nag-portrait')">Play in portrait anyway</button>
+  </div>
+
   <!-- =================== MOBILE TOUCH CONTROLS =================== -->
   <!-- Visible on touch devices (coarse pointer). Injected via CSS. -->
   <div id="mobile-ctrl" class="mobile-ctrl">
@@ -1151,7 +1226,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.14.1';
+const GAME_VERSION = 'v0.14.2';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -2860,6 +2935,69 @@ if (document.readyState === 'loading') {
 } else {
   _initMobileControls();
 }
+
+// =========================================================================
+// FULLSCREEN FIT — scale the fixed 960x560 game-wrapper to the device
+// viewport so mobile screens fill edge-to-edge with no scroll / pinch.
+// =========================================================================
+const GAME_W = 960, GAME_H = 560;
+function _fitGameToViewport() {
+  const wrap = document.querySelector('.game-wrapper');
+  if (!wrap) return;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const bodyStyle = getComputedStyle(document.body);
+  const padT = parseFloat(bodyStyle.paddingTop)    || 0;
+  const padB = parseFloat(bodyStyle.paddingBottom) || 0;
+  const padL = parseFloat(bodyStyle.paddingLeft)   || 0;
+  const padR = parseFloat(bodyStyle.paddingRight)  || 0;
+  const availW = Math.max(200, vw - padL - padR);
+  const availH = Math.max(200, vh - padT - padB);
+  const scale = Math.min(availW / GAME_W, availH / GAME_H);
+  wrap.style.setProperty('--game-scale', scale.toFixed(4));
+  // Re-arm the portrait-rotate nag whenever we re-fit. User's manual
+  // dismissal is sticky via the data attribute.
+  const isTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  const isPortrait = vh > vw;
+  const shouldNag = isTouch && isPortrait && vw < 768 && !document.body.dataset.nagDismissed;
+  document.body.classList.toggle('nag-portrait', shouldNag);
+}
+// Mark dismissal so the nag doesn't keep popping back on orientation flicker
+document.addEventListener('click', (e) => {
+  if (e.target && e.target.closest && e.target.closest('#rotate-nag button')) {
+    document.body.dataset.nagDismissed = '1';
+  }
+}, true);
+window.addEventListener('resize', _fitGameToViewport);
+window.addEventListener('orientationchange', () => {
+  // Some browsers fire orientationchange before the viewport metrics update;
+  // wait a frame to read the new dimensions.
+  requestAnimationFrame(_fitGameToViewport);
+  setTimeout(_fitGameToViewport, 200);
+});
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', _fitGameToViewport);
+} else {
+  _fitGameToViewport();
+}
+// Re-fit once images/fonts have loaded (the body padding may shift)
+window.addEventListener('load', _fitGameToViewport);
+
+// Block default scroll / pinch gestures at the window level. The game
+// controls its own input via pointer events; mobile browsers default to
+// bounce-scroll the whole page, which we don't want.
+document.addEventListener('touchmove', (e) => {
+  // Allow touch scrolling inside modals (they're the only scrollable regions)
+  let n = e.target;
+  while (n && n !== document.body) {
+    if (n.dataset && n.dataset.scrollable === '1') return;
+    const st = n.scrollHeight - n.clientHeight;
+    if (st > 2 && getComputedStyle(n).overflowY !== 'visible') return;
+    n = n.parentNode;
+  }
+  e.preventDefault();
+}, { passive: false });
+document.addEventListener('gesturestart', (e) => e.preventDefault());
 
 // =========================================================================
 // CLASS / JOB SYSTEM
