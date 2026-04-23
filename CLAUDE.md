@@ -33,6 +33,17 @@ After any push that lands on `mobile-ui-pass`, always surface the playtest URL i
 
 Single-file static HTML + raw.githack serves the latest branch tip with the correct MIME, so the URL never changes — reviewers / iPhone testers bookmark once.
 
+### Mobile changelog (durable)
+
+Mobile-branch changes are documented in `MOBILE_CHANGELOG.html` — **not** in the main `CHANGELOG.html`. This keeps the gameplay release notes focused on gameplay.
+
+Rules:
+
+- Every shipped commit on `mobile-ui-pass` must add an entry to `MOBILE_CHANGELOG.html`.
+- Match the existing styling (same palette, pill tags for `bug` / `feat` / `polish`, `<kbd>` for keys).
+- Only log mobile-specific work there. If a change touches gameplay code outside the mobile safe zones, it belongs in the main changelog instead (and probably in a different branch).
+- Shareable URL: `https://raw.githack.com/dpeh001-x/LevelX/mobile-ui-pass/MOBILE_CHANGELOG.html`.
+
 ## Session start (automated)
 
 A `SessionStart` hook (`.claude/hooks/session-start.sh`, registered in `.claude/settings.json`) runs `git fetch origin` and fast-forwards / rebases the current branch onto `origin/main` before the session begins. This compensates for human collaborators pushing to `main` between sessions.
