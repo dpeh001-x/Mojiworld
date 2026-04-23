@@ -1500,7 +1500,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.21.0';
+const GAME_VERSION = 'v0.21.1';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -3268,25 +3268,19 @@ window.addEventListener('keydown', e => {
   if (k === 'arrowup' && !game.paused && player.hp > 0 && player.hitStun <= 0) tryPortal();
   if (k === 'b') toggleModal('inventory-modal', renderInventory);
   if (k === 'k') {
-    // Skill tree removed — K now opens the Level Up panel for quick access
-    if (player.cls && !game.paused && player.hp > 0) {
-      openLevelUpPanel();
-    } else if (!player.cls) {
-      showToast('Pick a class first', 'common');
-    }
+    // K / U share the attributes-modal container in "lp" variant.
+    if (!player.cls) { showToast('Pick a class first', 'common'); }
+    else if (player.hp > 0) { toggleSharedModal('attributes-modal', 'lp', openLevelUpPanel); }
   }
   if (k === 'u') {
-    // Character sheet (Level Up panel — replaces attribute allocation)
-    if (player.cls && !game.paused && player.hp > 0) {
-      openLevelUpPanel();
-    } else if (!player.cls) {
-      showToast('Pick a class first', 'common');
-    }
+    if (!player.cls) { showToast('Pick a class first', 'common'); }
+    else if (player.hp > 0) { toggleSharedModal('attributes-modal', 'lp', openLevelUpPanel); }
   }
   if (k === 'i') {
-    // Skills reference — lists A-V hotkeys + current skill + brief desc
-    if (player.cls) openSkillsReference();
-    else showToast('Pick a class first', 'common');
+    // I uses the same container in "skills" variant. Pressing I when K's
+    // Level Up panel is showing swaps the content; pressing I again closes.
+    if (!player.cls) { showToast('Pick a class first', 'common'); }
+    else { toggleSharedModal('attributes-modal', 'skills', openSkillsReference); }
   }
   // Press 9 to reset the entire save (double-confirmed browser prompt)
   if (k === '9' && !game.paused) {
@@ -3306,19 +3300,25 @@ window.addEventListener('keydown', e => {
       openDevConsole();
     }
   }
-  if (k === '?' || k === '/') openHelp();
+  if (k === '?' || k === '/') toggleModalOrOpen('help-modal', openHelp);
   if (k === 'escape') closeAllModals();
   if (k === 'm') audio.toggleMute();
   if (k === 'n') {
-    // N is now the primary "Talk to NPC" key — if any NPC is in talk range,
-    // open their dialog; otherwise fall through to the Codex. This avoids
-    // the old F-key double-trigger (F was both "Talk" and the job signature
-    // skill slot — pressing it near an NPC would talk AND cast a skill).
-    if (player.cls && !game.paused && player.hp > 0) {
-      const pcx = player.x + player.w / 2;
-      const nearNpc = game.npcs && game.npcs.find(npc => Math.abs(pcx - npc.x) < 60);
-      if (nearNpc) openNPC(nearNpc);
-      else openCodex();
+    // N is the primary "Talk to NPC" key — if any NPC is in talk range,
+    // open their dialog; otherwise fall through to the Codex. Pressing N
+    // again with the same window open closes it (works for both branches).
+    if (player.cls && player.hp > 0) {
+      // If the dialog OR codex is already showing, a second N press closes.
+      const dlg = document.getElementById('dialog');
+      const cdx = document.getElementById('codex-modal');
+      if ((dlg && dlg.style.display === 'flex') || (cdx && cdx.style.display === 'flex')) {
+        closeAllModals();
+      } else {
+        const pcx = player.x + player.w / 2;
+        const nearNpc = game.npcs && game.npcs.find(npc => Math.abs(pcx - npc.x) < 60);
+        if (nearNpc) openNPC(nearNpc);
+        else openCodex();
+      }
     }
   }
   // Quick potion use (PgUp = HP, PgDn = MP; legacy R / T kept as aliases).
@@ -12588,6 +12588,32 @@ function toggleModal(id, onOpen) {
   const m = document.getElementById(id);
   if (m.style.display === 'flex') closeAllModals();
   else { if (onOpen) onOpen(); m.style.display = 'flex'; game.paused = true; }
+}
+// v0.21.1 — press the opening key again to close. If a DIFFERENT modal is
+// already showing (e.g. player pressed B then K), close the other one
+// first and then open the requested panel so keybinds always produce
+// predictable behaviour.
+function toggleModalOrOpen(modalId, openFn) {
+  const m = document.getElementById(modalId);
+  if (m && m.style.display === 'flex') { closeAllModals(); return; }
+  closeAllModals();
+  openFn();
+}
+// Some panels share a single modal container (attributes-modal hosts both
+// the Level Up radar and the Skills Reference card). We track which
+// VARIANT is currently rendered so the same key that opened that variant
+// is also the one that closes it — pressing K when the Skills card is
+// showing should swap content, not close.
+function toggleSharedModal(modalId, variant, openFn) {
+  const m = document.getElementById(modalId);
+  if (!m) return openFn();
+  if (m.style.display === 'flex' && m.dataset.variant === variant) {
+    closeAllModals();
+    return;
+  }
+  closeAllModals();
+  openFn();
+  m.dataset.variant = variant;
 }
 function closeAllModals() {
   // Don't close forced modals
