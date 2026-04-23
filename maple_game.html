@@ -1121,7 +1121,7 @@
   <div id="top-ui">
     <div id="stats">
       <div>Lv.<span id="level">1</span> <span id="class">Warrior</span>
-        <span style="color:#ffcc55;margin-left:6px;">LP:<span id="skill-points">0</span></span></div>
+        <span style="color:#ffcc55;margin-left:6px;" title="Skill points — spend in the Level Up panel (K or U)">SP:<span id="skill-points">0</span></span></div>
       <div class="bar"><div class="bar-fill hp-fill" id="hp-bar" style="width:100%"></div><div class="bar-text" id="hp-text">100/100</div></div>
       <div class="bar"><div class="bar-fill mp-fill" id="mp-bar" style="width:100%"></div><div class="bar-text" id="mp-text">50/50</div></div>
       <div class="bar"><div class="bar-fill exp-fill" id="exp-bar" style="width:0%"></div><div class="bar-text" id="exp-text">0/100</div></div>
@@ -1499,7 +1499,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.17.1';
+const GAME_VERSION = 'v0.17.2';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -3842,24 +3842,40 @@ function openCodex() {
 // DAILY — login bonus + rotating challenge (deterministic UTC-day rotation)
 // =========================================================================
 const DAILY_CHALLENGES = [
-  { id:'kill50',   desc:'Defeat 50 enemies today',     goal:50, track:'kills',   reward:{ mesos:500, sp:1 } },
-  { id:'reach15',  desc:'Reach level 15 (account)',    goal:15, track:'level',   reward:{ mesos:800 } },
-  { id:'enhance1', desc:'Enhance any item once',       goal:1,  track:'enhance', reward:{ mesos:600, sp:1 } },
-  { id:'combo30',  desc:'Land a 30-hit combo',         goal:30, track:'combo',   reward:{ mesos:700 } },
+  // Beginner-friendly — always doable from Lv 1 with no items
+  { id:'kill10',   desc:'Defeat 10 enemies today',     goal:10, track:'kills',   reward:{ mesos:300, sp:1 }, minLv:1  },
+  { id:'visit3',   desc:'Visit 3 different maps',      goal:3,  track:'visit',   reward:{ mesos:300, sp:1 }, minLv:1  },
+  { id:'talk3',    desc:'Talk to 3 different NPCs',    goal:3,  track:'talk',    reward:{ mesos:300 },       minLv:1  },
+  // Mid — assumes a chest or two cracked, a fight or two survived
+  { id:'kill50',   desc:'Defeat 50 enemies today',     goal:50, track:'kills',   reward:{ mesos:500, sp:1 }, minLv:6  },
+  { id:'combo30',  desc:'Land a 30-hit combo',         goal:30, track:'combo',   reward:{ mesos:700 },       minLv:6  },
+  { id:'chest3',   desc:'Open 3 chests',               goal:3,  track:'chest',   reward:{ mesos:500 },       minLv:6  },
+  // Late — enhancement requires items + stones (wool chest / shop)
+  { id:'enhance1', desc:'Enhance any item once',       goal:1,  track:'enhance', reward:{ mesos:600, sp:1 }, minLv:15 },
+  { id:'reach25',  desc:'Reach character level 25',    goal:25, track:'level',   reward:{ mesos:800, sp:1 }, minLv:15 },
 ];
 function dailyIndex() { return Math.floor(Date.now() / 86400000); }
+// Pick a challenge deterministically per day, but filtered by level bracket
+// so a Lv 1 player never rolls "Enhance any item once" on day one.
+function _pickDailyChallenge(day) {
+  const lv = player.level || 1;
+  const pool = DAILY_CHALLENGES.filter(c => (c.minLv || 1) <= lv);
+  if (!pool.length) return DAILY_CHALLENGES[0];
+  return pool[day % pool.length];
+}
 function checkDaily() {
   if (!player.cls) return;
   const day = dailyIndex();
   if (!game.dailyState || game.dailyState.day !== day) {
     const prev = game.dailyState;
-    const c = DAILY_CHALLENGES[day % DAILY_CHALLENGES.length];
+    const c = _pickDailyChallenge(day);
     const streak = (prev && (day - prev.day === 1)) ? (prev.streak || 0) + 1 : 1;
     const bonus = 200 * Math.min(7, streak);
     player.mesos += bonus;
     showToast(`🌅 Daily login +${bonus} Lumens (streak ${streak})`, 'epic');
     flash(0.2); audio.play('levelup');
-    game.dailyState = { day, streak, challenge: c.id, progress: 0, claimed: false };
+    // Track per-day sets for visit/talk so repeats don't count
+    game.dailyState = { day, streak, challenge: c.id, progress: 0, claimed: false, seenMaps: [], seenNpcs: [] };
     saveState();
   }
   tickDaily('level', player.level);
@@ -3868,10 +3884,21 @@ function tickDaily(kind, n) {
   const d = game.dailyState; if (!d || d.claimed) return;
   const c = DAILY_CHALLENGES.find(x => x.id === d.challenge);
   if (!c || c.track !== kind) return;
-  const add = (typeof n === 'number') ? n : 1;
-  d.progress = (kind === 'level' || kind === 'combo')
-    ? Math.max(d.progress || 0, add)
-    : (d.progress || 0) + add;
+  // Set-tracked kinds (visit / talk) dedupe by id instead of adding
+  if (kind === 'visit' || kind === 'talk') {
+    const bucket = kind === 'visit' ? 'seenMaps' : 'seenNpcs';
+    if (!d[bucket]) d[bucket] = [];
+    const id = String(n);
+    if (!d[bucket].includes(id)) {
+      d[bucket].push(id);
+      d.progress = d[bucket].length;
+    }
+  } else {
+    const add = (typeof n === 'number') ? n : 1;
+    d.progress = (kind === 'level' || kind === 'combo')
+      ? Math.max(d.progress || 0, add)
+      : (d.progress || 0) + add;
+  }
   if (d.progress >= c.goal) {
     d.claimed = true;
     if (c.reward.mesos) player.mesos += c.reward.mesos;
@@ -4261,9 +4288,17 @@ function loadMap(id, entryX) {
   // Any pending skill timers belong to the previous map — cancel them so
   // volleys / tether bursts / follow-up strikes don't bleed into the new map.
   if (typeof cancelPendingSkillTimers === 'function') cancelPendingSkillTimers();
+  // Clear input state. If a key was still physically down when the portal
+  // fired, its keyup often never reaches the window after the map swap —
+  // leaving `game.keys['arrowup']` etc. stuck true, which turns into ghost
+  // movement / repeated portal attempts / jammed skills on the new map.
+  if (game.keys) for (const k in game.keys) game.keys[k] = false;
+  player.lastTapKey = null;
   // Track visited maps for the taxi system
   if (!game.visitedMaps) game.visitedMaps = {};
   game.visitedMaps[id] = true;
+  // Daily "visit N different maps" challenge — deduped by id in tickDaily
+  if (typeof tickDaily === 'function') tickDaily('visit', id);
   game.currentMap = id;
   game.mapData = _variedMapData(id);
   game.monsters = [];
@@ -4299,6 +4334,26 @@ function loadMap(id, entryX) {
     }
     for (let i = 0; i < count; i++) {
       spawnFromMap(s.type, s.boss);
+    }
+  }
+  // Entry safe zone — push non-boss monsters out of a ~240 px bubble around
+  // the player's spawn so fresh arrivals (especially Lv 1 in Emerald Thicket)
+  // aren't dumped straight into a contact-damage cluster. Only applies on
+  // combat maps; boss arenas and the tower deliberately spawn close.
+  if (entryX !== undefined && !game.mapData.isTown && !game.mapData.isBossArena && !game.mapData.isTower) {
+    const SAFE = 240;
+    const worldW = game.mapData.worldWidth || 2000;
+    for (const m of game.monsters) {
+      if (m.isBoss) continue;
+      const dx = m.x - entryX;
+      if (Math.abs(dx) < SAFE) {
+        // Push toward the deeper half of the map. If entry is near the left
+        // edge, shove right; near the right edge, shove left.
+        const pushRight = entryX < worldW / 2;
+        m.x = pushRight ? entryX + SAFE + Math.random() * 80
+                        : entryX - SAFE - Math.random() * 80;
+        m.x = Math.max(40, Math.min(worldW - 40, m.x));
+      }
     }
   }
   // Rare "wanderer" — a single mob from a mismatched tier to keep maps
@@ -4487,6 +4542,7 @@ function drawPowerupOrbs() {
 function openChest(c) {
   if (c.opened) return;
   c.opened = true;
+  tickDaily('chest');
   const rewards = {
     wood:   { mesos: [40, 120],  rarity: ['common','common','rare'],    hpPot: 2, mpPot: 1 },
     silver: { mesos: [200, 400], rarity: ['common','rare','rare','epic'], hpPot: 3, mpPot: 2 },
@@ -9774,6 +9830,8 @@ function tryInteract() {
 function openNPC(npc) {
   const dlg = document.getElementById('dialog');
   document.getElementById('dialog-name').textContent = npc.name;
+  // Daily "talk to N different NPCs" challenge — deduped by role in tickDaily
+  if (typeof tickDaily === 'function') tickDaily('talk', npc.role || npc.name);
   let text = '', opts = [];
   if (npc.role === 'potion') {
     text = 'Welcome! Stock up on potions — they might save your life.';
@@ -10683,7 +10741,7 @@ function openSkillsReference() {
     { key:'H',     label:'—',                 desc:'(unbound)', kind:'unbound' },
     { key:'I',     label:'Skills Reference',  desc:'This panel.', kind:'menu' },
     { key:'J',     label:'—',                 desc:'(unbound)', kind:'unbound' },
-    { key:'K',     label:'Level Up Panel',    desc:'Spend LP into HP / MP / ATK / DEF / Crit / Speed lanes.', kind:'menu' },
+    { key:'K',     label:'Level Up Panel',    desc:'Spend Skill Points into HP / MP / ATK / DEF / Crit / Speed lanes.', kind:'menu' },
     { key:'L',     label:'—',                 desc:'(unbound)', kind:'unbound' },
     { key:'M',     label:'Mute audio',        desc:'Toggle sound effects on/off.', kind:'menu' },
     { key:'N',     label:'Codex',             desc:'Achievement + bestiary progress tracker.', kind:'menu' },
@@ -10693,7 +10751,7 @@ function openSkillsReference() {
     { key:'R',     label:'HP Potion (alias)', desc:'Alternative to PgUp — use HP potion; auto-buys with gold if none.', kind:'item' },
     { key:'S',     label:'Skill (Slot A)',    desc:null, slot:'a', kind:'skill' },
     { key:'T',     label:'MP Potion (alias)', desc:'Alternative to PgDn — use MP potion; auto-buys with gold if none.', kind:'item' },
-    { key:'U',     label:'Level Up Panel',    desc:'Open the radar stat chart + LP spending screen.', kind:'menu' },
+    { key:'U',     label:'Level Up Panel',    desc:'Open the radar stat chart + Skill Point spending screen.', kind:'menu' },
     { key:'V',     label:'Job Ultimate',      desc:null, slot:'c', kind:'skill' },
     { key:'9',     label:'Reset Save',        desc:'Instant reset — double-confirms, wipes everything and restarts from class select.', kind:'menu' },
   ];
@@ -10764,7 +10822,7 @@ function openLevelUpPanel() {
     <button class="close-btn" onclick="closeAllModals()">✕</button>
     <h2>✦ Level Up Points ✦</h2>
     <div style="text-align:center; margin-bottom:8px; color:#bbb; font-size:12px;">
-      Spend LP to permanently boost a stat. Each lane has a cap — the radar below shows your build shape.
+      Spend SP to permanently boost a stat. Each lane has a cap — the radar below shows your build shape.
     </div>
     <div style="text-align:center; margin-bottom:12px;">
       Available: <span class="gold" id="lp-remaining">${player.skillPoints}</span>
@@ -10907,7 +10965,7 @@ function renderLevelUp() {
         <div style="width:${pctFilled}%; height:100%; background:${atCap ? '#6cbb4a' : '#ffcc66'}; transition:width 180ms ease-out;"></div>
       </div>
       <div style="font-size:10px; color:#999; margin-top:4px;">
-        ${o.cost} LP${atCap ? ' · MAXED' : ''}
+        ${o.cost} SP${atCap ? ' · MAXED' : ''}
       </div>
     `;
     if (canAfford) {
@@ -14097,6 +14155,88 @@ function drawNPCs() {
       ctx.fillStyle = '#ffdd44';
       ctx.font = 'bold 12px sans-serif';
       ctx.fillText('[F] Talk', cx, headY - 36 + t);
+    }
+
+    // Zodiac portal visual cue — the Zodiac Sanctum portal sits at the same
+    // x as The Amnesiac (so players discover it after interacting). Without
+    // this cue, the purple portal swirl is hidden behind the cottage. Paint
+    // a floating zodiac sigil above the cottage roof so the portal is
+    // visibly advertised from far away.
+    if (npc.role === 'amnesiac') {
+      const t = game.time * 0.05;
+      const bob = Math.sin(t * 2) * 5;
+      // Cottages are ~110 px tall with roofs reaching up to ~y=220 in screen
+      // space relative to feet=480. Put the sigil at y ~=190 so it floats
+      // above the roofline and is visible from every on-screen position.
+      const cy = 200 + bob;
+      // Outer halo (additive for glow)
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const halo = ctx.createRadialGradient(cx, cy, 2, cx, cy, 44);
+      halo.addColorStop(0, 'rgba(210,180,255,0.70)');
+      halo.addColorStop(0.5, 'rgba(140,100,230,0.30)');
+      halo.addColorStop(1, 'rgba(60,30,100,0)');
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 44, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      // 8-point star body (pulses in size)
+      const pulse = 1 + Math.sin(t * 3) * 0.18;
+      const rOuter = 16 * pulse;
+      const rInner = 5.2 * pulse;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(t * 0.35);
+      ctx.fillStyle = '#f6e6ff';
+      ctx.strokeStyle = '#aa77ff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const r = (i % 2 === 0) ? rOuter : rInner;
+        const x = Math.cos(a) * r, y = Math.sin(a) * r;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Inner core dot
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(0, 0, 3.2 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      // Orbit dust — 3 tiny sparkles tracing an arc around the star
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 3; i++) {
+        const a = t * 0.8 + (i / 3) * Math.PI * 2;
+        const ox = cx + Math.cos(a) * 24;
+        const oy = cy + Math.sin(a) * 10;
+        ctx.fillStyle = 'rgba(230,210,255,0.8)';
+        ctx.beginPath();
+        ctx.arc(ox, oy, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+      // Label banner — only when camera is close enough that the player
+      // would plausibly notice it (near the NPC)
+      if (Math.abs((player.x + player.w/2) - npc.x) < 200) {
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 10px sans-serif';
+        const label = 'ZODIAC SANCTUM';
+        const tw = ctx.measureText(label).width + 14;
+        ctx.fillStyle = 'rgba(30,15,55,0.78)';
+        ctx.fillRect(cx - tw/2, cy + 22, tw, 14);
+        ctx.strokeStyle = '#aa77ff';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(cx - tw/2, cy + 22, tw, 14);
+        ctx.fillStyle = '#f6e6ff';
+        ctx.fillText(label, cx, cy + 32);
+        ctx.restore();
+      }
     }
   }
 }

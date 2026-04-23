@@ -10,26 +10,48 @@ Live play URL (once GitHub Pages is enabled): **https://dpeh001-x.github.io/Leve
 
 ## 🎯 Controls
 
+Skills are laid out as a left-hand cluster (`Z X S C D F V G`) so you can reach every attack without leaving WASD-adjacent position. Press `?` in-game for a live keybind panel that shows your current class's skill names + cooldowns, or `I` for a short skill reference card.
+
+### Movement
+
 | Action | Key |
 |---|---|
-| Move | `←` `→` |
-| Jump (double/triple) | `Space` |
+| Move left / right | `←` `→` |
+| Jump (double / triple) | `Space` |
 | Drop through platform | `↓` + `Space` |
 | Enter portal | `↑` |
-| Dodge roll | `Shift` / `V` |
-| Block / Parry | `Z` |
+| Dodge roll | `Shift` |
+| Block / Parry | `A` |
 | Quick dash | double-tap `←` or `→` |
-| Basic attack | `D` |
-| Skills | `S A E W Q` |
-| Job ultimate / Master signature | `C` / `X` |
-| Interact / Talk | `F` |
-| Inventory | `B` |
-| Skill tree | `K` |
-| Character sheet | `U` |
-| Help panel | `?` |
-| HP / MP potion (buys with gold if none) | `PgUp` / `PgDn` |
 
-Press `?` in-game for a full live keybind panel that shows your current class skills.
+### Combat
+
+| Action | Key |
+|---|---|
+| Basic attack | `Z` |
+| Skill 2 | `X` |
+| Skill 3 | `S` |
+| Skill 4 | `C` |
+| Skill 5 | `D` |
+| Job signature (Lv 10) | `F` |
+| Job ultimate (Lv 10) | `V` |
+| Master signature (Lv 20) | `G` |
+
+### UI & utility
+
+| Action | Key |
+|---|---|
+| Interact / Talk (next to NPC) | `F` |
+| Inventory | `B` |
+| Level-up panel | `K` or `U` |
+| Skill reference | `I` |
+| Codex / achievements | `N` |
+| Help panel | `?` |
+| Mute / unmute | `M` |
+| HP / MP potion (3 s CD, buys with Lumen if none) | `R` / `T` (or `PgUp` / `PgDn`) |
+| Reset save (confirms) | `9` |
+| Re-pick job / master | `0` |
+| Dev console | hold `1` + `2` + `3` |
 
 ## ⚔️ Classes
 
