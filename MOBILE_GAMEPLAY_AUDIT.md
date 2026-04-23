@@ -111,7 +111,74 @@ _Filled in below._
 
 ## Phase 1 — Quick wins (<1hr)
 
-_Filled in below._
+Each item ships as an atomic commit. All land inside mobile safe zones.
+
+### P1.1 · Tab-title badge on level-up 🟢 S
+- **Psychology lever:** Re-engagement (+3), Completion bias (+1)
+- **What:** On each `gainExp` level-up branch, push `document.title = '⭐ Lv ' + player.level + ' — LevelX';`. When the tab loses focus, enqueue a pulse-animation via existing toast system.
+- **Anchor:** JS hook in mobile safe zone 3612–3797. Add a `document.addEventListener('visibilitychange', ...)` listener that sets `document.title` based on current `player.level`. Revert to static title on focus.
+- **Why it works:** The browser tab is the #1 retention surface for web games. Zero-cost reminder in the user's existing workflow.
+- **Reuse:** `player.level` (already global), no new save fields.
+
+### P1.2 · Skill-point toast on level-up 🟢 S
+- **Psychology lever:** Near-miss reinforcement (+2), Completion bias (+2)
+- **What:** After a level-up, fire `showToast('+1 Skill Point — open Skills (I)', 'rare')` at line 10751 area (where `audio.play('levelup')` sits). Wrapped in an `if (window.matchMedia('(pointer: coarse)').matches || isMobile())` check so desktop isn't doubled.
+- **Anchor:** **NOTE — this one requires a 2-line addition in gameplay code (line ~10724/10751) and would violate the mobile hard rule.** *Alternative mobile-only implementation:* MutationObserver in the mobile JS zone watching `player.skillPoints` via a periodic tick, synthesize the toast when the counter increments. Slightly indirect but safe-zone-local. **Flag to user: confirm before shipping.**
+- **Why it works:** The level-up fanfare is loud but the actionable reward is invisible. This converts a silent gain into a clear CTA.
+
+### P1.3 · Rotate-nag dismissal persists across reloads 🟢 S
+- **Psychology lever:** Friction reduction; not a lever proper, but removes a quit-point.
+- **What:** At line 3767–3769, replace `document.body.dataset.nagDismissed = '1'` with a pair of writes — dataset AND `localStorage.setItem('_mobileNagDismissed', '1')`. On the nag-evaluation path earlier (which sets `body.nag-portrait`), read localStorage first and early-return if set.
+- **Anchor:** JS safe zone 3612–3797. ~6 lines total.
+- **Why it works:** Current behavior re-nags on every page load; an already-dismissed user re-learns "close this banner" daily.
+
+### P1.4 · XP-bar near-level pulse 🟢 S
+- **Psychology lever:** Near-miss reinforcement (+3)
+- **What:** Pure CSS. When `player.exp / player.expToNext > 0.9`, add `body.xp-near` (set from an existing mobile JS tick). CSS in safe zone 65–334 applies a 0.8s pulse-glow animation on the XP fill element.
+- **Anchor:** CSS rule in MOBILE CONTROLS (v5) block; JS toggle in mobile-init block. Uses `player.exp` / `player.expToNext` already in scope.
+- **Why it works:** The last 10% of any bar is the Casino rule — visible "almost there" drives one-more-kill.
+
+### P1.5 · Daily-banner default-visible + countdown timer 🟢 S
+- **Psychology lever:** FOMO (+3), Loss aversion (+2)
+- **What:** Add CSS override in safe zone 65–334: `@media (pointer: coarse) { #daily-banner { display: block !important; } }`. Plus a tiny JS tick (once per minute) that appends `… resets in 5h 32m` to the banner using `Date.now()` vs next UTC midnight.
+- **Anchor:** CSS + JS mobile safe zones. Reads `dailyState` (no writes).
+- **Why it works:** The banner already exists, already has a progress bar and streak counter. Mobile just hides it.
+
+### P1.6 · Route damage numbers out of bottom-right quadrant 🟢 S
+- **Psychology lever:** Flow state (+2)
+- **What:** CSS/JS tweak that, on mobile, clamps the spawn Y of damage numbers to ≤ 340 (well above the face button cluster). Read `player.y` via `document.body.classList.contains('mc-portrait')` gate.
+- **Anchor:** Existing `#damage-numbers` container styling in mobile safe zones; no combat-code touch required if done via CSS transform overlay.
+- **Note:** Full implementation requires a small JS helper in mobile safe zone that repositions nodes after they append. *If this requires touching combat code, flag before shipping.*
+
+### P1.7 · Haptic vibrate on legendary drop / boss kill 🟡 S
+- **Psychology lever:** Variable-ratio reinforcement (+2)
+- **What:** Wrap a mobile-only call `if (navigator.vibrate) navigator.vibrate([60, 40, 60])` triggered by a MutationObserver on toast DOM nodes that have `.rarity-legendary` / `.epic` class. Zero gameplay touch.
+- **Anchor:** JS safe zone 3612–3797. Observer on toast container.
+- **Why it works:** Haptic is a mobile-only feedback channel the game doesn't use yet.
+
+### P1.8 · "Streak at risk" localStorage check 🟢 S
+- **Psychology lever:** Loss aversion (+3), Re-engagement (+2)
+- **What:** On page-load, if `player.dailyState.streak > 1` AND `Date.now() + 2*3600*1000 > nextUTCMidnight`, show a toast `"⚠ 2h left to keep your X-day streak"` plus pulse the daily banner for 3s.
+- **Anchor:** JS safe zone; reads `player.dailyState` (existing save field).
+- **Why it works:** Turns a passive streak into an urgent cue. Loss aversion is ~2× the pull of equivalent gain.
+
+### P1.9 · Mobile-only "next advancement" countdown chip 🟢 S
+- **Psychology lever:** Progress overview (+3)
+- **What:** A small badge in the mobile-ctrl HUD region (safe zone 1147–1167). Content: if `player.level < 25`, shows `→ Job in N`; if 25 ≤ level < 50, shows `→ Master in N`; if ≥ 50, shows `→ Ascend in N` or hides.
+- **Anchor:** New `<div id="adv-chip">` in DOM safe zone; CSS in CSS safe zone; data reads from `player.level` (existing). One-line JS tick to update.
+- **Why it works:** Removes the 25-level flat zones between advancement tiers.
+
+### P1.10 · Death overlay: add "Tap to respawn" affordance 🟢 S
+- **Psychology lever:** Flow state (+2)
+- **What:** Mobile-only override. CSS in safe zone 338–419 (adjacent to rotate-nag zone): add pointer-events:auto on an inner element inside `#death-overlay`; attach click that speeds up the existing respawn timer to completion. If respawn is gameplay-timer-driven and can't be accelerated safely: flag to user.
+- **Anchor:** `#death-overlay` (1030–1066). Ideally call an existing respawn helper. *If no safe accelerator exists, flag.*
+- **Why it works:** Removes a dead-air moment on every death.
+
+### Phase 1 flagged items (hard-rule checks)
+
+- **P1.2 (skill-point toast)** — cleanest implementation is 2 lines at line ~10751. That's gameplay code. Proposing MutationObserver-on-counter as the safe-zone alternative. **User decision needed.**
+- **P1.6 (damage-number clamp)** — may require touching the emit site in combat code. Proposing post-append DOM reposition in mobile JS as alt. **User decision needed.**
+- **P1.10 (respawn accelerator)** — depends on whether `respawnAtTown` exposes a skip function. If not, flag.
 
 ---
 
