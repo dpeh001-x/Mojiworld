@@ -1,5 +1,18 @@
 # LevelX — project conventions for Claude
 
+## Session start (durable)
+
+**Always `git fetch` and sync the working branch at the start of every session.** A human collaborator also pushes to this repo, so local state is often stale by the time a new session begins.
+
+Required first steps on every session (before any edits):
+
+1. `git fetch origin`
+2. Inspect `git log --oneline claude/debug-connection-zGgar..origin/main` (and `origin/main..claude/debug-connection-zGgar`) to understand divergence.
+3. Rebase or fast-forward the feature branch onto `origin/main` so edits apply to the latest code.
+4. If the feature branch has no unique commits, simply reset to `origin/main`.
+
+Only skip this if the user explicitly says "don't pull" or is in the middle of an offline task.
+
 ## Changelog policy (durable)
 
 **Always update `CHANGELOG.html` whenever a new implementation lands.**
