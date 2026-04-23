@@ -1,17 +1,17 @@
 # LevelX — project conventions for Claude
 
-## Session start (durable)
+## Session start (automated)
 
-**Always `git fetch` and sync the working branch at the start of every session.** A human collaborator also pushes to this repo, so local state is often stale by the time a new session begins.
+A `SessionStart` hook (`.claude/hooks/session-start.sh`, registered in `.claude/settings.json`) runs `git fetch origin` and fast-forwards / rebases the current branch onto `origin/main` before the session begins. This compensates for human collaborators pushing to `main` between sessions.
 
-Required first steps on every session (before any edits):
+Behaviour:
 
-1. `git fetch origin`
-2. Inspect `git log --oneline claude/debug-connection-zGgar..origin/main` (and `origin/main..claude/debug-connection-zGgar`) to understand divergence.
-3. Rebase or fast-forward the feature branch onto `origin/main` so edits apply to the latest code.
-4. If the feature branch has no unique commits, simply reset to `origin/main`.
+- Fast-forward when the branch has no unique commits.
+- Rebase when it does; auto-aborts on conflict and logs a warning.
+- No-op on dirty working tree, detached HEAD, missing `origin/main`, or fetch timeout.
+- Opt out per-session with `CLAUDE_DONT_PULL=1`.
 
-Only skip this if the user explicitly says "don't pull" or is in the middle of an offline task.
+If editing the hook, keep it idempotent and always exit 0 so it never blocks session start.
 
 ## Changelog policy (durable)
 
