@@ -732,6 +732,23 @@
     transform: translateX(-50%); font-size: 10px; color: #aaa;
   }
 
+  /* Inventory tabs (v0.22) */
+  .inv-tab {
+    flex: 1; padding: 7px 8px; font-size: 12px;
+    background: rgba(30,20,50,0.5); color: #c8b8e0;
+    border: 1px solid rgba(136,107,184,0.25);
+    border-bottom: none; border-radius: 6px 6px 0 0;
+    cursor: pointer; transition: background 120ms;
+    font-family: inherit;
+  }
+  .inv-tab:hover { background: rgba(50,35,85,0.7); color: #fff; }
+  .inv-tab.active {
+    background: linear-gradient(180deg, #3a2a60, #2a1f48);
+    color: #ffdd88;
+    border-color: #ccaa55;
+    box-shadow: 0 2px 0 0 #ccaa55;
+  }
+
   #item-tooltip {
     position: absolute; pointer-events: none;
     background: rgba(20,15,35,0.95); border: 1px solid #886bb8;
@@ -1204,9 +1221,15 @@
         <div class="equip-slot" id="eq-armor">🛡️<div class="label">Armor</div></div>
         <div class="equip-slot" id="eq-accessory">💍<div class="label">Accessory</div></div>
       </div>
-      <div class="section-title">Items (click to equip / use)</div>
+      <div id="inv-tabs" style="display:flex; gap:4px; margin:10px 0 6px 0; border-bottom:1px solid rgba(180,140,220,0.25);">
+        <button type="button" class="inv-tab" data-tab="equip">⚔ Equip</button>
+        <button type="button" class="inv-tab" data-tab="use">🧪 Use</button>
+        <button type="button" class="inv-tab" data-tab="etc">📦 Etc</button>
+        <button type="button" class="inv-tab" data-tab="setup">🪑 Set-Up</button>
+        <button type="button" class="inv-tab" data-tab="cash">✨ Cash</button>
+      </div>
+      <div id="inv-tab-info" style="font-size:11px; color:#aaa; margin-bottom:6px;"></div>
       <div class="inventory-grid" id="inv-grid"></div>
-      <div class="section-title">Consumables</div>
       <div id="consumables"></div>
     </div>
   </div>
@@ -1500,7 +1523,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.21.2';
+const GAME_VERSION = 'v0.22.0';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -3059,6 +3082,8 @@ const player = {
   _steady: 0, _rootedTimer: 0,
   _mageLastCastT: 0, _mageLastCastId: null, _mageChainPing: 0,
   _classSkillMul: 1, _classSkillMulExpires: 0, _classSkillMulSkillId: null,
+  // Emote (v0.22) — ms remaining on the speech bubble
+  _emote: null,
   // Attributes (AP) — Str/Vit/Agi/Int/Wis/Lck
   attrs: { str:5, vit:5, agi:5, int:5, wis:5, lck:5 },
   // Buffs: each is a timer (ms remaining)
@@ -3298,6 +3323,15 @@ window.addEventListener('keydown', e => {
     if (game.keys['1'] && game.keys['2'] && game.keys['3'] && !game._devComboFired) {
       game._devComboFired = true;
       openDevConsole();
+    }
+  }
+
+  // Emotes (v0.22) — number keys 4-8 pop a speech bubble above the player
+  // for ~2s. Classic MapleStory flavor. Doesn't pause, doesn't cost MP.
+  if (player.cls && !game.paused && player.hp > 0) {
+    const EMOTES = { '4': '😊', '5': '😲', '6': '😂', '7': '😢', '8': '💤' };
+    if (EMOTES[k]) {
+      player._emote = { kind: EMOTES[k], life: 2000, maxLife: 2000 };
     }
   }
   if (k === '?' || k === '/') toggleModalOrOpen('help-modal', openHelp);
@@ -3948,7 +3982,231 @@ const audio = {
     this.muted = !this.muted;
     saveState();
     if (typeof showToast === 'function') showToast(this.muted ? '🔇 Muted' : '🔊 Unmuted', 'common');
+    // v0.22: stop any playing music immediately on mute.
+    if (this.muted && typeof music !== 'undefined' && music) music.stop();
+    else if (!this.muted && typeof music !== 'undefined' && music && music._lastMap) music.play(music._lastMap);
   }
+};
+
+// =========================================================================
+// MUSIC (v0.22) — short looping Web-Audio chiptunes per map. All synthesis,
+// no sample files (keeps the build single-file). Respects audio.muted and
+// swaps cleanly on map change. Each track is a melody (lead) plus a
+// simple bass line running at half tempo.
+// =========================================================================
+// Note-name → frequency helper. 'A4' = 440 Hz.
+function _mnote(name) {
+  const m = /^([A-Ga-g])(#|b)?(-?\d+)$/.exec(name);
+  if (!m) return 0;
+  const base = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 }[m[1].toUpperCase()];
+  const acc  = m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0;
+  const oct  = parseInt(m[3], 10);
+  const midi = (oct + 1) * 12 + base + acc;
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+// Rest is denoted by 0.
+const REST = 0;
+// Each track: { beat: ms per beat, lead: [note, beats], bass: [note, beats], leadWave, bassWave, leadVol, bassVol }
+const MUSIC_TRACKS = {
+  town: {
+    beat: 300,
+    leadWave: 'triangle', bassWave: 'sine',
+    leadVol: 0.05, bassVol: 0.035,
+    lead: [
+      ['E5',1],['G5',1],['A5',1],['G5',1], ['E5',1],['C5',1],['D5',1],['E5',1],
+      ['G5',1],['A5',1],['B5',1],['A5',1], ['G5',2],['E5',2],
+      ['A5',1],['G5',1],['E5',1],['D5',1], ['C5',2],['D5',1],['E5',1],
+      ['G5',1],['E5',1],['D5',1],['C5',1], ['G4',2],[REST,2],
+    ],
+    bass: [
+      ['C3',2],['G3',2], ['C3',2],['G3',2],
+      ['A3',2],['E3',2], ['G3',2],['C4',2],
+      ['F3',2],['C3',2], ['G3',2],['C3',2],
+      ['F3',2],['C3',2], ['G3',2],['C3',2],
+    ],
+  },
+  forest: {
+    beat: 240,
+    leadWave: 'square', bassWave: 'triangle',
+    leadVol: 0.04, bassVol: 0.03,
+    lead: [
+      ['D5',1],['F5',1],['A5',1],['D6',1], ['C6',1],['A5',1],['F5',1],['D5',1],
+      ['E5',1],['G5',1],['B5',1],['E6',1], ['D6',1],['B5',1],['G5',1],['E5',1],
+      ['F5',2],['A5',1],['C6',1],         ['D6',2],['A5',2],
+      ['G5',1],['F5',1],['E5',1],['D5',1], ['D5',2],[REST,2],
+    ],
+    bass: [
+      ['D3',2],['A3',2], ['D3',2],['A3',2],
+      ['E3',2],['B3',2], ['E3',2],['B3',2],
+      ['F3',2],['C4',2], ['D3',2],['A3',2],
+      ['G3',2],['D3',2], ['A3',2],['D3',2],
+    ],
+  },
+  mushroom: {
+    beat: 260,
+    leadWave: 'sawtooth', bassWave: 'sine',
+    leadVol: 0.035, bassVol: 0.03,
+    lead: [
+      ['A4',1],['B4',1],['C5',1],['D5',1], ['E5',2],['D5',1],['C5',1],
+      ['B4',1],['A4',1],['G4',1],['A4',1], ['B4',2],[REST,2],
+      ['E5',1],['D5',1],['C5',1],['B4',1], ['A4',2],['G4',2],
+      ['A4',1],['B4',1],['C5',1],['D5',1], ['A4',2],[REST,2],
+    ],
+    bass: [
+      ['A2',2],['E3',2], ['A2',2],['E3',2],
+      ['D3',2],['A2',2], ['E3',2],['A2',2],
+      ['F3',2],['C3',2], ['G3',2],['D3',2],
+      ['A2',2],['E3',2], ['A2',2],['A2',2],
+    ],
+  },
+  boss: {
+    beat: 180,
+    leadWave: 'square', bassWave: 'sawtooth',
+    leadVol: 0.04, bassVol: 0.04,
+    lead: [
+      ['C5',1],['D#5',1],['G5',1],['D#5',1], ['C5',1],['G4',1],['C5',2],
+      ['G4',1],['A#4',1],['D5',1],['A#4',1], ['G4',1],['D4',1],['G4',2],
+      ['D#5',1],['F5',1],['G5',1],['F5',1], ['D#5',1],['D5',1],['C5',2],
+      ['G4',2],['C5',2],                    ['C5',2],[REST,2],
+    ],
+    bass: [
+      ['C2',2],['G2',2], ['C2',2],['G2',2],
+      ['G2',2],['D3',2], ['G2',2],['D3',2],
+      ['F2',2],['C3',2], ['G2',2],['D3',2],
+      ['C2',2],['G2',2], ['C2',2],['C2',2],
+    ],
+  },
+  zodiac: {
+    beat: 220,
+    leadWave: 'triangle', bassWave: 'sine',
+    leadVol: 0.035, bassVol: 0.03,
+    lead: [
+      ['A4',2],['C5',2], ['E5',1],['A5',1],['G5',2],
+      ['F5',2],['E5',2], ['D5',1],['C5',1],['A4',2],
+      ['E5',1],['G5',1],['A5',2], ['C6',2],['B5',2],
+      ['A5',2],['G5',2], ['E5',2],[REST,2],
+    ],
+    bass: [
+      ['A2',2],['E3',2], ['A2',2],['E3',2],
+      ['F2',2],['C3',2], ['A2',2],['E3',2],
+      ['G2',2],['D3',2], ['A2',2],['E3',2],
+      ['F2',2],['C3',2], ['A2',2],['A2',2],
+    ],
+  },
+  tower: {
+    beat: 200,
+    leadWave: 'square', bassWave: 'triangle',
+    leadVol: 0.035, bassVol: 0.035,
+    lead: [
+      ['C5',1],['E5',1],['G5',1],['C6',1], ['B5',1],['G5',1],['E5',1],['C5',1],
+      ['D5',1],['F5',1],['A5',1],['D6',1], ['C6',1],['A5',1],['F5',1],['D5',1],
+      ['E5',1],['G5',1],['B5',1],['E6',1], ['D6',1],['B5',1],['G5',1],['E5',1],
+      ['F5',2],['E5',2], ['D5',2],['C5',2],
+    ],
+    bass: [
+      ['C3',2],['G3',2], ['C3',2],['G3',2],
+      ['D3',2],['A3',2], ['D3',2],['A3',2],
+      ['E3',2],['B3',2], ['E3',2],['B3',2],
+      ['F3',2],['G3',2], ['C3',2],['C3',2],
+    ],
+  },
+};
+// Which track each map uses.
+const MAP_MUSIC = {
+  town: 'town', zodiacHall: 'zodiac',
+  forest: 'forest', elderwood: 'forest', sky: 'forest', sunset: 'forest',
+  mushroom: 'mushroom', fungal: 'mushroom',
+  frozen: 'mushroom', lava: 'boss',
+  gelwater: 'boss', queens: 'boss',
+  tower: 'tower',
+};
+function _mapTrackId(mapId) {
+  if (!mapId) return null;
+  if (MAP_MUSIC[mapId]) return MAP_MUSIC[mapId];
+  if (mapId.indexOf('zod_') === 0) return 'zodiac';
+  // Fallback — pick by coarse category
+  return 'forest';
+}
+const music = {
+  ctx: null,
+  gain: null,
+  current: null,   // track id
+  _stepIdx: 0,
+  _bassIdx: 0,
+  _nextAt: 0,
+  _timer: null,
+  _lastMap: null,
+  _init() {
+    if (!audio.ctx) audio.init();
+    this.ctx = audio.ctx;
+    if (!this.ctx) return false;
+    if (!this.gain) {
+      this.gain = this.ctx.createGain();
+      this.gain.gain.value = 0.7;
+      this.gain.connect(this.ctx.destination);
+    }
+    return true;
+  },
+  play(mapId) {
+    this._lastMap = mapId;
+    if (!audio.muted) { if (!this._init()) return; } else { return; }
+    const id = _mapTrackId(mapId);
+    if (!id || !MUSIC_TRACKS[id]) { this.stop(); return; }
+    if (this.current === id && this._timer) return;  // already playing
+    this.stop();
+    this.current = id;
+    this._stepIdx = 0; this._bassIdx = 0;
+    this._nextAt = this.ctx.currentTime + 0.05;
+    this._schedule();
+  },
+  stop() {
+    this.current = null;
+    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+  },
+  _schedule() {
+    if (!this.ctx || audio.muted || !this.current) return;
+    const t = MUSIC_TRACKS[this.current];
+    if (!t) return;
+    // Look ahead ~0.5 s and schedule any notes that fall within it. The
+    // re-arm timer fires every 150 ms so we stay ahead of playback.
+    const HORIZON = 0.6;
+    const until = this.ctx.currentTime + HORIZON;
+    while (this._nextAt < until) {
+      const leadNote = t.lead[this._stepIdx % t.lead.length];
+      const dur = leadNote[1] * (t.beat / 1000);
+      if (leadNote[0] !== REST) {
+        this._tone(_mnote(leadNote[0]), this._nextAt, dur, t.leadWave, t.leadVol);
+      }
+      // Bass moves at whatever cadence the bass array dictates
+      const bassNote = t.bass[this._bassIdx % t.bass.length];
+      const bassDur  = bassNote[1] * (t.beat / 1000);
+      if (bassNote[0] !== REST) {
+        this._tone(_mnote(bassNote[0]), this._nextAt, bassDur, t.bassWave, t.bassVol);
+      }
+      this._stepIdx++;
+      // Advance bass by its own duration units — rough sync, repeats if
+      // the lead is longer than the bass pattern.
+      this._bassIdx = (this._bassIdx + leadNote[1]) % t.bass.length;
+      this._nextAt += dur;
+    }
+    this._timer = setTimeout(() => this._schedule(), 150);
+  },
+  _tone(freq, when, dur, wave, vol) {
+    if (!this.ctx || !freq || freq <= 0) return;
+    const o = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    o.type = wave || 'triangle';
+    o.frequency.setValueAtTime(freq, when);
+    // Short envelope: quick attack, gentle decay, brief release
+    const peak = vol || 0.04;
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), when + 0.01);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak * 0.55), when + dur * 0.65);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur * 0.95);
+    o.connect(g); g.connect(this.gain);
+    o.start(when);
+    o.stop(when + dur + 0.05);
+  },
 };
 
 // =========================================================================
@@ -4531,6 +4789,8 @@ function loadMap(id, entryX) {
   game.visitedMaps[id] = true;
   // Daily "visit N different maps" challenge — deduped by id in tickDaily
   if (typeof tickDaily === 'function') tickDaily('visit', id);
+  // v0.22: swap the background music to the new map's track.
+  if (typeof music !== 'undefined' && music) music.play(id);
   game.currentMap = id;
   game.mapData = _variedMapData(id);
   game.monsters = [];
@@ -5845,6 +6105,12 @@ function _tickClassIdentity(dt) {
     player._mageChainPing -= dt;
     if (player._mageChainPing < 0) player._mageChainPing = 0;
   }
+
+  // --- Emote bubble decay (shared across all classes, v0.22) ---
+  if (player._emote) {
+    player._emote.life -= dt;
+    if (player._emote.life <= 0) player._emote = null;
+  }
 }
 
 // Called from castSkill BEFORE the SKILL_FN runs. Computes the damage
@@ -5972,6 +6238,42 @@ function drawClassIdentityHUD() {
   if (!_classIdentityActive() || player.hp <= 0) return;
   const cx = (player.x + player.w/2) - game.camera.x;
   const cy = (player.y + player.h/2);
+
+  // Emote speech bubble (v0.22) — draws above the player's head, fades
+  // out in the last 400ms. Stays in world space so it follows movement.
+  if (player._emote) {
+    const e = player._emote;
+    const fade = e.life < 400 ? e.life / 400 : 1;
+    const by = (player.y - 14) + Math.sin(game.time * 0.08) * 1.5;
+    ctx.save();
+    ctx.globalAlpha = 0.92 * fade;
+    // Rounded rectangle background
+    const pad = 6, icoSize = 20;
+    const bw = icoSize + pad * 2, bh = icoSize + pad;
+    ctx.fillStyle = 'rgba(255,255,255,0.96)';
+    ctx.strokeStyle = 'rgba(60,40,80,0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(cx - bw/2, by - bh, bw, bh, 6);
+    else ctx.rect(cx - bw/2, by - bh, bw, bh);
+    ctx.fill();
+    ctx.stroke();
+    // Little tail pointing down at the player
+    ctx.beginPath();
+    ctx.moveTo(cx - 4, by);
+    ctx.lineTo(cx, by + 6);
+    ctx.lineTo(cx + 4, by);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Emoji glyph
+    ctx.font = '18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#000';
+    ctx.fillText(e.kind, cx, by - bh/2 + 1);
+    ctx.restore();
+  }
 
   // --- Charge ring (warrior: free-move, archer: rooted) ---
   if (player._warCharge && (player.cls === 'warrior' || player.cls === 'archer')) {
@@ -8832,6 +9134,9 @@ function updateMonsters(dt) {
   const camX = game.camera.x;
   const ACTIVE_PAD = 400; // update monsters within ±400px of viewport
   for (const m of game.monsters) {
+    // Chat bubble tick (v0.22) — cheap and runs for every mob even while
+    // offscreen so bubbles are ready when you walk back into view.
+    _mobChatTick(m, dt);
     // Squash/stretch decay back toward 1.0 (snappy exp ease)
     if (m.scaleX !== undefined && m.scaleX !== 1) {
       m.scaleX += (1 - m.scaleX) * 0.22;
@@ -12285,10 +12590,36 @@ function openSkillsModal() {
 // =========================================================================
 // INVENTORY UI
 // =========================================================================
+// Classify each item into one of the five MapleStory-style tabs (v0.22).
+// Existing items carry a `slot` field (weapon / armor / accessory) → Equip.
+// Potions and throwables with an effect → Use. Cosmetics → Cash. Others
+// fall into Etc as crafting flavour.
+function _itemTab(it) {
+  if (!it) return 'etc';
+  if (it.slot === 'weapon' || it.slot === 'armor' || it.slot === 'accessory') return 'equip';
+  if (it.type === 'potion' || it.kind === 'potion' || it.useFn || it.hpRestore || it.mpRestore) return 'use';
+  if (it.cosmetic || it.type === 'cosmetic' || it.tab === 'cash') return 'cash';
+  if (it.tab === 'setup' || it.chair || it.mount) return 'setup';
+  return 'etc';
+}
+// Persist the current tab on game so reopening the modal remembers.
 function renderInventory() {
   const grid = document.getElementById('inv-grid');
+  const tabInfo = document.getElementById('inv-tab-info');
+  if (!game._invTab) game._invTab = 'equip';
+
+  // Wire the tab buttons once (idempotent — onclick re-assignments are fine).
+  const tabButtons = document.querySelectorAll('#inv-tabs .inv-tab');
+  tabButtons.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === game._invTab);
+    btn.onclick = () => { game._invTab = btn.dataset.tab; renderInventory(); };
+  });
+
   grid.innerHTML = '';
-  // Equip slots
+  // Equip slots always visible — they're the "currently-worn" row, shared
+  // across all tabs. Show dimmed if the active tab isn't Equip.
+  const eqRow = document.querySelector('.equip-slots');
+  if (eqRow) eqRow.style.opacity = (game._invTab === 'equip') ? '1' : '0.55';
   for (const slot of ['weapon','armor','accessory']) {
     const el = document.getElementById('eq-' + slot);
     const it = player.equipped[slot];
@@ -12314,47 +12645,106 @@ function renderInventory() {
       el.style.borderColor = '#555';
     }
   }
-  // Items
-  player.inventory.forEach((it, idx) => {
-    const slot = document.createElement('div');
-    slot.className = 'inv-slot rarity-' + it.rarity;
-    slot.innerHTML = it.icon;
-    slot.onclick = () => {
-      // Equip
-      const equipped = player.equipped[it.slot];
-      if (equipped) player.inventory.push(equipped);
-      player.equipped[it.slot] = it;
-      player.inventory.splice(idx, 1);
-      renderInventory();
-    };
-    attachTooltip(slot, it);
-    grid.appendChild(slot);
-  });
-  // Empty slots
-  const total = Math.max(20, player.inventory.length + 5);
-  for (let i = player.inventory.length; i < total; i++) {
-    const s = document.createElement('div');
-    s.className = 'inv-slot';
-    grid.appendChild(s);
+
+  const TAB_INFO = {
+    equip: 'Weapons, armour, and accessories. Click an item to equip / unequip.',
+    use:   'Potions and throwables. Click to consume.',
+    etc:   'Crafting materials and quest items.',
+    setup: 'Chairs, mounts, pets, and other set-up items.',
+    cash:  'Cosmetic-only items that change your look without affecting stats.',
+  };
+  if (tabInfo) tabInfo.textContent = TAB_INFO[game._invTab] || '';
+
+  const consumablesEl = document.getElementById('consumables');
+  if (consumablesEl) consumablesEl.innerHTML = '';
+
+  if (game._invTab === 'equip') {
+    // Filter inventory to equip-tab items
+    const items = player.inventory.map((it, idx) => ({it, idx})).filter(e => _itemTab(e.it) === 'equip');
+    items.forEach(({it, idx}) => {
+      const slot = document.createElement('div');
+      slot.className = 'inv-slot rarity-' + it.rarity;
+      slot.innerHTML = it.icon;
+      slot.onclick = () => {
+        const equipped = player.equipped[it.slot];
+        if (equipped) player.inventory.push(equipped);
+        player.equipped[it.slot] = it;
+        // Find the REAL index to splice (may have shifted if items were re-pushed)
+        const realIdx = player.inventory.indexOf(it);
+        if (realIdx >= 0) player.inventory.splice(realIdx, 1);
+        renderInventory();
+      };
+      attachTooltip(slot, it);
+      grid.appendChild(slot);
+    });
+    const total = Math.max(20, items.length + 5);
+    for (let i = items.length; i < total; i++) {
+      const s = document.createElement('div'); s.className = 'inv-slot'; grid.appendChild(s);
+    }
+  } else if (game._invTab === 'use') {
+    // Show stacked potions + any other Use items in the inventory
+    for (const id in player.consumables) {
+      if (player.consumables[id] <= 0) continue;
+      const item = POTION_ITEMS.find(p => p.id === id);
+      if (!item) continue;
+      const slot = document.createElement('div');
+      slot.className = 'inv-slot';
+      slot.innerHTML = `${item.icon}<div style="position:absolute;right:2px;bottom:0;font-size:10px;color:#ffee99;font-weight:bold;">×${player.consumables[id]}</div>`;
+      slot.style.position = 'relative';
+      slot.title = `${item.name} — click to use`;
+      slot.onclick = () => { useConsumable(id); renderInventory(); };
+      grid.appendChild(slot);
+    }
+    const useItems = player.inventory.map((it, idx) => ({it, idx})).filter(e => _itemTab(e.it) === 'use');
+    useItems.forEach(({it}) => {
+      const slot = document.createElement('div');
+      slot.className = 'inv-slot rarity-' + (it.rarity || 'common');
+      slot.innerHTML = it.icon;
+      attachTooltip(slot, it);
+      grid.appendChild(slot);
+    });
+    if (!grid.children.length) {
+      grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; text-align:center; color:#888; font-style:italic;">No usable items. Buy potions from Elspeth in town.</div>';
+    }
+  } else if (game._invTab === 'etc') {
+    const items = player.inventory.map((it, idx) => ({it, idx})).filter(e => _itemTab(e.it) === 'etc');
+    items.forEach(({it}) => {
+      const slot = document.createElement('div');
+      slot.className = 'inv-slot';
+      slot.innerHTML = it.icon || '📦';
+      attachTooltip(slot, it);
+      grid.appendChild(slot);
+    });
+    if (!items.length) {
+      grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; text-align:center; color:#888; font-style:italic;">No crafting materials yet. Some will drop from specific foes.</div>';
+    }
+  } else if (game._invTab === 'setup') {
+    const items = player.inventory.map((it, idx) => ({it, idx})).filter(e => _itemTab(e.it) === 'setup');
+    if (!items.length) {
+      grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; text-align:center; color:#888; font-style:italic;">No set-up items. Chairs, mounts, and pets will live here.</div>';
+    } else {
+      items.forEach(({it}) => {
+        const slot = document.createElement('div');
+        slot.className = 'inv-slot';
+        slot.innerHTML = it.icon || '🪑';
+        attachTooltip(slot, it);
+        grid.appendChild(slot);
+      });
+    }
+  } else if (game._invTab === 'cash') {
+    const items = player.inventory.map((it, idx) => ({it, idx})).filter(e => _itemTab(e.it) === 'cash');
+    if (!items.length) {
+      grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; text-align:center; color:#888; font-style:italic;">No cosmetic items yet. These will come from event rewards.</div>';
+    } else {
+      items.forEach(({it}) => {
+        const slot = document.createElement('div');
+        slot.className = 'inv-slot';
+        slot.innerHTML = it.icon || '✨';
+        attachTooltip(slot, it);
+        grid.appendChild(slot);
+      });
+    }
   }
-  // Consumables
-  const cEl = document.getElementById('consumables');
-  cEl.innerHTML = '';
-  for (const id in player.consumables) {
-    if (player.consumables[id] <= 0) continue;
-    const item = POTION_ITEMS.find(p => p.id === id);
-    if (!item) continue;
-    const div = document.createElement('span');
-    div.className = 'shop-item';
-    div.style.display = 'inline-flex';
-    div.style.margin = '3px';
-    div.style.padding = '4px 10px';
-    div.style.cursor = 'pointer';
-    div.innerHTML = `${item.icon} ${item.name} × ${player.consumables[id]}`;
-    div.onclick = () => { useConsumable(id); renderInventory(); };
-    cEl.appendChild(div);
-  }
-  if (!cEl.innerHTML) cEl.innerHTML = '<span style="color:#888">No consumables</span>';
 }
 
 function starString(stars) {
@@ -15138,8 +15528,26 @@ function drawNPCs() {
     ctx.fillStyle = '#ffdd66';
     ctx.fillText(npc.name, cx, headY - 14);
 
-    // Interact prompt
+    // NPC idle chat bubble (v0.22) — every ~12-25s each NPC rolls for
+    // flavour text. Drawn above the head. Skipped when the player is in
+    // dialog range (the [N] Talk prompt takes that slot).
+    if (npc._chatNext == null) npc._chatNext = 6000 + Math.random() * 14000;
+    npc._chatNext -= 16;  // approx dt — updated once per frame via drawNPCs
+    if (npc._chat && npc._chat.life > 0) npc._chat.life -= 16;
+    if (npc._chat && npc._chat.life <= 0) npc._chat = null;
+    if (npc._chatNext <= 0) {
+      npc._chatNext = 12000 + Math.random() * 18000;
+      if (Math.random() < 0.55 && !npc._chat) {
+        const line = _pickChatLine(NPC_CHAT_LINES[npc.role]);
+        if (line) npc._chat = { text: line, life: 3200, maxLife: 3200 };
+      }
+    }
     const near = Math.abs((player.x + player.w/2) - npc.x) < 70;
+    if (!near && npc._chat) {
+      const fade = npc._chat.life < 500 ? npc._chat.life / 500 : 1;
+      _drawBubble(cx, headY - 12, npc._chat.text, { fade });
+    }
+    // Interact prompt (takes priority over chat bubble when nearby)
     if (near) {
       const t = Math.sin(game.time * 0.15) * 3;
       ctx.fillStyle = '#ffdd44';
@@ -16946,6 +17354,98 @@ function _drawDQBlob(m, sx, sy, cx, cy, f, base, shade, stroke, evil) {
   if (evil) ctx.arc(cx, bodyCY + 6, 2.5, Math.PI + 0.3, -0.3);
   else      ctx.arc(cx, bodyCY + 5, 2.5, 0.2, Math.PI - 0.2);
   ctx.stroke();
+}
+
+// =========================================================================
+// CHAT BUBBLES (v0.22) — mobs and NPCs pop idle chatter bubbles above
+// their heads. Gives the world personality; evokes MapleStory's flavour
+// text. Per-type dialogue pools + independent random timers per instance.
+// =========================================================================
+const MOB_CHAT_LINES = {
+  snail:    ['zzz...', '...', 'slippery!', 'wheee', 'shellfie'],
+  slime:    ['bounce!', 'squish~', 'jelly', 'wobble', 'bloop!'],
+  mushroom: ['spore~', 'shroomy', 'growing', 'whoosh', 'ooh!'],
+  horny:    ['RAWR!', 'poke!', 'charge!', 'pointy', 'GRR'],
+  orange:   ['juicy', 'hop hop', 'sunny!', 'zesty', 'bounce'],
+  stump:    ['creak', 'root', 'leafy', '...grumble', 'ancient'],
+  zombie:   ['braiiins', 'ughh', 'shamble', 'lost...', 'urrgh'],
+  scorpion: ['click', 'pinch!', 'sting!', 'sssss', 'skitter'],
+  mummy:    ['bandage', 'curse...', 'old bones', 'wrapped', 'tomb'],
+  skeleton: ['clack', 'rattle', 'spooky!', 'boney', 'xylophone'],
+  wraith:   ['oooo~', 'fade...', 'boo', 'ghost', 'drift'],
+};
+const NPC_CHAT_LINES = {
+  potion:   ['Fresh potions!', 'Stock up, hero!', 'Red for HP, blue for MP', 'Watch your health out there'],
+  weapon:   ['Clang! Clang!', 'Fine steel', 'Stars make you stronger ★', 'Sharpest in town'],
+  amnesiac: ['...who...', 'The door...', 'I forget...', 'Ren? Was it?', 'Unmake... or keep?'],
+  sage:     ['The boons await', 'Lumens buy wisdom', 'Roll again!', 'Fortune favours the bold'],
+  info:     ['Back in my day...', 'Press K, young one', 'Skills tell tales', 'Advance at ten'],
+  taxi:     ['Long roads ahead', 'Climb aboard!', 'Where to?', 'Fuel for the journey'],
+  skills:   ['Train your craft', 'Every swing counts', 'Feel the rhythm'],
+};
+function _pickChatLine(pool) {
+  if (!pool || !pool.length) return null;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+function _mobChatTick(m, dt) {
+  // Gate to non-bosses within a reasonable distance so we don't tick 100
+  // timers while offscreen. Bosses also stay silent — their boss-intro
+  // banner is the flavour text there.
+  if (m.isBoss || m.currentHp <= 0) return;
+  if (m._chat && m._chat.life > 0) m._chat.life -= dt;
+  if (m._chat && m._chat.life <= 0) m._chat = null;
+  if (m._chatNext == null) m._chatNext = 4000 + Math.random() * 12000;
+  m._chatNext -= dt;
+  if (m._chatNext <= 0) {
+    m._chatNext = 8000 + Math.random() * 18000;
+    // Only ~40% of the time actually speak (avoids overly chatty scenes)
+    if (Math.random() < 0.4 && !m._chat) {
+      const line = _pickChatLine(MOB_CHAT_LINES[m.type]);
+      if (line) m._chat = { text: line, life: 2200, maxLife: 2200 };
+    }
+  }
+}
+function _drawBubble(cx, topY, text, opts) {
+  opts = opts || {};
+  const fade = opts.fade != null ? opts.fade : 1;
+  if (fade <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = 0.9 * fade;
+  ctx.font = opts.font || 'bold 10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const padX = 6, padY = 4;
+  const tw = ctx.measureText(text).width;
+  const bw = tw + padX * 2, bh = 14 + padY;
+  const bx = cx - bw/2, by = topY - bh;
+  // Bubble fill + outline
+  ctx.fillStyle = opts.fill || 'rgba(255,255,255,0.96)';
+  ctx.strokeStyle = opts.stroke || 'rgba(60,40,80,0.8)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 5);
+  else ctx.rect(bx, by, bw, bh);
+  ctx.fill();
+  ctx.stroke();
+  // Tail
+  ctx.beginPath();
+  ctx.moveTo(cx - 3, by + bh);
+  ctx.lineTo(cx, by + bh + 4);
+  ctx.lineTo(cx + 3, by + bh);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // Text
+  ctx.fillStyle = opts.color || '#1a0820';
+  ctx.fillText(text, cx, by + bh/2 + 1);
+  ctx.restore();
+}
+function _drawMobChat(m) {
+  if (!m._chat) return;
+  const sx = m.x + m.w/2 - game.camera.x;
+  if (sx < -60 || sx > W + 60) return;
+  const fade = m._chat.life < 400 ? m._chat.life / 400 : 1;
+  _drawBubble(sx, m.y - 4, m._chat.text, { fade });
 }
 
 function drawMonster(m) {
@@ -20538,6 +21038,9 @@ function loop(time) {
     } else {
       drawMonster(m);
     }
+    // Chat bubble — drawn outside of the squash/stretch transform so the
+    // bubble stays upright / unstretched even when the mob is wobbling.
+    _drawMobChat(m);
   }
   drawProjectiles();
   drawHazards();
