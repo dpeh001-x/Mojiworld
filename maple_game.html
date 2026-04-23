@@ -56,10 +56,10 @@
     body { padding: 0; }
     .game-wrapper { border-width: 0; border-radius: 0; box-shadow: none; }
   }
-  /* In mobile landscape, anchor the wrapper from the top-left corner so
-     the stretched transform fills viewport without off-canvas bias. */
+  /* In mobile landscape, anchor from centre so the aspect-preserving
+     scale keeps the game centred horizontally and vertically. */
   body.mc-landscape .game-wrapper {
-    transform-origin: top left;
+    transform-origin: center center;
   }
 
   /* ===========================================================
@@ -102,19 +102,21 @@
     }
     .mobile-ctrl .mc-btn { pointer-events: auto; }
 
-    /* ===== TRANSLUCENT WHITE BUTTON STYLING — frosted glass ===== */
+    /* ===== TRANSLUCENT WHITE BUTTON STYLING =====
+       NO `backdrop-filter: blur()` — it forces the browser to re-blur the
+       underlying game canvas every single frame for every button, which
+       tanks FPS on mobile. Plain rgba background + crisp border + soft
+       shadow gives the same visual read at a fraction of the GPU cost. */
     .mobile-deck .mc-btn,
     .mobile-ctrl .mc-btn {
-      background: rgba(255,255,255,0.22) !important;
+      background: rgba(40,30,60,0.55) !important;
       border: 2px solid rgba(255,255,255,0.55) !important;
       color: rgba(255,255,255,0.95) !important;
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
       box-shadow:
-        inset 0 2px 0 rgba(255,255,255,0.35),
-        inset 0 -2px 4px rgba(0,0,0,0.20),
-        0 2px 8px rgba(0,0,0,0.35) !important;
-      text-shadow: 0 1px 3px rgba(0,0,0,0.55) !important;
+        inset 0 2px 0 rgba(255,255,255,0.25),
+        inset 0 -2px 4px rgba(0,0,0,0.35),
+        0 2px 8px rgba(0,0,0,0.45) !important;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.65) !important;
       font-weight: bold !important;
       pointer-events: auto;
     }
@@ -1497,7 +1499,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.16.2';
+const GAME_VERSION = 'v0.16.3';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -3243,23 +3245,17 @@ function _fitGameToViewport() {
   // doesn't reserve any layout space, so game canvas fills the whole
   // viewport. No deck subtraction.
   document.body.classList.toggle('mc-portrait', isTouchOrNarrow && !isLandscape);
-  // Mobile landscape — STRETCH the game to fill the viewport completely
-  // (independent X/Y scales). Slight aspect-ratio distortion is accepted
-  // in exchange for using every pixel of the phone screen. Desktop and
-  // portrait still get the aspect-preserving minimum fit.
+  // Uniform aspect-preserving scale in every mode. The previous attempt at
+  // non-uniform X/Y stretching in landscape looked wrong (characters
+  // squashed or stretched). Better to keep proportions correct; if letter-
+  // box bars appear on wider phones, that's the least-bad outcome.
   const sx = availW / GAME_W;
   const sy = availH / GAME_H;
-  if (isTouchOrNarrow && isLandscape) {
-    wrap.style.setProperty('--game-scale',   Math.max(sx, sy).toFixed(4));
-    wrap.style.setProperty('--game-scale-x', sx.toFixed(4));
-    wrap.style.setProperty('--game-scale-y', sy.toFixed(4));
-  } else {
-    const base = Math.min(sx, sy);
-    const scale = isTouchOrNarrow ? Math.min(base * 1.04, sx, sy) : base;
-    wrap.style.setProperty('--game-scale',   scale.toFixed(4));
-    wrap.style.setProperty('--game-scale-x', scale.toFixed(4));
-    wrap.style.setProperty('--game-scale-y', scale.toFixed(4));
-  }
+  const base = Math.min(sx, sy);
+  const scale = isTouchOrNarrow ? Math.min(base * 1.04, sx, sy) : base;
+  wrap.style.setProperty('--game-scale',   scale.toFixed(4));
+  wrap.style.setProperty('--game-scale-x', scale.toFixed(4));
+  wrap.style.setProperty('--game-scale-y', scale.toFixed(4));
 
   // Portrait nag — encourage landscape on narrow phones.
   const isPortrait = !isLandscape;
@@ -12004,17 +12000,26 @@ function drawCarriageInterior() {
 // ZODIAC SIGNATURE ARENAS
 // Per-sign epic backdrops painted behind the generic constellation / element
 // layers. Each function uses the camera parallax + game.time to animate.
+// Gradients are cached on first use (keyed by sign) so we don't pay the
+// createRadialGradient cost every frame.
 // =========================================================================
+const _zGradCache = {};
+function _zGrad(key, factory) {
+  if (!_zGradCache[key]) _zGradCache[key] = factory();
+  return _zGradCache[key];
+}
 const ZODIAC_SIGNATURE_DECOR = {
   // ♈ ARIES — blazing sun, horned mountain peaks, lava rivers
   aries(z, camX) {
-    // Hot sky disc
+    // Hot sky disc — gradient cached
     const cx = W * 0.72, cy = 140;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    const g = ctx.createRadialGradient(cx, cy, 8, cx, cy, 220);
-    g.addColorStop(0, '#ffcc66'); g.addColorStop(0.4, '#ff6622'); g.addColorStop(1, 'rgba(120,20,10,0)');
-    ctx.fillStyle = g;
+    ctx.fillStyle = _zGrad('aries-sun', () => {
+      const g = ctx.createRadialGradient(cx, cy, 8, cx, cy, 220);
+      g.addColorStop(0, '#ffcc66'); g.addColorStop(0.4, '#ff6622'); g.addColorStop(1, 'rgba(120,20,10,0)');
+      return g;
+    });
     ctx.fillRect(cx - 220, cy - 220, 440, 440);
     ctx.restore();
     ctx.fillStyle = '#ffddaa';
@@ -12078,8 +12083,8 @@ const ZODIAC_SIGNATURE_DECOR = {
     ctx.beginPath(); ctx.arc(sx - 40, sy, 22, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(sx + 40, sy, 22, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
-    // Dust kicking up
-    if (game.time % 3 === 0) {
+    // Dust kicking up — dialled back from 20/s to 8/s
+    if (game.time % 8 === 0) {
       game.particles.push({
         x: Math.random() * W, y: 460 + Math.random() * 20,
         vx: (Math.random() - 0.5) * 0.5, vy: -0.3 - Math.random() * 0.4,
@@ -12121,14 +12126,16 @@ const ZODIAC_SIGNATURE_DECOR = {
 
   // ♋ CANCER — underwater moon palace, bubbles, coral
   cancer(z, camX) {
-    // Moonlit glow halo
+    // Moonlit glow halo — gradient cached
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     const mx = W * 0.5, my = 120;
-    const g = ctx.createRadialGradient(mx, my, 6, mx, my, 220);
-    g.addColorStop(0, 'rgba(220,220,255,0.45)');
-    g.addColorStop(1, 'rgba(40,60,120,0)');
-    ctx.fillStyle = g;
+    ctx.fillStyle = _zGrad('cancer-moon', () => {
+      const g = ctx.createRadialGradient(mx, my, 6, mx, my, 220);
+      g.addColorStop(0, 'rgba(220,220,255,0.45)');
+      g.addColorStop(1, 'rgba(40,60,120,0)');
+      return g;
+    });
     ctx.fillRect(mx - 220, my - 220, 440, 440);
     ctx.restore();
     ctx.fillStyle = '#f0f0ff';
@@ -12270,13 +12277,15 @@ const ZODIAC_SIGNATURE_DECOR = {
 
   // ♏ SCORPIO — crimson crypt, scorpion tail silhouette
   scorpio(z, camX) {
-    // Red mist floor glow
+    // Red mist floor glow — gradient cached
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    const g = ctx.createLinearGradient(0, 300, 0, 480);
-    g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(1, 'rgba(170,40,80,0.5)');
-    ctx.fillStyle = g;
+    ctx.fillStyle = _zGrad('scorpio-mist', () => {
+      const g = ctx.createLinearGradient(0, 300, 0, 480);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(1, 'rgba(170,40,80,0.5)');
+      return g;
+    });
     ctx.fillRect(0, 300, W, 180);
     ctx.restore();
     // Giant scorpion tail arcing over the arena
@@ -12316,14 +12325,28 @@ const ZODIAC_SIGNATURE_DECOR = {
 
   // ♐ SAGITTARIUS — starry forest, constellations, arrows embedded in trees
   sagittarius(z, camX) {
-    // Extra bright starfield
+    // Extra bright starfield — positions precomputed once (const arr) so
+    // we don't recompute sin/cos for 120 stars every frame.
+    const stars = (ZODIAC_SIGNATURE_DECOR._sagStars ||= (() => {
+      const out = [];
+      for (let i = 0; i < 90; i++) {       // dropped from 120 to 90
+        out.push({
+          x: (Math.sin(i * 13.5) * 0.5 + 0.5) * W,
+          y: (Math.cos(i * 9.1)  * 0.5 + 0.5) * 320,
+          big: i % 4 === 0,
+          phase: i,
+        });
+      }
+      return out;
+    })());
     ctx.fillStyle = '#ffffff';
-    for (let i = 0; i < 120; i++) {
-      const sx = (Math.sin(i * 13.5) * 0.5 + 0.5) * W;
-      const sy = (Math.cos(i * 9.1) * 0.5 + 0.5) * 320;
-      const tw = 0.4 + Math.sin(game.time * 0.04 + i) * 0.5;
-      ctx.globalAlpha = Math.max(0, tw);
-      ctx.fillRect(sx, sy, i % 4 === 0 ? 2 : 1, i % 4 === 0 ? 2 : 1);
+    const t = game.time * 0.04;
+    for (const st of stars) {
+      const tw = 0.4 + Math.sin(t + st.phase) * 0.5;
+      if (tw <= 0) continue;
+      ctx.globalAlpha = tw;
+      const s = st.big ? 2 : 1;
+      ctx.fillRect(st.x, st.y, s, s);
     }
     ctx.globalAlpha = 1;
     // Dense tree silhouettes
@@ -12391,12 +12414,12 @@ const ZODIAC_SIGNATURE_DECOR = {
       ctx.closePath(); ctx.fill();
     }
     ctx.restore();
-    // Blizzard
-    if (game.time % 2 === 0) {
+    // Blizzard — dialled back from 30/s to 12/s (still feels snowy)
+    if (game.time % 5 === 0) {
       game.particles.push({
         x: Math.random() * W, y: -10,
         vx: -0.8 - Math.random() * 0.5, vy: 1 + Math.random(),
-        life: 200, color: '#ddeeff', size: 1 + Math.random() * 2
+        life: 140, color: '#ddeeff', size: 1 + Math.random() * 2
       });
     }
   },
@@ -12441,11 +12464,13 @@ const ZODIAC_SIGNATURE_DECOR = {
 
   // ♓ PISCES — abyssal ocean, two giant fish silhouettes swirling, bioluminescence
   pisces(z, camX) {
-    // Abyssal gradient
+    // Abyssal gradient — cached
     ctx.save();
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, '#0a042a'); g.addColorStop(1, '#2a1048');
-    ctx.fillStyle = g;
+    ctx.fillStyle = _zGrad('pisces-abyss', () => {
+      const g = ctx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, '#0a042a'); g.addColorStop(1, '#2a1048');
+      return g;
+    });
     ctx.fillRect(0, 60, W, H);
     ctx.restore();
     // Twin giant fish orbiting
@@ -12635,11 +12660,13 @@ function drawZodiacArena(signId) {
   // Floor shadow bar
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   ctx.fillRect(0, 478, W, 62);
-  // Vignette
-  const vig = ctx.createRadialGradient(W/2, H/2, W * 0.3, W/2, H/2, W * 0.9);
-  vig.addColorStop(0, 'rgba(0,0,0,0)');
-  vig.addColorStop(1, 'rgba(0,0,0,0.45)');
-  ctx.fillStyle = vig;
+  // Vignette — cached
+  ctx.fillStyle = _zGrad('zarena-vignette', () => {
+    const v = ctx.createRadialGradient(W/2, H/2, W * 0.3, W/2, H/2, W * 0.9);
+    v.addColorStop(0, 'rgba(0,0,0,0)');
+    v.addColorStop(1, 'rgba(0,0,0,0.45)');
+    return v;
+  });
   ctx.fillRect(0, 0, W, H);
 }
 
