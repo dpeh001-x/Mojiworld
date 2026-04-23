@@ -1500,7 +1500,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.18.0';
+const GAME_VERSION = 'v0.19.0';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -2224,27 +2224,162 @@ const POTION_ITEMS = [
 ];
 
 // =========================================================================
-// POWERUPS (persistent per-run boons)
+// POWERUPS — equippable boons (v0.19)
+//   Each POWERUPS entry is a template. Acquisition rolls an instance
+//   { id, roll, rerolls } with `roll` in the template's [min, max] range.
+//   Instances live on player.boons; up to BOON_EQUIP_CAP can be equipped
+//   via player.boonsEquipped (array of inventory indices). Equipping /
+//   unequipping / rerolling triggers _applyEquippedBoons() which recomputes
+//   player.mods from scratch (the mod object is now purely derived).
+//   Players access the loadout + reroll UI by pressing U.
 // =========================================================================
 const POWERUPS = [
-  { id:'atk_p',  name:'Iron Muscles',   icon:'💪', desc:'+15% ATK',             apply: p => p.mods.atkPct += 0.15 },
-  { id:'atk',    name:'Keen Edge',      icon:'🗡️', desc:'+6 ATK',               apply: p => p.mods.atk += 6 },
-  { id:'def',    name:'Thick Skin',     icon:'🛡️', desc:'+6 DEF',               apply: p => p.mods.def += 6 },
-  { id:'maxhp',  name:'Vitality',       icon:'❤️', desc:'+40 Max HP',           apply: p => { p.mods.maxHp += 40; p.hp += 40; } },
-  { id:'maxmp',  name:'Inner Focus',    icon:'💙', desc:'+25 Max MP',           apply: p => { p.mods.maxMp += 25; p.mp += 25; } },
-  { id:'crit',   name:'Sharp Eye',      icon:'👁️', desc:'+10% Crit Chance',     apply: p => p.mods.crit += 10 },
-  { id:'critd',  name:'Lethal Strike',  icon:'💢', desc:'+50% Crit Damage',     apply: p => p.mods.critDmg += 0.5 },
-  { id:'spd',    name:'Quick Feet',     icon:'👟', desc:'+0.6 Move Speed',      apply: p => p.mods.speed += 0.6 },
-  { id:'jmp',    name:'Leap Boost',     icon:'🦘', desc:'+1.2 Jump Power',      apply: p => p.mods.jump += 1.2 },
-  { id:'ls',     name:'Lifesteal',      icon:'🩸', desc:'Heal 8% of damage',    apply: p => p.mods.lifesteal += 0.08 },
-  { id:'burn',   name:'Burning Touch',  icon:'🔥', desc:'Attacks burn enemies', apply: p => p.mods.burn += 1 },
-  { id:'multi',  name:'Double Shot',    icon:'🎯', desc:'+1 Projectile',        apply: p => p.mods.multishot += 1 },
-  { id:'mpreg',  name:'Mana Surge',     icon:'♻️', desc:'Faster MP regen',      apply: p => p.mods.mpRegen += 1 },
-  { id:'thorns', name:'Thorns',         icon:'🌵', desc:'Reflect 25% damage',   apply: p => p.mods.thorns += 0.25 },
-  { id:'eco',    name:'Treasure Hunter',icon:'💎', desc:'+40% Lumen drop',      apply: p => p.mods.greed += 0.4 },
-  { id:'xp',     name:'Quick Learner',  icon:'📘', desc:'+30% EXP gain',        apply: p => p.mods.xpBoost += 0.3 },
-  { id:'tjump',  name:'Triple Jump',    icon:'🪂', desc:'Unlocks a third mid-air jump', apply: p => p.mods.extraJumps = Math.max(p.mods.extraJumps || 0, 1) },
+  { id:'atk_p',  name:'Iron Muscles',   icon:'💪', stat:'atkPct',    min:8,  max:22, unit:'%', fmt:r=>`+${r}% ATK`,                     scale:r=>r/100 },
+  { id:'atk',    name:'Keen Edge',      icon:'🗡️', stat:'atk',       min:3,  max:10, unit:'',  fmt:r=>`+${r} ATK`,                      scale:r=>r },
+  { id:'def',    name:'Thick Skin',     icon:'🛡️', stat:'def',       min:3,  max:10, unit:'',  fmt:r=>`+${r} DEF`,                      scale:r=>r },
+  { id:'maxhp',  name:'Vitality',       icon:'❤️', stat:'maxHp',     min:20, max:60, unit:'',  fmt:r=>`+${r} Max HP`,                   scale:r=>r },
+  { id:'maxmp',  name:'Inner Focus',    icon:'💙', stat:'maxMp',     min:12, max:40, unit:'',  fmt:r=>`+${r} Max MP`,                   scale:r=>r },
+  { id:'crit',   name:'Sharp Eye',      icon:'👁️', stat:'crit',      min:5,  max:15, unit:'%', fmt:r=>`+${r}% Crit`,                    scale:r=>r },
+  { id:'critd',  name:'Lethal Strike',  icon:'💢', stat:'critDmg',   min:25, max:75, unit:'%', fmt:r=>`+${r}% Crit Damage`,             scale:r=>r/100 },
+  { id:'spd',    name:'Quick Feet',     icon:'👟', stat:'speed',     min:3,  max:12, unit:'',  fmt:r=>`+${(r/10).toFixed(1)} Move Speed`,scale:r=>r/10 },
+  { id:'jmp',    name:'Leap Boost',     icon:'🦘', stat:'jump',      min:6,  max:18, unit:'',  fmt:r=>`+${(r/10).toFixed(1)} Jump Power`,scale:r=>r/10 },
+  { id:'ls',     name:'Lifesteal',      icon:'🩸', stat:'lifesteal', min:4,  max:12, unit:'%', fmt:r=>`Heal ${r}% of damage dealt`,     scale:r=>r/100 },
+  { id:'burn',   name:'Burning Touch',  icon:'🔥', stat:'burn',      min:1,  max:3,  unit:'×', fmt:r=>`Attacks burn enemies (×${r})`,   scale:r=>r },
+  { id:'multi',  name:'Double Shot',    icon:'🎯', stat:'multishot', min:1,  max:2,  unit:'',  fmt:r=>`+${r} Projectile${r>1?'s':''}`,  scale:r=>r },
+  { id:'mpreg',  name:'Mana Surge',     icon:'♻️', stat:'mpRegen',   min:1,  max:3,  unit:'',  fmt:r=>`+${r} MP regen tier`,            scale:r=>r },
+  { id:'thorns', name:'Thorns',         icon:'🌵', stat:'thorns',    min:15, max:40, unit:'%', fmt:r=>`Reflect ${r}% of damage taken`,  scale:r=>r/100 },
+  { id:'eco',    name:'Treasure Hunter',icon:'💎', stat:'greed',     min:20, max:60, unit:'%', fmt:r=>`+${r}% Lumen drop`,              scale:r=>r/100 },
+  { id:'xp',     name:'Quick Learner',  icon:'📘', stat:'xpBoost',   min:15, max:45, unit:'%', fmt:r=>`+${r}% EXP gain`,                scale:r=>r/100 },
+  { id:'tjump',  name:'Triple Jump',    icon:'🪂', stat:'extraJumps',min:1,  max:1,  unit:'',  fmt:r=>`Unlocks a third mid-air jump`,   scale:r=>r, unique:true },
 ];
+
+const BOON_EQUIP_CAP  = 5;   // how many boons can be active at once
+const BOON_REROLL_BASE = 500;// Lumen cost — climbs with each reroll on the same boon
+
+function getBoonDef(boon) {
+  return POWERUPS.find(p => p.id === boon.id);
+}
+function _rollBoonValue(def) {
+  return def.min + Math.floor(Math.random() * (def.max - def.min + 1));
+}
+function rollBoonInstance(id) {
+  const def = POWERUPS.find(p => p.id === id);
+  if (!def) return null;
+  return { id, roll: _rollBoonValue(def), rerolls: 0 };
+}
+function formatBoon(boon) {
+  const def = getBoonDef(boon);
+  return def ? `${def.icon} ${def.name} — ${def.fmt(boon.roll)}` : '?';
+}
+function boonRerollCost(boon) {
+  return BOON_REROLL_BASE + (boon.rerolls || 0) * 250;
+}
+// Recompute player.mods from scratch based on equipped boons. Called every
+// time equip / unequip / reroll changes the loadout.
+function _applyEquippedBoons() {
+  if (!player.mods) return;
+  const M = player.mods;
+  for (const k in M) {
+    // extraJumps is integer max across sources; others additive
+    M[k] = 0;
+  }
+  if (!player.boons || !player.boonsEquipped) return;
+  for (const idx of player.boonsEquipped) {
+    const boon = player.boons[idx];
+    if (!boon) continue;
+    const def = getBoonDef(boon);
+    if (!def) continue;
+    const val = def.scale(boon.roll);
+    if (def.stat === 'extraJumps') {
+      M[def.stat] = Math.max(M[def.stat] || 0, val);
+    } else {
+      M[def.stat] = (M[def.stat] || 0) + val;
+    }
+  }
+  // Clamp hp / mp to new max in case maxHp / maxMp dropped
+  if (typeof getMaxHp === 'function' && player.hp > getMaxHp()) player.hp = getMaxHp();
+  if (typeof getMaxMp === 'function' && player.mp > getMaxMp()) player.mp = getMaxMp();
+}
+// Equip (auto-fills first free slot); returns true on success
+function equipBoon(index) {
+  if (!player.boons[index]) return false;
+  if (!player.boonsEquipped) player.boonsEquipped = [];
+  if (player.boonsEquipped.includes(index)) return false;
+  if (player.boonsEquipped.length >= BOON_EQUIP_CAP) return false;
+  player.boonsEquipped.push(index);
+  _applyEquippedBoons();
+  return true;
+}
+function unequipBoon(index) {
+  if (!player.boonsEquipped) return false;
+  const i = player.boonsEquipped.indexOf(index);
+  if (i < 0) return false;
+  player.boonsEquipped.splice(i, 1);
+  _applyEquippedBoons();
+  return true;
+}
+// Spend Lumens to re-roll the boon's value within its template range.
+function rerollBoon(index) {
+  const boon = player.boons[index];
+  if (!boon) return false;
+  const def = getBoonDef(boon);
+  if (!def) return false;
+  if (def.min === def.max) {
+    showToast('This boon has no variance to reroll', 'common');
+    return false;
+  }
+  const cost = boonRerollCost(boon);
+  if (player.mesos < cost) {
+    showToast(`Need ${cost} Lumens to reroll — you have ${player.mesos}`, 'rare');
+    return false;
+  }
+  const oldRoll = boon.roll;
+  let newRoll = oldRoll;
+  for (let i = 0; i < 8 && newRoll === oldRoll; i++) newRoll = _rollBoonValue(def);
+  player.mesos -= cost;
+  boon.roll = newRoll;
+  boon.rerolls = (boon.rerolls || 0) + 1;
+  _applyEquippedBoons();
+  const delta = newRoll - oldRoll;
+  const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '•';
+  showToast(`${def.name}: ${oldRoll}${def.unit||''} → ${newRoll}${def.unit||''} ${arrow}`,
+    delta > 0 ? 'epic' : (delta < 0 ? 'rare' : 'common'));
+  audio.play(delta > 0 ? 'crit' : 'hit');
+  return true;
+}
+function discardBoon(index) {
+  if (!player.boons[index]) return false;
+  // Remove from equipped list first
+  const ei = player.boonsEquipped.indexOf(index);
+  if (ei >= 0) player.boonsEquipped.splice(ei, 1);
+  // Splice the inventory, then shift any equipped indices that were > index
+  player.boons.splice(index, 1);
+  for (let i = 0; i < player.boonsEquipped.length; i++) {
+    if (player.boonsEquipped[i] > index) player.boonsEquipped[i]--;
+  }
+  _applyEquippedBoons();
+  return true;
+}
+// One-way migration: legacy `player._powerups` (array of ids) becomes a set
+// of rolled boon instances. Each old id gets one roll; all migrated boons
+// are auto-equipped up to the cap to preserve approximate old power level.
+function _migrateLegacyPowerups() {
+  if (!player._powerups || !player._powerups.length) return;
+  if (!player.boons) player.boons = [];
+  if (!player.boonsEquipped) player.boonsEquipped = [];
+  for (const id of player._powerups) {
+    const inst = rollBoonInstance(id);
+    if (!inst) continue;
+    // Median-ish roll for legacy migration so balance doesn't shift wildly
+    const def = getBoonDef(inst);
+    if (def) inst.roll = Math.floor((def.min + def.max) / 2);
+    const newIdx = player.boons.length;
+    player.boons.push(inst);
+    if (player.boonsEquipped.length < BOON_EQUIP_CAP) player.boonsEquipped.push(newIdx);
+  }
+  delete player._powerups;
+  _applyEquippedBoons();
+}
 
 // =========================================================================
 // MONSTER BASE
@@ -2936,6 +3071,10 @@ const player = {
   equipped: { weapon:null, armor:null, accessory:null },
   inventory: [],
   consumables: {}, // { hp_s: 3, mp_m: 1, ... }
+  // Boon loadout (v0.19) — rolled instances live in `boons`; indices in
+  // `boonsEquipped` are the ones currently applying their stats. Cap 5.
+  boons: [],
+  boonsEquipped: [],
 };
 
 // Starting potions
@@ -3614,7 +3753,9 @@ const PLAYER_SAVE_FIELDS = [
   'hp','maxHp','mp','maxMp','mesos','baseAtk','baseDef',
   'attrs','skillPoints','milestonesUnlocked','treeUnlocked','tree',
   'mods','equipped','inventory','consumables','look','pet','baseCrit','baseSpeed','baseJump',
-  'cosmetics'
+  'cosmetics',
+  // Boon loadout (v0.19)
+  '_powerups', 'boons','boonsEquipped'
 ];
 const GAME_SAVE_FIELDS = [
   'currentMap','bossDefeated','kills','achievements',
@@ -3648,6 +3789,12 @@ function loadState() {
     if (!s || s.v !== SAVE_VERSION || !s.player || !s.player.cls) return false;
     Object.assign(player, s.player);
     Object.assign(game,   s.game || {});
+    // Ensure boon arrays exist on older saves + migrate legacy _powerups
+    if (!player.boons) player.boons = [];
+    if (!player.boonsEquipped) player.boonsEquipped = [];
+    if (typeof _migrateLegacyPowerups === 'function') _migrateLegacyPowerups();
+    // Re-compute player.mods from equipped boons (mods is now derived)
+    if (typeof _applyEquippedBoons === 'function') _applyEquippedBoons();
     // Re-derive any transient state — never load into a dead/capped state
     const maxHp = getMaxHp(), maxMp = getMaxMp();
     player.hp = (!player.hp || player.hp <= 0) ? maxHp : Math.min(player.hp, maxHp);
@@ -4481,15 +4628,20 @@ function updatePowerupOrbs(dt) {
 }
 
 function applyPowerupOrb(o) {
-  // Number of stacked powerups based on rarity
+  // Number of stacked powerups based on rarity — each stack rolls its own
+  // independent boon instance; rare / epic / legendary orbs drop more.
   const stacks = o.rarity === 'legendary' ? 3 : o.rarity === 'epic' ? 2 : 1;
   const given = [];
   for (let i = 0; i < stacks; i++) {
     const pw = i === 0 ? o.pw : POWERUPS[Math.floor(Math.random() * POWERUPS.length)];
-    if (acquirePowerup(pw)) given.push(pw.name);
+    const res = acquirePowerup(pw);
+    if (res) {
+      given.push(`${pw.icon} ${pw.name} (${pw.fmt(res.instance.roll)})${res.equipped ? '' : ' [bag]'}`);
+    }
   }
-  if (given.length === 0) { given.push('(Powerup slots full — boon declined)'); }
-  showToast(`${given.join(' + ')}`, o.rarity);
+  if (given.length === 0) { given.push('(Boon roll failed)'); }
+  showToast(given.join('\n'), o.rarity);
+  saveState();
   flash(0.3);
   addShake(3);
   // Burst particles
@@ -11246,11 +11398,107 @@ function openLevelUpPanel() {
       <canvas id="lp-radar" width="280" height="280" style="flex:0 0 280px; filter:drop-shadow(0 0 8px rgba(255,204,102,0.15));"></canvas>
       <div id="lp-grid" style="flex:1; display:grid; grid-template-columns:1fr; gap:8px;"></div>
     </div>
-    <div id="lp-powerup" style="margin-top:14px; padding:10px; background:rgba(0,0,0,0.35); border-radius:6px; font-size:12px; color:#cfd; line-height:1.5;"></div>
+    <div id="lp-powerup" style="margin-top:10px; padding:8px 10px; background:rgba(0,0,0,0.35); border-radius:6px; font-size:12px; color:#cfd; line-height:1.5;"></div>
+    <div id="lp-boons" style="margin-top:14px;"></div>
   `;
   renderLevelUp();
+  renderBoonPanel();
   modal.style.display = 'flex';
   game.paused = true;
+}
+
+// =========================================================================
+// BOON LOADOUT UI (v0.19)
+// =========================================================================
+function renderBoonPanel() {
+  const host = document.getElementById('lp-boons');
+  if (!host) return;
+  if (!player.boons) player.boons = [];
+  if (!player.boonsEquipped) player.boonsEquipped = [];
+  const equipped = player.boonsEquipped;
+
+  const slotsHtml = [];
+  for (let s = 0; s < BOON_EQUIP_CAP; s++) {
+    const invIdx = equipped[s];
+    const boon = (invIdx != null) ? player.boons[invIdx] : null;
+    const def = boon ? getBoonDef(boon) : null;
+    if (boon && def) {
+      slotsHtml.push(`
+        <div style="padding:8px 10px; background:rgba(180,130,255,0.12); border:1px solid #8866cc; border-radius:6px; display:flex; flex-direction:column; gap:2px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+            <div style="display:flex; gap:6px; align-items:center; min-width:0;"><span style="font-size:18px;">${def.icon}</span><b style="color:#eddaff; font-size:12px;">${def.name}</b></div>
+            <button data-unequip="${invIdx}" style="padding:2px 6px; background:#552277; color:#fff; border:1px solid #aa77cc; border-radius:3px; font-size:10px; cursor:pointer;">Unequip</button>
+          </div>
+          <div style="font-size:11px; color:#e0d0f0;">${def.fmt(boon.roll)}</div>
+          <div style="font-size:10px; color:#aa88cc;">Roll ${boon.roll}${def.unit||''} · range ${def.min}-${def.max}${def.unit||''}${boon.rerolls ? ` · rerolled ×${boon.rerolls}` : ''}</div>
+        </div>
+      `);
+    } else {
+      slotsHtml.push(`
+        <div style="padding:8px 10px; background:rgba(0,0,0,0.25); border:1px dashed #554466; border-radius:6px; color:#776688; font-size:11px; font-style:italic; display:flex; align-items:center; justify-content:center;">
+          — empty slot —
+        </div>
+      `);
+    }
+  }
+
+  const invHtml = [];
+  for (let i = 0; i < player.boons.length; i++) {
+    const boon = player.boons[i];
+    const def = getBoonDef(boon);
+    if (!def) continue;
+    const isEquipped = equipped.includes(i);
+    const cost = boonRerollCost(boon);
+    const canReroll = player.mesos >= cost && def.min < def.max;
+    invHtml.push(`
+      <div style="padding:8px 10px; background:rgba(0,0,0,0.30); border:1px solid ${isEquipped ? '#8866cc' : '#444'}; border-radius:6px; display:flex; flex-direction:column; gap:4px;">
+        <div style="display:flex; gap:6px; align-items:center;">
+          <span style="font-size:18px;">${def.icon}</span>
+          <b style="color:${isEquipped ? '#d0b8ff' : '#ddd'}; font-size:12px;">${def.name}</b>
+          ${isEquipped ? '<span style="color:#aa77cc; font-size:10px;">• equipped</span>' : ''}
+        </div>
+        <div style="font-size:11px; color:${isEquipped ? '#e0d0f0' : '#bbb'};">${def.fmt(boon.roll)}</div>
+        <div style="font-size:10px; color:#999;">Roll ${boon.roll}${def.unit||''} · range ${def.min}-${def.max}${def.unit||''}${boon.rerolls ? ` · rerolled ×${boon.rerolls}` : ''}</div>
+        <div style="display:flex; gap:4px; margin-top:2px; flex-wrap:wrap;">
+          ${isEquipped
+            ? `<button data-unequip="${i}" style="padding:3px 7px; background:#552277; color:#fff; border:1px solid #aa77cc; border-radius:3px; font-size:10px; cursor:pointer;">Unequip</button>`
+            : `<button data-equip="${i}" ${equipped.length >= BOON_EQUIP_CAP ? 'disabled' : ''} style="padding:3px 7px; background:${equipped.length >= BOON_EQUIP_CAP ? '#333' : '#226644'}; color:${equipped.length >= BOON_EQUIP_CAP ? '#666' : '#fff'}; border:1px solid ${equipped.length >= BOON_EQUIP_CAP ? '#555' : '#66bb88'}; border-radius:3px; font-size:10px; cursor:${equipped.length >= BOON_EQUIP_CAP ? 'not-allowed' : 'pointer'};">Equip</button>`}
+          <button data-reroll="${i}" ${canReroll ? '' : 'disabled'} style="padding:3px 7px; background:${canReroll ? '#775522' : '#333'}; color:${canReroll ? '#fff' : '#666'}; border:1px solid ${canReroll ? '#ccaa55' : '#555'}; border-radius:3px; font-size:10px; cursor:${canReroll ? 'pointer' : 'not-allowed'};" title="${def.min === def.max ? 'This boon has no variance to reroll' : `Reroll cost: ${cost}💰`}">Reroll · ${cost}💰</button>
+          <button data-discard="${i}" style="padding:3px 7px; background:#553333; color:#dcc; border:1px solid #a66; border-radius:3px; font-size:10px; cursor:pointer;">Discard</button>
+        </div>
+      </div>
+    `);
+  }
+  if (!invHtml.length) {
+    invHtml.push(`<div style="padding:14px; text-align:center; color:#888; font-style:italic; background:rgba(0,0,0,0.25); border:1px dashed #444; border-radius:6px; grid-column:1/-1;">Defeat mini-bosses or buy from <b>Sage Mira</b> to collect boons. Each one rolls a unique value — spend Lumens to reroll for a better stat.</div>`);
+  }
+
+  host.innerHTML = `
+    <h3 style="margin:0 0 6px 0; color:#c8a8ff; font-size:14px;">◈ Boon Loadout <span style="color:#888; font-size:11px; font-weight:normal;">(${equipped.length} / ${BOON_EQUIP_CAP} equipped · ${player.boons.length} owned)</span></h3>
+    <div style="display:grid; grid-template-columns:repeat(${BOON_EQUIP_CAP}, 1fr); gap:6px; margin-bottom:10px;">${slotsHtml.join('')}</div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:6px; max-height:260px; overflow-y:auto;">${invHtml.join('')}</div>
+    <div style="margin-top:6px; font-size:10px; color:#888; text-align:center;">💰 ${player.mesos} Lumens · Reroll cost climbs ×250 each time</div>
+  `;
+  // Wire up buttons. After any mutation we re-render both the boon panel
+  // AND the level-up summary so the derived-stats line reflects the change.
+  const refresh = () => { renderBoonPanel(); renderLevelUp(); updateUI(); saveState(); };
+  host.querySelectorAll('[data-equip]').forEach(btn => btn.onclick = () => {
+    if (equipBoon(+btn.dataset.equip)) refresh();
+  });
+  host.querySelectorAll('[data-unequip]').forEach(btn => btn.onclick = () => {
+    if (unequipBoon(+btn.dataset.unequip)) refresh();
+  });
+  host.querySelectorAll('[data-reroll]').forEach(btn => btn.onclick = () => {
+    if (rerollBoon(+btn.dataset.reroll)) refresh();
+  });
+  host.querySelectorAll('[data-discard]').forEach(btn => btn.onclick = () => {
+    const i = +btn.dataset.discard;
+    const boon = player.boons[i];
+    const def = boon && getBoonDef(boon);
+    if (!def) return;
+    if (!confirm(`Discard ${def.name} (${def.fmt(boon.roll)})? This cannot be undone.`)) return;
+    discardBoon(i); refresh();
+  });
 }
 
 // Radar chart — one vertex per LP lane. The outer polygon represents the
@@ -11397,15 +11645,12 @@ function renderLevelUp() {
   }
   // Redraw radar
   _drawLpRadar();
-  // Derived stats + powerup cap summary
+  // Derived stats summary (boon loadout lives in its own panel below)
   const pw = document.getElementById('lp-powerup');
   if (pw) {
-    const pcount = (player._powerups && player._powerups.length) || 0;
     pw.innerHTML = `
       <b style="color:#ffcc66;">Current stats</b><br>
       HP ${getMaxHp()} · MP ${getMaxMp()} · ATK ${getAtk()} · DEF ${getDef()} · Crit ${getCrit()}% · Speed ${getSpeed().toFixed(1)}
-      <br><br><b style="color:#ffcc66;">Powerup slots</b><br>
-      ${pcount} / ${POWERUP_CAP} boons active — extra powerups beyond the cap will refresh existing ones.
     `;
   }
   const rem = document.getElementById('lp-remaining');
@@ -11955,60 +12200,64 @@ function useQuickPotion(which) {
 }
 
 // =========================================================================
-// POWERUPS
+// POWERUPS (boon acquisition — v0.19)
 // =========================================================================
-// Cap how many stacking perks a run can carry. Beyond this, new choices
-// rotate out the weakest existing boon so nobody ends up with infinite
-// stacked buffs. Sage shop purchases beyond the cap are refunded.
-const POWERUP_CAP = 8;
-const POWERUP_SAME_CAP = 3;   // same powerup ID can stack at most 3 times
-
-// Returns 'ok' | 'dup-cap' | 'total-cap' — tells the caller if acquisition
-// is allowed. When total-cap, still allow replacing the oldest boon.
-function canTakePowerup(pw) {
-  if (!player._powerups) player._powerups = [];
-  const dup = player._powerups.filter(id => id === pw.id).length;
-  if (dup >= POWERUP_SAME_CAP) return 'dup-cap';
-  if (player._powerups.length >= POWERUP_CAP) return 'total-cap';
-  return 'ok';
-}
-
+// Boon acquisition always succeeds — rolled instances land in player.boons.
+// If a slot is open, auto-equip for convenience (preserves old "orb =
+// instant stat" feel). Otherwise the boon waits in inventory for the
+// player to open U and manage their loadout.
 function acquirePowerup(pw) {
-  if (!player._powerups) player._powerups = [];
-  const status = canTakePowerup(pw);
-  if (status === 'dup-cap') {
-    showToast(`${pw.name} is maxed (3x)`, 'rare');
-    return false;
+  if (!player.boons) player.boons = [];
+  if (!player.boonsEquipped) player.boonsEquipped = [];
+  const inst = rollBoonInstance(pw.id);
+  if (!inst) return false;
+  const idx = player.boons.length;
+  player.boons.push(inst);
+  let equipped = false;
+  if (player.boonsEquipped.length < BOON_EQUIP_CAP) {
+    // Auto-equip the fresh pickup
+    player.boonsEquipped.push(idx);
+    _applyEquippedBoons();
+    equipped = true;
   }
-  if (status === 'total-cap') {
-    // Drop the oldest slot to make room
-    player._powerups.shift();
-    showToast('Powerup slots full — oldest replaced', 'rare');
-  }
-  pw.apply(player);
-  player._powerups.push(pw.id);
-  return true;
+  return { index: idx, equipped, instance: inst };
 }
+
+// Legacy caller compatibility — some call sites still check truthy/falsy.
+// canTakePowerup is now always "ok" (inventory has no cap; equip cap is
+// the only gate) but we keep the symbol so older code paths don't break.
+function canTakePowerup(/*pw*/) { return 'ok'; }
 
 function showPowerupChoice() {
   const opts = document.getElementById('powerup-options');
   opts.innerHTML = '';
-  // Filter out powerups you've already maxed at POWERUP_SAME_CAP
-  const pool = POWERUPS.filter(p => canTakePowerup(p) !== 'dup-cap');
-  const shuffled = (pool.length ? pool : POWERUPS).slice().sort(() => Math.random() - 0.5);
-  const pick = shuffled.slice(0, 3);
-  for (const pw of pick) {
+  // Roll 3 distinct boon templates; each card previews an actual rolled
+  // instance so the player picks based on the value they'll get.
+  const shuffled = POWERUPS.slice().sort(() => Math.random() - 0.5);
+  const pick = shuffled.slice(0, 3).map(def => ({ def, preview: rollBoonInstance(def.id) }));
+  for (const entry of pick) {
+    const pw = entry.def;
+    const inst = entry.preview;
     const card = document.createElement('div');
     card.className = 'powerup-card';
     card.innerHTML = `
       <div class="icon">${pw.icon}</div>
       <div class="name">${pw.name}</div>
-      <div class="desc">${pw.desc}</div>
+      <div class="desc">${pw.fmt(inst.roll)}</div>
+      <div class="desc" style="opacity:0.55; font-size:10px;">Roll: ${inst.roll}${pw.unit||''} · range ${pw.min}-${pw.max}${pw.unit||''}</div>
     `;
     card.onclick = () => {
-      if (acquirePowerup(pw)) {
-        showToast(`${pw.name} acquired!`, 'epic');
+      // Push the previewed instance (not a fresh roll) so what-you-saw = what-you-got
+      if (!player.boons) player.boons = [];
+      if (!player.boonsEquipped) player.boonsEquipped = [];
+      const newIdx = player.boons.length;
+      player.boons.push(inst);
+      if (player.boonsEquipped.length < BOON_EQUIP_CAP) {
+        player.boonsEquipped.push(newIdx);
+        _applyEquippedBoons();
       }
+      showToast(`${pw.icon} ${pw.name} — ${pw.fmt(inst.roll)}`, 'epic');
+      saveState();
       closeAllModals();
     };
     opts.appendChild(card);
@@ -12020,13 +12269,13 @@ function showPowerupChoice() {
 function buyRandomPowerup() {
   if (player.mesos < 1500) { showToast('Not enough Lumens!', 'rare'); return; }
   const pw = POWERUPS[Math.floor(Math.random() * POWERUPS.length)];
-  if (canTakePowerup(pw) === 'dup-cap') {
-    showToast(`${pw.name} already maxed — try again`, 'rare');
-    return;
-  }
   player.mesos -= 1500;
-  if (acquirePowerup(pw)) {
-    showToast(`${pw.name} — ${pw.desc}`, 'epic');
+  const res = acquirePowerup(pw);
+  if (res) {
+    const msg = `${pw.icon} ${pw.name} — ${pw.fmt(res.instance.roll)}`
+      + (res.equipped ? '' : ' (in inventory — press U to equip)');
+    showToast(msg, 'epic');
+    saveState();
   }
 }
 
