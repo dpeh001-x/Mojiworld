@@ -1500,7 +1500,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.17.3';
+const GAME_VERSION = 'v0.18.0';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -1641,6 +1641,7 @@ const CLASSES = {
     desc:'Frontline bruiser. Tanks hits, trades slower for heavy sustain.',
     stats:{ hp:150, mp:40, atk:15, def:11, crit:5, speed:3.2, jump:10 },
     perk: { name:'Fortitude', desc:'-18% damage taken. HP regen triples after 3s out of combat.' },
+    identity: { name:'Charge & Release', desc:'From Lv 10: HOLD a skill key to charge the meter (~0.75s). Release for up to +100% damage + guaranteed crit at full charge.' },
     jobs:['berserker','knight'],
   },
   rogue: {
@@ -1648,6 +1649,7 @@ const CLASSES = {
     desc:'Glass-cannon striker. Obliterates single targets but dies fast.',
     stats:{ hp:75, mp:50, atk:15, def:3, crit:25, speed:5.2, jump:12 },
     perk: { name:'Shadowstep', desc:'Dodge CD halved. Dash is fully invincible. +35% damage for 1s after dodging.' },
+    identity: { name:'Momentum', desc:'From Lv 10: movement fills a gauge (0-100). Skills spend it for up to +100% damage. Stop moving → it drains fast.' },
     jobs:['ninja','assassin'],
   },
   mage: {
@@ -1655,6 +1657,7 @@ const CLASSES = {
     desc:'Arcane caster. Spammy AoE, blink mobility, very squishy.',
     stats:{ hp:70, mp:130, atk:10, def:2, crit:8, speed:3.4, jump:10 },
     perk: { name:'Arcane Focus', desc:'2× MP regen. Skills cost 20% less MP. Skill cooldowns 30% shorter.' },
+    identity: { name:'Chain Cast', desc:'From Lv 10: two DIFFERENT skills within 1s empower the 2nd to 1.5× damage. Each crit shaves 150ms off your other cooldowns.' },
     jobs:['archmage','warlock'],
   },
   archer: {
@@ -1662,6 +1665,7 @@ const CLASSES = {
     desc:'Ranged precision. Kite, pick, keep distance.',
     stats:{ hp:100, mp:60, atk:13, def:6, crit:14, speed:4.0, jump:11 },
     perk: { name:'Eagle\'s Precision', desc:'+45% damage on first hit vs each enemy. Arrows fly 70% further. Triple jump built in.' },
+    identity: { name:'Rooted Fire', desc:'From Lv 10: skills freeze you in place ~0.4s for +25% damage. Standing still builds Steady up to +40%. Moving breaks Steady.' },
     jobs:['sniper','ranger'],
   },
 };
@@ -2902,6 +2906,12 @@ const player = {
   attacking:false, attackTimer:0, attackCooldown:0,
   skillCooldowns: {}, skillPoints: 0,
   _pendingTimeouts: [],  // ids queued by scheduleSkillTimer; cleared on death/respawn/mapChange
+  // Class identity (v0.18) — see _tickClassIdentity + _computeClassSkillMul
+  _warCharge: null, _releasedCharge: null,
+  _momentum: 0,
+  _steady: 0, _rootedTimer: 0,
+  _mageLastCastT: 0, _mageLastCastId: null, _mageChainPing: 0,
+  _classSkillMul: 1, _classSkillMulExpires: 0, _classSkillMulSkillId: null,
   // Attributes (AP) — Str/Vit/Agi/Int/Wis/Lck
   attrs: { str:5, vit:5, agi:5, int:5, wis:5, lck:5 },
   // Buffs: each is a timer (ms remaining)
@@ -3055,6 +3065,12 @@ window.addEventListener('keydown', e => {
 
   if (repeat) return; // Fresh presses only below
 
+  // Warrior charge — start holding on the first press of a skill key.
+  // Must run before castSkill-style handlers so the poll loop sees the lock.
+  if (typeof tryStartWarriorCharge === 'function' && KEY_TO_SLOT && KEY_TO_SLOT[k]) {
+    tryStartWarriorCharge(k);
+  }
+
   if (k === 'f') tryInteract();
   if (k === 'arrowup' && !game.paused && player.hp > 0 && player.hitStun <= 0) tryPortal();
   if (k === 'b') toggleModal('inventory-modal', renderInventory);
@@ -3145,6 +3161,10 @@ window.addEventListener('keyup', e => {
   // Release dev combo guard once any of 1/2/3 lifts
   if ((k === '1' || k === '2' || k === '3') && (!game.keys['1'] || !game.keys['2'] || !game.keys['3'])) {
     game._devComboFired = false;
+  }
+  // Warrior charge — release fires the skill with the accumulated charge
+  if (typeof tryReleaseWarriorCharge === 'function' && KEY_TO_SLOT && KEY_TO_SLOT[k]) {
+    tryReleaseWarriorCharge(k);
   }
 });
 
@@ -3420,6 +3440,7 @@ function openClassSelect() {
     card.style.borderColor = c.color;
     const jobs = c.jobs.map(j => JOBS[j].name).join(' / ');
     const perk = c.perk;
+    const identity = c.identity;
     card.innerHTML = `
       <div class="cls-icon">${c.icon}</div>
       <div class="cls-name" style="color:${c.color}">${c.name}</div>
@@ -3430,6 +3451,7 @@ function openClassSelect() {
         CRIT ${c.stats.crit||5}% · SPD ${c.stats.speed}
       </div>
       ${perk ? `<div class="cls-perk"><b style="color:#ffdd88">✦ ${perk.name}</b><br><span style="font-size:10px;color:#ccc">${perk.desc}</span></div>` : ''}
+      ${identity ? `<div class="cls-perk" style="border-color:#aa77ff;"><b style="color:#c8a8ff">◈ ${identity.name}</b><br><span style="font-size:10px;color:#ccc">${identity.desc}</span></div>` : ''}
       <div class="cls-jobs">→ ${jobs}</div>
     `;
     card.onclick = () => {
@@ -5127,11 +5149,19 @@ function updatePlayer(dt) {
     if (player.skillCooldowns[id] > 0) player.skillCooldowns[id] -= dt;
   }
 
+  // Tick the per-class identity mechanics (warrior charge, rogue momentum,
+  // archer steady aim + root, mage chain ping). See _tickClassIdentity docs.
+  _tickClassIdentity(dt);
+
   // Skills — keyboard keys map to internal slot ids via KEY_TO_SLOT
   if (!game.paused) {
     for (const key in KEY_TO_SLOT) {
       if (!k[key]) continue;
       const slot = KEY_TO_SLOT[key];
+      // Warrior charge owns the skill slots after job advancement — the
+      // auto-cast poll must not fire while the key is held. Cast happens
+      // on keyup via tryReleaseWarriorCharge().
+      if (slot !== 'd' && _warriorChargeOwnsSlot(slot)) continue;
       const found = skillBySlot(slot);
       if (!found) continue;
       const id = found.id;
@@ -5466,6 +5496,12 @@ function triggerDeath() {
   player._bloodstormNextTick = 0;
   player._aegis = null;
   player._clones = null;
+  // Class identity: cancel any pending charge / root / momentum state so
+  // a half-charged swing or stale root doesn't carry through respawn.
+  player._warCharge = null;
+  player._releasedCharge = null;
+  player._rootedTimer = 0;
+  player._classSkillMul = 1;
   // Cancel any queued skill setTimeout callbacks
   cancelPendingSkillTimers();
   const lostMesos = Math.floor(player.mesos * 0.5);
@@ -5508,6 +5544,15 @@ function respawnAtTown() {
   player._bloodstormNextTick = 0;
   player._aegis = null;
   player._clones = null;
+  player._warCharge = null;
+  player._releasedCharge = null;
+  player._rootedTimer = 0;
+  player._momentum = 0;
+  player._steady = 0;
+  player._mageLastCastT = 0;
+  player._mageLastCastId = null;
+  player._mageChainPing = 0;
+  player._classSkillMul = 1;
   cancelPendingSkillTimers();
   for (const k in player.buffs) player.buffs[k] = 0;
   resetCombo();
@@ -5529,6 +5574,339 @@ function isReady(id) {
   if ((player.skillCooldowns[id] || 0) > 0) return false;
   if (player.mp < s.mp) return false;
   return true;
+}
+
+// =========================================================================
+// CLASS IDENTITY — per-advancement playstyle mechanics (v0.18)
+//   Warrior: hold a skill key to charge (0→100% over ~0.75s); release for
+//            up to +100% damage + guaranteed crit at full charge.
+//   Rogue:   Momentum gauge builds from movement, drains when still. Skills
+//            consume most of it for +0..+100% damage.
+//   Mage:    Chain Cast — two DIFFERENT skills within 1 s empower the
+//            second to 1.5× damage. Crits refund 150 ms of all other CDs.
+//   Archer:  Rooted Fire — skills freeze the archer for ~0.4 s in exchange
+//            for +25% damage; standing still builds Steady stacks up to
+//            +40% damage. Moving breaks Steady instantly.
+// Each system only activates once the player has advanced to a job (Lv 10+).
+// =========================================================================
+const WAR_CHARGE_FRAMES  = 45;   // ~0.75 s to full charge at 60 fps
+const WAR_CHARGE_TAP     = 7;    // < 7 frames held = tap (no charge bonus)
+const MAGE_CHAIN_FRAMES  = 60;   // ~1 s window for chain cast
+const ARCHER_ROOT_MS     = 420;  // ms — _rootedTimer is decayed via dt(ms)
+const ARCHER_STEADY_CAP  = 40;   // +40% damage at max steady
+
+function _classIdentityActive() {
+  // Unlocks at job advancement (level 10) and carries through master advancement.
+  return !!(player.cls && player.job);
+}
+
+// Per-frame tick for the current class's identity state. Called from
+// updatePlayer alongside the other per-frame systems.
+function _tickClassIdentity(dt) {
+  if (!_classIdentityActive()) return;
+
+  // --- Warrior: charge meter ---
+  if (player.cls === 'warrior' && player._warCharge) {
+    const held = game.time - player._warCharge.start;
+    player._warCharge.power = Math.min(1, held / WAR_CHARGE_FRAMES);
+    // Getting stunned / dying cancels the charge without firing
+    if (player.hitStun > 0 || player.hp <= 0 || game.dying > 0 || game.paused) {
+      player._warCharge = null;
+    }
+  }
+
+  // --- Rogue: momentum gauge ---
+  if (player.cls === 'rogue') {
+    const moving = Math.abs(player.vx) > 0.5 ||
+                   player.rushTimer > 0 || player.dodgeTimer > 0 ||
+                   player.quickDashTimer > 0;
+    if (moving) {
+      player._momentum = Math.min(100,
+        (player._momentum || 0) + Math.abs(player.vx) * 0.5 + 1.0);
+    } else {
+      player._momentum = Math.max(0, (player._momentum || 0) - 0.8);
+    }
+  }
+
+  // --- Archer: root timer + steady aim stacks ---
+  if (player.cls === 'archer') {
+    if (player._rootedTimer > 0) {
+      player._rootedTimer -= dt;
+      if (player._rootedTimer < 0) player._rootedTimer = 0;
+      // Forced still while rooted — gravity still applies, just no horizontal
+      player.vx = 0;
+    }
+    if (Math.abs(player.vx) < 0.5 && player._rootedTimer <= 0 && player.hp > 0) {
+      player._steady = Math.min(ARCHER_STEADY_CAP, (player._steady || 0) + 0.25);
+    } else if (Math.abs(player.vx) > 1.5) {
+      player._steady = 0;
+    }
+  }
+
+  // --- Mage: visual ping decay ---
+  if (player.cls === 'mage' && player._mageChainPing > 0) {
+    player._mageChainPing -= dt;
+    if (player._mageChainPing < 0) player._mageChainPing = 0;
+  }
+}
+
+// Called from castSkill BEFORE the SKILL_FN runs. Computes the damage
+// multiplier that will apply to non-melee hits produced by this cast, and
+// triggers any side effects (archer root, mage chain ping, etc).
+function _computeClassSkillMul(skillId) {
+  if (!_classIdentityActive()) return 1;
+  const s = SKILLS[skillId];
+  if (!s || s.slot === 'd') return 1;  // basic attack keeps vanilla behaviour
+
+  // Warrior — a release from the charge meter set this value
+  if (player.cls === 'warrior') {
+    const power = (player._releasedCharge != null) ? player._releasedCharge : 0;
+    player._releasedCharge = null;
+    if (power >= 1) player._guaranteedCrit = (player._guaranteedCrit || 0) + 1;
+    return 1 + power;  // 1× at 0%, 2× at 100%
+  }
+
+  // Rogue — spend most of the momentum for a damage bonus
+  if (player.cls === 'rogue') {
+    const m = player._momentum || 0;
+    player._momentum = Math.max(0, m - 60);
+    return 1 + m / 100;
+  }
+
+  // Mage — chain cast detection + visual ping for the new cast
+  if (player.cls === 'mage') {
+    const now = game.time;
+    const lastT = player._mageLastCastT || -9999;
+    const lastId = player._mageLastCastId;
+    player._mageLastCastT = now;
+    player._mageLastCastId = skillId;
+    if (lastId && lastId !== skillId && (now - lastT) <= MAGE_CHAIN_FRAMES) {
+      player._mageChainPing = 500;  // ms — decays via dt in _tickClassIdentity
+      return 1.5;
+    }
+    return 1;
+  }
+
+  // Archer — root + flat bonus + steady stacks
+  if (player.cls === 'archer') {
+    player._rootedTimer = ARCHER_ROOT_MS;
+    player.vx = 0;
+    const steady = (player._steady || 0) / 100;
+    return 1.25 + steady;  // +25% from root, + up to +40% from steady
+  }
+
+  return 1;
+}
+
+// Warrior charge — call on keydown of a skill key. Returns true if a charge
+// was started and the poll loop should NOT fire the skill this frame.
+function tryStartWarriorCharge(slotKey) {
+  if (!_classIdentityActive() || player.cls !== 'warrior') return false;
+  const slot = KEY_TO_SLOT[slotKey];
+  if (!slot || slot === 'd') return false;  // basic attack untouched
+  const found = skillBySlot(slot);
+  if (!found || !isReady(found.id)) return false;
+  if (player.hp <= 0 || game.paused || game.dying > 0) return false;
+  if (player._warCharge) return true;  // already charging
+  player._warCharge = { slotKey, start: game.time, skillId: found.id, power: 0 };
+  return true;
+}
+
+// Warrior charge — call on keyup. Fires the skill with the accumulated charge.
+function tryReleaseWarriorCharge(slotKey) {
+  const c = player._warCharge;
+  if (!c || c.slotKey !== slotKey) return false;
+  const held = game.time - c.start;
+  const power = Math.min(1, held / WAR_CHARGE_FRAMES);
+  player._warCharge = null;
+  // If cooldown elapsed mid-charge (rare), re-check
+  if (!isReady(c.skillId)) return true;  // silently consumed
+  // Tap — tiny hold time = minimum charge
+  if (held < WAR_CHARGE_TAP) {
+    player._releasedCharge = 0;
+    castSkill(c.skillId);
+    return true;
+  }
+  player._releasedCharge = power;
+  if (power >= 1) {
+    addShake(12); flash(0.3); addHitStop(60);
+    showToast('⚔ EMPOWERED', 'epic');
+    audio.play('crit');
+    // Big burst at the player
+    for (let i = 0; i < 30; i++) {
+      const a = (i / 30) * Math.PI * 2;
+      game.particles.push({
+        x: player.x + player.w/2, y: player.y + player.h/2,
+        vx: Math.cos(a) * 6, vy: Math.sin(a) * 6,
+        life: 30, color: i % 2 ? '#ffdd44' : '#ff8822', size: 3
+      });
+    }
+  } else if (power > 0.6) {
+    addShake(4); flash(0.12);
+  }
+  castSkill(c.skillId);
+  return true;
+}
+
+// Returns true while the warrior is actively charging THIS slot (used by the
+// poll loop to suppress the auto-cast so charge takes over).
+function _warriorChargeOwnsSlot(slot) {
+  return player._warCharge && KEY_TO_SLOT[player._warCharge.slotKey] === slot;
+}
+
+// Per-frame HUD for the current class's identity mechanic. Drawn in world
+// space (inside the camera shake / translate block) so the charge ring
+// follows the player even if they're off-centre.
+function drawClassIdentityHUD() {
+  if (!_classIdentityActive() || player.hp <= 0) return;
+  const cx = (player.x + player.w/2) - game.camera.x;
+  const cy = (player.y + player.h/2);
+
+  // --- Warrior charge ring ---
+  if (player.cls === 'warrior' && player._warCharge) {
+    const p = player._warCharge.power || 0;
+    const r = 36;
+    ctx.save();
+    // Soft halo that swells with charge
+    ctx.globalCompositeOperation = 'lighter';
+    const halo = ctx.createRadialGradient(cx, cy, 8, cx, cy, r + 14);
+    const intensity = 0.20 + p * 0.35;
+    halo.addColorStop(0, `rgba(255,180,80,${intensity})`);
+    halo.addColorStop(0.6, `rgba(255,120,40,${intensity * 0.5})`);
+    halo.addColorStop(1, 'rgba(80,30,10,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r + 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    // Base ring
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    // Fill arc
+    ctx.strokeStyle = p >= 1 ? '#ffee44' : (p > 0.6 ? '#ffbb44' : '#ff8844');
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, -Math.PI/2, -Math.PI/2 + p * Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    // Max-charge "ready!" pulse
+    if (p >= 1) {
+      const pulse = 1 + Math.sin(game.time * 0.5) * 0.15;
+      ctx.save();
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = '#ffee44';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('⚔ RELEASE', cx, cy - r - 8);
+      ctx.restore();
+      // Outer ring pulse
+      ctx.save();
+      ctx.strokeStyle = `rgba(255,238,68,${0.6 - (pulse - 1) * 2})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r + 8 * pulse, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // --- Rogue momentum bar ---
+  if (player.cls === 'rogue') {
+    const m = player._momentum || 0;
+    if (m > 2) {
+      const barW = 48, barH = 4;
+      const bx = cx - barW/2;
+      const by = cy - 45;
+      ctx.save();
+      ctx.fillStyle = 'rgba(20,10,30,0.75)';
+      ctx.fillRect(bx - 1, by - 1, barW + 2, barH + 2);
+      const col = m >= 95 ? '#ff66cc' : (m >= 60 ? '#cc66ff' : '#8866ff');
+      ctx.fillStyle = col;
+      ctx.fillRect(bx, by, (barW * m) / 100, barH);
+      // End-cap glow at high momentum
+      if (m >= 95) {
+        ctx.globalCompositeOperation = 'lighter';
+        const g = ctx.createRadialGradient(bx + barW, by + barH/2, 0, bx + barW, by + barH/2, 16);
+        g.addColorStop(0, 'rgba(255,120,220,0.8)');
+        g.addColorStop(1, 'rgba(255,120,220,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(bx + barW - 16, by - 8, 32, 20);
+      }
+      ctx.restore();
+    }
+  }
+
+  // --- Mage chain pip ---
+  if (player.cls === 'mage') {
+    const now = game.time;
+    const lastT = player._mageLastCastT || -9999;
+    const primed = player._mageLastCastId && (now - lastT) <= MAGE_CHAIN_FRAMES;
+    if (primed) {
+      const remain = 1 - (now - lastT) / MAGE_CHAIN_FRAMES;
+      ctx.save();
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = `rgba(180,130,255,${0.65 + remain * 0.35})`;
+      ctx.fillText('⌬ CHAIN', cx, cy - 45);
+      // Thin underline meter
+      const barW = 36;
+      ctx.fillStyle = 'rgba(30,15,55,0.6)';
+      ctx.fillRect(cx - barW/2, cy - 40, barW, 2);
+      ctx.fillStyle = '#c8a8ff';
+      ctx.fillRect(cx - barW/2, cy - 40, barW * remain, 2);
+      ctx.restore();
+    }
+    // Chain-triggered ping — brief bright flash after a successful chain cast
+    if ((player._mageChainPing || 0) > 0) {
+      const a = player._mageChainPing / 30;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, 60);
+      g.addColorStop(0, `rgba(200,160,255,${0.45 * a})`);
+      g.addColorStop(1, 'rgba(100,60,200,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 60, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // --- Archer steady + root ---
+  if (player.cls === 'archer') {
+    const steady = player._steady || 0;
+    const rooted = (player._rootedTimer || 0) > 0;
+    if (steady > 2 || rooted) {
+      ctx.save();
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      // Steady label
+      if (steady > 2) {
+        const col = steady >= ARCHER_STEADY_CAP ? '#88ffcc' : '#66ccff';
+        ctx.fillStyle = col;
+        ctx.fillText(`◎ AIM +${Math.floor(steady)}%`, cx, cy - 45);
+      }
+      // Root indicator — foot-planted sparks + "ROOTED" text
+      if (rooted) {
+        ctx.fillStyle = '#ffcc66';
+        ctx.fillText('▼ STEADY', cx, cy - 30);
+        // Footplant sparks at the player's feet (world-space)
+        const fy = player.y + player.h;
+        const fsx = (player.x + player.w/2) - game.camera.x;
+        ctx.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < 2; i++) {
+          const dx = (Math.random() - 0.5) * 22;
+          ctx.fillStyle = 'rgba(255,200,100,0.5)';
+          ctx.fillRect(fsx + dx, fy - 2, 1, 3);
+        }
+      }
+      ctx.restore();
+    }
+  }
 }
 function rollCrit() {
   if ((player._guaranteedCrit || 0) > 0) { player._guaranteedCrit--; return true; }
@@ -5583,6 +5961,12 @@ function castSkill(id) {
   }
   // Shadowlord clones no longer mimic — they act autonomously now
   // (see _clones tick in updatePlayer). Nothing to queue here.
+  // Class identity: compute the per-cast damage multiplier (warrior charge,
+  // rogue momentum, mage chain, archer steady) and keep it alive for 2 s so
+  // delayed projectiles / lane hits from this same cast still get the bonus.
+  player._classSkillMul = _computeClassSkillMul(id);
+  player._classSkillMulExpires = game.time + 120;
+  player._classSkillMulSkillId = id;
   const f = SKILL_FNS[id];
   if (f) f();
 }
@@ -8736,6 +9120,28 @@ function bossAI(m, dt, distToPlayer) {
 function hitMonster(m, dmg, isCrit, skill) {
   // Dev cheat — one-shot kills anything
   if (player._oneShot) dmg = 999999;
+  // Class identity multiplier — amplifies non-melee skill hits from the
+  // most recent cast. Expires 2 s after the cast to catch delayed volleys.
+  if (player._classSkillMul && player._classSkillMul > 1 &&
+      skill !== 'melee' && skill !== 'thorns' && skill !== 'aegis' &&
+      game.time <= (player._classSkillMulExpires || 0)) {
+    dmg = Math.floor(dmg * player._classSkillMul);
+  }
+  // Mage crit refund — every crit from a post-advancement mage shaves 150 ms
+  // off EVERY other skill's cooldown. Rewards rotating through spells rather
+  // than spamming one. Gated to at most once per frame so a single AOE tick
+  // can't refund everything to zero in one hit.
+  if (isCrit && player.cls === 'mage' && player.job &&
+      skill !== 'melee' && skill !== 'thorns') {
+    if (player._mageCritRefundFrame !== game.time) {
+      player._mageCritRefundFrame = game.time;
+      for (const id in player.skillCooldowns) {
+        if (player.skillCooldowns[id] > 0) {
+          player.skillCooldowns[id] = Math.max(0, player.skillCooldowns[id] - 150);
+        }
+      }
+    }
+  }
   // Archer parry reward — next projectile hit gets massive damage + crit
   if (player._nextShotBonus > 0 && (skill === 'arrow' || skill === 'charged' || skill === 'deadeye')) {
     dmg = Math.floor(dmg * 2.5);
@@ -19566,6 +19972,7 @@ function loop(time) {
   drawPlayer();
   drawAegisOrbs();
   drawPet();
+  drawClassIdentityHUD();
   drawParticles();
   drawFxInstances();
   drawSmoothFx();
