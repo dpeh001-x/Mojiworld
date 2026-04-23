@@ -517,6 +517,85 @@
   </div>
 </div>
 
+<h2 id="files">Critical files + existing APIs <span class="count">8 safe zones</span></h2>
+<h3>Mobile safe zones (editable — per <code>.claude/hooks/mobile-zone-check.py</code>)</h3>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th style="width:120px;">Range</th><th>Content</th><th>Used by</th></tr></thead>
+  <tbody>
+    <tr><td><span class="pill anchor">7–10</span></td><td>mobile meta tags</td><td>P2.6 (PWA manifest link)</td></tr>
+    <tr><td><span class="pill anchor">33</span></td><td>body <code>touch-action</code></td><td>—</td></tr>
+    <tr><td><span class="pill anchor">65–334</span></td><td>MOBILE CONTROLS (v5) CSS</td><td>P1.4, P1.5, P1.9, P2.1, P2.3</td></tr>
+    <tr><td><span class="pill anchor">338–419</span></td><td><code>#rotate-nag</code> CSS + portrait-nag media query</td><td>P1.3, P1.10</td></tr>
+    <tr><td><span class="pill anchor">484–605</span></td><td>MOBILE TOUCH CONTROLS CSS</td><td>—</td></tr>
+    <tr><td><span class="pill anchor">1147–1167</span></td><td>rotate-to-landscape nag + <code>#mobile-ctrl</code> HUD overlay</td><td>P1.9, P2.1, P2.3, P3.1</td></tr>
+    <tr><td><span class="pill anchor">1476–1512</span></td><td>MOBILE CONTROL DECK DOM</td><td>P3.1 (companion panel mount)</td></tr>
+    <tr><td><span class="pill anchor">3612–3797</span></td><td>MOBILE / TOUCH CONTROLS JS + FULLSCREEN FIT</td><td>all Phase-1 JS, all Phase-2 JS, P3.2, P3.3</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Existing APIs to reuse — no new abstractions</h3>
+<ul>
+  <li><code>showToast(text, rarity)</code> — toast notifications. Rarity: <code>'common' | 'rare' | 'epic' | 'legendary'</code>. Around lines 2330–2400.</li>
+  <li><code>audio.play('levelup' | 'pickup' | …)</code> — sound cues; globals on <code>audio</code>.</li>
+  <li><code>flash(alpha)</code>, <code>addShake(n)</code>, <code>addHitStop(ms)</code> — feel helpers (lines 4042–4044).</li>
+  <li><code>player.exp</code>, <code>player.expToNext</code>, <code>player.level</code>, <code>player.skillPoints</code>, <code>player.dailyState</code>, <code>game.achievements</code>, <code>game.bestiary</code>, <code>game.prestige</code>, <code>game.towerBestFloor</code> — all read-only from mobile layer.</li>
+  <li><code>document.body.classList</code> — already used for <code>forced-modal</code>, <code>mc-portrait</code>, <code>mc-landscape</code>, <code>nag-portrait</code>, <code>hide-mobile-ctrl</code>. Add <code>xp-near</code>, <code>streak-risk</code>, <code>adv-ready</code> for new triggers.</li>
+  <li><code>localStorage</code> — main save key is <code>levelx_save_v1</code>. <strong>All new mobile-only keys prefixed with <code>_mobile_</code></strong> to avoid clashing. No migration needed; these are pure additions.</li>
+</ul>
+
+<div class="callout">
+  <p style="margin:0;"><strong>Save format — do not touch.</strong> <code>PLAYER_SAVE_FIELDS</code> (line 4051) and <code>GAME_SAVE_FIELDS</code> (line 4060) are shared with <code>main</code>. Never add fields here from the mobile branch. New persistent state goes to dedicated <code>localStorage</code> keys with the <code>_mobile_</code> prefix.</p>
+</div>
+
+<h2 id="verify">Verification plan <span class="count">per-item + end-to-end</span></h2>
+<p>Every commit includes a <code>verification:</code> block matching the patterns below.</p>
+
+<h3>Per-item verification</h3>
+<ul>
+  <li><strong>P1.1 Tab-title badge:</strong> Level up, switch tabs, confirm title becomes <code>⭐ Lv N — LevelX</code>. Switch back, confirm revert.</li>
+  <li><strong>P1.3 Rotate-nag persistence:</strong> Dismiss nag, reload, confirm no re-nag. Delete <code>localStorage._mobile_nagDismissed</code>, confirm nag returns.</li>
+  <li><strong>P1.4 XP-bar pulse:</strong> Set <code>player.exp</code> so ratio &gt; 0.9, confirm CSS <code>xp-near</code> class applied and animation fires. Drop ratio, confirm class removed.</li>
+  <li><strong>P1.5 Daily countdown:</strong> Open banner at 00:30 UTC, confirm ~23h. At 23:50 UTC, confirm ~10m. Loop over midnight rollover.</li>
+  <li><strong>P1.8 Streak-at-risk:</strong> Set <code>player.dailyState.streak = 5</code> + clock to 22:00 UTC. Reload, confirm toast. Streak = 1 → no toast. Time = 10:00 UTC → no toast.</li>
+  <li><strong>P1.9 Next-advancement chip:</strong> At Lv 10 expect <code>→ Job in 15</code>. At Lv 25 expect <code>→ Master in 25</code>. At Lv 55 → <code>→ Ascend in N</code> or hidden.</li>
+  <li><strong>P2.1 Next-goal widget:</strong> Confirm cycles every 5s across all active tracks. Confirm no stale data when daily flips. Confirm mobile-only (hidden on desktop).</li>
+  <li><strong>P2.6 PWA:</strong> Chrome Android: add-to-home-screen prompt surfaces. iOS Safari: share → Add to Home Screen produces standalone. Service worker registers without errors.</li>
+</ul>
+
+<h3>End-to-end syntax + regression</h3>
+<p>Per the v2 guardrails:</p>
+<ul>
+  <li>Extract and syntax-check <code>&lt;script&gt;</code> before each commit:
+    <code>awk '/&lt;script&gt;/{flag=1;next}/&lt;\/script&gt;/{flag=0}flag' maple_game.html &gt; /tmp/x.js &amp;&amp; node --check /tmp/x.js</code></li>
+  <li>Every shipped commit on <code>mobile-ui-pass</code> adds an entry to <code>MOBILE_CHANGELOG.html</code>.</li>
+  <li>All new behaviour gated by <code>@media (pointer: coarse)</code> or <code>window.matchMedia('(pointer: coarse)').matches</code>. Zero desktop regression risk.</li>
+</ul>
+
+<h2 id="glossary">Psychology-lever glossary <span class="count">12 definitions</span></h2>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th style="width:30px;">#</th><th style="width:180px;">Lever</th><th>Definition</th></tr></thead>
+  <tbody>
+    <tr><td class="num">1</td><td><strong>Variable-ratio reinforcement</strong></td><td>Rewards whose timing / magnitude are random. Slots, loot boxes. Highest sustained engagement of any schedule.</td></tr>
+    <tr><td class="num">2</td><td><strong>Loss aversion</strong></td><td>The pain of losing X is ~2× the pleasure of gaining X. Streaks, decay, expiring buffs, warnings.</td></tr>
+    <tr><td class="num">3</td><td><strong>Completion bias</strong></td><td>Humans are compelled to finish started sets. Collection shelves, owned-ticks, "8/10" counters.</td></tr>
+    <tr><td class="num">4</td><td><strong>Social proof</strong></td><td>Seeing others do/want something raises your own desire. Leaderboards, rivals, "X% of players".</td></tr>
+    <tr><td class="num">5</td><td><strong>FOMO</strong></td><td>Fear of missing out — time-limited content triggers urgency. Events, daily-resets, seasonal cosmetics.</td></tr>
+    <tr><td class="num">6</td><td><strong>Endowment effect</strong></td><td>You value things more when you own them. Naming, customizing, long-term persistence.</td></tr>
+    <tr><td class="num">7</td><td><strong>Progress overview</strong></td><td>A single glanceable "what's next" reduces cognitive load; absence creates dead zones.</td></tr>
+    <tr><td class="num">8</td><td><strong>Near-miss reinforcement</strong></td><td>The last 10% of a goal feels more rewarding than the first 10%. Louder bars near cap.</td></tr>
+    <tr><td class="num">9</td><td><strong>Re-engagement</strong></td><td>Surfaces outside the game that pull the player back. Push, email, tab title, home-screen icon.</td></tr>
+    <tr><td class="num">10</td><td><strong>Mastery curve</strong></td><td>Escalating challenge matched to growing skill. Too easy → bored; too hard → quit.</td></tr>
+    <tr><td class="num">11</td><td><strong>Flow state</strong></td><td>A tight action loop with continuous feedback that feels timeless. Broken by UI interruptions.</td></tr>
+    <tr><td class="num">12</td><td><strong>Identity / self-expression</strong></td><td>The player can make themselves visible. Cosmetics, titles, shareables.</td></tr>
+  </tbody>
+</table>
+</div>
+
 <footer>
   <p>Audit compiled 2026-04-23 from independent findings of 3 parallel mobile-scoped Explore agents. All Phase 1/2 items implementable inside mobile safe zones per <code>.claude/hooks/mobile-zone-check.py</code>. Items with <span class="pill flag">hard-rule flag</span> need a user decision before ship.</p>
   <p>Internal plan: <code>.claude/plans/mobile-gameplay-audit.md</code>. Source safe-zone table: <a href="https://github.com/dpeh001-x/LevelX/blob/mobile-ui-pass/CLAUDE.md">CLAUDE.md</a>.</p>
