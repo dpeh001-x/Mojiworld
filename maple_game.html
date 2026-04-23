@@ -4049,21 +4049,31 @@ function _initMobileControls() {
       toggle.textContent = document.body.classList.contains('hide-mobile-ctrl') ? '◀' : '✕';
     };
   }
-  // Forced-modal watcher: class-select and advancement modals sit inside
-  // .game-wrapper, whose transform: scale() traps their z-index below the
-  // #mobile-deck (z-index:70). Toggle body.forced-modal so the deck's
-  // CSS rule can display:none itself out of the way — otherwise the
-  // d-pad + action buttons eat taps meant for class / job / master cards.
-  const _forcedIds = ['class-select-modal', 'advancement-modal'];
+  // Forced-modal watcher: modals that sit inside .game-wrapper are
+  // trapped below the #mobile-deck (z-index:70) by the wrapper's
+  // transform: scale() stacking context. Toggle body.forced-modal so
+  // the deck's CSS rule can display:none itself out of the way —
+  // otherwise the d-pad + action buttons eat taps meant for the
+  // class / job / master cards and for the NPC dialog's option
+  // buttons (e.g. "Leave" on a shopkeeper dialog).
+  //
+  // Each entry lists the element id and which style.display value
+  // counts as "open" — NPC #dialog uses 'block' where the modals
+  // use 'flex'.
+  const _forcedModals = [
+    { id: 'class-select-modal', open: 'flex'  },
+    { id: 'advancement-modal',  open: 'flex'  },
+    { id: 'dialog',             open: 'block' },
+  ];
   const _syncForcedModal = () => {
-    const anyOpen = _forcedIds.some(id => {
-      const el = document.getElementById(id);
-      return el && el.style.display === 'flex';
+    const anyOpen = _forcedModals.some(m => {
+      const el = document.getElementById(m.id);
+      return el && el.style.display === m.open;
     });
     document.body.classList.toggle('forced-modal', anyOpen);
   };
-  for (const id of _forcedIds) {
-    const el = document.getElementById(id);
+  for (const m of _forcedModals) {
+    const el = document.getElementById(m.id);
     if (el) new MutationObserver(_syncForcedModal)
       .observe(el, { attributes: true, attributeFilter: ['style'] });
   }
@@ -4137,14 +4147,31 @@ document.addEventListener('click', (e) => {
   }
 }, true);
 window.addEventListener('resize', _fitGameToViewport);
-window.addEventListener('orientationchange', () => {
-  // Some browsers fire orientationchange before the viewport metrics update.
-  // Re-fit several times to catch the post-layout state on iOS / Android.
+// Orientationchange fires before viewport metrics update, so re-fit
+// across a widening retry schedule. The 1400/2000 tail catches iOS
+// Safari's post-URL-bar-settle reflow when returning to landscape
+// after a brief portrait excursion — otherwise the game gets stuck
+// at the portrait scale.
+const _reFitSchedule = () => {
   requestAnimationFrame(_fitGameToViewport);
   setTimeout(_fitGameToViewport, 120);
   setTimeout(_fitGameToViewport, 350);
   setTimeout(_fitGameToViewport, 800);
-});
+  setTimeout(_fitGameToViewport, 1400);
+  setTimeout(_fitGameToViewport, 2000);
+};
+window.addEventListener('orientationchange', _reFitSchedule);
+// Modern API: screen.orientation fires after the browser has finished
+// applying the orientation change, so a single immediate fit is
+// sufficient here (the setTimeout tail is the fallback for iOS).
+if (window.screen && window.screen.orientation && typeof window.screen.orientation.addEventListener === 'function') {
+  try { window.screen.orientation.addEventListener('change', _reFitSchedule); } catch (e) {}
+}
+// visualViewport: fires on orientation change AND on URL-bar show/hide.
+// The most reliable signal that the usable viewport has actually changed.
+if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
+  try { window.visualViewport.addEventListener('resize', _fitGameToViewport); } catch (e) {}
+}
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', _fitGameToViewport);
 } else {
