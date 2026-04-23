@@ -486,6 +486,17 @@
       opacity: 0.32 !important;
       filter: grayscale(1) brightness(0.85);
     }
+    /* F button in "block mode" — toggled from _wireDynamicFButton
+       when no interact is in range AND the Q skill is still locked.
+       Blue shield tint so the player knows a tap will block, not
+       interact / cast. */
+    .mobile-deck .mc-skill.mc-f-block {
+      background: rgba(120,180,255,0.28) !important;
+      border-color: rgba(170,210,255,0.82) !important;
+      color: #cceeff !important;
+      opacity: 1 !important;
+      filter: none !important;
+    }
     /* P1.9 — next-advancement chip. Injected at runtime into
        #top-ui; styled only on mobile so the desktop HUD stays
        unchanged. Shows "→ Job in N" / "→ Master in N"; hides
@@ -1992,7 +2003,9 @@
   <!-- Block (A) — lives OUTSIDE .mc-actions so it can be positioned
        independently without fighting the grid layout or display:contents
        quirks on iOS Safari. Styled as a standalone fixed-position circle. -->
-  <button class="mc-btn mc-block" data-mkey="a" aria-label="Block / Parry">🛡</button>
+  <!-- Block kept in DOM but hidden — F button now doubles as Block
+       when no chest / portal / NPC is in range (see _wireDynamicF). -->
+  <button class="mc-btn mc-block" data-mkey="a" aria-label="Block / Parry" style="display:none">🛡</button>
   <!-- Right side of deck: Jump + defense + skill grid -->
   <div class="mc-actions">
     <button class="mc-btn mc-jump"   data-mkey=" "  aria-label="Jump">⤒</button>
@@ -2005,7 +2018,7 @@
       <button class="mc-btn mc-skill" data-mkey="s" aria-label="Skill S">S</button>
       <button class="mc-btn mc-skill" data-mkey="c" aria-label="Skill C">C</button>
       <button class="mc-btn mc-skill" data-mkey="d" aria-label="Skill D">D</button>
-      <button class="mc-btn mc-skill" data-mkey="f" aria-label="Skill F (job)">F</button>
+      <button class="mc-btn mc-skill" data-mkey="f" data-dynamic="f-block" aria-label="Skill F / Interact / Block">F</button>
       <button class="mc-btn mc-skill" data-mkey="v" aria-label="Skill V (job ult)">V</button>
       <button class="mc-btn mc-skill" data-mkey="g" aria-label="Skill G (master)">G</button>
     </div>
@@ -4109,6 +4122,81 @@ function _wireSmartDpad() {
   pad.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
+// Dynamic F button — F already dispatches the 'f' key (which handles
+// tryInteract + cast Q skill if unlocked). When NO chest / portal / NPC
+// is in range AND the player doesn't have Q yet, the F tap dispatches
+// 'a' (block) instead so the face-cluster F doubles as a block button
+// early-game. Visual updates every 200ms to reflect current mode.
+function _wireDynamicFButton() {
+  const btn = document.querySelector('.mobile-deck [data-dynamic="f-block"]');
+  if (!btn || btn._dynWired) return;
+  btn._dynWired = true;
+  const INTERACT_ICON = 'F';
+  const BLOCK_ICON = '🛡';
+  const hasInteractNearby = () => {
+    if (typeof game === 'undefined' || !game) return false;
+    if (typeof player === 'undefined' || !player || !player.cls || (player.hp || 0) <= 0) return false;
+    const pcx = player.x + player.w / 2;
+    const pcy = player.y + player.h;
+    for (const c of (game.chests || [])) {
+      if (!c.opened &&
+          Math.abs(pcx - (c.x + c.w / 2)) < 40 &&
+          Math.abs(pcy - (c.y + c.h))   < 60) return true;
+    }
+    for (const po of (game.portals || [])) {
+      if (Math.abs(pcx - po.x) < 50 &&
+          Math.abs(pcy - 480)  < 100) return true;
+    }
+    for (const npc of (game.npcs || [])) {
+      if (Math.abs(pcx - npc.x) < 60) return true;
+    }
+    return false;
+  };
+  const qSkillUnlocked = () => {
+    if (typeof _sbSlots === 'undefined' || !_sbSlots.q) return false;
+    if (!_sbSlots.q.skill) return false;
+    if (typeof slotLevelReq !== 'function') return true;
+    return (player && player.level >= slotLevelReq('q'));
+  };
+  // Decide the dispatch key at press time:
+  //   interact nearby → 'f' (interact + cast Q if unlocked)
+  //   no interact, Q unlocked → 'f' (cast Q — keep it reachable late-game)
+  //   no interact, Q locked  → 'a' (block)
+  let active = false;
+  let activeKey = null;
+  const press = (ev) => {
+    if (ev) ev.preventDefault();
+    if (active) return;
+    active = true;
+    activeKey = (hasInteractNearby() || qSkillUnlocked()) ? 'f' : 'a';
+    if (typeof audio !== 'undefined' && !audio.ctx) audio.init();
+    _mkeyDispatch('keydown', activeKey);
+  };
+  const release = (ev) => {
+    if (ev) ev.preventDefault();
+    if (!active) return;
+    active = false;
+    if (activeKey) _mkeyDispatch('keyup', activeKey);
+    activeKey = null;
+  };
+  btn.addEventListener('pointerdown',   press,   { passive: false });
+  btn.addEventListener('pointerup',     release, { passive: false });
+  btn.addEventListener('pointercancel', release, { passive: false });
+  btn.addEventListener('pointerleave',  release, { passive: false });
+  btn.addEventListener('contextmenu', e => e.preventDefault());
+  // Visual updater — reflect the mode so the player knows what the
+  // button does before pressing it. Block mode gets blue tint + shield
+  // icon; interact/Q mode keeps the "F" letter. Skip updates while the
+  // button is actively held to avoid icon-swapping mid-press.
+  setInterval(() => {
+    if (active) return;
+    const blockMode = !hasInteractNearby() && !qSkillUnlocked();
+    const wantIcon = blockMode ? BLOCK_ICON : INTERACT_ICON;
+    if (btn.textContent !== wantIcon) btn.textContent = wantIcon;
+    btn.classList.toggle('mc-f-block', blockMode);
+  }, 200);
+}
+
 // Wire up all mobile buttons once DOM is ready.
 function _initMobileControls() {
   // Bind buttons in BOTH the in-wrapper HUD (pots) and the outside deck
@@ -4121,12 +4209,17 @@ function _initMobileControls() {
   for (const root of roots) {
     root.querySelectorAll('.mc-btn').forEach(btn => {
       if (btn.closest('.mc-dpad')) return;
+      // Buttons with data-dynamic are wired below — their dispatched
+      // key depends on live game state, so _mkeyBind's static closure
+      // wouldn't work.
+      if (btn.dataset.dynamic) return;
       _mkeyBind(btn);
     });
     // Block page-scroll / iOS rubber-band on the control regions
     root.addEventListener('touchmove', e => { e.preventDefault(); }, { passive: false });
   }
   _wireSmartDpad();
+  _wireDynamicFButton();
   const toggle = document.getElementById('mobile-ctrl-toggle');
   if (toggle) {
     toggle.onclick = () => {
