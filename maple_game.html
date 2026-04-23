@@ -1500,7 +1500,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.19.0';
+const GAME_VERSION = 'v0.19.1';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -1565,7 +1565,7 @@ const SKILLS = {
   rush:         { name:'Rush',           icon:'🏃', cls:'warrior', slot:'e', mp:12, cd:900,  desc:'Dash forward, pierce enemies.' },
   warCry:       { name:'War Cry',        icon:'📣', cls:'warrior', slot:'w', mp:18, cd:7000, desc:'+50% ATK for 6s. Battle roar.' },
   // Berserker
-  bloodlust:    { name:'Bloodlust',      icon:'🩸', cls:'warrior', job:'berserker', slot:'q', mp:22, cd:20000, desc:'15 s rage (+ATK, lifesteal, speed). 10 s of outward shockwaves that rip nearby foes.' },
+  bloodlust:    { name:'Bloodlust',      icon:'🩸', cls:'warrior', job:'berserker', slot:'q', mp:22, cd:18000, desc:'12 s rage (+ATK, lifesteal, speed). While active, basic Z attacks launch forward shockwaves.' },
   rampage:      { name:'Rampage',        icon:'🌪️', cls:'warrior', job:'berserker', slot:'c', mp:45, cd:10000, desc:'Ultimate: 3s spinning AoE.' },
   // Knight
   guardian:     { name:'Guardian',       icon:'🛡️', cls:'warrior', job:'knight',    slot:'q', mp:18, cd:5500,  desc:'80% damage reduction 5s.' },
@@ -1621,7 +1621,7 @@ const SKILLS = {
   shadowlord_clones:  { name:'Mirror Shadow',      icon:'👥', cls:'rogue', job:'ninja',    master:'shadowlord',  slot:'x', mp:40, cd:10000, desc:'3 silhouette clones — slash nearby foes for 4s (heavy damage each).' },
   shinobi_seal:       { name:'Kage Rush',          icon:'🎴', cls:'rogue', job:'ninja',    master:'shinobi',     slot:'x', mp:35, cd:8500,  desc:'Zip across the map slashing in rapid succession.' },
   nightreaper_mark:   { name:'Ricochet Daggers',   icon:'🗡️', cls:'rogue', job:'assassin', master:'nightreaper', slot:'x', mp:25, cd:6500,  desc:'7 forward daggers that ricochet off enemies and walls.' },
-  phantom_cut:        { name:'Dimensional Cut',    icon:'👻', cls:'rogue', job:'assassin', master:'phantom',     slot:'x', mp:30, cd:7500,  desc:'Teleport-strike ignoring defense; always crits.' },
+  phantom_cut:        { name:'Voidrift Execution', icon:'👻', cls:'rogue', job:'assassin', master:'phantom',     slot:'x', mp:55, cd:14000, desc:'Mark up to 6 enemies, phase through the world and execute them in chain-teleport strikes. Each strike ignores DEF and crits; final hit detonates a shadow nova.' },
   // Mage path
   sage_meteorshower:  { name:'Meteor Shower',      icon:'📜', cls:'mage', job:'archmage', master:'sage',         slot:'x', mp:55, cd:14000, desc:'5 meteors rain over an area.' },
   elementalist_cascade:{ name:'Prismatic Cascade', icon:'🌈', cls:'mage', job:'archmage', master:'elementalist', slot:'x', mp:50, cd:13000, desc:'Four elements in amplifying sequence.' },
@@ -5148,39 +5148,13 @@ function updatePlayer(dt) {
   // Divine Aegis — 5 hovering holy orbs pendulum in and out, striking
   // enemies in their path. Damage reduction is applied in hitMonster-style
   // incoming damage sites via towerPlayerTakeMul-like check elsewhere.
-  // Bloodlust shockwave tick — while _bloodstorm > 0, fire an outward
-  // projectile ring every 400 ms that damages all nearby foes. Expires
-  // after 10 s regardless of the 15 s rage buff.
+  // Bloodlust (v0.19.1) — the old auto-shockwave ring is retired. While
+  // the rage buff is active, each basic Z attack spawns a forward-facing
+  // shockwave projectile as a side-effect of the swing. The `_bloodstorm`
+  // field is kept only for back-compat with old saves; it's drained here
+  // but no longer emits anything.
   if (player._bloodstorm && player._bloodstorm > 0) {
     player._bloodstorm -= dt;
-    player._bloodstormNextTick -= dt;
-    if (player._bloodstormNextTick <= 0) {
-      player._bloodstormNextTick = 400;
-      const cx = player.x + player.w / 2;
-      const cy = player.y + player.h / 2;
-      // 10-projectile ring around the player
-      for (let i = 0; i < 10; i++) {
-        const a = (i / 10) * Math.PI * 2;
-        game.projectiles.push({
-          x: cx, y: cy,
-          vx: Math.cos(a) * 7, vy: Math.sin(a) * 7,
-          w: 20, h: 20, life: 30,
-          damage: getAtk() * 0.7 + 5,
-          owner: 'player', skill: 'bloodwave', color: '#ff3355', noGravity: true,
-          pierce: true,
-        });
-      }
-      // Red radial burst visual
-      for (let i = 0; i < 20; i++) {
-        const a = (i / 20) * Math.PI * 2;
-        game.particles.push({
-          x: cx, y: cy,
-          vx: Math.cos(a) * 6, vy: Math.sin(a) * 6,
-          life: 28, color: i % 2 ? '#ff3355' : '#aa2244', size: 3
-        });
-      }
-      addShake(3);
-    }
     if (player._bloodstorm <= 0) player._bloodstorm = 0;
   }
 
@@ -6671,6 +6645,28 @@ const SKILL_FNS = {
         life: 18, color: '#ffffff', size: 2
       });
     }
+    // Bloodlust rider — while the rage buff is active, every basic Z swing
+    // spawns a forward shockwave projectile. Replaces the old auto-ring.
+    if (player.buffs && player.buffs.bloodlust > 0) {
+      const dir = player.facing || 1;
+      game.projectiles.push({
+        x: cx + dir * 20, y: cy,
+        vx: dir * 10, vy: 0,
+        w: 26, h: 26, life: 40,
+        damage: getAtk() * 0.9 + 4,
+        owner: 'player', skill: 'bloodwave',
+        color: '#ff3355', noGravity: true, pierce: true,
+      });
+      // Red trailing spark — reads the shockwave clearly
+      for (let i = 0; i < 8; i++) {
+        game.particles.push({
+          x: cx + dir * 20, y: cy + (Math.random() - 0.5) * 10,
+          vx: dir * (3 + Math.random() * 2), vy: (Math.random() - 0.5) * 1.5,
+          life: 20, color: i % 2 ? '#ff3355' : '#aa0022', size: 2
+        });
+      }
+      addShake(1);
+    }
   },
   powerStrike: () => {
     // 3-line vertical cleave — three sweeping strikes staggered by 130 ms,
@@ -6910,26 +6906,28 @@ const SKILL_FNS = {
   },
   // Berserker
   bloodlust: () => {
-    // Bloodlust — 15 s of lifesteal / speed / ATK buff, with 10 s of
-    // continuous outward shockwaves that rip nearby foes every 400 ms.
-    // 20 s cooldown (set in SKILLS definition).
-    player.buffs.bloodlust = 15000;                  // 15 s rage
-    player._bloodstorm     = 10000;                  // 10 s shockwave tick
+    // Bloodlust (v0.19.1 rework) — 12 s of rage (+ATK, lifesteal, speed).
+    // No more auto-shockwave ring; instead, every basic Z attack spawns
+    // a forward-facing shockwave projectile while the buff is active.
+    // Player has to ACTIVELY swing to get the damage — it's a combat
+    // amplifier, not a passive AOE. 20 s cooldown (set in SKILLS def).
+    player.buffs.bloodlust = 12000;                   // 12 s rage (was 15 s)
+    player._bloodstorm = 0;                           // retired — no auto-ring
     player._bloodstormNextTick = 0;
-    // Instant surge — heal / MP refund + big cast burst
-    player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.25));
-    player.mp = Math.min(getMaxMp(), player.mp + Math.floor(getMaxMp() * 0.25));
-    showToast('BLOODLUST — 15 s rage · 10 s shockwaves!', 'legendary');
-    flash(0.5); addShake(10); addHitStop(60);
+    // Moderate surge on cast — heal / MP refund + big cast burst
+    player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.20));
+    player.mp = Math.min(getMaxMp(), player.mp + Math.floor(getMaxMp() * 0.20));
+    showToast('🩸 BLOODLUST — basic attacks shoot shockwaves (12s)', 'legendary');
+    flash(0.4); addShake(8); addHitStop(50);
     audio.play('crit');
     // Initial blood spiral burst
-    for (let i = 0; i < 40; i++) {
-      const a = (i / 40) * Math.PI * 4;
+    for (let i = 0; i < 32; i++) {
+      const a = (i / 32) * Math.PI * 4;
       game.particles.push({
         x: player.x + player.w/2 + Math.cos(a) * 20,
         y: player.y + player.h/2 + Math.sin(a) * 20,
         vx: Math.cos(a) * 5, vy: Math.sin(a) * 5 - 1,
-        life: 48, color: i % 2 ? '#ff2244' : '#aa0022', size: 3
+        life: 42, color: i % 2 ? '#ff2244' : '#aa0022', size: 3
       });
     }
   },
@@ -8159,38 +8157,154 @@ const SKILL_FNS = {
   },
 
   phantom_cut: () => {
-    let target = null, best = Infinity;
-    for (const m of game.monsters) {
-      if (m.currentHp <= 0) continue;
-      const d = Math.hypot((m.x + m.w/2) - (player.x + player.w/2),
-                            (m.y + m.h/2) - (player.y + player.h/2));
-      if (d < best && d < 700) { best = d; target = m; }
-    }
-    if (target) {
-      // Teleport behind
-      player.x = Math.max(0, Math.min(game.mapData.worldWidth - player.w,
-        target.x + (target.facing > 0 ? -player.w - 8 : target.w + 8)));
-      player.y = target.y;
+    // Voidrift Execution (v0.19.1) — phantom ultimate rework.
+    // Mark up to 6 nearest enemies within 900 px. The rogue dissolves into
+    // shadow, pauses the frame briefly, then chain-teleports to each mark
+    // in rapid succession. Every strike ignores DEF and crits; the final
+    // mark triggers a shadow nova that radiates from the rogue's landing
+    // point and damages every mob in ~220 px.
+    const pcx = player.x + player.w/2;
+    const pcy = player.y + player.h/2;
+    const candidates = game.monsters
+      .filter(m => m.currentHp > 0)
+      .map(m => ({
+        m, d: Math.hypot((m.x + m.w/2) - pcx, (m.y + m.h/2) - pcy)
+      }))
+      .filter(e => e.d < 900)
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 6)
+      .map(e => e.m);
+
+    if (!candidates.length) {
+      // Whiff — small refund + visual ghost-step so the skill still feels
+      player.mp = Math.min(getMaxMp(), player.mp + 30);
       player.invulnerable = Math.max(player.invulnerable, 500);
-      // Ignore DEF + always crit
-      const dmg = Math.floor(getAtk() * 4 * getCritDmg());
-      target.currentHp -= dmg;
-      target.hitFlash = 120;
-      game.damageNumbers.push({
-        x: target.x + target.w/2, y: target.y - 5, vy: -2.4,
-        text: dmg + '!!', life: 50, color: '#8ef', size: 22, crit: true
-      });
-      if (target.currentHp <= 0) killMonster(target);
-      addShake(10); flash(0.35); addHitStop(100);
-      for (let i = 0; i < 40; i++) {
-        game.afterImages.push({
-          x: player.x - (Math.random() - 0.5) * 200,
-          y: player.y, facing: player.facing,
-          state: 'attack', life: 20 + Math.random() * 10,
-          maxLife: 30, color: 'rgba(140,220,255,0.4)'
+      showToast('No marks in range — MP refunded', 'common');
+      flash(0.15); audio.play('mp_refund');
+      // Ghost shimmer
+      for (let i = 0; i < 20; i++) {
+        const a = Math.random() * Math.PI * 2;
+        game.particles.push({
+          x: pcx + Math.cos(a) * 30, y: pcy + Math.sin(a) * 30,
+          vx: Math.cos(a) * -2, vy: Math.sin(a) * -2,
+          life: 30, color: i % 2 ? '#8866cc' : '#220033', size: 2
         });
       }
+      return;
     }
+
+    showToast(`✦ VOIDRIFT — ${candidates.length} marked for execution`, 'legendary');
+    audio.play('levelup');
+    flash(0.55); addShake(18); addHitStop(200);
+    player.invulnerable = Math.max(player.invulnerable, 2200);
+
+    // --- Cast VFX: dark pillar + rune circle at the rogue's feet ---
+    for (let i = 0; i < 48; i++) {
+      const a = (i / 48) * Math.PI * 2;
+      game.particles.push({
+        x: pcx, y: pcy + 10,
+        vx: Math.cos(a) * 4, vy: Math.sin(a) * 2 - 4,
+        life: 46, color: i % 2 ? '#c8a8ff' : '#5522aa',
+        size: 3, gravity: 0.05,
+      });
+    }
+
+    // --- Mark phase: floating sigil on each target for the duration ---
+    candidates.forEach((target, i) => {
+      target._voidBrand = 1;
+      // Visual mark — 8 particles orbiting the target for ~300ms
+      for (let j = 0; j < 12; j++) {
+        const a = (j / 12) * Math.PI * 2;
+        game.particles.push({
+          x: target.x + target.w/2 + Math.cos(a) * 30,
+          y: target.y + target.h/2 + Math.sin(a) * 30,
+          vx: Math.cos(a) * 2, vy: Math.sin(a) * 2,
+          life: 24, color: '#c8a8ff', size: 3
+        });
+      }
+    });
+
+    // --- Strike phase: chain teleport + execute at 110 ms intervals ---
+    const STRIKE_DELAY = 110;  // ms between strikes
+    const PRE_DELAY    = 260;  // ms cast windup before first strike
+    candidates.forEach((target, i) => {
+      scheduleSkillTimer(() => {
+        if (player.hp <= 0) return;
+        if (target.currentHp <= 0) return;  // already dead from an earlier strike
+        // Teleport to an opposite flank — alternate sides for rhythm
+        const side = (i % 2 === 0) ? -1 : 1;
+        player.x = Math.max(0, Math.min(game.mapData.worldWidth - player.w,
+          target.x + (side > 0 ? target.w + 8 : -player.w - 8)));
+        player.y = target.y;
+        player.facing = -side;
+        player.invulnerable = Math.max(player.invulnerable, 400);
+        // Execution damage: ignores DEF, always crits, scales with strike count
+        const crit = true;
+        const dmg = Math.floor(getAtk() * 3.2 * getCritDmg());
+        target.currentHp -= dmg;
+        target.hitFlash = 120;
+        game.damageNumbers.push({
+          x: target.x + target.w/2, y: target.y - 6, vy: -2.6,
+          text: (i === candidates.length - 1 ? '✦ ' : '') + dmg + '!!',
+          life: 55, color: '#c8a8ff', size: 22, crit: true
+        });
+        delete target._voidBrand;
+        if (target.currentHp <= 0) killMonster(target);
+        addShake(6); flash(0.22); audio.play('crit');
+        // After-image trail — shadow chain connecting the strikes
+        for (let k = 0; k < 14; k++) {
+          game.afterImages.push({
+            x: player.x + (Math.random() - 0.5) * 80,
+            y: player.y + (Math.random() - 0.5) * 20,
+            facing: player.facing,
+            state: 'attack',
+            life: 18 + Math.random() * 8, maxLife: 24,
+            color: 'rgba(180,130,255,0.42)',
+          });
+        }
+        // Strike slash VFX
+        spawnSmoothSlash(
+          target.x + target.w/2, target.y + target.h/2,
+          side > 0 ? Math.PI : 0,
+          130, '#c8a8ff', { thickness: 8, spread: Math.PI * 0.9, life: 16 }
+        );
+      }, PRE_DELAY + i * STRIKE_DELAY);
+    });
+
+    // --- Finale: shadow nova at the rogue's final position ---
+    const finaleAt = PRE_DELAY + candidates.length * STRIKE_DELAY + 40;
+    scheduleSkillTimer(() => {
+      if (player.hp <= 0) return;
+      const fx = player.x + player.w/2, fy = player.y + player.h/2;
+      addShake(22); flash(0.55); addHitStop(140);
+      audio.play('levelup');
+      // Big damage nova: ATK × 2 to everything within 220 px
+      for (const m of game.monsters) {
+        if (m.currentHp <= 0) continue;
+        const d = Math.hypot((m.x + m.w/2) - fx, (m.y + m.h/2) - fy);
+        if (d > 220) continue;
+        const dmg = Math.floor(getAtk() * 2 + 20);
+        hitMonster(m, dmg, true, 'phantom_nova');
+        m.vx += ((m.x + m.w/2) - fx > 0 ? 1 : -1) * 8;
+        m.vy -= 6;
+        m.stunTimer = Math.max(m.stunTimer || 0, 700);
+      }
+      // Concentric violet rings
+      spawnSmoothExplosion(fx, fy, 220, '#c8a8ff', '#5522aa80', { life: 36 });
+      spawnSmoothExplosion(fx, fy, 140, '#ffffff', '#c8a8ff80', { life: 24 });
+      // Radial shadow spokes
+      for (let i = 0; i < 40; i++) {
+        const a = (i / 40) * Math.PI * 2;
+        game.particles.push({
+          x: fx, y: fy,
+          vx: Math.cos(a) * 9, vy: Math.sin(a) * 9,
+          life: 48, color: i % 3 === 0 ? '#ffffff' : i % 2 ? '#c8a8ff' : '#220033',
+          size: 3
+        });
+      }
+      // Regen reward — surviving a 6-strike chain should feel triumphant
+      player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.15));
+    }, finaleAt);
   },
 
   sage_meteorshower: () => {
