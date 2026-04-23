@@ -41,17 +41,20 @@ Skills are laid out as a left-hand cluster (`Z X S C D F V G`) so you can reach 
 
 | Action | Key |
 |---|---|
-| Interact / Talk (next to NPC) | `F` |
+| Talk to NPC (when one is in range) | `N` |
+| Codex / achievements (when no NPC is in range) | `N` |
+| Open chest / pick up drop | `F` |
 | Inventory | `B` |
 | Level-up panel | `K` or `U` |
 | Skill reference | `I` |
-| Codex / achievements | `N` |
 | Help panel | `?` |
 | Mute / unmute | `M` |
 | HP / MP potion (3 s CD, buys with Lumen if none) | `R` / `T` (or `PgUp` / `PgDn`) |
 | Reset save (confirms) | `9` |
 | Re-pick job / master | `0` |
 | Dev console | hold `1` + `2` + `3` |
+
+> `N` is context-aware: next to an NPC it opens their dialog, otherwise it opens the Codex. `F` is reserved for chest / pickup / job signature skill — pressing `F` next to an NPC still talks as a legacy fallback, but `N` is the primary talk key.
 
 ## ⚔️ Classes
 
