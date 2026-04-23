@@ -1500,7 +1500,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.20.0';
+const GAME_VERSION = 'v0.20.1';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -1604,7 +1604,7 @@ const SKILLS = {
   evadeRoll:    { name:'Evade Roll',     icon:'🤸', cls:'archer', slot:'e', mp:6,  cd:750,  desc:'Back flip + 2 shot.' },
   eagleEye:     { name:'Eagle Eye',      icon:'🦅', cls:'archer', slot:'w', mp:16, cd:7000, desc:'+40% crit chance for 8s.' },
   // Sniper
-  deadeye:      { name:'Deadeye',        icon:'🎯', cls:'archer', job:'sniper', slot:'q', mp:22, cd:3500,  desc:'Guaranteed crit piercing shot.' },
+  deadeye:      { name:'Strafe Volley',  icon:'🏹', cls:'archer', job:'sniper', slot:'q', mp:26, cd:3800,  desc:'Short sideways hop + 3 piercing arrows fired in quick succession — high / mid / low lanes.' },
   snipe_railgun:{ name:'Railshot',       icon:'💠', cls:'archer', job:'sniper', slot:'s', mp:16, cd:1300, desc:'Instant piercing rail that hits every foe in a flat line; each consecutive hit empowers the next.' },
   arrowRain:    { name:'Arrow Rain',     icon:'🌧️', cls:'archer', job:'sniper', slot:'c', mp:42, cd:9000,  desc:'Ultimate: Rain arrows over an area.' },
   // Ranger
@@ -7841,20 +7841,56 @@ const SKILL_FNS = {
   },
   // Sniper
   deadeye: () => {
-    // Marksman precision shot — almost no gravity, laser-straight
-    const { cosA, sinA } = getArcherAim();
-    game.projectiles.push({
-      x: player.x + (player.facing > 0 ? player.w : -30), y: player.y + 18,
-      vx: player.facing * 20 * cosA, vy: sinA * 20,
-      w: 36, h: 8, life: 200,
-      damage: getAtk() * 4 + 30, owner: 'player', skill: 'deadeye', pierce: true,
-      alwaysCrit: true, color: '#ffcc66',
-      gravity: 0.02,                   // very very mild gravity
+    // Strafe Volley — sideways hop + 3 piercing arrows in staggered lanes.
+    // Arrow 1: high (slight upward). Arrow 2: mid (dead straight). Arrow 3:
+    // low (slight downward). All fly flat (near-zero gravity) and pierce.
+    // The quick 60 ms stagger reads as a "one-two-three" burst and the
+    // short backwards hop gives the strafe feel. Works in both directions.
+    const dir = player.facing || 1;
+    // Short strafe hop — backwards + small vertical lift for readability.
+    // Doesn't apply if the archer is rooted (hold-to-draw flow bypasses it).
+    if (!player._warCharge) {
+      player.vx = -dir * 5;
+      if (player.vy > -3) player.vy = -3;
+    }
+    player.invulnerable = Math.max(player.invulnerable, 260);
+
+    const baseDmg = getAtk() * 1.55 + 12;
+    const LANES = [
+      { yOff: -10, vyMul: -0.22, col: '#ffe8a8', delay:   0, label: 'HIGH' },
+      { yOff:   2, vyMul:  0.00, col: '#ffcc66', delay:  60, label: 'MID'  },
+      { yOff:  14, vyMul:  0.20, col: '#ffaa44', delay: 120, label: 'LOW'  },
+    ];
+    LANES.forEach((lane) => {
+      scheduleSkillTimer(() => {
+        if (player.hp <= 0) return;
+        const sx = player.x + (dir > 0 ? player.w : -30);
+        const sy = player.y + 18 + lane.yOff;
+        game.projectiles.push({
+          x: sx, y: sy,
+          vx: dir * 19, vy: lane.vyMul * 6,
+          w: 32, h: 7, life: 180,
+          damage: baseDmg, owner: 'player', skill: 'deadeye', pierce: true,
+          color: lane.col, gravity: 0.015,
+        });
+        // Muzzle flash per arrow
+        spawnSmoothBeam(player.x + player.w/2, sy, dir > 0 ? 0 : Math.PI,
+          140, 2, lane.col, { life: 7 });
+        for (let i = 0; i < 6; i++) {
+          game.particles.push({
+            x: sx, y: sy + (Math.random() - 0.5) * 4,
+            vx: dir * (2 + Math.random() * 3), vy: (Math.random() - 0.5) * 1.2,
+            life: 14, color: lane.col, size: 2
+          });
+        }
+        addShake(1); audio.play('hit');
+      }, lane.delay);
     });
-    // Aiming laser trail for the first few frames
-    spawnSmoothBeam(player.x + player.w/2, player.y + 22, player.facing > 0 ? 0 : Math.PI,
-      320, 3, '#ffdd44', { life: 10 });
-    flash(0.25);
+
+    // Cast burst + toast
+    flash(0.22);
+    addShake(3);
+    showToast('🏹 STRAFE VOLLEY', 'epic');
   },
   // Sniper — signature S skill: instant piercing rail, escalating damage per hit
   snipe_railgun: () => {
