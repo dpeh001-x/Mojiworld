@@ -1,5 +1,25 @@
 # LevelX — project conventions for Claude
 
+## Scope + timeout guardrails (READ FIRST — v2, 2026-04-23)
+
+Default to smaller-than-you-think batches. Stream timeouts happen above ~150 lines per write or ~1200 words per response; design chunks well under that.
+
+- **Assess size BEFORE writing or using tools.** Estimate the next chunk's line/word count. If over the thresholds below, split first.
+- **Hard thresholds:**
+  - File write: **≤ 150 lines per call.** Larger files = skeleton first, then multiple Edit/append calls.
+  - Text response to user: **≤ 1,200 words.** Longer = split into follow-up messages or offer an outline first.
+  - Single Edit operation: **≤ 100 lines diff per call.** Multi-section replacements = multiple sequential Edits.
+- **Commit discipline:**
+  - Any meaningful deliverable = **5+ atomic commits**, not 2–4.
+  - Each commit: single focused change, ≤ 150 lines diff.
+  - Large doc build = 1 skeleton commit + 1 commit per section.
+- **Agent delegation (Explore / Plan / general-purpose):**
+  - Cap each at ~1,500 words of output (down from 2,000).
+  - Explicitly instruct agents to stop early if approaching the cap.
+  - Multiple smaller agents > one large agent.
+- **On timeout / partial response:** retry at HALF the size, not the same size. Never re-send the whole payload.
+- **Default working style:** skeleton → verify → append section 1 → verify → append section 2 → commit. Micro-batches over batches.
+
 ## Mobile UI branch (automated)
 
 The `mobile-ui-pass` branch has two extra hooks (scoped to that branch only — they no-op on other branches):
