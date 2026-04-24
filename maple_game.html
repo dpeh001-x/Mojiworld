@@ -2354,13 +2354,114 @@ function _bootstrapPhaser() {
   });
   window.__LX_PHASER = window.__LX_PHASER_BG;  // legacy alias
 
+  // v0.25.18 — Phase 4a: particle renderer on UI canvas. Owns the
+  // up-to-500 (200 on mobile) per-frame particle draws that were the
+  // dominant vanilla cost during boss fights and combo bursts. Uses a
+  // pool of Phaser Images tinted+scaled to match each particle. WebGL
+  // batches all same-blend-mode sprites into a single draw call —
+  // which is why this layer is Phase 4's biggest expected win.
+  class LXParticleScene extends Phaser.Scene {
+    constructor() { super({ key: 'lx_particles' }); }
+    preload() {
+      // 2×2 white pixel texture — scaled + tinted per-particle at render.
+      const c = document.createElement('canvas');
+      c.width = 2; c.height = 2;
+      const cx = c.getContext('2d');
+      cx.fillStyle = '#ffffff'; cx.fillRect(0, 0, 2, 2);
+      this.textures.addCanvas('lx_px', c);
+    }
+    create() {
+      this._imgPool  = [];   // reusable Image sprites for square particles
+      this._textPool = [];   // reusable Text objects for p.text particles
+      this._imgUsed  = 0;
+      this._textUsed = 0;
+      this._isReady = true;
+    }
+    _parseColor(hex) {
+      // Vanilla stores colors as '#rrggbb' (sometimes with alpha). Strip
+      // '#' + pad/truncate to 6 hex digits → 0xRRGGBB integer for setTint.
+      if (typeof hex !== 'string') return 0xffffff;
+      let h = hex.charAt(0) === '#' ? hex.slice(1) : hex;
+      if (h.length === 3) {
+        h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+      } else if (h.length >= 6) {
+        h = h.slice(0, 6);
+      } else {
+        return 0xffffff;
+      }
+      return parseInt(h, 16) || 0xffffff;
+    }
+    _getImg() {
+      if (this._imgUsed < this._imgPool.length) {
+        return this._imgPool[this._imgUsed++];
+      }
+      const img = this.add.image(0, 0, 'lx_px').setOrigin(0.5).setDepth(5);
+      this._imgPool.push(img);
+      this._imgUsed++;
+      return img;
+    }
+    _getText() {
+      if (this._textUsed < this._textPool.length) {
+        return this._textPool[this._textUsed++];
+      }
+      const t = this.add.text(0, 0, '', {
+        fontFamily: 'sans-serif',
+        fontStyle: 'bold',
+        fontSize: '12px',
+      }).setOrigin(0.5).setDepth(6);
+      this._textPool.push(t);
+      this._textUsed++;
+      return t;
+    }
+    update() {
+      const g = window.game;
+      if (!g || !g.particles) { this._hideAll(); return; }
+      const camX = g.camera ? g.camera.x : 0;
+      this._imgUsed = 0;
+      this._textUsed = 0;
+      // Sync each vanilla particle to a pool entry.
+      for (const p of g.particles) {
+        const sx = p.x - camX;
+        if (sx < -20 || sx > W + 20 || p.y < -20 || p.y > H + 20) continue;
+        const alpha = p.life < 20 ? p.life / 20 : 1;
+        if (p.text) {
+          const t = this._getText();
+          t.setText(p.text);
+          t.setPosition(sx, p.y);
+          t.setColor(p.color || '#ffffff');
+          t.setAlpha(alpha);
+          t.setVisible(true);
+        } else {
+          const img = this._getImg();
+          img.setPosition(sx, p.y);
+          const s = (p.size || 2) / 2;  // 2px source → full size by 2× scale
+          img.setScale(s);
+          img.setTint(this._parseColor(p.color));
+          img.setAlpha(alpha);
+          img.setVisible(true);
+        }
+      }
+      // Hide any pooled objects not used this frame (kept allocated).
+      for (let i = this._imgUsed; i < this._imgPool.length; i++) {
+        this._imgPool[i].setVisible(false);
+      }
+      for (let i = this._textUsed; i < this._textPool.length; i++) {
+        this._textPool[i].setVisible(false);
+      }
+    }
+    _hideAll() {
+      for (const img of this._imgPool) img.setVisible(false);
+      for (const t of this._textPool) t.setVisible(false);
+    }
+  }
+
   window.__LX_PHASER_UI = new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'phaser-ui-canvas',
     width: W, height: H,
     backgroundColor: 'rgba(0,0,0,0)',
     transparent: true,          // stack OVER vanilla canvas
-    scene: [LXPlayerNameplateScene],
+    scene: [LXPlayerNameplateScene, LXParticleScene],
     fps: { target: 60, forceSetTimeOut: false },
     // No physics — pure render layer.
   });
