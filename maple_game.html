@@ -2589,30 +2589,142 @@ function _bootstrapPhaser() {
   class LXProjectileScene extends Phaser.Scene {
     constructor() { super({ key: 'lx_projectiles' }); }
     preload() {
-      // Pre-render the arrow shape to a canvas once. Left-pointing at
-      // origin so Phaser's setRotation(angle) points along velocity.
-      // Texture is 32×8 so the core shaft is padded enough for the
-      // arrowhead + feather to sit inside the sprite bounding box.
-      const c = document.createElement('canvas');
-      c.width = 32; c.height = 8;
-      const cx = c.getContext('2d');
-      // Shaft (gold) — drawn left→right across the full width; tint at
-      // runtime re-colors it per-projectile.
-      cx.fillStyle = '#ffffff';
-      cx.fillRect(2, 3, 28, 2);
-      // Arrowhead (gray) — isoceles triangle on the right end.
-      cx.fillStyle = '#888888';
-      cx.beginPath();
-      cx.moveTo(32, 4);
-      cx.lineTo(26, 1);
-      cx.lineTo(26, 7);
-      cx.closePath();
-      cx.fill();
-      // Feather (warm brown) — two small bars on the left.
-      cx.fillStyle = '#aa7744';
-      cx.fillRect(0, 1, 4, 2);
-      cx.fillRect(0, 5, 4, 2);
-      this.textures.addCanvas('lx_arrow', c);
+      // v0.25.21 — one canvas per projectile archetype, rendered ONCE
+      // at preload. All subsequent frames are drawImage blits of the
+      // cached canvas via Phaser's batched WebGL pipeline.
+      const addTex = (key, w, h, draw) => {
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        draw(c.getContext('2d'), w, h);
+        this.textures.addCanvas(key, c);
+      };
+
+      // --- Arrow (32×8, horizontal, tint-white shaft) -------------
+      addTex('lx_arrow', 32, 8, (cx) => {
+        cx.fillStyle = '#ffffff';
+        cx.fillRect(2, 3, 28, 2);                      // shaft (tinted)
+        cx.fillStyle = '#888888';                      // arrowhead
+        cx.beginPath();
+        cx.moveTo(32, 4); cx.lineTo(26, 1); cx.lineTo(26, 7);
+        cx.closePath(); cx.fill();
+        cx.fillStyle = '#aa7744';                      // feather
+        cx.fillRect(0, 1, 4, 2);
+        cx.fillRect(0, 5, 4, 2);
+      });
+
+      // --- Fireball (40×40, composite of 3 concentric circles) ----
+      addTex('lx_fire', 40, 40, (cx) => {
+        cx.fillStyle = 'rgba(255,120,30,0.5)';
+        cx.beginPath(); cx.arc(20, 20, 20, 0, Math.PI * 2); cx.fill();
+        cx.fillStyle = '#ff7722';
+        cx.beginPath(); cx.arc(20, 20, 10, 0, Math.PI * 2); cx.fill();
+        cx.fillStyle = '#ffdd44';
+        cx.beginPath(); cx.arc(17, 17, 5, 0, Math.PI * 2); cx.fill();
+      });
+
+      // --- Ice spike (40×16, left-pointing crystal) ---------------
+      addTex('lx_ice', 40, 16, (cx) => {
+        cx.fillStyle = '#88ccff';
+        cx.beginPath();
+        cx.moveTo(40, 8); cx.lineTo(0, 0); cx.lineTo(3, 8); cx.lineTo(0, 16);
+        cx.closePath(); cx.fill();
+        cx.fillStyle = '#e0f5ff';
+        cx.beginPath();
+        cx.moveTo(38, 8); cx.lineTo(10, 4); cx.lineTo(10, 12);
+        cx.closePath(); cx.fill();
+      });
+
+      // --- Dagger (24×8, horizontal blade + hilt) -----------------
+      addTex('lx_dagger', 24, 8, (cx) => {
+        cx.fillStyle = '#ccc';
+        cx.fillRect(4, 3, 12, 2);                      // blade
+        cx.fillStyle = '#663';
+        cx.fillRect(0, 2, 4, 4);                       // hilt
+        cx.fillStyle = '#ddd';                         // point
+        cx.beginPath();
+        cx.moveTo(20, 4); cx.lineTo(24, 2); cx.lineTo(24, 6);
+        cx.closePath(); cx.fill();
+      });
+
+      // --- Default player magic bolt (32×32, ellipse composite) ---
+      addTex('lx_bolt', 32, 32, (cx) => {
+        cx.fillStyle = 'rgba(100,160,255,0.5)';
+        cx.beginPath(); cx.ellipse(16, 16, 11, 11, 0, 0, Math.PI * 2); cx.fill();
+        cx.fillStyle = '#88bbff';
+        cx.beginPath(); cx.ellipse(16, 16, 8, 8, 0, 0, Math.PI * 2); cx.fill();
+        cx.fillStyle = '#fff';
+        cx.beginPath(); cx.arc(16, 16, 3, 0, Math.PI * 2); cx.fill();
+      });
+
+      // --- Enemy: spore pellet (32×32) ----------------------------
+      addTex('lx_mspore', 32, 32, (cx) => {
+        cx.fillStyle = 'rgba(255,150,60,0.4)';
+        cx.beginPath(); cx.arc(16, 16, 11, 0, Math.PI * 2); cx.fill();
+        cx.fillStyle = '#ff8866';
+        cx.beginPath(); cx.arc(16, 16, 8, 0, Math.PI * 2); cx.fill();
+        cx.fillStyle = '#ffdd88';
+        cx.beginPath(); cx.arc(14, 14, 4, 0, Math.PI * 2); cx.fill();
+      });
+
+      // --- Enemy: dark bolt (32×32) -------------------------------
+      addTex('lx_mdark', 32, 32, (cx) => {
+        cx.fillStyle = 'rgba(160,60,200,0.45)';
+        cx.beginPath(); cx.arc(16, 16, 14, 0, Math.PI * 2); cx.fill();
+        cx.fillStyle = '#ff8866';
+        cx.beginPath(); cx.arc(16, 16, 8, 0, Math.PI * 2); cx.fill();
+        cx.fillStyle = '#ff88ff';
+        cx.beginPath(); cx.arc(14, 14, 3, 0, Math.PI * 2); cx.fill();
+      });
+
+      // --- Enemy: wooden splinter (24×8, rotates with velocity) ---
+      addTex('lx_msplinter', 24, 8, (cx) => {
+        cx.fillStyle = '#4a2a0a';
+        cx.fillRect(0, 2, 24, 4);
+        cx.fillStyle = '#ff8866';
+        cx.fillRect(1, 3, 22, 2);
+        cx.fillStyle = '#c89050';
+        cx.fillRect(1, 3, 22, 1);
+        cx.fillStyle = '#2a1808';                      // tip
+        cx.beginPath();
+        cx.moveTo(23, 2); cx.lineTo(28 > 24 ? 24 : 28, 4); cx.lineTo(23, 6);
+        cx.closePath(); cx.fill();
+      });
+
+      // --- Enemy: toxic blob (32×32) ------------------------------
+      addTex('lx_mtoxic', 32, 32, (cx) => {
+        cx.fillStyle = 'rgba(80,230,60,0.4)';
+        cx.beginPath(); cx.arc(16, 16, 12, 0, Math.PI * 2); cx.fill();
+        cx.fillStyle = '#ff8866';
+        cx.beginPath();
+        cx.arc(16, 16, 8, 0, Math.PI * 2);
+        cx.arc(13, 18, 6, 0, Math.PI * 2);
+        cx.arc(19, 15, 6, 0, Math.PI * 2);
+        cx.fill();
+        cx.fillStyle = '#ccffaa';
+        cx.beginPath(); cx.arc(14, 13, 2, 0, Math.PI * 2); cx.fill();
+      });
+
+      // --- Enemy: crystal shard (32×32, rotates continuously) -----
+      addTex('lx_shard', 32, 32, (cx) => {
+        cx.fillStyle = 'rgba(200,160,255,0.4)';
+        cx.beginPath(); cx.arc(16, 16, 14, 0, Math.PI * 2); cx.fill();
+        cx.fillStyle = '#b090ff';
+        cx.beginPath();
+        cx.moveTo(16, 2); cx.lineTo(30, 16); cx.lineTo(16, 30); cx.lineTo(2, 16);
+        cx.closePath(); cx.fill();
+        cx.fillStyle = '#e8d8ff';
+        cx.beginPath();
+        cx.moveTo(16, 2); cx.lineTo(26, 16); cx.lineTo(16, 22);
+        cx.closePath(); cx.fill();
+      });
+
+      // --- Enemy: default ellipse bolt (32×32) --------------------
+      addTex('lx_enemy', 32, 32, (cx) => {
+        cx.fillStyle = '#ff8866';
+        cx.beginPath(); cx.ellipse(16, 16, 12, 12, 0, 0, Math.PI * 2); cx.fill();
+        cx.fillStyle = '#fff';
+        cx.beginPath(); cx.arc(14, 14, 2, 0, Math.PI * 2); cx.fill();
+      });
     }
     create() {
       this._pool = [];
