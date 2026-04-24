@@ -19650,6 +19650,48 @@ function _drawMobChat(m) {
   _drawBubble(sx, m.y - 4, m._chat.text, { fade });
 }
 
+// v0.25.9 — elite / mini-boss aura cache. Canvas radial gradients are
+// expensive to rasterize; since monster widths are drawn from a small
+// set of values (20-120 ish), we pre-render each unique aura once to
+// an off-screen canvas and blit via drawImage forever after. Pulse is
+// done with globalAlpha at draw time, no per-frame gradient cost.
+const _auraCache = new Map();
+function _getEliteAuraCanvas(w, h) {
+  const key = 'e_' + w + 'x' + h;
+  let c = _auraCache.get(key);
+  if (c) return c;
+  const pad = 20;
+  c = document.createElement('canvas');
+  c.width = w + pad * 2; c.height = h + pad * 2;
+  const cx = c.getContext('2d');
+  const cxx = w/2 + pad, cyy = h/2 + pad;
+  const g = cx.createRadialGradient(cxx, cyy, w/4, cxx, cyy, w);
+  g.addColorStop(0, 'rgba(255,210,100,0.5)');
+  g.addColorStop(1, 'rgba(255,120,60,0)');
+  cx.fillStyle = g;
+  cx.fillRect(0, 0, c.width, c.height);
+  _auraCache.set(key, c);
+  return c;
+}
+function _getMiniBossAuraCanvas(w, h) {
+  const key = 'mb_' + w + 'x' + h;
+  let c = _auraCache.get(key);
+  if (c) return c;
+  const pad = 40;
+  c = document.createElement('canvas');
+  c.width = w + pad * 2; c.height = h + pad * 2;
+  const cx = c.getContext('2d');
+  const cxx = w/2 + pad, cyy = h/2 + pad;
+  const g = cx.createRadialGradient(cxx, cyy, w/3, cxx, cyy, w);
+  g.addColorStop(0, 'rgba(255,220,120,0.55)');
+  g.addColorStop(0.5, 'rgba(200,120,255,0.35)');
+  g.addColorStop(1, 'rgba(120,60,200,0)');
+  cx.fillStyle = g;
+  cx.fillRect(0, 0, c.width, c.height);
+  _auraCache.set(key, c);
+  return c;
+}
+
 function drawMonster(m) {
   const sx = m.x - game.camera.x;
   const sy = m.y;
@@ -19676,14 +19718,17 @@ function drawMonster(m) {
       ctx.fillText('◈', sx + m.w/2 - (Math.min(5, m.curses) - 1) * 6 + c * 12, sy - 2);
     }
   }
-  // Elite aura
+  // Elite aura — v0.25.9: cached to an off-screen canvas keyed by (w,h)
+  // so the radial gradient only rasterizes ONCE per unique monster size
+  // instead of every frame. Pulse is approximated by modulating alpha
+  // via globalAlpha — visually near-identical, massively cheaper.
   if (m.isElite) {
-    const pulse = Math.sin(game.time * 0.12) * 4;
-    const g = ctx.createRadialGradient(sx + m.w/2, sy + m.h/2, m.w/4, sx + m.w/2, sy + m.h/2, m.w);
-    g.addColorStop(0, 'rgba(255,210,100,0.5)');
-    g.addColorStop(1, 'rgba(255,120,60,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(sx - 20, sy - 20, m.w + 40, m.h + 40);
+    const pulseA = 0.92 + Math.sin(game.time * 0.12) * 0.08;
+    const aura = _getEliteAuraCanvas(m.w, m.h);
+    ctx.save();
+    ctx.globalAlpha = pulseA;
+    ctx.drawImage(aura, sx - 20, sy - 20);
+    ctx.restore();
     if (game.time % 5 === 0) {
       game.particles.push({
         x: m.x + Math.random() * m.w, y: m.y + m.h - Math.random() * m.h,
@@ -19692,15 +19737,16 @@ function drawMonster(m) {
       });
     }
   }
-  // Mini-boss aura — bigger, pulsing gold-violet halo + ember trail
+  // Mini-boss aura — bigger, pulsing gold-violet halo + ember trail.
+  // v0.25.9: same cache strategy as elite. Static radius (m.w) for the
+  // base aura, alpha modulation handles the pulse.
   if (m.isMiniBoss) {
-    const pulse = Math.sin(game.time * 0.1) * 8;
-    const g = ctx.createRadialGradient(sx + m.w/2, sy + m.h/2, m.w/3, sx + m.w/2, sy + m.h/2, m.w + pulse);
-    g.addColorStop(0, 'rgba(255,220,120,0.55)');
-    g.addColorStop(0.5, 'rgba(200,120,255,0.35)');
-    g.addColorStop(1, 'rgba(120,60,200,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(sx - 40, sy - 40, m.w + 80, m.h + 80);
+    const pulseA = 0.90 + Math.sin(game.time * 0.1) * 0.10;
+    const aura = _getMiniBossAuraCanvas(m.w, m.h);
+    ctx.save();
+    ctx.globalAlpha = pulseA;
+    ctx.drawImage(aura, sx - 40, sy - 40);
+    ctx.restore();
     // Rotating sigils
     for (let i = 0; i < 3; i++) {
       const a = game.time * 0.04 + i * (Math.PI * 2 / 3);
