@@ -1630,7 +1630,7 @@
   <button id="taxi-btn" onclick="openTaxi()" title="Fast travel to any discovered map">🚕 Taxi</button>
   <button id="mp-btn" onclick="openMultiplayer()" title="Multiplayer — connect to a server and play with friends">🌐 Multi</button>
   <div id="mp-chat-log" style="display:none"></div>
-  <input id="mp-chat-input" type="text" maxlength="200" placeholder="Say something… (Enter to send, Esc to cancel)" style="display:none" />
+  <input id="mp-chat-input" type="text" maxlength="60" placeholder="Say something… (max 60 chars · Enter send, Esc cancel)" style="display:none" />
 
   <div id="multiplayer-modal" class="modal-overlay">
     <div class="modal" style="min-width:480px;">
@@ -1662,7 +1662,7 @@
       </div>
       <div style="margin-top:10px; padding:8px 10px; background:rgba(30,15,55,0.4); border-radius:4px; font-size:11px; color:#c8b0e0; line-height:1.5;">
         <b>How it works.</b> Run the server from <code>server/</code> (<code>npm start</code>). Connect to <code>ws://localhost:8080</code> for a local LAN party, or deploy the server to Fly.io / Railway / any VPS for a public game. Everyone on the same room name sees each other. Combat / loot are still per-player for now — this is presence + chat.<br>
-        <b>In-world chat:</b> press <kbd>Enter</kbd> to type, <kbd>Esc</kbd> to cancel.
+        <b>In-world chat:</b> press <kbd>Enter</kbd> to type, <kbd>Esc</kbd> to cancel. Max <b>60 characters</b> per bubble. Works offline — bubbles float above your own character.
       </div>
     </div>
   </div>
@@ -1676,8 +1676,9 @@
   </div>
 
   <div id="controls">
-    Press <kbd>?</kbd> for Controls &nbsp;·&nbsp;
-    <kbd>N</kbd> Talk / Codex &nbsp;·&nbsp; <kbd>B</kbd> Bag &nbsp;·&nbsp; <kbd>R</kbd>/<kbd>T</kbd> Pots &nbsp;·&nbsp;
+    Press <kbd>?</kbd> Controls &nbsp;·&nbsp;
+    <kbd>Enter</kbd> Chat &nbsp;·&nbsp;
+    <kbd>N</kbd> Talk/Codex &nbsp;·&nbsp; <kbd>B</kbd> Bag &nbsp;·&nbsp; <kbd>R</kbd>/<kbd>T</kbd> Pots &nbsp;·&nbsp;
     <kbd>M</kbd> Mute
   </div>
 
@@ -2016,7 +2017,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.24.2';
+const GAME_VERSION = 'v0.24.3';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -3609,6 +3610,8 @@ const player = {
   _classSkillMul: 1, _classSkillMulExpires: 0, _classSkillMulSkillId: null,
   // Emote (v0.22) — ms remaining on the speech bubble
   _emote: null,
+  // Chat bubble (v0.24.3) — { text, life, maxLife } above the local player
+  _chat: null,
   // Attributes (AP) — Str/Vit/Agi/Int/Wis/Lck
   attrs: { str:5, vit:5, agi:5, int:5, wis:5, lck:5 },
   // Buffs: each is a timer (ms remaining)
@@ -3919,9 +3922,10 @@ window.addEventListener('keydown', e => {
     if (typeof _maybeLevelUp === 'function') _maybeLevelUp();
   }
 
-  // Multiplayer chat — Enter opens the input, Escape closes without send.
-  // Only consumes the key when connected, so offline play is unaffected.
-  if (k === 'enter' && net.connected && !net.chatOpen && !game.paused) {
+  // Chat — Enter opens the input at any time (online OR offline).
+  // Offline messages float as a local bubble only; online messages also
+  // relay to the room. Escape cancels. Input is gated by maxlength=60.
+  if (k === 'enter' && !net.chatOpen && !game.paused && player.cls && player.hp > 0) {
     e.preventDefault();
     _mpOpenChat();
     return;
@@ -5528,10 +5532,13 @@ function _mpHandle(msg) {
       net.peers[msg.id]._last = performance.now();
       break;
     case 'chat': {
+      // Skip server-echoed own messages — _mpSendChat already logged them
+      // locally and placed a bubble above the local player.
+      if (msg.id === net.myId) break;
       const p = net.peers[msg.id];
-      const name = (msg.id === net.myId) ? _mpLocalName() : (p && p.name) || msg.name || '?';
+      const name = (p && p.name) || msg.name || '?';
       const line = `<b>${escapeHtml(name)}:</b> ${escapeHtml(msg.text)}`;
-      _mpPushLog(line, msg.id === net.myId ? 'me' : '');
+      _mpPushLog(line);
       // Float a bubble above the sender for 4 s
       if (p) p.chat = { text: msg.text, life: 4000 };
       break;
@@ -5574,10 +5581,22 @@ function _mpTick() {
   }
 }
 function _mpSendChat(text) {
-  if (!net.connected || !net.ws || net.ws.readyState !== 1) return;
-  const clean = (text || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 200);
+  // v0.24.3 — 60-char hard cap per bubble. Always surfaces a local
+  // bubble above the player (even offline); only relays to the server
+  // when the socket is connected.
+  const clean = (text || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 60);
   if (!clean) return;
-  try { net.ws.send(JSON.stringify({ t: 'chat', text: clean })); } catch (e) {}
+  // Local bubble on the player (4 s)
+  player._chat = { text: clean, life: 4000, maxLife: 4000 };
+  // Echo into the chat log as a "me" line (even solo — nice history)
+  if (typeof _mpPushLog === 'function') {
+    const name = (typeof _mpLocalName === 'function') ? _mpLocalName() : ((player.look && player.look.name) || 'Hero');
+    _mpPushLog(`<b>${escapeHtml(name)}:</b> ${escapeHtml(clean)}`, 'me');
+  }
+  // Broadcast if connected
+  if (net.connected && net.ws && net.ws.readyState === 1) {
+    try { net.ws.send(JSON.stringify({ t: 'chat', text: clean })); } catch (e) {}
+  }
 }
 function _mpSendEmote(kind) {
   if (!net.connected || !net.ws || net.ws.readyState !== 1) return;
@@ -7719,6 +7738,20 @@ function drawClassIdentityHUD() {
   if (!_classIdentityActive() || player.hp <= 0) return;
   const cx = (player.x + player.w/2) - game.camera.x;
   const cy = (player.y + player.h/2);
+
+  // Local player chat bubble (v0.24.3) — shows above your head for 4s
+  // after you send a message (Enter to type, Esc to cancel). Shared
+  // _drawBubble renderer gives a consistent pill + tail look.
+  if (player._chat) {
+    const c = player._chat;
+    c.life -= 16;  // approx dt — close enough for a 4s bubble
+    if (c.life <= 0) { player._chat = null; }
+    else {
+      const fade = c.life < 500 ? c.life / 500 : 1;
+      const topY = player.y - 4;
+      if (typeof _drawBubble === 'function') _drawBubble(cx, topY, c.text, { fade });
+    }
+  }
 
   // Emote speech bubble (v0.22) — draws above the player's head, fades
   // out in the last 400ms. Stays in world space so it follows movement.
