@@ -95,6 +95,7 @@ If editing the hook, keep it idempotent and always exit 0 so it never blocks ses
 - Match the existing styling (dark theme, pill components, `<kbd>` for keys, summary cards, callouts, controls table).
 - When a keybind or feature is renamed, update every reference — summary table, controls table, verification checklist, and any inline mentions.
 - Do not maintain a `CHANGELOG.md` alongside. `CHANGELOG.html` is the canonical artifact.
+- **Newest entries always go on top.** New H2 sections are inserted directly under the `<header>` block (top of the entry list). The oldest entry stays at the bottom. Same convention for `MOBILE_CHANGELOG.html`. Never append to the bottom.
 
 ## Reply format after changelog edits (durable)
 
