@@ -1776,8 +1776,7 @@
           <div class="kb"><span>Talk to NPC / Codex</span><span><kbd>N</kbd></span></div>
           <div class="kb"><span>Open Chest / Pickup</span><span><kbd>F</kbd></span></div>
           <div class="kb"><span>Inventory</span><span><kbd>B</kbd></span></div>
-          <div class="kb"><span>Level Up Panel</span><span><kbd>K</kbd> / <kbd>U</kbd></span></div>
-          <div class="kb"><span>Skills Reference</span><span><kbd>I</kbd></span></div>
+          <div class="kb"><span>Character panel (Level Up / Boons / Skills)</span><span><kbd>K</kbd> / <kbd>U</kbd></span></div>
           <div class="kb"><span>Reset Save</span><span><kbd>9</kbd></span></div>
           <div class="kb"><span>Change Job / Master</span><span><kbd>0</kbd></span></div>
           <div class="kb"><span>Dev Console</span><span><kbd>1</kbd>+<kbd>2</kbd>+<kbd>3</kbd></span></div>
@@ -2017,7 +2016,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.24.1';
+const GAME_VERSION = 'v0.24.2';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -2788,7 +2787,7 @@ const POWERUPS = [
   { id:'jmp',    name:'Leap Boost',     icon:'🦘', stat:'jump',      min:6,  max:18, unit:'',  fmt:r=>`+${(r/10).toFixed(1)} Jump Power`,scale:r=>r/10 },
   { id:'ls',     name:'Lifesteal',      icon:'🩸', stat:'lifesteal', min:4,  max:12, unit:'%', fmt:r=>`Heal ${r}% of damage dealt`,     scale:r=>r/100 },
   { id:'burn',   name:'Burning Touch',  icon:'🔥', stat:'burn',      min:1,  max:3,  unit:'×', fmt:r=>`Attacks burn enemies (×${r})`,   scale:r=>r },
-  { id:'multi',  name:'Double Shot',    icon:'🎯', stat:'multishot', min:1,  max:2,  unit:'',  fmt:r=>`+${r} Projectile${r>1?'s':''}`,  scale:r=>r },
+  { id:'multi',  name:'Double Shot',    icon:'🎯', stat:'multishot', min:1,  max:1,  unit:'',  fmt:r=>`+${r} Projectile`,               scale:r=>r },
   { id:'mpreg',  name:'Mana Surge',     icon:'♻️', stat:'mpRegen',   min:1,  max:3,  unit:'',  fmt:r=>`+${r} MP regen tier`,            scale:r=>r },
   { id:'thorns', name:'Thorns',         icon:'🌵', stat:'thorns',    min:15, max:40, unit:'%', fmt:r=>`Reflect ${r}% of damage taken`,  scale:r=>r/100 },
   { id:'eco',    name:'Treasure Hunter',icon:'💎', stat:'greed',     min:20, max:60, unit:'%', fmt:r=>`+${r}% Lumen drop`,              scale:r=>r/100 },
@@ -2846,6 +2845,9 @@ function _applyEquippedBoons() {
       M[def.stat] = (M[def.stat] || 0) + val;
     }
   }
+  // v0.24.2 — hard cap on total multishot contribution from boons. Stacking
+  // multiple Double Shot boons can't push past +1 extra projectile.
+  if (M.multishot > 1) M.multishot = 1;
   // Clamp hp / mp to new max in case maxHp / maxMp dropped
   if (typeof getMaxHp === 'function' && player.hp > getMaxHp()) player.hp = getMaxHp();
   if (typeof getMaxMp === 'function' && player.mp > getMaxMp()) player.mp = getMaxMp();
@@ -3827,12 +3829,8 @@ window.addEventListener('keydown', e => {
     if (!player.cls) { showToast('Pick a class first', 'common'); }
     else if (player.hp > 0) { toggleSharedModal('attributes-modal', 'lp', openLevelUpPanel); }
   }
-  if (k === 'i') {
-    // I uses the same container in "skills" variant. Pressing I when K's
-    // Level Up panel is showing swaps the content; pressing I again closes.
-    if (!player.cls) { showToast('Pick a class first', 'common'); }
-    else { toggleSharedModal('attributes-modal', 'skills', openSkillsReference); }
-  }
+  // v0.24.2 — I key retired. Skills reference now lives as a tab inside
+  // the U panel (Level Up / Boon Loadout / Skills).
   // Press 9 to reset the entire save (double-confirmed browser prompt)
   if (k === '9' && !game.paused) {
     resetSave();
@@ -3898,14 +3896,27 @@ window.addEventListener('keydown', e => {
     }
   }
 
-  // Emotes (v0.22) — number keys 4-8 pop a speech bubble above the player
-  // for ~2s. Classic MapleStory flavor. Doesn't pause, doesn't cost MP.
+  // Emotes (v0.22) — number keys 4-7 pop a speech bubble above the player
+  // for ~2s. 8 is reserved for the dev XP cheat (v0.24.2).
   if (player.cls && !game.paused && player.hp > 0) {
-    const EMOTES = { '4': '😊', '5': '😲', '6': '😂', '7': '😢', '8': '💤' };
+    const EMOTES = { '4': '😊', '5': '😲', '6': '😂', '7': '😢' };
     if (EMOTES[k]) {
       player._emote = { kind: EMOTES[k], life: 2000, maxLife: 2000 };
       if (typeof _mpSendEmote === 'function') _mpSendEmote(EMOTES[k]);
     }
+  }
+
+  // v0.24.2 — dev cheat: press 8 to grant 20× the normal kill XP reward
+  // (~= 1-2 levels depending on tier). Combined with the once-per-tick
+  // level-up gate below, it takes multiple presses to jump levels — still
+  // grindy, but fast enough for skill-testing in the late game.
+  if (k === '8' && player.cls && !game.paused && player.hp > 0) {
+    const burst = Math.max(200, Math.floor(player.expToNext * 0.4));
+    player.exp += burst;
+    showToast(`✨ Dev: +${burst} XP`, 'epic');
+    flash(0.15); audio.play('levelup');
+    // Run a single level-up pass if the bar overflowed
+    if (typeof _maybeLevelUp === 'function') _maybeLevelUp();
   }
 
   // Multiplayer chat — Enter opens the input, Escape closes without send.
@@ -11768,6 +11779,60 @@ function hitMonster(m, dmg, isCrit, skill) {
   if (m.currentHp <= 0) killMonster(m);
 }
 
+// v0.24.2 — shared level-up pass. Used by kill rewards + the press-8 dev
+// cheat. Caps at ONE level per invocation so big XP drops don't chain
+// multiple level-ups; any overflow past the next level is clamped.
+function _maybeLevelUp() {
+  if (!player.cls) return;
+  if (player.exp < player.expToNext) return;
+  player.exp -= player.expToNext;
+  player.level++;
+  const curveMul = player.level >= 40 ? 1.26
+                 : player.level >= 30 ? 1.22
+                 : 1.18;
+  player.expToNext = Math.floor(player.expToNext * curveMul);
+  // Clamp overflow — no banking toward the NEXT level-up
+  if (player.exp >= player.expToNext) player.exp = Math.floor(player.expToNext * 0.95);
+  // Scale HP/MP based on class type
+  const hpGain = player.cls === 'warrior' ? 28 : player.cls === 'archer' ? 20 : player.cls === 'rogue' ? 16 : 14;
+  const mpGain = player.cls === 'mage' ? 22 : player.cls === 'warlock' ? 20 : 10;
+  player.maxHp += hpGain;
+  player.maxMp += mpGain;
+  player.hp = getMaxHp();
+  player.mp = getMaxMp();
+  player.baseAtk += player.cls === 'warrior' ? 3 : player.cls === 'mage' ? 2 : 2;
+  player.baseDef += player.cls === 'warrior' ? 2 : 1;
+  player.skillPoints += 1;
+
+  const lu = document.createElement('div');
+  lu.className = 'level-up';
+  lu.textContent = 'LEVEL UP!';
+  document.querySelector('.game-wrapper').appendChild(lu);
+  setTimeout(() => lu.remove(), 2000);
+
+  for (let i = 0; i < 30; i++) {
+    game.particles.push({
+      x: player.x + player.w/2, y: player.y + player.h/2,
+      vx: (Math.random() - 0.5) * 8, vy: -Math.random() * 8 - 2,
+      life: 60, color: '#ffdd44', size: 3 + Math.random() * 3
+    });
+  }
+
+  if (player.level === JOB_ADVANCE_LEVEL && !player.job) {
+    setTimeout(() => openAdvancement(), 600);
+  }
+  if (player.level === MASTER_ADVANCE_LEVEL && player.job && !player.master) {
+    setTimeout(() => openMasterAdvancement(), 600);
+  }
+  audio.play('levelup');
+  if (typeof tickDaily === 'function') tickDaily('level', player.level);
+  if (typeof checkAchievements === 'function') checkAchievements();
+  saveState();
+  if (player.level >= 60 && !game._prestigeOffered) {
+    setTimeout(() => offerPrestige(), 900);
+  }
+}
+
 function killMonster(m) {
   const idx = game.monsters.indexOf(m);
   if (idx < 0) return;
@@ -11857,6 +11922,9 @@ function killMonster(m) {
   // combo multipliers compound cleanly on top.
   const xpCurveMul = 1.25;
   player.exp += Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul);
+  // Press 8 cheat + any other XP pump call into _maybeLevelUp via the
+  // inline call below. Extracting it as a named helper above the body of
+  // this function so the dev XP cheat can trigger the same animation.
   // Killstreak toast milestones
   if (game.combo > 0 && game.combo % 15 === 0) {
     showToast(`${game.combo} HIT COMBO!`, 'epic');
@@ -11938,58 +12006,9 @@ function killMonster(m) {
     triggerSuperBossDeath(m);
   }
 
-  // Level check — v0.24.1 tiered XP curve. Lv 1-29 stays at ×1.18 for
-  // the onboarding grind, then the curve steepens to create a classic
-  // MMORPG "endgame wall" where Lv 40→50 requires real time investment.
-  while (player.exp >= player.expToNext) {
-    player.exp -= player.expToNext;
-    player.level++;
-    const curveMul = player.level >= 40 ? 1.26
-                   : player.level >= 30 ? 1.22
-                   : 1.18;
-    player.expToNext = Math.floor(player.expToNext * curveMul);
-    // Scale HP/MP based on class type
-    const hpGain = player.cls === 'warrior' ? 28 : player.cls === 'archer' ? 20 : player.cls === 'rogue' ? 16 : 14;
-    const mpGain = player.cls === 'mage' ? 22 : player.cls === 'warlock' ? 20 : 10;
-    player.maxHp += hpGain;
-    player.maxMp += mpGain;
-    player.hp = getMaxHp();
-    player.mp = getMaxMp();
-    player.baseAtk += player.cls === 'warrior' ? 3 : player.cls === 'mage' ? 2 : 2;
-    player.baseDef += player.cls === 'warrior' ? 2 : 1;
-    player.skillPoints += 1;
-
-    const lu = document.createElement('div');
-    lu.className = 'level-up';
-    lu.textContent = 'LEVEL UP!';
-    document.querySelector('.game-wrapper').appendChild(lu);
-    setTimeout(() => lu.remove(), 2000);
-
-    for (let i = 0; i < 30; i++) {
-      game.particles.push({
-        x: player.x + player.w/2, y: player.y + player.h/2,
-        vx: (Math.random() - 0.5) * 8, vy: -Math.random() * 8 - 2,
-        life: 60, color: '#ffdd44', size: 3 + Math.random() * 3
-      });
-    }
-
-    // Job advancement at Lv 25 (v0.23 — was Lv 10)
-    if (player.level === JOB_ADVANCE_LEVEL && !player.job) {
-      setTimeout(() => openAdvancement(), 600);
-    }
-    // Master advancement at Lv 50 (v0.23 — was Lv 20)
-    if (player.level === MASTER_ADVANCE_LEVEL && player.job && !player.master) {
-      setTimeout(() => openMasterAdvancement(), 600);
-    }
-    audio.play('levelup');
-    tickDaily('level', player.level);
-    checkAchievements();
-    saveState();
-    // Prestige offer pushed back to Lv 60 since 50 is now the master gate
-    if (player.level >= 60 && !game._prestigeOffered) {
-      setTimeout(() => offerPrestige(), 900);
-    }
-  }
+  // Level check (v0.24.2 — extracted into _maybeLevelUp, caps at ONE
+  // level per kill). See the helper for the full body.
+  _maybeLevelUp();
 
   game.monsters.splice(idx, 1);
 
@@ -12626,8 +12645,8 @@ function tryInteract() {
       return;
     }
   }
-  // Portal (fallback)
-  if (tryPortal()) return;
+  // v0.24.2 — portals no longer trigger on F. Use ↑ (ArrowUp) to enter
+  // portals; F is reserved for chests / pickups / job signature casts.
   // NPC
   for (const npc of game.npcs) {
     if (Math.abs((player.x + player.w/2) - npc.x) < 60) {
@@ -13526,9 +13545,12 @@ const LEVELUP_OPTIONS = [
 // action it triggers plus a brief description. Lets players learn their
 // kit at a glance without tabbing between help + skill bar.
 // =========================================================================
-function openSkillsReference() {
-  const modal = document.getElementById('attributes-modal');
-  const body = modal.querySelector('.modal');
+// v0.24.2 — Skills Reference moved into the U-panel's Skills tab. This
+// helper renders the reference into a host element instead of its own
+// modal. The old `openSkillsReference()` wrapper keeps working by
+// pointing U's Skills tab at this content; the I key was retired.
+function renderSkillsReference(host) {
+  if (!host) return;
   const kit = skillsForClass(player.cls, player.job, player.master);
   const slotSkill = (slot) => {
     let best = null, bestScore = -1;
@@ -13540,45 +13562,28 @@ function openSkillsReference() {
     }
     return best;
   };
-  // Build one row per A-V binding — combines in-game actions and skill casts
   const rows = [
+    { key:'Z',     label:'Basic Attack',      desc:null, slot:'d', kind:'skill' },
     { key:'A',     label:'Block / Parry',     desc:'Hold to mitigate 70% damage. 400 ms perfect-timing parry = stun + counter window.', kind:'defense' },
-    { key:'B',     label:'Inventory',         desc:'Open the gear / consumable inventory.', kind:'menu' },
+    { key:'X',     label:'Skill (Slot S)',    desc:null, slot:'s', kind:'skill' },
+    { key:'S',     label:'Skill (Slot A)',    desc:null, slot:'a', kind:'skill' },
     { key:'C',     label:'Skill (Slot E)',    desc:null, slot:'e', kind:'skill' },
     { key:'D',     label:'Skill (Slot W)',    desc:null, slot:'w', kind:'skill' },
-    { key:'F',     label:'Open chest / Skill Q', desc:'Open chest or pick up. Also casts the Q skill. (Talk was moved to N — F still talks as a legacy fallback.)', slot:'q', kind:'skill' },
-    { key:'G',     label:'Master Signature',  desc:null, slot:'x', kind:'skill' },
-    { key:'H',     label:'—',                 desc:'(unbound)', kind:'unbound' },
-    { key:'I',     label:'Skills Reference',  desc:'This panel.', kind:'menu' },
-    { key:'J',     label:'—',                 desc:'(unbound)', kind:'unbound' },
-    { key:'K',     label:'Level Up Panel',    desc:'Spend Skill Points into HP / MP / ATK / DEF / Crit / Speed lanes.', kind:'menu' },
-    { key:'L',     label:'—',                 desc:'(unbound)', kind:'unbound' },
-    { key:'M',     label:'Mute audio',        desc:'Toggle sound effects on/off.', kind:'menu' },
-    { key:'N',     label:'Talk / Codex',      desc:'Primary: talks to the nearest NPC when one is in range. Otherwise opens the Codex (achievements + bestiary).', kind:'menu' },
-    { key:'O',     label:'—',                 desc:'(unbound)', kind:'unbound' },
-    { key:'P',     label:'—',                 desc:'(unbound)', kind:'unbound' },
-    { key:'Q',     label:'—',                 desc:'(unbound)', kind:'unbound' },
-    { key:'R',     label:'HP Potion (alias)', desc:'Alternative to PgUp — use HP potion; auto-buys with gold if none.', kind:'item' },
-    { key:'S',     label:'Skill (Slot A)',    desc:null, slot:'a', kind:'skill' },
-    { key:'T',     label:'MP Potion (alias)', desc:'Alternative to PgDn — use MP potion; auto-buys with gold if none.', kind:'item' },
-    { key:'U',     label:'Level Up Panel',    desc:'Open the radar stat chart + Skill Point spending screen.', kind:'menu' },
+    { key:'F',     label:'Job Signature',     desc:null, slot:'q', kind:'skill' },
     { key:'V',     label:'Job Ultimate',      desc:null, slot:'c', kind:'skill' },
-    { key:'9',     label:'Reset Save',        desc:'Instant reset — double-confirms, wipes everything and restarts from class select.', kind:'menu' },
+    { key:'G',     label:'Master Signature',  desc:null, slot:'x', kind:'skill' },
   ];
   const kindCol = { skill:'#ffcc66', defense:'#88ccff', menu:'#aaddff', item:'#ff99aa', unbound:'#666' };
 
-  body.innerHTML = `
-    <button class="close-btn" onclick="closeAllModals()">✕</button>
-    <h2>📖 Skills Reference</h2>
+  host.innerHTML = `
     <div style="text-align:center; margin-bottom:8px; color:#bbb; font-size:12px;">
-      Every A–V hotkey for your current class + active job + master.<br>
-      <span style="color:#888">Press</span> <kbd style="background:#333;padding:1px 6px;border-radius:3px;border:1px solid #555;color:#fff">I</kbd>
-      <span style="color:#888">any time to reopen.</span>
+      Your current skill bindings and their unlock progression.<br>
+      <span style="color:#888;">Bars show which levels the slot is available across Lv 1 → 50. Gold mark = unlock.</span>
     </div>
     <div id="skills-ref-grid" style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px;
-         max-height:440px; overflow-y:auto; padding:4px;"></div>
+         max-height:430px; overflow-y:auto; padding:4px;"></div>
   `;
-  const grid = body.querySelector('#skills-ref-grid');
+  const grid = host.querySelector('#skills-ref-grid');
   for (const r of rows) {
     const card = document.createElement('div');
     card.style.cssText = `
@@ -13587,7 +13592,6 @@ function openSkillsReference() {
       background: rgba(0,0,0,0.35);
       border:1px solid ${kindCol[r.kind]}55;
     `;
-    // Key chip
     const chip = `<div style="
       min-width:34px; height:34px; flex:0 0 34px;
       border:1px solid ${kindCol[r.kind]}; border-radius:6px;
@@ -13595,33 +13599,71 @@ function openSkillsReference() {
       display:flex; align-items:center; justify-content:center;
       font-weight:bold; font-family:monospace;
     ">${r.key}</div>`;
-    // Label + desc
     let label = r.label, desc = r.desc || '';
     let costBadge = '';
+    let unlockLv = 1, locked = false;
     if (r.slot) {
       const s = slotSkill(r.slot);
+      unlockLv = (typeof slotLevelReq === 'function') ? slotLevelReq(r.slot) : 1;
       if (s) {
         label = `${s.icon || '•'}  ${s.name}`;
         desc  = s.desc || '';
         if (s.mp)  costBadge += `<span style="color:#88bbff;">${s.mp} MP</span> · `;
-        if (s.cd)  costBadge += `<span style="color:#ffcc66;">${(s.cd/1000).toFixed(1)}s CD</span>`;
+        if (s.cd)  costBadge += `<span style="color:#ffcc66;">${(s.cd/1000).toFixed(1)}s CD</span> · `;
+        costBadge += `<span style="color:#aaffaa;">Lv ${unlockLv}+</span>`;
       } else {
-        label = `(Slot ${r.slot.toUpperCase()} — ${r.slot === 'x' ? 'Unlocks at Master (Lv 20)' : 'Unlocks at job advancement (Lv 10)'})`;
-        desc = '';
+        label = `(Slot ${r.slot.toUpperCase()} — locked)`;
+        desc = r.slot === 'x'
+          ? `Unlocks at master advancement (Lv ${typeof MASTER_ADVANCE_LEVEL === 'number' ? MASTER_ADVANCE_LEVEL : 50})`
+          : r.slot === 'q' || r.slot === 'c'
+            ? `Requires job advancement (Lv ${typeof JOB_ADVANCE_LEVEL === 'number' ? JOB_ADVANCE_LEVEL : 25})`
+            : `Requires Lv ${unlockLv}`;
         card.style.opacity = 0.5;
+        locked = true;
       }
     }
+    // --- Skill growth chart: horizontal Lv 1 → 50 track with unlock + now markers
+    const curLv = player.level || 1;
+    const curPct = Math.min(100, (curLv - 1) / 49 * 100);
+    const unlockPct = Math.min(100, (unlockLv - 1) / 49 * 100);
+    const availableNow = curLv >= unlockLv && !locked;
+    const chart = r.slot ? `
+      <div style="margin-top:6px;">
+        <div style="position:relative; height:14px; background:rgba(0,0,0,0.5); border-radius:3px; border:1px solid #222; overflow:hidden;">
+          <!-- Available range fill (from unlock to Lv 50) -->
+          <div style="position:absolute; top:0; bottom:0; left:${unlockPct}%; right:0;
+                      background:linear-gradient(90deg, ${availableNow ? 'rgba(136,221,120,0.35)' : 'rgba(120,100,160,0.25)'} 0%, ${availableNow ? 'rgba(136,221,120,0.15)' : 'rgba(120,100,160,0.10)'} 100%);"></div>
+          <!-- Unlock marker -->
+          <div style="position:absolute; top:-2px; bottom:-2px; left:calc(${unlockPct}% - 1px); width:2px; background:#ffcc55;"></div>
+          <div style="position:absolute; top:0px; left:calc(${unlockPct}% - 9px); font-size:9px; color:#ffdd77; text-shadow:0 0 2px #000;">▼${unlockLv}</div>
+          <!-- Current level marker -->
+          <div style="position:absolute; top:-2px; bottom:-2px; left:calc(${curPct}% - 1px); width:2px; background:#88ffcc;"></div>
+          <div style="position:absolute; bottom:-2px; left:calc(${curPct}% - 12px); font-size:9px; color:#88ffcc; text-shadow:0 0 2px #000;">you ${curLv}</div>
+        </div>
+        <div style="font-size:9px; color:#666; display:flex; justify-content:space-between; margin-top:1px;">
+          <span>Lv 1</span><span>Lv 25</span><span>Lv 50</span>
+        </div>
+      </div>
+    ` : '';
     card.innerHTML = chip + `
       <div style="flex:1; min-width:0;">
         <div style="color:#fff; font-weight:bold; font-size:13px; margin-bottom:2px;">${label}</div>
         ${costBadge ? `<div style="font-size:10px; margin-bottom:3px;">${costBadge}</div>` : ''}
         <div style="color:#bbb; font-size:11px; line-height:1.4;">${desc}</div>
+        ${chart}
       </div>
     `;
     grid.appendChild(card);
   }
-  modal.style.display = 'flex';
-  game.paused = true;
+}
+
+// Back-compat — legacy callers still reach for this; route them to the
+// U panel's Skills tab so there's a single source of truth.
+function openSkillsReference() {
+  if (!game._uTab || game._uTab === 'lp' || game._uTab === 'boons') {
+    game._uTab = 'skills';
+  }
+  openLevelUpPanel();
 }
 
 function openLevelUpPanel() {
@@ -13640,6 +13682,7 @@ function openLevelUpPanel() {
     <div id="u-tabs" style="display:flex; gap:4px; margin-bottom:10px; border-bottom:1px solid rgba(180,140,220,0.25);">
       <button type="button" class="inv-tab" data-utab="lp">📈 Level Up</button>
       <button type="button" class="inv-tab" data-utab="boons">◈ Boon Loadout</button>
+      <button type="button" class="inv-tab" data-utab="skills">📖 Skills</button>
     </div>
     <div id="u-pane-lp" style="display:${game._uTab==='lp'?'block':'none'}">
       <div style="text-align:center; margin-bottom:8px;">
@@ -13661,25 +13704,24 @@ function openLevelUpPanel() {
     <div id="u-pane-boons" style="display:${game._uTab==='boons'?'block':'none'}">
       <div id="lp-boons"></div>
     </div>
+    <div id="u-pane-skills" style="display:${game._uTab==='skills'?'block':'none'}"></div>
   `;
   // Wire tab buttons + set initial active state
   const tabs = body.querySelectorAll('#u-tabs .inv-tab');
+  const swapPane = () => {
+    document.getElementById('u-pane-lp').style.display     = game._uTab === 'lp'     ? 'block' : 'none';
+    document.getElementById('u-pane-boons').style.display  = game._uTab === 'boons'  ? 'block' : 'none';
+    document.getElementById('u-pane-skills').style.display = game._uTab === 'skills' ? 'block' : 'none';
+    tabs.forEach(b => b.classList.toggle('active', b.dataset.utab === game._uTab));
+    if (game._uTab === 'lp')          renderLevelUp();
+    else if (game._uTab === 'boons')  renderBoonPanel();
+    else if (game._uTab === 'skills') renderSkillsReference(document.getElementById('u-pane-skills'));
+    document.getElementById('attributes-modal').dataset.variant = 'lp';
+  };
   tabs.forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.utab === game._uTab);
-    btn.onclick = () => {
-      game._uTab = btn.dataset.utab;
-      // Swap pane visibility + refresh
-      document.getElementById('u-pane-lp').style.display    = game._uTab === 'lp'    ? 'block' : 'none';
-      document.getElementById('u-pane-boons').style.display = game._uTab === 'boons' ? 'block' : 'none';
-      tabs.forEach(b => b.classList.toggle('active', b.dataset.utab === game._uTab));
-      if (game._uTab === 'lp')    renderLevelUp();
-      else                        renderBoonPanel();
-      // Persist the shared-modal variant so K / I don't fight over the tab
-      document.getElementById('attributes-modal').dataset.variant = 'lp';
-    };
+    btn.onclick = () => { game._uTab = btn.dataset.utab; swapPane(); };
   });
-  renderLevelUp();
-  renderBoonPanel();
+  swapPane();
   modal.style.display = 'flex';
   game.paused = true;
 }
@@ -13727,24 +13769,39 @@ function renderBoonPanel() {
     const isEquipped = equipped.includes(i);
     const cost = boonRerollCost(boon);
     const canReroll = player.mesos >= cost && def.min < def.max;
-    invHtml.push(`
-      <div style="padding:8px 10px; background:rgba(0,0,0,0.30); border:1px solid ${isEquipped ? '#8866cc' : '#444'}; border-radius:6px; display:flex; flex-direction:column; gap:4px;">
-        <div style="display:flex; gap:6px; align-items:center;">
-          <span style="font-size:18px;">${def.icon}</span>
-          <b style="color:${isEquipped ? '#d0b8ff' : '#ddd'}; font-size:12px;">${def.name}</b>
-          ${isEquipped ? '<span style="color:#aa77cc; font-size:10px;">• equipped</span>' : ''}
+    // v0.24.2 — equipped cards stay full-size; unequipped cards shrink
+    // to half-height chips so the full inventory fits on one screen.
+    if (isEquipped) {
+      invHtml.push(`
+        <div class="boon-card boon-equipped" style="padding:8px 10px; background:rgba(100,70,200,0.22); border:1.5px solid #8866cc; border-radius:7px; display:flex; flex-direction:column; gap:4px; box-shadow:inset 0 0 12px rgba(200,170,255,0.15);">
+          <div style="display:flex; gap:6px; align-items:center;">
+            <span style="font-size:18px;">${def.icon}</span>
+            <b style="color:#d0b8ff; font-size:12px;">${def.name}</b>
+            <span style="color:#aa77cc; font-size:10px;">• equipped</span>
+          </div>
+          <div style="font-size:11px; color:#e0d0f0;">${def.fmt(boon.roll)}</div>
+          <div style="font-size:10px; color:#999;">Roll ${boon.roll}${def.unit||''} · range ${def.min}-${def.max}${def.unit||''}${boon.rerolls ? ` · ×${boon.rerolls}` : ''}</div>
+          <div style="display:flex; gap:4px; margin-top:2px; flex-wrap:wrap;">
+            <button data-unequip="${i}" style="padding:3px 7px; background:#552277; color:#fff; border:1px solid #aa77cc; border-radius:3px; font-size:10px; cursor:pointer;">Unequip</button>
+            <button data-reroll="${i}" ${canReroll ? '' : 'disabled'} style="padding:3px 7px; background:${canReroll ? '#775522' : '#333'}; color:${canReroll ? '#fff' : '#666'}; border:1px solid ${canReroll ? '#ccaa55' : '#555'}; border-radius:3px; font-size:10px; cursor:${canReroll ? 'pointer' : 'not-allowed'};" title="${def.min === def.max ? 'No variance to reroll' : `Reroll cost: ${cost}💰`}">Reroll · ${cost}💰</button>
+            <button data-discard="${i}" style="padding:3px 7px; background:#553333; color:#dcc; border:1px solid #a66; border-radius:3px; font-size:10px; cursor:pointer;">Discard</button>
+          </div>
         </div>
-        <div style="font-size:11px; color:${isEquipped ? '#e0d0f0' : '#bbb'};">${def.fmt(boon.roll)}</div>
-        <div style="font-size:10px; color:#999;">Roll ${boon.roll}${def.unit||''} · range ${def.min}-${def.max}${def.unit||''}${boon.rerolls ? ` · rerolled ×${boon.rerolls}` : ''}</div>
-        <div style="display:flex; gap:4px; margin-top:2px; flex-wrap:wrap;">
-          ${isEquipped
-            ? `<button data-unequip="${i}" style="padding:3px 7px; background:#552277; color:#fff; border:1px solid #aa77cc; border-radius:3px; font-size:10px; cursor:pointer;">Unequip</button>`
-            : `<button data-equip="${i}" ${equipped.length >= BOON_EQUIP_CAP ? 'disabled' : ''} style="padding:3px 7px; background:${equipped.length >= BOON_EQUIP_CAP ? '#333' : '#226644'}; color:${equipped.length >= BOON_EQUIP_CAP ? '#666' : '#fff'}; border:1px solid ${equipped.length >= BOON_EQUIP_CAP ? '#555' : '#66bb88'}; border-radius:3px; font-size:10px; cursor:${equipped.length >= BOON_EQUIP_CAP ? 'not-allowed' : 'pointer'};">Equip</button>`}
-          <button data-reroll="${i}" ${canReroll ? '' : 'disabled'} style="padding:3px 7px; background:${canReroll ? '#775522' : '#333'}; color:${canReroll ? '#fff' : '#666'}; border:1px solid ${canReroll ? '#ccaa55' : '#555'}; border-radius:3px; font-size:10px; cursor:${canReroll ? 'pointer' : 'not-allowed'};" title="${def.min === def.max ? 'This boon has no variance to reroll' : `Reroll cost: ${cost}💰`}">Reroll · ${cost}💰</button>
-          <button data-discard="${i}" style="padding:3px 7px; background:#553333; color:#dcc; border:1px solid #a66; border-radius:3px; font-size:10px; cursor:pointer;">Discard</button>
+      `);
+    } else {
+      invHtml.push(`
+        <div class="boon-card boon-unequipped" style="padding:4px 8px; background:rgba(0,0,0,0.28); border:1px solid #444; border-radius:5px; display:flex; align-items:center; gap:6px; font-size:11px; min-height:30px;">
+          <span style="font-size:14px;">${def.icon}</span>
+          <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            <b style="color:#ccc;">${def.name}</b>
+            <span style="color:#999; font-size:10px;"> · ${def.fmt(boon.roll)}</span>
+          </span>
+          <button data-equip="${i}" ${equipped.length >= BOON_EQUIP_CAP ? 'disabled' : ''} style="padding:2px 6px; background:${equipped.length >= BOON_EQUIP_CAP ? '#333' : '#226644'}; color:${equipped.length >= BOON_EQUIP_CAP ? '#666' : '#fff'}; border:1px solid ${equipped.length >= BOON_EQUIP_CAP ? '#555' : '#66bb88'}; border-radius:3px; font-size:10px; cursor:${equipped.length >= BOON_EQUIP_CAP ? 'not-allowed' : 'pointer'};">Equip</button>
+          <button data-reroll="${i}" ${canReroll ? '' : 'disabled'} style="padding:2px 6px; background:${canReroll ? '#664411' : '#2a2220'}; color:${canReroll ? '#ffd' : '#666'}; border:1px solid ${canReroll ? '#aa8844' : '#444'}; border-radius:3px; font-size:10px; cursor:${canReroll ? 'pointer' : 'not-allowed'};" title="${def.min === def.max ? 'No variance' : `${cost}💰`}">🎲 ${cost}💰</button>
+          <button data-discard="${i}" style="padding:2px 6px; background:#3a2626; color:#c99; border:1px solid #844; border-radius:3px; font-size:10px; cursor:pointer;" title="Discard">✕</button>
         </div>
-      </div>
-    `);
+      `);
+    }
   }
   if (!invHtml.length) {
     invHtml.push(`<div style="padding:14px; text-align:center; color:#888; font-style:italic; background:rgba(0,0,0,0.25); border:1px dashed #444; border-radius:6px; grid-column:1/-1;">Defeat mini-bosses or buy from <b>Sage Mira</b> to collect boons. Each one rolls a unique value — spend Lumens to reroll for a better stat.</div>`);

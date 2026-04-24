@@ -57,8 +57,7 @@ Skills are laid out as a left-hand cluster (`Z X S C D F V G`) so you can reach 
 | Codex / achievements (when no NPC is in range) | `N` |
 | Open chest / pick up drop | `F` |
 | Inventory | `B` |
-| Level-up panel | `K` or `U` |
-| Skill reference | `I` |
+| Character panel — Level Up / Boons / Skills | `K` or `U` |
 | Help panel | `?` |
 | Mute / unmute | `M` |
 | HP / MP potion (3 s CD, buys with Lumen if none) | `R` / `T` (or `PgUp` / `PgDn`) |
