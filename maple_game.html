@@ -15057,11 +15057,15 @@ function updateCamera() {
 // automatically (or the game falls back to the procedural parallax). See
 // backgrounds/README.md for the slot list.
 //
-// v0.25.12 — expanded from a single `main_bg.png` to a multi-slot system:
-//   forest  → all combat / field / outdoor maps
-//   valley  → town hub
-//   main    → legacy fallback (v0.24.1 single-image path, used if neither
-//             forest nor valley is present AND the map is a combat map)
+// v0.25.13 — expanded to a 6-slot system with thematic defaults + a
+// map-ID hash that cycles combat maps through the available outdoor
+// backgrounds for visual variety:
+//   forest    → sunny forest framing distant mountains
+//   valley    → mountain valley with oak + snow peaks + dirt layer
+//   meadow    → bright meadow with blossom tree + cumulus clouds
+//   misty     → misty mountain forest with eagle + moss ledges
+//   homestead → farmhouse on a golden-grass hill + sky clouds
+//   main      → legacy slot (v0.24.1 single-image path, kept for back-compat)
 function _loadBG(path) {
   const img = (typeof Image !== 'undefined') ? new Image() : null;
   if (!img) return null;
@@ -15072,12 +15076,28 @@ function _loadBG(path) {
   return img;
 }
 const BG_IMAGES = {
-  forest: _loadBG('backgrounds/bg_forest.png'),
-  valley: _loadBG('backgrounds/bg_valley.png'),
-  main:   _loadBG('backgrounds/main_bg.png'),
+  forest:    _loadBG('backgrounds/bg_forest.png'),
+  valley:    _loadBG('backgrounds/bg_valley.png'),
+  meadow:    _loadBG('backgrounds/bg_meadow.png'),
+  misty:     _loadBG('backgrounds/bg_misty.png'),
+  homestead: _loadBG('backgrounds/bg_homestead.png'),
+  main:      _loadBG('backgrounds/main_bg.png'),
 };
 // Legacy alias — some older code still references BG_IMG by name.
 const BG_IMG = BG_IMAGES.main;
+
+// Ordered cycle used when a combat map has no explicit `mapData.bg`.
+// Ordered from "bright/cheery" → "moody" so the natural grind
+// progression feels like it ramps visually with the difficulty arc.
+const _BG_CYCLE = ['forest', 'valley', 'meadow', 'misty'];
+
+// Cheap string hash so the same mapId always picks the same bg slot.
+function _hashStr(s) {
+  let h = 0;
+  if (!s) return 0;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
 
 // Pick the right bitmap for the current map. Returns an Image or null.
 function _pickBGImage() {
@@ -15085,11 +15105,25 @@ function _pickBGImage() {
   if (!md) return null;
   // Special backdrops never use a bitmap — they have their own authored art.
   if (md.sanctum || md.singularity || md.isCarriage || md.isZodiac || md.isZodiacHub) return null;
-  // Explicit per-map override (map can set `bg: 'forest' | 'valley' | 'main'`)
+  // Explicit per-map override takes priority. Map can set e.g.
+  // `bg: 'misty'` to pin a dark mountain scene.
   if (md.bg && BG_IMAGES[md.bg] && BG_IMAGES[md.bg]._loaded) return BG_IMAGES[md.bg];
-  // Default: town → valley, everything else → forest, fall back to main.
-  if (md.isTown && BG_IMAGES.valley._loaded) return BG_IMAGES.valley;
-  if (!md.isTown && BG_IMAGES.forest._loaded) return BG_IMAGES.forest;
+  // Town default: homestead (farmhouse feel). Fall back to valley.
+  if (md.isTown) {
+    if (BG_IMAGES.homestead._loaded) return BG_IMAGES.homestead;
+    if (BG_IMAGES.valley._loaded) return BG_IMAGES.valley;
+  }
+  // Combat maps: cycle the loaded slots by map-ID hash so different
+  // maps get different backdrops automatically. Ensures variety even
+  // if none of the maps have a manual `bg` override set.
+  if (!md.isTown) {
+    const loaded = _BG_CYCLE.filter(k => BG_IMAGES[k] && BG_IMAGES[k]._loaded);
+    if (loaded.length) {
+      const pick = loaded[_hashStr(md.id || md.name || '') % loaded.length];
+      return BG_IMAGES[pick];
+    }
+  }
+  // Final fallback: legacy main slot.
   if (BG_IMAGES.main && BG_IMAGES.main._loaded) return BG_IMAGES.main;
   return null;
 }
