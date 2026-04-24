@@ -2371,11 +2371,33 @@ function _bootstrapPhaser() {
       this.textures.addCanvas('lx_px', c);
     }
     create() {
-      this._imgPool  = [];   // reusable Image sprites for square particles
-      this._textPool = [];   // reusable Text objects for p.text particles
-      this._imgUsed  = 0;
-      this._textUsed = 0;
+      this._imgPool   = [];  // reusable Image sprites for square cores
+      this._haloPool  = [];  // v0.25.19 — ADD-blend halos behind bright particles
+      this._textPool  = [];  // reusable Text objects for p.text particles
+      this._imgUsed   = 0;
+      this._haloUsed  = 0;
+      this._textUsed  = 0;
       this._isReady = true;
+    }
+    _isBrightHex(hex) {
+      // Mirror vanilla _isBrightHex — maxChannel > 200 = bright enough to glow.
+      if (!hex || hex[0] !== '#' || hex.length < 7) return false;
+      const r = parseInt(hex.slice(1,3),16),
+            g = parseInt(hex.slice(3,5),16),
+            b = parseInt(hex.slice(5,7),16);
+      return Math.max(r, g, b) > 200;
+    }
+    _getHalo() {
+      if (this._haloUsed < this._haloPool.length) {
+        return this._haloPool[this._haloUsed++];
+      }
+      const img = this.add.image(0, 0, 'lx_px')
+        .setOrigin(0.5)
+        .setDepth(4)
+        .setBlendMode(Phaser.BlendModes.ADD);
+      this._haloPool.push(img);
+      this._haloUsed++;
+      return img;
     }
     _parseColor(hex) {
       // Vanilla stores colors as '#rrggbb' (sometimes with alpha). Strip
@@ -2417,12 +2439,13 @@ function _bootstrapPhaser() {
       const g = window.game;
       if (!g || !g.particles) { this._hideAll(); return; }
       const camX = g.camera ? g.camera.x : 0;
-      this._imgUsed = 0;
-      this._textUsed = 0;
+      this._imgUsed   = 0;
+      this._haloUsed  = 0;
+      this._textUsed  = 0;
       // Sync each vanilla particle to a pool entry.
       for (const p of g.particles) {
         const sx = p.x - camX;
-        if (sx < -20 || sx > W + 20 || p.y < -20 || p.y > H + 20) continue;
+        if (sx < -30 || sx > W + 30 || p.y < -30 || p.y > H + 30) continue;
         const alpha = p.life < 20 ? p.life / 20 : 1;
         if (p.text) {
           const t = this._getText();
@@ -2432,6 +2455,7 @@ function _bootstrapPhaser() {
           t.setAlpha(alpha);
           t.setVisible(true);
         } else {
+          // Core pixel
           const img = this._getImg();
           img.setPosition(sx, p.y);
           const s = (p.size || 2) / 2;  // 2px source → full size by 2× scale
@@ -2439,19 +2463,28 @@ function _bootstrapPhaser() {
           img.setTint(this._parseColor(p.color));
           img.setAlpha(alpha);
           img.setVisible(true);
+          // v0.25.19 — glow halo for bright particles (ADD blend, ~3× bigger).
+          // Matches vanilla pass-1 semantics: `r = p.size + 3` square in
+          // ADD composite at 0.35 alpha.
+          if (this._isBrightHex(p.color)) {
+            const halo = this._getHalo();
+            halo.setPosition(sx, p.y);
+            halo.setScale((p.size || 2) + 3);
+            halo.setTint(this._parseColor(p.color));
+            halo.setAlpha(alpha * 0.35);
+            halo.setVisible(true);
+          }
         }
       }
       // Hide any pooled objects not used this frame (kept allocated).
-      for (let i = this._imgUsed; i < this._imgPool.length; i++) {
-        this._imgPool[i].setVisible(false);
-      }
-      for (let i = this._textUsed; i < this._textPool.length; i++) {
-        this._textPool[i].setVisible(false);
-      }
+      for (let i = this._imgUsed;  i < this._imgPool.length;  i++) this._imgPool[i].setVisible(false);
+      for (let i = this._haloUsed; i < this._haloPool.length; i++) this._haloPool[i].setVisible(false);
+      for (let i = this._textUsed; i < this._textPool.length; i++) this._textPool[i].setVisible(false);
     }
     _hideAll() {
-      for (const img of this._imgPool) img.setVisible(false);
-      for (const t of this._textPool) t.setVisible(false);
+      for (const img of this._imgPool)  img.setVisible(false);
+      for (const img of this._haloPool) img.setVisible(false);
+      for (const t of this._textPool)   t.setVisible(false);
     }
   }
 
