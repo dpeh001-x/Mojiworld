@@ -1125,6 +1125,45 @@
   <li><b>Clouds</b> now have optional tiny faces on bright maps — little black dot eyes, pink blush cheeks, and a subtle smile arc. About half the clouds get faces (every even-sized cloud) to avoid feeling busy.</li>
 </ul>
 
+<h2>v0.25.16 <span class="tag">Phaser 3 migration — Phase 2 (background layer)</span></h2>
+<p class="lede"><b>Phase 2 of the Phaser migration.</b> The background image layer — every outdoor map's bitmap + haze — now renders through Phaser when the flag is on, via a WebGL-batched <code>TileSprite</code>. The flag-off path is byte-identical to v0.25.15; flag-on users drop the per-frame <code>drawImage × 2 + fillRect</code> sequence in exchange for a single GPU draw call.</p>
+
+<h3>🪛 What landed</h3>
+<ul>
+  <li><b>Canvas stacking.</b> Z-index swap: vanilla <code>#game</code> (z:2) now sits over Phaser's <code>#phaser-canvas</code> (z:1). Phaser paints the bg image underneath so monsters, particles, player, and HUD still render on the vanilla canvas as before.</li>
+  <li><b><code>LXBackgroundScene</code> replaces the Phase 1 test scene.</b> Preloads all 5 bg PNGs into Phaser's texture cache at boot. A <code>pickBgKey()</code> method mirrors vanilla's <code>_pickBGImage</code> selection rules exactly — explicit <code>mapData.bg</code> override, town → homestead, combat maps → hash-cycle across the other four.</li>
+  <li><b><code>TileSprite</code> for tiling.</b> Replaces the vanilla two-image <code>drawImage</code> pattern. WebGL batches arbitrarily-wide parallax scroll into a single draw call. <code>tilePositionX</code> tracks <code>game.camera.x × 0.12</code> so parallax matches the vanilla factor exactly.</li>
+  <li><b>Haze overlay.</b> Painted as a Phaser <code>Rectangle</code> at depth 10 with the same <code>rgba(20,24,48,0.18)</code> tint as vanilla's atmospheric haze <code>fillRect</code>.</li>
+  <li><b>Texture swap on map change.</b> The previous <code>TileSprite</code> is destroyed before a new one is created, so GPU texture slots don't leak across dozens of map loads.</li>
+  <li><b>Vanilla gate.</b> New helper <code>_phaserHandlingBg()</code> returns true iff (flag on) + (scene ready) + (scene has a texture for this map). When true, <code>drawBackground</code>'s very first statement is <code>ctx.clearRect</code> — vanilla leaves the canvas transparent so the Phaser layer underneath shows through. Sky gradient, procedural mountains/pines/flowers/sparkles, haze, and vignette all skipped in that branch.</li>
+</ul>
+
+<h3>🎯 Expected wins on the BG layer</h3>
+<p>Vanilla cost per frame (flag off, bitmap map): 1 full-canvas gradient fill + 2 <code>drawImage</code> tile blits + 1 full-canvas haze fill = 4 full-screen-sized ops. Under HiDPI (2×) that's ~8.6 MP of fill rate per frame just for the bg layer.</p>
+<p>Phaser cost per frame (flag on, bitmap map): 1 batched WebGL draw call for the <code>TileSprite</code> + 1 batched draw for the haze <code>Rectangle</code>. GPU batching makes the marginal cost of the tile negligible once the texture is uploaded.</p>
+
+<h3>Special backdrops unchanged</h3>
+<p>Sanctum cosmos, zodiac boss arenas, subway carriage, and the zodiac hub all still render through the vanilla canvas — <code>pickBgKey</code> returns null for those and the vanilla fallback path is untouched. Boss-arena decor also still rides on vanilla (painted on top of the Phaser bg).</p>
+
+<h3>📅 Migration roadmap (reminder)</h3>
+<ul>
+  <li>✅ <b>Phase 1.</b> Scaffolding + proof-of-concept (v0.25.15).</li>
+  <li>✅ <b>Phase 2.</b> Background image layer (this release).</li>
+  <li><b>Phase 3.</b> Character + nameplate → Phaser sprites.</li>
+  <li><b>Phase 4.</b> Monsters, projectiles, particles (biggest perf payoff).</li>
+  <li><b>Phase 5.</b> HUD.</li>
+  <li><b>Phase 6.</b> Retire the vanilla canvas path.</li>
+</ul>
+
+<h3>How to try it</h3>
+<p>Append <code>?phaser=1</code> to the game URL, or run <code>localStorage.setItem('levelx_phaser', '1')</code> in DevTools and reload. On any outdoor map the bg image is now GPU-rendered; the test-scene yellow diamond from v0.25.15 is gone (replaced by the real bg). <code>window.__LX_PHASER.scene.getScene('lx_bg')</code> is the scene object for DevTools debugging.</p>
+
+<h3>Touched surface</h3>
+<ul>
+  <li><code>maple_game.html</code> — version bump to <code>v0.25.16</code>. Three focused edits: <code>#game</code> gets <code>position:relative; z-index:2</code>, <code>#phaser-canvas</code> z-index drops to 1. Phaser bootstrap scene body rewritten into <code>LXBackgroundScene</code> (~55 lines). <code>drawBackground</code> gets a <code>_phaserHandlingBg()</code> early-out gate.</li>
+  <li>No save/network/gameplay/protocol impact. Flag-off path is byte-identical to v0.25.15.</li>
+</ul>
+
 <h2>v0.25.15 <span class="tag">Phaser 3 migration — Phase 1 (scaffolding)</span></h2>
 <p class="lede"><b>Phase 1 of a multi-session migration to Phaser 3.</b> No visible gameplay change. Lands the plumbing (CDN load, parent DOM element, bootstrap IIFE, proof-of-concept test scene) so future sessions can incrementally port the render layer (background → characters → monsters → particles → HUD) without another scaffolding pass. Flag-gated — the vanilla canvas build is byte-identical for any user who doesn't explicitly opt in.</p>
 
