@@ -1125,6 +1125,98 @@
   <li><b>Clouds</b> now have optional tiny faces on bright maps — little black dot eyes, pink blush cheeks, and a subtle smile arc. About half the clouds get faces (every even-sized cloud) to avoid feeling busy.</li>
 </ul>
 
+<h2>v0.25.0 <span class="tag">Backend: Accounts · Passwords · Sessions · Persistent saves</span></h2>
+<p class="lede">Server-side MMORPG foundations land. The <code>server/</code> directory gets a full account system — HTTP register/login endpoints, scrypt password hashing, HMAC-signed stateless session tokens, per-account SQLite save persistence, WebSocket auth, and in-memory rate limiting. Dockerfile + Fly.io + Railway deploy configs are wired up. The game client still runs as a guest for now; the client-side login UI + save-sync ships next in v0.25.1.</p>
+
+<h3>📚 New: <code>server/auth.js</code></h3>
+<ul>
+  <li><b>SQLite schema</b> — <code>accounts</code> (id, username, email, password_hash, password_salt, created_at, last_login_at, <code>oauth_provider</code>, <code>oauth_subject</code>) + <code>saves</code> (account_id, data, updated_at) with cascade delete. <code>oauth_*</code> columns wait for Google/Discord wiring without a schema change.</li>
+  <li><b>Password hashing</b> via Node's stdlib <code>crypto.scryptSync</code> (<code>N=16384, r=8, p=1</code>, 64-byte output) with 16-byte random per-password salt. Verification uses <code>crypto.timingSafeEqual</code> to defeat timing attacks.</li>
+  <li><b>Session tokens</b> are HMAC-SHA256 signed JSON — <code>&lt;base64url(payload)&gt;.&lt;base64url(sig)&gt;</code>. Stateless: no session table, no DB lookup to verify. Default 30-day TTL, configurable via <code>SESSION_TTL_DAYS</code>.</li>
+  <li><b>Input validation</b> baked in — username 3-20 chars <code>[a-zA-Z0-9_]</code>, password 8-200 chars, optional email with RFC-lite regex.</li>
+  <li><b>Per-account save blob</b> — 1 MB cap, stored as JSON text in SQLite. <code>getSave(id)</code> / <code>putSave(id, data)</code> round-trip.</li>
+  <li>Uses Node 22+'s built-in <code>node:sqlite</code> — zero native compile, zero extra deps beyond <code>ws</code>.</li>
+</ul>
+
+<h3>🌐 HTTP endpoints</h3>
+<table style="font-size:11px; width:100%;">
+  <thead><tr><th>Method</th><th>Path</th><th>Body</th><th>Response</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td><code>/</code> · <code>/health</code></td><td>—</td><td><code>{ ok, version, rooms, totalPlayers, accounts, saves }</code></td></tr>
+    <tr><td>POST</td><td><code>/api/register</code></td><td><code>{ username, password, email? }</code></td><td><code>201 { token, user }</code> or <code>400/409</code></td></tr>
+    <tr><td>POST</td><td><code>/api/login</code></td><td><code>{ username, password }</code></td><td><code>200 { token, user }</code> or <code>401</code></td></tr>
+    <tr><td>POST</td><td><code>/api/logout</code></td><td>—</td><td><code>{ ok }</code> (advisory)</td></tr>
+    <tr><td>GET</td><td><code>/api/me</code></td><td>Bearer token</td><td><code>{ user }</code> or <code>401</code></td></tr>
+    <tr><td>GET</td><td><code>/api/save</code></td><td>Bearer token</td><td><code>{ data, updatedAt }</code> or <code>401</code></td></tr>
+    <tr><td>PUT</td><td><code>/api/save</code></td><td>JSON save + Bearer</td><td><code>{ ok, updatedAt }</code></td></tr>
+    <tr><td>DELETE</td><td><code>/api/account</code></td><td>Bearer token</td><td><code>{ ok }</code></td></tr>
+    <tr><td>ALL</td><td><code>/api/oauth/:provider</code></td><td>—</td><td><code>501</code> (stub)</td></tr>
+  </tbody>
+</table>
+
+<h3>🔐 WebSocket auth (optional, guest mode still works)</h3>
+<ul>
+  <li>New <code>{t:'auth', token}</code> message promotes a guest socket to an authenticated account. Server replies with <code>{t:'auth_ok', user}</code> or <code>{t:'error', code:'bad_token'}</code>.</li>
+  <li>New <code>{t:'save', data}</code> WS message persists a save blob server-side. Requires a prior successful <code>auth</code>; otherwise replies <code>{t:'error', code:'unauthed'}</code>.</li>
+  <li><code>welcome</code> now includes an <code>authed</code> boolean so peers can show an account badge if/when we add that.</li>
+  <li>All existing guest behaviour (hello / state / chat / emote / map) unchanged — no breaking change for v0.24.x clients.</li>
+</ul>
+
+<h3>🛡️ Safety + rate limiting</h3>
+<ul>
+  <li>In-memory per-IP rate limiter: 5 registers/min, 10 logins/min. 429 with a friendly message past the limit.</li>
+  <li>CORS is fully open (<code>Access-Control-Allow-Origin: *</code>) — tighten to your game's origin when deploying publicly.</li>
+  <li>Uniform <code>401 Invalid credentials</code> on login failure (no username probe surface).</li>
+  <li><code>SECRET</code> env var becomes <b>mandatory in production</b> — server refuses to boot without it when <code>NODE_ENV=production</code>.</li>
+  <li>Graceful shutdown: <code>SIGTERM</code>/<code>SIGINT</code> closes the SQLite handle before exit.</li>
+  <li>Idle socket sweeper (60s) unchanged.</li>
+</ul>
+
+<h3>🚢 Deploy-ready</h3>
+<ul>
+  <li><code>Dockerfile</code> — Node 22-alpine, 58 MB final image, <code>VOLUME /app/data</code> for SQLite persistence.</li>
+  <li><code>fly.toml.example</code> — one-shot Fly.io config with volume mount, auto-scale-to-zero, <code>/health</code> probe, secrets workflow.</li>
+  <li><code>railway.json.example</code> — Railway equivalent with Dockerfile build + healthcheck.</li>
+  <li><code>.env.example</code> — documents every env var with production guidance.</li>
+</ul>
+
+<h3>✅ Smoke-tested end-to-end</h3>
+<p>Before shipping I ran the full register → login → /api/me → PUT /api/save → GET /api/save → wrong password → duplicate register → OAuth stub → validation → unauth → self-delete loop, plus a WebSocket auth/hello/save round-trip, plus rate-limit overflow. All 14 paths responded correctly:</p>
+<pre style="font-size:11px; background:rgba(0,0,0,0.4); padding:8px; border-radius:4px; color:#c8ffc8;">
+REGISTER 201 OK id=1
+LOGIN    200 OK
+ME       200 hero123
+PUT SAVE 200 OK
+GET SAVE 200 {"level":42,"inventory":["sword","potion"],"mesos":5000}
+BADLOG   401 Invalid credentials
+DUPREG   409 Username or email already registered
+OAUTH    501 OAuth not yet implemented
+VALIDAT  400 Username too short (min 3)
+NOAUTH   401 Invalid or expired token
+DELETE   200 true
+WS auth_ok  → authed account
+WS welcome  → authed: true
+WS save_ok  → persisted
+RATE 6/7   → 429 Too many registration attempts
+</pre>
+
+<h3>🔜 What's NOT in this ship (coming in v0.25.1)</h3>
+<ul>
+  <li><b>Client-side login UI.</b> Register/Login form in the Multiplayer modal, token storage in localStorage, auth-on-WS-connect wiring.</li>
+  <li><b>Server-side save UI.</b> Manual save button + auto-sync hooks.</li>
+  <li><b>OAuth flow.</b> Endpoint is a 501 stub; schema is ready.</li>
+  <li><b>Email verification / password reset.</b> Needs an SMTP provider.</li>
+  <li><b>Authoritative combat.</b> Still client-side; per-client mob instances. The big milestone.</li>
+</ul>
+
+<h3>Touched surface</h3>
+<ul>
+  <li><b>New files:</b> <code>server/auth.js</code> (390 LOC), <code>server/fly.toml.example</code>, <code>server/railway.json.example</code>, <code>server/.env.example</code>.</li>
+  <li><b>Rewritten:</b> <code>server/server.js</code> (HTTP routing + WS auth + rate limiting), <code>server/package.json</code> (ws only, Node 22+), <code>server/Dockerfile</code> (Node 22-alpine, single stage), <code>server/README.md</code> (full API + deploy guide).</li>
+  <li><code>maple_game.html</code> — version bump only. Client still runs as guest.</li>
+  <li>Save-compat: yes. No client save format change.</li>
+</ul>
+
 <h2>v0.24.3 <span class="tag">Typable chat system · 60-char bubbles · Works offline</span></h2>
 <p class="lede">Chat is now a real in-world feature. Press <kbd>Enter</kbd> any time to type a message — solo or multiplayer — and it floats as a speech bubble above your character for 4 seconds. Bubbles hard-cap at <b>60 characters</b> each, enforced at the input level and on send.</p>
 
