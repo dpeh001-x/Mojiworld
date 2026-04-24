@@ -2173,6 +2173,78 @@ const W = canvas.width, H = canvas.height;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 })();
 
+// =========================================================================
+// PHASER 3 BOOTSTRAP (v0.25.15 — migration scaffolding, flag-gated)
+// =========================================================================
+// Goal: get Phaser rendering a single sprite on top of the vanilla game to
+// prove the plumbing works. Future sessions will migrate systems one at a
+// time (background → characters → monsters → particles → HUD).
+//
+// Activation: `?phaser=1` URL param or `localStorage.levelx_phaser=1`.
+// The CDN <script> up in <head> only downloads the Phaser bundle when the
+// flag is on, so users without the flag pay zero cost.
+//
+// Architecture: Phaser renders into #phaser-canvas (parent div), stacked
+// over #game with pointer-events:none so input still hits the vanilla
+// game layer. Both renderers share the same 960×560 logical coord space.
+// =========================================================================
+window.__LX_PHASER = null;   // exposed for debugging / future migration steps
+
+function _bootstrapPhaser() {
+  if (!window.__PHASER_ENABLED) return;
+  // Defer until the async CDN script has finished loading.
+  if (typeof Phaser === 'undefined') {
+    return void setTimeout(_bootstrapPhaser, 50);
+  }
+  const host = document.getElementById('phaser-canvas');
+  if (!host) { console.warn('[phaser] #phaser-canvas host missing'); return; }
+  host.style.display = 'block';
+
+  // Minimal test scene — draws a rotating sprite in the top-left corner of
+  // the game area. If this renders, the whole pipeline (CDN → bootstrap →
+  // Phaser.Game → Scene → render) works end-to-end.
+  class _PhaserTestScene extends Phaser.Scene {
+    constructor() { super({ key: 'lx_test' }); }
+    preload() {
+      // Generate a 32 px PNG on the fly so the test scene has zero asset
+      // dependencies. Yellow diamond with a dark outline — easy to spot.
+      const c = document.createElement('canvas');
+      c.width = 32; c.height = 32;
+      const cx = c.getContext('2d');
+      cx.fillStyle = '#ffd24a';
+      cx.beginPath();
+      cx.moveTo(16, 2); cx.lineTo(30, 16); cx.lineTo(16, 30); cx.lineTo(2, 16);
+      cx.closePath(); cx.fill();
+      cx.strokeStyle = '#120615'; cx.lineWidth = 2; cx.stroke();
+      this.textures.addCanvas('lx_test_diamond', c);
+    }
+    create() {
+      this._marker = this.add.image(40, 40, 'lx_test_diamond');
+      // On-screen label so testers know the flag worked
+      this._label = this.add.text(70, 28, 'PHASER ON', {
+        fontFamily: 'monospace', fontSize: '12px',
+        color: '#ffd24a', backgroundColor: '#120615aa', padding: { x: 4, y: 2 },
+      });
+    }
+    update(_t, dt) {
+      if (this._marker) this._marker.rotation += dt * 0.004;
+    }
+  }
+
+  window.__LX_PHASER = new Phaser.Game({
+    type: Phaser.AUTO,          // WebGL if available, Canvas fallback
+    parent: 'phaser-canvas',
+    width: W, height: H,
+    backgroundColor: 'rgba(0,0,0,0)',
+    transparent: true,          // stack over vanilla canvas without covering
+    scene: [_PhaserTestScene],
+    fps: { target: 60, forceSetTimeOut: false },
+    physics: { default: 'arcade' },
+  });
+  console.log('[phaser] bootstrap complete — version', Phaser.VERSION);
+}
+_bootstrapPhaser();
+
 const game = {
   camera: { x: 0, y: 0 },
   time: 0,
