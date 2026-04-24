@@ -96,6 +96,16 @@ If editing the hook, keep it idempotent and always exit 0 so it never blocks ses
 - When a keybind or feature is renamed, update every reference — summary table, controls table, verification checklist, and any inline mentions.
 - Do not maintain a `CHANGELOG.md` alongside. `CHANGELOG.html` is the canonical artifact.
 
+## Reply format after changelog edits (durable)
+
+**After every edit that lands a changelog entry, surface the full running changelog since day 1 in the user-facing reply.** Preferred format:
+
+1. The rendered raw.githack URL (canonical artifact).
+2. A compact HTML table listing every entry since day 1 — columns: `Tag` (bug / feat / polish), `Title`, `Summary` (one line). New-on-top, oldest-at-bottom.
+3. The full H2/H3/P blocks for entries added in the current session inline, so the user can read the shipped prose without navigating away.
+
+The 1,200-word response cap still applies; if the summary table would blow past it, keep the table compact (≤ 8 words per summary cell) and link to the rendered URL for the full prose. Never skip the table — "see the file" is not enough.
+
 ## Shipping rhythm
 
 - Develop on the branch specified in the environment instructions.
