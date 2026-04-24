@@ -558,6 +558,18 @@
     left: calc(186px + env(safe-area-inset-left)) !important;
     bottom: calc(60px + env(safe-area-inset-bottom)) !important;
   }
+  /* Hide the floating Block button on mobile — dynamic F dispatch
+     (see _wireDynamicFButton) sends 'a' (block) whenever no interact
+     target is in range AND Q is still locked. Having a separate
+     Block circle on top of that is redundant. At Lv 25+ once Q
+     unlocks, F dispatches 'f' (Q cast) instead; block is lost from
+     the face cluster. Intentional trade-off per user request — the
+     desktop 'a' hotkey is always available. */
+  .mobile-deck .mc-block { display: none !important; }
+  /* Hide the desktop-keyboard help strip (#controls) on mobile.
+     Its contents — Enter / N / B / R / T / M — are all keyboard
+     keys that don't exist on touch devices, so it's pure noise. */
+  #controls { display: none !important; }
   body.hide-mobile-ctrl .mobile-deck,
   body.hide-mobile-ctrl .mobile-ctrl .mc-pots { display: none !important; }
 
@@ -2086,7 +2098,7 @@
       <button class="mc-btn mc-skill" data-mkey="s" aria-label="Skill S">S</button>
       <button class="mc-btn mc-skill" data-mkey="c" aria-label="Skill C">C</button>
       <button class="mc-btn mc-skill" data-mkey="d" aria-label="Skill D">D</button>
-      <button class="mc-btn mc-skill" data-mkey="f" aria-label="Skill F (job)">F</button>
+      <button class="mc-btn mc-skill" data-mkey="f" data-dynamic="f-block" aria-label="Skill F / Interact / Block">F</button>
       <button class="mc-btn mc-skill" data-mkey="v" aria-label="Skill V (job ult)">V</button>
       <button class="mc-btn mc-skill" data-mkey="g" aria-label="Skill G (master)">G</button>
     </div>
@@ -4133,6 +4145,11 @@ function _mkeyDispatch(type, k) {
 function _mkeyBind(btn) {
   if (!btn || btn._mkWired) return;
   btn._mkWired = true;
+  // Buttons marked data-dynamic get their own wiring (e.g. F button
+  // which dispatches different keys based on live game state). Skip
+  // the static dispatch here so the dynamic wiring has exclusive
+  // control of the tap listeners.
+  if (btn.dataset.dynamic) return;
   const k = (btn.dataset.mkey || '').toLowerCase();
   if (!k) return;
   let active = false;
@@ -4228,6 +4245,62 @@ function _wireSmartDpad() {
   pad.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
+// Dynamic F button — picks its dispatch key at press time based
+// on live game state:
+//   nearby chest / NPC            → 'f'  (tryInteract fires)
+//   no interact, Q unlocked       → 'f'  (cast Q signature skill)
+//   no interact, Q locked         → 'a'  (block / parry)
+// The keyup dispatches the SAME key that keydown dispatched so
+// `game.keys` doesn't leave a stuck key behind when the player
+// moves between proximity states mid-press.
+function _wireDynamicFButton() {
+  const btn = document.querySelector('.mobile-deck [data-dynamic="f-block"]');
+  if (!btn || btn._dynFWired) return;
+  btn._dynFWired = true;
+  let active = false;
+  let activeKey = null;
+  const pick = () => {
+    try {
+      if (typeof game !== 'undefined' && typeof player !== 'undefined' && player) {
+        const px = player.x + player.w/2;
+        const py = player.y + player.h;
+        for (const c of (game.chests || [])) {
+          if (!c.opened &&
+              Math.abs(px - (c.x + c.w/2)) < 40 &&
+              Math.abs(py - (c.y + c.h)) < 60) return 'f';
+        }
+        for (const npc of (game.npcs || [])) {
+          if (Math.abs(px - npc.x) < 60) return 'f';
+        }
+        const qSkill = (typeof skillBySlot === 'function') ? skillBySlot('q') : null;
+        const lvReq = (typeof slotLevelReq === 'function') ? slotLevelReq('q') : 25;
+        if (qSkill && player.level >= lvReq) return 'f';
+      }
+    } catch (e) { /* fall through to block */ }
+    return 'a';
+  };
+  const press = (ev) => {
+    if (ev) ev.preventDefault();
+    if (active) return;
+    active = true;
+    activeKey = pick();
+    if (!audio.ctx) audio.init();
+    _mkeyDispatch('keydown', activeKey);
+  };
+  const release = (ev) => {
+    if (ev) ev.preventDefault();
+    if (!active) return;
+    active = false;
+    _mkeyDispatch('keyup', activeKey);
+    activeKey = null;
+  };
+  btn.addEventListener('pointerdown',   press,   { passive: false });
+  btn.addEventListener('pointerup',     release, { passive: false });
+  btn.addEventListener('pointercancel', release, { passive: false });
+  btn.addEventListener('pointerleave',  release, { passive: false });
+  btn.addEventListener('contextmenu', e => e.preventDefault());
+}
+
 // Wire up all mobile buttons once DOM is ready.
 function _initMobileControls() {
   // Bind buttons in BOTH the in-wrapper HUD (pots) and the outside deck
@@ -4246,6 +4319,7 @@ function _initMobileControls() {
     root.addEventListener('touchmove', e => { e.preventDefault(); }, { passive: false });
   }
   _wireSmartDpad();
+  _wireDynamicFButton();
   const toggle = document.getElementById('mobile-ctrl-toggle');
   if (toggle) {
     toggle.onclick = () => {
