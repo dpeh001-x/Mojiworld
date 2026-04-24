@@ -2197,11 +2197,16 @@ const W = canvas.width, H = canvas.height;
 // The CDN <script> up in <head> only downloads the Phaser bundle when the
 // flag is on, so users without the flag pay zero cost.
 //
-// Architecture: Phaser renders into #phaser-canvas (parent div), stacked
-// over #game with pointer-events:none so input still hits the vanilla
-// game layer. Both renderers share the same 960×560 logical coord space.
+// Architecture: v0.25.17 uses TWO Phaser.Game instances during the
+// migration window — one BG canvas under vanilla (z:1) for the BG scene,
+// one UI canvas over vanilla (z:3) for nameplates / future HUD. Vanilla
+// stays in the middle (z:2) rendering entities and particles until those
+// phases land. Both Phaser canvases share the 960×560 logical coord space.
+// Legacy alias `__LX_PHASER` points at the BG game for back-compat.
 // =========================================================================
-window.__LX_PHASER = null;   // exposed for debugging / future migration steps
+window.__LX_PHASER_BG = null;   // BG scene host (z-index: 1, under vanilla)
+window.__LX_PHASER_UI = null;   // UI scene host (z-index: 3, over vanilla)
+window.__LX_PHASER    = null;   // alias → __LX_PHASER_BG for back-compat
 
 function _bootstrapPhaser() {
   if (!window.__PHASER_ENABLED) return;
@@ -2212,6 +2217,9 @@ function _bootstrapPhaser() {
   const host = document.getElementById('phaser-canvas');
   if (!host) { console.warn('[phaser] #phaser-canvas host missing'); return; }
   host.style.display = 'block';
+  const uiHost = document.getElementById('phaser-ui-canvas');
+  if (!uiHost) { console.warn('[phaser] #phaser-ui-canvas host missing'); return; }
+  uiHost.style.display = 'block';
 
   // v0.25.16 — Phase 2: background renderer. Replaces v0.25.15's test
   // scene with a proper LXBackgroundScene that preloads the 5 bg PNGs
@@ -2281,7 +2289,60 @@ function _bootstrapPhaser() {
     }
   }
 
-  window.__LX_PHASER = new Phaser.Game({
+  // v0.25.17 — Phase 3a: UI-layer nameplate scene. Owns the label that
+  // sits below the player's feet. Pulls live state (player name, class,
+  // level, position) from the vanilla game every frame, reproducing the
+  // vanilla `_drawPlayerNameTag` look (gold border, dark fill, center text).
+  class LXPlayerNameplateScene extends Phaser.Scene {
+    constructor() { super({ key: 'lx_nameplate' }); }
+    create() {
+      // Container is the transform anchor; width auto-fits text.
+      this._plate = this.add.container(0, 0);
+      this._bg = this.add.rectangle(0, 0, 80, 14, 0x140e1e, 0.72).setOrigin(0.5, 0);
+      this._border = this.add.rectangle(0, 0, 80, 14, 0x000000, 0)
+        .setOrigin(0.5, 0).setStrokeStyle(1, 0xffdc8c, 0.55);
+      this._text = this.add.text(0, 7, '', {
+        fontFamily: 'Trebuchet MS, sans-serif',
+        fontStyle: 'bold',
+        fontSize: '11px',
+        color: '#ffeeaa',
+      }).setOrigin(0.5, 0.5);
+      this._plate.add([this._bg, this._border, this._text]);
+      this._plate.setVisible(false);
+      this._lastName = null;
+      this._isReady = true;
+    }
+    update() {
+      const p = window.player, g = window.game;
+      if (!p || !g || !g.mapData || p.hp <= 0 || g.paused) {
+        this._plate.setVisible(false); return;
+      }
+      // Mirror vanilla fallback: title-cased class if no IGN set.
+      let name = (p.look && p.look.name) || '';
+      if (!name) {
+        const cls = p.cls || '';
+        name = cls ? (cls.charAt(0).toUpperCase() + cls.slice(1)) : '';
+      }
+      if (!name) { this._plate.setVisible(false); return; }
+      // Cache text + metrics when the displayed string changes.
+      if (name !== this._lastName) {
+        this._text.setText(name);
+        const tw = this._text.width + 10;
+        this._bg.setSize(tw, 14);
+        this._border.setSize(tw, 14);
+        this._lastName = name;
+      }
+      // Position: screen-space, below feet. Matches vanilla _drawPlayerNameTag
+      // (sy + player.h + 14, centered on player.w/2).
+      const sx = (p.x + p.w / 2) - g.camera.x;
+      const sy = p.y + (p.h || 44) + 4;   // +4 so the 10 px offset below
+                                          // lands the same pixel row as vanilla
+      this._plate.setPosition(sx, sy);
+      this._plate.setVisible(true);
+    }
+  }
+
+  window.__LX_PHASER_BG = new Phaser.Game({
     type: Phaser.AUTO,          // WebGL if available, Canvas fallback
     parent: 'phaser-canvas',
     width: W, height: H,
@@ -2291,7 +2352,20 @@ function _bootstrapPhaser() {
     fps: { target: 60, forceSetTimeOut: false },
     physics: { default: 'arcade' },
   });
-  console.log('[phaser] bootstrap complete — version', Phaser.VERSION);
+  window.__LX_PHASER = window.__LX_PHASER_BG;  // legacy alias
+
+  window.__LX_PHASER_UI = new Phaser.Game({
+    type: Phaser.AUTO,
+    parent: 'phaser-ui-canvas',
+    width: W, height: H,
+    backgroundColor: 'rgba(0,0,0,0)',
+    transparent: true,          // stack OVER vanilla canvas
+    scene: [LXPlayerNameplateScene],
+    fps: { target: 60, forceSetTimeOut: false },
+    // No physics — pure render layer.
+  });
+  console.log('[phaser] bootstrap complete — version', Phaser.VERSION,
+    '· 2 games: BG (z:1), UI (z:3)');
 }
 _bootstrapPhaser();
 
