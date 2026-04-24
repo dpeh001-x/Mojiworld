@@ -1125,6 +1125,25 @@
   <li><b>Clouds</b> now have optional tiny faces on bright maps — little black dot eyes, pink blush cheeks, and a subtle smile arc. About half the clouds get faces (every even-sized cloud) to avoid feeling busy.</li>
 </ul>
 
+<h2>v0.25.9 <span class="tag">Perf pass — cached gradients + measureText</span></h2>
+<p class="lede">Pure performance work, no visual change. Four per-frame hot spots identified from a render-path audit were caching-class wins — gradient rasterization and <code>measureText</code> calls that were being redone every frame despite producing identical results. Under HiDPI (v0.25.2's 2× canvas scaling = 4× fill rate), these adds up to measurable stutter, especially on boss arenas with multiple elites.</p>
+
+<h3>🚀 What got faster</h3>
+<ul>
+  <li><b>Vignette gradient cached once.</b> The full-screen radial vignette at the end of <code>drawBackground</code> was rebuilding its gradient object every frame, even though W and H are constants for the life of the page. Now lazily built once into <code>_vignetteGradCache</code> and reused forever. Under HiDPI this gradient fills ~2.15 million pixels per frame — reallocating the gradient object that often was a real cost.</li>
+  <li><b>Carriage vignette cached too.</b> Same fix for <code>drawCarriageInterior</code>'s ambient vignette (cached in <code>_carriageVignetteGradCache</code>).</li>
+  <li><b>Elite + mini-boss auras → off-screen canvas cache.</b> Both aura types used to build a fresh <code>createRadialGradient</code> every frame for every on-screen elite/miniboss. New strategy: a <code>Map</code>-keyed off-screen canvas cache indexed by <code>(width, height)</code>. First time any unique size appears the aura renders ONCE into an off-screen canvas; every subsequent frame just blits via <code>drawImage</code>. Pulse animation moves from varying the gradient radius to modulating <code>globalAlpha</code> (+/- 8-10%) — visually near-identical, hugely cheaper. On maps with 3+ elites on screen the framerate win is noticeable.</li>
+  <li><b>Nameplate <code>measureText</code> cached.</b> The peer render loop called <code>ctx.measureText(name)</code> once per peer per frame — <code>measureText</code> forces font-metrics recalculation. Same bug on the local <code>_drawPlayerNameTag</code>. Now cached on the peer object (<code>p._nameCache</code> / <code>p._nameTw</code>) and a module-level <code>_playerNameTagCache</code>, invalidated only when the display string actually changes.</li>
+</ul>
+
+<h3>Not in this pass</h3>
+<p>The ambient flora loops (treeline + flowers in <code>drawBackground</code>) and the HiDPI toggle itself were flagged but not changed — they're either cheaper than they look (flora is just 52 small path/fills) or need a settings UI to expose properly. If lag persists on low-end devices, a HiDPI opt-out toggle is the next step.</p>
+
+<h3>Touched surface</h3>
+<ul>
+  <li><code>maple_game.html</code> — version bump to <code>v0.25.9</code>. Four caches introduced (<code>_vignetteGradCache</code>, <code>_carriageVignetteGradCache</code>, <code>_auraCache</code> Map with <code>_getEliteAuraCanvas</code> / <code>_getMiniBossAuraCanvas</code>, and the peer/player nameplate width caches). No rendering output changed; every cache hands the draw call identical pixels to what the per-frame path produced before. No save-compat impact.</li>
+</ul>
+
 <h2>v0.25.8 <span class="tag">Ballista Siege Volley — 8-shot barrage</span></h2>
 <p class="lede">The Archer → Sniper → Ballista master signature (<kbd>G</kbd> slot) now fires <b>8 piercing shots</b> instead of 4. Vertical spread tightened so the whole burst fits cleanly inside the player's silhouette; cadence tightened so the barrage still resolves in under half a second. Feels like a wall-of-lead now rather than a slow sprinkler.</p>
 
