@@ -2488,13 +2488,104 @@ function _bootstrapPhaser() {
     }
   }
 
+  // v0.25.19 — Phase 4b: damage numbers on the UI canvas. Pooled Phaser
+  // Text with scale/rotation/alpha animation reproducing vanilla
+  // drawDamageNumbers. Known scope trades (documented in CHANGELOG):
+  //   - Vertical-gradient fill on crits/big hits → solid tint + brighter
+  //     tint for crits (Phaser Text has no native vertical gradient).
+  //   - Multi-pass thick outline → single setStroke (visually close).
+  //   - shadowBlur crit/big glow → setShadow with blur radius.
+  class LXDamageNumberScene extends Phaser.Scene {
+    constructor() { super({ key: 'lx_dmgnums' }); }
+    create() {
+      this._pool = [];
+      this._used = 0;
+      this._isReady = true;
+    }
+    _get() {
+      if (this._used < this._pool.length) return this._pool[this._used++];
+      const t = this.add.text(0, 0, '', {
+        fontFamily: 'Impact, "Arial Black", "Trebuchet MS", sans-serif',
+        fontStyle: '900',
+        fontSize: '18px',
+        color: '#ffffff',
+        stroke: '#000000',
+        strokeThickness: 4.5,
+      }).setOrigin(0.5).setDepth(8);
+      this._pool.push(t);
+      this._used++;
+      return t;
+    }
+    update() {
+      const g = window.game;
+      if (!g || !g.damageNumbers) { this._hideAll(); return; }
+      const camX = g.camera ? g.camera.x : 0;
+      this._used = 0;
+      for (const d of g.damageNumbers) {
+        const sx = d.x - camX;
+        if (sx < -80 || sx > W + 80 || d.y < -50 || d.y > H + 50) continue;
+        // Backfill — legacy pushes without maxLife / wobbleDir
+        if (d.maxLife === undefined) d.maxLife = d.life + 1;
+        if (d.wobbleDir === undefined) d.wobbleDir = (d.x | 0) % 2 ? 1 : -1;
+        const age = d.maxLife - d.life;
+        const baseSize = (d.size || 14) + 4;
+
+        // Elastic pop-in (first 10 frames), idle bob, tail shrink+fade.
+        let scale = 1;
+        if (age < 10) {
+          const t = age / 10;
+          const s = d.crit ? 2.6 : 1.9;
+          const back = 1 + (t - 1) * (t - 1) * ((s + 1) * (t - 1) + s);
+          scale = 0.3 + back * 0.7;
+        }
+        if (age >= 10 && d.life > 12) {
+          scale *= 1 + Math.sin((age - 10) * 0.24) * 0.045;
+        }
+        const fadeFrames = Math.min(14, Math.max(6, Math.floor(d.maxLife * 0.32)));
+        let alpha = 1;
+        if (d.life < fadeFrames) {
+          const t = d.life / fadeFrames;
+          scale *= 0.7 + 0.3 * t;
+          alpha = t;
+        }
+        // Wobble rotation — settles to 0 within ~10 frames.
+        let rot = 0;
+        if (age < 12) {
+          rot = Math.sin(age * 0.9) * 0.18 * (1 - age / 12) * d.wobbleDir;
+        }
+
+        const t = this._get();
+        t.setText(d.text);
+        t.setPosition(sx, d.y);
+        t.setFontSize(baseSize);
+        t.setColor(d.color || '#ffffff');
+        t.setStroke('#000000', d.crit ? 6 : 4.5);
+        if (d.crit) {
+          t.setShadow(0, 0, d.color || '#ffffff', 16, false, true);
+        } else if (d.big) {
+          t.setShadow(0, 0, d.color || '#ffffff', 8, false, true);
+        } else {
+          t.setShadow(2, 3, '#000000', 0, false, true);   // drop-shadow
+        }
+        t.setScale(scale);
+        t.setRotation(rot);
+        t.setAlpha(alpha);
+        t.setVisible(true);
+      }
+      for (let i = this._used; i < this._pool.length; i++) this._pool[i].setVisible(false);
+    }
+    _hideAll() {
+      for (const t of this._pool) t.setVisible(false);
+    }
+  }
+
   window.__LX_PHASER_UI = new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'phaser-ui-canvas',
     width: W, height: H,
     backgroundColor: 'rgba(0,0,0,0)',
     transparent: true,          // stack OVER vanilla canvas
-    scene: [LXPlayerNameplateScene, LXParticleScene],
+    scene: [LXPlayerNameplateScene, LXParticleScene, LXDamageNumberScene],
     fps: { target: 60, forceSetTimeOut: false },
     // No physics — pure render layer.
   });
