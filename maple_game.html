@@ -517,6 +517,16 @@
       0%, 100% { filter: brightness(1)    saturate(1.15); }
       50%      { filter: brightness(1.35) saturate(1.55); }
     }
+    /* Audit P1.10 — tap the death overlay to skip the 1.6s wait.
+       Desktop has no obvious skip affordance either, but mobile
+       players stare at a frozen screen until the timer elapses.
+       Enable pointer events + hint cursor; JS below finishes the
+       job by setting game.dying = 0 on tap (the existing game loop
+       calls respawnAtTown() the next frame). */
+    #death-overlay.on {
+      pointer-events: auto !important;
+      cursor: pointer;
+    }
   }
 
   /* ---- LANDSCAPE-SPECIFIC HUD OVERRIDES --------------------------
@@ -4409,6 +4419,33 @@ function _isMobileClient() {
     return window.matchMedia('(pointer: coarse), (max-width: 900px)').matches;
   } catch (e) { return false; }
 }
+
+// =================================================================
+// Audit P1.10 — tap-to-skip the death overlay on mobile.
+// The game loop sets game.dying = 1600 on death and ticks it down;
+// when it reaches 0, respawnAtTown() fires. Players stare at a
+// frozen screen for 1.6s. On tap, we set game.dying = 0 so the
+// next game-loop frame runs respawn immediately. Does NOT modify
+// gameplay code — only reads/writes game.dying, which the game
+// loop already drives.
+(function _wireDeathTapToSkip() {
+  if (!_isMobileClient()) return;
+  const wire = () => {
+    const ov = document.getElementById('death-overlay');
+    if (!ov || ov._tapSkipWired) return;
+    ov._tapSkipWired = true;
+    ov.addEventListener('pointerdown', (ev) => {
+      if (typeof game === 'undefined' || !game) return;
+      if ((game.dying || 0) > 0) {
+        ev.preventDefault();
+        game.dying = 0;
+      }
+    }, { passive: false });
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wire);
+  } else { wire(); }
+})();
 
 // =================================================================
 // Mobile face-cluster lock sync — mirrors the skill bar's per-slot
