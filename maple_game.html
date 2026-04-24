@@ -2579,13 +2579,103 @@ function _bootstrapPhaser() {
     }
   }
 
+  // v0.25.20 — Phase 4c: arrow-only projectile renderer. Scoped tight
+  // so side-effect particle emissions in vanilla drawProjectiles (fire
+  // trail, spore dust, etc.) don't need a refactor. Arrows have no such
+  // emissions and are the highest-volume projectile during archer play
+  // (basic attack, multishot, arrow rain, etc.) so this captures most
+  // of the per-frame batching win without touching the variety-heavy
+  // magic / enemy branches.
+  class LXProjectileScene extends Phaser.Scene {
+    constructor() { super({ key: 'lx_projectiles' }); }
+    preload() {
+      // Pre-render the arrow shape to a canvas once. Left-pointing at
+      // origin so Phaser's setRotation(angle) points along velocity.
+      // Texture is 32×8 so the core shaft is padded enough for the
+      // arrowhead + feather to sit inside the sprite bounding box.
+      const c = document.createElement('canvas');
+      c.width = 32; c.height = 8;
+      const cx = c.getContext('2d');
+      // Shaft (gold) — drawn left→right across the full width; tint at
+      // runtime re-colors it per-projectile.
+      cx.fillStyle = '#ffffff';
+      cx.fillRect(2, 3, 28, 2);
+      // Arrowhead (gray) — isoceles triangle on the right end.
+      cx.fillStyle = '#888888';
+      cx.beginPath();
+      cx.moveTo(32, 4);
+      cx.lineTo(26, 1);
+      cx.lineTo(26, 7);
+      cx.closePath();
+      cx.fill();
+      // Feather (warm brown) — two small bars on the left.
+      cx.fillStyle = '#aa7744';
+      cx.fillRect(0, 1, 4, 2);
+      cx.fillRect(0, 5, 4, 2);
+      this.textures.addCanvas('lx_arrow', c);
+    }
+    create() {
+      this._pool = [];
+      this._used = 0;
+      this._isReady = true;
+    }
+    _isArrow(p) {
+      // Mirror vanilla drawProjectiles' arrow branch: player-owned
+      // projectiles with these skill tags share the arrow visual.
+      if (!p || p.owner !== 'player') return false;
+      const s = p.skill;
+      return s === 'arrow' || s === 'charged' || s === 'deadeye'
+          || s === 'rainArrow' || s === 'elemArrow';
+    }
+    _parseColor(hex) {
+      if (typeof hex !== 'string') return 0xddaa66;
+      let h = hex.charAt(0) === '#' ? hex.slice(1) : hex;
+      if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+      else if (h.length >= 6) h = h.slice(0, 6);
+      else return 0xddaa66;
+      return parseInt(h, 16) || 0xddaa66;
+    }
+    _get() {
+      if (this._used < this._pool.length) return this._pool[this._used++];
+      const img = this.add.image(0, 0, 'lx_arrow').setOrigin(0.5).setDepth(3);
+      this._pool.push(img);
+      this._used++;
+      return img;
+    }
+    update() {
+      const g = window.game;
+      if (!g || !g.projectiles) { this._hideAll(); return; }
+      const camX = g.camera ? g.camera.x : 0;
+      this._used = 0;
+      for (const p of g.projectiles) {
+        if (!this._isArrow(p)) continue;
+        const sx = p.x - camX;
+        if (sx + p.w < -60 || sx > W + 60) continue;
+        if (p.y + p.h < -60 || p.y > H + 60) continue;
+        const img = this._get();
+        img.setPosition(sx + p.w / 2, p.y + p.h / 2);
+        img.setRotation(Math.atan2(p.vy, p.vx));
+        // Texture is 32×8; scale so shaft matches p.w. Height rides the
+        // same scale so the arrowhead/feather keep their proportion.
+        const scale = p.w / 32;
+        img.setScale(scale, scale);
+        img.setTint(this._parseColor(p.color || '#ddaa66'));
+        img.setVisible(true);
+      }
+      for (let i = this._used; i < this._pool.length; i++) this._pool[i].setVisible(false);
+    }
+    _hideAll() {
+      for (const img of this._pool) img.setVisible(false);
+    }
+  }
+
   window.__LX_PHASER_UI = new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'phaser-ui-canvas',
     width: W, height: H,
     backgroundColor: 'rgba(0,0,0,0)',
     transparent: true,          // stack OVER vanilla canvas
-    scene: [LXPlayerNameplateScene, LXParticleScene, LXDamageNumberScene],
+    scene: [LXPlayerNameplateScene, LXParticleScene, LXDamageNumberScene, LXProjectileScene],
     fps: { target: 60, forceSetTimeOut: false },
     // No physics — pure render layer.
   });
