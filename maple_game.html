@@ -2203,34 +2203,71 @@ function _bootstrapPhaser() {
   if (!host) { console.warn('[phaser] #phaser-canvas host missing'); return; }
   host.style.display = 'block';
 
-  // Minimal test scene — draws a rotating sprite in the top-left corner of
-  // the game area. If this renders, the whole pipeline (CDN → bootstrap →
-  // Phaser.Game → Scene → render) works end-to-end.
-  class _PhaserTestScene extends Phaser.Scene {
-    constructor() { super({ key: 'lx_test' }); }
+  // v0.25.16 — Phase 2: background renderer. Replaces v0.25.15's test
+  // scene with a proper LXBackgroundScene that preloads the 5 bg PNGs
+  // and renders the one that matches the current map using a TileSprite
+  // (Phaser's own batched tiling primitive — WebGL batches it into a
+  // single draw call regardless of map width, vs the vanilla two-image
+  // tile approach).
+  class LXBackgroundScene extends Phaser.Scene {
+    constructor() { super({ key: 'lx_bg' }); }
     preload() {
-      // Generate a 32 px PNG on the fly so the test scene has zero asset
-      // dependencies. Yellow diamond with a dark outline — easy to spot.
-      const c = document.createElement('canvas');
-      c.width = 32; c.height = 32;
-      const cx = c.getContext('2d');
-      cx.fillStyle = '#ffd24a';
-      cx.beginPath();
-      cx.moveTo(16, 2); cx.lineTo(30, 16); cx.lineTo(16, 30); cx.lineTo(2, 16);
-      cx.closePath(); cx.fill();
-      cx.strokeStyle = '#120615'; cx.lineWidth = 2; cx.stroke();
-      this.textures.addCanvas('lx_test_diamond', c);
+      this.load.image('bg_forest',    'backgrounds/bg_forest.png');
+      this.load.image('bg_valley',    'backgrounds/bg_valley.png');
+      this.load.image('bg_meadow',    'backgrounds/bg_meadow.png');
+      this.load.image('bg_misty',     'backgrounds/bg_misty.png');
+      this.load.image('bg_homestead', 'backgrounds/bg_homestead.png');
     }
     create() {
-      this._marker = this.add.image(40, 40, 'lx_test_diamond');
-      // On-screen label so testers know the flag worked
-      this._label = this.add.text(70, 28, 'PHASER ON', {
-        fontFamily: 'monospace', fontSize: '12px',
-        color: '#ffd24a', backgroundColor: '#120615aa', padding: { x: 4, y: 2 },
-      });
+      this._bgTile = null;
+      this._currentKey = null;
+      // Haze overlay to match vanilla (rgba(20,24,48,0.18))
+      this._haze = this.add.rectangle(0, 0, W, H, 0x141830, 0.18)
+        .setOrigin(0).setDepth(10);
+      this._haze.setVisible(false);
+      this._isReady = true;
     }
-    update(_t, dt) {
-      if (this._marker) this._marker.rotation += dt * 0.004;
+    // Mirror the vanilla _pickBGImage logic, but resolved against loaded
+    // Phaser textures instead of Image objects. Returns a texture key or null.
+    pickBgKey(md) {
+      if (!md) return null;
+      if (md.sanctum || md.singularity || md.isCarriage || md.isZodiac || md.isZodiacHub) return null;
+      const explicit = md.bg ? ('bg_' + md.bg) : null;
+      if (explicit && this.textures.exists(explicit)) return explicit;
+      if (md.isTown && this.textures.exists('bg_homestead')) return 'bg_homestead';
+      if (!md.isTown) {
+        const cycle = ['bg_forest', 'bg_valley', 'bg_meadow', 'bg_misty']
+          .filter(k => this.textures.exists(k));
+        if (cycle.length) {
+          let h = 0;
+          const s = md.id || md.name || '';
+          for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+          return cycle[Math.abs(h) % cycle.length];
+        }
+      }
+      return null;
+    }
+    update() {
+      const md = window.game && window.game.mapData;
+      const key = this.pickBgKey(md);
+      if (!key) {
+        if (this._bgTile) this._bgTile.setVisible(false);
+        this._haze.setVisible(false);
+        this._currentKey = null;
+        return;
+      }
+      // Texture swap on map change — destroy previous TileSprite so we
+      // don't leak GPU textures across dozens of map loads.
+      if (key !== this._currentKey) {
+        if (this._bgTile) { this._bgTile.destroy(); this._bgTile = null; }
+        this._bgTile = this.add.tileSprite(0, 0, W, H, key)
+          .setOrigin(0).setDepth(0);
+        this._currentKey = key;
+      }
+      // Parallax scroll — match vanilla's 0.12 factor.
+      this._bgTile.tilePositionX = (window.game.camera.x * 0.12) | 0;
+      this._bgTile.setVisible(true);
+      this._haze.setVisible(true);
     }
   }
 
@@ -2239,8 +2276,8 @@ function _bootstrapPhaser() {
     parent: 'phaser-canvas',
     width: W, height: H,
     backgroundColor: 'rgba(0,0,0,0)',
-    transparent: true,          // stack over vanilla canvas without covering
-    scene: [_PhaserTestScene],
+    transparent: true,          // stack under vanilla canvas
+    scene: [LXBackgroundScene],
     fps: { target: 60, forceSetTimeOut: false },
     physics: { default: 'arcade' },
   });
