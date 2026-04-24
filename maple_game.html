@@ -15053,14 +15053,45 @@ function updateCamera() {
 // =========================================================================
 // DRAWING
 // =========================================================================
-// Global ambient background image — stretched to fill the canvas if loaded.
-// Drop 'backgrounds/main_bg.png' into the repo and it activates automatically.
-const BG_IMG = (typeof Image !== 'undefined') ? new Image() : null;
-if (BG_IMG) {
-  BG_IMG._loaded = false;
-  BG_IMG.onload = () => { BG_IMG._loaded = true; };
-  BG_IMG.onerror = () => { BG_IMG._loaded = false; };
-  BG_IMG.src = 'backgrounds/main_bg.png';
+// Background image loader. Drop PNGs into `backgrounds/` and they activate
+// automatically (or the game falls back to the procedural parallax). See
+// backgrounds/README.md for the slot list.
+//
+// v0.25.12 — expanded from a single `main_bg.png` to a multi-slot system:
+//   forest  → all combat / field / outdoor maps
+//   valley  → town hub
+//   main    → legacy fallback (v0.24.1 single-image path, used if neither
+//             forest nor valley is present AND the map is a combat map)
+function _loadBG(path) {
+  const img = (typeof Image !== 'undefined') ? new Image() : null;
+  if (!img) return null;
+  img._loaded = false;
+  img.onload  = () => { img._loaded = true; };
+  img.onerror = () => { img._loaded = false; };
+  img.src     = path;
+  return img;
+}
+const BG_IMAGES = {
+  forest: _loadBG('backgrounds/bg_forest.png'),
+  valley: _loadBG('backgrounds/bg_valley.png'),
+  main:   _loadBG('backgrounds/main_bg.png'),
+};
+// Legacy alias — some older code still references BG_IMG by name.
+const BG_IMG = BG_IMAGES.main;
+
+// Pick the right bitmap for the current map. Returns an Image or null.
+function _pickBGImage() {
+  const md = game && game.mapData;
+  if (!md) return null;
+  // Special backdrops never use a bitmap — they have their own authored art.
+  if (md.sanctum || md.singularity || md.isCarriage || md.isZodiac || md.isZodiacHub) return null;
+  // Explicit per-map override (map can set `bg: 'forest' | 'valley' | 'main'`)
+  if (md.bg && BG_IMAGES[md.bg] && BG_IMAGES[md.bg]._loaded) return BG_IMAGES[md.bg];
+  // Default: town → valley, everything else → forest, fall back to main.
+  if (md.isTown && BG_IMAGES.valley._loaded) return BG_IMAGES.valley;
+  if (!md.isTown && BG_IMAGES.forest._loaded) return BG_IMAGES.forest;
+  if (BG_IMAGES.main && BG_IMAGES.main._loaded) return BG_IMAGES.main;
+  return null;
 }
 
 // Cache the sky gradient across frames — only rebuild when the map (or
@@ -15109,12 +15140,15 @@ function drawBackground() {
     return;
   }
 
-  // Full-canvas background image (stretched to fill) — gentle camera parallax
-  if (BG_IMG && BG_IMG._loaded && !game.mapData.isTown && !game.mapData.singularity) {
+  // Full-canvas background image (stretched to fill) — gentle camera parallax.
+  // v0.25.12 — now picks per-map via _pickBGImage (forest for outdoor combat,
+  // valley for town) with a procedural fallback when a slot is empty.
+  const bgPick = _pickBGImage();
+  if (bgPick) {
     const parallax = 0.12;
     const shift = (game.camera.x * parallax) % W;
-    ctx.drawImage(BG_IMG, -shift, 0, W, H);
-    ctx.drawImage(BG_IMG, W - shift, 0, W, H);
+    ctx.drawImage(bgPick, -shift, 0, W, H);
+    ctx.drawImage(bgPick, W - shift, 0, W, H);
     // Subtle atmospheric haze so foreground characters still pop
     ctx.fillStyle = 'rgba(20,24,48,0.18)';
     ctx.fillRect(0, 0, W, H);
