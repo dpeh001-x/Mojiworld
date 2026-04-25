@@ -925,6 +925,42 @@
   }
   #version-tag:hover { background: linear-gradient(135deg, rgba(100,60,150,0.95), rgba(60,30,100,0.95)); }
 
+  /* v0.25.43 — Fullscreen + force-desktop toggle. Always visible at the
+     top-right, just below the version tag. Click pops the browser into
+     true fullscreen via the Fullscreen API AND sets body.force-desktop
+     so any mobile-detection branches in fitGameToViewport / the mobile
+     CSS media query are bypassed — guarantees the desktop HUD layout
+     (HP/MP/EXP bars, top-left skill mini-row, bottom skill dock) all
+     show regardless of viewport quirks. position:fixed + z-index:120
+     keeps it above every overlay. */
+  #fullscreen-btn {
+    position: fixed; top: 38px; right: 10px;
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, rgba(80,40,120,0.88), rgba(40,20,80,0.88));
+    border: 1px solid #b090ff; color: #e8d8ff;
+    font-size: 16px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; z-index: 120;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.55), 0 0 8px rgba(176,144,255,0.25);
+    transition: background 120ms, transform 120ms;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  #fullscreen-btn:hover {
+    background: linear-gradient(135deg, rgba(120,60,180,0.95), rgba(80,40,140,0.95));
+    transform: scale(1.06);
+  }
+  #fullscreen-btn:active { transform: scale(0.96); }
+  body.force-desktop #fullscreen-btn { color: #88ffcc; border-color: #66dd88; }
+  /* When force-desktop is on, hide the mobile chrome that was meant
+     for narrow / touch viewports. Lets the desktop HUD breathe even
+     when the browser thinks we're a touch device (DPI scaling, hybrid
+     laptops, etc). */
+  body.force-desktop .mobile-deck { display: none !important; }
+  body.force-desktop #rotate-nag  { display: none !important; }
+  body.force-desktop #help-btn-tr { display: none !important; }
+
   /* Multiplayer button + chat overlay (v0.24.0) */
   #mp-btn {
     position: absolute; top: 10px; right: 88px;
@@ -2441,12 +2477,20 @@
   </div>
 </div>
 
+<!-- v0.25.43 — Fullscreen + force-desktop button. Outside .game-wrapper so
+     the wrapper's CSS transform doesn't scale it. body-level child means
+     it's anchored to the real viewport at all times. -->
+<button id="fullscreen-btn"
+        onclick="toggleFullscreenDesktop()"
+        title="Fullscreen + Desktop layout — shows HP/MP/EXP, skill bar, all HUD elements"
+        aria-label="Fullscreen toggle">⛶</button>
+
 <script>
 // =========================================================================
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.42';
+const GAME_VERSION = 'v0.25.43';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5996,9 +6040,16 @@ function _fitGameToViewport() {
   if (!wrap) return;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
+  // v0.25.43 — when the user has toggled the force-desktop button,
+  // bypass mobile detection entirely. Hybrid laptops with touchscreens
+  // (which match `pointer: coarse`) and high-DPI Windows machines (which
+  // can report `vw < 900` after display scaling) otherwise drop into
+  // mobile mode at desktop fullscreen, hiding parts of the HUD.
+  const forceDesktop = document.body.classList.contains('force-desktop');
   // Toggle the `mc-landscape` body class so the landscape-only deck CSS
   // applies even on browsers that don't fully support Media Queries L4.
-  const isTouchOrNarrow = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || vw < 900;
+  const isTouchOrNarrow = forceDesktop ? false :
+    ((window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || vw < 900);
   const isLandscape = vw > vh;
   document.body.classList.toggle('mc-landscape', isTouchOrNarrow && isLandscape);
   const bodyStyle = getComputedStyle(document.body);
@@ -6032,6 +6083,62 @@ function _fitGameToViewport() {
   const shouldNag = isTouchOrNarrow && isPortrait && vw < 768 && !document.body.dataset.nagDismissed;
   document.body.classList.toggle('nag-portrait', shouldNag);
 }
+// =========================================================================
+// v0.25.43 — Fullscreen + force-desktop toggle.
+// =========================================================================
+// Combines two affordances into one click:
+//   1. browser fullscreen via the Fullscreen API (works on Chrome /
+//      Firefox / Edge; webkit fallback for Safari)
+//   2. body.force-desktop class that shorts-circuits mobile detection
+//      in _fitGameToViewport + hides mobile-only DOM via CSS overrides
+// Persists the force-desktop preference to localStorage so the next
+// session starts in desktop layout for users who explicitly opted in.
+// Listens for fullscreenchange so the icon flips between ⛶ and ⛶⤡
+// even when the user exits via Esc.
+function toggleFullscreenDesktop() {
+  const inFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  // Always flip the force-desktop flag on click; persisting means the
+  // user can hit the button once and have desktop layout from then on.
+  const wantDesktop = !document.body.classList.contains('force-desktop');
+  document.body.classList.toggle('force-desktop', wantDesktop);
+  document.body.classList.remove('mc-portrait', 'mc-landscape', 'nag-portrait');
+  try {
+    if (wantDesktop) localStorage.setItem('_lx_forceDesktop', '1');
+    else             localStorage.removeItem('_lx_forceDesktop');
+  } catch (e) {}
+  // Also toggle browser fullscreen.
+  const root = document.documentElement;
+  if (!inFullscreen && wantDesktop) {
+    if (root.requestFullscreen)            root.requestFullscreen().catch(() => {});
+    else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+  } else if (inFullscreen && !wantDesktop) {
+    if (document.exitFullscreen)            document.exitFullscreen().catch(() => {});
+    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+  }
+  // Refit immediately + a small tail to catch the post-fullscreen
+  // viewport reflow.
+  _fitGameToViewport();
+  setTimeout(_fitGameToViewport, 60);
+  setTimeout(_fitGameToViewport, 240);
+}
+// Restore the user's force-desktop preference on boot.
+try {
+  if (localStorage.getItem('_lx_forceDesktop') === '1') {
+    document.body.classList.add('force-desktop');
+  }
+} catch (e) {}
+// Sync the icon state when the browser leaves fullscreen via Esc.
+function _syncFullscreenIcon() {
+  const btn = document.getElementById('fullscreen-btn');
+  if (!btn) return;
+  const inFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  btn.textContent = inFs ? '⛶⤡' : '⛶';
+  btn.title = inFs
+    ? 'Exit fullscreen (returns to windowed desktop layout)'
+    : 'Fullscreen + Desktop layout — shows HP/MP/EXP, skill bar, all HUD elements';
+}
+document.addEventListener('fullscreenchange',       _syncFullscreenIcon);
+document.addEventListener('webkitfullscreenchange', _syncFullscreenIcon);
 // Restore previous nag-dismissal so a reload doesn't re-prompt (P1.3).
 // localStorage is a best-effort store — wrap in try/catch for private-mode.
 try {
