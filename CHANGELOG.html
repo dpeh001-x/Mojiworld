@@ -1125,6 +1125,56 @@
   <li><b>Clouds</b> now have optional tiny faces on bright maps — little black dot eyes, pink blush cheeks, and a subtle smile arc. About half the clouds get faces (every even-sized cloud) to avoid feeling busy.</li>
 </ul>
 
+<h2>v0.25.24 <span class="tag">Phaser 3 migration — Phase 5a (mob HP bars + names)</span></h2>
+<p class="lede"><b>Phase 5a opens the HUD migration:</b> the per-monster HP bar + name label — the highest-fire-rate canvas HUD elements in the game — move to a pooled Phaser scene on the UI canvas. Every visible mob fired 5+ canvas-2D ops per frame on vanilla (bar bg, bar fill, <code>measureText</code>, name bg, name text); pooled rectangles + Text objects in Phaser collapse all of those into batched WebGL draws.</p>
+
+<h3>📊 LXMonsterUIScene</h3>
+<ul>
+  <li><b>Four parallel pools</b> — <code>_bgBarPool</code>, <code>_fillBarPool</code>, <code>_bgNamePool</code>, <code>_namePool</code>. Each pool batches independently; depth ordering keeps fills above backings.</li>
+  <li><b>Phaser GameObjects.Rectangle</b> for the bars + name backing — no preload, no texture lookup. <code>setSize()</code> per frame mutates the in-place vertex buffer (cheap).</li>
+  <li><b>Phaser.Text pool</b> for mob names. Text width readback (<code>t.width</code>) is cached internally by Phaser and only recalculates when the string changes — replaces vanilla's per-frame <code>ctx.measureText</code>.</li>
+  <li><b>HP bar fill colour</b> matches vanilla's three-tier scheme: green &gt; 50%, yellow 25-50%, red &lt; 25%. <code>setFillStyle</code> per frame is a one-uniform update.</li>
+  <li><b>Boss differentiation</b> — name labels render at 12 px bold orange for bosses, 10 px white for grunts. Both come from the same Text pool with per-instance <code>setFontSize</code> / <code>setFontStyle</code> / <code>setColor</code>.</li>
+  <li><b>Cull envelope</b> matches vanilla (±40 px around viewport).</li>
+</ul>
+
+<h3>🚪 Gate</h3>
+<p>New <code>_phaserHandlingMonsterUI()</code> mirrors the existing pattern. <code>drawMonster</code> gets a single-line <code>return</code> between <code>ctx.restore()</code> and the HP bar block — short-circuits when the scene is up. Importantly, the gate fires <i>after</i> the body's save/restore + burn FX, so those continue to render on vanilla without disruption.</p>
+
+<h3>💡 Why this is the perf-impact pick for HUD migration</h3>
+<p>Most "HUD" elements in this game are DOM (player stats panel, minimap, level-up modal, inventory, chat log). The canvas-rendered HUD pieces are: per-mob HP bars + names (high count, every frame), boss banner (one per frame in boss fights), flash overlay (one per frame on hit). Per-mob HUD is the only one that fires &gt; 1 per frame — and during boss arenas with 3-5 elites + a boss + their HP bars on screen, it's been measurable.</p>
+
+<h3>🤝 Combined with prior phases</h3>
+<p>With this release, monsters now flow through Phaser for:</p>
+<ul>
+  <li><b>Body</b> (slime/snail/mushroom from Phase 4d-1/4d-2)</li>
+  <li><b>HP bars + name labels</b> (every mob type — this release)</li>
+</ul>
+<p>Future 4d-3+ types automatically get the HUD migration "for free" — the gate doesn't filter by mob type. Body ports are independent and additive.</p>
+
+<h3>📅 Migration roadmap</h3>
+<ul>
+  <li>✅ Phase 1-4d-2 (v0.25.15 - v0.25.23).</li>
+  <li>✅ <b>Phase 5a.</b> Mob HP bars + name labels (this release).</li>
+  <li><b>Phase 5b.</b> Super boss banner + flash overlay.</li>
+  <li><b>Phase 4d-3+</b> Remaining mob bodies (humanoids, bosses, zodiac).</li>
+  <li><b>Phase 3b.</b> Character sprite.</li>
+  <li><b>Phase 6.</b> Retire vanilla canvas.</li>
+</ul>
+
+<h3>How to try it</h3>
+<p>Append <code>?phaser=1</code> and engage any mob. HP bars and name labels are now Phaser-rendered. DevTools:</p>
+<pre>const s = window.__LX_PHASER_UI.scene.getScene('lx_monster_ui');
+s._bgBarPool.length     // grows to peak visible-mob count
+s._namePool.length      // same
+s._fillUsed             // mobs currently showing damage</pre>
+
+<h3>Touched surface</h3>
+<ul>
+  <li><code>maple_game.html</code> — version bump to <code>v0.25.24</code>. New <code>LXMonsterUIScene</code> (~110 lines) added to UI <code>scene:</code> list. New <code>_phaserHandlingMonsterUI()</code> gate. <code>drawMonster</code> gets a one-line early-return.</li>
+  <li>No save/network/gameplay/protocol impact. Flag-off path unchanged.</li>
+</ul>
+
 <h2>v0.25.23 <span class="tag">Phaser 3 migration — Phase 4d-2 (snail + mushroom)</span></h2>
 <p class="lede"><b>Phase 4d-2:</b> two more blob mob types land on Phaser. Snail and mushroom (plus its orange variant) follow the slime template from 4d-1 — pre-rendered body texture at boot, dispatch via <code>textureForMob()</code>, vanilla <code>drawCuteMob</code> short-circuits via the existing <code>_phaserHandlingMonsterBody(m)</code> gate. No new architectural work; the slot of bench from 4d-1 is doing real work now.</p>
 
