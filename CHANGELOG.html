@@ -1125,6 +1125,78 @@
   <li><b>Clouds</b> now have optional tiny faces on bright maps — little black dot eyes, pink blush cheeks, and a subtle smile arc. About half the clouds get faces (every even-sized cloud) to avoid feeling busy.</li>
 </ul>
 
+<h2>v0.25.21 <span class="tag">Phaser 3 migration — Phase 4c-2 (full projectile port)</span></h2>
+<p class="lede"><b>Phase 4c-2:</b> the v0.25.20 arrow-only port grows to cover every projectile type except voidbeam. Two pieces of work — a refactor that splits side-effect particle emissions out of the render loop, and an expanded <code>LXProjectileScene</code> that pre-renders eleven projectile textures at boot and dispatches per-projectile through a single batched WebGL pipeline.</p>
+
+<h3>🔧 Refactor — emissions out of render</h3>
+<p>Vanilla <code>drawProjectiles</code> historically pushed trail / dust / sparkle particles inline inside its per-skill render branches. New <code>emitProjectileTrails()</code> function pulls every emission out byte-for-byte (same spawn math, same <code>game.time % N</code> cadence) and runs from the main update tick — guaranteed every frame regardless of which renderer draws the projectile shape. Affects:</p>
+<ul>
+  <li><b>fire</b> — trail every frame</li>
+  <li><b>mspore</b> — orange dust every 4 frames</li>
+  <li><b>mdark</b> — purple sparkles every 3 frames</li>
+  <li><b>mtoxic</b> — green drips every 4 frames</li>
+  <li><b>shard</b> — violet trail every 2 frames</li>
+  <li><b>voidbeam</b> — 2 plasma particles every 2 frames</li>
+</ul>
+
+<h3>🖼️ Pre-rendered texture set (11)</h3>
+<p>Each projectile archetype renders ONCE to an offscreen canvas at <code>preload</code> and registers as a Phaser texture. Runtime per-frame cost collapses to <code>setPosition / setRotation / setScale / setTint</code> on a pooled sprite — same sprite-batched WebGL pipeline as Phase 4a particles.</p>
+<table style="border-collapse:collapse; margin-top:6px;">
+  <tr><th style="text-align:left; padding-right:14px;">Texture</th><th style="text-align:left;">Maps to</th></tr>
+  <tr><td><code>lx_arrow</code></td><td>arrow / charged / deadeye / rainArrow / elemArrow (player)</td></tr>
+  <tr><td><code>lx_fire</code></td><td>fireball</td></tr>
+  <tr><td><code>lx_ice</code></td><td>ice spike</td></tr>
+  <tr><td><code>lx_dagger</code></td><td>dagger</td></tr>
+  <tr><td><code>lx_bolt</code></td><td>player default magic bolt</td></tr>
+  <tr><td><code>lx_mspore</code></td><td>enemy spore pellet</td></tr>
+  <tr><td><code>lx_mdark</code></td><td>enemy dark bolt</td></tr>
+  <tr><td><code>lx_msplinter</code></td><td>enemy wooden splinter</td></tr>
+  <tr><td><code>lx_mtoxic</code></td><td>enemy toxic blob</td></tr>
+  <tr><td><code>lx_shard</code></td><td>enemy crystal shard</td></tr>
+  <tr><td><code>lx_enemy</code></td><td>enemy default ellipse bolt</td></tr>
+</table>
+
+<h3>🔁 Per-projectile dispatch</h3>
+<p>The scene's update loop drives a unified pipeline:</p>
+<ul>
+  <li><b>Texture lookup</b> via <code>textureForProj(p)</code> — also used by the vanilla skip gate so the two can't disagree.</li>
+  <li><b>Rotation</b> — arrow / ice / dagger / msplinter rotate to match velocity (<code>atan2(vy, vx)</code>); shard spins continuously (<code>+ game.time × 0.15</code>); circles/blobs stay axis-aligned.</li>
+  <li><b>Scale</b> — uniform <code>p.w / texWidth</code> for rotated rectangles; circles/blobs target a diameter of <code>max(10, p.w × 1.8)</code> so the bitmap diameter matches vanilla's radius-based render.</li>
+  <li><b>Tint</b> — only arrows tint by <code>p.color</code> (vanilla re-colors the shaft); other textures are pre-rendered with their vanilla colors and stay tint=white.</li>
+  <li><b>Pool reuse</b> — pool sprites swap textures via <code>setTexture(key)</code> when reassigned to a different projectile type; pool grows to peak count, never shrinks.</li>
+</ul>
+
+<h3>🚪 Gate</h3>
+<p>New <code>_phaserHandlingProjectile(p)</code> asks the scene whether it owns this specific projectile. A single early-out at the top of vanilla's render loop short-circuits any projectile Phaser handles. <code>voidbeam</code> (complex linear gradient + direction-dependent geometry) returns null → vanilla keeps drawing it for now.</p>
+
+<h3>📅 Migration roadmap</h3>
+<ul>
+  <li>✅ <b>Phase 1.</b> Scaffolding (v0.25.15).</li>
+  <li>✅ <b>Phase 2.</b> Background (v0.25.16).</li>
+  <li>✅ <b>Phase 3a.</b> Nameplate + two-canvas (v0.25.17).</li>
+  <li>✅ <b>Phase 4a.</b> Particles (v0.25.18).</li>
+  <li>✅ <b>Phase 4b.</b> Halos + damage numbers (v0.25.19).</li>
+  <li>✅ <b>Phase 4c.</b> Player arrows (v0.25.20).</li>
+  <li>✅ <b>Phase 4c-2.</b> Full projectile port (this release).</li>
+  <li><b>Phase 4d.</b> Monsters — biggest surgery (atlas-gen per type).</li>
+  <li><b>Phase 5.</b> HUD.</li>
+  <li><b>Phase 3b.</b> Character sprite.</li>
+  <li><b>Phase 6.</b> Retire vanilla canvas.</li>
+</ul>
+
+<h3>How to try it</h3>
+<p>Append <code>?phaser=1</code> and trigger every projectile type — basic attacks, fireballs, ice spikes, daggers, mob attacks. All flow through Phaser. DevTools:</p>
+<pre>const s = window.__LX_PHASER_UI.scene.getScene('lx_projectiles');
+s._pool.length        // peak sprite count
+s.textureForProj({owner:'enemy', skill:'mspore'})   // → 'lx_mspore'
+s.textureForProj({owner:'enemy', skill:'voidbeam'}) // → null (vanilla)</pre>
+
+<h3>Touched surface</h3>
+<ul>
+  <li><code>maple_game.html</code> — version bump to <code>v0.25.21</code>. New <code>emitProjectileTrails()</code> function (~50 lines) wired into the main tick. <code>LXProjectileScene</code> grows to ~250 lines (preload generates 11 textures, update loop dispatches per-type with rotation / scale / tint logic, helpers <code>textureForProj</code> + <code>_texBaseSize</code> + <code>_rotatesWithVelocity</code>). New <code>_phaserHandlingProjectile(p)</code> gate; vanilla <code>drawProjectiles</code> gets a one-line top-of-loop early-out.</li>
+  <li>No save/network/gameplay/protocol impact. Flag-off path unchanged.</li>
+</ul>
+
 <h2>v0.25.20 <span class="tag">Phaser 3 migration — Phase 4c (arrows)</span></h2>
 <p class="lede"><b>Narrow Phase 4c:</b> player-owned arrow projectiles render through a new <code>LXProjectileScene</code> on the UI canvas. Scoped deliberately tight — only arrows, not the variety-heavy magic / enemy projectile branches — because arrows are the only projectile type with no side-effect particle emissions baked into vanilla's render loop. Doing the rest properly needs a render/emit refactor that deserves its own session.</p>
 
