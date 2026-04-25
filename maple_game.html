@@ -2867,13 +2867,143 @@ function _bootstrapPhaser() {
     }
   }
 
+  // v0.25.22 — Phase 4d-1: monster body renderer (slime only, this
+  // session). Each monster type that lands here gets a pre-rendered
+  // body texture. Bob, facing, and hit-flash are reproduced at runtime
+  // via setY / setFlipX / setTint. HP bars, name labels, burn FX, and
+  // boss types stay on vanilla — Phaser only owns the silhouette.
+  // Architectural note: this scene lives on the UI canvas (z:3) so
+  // sprites render OVER vanilla entities. HP bars / names sit at
+  // different screen Y rows so Z-order doesn't visually conflict.
+  class LXMonsterScene extends Phaser.Scene {
+    constructor() { super({ key: 'lx_monsters' }); }
+    preload() {
+      // ---- Slime body texture (~28 px wide × 22 px tall). Iconic
+      // teardrop with two big eyes and a smile, matching the in-game
+      // chibi aesthetic. Tint applied at runtime via setTint(m.color).
+      const c = document.createElement('canvas');
+      c.width = 28; c.height = 22;
+      const cx = c.getContext('2d');
+      // Body — rounded teardrop, white base so setTint colours it cleanly.
+      cx.fillStyle = '#ffffff';
+      cx.beginPath();
+      cx.ellipse(14, 14, 11, 8, 0, 0, Math.PI * 2);
+      cx.fill();
+      // Top dome
+      cx.beginPath();
+      cx.ellipse(14, 10, 8, 6, 0, 0, Math.PI * 2);
+      cx.fill();
+      // Outline (kept dark even after tint)
+      cx.strokeStyle = 'rgba(0,0,0,0.6)';
+      cx.lineWidth = 1.5;
+      cx.beginPath();
+      cx.ellipse(14, 14, 11, 8, 0, 0, Math.PI * 2);
+      cx.stroke();
+      cx.beginPath();
+      cx.ellipse(14, 10, 8, 6, 0, 0, Math.PI * 2);
+      cx.stroke();
+      // Top sheen — bright white spot, doesn't tint
+      cx.fillStyle = 'rgba(255,255,255,0.85)';
+      cx.beginPath();
+      cx.ellipse(11, 6, 3, 1.5, 0, 0, Math.PI * 2);
+      cx.fill();
+      // Eyes — opaque dark
+      cx.fillStyle = '#1a0410';
+      cx.beginPath(); cx.arc(10, 13, 2, 0, Math.PI * 2); cx.fill();
+      cx.beginPath(); cx.arc(18, 13, 2, 0, Math.PI * 2); cx.fill();
+      // Eye sparkle highlights
+      cx.fillStyle = '#ffffff';
+      cx.fillRect(9, 12, 1, 1);
+      cx.fillRect(17, 12, 1, 1);
+      // Smile
+      cx.strokeStyle = '#1a0410';
+      cx.lineWidth = 1;
+      cx.beginPath();
+      cx.arc(14, 16, 2.5, 0.2, Math.PI - 0.2);
+      cx.stroke();
+      this.textures.addCanvas('lx_mob_slime', c);
+    }
+    create() {
+      this._pool = [];
+      this._used = 0;
+      this._isReady = true;
+    }
+    _parseColor(hex) {
+      if (typeof hex !== 'string') return 0xff66aa;   // default slime pink
+      let h = hex.charAt(0) === '#' ? hex.slice(1) : hex;
+      if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+      else if (h.length >= 6) h = h.slice(0, 6);
+      else return 0xff66aa;
+      return parseInt(h, 16) || 0xff66aa;
+    }
+    // Returns the texture key Phaser uses for this monster, or null
+    // when Phaser doesn't handle this type (vanilla takes over).
+    textureForMob(m) {
+      if (!m || m.isBoss || m.zodiacBoss) return null;
+      if (m.type === 'slime') return 'lx_mob_slime';
+      return null;   // every other type stays on vanilla for now
+    }
+    _get(texKey) {
+      let img;
+      if (this._used < this._pool.length) {
+        img = this._pool[this._used++];
+      } else {
+        img = this.add.image(0, 0, texKey).setOrigin(0.5, 0.5).setDepth(2);
+        this._pool.push(img);
+        this._used++;
+      }
+      if (img.texture && img.texture.key !== texKey) {
+        img.setTexture(texKey);
+      }
+      return img;
+    }
+    update() {
+      const g = window.game;
+      if (!g || !g.monsters) { this._hideAll(); return; }
+      const camX = g.camera ? g.camera.x : 0;
+      this._used = 0;
+      for (const m of g.monsters) {
+        if (m.currentHp <= 0) continue;
+        const key = this.textureForMob(m);
+        if (!key) continue;
+        const sx = m.x - camX;
+        if (sx + m.w < -40 || sx > W + 40) continue;
+        if (m.y + m.h < -40 || m.y > H + 40) continue;
+        const img = this._get(key);
+        // Position centered on the mob's hitbox, with a small bob
+        // matching vanilla _drawDQSlime's animTimer-driven sin oscillation.
+        const bob = Math.sin((m.animTimer || 0) * 0.02) * 1.5;
+        img.setPosition(sx + m.w / 2, m.y + m.h / 2 + bob);
+        // Scale the 28×22 base texture to fit m.w × m.h.
+        img.setScale(m.w / 28, m.h / 22);
+        // Facing — flip the sprite horizontally
+        img.setFlipX((m.facing || 1) < 0);
+        // Hit flash — vanilla uses ctx.filter = 'brightness(2.5)'.
+        // Approximate via Phaser tintFill toward white.
+        const flashOn = (m.hitFlash || 0) > 0 && Math.floor((m.hitFlash || 0) / 30) % 2 === 0;
+        if (flashOn) {
+          img.setTint(0xffffff);
+          img.setTintFill(0xffffff);
+        } else {
+          img.clearTint();
+          img.setTint(this._parseColor(m.color));
+        }
+        img.setVisible(true);
+      }
+      for (let i = this._used; i < this._pool.length; i++) this._pool[i].setVisible(false);
+    }
+    _hideAll() {
+      for (const img of this._pool) img.setVisible(false);
+    }
+  }
+
   window.__LX_PHASER_UI = new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'phaser-ui-canvas',
     width: W, height: H,
     backgroundColor: 'rgba(0,0,0,0)',
     transparent: true,          // stack OVER vanilla canvas
-    scene: [LXPlayerNameplateScene, LXParticleScene, LXDamageNumberScene, LXProjectileScene],
+    scene: [LXPlayerNameplateScene, LXParticleScene, LXDamageNumberScene, LXProjectileScene, LXMonsterScene],
     fps: { target: 60, forceSetTimeOut: false },
     // No physics — pure render layer.
   });
