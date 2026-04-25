@@ -1125,6 +1125,51 @@
   <li><b>Clouds</b> now have optional tiny faces on bright maps — little black dot eyes, pink blush cheeks, and a subtle smile arc. About half the clouds get faces (every even-sized cloud) to avoid feeling busy.</li>
 </ul>
 
+<h2>v0.25.26 <span class="tag">Layered chibi sprite sheets — base body in, equipment slots wired</span></h2>
+<p class="lede">Reintroduces the layered-sprite-sheet pipeline disabled in v0.25.2, this time as a proper modular system designed for adding equipment incrementally without redrawing the base. The nude chibi base body is on screen now; hair / armor / cape / helmet / shield / weapon / boots slots are wired in but empty — drop a PNG matching the 4×4 pose layout into <code>Sprites/character/&lt;slot&gt;/&lt;id&gt;.png</code> and it appears.</p>
+
+<h3>🖼️ The asset</h3>
+<p><code>Sprites/character/chibi_nude.png</code> — 1216×2312, 4×4 grid of 304×578 walk-cycle frames. Pre-loaded at boot via <code>_loadCharLayer('base_chibi', ...)</code>. Other equipment slots load lazily on first lookup.</p>
+
+<h3>🧩 Why layered sprite sheets and not skeletal</h3>
+<p>The big concern with flat sprite sheets is equipment variety — every armor / helmet / cape would multiply the per-frame asset count. <b>Layered sheets sidestep this</b>: each equipment piece is its own per-pose PNG drawn to match the base's frame layout, transparent everywhere else. Composited at runtime, base + gear reads as one unified character. This is how MapleStory, Stardew Valley, and most chibi-2D MMOs handle the equipment problem — you draw each gear piece <i>once across the same 16 poses</i>, not once per body × armor × helmet × etc combination.</p>
+<p>Skeletal animation (Spine / DragonBones) was the alternative — lower per-piece artist cost, but requires rigging the base, paid tooling, and weeks of pipeline work before anything ships. The layered-sheet path lets you ship the base today and add equipment one piece at a time without restructuring.</p>
+
+<h3>🛠️ How equipment will work</h3>
+<ol>
+  <li>Artist draws a gear piece across all 16 poses, matching the base sheet's pivot points (transparent where no gear).</li>
+  <li>Save as <code>Sprites/character/&lt;slot&gt;/&lt;id&gt;.png</code> (slot ∈ hair / armor / cape / helmet / shield / weapon / boots).</li>
+  <li>Set the relevant equipped item's <code>spriteKey</code> to <code>'&lt;id&gt;'</code>.</li>
+  <li>Item appears on the character with zero code changes.</li>
+</ol>
+
+<h3>📐 Architecture</h3>
+<ul>
+  <li><b><code>CHARACTER_ASSETS</code></b> — module-level <code>Map</code> keyed by <code>'&lt;slot&gt;_&lt;id&gt;'</code>. Lazy-load on first access via <code>_loadCharLayer</code>; missing files silently no-op.</li>
+  <li><b><code>CHAR_FRAMES_X / CHAR_FRAMES_Y</code></b> = 4 × 4 — frame grid layout, configurable per future sheet.</li>
+  <li><b><code>_currentCharFrame()</code></b> picks frame index from player state. v0.25.26 implements idle (frame 0) + 4-frame walk cycle. Future iterations extend this with attack / jump / hurt rows.</li>
+  <li><b><code>_drawCharFrame(img, sx, sy, frame, facing)</code></b> blits one frame of one layer with horizontal-flip support. Anchored to the player's feet so the figure stands on the ground regardless of source frame height.</li>
+  <li><b><code>drawLayeredCharacter</code></b> orchestrates the layer stack: base → hair → armor → cape → helmet → shield → weapon → boots. Returns true on successful base draw so <code>drawPlayer</code> skips procedural fallback.</li>
+</ul>
+
+<h3>🔄 Fallback path preserved</h3>
+<p><code>drawPlayer</code>'s existing dispatch is unchanged: it tries <code>drawLayeredCharacter</code> first, falls back to procedural <code>drawCuteCharacter</code> if anything fails. If you delete the base PNG or the network blocks it, the game still renders via the procedural pixel art that's been there since v0.25.2.</p>
+
+<h3>⚖️ Known scope trades</h3>
+<ul>
+  <li><b>Procedural face overlay still draws on top.</b> The sprite has no facial details; <code>_drawCuteFaceOverlay</code> brings the character to life. If the eye position is off vs the sprite head, future polish can add face frames as a separate layer.</li>
+  <li><b>Frame layout assumed 4×4.</b> If your future sheets use a different grid (e.g. 8 columns × 2 rows for a more granular cycle), tweak <code>CHAR_FRAMES_X / Y</code> or move to per-asset metadata.</li>
+  <li><b>Walk cycle uses row 0 only.</b> Other rows in the current sheet may be different states — adjust <code>_currentCharFrame()</code> when you know the layout.</li>
+  <li><b>Procedural cape / weapon swing animations skipped</b> when the sprite path is active. They were calibrated for the procedural body; sprite-based gear handles those visuals once the gear PNGs land.</li>
+</ul>
+
+<h3>Touched surface</h3>
+<ul>
+  <li><code>maple_game.html</code> — version bump to <code>v0.25.26</code>. New <code>CHARACTER_ASSETS</code> map, <code>_loadCharLayer</code> / <code>_currentCharFrame</code> / <code>_drawCharFrame</code> helpers (~75 lines). <code>drawLayeredCharacter</code> rewritten from <code>return false</code> to the full slot composition (~50 lines).</li>
+  <li><b>New asset</b> — <code>Sprites/character/chibi_nude.png</code>.</li>
+  <li>Vanilla / Phaser flag-off path unchanged.</li>
+</ul>
+
 <h2>v0.25.25 <span class="tag">Phaser 3 migration — Phase 5b (boss banner + flash overlay)</span></h2>
 <p class="lede"><b>Phase 5b closes out the HUD migration.</b> The two remaining canvas-rendered HUD pieces — the super-boss top-of-screen banner and the white flash overlay — move to a new <code>LXOverlayScene</code> on the UI canvas at the topmost depth. Combined with Phase 5a's mob HUD migration, every canvas-2D HUD draw is now batched through Phaser when the flag is on.</p>
 
