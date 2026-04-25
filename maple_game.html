@@ -1143,6 +1143,27 @@
     position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
     display: flex; gap: 6px;
   }
+  /* v0.25.37 — compact skill-icon row mirrored into the #top-ui HUD so the
+     skills + cooldowns are glanceable from the top-left alongside the
+     HP/MP/EXP bars, not just from the bottom-centre dock. Mirrors the same
+     icons + conic cooldown sweep as #skill-bar, just at ~70% the size and
+     without the overflow that hides the corner key on the smallest slots. */
+  #hud-skills {
+    display: flex; gap: 4px;
+    margin-top: 6px;
+    pointer-events: auto;
+  }
+  #hud-skills .skill-slot {
+    width: 30px; height: 30px;
+    border-radius: 6px;
+    border-width: 1px;
+  }
+  #hud-skills .skill-icon { font-size: 16px; }
+  #hud-skills .skill-key {
+    font-size: 7px; bottom: 0; right: 2px;
+  }
+  #hud-skills .skill-cd { font-size: 9px; }
+  #hud-skills .skill-slot.defense { margin-right: 4px; }
   /* v0.25.35 — desktop skill bar redesigned to match mobile face-button
      visual language: compact square slot, big centered icon, tiny key
      letter as a corner badge, MOBA-style conic-gradient cooldown sweep
@@ -1932,6 +1953,9 @@
       <div class="bar"><div class="bar-fill hp-fill" id="hp-bar" style="width:100%"></div><div class="bar-text" id="hp-text">100/100</div></div>
       <div class="bar"><div class="bar-fill mp-fill" id="mp-bar" style="width:100%"></div><div class="bar-text" id="mp-text">50/50</div></div>
       <div class="bar"><div class="bar-fill exp-fill" id="exp-bar" style="width:0%"></div><div class="bar-text" id="exp-text">0/100</div></div>
+      <!-- v0.25.37 — compact skill-icon row mirrored from #skill-bar so
+           skills + cooldowns are glanceable from the top-left HUD. -->
+      <div id="hud-skills"></div>
     </div>
   </div>
 
@@ -2390,7 +2414,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.36';
+const GAME_VERSION = 'v0.25.37';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -25289,59 +25313,85 @@ function drawDamageNumbers() {
 // renderSkillBar — builds its 9 DOM slots ONCE, then patches text/classes
 // in place every frame. Avoids rebuilding the entire skill bar on every UI
 // tick (huge DOM-churn win during combat).
+//
+// v0.25.37 — also builds a parallel compact row inside #top-ui (#hud-skills)
+// so the skill icons + cooldown sweeps are glanceable from the top-left HUD
+// alongside HP/MP/EXP, not just from the bottom-centre dock. Each entry in
+// _sbSlots gains a hudRoot / hudIconEl / hudCdEl pair; renderSkillBar
+// mirrors every per-frame mutation onto both surfaces.
 const _sbSlots = {};   // { 'block': slotEl, 'd': slotEl, ... }
 let   _sbBuiltFor = null;   // invalidated when kit changes (job/master picked)
+function _sbMakeSlot(cls, key, icon, title) {
+  const slot = document.createElement('div');
+  slot.className = cls;
+  slot.innerHTML = `
+    <div class="skill-key">${key}</div>
+    <div class="skill-icon">${icon}</div>
+    <div class="skill-mp">&nbsp;</div>
+    <div class="skill-cd" style="display:none"></div>`;
+  if (title) slot.title = title;
+  return slot;
+}
 function _sbBuild() {
   const bar = document.getElementById('skill-bar');
+  const hud = document.getElementById('hud-skills');
   bar.innerHTML = '';
+  if (hud) hud.innerHTML = '';
   Object.keys(_sbSlots).forEach(k => delete _sbSlots[k]);
-  // Defense slot (Block/Parry on A)
-  const bs = document.createElement('div');
-  bs.className = 'skill-slot defense';
-  bs.innerHTML = `
-    <div class="skill-key">A</div>
-    <div class="skill-icon">🛡</div>
-    <div class="skill-mp">Block</div>
-    <div class="skill-cd" style="display:none"></div>`;
-  bs.title = 'Block / Parry — hold to mitigate 70% damage; perfect timing triggers a parry (400ms window).';
+  // Defense slot (Block/Parry on A) — built once for the bottom dock and
+  // cloned into the top HUD row so both stay in lockstep.
+  const blockTitle = 'Block / Parry — hold to mitigate 70% damage; perfect timing triggers a parry (400ms window).';
+  const bs    = _sbMakeSlot('skill-slot defense', 'A', '🛡', blockTitle);
+  const bsHud = hud ? _sbMakeSlot('skill-slot defense', 'A', '🛡', blockTitle) : null;
   bar.appendChild(bs);
+  if (hud && bsHud) hud.appendChild(bsHud);
   _sbSlots.block = {
     root: bs,
     iconEl: bs.querySelector('.skill-icon'),
     mpEl:   bs.querySelector('.skill-mp'),
     cdEl:   bs.querySelector('.skill-cd'),
+    hudRoot:   bsHud || null,
+    hudIconEl: bsHud ? bsHud.querySelector('.skill-icon') : null,
+    hudCdEl:   bsHud ? bsHud.querySelector('.skill-cd')   : null,
   };
   // Skill slots
   const kit = skillsForClass(player.cls, player.job, player.master);
   for (const slotId of ['d','s','a','e','w','q','c','x']) {
-    const slot = document.createElement('div');
-    slot.className = 'skill-slot';
     const displayKey = SLOT_TO_KEY[slotId] || slotId.toUpperCase();
     let matched = null, matchId = null;
     for (const id in kit) if (kit[id].slot === slotId) { matched = kit[id]; matchId = id; break; }
-    slot.innerHTML = `
-      <div class="skill-key">${displayKey}</div>
-      <div class="skill-icon">${matched ? matched.icon : '⬚'}</div>
-      <div class="skill-mp">&nbsp;</div>
-      <div class="skill-cd" style="display:none"></div>`;
+    const iconTxt = matched ? matched.icon : '⬚';
     // Tier-req (advancement gate) + slot-req (level gate). Both must be met
     // before the icon is "live"; visually we treat either miss as locked.
     const lvReq = slotLevelReq(slotId);
+    let title;
+    if (!matched) {
+      if (slotId === 'x') title = 'Unlocks at Master (Level ' + MASTER_ADVANCE_LEVEL + ')';
+      else if (slotId === 'q' || slotId === 'c') title = 'Unlocks on job advancement (Level ' + JOB_ADVANCE_LEVEL + ')';
+      else title = `Unlocks at Level ${lvReq}`;
+    } else {
+      title = matched.name + ' — ' + matched.desc + ` (Lv ${lvReq}+)`;
+    }
+    const slot    = _sbMakeSlot('skill-slot', displayKey, iconTxt, title);
+    const slotHud = hud ? _sbMakeSlot('skill-slot', displayKey, iconTxt, title) : null;
     if (!matched) {
       slot.classList.add('locked');
       slot.querySelector('.skill-icon').style.opacity = '0.3';
-      if (slotId === 'x') slot.title = 'Unlocks at Master (Level ' + MASTER_ADVANCE_LEVEL + ')';
-      else if (slotId === 'q' || slotId === 'c') slot.title = 'Unlocks on job advancement (Level ' + JOB_ADVANCE_LEVEL + ')';
-      else slot.title = `Unlocks at Level ${lvReq}`;
-    } else {
-      slot.title = matched.name + ' — ' + matched.desc + ` (Lv ${lvReq}+)`;
+      if (slotHud) {
+        slotHud.classList.add('locked');
+        slotHud.querySelector('.skill-icon').style.opacity = '0.3';
+      }
     }
     bar.appendChild(slot);
+    if (hud && slotHud) hud.appendChild(slotHud);
     _sbSlots[slotId] = {
       root: slot,
       iconEl: slot.querySelector('.skill-icon'),
       mpEl:   slot.querySelector('.skill-mp'),
       cdEl:   slot.querySelector('.skill-cd'),
+      hudRoot:   slotHud || null,
+      hudIconEl: slotHud ? slotHud.querySelector('.skill-icon') : null,
+      hudCdEl:   slotHud ? slotHud.querySelector('.skill-cd')   : null,
       skill:  matched, skillId: matchId,
     };
   }
@@ -25358,20 +25408,37 @@ function renderSkillBar() {
     const parrying  = (player.parryWindow || 0) > 0;
     const readyNow = !onBlockCd && !blocking;
     bs.root.classList.toggle('ready', readyNow);
+    if (bs.hudRoot) bs.hudRoot.classList.toggle('ready', readyNow);
     const iconTxt = parrying ? '⚡' : '🛡';
-    if (bs._ic !== iconTxt) { bs._ic = iconTxt; bs.iconEl.textContent = iconTxt; }
+    if (bs._ic !== iconTxt) {
+      bs._ic = iconTxt;
+      bs.iconEl.textContent = iconTxt;
+      if (bs.hudIconEl) bs.hudIconEl.textContent = iconTxt;
+    }
     const mpTxt = onBlockCd ? (player.blockCD / 1000).toFixed(1) + 's' : 'Block';
     if (bs._mp !== mpTxt) { bs._mp = mpTxt; bs.mpEl.textContent = mpTxt; }
     if (onBlockCd) {
       const frac = Math.min(1, player.blockCD / 2000);
-      if (bs._cd !== onBlockCd) { bs._cd = onBlockCd; bs.cdEl.style.display = 'flex'; }
+      if (bs._cd !== onBlockCd) {
+        bs._cd = onBlockCd;
+        bs.cdEl.style.display = 'flex';
+        if (bs.hudCdEl) bs.hudCdEl.style.display = 'flex';
+      }
       // v0.25.35 — drive --cd-pct on the slot root for the conic-gradient
       // pie-wipe overlay (was cdEl.style.height for the old vertical bar).
-      bs.root.style.setProperty('--cd-pct', (frac * 100).toFixed(1));
-      bs.cdEl.textContent = (player.blockCD / 1000).toFixed(1);
+      // v0.25.37 — mirror the same --cd-pct + label onto the HUD slot.
+      const pctTxt = (frac * 100).toFixed(1);
+      const cdTxt  = (player.blockCD / 1000).toFixed(1);
+      bs.root.style.setProperty('--cd-pct', pctTxt);
+      bs.cdEl.textContent = cdTxt;
+      if (bs.hudRoot) bs.hudRoot.style.setProperty('--cd-pct', pctTxt);
+      if (bs.hudCdEl) bs.hudCdEl.textContent = cdTxt;
     } else if (bs._cd) {
-      bs._cd = false; bs.cdEl.style.display = 'none';
+      bs._cd = false;
+      bs.cdEl.style.display = 'none';
       bs.root.style.removeProperty('--cd-pct');
+      if (bs.hudCdEl) bs.hudCdEl.style.display = 'none';
+      if (bs.hudRoot) bs.hudRoot.style.removeProperty('--cd-pct');
     }
   }
   // -- Skill slots (live) --
@@ -25389,9 +25456,19 @@ function renderSkillBar() {
       s._lvGated = lvGated;
       s.root.classList.toggle('locked', lvGated);
       s.iconEl.style.opacity = lvGated ? '0.35' : '1';
+      if (s.hudRoot)   s.hudRoot.classList.toggle('locked', lvGated);
+      if (s.hudIconEl) s.hudIconEl.style.opacity = lvGated ? '0.35' : '1';
     }
-    if (s._ready !== ready) { s._ready = ready; s.root.classList.toggle('ready', ready); }
-    if (s._costHigh !== costHigh) { s._costHigh = costHigh; s.root.classList.toggle('cost-high', costHigh); }
+    if (s._ready !== ready) {
+      s._ready = ready;
+      s.root.classList.toggle('ready', ready);
+      if (s.hudRoot) s.hudRoot.classList.toggle('ready', ready);
+    }
+    if (s._costHigh !== costHigh) {
+      s._costHigh = costHigh;
+      s.root.classList.toggle('cost-high', costHigh);
+      if (s.hudRoot) s.hudRoot.classList.toggle('cost-high', costHigh);
+    }
     // While gated by level, replace the MP line with "Lv N" so the player
     // knows exactly when the slot wakes up.
     if (lvGated) {
@@ -25402,14 +25479,26 @@ function renderSkillBar() {
       if (s._mp !== mpTxt) { s._mp = mpTxt; s.mpEl.textContent = mpTxt; }
     }
     if (cd > 0 && !lvGated) {
-      if (!s._cdShown) { s._cdShown = true; s.cdEl.style.display = 'flex'; }
+      if (!s._cdShown) {
+        s._cdShown = true;
+        s.cdEl.style.display = 'flex';
+        if (s.hudCdEl) s.hudCdEl.style.display = 'flex';
+      }
       const frac = Math.min(1, cd / matched.cd);
       // v0.25.35 — conic-gradient pie-wipe via --cd-pct (was height fill)
-      s.root.style.setProperty('--cd-pct', (frac * 100).toFixed(1));
-      s.cdEl.textContent = (cd / 1000).toFixed(1);
+      // v0.25.37 — mirror onto the HUD slot.
+      const pctTxt = (frac * 100).toFixed(1);
+      const cdTxt  = (cd / 1000).toFixed(1);
+      s.root.style.setProperty('--cd-pct', pctTxt);
+      s.cdEl.textContent = cdTxt;
+      if (s.hudRoot) s.hudRoot.style.setProperty('--cd-pct', pctTxt);
+      if (s.hudCdEl) s.hudCdEl.textContent = cdTxt;
     } else if (s._cdShown) {
-      s._cdShown = false; s.cdEl.style.display = 'none';
+      s._cdShown = false;
+      s.cdEl.style.display = 'none';
       s.root.style.removeProperty('--cd-pct');
+      if (s.hudCdEl) s.hudCdEl.style.display = 'none';
+      if (s.hudRoot) s.hudRoot.style.removeProperty('--cd-pct');
     }
   }
 }
