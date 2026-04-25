@@ -3127,13 +3127,124 @@ function _bootstrapPhaser() {
     }
   }
 
+  // v0.25.24 — Phase 5a: per-mob HP bar + name label renderer. The
+  // single highest-firing HUD element in the game — every visible
+  // monster fires 5+ canvas ops per frame on vanilla (bar bg, bar
+  // fill, measureText, name bg, name text). Pool-based Phaser
+  // version cuts the per-mob cost to a few setPosition calls and
+  // batches all bar rectangles into a single GPU draw.
+  class LXMonsterUIScene extends Phaser.Scene {
+    constructor() { super({ key: 'lx_monster_ui' }); }
+    create() {
+      // Four parallel pools — one per element in the per-mob HUD.
+      // All are Phaser GameObjects.Rectangle / Text, so each pool
+      // batches independently.
+      this._bgBarPool   = [];   // dark backing rect for HP bar
+      this._fillBarPool = [];   // coloured HP fill rect
+      this._bgNamePool  = [];   // dark backing rect under name
+      this._namePool    = [];   // name Text
+      this._bgUsed = 0;
+      this._fillUsed = 0;
+      this._bgNameUsed = 0;
+      this._nameUsed = 0;
+      this._isReady = true;
+    }
+    _getBgBar() {
+      if (this._bgUsed < this._bgBarPool.length) return this._bgBarPool[this._bgUsed++];
+      const r = this.add.rectangle(0, 0, 4, 4, 0x000000, 0.6).setOrigin(0).setDepth(11);
+      this._bgBarPool.push(r);
+      this._bgUsed++;
+      return r;
+    }
+    _getFillBar() {
+      if (this._fillUsed < this._fillBarPool.length) return this._fillBarPool[this._fillUsed++];
+      const r = this.add.rectangle(0, 0, 4, 2, 0x44cc44, 1).setOrigin(0).setDepth(12);
+      this._fillBarPool.push(r);
+      this._fillUsed++;
+      return r;
+    }
+    _getNameBg() {
+      if (this._bgNameUsed < this._bgNamePool.length) return this._bgNamePool[this._bgNameUsed++];
+      const r = this.add.rectangle(0, 0, 24, 14, 0x000000, 0.5).setOrigin(0).setDepth(11);
+      this._bgNamePool.push(r);
+      this._bgNameUsed++;
+      return r;
+    }
+    _getName() {
+      if (this._nameUsed < this._namePool.length) return this._namePool[this._nameUsed++];
+      const t = this.add.text(0, 0, '', {
+        fontFamily: 'sans-serif',
+        fontSize: '10px',
+        color: '#ffffff',
+      }).setOrigin(0.5, 0.5).setDepth(12);
+      this._namePool.push(t);
+      this._nameUsed++;
+      return t;
+    }
+    update() {
+      const g = window.game;
+      if (!g || !g.monsters) { this._hideAll(); return; }
+      const camX = g.camera ? g.camera.x : 0;
+      this._bgUsed = 0;
+      this._fillUsed = 0;
+      this._bgNameUsed = 0;
+      this._nameUsed = 0;
+      for (const m of g.monsters) {
+        if (m.currentHp <= 0) continue;
+        const sx = m.x - camX;
+        if (sx + m.w < -40 || sx > W + 40) continue;
+        if (m.y + m.h < -40 || m.y > H + 40) continue;
+
+        // HP bar — only when damaged, matching vanilla's `currentHp < maxHp`.
+        if (m.currentHp < m.maxHp) {
+          const hpPct = Math.max(0, Math.min(1, m.currentHp / m.maxHp));
+          const bg = this._getBgBar();
+          bg.setPosition(sx + 2, m.y - 8);
+          bg.setSize(m.w - 4, 4);
+          bg.setVisible(true);
+          const fill = this._getFillBar();
+          fill.setPosition(sx + 3, m.y - 7);
+          fill.setSize((m.w - 6) * hpPct, 2);
+          fill.setFillStyle(hpPct > 0.5 ? 0x44cc44 : hpPct > 0.25 ? 0xccaa44 : 0xcc4444, 1);
+          fill.setVisible(true);
+        }
+
+        // Name label
+        const t = this._getName();
+        t.setText(m.name || '');
+        t.setFontSize(m.isBoss ? 12 : 10);
+        t.setFontStyle(m.isBoss ? 'bold' : 'normal');
+        t.setColor(m.isBoss ? '#ff8866' : '#ffffff');
+        t.setPosition(sx + m.w / 2, m.y + m.h + 9);
+        t.setVisible(true);
+        // Name backing rect — sized to match measured text width + 6 px padding
+        const nw = (t.width || 0) + 6;
+        const bgN = this._getNameBg();
+        bgN.setPosition(sx + m.w / 2 - nw / 2, m.y + m.h + 2);
+        bgN.setSize(nw, 14);
+        bgN.setVisible(true);
+      }
+      // Hide unused pool entries (kept allocated)
+      for (let i = this._bgUsed;     i < this._bgBarPool.length;   i++) this._bgBarPool[i].setVisible(false);
+      for (let i = this._fillUsed;   i < this._fillBarPool.length; i++) this._fillBarPool[i].setVisible(false);
+      for (let i = this._bgNameUsed; i < this._bgNamePool.length;  i++) this._bgNamePool[i].setVisible(false);
+      for (let i = this._nameUsed;   i < this._namePool.length;    i++) this._namePool[i].setVisible(false);
+    }
+    _hideAll() {
+      for (const r of this._bgBarPool)   r.setVisible(false);
+      for (const r of this._fillBarPool) r.setVisible(false);
+      for (const r of this._bgNamePool)  r.setVisible(false);
+      for (const t of this._namePool)    t.setVisible(false);
+    }
+  }
+
   window.__LX_PHASER_UI = new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'phaser-ui-canvas',
     width: W, height: H,
     backgroundColor: 'rgba(0,0,0,0)',
     transparent: true,          // stack OVER vanilla canvas
-    scene: [LXPlayerNameplateScene, LXParticleScene, LXDamageNumberScene, LXProjectileScene, LXMonsterScene],
+    scene: [LXPlayerNameplateScene, LXParticleScene, LXDamageNumberScene, LXProjectileScene, LXMonsterScene, LXMonsterUIScene],
     fps: { target: 60, forceSetTimeOut: false },
     // No physics — pure render layer.
   });
