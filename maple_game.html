@@ -1143,13 +1143,19 @@
     position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
     display: flex; gap: 6px;
   }
+  /* v0.25.35 — desktop skill bar redesigned to match mobile face-button
+     visual language: compact square slot, big centered icon, tiny key
+     letter as a corner badge, MOBA-style conic-gradient cooldown sweep
+     instead of the old vertical-fill bar. MP cost moves to title=
+     tooltip to reclaim the vertical space. */
   .skill-slot {
-    width: 52px; height: 64px; background: rgba(0,0,0,0.65);
-    border: 2px solid #555; border-radius: 6px; position: relative;
-    display: flex; flex-direction: column; align-items: center;
-    justify-content: center; font-size: 11px; color: #eee;
+    width: 44px; height: 44px; background: rgba(0,0,0,0.65);
+    border: 2px solid #555; border-radius: 8px; position: relative;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; color: #eee;
+    overflow: hidden;
   }
-  .skill-slot.locked { opacity: 0.3; filter: grayscale(1); }
+  .skill-slot.locked { opacity: 0.45; filter: grayscale(1); }
   .skill-slot.ready { border-color: #88ccff; box-shadow: 0 0 6px rgba(120,180,255,0.5); }
   .skill-slot.cost-high { border-color: #c44; }
   /* Defensive dock slot — Block / Parry at the A key, sits left of the skills */
@@ -1159,14 +1165,48 @@
     margin-right: 6px;
   }
   .skill-slot.defense.ready { box-shadow: 0 0 8px rgba(120,180,255,0.65); }
-  .skill-slot.defense .skill-mp { color: #aaddff; }
-  .skill-icon { font-size: 22px; margin-top: 2px; }
-  .skill-key { font-size: 10px; color: #ffee88; font-weight: bold; }
-  .skill-mp { font-size: 9px; color: #88bbff; }
+  /* Big centered icon */
+  .skill-icon {
+    font-size: 22px; line-height: 1;
+    pointer-events: none;
+    filter: drop-shadow(0 1px 1px rgba(0,0,0,0.6));
+  }
+  /* Tiny key letter tucked into bottom-right corner */
+  .skill-key {
+    position: absolute; bottom: 1px; right: 3px;
+    font: 700 9px ui-monospace, Menlo, Consolas, monospace;
+    color: #ffee88; text-shadow: 0 1px 2px #000;
+    letter-spacing: 0.5px; pointer-events: none;
+    z-index: 1;
+  }
+  /* MP cost — hidden on the compact slot; the full text is still
+     accessible via the slot's `title` tooltip on hover. */
+  .skill-mp { display: none; }
+  /* When the slot is gated by level (matched skill but lvGated=true),
+     renderSkillBar replaces the icon with a "Lv N" string and adds
+     .locked. Keep that readable: smaller font when the icon span is
+     showing text instead of a single emoji. */
+  .skill-slot.locked .skill-icon {
+    font-size: 13px; font-weight: 700; color: #ffeeaa;
+    letter-spacing: 0.5px;
+  }
+  /* Conic-gradient cooldown sweep — same MOBA pie-wipe as the mobile
+     face buttons. Driven by --cd-pct (0..100) which renderSkillBar
+     updates each tick. */
   .skill-cd {
-    position: absolute; bottom: 0; left: 0; right: 0;
-    background: rgba(80, 80, 80, 0.65); pointer-events: none;
-    font-size: 11px; text-align: center; font-weight: bold;
+    position: absolute; inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    display: flex; align-items: center; justify-content: center;
+    background: conic-gradient(
+      rgba(0,0,0,0.72) 0deg,
+      rgba(0,0,0,0.72) calc(var(--cd-pct, 0) * 3.6deg),
+      rgba(0,0,0,0)    calc(var(--cd-pct, 0) * 3.6deg)
+    );
+    color: #fff;
+    font: 700 12px ui-monospace, Menlo, Consolas, monospace;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.85);
+    z-index: 2;
   }
 
   #dialog {
@@ -2350,7 +2390,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.34';
+const GAME_VERSION = 'v0.25.35';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -25569,11 +25609,14 @@ function renderSkillBar() {
     if (bs._mp !== mpTxt) { bs._mp = mpTxt; bs.mpEl.textContent = mpTxt; }
     if (onBlockCd) {
       const frac = Math.min(1, player.blockCD / 2000);
-      if (bs._cd !== onBlockCd) { bs._cd = onBlockCd; bs.cdEl.style.display = 'block'; }
-      bs.cdEl.style.height = (frac * 100) + '%';
+      if (bs._cd !== onBlockCd) { bs._cd = onBlockCd; bs.cdEl.style.display = 'flex'; }
+      // v0.25.35 — drive --cd-pct on the slot root for the conic-gradient
+      // pie-wipe overlay (was cdEl.style.height for the old vertical bar).
+      bs.root.style.setProperty('--cd-pct', (frac * 100).toFixed(1));
       bs.cdEl.textContent = (player.blockCD / 1000).toFixed(1);
     } else if (bs._cd) {
       bs._cd = false; bs.cdEl.style.display = 'none';
+      bs.root.style.removeProperty('--cd-pct');
     }
   }
   // -- Skill slots (live) --
@@ -25604,12 +25647,14 @@ function renderSkillBar() {
       if (s._mp !== mpTxt) { s._mp = mpTxt; s.mpEl.textContent = mpTxt; }
     }
     if (cd > 0 && !lvGated) {
-      if (!s._cdShown) { s._cdShown = true; s.cdEl.style.display = 'block'; }
+      if (!s._cdShown) { s._cdShown = true; s.cdEl.style.display = 'flex'; }
       const frac = Math.min(1, cd / matched.cd);
-      s.cdEl.style.height = (frac * 100) + '%';
+      // v0.25.35 — conic-gradient pie-wipe via --cd-pct (was height fill)
+      s.root.style.setProperty('--cd-pct', (frac * 100).toFixed(1));
       s.cdEl.textContent = (cd / 1000).toFixed(1);
     } else if (s._cdShown) {
       s._cdShown = false; s.cdEl.style.display = 'none';
+      s.root.style.removeProperty('--cd-pct');
     }
   }
 }
