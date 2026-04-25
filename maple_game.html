@@ -503,36 +503,6 @@
       opacity: 0.32 !important;
       filter: grayscale(1) brightness(0.85);
     }
-    /* Cooldown sweep overlay — circular MOBA-style "pie wipe" that
-       slowly retreats as the cooldown timer ticks down. Driven by
-       --cd-pct (0..100) which a JS poll loop updates every 50ms
-       from player.skillCooldowns (or player.attackCooldown for Z).
-       The grayscale filter is layered on top so the button reads as
-       "not ready" while still showing its icon. */
-    .mobile-deck .mc-btn[data-cooling="1"] {
-      filter: grayscale(0.85) brightness(0.78);
-      position: relative;
-    }
-    .mobile-deck .mc-btn[data-cooling="1"]::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      border-radius: inherit;
-      pointer-events: none;
-      background: conic-gradient(
-        rgba(8,10,18,0.62) calc(var(--cd-pct, 0) * 1%),
-        rgba(255,255,255,0.04) calc(var(--cd-pct, 0) * 1%) 100%
-      );
-      z-index: 2;
-    }
-    .mobile-deck .mc-btn[data-cooling="1"] .mc-cd-text {
-      position: absolute; inset: 0;
-      display: flex; align-items: center; justify-content: center;
-      font: 700 14px ui-monospace, Menlo, Consolas, monospace;
-      color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.85);
-      pointer-events: none; z-index: 3;
-    }
-    .mobile-deck .mc-btn:not([data-cooling="1"]) .mc-cd-text { display: none; }
     /* P1.9 — next-advancement chip. Injected at runtime into
        #top-ui; styled only on mobile so the desktop HUD stays
        unchanged. Shows "→ Job in N" / "→ Master in N"; hides
@@ -5628,64 +5598,6 @@ function _wireDynamicFButton() {
   btn.addEventListener('contextmenu', e => e.preventDefault());
 }
 
-// MOBA-style cooldown sweep on the mobile face cluster. Polls
-// player.skillCooldowns every 50ms and writes --cd-pct (0..100)
-// into each skill button's style. The conic-gradient overlay in
-// CSS reads --cd-pct to draw the pie wipe; data-cooling="1" gates
-// the grayscale filter and the seconds-remaining text. F is
-// skipped — its dynamic dispatch (interact / portal / Q / block)
-// makes "what cooldown to show" ambiguous, and the F button is
-// rarely on cooldown anyway (block has no CD; Q only at 25+).
-function _wireMobileCooldownSweep() {
-  const btns = document.querySelectorAll(
-    '.mobile-deck .mc-skill, .mobile-deck .mc-basic'
-  );
-  for (const btn of btns) {
-    if (btn.dataset.dynamic) continue;          // skip F
-    if (btn.querySelector('.mc-cd-text')) continue;
-    const t = document.createElement('span');
-    t.className = 'mc-cd-text';
-    btn.appendChild(t);
-  }
-  setInterval(() => {
-    if (typeof player === 'undefined' || !player) return;
-    if (typeof KEY_TO_SLOT === 'undefined') return;
-    for (const btn of btns) {
-      if (btn.dataset.dynamic) continue;
-      const k = (btn.dataset.mkey || '').toLowerCase();
-      const slot = KEY_TO_SLOT[k];
-      if (!slot) continue;
-      const found = (typeof skillBySlot === 'function') ? skillBySlot(slot) : null;
-      let cd = 0, max = 0;
-      if (found) {
-        cd = (player.skillCooldowns && player.skillCooldowns[found.id]) || 0;
-        max = (found.def && found.def.cd) || 0;
-      }
-      // Z (basic attack): some classes don't queue z through skillCooldowns;
-      // fall back to player.attackCooldown for those so the sweep still
-      // animates on every basic swing.
-      if (k === 'z' && (!cd || cd <= 0)) {
-        cd = player.attackCooldown || 0;
-        if (cd > 0 && (!max || max <= 0)) max = cd; // first frame: assume "now == max"
-      }
-      const cooling = cd > 0 && max > 0;
-      if (cooling) {
-        if (btn.dataset.cooling !== '1') btn.dataset.cooling = '1';
-        const pct = Math.min(100, Math.max(0, (cd / max) * 100));
-        btn.style.setProperty('--cd-pct', pct.toFixed(1));
-        const txtEl = btn.querySelector('.mc-cd-text');
-        if (txtEl) {
-          const sec = cd / 1000;
-          txtEl.textContent = sec >= 1 ? Math.ceil(sec) : sec.toFixed(1);
-        }
-      } else if (btn.dataset.cooling === '1') {
-        btn.dataset.cooling = '0';
-        btn.style.removeProperty('--cd-pct');
-      }
-    }
-  }, 50);
-}
-
 // Wire up all mobile buttons once DOM is ready.
 function _initMobileControls() {
   // Bind buttons in BOTH the in-wrapper HUD (pots) and the outside deck
@@ -5705,7 +5617,6 @@ function _initMobileControls() {
   }
   _wireSmartDpad();
   _wireDynamicFButton();
-  _wireMobileCooldownSweep();
   const toggle = document.getElementById('mobile-ctrl-toggle');
   if (toggle) {
     toggle.onclick = () => {
