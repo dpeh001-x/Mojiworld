@@ -2731,47 +2731,133 @@ function _bootstrapPhaser() {
       this._used = 0;
       this._isReady = true;
     }
-    _isArrow(p) {
-      // Mirror vanilla drawProjectiles' arrow branch: player-owned
-      // projectiles with these skill tags share the arrow visual.
-      if (!p || p.owner !== 'player') return false;
-      const s = p.skill;
-      return s === 'arrow' || s === 'charged' || s === 'deadeye'
-          || s === 'rainArrow' || s === 'elemArrow';
-    }
     _parseColor(hex) {
-      if (typeof hex !== 'string') return 0xddaa66;
+      if (typeof hex !== 'string') return 0xffffff;
       let h = hex.charAt(0) === '#' ? hex.slice(1) : hex;
       if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
       else if (h.length >= 6) h = h.slice(0, 6);
-      else return 0xddaa66;
-      return parseInt(h, 16) || 0xddaa66;
+      else return 0xffffff;
+      return parseInt(h, 16) || 0xffffff;
     }
-    _get() {
-      if (this._used < this._pool.length) return this._pool[this._used++];
-      const img = this.add.image(0, 0, 'lx_arrow').setOrigin(0.5).setDepth(3);
-      this._pool.push(img);
-      this._used++;
+    // v0.25.21 — resolve p → Phaser texture key. Returns null when Phaser
+    // shouldn't handle this projectile (e.g. voidbeam, which keeps its
+    // complex gradient on vanilla). Used by both the scene update loop
+    // AND by the vanilla-side skip gate, so the two can't disagree.
+    textureForProj(p) {
+      if (!p) return null;
+      if (p.owner === 'player') {
+        const s = p.skill;
+        if (s === 'arrow' || s === 'charged' || s === 'deadeye'
+         || s === 'rainArrow' || s === 'elemArrow') return 'lx_arrow';
+        if (s === 'fire')   return 'lx_fire';
+        if (s === 'ice')    return 'lx_ice';
+        if (s === 'dagger') return 'lx_dagger';
+        // Player default bolt (no specific skill match above)
+        return 'lx_bolt';
+      }
+      // Enemy-owned
+      const s = p.skill;
+      if (s === 'mspore')    return 'lx_mspore';
+      if (s === 'mdark')     return 'lx_mdark';
+      if (s === 'msplinter') return 'lx_msplinter';
+      if (s === 'mtoxic')    return 'lx_mtoxic';
+      if (s === 'shard')     return 'lx_shard';
+      if (s === 'voidbeam')  return null;   // vanilla keeps voidbeam
+      return 'lx_enemy';
+    }
+    // Types that need rotation to match velocity (horizontal-silhouette
+    // textures). Others (circles/blobs) stay axis-aligned.
+    _rotatesWithVelocity(key) {
+      return key === 'lx_arrow' || key === 'lx_ice' || key === 'lx_dagger'
+          || key === 'lx_msplinter';
+    }
+    // Natural dimensions of each texture — used to derive display scale
+    // from the projectile's logical p.w / p.h.
+    _texBaseSize(key) {
+      switch (key) {
+        case 'lx_arrow':     return [32, 8];
+        case 'lx_ice':       return [40, 16];
+        case 'lx_dagger':    return [24, 8];
+        case 'lx_fire':      return [40, 40];
+        case 'lx_bolt':      return [32, 32];
+        case 'lx_mspore':    return [32, 32];
+        case 'lx_mdark':     return [32, 32];
+        case 'lx_msplinter': return [24, 8];
+        case 'lx_mtoxic':    return [32, 32];
+        case 'lx_shard':     return [32, 32];
+        case 'lx_enemy':     return [32, 32];
+        default:             return [32, 32];
+      }
+    }
+    _get(texKey) {
+      let img;
+      if (this._used < this._pool.length) {
+        img = this._pool[this._used++];
+      } else {
+        img = this.add.image(0, 0, texKey).setOrigin(0.5).setDepth(3);
+        this._pool.push(img);
+        this._used++;
+      }
+      // Swap texture when a pool entry is reused for a different type.
+      if (img.texture && img.texture.key !== texKey) {
+        img.setTexture(texKey);
+      }
       return img;
     }
     update() {
       const g = window.game;
       if (!g || !g.projectiles) { this._hideAll(); return; }
       const camX = g.camera ? g.camera.x : 0;
+      const now = g.time || 0;
       this._used = 0;
       for (const p of g.projectiles) {
-        if (!this._isArrow(p)) continue;
+        const key = this.textureForProj(p);
+        if (!key) continue;
         const sx = p.x - camX;
         if (sx + p.w < -60 || sx > W + 60) continue;
         if (p.y + p.h < -60 || p.y > H + 60) continue;
-        const img = this._get();
+        const img = this._get(key);
         img.setPosition(sx + p.w / 2, p.y + p.h / 2);
-        img.setRotation(Math.atan2(p.vy, p.vx));
-        // Texture is 32×8; scale so shaft matches p.w. Height rides the
-        // same scale so the arrowhead/feather keep their proportion.
-        const scale = p.w / 32;
-        img.setScale(scale, scale);
-        img.setTint(this._parseColor(p.color || '#ddaa66'));
+
+        // Scale: logical p.w / natural texture width. For square textures
+        // we match p.w*2 (vanilla draws a circle of radius p.w on fire,
+        // so the "visual size" matches vanilla — bitmap width 40 ≈ radius
+        // 20, fits the typical p.w ≈ 18-20 fireballs comfortably).
+        const [bw, bh] = this._texBaseSize(key);
+        let sW, sH;
+        if (key === 'lx_arrow' || key === 'lx_ice' || key === 'lx_dagger' || key === 'lx_msplinter') {
+          sW = p.w / bw; sH = sW;   // uniform scale for rotated rectangles
+        } else {
+          // Circle / blob composites — vanilla draws at radius ≈ p.w, so
+          // displayed diameter should be ≈ 2 × p.w. Our 32-wide texture
+          // already includes a margin (the outer halo fills 22 of 32), so
+          // scale by (2 × p.w) / bw. Clamp to a minimum so tiny p.w
+          // projectiles still render.
+          const target = Math.max(10, p.w * 1.8);
+          sW = target / bw; sH = target / bh;
+        }
+        img.setScale(sW, sH);
+
+        // Rotation:
+        //   arrow / ice / dagger / msplinter → atan2(vy, vx), match velocity
+        //   shard → continuous spin proportional to game time (vanilla spins it)
+        //   others → no rotation
+        if (this._rotatesWithVelocity(key)) {
+          img.setRotation(Math.atan2(p.vy, p.vx));
+        } else if (key === 'lx_shard') {
+          img.setRotation(Math.atan2(p.vy, p.vx) + now * 0.15);
+        } else {
+          img.setRotation(0);
+        }
+
+        // Tint: arrow uses p.color (vanilla re-colors the shaft).
+        // Other textures are pre-rendered with their vanilla colors, so
+        // setTint(0xffffff) is a no-op that keeps them untinted.
+        if (key === 'lx_arrow') {
+          img.setTint(this._parseColor(p.color || '#ddaa66'));
+        } else {
+          img.setTint(0xffffff);
+        }
         img.setVisible(true);
       }
       for (let i = this._used; i < this._pool.length; i++) this._pool[i].setVisible(false);
