@@ -2446,7 +2446,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.40';
+const GAME_VERSION = 'v0.25.41';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -20195,7 +20195,48 @@ function drawPlayer() {
 // =========================================================================
 // CUTE CHIBI CHARACTER — procedural pixel art, class-themed via CUTE palette
 // =========================================================================
+// v0.25.41 — extended cel-shading tone palette. Derives a 4-tone ladder
+// (highlight → lit → mid-shadow → deep-shadow) per class plus a warm
+// sub-surface-scattering tint for skin. Derived from the existing 2-tone
+// palette via _mixHex blends, so artists only have to author the lit
+// base + shadow base; the deeper / brighter / SSS variants follow
+// automatically. Cached on first call (set ._cel = true) so the blends
+// run once per session, not per-frame.
+//
+// Hue shifts:
+//   • warrior  shadows pull violet (#3a1a4a) — a touch of cool against
+//              the warm red base.
+//   • mage     shadows pull deep cyan (#0a2a5a)  — pushes the blue.
+//   • archer   shadows pull blue-green (#0a3a40) — settles the green.
+//   • rogue    shadows pull near-black indigo  — keeps it inky.
+// Skin shadows pull cool slate-blue with a warm pink SSS edge.
+function _ensureCelTones() {
+  if (CUTE_PAL._cel) return;
+  // Skin extras
+  CUTE_PAL.skinHi    = _mixHex(CUTE_PAL.skin, '#ffffff', 0.42);
+  CUTE_PAL.skinDeep  = _mixHex(CUTE_PAL.skinShd, '#3a4670', 0.55);
+  CUTE_PAL.skinSss   = _mixHex(CUTE_PAL.skinShd, '#d05068', 0.32);
+  // Class-coloured body extras + per-class shadow hue shift
+  const SHADOW_TINT = {
+    warrior: '#3a1a4a',   // violet
+    mage:    '#0a2a5a',   // deep cyan
+    archer:  '#0a3a40',   // blue-green
+    rogue:   '#100018',   // inky indigo
+  };
+  for (const k in CUTE_CLASS_COLORS) {
+    const c = CUTE_CLASS_COLORS[k];
+    const tint = SHADOW_TINT[k] || '#1a1a2a';
+    c.bodyHi   = _mixHex(c.body2,   '#ffffff', 0.38);   // bright lit ribbon
+    c.bodyMid  = _mixHex(c.bodyShd, tint,      0.18);   // shadow with subtle hue shift
+    c.bodyDeep = _mixHex(c.bodyShd, tint,      0.55);   // deep cool shadow
+    c.bodySss  = _mixHex(c.body,    '#cc4488', 0.18);   // warm SSS hint at lit/shadow seam
+    c.hairDeep = _mixHex(c.hair,    '#1a1428', 0.45);   // shadow under hair mass
+    c.hairHi2  = _mixHex(c.hairHi,  '#ffffff', 0.45);   // glossy strand peak
+  }
+  CUTE_PAL._cel = true;
+}
 function drawCuteCharacter(sx, sy) {
+  _ensureCelTones();
   const cls = player.cls || 'warrior';
   const cc = CUTE_CLASS_COLORS[cls] || CUTE_CLASS_COLORS.warrior;
   const f = player.facing;
@@ -20266,17 +20307,24 @@ function drawCuteCharacter(sx, sy) {
   // Leg fills
   px(sx + 9,  sy + 40 + bb, 5, 6, CUTE_PAL.pants);
   px(sx + 18, sy + 40 + bb, 5, 6, CUTE_PAL.pants);
-  // Leg shadow side
+  // v0.25.41 — 3-tone leg cel: shadow side (2px) + mid (3px lit) + lit
+  // edge (1px highlight). Upgrades the previous 2-tone (lit + 2px shadow).
   px(sx + 9,  sy + 40 + bb, 2, 6, CUTE_PAL.pantsShd);
   px(sx + 18, sy + 40 + bb, 2, 6, CUTE_PAL.pantsShd);
+  // Lit edge highlight on the front (light source upper-left)
+  px(sx + 13, sy + 40 + bb, 1, 6, 'rgba(255,235,200,0.30)');
+  px(sx + 22, sy + 40 + bb, 1, 6, 'rgba(255,235,200,0.30)');
   // Boot outline halo
   px(sx + 7,  sy + 43 + bb + wc, 9, 5, CUTE_PAL.outline);
   px(sx + 16, sy + 43 + bb - wc, 9, 5, CUTE_PAL.outline);
-  // Boot fills
+  // Boot fills + 3-tone (top hi-strip, body, deeper shadow line at sole)
   px(sx + 8,  sy + 44 + bb + wc, 7, 4, CUTE_PAL.boot);
   px(sx + 17, sy + 44 + bb - wc, 7, 4, CUTE_PAL.boot);
   px(sx + 8,  sy + 44 + bb + wc, 7, 1, CUTE_PAL.bootTop);
   px(sx + 17, sy + 44 + bb - wc, 7, 1, CUTE_PAL.bootTop);
+  // v0.25.41 — deep shadow strip at boot sole for cel-form contrast
+  px(sx + 8,  sy + 47 + bb + wc, 7, 1, 'rgba(0,0,0,0.42)');
+  px(sx + 17, sy + 47 + bb - wc, 7, 1, 'rgba(0,0,0,0.42)');
   // v0.25.29 — boot specular pip on the front of each boot. Tiny
   // bright highlight that sells the leather-shine without painting
   // over the flat-fill silhouette.
@@ -20324,18 +20372,43 @@ function drawCuteCharacter(sx, sy) {
   ctx.fillStyle = cc.body;
   torsoPath();
   ctx.fill();
-  // 2-tone diagonal cel shadow (hard-edge wedge, upper-left light source)
+  // v0.25.41 — 4-tone cel shading (was 2-tone). Hard-edge wedges, upper-
+  // left light source. Stack from lit to dark so each layer paints over
+  // the previous. Order: SSS warm seam → mid shadow → deep shadow.
+  // Highlight ribbon paints separately below.
+  const tcx = (lCx + rCx) / 2;
+  const tcy = topY + 8;
   ctx.save();
   torsoPath();
   ctx.clip();
-  ctx.fillStyle = cc.bodyShd;
+  // Sub-surface warm seam — narrow band where lit meets mid-shadow,
+  // simulates light bouncing through translucent skin/cloth. Paints
+  // underneath the mid-shadow so only its peeking edge shows.
+  ctx.fillStyle = cc.bodySss;
   ctx.beginPath();
-  const tcx = (lCx + rCx) / 2;
-  const tcy = topY + 8;
+  ctx.moveTo(tcx - 16, tcy - 3);
+  ctx.lineTo(tcx + 16, tcy - 9);
+  ctx.lineTo(tcx + 16, tcy - 7);
+  ctx.lineTo(tcx - 16, tcy - 1);
+  ctx.closePath();
+  ctx.fill();
+  // Mid shadow (hue-shifted body shadow)
+  ctx.fillStyle = cc.bodyMid;
+  ctx.beginPath();
   ctx.moveTo(tcx - 16, tcy - 4);
   ctx.lineTo(tcx + 16, tcy - 10);
   ctx.lineTo(tcx + 20, tcy + 20);
   ctx.lineTo(tcx - 20, tcy + 20);
+  ctx.closePath();
+  ctx.fill();
+  // Deep shadow (cooler, only on the back-shadow edge — bottom-right
+  // wedge that sells the form-shadow at the waist + back of torso)
+  ctx.fillStyle = cc.bodyDeep;
+  ctx.beginPath();
+  ctx.moveTo(tcx + 4, tcy + 2);
+  ctx.lineTo(tcx + 20, tcy - 4);
+  ctx.lineTo(tcx + 22, tcy + 20);
+  ctx.lineTo(tcx + 4, tcy + 20);
   ctx.closePath();
   ctx.fill();
   ctx.restore();
@@ -20381,9 +20454,16 @@ function drawCuteCharacter(sx, sy) {
   ctx.restore();
   ctx.restore();
 
-  // Top highlight ribbon (lit side)
+  // v0.25.41 — Top highlight ribbon now uses 2-stop band: brighter
+  // peak in the centre, body2 falloff on either side. Reads as a
+  // proper specular ridge along the upper chest instead of a flat
+  // 1-px stripe of body2.
   ctx.fillStyle = cc.body2;
   ctx.fillRect(sx + 9, topY + 2, 14, 1);
+  ctx.fillStyle = cc.bodyHi;
+  ctx.fillRect(sx + 12, topY + 2, 8, 1);
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.fillRect(sx + 14, topY + 2, 4, 1);
 
   // White front trim (collar V)
   px(sx + 12, topY + 3, 8, 1, CUTE_PAL.trim);
@@ -20404,17 +20484,29 @@ function drawCuteCharacter(sx, sy) {
   px(sx + 21, sy + 40 + bb, 3, 1, CUTE_PAL.outline);
 
   // === ARMS (thin, anchored at new shoulder positions) ===
+  // v0.25.41 — 3-tone cel on each arm: shoulder hi-cap, body, deep
+  // shadow underside, hand-skin terminator. Sells the arm as a
+  // cylinder rather than a flat 2px bar.
   const backX = f > 0 ? sx + 5 : sx + player.w - 7;
   px(backX, topY + 2, 2, 8, cc.body);
-  px(backX, topY + 2, 2, 1, cc.body2);
+  px(backX, topY + 2, 2, 1, cc.body2);                      // shoulder hi-cap
+  px(backX, topY + 3, 1, 7, cc.bodyMid);                    // shadow side stripe
   px(backX, topY + 10, 2, 2, CUTE_PAL.skin);
+  // skin micro-shadow on the back-arm hand
+  px(backX, topY + 11, 1, 1, CUTE_PAL.skinShd);
 
   const frontX = f > 0 ? sx + player.w - 7 : sx + 5;
-  px(frontX, topY + 2, 2, 3, cc.body2);
+  px(frontX, topY + 2, 2, 3, cc.body2);                      // shoulder hi-cap
   const sleeveLen = 6 + Math.floor(swingBase * 3);
   px(frontX, topY + 2, 2, sleeveLen, cc.body);
+  // Cel shadow stripe on the underside of the front arm
+  px(frontX + (f > 0 ? 0 : 1), topY + 3, 1, sleeveLen - 1, cc.bodyMid);
+  // Bright lit edge stripe on the topside of the front arm
+  px(frontX + (f > 0 ? 1 : 0), topY + 2, 1, sleeveLen, 'rgba(255,235,200,0.35)');
   const handY = topY + 2 + sleeveLen;
   px(frontX, handY, 2, 2, CUTE_PAL.skin);
+  // skin micro-shadow on the front hand (matches head 4-tone treatment)
+  px(frontX + (f > 0 ? 0 : 1), handY + 1, 1, 1, CUTE_PAL.skinShd);
 
   // Rush trail (behind the torso)
   if (player.rushTimer > 0) {
@@ -20450,9 +20542,26 @@ function drawCuteCharacter(sx, sy) {
   // Skin base fill
   ctx.fillStyle = CUTE_PAL.skin;
   ctx.beginPath(); ctx.arc(hcx, hcy, hr, 0, Math.PI * 2); ctx.fill();
-  // Hard diagonal cel-shadow wedge (upper-left light source)
+  // v0.25.41 — 4-tone cel-shaded sphere with SSS warm seam.
+  // Layer order from light to dark:
+  //   1. base lit skin  (already painted above)
+  //   2. SSS warm pink seam at the lit/shadow boundary
+  //   3. mid skin shadow (the existing skinShd hue)
+  //   4. deep cool shadow at the bottom-right form-shadow edge
+  //   5. chin cast shadow (deepest, ellipse under jaw)
+  // All clipped to the head circle.
   ctx.save();
   ctx.beginPath(); ctx.arc(hcx, hcy, hr, 0, Math.PI * 2); ctx.clip();
+  // SSS warm seam — narrow strip just above where the mid-shadow starts
+  ctx.fillStyle = CUTE_PAL.skinSss;
+  ctx.beginPath();
+  ctx.moveTo(hcx - hr * 1.3, hcy - 2);
+  ctx.lineTo(hcx + hr * 1.3, hcy - hr * 0.7 - 2);
+  ctx.lineTo(hcx + hr * 1.3, hcy - hr * 0.7 + 1);
+  ctx.lineTo(hcx - hr * 1.3, hcy + 1);
+  ctx.closePath();
+  ctx.fill();
+  // Mid shadow wedge (the original skinShd, bottom-right of the sphere)
   ctx.fillStyle = CUTE_PAL.skinShd;
   ctx.beginPath();
   ctx.moveTo(hcx - hr * 1.3, hcy);
@@ -20461,26 +20570,19 @@ function drawCuteCharacter(sx, sy) {
   ctx.lineTo(hcx - hr * 1.6, hcy + hr * 1.6);
   ctx.closePath();
   ctx.fill();
-  // v0.25.30 — mid-tone transition band between lit base and cel
-  // shadow. A narrow warm-skin strip drawn just above the cel-shadow
-  // edge gives 3-tone shading (lit → mid → shadow) instead of the
-  // hard 2-tone step. Subtle but reads as proper illustration.
-  const midSkin = (typeof _mixHex === 'function')
-    ? _mixHex(CUTE_PAL.skin, CUTE_PAL.skinShd, 0.45)
-    : CUTE_PAL.skin;
-  ctx.fillStyle = midSkin;
+  // Deep shadow — small cool wedge at the bottom-right form-shadow
+  // (where the sphere curves furthest from the light). Sells the
+  // 3-D form vs. flat 2-tone disc.
+  ctx.fillStyle = CUTE_PAL.skinDeep;
   ctx.beginPath();
-  ctx.moveTo(hcx - hr * 1.3, hcy - 1);
-  ctx.lineTo(hcx + hr * 1.3, hcy - hr * 0.7 - 1);
-  ctx.lineTo(hcx + hr * 1.3, hcy - hr * 0.7 + 2);
-  ctx.lineTo(hcx - hr * 1.3, hcy + 2);
+  ctx.moveTo(hcx + hr * 0.2, hcy + hr * 0.4);
+  ctx.lineTo(hcx + hr * 1.2, hcy + hr * 0.0);
+  ctx.lineTo(hcx + hr * 1.6, hcy + hr * 1.6);
+  ctx.lineTo(hcx + hr * 0.0, hcy + hr * 1.6);
   ctx.closePath();
   ctx.fill();
-  ctx.restore();
-  // Chin cast shadow under the jaw
-  ctx.save();
-  ctx.beginPath(); ctx.arc(hcx, hcy, hr, 0, Math.PI * 2); ctx.clip();
-  ctx.fillStyle = CUTE_PAL.skinShd;
+  // Chin cast shadow under the jaw — uses skinDeep for stronger contrast
+  ctx.fillStyle = CUTE_PAL.skinDeep;
   ctx.beginPath();
   ctx.ellipse(hcx, hcy + hr - 2, hr - 2, 3, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -20516,23 +20618,34 @@ function drawCuteCharacter(sx, sy) {
   ctx.restore();
 
   // Hair (fills bigger head nicely)
+  // v0.25.41 — hair gets the same 4-tone treatment: deep shadow band
+  // on the right (shadow side), base hair, hi rim, glossy peak strand.
   px(sx + 2, sy - 1 + hb, 28, 9, cc.hair);
   px(sx + 2, sy - 1 + hb, 28, 2, cc.hairHi);
+  // Right-side hair receives the cool deep shadow (form-shadow side)
+  px(sx + 22, sy - 1 + hb, 8, 9, cc.hairDeep);
+  px(sx + 22, sy + 1 + hb, 8, 1, cc.hair);    // mid-tone re-stripe to soften the cut
   px(sx + 1, sy + 4 + hb, 3, 15, cc.hair);
-  px(sx + 28, sy + 4 + hb, 3, 15, cc.hair);
+  px(sx + 28, sy + 4 + hb, 3, 15, cc.hairDeep);   // right side-locks darker
   px(sx + 1, sy + 4 + hb, 1, 13, cc.hairHi);
   px(sx + 6, sy + 7 + hb, 8, 4, cc.hair);
   px(sx + 18, sy + 7 + hb, 8, 4, cc.hair);
+  px(sx + 22, sy + 7 + hb, 4, 4, cc.hairDeep);    // right tuft inherits deep
   px(sx + 6, sy + 2 + hb, 4, 2, cc.hairHi);
   px(sx + 22, sy + 2 + hb, 4, 2, cc.hairHi);
   // v0.25.29 — hair shine band: thin near-white strand running across
   // the top of the hair mass. Sells the "glossy anime hair" feel that
   // the existing flat hairHi rim missed.
+  // v0.25.41 — peak strand uses cc.hairHi2 (super-bright derived tone)
+  // for that anime hair gloss, plus a 1px crisp-white core.
   ctx.save();
-  ctx.fillStyle = 'rgba(255,255,255,0.42)';
+  ctx.fillStyle = cc.hairHi2;
   ctx.fillRect(sx + 7, sy - 1 + hb, 12, 1);
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.fillStyle = 'rgba(255,255,255,0.95)';
   ctx.fillRect(sx + 11, sy - 1 + hb, 5, 1);   // brighter peak
+  // Tiny secondary specular pip on the side-locks
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.fillRect(sx + 1, sy + 5 + hb, 1, 3);
   ctx.restore();
 
   // === EYES — smaller 2×3 solid black dots ===
