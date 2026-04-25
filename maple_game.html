@@ -565,6 +565,38 @@
     .mobile-deck .mc-btn[data-cooling="1"] {
       filter: grayscale(0.85) brightness(0.78);
     }
+
+    /* v0.25.34 — skill ICON + small key badge inside each face button.
+       Replaces the previous letter-only label. Big emoji shows the
+       actual skill, tiny corner badge keeps the keyboard hint so
+       desktop+touch parity stays. The .mc-cd cooldown sweep still
+       layers on top (z-index:2) so it covers the icon while cooling. */
+    .mobile-deck .mc-btn .mc-icon {
+      font-size: 26px;
+      line-height: 1;
+      pointer-events: none;
+      filter: drop-shadow(0 1px 1px rgba(0,0,0,0.6));
+    }
+    .mobile-deck .mc-btn .mc-key {
+      position: absolute;
+      bottom: 2px; right: 4px;
+      font: 700 9px ui-monospace, Menlo, Consolas, monospace;
+      color: rgba(255,238,170,0.92);
+      text-shadow: 0 1px 2px #000;
+      pointer-events: none;
+      z-index: 1;
+      letter-spacing: 0.5px;
+    }
+    /* When a slot is empty (no skill matched yet — e.g. before job
+       advancement), keep the icon span hidden so the key badge can
+       sit centered like before. */
+    .mobile-deck .mc-btn[data-empty="1"] .mc-icon { display: none; }
+    .mobile-deck .mc-btn[data-empty="1"] .mc-key {
+      position: static;
+      font-size: 12px;
+      color: #fff;
+      letter-spacing: 1px;
+    }
     /* P1.9 — next-advancement chip. Injected at runtime into
        #top-ui; styled only on mobile so the desktop HUD stays
        unchanged. Shows "→ Job in N" / "→ Master in N"; hides
@@ -2290,7 +2322,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.33';
+const GAME_VERSION = 'v0.25.34';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5684,10 +5716,29 @@ function _wireMobileCooldownSweep() {
   );
   for (const btn of btns) {
     if (btn.dataset.dynamic) continue;          // skip F
-    if (btn.querySelector('.mc-cd')) continue;
-    const overlay = document.createElement('span');
-    overlay.className = 'mc-cd';
-    btn.appendChild(overlay);
+    // v0.25.34 — restructure each button's children once: replace the
+    // letter-only text (e.g. "Z") with two spans — a big skill ICON
+    // span and a small KEY badge — plus the existing cooldown overlay.
+    if (!btn.querySelector('.mc-icon')) {
+      const keyLabel = (btn.textContent || '').trim() || (btn.dataset.mkey || '').toUpperCase();
+      btn.textContent = '';
+      const iconEl = document.createElement('span');
+      iconEl.className = 'mc-icon';
+      iconEl.textContent = '';
+      btn.appendChild(iconEl);
+      const keyEl = document.createElement('span');
+      keyEl.className = 'mc-key';
+      keyEl.textContent = keyLabel;
+      btn.appendChild(keyEl);
+      // Pre-mark as empty so styling falls back to centered key badge
+      // until a real skill resolves on the first poll tick.
+      btn.dataset.empty = '1';
+    }
+    if (!btn.querySelector('.mc-cd')) {
+      const overlay = document.createElement('span');
+      overlay.className = 'mc-cd';
+      btn.appendChild(overlay);
+    }
   }
   setInterval(() => {
     if (typeof player === 'undefined' || !player) return;
@@ -5698,6 +5749,16 @@ function _wireMobileCooldownSweep() {
       const slot = KEY_TO_SLOT[k];
       if (!slot) continue;
       const found = (typeof skillBySlot === 'function') ? skillBySlot(slot) : null;
+      // v0.25.34 — keep the .mc-icon span in sync with the resolved
+      // skill's emoji (changes on class pick, job advance, master pick).
+      // Falls back to centered key badge when no skill matches the slot.
+      const iconEl = btn.querySelector('.mc-icon');
+      if (iconEl) {
+        const ico = found && found.def && found.def.icon ? found.def.icon : '';
+        if (iconEl.textContent !== ico) iconEl.textContent = ico;
+        const empty = ico ? '0' : '1';
+        if (btn.dataset.empty !== empty) btn.dataset.empty = empty;
+      }
       let cd = 0, max = 0;
       if (found) {
         cd = (player.skillCooldowns && player.skillCooldowns[found.id]) || 0;
