@@ -2486,7 +2486,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.46';
+const GAME_VERSION = 'v0.25.47';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5255,7 +5255,9 @@ const player = {
   },
   onGround:false, dropThrough:false, dropTimer:0,
   hp:100, maxHp:100, mp:50, maxMp:50,
-  exp:0, expToNext:100, level:1, mesos:200,
+  // v0.25.47 — initial expToNext bumped 100 → 120 to nudge the early
+  // grind up alongside the steeper late-game curve.
+  exp:0, expToNext:120, level:1, mesos:200,
   baseAtk:12, baseDef:5,
   cls: 'warrior', job: null, master: null,
   treeUnlocked: {},  // skill tree unlock map
@@ -5532,8 +5534,16 @@ window.addEventListener('keydown', e => {
     if (game.paused || player.hp <= 0) return;
     if (player.level < 50) {
       player.level = 50; player.exp = 0;
-      // Re-roll expToNext so the progress bar matches the new level
-      player.expToNext = Math.floor(100 * Math.pow(1.18, 49));
+      // Re-roll expToNext so the progress bar matches the new level.
+      // v0.25.47 — curve is now tiered (1.20 / 1.24 / 1.28) so a flat
+      // Math.pow won't compute the right number any more; loop through
+      // each level's multiplier to get the value for L50.
+      let _e = 120;
+      for (let _i = 1; _i < 50; _i++) {
+        const _mul = _i >= 40 ? 1.28 : _i >= 30 ? 1.24 : 1.20;
+        _e *= _mul;
+      }
+      player.expToNext = Math.floor(_e);
       // Boost max HP/MP to match the missed level grants
       const hpGain = player.cls === 'warrior' ? 28 : player.cls === 'archer' ? 20 : player.cls === 'rogue' ? 16 : 14;
       const mpGain = player.cls === 'mage' ? 22 : 10;
@@ -8051,7 +8061,7 @@ function offerPrestige() {
   p.count++; p.xpMult += 0.30; p.dmgMult += 0.30; p.bonusAP += 1;
   game.prestige = p;
   // Reset progression
-  player.level = 1; player.exp = 0; player.expToNext = 100;
+  player.level = 1; player.exp = 0; player.expToNext = 120;   // v0.25.47
   player.maxHp = 100; player.maxMp = 50;
   player.baseAtk = 12; player.baseDef = 5;
   player.skillPoints = p.bonusAP;
@@ -13966,13 +13976,23 @@ function _maybeLevelUp() {
   if (player.exp < player.expToNext) return;
   player.exp -= player.expToNext;
   player.level++;
-  // v0.25.7 — softened mid/late acceleration. Was 1.22/1.26, now 1.20/1.22.
-  // The Lv 40-50 climb used to compound at 1.26× per level (≈ 4× the
-  // bar in 5 levels) which felt punishing across prestige runs. At 1.22
-  // it's still a clear ramp without feeling like a wall.
-  const curveMul = player.level >= 40 ? 1.22
-                 : player.level >= 30 ? 1.20
-                 : 1.18;
+  // v0.25.7 — softened mid/late acceleration to 1.18/1.20/1.22.
+  // v0.25.47 — user asked for a harder levelling curve. Bumped each
+  // tier so the late game actually grinds without becoming punishing:
+  //   1-29  : 1.18 → 1.20  (slightly steeper early curve)
+  //   30-39 : 1.20 → 1.24  (mid-game noticeably harder)
+  //   40+   : 1.22 → 1.28  (late-game properly walls)
+  // Reference cumulative EXP totals (sum of expToNext from L1 → L50,
+  // starting at 120 base):
+  //   Old curve: ~2.5M total EXP for L1 → L50.
+  //   New curve: ~8.7M total EXP — roughly 3.4x the grind to L50,
+  //   front-loaded onto the late game. Players can hit L10 at near-
+  //   identical pace (1.31x), L20 a little slower (1.50x), and L40+
+  //   takes substantially more kills (2.3-3.4x). Tougher but not
+  //   punishing — keeps the run completable in a session.
+  const curveMul = player.level >= 40 ? 1.28
+                 : player.level >= 30 ? 1.24
+                 : 1.20;
   player.expToNext = Math.floor(player.expToNext * curveMul);
   // Clamp overflow — no banking toward the NEXT level-up
   if (player.exp >= player.expToNext) player.exp = Math.floor(player.expToNext * 0.95);
