@@ -2390,7 +2390,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.35';
+const GAME_VERSION = 'v0.25.36';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -16878,81 +16878,16 @@ const BG_IMAGES = {
 const BG_IMG = BG_IMAGES.main;
 
 // =========================================================================
-// CHARACTER LAYER ASSETS (v0.25.26)
+// CHARACTER LAYER ASSETS — REMOVED v0.25.36
 // =========================================================================
-// Layered sprite-sheet system: the base body is one PNG with 4×4 walk-cycle
-// frames; each equipment piece (hair / armor / cape / helmet / shield /
-// weapon / boots) attaches as its own per-pose PNG that draws on top.
-// Each gear PNG must match the same 4×4 frame layout as the base so the
-// composite reads as a single character animating in lockstep.
-//
-// Drop a PNG into `Sprites/character/<slot>/<id>.png` and reference it by
-// setting `player.equipped.<slot>.spriteKey = '<id>'` — the layer system
-// auto-loads on first access and gracefully no-ops if the file is missing.
-const CHARACTER_ASSETS = {};   // key (e.g. 'base_chibi', 'armor_chain') → Image
-function _loadCharLayer(key, src) {
-  if (CHARACTER_ASSETS[key]) return CHARACTER_ASSETS[key];
-  const img = (typeof Image !== 'undefined') ? new Image() : null;
-  if (!img) return null;
-  img._loaded = false;
-  img.onload  = () => { img._loaded = true; };
-  img.onerror = () => { img._loaded = false; };  // missing layer = silent skip
-  img.src     = src;
-  CHARACTER_ASSETS[key] = img;
-  return img;
-}
-// Pre-load the base body. Equipment layers load lazily on first lookup.
-_loadCharLayer('base_chibi', 'Sprites/character/chibi_nude.png');
-
-// Frame layout — 4×4 grid by default. Adjust if a future sheet uses a
-// different layout (e.g. 8 columns of 2 rows for a more granular cycle).
-const CHAR_FRAMES_X = 4;
-const CHAR_FRAMES_Y = 4;
-
-// Pick the right frame index from current player state. v0.25.26 uses a
-// simple 4-frame walk cycle in row 0 + frame 0 as idle. Future iterations
-// can extend this to attack frames in row 1, jump in row 2, etc.
-function _currentCharFrame() {
-  if (!player) return 0;
-  const moving = Math.abs(player.vx) > 0.5;
-  if (!moving) return 0;
-  // Cycle frames 0..3 of the top row at ~5 fps walk pace
-  return Math.floor(game.time * 0.18) % CHAR_FRAMES_X;
-}
-
-// Draw one frame of one layer at the player's screen position. Anchored
-// to the player's feet so the visible silhouette stands on the ground
-// regardless of how tall the source frame is.
-function _drawCharFrame(img, sx, sy, frameIdx, facing) {
-  if (!img || !img._loaded) return false;
-  const fw = (img.naturalWidth  || img.width)  / CHAR_FRAMES_X;
-  const fh = (img.naturalHeight || img.height) / CHAR_FRAMES_Y;
-  if (!fw || !fh) return false;
-  const col = frameIdx % CHAR_FRAMES_X;
-  const row = ((frameIdx / CHAR_FRAMES_X) | 0) % CHAR_FRAMES_Y;
-  const sxSrc = col * fw;
-  const sySrc = row * fh;
-  // Display size — chibi sheets are typically much taller than wide, and
-  // the head dominates. Fit so the figure stands ~1.6× the player hitbox
-  // height, with width derived from the source aspect to avoid squashing.
-  const dispH = player.h * 1.6;
-  const dispW = dispH * (fw / fh);
-  const drawX = sx + player.w / 2 - dispW / 2;
-  const drawY = sy + player.h - dispH;
-  ctx.save();
-  // v0.25.27 — sprite sheet natively faces LEFT (verified from the
-  // shipped chibi_nude.png poses). Flip when the player is facing
-  // RIGHT so the chibi walks the same direction it's moving.
-  if (facing > 0) {
-    ctx.translate(drawX + dispW, drawY);
-    ctx.scale(-1, 1);
-    ctx.drawImage(img, sxSrc, sySrc, fw, fh, 0, 0, dispW, dispH);
-  } else {
-    ctx.drawImage(img, sxSrc, sySrc, fw, fh, drawX, drawY, dispW, dispH);
-  }
-  ctx.restore();
-  return true;
-}
+// The PNG character sprite system (chibi_nude.png + per-slot overlays) is
+// gone. The procedural illustrative renderer (drawCuteCharacter) is the
+// only character art path. This block previously held _loadCharLayer +
+// _drawCharFrame + an auto-load of `Sprites/character/chibi_nude.png` at
+// boot — every load wasted ~1.9 MB of bandwidth + memory for a sprite
+// that drawLayeredCharacter never actually drew (the function returned
+// false unconditionally since v0.25.29). Removing the scaffolding so
+// nothing references the Sprites/character/ tree.
 
 // Ordered cycle used when a combat map has no explicit `mapData.bg`.
 // Ordered from "bright/cheery" → "moody" so the natural grind
@@ -19951,183 +19886,18 @@ function shadeColor(hex, amt) {
 }
 
 // =========================================================================
-// SPRITE ASSET LOADER + LAYERED CHARACTER RENDERER
-// Drops PNG sprite sheets over the procedural draw. Falls back to the
-// hand-drawn pixel art if any expected asset is missing.
-// Frame layout: 6 frames, 32×48 each, horizontal sheet (192×48 total).
-// Frame order: 0=idle 1=walk-1 2=walk-2 3=jump 4=attack-mid 5=attack-end
-// Layer Z-order: base → hair → armor → cape → helmet → shield → weapon → accessory glow
+// SPRITE ASSET LOADER + LAYERED CHARACTER RENDERER — REMOVED v0.25.36
 // =========================================================================
-const ASSETS = {};
-const SPRITE_FRAME_W = 32;
-const SPRITE_FRAME_H = 48;
-
-function loadSprite(name, path) {
-  return new Promise(resolve => {
-    const img = new Image();
-    img.onload  = () => { ASSETS[name] = img; resolve(img); };
-    img.onerror = () => { resolve(null); }; // silent fallback
-    img.src = path;
-  });
-}
-
-// Call this once at boot (also whenever equipment changes if you want to lazy-load).
-function loadCharacterAssets() {
-  const todo = [
-    // Base bodies
-    ['base_male',   'sprites/character/base_male.png'],
-    ['base_female', 'sprites/character/base_female.png'],
-    // Hair
-    ['hair_spiky_brown',    'sprites/character/overlays/hair/spiky_brown.png'],
-    ['hair_spiky_gold',     'sprites/character/overlays/hair/spiky_gold.png'],
-    ['hair_long_silver',    'sprites/character/overlays/hair/long_silver.png'],
-    ['hair_ponytail_blonde','sprites/character/overlays/hair/ponytail_blonde.png'],
-    // Armor
-    ['armor_cloth_tunic',    'sprites/character/overlays/armor/cloth_tunic.png'],
-    ['armor_leather_vest',   'sprites/character/overlays/armor/leather_vest.png'],
-    ['armor_chain_mail',     'sprites/character/overlays/armor/chain_mail.png'],
-    ['armor_plate_armor',    'sprites/character/overlays/armor/plate_armor.png'],
-    ['armor_dragon_scale',   'sprites/character/overlays/armor/dragon_scale.png'],
-    ['armor_dawnshard_aegis','sprites/character/overlays/armor/dawnshard_aegis.png'],
-    // Cape
-    ['cape_wine_red',     'sprites/character/overlays/cape/wine_red.png'],
-    ['cape_royal_blue',   'sprites/character/overlays/cape/royal_blue.png'],
-    ['cape_dawnshard',    'sprites/character/overlays/cape/dawnshard.png'],
-    // Helmet
-    ['helmet_iron_cap',       'sprites/character/overlays/helmet/iron_cap.png'],
-    ['helmet_knight_plume',   'sprites/character/overlays/helmet/knight_plume.png'],
-    ['helmet_dawnshard_crown','sprites/character/overlays/helmet/dawnshard_crown.png'],
-    // Shield
-    ['shield_wooden',     'sprites/character/overlays/shield/wooden.png'],
-    ['shield_iron',       'sprites/character/overlays/shield/iron.png'],
-    ['shield_knight_kite','sprites/character/overlays/shield/knight_kite.png'],
-    // Weapons
-    ['weapon_sword_wood',     'sprites/character/overlays/weapon/sword_wood.png'],
-    ['weapon_sword_iron',     'sprites/character/overlays/weapon/sword_iron.png'],
-    ['weapon_sword_steel',    'sprites/character/overlays/weapon/sword_steel.png'],
-    ['weapon_sword_runed',    'sprites/character/overlays/weapon/sword_runed.png'],
-    ['weapon_sword_katana',   'sprites/character/overlays/weapon/sword_katana.png'],
-    ['weapon_sword_dawnshard','sprites/character/overlays/weapon/sword_dawnshard.png'],
-    // Boots
-    ['boots_leather',   'sprites/character/overlays/boots/leather.png'],
-    ['boots_plate',     'sprites/character/overlays/boots/plate.png'],
-    ['boots_dawnshard', 'sprites/character/overlays/boots/dawnshard.png'],
-  ];
-  for (const [name, path] of todo) loadSprite(name, path);
-}
-
-// State → which of the 6 frames to show
-function currentCharacterFrame() {
-  if (player.attacking) {
-    return (player.attackTimer > 130) ? 4 : 5;   // mid / end
-  }
-  if (!player.onGround) return 3;                 // jump
-  if (player.state === 'walk' || player.state === 'dash' || player.state === 'rush') {
-    return (Math.floor(game.time / 8) % 2 === 0) ? 1 : 2;
-  }
-  return 0; // idle
-}
-
-// Upscale factor: draw each 32×48 sprite frame at ~1.5× to fill the 28×44
-// hitbox with a little overflow for cape/weapon. Tuneable via SPRITE_SCALE.
-const SPRITE_SCALE = 1.5;
-
-function drawFrame(img, sx, sy, frameIdx, facing) {
-  if (!img) return false;
-  const fw = SPRITE_FRAME_W, fh = SPRITE_FRAME_H;
-  const sxSrc = frameIdx * fw;
-  const outW = fw * SPRITE_SCALE;
-  const outH = fh * SPRITE_SCALE;
-  // Anchor: feet of sprite on feet of hitbox; horizontally centered.
-  const drawX = sx + player.w/2 - outW/2;
-  const drawY = sy + player.h - outH;
-  ctx.save();
-  if (facing < 0) {
-    // Mirror around the draw rectangle's center vertical axis
-    ctx.translate(drawX + outW, drawY);
-    ctx.scale(-1, 1);
-    ctx.drawImage(img, sxSrc, 0, fw, fh, 0, 0, outW, outH);
-  } else {
-    ctx.drawImage(img, sxSrc, 0, fw, fh, drawX, drawY, outW, outH);
-  }
-  ctx.restore();
-  return true;
-}
-
-// Composites base → hair → armor → cape → helmet → shield → weapon.
-// Returns true if the BASE body rendered from a sprite — otherwise
-// caller falls back to the procedural hand-drawn art.
-//
-// v0.25.2 — disabled. The procedural DQ-style character + cape/weapon
-// animation is the canonical art. Returning false unconditionally forces
-// drawPlayer to use drawCuteCharacter. PNG sprite loading also skipped
-// at boot so the ASSETS map stays empty. Delete the generated PNGs in
-// Sprites/character/ if you find them — they are not referenced.
-function drawLayeredCharacter(sx, sy) {
-  // v0.25.26 — re-enabled with the new layered-sprite system. Tries
-  // v0.25.29 — sprite path disabled. The chibi_nude.png sheet didn't
-  // read well in-game (proportions, lighting, facing inversion all
-  // pulled the eye away from the procedural cel-shaded look). The
-  // CHARACTER_ASSETS infrastructure stays in place so a future asset
-  // pass (e.g. a sheet with proper lighting + matching equipment
-  // layers) can flip this back to active by removing the early return.
-  return false;
-  // eslint-disable-next-line no-unreachable
-  /* preserved for the future re-enable:
-  const base = CHARACTER_ASSETS['base_chibi'];
-  if (!base || !base._loaded) return false;
-  const frame = _currentCharFrame();
-  const f = player.facing;
-
-  // 0. Base body (the nude sheet)
-  if (!_drawCharFrame(base, sx, sy, frame, f)) return false;
-
-  // 1. Hair — from player.look.hair (cosmetic slot)
-  const hairKey = player.look && player.look.hair;
-  if (hairKey) {
-    const img = _loadCharLayer('hair_' + hairKey, 'Sprites/character/hair/' + hairKey + '.png');
-    _drawCharFrame(img, sx, sy, frame, f);
-  }
-  // 2. Armor — from equipped item
-  const armor = player.equipped && player.equipped.armor;
-  if (armor && armor.spriteKey) {
-    const img = _loadCharLayer('armor_' + armor.spriteKey, 'Sprites/character/armor/' + armor.spriteKey + '.png');
-    _drawCharFrame(img, sx, sy, frame, f);
-  }
-  // 3. Cape — equipped item OR cosmetic player.look.cape
-  const capeKey = (player.equipped && player.equipped.cape && player.equipped.cape.spriteKey)
-               || (player.look && player.look.cape);
-  if (capeKey) {
-    const img = _loadCharLayer('cape_' + capeKey, 'Sprites/character/cape/' + capeKey + '.png');
-    _drawCharFrame(img, sx, sy, frame, f);
-  }
-  // 4. Helmet — from equipped item
-  const helmet = player.equipped && player.equipped.helmet;
-  if (helmet && helmet.spriteKey) {
-    const img = _loadCharLayer('helmet_' + helmet.spriteKey, 'Sprites/character/helmet/' + helmet.spriteKey + '.png');
-    _drawCharFrame(img, sx, sy, frame, f);
-  }
-  // 5. Shield (off-hand)
-  const shield = player.equipped && player.equipped.shield;
-  if (shield && shield.spriteKey) {
-    const img = _loadCharLayer('shield_' + shield.spriteKey, 'Sprites/character/shield/' + shield.spriteKey + '.png');
-    _drawCharFrame(img, sx, sy, frame, f);
-  }
-  // 6. Weapon (main hand)
-  const weapon = player.equipped && player.equipped.weapon;
-  if (weapon && weapon.spriteKey) {
-    const img = _loadCharLayer('weapon_' + weapon.spriteKey, 'Sprites/character/weapon/' + weapon.spriteKey + '.png');
-    _drawCharFrame(img, sx, sy, frame, f);
-  }
-  // 7. Boots — drawn last so they overlay base feet cleanly
-  const boots = player.equipped && player.equipped.boots;
-  if (boots && boots.spriteKey) {
-    const img = _loadCharLayer('boots_' + boots.spriteKey, 'Sprites/character/boots/' + boots.spriteKey + '.png');
-    _drawCharFrame(img, sx, sy, frame, f);
-  }
-  return true;
-  */
-}
+// All PNG-based character rendering is gone — drawCuteCharacter (procedural
+// chibi pixel art) is the canonical character renderer. Previously this
+// block held: ASSETS / SPRITE_FRAME_W / SPRITE_FRAME_H / SPRITE_SCALE
+// constants, loadSprite, loadCharacterAssets (auto-loaded ~30 PNGs from
+// Sprites/character/overlays/), currentCharacterFrame, drawFrame, and
+// drawLayeredCharacter. None were called any more (loadCharacterAssets()
+// was commented out in BOOT, drawLayeredCharacter returned false
+// unconditionally) — kept around as dead code that confused readers and
+// added ~150 lines. drawPlayer's call to drawLayeredCharacter is also
+// gone — drawCuteCharacter is invoked directly.
 
 // Chibi transform — applied around every drawPlayer call so all layers (cape,
 // body, head, overlays) get the same big-head/small-body proportions without
@@ -20356,24 +20126,9 @@ function drawPlayer() {
     }
   }
 
-  // Try layered PNG renderer; fall back to procedural pixel art if no asset loaded.
-  if (drawLayeredCharacter(sx, sy)) {
-    // Accessory glow (always procedural for now, even over sprites)
-    const accVis = (player.equipped && player.equipped.accessory && player.equipped.accessory.vis) || null;
-    if (accVis) {
-      const ag = Math.sin(game.time * 0.15) * 2;
-      ctx.fillStyle = accVis.glow + '88';
-      const accX = player.facing > 0 ? sx + player.w - 2 : sx;
-      ctx.fillRect(accX, sy + 28, 3, 3);
-      ctx.fillStyle = accVis.glow + 'aa';
-      ctx.beginPath(); ctx.arc(sx + player.w/2, sy + 26, 1.5 + ag * 0.3, 0, Math.PI * 2); ctx.fill();
-    }
-    _chibiRestore();
-    _drawCuteFaceOverlay(sx, sy);
-    _drawPlayerNameTag(sx, sy);
-    return;
-  }
   // --- Cute chibi character (procedural, uses CUTE_PAL + CUTE_CLASS_COLORS) ---
+  // v0.25.36 — was guarded by a dead drawLayeredCharacter() PNG path; that
+  // sprite system is removed and drawCuteCharacter is the only renderer.
   drawCuteCharacter(sx, sy);
   _chibiRestore();
   _drawCuteFaceOverlay(sx, sy);
@@ -26000,9 +25755,10 @@ function drawSuperBossBar() {
 // =========================================================================
 // BOOT
 // =========================================================================
-// v0.25.2 — PNG character sprites disabled; the procedural DQ-style art
-// (drawCuteCharacter) is the canonical renderer. No sprites loaded.
-// loadCharacterAssets();
+// v0.25.36 — PNG character sprite scaffolding fully removed. drawCuteCharacter
+// (procedural chibi pixel art) is the canonical character renderer. There is
+// no sprite asset loader to reinstate; if a future iteration wants PNG-driven
+// character art it should be designed from scratch.
 // Any user gesture (click or key) initializes audio (satisfies autoplay policy)
 window.addEventListener('keydown',    () => audio.init(), { once: true });
 window.addEventListener('pointerdown', () => audio.init(), { once: true });
