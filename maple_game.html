@@ -2486,7 +2486,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.45';
+const GAME_VERSION = 'v0.25.46';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5185,16 +5185,19 @@ for (const z of ZODIAC_SIGNS) {
   // v0.20 rebalance — zodiac bosses bumped +30% HP / +15% ATK to match the
   // player power-creep from class identity + 5-boon stacked rolls.
   // v0.21 — each sign also declares an evasion score scaling with order.
+  // v0.25.46 — user asked for harder zodiac fights. HP +25%, ATK +18%,
+  // DEF +25%, evasion bumped at the top end. Loot rewards scale with the
+  // new HP curve so the grind/reward ratio stays roughly even.
   monsterTypes['zodiac_' + z.id] = {
     name: z.name,
     w: 110 + o * 4, h: 110 + o * 4,
     color: z.colors.base, shell: z.colors.shade,
-    hp:    Math.floor(15600 + o * 5850),
-    atk:   Math.floor(80 + o * 9),
-    def:   Math.floor(16 + o * 2),
-    evasion: Math.floor(140 + o * 8),
-    exp:   Math.floor(5800 + o * 1380),
-    mesos: Math.floor(4000 + o * 920),
+    hp:    Math.floor(19500 + o * 7300),
+    atk:   Math.floor(95 + o * 11),
+    def:   Math.floor(20 + o * 3),
+    evasion: Math.floor(160 + o * 10),
+    exp:   Math.floor(6800 + o * 1620),
+    mesos: Math.floor(4700 + o * 1080),
     speed: 0.8, jump: 0,
     boss: true, zodiacBoss: true,
     zodiacSign: z.id,
@@ -12983,15 +12986,30 @@ function updateMonsters(dt) {
     }
 
     // Physics (gravity scales with map)
-    const _mGM = gravMul();
-    m.vy += 0.5 * _mGM;
-    const _mCap = 14 * Math.sqrt(_mGM);
-    if (m.vy > _mCap) m.vy = _mCap;
-    m.x += m.vx; m.y += m.vy;
-    m.vx *= m.isBoss ? 0.94 : 0.9;
-    if (m.x < 0) { m.x = 0; m.facing = 1; }
-    if (m.x + m.w > game.mapData.worldWidth) { m.x = game.mapData.worldWidth - m.w; m.facing = -1; }
-    checkPlatformCollision(m);
+    // v0.25.46 — gate the whole physics block on m._noGravity so bosses
+    // with phased "out of bounds" attacks (Scorpio's burrow) can drive
+    // their own y/x without gravity + collision-clamp interference.
+    if (!m._noGravity) {
+      const _mGM = gravMul();
+      m.vy += 0.5 * _mGM;
+      const _mCap = 14 * Math.sqrt(_mGM);
+      if (m.vy > _mCap) m.vy = _mCap;
+      m.x += m.vx; m.y += m.vy;
+      m.vx *= m.isBoss ? 0.94 : 0.9;
+      if (m.x < 0) { m.x = 0; m.facing = 1; }
+      if (m.x + m.w > game.mapData.worldWidth) { m.x = game.mapData.worldWidth - m.w; m.facing = -1; }
+      checkPlatformCollision(m);
+    } else {
+      // Suspended — preserve x/y exactly as the AI set them. Zero out
+      // velocities each tick so they can't accumulate during the
+      // suspension and slingshot the boss when the flag releases.
+      m.vy = 0;
+      m.vx = 0;
+      // Still clamp horizontal world bounds so a "tracking the player"
+      // burrow can't exit the arena.
+      if (m.x < 0) m.x = 0;
+      if (m.x + m.w > game.mapData.worldWidth) m.x = game.mapData.worldWidth - m.w;
+    }
 
     // Contact damage
     if (aabb(player, m) && player.invulnerable <= 0) {
@@ -13618,6 +13636,15 @@ const ULT_SKILL_TAGS = new Set([
 ]);
 
 function hitMonster(m, dmg, isCrit, skill) {
+  // v0.25.46 — Scorpio (and any other zodiac with burrow/dodge mech) is
+  // invulnerable while underground; show MISS so player gets feedback.
+  if (m && m._invulnBurrow && skill !== 'thorns' && skill !== 'burn') {
+    game.damageNumbers.push({
+      x: m.x + m.w/2 - 18, y: m.y - 6, vy: -2,
+      text: 'BURROWED', life: 32, color: '#aa66cc', size: 11
+    });
+    return;
+  }
   // Dev cheat — one-shot kills anything
   if (player._oneShot) dmg = 999999;
   // Mastery damage bonus (v0.24.1) — 1% per mastery tier vs the mob type.
@@ -24049,20 +24076,27 @@ function zodiacBossAI(m, dt, distToPlayer) {
 }
 
 function _zodiacAiGeneric(m, dt, distToPlayer, phase, z) {
-  // Chase + periodic projectile volley
+  // Chase + periodic projectile volley.
+  // v0.25.46 — tighter cycles (was 1800/1200/800 → 1450/950/650) and
+  // wider volleys at higher phases (5 → 7 shots in phase 3) so the
+  // generic fallback feels more dangerous, not just the bespoke
+  // signs. Scale also bumped slightly so phase-3 burst hits harder.
   const dir = Math.sign((player.x + player.w/2) - (m.x + m.w/2));
-  m.vx += dir * 0.06;
-  if (Math.abs(m.vx) > 2) m.vx = Math.sign(m.vx) * 2;
-  const cycle = phase === 1 ? 1800 : phase === 2 ? 1200 : 800;
+  m.vx += dir * 0.07;
+  if (Math.abs(m.vx) > 2.2) m.vx = Math.sign(m.vx) * 2.2;
+  const cycle = phase === 1 ? 1450 : phase === 2 ? 950 : 650;
   if (m.patternTimer > cycle) {
     m.patternTimer = 0;
-    // Volley
-    for (let i = -2; i <= 2; i++) {
+    const shots = phase === 3 ? 7 : phase === 2 ? 5 : 5;
+    const half = (shots - 1) / 2;
+    for (let i = 0; i < shots; i++) {
+      const offset = i - half;
       game.projectiles.push({
         x: m.x + m.w/2, y: m.y + m.h/2,
-        vx: i * 2, vy: -4,
+        vx: offset * 1.8, vy: -4 - Math.abs(offset) * 0.3,
         w: 14, h: 14, life: 120,
-        damage: m.atk * 0.9, owner: 'enemy', skill: 'zodiac', color: z.colors.aura
+        damage: m.atk * (phase === 3 ? 1.05 : 0.9),
+        owner: 'enemy', skill: 'zodiac', color: z.colors.aura
       });
     }
     addShake(4);
@@ -24303,41 +24337,119 @@ const ZODIAC_AI = {
   },
 
   // ----- SCORPIO — poison tail + burrow -----
+  // v0.25.46 — completely reworked burrow. Old bug: y was nudged via
+  // `m.y += 3` deltas while gravity + checkPlatformCollision kept
+  // fighting the AI for control. The boss could fall through the floor
+  // and never recover ("buried underground" forever). New burrow uses
+  // m._noGravity to suspend physics, captures a known-good "groundY"
+  // before sinking, and uses absolute y-targets per phase. Boss is also
+  // invulnerable (m._invulnBurrow) while truly underground so players
+  // get visual feedback ("BURROWED") instead of phantom-hitting empty
+  // air. Cycle is also tightened for higher difficulty + a small
+  // poison-puddle telegraph appears at the emerge spot so the player
+  // can dodge the eruption.
   scorpio(m, dt, dist, phase, z) {
     const dir = Math.sign((player.x + player.w/2) - (m.x + m.w/2));
-    m.vx += dir * 0.05;
-    if (Math.abs(m.vx) > 1.4) m.vx = Math.sign(m.vx) * 1.4;
+    if (!m._noGravity) {
+      m.vx += dir * 0.05;
+      if (Math.abs(m.vx) > 1.4) m.vx = Math.sign(m.vx) * 1.4;
+    }
     if (m.patternState === 'idle') {
-      const cycle = phase === 1 ? 1700 : phase === 2 ? 1100 : 700;
+      // v0.25.46 — tighter cycles + 50% burrow chance (was 40%).
+      const cycle = phase === 1 ? 1500 : phase === 2 ? 950 : 600;
       if (m.patternTimer > cycle) {
-        m.patternState = Math.random() < 0.4 ? 'burrow' : 'sting';
+        m.patternState = Math.random() < 0.5 ? 'burrow' : 'sting';
         m.patternTimer = 0;
       }
     } else if (m.patternState === 'sting') {
-      if (m.patternTimer > 300 && !m._stung) {
+      // v0.25.46 — phase 2/3 fire 5 venom shots in a wide cone (was 3).
+      if (m.patternTimer > 280 && !m._stung) {
         m._stung = true;
-        // Three venom shots, high arc
-        for (let i = -1; i <= 1; i++) {
+        const shots = phase === 1 ? 3 : 5;
+        const half = (shots - 1) / 2;
+        for (let i = 0; i < shots; i++) {
+          const offset = i - half;
           game.projectiles.push({
             x: m.x + m.w/2, y: m.y,
-            vx: i * 3 + dir * 4, vy: -7,
-            w: 14, h: 14, life: 120,
-            damage: m.atk * 1.0, owner: 'enemy', skill: 'venom', color: '#ff44aa',
-            poison: 3000,
+            vx: offset * 2.4 + dir * 4, vy: -7 - Math.abs(offset) * 0.3,
+            w: 14, h: 14, life: 130,
+            damage: m.atk * (phase === 3 ? 1.15 : 1.0),
+            owner: 'enemy', skill: 'venom', color: '#ff44aa',
+            poison: phase === 3 ? 4500 : 3000,
           });
         }
       }
-      if (m.patternTimer > 900) { m.patternState = 'idle'; m.patternTimer = 0; m._stung = false; }
+      if (m.patternTimer > 850) { m.patternState = 'idle'; m.patternTimer = 0; m._stung = false; }
     } else if (m.patternState === 'burrow') {
-      // Teleport underground & re-emerge under player
-      if (m.patternTimer < 400) {
-        m.y += 3;                          // sink
-      } else if (m.patternTimer < 700) {
-        m.x = player.x;
-        m.y = 470;
+      // 4-phase state machine, all using absolute y-targets.
+      //   0   – 250 ms : SINK     (slide down into ground, become invuln)
+      //   250 – 800 ms : TRAVEL   (track player x while underground)
+      //   800 – 1000ms : ERUPT    (snap up + venom geyser)
+      //   1000–1300ms : SETTLE   (hold at ground, exit invuln, reset)
+      // Capture spawn y on entry so we always restore to the same height.
+      if (m._burrowGroundY == null) m._burrowGroundY = m.y;
+      m._noGravity = true;     // physics block honors this
+      m.vx = 0; m.vy = 0;
+      m._invulnBurrow = m.patternTimer >= 200 && m.patternTimer < 950;
+
+      const groundY = m._burrowGroundY;
+      if (m.patternTimer < 250) {
+        // Sink — slide downward, particles spit upward.
+        const t = m.patternTimer / 250;
+        m.y = groundY + 60 * t;
+        if (m.patternTimer % 4 < dt) {
+          game.particles.push({
+            x: m.x + m.w/2 + (Math.random() - 0.5) * m.w * 0.7,
+            y: m.y + m.h - 4, vx: (Math.random() - 0.5) * 1.5, vy: -1.4 - Math.random(),
+            life: 26, color: '#553a2a', size: 2.5
+          });
+        }
+      } else if (m.patternTimer < 800) {
+        // Underground travel — track player horizontally with light lag.
+        // Telegraph the emerge spot with a rising dust column on phase 2/3.
+        const targetX = player.x + player.w / 2 - m.w / 2;
+        m.x += (targetX - m.x) * 0.06;       // smooth chase
+        m.y = groundY + 70;                  // hold underground
+        if (phase >= 2 && m.patternTimer % 5 < dt) {
+          game.particles.push({
+            x: m.x + m.w/2 + (Math.random() - 0.5) * m.w * 0.5,
+            y: 480, vx: (Math.random() - 0.5) * 0.6, vy: -0.8,
+            life: 18, color: phase === 3 ? '#ff66cc' : '#aa66cc', size: 2
+          });
+        }
+      } else if (m.patternTimer < 1000) {
+        // Erupt — snap upward, fire a venom geyser.
+        const t = (m.patternTimer - 800) / 200;
+        m.y = groundY + 70 - 70 * t;
+        if (m.patternTimer >= 850 && !m._erupted) {
+          m._erupted = true;
+          addShake(10);
+          const shots = phase === 3 ? 7 : phase === 2 ? 5 : 3;
+          const half = (shots - 1) / 2;
+          for (let i = 0; i < shots; i++) {
+            const offset = i - half;
+            game.projectiles.push({
+              x: m.x + m.w/2, y: m.y,
+              vx: offset * 1.8, vy: -9 - Math.abs(offset) * 0.5,
+              w: 14, h: 14, life: 140,
+              damage: m.atk * (phase === 3 ? 1.2 : 1.0),
+              owner: 'enemy', skill: 'venom', color: '#ff44aa',
+              poison: phase === 3 ? 5000 : 3500,
+            });
+          }
+        }
+      } else if (m.patternTimer < 1300) {
+        // Settle — back to ground level, drop invuln.
+        m.y = groundY;
       } else {
-        m.y -= 4;                          // rise
-        if (m.patternTimer > 1200) { m.patternState = 'idle'; m.patternTimer = 0; }
+        // Exit — clear all burrow state.
+        m.y = groundY;
+        m._noGravity = false;
+        m._invulnBurrow = false;
+        m._erupted = false;
+        m._burrowGroundY = null;
+        m.patternState = 'idle';
+        m.patternTimer = 0;
       }
     }
   },

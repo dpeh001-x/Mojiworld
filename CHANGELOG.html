@@ -1125,6 +1125,66 @@
   <li><b>Clouds</b> now have optional tiny faces on bright maps — little black dot eyes, pink blush cheeks, and a subtle smile arc. About half the clouds get faces (every even-sized cloud) to avoid feeling busy.</li>
 </ul>
 
+<h2>v0.25.46 <span class="tag">Zodiac bosses harder + Scorpio burrow bug fixed</span></h2>
+<p class="lede">User: <i>"make the horoscope bosses mechanism harder to fight, scorpio has a bug in which it buries underground."</i> Two-part patch: a global zodiac difficulty buff, and a complete rework of Scorpio's burrow attack so it stops getting stuck below the floor.</p>
+
+<h3>🐛 Scorpio burrow bug — root cause</h3>
+<p>The old burrow mutated <code>m.y += 3</code> / <code>m.y -= 4</code> per AI tick while the standard monster-physics block kept applying gravity (<code>m.vy += 0.5</code>) and clamping to platforms. The two systems fought each other: gravity accumulated faster than the AI's <code>m.y -= 4</code> rise, so Scorpio could "miss" the surface during the rise phase and end up at <code>m.y &gt; 1000</code> after a few cycles — visually buried, mechanically stuck. The platform-collision gate (<code>entity.y + entity.h &lt; p.y + p.h + 20</code>) only triggers if the boss is <i>just</i> intersecting the ground from above; once the boss's bottom passes the ground's bottom, the clamp stops engaging and the boss falls forever.</p>
+
+<h3>🛠️ Burrow rework</h3>
+<ul>
+  <li>New <code>m._noGravity</code> flag in the boss physics block — when set, the monster-physics gravity + collision-clamp + position update is skipped entirely. AI drives <code>m.x</code> and <code>m.y</code> directly. Velocities zeroed each tick so they can't accumulate during the suspension.</li>
+  <li>Captures <code>m._burrowGroundY</code> on entry so the surface y is known. All sink/travel/erupt/settle phases use absolute targets relative to it (no more <code>+= 3</code> drift).</li>
+  <li>4-phase state machine with bounded timers:
+    <ul>
+      <li><b>0 – 250 ms — SINK</b>: slide 60 px down into the ground, dust particles spit upward.</li>
+      <li><b>250 – 800 ms — TRAVEL</b>: smooth chase to player x at 6%/tick lag. Phase 2/3 emit a violet/pink ground-warning column at the boss's column so the player can read where the eruption hits.</li>
+      <li><b>800 – 1000 ms — ERUPT</b>: snap upward 70 px, fire a 3/5/7-shot venom geyser at phase 1/2/3 (was 3 flat).</li>
+      <li><b>1000 – 1300 ms — SETTLE</b>: hold at <code>groundY</code>, drop the noGravity + invuln flags, reset <code>_erupted</code>, return to idle.</li>
+    </ul>
+  </li>
+  <li>New <code>m._invulnBurrow</code> flag — set during the underground portion of the burrow. <code>hitMonster()</code> checks this flag and shows a <code>BURROWED</code> miss tag instead of dealing damage, so players get visual feedback instead of phantom-hitting empty air.</li>
+</ul>
+
+<h3>🔪 Zodiac difficulty buff</h3>
+<table>
+<tr><th>Stat</th><th>Old</th><th>New</th></tr>
+<tr><td>HP</td><td>15600 + 5850 × order</td><td><b>19500 + 7300 × order</b> (~+25 / +28%)</td></tr>
+<tr><td>ATK</td><td>80 + 9 × order</td><td><b>95 + 11 × order</b> (~+18 / +24%)</td></tr>
+<tr><td>DEF</td><td>16 + 2 × order</td><td><b>20 + 3 × order</b> (~+25 / +50%)</td></tr>
+<tr><td>Evasion</td><td>140 + 8 × order</td><td><b>160 + 10 × order</b></td></tr>
+<tr><td>EXP reward</td><td>5800 + 1380 × order</td><td>6800 + 1620 × order</td></tr>
+<tr><td>Mesos reward</td><td>4000 + 920 × order</td><td>4700 + 1080 × order</td></tr>
+</table>
+<p>Loot/EXP scale up with HP so the time-to-clear ratio stays roughly constant — fights are tougher, but the reward per hour holds.</p>
+
+<h3>🎯 Tighter generic AI</h3>
+<ul>
+  <li><code>_zodiacAiGeneric</code> cycle reduced 1800/1200/800 ms → <b>1450/950/650</b> for phase 1/2/3.</li>
+  <li>Drift cap raised 2.0 → 2.2, acceleration 0.06 → 0.07, so the boss closes distance faster.</li>
+  <li>Volley count pushed to 5/5/7 shots (was 5 flat). Phase-3 shots also do +17% damage and arc wider for the wedge spread.</li>
+</ul>
+
+<h3>🦂 Scorpio-specific buffs</h3>
+<ul>
+  <li>Idle cycle 1700/1100/700 → <b>1500/950/600</b> ms. Burrow chance 40% → 50%.</li>
+  <li>Sting volley 3 shots flat → <b>3 / 5 / 5</b> per phase, with phase-3 venom doing +15% damage and 50% longer poison DoT (4500 → 5000 ms).</li>
+  <li>Burrow eruption volley 3 / 5 / 7 shots, phase-3 venom +20% damage and 5000 ms poison DoT.</li>
+</ul>
+
+<h3>What didn't change</h3>
+<ul>
+  <li>Other zodiac AI handlers (Aries / Taurus / Gemini / Cancer / Leo / Virgo / Libra / Sagittarius / Capricorn / Aquarius / Pisces) — unchanged. They get harder via the global stat buff but their bespoke patterns stay.</li>
+  <li>Phase thresholds — still 66% / 33% HP. Three phases, each more aggressive.</li>
+  <li>Standard AI / non-zodiac boss code — unchanged.</li>
+</ul>
+
+<h3>Touched surface</h3>
+<ul>
+  <li><code>maple_game.html</code> — version bump to <code>v0.25.46</code>. Edits in 5 places: zodiac stat block, generic AI fallback, scorpio AI handler, monster-physics gate, <code>hitMonster</code> invuln check. <b>+143 / −47</b> lines.</li>
+  <li>No save/network/protocol impact.</li>
+</ul>
+
 <h2>v0.25.45 <span class="tag">Remove top-left skill mini-row duplicate</span></h2>
 <p class="lede">User: <i>"can remove the skill dashboard duplicate at the top left."</i> The <code>#hud-skills</code> mini-row added in v0.25.37 mirrored the bottom-centre <code>#skill-bar</code> dock into the top-left HUD. With the v0.25.44 z-index fix making sure the bottom dock is always visible (it was actually hidden behind the canvas before that), the mirror is redundant. Removed it.</p>
 
