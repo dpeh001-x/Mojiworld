@@ -2878,6 +2878,16 @@ function _bootstrapPhaser() {
   class LXMonsterScene extends Phaser.Scene {
     constructor() { super({ key: 'lx_monsters' }); }
     preload() {
+      // v0.25.23 — Phase 4d-2: shared canvas helper so each new mob
+      // texture stays self-contained. Each `addMob` invocation produces
+      // one Phaser texture from a procedural drawing.
+      const addMob = (key, w, h, draw) => {
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        draw(c.getContext('2d'), w, h);
+        this.textures.addCanvas(key, c);
+      };
+
       // ---- Slime body texture (~28 px wide × 22 px tall). Iconic
       // teardrop with two big eyes and a smile, matching the in-game
       // chibi aesthetic. Tint applied at runtime via setTint(m.color).
@@ -2922,6 +2932,51 @@ function _bootstrapPhaser() {
       cx.arc(14, 16, 2.5, 0.2, Math.PI - 0.2);
       cx.stroke();
       this.textures.addCanvas('lx_mob_slime', c);
+
+      // ---- Snail body (~36 px wide × 28 px tall). Wide squat body with
+      // a round shell on top-left, two antenna stalks with eye dots,
+      // and a smile. White-base body so setTint colours it cleanly.
+      addMob('lx_mob_snail', 36, 28, (cx) => {
+        // Body (squat oval foot)
+        cx.fillStyle = '#ffffff';
+        cx.beginPath();
+        cx.ellipse(18, 22, 14, 5, 0, 0, Math.PI * 2);
+        cx.fill();
+        cx.strokeStyle = 'rgba(0,0,0,0.6)';
+        cx.lineWidth = 1.5;
+        cx.beginPath();
+        cx.ellipse(18, 22, 14, 5, 0, 0, Math.PI * 2);
+        cx.stroke();
+        // Round shell — purple, NOT tinted (rendered with full color)
+        cx.fillStyle = '#6a4fbd';
+        cx.beginPath(); cx.arc(13, 14, 8, 0, Math.PI * 2); cx.fill();
+        cx.strokeStyle = '#1a0810';
+        cx.lineWidth = 1.5;
+        cx.beginPath(); cx.arc(13, 14, 8, 0, Math.PI * 2); cx.stroke();
+        // Spiral lines on shell
+        cx.strokeStyle = '#3a205a';
+        cx.lineWidth = 1;
+        cx.beginPath(); cx.arc(11, 13, 4.5, 0, Math.PI * 2); cx.stroke();
+        cx.beginPath(); cx.arc(10, 12, 2, 0, Math.PI * 2); cx.stroke();
+        // Shell sheen
+        cx.fillStyle = 'rgba(255,255,255,0.4)';
+        cx.beginPath(); cx.ellipse(10, 11, 2.5, 1.2, -0.4, 0, Math.PI * 2); cx.fill();
+        // Antenna stalks
+        cx.strokeStyle = '#1a0810';
+        cx.lineWidth = 1.5;
+        cx.beginPath(); cx.moveTo(24, 21); cx.lineTo(26, 16); cx.stroke();
+        cx.beginPath(); cx.moveTo(28, 20); cx.lineTo(31, 14); cx.stroke();
+        // Eyes on stalks
+        cx.fillStyle = '#1a0410';
+        cx.beginPath(); cx.arc(26, 16, 1.5, 0, Math.PI * 2); cx.fill();
+        cx.beginPath(); cx.arc(31, 14, 1.5, 0, Math.PI * 2); cx.fill();
+        // Smile on body
+        cx.strokeStyle = '#1a0410';
+        cx.lineWidth = 1;
+        cx.beginPath();
+        cx.arc(22, 22, 2, 0.2, Math.PI - 0.2);
+        cx.stroke();
+      });
     }
     create() {
       this._pool = [];
@@ -2941,7 +2996,17 @@ function _bootstrapPhaser() {
     textureForMob(m) {
       if (!m || m.isBoss || m.zodiacBoss) return null;
       if (m.type === 'slime') return 'lx_mob_slime';
+      if (m.type === 'snail') return 'lx_mob_snail';
       return null;   // every other type stays on vanilla for now
+    }
+    // v0.25.23 — natural texture dimensions per type. Used by update()
+    // to derive scale from the mob's logical hitbox size.
+    _texBaseSize(key) {
+      switch (key) {
+        case 'lx_mob_slime': return [28, 22];
+        case 'lx_mob_snail': return [36, 28];
+        default:             return [28, 22];
+      }
     }
     _get(texKey) {
       let img;
@@ -2971,11 +3036,12 @@ function _bootstrapPhaser() {
         if (m.y + m.h < -40 || m.y > H + 40) continue;
         const img = this._get(key);
         // Position centered on the mob's hitbox, with a small bob
-        // matching vanilla _drawDQSlime's animTimer-driven sin oscillation.
+        // matching vanilla's animTimer-driven sin oscillation.
         const bob = Math.sin((m.animTimer || 0) * 0.02) * 1.5;
         img.setPosition(sx + m.w / 2, m.y + m.h / 2 + bob);
-        // Scale the 28×22 base texture to fit m.w × m.h.
-        img.setScale(m.w / 28, m.h / 22);
+        // Scale the base texture to fit m.w × m.h.
+        const [bw, bh] = this._texBaseSize(key);
+        img.setScale(m.w / bw, m.h / bh);
         // Facing — flip the sprite horizontally
         img.setFlipX((m.facing || 1) < 0);
         // Hit flash — vanilla uses ctx.filter = 'brightness(2.5)'.
