@@ -3238,13 +3238,115 @@ function _bootstrapPhaser() {
     }
   }
 
+  // v0.25.25 — Phase 5b: full-screen overlays. Owns the two remaining
+  // canvas-rendered HUD pieces — the super-boss top-of-screen banner
+  // (only visible during boss fights) and the white flash overlay
+  // (fires on every hit / level-up / dramatic moment). Highest depth
+  // in the UI scene stack so it covers everything else.
+  class LXOverlayScene extends Phaser.Scene {
+    constructor() { super({ key: 'lx_overlay' }); }
+    create() {
+      // ---- Flash overlay (full-screen white rect) ----
+      this._flash = this.add.rectangle(0, 0, W, H, 0xffffff, 0)
+        .setOrigin(0).setDepth(100);
+
+      // ---- Boss banner: backdrop + name + bar bg + bar fill +
+      // border + HP/phase text. Built once at scene-create time;
+      // each frame just toggles visibility + updates state.
+      // Hidden by default — only revealed when a superBoss is alive.
+      const pad = 40, barW = W - pad * 2, barH = 18;
+      const x = pad, y = 20;
+      this._bbX = x; this._bbY = y; this._bbW = barW; this._bbH = barH;
+
+      this._bbPlate = this.add.rectangle(x - 6, y - 22, barW + 12, barH + 42, 0x0a051e, 0.82)
+        .setOrigin(0).setDepth(50).setStrokeStyle(2, 0xb090ff, 1);
+      this._bbName = this.add.text(W / 2, y - 6, '', {
+        fontFamily: 'sans-serif', fontStyle: 'bold', fontSize: '16px',
+        color: '#e0c8ff',
+      }).setOrigin(0.5, 1).setDepth(52);
+      this._bbBarBg = this.add.rectangle(x, y, barW, barH, 0x1a0a2a, 1)
+        .setOrigin(0).setDepth(50);
+      // Phase tick marks at 33% and 66%
+      this._bbTick1 = this.add.rectangle(x + barW * 0.33, y, 2, barH, 0xffffff, 0.25)
+        .setOrigin(0).setDepth(51);
+      this._bbTick2 = this.add.rectangle(x + barW * 0.66, y, 2, barH, 0xffffff, 0.25)
+        .setOrigin(0).setDepth(51);
+      // HP fill (single solid colour; gradient simplified for the migration)
+      this._bbFill = this.add.rectangle(x, y, 0, barH, 0x7a5aee, 1)
+        .setOrigin(0).setDepth(51);
+      // Shimmer highlight along top edge of fill
+      this._bbShimmer = this.add.rectangle(x, y + 1, 0, 3, 0xffffff, 0.25)
+        .setOrigin(0).setDepth(52);
+      // White inner border
+      this._bbBorder = this.add.rectangle(x, y, barW, barH, 0x000000, 0)
+        .setOrigin(0).setDepth(52).setStrokeStyle(1, 0xffffff, 1);
+      this._bbInfo = this.add.text(W / 2, y + 13, '', {
+        fontFamily: 'sans-serif', fontStyle: 'bold', fontSize: '11px',
+        color: '#ffffff',
+      }).setOrigin(0.5, 0.5).setDepth(52);
+      this._setBossBannerVisible(false);
+      this._isReady = true;
+    }
+    _setBossBannerVisible(v) {
+      this._bbPlate.setVisible(v);
+      this._bbName.setVisible(v);
+      this._bbBarBg.setVisible(v);
+      this._bbTick1.setVisible(v);
+      this._bbTick2.setVisible(v);
+      this._bbFill.setVisible(v);
+      this._bbShimmer.setVisible(v);
+      this._bbBorder.setVisible(v);
+      this._bbInfo.setVisible(v);
+    }
+    update() {
+      const g = window.game;
+      if (!g) { this._flash.setAlpha(0); this._setBossBannerVisible(false); return; }
+
+      // ---- Flash overlay sync ----
+      const f = g.flashOverlay || 0;
+      this._flash.setAlpha(Math.min(1, f));
+
+      // ---- Boss banner sync ----
+      const sb = g.monsters && g.monsters.find(m => m.superBoss && m.currentHp > 0);
+      if (!sb) { this._setBossBannerVisible(false); return; }
+      this._setBossBannerVisible(true);
+
+      const hpPct = Math.max(0, Math.min(1, sb.currentHp / sb.maxHp));
+      const phase = sb.phase || 1;
+      const hyper = !!sb.hyperBoss;
+
+      // Plate stroke colour by phase (hyper variants slightly more saturated)
+      const plateStroke = hyper
+        ? (phase === 1 ? 0xaa66ff : phase === 2 ? 0xff66cc : 0xffaa44)
+        : (phase === 1 ? 0xb090ff : phase === 2 ? 0xff88dd : 0xff4466);
+      this._bbPlate.setStrokeStyle(hyper ? 3 : 2, plateStroke, 1);
+      this._bbPlate.setFillStyle(hyper ? 0x020006 : 0x0a051e, hyper ? 0.92 : 0.82);
+
+      // Name + colour by phase
+      const nameColour = phase === 1 ? '#e0c8ff' : phase === 2 ? '#ffaadd' : '#ff7a8e';
+      const namePrefix = hyper ? '⚠ HYPER BOSS — ' : '';
+      this._bbName.setColor(nameColour);
+      this._bbName.setText((namePrefix + (sb.name || '')).toUpperCase());
+
+      // HP fill width + colour (single solid colour per phase — gradient
+      // simplified for the migration; vanilla used a left-to-right gradient).
+      const fillCol = phase === 1 ? 0xa48aff : phase === 2 ? 0xd166e0 : 0xff5550;
+      this._bbFill.setSize(this._bbW * hpPct, this._bbH);
+      this._bbFill.setFillStyle(fillCol, 1);
+      this._bbShimmer.setSize(this._bbW * hpPct, 3);
+
+      // HP / phase readout
+      this._bbInfo.setText(`${sb.currentHp | 0} / ${sb.maxHp | 0}  ·  PHASE ${phase}`);
+    }
+  }
+
   window.__LX_PHASER_UI = new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'phaser-ui-canvas',
     width: W, height: H,
     backgroundColor: 'rgba(0,0,0,0)',
     transparent: true,          // stack OVER vanilla canvas
-    scene: [LXPlayerNameplateScene, LXParticleScene, LXDamageNumberScene, LXProjectileScene, LXMonsterScene, LXMonsterUIScene],
+    scene: [LXPlayerNameplateScene, LXParticleScene, LXDamageNumberScene, LXProjectileScene, LXMonsterScene, LXMonsterUIScene, LXOverlayScene],
     fps: { target: 60, forceSetTimeOut: false },
     // No physics — pure render layer.
   });
