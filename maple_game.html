@@ -16631,6 +16631,80 @@ const BG_IMAGES = {
 // Legacy alias — some older code still references BG_IMG by name.
 const BG_IMG = BG_IMAGES.main;
 
+// =========================================================================
+// CHARACTER LAYER ASSETS (v0.25.26)
+// =========================================================================
+// Layered sprite-sheet system: the base body is one PNG with 4×4 walk-cycle
+// frames; each equipment piece (hair / armor / cape / helmet / shield /
+// weapon / boots) attaches as its own per-pose PNG that draws on top.
+// Each gear PNG must match the same 4×4 frame layout as the base so the
+// composite reads as a single character animating in lockstep.
+//
+// Drop a PNG into `Sprites/character/<slot>/<id>.png` and reference it by
+// setting `player.equipped.<slot>.spriteKey = '<id>'` — the layer system
+// auto-loads on first access and gracefully no-ops if the file is missing.
+const CHARACTER_ASSETS = {};   // key (e.g. 'base_chibi', 'armor_chain') → Image
+function _loadCharLayer(key, src) {
+  if (CHARACTER_ASSETS[key]) return CHARACTER_ASSETS[key];
+  const img = (typeof Image !== 'undefined') ? new Image() : null;
+  if (!img) return null;
+  img._loaded = false;
+  img.onload  = () => { img._loaded = true; };
+  img.onerror = () => { img._loaded = false; };  // missing layer = silent skip
+  img.src     = src;
+  CHARACTER_ASSETS[key] = img;
+  return img;
+}
+// Pre-load the base body. Equipment layers load lazily on first lookup.
+_loadCharLayer('base_chibi', 'Sprites/character/chibi_nude.png');
+
+// Frame layout — 4×4 grid by default. Adjust if a future sheet uses a
+// different layout (e.g. 8 columns of 2 rows for a more granular cycle).
+const CHAR_FRAMES_X = 4;
+const CHAR_FRAMES_Y = 4;
+
+// Pick the right frame index from current player state. v0.25.26 uses a
+// simple 4-frame walk cycle in row 0 + frame 0 as idle. Future iterations
+// can extend this to attack frames in row 1, jump in row 2, etc.
+function _currentCharFrame() {
+  if (!player) return 0;
+  const moving = Math.abs(player.vx) > 0.5;
+  if (!moving) return 0;
+  // Cycle frames 0..3 of the top row at ~5 fps walk pace
+  return Math.floor(game.time * 0.18) % CHAR_FRAMES_X;
+}
+
+// Draw one frame of one layer at the player's screen position. Anchored
+// to the player's feet so the visible silhouette stands on the ground
+// regardless of how tall the source frame is.
+function _drawCharFrame(img, sx, sy, frameIdx, facing) {
+  if (!img || !img._loaded) return false;
+  const fw = (img.naturalWidth  || img.width)  / CHAR_FRAMES_X;
+  const fh = (img.naturalHeight || img.height) / CHAR_FRAMES_Y;
+  if (!fw || !fh) return false;
+  const col = frameIdx % CHAR_FRAMES_X;
+  const row = ((frameIdx / CHAR_FRAMES_X) | 0) % CHAR_FRAMES_Y;
+  const sxSrc = col * fw;
+  const sySrc = row * fh;
+  // Display size — chibi sheets are typically much taller than wide, and
+  // the head dominates. Fit so the figure stands ~1.6× the player hitbox
+  // height, with width derived from the source aspect to avoid squashing.
+  const dispH = player.h * 1.6;
+  const dispW = dispH * (fw / fh);
+  const drawX = sx + player.w / 2 - dispW / 2;
+  const drawY = sy + player.h - dispH;
+  ctx.save();
+  if (facing < 0) {
+    ctx.translate(drawX + dispW, drawY);
+    ctx.scale(-1, 1);
+    ctx.drawImage(img, sxSrc, sySrc, fw, fh, 0, 0, dispW, dispH);
+  } else {
+    ctx.drawImage(img, sxSrc, sySrc, fw, fh, drawX, drawY, dispW, dispH);
+  }
+  ctx.restore();
+  return true;
+}
+
 // Ordered cycle used when a combat map has no explicit `mapData.bg`.
 // Ordered from "bright/cheery" → "moody" so the natural grind
 // progression feels like it ramps visually with the difficulty arc.
