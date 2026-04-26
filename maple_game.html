@@ -2364,6 +2364,18 @@
     </div>
   </div>
 
+  <!-- v0.25.61 — Quest journal modal -->
+  <div id="quest-modal" class="modal-overlay">
+    <div class="modal" style="position:relative; min-width:580px; max-width:760px;">
+      <button class="close-btn" onclick="closeAllModals()">✕</button>
+      <h2>📜 Quest Journal</h2>
+      <div style="text-align:center; margin-bottom:8px; color:#bbb; font-size:12px;">
+        Available quests appear once you meet the level requirement. Press <kbd style="background:#444;padding:1px 5px;border-radius:3px;border:1px solid #666;">J</kbd> to toggle.
+      </div>
+      <div id="quest-list" style="display:flex; flex-direction:column; gap:8px; max-height:440px; overflow-y:auto;"></div>
+    </div>
+  </div>
+
   <div id="dev-modal" class="modal-overlay">
     <div class="modal" style="position:relative; min-width:680px; max-width:760px; border:2px solid #ffcc44; background:linear-gradient(160deg,#1a1520,#0a0818);">
       <button class="close-btn" onclick="closeAllModals()">✕</button>
@@ -2486,7 +2498,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.60';
+const GAME_VERSION = 'v0.25.61';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4661,6 +4673,91 @@ const EMPOWERED_TIER = {
   axolotl:  { prefix: 'Mystic ',      hpMul: 1.9, atkMul: 1.50, defMul: 1.5, expMul: 1.8, mesosMul: 1.8, flag: '_empoweredAura' },
 };
 
+// =========================================================================
+// v0.25.61 — QUEST SYSTEM
+// =========================================================================
+// Lightweight quest framework. Each quest has a kind (kill / visit / boss),
+// a target (monster type, map id, or boss type), a count, level gate, and
+// rewards. Quests auto-appear in the journal when their level gate is met;
+// players accept them from the journal (J), and progress is tracked via
+// killMonster + loadMap hooks. Completion grants mesos + exp instantly.
+//
+// Save schema: player.quests = { active: { id: { progress } }, completed: {} }
+const QUESTS = {
+  q_slime_intro: {
+    name: 'A Slimy Welcome', icon: '🟢', levelReq: 1,
+    kind: 'kill', target: 'slime', count: 5,
+    desc: 'Defeat 5 slimes in the Emerald Thicket.',
+    rewards: { mesos: 220, exp: 120 },
+  },
+  q_snail_pace: {
+    name: 'Slow & Steady', icon: '🐌', levelReq: 1,
+    kind: 'kill', target: 'snail', count: 8,
+    desc: 'Clear out 8 mischievous snails.',
+    rewards: { mesos: 280, exp: 150 },
+  },
+  q_visit_candy: {
+    name: 'Sweet Discoveries', icon: '🍭', levelReq: 4,
+    kind: 'visit', target: 'candyCanyon',
+    desc: 'Set foot in the Sweet Candy Canyon.',
+    rewards: { mesos: 500, exp: 320 },
+  },
+  q_visit_swamp: {
+    name: 'Pondhopper', icon: '🐸', levelReq: 5,
+    kind: 'visit', target: 'bubblegumSwamp',
+    desc: 'Discover the Bubblegum Swamp.',
+    rewards: { mesos: 600, exp: 380 },
+  },
+  q_kill_gummy: {
+    name: 'Sweet Tooth', icon: '🍬', levelReq: 4,
+    kind: 'kill', target: 'gummy', count: 6,
+    desc: 'Defeat 6 Gummibeau in the Candy Canyon.',
+    rewards: { mesos: 480, exp: 280 },
+  },
+  q_kill_axolotl: {
+    name: 'Pond Patrol', icon: '🦎', levelReq: 5,
+    kind: 'kill', target: 'axolotl', count: 5,
+    desc: 'Quell 5 mischievous Lottie axolotls.',
+    rewards: { mesos: 720, exp: 450 },
+  },
+  q_visit_atrium: {
+    name: 'Stargazer', icon: '✨', levelReq: 30,
+    kind: 'visit', target: 'stardustAtrium',
+    desc: 'Step into the Stardust Atrium.',
+    rewards: { mesos: 2400, exp: 1500 },
+  },
+  q_kill_nimbusFox: {
+    name: 'Foxhunt Among the Stars', icon: '🦊', levelReq: 30,
+    kind: 'kill', target: 'nimbusFox', count: 8,
+    desc: 'Tame 8 Astrofox in the Stardust Atrium.',
+    rewards: { mesos: 3200, exp: 2000 },
+  },
+  q_visit_bathhouse: {
+    name: 'Bathhouse Tourist', icon: '🛁', levelReq: 40,
+    kind: 'visit', target: 'pearlBathhouse',
+    desc: 'Submerge into the Pearl Bathhouse.',
+    rewards: { mesos: 4500, exp: 2800 },
+  },
+  q_boss_aries: {
+    name: 'The Ram Awakens', icon: '♈', levelReq: 15,
+    kind: 'boss', target: 'zodiac_aries', count: 1,
+    desc: 'Defeat Ariel the Ember Ram.',
+    rewards: { mesos: 5500, exp: 3500 },
+  },
+  q_boss_aetherion: {
+    name: 'Shardfather\'s End', icon: '💎', levelReq: 25,
+    kind: 'boss', target: 'aetherion', count: 1,
+    desc: 'Vanquish Aetherion in the Sanctum.',
+    rewards: { mesos: 18000, exp: 12000 },
+  },
+  q_boss_gravitos: {
+    name: 'Past the Singularity', icon: '🌌', levelReq: 35,
+    kind: 'boss', target: 'gravitos', count: 1,
+    desc: 'Defeat Gravitos at the Singularity.',
+    rewards: { mesos: 32000, exp: 22000 },
+  },
+};
+
 // v0.25.59 — Monster natural-level table. Each mob type has a "design
 // level" — the player level the type is balanced for. When a player
 // who's higher than this spawns the mob, stats scale up to keep the
@@ -5652,6 +5749,10 @@ const player = {
   cls: 'warrior', job: null, master: null,
   treeUnlocked: {},  // skill tree unlock map
   tree: {},          // flags set by tree apply() functions
+  // v0.25.61 — quest tracking. active is map id → { progress }. completed
+  // is a set of finished quest ids. Unlocked auto-tracks which quests have
+  // appeared in the journal yet (so brand-new ones show a 'NEW!' tag).
+  quests: { active: {}, completed: {}, unlocked: {} },
   // Cosmetic unlocks — earned from bestiary thresholds + achievements.
   // Each key maps to a set of unlocked IDs. Unlocked cosmetics show up in the
   // cosmetic picker alongside the base options.
@@ -5891,6 +5992,10 @@ window.addEventListener('keydown', e => {
   if (k === 'u') {
     if (!player.cls) { showToast('Pick a class first', 'common'); }
     else if (player.hp > 0) { toggleSharedModal('attributes-modal', 'lp', openLevelUpPanel); }
+  }
+  // v0.25.61 — J opens the Quest Journal
+  if (k === 'j') {
+    if (typeof toggleQuestJournal === 'function') toggleQuestJournal();
   }
   // v0.24.2 — I key retired. Skills reference now lives as a tab inside
   // the U panel (Level Up / Boon Loadout / Skills).
@@ -7439,7 +7544,9 @@ const PLAYER_SAVE_FIELDS = [
   'mods','equipped','inventory','consumables','look','pet','baseCrit','baseSpeed','baseJump',
   'cosmetics',
   // Boon loadout (v0.19)
-  '_powerups', 'boons','boonsEquipped', 'mastery'
+  '_powerups', 'boons','boonsEquipped', 'mastery',
+  // v0.25.61 — quest progression
+  'quests'
 ];
 const GAME_SAVE_FIELDS = [
   'currentMap','bossDefeated','kills','achievements',
@@ -8279,6 +8386,193 @@ function checkAchievements() {
   }
   if (unlocked > 0) saveState();
 }
+
+// =========================================================================
+// v0.25.61 — QUEST HOOKS
+// =========================================================================
+// Per-frame helpers called from killMonster, loadMap, openQuestJournal.
+// Quests are tracked via player.quests = { active, completed, unlocked }.
+// Progress is incremented for the matching `kind + target` quest, and
+// completion grants rewards instantly + saves state.
+function _ensureQuests() {
+  if (!player.quests) player.quests = { active: {}, completed: {}, unlocked: {} };
+  if (!player.quests.active)    player.quests.active    = {};
+  if (!player.quests.completed) player.quests.completed = {};
+  if (!player.quests.unlocked)  player.quests.unlocked  = {};
+}
+// Mark any quest the player now meets the level gate for as "unlocked"
+// in the journal. Idempotent — call freely.
+function tickQuestUnlocks() {
+  _ensureQuests();
+  let any = false;
+  for (const id in QUESTS) {
+    const q = QUESTS[id];
+    if (player.quests.unlocked[id] || player.quests.completed[id]) continue;
+    if ((player.level || 1) >= (q.levelReq || 1)) {
+      player.quests.unlocked[id] = true;
+      // Toast for newly-unlocked quest so the player knows the journal
+      // grew. Skip on the very first level-up (pre-class-pick) to avoid
+      // spam during boot.
+      if (player.cls) {
+        showToast(`📜 New quest: ${q.icon} ${q.name}`, 'epic');
+      }
+      any = true;
+    }
+  }
+  return any;
+}
+// Bump kill / boss quests when a monster dies. monsterType matches the
+// quest target either directly (kill) or as a boss tag (boss).
+function tickQuestKill(monsterType, isBoss) {
+  _ensureQuests();
+  let granted = false;
+  for (const id in player.quests.active) {
+    const q = QUESTS[id]; if (!q) continue;
+    const matches = (q.kind === 'kill'  && q.target === monsterType) ||
+                    (q.kind === 'boss'  && q.target === monsterType);
+    if (!matches) continue;
+    const a = player.quests.active[id];
+    a.progress = (a.progress || 0) + 1;
+    if (a.progress >= (q.count || 1)) {
+      _completeQuest(id);
+      granted = true;
+    }
+  }
+  if (granted) saveState();
+}
+// Visit-type quests trigger on map entry.
+function tickQuestVisit(mapId) {
+  _ensureQuests();
+  let granted = false;
+  for (const id in player.quests.active) {
+    const q = QUESTS[id]; if (!q) continue;
+    if (q.kind !== 'visit' || q.target !== mapId) continue;
+    _completeQuest(id);
+    granted = true;
+  }
+  if (granted) saveState();
+}
+function _completeQuest(id) {
+  const q = QUESTS[id]; if (!q) return;
+  delete player.quests.active[id];
+  player.quests.completed[id] = Date.now();
+  // Grant rewards
+  const r = q.rewards || {};
+  if (r.mesos) player.mesos += r.mesos;
+  if (r.exp)   { player.exp += r.exp; if (typeof _maybeLevelUp === 'function') _maybeLevelUp(); }
+  showToast(`✅ Quest complete — ${q.icon} ${q.name}  +${r.mesos || 0}💰 +${r.exp || 0} EXP`, 'legendary');
+  flash(0.30); audio.play('levelup');
+}
+function acceptQuest(id) {
+  _ensureQuests();
+  const q = QUESTS[id]; if (!q) return false;
+  if (player.quests.completed[id]) return false;
+  if (player.quests.active[id])    return false;
+  if ((player.level || 1) < (q.levelReq || 1)) return false;
+  player.quests.active[id] = { progress: 0 };
+  showToast(`📜 Quest started — ${q.icon} ${q.name}`, 'rare');
+  saveState();
+  return true;
+}
+function abandonQuest(id) {
+  _ensureQuests();
+  if (player.quests.active[id]) {
+    delete player.quests.active[id];
+    saveState();
+  }
+}
+function toggleQuestJournal() {
+  if (!player.cls) { showToast('Pick a class first', 'common'); return; }
+  if (player.hp <= 0) return;
+  const modal = document.getElementById('quest-modal');
+  if (!modal) return;
+  if (modal.style.display === 'flex') {
+    modal.style.display = 'none';
+    game.paused = false;
+    return;
+  }
+  // Tick unlocks once before rendering so any newly-eligible quests show
+  tickQuestUnlocks();
+  renderQuestJournal();
+  modal.style.display = 'flex';
+  game.paused = true;
+}
+function renderQuestJournal() {
+  _ensureQuests();
+  const list = document.getElementById('quest-list');
+  if (!list) return;
+  list.innerHTML = '';
+  // Build three sections: Active, Available, Completed
+  const sections = [
+    { key: 'active',    label: '🎯 Active',    color: '#ffaa44' },
+    { key: 'available', label: '📋 Available', color: '#88ccff' },
+    { key: 'completed', label: '✅ Completed', color: '#88dd66' },
+  ];
+  const buckets = { active: [], available: [], completed: [] };
+  for (const id in QUESTS) {
+    const q = QUESTS[id];
+    if (player.quests.completed[id]) buckets.completed.push(id);
+    else if (player.quests.active[id]) buckets.active.push(id);
+    else if (player.quests.unlocked[id]) buckets.available.push(id);
+  }
+  for (const sec of sections) {
+    const ids = buckets[sec.key];
+    if (!ids.length) continue;
+    const head = document.createElement('div');
+    head.style.cssText = `font-size:13px; font-weight:bold; color:${sec.color}; margin:8px 0 4px;`;
+    head.textContent = sec.label + ' (' + ids.length + ')';
+    list.appendChild(head);
+    for (const id of ids) {
+      const q = QUESTS[id];
+      const card = document.createElement('div');
+      card.style.cssText = `
+        padding: 10px 12px; border-radius: 6px;
+        background: rgba(0,0,0,0.40);
+        border-left: 3px solid ${sec.color};
+        display: flex; align-items: center; gap: 10px;
+      `;
+      const icon = document.createElement('div');
+      icon.style.cssText = 'font-size:24px; min-width:32px; text-align:center;';
+      icon.textContent = q.icon || '📜';
+      card.appendChild(icon);
+      const body = document.createElement('div');
+      body.style.cssText = 'flex:1; font-size:12px;';
+      let progressTxt = '';
+      if (sec.key === 'active' && q.count) {
+        const p = (player.quests.active[id] || {}).progress || 0;
+        progressTxt = ` <span style="color:#ffcc66;">[${p} / ${q.count}]</span>`;
+      }
+      body.innerHTML = `
+        <div style="font-weight:bold; color:#fff; font-size:13px;">${q.name}${progressTxt}</div>
+        <div style="color:#bbb; margin-top:2px;">${q.desc}</div>
+        <div style="color:#888; margin-top:4px; font-size:11px;">
+          Lv ${q.levelReq || 1}+
+          ${q.rewards.mesos ? ' · Reward: ' + q.rewards.mesos + '💰' : ''}
+          ${q.rewards.exp   ? ' + ' + q.rewards.exp + ' EXP' : ''}
+        </div>
+      `;
+      card.appendChild(body);
+      // Action button
+      if (sec.key === 'available') {
+        const btn = document.createElement('button');
+        btn.textContent = 'Accept';
+        btn.style.cssText = 'background:#2a4a2a; color:#88ff88; border:1px solid #4a8a4a; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:12px;';
+        btn.onclick = () => { acceptQuest(id); renderQuestJournal(); };
+        card.appendChild(btn);
+      } else if (sec.key === 'active') {
+        const btn = document.createElement('button');
+        btn.textContent = 'Abandon';
+        btn.style.cssText = 'background:#4a2a2a; color:#ff8888; border:1px solid #8a4a4a; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:12px;';
+        btn.onclick = () => { abandonQuest(id); renderQuestJournal(); };
+        card.appendChild(btn);
+      }
+      list.appendChild(card);
+    }
+  }
+  if (!buckets.active.length && !buckets.available.length && !buckets.completed.length) {
+    list.innerHTML = '<div style="color:#888; text-align:center; padding:20px;">No quests yet. Level up to unlock them.</div>';
+  }
+}
 function openCodex() {
   const modal = document.getElementById('codex-modal');
   if (!modal) return;
@@ -8771,6 +9065,8 @@ function loadMap(id, entryX) {
   game.visitedMaps[id] = true;
   // Daily "visit N different maps" challenge — deduped by id in tickDaily
   if (typeof tickDaily === 'function') tickDaily('visit', id);
+  // v0.25.61 — quest visit hook
+  if (typeof tickQuestVisit === 'function' && player.cls) tickQuestVisit(id);
   // v0.22: swap the background music to the new map's track.
   if (typeof music !== 'undefined' && music) music.play(id);
   game.currentMap = id;
@@ -14627,6 +14923,8 @@ function _maybeLevelUp() {
   player.baseAtk += player.cls === 'warrior' ? 3 : player.cls === 'mage' ? 2 : 2;
   player.baseDef += player.cls === 'warrior' ? 2 : 1;
   player.skillPoints += 1;
+  // v0.25.61 — quest journal unlock check on every level-up
+  if (typeof tickQuestUnlocks === 'function') tickQuestUnlocks();
 
   const lu = document.createElement('div');
   lu.className = 'level-up';
@@ -14713,6 +15011,8 @@ function killMonster(m) {
   game.kills++;
   tickDaily('kills');
   checkAchievements();
+  // v0.25.61 — quest progression hook
+  if (m.type) tickQuestKill(m.type, !!m.isBoss);
   // Mastery (v0.24.1) — per-mob-type kill counter. Hitting thresholds of
   // 100 / 500 / 1000 kills grants +1% / +2% / +3% damage vs that type.
   // Classic MMO "paragon-lite" grind that rewards long-term farming.
