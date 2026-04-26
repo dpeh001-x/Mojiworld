@@ -2502,7 +2502,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.67';
+const GAME_VERSION = 'v0.25.68';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -23108,16 +23108,12 @@ function drawCuteCharacter(sx, sy) {
 
   ctx.restore();
 
-  // === EYES — v0.25.66: big expressive anime-chibi eyes ===
-  // Replaces the old 2×3 black dots. Each eye now has:
-  //   • dark outer ring (the iris border)
-  //   • class-coloured iris fill (warrior=amber, rogue=violet, mage=blue, archer=teal)
-  //   • white shine pip on the upper-left for that anime sparkle
-  //   • secondary lower shine pip for extra glossiness
-  //   • soft pink under-eye blush hint
-  // Blink animation snaps both eyes to a thin horizontal line for one
-  // frame every ~3 seconds (closed-arc tells), preserving the existing
-  // blink rhythm.
+  // === EYES — v0.25.68: wider spacing + animated pupils ===
+  // v0.25.66 originally placed eyes at sx+11/sx+21 (10 px apart).
+  // v0.25.68 widens to sx+9/sx+23 (14 px apart) for more pronounced
+  // anime-chibi proportions — bigger feel, more expressive room
+  // between them. Each eye also gets ANIMATED PUPILS that track
+  // the nearest enemy (or drift slowly during idle).
   const irisColor = (
     cls === 'warrior' ? '#c47a32' :
     cls === 'rogue'   ? '#7a44b8' :
@@ -23127,9 +23123,37 @@ function drawCuteCharacter(sx, sy) {
   );
   const irisHi = _mixHex(irisColor, '#ffffff', 0.40);
   const blink = (Math.floor(game.time / 180) % 15 === 0);
-  // Eye centres — symmetric on either side of the head
-  const eyeXs = [sx + 11, sy + 14 + hb];
-  const eyeYsR = [sx + 21, sy + 14 + hb];
+  // v0.25.68 — widened eye centres (14 px apart, was 10)
+  const eyeXs  = [sx + 9,  sy + 14 + hb];
+  const eyeYsR = [sx + 23, sy + 14 + hb];
+  // ---- Pupil-tracking offsets ----
+  // Find nearest visible monster + compute a unit vector from the
+  // player's head toward it. Map to a small (-1..+1) pixel offset
+  // for the pupils. If no enemy nearby, drift the pupils slowly via
+  // sine waves so the eyes feel alive even at rest.
+  let pupilDx = 0, pupilDy = 0;
+  if (game.monsters && game.monsters.length) {
+    const headWX = player.x + player.w / 2;
+    const headWY = player.y + 12;
+    let nearest = null, nearestDist = 320 * 320;   // 320 px tracking range
+    for (const m of game.monsters) {
+      if (m.currentHp <= 0) continue;
+      const dx = (m.x + m.w / 2) - headWX;
+      const dy = (m.y + m.h / 2) - headWY;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < nearestDist) { nearestDist = d2; nearest = { dx, dy }; }
+    }
+    if (nearest) {
+      const d = Math.sqrt(nearestDist) || 1;
+      pupilDx = (nearest.dx / d) * 1.0;     // max 1 px x-shift
+      pupilDy = Math.max(-0.6, Math.min(0.6, (nearest.dy / d) * 0.7));   // ±0.6 px
+    }
+  }
+  if (pupilDx === 0 && pupilDy === 0) {
+    // Idle drift — gentle sine sweep so the eyes don't lock dead-centre.
+    pupilDx = Math.sin(game.time * 0.03) * 0.6;
+    pupilDy = Math.cos(game.time * 0.04) * 0.3;
+  }
   if (blink) {
     // Closed eyes — soft 3-px arcs (closed-arc anime tell)
     ctx.strokeStyle = CUTE_PAL.eye; ctx.lineWidth = 1.5;
@@ -23138,29 +23162,41 @@ function drawCuteCharacter(sx, sy) {
   } else {
     // Open eyes — for both eyes
     for (const [ex, ey] of [eyeXs, eyeYsR]) {
-      // Outer dark ring (eye outline)
+      // Outer dark ring (eye outline) — slightly bigger to fit the
+      // tracked pupil without overflowing the iris boundary.
       ctx.fillStyle = CUTE_PAL.eye;
-      ctx.beginPath(); ctx.ellipse(ex, ey, 2.4, 3.0, 0, 0, Math.PI * 2); ctx.fill();
-      // Iris fill (class colour)
+      ctx.beginPath(); ctx.ellipse(ex, ey, 2.6, 3.2, 0, 0, Math.PI * 2); ctx.fill();
+      // Iris fill (class colour) — STAYS centred in the eye ring (the
+      // "white" of the eye). The PUPIL inside it is what shifts.
+      const irisCx = ex, irisCy = ey;
       ctx.fillStyle = player.inRage ? '#ff4444' : irisColor;
-      ctx.beginPath(); ctx.ellipse(ex, ey, 1.8, 2.4, 0, 0, Math.PI * 2); ctx.fill();
-      // Iris highlight band on upper half (lighter shade)
+      ctx.beginPath(); ctx.ellipse(irisCx, irisCy, 2.0, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      // ---- Animated pupil ----
+      // Small dark pupil shifted by (pupilDx, pupilDy) within the iris.
+      // Player.facing flips the horizontal component so left-facing eyes
+      // look correctly aligned with whatever they're tracking.
+      const pCx = irisCx + pupilDx * f;
+      const pCy = irisCy + pupilDy;
+      ctx.fillStyle = '#1a0818';
+      ctx.beginPath(); ctx.ellipse(pCx, pCy, 1.0, 1.4, 0, 0, Math.PI * 2); ctx.fill();
+      // Iris highlight band on upper half (lighter shade) — drawn in
+      // the IRIS frame, doesn't move with the pupil
       ctx.fillStyle = irisHi;
-      ctx.fillRect(ex - 1.5, ey - 2, 3, 1);
-      // White shine pip — upper-left, the anime sparkle
+      ctx.fillRect(irisCx - 1.5, irisCy - 2, 3, 1);
+      // White shine pip — upper-left, classic anime sparkle.
+      // Drawn AFTER the pupil so it overlays even when the pupil
+      // tracks toward the upper-left corner.
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(ex - 1, ey - 1.8, 1, 1);
-      ctx.fillRect(ex - 1.5, ey - 1, 1, 1);
+      ctx.fillRect(irisCx - 1.2, irisCy - 1.8, 1, 1);
+      ctx.fillRect(irisCx - 1.7, irisCy - 1.0, 1, 1);
       // Secondary tiny shine pip — lower-right (gloss)
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.fillRect(ex + 0.5, ey + 0.8, 1, 1);
+      ctx.fillRect(irisCx + 0.5, irisCy + 1.0, 1, 1);
     }
-    // Soft pink under-eye blush band (very subtle — sits under both eyes
-    // suggesting cute anime "fresh face" colour, NOT the cheek blush
-    // which lives separately on the temples)
+    // Soft pink under-eye blush band (positions updated for new spacing)
     ctx.fillStyle = 'rgba(255,180,200,0.45)';
-    ctx.fillRect(sx + 9,  sy + 16 + hb, 4, 1);
-    ctx.fillRect(sx + 19, sy + 16 + hb, 4, 1);
+    ctx.fillRect(sx + 7,  sy + 16 + hb, 4, 1);
+    ctx.fillRect(sx + 21, sy + 16 + hb, 4, 1);
   }
 
   // === MOUTH — v0.25.66: expression variants ===
