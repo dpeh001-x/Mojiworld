@@ -2486,7 +2486,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.58';
+const GAME_VERSION = 'v0.25.59';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4659,6 +4659,40 @@ const EMPOWERED_TIER = {
   cookie:   { prefix: 'Crumbling ',   hpMul: 1.7, atkMul: 1.55, defMul: 1.4, expMul: 1.7, mesosMul: 1.7, shootCd: 1500, flag: '_empoweredSpread' },
   frog:     { prefix: 'Venom ',       hpMul: 1.6, atkMul: 1.60, defMul: 1.3, expMul: 1.7, mesosMul: 1.7, shootCd: 1700, speed: 1.3, jump: 11, flag: '_empoweredVenom' },
   axolotl:  { prefix: 'Mystic ',      hpMul: 1.9, atkMul: 1.50, defMul: 1.5, expMul: 1.8, mesosMul: 1.8, flag: '_empoweredAura' },
+};
+
+// v0.25.59 — Monster natural-level table. Each mob type has a "design
+// level" — the player level the type is balanced for. When a player
+// who's higher than this spawns the mob, stats scale up to keep the
+// fight challenging. Smooths progression across the level gaps in
+// the map graph (Lv 9 → 15 → 22 → 30 → 40 etc.) so every player
+// level has appropriately-tuned encounters even when revisiting an
+// "old" map.
+//
+// Veteran scaling kicks in at +1 level above natural and applies:
+//   HP   ×= 1 + (gap × 0.03)   capped at 2.0
+//   ATK  ×= same
+//   DEF  ×= 1 + (gap × 0.025)
+//   EXP  ×= 1 + (gap × 0.030)  loot stays worth farming
+//   mesos×= 1 + (gap × 0.025)
+// Mobs at +5 levels or more get a ⚔ name prefix so the player can
+// see the over-tier marker. Bosses + miniboss + elite are skipped
+// (they have their own multipliers; double-stacking would explode HP).
+const MOB_NATURAL_LEVEL = {
+  // Tier 1 — earliest mobs
+  snail: 1, slime: 2,
+  // Tier 2 — intro hub
+  mushroom: 3, gummy: 4, cookie: 4, frog: 5, axolotl: 5,
+  // Tier 3 — early forest / sky
+  horny: 6, orange: 7, stump: 8,
+  // Tier 4 — mid-game
+  scorpion: 12, honeyBuzz: 14, nougatBear: 16,
+  // Tier 5 — late mid
+  skeleton: 18, mummy: 20, zombie: 22, wraith: 24,
+  // Tier 6+ — late game
+  nimbusFox: 30, cosmicMochi: 32,
+  // Tier 7 — endgame
+  coralImp: 38, pearlSprite: 42,
 };
 
 // v0.25.58 — High-tier monster skills. Tier-4+ mobs (zombie, mummy,
@@ -9147,6 +9181,34 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     m.name       = E.prefix + m.name;
     m._empowered = true;
     if (E.flag) m[E.flag] = true;
+  }
+  // v0.25.59 — veteran scaling: if the player is above the monster's
+  // natural design level, scale stats up so the fight stays meaningful.
+  // Composes with EMPOWERED_TIER (runs after) so a Lv 30 player on a
+  // Lv 4 candy mob gets BOTH the empowered upgrade AND the +26-level
+  // veteran scale. Bosses / miniboss / elite skipped (they have their
+  // own multipliers; double-stacking would explode HP).
+  if (!isBoss && !isMiniBoss && !isElite && MOB_NATURAL_LEVEL[type] &&
+      typeof player !== 'undefined' && player) {
+    const m = game.monsters[game.monsters.length - 1];
+    const natural = MOB_NATURAL_LEVEL[type];
+    const playerLv = player.level || 1;
+    const lvGap = Math.max(0, playerLv - natural);
+    if (lvGap > 0) {
+      const hpAtkMul = Math.min(2.0, 1 + lvGap * 0.030);
+      const defMul   = Math.min(2.0, 1 + lvGap * 0.025);
+      const expMul   = Math.min(3.0, 1 + lvGap * 0.030);
+      const mesMul   = Math.min(3.0, 1 + lvGap * 0.025);
+      m.maxHp     = Math.floor(m.maxHp     * hpAtkMul);
+      m.currentHp = m.maxHp;
+      m.atk       = Math.floor(m.atk       * hpAtkMul);
+      m.def       = Math.floor((m.def || 0) * defMul);
+      m.exp       = Math.floor(m.exp       * expMul);
+      m.mesos     = Math.floor(m.mesos     * mesMul);
+      // ⚔ tag for over-tier mobs so the player can see the marker
+      if (lvGap >= 5 && !m.name.startsWith('⚔')) m.name = '⚔ ' + m.name;
+      m._veteranGap = lvGap;
+    }
   }
   // Boss intro cue
   if (isBoss) {
