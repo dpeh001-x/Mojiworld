@@ -2486,7 +2486,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.57';
+const GAME_VERSION = 'v0.25.58';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4659,6 +4659,111 @@ const EMPOWERED_TIER = {
   cookie:   { prefix: 'Crumbling ',   hpMul: 1.7, atkMul: 1.55, defMul: 1.4, expMul: 1.7, mesosMul: 1.7, shootCd: 1500, flag: '_empoweredSpread' },
   frog:     { prefix: 'Venom ',       hpMul: 1.6, atkMul: 1.60, defMul: 1.3, expMul: 1.7, mesosMul: 1.7, shootCd: 1700, speed: 1.3, jump: 11, flag: '_empoweredVenom' },
   axolotl:  { prefix: 'Mystic ',      hpMul: 1.9, atkMul: 1.50, defMul: 1.5, expMul: 1.8, mesosMul: 1.8, flag: '_empoweredAura' },
+};
+
+// v0.25.58 — High-tier monster skills. Tier-4+ mobs (zombie, mummy,
+// skeleton, wraith) and the new high-level biome residents (coralImp,
+// pearlSprite, nimbusFox, cosmicMochi) each get one signature special
+// move on a long cooldown, separate from their basic m.shoot ranged
+// attack. Skill is fired by updateMonsters per-frame when:
+//   1. m.type is in MONSTER_SKILLS
+//   2. m._mskTimer has counted down to <= 0
+//   3. m.aggroTarget is set AND player within 320 px range
+// Available skill kinds (implementations live in MONSTER_SKILL_FNS):
+//   groundStun   — slam shockwave hazard, telegraphs then pulses
+//   homingShot   — slow projectile that tracks the player
+//   poisonCloud  — drops a lingering poison puddle hazard
+//   dashCharge   — short fast burst toward player, contact-damage burst
+const MONSTER_SKILLS = {
+  // tier-4 classic mobs
+  mummy:       { kind: 'groundStun',  cd: 5500 },
+  wraith:      { kind: 'homingShot',  cd: 4000 },
+  zombie:      { kind: 'poisonCloud', cd: 6000 },
+  skeleton:    { kind: 'dashCharge',  cd: 4500 },
+  // new high-level biome residents
+  coralImp:    { kind: 'homingShot',  cd: 3800 },
+  pearlSprite: { kind: 'groundStun',  cd: 5000 },
+  nimbusFox:   { kind: 'dashCharge',  cd: 4200 },
+  cosmicMochi: { kind: 'homingShot',  cd: 4400 },
+};
+const MONSTER_SKILL_FNS = {
+  groundStun(m) {
+    // Drops a short-fuse shockwave on the player's column. 35-frame
+    // telegraph then pulses dmg + 0.7 s player stun on contact.
+    const px = player.x + player.w / 2;
+    game.hazards.push({
+      type: 'mob_quake',
+      cx: px, x: px - 80, y: 460, w: 160, h: 30,
+      life: 35, maxLife: 35,
+      damage: Math.max(4, Math.floor(m.atk * 0.85)),
+      stun: 700,
+      colorTele: m.color || '#ffaa44',
+    });
+    addShake(3);
+    // Telegraph particle burst on the monster
+    for (let i = 0; i < 8; i++) {
+      const ang = (i / 8) * Math.PI * 2;
+      game.particles.push({
+        x: m.x + m.w / 2 + Math.cos(ang) * 6,
+        y: m.y + m.h - 4 + Math.sin(ang) * 3,
+        vx: Math.cos(ang) * 1.2, vy: -1 - Math.random(),
+        life: 22, color: m.shell || '#cc8844', size: 2
+      });
+    }
+  },
+  homingShot(m) {
+    // Slow tracking projectile. Re-uses the existing p.homing === true
+    // steering already implemented in updateProjectiles. Initial speed
+    // ~3 px/frame so the player has time to weave.
+    const mx = m.x + m.w / 2, my = m.y + m.h / 2;
+    const dx = (player.x + player.w / 2) - mx;
+    const dy = (player.y + player.h / 2) - my;
+    const dist = Math.max(40, Math.hypot(dx, dy));
+    game.projectiles.push({
+      x: mx, y: my,
+      vx: (dx / dist) * 3,
+      vy: (dy / dist) * 3 - 1,
+      w: 16, h: 16, life: 220,
+      damage: Math.max(4, Math.floor(m.atk * 0.85)),
+      owner: 'enemy', skill: 'mhoming',
+      color: m.shell || '#aa44cc',
+      homing: true,
+    });
+    addShake(2);
+  },
+  poisonCloud(m) {
+    // Lingering 4-second poison puddle at the monster's feet. Ticks
+    // damage + applies a short poison DoT to the player on contact.
+    const px = m.x + m.w / 2;
+    game.hazards.push({
+      type: 'mob_poisoncloud',
+      cx: px, x: px - 38, y: 470, w: 76, h: 18,
+      life: 240, maxLife: 240,
+      damage: Math.max(2, Math.floor(m.atk * 0.30)),
+      poison: 1800,
+      tick: 0,
+    });
+  },
+  dashCharge(m) {
+    // Short fast horizontal burst toward player. AI loop already aims
+    // facing; we just slap a high vx + short invuln-ish window where
+    // the monster can't be staggered. Contact damage handled by the
+    // standard touch system.
+    const dir = Math.sign((player.x + player.w / 2) - (m.x + m.w / 2));
+    m.vx = dir * 8;
+    m.facing = dir > 0 ? 1 : -1;
+    m._dashCharging = 16;     // frames of "dashing" — slight visual cue
+    addShake(2);
+    // Trail particles
+    for (let i = 0; i < 6; i++) {
+      game.particles.push({
+        x: m.x + m.w / 2 - dir * i * 4,
+        y: m.y + m.h - 6,
+        vx: -dir * 0.5, vy: -0.2,
+        life: 18, color: m.color || '#ddccff', size: 2
+      });
+    }
+  },
 };
 
 // Zodiac boss entries are registered into `monsterTypes` AFTER ZODIAC_SIGNS is
@@ -13263,6 +13368,31 @@ function updateMonsters(dt) {
         m._venomPuffTimer = 1500 + Math.random() * 700;
       }
     }
+    // v0.25.58 — high-tier monster signature skill on cooldown.
+    // Independent of m.shoot — gives mid+late-game mobs a unique
+    // mechanic to play around (groundStun / homingShot / poisonCloud
+    // / dashCharge). Skipped for bosses (they have their own full AI).
+    if (!m.isBoss && m.currentHp > 0 && MONSTER_SKILLS[m.type]) {
+      if (m._mskTimer === undefined) {
+        // Stagger the first cast so a pack doesn't all fire at once.
+        m._mskTimer = MONSTER_SKILLS[m.type].cd * (0.5 + Math.random() * 0.6);
+      }
+      m._mskTimer -= dt;
+      if (m._mskTimer <= 0) {
+        const dxs = Math.abs((player.x + player.w/2) - (m.x + m.w/2));
+        const dys = Math.abs((player.y + player.h/2) - (m.y + m.h/2));
+        if (dxs < 320 && dys < 220 && m.aggroTarget) {
+          const sk = MONSTER_SKILLS[m.type];
+          const fn = MONSTER_SKILL_FNS[sk.kind];
+          if (fn) fn(m);
+          m._mskTimer = sk.cd * (0.85 + Math.random() * 0.30);
+        } else {
+          // Player out of range — short retry, don't burn the cd.
+          m._mskTimer = 600;
+        }
+      }
+      if (m._dashCharging > 0) m._dashCharging -= dt;
+    }
     // v0.25.53 — empowered axolotl heal aura: regen self every ~28
     // frames + heal nearby empowered candy/swamp allies in a 110 px
     // radius. Capped at maxHp. Spawns a soft pink heal pulse particle
@@ -15128,6 +15258,72 @@ function updateProjectiles(dt) {
   for (let i = game.hazards.length - 1; i >= 0; i--) {
     const h = game.hazards[i];
     h.life -= 1;
+    // v0.25.58 — mob_quake: high-tier monster ground-slam shockwave.
+    // Telegraphs for ~30 frames then pulses on the final tick: applies
+    // damage + 700ms hitStun if the player is standing in the band at
+    // ground level. Single-pulse hazard, despawns on the same tick.
+    if (h.type === 'mob_quake' && h.life === 0) {
+      const inHzn = Math.abs((player.x + player.w/2) - h.cx) < h.w / 2;
+      const onFloor = (player.y + player.h) > h.y && (player.y + player.h) < h.y + h.h + 30;
+      if (inHzn && onFloor && player.hp > 0 && player.invulnerable <= 0) {
+        const dmg = Math.max(1, Math.floor(h.damage - getDef() * 0.5));
+        player.hp -= (player._god ? 0 : dmg);
+        player.invulnerable = 500;
+        player.hitStun = Math.max(player.hitStun || 0, h.stun);
+        player.vy = Math.min(player.vy, -3.5);
+        game.damageNumbers.push({
+          x: player.x + 14, y: player.y, vy: -2,
+          text: dmg, life: 40, color: '#ffaa44', size: 14
+        });
+        addShake(6); flash(0.18);
+      }
+      // Visual burst regardless of hit (so the telegraph pays off
+      // visually even on a successful dodge).
+      addShake(4);
+      for (let j = 0; j < 14; j++) {
+        const ang = (j / 14) * Math.PI * 2;
+        game.particles.push({
+          x: h.cx + Math.cos(ang) * h.w * 0.4,
+          y: h.y + 8 + Math.sin(ang) * 4,
+          vx: Math.cos(ang) * 3, vy: -1 - Math.random() * 2,
+          life: 28, color: h.colorTele || '#ffaa44', size: 3
+        });
+      }
+      game.hazards.splice(i, 1);
+      continue;
+    }
+    // v0.25.58 — mob_poisoncloud: lingering puddle. Tick damages the
+    // player while standing in it + applies short poison DoT. 240-frame
+    // life, ticks every 24 frames so a brushing pass deals 1-2 ticks.
+    if (h.type === 'mob_poisoncloud') {
+      h.tick = (h.tick || 0) + 1;
+      const inX = Math.abs((player.x + player.w/2) - h.cx) < h.w / 2;
+      const onFloor = (player.y + player.h) > h.y && (player.y + player.h) < h.y + h.h + 24;
+      if (inX && onFloor && player.hp > 0 && (h.tick % 24 === 0)) {
+        const dmg = Math.max(1, Math.floor(h.damage - getDef() * 0.4));
+        if (player.invulnerable <= 0) {
+          player.hp -= (player._god ? 0 : dmg);
+          player.invulnerable = 220;
+          game.damageNumbers.push({
+            x: player.x + 12, y: player.y, vy: -1.5,
+            text: dmg, life: 32, color: '#88ff44', size: 12
+          });
+        }
+        // Apply short poison DoT (re-uses player._poisonTimer system)
+        player._poisonTimer = Math.max(player._poisonTimer || 0, h.poison);
+        player._poisonDmg   = Math.max(player._poisonDmg   || 0, Math.max(2, Math.floor(h.damage * 0.5)));
+      }
+      // Bubbling green particles on the surface
+      if (h.tick % 6 === 0) {
+        game.particles.push({
+          x: h.cx + (Math.random() - 0.5) * h.w * 0.7,
+          y: h.y + 4, vx: (Math.random() - 0.5) * 0.3, vy: -0.8 - Math.random() * 0.4,
+          life: 22, color: '#88ff44', size: 2
+        });
+      }
+      if (h.life <= 0) { game.hazards.splice(i, 1); continue; }
+      continue;
+    }
     if (h.type === 'meteor_warn' && h.life === 0) {
       // Meteor strike — wider blast radius for Archmage Q
       const damage = getAtk() * 4 + 30;
@@ -27218,6 +27414,59 @@ function drawPet() {
 function drawHazards() {
   for (const h of game.hazards) {
     const sx = h.cx - game.camera.x;
+    // v0.25.58 — mob_quake: ground-slam shockwave telegraph. Concentric
+    // expanding rings on the ground with a colour from the casting
+    // monster's palette + a flashing ! marker right before pulse.
+    if (h.type === 'mob_quake') {
+      const t = 1 - h.life / h.maxLife;        // 0 → 1 over the telegraph
+      const r = h.w * 0.5 * (0.4 + t * 0.6);
+      const a = 0.30 + t * 0.55;
+      // Outer ring (lighter)
+      ctx.strokeStyle = h.colorTele || '#ffaa44';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(sx, h.y + 16, r, r * 0.30, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      // Inner band (filled)
+      ctx.fillStyle = `rgba(255,180,80,${a * 0.35})`;
+      ctx.beginPath();
+      ctx.ellipse(sx, h.y + 16, r * 0.65, r * 0.18, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Pulsing ! marker just before the strike
+      if (h.life < 12) {
+        ctx.fillStyle = '#ffee44';
+        ctx.font = 'bold 18px ui-monospace, Menlo, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('!', sx, h.y - 4);
+      }
+      continue;
+    }
+    // v0.25.58 — mob_poisoncloud: bubbling lingering puddle. Two-tone
+    // green gradient + animated bubble pips drifting upward (also
+    // spawned as game.particles in the update loop).
+    if (h.type === 'mob_poisoncloud') {
+      const fade = Math.min(1, h.life / 60);
+      // Outer puddle
+      ctx.fillStyle = `rgba(80,160,40,${0.65 * fade})`;
+      ctx.beginPath();
+      ctx.ellipse(sx, h.y + 8, h.w * 0.55, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Inner brighter band
+      ctx.fillStyle = `rgba(140,255,90,${0.55 * fade})`;
+      ctx.beginPath();
+      ctx.ellipse(sx, h.y + 7, h.w * 0.45, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Surface bubbles (drawn here so they're crisp without relying on
+      // particle layering)
+      const t = h.tick || 0;
+      for (let b = 0; b < 4; b++) {
+        const bx = sx + Math.sin((t + b * 17) * 0.10) * h.w * 0.30;
+        const by = h.y + 6 - ((t + b * 12) % 30) * 0.15;
+        ctx.fillStyle = `rgba(180,255,120,${0.85 * fade})`;
+        ctx.beginPath(); ctx.arc(bx, by, 1.6, 0, Math.PI * 2); ctx.fill();
+      }
+      continue;
+    }
     if (h.type === 'void_tear') {
       // Swirling void rift on the ground that damages
       const t = game.time * 0.08;

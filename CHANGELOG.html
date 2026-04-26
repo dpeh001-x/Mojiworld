@@ -1125,6 +1125,73 @@
   <li><b>Clouds</b> now have optional tiny faces on bright maps — little black dot eyes, pink blush cheeks, and a subtle smile arc. About half the clouds get faces (every even-sized cloud) to avoid feeling busy.</li>
 </ul>
 
+<h2>v0.25.58 <span class="tag">High-tier monsters get signature special skills (groundStun, homingShot, poisonCloud, dashCharge)</span></h2>
+<p class="lede">User: <i>"make high level monsters be able to have more unique skills like ground stun or shoot slow homing projectiles."</i> Built a skill registry where each tier-4+ mob gets a signature special move on a long cooldown, separate from its basic m.shoot ranged attack. Four skill kinds shipped, each one assigned to two monster types so mid+late zones play differently.</p>
+
+<h3>⚔️ Four skill kinds</h3>
+<table>
+<tr><th>Skill</th><th>Mechanic</th></tr>
+<tr><td><b>groundStun</b></td><td>Drops a 35-frame telegraphed shockwave on the player's column. On pulse: damage + <b>0.7 s player hitStun</b> if standing in the band. Visual ring expands during the telegraph; a flashing <code>!</code> appears in the last 12 frames.</td></tr>
+<tr><td><b>homingShot</b></td><td>Slow projectile (~3 px/frame) with <code>homing: true</code> — re-uses the existing player-tracking steering logic in <code>updateProjectiles</code> (gentle 0.18 accel, capped at speed 5). Player can weave it but eating one stings.</td></tr>
+<tr><td><b>poisonCloud</b></td><td>Lingering 4-second puddle hazard at the caster's feet. Ticks damage every 24 frames + applies a 1.8 s poison DoT. Stays put — area-denial, not chase.</td></tr>
+<tr><td><b>dashCharge</b></td><td>Short fast horizontal burst (vx ±8) toward the player. Sets <code>m._dashCharging = 16</code> for a brief visual cue. Trail particles spawn behind.</td></tr>
+</table>
+
+<h3>👾 Monster assignments</h3>
+<table>
+<tr><th>Monster</th><th>Skill</th><th>Cooldown</th></tr>
+<tr><td>mummy (Wrappy)</td><td>groundStun</td><td>5.5 s</td></tr>
+<tr><td>wraith (Spook)</td><td>homingShot</td><td>4.0 s</td></tr>
+<tr><td>zombie (Rotter)</td><td>poisonCloud</td><td>6.0 s</td></tr>
+<tr><td>skeleton (Bones)</td><td>dashCharge</td><td>4.5 s</td></tr>
+<tr><td>coralImp (Coralite)</td><td>homingShot</td><td>3.8 s</td></tr>
+<tr><td>pearlSprite (Pearl Cherub)</td><td>groundStun</td><td>5.0 s</td></tr>
+<tr><td>nimbusFox (Astrofox)</td><td>dashCharge</td><td>4.2 s</td></tr>
+<tr><td>cosmicMochi (Mochi Galaxy)</td><td>homingShot</td><td>4.4 s</td></tr>
+</table>
+
+<h3>🛠️ How it's wired</h3>
+<ul>
+  <li>New <code>MONSTER_SKILLS</code> config table maps monster type → {kind, cd}.</li>
+  <li>New <code>MONSTER_SKILL_FNS</code> object holds the four skill implementations. Each takes the casting monster <code>m</code> and pushes the appropriate hazard / projectile / state mutation.</li>
+  <li><code>updateMonsters</code> per-frame loop: when <code>MONSTER_SKILLS[m.type]</code> exists, ticks <code>m._mskTimer</code>. On expiry checks player range (320 px x / 220 px y) + aggro target; if in range, fires the skill and resets cd with ±15% jitter so packs don't synchronize. Out-of-range short retry (600 ms) so the cd doesn't burn while the player is far.</li>
+  <li>Initial <code>m._mskTimer</code> stagger (0.5×–1.1× of base cd) so a freshly-spawned pack doesn't all cast simultaneously.</li>
+  <li>Two new hazard types in <code>updateHazards</code>:
+    <ul>
+      <li><code>mob_quake</code> — pulses on <code>life === 0</code>, applies damage + <code>player.hitStun = 700</code> + 14 outward particles. Despawns same tick.</li>
+      <li><code>mob_poisoncloud</code> — ticks every 24 frames, applies damage + extends <code>player._poisonTimer</code> + <code>player._poisonDmg</code> (re-uses existing zodiac poison DoT system). 240-frame life. Bubbling particles.</li>
+    </ul>
+  </li>
+  <li>Two new render branches in <code>drawHazards</code>:
+    <ul>
+      <li><code>mob_quake</code> — concentric expanding ring on the ground in the casting mob's palette colour, plus a flashing <code>!</code> in the final 12 frames.</li>
+      <li><code>mob_poisoncloud</code> — two-tone green puddle gradient + 4 surface-bubble pips drifting upward via tick.</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>🛡️ Carve-outs</h3>
+<ul>
+  <li><b>Bosses</b> — skipped entirely. They have authored AI patterns (zodiac, Aetherion, Gravitos) — not interfered with.</li>
+  <li><b>Tier 1-3 mobs</b> (snail, slime, mushroom, horny, orange, stump, scorpion, gummy, cookie, frog, axolotl, honeyBuzz, nougatBear) — no skill assigned. Stay simple for early progression.</li>
+  <li><b>Empowered Lv 25+ candy/swamp tier</b> (v0.25.53) — keeps its own special powers (split, spread, venom puff, heal aura). Doesn't double-up with MONSTER_SKILLS since those types aren't in the new registry.</li>
+  <li>Skill cooldowns + skill triggers respect <code>player.invulnerable</code> — i-frames during dodge / parry still protect.</li>
+</ul>
+
+<h3>What stays</h3>
+<ul>
+  <li>Existing <code>m.shoot</code> ranged attacks — unchanged. Skills are additive, not replacements.</li>
+  <li>Stun resist, def, evasion — apply normally.</li>
+  <li>Poison DoT system — re-used, not duplicated.</li>
+  <li>Player hitStun cap from <code>tree.stunImmune</code> trait — the big skill stun honors it (<code>player.hitStun = Math.max(player.hitStun || 0, h.stun)</code>).</li>
+</ul>
+
+<h3>Touched surface</h3>
+<ul>
+  <li><code>maple_game.html</code> — version bump to <code>v0.25.58</code>. New <code>MONSTER_SKILLS</code> + <code>MONSTER_SKILL_FNS</code> config blocks, per-frame skill cooldown hook in <code>updateMonsters</code>, two new hazard branches in <code>updateHazards</code>, two new render branches in <code>drawHazards</code>. <b>+205 / −1</b> lines.</li>
+  <li>No save/network/protocol impact.</li>
+</ul>
+
 <h2>v0.25.57 <span class="tag">Monsters vary in size + scale up with player level</span></h2>
 <p class="lede">User: <i>"make monsters vary in size, if they are higher level make them bigger."</i> Two factors compose into the spawn-time size multiplier so packs feel less clone-y AND high-level zones feel more imposing.</p>
 
