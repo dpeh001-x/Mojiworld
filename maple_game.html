@@ -2486,7 +2486,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.59';
+const GAME_VERSION = 'v0.25.60';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -10957,10 +10957,19 @@ function drawSmoothFx() {
     const sx = fx.x - camX;
     if (sx < -200 || sx > W + 200) continue;
     if (fx.type === 'slash') {
-      // Stacked arcs for a clean energy crescent
+      // Stacked arcs for a clean energy crescent.
+      // v0.25.60 — wrapped in save/restore. The previous code used
+      // ctx.setTransform(1,0,0,1,0,0) to "undo" the per-fx translate +
+      // rotate, which also nuked the outer HiDPI / camera transform
+      // saved by drawSmoothFx's outer ctx.save(). When 2+ slashes were
+      // alive in the same frame, every slash AFTER the first one
+      // rendered at half the size at the top-left corner — the
+      // "duplicate slash at the top diagonal of the screen" the user
+      // reported on warrior_x (Blade of Calamity, 5 staggered slashes).
       const t = 1 - fx.life / fx.maxLife;
       const grow = 0.6 + t * 0.4;
       const r = fx.length * grow;
+      ctx.save();
       ctx.globalCompositeOperation = 'lighter';
       ctx.translate(sx, fx.y);
       ctx.rotate(fx.angle);
@@ -10978,7 +10987,7 @@ function drawSmoothFx() {
       ctx.globalAlpha = alpha * 0.9;
       ctx.lineWidth = Math.max(2, fx.thickness * 0.5);
       ctx.beginPath(); ctx.arc(0, 0, r, -fx.spread/2 + 0.15, fx.spread/2 - 0.15); ctx.stroke();
-      ctx.setTransform(1,0,0,1,0,0);
+      ctx.restore();
       ctx.globalCompositeOperation = 'source-over';
     } else if (fx.type === 'explosion') {
       const r = fx.radius;
@@ -12505,9 +12514,15 @@ const SKILL_FNS = {
   doombringer_apoc: () => {
     // Summon a colossal sword in front of the player that slashes forward
     // 5 times over 900ms. Each slash hits a 220x100 zone ahead.
+    // v0.25.60 — added a final ground-slam coda. After the 5 forward
+    // slashes the player slams the colossal sword down on the ground:
+    // wide shockwave hazard radiating both directions, big ATK*3.5
+    // damage burst, hard hitstop + camera shake. Reads as a real
+    // "executioner's stroke" finale.
     const dir = player.facing;
     const strikes = 5;
-    player.invulnerable = Math.max(player.invulnerable, 900);
+    // Cover the slashes + the slam coda with invuln (bumped to 1300ms)
+    player.invulnerable = Math.max(player.invulnerable, 1300);
     for (let i = 0; i < strikes; i++) {
       scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
@@ -12534,6 +12549,54 @@ const SKILL_FNS = {
         addShake(6 + i); flash(0.18 + i * 0.04);
       }, i * 150);
     }
+    // v0.25.60 — FINAL ACTION: ground-slam coda at 900ms. The 5
+    // slashes finish around 600-700ms; this fires after a brief
+    // beat for cinematic "wind-up" feel.
+    scheduleSkillTimer(() => {
+      if (player.hp <= 0 || game.paused) return;
+      const slamX = player.x + player.w/2;
+      const slamY = player.y + player.h;            // ground line at player feet
+      // Wide ground-slam hitbox: 380x80 centered on player
+      const slamHit = { x: slamX - 190, y: slamY - 40, w: 380, h: 80 };
+      for (const m of game.monsters) {
+        if (m.currentHp <= 0) continue;
+        if (aabb(slamHit, m)) {
+          const crit = rollCrit();
+          const dmg = Math.floor(getAtk() * 3.5 * (crit ? getCritDmg() : 1));
+          hitMonster(m, dmg, crit, 'apocSlam');
+          // Knock UP + away from impact centre
+          const dx = (m.x + m.w/2) - slamX;
+          m.vx += Math.sign(dx) * 7;
+          m.vy = -7;
+        }
+      }
+      // Big slam visual: full-height impact pillar + wide shockwave
+      spawnSmoothExplosion(slamX, slamY - 18, 220, '#ffe488', '#ff883344', { life: 32 });
+      spawnSmoothImpact(slamX, slamY - 4, '#ffaa44');
+      // Shockwave dust ring radiating outward
+      for (let i = 0; i < 24; i++) {
+        const ang = (i / 24) * Math.PI;            // half-circle along ground
+        const sp  = 4 + Math.random() * 3;
+        game.particles.push({
+          x: slamX, y: slamY - 4,
+          vx: Math.cos(ang) * sp * (Math.random() < 0.5 ? -1 : 1),
+          vy: -Math.abs(Math.sin(ang)) * sp * 0.5 - 1,
+          life: 36, color: i % 2 ? '#ffe488' : '#c89868', size: 3 + Math.random() * 2
+        });
+      }
+      // Vertical impact column — bright pillar at slam point
+      for (let j = 0; j < 18; j++) {
+        game.particles.push({
+          x: slamX + (Math.random() - 0.5) * 10,
+          y: slamY - j * 5,
+          vx: (Math.random() - 0.5) * 0.8,
+          vy: -0.6 - Math.random() * 0.5,
+          life: 28, color: j < 8 ? '#ffffff' : '#ffcc66', size: 3
+        });
+      }
+      addShake(28); flash(0.7); addHitStop(220);
+      audio.play('crit');
+    }, 900);
     // Giant sword silhouette drawn as particles stacked vertically
     for (let j = 0; j < 30; j++) {
       const py = player.y - 40 + j * 3;

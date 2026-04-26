@@ -1125,6 +1125,66 @@
   <li><b>Clouds</b> now have optional tiny faces on bright maps — little black dot eyes, pink blush cheeks, and a subtle smile arc. About half the clouds get faces (every even-sized cloud) to avoid feeling busy.</li>
 </ul>
 
+<h2>v0.25.60 <span class="tag">Bug fix: slash duplicate at top diagonal · Warrior X gets a ground-slam finale</span></h2>
+<p class="lede">User: <i>"Final action of warrior x skill character slams hard on the ground. Warrior x skill has a duplicate slash animation at the top diagonal of the screen."</i> Two fixes: a long-standing render bug in <code>drawSmoothFx</code> that ghosted slashes when 2+ were alive in the same frame, and a new ground-slam coda for the Doombringer ult so the executioner's stroke actually feels final.</p>
+
+<h3>🐛 Bug — duplicate slash at top diagonal</h3>
+<p>Root cause in <code>drawSmoothFx</code>'s slash branch:</p>
+<pre>
+ctx.translate(sx, fx.y);
+ctx.rotate(fx.angle);
+// ... draw arcs ...
+ctx.setTransform(1,0,0,1,0,0);   // ← BUG: nukes outer transform
+</pre>
+<p><code>setTransform(identity)</code> resets the entire matrix — including the HiDPI scale + camera transform that the outer <code>drawSmoothFx</code>'s <code>ctx.save()</code> had preserved. After the first slash in a frame, every subsequent slash rendered at half-size at the top-left of the screen, looking like a "ghost" duplicate floating diagonally up.</p>
+<p>This was invisible for skills that only spawn 1–2 slashes (basic melee, single-cast skills), but the Doombringer ult fires <b>5 staggered slashes over 600 ms</b> with a 20-frame life each, so 2–4 slashes overlap every frame — the user reported the visible artefact there.</p>
+
+<h3>🛠️ Fix</h3>
+<p>Wrap the slash draw in proper <code>ctx.save()</code> / <code>ctx.restore()</code>. The outer transform survives, no more ghost slashes:</p>
+<pre>
+ctx.save();
+ctx.translate(sx, fx.y);
+ctx.rotate(fx.angle);
+// ... draw arcs ...
+ctx.restore();
+</pre>
+<p>Benefits every skill that spawns multiple <code>spawnSmoothSlash()</code> calls in the same frame — Doombringer's apoc, Phantom's chain, sword auto-attacks at high attack speed, etc.</p>
+
+<h3>⚔️ Warrior X — Doombringer ground-slam finale</h3>
+<p>The Blade of Calamity used to do 5 forward slashes and just… end. Added a coda that fires <b>900 ms after cast</b> (right after the 5th slash settles):</p>
+<ul>
+  <li><b>Wide ground hitbox</b> — 380 × 80 px centered on the player at ground line.</li>
+  <li><b>Damage</b> — <code>getAtk() × 3.5</code> with crit roll. Knocks every hit mob UP (vy −7) + AWAY from impact centre (vx ±7 by side).</li>
+  <li><b>Visuals</b> — large smooth-explosion (220 px gold + amber edge), impact star-burst, 24-particle dust shockwave radiating along the ground, 18-particle vertical impact column rising from the slam point.</li>
+  <li><b>Feel</b> — <code>addShake(28)</code> + <code>flash(0.7)</code> + <code>addHitStop(220)</code> + crit audio. Reads as a real executioner's stroke.</li>
+  <li><b>Invuln window</b> bumped 900 ms → 1300 ms so the player isn't punished during the slam wind-up + shockwave.</li>
+</ul>
+
+<h3>📐 New ult timeline</h3>
+<table>
+<tr><th>Time</th><th>Event</th></tr>
+<tr><td>0 ms</td><td>Cast — toast + initial shake/flash + sword silhouette particles spawn</td></tr>
+<tr><td>0 ms</td><td>Slash 1 (forward, getAtk × 2.4)</td></tr>
+<tr><td>150 ms</td><td>Slash 2</td></tr>
+<tr><td>300 ms</td><td>Slash 3</td></tr>
+<tr><td>450 ms</td><td>Slash 4</td></tr>
+<tr><td>600 ms</td><td>Slash 5 (guaranteed crit)</td></tr>
+<tr><td><b>900 ms</b></td><td><b>GROUND SLAM finale (getAtk × 3.5 wide AOE + shockwave)</b></td></tr>
+</table>
+
+<h3>What stays</h3>
+<ul>
+  <li>Doombringer's existing 5 forward slashes — unchanged. The slam is additive, not a replacement.</li>
+  <li>Other warrior X variants (warlord_warcry, crusader_aegis, dragoon_skylance) — untouched.</li>
+  <li>The bug fix only changes the slash-render code path; non-slash smoothFx (explosion, beam, impact) were already wrapped correctly.</li>
+</ul>
+
+<h3>Touched surface</h3>
+<ul>
+  <li><code>maple_game.html</code> — version bump to <code>v0.25.60</code>. Two edits: <code>drawSmoothFx</code> slash branch (save/restore wrap), <code>doombringer_apoc</code> (final scheduleSkillTimer at 900 ms). <b>+76 / −2</b> lines.</li>
+  <li>No save/network/protocol impact.</li>
+</ul>
+
 <h2>v0.25.59 <span class="tag">Veteran scaling — monster progression smoothly covers every level</span></h2>
 <p class="lede">User: <i>"make the progression of monsters nicely cover close to every level."</i> Map graph has gaps (Lv 9 → 15, Lv 22 → 30, Lv 30 → 40), so a player at Lv 26 had no fresh map to clear and old mobs felt trivial. Added a per-mob "natural level" table + veteran scaling at spawn time. Now every player level has appropriately-tuned encounters, even when revisiting an "old" map.</p>
 
