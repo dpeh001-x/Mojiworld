@@ -2486,7 +2486,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.52';
+const GAME_VERSION = 'v0.25.53';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4630,6 +4630,21 @@ const monsterTypes = {
   mushmom:  { name:'Momma Shroom',   w:76,  h:86,  color:'#f0d8a8', shell:'#aa2244', hp:8200,  atk:78, def:18, evasion:130, exp:2860, mesos:1950, speed:0.9, jump:8,  boss:true },
   aetherion:{ name:'Aetherion, the Shardfather', w:160, h:160, color:'#7a5aee', shell:'#c8a8ff', hp:54000, atk:144, def:25, evasion:180, exp:18800, mesos:13000, speed:0.8, jump:0, boss:true, superBoss:true },
   gravitos: { name:'Gravitos, the Weight-Bearer', w:180, h:180, color:'#1a0a2e', shell:'#6634a8', hp:88000, atk:184, def:34, evasion:210, exp:30600, mesos:21200, speed:1.4, jump:0, boss:true, superBoss:true, hyperBoss:true },
+};
+
+// v0.25.53 — Empowered tier. When the player hits Lv 25+, the gummy /
+// cookie / frog / axolotl mobs spawn as upgraded variants with bigger
+// stats AND a unique special power per type. Tracks the same monster
+// type so mastery/bestiary entries don't fragment.
+//   gummy   → Sugar Rush  splits into 2 mini-gummies on death
+//   cookie  → Crumbling   fires a 3-shot mspore spread per volley
+//   frog    → Venom       emits a passive venom puff every ~1.6 s
+//   axolotl → Mystic      regen + heal-aura for nearby allies
+const EMPOWERED_TIER = {
+  gummy:    { prefix: 'Sugar Rush ',  hpMul: 1.7, atkMul: 1.50, defMul: 1.3, expMul: 1.6, mesosMul: 1.6, speed: 1.4, jump: 9,  flag: '_empoweredSplit' },
+  cookie:   { prefix: 'Crumbling ',   hpMul: 1.7, atkMul: 1.55, defMul: 1.4, expMul: 1.7, mesosMul: 1.7, shootCd: 1500, flag: '_empoweredSpread' },
+  frog:     { prefix: 'Venom ',       hpMul: 1.6, atkMul: 1.60, defMul: 1.3, expMul: 1.7, mesosMul: 1.7, shootCd: 1700, speed: 1.3, jump: 11, flag: '_empoweredVenom' },
+  axolotl:  { prefix: 'Mystic ',      hpMul: 1.9, atkMul: 1.50, defMul: 1.5, expMul: 1.8, mesosMul: 1.8, flag: '_empoweredAura' },
 };
 
 // Zodiac boss entries are registered into `monsterTypes` AFTER ZODIAC_SIGNS is
@@ -8849,6 +8864,27 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     attackTimer: 0, attackCooldown: 0,
     patternTimer: 0, patternState: 'idle',
   });
+  // v0.25.53 — empowered tier: upgrade gummy / cookie / frog / axolotl
+  // when the player has crossed Lv 25. Stat multipliers + special-power
+  // flag, name prefixed with the empowered title. Skipped for elites,
+  // mini-bosses, bosses (those tiers already buff stats their own way).
+  if (!isBoss && !isMiniBoss && !isElite && EMPOWERED_TIER[type] &&
+      typeof player !== 'undefined' && player && (player.level || 0) >= 25) {
+    const m = game.monsters[game.monsters.length - 1];
+    const E = EMPOWERED_TIER[type];
+    m.maxHp     = Math.floor(m.maxHp     * E.hpMul);
+    m.currentHp = m.maxHp;
+    m.atk       = Math.floor(m.atk       * E.atkMul);
+    m.def       = Math.floor((m.def || 0) * E.defMul);
+    if (E.expMul   != null) m.exp   = Math.floor(m.exp   * E.expMul);
+    if (E.mesosMul != null) m.mesos = Math.floor(m.mesos * E.mesosMul);
+    if (E.speed   != null) m.speed   = E.speed;
+    if (E.jump    != null) m.jump    = E.jump;
+    if (E.shootCd != null) m.shootCd = E.shootCd;
+    m.name       = E.prefix + m.name;
+    m._empowered = true;
+    if (E.flag) m[E.flag] = true;
+  }
   // Boss intro cue
   if (isBoss) {
     const bossNames = { king:'Jelly King', mushmom:'Momma Shroom', aetherion:'Aetherion, the Shardfather', gravitos:'Gravitos, the Weight-Bearer' };
@@ -12954,12 +12990,23 @@ function performMeteor() {
 // =========================================================================
 // MONSTER AI
 // =========================================================================
-function fireMonsterProjectile(m) {
+function fireMonsterProjectile(m, angleOffset) {
+  // v0.25.53 — optional angleOffset (radians) lets empowered cookies
+  // fire a 3-shot mspore spread without duplicating this whole function.
+  // Default 0 = straight at the player (original behaviour).
   const mx = m.x + m.w/2, my = m.y + m.h/2;
-  const dx = (player.x + player.w/2) - mx;
-  const dy = (player.y + player.h/2) - my;
+  let dx = (player.x + player.w/2) - mx;
+  let dy = (player.y + player.h/2) - my;
   const dist = Math.max(30, Math.hypot(dx, dy));
   const speed = m.shoot === 'mdark' ? 5.5 : m.shoot === 'msplinter' ? 4.5 : 5;
+  // Apply optional angle rotation BEFORE normalization so the spread
+  // fans out evenly around the aim line.
+  if (angleOffset) {
+    const c = Math.cos(angleOffset), s = Math.sin(angleOffset);
+    const rx = dx * c - dy * s;
+    const ry = dx * s + dy * c;
+    dx = rx; dy = ry;
+  }
   let vx = dx / dist * speed;
   let vy = dy / dist * speed - (m.shoot === 'msplinter' ? 4 : m.shoot === 'mspore' ? 2.5 : m.shoot === 'mtoxic' ? 2 : 1.5);
   const dmg = Math.max(3, Math.floor(m.atk * 0.7));
@@ -13021,8 +13068,71 @@ function updateMonsters(dt) {
       const dxs = Math.abs((player.x + player.w/2) - (m.x + m.w/2));
       const dys = Math.abs((player.y + player.h/2) - (m.y + m.h/2));
       if (m.shootTimer <= 0 && dxs < 380 && dxs > 90 && dys < 260 && m.aggroTarget) {
-        fireMonsterProjectile(m);
+        // v0.25.53 — empowered cookie fires a 3-shot mspore spread.
+        if (m._empoweredSpread) {
+          fireMonsterProjectile(m, -0.40);
+          fireMonsterProjectile(m,  0.00);
+          fireMonsterProjectile(m,  0.40);
+        } else {
+          fireMonsterProjectile(m);
+        }
         m.shootTimer = m.shootCd + Math.random() * 1200;
+      }
+    }
+    // v0.25.53 — empowered frog passive: emit a slow venom puff every
+    // ~1.6 s. Acts like a short-range mtoxic projectile aimed at the
+    // player. Fires regardless of m.shoot state so it stacks with the
+    // standard mtoxic shot.
+    if (m._empoweredVenom && m.currentHp > 0 && !m.isBoss) {
+      if (m._venomPuffTimer === undefined) m._venomPuffTimer = 1600 + Math.random() * 800;
+      m._venomPuffTimer -= dt;
+      const dxv = Math.abs((player.x + player.w/2) - (m.x + m.w/2));
+      const dyv = Math.abs((player.y + player.h/2) - (m.y + m.h/2));
+      if (m._venomPuffTimer <= 0 && dxv < 280 && dyv < 200) {
+        const mxv = m.x + m.w/2, myv = m.y + m.h/2;
+        const px = player.x + player.w/2 - mxv;
+        const py = player.y + player.h/2 - myv;
+        const dist = Math.max(30, Math.hypot(px, py));
+        game.projectiles.push({
+          x: mxv, y: myv,
+          vx: (px / dist) * 3.2,
+          vy: (py / dist) * 3.2 - 1.2,
+          w: 14, h: 14, life: 80,
+          damage: Math.max(3, Math.floor(m.atk * 0.55)),
+          owner: 'enemy', skill: 'mtoxic', color: '#88ff44',
+          poison: 2200,
+        });
+        m._venomPuffTimer = 1500 + Math.random() * 700;
+      }
+    }
+    // v0.25.53 — empowered axolotl heal aura: regen self every ~28
+    // frames + heal nearby empowered candy/swamp allies in a 110 px
+    // radius. Capped at maxHp. Spawns a soft pink heal pulse particle
+    // ring on tick so the player can see the aura is active.
+    if (m._empoweredAura && m.currentHp > 0 && !m.isBoss) {
+      m.animTimer = m.animTimer || 0;
+      if (Math.floor(m.animTimer) % 28 === 0) {
+        const heal = Math.max(2, Math.floor(m.maxHp * 0.018));
+        m.currentHp = Math.min(m.maxHp, m.currentHp + heal);
+        // Heal nearby allies (other empowered same-biome mobs)
+        for (const other of game.monsters) {
+          if (other === m || other.currentHp <= 0 || !other._empowered) continue;
+          const dxa = (other.x + other.w/2) - (m.x + m.w/2);
+          const dya = (other.y + other.h/2) - (m.y + m.h/2);
+          if (dxa * dxa + dya * dya < 110 * 110) {
+            other.currentHp = Math.min(other.maxHp, other.currentHp + Math.floor(heal * 0.6));
+          }
+        }
+        // Pulse particle ring
+        for (let r = 0; r < 6; r++) {
+          const ang = (r / 6) * Math.PI * 2;
+          game.particles.push({
+            x: m.x + m.w/2 + Math.cos(ang) * 24,
+            y: m.y + m.h/2 + Math.sin(ang) * 12,
+            vx: Math.cos(ang) * 0.4, vy: Math.sin(ang) * 0.3 - 0.4,
+            life: 22, color: '#ffb4d8', size: 2
+          });
+        }
       }
     }
     if (m.stunTimer > 0) { m.stunTimer -= dt; m.vx *= 0.5; continue; }
@@ -14132,6 +14242,56 @@ function _maybeLevelUp() {
 function killMonster(m) {
   const idx = game.monsters.indexOf(m);
   if (idx < 0) return;
+  // v0.25.53 — empowered Sugar Rush gummy splits into 2 mini-gummies.
+  // Spawn them BEFORE removing m from the monsters array so they can
+  // share its position. Mini-gummies are smaller (60% size), faster,
+  // and not-empowered themselves so they don't chain-split forever.
+  if (m._empoweredSplit && !m._isMiniSplit) {
+    addShake(4);
+    for (let s = -1; s <= 1; s += 2) {
+      const cx = m.x + m.w / 2 + s * 8;
+      const cy = m.y;
+      // Push directly into game.monsters so we bypass spawnMonster's
+      // empower-on-spawn check (we do not want Lv25+ players to chain-
+      // split mini-gummies into more mini-gummies).
+      const t = monsterTypes['gummy'];
+      const sizeMul = 0.60;
+      const w = Math.floor(t.w * sizeMul);
+      const h = Math.floor(t.h * sizeMul);
+      game.monsters.push({
+        type: 'gummy', ...t,
+        name: 'Mini ' + t.name,
+        atk:   Math.max(4, Math.floor(t.atk * 0.55)),
+        evasion: Math.floor((t.evasion || 40) * 1.1),
+        exp:   Math.max(8, Math.floor(t.exp * 0.30)),
+        mesos: Math.max(4, Math.floor(t.mesos * 0.30)),
+        w, h,
+        x: cx - w / 2, y: cy, vx: s * 2.5, vy: -3,
+        currentHp: Math.max(40, Math.floor(t.hp * 0.35)),
+        maxHp:     Math.max(40, Math.floor(t.hp * 0.35)),
+        facing: s,
+        onGround: false,
+        hitFlash: 0, burnTimer: 0, burnDmg: 0,
+        stunTimer: 0, freezeTimer: 0,
+        animTimer: Math.random() * 100,
+        aggroTarget: player, aggroRange: 220,
+        isBoss: false, isMiniBoss: false, isElite: false,
+        attackTimer: 0, attackCooldown: 0,
+        patternTimer: 0, patternState: 'idle',
+        speed: 1.6, jump: 7,
+        _isMiniSplit: true,
+      });
+    }
+    // Pink burst particles to sell the split
+    for (let i = 0; i < 14; i++) {
+      const ang = (i / 14) * Math.PI * 2;
+      game.particles.push({
+        x: m.x + m.w / 2, y: m.y + m.h / 2,
+        vx: Math.cos(ang) * 3, vy: Math.sin(ang) * 3 - 1,
+        life: 24, color: '#ffb4d8', size: 3
+      });
+    }
+  }
   game.kills++;
   tickDaily('kills');
   checkAchievements();
