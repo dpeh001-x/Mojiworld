@@ -22864,26 +22864,59 @@ function _drawPlayerCustomSprite() {
   const isHeroActive = HERO.idle && (window.PLAYER_CUSTOM_SPRITE_CANVAS === HERO.idle);
   let sprite;
   if (isHeroActive) {
-    // v0.25.84 — full state machine. Priority: death > hit > attack > jump > walk > idle.
+    // v0.25.85 — full state machine with proper one-shot timing for attacks.
+    // Priority: death > hit > attack (one-shot, class-specific) > jump > walk > idle.
     const dead = player.hp <= 0;
     const hitStun = (player.hitStun | 0) > 0;
-    const attacking = !!player.attacking;
     const inAir = Math.abs(player.vy) > 0.5;
     const walking = !inAir && Math.abs(player.vx) > 0.5;
-    let frames = null, fps = 9, oneShot = false;
-    if (dead && HERO.deathFrames)               { frames = HERO.deathFrames;  fps = HERO_META.death.fps;  oneShot = true; }
-    else if (hitStun && HERO.hitFrames)         { frames = HERO.hitFrames;    fps = HERO_META.hit.fps;    oneShot = true; }
-    else if (attacking && HERO.attackFrames)    { frames = HERO.attackFrames; fps = HERO_META.attack.fps; }
-    else if (inAir && HERO.jumpFrames)          { frames = HERO.jumpFrames;   fps = HERO_META.jump.fps; }
-    else if (walking && HERO.walkFrames)        { frames = HERO.walkFrames;   fps = HERO_META.walk.fps; }
+
+    // Track when each one-shot anim started so the playback isn't tied to
+    // game.time absolute (otherwise frames jump in mid-cycle when the state
+    // becomes true at an arbitrary moment).
+    if (dead && !player._heroDeathAt) player._heroDeathAt = game.time;
+    if (!dead && player._heroDeathAt) player._heroDeathAt = 0;
+    if (hitStun && !player._heroHitAt) player._heroHitAt = game.time;
+    if (!hitStun && player._heroHitAt) player._heroHitAt = 0;
+
+    // Attack uses a derived "still playing" flag so the animation completes
+    // even if player.attacking flips off before the last frame.
+    const cls = player.cls || '';
+    const classFrames = HERO.classFrames[cls];
+    const attackFrames = classFrames || HERO.attackFrames;
+    const attackFps = (HERO_META[cls] && classFrames) ? HERO_META[cls].fps : HERO_META.attack.fps;
+    const attackFramesPerStep = Math.max(1, (60 / attackFps) | 0);
+    const attackTotalFrames = attackFrames ? attackFrames.length : 0;
+    const attackTotalDuration = attackFramesPerStep * attackTotalFrames;
+    if (player.attacking && !player._heroAtkAt) player._heroAtkAt = game.time;
+    const attackElapsed = player._heroAtkAt ? (game.time - player._heroAtkAt) : -1;
+    const attackPlaying = attackElapsed >= 0 && attackElapsed < attackTotalDuration;
+    if (!player.attacking && !attackPlaying) player._heroAtkAt = 0;
+
+    let frames = null, fps = 9, anchorAt = 0;  // anchorAt is game.time origin for one-shot playback
+    if (dead && HERO.deathFrames) {
+      frames = HERO.deathFrames;  fps = HERO_META.death.fps;  anchorAt = player._heroDeathAt;
+    } else if (hitStun && HERO.hitFrames) {
+      frames = HERO.hitFrames;    fps = HERO_META.hit.fps;    anchorAt = player._heroHitAt;
+    } else if (attackPlaying && attackFrames && attackTotalFrames) {
+      frames = attackFrames;      fps = attackFps;            anchorAt = player._heroAtkAt;
+    } else if (inAir && HERO.jumpFrames) {
+      frames = HERO.jumpFrames;   fps = HERO_META.jump.fps;   // loops
+    } else if (walking && HERO.walkFrames) {
+      frames = HERO.walkFrames;   fps = HERO_META.walk.fps;   // loops
+    }
     if (frames && frames.length) {
-      const framesPerStep = Math.max(1, (60 / fps) | 0);
-      // For one-shot anims (hit, death) clamp to last frame instead of looping.
-      const raw = (game.time / framesPerStep) | 0;
-      const idx = oneShot
-        ? Math.min(frames.length - 1, raw - ((player._heroAnimStart | 0) || 0))
-        : ((raw % frames.length) + frames.length) % frames.length;
-      sprite = frames[Math.max(0, Math.min(frames.length - 1, idx))];
+      const fpsStep = Math.max(1, (60 / fps) | 0);
+      let idx;
+      if (anchorAt > 0) {
+        // One-shot: relative to anchor, clamp to last frame
+        idx = Math.min(frames.length - 1, ((game.time - anchorAt) / fpsStep) | 0);
+        if (idx < 0) idx = 0;
+      } else {
+        // Loop: based on absolute game.time
+        idx = ((((game.time / fpsStep) | 0) % frames.length) + frames.length) % frames.length;
+      }
+      sprite = frames[idx];
     } else {
       sprite = HERO.idle;
     }
@@ -25759,13 +25792,20 @@ const HERO = {
   idleBbox: null, idleFootY: 0,
   walkFrames: null, jumpFrames: null, attackFrames: null,
   hitFrames: null, deathFrames: null,
+  classFrames: { warrior: null, rogue: null, mage: null, archer: null },
 };
 const HERO_META = {
-  walk:   { sheet: 'teen_walk_sheet.webp',   frames: 9, gridW: 3, gridH: 3, fps: 9  },
-  jump:   { sheet: 'teen_jump_sheet.webp',   frames: 9, gridW: 3, gridH: 3, fps: 8  },
-  attack: { sheet: 'teen_attack_sheet.webp', frames: 9, gridW: 3, gridH: 3, fps: 14 },
-  hit:    { sheet: 'teen_hit_sheet.webp',    frames: 4, gridW: 2, gridH: 2, fps: 12 },
-  death:  { sheet: 'teen_death_sheet.webp',  frames: 4, gridW: 2, gridH: 2, fps: 4  },
+  walk:   { sheet: 'teen_walk_sheet.webp',     frames: 9, gridW: 3, gridH: 3, fps: 9  },
+  jump:   { sheet: 'teen_jump_sheet.webp',     frames: 9, gridW: 3, gridH: 3, fps: 8  },
+  attack: { sheet: 'teen_attack_sheet.webp',   frames: 9, gridW: 3, gridH: 3, fps: 14 },
+  hit:    { sheet: 'teen_hit_sheet.webp',      frames: 4, gridW: 2, gridH: 2, fps: 12 },
+  death:  { sheet: 'teen_death_sheet.webp',    frames: 4, gridW: 2, gridH: 2, fps: 4  },
+  // v0.25.85 — per-class skill animations. Selected via player.cls; fall back
+  // to the generic `attack` if the class isn't mapped or its sheet failed.
+  warrior: { sheet: 'teen_warrior_swing.webp', frames: 4, gridW: 2, gridH: 2, fps: 14 },
+  rogue:   { sheet: 'teen_rogue_stab.webp',    frames: 4, gridW: 2, gridH: 2, fps: 16 },
+  mage:    { sheet: 'teen_mage_cast.webp',     frames: 4, gridW: 2, gridH: 2, fps: 12 },
+  archer:  { sheet: 'teen_archer_shot.webp',   frames: 4, gridW: 2, gridH: 2, fps: 14 },
 };
 
 function _csLoadImage(src) {
@@ -25797,13 +25837,20 @@ function _heroExtractAndNormalize(sheet, meta, idleBh, idleFootY, outW, outH) {
 
 (async function _loadHero() {
   try {
-    const [idleImg, walkSheet, jumpSheet, attackSheet, hitSheet, deathSheet] = await Promise.all([
+    const [
+      idleImg, walkSheet, jumpSheet, attackSheet, hitSheet, deathSheet,
+      warriorSheet, rogueSheet, mageSheet, archerSheet,
+    ] = await Promise.all([
       _csLoadImage('Sprites/character/hero/teen_idle.webp'),
       _csLoadImage('Sprites/character/hero/' + HERO_META.walk.sheet),
       _csLoadImage('Sprites/character/hero/' + HERO_META.jump.sheet),
       _csLoadImage('Sprites/character/hero/' + HERO_META.attack.sheet),
       _csLoadImage('Sprites/character/hero/' + HERO_META.hit.sheet),
       _csLoadImage('Sprites/character/hero/' + HERO_META.death.sheet),
+      _csLoadImage('Sprites/character/hero/' + HERO_META.warrior.sheet).catch(() => null),
+      _csLoadImage('Sprites/character/hero/' + HERO_META.rogue.sheet).catch(() => null),
+      _csLoadImage('Sprites/character/hero/' + HERO_META.mage.sheet).catch(() => null),
+      _csLoadImage('Sprites/character/hero/' + HERO_META.archer.sheet).catch(() => null),
     ]);
     HERO.idle = idleImg;
     // Compute idle's reference bbox: every animated frame normalizes to this
@@ -25825,12 +25872,17 @@ function _heroExtractAndNormalize(sheet, meta, idleBh, idleFootY, outW, outH) {
     HERO.attackFrames = _heroExtractAndNormalize(attackSheet, HERO_META.attack, idleBh, idleFootY, targetW, targetH);
     HERO.hitFrames    = _heroExtractAndNormalize(hitSheet,    HERO_META.hit,    idleBh, idleFootY, targetW, targetH);
     HERO.deathFrames  = _heroExtractAndNormalize(deathSheet,  HERO_META.death,  idleBh, idleFootY, targetW, targetH);
+    if (warriorSheet) HERO.classFrames.warrior = _heroExtractAndNormalize(warriorSheet, HERO_META.warrior, idleBh, idleFootY, targetW, targetH);
+    if (rogueSheet)   HERO.classFrames.rogue   = _heroExtractAndNormalize(rogueSheet,   HERO_META.rogue,   idleBh, idleFootY, targetW, targetH);
+    if (mageSheet)    HERO.classFrames.mage    = _heroExtractAndNormalize(mageSheet,    HERO_META.mage,    idleBh, idleFootY, targetW, targetH);
+    if (archerSheet)  HERO.classFrames.archer  = _heroExtractAndNormalize(archerSheet,  HERO_META.archer,  idleBh, idleFootY, targetW, targetH);
     if (!window.PLAYER_CUSTOM_SPRITE_CANVAS) {
       window.PLAYER_CUSTOM_SPRITE_CANVAS = idleImg;
       window.PLAYER_CUSTOM_WALK_FRAMES = HERO.walkFrames;
       window.PLAYER_SPRITE_FACES_RIGHT = false;
     }
-    console.log('[Hero] loaded teen idle + walk(' + HERO.walkFrames.length + ') + jump(' + HERO.jumpFrames.length + ') + attack(' + HERO.attackFrames.length + ') + hit(' + HERO.hitFrames.length + ') + death(' + HERO.deathFrames.length + ')');
+    const classCount = ['warrior','rogue','mage','archer'].filter(c => !!HERO.classFrames[c]).length;
+    console.log('[Hero] loaded teen idle + walk(' + HERO.walkFrames.length + ') + jump(' + HERO.jumpFrames.length + ') + attack(' + HERO.attackFrames.length + ') + hit(' + HERO.hitFrames.length + ') + death(' + HERO.deathFrames.length + ') + class anims (' + classCount + '/4)');
     window.HERO_READY = true;
     window.dispatchEvent(new CustomEvent('hero-ready'));
   } catch (err) {
@@ -29996,6 +30048,10 @@ requestAnimationFrame(loop);
     'Sprites/character/hero/teen_attack_sheet.webp',
     'Sprites/character/hero/teen_hit_sheet.webp',
     'Sprites/character/hero/teen_death_sheet.webp',
+    'Sprites/character/hero/teen_warrior_swing.webp',
+    'Sprites/character/hero/teen_rogue_stab.webp',
+    'Sprites/character/hero/teen_mage_cast.webp',
+    'Sprites/character/hero/teen_archer_shot.webp',
   ];
   const overlay = document.getElementById('loading-overlay');
   const bar = document.getElementById('loading-bar');
@@ -30110,8 +30166,8 @@ requestAnimationFrame(loop);
 </div>
 
 <script>
-// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.84) ===
-console.log('%c[CharStudio] v0.25.84 loaded — hit + death anims + loading screen + 2× skill cd','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
+// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.85) ===
+console.log('%c[CharStudio] v0.25.85 loaded — class skill anims (4) + one-shot attack timing','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
 const CHAR_STUDIO = {
   base: null,           // grayscale neutral mannequin (multiply target)
   baseColored: null,    // peach mannequin used as walk-anim source frames
