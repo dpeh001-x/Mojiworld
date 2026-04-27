@@ -29916,8 +29916,8 @@ requestAnimationFrame(loop);
 </div>
 
 <script>
-// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.80) ===
-console.log('%c[CharStudio] v0.25.80 loaded — facing fix + walk cycle (4-frame sheet)','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
+// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.80b) ===
+console.log('%c[CharStudio] v0.25.80b loaded — bbox-normalize walk frames (proper size + head alignment)','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
 const CHAR_STUDIO = {
   base: null,           // grayscale neutral mannequin (multiply target)
   baseColored: null,    // peach mannequin used as walk-anim source frames
@@ -30101,6 +30101,50 @@ function openCharStudio() {
   else renderCharStudio();
 }
 
+// v0.25.80b — bounding-box-normalize a chibi sprite cell so the character
+// fills the output canvas with the same proportions as the canonical base
+// (head ~10-50% Y, body ~50-95% Y, horizontally centered, feet at ~95% down).
+// Used to compose walk frames whose source has the character drawn small
+// inside a larger cell.
+function _normalizeChibiFrame(srcCanvas, outSize) {
+  const sw = srcCanvas.width;
+  const sh = srcCanvas.height;
+  const data = srcCanvas.getContext('2d').getImageData(0, 0, sw, sh).data;
+  // Find bounding box of pixels with non-trivial alpha
+  let minX = sw, minY = sh, maxX = -1, maxY = -1;
+  for (let y = 0; y < sh; y++) {
+    for (let x = 0; x < sw; x++) {
+      const a = data[(y * sw + x) * 4 + 3];
+      if (a > 12) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  const out = document.createElement('canvas');
+  out.width = outSize;
+  out.height = outSize;
+  if (maxX < minX || maxY < minY) {
+    // empty input — return blank
+    return out;
+  }
+  const bw = maxX - minX + 1;
+  const bh = maxY - minY + 1;
+  // Match the canonical base: character spans ~92% of canvas height, ~62% of
+  // width (chibi is taller than wide). Anchor feet at ~96% down.
+  const fitScale = Math.min((outSize * 0.62) / bw, (outSize * 0.92) / bh);
+  const drawW = bw * fitScale;
+  const drawH = bh * fitScale;
+  const dx = (outSize - drawW) / 2;
+  const dy = (outSize * 0.96) - drawH;
+  const oc = out.getContext('2d');
+  oc.imageSmoothingEnabled = true;
+  oc.drawImage(srcCanvas, minX, minY, bw, bh, dx, dy, drawW, drawH);
+  return out;
+}
+
 function applyCharStudioToPlayer() {
   const cv = document.getElementById('char-studio-canvas');
   if (!cv || !CHAR_STUDIO.ready) return;
@@ -30111,30 +30155,38 @@ function applyCharStudioToPlayer() {
   off.getContext('2d').drawImage(cv, 0, 0);
   window.PLAYER_CUSTOM_SPRITE_CANVAS = off;
 
-  // v0.25.80 — pre-render walk-cycle frames per current customization.
-  // Each frame: animated peach base (cropped from walkSheet) + face + hair on top.
-  // (Skin tone tinting only applies to the idle snapshot for now — the walk anim
-  // source is the colored mannequin, not the neutral one.)
+  // v0.25.80b — pre-render walk-cycle frames per current customization.
+  // animateSprite returns the character drawn small inside each cell with lots
+  // of empty space around. We bbox-normalize each cropped cell so the character
+  // fills the output canvas the same way the idle base does — that makes the
+  // walk frame the same on-screen size as the idle snapshot AND puts the head
+  // in the right vertical position so face + hair overlays land correctly.
   if (CHAR_STUDIO.walkSheet) {
     const sheet = CHAR_STUDIO.walkSheet;
     const { frames, gridW, gridH } = CHAR_STUDIO.walkSheetMeta;
-    const cellW = sheet.width / gridW;
-    const cellH = sheet.height / gridH;
+    const cellW = (sheet.width  / gridW) | 0;
+    const cellH = (sheet.height / gridH) | 0;
+    const outSize = 384;  // matches the canonical face/hair overlay canvas size
     const out = [];
     const face = CHAR_STUDIO.faces[CHAR_STUDIO.faceStyle];
     const hair = CHAR_STUDIO.hairs[CHAR_STUDIO.hairStyle];
     for (let i = 0; i < frames; i++) {
       const col = i % gridW;
       const row = (i / gridW) | 0;
-      const fr = document.createElement('canvas');
-      fr.width = cellW;
-      fr.height = cellH;
-      const fc = fr.getContext('2d');
-      fc.drawImage(sheet, col * cellW, row * cellH, cellW, cellH, 0, 0, cellW, cellH);
-      // Face + hair overlays use the same canvas dimensions, scaled to match the cell
-      if (face) fc.drawImage(face, 0, 0, cellW, cellH);
-      if (hair) fc.drawImage(hair, 0, 0, cellW, cellH);
-      out.push(fr);
+      // Step 1: crop the raw cell into its own canvas
+      const cell = document.createElement('canvas');
+      cell.width = cellW;
+      cell.height = cellH;
+      cell.getContext('2d').drawImage(
+        sheet, col * cellW, row * cellH, cellW, cellH, 0, 0, cellW, cellH
+      );
+      // Step 2: normalize → character fills outSize×outSize, feet at ~95%
+      const norm = _normalizeChibiFrame(cell, outSize);
+      // Step 3: overlay face + hair on the normalized frame
+      const fc = norm.getContext('2d');
+      if (face) fc.drawImage(face, 0, 0, outSize, outSize);
+      if (hair) fc.drawImage(hair, 0, 0, outSize, outSize);
+      out.push(norm);
     }
     window.PLAYER_CUSTOM_WALK_FRAMES = out;
   }
