@@ -25697,9 +25697,30 @@ const MONSTER_SPRITE_TYPES = [
     img.src = 'Sprites/monsters/' + type + '.webp';
   }
 })();
+
+// === MONSTER ANIMATION SPRITESHEETS (v0.25.79) === ludo.ai animateSprite output.
+// Each entry is a square spritesheet split into a gridW×gridH cell grid; we cycle
+// through `frames` cells at `fps` Hz. Drawn in the same anchor + mirror setup as
+// the static sprite, just src-cropped to the current cell instead of the whole img.
+const MONSTER_ANIMS = Object.create(null);
+const MONSTER_ANIM_DEFS = {
+  // 4-frame 2×2 grid, ~3 fps for gentle idle bob (matches the 1.33s loop ludo returned)
+  snail: { sheet: 'snail_idle_sheet.webp', frames: 4, gridW: 2, gridH: 2, fps: 3 },
+};
+(function _loadMonsterAnims() {
+  for (const type in MONSTER_ANIM_DEFS) {
+    const def = MONSTER_ANIM_DEFS[type];
+    const img = new Image();
+    img.onload = () => { MONSTER_ANIMS[type] = Object.assign({}, def, { image: img }); };
+    img.onerror = () => { console.warn('[MonsterAnim] failed to load', type); };
+    img.src = 'Sprites/monsters/anim/' + def.sheet;
+  }
+})();
+
 function _drawMonsterSprite(m, sx, sy) {
+  const anim = MONSTER_ANIMS[m.type];
   const sprite = MONSTER_SPRITES[m.type];
-  if (!sprite) return;
+  if (!anim && !sprite) return;
   // Square sprite; scale to ~1.4× the bbox height so the rounded chibi body
   // overflows slightly above the bbox without clipping the ground at the feet.
   const targetH = m.h * 1.4;
@@ -25711,6 +25732,26 @@ function _drawMonsterSprite(m, sx, sy) {
   // Sprites are drawn facing right; mirror when the monster faces left.
   if ((m.facing | 0) < 0) ctx.scale(-1, 1);
   ctx.imageSmoothingEnabled = true;
+  if (anim && anim.image) {
+    // Pick the current frame from game.time. game.time advances ~1/frame at 60Hz,
+    // so framesPerStep = 60 / fps. Different monsters get a small phase offset
+    // (m.x % anim.frames) so a cluster of mobs doesn't all bob in lockstep.
+    const fps = anim.fps || 4;
+    const framesPerStep = Math.max(1, (60 / fps) | 0);
+    const phase = ((m.x | 0) % anim.frames + anim.frames) % anim.frames;
+    const frameIdx = ((((game.time / framesPerStep) | 0) + phase) % anim.frames + anim.frames) % anim.frames;
+    const cellW = anim.image.width  / anim.gridW;
+    const cellH = anim.image.height / anim.gridH;
+    const col = frameIdx % anim.gridW;
+    const row = (frameIdx / anim.gridW) | 0;
+    ctx.drawImage(
+      anim.image,
+      col * cellW, row * cellH, cellW, cellH,
+      -targetW / 2, -targetH * 0.95, targetW, targetH
+    );
+    ctx.restore();
+    return;
+  }
   ctx.drawImage(sprite, -targetW / 2, -targetH * 0.95, targetW, targetH);
   ctx.restore();
 }
@@ -25811,7 +25852,7 @@ function drawMonster(m) {
   else if (m.type === 'aetherion') drawAetherion(m, sx, sy);
   else if (m.type === 'gravitos') drawGravitos(m, sx, sy);
   else if (m.zodiacBoss) drawZodiacBoss(m, sx, sy);
-  else if (MONSTER_SPRITES[m.type]) _drawMonsterSprite(m, sx, sy);
+  else if (MONSTER_ANIMS[m.type] || MONSTER_SPRITES[m.type]) _drawMonsterSprite(m, sx, sy);
   else drawCuteMob(m, sx, sy);
 
   // Burn effect
