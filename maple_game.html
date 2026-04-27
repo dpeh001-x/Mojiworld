@@ -18194,6 +18194,16 @@ function _loadBG(path) {
   img.src     = path;
   return img;
 }
+// Optional high-fidelity art pack toggle. This mode can be enabled with
+// `?art=cinematic` in the URL (or persisted in localStorage via
+// `levelx_art_pack=cinematic`). It uses a curated set of hand-painted style
+// background variants already shipped in /backgrounds to increase scene
+// variety for side-scroller runs without changing gameplay code.
+const _ART_PACK = (() => {
+  if (/[?&]art=cinematic\b/.test(location.search)) return 'cinematic';
+  if (/[?&]art=classic\b/.test(location.search)) return 'classic';
+  return (localStorage.getItem('levelx_art_pack') || 'classic').toLowerCase();
+})();
 const BG_IMAGES = {
   forest:    _loadBG('backgrounds/bg_forest.png'),
   valley:    _loadBG('backgrounds/bg_valley.png'),
@@ -18202,6 +18212,28 @@ const BG_IMAGES = {
   homestead: _loadBG('backgrounds/bg_homestead.png'),
   main:      _loadBG('backgrounds/main_bg.png'),
 };
+const BG_CINEMATIC_VARIANTS = [
+  _loadBG('backgrounds/Dadpeh_169_landscape_cute_horizontal_background_for_2d_MMORPG_806cb376-fd1b-4b5d-b58c-d9e6d6a027e3_0.png'),
+  _loadBG('backgrounds/Dadpeh_169_landscape_cute_horizontal_background_for_2d_MMORPG_9159d064-b648-4bd3-bcd4-09ed8adf93cc_2.png'),
+  _loadBG('backgrounds/Dadpeh_Make_169_2d-sidescroller_mmorpg_horizontal_background__53dfc436-dd06-4501-93ad-3831703b3a7c_2.png'),
+  _loadBG('backgrounds/Dadpeh_make_landscape_horizontal_background_for_2d_MMORPG_sid_bbf41737-9346-4600-b5fb-9a7e5c2e52d6_1.png'),
+  _loadBG('backgrounds/Dadpeh_Make_169_2d_mmorpg_background_of_a_cute_high-speed_tra_2ce3b333-ccea-40b5-9323-cac446b96f6c_3.png'),
+  _loadBG('backgrounds/Dadpeh_Make_169_2d_mmorpg_background_of_a_cute_interior_of_a__6ca414d8-7aaf-4cfe-b027-c4ebb92d50a7_3.png'),
+];
+// Whole-scene art-direction post processing (optional, defaults on).
+// Query flags:
+//   ?artfx=0        -> disable post FX completely
+//   ?artfx=1        -> enable post FX
+//   ?artfx=soft     -> soft fantasy grade (default)
+//   ?artfx=vivid    -> higher saturation + bloom accent
+//   ?artfx=noir     -> cooler, moodier grade
+const _ART_FX_MODE = (() => {
+  if (/[?&]artfx=0\b/.test(location.search)) return 'off';
+  const m = location.search.match(/[?&]artfx=([a-z0-9_-]+)/i);
+  if (m && m[1]) return m[1].toLowerCase();
+  return (localStorage.getItem('levelx_art_fx') || 'soft').toLowerCase();
+})();
+const _ART_FX_ENABLED = _ART_FX_MODE !== 'off';
 // Legacy alias — some older code still references BG_IMG by name.
 const BG_IMG = BG_IMAGES.main;
 
@@ -18243,6 +18275,12 @@ function _pickBGImage() {
   if (md.isTown) {
     if (BG_IMAGES.homestead._loaded) return BG_IMAGES.homestead;
     if (BG_IMAGES.valley._loaded) return BG_IMAGES.valley;
+  }
+  // Optional cinematic art pack for non-town traversal maps. This runs
+  // after explicit/town rules so authored map intent still wins.
+  if (_ART_PACK === 'cinematic' && !md.isTown && !md.isBossArena) {
+    const loaded = BG_CINEMATIC_VARIANTS.filter(img => img && img._loaded);
+    if (loaded.length) return loaded[_hashStr((md.id || md.name || '') + ':cinematic') % loaded.length];
   }
   // Combat maps: cycle the loaded slots by map-ID hash so different
   // maps get different backdrops automatically. Ensures variety even
@@ -18354,6 +18392,80 @@ function _phaserHandlingOverlay() {
   return !!(scene && scene._isReady);
 }
 
+// -------------------------------------------------------------------------
+// Bitmap-background enhancement pass
+// Adds parallax cloud wisps + distant birds on top of loaded bitmap bgs.
+// This gives static generated images some "living world" movement so the
+// scene feels painted-yet-alive rather than a flat wallpaper.
+// -------------------------------------------------------------------------
+let _skyLifeSeeds = null;
+function _ensureSkyLifeSeeds() {
+  if (_skyLifeSeeds) return;
+  _skyLifeSeeds = { clouds: [], birds: [] };
+  for (let i = 0; i < 12; i++) {
+    _skyLifeSeeds.clouds.push({
+      x: (i * 151) % (W + 300),
+      y: 45 + ((i * 67) % 170),
+      w: 58 + ((i * 29) % 80),
+      h: 18 + ((i * 13) % 22),
+      p: ((i * 37) % 100) / 100,
+      d: 0.010 + ((i % 5) * 0.003), // parallax drift
+    });
+  }
+  for (let i = 0; i < 7; i++) {
+    _skyLifeSeeds.birds.push({
+      x: (i * 227) % (W + 220),
+      y: 70 + ((i * 41) % 120),
+      s: 0.7 + ((i * 17) % 45) / 100,
+      p: ((i * 23) % 100) / 100,
+      d: 0.018 + (i % 3) * 0.004,
+    });
+  }
+}
+function drawSkyLifeOverlay() {
+  _ensureSkyLifeSeeds();
+  const t = game.time || 0;
+
+  // Layer 1: soft moving cloud wisps
+  ctx.save();
+  ctx.globalAlpha = 0.22;
+  for (const c of _skyLifeSeeds.clouds) {
+    const drift = (game.camera.x * c.d + t * (0.012 + c.p * 0.01)) % (W + 360);
+    const x = c.x - drift + 180;
+    const y = c.y + Math.sin(t * 0.002 + c.p * 8) * 4;
+    const g = ctx.createRadialGradient(x, y, 3, x, y, c.w);
+    g.addColorStop(0, 'rgba(255,255,255,0.55)');
+    g.addColorStop(0.55, 'rgba(255,255,255,0.28)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(x, y, c.w, c.h, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Layer 2: tiny distant birds (dark maps reduce visibility)
+  const skyBottom = game.mapData && game.mapData.sky ? game.mapData.sky[2] : '#5a6a8a';
+  const dark = _hexLuma(skyBottom) < 90;
+  ctx.save();
+  ctx.globalAlpha = dark ? 0.17 : 0.28;
+  ctx.strokeStyle = dark ? 'rgba(210,220,255,0.65)' : 'rgba(60,60,90,0.6)';
+  ctx.lineWidth = 1.2;
+  ctx.lineCap = 'round';
+  for (const b of _skyLifeSeeds.birds) {
+    const drift = (game.camera.x * b.d + t * (0.025 + b.p * 0.03)) % (W + 280);
+    const x = b.x - drift + 140;
+    const y = b.y + Math.sin(t * 0.004 + b.p * 7) * 6;
+    const flap = Math.sin(t * 0.012 + b.p * 10) * 2.2 * b.s;
+    ctx.beginPath();
+    ctx.moveTo(x - 5 * b.s, y + flap);
+    ctx.quadraticCurveTo(x - 2 * b.s, y - 2.5 * b.s, x, y + flap * 0.35);
+    ctx.quadraticCurveTo(x + 2 * b.s, y - 2.5 * b.s, x + 5 * b.s, y + flap);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawBackground() {
   // v0.25.16 — Phaser handles the bg image + sky + haze when active.
   // Vanilla just clears to transparent here so the Phaser layer shows
@@ -18410,6 +18522,8 @@ function drawBackground() {
     const shift = (game.camera.x * parallax) % W;
     ctx.drawImage(bgPick, -shift, 0, W, H);
     ctx.drawImage(bgPick, W - shift, 0, W, H);
+    // Bring static bitmap art to life with moving sky overlays.
+    drawSkyLifeOverlay();
     // Subtle atmospheric haze so foreground characters still pop
     ctx.fillStyle = 'rgba(20,24,48,0.18)';
     ctx.fillRect(0, 0, W, H);
@@ -19079,6 +19193,173 @@ function drawBackground() {
 }
 // Cached vignette — created once per session, reused for every draw call.
 let _vignetteGradCache = null;
+let _artGrainCanvas = null;
+let _artGrainPat = null;
+let _artBloomCache = null;
+
+function _ensureArtFxCaches() {
+  if (!_ART_FX_ENABLED) return;
+  if (!_artGrainCanvas) {
+    const sz = 128;
+    _artGrainCanvas = document.createElement('canvas');
+    _artGrainCanvas.width = sz;
+    _artGrainCanvas.height = sz;
+    const gctx = _artGrainCanvas.getContext('2d');
+    const img = gctx.createImageData(sz, sz);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const v = 120 + Math.floor(Math.random() * 136);
+      img.data[i] = v;
+      img.data[i + 1] = v;
+      img.data[i + 2] = v;
+      img.data[i + 3] = 26;
+    }
+    gctx.putImageData(img, 0, 0);
+    _artGrainPat = ctx.createPattern(_artGrainCanvas, 'repeat');
+  }
+  if (!_artBloomCache) {
+    _artBloomCache = ctx.createRadialGradient(W * 0.5, H * 0.22, 20, W * 0.5, H * 0.22, W * 0.62);
+    _artBloomCache.addColorStop(0, 'rgba(255,236,190,0.24)');
+    _artBloomCache.addColorStop(0.38, 'rgba(255,220,165,0.11)');
+    _artBloomCache.addColorStop(1, 'rgba(0,0,0,0)');
+  }
+}
+
+function drawArtPostFX() {
+  if (!_ART_FX_ENABLED || _phaserHandlingOverlay()) return;
+  _ensureArtFxCaches();
+  const mode = _ART_FX_MODE;
+
+  // 1) Global grade wash
+  ctx.save();
+  if (mode === 'vivid') {
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.globalAlpha = 0.23;
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, 'rgba(255,220,170,1)');
+    g.addColorStop(1, 'rgba(120,165,255,1)');
+    ctx.fillStyle = g;
+  } else if (mode === 'noir') {
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.globalAlpha = 0.22;
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, 'rgba(38,52,82,1)');
+    g.addColorStop(1, 'rgba(28,24,44,1)');
+    ctx.fillStyle = g;
+  } else {
+    ctx.globalCompositeOperation = 'soft-light';
+    ctx.globalAlpha = 0.18;
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, 'rgba(255,224,182,1)');
+    g.addColorStop(1, 'rgba(156,188,255,1)');
+    ctx.fillStyle = g;
+  }
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+
+  // 2) Subtle atmospheric bloom (stronger on vivid)
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = mode === 'vivid' ? 0.34 : 0.22;
+  ctx.fillStyle = _artBloomCache;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+
+  // 3) Film grain — tiny opacity so visuals stay clean.
+  if (_artGrainPat) {
+    const ox = (game.time * 0.11) % 128;
+    const oy = (game.time * 0.09) % 128;
+    ctx.save();
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.globalAlpha = mode === 'noir' ? 0.09 : 0.07;
+    ctx.translate(-ox, -oy);
+    ctx.fillStyle = _artGrainPat;
+    ctx.fillRect(0, 0, W + 128, H + 128);
+    ctx.restore();
+  }
+}
+
+// World-space art overlays (drawn before UI). These passes increase depth and
+// readability by separating background planes from combat silhouettes.
+let _fgLeafSeeds = null;
+function _initFgLeaves() {
+  if (_fgLeafSeeds) return;
+  _fgLeafSeeds = [];
+  for (let i = 0; i < 22; i++) {
+    _fgLeafSeeds.push({
+      x: (i * 47) % (W + 120),
+      y: (i * 83) % (H * 0.62),
+      s: 0.7 + ((i * 37) % 100) / 100,
+      p: ((i * 19) % 100) / 100,
+    });
+  }
+}
+function _isOutdoorMap(md) {
+  return !!(md && !md.isTown && !md.isBossArena && !md.sanctum && !md.singularity && !md.isCarriage && !md.isZodiac && !md.isZodiacHub);
+}
+function drawWorldArtOverlay() {
+  const md = game && game.mapData;
+  if (!_isOutdoorMap(md)) return;
+  _initFgLeaves();
+
+  // 1) Mid-ground atmospheric depth fog (helps characters pop).
+  ctx.save();
+  const fogA = _mixHex(md.sky[2], '#ffffff', 0.28);
+  const fogB = _mixHex(md.sky[2], '#d8ecff', 0.45);
+  const fog = ctx.createLinearGradient(0, H * 0.45, 0, H);
+  fog.addColorStop(0, fogA + '00');
+  fog.addColorStop(0.55, fogA + '46');
+  fog.addColorStop(1, fogB + '88');
+  ctx.fillStyle = fog;
+  ctx.fillRect(0, H * 0.38, W, H * 0.62);
+  ctx.restore();
+
+  // 2) Subtle god rays to lift premium art direction.
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  ctx.globalAlpha = 0.17;
+  const t = game.time * 0.0014;
+  for (let i = 0; i < 5; i++) {
+    const ox = (i * 170 + Math.sin(t + i * 1.3) * 34);
+    const ray = ctx.createLinearGradient(0, 0, 0, H);
+    ray.addColorStop(0, 'rgba(255,245,210,0.65)');
+    ray.addColorStop(0.5, 'rgba(255,235,190,0.22)');
+    ray.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = ray;
+    ctx.beginPath();
+    ctx.moveTo(ox, -20);
+    ctx.lineTo(ox + 60, -20);
+    ctx.lineTo(ox + 190, H);
+    ctx.lineTo(ox + 70, H);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // 3) Foreground painterly leaf frame near screen edges for depth.
+  ctx.save();
+  ctx.globalAlpha = 0.22;
+  for (let i = 0; i < _fgLeafSeeds.length; i++) {
+    const s = _fgLeafSeeds[i];
+    const wave = Math.sin(game.time * 0.003 + s.p * 9) * 6;
+    const lx = (s.x + wave) % (W + 140) - 70;
+    const ly = s.y;
+    const leftEdge = lx < 90;
+    const rightEdge = lx > W - 90;
+    if (!leftEdge && !rightEdge) continue;
+    const rot = leftEdge ? -0.7 : 0.7;
+    ctx.save();
+    ctx.translate(lx, ly);
+    ctx.rotate(rot + Math.sin(game.time * 0.002 + i) * 0.12);
+    ctx.fillStyle = leftEdge ? 'rgba(35,70,45,0.72)' : 'rgba(30,65,40,0.66)';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 8 * s.s, 18 * s.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(120,170,120,0.22)';
+    ctx.fillRect(-1, -14 * s.s, 2, 28 * s.s);
+    ctx.restore();
+  }
+  ctx.restore();
+}
 
 // Luma helper — used to decide sun vs moon based on sky colour.
 function _hexLuma(hex) {
@@ -29356,12 +29637,15 @@ function loop(time) {
   drawParticles();
   drawFxInstances();
   drawSmoothFx();
+  drawWorldArtOverlay();
   drawDamageNumbers();
 
   ctx.restore();
 
   // Super-boss HP banner
   drawSuperBossBar();
+  // Whole-scene grading / bloom / grain art pass.
+  drawArtPostFX();
   // Update minimap (DOM-side, every few frames to avoid overhead)
   if (game.time % 4 === 0) drawMinimap();
 
