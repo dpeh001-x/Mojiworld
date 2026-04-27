@@ -18516,12 +18516,26 @@ function drawBackground() {
   // Full-canvas background image (stretched to fill) — gentle camera parallax.
   // v0.25.12 — now picks per-map via _pickBGImage (forest for outdoor combat,
   // valley for town) with a procedural fallback when a slot is empty.
+  // v0.25.86 — bg images aren't seamless, so two side-by-side copies showed a
+  // visible seam where the right edge of one met the left edge of the next.
+  // Fix: flip the SECOND copy horizontally so the seam matches its own mirror
+  // (right edge meets right edge, perfectly continuous). Also round shift to
+  // integer pixels to avoid sub-pixel blur during slow camera movement.
   const bgPick = _pickBGImage();
   if (bgPick) {
     const parallax = 0.12;
-    const shift = (game.camera.x * parallax) % W;
+    const shift = Math.floor((game.camera.x * parallax) % W);
+    // First copy — drawn normally
     ctx.drawImage(bgPick, -shift, 0, W, H);
-    ctx.drawImage(bgPick, W - shift, 0, W, H);
+    // Second copy — mirrored. Translating to (2W - shift) puts its right
+    // edge at x=(2W-shift) and after scale(-1,1) its left edge ends up at
+    // x=(W-shift), exactly where the first copy's right edge lands. Pixels
+    // along the seam are mirror-matched → no visible cut.
+    ctx.save();
+    ctx.translate(2 * W - shift, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(bgPick, 0, 0, W, H);
+    ctx.restore();
     // Bring static bitmap art to life with moving sky overlays.
     drawSkyLifeOverlay();
     // Subtle atmospheric haze so foreground characters still pop
@@ -22221,6 +22235,12 @@ function drawNPCs() {
     ctx.ellipse(cx, feetY + 2, 13, 3.5, 0, 0, Math.PI * 2);
     ctx.fill();
 
+    // v0.25.86 — if a ludo.ai NPC sprite is loaded for this NPC, draw it
+    // INSTEAD of the procedural body. Procedural is the fallback.
+    const _npcSpriteImg = NPC_SPRITES[npc.name];
+    if (_npcSpriteImg) {
+      _drawNpcSprite(_npcSpriteImg, cx, feetY);
+    } else {
     // Chibi scale transform — matches the player's (slightly taller) proportions
     ctx.save();
     ctx.translate(cx, feetY + 2);
@@ -22461,6 +22481,7 @@ function drawNPCs() {
     }
 
     ctx.restore();   // end chibi scale wrapper
+    }  // end procedural-NPC fallback else (v0.25.86)
 
     // Name tag (drawn outside the chibi scale so text stays crisp)
     ctx.font = 'bold 11px sans-serif';
@@ -25781,6 +25802,44 @@ const MONSTER_SPRITE_TYPES = [
     img.src = 'Sprites/monsters/' + type + '.webp';
   }
 })();
+
+// === NPC SPRITES (v0.25.86) === ludo.ai-generated NPC portraits replace the
+// procedural pixel-NPC body when the matching .webp is loaded. Falls back to
+// the procedural drawing for any NPC not in NPC_SPRITE_FILES or whose load
+// failed.
+const NPC_SPRITES = Object.create(null);
+const NPC_SPRITE_FILES = {
+  'Elspeth':       'elspeth.webp',
+  'Brok':          'brok.webp',
+  'The Amnesiac':  'amnesiac.webp',
+  'Sage Mira':     'sage_mira.webp',
+  'Old Arlen':     'old_arlen.webp',
+  'Caravan Yara':  'caravan_yara.webp',
+};
+(function _loadNpcSprites() {
+  for (const name in NPC_SPRITE_FILES) {
+    const img = new Image();
+    img.onload = () => { NPC_SPRITES[name] = img; };
+    img.onerror = () => console.warn('[NPC] failed to load', name);
+    img.src = 'Sprites/npc/' + NPC_SPRITE_FILES[name];
+  }
+})();
+function _drawNpcSprite(sprite, cx, feetY) {
+  // Match the procedural NPC body height (~50-60 px). Aspect-aware so the
+  // taller-than-wide ludo portraits don't get squashed.
+  const targetH = 78;
+  const srcW = sprite.naturalWidth  || sprite.width  || 1;
+  const srcH = sprite.naturalHeight || sprite.height || 1;
+  const targetW = targetH * (srcW / srcH);
+  // Subtle head-bobble + body-breathe so static sprite NPCs still feel alive
+  const t = (game.time + cx) * 0.06;
+  const bob = Math.sin(t) * 1.5;
+  ctx.save();
+  ctx.translate(cx, feetY + 2 + bob);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(sprite, -targetW / 2, -targetH * 0.96, targetW, targetH);
+  ctx.restore();
+}
 
 // === HERO CHARACTER (v0.25.83) === complete pre-styled teen-male sprite with
 // face / hair / clothes / shoes baked in. Replaces the layered mannequin
@@ -30052,6 +30111,12 @@ requestAnimationFrame(loop);
     'Sprites/character/hero/teen_rogue_stab.webp',
     'Sprites/character/hero/teen_mage_cast.webp',
     'Sprites/character/hero/teen_archer_shot.webp',
+    'Sprites/npc/elspeth.webp',
+    'Sprites/npc/brok.webp',
+    'Sprites/npc/amnesiac.webp',
+    'Sprites/npc/sage_mira.webp',
+    'Sprites/npc/old_arlen.webp',
+    'Sprites/npc/caravan_yara.webp',
   ];
   const overlay = document.getElementById('loading-overlay');
   const bar = document.getElementById('loading-bar');
@@ -30166,8 +30231,8 @@ requestAnimationFrame(loop);
 </div>
 
 <script>
-// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.85) ===
-console.log('%c[CharStudio] v0.25.85 loaded — class skill anims (4) + one-shot attack timing','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
+// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.86) ===
+console.log('%c[CharStudio] v0.25.86 loaded — 6 NPC sprites + bg seam fix','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
 const CHAR_STUDIO = {
   base: null,           // grayscale neutral mannequin (multiply target)
   baseColored: null,    // peach mannequin used as walk-anim source frames
