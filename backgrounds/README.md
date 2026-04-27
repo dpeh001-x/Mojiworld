@@ -17,9 +17,10 @@ Drop any of the following PNGs into this folder and the game picks them up autom
 
 1. **Explicit per-map override** — a map can set `mapData.bg = 'forest' | 'valley' | 'meadow' | 'misty' | 'homestead'` to pin a specific image. Takes highest priority.
 2. **Town default** — maps with `isTown: true` pick `bg_homestead.png` first, falling back to `bg_valley.png`.
-3. **Combat map cycle** — non-town maps deterministically pick one of the loaded outdoor slots by hashing their map ID, so different maps get different backdrops without you having to assign each one.
-4. **Special backdrops** — sanctum cosmos, zodiac boss arenas, and the subway carriage ignore this folder entirely.
-5. **Procedural fallback** — if no slot is loaded for the current map, the procedural parallax (faceted mountains + pines + flowers + sparkles) kicks in.
+3. **Cinematic art pack (optional)** — launch with `?art=cinematic` (or set `localStorage.levelx_art_pack = "cinematic"`) to use the bundled high-fidelity AI-painted variants for non-town traversal maps.
+4. **Combat map cycle** — when cinematic mode is off, non-town maps deterministically pick one of the loaded outdoor slots by hashing their map ID, so different maps get different backdrops without you having to assign each one.
+5. **Special backdrops** — sanctum cosmos, zodiac boss arenas, and the subway carriage ignore this folder entirely.
+6. **Procedural fallback** — if no slot is loaded for the current map, the procedural parallax (faceted mountains + pines + flowers + sparkles) kicks in.
 
 ## Sizing
 
@@ -32,8 +33,9 @@ Drop any of the following PNGs into this folder and the game picks them up autom
 
 1. Sky gradient paints first (always — even behind the bitmap, so tall/transparent PNGs blend).
 2. If a bitmap is loaded for this map, it draws at ~0.12 camera-parallax over the sky.
-3. A subtle atmospheric haze (`rgba(20,24,48,0.18)`) paints on top so foreground characters still pop.
-4. If no bitmap is available, the procedural parallax (mountains → pines → flowers → sparkles) draws instead — that's the fully-coded fallback path.
+3. Bitmap maps also add a light animated sky-life pass (soft cloud wisps + tiny distant birds) to keep the scene feeling alive.
+4. A subtle atmospheric haze (`rgba(20,24,48,0.18)`) paints on top so foreground characters still pop.
+5. If no bitmap is available, the procedural parallax (mountains → pines → flowers → sparkles) draws instead — that's the fully-coded fallback path.
 
 ## Pin a specific background to a specific map
 
@@ -46,3 +48,10 @@ MAPS.dark_cave = {
   bg: 'misty',   // force the misty forest background on this map
 };
 ```
+
+## Art quality mode quick use
+
+- Classic visuals (default): `maple_game.html`
+- Cinematic visuals: `maple_game.html?art=cinematic`
+- Force classic even if stored preference exists: `maple_game.html?art=classic`
+- Add post-FX profiles for full-scene polish: `&artfx=soft`, `&artfx=vivid`, `&artfx=noir`, or `&artfx=0` to disable.
