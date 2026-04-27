@@ -22858,25 +22858,38 @@ function drawPlayer() {
 // scale-anchored-at-feet but does NOT translate the coordinate origin, so we
 // must use absolute screen coords just like drawCuteCharacter(sx, sy) does.
 function _drawPlayerCustomSprite() {
-  // v0.25.81 — pick the right frame source based on movement state:
-  //   walking (|vx|>0.5) + walk frames available → cycle through walk cycle
-  //   else → static idle snapshot
-  // Frame fps + facing convention vary by which sprite system is active:
-  //   hero (default at game load): faces right natively, 9 frames at 9 fps
-  //   studio's mannequin composite: faces left natively, 4 frames at 6 fps
-  const walkFrames = window.PLAYER_CUSTOM_WALK_FRAMES;
-  const moving = Math.abs(player.vx) > 0.5;
-  const isHero = walkFrames === HERO.walkFrames;
+  // v0.25.83 — state machine: pick the right frame source based on player
+  // state. Priority: attack > jump > walk > idle. Hero anims get state-aware
+  // selection; studio composite still uses the simpler walk/idle split.
+  const isHeroActive = HERO.idle && (window.PLAYER_CUSTOM_SPRITE_CANVAS === HERO.idle);
   let sprite;
-  if (moving && walkFrames && walkFrames.length) {
-    const fps = isHero
-      ? (HERO_META.fps || 9)
-      : ((CHAR_STUDIO && CHAR_STUDIO.walkSheetMeta && CHAR_STUDIO.walkSheetMeta.fps) || 6);
-    const framesPerStep = Math.max(1, (60 / fps) | 0);
-    const idx = ((((game.time / framesPerStep) | 0) % walkFrames.length) + walkFrames.length) % walkFrames.length;
-    sprite = walkFrames[idx];
+  if (isHeroActive) {
+    const attacking = !!player.attacking;
+    const inAir = Math.abs(player.vy) > 0.5;
+    const walking = !inAir && Math.abs(player.vx) > 0.5;
+    let frames = null, fps = 9;
+    if (attacking && HERO.attackFrames) { frames = HERO.attackFrames; fps = HERO_META.attack.fps; }
+    else if (inAir && HERO.jumpFrames)   { frames = HERO.jumpFrames;   fps = HERO_META.jump.fps; }
+    else if (walking && HERO.walkFrames) { frames = HERO.walkFrames;   fps = HERO_META.walk.fps; }
+    if (frames && frames.length) {
+      const framesPerStep = Math.max(1, (60 / fps) | 0);
+      const idx = ((((game.time / framesPerStep) | 0) % frames.length) + frames.length) % frames.length;
+      sprite = frames[idx];
+    } else {
+      sprite = HERO.idle;
+    }
   } else {
-    sprite = window.PLAYER_CUSTOM_SPRITE_CANVAS;
+    // Studio composite path (mannequin) — original walk/idle split
+    const walkFrames = window.PLAYER_CUSTOM_WALK_FRAMES;
+    const moving = Math.abs(player.vx) > 0.5;
+    if (moving && walkFrames && walkFrames.length) {
+      const fps = (CHAR_STUDIO && CHAR_STUDIO.walkSheetMeta && CHAR_STUDIO.walkSheetMeta.fps) || 6;
+      const framesPerStep = Math.max(1, (60 / fps) | 0);
+      const idx = ((((game.time / framesPerStep) | 0) % walkFrames.length) + walkFrames.length) % walkFrames.length;
+      sprite = walkFrames[idx];
+    } else {
+      sprite = window.PLAYER_CUSTOM_SPRITE_CANVAS;
+    }
   }
   if (!sprite) return;
   const sx = Math.round(player.x - game.camera.x);
@@ -25727,60 +25740,84 @@ const MONSTER_SPRITE_TYPES = [
   }
 })();
 
-// === HERO CHARACTER (v0.25.81) === complete pre-styled teen-male sprite with
+// === HERO CHARACTER (v0.25.83) === complete pre-styled teen-male sprite with
 // face / hair / clothes / shoes baked in. Replaces the layered mannequin
 // approach for the in-game player (the Character Studio still works for users
 // who want to customize via Q + Apply, but the default at game load is the
-// teen hero). Idle is a single transparent webp; walk is a 3×3 spritesheet.
-const HERO = { idle: null, walkSheet: null, walkFrames: null };
-const HERO_META = { frames: 9, gridW: 3, gridH: 3, fps: 9 };
-(function _loadHero() {
-  let pendingIdle = new Image();
-  let pendingSheet = new Image();
-  let loaded = 0;
-  const onReady = () => {
-    if (++loaded < 2) return;
-    HERO.idle = pendingIdle;
-    HERO.walkSheet = pendingSheet;
-    // v0.25.82 — bbox-normalize each walk cell to the idle's exact dimensions,
-    // so walk frames render at the same on-screen size and aspect as idle.
-    // The walk sheet output has cells with significant padding around the
-    // character; without normalization, scaled walk frames look squashed.
-    const cellW = (pendingSheet.width  / HERO_META.gridW) | 0;
-    const cellH = (pendingSheet.height / HERO_META.gridH) | 0;
-    const targetW = pendingIdle.naturalWidth  || 640;
-    const targetH = pendingIdle.naturalHeight || 864;
-    const frames = [];
-    for (let i = 0; i < HERO_META.frames; i++) {
-      const col = i % HERO_META.gridW;
-      const row = (i / HERO_META.gridW) | 0;
-      const cell = document.createElement('canvas');
-      cell.width = cellW;
-      cell.height = cellH;
-      cell.getContext('2d').drawImage(
-        pendingSheet, col * cellW, row * cellH, cellW, cellH, 0, 0, cellW, cellH
-      );
-      // Normalize to idle dimensions so on-screen size + position match
-      frames.push(_normalizeChibiFrame(cell, targetW, targetH));
-    }
-    HERO.walkFrames = frames;
-    // Default the in-game player to the hero unless the studio has already
-    // explicitly applied a custom avatar.
+// teen hero). Idle is a single transparent webp; each motion is a 3×3 sheet.
+const HERO = {
+  idle: null,
+  idleBbox: null, idleFootY: 0,
+  walkFrames: null, jumpFrames: null, attackFrames: null,
+};
+const HERO_META = {
+  walk:   { sheet: 'teen_walk_sheet.webp',   frames: 9, gridW: 3, gridH: 3, fps: 9  },
+  jump:   { sheet: 'teen_jump_sheet.webp',   frames: 9, gridW: 3, gridH: 3, fps: 8  },
+  attack: { sheet: 'teen_attack_sheet.webp', frames: 9, gridW: 3, gridH: 3, fps: 14 },
+};
+
+function _csLoadImage(src) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => rej(new Error(src));
+    img.src = src;
+  });
+}
+
+function _heroExtractAndNormalize(sheet, meta, idleBh, idleFootY, outW, outH) {
+  const cellW = (sheet.width  / meta.gridW) | 0;
+  const cellH = (sheet.height / meta.gridH) | 0;
+  const out = [];
+  for (let i = 0; i < meta.frames; i++) {
+    const col = i % meta.gridW;
+    const row = (i / meta.gridW) | 0;
+    const cell = document.createElement('canvas');
+    cell.width = cellW;
+    cell.height = cellH;
+    cell.getContext('2d').drawImage(
+      sheet, col * cellW, row * cellH, cellW, cellH, 0, 0, cellW, cellH
+    );
+    out.push(_normalizeFrameToReference(cell, idleBh, idleFootY, outW, outH));
+  }
+  return out;
+}
+
+(async function _loadHero() {
+  try {
+    const [idleImg, walkSheet, jumpSheet, attackSheet] = await Promise.all([
+      _csLoadImage('Sprites/character/hero/teen_idle.webp'),
+      _csLoadImage('Sprites/character/hero/' + HERO_META.walk.sheet),
+      _csLoadImage('Sprites/character/hero/' + HERO_META.jump.sheet),
+      _csLoadImage('Sprites/character/hero/' + HERO_META.attack.sheet),
+    ]);
+    HERO.idle = idleImg;
+    // Compute idle's reference bbox: every animated frame normalizes to this
+    // exact character height + feet Y position so on-screen size + position
+    // are perfectly consistent across idle / walk / jump / attack.
+    const targetW = idleImg.naturalWidth  || 640;
+    const targetH = idleImg.naturalHeight || 864;
+    const idleCanvas = document.createElement('canvas');
+    idleCanvas.width = targetW;
+    idleCanvas.height = targetH;
+    idleCanvas.getContext('2d').drawImage(idleImg, 0, 0);
+    const idleBbox = _findChibiBbox(idleCanvas);
+    const idleBh = idleBbox.maxY - idleBbox.minY + 1;
+    const idleFootY = idleBbox.maxY + 1;
+    HERO.idleBbox = idleBbox;
+    HERO.idleFootY = idleFootY;
+    HERO.walkFrames   = _heroExtractAndNormalize(walkSheet,   HERO_META.walk,   idleBh, idleFootY, targetW, targetH);
+    HERO.jumpFrames   = _heroExtractAndNormalize(jumpSheet,   HERO_META.jump,   idleBh, idleFootY, targetW, targetH);
+    HERO.attackFrames = _heroExtractAndNormalize(attackSheet, HERO_META.attack, idleBh, idleFootY, targetW, targetH);
     if (!window.PLAYER_CUSTOM_SPRITE_CANVAS) {
-      window.PLAYER_CUSTOM_SPRITE_CANVAS = pendingIdle;
-      window.PLAYER_CUSTOM_WALK_FRAMES = frames;
-      // v0.25.82 — flip: the 3/4-view teen sprite reads as left-facing in-game.
-      // Setting this to false makes the runtime mirror when player goes right.
+      window.PLAYER_CUSTOM_SPRITE_CANVAS = idleImg;
+      window.PLAYER_CUSTOM_WALK_FRAMES = HERO.walkFrames;
       window.PLAYER_SPRITE_FACES_RIGHT = false;
     }
-    console.log('[Hero] loaded teen idle + ' + HERO_META.frames + ' walk frames');
-  };
-  pendingIdle.onload = onReady;
-  pendingSheet.onload = onReady;
-  pendingIdle.onerror = () => console.warn('[Hero] failed to load teen_idle.webp');
-  pendingSheet.onerror = () => console.warn('[Hero] failed to load teen_walk_sheet.webp');
-  pendingIdle.src = 'Sprites/character/hero/teen_idle.webp';
-  pendingSheet.src = 'Sprites/character/hero/teen_walk_sheet.webp';
+    console.log('[Hero] loaded teen idle + walk(' + HERO.walkFrames.length + ') + jump(' + HERO.jumpFrames.length + ') + attack(' + HERO.attackFrames.length + ')');
+  } catch (err) {
+    console.warn('[Hero] load failed:', err.message);
+  }
 })();
 
 // === MONSTER ANIMATION SPRITESHEETS (v0.25.79) === ludo.ai animateSprite output.
@@ -29984,8 +30021,8 @@ requestAnimationFrame(loop);
 </div>
 
 <script>
-// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.82) ===
-console.log('%c[CharStudio] v0.25.82 loaded — aspect-aware scale + bbox-normalize walk frames + facing flip','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
+// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.83) ===
+console.log('%c[CharStudio] v0.25.83 loaded — consistent frame size + jump + attack anims (state machine)','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
 const CHAR_STUDIO = {
   base: null,           // grayscale neutral mannequin (multiply target)
   baseColored: null,    // peach mannequin used as walk-anim source frames
@@ -30174,6 +30211,49 @@ function openCharStudio() {
 // (head ~10-50% Y, body ~50-95% Y, horizontally centered, feet at ~95% down).
 // Used to compose walk frames whose source has the character drawn small
 // inside a larger cell.
+// v0.25.83 — pure bbox finder used by both _normalizeChibiFrame and the
+// new hero "use the idle as reference" normalization that keeps every walk
+// frame at the SAME on-screen size (instead of each frame fitting itself).
+function _findChibiBbox(srcCanvas) {
+  const sw = srcCanvas.width;
+  const sh = srcCanvas.height;
+  const data = srcCanvas.getContext('2d').getImageData(0, 0, sw, sh).data;
+  let minX = sw, minY = sh, maxX = -1, maxY = -1;
+  for (let y = 0; y < sh; y++) {
+    for (let x = 0; x < sw; x++) {
+      const a = data[(y * sw + x) * 4 + 3];
+      if (a > 12) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+// v0.25.83 — normalize a frame so its character matches a reference bbox's
+// HEIGHT exactly, anchored at a target feet Y. Use this for animation frames
+// where you want every frame to render at the same on-screen size + feet
+// position regardless of natural pose differences.
+function _normalizeFrameToReference(srcCanvas, refBboxHeight, targetFootY, outW, outH) {
+  const out = document.createElement('canvas');
+  out.width = outW;
+  out.height = outH;
+  const b = _findChibiBbox(srcCanvas);
+  if (b.maxX < b.minX || b.maxY < b.minY) return out;
+  const bw = b.maxX - b.minX + 1;
+  const bh = b.maxY - b.minY + 1;
+  const fitScale = refBboxHeight / bh;
+  const drawW = bw * fitScale;
+  const drawH = refBboxHeight;
+  const dx = (outW - drawW) / 2;
+  const dy = targetFootY - drawH;
+  out.getContext('2d').drawImage(srcCanvas, b.minX, b.minY, bw, bh, dx, dy, drawW, drawH);
+  return out;
+}
+
 function _normalizeChibiFrame(srcCanvas, outW, outH) {
   // v0.25.82 — outputs are now configurable (not forced square) so walk frames
   // can match the idle sprite's aspect exactly (e.g. hero idle is 640×864).
