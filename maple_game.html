@@ -22882,13 +22882,16 @@ function _drawPlayerCustomSprite() {
   const sx = Math.round(player.x - game.camera.x);
   const footX = sx + player.w / 2;
   const footY = player.y + player.h;
-  const targetH = player.h * 1.55;          // hero is taller-proportioned than mannequin
-  const targetW = targetH;
+  // v0.25.82 — aspect-aware scaling. Old code forced a square target; for the
+  // hero (640×864 ≈ 0.74) that horizontally squashed the character. Compute
+  // targetW from the sprite's actual aspect so proportions stay correct.
+  const srcW = sprite.naturalWidth  || sprite.width  || 1;
+  const srcH = sprite.naturalHeight || sprite.height || 1;
+  const targetH = player.h * 1.55;
+  const targetW = targetH * (srcW / srcH);
   ctx.save();
   ctx.translate(footX, footY);              // origin → player feet
   // Mirror when the in-game facing doesn't match the sprite's native facing.
-  // PLAYER_SPRITE_FACES_RIGHT is true for the hero (natively faces right) and
-  // false (or unset) for the studio's mannequin composite (natively faces left).
   const spriteFacesRight = !!window.PLAYER_SPRITE_FACES_RIGHT;
   const playerFacingRight = (player.facing | 0) >= 0;
   if (spriteFacesRight !== playerFacingRight) ctx.scale(-1, 1);
@@ -25739,19 +25742,26 @@ const HERO_META = { frames: 9, gridW: 3, gridH: 3, fps: 9 };
     if (++loaded < 2) return;
     HERO.idle = pendingIdle;
     HERO.walkSheet = pendingSheet;
+    // v0.25.82 — bbox-normalize each walk cell to the idle's exact dimensions,
+    // so walk frames render at the same on-screen size and aspect as idle.
+    // The walk sheet output has cells with significant padding around the
+    // character; without normalization, scaled walk frames look squashed.
     const cellW = (pendingSheet.width  / HERO_META.gridW) | 0;
     const cellH = (pendingSheet.height / HERO_META.gridH) | 0;
+    const targetW = pendingIdle.naturalWidth  || 640;
+    const targetH = pendingIdle.naturalHeight || 864;
     const frames = [];
     for (let i = 0; i < HERO_META.frames; i++) {
       const col = i % HERO_META.gridW;
       const row = (i / HERO_META.gridW) | 0;
-      const fr = document.createElement('canvas');
-      fr.width = cellW;
-      fr.height = cellH;
-      fr.getContext('2d').drawImage(
+      const cell = document.createElement('canvas');
+      cell.width = cellW;
+      cell.height = cellH;
+      cell.getContext('2d').drawImage(
         pendingSheet, col * cellW, row * cellH, cellW, cellH, 0, 0, cellW, cellH
       );
-      frames.push(fr);
+      // Normalize to idle dimensions so on-screen size + position match
+      frames.push(_normalizeChibiFrame(cell, targetW, targetH));
     }
     HERO.walkFrames = frames;
     // Default the in-game player to the hero unless the studio has already
@@ -25759,7 +25769,9 @@ const HERO_META = { frames: 9, gridW: 3, gridH: 3, fps: 9 };
     if (!window.PLAYER_CUSTOM_SPRITE_CANVAS) {
       window.PLAYER_CUSTOM_SPRITE_CANVAS = pendingIdle;
       window.PLAYER_CUSTOM_WALK_FRAMES = frames;
-      window.PLAYER_SPRITE_FACES_RIGHT = true;  // teen natively faces right
+      // v0.25.82 — flip: the 3/4-view teen sprite reads as left-facing in-game.
+      // Setting this to false makes the runtime mirror when player goes right.
+      window.PLAYER_SPRITE_FACES_RIGHT = false;
     }
     console.log('[Hero] loaded teen idle + ' + HERO_META.frames + ' walk frames');
   };
@@ -29972,8 +29984,8 @@ requestAnimationFrame(loop);
 </div>
 
 <script>
-// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.81) ===
-console.log('%c[CharStudio] v0.25.81 loaded — teen hero default + Eagle-quality walk (9 frames)','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
+// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.82) ===
+console.log('%c[CharStudio] v0.25.82 loaded — aspect-aware scale + bbox-normalize walk frames + facing flip','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
 const CHAR_STUDIO = {
   base: null,           // grayscale neutral mannequin (multiply target)
   baseColored: null,    // peach mannequin used as walk-anim source frames
@@ -30162,7 +30174,10 @@ function openCharStudio() {
 // (head ~10-50% Y, body ~50-95% Y, horizontally centered, feet at ~95% down).
 // Used to compose walk frames whose source has the character drawn small
 // inside a larger cell.
-function _normalizeChibiFrame(srcCanvas, outSize) {
+function _normalizeChibiFrame(srcCanvas, outW, outH) {
+  // v0.25.82 — outputs are now configurable (not forced square) so walk frames
+  // can match the idle sprite's aspect exactly (e.g. hero idle is 640×864).
+  if (outH === undefined) outH = outW;  // back-compat: single arg = square
   const sw = srcCanvas.width;
   const sh = srcCanvas.height;
   const data = srcCanvas.getContext('2d').getImageData(0, 0, sw, sh).data;
@@ -30180,21 +30195,18 @@ function _normalizeChibiFrame(srcCanvas, outSize) {
     }
   }
   const out = document.createElement('canvas');
-  out.width = outSize;
-  out.height = outSize;
-  if (maxX < minX || maxY < minY) {
-    // empty input — return blank
-    return out;
-  }
+  out.width = outW;
+  out.height = outH;
+  if (maxX < minX || maxY < minY) return out;
   const bw = maxX - minX + 1;
   const bh = maxY - minY + 1;
-  // Match the canonical base: character spans ~92% of canvas height, ~62% of
-  // width (chibi is taller than wide). Anchor feet at ~96% down.
-  const fitScale = Math.min((outSize * 0.62) / bw, (outSize * 0.92) / bh);
+  // Character spans ~88% of output height and stays within output width.
+  // Anchor feet at ~96% down. Preserves the source's aspect ratio.
+  const fitScale = Math.min((outW * 0.88) / bw, (outH * 0.92) / bh);
   const drawW = bw * fitScale;
   const drawH = bh * fitScale;
-  const dx = (outSize - drawW) / 2;
-  const dy = (outSize * 0.96) - drawH;
+  const dx = (outW - drawW) / 2;
+  const dy = (outH * 0.96) - drawH;
   const oc = out.getContext('2d');
   oc.imageSmoothingEnabled = true;
   oc.drawImage(srcCanvas, minX, minY, bw, bh, dx, dy, drawW, drawH);
@@ -30258,7 +30270,7 @@ function revertCharStudioFromPlayer() {
   // to procedural drawCuteCharacter).
   window.PLAYER_CUSTOM_SPRITE_CANVAS = HERO.idle || null;
   window.PLAYER_CUSTOM_WALK_FRAMES = HERO.walkFrames || null;
-  window.PLAYER_SPRITE_FACES_RIGHT = !!HERO.idle;
+  window.PLAYER_SPRITE_FACES_RIGHT = false;  // hero reads as left-facing in 3/4 view
   const status = document.getElementById('char-studio-status');
   if (status) status.textContent = 'Reverted · in-game player back to procedural chibi';
   if (typeof showToast === 'function') showToast('Reverted to procedural chibi', 'common');
