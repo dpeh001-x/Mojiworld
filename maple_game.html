@@ -22858,14 +22858,20 @@ function drawPlayer() {
 // scale-anchored-at-feet but does NOT translate the coordinate origin, so we
 // must use absolute screen coords just like drawCuteCharacter(sx, sy) does.
 function _drawPlayerCustomSprite() {
-  // v0.25.80 — pick the right frame source based on movement state:
+  // v0.25.81 — pick the right frame source based on movement state:
   //   walking (|vx|>0.5) + walk frames available → cycle through walk cycle
   //   else → static idle snapshot
+  // Frame fps + facing convention vary by which sprite system is active:
+  //   hero (default at game load): faces right natively, 9 frames at 9 fps
+  //   studio's mannequin composite: faces left natively, 4 frames at 6 fps
   const walkFrames = window.PLAYER_CUSTOM_WALK_FRAMES;
   const moving = Math.abs(player.vx) > 0.5;
+  const isHero = walkFrames === HERO.walkFrames;
   let sprite;
   if (moving && walkFrames && walkFrames.length) {
-    const fps = (CHAR_STUDIO && CHAR_STUDIO.walkSheetMeta && CHAR_STUDIO.walkSheetMeta.fps) || 6;
+    const fps = isHero
+      ? (HERO_META.fps || 9)
+      : ((CHAR_STUDIO && CHAR_STUDIO.walkSheetMeta && CHAR_STUDIO.walkSheetMeta.fps) || 6);
     const framesPerStep = Math.max(1, (60 / fps) | 0);
     const idx = ((((game.time / framesPerStep) | 0) % walkFrames.length) + walkFrames.length) % walkFrames.length;
     sprite = walkFrames[idx];
@@ -22876,13 +22882,16 @@ function _drawPlayerCustomSprite() {
   const sx = Math.round(player.x - game.camera.x);
   const footX = sx + player.w / 2;
   const footY = player.y + player.h;
-  const targetH = player.h * 1.45;          // taller than bbox to fit the chibi big head
-  const targetW = targetH;                  // sprite canvas is square (384×384)
+  const targetH = player.h * 1.55;          // hero is taller-proportioned than mannequin
+  const targetW = targetH;
   ctx.save();
   ctx.translate(footX, footY);              // origin → player feet
-  // Sprite is natively in 3/4 front-facing-LEFT view; mirror when the player
-  // faces RIGHT so the character looks the right way during play.
-  if ((player.facing | 0) > 0) ctx.scale(-1, 1);
+  // Mirror when the in-game facing doesn't match the sprite's native facing.
+  // PLAYER_SPRITE_FACES_RIGHT is true for the hero (natively faces right) and
+  // false (or unset) for the studio's mannequin composite (natively faces left).
+  const spriteFacesRight = !!window.PLAYER_SPRITE_FACES_RIGHT;
+  const playerFacingRight = (player.facing | 0) >= 0;
+  if (spriteFacesRight !== playerFacingRight) ctx.scale(-1, 1);
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(sprite, -targetW / 2, -targetH * 0.92, targetW, targetH);
   ctx.restore();
@@ -25713,6 +25722,53 @@ const MONSTER_SPRITE_TYPES = [
     img.onerror = () => { console.warn('[MonsterSprite] failed to load', type); };
     img.src = 'Sprites/monsters/' + type + '.webp';
   }
+})();
+
+// === HERO CHARACTER (v0.25.81) === complete pre-styled teen-male sprite with
+// face / hair / clothes / shoes baked in. Replaces the layered mannequin
+// approach for the in-game player (the Character Studio still works for users
+// who want to customize via Q + Apply, but the default at game load is the
+// teen hero). Idle is a single transparent webp; walk is a 3×3 spritesheet.
+const HERO = { idle: null, walkSheet: null, walkFrames: null };
+const HERO_META = { frames: 9, gridW: 3, gridH: 3, fps: 9 };
+(function _loadHero() {
+  let pendingIdle = new Image();
+  let pendingSheet = new Image();
+  let loaded = 0;
+  const onReady = () => {
+    if (++loaded < 2) return;
+    HERO.idle = pendingIdle;
+    HERO.walkSheet = pendingSheet;
+    const cellW = (pendingSheet.width  / HERO_META.gridW) | 0;
+    const cellH = (pendingSheet.height / HERO_META.gridH) | 0;
+    const frames = [];
+    for (let i = 0; i < HERO_META.frames; i++) {
+      const col = i % HERO_META.gridW;
+      const row = (i / HERO_META.gridW) | 0;
+      const fr = document.createElement('canvas');
+      fr.width = cellW;
+      fr.height = cellH;
+      fr.getContext('2d').drawImage(
+        pendingSheet, col * cellW, row * cellH, cellW, cellH, 0, 0, cellW, cellH
+      );
+      frames.push(fr);
+    }
+    HERO.walkFrames = frames;
+    // Default the in-game player to the hero unless the studio has already
+    // explicitly applied a custom avatar.
+    if (!window.PLAYER_CUSTOM_SPRITE_CANVAS) {
+      window.PLAYER_CUSTOM_SPRITE_CANVAS = pendingIdle;
+      window.PLAYER_CUSTOM_WALK_FRAMES = frames;
+      window.PLAYER_SPRITE_FACES_RIGHT = true;  // teen natively faces right
+    }
+    console.log('[Hero] loaded teen idle + ' + HERO_META.frames + ' walk frames');
+  };
+  pendingIdle.onload = onReady;
+  pendingSheet.onload = onReady;
+  pendingIdle.onerror = () => console.warn('[Hero] failed to load teen_idle.webp');
+  pendingSheet.onerror = () => console.warn('[Hero] failed to load teen_walk_sheet.webp');
+  pendingIdle.src = 'Sprites/character/hero/teen_idle.webp';
+  pendingSheet.src = 'Sprites/character/hero/teen_walk_sheet.webp';
 })();
 
 // === MONSTER ANIMATION SPRITESHEETS (v0.25.79) === ludo.ai animateSprite output.
@@ -29916,8 +29972,8 @@ requestAnimationFrame(loop);
 </div>
 
 <script>
-// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.80b) ===
-console.log('%c[CharStudio] v0.25.80b loaded — bbox-normalize walk frames (proper size + head alignment)','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
+// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.81) ===
+console.log('%c[CharStudio] v0.25.81 loaded — teen hero default + Eagle-quality walk (9 frames)','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
 const CHAR_STUDIO = {
   base: null,           // grayscale neutral mannequin (multiply target)
   baseColored: null,    // peach mannequin used as walk-anim source frames
@@ -30154,6 +30210,7 @@ function applyCharStudioToPlayer() {
   off.height = cv.height;
   off.getContext('2d').drawImage(cv, 0, 0);
   window.PLAYER_CUSTOM_SPRITE_CANVAS = off;
+  window.PLAYER_SPRITE_FACES_RIGHT = false;  // studio mannequin natively faces left
 
   // v0.25.80b — pre-render walk-cycle frames per current customization.
   // animateSprite returns the character drawn small inside each cell with lots
@@ -30197,8 +30254,11 @@ function applyCharStudioToPlayer() {
 }
 
 function revertCharStudioFromPlayer() {
-  window.PLAYER_CUSTOM_SPRITE_CANVAS = null;
-  window.PLAYER_CUSTOM_WALK_FRAMES = null;
+  // Revert to the default hero (or null if hero hasn't loaded yet — falls back
+  // to procedural drawCuteCharacter).
+  window.PLAYER_CUSTOM_SPRITE_CANVAS = HERO.idle || null;
+  window.PLAYER_CUSTOM_WALK_FRAMES = HERO.walkFrames || null;
+  window.PLAYER_SPRITE_FACES_RIGHT = !!HERO.idle;
   const status = document.getElementById('char-studio-status');
   if (status) status.textContent = 'Reverted · in-game player back to procedural chibi';
   if (typeof showToast === 'function') showToast('Reverted to procedural chibi', 'common');
