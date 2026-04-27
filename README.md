@@ -6,6 +6,11 @@ A 2D action-platformer RPG with roguelite elements. Four classes, eight job adva
 
 **Open `maple_game.html` in a browser.** Solo play needs no setup.
 
+Optional art mode: append `?art=cinematic` for the high-fidelity background pack.
+Optional scene post-processing: append `?artfx=soft` (default), `?artfx=vivid`, `?artfx=noir`, or `?artfx=0` to disable.
+Outdoor maps now include a built-in art pass (depth fog, god rays, foreground foliage framing) to improve scene depth and character readability.
+Bitmap backgrounds also get an animated sky-life layer (moving cloud wisps + distant birds) for a more alive painterly feel.
+
 Live play URL (once GitHub Pages is enabled): **https://dpeh001-x.github.io/LevelX/maple_game.html**
 
 ## 🌐 Multiplayer (optional, v0.24.0)
