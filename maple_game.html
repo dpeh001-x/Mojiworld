@@ -22557,11 +22557,37 @@ function drawPlayer() {
   // --- Cute chibi character (procedural, uses CUTE_PAL + CUTE_CLASS_COLORS) ---
   // v0.25.36 — was guarded by a dead drawLayeredCharacter() PNG path; that
   // sprite system is removed and drawCuteCharacter is the only renderer.
-  drawCuteCharacter(sx, sy);
+  // v0.25.75 — Character Studio "Apply to player" sets window.PLAYER_CUSTOM_SPRITE_CANVAS;
+  //             when set, draw the layered avatar instead of the procedural chibi.
+  if (window.PLAYER_CUSTOM_SPRITE_CANVAS) {
+    _drawPlayerCustomSprite();
+  } else {
+    drawCuteCharacter(sx, sy);
+  }
   _chibiRestore();
-  _drawCuteFaceOverlay(sx, sy);
+  if (!window.PLAYER_CUSTOM_SPRITE_CANVAS) _drawCuteFaceOverlay(sx, sy);
   _drawPlayerNameTag(sx, sy);
   return;
+}
+
+// Draw the Character Studio's composited sprite at the player's screen
+// position. Runs INSIDE the _chibiApply transform — that transform applies
+// scale-anchored-at-feet but does NOT translate the coordinate origin, so we
+// must use absolute screen coords just like drawCuteCharacter(sx, sy) does.
+function _drawPlayerCustomSprite() {
+  const sprite = window.PLAYER_CUSTOM_SPRITE_CANVAS;
+  if (!sprite) return;
+  const sx = Math.round(player.x - game.camera.x);
+  const footX = sx + player.w / 2;
+  const footY = player.y + player.h;
+  const targetH = player.h * 1.45;          // taller than bbox to fit the chibi big head
+  const targetW = targetH;                  // sprite canvas is square (384×384)
+  ctx.save();
+  ctx.translate(footX, footY);              // origin → player feet
+  if ((player.facing | 0) < 0) ctx.scale(-1, 1);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(sprite, -targetW / 2, -targetH * 0.92, targetW, targetH);
+  ctx.restore();
 }
 
 // =========================================================================
@@ -29420,6 +29446,309 @@ renderSkillBar();
 window.addEventListener('visibilitychange', () => { if (document.hidden && player.cls && !game._resetting) saveState(); });
 window.addEventListener('beforeunload',     () => { if (player.cls && !game._resetting) saveState(); });
 requestAnimationFrame(loop);
+</script>
+
+<!-- ===== CHARACTER STUDIO (v0.25.72) ===== layered avatar with skin-tone tinting -->
+<style>
+  #char-studio-overlay {
+    position: fixed; inset: 0;
+    background: rgba(8, 4, 18, 0.94);
+    z-index: 220;
+    display: none;
+    align-items: center; justify-content: center;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  #char-studio-overlay.open { display: flex; }
+  .char-studio-panel {
+    position: relative;
+    background: linear-gradient(180deg, #1f1238 0%, #15082a 100%);
+    border: 1px solid #4a3a6e;
+    border-radius: 14px;
+    padding: 28px 32px;
+    display: grid;
+    grid-template-columns: 320px 260px;
+    gap: 28px;
+    color: #e8d8ff;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    box-shadow: 0 22px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(201,168,255,0.08) inset;
+    max-height: 92vh;
+    overflow-y: auto;
+  }
+  .char-studio-controls { max-height: 80vh; overflow-y: auto; padding-right: 6px; }
+  .char-studio-panel h2 { margin: 0 0 4px; font-size: 18px; letter-spacing: 1px; color: #ffd166; grid-column: 1 / -1; }
+  .char-studio-panel .subtitle { margin: 0 0 14px; opacity: 0.6; font-size: 12px; grid-column: 1 / -1; }
+  .char-studio-canvas-wrap {
+    background: radial-gradient(ellipse at 50% 30%, #3a2a5a 0%, #1a0d28 78%);
+    border: 1px solid #4a3a6e;
+    border-radius: 10px;
+    padding: 14px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #char-studio-canvas { width: 280px; height: 280px; image-rendering: -webkit-optimize-contrast; }
+  .char-studio-controls h3 { margin: 4px 0 8px; font-size: 11px; opacity: 0.7; text-transform: uppercase; letter-spacing: 1.4px; color: #c9a8ff; }
+  .skin-swatches { display: grid; grid-template-columns: repeat(6, 32px); gap: 8px; margin-bottom: 18px; }
+  .skin-swatch { width: 32px; height: 32px; border-radius: 50%; cursor: pointer; border: 2px solid rgba(255,255,255,0.12); transition: transform 0.12s, border-color 0.12s; box-shadow: inset 0 -3px 6px rgba(0,0,0,0.18); }
+  .skin-swatch:hover { transform: translateY(-2px); border-color: #c9a8ff; }
+  .skin-swatch.active { border-color: #ffd166; transform: translateY(-2px); }
+  .face-styles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 18px; }
+  .face-style-btn { padding: 6px 10px; font-size: 11px; cursor: pointer; background: #2a1a44; border: 1px solid #4a3a6e; border-radius: 6px; color: #e8d8ff; text-align: left; transition: background 0.12s, border-color 0.12s; }
+  .face-style-btn:hover { background: #3a2654; border-color: #c9a8ff; }
+  .face-style-btn.active { background: #4a2c70; border-color: #ffd166; color: #ffd166; }
+  #char-studio-status { font-size: 11px; opacity: 0.55; margin: 6px 0 0; }
+  #char-studio-close { position: absolute; top: 10px; right: 14px; cursor: pointer; font-size: 22px; line-height: 1; opacity: 0.5; user-select: none; }
+  #char-studio-close:hover { opacity: 1; color: #ffd166; }
+  .char-studio-hint { margin-top: 12px; font-size: 11px; opacity: 0.45; }
+  .char-studio-hint kbd { font-family: 'Consolas', monospace; font-size: 10px; padding: 2px 6px; background: #2a1a44; border: 1px solid #4a3a6e; border-radius: 4px; }
+</style>
+
+<div id="char-studio-overlay">
+  <div class="char-studio-panel">
+    <span id="char-studio-close" title="Close (Q or Esc)">×</span>
+    <h2>Character Studio</h2>
+    <p class="subtitle">Layered avatar — base + face overlays, skin tone tinted at runtime via multiply blend.</p>
+    <div class="char-studio-canvas-wrap">
+      <canvas id="char-studio-canvas" width="384" height="384"></canvas>
+    </div>
+    <div class="char-studio-controls">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
+        <button type="button" class="face-style-btn" id="char-studio-apply" style="flex:1;background:#4a2c70;color:#ffd166;border-color:#ffd166;font-weight:600;">▶ Use in game</button>
+        <button type="button" class="face-style-btn" id="char-studio-revert" style="flex:1;">↺ Revert</button>
+      </div>
+      <p id="char-studio-status" style="margin-top:0;">Loading layers…</p>
+      <h3>Skin Tone</h3>
+      <div class="skin-swatches" id="skin-swatches"></div>
+      <h3>Face Style</h3>
+      <div class="face-styles" id="face-styles"></div>
+      <h3>Hair</h3>
+      <div class="face-styles" id="hair-styles"></div>
+      <p class="char-studio-hint">Press <kbd>Q</kbd> to toggle • <kbd>Esc</kbd> to close</p>
+    </div>
+  </div>
+</div>
+
+<script>
+// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.76) ===
+console.log('%c[CharStudio] v0.25.76 loaded — hair now renders on top of face (bangs occlude eyes)','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
+const CHAR_STUDIO = {
+  base: null,           // grayscale neutral mannequin (multiply target)
+  faces: {},            // { 'anime_classic': Image, 'sleepy_calm': Image, ... }
+  faceStyle: 'anime_classic',
+  skinTone: '#F5C9A8',  // default light-peach
+  swatches: [
+    { name: 'Porcelain', hex: '#FCDFC9' },
+    { name: 'Light',     hex: '#F5C9A8' },
+    { name: 'Tan',       hex: '#E0AC83' },
+    { name: 'Olive',     hex: '#B68458' },
+    { name: 'Brown',     hex: '#8C5A36' },
+    { name: 'Deep',      hex: '#5E3920' },
+  ],
+  faceStyles: [
+    { id: 'anime_classic', name: 'Classic',  file: 'anime_classic.webp' },
+    { id: 'sleepy_calm',   name: 'Sleepy',   file: 'sleepy_calm.webp'   },
+    { id: 'sharp_serious', name: 'Sharp',    file: 'sharp_serious.webp' },
+    { id: 'big_grin',      name: 'Big Grin', file: 'big_grin.webp'      },
+  ],
+  hairs: {},
+  hairStyle: 'blonde_shaggy',
+  hairStyles: [
+    { id: 'bald',          name: 'Bald',     file: null },
+    { id: 'blonde_shaggy', name: 'Blonde',   file: 'blonde_shaggy.webp' },
+    { id: 'black_spike',   name: 'Black',    file: 'black_spike.webp'   },
+    { id: 'brown_pony',    name: 'Brown',    file: 'brown_pony.webp'    },
+    { id: 'mage_hood',     name: 'Hood',     file: 'mage_hood.webp'     },
+  ],
+  ready: false,
+};
+
+function _csLoadImg(src) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => rej(new Error('Failed to load ' + src));
+    img.src = src;
+  });
+}
+
+async function loadCharStudioLayers() {
+  try {
+    const status = document.getElementById('char-studio-status');
+    if (status) status.textContent = 'Loading layers…';
+    const baseP = _csLoadImg('Sprites/character/layers/base/mannequin_base_neutral.webp');
+    const facePromises = CHAR_STUDIO.faceStyles.map((fs) =>
+      _csLoadImg('Sprites/character/layers/eyes/' + fs.file).then((img) => {
+        CHAR_STUDIO.faces[fs.id] = img;
+      })
+    );
+    const hairPromises = CHAR_STUDIO.hairStyles
+      .filter((hs) => !!hs.file)
+      .map((hs) =>
+        _csLoadImg('Sprites/character/layers/hair/' + hs.file).then((img) => {
+          CHAR_STUDIO.hairs[hs.id] = img;
+        })
+      );
+    CHAR_STUDIO.base = await baseP;
+    await Promise.all([...facePromises, ...hairPromises]);
+    CHAR_STUDIO.ready = true;
+    const layerCount = 1 + CHAR_STUDIO.faceStyles.length + CHAR_STUDIO.hairStyles.filter((h) => !!h.file).length;
+    if (status) status.textContent = 'Ready · ' + layerCount + ' layers loaded';
+    renderCharStudio();
+  } catch (err) {
+    const status = document.getElementById('char-studio-status');
+    if (status) status.textContent = 'Failed to load: ' + err.message;
+    console.error('[CharStudio]', err);
+  }
+}
+
+function renderCharStudio() {
+  if (!CHAR_STUDIO.ready) return;
+  const cv = document.getElementById('char-studio-canvas');
+  if (!cv) return;
+  const W = cv.width, H = cv.height;
+  const c = cv.getContext('2d');
+  c.clearRect(0, 0, W, H);
+  c.globalCompositeOperation = 'source-over';
+  // Step 1: paint the neutralized grayscale mannequin (alpha intact, including anti-aliased edges)
+  c.drawImage(CHAR_STUDIO.base, 0, 0, W, H);
+  // Step 2: per-pixel RGB multiply by the skin tone — only touches pixels that already exist,
+  // preserves alpha exactly, eliminates the fringe halo from blend-mode + fillRect tinting.
+  const hex = CHAR_STUDIO.skinTone;
+  const skinR = parseInt(hex.slice(1, 3), 16);
+  const skinG = parseInt(hex.slice(3, 5), 16);
+  const skinB = parseInt(hex.slice(5, 7), 16);
+  const img = c.getImageData(0, 0, W, H);
+  const d = img.data;
+  for (let i = 0, n = d.length; i < n; i += 4) {
+    if (d[i + 3] === 0) continue; // skip fully transparent pixels
+    d[i]     = (d[i]     * skinR / 255) | 0;
+    d[i + 1] = (d[i + 1] * skinG / 255) | 0;
+    d[i + 2] = (d[i + 2] * skinB / 255) | 0;
+    // alpha (d[i+3]) unchanged so anti-aliased silhouette stays intact
+  }
+  c.putImageData(img, 0, 0);
+  // Step 3: stack the chosen face overlay (eyes + mouth) FIRST
+  const face = CHAR_STUDIO.faces[CHAR_STUDIO.faceStyle];
+  if (face) c.drawImage(face, 0, 0, W, H);
+  // Step 4: stack the hair overlay LAST so its baked-in black outline + bangs
+  // sit ON TOP of face — bangs occlude the eyes naturally (chibi/MapleStory convention).
+  const hair = CHAR_STUDIO.hairs[CHAR_STUDIO.hairStyle];
+  if (hair) c.drawImage(hair, 0, 0, W, H);
+}
+
+function buildCharStudioSwatches() {
+  const cont = document.getElementById('skin-swatches');
+  if (!cont || cont.dataset.built) return;
+  cont.dataset.built = '1';
+  CHAR_STUDIO.swatches.forEach((sw) => {
+    const el = document.createElement('div');
+    el.className = 'skin-swatch' + (sw.hex === CHAR_STUDIO.skinTone ? ' active' : '');
+    el.style.background = sw.hex;
+    el.title = sw.name + ' · ' + sw.hex;
+    el.onclick = () => {
+      CHAR_STUDIO.skinTone = sw.hex;
+      cont.querySelectorAll('.skin-swatch').forEach((s) => s.classList.remove('active'));
+      el.classList.add('active');
+      renderCharStudio();
+    };
+    cont.appendChild(el);
+  });
+}
+
+function buildCharStudioFaceStyles() {
+  const cont = document.getElementById('face-styles');
+  if (!cont || cont.dataset.built) return;
+  cont.dataset.built = '1';
+  CHAR_STUDIO.faceStyles.forEach((fs) => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'face-style-btn' + (fs.id === CHAR_STUDIO.faceStyle ? ' active' : '');
+    el.textContent = fs.name;
+    el.title = fs.id;
+    el.onclick = () => {
+      CHAR_STUDIO.faceStyle = fs.id;
+      cont.querySelectorAll('.face-style-btn').forEach((b) => b.classList.remove('active'));
+      el.classList.add('active');
+      renderCharStudio();
+    };
+    cont.appendChild(el);
+  });
+}
+
+function buildCharStudioHairStyles() {
+  const cont = document.getElementById('hair-styles');
+  if (!cont || cont.dataset.built) return;
+  cont.dataset.built = '1';
+  CHAR_STUDIO.hairStyles.forEach((hs) => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'face-style-btn' + (hs.id === CHAR_STUDIO.hairStyle ? ' active' : '');
+    el.textContent = hs.name;
+    el.title = hs.id;
+    el.onclick = () => {
+      CHAR_STUDIO.hairStyle = hs.id;
+      cont.querySelectorAll('.face-style-btn').forEach((b) => b.classList.remove('active'));
+      el.classList.add('active');
+      renderCharStudio();
+    };
+    cont.appendChild(el);
+  });
+}
+
+function openCharStudio() {
+  document.getElementById('char-studio-overlay').classList.add('open');
+  buildCharStudioSwatches();
+  buildCharStudioFaceStyles();
+  buildCharStudioHairStyles();
+  wireCharStudioActionButtons();
+  if (!CHAR_STUDIO.ready) loadCharStudioLayers();
+  else renderCharStudio();
+}
+
+function applyCharStudioToPlayer() {
+  const cv = document.getElementById('char-studio-canvas');
+  if (!cv || !CHAR_STUDIO.ready) return;
+  // Snapshot the current composite into an offscreen canvas the in-game
+  // player draw routine can read each frame (no per-frame allocation).
+  const off = document.createElement('canvas');
+  off.width = cv.width;
+  off.height = cv.height;
+  off.getContext('2d').drawImage(cv, 0, 0);
+  window.PLAYER_CUSTOM_SPRITE_CANVAS = off;
+  const status = document.getElementById('char-studio-status');
+  if (status) status.textContent = 'Applied · in-game player now uses this avatar';
+  if (typeof showToast === 'function') showToast('Avatar applied to player', 'rare');
+}
+
+function revertCharStudioFromPlayer() {
+  window.PLAYER_CUSTOM_SPRITE_CANVAS = null;
+  const status = document.getElementById('char-studio-status');
+  if (status) status.textContent = 'Reverted · in-game player back to procedural chibi';
+  if (typeof showToast === 'function') showToast('Reverted to procedural chibi', 'common');
+}
+
+function wireCharStudioActionButtons() {
+  const ap = document.getElementById('char-studio-apply');
+  const rv = document.getElementById('char-studio-revert');
+  if (ap && !ap.dataset.wired) { ap.dataset.wired = '1'; ap.onclick = applyCharStudioToPlayer; }
+  if (rv && !rv.dataset.wired) { rv.dataset.wired = '1'; rv.onclick = revertCharStudioFromPlayer; }
+}
+function closeCharStudio() {
+  document.getElementById('char-studio-overlay').classList.remove('open');
+}
+const _csCloseBtn = document.getElementById('char-studio-close');
+if (_csCloseBtn) _csCloseBtn.addEventListener('click', closeCharStudio);
+else console.warn('[CharStudio] close button missing from DOM');
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('char-studio-overlay').classList.contains('open')) {
+    e.preventDefault();
+    closeCharStudio();
+  } else if ((e.key === 'Q' || e.key === 'q') && !e.repeat) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    e.preventDefault();
+    if (document.getElementById('char-studio-overlay').classList.contains('open')) closeCharStudio();
+    else openCharStudio();
+  }
+});
 </script>
 </body>
 </html>

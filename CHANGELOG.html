@@ -1125,6 +1125,123 @@
   <li><b>Clouds</b> now have optional tiny faces on bright maps — little black dot eyes, pink blush cheeks, and a subtle smile arc. About half the clouds get faces (every even-sized cloud) to avoid feeling busy.</li>
 </ul>
 
+<h2>v0.25.75 <span class="tag">Apply Character Studio avatar to live in-game player</span></h2>
+<p class="lede">The Character Studio output (skin tone × face × hair) can now be applied to the live in-game player sprite. Procedural <code>drawCuteCharacter</code> stays as the fallback when no custom avatar is applied.</p>
+
+<h3>Apply / Revert buttons</h3>
+<ul>
+  <li>Two new buttons under the Character Studio panel: <b>Use in game</b> and <b>Revert</b>.</li>
+  <li><b>Use in game</b> snapshots the current 384×384 composited canvas into <code>window.PLAYER_CUSTOM_SPRITE_CANVAS</code> (one-time copy, no per-frame allocation) and shows a toast.</li>
+  <li><b>Revert</b> clears the global → <code>drawPlayer</code> falls back to procedural chibi rendering.</li>
+</ul>
+
+<h3>Render-time integration in <code>drawPlayer</code></h3>
+<ul>
+  <li>Added a branch at the existing <code>drawCuteCharacter(sx, sy)</code> call site (line ~22560): if <code>PLAYER_CUSTOM_SPRITE_CANVAS</code> is set, the custom sprite renders instead via <code>_drawPlayerCustomSprite()</code>.</li>
+  <li>Custom sprite anchors at the player's feet (using the existing <code>_chibiApply</code> transform), scales to <code>player.h × 1.45</code> (taller than the bbox to fit the chibi's big head), and mirrors horizontally for left-facing.</li>
+  <li>The procedural face overlay (<code>_drawCuteFaceOverlay</code>) is skipped when a custom sprite is in use — the studio's face overlay is already baked in.</li>
+  <li>Block / parry shield bubble + name tag still draw on top regardless of which character path was used.</li>
+</ul>
+
+<h3>Caveats</h3>
+<ul>
+  <li><b>Idle pose only.</b> The studio sprite is one fixed 3/4-front pose. While the player walks / runs / attacks, the same sprite is drawn (no animation frames yet). Feels static during action — that's the next batch (per-pose <code>generatePose</code> calls).</li>
+  <li><b>No clothes layer yet.</b> The mannequin's plain body shows when applied — top / bottom / weapon overlays come next.</li>
+  <li>Apply doesn't persist across reloads (no save). Re-apply after each refresh until the persistence step ships.</li>
+</ul>
+
+<h3>v0.25.75b coord-fix patch</h3>
+<ul>
+  <li>Initial v0.25.75 had the sprite drawn at user-coord origin assuming <code>_chibiApply</code> translated the origin to player feet. It does not — <code>_chibiApply</code> applies a scale-anchored-at-feet but the coordinate system stays in screen space (which is why <code>drawCuteCharacter</code> takes <code>sx, sy</code> as parameters).</li>
+  <li>Result: the custom sprite was being drawn in the upper-left of the screen at roughly <code>(-0.19 × footX, -0.06 × footY)</code> — far off-screen. Player appeared invisible after Apply, masquerading as "sprite doesn't show".</li>
+  <li>Fix: <code>_drawPlayerCustomSprite</code> now derives <code>footX, footY</code> from the same <code>player.x - game.camera.x + w/2</code> + <code>player.y + h</code> formulas, then <code>ctx.translate(footX, footY)</code> before the draw. Anchor + scale now work correctly.</li>
+</ul>
+
+<h2>v0.25.74 <span class="tag">Hair slot + soft-alpha extraction (4 hair styles)</span></h2>
+<p class="lede">Adds the hair layer slot to the Character Studio with 4 starter styles, plus a soft-alpha extraction mode that fades feature edges naturally instead of capturing AA pixels at hard full alpha.</p>
+
+<h3>Soft-alpha extraction mode</h3>
+<ul>
+  <li><b>Why</b>: hair edges have wide anti-aliased gradients (yellow→cream for blonde, black→cream for spike). Hard-alpha extraction captured those gradient pixels at full alpha with their gray-blend RGB, producing a visible halo when composited over a tinted skin tone.</li>
+  <li><b>What changed</b>: <code>extract_layer.py</code> now defaults to <code>soft_alpha=True</code>. Per-pixel alpha ramps from 0 at the diff threshold to 255 at <code>threshold + soft_alpha_ramp</code> (default 80). Edges that are barely-different fade to transparent; clear feature pixels stay fully opaque.</li>
+  <li>Optional <code>soft_alpha=False</code> falls back to the previous binary mask if a layer needs hard edges (e.g. logo overlays).</li>
+</ul>
+
+<h3>4 starter hair overlays</h3>
+<ul>
+  <li><b>Blonde Shaggy</b>: chunky single-silhouette golden tousled bangs, MapleStory warrior-class look.</li>
+  <li><b>Black Spike</b>: anime-shounen spiky black hair with subtle gray sheen highlights.</li>
+  <li><b>Brown Pony</b>: chibi straight-cut bangs with a high red-ribbon ponytail. Iconic anime-girl silhouette.</li>
+  <li><b>Mage Hood</b>: deep purple wizard cowl with silver trim — covers hair entirely, classic mage class read.</li>
+  <li>Plus a <b>Bald</b> option (no hair layer rendered) so the player can opt out.</li>
+</ul>
+
+<h3>Studio runtime — 5th picker + new z-order</h3>
+<ul>
+  <li>Hair-style picker added below the Face picker (5 buttons matching the existing button styling).</li>
+  <li><b>Render z-order</b> updated: base → multiply skin tint → hair → face. Hair below face means eyes peek through bangs (chibi convention), face overlay always reads cleanly.</li>
+  <li>Lazy-load now fetches 9 layers in parallel on first studio open (1 base + 4 faces + 4 hairs). Status: <code>Ready · 9 layers loaded</code>.</li>
+</ul>
+
+<h2>v0.25.73 <span class="tag">Character Studio — 4 face styles + face-aware extractor + halo fixes</span></h2>
+<p class="lede">Builds on v0.25.72. Three new face styles join Classic (Sleepy, Sharp, Big Grin), plus a face-specific extraction pipeline that fixes both the silhouette fringe halo and the missing-pupil-highlight bug.</p>
+
+<h3>Halo fixes — render pipeline + extractor</h3>
+<ul>
+  <li><b>Silhouette halo</b> (mannequin edge looked fuzzy after multiply blend): the old <code>multiply</code>+<code>fillRect</code>+<code>destination-in</code> pipeline over-tinted anti-aliased silhouette pixels with pure skin tone. Replaced with a <b>per-pixel ImageData multiply</b> that touches only existing pixels, preserves alpha exactly, and gives mathematically correct shading. Black outlines stay black; AA edges fade naturally to any skin tone.</li>
+  <li><b>Eye halo + missing pupils</b>: the generic <code>extract_layer.py</code> pixel-diff captured the AA fringe of the black eye with its gray transition RGB at full alpha (visible halo over tinted skin) and missed the white pupils because they were too close in colour to the cream-white face background.</li>
+  <li><b>New <code>extract_face.py</code></b> handles faces specifically: dark feature pixels become pure black with alpha = 255 − max(R,G,B) so AA fades to whatever's underneath; pupil whites are detected via erode + dilate inside the dark cluster (centres only — no cream face leakage) and forced fully opaque white. Tunable thresholds (<code>dark_max_rgb=180</code>, <code>white_min_rgb=248</code>, <code>pupil_erosion_px=1</code>, <code>pupil_dilation_px=1</code>).</li>
+</ul>
+
+<h3>3 new face overlays</h3>
+<ul>
+  <li><b>Sleepy / Calm</b>: smooth closed-eyelid arches with eyelashes + small calm mouth. Quiet thoughtful vibe.</li>
+  <li><b>Sharp / Serious</b>: angular narrow black eyes with thin pupil glints + slight scowl. Warrior / commander look.</li>
+  <li><b>Big Grin</b>: oversized round anime eyes with sparkle highlights + open pink-tongued grin + scattered sparkle particles for the excited / delighted vibe.</li>
+  <li>All four styles re-extracted with the fixed face extractor — pupils opaque, no edge halo at any of the 6 skin tones.</li>
+</ul>
+
+<h3>Face style picker in Character Studio</h3>
+<ul>
+  <li>4 buttons (Classic · Sleepy · Sharp · Big Grin) under the skin tone palette. Click to live-swap the face overlay.</li>
+  <li>Lazy-load: all 4 face PNGs fetched in parallel with the base when the studio first opens. Status line now reports <code>Ready · 5 layers loaded</code>.</li>
+  <li>Swatches and face buttons share the same active-state styling (gold border on selection).</li>
+</ul>
+
+<h2>v0.25.72 <span class="tag">Layered avatar system — ludo.ai sprite pipeline + Character Studio (press Q)</span></h2>
+<p class="lede">First step toward a MapleStory-style customizable character. Ships a runtime layer compositor (toggle with <kbd>Q</kbd>) backed by ludo.ai-generated overlays. Each visual layer (face, hair, top, etc.) is a transparent PNG anchored to a canonical neutral mannequin base. Skin tones are tinted at runtime via canvas multiply blend so any RGB colour works.</p>
+
+<h3>Pipeline — edit + extract + neutralize</h3>
+<ul>
+  <li><b>Canonical base</b>: faceless chibi mannequin (3/4 front-turned right, 4-tone cel-shaded, anatomically simplified). Generated via ludo.ai then background-removed for clean alpha. Saved to <code>Sprites/character/layers/base/mannequin_base.webp</code>.</li>
+  <li><b>Neutralized base</b>: <code>neutralize_skin.py</code> converts the peach body fill to grayscale luminance while preserving the black manga-ink outline and alpha channel. Output at <code>mannequin_base_neutral.webp</code> — the runtime tinting target.</li>
+  <li><b>Layer extraction</b>: <code>extract_layer.py</code> pixel-diffs a "mannequin + feature" composite against the bare mannequin to produce a transparent feature-only layer. Threshold-based, supports y-region masking. Used to extract the first face overlay (eyes + gentle smile) from a ludo edit.</li>
+  <li><b>Preview compose</b>: <code>preview_compose.py</code> stacks layers in z-order for visual verification.</li>
+</ul>
+
+<h3>Character Studio — runtime compositor in <code>maple_game.html</code></h3>
+<ul>
+  <li>Self-contained module added at the bottom of the file (CSS + DOM + script). Zero coupling with existing player rendering — the in-game character is unchanged.</li>
+  <li><b>Toggle</b>: <kbd>Q</kbd> opens / closes the studio overlay. <kbd>Esc</kbd> closes. Ignores keypresses while a text input is focused.</li>
+  <li><b>Compositor</b> stacks four canvas operations: (1) draw neutralized mannequin → (2) <code>multiply</code> blend with the selected skin tone → (3) <code>destination-in</code> re-mask to the original alpha so transparent pixels stay transparent → (4) <code>source-over</code> draw the face overlay on top.</li>
+  <li><b>Skin tone palette</b>: six swatches (Porcelain · Light · Tan · Olive · Brown · Deep). Click any to live-update the canvas. The black outline stays black under multiply (any × 0 = 0); the 4-tone shading variation tints proportionally to give natural-looking lit and shadowed skin in any colour.</li>
+  <li><b>Lazy-load</b>: layers are fetched only on first open; the status line shows <code>Loading…</code> → <code>Ready · 2 layers loaded</code>.</li>
+</ul>
+
+<h3>Asset tree</h3>
+<pre><code>Sprites/character/
+├── extract_layer.py        # pixel-diff feature extractor
+├── neutralize_skin.py      # colour → grayscale luminance for runtime tinting
+├── preview_compose.py      # stacking verifier
+└── layers/
+    ├── base/
+    │   ├── mannequin_base.webp           # canonical (peach default)
+    │   └── mannequin_base_neutral.webp   # grayscale tinting target
+    ├── eyes/anime_classic.webp           # eyes + gentle smile face overlay
+    ├── face/   hair/   top/   bottom/    # ready for next batches
+    └── glove/  shoe/   weapon/   hat/   cape/
+</code></pre>
+
 <h2>v0.25.67 <span class="tag">Curved-path stylish hair — spiky tufts + forelocks + side locks + glossy shine</span></h2>
 <p class="lede">Replaced the old flat pixel-rectangle hair with a proper layered curved-path system. Six layers compose into a stylish anime-chibi hair silhouette: back hair mass with form shadow, four spiky top tufts, three front fringe forelocks, two side-lock sweeps, the anime glossy shine band, and a crisp ink outline.</p>
 
