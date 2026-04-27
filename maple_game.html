@@ -22840,13 +22840,15 @@ function drawPlayer() {
   // sprite system is removed and drawCuteCharacter is the only renderer.
   // v0.25.75 — Character Studio "Apply to player" sets window.PLAYER_CUSTOM_SPRITE_CANVAS;
   //             when set, draw the layered avatar instead of the procedural chibi.
-  if (window.PLAYER_CUSTOM_SPRITE_CANVAS) {
+  // v0.25.80 — also has walk-cycle frames (PLAYER_CUSTOM_WALK_FRAMES) when applied.
+  const _hasCustomSprite = !!(window.PLAYER_CUSTOM_SPRITE_CANVAS || (window.PLAYER_CUSTOM_WALK_FRAMES && window.PLAYER_CUSTOM_WALK_FRAMES.length));
+  if (_hasCustomSprite) {
     _drawPlayerCustomSprite();
   } else {
     drawCuteCharacter(sx, sy);
   }
   _chibiRestore();
-  if (!window.PLAYER_CUSTOM_SPRITE_CANVAS) _drawCuteFaceOverlay(sx, sy);
+  if (!_hasCustomSprite) _drawCuteFaceOverlay(sx, sy);
   _drawPlayerNameTag(sx, sy);
   return;
 }
@@ -22856,7 +22858,20 @@ function drawPlayer() {
 // scale-anchored-at-feet but does NOT translate the coordinate origin, so we
 // must use absolute screen coords just like drawCuteCharacter(sx, sy) does.
 function _drawPlayerCustomSprite() {
-  const sprite = window.PLAYER_CUSTOM_SPRITE_CANVAS;
+  // v0.25.80 — pick the right frame source based on movement state:
+  //   walking (|vx|>0.5) + walk frames available → cycle through walk cycle
+  //   else → static idle snapshot
+  const walkFrames = window.PLAYER_CUSTOM_WALK_FRAMES;
+  const moving = Math.abs(player.vx) > 0.5;
+  let sprite;
+  if (moving && walkFrames && walkFrames.length) {
+    const fps = (CHAR_STUDIO && CHAR_STUDIO.walkSheetMeta && CHAR_STUDIO.walkSheetMeta.fps) || 6;
+    const framesPerStep = Math.max(1, (60 / fps) | 0);
+    const idx = ((((game.time / framesPerStep) | 0) % walkFrames.length) + walkFrames.length) % walkFrames.length;
+    sprite = walkFrames[idx];
+  } else {
+    sprite = window.PLAYER_CUSTOM_SPRITE_CANVAS;
+  }
   if (!sprite) return;
   const sx = Math.round(player.x - game.camera.x);
   const footX = sx + player.w / 2;
@@ -22865,7 +22880,9 @@ function _drawPlayerCustomSprite() {
   const targetW = targetH;                  // sprite canvas is square (384×384)
   ctx.save();
   ctx.translate(footX, footY);              // origin → player feet
-  if ((player.facing | 0) < 0) ctx.scale(-1, 1);
+  // Sprite is natively in 3/4 front-facing-LEFT view; mirror when the player
+  // faces RIGHT so the character looks the right way during play.
+  if ((player.facing | 0) > 0) ctx.scale(-1, 1);
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(sprite, -targetW / 2, -targetH * 0.92, targetW, targetH);
   ctx.restore();
@@ -29899,10 +29916,13 @@ requestAnimationFrame(loop);
 </div>
 
 <script>
-// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.76) ===
-console.log('%c[CharStudio] v0.25.76 loaded — hair now renders on top of face (bangs occlude eyes)','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
+// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.80) ===
+console.log('%c[CharStudio] v0.25.80 loaded — facing fix + walk cycle (4-frame sheet)','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
 const CHAR_STUDIO = {
   base: null,           // grayscale neutral mannequin (multiply target)
+  baseColored: null,    // peach mannequin used as walk-anim source frames
+  walkSheet: null,      // animated walk spritesheet (2×2 grid, 4 frames)
+  walkSheetMeta: { frames: 4, gridW: 2, gridH: 2, fps: 6 },
   faces: {},            // { 'anime_classic': Image, 'sleepy_calm': Image, ... }
   faceStyle: 'anime_classic',
   skinTone: '#F5C9A8',  // default light-peach
@@ -29946,6 +29966,12 @@ async function loadCharStudioLayers() {
     const status = document.getElementById('char-studio-status');
     if (status) status.textContent = 'Loading layers…';
     const baseP = _csLoadImg('Sprites/character/layers/base/mannequin_base_neutral.webp');
+    const baseColP = _csLoadImg('Sprites/character/layers/base/mannequin_base.webp')
+      .then((img) => { CHAR_STUDIO.baseColored = img; })
+      .catch(() => {});
+    const walkSheetP = _csLoadImg('Sprites/character/layers/base/mannequin_walk_sheet.webp')
+      .then((img) => { CHAR_STUDIO.walkSheet = img; })
+      .catch(() => {});  // walk anim is optional — falls back to static when missing
     const facePromises = CHAR_STUDIO.faceStyles.map((fs) =>
       _csLoadImg('Sprites/character/layers/eyes/' + fs.file).then((img) => {
         CHAR_STUDIO.faces[fs.id] = img;
@@ -29959,10 +29985,10 @@ async function loadCharStudioLayers() {
         })
       );
     CHAR_STUDIO.base = await baseP;
-    await Promise.all([...facePromises, ...hairPromises]);
+    await Promise.all([baseColP, walkSheetP, ...facePromises, ...hairPromises]);
     CHAR_STUDIO.ready = true;
     const layerCount = 1 + CHAR_STUDIO.faceStyles.length + CHAR_STUDIO.hairStyles.filter((h) => !!h.file).length;
-    if (status) status.textContent = 'Ready · ' + layerCount + ' layers loaded';
+    if (status) status.textContent = 'Ready · ' + layerCount + ' layers + walk anim loaded';
     renderCharStudio();
   } catch (err) {
     const status = document.getElementById('char-studio-status');
@@ -30078,20 +30104,49 @@ function openCharStudio() {
 function applyCharStudioToPlayer() {
   const cv = document.getElementById('char-studio-canvas');
   if (!cv || !CHAR_STUDIO.ready) return;
-  // Snapshot the current composite into an offscreen canvas the in-game
-  // player draw routine can read each frame (no per-frame allocation).
+  // Snapshot the current static composite (idle pose).
   const off = document.createElement('canvas');
   off.width = cv.width;
   off.height = cv.height;
   off.getContext('2d').drawImage(cv, 0, 0);
   window.PLAYER_CUSTOM_SPRITE_CANVAS = off;
+
+  // v0.25.80 — pre-render walk-cycle frames per current customization.
+  // Each frame: animated peach base (cropped from walkSheet) + face + hair on top.
+  // (Skin tone tinting only applies to the idle snapshot for now — the walk anim
+  // source is the colored mannequin, not the neutral one.)
+  if (CHAR_STUDIO.walkSheet) {
+    const sheet = CHAR_STUDIO.walkSheet;
+    const { frames, gridW, gridH } = CHAR_STUDIO.walkSheetMeta;
+    const cellW = sheet.width / gridW;
+    const cellH = sheet.height / gridH;
+    const out = [];
+    const face = CHAR_STUDIO.faces[CHAR_STUDIO.faceStyle];
+    const hair = CHAR_STUDIO.hairs[CHAR_STUDIO.hairStyle];
+    for (let i = 0; i < frames; i++) {
+      const col = i % gridW;
+      const row = (i / gridW) | 0;
+      const fr = document.createElement('canvas');
+      fr.width = cellW;
+      fr.height = cellH;
+      const fc = fr.getContext('2d');
+      fc.drawImage(sheet, col * cellW, row * cellH, cellW, cellH, 0, 0, cellW, cellH);
+      // Face + hair overlays use the same canvas dimensions, scaled to match the cell
+      if (face) fc.drawImage(face, 0, 0, cellW, cellH);
+      if (hair) fc.drawImage(hair, 0, 0, cellW, cellH);
+      out.push(fr);
+    }
+    window.PLAYER_CUSTOM_WALK_FRAMES = out;
+  }
+
   const status = document.getElementById('char-studio-status');
-  if (status) status.textContent = 'Applied · in-game player now uses this avatar';
+  if (status) status.textContent = 'Applied · in-game player now uses this avatar' + (window.PLAYER_CUSTOM_WALK_FRAMES ? ' (with walk cycle)' : '');
   if (typeof showToast === 'function') showToast('Avatar applied to player', 'rare');
 }
 
 function revertCharStudioFromPlayer() {
   window.PLAYER_CUSTOM_SPRITE_CANVAS = null;
+  window.PLAYER_CUSTOM_WALK_FRAMES = null;
   const status = document.getElementById('char-studio-status');
   if (status) status.textContent = 'Reverted · in-game player back to procedural chibi';
   if (typeof showToast === 'function') showToast('Reverted to procedural chibi', 'common');
