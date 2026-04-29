@@ -2584,7 +2584,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.124';
+const GAME_VERSION = 'v0.25.125';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -24407,6 +24407,10 @@ function _drawPlayerCustomSprite() {
   // selection; studio composite still uses the simpler walk/idle split.
   const isHeroActive = HERO.idle && (window.PLAYER_CUSTOM_SPRITE_CANVAS === HERO.idle);
   let sprite;
+  // v0.25.125 — hoist the active frames reference so the bow overlay below
+  // can detect when the archer-shot sheet is playing (and skip the
+  // procedural bow to avoid doubling the one already in the sheet).
+  let _heroActiveFrames = null;
   if (isHeroActive) {
     // v0.25.85 — full state machine with proper one-shot timing for attacks.
     // Priority: death > hit > attack (one-shot, class-specific) > jump > walk > idle.
@@ -24464,6 +24468,7 @@ function _drawPlayerCustomSprite() {
     } else {
       sprite = HERO.idle;
     }
+    _heroActiveFrames = frames; // export to outer scope for the bow overlay
   } else {
     // Studio composite path (mannequin) — original walk/idle split
     const walkFrames = window.PLAYER_CUSTOM_WALK_FRAMES;
@@ -24496,6 +24501,36 @@ function _drawPlayerCustomSprite() {
   if (spriteFacesRight !== playerFacingRight) ctx.scale(-1, 1);
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(sprite, -targetW / 2, -targetH * 0.92, targetW, targetH);
+
+  // v0.25.125 — Archer bow overlay. The generic HERO sheets (idle / walk /
+  // jump / hit / death / attack) don't include any weapon — only the
+  // class-specific teen_archer_shot.webp has a bow drawn into its frames.
+  // Without this overlay, the archer holds nothing during idle/walk/jump
+  // and the bow only POPS into existence mid-shot animation, which the
+  // user reported as the bow being "out of sync".
+  //
+  // Render a procedural bow at the archer's right-hand grip position for
+  // every state EXCEPT the archer-shot frames (those already have a bow
+  // built into the sheet, so drawing one here would double up).
+  // Coordinates: the ctx is still translated to the player's feet with
+  // the facing-mirror applied, so we work in feet-local space.
+  if (player.cls === 'archer'
+      && typeof HERO !== 'undefined' && HERO.classFrames
+      && _heroActiveFrames !== HERO.classFrames.archer
+      && typeof _drawCuteBow === 'function'
+      && typeof _weaponPalette === 'function') {
+    // Hand grip ~18% to the right of the body centre, ~50% up from feet.
+    // Subtle vertical bob so it follows walk/idle better.
+    const bobY = Math.sin((game.time || 0) * 0.18) * 0.6;
+    ctx.save();
+    ctx.translate(targetW * 0.18, -targetH * 0.50 + bobY);
+    ctx.scale(0.70, 0.70);
+    ctx.rotate(-0.35);                // tilted hold pose
+    const P = _weaponPalette();
+    _drawCuteBow(P, 1, false);        // f = 1 (mirroring already in parent), drawArrow = false
+    ctx.restore();
+  }
+
   ctx.restore();
 }
 
