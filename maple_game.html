@@ -25882,7 +25882,9 @@ function _csLoadImage(src) {
 function _heroExtractAndNormalize(sheet, meta, idleBh, idleFootY, outW, outH) {
   const cellW = (sheet.width  / meta.gridW) | 0;
   const cellH = (sheet.height / meta.gridH) | 0;
-  const out = [];
+  // First pass: extract all cells + compute their anchors
+  const cells = [];
+  const anchors = [];
   for (let i = 0; i < meta.frames; i++) {
     const col = i % meta.gridW;
     const row = (i / meta.gridW) | 0;
@@ -25892,9 +25894,32 @@ function _heroExtractAndNormalize(sheet, meta, idleBh, idleFootY, outW, outH) {
     cell.getContext('2d').drawImage(
       sheet, col * cellW, row * cellH, cellW, cellH, 0, 0, cellW, cellH
     );
-    out.push(_normalizeFrameToReference(cell, idleBh, idleFootY, outW, outH));
+    cells.push(cell);
+    anchors.push(_findChibiAnchor(cell));
   }
-  return out;
+  // v0.25.89 — uniform per-sheet scale: pick the LARGEST bbox-h across all
+  // frames as the "fully-extended pose" reference. Map THAT to idle's bh, so
+  // the tallest pose in this animation matches idle's height. Shorter poses
+  // (tucked legs, etc.) stay proportionally smaller, which preserves natural
+  // body bob during walks instead of looking stretched.
+  const valid = anchors.filter(a => a);
+  const maxBh = valid.length ? Math.max(...valid.map(a => a.bh)) : 1;
+  const sheetFitScale = idleBh / maxBh;
+  return cells.map((cell, i) => {
+    const out = document.createElement('canvas');
+    out.width = outW;
+    out.height = outH;
+    const a = anchors[i];
+    if (!a) return out;
+    const drawW = a.bw * sheetFitScale;
+    const drawH = a.bh * sheetFitScale;
+    // X: centroid maps to canvas-center (stable across asymmetric poses)
+    const dx = (outW / 2) - ((a.centroidX - a.minX) * sheetFitScale);
+    // Y: bbox-bottom maps to idleFootY (feet anchor)
+    const dy = idleFootY - drawH;
+    out.getContext('2d').drawImage(cell, a.minX, a.minY, a.bw, a.bh, dx, dy, drawW, drawH);
+    return out;
+  });
 }
 
 (async function _loadHero() {
@@ -25926,14 +25951,25 @@ function _heroExtractAndNormalize(sheet, meta, idleBh, idleFootY, outW, outH) {
     idleRaw.width = targetW;
     idleRaw.height = targetH;
     idleRaw.getContext('2d').drawImage(idleImg, 0, 0);
-    const idleBbox = _findChibiBbox(idleRaw);
-    const idleBh = idleBbox.maxY - idleBbox.minY + 1;
-    const idleFootY = idleBbox.maxY + 1;
-    // Build a canonical normalized idle canvas using the exact same logic as
-    // _normalizeFrameToReference uses for animation frames. Use this for both
-    // PLAYER_CUSTOM_SPRITE_CANVAS and HERO.idle so the runtime always blits
-    // a centered character.
-    const idleNorm = _normalizeFrameToReference(idleRaw, idleBh, idleFootY, targetW, targetH);
+    const idleAnchor = _findChibiAnchor(idleRaw);
+    const idleBbox = idleAnchor;
+    const idleBh = idleAnchor.bh;
+    const idleFootY = idleAnchor.maxY + 1;
+    // v0.25.89 — normalize idle by CENTROID (not bbox center). Same anchor
+    // strategy as the new animation normalizer, so idle and walk/jump/attack
+    // all align by the same body-axis reference.
+    const idleNorm = document.createElement('canvas');
+    idleNorm.width = targetW;
+    idleNorm.height = targetH;
+    {
+      const dx = (targetW / 2) - (idleAnchor.centroidX - idleAnchor.minX);
+      const dy = idleFootY - idleAnchor.bh;
+      idleNorm.getContext('2d').drawImage(
+        idleRaw,
+        idleAnchor.minX, idleAnchor.minY, idleAnchor.bw, idleAnchor.bh,
+        dx, dy, idleAnchor.bw, idleAnchor.bh
+      );
+    }
     HERO.idle = idleNorm;
     HERO.idleBbox = idleBbox;
     HERO.idleFootY = idleFootY;
@@ -30242,8 +30278,8 @@ requestAnimationFrame(loop);
 </div>
 
 <script>
-// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.88) ===
-console.log('%c[CharStudio] v0.25.88 loaded — 16-frame jump (full-smooth idle/walk/jump/attack)','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
+// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.89) ===
+console.log('%c[CharStudio] v0.25.89 loaded — centroid anchor + uniform per-sheet scale (rock-solid pixel sync)','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
 const CHAR_STUDIO = {
   base: null,           // grayscale neutral mannequin (multiply target)
   baseColored: null,    // peach mannequin used as walk-anim source frames
@@ -30432,9 +30468,46 @@ function openCharStudio() {
 // (head ~10-50% Y, body ~50-95% Y, horizontally centered, feet at ~95% down).
 // Used to compose walk frames whose source has the character drawn small
 // inside a larger cell.
-// v0.25.83 — pure bbox finder used by both _normalizeChibiFrame and the
-// new hero "use the idle as reference" normalization that keeps every walk
-// frame at the SAME on-screen size (instead of each frame fitting itself).
+// v0.25.89 — anchor by CENTROID of opaque pixels (mass center, dominated by
+// torso + head — only shifts slightly when a thin arm extends) instead of
+// bbox-center, which lurched the body around on asymmetric poses (punch with
+// arm extended right made the bbox shift right, so re-centering moved the
+// body LEFT, creating visible head wobble across frames).
+//
+// Plus a uniform PER-SHEET scale (every frame in the same animation uses the
+// same fitScale) so tucked-leg / curled poses stay physically smaller (which
+// is correct) rather than being vertically stretched to match the tallest
+// frame's bbox.
+function _findChibiAnchor(srcCanvas) {
+  const sw = srcCanvas.width;
+  const sh = srcCanvas.height;
+  const data = srcCanvas.getContext('2d').getImageData(0, 0, sw, sh).data;
+  let minX = sw, minY = sh, maxX = -1, maxY = -1;
+  let sumX = 0, count = 0;
+  for (let y = 0; y < sh; y++) {
+    for (let x = 0; x < sw; x++) {
+      const a = data[(y * sw + x) * 4 + 3];
+      if (a > 12) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        sumX += x * a;
+        count += a;
+      }
+    }
+  }
+  if (count === 0) return null;
+  return {
+    minX, minY, maxX, maxY,
+    bw: maxX - minX + 1,
+    bh: maxY - minY + 1,
+    centroidX: sumX / count,
+  };
+}
+
+// v0.25.83 — pure bbox finder, kept for backward compat (other call sites
+// don't need centroids). New hero pipeline uses _findChibiAnchor instead.
 function _findChibiBbox(srcCanvas) {
   const sw = srcCanvas.width;
   const sh = srcCanvas.height;
