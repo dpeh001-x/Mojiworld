@@ -2584,7 +2584,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.114';
+const GAME_VERSION = 'v0.25.115';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5197,6 +5197,13 @@ const MONSTER_SKILLS = {
   // v0.25.102 — Celestial Spire specials
   seraph:      { kind: 'homingShot',  cd: 4400 }, // divine guided light
   archon:      { kind: 'summon',      cd: 11000 }, // spawns cherubs (special-cased in summon())
+  // v0.25.115 — three new attack kinds wired onto previously plain
+  // mobs. orange (Sunbun) gains a 5-projectile fan; stump (Stumpy) —
+  // an arcing mortar lob with AOE detonation; scorpion (Pincer) — a
+  // 4-second self-enrage that pumps its contact damage 1.5×.
+  orange:      { kind: 'spreadFan',  cd: 4800 },
+  stump:       { kind: 'mortarLob',  cd: 5200 },
+  scorpion:    { kind: 'enrageSelf', cd: 8000 },
 };
 const MONSTER_SKILL_FNS = {
   groundStun(m) {
@@ -5434,6 +5441,94 @@ const MONSTER_SKILL_FNS = {
         y: cy + Math.sin(ang) * 16,
         vx: -Math.cos(ang) * 1.5, vy: -Math.sin(ang) * 0.6,
         life: 30, color: '#cc88ff', size: 2
+      });
+    }
+  },
+  // v0.25.115 — three new attack kinds for variety:
+  //   spreadFan   → 5-projectile cone fired in a 45° arc, all at once.
+  //                 Distinct from rapidFire (sequential single shots);
+  //                 forces the player to weave or jump out of the lane
+  //                 since all 5 land in roughly the same instant.
+  //   mortarLob   → single arcing projectile, gravity-affected, lands
+  //                 at the player's current position after ~55 frames
+  //                 and detonates in a ~60 px AOE. No homing — player
+  //                 dodges by moving toward the caster (overshoots) or
+  //                 perpendicular (underflies the arc).
+  //   enrageSelf  → 4-second self-buff. Monster's contact damage +50%
+  //                 while active. Telegraphed by a red particle ring
+  //                 bursting outward at cast. m._selfRageTimer ticks
+  //                 in updateMonsters; contact-damage line reads it.
+  spreadFan(m) {
+    const mx = m.x + m.w / 2, my = m.y + m.h / 2;
+    const dx = (player.x + player.w / 2) - mx;
+    const dy = (player.y + player.h / 2) - my;
+    const baseAng = Math.atan2(dy, dx);
+    const N = 5;
+    const arc = Math.PI / 4;          // 45° total spread
+    const speed = 4.6;
+    for (let i = 0; i < N; i++) {
+      const t = (i - (N - 1) / 2) / ((N - 1) / 2);
+      const ang = baseAng + t * (arc / 2);
+      game.projectiles.push({
+        x: mx, y: my,
+        vx: Math.cos(ang) * speed,
+        vy: Math.sin(ang) * speed,
+        w: 12, h: 12, life: 100,
+        damage: Math.max(3, Math.floor(m.atk * 0.45)),
+        owner: 'enemy', skill: 'mspore',
+        color: m.shell || '#ffaa44',
+      });
+    }
+    addShake(2);
+    for (let i = 0; i < 8; i++) {
+      const ang = baseAng + (Math.random() - 0.5) * arc;
+      game.particles.push({
+        x: mx, y: my,
+        vx: Math.cos(ang) * 1.3, vy: Math.sin(ang) * 1.3,
+        life: 22, color: m.color || '#ffcc66', size: 2
+      });
+    }
+  },
+  mortarLob(m) {
+    const mx = m.x + m.w / 2, my = m.y + m.h / 2;
+    const tx = player.x + player.w / 2;
+    const ty = player.y + player.h - 6;
+    // Pick a 55-frame flight time and solve for vx / vy assuming
+    // per-frame gravity g. Re-uses the existing selfExplode + explode
+    // projectile flags (same path the player's fireball uses).
+    const dt = 55;
+    const g = 0.18;
+    const vx = (tx - mx) / dt;
+    const vy = ((ty - my) / dt) - (g * dt) / 2;
+    game.projectiles.push({
+      x: mx, y: my, vx, vy,
+      w: 14, h: 14, life: dt + 6,
+      damage: Math.max(5, Math.floor(m.atk * 0.7)),
+      owner: 'enemy', skill: 'mlob',
+      color: m.shell || '#aa4422',
+      gravity: g,
+      selfExplode: true, explode: 60,
+    });
+    addShake(1);
+    for (let i = 0; i < 6; i++) {
+      game.particles.push({
+        x: mx, y: my,
+        vx: (Math.random() - 0.5) * 1.2,
+        vy: -1 - Math.random() * 0.8,
+        life: 26, color: m.shell || '#cc4422', size: 2
+      });
+    }
+  },
+  enrageSelf(m) {
+    m._selfRageTimer = 240;          // ~4 s @ 60 fps
+    addShake(1);
+    // Outward red particle ring as cast telegraph
+    for (let i = 0; i < 14; i++) {
+      const ang = (i / 14) * Math.PI * 2;
+      game.particles.push({
+        x: m.x + m.w / 2, y: m.y + m.h / 2,
+        vx: Math.cos(ang) * 2.2, vy: Math.sin(ang) * 2.2,
+        life: 32, color: '#ff4422', size: 3
       });
     }
   },
@@ -14777,6 +14872,23 @@ function updateMonsters(dt) {
         }
       }
       if (m._dashCharging > 0) m._dashCharging -= dt;
+      // v0.25.115 — tick the enrageSelf rage timer. Reads back in the
+      // contact-damage line as a 1.5× multiplier. Trailing red sparks
+      // every ~10 frames keep the buff visually obvious.
+      if ((m._selfRageTimer | 0) > 0) {
+        m._selfRageTimer -= 1;
+        if ((m._selfRageTimer % 10) === 0) {
+          for (let i = 0; i < 2; i++) {
+            const ang = Math.random() * Math.PI * 2;
+            game.particles.push({
+              x: m.x + m.w / 2 + Math.cos(ang) * (m.w * 0.5),
+              y: m.y + m.h / 2 + Math.sin(ang) * (m.h * 0.4),
+              vx: Math.cos(ang) * 0.6, vy: -0.3 - Math.random() * 0.4,
+              life: 18, color: '#ff5533', size: 2
+            });
+          }
+        }
+      }
     }
     // ----------------------------------------------------------------
     // v0.25.103 — Celestial Spire angel passives. These run every
@@ -15045,7 +15157,10 @@ function updateMonsters(dt) {
         player.invulnerable = 300;
         continue;
       }
-      let dmg = Math.max(1, m.atk - getDef() + Math.floor(Math.random() * 4));
+      // v0.25.115 — enrageSelf skill multiplies contact damage by 1.5×
+      // while active. Timer ticks down in updateMonsters.
+      const _atkBase = (m._selfRageTimer | 0) > 0 ? Math.floor(m.atk * 1.5) : m.atk;
+      let dmg = Math.max(1, _atkBase - getDef() + Math.floor(Math.random() * 4));
       // Block reduces damage by 70% (outside parry window)
       if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); triggerBlock(); }
       if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * 0.82));
