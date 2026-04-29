@@ -2584,7 +2584,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.113';
+const GAME_VERSION = 'v0.25.114';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -32125,9 +32125,27 @@ requestAnimationFrame(loop);
 </div>
 <script>
 (function _wireLoadingScreen() {
+  // v0.25.114 — speed up boot. Old loader gated reveal on 16 sprites
+  // *and* the HERO_READY event (which awaits a Promise.all over 10
+  // hero sprites). Slow connections + cold caches saw 3-5 s loads
+  // before the world appeared.
+  //
+  // New: REQUIRED is just the 4 critical-path assets the first frame
+  // actually needs (teen idle + walk for the player, plus the two
+  // starting-town NPCs the player can immediately see/talk to). The
+  // remaining 12 sprites are pre-fetched in the background via the
+  // same browser image-cache so they're hot by the time the runtime
+  // tries to draw them — but they don't block the reveal. Procedural
+  // drawCuteCharacter covers any gap before the hero sheets resolve.
+  // HERO_READY wait dropped (it depended on all 10 hero sprites).
+  // Hard fallback shrunk 8000 → 1200 ms. Fade 600 → 220 ms.
   const REQUIRED = [
     'Sprites/character/hero/teen_idle.webp',
     'Sprites/character/hero/teen_walk_sheet.webp',
+    'Sprites/npc/elspeth.webp',
+    'Sprites/npc/brok.webp',
+  ];
+  const BACKGROUND = [
     'Sprites/character/hero/teen_jump_sheet.webp',
     'Sprites/character/hero/teen_attack_sheet.webp',
     'Sprites/character/hero/teen_hit_sheet.webp',
@@ -32136,18 +32154,20 @@ requestAnimationFrame(loop);
     'Sprites/character/hero/teen_rogue_stab.webp',
     'Sprites/character/hero/teen_mage_cast.webp',
     'Sprites/character/hero/teen_archer_shot.webp',
-    'Sprites/npc/elspeth.webp',
-    'Sprites/npc/brok.webp',
     'Sprites/npc/amnesiac.webp',
     'Sprites/npc/sage_mira.webp',
     'Sprites/npc/old_arlen.webp',
     'Sprites/npc/caravan_yara.webp',
   ];
+  // Kick off background prefetch immediately — these warm the cache so
+  // when the runtime hero loader / NPC lookup hits them they resolve
+  // instantly. We never wait on them.
+  BACKGROUND.forEach((src) => { const img = new Image(); img.src = src; });
+
   const overlay = document.getElementById('loading-overlay');
   const bar = document.getElementById('loading-bar');
   const status = document.getElementById('loading-status');
   let loaded = 0;
-  // v0.25.104 — phrasing rotates over the load to feel less repetitive.
   const phrases = [
     'Conjuring sprites…',
     'Painting biomes…',
@@ -32175,17 +32195,17 @@ requestAnimationFrame(loop);
   });
   function maybeReveal() {
     if (loaded < REQUIRED.length) return;
-    if (window.HERO_READY) hide();
-    else window.addEventListener('hero-ready', hide, { once: true });
+    hide();
   }
   function hide() {
     if (!overlay) return;
     overlay.classList.add('fade');
-    setTimeout(() => { if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 600);
+    setTimeout(() => { if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 220);
   }
-  // Hard fallback: if hero never reports ready in 8s, fade anyway so the player
-  // isn't locked out (sprite system will gracefully fall back to procedural).
-  setTimeout(() => { if (overlay && !overlay.classList.contains('fade')) hide(); }, 8000);
+  // Hard fallback — was 8 s, now 1.2 s. If something blocks the
+  // critical 4 sprites (network drop, 404, etc.), the world still
+  // reveals quickly with procedural fallback art.
+  setTimeout(() => { if (overlay && !overlay.classList.contains('fade')) hide(); }, 1200);
 })();
 </script>
 
