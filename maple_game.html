@@ -2514,7 +2514,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.102';
+const GAME_VERSION = 'v0.25.103';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4896,13 +4896,20 @@ const monsterTypes = {
   emberling:   { name:'Emberling',    w:32, h:34, color:'#ff8844', shell:'#cc3322', hp:520,  atk:42, def:5,  evasion:95,  exp:138, mesos:62, speed:1.1, jump:4, shoot:'mspore',    shootCd:2000 },
   skywisp:     { name:'Skywisp',      w:38, h:30, color:'#e8f2ff', shell:'#88aacc', hp:240,  atk:26, def:3,  evasion:140, exp:70,  mesos:34, speed:1.3, jump:0 },
   sandhusk:    { name:'Sandhusk',     w:38, h:34, color:'#d8a868', shell:'#8a6a40', hp:720,  atk:50, def:11, evasion:80,  exp:200, mesos:94, speed:0.6, jump:0, shoot:'mdark',     shootCd:2300 },
-  // v0.25.102 — Celestial Spire angel-tier mobs. Difficulty steps up
-  // sharply: cherub is the floor mob (Lv 28+ tier 5), seraph the
-  // ranged caster (Lv 32+ tier 6), archon the spire-top guardian
-  // (Lv 38+ near-boss with summon special).
-  cherub:      { name:'Cherub',       w:38, h:42, color:'#fff4d8', shell:'#ddaa44', hp:920,  atk:64,  def:9,  evasion:130, exp:285,  mesos:135, speed:1.3, jump:5 },
-  seraph:      { name:'Seraph',       w:46, h:54, color:'#fff8e0', shell:'#e8c060', hp:1750, atk:96,  def:15, evasion:120, exp:480,  mesos:230, speed:0.9, jump:0,  shoot:'mdark',     shootCd:2000 },
-  archon:      { name:'Archon',       w:54, h:62, color:'#ffe88a', shell:'#cc8822', hp:3400, atk:135, def:22, evasion:105, exp:980,  mesos:480, speed:1.0, jump:4,  shoot:'msplinter', shootCd:2300 },
+  // v0.25.102 — Celestial Spire angel-tier mobs.
+  // v0.25.103 — Stats sharply boosted + tricky passives wired into the
+  // monster update loop. Difficulty curve:
+  //   cherub  (Lv 30+ tier 7): annoying — high evasion + blink-teleport
+  //                            when player gets close, brief invuln.
+  //   seraph  (Lv 32+ tier 7+): support caster — passively heals nearby
+  //                             angels every 90 frames (own + cherubs +
+  //                             archon). Always paired = de-prioritise.
+  //   archon  (Lv 38+ mini-boss): peak threat. Enrages at 50% HP — atk
+  //                               speed +60%, move speed +30%, summons
+  //                               cherubs more often.
+  cherub:      { name:'Cherub',       w:38, h:42, color:'#fff4d8', shell:'#ddaa44', hp:1500, atk:90,  def:11, evasion:170, exp:380,  mesos:185, speed:1.4, jump:6 },
+  seraph:      { name:'Seraph',       w:46, h:54, color:'#fff8e0', shell:'#e8c060', hp:2900, atk:135, def:24, evasion:130, exp:680,  mesos:330, speed:0.9, jump:0,  shoot:'mdark',     shootCd:1700 },
+  archon:      { name:'Archon',       w:54, h:62, color:'#ffe88a', shell:'#cc8822', hp:6800, atk:185, def:36, evasion:115, exp:1480, mesos:740, speed:1.0, jump:4,  shoot:'msplinter', shootCd:2000 },
   king:     { name:'Jelly King',     w:64,  h:56,  color:'#66ccff', shell:'#3388cc', hp:3900,  atk:63, def:14, evasion:110, exp:1300, mesos:780,  speed:1.1, jump:10, boss:true },
   mushmom:  { name:'Momma Shroom',   w:76,  h:86,  color:'#f0d8a8', shell:'#aa2244', hp:8200,  atk:78, def:18, evasion:130, exp:2860, mesos:1950, speed:0.9, jump:8,  boss:true },
   aetherion:{ name:'Aetherion, the Shardfather', w:160, h:160, color:'#7a5aee', shell:'#c8a8ff', hp:54000, atk:144, def:25, evasion:180, exp:18800, mesos:13000, speed:0.8, jump:0, boss:true, superBoss:true },
@@ -14650,6 +14657,113 @@ function updateMonsters(dt) {
         }
       }
       if (m._dashCharging > 0) m._dashCharging -= dt;
+    }
+    // ----------------------------------------------------------------
+    // v0.25.103 — Celestial Spire angel passives. These run every
+    // frame on top of the standard MONSTER_SKILLS dispatch above and
+    // give the three angel mobs their tricky combat identity.
+    // ----------------------------------------------------------------
+    if (m.type === 'cherub' && m.currentHp > 0 && !m.isBoss) {
+      // Decrement the blink-invuln timer so the cherub can be hit again.
+      if ((m._blinkInvuln || 0) > 0) m._blinkInvuln -= dt;
+      // Blink-teleport when the player closes inside 80 px. Per-frame
+      // gate of ~5%, so on average ~1 blink every 20 frames the player
+      // is in range — feels jittery without being obnoxious.
+      const dxc = (player.x + player.w / 2) - (m.x + m.w / 2);
+      const dyc = (player.y + player.h / 2) - (m.y + m.h / 2);
+      const closeEnough = (dxc * dxc + dyc * dyc) < 80 * 80;
+      if (closeEnough && (m._blinkInvuln || 0) <= 0 && Math.random() < 0.05) {
+        // Teleport horizontally 80-140 px to the OPPOSITE side of the player
+        const dir = dxc > 0 ? 1 : -1;            // away from player
+        const dist = 80 + Math.random() * 60;
+        const newX = m.x + dir * dist;
+        // Clamp to map bounds
+        const ww = (game.mapData && game.mapData.worldWidth) || 2400;
+        m.x = Math.max(20, Math.min(ww - m.w - 20, newX));
+        m._blinkInvuln = 240;                    // ~14 frames of i-frames
+        m.invulnerable = Math.max(m.invulnerable || 0, 240);
+        // Pop particles at both endpoints
+        const burst = (cx, cy) => {
+          for (let j = 0; j < 8; j++) {
+            const ang = (j / 8) * Math.PI * 2;
+            game.particles.push({
+              x: cx + Math.cos(ang) * 6,
+              y: cy + Math.sin(ang) * 6,
+              vx: Math.cos(ang) * 2, vy: Math.sin(ang) * 2,
+              life: 16, color: '#fff4d8', size: 2
+            });
+          }
+        };
+        burst(m.x - dir * dist + m.w / 2, m.y + m.h / 2); // departure
+        burst(m.x + m.w / 2, m.y + m.h / 2);              // arrival
+      }
+    }
+    if (m.type === 'seraph' && m.currentHp > 0 && !m.isBoss) {
+      // Heal-aura tick every 90 frames: heals self + nearby angels for
+      // 3% of THEIR maxHp. Visible green pulse so the player can prep.
+      m._seraphAuraT = (m._seraphAuraT || 0) + dt;
+      if (m._seraphAuraT >= 1500) { // 90 frames @ 60 fps
+        m._seraphAuraT = 0;
+        const radius = 180;
+        for (const ally of game.monsters) {
+          if (ally.currentHp <= 0) continue;
+          if (ally.type !== 'cherub' && ally.type !== 'seraph' && ally.type !== 'archon') continue;
+          const dxa = (ally.x + ally.w / 2) - (m.x + m.w / 2);
+          const dya = (ally.y + ally.h / 2) - (m.y + m.h / 2);
+          if (dxa * dxa + dya * dya <= radius * radius) {
+            const heal = Math.max(2, Math.floor((ally.maxHp || ally.hp) * 0.03));
+            ally.currentHp = Math.min(ally.maxHp || ally.hp, ally.currentHp + heal);
+            // Float a green +heal number above the ally
+            game.damageNumbers.push({
+              x: ally.x + ally.w / 2 - 8, y: ally.y - 4, vy: -1.5,
+              text: '+' + heal, life: 32, color: '#88ff88', size: 12
+            });
+          }
+        }
+        // Green pulse ring at the seraph's position
+        for (let j = 0; j < 18; j++) {
+          const ang = (j / 18) * Math.PI * 2;
+          game.particles.push({
+            x: m.x + m.w / 2 + Math.cos(ang) * 12,
+            y: m.y + m.h / 2 + Math.sin(ang) * 12,
+            vx: Math.cos(ang) * 1.5, vy: Math.sin(ang) * 1.5,
+            life: 28, color: '#88ff88', size: 2
+          });
+        }
+      }
+    }
+    if (m.type === 'archon' && m.currentHp > 0 && !m.isBoss) {
+      // Enrage trigger: at 50% HP (one-shot flag). Permanent buffs for
+      // the rest of the encounter — atk speed +60%, move speed +30%,
+      // continuous golden ember trail. Skill cooldown also halved.
+      if (!m._enraged && m.currentHp <= m.maxHp * 0.5) {
+        m._enraged = true;
+        m._enrageBaseShootCd = m.shootCd;
+        m.shootCd = Math.floor((m.shootCd || 2000) * 0.55);
+        m.speed = (m.speed || 1) * 1.3;
+        if (MONSTER_SKILLS.archon) m._mskTimer = Math.min(m._mskTimer || 0, 1200);
+        // One-time burst of golden flame on transition
+        for (let j = 0; j < 22; j++) {
+          const ang = (j / 22) * Math.PI * 2;
+          game.particles.push({
+            x: m.x + m.w / 2 + Math.cos(ang) * 14,
+            y: m.y + m.h / 2 + Math.sin(ang) * 14,
+            vx: Math.cos(ang) * 3, vy: Math.sin(ang) * 3 - 1,
+            life: 36, color: '#ffaa22', size: 3
+          });
+        }
+        addShake(5); flash(0.18);
+        if (typeof showToast === 'function') showToast('⚔ Archon enraged!', 'epic');
+      }
+      // Continuous golden ember trail while enraged
+      if (m._enraged && (game.time | 0) % 4 === 0) {
+        game.particles.push({
+          x: m.x + m.w / 2 + (Math.random() - 0.5) * m.w * 0.6,
+          y: m.y + m.h / 2 + (Math.random() - 0.5) * m.h * 0.6,
+          vx: (Math.random() - 0.5) * 1.0, vy: -0.6 - Math.random() * 0.8,
+          life: 18, color: '#ffcc44', size: 2
+        });
+      }
     }
     // v0.25.53 — empowered axolotl heal aura: regen self every ~28
     // frames + heal nearby empowered candy/swamp allies in a 110 px
