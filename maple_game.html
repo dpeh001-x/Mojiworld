@@ -2514,7 +2514,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.101';
+const GAME_VERSION = 'v0.25.102';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4896,6 +4896,13 @@ const monsterTypes = {
   emberling:   { name:'Emberling',    w:32, h:34, color:'#ff8844', shell:'#cc3322', hp:520,  atk:42, def:5,  evasion:95,  exp:138, mesos:62, speed:1.1, jump:4, shoot:'mspore',    shootCd:2000 },
   skywisp:     { name:'Skywisp',      w:38, h:30, color:'#e8f2ff', shell:'#88aacc', hp:240,  atk:26, def:3,  evasion:140, exp:70,  mesos:34, speed:1.3, jump:0 },
   sandhusk:    { name:'Sandhusk',     w:38, h:34, color:'#d8a868', shell:'#8a6a40', hp:720,  atk:50, def:11, evasion:80,  exp:200, mesos:94, speed:0.6, jump:0, shoot:'mdark',     shootCd:2300 },
+  // v0.25.102 — Celestial Spire angel-tier mobs. Difficulty steps up
+  // sharply: cherub is the floor mob (Lv 28+ tier 5), seraph the
+  // ranged caster (Lv 32+ tier 6), archon the spire-top guardian
+  // (Lv 38+ near-boss with summon special).
+  cherub:      { name:'Cherub',       w:38, h:42, color:'#fff4d8', shell:'#ddaa44', hp:920,  atk:64,  def:9,  evasion:130, exp:285,  mesos:135, speed:1.3, jump:5 },
+  seraph:      { name:'Seraph',       w:46, h:54, color:'#fff8e0', shell:'#e8c060', hp:1750, atk:96,  def:15, evasion:120, exp:480,  mesos:230, speed:0.9, jump:0,  shoot:'mdark',     shootCd:2000 },
+  archon:      { name:'Archon',       w:54, h:62, color:'#ffe88a', shell:'#cc8822', hp:3400, atk:135, def:22, evasion:105, exp:980,  mesos:480, speed:1.0, jump:4,  shoot:'msplinter', shootCd:2300 },
   king:     { name:'Jelly King',     w:64,  h:56,  color:'#66ccff', shell:'#3388cc', hp:3900,  atk:63, def:14, evasion:110, exp:1300, mesos:780,  speed:1.1, jump:10, boss:true },
   mushmom:  { name:'Momma Shroom',   w:76,  h:86,  color:'#f0d8a8', shell:'#aa2244', hp:8200,  atk:78, def:18, evasion:130, exp:2860, mesos:1950, speed:0.9, jump:8,  boss:true },
   aetherion:{ name:'Aetherion, the Shardfather', w:160, h:160, color:'#7a5aee', shell:'#c8a8ff', hp:54000, atk:144, def:25, evasion:180, exp:18800, mesos:13000, speed:0.8, jump:0, boss:true, superBoss:true },
@@ -5068,6 +5075,9 @@ const MONSTER_SKILLS = {
   frostkin:    { kind: 'freezeBeam',  cd: 5800 }, // horizontal frost cone
   stoneling:   { kind: 'summon',      cd: 9000 }, // spawn 2 mini-stonelings
   skywisp:     { kind: 'gravityWell', cd: 6000 }, // pulls player toward caster
+  // v0.25.102 — Celestial Spire specials
+  seraph:      { kind: 'homingShot',  cd: 4400 }, // divine guided light
+  archon:      { kind: 'summon',      cd: 11000 }, // spawns cherubs (special-cased in summon())
 };
 const MONSTER_SKILL_FNS = {
   groundStun(m) {
@@ -5242,18 +5252,25 @@ const MONSTER_SKILL_FNS = {
   // the caster. Each minion is 60% size with 40% HP and 50% atk so they
   // act as throwaway pressure rather than free DPS. Minions never use
   // their own special (we lock _mskTimer to a huge value).
+  // v0.25.102 — Archon special-cases: spawns cherubs instead of
+  // mini-archons (not nerfed, since cherubs are already the floor mob).
   summon(m) {
+    const spawnType = (m.type === 'archon') ? 'cherub' : m.type;
+    const isThemed  = (m.type === 'archon');     // archon spawns full-strength cherubs
     const positions = [-30, 30];
     for (const dx of positions) {
       if (typeof spawnMonster === 'function') {
-        spawnMonster(m.x + dx, m.y - 20, m.type, false, false);
+        spawnMonster(m.x + dx, m.y - 20, spawnType, false, false);
         const child = game.monsters[game.monsters.length - 1];
         if (child && child !== m) {
-          child.maxHp = Math.max(1, Math.floor(child.maxHp * 0.4));
-          child.currentHp = child.maxHp;
-          child.atk = Math.max(1, Math.floor(child.atk * 0.5));
-          child.w = Math.max(12, Math.floor(child.w * 0.6));
-          child.h = Math.max(12, Math.floor(child.h * 0.6));
+          if (!isThemed) {
+            // Mini-version of self
+            child.maxHp = Math.max(1, Math.floor(child.maxHp * 0.4));
+            child.currentHp = child.maxHp;
+            child.atk = Math.max(1, Math.floor(child.atk * 0.5));
+            child.w = Math.max(12, Math.floor(child.w * 0.6));
+            child.h = Math.max(12, Math.floor(child.h * 0.6));
+          }
           child._isMinion = true;
           child._mskTimer = 9e9;       // disable specials on minions
           child.exp = Math.max(1, Math.floor((child.exp || 0) * 0.3));
@@ -5269,7 +5286,7 @@ const MONSTER_SKILL_FNS = {
         x: m.x + m.w / 2 + Math.cos(ang) * 10,
         y: m.y + m.h - 4 + Math.sin(ang) * 4,
         vx: Math.cos(ang) * 1.8, vy: -1 - Math.random(),
-        life: 24, color: m.shell || '#4a3a28', size: 2
+        life: 24, color: m.shell || (isThemed ? '#fff4d8' : '#4a3a28'), size: 2
       });
     }
   },
@@ -6147,6 +6164,57 @@ const MAPS = {
       {type:'stoneling', count:7},
       {type:'horny',     count:5},
       {type:'scorpion',  count:4},
+    ],
+  },
+  // v0.25.102 — Celestial Spire: a narrow ascending tower map. Players
+  // climb a tightly-stacked pillar of platforms zig-zagging upward
+  // across a 960 px-wide cloud kingdom. Three angel-tier mobs guard the
+  // levels — cherubs on the lower tiers, seraphs mid, the archon at the
+  // peak. Highest-difficulty regular map (Lv 30+ entry, mobs scale to
+  // Lv 38+). Reuses the meadow sky-kingdom backdrop.
+  celestialSpire: {
+    name:'Celestial Spire',
+    sky:['#fff4d8','#ffd8a8','#cfaef0'],
+    worldWidth: 960,                     // narrow → vertical-feeling
+    levelReq: 30,
+    taxiAccessible: true,
+    bg: 'meadow',
+    platforms: [
+      // Ground floor
+      {x:0,   y:480, w:960, h:60, type:'ground'},
+      // Tier 1 (cherubs swarm here)
+      {x:80,  y:420, w:160, h:12, type:'platform'},
+      {x:340, y:420, w:160, h:12, type:'platform'},
+      {x:600, y:420, w:160, h:12, type:'platform'},
+      {x:820, y:420, w:120, h:12, type:'platform'},
+      // Tier 2
+      {x:160, y:360, w:140, h:12, type:'platform'},
+      {x:420, y:360, w:140, h:12, type:'platform'},
+      {x:680, y:360, w:140, h:12, type:'platform'},
+      // Tier 3 (seraph height)
+      {x:60,  y:300, w:140, h:12, type:'platform'},
+      {x:300, y:300, w:160, h:12, type:'platform'},
+      {x:560, y:300, w:160, h:12, type:'platform'},
+      {x:780, y:300, w:140, h:12, type:'platform'},
+      // Tier 4
+      {x:180, y:240, w:140, h:12, type:'platform'},
+      {x:420, y:240, w:160, h:12, type:'platform'},
+      {x:660, y:240, w:140, h:12, type:'platform'},
+      // Tier 5 (archon zone)
+      {x:80,  y:180, w:140, h:12, type:'platform'},
+      {x:300, y:180, w:140, h:12, type:'platform'},
+      {x:540, y:180, w:140, h:12, type:'platform'},
+      {x:760, y:180, w:140, h:12, type:'platform'},
+      // Peak (single wide cap)
+      {x:340, y:120, w:280, h:14, type:'platform'},
+    ],
+    portals: [
+      {x:80, dest:'town', name:'◀ Everdawn Bazaar'},
+    ],
+    spawns: [
+      {type:'cherub', count:6},
+      {type:'seraph', count:4},
+      {type:'archon', count:2},
     ],
   },
   thunderPlateau: {
@@ -9171,6 +9239,8 @@ const _WM_BIOME_ICON = {
   gravitosArena:'🕳', boss:'👑', tower:'🗼',
   // v0.25.98 — elemental quartet
   wildflowerPlains:'🌼', tidalLagoon:'🌊', graniteBluffs:'🪨', thunderPlateau:'⚡',
+  // v0.25.102 — angel tower
+  celestialSpire:'😇',
 };
 function toggleWorldMap() {
   if (!player.cls) { showToast('Pick a class first', 'common'); return; }
@@ -26667,6 +26737,9 @@ const FLOATING_TYPES = new Set([
   'wraith',        // ghost
   'nimbusFox',     // cloud spirit
   'pearlSprite',   // sea fairy
+  'skywisp',       // v0.25.102 — cloud sprite (no legs)
+  'seraph',        // v0.25.102 — winged angel caster
+  'cherub',        // v0.25.102 — winged baby angel
   // bosses
   'aetherion',     // cosmic dragon
 ]);
@@ -26726,6 +26799,8 @@ const MONSTER_SPRITE_TYPES = [
   'sproutle', 'tideling', 'stoneling', 'voltipup',
   // v0.25.99 — biome-signature mobs for fire/ice/wind/desert
   'frostkin', 'emberling', 'skywisp', 'sandhusk',
+  // v0.25.102 — Celestial Spire angel tier
+  'cherub', 'seraph', 'archon',
 ];
 (function _loadMonsterSprites() {
   for (const type of MONSTER_SPRITE_TYPES) {
