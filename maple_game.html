@@ -2584,7 +2584,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.116';
+const GAME_VERSION = 'v0.25.117';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -13550,6 +13550,12 @@ const SKILL_FNS = {
       owner: 'player', skill: 'arrow', color: steady >= 0.35 ? '#ffdd88' : '#ddaa66',
       _enh: player._enh,
       gravity: 0.32 - steady * 0.15,  // full steady arrows drop less
+      // v0.25.117 — basic Z arrow is locked to a single target. Pierce
+      // / explode / split modifiers from tree skills, Sniper job, and
+      // Ranger split still apply to Multi Shot, Charged Shot, etc., but
+      // Z lands one shot on one target. Read by the projectile-update
+      // gates that add p.pierce / p.explode / pEnh.splitChance.
+      _singleTarget: true,
     };
     game.projectiles.push(p);
     // Steady cash-out: firing consumes most of the stacks — the aim point
@@ -16627,10 +16633,11 @@ function updateProjectiles(dt) {
       let rangeMul = 1.70;
       if (player.tree.archerRange) rangeMul *= player.tree.archerRange;
       p.life = Math.floor(p.life * rangeMul);
-      // Pierce basic arrows
-      if (player.tree.arrowPierce && p.skill === 'arrow') p.pierce = true;
+      // Pierce basic arrows — gated on !_singleTarget so basic Z arrows
+      // stay 1-target even when arrowPierce / explosiveArrows are unlocked.
+      if (player.tree.arrowPierce && p.skill === 'arrow' && !p._singleTarget) p.pierce = true;
       // Explosive tips
-      if (player.tree.explosiveArrows) p.explode = Math.max(p.explode || 0, 40);
+      if (player.tree.explosiveArrows && !p._singleTarget) p.explode = Math.max(p.explode || 0, 40);
     }
     // One-time initial upward boost so projectiles arc instead of dropping
     if (p.owner === 'player' && !p._arc && !p.homing && p.skill !== 'rainArrow') {
@@ -16750,10 +16757,11 @@ function updateProjectiles(dt) {
             addShake(3);
           }
           if (pEnh) applyEnhOnHit(m, dmg, pEnh);
-          // Sniper pierce: basic arrows go through enemies
-          if (pEnh && pEnh.pierce) p.pierce = true;
+          // Sniper pierce: basic arrows go through enemies (skipped on
+          // _singleTarget so basic Z stays one-shot-one-kill).
+          if (pEnh && pEnh.pierce && !p._singleTarget) p.pierce = true;
           // Ranger split: arrow may split into 2 smaller shots on hit
-          if (pEnh && pEnh.splitChance && Math.random() < pEnh.splitChance && !p._split) {
+          if (pEnh && pEnh.splitChance && Math.random() < pEnh.splitChance && !p._split && !p._singleTarget) {
             for (let i = -1; i <= 1; i += 2) {
               game.projectiles.push({
                 x: p.x, y: p.y,
