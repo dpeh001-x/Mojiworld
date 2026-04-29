@@ -2514,7 +2514,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.95';
+const GAME_VERSION = 'v0.25.96';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -3730,33 +3730,115 @@ _bootstrapPhaser();
 // =========================================================================
 const LX_TILES = (() => {
   const base = 'backgrounds/tiles/';
+  // sources map keys to {file, bake}: bake describes how to crop the
+  // leftmost seamless tile out of a multi-tile source image.
+  //   - 'auto': scan alpha at mid-Y to find the first opaque column run
+  //     and crop to those bounds (full image height). Used for floor_grass
+  //     where the source has 3 distinct tiles with transparent gaps.
+  //   - 'grid:Nx M': crop the top-left cell of an N-wide x M-tall grid.
+  //     Used for floor_wood where the source is a 4x2 plank grid.
+  //   - 'none': use the whole image (no crop) — for pillars rendered
+  //     as a single decorative asset.
   const sources = {
-    floorGrass:    'floor_grass_b.webp',
-    floorWood:     'floor_wood_b.webp',
-    pillarSanctum: 'pillar_sanctum_a.webp',
-    pillarCrypt:   'pillar_crypt_a.webp',
+    floorGrass:    { file: 'floor_grass_b.webp', bake: 'auto' },
+    floorWood:     { file: 'floor_wood_b.webp',  bake: 'grid:4x2' },
+    pillarSanctum: { file: 'pillar_sanctum_a.webp', bake: 'none' },
+    pillarCrypt:   { file: 'pillar_crypt_a.webp',   bake: 'none' },
   };
   const out = {};
-  for (const [k, file] of Object.entries(sources)) {
+  for (const [k, cfg] of Object.entries(sources)) {
     const img = new Image();
     img.decoding = 'async';
-    img.src = base + file;
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      // After load, bake a seamless single-tile source if requested.
+      // If baking fails (CORS, no opaque region) the original img is
+      // kept as the renderable source.
+      if (cfg.bake !== 'none') {
+        const baked = _lxBakeSeamlessTile(img, cfg.bake);
+        if (baked) out[k] = baked;
+      }
+    };
+    img.src = base + cfg.file;
     out[k] = img;
   }
   return out;
 })();
-function _lxTileReady(img) {
-  return !!(img && img.complete && img.naturalWidth > 0);
+function _lxNatW(src) { return src && (src.naturalWidth || src.width) || 0; }
+function _lxNatH(src) { return src && (src.naturalHeight || src.height) || 0; }
+function _lxTileReady(src) {
+  if (!src) return false;
+  // HTMLImageElement carries `complete`; HTMLCanvasElement always renders.
+  if (src instanceof HTMLImageElement) return src.complete && src.naturalWidth > 0;
+  return _lxNatW(src) > 0;
 }
-// Tile an image horizontally at a fixed display height — preserves the
-// image's aspect ratio so chibi flowers / planks don't get squashed.
-function _lxDrawTiledRow(img, sx, sy, dw, dh) {
-  if (!_lxTileReady(img) || dh <= 0 || dw <= 0) return false;
-  const tileW = Math.max(8, (img.naturalWidth / img.naturalHeight) * dh);
+// Bake the leftmost contiguous opaque region of an image (plus full
+// image height) onto an offscreen canvas. The result is a seamless
+// single-tile source that drawImage can repeat without showing the
+// transparent gaps from the original asset's multi-tile layout.
+function _lxBakeSeamlessTile(img, mode) {
+  try {
+    const w = img.naturalWidth, h = img.naturalHeight;
+    if (!w || !h) return null;
+    if (mode && mode.startsWith('grid:')) {
+      // mode: 'grid:CxR' — crop top-left cell
+      const m = mode.match(/grid:(\d+)x(\d+)/);
+      if (!m) return null;
+      const cols = +m[1], rows = +m[2];
+      const cw = (w / cols) | 0, ch = (h / rows) | 0;
+      const out = document.createElement('canvas');
+      out.width = cw; out.height = ch;
+      out.getContext('2d').drawImage(img, 0, 0, cw, ch, 0, 0, cw, ch);
+      return out;
+    }
+    // 'auto': detect leftmost opaque column run via alpha sampling.
+    const probe = document.createElement('canvas');
+    probe.width = w; probe.height = h;
+    const pctx = probe.getContext('2d');
+    pctx.drawImage(img, 0, 0);
+    // Sample several Y rows and union the opaque ranges so we don't
+    // miss content at any height (grass at top is thinner than dirt).
+    const ys = [(h * 0.30) | 0, (h * 0.50) | 0, (h * 0.70) | 0];
+    let start = -1, end = -1, gapRun = 0;
+    const opaque = new Uint8Array(w);
+    for (const y of ys) {
+      const row = pctx.getImageData(0, y, w, 1).data;
+      for (let x = 0; x < w; x++) if (row[x * 4 + 3] > 30) opaque[x] = 1;
+    }
+    for (let x = 0; x < w; x++) {
+      if (opaque[x]) {
+        if (start < 0) start = x;
+        end = x;
+        gapRun = 0;
+      } else if (start >= 0) {
+        gapRun++;
+        if (gapRun > 12) break; // 12+ consecutive transparent cols = end of leftmost tile
+      }
+    }
+    if (start < 0 || end <= start) return null;
+    // Tighten end to the last actually-opaque pixel
+    while (end > start && !opaque[end]) end--;
+    const tileW = end - start + 1;
+    const out = document.createElement('canvas');
+    out.width = tileW; out.height = h;
+    out.getContext('2d').drawImage(img, start, 0, tileW, h, 0, 0, tileW, h);
+    return out;
+  } catch (e) {
+    // Tainted canvas (CORS) etc. — fall back to original img.
+    return null;
+  }
+}
+// Tile a (possibly-baked) source horizontally at a fixed display height.
+// Preserves the source aspect ratio so chibi flowers / planks don't get
+// squashed at small platform heights.
+function _lxDrawTiledRow(src, sx, sy, dw, dh) {
+  if (!_lxTileReady(src) || dh <= 0 || dw <= 0) return false;
+  const sW = _lxNatW(src), sH = _lxNatH(src);
+  const tileW = Math.max(8, (sW / sH) * dh);
   for (let x = 0; x < dw; x += tileW) {
     const w = Math.min(tileW, dw - x);
-    const sw = (w / tileW) * img.naturalWidth;
-    ctx.drawImage(img, 0, 0, sw, img.naturalHeight, sx + x, sy, w, dh);
+    const sw = (w / tileW) * sW;
+    ctx.drawImage(src, 0, 0, sw, sH, sx + x, sy, w, dh);
   }
   return true;
 }
