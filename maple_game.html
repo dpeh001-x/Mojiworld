@@ -2514,7 +2514,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.100';
+const GAME_VERSION = 'v0.25.101';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -3807,6 +3807,24 @@ const LX_TILES = (() => {
   }
   return out;
 })();
+// =========================================================================
+// LX_VFX — ludo-generated effect sprites used by hazard renderers (v0.25.101)
+// =========================================================================
+// Loaded eagerly. Hazard render paths call drawImage(LX_VFX.X, …) and fall
+// back to a procedural drawing if the image isn't loaded yet.
+// =========================================================================
+const LX_VFX = (() => {
+  const out = {};
+  const files = { frostBeam: 'frost_beam.webp', gravityWell: 'gravity_well.webp' };
+  for (const [k, f] of Object.entries(files)) {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = 'Sprites/vfx/' + f;
+    out[k] = img;
+  }
+  return out;
+})();
+function _lxVfxReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
 function _lxNatW(src) { return src && (src.naturalWidth || src.width) || 0; }
 function _lxNatH(src) { return src && (src.naturalHeight || src.height) || 0; }
 function _lxTileReady(src) {
@@ -5046,6 +5064,10 @@ const MONSTER_SKILLS = {
   voltipup:    { kind: 'lightningStrike', cd: 4200 }, // electric pillar
   sandhusk:    { kind: 'shockwave',       cd: 5000 }, // expanding ring
   emberling:   { kind: 'rapidFire',       cd: 3600 }, // burst of spores
+  // v0.25.101 — three more biome-signature specials with new mechanics
+  frostkin:    { kind: 'freezeBeam',  cd: 5800 }, // horizontal frost cone
+  stoneling:   { kind: 'summon',      cd: 9000 }, // spawn 2 mini-stonelings
+  skywisp:     { kind: 'gravityWell', cd: 6000 }, // pulls player toward caster
 };
 const MONSTER_SKILL_FNS = {
   groundStun(m) {
@@ -5182,6 +5204,102 @@ const MONSTER_SKILL_FNS = {
     };
     fire();
     addShake(2);
+  },
+  // v0.25.101 — Frostkin's signature: a wide horizontal cone of frost
+  // that telegraphs for 24 frames then strikes for ~36 frames. While
+  // active, contact damages player + applies a 1.5s movement-slow.
+  // Reach is 280 px, locked to the monster's facing direction at cast
+  // time so movement around the flank can break it.
+  freezeBeam(m) {
+    const mx = m.x + m.w / 2, my = m.y + m.h / 2;
+    const dir = Math.sign((player.x + player.w / 2) - mx) || 1;
+    const reach = 280;
+    game.hazards.push({
+      type: 'mob_frostbeam',
+      cx: mx, cy: my,
+      x: dir > 0 ? mx : mx - reach,
+      y: my - 16, w: reach, h: 32,
+      dir,
+      life: 60, maxLife: 60,
+      tele: 24,
+      damage: Math.max(4, Math.floor(m.atk * 0.7)),
+      slow: 1500,
+      color: m.color || '#aaccff',
+      struck: false,
+    });
+    addShake(2);
+    // Charge particles at the source
+    for (let i = 0; i < 10; i++) {
+      game.particles.push({
+        x: mx + (Math.random() - 0.5) * 10,
+        y: my + (Math.random() - 0.5) * 10,
+        vx: dir * 0.6, vy: -0.4 - Math.random() * 0.5,
+        life: 20, color: m.color || '#aaccff', size: 2
+      });
+    }
+  },
+  // v0.25.101 — Stoneling's signature: spawn 2 mini-stonelings beside
+  // the caster. Each minion is 60% size with 40% HP and 50% atk so they
+  // act as throwaway pressure rather than free DPS. Minions never use
+  // their own special (we lock _mskTimer to a huge value).
+  summon(m) {
+    const positions = [-30, 30];
+    for (const dx of positions) {
+      if (typeof spawnMonster === 'function') {
+        spawnMonster(m.x + dx, m.y - 20, m.type, false, false);
+        const child = game.monsters[game.monsters.length - 1];
+        if (child && child !== m) {
+          child.maxHp = Math.max(1, Math.floor(child.maxHp * 0.4));
+          child.currentHp = child.maxHp;
+          child.atk = Math.max(1, Math.floor(child.atk * 0.5));
+          child.w = Math.max(12, Math.floor(child.w * 0.6));
+          child.h = Math.max(12, Math.floor(child.h * 0.6));
+          child._isMinion = true;
+          child._mskTimer = 9e9;       // disable specials on minions
+          child.exp = Math.max(1, Math.floor((child.exp || 0) * 0.3));
+          child.mesos = Math.max(1, Math.floor((child.mesos || 0) * 0.3));
+        }
+      }
+    }
+    addShake(3);
+    // Ring of dust at cast
+    for (let i = 0; i < 14; i++) {
+      const ang = (i / 14) * Math.PI * 2;
+      game.particles.push({
+        x: m.x + m.w / 2 + Math.cos(ang) * 10,
+        y: m.y + m.h - 4 + Math.sin(ang) * 4,
+        vx: Math.cos(ang) * 1.8, vy: -1 - Math.random(),
+        life: 24, color: m.shell || '#4a3a28', size: 2
+      });
+    }
+  },
+  // v0.25.101 — Skywisp's signature: a gravity well at the caster's
+  // ground position that pulls the player horizontally toward h.cx
+  // every frame for 3 seconds. Light contact damage + a movement
+  // pull-strength that scales with proximity (closer = stronger).
+  gravityWell(m) {
+    const cx = m.x + m.w / 2;
+    const cy = m.y + m.h - 4;
+    game.hazards.push({
+      type: 'mob_gravity',
+      cx, cy, x: cx - 90, y: cy - 30, w: 180, h: 60,
+      life: 180, maxLife: 180,
+      pull: 1.6, radius: 130,
+      damage: Math.max(2, Math.floor(m.atk * 0.30)),
+      tick: 0,
+      color: '#a866dd',
+    });
+    addShake(2);
+    // Inward swirl particles
+    for (let i = 0; i < 14; i++) {
+      const ang = (i / 14) * Math.PI * 2;
+      game.particles.push({
+        x: cx + Math.cos(ang) * 50,
+        y: cy + Math.sin(ang) * 16,
+        vx: -Math.cos(ang) * 1.5, vy: -Math.sin(ang) * 0.6,
+        life: 30, color: '#cc88ff', size: 2
+      });
+    }
   },
   // v0.25.100 — Voltipup's signature: a vertical lightning pillar at
   // the player's CURRENT column. Telegraphs for 30 frames (warning
@@ -6459,6 +6577,10 @@ function getSpeed(){
   if (player.buffs.bloodlust > 0) s += 1.2;
   // Milestone: Flow State — +10% per dodge stack
   if (player._flowStacks > 0) s *= (1 + 0.10 * player._flowStacks);
+  // v0.25.101 — Frostkin's freezeBeam slow: 50% movement penalty while
+  // _slowTimer > 0 (decremented in the main update loop). The timer
+  // is set by the mob_frostbeam hazard hit branch.
+  if ((player._slowTimer || 0) > 0) s *= 0.5;
   return s;
 }
 function getJump() { return (player.baseJump || 10.5) + player.mods.jump; }
@@ -10272,6 +10394,8 @@ function updatePlayer(dt) {
   }
   if (player._iceFloor && player._iceFloor > 0) player._iceFloor -= dt;
   if (player.frozenTimer && player.frozenTimer > 0) player.frozenTimer -= dt;
+  // v0.25.101 — Frostkin's freezeBeam movement-slow timer.
+  if (player._slowTimer && player._slowTimer > 0) player._slowTimer -= dt;
 
   // Hit-stun: no voluntary action during stun
   const stunned = player.hitStun > 0;
@@ -16451,6 +16575,73 @@ function updateProjectiles(dt) {
             life: 24, color: '#ffee44', size: 3
           });
         }
+      }
+      if (h.life <= 0) { game.hazards.splice(i, 1); continue; }
+      continue;
+    }
+    // v0.25.101 — mob_frostbeam: telegraphed horizontal frost cone.
+    // First `tele` frames are charge-up (no damage); after the strike
+    // frame the beam is active and damages on contact, applying a 1.5s
+    // slow (player._slowTimer) on hit.
+    if (h.type === 'mob_frostbeam') {
+      const struckFrame = h.maxLife - h.tele;
+      if (h.life < struckFrame) {
+        // Active phase — damage if player is in the beam box
+        const inX = (player.x + player.w) > h.x && player.x < (h.x + h.w);
+        const inY = (player.y + player.h) > h.y && player.y < (h.y + h.h);
+        if (!h.struck && inX && inY && player.hp > 0 && player.invulnerable <= 0) {
+          const dmg = Math.max(1, Math.floor(h.damage - getDef() * 0.5));
+          player.hp -= (player._god ? 0 : dmg);
+          player.invulnerable = 380;
+          player._slowTimer = Math.max(player._slowTimer || 0, h.slow);
+          game.damageNumbers.push({
+            x: player.x + 14, y: player.y, vy: -2,
+            text: dmg, life: 40, color: '#88ddff', size: 14
+          });
+          addShake(4); flash(0.14);
+          h.struck = true;
+        }
+      }
+      if (h.life <= 0) { game.hazards.splice(i, 1); continue; }
+      continue;
+    }
+    // v0.25.101 — mob_gravity: pulls the player horizontally toward
+    // h.cx every frame they're within `radius`. Pull strength scales
+    // inversely with distance (close = strong, edge = weak). Also
+    // ticks light contact damage every 30 frames. The player can
+    // resist by jumping (vertical motion isn't affected) or moving
+    // perpendicular faster than the pull.
+    if (h.type === 'mob_gravity') {
+      h.tick = (h.tick || 0) + 1;
+      const px = player.x + player.w / 2;
+      const py = player.y + player.h / 2;
+      const dx = h.cx - px;
+      const d = Math.hypot(dx, py - h.cy);
+      if (d < h.radius) {
+        // Pull horizontally — falls off linearly with distance
+        const factor = 1 - d / h.radius;
+        const pull = h.pull * factor;
+        if (Math.abs(dx) > 4) player.x += Math.sign(dx) * pull;
+        // Light contact damage every 30 frames
+        if (h.tick % 30 === 0 && player.hp > 0 && player.invulnerable <= 0) {
+          const dmg = Math.max(1, Math.floor(h.damage - getDef() * 0.4));
+          player.hp -= (player._god ? 0 : dmg);
+          player.invulnerable = 200;
+          game.damageNumbers.push({
+            x: player.x + 12, y: player.y, vy: -1.5,
+            text: dmg, life: 30, color: '#cc88ff', size: 12
+          });
+        }
+      }
+      // Persistent inward-swirl particles
+      if (h.tick % 4 === 0) {
+        const ang = Math.random() * Math.PI * 2;
+        game.particles.push({
+          x: h.cx + Math.cos(ang) * h.radius * 0.7,
+          y: h.cy + Math.sin(ang) * 14,
+          vx: -Math.cos(ang) * 1.2, vy: -Math.sin(ang) * 0.4,
+          life: 26, color: '#cc88ff', size: 2
+        });
       }
       if (h.life <= 0) { game.hazards.splice(i, 1); continue; }
       continue;
@@ -30104,6 +30295,85 @@ function drawHazards() {
         }
         ctx.stroke();
       }
+      continue;
+    }
+    // v0.25.101 — mob_frostbeam: render the LX_VFX.frostBeam image
+    // along the hazard box, mirrored if dir < 0. Telegraph fades in
+    // before the strike frame; strike phase pulses at full alpha.
+    if (h.type === 'mob_frostbeam') {
+      const struckFrame = h.maxLife - h.tele;
+      const beamSx = h.x - game.camera.x;
+      const charging = h.life > struckFrame;
+      const a = charging
+        ? 0.25 + 0.45 * ((h.maxLife - h.life) / h.tele)
+        : 0.65 + 0.35 * Math.abs(Math.sin(h.life * 0.45));
+      ctx.save();
+      ctx.globalAlpha = a;
+      if (_lxVfxReady(LX_VFX.frostBeam)) {
+        if (h.dir < 0) {
+          ctx.translate(beamSx + h.w, h.y);
+          ctx.scale(-1, 1);
+          ctx.drawImage(LX_VFX.frostBeam, 0, 0, h.w, h.h);
+        } else {
+          ctx.drawImage(LX_VFX.frostBeam, beamSx, h.y, h.w, h.h);
+        }
+      } else {
+        // Procedural fallback: pale-blue gradient cone
+        ctx.fillStyle = h.color || '#aaccff';
+        ctx.beginPath();
+        if (h.dir > 0) {
+          ctx.moveTo(beamSx, h.y + h.h / 2);
+          ctx.lineTo(beamSx + h.w, h.y);
+          ctx.lineTo(beamSx + h.w, h.y + h.h);
+        } else {
+          ctx.moveTo(beamSx + h.w, h.y + h.h / 2);
+          ctx.lineTo(beamSx, h.y);
+          ctx.lineTo(beamSx, h.y + h.h);
+        }
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+      // Frosty crystal particles along the beam during charge
+      if (charging && h.life % 4 === 0) {
+        for (let p = 0; p < 2; p++) {
+          const t = Math.random();
+          game.particles.push({
+            x: h.x + h.w * (h.dir > 0 ? t : (1 - t)),
+            y: h.y + Math.random() * h.h,
+            vx: h.dir * 0.5, vy: -0.2 - Math.random() * 0.3,
+            life: 16, color: '#e0f0ff', size: 1.5
+          });
+        }
+      }
+      continue;
+    }
+    // v0.25.101 — mob_gravity: render LX_VFX.gravityWell at hazard
+    // center with a continuous slow rotation tied to game.time so the
+    // swirl visually "spins". Falls back to a solid purple ellipse if
+    // the image isn't loaded.
+    if (h.type === 'mob_gravity') {
+      const fade = Math.min(1, h.life / 40);
+      const cy = h.cy;
+      ctx.save();
+      ctx.globalAlpha = 0.85 * fade;
+      ctx.translate(sx, cy);
+      ctx.rotate((game.time || 0) * 0.04);
+      const size = h.radius * 1.4;
+      if (_lxVfxReady(LX_VFX.gravityWell)) {
+        ctx.drawImage(LX_VFX.gravityWell, -size / 2, -size * 0.18, size, size * 0.36);
+      } else {
+        ctx.fillStyle = `rgba(168,102,221,${0.55 * fade})`;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, h.radius * 0.7, h.radius * 0.22, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+      // Outer dimming ring
+      ctx.strokeStyle = `rgba(168,102,221,${0.4 * fade})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(sx, cy, h.radius, h.radius * 0.30, 0, 0, Math.PI * 2);
+      ctx.stroke();
       continue;
     }
     if (h.type === 'void_tear') {
