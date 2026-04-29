@@ -1,4 +1,4 @@
-# 🗡️ LevelX — Shardfall Expedition
+# 🗡️ Mojiworld — Shardfall Expedition
 
 A 2D action-platformer RPG with roguelite elements. Four classes, eight job advancements, sixteen master classes, skill trees, affix-roll loot, star enhancement, procedural dungeons, and mini-bosses. **v0.24.0 adds optional multiplayer** — run the server in `server/` and friends can join your room to run around and chat together.
 
