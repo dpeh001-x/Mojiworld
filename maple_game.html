@@ -2514,7 +2514,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.106';
+const GAME_VERSION = 'v0.25.107';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -15740,6 +15740,9 @@ function hitMonster(m, dmg, isCrit, skill) {
     if (isCrit) {
       game.critStreak++;
       game.critStreakTimer = 2500;
+      // v0.25.107 — timestamp the crit so drawCuteCharacter can paint a
+      // brief gold flash over the body for ~280 ms after the hit.
+      player.lastCritT = game.time;
       if (game.critStreak === 3) {
         showToast('TRIPLE CRIT!', 'legendary');
         flash(0.35);
@@ -24104,15 +24107,43 @@ function drawCuteCharacter(sx, sy) {
   const cx = sx + player.w/2;
   const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x|0, y|0, w, h); };
 
-  // === SWING STATE ===
-  // Smooth ease-out arc: fast wind-up, soft follow-through
+  // === SWING STATE — v0.25.107 anticipation + follow-through ===
+  // Body lean now has THREE distinct phases instead of one bell curve:
+  //   • 0.00 – 0.18   anticipation : body pulls BACK (away from facing),
+  //                                   sells the wind-up before the strike.
+  //   • 0.18 – 0.55   strike       : sharp swing toward facing, peaks
+  //                                   ~30% past the bell mid for a
+  //                                   harder snap.
+  //   • 0.55 – 1.00   follow-through: slight overshoot then settle, so
+  //                                   the silhouette is still expressive
+  //                                   on the back half of the animation.
+  // swingBase (0..1 bell) is kept for downstream consumers — front-arm
+  // sleeveLen still uses it. swingAng is the new piecewise lean.
   const isAtk = player.attacking && player.attackTimer > 0;
   const swingT = isAtk ? Math.min(1, (320 - player.attackTimer) / 320) : 0;
-  // Ease the sine arch for a crisper snap at the peak
   const swingBase = isAtk
     ? Math.sin(Math.pow(swingT, 0.7) * Math.PI)
     : 0;
-  const swingAng = f * swingBase * 0.35;
+  // Piecewise lean: anticipation (negative) → strike snap → overshoot
+  let _swingLean = 0;
+  if (isAtk) {
+    if (swingT < 0.18) {
+      // Anticipation — ease IN to a small back-lean (-0.18)
+      const k = swingT / 0.18;
+      _swingLean = -0.18 * (k * k);
+    } else if (swingT < 0.55) {
+      // Strike — snap from -0.18 to +1.0 with cubic ease-out
+      const k = (swingT - 0.18) / 0.37;
+      const eased = 1 - Math.pow(1 - k, 3);
+      _swingLean = -0.18 + (1.0 + 0.18) * eased;
+    } else {
+      // Follow-through — small overshoot then settle to 0
+      const k = (swingT - 0.55) / 0.45;
+      // Damped sinusoid: 1.0 → 1.12 (overshoot) → 0.0
+      _swingLean = (1 - k) * (1 + 0.12 * Math.sin(k * Math.PI));
+    }
+  }
+  const swingAng = f * _swingLean * 0.42;
 
   // === BODY BOB (smooth, continuous — no floor/round truncation) ===
   const speedN = Math.min(1, Math.abs(player.vx) / 5);   // 0..1 movement factor
@@ -24725,11 +24756,61 @@ function drawCuteCharacter(sx, sy) {
     }
   }
 
-  // === MOUTH — v0.25.66: expression variants ===
+  // === EYEBROWS — v0.25.107 ===
+  // Hidden during default chibi rest pose; appear on specific states.
+  //   • Jump (airborne): arched UP — surprised lift, sells the launch.
+  //   • Hit-stunned: furrowed inward — pained \\/.
+  //   • Attacking: angled DOWN-INWARD — focused/intense.
+  // Drawn AFTER the eyes so they sit cleanly on the upper-eye line.
+  const browJump = !player.onGround && Math.abs(player.vy || 0) > 0.6;
+  const browHit  = player.hitStun > 80;
+  const browAtk  = isAtk;
+  if (browJump || browHit || browAtk) {
+    ctx.strokeStyle = CUTE_PAL.eye;
+    ctx.lineWidth = 1.4;
+    ctx.lineCap = 'round';
+    const browYL = eyeBaseY - 3;
+    const browYR = eyeBaseY - 3;
+    if (browJump) {
+      // Arched-up surprised brows (^ ^)
+      ctx.beginPath();
+      ctx.moveTo(eyeL[0] - 2, browYL + 1);
+      ctx.quadraticCurveTo(eyeL[0], browYL - 2, eyeL[0] + 2, browYL + 1);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(eyeR[0] - 2, browYR + 1);
+      ctx.quadraticCurveTo(eyeR[0], browYR - 2, eyeR[0] + 2, browYR + 1);
+      ctx.stroke();
+    } else if (browHit) {
+      // Furrowed \\/ — pained
+      ctx.beginPath();
+      ctx.moveTo(eyeL[0] - 2, browYL - 1);
+      ctx.lineTo(eyeL[0] + 2, browYL + 1);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(eyeR[0] - 2, browYR + 1);
+      ctx.lineTo(eyeR[0] + 2, browYR - 1);
+      ctx.stroke();
+    } else {
+      // Attacking — focused down-inward angle
+      ctx.beginPath();
+      ctx.moveTo(eyeL[0] - 2, browYL - 1);
+      ctx.lineTo(eyeL[0] + 2, browYL + 0.5);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(eyeR[0] - 2, browYR + 0.5);
+      ctx.lineTo(eyeR[0] + 2, browYR - 1);
+      ctx.stroke();
+    }
+  }
+
+  // === MOUTH — v0.25.66 + v0.25.107 expressive variants ===
   // Default: small upturned smile.
   // Active buff (warCry / rampage / bloodlust / holyShield): open
   // smile (a small "o" with rounded edges) — looks energised.
-  // Hit-stunned: tiny "o" surprise.
+  // Attacking: open mouth that scales with the swing peak — bigger
+  //   gape at mid-swing, snaps closed as the arc finishes.
+  // Hit-stunned: zigzag /\/\ ouch-mouth (replaces the v0.25.66 "o").
   // In-rage: same default smile but red-tinted (kept from old code).
   const mouthCol = player.inRage ? '#ff4466' : CUTE_PAL.mouth;
   const buffActive = (player.buffs && (
@@ -24737,12 +24818,30 @@ function drawCuteCharacter(sx, sy) {
     player.buffs.bloodlust > 0 || player.buffs.holyShield > 0
   ));
   if (player.hitStun > 100) {
-    // Surprised "o"
-    ctx.fillStyle = mouthCol;
+    // Zigzag "ouch" mouth — 3 segments, 1px peaks
+    ctx.strokeStyle = mouthCol;
+    ctx.lineWidth = 1.3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     ctx.beginPath();
-    ctx.ellipse(sx + 16, sy + 19 + hb, 1.5, 1.5, 0, 0, Math.PI * 2);
+    ctx.moveTo(sx + 13, sy + 19 + hb);
+    ctx.lineTo(sx + 14.5, sy + 18 + hb);
+    ctx.lineTo(sx + 16,   sy + 19.5 + hb);
+    ctx.lineTo(sx + 17.5, sy + 18 + hb);
+    ctx.lineTo(sx + 19,   sy + 19 + hb);
+    ctx.stroke();
+  } else if (isAtk) {
+    // Open shouting mouth — height scales with swingBase so the gape
+    // grows at the arc peak then snaps shut on follow-through.
+    const gape = 1.0 + swingBase * 1.1;
+    ctx.fillStyle = '#3a1a14';
+    ctx.beginPath();
+    ctx.ellipse(sx + 16, sy + 19 + hb, 2.4, gape, 0, 0, Math.PI * 2);
     ctx.fill();
-  } else if (buffActive || isAtk) {
+    // Inner tongue / pink
+    ctx.fillStyle = '#ff7a99';
+    ctx.fillRect(sx + 15, sy + 19 + hb, 2, Math.max(1, Math.round(gape - 0.5)));
+  } else if (buffActive) {
     // Open smile — slightly bigger ellipse with a darker upper rim
     ctx.fillStyle = '#3a1a14';
     ctx.beginPath();
@@ -24778,6 +24877,65 @@ function drawCuteCharacter(sx, sy) {
     ctx.fillStyle = accVis.glow + 'aa';
     ctx.beginPath(); ctx.arc(cx, sy + 28 + bb, 1.5 + ag * 0.3, 0, Math.PI * 2); ctx.fill();
   }
+
+  // === STATE COLOR SHIFTS (v0.25.107) ===
+  // Painted OVER the rendered character as a top layer using additive
+  // blending. Three independent reads all stack:
+  //   1. Low-HP red rim — pulses harder as HP drops below 30 / 15 %.
+  //   2. Buff pulsing accent rim — gold/red/cyan depending on which
+  //      buff is active. Subtle so it doesn't fight the body palette.
+  //   3. Crit gold flash — a bright gold halo for ~280 ms after any
+  //      crit hit, set by hitMonster via player.lastCritT.
+  // Body silhouette approximated by an ellipse around the torso/head;
+  // additive blending means the visual weight is on the rim, not the
+  // body fill, so we don't have to clip precisely.
+  ctx.save();
+  const _scBodyCx = cx;
+  const _scBodyCy = sy + player.h * 0.5;
+  const _scRx = player.w * 0.55;
+  const _scRy = player.h * 0.55;
+  const _maxHpV = (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100);
+  const _hpRatio = Math.max(0, Math.min(1, (player.hp || 0) / _maxHpV));
+  // 1. Low-HP rim
+  if (_hpRatio < 0.30) {
+    const danger = _hpRatio < 0.15 ? 1.0 : 0.55;
+    const pulse  = 0.5 + 0.5 * Math.sin(game.time * (_hpRatio < 0.15 ? 0.30 : 0.18));
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = `rgba(255,60,60,${(0.30 + pulse * 0.45) * danger})`;
+    ctx.lineWidth = 2 + pulse * 1.5;
+    ctx.beginPath();
+    ctx.ellipse(_scBodyCx, _scBodyCy, _scRx + 1, _scRy + 1, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // 2. Buff pulsing accent rim — colour by dominant active buff
+  if (buffActive) {
+    let buffCol = 'rgba(255,200,80,';   // default gold (warCry / rampage)
+    if (player.buffs.bloodlust > 0)   buffCol = 'rgba(255,80,90,';
+    else if (player.buffs.holyShield > 0) buffCol = 'rgba(180,220,255,';
+    const pulse = 0.5 + 0.5 * Math.sin(game.time * 0.20);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = buffCol + (0.18 + pulse * 0.22) + ')';
+    ctx.lineWidth = 1.5 + pulse * 1.0;
+    ctx.beginPath();
+    ctx.ellipse(_scBodyCx, _scBodyCy, _scRx + 2, _scRy + 2, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // 3. Crit gold flash — fades over 280 ms after a crit hit
+  const _critAge = game.time - (player.lastCritT || -9999);
+  if (_critAge >= 0 && _critAge < 280) {
+    const k = 1 - (_critAge / 280);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = `rgba(255,225,120,${0.35 * k})`;
+    ctx.beginPath();
+    ctx.ellipse(_scBodyCx, _scBodyCy, _scRx * (1 + 0.2 * (1 - k)), _scRy * (1 + 0.2 * (1 - k)), 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255,240,170,${0.55 * k})`;
+    ctx.lineWidth = 2.5 * k + 0.5;
+    ctx.beginPath();
+    ctx.ellipse(_scBodyCx, _scBodyCy, _scRx + 2, _scRy + 2, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 // Active melee swing — blade rotates through an arc and body leans into it
@@ -24927,19 +25085,43 @@ function _drawCuteCape(sx, sy, bb, cls, cc, facing, speedN) {
 function drawCuteSwingingBlade(sx, sy, cls, f, cc, prog) {
   const cx = sx + player.w/2;
   const shoulderY = sy + 22;
-  // Smoother easing — easeOutBack with gentle overshoot at follow-through
-  const eased = _easeOutBack(Math.min(1, prog));
-  const swingAngle = f * (eased * Math.PI * 1.05 - Math.PI * 0.35);
   const P = _weaponPalette();
+  // v0.25.107 — piecewise blade angle with anticipation pull-back.
+  //   • 0.00 – 0.18  anticipation : ease IN from shoulder pose to a
+  //                                  pulled-back over-shoulder wind-up.
+  //   • 0.18 – 0.55  strike       : cubic ease-out from wind-up to the
+  //                                  follow-through end. Sharp + decisive.
+  //   • 0.55 – 1.00  follow-through: damped wobble that decays so the
+  //                                   blade settles instead of stopping
+  //                                   dead at the peak.
+  // Replaces the old single easeOutBack curve which had a soft wind-up
+  // and no anticipation phase.
+  const _bladeAngle = (t) => {
+    const startA = -Math.PI * 0.35;
+    const windA  = -Math.PI * 0.58;
+    const peakA  = +Math.PI * 0.78;
+    if (t < 0.18) {
+      const k = t / 0.18;
+      return startA + (windA - startA) * (k * k);
+    } else if (t < 0.55) {
+      const k = (t - 0.18) / 0.37;
+      const eased = 1 - Math.pow(1 - k, 3);
+      return windA + (peakA - windA) * eased;
+    } else {
+      const k = (t - 0.55) / 0.45;
+      return peakA + Math.sin(k * Math.PI * 2) * 0.10 * (1 - k);
+    }
+  };
+  const swingAngle = f * _bladeAngle(Math.min(1, prog));
 
-  // --- Motion trail (3 ghost frames behind) ---
+  // --- Motion trail (3 ghost frames behind) — uses new piecewise curve ---
   ctx.save();
   ctx.translate(cx + f * 7, shoulderY);
   ctx.globalCompositeOperation = 'lighter';
   for (let g = 3; g >= 1; g--) {
     const gProg = Math.max(0, prog - g * 0.085);
     if (gProg <= 0) continue;
-    const gAng = f * (_easeOutBack(gProg) * Math.PI * 1.05 - Math.PI * 0.35);
+    const gAng = f * _bladeAngle(gProg);
     ctx.save();
     ctx.rotate(gAng);
     ctx.globalAlpha = 0.18 * (1 - g / 4);
