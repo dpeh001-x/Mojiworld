@@ -2514,7 +2514,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.109';
+const GAME_VERSION = 'v0.25.110';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4315,25 +4315,46 @@ function skillsForClass(cls, job, master) {
   }
   return out;
 }
-// v0.25.109 — per-skill rank upgrades.
-//   getSkillRank(id)    → current invested rank for a skill (0..CAP).
-//   getSkillRankMul(id) → 1 + rank * 0.08, applied as a damage multiplier
+// v0.25.109 / v0.25.110 — per-skill rank upgrades.
+//   getSkillRank(id)    → current invested rank for a SKILL_DEFS id (0..CAP).
+//   getSkillRankMul(tag)→ 1 + rank * 0.08, applied as a damage multiplier
 //                          inside hitMonster. Skills tagged in
 //                          SKILL_RANK_BLACKLIST stay unaffected (basic
 //                          weapon attacks + reactive damage like thorns
 //                          / minion-pet damage shouldn't double-dip).
 //   SKILL_RANK_CAP      → max ranks per skill.
+// v0.25.110 alias bridge — projectiles + skill effects pass short
+// hit-tags into hitMonster ('bolt', 'fire', 'ice', 'arrow', …) that
+// don't match the SKILL_DEFS id the rank UI lets the player invest in.
+// SKILL_HIT_TAG_TO_DEF_ID maps the runtime hit-tag back to the
+// canonical SKILL_DEFS id so a rank invested in 'magicBolt' actually
+// boosts hits tagged 'bolt'. Tags that already match a SKILL_DEFS id
+// (e.g. 'meteor', 'shadowStrike') are looked up directly and skip this
+// table.
 const SKILL_RANK_CAP = 5;
 const SKILL_RANK_BLACKLIST = new Set([
   'melee', 'thorns', 'burn', 'minion', 'pet', 'pack', 'afterimage'
 ]);
+const SKILL_HIT_TAG_TO_DEF_ID = {
+  bolt:   'magicBolt',
+  fire:   'fireball',
+  ice:    'iceSpike',
+  arrow:  'arrowShot',
+  dagger: 'throwDagger',
+};
 function getSkillRank(id) {
   if (!id || !player.skillRanks) return 0;
   return Math.max(0, Math.min(SKILL_RANK_CAP, player.skillRanks[id] | 0));
 }
-function getSkillRankMul(id) {
-  if (!id || SKILL_RANK_BLACKLIST.has(id)) return 1;
-  return 1 + getSkillRank(id) * 0.08;
+function getSkillRankMul(tag) {
+  if (!tag || SKILL_RANK_BLACKLIST.has(tag)) return 1;
+  // Try direct id match first; fall back to the alias bridge.
+  let r = getSkillRank(tag);
+  if (r === 0) {
+    const aliasId = SKILL_HIT_TAG_TO_DEF_ID[tag];
+    if (aliasId) r = getSkillRank(aliasId);
+  }
+  return 1 + r * 0.08;
 }
 
 function skillBySlot(slot) {
@@ -17936,16 +17957,17 @@ const LEVELUP_OPTIONS = [
 // pointing U's Skills tab at this content; the I key was retired.
 function renderSkillsReference(host) {
   if (!host) return;
+  if (!player.skillRanks) player.skillRanks = {};
   const kit = skillsForClass(player.cls, player.job, player.master);
   const slotSkill = (slot) => {
-    let best = null, bestScore = -1;
+    let best = null, bestScore = -1, bestId = null;
     for (const id in kit) {
       const s = kit[id];
       if (s.slot !== slot) continue;
       const sc = (s.master ? 4 : 0) + (s.job ? 2 : 0);
-      if (sc > bestScore) { bestScore = sc; best = s; }
+      if (sc > bestScore) { bestScore = sc; best = s; bestId = id; }
     }
-    return best;
+    return best ? { id: bestId, def: best } : null;
   };
   const rows = [
     { key:'Z',     label:'Basic Attack',      desc:null, slot:'d', kind:'skill' },
@@ -17959,11 +17981,28 @@ function renderSkillsReference(host) {
     { key:'G',     label:'Master Signature',  desc:null, slot:'x', kind:'skill' },
   ];
   const kindCol = { skill:'#ffcc66', defense:'#88ccff', menu:'#aaddff', item:'#ff99aa', unbound:'#666' };
+  // v0.25.110 — Basic-attack slot 'd' resolves to a class skill id
+  // ('slash' / 'magicBolt' / 'arrowShot' / 'stab') but in combat its
+  // hits land tagged 'melee' / 'bolt' / 'arrow' / 'dagger'. The first
+  // is blacklisted; the others bridge through SKILL_HIT_TAG_TO_DEF_ID.
+  // Block/Parry (slot-less, kind:'defense') has no skill id and stays
+  // un-rankable. Reactive blacklist tags (thorns / pet / minion / pack
+  // / afterimage / burn) aren't in any kit row so don't need handling.
+  const isBasicMeleeSlot = (id) => id === 'slash' || id === 'stab';
+  const pool = player.skillRankPoints | 0;
 
   host.innerHTML = `
-    <div style="text-align:center; margin-bottom:8px; color:#bbb; font-size:12px;">
-      Your current skill bindings and their unlock progression.<br>
-      <span style="color:#888;">Bars show which levels the slot is available across Lv 1 → 50. Gold mark = unlock.</span>
+    <div style="text-align:center; margin-bottom:8px;">
+      <div style="display:inline-flex; align-items:center; gap:10px; padding:7px 14px; background:linear-gradient(180deg,#2a3a60,#1f2848); border:2px solid #66ccff; border-radius:20px; box-shadow:0 0 14px rgba(102,204,255,0.35); font-size:12px;">
+        <span style="color:#ddd;">SKILL POINTS</span>
+        <span id="rank-pool" style="font-size:20px; font-weight:bold; color:#bcefff; text-shadow:0 0 8px rgba(120,220,255,0.6); font-variant-numeric:tabular-nums;">${pool}</span>
+        <span style="color:#aaa; font-size:11px;">to invest</span>
+      </div>
+    </div>
+    <div style="text-align:center; margin-bottom:8px; color:#aaa; font-size:11px; line-height:1.45;">
+      Each card shows its keybind, costs, unlock level &amp; rank.
+      Spend a Skill Point on the <b style="color:#66ccff;">+</b> button to add
+      <b style="color:#ffdd88;">+8% damage</b> per rank (cap ${SKILL_RANK_CAP}).
     </div>
     <div id="skills-ref-grid" style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px;
          max-height:430px; overflow-y:auto; padding:4px;"></div>
@@ -17987,14 +18026,16 @@ function renderSkillsReference(host) {
     let label = r.label, desc = r.desc || '';
     let costBadge = '';
     let unlockLv = 1, locked = false;
+    let skillId = null;
     if (r.slot) {
       const s = slotSkill(r.slot);
       unlockLv = (typeof slotLevelReq === 'function') ? slotLevelReq(r.slot) : 1;
       if (s) {
-        label = `${s.icon || '•'}  ${s.name}`;
-        desc  = s.desc || '';
-        if (s.mp)  costBadge += `<span style="color:#88bbff;">${s.mp} MP</span> · `;
-        if (s.cd)  costBadge += `<span style="color:#ffcc66;">${(s.cd/1000).toFixed(1)}s CD</span> · `;
+        skillId = s.id;
+        label = `${s.def.icon || '•'}  ${s.def.name}`;
+        desc  = s.def.desc || '';
+        if (s.def.mp)  costBadge += `<span style="color:#88bbff;">${s.def.mp} MP</span> · `;
+        if (s.def.cd)  costBadge += `<span style="color:#ffcc66;">${(s.def.cd/1000).toFixed(1)}s CD</span> · `;
         costBadge += `<span style="color:#aaffaa;">Lv ${unlockLv}+</span>`;
       } else {
         label = `(Slot ${r.slot.toUpperCase()} — locked)`;
@@ -18006,6 +18047,51 @@ function renderSkillsReference(host) {
         card.style.opacity = 0.5;
         locked = true;
       }
+    }
+    // v0.25.110 — rank row block. Built per-card so basic-melee slots
+    // (warrior 'slash' / rogue 'stab') and the defense row render a
+    // muted "no rank" hint instead of a button. Other ranked skills
+    // get a 5-pip strip + a [+] button that spends one Skill Point.
+    let rankBlock = '';
+    if (skillId && !locked) {
+      const blocked = isBasicMeleeSlot(skillId);
+      const curRank = getSkillRank(skillId);
+      const dmgPct = curRank * 8;
+      const atCap = curRank >= SKILL_RANK_CAP;
+      const canAfford = pool > 0 && !atCap && !blocked;
+      let pips = '';
+      for (let i = 0; i < SKILL_RANK_CAP; i++) {
+        pips += `<span style="display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:3px; background:${i < curRank ? '#ffdd66' : 'transparent'}; border:1px solid ${i < curRank ? '#ffdd66' : '#555'};"></span>`;
+      }
+      const rightLabel = blocked
+        ? `<span style="color:#888;">basic · no rank</span>`
+        : (curRank > 0
+            ? `<span style="color:#ffdd88;">+${dmgPct}% dmg</span>`
+            : `<span style="color:#888;">rank 0</span>`);
+      const buttonHtml = blocked
+        ? ''
+        : `<button type="button" data-rankid="${skillId}"
+            ${canAfford ? '' : 'disabled'}
+            style="width:26px; height:22px; border-radius:4px;
+                   background:${canAfford ? '#3a5a7a' : '#333'};
+                   color:${canAfford ? '#bcefff' : '#666'};
+                   border:1px solid ${canAfford ? '#66ccff' : '#555'};
+                   cursor:${canAfford ? 'pointer' : 'not-allowed'};
+                   font-weight:bold; font-size:13px; line-height:1;">+</button>`;
+      rankBlock = `
+        <div style="display:flex; align-items:center; justify-content:space-between;
+                    margin-top:5px; padding:4px 6px; border-radius:4px;
+                    background:rgba(102,204,255,0.06); border:1px solid rgba(102,204,255,0.18);">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span style="font-size:9px; color:#88aacc; letter-spacing:0.4px;">RANK</span>
+            <span>${pips}</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px; font-size:10px;">
+            ${rightLabel}
+            ${buttonHtml}
+          </div>
+        </div>
+      `;
     }
     // --- Skill growth chart: horizontal Lv 1 → 50 track with unlock + now markers
     const curLv = player.level || 1;
@@ -18035,11 +18121,27 @@ function renderSkillsReference(host) {
         <div style="color:#fff; font-weight:bold; font-size:13px; margin-bottom:2px;">${label}</div>
         ${costBadge ? `<div style="font-size:10px; margin-bottom:3px;">${costBadge}</div>` : ''}
         <div style="color:#bbb; font-size:11px; line-height:1.4;">${desc}</div>
+        ${rankBlock}
         ${chart}
       </div>
     `;
     grid.appendChild(card);
   }
+  // Wire rank "+" buttons. One handler per card; spends 1 Skill Point
+  // and re-renders so pip count + pool badge update in lockstep.
+  grid.querySelectorAll('button[data-rankid]').forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.dataset.rankid;
+      if (!id || (player.skillRankPoints | 0) <= 0) return;
+      if (SKILL_RANK_BLACKLIST.has(id)) return;
+      const cur = getSkillRank(id);
+      if (cur >= SKILL_RANK_CAP) return;
+      player.skillRanks[id] = cur + 1;
+      player.skillRankPoints -= 1;
+      if (typeof audio !== 'undefined' && audio.play) audio.play('levelup');
+      renderSkillsReference(host);
+    };
+  });
 }
 
 // Back-compat — legacy callers still reach for this; route them to the
@@ -18066,7 +18168,6 @@ function openLevelUpPanel() {
     <h2 style="margin:0 0 8px;">✦ Character ✦</h2>
     <div id="u-tabs" style="display:flex; gap:4px; margin-bottom:10px; border-bottom:1px solid rgba(180,140,220,0.25);">
       <button type="button" class="inv-tab" data-utab="lp">📈 Level Up</button>
-      <button type="button" class="inv-tab" data-utab="ranks">🎯 Skill Ranks</button>
       <button type="button" class="inv-tab" data-utab="boons">◈ Boon Loadout</button>
       <button type="button" class="inv-tab" data-utab="skills">📖 Skills</button>
     </div>
@@ -18087,7 +18188,6 @@ function openLevelUpPanel() {
       </div>
       <div id="lp-powerup" style="margin-top:10px; padding:8px 10px; background:rgba(0,0,0,0.35); border-radius:6px; font-size:12px; color:#cfd; line-height:1.5;"></div>
     </div>
-    <div id="u-pane-ranks" style="display:${game._uTab==='ranks'?'block':'none'}"></div>
     <div id="u-pane-boons" style="display:${game._uTab==='boons'?'block':'none'}">
       <div id="lp-boons"></div>
     </div>
@@ -18096,13 +18196,14 @@ function openLevelUpPanel() {
   // Wire tab buttons + set initial active state
   const tabs = body.querySelectorAll('#u-tabs .inv-tab');
   const swapPane = () => {
+    // v0.25.110 — 'ranks' tab folded into 'skills'. Legacy values (e.g.
+    // saved game._uTab === 'ranks') auto-route to skills.
+    if (game._uTab === 'ranks') game._uTab = 'skills';
     document.getElementById('u-pane-lp').style.display     = game._uTab === 'lp'     ? 'block' : 'none';
-    document.getElementById('u-pane-ranks').style.display  = game._uTab === 'ranks'  ? 'block' : 'none';
     document.getElementById('u-pane-boons').style.display  = game._uTab === 'boons'  ? 'block' : 'none';
     document.getElementById('u-pane-skills').style.display = game._uTab === 'skills' ? 'block' : 'none';
     tabs.forEach(b => b.classList.toggle('active', b.dataset.utab === game._uTab));
     if (game._uTab === 'lp')          renderLevelUp();
-    else if (game._uTab === 'ranks')  renderSkillRanks(document.getElementById('u-pane-ranks'));
     else if (game._uTab === 'boons')  renderBoonPanel();
     else if (game._uTab === 'skills') renderSkillsReference(document.getElementById('u-pane-skills'));
     document.getElementById('attributes-modal').dataset.variant = 'lp';
@@ -18115,102 +18216,12 @@ function openLevelUpPanel() {
   game.paused = true;
 }
 
-// =========================================================================
-// SKILL RANKS UI (v0.25.109)
-// Each skill in the player's class kit can absorb up to SKILL_RANK_CAP
-// (=5) ranks. Each rank costs one Skill Point (player.skillRankPoints,
-// granted +1 per level-up) and adds +8 % damage to that skill in
-// hitMonster. Basic-attack / reactive skills (melee, thorns, pet, …)
-// are blacklisted from receiving the multiplier even if a player
-// somehow invests a rank, so the field is always safe to read.
-// =========================================================================
-function renderSkillRanks(host) {
-  if (!host) return;
-  if (!player.skillRanks) player.skillRanks = {};
-  const kit = skillsForClass(player.cls, player.job, player.master);
-  // Sort by slot order so the layout matches the Skills reference tab.
-  const SLOT_ORDER = ['d','s','a','e','w','q','c','x'];
-  const skillList = Object.entries(kit).sort((a, b) => {
-    const ai = SLOT_ORDER.indexOf(a[1].slot);
-    const bi = SLOT_ORDER.indexOf(b[1].slot);
-    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
-  });
-  const pool = player.skillRankPoints | 0;
-  const blacklisted = (id) => SKILL_RANK_BLACKLIST.has(id);
-
-  let html = `
-    <div style="text-align:center; margin-bottom:8px;">
-      <div style="display:inline-flex; align-items:center; gap:10px; padding:7px 14px; background:linear-gradient(180deg,#2a3a60,#1f2848); border:2px solid #66ccff; border-radius:20px; box-shadow:0 0 14px rgba(102,204,255,0.35); font-size:12px;">
-        <span style="color:#ddd;">SKILL POINTS</span>
-        <span id="rank-pool" style="font-size:20px; font-weight:bold; color:#bcefff; text-shadow:0 0 8px rgba(120,220,255,0.6); font-variant-numeric:tabular-nums;">${pool}</span>
-        <span style="color:#aaa; font-size:11px;">to invest</span>
-      </div>
-    </div>
-    <div style="text-align:center; margin-bottom:10px; color:#aaa; font-size:11px; line-height:1.45;">
-      Spend a Skill Point to upgrade an individual skill. Each rank adds
-      <b style="color:#ffdd88;">+8% damage</b> (cap ${SKILL_RANK_CAP} ranks = +${SKILL_RANK_CAP * 8}%).<br>
-      Reactive skills (basic Z attack · thorns · pet · minion) cannot be ranked.
-    </div>
-    <div id="rank-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:6px; max-height:430px; overflow-y:auto; padding:4px;"></div>
-  `;
-  host.innerHTML = html;
-  const grid = host.querySelector('#rank-grid');
-
-  for (const [id, s] of skillList) {
-    const rank = getSkillRank(id);
-    const atCap = rank >= SKILL_RANK_CAP;
-    const blocked = blacklisted(id);
-    const canAfford = pool > 0 && !atCap && !blocked;
-    const dmgPct = rank * 8;
-    const card = document.createElement('div');
-    card.style.cssText = `
-      padding:8px 10px; border-radius:6px; background:rgba(0,0,0,0.35);
-      border:1px solid ${blocked ? '#444' : (canAfford ? '#66ccff77' : '#555')};
-      opacity:${blocked ? 0.45 : 1};
-    `;
-    // Pip strip — filled circles for invested ranks, empty for remaining
-    let pips = '';
-    for (let i = 0; i < SKILL_RANK_CAP; i++) {
-      pips += `<span style="display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:3px; background:${i < rank ? '#ffdd66' : 'transparent'}; border:1px solid ${i < rank ? '#ffdd66' : '#666'};"></span>`;
-    }
-    card.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-        <div style="display:flex; align-items:center; gap:6px; min-width:0;">
-          <span style="font-size:18px;">${s.icon || '•'}</span>
-          <span style="font-weight:bold; color:#e8e4f4; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.name}</span>
-        </div>
-        <button type="button" data-rankid="${id}"
-          ${(canAfford ? '' : 'disabled')}
-          style="width:28px; height:26px; border-radius:4px;
-                 background:${canAfford ? '#3a5a7a' : '#333'};
-                 color:${canAfford ? '#bcefff' : '#666'};
-                 border:1px solid ${canAfford ? '#66ccff' : '#555'};
-                 cursor:${canAfford ? 'pointer' : 'not-allowed'};
-                 font-weight:bold; font-size:14px;">+</button>
-      </div>
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
-        <div>${pips}</div>
-        <div style="font-size:11px; color:${blocked ? '#888' : '#ffdd88'}; font-variant-numeric:tabular-nums;">
-          ${blocked ? 'reactive · no rank' : (rank > 0 ? `+${dmgPct}% dmg` : '— · rank 0')}
-        </div>
-      </div>
-    `;
-    grid.appendChild(card);
-  }
-  grid.querySelectorAll('button[data-rankid]').forEach(btn => {
-    btn.onclick = () => {
-      const id = btn.dataset.rankid;
-      if (!id || (player.skillRankPoints | 0) <= 0) return;
-      if (SKILL_RANK_BLACKLIST.has(id)) return;
-      const cur = getSkillRank(id);
-      if (cur >= SKILL_RANK_CAP) return;
-      player.skillRanks[id] = cur + 1;
-      player.skillRankPoints -= 1;
-      audio.play && audio.play('levelup');
-      renderSkillRanks(host);
-    };
-  });
-}
+// v0.25.110 — the standalone Skill Ranks panel was folded into the
+// Skills reference tab (renderSkillsReference). Each skill card now
+// shows its rank pips + a [+] button alongside the keybind, MP, CD,
+// and Lv-1→50 growth chart, so players read the full state of a skill
+// in one place. The previous renderSkillRanks(host) function has been
+// retired.
 
 // =========================================================================
 // BOON LOADOUT UI (v0.19)
