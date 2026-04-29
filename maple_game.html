@@ -18538,9 +18538,8 @@ function drawBackground() {
     ctx.restore();
     // Bring static bitmap art to life with moving sky overlays.
     drawSkyLifeOverlay();
-    // Subtle atmospheric haze so foreground characters still pop
-    ctx.fillStyle = 'rgba(20,24,48,0.18)';
-    ctx.fillRect(0, 0, W, H);
+    // v0.25.92 — translucent atmospheric haze removed per user request.
+    // (Used to be: ctx.fillStyle='rgba(20,24,48,0.18)'; ctx.fillRect(0,0,W,H);)
     // Keep boss-arena decor on top if applicable
     if (game.mapData.isBossArena) drawBossDecor();
     return;
@@ -25793,9 +25792,13 @@ const MONSTER_SPRITE_TYPES = [
   // tier 3 (early forest)
   'horny', 'orange', 'stump',
   // tier 4 (mid-game)
-  'scorpion', 'nougatBear',
-  // tier 5+ (late mid + endgame)
-  'skeleton', 'coralImp',
+  'scorpion', 'nougatBear', 'honeyBuzz',
+  // tier 5 (late mid)
+  'skeleton', 'mummy', 'zombie', 'wraith',
+  // tier 6 (high)
+  'nimbusFox', 'cosmicMochi',
+  // tier 7 (endgame)
+  'coralImp', 'pearlSprite',
 ];
 (function _loadMonsterSprites() {
   for (const type of MONSTER_SPRITE_TYPES) {
@@ -25841,6 +25844,50 @@ function _drawNpcSprite(sprite, cx, feetY) {
   ctx.translate(cx, feetY + 2 + bob);
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(sprite, -targetW / 2, -targetH * 0.96, targetW, targetH);
+  ctx.restore();
+}
+
+// === BOSS SPRITES (v0.25.92) === ludo.ai-generated chibi boss portraits.
+// Each entry maps the boss m.type ('king', 'mushmom', 'aetherion', 'gravitos')
+// to its transparent webp under Sprites/bosses/. Falls back to the existing
+// procedural draw functions (drawKingSlime, drawMushmom, etc.) when not loaded.
+const BOSS_SPRITES = Object.create(null);
+const BOSS_SPRITE_TYPES = ['king', 'mushmom', 'aetherion', 'gravitos'];
+(function _loadBossSprites() {
+  for (const type of BOSS_SPRITE_TYPES) {
+    const img = new Image();
+    img.onload = () => { BOSS_SPRITES[type] = img; };
+    img.onerror = () => console.warn('[BossSprite] failed', type);
+    img.src = 'Sprites/bosses/' + type + '.webp';
+  }
+})();
+
+// === ZODIAC BOSS SPRITES (v0.25.92) === one per zodiac sign, keyed by m.zodiacSign.
+const ZODIAC_SPRITES = Object.create(null);
+const ZODIAC_SPRITE_TYPES = ['aries','taurus','gemini','cancer','leo','virgo','libra','scorpio','sagittarius','capricorn','aquarius','pisces'];
+(function _loadZodiacSprites() {
+  for (const sign of ZODIAC_SPRITE_TYPES) {
+    const img = new Image();
+    img.onload = () => { ZODIAC_SPRITES[sign] = img; };
+    img.onerror = () => console.warn('[ZodiacSprite] failed', sign);
+    img.src = 'Sprites/zodiac/' + sign + '.webp';
+  }
+})();
+
+// Boss sprites are bigger than regular mobs — render at ~2× the bbox height
+// to fit the mini-boss/boss aura halo silhouette on screen.
+function _drawBossSprite(sprite, m, sx, sy) {
+  const targetH = m.h * 2.0;
+  const srcW = sprite.naturalWidth  || sprite.width  || 1;
+  const srcH = sprite.naturalHeight || sprite.height || 1;
+  const targetW = targetH * (srcW / srcH);
+  const footX = sx + m.w / 2;
+  const footY = sy + m.h;
+  ctx.save();
+  ctx.translate(footX, footY);
+  if ((m.facing | 0) > 0) ctx.scale(-1, 1);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(sprite, -targetW / 2, -targetH * 0.95, targetW, targetH);
   ctx.restore();
 }
 
@@ -26157,13 +26204,14 @@ function drawMonster(m) {
   ctx.save();
   if (flashOn) ctx.filter = 'brightness(2.5)';
 
-  // Bosses keep signature visuals; all grunts use unified cute chibi renderer
-  // v0.25.77 — types with a ludo.ai sprite loaded into MONSTER_SPRITES use
-  // _drawMonsterSprite instead of the procedural drawCuteMob fallback.
-  if (m.type === 'king') drawKingSlime(m, sx, sy);
+  // v0.25.92 — bosses + zodiac now check ludo.ai sprite cache first; fall
+  // back to procedural draw functions when the sprite isn't loaded.
+  if (BOSS_SPRITES[m.type]) _drawBossSprite(BOSS_SPRITES[m.type], m, sx, sy);
+  else if (m.type === 'king') drawKingSlime(m, sx, sy);
   else if (m.type === 'mushmom') drawMushmom(m, sx, sy);
   else if (m.type === 'aetherion') drawAetherion(m, sx, sy);
   else if (m.type === 'gravitos') drawGravitos(m, sx, sy);
+  else if (m.zodiacBoss && ZODIAC_SPRITES[m.zodiacSign]) _drawBossSprite(ZODIAC_SPRITES[m.zodiacSign], m, sx, sy);
   else if (m.zodiacBoss) drawZodiacBoss(m, sx, sy);
   else if (MONSTER_ANIMS[m.type] || MONSTER_SPRITES[m.type]) _drawMonsterSprite(m, sx, sy);
   else drawCuteMob(m, sx, sy);
@@ -30293,8 +30341,8 @@ requestAnimationFrame(loop);
 </div>
 
 <script>
-// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.91) ===
-console.log('%c[CharStudio] v0.25.91 loaded — head locked at Y=49 across EVERY frame in EVERY state','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
+// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.92) ===
+console.log('%c[CharStudio] v0.25.92 loaded — 7 mobs + 4 bosses + 12 zodiac wired, haze removed','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
 const CHAR_STUDIO = {
   base: null,           // grayscale neutral mannequin (multiply target)
   baseColored: null,    // peach mannequin used as walk-anim source frames
