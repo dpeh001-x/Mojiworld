@@ -2380,6 +2380,18 @@
     </div>
   </div>
 
+  <!-- v0.25.95 — World map modal (press W) -->
+  <div id="worldmap-modal" class="modal-overlay">
+    <div class="modal" style="position:relative; min-width:680px; max-width:880px;">
+      <button class="close-btn" onclick="closeAllModals()">✕</button>
+      <h2>🗺 World Map</h2>
+      <div style="text-align:center; margin-bottom:10px; color:#bbb; font-size:12px;">
+        Maps grouped by recommended level. Your current location is highlighted. Press <kbd style="background:#444;padding:1px 5px;border-radius:3px;border:1px solid #666;">W</kbd> to toggle.
+      </div>
+      <div id="worldmap-grid" style="display:flex; flex-direction:column; gap:14px; max-height:480px; overflow-y:auto; padding:4px 6px;"></div>
+    </div>
+  </div>
+
   <div id="dev-modal" class="modal-overlay">
     <div class="modal" style="position:relative; min-width:680px; max-width:760px; border:2px solid #ffcc44; background:linear-gradient(160deg,#1a1520,#0a0818);">
       <button class="close-btn" onclick="closeAllModals()">✕</button>
@@ -2502,7 +2514,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.71';
+const GAME_VERSION = 'v0.25.95';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -2577,11 +2589,15 @@ function _bootstrapPhaser() {
   class LXBackgroundScene extends Phaser.Scene {
     constructor() { super({ key: 'lx_bg' }); }
     preload() {
-      this.load.image('bg_forest',    'backgrounds/bg_forest.png');
-      this.load.image('bg_valley',    'backgrounds/bg_valley.png');
-      this.load.image('bg_meadow',    'backgrounds/bg_meadow.png');
-      this.load.image('bg_misty',     'backgrounds/bg_misty.png');
-      this.load.image('bg_homestead', 'backgrounds/bg_homestead.png');
+      // v0.25.93 — point all 5 biome slots at the new ChatGPT-rendered
+      // hero art (bg_v2_*.png copied from backgrounds/New background/).
+      // Keys are unchanged so pickBgKey + md.bg overrides keep working.
+      this.load.image('bg_forest',    'backgrounds/bg_v2_forest.png');
+      this.load.image('bg_valley',    'backgrounds/bg_v2_valley.png');
+      this.load.image('bg_meadow',    'backgrounds/bg_v2_meadow.png');
+      this.load.image('bg_misty',     'backgrounds/bg_v2_misty.png');
+      this.load.image('bg_homestead', 'backgrounds/bg_v2_homestead.png');
+      this.load.image('bg_dungeon',   'backgrounds/bg_v2_dungeon.png');
     }
     create() {
       this._bgTile = null;
@@ -2601,7 +2617,9 @@ function _bootstrapPhaser() {
       if (explicit && this.textures.exists(explicit)) return explicit;
       if (md.isTown && this.textures.exists('bg_homestead')) return 'bg_homestead';
       if (!md.isTown) {
-        const cycle = ['bg_forest', 'bg_valley', 'bg_meadow', 'bg_misty']
+        // v0.25.93 — dungeon added to the rotation so all 5 new hero
+        // backdrops are reachable without an explicit md.bg override.
+        const cycle = ['bg_forest', 'bg_valley', 'bg_meadow', 'bg_misty', 'bg_dungeon']
           .filter(k => this.textures.exists(k));
         if (cycle.length) {
           let h = 0;
@@ -3701,6 +3719,47 @@ function _bootstrapPhaser() {
     '· 2 games: BG (z:1), UI (z:3)');
 }
 _bootstrapPhaser();
+
+// =========================================================================
+// LX_TILES — ludo-generated floor + pillar art (v0.25.93)
+// =========================================================================
+// Side-scrolling platform + decorative-pillar textures live in
+// backgrounds/tiles/. Loaded eagerly; renderers fall back to procedural
+// drawing when the image isn't ready (or naturalWidth is 0 due to a
+// fetch error), so the game always renders correctly.
+// =========================================================================
+const LX_TILES = (() => {
+  const base = 'backgrounds/tiles/';
+  const sources = {
+    floorGrass:    'floor_grass_b.webp',
+    floorWood:     'floor_wood_b.webp',
+    pillarSanctum: 'pillar_sanctum_a.webp',
+    pillarCrypt:   'pillar_crypt_a.webp',
+  };
+  const out = {};
+  for (const [k, file] of Object.entries(sources)) {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = base + file;
+    out[k] = img;
+  }
+  return out;
+})();
+function _lxTileReady(img) {
+  return !!(img && img.complete && img.naturalWidth > 0);
+}
+// Tile an image horizontally at a fixed display height — preserves the
+// image's aspect ratio so chibi flowers / planks don't get squashed.
+function _lxDrawTiledRow(img, sx, sy, dw, dh) {
+  if (!_lxTileReady(img) || dh <= 0 || dw <= 0) return false;
+  const tileW = Math.max(8, (img.naturalWidth / img.naturalHeight) * dh);
+  for (let x = 0; x < dw; x += tileW) {
+    const w = Math.min(tileW, dw - x);
+    const sw = (w / tileW) * img.naturalWidth;
+    ctx.drawImage(img, 0, 0, sw, img.naturalHeight, sx + x, sy, w, dh);
+  }
+  return true;
+}
 
 const game = {
   camera: { x: 0, y: 0 },
@@ -6054,6 +6113,13 @@ window.addEventListener('keydown', e => {
   // v0.25.61 — J opens the Quest Journal
   if (k === 'j') {
     if (typeof toggleQuestJournal === 'function') toggleQuestJournal();
+  }
+  // v0.25.95 — W opens the World Map (overview of every reachable map,
+  // grouped by recommended level, with the current location highlighted).
+  // KEY_TO_SLOT uses z/x/s/c/d/f/v/g for skill slots — the literal W
+  // keyboard key is unbound, so it's safe to claim for this modal.
+  if (k === 'w') {
+    if (typeof toggleWorldMap === 'function') toggleWorldMap();
   }
   // v0.24.2 — I key retired. Skills reference now lives as a tab inside
   // the U panel (Level Up / Boon Loadout / Skills).
@@ -8572,6 +8638,113 @@ function toggleQuestJournal() {
   renderQuestJournal();
   modal.style.display = 'flex';
   game.paused = true;
+}
+
+// =========================================================================
+// WORLD MAP — v0.25.95 (Tab toggles, click a card to fast-travel)
+// =========================================================================
+// Bucket every entry in MAPS by its category (hub / boss / tower) or by
+// levelReq tier (early / mid / high / end). Renders cards with biome
+// icon, name, level requirement, and "you are here" / locked badges.
+// Click an unlocked, non-current card to closeAllModals + loadMap(id).
+// =========================================================================
+const _WM_BIOME_ICON = {
+  town:'🏛', forest:'🌳', mushroom:'🍄', ancient:'🌲',
+  sunsetBeach:'🌅', slimeCave:'💧', frozenPeak:'❄', lavaCavern:'🔥',
+  skyGarden:'☁', candyCanyon:'🍬', bubblegumSwamp:'🍡',
+  duneSands:'🏜', honeycombHollow:'🐝', cryptHollow:'🪦',
+  pearlBathhouse:'🪷', stardustAtrium:'✨', sanctum:'🌌',
+  gravitosArena:'🕳', boss:'👑', tower:'🗼',
+};
+function toggleWorldMap() {
+  if (!player.cls) { showToast('Pick a class first', 'common'); return; }
+  if (player.hp <= 0) return;
+  const modal = document.getElementById('worldmap-modal');
+  if (!modal) return;
+  if (modal.style.display === 'flex') {
+    modal.style.display = 'none';
+    game.paused = false;
+    return;
+  }
+  renderWorldMap();
+  modal.style.display = 'flex';
+  game.paused = true;
+}
+function renderWorldMap() {
+  const grid = document.getElementById('worldmap-grid');
+  if (!grid || typeof MAPS !== 'object') return;
+  grid.innerHTML = '';
+  const cur = game.currentMap;
+  const playerLv = (player && player.level) || 1;
+  const buckets = {
+    hub:   { label: '🏛 Hub',                    color: '#ffdd88', maps: [] },
+    early: { label: '🌱 Beginner (Lv 1–4)',      color: '#88dd66', maps: [] },
+    mid:   { label: '⚔ Intermediate (Lv 5–14)',  color: '#88ccff', maps: [] },
+    high:  { label: '🔥 Advanced (Lv 15–29)',    color: '#ffaa44', maps: [] },
+    end:   { label: '🌟 Endgame (Lv 30+)',       color: '#c68aff', maps: [] },
+    boss:  { label: '👑 Boss Arenas',            color: '#ff6677', maps: [] },
+    tower: { label: '🗼 Tower of Ascension',     color: '#ffb24a', maps: [] },
+  };
+  for (const [id, m] of Object.entries(MAPS)) {
+    if (m.isZodiac || m.isZodiacHub || m.isCarriage) continue; // gated through other UI
+    const lvl = m.levelReq || 0;
+    let key;
+    if (m.isTower)         key = 'tower';
+    else if (m.isTown)     key = 'hub';
+    else if (m.isBossArena)key = 'boss';
+    else if (lvl <= 4)     key = 'early';
+    else if (lvl <= 14)    key = 'mid';
+    else if (lvl <= 29)    key = 'high';
+    else                   key = 'end';
+    buckets[key].maps.push([id, m, lvl]);
+  }
+  for (const b of Object.values(buckets)) {
+    if (!b.maps.length) continue;
+    b.maps.sort((a, c) => a[2] - c[2]);
+    const sec = document.createElement('div');
+    sec.style.cssText = 'display:flex; flex-direction:column; gap:6px;';
+    sec.innerHTML = `<div style="color:${b.color}; font-size:13px; font-weight:700; letter-spacing:0.5px;">${b.label}</div>`;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:8px;';
+    for (const [id, m, lvl] of b.maps) {
+      const here = id === cur;
+      const locked = lvl > 0 && playerLv < lvl;
+      const card = document.createElement('div');
+      const bg = here   ? 'linear-gradient(135deg,rgba(255,221,136,0.22),rgba(180,120,40,0.18))'
+               : locked ? 'rgba(20,15,30,0.55)'
+                        : 'rgba(40,28,60,0.65)';
+      const border = here   ? '2px solid #ffdd88'
+                   : locked ? '1px solid rgba(80,70,100,0.5)'
+                            : '1px solid rgba(120,100,160,0.45)';
+      card.style.cssText = `background:${bg}; border:${border}; border-radius:8px; padding:10px 12px; cursor:${locked?'not-allowed':'pointer'}; transition:transform 80ms, background 80ms;${locked?' opacity:0.55;':''}`;
+      const icon = _WM_BIOME_ICON[id] || '📍';
+      const lvlTxt   = lvl > 0 ? `<div style="font-size:11px; color:#aaa;">Lv ${lvl}+</div>` : '<div style="font-size:11px; color:#aaa;">No level req</div>';
+      const hereTag  = here   ? '<div style="font-size:10px; color:#ffdd88; font-weight:700; letter-spacing:1px;">▸ YOU ARE HERE</div>' : '';
+      const lockTag  = locked ? `<div style="font-size:10px; color:#ff6677;">🔒 Need Lv ${lvl}</div>` : '';
+      card.innerHTML =
+        `<div style="display:flex; align-items:center; gap:10px;">`
+        + `<div style="font-size:24px;">${icon}</div>`
+        + `<div style="flex:1; min-width:0;">`
+        +   `<div style="font-size:13px; font-weight:600; color:#fff;">${m.name || id}</div>`
+        +   lvlTxt + hereTag + lockTag
+        + `</div></div>`;
+      if (!locked) {
+        card.addEventListener('mouseenter', () => { card.style.transform = 'translateY(-1px)'; });
+        card.addEventListener('mouseleave', () => { card.style.transform = 'translateY(0)'; });
+        card.addEventListener('click', () => {
+          if (id === cur) { showToast('Already here', 'common'); return; }
+          if (typeof loadMap === 'function') {
+            closeAllModals();
+            loadMap(id);
+            showToast(`Travelling to ${m.name || id}…`, 'rare');
+          }
+        });
+      }
+      row.appendChild(card);
+    }
+    sec.appendChild(row);
+    grid.appendChild(sec);
+  }
 }
 function renderQuestJournal() {
   _ensureQuests();
@@ -18204,13 +18377,19 @@ const _ART_PACK = (() => {
   if (/[?&]art=classic\b/.test(location.search)) return 'classic';
   return (localStorage.getItem('levelx_art_pack') || 'classic').toLowerCase();
 })();
+// v0.25.93 — replaced the 5 biome slots with the New background hero art.
+// `main` doubles as the universal fallback so detached non-Phaser draws also
+// pick up the new look. `dungeon` is a new key — boss/eerie maps can opt in
+// with `bg: 'dungeon'` and the cycle below routes a fraction of combat
+// maps to it automatically.
 const BG_IMAGES = {
-  forest:    _loadBG('backgrounds/bg_forest.png'),
-  valley:    _loadBG('backgrounds/bg_valley.png'),
-  meadow:    _loadBG('backgrounds/bg_meadow.png'),
-  misty:     _loadBG('backgrounds/bg_misty.png'),
-  homestead: _loadBG('backgrounds/bg_homestead.png'),
-  main:      _loadBG('backgrounds/main_bg.png'),
+  forest:    _loadBG('backgrounds/bg_v2_forest.png'),
+  valley:    _loadBG('backgrounds/bg_v2_valley.png'),
+  meadow:    _loadBG('backgrounds/bg_v2_meadow.png'),
+  misty:     _loadBG('backgrounds/bg_v2_misty.png'),
+  homestead: _loadBG('backgrounds/bg_v2_homestead.png'),
+  dungeon:   _loadBG('backgrounds/bg_v2_dungeon.png'),
+  main:      _loadBG('backgrounds/bg_v2_valley.png'),
 };
 const BG_CINEMATIC_VARIANTS = [
   _loadBG('backgrounds/Dadpeh_169_landscape_cute_horizontal_background_for_2d_MMORPG_806cb376-fd1b-4b5d-b58c-d9e6d6a027e3_0.png'),
@@ -18252,7 +18431,9 @@ const BG_IMG = BG_IMAGES.main;
 // Ordered cycle used when a combat map has no explicit `mapData.bg`.
 // Ordered from "bright/cheery" → "moody" so the natural grind
 // progression feels like it ramps visually with the difficulty arc.
-const _BG_CYCLE = ['forest', 'valley', 'meadow', 'misty'];
+// v0.25.93 — dungeon added so the vanilla canvas fallback path stays in
+// sync with Phaser's pickBgKey (5-image cycle, not 4).
+const _BG_CYCLE = ['forest', 'valley', 'meadow', 'misty', 'dungeon'];
 
 // Cheap string hash so the same mapId always picks the same bg slot.
 function _hashStr(s) {
@@ -20832,21 +21013,33 @@ function drawSanctumCosmos() {
   ctx.fillStyle = hazeGrad; ctx.fillRect(0, 380, W, 100);
 
   // Altar pillars (boss arena pillars with crystal caps — sanctum-themed)
+  // v0.25.93: ludo-generated pillar art when image loaded; procedural
+  // crystal-orb glow still drawn on top so the bobbing keeps animating.
   const pillars = [220, 620, 1380, 1780];
+  const _pillarImg = LX_TILES.pillarSanctum;
+  const _pillarReady = _lxTileReady(_pillarImg);
   for (const px of pillars) {
     if (px > game.mapData.worldWidth) continue;
     const sx = px - game.camera.x;
     if (sx < -40 || sx > W + 40) continue;
-    // Pillar shaft
-    ctx.fillStyle = '#1a0a3a';
-    ctx.fillRect(sx - 14, 180, 28, 300);
-    ctx.fillStyle = '#2a1a5a';
-    ctx.fillRect(sx - 14, 180, 4, 300);
-    // Pillar base/cap
-    ctx.fillStyle = '#3a2a6a';
-    ctx.fillRect(sx - 20, 170, 40, 14);
-    ctx.fillRect(sx - 20, 470, 40, 14);
-    // Floating crystal orb on top
+    if (_pillarReady) {
+      // Image is ~9:16 portrait; lock display height to 314 (180→494)
+      const dh = 314;
+      const dw = (_pillarImg.naturalWidth / _pillarImg.naturalHeight) * dh;
+      ctx.drawImage(_pillarImg, sx - dw / 2, 180, dw, dh);
+    } else {
+      // Pillar shaft
+      ctx.fillStyle = '#1a0a3a';
+      ctx.fillRect(sx - 14, 180, 28, 300);
+      ctx.fillStyle = '#2a1a5a';
+      ctx.fillRect(sx - 14, 180, 4, 300);
+      // Pillar base/cap
+      ctx.fillStyle = '#3a2a6a';
+      ctx.fillRect(sx - 20, 170, 40, 14);
+      ctx.fillRect(sx - 20, 470, 40, 14);
+    }
+    // Floating crystal orb glow — drawn on top of either render path so
+    // the magenta bob still pops above the marble cap.
     const orbBob = Math.sin(t * 4 + px * 0.01) * 4;
     const orbY = 150 + orbBob;
     ctx.fillStyle = 'rgba(200,120,255,0.4)';
@@ -20859,17 +21052,26 @@ function drawSanctumCosmos() {
 }
 
 function drawBossDecor() {
-  // Eerie pillars
+  // Eerie pillars — v0.25.93: ludo-generated cracked-stone art when
+  // image is ready; flickering torch flame still drawn on top.
   const pillars = [200, 600, 1000, 1400];
+  const _pillarImg = LX_TILES.pillarCrypt;
+  const _pillarReady = _lxTileReady(_pillarImg);
   for (const px of pillars) {
     if (px > game.mapData.worldWidth) continue;
     const sx = px - game.camera.x;
-    ctx.fillStyle = '#3a2850';
-    ctx.fillRect(sx - 15, 180, 30, 300);
-    ctx.fillStyle = '#5a3878';
-    ctx.fillRect(sx - 20, 170, 40, 15);
-    ctx.fillStyle = '#5a3878';
-    ctx.fillRect(sx - 20, 470, 40, 15);
+    if (_pillarReady) {
+      const dh = 314;
+      const dw = (_pillarImg.naturalWidth / _pillarImg.naturalHeight) * dh;
+      ctx.drawImage(_pillarImg, sx - dw / 2, 180, dw, dh);
+    } else {
+      ctx.fillStyle = '#3a2850';
+      ctx.fillRect(sx - 15, 180, 30, 300);
+      ctx.fillStyle = '#5a3878';
+      ctx.fillRect(sx - 20, 170, 40, 15);
+      ctx.fillStyle = '#5a3878';
+      ctx.fillRect(sx - 20, 470, 40, 15);
+    }
     // Torch flame
     const f = Math.sin(game.time * 0.1 + px * 0.01) * 3;
     ctx.fillStyle = '#ff8822';
@@ -21706,6 +21908,16 @@ function drawPlatforms() {
     const sx = p.x - game.camera.x;
     if (sx + p.w < 0 || sx > W) continue;
     if (p.type === 'ground') {
+      // ---- v0.25.93: ludo-generated grass+dirt tile if available ----
+      // The image already includes scalloped grass top + flowers + dirt
+      // body, so when it loads we let it replace the procedural pass
+      // entirely. Keep the grass band ABOVE p.y so the visible tile
+      // matches the legacy outline (grass tufts protrude over the line).
+      if (_lxTileReady(LX_TILES.floorGrass)) {
+        const grassLift = 9; // legacy art protrudes ~9px above p.y
+        _lxDrawTiledRow(LX_TILES.floorGrass, sx, p.y - grassLift, p.w, p.h + grassLift);
+        continue;
+      }
       // ---- CUTE cel-shaded ground (matches monster aesthetic) ----
       // Dirt body — 2 soft pastel tones + thicker outline seam
       ctx.fillStyle = '#c89470';                     // warm honey-dirt top
@@ -21789,6 +22001,16 @@ function drawPlatforms() {
         ctx.fillRect(fx + 1, fy - 1, 1, 1);
       }
     } else {
+      // ---- v0.25.93: ludo-generated wood plank tile if available ----
+      // Wood platforms are short (h~10–12) — scale image to platform
+      // height and tile horizontally. We still paint the OUT halo so
+      // the platform reads against busy backgrounds.
+      if (_lxTileReady(LX_TILES.floorWood)) {
+        ctx.fillStyle = OUT;
+        ctx.fillRect(sx - 1, p.y - 1, p.w + 2, p.h + 2);
+        _lxDrawTiledRow(LX_TILES.floorWood, sx, p.y, p.w, p.h);
+        continue;
+      }
       // ---- DQ cel-shaded wood platform ----
       // Outer outline halo
       ctx.fillStyle = OUT;
@@ -25779,6 +26001,50 @@ function _getMiniBossAuraCanvas(w, h) {
   return c;
 }
 
+// === FLOATING TYPE SET (v0.25.93) — creatures whose sprites should NOT have
+// their feet planted on the ground. For everyone else, the renderer anchors
+// the sprite's actual character bbox-bottom to the monster's foot line.
+const FLOATING_TYPES = new Set([
+  // mobs that hover / float
+  'honeyBuzz',     // bee
+  'wraith',        // ghost
+  'nimbusFox',     // cloud spirit
+  'pearlSprite',   // sea fairy
+  // bosses
+  'aetherion',     // cosmic dragon
+]);
+const FLOATING_ZODIAC = new Set([
+  'gemini',   // twin star spirits
+  'virgo',    // winged seraph
+  'pisces',   // swimming twin koi
+]);
+const FLOATING_GROUND_BLEED = 0.18;  // lift floating sprites 18% of target height
+const GROUND_BURY_FRAC = 0.02;        // ground sprites overlap 2% below feet
+
+// Detect the lowest opaque pixel Y in a loaded sprite — used to anchor the
+// character's actual feet (rather than canvas-bottom) to the monster's foot
+// line. Returns canvas-bottom-Y when no opaque pixels found.
+function _detectSpriteBboxBottom(img) {
+  if (!img.naturalWidth || !img.naturalHeight) return null;
+  try {
+    const cv = document.createElement('canvas');
+    cv.width = img.naturalWidth;
+    cv.height = img.naturalHeight;
+    const c = cv.getContext('2d');
+    c.drawImage(img, 0, 0);
+    const data = c.getImageData(0, 0, cv.width, cv.height).data;
+    for (let y = cv.height - 1; y >= 0; y--) {
+      for (let x = 0; x < cv.width; x++) {
+        if (data[(y * cv.width + x) * 4 + 3] > 12) return y;
+      }
+    }
+    return cv.height - 1;
+  } catch (e) { return null; }
+}
+const MONSTER_SPRITE_META = Object.create(null);
+const BOSS_SPRITE_META    = Object.create(null);
+const ZODIAC_SPRITE_META  = Object.create(null);
+
 // === MONSTER SPRITES (v0.25.77) — ludo.ai-generated layered avatar overlays ===
 // Lazy-loaded once at module init. Each monster type whose sprite has loaded
 // uses _drawMonsterSprite() instead of the procedural drawCuteMob() — others
@@ -25803,7 +26069,10 @@ const MONSTER_SPRITE_TYPES = [
 (function _loadMonsterSprites() {
   for (const type of MONSTER_SPRITE_TYPES) {
     const img = new Image();
-    img.onload = () => { MONSTER_SPRITES[type] = img; };
+    img.onload = () => {
+      MONSTER_SPRITES[type] = img;
+      MONSTER_SPRITE_META[type] = { bboxBottomY: _detectSpriteBboxBottom(img) };
+    };
     img.onerror = () => { console.warn('[MonsterSprite] failed to load', type); };
     img.src = 'Sprites/monsters/' + type + '.webp';
   }
@@ -25856,7 +26125,10 @@ const BOSS_SPRITE_TYPES = ['king', 'mushmom', 'aetherion', 'gravitos'];
 (function _loadBossSprites() {
   for (const type of BOSS_SPRITE_TYPES) {
     const img = new Image();
-    img.onload = () => { BOSS_SPRITES[type] = img; };
+    img.onload = () => {
+      BOSS_SPRITES[type] = img;
+      BOSS_SPRITE_META[type] = { bboxBottomY: _detectSpriteBboxBottom(img) };
+    };
     img.onerror = () => console.warn('[BossSprite] failed', type);
     img.src = 'Sprites/bosses/' + type + '.webp';
   }
@@ -25868,26 +26140,39 @@ const ZODIAC_SPRITE_TYPES = ['aries','taurus','gemini','cancer','leo','virgo','l
 (function _loadZodiacSprites() {
   for (const sign of ZODIAC_SPRITE_TYPES) {
     const img = new Image();
-    img.onload = () => { ZODIAC_SPRITES[sign] = img; };
+    img.onload = () => {
+      ZODIAC_SPRITES[sign] = img;
+      ZODIAC_SPRITE_META[sign] = { bboxBottomY: _detectSpriteBboxBottom(img) };
+    };
     img.onerror = () => console.warn('[ZodiacSprite] failed', sign);
     img.src = 'Sprites/zodiac/' + sign + '.webp';
   }
 })();
 
 // Boss sprites are bigger than regular mobs — render at ~2× the bbox height
-// to fit the mini-boss/boss aura halo silhouette on screen.
+// to fit the mini-boss/boss aura halo silhouette on screen. v0.25.93 — bbox-
+// bottom anchored, floating bosses lifted off the ground; facing convention
+// matches monsters (mirror when facing < 0).
 function _drawBossSprite(sprite, m, sx, sy) {
-  const targetH = m.h * 2.0;
   const srcW = sprite.naturalWidth  || sprite.width  || 1;
   const srcH = sprite.naturalHeight || sprite.height || 1;
+  const targetH = m.h * 2.0;
   const targetW = targetH * (srcW / srcH);
   const footX = sx + m.w / 2;
   const footY = sy + m.h;
+  // Look up bbox-bottom: bosses use BOSS_SPRITE_META[m.type], zodiac use
+  // ZODIAC_SPRITE_META[m.zodiacSign].
+  const meta = BOSS_SPRITE_META[m.type] || ZODIAC_SPRITE_META[m.zodiacSign] || {};
+  const bboxBottomY = (meta.bboxBottomY != null) ? meta.bboxBottomY : (srcH - 1);
+  const isFloating = FLOATING_TYPES.has(m.type) || (m.zodiacSign && FLOATING_ZODIAC.has(m.zodiacSign));
+  let dyOffset = -((bboxBottomY + 1) / srcH) * targetH;
+  if (isFloating) dyOffset -= targetH * FLOATING_GROUND_BLEED;
+  else dyOffset += targetH * GROUND_BURY_FRAC;
   ctx.save();
   ctx.translate(footX, footY);
-  if ((m.facing | 0) > 0) ctx.scale(-1, 1);
+  if ((m.facing | 0) < 0) ctx.scale(-1, 1);  // mirror when facing left (matches monster convention)
   ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(sprite, -targetW / 2, -targetH * 0.95, targetW, targetH);
+  ctx.drawImage(sprite, -targetW / 2, dyOffset, targetW, targetH);
   ctx.restore();
 }
 
@@ -26081,17 +26366,28 @@ function _drawMonsterSprite(m, sx, sy) {
   const anim = MONSTER_ANIMS[m.type];
   const sprite = MONSTER_SPRITES[m.type];
   if (!anim && !sprite) return;
-  // Square sprite; scale to ~1.4× the bbox height so the rounded chibi body
-  // overflows slightly above the bbox without clipping the ground at the feet.
+  // v0.25.93 — aspect-aware scale + bbox-bottom anchor: the character's
+  // ACTUAL feet (lowest opaque pixel) land at the monster's foot line for
+  // ground monsters; floating monsters are lifted off the ground.
+  const refImg = sprite || (anim && anim.image);
+  const srcW = (refImg && refImg.naturalWidth)  || (refImg && refImg.width)  || 1;
+  const srcH = (refImg && refImg.naturalHeight) || (refImg && refImg.height) || 1;
   const targetH = m.h * 1.4;
-  const targetW = targetH;
+  const targetW = targetH * (srcW / srcH);
   const footX = sx + m.w / 2;
   const footY = sy + m.h;
   ctx.save();
   ctx.translate(footX, footY);
-  // Sprites are drawn facing right; mirror when the monster faces left.
   if ((m.facing | 0) < 0) ctx.scale(-1, 1);
   ctx.imageSmoothingEnabled = true;
+  // Compute Y so the character's bbox-bottom lands on the foot line, with a
+  // tiny ground bleed for ground mobs and a 18% lift for floating ones.
+  const meta = MONSTER_SPRITE_META[m.type];
+  const bboxBottomY = (meta && meta.bboxBottomY != null) ? meta.bboxBottomY : (srcH - 1);
+  const isFloating = FLOATING_TYPES.has(m.type);
+  let dyOffset = -((bboxBottomY + 1) / srcH) * targetH;
+  if (isFloating) dyOffset -= targetH * FLOATING_GROUND_BLEED;
+  else dyOffset += targetH * GROUND_BURY_FRAC;
   if (anim && anim.image) {
     // Pick the current frame from game.time. game.time advances ~1/frame at 60Hz,
     // so framesPerStep = 60 / fps. Different monsters get a small phase offset
@@ -26107,12 +26403,12 @@ function _drawMonsterSprite(m, sx, sy) {
     ctx.drawImage(
       anim.image,
       col * cellW, row * cellH, cellW, cellH,
-      -targetW / 2, -targetH * 0.95, targetW, targetH
+      -targetW / 2, dyOffset, targetW, targetH
     );
     ctx.restore();
     return;
   }
-  ctx.drawImage(sprite, -targetW / 2, -targetH * 0.95, targetW, targetH);
+  ctx.drawImage(sprite, -targetW / 2, dyOffset, targetW, targetH);
   ctx.restore();
 }
 
@@ -30341,8 +30637,8 @@ requestAnimationFrame(loop);
 </div>
 
 <script>
-// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.92) ===
-console.log('%c[CharStudio] v0.25.92 loaded — 7 mobs + 4 bosses + 12 zodiac wired, haze removed','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
+// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.93) ===
+console.log('%c[CharStudio] v0.25.93 loaded — bbox-bottom ground anchor + 8 floating types lifted','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
 const CHAR_STUDIO = {
   base: null,           // grayscale neutral mannequin (multiply target)
   baseColored: null,    // peach mannequin used as walk-anim source frames
