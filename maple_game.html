@@ -2514,7 +2514,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.96';
+const GAME_VERSION = 'v0.25.97';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -3831,16 +3831,33 @@ function _lxBakeSeamlessTile(img, mode) {
 // Tile a (possibly-baked) source horizontally at a fixed display height.
 // Preserves the source aspect ratio so chibi flowers / planks don't get
 // squashed at small platform heights.
+//
+// v0.25.97 — wrapped in try/catch. If drawImage throws (tainted canvas,
+// detached source, weird browser state) we swallow the error and return
+// false so the procedural fallback can paint the platform instead. An
+// unhandled throw here would propagate up through drawPlatforms → loop()
+// and break the rAF chain — which means the player + monsters + UI all
+// stop rendering until the next reload. Defensive return prevents that.
 function _lxDrawTiledRow(src, sx, sy, dw, dh) {
-  if (!_lxTileReady(src) || dh <= 0 || dw <= 0) return false;
-  const sW = _lxNatW(src), sH = _lxNatH(src);
-  const tileW = Math.max(8, (sW / sH) * dh);
-  for (let x = 0; x < dw; x += tileW) {
-    const w = Math.min(tileW, dw - x);
-    const sw = (w / tileW) * sW;
-    ctx.drawImage(src, 0, 0, sw, sH, sx + x, sy, w, dh);
+  try {
+    if (!_lxTileReady(src) || dh <= 0 || dw <= 0) return false;
+    const sW = _lxNatW(src), sH = _lxNatH(src);
+    if (sW <= 0 || sH <= 0) return false;
+    const tileW = Math.max(8, (sW / sH) * dh);
+    for (let x = 0; x < dw; x += tileW) {
+      const w = Math.min(tileW, dw - x);
+      const sw = (w / tileW) * sW;
+      if (sw <= 0 || w <= 0) continue;
+      ctx.drawImage(src, 0, 0, sw, sH, sx + x, sy, w, dh);
+    }
+    return true;
+  } catch (e) {
+    if (!_lxDrawTiledRow._warned) {
+      _lxDrawTiledRow._warned = true;
+      console.warn('[LX_TILES] drawImage threw — falling back to procedural:', e.message);
+    }
+    return false;
   }
-  return true;
 }
 
 const game = {
@@ -21105,10 +21122,13 @@ function drawSanctumCosmos() {
     const sx = px - game.camera.x;
     if (sx < -40 || sx > W + 40) continue;
     if (_pillarReady) {
-      // Image is ~9:16 portrait; lock display height to 314 (180→494)
-      const dh = 314;
-      const dw = (_pillarImg.naturalWidth / _pillarImg.naturalHeight) * dh;
-      ctx.drawImage(_pillarImg, sx - dw / 2, 180, dw, dh);
+      // Image is ~9:16 portrait; lock display height to 314 (180→494).
+      // v0.25.97 — try/catch so a tainted source can't break the loop.
+      try {
+        const dh = 314;
+        const dw = (_pillarImg.naturalWidth / _pillarImg.naturalHeight) * dh;
+        ctx.drawImage(_pillarImg, sx - dw / 2, 180, dw, dh);
+      } catch (e) { /* fall through to procedural via the else block */ }
     } else {
       // Pillar shaft
       ctx.fillStyle = '#1a0a3a';
@@ -21143,9 +21163,12 @@ function drawBossDecor() {
     if (px > game.mapData.worldWidth) continue;
     const sx = px - game.camera.x;
     if (_pillarReady) {
-      const dh = 314;
-      const dw = (_pillarImg.naturalWidth / _pillarImg.naturalHeight) * dh;
-      ctx.drawImage(_pillarImg, sx - dw / 2, 180, dw, dh);
+      // v0.25.97 — try/catch so a tainted source can't break the loop.
+      try {
+        const dh = 314;
+        const dw = (_pillarImg.naturalWidth / _pillarImg.naturalHeight) * dh;
+        ctx.drawImage(_pillarImg, sx - dw / 2, 180, dw, dh);
+      } catch (e) { /* fall through to procedural via the else block */ }
     } else {
       ctx.fillStyle = '#3a2850';
       ctx.fillRect(sx - 15, 180, 30, 300);
@@ -21995,10 +22018,13 @@ function drawPlatforms() {
       // body, so when it loads we let it replace the procedural pass
       // entirely. Keep the grass band ABOVE p.y so the visible tile
       // matches the legacy outline (grass tufts protrude over the line).
+      // v0.25.97 — only `continue` when the image actually painted; if
+      // _lxDrawTiledRow returned false (image not ready, drawImage
+      // threw, etc.) fall through to procedural so the platform still
+      // renders instead of being skipped entirely.
       if (_lxTileReady(LX_TILES.floorGrass)) {
         const grassLift = 9; // legacy art protrudes ~9px above p.y
-        _lxDrawTiledRow(LX_TILES.floorGrass, sx, p.y - grassLift, p.w, p.h + grassLift);
-        continue;
+        if (_lxDrawTiledRow(LX_TILES.floorGrass, sx, p.y - grassLift, p.w, p.h + grassLift)) continue;
       }
       // ---- CUTE cel-shaded ground (matches monster aesthetic) ----
       // Dirt body — 2 soft pastel tones + thicker outline seam
@@ -22087,11 +22113,11 @@ function drawPlatforms() {
       // Wood platforms are short (h~10–12) — scale image to platform
       // height and tile horizontally. We still paint the OUT halo so
       // the platform reads against busy backgrounds.
+      // v0.25.97 — fall through to procedural if drawImage failed.
       if (_lxTileReady(LX_TILES.floorWood)) {
         ctx.fillStyle = OUT;
         ctx.fillRect(sx - 1, p.y - 1, p.w + 2, p.h + 2);
-        _lxDrawTiledRow(LX_TILES.floorWood, sx, p.y, p.w, p.h);
-        continue;
+        if (_lxDrawTiledRow(LX_TILES.floorWood, sx, p.y, p.w, p.h)) continue;
       }
       // ---- DQ cel-shaded wood platform ----
       // Outer outline halo
