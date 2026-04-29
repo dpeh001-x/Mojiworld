@@ -2584,7 +2584,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.125';
+const GAME_VERSION = 'v0.25.126';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -18454,10 +18454,11 @@ function openLevelUpPanel() {
   body.innerHTML = `
     <button class="close-btn" onclick="closeAllModals()">✕</button>
     <h2 style="margin:0 0 8px;">✦ Character ✦</h2>
-    <div id="u-tabs" style="display:flex; gap:4px; margin-bottom:10px; border-bottom:1px solid rgba(180,140,220,0.25);">
+    <div id="u-tabs" style="display:flex; gap:4px; margin-bottom:10px; border-bottom:1px solid rgba(180,140,220,0.25); flex-wrap:wrap;">
       <button type="button" class="inv-tab" data-utab="lp">📈 Level Up</button>
       <button type="button" class="inv-tab" data-utab="boons">◈ Boon Loadout</button>
       <button type="button" class="inv-tab" data-utab="skills">📖 Skills</button>
+      <button type="button" class="inv-tab" data-utab="items">🎒 Items</button>
     </div>
     <div id="u-pane-lp" style="display:${game._uTab==='lp'?'block':'none'}">
       <div style="text-align:center; margin-bottom:8px;">
@@ -18480,6 +18481,23 @@ function openLevelUpPanel() {
       <div id="lp-boons"></div>
     </div>
     <div id="u-pane-skills" style="display:${game._uTab==='skills'?'block':'none'}"></div>
+    <div id="u-pane-items" style="display:${game._uTab==='items'?'block':'none'}">
+      <div class="equip-slots">
+        <div class="equip-slot" id="u-eq-weapon">⚔️<div class="label">Weapon</div></div>
+        <div class="equip-slot" id="u-eq-armor">🛡️<div class="label">Armor</div></div>
+        <div class="equip-slot" id="u-eq-accessory">💍<div class="label">Accessory</div></div>
+      </div>
+      <div id="u-inv-tabs" style="display:flex; gap:4px; margin:10px 0 6px 0; border-bottom:1px solid rgba(180,140,220,0.25);">
+        <button type="button" class="inv-tab" data-tab="equip">⚔ Equip</button>
+        <button type="button" class="inv-tab" data-tab="use">🧪 Use</button>
+        <button type="button" class="inv-tab" data-tab="etc">📦 Etc</button>
+        <button type="button" class="inv-tab" data-tab="setup">🪑 Set-Up</button>
+        <button type="button" class="inv-tab" data-tab="cash">✨ Cash</button>
+      </div>
+      <div id="u-inv-tab-info" style="font-size:11px; color:#aaa; margin-bottom:6px;"></div>
+      <div class="inventory-grid" id="u-inv-grid"></div>
+      <div id="u-consumables"></div>
+    </div>
   `;
   // Wire tab buttons + set initial active state
   const tabs = body.querySelectorAll('#u-tabs .inv-tab');
@@ -18490,10 +18508,13 @@ function openLevelUpPanel() {
     document.getElementById('u-pane-lp').style.display     = game._uTab === 'lp'     ? 'block' : 'none';
     document.getElementById('u-pane-boons').style.display  = game._uTab === 'boons'  ? 'block' : 'none';
     document.getElementById('u-pane-skills').style.display = game._uTab === 'skills' ? 'block' : 'none';
+    const itemsPane = document.getElementById('u-pane-items');
+    if (itemsPane) itemsPane.style.display = game._uTab === 'items' ? 'block' : 'none';
     tabs.forEach(b => b.classList.toggle('active', b.dataset.utab === game._uTab));
     if (game._uTab === 'lp')          renderLevelUp();
     else if (game._uTab === 'boons')  renderBoonPanel();
     else if (game._uTab === 'skills') renderSkillsReference(document.getElementById('u-pane-skills'));
+    else if (game._uTab === 'items')  renderInventory('u-');  // v0.25.126
     document.getElementById('attributes-modal').dataset.variant = 'lp';
   };
   tabs.forEach(btn => {
@@ -19142,25 +19163,37 @@ function _itemTab(it) {
   return 'etc';
 }
 // Persist the current tab on game so reopening the modal remembers.
-function renderInventory() {
-  const grid = document.getElementById('inv-grid');
-  const tabInfo = document.getElementById('inv-tab-info');
+// v0.25.126 — prefix parameter so renderInventory can target either the
+// stand-alone B-key inventory-modal (no prefix) or the new U-tab Items
+// pane (prefix 'u-'). The two hosts have parallel DOM structures with
+// the same class-based styling but distinct IDs so getElementById /
+// querySelector calls don't collide.
+function renderInventory(prefix) {
+  prefix = prefix || '';
+  const grid = document.getElementById(prefix + 'inv-grid');
+  if (!grid) return;
+  const tabInfo = document.getElementById(prefix + 'inv-tab-info');
   if (!game._invTab) game._invTab = 'equip';
 
   // Wire the tab buttons once (idempotent — onclick re-assignments are fine).
-  const tabButtons = document.querySelectorAll('#inv-tabs .inv-tab');
+  const tabButtons = document.querySelectorAll('#' + prefix + 'inv-tabs .inv-tab');
   tabButtons.forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === game._invTab);
-    btn.onclick = () => { game._invTab = btn.dataset.tab; renderInventory(); };
+    btn.onclick = () => { game._invTab = btn.dataset.tab; renderInventory(prefix); };
   });
 
   grid.innerHTML = '';
   // Equip slots always visible — they're the "currently-worn" row, shared
-  // across all tabs. Show dimmed if the active tab isn't Equip.
-  const eqRow = document.querySelector('.equip-slots');
+  // across all tabs. Show dimmed if the active tab isn't Equip. Scope the
+  // class lookup to the prefix's host so we don't dim the OTHER copy.
+  const host = prefix
+    ? (document.getElementById(prefix.replace(/-$/, '') + '-pane-items') || document.body)
+    : (document.getElementById('inventory-modal') || document.body);
+  const eqRow = host.querySelector('.equip-slots');
   if (eqRow) eqRow.style.opacity = (game._invTab === 'equip') ? '1' : '0.55';
   for (const slot of ['weapon','armor','accessory']) {
-    const el = document.getElementById('eq-' + slot);
+    const el = document.getElementById(prefix + 'eq-' + slot);
+    if (!el) continue;
     const it = player.equipped[slot];
     el.innerHTML = it
       ? `<span style="font-size:24px">${it.icon}</span><div class="label">${slot}</div>`
@@ -19169,7 +19202,7 @@ function renderInventory() {
       if (it) {
         player.inventory.push(it);
         player.equipped[slot] = null;
-        renderInventory();
+        renderInventory(prefix);
       }
     };
     if (it) {
@@ -19194,7 +19227,7 @@ function renderInventory() {
   };
   if (tabInfo) tabInfo.textContent = TAB_INFO[game._invTab] || '';
 
-  const consumablesEl = document.getElementById('consumables');
+  const consumablesEl = document.getElementById(prefix + 'consumables');
   if (consumablesEl) consumablesEl.innerHTML = '';
 
   if (game._invTab === 'equip') {
@@ -19211,7 +19244,7 @@ function renderInventory() {
         // Find the REAL index to splice (may have shifted if items were re-pushed)
         const realIdx = player.inventory.indexOf(it);
         if (realIdx >= 0) player.inventory.splice(realIdx, 1);
-        renderInventory();
+        renderInventory(prefix);
       };
       attachTooltip(slot, it);
       grid.appendChild(slot);
@@ -19231,7 +19264,7 @@ function renderInventory() {
       slot.innerHTML = `${item.icon}<div style="position:absolute;right:2px;bottom:0;font-size:10px;color:#ffee99;font-weight:bold;">×${player.consumables[id]}</div>`;
       slot.style.position = 'relative';
       slot.title = `${item.name} — click to use`;
-      slot.onclick = () => { useConsumable(id); renderInventory(); };
+      slot.onclick = () => { useConsumable(id); renderInventory(prefix); };
       grid.appendChild(slot);
     }
     const useItems = player.inventory.map((it, idx) => ({it, idx})).filter(e => _itemTab(e.it) === 'use');
