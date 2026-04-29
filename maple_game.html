@@ -25857,17 +25857,23 @@ const HERO = {
   classFrames: { warrior: null, rogue: null, mage: null, archer: null },
 };
 const HERO_META = {
-  walk:   { sheet: 'teen_walk_sheet.webp',     frames: 16, gridW: 4, gridH: 4, fps: 12 },
-  jump:   { sheet: 'teen_jump_sheet.webp',     frames: 16, gridW: 4, gridH: 4, fps: 14 },
-  attack: { sheet: 'teen_attack_sheet.webp',   frames: 16, gridW: 4, gridH: 4, fps: 18 },
-  hit:    { sheet: 'teen_hit_sheet.webp',      frames: 4, gridW: 2, gridH: 2, fps: 12 },
-  death:  { sheet: 'teen_death_sheet.webp',    frames: 4, gridW: 2, gridH: 2, fps: 4  },
-  // v0.25.85 — per-class skill animations. Selected via player.cls; fall back
-  // to the generic `attack` if the class isn't mapped or its sheet failed.
-  warrior: { sheet: 'teen_warrior_swing.webp', frames: 4, gridW: 2, gridH: 2, fps: 14 },
-  rogue:   { sheet: 'teen_rogue_stab.webp',    frames: 4, gridW: 2, gridH: 2, fps: 16 },
-  mage:    { sheet: 'teen_mage_cast.webp',     frames: 4, gridW: 2, gridH: 2, fps: 12 },
-  archer:  { sheet: 'teen_archer_shot.webp',   frames: 4, gridW: 2, gridH: 2, fps: 14 },
+  // v0.25.90 — per-anim `anchor` strategy. 'feet' (default) anchors bbox-
+  // bottom to idleFootY (correct for ground states where the lowest pixel
+  // is the planted foot). 'head' anchors bbox-top to idleHeadTopY (correct
+  // for in-air poses like jump-apex tuck where the lowest pixel is body/
+  // back, not feet — feet-anchor would drop the head 600 px).
+  walk:   { sheet: 'teen_walk_sheet.webp',     frames: 16, gridW: 4, gridH: 4, fps: 12, anchor: 'feet' },
+  jump:   { sheet: 'teen_jump_sheet.webp',     frames: 16, gridW: 4, gridH: 4, fps: 14, anchor: 'head' },
+  attack: { sheet: 'teen_attack_sheet.webp',   frames: 16, gridW: 4, gridH: 4, fps: 18, anchor: 'head' },
+  hit:    { sheet: 'teen_hit_sheet.webp',      frames: 4,  gridW: 2, gridH: 2, fps: 12, anchor: 'head' },
+  death:  { sheet: 'teen_death_sheet.webp',    frames: 4,  gridW: 2, gridH: 2, fps: 4,  anchor: 'head' },
+  // Class skill anims: characters lean forward / extend arms making bbox
+  // shorter than standing — head-anchor keeps the head stable while the
+  // body & arms move naturally below.
+  warrior:{ sheet: 'teen_warrior_swing.webp',  frames: 4,  gridW: 2, gridH: 2, fps: 14, anchor: 'head' },
+  rogue:  { sheet: 'teen_rogue_stab.webp',     frames: 4,  gridW: 2, gridH: 2, fps: 16, anchor: 'head' },
+  mage:   { sheet: 'teen_mage_cast.webp',      frames: 4,  gridW: 2, gridH: 2, fps: 12, anchor: 'head' },
+  archer: { sheet: 'teen_archer_shot.webp',    frames: 4,  gridW: 2, gridH: 2, fps: 14, anchor: 'head' },
 };
 
 function _csLoadImage(src) {
@@ -25879,7 +25885,7 @@ function _csLoadImage(src) {
   });
 }
 
-function _heroExtractAndNormalize(sheet, meta, idleBh, idleFootY, outW, outH) {
+function _heroExtractAndNormalize(sheet, meta, idleBh, idleFootY, idleHeadTopY, outW, outH) {
   const cellW = (sheet.width  / meta.gridW) | 0;
   const cellH = (sheet.height / meta.gridH) | 0;
   // First pass: extract all cells + compute their anchors
@@ -25905,6 +25911,11 @@ function _heroExtractAndNormalize(sheet, meta, idleBh, idleFootY, outW, outH) {
   const valid = anchors.filter(a => a);
   const maxBh = valid.length ? Math.max(...valid.map(a => a.bh)) : 1;
   const sheetFitScale = idleBh / maxBh;
+  // v0.25.90 — vertical anchor strategy. 'head' for in-air poses (jump apex
+  // tuck where bbox-bottom is back/butt, NOT feet) — keeps the head stable.
+  // 'feet' for ground poses (walk / attack / class skills) — bbox-bottom IS
+  // the planted foot, anchor it to idleFootY.
+  const anchorMode = meta.anchor || 'feet';
   return cells.map((cell, i) => {
     const out = document.createElement('canvas');
     out.width = outW;
@@ -25915,8 +25926,10 @@ function _heroExtractAndNormalize(sheet, meta, idleBh, idleFootY, outW, outH) {
     const drawH = a.bh * sheetFitScale;
     // X: centroid maps to canvas-center (stable across asymmetric poses)
     const dx = (outW / 2) - ((a.centroidX - a.minX) * sheetFitScale);
-    // Y: bbox-bottom maps to idleFootY (feet anchor)
-    const dy = idleFootY - drawH;
+    // Y: depends on anchor mode
+    const dy = (anchorMode === 'head')
+      ? idleHeadTopY                    // bbox-top → idleHeadTopY
+      : (idleFootY - drawH);            // bbox-bottom → idleFootY
     out.getContext('2d').drawImage(cell, a.minX, a.minY, a.bw, a.bh, dx, dy, drawW, drawH);
     return out;
   });
@@ -25973,15 +25986,17 @@ function _heroExtractAndNormalize(sheet, meta, idleBh, idleFootY, outW, outH) {
     HERO.idle = idleNorm;
     HERO.idleBbox = idleBbox;
     HERO.idleFootY = idleFootY;
-    HERO.walkFrames   = _heroExtractAndNormalize(walkSheet,   HERO_META.walk,   idleBh, idleFootY, targetW, targetH);
-    HERO.jumpFrames   = _heroExtractAndNormalize(jumpSheet,   HERO_META.jump,   idleBh, idleFootY, targetW, targetH);
-    HERO.attackFrames = _heroExtractAndNormalize(attackSheet, HERO_META.attack, idleBh, idleFootY, targetW, targetH);
-    HERO.hitFrames    = _heroExtractAndNormalize(hitSheet,    HERO_META.hit,    idleBh, idleFootY, targetW, targetH);
-    HERO.deathFrames  = _heroExtractAndNormalize(deathSheet,  HERO_META.death,  idleBh, idleFootY, targetW, targetH);
-    if (warriorSheet) HERO.classFrames.warrior = _heroExtractAndNormalize(warriorSheet, HERO_META.warrior, idleBh, idleFootY, targetW, targetH);
-    if (rogueSheet)   HERO.classFrames.rogue   = _heroExtractAndNormalize(rogueSheet,   HERO_META.rogue,   idleBh, idleFootY, targetW, targetH);
-    if (mageSheet)    HERO.classFrames.mage    = _heroExtractAndNormalize(mageSheet,    HERO_META.mage,    idleBh, idleFootY, targetW, targetH);
-    if (archerSheet)  HERO.classFrames.archer  = _heroExtractAndNormalize(archerSheet,  HERO_META.archer,  idleBh, idleFootY, targetW, targetH);
+    const idleHeadTopY = idleAnchor.minY;  // v0.25.90 — for head-anchor anims (jump)
+    HERO.idleHeadTopY = idleHeadTopY;
+    HERO.walkFrames   = _heroExtractAndNormalize(walkSheet,   HERO_META.walk,   idleBh, idleFootY, idleHeadTopY, targetW, targetH);
+    HERO.jumpFrames   = _heroExtractAndNormalize(jumpSheet,   HERO_META.jump,   idleBh, idleFootY, idleHeadTopY, targetW, targetH);
+    HERO.attackFrames = _heroExtractAndNormalize(attackSheet, HERO_META.attack, idleBh, idleFootY, idleHeadTopY, targetW, targetH);
+    HERO.hitFrames    = _heroExtractAndNormalize(hitSheet,    HERO_META.hit,    idleBh, idleFootY, idleHeadTopY, targetW, targetH);
+    HERO.deathFrames  = _heroExtractAndNormalize(deathSheet,  HERO_META.death,  idleBh, idleFootY, idleHeadTopY, targetW, targetH);
+    if (warriorSheet) HERO.classFrames.warrior = _heroExtractAndNormalize(warriorSheet, HERO_META.warrior, idleBh, idleFootY, idleHeadTopY, targetW, targetH);
+    if (rogueSheet)   HERO.classFrames.rogue   = _heroExtractAndNormalize(rogueSheet,   HERO_META.rogue,   idleBh, idleFootY, idleHeadTopY, targetW, targetH);
+    if (mageSheet)    HERO.classFrames.mage    = _heroExtractAndNormalize(mageSheet,    HERO_META.mage,    idleBh, idleFootY, idleHeadTopY, targetW, targetH);
+    if (archerSheet)  HERO.classFrames.archer  = _heroExtractAndNormalize(archerSheet,  HERO_META.archer,  idleBh, idleFootY, idleHeadTopY, targetW, targetH);
     if (!window.PLAYER_CUSTOM_SPRITE_CANVAS) {
       window.PLAYER_CUSTOM_SPRITE_CANVAS = HERO.idle;   // v0.25.87 — normalized
       window.PLAYER_CUSTOM_WALK_FRAMES = HERO.walkFrames;
@@ -30278,8 +30293,8 @@ requestAnimationFrame(loop);
 </div>
 
 <script>
-// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.89) ===
-console.log('%c[CharStudio] v0.25.89 loaded — centroid anchor + uniform per-sheet scale (rock-solid pixel sync)','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
+// === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.90) ===
+console.log('%c[CharStudio] v0.25.90 loaded — head-top anchor for jump (in-air pose stability)','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
 const CHAR_STUDIO = {
   base: null,           // grayscale neutral mannequin (multiply target)
   baseColored: null,    // peach mannequin used as walk-anim source frames
