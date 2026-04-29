@@ -2514,7 +2514,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.108';
+const GAME_VERSION = 'v0.25.109';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4315,6 +4315,27 @@ function skillsForClass(cls, job, master) {
   }
   return out;
 }
+// v0.25.109 — per-skill rank upgrades.
+//   getSkillRank(id)    → current invested rank for a skill (0..CAP).
+//   getSkillRankMul(id) → 1 + rank * 0.08, applied as a damage multiplier
+//                          inside hitMonster. Skills tagged in
+//                          SKILL_RANK_BLACKLIST stay unaffected (basic
+//                          weapon attacks + reactive damage like thorns
+//                          / minion-pet damage shouldn't double-dip).
+//   SKILL_RANK_CAP      → max ranks per skill.
+const SKILL_RANK_CAP = 5;
+const SKILL_RANK_BLACKLIST = new Set([
+  'melee', 'thorns', 'burn', 'minion', 'pet', 'pack', 'afterimage'
+]);
+function getSkillRank(id) {
+  if (!id || !player.skillRanks) return 0;
+  return Math.max(0, Math.min(SKILL_RANK_CAP, player.skillRanks[id] | 0));
+}
+function getSkillRankMul(id) {
+  if (!id || SKILL_RANK_BLACKLIST.has(id)) return 1;
+  return 1 + getSkillRank(id) * 0.08;
+}
+
 function skillBySlot(slot) {
   const kit = skillsForClass(player.cls, player.job, player.master);
   // Pick the most-specific skill for the slot: master > job > class
@@ -6460,7 +6481,15 @@ const player = {
   // cosmetic picker alongside the base options.
   cosmetics: { hair: {}, cape: {}, weapon: {} },
   attacking:false, attackTimer:0, attackCooldown:0,
+  // v0.25.109 — `skillPoints` is the legacy "ability points" pool used
+  // for tree unlocks + attribute spending (relabeled in the UI to
+  // "ABILITY POINTS"). The NEW per-skill upgrade system uses two
+  // separate fields:
+  //   • skillRankPoints — pool of points granted +1 / level-up.
+  //   • skillRanks      — map { skillId → integer rank, capped at 5 }.
+  // Each rank adds +8 % damage to that skill in `hitMonster`.
   skillCooldowns: {}, skillPoints: 0,
+  skillRankPoints: 0, skillRanks: {},
   _pendingTimeouts: [],  // ids queued by scheduleSkillTimer; cleared on death/respawn/mapChange
   // Class identity (v0.18) — see _tickClassIdentity + _computeClassSkillMul
   _warCharge: null, _releasedCharge: null,
@@ -7470,7 +7499,7 @@ function _isMobileClient() {
     if (lastSeen === null) { lastSeen = cur; return; }
     if (cur > lastSeen && typeof showToast === 'function') {
       const delta = cur - lastSeen;
-      showToast('+' + delta + ' Skill Point' + (delta === 1 ? '' : 's') +
+      showToast('+' + delta + ' Ability Point' + (delta === 1 ? '' : 's') +
                 ' — tap 📖 to spend', 'rare');
     }
     lastSeen = cur;
@@ -8271,7 +8300,7 @@ const SAVE_VERSION = 1;
 const PLAYER_SAVE_FIELDS = [
   'cls','job','master','level','exp','expToNext',
   'hp','maxHp','mp','maxMp','mesos','baseAtk','baseDef',
-  'attrs','skillPoints','milestonesUnlocked','treeUnlocked','tree',
+  'attrs','skillPoints','skillRankPoints','skillRanks','milestonesUnlocked','treeUnlocked','tree',
   'mods','equipped','inventory','consumables','look','pet','baseCrit','baseSpeed','baseJump',
   'cosmetics',
   // Boon loadout (v0.19)
@@ -15542,6 +15571,16 @@ function hitMonster(m, dmg, isCrit, skill) {
       dmg = Math.floor(dmg * GLOBAL_ULT_DMG_MUL);
     }
   }
+  // v0.25.109 — per-skill rank multiplier (+8 % damage per invested
+  // rank, capped at +40 % at rank 5). Applied AFTER the global rebalance
+  // multipliers so the ranks scale with the post-rebalance number.
+  // SKILL_RANK_BLACKLIST excludes basic weapon hits and reactive damage
+  // (thorns / pet / minion / pack / afterimage) so those don't
+  // double-dip on rank investment in another skill.
+  if (skill && !player._oneShot) {
+    const rmul = getSkillRankMul(skill);
+    if (rmul !== 1) dmg = Math.floor(dmg * rmul);
+  }
   // Accuracy roll (v0.21) — only basic attacks respect evasion. Skill
   // AOEs always connect so a cast with a big MP / CD cost never whiffs
   // on a fluke roll. Thorns / burn / skill hazards also always connect.
@@ -15877,6 +15916,10 @@ function _maybeLevelUp() {
   player.baseAtk += player.cls === 'warrior' ? 3 : player.cls === 'mage' ? 2 : 2;
   player.baseDef += player.cls === 'warrior' ? 2 : 1;
   player.skillPoints += 1;
+  // v0.25.109 — also grant +1 SKILL POINT (per-skill upgrade currency,
+  // distinct from the legacy `skillPoints` which is now labelled
+  // "ability points" in the UI). Spend in U → 🎯 Skill Ranks.
+  player.skillRankPoints = (player.skillRankPoints || 0) + 1;
   // v0.25.61 — quest journal unlock check on every level-up
   if (typeof tickQuestUnlocks === 'function') tickQuestUnlocks();
 
@@ -18023,13 +18066,14 @@ function openLevelUpPanel() {
     <h2 style="margin:0 0 8px;">✦ Character ✦</h2>
     <div id="u-tabs" style="display:flex; gap:4px; margin-bottom:10px; border-bottom:1px solid rgba(180,140,220,0.25);">
       <button type="button" class="inv-tab" data-utab="lp">📈 Level Up</button>
+      <button type="button" class="inv-tab" data-utab="ranks">🎯 Skill Ranks</button>
       <button type="button" class="inv-tab" data-utab="boons">◈ Boon Loadout</button>
       <button type="button" class="inv-tab" data-utab="skills">📖 Skills</button>
     </div>
     <div id="u-pane-lp" style="display:${game._uTab==='lp'?'block':'none'}">
       <div style="text-align:center; margin-bottom:8px;">
         <div style="display:inline-flex; align-items:center; gap:10px; padding:7px 14px; background:linear-gradient(180deg,#3a2a60,#2a1f48); border:2px solid #ffcc66; border-radius:20px; box-shadow:0 0 14px rgba(255,204,102,0.35); font-size:12px;">
-          <span style="color:#ddd;">SKILL POINTS</span>
+          <span style="color:#ddd;">ABILITY POINTS</span>
           <span id="lp-remaining" style="font-size:20px; font-weight:bold; color:#ffee88; text-shadow:0 0 8px rgba(255,220,120,0.6); font-variant-numeric:tabular-nums;">${player.skillPoints}</span>
           <span style="color:#aaa; font-size:11px;">to spend</span>
         </div>
@@ -18043,6 +18087,7 @@ function openLevelUpPanel() {
       </div>
       <div id="lp-powerup" style="margin-top:10px; padding:8px 10px; background:rgba(0,0,0,0.35); border-radius:6px; font-size:12px; color:#cfd; line-height:1.5;"></div>
     </div>
+    <div id="u-pane-ranks" style="display:${game._uTab==='ranks'?'block':'none'}"></div>
     <div id="u-pane-boons" style="display:${game._uTab==='boons'?'block':'none'}">
       <div id="lp-boons"></div>
     </div>
@@ -18052,10 +18097,12 @@ function openLevelUpPanel() {
   const tabs = body.querySelectorAll('#u-tabs .inv-tab');
   const swapPane = () => {
     document.getElementById('u-pane-lp').style.display     = game._uTab === 'lp'     ? 'block' : 'none';
+    document.getElementById('u-pane-ranks').style.display  = game._uTab === 'ranks'  ? 'block' : 'none';
     document.getElementById('u-pane-boons').style.display  = game._uTab === 'boons'  ? 'block' : 'none';
     document.getElementById('u-pane-skills').style.display = game._uTab === 'skills' ? 'block' : 'none';
     tabs.forEach(b => b.classList.toggle('active', b.dataset.utab === game._uTab));
     if (game._uTab === 'lp')          renderLevelUp();
+    else if (game._uTab === 'ranks')  renderSkillRanks(document.getElementById('u-pane-ranks'));
     else if (game._uTab === 'boons')  renderBoonPanel();
     else if (game._uTab === 'skills') renderSkillsReference(document.getElementById('u-pane-skills'));
     document.getElementById('attributes-modal').dataset.variant = 'lp';
@@ -18066,6 +18113,103 @@ function openLevelUpPanel() {
   swapPane();
   modal.style.display = 'flex';
   game.paused = true;
+}
+
+// =========================================================================
+// SKILL RANKS UI (v0.25.109)
+// Each skill in the player's class kit can absorb up to SKILL_RANK_CAP
+// (=5) ranks. Each rank costs one Skill Point (player.skillRankPoints,
+// granted +1 per level-up) and adds +8 % damage to that skill in
+// hitMonster. Basic-attack / reactive skills (melee, thorns, pet, …)
+// are blacklisted from receiving the multiplier even if a player
+// somehow invests a rank, so the field is always safe to read.
+// =========================================================================
+function renderSkillRanks(host) {
+  if (!host) return;
+  if (!player.skillRanks) player.skillRanks = {};
+  const kit = skillsForClass(player.cls, player.job, player.master);
+  // Sort by slot order so the layout matches the Skills reference tab.
+  const SLOT_ORDER = ['d','s','a','e','w','q','c','x'];
+  const skillList = Object.entries(kit).sort((a, b) => {
+    const ai = SLOT_ORDER.indexOf(a[1].slot);
+    const bi = SLOT_ORDER.indexOf(b[1].slot);
+    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+  });
+  const pool = player.skillRankPoints | 0;
+  const blacklisted = (id) => SKILL_RANK_BLACKLIST.has(id);
+
+  let html = `
+    <div style="text-align:center; margin-bottom:8px;">
+      <div style="display:inline-flex; align-items:center; gap:10px; padding:7px 14px; background:linear-gradient(180deg,#2a3a60,#1f2848); border:2px solid #66ccff; border-radius:20px; box-shadow:0 0 14px rgba(102,204,255,0.35); font-size:12px;">
+        <span style="color:#ddd;">SKILL POINTS</span>
+        <span id="rank-pool" style="font-size:20px; font-weight:bold; color:#bcefff; text-shadow:0 0 8px rgba(120,220,255,0.6); font-variant-numeric:tabular-nums;">${pool}</span>
+        <span style="color:#aaa; font-size:11px;">to invest</span>
+      </div>
+    </div>
+    <div style="text-align:center; margin-bottom:10px; color:#aaa; font-size:11px; line-height:1.45;">
+      Spend a Skill Point to upgrade an individual skill. Each rank adds
+      <b style="color:#ffdd88;">+8% damage</b> (cap ${SKILL_RANK_CAP} ranks = +${SKILL_RANK_CAP * 8}%).<br>
+      Reactive skills (basic Z attack · thorns · pet · minion) cannot be ranked.
+    </div>
+    <div id="rank-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:6px; max-height:430px; overflow-y:auto; padding:4px;"></div>
+  `;
+  host.innerHTML = html;
+  const grid = host.querySelector('#rank-grid');
+
+  for (const [id, s] of skillList) {
+    const rank = getSkillRank(id);
+    const atCap = rank >= SKILL_RANK_CAP;
+    const blocked = blacklisted(id);
+    const canAfford = pool > 0 && !atCap && !blocked;
+    const dmgPct = rank * 8;
+    const card = document.createElement('div');
+    card.style.cssText = `
+      padding:8px 10px; border-radius:6px; background:rgba(0,0,0,0.35);
+      border:1px solid ${blocked ? '#444' : (canAfford ? '#66ccff77' : '#555')};
+      opacity:${blocked ? 0.45 : 1};
+    `;
+    // Pip strip — filled circles for invested ranks, empty for remaining
+    let pips = '';
+    for (let i = 0; i < SKILL_RANK_CAP; i++) {
+      pips += `<span style="display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:3px; background:${i < rank ? '#ffdd66' : 'transparent'}; border:1px solid ${i < rank ? '#ffdd66' : '#666'};"></span>`;
+    }
+    card.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+        <div style="display:flex; align-items:center; gap:6px; min-width:0;">
+          <span style="font-size:18px;">${s.icon || '•'}</span>
+          <span style="font-weight:bold; color:#e8e4f4; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.name}</span>
+        </div>
+        <button type="button" data-rankid="${id}"
+          ${(canAfford ? '' : 'disabled')}
+          style="width:28px; height:26px; border-radius:4px;
+                 background:${canAfford ? '#3a5a7a' : '#333'};
+                 color:${canAfford ? '#bcefff' : '#666'};
+                 border:1px solid ${canAfford ? '#66ccff' : '#555'};
+                 cursor:${canAfford ? 'pointer' : 'not-allowed'};
+                 font-weight:bold; font-size:14px;">+</button>
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+        <div>${pips}</div>
+        <div style="font-size:11px; color:${blocked ? '#888' : '#ffdd88'}; font-variant-numeric:tabular-nums;">
+          ${blocked ? 'reactive · no rank' : (rank > 0 ? `+${dmgPct}% dmg` : '— · rank 0')}
+        </div>
+      </div>
+    `;
+    grid.appendChild(card);
+  }
+  grid.querySelectorAll('button[data-rankid]').forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.dataset.rankid;
+      if (!id || (player.skillRankPoints | 0) <= 0) return;
+      if (SKILL_RANK_BLACKLIST.has(id)) return;
+      const cur = getSkillRank(id);
+      if (cur >= SKILL_RANK_CAP) return;
+      player.skillRanks[id] = cur + 1;
+      player.skillRankPoints -= 1;
+      audio.play && audio.play('levelup');
+      renderSkillRanks(host);
+    };
+  });
 }
 
 // =========================================================================
