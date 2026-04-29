@@ -2514,7 +2514,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.99';
+const GAME_VERSION = 'v0.25.100';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -3090,6 +3090,36 @@ function _bootstrapPhaser() {
         cx.fillStyle = '#fff';
         cx.beginPath(); cx.arc(14, 14, 2, 0, Math.PI * 2); cx.fill();
       });
+
+      // v0.25.100 — async-load PNG sprite versions of the 4 main monster
+      // projectile archetypes. Baked into 64×64 canvases on load and
+      // registered as separate '*_sprite' texture keys. textureForProj
+      // prefers the sprite when present and falls back to the procedural
+      // canvas otherwise — so the game keeps rendering even if the asset
+      // 404s or the canvas gets tainted by CORS.
+      const _scene = this;
+      const _loadProjSprite = (procKey, file) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const c = document.createElement('canvas');
+            c.width = 64; c.height = 64;
+            c.getContext('2d').drawImage(img, 0, 0, 64, 64);
+            const spriteKey = procKey + '_sprite';
+            if (_scene.textures && !_scene.textures.exists(spriteKey)) {
+              _scene.textures.addCanvas(spriteKey, c);
+            }
+          } catch (e) {
+            console.warn('[LX_PROJ] failed to bake sprite', procKey, e.message);
+          }
+        };
+        img.onerror = () => console.warn('[LX_PROJ] sprite 404', procKey, file);
+        img.src = 'Sprites/projectiles/' + file;
+      };
+      _loadProjSprite('lx_mspore',    'mspore.webp');
+      _loadProjSprite('lx_mdark',     'mdark.webp');
+      _loadProjSprite('lx_msplinter', 'msplinter.webp');
+      _loadProjSprite('lx_mtoxic',    'mtoxic.webp');
     }
     create() {
       this._pool = [];
@@ -3120,21 +3150,28 @@ function _bootstrapPhaser() {
         // Player default bolt (no specific skill match above)
         return 'lx_bolt';
       }
-      // Enemy-owned
+      // Enemy-owned. v0.25.100 — prefer the loaded PNG sprite version
+      // when its '*_sprite' texture has registered; falls through to
+      // the procedural canvas if the load is still in flight or failed.
       const s = p.skill;
-      if (s === 'mspore')    return 'lx_mspore';
-      if (s === 'mdark')     return 'lx_mdark';
-      if (s === 'msplinter') return 'lx_msplinter';
-      if (s === 'mtoxic')    return 'lx_mtoxic';
+      const _pickProj = (procKey) => (this.textures && this.textures.exists(procKey + '_sprite')) ? procKey + '_sprite' : procKey;
+      if (s === 'mspore')    return _pickProj('lx_mspore');
+      if (s === 'mdark')     return _pickProj('lx_mdark');
+      if (s === 'msplinter') return _pickProj('lx_msplinter');
+      if (s === 'mtoxic')    return _pickProj('lx_mtoxic');
       if (s === 'shard')     return 'lx_shard';
       if (s === 'voidbeam')  return null;   // vanilla keeps voidbeam
       return 'lx_enemy';
     }
     // Types that need rotation to match velocity (horizontal-silhouette
     // textures). Others (circles/blobs) stay axis-aligned.
+    // v0.25.100 — sprite-based mdark + msplinter both have an obvious tip,
+    // so they rotate with velocity. The cluster (mspore) and blob (mtoxic)
+    // sprites read fine in any orientation, so they stay axis-aligned.
     _rotatesWithVelocity(key) {
       return key === 'lx_arrow' || key === 'lx_ice' || key === 'lx_dagger'
-          || key === 'lx_msplinter';
+          || key === 'lx_msplinter'
+          || key === 'lx_mdark_sprite' || key === 'lx_msplinter_sprite';
     }
     // Natural dimensions of each texture — used to derive display scale
     // from the projectile's logical p.w / p.h.
@@ -3151,6 +3188,12 @@ function _bootstrapPhaser() {
         case 'lx_mtoxic':    return [32, 32];
         case 'lx_shard':     return [32, 32];
         case 'lx_enemy':     return [32, 32];
+        // v0.25.100 — sprite-based versions are baked at 64×64.
+        case 'lx_mspore_sprite':
+        case 'lx_mdark_sprite':
+        case 'lx_msplinter_sprite':
+        case 'lx_mtoxic_sprite':
+          return [64, 64];
         default:             return [32, 32];
       }
     }
@@ -4999,6 +5042,10 @@ const MONSTER_SKILLS = {
   pearlSprite: { kind: 'groundStun',  cd: 5000 },
   nimbusFox:   { kind: 'dashCharge',  cd: 4200 },
   cosmicMochi: { kind: 'homingShot',  cd: 4400 },
+  // v0.25.100 — biome-signature specials for the elemental mobs
+  voltipup:    { kind: 'lightningStrike', cd: 4200 }, // electric pillar
+  sandhusk:    { kind: 'shockwave',       cd: 5000 }, // expanding ring
+  emberling:   { kind: 'rapidFire',       cd: 3600 }, // burst of spores
 };
 const MONSTER_SKILL_FNS = {
   groundStun(m) {
@@ -5075,6 +5122,93 @@ const MONSTER_SKILL_FNS = {
         y: m.y + m.h - 6,
         vx: -dir * 0.5, vy: -0.2,
         life: 18, color: m.color || '#ddccff', size: 2
+      });
+    }
+  },
+  // v0.25.100 — Sandhusk's signature: a radial shockwave hazard that
+  // expands from the monster's center over ~50 frames. Damages the
+  // player when the expanding ring sweeps past them. Telegraphed by
+  // a quick particle burst at cast.
+  shockwave(m) {
+    const cx = m.x + m.w / 2, cy = m.y + m.h - 4;
+    game.hazards.push({
+      type: 'mob_shockwave',
+      cx, cy, x: cx - 60, y: cy - 30, w: 120, h: 60,
+      life: 50, maxLife: 50,
+      damage: Math.max(5, Math.floor(m.atk * 0.65)),
+      maxRadius: 150,
+      color: m.shell || '#8a6a40',
+      hitOnce: false,
+    });
+    addShake(3);
+    for (let i = 0; i < 12; i++) {
+      const ang = (i / 12) * Math.PI * 2;
+      game.particles.push({
+        x: cx + Math.cos(ang) * 8,
+        y: cy + Math.sin(ang) * 4,
+        vx: Math.cos(ang) * 1.6, vy: Math.sin(ang) * 0.6 - 0.8,
+        life: 26, color: m.color || '#d8a868', size: 2
+      });
+    }
+  },
+  // v0.25.100 — Emberling's signature: a rapid-fire 4-shot volley over
+  // ~20 frames (1 shot per 5 frames). Each shot tracks the player at
+  // cast time, so movement breaks the volley. Uses the regular mspore
+  // projectile type so the new sprite renders.
+  rapidFire(m) {
+    let i = 0;
+    const fire = () => {
+      if (!m || m.currentHp <= 0) return;
+      const mx = m.x + m.w / 2, my = m.y + m.h / 2;
+      const dx = (player.x + player.w / 2) - mx;
+      const dy = (player.y + player.h / 2) - my;
+      const dist = Math.max(40, Math.hypot(dx, dy));
+      const speed = 5.2;
+      // Slight per-shot spread so the volley fans out
+      const spread = (i - 1.5) * 0.10;
+      const c = Math.cos(spread), s = Math.sin(spread);
+      const rx = dx * c - dy * s, ry = dx * s + dy * c;
+      game.projectiles.push({
+        x: mx, y: my,
+        vx: (rx / dist) * speed,
+        vy: (ry / dist) * speed - 1.2,
+        w: 12, h: 12, life: 90,
+        damage: Math.max(3, Math.floor(m.atk * 0.40)),
+        owner: 'enemy', skill: 'mspore',
+        color: m.shell || '#cc3322',
+      });
+      i++;
+      if (i < 4) setTimeout(fire, 80); // 80ms ≈ 5 frames @ 60fps
+    };
+    fire();
+    addShake(2);
+  },
+  // v0.25.100 — Voltipup's signature: a vertical lightning pillar at
+  // the player's CURRENT column. Telegraphs for 30 frames (warning
+  // line on the ground), then strikes — 60-frame visible pillar that
+  // damages on contact during a brief active window.
+  lightningStrike(m) {
+    const px = player.x + player.w / 2;
+    game.hazards.push({
+      type: 'mob_lightning',
+      cx: px, x: px - 18, y: 0, w: 36, h: 480,
+      life: 90, maxLife: 90,
+      tele: 30, // first 30 frames are telegraph, then strike
+      damage: Math.max(6, Math.floor(m.atk * 0.95)),
+      stun: 400,
+      color: m.color || '#ffe45f',
+      bolt: m.shell || '#5588ff',
+      struck: false,
+    });
+    addShake(2);
+    // Spark burst on the monster
+    for (let i = 0; i < 10; i++) {
+      const ang = (i / 10) * Math.PI * 2;
+      game.particles.push({
+        x: m.x + m.w / 2 + Math.cos(ang) * 5,
+        y: m.y + m.h / 2 + Math.sin(ang) * 4,
+        vx: Math.cos(ang) * 2, vy: Math.sin(ang) * 2,
+        life: 18, color: m.shell || '#5588ff', size: 2
       });
     }
   },
@@ -16254,6 +16388,69 @@ function updateProjectiles(dt) {
           y: h.y + 4, vx: (Math.random() - 0.5) * 0.3, vy: -0.8 - Math.random() * 0.4,
           life: 22, color: '#88ff44', size: 2
         });
+      }
+      if (h.life <= 0) { game.hazards.splice(i, 1); continue; }
+      continue;
+    }
+    // v0.25.100 — mob_shockwave: radial ring expanding from monster.
+    // Sweeps outward over the hazard's lifetime; damages the player
+    // when the ring's leading edge passes through them. Single-hit
+    // (hitOnce flag) so a player standing in the cast point doesn't
+    // eat the whole ring.
+    if (h.type === 'mob_shockwave') {
+      const t = 1 - h.life / h.maxLife;            // 0 → 1
+      const r = t * h.maxRadius;
+      const prevR = ((1 - (h.life + 1) / h.maxLife)) * h.maxRadius;
+      const px = player.x + player.w / 2;
+      const py = player.y + player.h / 2;
+      const d = Math.hypot(px - h.cx, py - h.cy);
+      // Player crossed by the leading edge this frame?
+      if (!h.hitOnce && d <= r && d >= prevR - 6 && player.hp > 0 && player.invulnerable <= 0) {
+        const dmg = Math.max(1, Math.floor(h.damage - getDef() * 0.5));
+        player.hp -= (player._god ? 0 : dmg);
+        player.invulnerable = 400;
+        game.damageNumbers.push({
+          x: player.x + 14, y: player.y, vy: -2,
+          text: dmg, life: 40, color: h.color || '#ff8844', size: 14
+        });
+        h.hitOnce = true;
+        addShake(4); flash(0.12);
+      }
+      if (h.life <= 0) { game.hazards.splice(i, 1); continue; }
+      continue;
+    }
+    // v0.25.100 — mob_lightning: telegraphed vertical pillar at a
+    // fixed X (locked at cast time to player's column). First `tele`
+    // frames show a warning crosshair on the ground; on the strike
+    // frame the pillar flashes and damages the player if they're
+    // inside the column. After the strike, the pillar fades for the
+    // remainder of the lifetime.
+    if (h.type === 'mob_lightning') {
+      const struckFrame = h.maxLife - h.tele;
+      if (!h.struck && h.life === struckFrame) {
+        h.struck = true;
+        const inCol = Math.abs((player.x + player.w / 2) - h.cx) < h.w / 2 + 8;
+        if (inCol && player.hp > 0 && player.invulnerable <= 0) {
+          const dmg = Math.max(1, Math.floor(h.damage - getDef() * 0.5));
+          player.hp -= (player._god ? 0 : dmg);
+          player.invulnerable = 600;
+          player.hitStun = Math.max(player.hitStun || 0, h.stun || 400);
+          game.damageNumbers.push({
+            x: player.x + 14, y: player.y, vy: -2,
+            text: dmg, life: 40, color: '#ffee44', size: 16
+          });
+          addShake(8); flash(0.30);
+        }
+        // Spark burst at the strike point
+        for (let j = 0; j < 16; j++) {
+          const ang = (j / 16) * Math.PI * 2;
+          game.particles.push({
+            x: h.cx + Math.cos(ang) * 8,
+            y: 460 + Math.sin(ang) * 4,
+            vx: Math.cos(ang) * 3, vy: -1 - Math.random() * 2,
+            life: 24, color: '#ffee44', size: 3
+          });
+        }
       }
       if (h.life <= 0) { game.hazards.splice(i, 1); continue; }
       continue;
@@ -29819,6 +30016,93 @@ function drawHazards() {
         const by = h.y + 6 - ((t + b * 12) % 30) * 0.15;
         ctx.fillStyle = `rgba(180,255,120,${0.85 * fade})`;
         ctx.beginPath(); ctx.arc(bx, by, 1.6, 0, Math.PI * 2); ctx.fill();
+      }
+      continue;
+    }
+    // v0.25.100 — mob_shockwave: expanding ring on the ground. Two
+    // concentric rings (outer faint, inner bold) sweep outward as
+    // the hazard ages, giving the player a clear leading edge to
+    // jump over.
+    if (h.type === 'mob_shockwave') {
+      const t = 1 - h.life / h.maxLife;
+      const r = t * h.maxRadius;
+      const fade = 1 - t * 0.6;
+      const cy = h.cy;
+      // Outer halo
+      ctx.strokeStyle = `rgba(216,168,104,${0.35 * fade})`;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.ellipse(sx, cy, r + 6, (r + 6) * 0.32, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      // Inner bright ring (leading edge)
+      ctx.strokeStyle = h.color || '#8a6a40';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(sx, cy, r, r * 0.32, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      // Soft fill behind the ring
+      ctx.fillStyle = `rgba(216,168,104,${0.18 * fade})`;
+      ctx.beginPath();
+      ctx.ellipse(sx, cy, r * 0.85, r * 0.27, 0, 0, Math.PI * 2);
+      ctx.fill();
+      continue;
+    }
+    // v0.25.100 — mob_lightning: telegraph crosshair while charging,
+    // then a vertical jagged bolt on strike + a fading afterglow.
+    if (h.type === 'mob_lightning') {
+      const struckFrame = h.maxLife - h.tele;
+      if (h.life > struckFrame) {
+        // Telegraph: pulsing yellow vertical line on the ground
+        const phase = (h.maxLife - h.life) / h.tele; // 0 → 1
+        const pulse = 0.4 + 0.6 * Math.abs(Math.sin(phase * Math.PI * 4));
+        ctx.strokeStyle = `rgba(255,238,68,${pulse})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(sx, 460);
+        ctx.lineTo(sx, 480);
+        ctx.stroke();
+        // Crosshair Xs at ground
+        ctx.beginPath();
+        ctx.moveTo(sx - 12, 470); ctx.lineTo(sx + 12, 470);
+        ctx.stroke();
+        // ! marker just before strike
+        if (h.life <= struckFrame + 8) {
+          ctx.fillStyle = '#ffee44';
+          ctx.font = 'bold 18px ui-monospace, Menlo, monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('!', sx, 450);
+        }
+      } else {
+        // Strike: vertical pillar with jagged bolt
+        const since = struckFrame - h.life; // 0 ↑ as it fades
+        const fade = Math.max(0, 1 - since / h.tele);
+        // Outer glow column
+        ctx.fillStyle = `rgba(255,238,68,${0.18 * fade})`;
+        ctx.fillRect(sx - 18, 0, 36, 480);
+        // Jagged bolt — zig-zag down the column
+        ctx.strokeStyle = `rgba(255,255,210,${fade})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(sx, 0);
+        let by = 0;
+        while (by < 480) {
+          const off = (Math.sin(by * 0.07 + h.life * 0.4) * 6) | 0;
+          ctx.lineTo(sx + off, by);
+          by += 18;
+        }
+        ctx.stroke();
+        // Inner bright core
+        ctx.strokeStyle = h.bolt || '#5588ff';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(sx, 0);
+        by = 0;
+        while (by < 480) {
+          const off = (Math.sin(by * 0.05 + h.life * 0.3) * 3) | 0;
+          ctx.lineTo(sx + off, by);
+          by += 14;
+        }
+        ctx.stroke();
       }
       continue;
     }
