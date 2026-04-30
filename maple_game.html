@@ -2584,11 +2584,17 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.133';
+const GAME_VERSION = 'v0.25.134';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
+// v0.25.134 — alias used by _drawVectorHero so the function can default
+// to the main game canvas while ALSO accepting an override `_ctx`
+// parameter for offscreen renders (e.g. the Q-key Character Studio
+// preview). Reading via this alias avoids the TDZ error that would
+// otherwise occur if the function shadowed `ctx` with `const ctx = ...`.
+const _MAIN_CTX = ctx;
 const W = canvas.width, H = canvas.height;
 
 // v0.25.2 — HiDPI canvas upgrade. On Retina / 1.5×-2× displays, the
@@ -8577,6 +8583,8 @@ const PLAYER_SAVE_FIELDS = [
   'attrs','skillPoints','skillRankPoints','skillRanks','milestonesUnlocked','treeUnlocked','tree',
   'mods','equipped','inventory','consumables','look','pet','baseCrit','baseSpeed','baseJump',
   'cosmetics',
+  // v0.25.134 — vector character studio: persisted skin tone + hairstyle picks
+  'lookCustom',
   // Boon loadout (v0.19)
   '_powerups', 'boons','boonsEquipped', 'mastery',
   // v0.25.61 — quest progression
@@ -24475,23 +24483,20 @@ const _CHAR_STYLE = (() => {
   return (localStorage.getItem('mojiworld_charstyle') || 'sprite').toLowerCase();
 })();
 const HERO_VEC_PARTS = {
-  // v0.25.133 — bigger head (r=20), smaller torso (~16 px tall instead of
-  // 30), shorter arms (~10) and legs (~10). Total visual height ~64 px.
-  // The head dominates more — closer to a true chibi 1:2 head-to-body
-  // ratio per the user's reference.
+  // v0.25.133 — bigger head (r=20).
+  // v0.25.134 — even smaller torso per user request: pear height ~12 px
+  // (was 16). The head now dominates the silhouette ~3:1.
   head:  new Path2D('M -20 0 A 20 20 0 1 1 20 0 A 20 20 0 1 1 -20 0 Z'),
-  // Compact pear torso: top at y=-14 (just below head), hip-line at y=2.
-  // Tapers from waist out to wider hip bulge. Pivot y=0 = hip line.
   torso: new Path2D(
-    'M -7 -14 ' +
-    'Q -9 -10 -10 -4 ' +
-    'Q -11 2 -10 6 ' +
-    'Q -8 8 0 8 ' +
-    'Q 8 8 10 6 ' +
-    'Q 11 2 10 -4 ' +
-    'Q 9 -10 7 -14 ' +
-    'Q 4 -16 0 -16 ' +
-    'Q -4 -16 -7 -14 Z'
+    'M -6 -10 ' +
+    'Q -8 -6 -8 -2 ' +
+    'Q -9 4 -8 6 ' +
+    'Q -6 8 0 8 ' +
+    'Q 6 8 8 6 ' +
+    'Q 9 4 8 -2 ' +
+    'Q 8 -6 6 -10 ' +
+    'Q 3 -12 0 -12 ' +
+    'Q -3 -12 -6 -10 Z'
   ),
   // Stubby teardrop arm — pivot at top (shoulder), hand at y=10.
   arm:   new Path2D(
@@ -24558,13 +24563,101 @@ const HERO_VEC_RIG = {
 // only `body` colour changes per class for identification. Hair colour
 // also stays consistent (dark brown). Removed `hat` field — no more
 // per-class helmet/hood/pointy/feather differentiation.
+// v0.25.134 — class palette no longer carries skin tones; those come from
+// HERO_VEC_SKIN below (+ optional player.lookCustom.skinIdx override).
 const HERO_VEC_CLASS = {
-  warrior: { body:'#d04444', bodyShd:'#8a2a2a', accent:'#ffe082', skin:'#f5c8a8', skinShd:'#cc8c70', boot:'#3a1f10', hair:'#2a1810' },
-  rogue:   { body:'#5a3a8a', bodyShd:'#3a2050', accent:'#a8dad8', skin:'#f5c8a8', skinShd:'#cc8c70', boot:'#1f1230', hair:'#2a1810' },
-  mage:    { body:'#3a5fa0', bodyShd:'#1f3a68', accent:'#ffd166', skin:'#f5c8a8', skinShd:'#cc8c70', boot:'#1c2a40', hair:'#2a1810' },
-  archer:  { body:'#3a8a4f', bodyShd:'#1f5a30', accent:'#dfa84a', skin:'#f5c8a8', skinShd:'#cc8c70', boot:'#23341a', hair:'#2a1810' },
-  default: { body:'#f5c8a8', bodyShd:'#cc8c70', accent:'#ffe082', skin:'#f5c8a8', skinShd:'#cc8c70', boot:'#f5c8a8', hair:'#2a1810' },
+  warrior: { body:'#d04444', bodyShd:'#8a2a2a', accent:'#ffe082', boot:'#3a1f10', hair:'#2a1810' },
+  rogue:   { body:'#5a3a8a', bodyShd:'#3a2050', accent:'#a8dad8', boot:'#1f1230', hair:'#2a1810' },
+  mage:    { body:'#3a5fa0', bodyShd:'#1f3a68', accent:'#ffd166', boot:'#1c2a40', hair:'#2a1810' },
+  archer:  { body:'#3a8a4f', bodyShd:'#1f5a30', accent:'#dfa84a', boot:'#23341a', hair:'#2a1810' },
+  default: { body:null,      bodyShd:null,      accent:null,      boot:null,      hair:'#2a1810' },
 };
+// v0.25.134 — skin tone presets. 4 levels per tone for the 3-tone cel
+// pass: `light` (highlight pip), `base` (lit fill), `mid` (first cel
+// crescent), `deep` (second deeper cel crescent). Default index 1
+// matches the previous "Light" tone.
+const HERO_VEC_SKIN = [
+  { id:'porcelain', name:'Porcelain', light:'#fff0e2', base:'#fce0cc', mid:'#e6c0a4', deep:'#bd9072' },
+  { id:'light',     name:'Light',     light:'#ffe2c8', base:'#f5c8a8', mid:'#d8a484', deep:'#a8744e' },
+  { id:'tan',       name:'Tan',       light:'#f0c89e', base:'#dab287', mid:'#b88962', deep:'#825c3a' },
+  { id:'olive',     name:'Olive',     light:'#d8b288', base:'#bc946e', mid:'#9a7050', deep:'#6a4530' },
+  { id:'bronze',    name:'Bronze',    light:'#bc8862', base:'#9e6e4a', mid:'#7a5034', deep:'#4a2c1a' },
+  { id:'brown',     name:'Brown',     light:'#9a6c48', base:'#7a5232', mid:'#553820', deep:'#2e1c0e' },
+  { id:'deep',      name:'Deep',      light:'#785030', base:'#553820', mid:'#36200e', deep:'#1a0d04' },
+];
+// v0.25.134 — hair Path2Ds. Each silhouette is a self-contained shape
+// drawn over the head circle. Player picks one via the studio UI; the
+// id persists in player.lookCustom.hairId.
+const HERO_VEC_HAIR = {
+  // The original v0.25.131 anime sweep: top crown + 2 tufts + forward
+  // bang sweeping past chin + back ponytail.
+  anime: new Path2D(
+    'M -14 -2 ' +
+    'Q -18 -18, -2 -25 ' +
+    'L 2 -23 L 6 -27 L 9 -23 L 12 -26 ' +
+    'Q 16 -18, 14 -10 ' +
+    'Q 24 0, 18 14 ' +
+    'Q 12 18, 6 14 ' +
+    'Q 12 6, 10 -2 ' +
+    'L -10 -2 ' +
+    'Q -18 4, -22 14 ' +
+    'Q -22 20, -14 16 ' +
+    'Q -10 10, -14 -2 Z'
+  ),
+  // Clean short cut: smooth dome over the head, no bang or tail.
+  short: new Path2D(
+    'M -18 -2 ' +
+    'Q -20 -16 0 -22 ' +
+    'Q 20 -16 18 -2 ' +
+    'L 14 -4 Q 0 -10 -14 -4 Z'
+  ),
+  // Spiky punk silhouette: jagged upward spikes across the crown.
+  spike: new Path2D(
+    'M -18 -2 ' +
+    'L -16 -10 L -12 -22 L -8 -12 ' +
+    'L -4 -24 L 0 -10 L 4 -24 ' +
+    'L 8 -12 L 12 -22 L 16 -10 L 18 -2 ' +
+    'Q 0 -8 -18 -2 Z'
+  ),
+  // Bowl cut: even rounded helmet shape with crisp side fringes.
+  bowl: new Path2D(
+    'M -18 -2 ' +
+    'Q -20 -22 0 -22 ' +
+    'Q 20 -22 18 -2 ' +
+    'L 16 4 L 12 4 L 10 0 ' +
+    'L -10 0 L -12 4 L -16 4 Z'
+  ),
+  // Top bun: small dome + a round ball on top.
+  bun: new Path2D(
+    'M -14 -2 ' +
+    'Q -18 -16 -4 -20 ' +
+    'L -4 -22 ' +
+    'Q -8 -28 0 -30 ' +     // bun ball
+    'Q 8 -28 4 -22 ' +
+    'L 4 -20 ' +
+    'Q 18 -16 14 -2 ' +
+    'Q 0 -6 -14 -2 Z'
+  ),
+  // Long flowing pigtails (no forward bang).
+  pigtails: new Path2D(
+    'M -18 -2 ' +
+    'Q -22 -20 0 -22 ' +
+    'Q 22 -20 18 -2 ' +
+    'L 16 0 ' +
+    'Q 24 8 22 18 Q 18 22 14 18 Q 14 8 12 2 ' + // right pigtail
+    'L -12 2 ' +
+    'Q -14 8 -14 18 Q -18 22 -22 18 Q -24 8 -16 0 Z' // left pigtail
+  ),
+};
+// v0.25.134 — list view used by the studio UI in option order.
+const HERO_VEC_HAIR_OPTIONS = [
+  { id:'anime',    name:'Anime' },
+  { id:'short',    name:'Short' },
+  { id:'spike',    name:'Spike' },
+  { id:'bowl',     name:'Bowl' },
+  { id:'bun',      name:'Top Bun' },
+  { id:'pigtails', name:'Pigtails' },
+];
 const HERO_VEC_ANIMS = {
   idle: {
     spine: t => Math.sin(t * Math.PI * 2) * 0.012,
@@ -24629,14 +24722,34 @@ function _heroVecTimeNorm(animName) {
   }
   return 0;
 }
-function _drawVectorHero(sx, sy) {
-  const cls = player.cls || 'default';
+// v0.25.134 — `_drawVectorHero` now accepts an optional `_ctx` target
+// canvas + opts so the Q-key Character Studio can preview the hero on
+// its own canvas. opts.lookCustom overrides player.lookCustom; opts.cls
+// overrides player.cls; opts.animName forces a specific anim state
+// (used by the studio to show idle preview regardless of current
+// runtime player state).
+function _drawVectorHero(sx, sy, _ctx, opts) {
+  // Alias the chosen target context to `ctx` so the rest of the body
+  // reads naturally. The right-hand side never references the local
+  // `ctx` (it reads `_ctx` and `_MAIN_CTX`), so no TDZ throw.
+  const ctx = _ctx || _MAIN_CTX;
+  opts = opts || {};
+  const cls = opts.cls || (typeof player !== 'undefined' && player.cls) || 'default';
   const C = HERO_VEC_CLASS[cls] || HERO_VEC_CLASS.default;
-  const animName = _heroVecAnimFor();
-  const t = _heroVecTimeNorm(animName);
+  const lookCustom = opts.lookCustom || (typeof player !== 'undefined' && player.lookCustom) || {};
+  const skinIdx = (lookCustom.skinIdx != null && HERO_VEC_SKIN[lookCustom.skinIdx]) ? lookCustom.skinIdx : 1;
+  const SKIN = HERO_VEC_SKIN[skinIdx];
+  const hairId = lookCustom.hairId || 'anime';
+  const HAIR_PATH = HERO_VEC_HAIR[hairId] || HERO_VEC_HAIR.anime;
+  // Default class = "naked" mannequin: body + boots take skin colour.
+  const BODY_BASE = (cls === 'default' || !C.body) ? SKIN.base : C.body;
+  const BODY_SHD  = (cls === 'default' || !C.bodyShd) ? SKIN.mid  : C.bodyShd;
+  const BOOT_BASE = (cls === 'default' || !C.boot) ? SKIN.base : C.boot;
+  const animName = opts.animName || _heroVecAnimFor();
+  const t = (opts.animTime != null) ? opts.animTime : _heroVecTimeNorm(animName);
   const anim = HERO_VEC_ANIMS[animName] || {};
   const deform = HERO_VEC_DEFORM[animName] || {};
-  const bob = HERO_VEC_BOB[animName] || {};   // v0.25.133 — head/bone translation
+  const bob = HERO_VEC_BOB[animName] || {};
   const OUT = '#1a0818';
   const STROKE_W = 3;
   function applyChain(bone) {
@@ -24662,21 +24775,35 @@ function _drawVectorHero(sx, sy) {
     ctx.lineWidth = STROKE_W;
     ctx.stroke(path);
   }
-  // v0.25.133 — proper cel-shading via shifted-self-clip. Fill base, clip
-  // to the part, then fill the SAME PATH offset down-and-right with the
-  // shadow tone. The intersection is a crisp lower-right crescent — no
-  // soft gradient blur, just hard-edged "lit vs shaded" regions like a
-  // hand-drawn cel-painted illustration. The bigger the (dx,dy) offset
-  // the more of the part stays lit.
-  function _drawShaded(path, base, shadow, dx, dy) {
+  // v0.25.134 — 3-tone cel-shading via two shifted-self-clip passes.
+  //   Pass 1: clip to part, translate (dx, dy), fill with `mid` tone.
+  //           Result: lower-right crescent in mid shadow.
+  //   Pass 2: ALSO clip to the first-pass shape, translate further,
+  //           fill with `deep` tone. Result: a smaller inner crescent
+  //           where the shadow is darkest.
+  // Boundary between every band stays crisp (hard-edged) — proper
+  // hand-painted cel look, not a soft gradient. `deep` is optional; if
+  // null, only the 2-tone pass runs.
+  function _drawShaded(path, base, mid, deep, dx, dy) {
     ctx.fillStyle = base;
     ctx.fill(path);
-    ctx.save();
-    ctx.clip(path);
-    ctx.translate(dx || 5, dy || 5);
-    ctx.fillStyle = shadow;
-    ctx.fill(path);
-    ctx.restore();
+    if (mid) {
+      ctx.save();
+      ctx.clip(path);
+      ctx.translate(dx || 5, dy || 5);
+      ctx.fillStyle = mid;
+      ctx.fill(path);
+      if (deep) {
+        // Inner crescent: clip again to the FIRST shifted shape so the
+        // deep tone only paints over the mid region, then translate
+        // further for a deeper offset.
+        ctx.clip(path);
+        ctx.translate((dx || 5) * 0.4, (dy || 5) * 0.4);
+        ctx.fillStyle = deep;
+        ctx.fill(path);
+      }
+      ctx.restore();
+    }
     strokePath(path);
   }
   // Glossy highlight pip — a small white ellipse on the upper-left of a
@@ -24716,46 +24843,49 @@ function _drawVectorHero(sx, sy) {
   ctx.lineCap  = 'round';
 
   // Z-order: back leg → back arm → torso → head + hair → front leg →
-  // front arm. ?L bones = BACK side; ?R bones = FRONT.
-  // Back limbs are slightly darkened so they read as "behind" the body.
+  // front arm. ?L = back, ?R = front. Back limbs darkened slightly.
+  // v0.25.134 — body parts sourced from BODY_BASE/SHD + SKIN palette,
+  // hair sourced from HAIR_PATH (selected style).
   drawBone('legL', () => {
-    const base = (typeof _mixHex === 'function') ? _mixHex(C.boot, '#000000', 0.12) : C.boot;
-    const shd  = C.bodyShd || C.skinShd;
-    _drawShaded(HERO_VEC_PARTS.leg, base, shd, 3, 3);
+    const base = (typeof _mixHex === 'function') ? _mixHex(BOOT_BASE, '#000000', 0.12) : BOOT_BASE;
+    _drawShaded(HERO_VEC_PARTS.leg, base, BODY_SHD, SKIN.deep, 3, 3);
   });
   drawBone('armL', () => {
-    const base = (typeof _mixHex === 'function') ? _mixHex(C.body, '#000000', 0.12) : C.body;
-    const shd  = C.bodyShd;
-    _drawShaded(HERO_VEC_PARTS.arm, base, shd, 3, 3);
+    const base = (typeof _mixHex === 'function') ? _mixHex(BODY_BASE, '#000000', 0.12) : BODY_BASE;
+    _drawShaded(HERO_VEC_PARTS.arm, base, BODY_SHD, SKIN.deep, 3, 3);
   });
-  // Torso — solid pear body with cel-shaded lower-right crescent.
   drawBone('spine', () => {
-    _drawShaded(HERO_VEC_PARTS.torso, C.body, C.bodyShd, 4, 4);
-    _drawGloss(-5, -10, 3, 4, 0.55);
+    _drawShaded(HERO_VEC_PARTS.torso, BODY_BASE, BODY_SHD, SKIN.deep, 4, 4);
+    _drawGloss(-4, -7, 3, 4, 0.55);
   });
-  // Head — skin, hair (unified silhouette across all classes), eyes,
-  // gloss. v0.25.133 — no per-class hats; everyone shares the chibi
-  // anime hairstyle for visual consistency. Class is read off the body
-  // palette instead.
   drawBone('head', () => {
-    _drawShaded(HERO_VEC_PARTS.head, C.skin, C.skinShd, 6, 6);
-    // Big glossy highlight on upper-left forehead
-    _drawGloss(-8, -10, 6, 5, 0.88);
-    // Unified hair silhouette (rendered AFTER skin so hair sits on top)
-    ctx.fillStyle = C.hair;
-    ctx.fill(HERO_VEC_PARTS.hair);
-    // Cel shadow on hair (small offset for depth)
+    // 3-tone cel-shaded head: light → base → mid → deep.
+    _drawShaded(HERO_VEC_PARTS.head, SKIN.base, SKIN.mid, SKIN.deep, 6, 6);
+    // Bright lit highlight band on upper-left (matches the SKIN.light tone)
     ctx.save();
-    ctx.clip(HERO_VEC_PARTS.hair);
+    ctx.clip(HERO_VEC_PARTS.head);
+    ctx.fillStyle = SKIN.light;
+    ctx.beginPath();
+    ctx.ellipse(-9, -9, 7, 5, 0.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    // Glossy white pip
+    _drawGloss(-9, -10, 4, 3, 0.85);
+    // Hair silhouette (selected style, unified across all classes)
+    ctx.fillStyle = C.hair;
+    ctx.fill(HAIR_PATH);
+    // Cel shadow pass on the hair
+    ctx.save();
+    ctx.clip(HAIR_PATH);
     ctx.translate(3, 4);
     ctx.fillStyle = (typeof _mixHex === 'function') ? _mixHex(C.hair, '#000000', 0.45) : C.hair;
-    ctx.fill(HERO_VEC_PARTS.hair);
+    ctx.fill(HAIR_PATH);
     ctx.restore();
-    strokePath(HERO_VEC_PARTS.hair);
-    // Long vertical anime eyes — universal for every class.
+    strokePath(HAIR_PATH);
+    // Long vertical anime eyes (universal)
     _drawEye(-5, 2);
     _drawEye(5, 2);
-    // Subtle smile mouth.
+    // Subtle smile
     ctx.strokeStyle = OUT;
     ctx.lineWidth = 1.6;
     ctx.lineCap = 'round';
@@ -24763,14 +24893,12 @@ function _drawVectorHero(sx, sy) {
     ctx.moveTo(-2.5, 9); ctx.quadraticCurveTo(0, 11, 2.5, 9);
     ctx.stroke();
   });
-  // Front leg
   drawBone('legR', () => {
-    _drawShaded(HERO_VEC_PARTS.leg, C.boot, C.bodyShd || C.skinShd, 3, 3);
+    _drawShaded(HERO_VEC_PARTS.leg, BOOT_BASE, BODY_SHD, SKIN.deep, 3, 3);
     _drawGloss(-2, -1, 1.8, 2.5, 0.55);
   });
-  // Front arm
   drawBone('armR', () => {
-    _drawShaded(HERO_VEC_PARTS.arm, C.body, C.bodyShd, 3, 3);
+    _drawShaded(HERO_VEC_PARTS.arm, BODY_BASE, BODY_SHD, SKIN.deep, 3, 3);
     _drawGloss(-2, -1, 1.8, 2.5, 0.55);
   });
   ctx.restore();
@@ -24818,7 +24946,9 @@ function drawPlayer() {
   // v0.25.130 — opt-in vector-art skeletal renderer takes priority over
   // both the HERO sprite-sheet path AND the procedural chibi when
   // _CHAR_STYLE === 'vector'. Default 'sprite' keeps the existing flow.
-  if (_CHAR_STYLE === 'vector') {
+  // v0.25.134 — also routed through vector when player.lookCustom is
+  // set (Q-key Character Studio applied a skin/hair to the player).
+  if (_CHAR_STYLE === 'vector' || (player.lookCustom)) {
     _drawVectorHero(sx, sy);
   } else if (_hasCustomSprite) {
     _drawPlayerCustomSprite();
@@ -24826,7 +24956,7 @@ function drawPlayer() {
     drawCuteCharacter(sx, sy);
   }
   _chibiRestore();
-  if (_CHAR_STYLE !== 'vector' && !_hasCustomSprite) _drawCuteFaceOverlay(sx, sy);
+  if (_CHAR_STYLE !== 'vector' && !player.lookCustom && !_hasCustomSprite) _drawCuteFaceOverlay(sx, sy);
   _drawPlayerNameTag(sx, sy);
   return;
 }
@@ -32954,174 +33084,99 @@ requestAnimationFrame(loop);
 <script>
 // === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.93) ===
 console.log('%c[CharStudio] v0.25.93 loaded — bbox-bottom ground anchor + 8 floating types lifted','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
+// v0.25.134 — Character Studio rebuilt to drive the vector hero. The
+// sprite-layer system (mannequin base + face/hair PNG overlays) is gone;
+// previews now render the same _drawVectorHero used in-game on a 384×384
+// studio canvas. State is just the two picks the user can change: skin
+// tone (index into HERO_VEC_SKIN) and hair style (id into HERO_VEC_HAIR).
 const CHAR_STUDIO = {
-  base: null,           // grayscale neutral mannequin (multiply target)
-  baseColored: null,    // peach mannequin used as walk-anim source frames
-  walkSheet: null,      // animated walk spritesheet (2×2 grid, 4 frames)
-  walkSheetMeta: { frames: 4, gridW: 2, gridH: 2, fps: 6 },
-  faces: {},            // { 'anime_classic': Image, 'sleepy_calm': Image, ... }
-  faceStyle: 'anime_classic',
-  skinTone: '#F5C9A8',  // default light-peach
-  swatches: [
-    { name: 'Porcelain', hex: '#FCDFC9' },
-    { name: 'Light',     hex: '#F5C9A8' },
-    { name: 'Tan',       hex: '#E0AC83' },
-    { name: 'Olive',     hex: '#B68458' },
-    { name: 'Brown',     hex: '#8C5A36' },
-    { name: 'Deep',      hex: '#5E3920' },
-  ],
-  faceStyles: [
-    { id: 'anime_classic', name: 'Classic',  file: 'anime_classic.webp' },
-    { id: 'sleepy_calm',   name: 'Sleepy',   file: 'sleepy_calm.webp'   },
-    { id: 'sharp_serious', name: 'Sharp',    file: 'sharp_serious.webp' },
-    { id: 'big_grin',      name: 'Big Grin', file: 'big_grin.webp'      },
-  ],
-  hairs: {},
-  hairStyle: 'blonde_shaggy',
-  hairStyles: [
-    { id: 'bald',          name: 'Bald',     file: null },
-    { id: 'blonde_shaggy', name: 'Blonde',   file: 'blonde_shaggy.webp' },
-    { id: 'black_spike',   name: 'Black',    file: 'black_spike.webp'   },
-    { id: 'brown_pony',    name: 'Brown',    file: 'brown_pony.webp'    },
-    { id: 'mage_hood',     name: 'Hood',     file: 'mage_hood.webp'     },
-  ],
-  ready: false,
+  skinIdx: 1,           // default 'Light' tone
+  hairId:  'anime',     // default anime hair
+  ready: true,          // no async asset load needed for vector mode
 };
 
-function _csLoadImg(src) {
-  return new Promise((res, rej) => {
-    const img = new Image();
-    img.onload = () => res(img);
-    img.onerror = () => rej(new Error('Failed to load ' + src));
-    img.src = src;
-  });
-}
-
-async function loadCharStudioLayers() {
-  try {
-    const status = document.getElementById('char-studio-status');
-    if (status) status.textContent = 'Loading layers…';
-    const baseP = _csLoadImg('Sprites/character/layers/base/mannequin_base_neutral.webp');
-    const baseColP = _csLoadImg('Sprites/character/layers/base/mannequin_base.webp')
-      .then((img) => { CHAR_STUDIO.baseColored = img; })
-      .catch(() => {});
-    const walkSheetP = _csLoadImg('Sprites/character/layers/base/mannequin_walk_sheet.webp')
-      .then((img) => { CHAR_STUDIO.walkSheet = img; })
-      .catch(() => {});  // walk anim is optional — falls back to static when missing
-    const facePromises = CHAR_STUDIO.faceStyles.map((fs) =>
-      _csLoadImg('Sprites/character/layers/eyes/' + fs.file).then((img) => {
-        CHAR_STUDIO.faces[fs.id] = img;
-      })
-    );
-    const hairPromises = CHAR_STUDIO.hairStyles
-      .filter((hs) => !!hs.file)
-      .map((hs) =>
-        _csLoadImg('Sprites/character/layers/hair/' + hs.file).then((img) => {
-          CHAR_STUDIO.hairs[hs.id] = img;
-        })
-      );
-    CHAR_STUDIO.base = await baseP;
-    await Promise.all([baseColP, walkSheetP, ...facePromises, ...hairPromises]);
-    CHAR_STUDIO.ready = true;
-    const layerCount = 1 + CHAR_STUDIO.faceStyles.length + CHAR_STUDIO.hairStyles.filter((h) => !!h.file).length;
-    if (status) status.textContent = 'Ready · ' + layerCount + ' layers + walk anim loaded';
-    renderCharStudio();
-  } catch (err) {
-    const status = document.getElementById('char-studio-status');
-    if (status) status.textContent = 'Failed to load: ' + err.message;
-    console.error('[CharStudio]', err);
-  }
-}
-
+// v0.25.134 — vector preview. Calls _drawVectorHero with explicit
+// _ctx + opts so the studio renders the same character that will
+// render in-game. Centred + scaled-up to fill the 384×384 panel.
 function renderCharStudio() {
-  if (!CHAR_STUDIO.ready) return;
   const cv = document.getElementById('char-studio-canvas');
   if (!cv) return;
-  const W = cv.width, H = cv.height;
   const c = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
   c.clearRect(0, 0, W, H);
-  c.globalCompositeOperation = 'source-over';
-  // Step 1: paint the neutralized grayscale mannequin (alpha intact, including anti-aliased edges)
-  c.drawImage(CHAR_STUDIO.base, 0, 0, W, H);
-  // Step 2: per-pixel RGB multiply by the skin tone — only touches pixels that already exist,
-  // preserves alpha exactly, eliminates the fringe halo from blend-mode + fillRect tinting.
-  const hex = CHAR_STUDIO.skinTone;
-  const skinR = parseInt(hex.slice(1, 3), 16);
-  const skinG = parseInt(hex.slice(3, 5), 16);
-  const skinB = parseInt(hex.slice(5, 7), 16);
-  const img = c.getImageData(0, 0, W, H);
-  const d = img.data;
-  for (let i = 0, n = d.length; i < n; i += 4) {
-    if (d[i + 3] === 0) continue; // skip fully transparent pixels
-    d[i]     = (d[i]     * skinR / 255) | 0;
-    d[i + 1] = (d[i + 1] * skinG / 255) | 0;
-    d[i + 2] = (d[i + 2] * skinB / 255) | 0;
-    // alpha (d[i+3]) unchanged so anti-aliased silhouette stays intact
-  }
-  c.putImageData(img, 0, 0);
-  // Step 3: stack the chosen face overlay (eyes + mouth) FIRST
-  const face = CHAR_STUDIO.faces[CHAR_STUDIO.faceStyle];
-  if (face) c.drawImage(face, 0, 0, W, H);
-  // Step 4: stack the hair overlay LAST so its baked-in black outline + bangs
-  // sit ON TOP of face — bangs occlude the eyes naturally (chibi/MapleStory convention).
-  const hair = CHAR_STUDIO.hairs[CHAR_STUDIO.hairStyle];
-  if (hair) c.drawImage(hair, 0, 0, W, H);
+  c.save();
+  c.translate(W / 2, H * 0.92);   // feet at ~92% down so head clears the top
+  const SCALE = 5.0;
+  c.scale(SCALE, SCALE);
+  // Render the vector hero on the studio canvas with the current picks.
+  // The function expects (sx, sy) where (sx + player.w/2, sy + player.h)
+  // becomes the feet anchor. Faking player.w/h to 28/44 (game defaults).
+  const FAKE_W = 28, FAKE_H = 44;
+  _drawVectorHero(-FAKE_W / 2, -FAKE_H, c, {
+    cls: (typeof player !== 'undefined' && player.cls) || 'default',
+    lookCustom: { skinIdx: CHAR_STUDIO.skinIdx, hairId: CHAR_STUDIO.hairId },
+    animName: 'idle',
+    animTime: ((Date.now() / 1000) % 3) / 3,  // looped idle anim time
+    forcedFacing: 1,
+  });
+  c.restore();
+  // Re-render every frame so the idle bob animates.
+  if (CHAR_STUDIO._raf) cancelAnimationFrame(CHAR_STUDIO._raf);
+  CHAR_STUDIO._raf = requestAnimationFrame(renderCharStudio);
+}
+
+function _csStopPreview() {
+  if (CHAR_STUDIO._raf) { cancelAnimationFrame(CHAR_STUDIO._raf); CHAR_STUDIO._raf = null; }
 }
 
 function buildCharStudioSwatches() {
   const cont = document.getElementById('skin-swatches');
-  if (!cont || cont.dataset.built) return;
+  if (!cont) return;
   cont.dataset.built = '1';
-  CHAR_STUDIO.swatches.forEach((sw) => {
+  cont.innerHTML = '';
+  HERO_VEC_SKIN.forEach((sw, idx) => {
     const el = document.createElement('div');
-    el.className = 'skin-swatch' + (sw.hex === CHAR_STUDIO.skinTone ? ' active' : '');
-    el.style.background = sw.hex;
-    el.title = sw.name + ' · ' + sw.hex;
+    el.className = 'skin-swatch' + (idx === CHAR_STUDIO.skinIdx ? ' active' : '');
+    el.style.background = sw.base;
+    el.title = sw.name + ' · ' + sw.base;
     el.onclick = () => {
-      CHAR_STUDIO.skinTone = sw.hex;
+      CHAR_STUDIO.skinIdx = idx;
       cont.querySelectorAll('.skin-swatch').forEach((s) => s.classList.remove('active'));
       el.classList.add('active');
-      renderCharStudio();
     };
     cont.appendChild(el);
   });
 }
-
+// Face-style picker disabled in vector mode — vector hero has a unified
+// face. We hide the section header + container so the panel doesn't
+// show an empty pane.
 function buildCharStudioFaceStyles() {
   const cont = document.getElementById('face-styles');
-  if (!cont || cont.dataset.built) return;
-  cont.dataset.built = '1';
-  CHAR_STUDIO.faceStyles.forEach((fs) => {
-    const el = document.createElement('button');
-    el.type = 'button';
-    el.className = 'face-style-btn' + (fs.id === CHAR_STUDIO.faceStyle ? ' active' : '');
-    el.textContent = fs.name;
-    el.title = fs.id;
-    el.onclick = () => {
-      CHAR_STUDIO.faceStyle = fs.id;
-      cont.querySelectorAll('.face-style-btn').forEach((b) => b.classList.remove('active'));
-      el.classList.add('active');
-      renderCharStudio();
-    };
-    cont.appendChild(el);
-  });
+  if (cont) cont.style.display = 'none';
+  // Hide the corresponding "Face Style" h3 just before it.
+  const panel = document.querySelector('.char-studio-controls');
+  if (panel) {
+    panel.querySelectorAll('h3').forEach(h => {
+      if (h.textContent && h.textContent.trim().toLowerCase() === 'face style') h.style.display = 'none';
+    });
+  }
 }
 
 function buildCharStudioHairStyles() {
   const cont = document.getElementById('hair-styles');
-  if (!cont || cont.dataset.built) return;
+  if (!cont) return;
   cont.dataset.built = '1';
-  CHAR_STUDIO.hairStyles.forEach((hs) => {
+  cont.innerHTML = '';
+  HERO_VEC_HAIR_OPTIONS.forEach((hs) => {
     const el = document.createElement('button');
     el.type = 'button';
-    el.className = 'face-style-btn' + (hs.id === CHAR_STUDIO.hairStyle ? ' active' : '');
+    el.className = 'face-style-btn' + (hs.id === CHAR_STUDIO.hairId ? ' active' : '');
     el.textContent = hs.name;
     el.title = hs.id;
     el.onclick = () => {
-      CHAR_STUDIO.hairStyle = hs.id;
+      CHAR_STUDIO.hairId = hs.id;
       cont.querySelectorAll('.face-style-btn').forEach((b) => b.classList.remove('active'));
       el.classList.add('active');
-      renderCharStudio();
     };
     cont.appendChild(el);
   });
@@ -33129,12 +33184,19 @@ function buildCharStudioHairStyles() {
 
 function openCharStudio() {
   document.getElementById('char-studio-overlay').classList.add('open');
+  // Seed picks from the player's current lookCustom so the studio
+  // opens showing what's already applied.
+  if (typeof player !== 'undefined' && player.lookCustom) {
+    if (player.lookCustom.skinIdx != null) CHAR_STUDIO.skinIdx = player.lookCustom.skinIdx;
+    if (player.lookCustom.hairId)          CHAR_STUDIO.hairId  = player.lookCustom.hairId;
+  }
   buildCharStudioSwatches();
   buildCharStudioFaceStyles();
   buildCharStudioHairStyles();
   wireCharStudioActionButtons();
-  if (!CHAR_STUDIO.ready) loadCharStudioLayers();
-  else renderCharStudio();
+  const status = document.getElementById('char-studio-status');
+  if (status) status.textContent = 'Vector preview · pick skin tone + hair style, then Use in game.';
+  renderCharStudio();
 }
 
 // v0.25.80b — bounding-box-normalize a chibi sprite cell so the character
@@ -33261,67 +33323,36 @@ function _normalizeChibiFrame(srcCanvas, outW, outH) {
   return out;
 }
 
+// v0.25.134 — apply persists the current picks into player.lookCustom
+// which the in-game drawPlayer routes through _drawVectorHero. Also
+// clears any leftover sprite overrides from the legacy system.
 function applyCharStudioToPlayer() {
-  const cv = document.getElementById('char-studio-canvas');
-  if (!cv || !CHAR_STUDIO.ready) return;
-  // Snapshot the current static composite (idle pose).
-  const off = document.createElement('canvas');
-  off.width = cv.width;
-  off.height = cv.height;
-  off.getContext('2d').drawImage(cv, 0, 0);
-  window.PLAYER_CUSTOM_SPRITE_CANVAS = off;
-  window.PLAYER_SPRITE_FACES_RIGHT = false;  // studio mannequin natively faces left
-
-  // v0.25.80b — pre-render walk-cycle frames per current customization.
-  // animateSprite returns the character drawn small inside each cell with lots
-  // of empty space around. We bbox-normalize each cropped cell so the character
-  // fills the output canvas the same way the idle base does — that makes the
-  // walk frame the same on-screen size as the idle snapshot AND puts the head
-  // in the right vertical position so face + hair overlays land correctly.
-  if (CHAR_STUDIO.walkSheet) {
-    const sheet = CHAR_STUDIO.walkSheet;
-    const { frames, gridW, gridH } = CHAR_STUDIO.walkSheetMeta;
-    const cellW = (sheet.width  / gridW) | 0;
-    const cellH = (sheet.height / gridH) | 0;
-    const outSize = 384;  // matches the canonical face/hair overlay canvas size
-    const out = [];
-    const face = CHAR_STUDIO.faces[CHAR_STUDIO.faceStyle];
-    const hair = CHAR_STUDIO.hairs[CHAR_STUDIO.hairStyle];
-    for (let i = 0; i < frames; i++) {
-      const col = i % gridW;
-      const row = (i / gridW) | 0;
-      // Step 1: crop the raw cell into its own canvas
-      const cell = document.createElement('canvas');
-      cell.width = cellW;
-      cell.height = cellH;
-      cell.getContext('2d').drawImage(
-        sheet, col * cellW, row * cellH, cellW, cellH, 0, 0, cellW, cellH
-      );
-      // Step 2: normalize → character fills outSize×outSize, feet at ~95%
-      const norm = _normalizeChibiFrame(cell, outSize);
-      // Step 3: overlay face + hair on the normalized frame
-      const fc = norm.getContext('2d');
-      if (face) fc.drawImage(face, 0, 0, outSize, outSize);
-      if (hair) fc.drawImage(hair, 0, 0, outSize, outSize);
-      out.push(norm);
+  if (typeof player === 'undefined') return;
+  player.lookCustom = {
+    skinIdx: CHAR_STUDIO.skinIdx,
+    hairId:  CHAR_STUDIO.hairId,
+  };
+  // Clear any leftover sprite-system overrides from the legacy studio.
+  if (typeof window !== 'undefined') {
+    if (window.PLAYER_CUSTOM_SPRITE_CANVAS && window.HERO && window.HERO.idle && window.PLAYER_CUSTOM_SPRITE_CANVAS !== window.HERO.idle) {
+      window.PLAYER_CUSTOM_SPRITE_CANVAS = window.HERO.idle;
     }
-    window.PLAYER_CUSTOM_WALK_FRAMES = out;
   }
-
   const status = document.getElementById('char-studio-status');
-  if (status) status.textContent = 'Applied · in-game player now uses this avatar' + (window.PLAYER_CUSTOM_WALK_FRAMES ? ' (with walk cycle)' : '');
-  if (typeof showToast === 'function') showToast('Avatar applied to player', 'rare');
+  if (status) status.textContent = 'Applied · player is now using the vector look ('
+    + HERO_VEC_SKIN[CHAR_STUDIO.skinIdx].name + ' · ' + CHAR_STUDIO.hairId + ').';
+  if (typeof showToast === 'function') showToast('Vector look applied', 'rare');
+  if (typeof saveState === 'function') saveState();
 }
 
+// Revert clears the lookCustom flag so drawPlayer falls back to the
+// HERO sprite (or procedural chibi if no hero loaded yet).
 function revertCharStudioFromPlayer() {
-  // Revert to the default hero (or null if hero hasn't loaded yet — falls back
-  // to procedural drawCuteCharacter).
-  window.PLAYER_CUSTOM_SPRITE_CANVAS = HERO.idle || null;
-  window.PLAYER_CUSTOM_WALK_FRAMES = HERO.walkFrames || null;
-  window.PLAYER_SPRITE_FACES_RIGHT = false;  // hero reads as left-facing in 3/4 view
+  if (typeof player !== 'undefined') player.lookCustom = null;
   const status = document.getElementById('char-studio-status');
-  if (status) status.textContent = 'Reverted · in-game player back to procedural chibi';
-  if (typeof showToast === 'function') showToast('Reverted to procedural chibi', 'common');
+  if (status) status.textContent = 'Reverted · player back to default sprite hero.';
+  if (typeof showToast === 'function') showToast('Reverted vector look', 'common');
+  if (typeof saveState === 'function') saveState();
 }
 
 function wireCharStudioActionButtons() {
@@ -33332,6 +33363,7 @@ function wireCharStudioActionButtons() {
 }
 function closeCharStudio() {
   document.getElementById('char-studio-overlay').classList.remove('open');
+  if (typeof _csStopPreview === 'function') _csStopPreview();
 }
 const _csCloseBtn = document.getElementById('char-studio-close');
 if (_csCloseBtn) _csCloseBtn.addEventListener('click', closeCharStudio);
