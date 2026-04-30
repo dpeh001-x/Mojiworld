@@ -56,8 +56,8 @@ Skills are laid out as a left-hand cluster (`Z X S C D F V G`) so you can reach 
 
 | Action | Key |
 |---|---|
-| Talk to NPC (when one is in range) | `N` |
-| Codex / achievements (when no NPC is in range) | `N` |
+| Talk to NPC (or open chest in range) | `N` |
+| Codex / achievements | `Y` |
 | Open chest / pick up drop | `F` |
 | Inventory | `B` |
 | Character panel — Level Up / Boons / Skills | `K` or `U` |
@@ -68,7 +68,7 @@ Skills are laid out as a left-hand cluster (`Z X S C D F V G`) so you can reach 
 | Re-pick job / master | `0` |
 | Dev console | hold `1` + `2` + `3` |
 
-> `N` is context-aware: next to an NPC it opens their dialog, otherwise it opens the Codex. `F` is reserved for chest / pickup / job signature skill — pressing `F` next to an NPC still talks as a legacy fallback, but `N` is the primary talk key.
+> `N` is the interact key: next to an NPC it opens their dialog, on a chest it opens the chest. The Codex now lives on its own key, `Y` (v0.25.180). `F` is reserved for chest / pickup / job signature skill — pressing `F` next to an NPC still talks as a legacy fallback, but `N` is the primary talk key.
 
 ## ⚔️ Classes
 
