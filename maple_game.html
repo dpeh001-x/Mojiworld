@@ -2758,7 +2758,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.171';
+const GAME_VERSION = 'v0.25.172';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4135,6 +4135,25 @@ const LX_VFX = (() => {
   return out;
 })();
 function _lxVfxReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+// =========================================================================
+// LX_WORLD — world-decoration sprites (v0.25.172)
+// =========================================================================
+// Painterly sprites for in-world props that used to be procedural.
+//   portal — runestone-framed magical vortex (replaces drawPortals'
+//            procedural ellipse + radial-gradient stack).
+// =========================================================================
+const LX_WORLD = (() => {
+  const out = {};
+  const files = { portal: 'portal.webp' };
+  for (const [k, f] of Object.entries(files)) {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = 'Sprites/world/' + f;
+    out[k] = img;
+  }
+  return out;
+})();
+function _lxWorldReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
 // =========================================================================
 // MSX_HERO — MapleStory-style chibi character sprite registry (v0.25.152)
 // =========================================================================
@@ -24272,107 +24291,63 @@ function drawAfterImages() {
 }
 
 function drawPortals() {
+  // v0.25.172 — Painterly portal sprite (Sprites/world/portal.webp)
+  // replaces the old procedural ellipse + radial-gradient + sparkle
+  // stack (which was ~110 lines of canvas ops per portal per frame).
+  // The sprite has the runestone frame, swirling vortex, and gold
+  // filigree all baked in. We add a subtle gentle bob + a soft glow
+  // halo underneath for life, and a light additive sparkle drift so
+  // the portal still feels animated. Falls back to a tinted ellipse
+  // if the sprite hasn't decoded yet (first-frame load).
+  const img = LX_WORLD && LX_WORLD.portal;
+  const ready = _lxWorldReady(img);
   for (const po of game.portals) {
     const sx = po.x - game.camera.x;
-    if (sx + 60 < 0 || sx - 60 > W) continue;
+    if (sx + 80 < 0 || sx - 80 > W) continue;
     const t = game.time * 0.05;
+    const bob = Math.sin(t * 0.6) * 1.5;
     ctx.save();
-    ctx.translate(sx, 420);
-
-    // ---- Outer halo (additive, soft) ----
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    const halo = ctx.createRadialGradient(0, 0, 10, 0, 0, 70);
-    halo.addColorStop(0, 'rgba(180,150,255,0.45)');
-    halo.addColorStop(0.6, 'rgba(120,90,200,0.18)');
-    halo.addColorStop(1, 'rgba(40,20,70,0)');
-    ctx.fillStyle = halo;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 70, 80, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    // ---- Translucent stone frame (no outline) ----
-    ctx.save();
-    ctx.globalAlpha = 0.55;
-    // Lit stone ring
-    ctx.fillStyle = '#8a7aa8';
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 32, 52, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Cutout for the portal interior (erase middle)
-    ctx.save();
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.fillStyle = '#000';
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 26, 46, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    // Soft shadow wedge clipped to frame
-    ctx.save();
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 32, 52, 0, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.fillStyle = 'rgba(40,20,60,0.45)';
-    ctx.beginPath();
-    ctx.moveTo(-50, 10); ctx.lineTo(40, -30);
-    ctx.lineTo(55, 60); ctx.lineTo(-55, 60);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-    ctx.restore();
-
-    // ---- Translucent magical swirl interior ----
-    ctx.save();
-    ctx.globalAlpha = 0.60;
-    ctx.fillStyle = '#aa88ff';
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 26, 46, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Darker inner plate
-    ctx.globalAlpha = 0.55;
-    ctx.fillStyle = '#553399';
-    ctx.beginPath();
-    ctx.ellipse(3, 4, 22, 40, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    // ---- Rotating interior arcs (additive, translucent) ----
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    for (let i = 0; i < 3; i++) {
-      const ang = t * 0.5 + i * Math.PI * 2 / 3;
-      ctx.globalAlpha = 0.38;
-      ctx.fillStyle = i === 0 ? '#ccaaff' : i === 1 ? '#9977dd' : '#7755bb';
+    ctx.translate(sx, 420 + bob);
+    // Soft glow halo underneath (cheap radial gradient). Skip on lowFx.
+    if (typeof _perfLowFx !== 'function' || !_perfLowFx()) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const halo = ctx.createRadialGradient(0, 0, 6, 0, 0, 70);
+      halo.addColorStop(0, 'rgba(180,150,255,0.40)');
+      halo.addColorStop(0.6, 'rgba(120,90,200,0.16)');
+      halo.addColorStop(1, 'rgba(40,20,70,0)');
+      ctx.fillStyle = halo;
       ctx.beginPath();
-      ctx.ellipse(Math.cos(ang) * 6, Math.sin(ang) * 12, 10, 18, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, 70, 80, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    if (ready) {
+      // Sprite is ~320x420 native; draw at 110x150 in-world. Centred so
+      // the bottom of the portal sits roughly on the original ground line.
+      ctx.drawImage(img, -55, -78, 110, 156);
+    } else {
+      // Fallback: tinted ellipse so the portal isn't invisible while
+      // the sprite is still decoding (first ~50 ms after page load).
+      ctx.fillStyle = 'rgba(120,90,200,0.6)';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 28, 52, 0, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.restore();
-
-    // Subtle rivets at cardinal positions (translucent)
-    ctx.save();
-    ctx.globalAlpha = 0.55;
-    ctx.fillStyle = '#aaa8bc';
-    for (const [rx, ry] of [[0, -50], [0, 50], [-30, 0], [30, 0]]) {
-      ctx.beginPath(); ctx.arc(rx, ry, 2, 0, Math.PI * 2); ctx.fill();
+    // Gentle drifting sparkles — additive + tiny, doesn't pop on lowFx.
+    if (typeof _perfLowFx !== 'function' || !_perfLowFx()) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 4; i++) {
+        const a = (t * 0.8 + i * 1.6) % (Math.PI * 2);
+        const rx = Math.cos(a) * 22, ry = Math.sin(a * 1.2) * 38;
+        ctx.globalAlpha = 0.6 + Math.sin(t * 1.6 + i) * 0.3;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(Math.round(rx) - 1, Math.round(ry) - 1, 2, 2);
+      }
+      ctx.restore();
     }
     ctx.restore();
-
-    // Sparkles floating inside (bright, additive)
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    for (let i = 0; i < 5; i++) {
-      const a = (t + i * 1.1) % (Math.PI * 2);
-      const rx = Math.cos(a) * 18, ry = Math.sin(a * 1.3) * 34;
-      ctx.globalAlpha = 0.7 + Math.sin(t * 2 + i) * 0.25;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(Math.round(rx) - 1, Math.round(ry) - 1, 2, 2);
-    }
-    ctx.restore();
-
-    ctx.restore();
-
     // Label
     const near = Math.abs((player.x + player.w/2) - po.x) < 100;
     if (near) {
