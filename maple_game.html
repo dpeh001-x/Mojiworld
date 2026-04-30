@@ -2584,7 +2584,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.128';
+const GAME_VERSION = 'v0.25.129';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -3852,17 +3852,30 @@ const LX_TILES = (() => {
   //     Used for floor_wood where the source is a 4x2 plank grid.
   //   - 'none': use the whole image (no crop) — for pillars rendered
   //     as a single decorative asset.
-  // v0.25.128 — switched to painterly hand-painted v3 tiles that match the
-  // bg_v2_* map backdrops (Genshin/Hollow Knight-style). The chibi-cel
-  // _b variants stayed in the repo as a fallback if v3 ever 404s.
-  //   floor_grass_v3 — 4 grass-on-dirt cells touching; auto-bake crops
-  //                    the contiguous opaque region into a seamless tile.
-  //   floor_wood_v3  — 2 stacked horizontal planks; grid:1x2 crops the
-  //                    top plank only so a thin platform (h~12) shows
-  //                    one full plank rather than squashing both into 6 px.
+  // v0.25.128 — painterly hand-painted v3 tiles that match the bg_v2_* map
+  // backdrops (Genshin/Hollow Knight-style).
+  // v0.25.129 — themed floor + platform variants per biome. Each theme has
+  // a paired "floor" (the ground strip) and "platform" (the floating
+  // slab/plank). _pickFloorTheme(md) resolves the active theme per map
+  // and drawPlatforms looks up the right tile via _THEME_FLOOR_KEY /
+  // _THEME_PLATFORM_KEY below.
   const sources = {
+    // Grass biomes (forest / valley / meadow / town / candy / honeycomb / sky)
     floorGrass:    { file: 'floor_grass_v3.webp', bake: 'auto' },
-    floorWood:     { file: 'floor_wood_v3.webp',  bake: 'grid:1x2' },
+    platformGrass: { file: 'floor_wood_v3.webp',  bake: 'grid:1x2' },
+    // Stone biomes (cryptHollow / sanctum / gravitosArena / md.bg='dungeon')
+    floorStone:    { file: 'floor_stone_v1.webp',    bake: 'auto' },
+    platformStone: { file: 'platform_stone_v1.webp', bake: 'auto' },
+    // Ice biome (frozenPeak)
+    floorIce:      { file: 'floor_ice_v1.webp',      bake: 'auto' },
+    platformIce:   { file: 'platform_ice_v1.webp',   bake: 'auto' },
+    // Lava biome (lavaCavern)
+    floorLava:     { file: 'floor_lava_v1.webp',     bake: 'auto' },
+    platformLava:  { file: 'platform_lava_v1.webp',  bake: 'auto' },
+    // Desert biome (duneSands)
+    floorSand:     { file: 'floor_sand_v1.webp',     bake: 'auto' },
+    platformSand:  { file: 'platform_sand_v1.webp',  bake: 'auto' },
+    // Decorative pillars (no bake — drawn whole)
     pillarSanctum: { file: 'pillar_sanctum_a.webp', bake: 'none' },
     pillarCrypt:   { file: 'pillar_crypt_a.webp',   bake: 'none' },
   };
@@ -3903,6 +3916,26 @@ const LX_VFX = (() => {
   return out;
 })();
 function _lxVfxReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+// v0.25.129 — pick the floor theme per map. drawPlatforms uses this to
+// look up the matching ground + platform tile pair from LX_TILES.
+const _THEME_FLOOR_KEY    = { grass:'floorGrass',    stone:'floorStone',    ice:'floorIce',    lava:'floorLava',    sand:'floorSand'    };
+const _THEME_PLATFORM_KEY = { grass:'platformGrass', stone:'platformStone', ice:'platformIce', lava:'platformLava', sand:'platformSand' };
+function _pickFloorTheme(md) {
+  if (!md) return 'grass';
+  // Per-map override first — explicit md.floorTheme wins.
+  if (md.floorTheme && _THEME_FLOOR_KEY[md.floorTheme]) return md.floorTheme;
+  // _variedMapData() doesn't put the source key on the spread, so md.id is
+  // typically undefined. Fall back through game.currentMap (set by loadMap)
+  // to the map's display name.
+  const id = (typeof game !== 'undefined' && game.currentMap)
+    ? game.currentMap
+    : (md.id || md.name || '');
+  if (id === 'frozenPeak')                                    return 'ice';
+  if (id === 'lavaCavern')                                    return 'lava';
+  if (id === 'duneSands')                                     return 'sand';
+  if (id === 'cryptHollow' || id === 'sanctum' || id === 'gravitosArena' || md.bg === 'dungeon') return 'stone';
+  return 'grass';
+}
 function _lxNatW(src) { return src && (src.naturalWidth || src.width) || 0; }
 function _lxNatH(src) { return src && (src.naturalHeight || src.height) || 0; }
 function _lxTileReady(src) {
@@ -23276,9 +23309,14 @@ function drawPlatforms() {
       // _lxDrawTiledRow returned false (image not ready, drawImage
       // threw, etc.) fall through to procedural so the platform still
       // renders instead of being skipped entirely.
-      if (_lxTileReady(LX_TILES.floorGrass)) {
+      // v0.25.129 — theme-aware ground tile. _pickFloorTheme(md) returns
+      // 'grass' / 'stone' / 'ice' / 'lava' / 'sand' based on map id +
+      // md.bg + explicit md.floorTheme override.
+      const _gtKey = _THEME_FLOOR_KEY[_pickFloorTheme(game.mapData)] || 'floorGrass';
+      const _gt = LX_TILES[_gtKey] || LX_TILES.floorGrass;
+      if (_lxTileReady(_gt)) {
         const grassLift = 9; // legacy art protrudes ~9px above p.y
-        if (_lxDrawTiledRow(LX_TILES.floorGrass, sx, p.y - grassLift, p.w, p.h + grassLift)) continue;
+        if (_lxDrawTiledRow(_gt, sx, p.y - grassLift, p.w, p.h + grassLift)) continue;
       }
       // ---- CUTE cel-shaded ground (matches monster aesthetic) ----
       // Dirt body — 2 soft pastel tones + thicker outline seam
@@ -23368,10 +23406,13 @@ function drawPlatforms() {
       // height and tile horizontally. We still paint the OUT halo so
       // the platform reads against busy backgrounds.
       // v0.25.97 — fall through to procedural if drawImage failed.
-      if (_lxTileReady(LX_TILES.floorWood)) {
+      // v0.25.129 — theme-aware platform tile to match the ground tile.
+      const _ptKey = _THEME_PLATFORM_KEY[_pickFloorTheme(game.mapData)] || 'platformGrass';
+      const _pt = LX_TILES[_ptKey] || LX_TILES.platformGrass;
+      if (_lxTileReady(_pt)) {
         ctx.fillStyle = OUT;
         ctx.fillRect(sx - 1, p.y - 1, p.w + 2, p.h + 2);
-        if (_lxDrawTiledRow(LX_TILES.floorWood, sx, p.y, p.w, p.h)) continue;
+        if (_lxDrawTiledRow(_pt, sx, p.y, p.w, p.h)) continue;
       }
       // ---- DQ cel-shaded wood platform ----
       // Outer outline halo
