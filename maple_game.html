@@ -248,9 +248,23 @@
       border-radius: 12px !important;
       font-size: 20px !important;
       position: absolute !important;
-      /* Buttons are visual-only; the .mc-dpad container captures input
-         so drags between arrows don't lose tracking. */
-      pointer-events: none;
+      /* v0.25.166 — D-pad arrows (especially Up) are PURELY VISUAL.
+         The .mc-dpad container captures all input so finger-drags
+         between arrows don't lose tracking. The arrow buttons must
+         not be selectable / focusable / hit-testable as ordinary
+         HTML buttons:
+           - pointer-events: none !important — closes the override
+             loophole where the parent .mc-btn rule was promoting
+             pointer-events back to auto
+           - user-select: none — already inherited, re-asserted here
+           - user inputs (tabindex=-1, draggable=false) live on the
+             DOM elements themselves to belt-and-suspenders this. */
+      pointer-events: none !important;
+      -webkit-user-select: none !important;
+      user-select: none !important;
+      -webkit-touch-callout: none !important;
+      -webkit-tap-highlight-color: transparent !important;
+      cursor: default !important;
       transition: background 0.05s, transform 0.05s;
     }
     /* Mirror :active styling when the smart-dpad JS marks a direction
@@ -387,7 +401,35 @@
       opacity: 0.55 !important;
       z-index: 55 !important;
     }
+    /* v0.25.166 — Mobile dev-mode button. Sits directly under the
+       hide-controls toggle so it shares the same top-right column.
+       Touch-only — hidden on desktop via the surrounding @media. */
+    #mobile-dev-btn {
+      display: flex !important;
+      position: fixed !important;
+      top: calc(106px + env(safe-area-inset-top)) !important;
+      right: calc(12px + env(safe-area-inset-right)) !important;
+      width: 30px !important; height: 30px !important;
+      align-items: center; justify-content: center;
+      font-size: 14px;
+      background: rgba(40,30,60,0.55);
+      color: #ffd166;
+      border: 1px solid rgba(255,209,102,0.55);
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+      opacity: 0.7;
+      z-index: 55;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+      outline: none;
+    }
+    #mobile-dev-btn:active { transform: scale(0.92); opacity: 1; }
   }
+  /* Desktop default — the dev button is mobile-only. */
+  #mobile-dev-btn { display: none; }
 
   /* ---- PORTRAIT LAYOUT ------------------------------------------
      Thumb-rest diagonal: D-pad raised on the LEFT (lower-left thumb),
@@ -2203,6 +2245,13 @@
     <button id="mobile-ctrl-toggle" aria-label="Hide touch controls">✕</button>
   </div>
 
+  <!-- v0.25.166 — discreet developer-mode button for mobile (one-tap entry).
+       Long-pressing the version tag still works (v0.25.161) but a visible
+       button is more discoverable. Touch-only via the CSS media query. -->
+  <button id="mobile-dev-btn"
+          aria-label="Open developer console"
+          title="Developer console (Lv 50 + skills)">🛠</button>
+
   <div id="version-tag" title="Mojiworld build version — updates with every release">v0.4.0</div>
 
   <div id="minimap">
@@ -2616,12 +2665,17 @@
      desktop via media query. Buttons dispatch real keyboard events so the
      existing keydown/keyup handlers drive the game. -->
 <div id="mobile-deck" class="mobile-deck">
-  <!-- Left side of deck: D-pad -->
+  <!-- Left side of deck: D-pad.
+       v0.25.166 — arrows are NOT normal selectable elements. They are
+       purely visual; the .mc-dpad parent captures all touches.
+       tabindex="-1" removes them from keyboard tab order, draggable
+       blocks long-press drag, aria-hidden hides them from screen
+       readers (the parent .mc-dpad role + label could supply that). -->
   <div class="mc-dpad">
-    <button class="mc-btn mc-up"     data-mkey="arrowup"    aria-label="Up / Enter portal">▲</button>
-    <button class="mc-btn mc-left"   data-mkey="arrowleft"  aria-label="Left">◀</button>
-    <button class="mc-btn mc-right"  data-mkey="arrowright" aria-label="Right">▶</button>
-    <button class="mc-btn mc-down"   data-mkey="arrowdown"  aria-label="Drop / down">▼</button>
+    <button class="mc-btn mc-up"     data-mkey="arrowup"    aria-label="Up / Enter portal" tabindex="-1" draggable="false" aria-hidden="true">▲</button>
+    <button class="mc-btn mc-left"   data-mkey="arrowleft"  aria-label="Left"              tabindex="-1" draggable="false" aria-hidden="true">◀</button>
+    <button class="mc-btn mc-right"  data-mkey="arrowright" aria-label="Right"             tabindex="-1" draggable="false" aria-hidden="true">▶</button>
+    <button class="mc-btn mc-down"   data-mkey="arrowdown"  aria-label="Drop / down"       tabindex="-1" draggable="false" aria-hidden="true">▼</button>
   </div>
   <!-- Block (A) — lives OUTSIDE .mc-actions so it can be positioned
        independently without fighting the grid layout or display:contents
@@ -2660,7 +2714,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.165';
+const GAME_VERSION = 'v0.25.166';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -19346,6 +19400,30 @@ function openDevConsole() {
   tag.addEventListener('mousedown', start);
   tag.addEventListener('mouseup',   cancel);
   tag.addEventListener('mouseleave', cancel);
+})();
+
+// v0.25.166 — One-tap mobile dev button. Opens the dev console
+// immediately, no long-press required. The CSS (#mobile-dev-btn,
+// scoped under the mobile @media query) hides this on desktop, but
+// we still wire the handler everywhere so QA can poke at it from
+// devtools' touch emulator.
+(function _wireMobileDevButton() {
+  const btn = document.getElementById('mobile-dev-btn');
+  if (!btn) return;
+  function fire(ev) {
+    if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+    try { if (navigator.vibrate) navigator.vibrate(20); } catch (e) {}
+    openDevConsole();
+  }
+  // pointerup wins over click on iOS Safari and prevents the synthetic
+  // click that follows pointerend from firing twice. Fall back to
+  // click for older browsers without Pointer Events.
+  if ('PointerEvent' in window) {
+    btn.addEventListener('pointerup', fire);
+  } else {
+    btn.addEventListener('click', fire);
+    btn.addEventListener('touchend', fire);
+  }
 })();
 
 // v0.25.161 — Mobile Unlock cheat: instant level 50 + class/job/master
