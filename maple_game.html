@@ -2625,7 +2625,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.159';
+const GAME_VERSION = 'v0.25.160';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -24988,6 +24988,94 @@ function _migrateHairId(id) {
   return id;
 }
 
+// v0.25.160 — MODULE-LEVEL HAIR-GOO BAKE CACHE.
+// =========================================================================
+// The 3-pass goo render (outline + colour + highlight, each a filtered
+// drawImage) was running every frame for the player + every multiplayer
+// peer. Per-character cost was 6 filtered ops, which murders frame
+// budget on mobile where SVG filter is software-rendered.
+//
+// The blob coords don't change between frames, so we bake the FINAL
+// 3-pass composited result once into an offscreen canvas, keyed by
+// (group, hairColor, hairHi, lowFx). Steady-state per-frame cost
+// drops from 6 filtered drawImages → 1 plain drawImage.
+//
+// Cache invalidates when hair pick, class, or low-FX state changes.
+// =========================================================================
+const _LX_HAIR_GOO_BAKE_CACHE = new Map();
+let _lxHairGroupKeyCtr = 0;
+let _LX_HAIR_OFF_SRC = null;        // shared source canvas (blobs go here)
+let _LX_HAIR_OFF_SRC_CTX = null;
+const _LX_HAIR_OFF_W = 96, _LX_HAIR_OFF_H = 96, _LX_HAIR_OFF_OX = 48, _LX_HAIR_OFF_OY = 48;
+function _lxHairGroupKey(group) {
+  if (group.__lxKey == null) {
+    Object.defineProperty(group, '__lxKey', { value: ++_lxHairGroupKeyCtr, enumerable: false });
+  }
+  return group.__lxKey;
+}
+function _lxHairBlob(targetCtx, b, expandR) {
+  targetCtx.beginPath();
+  if (b.rx != null && b.ry != null) {
+    targetCtx.ellipse(b.cx, b.cy, b.rx + expandR, b.ry + expandR, 0, 0, Math.PI * 2);
+  } else {
+    targetCtx.arc(b.cx, b.cy, b.r + expandR, 0, Math.PI * 2);
+  }
+  targetCtx.fill();
+}
+// Bake the full 3-pass goo'd hair into a cached offscreen canvas.
+// Returns the cached canvas; subsequent calls hit the Map.
+function _lxBakeHairGoo(group, hairColor, hairHi, lowFx) {
+  const key = _lxHairGroupKey(group) + '|' + hairColor + '|' + hairHi + '|' + (lowFx ? 1 : 0);
+  let baked = _LX_HAIR_GOO_BAKE_CACHE.get(key);
+  if (baked) return baked;
+
+  // Lazy-alloc the shared source canvas once.
+  if (!_LX_HAIR_OFF_SRC) {
+    _LX_HAIR_OFF_SRC = document.createElement('canvas');
+    _LX_HAIR_OFF_SRC.width = _LX_HAIR_OFF_W; _LX_HAIR_OFF_SRC.height = _LX_HAIR_OFF_H;
+    _LX_HAIR_OFF_SRC_CTX = _LX_HAIR_OFF_SRC.getContext('2d');
+  }
+  const sx = _LX_HAIR_OFF_SRC_CTX;
+
+  // Allocate a fresh result canvas for this cache entry.
+  baked = document.createElement('canvas');
+  baked.width = _LX_HAIR_OFF_W; baked.height = _LX_HAIR_OFF_H;
+  const bx = baked.getContext('2d');
+
+  function _drawPass(fillStyle, expandR, alpha, scaleR, dyOffset) {
+    sx.clearRect(0, 0, _LX_HAIR_OFF_W, _LX_HAIR_OFF_H);
+    sx.save();
+    sx.translate(_LX_HAIR_OFF_OX, _LX_HAIR_OFF_OY);
+    sx.fillStyle = fillStyle;
+    for (const b of group.blobs) {
+      const blob = (scaleR == null && !dyOffset) ? b : {
+        cx: b.cx,
+        cy: b.cy + (dyOffset || 0),
+        r:  b.r  != null ? b.r  * (scaleR || 1) : null,
+        rx: b.rx != null ? b.rx * (scaleR || 1) : null,
+        ry: b.ry != null ? b.ry * (scaleR || 1) : null,
+      };
+      _lxHairBlob(sx, blob, expandR || 0);
+    }
+    sx.restore();
+    bx.save();
+    if (alpha != null) bx.globalAlpha = alpha;
+    try { bx.filter = 'url(#goo)'; } catch (e) { /* fallback: no filter */ }
+    bx.drawImage(_LX_HAIR_OFF_SRC, 0, 0);
+    bx.restore();
+  }
+
+  // Pass 1 — outline (slightly enlarged blobs, dark colour).
+  _drawPass('#1a0818', 1.6);
+  // Pass 2 — colour.
+  _drawPass(hairColor, 0);
+  // Pass 3 — cel highlight band (SKIPPED on low-FX mobile).
+  if (!lowFx) _drawPass(hairHi, 0, 0.55, 0.55, -4);
+
+  _LX_HAIR_GOO_BAKE_CACHE.set(key, baked);
+  return baked;
+}
+
 // v0.25.157 — SVG GOOEY-FILTER HAIR PIPELINE.
 // =========================================================================
 // Hair is no longer Path2D + cubic-beziers. Each style is a cluster of
@@ -25362,78 +25450,16 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     ctx.fill();
     ctx.restore();
   }
-  // v0.25.157 — SVG GOOEY-FILTER HAIR RENDERER.
-  // ===================================================================
-  // The blob group (back or front) is rendered to an offscreen canvas
-  // first WITHOUT any filter — just flat-colour overlapping circles +
-  // ellipses. Then the offscreen image is drawn back to the main
-  // canvas with `ctx.filter = 'url(#goo)'`, applying the Gaussian-blur
-  // → steep-alpha-threshold → atop-composite chain across the WHOLE
-  // image at once. That's what makes the blobs merge into a smooth
-  // organic silhouette — applying the filter per-blob would just give
-  // a fuzzy circle each.
-  //
-  // A two-pass routine paints a slightly-larger black "outline" pass
-  // first, then the colored hair pass on top. The outline pass uses
-  // the same blob set with radii expanded ~+1.6 px so a thin black
-  // ring peeks out around the merged silhouette, matching the cel-art
-  // outline aesthetic without needing any stroke ops.
-  // ===================================================================
-  const _GOO_OFF_W = 96, _GOO_OFF_H = 96, _GOO_OX = 48, _GOO_OY = 48;
-  let _hairGooCache = null;
-  function _ensureHairGooCanvas() {
-    if (_hairGooCache) return _hairGooCache;
-    const c = document.createElement('canvas');
-    c.width = _GOO_OFF_W; c.height = _GOO_OFF_H;
-    _hairGooCache = c;
-    return c;
-  }
-  function _drawBlobsOnCanvas(target, blobs, fillStyle, expandR) {
-    const tx = target.getContext('2d');
-    tx.clearRect(0, 0, _GOO_OFF_W, _GOO_OFF_H);
-    tx.save();
-    tx.translate(_GOO_OX, _GOO_OY);
-    tx.fillStyle = fillStyle;
-    for (const b of blobs) {
-      tx.beginPath();
-      if (b.rx != null && b.ry != null) {
-        tx.ellipse(b.cx, b.cy, b.rx + expandR, b.ry + expandR, 0, 0, Math.PI * 2);
-      } else {
-        tx.arc(b.cx, b.cy, b.r + expandR, 0, Math.PI * 2);
-      }
-      tx.fill();
-    }
-    tx.restore();
-  }
+  // v0.25.160 — Thin wrapper around _lxBakeHairGoo (module scope).
+  // Per-frame cost is now ONE drawImage instead of three filtered
+  // drawImages. The bake itself runs once per (style, colour, lowFx)
+  // tuple and gets cached forever. Also skips bake on low-FX mode if
+  // SVG filter URL is unsupported — falls back to a flat single-pass
+  // tinted blob render. See _lxBakeHairGoo for full pipeline.
   function _drawHairGoo(group) {
     if (!group || !group.blobs || !group.blobs.length) return;
-    const off = _ensureHairGooCanvas();
-    // Pass 1 — black outline (slightly enlarged blobs).
-    _drawBlobsOnCanvas(off, group.blobs, '#1a0818', 1.6);
-    ctx.save();
-    try { ctx.filter = 'url(#goo)'; } catch (e) { /* noop */ }
-    ctx.drawImage(off, -_GOO_OX, -_GOO_OY);
-    ctx.restore();
-    // Pass 2 — colored hair (normal blob radii) layered on top.
-    _drawBlobsOnCanvas(off, group.blobs, C.hair, 0);
-    ctx.save();
-    try { ctx.filter = 'url(#goo)'; } catch (e) { /* noop */ }
-    ctx.drawImage(off, -_GOO_OX, -_GOO_OY);
-    ctx.restore();
-    // Pass 3 — bright cel-highlight band across the upper third of
-    // the silhouette so the hair still reads as cel-shaded volume,
-    // not just a flat blob. Goo'd separately for soft falloff.
-    _drawBlobsOnCanvas(off, group.blobs.map(b => ({
-      cx: b.cx, cy: b.cy - 4,
-      r: b.r != null ? b.r * 0.55 : null,
-      rx: b.rx != null ? b.rx * 0.55 : null,
-      ry: b.ry != null ? b.ry * 0.55 : null,
-    })), HAIR_HI, 0);
-    ctx.save();
-    ctx.globalAlpha = 0.55;
-    try { ctx.filter = 'url(#goo)'; } catch (e) { /* noop */ }
-    ctx.drawImage(off, -_GOO_OX, -_GOO_OY);
-    ctx.restore();
+    const baked = _lxBakeHairGoo(group, C.hair, HAIR_HI, _perfLowFx());
+    ctx.drawImage(baked, -_LX_HAIR_OFF_OX, -_LX_HAIR_OFF_OY);
   }
   // v0.25.158 — Path2D-based hair renderer for traced silhouettes
   // (e.g. the Figma reference design). Uses a vertical cel-halo
@@ -32900,21 +32926,27 @@ function drawParticles() {
   // per-frame particle render when flag is on. Vanilla skips entirely.
   if (_phaserHandlingParticles()) return;
   const camX = game.camera.x;
-  // Pass 1 — glow halos for bright particles (lighter composite, cheap-ish)
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  for (const p of game.particles) {
-    if (p.text) continue;
-    if (!_isBrightHex(p.color)) continue;
-    const sx = p.x - camX;
-    if (sx < -30 || sx > W + 30 || p.y < -30 || p.y > H + 30) continue;
-    const alpha = p.life < 20 ? (p.life / 20) : 1;
-    ctx.globalAlpha = alpha * 0.35;
-    ctx.fillStyle = p.color;
-    const r = p.size + 3;
-    ctx.fillRect(sx - r, p.y - r, r * 2, r * 2);
+  // v0.25.160 — skip the additive glow pass entirely on low-FX (mobile).
+  // The 'lighter' composite + per-particle fillRect is the most
+  // expensive pass in this function; the crisp-core pass below still
+  // runs so particles remain visible, just without the soft halo.
+  if (!_perfLowFx()) {
+    // Pass 1 — glow halos for bright particles (lighter composite)
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const p of game.particles) {
+      if (p.text) continue;
+      if (!_isBrightHex(p.color)) continue;
+      const sx = p.x - camX;
+      if (sx < -30 || sx > W + 30 || p.y < -30 || p.y > H + 30) continue;
+      const alpha = p.life < 20 ? (p.life / 20) : 1;
+      ctx.globalAlpha = alpha * 0.35;
+      ctx.fillStyle = p.color;
+      const r = p.size + 3;
+      ctx.fillRect(sx - r, p.y - r, r * 2, r * 2);
+    }
+    ctx.restore();
   }
-  ctx.restore();
   // Pass 2 — crisp core pixels
   let lastAlpha = -1;
   let lastColor = null;
@@ -33360,6 +33392,12 @@ function loop(time) {
   const dt = Math.min(32, time - lastTime);
   lastTime = time;
   game.time++;
+  // v0.25.160 — feed the adaptive-perf monitor every frame. Was DEFINED
+  // but never called, so LX_PERF.lowFx never flipped on and every
+  // _perfLowFx()-gated optimisation was dead code. Now mobile / slow
+  // hardware gets the ambient cull + projectile-trail skip + (below)
+  // single-pass hair fallback as soon as frame time spikes past 28 ms.
+  _perfTick(dt, time);
 
   // Throttled autosave (every ~15s of wall time) — only after a class is chosen
   if (player.cls && !game._resetting && (time - (game._lastSave || 0) > 15000)) {

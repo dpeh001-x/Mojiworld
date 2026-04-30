@@ -148,6 +148,20 @@
   <b>Heads-up.</b> An earlier implementation of these phases targeted <code>v0.5.1</code> and was preserved locally at tag <code>phase-1-2-3-on-v0.5.1</code>. This is the rebuild against the current <code>v0.9.8</code> codebase, which had moved substantially (new bosses like Gravitos, minimap/taxi, chibi character rewrite).
 </div>
 
+<h2>v0.25.160 <span class="tag">Mobile perf debug</span></h2>
+
+<h3><span class="pill bug">bug</span>Wire <code>_perfTick</code> into the game loop (CRITICAL fix)</h3>
+<p>The adaptive-perf monitor <code>_perfTick(dt, time)</code> has existed since v0.25.86 to flip <code>LX_PERF.lowFx</code> on when frame time spikes past 28 ms — but the call site was never added to the main loop. Result: <code>LX_PERF.lowFx</code> stayed <code>false</code> forever, so every <code>_perfLowFx()</code>-gated optimisation (ambient particle cap from v0.25.147, projectile-trail frustum-cull, low-FX hair fallback below) was <b>dead code on mobile</b>. Now wired in at the top of <code>loop()</code>; mobile / slow hardware adapts in &lt;1 second once frame time spikes.</p>
+
+<h3><span class="pill bug">perf</span>Goo-filter hair: cache the bake (3 filtered passes &rarr; 1 plain drawImage)</h3>
+<p>The v0.25.157 SVG goo hair did <b>three filtered <code>drawImage</code> calls per frame per character</b> (outline + colour + cel highlight, each routed through <code>ctx.filter = 'url(#goo)'</code>). On mobile where SVG filter is software-rendered, that was the single biggest per-frame cost. The blob coordinates don't change between frames, so I moved the renderer to bake the full 3-pass composite into a cached offscreen canvas keyed by <code>(group, hairColor, hairHi, lowFx)</code> at module scope. Steady-state per-frame cost: 1 plain <code>drawImage</code>. Cache invalidates only when the player changes hair pick or class — at most ~8 entries ever exist.</p>
+
+<h3><span class="pill bug">perf</span>Skip cel-highlight pass on low-FX</h3>
+<p>The third goo pass (the bright halo across the upper third of the hair silhouette) is now skipped when <code>_perfLowFx()</code> is true. Saves the bake cost on mobile entirely; the hair still has the dark outline + colour fill so it reads correctly, just without the cel highlight band.</p>
+
+<h3><span class="pill bug">perf</span>Skip additive glow pass in <code>drawParticles</code> on low-FX</h3>
+<p><code>drawParticles</code> ran a <code>'lighter'</code>-composite glow halo pass for every bright particle, then a crisp core pass. The glow pass is the GPU-expensive one. Now gated behind <code>!_perfLowFx()</code>; mobile gets only the crisp-core pass (particles still visible, just without the soft halo). Combat-heavy moments with 80+ particles benefit most.</p>
+
 <h2>v0.25.159 <span class="tag">Eyebrow raised</span></h2>
 
 <h3><span class="pill rare">polish</span>Eyebrow lifted 2.5 px above the iris</h3>
