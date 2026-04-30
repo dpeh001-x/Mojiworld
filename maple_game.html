@@ -2584,7 +2584,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.129';
+const GAME_VERSION = 'v0.25.130';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -24451,6 +24451,224 @@ function drawShadowClones() {
   }
 }
 
+// =========================================================================
+// VECTOR HERO RENDERER (v0.25.130) — skeletal animation + mesh deformation
+// =========================================================================
+// Opt-in via `?charstyle=vector` URL flag or
+// `localStorage.setItem('mojiworld_charstyle', 'vector')`. Default stays
+// the HERO sprite-sheet renderer so the rebrand doesn't lose the
+// painterly hero artwork that v0.25.81-93 polished.
+//
+// Architecture:
+// - HERO_VEC_RIG    : tree of bones with rest-pose offsets relative to parent
+// - HERO_VEC_PARTS  : Path2D vector shapes per body part (compiled SVG paths)
+// - HERO_VEC_ANIMS  : per-bone rotation curves over normalised time t
+// - HERO_VEC_DEFORM : per-bone scale curves (mesh squash / stretch)
+// - HERO_VEC_CLASS  : per-class palette + silhouette (helmet/hood/hat/feather)
+//
+// Each bone applies its parent chain's translate → rotate → scale in order
+// so child transforms compose naturally without explicit matrix math.
+// =========================================================================
+const _CHAR_STYLE = (() => {
+  if (/[?&]charstyle=vector\b/.test(location.search)) return 'vector';
+  if (/[?&]charstyle=sprite\b/.test(location.search)) return 'sprite';
+  return (localStorage.getItem('mojiworld_charstyle') || 'sprite').toLowerCase();
+})();
+const HERO_VEC_PARTS = {
+  head:  new Path2D('M -14 0 A 14 14 0 1 1 14 0 A 14 14 0 1 1 -14 0 Z'),
+  torso: new Path2D('M -11 -16 Q 0 -18 11 -16 L 9 16 Q 0 17 -9 16 Z'),
+  arm:   new Path2D('M -3 -3 L 3 -3 L 2 22 Q 0 24 -2 22 Z'),
+  leg:   new Path2D('M -4 -3 L 4 -3 L 3 26 Q 0 28 -3 26 Z'),
+  hair:  new Path2D('M -14 -2 Q -10 -16 0 -16 Q 10 -16 14 -2 L 12 -8 L 8 -10 L 4 -8 L 0 -10 L -4 -8 L -8 -10 L -12 -8 Z'),
+};
+const HERO_VEC_RIG = {
+  root:  { x:0,  y:0,    parent:null   },
+  spine: { x:0,  y:-26,  parent:'root'  },
+  head:  { x:0,  y:-32,  parent:'spine' },
+  armL:  { x:-9, y:-22,  parent:'spine' },
+  armR:  { x:9,  y:-22,  parent:'spine' },
+  legL:  { x:-5, y:-2,   parent:'root'  },
+  legR:  { x:5,  y:-2,   parent:'root'  },
+};
+const HERO_VEC_CLASS = {
+  warrior: { body:'#d04444', accent:'#ffe082', skin:'#fde2c4', boot:'#3a1f10', hair:'#3a2820', hat:'helmet'  },
+  rogue:   { body:'#5a3a8a', accent:'#a8dad8', skin:'#fde2c4', boot:'#1f1230', hair:'#2a1810', hat:'hood'    },
+  mage:    { body:'#3a5fa0', accent:'#ffd166', skin:'#fde2c4', boot:'#1c2a40', hair:'#5a3a18', hat:'pointy'  },
+  archer:  { body:'#3a8a4f', accent:'#dfa84a', skin:'#fde2c4', boot:'#23341a', hair:'#5a3a18', hat:'feather' },
+  default: { body:'#888',    accent:'#ffe082', skin:'#fde2c4', boot:'#444',    hair:'#3a2820', hat:null      },
+};
+const HERO_VEC_ANIMS = {
+  idle: {
+    spine: t => Math.sin(t * Math.PI * 2) * 0.012,
+    head:  t => Math.sin(t * Math.PI * 2 + 0.5) * 0.02,
+    armL:  () => 0, armR: () => 0, legL: () => 0, legR: () => 0,
+  },
+  walk: {
+    spine: t => Math.sin(t * Math.PI * 4) * 0.025,
+    head:  t => Math.sin(t * Math.PI * 4 + 0.3) * 0.04,
+    armL:  t => Math.sin(t * Math.PI * 2) * 0.45,
+    armR:  t => Math.sin(t * Math.PI * 2 + Math.PI) * 0.45,
+    legL:  t => Math.sin(t * Math.PI * 2 + Math.PI) * 0.55,
+    legR:  t => Math.sin(t * Math.PI * 2) * 0.55,
+  },
+  jump: {
+    spine: () => -0.05, head: () => -0.08,
+    armL:  () => -0.7, armR: () => 0.7,
+    legL:  () => 0.5,  legR: () => -0.5,
+  },
+  attack: {
+    spine: t => Math.sin(t * Math.PI) * 0.12,
+    head:  t => Math.sin(t * Math.PI) * 0.10,
+    armR:  t => -1.2 + Math.sin(t * Math.PI) * 0.7,
+    armL:  t => 0.3 + Math.sin(t * Math.PI) * 0.2,
+    legL:  () => 0, legR: () => 0,
+  },
+};
+const HERO_VEC_DEFORM = {
+  idle: { spine: t => ({ sx: 1 - Math.sin(t * Math.PI * 2) * 0.012, sy: 1 + Math.sin(t * Math.PI * 2) * 0.012 }) },
+  walk: { spine: t => ({ sx: 1, sy: 1 + Math.sin(t * Math.PI * 4) * 0.04 }) },
+  jump: { spine: () => ({ sx: 0.94, sy: 1.08 }) },
+  attack: {
+    armR:  t => ({ sx: 1, sy: 1 + Math.sin(t * Math.PI) * 0.18 }),
+    spine: () => ({ sx: 1.05, sy: 0.98 }),
+  },
+};
+function _heroVecAnimFor() {
+  const inAir = Math.abs(player.vy) > 0.5 && !player.onGround;
+  const walking = !inAir && Math.abs(player.vx) > 0.5;
+  if (player.attacking) return 'attack';
+  if (inAir) return 'jump';
+  if (walking) return 'walk';
+  return 'idle';
+}
+function _heroVecTimeNorm(animName) {
+  const t = (game && game.time) || 0;
+  if (animName === 'walk')   return ((t * 0.07) % 1);
+  if (animName === 'idle')   return ((t * 0.02) % 1);
+  if (animName === 'attack') {
+    const start = player._heroAtkAt || t;
+    return Math.max(0, Math.min(1, (t - start) / 22));
+  }
+  return 0;
+}
+function _drawVectorHero(sx, sy) {
+  const cls = player.cls || 'default';
+  const C = HERO_VEC_CLASS[cls] || HERO_VEC_CLASS.default;
+  const animName = _heroVecAnimFor();
+  const t = _heroVecTimeNorm(animName);
+  const anim = HERO_VEC_ANIMS[animName] || {};
+  const deform = HERO_VEC_DEFORM[animName] || {};
+  const OUT = '#1a0818';
+  // Walk the parent chain root → ...→ bone, applying each transform.
+  function applyChain(bone) {
+    const chain = [];
+    let cur = bone;
+    while (cur) { chain.unshift(cur); cur = HERO_VEC_RIG[cur].parent; }
+    for (const b of chain) {
+      const r = HERO_VEC_RIG[b];
+      ctx.translate(r.x, r.y);
+      const rotFn = anim[b];
+      if (rotFn) ctx.rotate(rotFn(t));
+      const defFn = deform[b];
+      if (defFn) {
+        const d = defFn(t);
+        ctx.scale(d.sx, d.sy);
+      }
+    }
+  }
+  function drawBone(bone, drawFn) {
+    ctx.save();
+    applyChain(bone);
+    drawFn();
+    ctx.restore();
+  }
+  function stroke(path) {
+    ctx.strokeStyle = OUT;
+    ctx.lineWidth = 1.5;
+    ctx.stroke(path);
+  }
+  // World-space anchor: feet centred at (sx + player.w/2, sy + player.h)
+  ctx.save();
+  ctx.translate(sx + player.w / 2, sy + player.h);
+  if ((player.facing | 0) < 0) ctx.scale(-1, 1);
+  ctx.lineJoin = 'round';
+  ctx.lineCap  = 'round';
+
+  // Z-order: back leg → back arm → torso → head → front leg → front arm.
+  // Convention: ?L bones are the BACK side; ?R bones the FRONT.
+  // Back leg (slightly darker for depth)
+  drawBone('legL', () => {
+    ctx.fillStyle = (typeof _mixHex === 'function') ? _mixHex(C.boot, '#000000', 0.20) : C.boot;
+    ctx.fill(HERO_VEC_PARTS.leg); stroke(HERO_VEC_PARTS.leg);
+  });
+  // Back arm
+  drawBone('armL', () => {
+    ctx.fillStyle = (typeof _mixHex === 'function') ? _mixHex(C.body, '#000000', 0.18) : C.body;
+    ctx.fill(HERO_VEC_PARTS.arm); stroke(HERO_VEC_PARTS.arm);
+  });
+  // Torso + accent belt
+  drawBone('spine', () => {
+    ctx.fillStyle = C.body;
+    ctx.fill(HERO_VEC_PARTS.torso); stroke(HERO_VEC_PARTS.torso);
+    ctx.fillStyle = C.accent;
+    ctx.fillRect(-9, 8, 18, 3);
+    ctx.strokeRect(-9, 8, 18, 3);
+  });
+  // Head — skin, hair, class hat, eyes, mouth
+  drawBone('head', () => {
+    ctx.fillStyle = C.skin;
+    ctx.fill(HERO_VEC_PARTS.head); stroke(HERO_VEC_PARTS.head);
+    if (C.hat === 'pointy') {
+      ctx.fillStyle = C.body;
+      ctx.beginPath();
+      ctx.moveTo(-14, -8); ctx.lineTo(0, -28); ctx.lineTo(14, -8); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = C.accent;
+      ctx.beginPath(); ctx.arc(0, -10, 2, 0, Math.PI * 2); ctx.fill();
+    } else if (C.hat === 'hood') {
+      ctx.fillStyle = (typeof _mixHex === 'function') ? _mixHex(C.body, '#000000', 0.22) : C.body;
+      ctx.beginPath();
+      ctx.moveTo(-14, 0); ctx.quadraticCurveTo(-12, -16, 0, -18);
+      ctx.quadraticCurveTo(12, -16, 14, 0); ctx.lineTo(10, -2);
+      ctx.quadraticCurveTo(0, -8, -10, -2); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    } else if (C.hat === 'helmet') {
+      ctx.fillStyle = C.accent;
+      ctx.beginPath();
+      ctx.moveTo(-14, 2); ctx.quadraticCurveTo(0, -20, 14, 2); ctx.lineTo(10, -2);
+      ctx.quadraticCurveTo(0, -16, -10, -2); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    } else if (C.hat === 'feather') {
+      ctx.fillStyle = C.hair;
+      ctx.fill(HERO_VEC_PARTS.hair); stroke(HERO_VEC_PARTS.hair);
+      ctx.fillStyle = C.accent;
+      ctx.beginPath();
+      ctx.moveTo(8, -10); ctx.lineTo(20, -22); ctx.lineTo(14, -16); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    } else {
+      ctx.fillStyle = C.hair;
+      ctx.fill(HERO_VEC_PARTS.hair); stroke(HERO_VEC_PARTS.hair);
+    }
+    ctx.fillStyle = OUT;
+    ctx.beginPath(); ctx.arc(-4, 0, 1.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(4,  0, 1.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-2, 5); ctx.quadraticCurveTo(0, 7, 2, 5);
+    ctx.stroke();
+  });
+  // Front leg
+  drawBone('legR', () => {
+    ctx.fillStyle = C.boot;
+    ctx.fill(HERO_VEC_PARTS.leg); stroke(HERO_VEC_PARTS.leg);
+  });
+  // Front arm
+  drawBone('armR', () => {
+    ctx.fillStyle = C.body;
+    ctx.fill(HERO_VEC_PARTS.arm); stroke(HERO_VEC_PARTS.arm);
+  });
+  ctx.restore();
+}
+
 function drawPlayer() {
   const sx = Math.round(player.x - game.camera.x);
   const sy = Math.round(player.y);
@@ -24490,13 +24708,18 @@ function drawPlayer() {
   //             when set, draw the layered avatar instead of the procedural chibi.
   // v0.25.80 — also has walk-cycle frames (PLAYER_CUSTOM_WALK_FRAMES) when applied.
   const _hasCustomSprite = !!(window.PLAYER_CUSTOM_SPRITE_CANVAS || (window.PLAYER_CUSTOM_WALK_FRAMES && window.PLAYER_CUSTOM_WALK_FRAMES.length));
-  if (_hasCustomSprite) {
+  // v0.25.130 — opt-in vector-art skeletal renderer takes priority over
+  // both the HERO sprite-sheet path AND the procedural chibi when
+  // _CHAR_STYLE === 'vector'. Default 'sprite' keeps the existing flow.
+  if (_CHAR_STYLE === 'vector') {
+    _drawVectorHero(sx, sy);
+  } else if (_hasCustomSprite) {
     _drawPlayerCustomSprite();
   } else {
     drawCuteCharacter(sx, sy);
   }
   _chibiRestore();
-  if (!_hasCustomSprite) _drawCuteFaceOverlay(sx, sy);
+  if (_CHAR_STYLE !== 'vector' && !_hasCustomSprite) _drawCuteFaceOverlay(sx, sy);
   _drawPlayerNameTag(sx, sy);
   return;
 }
