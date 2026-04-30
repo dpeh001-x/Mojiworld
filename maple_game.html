@@ -2758,7 +2758,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.173';
+const GAME_VERSION = 'v0.25.174';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4154,6 +4154,34 @@ const LX_WORLD = (() => {
   return out;
 })();
 function _lxWorldReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+// =========================================================================
+// LX_MOB_PROJ — painterly monster-projectile sprites for the VANILLA
+// canvas renderer (v0.25.174). The Phaser opt-in path has used these
+// since v0.25.100 via _loadProjSprite, but the default vanilla path
+// in drawProjectiles was still drawing 4 procedural circle/blob
+// stacks per mob projectile. Now drawProjectiles loads them through
+// this registry and prefers drawImage of the painterly webp whenever
+// the asset has decoded — falls back to the original procedural draw
+// if the image hasn't loaded yet (rare; the v0.25.173 preloader
+// blocks the world reveal until these are warm).
+// =========================================================================
+const LX_MOB_PROJ = (() => {
+  const out = {};
+  const files = {
+    mdark:     'mdark.webp',
+    msplinter: 'msplinter.webp',
+    mspore:    'mspore.webp',
+    mtoxic:    'mtoxic.webp',
+  };
+  for (const [k, f] of Object.entries(files)) {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = 'Sprites/projectiles/' + f;
+    out[k] = img;
+  }
+  return out;
+})();
+function _lxMobProjReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
 // =========================================================================
 // MSX_HERO — MapleStory-style chibi character sprite registry (v0.25.152)
 // =========================================================================
@@ -32469,56 +32497,82 @@ function drawProjectiles() {
     } else {
       const col = p.color || '#ff8866';
       const cx = sx + p.w/2, cy = p.y + p.h/2;
+      // v0.25.174 — painterly sprite path for the 4 main monster
+      // projectile archetypes. Each is rendered as a single drawImage
+      // (procedurally rotated for the splinter shard so it tracks
+      // velocity). Procedural fallbacks are still inline below — the
+      // `if (sprite-ready)` early-out skips them when the sprite is
+      // available, so we only pay the canvas-stack cost during the
+      // first decode window.
       if (p.skill === 'mspore') {
-        // Spore pellet — orange cluster
-        ctx.fillStyle = 'rgba(255,150,60,0.4)';
-        ctx.beginPath(); ctx.arc(cx, cy, p.w * 0.7, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = col;
-        ctx.beginPath(); ctx.arc(cx, cy, p.w/2, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = '#ffdd88';
-        ctx.beginPath(); ctx.arc(cx - 2, cy - 2, p.w/4, 0, Math.PI * 2); ctx.fill();
+        if (_lxMobProjReady(LX_MOB_PROJ.mspore)) {
+          const r = p.w * 1.1;
+          ctx.drawImage(LX_MOB_PROJ.mspore, cx - r, cy - r, r * 2, r * 2);
+        } else {
+          // Procedural fallback (orange cluster).
+          ctx.fillStyle = 'rgba(255,150,60,0.4)';
+          ctx.beginPath(); ctx.arc(cx, cy, p.w * 0.7, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = col;
+          ctx.beginPath(); ctx.arc(cx, cy, p.w/2, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#ffdd88';
+          ctx.beginPath(); ctx.arc(cx - 2, cy - 2, p.w/4, 0, Math.PI * 2); ctx.fill();
+        }
         // v0.25.21 — dust emission extracted to emitProjectileTrails()
       } else if (p.skill === 'mdark') {
-        // Dark purple energy bolt
-        ctx.fillStyle = 'rgba(160,60,200,0.45)';
-        ctx.beginPath(); ctx.arc(cx, cy, p.w * 0.9, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = col;
-        ctx.beginPath(); ctx.arc(cx, cy, p.w/2, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = '#ff88ff';
-        ctx.beginPath(); ctx.arc(cx - 2, cy - 2, p.w/5, 0, Math.PI * 2); ctx.fill();
+        if (_lxMobProjReady(LX_MOB_PROJ.mdark)) {
+          const r = p.w * 1.1;
+          ctx.drawImage(LX_MOB_PROJ.mdark, cx - r, cy - r, r * 2, r * 2);
+        } else {
+          // Procedural fallback (purple bolt).
+          ctx.fillStyle = 'rgba(160,60,200,0.45)';
+          ctx.beginPath(); ctx.arc(cx, cy, p.w * 0.9, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = col;
+          ctx.beginPath(); ctx.arc(cx, cy, p.w/2, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#ff88ff';
+          ctx.beginPath(); ctx.arc(cx - 2, cy - 2, p.w/5, 0, Math.PI * 2); ctx.fill();
+        }
         // v0.25.21 — sparkle emission extracted to emitProjectileTrails()
       } else if (p.skill === 'msplinter') {
-        // Wooden splinter — rotating shard
+        // Splinter has a clear pointy tip — rotate to track velocity.
         ctx.save();
         ctx.translate(cx, cy);
         ctx.rotate(Math.atan2(p.vy, p.vx));
-        ctx.fillStyle = '#4a2a0a';
-        ctx.fillRect(-p.w/2, -2, p.w, 4);
-        ctx.fillStyle = col;
-        ctx.fillRect(-p.w/2 + 1, -1, p.w - 2, 2);
-        ctx.fillStyle = '#c89050';
-        ctx.fillRect(-p.w/2 + 1, -1, p.w - 2, 1);
-        // Pointed tip
-        ctx.fillStyle = '#2a1808';
-        ctx.beginPath();
-        ctx.moveTo(p.w/2 - 1, -2);
-        ctx.lineTo(p.w/2 + 4, 0);
-        ctx.lineTo(p.w/2 - 1, 2);
-        ctx.closePath(); ctx.fill();
+        if (_lxMobProjReady(LX_MOB_PROJ.msplinter)) {
+          const w = p.w * 2.4, h = p.w * 1.6;
+          ctx.drawImage(LX_MOB_PROJ.msplinter, -w / 2, -h / 2, w, h);
+        } else {
+          // Procedural fallback (wooden shard).
+          ctx.fillStyle = '#4a2a0a';
+          ctx.fillRect(-p.w/2, -2, p.w, 4);
+          ctx.fillStyle = col;
+          ctx.fillRect(-p.w/2 + 1, -1, p.w - 2, 2);
+          ctx.fillStyle = '#c89050';
+          ctx.fillRect(-p.w/2 + 1, -1, p.w - 2, 1);
+          ctx.fillStyle = '#2a1808';
+          ctx.beginPath();
+          ctx.moveTo(p.w/2 - 1, -2);
+          ctx.lineTo(p.w/2 + 4, 0);
+          ctx.lineTo(p.w/2 - 1, 2);
+          ctx.closePath(); ctx.fill();
+        }
         ctx.restore();
       } else if (p.skill === 'mtoxic') {
-        // Toxic green ooze blob
-        ctx.fillStyle = 'rgba(80,230,60,0.4)';
-        ctx.beginPath(); ctx.arc(cx, cy, p.w * 0.8, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = col;
-        // Lumpy blob
-        ctx.beginPath();
-        ctx.arc(cx, cy, p.w/2, 0, Math.PI * 2);
-        ctx.arc(cx - 3, cy + 2, p.w/3, 0, Math.PI * 2);
-        ctx.arc(cx + 3, cy - 1, p.w/3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#ccffaa';
-        ctx.beginPath(); ctx.arc(cx - 2, cy - 3, 2, 0, Math.PI * 2); ctx.fill();
+        if (_lxMobProjReady(LX_MOB_PROJ.mtoxic)) {
+          const r = p.w * 1.15;
+          ctx.drawImage(LX_MOB_PROJ.mtoxic, cx - r, cy - r, r * 2, r * 2);
+        } else {
+          // Procedural fallback (green blob).
+          ctx.fillStyle = 'rgba(80,230,60,0.4)';
+          ctx.beginPath(); ctx.arc(cx, cy, p.w * 0.8, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = col;
+          ctx.beginPath();
+          ctx.arc(cx, cy, p.w/2, 0, Math.PI * 2);
+          ctx.arc(cx - 3, cy + 2, p.w/3, 0, Math.PI * 2);
+          ctx.arc(cx + 3, cy - 1, p.w/3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#ccffaa';
+          ctx.beginPath(); ctx.arc(cx - 2, cy - 3, 2, 0, Math.PI * 2); ctx.fill();
+        }
         // v0.25.21 — drip emission extracted to emitProjectileTrails()
       } else if (p.skill === 'shard') {
         // Crystal shard — rotating diamond with glow
