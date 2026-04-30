@@ -2625,7 +2625,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.160';
+const GAME_VERSION = 'v0.25.161';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -19130,6 +19130,22 @@ function renderDev() {
   };
   grid.innerHTML = '';
 
+  // ===== Mobile Unlock (top — quick one-tap action for phones) =====
+  // v0.25.161 — single big button that gives the player a fully-kitted
+  // Lv 50 chibi: class auto-picked, full skill tree, generous resources.
+  const mobileSec = makeSection('📱 Mobile Quick-Unlock', '#ffaa66');
+  const mobileBtn = btn('🎁 Lv 50 + ALL SKILLS', () => devMobileUnlock(), '#7a4a8a');
+  mobileBtn.style.fontSize = '14px';
+  mobileBtn.style.padding = '10px 14px';
+  mobileBtn.style.width = '100%';
+  mobileBtn.style.fontWeight = 'bold';
+  mobileSec.appendChild(mobileBtn);
+  const mobileNote = document.createElement('div');
+  mobileNote.style.cssText = 'color:#bbb; font-size:11px; margin-top:6px; line-height:1.4;';
+  mobileNote.textContent = 'One-tap setup for touch devices. Picks Warrior + first job/master if no class chosen, jumps to Lv 50, unlocks every skill-tree node for your class, refills HP/MP and grants 50k Lumens. Safe to tap repeatedly.';
+  mobileSec.appendChild(mobileNote);
+  grid.appendChild(mobileSec);
+
   // ===== Progression =====
   const progSec = makeSection('⏫ Progression', '#88ccff');
   const lvlRow = document.createElement('div');
@@ -19261,6 +19277,86 @@ function openDevConsole() {
   renderDev();
   document.getElementById('dev-modal').style.display = 'flex';
   game.paused = true;
+}
+
+// v0.25.161 — MOBILE DEV-CONSOLE OPENER (long-press on #version-tag).
+// =========================================================================
+// Mobile devices have no physical keyboard, so the desktop 1+2+3 hold
+// combo can't open the dev console. Bind a long-press (~700 ms) on the
+// top-right version tag instead — that's a safe target because nothing
+// else in the HUD reacts to taps there. The press fires haptic feedback
+// (if available) when it crosses the threshold so the player knows it
+// triggered.
+// =========================================================================
+(function _wireMobileDevOpener() {
+  const tag = document.getElementById('version-tag');
+  if (!tag) return;
+  let pressTimer = null;
+  function start(ev) {
+    if (pressTimer) return;
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      try { if (navigator.vibrate) navigator.vibrate(30); } catch (e) {}
+      openDevConsole();
+    }, 700);
+  }
+  function cancel() {
+    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+  }
+  tag.addEventListener('touchstart',  start,  { passive: true });
+  tag.addEventListener('touchend',    cancel, { passive: true });
+  tag.addEventListener('touchmove',   cancel, { passive: true });
+  tag.addEventListener('touchcancel', cancel, { passive: true });
+  // Desktop fallback (right-click + hold, or click-and-hold) for testing.
+  tag.addEventListener('mousedown', start);
+  tag.addEventListener('mouseup',   cancel);
+  tag.addEventListener('mouseleave', cancel);
+})();
+
+// v0.25.161 — Mobile Unlock cheat: instant level 50 + class/job/master
+// chain auto-picked + every skill-tree node unlocked + full HP/MP/AP
+// refill. Idempotent: safe to call repeatedly. Used by the Mobile Unlock
+// button that the dev console renders for touch users.
+function devMobileUnlock() {
+  // Pick a class if none chosen yet — default warrior so the unlock
+  // works even on a fresh save before character creation.
+  if (!player.cls) {
+    if (typeof applyClass === 'function') applyClass('warrior');
+  }
+  // Auto-pick first job for the class if none.
+  if (!player.job && player.cls) {
+    const jobIds = Object.keys(JOBS).filter(j => JOBS[j].cls === player.cls);
+    if (jobIds.length && typeof devSetJob === 'function') devSetJob(jobIds[0]);
+  }
+  // Auto-pick first master for the job.
+  if (!player.master && player.job) {
+    const masterIds = Object.keys(MASTERS).filter(m => MASTERS[m].job === player.job);
+    if (masterIds.length && typeof devSetMaster === 'function') devSetMaster(masterIds[0]);
+  }
+  // Level to 50.
+  if (player.level < 50) devSetLevel(50);
+  // Unlock every skill-tree node for the class. canUnlock requires SP +
+  // prereqs, so loop tier-by-tier and grant the SP cost back each time
+  // until everything is unlocked.
+  player.treeUnlocked = player.treeUnlocked || {};
+  player.tree = player.tree || {};
+  const nodes = (SKILL_TREE && SKILL_TREE[player.cls]) || [];
+  // Tier 1 → 2 → 3 ordering ensures prereqs land first.
+  const sorted = nodes.slice().sort((a, b) => (a.tier || 0) - (b.tier || 0));
+  for (const node of sorted) {
+    if (player.treeUnlocked[node.id]) continue;
+    player.skillPoints = Math.max(player.skillPoints, node.cost + 5);
+    if (typeof unlockTreeNode === 'function') unlockTreeNode(node);
+  }
+  // Generous resource refill so the player can immediately try the kit.
+  player.skillPoints += 10;
+  player.mesos = Math.max(player.mesos || 0, 50000);
+  player.hp = getMaxHp();
+  player.mp = getMaxMp();
+  if (typeof updateUI === 'function') updateUI();
+  if (typeof renderDev === 'function') renderDev();
+  if (typeof devLog === 'function') devLog('Mobile Unlock: Lv50 + class chain + all skill-tree nodes + 50k Lumens.');
+  if (typeof showToast === 'function') showToast('🎁 Mobile Unlock applied — Lv50 + all skills', 'legendary');
 }
 
 // =========================================================================
