@@ -2584,7 +2584,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.134';
+const GAME_VERSION = 'v0.25.135';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -24477,10 +24477,14 @@ function drawShadowClones() {
 // Each bone applies its parent chain's translate → rotate → scale in order
 // so child transforms compose naturally without explicit matrix math.
 // =========================================================================
+// v0.25.135 — default flipped from 'sprite' to 'vector' per user request.
+// Power users can opt back into the legacy HERO sprite-sheet renderer via
+// `?charstyle=sprite` URL flag or
+// `localStorage.setItem('mojiworld_charstyle', 'sprite')`.
 const _CHAR_STYLE = (() => {
   if (/[?&]charstyle=vector\b/.test(location.search)) return 'vector';
   if (/[?&]charstyle=sprite\b/.test(location.search)) return 'sprite';
-  return (localStorage.getItem('mojiworld_charstyle') || 'sprite').toLowerCase();
+  return (localStorage.getItem('mojiworld_charstyle') || 'vector').toLowerCase();
 })();
 const HERO_VEC_PARTS = {
   // v0.25.133 — bigger head (r=20).
@@ -24548,8 +24552,9 @@ const HERO_VEC_PARTS = {
 };
 // v0.25.133 — tighter rig: smaller torso, head sits even higher relative
 // to body so the chibi head-to-body ratio reads ~1:1.
-// Origin at feet (0,0); leg hip pivot at y=-10; torso pivots at the same
-// hip line; shoulders at y=-12; head centre at y=-32 (so head dominates).
+// v0.25.136 — added handR bone (child of armR) for the per-class weapon
+// layer. Anchored at y=10 = bottom of arm path = hand position. Rotates
+// + bobs naturally with the arm.
 const HERO_VEC_RIG = {
   root:  { x:0,   y:0,     parent:null    },   // feet centre
   legL:  { x:-4,  y:-10,   parent:'root'  },   // back-leg HIP pivot
@@ -24558,6 +24563,99 @@ const HERO_VEC_RIG = {
   armL:  { x:-9,  y:-12,   parent:'spine' },   // back-arm shoulder pivot
   armR:  { x:9,   y:-12,   parent:'spine' },   // front-arm shoulder pivot
   head:  { x:0,   y:-32,   parent:'spine' },   // big head sits high
+  handR: { x:0,   y:10,    parent:'armR'  },   // front hand (weapon anchor)
+};
+// v0.25.136 — per-class weapon overlays. Drawn at the front-hand bone
+// (handR) so the weapon naturally inherits the arm's animation
+// rotation + the head/spine bob. Each fn accepts (ctx, OUT) where ctx
+// is the local renderer context and OUT is the outline colour. Weapons
+// live in hand-local coords with the grip near (0, 0) and the business
+// end pointing UP (negative y).
+const HERO_VEC_WEAPON = {
+  warrior: function(c, OUT) {
+    // Sword: silver blade pointing up, gold crossguard, dark grip.
+    c.fillStyle = '#dadde2'; c.strokeStyle = OUT; c.lineWidth = 0.5;
+    c.beginPath();
+    c.moveTo(-1.8, -22); c.lineTo(0, -25); c.lineTo(1.8, -22);
+    c.lineTo(1.8, -4); c.lineTo(-1.8, -4); c.closePath();
+    c.fill(); c.stroke();
+    // Cel shadow on right edge of blade
+    c.fillStyle = 'rgba(0,0,0,0.30)';
+    c.fillRect(0.4, -22, 1.4, 18);
+    // Highlight on left edge
+    c.fillStyle = 'rgba(255,255,255,0.65)';
+    c.fillRect(-1.5, -22, 0.6, 18);
+    // Crossguard
+    c.fillStyle = '#e0a64a';
+    c.fillRect(-5.5, -4.5, 11, 2.5);
+    c.strokeRect(-5.5, -4.5, 11, 2.5);
+    // Grip
+    c.fillStyle = '#3a2010';
+    c.fillRect(-1.2, -2, 2.4, 4.5);
+    c.strokeRect(-1.2, -2, 2.4, 4.5);
+    // Pommel
+    c.fillStyle = '#e0a64a';
+    c.beginPath(); c.arc(0, 3.2, 1.3, 0, Math.PI * 2); c.fill(); c.stroke();
+  },
+  rogue: function(c, OUT) {
+    // Dagger: short silver blade with leather wrap on grip.
+    c.fillStyle = '#dadde2'; c.strokeStyle = OUT; c.lineWidth = 0.5;
+    c.beginPath();
+    c.moveTo(-1.4, -12); c.lineTo(0, -14); c.lineTo(1.4, -12);
+    c.lineTo(1.4, -3); c.lineTo(-1.4, -3); c.closePath();
+    c.fill(); c.stroke();
+    c.fillStyle = 'rgba(0,0,0,0.30)';
+    c.fillRect(0.3, -12, 1.1, 9);
+    c.fillStyle = 'rgba(255,255,255,0.6)';
+    c.fillRect(-1.1, -12, 0.5, 9);
+    // Crossguard (smaller)
+    c.fillStyle = '#5a3a18';
+    c.fillRect(-3, -3.5, 6, 1.8);
+    c.strokeRect(-3, -3.5, 6, 1.8);
+    // Wrapped grip
+    c.fillStyle = '#3a2010';
+    c.fillRect(-1, -1.5, 2, 3.5);
+    c.strokeRect(-1, -1.5, 2, 3.5);
+  },
+  mage: function(c, OUT) {
+    // Wizard staff: tall wooden shaft + glowing magic orb on top.
+    c.fillStyle = '#5a3a18'; c.strokeStyle = OUT; c.lineWidth = 0.5;
+    c.fillRect(-1.3, -22, 2.6, 26);
+    c.strokeRect(-1.3, -22, 2.6, 26);
+    // Wood-grain shadow
+    c.fillStyle = 'rgba(0,0,0,0.30)';
+    c.fillRect(0.4, -22, 0.9, 26);
+    // Orb glow halo
+    c.fillStyle = 'rgba(136,204,255,0.40)';
+    c.beginPath(); c.arc(0, -25, 6, 0, Math.PI * 2); c.fill();
+    // Orb body
+    c.fillStyle = '#88ccff';
+    c.beginPath(); c.arc(0, -25, 3.8, 0, Math.PI * 2); c.fill(); c.stroke();
+    // Orb highlight
+    c.fillStyle = 'rgba(255,255,255,0.85)';
+    c.beginPath(); c.arc(-1.4, -26.4, 1.1, 0, Math.PI * 2); c.fill();
+  },
+  archer: function(c, OUT) {
+    // Bow: curved arc, dark wood, light bowstring. v0.25.136 — outline
+    // reduced by 2 px throughout (4→2 outer wood-shadow, 2.5→0.5 inner
+    // wood, grip 1.2→0.5).
+    c.strokeStyle = OUT; c.lineWidth = 2;
+    c.beginPath();
+    c.moveTo(0, -16); c.quadraticCurveTo(11, 0, 0, 16);
+    c.stroke();
+    c.strokeStyle = '#7a4a18'; c.lineWidth = 0.5;
+    c.beginPath();
+    c.moveTo(0, -16); c.quadraticCurveTo(9, 0, 0, 16);
+    c.stroke();
+    c.strokeStyle = '#efe0b0'; c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(0, -16); c.lineTo(0, 16);
+    c.stroke();
+    c.fillStyle = '#3a2010';
+    c.fillRect(-1, -3, 2.5, 6);
+    c.strokeStyle = OUT; c.lineWidth = 0.5;
+    c.strokeRect(-1, -3, 2.5, 6);
+  },
 };
 // v0.25.133 — unified vector look across all classes. Shape is identical;
 // only `body` colour changes per class for identification. Hair colour
@@ -24577,6 +24675,8 @@ const HERO_VEC_CLASS = {
 // crescent), `deep` (second deeper cel crescent). Default index 1
 // matches the previous "Light" tone.
 const HERO_VEC_SKIN = [
+  // v0.25.135 — added 'Ivory' lighter than Porcelain per user request.
+  { id:'ivory',     name:'Ivory',     light:'#fffaf2', base:'#fdf0db', mid:'#f1d8bc', deep:'#cfae8c' },
   { id:'porcelain', name:'Porcelain', light:'#fff0e2', base:'#fce0cc', mid:'#e6c0a4', deep:'#bd9072' },
   { id:'light',     name:'Light',     light:'#ffe2c8', base:'#f5c8a8', mid:'#d8a484', deep:'#a8744e' },
   { id:'tan',       name:'Tan',       light:'#f0c89e', base:'#dab287', mid:'#b88962', deep:'#825c3a' },
@@ -24737,7 +24837,8 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   const cls = opts.cls || (typeof player !== 'undefined' && player.cls) || 'default';
   const C = HERO_VEC_CLASS[cls] || HERO_VEC_CLASS.default;
   const lookCustom = opts.lookCustom || (typeof player !== 'undefined' && player.lookCustom) || {};
-  const skinIdx = (lookCustom.skinIdx != null && HERO_VEC_SKIN[lookCustom.skinIdx]) ? lookCustom.skinIdx : 1;
+  // v0.25.135 — default to skinIdx 2 ('Light'), not 1, after Ivory insert.
+  const skinIdx = (lookCustom.skinIdx != null && HERO_VEC_SKIN[lookCustom.skinIdx]) ? lookCustom.skinIdx : 2;
   const SKIN = HERO_VEC_SKIN[skinIdx];
   const hairId = lookCustom.hairId || 'anime';
   const HAIR_PATH = HERO_VEC_HAIR[hairId] || HERO_VEC_HAIR.anime;
@@ -24751,7 +24852,8 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   const deform = HERO_VEC_DEFORM[animName] || {};
   const bob = HERO_VEC_BOB[animName] || {};
   const OUT = '#1a0818';
-  const STROKE_W = 3;
+  // v0.25.136 — outlines reduced by 2 px (was 3). Floor 0.5 elsewhere.
+  const STROKE_W = 1;
   function applyChain(bone) {
     const chain = [];
     let cur = bone;
@@ -24820,25 +24922,48 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   // small white highlight pip on the upper area for the "shiny anime
   // eye" look. Drawn per-eye so the y-offset of the highlight stays
   // consistent regardless of eye spacing.
+  // v0.25.136 — accepts an `eyeShiftX` offset so the pupil tracks the
+  // direction of player movement. Read from outer scope variable
+  // `eyeShiftX` computed below from player.vx.
   function _drawEye(cx, cy) {
     ctx.fillStyle = OUT;
     ctx.beginPath();
     ctx.ellipse(cx, cy, 2.4, 5.2, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Subtle stroke to firm up the edge against light-skin
     ctx.strokeStyle = OUT;
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 0.5;       // v0.25.136 — eye outline reduced
     ctx.stroke();
-    // White pip in the upper third of the eye
+    // Pupil-tracking: white pip shifts horizontally with movement.
+    // Highlight pip drawn at the OPPOSITE corner of the pupil (so the
+    // eye reads as "looking" in the movement direction).
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.ellipse(cx - 0.6, cy - 2.2, 0.9, 1.6, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx - 0.6 - eyeShiftX, cy - 2.2, 0.9, 1.6, 0, 0, Math.PI * 2);
     ctx.fill();
   }
+  // v0.25.136 — eye shift toward movement direction. -1 means highlight
+  // pip slides LEFT (eye looks right when facing right), so the user
+  // perceives the character is looking forward as they walk.
+  // Falls back to the facing-aligned default during idle.
+  let eyeShiftX = 0;
+  if (typeof player !== 'undefined') {
+    if (Math.abs(player.vx || 0) > 0.5) {
+      // Moving — eye looks toward movement; in mirrored space we flip sign
+      eyeShiftX = (player.vx > 0) ? 0.7 : -0.7;
+      if ((player.facing | 0) < 0) eyeShiftX = -eyeShiftX;
+    } else if (player.attacking) {
+      eyeShiftX = 0.6;          // looking forward when attacking
+    }
+  }
   // World-space anchor: feet centred at (sx + player.w/2, sy + player.h)
+  // v0.25.135 — scale to 90% of v0.25.134 size per user request. The
+  // facing flip composes with the size scale so the character mirrors
+  // correctly at the smaller size.
   ctx.save();
   ctx.translate(sx + player.w / 2, sy + player.h);
-  if ((player.facing | 0) < 0) ctx.scale(-1, 1);
+  const _vecSize = 0.9;
+  if ((player.facing | 0) < 0) ctx.scale(-_vecSize, _vecSize);
+  else                          ctx.scale( _vecSize, _vecSize);
   ctx.lineJoin = 'round';
   ctx.lineCap  = 'round';
 
@@ -24860,17 +24985,22 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   });
   drawBone('head', () => {
     // 3-tone cel-shaded head: light → base → mid → deep.
-    _drawShaded(HERO_VEC_PARTS.head, SKIN.base, SKIN.mid, SKIN.deep, 6, 6);
-    // Bright lit highlight band on upper-left (matches the SKIN.light tone)
+    // v0.25.135 — bumped offset 6→7 so the lower-right shadow crescent
+    // is more visible without losing the lit area.
+    _drawShaded(HERO_VEC_PARTS.head, SKIN.base, SKIN.mid, SKIN.deep, 7, 7);
+    // Bright lit highlight band on upper-left.
+    // v0.25.135 — enlarged from rx=7,ry=5 to rx=10,ry=7 so the lit
+    // shape reads as a proper "light from upper-left" wash, not just
+    // a small pip.
     ctx.save();
     ctx.clip(HERO_VEC_PARTS.head);
     ctx.fillStyle = SKIN.light;
     ctx.beginPath();
-    ctx.ellipse(-9, -9, 7, 5, 0.4, 0, Math.PI * 2);
+    ctx.ellipse(-9, -9, 10, 7, 0.4, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
-    // Glossy white pip
-    _drawGloss(-9, -10, 4, 3, 0.85);
+    // Bright glossy pip on top of the light band — the shiniest spot.
+    _drawGloss(-10, -11, 4.5, 3.5, 0.92);
     // Hair silhouette (selected style, unified across all classes)
     ctx.fillStyle = C.hair;
     ctx.fill(HAIR_PATH);
@@ -24887,7 +25017,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     _drawEye(5, 2);
     // Subtle smile
     ctx.strokeStyle = OUT;
-    ctx.lineWidth = 1.6;
+    ctx.lineWidth = 0.6;       // v0.25.136 — mouth outline reduced
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(-2.5, 9); ctx.quadraticCurveTo(0, 11, 2.5, 9);
@@ -24901,6 +25031,15 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     _drawShaded(HERO_VEC_PARTS.arm, BODY_BASE, BODY_SHD, SKIN.deep, 3, 3);
     _drawGloss(-2, -1, 1.8, 2.5, 0.55);
   });
+  // v0.25.136 — per-class weapon overlay. Anchored at handR (child of
+  // armR) so the weapon inherits the arm's animation rotation + the
+  // overall head/spine bob naturally.
+  const weaponFn = HERO_VEC_WEAPON[cls];
+  if (weaponFn) {
+    drawBone('handR', () => {
+      weaponFn(ctx, OUT);
+    });
+  }
   ctx.restore();
 }
 
@@ -24953,9 +25092,14 @@ function drawPlayer() {
   } else if (_hasCustomSprite) {
     _drawPlayerCustomSprite();
   } else {
-    drawCuteCharacter(sx, sy);
+    // v0.25.135 — fallback path also uses the vector hero (was the
+    // procedural drawCuteCharacter chibi). Keeps the look consistent
+    // even when the HERO sprite system isn't loaded yet.
+    _drawVectorHero(sx, sy);
   }
   _chibiRestore();
+  // Face overlay only when neither vector nor sprite is rendering — the
+  // vector path draws its own eyes / mouth.
   if (_CHAR_STYLE !== 'vector' && !player.lookCustom && !_hasCustomSprite) _drawCuteFaceOverlay(sx, sy);
   _drawPlayerNameTag(sx, sy);
   return;
@@ -33090,9 +33234,12 @@ console.log('%c[CharStudio] v0.25.93 loaded — bbox-bottom ground anchor + 8 fl
 // studio canvas. State is just the two picks the user can change: skin
 // tone (index into HERO_VEC_SKIN) and hair style (id into HERO_VEC_HAIR).
 const CHAR_STUDIO = {
-  skinIdx: 1,           // default 'Light' tone
-  hairId:  'anime',     // default anime hair
-  ready: true,          // no async asset load needed for vector mode
+  // v0.25.135 — index 2 = Light (Ivory inserted at 0 shifted everything down).
+  // Existing saves with skinIdx=1 now read as Porcelain — close enough; the
+  // user can re-pick from the swatch row if they want.
+  skinIdx: 2,           // default 'Light' tone
+  hairId:  'anime',
+  ready: true,
 };
 
 // v0.25.134 — vector preview. Calls _drawVectorHero with explicit
