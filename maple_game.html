@@ -2605,7 +2605,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.154';
+const GAME_VERSION = 'v0.25.155';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -24935,151 +24935,199 @@ const HERO_VEC_SKIN = [
   { id:'brown',     name:'Brown',     light:'#9a6c48', base:'#7a5232', mid:'#553820', deep:'#2e1c0e' },
   { id:'deep',      name:'Deep',      light:'#785030', base:'#553820', mid:'#36200e', deep:'#1a0d04' },
 ];
-// v0.25.134 — hair Path2Ds. Each silhouette is a self-contained shape
-// drawn over the head circle. Player picks one via the studio UI; the
-// id persists in player.lookCustom.hairId.
-const HERO_VEC_HAIR = {
-  // v0.25.144 — simplified silhouettes: clear crowns + small bangs.
-  // v0.25.150 — 'anime' rebuilt MapleStory-style: smooth rounded crown
-  // with one small upward tuft, and three chunky scalloped bang lobes
-  // (one tucked back, one mid, one longer side bang). Quadratic
-  // beziers throughout so the silhouette reads soft + flowing rather
-  // than the previous angular zigzag.
-  anime: new Path2D(
-    'M -19 -2 ' +
-    'Q -23 -16 -10 -25 ' +    // smooth curve up to upper-left
-    'Q -2 -29 5 -27 ' +       // crown peak slightly right
-    'Q 7 -32 11 -29 ' +       // small upward tuft on top
-    'Q 17 -25 18 -12 ' +      // round off top-right corner
-    'Q 21 -2 16 5 ' +         // right side strand falls
-    'Q 11 8 10 3 ' +          // strand tip curves back/under
-    'Q 6 8 3 5 ' +            // chunky bang lobe 1 (right of centre)
-    'Q 0 9 -3 5 ' +           // chunky bang lobe 2 (centre)
-    'Q -7 9 -11 5 ' +         // chunky bang lobe 3 (left)
-    'Q -16 8 -19 -2 Z'        // close back to start
-  ),
-  short: new Path2D(
-    'M -18 -2 ' +
-    'Q -17 -18 0 -23 Q 17 -18 18 -2 ' +
-    'L 14 2 Q 0 -6 -14 2 Z'
-  ),
-  spike: new Path2D(
-    'M -18 -2 ' +
-    'L -15 -13 L -10 -21 L -6 -11 L 0 -24 L 6 -11 ' +
-    'L 10 -21 L 15 -13 L 18 -2 Q 0 -6 -18 -2 Z'
-  ),
-  bowl: new Path2D(
-    'M -18 -2 ' +
-    'Q -18 -22 0 -23 Q 18 -22 18 -2 ' +
-    'L 15 2 L 10 0 L 5 2 L 0 0 L -5 2 L -10 0 L -15 2 Z'
-  ),
-  bun: new Path2D(
-    'M -16 -2 ' +
-    'Q -16 -17 0 -21 Q 16 -17 16 -2 Q 0 -6 -16 -2 Z ' +
-    'M -7 -22 Q -6 -30 0 -31 Q 6 -30 7 -22 Q 0 -18 -7 -22 Z'
-  ),
-  pigtails: new Path2D(
-    'M -18 -2 ' +
-    'Q -20 -19 0 -23 Q 20 -19 18 -2 ' +
-    'L 12 1 Q 20 10 17 18 Q 13 23 10 17 Q 10 8 7 2 ' +
-    'L -7 2 Q -10 8 -10 17 Q -13 23 -17 18 Q -20 10 -12 1 Z'
-  ),
-};
-// v0.25.134 — list view used by the studio UI in option order.
-// v0.25.154 — added 'flow' (the new layered cubic-bezier MapleStory
-// hairstyle that respects the strict SVG spec: 2 back locks + 5 front
-// bang locks, cel-halo gradient fill, thick 2.5px black outline).
+// v0.25.155 — Hair pipeline simplified to the layered 4-lock template
+// only. The legacy single-Path2D HERO_VEC_HAIR registry (anime / short /
+// spike / bowl / bun / pigtails) is removed; every hair style now uses
+// 1 back lock + 3 front locks = 4 cubic-bezier paths total. _drawVectorHero
+// always routes through the layered pipeline, so the old fallback branch
+// is gone and there is no more `_useLayeredHair` flag.
+//
+// v0.25.155 — list view used by the studio UI. Four chibi-friendly
+// silhouettes built from the simplified 4-lock template.
 const HERO_VEC_HAIR_OPTIONS = [
-  { id:'flow',     name:'Flow ✨' },
-  { id:'anime',    name:'Anime' },
-  { id:'short',    name:'Short' },
-  { id:'spike',    name:'Spike' },
-  { id:'bowl',     name:'Bowl' },
-  { id:'bun',      name:'Top Bun' },
-  { id:'pigtails', name:'Pigtails' },
+  { id:'flow',  name:'Flow ✨'   },
+  { id:'spike', name:'Spike ⚡'  },
+  { id:'wave',  name:'Wave 🌊'   },
+  { id:'crop',  name:'Crop ✂️'   },
 ];
 
-// v0.25.154 — LAYERED HAIR PIPELINE (strict SVG spec).
+// v0.25.155 — Legacy hairId migration. Saves with the old IDs (anime,
+// short, bowl, bun, pigtails) automatically remap to the closest new
+// silhouette so existing players don't see a missing-style fallback.
+const HERO_VEC_HAIR_LEGACY_MAP = {
+  anime:    'flow',
+  short:    'crop',
+  bowl:     'crop',
+  bun:      'flow',
+  pigtails: 'wave',
+  // 'spike' is preserved (already a valid id in the new registry).
+};
+function _migrateHairId(id) {
+  if (!id) return 'flow';
+  if (HERO_VEC_HAIR_LEGACY_MAP[id]) return HERO_VEC_HAIR_LEGACY_MAP[id];
+  return id;
+}
+
+// v0.25.155 — SIMPLIFIED 4-LOCK LAYERED HAIR PIPELINE.
 // =========================================================================
-// Each entry has:
-//   back:  Path2D[]  — drawn BEFORE the head silhouette (nape mass + tail wisps)
-//   front: Path2D[]  — drawn AFTER the head shading (crown + bangs in front)
-// All paths use cubic-bezier (C) commands only — no polygons, no jagged
-// L-zigzag fringe. Locks intentionally overlap to read as 3D volume.
-// _drawHairLockGradient (in _drawVectorHero) builds a vertical cel-halo
-// linearGradient that paints all locks with a shared stop pattern:
-//   dark roots (top) → bright cel-band (middle) → dark tips (bottom).
-// Each lock then takes a thick 2.5px OUT-coloured stroke.
+// Every hairstyle uses the same template: 1 back lock + 3 front locks =
+// 4 cubic-bezier paths total. The back lock is drawn BEFORE the head
+// silhouette (nape / mass behind the head). The 3 front locks are drawn
+// AFTER head shading (left side + centre + right side, layered front).
+// All paths use cubic-bezier (C) commands only.
+// _hairCelGrad (in _drawVectorHero) supplies the shared dark→bright→dark
+// vertical gradient. Each lock takes a thick 2.5 px black stroke.
 // =========================================================================
 const HERO_VEC_HAIR_LAYERED = {
+  // ─── FLOW — soft anime swept hair, default ───────────────────────────
   flow: {
-    // BEHIND the head — nape mass + a long tail wisp
     back: [
-      // B1 — back-of-crown / nape mass framing the head from behind
+      // Full nape + back-of-crown mass
       new Path2D(
         'M -22 -8 ' +
         'C -25 -22 -10 -28 0 -28 ' +
         'C 12 -28 25 -22 22 -8 ' +
-        'C 24 4 22 14 16 18 ' +
-        'C 8 22 -8 22 -16 18 ' +
-        'C -22 14 -24 4 -22 -8 Z'
-      ),
-      // B2 — long back-left tail wisp peeking out from behind the head
-      new Path2D(
-        'M -16 8 ' +
-        'C -22 14 -25 24 -18 27 ' +
-        'C -13 28 -10 22 -12 14 Z'
+        'C 24 6 20 18 12 20 ' +
+        'C 0 22 -10 22 -18 18 ' +
+        'C -23 12 -24 2 -22 -8 Z'
       ),
     ],
-    // IN FRONT of the head — crown peaks + 4 chunky overlapping bangs
     front: [
-      // F1 — left crown chunk swept up + over
+      // Left side: crown sweep + soft forelock combined
+      new Path2D(
+        'M -20 -2 ' +
+        'C -24 -18 -10 -26 -2 -22 ' +
+        'C -3 -14 -8 -6 -10 0 ' +
+        'C -13 6 -18 6 -20 -2 Z'
+      ),
+      // Centre crown peak with chunky middle bang
+      new Path2D(
+        'M -3 -22 ' +
+        'C 0 -30 8 -30 9 -23 ' +
+        'C 8 -14 4 -8 0 -4 ' +
+        'C -4 -8 -5 -16 -3 -22 Z'
+      ),
+      // Right side: crown sweep + soft forelock combined
+      new Path2D(
+        'M 4 -18 ' +
+        'C 10 -25 22 -22 20 -8 ' +
+        'C 22 0 18 6 12 6 ' +
+        'C 6 6 4 -2 4 -18 Z'
+      ),
+    ],
+  },
+
+  // ─── SPIKE — angular shounen pointed hair (still cubic-bezier only) ───
+  spike: {
+    back: [
+      // Smaller, tighter nape — most volume is on top
+      new Path2D(
+        'M -19 -4 ' +
+        'C -22 -14 -10 -22 0 -22 ' +
+        'C 10 -22 22 -14 19 -4 ' +
+        'C 22 8 14 16 4 16 ' +
+        'C -6 16 -16 14 -19 -4 Z'
+      ),
+    ],
+    front: [
+      // Tall left spike
       new Path2D(
         'M -19 -2 ' +
-        'C -23 -16 -10 -25 -2 -22 ' +
-        'C -1 -19 -3 -14 -5 -10 ' +
-        'C -9 -4 -14 -2 -19 -2 Z'
+        'C -22 -14 -16 -26 -8 -30 ' +
+        'C -4 -18 -8 -8 -10 -2 ' +
+        'C -14 2 -19 0 -19 -2 Z'
       ),
-      // F2 — center crown peak with small upward tuft
+      // Tall centre spike (tallest of the three)
       new Path2D(
-        'M -2 -22 ' +
-        'C 0 -28 6 -32 9 -28 ' +
-        'C 11 -25 8 -22 6 -22 ' +
-        'C 4 -20 0 -22 -2 -22 Z'
+        'M -4 -8 ' +
+        'C -2 -24 4 -34 6 -32 ' +
+        'C 9 -22 7 -12 4 -4 ' +
+        'C 0 -2 -4 -4 -4 -8 Z'
       ),
-      // F3 — right crown chunk
+      // Tall right spike
       new Path2D(
-        'M 6 -22 ' +
-        'C 14 -25 20 -18 18 -8 ' +
-        'C 16 -4 14 -2 10 -4 ' +
-        'C 8 -8 8 -14 6 -22 Z'
+        'M 6 -6 ' +
+        'C 10 -24 18 -30 20 -22 ' +
+        'C 22 -10 16 -2 12 -2 ' +
+        'C 8 -2 6 -4 6 -6 Z'
       ),
-      // F4 — long left forelock falling over forehead
+    ],
+  },
+
+  // ─── WAVE — flowing curly hair with longer side strands ──────────────
+  wave: {
+    back: [
+      // Long flowing back lock with bottom curl
+      new Path2D(
+        'M -22 -6 ' +
+        'C -26 -22 -8 -30 0 -28 ' +
+        'C 12 -30 26 -22 22 -6 ' +
+        'C 28 12 22 24 14 26 ' +
+        'C 4 28 -6 28 -14 24 ' +
+        'C -24 18 -26 4 -22 -6 Z'
+      ),
+    ],
+    front: [
+      // Wavy left side strand falling past chin
+      new Path2D(
+        'M -20 -2 ' +
+        'C -24 -18 -8 -24 -2 -22 ' +
+        'C -4 -10 -10 2 -14 10 ' +
+        'C -20 16 -23 12 -22 4 ' +
+        'C -22 0 -22 -2 -20 -2 Z'
+      ),
+      // Flowing centre wave bang
+      new Path2D(
+        'M -3 -22 ' +
+        'C 2 -30 10 -26 9 -16 ' +
+        'C 6 -8 0 -2 -3 0 ' +
+        'C -8 -2 -8 -14 -3 -22 Z'
+      ),
+      // Wavy right side strand
+      new Path2D(
+        'M 4 -16 ' +
+        'C 10 -24 22 -20 22 -4 ' +
+        'C 24 8 18 16 12 14 ' +
+        'C 4 10 2 0 4 -8 ' +
+        'C 4 -12 4 -16 4 -16 Z'
+      ),
+    ],
+  },
+
+  // ─── CROP — short cropped hair, tight to the head ────────────────────
+  crop: {
+    back: [
+      // Tight nape close to the skull
+      new Path2D(
+        'M -18 -2 ' +
+        'C -20 -12 -10 -20 0 -20 ' +
+        'C 10 -20 20 -12 18 -2 ' +
+        'C 18 6 12 10 6 10 ' +
+        'C -2 12 -10 12 -14 10 ' +
+        'C -18 6 -20 0 -18 -2 Z'
+      ),
+    ],
+    front: [
+      // Short tucked left bang
       new Path2D(
         'M -16 -2 ' +
-        'C -14 -4 -10 -6 -8 -4 ' +
-        'C -10 0 -14 6 -15 5 ' +
-        'C -17 4 -17 0 -16 -2 Z'
+        'C -18 -12 -10 -18 -4 -16 ' +
+        'C -4 -10 -8 -2 -10 2 ' +
+        'C -14 4 -17 2 -16 -2 Z'
       ),
-      // F5 — middle bang
+      // Short forehead bang (centre)
       new Path2D(
-        'M -8 -4 ' +
-        'C -6 -2 -4 -2 -2 -4 ' +
-        'C -2 -1 -3 4 -6 5 ' +
-        'C -8 4 -9 0 -8 -4 Z'
+        'M -5 -16 ' +
+        'C 0 -19 5 -16 5 -10 ' +
+        'C 3 -4 0 -2 -2 -2 ' +
+        'C -5 -4 -7 -10 -5 -16 Z'
       ),
-      // F6 — right bang
+      // Short tucked right bang
       new Path2D(
-        'M -2 -4 ' +
-        'C 2 -3 8 -3 10 -4 ' +
-        'C 12 0 10 6 6 7 ' +
-        'C 1 6 -2 0 -2 -4 Z'
-      ),
-      // F7 — long right side strand falling down
-      new Path2D(
-        'M 10 -4 ' +
-        'C 16 -2 19 4 18 8 ' +
-        'C 14 8 11 4 10 0 Z'
+        'M 4 -16 ' +
+        'C 10 -18 18 -12 16 -2 ' +
+        'C 17 2 14 4 10 2 ' +
+        'C 8 -2 4 -10 4 -16 Z'
       ),
     ],
   },
@@ -25218,15 +25266,11 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   // v0.25.135 — default to skinIdx 2 ('Light'), not 1, after Ivory insert.
   const skinIdx = (lookCustom.skinIdx != null && HERO_VEC_SKIN[lookCustom.skinIdx]) ? lookCustom.skinIdx : 2;
   const SKIN = HERO_VEC_SKIN[skinIdx];
-  const hairId = lookCustom.hairId || 'anime';
-  const HAIR_PATH = HERO_VEC_HAIR[hairId] || HERO_VEC_HAIR.anime;
-  // v0.25.154 — when the layered hair pipeline ('flow') is selected,
-  // bypass the single-Path2D HAIR_PATH route and use back/front lock
-  // arrays. The renderer draws HAIR_LAYERED.back BEFORE the head and
-  // HAIR_LAYERED.front AFTER head shading. _useLayeredHair flag drives
-  // both branches without breaking the legacy hair styles.
-  const HAIR_LAYERED = HERO_VEC_HAIR_LAYERED[hairId] || null;
-  const _useLayeredHair = !!HAIR_LAYERED;
+  // v0.25.155 — every hairstyle is layered (1 back lock + 3 front locks).
+  // Legacy hairId values get remapped via _migrateHairId before lookup so
+  // existing saves keep working. Falls back to 'flow' on any unknown id.
+  const hairId = _migrateHairId(lookCustom.hairId);
+  const HAIR_LAYERED = HERO_VEC_HAIR_LAYERED[hairId] || HERO_VEC_HAIR_LAYERED.flow;
   // Default class = "naked" mannequin: body + boots take skin colour.
   const BODY_BASE = (cls === 'default' || !C.body) ? SKIN.base : C.body;
   const BODY_SHD  = (cls === 'default' || !C.bodyShd) ? SKIN.mid  : C.bodyShd;
@@ -25385,8 +25429,9 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
 
   // Z-order: back leg → back arm → torso → head + hair → front leg →
   // front arm. ?L = back, ?R = front. Back limbs darkened slightly.
-  // v0.25.134 — body parts sourced from BODY_BASE/SHD + SKIN palette,
-  // hair sourced from HAIR_PATH (selected style).
+  // v0.25.134 — body parts sourced from BODY_BASE/SHD + SKIN palette.
+  // v0.25.155 — hair sourced from HAIR_LAYERED (the 4-lock cubic-bezier
+  // entry for the selected hairId, post-migration).
   drawBone('legL', () => {
     const base = (typeof _mixHex === 'function') ? _mixHex(BOOT_BASE, '#000000', 0.12) : BOOT_BASE;
     _drawShaded(HERO_VEC_PARTS.leg, base, BODY_SHD, SKIN.deep, 3, 3);
@@ -25415,11 +25460,9 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     _drawGloss(-4, -7, 3, 4, 0.55);
   });
   drawBone('head', () => {
-    // v0.25.154 — back-hair locks (layered hair pipeline) draw FIRST,
-    // before any head silhouette / ears / shading. Sits behind the head.
-    if (_useLayeredHair && HAIR_LAYERED.back) {
-      _drawHairLockGroup(HAIR_LAYERED.back);
-    }
+    // v0.25.155 — back-hair lock(s) ALWAYS draw FIRST, before any head
+    // silhouette / ears / shading. Sits behind the head.
+    if (HAIR_LAYERED.back) _drawHairLockGroup(HAIR_LAYERED.back);
     // v0.25.144 — cleaner head shading: softer shadow offset, one broad
     // forehead light, and gentler face accents.
     ctx.fillStyle = SKIN.mid;
@@ -25460,39 +25503,10 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     ctx.restore();
     // 5) One soft specular pip on the upper-right for life.
     _drawGloss(9, -12, 3.4, 2.2, 0.55);
-    // v0.25.154 — Hair routing. Layered pipeline draws each lock as a
-    // separate cubic-bezier path with cel-halo gradient + thick black
-    // outline (matches the strict SVG spec). Legacy single-Path2D path
-    // kept as a fallback for the older hair styles.
-    if (_useLayeredHair) {
-      // FRONT bangs / crown locks layered over the head shading.
-      _drawHairLockGroup(HAIR_LAYERED.front);
-    } else {
-      // Hair silhouette (selected style, unified across all classes)
-      ctx.fillStyle = C.hair;
-      ctx.fill(HAIR_PATH);
-      // Cel shadow pass on the hair
-      ctx.save();
-      ctx.clip(HAIR_PATH);
-      ctx.translate(2, 3);
-      ctx.fillStyle = HAIR_SHD;
-      ctx.fill(HAIR_PATH);
-      ctx.restore();
-      ctx.save();
-      ctx.clip(HAIR_PATH);
-      ctx.strokeStyle = HAIR_HI;
-      ctx.lineWidth = 1.5;
-      ctx.globalAlpha = 0.7;
-      ctx.beginPath();
-      ctx.moveTo(-10, -13); ctx.quadraticCurveTo(-2, -19, 10, -15);
-      ctx.stroke();
-      ctx.lineWidth = 1.1;
-      ctx.beginPath();
-      ctx.moveTo(-3, -1); ctx.quadraticCurveTo(4, -5, 10, -2);
-      ctx.stroke();
-      ctx.restore();
-      strokePath(HAIR_PATH);
-    }
+    // v0.25.155 — Front-hair locks ALWAYS use the layered pipeline now.
+    // Each of the 3 front locks is drawn with the shared cel-halo
+    // gradient fill + thick 2.5 px black stroke (SVG spec).
+    _drawHairLockGroup(HAIR_LAYERED.front);
     // =====================================================================
     // FACE-ELEMENTS (v0.25.154) — strict chibi/anime spec.
     // Wide-spaced eyes, no nose, minimal mouth, all positioned in the
@@ -33890,7 +33904,8 @@ console.log('%c[CharStudio] v0.25.93 loaded — bbox-bottom ground anchor + 8 fl
 // sprite-layer system (mannequin base + face/hair PNG overlays) is gone;
 // previews now render the same _drawVectorHero used in-game on a 384×384
 // studio canvas. State is just the two picks the user can change: skin
-// tone (index into HERO_VEC_SKIN) and hair style (id into HERO_VEC_HAIR).
+// tone (index into HERO_VEC_SKIN) and hair style (id into the
+// HERO_VEC_HAIR_LAYERED registry, post-_migrateHairId remap).
 const CHAR_STUDIO = {
   // v0.25.135 — index 2 = Light (Ivory inserted at 0 shifted everything down).
   // Existing saves with skinIdx=1 now read as Porcelain — close enough; the
