@@ -2775,7 +2775,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.180';
+const GAME_VERSION = 'v0.25.181';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -29516,6 +29516,25 @@ const BOSS_SPRITE_TYPES = ['king', 'mushmom', 'aetherion', 'gravitos'];
     img.src = 'Sprites/bosses/' + type + '.webp';
   }
 })();
+// === BOSS ATTACK SPRITES (v0.25.181) === one painterly attack-pose sprite
+// per boss, loaded from Sprites/bosses/attack/. The dispatch in drawMonster
+// swaps to the attack pose when m.patternState !== 'idle' (which is true
+// during every boss's windup + projectile-fire window). Falls back to the
+// neutral BOSS_SPRITES[type] when patternState is 'idle' or the attack
+// sprite hasn't decoded yet.
+const BOSS_ATTACK_SPRITES = Object.create(null);
+const BOSS_ATTACK_META = Object.create(null);
+(function _loadBossAttackSprites() {
+  for (const type of BOSS_SPRITE_TYPES) {
+    const img = new Image();
+    img.onload = () => {
+      BOSS_ATTACK_SPRITES[type] = img;
+      BOSS_ATTACK_META[type] = { bboxBottomY: _detectSpriteBboxBottom(img) };
+    };
+    img.onerror = () => console.warn('[BossAttackSprite] failed', type);
+    img.src = 'Sprites/bosses/attack/' + type + '.webp';
+  }
+})();
 
 // === ZODIAC BOSS SPRITES (v0.25.92) === one per zodiac sign, keyed by m.zodiacSign.
 const ZODIAC_SPRITES = Object.create(null);
@@ -29536,16 +29555,19 @@ const ZODIAC_SPRITE_TYPES = ['aries','taurus','gemini','cancer','leo','virgo','l
 // to fit the mini-boss/boss aura halo silhouette on screen. v0.25.93 — bbox-
 // bottom anchored, floating bosses lifted off the ground; facing convention
 // matches monsters (mirror when facing < 0).
-function _drawBossSprite(sprite, m, sx, sy) {
+function _drawBossSprite(sprite, m, sx, sy, _isAttack) {
   const srcW = sprite.naturalWidth  || sprite.width  || 1;
   const srcH = sprite.naturalHeight || sprite.height || 1;
   const targetH = m.h * 2.0;
   const targetW = targetH * (srcW / srcH);
   const footX = sx + m.w / 2;
   const footY = sy + m.h;
-  // Look up bbox-bottom: bosses use BOSS_SPRITE_META[m.type], zodiac use
-  // ZODIAC_SPRITE_META[m.zodiacSign].
-  const meta = BOSS_SPRITE_META[m.type] || ZODIAC_SPRITE_META[m.zodiacSign] || {};
+  // Look up bbox-bottom: bosses use BOSS_SPRITE_META[m.type] (or the
+  // _ATTACK variant when an attack-pose sprite is being drawn), zodiac
+  // use ZODIAC_SPRITE_META[m.zodiacSign].
+  const meta = (_isAttack ? BOSS_ATTACK_META[m.type] : BOSS_SPRITE_META[m.type])
+            || BOSS_SPRITE_META[m.type]
+            || ZODIAC_SPRITE_META[m.zodiacSign] || {};
   const bboxBottomY = (meta.bboxBottomY != null) ? meta.bboxBottomY : (srcH - 1);
   const isFloating = FLOATING_TYPES.has(m.type) || (m.zodiacSign && FLOATING_ZODIAC.has(m.zodiacSign));
   let dyOffset = -((bboxBottomY + 1) / srcH) * targetH;
@@ -29885,8 +29907,18 @@ function drawMonster(m) {
 
   // v0.25.92 — bosses + zodiac now check ludo.ai sprite cache first; fall
   // back to procedural draw functions when the sprite isn't loaded.
-  if (BOSS_SPRITES[m.type]) _drawBossSprite(BOSS_SPRITES[m.type], m, sx, sy);
-  else if (m.type === 'king') drawKingSlime(m, sx, sy);
+  // v0.25.181 — when m.patternState !== 'idle' AND a matching attack
+  // pose has decoded, use BOSS_ATTACK_SPRITES[m.type] instead. Each
+  // boss tags itself 'volley' / 'beam' / 'leap' / 'cast' etc on enter
+  // and clears back to 'idle' when the pattern finishes — so the
+  // attack pose stays up for the entire windup + release window.
+  const _bossAttacking = m.patternState && m.patternState !== 'idle';
+  const _bossAttackImg = _bossAttacking ? BOSS_ATTACK_SPRITES[m.type] : null;
+  if (_bossAttackImg) {
+    _drawBossSprite(_bossAttackImg, m, sx, sy, true);
+  } else if (BOSS_SPRITES[m.type]) {
+    _drawBossSprite(BOSS_SPRITES[m.type], m, sx, sy, false);
+  } else if (m.type === 'king') drawKingSlime(m, sx, sy);
   else if (m.type === 'mushmom') drawMushmom(m, sx, sy);
   else if (m.type === 'aetherion') drawAetherion(m, sx, sy);
   else if (m.type === 'gravitos') drawGravitos(m, sx, sy);
@@ -34358,6 +34390,11 @@ requestAnimationFrame(loop);
     'Sprites/projectiles/cast/mtoxic.webp',
     // Sprite-based hair (v0.25.178).
     'Sprites/character/hair/flow.webp',
+    // Boss attack-pose sprites (v0.25.181).
+    'Sprites/bosses/attack/aetherion.webp',
+    'Sprites/bosses/attack/gravitos.webp',
+    'Sprites/bosses/attack/king.webp',
+    'Sprites/bosses/attack/mushmom.webp',
     // World props.
     'Sprites/world/portal.webp',
   ];
