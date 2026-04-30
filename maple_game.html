@@ -2584,7 +2584,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.146';
+const GAME_VERSION = 'v0.25.147';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -23685,6 +23685,8 @@ function drawChests() {
 function updateAmbient() {
   const W2 = game.mapData.worldWidth;
   const id = game.currentMap;
+  const lowFx = _perfLowFx();
+  const ambientCap = Math.max(24, Math.floor(MAX_AMBIENT * (lowFx ? 0.45 : 1)));
   // Spawn rate / type depends on map — richer palette and motion per biome
   let spawnChance = 0, col = '#fff', vx = -0.3, vy = 0.4, type = 'leaf';
   if (id === 'forest')        { spawnChance = 0.30; col = '#88cc55'; vy = 0.4;  type = 'leaf'; }
@@ -23701,7 +23703,8 @@ function updateAmbient() {
   else if (id === 'cryptHollow'){ spawnChance = 0.30; col = '#aaccff'; vy = -0.1; type = 'wisp'; }
   else if (id === 'sanctum')  { spawnChance = 0.20; col = '#cc99ff'; vy = -0.1; type = 'wisp'; }
   else if (id === 'gravitosArena'){ spawnChance = 0.30; col = '#aa66ff'; vy = 0.0; type = 'wisp'; }
-  if (Math.random() < spawnChance) {
+  if (Math.random() < spawnChance * (lowFx ? 0.35 : 1) &&
+      game.ambient.length < ambientCap) {
     const startY = (type === 'ash' || type === 'ember' || type === 'firefly' || type === 'wisp') ? 540 : -10;
     game.ambient.push({
       x: Math.random() * (W2 + 400) - 200,
@@ -23713,6 +23716,9 @@ function updateAmbient() {
       sway: Math.random() * Math.PI * 2, type,
       pulse: Math.random() * Math.PI * 2,
     });
+  }
+  if (game.ambient.length > ambientCap) {
+    game.ambient.splice(0, game.ambient.length - ambientCap);
   }
   for (let i = game.ambient.length - 1; i >= 0; i--) {
     const p = game.ambient[i];
@@ -23743,6 +23749,7 @@ function updateAmbient() {
 }
 
 function drawAmbient() {
+  const lowFx = _perfLowFx();
   for (const p of game.ambient) {
     const sx = p.x - game.camera.x * 0.85;
     if (sx < -20 || sx > W + 20) continue;
@@ -23773,11 +23780,13 @@ function drawAmbient() {
     } else if (p.type === 'ember') {
       // Bright pulsing ember with hot core + warm halo
       const pul = 0.6 + Math.sin(p.pulse) * 0.4;
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = 'rgba(255,128,40,0.35)';
-      ctx.fillRect(sx - 2, p.y - 2, 5, 5);
-      ctx.restore();
+      if (!lowFx) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = 'rgba(255,128,40,0.35)';
+        ctx.fillRect(sx - 2, p.y - 2, 5, 5);
+        ctx.restore();
+      }
       ctx.fillStyle = p.color;
       ctx.fillRect(sx, p.y, 2, 2);
       ctx.fillStyle = '#ffee88';
@@ -23785,22 +23794,26 @@ function drawAmbient() {
     } else if (p.type === 'firefly') {
       // Pulsing glow, size-breathes
       const pul = 0.5 + Math.sin(p.pulse) * 0.5;
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = 'rgba(255,238,136,0.35)';
-      const r = 2 + pul * 3;
-      ctx.fillRect(sx - r, p.y - r, r * 2, r * 2);
-      ctx.restore();
+      if (!lowFx) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = 'rgba(255,238,136,0.35)';
+        const r = 2 + pul * 3;
+        ctx.fillRect(sx - r, p.y - r, r * 2, r * 2);
+        ctx.restore();
+      }
       ctx.fillStyle = p.color;
       ctx.fillRect(sx, p.y, 2, 2);
     } else if (p.type === 'wisp') {
       // Drifting purple/blue wisp with glow halo
       const pul = 0.6 + Math.sin(p.pulse * 0.5) * 0.4;
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = p.color + '55';
-      ctx.fillRect(sx - 4, p.y - 4, 9, 9);
-      ctx.restore();
+      if (!lowFx) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = p.color + '55';
+        ctx.fillRect(sx - 4, p.y - 4, 9, 9);
+        ctx.restore();
+      }
       ctx.fillStyle = p.color;
       ctx.fillRect(sx, p.y, 2, 2);
       if (pul > 0.8) ctx.fillRect(sx - 1, p.y - 1, 4, 4);
@@ -31587,7 +31600,12 @@ function drawMushmom(m, sx, sy) {
 // spawn math are byte-for-byte vanilla; only the location moved.
 function emitProjectileTrails() {
   if (!game || !game.projectiles) return;
+  const camX = game.camera.x;
+  const lowFx = _perfLowFx();
   for (const p of game.projectiles) {
+    const sx = p.x - camX;
+    if (sx + p.w < -80 || sx > W + 80 || p.y + p.h < -80 || p.y > H + 80) continue;
+    if (lowFx && (game.time & 1)) continue;
     if (p.owner === 'player') {
       if (p.skill === 'fire') {
         // Fireball trail (every frame, unconditional)
