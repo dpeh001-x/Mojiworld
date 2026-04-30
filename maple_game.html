@@ -2774,7 +2774,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.176';
+const GAME_VERSION = 'v0.25.177';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4198,6 +4198,33 @@ const LX_MOB_PROJ = (() => {
   return out;
 })();
 function _lxMobProjReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+// =========================================================================
+// LX_MOB_CAST — monster attack-cast aura sprites (v0.25.177)
+// =========================================================================
+// One painterly burst per projectile element. drawMonster overlays the
+// matching aura at the monster's centre for ~280 ms after they fire,
+// fading out via globalAlpha. Provides clear visual feedback ("this
+// monster just attacked you") without changing combat timing — the
+// projectile still fires the same instant it always did.
+// =========================================================================
+const LX_MOB_CAST = (() => {
+  const out = {};
+  const files = {
+    mdark:     'mdark.webp',
+    msplinter: 'msplinter.webp',
+    mspore:    'mspore.webp',
+    mtoxic:    'mtoxic.webp',
+  };
+  for (const [k, f] of Object.entries(files)) {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = 'Sprites/projectiles/cast/' + f;
+    out[k] = img;
+  }
+  return out;
+})();
+function _lxMobCastReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+const LX_MOB_CAST_DURATION = 280;  // ms — total aura visible window
 // =========================================================================
 // MSX_HERO — MapleStory-style chibi character sprite registry (v0.25.152)
 // =========================================================================
@@ -15305,6 +15332,11 @@ function fireMonsterProjectile(m, angleOffset) {
     w: 14, h: 14, life: 100,
     damage: dmg, owner: 'enemy', skill: m.shoot, color,
   });
+  // v0.25.177 — stamp the attack-cast flash so drawMonster renders the
+  // matching aura sprite (LX_MOB_CAST[m.shoot]) overlaying the monster
+  // for the next ~280 ms. Pure visual; doesn't gate the projectile.
+  m._castFlashT = (game && game.time) || 0;
+  m._castFlashSkill = m.shoot;
   // Telegraph particles
   for (let i = 0; i < 6; i++) {
     game.particles.push({
@@ -29827,6 +29859,40 @@ function drawMonster(m) {
 
   ctx.restore();
 
+  // v0.25.177 — Cast-aura overlay. fireMonsterProjectile stamps
+  // m._castFlashT (game.time when fired) + m._castFlashSkill (which
+  // projectile type). Render the matching aura sprite at the
+  // monster's centre, fading out by elapsed-time fraction. Short
+  // duration (~17 frames at 60 FPS) means it doesn't permanently
+  // obscure the HP bar below.
+  if (m._castFlashT && m._castFlashSkill) {
+    const elapsedMs = ((game.time || 0) - m._castFlashT) * (1000 / 60);
+    if (elapsedMs >= 0 && elapsedMs < LX_MOB_CAST_DURATION) {
+      const auraImg = LX_MOB_CAST[m._castFlashSkill];
+      if (_lxMobCastReady(auraImg)) {
+        const t = elapsedMs / LX_MOB_CAST_DURATION;          // 0 → 1
+        const alpha = (1 - t) * 0.85;
+        const scale = 0.6 + t * 0.5;                         // grows out
+        const auraW = m.w * 1.6 * scale;
+        const auraH = m.w * 1.6 * scale;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(
+          auraImg,
+          sx + m.w/2 - auraW/2,
+          m.y + m.h/2 - auraH/2,
+          auraW, auraH
+        );
+        ctx.restore();
+      }
+    } else {
+      // Expired — clear so subsequent frames skip the elapsed check.
+      m._castFlashT = 0;
+      m._castFlashSkill = null;
+    }
+  }
+
   // v0.25.24 — Phase 5a: skip HP bar + name when LXMonsterUIScene
   // owns them. The Phaser scene reads from game.monsters directly so
   // we don't need to pass any state — just bail out here.
@@ -34234,6 +34300,11 @@ requestAnimationFrame(loop);
     'Sprites/projectiles/msplinter.webp',
     'Sprites/projectiles/mspore.webp',
     'Sprites/projectiles/mtoxic.webp',
+    // Monster attack-cast aura sprites (v0.25.177).
+    'Sprites/projectiles/cast/mdark.webp',
+    'Sprites/projectiles/cast/msplinter.webp',
+    'Sprites/projectiles/cast/mspore.webp',
+    'Sprites/projectiles/cast/mtoxic.webp',
     // World props.
     'Sprites/world/portal.webp',
   ];
