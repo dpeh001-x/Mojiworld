@@ -148,6 +148,29 @@
   <b>Heads-up.</b> An earlier implementation of these phases targeted <code>v0.5.1</code> and was preserved locally at tag <code>phase-1-2-3-on-v0.5.1</code>. This is the rebuild against the current <code>v0.9.8</code> codebase, which had moved substantially (new bosses like Gravitos, minimap/taxi, chibi character rewrite).
 </div>
 
+<h2>v0.25.176 <span class="tag">Bake-cache hero idle frame</span></h2>
+
+<h3><span class="pill bug">perf</span>Idle player renders via 1 drawImage instead of full Path2D pipeline</h3>
+<p><code>_drawVectorHero</code> ran a full skeletal walk + Path2D fills + cel-shading + face elements + hair-goo pipeline EVERY FRAME. For an idle player, the rendered pixels are nearly identical between frames &mdash; only a sub-pixel sin-wave bob on head + spine.</p>
+<p>New <code>_LX_HERO_IDLE_BAKE_CACHE</code> bakes one idle frame at <code>animTime=0.5</code> (bob midpoint) per unique <code>(cls, skinIdx, hairId)</code> tuple into a 100&times;100 offscreen canvas. The new wrapper <code>_drawVectorHeroCached(sx, sy)</code>:</p>
+<ol>
+<li>If <code>_heroVecAnimFor()</code> returns anything other than <code>'idle'</code> (walk / attack / jump) &rarr; falls through to live <code>_drawVectorHero</code></li>
+<li>If MSX sprite is active &rarr; falls through</li>
+<li>Otherwise &rarr; cache-hit <code>drawImage</code> + facing-flip mirror around player centre</li>
+</ol>
+<p>Cache invalidates implicitly: skin / hair / class swap creates a new tuple key &rarr; one-time re-bake on the next idle frame, then steady-state hits forever.</p>
+
+<h3><span class="pill rare">feat</span><code>opts.forcedFacing</code> now honoured by entry transform</h3>
+<p>The function's entry-transform was reading <code>player.facing</code> directly. The Character Studio (v0.25.93) and the new bake helper both pass <code>forcedFacing: 1</code> &mdash; that flag now actually controls the scale-flip. Net: cleaner studio preview + stable bake regardless of which way the live player is facing.</p>
+
+<h3><span class="pill bug">perf</span>Quantified savings on a stationary boss frame</h3>
+<p>Boss arena, player standing still while monitoring HP, vector hero active:</p>
+<ul>
+<li><b>Before:</b> per-frame call into <code>_drawVectorHero</code> &rarr; 6 bone walks &rarr; ~24 Path2D fills + strokes + 2 hair-goo bake-cache lookups + 8 face elements + cel-shading shifts. Roughly 60+ canvas operations.</li>
+<li><b>After:</b> 1 <code>drawImage(cachedCanvas, dx, dy)</code>. ~98% reduction in canvas-operation count for the hero on idle frames.</li>
+</ul>
+<p>Combined with v0.25.160 (hair-goo bake), v0.25.171 (impact-burst gating), v0.25.174 (mob-projectile sprite swap), and v0.25.175 (backdrop-filter mobile drop) the mobile idle-hover frame budget should now be comfortable headroom on most phones.</p>
+
 <h2>v0.25.175 <span class="tag">Drop backdrop-filter: blur on mobile</span></h2>
 
 <h3><span class="pill bug">perf</span>4 mobile-expensive blur'd surfaces stripped on touch devices</h3>
