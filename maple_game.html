@@ -2605,7 +2605,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.151';
+const GAME_VERSION = 'v0.25.152';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -3982,6 +3982,92 @@ const LX_VFX = (() => {
   return out;
 })();
 function _lxVfxReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+// =========================================================================
+// MSX_HERO — MapleStory-style chibi character sprite registry (v0.25.152)
+// =========================================================================
+// Three painterly hand-painted chibi sprites generated via ludo.ai:
+//   default — adventurer boy in plain tee + jeans
+//   warrior — armored warrior with crystal sword + shield + cape
+//   mage    — robed spellcaster with glowing staff + spellbook
+// All three follow MapleStory aesthetic: super-deformed 1:2 head ratio,
+// soft cel-shading, big anime eyes, pure white background.
+//
+// "Fix pixels to head" — on each image load we compute a head-pixel
+// anchor by scanning alpha for the bounding box of opaque pixels.
+// _drawMsxHero then scales the sprite so its bbox HEIGHT matches
+// player.h exactly and positions it so the topmost-opaque pixel
+// (head top) sits at the player's bbox top. Result: swapping
+// between sprites of different heights keeps the head at a fixed
+// on-screen Y and the feet on the ground simultaneously.
+// =========================================================================
+const MSX_HERO = (() => {
+  const out = {};
+  const files = {
+    default: 'msx_default.webp',
+    warrior: 'msx_warrior.webp',
+    mage:    'msx_mage.webp',
+  };
+  for (const [k, f] of Object.entries(files)) {
+    const img = new Image();
+    img.decoding = 'async';
+    img.onload = () => { _msxComputeAnchor(out[k]); };
+    img.src = 'Sprites/character/hero/' + f;
+    out[k] = { img, anchor: null };
+  }
+  return out;
+})();
+const MSX_HERO_OPTIONS = [
+  { id: null,        name: 'Vector' },
+  { id: 'default',   name: 'Adventurer' },
+  { id: 'warrior',   name: 'Warrior' },
+  { id: 'mage',      name: 'Mage' },
+];
+// Scan alpha channel to find the bbox of opaque pixels + the topmost-opaque
+// pixel (head top) and centroid X (horizontal anchor). Cached on the entry
+// so subsequent draws are zero-cost.
+function _msxComputeAnchor(entry) {
+  if (!entry || !entry.img || !entry.img.complete || entry.img.naturalWidth === 0) return;
+  try {
+    const sw = entry.img.naturalWidth;
+    const sh = entry.img.naturalHeight;
+    const c = document.createElement('canvas');
+    c.width = sw; c.height = sh;
+    const cx = c.getContext('2d');
+    cx.drawImage(entry.img, 0, 0);
+    const data = cx.getImageData(0, 0, sw, sh).data;
+    let minX = sw, minY = sh, maxX = -1, maxY = -1;
+    let sumX = 0, count = 0;
+    let headTopY = sh;
+    for (let y = 0; y < sh; y++) {
+      for (let x = 0; x < sw; x++) {
+        const a = data[(y * sw + x) * 4 + 3];
+        if (a > 24) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+          if (y < headTopY) headTopY = y;
+          sumX += x * a;
+          count += a;
+        }
+      }
+    }
+    if (count === 0) return;
+    entry.anchor = {
+      sw, sh, minX, minY, maxX, maxY,
+      bw: maxX - minX + 1,
+      bh: maxY - minY + 1,
+      centroidX: sumX / count,
+      headY: headTopY,            // topmost opaque pixel — the "head pin"
+    };
+  } catch (e) {
+    console.warn('[MSX] anchor compute failed', e.message);
+  }
+}
+function _msxReady(id) {
+  const e = id && MSX_HERO[id];
+  return !!(e && e.img && e.img.complete && e.img.naturalWidth > 0 && e.anchor);
+}
 // v0.25.129 — pick the floor theme per map. drawPlatforms uses this to
 // look up the matching ground + platform tile pair from LX_TILES.
 const _THEME_FLOOR_KEY    = { grass:'floorGrass',    stone:'floorStone',    ice:'floorIce',    lava:'floorLava',    sand:'floorSand'    };
@@ -25315,6 +25401,59 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   ctx.restore();
 }
 
+// =========================================================================
+// _drawMsxHero — MapleStory-style sprite renderer (v0.25.152)
+// =========================================================================
+// Picks the entry from MSX_HERO based on player.lookCustom.msxId or the
+// optional opts.msxId (used by Character Studio preview). Scales the
+// source bbox to fit player.h exactly and anchors the topmost-opaque
+// pixel ("head pin") at the player's bbox top, so heads stay at a fixed
+// on-screen Y across all sprite swaps. Honors player.facing flip.
+// _ctx is optional — defaults to the global ctx.
+// =========================================================================
+function _drawMsxHero(sx, sy, _ctx, opts) {
+  opts = opts || {};
+  const targetCtx = _ctx || (typeof _MAIN_CTX !== 'undefined' ? _MAIN_CTX : ctx);
+  const msxId = opts.msxId || (player && player.lookCustom && player.lookCustom.msxId);
+  if (!msxId || !_msxReady(msxId)) return false;
+  const entry = MSX_HERO[msxId];
+  const a = entry.anchor;
+  // Player visual size — match the vector hero's 0.9× scale so swaps feel
+  // visually equivalent. The vector hero centres feet at (sx+pw/2, sy+ph)
+  // with a 0.9 scale, so use ph * 0.9 as the target sprite height.
+  const targetH = (typeof player !== 'undefined' ? player.h : 44) * 0.9;
+  const fit = targetH / a.bh;
+  const drawW = a.bw * fit;
+  const drawH = a.bh * fit;
+  // Centre horizontally on the player's bbox centre using the sprite's
+  // centroid (mass centre, not bbox centre — matches the vector hero's
+  // visual "weight" placement when limbs extend asymmetrically).
+  const pw = (typeof player !== 'undefined' ? player.w : 28);
+  const cx = sx + pw / 2;
+  const cy = sy + (player ? player.h : 44);  // feet anchor on ground
+  const centroidOffsetX = (a.centroidX - (a.minX + a.bw / 2)) * fit;
+  const dstX = cx - drawW / 2 - centroidOffsetX;
+  const dstY = cy - drawH;   // feet sit on the ground line
+  targetCtx.save();
+  // Facing flip — mirror around the player's vertical centreline
+  const facing = (opts.forcedFacing != null) ? opts.forcedFacing
+                 : (player && (player.facing | 0)) || 1;
+  if (facing < 0) {
+    targetCtx.translate(cx, 0);
+    targetCtx.scale(-1, 1);
+    targetCtx.translate(-cx, 0);
+  }
+  targetCtx.imageSmoothingEnabled = true;
+  targetCtx.imageSmoothingQuality = 'high';
+  targetCtx.drawImage(
+    entry.img,
+    a.minX, a.minY, a.bw, a.bh,   // source bbox
+    dstX,   dstY,   drawW, drawH  // dest rect
+  );
+  targetCtx.restore();
+  return true;
+}
+
 function drawPlayer() {
   const sx = Math.round(player.x - game.camera.x);
   const sy = Math.round(player.y);
@@ -25359,7 +25498,14 @@ function drawPlayer() {
   // _CHAR_STYLE === 'vector'. Default 'sprite' keeps the existing flow.
   // v0.25.134 — also routed through vector when player.lookCustom is
   // set (Q-key Character Studio applied a skin/hair to the player).
-  if (_CHAR_STYLE === 'vector' || (player.lookCustom)) {
+  // v0.25.152 — MapleStory-style chibi sprite picks (msxId) take priority
+  // over BOTH vector and legacy sprite-sheet paths. _drawMsxHero returns
+  // false if the picked sprite hasn't decoded yet, so we fall back to
+  // the vector hero rather than rendering nothing.
+  const _msxId = player.lookCustom && player.lookCustom.msxId;
+  if (_msxId && _msxReady(_msxId)) {
+    _drawMsxHero(sx, sy);
+  } else if (_CHAR_STYLE === 'vector' || (player.lookCustom)) {
     _drawVectorHero(sx, sy);
   } else if (_hasCustomSprite) {
     _drawPlayerCustomSprite();
@@ -33517,7 +33663,9 @@ requestAnimationFrame(loop);
       <div class="face-styles" id="face-styles"></div>
       <h3>Hair</h3>
       <div class="face-styles" id="hair-styles"></div>
-      <p class="char-studio-hint">Press <kbd>Q</kbd> to toggle • <kbd>Esc</kbd> to close</p>
+      <h3>Sprite Skin</h3>
+      <div class="face-styles" id="msx-styles"></div>
+      <p class="char-studio-hint">Press <kbd>Q</kbd> to toggle • <kbd>Esc</kbd> to close • Sprite Skin overrides the vector look</p>
     </div>
   </div>
 </div>
@@ -33536,6 +33684,10 @@ const CHAR_STUDIO = {
   // user can re-pick from the swatch row if they want.
   skinIdx: 2,           // default 'Light' tone
   hairId:  'anime',
+  // v0.25.152 — null = vector hero, 'default' / 'warrior' / 'mage' picks
+  // the matching MapleStory chibi sprite from MSX_HERO and overrides
+  // the vector path entirely.
+  msxId:   null,
   ready: true,
 };
 
@@ -33548,23 +33700,39 @@ function renderCharStudio() {
   const c = cv.getContext('2d');
   const W = cv.width, H = cv.height;
   c.clearRect(0, 0, W, H);
-  c.save();
-  c.translate(W / 2, H * 0.92);   // feet at ~92% down so head clears the top
-  const SCALE = 5.0;
-  c.scale(SCALE, SCALE);
-  // Render the vector hero on the studio canvas with the current picks.
-  // The function expects (sx, sy) where (sx + player.w/2, sy + player.h)
-  // becomes the feet anchor. Faking player.w/h to 28/44 (game defaults).
-  const FAKE_W = 28, FAKE_H = 44;
-  _drawVectorHero(-FAKE_W / 2, -FAKE_H, c, {
-    cls: (typeof player !== 'undefined' && player.cls) || 'default',
-    lookCustom: { skinIdx: CHAR_STUDIO.skinIdx, hairId: CHAR_STUDIO.hairId },
-    animName: 'idle',
-    animTime: ((Date.now() / 1000) % 3) / 3,  // looped idle anim time
-    forcedFacing: 1,
-  });
-  c.restore();
-  // Re-render every frame so the idle bob animates.
+  // v0.25.152 — when an MSX sprite is picked, preview that instead of
+  // the vector hero. The sprite is drawn directly on the studio canvas
+  // (no SCALE transform needed — _drawMsxHero scales internally to
+  // match player.h * 0.9, which we approximate with a larger fake H
+  // here so the studio fills the panel).
+  if (CHAR_STUDIO.msxId && _msxReady(CHAR_STUDIO.msxId)) {
+    const STUDIO_PH = 320;          // visible character height in panel
+    const STUDIO_PW = 200;
+    const sx = (W - STUDIO_PW) / 2;
+    const sy = H * 0.95 - STUDIO_PH;
+    // Build a temporary fake player so _drawMsxHero uses the panel size.
+    const realPlayer = (typeof player !== 'undefined') ? player : null;
+    const fakePlayer = { w: STUDIO_PW, h: STUDIO_PH / 0.9, facing: 1 };
+    if (typeof window !== 'undefined') window.player = fakePlayer;
+    _drawMsxHero(sx, sy, c, { msxId: CHAR_STUDIO.msxId, forcedFacing: 1 });
+    if (typeof window !== 'undefined') window.player = realPlayer;
+  } else {
+    c.save();
+    c.translate(W / 2, H * 0.92);   // feet at ~92% down so head clears the top
+    const SCALE = 5.0;
+    c.scale(SCALE, SCALE);
+    // Render the vector hero on the studio canvas with the current picks.
+    const FAKE_W = 28, FAKE_H = 44;
+    _drawVectorHero(-FAKE_W / 2, -FAKE_H, c, {
+      cls: (typeof player !== 'undefined' && player.cls) || 'default',
+      lookCustom: { skinIdx: CHAR_STUDIO.skinIdx, hairId: CHAR_STUDIO.hairId },
+      animName: 'idle',
+      animTime: ((Date.now() / 1000) % 3) / 3,  // looped idle anim time
+      forcedFacing: 1,
+    });
+    c.restore();
+  }
+  // Re-render every frame so the idle bob animates / sprite preview stays live.
   if (CHAR_STUDIO._raf) cancelAnimationFrame(CHAR_STUDIO._raf);
   CHAR_STUDIO._raf = requestAnimationFrame(renderCharStudio);
 }
@@ -33606,6 +33774,30 @@ function buildCharStudioFaceStyles() {
   }
 }
 
+// v0.25.152 — MSX sprite picker. 'Vector' (id=null) = use the vector
+// hero; 'Adventurer' / 'Warrior' / 'Mage' switch to the matching
+// painterly sprite from MSX_HERO. Picking an MSX skin overrides the
+// skin/hair picks above (those only affect the vector renderer).
+function buildCharStudioMsxStyles() {
+  const cont = document.getElementById('msx-styles');
+  if (!cont) return;
+  cont.dataset.built = '1';
+  cont.innerHTML = '';
+  MSX_HERO_OPTIONS.forEach((opt) => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'face-style-btn' + (opt.id === CHAR_STUDIO.msxId ? ' active' : '');
+    el.textContent = opt.name;
+    el.title = opt.id ? ('Sprite: ' + opt.id) : 'Vector hero (skin + hair pickers above apply)';
+    el.onclick = () => {
+      CHAR_STUDIO.msxId = opt.id;
+      cont.querySelectorAll('.face-style-btn').forEach((b) => b.classList.remove('active'));
+      el.classList.add('active');
+    };
+    cont.appendChild(el);
+  });
+}
+
 function buildCharStudioHairStyles() {
   const cont = document.getElementById('hair-styles');
   if (!cont) return;
@@ -33633,10 +33825,12 @@ function openCharStudio() {
   if (typeof player !== 'undefined' && player.lookCustom) {
     if (player.lookCustom.skinIdx != null) CHAR_STUDIO.skinIdx = player.lookCustom.skinIdx;
     if (player.lookCustom.hairId)          CHAR_STUDIO.hairId  = player.lookCustom.hairId;
+    if ('msxId' in player.lookCustom)      CHAR_STUDIO.msxId   = player.lookCustom.msxId;
   }
   buildCharStudioSwatches();
   buildCharStudioFaceStyles();
   buildCharStudioHairStyles();
+  buildCharStudioMsxStyles();
   wireCharStudioActionButtons();
   const status = document.getElementById('char-studio-status');
   if (status) status.textContent = 'Vector preview · pick skin tone + hair style, then Use in game.';
@@ -33775,6 +33969,7 @@ function applyCharStudioToPlayer() {
   player.lookCustom = {
     skinIdx: CHAR_STUDIO.skinIdx,
     hairId:  CHAR_STUDIO.hairId,
+    msxId:   CHAR_STUDIO.msxId,   // v0.25.152 — null = vector, otherwise picks MSX sprite
   };
   // Clear any leftover sprite-system overrides from the legacy studio.
   if (typeof window !== 'undefined') {
@@ -33783,9 +33978,16 @@ function applyCharStudioToPlayer() {
     }
   }
   const status = document.getElementById('char-studio-status');
-  if (status) status.textContent = 'Applied · player is now using the vector look ('
-    + HERO_VEC_SKIN[CHAR_STUDIO.skinIdx].name + ' · ' + CHAR_STUDIO.hairId + ').';
-  if (typeof showToast === 'function') showToast('Vector look applied', 'rare');
+  if (status) {
+    if (CHAR_STUDIO.msxId) {
+      const opt = MSX_HERO_OPTIONS.find(o => o.id === CHAR_STUDIO.msxId);
+      status.textContent = 'Applied · player is now using the MapleStory ' + (opt ? opt.name : CHAR_STUDIO.msxId) + ' sprite.';
+    } else {
+      status.textContent = 'Applied · player is now using the vector look ('
+        + HERO_VEC_SKIN[CHAR_STUDIO.skinIdx].name + ' · ' + CHAR_STUDIO.hairId + ').';
+    }
+  }
+  if (typeof showToast === 'function') showToast(CHAR_STUDIO.msxId ? 'Sprite skin applied' : 'Vector look applied', 'rare');
   if (typeof saveState === 'function') saveState();
 }
 
