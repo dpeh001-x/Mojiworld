@@ -2584,7 +2584,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.137';
+const GAME_VERSION = 'v0.25.138';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -2611,7 +2611,7 @@ const W = canvas.width, H = canvas.height;
   const isMobile =
     (typeof window !== 'undefined' && window.matchMedia &&
      window.matchMedia('(pointer: coarse), (max-width: 900px)').matches);
-  const cap = isMobile ? 1 : 2;
+  const cap = isMobile ? 1 : 1.5;
   const dpr = Math.min(cap, Math.max(1, window.devicePixelRatio || 1));
   if (dpr <= 1) return;
   canvas.width  = W * dpr;
@@ -2620,6 +2620,37 @@ const W = canvas.width, H = canvas.height;
   canvas.style.height = H + 'px';
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 })();
+
+// Lightweight adaptive visual budget. It only gates eye-candy work; gameplay
+// timing, hitboxes, damage, and AI continue to run normally.
+const LX_PERF = {
+  avgFrame: 16.7,
+  slowFrames: 0,
+  lowFx: false,
+  lowFxUntil: 0,
+};
+
+function _perfTick(dt, time) {
+  const frame = Math.min(80, Math.max(0, dt || 16.7));
+  LX_PERF.avgFrame += (frame - LX_PERF.avgFrame) * 0.06;
+  if (frame > 28 || LX_PERF.avgFrame > 22) {
+    LX_PERF.slowFrames++;
+  } else {
+    LX_PERF.slowFrames = Math.max(0, LX_PERF.slowFrames - 2);
+  }
+  if (!LX_PERF.lowFx && LX_PERF.slowFrames >= 12) {
+    LX_PERF.lowFx = true;
+    LX_PERF.lowFxUntil = time + 3000;
+  } else if (LX_PERF.lowFx && time > LX_PERF.lowFxUntil &&
+             LX_PERF.avgFrame < 19 && LX_PERF.slowFrames <= 2) {
+    LX_PERF.lowFx = false;
+    LX_PERF.slowFrames = 0;
+  }
+}
+
+function _perfLowFx() {
+  return !!(LX_PERF && LX_PERF.lowFx);
+}
 
 // =========================================================================
 // PHASER 3 BOOTSTRAP (v0.25.15 — migration scaffolding, flag-gated)
@@ -17345,6 +17376,28 @@ const _IS_MOBILE_AT_LOAD =
 const MAX_PARTICLES    = _IS_MOBILE_AT_LOAD ? 200 : 500;
 const MAX_DMG_NUMBERS  = _IS_MOBILE_AT_LOAD ? 24  : 40;
 const MAX_AFTERIMAGES  = _IS_MOBILE_AT_LOAD ? 12  : 25;
+const MAX_AMBIENT      = _IS_MOBILE_AT_LOAD ? 45  : 90;
+
+function _particleCap() {
+  return Math.max(80, Math.floor(MAX_PARTICLES * (_perfLowFx() ? 0.55 : 1)));
+}
+
+function _damageNumberCap() {
+  return Math.max(16, Math.floor(MAX_DMG_NUMBERS * (_perfLowFx() ? 0.70 : 1)));
+}
+
+function _afterImageCap() {
+  return Math.max(6, Math.floor(MAX_AFTERIMAGES * (_perfLowFx() ? 0.55 : 1)));
+}
+
+function _trimVisualQueues() {
+  const pc = _particleCap();
+  const dc = _damageNumberCap();
+  const ac = _afterImageCap();
+  if (game.particles.length > pc) game.particles.splice(0, game.particles.length - pc);
+  if (game.damageNumbers.length > dc) game.damageNumbers.splice(0, game.damageNumbers.length - dc);
+  if (game.afterImages.length > ac) game.afterImages.splice(0, game.afterImages.length - ac);
+}
 
 function updateParticles(dt) {
   // Advance + compact via write-index (O(n)) — replaces the old per-dead
@@ -17352,6 +17405,8 @@ function updateParticles(dt) {
   // particles shift down into slots vacated by expired ones in a single pass.
   {
     const arr = game.particles;
+    const cap = _particleCap();
+    if (arr.length > cap) arr.splice(0, arr.length - cap);
     let w = 0;
     for (let r = 0; r < arr.length; r++) {
       const p = arr[r];
@@ -17363,10 +17418,12 @@ function updateParticles(dt) {
     }
     if (w !== arr.length) arr.length = w;
     // Cap — drop oldest when over budget (splice is only paid in overflow frames)
-    if (arr.length > MAX_PARTICLES) arr.splice(0, arr.length - MAX_PARTICLES);
+    if (arr.length > cap) arr.splice(0, arr.length - cap);
   }
   {
     const arr = game.damageNumbers;
+    const cap = _damageNumberCap();
+    if (arr.length > cap) arr.splice(0, arr.length - cap);
     let w = 0;
     for (let r = 0; r < arr.length; r++) {
       const d = arr[r];
@@ -17379,10 +17436,11 @@ function updateParticles(dt) {
       }
     }
     if (w !== arr.length) arr.length = w;
-    if (arr.length > MAX_DMG_NUMBERS) arr.splice(0, arr.length - MAX_DMG_NUMBERS);
+    if (arr.length > cap) arr.splice(0, arr.length - cap);
   }
-  if (game.afterImages.length > MAX_AFTERIMAGES) {
-    game.afterImages.splice(0, game.afterImages.length - MAX_AFTERIMAGES);
+  const afterCap = _afterImageCap();
+  if (game.afterImages.length > afterCap) {
+    game.afterImages.splice(0, game.afterImages.length - afterCap);
   }
 }
 
