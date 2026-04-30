@@ -2080,6 +2080,26 @@
 </style>
 </head>
 <body>
+<!-- v0.25.157 — SVG Gooey Filter (in-document, zero-size, hidden).
+     Used by Canvas2D via `ctx.filter = 'url(#goo)'` to merge a cluster
+     of overlapping hair blobs (circles + ellipses on an offscreen
+     canvas) into a smooth organic anime-hair silhouette. The filter
+     does Gaussian blur → steep alpha-threshold colour matrix →
+     atop-composite with the source. Stays in DOM for the lifetime
+     of the page; canvas filter URL refs require this. -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="0" height="0"
+     style="position:absolute;width:0;height:0;pointer-events:none;"
+     aria-hidden="true">
+  <defs>
+    <filter id="goo">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur" />
+      <feColorMatrix in="blur" mode="matrix"
+        values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7" result="goo" />
+      <feComposite in="SourceGraphic" in2="goo" operator="atop" />
+    </filter>
+  </defs>
+</svg>
 <div class="game-wrapper">
   <canvas id="game" width="960" height="560"
           style="position:relative; z-index:2;"></canvas>
@@ -2605,7 +2625,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.156';
+const GAME_VERSION = 'v0.25.157';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -24968,168 +24988,134 @@ function _migrateHairId(id) {
   return id;
 }
 
-// v0.25.155 — SIMPLIFIED 4-LOCK LAYERED HAIR PIPELINE.
+// v0.25.157 — SVG GOOEY-FILTER HAIR PIPELINE.
 // =========================================================================
-// Every hairstyle uses the same template: 1 back lock + 3 front locks =
-// 4 cubic-bezier paths total. The back lock is drawn BEFORE the head
-// silhouette (nape / mass behind the head). The 3 front locks are drawn
-// AFTER head shading (left side + centre + right side, layered front).
-// All paths use cubic-bezier (C) commands only.
-// _hairCelGrad (in _drawVectorHero) supplies the shared dark→bright→dark
-// vertical gradient. Each lock takes a thick 2.5 px black stroke.
+// Hair is no longer Path2D + cubic-beziers. Each style is a cluster of
+// 15-25 overlapping circles + ellipses (the SVG "metaballs / gooey"
+// technique). The blobs are rendered to an offscreen canvas, then
+// drawn back to the main canvas through `ctx.filter = 'url(#goo)'`,
+// which applies a Gaussian blur → steep alpha-threshold colour matrix
+// → atop-composite. Result: blobs merge into a smooth organic anime
+// silhouette automatically, no calculated bezier control points.
+//
+// Each entry:
+//   back:  { blobs: [{cx,cy,r} | {cx,cy,rx,ry}, ...] }   drawn BEFORE head
+//   front: { blobs: [...] }                              drawn AFTER head
+//
+// Coordinates are in head-space (head bbox ≈ x ∈ [-22, 22], y ∈ [-30, 22]).
+// Blob radii r=4..18 in head-space units.
 // =========================================================================
-const HERO_VEC_HAIR_LAYERED = {
-  // ─── FLOW — soft anime swept hair, default ───────────────────────────
+const HERO_VEC_HAIR_GOO = {
+  // ─── FLOW — soft anime swept hair (default) ─────────────────────────
+  // 8 back blobs frame the nape; 10 front blobs build crown peak +
+  // 3-bang silhouette over the forehead.
   flow: {
-    back: [
-      // Full nape + back-of-crown mass
-      new Path2D(
-        'M -22 -8 ' +
-        'C -25 -22 -10 -28 0 -28 ' +
-        'C 12 -28 25 -22 22 -8 ' +
-        'C 24 6 20 18 12 20 ' +
-        'C 0 22 -10 22 -18 18 ' +
-        'C -23 12 -24 2 -22 -8 Z'
-      ),
-    ],
-    front: [
-      // Left side: crown sweep + soft forelock combined
-      new Path2D(
-        'M -20 -2 ' +
-        'C -24 -18 -10 -26 -2 -22 ' +
-        'C -3 -14 -8 -6 -10 0 ' +
-        'C -13 6 -18 6 -20 -2 Z'
-      ),
-      // Centre crown peak with chunky middle bang
-      new Path2D(
-        'M -3 -22 ' +
-        'C 0 -30 8 -30 9 -23 ' +
-        'C 8 -14 4 -8 0 -4 ' +
-        'C -4 -8 -5 -16 -3 -22 Z'
-      ),
-      // Right side: crown sweep + soft forelock combined
-      new Path2D(
-        'M 4 -18 ' +
-        'C 10 -25 22 -22 20 -8 ' +
-        'C 22 0 18 6 12 6 ' +
-        'C 6 6 4 -2 4 -18 Z'
-      ),
-    ],
+    back: { blobs: [
+      { cx:  0, cy:  0, r: 18 },   // big back-of-head anchor
+      { cx:-12, cy:-10, r: 12 },   // upper-left back
+      { cx: 12, cy:-10, r: 12 },   // upper-right back
+      { cx:  0, cy:-15, r: 14 },   // top of crown
+      { cx:-14, cy: 10, r: 10 },   // lower-left wisp
+      { cx: 14, cy: 10, r: 10 },   // lower-right wisp
+      { cx: -8, cy: 15, r:  8 },   // bottom-left tuck
+      { cx:  8, cy: 15, r:  8 },   // bottom-right tuck
+    ]},
+    front: { blobs: [
+      { cx:  2, cy:-22, r: 10 },   // crown peak (centre)
+      { cx: -8, cy:-20, r:  8 },   // crown peak left tuft
+      { cx: 10, cy:-20, r:  8 },   // crown peak right tuft
+      { cx:-15, cy:-15, r:  8 },   // far left crown
+      { cx: 15, cy:-12, r:  8 },   // far right crown
+      { cx:-10, cy: -3, r:  8 },   // forehead bang left lobe
+      { cx: -2, cy: -2, r:  7 },   // forehead bang centre lobe
+      { cx:  8, cy: -3, r:  8 },   // forehead bang right lobe
+      { cx:-16, cy: -5, r:  6 },   // side strand left
+      { cx: 16, cy: -3, r:  6 },   // side strand right
+    ]},
   },
 
-  // ─── SPIKE — angular shounen pointed hair (still cubic-bezier only) ───
+  // ─── SPIKE — shounen pointed hair via vertical ellipse stacks ────────
+  // The goo filter rounds sharp points, so spikes are built from tall
+  // narrow ellipses that taper toward the top via decreasing rx.
   spike: {
-    back: [
-      // Smaller, tighter nape — most volume is on top
-      new Path2D(
-        'M -19 -4 ' +
-        'C -22 -14 -10 -22 0 -22 ' +
-        'C 10 -22 22 -14 19 -4 ' +
-        'C 22 8 14 16 4 16 ' +
-        'C -6 16 -16 14 -19 -4 Z'
-      ),
-    ],
-    front: [
-      // Tall left spike
-      new Path2D(
-        'M -19 -2 ' +
-        'C -22 -14 -16 -26 -8 -30 ' +
-        'C -4 -18 -8 -8 -10 -2 ' +
-        'C -14 2 -19 0 -19 -2 Z'
-      ),
-      // Tall centre spike (tallest of the three)
-      new Path2D(
-        'M -4 -8 ' +
-        'C -2 -24 4 -34 6 -32 ' +
-        'C 9 -22 7 -12 4 -4 ' +
-        'C 0 -2 -4 -4 -4 -8 Z'
-      ),
-      // Tall right spike
-      new Path2D(
-        'M 6 -6 ' +
-        'C 10 -24 18 -30 20 -22 ' +
-        'C 22 -10 16 -2 12 -2 ' +
-        'C 8 -2 6 -4 6 -6 Z'
-      ),
-    ],
+    back: { blobs: [
+      { cx:  0, cy:  2, r: 18 },   // big back mass
+      { cx:  0, cy: -8, r: 14 },   // upper-back
+      { cx:-14, cy:  0, r: 10 },   // back-left side
+      { cx: 14, cy:  0, r: 10 },   // back-right side
+      { cx:-12, cy: 10, r: 10 },   // lower-left
+      { cx: 12, cy: 10, r: 10 },   // lower-right
+    ]},
+    front: { blobs: [
+      // Centre spike (tallest)
+      { cx:  2, cy:-25, rx: 5, ry: 10 },
+      { cx:  2, cy:-15, rx: 8, ry: 10 },
+      { cx:  2, cy: -5, rx:10, ry: 10 },
+      // Left spike
+      { cx:-12, cy:-22, rx: 4, ry: 10 },
+      { cx:-11, cy:-12, rx: 7, ry: 10 },
+      { cx:-10, cy: -2, rx: 9, ry:  8 },
+      // Right spike
+      { cx: 14, cy:-22, rx: 4, ry: 10 },
+      { cx: 13, cy:-12, rx: 7, ry: 10 },
+      { cx: 12, cy: -2, rx: 9, ry:  8 },
+      // Connectors so the goo merges spikes into one silhouette
+      { cx: -5, cy: -6, r:  7 },
+      { cx:  8, cy: -6, r:  7 },
+      { cx:  0, cy:  2, r:  8 },
+    ]},
   },
 
-  // ─── WAVE — flowing curly hair with longer side strands ──────────────
+  // ─── WAVE — flowing curly with long side strands ─────────────────────
   wave: {
-    back: [
-      // Long flowing back lock with bottom curl
-      new Path2D(
-        'M -22 -6 ' +
-        'C -26 -22 -8 -30 0 -28 ' +
-        'C 12 -30 26 -22 22 -6 ' +
-        'C 28 12 22 24 14 26 ' +
-        'C 4 28 -6 28 -14 24 ' +
-        'C -24 18 -26 4 -22 -6 Z'
-      ),
-    ],
-    front: [
-      // Wavy left side strand falling past chin
-      new Path2D(
-        'M -20 -2 ' +
-        'C -24 -18 -8 -24 -2 -22 ' +
-        'C -4 -10 -10 2 -14 10 ' +
-        'C -20 16 -23 12 -22 4 ' +
-        'C -22 0 -22 -2 -20 -2 Z'
-      ),
-      // Flowing centre wave bang
-      new Path2D(
-        'M -3 -22 ' +
-        'C 2 -30 10 -26 9 -16 ' +
-        'C 6 -8 0 -2 -3 0 ' +
-        'C -8 -2 -8 -14 -3 -22 Z'
-      ),
-      // Wavy right side strand
-      new Path2D(
-        'M 4 -16 ' +
-        'C 10 -24 22 -20 22 -4 ' +
-        'C 24 8 18 16 12 14 ' +
-        'C 4 10 2 0 4 -8 ' +
-        'C 4 -12 4 -16 4 -16 Z'
-      ),
-    ],
+    back: { blobs: [
+      { cx:  0, cy: -5, r: 18 },   // crown mass
+      { cx:  0, cy:-15, r: 14 },   // top-back
+      { cx:-15, cy:  0, r: 11 },   // back-left side
+      { cx: 15, cy:  0, r: 11 },   // back-right side
+      { cx:-14, cy: 14, r: 10 },   // lower-left wisp
+      { cx: 14, cy: 14, r: 10 },   // lower-right wisp
+      { cx:-12, cy: 22, r:  9 },   // bottom curl left
+      { cx: 12, cy: 22, r:  9 },   // bottom curl right
+      { cx:-18, cy:  8, r:  8 },   // long tail left
+      { cx: 18, cy:  8, r:  8 },   // long tail right
+    ]},
+    front: { blobs: [
+      { cx:  2, cy:-22, r: 10 },   // crown peak
+      { cx:-10, cy:-20, r: 10 },   // top-left
+      { cx: 12, cy:-19, r: 10 },   // top-right
+      { cx:-13, cy: -8, r:  8 },   // wave forelock left
+      { cx:-15, cy:  2, r:  7 },   // wave tip left (falls past chin)
+      { cx: 14, cy: -7, r:  8 },   // wave forelock right
+      { cx: 16, cy:  4, r:  7 },   // wave tip right
+      { cx:  0, cy: -3, r:  7 },   // centre bang
+      { cx:-17, cy: -3, r:  6 },   // side strand left
+      { cx: 17, cy: -2, r:  6 },   // side strand right
+    ]},
   },
 
-  // ─── CROP — short cropped hair, tight to the head ────────────────────
+  // ─── CROP — short cropped, tight to the skull ────────────────────────
   crop: {
-    back: [
-      // Tight nape close to the skull
-      new Path2D(
-        'M -18 -2 ' +
-        'C -20 -12 -10 -20 0 -20 ' +
-        'C 10 -20 20 -12 18 -2 ' +
-        'C 18 6 12 10 6 10 ' +
-        'C -2 12 -10 12 -14 10 ' +
-        'C -18 6 -20 0 -18 -2 Z'
-      ),
-    ],
-    front: [
-      // Short tucked left bang
-      new Path2D(
-        'M -16 -2 ' +
-        'C -18 -12 -10 -18 -4 -16 ' +
-        'C -4 -10 -8 -2 -10 2 ' +
-        'C -14 4 -17 2 -16 -2 Z'
-      ),
-      // Short forehead bang (centre)
-      new Path2D(
-        'M -5 -16 ' +
-        'C 0 -19 5 -16 5 -10 ' +
-        'C 3 -4 0 -2 -2 -2 ' +
-        'C -5 -4 -7 -10 -5 -16 Z'
-      ),
-      // Short tucked right bang
-      new Path2D(
-        'M 4 -16 ' +
-        'C 10 -18 18 -12 16 -2 ' +
-        'C 17 2 14 4 10 2 ' +
-        'C 8 -2 4 -10 4 -16 Z'
-      ),
-    ],
+    back: { blobs: [
+      { cx:  0, cy: -3, r: 16 },
+      { cx:  0, cy:-13, r: 12 },
+      { cx:-12, cy: -2, r: 10 },
+      { cx: 12, cy: -2, r: 10 },
+      { cx:-10, cy:  8, r:  8 },
+      { cx: 10, cy:  8, r:  8 },
+      { cx:  0, cy:-18, r: 10 },
+      { cx:  0, cy: 10, r:  8 },
+    ]},
+    front: { blobs: [
+      { cx:  0, cy:-18, r:  8 },
+      { cx:-10, cy:-15, r:  8 },
+      { cx: 10, cy:-15, r:  8 },
+      { cx:  0, cy: -3, r:  6 },
+      { cx:-10, cy: -2, r:  6 },
+      { cx: 10, cy: -2, r:  6 },
+      { cx:-15, cy: -5, r:  6 },
+      { cx: 15, cy: -5, r:  6 },
+    ]},
   },
 };
 function _heroClamp01(x) {
@@ -25266,11 +25252,12 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   // v0.25.135 — default to skinIdx 2 ('Light'), not 1, after Ivory insert.
   const skinIdx = (lookCustom.skinIdx != null && HERO_VEC_SKIN[lookCustom.skinIdx]) ? lookCustom.skinIdx : 2;
   const SKIN = HERO_VEC_SKIN[skinIdx];
-  // v0.25.155 — every hairstyle is layered (1 back lock + 3 front locks).
-  // Legacy hairId values get remapped via _migrateHairId before lookup so
-  // existing saves keep working. Falls back to 'flow' on any unknown id.
+  // v0.25.157 — every hairstyle is a cluster of overlapping circle/ellipse
+  // blobs that get merged via SVG goo filter at draw time. Legacy hairId
+  // values get remapped via _migrateHairId before lookup so existing
+  // saves keep working. Falls back to 'flow' on any unknown id.
   const hairId = _migrateHairId(lookCustom.hairId);
-  const HAIR_LAYERED = HERO_VEC_HAIR_LAYERED[hairId] || HERO_VEC_HAIR_LAYERED.flow;
+  const HAIR_GOO = HERO_VEC_HAIR_GOO[hairId] || HERO_VEC_HAIR_GOO.flow;
   // Default class = "naked" mannequin: body + boots take skin colour.
   const BODY_BASE = (cls === 'default' || !C.body) ? SKIN.base : C.body;
   const BODY_SHD  = (cls === 'default' || !C.bodyShd) ? SKIN.mid  : C.bodyShd;
@@ -25350,41 +25337,77 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     ctx.fill();
     ctx.restore();
   }
-  // v0.25.154 — Cel-halo gradient for layered hair locks.
-  // Pattern: dark roots (top) → bright cel-band (middle) → dark tips
-  // (bottom). The mid stops use a tight delta (0.34→0.36 and 0.55→0.57)
-  // so the band reads as a crisp cel-shaded transition rather than a
-  // smooth airbrush blend, matching the SVG spec's stop pattern.
-  // Cached on first call per render so all 7+ locks share one gradient.
-  let _hairCelGradCache = null;
-  function _hairCelGrad() {
-    if (_hairCelGradCache) return _hairCelGradCache;
-    const g = ctx.createLinearGradient(0, -30, 0, 12);
-    g.addColorStop(0.00, HAIR_SHD);   // dark roots top
-    g.addColorStop(0.34, HAIR_SHD);
-    g.addColorStop(0.36, HAIR_HI);    // sharp cel transition to bright
-    g.addColorStop(0.55, HAIR_HI);    // bright halo middle
-    g.addColorStop(0.57, C.hair);     // back to base
-    g.addColorStop(0.85, C.hair);
-    g.addColorStop(1.00, HAIR_SHD);   // dark tips
-    _hairCelGradCache = g;
-    return g;
+  // v0.25.157 — SVG GOOEY-FILTER HAIR RENDERER.
+  // ===================================================================
+  // The blob group (back or front) is rendered to an offscreen canvas
+  // first WITHOUT any filter — just flat-colour overlapping circles +
+  // ellipses. Then the offscreen image is drawn back to the main
+  // canvas with `ctx.filter = 'url(#goo)'`, applying the Gaussian-blur
+  // → steep-alpha-threshold → atop-composite chain across the WHOLE
+  // image at once. That's what makes the blobs merge into a smooth
+  // organic silhouette — applying the filter per-blob would just give
+  // a fuzzy circle each.
+  //
+  // A two-pass routine paints a slightly-larger black "outline" pass
+  // first, then the colored hair pass on top. The outline pass uses
+  // the same blob set with radii expanded ~+1.6 px so a thin black
+  // ring peeks out around the merged silhouette, matching the cel-art
+  // outline aesthetic without needing any stroke ops.
+  // ===================================================================
+  const _GOO_OFF_W = 96, _GOO_OFF_H = 96, _GOO_OX = 48, _GOO_OY = 48;
+  let _hairGooCache = null;
+  function _ensureHairGooCanvas() {
+    if (_hairGooCache) return _hairGooCache;
+    const c = document.createElement('canvas');
+    c.width = _GOO_OFF_W; c.height = _GOO_OFF_H;
+    _hairGooCache = c;
+    return c;
   }
-  // Draw an array of overlapping hair locks with the cel-halo gradient
-  // fill + a thick dark outline matching the strict SVG spec
-  // (stroke="rgba(0,0,0,0.85)" stroke-width="3" stroke-linejoin="round").
-  function _drawHairLockGroup(locks) {
-    if (!locks || !locks.length) return;
-    ctx.save();
-    ctx.lineJoin = 'round';
-    ctx.lineCap  = 'round';
-    for (const p of locks) {
-      ctx.fillStyle = _hairCelGrad();
-      ctx.fill(p);
-      ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-      ctx.lineWidth = 2.5;
-      ctx.stroke(p);
+  function _drawBlobsOnCanvas(target, blobs, fillStyle, expandR) {
+    const tx = target.getContext('2d');
+    tx.clearRect(0, 0, _GOO_OFF_W, _GOO_OFF_H);
+    tx.save();
+    tx.translate(_GOO_OX, _GOO_OY);
+    tx.fillStyle = fillStyle;
+    for (const b of blobs) {
+      tx.beginPath();
+      if (b.rx != null && b.ry != null) {
+        tx.ellipse(b.cx, b.cy, b.rx + expandR, b.ry + expandR, 0, 0, Math.PI * 2);
+      } else {
+        tx.arc(b.cx, b.cy, b.r + expandR, 0, Math.PI * 2);
+      }
+      tx.fill();
     }
+    tx.restore();
+  }
+  function _drawHairGoo(group) {
+    if (!group || !group.blobs || !group.blobs.length) return;
+    const off = _ensureHairGooCanvas();
+    // Pass 1 — black outline (slightly enlarged blobs).
+    _drawBlobsOnCanvas(off, group.blobs, '#1a0818', 1.6);
+    ctx.save();
+    try { ctx.filter = 'url(#goo)'; } catch (e) { /* noop */ }
+    ctx.drawImage(off, -_GOO_OX, -_GOO_OY);
+    ctx.restore();
+    // Pass 2 — colored hair (normal blob radii) layered on top.
+    _drawBlobsOnCanvas(off, group.blobs, C.hair, 0);
+    ctx.save();
+    try { ctx.filter = 'url(#goo)'; } catch (e) { /* noop */ }
+    ctx.drawImage(off, -_GOO_OX, -_GOO_OY);
+    ctx.restore();
+    // Pass 3 — bright cel-highlight band across the upper third of
+    // the silhouette so the hair still reads as cel-shaded volume,
+    // not just a flat blob. Goo'd separately for soft falloff.
+    _drawBlobsOnCanvas(off, group.blobs.map(b => ({
+      cx: b.cx, cy: b.cy - 4,
+      r: b.r != null ? b.r * 0.55 : null,
+      rx: b.rx != null ? b.rx * 0.55 : null,
+      ry: b.ry != null ? b.ry * 0.55 : null,
+    })), HAIR_HI, 0);
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    try { ctx.filter = 'url(#goo)'; } catch (e) { /* noop */ }
+    ctx.drawImage(off, -_GOO_OX, -_GOO_OY);
     ctx.restore();
   }
   // v0.25.144 — two-colour eyes only: black oval + white highlight.
@@ -25430,8 +25453,8 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   // Z-order: back leg → back arm → torso → head + hair → front leg →
   // front arm. ?L = back, ?R = front. Back limbs darkened slightly.
   // v0.25.134 — body parts sourced from BODY_BASE/SHD + SKIN palette.
-  // v0.25.155 — hair sourced from HAIR_LAYERED (the 4-lock cubic-bezier
-  // entry for the selected hairId, post-migration).
+  // v0.25.157 — hair sourced from HAIR_GOO (the SVG-goo blob cluster
+  // for the selected hairId, post-migration).
   drawBone('legL', () => {
     const base = (typeof _mixHex === 'function') ? _mixHex(BOOT_BASE, '#000000', 0.12) : BOOT_BASE;
     _drawShaded(HERO_VEC_PARTS.leg, base, BODY_SHD, SKIN.deep, 3, 3);
@@ -25462,7 +25485,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   drawBone('head', () => {
     // v0.25.155 — back-hair lock(s) ALWAYS draw FIRST, before any head
     // silhouette / ears / shading. Sits behind the head.
-    if (HAIR_LAYERED.back) _drawHairLockGroup(HAIR_LAYERED.back);
+    if (HAIR_GOO.back) _drawHairGoo(HAIR_GOO.back);
     // v0.25.144 — cleaner head shading: softer shadow offset, one broad
     // forehead light, and gentler face accents.
     ctx.fillStyle = SKIN.mid;
@@ -25503,10 +25526,9 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     ctx.restore();
     // 5) One soft specular pip on the upper-right for life.
     _drawGloss(9, -12, 3.4, 2.2, 0.55);
-    // v0.25.155 — Front-hair locks ALWAYS use the layered pipeline now.
-    // Each of the 3 front locks is drawn with the shared cel-halo
-    // gradient fill + thick 2.5 px black stroke (SVG spec).
-    _drawHairLockGroup(HAIR_LAYERED.front);
+    // v0.25.157 — Front-hair blob cluster, drawn through SVG goo filter.
+    // Black outline pass + colored hair pass + cel-highlight pass.
+    if (HAIR_GOO.front) _drawHairGoo(HAIR_GOO.front);
     // =====================================================================
     // FACE-ELEMENTS (v0.25.154, simplified v0.25.156) — strict chibi/anime
     // spec. Wide-spaced eyes, no nose, minimal mouth, all positioned in
@@ -33902,7 +33924,7 @@ console.log('%c[CharStudio] v0.25.93 loaded — bbox-bottom ground anchor + 8 fl
 // previews now render the same _drawVectorHero used in-game on a 384×384
 // studio canvas. State is just the two picks the user can change: skin
 // tone (index into HERO_VEC_SKIN) and hair style (id into the
-// HERO_VEC_HAIR_LAYERED registry, post-_migrateHairId remap).
+// HERO_VEC_HAIR_GOO registry, post-_migrateHairId remap).
 const CHAR_STUDIO = {
   // v0.25.135 — index 2 = Light (Ivory inserted at 0 shifted everything down).
   // Existing saves with skinIdx=1 now read as Porcelain — close enough; the
