@@ -2625,7 +2625,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.157';
+const GAME_VERSION = 'v0.25.158';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -25006,32 +25006,57 @@ function _migrateHairId(id) {
 // Blob radii r=4..18 in head-space units.
 // =========================================================================
 const HERO_VEC_HAIR_GOO = {
-  // ─── FLOW — soft anime swept hair (default) ─────────────────────────
-  // 8 back blobs frame the nape; 10 front blobs build crown peak +
-  // 3-bang silhouette over the forehead.
+  // ─── FLOW — Figma reference design (v0.25.158) ──────────────────────
+  // Traced from Sprites/character/refs/figma_hair_design.png. A single
+  // asymmetric anime silhouette: 4 sharp upward spikes on the crown
+  // (right side taller), smooth side wraps, 3 sharp downward bangs +
+  // 1 side-strand fang at the bottom. Goo would round off the defining
+  // sharp tips, so this style uses Path2D mode: the registry entry has
+  // `path` instead of `blobs`, and _drawHairPath renders it with a
+  // gradient fill + thick black outline.
+  //
+  // Split into two paths so the back wrap goes BEHIND the head and the
+  // top + bangs draw IN FRONT.
   flow: {
-    back: { blobs: [
-      { cx:  0, cy:  0, r: 18 },   // big back-of-head anchor
-      { cx:-12, cy:-10, r: 12 },   // upper-left back
-      { cx: 12, cy:-10, r: 12 },   // upper-right back
-      { cx:  0, cy:-15, r: 14 },   // top of crown
-      { cx:-14, cy: 10, r: 10 },   // lower-left wisp
-      { cx: 14, cy: 10, r: 10 },   // lower-right wisp
-      { cx: -8, cy: 15, r:  8 },   // bottom-left tuck
-      { cx:  8, cy: 15, r:  8 },   // bottom-right tuck
-    ]},
-    front: { blobs: [
-      { cx:  2, cy:-22, r: 10 },   // crown peak (centre)
-      { cx: -8, cy:-20, r:  8 },   // crown peak left tuft
-      { cx: 10, cy:-20, r:  8 },   // crown peak right tuft
-      { cx:-15, cy:-15, r:  8 },   // far left crown
-      { cx: 15, cy:-12, r:  8 },   // far right crown
-      { cx:-10, cy: -3, r:  8 },   // forehead bang left lobe
-      { cx: -2, cy: -2, r:  7 },   // forehead bang centre lobe
-      { cx:  8, cy: -3, r:  8 },   // forehead bang right lobe
-      { cx:-16, cy: -5, r:  6 },   // side strand left
-      { cx: 16, cy: -3, r:  6 },   // side strand right
-    ]},
+    back: { path: new Path2D(
+      // Outer wrap: U-shape that hugs the lower sides + bottom of head.
+      // Starts at the upper-left tuck, sweeps down + around the bottom,
+      // up the right side, with the side-strand fang on the lower-right.
+      'M -22 -4 ' +
+      'C -25 6 -22 18 -16 22 ' +    // sweep down left side
+      'L -16 26 ' +                  // tiny extension at bottom-left
+      'C -8 24 0 24 8 23 ' +         // bottom curve
+      'L 19 28 ' +                   // side-strand fang (tall narrow)
+      'L 14 18 ' +                   // back up into silhouette
+      'C 18 16 22 12 22 6 ' +        // sweep up right side
+      'C 24 0 24 -4 22 -4 ' +        // close along the top line
+      'L -22 -4 Z'
+    )},
+    front: { path: new Path2D(
+      // Top with 4 sharp spikes + bangs across the forehead. Spikes use
+      // L commands for crisp tips, smooth C curves between them.
+      'M -22 -4 ' +
+      'C -25 -16 -12 -28 -3 -29 ' + // smooth curve up to upper-left
+      'L -7 -33 ' +                  // spike #1 — small top-left tuft
+      'L -2 -28 ' +                  // valley
+      'L  2 -36 ' +                  // spike #2 — medium centre-left
+      'L  5 -28 ' +                  // valley
+      'L  9 -40 ' +                  // spike #3 — TALLEST, slightly right of centre
+      'L 13 -28 ' +                  // valley
+      'L 17 -34 ' +                  // spike #4 — tall, right side
+      'L 21 -22 ' +                  // back down toward upper-right
+      'C 26 -10 26 -4 22 -4 ' +      // smooth curve close upper-right corner
+      // Continue across to forehead bangs (lower edge of front piece)
+      'L 14 -2 ' +                   // forehead-right
+      'L 13 4 ' +                    // tip start of bang #3 (rightmost)
+      'L 7 -3 ' +                    // valley (face peeks through)
+      'L 5 6 ' +                     // bang fang #2 tip
+      'L 0 -3 ' +                    // valley
+      'L -3 6 ' +                    // bang fang #1 tip
+      'L -8 -2 ' +                   // valley
+      'L -14 0 ' +                   // forehead-left base
+      'L -22 -4 Z'                   // close back to start
+    )},
   },
 
   // ─── SPIKE — shounen pointed hair via vertical ellipse stacks ────────
@@ -25410,6 +25435,38 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     ctx.drawImage(off, -_GOO_OX, -_GOO_OY);
     ctx.restore();
   }
+  // v0.25.158 — Path2D-based hair renderer for traced silhouettes
+  // (e.g. the Figma reference design). Uses a vertical cel-halo
+  // gradient fill matching the goo highlight pass, plus a thick
+  // black outline so sharp spike tips and bang fangs stay crisp
+  // (the goo filter would round them off, which we don't want here).
+  function _drawHairPath(group) {
+    if (!group || !group.path) return;
+    // Vertical cel-halo gradient: dark roots → bright band → dark tips.
+    const grad = ctx.createLinearGradient(0, -42, 0, 28);
+    grad.addColorStop(0.00, HAIR_SHD);
+    grad.addColorStop(0.32, HAIR_SHD);
+    grad.addColorStop(0.36, HAIR_HI);
+    grad.addColorStop(0.55, HAIR_HI);
+    grad.addColorStop(0.60, C.hair);
+    grad.addColorStop(0.85, C.hair);
+    grad.addColorStop(1.00, HAIR_SHD);
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.lineCap  = 'round';
+    ctx.fillStyle = grad;
+    ctx.fill(group.path);
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke(group.path);
+    ctx.restore();
+  }
+  // Dispatch helper: routes to goo or path renderer based on entry shape.
+  function _drawHairGroup(group) {
+    if (!group) return;
+    if (group.path)  return _drawHairPath(group);
+    if (group.blobs) return _drawHairGoo(group);
+  }
   // v0.25.144 — two-colour eyes only: black oval + white highlight.
   // v0.25.136 — accepts an `eyeShiftX` offset so the pupil tracks the
   // direction of player movement. Read from outer scope variable
@@ -25485,7 +25542,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   drawBone('head', () => {
     // v0.25.155 — back-hair lock(s) ALWAYS draw FIRST, before any head
     // silhouette / ears / shading. Sits behind the head.
-    if (HAIR_GOO.back) _drawHairGoo(HAIR_GOO.back);
+    if (HAIR_GOO.back) _drawHairGroup(HAIR_GOO.back);
     // v0.25.144 — cleaner head shading: softer shadow offset, one broad
     // forehead light, and gentler face accents.
     ctx.fillStyle = SKIN.mid;
@@ -25528,7 +25585,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     _drawGloss(9, -12, 3.4, 2.2, 0.55);
     // v0.25.157 — Front-hair blob cluster, drawn through SVG goo filter.
     // Black outline pass + colored hair pass + cel-highlight pass.
-    if (HAIR_GOO.front) _drawHairGoo(HAIR_GOO.front);
+    if (HAIR_GOO.front) _drawHairGroup(HAIR_GOO.front);
     // =====================================================================
     // FACE-ELEMENTS (v0.25.154, simplified v0.25.156) — strict chibi/anime
     // spec. Wide-spaced eyes, no nose, minimal mouth, all positioned in
