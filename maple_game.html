@@ -2605,7 +2605,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.153';
+const GAME_VERSION = 'v0.25.154';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -24986,7 +24986,11 @@ const HERO_VEC_HAIR = {
   ),
 };
 // v0.25.134 — list view used by the studio UI in option order.
+// v0.25.154 — added 'flow' (the new layered cubic-bezier MapleStory
+// hairstyle that respects the strict SVG spec: 2 back locks + 5 front
+// bang locks, cel-halo gradient fill, thick 2.5px black outline).
 const HERO_VEC_HAIR_OPTIONS = [
+  { id:'flow',     name:'Flow ✨' },
   { id:'anime',    name:'Anime' },
   { id:'short',    name:'Short' },
   { id:'spike',    name:'Spike' },
@@ -24994,6 +24998,92 @@ const HERO_VEC_HAIR_OPTIONS = [
   { id:'bun',      name:'Top Bun' },
   { id:'pigtails', name:'Pigtails' },
 ];
+
+// v0.25.154 — LAYERED HAIR PIPELINE (strict SVG spec).
+// =========================================================================
+// Each entry has:
+//   back:  Path2D[]  — drawn BEFORE the head silhouette (nape mass + tail wisps)
+//   front: Path2D[]  — drawn AFTER the head shading (crown + bangs in front)
+// All paths use cubic-bezier (C) commands only — no polygons, no jagged
+// L-zigzag fringe. Locks intentionally overlap to read as 3D volume.
+// _drawHairLockGradient (in _drawVectorHero) builds a vertical cel-halo
+// linearGradient that paints all locks with a shared stop pattern:
+//   dark roots (top) → bright cel-band (middle) → dark tips (bottom).
+// Each lock then takes a thick 2.5px OUT-coloured stroke.
+// =========================================================================
+const HERO_VEC_HAIR_LAYERED = {
+  flow: {
+    // BEHIND the head — nape mass + a long tail wisp
+    back: [
+      // B1 — back-of-crown / nape mass framing the head from behind
+      new Path2D(
+        'M -22 -8 ' +
+        'C -25 -22 -10 -28 0 -28 ' +
+        'C 12 -28 25 -22 22 -8 ' +
+        'C 24 4 22 14 16 18 ' +
+        'C 8 22 -8 22 -16 18 ' +
+        'C -22 14 -24 4 -22 -8 Z'
+      ),
+      // B2 — long back-left tail wisp peeking out from behind the head
+      new Path2D(
+        'M -16 8 ' +
+        'C -22 14 -25 24 -18 27 ' +
+        'C -13 28 -10 22 -12 14 Z'
+      ),
+    ],
+    // IN FRONT of the head — crown peaks + 4 chunky overlapping bangs
+    front: [
+      // F1 — left crown chunk swept up + over
+      new Path2D(
+        'M -19 -2 ' +
+        'C -23 -16 -10 -25 -2 -22 ' +
+        'C -1 -19 -3 -14 -5 -10 ' +
+        'C -9 -4 -14 -2 -19 -2 Z'
+      ),
+      // F2 — center crown peak with small upward tuft
+      new Path2D(
+        'M -2 -22 ' +
+        'C 0 -28 6 -32 9 -28 ' +
+        'C 11 -25 8 -22 6 -22 ' +
+        'C 4 -20 0 -22 -2 -22 Z'
+      ),
+      // F3 — right crown chunk
+      new Path2D(
+        'M 6 -22 ' +
+        'C 14 -25 20 -18 18 -8 ' +
+        'C 16 -4 14 -2 10 -4 ' +
+        'C 8 -8 8 -14 6 -22 Z'
+      ),
+      // F4 — long left forelock falling over forehead
+      new Path2D(
+        'M -16 -2 ' +
+        'C -14 -4 -10 -6 -8 -4 ' +
+        'C -10 0 -14 6 -15 5 ' +
+        'C -17 4 -17 0 -16 -2 Z'
+      ),
+      // F5 — middle bang
+      new Path2D(
+        'M -8 -4 ' +
+        'C -6 -2 -4 -2 -2 -4 ' +
+        'C -2 -1 -3 4 -6 5 ' +
+        'C -8 4 -9 0 -8 -4 Z'
+      ),
+      // F6 — right bang
+      new Path2D(
+        'M -2 -4 ' +
+        'C 2 -3 8 -3 10 -4 ' +
+        'C 12 0 10 6 6 7 ' +
+        'C 1 6 -2 0 -2 -4 Z'
+      ),
+      // F7 — long right side strand falling down
+      new Path2D(
+        'M 10 -4 ' +
+        'C 16 -2 19 4 18 8 ' +
+        'C 14 8 11 4 10 0 Z'
+      ),
+    ],
+  },
+};
 function _heroClamp01(x) {
   return Math.max(0, Math.min(1, x));
 }
@@ -25130,6 +25220,13 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   const SKIN = HERO_VEC_SKIN[skinIdx];
   const hairId = lookCustom.hairId || 'anime';
   const HAIR_PATH = HERO_VEC_HAIR[hairId] || HERO_VEC_HAIR.anime;
+  // v0.25.154 — when the layered hair pipeline ('flow') is selected,
+  // bypass the single-Path2D HAIR_PATH route and use back/front lock
+  // arrays. The renderer draws HAIR_LAYERED.back BEFORE the head and
+  // HAIR_LAYERED.front AFTER head shading. _useLayeredHair flag drives
+  // both branches without breaking the legacy hair styles.
+  const HAIR_LAYERED = HERO_VEC_HAIR_LAYERED[hairId] || null;
+  const _useLayeredHair = !!HAIR_LAYERED;
   // Default class = "naked" mannequin: body + boots take skin colour.
   const BODY_BASE = (cls === 'default' || !C.body) ? SKIN.base : C.body;
   const BODY_SHD  = (cls === 'default' || !C.bodyShd) ? SKIN.mid  : C.bodyShd;
@@ -25209,6 +25306,43 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     ctx.fill();
     ctx.restore();
   }
+  // v0.25.154 — Cel-halo gradient for layered hair locks.
+  // Pattern: dark roots (top) → bright cel-band (middle) → dark tips
+  // (bottom). The mid stops use a tight delta (0.34→0.36 and 0.55→0.57)
+  // so the band reads as a crisp cel-shaded transition rather than a
+  // smooth airbrush blend, matching the SVG spec's stop pattern.
+  // Cached on first call per render so all 7+ locks share one gradient.
+  let _hairCelGradCache = null;
+  function _hairCelGrad() {
+    if (_hairCelGradCache) return _hairCelGradCache;
+    const g = ctx.createLinearGradient(0, -30, 0, 12);
+    g.addColorStop(0.00, HAIR_SHD);   // dark roots top
+    g.addColorStop(0.34, HAIR_SHD);
+    g.addColorStop(0.36, HAIR_HI);    // sharp cel transition to bright
+    g.addColorStop(0.55, HAIR_HI);    // bright halo middle
+    g.addColorStop(0.57, C.hair);     // back to base
+    g.addColorStop(0.85, C.hair);
+    g.addColorStop(1.00, HAIR_SHD);   // dark tips
+    _hairCelGradCache = g;
+    return g;
+  }
+  // Draw an array of overlapping hair locks with the cel-halo gradient
+  // fill + a thick dark outline matching the strict SVG spec
+  // (stroke="rgba(0,0,0,0.85)" stroke-width="3" stroke-linejoin="round").
+  function _drawHairLockGroup(locks) {
+    if (!locks || !locks.length) return;
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.lineCap  = 'round';
+    for (const p of locks) {
+      ctx.fillStyle = _hairCelGrad();
+      ctx.fill(p);
+      ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+      ctx.lineWidth = 2.5;
+      ctx.stroke(p);
+    }
+    ctx.restore();
+  }
   // v0.25.144 — two-colour eyes only: black oval + white highlight.
   // v0.25.136 — accepts an `eyeShiftX` offset so the pupil tracks the
   // direction of player movement. Read from outer scope variable
@@ -25281,6 +25415,11 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     _drawGloss(-4, -7, 3, 4, 0.55);
   });
   drawBone('head', () => {
+    // v0.25.154 — back-hair locks (layered hair pipeline) draw FIRST,
+    // before any head silhouette / ears / shading. Sits behind the head.
+    if (_useLayeredHair && HAIR_LAYERED.back) {
+      _drawHairLockGroup(HAIR_LAYERED.back);
+    }
     // v0.25.144 — cleaner head shading: softer shadow offset, one broad
     // forehead light, and gentler face accents.
     ctx.fillStyle = SKIN.mid;
@@ -25321,50 +25460,111 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     ctx.restore();
     // 5) One soft specular pip on the upper-right for life.
     _drawGloss(9, -12, 3.4, 2.2, 0.55);
-    // Hair silhouette (selected style, unified across all classes)
-    ctx.fillStyle = C.hair;
-    ctx.fill(HAIR_PATH);
-    // Cel shadow pass on the hair
-    ctx.save();
-    ctx.clip(HAIR_PATH);
-    ctx.translate(2, 3);
-    ctx.fillStyle = HAIR_SHD;
-    ctx.fill(HAIR_PATH);
-    ctx.restore();
-    ctx.save();
-    ctx.clip(HAIR_PATH);
-    ctx.strokeStyle = HAIR_HI;
-    ctx.lineWidth = 1.5;
-    ctx.globalAlpha = 0.7;
-    ctx.beginPath();
-    ctx.moveTo(-10, -13); ctx.quadraticCurveTo(-2, -19, 10, -15);
-    ctx.stroke();
-    ctx.lineWidth = 1.1;
-    ctx.beginPath();
-    ctx.moveTo(-3, -1); ctx.quadraticCurveTo(4, -5, 10, -2);
-    ctx.stroke();
-    ctx.restore();
-    strokePath(HAIR_PATH);
-    // v0.25.150 — face features biased toward facing direction.
-    // Canvas X is flipped when player.facing < 0, so a constant +FACE_DX
-    // here naturally biases visually toward whichever direction the
-    // hero is facing. Creates a subtle 3/4-view feel without breaking
-    // the pure-front silhouette.
+    // v0.25.154 — Hair routing. Layered pipeline draws each lock as a
+    // separate cubic-bezier path with cel-halo gradient + thick black
+    // outline (matches the strict SVG spec). Legacy single-Path2D path
+    // kept as a fallback for the older hair styles.
+    if (_useLayeredHair) {
+      // FRONT bangs / crown locks layered over the head shading.
+      _drawHairLockGroup(HAIR_LAYERED.front);
+    } else {
+      // Hair silhouette (selected style, unified across all classes)
+      ctx.fillStyle = C.hair;
+      ctx.fill(HAIR_PATH);
+      // Cel shadow pass on the hair
+      ctx.save();
+      ctx.clip(HAIR_PATH);
+      ctx.translate(2, 3);
+      ctx.fillStyle = HAIR_SHD;
+      ctx.fill(HAIR_PATH);
+      ctx.restore();
+      ctx.save();
+      ctx.clip(HAIR_PATH);
+      ctx.strokeStyle = HAIR_HI;
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.7;
+      ctx.beginPath();
+      ctx.moveTo(-10, -13); ctx.quadraticCurveTo(-2, -19, 10, -15);
+      ctx.stroke();
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.moveTo(-3, -1); ctx.quadraticCurveTo(4, -5, 10, -2);
+      ctx.stroke();
+      ctx.restore();
+      strokePath(HAIR_PATH);
+    }
+    // =====================================================================
+    // FACE-ELEMENTS (v0.25.154) — strict chibi/anime spec.
+    // Wide-spaced eyes, no nose, minimal mouth, all positioned in the
+    // bottom 40% of the face area. Each eye has 5 layered z-elements:
+    //   1. heavy upper eyelash line (path stroke, 2.4 px)
+    //   2. iris ellipse with vertical linearGradient (dark top → bright bot)
+    //   3. solid dark pupil ellipse
+    //   4. catchlight A — large white circle, top-right
+    //   5. catchlight B — small white circle, mid-left of pupil
+    // Symmetry enforced by a helper that draws one eye and is called
+    // twice with mirrored x. Bias toward facing direction preserved.
+    // =====================================================================
     const FACE_DX = 2;
-    _drawEye(-5 + FACE_DX, 2);
-    _drawEye( 5 + FACE_DX, 2);
-    ctx.strokeStyle = SKIN.deep;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0.8 + FACE_DX, 4.5); ctx.quadraticCurveTo(1.8 + FACE_DX, 6.2, 0.2 + FACE_DX, 6.8);
-    ctx.stroke();
-    // Subtle smile (also biased)
-    ctx.strokeStyle = OUT;
-    ctx.lineWidth = 1.6;       // v0.25.137 — mouth outline +1
+    // Iris vertical cel-gradient: dark crown → bright lower band.
+    const _irisGrad = ctx.createLinearGradient(0, 4, 0, 14);
+    _irisGrad.addColorStop(0,    '#0a1a3a');     // deep navy at top
+    _irisGrad.addColorStop(0.45, '#2a4ea8');     // mid blue
+    _irisGrad.addColorStop(0.85, '#7fb6ff');     // bright cyan-blue at bottom
+    _irisGrad.addColorStop(1,    '#c4e2ff');     // brightest near base
+    function _drawChibiEye(cx) {
+      // 1) Heavy upper eyelash line — thick black arc above the iris.
+      ctx.save();
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 2.4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx - 4.2, 7.8);
+      ctx.quadraticCurveTo(cx, 4.6, cx + 4.2, 7.8);
+      ctx.stroke();
+      ctx.restore();
+      // 2) Iris — large gradient-filled ellipse.
+      ctx.save();
+      ctx.fillStyle = _irisGrad;
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.ellipse(cx, 10.4, 3.4, 4.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+      // 3) Pupil — solid dark ellipse.
+      ctx.fillStyle = '#0a0612';
+      ctx.beginPath();
+      ctx.ellipse(cx, 10.6, 1.6, 2.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 4) Catchlight A — large white circle, top-right of pupil.
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(cx + 0.9, 9.1, 0.95, 0, Math.PI * 2);
+      ctx.fill();
+      // 5) Catchlight B — small white circle, mid-left of pupil.
+      ctx.beginPath();
+      ctx.arc(cx - 1.1, 11.3, 0.45, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Wide chibi eye spacing — eyes at x = ±6.5, biased by FACE_DX.
+    // Bottom 40% of face: head spans y ∈ [-21, 22], so the lower 40%
+    // starts around y ≈ 4.6. Eye centroid at y = 10.4 sits squarely
+    // in that band, mouth at y = 16, well below.
+    _drawChibiEye(-6.5 + FACE_DX);
+    _drawChibiEye( 6.5 + FACE_DX);
+    // Zero nose (per spec — explicitly omitted, no path here).
+    // Minimal mouth — tiny confident smirk: single shallow curve, low.
+    ctx.save();
+    ctx.strokeStyle = '#1a0818';
+    ctx.lineWidth = 1.5;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(-2.5 + FACE_DX, 9); ctx.quadraticCurveTo(0 + FACE_DX, 11, 2.5 + FACE_DX, 9);
+    ctx.moveTo(-1.6 + FACE_DX, 16);
+    ctx.quadraticCurveTo(0 + FACE_DX, 17.1, 1.6 + FACE_DX, 16);
     ctx.stroke();
+    ctx.restore();
   });
   drawBone('legR', () => {
     _drawShaded(HERO_VEC_PARTS.leg, BOOT_BASE, BODY_SHD, SKIN.deep, 3, 3);
