@@ -2775,7 +2775,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.182';
+const GAME_VERSION = 'v0.25.183';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -25361,6 +25361,17 @@ function _migrateHairId(id) {
   return id;
 }
 
+// v0.25.183 — Eye style options for the Q-key Character Studio.
+// _drawVectorHero dispatches to per-style helpers based on
+// player.lookCustom.eyeId; renderers live inside the function (closure
+// captures `lookCustom`). Falls back to 'sparkle' on any unknown id.
+const HERO_VEC_EYE_OPTIONS = [
+  { id:'sparkle', name:'Sparkle ✨' },
+  { id:'star',    name:'Star ⭐'    },
+  { id:'sleepy',  name:'Sleepy 😴'  },
+  { id:'dot',     name:'Dot ●'     },
+];
+
 // v0.25.160 — MODULE-LEVEL HAIR-GOO BAKE CACHE.
 // =========================================================================
 // The 3-pass goo render (outline + colour + highlight, each a filtered
@@ -25474,8 +25485,8 @@ function _lxBakeHairGoo(group, hairColor, hairHi, lowFx) {
 const _LX_HERO_BAKE_W = 100, _LX_HERO_BAKE_H = 100;
 const _LX_HERO_BAKE_FOOT_X = 50, _LX_HERO_BAKE_FOOT_Y = 80;
 const _LX_HERO_IDLE_BAKE_CACHE = new Map();
-function _lxBakeHeroIdle(cls, skinIdx, hairId) {
-  const key = cls + '|' + skinIdx + '|' + hairId;
+function _lxBakeHeroIdle(cls, skinIdx, hairId, eyeId) {
+  const key = cls + '|' + skinIdx + '|' + hairId + '|' + (eyeId || 'sparkle');
   let baked = _LX_HERO_IDLE_BAKE_CACHE.get(key);
   if (baked) return baked;
   baked = document.createElement('canvas');
@@ -25493,7 +25504,7 @@ function _lxBakeHeroIdle(cls, skinIdx, hairId) {
     offCtx,
     {
       cls,
-      lookCustom: { skinIdx, hairId, msxId: null },
+      lookCustom: { skinIdx, hairId, eyeId, msxId: null },
       animName:    'idle',
       animTime:    0.5,
       forcedFacing: 1,
@@ -25515,7 +25526,8 @@ function _drawVectorHeroCached(sx, sy) {
   const cls     = (typeof player !== 'undefined' && player.cls) || 'default';
   const skinIdx = (lookCustom.skinIdx != null && HERO_VEC_SKIN[lookCustom.skinIdx]) ? lookCustom.skinIdx : 2;
   const hairId  = _migrateHairId(lookCustom.hairId);
-  const baked   = _lxBakeHeroIdle(cls, skinIdx, hairId);
+  const eyeId   = lookCustom.eyeId || 'sparkle';
+  const baked   = _lxBakeHeroIdle(cls, skinIdx, hairId, eyeId);
   const pw = player.w, ph = player.h;
   const dstX = sx + pw / 2 - _LX_HERO_BAKE_FOOT_X;
   const dstY = sy + ph - _LX_HERO_BAKE_FOOT_Y;
@@ -26076,36 +26088,102 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     // chibi look, and a primary + secondary catchlight for the cuteness
     // pop. Signature now (ctx, cx, irisGrad) so the helper can be
     // reused outside the closure if needed.
-    function _drawChibiEye(ctx, cx, irisGrad) {
-      // 1) Heavy upper eyelash — anchors the iris; v0.25.179 raised 3 px.
-      ctx.strokeStyle = '#1a1a1a';   // soft black
-      ctx.lineWidth = 3.5;
-      ctx.lineCap = 'round';
+    // v0.25.183 — Four eye style helpers. All share the (ctx, cx, irisGrad)
+    // signature so they're hot-swappable per render based on eyeId.
+    // Colours / sizes for the eyelash + iris + pupil are matched across
+    // styles where possible so the face proportions stay consistent.
+
+    // ─── SPARKLE (default) — gradient iris + dilated pupil + 1 catchlight ──
+    function _drawEye_sparkle(ctx, cx, irisGrad) {
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 3.5; ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(cx - 5.5, 4.5);
       ctx.quadraticCurveTo(cx, 1.5, cx + 5.5, 5.5);
       ctx.stroke();
-      // 2) Iris — wider + taller ellipse, gradient fill + thin stroke.
       ctx.fillStyle = irisGrad;
-      ctx.beginPath();
-      ctx.ellipse(cx, 8.0, 4.5, 5.2, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      // 3) Pupil — dilated 3.2×4.5 (v0.25.163).
+      ctx.beginPath(); ctx.ellipse(cx, 8.0, 4.5, 5.2, 0, 0, Math.PI * 2);
+      ctx.fill(); ctx.lineWidth = 1; ctx.stroke();
       ctx.fillStyle = '#0a0612';
+      ctx.beginPath(); ctx.ellipse(cx, 8.5, 3.2, 4.5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(cx - 1.5, 5.0, 1.8, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // ─── STAR — anime "sparkle eyes" with 5-pointed star catchlight ────────
+    function _drawEye_star(ctx, cx, irisGrad) {
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 3.5; ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.ellipse(cx, 8.5, 3.2, 4.5, 0, 0, Math.PI * 2);
-      ctx.fill();
-      // 4) Catchlight — top-left primary pip.
+      ctx.moveTo(cx - 5.5, 4.5);
+      ctx.quadraticCurveTo(cx, 1.5, cx + 5.5, 5.5);
+      ctx.stroke();
+      ctx.fillStyle = irisGrad;
+      ctx.beginPath(); ctx.ellipse(cx, 8.0, 4.5, 5.2, 0, 0, Math.PI * 2);
+      ctx.fill(); ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = '#0a0612';
+      ctx.beginPath(); ctx.ellipse(cx, 8.5, 2.8, 4.0, 0, 0, Math.PI * 2); ctx.fill();
+      // 5-pointed white star, slightly off-centre top-left for life.
+      const sx = cx - 0.5, sy = 7.5, R = 2.6, r = 1.05;
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.arc(cx - 1.5, 5.0, 1.8, 0, Math.PI * 2);
+      for (let i = 0; i < 10; i++) {
+        const ang = -Math.PI/2 + i * Math.PI/5;
+        const rr = (i % 2 === 0) ? R : r;
+        const px = sx + Math.cos(ang) * rr;
+        const py = sy + Math.sin(ang) * rr;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath(); ctx.fill();
+    }
+
+    // ─── SLEEPY — half-closed lids, drowsy iris peek ───────────────────────
+    function _drawEye_sleepy(ctx, cx, irisGrad) {
+      // Heavy eyelash lowered + thicker so it covers the upper half
+      // of where the iris would normally be.
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 3.8; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx - 5.8, 7.0);
+      ctx.quadraticCurveTo(cx, 5.5, cx + 5.8, 7.0);
+      ctx.stroke();
+      // Tiny iris peek showing only the bottom band (clipped to a low arc).
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(cx - 5, 8.0, 10, 4);
+      ctx.clip();
+      ctx.fillStyle = irisGrad;
+      ctx.beginPath(); ctx.ellipse(cx, 9.0, 4.0, 4.0, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      // Pupil dot at the visible band.
+      ctx.fillStyle = '#0a0612';
+      ctx.beginPath(); ctx.ellipse(cx, 9.5, 1.6, 1.4, 0, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // ─── DOT — minimalist solid black oval (classic chibi simplicity) ──────
+    function _drawEye_dot(ctx, cx, irisGrad) {
+      ctx.fillStyle = '#0a0612';
+      ctx.beginPath();
+      ctx.ellipse(cx, 7.5, 1.7, 2.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Tiny white pip for life.
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(cx - 0.6, 6.6, 0.55, 0, Math.PI * 2);
       ctx.fill();
     }
-    // v0.25.179 — eye spacing widened ±6.5 → ±9.0 (more pushed to the
-    // sides) and entire face block raised ~3 px. Reads more "wide-eyed
-    // chibi" and clears space above the mouth for the new sprite hair.
+
+    // Dispatch table. Add new styles by extending this map and the
+    // corresponding HERO_VEC_EYE_OPTIONS list (module scope).
+    const _EYE_RENDERERS = {
+      sparkle: _drawEye_sparkle,
+      star:    _drawEye_star,
+      sleepy:  _drawEye_sleepy,
+      dot:     _drawEye_dot,
+    };
+    const _eyeId = (lookCustom.eyeId && _EYE_RENDERERS[lookCustom.eyeId]) ? lookCustom.eyeId : 'sparkle';
+    const _drawChibiEye = _EYE_RENDERERS[_eyeId];
     _drawChibiEye(ctx, -9.0 + FACE_DX, _irisGrad);
     _drawChibiEye(ctx,  9.0 + FACE_DX, _irisGrad);
     // Zero nose (per spec — explicitly omitted, no path here).
@@ -34572,6 +34650,8 @@ requestAnimationFrame(loop);
       <div class="face-styles" id="face-styles"></div>
       <h3>Hair</h3>
       <div class="face-styles" id="hair-styles"></div>
+      <h3>Eye Style</h3>
+      <div class="face-styles" id="eye-styles"></div>
       <h3>Sprite Skin</h3>
       <div class="face-styles" id="msx-styles"></div>
       <p class="char-studio-hint">Press <kbd>Q</kbd> to toggle • <kbd>Esc</kbd> to close • Sprite Skin overrides the vector look</p>
@@ -34594,6 +34674,8 @@ const CHAR_STUDIO = {
   // user can re-pick from the swatch row if they want.
   skinIdx: 2,           // default 'Light' tone
   hairId:  'anime',
+  // v0.25.183 — eye style picker (sparkle / star / sleepy / dot).
+  eyeId:   'sparkle',
   // v0.25.152 — null = vector hero, 'default' / 'warrior' / 'mage' picks
   // the matching MapleStory chibi sprite from MSX_HERO and overrides
   // the vector path entirely.
@@ -34728,6 +34810,29 @@ function buildCharStudioHairStyles() {
   });
 }
 
+// v0.25.183 — Eye style picker. Sparkle / Star / Sleepy / Dot.
+// _drawVectorHero reads lookCustom.eyeId at draw time and dispatches
+// to the matching renderer.
+function buildCharStudioEyeStyles() {
+  const cont = document.getElementById('eye-styles');
+  if (!cont) return;
+  cont.dataset.built = '1';
+  cont.innerHTML = '';
+  HERO_VEC_EYE_OPTIONS.forEach((es) => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'face-style-btn' + (es.id === CHAR_STUDIO.eyeId ? ' active' : '');
+    el.textContent = es.name;
+    el.title = es.id;
+    el.onclick = () => {
+      CHAR_STUDIO.eyeId = es.id;
+      cont.querySelectorAll('.face-style-btn').forEach((b) => b.classList.remove('active'));
+      el.classList.add('active');
+    };
+    cont.appendChild(el);
+  });
+}
+
 function openCharStudio() {
   document.getElementById('char-studio-overlay').classList.add('open');
   // Seed picks from the player's current lookCustom so the studio
@@ -34735,10 +34840,12 @@ function openCharStudio() {
   if (typeof player !== 'undefined' && player.lookCustom) {
     if (player.lookCustom.skinIdx != null) CHAR_STUDIO.skinIdx = player.lookCustom.skinIdx;
     if (player.lookCustom.hairId)          CHAR_STUDIO.hairId  = player.lookCustom.hairId;
+    if (player.lookCustom.eyeId)           CHAR_STUDIO.eyeId   = player.lookCustom.eyeId;
     if ('msxId' in player.lookCustom)      CHAR_STUDIO.msxId   = player.lookCustom.msxId;
   }
   buildCharStudioSwatches();
   buildCharStudioFaceStyles();
+  buildCharStudioEyeStyles();
   buildCharStudioHairStyles();
   buildCharStudioMsxStyles();
   wireCharStudioActionButtons();
@@ -34879,8 +34986,14 @@ function applyCharStudioToPlayer() {
   player.lookCustom = {
     skinIdx: CHAR_STUDIO.skinIdx,
     hairId:  CHAR_STUDIO.hairId,
+    eyeId:   CHAR_STUDIO.eyeId,   // v0.25.183 — Sparkle / Star / Sleepy / Dot
     msxId:   CHAR_STUDIO.msxId,   // v0.25.152 — null = vector, otherwise picks MSX sprite
   };
+  // v0.25.183 — eye style change must invalidate the v0.25.176 hero idle
+  // bake cache so the next idle frame re-bakes with the new eye renderer.
+  if (typeof _LX_HERO_IDLE_BAKE_CACHE !== 'undefined' && _LX_HERO_IDLE_BAKE_CACHE.clear) {
+    _LX_HERO_IDLE_BAKE_CACHE.clear();
+  }
   // Clear any leftover sprite-system overrides from the legacy studio.
   if (typeof window !== 'undefined') {
     if (window.PLAYER_CUSTOM_SPRITE_CANVAS && window.HERO && window.HERO.idle && window.PLAYER_CUSTOM_SPRITE_CANVAS !== window.HERO.idle) {
