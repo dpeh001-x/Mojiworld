@@ -2775,7 +2775,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.211';
+const GAME_VERSION = 'v0.25.212';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4310,6 +4310,14 @@ const LX_FX = (() => {
     slash_rogue:   'slash_rogue.webp',
     smoke_puff:    'smoke_puff.webp',
     dust_ring:     'dust_ring.webp',
+    // v0.25.212 — flashy thief skill bursts (one-shot sprites spawned at
+    // cast/impact via spawnSpriteBurst() and rendered through the
+    // 'spriteBurst' branch of drawSmoothFx).
+    flurry:        'flurry.webp',
+    stab:          'stab.webp',
+    backstab:      'backstab.webp',
+    death_blossom: 'death_blossom.webp',
+    shadow_strike: 'shadow_strike.webp',
   };
   for (const [k, f] of Object.entries(files)) {
     const img = new Image();
@@ -4836,7 +4844,7 @@ const SKILLS = {
   backstab:     { name:'Backstab',       icon:'🩸', cls:'rogue', slot:'s', mp:8,  cd:1300,  desc:'Blink + 3-stab combo (triple-crit finisher).' },
   throwDagger:  { name:'Throw Dagger',   icon:'🎯', cls:'rogue', slot:'a', mp:6,  cd:1300,  desc:'5-lane dagger fan (up to 6 with multishot).' },
   smokeDash:    { name:'Smoke Dash',     icon:'💨', cls:'rogue', slot:'e', mp:14, cd:1500,  desc:'3-line dash corridor + 3 smoke ticks.' },
-  flurry:       { name:'Flurry',         icon:'🌀', cls:'rogue', slot:'w', mp:18, cd:1800,  desc:'6-strike lightning V-slash — cancels any skill.' },
+  flurry:       { name:'Flurry',         icon:'🌀', cls:'rogue', slot:'w', mp:18, cd:1800,  desc:'Blink-warp forward, slashing the corridor. Press again within 6 s to warp back.' },
   // Ninja
   shadowStrike: { name:'Shadow Strike',  icon:'🥷', cls:'rogue', job:'ninja',    slot:'q', mp:22, cd:7000,  desc:'Teleport behind target, guaranteed crit.' },
   deathBlossom: { name:'Death Blossom',  icon:'🌸', cls:'rogue', job:'ninja',    slot:'c', mp:50, cd:20000, desc:'Ultimate: Strike all nearby enemies.' },
@@ -13135,6 +13143,22 @@ function spawnSmoothBeam(x, y, angle, length, width, color, opts) {
     life: opts.life || 14, maxLife: opts.life || 14,
   });
 }
+// v0.25.212 — One-shot named-sprite burst for class skill flair. Spawns
+// a smoothFx entry that drawSmoothFx renders via drawImage from LX_FX
+// (the burst grows + fades over its lifetime so it pops on cast). Use
+// for flashy thief skill flourishes (flurry asterisk, blossom petals,
+// shadow-strike flash, etc.) that don't fit the slash/explosion shapes.
+function spawnSpriteBurst(x, y, spriteKey, opts) {
+  opts = opts || {};
+  if (!game.smoothFx) game.smoothFx = [];
+  game.smoothFx.push({
+    type: 'spriteBurst', x, y, spriteKey,
+    life: opts.life || 22, maxLife: opts.life || 22,
+    size: opts.size || 80,
+    angle: opts.angle || 0,
+    spin: opts.spin || 0,
+  });
+}
 function spawnSmoothImpact(x, y, color) {
   if (!game.smoothFx) game.smoothFx = [];
   game.smoothFx.push({
@@ -13270,6 +13294,23 @@ function drawSmoothFx() {
       ctx.fillRect(0, -w * 0.25, len, w * 0.5);
       ctx.restore();
       ctx.globalCompositeOperation = 'source-over';
+    } else if (fx.type === 'spriteBurst') {
+      // v0.25.212 — flashy thief skill bursts. drawImage of an LX_FX
+      // sprite, growing 0.5x→1.1x over the burst lifetime with a soft
+      // fade-out at the end. Optional spin (rot per-frame) for flurry's
+      // asterisk to feel rotating.
+      const sprite = LX_FX && LX_FX[fx.spriteKey];
+      if (!sprite || !_lxFxReady(sprite)) continue;
+      const t = 1 - fx.life / fx.maxLife;
+      const grow = 0.5 + t * 0.6;
+      const sz = fx.size * grow;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(sx, fx.y);
+      const rot = (fx.angle || 0) + (fx.spin || 0) * t;
+      if (rot) ctx.rotate(rot);
+      ctx.drawImage(sprite, -sz / 2, -sz / 2, sz, sz);
+      ctx.restore();
     } else if (fx.type === 'impact') {
       // Expanding star-burst flash — 4-point with soft radial
       const t = 1 - fx.life / fx.maxLife;
@@ -13774,6 +13815,9 @@ const SKILL_FNS = {
   stab: () => {
     // Quick violet X-slash flourish
     pixelBurst('x', player.x + player.w/2 + player.facing * 30, player.y + player.h/2, player.facing, { color:'#ff99ff', color2:'#ffffff', speed:3 });
+    // v0.25.212 — flashy stab piercing-thrust sprite at the strike point.
+    spawnSpriteBurst(player.x + player.w/2 + player.facing * 36, player.y + player.h/2, 'stab',
+      { size: 70, life: 14, angle: player.facing > 0 ? 0 : Math.PI });
     const hits = performMelee(110, 0.95, { color:'#ff99ff', burst:6 });
     if (hits) {
       // Brief afterimage
@@ -13833,6 +13877,10 @@ const SKILL_FNS = {
             // Finisher X burst
             pixelBurst('x', tgt.x + tgt.w/2, tgt.y + tgt.h/2, player.facing,
               { color:'#ff3366', color2:'#ffaacc', speed:5, life:22, size:3 });
+            // v0.25.212 — flashy shadow-strike critical burst sprite on
+            // the finisher hit.
+            spawnSpriteBurst(tgt.x + tgt.w/2, tgt.y + tgt.h/2, 'backstab',
+              { size: 130, life: 22 });
             addHitStop(40);
           }
         }, s.delay);
@@ -13953,166 +14001,106 @@ const SKILL_FNS = {
     addShake(4); flash(0.15);
   },
   flurry: () => {
-    // Airborne-only lightning V-slash — instant cancel-any-skill, very flashy
-    if (player.onGround) {
-      player.mp += SKILLS.flurry.mp;
-      player.skillCooldowns.flurry = 0;
-      player.attacking = false;
-      player.attackTimer = 0;
-      showToast('Flurry needs air!', 'common');
+    // v0.25.212 — Flurry rebuilt as a teleport blink-strike. First press
+    // teleports the player FORWARD ~240 px, slashing every monster
+    // along the corridor. A return anchor is recorded; press the skill
+    // again within 6 s to teleport BACK to the original spot, slashing
+    // a second corridor on the way back. The asterisk sprite spawns at
+    // both teleport endpoints so the cast reads as a flashy double-tap.
+    const now = (game && game.time) || 0;
+    const RETURN_WINDOW = 6 * 60;             // 6 s in frames
+    const corridorRange = 240;
+    const corridorH     = 70;
+    // Helper: damage every mob inside the corridor between (ax,ay) and (bx,by).
+    const slashCorridor = (ax, ay, bx, by) => {
+      const lo = Math.min(ax, bx), hi = Math.max(ax, bx);
+      for (const m of game.monsters) {
+        if (m.currentHp <= 0) continue;
+        const mid = m.x + m.w / 2;
+        if (mid < lo - 16 || mid > hi + 16) continue;
+        if (Math.abs((m.y + m.h / 2) - (ay + by) / 2) > corridorH) continue;
+        const crit = rollCrit() || true;       // every blink-hit guaranteed crit-tier
+        const dmg = Math.floor((getAtk() * 1.6 + Math.random() * 6) * (crit ? getCritDmg() : 1));
+        hitMonster(m, dmg, crit, 'flurry');
+        m.vx += (bx > ax ? 1 : -1) * 6;
+        for (let j = 0; j < 6; j++) {
+          const col = ['#ff66ff','#ffffff','#aaeeff','#ffee66','#ff99aa','#88ffcc'][j];
+          game.particles.push({
+            x: m.x + m.w / 2, y: m.y + m.h / 2,
+            vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4,
+            life: 18, color: col, size: 3,
+          });
+        }
+      }
+    };
+    // Helper: ghosted blink trail between two points.
+    const blinkTrail = (ax, ay, bx, by) => {
+      const steps = 14;
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        game.afterImages.push({
+          x: ax + (bx - ax) * t, y: ay + (by - ay) * t,
+          facing: player.facing, state: 'attack',
+          life: 22, maxLife: 22,
+          color: `rgba(255,120,220,${0.65 - t * 0.45})`,
+        });
+        game.particles.push({
+          x: ax + (bx - ax) * t,
+          y: ay + (by - ay) * t + (Math.random() - 0.5) * 14,
+          vx: 0, vy: 0, life: 16, color: i % 2 ? '#ff99ff' : '#ffffff', size: 3,
+        });
+      }
+    };
+
+    // ===== Branch 1 — return-warp (second press within window) =====
+    const ret = player._flurryReturn;
+    if (ret && now - ret.t < RETURN_WINDOW) {
+      const fromX = player.x + player.w / 2;
+      const fromY = player.y + player.h / 2;
+      slashCorridor(fromX, fromY, ret.cx, ret.cy);
+      // Burst at the departure point
+      spawnSpriteBurst(fromX, fromY, 'flurry', { size: 140, life: 22, spin: -Math.PI * 0.9 });
+      // Snap back
+      player.x = ret.x;
+      player.y = ret.y;
+      player.facing = ret.facing;
+      player.vx = 0; player.vy = 0;
+      // Burst at the arrival (original) point
+      spawnSpriteBurst(ret.cx, ret.cy, 'flurry', { size: 160, life: 26, spin: Math.PI * 0.9 });
+      blinkTrail(fromX, fromY, ret.cx, ret.cy);
+      addShake(8); flash(0.35); addHitStop(50);
+      player.invulnerable = Math.max(player.invulnerable, 360);
+      player._flurryReturn = null;
+      showToast('FLURRY RETURN', 'rare');
       return;
     }
-    // Hard-cancel EVERY in-progress action and invalidate prior Flurry combos
-    player.rushTimer = 0;
-    player.dodgeTimer = 0;
-    player.quickDashTimer = 0;
-    player.smokeLock = 0;
-    player.attackTimer = 0;
-    player.attacking = true;
-    game._flurryId = (game._flurryId || 0) + 1;
-    const myId = game._flurryId;
 
-    // Launch-cast fanfare — big flash + radial star burst to sell the cancel
-    flash(0.3); addShake(5); addHitStop(40);
-    for (let j = 0; j < 28; j++) {
-      const a = (j / 28) * Math.PI * 2;
-      const col = ['#ff66ff','#ffffff','#aaeeff','#ffee66'][j % 4];
-      game.particles.push({
-        x: player.x + player.w/2, y: player.y + player.h/2,
-        vx: Math.cos(a) * 7, vy: Math.sin(a) * 7,
-        life: 22, color: col, size: 3
-      });
-    }
-
-    // Phase 1: dive down-forward (descending leg of V)
-    player.vx = player.facing * 16;
-    player.vy = 15;
-    player.invulnerable = Math.max(player.invulnerable, 480);
-
-    // 6 strikes total — 3 down, snap pivot, 3 up (V-pattern)
-    const strikes = 6;
-    const pivotAt = 3;
-    const stepMs = 36;                  // faster than before — ~220ms total
-    for (let i = 0; i < strikes; i++) {
-      scheduleSkillTimer(() => {
-        if (player.hp <= 0 || game.paused) return;
-        if (myId !== game._flurryId) return;   // cancelled by a newer Flurry
-
-        // Hold the V trajectory
-        if (i < pivotAt) {
-          player.vx = player.facing * 16;
-          player.vy = 15;
-        } else if (i === pivotAt) {
-          player.vx = player.facing * 16;
-          player.vy = -15;
-          // Big pivot explosion — two concentric rings + bright flash
-          addShake(7); flash(0.32); addHitStop(50);
-          for (let ring = 0; ring < 2; ring++) {
-            const rCount = 24 + ring * 8;
-            for (let j = 0; j < rCount; j++) {
-              const a = (j / rCount) * Math.PI * 2;
-              const speed = 5 + ring * 3;
-              const col = (j + ring) % 3 === 0 ? '#fff'
-                         : (j + ring) % 3 === 1 ? '#ff66dd'
-                         : '#aaeeff';
-              game.particles.push({
-                x: player.x + player.w/2, y: player.y + player.h,
-                vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
-                life: 26 + ring * 4, color: col, size: 3
-              });
-            }
-          }
-          // Ground crack sparks
-          for (let j = 0; j < 12; j++) {
-            game.particles.push({
-              x: player.x + player.w/2 + (Math.random()-0.5) * 80,
-              y: player.y + player.h - Math.random() * 6,
-              vx: (Math.random()-0.5) * 5, vy: -3 - Math.random() * 4,
-              life: 22, color: '#ffdd66', size: 2
-            });
-          }
-        } else {
-          player.vx = player.facing * 16;
-          player.vy = -15;
-        }
-
-        // Diagonal slash hitbox aligned to current travel direction
-        const forwardReach = 140;
-        const verticalReach = 80;
-        const hitbox = {
-          x: player.facing > 0 ? player.x + player.w - 5 : player.x - forwardReach + 5,
-          y: player.y + (i < pivotAt ? 0 : -verticalReach / 2),
-          w: forwardReach,
-          h: player.h + verticalReach,
-        };
-        for (const m of game.monsters) {
-          if (m.currentHp <= 0) continue;
-          if (aabb(hitbox, m)) {
-            const crit = rollCrit();
-            const dmg = Math.floor((getAtk() * 0.6 + Math.random() * 4) * (crit ? getCritDmg() : 1));
-            hitMonster(m, dmg, crit, 'melee');
-            m.vx += player.facing * 6;
-            m.vy += (i < pivotAt ? 2 : -3);
-            // Rainbow hit-flash at contact
-            for (let j = 0; j < 6; j++) {
-              const col = ['#ff66ff','#ffffff','#aaeeff','#ffee66','#ff99aa','#88ffcc'][j];
-              game.particles.push({
-                x: m.x + m.w/2, y: m.y + m.h/2,
-                vx: (Math.random()-0.5) * 4, vy: (Math.random()-0.5) * 4,
-                life: 18, color: col, size: 3
-              });
-            }
-          }
-        }
-
-        // Diagonal slash streak with jittered lightning bolts
-        const dirY = i < pivotAt ? 1 : -1;
-        const origin = { x: player.x + player.w/2, y: player.y + player.h/2 };
-        // Slash particles
-        for (let j = 0; j < 14; j++) {
-          const t = j / 14;
-          game.particles.push({
-            x: origin.x + player.facing * t * forwardReach,
-            y: origin.y + dirY * t * 50,
-            vx: player.facing * (2 + Math.random() * 2),
-            vy: dirY * (2 + Math.random() * 1.5),
-            life: 14, color: j % 3 === 0 ? '#fff' : (j % 3 === 1 ? '#ff99ff' : '#aaddff'), size: 3
-          });
-        }
-        // Jagged lightning line along the slash path
-        const segs = 6;
-        ctx.save ? 0 : 0;
-        for (let s = 0; s < segs; s++) {
-          const t1 = s / segs, t2 = (s + 1) / segs;
-          const jitter = (Math.random() - 0.5) * 14;
-          game.particles.push({
-            x: origin.x + player.facing * t1 * forwardReach + jitter,
-            y: origin.y + dirY * t1 * 50 + jitter,
-            vx: 0, vy: 0,
-            life: 8, color: '#ffffff', size: 2
-          });
-          game.particles.push({
-            x: origin.x + player.facing * t2 * forwardReach - jitter,
-            y: origin.y + dirY * t2 * 50 + jitter,
-            vx: 0, vy: 0,
-            life: 8, color: '#eeeeff', size: 3
-          });
-        }
-
-        // Double afterimage — violet + white
-        game.afterImages.push({
-          x: player.x, y: player.y,
-          facing: player.facing, state:'attack', life: 16, maxLife: 16,
-          color: `rgba(255,120,220,${0.7 - i * 0.06})`,
-        });
-        game.afterImages.push({
-          x: player.x - player.facing * 6, y: player.y + (dirY * 4),
-          facing: player.facing, state:'attack', life: 12, maxLife: 12,
-          color: `rgba(255,255,255,${0.5 - i * 0.05})`,
-        });
-        addShake(3);
-      }, i * stepMs);
-    }
+    // ===== Branch 2 — outbound warp (first press) =====
+    const dir = player.facing || 1;
+    const fromX = player.x + player.w / 2;
+    const fromY = player.y + player.h / 2;
+    // Clamp the destination to map bounds.
+    const targetX = Math.min(
+      (game.mapData ? game.mapData.worldWidth : 99999) - player.w - 4,
+      Math.max(4, player.x + dir * corridorRange)
+    );
+    const toX = targetX + player.w / 2;
+    const toY = fromY;
+    slashCorridor(fromX, fromY, toX, toY);
+    spawnSpriteBurst(fromX, fromY, 'flurry', { size: 160, life: 24, spin:  Math.PI * 0.9 });
+    spawnSpriteBurst(toX,   toY,   'flurry', { size: 160, life: 26, spin: -Math.PI * 0.9 });
+    blinkTrail(fromX, fromY, toX, toY);
+    // Save the return anchor.
+    player._flurryReturn = {
+      x: player.x, y: player.y, cx: fromX, cy: fromY,
+      facing: dir, t: now,
+    };
+    // Apply teleport.
+    player.x = targetX;
+    player.vx = 0; player.vy = 0;
+    addShake(7); flash(0.30); addHitStop(45);
+    player.invulnerable = Math.max(player.invulnerable, 360);
+    showToast('FLURRY · press again to return', 'rare');
   },
   // Ninja
   shadowStrike: () => {
@@ -14142,6 +14130,9 @@ const SKILL_FNS = {
         });
       }
       hitMonster(tgt, Math.floor(getAtk() * 1.9), true, 'shadowStrike');
+      // v0.25.212 — flashy shadow-strike sprite at the target.
+      spawnSpriteBurst(tgt.x + tgt.w/2, tgt.y + tgt.h/2, 'shadow_strike',
+        { size: 110, life: 18 });
       // v0.23 — recoloured to the rogue's purple + black shadow palette
       for (let i = 0; i < 16; i++) {
         const a = Math.random() * Math.PI * 2;
@@ -14171,6 +14162,10 @@ const SKILL_FNS = {
           const d = Math.hypot((m.x+m.w/2)-(player.x+player.w/2),(m.y+m.h/2)-(player.y+player.h/2));
           if (d < radius) hitMonster(m, Math.floor(getAtk() * 1.15), rollCrit(), 'deathBlossom');
         }
+        // v0.25.212 — flashy sakura petal burst sprite per wave (slow spin
+        // so the 3 waves stack into a layered rotating bloom).
+        spawnSpriteBurst(player.x + player.w/2, player.y + player.h/2, 'death_blossom',
+          { size: 200 + w * 60, life: 32, spin: Math.PI * 0.6 * (w % 2 === 0 ? 1 : -1) });
         // Rotating petal ring
         const ringCount = 20 + w * 6;
         for (let i = 0; i < ringCount; i++) {
