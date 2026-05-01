@@ -20,6 +20,25 @@ Default to smaller-than-you-think batches. Stream timeouts happen above ~150 lin
 - **On timeout / partial response:** retry at HALF the size, not the same size. Never re-send the whole payload.
 - **Default working style:** skeleton → verify → append section 1 → verify → append section 2 → commit. Micro-batches over batches.
 
+## Before every push — sync first (HARD RULE)
+
+Multiple Claude sessions (phone, laptop, web) can push to this repo in parallel. Pushing without syncing risks (a) the push getting rejected as non-fast-forward, or (b) silently clobbering the other session's work via a force-push.
+
+**Before every `git push origin <branch>`, run:**
+
+```bash
+git fetch origin
+git rebase origin/<branch>
+# resolve any conflicts (do NOT abort + force-push)
+git push origin <branch>
+```
+
+This applies to **every branch**, not just the default. Even feature branches drift if a parallel session FF-merged the default into them.
+
+If the rebase hits a conflict, **resolve it** (read both sides, merge the intent — most cross-session conflicts are changelog-style and trivial). Do **NOT** `git rebase --abort` followed by a force-push to "skip" the conflict — that overwrites the other side's work.
+
+Force-pushes are reserved for: (i) feature-branch resyncs after a clean rebase where the only change was rewriting your own commit hashes, and (ii) explicit user instruction. Always use `--force-with-lease`, never bare `--force`. Never force-push the default branch.
+
 ## Mobile UI branch (automated)
 
 ### Hard rule: never touch non-mobile code on this branch
