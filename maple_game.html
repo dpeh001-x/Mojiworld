@@ -2775,7 +2775,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.200';
+const GAME_VERSION = 'v0.25.201';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4758,7 +4758,7 @@ const SKILLS = {
   // Mage path
   sage_meteorshower:  { name:'Meteor Shower',      icon:'📜', cls:'mage', job:'archmage', master:'sage',         slot:'x', mp:55, cd:19000, desc:'5 meteors rain over an area.' },
   elementalist_cascade:{ name:'Prismatic Cascade', icon:'🌈', cls:'mage', job:'archmage', master:'elementalist', slot:'x', mp:50, cd:5000,  desc:'Four elements in amplifying sequence.' },
-  lich_harvest:       { name:'Soul Vortex',        icon:'👹', cls:'mage', job:'warlock',  master:'lich',         slot:'x', mp:40, cd:30000, desc:'Open a 30s vacuum pool that siphons life from enemies.' },
+  lich_harvest:       { name:'Soul Vortex',        icon:'👹', cls:'mage', job:'warlock',  master:'lich',         slot:'x', mp:40, cd:30000, desc:'Open a 30s 320px vortex that yanks enemies in and drains heavy life damage.' },
   hexmaster_grandhex: { name:'Grand Hex',          icon:'🧿', cls:'mage', job:'warlock',  master:'hexmaster',    slot:'x', mp:35, cd:24000, desc:'Freeze every enemy 2s and apply a slow poison DOT.' },
   // Archer path
   marksman_oneshot:   { name:'One Shot One Kill',  icon:'🎯', cls:'archer', job:'sniper', master:'marksman',    slot:'x', mp:50, cd:22000, desc:'Guaranteed crit piercing; 12% instakill.' },
@@ -15168,28 +15168,30 @@ const SKILL_FNS = {
 
   lich_harvest: () => {
     // SOUL VORTEX — drop a 30s vacuum pool that pulls enemies and siphons HP/MP
+    // v0.25.201 — Major buff: AOE radius 180→320 px (+78%), hazard rect
+    // 200×100→400×140, atk×0.80→×1.40 (+75% damage), tick 12→8 frames
+    // (50% faster), pull force 0.5→1.2 (+140% suction). Open animation
+    // radius bumped 140→240 to match the larger pool.
     const cx = player.x + player.w/2 + player.facing * 40;
     const cy = player.y + player.h - 20;
     game.hazards.push({
-      type: 'soul_vortex', cx, x: cx - 100, y: cy - 20, w: 200, h: 100,
+      type: 'soul_vortex', cx, x: cx - 200, y: cy - 30, w: 400, h: 140,
       life: 30000, maxLife: 30000,
-      // v0.25.116 — per-tick atk bumped 0.45 → 0.80 (~78% damage uplift)
-      // alongside the cooldown cut from 80 s → 30 s above.
-      atk: getAtk() * 0.80,
+      atk: getAtk() * 1.40,
       tick: 0,
     });
     showToast('SOUL VORTEX — 30s life pool', 'legendary');
-    // Open animation
-    for (let i = 0; i < 50; i++) {
-      const a = (i / 50) * Math.PI * 2;
+    // Open animation — bigger ring of particles + larger explosion
+    for (let i = 0; i < 80; i++) {
+      const a = (i / 80) * Math.PI * 2;
       game.particles.push({
         x: cx, y: cy,
-        vx: Math.cos(a) * 8, vy: Math.sin(a) * 6,
-        life: 50, color: i % 2 ? '#66cc66' : '#224422', size: 3
+        vx: Math.cos(a) * 14, vy: Math.sin(a) * 10,
+        life: 60, color: i % 2 ? '#66cc66' : '#224422', size: 4
       });
     }
-    spawnSmoothExplosion(cx, cy, 140, '#66ff88', '#1a3a1a44', { life: 32 });
-    flash(0.4); addShake(10);
+    spawnSmoothExplosion(cx, cy, 240, '#66ff88', '#1a3a1a44', { life: 40 });
+    flash(0.55); addShake(14);
   },
 
   hexmaster_grandhex: () => {
@@ -17933,19 +17935,23 @@ function updateProjectiles(dt) {
       game.hazards.splice(i, 1);
     } else if (h.type === 'soul_vortex') {
       // SOUL VORTEX — pull enemies in, drain their HP and return it to caster
+      // v0.25.201 — buffed: AOE 180→320 px, pull 0.5→1.2 (with floor of
+      // 0.4 even at the rim so suction reads on every frame), tick 12→8.
       const cx = h.cx, cy = h.y + h.h/2;
       h.tick = (h.tick || 0) + 1;
+      const RADIUS = 320;
       for (const m of game.monsters) {
         if (m.currentHp <= 0) continue;
         const dxp = cx - (m.x + m.w/2), dyp = cy - (m.y + m.h/2);
         const dist = Math.hypot(dxp, dyp);
-        if (dist < 180) {
-          // Pull inward
-          const force = 0.5 * (1 - dist / 180);
+        if (dist < RADIUS) {
+          // Pull inward — base force scales with proximity, plus a 0.4
+          // floor at the rim so distant mobs still feel the tug.
+          const force = 0.4 + 1.2 * (1 - dist / RADIUS);
           m.vx += (dxp / (dist || 1)) * force;
           m.vy += (dyp / (dist || 1)) * force * 0.6;
-          // Tick drain every 12 frames
-          if (h.tick % 12 === 0) {
+          // Tick drain every 8 frames (was 12)
+          if (h.tick % 8 === 0) {
             const dmg = Math.max(1, Math.floor(h.atk));
             hitMonster(m, dmg, false, 'vortex');
             player.hp = Math.min(getMaxHp(), player.hp + Math.floor(dmg * 0.3));
@@ -33586,34 +33592,36 @@ function drawHazards() {
       }
     }
     else if (h.type === 'soul_vortex') {
-      // Swirling green life-pool on the ground
+      // v0.25.201 — Scaled visuals to match the buffed 320 px AOE.
+      // Outer pool 200, inner 170, ring spacing widened, wisp spawn box
+      // doubled to 320 wide.
       const t = game.time * 0.06;
       const fade = Math.min(1, h.life / 4000);
       const cy = h.y + h.h/2;
       // Pool
       ctx.fillStyle = `rgba(40,90,40,${0.55 * fade})`;
       ctx.beginPath();
-      ctx.ellipse(sx, cy, 100, 28, 0, 0, Math.PI * 2);
+      ctx.ellipse(sx, cy, 200, 56, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = `rgba(110,220,130,${0.55 * fade})`;
       ctx.beginPath();
-      ctx.ellipse(sx, cy, 85, 20, 0, 0, Math.PI * 2);
+      ctx.ellipse(sx, cy, 170, 40, 0, 0, Math.PI * 2);
       ctx.fill();
-      // Rotating green rings
-      for (let i = 0; i < 4; i++) {
-        const a = t + i * Math.PI / 2;
+      // Rotating green rings — 5 rings out from the centre
+      for (let i = 0; i < 5; i++) {
+        const a = t + i * Math.PI / 2.5;
         ctx.strokeStyle = `rgba(130,255,160,${0.5 * fade})`;
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.ellipse(sx, cy, 80 - i * 12, 18 - i * 3, 0, a, a + Math.PI);
+        ctx.ellipse(sx, cy, 160 - i * 24, 36 - i * 5, 0, a, a + Math.PI);
         ctx.stroke();
       }
-      // Rising wisp particles
-      if (game.time % 4 === 0) {
+      // Rising wisp particles — wider spawn box matching AOE
+      if (game.time % 3 === 0) {
         game.particles.push({
-          x: h.cx + (Math.random() - 0.5) * 160,
+          x: h.cx + (Math.random() - 0.5) * 320,
           y: cy, vx: (Math.random() - 0.5) * 0.4, vy: -1 - Math.random(),
-          life: 40, color: '#88ff99', size: 2
+          life: 50, color: '#88ff99', size: 2
         });
       }
     }
