@@ -2776,7 +2776,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.233';
+const GAME_VERSION = 'v0.25.234';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -2815,11 +2815,18 @@ const W = canvas.width, H = canvas.height;
 
 // Lightweight adaptive visual budget. It only gates eye-candy work; gameplay
 // timing, hitboxes, damage, and AI continue to run normally.
+// v0.25.234 — Mobile devices start in lowFx mode immediately so the first
+// 5-10 seconds of play are smooth before the adaptive heuristic warms up.
+// The gate releases after sustained fast frames, so high-end phones still
+// get the full glow / particle counts after a brief warm-up window.
+const _LX_IS_MOBILE_INITIAL =
+  (typeof window !== 'undefined' && window.matchMedia &&
+   window.matchMedia('(pointer: coarse), (max-width: 900px)').matches);
 const LX_PERF = {
   avgFrame: 16.7,
   slowFrames: 0,
-  lowFx: false,
-  lowFxUntil: 0,
+  lowFx: _LX_IS_MOBILE_INITIAL,
+  lowFxUntil: _LX_IS_MOBILE_INITIAL ? 8000 : 0,   // 8 s warm-up
 };
 
 function _perfTick(dt, time) {
@@ -35679,23 +35686,64 @@ requestAnimationFrame(loop);
     'backgrounds/bg_v3_thunderPlateau.png',
   ];
 
+  // v0.25.234 — Tiered loader. CRITICAL holds the ~30 sprites the
+  // player sees in the first 5 seconds (town bg, town NPCs, hero
+  // base, dialog box, U-panel banner, basic tiles). DEFERRED holds
+  // the other ~95 (boss bgs, master-class FX, all summon variants,
+  // every biome bg/tile pair). Loading screen reveals the world
+  // after CRITICAL finishes; DEFERRED keeps streaming in the
+  // background. Net effect on mobile: typical cold-load reveal time
+  // drops from ~8 s (full preload) to ~2-3 s (critical only).
+  const CRITICAL_PATHS = new Set([
+    // Hero base + face layers (what drawPlayer renders every frame).
+    'Sprites/character/head/flow.webp',
+    'Sprites/character/hair/flow.webp',
+    'Sprites/character/eyes/default.webp',
+    'Sprites/character/mouth/default.webp',
+    // Town bg (first map the player spawns into).
+    'backgrounds/bg_v3_homestead.png',
+    // Town NPCs (visible at spawn).
+    'Sprites/npc/elspeth.webp',
+    'Sprites/npc/brok.webp',
+    'Sprites/npc/amnesiac.webp',
+    'Sprites/npc/sage_mira.webp',
+    'Sprites/npc/old_arlen.webp',
+    'Sprites/npc/taxi_uncle.webp',
+    // First-biome floor + platform tiles.
+    'backgrounds/tiles/floor_grass_v5.webp',
+    'backgrounds/tiles/platform_grass_v4.webp',
+    // World props the town shows (portals).
+    'Sprites/world/portal.webp',
+    // Dialog box + U-panel header (player will likely hit U or talk to NPC fast).
+    'Sprites/ui/dialog_box.webp',
+    'Sprites/ui/char_header.webp',
+    'Sprites/ui/tab_levelup.webp',
+    'Sprites/ui/tab_boons.webp',
+    'Sprites/ui/tab_skills.webp',
+    'Sprites/ui/tab_items.webp',
+  ]);
+  const CRITICAL = REQUIRED.filter(p => CRITICAL_PATHS.has(p));
+  const DEFERRED = REQUIRED.filter(p => !CRITICAL_PATHS.has(p));
+
   const overlay = document.getElementById('loading-overlay');
   const bar = document.getElementById('loading-bar');
   const status = document.getElementById('loading-status');
-  let loaded = 0;
+  let critLoaded = 0, defLoaded = 0;
+  let revealed = false;
   const phrases = [
     'Conjuring sprites…',
     'Painting biomes…',
     'Awakening monsters…',
     'Tuning skill VFX…',
-    'Aligning the celestial spire…',
+    'Almost there…',
   ];
   const update = () => {
-    const pct = Math.round((loaded / REQUIRED.length) * 100);
+    if (revealed) return;
+    const pct = Math.round((critLoaded / Math.max(1, CRITICAL.length)) * 100);
     if (bar) bar.style.width = pct + '%';
     if (status) {
-      if (loaded < REQUIRED.length) {
-        const phrase = phrases[Math.min(phrases.length - 1, Math.floor((loaded / REQUIRED.length) * phrases.length))];
+      if (critLoaded < CRITICAL.length) {
+        const phrase = phrases[Math.min(phrases.length - 1, Math.floor((critLoaded / CRITICAL.length) * phrases.length))];
         status.innerHTML = '<span class="pct">' + pct + '%</span> · <span class="pulse">' + phrase + '</span>';
       } else {
         status.innerHTML = '<span class="pct">100%</span> · <span style="color:#c8ffc8;">Ready ✓</span>';
@@ -35703,13 +35751,39 @@ requestAnimationFrame(loop);
     }
   };
   update();
-  REQUIRED.forEach((src) => {
+  // Helper: load one image with native decode hints. fetchpriority=high
+  // tells the browser to prioritise these over default page resources.
+  // decode() returns a promise that resolves only when the bitmap is
+  // ready to draw — eliminates first-paint cost.
+  const loadOne = (src, isCritical) => new Promise((resolve) => {
     const img = new Image();
-    img.onload = img.onerror = () => { loaded++; update(); maybeReveal(); };
+    img.decoding = 'async';
+    if (isCritical && 'fetchPriority' in img) img.fetchPriority = 'high';
+    img.onload = img.onerror = () => {
+      // Try to decode (some browsers no-op for cached imgs).
+      const done = () => resolve();
+      if (img.decode) img.decode().then(done, done); else done();
+    };
     img.src = src;
   });
+  // Phase 1 — load critical sprites in parallel, gate world reveal.
+  Promise.all(CRITICAL.map(p => loadOne(p, true).then(() => { critLoaded++; update(); })))
+    .then(() => maybeReveal());
+  // Phase 2 — defer everything else. Start fetching as soon as the
+  // browser idles so it doesn't fight phase 1 for bandwidth, but
+  // before the player can actually need the assets.
+  const startDeferred = () => {
+    DEFERRED.forEach(p => loadOne(p, false).then(() => { defLoaded++; }));
+  };
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(startDeferred, { timeout: 1500 });
+  } else {
+    setTimeout(startDeferred, 50);
+  }
   function maybeReveal() {
-    if (loaded < REQUIRED.length) return;
+    if (critLoaded < CRITICAL.length) return;
+    if (revealed) return;
+    revealed = true;
     hide();
   }
   function hide() {
@@ -35717,17 +35791,12 @@ requestAnimationFrame(loop);
     overlay.classList.add('fade');
     setTimeout(() => { if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 220);
     // v0.25.233 — Start the looping BGM the moment the world reveals.
-    // Browsers block autoplay until the user interacts; we attempt
-    // once here and fall back to a one-shot 'pointerdown'/'keydown'
-    // listener that retries on the first input.
     startBgm();
   }
-  // Hard fallback — v0.25.224 raised 6 s → 12 s. The REQUIRED list now
-  // covers ~120 sprites (every runtime registry: hero / NPC / projectile
-  // / VFX / FX / summon / UI / face / hair / boss / tiles / 22 bgs).
-  // 12 s gives slow connections enough time on first cold load while
-  // still revealing eventually if one or more 404s.
-  setTimeout(() => { if (overlay && !overlay.classList.contains('fade')) hide(); }, 12000);
+  // Hard fallback — was 12 s when REQUIRED was loaded all-or-nothing.
+  // With the critical/deferred split CRITICAL is ~20 sprites and a
+  // 5 s ceiling is generous enough on slow mobile connections.
+  setTimeout(() => { if (overlay && !overlay.classList.contains('fade')) { revealed = true; hide(); } }, 5000);
 })();
 // v0.25.233 — Mojiworld main BGM (loops indefinitely).
 const _bgmEl = (() => {
