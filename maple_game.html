@@ -2775,7 +2775,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.208';
+const GAME_VERSION = 'v0.25.209';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4247,6 +4247,9 @@ const LX_PLAYER_PROJ = (() => {
     lightning: 'p_lightning.webp',
     gale:      'p_gale.webp',
     shockwave: 'p_shockwave.webp',
+    // v0.25.209 — additional player projectile + meteor sprites
+    mage_orb:  'p_mage_orb.webp',  // mage Z (magicBolt) blue/yellow energy orb
+    meteor:    'p_meteor.webp',    // sage F (meteor) + G (meteor shower) fireball
   };
   for (const [k, f] of Object.entries(files)) {
     const img = new Image();
@@ -4269,10 +4272,14 @@ function _lxPlayerProjReady(img) { return !!(img && img.complete && img.naturalW
 const LX_SUMMON = (() => {
   const out = {};
   const files = {
-    skeleton: 'skeleton.webp',
-    zombie:   'zombie.webp',
-    wolf:     'wolf.webp',
-    sword:    'sword.webp',
+    skeleton:   'skeleton.webp',
+    zombie:     'zombie.webp',
+    wolf:       'wolf.webp',
+    // v0.25.209 — beastmaster's pack-leader wolf. Used by drawWolf when
+    // the player is master-class beastmaster. Slightly grander markings
+    // (white chest mane + golden eyes + small red flower at the ear).
+    wolf_alpha: 'wolf_alpha.webp',
+    sword:      'sword.webp',
   };
   for (const [k, f] of Object.entries(files)) {
     const img = new Image();
@@ -6325,7 +6332,7 @@ const MAPS = {
       {x:440,  name:'The Amnesiac',  role:'amnesiac',color:'#cc9944'},
       {x:580,  name:'Sage Mira',     role:'sage',    color:'#aa66cc'},
       {x:720,  name:'Old Arlen',     role:'info',    color:'#6aaa88'},
-      {x:860,  name:'Caravan Yara',  role:'caravan', color:'#e8b85a'},
+      {x:860,  name:'Taxi Uncle',    role:'caravan', color:'#e8b85a'},
     ],
     portals: [
       {x:60,   dest:'sunsetBeach', name:'◀ Sunset Coast'},
@@ -30003,7 +30010,7 @@ const NPC_SPRITE_FILES = {
   'The Amnesiac':  'amnesiac.webp',
   'Sage Mira':     'sage_mira.webp',
   'Old Arlen':     'old_arlen.webp',
-  'Caravan Yara':  'caravan_yara.webp',
+  'Taxi Uncle':    'taxi_uncle.webp',
 };
 (function _loadNpcSprites() {
   for (const name in NPC_SPRITE_FILES) {
@@ -33197,7 +33204,12 @@ function drawProjectiles() {
         if (p.skill === 'fire')                                  return LX_PLAYER_PROJ.fireball;
         if (p.skill === 'ice')                                   return LX_PLAYER_PROJ.icespike;
         if (p.skill === 'dagger')                                return LX_PLAYER_PROJ.dagger;
-        if (p.skill === 'bolt' || p.skill === 'lightning')       return LX_PLAYER_PROJ.lightning;
+        // v0.25.209 — Mage Z (magicBolt) uses skill: 'bolt'. User requested
+        // a blue/yellow energy orb instead of the prior lightning sprite,
+        // so 'bolt' now points at the mage_orb. 'lightning' (if any future
+        // skill uses that exact name) stays mapped to the lightning sprite.
+        if (p.skill === 'bolt')                                  return LX_PLAYER_PROJ.mage_orb;
+        if (p.skill === 'lightning')                             return LX_PLAYER_PROJ.lightning;
         if (p.skill === 'gale')                                  return LX_PLAYER_PROJ.gale;
         if (p.skill === 'bloodwave' || p.skill === 'shockwave')  return LX_PLAYER_PROJ.shockwave;
         return null;
@@ -33461,7 +33473,13 @@ function drawWolf(pet, tintColor) {
   const f = pet.facing || 1;
   // v0.25.203 — sprite-based wolf replaces the procedural rect art.
   // Falls back to the original draw if the sprite hasn't decoded yet.
-  const _wolfSprite = LX_SUMMON.wolf;
+  // v0.25.209 — Beastmaster master-class summons render with the alpha
+  // wolf variant (red flower marking + white chest mane). Falls back
+  // to the regular wolf sprite for ranger F-skill summons.
+  const _isBeastmaster = (player.master === 'beastmaster');
+  const _wolfSprite = (_isBeastmaster && _lxSummonReady(LX_SUMMON.wolf_alpha))
+    ? LX_SUMMON.wolf_alpha
+    : LX_SUMMON.wolf;
   if (_lxSummonReady(_wolfSprite)) {
     const W = 40, H = 36;
     ctx.save();
@@ -33914,21 +33932,38 @@ function drawHazards() {
       ctx.beginPath();
       ctx.ellipse(sx, 470, rad, 14, 0, 0, Math.PI * 2);
       ctx.stroke();
-      // Incoming meteor
-      ctx.fillStyle = '#ff4422';
-      ctx.beginPath();
-      ctx.arc(sx, 60 + prog * 400, 20 + prog * 15, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#ffaa22';
-      ctx.beginPath();
-      ctx.arc(sx, 60 + prog * 400, 12 + prog * 8, 0, Math.PI * 2);
-      ctx.fill();
-      // Trail
-      for (let i = 0; i < 5; i++) {
-        ctx.fillStyle = `rgba(255, ${100 + i * 30}, 0, ${0.5 - i * 0.08})`;
+      // v0.25.209 — Sprite-based meteor replaces the procedural circle
+      // stack. Used by the mage's Meteor (job F) and Sage's Meteor Shower
+      // (master G) — both push 'meteor_warn' hazards. Falls back to the
+      // procedural circles if the sprite hasn't decoded yet.
+      const _meteorSprite = LX_PLAYER_PROJ && LX_PLAYER_PROJ.meteor;
+      const meteorY = 60 + prog * 400;
+      if (_lxPlayerProjReady(_meteorSprite)) {
+        const sz = 50 + prog * 30;
+        ctx.drawImage(_meteorSprite, sx - sz/2, meteorY - sz/2, sz, sz);
+        // Fiery wisp trail behind it
+        for (let i = 1; i <= 4; i++) {
+          ctx.globalAlpha = 0.4 - i * 0.08;
+          const tsz = sz * (1 - i * 0.12);
+          ctx.drawImage(_meteorSprite, sx - tsz/2 + (Math.random() - 0.5) * 6, meteorY - tsz/2 - i * 14, tsz, tsz);
+        }
+        ctx.globalAlpha = 1;
+      } else {
+        // Procedural fallback
+        ctx.fillStyle = '#ff4422';
         ctx.beginPath();
-        ctx.arc(sx + (Math.random() - 0.5) * 6, 60 + prog * 400 - i * 10, 10 - i, 0, Math.PI * 2);
+        ctx.arc(sx, meteorY, 20 + prog * 15, 0, Math.PI * 2);
         ctx.fill();
+        ctx.fillStyle = '#ffaa22';
+        ctx.beginPath();
+        ctx.arc(sx, meteorY, 12 + prog * 8, 0, Math.PI * 2);
+        ctx.fill();
+        for (let i = 0; i < 5; i++) {
+          ctx.fillStyle = `rgba(255, ${100 + i * 30}, 0, ${0.5 - i * 0.08})`;
+          ctx.beginPath();
+          ctx.arc(sx + (Math.random() - 0.5) * 6, meteorY - i * 10, 10 - i, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
     }
   }
@@ -34960,7 +34995,7 @@ requestAnimationFrame(loop);
     'Sprites/npc/amnesiac.webp',
     'Sprites/npc/sage_mira.webp',
     'Sprites/npc/old_arlen.webp',
-    'Sprites/npc/caravan_yara.webp',
+    'Sprites/npc/taxi_uncle.webp',
     // VFX sprites — used by player skills + hazards on the first map.
     'Sprites/vfx/fireball.png',
     'Sprites/vfx/ice_spike.png',
