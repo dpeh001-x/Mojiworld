@@ -2775,7 +2775,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.190';
+const GAME_VERSION = 'v0.25.191';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4306,6 +4306,58 @@ const LX_HEAD = (() => {
   return out;
 })();
 function _lxHeadReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+// =========================================================================
+// Tinted head cache (v0.25.191)
+// =========================================================================
+// Skin tone picker writes to lookCustom.skinIdx; before the head was a
+// sprite, the procedural head shading honoured that automatically. With
+// the v0.25.182 sprite-based head, the cream baked into the sprite was
+// fixed.
+//
+// _lxGetTintedHead bakes one offscreen-canvas variant per (sprite, tint)
+// tuple using:
+//   1. drawImage(sprite)
+//   2. globalCompositeOperation = 'multiply' + fillRect with tint
+//   3. globalCompositeOperation = 'destination-in' + drawImage(sprite)
+//      to clip the multiply layer back to the sprite's alpha shape
+//
+// Multiply preserves the sprite's tonal range (shadow remains darker than
+// base) so the result reads as natural skin shading across all 8 tones.
+// Cached forever; only ~8 entries × ~30 KB each = ~240 KB total.
+// =========================================================================
+const _LX_TINTED_HEAD_CACHE = new Map();
+function _lxBakeTintedHead(sprite, tint) {
+  const c = document.createElement('canvas');
+  c.width = sprite.naturalWidth;
+  c.height = sprite.naturalHeight;
+  const cx = c.getContext('2d');
+  // 1) Original sprite.
+  cx.drawImage(sprite, 0, 0);
+  // 2) Multiply tint over the whole canvas. Pixels outside the sprite
+  //    alpha would multiply against transparent (no-op) — but the
+  //    fillRect paints opaque, so we need destination-in below.
+  cx.globalCompositeOperation = 'multiply';
+  cx.fillStyle = tint;
+  cx.fillRect(0, 0, c.width, c.height);
+  // 3) Clip back to the sprite's alpha shape so the multiply layer
+  //    doesn't leak outside the sprite outline.
+  cx.globalCompositeOperation = 'destination-in';
+  cx.drawImage(sprite, 0, 0);
+  return c;
+}
+function _lxGetTintedHead(skinIdx) {
+  if (typeof HERO_VEC_SKIN === 'undefined') return null;
+  const tone = HERO_VEC_SKIN[skinIdx] || HERO_VEC_SKIN[2];
+  if (!tone) return null;
+  const sprite = LX_HEAD && LX_HEAD.flow;
+  if (!_lxHeadReady(sprite)) return null;
+  const key = skinIdx + '|' + tone.base;
+  let baked = _LX_TINTED_HEAD_CACHE.get(key);
+  if (baked) return baked;
+  baked = _lxBakeTintedHead(sprite, tone.base);
+  _LX_TINTED_HEAD_CACHE.set(key, baked);
+  return baked;
+}
 // =========================================================================
 // LX_EYES + LX_MOUTH — frontmost face layer sprites (v0.25.189)
 // =========================================================================
@@ -25312,21 +25364,25 @@ const HERO_VEC_WEAPON = {
   },
   mage: function(c, OUT) {
     // Wizard staff: tall wooden shaft + glowing magic orb on top.
+    // v0.25.191 — Entire staff dropped +14 in y so the orb clears the
+    // head silhouette (orb world y was -47, putting it inside the head
+    // bbox; now -33, just below the chin). Shaft length unchanged (26 px),
+    // staff still reads as upright but held closer to chest height.
     c.fillStyle = '#5a3a18'; c.strokeStyle = OUT; c.lineWidth = 1.5;
-    c.fillRect(-1.3, -22, 2.6, 26);
-    c.strokeRect(-1.3, -22, 2.6, 26);
+    c.fillRect(-1.3, -8, 2.6, 26);
+    c.strokeRect(-1.3, -8, 2.6, 26);
     // Wood-grain shadow
     c.fillStyle = 'rgba(0,0,0,0.30)';
-    c.fillRect(0.4, -22, 0.9, 26);
+    c.fillRect(0.4, -8, 0.9, 26);
     // Orb glow halo
     c.fillStyle = 'rgba(136,204,255,0.40)';
-    c.beginPath(); c.arc(0, -25, 6, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.arc(0, -11, 6, 0, Math.PI * 2); c.fill();
     // Orb body
     c.fillStyle = '#88ccff';
-    c.beginPath(); c.arc(0, -25, 3.8, 0, Math.PI * 2); c.fill(); c.stroke();
+    c.beginPath(); c.arc(0, -11, 3.8, 0, Math.PI * 2); c.fill(); c.stroke();
     // Orb highlight
     c.fillStyle = 'rgba(255,255,255,0.85)';
-    c.beginPath(); c.arc(-1.4, -26.4, 1.1, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.arc(-1.4, -12.4, 1.1, 0, Math.PI * 2); c.fill();
   },
   archer: function(c, OUT) {
     // Bow: curved arc, dark wood, light bowstring. v0.25.136 — outline
@@ -25730,6 +25786,25 @@ function _heroVecAttackOffArm(t) {
   if (t < 0.56) return 1.05 - _heroEaseOutCubic((t - 0.18) / 0.38) * 1.70;
   return -0.65 + _heroVecAttackRecover(t) * 0.45;
 }
+// v0.25.191 — Archer attack: pull bowstring → hold → release.
+// Front arm (armR) holds the bow steady forward-up throughout. Back
+// arm (armL) raises with the bow during windup, pulls back further
+// during draw, snaps forward on release, then recovers.
+function _heroVecArcherFrontArm(t) {
+  // Bow-holding arm — rises during windup to forward-up, holds steady
+  // through draw + release, then returns to neutral on recovery.
+  if (t < 0.20) return -0.30 - _heroEaseOutCubic(t / 0.20) * 0.85;
+  if (t < 0.85) return -1.15;
+  return -1.15 + _heroVecAttackRecover(t) * 1.15;
+}
+function _heroVecArcherBackArm(t) {
+  // String-pulling arm — windup rises with the bow, draws back during
+  // the aim phase, snaps forward on release, recovers to neutral.
+  if (t < 0.20) return 0.30 + _heroEaseOutCubic(t / 0.20) * 0.95;     // raise to mirror front arm
+  if (t < 0.55) return 1.25 + _heroEaseOutCubic((t - 0.20) / 0.35) * 0.65;  // pull string back
+  if (t < 0.62) return 1.90 - _heroEaseOutCubic((t - 0.55) / 0.07) * 2.20;  // snap forward (release)
+  return -0.30 + _heroVecAttackRecover(t) * 0.30;                          // recover
+}
 function _heroVecJumpRise() {
   return ((typeof player !== 'undefined' && player.vy) || 0) < -0.4;
 }
@@ -25764,6 +25839,17 @@ const HERO_VEC_ANIMS = {
     legL:  t => -0.22 + _heroVecAttackStrike(t) * 0.18,
     legR:  t => 0.24 - _heroVecAttackStrike(t) * 0.18,
   },
+  // v0.25.191 — Archer-specific attack: bow draw + release. Body lean
+  // is much subtler than the warrior swing (no heavy windup or
+  // follow-through). The action lives in the arms.
+  attack_archer: {
+    spine: t => -0.04 + _heroVecAttackStrike(t) * 0.10 - _heroVecAttackRecover(t) * 0.06,
+    head:  t => -0.05 + _heroVecAttackStrike(t) * 0.10 - _heroVecAttackRecover(t) * 0.05,
+    armR:  t => _heroVecArcherFrontArm(t),
+    armL:  t => _heroVecArcherBackArm(t),
+    legL:  t => -0.10,
+    legR:  t => 0.12,
+  },
 };
 const HERO_VEC_DEFORM = {
   idle: { spine: t => ({ sx: 1 - Math.sin(t * Math.PI * 2) * 0.012, sy: 1 + Math.sin(t * Math.PI * 2) * 0.012 }) },
@@ -25774,6 +25860,13 @@ const HERO_VEC_DEFORM = {
     armL:  t => ({ sx: 1, sy: 1 + _heroVecAttackStrike(t) * 0.10 }),
     spine: t => ({ sx: 1.02 + _heroVecAttackStrike(t) * 0.08, sy: 0.98 }),
     handR: t => { const s = 1 + _heroVecAttackStrike(t) * 0.18 + Math.sin(t * Math.PI) * 0.14; return { sx: s, sy: s }; },
+  },
+  // v0.25.191 — Archer attack deform: minimal squash/stretch. Front arm
+  // (armR) holds steady; back arm (armL) has tension during the draw.
+  attack_archer: {
+    armR:  t => ({ sx: 1, sy: 1 }),
+    armL:  t => ({ sx: 1, sy: 1 + _heroVecAttackStrike(t) * 0.06 }),
+    spine: t => ({ sx: 1, sy: 1 }),
   },
 };
 // v0.25.133 — per-bone position offsets layered on top of rotation +
@@ -25788,12 +25881,23 @@ const HERO_VEC_BOB = {
     spine: t => ({ x: _heroVecAttackStrike(t) * 2.8 - _heroVecAttackRecover(t) * 1.4, y: -Math.sin(t * Math.PI) * 1.2 }),
     head:  t => ({ x: _heroVecAttackStrike(t) * 1.2, y: -Math.sin(t * Math.PI) * 3.4 }),
   },
+  // v0.25.191 — Archer body bob: barely-there steady aim. No big body
+  // lurch since the bow keeps the upper body locked.
+  attack_archer: {
+    spine: t => ({ x: _heroVecAttackStrike(t) * 0.6, y: 0 }),
+    head:  t => ({ x: _heroVecAttackStrike(t) * 0.4, y: -Math.sin(t * Math.PI) * 0.6 }),
+  },
 };
 function _heroVecAnimFor() {
   const inAir = Math.abs(player.vy) > 0.5 && !player.onGround;
   const walking = !inAir && Math.abs(player.vx) > 0.5;
   const now = (game && game.time) || 0;
-  if (_heroVecAttackActive(now)) return 'attack';
+  if (_heroVecAttackActive(now)) {
+    // v0.25.191 — Archer uses a class-specific bow-draw attack; everyone
+    // else uses the warrior-style swing.
+    const cls = (typeof player !== 'undefined' && player.cls) || 'default';
+    return cls === 'archer' ? 'attack_archer' : 'attack';
+  }
   if (inAir) return 'jump';
   if (walking) return 'walk';
   return 'idle';
@@ -25802,7 +25906,8 @@ function _heroVecTimeNorm(animName) {
   const t = (game && game.time) || 0;
   if (animName === 'walk')   return ((t * 0.065) % 1);
   if (animName === 'idle')   return ((t * 0.02) % 1);
-  if (animName === 'attack') {
+  // v0.25.191 — both 'attack' and 'attack_archer' use the same timer.
+  if (animName === 'attack' || animName === 'attack_archer') {
     _heroVecAttackActive(t);
     const start = player._heroAtkAt || t;
     return Math.max(0, Math.min(1, (t - start) / HERO_VEC_ATTACK_FRAMES));
@@ -26079,7 +26184,13 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
       const _headW = _headH * (_nw / _nh);    // proportional, no squish
       const _headDx = -_headW / 2;            // centre on head bone
       const _headDy = -23;                     // top of sprite at y=-23
-      ctx.drawImage(_headSprite, _headDx, _headDy, _headW, _headH);
+      // v0.25.191 — Skin tone picker now affects the head sprite via a
+      // multiply-blend tinted variant. _lxGetTintedHead returns a cached
+      // offscreen canvas (one per skinIdx) that pre-bakes the multiply
+      // result. Falls back to the raw sprite if the cache lookup misses
+      // (first-frame edge case).
+      const _headTinted = _lxGetTintedHead(skinIdx) || _headSprite;
+      ctx.drawImage(_headTinted, _headDx, _headDy, _headW, _headH);
       // Single soft specular pip preserved (was step 5 of the
       // procedural pipeline — adds life without conflicting with
       // the sprite's baked-in shading).
