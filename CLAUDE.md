@@ -28,7 +28,7 @@ Multiple Claude sessions (phone, laptop, web) can push to this repo in parallel.
 
 ```bash
 git fetch origin
-git rebase origin/<branch>
+git pull --rebase origin <branch>
 # resolve any conflicts (do NOT abort + force-push)
 git push origin <branch>
 ```
