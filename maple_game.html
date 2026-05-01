@@ -2775,7 +2775,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.181';
+const GAME_VERSION = 'v0.25.182';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4260,6 +4260,44 @@ const LX_HAIR = (() => {
   return out;
 })();
 function _lxHairReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+// =========================================================================
+// LX_HEAD — sprite-based head silhouette (v0.25.182)
+// =========================================================================
+// User-supplied chibi head sprite. Replaces the procedural 2-tone cream
+// fill + warm-brown shadow + bold black outline that drawBone('head',
+// ...) drew per frame. The sprite has the silhouette + base colour +
+// shadow + outline ALL baked in — so a single drawImage at the head
+// bone replaces ~25 lines of canvas ops.
+//
+// When registered + decoded, the head bone:
+//   1. Draws back hair (vector, only for non-sprite hair styles)
+//   2. drawImage(LX_HEAD.flow, -24, -22, 48, 48)   ← whole head silhouette
+//   3. Skips the procedural fill / shadow ellipse / outline
+//   4. Draws front hair (sprite OR vector)
+//   5. Draws face features (eyes / eyebrow / mouth) on top
+// Falls back to the procedural silhouette + shading when the sprite
+// hasn't decoded yet.
+// =========================================================================
+const LX_HEAD = (() => {
+  const out = {};
+  const files = { flow: 'flow.webp' };
+  for (const [k, f] of Object.entries(files)) {
+    const img = new Image();
+    img.decoding = 'async';
+    // Same bake-cache invalidation trick as LX_HAIR: when the sprite
+    // finishes loading we wipe the v0.25.176 hero idle bake so the
+    // first idle frame re-bakes with the sprite ready.
+    img.onload = () => {
+      if (typeof _LX_HERO_IDLE_BAKE_CACHE !== 'undefined' && _LX_HERO_IDLE_BAKE_CACHE.clear) {
+        _LX_HERO_IDLE_BAKE_CACHE.clear();
+      }
+    };
+    img.src = 'Sprites/character/head/' + f;
+    out[k] = img;
+  }
+  return out;
+})();
+function _lxHeadReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
 // =========================================================================
 // MSX_HERO — MapleStory-style chibi character sprite registry (v0.25.152)
 // =========================================================================
@@ -25949,34 +25987,46 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     const _useSpriteHair = _lxHairReady(_hairSprite);
     if (!_useSpriteHair && HAIR_GOO.back) _drawHairGroup(HAIR_GOO.back);
 
-    // v0.25.149 — clean 2-tone head shading per user reference image.
-    // v0.25.150 — mirrored: shadow now on the LEFT (back-of-head when
-    // facing right), highlight on UPPER-RIGHT (toward the facing
-    // direction). Light source still reads as upper-front.
-    // 1) Base.
-    ctx.fillStyle = SKIN.base;
-    ctx.fill(HERO_VEC_PARTS.head);
-    // 2) Left-side shadow — warm deep tone, clipped to head.
-    ctx.save();
-    ctx.clip(HERO_VEC_PARTS.head);
-    ctx.fillStyle = SKIN.deep;
-    ctx.beginPath();
-    ctx.ellipse(-13, 4, 14, 22, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // 3) Subtle upper-right highlight (toward facing direction).
-    ctx.fillStyle = SKIN.light;
-    ctx.beginPath();
-    ctx.ellipse(9, -10, 10, 7, -0.35, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    // 4) Bold black outline on top — slightly thicker than body parts.
-    ctx.save();
-    ctx.strokeStyle = OUT;
-    ctx.lineWidth = STROKE_W + 0.6;
-    ctx.stroke(HERO_VEC_PARTS.head);
-    ctx.restore();
-    // 5) One soft specular pip on the upper-right for life.
-    _drawGloss(9, -12, 3.4, 2.2, 0.55);
+    // v0.25.182 — sprite head replaces the procedural silhouette +
+    // 2-tone shading + bold outline. Sprite has all of those baked
+    // in. Falls back to the procedural pipeline (kept inline below)
+    // when the sprite hasn't decoded yet — though the v0.25.173
+    // preloader blocks the world reveal until it has.
+    const _headSprite = LX_HEAD && LX_HEAD.flow;
+    if (_lxHeadReady(_headSprite)) {
+      // Head bbox in head-local coords: x ∈ [-24, 24], y ∈ [-22, 24].
+      // Map sprite to that 48×46 area; tiny vertical overshoot tucks
+      // the sprite slightly into the body so the chin nub doesn't
+      // float above the neck.
+      ctx.drawImage(_headSprite, -24, -23, 48, 50);
+      // Single soft specular pip preserved (was step 5 of the
+      // procedural pipeline — adds life without conflicting with
+      // the sprite's baked-in shading).
+      _drawGloss(9, -12, 3.4, 2.2, 0.45);
+    } else {
+      // v0.25.149 / v0.25.150 — procedural fallback: 2-tone cream fill
+      // + warm-brown shadow ellipse on the LEFT (back-of-head when
+      // facing right) + upper-right highlight + bold outline.
+      ctx.fillStyle = SKIN.base;
+      ctx.fill(HERO_VEC_PARTS.head);
+      ctx.save();
+      ctx.clip(HERO_VEC_PARTS.head);
+      ctx.fillStyle = SKIN.deep;
+      ctx.beginPath();
+      ctx.ellipse(-13, 4, 14, 22, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = SKIN.light;
+      ctx.beginPath();
+      ctx.ellipse(9, -10, 10, 7, -0.35, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.save();
+      ctx.strokeStyle = OUT;
+      ctx.lineWidth = STROKE_W + 0.6;
+      ctx.stroke(HERO_VEC_PARTS.head);
+      ctx.restore();
+      _drawGloss(9, -12, 3.4, 2.2, 0.55);
+    }
     // v0.25.178 — sprite-hair dispatch.
     // If the current hairId has a registered + decoded sprite in
     // LX_HAIR, draw the entire hair as a single drawImage centred on
@@ -34390,6 +34440,8 @@ requestAnimationFrame(loop);
     'Sprites/projectiles/cast/mtoxic.webp',
     // Sprite-based hair (v0.25.178).
     'Sprites/character/hair/flow.webp',
+    // Sprite-based head (v0.25.182).
+    'Sprites/character/head/flow.webp',
     // Boss attack-pose sprites (v0.25.181).
     'Sprites/bosses/attack/aetherion.webp',
     'Sprites/bosses/attack/gravitos.webp',
