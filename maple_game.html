@@ -2775,7 +2775,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.195';
+const GAME_VERSION = 'v0.25.196';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -26476,6 +26476,11 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     // v0.25.190 — eye + mouth picker IDs. eyeId / mouthId in lookCustom
     // map to LX_EYES[id] / LX_MOUTH[id] sprite layers. Falls back to
     // 'default' for missing / unknown picks.
+    // v0.25.196 — Sprite layers are the canonical default. Any legacy
+    // procedural id (sparkle/star/sleepy/dot for eyes; smile/etc. for
+    // mouths) coerces to 'default' so the sprite always wins. Unknown
+    // ids do the same. Procedural renderers stay as a cold-start
+    // fallback ONLY if the sprite hasn't decoded yet.
     const _eyeLayerId   = (lookCustom.eyeId   && LX_EYES[lookCustom.eyeId])     ? lookCustom.eyeId   : 'default';
     const _mouthLayerId = (lookCustom.mouthId && LX_MOUTH[lookCustom.mouthId]) ? lookCustom.mouthId : 'default';
     const _eyeSprite   = LX_EYES   && LX_EYES[_eyeLayerId];
@@ -26483,8 +26488,13 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     const _useSpriteEyes  = _lxFaceLayerReady(_eyeSprite);
     const _useSpriteMouth = _lxFaceLayerReady(_mouthSprite);
     if (!_useSpriteEyes) {
-      const _eyeId = (lookCustom.eyeId && _EYE_RENDERERS[lookCustom.eyeId]) ? lookCustom.eyeId : 'sparkle';
-      const _drawChibiEye = _EYE_RENDERERS[_eyeId];
+      // v0.25.196 — emergency fallback only (sprite not decoded yet on
+      // a cold first frame). Force 'sparkle' since the user no longer
+      // exposes alternate procedural eyes in the picker — sprite is the
+      // canonical default and the sprite layer's pre-loader normally
+      // gates the world reveal. Once LX_EYES.default decodes, this path
+      // stops running and the sprite takes over for the rest of the run.
+      const _drawChibiEye = _EYE_RENDERERS.sparkle;
       _drawChibiEye(ctx, -9.0 + FACE_DX, _irisGrad);
       _drawChibiEye(ctx,  9.0 + FACE_DX, _irisGrad);
     }
@@ -34989,7 +34999,11 @@ const CHAR_STUDIO = {
   // Existing saves with skinIdx=1 now read as Porcelain — close enough; the
   // user can re-pick from the swatch row if they want.
   skinIdx: 2,           // default 'Light' tone
-  hairId:  'anime',
+  // v0.25.196 — Sprite layers (head/hair/eyes/mouth) are the canonical
+  // default render path. 'flow' is the actual LX_HAIR sprite key (was
+  // 'anime' which migrated to 'flow' via _migrateHairId — same result,
+  // but 'flow' is the canonical id).
+  hairId:  'flow',
   // v0.25.190 — eyeId + mouthId now select sprite LAYER (LX_EYES[id] /
   // LX_MOUTH[id]). Default 'default' loads `default.webp` from each.
   eyeId:   'default',
@@ -35035,7 +35049,18 @@ function renderCharStudio() {
     const FAKE_W = 28, FAKE_H = 44;
     _drawVectorHero(-FAKE_W / 2, -FAKE_H, c, {
       cls: (typeof player !== 'undefined' && player.cls) || 'default',
-      lookCustom: { skinIdx: CHAR_STUDIO.skinIdx, hairId: CHAR_STUDIO.hairId },
+      // v0.25.196 — pass full sprite-layer set (head + hair + eye + mouth)
+      // so the studio preview is pixel-identical to the in-game render.
+      // Previously only skinIdx + hairId were passed — eyeId/mouthId fell
+      // through to the internal 'default' resolver, which works in
+      // practice but doesn't preview the user's actual LX_EYES /
+      // LX_MOUTH picks until they hit Apply.
+      lookCustom: {
+        skinIdx: CHAR_STUDIO.skinIdx,
+        hairId:  CHAR_STUDIO.hairId,
+        eyeId:   CHAR_STUDIO.eyeId,
+        mouthId: CHAR_STUDIO.mouthId,
+      },
       animName: 'idle',
       animTime: ((Date.now() / 1000) % 3) / 3,  // looped idle anim time
       forcedFacing: 1,
