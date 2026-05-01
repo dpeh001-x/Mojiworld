@@ -2775,7 +2775,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.205';
+const GAME_VERSION = 'v0.25.206';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -25897,6 +25897,15 @@ function _heroVecAttackStrike(t) {
 function _heroVecAttackRecover(t) {
   return _heroEaseInOutSine((t - 0.58) / 0.42);
 }
+// v0.25.206 — Windup curve: 0 → 1 ramp through the anticipation phase
+// (0..0.27), then decays to 0 during the strike phase. Used by the
+// warrior bob to lean the body BACK during windup before snapping
+// forward on the strike — sells the "winding up like an axe" feel.
+function _heroVecAttackWindup(t) {
+  if (t < 0.27) return _heroEaseOutCubic(_heroClamp01(t / 0.27));
+  if (t < 0.55) return 1 - _heroEaseOutCubic((t - 0.27) / 0.28);
+  return 0;
+}
 function _heroVecAttackArm(t) {
   if (t < 0.18) return -0.20 - _heroEaseOutCubic(t / 0.18) * 1.65;
   if (t < 0.56) return -1.85 + _heroEaseOutCubic((t - 0.18) / 0.38) * 3.25;
@@ -25913,20 +25922,23 @@ function _heroVecAttackOffArm(t) {
 // across the body and past the far-side hip, recovery returns to
 // guard. Mirror-coupled arm rotations so both hands stay on the
 // handle through the full motion.
+// v0.25.206 — More dramatic. Bigger arc (−2.95 to +2.50, total 5.45
+// vs prior 4.30 = +27%), anticipation HOLD at apex of windup,
+// faster snap-strike, heavier follow-through.
 function _heroVecWarriorFrontArm(t) {
   // Sword-side (front) arm. Negative = up/back, positive = forward/down.
-  // Range: -2.40 (overhead) → +1.90 (past body) — ~30% wider than the
-  // generic attack swing.
-  if (t < 0.22) return -0.30 - _heroEaseOutCubic(t / 0.22) * 2.10;          // windup overhead-back
-  if (t < 0.58) return -2.40 + _heroEaseOutCubic((t - 0.22) / 0.36) * 4.30; // strike huge arc
-  return 1.90 - _heroVecAttackRecover(t) * 1.45;                            // recover to guard
+  if (t < 0.18) return -0.30 - _heroEaseOutCubic(t / 0.18) * 2.65;          // fast windup overhead-back to −2.95
+  if (t < 0.27) return -2.95;                                                // ANTICIPATION HOLD — sword cocked
+  if (t < 0.55) return -2.95 + _heroEaseOutCubic((t - 0.27) / 0.28) * 5.45; // SNAP strike to +2.50
+  return 2.50 - _heroVecAttackRecover(t) * 1.95;                            // heavy follow-through to +0.55
 }
 function _heroVecWarriorBackArm(t) {
   // Off-hand grip arm — mirrors front arm so both hands stay on the
   // hilt through the entire swing.
-  if (t < 0.22) return 0.30 + _heroEaseOutCubic(t / 0.22) * 2.10;
-  if (t < 0.58) return 2.40 - _heroEaseOutCubic((t - 0.22) / 0.36) * 4.30;
-  return -1.90 + _heroVecAttackRecover(t) * 1.45;
+  if (t < 0.18) return 0.30 + _heroEaseOutCubic(t / 0.18) * 2.65;
+  if (t < 0.27) return 2.95;
+  if (t < 0.55) return 2.95 - _heroEaseOutCubic((t - 0.27) / 0.28) * 5.45;
+  return -2.50 + _heroVecAttackRecover(t) * 1.95;
 }
 // v0.25.194 — Mage attack: raise staff overhead and point it at the
 // sky. Front arm (armR) sweeps from neutral up to ~vertical, holds
@@ -26017,13 +26029,17 @@ const HERO_VEC_ANIMS = {
   },
   // v0.25.194 — Warrior 2-handed wide slash. Bigger spine + head
   // commit than the generic attack since both arms drive the swing.
+  // v0.25.206 — Cranked dramatic factor. Spine windup −0.42 (was
+  // −0.22) + strike commit 1.10 (was 0.65) + bigger recovery whip
+  // 0.55 (was 0.30). Head matches at half scale.  Leg bend on
+  // strike 0.40 (was 0.22) for the squat-into-the-swing feel.
   attack_warrior: {
-    spine: t => -0.22 + _heroVecAttackStrike(t) * 0.65 - _heroVecAttackRecover(t) * 0.30,
-    head:  t => -0.14 + _heroVecAttackStrike(t) * 0.32 - _heroVecAttackRecover(t) * 0.14,
+    spine: t => -0.42 + _heroVecAttackStrike(t) * 1.10 - _heroVecAttackRecover(t) * 0.55,
+    head:  t => -0.28 + _heroVecAttackStrike(t) * 0.55 - _heroVecAttackRecover(t) * 0.26,
     armR:  t => _heroVecWarriorFrontArm(t),
     armL:  t => _heroVecWarriorBackArm(t),
-    legL:  t => -0.30 + _heroVecAttackStrike(t) * 0.22,
-    legR:  t => 0.32 - _heroVecAttackStrike(t) * 0.22,
+    legL:  t => -0.40 + _heroVecAttackStrike(t) * 0.40,
+    legR:  t => 0.42 - _heroVecAttackStrike(t) * 0.40,
   },
   // v0.25.194 — Mage cast. Body leans back to look up at the staff
   // tip raised overhead. Minimal horizontal twist — vertical-axis
@@ -26065,11 +26081,14 @@ const HERO_VEC_DEFORM = {
   },
   // v0.25.194 — Warrior 2-handed slash deform. Both arms stretch on
   // the swing, body squashes forward for the heavy committed motion.
+  // v0.25.206 — Cranked. Arm stretch 0.65 (was 0.40), spine stretch
+  // 0.18 (was 0.10), spine compress 0.92 (was 0.96), hand grow on
+  // impact 0.40 (was 0.22).
   attack_warrior: {
-    armR:  t => ({ sx: 1 + _heroVecAttackStrike(t) * 0.05, sy: 1 + Math.sin(t * Math.PI) * 0.40 }),
-    armL:  t => ({ sx: 1 + _heroVecAttackStrike(t) * 0.05, sy: 1 + Math.sin(t * Math.PI) * 0.40 }),
-    spine: t => ({ sx: 1.04 + _heroVecAttackStrike(t) * 0.10, sy: 0.96 }),
-    handR: t => { const s = 1 + _heroVecAttackStrike(t) * 0.22 + Math.sin(t * Math.PI) * 0.16; return { sx: s, sy: s }; },
+    armR:  t => ({ sx: 1 + _heroVecAttackStrike(t) * 0.08, sy: 1 + Math.sin(t * Math.PI) * 0.65 }),
+    armL:  t => ({ sx: 1 + _heroVecAttackStrike(t) * 0.08, sy: 1 + Math.sin(t * Math.PI) * 0.65 }),
+    spine: t => ({ sx: 1.06 + _heroVecAttackStrike(t) * 0.18, sy: 0.92 }),
+    handR: t => { const s = 1 + _heroVecAttackStrike(t) * 0.40 + Math.sin(t * Math.PI) * 0.26; return { sx: s, sy: s }; },
   },
   // v0.25.194 — Mage cast deform. Subtle staff-arm stretch upward
   // during the channel, no twist on the body.
@@ -26098,9 +26117,19 @@ const HERO_VEC_BOB = {
     head:  t => ({ x: _heroVecAttackStrike(t) * 0.4, y: -Math.sin(t * Math.PI) * 0.6 }),
   },
   // v0.25.194 — Warrior 2-handed slash bob: heavier forward lurch.
+  // v0.25.206 — Way bigger lurch. Spine forward 5.5 (was 3.6),
+  // recovery whip 3.0 (was 1.8). Head forward 2.6 (was 1.6) and
+  // dip 6.5 (was 4.2). Adds a windup BACK lean before the strike
+  // so the body really winds up like an axe-swing.
   attack_warrior: {
-    spine: t => ({ x: _heroVecAttackStrike(t) * 3.6 - _heroVecAttackRecover(t) * 1.8, y: -Math.sin(t * Math.PI) * 1.6 }),
-    head:  t => ({ x: _heroVecAttackStrike(t) * 1.6, y: -Math.sin(t * Math.PI) * 4.2 }),
+    spine: t => ({
+      x: -_heroVecAttackWindup(t) * 2.4 + _heroVecAttackStrike(t) * 5.5 - _heroVecAttackRecover(t) * 3.0,
+      y: -Math.sin(t * Math.PI) * 3.0,
+    }),
+    head:  t => ({
+      x: -_heroVecAttackWindup(t) * 1.4 + _heroVecAttackStrike(t) * 2.6,
+      y: -Math.sin(t * Math.PI) * 6.5,
+    }),
   },
   // v0.25.194 — Mage cast bob: head tilts back to look up at staff,
   // body leans back slightly. No horizontal lurch.
@@ -26536,25 +26565,41 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   // weapon to sell the swing. Arc grows over the attack window so it
   // reads as a motion trail.
   const weaponFn = HERO_VEC_WEAPON[cls];
-  if (animName === 'attack' && weaponFn) {
+  // v0.25.206 — slash arc trail now fires for both 'attack' AND
+  // 'attack_warrior'. Warrior gets a much bigger / brighter arc to
+  // match the more dramatic 2H swing.
+  if ((animName === 'attack' || animName === 'attack_warrior') && weaponFn) {
     ctx.save();
     applyChain('armR');                   // origin at shoulder
-    const swingT = _heroClamp01((t - 0.14) / 0.48);
-    const arcLead = -1.85 + _heroEaseOutCubic(swingT) * 2.95;
-    const arcTail = arcLead - (0.70 + Math.sin(swingT * Math.PI) * 0.78);
+    const isWar = animName === 'attack_warrior';
+    const swingT = _heroClamp01((t - (isWar ? 0.27 : 0.14)) / (isWar ? 0.28 : 0.48));
+    const arcSpan   = isWar ? 5.45 : 2.95;
+    const arcStart  = isWar ? -2.95 : -1.85;
+    const arcRadius = isWar ? 42    : 25;
+    const arcLead = arcStart + _heroEaseOutCubic(swingT) * arcSpan;
+    const arcTail = arcLead - (isWar ? 1.10 : 0.70) - Math.sin(swingT * Math.PI) * (isWar ? 1.20 : 0.78);
     const trailA = Math.max(0, Math.sin(swingT * Math.PI));
-    ctx.strokeStyle = 'rgba(255,255,255,' + (0.16 + trailA * 0.56) + ')';
-    ctx.lineWidth = 7;
+    // Outer glow pass — warrior gets thicker stroke for impact.
+    ctx.strokeStyle = 'rgba(255,255,255,' + (0.18 + trailA * (isWar ? 0.72 : 0.56)) + ')';
+    ctx.lineWidth = isWar ? 11 : 7;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.arc(0, 12, 25, arcTail, arcLead);
+    ctx.arc(0, 12, arcRadius, arcTail, arcLead);
     ctx.stroke();
     // Bright inner pass for the leading edge
-    ctx.strokeStyle = 'rgba(255,240,180,' + (0.22 + trailA * 0.55) + ')';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,240,180,' + (0.24 + trailA * (isWar ? 0.70 : 0.55)) + ')';
+    ctx.lineWidth = isWar ? 4 : 2;
     ctx.beginPath();
-    ctx.arc(0, 12, 20, arcLead - 0.42, arcLead);
+    ctx.arc(0, 12, arcRadius - 5, arcLead - (isWar ? 0.62 : 0.42), arcLead);
     ctx.stroke();
+    // Warrior — extra "shockwave" arc behind the trail at peak swing.
+    if (isWar && trailA > 0.4) {
+      ctx.strokeStyle = 'rgba(255,200,80,' + ((trailA - 0.4) * 1.0) + ')';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 12, arcRadius + 8, arcTail - 0.2, arcLead + 0.2);
+      ctx.stroke();
+    }
     ctx.restore();
   }
   if (weaponFn) {
