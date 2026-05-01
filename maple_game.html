@@ -2776,7 +2776,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.230';
+const GAME_VERSION = 'v0.25.231';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5621,13 +5621,19 @@ function rollAffixedItem(base, forcedRarity) {
 }
 
 const POTION_ITEMS = [
-  // v0.24.1 — prices +40% so potions are a meaningful Lumen sink.
-  { id:'hp_s',  name:'Red Potion',       icon:'🧪', type:'hp', value:50,  price:85 },
-  { id:'hp_m',  name:'Orange Potion',    icon:'🧃', type:'hp', value:150, price:250 },
-  { id:'hp_l',  name:'Pure Water',       icon:'💧', type:'hp', value:400, price:700 },
-  { id:'mp_s',  name:'Blue Potion',      icon:'🔵', type:'mp', value:40,  price:115 },
-  { id:'mp_m',  name:'Mana Elixir',      icon:'💠', type:'mp', value:120, price:310 },
-  { id:'full',  name:'Elixir',           icon:'⭐', type:'full', value:1, price:1250 },
+  // v0.25.231 — Rebuilt as PERCENTAGE heals: small / medium / large
+  // restore 25% / 50% / 75% of max HP or MP. Red potions = HP, blue
+  // = MP. Fixed-value heals retired so a single large potion always
+  // means the same gameplay impact regardless of player level. The
+  // `value` field carries the percentage (0-100) for backwards-compat
+  // with code paths that still read it; `pct` is the canonical key.
+  { id:'hp_s',  name:'Small Red Potion',    icon:'🧪', type:'hp', pct:25, value:25, price:85 },
+  { id:'hp_m',  name:'Medium Red Potion',   icon:'🧃', type:'hp', pct:50, value:50, price:280 },
+  { id:'hp_l',  name:'Large Red Potion',    icon:'💧', type:'hp', pct:75, value:75, price:680 },
+  { id:'mp_s',  name:'Small Blue Potion',   icon:'🔵', type:'mp', pct:25, value:25, price:115 },
+  { id:'mp_m',  name:'Medium Blue Potion',  icon:'💠', type:'mp', pct:50, value:50, price:340 },
+  { id:'mp_l',  name:'Large Blue Potion',   icon:'🟦', type:'mp', pct:75, value:75, price:780 },
+  { id:'full',  name:'Elixir',              icon:'⭐', type:'full', pct:100, value:1, price:1250 },
 ];
 
 // =========================================================================
@@ -12305,22 +12311,25 @@ function updatePlayer(dt) {
         if (amt >= 40) audio.play('meso');
         if (amt >= 120) showToast(`+${amt} 💰`, amt >= 400 ? 'epic' : 'rare');
       } else if (d.type === 'potion_hp') {
-        player.hp = Math.min(getMaxHp(), player.hp + d.value);
+        // v0.25.231 — d.value is now a PERCENTAGE of max HP (typically 25).
+        const heal = Math.max(1, Math.ceil(getMaxHp() * (d.value || 25) / 100));
+        player.hp = Math.min(getMaxHp(), player.hp + heal);
         game.damageNumbers.push({ x:player.x+14, y:player.y, vy:-1.5,
-          text:'+' + d.value, life:40, color:'#44ff44' });
+          text:'+' + heal, life:40, color:'#44ff44' });
         audio.play('potion_hp');
-        showToast(`+${d.value} HP`, 'common');
+        showToast(`+${heal} HP (${d.value || 25}%)`, 'common');
         for (let k = 0; k < 8; k++) {
           game.particles.push({ x: player.x + player.w/2, y: player.y + player.h/2,
             vx: (Math.random()-0.5)*4, vy: -2 - Math.random()*2,
             life: 26, color: '#66ff88', size: 2 });
         }
       } else if (d.type === 'potion_mp') {
-        player.mp = Math.min(getMaxMp(), player.mp + d.value);
+        const restore = Math.max(1, Math.ceil(getMaxMp() * (d.value || 25) / 100));
+        player.mp = Math.min(getMaxMp(), player.mp + restore);
         game.damageNumbers.push({ x:player.x+14, y:player.y, vy:-1.5,
-          text:'+' + d.value, life:40, color:'#4488ff' });
+          text:'+' + restore, life:40, color:'#4488ff' });
         audio.play('potion_mp');
-        showToast(`+${d.value} MP`, 'common');
+        showToast(`+${restore} MP (${d.value || 25}%)`, 'common');
         for (let k = 0; k < 8; k++) {
           game.particles.push({ x: player.x + player.w/2, y: player.y + player.h/2,
             vx: (Math.random()-0.5)*4, vy: -2 - Math.random()*2,
@@ -17704,13 +17713,14 @@ function killMonster(m) {
     });
   }
 
-  // Potion drops
+  // Potion drops — value field is now a PERCENTAGE of max HP/MP (v0.25.231).
+  // Mob-dropped potions are smaller (15-20%) than the shop sizes.
   if (Math.random() < 0.18) {
     game.drops.push({ x:m.x+m.w/2, y:m.y+m.h/2, vy:-5,
-      type:'potion_hp', value: 25, life:400 });
+      type:'potion_hp', value: 20, life:400 });
   } else if (Math.random() < 0.12) {
     game.drops.push({ x:m.x+m.w/2, y:m.y+m.h/2, vy:-5,
-      type:'potion_mp', value: 20, life:400 });
+      type:'potion_mp', value: 15, life:400 });
   }
 
   // Item drops — LCK attribute boosts drop rate
@@ -18780,9 +18790,13 @@ function openShop(type) {
   if (type === 'potion') {
     title.textContent = 'Elspeth\'s Elixir Stand';
     for (const p of POTION_ITEMS) {
+      // v0.25.231 — describe potions as a percentage of max stat
+      // (small/medium/large = 25/50/75%) so the shop matches the new
+      // % heal model.
+      const pct = p.pct || p.value || 0;
       list.appendChild(makeShopRow(p.icon, p.name,
         p.type === 'full' ? 'Fully restore HP and MP' :
-        p.type === 'hp' ? `Restore ${p.value} HP` : `Restore ${p.value} MP`,
+        p.type === 'hp' ? `Restore ${pct}% of max HP` : `Restore ${pct}% of max MP`,
         p.price, () => {
           if (player.mesos >= p.price) {
             player.mesos -= p.price;
@@ -20756,8 +20770,11 @@ function useConsumable(id) {
   if (!player.consumables[id] || player.consumables[id] <= 0) return;
   const p = POTION_ITEMS.find(x => x.id === id);
   if (!p) return;
-  if (p.type === 'hp') player.hp = Math.min(getMaxHp(), player.hp + p.value);
-  else if (p.type === 'mp') player.mp = Math.min(getMaxMp(), player.mp + p.value);
+  // v0.25.231 — heal = pct% of max stat. Math.ceil so a 25% on a
+  // small pool always restores at least 1 point.
+  const pct = p.pct || p.value || 0;
+  if (p.type === 'hp') player.hp = Math.min(getMaxHp(), player.hp + Math.ceil(getMaxHp() * pct / 100));
+  else if (p.type === 'mp') player.mp = Math.min(getMaxMp(), player.mp + Math.ceil(getMaxMp() * pct / 100));
   else if (p.type === 'full') { player.hp = getMaxHp(); player.mp = getMaxMp(); }
   player.consumables[id]--;
   showToast(`Used ${p.name}`);
