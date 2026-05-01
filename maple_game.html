@@ -2776,7 +2776,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.236';
+const GAME_VERSION = 'v0.25.237';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4929,7 +4929,7 @@ const SKILLS = {
   flurry:       { name:'Flurry',         icon:'🌀', cls:'rogue', slot:'w', mp:18, cd:1000,  desc:'Blink-warp forward, slashing the corridor. Press again within 6 s to warp back. 1 s cooldown.' },
   // Ninja
   shadowStrike: { name:'Shadow Strike',  icon:'🥷', cls:'rogue', job:'ninja',    slot:'q', mp:22, cd:7000,  desc:'Teleport behind target, guaranteed crit.' },
-  deathBlossom: { name:'Death Blossom',  icon:'🌸', cls:'rogue', job:'ninja',    slot:'c', mp:50, cd:20000, desc:'Ultimate: Strike all nearby enemies.' },
+  deathBlossom: { name:'Death Blossom',  icon:'🌸', cls:'rogue', job:'ninja',    slot:'c', mp:50, cd:8000, desc:'Ultimate: Strike up to 5 nearby enemies — 3 fast waves.' },
   // Assassin
   smokeBomb:    { name:'Smoke Bomb',     icon:'☁️', cls:'rogue', job:'assassin', slot:'q', mp:20, cd:10000,  desc:'Invuln + heal 30% for 3s.' },
   sleight:      { name:'Sleight of Hand',icon:'🪄', cls:'rogue', job:'assassin', slot:'c', mp:35, cd:17000,  desc:'Ultimate: Steal Lumens & buff self.' },
@@ -4970,10 +4970,10 @@ const SKILLS = {
   crusader_aegis:     { name:'Divine Aegis',       icon:'✝️', cls:'warrior', job:'knight',    master:'crusader',    slot:'x', mp:45, cd:26000, desc:'Heal 60% + 5 hovering holy orbs strike nearby foes · HALF damage taken for 8s.' },
   dragoon_skylance:   { name:'Sky Lance',          icon:'🐉', cls:'warrior', job:'knight',    master:'dragoon',     slot:'x', mp:35, cd:16000,  desc:'Leap up, slam down with piercing force.' },
   // Rogue path
-  shadowlord_clones:  { name:'Mirror Shadow',      icon:'👥', cls:'rogue', job:'ninja',    master:'shadowlord',  slot:'x', mp:40, cd:20000, desc:'3 silhouette clones — slash nearby foes for 4s (heavy damage each).' },
+  shadowlord_clones:  { name:'Mirror Shadow',      icon:'👥', cls:'rogue', job:'ninja',    master:'shadowlord',  slot:'x', mp:40, cd:22000, desc:'3 levitating clones flank you at long range — circular AOE strikes for 15s.' },
   shinobi_seal:       { name:'Kage Rush',          icon:'🎴', cls:'rogue', job:'ninja',    master:'shinobi',     slot:'x', mp:35, cd:17000,  desc:'Zip across the map slashing in rapid succession.' },
-  nightreaper_mark:   { name:'Blink Barrage',      icon:'🗡️', cls:'rogue', job:'assassin', master:'nightreaper', slot:'x', mp:55, cd:30000, desc:'Zip-zap at blinding speed between every foe on screen — up to 14 blink-strikes at 65 ms cadence. Ends with a dark twin-blade nova.' },
-  phantom_cut:        { name:'Voidrift Execution', icon:'👻', cls:'rogue', job:'assassin', master:'phantom',     slot:'x', mp:55, cd:28000, desc:'Mark up to 6 enemies, phase through the world and execute them in chain-teleport strikes. Each strike ignores DEF and crits; final hit detonates a shadow nova.' },
+  nightreaper_mark:   { name:'Blink Barrage',      icon:'🗡️', cls:'rogue', job:'assassin', master:'nightreaper', slot:'x', mp:55, cd:12000, desc:'Zip-zap at blinding speed between every foe on screen — up to 14 blink-strikes at 65 ms cadence. Ends with a dark twin-blade nova. Fixed 12 s CD (CDR-immune).' },
+  phantom_cut:        { name:'Voidrift Execution', icon:'👻', cls:'rogue', job:'assassin', master:'phantom',     slot:'x', mp:55, cd:12000, desc:'Mark up to 6 enemies, phase through the world and execute them in chain-teleport strikes. Each strike ignores DEF and crits; final hit detonates a shadow nova. Fixed 12 s CD (CDR-immune).' },
   // Mage path
   sage_meteorshower:  { name:'Meteor Shower',      icon:'📜', cls:'mage', job:'archmage', master:'sage',         slot:'x', mp:55, cd:19000, desc:'5 meteors rain over an area.' },
   elementalist_cascade:{ name:'Prismatic Cascade', icon:'🌈', cls:'mage', job:'archmage', master:'elementalist', slot:'x', mp:50, cd:5000,  desc:'Four elements in amplifying sequence.' },
@@ -13021,13 +13021,14 @@ function castSkill(id) {
   // v0.25.169 — blanket -25% cooldown across all classes / jobs.
   cdMul *= JOB_CD_MUL;
   let computedCd = s.cd * cdMul;
-  // v0.25.226 — Hard 12 s floor on phantom + nightreaper G skills.
-  // Their base cd is 28-30 s but stacked WIS cooldown reduction
-  // (up to 40%) + job CDR (25%) + mage class bonus could collapse
-  // them below 12 s, which is too spammy for a 6-target chain-blink
-  // ultimate. Ensures these reads as proper master signatures.
+  // v0.25.237 — Phantom + Nightreaper G skills lock at exactly 12 s.
+  // Earlier (v0.25.226) we used Math.max(12000, computedCd) as a
+  // floor, but the user wants these two ultimates to be CDR-immune
+  // entirely so the cadence reads identically regardless of WIS
+  // stacks, mage class, or skill-tree CDR. Cap or floor — the result
+  // is always 12 s.
   if (id === 'phantom_cut' || id === 'nightreaper_mark') {
-    computedCd = Math.max(12000, computedCd);
+    computedCd = 12000;
   }
   player.skillCooldowns[id] = computedCd;
   player.attacking = true;
@@ -14452,16 +14453,26 @@ const SKILL_FNS = {
     player.invulnerable = Math.max(player.invulnerable, 500);
   },
   deathBlossom: () => {
-    // Spinning vortex — 3 waves of strikes over 800ms, petal burst
+    // Spinning vortex — 3 waves of strikes over 800ms, petal burst.
+    // v0.25.237 — capped at 5 closest enemies per wave (was unlimited)
+    // to pair with the 8 s cooldown.
     const radius = 260;
     const waves = 3;
+    const HIT_CAP = 5;
     for (let w = 0; w < waves; w++) {
       scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
+        // Score every alive monster in range, sort, hit the closest 5.
+        const candidates = [];
         for (const m of game.monsters) {
           if (m.currentHp <= 0) continue;
           const d = Math.hypot((m.x+m.w/2)-(player.x+player.w/2),(m.y+m.h/2)-(player.y+player.h/2));
-          if (d < radius) hitMonster(m, Math.floor(getAtk() * 1.15), rollCrit(), 'deathBlossom');
+          if (d < radius) candidates.push({ m, d });
+        }
+        candidates.sort((a, b) => a.d - b.d);
+        const targets = candidates.slice(0, HIT_CAP);
+        for (const t of targets) {
+          hitMonster(t.m, Math.floor(getAtk() * 1.15), rollCrit(), 'deathBlossom');
         }
         // v0.25.212 — flashy sakura petal burst sprite per wave (slow spin
         // so the 3 waves stack into a layered rotating bloom).
@@ -15318,17 +15329,21 @@ const SKILL_FNS = {
   },
 
   shadowlord_clones: () => {
-    // v0.25.236 — Levitating summon rework. Clones now anchor to fixed world
-    // positions at cast time and float in place (gentle hover bob), striking
-    // every monster inside a circular AOE around them every ~400 ms.
-    // Spawn positions fan out in a triangle around the cast point.
-    const LIFE = 4000;
+    // v0.25.237 — Lifetime extended to 15 s and clones spawn FAR from the
+    // player so they project a wide turret screen across the map. CD is
+    // now 22 s (see SKILLS table) — uptime sits at ~68%.
+    // v0.25.236 — Levitating summon rework. Clones anchor to fixed world
+    // positions at cast time and float in place (gentle hover bob),
+    // striking every monster inside a circular AOE around them every
+    // ~400 ms.
+    const LIFE = 15000;
     player._clones = [];
     const px = player.x + player.w / 2;
     const py = player.y + player.h / 2;
-    // Spread clones further apart now that they don't follow the player.
-    const fanX = 130;     // horizontal spread between clones
-    const fanY = 30;      // small vertical stagger so they don't line up flat
+    // Wide fan — clones plant themselves far from the player so all three
+    // AOE rings extend most of the visible width without overlapping.
+    const fanX = 320;     // horizontal spread between clones
+    const fanY = 50;      // vertical stagger so the formation isn't flat
     const positions = [
       { ox: -fanX,    oy:  fanY    },   // left  / phase 0
       { ox:  0,       oy: -fanY * 1.2 }, // centre / phase 1 (slightly higher)
@@ -15355,7 +15370,7 @@ const SKILL_FNS = {
     // silhouettes fanned out behind the player). Spans the whole cast
     // moment, then the in-game logic takes over with the actual clones.
     spawnSpriteBurst(px, py, 'shadowlord_clones', { size: 220, life: 36 });
-    showToast('✦ MIRROR SHADOW — 3 floating clones, AOE strikes', 'legendary');
+    showToast('✦ MIRROR SHADOW — 3 floating clones, 15s', 'legendary');
     // Summon burst — violet core + 3 directional rays
     flash(0.45); addShake(8); addHitStop(60);
     for (let i = 0; i < 48; i++) {
@@ -35800,35 +35815,41 @@ requestAnimationFrame(loop);
     'backgrounds/bg_v3_thunderPlateau.png',
   ];
 
-  // v0.25.234 — Tiered loader. CRITICAL holds the ~30 sprites the
-  // player sees in the first 5 seconds (town bg, town NPCs, hero
-  // base, dialog box, U-panel banner, basic tiles). DEFERRED holds
-  // the other ~95 (boss bgs, master-class FX, all summon variants,
-  // every biome bg/tile pair). Loading screen reveals the world
-  // after CRITICAL finishes; DEFERRED keeps streaming in the
-  // background. Net effect on mobile: typical cold-load reveal time
-  // drops from ~8 s (full preload) to ~2-3 s (critical only).
-  const CRITICAL_PATHS = new Set([
+  // v0.25.237 — Three-tier loader. BAZAAR is the smallest bucket and
+  // exclusively gates the world reveal: only the sprites the player
+  // sees the moment they spawn into Everdawn Bazaar (hero face, bazaar
+  // bg, the 6 bazaar NPCs, walkway tiles, portals). CRITICAL is loaded
+  // immediately after BAZAAR with fetchPriority=high — UI tabs +
+  // dialog box that the player will hit within seconds but are not
+  // strictly required for first paint. DEFERRED keeps streaming all
+  // ~95 of the other biome/boss/master-class sprites via
+  // requestIdleCallback. Net effect: reveal gate shrinks from
+  // ~21 sprites → ~14, and the bazaar paint is faster because UI
+  // sprites no longer compete for HTTP/2 bandwidth at first frame.
+  const BAZAAR_PATHS = new Set([
     // Hero base + face layers (what drawPlayer renders every frame).
     'Sprites/character/head/flow.webp',
     'Sprites/character/hair/flow.webp',
     'Sprites/character/eyes/default.webp',
     'Sprites/character/mouth/default.webp',
-    // Town bg (first map the player spawns into).
+    // Bazaar bg (first map the player spawns into — Everdawn Bazaar).
     'backgrounds/bg_v3_homestead.png',
-    // Town NPCs (visible at spawn).
+    // Bazaar NPCs (all six visible at spawn).
     'Sprites/npc/elspeth.webp',
     'Sprites/npc/brok.webp',
     'Sprites/npc/amnesiac.webp',
     'Sprites/npc/sage_mira.webp',
     'Sprites/npc/old_arlen.webp',
     'Sprites/npc/taxi_uncle.webp',
-    // First-biome floor + platform tiles.
+    // First-biome floor + platform tiles (also used by bazaar walkway).
     'backgrounds/tiles/floor_grass_v5.webp',
     'backgrounds/tiles/platform_grass_v4.webp',
-    // World props the town shows (portals).
+    // Portal sprite (both bazaar exits use it).
     'Sprites/world/portal.webp',
-    // Dialog box + U-panel header (player will likely hit U or talk to NPC fast).
+  ]);
+  const CRITICAL_PATHS = new Set([
+    // Dialog box + U-panel header (loaded right after reveal so they're
+    // ready by the time the player taps an NPC or opens U).
     'Sprites/ui/dialog_box.webp',
     'Sprites/ui/char_header.webp',
     'Sprites/ui/tab_levelup.webp',
@@ -35836,28 +35857,31 @@ requestAnimationFrame(loop);
     'Sprites/ui/tab_skills.webp',
     'Sprites/ui/tab_items.webp',
   ]);
+  const BAZAAR = REQUIRED.filter(p => BAZAAR_PATHS.has(p));
   const CRITICAL = REQUIRED.filter(p => CRITICAL_PATHS.has(p));
-  const DEFERRED = REQUIRED.filter(p => !CRITICAL_PATHS.has(p));
+  const DEFERRED = REQUIRED.filter(p => !BAZAAR_PATHS.has(p) && !CRITICAL_PATHS.has(p));
 
   const overlay = document.getElementById('loading-overlay');
   const bar = document.getElementById('loading-bar');
   const status = document.getElementById('loading-status');
-  let critLoaded = 0, defLoaded = 0;
+  let bzLoaded = 0, critLoaded = 0, defLoaded = 0;
   let revealed = false;
   const phrases = [
-    'Conjuring sprites…',
-    'Painting biomes…',
-    'Awakening monsters…',
-    'Tuning skill VFX…',
+    'Painting Everdawn Bazaar…',
+    'Lighting the lanterns…',
+    'Waking the merchants…',
+    'Stocking Brok\'s anvil…',
     'Almost there…',
   ];
   const update = () => {
     if (revealed) return;
-    const pct = Math.round((critLoaded / Math.max(1, CRITICAL.length)) * 100);
+    // v0.25.237 — Progress bar tracks BAZAAR only (the gate). UI tabs +
+    // dialog box load after reveal as part of CRITICAL.
+    const pct = Math.round((bzLoaded / Math.max(1, BAZAAR.length)) * 100);
     if (bar) bar.style.width = pct + '%';
     if (status) {
-      if (critLoaded < CRITICAL.length) {
-        const phrase = phrases[Math.min(phrases.length - 1, Math.floor((critLoaded / CRITICAL.length) * phrases.length))];
+      if (bzLoaded < BAZAAR.length) {
+        const phrase = phrases[Math.min(phrases.length - 1, Math.floor((bzLoaded / BAZAAR.length) * phrases.length))];
         status.innerHTML = '<span class="pct">' + pct + '%</span> · <span class="pulse">' + phrase + '</span>';
       } else {
         status.innerHTML = '<span class="pct">100%</span> · <span style="color:#c8ffc8;">Ready ✓</span>';
@@ -35880,11 +35904,19 @@ requestAnimationFrame(loop);
     };
     img.src = src;
   });
-  // Phase 1 — load critical sprites in parallel, gate world reveal.
-  Promise.all(CRITICAL.map(p => loadOne(p, true).then(() => { critLoaded++; update(); })))
+  // v0.25.237 — Phase 1: load BAZAAR sprites in parallel with high
+  // fetchPriority. Reveal gates on this set finishing — CRITICAL UI
+  // sprites (dialog box + U-panel tabs) are NOT in this gate so the
+  // bazaar paint isn't held up waiting for assets the player isn't
+  // even looking at yet.
+  Promise.all(BAZAAR.map(p => loadOne(p, true).then(() => { bzLoaded++; update(); })))
     .then(() => maybeReveal());
-  // Phase 2 — defer everything else. Start fetching as soon as the
-  // browser idles so it doesn't fight phase 1 for bandwidth, but
+  // Phase 2 — Critical UI assets. Start as soon as BAZAAR phase fires;
+  // these still get fetchPriority=high so they finish well before the
+  // player taps an NPC. They don't gate reveal.
+  CRITICAL.forEach(p => loadOne(p, true).then(() => { critLoaded++; }));
+  // Phase 3 — defer everything else. Start fetching as soon as the
+  // browser idles so it doesn't fight phases 1-2 for bandwidth, but
   // before the player can actually need the assets.
   // v0.25.235 — also surface the deferred progress via a tiny corner
   // pill (#defer-loader) so the player sees the asset stream while
@@ -35920,7 +35952,7 @@ requestAnimationFrame(loop);
     setTimeout(startDeferred, 50);
   }
   function maybeReveal() {
-    if (critLoaded < CRITICAL.length) return;
+    if (bzLoaded < BAZAAR.length) return;
     if (revealed) return;
     revealed = true;
     hide();
@@ -35932,10 +35964,9 @@ requestAnimationFrame(loop);
     // v0.25.233 — Start the looping BGM the moment the world reveals.
     startBgm();
   }
-  // Hard fallback — was 12 s when REQUIRED was loaded all-or-nothing.
-  // With the critical/deferred split CRITICAL is ~20 sprites and a
-  // 5 s ceiling is generous enough on slow mobile connections.
-  setTimeout(() => { if (overlay && !overlay.classList.contains('fade')) { revealed = true; hide(); } }, 5000);
+  // Hard fallback. v0.25.237 — gate is now BAZAAR (~14 sprites),
+  // so 4 s is plenty even on slow mobile connections.
+  setTimeout(() => { if (overlay && !overlay.classList.contains('fade')) { revealed = true; hide(); } }, 4000);
 })();
 // v0.25.233 — Mojiworld main BGM (loops indefinitely).
 const _bgmEl = (() => {
