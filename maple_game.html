@@ -2775,7 +2775,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.189';
+const GAME_VERSION = 'v0.25.190';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4241,16 +4241,13 @@ const LX_MOB_CAST_DURATION = 280;  // ms — total aura visible window
 // =========================================================================
 const LX_HAIR = (() => {
   const out = {};
-  // v0.25.184 — `spike` joins flow as a sprite-backed hair. The dispatch
-  // in _drawVectorHero prefers the sprite when LX_HAIR[hairId] is decoded
-  // and falls through to the goo-blob renderer (still defined in
-  // HERO_VEC_HAIR_GOO.spike) only when the sprite hasn't loaded yet.
-  // v0.25.185 — `prince` added: blonde golden chunky-spike anime hair.
-  // v0.25.187 — `ponytail` added: brown anime ponytail with red hair tie.
+  // v0.25.190 — Trimmed to just `flow` + `ponytail`. Both authored at
+  // 800×800 head-aligned format (content positioned within the same
+  // canvas as the head sprite). Legacy 500×410 prince + spike sprites
+  // removed — the dispatch in drawBone('head') now uses one render rect
+  // since every hair is the same format.
   const files = {
     flow:     'flow.webp',
-    spike:    'spike.webp',
-    prince:   'prince.webp',
     ponytail: 'ponytail.webp',
   };
   for (const [k, f] of Object.entries(files)) {
@@ -4318,9 +4315,15 @@ function _lxHeadReady(img) { return !!(img && img.complete && img.naturalWidth >
 // When the sprite is decoded, the procedural face features (procedural
 // eye renderer, procedural smirk) are skipped to avoid double rendering.
 // =========================================================================
+// v0.25.190 — Multi-option face layer registries. Each entry maps a
+// picker id (from HERO_VEC_EYE_OPTIONS / HERO_VEC_MOUTH_OPTIONS) to
+// its webp filename; extend by dropping new sprites + extending the
+// options list.
 const LX_EYES = (() => {
   const out = {};
-  const files = { default: 'default.webp' };
+  const files = {
+    default: 'default.webp',
+  };
   for (const [k, f] of Object.entries(files)) {
     const img = new Image();
     img.decoding = 'async';
@@ -4331,7 +4334,9 @@ const LX_EYES = (() => {
 })();
 const LX_MOUTH = (() => {
   const out = {};
-  const files = { default: 'default.webp' };
+  const files = {
+    default: 'default.webp',
+  };
   for (const [k, f] of Object.entries(files)) {
     const img = new Image();
     img.decoding = 'async';
@@ -25384,12 +25389,13 @@ const HERO_VEC_SKIN = [
 // retired; legacy IDs all migrate to 'flow' below.
 const HERO_VEC_HAIR_OPTIONS = [
   { id:'flow',     name:'Flow ✨'      },
-  { id:'spike',    name:'Spike ⚡'     },
-  { id:'prince',   name:'Prince 👑'   },
   { id:'ponytail', name:'Ponytail 🎀' },
 ];
 
 // Legacy hairId migration — every retired style folds into 'flow'.
+// v0.25.190 — Only flow + ponytail remain. Every legacy id collapses
+// to 'flow' (was 'spike' for some, but spike is gone). Unknown ids
+// also fall back to 'flow' via _migrateHairId.
 const HERO_VEC_HAIR_LEGACY_MAP = {
   anime:    'flow',
   short:    'flow',
@@ -25398,23 +25404,31 @@ const HERO_VEC_HAIR_LEGACY_MAP = {
   pigtails: 'flow',
   wave:     'flow',
   crop:     'flow',
-  // 'spike' is preserved (already a valid id).
+  spike:    'flow',
+  prince:   'flow',
 };
 function _migrateHairId(id) {
   if (!id) return 'flow';
   if (HERO_VEC_HAIR_LEGACY_MAP[id]) return HERO_VEC_HAIR_LEGACY_MAP[id];
-  return id;
+  if (id === 'flow' || id === 'ponytail') return id;
+  return 'flow';
 }
 
-// v0.25.183 — Eye style options for the Q-key Character Studio.
-// _drawVectorHero dispatches to per-style helpers based on
-// player.lookCustom.eyeId; renderers live inside the function (closure
-// captures `lookCustom`). Falls back to 'sparkle' on any unknown id.
+// v0.25.183 / repurposed v0.25.190 — Eye + Mouth LAYER options for
+// the Q-key Character Studio. Each id maps to a key in LX_EYES /
+// LX_MOUTH (which load `Sprites/character/eyes/<id>.webp` and
+// `Sprites/character/mouth/<id>.webp` respectively). Add more by
+// dropping a webp + extending the list.
+//
+// The procedural eye renderers (sparkle / star / sleepy / dot) still
+// live inside _drawVectorHero as a fallback when no sprite layer is
+// loaded — but they're not exposed in the picker anymore now that
+// the sprite layers are the design source.
 const HERO_VEC_EYE_OPTIONS = [
-  { id:'sparkle', name:'Sparkle ✨' },
-  { id:'star',    name:'Star ⭐'    },
-  { id:'sleepy',  name:'Sleepy 😴'  },
-  { id:'dot',     name:'Dot ●'     },
+  { id:'default', name:'Default 👀' },
+];
+const HERO_VEC_MOUTH_OPTIONS = [
+  { id:'default', name:'Default 😶' },
 ];
 
 // v0.25.160 — MODULE-LEVEL HAIR-GOO BAKE CACHE.
@@ -25530,8 +25544,8 @@ function _lxBakeHairGoo(group, hairColor, hairHi, lowFx) {
 const _LX_HERO_BAKE_W = 100, _LX_HERO_BAKE_H = 100;
 const _LX_HERO_BAKE_FOOT_X = 50, _LX_HERO_BAKE_FOOT_Y = 80;
 const _LX_HERO_IDLE_BAKE_CACHE = new Map();
-function _lxBakeHeroIdle(cls, skinIdx, hairId, eyeId) {
-  const key = cls + '|' + skinIdx + '|' + hairId + '|' + (eyeId || 'sparkle');
+function _lxBakeHeroIdle(cls, skinIdx, hairId, eyeId, mouthId) {
+  const key = cls + '|' + skinIdx + '|' + hairId + '|' + (eyeId || 'default') + '|' + (mouthId || 'default');
   let baked = _LX_HERO_IDLE_BAKE_CACHE.get(key);
   if (baked) return baked;
   baked = document.createElement('canvas');
@@ -25549,7 +25563,7 @@ function _lxBakeHeroIdle(cls, skinIdx, hairId, eyeId) {
     offCtx,
     {
       cls,
-      lookCustom: { skinIdx, hairId, eyeId, msxId: null },
+      lookCustom: { skinIdx, hairId, eyeId, mouthId, msxId: null },
       animName:    'idle',
       animTime:    0.5,
       forcedFacing: 1,
@@ -25571,8 +25585,9 @@ function _drawVectorHeroCached(sx, sy) {
   const cls     = (typeof player !== 'undefined' && player.cls) || 'default';
   const skinIdx = (lookCustom.skinIdx != null && HERO_VEC_SKIN[lookCustom.skinIdx]) ? lookCustom.skinIdx : 2;
   const hairId  = _migrateHairId(lookCustom.hairId);
-  const eyeId   = lookCustom.eyeId || 'sparkle';
-  const baked   = _lxBakeHeroIdle(cls, skinIdx, hairId, eyeId);
+  const eyeId   = lookCustom.eyeId   || 'default';
+  const mouthId = lookCustom.mouthId || 'default';
+  const baked   = _lxBakeHeroIdle(cls, skinIdx, hairId, eyeId, mouthId);
   const pw = player.w, ph = player.h;
   const dstX = sx + pw / 2 - _LX_HERO_BAKE_FOOT_X;
   const dstY = sy + ph - _LX_HERO_BAKE_FOOT_Y;
@@ -26102,34 +26117,18 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     // and BEFORE the eyes/mouth (so face features still render on top
     // of any low-hanging hair strands the sprite designer intended).
     if (_useSpriteHair) {
-      // v0.25.189 — Two hair sprite formats now supported:
-      //
-      //  HEAD-ALIGNED (800×800)  — flow, ponytail. Content positioned
-      //    within an 800×800 canvas so that the head bbox (245,215)..(612,585)
-      //    aligns with the head sprite's render rect. Drawing the full
-      //    sprite at (-58,-52,108,108) maps the head bbox region back
-      //    onto (-_headW/2, -23, _headW, 50) — the same on-screen rect
-      //    as the head silhouette. Hair extends past that rect on all
-      //    sides as authored.
-      //
-      //  LEGACY (~500×410)  — prince, spike. Content fills the canvas
-      //    at the older smaller footprint. Existing rect (-32,-25,64,54)
-      //    preserves backward compatibility.
-      //
-      // Dispatch by naturalWidth — anything ≥ 700 px wide is treated as
-      // head-aligned. Future hair sprites should be authored at 800×800
-      // matching the head canvas; the legacy branch can be removed once
-      // prince + spike are re-authored.
-      if (_hairSprite.naturalWidth >= 700) {
-        // v0.25.189 — bbox enlarged from 108 → 135 (~25% bigger) so the
-        // hair silhouette extends further past the head outline. Origin
-        // recomputed so the head-bbox region within the sprite still
-        // lands at (-_headW/2, -23): with size=135, source(245, 215) →
-        // (-66 + 41.3, -59 + 36.3) ≈ (-25, -23) ✓.
-        ctx.drawImage(_hairSprite, -66, -59, 135, 135);
-      } else {
-        ctx.drawImage(_hairSprite, -32, -25, 64, 54);
-      }
+      // v0.25.190 — All hair sprites are now 800×800 head-aligned.
+      // Content is positioned within the same canvas as the head /
+      // eyes / mouth sprites so that the head bbox (245,215)..(612,585)
+      // aligns with the head silhouette on screen.
+      // Drawing the full 800×800 source at (-58, -52, 108, 108) maps:
+      //   source (245, 215) → screen (-58 + 245 × 108/800, ...) ≈ (-25, -23)
+      //   source (612, 585) → screen (24, 27)
+      // — the same on-screen rect as the cropped head sprite. The hair
+      // content within the source canvas extends past that head bbox as
+      // authored, so the silhouette naturally overhangs the head.
+      // Same rect used for eye + mouth layers below for canvas alignment.
+      ctx.drawImage(_hairSprite, -58, -52, 108, 108);
     } else if (HAIR_GOO.front) {
       // Vector front-hair (still used by 'spike' style): goo blob cluster
       // through SVG filter — outline pass + colour pass + cel-highlight.
@@ -26262,8 +26261,13 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     // v0.25.189 — when sprite eye + mouth layers are decoded, skip the
     // procedural face renderers (avoid double-rendering / mismatch).
     // The sprite layers are drawn FRONTMOST below.
-    const _eyeSprite = LX_EYES && LX_EYES.default;
-    const _mouthSprite = LX_MOUTH && LX_MOUTH.default;
+    // v0.25.190 — eye + mouth picker IDs. eyeId / mouthId in lookCustom
+    // map to LX_EYES[id] / LX_MOUTH[id] sprite layers. Falls back to
+    // 'default' for missing / unknown picks.
+    const _eyeLayerId   = (lookCustom.eyeId   && LX_EYES[lookCustom.eyeId])     ? lookCustom.eyeId   : 'default';
+    const _mouthLayerId = (lookCustom.mouthId && LX_MOUTH[lookCustom.mouthId]) ? lookCustom.mouthId : 'default';
+    const _eyeSprite   = LX_EYES   && LX_EYES[_eyeLayerId];
+    const _mouthSprite = LX_MOUTH  && LX_MOUTH[_mouthLayerId];
     const _useSpriteEyes  = _lxFaceLayerReady(_eyeSprite);
     const _useSpriteMouth = _lxFaceLayerReady(_mouthSprite);
     if (!_useSpriteEyes) {
@@ -34610,10 +34614,8 @@ requestAnimationFrame(loop);
     'Sprites/projectiles/cast/msplinter.webp',
     'Sprites/projectiles/cast/mspore.webp',
     'Sprites/projectiles/cast/mtoxic.webp',
-    // Sprite-based hair (v0.25.178 / v0.25.184 / v0.25.185 / v0.25.187).
+    // Sprite-based hair (v0.25.178 / v0.25.187 / trimmed v0.25.190).
     'Sprites/character/hair/flow.webp',
-    'Sprites/character/hair/spike.webp',
-    'Sprites/character/hair/prince.webp',
     'Sprites/character/hair/ponytail.webp',
     // Frontmost face layers (v0.25.189).
     'Sprites/character/eyes/default.webp',
@@ -34750,8 +34752,10 @@ requestAnimationFrame(loop);
       <div class="face-styles" id="face-styles"></div>
       <h3>Hair</h3>
       <div class="face-styles" id="hair-styles"></div>
-      <h3>Eye Style</h3>
+      <h3>Eyes</h3>
       <div class="face-styles" id="eye-styles"></div>
+      <h3>Mouth</h3>
+      <div class="face-styles" id="mouth-styles"></div>
       <h3>Sprite Skin</h3>
       <div class="face-styles" id="msx-styles"></div>
       <p class="char-studio-hint">Press <kbd>Q</kbd> to toggle • <kbd>Esc</kbd> to close • Sprite Skin overrides the vector look</p>
@@ -34774,8 +34778,10 @@ const CHAR_STUDIO = {
   // user can re-pick from the swatch row if they want.
   skinIdx: 2,           // default 'Light' tone
   hairId:  'anime',
-  // v0.25.183 — eye style picker (sparkle / star / sleepy / dot).
-  eyeId:   'sparkle',
+  // v0.25.190 — eyeId + mouthId now select sprite LAYER (LX_EYES[id] /
+  // LX_MOUTH[id]). Default 'default' loads `default.webp` from each.
+  eyeId:   'default',
+  mouthId: 'default',
   // v0.25.152 — null = vector hero, 'default' / 'warrior' / 'mage' picks
   // the matching MapleStory chibi sprite from MSX_HERO and overrides
   // the vector path entirely.
@@ -34933,6 +34939,27 @@ function buildCharStudioEyeStyles() {
   });
 }
 
+// v0.25.190 — Mouth layer picker. Mirrors the eye-style builder.
+function buildCharStudioMouthStyles() {
+  const cont = document.getElementById('mouth-styles');
+  if (!cont) return;
+  cont.dataset.built = '1';
+  cont.innerHTML = '';
+  HERO_VEC_MOUTH_OPTIONS.forEach((ms) => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'face-style-btn' + (ms.id === CHAR_STUDIO.mouthId ? ' active' : '');
+    el.textContent = ms.name;
+    el.title = ms.id;
+    el.onclick = () => {
+      CHAR_STUDIO.mouthId = ms.id;
+      cont.querySelectorAll('.face-style-btn').forEach((b) => b.classList.remove('active'));
+      el.classList.add('active');
+    };
+    cont.appendChild(el);
+  });
+}
+
 function openCharStudio() {
   document.getElementById('char-studio-overlay').classList.add('open');
   // Seed picks from the player's current lookCustom so the studio
@@ -34941,11 +34968,13 @@ function openCharStudio() {
     if (player.lookCustom.skinIdx != null) CHAR_STUDIO.skinIdx = player.lookCustom.skinIdx;
     if (player.lookCustom.hairId)          CHAR_STUDIO.hairId  = player.lookCustom.hairId;
     if (player.lookCustom.eyeId)           CHAR_STUDIO.eyeId   = player.lookCustom.eyeId;
+    if (player.lookCustom.mouthId)         CHAR_STUDIO.mouthId = player.lookCustom.mouthId;
     if ('msxId' in player.lookCustom)      CHAR_STUDIO.msxId   = player.lookCustom.msxId;
   }
   buildCharStudioSwatches();
   buildCharStudioFaceStyles();
   buildCharStudioEyeStyles();
+  buildCharStudioMouthStyles();
   buildCharStudioHairStyles();
   buildCharStudioMsxStyles();
   wireCharStudioActionButtons();
@@ -35086,11 +35115,13 @@ function applyCharStudioToPlayer() {
   player.lookCustom = {
     skinIdx: CHAR_STUDIO.skinIdx,
     hairId:  CHAR_STUDIO.hairId,
-    eyeId:   CHAR_STUDIO.eyeId,   // v0.25.183 — Sparkle / Star / Sleepy / Dot
+    eyeId:   CHAR_STUDIO.eyeId,   // v0.25.190 — sprite layer id (LX_EYES key)
+    mouthId: CHAR_STUDIO.mouthId, // v0.25.190 — sprite layer id (LX_MOUTH key)
     msxId:   CHAR_STUDIO.msxId,   // v0.25.152 — null = vector, otherwise picks MSX sprite
   };
-  // v0.25.183 — eye style change must invalidate the v0.25.176 hero idle
-  // bake cache so the next idle frame re-bakes with the new eye renderer.
+  // v0.25.183 — face / hair / skin change invalidates the v0.25.176
+  // hero idle bake cache so the next idle frame re-bakes with the
+  // new picks.
   if (typeof _LX_HERO_IDLE_BAKE_CACHE !== 'undefined' && _LX_HERO_IDLE_BAKE_CACHE.clear) {
     _LX_HERO_IDLE_BAKE_CACHE.clear();
   }
