@@ -2776,7 +2776,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.234';
+const GAME_VERSION = 'v0.25.235';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -35493,6 +35493,60 @@ requestAnimationFrame(loop);
   </div>
   <div class="lo-tip">Tip · Press <span class="kbd">W</span> in-game to open the world map · <span class="kbd">J</span> for quests · <span class="kbd">Tab</span> + click for taxi</div>
 </div>
+
+<!-- v0.25.235 — Persistent deferred-loader pill. Shows in the corner
+     after world reveal until DEFERRED sprites finish streaming. Tiny
+     and unobtrusive — just so the player knows assets are still
+     coming if they alt-tab back during the first minute of play. -->
+<style>
+  #defer-loader {
+    position: fixed; top: 10px; right: 10px;
+    z-index: 80;
+    display: none;
+    align-items: center; gap: 8px;
+    padding: 5px 10px 5px 8px;
+    background: rgba(20, 14, 30, 0.78);
+    border: 1px solid rgba(180, 140, 232, 0.45);
+    border-radius: 14px;
+    color: #d8c8ff;
+    font: 600 11px 'Inter', 'Segoe UI', system-ui, sans-serif;
+    letter-spacing: 0.3px;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    user-select: none; pointer-events: none;
+    transition: opacity 0.4s ease-out, transform 0.4s ease-out;
+  }
+  #defer-loader.show { display: flex; opacity: 0.85; }
+  #defer-loader.hide { opacity: 0; transform: translateY(-6px); }
+  #defer-loader .dl-spin {
+    display: inline-block;
+    width: 12px; height: 12px;
+    border: 2px solid rgba(255, 255, 255, 0.18);
+    border-top-color: #ffd166;
+    border-radius: 50%;
+    animation: dl-spin 0.9s linear infinite;
+  }
+  @keyframes dl-spin { to { transform: rotate(360deg); } }
+  #defer-loader .dl-bar {
+    width: 60px; height: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  #defer-loader .dl-fill {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, #ffd166 0%, #c68aff 100%);
+    transition: width 0.25s ease-out;
+  }
+  #defer-loader .dl-count { color: #ffe6a8; font-variant-numeric: tabular-nums; }
+</style>
+<div id="defer-loader" aria-live="polite">
+  <span class="dl-spin"></span>
+  <span>Loading <span class="dl-count" id="defer-count">0/0</span></span>
+  <span class="dl-bar"><span class="dl-fill" id="defer-fill"></span></span>
+</div>
+
 <script>
 (function _wireLoadingScreen() {
   // v0.25.173 — Per user request: ensure ALL sprites are loaded
@@ -35772,8 +35826,33 @@ requestAnimationFrame(loop);
   // Phase 2 — defer everything else. Start fetching as soon as the
   // browser idles so it doesn't fight phase 1 for bandwidth, but
   // before the player can actually need the assets.
+  // v0.25.235 — also surface the deferred progress via a tiny corner
+  // pill (#defer-loader) so the player sees the asset stream while
+  // they're already playing.
+  const dlEl    = document.getElementById('defer-loader');
+  const dlCount = document.getElementById('defer-count');
+  const dlFill  = document.getElementById('defer-fill');
+  const updateDeferUI = () => {
+    if (!dlEl || !dlCount || !dlFill) return;
+    const total = DEFERRED.length;
+    const done  = defLoaded;
+    if (total <= 0) return;
+    dlCount.textContent = `${done}/${total}`;
+    dlFill.style.width = Math.round((done / total) * 100) + '%';
+    if (done >= total) {
+      dlEl.classList.add('hide');
+      setTimeout(() => { dlEl.classList.remove('show'); dlEl.classList.remove('hide'); }, 400);
+    }
+  };
   const startDeferred = () => {
-    DEFERRED.forEach(p => loadOne(p, false).then(() => { defLoaded++; }));
+    if (DEFERRED.length && dlEl) {
+      dlEl.classList.add('show');
+      updateDeferUI();
+    }
+    DEFERRED.forEach(p => loadOne(p, false).then(() => {
+      defLoaded++;
+      updateDeferUI();
+    }));
   };
   if (typeof requestIdleCallback === 'function') {
     requestIdleCallback(startDeferred, { timeout: 1500 });
