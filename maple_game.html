@@ -2775,7 +2775,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.202';
+const GAME_VERSION = 'v0.25.203';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4216,6 +4216,32 @@ const LX_MOB_PROJ = (() => {
   return out;
 })();
 function _lxMobProjReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+// =========================================================================
+// LX_SUMMON — class-summoned ally sprites (v0.25.203)
+// =========================================================================
+// Cute simple ludo-generated sprites that replace the procedural rect-art
+// for player-summoned allies (warlock skeleton/zombie raises, ranger wolf
+// companion, beastmaster pack, doombringer Blade of Calamity). Each
+// renderer falls back to the procedural drawing if the image hasn't
+// decoded yet.
+// =========================================================================
+const LX_SUMMON = (() => {
+  const out = {};
+  const files = {
+    skeleton: 'skeleton.webp',
+    zombie:   'zombie.webp',
+    wolf:     'wolf.webp',
+    sword:    'sword.webp',
+  };
+  for (const [k, f] of Object.entries(files)) {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = 'Sprites/summons/' + f;
+    out[k] = img;
+  }
+  return out;
+})();
+function _lxSummonReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
 // =========================================================================
 // LX_MOB_CAST — monster attack-cast aura sprites (v0.25.177)
 // =========================================================================
@@ -12814,7 +12840,13 @@ function drawMinions() {
     ctx.beginPath();
     ctx.ellipse(sx + mn.w/2, sy + mn.h, 10, 2.5, 0, 0, Math.PI * 2);
     ctx.fill();
-    if (mn.type === 'skeleton') {
+    // v0.25.203 — sprite-based renderers replace the procedural rect art.
+    // Falls through to procedural if the sprite hasn't decoded yet
+    // (rare; LX_SUMMON loads eagerly at module init).
+    const _sprite = mn.type === 'skeleton' ? LX_SUMMON.skeleton : LX_SUMMON.zombie;
+    if (_lxSummonReady(_sprite)) {
+      ctx.drawImage(_sprite, sx, yOff, mn.w + 4, mn.h + 4);
+    } else if (mn.type === 'skeleton') {
       // Bony body — white bones with purple soul core
       ctx.fillStyle = '#2a1a28';
       ctx.fillRect(sx + 6, yOff + 10, 12, 22);
@@ -14713,14 +14745,25 @@ const SKILL_FNS = {
       addShake(28); flash(0.7); addHitStop(220);
       audio.play('crit');
     }, 900);
-    // Giant sword silhouette drawn as particles stacked vertically
-    for (let j = 0; j < 30; j++) {
-      const py = player.y - 40 + j * 3;
+    // v0.25.203 — Sprite-based colossal sword replaces the 30 stacked
+    // rect particles. Falls back to the procedural stack if the
+    // sprite hasn't decoded yet.
+    if (_lxSummonReady(LX_SUMMON.sword)) {
       game.particles.push({
         x: player.x + player.w/2 + dir * 70,
-        y: py, vx: 0, vy: 0,
-        life: 26, color: j < 24 ? '#e8e8f0' : '#c0a868', size: 4
+        y: player.y + 5, vx: 0, vy: 0,
+        life: 90, color: '#ffffff', size: 0,
+        sprite: LX_SUMMON.sword, spriteW: 90, spriteH: 140, flip: dir < 0,
       });
+    } else {
+      for (let j = 0; j < 30; j++) {
+        const py = player.y - 40 + j * 3;
+        game.particles.push({
+          x: player.x + player.w/2 + dir * 70,
+          y: py, vx: 0, vy: 0,
+          life: 26, color: j < 24 ? '#e8e8f0' : '#c0a868', size: 4
+        });
+      }
     }
     showToast('BLADE OF CALAMITY', 'legendary');
     addShake(20); flash(0.6); addHitStop(140);
@@ -33294,22 +33337,39 @@ function drawWolf(pet, tintColor) {
   ctx.ellipse(sx + 18, sy + 28, 18, 3, 0, 0, Math.PI * 2);
   ctx.fill();
   const f = pet.facing || 1;
-  ctx.fillStyle = tintColor || '#666';
-  ctx.fillRect(sx + 6, sy + 14, 28, 10);
-  ctx.fillStyle = tintColor ? tintColor : '#777';
-  ctx.fillRect(sx + (f > 0 ? 28 : 0), sy + 10, 12, 12);
-  ctx.fillStyle = '#555';
-  ctx.fillRect(sx + (f > 0 ? 29 : 1), sy + 7, 3, 4);
-  ctx.fillRect(sx + (f > 0 ? 37 : 9), sy + 7, 3, 4);
-  ctx.fillStyle = '#ff4';
-  ctx.fillRect(sx + (f > 0 ? 33 : 3), sy + 13, 2, 2);
-  const wc = Math.sin(game.time * 0.3 + (pet.x * 0.01)) * 2;
-  ctx.fillStyle = '#444';
-  ctx.fillRect(sx + 8, sy + 22, 5, 7 + wc);
-  ctx.fillRect(sx + 18, sy + 22, 5, 7 - wc);
-  ctx.fillRect(sx + 28, sy + 22, 5, 7 + wc);
-  ctx.fillStyle = '#555';
-  ctx.fillRect(sx + (f > 0 ? 2 : 32), sy + 14, 6, 3);
+  // v0.25.203 — sprite-based wolf replaces the procedural rect art.
+  // Falls back to the original draw if the sprite hasn't decoded yet.
+  const _wolfSprite = LX_SUMMON.wolf;
+  if (_lxSummonReady(_wolfSprite)) {
+    const W = 40, H = 36;
+    ctx.save();
+    if (f < 0) {
+      // Mirror horizontally for left-facing
+      ctx.translate(sx + W, sy);
+      ctx.scale(-1, 1);
+      ctx.drawImage(_wolfSprite, 0, 0, W, H);
+    } else {
+      ctx.drawImage(_wolfSprite, sx, sy, W, H);
+    }
+    ctx.restore();
+  } else {
+    ctx.fillStyle = tintColor || '#666';
+    ctx.fillRect(sx + 6, sy + 14, 28, 10);
+    ctx.fillStyle = tintColor ? tintColor : '#777';
+    ctx.fillRect(sx + (f > 0 ? 28 : 0), sy + 10, 12, 12);
+    ctx.fillStyle = '#555';
+    ctx.fillRect(sx + (f > 0 ? 29 : 1), sy + 7, 3, 4);
+    ctx.fillRect(sx + (f > 0 ? 37 : 9), sy + 7, 3, 4);
+    ctx.fillStyle = '#ff4';
+    ctx.fillRect(sx + (f > 0 ? 33 : 3), sy + 13, 2, 2);
+    const wc = Math.sin(game.time * 0.3 + (pet.x * 0.01)) * 2;
+    ctx.fillStyle = '#444';
+    ctx.fillRect(sx + 8, sy + 22, 5, 7 + wc);
+    ctx.fillRect(sx + 18, sy + 22, 5, 7 - wc);
+    ctx.fillRect(sx + 28, sy + 22, 5, 7 + wc);
+    ctx.fillStyle = '#555';
+    ctx.fillRect(sx + (f > 0 ? 2 : 32), sy + 14, 6, 3);
+  }
   if (pet.life < 5000) {
     ctx.fillStyle = pet.life < 2000 ? '#ff4444' : '#ffaa44';
     ctx.font = 'bold 9px sans-serif';
@@ -33834,6 +33894,23 @@ function drawParticles() {
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(p.text, sx, p.y);
+      lastColor = null;
+    } else if (p.sprite) {
+      // v0.25.203 — sprite-particle support. Used by doombringer's
+      // Blade of Calamity to draw a colossal sword sprite as one
+      // ephemeral entity instead of 30 stacked rect particles.
+      const alpha = p.life < 20 ? p.life / 20 : 1;
+      if (alpha !== lastAlpha) { ctx.globalAlpha = alpha; lastAlpha = alpha; }
+      const w = p.spriteW || 80, h = p.spriteH || 120;
+      if (p.flip) {
+        ctx.save();
+        ctx.translate(sx + w / 2, p.y);
+        ctx.scale(-1, 1);
+        ctx.drawImage(p.sprite, -w / 2, -h / 2, w, h);
+        ctx.restore();
+      } else {
+        ctx.drawImage(p.sprite, sx - w / 2, p.y - h / 2, w, h);
+      }
       lastColor = null;
     } else {
       const alpha = p.life < 20 ? p.life / 20 : 1;
