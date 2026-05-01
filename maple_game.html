@@ -2775,7 +2775,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.213';
+const GAME_VERSION = 'v0.25.214';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4324,6 +4324,13 @@ const LX_FX = (() => {
     backstab:      'backstab.webp',
     death_blossom: 'death_blossom.webp',
     shadow_strike: 'shadow_strike.webp',
+    // v0.25.214 — warrior + thief master skill bursts.
+    ground_slam:       'ground_slam.webp',
+    shadowlord_clones: 'shadowlord_clones.webp',
+    shinobi_seal:      'shinobi_seal.webp',
+    warlord_banner:    'warlord_banner.webp',
+    crusader_aegis:    'crusader_aegis.webp',
+    dragoon_skylance:  'dragoon_skylance.webp',
   };
   for (const [k, f] of Object.entries(files)) {
     const img = new Image();
@@ -4850,7 +4857,7 @@ const SKILLS = {
   backstab:     { name:'Backstab',       icon:'🩸', cls:'rogue', slot:'s', mp:8,  cd:1300,  desc:'Blink + 3-stab combo (triple-crit finisher).' },
   throwDagger:  { name:'Throw Dagger',   icon:'🎯', cls:'rogue', slot:'a', mp:6,  cd:1300,  desc:'5-lane dagger fan (up to 6 with multishot).' },
   smokeDash:    { name:'Smoke Dash',     icon:'💨', cls:'rogue', slot:'e', mp:14, cd:1500,  desc:'3-line dash corridor + 3 smoke ticks.' },
-  flurry:       { name:'Flurry',         icon:'🌀', cls:'rogue', slot:'w', mp:18, cd:1800,  desc:'Blink-warp forward, slashing the corridor. Press again within 6 s to warp back.' },
+  flurry:       { name:'Flurry',         icon:'🌀', cls:'rogue', slot:'w', mp:18, cd:0,     desc:'Blink-warp forward, slashing the corridor. Press again within 6 s to warp back (2 s cooldown after).' },
   // Ninja
   shadowStrike: { name:'Shadow Strike',  icon:'🥷', cls:'rogue', job:'ninja',    slot:'q', mp:22, cd:7000,  desc:'Teleport behind target, guaranteed crit.' },
   deathBlossom: { name:'Death Blossom',  icon:'🌸', cls:'rogue', job:'ninja',    slot:'c', mp:50, cd:20000, desc:'Ultimate: Strike all nearby enemies.' },
@@ -13605,6 +13612,9 @@ const SKILL_FNS = {
       // v0.25.210 — warrior dust ring sprite at the slam point via
       // the heuristic spawnSmoothExplosion dispatch in drawSmoothFx.
       spawnSmoothExplosion(player.x + player.w/2, player.y + player.h - 4, 200, '#ffcc66', '#ff883344', { life: 28 });
+      // v0.25.214 — epic ground-slam burst sprite stacked on top.
+      spawnSpriteBurst(player.x + player.w/2, player.y + player.h - 18, 'ground_slam',
+        { size: 220, life: 26, spin: Math.PI * 0.4 });
       // Impact debris cone (front-facing)
       for (let i = 0; i < 50; i++) {
         game.particles.push({
@@ -13883,10 +13893,16 @@ const SKILL_FNS = {
             // Finisher X burst
             pixelBurst('x', tgt.x + tgt.w/2, tgt.y + tgt.h/2, player.facing,
               { color:'#ff3366', color2:'#ffaacc', speed:5, life:22, size:3 });
-            // v0.25.212 — flashy shadow-strike critical burst sprite on
-            // the finisher hit.
-            spawnSpriteBurst(tgt.x + tgt.w/2, tgt.y + tgt.h/2, 'backstab',
-              { size: 130, life: 22 });
+            // v0.25.214 — backstab now uses the Z-skill 'stab' sprite
+            // (piercing-thrust line) instead of the dark-burst, per user
+            // request. Fired three times in rapid succession to read as
+            // the triple-stab combo finisher.
+            for (let k = 0; k < 3; k++) {
+              scheduleSkillTimer(() => {
+                spawnSpriteBurst(tgt.x + tgt.w / 2, tgt.y + tgt.h / 2, 'stab',
+                  { size: 90, life: 14, angle: player.facing > 0 ? 0 : Math.PI });
+              }, k * 60);
+            }
             addHitStop(40);
           }
         }, s.delay);
@@ -14077,6 +14093,11 @@ const SKILL_FNS = {
       addShake(8); flash(0.35); addHitStop(50);
       player.invulnerable = Math.max(player.invulnerable, 360);
       player._flurryReturn = null;
+      // v0.25.214 — return-warp imposes a 2 s cooldown so the
+      // teleport-back can't be spammed. The outbound press uses the
+      // SKILLS.flurry.cd of 0 (no cooldown).
+      player.skillCooldowns = player.skillCooldowns || {};
+      player.skillCooldowns.flurry = 2000;
       showToast('FLURRY RETURN', 'rare');
       return;
     }
@@ -14769,6 +14790,10 @@ const SKILL_FNS = {
     if (player.pet) player.pet.hp = Math.min(300, player.pet.hp + 80);
     if (player.pack) for (const w of player.pack) w.hp = Math.min(300, w.hp + 80);
     performAround(200, 2.2 + stacks * 0.15, { color:'#ff8844', kb:5 });
+    // v0.25.214 — epic banner sprite planted at the player's feet for
+    // the rally moment. Held visible ~50 frames while the buff ramps in.
+    spawnSpriteBurst(player.x + player.w / 2, player.y + player.h - 24, 'warlord_banner',
+      { size: 200, life: 50 });
     // v0.25.119 — also fire a forward fan of 3 shockwave projectiles.
     // Each pierces, travels ~270 px, and reads as a ground wave.
     // Angles: -25° / 0° / +25° relative to the facing direction.
@@ -14921,6 +14946,10 @@ const SKILL_FNS = {
     // Divine Aegis — 5 hovering holy orbs pendulum in and out, striking
     // enemies they pass through. While the aegis is active the player
     // takes HALF damage.
+    // v0.25.214 — epic divine-cross-and-orbs sprite at the player's
+    // chest as the aegis ignites. Slow spin matches the orbiting orbs.
+    spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'crusader_aegis',
+      { size: 220, life: 50, spin: Math.PI * 0.5 });
     player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.6));
     // v0.25.120 — Aegis duration doubled 8 s → 16 s; orb damage doubled
     // in the per-frame strike below.
@@ -14957,6 +14986,10 @@ const SKILL_FNS = {
     player.vy = 0;
     player.invulnerable = Math.max(player.invulnerable, 400);
     player.dragoonSlam = 1;
+    // v0.25.214 — epic sky-lance sprite trailing the player's plummet.
+    // Mounted just below the chest so the lance leads the dive visually.
+    spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2 + 20, 'dragoon_skylance',
+      { size: 180, life: 40 });
     for (let i = 0; i < 20; i++) {
       game.particles.push({
         x: player.x + player.w/2, y: player.y + player.h,
@@ -14988,6 +15021,11 @@ const SKILL_FNS = {
         phase: i,
       });
     }
+    // v0.25.214 — flashy shadow-clones cast burst sprite (3 ninja
+    // silhouettes fanned out behind the player). Spans the whole cast
+    // moment, then the in-game logic takes over with the actual clones.
+    spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'shadowlord_clones',
+      { size: 220, life: 36 });
     showToast('✦ MIRROR SHADOW — 3 clones, 4s', 'legendary');
     // Summon burst — violet core + 3 directional rays
     flash(0.45); addShake(8); addHitStop(60);
@@ -15023,6 +15061,14 @@ const SKILL_FNS = {
     const destX = player.facing > 0 ? wMax - player.w - 40 : 40;
     player.invulnerable = Math.max(player.invulnerable, 900);
     player.vy = 0;
+    // v0.25.214 — paper-talisman seal sprite at the cast point as the
+    // sigil flashes before the rush, plus a second one at the dest.
+    spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'shinobi_seal',
+      { size: 140, life: 28 });
+    scheduleSkillTimer(() => {
+      spawnSpriteBurst(destX + player.w / 2, player.y + player.h / 2, 'shinobi_seal',
+        { size: 140, life: 24 });
+    }, 700);
     const totalSteps = 14;
     const hitIds = new Set();
     for (let i = 0; i < totalSteps; i++) {
