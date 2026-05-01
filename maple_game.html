@@ -2775,7 +2775,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.209';
+const GAME_VERSION = 'v0.25.210';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4290,6 +4290,54 @@ const LX_SUMMON = (() => {
   return out;
 })();
 function _lxSummonReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+// =========================================================================
+// LX_FX — class-skill VFX sprites (v0.25.210)
+// =========================================================================
+// One-shot effect sprites used by drawSmoothFx — replace procedural slash
+// arcs / impact starbursts / explosion gradients with cute illustrative
+// drawImages when the spawn color matches a known palette. Adds character
+// to warrior + rogue (thief) skill casts without touching every spawn
+// callsite individually.
+//   slash_warrior  — gold/yellow crescent for warrior basic / heavy strikes
+//   slash_rogue    — magenta/pink narrow slash for rogue daggers + ninja
+//   smoke_puff     — purple-gray smoke cloud for rogue smoke / shadow skills
+//   dust_ring      — tan dust-and-rocks shockwave for warrior ground slam
+// =========================================================================
+const LX_FX = (() => {
+  const out = {};
+  const files = {
+    slash_warrior: 'slash_warrior.webp',
+    slash_rogue:   'slash_rogue.webp',
+    smoke_puff:    'smoke_puff.webp',
+    dust_ring:     'dust_ring.webp',
+  };
+  for (const [k, f] of Object.entries(files)) {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = 'Sprites/fx/' + f;
+    out[k] = img;
+  }
+  return out;
+})();
+function _lxFxReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+// Heuristic colour-buckets so a spawn call with a warrior gold colour
+// automatically picks the warrior slash sprite, etc. Lowercased hex
+// strings looked up in a Set per bucket.
+const _LX_FX_WARRIOR_COLORS = new Set([
+  '#ffcc66','#ffee88','#ffee66','#fff1a0','#ffe488','#ffaa44','#ffd166',
+  '#ffdd44','#ffbb33','#ff8833',
+]);
+const _LX_FX_ROGUE_COLORS = new Set([
+  '#9944cc','#8844cc','#c8a8ff','#b866ff','#cc66ff','#aa66cc','#ff99aa',
+  '#ff66aa','#cc44aa','#6a22b0',
+]);
+function _lxFxBucket(color) {
+  if (!color || typeof color !== 'string') return null;
+  const c = color.toLowerCase();
+  if (_LX_FX_WARRIOR_COLORS.has(c)) return 'warrior';
+  if (_LX_FX_ROGUE_COLORS.has(c))   return 'rogue';
+  return null;
+}
 // =========================================================================
 // LX_MOB_CAST — monster attack-cast aura sprites (v0.25.177)
 // =========================================================================
@@ -13119,6 +13167,28 @@ function drawSmoothFx() {
     const sx = fx.x - camX;
     if (sx < -200 || sx > W + 200) continue;
     if (fx.type === 'slash') {
+      // v0.25.210 — sprite-based slash for warrior + rogue palettes.
+      // Detect class via the spawn colour and drawImage the matching
+      // crescent sprite at fx.length size, rotated to fx.angle. Falls
+      // through to the procedural arc stack for any non-class palette.
+      const _bucket = _lxFxBucket(fx.color);
+      const _slashSprite = _bucket === 'warrior' ? LX_FX.slash_warrior
+                         : _bucket === 'rogue'   ? LX_FX.slash_rogue
+                         : null;
+      if (_slashSprite && _lxFxReady(_slashSprite)) {
+        const t = 1 - fx.life / fx.maxLife;
+        const grow = 0.7 + t * 0.4;
+        const sz = fx.length * 1.6 * grow;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(sx, fx.y);
+        ctx.rotate(fx.angle);
+        // Sprite faces "open-right" — translate so the swing emanates
+        // from the cast point and arcs outward.
+        ctx.drawImage(_slashSprite, -sz * 0.15, -sz / 2, sz, sz);
+        ctx.restore();
+        continue;
+      }
       // Stacked arcs for a clean energy crescent.
       // v0.25.60 — wrapped in save/restore. The previous code used
       // ctx.setTransform(1,0,0,1,0,0) to "undo" the per-fx translate +
@@ -13154,6 +13224,22 @@ function drawSmoothFx() {
     } else if (fx.type === 'explosion') {
       const r = fx.radius;
       if (r < 1) continue;
+      // v0.25.210 — sprite-based explosion for class-recognisable
+      // palettes. Warrior gold core (groundSlam, rampage finishers) ->
+      // tan dust-ring sprite; rogue purple core (smoke skills, shadow
+      // bursts) -> smoke puff sprite. Falls through to the radial
+      // gradient for any other palette.
+      const _bucket = _lxFxBucket(fx.coreCol);
+      const _explosionSprite = _bucket === 'warrior' ? LX_FX.dust_ring
+                             : _bucket === 'rogue'   ? LX_FX.smoke_puff
+                             : null;
+      if (_explosionSprite && _lxFxReady(_explosionSprite)) {
+        const sz = r * 2.2;
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(_explosionSprite, sx - sz / 2, fx.y - sz / 2, sz, sz);
+        ctx.globalAlpha = 1;
+        continue;
+      }
       ctx.globalCompositeOperation = 'lighter';
       const grad = ctx.createRadialGradient(sx, fx.y, 0, sx, fx.y, r);
       grad.addColorStop(0, '#ffffff');
@@ -13300,6 +13386,10 @@ const SKILL_FNS = {
     pixelBurst('arc', player.x + player.w/2 + player.facing * 40, player.y + player.h/2, player.facing, { color:'#ffffff', color2:'#ffdd88', speed:4 });
     performMelee(160, 1.55, { color:'#fff', kb:5, burst:14 });
     const cx = player.x + player.w/2, cy = player.y + player.h/2;
+    // v0.25.210 — warrior gold slash crescent sprite via the heuristic
+    // spawnSmoothSlash dispatch in drawSmoothFx.
+    spawnSmoothSlash(cx + player.facing * 40, cy, player.facing > 0 ? 0 : Math.PI, 70, '#ffcc66',
+      { thickness: 7, spread: Math.PI * 0.85, life: 18 });
     for (let i = 0; i < 10; i++) {
       const t = i / 10;
       const ang = -Math.PI/3 + t * (Math.PI * 2/3);
@@ -13465,6 +13555,9 @@ const SKILL_FNS = {
           m.stunTimer = Math.max(m.stunTimer || 0, 750);
         }
       }
+      // v0.25.210 — warrior dust ring sprite at the slam point via
+      // the heuristic spawnSmoothExplosion dispatch in drawSmoothFx.
+      spawnSmoothExplosion(player.x + player.w/2, player.y + player.h - 4, 200, '#ffcc66', '#ff883344', { life: 28 });
       // Impact debris cone (front-facing)
       for (let i = 0; i < 50; i++) {
         game.particles.push({
@@ -13803,6 +13896,9 @@ const SKILL_FNS = {
     const tx = Math.min(game.mapData.worldWidth - player.w, Math.max(0, player.x + player.facing * 220));
     const startX = player.x;
     spawnFx('thief','shadowMove', startX + (tx - startX)/2 + player.w/2, player.y + player.h/2, player.facing, { scale: 0.65, frameMs: 45 });
+    // v0.25.210 — rogue purple smoke puff sprite at the dash end via
+    // the heuristic spawnSmoothExplosion dispatch in drawSmoothFx.
+    spawnSmoothExplosion(tx + player.w/2, player.y + player.h/2, 90, '#9944cc', '#33115580', { life: 22 });
     // Damage enemies in a tall corridor (3 effective lines) along the dash
     for (const m of game.monsters) {
       if (m.currentHp <= 0) continue;
@@ -14099,6 +14195,9 @@ const SKILL_FNS = {
     // Drop a damaging smoke cloud at position
     const cx = player.x + player.w/2, cy = player.y + player.h/2;
     spawnFx('thief','smokeScreen', cx, cy, player.facing, { scale: 0.9, frameMs: 80 });
+    // v0.25.210 — rogue purple smoke puff sprite at the bomb point via
+    // the heuristic spawnSmoothExplosion dispatch in drawSmoothFx.
+    spawnSmoothExplosion(cx, cy, 130, '#9944cc', '#33115580', { life: 30 });
     for (let tick = 0; tick < 4; tick++) {
       scheduleSkillTimer(() => {
         for (const m of game.monsters) {
