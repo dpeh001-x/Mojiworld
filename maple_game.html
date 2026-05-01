@@ -2776,7 +2776,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.235';
+const GAME_VERSION = 'v0.25.236';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -12000,62 +12000,76 @@ function updatePlayer(dt) {
     if (aegis.life <= 0) player._aegis = null;
   }
 
-  // Shadow Clones — up to 3 silhouettes orbiting the player for 4s each.
-  // Each tick attacks enemies in a circle around it every ~400 ms.
+  // v0.25.236 — Shadow Clones reworked into floating turrets. Each clone
+  // anchors to a fixed world position (set at cast time), bobs gently in
+  // place, and pulses a circular AOE every ~400 ms that hits every enemy
+  // within range — no longer follows the player, no longer a directional
+  // strike. Up to 3 clones, 4 s lifetime.
   if (player._clones && player._clones.length) {
+    const AOE_R = 110;                          // strike radius (world px)
+    const AOE_R_SQ = AOE_R * AOE_R;
     for (let ci = player._clones.length - 1; ci >= 0; ci--) {
       const c = player._clones[ci];
       c.life -= dt;
       c.attackTimer -= dt;
-      // Gentle orbital drift — each clone bobs around its spawn position
-      const t = (c.maxLife - c.life) * 0.0025 + c.phase * 2;
-      const cx = player.x + player.w/2 + c.offsetX + Math.cos(t) * 8;
-      const cy = player.y + player.h/2 + c.offsetY + Math.sin(t * 1.3) * 5;
-      // Face the nearest enemy for that "autonomous attacker" look
+      // Levitation: anchored XY plus a slow vertical hover sine — the
+      // clones bob in place like spirits instead of drifting around.
+      const tElapsed = (c.maxLife - c.life) * 0.005;
+      const cx = c.anchorX;
+      const cy = c.anchorY + Math.sin(tElapsed + c.bobPhase) * 6;
+      // Face the nearest enemy inside the AOE for visual flavor
       let tgt = null, bestD = Infinity;
       for (const m of game.monsters) {
         if (m.currentHp <= 0) continue;
         const dx = (m.x + m.w/2) - cx;
         const dy = (m.y + m.h/2) - cy;
         const d = dx * dx + dy * dy;
-        if (d < 240 * 240 && d < bestD) { bestD = d; tgt = m; }
+        if (d < AOE_R_SQ && d < bestD) { bestD = d; tgt = m; }
       }
       c.facing = tgt ? (tgt.x + tgt.w/2 - cx > 0 ? 1 : -1) : player.facing;
       c.lastX = cx; c.lastY = cy;
-      // Strike cadence — 400 ms between slashes
+      // Strike cadence — 400 ms between AOE pulses
       if (c.attackTimer <= 0) {
         c.attackTimer = 400;
         c.swingProg = 1;
-        const reach = 90;
-        const hitbox = {
-          x: c.facing > 0 ? cx : cx - reach,
-          y: cy - player.h/2 - 10,
-          w: reach, h: player.h + 20,
-        };
         let hitCount = 0;
         for (const m of game.monsters) {
           if (m.currentHp <= 0) continue;
-          if (aabb(hitbox, m)) {
-            // Significant damage — scales with player ATK + bonus per clone
-            const dmg = Math.floor(getAtk() * 1.4 + 6);
+          const mcx = m.x + m.w/2;
+          const mcy = m.y + m.h/2;
+          const dx = mcx - cx, dy = mcy - cy;
+          if (dx * dx + dy * dy <= AOE_R_SQ) {
+            // Slightly toned down per-hit since we now hit a full circle.
+            const dmg = Math.floor(getAtk() * 1.1 + 6);
             hitMonster(m, dmg, rollCrit(), 'shadow');
-            m.vx += c.facing * 4;
-            spawnSmoothImpact(m.x + m.w/2, m.y + m.h/2, '#8844cc');
+            // Push enemies outward from the clone instead of along facing
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            m.vx += (dx / len) * 3;
+            spawnSmoothImpact(mcx, mcy, '#8844cc');
             hitCount++;
-            if (hitCount >= 3) break;             // don't chain-stun a whole room
+            if (hitCount >= 5) break;             // cap chain reactions
           }
         }
-        // Dark slash crescent
-        spawnSmoothSlash(cx + c.facing * 24, cy, c.facing > 0 ? 0 : Math.PI,
-          reach * 0.7, '#220033',
-          { thickness: 5, spread: Math.PI * 0.75, life: 14 });
-        spawnSmoothSlash(cx + c.facing * 24, cy, c.facing > 0 ? 0 : Math.PI,
-          reach * 0.6, '#8844cc',
-          { thickness: 2, spread: Math.PI * 0.75, life: 14 });
+        // Visible AOE ring telegraph + violet shockwave
+        for (let i = 0; i < 18; i++) {
+          const a = (i / 18) * Math.PI * 2;
+          game.particles.push({
+            x: cx + Math.cos(a) * 14,
+            y: cy + Math.sin(a) * 14,
+            vx: Math.cos(a) * 4.4,
+            vy: Math.sin(a) * 4.4,
+            life: 24, color: i % 2 ? '#8844cc' : '#220033', size: 3
+          });
+        }
+        // Bright crescent flourish (kept for the "ninja blade" flavor)
+        spawnSmoothSlash(cx, cy, 0,                AOE_R * 0.55, '#220033',
+          { thickness: 5, spread: Math.PI * 2, life: 14 });
+        spawnSmoothSlash(cx, cy, Math.PI / 2,      AOE_R * 0.5,  '#8844cc',
+          { thickness: 2, spread: Math.PI * 2, life: 14 });
       }
       // Decay swing animation progress
       if (c.swingProg > 0) c.swingProg = Math.max(0, c.swingProg - dt / 200);
-      // Trail sparkles
+      // Trail sparkles — drifting upward like ghostly embers
       if (game.time % 5 === 0) {
         game.particles.push({
           x: cx + (Math.random() - 0.5) * 16,
@@ -15304,52 +15318,61 @@ const SKILL_FNS = {
   },
 
   shadowlord_clones: () => {
-    // Summon THREE shadow silhouettes in a triangle around the player. Each
-    // clone attacks surrounding enemies every 400 ms for 4 s, dealing
-    // significant damage. They're pure darkness — black silhouettes of the
-    // hero with a faint violet outline.
+    // v0.25.236 — Levitating summon rework. Clones now anchor to fixed world
+    // positions at cast time and float in place (gentle hover bob), striking
+    // every monster inside a circular AOE around them every ~400 ms.
+    // Spawn positions fan out in a triangle around the cast point.
     const LIFE = 4000;
     player._clones = [];
-    const angleOffsets = [-2.2, 0, 2.2];    // radians, three fan positions
-    const radius = 80;
+    const px = player.x + player.w / 2;
+    const py = player.y + player.h / 2;
+    // Spread clones further apart now that they don't follow the player.
+    const fanX = 130;     // horizontal spread between clones
+    const fanY = 30;      // small vertical stagger so they don't line up flat
+    const positions = [
+      { ox: -fanX,    oy:  fanY    },   // left  / phase 0
+      { ox:  0,       oy: -fanY * 1.2 }, // centre / phase 1 (slightly higher)
+      { ox:  fanX,    oy:  fanY    },   // right / phase 2
+    ];
     for (let i = 0; i < 3; i++) {
-      const a = angleOffsets[i];
-      const ox = Math.cos(a) * radius;
-      const oy = Math.sin(a) * radius * 0.4; // flattened ellipse (platformer-y)
+      const p = positions[i];
+      // Anchor at world coords. Clones hold their position regardless of
+      // where the player moves — they're floating turrets, not escorts.
+      const ax = px + p.ox;
+      const ay = py + p.oy;
       player._clones.push({
         life: LIFE, maxLife: LIFE,
-        offsetX: ox, offsetY: oy,
+        anchorX: ax, anchorY: ay,
         facing: player.facing,
         attackTimer: 140 + i * 80,            // stagger initial strikes
         swingProg: 0,
         phase: i,
+        bobPhase: i * 1.7,                    // unique hover offset per clone
+        lastX: ax, lastY: ay,
       });
     }
     // v0.25.214 — flashy shadow-clones cast burst sprite (3 ninja
     // silhouettes fanned out behind the player). Spans the whole cast
     // moment, then the in-game logic takes over with the actual clones.
-    spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'shadowlord_clones',
-      { size: 220, life: 36 });
-    showToast('✦ MIRROR SHADOW — 3 clones, 4s', 'legendary');
+    spawnSpriteBurst(px, py, 'shadowlord_clones', { size: 220, life: 36 });
+    showToast('✦ MIRROR SHADOW — 3 floating clones, AOE strikes', 'legendary');
     // Summon burst — violet core + 3 directional rays
     flash(0.45); addShake(8); addHitStop(60);
     for (let i = 0; i < 48; i++) {
       const a = (i / 48) * Math.PI * 2;
       game.particles.push({
-        x: player.x + player.w/2, y: player.y + player.h/2,
+        x: px, y: py,
         vx: Math.cos(a) * 8, vy: Math.sin(a) * 8,
         life: 46, color: i % 3 === 0 ? '#ffffff' : i % 3 === 1 ? '#8844cc' : '#330055', size: 3
       });
     }
-    // Directional puff at each clone's spawn
+    // Directional puff at each clone's anchor
     for (let i = 0; i < 3; i++) {
       const c = player._clones[i];
-      const cx = player.x + player.w/2 + c.offsetX;
-      const cy = player.y + player.h/2 + c.offsetY;
       for (let j = 0; j < 14; j++) {
         const a = Math.random() * Math.PI * 2;
         game.particles.push({
-          x: cx, y: cy,
+          x: c.anchorX, y: c.anchorY,
           vx: Math.cos(a) * 3, vy: Math.sin(a) * 3,
           life: 28, color: '#120420', size: 3
         });
@@ -25778,18 +25801,47 @@ function drawAegisOrbs() {
 // behind the real hero.
 function drawShadowClones() {
   if (!player._clones || !player._clones.length) return;
+  // v0.25.236 — Render order: AOE telegraph rings under each clone first
+  // (so the strike halo sits behind the silhouette), then per-clone bodies.
+  const AOE_R = 110;
   for (const c of player._clones) {
-    const sx = Math.round((c.lastX !== undefined ? c.lastX : player.x + player.w/2 + c.offsetX) - game.camera.x);
-    const sy = Math.round((c.lastY !== undefined ? c.lastY : player.y + player.h/2 + c.offsetY));
+    const fallbackX = c.anchorX !== undefined ? c.anchorX
+                    : (player.x + player.w/2 + (c.offsetX || 0));
+    const fallbackY = c.anchorY !== undefined ? c.anchorY
+                    : (player.y + player.h/2 + (c.offsetY || 0));
+    const sx = Math.round((c.lastX !== undefined ? c.lastX : fallbackX) - game.camera.x);
+    const sy = Math.round((c.lastY !== undefined ? c.lastY : fallbackY));
     // Fade out in last 400 ms of life
     const fadeStart = 400;
     const alpha = c.life < fadeStart ? (c.life / fadeStart) : 1;
-    // Violet under-glow (breathes with swing)
+    // Persistent AOE footprint ring — faintly visible at all times so the
+    // player can read each clone's strike radius. Brightens during swings.
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    ctx.fillStyle = `rgba(140,68,204,${0.20 + c.swingProg * 0.25})`;
+    const ringPulse = 0.10 + c.swingProg * 0.55;
+    ctx.strokeStyle = `rgba(180,110,240,${alpha * ringPulse})`;
+    ctx.lineWidth = 2 + c.swingProg * 2;
+    ctx.beginPath();
+    ctx.arc(sx, sy + 14, AOE_R, 0, Math.PI * 2);
+    ctx.stroke();
+    // Inner soft halo — looks like a hover platform
+    ctx.fillStyle = `rgba(140,68,204,${alpha * (0.06 + c.swingProg * 0.18)})`;
+    ctx.beginPath();
+    ctx.arc(sx, sy + 14, AOE_R * 0.55, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    // Violet under-glow (breathes with swing) — close to the clone body
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = `rgba(140,68,204,${0.22 + c.swingProg * 0.25})`;
     ctx.beginPath();
     ctx.ellipse(sx, sy, 22, 26, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Floating shadow puddle below clone (ground tether) — sells "levitating"
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = `rgba(8,2,18,${alpha * 0.35})`;
+    ctx.beginPath();
+    ctx.ellipse(sx, sy + 28, 18, 5, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
     // v0.25.218 — Sprite-based clone bodies. Each fan slot has its own
@@ -25812,16 +25864,22 @@ function drawShadowClones() {
         ctx.drawImage(_cloneSprite, sx - SW / 2, sy - SH / 2, SW, SH);
       }
       ctx.restore();
-      // Swing crescent overlay during attack
+      // v0.25.236 — 360° AOE sweep overlay during attack (was a directional
+      // crescent before the levitating-summon rework).
       if (c.swingProg > 0) {
         ctx.save();
         ctx.translate(sx, sy);
-        ctx.scale(c.facing < 0 ? -1 : 1, 1);
-        const reach = 28 + c.swingProg * 8;
+        const reach = 30 + c.swingProg * 14;
         ctx.strokeStyle = `rgba(220,140,255,${alpha * c.swingProg})`;
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.arc(0, 0, reach, -Math.PI * 0.55, Math.PI * 0.55);
+        ctx.arc(0, 0, reach, 0, Math.PI * 2);
+        ctx.stroke();
+        // Inner highlight ring
+        ctx.strokeStyle = `rgba(255,210,255,${alpha * c.swingProg * 0.6})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, reach - 6, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
       }
@@ -25866,17 +25924,19 @@ function drawShadowClones() {
     ctx.fillStyle = `rgba(200,130,255,${alpha * 0.9})`;
     ctx.fillRect(-5, -17, 2, 3);
     ctx.fillRect( 3, -17, 2, 3);
-    // Swinging blade (renders during swingProg > 0)
+    // v0.25.236 — 360° AOE sweep ring (procedural silhouette fallback).
     if (c.swingProg > 0) {
-      const reach = 28 + c.swingProg * 8;
+      const reach = 30 + c.swingProg * 14;
       ctx.strokeStyle = `rgba(160,90,220,${alpha * c.swingProg})`;
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(0, 0, reach, -Math.PI * 0.55, Math.PI * 0.55);
+      ctx.arc(0, 0, reach, 0, Math.PI * 2);
       ctx.stroke();
-      // Solid blade silhouette
-      ctx.fillStyle = '#0a0010';
-      ctx.fillRect(reach - 6, -2, 14, 3);
+      ctx.strokeStyle = `rgba(220,160,255,${alpha * c.swingProg * 0.55})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, reach - 6, 0, Math.PI * 2);
+      ctx.stroke();
     }
     ctx.restore();
   }
