@@ -2775,7 +2775,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.218';
+const GAME_VERSION = 'v0.25.219';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -26291,6 +26291,24 @@ function _heroVecMageBackArm(t) {
   if (t < 0.70) return 0.40;
   return 0.40 - _heroVecAttackRecover(t) * 0.20;
 }
+// v0.25.219 — Rogue / thief attack: forward DAGGER THRUST. Tiny windup
+// pull, sharp snap straight forward, brief hold at full extension,
+// smooth retract back to guard. Reads as a quick committed stab
+// rather than a wide swing. Off-hand drifts back slightly as a
+// counterweight so the thrust pose looks balanced.
+function _heroVecRogueFrontArm(t) {
+  // Front (dagger) arm. 0 = hanging down; positive = forward/horizontal.
+  if (t < 0.12) return -0.30 - _heroEaseOutCubic(t / 0.12) * 0.40;            // windup pull to -0.70
+  if (t < 0.30) return -0.70 + _heroEaseOutCubic((t - 0.12) / 0.18) * 2.25;   // SNAP thrust forward to +1.55
+  if (t < 0.45) return 1.55 + Math.sin((t - 0.30) * Math.PI / 0.15) * 0.05;   // brief held tremor at full extension
+  return 1.55 - _heroVecAttackRecover(t) * 1.55;                              // retract to neutral
+}
+function _heroVecRogueBackArm(t) {
+  // Off-hand pulls back slightly during the thrust for body balance.
+  if (t < 0.12) return 0.25 + _heroEaseOutCubic(t / 0.12) * 0.20;
+  if (t < 0.45) return 0.45;
+  return 0.45 - _heroVecAttackRecover(t) * 0.45;
+}
 // v0.25.191 — Archer attack: pull bowstring → hold → release.
 // Front arm (armR) holds the bow steady forward-up throughout. Back
 // arm (armL) raises with the bow during windup, pulls back further
@@ -26385,6 +26403,16 @@ const HERO_VEC_ANIMS = {
     legL:  t => -0.14,
     legR:  t => 0.16,
   },
+  // v0.25.219 — Rogue forward dagger thrust. Quick committed jab
+  // forward, slight body lean into the thrust, smooth retract.
+  attack_rogue: {
+    spine: t => -0.06 + _heroVecAttackStrike(t) * 0.18 - _heroVecAttackRecover(t) * 0.10,
+    head:  t => -0.04 + _heroVecAttackStrike(t) * 0.12 - _heroVecAttackRecover(t) * 0.06,
+    armR:  t => _heroVecRogueFrontArm(t),
+    armL:  t => _heroVecRogueBackArm(t),
+    legL:  t => -0.18,
+    legR:  t => 0.22,
+  },
 };
 const HERO_VEC_DEFORM = {
   idle: { spine: t => ({ sx: 1 - Math.sin(t * Math.PI * 2) * 0.012, sy: 1 + Math.sin(t * Math.PI * 2) * 0.012 }) },
@@ -26430,6 +26458,15 @@ const HERO_VEC_DEFORM = {
     armL:  t => ({ sx: 1, sy: 1 }),
     spine: t => ({ sx: 1, sy: 1 + Math.sin(t * Math.PI) * 0.04 }),
   },
+  // v0.25.219 — Rogue thrust deform. Front arm stretches lengthwise
+  // during the snap-forward phase to sell the lunge reach. Hand grows
+  // slightly at full extension. Body stays relatively neutral.
+  attack_rogue: {
+    armR:  t => ({ sx: 1, sy: 1 + _heroVecAttackStrike(t) * 0.30 }),
+    armL:  t => ({ sx: 1, sy: 1 }),
+    spine: t => ({ sx: 1.02, sy: 0.99 }),
+    handR: t => { const s = 1 + _heroVecAttackStrike(t) * 0.22; return { sx: s, sy: s }; },
+  },
 };
 // v0.25.133 — per-bone position offsets layered on top of rotation +
 // scale. Used for the prominent head bob the user asked for: the head
@@ -26470,6 +26507,12 @@ const HERO_VEC_BOB = {
     spine: t => ({ x: -_heroVecAttackStrike(t) * 0.4, y: -Math.sin(t * Math.PI) * 0.8 }),
     head:  t => ({ x: -_heroVecAttackStrike(t) * 0.6, y: -Math.sin(t * Math.PI) * 1.4 }),
   },
+  // v0.25.219 — Rogue thrust bob: sharp forward poke + quick recoil
+  // pull. Less than warrior lurch since the dagger is small + quick.
+  attack_rogue: {
+    spine: t => ({ x: _heroVecAttackStrike(t) * 2.0 - _heroVecAttackRecover(t) * 0.8, y: 0 }),
+    head:  t => ({ x: _heroVecAttackStrike(t) * 0.8, y: -Math.sin(t * Math.PI) * 0.6 }),
+  },
 };
 function _heroVecAnimFor() {
   const inAir = Math.abs(player.vy) > 0.5 && !player.onGround;
@@ -26479,10 +26522,12 @@ function _heroVecAnimFor() {
     // v0.25.194 — Per-class attack animations. Warrior gets a wide
     // 2-handed slash, mage raises staff at the sky, archer holds the
     // bow steady while back arm draws + releases.
+    // v0.25.219 — Rogue gets a forward dagger thrust.
     const cls = (typeof player !== 'undefined' && player.cls) || 'default';
     if (cls === 'archer')  return 'attack_archer';
     if (cls === 'warrior') return 'attack_warrior';
     if (cls === 'mage')    return 'attack_mage';
+    if (cls === 'rogue')   return 'attack_rogue';
     return 'attack';
   }
   if (inAir) return 'jump';
@@ -26494,7 +26539,7 @@ function _heroVecTimeNorm(animName) {
   if (animName === 'walk')   return ((t * 0.065) % 1);
   if (animName === 'idle')   return ((t * 0.02) % 1);
   // v0.25.191 — all attack variants share the same timer.
-  if (animName === 'attack' || animName === 'attack_archer' || animName === 'attack_warrior' || animName === 'attack_mage') {
+  if (animName === 'attack' || animName === 'attack_archer' || animName === 'attack_warrior' || animName === 'attack_mage' || animName === 'attack_rogue') {
     _heroVecAttackActive(t);
     const start = player._heroAtkAt || t;
     return Math.max(0, Math.min(1, (t - start) / HERO_VEC_ATTACK_FRAMES));
