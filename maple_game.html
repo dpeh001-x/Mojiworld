@@ -2775,7 +2775,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.188';
+const GAME_VERSION = 'v0.25.189';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4309,6 +4309,38 @@ const LX_HEAD = (() => {
   return out;
 })();
 function _lxHeadReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+// =========================================================================
+// LX_EYES + LX_MOUTH — frontmost face layer sprites (v0.25.189)
+// =========================================================================
+// User-supplied 800×800 head-aligned PNG layers for the eyes + mouth.
+// Drawn AFTER the head silhouette + after the procedural face elements
+// in drawBone('head'), so they render as the most-front visible layer.
+// When the sprite is decoded, the procedural face features (procedural
+// eye renderer, procedural smirk) are skipped to avoid double rendering.
+// =========================================================================
+const LX_EYES = (() => {
+  const out = {};
+  const files = { default: 'default.webp' };
+  for (const [k, f] of Object.entries(files)) {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = 'Sprites/character/eyes/' + f;
+    out[k] = img;
+  }
+  return out;
+})();
+const LX_MOUTH = (() => {
+  const out = {};
+  const files = { default: 'default.webp' };
+  for (const [k, f] of Object.entries(files)) {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = 'Sprites/character/mouth/' + f;
+    out[k] = img;
+  }
+  return out;
+})();
+function _lxFaceLayerReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
 // =========================================================================
 // MSX_HERO — MapleStory-style chibi character sprite registry (v0.25.152)
 // =========================================================================
@@ -26070,13 +26102,34 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     // and BEFORE the eyes/mouth (so face features still render on top
     // of any low-hanging hair strands the sprite designer intended).
     if (_useSpriteHair) {
-      // v0.25.186 — Shifted hair down 9 px (top y -34 → -25, bottom 20 → 29)
-      // per user feedback: the hair was floating above the head frame
-      // instead of sitting on it. New range puts the hair top just 2 px
-      // above the head top (head spans y=-23..27) and the bang fringe
-      // hangs 2 px past the chin — matches the reference image exactly.
-      // Sprite native ratio still 508×427 ≈ 1.19w; mapped to 64w × 54h.
-      ctx.drawImage(_hairSprite, -32, -25, 64, 54);
+      // v0.25.189 — Two hair sprite formats now supported:
+      //
+      //  HEAD-ALIGNED (800×800)  — flow, ponytail. Content positioned
+      //    within an 800×800 canvas so that the head bbox (245,215)..(612,585)
+      //    aligns with the head sprite's render rect. Drawing the full
+      //    sprite at (-58,-52,108,108) maps the head bbox region back
+      //    onto (-_headW/2, -23, _headW, 50) — the same on-screen rect
+      //    as the head silhouette. Hair extends past that rect on all
+      //    sides as authored.
+      //
+      //  LEGACY (~500×410)  — prince, spike. Content fills the canvas
+      //    at the older smaller footprint. Existing rect (-32,-25,64,54)
+      //    preserves backward compatibility.
+      //
+      // Dispatch by naturalWidth — anything ≥ 700 px wide is treated as
+      // head-aligned. Future hair sprites should be authored at 800×800
+      // matching the head canvas; the legacy branch can be removed once
+      // prince + spike are re-authored.
+      if (_hairSprite.naturalWidth >= 700) {
+        // v0.25.189 — bbox enlarged from 108 → 135 (~25% bigger) so the
+        // hair silhouette extends further past the head outline. Origin
+        // recomputed so the head-bbox region within the sprite still
+        // lands at (-_headW/2, -23): with size=135, source(245, 215) →
+        // (-66 + 41.3, -59 + 36.3) ≈ (-25, -23) ✓.
+        ctx.drawImage(_hairSprite, -66, -59, 135, 135);
+      } else {
+        ctx.drawImage(_hairSprite, -32, -25, 64, 54);
+      }
     } else if (HAIR_GOO.front) {
       // Vector front-hair (still used by 'spike' style): goo blob cluster
       // through SVG filter — outline pass + colour pass + cel-highlight.
@@ -26206,22 +26259,39 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
       sleepy:  _drawEye_sleepy,
       dot:     _drawEye_dot,
     };
-    const _eyeId = (lookCustom.eyeId && _EYE_RENDERERS[lookCustom.eyeId]) ? lookCustom.eyeId : 'sparkle';
-    const _drawChibiEye = _EYE_RENDERERS[_eyeId];
-    _drawChibiEye(ctx, -9.0 + FACE_DX, _irisGrad);
-    _drawChibiEye(ctx,  9.0 + FACE_DX, _irisGrad);
-    // Zero nose (per spec — explicitly omitted, no path here).
-    // Minimal mouth — tiny confident smirk: single shallow curve.
-    // v0.25.179 — also raised 3 px (16 → 13).
-    ctx.save();
-    ctx.strokeStyle = '#1a0818';
-    ctx.lineWidth = 1.5;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(-1.6 + FACE_DX, 13);
-    ctx.quadraticCurveTo(0 + FACE_DX, 14.1, 1.6 + FACE_DX, 13);
-    ctx.stroke();
-    ctx.restore();
+    // v0.25.189 — when sprite eye + mouth layers are decoded, skip the
+    // procedural face renderers (avoid double-rendering / mismatch).
+    // The sprite layers are drawn FRONTMOST below.
+    const _eyeSprite = LX_EYES && LX_EYES.default;
+    const _mouthSprite = LX_MOUTH && LX_MOUTH.default;
+    const _useSpriteEyes  = _lxFaceLayerReady(_eyeSprite);
+    const _useSpriteMouth = _lxFaceLayerReady(_mouthSprite);
+    if (!_useSpriteEyes) {
+      const _eyeId = (lookCustom.eyeId && _EYE_RENDERERS[lookCustom.eyeId]) ? lookCustom.eyeId : 'sparkle';
+      const _drawChibiEye = _EYE_RENDERERS[_eyeId];
+      _drawChibiEye(ctx, -9.0 + FACE_DX, _irisGrad);
+      _drawChibiEye(ctx,  9.0 + FACE_DX, _irisGrad);
+    }
+    if (!_useSpriteMouth) {
+      // Procedural smirk (v0.25.179).
+      ctx.save();
+      ctx.strokeStyle = '#1a0818';
+      ctx.lineWidth = 1.5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-1.6 + FACE_DX, 13);
+      ctx.quadraticCurveTo(0 + FACE_DX, 14.1, 1.6 + FACE_DX, 13);
+      ctx.stroke();
+      ctx.restore();
+    }
+    // v0.25.189 — frontmost face layers. Eye sprite first, then mouth
+    // on top (mouth sits below eyes anatomically so render order is
+    // visually irrelevant — both are head-aligned 800×800 PNGs and
+    // their alpha bboxes don't overlap). Drawn at the SAME rect as the
+    // head sprite (-58, -52, 108, 108) so the head-bbox region within
+    // each layer canvas aligns with the head silhouette on screen.
+    if (_useSpriteEyes)  ctx.drawImage(_eyeSprite,   -58, -52, 108, 108);
+    if (_useSpriteMouth) ctx.drawImage(_mouthSprite, -58, -52, 108, 108);
   });
   drawBone('legR', () => {
     _drawShaded(HERO_VEC_PARTS.limb, BOOT_BASE, BODY_SHD, SKIN.deep, 3, 3);
@@ -34545,6 +34615,9 @@ requestAnimationFrame(loop);
     'Sprites/character/hair/spike.webp',
     'Sprites/character/hair/prince.webp',
     'Sprites/character/hair/ponytail.webp',
+    // Frontmost face layers (v0.25.189).
+    'Sprites/character/eyes/default.webp',
+    'Sprites/character/mouth/default.webp',
     // Sprite-based head (v0.25.182).
     'Sprites/character/head/flow.webp',
     // Boss attack-pose sprites (v0.25.181).
