@@ -2611,16 +2611,16 @@
   </div>
 
   <div id="taxi-modal" class="modal-overlay">
-    <div class="modal" style="position:relative; min-width:580px; max-width:720px;">
+    <div class="modal" style="position:relative; min-width:780px; max-width:880px;">
       <button class="close-btn" onclick="closeAllModals()">✕</button>
       <h2>🚕 Taxi Service</h2>
-      <div style="text-align:center; margin-bottom:8px; color:#bbb; font-size:12px;">
-        Fast-travel to any map you've visited. Fee: 50 Lumens per ride.
+      <div style="text-align:center; margin-bottom:6px; color:#bbb; font-size:12px;">
+        Click a node to fast-travel. Fare: 50 Lumens. Boss arenas excluded.
       </div>
-      <div style="text-align:center; margin-bottom:12px;">
+      <div style="text-align:center; margin-bottom:8px;">
         Lumens: <span class="gold" id="taxi-lumens">0</span>
       </div>
-      <div id="taxi-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:8px; max-height:400px; overflow-y:auto;"></div>
+      <div id="taxi-grid"></div>
     </div>
   </div>
 
@@ -2638,13 +2638,14 @@
 
   <!-- v0.25.95 — World map modal (press W) -->
   <div id="worldmap-modal" class="modal-overlay">
-    <div class="modal" style="position:relative; min-width:680px; max-width:880px;">
+    <div class="modal" style="position:relative; min-width:780px; max-width:900px;">
       <button class="close-btn" onclick="closeAllModals()">✕</button>
       <h2>🗺 World Map</h2>
-      <div style="text-align:center; margin-bottom:10px; color:#bbb; font-size:12px;">
-        Maps grouped by recommended level. Your current location is highlighted. Press <kbd style="background:#444;padding:1px 5px;border-radius:3px;border:1px solid #666;">W</kbd> to toggle.
+      <div style="text-align:center; margin-bottom:8px; color:#bbb; font-size:12px;">
+        Click a node to teleport. Hub at centre, harder biomes further out.
+        Press <kbd style="background:#444;padding:1px 5px;border-radius:3px;border:1px solid #666;">W</kbd> to toggle.
       </div>
-      <div id="worldmap-grid" style="display:flex; flex-direction:column; gap:14px; max-height:480px; overflow-y:auto; padding:4px 6px;"></div>
+      <div id="worldmap-grid"></div>
     </div>
   </div>
 
@@ -2775,7 +2776,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.222';
+const GAME_VERSION = 'v0.25.223';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -10330,81 +10331,214 @@ function toggleWorldMap() {
   modal.style.display = 'flex';
   game.paused = true;
 }
-function renderWorldMap() {
-  const grid = document.getElementById('worldmap-grid');
-  if (!grid || typeof MAPS !== 'object') return;
-  grid.innerHTML = '';
-  const cur = game.currentMap;
-  const playerLv = (player && player.level) || 1;
-  const buckets = {
-    hub:   { label: '🏛 Hub',                    color: '#ffdd88', maps: [] },
-    early: { label: '🌱 Beginner (Lv 1–4)',      color: '#88dd66', maps: [] },
-    mid:   { label: '⚔ Intermediate (Lv 5–14)',  color: '#88ccff', maps: [] },
-    high:  { label: '🔥 Advanced (Lv 15–29)',    color: '#ffaa44', maps: [] },
-    end:   { label: '🌟 Endgame (Lv 30+)',       color: '#c68aff', maps: [] },
-    boss:  { label: '👑 Boss Arenas',            color: '#ff6677', maps: [] },
-    tower: { label: '🗼 Tower of Ascension',     color: '#ffb24a', maps: [] },
-  };
+// v0.25.223 — Shared SVG world-map diagram. Hub town at centre with
+// concentric tier rings around it and boss/tower nodes anchored to
+// corners. Used by both the W-key world map and the Taxi NPC modal
+// (different gating: W lets you walk anywhere unlocked, Taxi requires
+// Lumens + visited).
+function _wmComputePositions() {
+  const W = 760, H = 460;
+  const cx = W / 2, cy = H / 2;
+  const positions = {};
+  const buckets = { hub: [], early: [], mid: [], high: [], end: [], boss: [], tower: [] };
   for (const [id, m] of Object.entries(MAPS)) {
-    if (m.isZodiac || m.isZodiacHub || m.isCarriage) continue; // gated through other UI
+    if (m.isZodiac || m.isZodiacHub || m.isCarriage) continue;
     const lvl = m.levelReq || 0;
     let key;
-    if (m.isTower)         key = 'tower';
-    else if (m.isTown)     key = 'hub';
-    else if (m.isBossArena)key = 'boss';
-    else if (lvl <= 4)     key = 'early';
-    else if (lvl <= 14)    key = 'mid';
-    else if (lvl <= 29)    key = 'high';
-    else                   key = 'end';
-    buckets[key].maps.push([id, m, lvl]);
+    if (m.isTower)          key = 'tower';
+    else if (m.isTown)      key = 'hub';
+    else if (m.isBossArena) key = 'boss';
+    else if (lvl <= 4)      key = 'early';
+    else if (lvl <= 14)     key = 'mid';
+    else if (lvl <= 29)     key = 'high';
+    else                    key = 'end';
+    buckets[key].push([id, m]);
   }
-  for (const b of Object.values(buckets)) {
-    if (!b.maps.length) continue;
-    b.maps.sort((a, c) => a[2] - c[2]);
-    const sec = document.createElement('div');
-    sec.style.cssText = 'display:flex; flex-direction:column; gap:6px;';
-    sec.innerHTML = `<div style="color:${b.color}; font-size:13px; font-weight:700; letter-spacing:0.5px;">${b.label}</div>`;
-    const row = document.createElement('div');
-    row.style.cssText = 'display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:8px;';
-    for (const [id, m, lvl] of b.maps) {
-      const here = id === cur;
-      const locked = lvl > 0 && playerLv < lvl;
-      const card = document.createElement('div');
-      const bg = here   ? 'linear-gradient(135deg,rgba(255,221,136,0.22),rgba(180,120,40,0.18))'
-               : locked ? 'rgba(20,15,30,0.55)'
-                        : 'rgba(40,28,60,0.65)';
-      const border = here   ? '2px solid #ffdd88'
-                   : locked ? '1px solid rgba(80,70,100,0.5)'
-                            : '1px solid rgba(120,100,160,0.45)';
-      card.style.cssText = `background:${bg}; border:${border}; border-radius:8px; padding:10px 12px; cursor:${locked?'not-allowed':'pointer'}; transition:transform 80ms, background 80ms;${locked?' opacity:0.55;':''}`;
-      const icon = _WM_BIOME_ICON[id] || '📍';
-      const lvlTxt   = lvl > 0 ? `<div style="font-size:11px; color:#aaa;">Lv ${lvl}+</div>` : '<div style="font-size:11px; color:#aaa;">No level req</div>';
-      const hereTag  = here   ? '<div style="font-size:10px; color:#ffdd88; font-weight:700; letter-spacing:1px;">▸ YOU ARE HERE</div>' : '';
-      const lockTag  = locked ? `<div style="font-size:10px; color:#ff6677;">🔒 Need Lv ${lvl}</div>` : '';
-      card.innerHTML =
-        `<div style="display:flex; align-items:center; gap:10px;">`
-        + `<div style="font-size:24px;">${icon}</div>`
-        + `<div style="flex:1; min-width:0;">`
-        +   `<div style="font-size:13px; font-weight:600; color:#fff;">${m.name || id}</div>`
-        +   lvlTxt + hereTag + lockTag
-        + `</div></div>`;
-      if (!locked) {
-        card.addEventListener('mouseenter', () => { card.style.transform = 'translateY(-1px)'; });
-        card.addEventListener('mouseleave', () => { card.style.transform = 'translateY(0)'; });
-        card.addEventListener('click', () => {
-          if (id === cur) { showToast('Already here', 'common'); return; }
-          if (typeof loadMap === 'function') {
-            closeAllModals();
-            loadMap(id);
-            showToast(`Travelling to ${m.name || id}…`, 'rare');
-          }
-        });
-      }
-      row.appendChild(card);
+  // Sort each bucket by level for stable layout
+  for (const k of Object.keys(buckets)) buckets[k].sort((a, b) => (a[1].levelReq || 0) - (b[1].levelReq || 0));
+  // Hub centre
+  if (buckets.hub.length) positions[buckets.hub[0][0]] = { x: cx, y: cy, tier: 'hub' };
+  // Concentric rings — vertical-axis squashed by 0.85 so it fits the wider modal
+  const placeRing = (arr, r, tier, startAngle = -Math.PI / 2) => {
+    if (!arr.length) return;
+    arr.forEach(([id, m], i) => {
+      const a = startAngle + (i / arr.length) * Math.PI * 2;
+      positions[id] = { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r * 0.78, tier };
+    });
+  };
+  placeRing(buckets.early, 90,  'early', -Math.PI / 2);
+  placeRing(buckets.mid,   155, 'mid',   -Math.PI / 2 + 0.30);
+  placeRing(buckets.high,  220, 'high',  -Math.PI / 2 + 0.10);
+  placeRing(buckets.end,   285, 'end',   -Math.PI / 2);
+  // Boss + Tower pinned to corners (override their ring slots)
+  buckets.boss.forEach(([id], i) => {
+    const slots = [{ x: 50, y: H - 40 }, { x: W - 50, y: H - 40 }, { x: 50, y: 40 }];
+    positions[id] = { ...(slots[i] || slots[0]), tier: 'boss' };
+  });
+  buckets.tower.forEach(([id], i) => {
+    positions[id] = { x: W - 60, y: 60 + i * 70, tier: 'tower' };
+  });
+  return { positions, W, H };
+}
+const _WM_TIER_COLOR = {
+  hub: '#ffdd88', early: '#88dd66', mid: '#88ccff', high: '#ffaa44',
+  end: '#c68aff', boss: '#ff6677', tower: '#ffb24a',
+};
+const _WM_TIER_LABEL = {
+  hub: '🏛 Hub', early: '🌱 Beginner', mid: '⚔ Intermediate',
+  high: '🔥 Advanced', end: '🌟 Endgame', boss: '👑 Boss', tower: '🗼 Tower',
+};
+// Shared SVG renderer. opts:
+//   mode: 'travel' (W) | 'taxi' (NPC)
+//   onPick: (id, mapDef) => void   // called for valid clicks
+//   isAccessible: (id, mapDef) => { ok: bool, reason: string }
+function _renderWorldMapDiagram(host, opts) {
+  if (!host) return;
+  host.innerHTML = '';
+  const { positions, W, H } = _wmComputePositions();
+  const cur = game.currentMap;
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  svg.style.cssText = 'background:radial-gradient(ellipse at center,#1e1834,#0a0618 80%); border-radius:10px; border:1px solid rgba(180,140,220,0.35); display:block;';
+  // Background sparkle stars
+  for (let i = 0; i < 60; i++) {
+    const s = document.createElementNS(SVG_NS, 'circle');
+    s.setAttribute('cx', Math.random() * W);
+    s.setAttribute('cy', Math.random() * H);
+    s.setAttribute('r', Math.random() * 1.2 + 0.4);
+    s.setAttribute('fill', 'rgba(255,255,255,0.35)');
+    svg.appendChild(s);
+  }
+  // Connection edges from town to ring nodes (subtle paths)
+  const hubId = Object.keys(positions).find(id => positions[id].tier === 'hub');
+  if (hubId) {
+    const hub = positions[hubId];
+    for (const [id, p] of Object.entries(positions)) {
+      if (id === hubId) continue;
+      if (p.tier === 'boss' || p.tier === 'tower') continue;
+      const ln = document.createElementNS(SVG_NS, 'line');
+      ln.setAttribute('x1', hub.x); ln.setAttribute('y1', hub.y);
+      ln.setAttribute('x2', p.x);   ln.setAttribute('y2', p.y);
+      ln.setAttribute('stroke', 'rgba(180,140,220,0.18)');
+      ln.setAttribute('stroke-width', '1');
+      ln.setAttribute('stroke-dasharray', '3,3');
+      svg.appendChild(ln);
     }
-    sec.appendChild(row);
-    grid.appendChild(sec);
   }
+  // Nodes
+  for (const [id, p] of Object.entries(positions)) {
+    const m = MAPS[id]; if (!m) continue;
+    const here = id === cur;
+    const acc = opts.isAccessible ? opts.isAccessible(id, m) : { ok: true };
+    const tierCol = _WM_TIER_COLOR[p.tier] || '#aaa';
+    const g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('transform', `translate(${p.x},${p.y})`);
+    g.style.cursor = (here || !acc.ok) ? 'not-allowed' : 'pointer';
+    // Glow halo for current/accessible
+    if (here) {
+      const halo = document.createElementNS(SVG_NS, 'circle');
+      halo.setAttribute('r', 28);
+      halo.setAttribute('fill', 'rgba(255,221,136,0.18)');
+      halo.setAttribute('stroke', '#ffdd88');
+      halo.setAttribute('stroke-width', '2');
+      g.appendChild(halo);
+    }
+    // Node disc
+    const disc = document.createElementNS(SVG_NS, 'circle');
+    disc.setAttribute('r', here ? 22 : 19);
+    disc.setAttribute('fill', acc.ok ? `rgba(40,28,60,0.85)` : 'rgba(20,15,30,0.7)');
+    disc.setAttribute('stroke', here ? '#ffdd88' : tierCol);
+    disc.setAttribute('stroke-width', here ? 3 : 2);
+    if (!acc.ok) disc.setAttribute('opacity', '0.55');
+    g.appendChild(disc);
+    // Biome icon (emoji as SVG text)
+    const ico = document.createElementNS(SVG_NS, 'text');
+    ico.setAttribute('y', 6);
+    ico.setAttribute('text-anchor', 'middle');
+    ico.setAttribute('font-size', '20');
+    ico.setAttribute('pointer-events', 'none');
+    ico.textContent = _WM_BIOME_ICON[id] || '📍';
+    if (!acc.ok) ico.setAttribute('opacity', '0.55');
+    g.appendChild(ico);
+    // Label below
+    const label = document.createElementNS(SVG_NS, 'text');
+    label.setAttribute('y', 38);
+    label.setAttribute('text-anchor', 'middle');
+    label.setAttribute('font-size', '10');
+    label.setAttribute('font-family', 'Trebuchet MS, sans-serif');
+    label.setAttribute('font-weight', here ? '700' : '500');
+    label.setAttribute('fill', here ? '#ffe6a8' : (acc.ok ? '#ddd' : '#666'));
+    label.setAttribute('pointer-events', 'none');
+    label.textContent = m.name || id;
+    g.appendChild(label);
+    // Sub-label (lvl req / fee / lock reason)
+    const sub = document.createElementNS(SVG_NS, 'text');
+    sub.setAttribute('y', 50);
+    sub.setAttribute('text-anchor', 'middle');
+    sub.setAttribute('font-size', '9');
+    sub.setAttribute('font-family', 'Trebuchet MS, sans-serif');
+    sub.setAttribute('fill', here ? '#ffdd88' : (acc.ok ? '#999' : '#aa6677'));
+    sub.setAttribute('pointer-events', 'none');
+    sub.textContent = here ? '▸ YOU ARE HERE'
+                    : (acc.reason || (m.levelReq ? `Lv ${m.levelReq}+` : ''));
+    g.appendChild(sub);
+    if (!here && acc.ok) {
+      g.addEventListener('mouseenter', () => disc.setAttribute('r', 22));
+      g.addEventListener('mouseleave', () => disc.setAttribute('r', 19));
+      g.addEventListener('click', () => opts.onPick && opts.onPick(id, m));
+    }
+    // Hover tooltip via title
+    const titleEl = document.createElementNS(SVG_NS, 'title');
+    titleEl.textContent = `${m.name || id}${m.levelReq ? ` · Lv ${m.levelReq}+` : ''}${acc.reason ? ` · ${acc.reason}` : ''}`;
+    g.appendChild(titleEl);
+    svg.appendChild(g);
+  }
+  // Legend along bottom
+  const legY = H - 14;
+  const tiers = ['hub','early','mid','high','end','boss','tower'];
+  let legX = 8;
+  const legBg = document.createElementNS(SVG_NS, 'rect');
+  legBg.setAttribute('x', 0); legBg.setAttribute('y', H - 28);
+  legBg.setAttribute('width', W); legBg.setAttribute('height', 28);
+  legBg.setAttribute('fill', 'rgba(0,0,0,0.4)');
+  svg.appendChild(legBg);
+  for (const t of tiers) {
+    const dot = document.createElementNS(SVG_NS, 'circle');
+    dot.setAttribute('cx', legX + 6); dot.setAttribute('cy', legY);
+    dot.setAttribute('r', 4); dot.setAttribute('fill', _WM_TIER_COLOR[t]);
+    svg.appendChild(dot);
+    const lt = document.createElementNS(SVG_NS, 'text');
+    lt.setAttribute('x', legX + 14); lt.setAttribute('y', legY + 3);
+    lt.setAttribute('font-size', '9'); lt.setAttribute('font-family', 'Trebuchet MS, sans-serif');
+    lt.setAttribute('fill', '#ddd');
+    lt.textContent = _WM_TIER_LABEL[t];
+    svg.appendChild(lt);
+    legX += 100;
+  }
+  host.appendChild(svg);
+}
+function renderWorldMap() {
+  const grid = document.getElementById('worldmap-grid');
+  if (!grid) return;
+  const playerLv = (player && player.level) || 1;
+  _renderWorldMapDiagram(grid, {
+    mode: 'travel',
+    isAccessible: (id, m) => {
+      const lvl = m.levelReq || 0;
+      if (lvl > playerLv) return { ok: false, reason: `🔒 Lv ${lvl}` };
+      return { ok: true };
+    },
+    onPick: (id, m) => {
+      if (id === game.currentMap) { showToast('Already here', 'common'); return; }
+      if (typeof loadMap !== 'function') return;
+      closeAllModals();
+      loadMap(id);
+      showToast(`Travelling to ${m.name || id}…`, 'rare');
+    },
+  });
 }
 function renderQuestJournal() {
   _ensureQuests();
@@ -20275,59 +20409,35 @@ function openTaxi() {
 function renderTaxi() {
   document.getElementById('taxi-lumens').textContent = player.mesos;
   const grid = document.getElementById('taxi-grid');
-  grid.innerHTML = '';
+  if (!grid) return;
   if (!game.visitedMaps) game.visitedMaps = {};
   game.visitedMaps[game.currentMap] = true;
-  // v0.25.52 — taxi list now also includes any map flagged with
-  // `taxiAccessible: true` regardless of visit state, so newly-shipped
-  // biomes (Candy Canyon, Bubblegum Swamp) show up as fast-travel
-  // destinations even on a fresh save without forcing a manual walk.
-  // Boss arenas are still excluded so the player has to earn the fight.
-  const ids = new Set(Object.keys(game.visitedMaps));
-  for (const k in MAPS) {
-    if (MAPS[k] && MAPS[k].taxiAccessible) ids.add(k);
-  }
-  const visited = [...ids].filter(id => MAPS[id] && !MAPS[id].isBossArena);
-  if (!visited.length) {
-    grid.innerHTML = '<div style="color:#bbb; text-align:center; padding:10px;">No maps discovered yet — explore the world first.</div>';
+  // v0.25.223 — Taxi shares the SVG world-map diagram with the W key.
+  // Different gating: only visited / taxiAccessible maps are reachable,
+  // boss arenas always blocked, and the fee must be affordable.
+  const visitedIds = new Set(Object.keys(game.visitedMaps));
+  for (const k in MAPS) if (MAPS[k] && MAPS[k].taxiAccessible) visitedIds.add(k);
+  if (visitedIds.size <= 1) {
+    grid.innerHTML = '<div style="color:#bbb; text-align:center; padding:14px;">No maps discovered yet — explore the world first.</div>';
     return;
   }
-  for (const id of visited) {
-    const M = MAPS[id];
-    const here = id === game.currentMap;
-    const canAfford = player.mesos >= TAXI_FEE;
-    // Level gate removed — any visited map is reachable so long as you can pay
-    const disabled = here || !canAfford;
-    const card = document.createElement('div');
-    card.style.cssText = `
-      padding: 10px; border-radius: 6px;
-      background: rgba(0,0,0,0.35);
-      border: 1px solid ${here ? '#66ff88' : (disabled ? '#555' : '#88bbdd')};
-      cursor: ${disabled ? 'not-allowed' : 'pointer'};
-      opacity: ${disabled ? 0.5 : 1};
-      transition: background 0.15s;
-    `;
-    card.innerHTML = `
-      <div style="font-weight:bold; color:${here ? '#66ff88' : '#fff'}; font-size:13px;">
-        ${here ? '📍 ' : ''}${M.name}
-      </div>
-      <div style="font-size:11px; color:#999; margin-top:3px;">
-        ${M.levelReq ? `Lv ${M.levelReq}+ suggested · ` : ''}${here ? 'You are here' : (canAfford ? `Fare: ${TAXI_FEE}💰` : 'Need 50💰')}
-      </div>
-    `;
-    if (!disabled) {
-      card.onmouseenter = () => card.style.background = 'rgba(68,120,180,0.4)';
-      card.onmouseleave = () => card.style.background = 'rgba(0,0,0,0.35)';
-      card.onclick = () => {
-        player.mesos -= TAXI_FEE;
-        closeAllModals();
-        loadMap(id, 200);
-        player.x = 200; player.y = 400; player.vx = 0; player.vy = 0;
-        showToast(`Arrived at ${M.name}!`, 'epic');
-      };
-    }
-    grid.appendChild(card);
-  }
+  _renderWorldMapDiagram(grid, {
+    mode: 'taxi',
+    isAccessible: (id, m) => {
+      if (m.isBossArena) return { ok: false, reason: 'no taxi to bosses' };
+      if (!visitedIds.has(id)) return { ok: false, reason: 'unvisited' };
+      if (player.mesos < TAXI_FEE) return { ok: false, reason: `${TAXI_FEE}💰 fare` };
+      return { ok: true, reason: `${TAXI_FEE}💰 fare` };
+    },
+    onPick: (id, m) => {
+      if (id === game.currentMap) { showToast('Already here', 'common'); return; }
+      player.mesos -= TAXI_FEE;
+      closeAllModals();
+      if (typeof loadMap === 'function') loadMap(id, 200);
+      player.x = 200; player.y = 400; player.vx = 0; player.vy = 0;
+      showToast(`Arrived at ${m.name}!`, 'epic');
+    },
+  });
 }
 
 function openSkillsModal() {
