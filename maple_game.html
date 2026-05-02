@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.263';
+const GAME_VERSION = 'v0.25.264';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -3135,6 +3135,27 @@ function _perfTick(dt, time) {
              LX_PERF.avgFrame < 18 && LX_PERF.slowFrames <= 2) {
     LX_PERF.lowFx = false;
     LX_PERF.slowFrames = 0;
+  }
+  // v0.25.264 — When the vanilla game is paused (menus, modals, dialog,
+  // class select, etc.) we don't need either Phaser canvas drawing every
+  // frame. Pausing the entire Phaser loop saves ~30-50% FPS-budget on the
+  // pause screens (desktop) and 40-70% on mobile, since each scene was
+  // still ticking + rendering even though every scene's update() has an
+  // early-return on g.paused. Toggle on edge transitions only so we don't
+  // poke loop.sleep / wake every frame.
+  const wantPaused = !!(typeof game !== 'undefined' && game && game.paused);
+  if (wantPaused !== LX_PERF._phaserSlept) {
+    try {
+      const bg = window.__LX_PHASER_BG, ui = window.__LX_PHASER_UI;
+      if (wantPaused) {
+        if (bg && bg.loop && bg.loop.sleep) bg.loop.sleep();
+        if (ui && ui.loop && ui.loop.sleep) ui.loop.sleep();
+      } else {
+        if (bg && bg.loop && bg.loop.wake) bg.loop.wake();
+        if (ui && ui.loop && ui.loop.wake) ui.loop.wake();
+      }
+      LX_PERF._phaserSlept = wantPaused;
+    } catch (e) { /* phaser missing / pre-bootstrap: silent */ }
   }
 }
 
@@ -10150,7 +10171,15 @@ const GAME_SAVE_FIELDS = [
   'dailyState','prestige','comboRecord','muted',
   'bestiary','towerBestFloor'
 ];
-function saveState() {
+// v0.25.264 — saveState() is called from ~30 sites: every kill, quest tick,
+// boon equip, skill unlock, level-up, etc. Each call serializes the whole
+// {player, game} object via JSON.stringify (~10-40 KB) and hits localStorage
+// — which on busy mobile devices is the dominant GC + main-thread stall
+// source (70-150 KB/s of string churn). _flushSaveStateNow does the actual
+// work; saveState() is now a debounced trampoline. Critical save points
+// (visibilitychange, beforeunload, prestige, death) call _flushSaveStateNow
+// directly so they never lose data to the debounce window.
+function _flushSaveStateNow() {
   try {
     // audio.muted is the single source of truth; sync the serialization mirror here
     if (typeof audio !== 'undefined' && audio) game.muted = !!audio.muted;
@@ -10165,7 +10194,18 @@ function saveState() {
       game:   pick(game,   GAME_SAVE_FIELDS),
     };
     localStorage.setItem(SAVE_KEY, JSON.stringify(s));
+    game._saveDirty = false;
+    game._lastSaveAt = Date.now();
   } catch (e) { /* quota / private-mode: silent */ }
+}
+const _SAVE_DEBOUNCE_MS = 1500;  // coalesce bursts inside ~1.5s window
+function saveState() {
+  game._saveDirty = true;
+  if (game._saveTimer) return;   // already scheduled
+  game._saveTimer = setTimeout(() => {
+    game._saveTimer = null;
+    if (game._saveDirty && !game._resetting) _flushSaveStateNow();
+  }, _SAVE_DEBOUNCE_MS);
 }
 function hasSave() {
   try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; }
@@ -10293,6 +10333,15 @@ const audio = {
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g); g.connect(this.ctx.destination);
     o.start(t); o.stop(t + dur + 0.02);
+    // v0.25.264 — disconnect both nodes when the envelope completes.
+    // WebAudio retains nodes that are still wired to the destination
+    // graph, so without this every hit/crit/pickup left a zombie
+    // oscillator + gain pair pinned in memory (5-20× per second during
+    // combat = 200-500 KB accumulating over a 2-3 min fight, especially
+    // brutal on mobile Safari + Firefox).
+    o.onended = () => {
+      try { o.disconnect(); g.disconnect(); } catch (e) { /* already gone */ }
+    };
   },
   play(kind) {
     if (!this.ctx || this.muted) return;
@@ -11702,7 +11751,9 @@ function offerPrestige() {
     player.hp = getMaxHp(); player.mp = getMaxMp();
     showToast(`✨ ASCENSION ${p.count} — you begin anew`, 'legendary');
     flash(0.7); addShake(16); audio.play('levelup');
-    saveState();
+    // v0.25.264 — prestige immediately reloads, so we MUST flush the
+    // debounced save synchronously rather than queuing it.
+    _flushSaveStateNow();
     setTimeout(() => location.reload(), 1200);
   });
 }
@@ -15619,9 +15670,12 @@ const SKILL_FNS = {
   },
   blink: () => {
     const tx = Math.min(game.mapData.worldWidth - player.w, Math.max(0, player.x + player.facing * 180));
-    for (let i=0;i<20;i++) { game.particles.push({x:player.x+player.w/2,y:player.y+player.h/2,vx:(Math.random()-0.5)*4,vy:(Math.random()-0.5)*4,life:25,color:'#aa88ff',size:3}); }
+    // v0.25.264 — was 40 unguarded particles/cast (20 + 20). Route through
+    // _budgetedParticlePush so a frame already at budget cap doesn't blow
+    // past it for cosmetic blink puffs.
+    for (let i=0;i<20;i++) { if (!_budgetedParticlePush({x:player.x+player.w/2,y:player.y+player.h/2,vx:(Math.random()-0.5)*4,vy:(Math.random()-0.5)*4,life:25,color:'#aa88ff',size:3})) break; }
     player.x = tx;
-    for (let i=0;i<20;i++) { game.particles.push({x:player.x+player.w/2,y:player.y+player.h/2,vx:(Math.random()-0.5)*4,vy:(Math.random()-0.5)*4,life:25,color:'#aa88ff',size:3}); }
+    for (let i=0;i<20;i++) { if (!_budgetedParticlePush({x:player.x+player.w/2,y:player.y+player.h/2,vx:(Math.random()-0.5)*4,vy:(Math.random()-0.5)*4,life:25,color:'#aa88ff',size:3})) break; }
     player.invulnerable = Math.max(player.invulnerable, 180);
   },
   arcaneBurst: () => {
@@ -15634,15 +15688,16 @@ const SKILL_FNS = {
       { color:'#cc99ff', color2:'#ffffff', speed:11, life:34, size:4, n:36 });
     performAround(320, 2.4, { color:'#cc99ff', kb:9 });
     // Wider particle ring at 2x speed
+    // v0.25.264 — budget-guarded; ring breaks early when frame is over cap.
     for (let i = 0; i < 80; i++) {
       const a = (i / 80) * Math.PI * 2;
       const speed = 12 + (i % 3) * 3;
-      game.particles.push({
+      if (!_budgetedParticlePush({
         x: player.x + player.w/2, y: player.y + player.h/2,
         vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
         life: 42, color: i % 3 === 0 ? '#ffffff' : (i % 3 === 1 ? '#d8b4ff' : '#a877ff'),
         size: 3,
-      });
+      })) break;
     }
     // Cute arcane-burst magic-circle sprite over the player — scaled up.
     spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'arcane_burst',
@@ -16611,15 +16666,18 @@ const SKILL_FNS = {
           spawnSmoothSlash(tx, ty, Math.PI / 2, 90, '#ff66aa',
             { thickness: 5, spread: Math.PI * 0.25, life: 14 });
           // Trailing shadow particles falling from the moon
+          // v0.25.264 — budget-guarded; this fires inside a 10-batch
+          // outer loop so a packed room could spawn 400 particles for one
+          // Eclipse cast. Break per-batch when frame budget is exhausted.
           for (let k = 0; k < 4; k++) {
-            game.particles.push({
+            if (!_budgetedParticlePush({
               x: tx + (Math.random() - 0.5) * 24,
               y: ty - 60 - k * 18,
               vx: 0, vy: 4 + Math.random() * 2,
               life: 16,
               color: k % 2 ? '#ff5588' : '#1a0230',
               size: 3,
-            });
+            })) break;
           }
         }
         addShake(3); flash(0.08);
@@ -16891,13 +16949,15 @@ const SKILL_FNS = {
     });
     showToast('SOUL VORTEX — 30s life pool', 'legendary');
     // Open animation — bigger ring of particles + larger explosion
+    // v0.25.264 — budget-guarded; was 80 unconditional particles (~20-30%
+    // of mobile budget for one cast).
     for (let i = 0; i < 80; i++) {
       const a = (i / 80) * Math.PI * 2;
-      game.particles.push({
+      if (!_budgetedParticlePush({
         x: cx, y: cy,
         vx: Math.cos(a) * 14, vy: Math.sin(a) * 10,
         life: 60, color: i % 2 ? '#66cc66' : '#224422', size: 4
-      });
+      })) break;
     }
     spawnSmoothExplosion(cx, cy, 240, '#66ff88', '#1a3a1a44', { life: 40 });
     flash(0.55); addShake(14);
@@ -19293,11 +19353,16 @@ function updateProjectiles(dt) {
             if (!p.hitSet) p.hitSet = new Set();
             p.hitSet.add(m);
             let next = null, best = Infinity;
+            // v0.25.264 — was Math.hypot per candidate (expensive sqrt
+            // every iteration). Compare squared distances; only ordering
+            // matters here, and the 260 threshold becomes 67600.
+            const mx = m.x + m.w/2, my = m.y + m.h/2;
+            const RICOCHET_R2 = 260 * 260;
             for (const m2 of game.monsters) {
               if (m2 === m || m2.currentHp <= 0 || p.hitSet.has(m2) || hitIds.has(m2)) continue;
-              const d = Math.hypot((m2.x + m2.w/2) - (m.x + m.w/2),
-                                    (m2.y + m2.h/2) - (m.y + m.h/2));
-              if (d < best && d < 260) { best = d; next = m2; }
+              const dx = (m2.x + m2.w/2) - mx, dy = (m2.y + m2.h/2) - my;
+              const d2 = dx*dx + dy*dy;
+              if (d2 < best && d2 < RICOCHET_R2) { best = d2; next = m2; }
             }
             if (next) {
               // Redirect velocity toward next target
@@ -19323,10 +19388,14 @@ function updateProjectiles(dt) {
           if (p.aoeOnHit && !p._aoeFired) {
             p._aoeFired = true;
             const cx = m.x + m.w/2, cy = m.y + m.h/2;
+            // v0.25.264 — squared-distance comparison; sqrt was wasted
+            // since we only need the inside/outside radius test, never
+            // the actual distance value.
+            const aoeR2 = p.aoeOnHit * p.aoeOnHit;
             for (const m2 of game.monsters) {
               if (m2 === m || m2.currentHp <= 0) continue;
-              const d = Math.hypot((m2.x + m2.w/2) - cx, (m2.y + m2.h/2) - cy);
-              if (d < p.aoeOnHit) {
+              const dx = (m2.x + m2.w/2) - cx, dy = (m2.y + m2.h/2) - cy;
+              if (dx*dx + dy*dy < aoeR2) {
                 hitMonster(m2, Math.floor(dmg * 0.55), false, p.skill || 'bolt');
                 if (p.freeze) m2.freezeTimer = Math.max(m2.freezeTimer || 0, p.freeze);
               }
@@ -37312,8 +37381,11 @@ renderSkillBar();
 })();
 
 // Safety net: save when the tab is hidden or closed
-window.addEventListener('visibilitychange', () => { if (document.hidden && player.cls && !game._resetting) saveState(); });
-window.addEventListener('beforeunload',     () => { if (player.cls && !game._resetting) saveState(); });
+// v0.25.264 — these two paths must flush the pending debounced save
+// IMMEDIATELY: backgrounding tabs and unloading windows can fire before
+// the 1.5 s debounce window elapses and silently drop the latest changes.
+window.addEventListener('visibilitychange', () => { if (document.hidden && player.cls && !game._resetting) _flushSaveStateNow(); });
+window.addEventListener('beforeunload',     () => { if (player.cls && !game._resetting) _flushSaveStateNow(); });
 requestAnimationFrame(loop);
 </script>
 
