@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.276';
+const GAME_VERSION = 'v0.25.277';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -13828,6 +13828,13 @@ function tryStartClassCharge(slotKey) {
   if (player.cls !== 'warrior' && player.cls !== 'archer') return false;
   const slot = KEY_TO_SLOT[slotKey];
   if (!slot || slot === 'd') return false;  // basic attack untouched
+  // v0.25.277 — Tower basicOnly modifier blocks all non-'d' skills in
+  // castSkill at L14120, but the charge windup still ran (consuming
+  // animation frames + sound + visual feedback) only to be silently
+  // dropped on release. Block it at start so the player gets no
+  // misleading windup at all, matching the toast that castSkill would
+  // have shown on release.
+  if (typeof towerBasicOnly === 'function' && towerBasicOnly()) return false;
   const found = skillBySlot(slot);
   if (!found || !isReady(found.id)) return false;
   if (player.hp <= 0 || game.paused || game.dying > 0) return false;
@@ -13840,10 +13847,26 @@ function tryStartClassCharge(slotKey) {
 function tryReleaseClassCharge(slotKey) {
   const c = player._warCharge;
   if (!c || c.slotKey !== slotKey) return false;
+  // v0.25.277 — death-state guard. _tickClassIdentity clears _warCharge
+  // each frame the player is dead, but a synchronous keyup can race
+  // past it on the same frame the player drops to 0 HP. Without this
+  // guard the cast then deducts MP and sets a cooldown on a corpse,
+  // observable in some job death animations. Bail cleanly.
+  if (player.hp <= 0 || (game.dying | 0) > 0) {
+    player._warCharge = null;
+    return true;
+  }
   const held = game.time - c.start;
   const power = Math.min(1, held / WAR_CHARGE_FRAMES);
   player._warCharge = null;
-  if (!isReady(c.skillId)) return true;  // silently consumed
+  if (!isReady(c.skillId)) {
+    // v0.25.277 — silent-consume toast. Previously the charge was eaten
+    // with no feedback if a Tower modifier or skill-tree mid-charge
+    // change made the skill un-ready. The player would just see their
+    // windup vanish. A brief toast tells them why nothing fired.
+    if (typeof showToast === 'function') showToast('Skill not ready', 'common');
+    return true;
+  }
   // Tap — tiny hold time = minimum charge
   if (held < WAR_CHARGE_TAP) {
     player._releasedCharge = 0;
