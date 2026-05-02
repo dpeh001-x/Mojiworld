@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.284';
+const GAME_VERSION = 'v0.25.285';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -25359,6 +25359,25 @@ const ZODIAC_SIGNATURE_DECOR = {
   },
 };
 
+// v0.25.285 — cached god-ray bake (see drawZodiacArena light-element
+// branch). Single 80×H canvas pre-rendered with the diagonal gradient
+// + fillRect; drawImage at each per-frame ray position is ~10× cheaper
+// than allocating five fresh createLinearGradient calls per frame.
+let _zodiacGodRayCanvas = null;
+function _getZodiacGodRayCanvas() {
+  if (_zodiacGodRayCanvas) return _zodiacGodRayCanvas;
+  const c = document.createElement('canvas');
+  c.width = 80; c.height = H;
+  const cx = c.getContext('2d');
+  const g = cx.createLinearGradient(0, 0, 40, H);
+  g.addColorStop(0, 'rgba(255,255,200,0.12)');
+  g.addColorStop(1, 'rgba(255,255,200,0)');
+  cx.fillStyle = g;
+  cx.fillRect(0, 0, 80, H);
+  _zodiacGodRayCanvas = c;
+  return _zodiacGodRayCanvas;
+}
+
 function drawZodiacArena(signId) {
   const z = ZODIAC_SIGNS.find(s => s.id === signId); if (!z) return;
   const camX = game.camera.x, W2 = game.mapData.worldWidth;
@@ -25485,15 +25504,20 @@ function drawZodiacArena(signId) {
     }
   } else if (el === 'light') {
     // Divine god-rays from above
+    // v0.25.285 — bake the per-ray diagonal gradient ONCE into a
+    // module-level offscreen canvas; subsequent frames drawImage it at
+    // each animated position. Previously this allocated five fresh
+    // `createLinearGradient` calls every frame (~5 KB GC churn/frame
+    // on light-element zodiac arenas), and gradient creation is one
+    // of the hottest GC sources in the canvas API. Cached bake is
+    // visually identical because the gradient's intra-ray geometry
+    // is constant; only the X offset changes per frame.
+    const rayCanvas = _getZodiacGodRayCanvas();
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     for (let i = 0; i < 5; i++) {
       const rx = (i * 190 + Math.sin(game.time * 0.01 + i) * 40) % W;
-      const g = ctx.createLinearGradient(rx, 0, rx + 40, H);
-      g.addColorStop(0, 'rgba(255,255,200,0.12)');
-      g.addColorStop(1, 'rgba(255,255,200,0)');
-      ctx.fillStyle = g;
-      ctx.fillRect(rx, 0, 80, H);
+      ctx.drawImage(rayCanvas, rx, 0);
     }
     ctx.restore();
   } else if (el === 'arrow') {
