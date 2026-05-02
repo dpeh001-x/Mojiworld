@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.305';
+const GAME_VERSION = 'v0.25.306';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5163,6 +5163,30 @@ const LX_EQ_SLOT_ORDER = {
 // Per-slot offsets can be added later if a piece needs micro-tuning.
 const _LX_EQ_DEST = { x: -30, y: -80, w: 60, h: 80 };
 
+// v0.25.306 — Equipment tint cache. Same multiply-blend recipe as the
+// v0.25.191 head-tint cache (see _lxBakeTintedHead): draw sprite,
+// multiply tint over the whole canvas, destination-in clip back to
+// the sprite's alpha shape. Authored sprites should be painted in a
+// neutral light grey / warm cream so the multiply produces a clean
+// recolor; pure white sprites multiply cleanest. Cached forever per
+// (sprite, tint) tuple — each 800×800 baked canvas is ~50–200 KB; 20
+// distinct active tinted variants ≈ <4 MB. Recipe outsourced to the
+// existing _lxBakeTintedHead since the steps are identical.
+const _LX_TINTED_EQ_CACHE = new Map();
+function _lxGetTintedEqSprite(spriteImg, tint) {
+  if (!spriteImg || !tint) return spriteImg;
+  if (!spriteImg.complete || !spriteImg.naturalWidth) return spriteImg;
+  // Key includes natural dimensions so a hot-reload of the underlying
+  // image (which changes naturalWidth/Height) invalidates the cached
+  // variant naturally.
+  const key = (spriteImg.src || '?') + '|' + tint + '|' + spriteImg.naturalWidth + 'x' + spriteImg.naturalHeight;
+  let baked = _LX_TINTED_EQ_CACHE.get(key);
+  if (baked) return baked;
+  baked = _lxBakeTintedHead(spriteImg, tint);
+  _LX_TINTED_EQ_CACHE.set(key, baked);
+  return baked;
+}
+
 function _drawEquipmentLayer(layer) {
   // Defensive: bail if we're not in a real player context (Character
   // Studio preview path uses opts.lookCustom but doesn't set
@@ -5176,10 +5200,12 @@ function _drawEquipmentLayer(layer) {
     if (!item || !item.spriteId) continue;
     const reg = LX_EQ_REGISTRIES[slot];
     if (!reg) continue;
-    const img = reg[item.spriteId];
+    let img = reg[item.spriteId];
     if (!img || !img.complete || !img.naturalWidth) continue;
-    // Tint hook reserved for v0.25.306 (commit 4); for now sprites
-    // render at their authored colours.
+    // v0.25.306 — Tint variant. When item.tint is set (e.g. '#cc4444'),
+    // resolve to the multiply-blend baked variant. One sprite × N
+    // tints = N visually distinct equipment items.
+    if (item.tint) img = _lxGetTintedEqSprite(img, item.tint);
     ctx.drawImage(img, _LX_EQ_DEST.x, _LX_EQ_DEST.y, _LX_EQ_DEST.w, _LX_EQ_DEST.h);
   }
 }
