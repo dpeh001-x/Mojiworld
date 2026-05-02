@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.295';
+const GAME_VERSION = 'v0.25.296';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -14282,11 +14282,14 @@ function castSkill(id) {
     player.somersault = 480;
     player.somersaultDir = player.facing;
   } else if (id === 'backstab') {
-    // Thief X — backward somersault during the 3-stab combo. No vy
-    // change since backstab already has its own blink-and-strike
-    // movement; the spin is pure flair on top.
-    player.somersault = 420;
-    player.somersaultDir = -player.facing;
+    // Thief X — exaggerated big-stab action. v0.25.288 set a backward
+    // somersault here, but the spin clashed with the 3-stab combo's
+    // own blink-strike movement and made the read confusing. Reverted
+    // in v0.25.296 to a flag that amplifies the existing rogue thrust
+    // curves into an even larger committed stab — deeper windup,
+    // longer reach, sharper snap. Read by _heroVecRogueFrontArm /
+    // _heroVecRogueBackArm + the attack_rogue spine/head bob.
+    player._bigStabUntil = (game.time | 0) + 360;
   } else if (id === 'iceSpike' || id === 'arcaneBurst') {
     // v0.25.289 — Mage S (iceSpike) + Mage D (arcaneBurst) get an
     // exaggerated staff swing. The flag here is read by the mage
@@ -28928,16 +28931,41 @@ function _heroVecMageBackArm(t) {
 // Reads as a strong committed stabbing motion rather than a quick
 // flick — front foot lunges, back arm drives forward in opposition,
 // dagger arm stretches through the strike for maximum reach.
+// v0.25.296 — Backstab signature: when _bigStabUntil is live, the
+// thrust geometry is cranked even further — deeper windup pull
+// behind the hip, fuller arm extension past the body, longer
+// committed hold. Restores the "this is THE big stab" read after
+// backstab dropped its v0.25.288 backward somersault.
+function _heroVecRogueBigStabActive() {
+  if (typeof player === 'undefined') return false;
+  const t = (game && game.time) || 0;
+  return ((player._bigStabUntil | 0) > t);
+}
 function _heroVecRogueFrontArm(t) {
+  if (_heroVecRogueBigStabActive()) {
+    // Cranked range: −1.95 (hip-cocked further back) → +2.20 (full
+    // extension past horizontal) = 4.15 rad swing (vs 3.40 baseline).
+    if (t < 0.20) return -0.30 - _heroEaseOutCubic(t / 0.20) * 1.65;            // deeper windup
+    if (t < 0.40) return -1.95 + _heroEaseOutCubic((t - 0.20) / 0.20) * 4.15;   // explosive thrust
+    if (t < 0.62) return 2.20 + Math.sin((t - 0.40) * Math.PI / 0.22) * 0.14;   // longer held thrust + tremor
+    return 2.20 - _heroVecAttackRecover(t) * 2.20;
+  }
   // Front (dagger) arm. 0 = hanging down; positive = forward/horizontal.
-  // Range now -1.60 (cocked behind hip) → +1.80 (past horizontal) =
-  // 3.40 rad swing (was 2.25, +51%).
+  // Range -1.60 (cocked behind hip) → +1.80 (past horizontal) = 3.40 rad swing.
   if (t < 0.18) return -0.30 - _heroEaseOutCubic(t / 0.18) * 1.30;            // BIG windup pull to -1.60
   if (t < 0.36) return -1.60 + _heroEaseOutCubic((t - 0.18) / 0.18) * 3.40;   // EXPLOSIVE thrust to +1.80
   if (t < 0.55) return 1.80 + Math.sin((t - 0.36) * Math.PI / 0.19) * 0.10;   // sustained held thrust + tremor
   return 1.80 - _heroVecAttackRecover(t) * 1.80;                              // retract to neutral
 }
 function _heroVecRogueBackArm(t) {
+  if (_heroVecRogueBigStabActive()) {
+    // Off-hand mirrors the bigger commit: raises higher on windup,
+    // drives further past the body on the thrust.
+    if (t < 0.20) return 0.30 + _heroEaseOutCubic(t / 0.20) * 0.85;             // raise to +1.15
+    if (t < 0.40) return 1.15 - _heroEaseOutCubic((t - 0.20) / 0.20) * 1.85;    // drive forward to -0.70
+    if (t < 0.62) return -0.70;                                                  // hold forward
+    return -0.70 + _heroVecAttackRecover(t) * 0.70;
+  }
   // Off-hand swings back HARD on windup (raises high) then DRIVES
   // forward as the thrust commits — opposite-direction motion sells
   // the full-body hip rotation into the stab.
@@ -29314,14 +29342,23 @@ const HERO_VEC_BOB = {
   // before lunging FORWARD on the strike (5.0 px, was 2.0 px), then
   // recoils 2.5 px. Head matches with bigger forward commit + dip.
   attack_rogue: {
-    spine: t => ({
-      x: -_heroVecAttackWindup(t) * 1.5 + _heroVecAttackStrike(t) * 5.0 - _heroVecAttackRecover(t) * 2.5,
-      y: -Math.sin(t * Math.PI) * 1.0,
-    }),
-    head:  t => ({
-      x: -_heroVecAttackWindup(t) * 0.8 + _heroVecAttackStrike(t) * 2.2,
-      y: -Math.sin(t * Math.PI) * 1.6,
-    }),
+    // v0.25.296 — Big-stab amplifies the body lurch ~50 % so the full
+    // hip-rotation reads. Default thrust values preserved when the
+    // flag isn't live.
+    spine: t => {
+      const big = _heroVecRogueBigStabActive() ? 1.5 : 1;
+      return {
+        x: (-_heroVecAttackWindup(t) * 1.5 + _heroVecAttackStrike(t) * 5.0 - _heroVecAttackRecover(t) * 2.5) * big,
+        y: -Math.sin(t * Math.PI) * (1.0 * big),
+      };
+    },
+    head:  t => {
+      const big = _heroVecRogueBigStabActive() ? 1.5 : 1;
+      return {
+        x: (-_heroVecAttackWindup(t) * 0.8 + _heroVecAttackStrike(t) * 2.2) * big,
+        y: -Math.sin(t * Math.PI) * (1.6 * big),
+      };
+    },
   },
   // v0.25.293 — Ninja pose bobs. Standing pose hovers with a small
   // breath wobble. Crouch pose drops the head + spine ~3-4 px to
