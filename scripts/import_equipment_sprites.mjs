@@ -75,17 +75,16 @@ for (const slot of target) {
   printedAny = true;
   // Header
   console.log(`// ── ${slot} (${sprites.length} sprite${sprites.length === 1 ? '' : 's'}) ────────────────────────`);
-  console.log(`// Paste INSIDE the inner 'files' object of LX_${slot.toUpperCase()}'s _lxEqRegistry call.`);
-  console.log(`const _LX_${slot.toUpperCase()}_FILES = {`);
+  // v0.25.307 — Print the full _lxEqRegistry call ready to paste,
+  // replacing the existing LX_<SLOT> declaration in maple_game.html.
+  console.log(`const LX_${slot.toUpperCase()} = _lxEqRegistry(${JSON.stringify(slot)}, {`);
   for (const f of sprites) {
     const id = spriteIdOf(f);
-    // If the filename already maps cleanly to id + extension, no comment.
-    // If something was rewritten (spaces → underscores), note it.
     const cleanIdent = /^[a-z][a-z0-9_]*$/.test(id);
     const comment = cleanIdent ? '' : `  // ⚠ check id`;
     console.log(`  ${id}: ${JSON.stringify(f)},${comment}`);
   }
-  console.log(`};\n`);
+  console.log(`});\n`);
 
   // Sample item-definition block — picker-friendly + ready to drop into
   // the equipment table.
