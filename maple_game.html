@@ -2864,6 +2864,20 @@
     </div>
   </div>
 
+  <!-- v0.25.244 — In-game confirm modal (X4). Replaces browser confirm()
+       for reset-save / respec / prestige / boon-discard so the visual
+       world isn't broken by a mobile-phishing-looking native dialog. -->
+  <div id="confirm-modal" class="modal-overlay">
+    <div class="modal" style="min-width:360px; max-width:480px; text-align:center;">
+      <h2 id="confirm-title" style="margin-bottom:6px;">Confirm</h2>
+      <div id="confirm-body" style="color:#d3b89a; font-size:13px; margin:8px 12px 18px; white-space:pre-wrap; line-height:1.5;"></div>
+      <div style="display:flex; gap:10px; justify-content:center;">
+        <button id="confirm-no"  class="enhance-btn" style="background:linear-gradient(180deg,#888,#555); border-color:#aaa;">Cancel</button>
+        <button id="confirm-yes" class="enhance-btn">Confirm</button>
+      </div>
+    </div>
+  </div>
+
   <div id="enhance-modal" class="modal-overlay">
     <div class="modal" style="position:relative; min-width:600px; max-width:680px; max-height:520px; display:flex; flex-direction:column; padding-left:90px;">
       <div id="enhance-anvil" aria-hidden="true"></div>
@@ -2991,7 +3005,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.243';
+const GAME_VERSION = 'v0.25.244';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -11029,14 +11043,24 @@ function tickDaily(kind, n) {
 // =========================================================================
 // Full reset — wipe the save and return to a fresh game.
 function resetSave() {
-  if (!confirm('Erase ALL progress and start over from the class-select screen?\n\nThis cannot be undone.')) return;
-  if (!confirm('Final check: really wipe your character, inventory, achievements, daily streak, and prestige?')) return;
-  try {
-    game._resetting = true;          // prevent autosave from re-saving after clear
-    clearSave();
-    showToast('Save wiped. Restarting…', 'rare');
-    setTimeout(() => location.reload(), 400);
-  } catch (e) { location.reload(); }
+  // v0.25.244 (X4) — replaced double browser confirm() with a single
+  // styled in-game confirm. Same destructive intent, no native dialog
+  // breaking the visual world.
+  uiConfirm({
+    title: '⚠ Erase ALL progress?',
+    body: 'This will wipe your character, inventory, achievements, daily streak, and prestige.\n\nThis cannot be undone.',
+    yesLabel: 'Erase everything',
+    noLabel: 'Keep playing',
+    danger: true,
+  }).then((ok) => {
+    if (!ok) return;
+    try {
+      game._resetting = true;          // prevent autosave from re-saving after clear
+      clearSave();
+      showToast('Save wiped. Restarting…', 'rare');
+      setTimeout(() => location.reload(), 400);
+    } catch (e) { location.reload(); }
+  });
 }
 
 // The Amnesiac's reset — the stage-by-stage dialog already served as the
@@ -11069,18 +11093,26 @@ function _amnesiacReset() {
 function respec() {
   const cost = 2000 * Math.max(1, player.level - 5);
   if (player.mesos < cost) { showToast(`Need ${cost} Lumens to respec`, 'rare'); return; }
-  if (!confirm(`Refund all attribute points and reset milestone perks for ${cost} Lumens?`)) return;
-  player.mesos -= cost;
-  const keys = Object.keys(player.attrs || {});
-  const total = keys.reduce((a,k) => a + (player.attrs[k]||0), 0);
-  const base  = 5 * keys.length;
-  player.skillPoints += Math.max(0, total - base);
-  player.attrs = { str:5, vit:5, agi:5, int:5, wis:5, lck:5 };
-  player.milestonesUnlocked = {};
-  player.hp = getMaxHp(); player.mp = getMaxMp();
-  if (typeof renderAttributes === 'function') renderAttributes();
-  showToast('⟳ Attributes and perks reset.', 'epic');
-  flash(0.25); addShake(4); saveState();
+  // v0.25.244 (X4) — in-game confirm for the respec flow.
+  uiConfirm({
+    title: '⟳ Respec attributes?',
+    body: `Refund all attribute points and reset milestone perks for ${cost} Lumens.\n\nYour skill tree, level, and gear are unaffected.`,
+    yesLabel: 'Pay & reset',
+    noLabel: 'Cancel',
+  }).then((ok) => {
+    if (!ok) return;
+    player.mesos -= cost;
+    const keys = Object.keys(player.attrs || {});
+    const total = keys.reduce((a,k) => a + (player.attrs[k]||0), 0);
+    const base  = 5 * keys.length;
+    player.skillPoints += Math.max(0, total - base);
+    player.attrs = { str:5, vit:5, agi:5, int:5, wis:5, lck:5 };
+    player.milestonesUnlocked = {};
+    player.hp = getMaxHp(); player.mp = getMaxMp();
+    if (typeof renderAttributes === 'function') renderAttributes();
+    showToast('⟳ Attributes and perks reset.', 'epic');
+    flash(0.25); addShake(4); saveState();
+  });
 }
 
 // =========================================================================
@@ -11091,33 +11123,41 @@ function offerPrestige() {
   game._prestigeOffered = true;
   const p = game.prestige || { count:0, xpMult:1, dmgMult:1, bonusAP:0 };
   const nextCount = p.count + 1;
-  const msg = `ASCEND?\n\nReach level 50 again from scratch, keeping these permanent bonuses:\n` +
-              `• +30% XP gain  (→ x${(p.xpMult + 0.30).toFixed(2)})\n` +
-              `• +30% damage   (→ x${(p.dmgMult + 0.30).toFixed(2)})\n` +
-              `• +1 starting attribute point  (→ +${p.bonusAP + 1})\n\n` +
-              `Ascension #${nextCount}. Your inventory, equipment, and bosses reset.`;
-  if (!confirm(msg)) { game._prestigeOffered = false; return; }
-  p.count++; p.xpMult += 0.30; p.dmgMult += 0.30; p.bonusAP += 1;
-  game.prestige = p;
-  // Reset progression
-  player.level = 1; player.exp = 0; player.expToNext = 120;   // v0.25.47
-  player.maxHp = 100; player.maxMp = 50;
-  player.baseAtk = 12; player.baseDef = 5;
-  player.skillPoints = p.bonusAP;
-  player.attrs = { str:5, vit:5, agi:5, int:5, wis:5, lck:5 };
-  player.milestonesUnlocked = {};
-  player.treeUnlocked = {}; player.tree = {};
-  player.job = null; player.master = null;
-  player.inventory = [];
-  player.equipped = { weapon:null, armor:null, accessory:null };
-  player.mesos = 200;
-  player.consumables = { hp_s: 5, mp_s: 3 };
-  game.bossDefeated = {};
-  player.hp = getMaxHp(); player.mp = getMaxMp();
-  showToast(`✨ ASCENSION ${p.count} — you begin anew`, 'legendary');
-  flash(0.7); addShake(16); audio.play('levelup');
-  saveState();
-  setTimeout(() => location.reload(), 1200);
+  const body = `Reach level 50 again from scratch, keeping these permanent bonuses:\n\n` +
+               `• +30% XP gain  (→ ×${(p.xpMult + 0.30).toFixed(2)})\n` +
+               `• +30% damage   (→ ×${(p.dmgMult + 0.30).toFixed(2)})\n` +
+               `• +1 starting attribute point  (→ +${p.bonusAP + 1})\n\n` +
+               `Ascension #${nextCount}. Your inventory, equipment, and bosses reset.`;
+  // v0.25.244 (X4) — in-game styled prestige confirm.
+  uiConfirm({
+    title: '✨ ASCEND?',
+    body,
+    yesLabel: 'Ascend',
+    noLabel: 'Not yet',
+  }).then((ok) => {
+    if (!ok) { game._prestigeOffered = false; return; }
+    p.count++; p.xpMult += 0.30; p.dmgMult += 0.30; p.bonusAP += 1;
+    game.prestige = p;
+    // Reset progression
+    player.level = 1; player.exp = 0; player.expToNext = 120;
+    player.maxHp = 100; player.maxMp = 50;
+    player.baseAtk = 12; player.baseDef = 5;
+    player.skillPoints = p.bonusAP;
+    player.attrs = { str:5, vit:5, agi:5, int:5, wis:5, lck:5 };
+    player.milestonesUnlocked = {};
+    player.treeUnlocked = {}; player.tree = {};
+    player.job = null; player.master = null;
+    player.inventory = [];
+    player.equipped = { weapon:null, armor:null, accessory:null };
+    player.mesos = 200;
+    player.consumables = { hp_s: 5, mp_s: 3 };
+    game.bossDefeated = {};
+    player.hp = getMaxHp(); player.mp = getMaxMp();
+    showToast(`✨ ASCENSION ${p.count} — you begin anew`, 'legendary');
+    flash(0.7); addShake(16); audio.play('levelup');
+    saveState();
+    setTimeout(() => location.reload(), 1200);
+  });
 }
 
 function bumpCombo(n = 1) {
@@ -17926,6 +17966,21 @@ function _maybeLevelUp() {
     setTimeout(() => _firstTimeTip('worldmap_lv5',
       '🗺️ Press W to open the world map — fast-travel between unlocked areas.', 'epic'), 900);
   }
+  // v0.25.244 (X5) — when this level-up unlocks a new skill slot, fire a
+  // dedicated toast so the player knows their kit just expanded. Maps
+  // SLOT_LEVEL_REQ values (5/10/15/20/25/30/49) onto the new key.
+  for (const slotId in SLOT_LEVEL_REQ) {
+    if (SLOT_LEVEL_REQ[slotId] === player.level) {
+      const key = SLOT_TO_KEY[slotId] || slotId.toUpperCase();
+      const kit = skillsForClass(player.cls, player.job, player.master);
+      let skill = null;
+      for (const id in kit) if (kit[id].slot === slotId) { skill = kit[id]; break; }
+      const label = skill
+        ? `🔓 ${key}-slot unlocked: ${skill.name} — ${skill.desc}`
+        : `🔓 ${key}-slot unlocks on next advancement`;
+      setTimeout(() => showToast(label, 'epic'), 1200);
+    }
+  }
   audio.play('levelup');
   if (typeof tickDaily === 'function') tickDaily('level', player.level);
   if (typeof checkAchievements === 'function') checkAchievements();
@@ -20445,8 +20500,15 @@ function renderBoonPanel() {
     const boon = player.boons[i];
     const def = boon && getBoonDef(boon);
     if (!def) return;
-    if (!confirm(`Discard ${def.name} (${def.fmt(boon.roll)})? This cannot be undone.`)) return;
-    discardBoon(i); refresh();
+    // v0.25.244 (X4) — in-game confirm replaces browser confirm() so the
+    // boon-management flow stays inside the game's visual world.
+    uiConfirm({
+      title: `Discard ${def.name}?`,
+      body: `This boon (${def.fmt(boon.roll)}) will be permanently destroyed.\n\nThis cannot be undone.`,
+      yesLabel: 'Discard',
+      noLabel: 'Keep',
+      danger: true,
+    }).then((ok) => { if (ok) { discardBoon(i); refresh(); } });
   });
 }
 
@@ -21495,7 +21557,7 @@ function closeAllModals() {
   const av = document.getElementById('advancement-modal');
   if ((cs && cs.style.display === 'flex') ||
       (av && av.style.display === 'flex')) return;
-  for (const id of ['shop-modal','inventory-modal','skills-modal','powerup-modal','help-modal','enhance-modal','skilltree-modal','attributes-modal','dev-modal','taxi-modal','codex-modal','multiplayer-modal','quest-modal','worldmap-modal']) {
+  for (const id of ['shop-modal','inventory-modal','skills-modal','powerup-modal','help-modal','enhance-modal','skilltree-modal','attributes-modal','dev-modal','taxi-modal','codex-modal','multiplayer-modal','quest-modal','worldmap-modal','confirm-modal']) {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   }
@@ -21550,6 +21612,53 @@ function showToast(txt, rarity) {
   t.setAttribute('aria-live', 'polite');
   document.querySelector('.game-wrapper').appendChild(t);
   setTimeout(() => t.remove(), 3000);
+}
+
+// v0.25.244 (X4) — In-game replacement for the browser confirm() prompt.
+// Shows a styled modal that matches the rest of the UI; resolves the
+// returned Promise with `true` on Confirm, `false` on Cancel / Esc / X.
+// Use site:  if (!await uiConfirm({ title, body })) return;
+// Or callback site: uiConfirm({ title, body }).then(ok => { if (ok) ... });
+function uiConfirm(opts) {
+  opts = opts || {};
+  return new Promise((resolve) => {
+    const modal = document.getElementById('confirm-modal');
+    const title = document.getElementById('confirm-title');
+    const body  = document.getElementById('confirm-body');
+    const yes   = document.getElementById('confirm-yes');
+    const no    = document.getElementById('confirm-no');
+    if (!modal || !yes || !no || !title || !body) {
+      // Fallback to native if the modal markup is missing.
+      resolve(window.confirm((opts.title ? opts.title + '\n\n' : '') + (opts.body || '')));
+      return;
+    }
+    title.textContent = opts.title || 'Confirm';
+    body.textContent  = opts.body  || '';
+    yes.textContent   = opts.yesLabel || 'Confirm';
+    no.textContent    = opts.noLabel  || 'Cancel';
+    // Style: danger flips the Confirm button to red so destructive actions
+    // (reset save, prestige) read clearly.
+    if (opts.danger) {
+      yes.style.background = 'linear-gradient(180deg,#ff5544,#aa2200)';
+      yes.style.borderColor = '#ff8866';
+    } else {
+      yes.style.background = '';
+      yes.style.borderColor = '';
+    }
+    const cleanup = (val) => {
+      modal.style.display = 'none';
+      yes.onclick = null;
+      no.onclick = null;
+      game.paused = false;
+      resolve(val);
+    };
+    yes.onclick = () => cleanup(true);
+    no.onclick  = () => cleanup(false);
+    modal.style.display = 'flex';
+    game.paused = true;
+    // Auto-focus Confirm so Enter accepts.
+    setTimeout(() => yes.focus(), 0);
+  });
 }
 
 // v0.25.243 — One-shot tip toasts for first-session moments (hotkey hint
