@@ -2991,7 +2991,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.241';
+const GAME_VERSION = 'v0.25.242';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5374,7 +5374,7 @@ const JOB_ENHANCE = {
   berserker: { basicDmg: 1.40, rangeMul: 1.15, burn: true,                    fx: '#ff5533', label: '🔥 Ignite — basic hits burn for 2.5s' },
   knight:    { basicDmg: 1.20, lifesteal: 0.10, brief_dr: 1000,                fx: '#ffdd77', label: '✝ Holy — +10% lifesteal on basics, 1s DR after hit' },
   ninja:     { basicDmg: 1.35, extraHit: 0.25,  critBonus: 10,                 fx: '#aa44ff', label: '🥷 Double Strike — 25% chance of bonus hit, +10% crit' },
-  assassin:  { basicDmg: 1.25, cdRefundOnKill: 0.30,                           fx: '#888899', label: '💨 Smoke — kills refund 30% of all cooldowns' },
+  assassin:  { basicDmg: 1.25, cdRefundOnKill: 0.15,                           fx: '#888899', label: '💨 Smoke — kills refund 15% of all cooldowns (2 s gate)' },
   archmage:  { basicDmg: 1.30, splashOnHit: 40,                                fx: '#66aaff', label: '✨ Elemental Burst — basic spells splash 40px AoE' },
   warlock:   { basicDmg: 1.25, lifesteal: 0.15, slow: 800,                     fx: '#aa44cc', label: '💀 Dark Tendrils — 15% lifesteal on basics, slow on hit' },
   sniper:    { basicDmg: 1.45, pierce: true,    critBonus: 15,                 fx: '#ff7733', label: '🎯 Precision — basic arrows pierce, +15% crit' },
@@ -5692,12 +5692,16 @@ const SUFFIX_IDS = Object.keys(SUFFIXES);
 // STAR ENHANCEMENT SYSTEM
 // =========================================================================
 // Stars: 0 (base) → 10 (max). Each star = +10% to item's base stats.
-// Success starts at 70%, drops 5% per star. After ★5, failures have 50% chance
-// to bump the item DOWN one star.
-const STAR_COSTS    = [100, 200, 400, 800, 1500, 3000, 6000, 12000, 25000, 50000];
+// v0.25.242 (G1) — flattened the ★4-7 cost shoulder so mid-tier
+// enhancement isn't a wall. Success rate floor raised 5% → 15% so a
+// ★10 attempt always has at least a 1-in-7 chance instead of 1-in-20.
+// Old curve: [100, 200, 400, 800, 1500, 3000, 6000, 12000, 25000, 50000]
+// (cumulative 99,000) with a 5% floor.
+// New curve: cumulative ~70,000 — still expensive, but reachable.
+const STAR_COSTS    = [100, 200, 400, 800, 1500, 1500, 2000, 8000, 20000, 35000];
 const STAR_BONUS    = 0.10; // +10% per star
 const MAX_STARS     = 10;
-function starSuccessRate(star) { return Math.max(5, 70 - star * 5); }
+function starSuccessRate(star) { return Math.max(15, 70 - star * 5); }
 function starMult(item)        { return 1 + (item.stars || 0) * STAR_BONUS; }
 
 // Item power score — higher = better. Used for auto-equip comparison.
@@ -7177,7 +7181,7 @@ const MAPS = {
     bg:'cryptHollow',
     sky:['#1a1028','#2a1838','#4a2855'],
     worldWidth: 2400,
-    levelReq: 24,       // v0.25.225: 22→24 (tier 5, buffed skeleton/wraith/zombie)
+    levelReq: 26,       // v0.25.242 (G5): 24→26 — two extra levels of gear before entering the difficulty cliff
     platforms: [
       {x:0,y:480,w:2400,h:60,type:'ground'},
       {x:160, y:390,w:180,h:12,type:'platform'},
@@ -7315,7 +7319,7 @@ const MAPS = {
     bg:'aetherion',
     sky:['#08042a','#1a0844','#3a1a6e'],
     worldWidth: 2000,
-    levelReq: 28,       // v0.25.225: 25→28 (tier 5 boss prep)
+    levelReq: 30,       // v0.25.242 (G5): 28→30 (tier 5 boss prep — match smoother G2 XP curve)
     isBossArena: true,
     bossType: 'aetherion',
     sanctum: true,
@@ -12905,15 +12909,20 @@ function _computeClassSkillMul(skillId) {
     return 1 + m / 200;
   }
 
-  // Mage — chain cast detection + visual ping for the new cast
+  // Mage — chain cast detection + visual ping for the new cast.
+  // v0.25.242 (G6) — added a 1.5 s internal cooldown on the trigger so
+  // multishot/Rogue interactions can't stack 6 empowered hits per chain.
   if (player.cls === 'mage') {
     const now = game.time;
     const lastT = player._mageLastCastT || -9999;
     const lastId = player._mageLastCastId;
     player._mageLastCastT = now;
     player._mageLastCastId = skillId;
-    if (lastId && lastId !== skillId && (now - lastT) <= MAGE_CHAIN_FRAMES) {
-      player._mageChainPing = 500;  // ms — decays via dt in _tickClassIdentity
+    const lastTrig = player._mageChainTrigT || -9999;
+    if (lastId && lastId !== skillId && (now - lastT) <= MAGE_CHAIN_FRAMES &&
+        (now - lastTrig) > 1500) {
+      player._mageChainTrigT = now;
+      player._mageChainPing  = 500;  // ms — decays via dt in _tickClassIdentity
       return 1.5;
     }
     return 1;
@@ -15791,14 +15800,19 @@ const SKILL_FNS = {
         player.facing = -side;
         player.invulnerable = Math.max(player.invulnerable, 220);
 
-        // Damage per strike — ignores DEF, always crits. The nerf knob
-        // (GLOBAL_SKILL_DMG_MUL + ULT nerf) will also apply in hitMonster.
-        const dmg = Math.floor(getAtk() * 2.2 * getCritDmg());
+        // Damage per strike. v0.25.242 (G3) — used to bypass DEF and
+        // unconditionally crit; tanky elites melted regardless of their
+        // build. Now applies DEF reduction (50% effective) and rolls
+        // crit (with bias) so tanky mobs read as tanky.
+        const baseDmg = Math.floor(getAtk() * 1.8);
+        const defRed = Math.floor((target.def || 0) * 0.5);
+        const isCrit = rollCrit() || Math.random() < 0.6;     // still crit-biased
+        const dmg = Math.max(1, Math.floor((baseDmg - defRed) * (isCrit ? getCritDmg() : 1)));
         target.currentHp -= dmg;
         target.hitFlash = 120;
         game.damageNumbers.push({
           x: target.x + target.w/2, y: target.y - 6, vy: -2.8,
-          text: dmg + '!', life: 40, color: '#c8a8ff', size: 18, crit: true
+          text: dmg + (isCrit ? '!' : ''), life: 40, color: '#c8a8ff', size: 18, crit: isCrit
         });
         if (target.currentHp <= 0) killMonster(target);
 
@@ -15957,15 +15971,20 @@ const SKILL_FNS = {
         player.y = target.y;
         player.facing = -side;
         player.invulnerable = Math.max(player.invulnerable, 400);
-        // Execution damage: ignores DEF, always crits, scales with strike count
-        const crit = true;
-        const dmg = Math.floor(getAtk() * 3.2 * getCritDmg());
+        // Execution damage. v0.25.242 (G3) — used to bypass DEF and
+        // always crit; reworked to apply 40% DEF reduction (slightly
+        // softer than Nightreaper since Phantom's chain is shorter)
+        // and crit-bias instead of guaranteed crit.
+        const baseDmg = Math.floor(getAtk() * 2.6);
+        const defRed = Math.floor((target.def || 0) * 0.4);
+        const crit = rollCrit() || Math.random() < 0.7;       // strong crit bias
+        const dmg = Math.max(1, Math.floor((baseDmg - defRed) * (crit ? getCritDmg() : 1)));
         target.currentHp -= dmg;
         target.hitFlash = 120;
         game.damageNumbers.push({
           x: target.x + target.w/2, y: target.y - 6, vy: -2.6,
-          text: (i === candidates.length - 1 ? '✦ ' : '') + dmg + '!!',
-          life: 55, color: '#c8a8ff', size: 22, crit: true
+          text: (i === candidates.length - 1 ? '✦ ' : '') + dmg + (crit ? '!!' : '!'),
+          life: 55, color: '#c8a8ff', size: 22, crit: crit
         });
         delete target._voidBrand;
         if (target.currentHp <= 0) killMonster(target);
@@ -17817,19 +17836,20 @@ function _maybeLevelUp() {
   player.exp -= player.expToNext;
   player.level++;
   // v0.25.7 — softened mid/late acceleration to 1.18/1.20/1.22.
-  // v0.25.123 — XP curve gets very steep from L15 onwards. Levels
-  // 1-14 keep the gentle 1.20 ramp so the early class identity and
-  // first job advancement (L25) still arrive at a normal cadence.
-  // From L15 the multiplier jumps and ratchets up further at L20 /
-  // L30 / L40 so the late game becomes a real grind:
-  //   1-14   : 1.20  (unchanged early curve)
-  //   15-19  : 1.40  (steep wall begins)
-  //   20-29  : 1.45  (mid grind)
-  //   30-39  : 1.50  (late grind)
-  //   40+    : 1.55  (endgame proper)
+  // v0.25.123 — XP curve gets steep from L15 onwards.
+  // v0.25.242 (G2) — softened the 25-39 mid-grind that was the longest
+  // dead-zone in the curve (~8-12 hours of farming Lv 30 mobs that
+  // didn't yield enough XP). Endgame (40+) curve unchanged so the
+  // ascend-to-50 ceremony still feels earned.
+  //   1-14   : 1.20  (early curve)
+  //   15-19  : 1.40  (steep wall)
+  //   20-24  : 1.40  (was 1.45)
+  //   25-29  : 1.40  (was 1.45)
+  //   30-39  : 1.42  (was 1.50)  ← biggest cut
+  //   40+    : 1.55  (unchanged)
   const curveMul = player.level >= 40 ? 1.55
-                 : player.level >= 30 ? 1.50
-                 : player.level >= 20 ? 1.45
+                 : player.level >= 30 ? 1.42
+                 : player.level >= 20 ? 1.40
                  : player.level >= 15 ? 1.40
                  : 1.20;
   player.expToNext = Math.floor(player.expToNext * curveMul);
@@ -18004,12 +18024,19 @@ function killMonster(m) {
   }
   player._recentKills = (player._recentKills || 0) + 1;
   player._recentKillsDecay = 4000;
-  // Assassin job enhancement — kills refund 30% of every cooldown
+  // Assassin job enhancement — kills refund 15% of every cooldown.
+  // v0.25.242 (G4) — was 30% with no gate, which created a runaway loop
+  // in AoE clears. Now: 15% refund **and** a 2 s internal gate so a
+  // single AoE doesn't reset every cooldown.
   if (player.job === 'assassin' && JOB_ENHANCE.assassin.cdRefundOnKill) {
-    const refund = JOB_ENHANCE.assassin.cdRefundOnKill;
-    for (const id in player.skillCooldowns) {
-      if (player.skillCooldowns[id] > 0) {
-        player.skillCooldowns[id] *= (1 - refund);
+    const now = game.time;
+    if (!player._lastCdRefundT || now - player._lastCdRefundT > 2000) {
+      player._lastCdRefundT = now;
+      const refund = JOB_ENHANCE.assassin.cdRefundOnKill;
+      for (const id in player.skillCooldowns) {
+        if (player.skillCooldowns[id] > 0) {
+          player.skillCooldowns[id] *= (1 - refund);
+        }
       }
     }
   }
