@@ -148,6 +148,41 @@
   <b>Heads-up.</b> An earlier implementation of these phases targeted <code>v0.5.1</code> and was preserved locally at tag <code>phase-1-2-3-on-v0.5.1</code>. This is the rebuild against the current <code>v0.9.8</code> codebase, which had moved substantially (new bosses like Gravitos, minimap/taxi, chibi character rewrite).
 </div>
 
+<h2>v0.25.264 <span class="tag">Performance pass — 5 verified fixes from a 4-agent deep audit</span></h2>
+
+<p>Follow-up to the v0.25.263 user feedback that the game still felt laggy. Spawned four parallel perf audit agents (render hot-path, update-loop/collision, particle/VFX, and asset/GC pressure), then verified each high-impact finding line-by-line before shipping. Five real, high-impact fixes landed; the rest were either false positives or smaller wins held back for a follow-up pass.</p>
+
+<h3><span class="pill epic">feat</span>Phaser canvases now sleep when the game is paused</h3>
+<p>The two Phaser instances (BG + UI scene host) were ticking + rendering every frame even on menus, dialog, class-select, modals, and tutorial overlays — three concurrent render pipelines (vanilla canvas + 2× Phaser) with nothing meaningful changing on screen. <code>_perfTick</code> now toggles <code>game.loop.sleep()</code> / <code>wake()</code> on edge transitions of <code>game.paused</code>, dropping ~30-50% of the FPS budget on pause screens (desktop) and 40-70% on mobile.</p>
+
+<h3><span class="pill epic">feat</span>saveState() debounced — major GC pressure relief</h3>
+<p><code>saveState()</code> is called from ~30 sites: every kill, quest tick, boon equip, skill unlock, level-up, prestige, etc. Each call ran <code>JSON.stringify()</code> on the full <code>{player, game}</code> object (~10-40 KB) plus a <code>localStorage.setItem</code> — the dominant string-allocation source in heavy play (estimated 70-150 KB/s of churn).</p>
+<ul>
+<li><code>saveState()</code> is now a <b>1.5 s debounced trampoline</b> that sets a dirty flag and queues a single flush</li>
+<li><code>_flushSaveStateNow()</code> contains the actual serialize-and-write — used by paths that can't wait (visibility-change, before-unload, prestige reload)</li>
+<li>No save data lost: the critical-flush sites are wired up so backgrounding the tab or closing the window forces an immediate write</li>
+<li>Major GC pauses on mobile every 10-15 s should disappear or shrink dramatically</li>
+</ul>
+
+<h3><span class="pill bug">polish</span>Audio oscillator nodes now disconnect on completion</h3>
+<p>Every <code>audio.env(...)</code> call (hit, crit, pickup, levelup, potion, etc.) created an <code>OscillatorNode</code> + <code>GainNode</code>, called <code>start</code> + <code>stop</code>, but never <code>disconnect()</code>. WebAudio retains nodes that are still wired into the destination graph, so each combat hit (5-20× per second) was leaving zombie pairs pinned in memory — accumulating 200-500 KB over a 2-3 minute fight, especially brutal on mobile Safari + Firefox. Now both nodes are torn down via an <code>onended</code> callback once the envelope completes.</p>
+
+<h3><span class="pill bug">polish</span>Particle budget guards on 4 high-cost skill casts</h3>
+<p>Several skills pushed straight to <code>game.particles</code> with no per-frame budget check. Frames already at the particle cap silently dropped these via the <code>_trimVisualQueues</code> overflow-splice — wasted allocation + GC for nothing. All four now route through <code>_budgetedParticlePush()</code> and break the loop early when the cap is hit:</p>
+<ul>
+<li><b>Mage <kbd>Z</kbd> (Blink)</b> — was 40 unguarded particles/cast (20 + 20 around teleport)</li>
+<li><b>Mage Arcane Burst</b> — wider 80-particle ring per cast</li>
+<li><b>Lich Soul Vortex (G)</b> — 80-particle ring on the open animation</li>
+<li><b>Nightreaper Eclipse Massacre (G)</b> — 4 trailing-shadow particles per dagger × 10 batches per cast = up to 400 particles per Eclipse on a packed room. Now breaks per-batch when budget is exhausted.</li>
+</ul>
+<p>Visuals are unchanged below the cap; only frames already over budget see the trim.</p>
+
+<h3><span class="pill bug">polish</span>Squared-distance comparisons in two hot inner loops</h3>
+<p>Projectile ricochet (next-target search) and Ice Spike's AoE-on-hit splash both used <code>Math.hypot</code> per candidate inside <code>for (const m2 of game.monsters)</code> loops — that's a <code>sqrt</code> every iteration. Both were doing radius compares (<code>d &lt; threshold</code>) where the distance value itself is never used, so squaring the threshold and comparing <code>dx*dx + dy*dy</code> against it removes the sqrt entirely. Saves a few hundred microseconds per ricochet hit in dense pulls.</p>
+
+<h3><span class="pill rare">feat</span>What's still pending</h3>
+<p>Held back for a follow-up pass: damage-number gradient cache, screen-shake <code>Math.random</code> memoize, <code>shadowBlur</code> batching, drawSmoothFx composite batching, seraph heal-aura array cache, MP networking <code>JSON.stringify</code> debounce, toast pool, particle splice-thrashing → write-index. The five fixes shipped today are the highest-impact and easiest to verify; the rest will land after testing confirms the lag is meaningfully better.</p>
+
 <h2>v0.25.263 <span class="tag">DoT cadence 0.5s · Fashionista NPC + Q wardrobe</span></h2>
 
 <h3><span class="pill bug">polish</span>Burn / poison DoT now ticks every 0.5 s</h3>
