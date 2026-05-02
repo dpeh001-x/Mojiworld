@@ -3005,7 +3005,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.245';
+const GAME_VERSION = 'v0.25.246';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4319,8 +4319,11 @@ function _bootstrapPhaser() {
     fps: { target: 60, forceSetTimeOut: false },
     // No physics — pure render layer.
   });
-  console.log('[phaser] bootstrap complete — version', Phaser.VERSION,
-    '· 2 games: BG (z:1), UI (z:3)');
+  // v0.25.246 (R3) — gated behind LX_DEBUG.
+  if (typeof localStorage !== 'undefined' && localStorage.getItem('LX_DEBUG') === '1') {
+    console.log('[phaser] bootstrap complete — version', Phaser.VERSION,
+      '· 2 games: BG (z:1), UI (z:3)');
+  }
 }
 _bootstrapPhaser();
 
@@ -8043,6 +8046,23 @@ window.addEventListener('keydown', e => {
   game.keys[k] = true;
   if (['arrowleft','arrowright','arrowup','arrowdown',' '].includes(k)) e.preventDefault();
 
+  // v0.25.246 — keyboard usage signal. If the player presses any
+  // gameplay key, mark them as a keyboard user; the mobile-ctrl deck
+  // can then auto-hide itself (only on first detection — preserves the
+  // explicit toggle once set).
+  if (!game._keyboardSignalSent && !repeat) {
+    game._keyboardSignalSent = true;
+    try {
+      // Only auto-hide if user hasn't already manually set a preference.
+      const KEY = 'mojiworld_hide_mobile_ctrl';
+      if (localStorage.getItem(KEY) === null) {
+        document.body.classList.add('hide-mobile-ctrl');
+        const tg = document.getElementById('mobile-ctrl-toggle');
+        if (tg) tg.textContent = '◀';
+      }
+    } catch (e2) { /* localStorage blocked */ }
+  }
+
   if (repeat) return; // Fresh presses only below
 
   // Warrior charge — start holding on the first press of a skill key.
@@ -8594,11 +8614,39 @@ function _initMobileControls() {
   _wireSmartDpad();
   _wireDynamicFButton();
   _wireMobileCooldownSweep();
+  // v0.25.246 — Toggle state now persists across sessions. Also honours
+  // `?nomobile=1` URL param so desktop users with a touchscreen (which
+  // matches `pointer: coarse` and would otherwise force-show the deck)
+  // can permanently opt out. Stored in localStorage under
+  // `mojiworld_hide_mobile_ctrl`.
+  const TOGGLE_KEY = 'mojiworld_hide_mobile_ctrl';
+  const _urlForceHide = (() => {
+    try { return new URLSearchParams(location.search).get('nomobile') === '1'; }
+    catch (e) { return false; }
+  })();
   const toggle = document.getElementById('mobile-ctrl-toggle');
+  // Apply persisted preference on boot (URL param wins).
+  let _hidePref = false;
+  try { _hidePref = localStorage.getItem(TOGGLE_KEY) === '1'; } catch (e) {}
+  if (_urlForceHide || _hidePref) {
+    document.body.classList.add('hide-mobile-ctrl');
+    if (toggle) toggle.textContent = '◀';
+  }
   if (toggle) {
     toggle.onclick = () => {
-      document.body.classList.toggle('hide-mobile-ctrl');
-      toggle.textContent = document.body.classList.contains('hide-mobile-ctrl') ? '◀' : '✕';
+      const hidden = document.body.classList.toggle('hide-mobile-ctrl');
+      toggle.textContent = hidden ? '◀' : '✕';
+      try { localStorage.setItem(TOGGLE_KEY, hidden ? '1' : '0'); } catch (e) {}
+      // Provide non-visual feedback so screen-reader / keyboard users
+      // know the change registered.
+      if (typeof showToast === 'function') {
+        showToast(hidden ? 'Touch controls hidden' : 'Touch controls shown', 'common');
+      }
+    };
+    // Make sure the toggle is keyboard-actionable too (Enter / Space).
+    toggle.setAttribute('tabindex', '0');
+    toggle.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle.click(); }
     };
   }
   // Forced-modal watcher: modals that sit inside .game-wrapper are
@@ -19332,8 +19380,14 @@ function openShop(type) {
           if (player.mesos >= p.price) {
             player.mesos -= p.price;
             player.consumables[p.id] = (player.consumables[p.id] || 0) + 1;
-            showToast(`Bought ${p.name}`);
+            // v0.25.246 (Q1) — audio + rarity-tinted toast so the
+            // purchase doesn't feel silent. 'meso' kind is the
+            // existing coin-jingle SFX (lines 9843).
+            if (audio && audio.play) audio.play('meso');
+            showToast(`Bought ${p.name}`, 'rare');
             openShop('potion');
+          } else {
+            showToast(`Need ${p.price - player.mesos} more Lumens`, 'common');
           }
         }, 'common'));
     }
@@ -19359,15 +19413,21 @@ function openShop(type) {
         if (player.mesos >= it.price) {
           player.mesos -= it.price;
           player.inventory.push({...it});
+          // v0.25.246 (Q1) — coin SFX on every successful gear buy.
+          if (audio && audio.play) audio.play('meso');
           showToast(`Bought ${it.name}!`, it.rarity);
           openShop('weapon');
+        } else {
+          showToast(`Need ${it.price - player.mesos} more Lumens`, 'common');
         }
       }, it.rarity));
     }
   } else if (type === 'sell') {
     title.textContent = 'Brok\'s Forge — Selling';
     if (!player.inventory.length) {
-      list.innerHTML = '<div style="text-align:center;padding:20px;color:#888">Nothing to sell.</div>';
+      // v0.25.246 (Q5) — empty-state copy now hints at the buy → equip
+      // → sell loop instead of the bare "Nothing to sell."
+      list.innerHTML = '<div style="text-align:center;padding:20px;color:#888;font-style:italic;line-height:1.6">🛍️ Sell unwanted gear here for ~40% of its buy price.<br>Pick up drops or buy from Brok\'s Forge to fill your bags.</div>';
     } else {
       player.inventory.forEach((it, idx) => {
         const val = Math.floor(it.price * 0.4);
@@ -19403,7 +19463,12 @@ function makeShopRow(icon, name, desc, price, cb, rarity, btnText) {
   const btn = document.createElement('button');
   btn.textContent = btnText || 'Buy';
   btn.onclick = cb;
-  if (!btnText && player.mesos < price) btn.disabled = true;
+  if (!btnText && player.mesos < price) {
+    btn.disabled = true;
+    // v0.25.246 (Q4) — disabled buttons now explain why they're greyed
+    // out instead of looking broken.
+    btn.title = `Need ${price - player.mesos} more Lumens`;
+  }
   d.appendChild(btn);
   return d;
 }
@@ -31505,7 +31570,10 @@ function _heroExtractAndNormalize(sheet, meta, idleBh, idleFootY, idleHeadTopY, 
       window.PLAYER_SPRITE_FACES_RIGHT = false;
     }
     const classCount = ['warrior','rogue','mage','archer'].filter(c => !!HERO.classFrames[c]).length;
-    console.log('[Hero] loaded teen idle + walk(' + HERO.walkFrames.length + ') + jump(' + HERO.jumpFrames.length + ') + attack(' + HERO.attackFrames.length + ') + hit(' + HERO.hitFrames.length + ') + death(' + HERO.deathFrames.length + ') + class anims (' + classCount + '/4)');
+    // v0.25.246 (R3) — gated behind LX_DEBUG.
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('LX_DEBUG') === '1') {
+      console.log('[Hero] loaded teen idle + walk(' + HERO.walkFrames.length + ') + jump(' + HERO.jumpFrames.length + ') + attack(' + HERO.attackFrames.length + ') + hit(' + HERO.hitFrames.length + ') + death(' + HERO.deathFrames.length + ') + class anims (' + classCount + '/4)');
+    }
     window.HERO_READY = true;
     window.dispatchEvent(new CustomEvent('hero-ready'));
   } catch (err) {
@@ -36700,7 +36768,11 @@ function startBgm() {
 
 <script>
 // === CHARACTER STUDIO — layered avatar runtime compositor (v0.25.93) ===
-console.log('%c[CharStudio] v0.25.93 loaded — bbox-bottom ground anchor + 8 floating types lifted','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
+// v0.25.246 (R3) — diagnostic console.log removed for ship builds. Set
+// `localStorage.LX_DEBUG = '1'` to re-enable detailed boot logging.
+if (typeof localStorage !== 'undefined' && localStorage.getItem('LX_DEBUG') === '1') {
+  console.log('%c[CharStudio] v0.25.93 loaded — bbox-bottom ground anchor + 8 floating types lifted','background:#1f1238;color:#ffd166;padding:2px 6px;border-radius:3px;');
+}
 // v0.25.134 — Character Studio rebuilt to drive the vector hero. The
 // sprite-layer system (mannequin base + face/hair PNG overlays) is gone;
 // previews now render the same _drawVectorHero used in-game on a 384×384
@@ -36733,7 +36805,15 @@ const CHAR_STUDIO = {
 // render in-game. Centred + scaled-up to fill the 384×384 panel.
 function renderCharStudio() {
   const cv = document.getElementById('char-studio-canvas');
-  if (!cv) return;
+  if (!cv) {
+    // v0.25.246 (R2) — cancel the rAF chain when the studio canvas is
+    // gone (modal closed). Was leaking ~60 rAF/sec until the next open.
+    if (CHAR_STUDIO._raf) {
+      cancelAnimationFrame(CHAR_STUDIO._raf);
+      CHAR_STUDIO._raf = null;
+    }
+    return;
+  }
   const c = cv.getContext('2d');
   const W = cv.width, H = cv.height;
   c.clearRect(0, 0, W, H);
