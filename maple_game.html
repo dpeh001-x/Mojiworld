@@ -3054,7 +3054,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.256';
+const GAME_VERSION = 'v0.25.257';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5351,7 +5351,7 @@ const SKILLS = {
   hexmaster_grandhex: { name:'Grand Hex',          icon:'🧿', cls:'mage', job:'warlock',  master:'hexmaster',    slot:'x', mp:35, cd:24000, desc:'Freeze every enemy 2s and apply a slow poison DOT.' },
   // Archer path
   marksman_oneshot:   { name:'One Shot One Kill',  icon:'🎯', cls:'archer', job:'sniper', master:'marksman',    slot:'x', mp:50, cd:22000, desc:'Guaranteed crit piercing; 12% instakill.' },
-  ballista_volley:    { name:'Siege Volley',       icon:'🛡️', cls:'archer', job:'sniper', master:'ballista',    slot:'x', mp:45, cd:20000, desc:'8-shot piercing barrage; breaks defense.' },
+  ballista_volley:    { name:'Siege Volley',       icon:'🛡️', cls:'archer', job:'sniper', master:'ballista',    slot:'x', mp:25, cd:20000, desc:'Hold G to channel a 10 s piercing arrow stream. Drains MP while held; releases early on key-up.' },
   beastmaster_pack:   { name:'Call of the Wild',   icon:'🐾', cls:'archer', job:'ranger', master:'beastmaster', slot:'x', mp:50, cd:34000, desc:'Summon 3 wolves for 35s.' },
   skyhunter_gale:     { name:'Gale Storm',         icon:'🦅', cls:'archer', job:'ranger', master:'skyhunter',   slot:'x', mp:45, cd:22000, desc:'10 homing arrows that cannot miss.' },
 };
@@ -10200,6 +10200,7 @@ function loadState() {
     player._bloodstormNextTick = 0;
     player._aegis = null;
     player._clones = null;
+    player._ballistaChannel = null;     // v0.25.257 — clear channel state on save load
     player._pendingTimeouts = [];
     player.invulnerable = 0;
     player.rushTimer = 0;
@@ -12817,6 +12818,49 @@ function updatePlayer(dt) {
     if (aegis.life <= 0) player._aegis = null;
   }
 
+  // v0.25.257 — Ballista Siege Volley channel tick. While the channel
+  // is active, fire arrow volleys at a steady cadence and drain MP. End
+  // conditions: G released, time expired, dead, hitstun, or MP < 1.
+  if (player._ballistaChannel) {
+    const ch = player._ballistaChannel;
+    const now = game.time;
+    const released = !(game.keys && game.keys['g']);
+    const expired = now >= ch.endsAt;
+    const dead = player.hp <= 0;
+    const stunned = player.hitStun > 0;
+    const noMp = player.mp < 1;
+    if (released || expired || dead || stunned || noMp) {
+      // Brief cleanup flash on release so the player feels the channel end.
+      if (typeof spawnSmoothImpact === 'function') {
+        spawnSmoothImpact(player.x + player.w/2 + player.facing * 40, player.y + player.h/2, '#cc5522');
+      }
+      player._ballistaChannel = null;
+    } else {
+      // MP drain — 1 MP per 10 frames (~6 MP/sec)
+      ch.mpDrainAccum++;
+      if (ch.mpDrainAccum >= 10) {
+        ch.mpDrainAccum = 0;
+        player.mp = Math.max(0, player.mp - 1);
+      }
+      // Volley fire — every 9 frames
+      if (now - ch.lastFireAt >= 9) {
+        ch.lastFireAt = now;
+        // Two-arrow vertical stack (top + bottom of player silhouette)
+        for (let i = 0; i < 2; i++) {
+          game.projectiles.push({
+            x: player.x + (player.facing > 0 ? player.w : -40),
+            y: player.y + 6 + i * 26,
+            vx: player.facing * 17, vy: 0, w: 42, h: 8, life: 250,
+            damage: getAtk() * 0.85 + 5, owner: 'player', skill: 'siege',
+            pierce: true, defBreak: true, color: '#cc5522',
+          });
+        }
+        // Subtle muzzle flicker every other volley to sell continuous fire
+        if ((now & 1) === 0 && typeof addShake === 'function') addShake(1);
+      }
+    }
+  }
+
   // v0.25.236 — Shadow Clones reworked into floating turrets. Each clone
   // anchors to a fixed world position (set at cast time), bobs gently in
   // place, and pulses a circular AOE every ~400 ms that hits every enemy
@@ -13266,6 +13310,7 @@ function triggerDeath() {
   player._bloodstormNextTick = 0;
   player._aegis = null;
   player._clones = null;
+  player._ballistaChannel = null;     // v0.25.257 — channel can't survive death
   // Class identity: cancel any pending charge / root / momentum state so
   // a half-charged swing or stale root doesn't carry through respawn.
   player._warCharge = null;
@@ -13343,6 +13388,7 @@ function respawnAtTown() {
   player._bloodstormNextTick = 0;
   player._aegis = null;
   player._clones = null;
+  player._ballistaChannel = null;     // v0.25.257 — channel resets on respawn
   player._warCharge = null;
   player._releasedCharge = null;
   player._rootedTimer = 0;
@@ -16763,31 +16809,34 @@ const SKILL_FNS = {
   },
 
   ballista_volley: () => {
-    // v0.25.8 — doubled barrage from 4 → 8 shots. Vertical stack tightened
-    // from 10 → 7 px so all 8 bullets still fit inside the player's
-    // silhouette (8 × 7 = 56 px; player is 44 px tall so the top/bottom
-    // rails just barely fan past head/feet for a wide-swath read).
-    // Cadence tightened 90 → 70 ms so the whole skill still resolves in
-    // ~490 ms — feels like a burst, not a slow metronome. Damage per
-    // bullet untouched so total skill damage ≈ 2× (by design; this is a
-    // Lv 30 master-tier signature that should feel like a wall of lead).
-    // v0.25.218 — siege-ballista weapon sprite at the player's chest as
-    // the volley charges. Mirrored to facing direction.
+    // v0.25.257 — Reworked from a 0.5 s burst into a 10 s HOLD channel.
+    // Press G → start the channel, fire arrow volleys at a steady cadence
+    // for up to 10 s while G is held. Releases early on key-up. Drains MP
+    // while channeling so the player decides "burst now or save MP".
+    //
+    //   • 25 MP up-front (was 45 MP for the burst).
+    //   • +1 MP drain every 10 frames (~6 MP/sec → 60 MP over a full 10 s).
+    //   • Volley cadence: every 9 frames (~150 ms → ~67 volleys total).
+    //   • Volley shape: 2 arrows in a vertical stack (top + bottom), each
+    //     pierces, breaks defense.
+    //   • Per-arrow damage: getAtk() * 0.85 + 5 — tuned so a full 10 s
+    //     channel deals ~115× ATK total (vs old burst's ~28× ATK), but
+    //     spread thinly so per-second DPS is comparable to other ults.
+    //   • Released early → channel ends but cooldown still consumed
+    //     (prevents "tap-spam" abuse).
+    //
+    // Per-frame channel logic lives in updatePlayer near the aegis tick.
+    const now = game.time;
+    player._ballistaChannel = {
+      startedAt: now,
+      endsAt: now + 600,            // 600 frames = 10 s at 60 fps
+      lastFireAt: now - 10,         // fire on the next eligible frame
+      mpDrainAccum: 0,
+    };
     spawnSpriteBurst(player.x + player.w / 2 + player.facing * 30, player.y + player.h / 2, 'ballista_volley',
       { size: 160, life: 36, angle: player.facing > 0 ? 0 : Math.PI });
-    for (let i = 0; i < 8; i++) {
-      scheduleSkillTimer(() => {
-        if (player.hp <= 0) return;
-        game.projectiles.push({
-          x: player.x + (player.facing > 0 ? player.w : -40),
-          y: player.y + 4 + i * 7,
-          vx: player.facing * 17, vy: 0, w: 42, h: 8, life: 250,
-          damage: getAtk() * 3.5 + 25, owner: 'player', skill: 'siege',
-          pierce: true, defBreak: true, color: '#cc5522',
-        });
-      }, i * 70);
-    }
-    addShake(5);
+    if (typeof showToast === 'function') showToast('SIEGE VOLLEY — hold G to channel', 'legendary');
+    addShake(3);
   },
 
   beastmaster_pack: () => {
