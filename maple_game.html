@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.272';
+const GAME_VERSION = 'v0.25.273';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -28402,50 +28402,24 @@ function _lxBakeHeroIdle(cls, skinIdx, hairId, eyeId, mouthId) {
   _LX_HERO_IDLE_BAKE_CACHE.set(key, baked);
   return baked;
 }
-// Wrapper called from drawPlayer in lieu of _drawVectorHero(sx, sy)
-// when the live player's state is cacheable. Falls through to the
-// uncached pipeline for active animation frames.
+// Wrapper called from drawPlayer in lieu of _drawVectorHero(sx, sy).
+// v0.25.273 — always render the live vector pipeline. The v0.25.176
+// idle bake (and the v0.25.269 / v0.25.271 super-sample escalations
+// that followed) traded crispness for caching: every cached blit
+// went through ≥1 bilinear resample (chibi 1.19×, optional 1.5×
+// HiDPI), and bilinear is slightly soft by definition. Now that
+// the v0.25.157 SVG goo filter is gone — replaced by sprite hair /
+// head / eyes / mouth (LX_HAIR / LX_HEAD / LX_EYES / LX_MOUTH) —
+// the per-frame cost of _drawVectorHero is dominated by 4 small
+// drawImage calls plus a handful of Path2D fills for the body /
+// legs / arms. That's well within budget at 60 FPS on mobile, and
+// the win is razor-sharp edges: vectors rasterise directly at the
+// final pixel grid (post-chibi, post-HiDPI), no resample anywhere.
+// The bake function + cache map are kept around so peers and the
+// Q-key Studio paths that touch them still link, but the player
+// render path no longer reads from the cache.
 function _drawVectorHeroCached(sx, sy) {
-  if (typeof _heroVecAnimFor !== 'function' || _heroVecAnimFor() !== 'idle') {
-    _drawVectorHero(sx, sy);
-    return;
-  }
-  const lookCustom = (typeof player !== 'undefined' && player.lookCustom) || {};
-  if (lookCustom.msxId) { _drawVectorHero(sx, sy); return; }
-  const cls     = (typeof player !== 'undefined' && player.cls) || 'default';
-  const skinIdx = (lookCustom.skinIdx != null && HERO_VEC_SKIN[lookCustom.skinIdx]) ? lookCustom.skinIdx : 2;
-  const hairId  = _migrateHairId(lookCustom.hairId);
-  const eyeId   = lookCustom.eyeId   || 'default';
-  const mouthId = lookCustom.mouthId || 'default';
-  const baked   = _lxBakeHeroIdle(cls, skinIdx, hairId, eyeId, mouthId);
-  const pw = player.w, ph = player.h;
-  const dstX = sx + pw / 2 - _LX_HERO_BAKE_FOOT_X;
-  const dstY = sy + ph - _LX_HERO_BAKE_FOOT_Y;
-  // v0.25.269 — bake is now super-sampled at 3× (300×300 of source for a
-  // 100×100 logical footprint), so we explicitly resample down to the
-  // logical size with smoothing ON. End result: clean anti-aliased
-  // vectors at the final on-screen size, matching the Q-key Character
-  // Studio fidelity instead of the v0.25.266 nearest-neighbour blocky
-  // look that came from disabling smoothing on a same-resolution bake.
-  const _prevSmooth  = ctx.imageSmoothingEnabled;
-  const _prevQuality = ctx.imageSmoothingQuality;
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  if ((player.facing | 0) < 0) {
-    // Mirror around the player's vertical centreline so cached frame
-    // (forcedFacing=1) reads as facing-left.
-    const cx = sx + pw / 2;
-    ctx.save();
-    ctx.translate(cx, 0);
-    ctx.scale(-1, 1);
-    ctx.translate(-cx, 0);
-    ctx.drawImage(baked, dstX, dstY, _LX_HERO_BAKE_W, _LX_HERO_BAKE_H);
-    ctx.restore();
-  } else {
-    ctx.drawImage(baked, dstX, dstY, _LX_HERO_BAKE_W, _LX_HERO_BAKE_H);
-  }
-  ctx.imageSmoothingEnabled = _prevSmooth;
-  ctx.imageSmoothingQuality = _prevQuality;
+  _drawVectorHero(sx, sy);
 }
 
 // v0.25.157 — SVG GOOEY-FILTER HAIR PIPELINE.
