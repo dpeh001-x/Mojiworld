@@ -3005,7 +3005,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.246';
+const GAME_VERSION = 'v0.25.247';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -8046,21 +8046,29 @@ window.addEventListener('keydown', e => {
   game.keys[k] = true;
   if (['arrowleft','arrowright','arrowup','arrowdown',' '].includes(k)) e.preventDefault();
 
-  // v0.25.246 — keyboard usage signal. If the player presses any
-  // gameplay key, mark them as a keyboard user; the mobile-ctrl deck
-  // can then auto-hide itself (only on first detection — preserves the
-  // explicit toggle once set).
-  if (!game._keyboardSignalSent && !repeat) {
-    game._keyboardSignalSent = true;
-    try {
-      // Only auto-hide if user hasn't already manually set a preference.
-      const KEY = 'mojiworld_hide_mobile_ctrl';
-      if (localStorage.getItem(KEY) === null) {
-        document.body.classList.add('hide-mobile-ctrl');
-        const tg = document.getElementById('mobile-ctrl-toggle');
-        if (tg) tg.textContent = '◀';
-      }
-    } catch (e2) { /* localStorage blocked */ }
+  // v0.25.246 — keyboard usage signal. If the player presses an actual
+  // gameplay key (movement / skill / common HUD), mark them as a
+  // keyboard user; the mobile-ctrl deck auto-hides on first detection.
+  // v0.25.247 — restricted the trigger key set so Tab / Esc / F11 / Fn
+  // keys (which someone might press for browser navigation) don't
+  // accidentally hide the deck. Modifier-only presses also no-op.
+  if (!game._keyboardSignalSent && !repeat && !e.altKey && !e.ctrlKey && !e.metaKey) {
+    const GAMEPLAY_KEYS = new Set([
+      'arrowleft','arrowright','arrowup','arrowdown',' ',
+      'z','x','s','c','d','f','v','g','a',                  // skill / block keys
+      'b','i','k','u','y','n','m','t','r','w','9','0','?',  // common HUD / modal keys
+    ]);
+    if (GAMEPLAY_KEYS.has(k)) {
+      game._keyboardSignalSent = true;
+      try {
+        const KEY = 'mojiworld_hide_mobile_ctrl';
+        if (localStorage.getItem(KEY) === null) {
+          document.body.classList.add('hide-mobile-ctrl');
+          const tg = document.getElementById('mobile-ctrl-toggle');
+          if (tg) tg.textContent = '◀';
+        }
+      } catch (e2) { /* localStorage blocked */ }
+    }
   }
 
   if (repeat) return; // Fresh presses only below
@@ -9745,6 +9753,26 @@ function loadState() {
     // Ensure boon arrays exist on older saves + migrate legacy _powerups
     if (!player.boons) player.boons = [];
     if (!player.boonsEquipped) player.boonsEquipped = [];
+    // v0.25.247 (S4) — sanitise boonsEquipped so out-of-bounds indices
+    // (from a corrupted save / external edit / migration mismatch) get
+    // pruned before _applyEquippedBoons reads them. Also dedupe and
+    // clamp to BOON_EQUIP_CAP to recover from any stale state.
+    if (Array.isArray(player.boonsEquipped)) {
+      const seen = new Set();
+      const clean = [];
+      for (const idx of player.boonsEquipped) {
+        const n = Number(idx);
+        if (Number.isInteger(n) && n >= 0 && n < player.boons.length && !seen.has(n)) {
+          seen.add(n);
+          clean.push(n);
+        }
+      }
+      const cap = (typeof BOON_EQUIP_CAP === 'number') ? BOON_EQUIP_CAP : 6;
+      if (clean.length > cap) clean.length = cap;
+      player.boonsEquipped = clean;
+    } else {
+      player.boonsEquipped = [];
+    }
     if (typeof _migrateLegacyPowerups === 'function') _migrateLegacyPowerups();
     // Re-compute player.mods from equipped boons (mods is now derived)
     if (typeof _applyEquippedBoons === 'function') _applyEquippedBoons();
@@ -11583,6 +11611,16 @@ function loadMap(id, entryX) {
     player.x = entryX;
     player.y = 400;
     player.vx = 0; player.vy = 0;
+  }
+  // v0.25.247 (A3) — snap the camera to the player's new position on
+  // map load. Was lerping from the previous map's last camera offset
+  // (~30 frames / 0.5 s convergence), which caused parallax / clouds /
+  // background images to render at the wrong horizontal offset until
+  // the player moved.
+  if (game.camera && game.mapData) {
+    const targetX = (player.x + player.w / 2) - W / 2;
+    game.camera.x = Math.max(0, Math.min(game.mapData.worldWidth - W, targetX));
+    game.camera.y = 0;
   }
   buildBackdrop();
 
@@ -15439,8 +15477,14 @@ const SKILL_FNS = {
     hits.forEach((h, i) => {
       // Each consecutive hit empowers the next: +30% per link
       const stackMul = 1 + i * 0.30;
-      const dmg = Math.floor((baseAtk * 3.2 + 25) * stackMul * getCritDmg());
-      hitMonster(h.m, dmg, true, 'railshot');
+      // v0.25.247 (C2) — Railshot was unconditionally applying crit
+      // damage on every hit, making it effectively a "guaranteed crit"
+      // skill regardless of crit chance. Now rolls crit per-hit
+      // (with strong crit-bias since it's a master signature) so the
+      // skill scales with build investment instead of bypassing it.
+      const crit = rollCrit() || Math.random() < 0.4;
+      const dmg = Math.floor((baseAtk * 3.2 + 25) * stackMul * (crit ? getCritDmg() : 1));
+      hitMonster(h.m, dmg, crit, 'railshot');
       h.m.vx += dir * 14;
       // Electric spark particles at impact
       for (let k = 0; k < 8; k++) {
@@ -17772,7 +17816,11 @@ function hitMonster(m, dmg, isCrit, skill) {
         });
       }
     }
-    // Skill tree — Elemental Chain: spells chain to 2 more enemies at 50%
+    // Skill tree — Elemental Chain: spells chain to 2 more enemies at 50%.
+    // v0.25.247 (C1) — switched from raw `setTimeout` to
+    // `scheduleSkillTimer` so the chain follow-up is cancelled on death,
+    // map transition, or skill-cancel. Was firing on dead monsters /
+    // post-respawn, applying damage in the wrong context.
     if (player.tree.elemChain && (skill === 'bolt' || skill === 'fire' || skill === 'ice')) {
       let chains = 0;
       for (const m2 of game.monsters) {
@@ -17780,7 +17828,7 @@ function hitMonster(m, dmg, isCrit, skill) {
         const dx = m2.x - m.x, dy = m2.y - m.y;
         if (dx*dx + dy*dy < 180*180) {
           chains++;
-          setTimeout(() => {
+          scheduleSkillTimer(() => {
             if (m2.currentHp > 0) hitMonster(m2, Math.floor(dmg * 0.5), false, 'chain');
           }, 40 * chains);
         }
@@ -18598,13 +18646,17 @@ function updateProjectiles(dt) {
           }
           hitMonster(m, dmg, crit, p.skill || 'bolt');
           hitIds.add(m);
-          // Nightreaper ricochet — bounce to the next nearest foe
+          // Nightreaper ricochet — bounce to the next nearest foe.
+          // v0.25.247 (C3) — also exclude monsters already hit via
+          // pierce (`hitIds`), not just the ricochet's own hitSet. Prevents
+          // a pierce+ricochet combo from bouncing back through the same
+          // monster (theoretical with affix combos that grant both).
           if (p.ricochet && p.ricochet > 0) {
             if (!p.hitSet) p.hitSet = new Set();
             p.hitSet.add(m);
             let next = null, best = Infinity;
             for (const m2 of game.monsters) {
-              if (m2 === m || m2.currentHp <= 0 || p.hitSet.has(m2)) continue;
+              if (m2 === m || m2.currentHp <= 0 || p.hitSet.has(m2) || hitIds.has(m2)) continue;
               const d = Math.hypot((m2.x + m2.w/2) - (m.x + m.w/2),
                                     (m2.y + m2.h/2) - (m.y + m.h/2));
               if (d < best && d < 260) { best = d; next = m2; }
@@ -21654,6 +21706,11 @@ function closeAllModals() {
   const av = document.getElementById('advancement-modal');
   if ((cs && cs.style.display === 'flex') ||
       (av && av.style.display === 'flex')) return;
+  // v0.25.247 (U5) — if a uiConfirm Promise is in flight, resolve it
+  // (as cancel) before tearing down the modal so callers don't hang.
+  if (game && typeof game._uiConfirmCleanup === 'function') {
+    try { game._uiConfirmCleanup(); } catch (e) { /* ignore */ }
+  }
   for (const id of ['shop-modal','inventory-modal','skills-modal','powerup-modal','help-modal','enhance-modal','skilltree-modal','attributes-modal','dev-modal','taxi-modal','codex-modal','multiplayer-modal','quest-modal','worldmap-modal','confirm-modal']) {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
@@ -21746,9 +21803,25 @@ function uiConfirm(opts) {
       modal.style.display = 'none';
       yes.onclick = null;
       no.onclick = null;
+      window.removeEventListener('keydown', escHandler, true);
+      game._uiConfirmCleanup = null;
       game.paused = false;
       resolve(val);
     };
+    // v0.25.247 (U5) — Esc resolves false. Without this, pressing Esc
+    // (which routes through closeAllModals and hides the modal) left
+    // the Promise unresolved — calls awaiting the result would hang
+    // forever. Capture-phase listener so we run before the modal-close
+    // handler.
+    const escHandler = (e) => {
+      if (e.key === 'Escape' || e.key === 'Esc') {
+        e.preventDefault();
+        cleanup(false);
+      }
+    };
+    window.addEventListener('keydown', escHandler, true);
+    // Stash a pointer so closeAllModals can resolve gracefully too.
+    game._uiConfirmCleanup = () => cleanup(false);
     yes.onclick = () => cleanup(true);
     no.onclick  = () => cleanup(false);
     modal.style.display = 'flex';
