@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.275';
+const GAME_VERSION = 'v0.25.276';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4615,6 +4615,30 @@ const LX_PLAYER_PROJ = (() => {
   return out;
 })();
 function _lxPlayerProjReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+// v0.25.276 — Skill-id → projectile-sprite lookup. Replaces an IIFE
+// that ran per-projectile-per-frame inside drawProjectiles, allocating
+// a closure object every iteration. With 30–60 projectiles in flight
+// (rapid-fire ranger, mage AoE) the IIFE was burning 1,800–3,600
+// closure allocations per second of GC churn for a constant-string
+// branch. Module-scope dict lookup is one hash hit, zero allocations.
+// `null` falls through to the procedural draw branch below.
+const _LX_PROJ_FOR_SKILL = {
+  arrow:     LX_PLAYER_PROJ.arrow,
+  charged:   LX_PLAYER_PROJ.arrow,
+  deadeye:   LX_PLAYER_PROJ.arrow,
+  rainArrow: LX_PLAYER_PROJ.arrow,
+  elemArrow: LX_PLAYER_PROJ.arrow,
+  siege:     LX_PLAYER_PROJ.arrow,
+  oneshot:   LX_PLAYER_PROJ.arrow,
+  fire:      LX_PLAYER_PROJ.fireball,
+  ice:       LX_PLAYER_PROJ.icespike,
+  dagger:    LX_PLAYER_PROJ.dagger,
+  bolt:      LX_PLAYER_PROJ.mage_orb,   // v0.25.209 — mage Z (magicBolt)
+  lightning: LX_PLAYER_PROJ.lightning,
+  gale:      LX_PLAYER_PROJ.gale,
+  bloodwave: LX_PLAYER_PROJ.shockwave,
+  shockwave: LX_PLAYER_PROJ.shockwave,
+};
 // =========================================================================
 // LX_SUMMON — class-summoned ally sprites (v0.25.203)
 // =========================================================================
@@ -36012,21 +36036,10 @@ function drawProjectiles() {
       // ludo-generated webp; drawImage rotated to the velocity vector.
       // Procedural drawing remains as a cold-start fallback if the
       // sprite hasn't decoded yet.
-      const _spriteForSkill = (() => {
-        if (p.skill === 'arrow' || p.skill === 'charged' || p.skill === 'deadeye' || p.skill === 'rainArrow' || p.skill === 'elemArrow' || p.skill === 'siege' || p.skill === 'oneshot') return LX_PLAYER_PROJ.arrow;
-        if (p.skill === 'fire')                                  return LX_PLAYER_PROJ.fireball;
-        if (p.skill === 'ice')                                   return LX_PLAYER_PROJ.icespike;
-        if (p.skill === 'dagger')                                return LX_PLAYER_PROJ.dagger;
-        // v0.25.209 — Mage Z (magicBolt) uses skill: 'bolt'. User requested
-        // a blue/yellow energy orb instead of the prior lightning sprite,
-        // so 'bolt' now points at the mage_orb. 'lightning' (if any future
-        // skill uses that exact name) stays mapped to the lightning sprite.
-        if (p.skill === 'bolt')                                  return LX_PLAYER_PROJ.mage_orb;
-        if (p.skill === 'lightning')                             return LX_PLAYER_PROJ.lightning;
-        if (p.skill === 'gale')                                  return LX_PLAYER_PROJ.gale;
-        if (p.skill === 'bloodwave' || p.skill === 'shockwave')  return LX_PLAYER_PROJ.shockwave;
-        return null;
-      })();
+      // v0.25.276 — module-scope dict lookup replaces the per-frame IIFE
+      // that allocated a closure object every iteration. See the
+      // _LX_PROJ_FOR_SKILL definition next to LX_PLAYER_PROJ.
+      const _spriteForSkill = _LX_PROJ_FOR_SKILL[p.skill] || null;
       if (_spriteForSkill && _lxPlayerProjReady(_spriteForSkill)) {
         const angle = Math.atan2(p.vy, p.vx);
         const sw = Math.max(p.w, 18) * 1.6;     // sprite is bigger than hitbox so the image reads cleanly
