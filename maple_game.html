@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.288';
+const GAME_VERSION = 'v0.25.289';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -14262,6 +14262,14 @@ function castSkill(id) {
     // movement; the spin is pure flair on top.
     player.somersault = 420;
     player.somersaultDir = -player.facing;
+  } else if (id === 'iceSpike' || id === 'arcaneBurst') {
+    // v0.25.289 — Mage S (iceSpike) + Mage D (arcaneBurst) get an
+    // exaggerated staff swing. The flag here is read by the mage
+    // attack-arm helpers (_heroVecMageFrontArm / Back) and the
+    // attack_mage entries in HERO_VEC_BOB / DEFORM, which multiply
+    // their amplitudes while the flag is live. Decays naturally with
+    // the attack timer (no explicit clear needed).
+    player._mageBigSwingUntil = (game.time | 0) + 360;
   }
   // Rogues get fluid skill-linking — every cast clears prior action locks so moves flow into each other
   if (player.cls === 'rogue') {
@@ -28757,12 +28765,35 @@ function _heroVecWarriorBackArm(t) {
 // lowers back to neutral. Back arm stays low for balance. The staff
 // rotates with the arm, so when armR ≈ -1.80 (~103° from neutral)
 // the orb tip ends up pointing skyward.
+// v0.25.289 — When the player has just cast iceSpike or arcaneBurst,
+// _mageBigSwingUntil is set to (game.time + 360 ms). While that's in
+// effect we crank the mage attack arms into a wide arcing staff
+// swing instead of the calmer "raise overhead" cast pose. Falls back
+// to the v0.25.194 calm cast for every other mage skill.
+function _heroVecMageBigSwingActive() {
+  if (typeof player === 'undefined') return false;
+  const t = (game && game.time) || 0;
+  return ((player._mageBigSwingUntil | 0) > t);
+}
 function _heroVecMageFrontArm(t) {
+  if (_heroVecMageBigSwingActive()) {
+    // Wide arcing swing: starts behind the head, sweeps across forward
+    // past horizontal, then snaps back. Range −2.40 → +1.40 ≈ 3.8 rad.
+    if (t < 0.22) return -0.30 - _heroEaseOutCubic(t / 0.22) * 2.10;        // BIG windup pull behind
+    if (t < 0.60) return -2.40 + _heroEaseOutCubic((t - 0.22) / 0.38) * 3.80; // explosive forward sweep
+    return  1.40 - _heroVecAttackRecover(t) * 1.40;                          // recover to neutral
+  }
   if (t < 0.25) return -0.30 - _heroEaseOutCubic(t / 0.25) * 1.50;             // raise to vertical
   if (t < 0.70) return -1.80 + Math.sin((t - 0.25) * Math.PI / 0.45) * 0.08;   // hold + tremor
   return -1.80 + _heroVecAttackRecover(t) * 1.50;                              // lower back
 }
 function _heroVecMageBackArm(t) {
+  if (_heroVecMageBigSwingActive()) {
+    // Off-hand swings opposite for counterweight on the big sweep.
+    if (t < 0.22) return 0.20 + _heroEaseOutCubic(t / 0.22) * 0.50;
+    if (t < 0.60) return 0.70 - _heroEaseOutCubic((t - 0.22) / 0.38) * 0.90;
+    return -0.20 + _heroVecAttackRecover(t) * 0.20;
+  }
   // Off-hand stays low, drifts slightly forward as a counterweight
   // while the staff is overhead.
   if (t < 0.25) return 0.20 + _heroEaseOutCubic(t / 0.25) * 0.20;
@@ -28992,9 +29023,16 @@ const HERO_VEC_BOB = {
   },
   // v0.25.194 — Mage cast bob: head tilts back to look up at staff,
   // body leans back slightly. No horizontal lurch.
+  // v0.25.289 — When _mageBigSwingUntil is live (S/D skills), the
+  // body lurches FORWARD with the swing instead of leaning back.
+  // Helper picked once per frame so spine + head agree.
   attack_mage: {
-    spine: t => ({ x: -_heroVecAttackStrike(t) * 0.4, y: -Math.sin(t * Math.PI) * 0.8 }),
-    head:  t => ({ x: -_heroVecAttackStrike(t) * 0.6, y: -Math.sin(t * Math.PI) * 1.4 }),
+    spine: t => _heroVecMageBigSwingActive()
+      ? ({ x: -_heroVecAttackWindup(t) * 1.8 + _heroVecAttackStrike(t) * 4.2 - _heroVecAttackRecover(t) * 2.2, y: -Math.sin(t * Math.PI) * 1.6 })
+      : ({ x: -_heroVecAttackStrike(t) * 0.4, y: -Math.sin(t * Math.PI) * 0.8 }),
+    head:  t => _heroVecMageBigSwingActive()
+      ? ({ x: -_heroVecAttackWindup(t) * 0.9 + _heroVecAttackStrike(t) * 2.0, y: -Math.sin(t * Math.PI) * 2.6 })
+      : ({ x: -_heroVecAttackStrike(t) * 0.6, y: -Math.sin(t * Math.PI) * 1.4 }),
   },
   // v0.25.219 — Rogue thrust bob: sharp forward poke + quick recoil
   // pull. Less than warrior lurch since the dagger is small + quick.
