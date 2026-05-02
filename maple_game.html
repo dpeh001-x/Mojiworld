@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.268';
+const GAME_VERSION = 'v0.25.269';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -6258,6 +6258,13 @@ const POWERUPS = [
   // v0.21 — accuracy / hit-chance boon. Basic attacks roll accuracy vs
   // monster evasion; miss-prone players want to stack this.
   { id:'acc',    name:'Eagle Eye',      icon:'🦅', stat:'accuracy',  min:15, max:45, unit:'',  fmt:r=>`+${r} Accuracy`,                 scale:r=>r },
+  // v0.25.269 — Quickening: chance to bypass a skill's cooldown entirely
+  // when cast. Roll range is 5–20 %; the cap (20 %) is also enforced as
+  // a hard ceiling on the *summed* contribution from multiple rolls in
+  // _applyEquippedBoons, so equipping three Quickenings can't push the
+  // bypass rate past 20 %. Stored on player.mods.cdrChance and rolled
+  // against once per cast in castSkill.
+  { id:'cdSkip', name:'Quickening',     icon:'⚡', stat:'cdrChance', min:5,  max:20, unit:'%', fmt:r=>`${r}% chance to bypass skill cooldown`, scale:r=>r/100 },
 ];
 
 const BOON_EQUIP_CAP     = 3;   // v0.25.261 — tightened 5 → 3 so boon picks feel like real build commitments
@@ -6321,6 +6328,11 @@ function _applyEquippedBoons() {
   // v0.24.2 — hard cap on total multishot contribution from boons. Stacking
   // multiple Double Shot boons can't push past +1 extra projectile.
   if (M.multishot > 1) M.multishot = 1;
+  // v0.25.269 — Quickening's bypass-cooldown chance is capped at 20 %
+  // total, regardless of how many copies are equipped. The roll range
+  // (5–20 %) means a single equipped Quickening can already hit the
+  // ceiling at a god roll; further copies are pure redundancy.
+  if (M.cdrChance > 0.20) M.cdrChance = 0.20;
   // Clamp hp / mp to new max in case maxHp / maxMp dropped
   if (typeof getMaxHp === 'function' && player.hp > getMaxHp()) player.hp = getMaxHp();
   if (typeof getMaxMp === 'function' && player.mp > getMaxMp()) player.mp = getMaxMp();
@@ -7074,8 +7086,13 @@ const MAPS = {
       {x:960, y:360, w:80, h:10, type:'platform'},
     ],
     npcs: [
-      {x:300,  name:'The Amnesiac',  role:'amnesiac', color:'#cc9944'},
-      {x:520,  name:'Sage Mira',     role:'sage',     color:'#aa66cc'},
+      // v0.25.269 — Amnesiac moved from x:300 to x:440 so he stands
+      // directly in front of the ⭐ Zodiac Sanctum portal (also at x:440,
+      // pushed in by the MAPS.town.portals.push below). His lore arc
+      // points players toward the Sanctum, so anchoring him under the
+      // portal lets the visual cue + the dialogue line up.
+      {x:440,  name:'The Amnesiac',  role:'amnesiac', color:'#cc9944'},
+      {x:600,  name:'Sage Mira',     role:'sage',     color:'#aa66cc'},
       {x:860,  name:'Taxi Uncle',    role:'caravan',  color:'#e8b85a'},
     ],
     portals: [
@@ -8249,7 +8266,12 @@ const player = {
   animFrame:0, animTimer:0, state:'idle',
   mods: { atk:0, atkPct:0, def:0, maxHp:0, maxMp:0, crit:0, critDmg:0,
           speed:0, jump:0, lifesteal:0, burn:0, multishot:0, mpRegen:0,
-          thorns:0, greed:0, xpBoost:0, extraJumps:0, accuracy:0 },
+          thorns:0, greed:0, xpBoost:0, extraJumps:0, accuracy:0,
+          // v0.25.269 — chance per skill cast to bypass the cooldown
+          // entirely (set computed CD to 0). Sourced exclusively from
+          // the Quickening boon; capped at 0.20 by _applyEquippedBoons
+          // even if multiple Quickening rolls are equipped.
+          cdrChance:0 },
   equipped: { weapon:null, armor:null, accessory:null },
   inventory: [],
   consumables: {}, // { hp_s: 3, mp_m: 1, ... }
@@ -14068,6 +14090,21 @@ function castSkill(id) {
     computedCd = 12000;
   }
   player.skillCooldowns[id] = computedCd;
+  // v0.25.269 — Quickening boon (player.mods.cdrChance, capped at 0.20).
+  // Roll once per cast: on a hit, the cooldown is bypassed entirely so
+  // the skill is castable again on the very next press. Phantom_cut /
+  // nightreaper_mark are excluded so the v0.25.237 12 s ultimate floor
+  // stays unbreakable. Visual + audio cue plus a tiny screen flash so
+  // the proc is legible.
+  if (computedCd > 0 && id !== 'phantom_cut' && id !== 'nightreaper_mark') {
+    const cdrChance = (player.mods && player.mods.cdrChance) || 0;
+    if (cdrChance > 0 && Math.random() < cdrChance) {
+      player.skillCooldowns[id] = 0;
+      if (typeof showToast === 'function') showToast('⚡ Quickening!', 'epic');
+      if (audio && audio.play) audio.play('cd_refund');
+      if (typeof flash === 'function') flash(0.08);
+    }
+  }
   // v0.25.258 — Sleight (assassin V / Phantom V) is now a 3-charge zip.
   // Each press consumes one charge; re-cast gate is short (250 ms) until
   // charges are exhausted. After the 3rd charge, full cooldown applies
@@ -28264,15 +28301,32 @@ function _lxBakeHairGoo(group, hairColor, hairHi, lowFx) {
 // =========================================================================
 const _LX_HERO_BAKE_W = 100, _LX_HERO_BAKE_H = 100;
 const _LX_HERO_BAKE_FOOT_X = 50, _LX_HERO_BAKE_FOOT_Y = 80;
+// v0.25.269 — bake at 3× the logical footprint so the cached idle frame
+// has enough source pixels to survive the _chibiApply scale (1.19 × 1.06)
+// without looking pixelated or distorted. The Q-key Character Studio
+// renders the same vectors at 5× directly to its panel, which is why the
+// studio preview looks razor-sharp; matching the render quality in
+// gameplay just means giving the cache more source resolution and
+// letting the browser's bilinear downsampler do the rest.
+const _LX_HERO_BAKE_SUPER = 3;
 const _LX_HERO_IDLE_BAKE_CACHE = new Map();
 function _lxBakeHeroIdle(cls, skinIdx, hairId, eyeId, mouthId) {
   const key = cls + '|' + skinIdx + '|' + hairId + '|' + (eyeId || 'default') + '|' + (mouthId || 'default');
   let baked = _LX_HERO_IDLE_BAKE_CACHE.get(key);
   if (baked) return baked;
   baked = document.createElement('canvas');
-  baked.width = _LX_HERO_BAKE_W;
-  baked.height = _LX_HERO_BAKE_H;
+  // Physical pixel size = logical × super. The drawImage at the call site
+  // resamples this back down to (_LX_HERO_BAKE_W × _LX_HERO_BAKE_H) with
+  // smoothing on, giving an anti-aliased high-fidelity blit.
+  baked.width  = _LX_HERO_BAKE_W * _LX_HERO_BAKE_SUPER;
+  baked.height = _LX_HERO_BAKE_H * _LX_HERO_BAKE_SUPER;
   const offCtx = baked.getContext('2d');
+  offCtx.imageSmoothingEnabled = true;
+  offCtx.imageSmoothingQuality = 'high';
+  // Pre-scale the bake context so _drawVectorHero's logical coordinate
+  // system stays unchanged — every existing offset, anchor, and stroke
+  // width still works because we just zoom in on the bake canvas.
+  offCtx.scale(_LX_HERO_BAKE_SUPER, _LX_HERO_BAKE_SUPER);
   // _drawVectorHero applies its own translate(sx + player.w/2, sy + player.h)
   // at entry. Pick sx/sy so the function lands the feet anchor at
   // (BAKE_FOOT_X, BAKE_FOOT_Y) on the offscreen canvas.
@@ -28312,15 +28366,16 @@ function _drawVectorHeroCached(sx, sy) {
   const pw = player.w, ph = player.h;
   const dstX = sx + pw / 2 - _LX_HERO_BAKE_FOOT_X;
   const dstY = sy + ph - _LX_HERO_BAKE_FOOT_Y;
-  // v0.25.266 — the idle bake is a 100×100 raster bitmap, but it's
-  // drawn through the _chibiApply scale transform (1.19 × 1.06). With
-  // canvas's default imageSmoothingEnabled = true that scale bilinearly
-  // blurs the cached frame, so the player only looks "soft" when idle
-  // (the walk / attack / jump paths bypass the cache and re-rasterise
-  // the vectors at the final scale, staying crisp). Disable smoothing
-  // around the cached drawImage calls and restore afterward.
-  const _prevSmooth = ctx.imageSmoothingEnabled;
-  ctx.imageSmoothingEnabled = false;
+  // v0.25.269 — bake is now super-sampled at 3× (300×300 of source for a
+  // 100×100 logical footprint), so we explicitly resample down to the
+  // logical size with smoothing ON. End result: clean anti-aliased
+  // vectors at the final on-screen size, matching the Q-key Character
+  // Studio fidelity instead of the v0.25.266 nearest-neighbour blocky
+  // look that came from disabling smoothing on a same-resolution bake.
+  const _prevSmooth  = ctx.imageSmoothingEnabled;
+  const _prevQuality = ctx.imageSmoothingQuality;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   if ((player.facing | 0) < 0) {
     // Mirror around the player's vertical centreline so cached frame
     // (forcedFacing=1) reads as facing-left.
@@ -28329,12 +28384,13 @@ function _drawVectorHeroCached(sx, sy) {
     ctx.translate(cx, 0);
     ctx.scale(-1, 1);
     ctx.translate(-cx, 0);
-    ctx.drawImage(baked, dstX, dstY);
+    ctx.drawImage(baked, dstX, dstY, _LX_HERO_BAKE_W, _LX_HERO_BAKE_H);
     ctx.restore();
   } else {
-    ctx.drawImage(baked, dstX, dstY);
+    ctx.drawImage(baked, dstX, dstY, _LX_HERO_BAKE_W, _LX_HERO_BAKE_H);
   }
   ctx.imageSmoothingEnabled = _prevSmooth;
+  ctx.imageSmoothingQuality = _prevQuality;
 }
 
 // v0.25.157 — SVG GOOEY-FILTER HAIR PIPELINE.
