@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.291';
+const GAME_VERSION = 'v0.25.292';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -14294,6 +14294,17 @@ function castSkill(id) {
     player.somersault = 700;
     player.somersaultDir = player.facing;
     player.attackTimer = Math.max(player.attackTimer, 700);
+  } else if (id === 'dragoon_skylance') {
+    // v0.25.292 — Dragoon Sky Lance — exaggerated impale to the
+    // ground. The skill already does "leap up, slam down with
+    // piercing force"; this layers an authored two-handed impale
+    // pose on top. Drives the new attack_warrior_impale anim:
+    // first ~40 % of the timer holds the lance high overhead with
+    // both hands (windup), last ~60 % thrusts down hard while the
+    // body follows into a deep landing crouch.
+    player._impalePoseAt = (game.time | 0);
+    player._impalePoseUntil = (game.time | 0) + 32;     // ~540 ms at 60 Hz
+    player.attackTimer = Math.max(player.attackTimer, 540);
   }
   // Rogues get fluid skill-linking — every cast clears prior action locks so moves flow into each other
   if (player.cls === 'rogue') {
@@ -28954,6 +28965,36 @@ const HERO_VEC_ANIMS = {
     legL:  t => -0.32 + _heroVecAttackStrike(t) * 0.18,
     legR:  t => 0.40 - _heroVecAttackStrike(t) * 0.18,
   },
+  // v0.25.292 — Dragoon Sky Lance impale pose. Two phases over the
+  // 32-frame budget (~540 ms):
+  //   windup (t < 0.40): both arms hoist the lance straight overhead
+  //                      (-2.0 rad), spine arches BACK, head tilts up
+  //                      to track the lance tip — coiled like a spring.
+  //   thrust (t ≥ 0.40): both arms slam DOWN past horizontal (+1.6
+  //                      rad), spine collapses forward, head dives
+  //                      with the strike, legs fold into a deep
+  //                      landing crouch. Reads as a two-handed
+  //                      ground impale.
+  attack_warrior_impale: {
+    spine: t => t < 0.40
+      ? -0.30 - _heroEaseOutCubic(t / 0.40) * 0.20
+      : -0.50 + _heroEaseOutCubic((t - 0.40) / 0.60) * 1.10,
+    head:  t => t < 0.40
+      ? -0.40 - _heroEaseOutCubic(t / 0.40) * 0.10
+      : -0.50 + _heroEaseOutCubic((t - 0.40) / 0.60) * 0.85,
+    armR:  t => t < 0.40
+      ? -0.40 - _heroEaseOutCubic(t / 0.40) * 1.60
+      : -2.00 + _heroEaseOutCubic((t - 0.40) / 0.60) * 3.60,   // sweep down past horizontal
+    armL:  t => t < 0.40
+      ? 0.20 - _heroEaseOutCubic(t / 0.40) * 2.20
+      : -2.00 + _heroEaseOutCubic((t - 0.40) / 0.60) * 3.60,
+    legL:  t => t < 0.40
+      ? -0.18
+      : -0.18 - _heroEaseOutCubic((t - 0.40) / 0.60) * 0.40,
+    legR:  t => t < 0.40
+      ? 0.20
+      : 0.20 + _heroEaseOutCubic((t - 0.40) / 0.60) * 0.40,
+  },
   // v0.25.290 — Warlock + Archmage F/V/G "chant then raise" pose.
   // Two phases sharing one 32-frame (~540 ms) budget:
   //   chant  (t < 0.55): hands close near chest, head bowed, body
@@ -29038,6 +29079,15 @@ const HERO_VEC_DEFORM = {
     spine: t => ({ sx: 1.06 + _heroVecAttackStrike(t) * 0.04, sy: 0.94 }),
     handR: t => { const s = 1 + _heroVecAttackStrike(t) * 0.42 + Math.sin(t * Math.PI) * 0.10; return { sx: s, sy: s }; },
   },
+  // v0.25.292 — Dragoon impale deform. Both arms stretch lengthwise
+  // on the downward thrust (selling lance reach into the ground).
+  // Spine compresses vertically on landing for the heavy commit.
+  attack_warrior_impale: {
+    armR:  t => ({ sx: 1, sy: t < 0.40 ? 1 : 1 + _heroEaseOutCubic((t - 0.40) / 0.60) * 0.40 }),
+    armL:  t => ({ sx: 1, sy: t < 0.40 ? 1 : 1 + _heroEaseOutCubic((t - 0.40) / 0.60) * 0.40 }),
+    spine: t => ({ sx: 1, sy: t < 0.40 ? 1 : 1 - _heroEaseOutCubic((t - 0.40) / 0.60) * 0.10 }),
+    handR: t => { const s = t < 0.40 ? 1 : 1 + _heroEaseOutCubic((t - 0.40) / 0.60) * 0.30; return { sx: s, sy: s }; },
+  },
   // v0.25.290 — Mage chant-raise deform. Spine compresses slightly
   // during the chant (body stooped), then stretches up during the
   // raise. Staff arm stretches lengthwise on the upward sweep.
@@ -29112,6 +29162,24 @@ const HERO_VEC_BOB = {
       y: -Math.sin(t * Math.PI) * 1.6,
     }),
   },
+  // v0.25.292 — Dragoon impale body translation. Windup: body lifts
+  // slightly + spine pulls back as the lance hoists overhead. Thrust:
+  // body slams DOWN (positive y bob) to sell the impale into the
+  // ground. Head dives with the strike.
+  attack_warrior_impale: {
+    spine: t => ({
+      x: 0,
+      y: t < 0.40
+        ? -_heroEaseOutCubic(t / 0.40) * 2.5
+        : -2.5 + _heroEaseOutCubic((t - 0.40) / 0.60) * 6.0,
+    }),
+    head:  t => ({
+      x: 0,
+      y: t < 0.40
+        ? -_heroEaseOutCubic(t / 0.40) * 4.0
+        : -4.0 + _heroEaseOutCubic((t - 0.40) / 0.60) * 9.0,
+    }),
+  },
   // v0.25.290 — Mage chant-raise body translation. Chant phase: spine
   // dips slightly with a small mutter-tremor; head bows. Raise phase:
   // spine extends UP, head lifts the same amount, selling the
@@ -29144,6 +29212,9 @@ function _heroVecAnimFor() {
     // v0.25.290 — Warlock + Archmage F/V/G chant-raise pose overrides
     // the default mage cast for the duration of the flag.
     if (cls === 'mage' && (player._chantRaiseUntil | 0) > now) return 'attack_mage_chant';
+    // v0.25.292 — Dragoon Sky Lance impale pose overrides the warrior
+    // 2-handed slash for the duration of the flag.
+    if (cls === 'warrior' && (player._impalePoseUntil | 0) > now) return 'attack_warrior_impale';
     if (cls === 'archer')  return 'attack_archer';
     if (cls === 'warrior') return 'attack_warrior';
     if (cls === 'mage')    return 'attack_mage';
@@ -29163,6 +29234,12 @@ function _heroVecTimeNorm(animName) {
   // The default 18-frame attack timer would zoom through both.
   if (animName === 'attack_mage_chant') {
     const start = player._chantRaiseAt || t;
+    return Math.max(0, Math.min(1, (t - start) / 32));
+  }
+  // v0.25.292 — Dragoon impale shares the same 32-frame budget so
+  // the windup hold + downward thrust both read.
+  if (animName === 'attack_warrior_impale') {
+    const start = player._impalePoseAt || t;
     return Math.max(0, Math.min(1, (t - start) / 32));
   }
   // v0.25.191 — all attack variants share the same timer.
