@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.304';
+const GAME_VERSION = 'v0.25.305';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5142,6 +5142,47 @@ const LX_EQ_REGISTRIES = {
   weapon:      LX_WEAPON,
   helmet:      LX_HELMET,
 };
+// Z-order — three render passes wrapped around the existing bone
+// rendering inside _drawVectorHero. The split lets cape sit BEHIND
+// the body bones (back pass), body / boots / gloves / weapon overlay
+// the bones but tuck UNDER the head silhouette (mid pass), and helmet
+// sit ON TOP of the front-hair + face features (front pass). Tuning
+// individual pieces' Z further is just a matter of reordering the
+// slot arrays — no other code change.
+const LX_EQ_SLOT_ORDER = {
+  back:  ['cape'],
+  mid:   ['body_bottom', 'body_top', 'boots', 'gloves', 'weapon'],
+  front: ['helmet'],
+};
+// Dest rect for every equipment piece, expressed in chibi-scaled body
+// coords (origin = player feet centre, +y = up the body, +x = facing
+// forward). Sized to cover the full chibi character so the 800×800
+// anchor-template content lands at the right place out-of-the-box —
+// head crown of the canvas (template anchor y≈130 / 800) maps to the
+// top of the rect, feet (anchor y≈720 / 800) maps near the bottom.
+// Per-slot offsets can be added later if a piece needs micro-tuning.
+const _LX_EQ_DEST = { x: -30, y: -80, w: 60, h: 80 };
+
+function _drawEquipmentLayer(layer) {
+  // Defensive: bail if we're not in a real player context (Character
+  // Studio preview path uses opts.lookCustom but doesn't set
+  // player.equipped, and we don't want studio mannequins to render
+  // gear that the previewing player happens to have equipped).
+  if (typeof player === 'undefined' || !player.equipped) return;
+  const slots = LX_EQ_SLOT_ORDER[layer];
+  if (!slots) return;
+  for (const slot of slots) {
+    const item = player.equipped[slot];
+    if (!item || !item.spriteId) continue;
+    const reg = LX_EQ_REGISTRIES[slot];
+    if (!reg) continue;
+    const img = reg[item.spriteId];
+    if (!img || !img.complete || !img.naturalWidth) continue;
+    // Tint hook reserved for v0.25.306 (commit 4); for now sprites
+    // render at their authored colours.
+    ctx.drawImage(img, _LX_EQ_DEST.x, _LX_EQ_DEST.y, _LX_EQ_DEST.w, _LX_EQ_DEST.h);
+  }
+}
 // =========================================================================
 // MSX_HERO — MapleStory-style chibi character sprite registry (v0.25.152)
 // =========================================================================
@@ -29557,6 +29598,10 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   // v0.25.134 — body parts sourced from BODY_BASE/SHD + SKIN palette.
   // v0.25.157 — hair sourced from HAIR_GOO (the SVG-goo blob cluster
   // for the selected hairId, post-migration).
+  // v0.25.305 — Equipment BACK pass — drawn before any bone, sits
+  // behind the entire body. Currently just the cape slot. Inside the
+  // chibi-scale + facing-flip, so it mirrors with the character.
+  _drawEquipmentLayer('back');
   drawBone('legL', () => {
     const base = (typeof _mixHex === 'function') ? _mixHex(BOOT_BASE, '#000000', 0.12) : BOOT_BASE;
     _drawShaded(HERO_VEC_PARTS.limb, base, BODY_SHD, SKIN.deep, 3, 3);
@@ -29592,6 +29637,13 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     ctx.fillRect(-1.7, 11.4, 3.4, 2.2);
     _drawGloss(-4, 1, 3, 4, 0.55);
   });
+  // v0.25.305 — Equipment MID pass — overlays the bone-rendered torso
+  // and limbs, but sits UNDER the head silhouette so high-collar
+  // shirts get cut off cleanly at the neckline. Slots: body_bottom,
+  // body_top, boots, gloves, weapon (back-hand). Authoring on the
+  // 800×800 template means the body content automatically lands at
+  // the right Y within the chibi figure.
+  _drawEquipmentLayer('mid');
   drawBone('head', () => {
     // v0.25.155 — back-hair lock(s) ALWAYS draw FIRST, before any head
     // silhouette / ears / shading. Sits behind the head.
@@ -29796,6 +29848,12 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
       weaponFn(ctx, OUT);
     });
   }
+  // v0.25.305 — Equipment FRONT pass — drawn AFTER all bones + the
+  // procedural class-weapon overlay, so helmet sits on top of the
+  // head + front-hair + face, and (later) front-hand weapon sprites
+  // can render over the procedural class weapon. Still inside the
+  // chibi-scale block, so it mirrors + scales with the character.
+  _drawEquipmentLayer('front');
   ctx.restore();
 }
 
