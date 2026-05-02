@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.270';
+const GAME_VERSION = 'v0.25.271';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -27266,7 +27266,7 @@ function drawNPCs() {
     // INSTEAD of the procedural body. Procedural is the fallback.
     const _npcSpriteImg = NPC_SPRITES[npc.name];
     if (_npcSpriteImg) {
-      _drawNpcSprite(_npcSpriteImg, cx, feetY);
+      _drawNpcSprite(_npcSpriteImg, cx, feetY, npc.name);
     } else {
     // Chibi scale transform — matches the player's (slightly taller) proportions
     ctx.save();
@@ -28324,7 +28324,13 @@ const _LX_HERO_BAKE_FOOT_X = 50, _LX_HERO_BAKE_FOOT_Y = 80;
 // studio preview looks razor-sharp; matching the render quality in
 // gameplay just means giving the cache more source resolution and
 // letting the browser's bilinear downsampler do the rest.
-const _LX_HERO_BAKE_SUPER = 3;
+// v0.25.271 — pushed 3× → 5× so the source pixel ratio comfortably
+// exceeds the HiDPI canvas backing buffer (1.5× DPR on desktop) plus
+// the 1.19× chibi horizontal scale combined. Memory cost per cached
+// look ≈ 1 MB (500 × 500 × 4 bytes); with ~6–12 looks active that
+// caps at ~12 MB, well within budget. Higher SUPER values produce
+// diminishing returns once the source > 4× the destination pixel size.
+const _LX_HERO_BAKE_SUPER = 5;
 const _LX_HERO_IDLE_BAKE_CACHE = new Map();
 function _lxBakeHeroIdle(cls, skinIdx, hairId, eyeId, mouthId) {
   const key = cls + '|' + skinIdx + '|' + hairId + '|' + (eyeId || 'default') + '|' + (mouthId || 'default');
@@ -32773,6 +32779,14 @@ const NPC_SPRITE_FILES = {
   // Used both in the Bazaar and the new Everdawn Marketplace map.
   'Fashionista':   'fashionista.webp',
 };
+// v0.25.271 — per-NPC render-height override. Default is 78 px (set
+// inside _drawNpcSprite). Sage Mira is taller in lore (sage / sky
+// elder, towers over the bazaar regulars) and her source webp is
+// 640×864 — still ~7.5× downsample at 115 px, so the larger draw
+// stays crisp instead of bilinear-blurring like an upscale would.
+const NPC_SPRITE_HEIGHTS = {
+  'Sage Mira': 115,
+};
 (function _loadNpcSprites() {
   for (const name in NPC_SPRITE_FILES) {
     const img = new Image();
@@ -32781,10 +32795,12 @@ const NPC_SPRITE_FILES = {
     img.src = 'Sprites/npc/' + NPC_SPRITE_FILES[name];
   }
 })();
-function _drawNpcSprite(sprite, cx, feetY) {
+function _drawNpcSprite(sprite, cx, feetY, npcName) {
   // Match the procedural NPC body height (~50-60 px). Aspect-aware so the
   // taller-than-wide ludo portraits don't get squashed.
-  const targetH = 78;
+  // v0.25.271 — per-NPC override via NPC_SPRITE_HEIGHTS. Falls back to
+  // 78 px (the v0.25.86 default) for any NPC not in the override map.
+  const targetH = (npcName && NPC_SPRITE_HEIGHTS[npcName]) || 78;
   const srcW = sprite.naturalWidth  || sprite.width  || 1;
   const srcH = sprite.naturalHeight || sprite.height || 1;
   const targetW = targetH * (srcW / srcH);
@@ -32793,7 +32809,10 @@ function _drawNpcSprite(sprite, cx, feetY) {
   const bob = Math.sin(t) * 1.5;
   ctx.save();
   ctx.translate(cx, feetY + 2 + bob);
+  // v0.25.271 — keep smoothing high-quality so larger renders (Sage
+  // Mira at 115 px) stay crisp on the way down from the 640×864 source.
   ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(sprite, -targetW / 2, -targetH * 0.96, targetW, targetH);
   ctx.restore();
 }
