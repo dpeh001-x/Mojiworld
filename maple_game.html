@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.296';
+const GAME_VERSION = 'v0.25.297';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -28983,20 +28983,34 @@ function _heroVecArcherFrontArm(t) {
   // stable forward-up hold, locks there through the entire draw +
   // release (no rotation while aiming), with only a small recoil
   // shudder on the release frame. Recovers down at the end.
-  if (t < 0.10) return -0.30 - _heroEaseOutCubic(t / 0.10) * 0.85;            // fast raise
-  if (t < 0.62) return -1.15;                                                  // steady hold (bow locked)
-  if (t < 0.70) return -1.15 - Math.sin((t - 0.62) * Math.PI / 0.08) * 0.06;   // tiny release recoil
-  return -1.15 + _heroVecAttackRecover(t) * 1.15;                              // lower
+  // v0.25.297 — Tightened the draw beat: faster initial raise so the
+  // bow settles before the back arm starts pulling, then a small
+  // visible "tension wobble" through the aim hold (the bow shakes
+  // ever-so-slightly under string tension), and a sharper kickback
+  // recoil on release that arcs the bow up + back briefly before the
+  // arm lowers. Reads as a real archery stance: steady aim, recoil,
+  // recover.
+  if (t < 0.08) return -0.30 - _heroEaseOutCubic(t / 0.08) * 0.85;            // fast raise (was 0.10)
+  if (t < 0.58) return -1.15 + Math.sin(t * Math.PI * 22) * 0.018;             // hold + 22Hz tension wobble
+  if (t < 0.72) return -1.15 - _heroEaseOutCubic((t - 0.58) / 0.14) * 0.22;    // bow kicks UP on release
+  return -1.37 + _heroVecAttackRecover(t) * 1.37;                              // lower from kicked position
 }
 function _heroVecArcherBackArm(t) {
   // String-pulling arm — windup rises with the bow, draws back during
   // the aim phase, snaps forward on release, recovers to neutral.
   // v0.25.194 — Faster raise (0.10 windup) to match bow stabilising
   // sooner; longer draw window for the visible string-pull.
-  if (t < 0.10) return 0.30 + _heroEaseOutCubic(t / 0.10) * 0.95;             // raise to mirror front arm
-  if (t < 0.55) return 1.25 + _heroEaseOutCubic((t - 0.10) / 0.45) * 0.65;    // pull string back
-  if (t < 0.62) return 1.90 - _heroEaseOutCubic((t - 0.55) / 0.07) * 2.20;    // snap forward (release)
-  return -0.30 + _heroVecAttackRecover(t) * 0.30;                             // recover
+  // v0.25.297 — More dramatic draw + release. Pull-back goes deeper
+  // (+2.10, was +1.90) so the string-pull is visibly long, with a
+  // subtle 22 Hz tremor at full draw selling the held tension. The
+  // release is a faster snap (0.05 window vs 0.07) and overshoots
+  // forward briefly before settling, like the string actually firing.
+  if (t < 0.08) return 0.30 + _heroEaseOutCubic(t / 0.08) * 0.95;             // raise to mirror front arm
+  if (t < 0.50) return 1.25 + _heroEaseOutCubic((t - 0.08) / 0.42) * 0.85;    // pull string back DEEP to +2.10
+  if (t < 0.58) return 2.10 + Math.sin((t - 0.50) * Math.PI * 8) * 0.04;       // hold at full draw + tremor
+  if (t < 0.63) return 2.10 - _heroEaseOutCubic((t - 0.58) / 0.05) * 2.65;    // SHARP release snap (overshoots to -0.55)
+  if (t < 0.72) return -0.55 + _heroEaseOutCubic((t - 0.63) / 0.09) * 0.25;   // settle from overshoot
+  return -0.30 + _heroVecAttackRecover(t) * 0.30;                             // recover to neutral
 }
 function _heroVecJumpRise() {
   return ((typeof player !== 'undefined' && player.vy) || 0) < -0.4;
@@ -29035,13 +29049,32 @@ const HERO_VEC_ANIMS = {
   // v0.25.191 — Archer-specific attack: bow draw + release. Body lean
   // is much subtler than the warrior swing (no heavy windup or
   // follow-through). The action lives in the arms.
+  // v0.25.297 — Body now leans subtly BACK during the draw (legs
+  // brace, spine tilts), then nods FORWARD on release as recoil
+  // travels through the body. Reads as a real archer settling into
+  // their stance instead of a static torso.
   attack_archer: {
-    spine: t => -0.04 + _heroVecAttackStrike(t) * 0.10 - _heroVecAttackRecover(t) * 0.06,
-    head:  t => -0.05 + _heroVecAttackStrike(t) * 0.10 - _heroVecAttackRecover(t) * 0.05,
+    // Lean back during 0.08 → 0.58 draw window, snap forward 0.58 → 0.72 release.
+    spine: t => t < 0.08
+      ? -0.04 + _heroEaseOutCubic(t / 0.08) * -0.06
+      : t < 0.58
+        ? -0.10
+        : t < 0.72
+          ? -0.10 + _heroEaseOutCubic((t - 0.58) / 0.14) * 0.18
+          : 0.08 - _heroVecAttackRecover(t) * 0.08,
+    head:  t => t < 0.08
+      ? -0.05 + _heroEaseOutCubic(t / 0.08) * -0.04
+      : t < 0.58
+        ? -0.09
+        : t < 0.72
+          ? -0.09 + _heroEaseOutCubic((t - 0.58) / 0.14) * 0.14
+          : 0.05 - _heroVecAttackRecover(t) * 0.05,
     armR:  t => _heroVecArcherFrontArm(t),
     armL:  t => _heroVecArcherBackArm(t),
-    legL:  t => -0.10,
-    legR:  t => 0.12,
+    // Front leg braces forward (-0.20), back leg planted (+0.18) for
+    // the wide archery stance.
+    legL:  t => -0.20,
+    legR:  t =>  0.18,
   },
   // v0.25.194 — Warrior 2-handed wide slash. Bigger spine + head
   // commit than the generic attack since both arms drive the swing.
