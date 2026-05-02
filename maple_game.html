@@ -3054,7 +3054,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.259';
+const GAME_VERSION = 'v0.25.260';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4686,6 +4686,10 @@ const LX_FX = (() => {
     // theme with spectral hands + crossed daggers + void portal motifs.
     phantom_voidrift:      'phantom_voidrift.webp',
     phantom_cut:           'phantom_cut.webp',
+    // v0.25.260 — Nightreaper G eclipse (distinct from Phantom's portal)
+    // and Archer C (Evade Roll) playful explosion burst.
+    nightreaper_eclipse:   'nightreaper_eclipse.webp',
+    evade_burst:           'evade_burst.webp',
   };
   for (const [k, f] of Object.entries(files)) {
     const img = new Image();
@@ -5326,7 +5330,7 @@ const SKILLS = {
   arrowShot:    { name:'Arrow Shot',     icon:'🏹', cls:'archer', slot:'d', mp:2,  cd:520,  desc:'Fire an arrow.' },
   multiShot:    { name:'Multi Shot',     icon:'🎋', cls:'archer', slot:'s', mp:10, cd:1400,  desc:'3 arrow spread.' },
   chargedShot:  { name:'Charged Shot',   icon:'⚡', cls:'archer', slot:'a', mp:14, cd:1900,  desc:'Big piercing arrow.' },
-  evadeRoll:    { name:'Evade Roll',     icon:'🤸', cls:'archer', slot:'e', mp:6,  cd:1500,  desc:'Back flip + 2 shot.' },
+  evadeRoll:    { name:'Evade Burst',    icon:'💥', cls:'archer', slot:'e', mp:8,  cd:1700,  desc:'Back flip + 2 shot + cute explosive blast that hugely knocks back nearby monsters.' },
   eagleEye:     { name:'Eagle Eye',      icon:'🦅', cls:'archer', slot:'w', mp:16, cd:14000, desc:'+40% crit chance for 8s.' },
   // Sniper
   // v0.23.1 — Sniper X (slot s) reverts to the archer default MultiShot (its
@@ -5347,7 +5351,7 @@ const SKILLS = {
   // Rogue path
   shadowlord_clones:  { name:'Mirror Shadow',      icon:'👥', cls:'rogue', job:'ninja',    master:'shadowlord',  slot:'x', mp:40, cd:22000, desc:'3 levitating clones flank you at long range — circular AOE strikes for 15s.' },
   shinobi_seal:       { name:'Kage Rush',          icon:'🎴', cls:'rogue', job:'ninja',    master:'shinobi',     slot:'x', mp:35, cd:17000,  desc:'Zip across the map slashing in rapid succession.' },
-  nightreaper_mark:   { name:'Blink Barrage',      icon:'🗡️', cls:'rogue', job:'assassin', master:'nightreaper', slot:'x', mp:55, cd:12000, desc:'Zip-zap at blinding speed between every foe on screen — up to 14 blink-strikes at 65 ms cadence. Ends with a dark twin-blade nova. Fixed 12 s CD (CDR-immune).' },
+  nightreaper_mark:   { name:'Eclipse Massacre',   icon:'🌑', cls:'rogue', job:'assassin', master:'nightreaper', slot:'x', mp:55, cd:12000, desc:'Stationary 2.4 s channel: a blood-eclipse rains spectral daggers on every visible enemy in 10 batches, then snaps shut for an aftershock nova. Fixed 12 s CD (CDR-immune).' },
   phantom_cut:        { name:'Voidrift Execution', icon:'👻', cls:'rogue', job:'assassin', master:'phantom',     slot:'x', mp:55, cd:12000, desc:'Mark up to 6 enemies, phase through the world and execute them in chain-teleport strikes. Each strike ignores DEF and crits; final hit detonates a shadow nova. Fixed 12 s CD (CDR-immune).' },
   // Mage path
   sage_meteorshower:  { name:'Meteor Shower',      icon:'📜', cls:'mage', job:'archmage', master:'sage',         slot:'x', mp:55, cd:19000, desc:'5 meteors rain over an area.' },
@@ -5356,7 +5360,7 @@ const SKILLS = {
   hexmaster_grandhex: { name:'Grand Hex',          icon:'🧿', cls:'mage', job:'warlock',  master:'hexmaster',    slot:'x', mp:35, cd:24000, desc:'Freeze every enemy 2s and apply a slow poison DOT.' },
   // Archer path
   marksman_oneshot:   { name:'One Shot One Kill',  icon:'🎯', cls:'archer', job:'sniper', master:'marksman',    slot:'x', mp:50, cd:22000, desc:'Guaranteed crit piercing; 12% instakill.' },
-  ballista_volley:    { name:'Siege Volley',       icon:'🛡️', cls:'archer', job:'sniper', master:'ballista',    slot:'x', mp:25, cd:20000, desc:'Hold G to channel a 10 s piercing arrow stream. Drains MP while held; releases early on key-up.' },
+  ballista_volley:    { name:'Siege Volley',       icon:'🛡️', cls:'archer', job:'sniper', master:'ballista',    slot:'x', mp:25, cd:23000, desc:'Hold G to channel an 8 s piercing arrow stream. Drains MP while held; releases early on key-up.' },
   beastmaster_pack:   { name:'Call of the Wild',   icon:'🐾', cls:'archer', job:'ranger', master:'beastmaster', slot:'x', mp:50, cd:34000, desc:'Summon 3 wolves for 35s.' },
   skyhunter_gale:     { name:'Gale Storm',         icon:'🦅', cls:'archer', job:'ranger', master:'skyhunter',   slot:'x', mp:45, cd:22000, desc:'10 homing arrows that cannot miss.' },
 };
@@ -12863,6 +12867,14 @@ function updatePlayer(dt) {
         // Subtle muzzle flicker every other volley to sell continuous fire
         if ((now & 1) === 0 && typeof addShake === 'function') addShake(1);
       }
+      // v0.25.260 — keep the ballista sprite anchored to the chest for
+      // the entire duration. Sprite life is 28 frames, so respawn every
+      // 24 frames (~400ms) for slight overlap, no flicker.
+      if (now - (ch.lastSpriteAt | 0) >= 24) {
+        ch.lastSpriteAt = now;
+        spawnSpriteBurst(player.x + player.w / 2 + player.facing * 30, player.y + player.h / 2, 'ballista_volley',
+          { size: 160, life: 28, angle: player.facing > 0 ? 0 : Math.PI });
+      }
     }
   }
 
@@ -15824,6 +15836,37 @@ const SKILL_FNS = {
     flash(0.15);
   },
   evadeRoll: () => {
+    // v0.25.260 — Now ALSO blasts nearby monsters away with a cute
+    // explosive burst. Creates breathing room when the archer needs
+    // to reset positioning. Knockback is huge (vx ±18, vy −9) so even
+    // tanky elites get a proper push; no real damage so the skill
+    // stays a defensive maneuver, not a nuke.
+    const blastCx = player.x + player.w/2;
+    const blastCy = player.y + player.h/2;
+    const BLAST_R = 130;
+    let kbCount = 0;
+    for (const m of game.monsters) {
+      if (m.currentHp <= 0) continue;
+      const dx = (m.x + m.w/2) - blastCx;
+      const dy = (m.y + m.h/2) - blastCy;
+      if (dx * dx + dy * dy > BLAST_R * BLAST_R) continue;
+      // Direction: AWAY from player. Add small dmg tag so it feels alive.
+      const dir = dx === 0 ? (Math.random() < 0.5 ? -1 : 1) : Math.sign(dx);
+      m.vx += dir * 18;
+      m.vy = Math.min(m.vy || 0, -9);
+      m.stunTimer = Math.max(m.stunTimer || 0, 350);
+      const dmg = Math.max(1, Math.floor(getAtk() * 0.4 + 4));
+      hitMonster(m, dmg, false, 'evade_blast');
+      kbCount++;
+    }
+    // Cute medium-sized explosion sprite at the start position
+    spawnSpriteBurst(blastCx, blastCy, 'evade_burst',
+      { size: 180, life: 26, spin: 0.6 });
+    if (kbCount > 0) {
+      addShake(5); flash(0.18);
+      if (audio && audio.play) audio.play('crit');
+      if (typeof showToast === 'function' && kbCount >= 2) showToast(`💥 Knocked back ${kbCount}!`, 'rare');
+    }
     // Detect "moving back" intent — held direction is opposite the facing
     const k = game.keys;
     const movingBack = (player.facing > 0 && k['arrowleft']) || (player.facing < 0 && k['arrowright']);
@@ -16446,141 +16489,152 @@ const SKILL_FNS = {
   },
 
   nightreaper_mark: () => {
-    // Blink Barrage (v0.23 rework) — the rogue dissolves into a streak of
-    // shadow and teleport-strikes every enemy on screen in rapid succession.
-    // Strikes fire every 65 ms; each leaves a violet afterimage trail and a
-    // dark-blade slash sparkline. Finale: a twin-blade nova at the rogue's
-    // landing spot. A true signature "zip-zap" feel.
+    // v0.25.260 — Reworked to be MECHANICALLY DISTINCT from Phantom's
+    // chain-teleport. Now an Eclipse Massacre: the rogue ROOTS in place
+    // and summons a blood-eclipsed moon that rains spectral daggers
+    // down on every visible enemy for 2.4 s. Final beat snaps the
+    // eclipse closed for an aftershock nova.
+    //
+    // Core distinctions vs Phantom Cut:
+    //   • Stationary channel (Phantom moves via chain-teleport)
+    //   • Sustained AoE rain across the entire visible screen
+    //     (Phantom is single-target precision capped at 6 marks)
+    //   • Cinematic eclipse overlay with rainfall (Phantom is a portal
+    //     burst followed by chain-blink to each mark)
+    //   • Uses falling-dagger smoothFx instead of teleport afterimages
+    //   • Builds tension across 2.4 s rather than firing in 1 s
+    //
+    // 12 s CD is still CDR-immune (locked at 13911) so the ult cadence
+    // is identical regardless of WIS / mage CDR — preserves the
+    // assassin master signature feel.
+    const camL = game.camera.x, camR = camL + W;
     const pcx0 = player.x + player.w/2;
     const pcy0 = player.y + player.h/2;
-    const camL = game.camera.x, camR = camL + W;
     // Pick targets within the visible viewport (a bit past the edges so
     // mobs about to peek in still get tagged). Cap at 14 so a saturated
     // forest frame doesn't blow past the skill's tempo.
-    const targets = game.monsters
+    // Build the target list — every visible enemy on screen, no cap.
+    // Distinct from Phantom which selects 6 nearest. Eclipse hits ALL.
+    const initialTargets = game.monsters
       .filter(m => m.currentHp > 0)
-      .filter(m => (m.x + m.w) > camL - 80 && m.x < camR + 80)
-      .map(m => ({ m, d: Math.hypot((m.x + m.w/2) - pcx0, (m.y + m.h/2) - pcy0) }))
-      .sort((a, b) => a.d - b.d)
-      .slice(0, 14)
-      .map(e => e.m);
+      .filter(m => (m.x + m.w) > camL - 80 && m.x < camR + 80);
 
-    if (!targets.length) {
-      // Whiff — refund part of the cost and give a tiny blink so the skill
-      // still feels like it did something.
+    if (!initialTargets.length) {
+      // Whiff — refund part of the cost so the skill still feels alive.
       player.mp = Math.min(getMaxMp(), player.mp + 30);
       player.invulnerable = Math.max(player.invulnerable, 400);
-      showToast('No marks in sight — MP refunded', 'common');
+      showToast('No prey in sight — MP refunded', 'common');
       audio.play('mp_refund');
       return;
     }
 
     audio.play('levelup');
-    showToast(`⚡ BLINK BARRAGE — ${targets.length} marks`, 'legendary');
-    addShake(18); flash(0.45); addHitStop(140);
-    player.invulnerable = Math.max(player.invulnerable, 2400);
+    showToast(`🌑 ECLIPSE MASSACRE — ${initialTargets.length} prey under the moon`, 'legendary');
+    addShake(20); flash(0.55); addHitStop(160);
 
-    const STRIKE_DELAY = 65;   // ms between blinks — blindingly fast
-    const PRE_DELAY    = 150;  // ms windup
-    targets.forEach((target, i) => {
+    // Total channel: 2400 ms. Player roots in place + invulnerable.
+    const CHANNEL_MS = 2400;
+    player.invulnerable = Math.max(player.invulnerable, CHANNEL_MS + 200);
+    player.vx = 0;            // root in place — no chain-teleport movement
+    player.hitStun = 0;       // any incoming stun shaken off
+
+    // Big eclipse sprite as the cinematic backdrop. Spawn slightly
+    // above the player so it dominates the upper half of the screen.
+    spawnSpriteBurst(pcx0, pcy0 - 60, 'nightreaper_eclipse',
+      { size: 360, life: Math.floor(CHANNEL_MS / 16.6), spin: Math.PI * 0.3 });
+    // Atmospheric darkening — repeated via flash dim every few frames.
+
+    // Dagger rain — 10 batches over the 2.4 s window. Each batch picks
+    // one CURRENT alive enemy (re-evaluated each tick so kills drop out
+    // and new mobs spawning in get hit too) and rains a falling-dagger
+    // smoothFx slash + damage tick on each.
+    const BATCHES = 10;
+    const BATCH_DELAY = Math.floor(CHANNEL_MS / BATCHES);
+    for (let b = 0; b < BATCHES; b++) {
       scheduleSkillTimer(() => {
-        if (player.hp <= 0 || !target || target.currentHp <= 0) return;
-        // Alternate flanks for rhythm + variety
-        const side = (i % 2 === 0) ? -1 : 1;
-        const oldX = player.x, oldY = player.y;
-        player.x = Math.max(0, Math.min(game.mapData.worldWidth - player.w,
-          target.x + (side > 0 ? target.w + 6 : -player.w - 6)));
-        player.y = target.y;
-        player.facing = -side;
-        player.invulnerable = Math.max(player.invulnerable, 220);
-
-        // Damage per strike. v0.25.242 (G3) — used to bypass DEF and
-        // unconditionally crit; tanky elites melted regardless of their
-        // build. Now applies DEF reduction (50% effective) and rolls
-        // crit (with bias) so tanky mobs read as tanky.
-        const baseDmg = Math.floor(getAtk() * 1.8);
-        const defRed = Math.floor((target.def || 0) * 0.5);
-        const isCrit = rollCrit() || Math.random() < 0.6;     // still crit-biased
-        const dmg = Math.max(1, Math.floor((baseDmg - defRed) * (isCrit ? getCritDmg() : 1)));
-        target.currentHp -= dmg;
-        target.hitFlash = 120;
-        game.damageNumbers.push({
-          x: target.x + target.w/2, y: target.y - 6, vy: -2.8,
-          text: dmg + (isCrit ? '!' : ''), life: 40, color: '#c8a8ff', size: 18, crit: isCrit
-        });
-        if (target.currentHp <= 0) killMonster(target);
-
-        // Zig-zag shadow trail between old and new position — 10 after-images
-        // along the path to sell the "zip-zap" speed.
-        for (let k = 0; k < 10; k++) {
-          const t = k / 10;
-          game.afterImages.push({
-            x: oldX + (player.x - oldX) * t,
-            y: oldY + (player.y - oldY) * t,
-            facing: player.facing,
-            state: 'attack',
-            life: 14, maxLife: 18,
-            color: `rgba(170,110,255,${0.65 - t * 0.35})`,
-          });
-        }
-        // Dark-blade slash at the landing spot
-        spawnSmoothSlash(
-          target.x + target.w/2, target.y + target.h/2,
-          side > 0 ? Math.PI : 0,
-          120, '#b87aff',
-          { thickness: 7, spread: Math.PI * 0.9, life: 14 }
+        if (player.hp <= 0) return;
+        // Re-evaluate alive on-screen enemies each batch.
+        const alive = game.monsters.filter(m =>
+          m.currentHp > 0 &&
+          (m.x + m.w) > camL - 80 && m.x < camR + 80
         );
-        // Purple/black spark burst
-        for (let k = 0; k < 14; k++) {
-          const a = Math.random() * Math.PI * 2;
-          game.particles.push({
-            x: target.x + target.w/2, y: target.y + target.h/2,
-            vx: Math.cos(a) * 7, vy: Math.sin(a) * 7,
-            life: 20,
-            color: k % 3 === 0 ? '#0a0118' : k % 2 ? '#6a22b0' : '#b866ff',
-            size: 3
+        if (!alive.length) return;
+        for (const m of alive) {
+          const tx = m.x + m.w/2;
+          const ty = m.y + m.h/2;
+          // Damage per dagger — roughly 70% of old per-strike value, but
+          // multiplied by 10 batches × N targets = MUCH more total damage
+          // when many enemies present. Single-target stays comparable.
+          const baseDmg = Math.floor(getAtk() * 1.2);
+          const defRed = Math.floor((m.def || 0) * 0.5);
+          const isCrit = rollCrit() || Math.random() < 0.55;
+          const dmg = Math.max(1, Math.floor((baseDmg - defRed) * (isCrit ? getCritDmg() : 1)));
+          m.currentHp -= dmg;
+          m.hitFlash = 120;
+          m.stunTimer = Math.max(m.stunTimer || 0, 280);
+          game.damageNumbers.push({
+            x: tx, y: m.y - 6, vy: -2.4,
+            text: dmg + (isCrit ? '!' : ''), life: 36,
+            color: '#ff66aa', size: 16, crit: isCrit
           });
+          if (m.currentHp <= 0) killMonster(m);
+          // Falling-dagger smoothFx — vertical slash from above
+          spawnSmoothSlash(tx, ty, Math.PI / 2, 90, '#ff66aa',
+            { thickness: 5, spread: Math.PI * 0.25, life: 14 });
+          // Trailing shadow particles falling from the moon
+          for (let k = 0; k < 4; k++) {
+            game.particles.push({
+              x: tx + (Math.random() - 0.5) * 24,
+              y: ty - 60 - k * 18,
+              vx: 0, vy: 4 + Math.random() * 2,
+              life: 16,
+              color: k % 2 ? '#ff5588' : '#1a0230',
+              size: 3,
+            });
+          }
         }
-        addShake(2); flash(0.06); audio.play('hit');
-      }, PRE_DELAY + i * STRIKE_DELAY);
-    });
+        addShake(3); flash(0.08);
+        if ((b & 1) === 0) audio.play('hit');
+      }, b * BATCH_DELAY);
+    }
 
-    // Finale — twin-blade shadow nova at the rogue's final position.
-    const finaleAt = PRE_DELAY + targets.length * STRIKE_DELAY + 80;
+    // Finale — eclipse "snap": all on-screen enemies take a 2× ATK
+    // aftershock with knockback + a screen-wide flash.
     scheduleSkillTimer(() => {
       if (player.hp <= 0) return;
       const fx = player.x + player.w/2, fy = player.y + player.h/2;
-      addShake(24); flash(0.6); addHitStop(180);
+      addShake(28); flash(0.7); addHitStop(180);
       audio.play('crit');
-      // AOE nova damage
+      // Re-eval: hit every enemy still alive on screen
       for (const m of game.monsters) {
         if (m.currentHp <= 0) continue;
-        const d = Math.hypot((m.x + m.w/2) - fx, (m.y + m.h/2) - fy);
-        if (d > 240) continue;
-        const dmg = Math.floor(getAtk() * 1.6 + 20);
-        hitMonster(m, dmg, true, 'nightreaper_nova');
-        m.vx += ((m.x + m.w/2) - fx > 0 ? 1 : -1) * 9;
-        m.vy -= 7;
-        m.stunTimer = Math.max(m.stunTimer || 0, 650);
+        if ((m.x + m.w) <= camL - 80 || m.x >= camR + 80) continue;
+        const baseDmg = Math.floor(getAtk() * 2.0 + 25);
+        const defRed = Math.floor((m.def || 0) * 0.5);
+        const dmg = Math.max(1, Math.floor((baseDmg - defRed) * 1.5));      // forced crit
+        hitMonster(m, dmg, true, 'eclipse_snap');
+        m.vx += ((m.x + m.w/2) - fx > 0 ? 1 : -1) * 11;
+        m.vy -= 8;
+        m.stunTimer = Math.max(m.stunTimer || 0, 800);
       }
-      // Two crossed slashes — signature dual-blade finish
-      spawnSmoothSlash(fx, fy,  Math.PI * 0.25, 220, '#c8a8ff', { thickness: 10, spread: Math.PI * 0.8, life: 20 });
-      spawnSmoothSlash(fx, fy, -Math.PI * 0.25, 220, '#6a22b0', { thickness: 10, spread: Math.PI * 0.8, life: 20 });
-      spawnSmoothExplosion(fx, fy, 240, '#b866ff', '#1a0230a0', { life: 40 });
-      // Radial dark sparks
-      for (let i = 0; i < 48; i++) {
-        const a = (i / 48) * Math.PI * 2;
+      // Two crossed dagger slashes at player position (signature dual-blade)
+      spawnSmoothSlash(fx, fy,  Math.PI * 0.25, 240, '#ff66aa', { thickness: 12, spread: Math.PI * 0.9, life: 22 });
+      spawnSmoothSlash(fx, fy, -Math.PI * 0.25, 240, '#1a0230', { thickness: 12, spread: Math.PI * 0.9, life: 22 });
+      // Eclipse "snap" — tight ring at player, expanding outward
+      spawnSmoothExplosion(fx, fy, 280, '#ff5588', '#1a0230a0', { life: 44 });
+      for (let i = 0; i < 56; i++) {
+        const a = (i / 56) * Math.PI * 2;
         game.particles.push({
           x: fx, y: fy,
-          vx: Math.cos(a) * 10, vy: Math.sin(a) * 10,
-          life: 52,
-          color: i % 3 === 0 ? '#ffffff' : i % 2 ? '#b866ff' : '#1a0230',
+          vx: Math.cos(a) * 12, vy: Math.sin(a) * 12,
+          life: 56,
+          color: i % 3 === 0 ? '#ffffff' : i % 2 ? '#ff66aa' : '#1a0230',
           size: 3
         });
       }
-      // Small HP top-up reward for surviving the barrage
+      // Small HP top-up reward for surviving the channel
       player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.18));
-    }, finaleAt);
+    }, CHANNEL_MS + 60);
   },
 
   phantom_cut: () => {
@@ -16868,32 +16922,31 @@ const SKILL_FNS = {
   },
 
   ballista_volley: () => {
-    // v0.25.257 — Reworked from a 0.5 s burst into a 10 s HOLD channel.
-    // Press G → start the channel, fire arrow volleys at a steady cadence
-    // for up to 10 s while G is held. Releases early on key-up. Drains MP
-    // while channeling so the player decides "burst now or save MP".
+    // v0.25.257 — Reworked from a 0.5 s burst into a hold channel.
+    // v0.25.260 — Tuning pass: duration 10 s → 8 s, sprite re-spawns
+    // periodically during the hold so the ballista weapon stays
+    // visible the entire time, cooldown 20 s → 23 s to match the
+    // shorter window. Per-arrow damage stays tuned for the new
+    // total: ~106 arrows × `getAtk()*0.85+5` ≈ 90× ATK over 8 s.
     //
-    //   • 25 MP up-front (was 45 MP for the burst).
-    //   • +1 MP drain every 10 frames (~6 MP/sec → 60 MP over a full 10 s).
-    //   • Volley cadence: every 9 frames (~150 ms → ~67 volleys total).
-    //   • Volley shape: 2 arrows in a vertical stack (top + bottom), each
-    //     pierces, breaks defense.
-    //   • Per-arrow damage: getAtk() * 0.85 + 5 — tuned so a full 10 s
-    //     channel deals ~115× ATK total (vs old burst's ~28× ATK), but
-    //     spread thinly so per-second DPS is comparable to other ults.
-    //   • Released early → channel ends but cooldown still consumed
-    //     (prevents "tap-spam" abuse).
+    //   • 25 MP up-front.
+    //   • +1 MP drain every 10 frames (~6 MP/sec → ~48 MP over a full 8 s).
+    //   • Volley cadence: every 9 frames (~150 ms → ~53 volleys total).
+    //   • Sprite refreshes every 24 frames (~400 ms) for the duration so
+    //     the ballista weapon stays anchored to the chest visually.
+    //   • Released early → channel ends; full CD still applies.
     //
     // Per-frame channel logic lives in updatePlayer near the aegis tick.
     const now = game.time;
     player._ballistaChannel = {
       startedAt: now,
-      endsAt: now + 600,            // 600 frames = 10 s at 60 fps
+      endsAt: now + 480,            // 480 frames = 8 s at 60 fps (was 600 / 10 s)
       lastFireAt: now - 10,         // fire on the next eligible frame
+      lastSpriteAt: now,            // refresh sprite every 24 frames
       mpDrainAccum: 0,
     };
     spawnSpriteBurst(player.x + player.w / 2 + player.facing * 30, player.y + player.h / 2, 'ballista_volley',
-      { size: 160, life: 36, angle: player.facing > 0 ? 0 : Math.PI });
+      { size: 160, life: 28, angle: player.facing > 0 ? 0 : Math.PI });
     if (typeof showToast === 'function') showToast('SIEGE VOLLEY — hold G to channel', 'legendary');
     addShake(3);
   },
@@ -37523,6 +37576,9 @@ requestAnimationFrame(loop);
     // v0.25.258 — Phantom V/G sprites
     'Sprites/fx/phantom_voidrift.webp',
     'Sprites/fx/phantom_cut.webp',
+    // v0.25.260 — Nightreaper Eclipse + Archer Evade burst
+    'Sprites/fx/nightreaper_eclipse.webp',
+    'Sprites/fx/evade_burst.webp',
     'Sprites/summons/wolf_sky.webp',
     // U-panel UI art (v0.25.221 + v0.25.222).
     'Sprites/ui/char_header.webp',
