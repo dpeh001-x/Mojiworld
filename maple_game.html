@@ -3005,7 +3005,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.248';
+const GAME_VERSION = 'v0.25.249';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5725,6 +5725,8 @@ const SETS = {
     bonus2: { atkPct: 0.10 },
     bonus3: { crit: 15, hp: 50 },
     blurb: '2pc: +10% ATK · 3pc: +15 Crit, +50 HP',
+    // v0.25.249 — Aura: warm gold radiance with rising sparkles.
+    aura: { primary: '#ffe388', secondary: '#fff5cc', accent: '#ffaa44', shape: 'sparkle' },
   },
   doomforged: {
     name: 'Doomforged',
@@ -5733,6 +5735,8 @@ const SETS = {
     bonus2: { hp: 60 },
     bonus3: { atkPct: 0.12, def: 5 },
     blurb: '2pc: +60 HP · 3pc: +12% ATK, +5 DEF',
+    // Aura: hot red embers smoldering upward from the feet.
+    aura: { primary: '#ff5544', secondary: '#cc1111', accent: '#ffaa44', shape: 'ember' },
   },
   shadowweave: {
     name: 'Shadowweave',
@@ -5741,6 +5745,8 @@ const SETS = {
     bonus2: { crit: 12 },
     bonus3: { speed: 0.5, dodgeChance: 0.10 },
     blurb: '2pc: +12 Crit · 3pc: +0.5 Spd, +10% Dodge',
+    // Aura: violet shadow wisps trailing behind the character.
+    aura: { primary: '#aa44ff', secondary: '#3a1a5a', accent: '#cc88ff', shape: 'wisp' },
   },
   voidcaller: {
     name: 'Voidcaller',
@@ -5749,6 +5755,8 @@ const SETS = {
     bonus2: { mp: 30 },
     bonus3: { critDmg: 0.20, multishot: 1 },
     blurb: '2pc: +30 MP · 3pc: +20% Crit DMG, +1 Multishot',
+    // Aura: arcane runes orbiting at chest height.
+    aura: { primary: '#bb44ff', secondary: '#6622aa', accent: '#ddccff', shape: 'rune' },
   },
   skyhunter: {
     name: 'Skyhunter',
@@ -5757,6 +5765,8 @@ const SETS = {
     bonus2: { speed: 0.4 },
     bonus3: { multishot: 1, crit: 15 },
     blurb: '2pc: +0.4 Spd · 3pc: +1 Multishot, +15 Crit',
+    // Aura: green leaves drifting on the wind.
+    aura: { primary: '#88ffaa', secondary: '#228844', accent: '#ddffcc', shape: 'leaf' },
   },
 };
 
@@ -7987,6 +7997,10 @@ function getEquipBonus(key) {
 // returns the contribution for `key` from any active 2pc / 3pc bonus.
 // Cheap (3 slot reads + small object iteration); called per stat lookup,
 // no caching needed.
+// v0.25.249 — Items themselves are universally wearable (anyone can put
+// on a Doomforged Greatsword and get its raw stats), but the set
+// bonuses only activate when the set's class matches the player's class.
+// 'any' sets (Dawnshard) work for every class.
 function getSetBonus(key) {
   if (!player || !player.equipped) return 0;
   const counts = {};
@@ -7998,10 +8012,28 @@ function getSetBonus(key) {
   for (const sid in counts) {
     const set = SETS[sid];
     if (!set) continue;
+    if (set.cls && set.cls !== 'any' && set.cls !== player.cls) continue;
     if (counts[sid] >= 2 && set.bonus2 && typeof set.bonus2[key] === 'number') total += set.bonus2[key];
     if (counts[sid] >= 3 && set.bonus3 && typeof set.bonus3[key] === 'number') total += set.bonus3[key];
   }
   return total;
+}
+
+// v0.25.249 — Helper: which sets currently have 3-piece active for the
+// player's class. Drives the set-aura render. Returns array of setIds
+// (usually 0 or 1 element since stacking 3-piece sets across 3 slots
+// isn't possible, but the array shape future-proofs multi-set bonuses).
+function _activeFullSets() {
+  const counts = getEquippedSetCounts();
+  const out = [];
+  for (const sid in counts) {
+    if (counts[sid] < 3) continue;
+    const set = SETS[sid];
+    if (!set) continue;
+    if (set.cls && set.cls !== 'any' && set.cls !== player.cls) continue;
+    out.push(sid);
+  }
+  return out;
 }
 
 // v0.25.248 — Detect new set-bonus activations (2pc / 3pc thresholds
@@ -8015,14 +8047,25 @@ function _checkSetComplete() {
     if (!set) continue;
     const now = counts[sid];
     const before = prev[sid] || 0;
+    // v0.25.249 — different toasts for class-match (bonus active) vs
+    // mismatch (you can wear it but no bonus). Avoids the misleading
+    // "SET COMPLETE" celebration when the bonus actually does nothing.
+    const classMatch = !set.cls || set.cls === 'any' || set.cls === player.cls;
     if (now >= 3 && before < 3) {
-      if (typeof showToast === 'function') showToast(`✦ ${set.icon} ${set.name} SET COMPLETE — ${set.blurb}`, 'legendary');
-      if (typeof flash === 'function') flash(0.35);
-      if (typeof addShake === 'function') addShake(6);
-      if (audio && audio.play) audio.play('levelup');
+      if (classMatch) {
+        if (typeof showToast === 'function') showToast(`✦ ${set.icon} ${set.name} SET COMPLETE — ${set.blurb}`, 'legendary');
+        if (typeof flash === 'function') flash(0.35);
+        if (typeof addShake === 'function') addShake(6);
+        if (audio && audio.play) audio.play('levelup');
+      } else {
+        if (typeof showToast === 'function') showToast(`${set.icon} 3 ${set.name} pieces equipped — bonus is ${set.cls}-only`, 'common');
+      }
     } else if (now >= 2 && before < 2) {
-      if (typeof showToast === 'function') showToast(`◈ ${set.icon} ${set.name} 2-piece active — ${_setBonusFmt(set.bonus2)}`, 'epic');
-      if (audio && audio.play) audio.play('crit');
+      if (classMatch) {
+        if (typeof showToast === 'function') showToast(`◈ ${set.icon} ${set.name} 2-piece active — ${_setBonusFmt(set.bonus2)}`, 'epic');
+        if (audio && audio.play) audio.play('crit');
+      }
+      // (No toast for mismatched 2pc — too noisy)
     }
   }
   player._lastSetCounts = counts;
@@ -21607,11 +21650,19 @@ function attachTooltip(el, it) {
       const set = SETS[it.setId];
       const counts = getEquippedSetCounts();
       const equipped = counts[it.setId] || 0;
-      const active2 = equipped >= 2;
-      const active3 = equipped >= 3;
+      // v0.25.249 — bonuses only fire if the set's class matches
+      // player's. Show the gate explicitly in the tooltip so a mage
+      // looking at a Doomforged drop knows why the bonus is greyed out.
+      const classMatch = !set.cls || set.cls === 'any' || set.cls === player.cls;
+      const active2 = classMatch && equipped >= 2;
+      const active3 = classMatch && equipped >= 3;
+      const CLS_LABEL = { warrior:'Warrior', rogue:'Rogue', mage:'Mage', archer:'Archer', any:'Any class' };
+      const gateNote = classMatch ? '' :
+        `<div style="color:#ff9966;font-size:9px;margin-bottom:2px;">⚠ Bonuses only active for ${CLS_LABEL[set.cls] || set.cls}</div>`;
       setLine = `
         <div style="margin-top:6px;padding-top:6px;border-top:1px solid #443;font-size:10px;color:#aaa;">
           <div style="color:#ffcc66;margin-bottom:2px;">${set.icon} ${set.name} Set <span style="opacity:0.7;">(${equipped}/3)</span></div>
+          ${gateNote}
           <div style="color:${active2 ? '#88ff88' : '#777'};">2pc: ${_setBonusFmt(set.bonus2)}</div>
           <div style="color:${active3 ? '#88ff88' : '#777'};">3pc: ${_setBonusFmt(set.bonus3)}</div>
         </div>`;
@@ -28265,10 +28316,124 @@ function _drawMsxHero(sx, sy, _ctx, opts) {
   return true;
 }
 
+// v0.25.249 — Set-bonus 3pc aura. Renders a subtle thematic glow + a few
+// drifting particles around the player when the matching-class set is at
+// 3 pieces. Drawn before the chibi base so it sits behind the character.
+// Keeps emission cheap (1 particle every ~10 frames) so it doesn't add
+// to the per-frame budget noticeably even on mobile.
+function drawSetAura() {
+  if (!player || !player.cls) return;
+  if (typeof _activeFullSets !== 'function') return;
+  const active = _activeFullSets();
+  if (!active.length) return;
+  const sx = Math.round(player.x - game.camera.x);
+  const sy = Math.round(player.y);
+  const cx = sx + player.w / 2;
+  const cy = sy + player.h / 2;
+  const t = (game.time || 0) * 0.08;
+  for (const sid of active) {
+    const set = SETS[sid];
+    if (!set || !set.aura) continue;
+    const a = set.aura;
+    // 1) Soft radial halo behind the character — uses the "ground glow"
+    //    pattern already present elsewhere in the codebase. Pulses gently
+    //    so the player can read it as a status effect, not just decor.
+    const pulse = 0.6 + 0.4 * Math.sin(t * 1.3);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.18 * pulse;
+    ctx.fillStyle = a.primary;
+    ctx.beginPath();
+    ctx.ellipse(cx, sy + player.h - 4, player.w * 0.85, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Soft body halo
+    ctx.globalAlpha = 0.10 * pulse;
+    ctx.fillStyle = a.secondary;
+    ctx.beginPath();
+    ctx.arc(cx, cy, player.w * 0.95, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    // 2) Per-shape decorative element drawn in front of the body. These
+    //    are pure rendering (no game-state mutation) so they're cheap.
+    if (a.shape === 'rune') {
+      // Three slowly-orbiting runes at chest height
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 3; i++) {
+        const ang = t + i * (Math.PI * 2 / 3);
+        const rx = cx + Math.cos(ang) * 22;
+        const ry = cy + Math.sin(ang) * 8 - 6;
+        ctx.globalAlpha = 0.55 + 0.25 * Math.sin(t * 2 + i);
+        ctx.fillStyle = a.accent;
+        ctx.beginPath();
+        ctx.arc(rx, ry, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = a.primary;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(rx, ry, 4.5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    } else if (a.shape === 'sparkle') {
+      // Vertical-ish sparkle column; rises gently
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 4; i++) {
+        const phase = t * 1.5 + i * 0.7;
+        const sxk = cx + Math.sin(phase) * 14;
+        const syk = sy + 6 + ((phase * 6) % (player.h - 4));
+        ctx.globalAlpha = 0.45 + 0.35 * Math.sin(phase * 2);
+        ctx.fillStyle = a.accent;
+        ctx.fillRect(sxk - 1.5, syk - 1.5, 3, 3);
+        ctx.fillStyle = a.primary;
+        ctx.fillRect(sxk - 0.5, syk - 0.5, 1, 1);
+      }
+      ctx.restore();
+    }
+    // 3) Drift particles — one every few frames. Shape-specific motion.
+    if ((game.time | 0) % 8 === 0) {
+      if (a.shape === 'ember') {
+        // Ember rising from feet
+        for (let i = 0; i < 2; i++) {
+          game.particles.push({
+            x: cx + (Math.random() - 0.5) * player.w * 0.7,
+            y: sy + player.h - 2,
+            vx: (Math.random() - 0.5) * 0.6,
+            vy: -0.8 - Math.random() * 0.7,
+            life: 28, color: i ? a.primary : a.accent, size: 2,
+          });
+        }
+      } else if (a.shape === 'wisp') {
+        // Trailing violet shadow wisp behind
+        const back = -(player.facing || 1) * (8 + Math.random() * 6);
+        game.particles.push({
+          x: cx + back, y: cy + (Math.random() - 0.5) * 18,
+          vx: -(player.facing || 1) * (0.5 + Math.random() * 0.4),
+          vy: -0.2 - Math.random() * 0.3,
+          life: 26, color: Math.random() < 0.5 ? a.primary : a.secondary, size: 3,
+        });
+      } else if (a.shape === 'leaf') {
+        // Leaf drifting — sway side to side
+        const lx = cx + (Math.random() - 0.5) * 22;
+        const ly = sy + 4 + Math.random() * 10;
+        game.particles.push({
+          x: lx, y: ly,
+          vx: (Math.random() - 0.5) * 0.4,
+          vy: 0.25 + Math.random() * 0.4,
+          life: 60, color: Math.random() < 0.5 ? a.primary : a.accent, size: 2,
+        });
+      }
+    }
+  }
+}
+
 function drawPlayer() {
   const sx = Math.round(player.x - game.camera.x);
   const sy = Math.round(player.y);
   if (player.invulnerable > 0 && player.dodgeTimer <= 0 && Math.floor(player.invulnerable / 60) % 2 === 0) return;
+  // v0.25.249 — set-bonus 3pc aura sits behind the character.
+  drawSetAura();
   _spawnPlayerTrail();
   _chibiApply(sx, sy);
   // Block / parry shield bubble — drawn under the character so it haloes behind
