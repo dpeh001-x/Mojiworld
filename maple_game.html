@@ -2556,7 +2556,7 @@
         <div id="mp-players" style="min-height:40px; max-height:140px; overflow-y:auto; padding:6px 8px; background:rgba(0,0,0,0.35); border-radius:4px; font-size:12px;"></div>
       </div>
       <div style="margin-top:10px; padding:8px 10px; background:rgba(30,15,55,0.4); border-radius:4px; font-size:11px; color:#c8b0e0; line-height:1.5;">
-        <b>How it works.</b> Run the server from <code>server/</code> (<code>npm start</code>). Connect to <code>ws://localhost:8080</code> for a local LAN party, or deploy the server to Fly.io / Railway / any VPS for a public game. Everyone on the same room name sees each other. Combat / loot are still per-player for now — this is presence + chat.<br>
+        <b>How it works.</b> Run the server from <code>server/</code> (<code>npm start</code>). Connect to <code>ws://localhost:8080</code> for a local LAN party, or deploy the server to Fly.io / Railway / any VPS for a public game. Everyone on the same room name sees each other. Combat / loot are still per-player for now — this is presence + chat. <b>Co-op bonus:</b> if a party member is within ~400 px of your kill on the same map, you get <span class="gold">+50% XP</span>.<br>
         <b>In-world chat:</b> press <kbd>Enter</kbd> to type, <kbd>Esc</kbd> to cancel. Max <b>60 characters</b> per bubble. Works offline — bubbles float above your own character.
       </div>
     </div>
@@ -3005,7 +3005,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.244';
+const GAME_VERSION = 'v0.25.245';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -10105,6 +10105,28 @@ const net = {
   _reconnectTries: 0,
   _lastUrl: null,
 };
+
+// v0.25.245 (S2) — Multiplayer co-op XP wedge. If a peer is on the same
+// map and within 400 px of the killed monster, grant +50% XP for that
+// kill. Pure client-side — uses the existing presence ticks (peers
+// already broadcast x/y/map every 70 ms). The threshold is generous
+// enough that party play feels instantly cooperative without forcing
+// pixel-perfect grouping.
+function _coopXpMul(monster) {
+  if (!net.connected || !net.peers) return 1;
+  const myMap = game.currentMap || 'town';
+  const mx = (monster && monster.x) ? monster.x + monster.w / 2 : (player.x + player.w / 2);
+  const my = (monster && monster.y) ? monster.y + monster.h / 2 : (player.y + player.h / 2);
+  const RANGE = 400 * 400;
+  for (const id in net.peers) {
+    const p = net.peers[id];
+    if (!p || p.map !== myMap) continue;
+    const dx = (p.x || 0) - mx;
+    const dy = (p.y || 0) - my;
+    if (dx * dx + dy * dy <= RANGE) return 1.5;
+  }
+  return 1;
+}
 
 function _mpStatus(text, color) {
   const el = document.getElementById('mp-status');
@@ -18139,7 +18161,17 @@ function killMonster(m) {
   // v0.25.7 — bumped 1.25 → 1.35. Combined with the softer late curve
   // this takes ~8% off the L1→50 grind, which prestige compounds on.
   const xpCurveMul = 1.35;
-  player.exp += Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul);
+  // v0.25.245 (S2) — multiplayer combo XP. If at least one peer is on
+  // the same map within 400 px of the kill, grant +50% XP. Doesn't
+  // require any new network messages — uses existing presence ticks.
+  // Toast surfaces the bonus the first time it fires per kill chain.
+  let mpCoopMul = 1;
+  if (typeof _coopXpMul === 'function') mpCoopMul = _coopXpMul(m);
+  player.exp += Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul * mpCoopMul);
+  if (mpCoopMul > 1 && (game._lastCoopToast | 0) + 6000 < game.time) {
+    game._lastCoopToast = game.time;
+    showToast('🤝 Co-op bonus +50% XP', 'rare');
+  }
   // Press 8 cheat + any other XP pump call into _maybeLevelUp via the
   // inline call below. Extracting it as a named helper above the body of
   // this function so the dev XP cheat can trigger the same animation.
