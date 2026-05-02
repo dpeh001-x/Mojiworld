@@ -3054,7 +3054,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.260';
+const GAME_VERSION = 'v0.25.261';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -6175,11 +6175,14 @@ const POTION_ITEMS = [
   // means the same gameplay impact regardless of player level. The
   // `value` field carries the percentage (0-100) for backwards-compat
   // with code paths that still read it; `pct` is the canonical key.
-  { id:'hp_s',  name:'Small Red Potion',    icon:'🧪', type:'hp', pct:25, value:25, price:85 },
-  { id:'hp_m',  name:'Medium Red Potion',   icon:'🧃', type:'hp', pct:50, value:50, price:280 },
-  { id:'hp_l',  name:'Large Red Potion',    icon:'💧', type:'hp', pct:75, value:75, price:680 },
-  { id:'mp_s',  name:'Small Blue Potion',   icon:'🔵', type:'mp', pct:25, value:25, price:115 },
-  { id:'mp_m',  name:'Medium Blue Potion',  icon:'💠', type:'mp', pct:50, value:50, price:340 },
+  // v0.25.261 — Recolored potion icons so HP reads RED at every tier
+  // and MP reads BLUE. Old set mixed a blue droplet under the HP large
+  // tier which clashed with the red palette intent.
+  { id:'hp_s',  name:'Small Red Potion',    icon:'🍷', type:'hp', pct:25, value:25, price:85 },
+  { id:'hp_m',  name:'Medium Red Potion',   icon:'❤️', type:'hp', pct:50, value:50, price:280 },
+  { id:'hp_l',  name:'Large Red Potion',    icon:'🩸', type:'hp', pct:75, value:75, price:680 },
+  { id:'mp_s',  name:'Small Blue Potion',   icon:'💧', type:'mp', pct:25, value:25, price:115 },
+  { id:'mp_m',  name:'Medium Blue Potion',  icon:'💙', type:'mp', pct:50, value:50, price:340 },
   { id:'mp_l',  name:'Large Blue Potion',   icon:'🟦', type:'mp', pct:75, value:75, price:780 },
   { id:'full',  name:'Elixir',              icon:'⭐', type:'full', pct:100, value:1, price:1250 },
 ];
@@ -6217,7 +6220,7 @@ const POWERUPS = [
   { id:'acc',    name:'Eagle Eye',      icon:'🦅', stat:'accuracy',  min:15, max:45, unit:'',  fmt:r=>`+${r} Accuracy`,                 scale:r=>r },
 ];
 
-const BOON_EQUIP_CAP     = 5;   // how many boons can be active at once
+const BOON_EQUIP_CAP     = 3;   // v0.25.261 — tightened 5 → 3 so boon picks feel like real build commitments
 const BOON_INVENTORY_CAP = 25;  // total boons you can hold (v0.20); discard to make room
 const BOON_REROLL_BASE   = 500; // Lumen cost — climbs with each reroll on the same boon
 
@@ -7025,7 +7028,7 @@ const MAPS = {
       {x:820, y:360, w:80, h:10, type:'platform'},
     ],
     npcs: [
-      {x:160,  name:'Elspeth',       role:'potion',  color:'#ff88bb'},
+      {x:160,  name:'Pharma Sis',    role:'potion',  color:'#ff88bb'},
       {x:300,  name:'Brok',          role:'weapon',  color:'#6b8fcc'},
       {x:440,  name:'The Amnesiac',  role:'amnesiac',color:'#cc9944'},
       {x:580,  name:'Sage Mira',     role:'sage',    color:'#aa66cc'},
@@ -8485,7 +8488,10 @@ window.addEventListener('keydown', e => {
 
   if (k === 'f') tryInteract();
   if (k === 'arrowup' && !game.paused && player.hp > 0 && player.hitStun <= 0) tryPortal();
-  if (k === 'b') toggleModal('inventory-modal', renderInventory);
+  // v0.25.261 — B key intentionally unbound. Inventory is now opened
+  // via the U panel's "Items" tab. Keeping the key reserved (no fall
+  // through to other bindings) so future remap doesn't surprise users.
+  if (k === 'b') return;
   if (k === 'k') {
     // K / U share the attributes-modal container in "lp" variant.
     if (!player.cls) { showToast('Pick a class first', 'common'); }
@@ -12101,14 +12107,10 @@ function loadMap(id, entryX) {
       const tier = tierRoll < 0.1 ? 'gold' : tierRoll < 0.4 ? 'silver' : 'wood';
       spawnChest(p.x + p.w/2 - 14, p.y - 24, tier);
     }
-    // 1-2 random powerup orbs per combat map
-    const orbCount = game.mapData.isBossArena ? 0 : (Math.random() < 0.75 ? 1 + Math.floor(Math.random() * 2) : 0);
-    for (let i = 0; i < orbCount && plats.length; i++) {
-      const p = plats[Math.floor(Math.random() * plats.length)];
-      const r = Math.random();
-      const rarity = r < 0.02 ? 'legendary' : r < 0.12 ? 'epic' : r < 0.45 ? 'rare' : 'common';
-      spawnPowerupOrb(p.x + p.w/2, p.y - 20, rarity);
-    }
+    // v0.25.261 — Boons no longer scatter on combat maps. Only sources
+    // are: boss kills (powerup pick at line 19087) + Sage Mira's daily
+    // 12-hour offering. Tightens the boon economy so each pick is
+    // earned, not stumbled into.
   }
 
   // Reset mini-boss state on map change
@@ -15867,18 +15869,17 @@ const SKILL_FNS = {
       if (audio && audio.play) audio.play('crit');
       if (typeof showToast === 'function' && kbCount >= 2) showToast(`💥 Knocked back ${kbCount}!`, 'rare');
     }
-    // Detect "moving back" intent — held direction is opposite the facing
-    const k = game.keys;
-    const movingBack = (player.facing > 0 && k['arrowleft']) || (player.facing < 0 && k['arrowright']);
+    // v0.25.261 — Always a somersault flip backwards (was conditional
+    // on holding the back-direction key). Reads as a clean signature
+    // archer move every cast.
     const tx = Math.min(game.mapData.worldWidth - player.w, Math.max(0, player.x - player.facing * 120));
     for (let i=0;i<14;i++) { game.particles.push({x:player.x+player.w/2,y:player.y+player.h,vx:player.facing*(1+Math.random()*3),vy:-1-Math.random()*2,life:20,color:'#ccffcc',size:2}); }
     player.x = tx;
-    // Backward-movement triggers a somersault — big upward launch + spin flag
-    if (movingBack) {
+    // Always somersault: big upward launch + spin flag
+    {
       player.vy = -11;
       player.somersault = 520;              // ms of spin animation
       player.somersaultDir = -player.facing;
-      showToast('Somersault!', 'rare');
       // Extra ring of dust kicking up at launch
       for (let i = 0; i < 16; i++) {
         const a = (i / 16) * Math.PI;
@@ -15888,8 +15889,6 @@ const SKILL_FNS = {
           life: 24, color: '#e0f5e0', size: 2
         });
       }
-    } else {
-      player.vy = -4;
     }
     player.invulnerable = Math.max(player.invulnerable, 420);
     // Fire 2 flat-horizontal arrows (unchanged)
@@ -16073,11 +16072,17 @@ const SKILL_FNS = {
     if (hits.length >= 3) showToast(`${hits.length}x rail chain!`, 'epic');
   },
   arrowRain: () => {
-    // Larger AoE — wider spread, more arrows, longer duration
+    // v0.25.261 — Reskinned to a translucent rain cloud with blue
+    // arrows pouring out. Cloud sprite anchors at the top of the
+    // screen for the duration of the shower; projectile color
+    // shifted from gold (#ddaa66) to cyan-blue (#66ccff) so they
+    // match the new cloud aesthetic.
     const cx = player.x + player.w/2 + player.facing * 200;
     spawnFx('archer','arrowRain', cx, 420, 1, { scale: 1.25, frameMs: 80 });
-    // v0.25.228 — torrent arrow-shower sprite at the AOE centre.
-    spawnSpriteBurst(cx, 320, 'arrow_rain', { size: 320, life: 50 });
+    // Cloud at the TOP of the screen (y: 80) — life covers the full
+    // 22-arrow shower (~990 ms) plus tail-out so the cloud is visible
+    // the whole time.
+    spawnSpriteBurst(cx, 80, 'arrow_rain', { size: 360, life: 80 });
     const count = 22;
     const spread = 320;   // wider
     for (let i = 0; i < count; i++) {
@@ -16087,12 +16092,12 @@ const SKILL_FNS = {
         game.projectiles.push({
           x: ox, y: -20, vx: (Math.random()-0.5) * 1.8, vy: 15,
           w: 10, h: 18, life: 110, damage: getAtk() * 1.8 + 8,
-          owner: 'player', skill: 'rainArrow', color: '#ddaa66',
+          owner: 'player', skill: 'rainArrow', color: '#66ccff',
         });
       }, i * 45);
     }
-    // Target ring on ground showing the drop zone
-    spawnSmoothExplosion(cx, 470, spread * 0.55, '#ffdd88', '#ffaa4488', { life: 40 });
+    // Target ring on ground showing the drop zone — recolored cyan
+    spawnSmoothExplosion(cx, 470, spread * 0.55, '#88ddff', '#3388cc88', { life: 40 });
     addShake(6);
   },
   // Ranger
@@ -18915,14 +18920,10 @@ function killMonster(m) {
   // — yielded multiple boons per minute on busy maps. Now: tier 0
   // = 0.5%, tier 1 = 3% (~4x harder across the board). Mini-boss
   // guaranteed-epic drop downstream also dialed back to a chance.
-  if (tier !== 2) {
-    const orbChance = (tier === 1 ? 0.03 : 0.005) * (1 + luck);
-    if (Math.random() < orbChance) {
-      const r = Math.random();
-      const rarity = r < 0.02 ? 'legendary' : r < 0.15 ? 'epic' : r < 0.5 ? 'rare' : 'common';
-      spawnPowerupOrb(m.x + m.w/2, m.y + m.h/2, rarity);
-    }
-  }
+  // v0.25.261 — Boons no longer drop from elite/mini-boss/regular kills.
+  // Only sources: full boss kills (tier 2 below grants the powerup
+  // pick directly) + Sage Mira's 12-hour offering. Old code:
+  //   if (tier !== 2) { spawnPowerupOrb(...) on luck-weighted roll }
   // Bosses drop extra loot
   if (tier === 2) {
     for (let i = 0; i < 2; i++) {
@@ -18992,14 +18993,8 @@ function killMonster(m) {
       });
       emitRarityBurst(m.x + m.w/2, m.y + m.h/2, bonus.rarity);
     }
-    // v0.25.170 — was a guaranteed epic orb every mini-boss (60-90s).
-    // Cut to a 35% chance, rarity rolled fresh, so mini-bosses still
-    // feel rewarding but don't push the boon rate way past 1/5min.
-    if (Math.random() < 0.35) {
-      const r = Math.random();
-      const rarity = r < 0.05 ? 'legendary' : r < 0.40 ? 'epic' : 'rare';
-      spawnPowerupOrb(m.x + m.w/2, m.y + m.h/2, rarity);
-    }
+    // v0.25.261 — Mini-bosses no longer drop powerup orbs. Boon
+    // economy is now boss-only + Sage Mira's daily 12-hour offering.
   } else {
     // Respawn (faster + multiple spawns possible, capped at monsterCap)
     setTimeout(() => {
@@ -19978,8 +19973,16 @@ function openNPC(npc) {
     // Use the page's own opts as the full option set (skip the default Leave)
     opts = page.opts.slice();
   } else if (npc.role === 'sage') {
-    text = 'The road is long. For 1500 Lumens, I can offer you a random boon.';
-    opts.push({ t:'Buy Powerup (1500)', cb:() => { buyRandomPowerup(); closeDialog(); } });
+    // v0.25.261 — Sage Mira gates the boon to once per 12 real-time
+    // hours at 5000 Lumens. Dialog text adapts to whether the player
+    // can purchase right now.
+    if (typeof _sageReady === 'function' && !_sageReady()) {
+      text = `The road is long. I am still in meditation — come back in ${_sageWaitText()} for another offering.`;
+      opts.push({ t:`Sage meditates · ${_sageWaitText()} left`, cb: closeDialog });
+    } else {
+      text = 'The road is long. Once every twelve hours I can offer you a random boon. The price: 5000 Lumens.';
+      opts.push({ t:'Receive boon (5000)', cb:() => { buyRandomPowerup(); closeDialog(); } });
+    }
   } else if (npc.role === 'info') {
     text = 'Heard of the Gelwater Grotto? Head east into the Emerald Thicket. The Gelmonarch rules down there. And deeper still lies Queen Fungara\'s hollow...';
     opts.push({ t:'Thanks', cb: closeDialog });
@@ -20035,7 +20038,7 @@ function openShop(type) {
   list.innerHTML = '';
 
   if (type === 'potion') {
-    title.textContent = 'Elspeth\'s Elixir Stand';
+    title.textContent = 'Pharma Sis\'s Apothecary';
     for (const p of POTION_ITEMS) {
       // v0.25.231 — describe potions as a percentage of max stat
       // (small/medium/large = 25/50/75%) so the shop matches the new
@@ -21432,7 +21435,7 @@ function renderBoonPanel() {
     }
   }
   if (!invHtml.length) {
-    invHtml.push(`<div style="padding:14px; text-align:center; color:#888; font-style:italic; background:rgba(0,0,0,0.25); border:1px dashed #444; border-radius:6px; grid-column:1/-1;">Defeat mini-bosses or buy from <b>Sage Mira</b> to collect boons. Each one rolls a unique value — spend Lumens to reroll for a better stat.</div>`);
+    invHtml.push(`<div style="padding:14px; text-align:center; color:#888; font-style:italic; background:rgba(0,0,0,0.25); border:1px dashed #444; border-radius:6px; grid-column:1/-1;">Defeat <b>bosses</b> or wait on <b>Sage Mira</b>'s 12-hour offering to collect boons. Each one rolls a unique value — spend Lumens to reroll for a better stat.</div>`);
   }
 
   const bagPct = Math.round((player.boons.length / BOON_INVENTORY_CAP) * 100);
@@ -22205,7 +22208,7 @@ function renderInventory(prefix) {
       grid.appendChild(slot);
     });
     if (!grid.children.length) {
-      grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; text-align:center; color:#888; font-style:italic;">No usable items. Buy potions from Elspeth in town.</div>';
+      grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; text-align:center; color:#888; font-style:italic;">No usable items. Buy potions from Pharma Sis in town.</div>';
     }
   } else if (game._invTab === 'etc') {
     const items = player.inventory.map((it, idx) => ({it, idx})).filter(e => _itemTab(e.it) === 'etc');
@@ -22505,10 +22508,31 @@ function showPowerupChoice() {
   game.paused = true;
 }
 
+// v0.25.261 — Sage Mira's offering is now ONCE per 12 real-time hours
+// at 5000 Lumens (was 1500 / unlimited). Stored in player._sageNextAt
+// (epoch ms). Resets on prestige.
+const SAGE_PRICE = 5000;
+const SAGE_COOLDOWN_MS = 12 * 60 * 60 * 1000;   // 12 hours
+
+function _sageReadyAt() { return (player._sageNextAt | 0) || 0; }
+function _sageReady() { return Date.now() >= _sageReadyAt(); }
+function _sageWaitText() {
+  const wait = _sageReadyAt() - Date.now();
+  if (wait <= 0) return '';
+  const h = Math.floor(wait / 3600000);
+  const m = Math.floor((wait % 3600000) / 60000);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
 function buyRandomPowerup() {
-  if (player.mesos < 1500) { showToast('Not enough Lumens!', 'rare'); return; }
+  if (!_sageReady()) {
+    showToast(`Sage Mira meditates — return in ${_sageWaitText()}`, 'rare');
+    return;
+  }
+  if (player.mesos < SAGE_PRICE) { showToast(`Need ${SAGE_PRICE} Lumens for Sage's boon`, 'rare'); return; }
   const pw = POWERUPS[Math.floor(Math.random() * POWERUPS.length)];
-  player.mesos -= 1500;
+  player.mesos -= SAGE_PRICE;
+  player._sageNextAt = Date.now() + SAGE_COOLDOWN_MS;
   const res = acquirePowerup(pw);
   if (res) {
     const msg = `${pw.icon} ${pw.name} — ${pw.fmt(res.instance.roll)}`
@@ -22519,8 +22543,12 @@ function buyRandomPowerup() {
 }
 
 function showPowerupShop() {
-  // Quick access powerup choice if you have mesos
-  if (player.mesos < 1500) { showToast('Need 1500 Lumens for Sage\'s boon. Talk to Sage Mira in town.'); return; }
+  // Quick access — same gating as buyRandomPowerup
+  if (!_sageReady()) {
+    showToast(`Sage Mira meditates — return in ${_sageWaitText()}`, 'rare');
+    return;
+  }
+  if (player.mesos < SAGE_PRICE) { showToast(`Need ${SAGE_PRICE} Lumens for Sage's boon`); return; }
   buyRandomPowerup();
 }
 
@@ -32446,7 +32474,7 @@ const MONSTER_SPRITE_TYPES = [
 // failed.
 const NPC_SPRITES = Object.create(null);
 const NPC_SPRITE_FILES = {
-  'Elspeth':       'elspeth.webp',
+  'Pharma Sis':       'elspeth.webp',
   'Brok':          'brok.webp',
   'The Amnesiac':  'amnesiac.webp',
   'Sage Mira':     'sage_mira.webp',
