@@ -2991,7 +2991,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.239';
+const GAME_VERSION = 'v0.25.240';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -7888,20 +7888,20 @@ function getAtk()  {
   if (player.buffs.comboAtk > 0)  pct += 0.5;
   // Berserker passive: +% ATK below HP threshold
   if (player.job === 'berserker') {
-    const hpP = player.hp / getMaxHp();
+    const hpP = player.hp / Math.max(1, getMaxHp());
     pct += (1 - hpP) * 0.5;
   }
   // Skill tree: Blood Rage — +15% ATK under 50% HP
   if (treeHas('w_blood')) {
-    if (player.hp / getMaxHp() < 0.5) pct += 0.15;
+    if (player.hp / Math.max(1, getMaxHp()) < 0.5) pct += 0.15;
   }
   // Skill tree: Berserker — +35% ATK under 30% HP
   if (treeHas('w_berserk')) {
-    if (player.hp / getMaxHp() < 0.30) pct += 0.35;
+    if (player.hp / Math.max(1, getMaxHp()) < 0.30) pct += 0.35;
   }
   // Skill tree: Arcane Surge — +1% per % MP (up to +100%)
   if (treeHas('m_surge')) {
-    pct += (player.mp / getMaxMp());
+    pct += (player.mp / Math.max(1, getMaxMp()));
   }
   // Prestige damage multiplier (permanent, stacking per ascension)
   const pDmg = (game.prestige && game.prestige.dmgMult) || 1;
@@ -7917,7 +7917,7 @@ function getDef()  {
   if (player.buffs.holyShield > 0) d += 9999;
   // Milestone: Second Wind — +80% DEF for 10s when HP<20%, triggered once per 2min
   if (hasMilestone('secondWind')) {
-    const hpP = player.hp / getMaxHp();
+    const hpP = player.hp / Math.max(1, getMaxHp());
     if (hpP > 0 && hpP < 0.20 && (!player._secondWindCD || game.time > player._secondWindCD)) {
       player._secondWindExpiry = game.time + 10000;
       player._secondWindCD = game.time + 120000;
@@ -9678,7 +9678,15 @@ function loadState() {
     player.mp = (!player.mp || player.mp <= 0) ? maxMp : Math.min(player.mp, maxMp);
     // Wipe any persisted buff timers so save-then-reload can't extend a
     // 15s Bloodlust into a permanent one. Same for transient skill state.
+    // v0.25.240 (B3) — defensive defaulters for fields that older saves
+    // can lack. Object.assign doesn't add missing keys, so if a save
+    // predates a field, accessing it elsewhere would throw.
     if (player.buffs) { for (const k in player.buffs) player.buffs[k] = 0; }
+    else player.buffs = {};
+    if (!player.skillCooldowns) player.skillCooldowns = {};
+    if (!player.consumables)    player.consumables = {};
+    if (!player.equipped)       player.equipped = { weapon: null, armor: null, accessory: null };
+    if (!Array.isArray(player.inventory)) player.inventory = [];
     player._bloodstorm = 0;
     player._bloodstormNextTick = 0;
     player._aegis = null;
@@ -12532,7 +12540,7 @@ function updatePlayer(dt) {
   }
 
   // Rage mode
-  const hpPct = player.hp / getMaxHp();
+  const hpPct = player.hp / Math.max(1, getMaxHp());
   const wasRage = player.inRage;
   player.inRage = hpPct < 0.3 && player.hp > 0;
   if (player.inRage && !wasRage) { showToast('RAGE! +30% damage', 'legendary'); addShake(4); }
@@ -18147,7 +18155,9 @@ function killMonster(m) {
   } else {
     // Respawn (faster + multiple spawns possible, capped at monsterCap)
     setTimeout(() => {
-      if (game.currentMap === game.mapData && game.mapData.isTown) return;
+      // v0.25.240 (B1) — removed a dead `game.currentMap === game.mapData`
+      // string-vs-object comparison. The next guard (`!mapD.isTown ...`)
+      // already covers the "don't respawn in town" intent.
       const mapId = game.currentMap;
       const mapD = MAPS[mapId];
       if (mapD && !mapD.isTown && !mapD.isBossArena) {
@@ -21374,15 +21384,19 @@ function toggleSharedModal(modalId, variant, openFn) {
   m.dataset.variant = variant;
 }
 function closeAllModals() {
-  // Don't close forced modals
+  // v0.25.240 (B2) — null-guard the forced-modal lookups so a missing or
+  // late-injected element doesn't throw and break Esc/X across every
+  // overlay. Same pattern is now applied to the dialog close.
   const cs = document.getElementById('class-select-modal');
   const av = document.getElementById('advancement-modal');
-  if (cs.style.display === 'flex' || av.style.display === 'flex') return;
+  if ((cs && cs.style.display === 'flex') ||
+      (av && av.style.display === 'flex')) return;
   for (const id of ['shop-modal','inventory-modal','skills-modal','powerup-modal','help-modal','enhance-modal','skilltree-modal','attributes-modal','dev-modal','taxi-modal','codex-modal','multiplayer-modal','quest-modal','worldmap-modal']) {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   }
-  document.getElementById('dialog').style.display = 'none';
+  const dlg = document.getElementById('dialog');
+  if (dlg) dlg.style.display = 'none';
   game.paused = false;
 }
 
@@ -35603,6 +35617,11 @@ function loop(time) {
   }
 
   updateUI();
+  // v0.25.240 (B5) — visual-queue trim now actually runs every frame.
+  // The cap helpers (_particleCap / _afterImageCap) already account for
+  // mobile + lowFx, so this is the canonical guard against burst-spike
+  // queue growth (e.g. Nightreaper ricochet + AoE in one frame).
+  _trimVisualQueues();
   requestAnimationFrame(loop);
 }
 
