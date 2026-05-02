@@ -3033,7 +3033,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.251';
+const GAME_VERSION = 'v0.25.252';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4689,6 +4689,81 @@ function _lxFxBucket(color) {
   return null;
 }
 // =========================================================================
+// LX_ITEMS — equipment item sprites (v0.25.252)
+// =========================================================================
+// Maps an item key (lowercase-with-underscores form of the item name) to
+// a loaded Image. drawItemIcon(it, x, y, size) renders the sprite if
+// available; otherwise falls back to the item.icon emoji. Initially
+// covers the 15 legendary set pieces — emoji stays as the fallback for
+// every other tier so we can ship class-tier sprites incrementally.
+// =========================================================================
+function _itemKey(it) {
+  if (!it || !it.name) return null;
+  return it.name.toLowerCase()
+    .replace(/['']/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+const LX_ITEMS = (() => {
+  const out = {};
+  const files = {
+    // Set legendaries — Dawnshard
+    dawnshard_blade:        'dawnshard_blade.webp',
+    dawnshard_aegis:        'dawnshard_aegis.webp',
+    dawnshard_medallion:    'dawnshard_medallion.webp',
+    // Set legendaries — Doomforged (warrior)
+    doomforged_greatsword:  'doomforged_greatsword.webp',
+    doomforged_plate:       'doomforged_plate.webp',
+    doomforged_sigil:       'doomforged_sigil.webp',
+    // Set legendaries — Shadowweave (rogue)
+    shadowweave_dagger:     'shadowweave_dagger.webp',
+    shadowweave_cloak:      'shadowweave_cloak.webp',
+    shadowweave_veil:       'shadowweave_veil.webp',
+    // Set legendaries — Voidcaller (mage)
+    voidcaller_staff:       'voidcaller_staff.webp',
+    voidcaller_robe:        'voidcaller_robe.webp',
+    voidcaller_orb:         'voidcaller_orb.webp',
+    // Set legendaries — Skyhunter (archer)
+    skyhunter_longbow:      'skyhunter_longbow.webp',
+    skyhunter_vest:         'skyhunter_vest.webp',
+    skyhunter_quiver:       'skyhunter_quiver.webp',
+  };
+  for (const [k, f] of Object.entries(files)) {
+    const img = new Image();
+    img.decoding = 'async';
+    img.onload = () => { out[k] = img; };
+    img.onerror = () => { /* fall back to emoji silently */ };
+    img.src = 'Sprites/items/' + f;
+    out[k] = null;  // placeholder — render code checks _itemReady()
+    // Stash the in-flight image so onload sets it later. By keying on k
+    // we let the consumer use `LX_ITEMS[key]` once decode finishes.
+    out['_pending_' + k] = img;
+  }
+  return out;
+})();
+function _itemReady(img) { return img && img.complete && img.naturalWidth > 0; }
+// Returns an Image or null. Always check _itemReady() before drawImage.
+function _itemSprite(it) {
+  const k = _itemKey(it);
+  if (!k) return null;
+  // Resolve via the _pending_ stash so the same Image fires the load
+  // (covers initial state where LX_ITEMS[k] is still null).
+  const img = LX_ITEMS['_pending_' + k];
+  return _itemReady(img) ? img : null;
+}
+// HTML helper used by inventory/shop/craft: returns either an <img>
+// tag (sprite ready) or the emoji fallback. Drop directly into the
+// existing innerHTML templates.
+function itemIconHtml(it, sizePx) {
+  const sz = sizePx || 28;
+  const img = _itemSprite(it);
+  if (img) {
+    return `<img src="${img.src}" width="${sz}" height="${sz}" style="display:inline-block;vertical-align:middle;image-rendering:auto;" alt="${(it.name||'').replace(/"/g,'&quot;')}">`;
+  }
+  return `<span style="font-size:${Math.round(sz * 0.85)}px;line-height:1;">${(it && it.icon) || '◇'}</span>`;
+}
+
+// =========================================================================
 // LX_MOB_CAST — monster attack-cast aura sprites (v0.25.177)
 // =========================================================================
 // One painterly burst per projectile element. drawMonster overlays the
@@ -5998,7 +6073,7 @@ function showGearChange(oldIt, newIt, scoreDelta) {
       ✦ AUTO-EQUIPPED ✦
     </div>
     <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid #443;">
-      <div style="font-size:18px;">${newIt.icon}</div>
+      <div style="font-size:18px;line-height:1;">${(typeof itemIconHtml === 'function') ? itemIconHtml(newIt, 22) : newIt.icon}</div>
       <div style="flex:1;">
         <div style="color:${newCol}; font-weight:bold;">${newIt.name}${newIt.stars ? ' ★' + newIt.stars : ''}</div>
         ${oldIt ? `<div style="font-size:10px; color:#888;">replaced <span style="color:${oldCol};">${oldIt.name}</span></div>` : ''}
@@ -19782,7 +19857,7 @@ function openShop(type) {
         } else {
           showToast(`Need ${it.price - player.mesos} more Lumens`, 'common');
         }
-      }, it.rarity));
+      }, it.rarity, undefined, it));
     }
   } else if (type === 'sell') {
     title.textContent = 'Brok\'s Forge — Selling';
@@ -19801,7 +19876,7 @@ function openShop(type) {
           player.mesos += val;
           player.inventory.splice(idx, 1);
           openShop('sell');
-        }, it.rarity, 'Sell'));
+        }, it.rarity, 'Sell', it));
       });
     }
   }
@@ -19811,11 +19886,17 @@ function openShop(type) {
   game.paused = true;
 }
 
-function makeShopRow(icon, name, desc, price, cb, rarity, btnText) {
+function makeShopRow(icon, name, desc, price, cb, rarity, btnText, item) {
   const d = document.createElement('div');
   d.className = 'shop-item rarity-' + (rarity || 'common');
+  // v0.25.252 — render sprite when available (item param + LX_ITEMS hit),
+  // otherwise emoji. Backwards-compatible: existing callers without the
+  // `item` param still get the emoji column.
+  const iconCell = (item && typeof itemIconHtml === 'function')
+    ? `<div style="display:flex;align-items:center;justify-content:center;width:40px;height:40px;margin-right:8px;flex-shrink:0;">${itemIconHtml(item, 36)}</div>`
+    : `<div style="font-size:24px;margin-right:8px;">${icon}</div>`;
   d.innerHTML = `
-    <div style="font-size:24px;margin-right:8px;">${icon}</div>
+    ${iconCell}
     <div class="name">
       <div class="rarity-text-${rarity || 'common'}"><b>${name}</b></div>
       <div style="font-size:11px;color:#bbb">${desc}</div>
@@ -19970,7 +20051,7 @@ function renderEnhancementModal(selectedItem) {
       : `<span class="stars empty-star">${'☆'.repeat(MAX_STARS)}</span>`;
     // Polished card: icon with floating star badge + name + stats + star bar
     div.innerHTML = `
-      <div class="icon" style="position:relative;">${it.icon}${_starBadgeHtml(it)}</div>
+      <div class="icon" style="position:relative;">${itemIconHtml(it, 32)}${_starBadgeHtml(it)}</div>
       <div class="info">
         <div class="name rarity-text-${it.rarity}">${it.name}${entry.equipped ? ' <span style="color:#88ff88;font-size:10px;">[Equipped]</span>' : ''}</div>
         <div style="font-size:10px;color:#bbb;">${itemStatString(it)}</div>
@@ -20078,7 +20159,7 @@ function renderCraftingModal() {
       div.className = 'enhance-item rarity-' + (it.rarity || 'common');
       const equippedTag = entry.equipped ? '<span style="color:#88ff88;font-size:9px;margin-left:4px;">[Equipped]</span>' : '';
       div.innerHTML = `
-        <div class="icon" style="position:relative;">${it.icon}${(typeof _starBadgeHtml === 'function') ? _starBadgeHtml(it) : ''}</div>
+        <div class="icon" style="position:relative;">${itemIconHtml(it, 32)}${(typeof _starBadgeHtml === 'function') ? _starBadgeHtml(it) : ''}</div>
         <div class="info">
           <div class="name rarity-text-${it.rarity}">${it.name}${equippedTag}</div>
           <div style="font-size:10px;color:#aa66cc;">${set ? set.icon : '◈'} ${setName} Set Piece</div>
@@ -20109,7 +20190,7 @@ function renderCraftingModal() {
     const clsBadge = classMatch ? '' :
       `<span style="color:#ff9966;font-size:9px;margin-left:4px;">⚠ Bonuses ${setCls}-only</span>`;
     div.innerHTML = `
-      <div class="icon" style="position:relative;">${it.icon}</div>
+      <div class="icon" style="position:relative;">${itemIconHtml(it, 32)}</div>
       <div class="info">
         <div class="name rarity-text-${it.rarity}">${it.name}${clsBadge}</div>
         <div style="font-size:10px;color:#bbb;">${itemStatString(it)}</div>
@@ -21783,7 +21864,7 @@ function renderInventory(prefix) {
     if (!el) continue;
     const it = player.equipped[slot];
     el.innerHTML = it
-      ? `<span style="font-size:24px">${it.icon}</span>${_starBadgeHtml(it)}<div class="label">${slot}</div>`
+      ? `${itemIconHtml(it, 42)}${_starBadgeHtml(it)}<div class="label">${slot}</div>`
       : `<span style="opacity:0.4; font-size:22px">${slot==='weapon'?'⚔️':slot==='armor'?'🛡️':'💍'}</span><div class="label">${slot}</div>`;
     el.onclick = () => {
       if (it) {
@@ -21825,7 +21906,8 @@ function renderInventory(prefix) {
       const slot = document.createElement('div');
       slot.className = 'inv-slot rarity-' + it.rarity;
       // v0.25.239 — star count badge on top of the slot when item.stars > 0.
-      slot.innerHTML = it.icon + _starBadgeHtml(it);
+      // v0.25.252 — render sprite via itemIconHtml() with emoji fallback.
+      slot.innerHTML = itemIconHtml(it, 44) + _starBadgeHtml(it);
       slot.onclick = () => {
         const equipped = player.equipped[it.slot];
         if (equipped) player.inventory.push(equipped);
@@ -21947,7 +22029,7 @@ function attachTooltip(el, it) {
           <div style="color:${active3 ? '#88ff88' : '#777'};">3pc: ${_setBonusFmt(set.bonus3)}</div>
         </div>`;
     }
-    tt.innerHTML = `<div class="name rarity-text-${it.rarity}">${it.icon} ${it.name}</div>
+    tt.innerHTML = `<div class="name rarity-text-${it.rarity}">${itemIconHtml(it, 24)} ${it.name}</div>
       <div style="font-size:10px;color:#bbb;text-transform:capitalize;margin-bottom:4px;">${it.rarity}${it.tier ? ' · T' + it.tier : ''} ${it.slot || ''}</div>
       ${clsLine}
       ${starLine}
@@ -37143,6 +37225,22 @@ requestAnimationFrame(loop);
     'Sprites/ui/dialog_box.webp',
     // v0.25.239 — Enhancement Forge anvil decoration.
     'Sprites/ui/anvil.webp',
+    // v0.25.252 — Equipment sprites (15 set legendaries).
+    'Sprites/items/dawnshard_blade.webp',
+    'Sprites/items/dawnshard_aegis.webp',
+    'Sprites/items/dawnshard_medallion.webp',
+    'Sprites/items/doomforged_greatsword.webp',
+    'Sprites/items/doomforged_plate.webp',
+    'Sprites/items/doomforged_sigil.webp',
+    'Sprites/items/shadowweave_dagger.webp',
+    'Sprites/items/shadowweave_cloak.webp',
+    'Sprites/items/shadowweave_veil.webp',
+    'Sprites/items/voidcaller_staff.webp',
+    'Sprites/items/voidcaller_robe.webp',
+    'Sprites/items/voidcaller_orb.webp',
+    'Sprites/items/skyhunter_longbow.webp',
+    'Sprites/items/skyhunter_vest.webp',
+    'Sprites/items/skyhunter_quiver.webp',
     // Sprite-based head/hair/eyes/mouth (LX_HEAD / LX_HAIR / LX_EYES / LX_MOUTH).
     'Sprites/character/hair/flow.webp',
     'Sprites/character/hair/ponytail.webp',
