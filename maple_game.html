@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.289';
+const GAME_VERSION = 'v0.25.290';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -14270,6 +14270,19 @@ function castSkill(id) {
     // their amplitudes while the flag is live. Decays naturally with
     // the attack timer (no explicit clear needed).
     player._mageBigSwingUntil = (game.time | 0) + 360;
+  } else if (player.cls === 'mage' && (player.job === 'warlock' || player.job === 'archmage')
+             && (s.slot === 'q' || s.slot === 'c' || s.slot === 'x')) {
+    // v0.25.290 — Warlock + Archmage F (slot q) / V (slot c) / G
+    // (slot x) get a chant-then-raise pose. First ~55 % of the cast:
+    // hands close at the chest with a slight tremor (chanting). Last
+    // ~45 %: dominant arm raises overhead with the staff while the
+    // body extends and the head lifts. Drives a custom anim variant
+    // ('attack_mage_chant') via _heroVecAnimFor; needs an extended
+    // attack timer because the default 18-frame budget zooms past
+    // both phases. _chantRaiseAt anchors the per-frame t value.
+    player._chantRaiseAt = (game.time | 0);
+    player._chantRaiseUntil = (game.time | 0) + 32;     // ~540 ms at 60 Hz
+    player.attackTimer = Math.max(player.attackTimer, 540);
   }
   // Rogues get fluid skill-linking — every cast clears prior action locks so moves flow into each other
   if (player.cls === 'rogue') {
@@ -28930,6 +28943,33 @@ const HERO_VEC_ANIMS = {
     legL:  t => -0.32 + _heroVecAttackStrike(t) * 0.18,
     legR:  t => 0.40 - _heroVecAttackStrike(t) * 0.18,
   },
+  // v0.25.290 — Warlock + Archmage F/V/G "chant then raise" pose.
+  // Two phases sharing one 32-frame (~540 ms) budget:
+  //   chant  (t < 0.55): hands close near chest, head bowed, body
+  //                      stooped slightly, with a small tremor at
+  //                      ~6 Hz to sell the muttering incantation.
+  //   raise  (t ≥ 0.55): dominant arm sweeps overhead with the staff,
+  //                      head lifts, body extends back to look up.
+  attack_mage_chant: {
+    spine: t => t < 0.55
+      ? 0.18 - t * 0.08 + Math.sin(t * Math.PI * 6) * 0.012
+      : 0.14 - ((t - 0.55) / 0.45) * 0.32,
+    head:  t => t < 0.55
+      ? 0.22 + Math.sin(t * Math.PI * 6) * 0.04
+      : 0.22 - ((t - 0.55) / 0.45) * 0.50,
+    // Front arm: chant holds near chest with tremor; raise lifts to
+    // overhead vertical (-2.0 ≈ straight up).
+    armR:  t => t < 0.55
+      ? -0.20 + Math.sin(t * Math.PI * 8) * 0.06
+      : -0.20 + _heroEaseOutCubic((t - 0.55) / 0.45) * -1.80,
+    // Off arm mirrors the chant pose, drifts to the side on the raise
+    // so the silhouette opens up.
+    armL:  t => t < 0.55
+      ? 0.26 + Math.sin(t * Math.PI * 8 + 0.5) * 0.06
+      : 0.26 + _heroEaseOutCubic((t - 0.55) / 0.45) * 0.18,
+    legL:  () => -0.10,
+    legR:  () => 0.12,
+  },
 };
 const HERO_VEC_DEFORM = {
   idle: { spine: t => ({ sx: 1 - Math.sin(t * Math.PI * 2) * 0.012, sy: 1 + Math.sin(t * Math.PI * 2) * 0.012 }) },
@@ -28986,6 +29026,18 @@ const HERO_VEC_DEFORM = {
     armL:  t => ({ sx: 1, sy: 1 + _heroVecAttackStrike(t) * 0.10 }),
     spine: t => ({ sx: 1.06 + _heroVecAttackStrike(t) * 0.04, sy: 0.94 }),
     handR: t => { const s = 1 + _heroVecAttackStrike(t) * 0.42 + Math.sin(t * Math.PI) * 0.10; return { sx: s, sy: s }; },
+  },
+  // v0.25.290 — Mage chant-raise deform. Spine compresses slightly
+  // during the chant (body stooped), then stretches up during the
+  // raise. Staff arm stretches lengthwise on the upward sweep.
+  attack_mage_chant: {
+    spine: t => t < 0.55
+      ? ({ sx: 1, sy: 0.97 })
+      : ({ sx: 1, sy: 0.97 + _heroEaseOutCubic((t - 0.55) / 0.45) * 0.10 }),
+    armR:  t => t < 0.55
+      ? ({ sx: 1, sy: 1 })
+      : ({ sx: 1, sy: 1 + _heroEaseOutCubic((t - 0.55) / 0.45) * 0.14 }),
+    armL:  () => ({ sx: 1, sy: 1 }),
   },
 };
 // v0.25.133 — per-bone position offsets layered on top of rotation +
@@ -29049,6 +29101,24 @@ const HERO_VEC_BOB = {
       y: -Math.sin(t * Math.PI) * 1.6,
     }),
   },
+  // v0.25.290 — Mage chant-raise body translation. Chant phase: spine
+  // dips slightly with a small mutter-tremor; head bows. Raise phase:
+  // spine extends UP, head lifts the same amount, selling the
+  // "incantation finished, raise the staff to the heavens" beat.
+  attack_mage_chant: {
+    spine: t => ({
+      x: 0,
+      y: t < 0.55
+        ? 1.2 + Math.sin(t * Math.PI * 6) * 0.4
+        : 1.2 - _heroEaseOutCubic((t - 0.55) / 0.45) * 4.0,
+    }),
+    head:  t => ({
+      x: 0,
+      y: t < 0.55
+        ? 2.6 + Math.sin(t * Math.PI * 8) * 0.6
+        : 2.6 - _heroEaseOutCubic((t - 0.55) / 0.45) * 6.5,
+    }),
+  },
 };
 function _heroVecAnimFor() {
   const inAir = Math.abs(player.vy) > 0.5 && !player.onGround;
@@ -29060,6 +29130,9 @@ function _heroVecAnimFor() {
     // bow steady while back arm draws + releases.
     // v0.25.219 — Rogue gets a forward dagger thrust.
     const cls = (typeof player !== 'undefined' && player.cls) || 'default';
+    // v0.25.290 — Warlock + Archmage F/V/G chant-raise pose overrides
+    // the default mage cast for the duration of the flag.
+    if (cls === 'mage' && (player._chantRaiseUntil | 0) > now) return 'attack_mage_chant';
     if (cls === 'archer')  return 'attack_archer';
     if (cls === 'warrior') return 'attack_warrior';
     if (cls === 'mage')    return 'attack_mage';
@@ -29074,6 +29147,13 @@ function _heroVecTimeNorm(animName) {
   const t = (game && game.time) || 0;
   if (animName === 'walk')   return ((t * 0.065) % 1);
   if (animName === 'idle')   return ((t * 0.02) % 1);
+  // v0.25.290 — Mage chant-raise gets a 32-frame budget (~540 ms at
+  // 60 Hz) so the chant phase + raise phase both have time to read.
+  // The default 18-frame attack timer would zoom through both.
+  if (animName === 'attack_mage_chant') {
+    const start = player._chantRaiseAt || t;
+    return Math.max(0, Math.min(1, (t - start) / 32));
+  }
   // v0.25.191 — all attack variants share the same timer.
   if (animName === 'attack' || animName === 'attack_archer' || animName === 'attack_warrior' || animName === 'attack_mage' || animName === 'attack_rogue') {
     _heroVecAttackActive(t);
