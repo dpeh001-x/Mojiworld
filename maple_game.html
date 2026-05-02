@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.264';
+const GAME_VERSION = 'v0.25.265';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -12091,6 +12091,14 @@ function loadMap(id, entryX) {
   if (typeof tickQuestVisit === 'function' && player.cls) tickQuestVisit(id);
   // v0.22: swap the background music to the new map's track.
   if (typeof music !== 'undefined' && music) music.play(id);
+  // v0.25.265 — swap full-track BGM (mojiworld vs Gravitos Ascends boss
+  // theme) when entering / leaving a boss arena. MAPS[id].isBossArena is
+  // the static, authoritative flag — game.mapData is rebuilt below from
+  // _variedMapData, so we read MAPS directly here for the check.
+  if (typeof _setBossBgm === 'function') {
+    const _mb = (typeof MAPS !== 'undefined' && MAPS && MAPS[id]) ? MAPS[id] : null;
+    _setBossBgm(!!(_mb && _mb.isBossArena));
+  }
   game.currentMap = id;
   game.mapData = _variedMapData(id);
   game.monsters = [];
@@ -38007,13 +38015,67 @@ const _bgmEl = (() => {
   a.preload = 'auto';
   return a;
 })();
+// v0.25.265 — Boss arena BGM ("Gravitos Ascends"). Same loop pattern as
+// the main BGM; plays exclusively while the active map has
+// isBossArena: true. Hard-swap with a quick fade so the transition reads
+// as "the music shifts when the boss room loads".
+const _bgmBossEl = (() => {
+  const a = new Audio('audio/bgm_boss.mp3');
+  a.loop = true;
+  a.volume = 0;           // starts silent — _setBossBgm fades it up
+  a.preload = 'auto';
+  return a;
+})();
+const _BGM_TARGET_VOL = 0.55;
+const _BGM_FADE_MS = 600;
+function _bgmFade(el, target, durationMs) {
+  if (!el) return;
+  const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const start = el.volume;
+  const dur = Math.max(1, durationMs | 0);
+  // If we're fading IN, make sure the element is actually playing first.
+  if (target > 0.0001 && el.paused) {
+    try { el.play().catch(() => {/* autoplay-blocked: gesture unlocker handles */}); } catch (e) {}
+  }
+  const step = () => {
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const k = Math.min(1, Math.max(0, (now - t0) / dur));
+    el.volume = start + (target - start) * k;
+    if (k < 1) {
+      requestAnimationFrame(step);
+    } else if (target <= 0.0001) {
+      // Fully faded out — pause to free the audio decoder slot on mobile.
+      try { el.pause(); } catch (e) {}
+    }
+  };
+  requestAnimationFrame(step);
+}
+// Public API — flip between mojiworld + boss tracks. Called from loadMap.
+function _setBossBgm(isBoss) {
+  if (isBoss) {
+    _bgmFade(_bgmEl,     0,                _BGM_FADE_MS);
+    _bgmFade(_bgmBossEl, _BGM_TARGET_VOL,  _BGM_FADE_MS);
+  } else {
+    _bgmFade(_bgmBossEl, 0,                _BGM_FADE_MS);
+    _bgmFade(_bgmEl,     _BGM_TARGET_VOL,  _BGM_FADE_MS);
+  }
+}
 function startBgm() {
   if (!_bgmEl) return;
   const tryPlay = () => _bgmEl.play().catch(() => {/* blocked, wait for input */});
   tryPlay();
   // Retry on first user input for autoplay-blocked browsers.
+  // v0.25.265 — also unlocks the boss BGM element on the same gesture
+  // (we then immediately pause it; _setBossBgm will start it for real
+  // when the player enters a boss arena).
   const onceUp = () => {
     tryPlay();
+    if (_bgmBossEl) {
+      try {
+        _bgmBossEl.play().then(() => { try { _bgmBossEl.pause(); } catch (e) {} })
+                         .catch(() => {/* blocked: try again next gesture */});
+      } catch (e) {}
+    }
     window.removeEventListener('pointerdown', onceUp, true);
     window.removeEventListener('keydown', onceUp, true);
     window.removeEventListener('touchstart', onceUp, true);
