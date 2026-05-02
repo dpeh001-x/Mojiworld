@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.293';
+const GAME_VERSION = 'v0.25.294';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -14271,7 +14271,12 @@ function castSkill(id) {
     // the attack timer (no explicit clear needed).
     player._mageBigSwingUntil = (game.time | 0) + 360;
   } else if (player.cls === 'mage' && (player.job === 'warlock' || player.job === 'archmage')
-             && (s.slot === 'q' || s.slot === 'c' || s.slot === 'x')) {
+             && (s.slot === 'q' || s.slot === 'c' || s.slot === 'x')
+             // v0.25.294 — exclude the two warlock G master-signatures
+             // that have their own dedicated levitate pose handled in
+             // the next else-if branch below. Without this exclusion
+             // the warlock/archmage condition would shadow them.
+             && id !== 'lich_harvest' && id !== 'hexmaster_grandhex') {
     // v0.25.290 — Warlock + Archmage F (slot q) / V (slot c) / G
     // (slot x) get a chant-then-raise pose. First ~55 % of the cast:
     // hands close at the chest with a slight tremor (chanting). Last
@@ -14323,6 +14328,17 @@ function castSkill(id) {
     // the seal phase reads before the kage-rush kicks in.
     player._ninjaCrouchAt = (game.time | 0);
     player._ninjaCrouchUntil = (game.time | 0) + 32;
+    player.attackTimer = Math.max(player.attackTimer, 540);
+  } else if (id === 'lich_harvest' || id === 'hexmaster_grandhex') {
+    // v0.25.294 — Lich + Hexmaster G — levitate into the air with
+    // arms spread wide. Stylised dark-magic pose: body hovers ~10 px
+    // up via the spine/head bob (no physics change so the player
+    // stays anchored for the AoE), both arms extended out
+    // horizontally palms-down, spine very upright with a slight
+    // back arch, head lifted to look up. Drives the new
+    // attack_mage_levitate anim across a 32-frame budget.
+    player._levitateAt = (game.time | 0);
+    player._levitateUntil = (game.time | 0) + 32;
     player.attackTimer = Math.max(player.attackTimer, 540);
   }
   // Rogues get fluid skill-linking — every cast clears prior action locks so moves flow into each other
@@ -29040,6 +29056,32 @@ const HERO_VEC_ANIMS = {
       ? 0.20
       : 0.20 + _heroEaseOutCubic((t - 0.40) / 0.60) * 0.40,
   },
+  // v0.25.294 — Lich + Hexmaster G "levitate, arms wide" pose.
+  // Two phases over the 32-frame budget:
+  //   rise   (t < 0.40): body lifts via spine/head bob, arms sweep
+  //                      from neutral out to fully horizontal (palms
+  //                      down), spine straightens with a slight back
+  //                      arch, head tilts up.
+  //   hover  (t ≥ 0.40): hold the spread + lift with a slow 2 Hz
+  //                      breath wobble for the rest of the cast.
+  attack_mage_levitate: {
+    spine: t => t < 0.40
+      ? 0.04 - _heroEaseOutCubic(t / 0.40) * 0.18
+      : -0.14 + Math.sin((t - 0.40) * Math.PI * 2) * 0.012,
+    head:  t => t < 0.40
+      ? 0.08 - _heroEaseOutCubic(t / 0.40) * 0.20
+      : -0.12 + Math.sin((t - 0.40) * Math.PI * 2 + 0.5) * 0.014,
+    // Front arm spreads OUT to horizontal (≈ +π/2 = 1.57 rad)
+    armR:  t => t < 0.40
+      ? -0.30 + _heroEaseOutCubic(t / 0.40) * 1.85
+      : 1.55 + Math.sin((t - 0.40) * Math.PI * 2) * 0.04,
+    // Back arm spreads OUT to horizontal in the opposite direction.
+    armL:  t => t < 0.40
+      ? 0.30 + _heroEaseOutCubic(t / 0.40) * 1.20
+      : 1.50 + Math.sin((t - 0.40) * Math.PI * 2 + 0.5) * 0.04,
+    legL:  () => -0.06,
+    legR:  () => 0.06,
+  },
   // v0.25.290 — Warlock + Archmage F/V/G "chant then raise" pose.
   // Two phases sharing one 32-frame (~540 ms) budget:
   //   chant  (t < 0.55): hands close near chest, head bowed, body
@@ -29147,6 +29189,14 @@ const HERO_VEC_DEFORM = {
     spine: t => ({ sx: 1, sy: t < 0.40 ? 1 : 1 - _heroEaseOutCubic((t - 0.40) / 0.60) * 0.10 }),
     handR: t => { const s = t < 0.40 ? 1 : 1 + _heroEaseOutCubic((t - 0.40) / 0.60) * 0.30; return { sx: s, sy: s }; },
   },
+  // v0.25.294 — Mage levitate deform. Spine stretches slightly tall
+  // through the rise, then holds. Both arms stretch lengthwise on
+  // the spread. No horizontal squash.
+  attack_mage_levitate: {
+    spine: t => ({ sx: 1, sy: 1 + (t < 0.40 ? _heroEaseOutCubic(t / 0.40) * 0.06 : 0.06) }),
+    armR:  t => ({ sx: 1, sy: 1 + (t < 0.40 ? _heroEaseOutCubic(t / 0.40) * 0.08 : 0.08) }),
+    armL:  t => ({ sx: 1, sy: 1 + (t < 0.40 ? _heroEaseOutCubic(t / 0.40) * 0.08 : 0.08) }),
+  },
   // v0.25.290 — Mage chant-raise deform. Spine compresses slightly
   // during the chant (body stooped), then stretches up during the
   // raise. Staff arm stretches lengthwise on the upward sweep.
@@ -29250,6 +29300,24 @@ const HERO_VEC_BOB = {
         : -4.0 + _heroEaseOutCubic((t - 0.40) / 0.60) * 9.0,
     }),
   },
+  // v0.25.294 — Mage levitate body translation. Body LIFTS through
+  // the rise phase (~10 px up), then holds with a slow 2 Hz hover
+  // wobble. Head lifts proportionally so the silhouette reads as
+  // "feet off the ground, looking up at the conjuration".
+  attack_mage_levitate: {
+    spine: t => ({
+      x: 0,
+      y: t < 0.40
+        ? -_heroEaseOutCubic(t / 0.40) * 10
+        : -10 + Math.sin((t - 0.40) * Math.PI * 2) * 0.8,
+    }),
+    head:  t => ({
+      x: 0,
+      y: t < 0.40
+        ? -_heroEaseOutCubic(t / 0.40) * 12
+        : -12 + Math.sin((t - 0.40) * Math.PI * 2 + 0.5) * 0.6,
+    }),
+  },
   // v0.25.290 — Mage chant-raise body translation. Chant phase: spine
   // dips slightly with a small mutter-tremor; head bows. Raise phase:
   // spine extends UP, head lifts the same amount, selling the
@@ -29282,6 +29350,11 @@ function _heroVecAnimFor() {
     // v0.25.290 — Warlock + Archmage F/V/G chant-raise pose overrides
     // the default mage cast for the duration of the flag.
     if (cls === 'mage' && (player._chantRaiseUntil | 0) > now) return 'attack_mage_chant';
+    // v0.25.294 — Lich + Hexmaster G levitate pose. Checked before
+    // chant-raise so it wins precedence (the warlock branch is
+    // already excluding these two ids in castSkill, but the order
+    // here also guards against any future flag overlap).
+    if (cls === 'mage' && (player._levitateUntil | 0) > now) return 'attack_mage_levitate';
     // v0.25.292 — Dragoon Sky Lance impale pose overrides the warrior
     // 2-handed slash for the duration of the flag.
     if (cls === 'warrior' && (player._impalePoseUntil | 0) > now) return 'attack_warrior_impale';
@@ -29325,6 +29398,12 @@ function _heroVecTimeNorm(animName) {
   }
   if (animName === 'attack_rogue_crouch') {
     const start = player._ninjaCrouchAt || t;
+    return Math.max(0, Math.min(1, (t - start) / 32));
+  }
+  // v0.25.294 — Lich / Hexmaster levitate uses the same 32-frame
+  // budget so the rise + arms-spread reads cleanly.
+  if (animName === 'attack_mage_levitate') {
+    const start = player._levitateAt || t;
     return Math.max(0, Math.min(1, (t - start) / 32));
   }
   // v0.25.191 — all attack variants share the same timer.
