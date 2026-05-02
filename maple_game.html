@@ -2932,7 +2932,7 @@
 
   <div id="death-overlay">
     <div class="title">YOU DIED</div>
-    <div class="sub">Returning to Everdawn Village...</div>
+    <div class="sub" id="death-sub">Defeated · Returning to Everdawn Village...</div>
     <div class="loss" id="death-loss"></div>
   </div>
 </div>
@@ -2991,7 +2991,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.242';
+const GAME_VERSION = 'v0.25.243';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5463,7 +5463,13 @@ function unlockTreeNode(node) {
   player.treeUnlocked[node.id] = true;
   player.skillPoints -= node.cost;
   if (node.apply) node.apply(player);
-  showToast(`✦ Unlocked: ${node.name}`, 'epic');
+  // v0.25.243 (X2) — toast now includes the first sentence of node.desc
+  // so players can read the passive's effect without opening the tree.
+  // Fall back to the bare name when desc is missing.
+  const blurb = (node.desc || '').split(/\.\s/)[0];
+  showToast(blurb
+    ? `✦ Unlocked: ${node.name} — ${blurb}`
+    : `✦ Unlocked: ${node.name}`, 'epic');
   flash(0.2); addShake(3);
   return true;
 }
@@ -9226,6 +9232,10 @@ function applyClass(clsId) {
   if (clsId === 'archer') {
     player.mods.extraJumps = Math.max(player.mods.extraJumps || 0, 1);
   }
+  // v0.25.243 (X6) — first-class-pick tip pointing at the hotkey hint
+  // panel + Help. Fires after a beat so the class-select fade is done.
+  setTimeout(() => _firstTimeTip('hotkey_hint',
+    '💡 Tip: the hotkey panel (top-left) shows your skills. Press ? for full controls.', 'rare'), 1200);
 }
 function applyJob(jobId) {
   const j = JOBS[jobId];
@@ -11986,6 +11996,9 @@ function checkPlatformCollision(entity) {
 // =========================================================================
 function updatePlayer(dt) {
   const k = game.keys;
+  // v0.25.243 (X3) — auto-dismiss NPC dialog when the player walks
+  // > 110 px from the NPC. Called every frame; cheap (one number compare).
+  if (game._activeNpc) _checkDialogWalkAway();
   if (player.dropTimer > 0) { player.dropTimer -= dt; player.dropThrough = true; }
   else player.dropThrough = false;
 
@@ -12722,6 +12735,16 @@ function triggerDeath() {
     (lostMesos > 0 || lostExp > 0)
       ? `Lost ${lostMesos} 💰${lostExp > 0 ? ` · ${lostExp} XP` : ''}`
       : '';
+  // v0.25.243 (X1) — surface what killed the player so the death loop
+  // doesn't feel like an unexplained punishment. Pulls from
+  // player._lastDamageSource (set on every player-hit path).
+  const sub = document.getElementById('death-sub');
+  if (sub) {
+    const src = player._lastDamageSource || '';
+    sub.textContent = src
+      ? `💀 Defeated by ${src} · Returning to Everdawn Village...`
+      : 'Defeated · Returning to Everdawn Village...';
+  }
   ov.classList.remove('on'); void ov.offsetWidth; ov.classList.add('on');
   flash(0.4); addShake(12);
   audio.play('death');
@@ -16880,6 +16903,10 @@ function updateMonsters(dt) {
       }
       player.hp -= (player._god ? 0 : dmg);
       player.lastHitTime = game.time;
+      // v0.25.243 (X1) — record the source of the most recent player hit
+      // so the death overlay can name the killer. `m.label` falls back
+      // to type since some mobs don't carry a display name.
+      player._lastDamageSource = m.label || m.type || 'an enemy';
       // Knight Guardian reflect — bounce 50% of damage back to the attacker
       if (player._guardianReflect && game.time < player._guardianReflect && m.currentHp > 0) {
         const reflect = Math.floor(dmg * 0.5);
@@ -17892,6 +17919,13 @@ function _maybeLevelUp() {
   if (player.level === MASTER_ADVANCE_LEVEL && player.job && !player.master) {
     setTimeout(() => openMasterAdvancement(), 600);
   }
+  // v0.25.243 (S3) — first-time discoverability: when the player hits
+  // Lv 5, surface the world-map keybind. Easy to miss otherwise — Taxi
+  // Uncle is the only other path and many players never talk to him.
+  if (player.level === 5) {
+    setTimeout(() => _firstTimeTip('worldmap_lv5',
+      '🗺️ Press W to open the world map — fast-travel between unlocked areas.', 'epic'), 900);
+  }
   audio.play('levelup');
   if (typeof tickDaily === 'function') tickDaily('level', player.level);
   if (typeof checkAchievements === 'function') checkAchievements();
@@ -18577,6 +18611,8 @@ function updateProjectiles(dt) {
         if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
         player.hp -= (player._god ? 0 : dmg);
         player.lastHitTime = game.time;
+        // v0.25.243 (X1) — projectile origin label (or skill name fallback).
+        player._lastDamageSource = p.sourceLabel || p.skill || 'a stray bolt';
         // Zodiac projectile status effects on player
         if (p.freeze)  player.frozenTimer = Math.max(player.frozenTimer || 0, p.freeze);
         if (p.poison)  {
@@ -19069,6 +19105,9 @@ function tryInteract() {
 function openNPC(npc) {
   const dlg = document.getElementById('dialog');
   document.getElementById('dialog-name').textContent = npc.name;
+  // v0.25.243 (X3) — track which NPC the dialog belongs to so the
+  // walk-away auto-dismiss in updatePlayer can compare distances.
+  game._activeNpc = npc;
   // Daily "talk to N different NPCs" challenge — deduped by role in tickDaily
   if (typeof tickDaily === 'function') tickDaily('talk', npc.role || npc.name);
   let text = '', opts = [];
@@ -19165,6 +19204,22 @@ function openNPC(npc) {
 function closeDialog() {
   document.getElementById('dialog').style.display = 'none';
   game.paused = false;
+  game._activeNpc = null;
+}
+
+// v0.25.243 (X3) — auto-dismiss the NPC dialog if the player walks > 110 px
+// from the active NPC. Called from the player update loop.
+function _checkDialogWalkAway() {
+  const npc = game._activeNpc;
+  if (!npc) return;
+  const dlg = document.getElementById('dialog');
+  if (!dlg || dlg.style.display === 'none') return;
+  // NPCs store an x; use it directly. Some NPCs may be on a different
+  // map id (rare) — if so just close.
+  const npcX = (typeof npc.x === 'number') ? npc.x : null;
+  if (npcX === null) { closeDialog(); return; }
+  const playerCenter = player.x + player.w / 2;
+  if (Math.abs(playerCenter - npcX) > 110) closeDialog();
 }
 
 // =========================================================================
@@ -21489,8 +21544,25 @@ function showToast(txt, rarity) {
                               rarity === 'epic' ? '#c68aff' :
                               rarity === 'rare' ? '#6aa6ff' : '#fff';
   t.textContent = txt;
+  // v0.25.243 (X8) — surface toasts to assistive tech. role=status with
+  // aria-live=polite gets announced without interrupting the player.
+  t.setAttribute('role', 'status');
+  t.setAttribute('aria-live', 'polite');
   document.querySelector('.game-wrapper').appendChild(t);
   setTimeout(() => t.remove(), 3000);
+}
+
+// v0.25.243 — One-shot tip toasts for first-session moments (hotkey hint
+// pointer + world-map discoverability at Lv 5). Backed by localStorage so
+// each tip fires at most once per save slot. Returns whether it fired.
+function _firstTimeTip(key, txt, rarity) {
+  try {
+    const sk = 'mojiworld_tip_' + key;
+    if (localStorage.getItem(sk)) return false;
+    localStorage.setItem(sk, '1');
+  } catch (e) { /* no localStorage (private mode) — still show once per session */ }
+  showToast(txt, rarity || 'rare');
+  return true;
 }
 
 // =========================================================================
