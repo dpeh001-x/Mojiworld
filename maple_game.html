@@ -2692,6 +2692,7 @@
           <div class="kb"><span>Help Panel</span><span><kbd>?</kbd></span></div>
           <div class="kb"><span>HP Potion</span><span><kbd>PgUp</kbd></span></div>
           <div class="kb"><span>MP Potion</span><span><kbd>PgDn</kbd></span></div>
+          <div class="kb"><span>Wardrobe (Fashionista)</span><span><kbd>Q</kbd></span></div>
           <div class="kb"><span>Toggle Mute</span><span><kbd>M</kbd></span></div>
           <div class="kb"><span>Close Menus</span><span><kbd>Esc</kbd></span></div>
         </div>
@@ -3054,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.262';
+const GAME_VERSION = 'v0.25.263';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -7031,21 +7032,26 @@ const MAPS = {
     isTown: true,
     platforms: [
       {x:0, y:480, w:1100, h:60, type:'ground'},
-      // Sidewalk tier right outside each building
+      // Sidewalk tier right outside each building. v0.25.263 — added a
+      // 7th platform at x:960 so Fashionista's stall has its own raised
+      // walkway like the other vendors.
       {x:120, y:360, w:80, h:10, type:'platform'},
       {x:260, y:360, w:80, h:10, type:'platform'},
       {x:400, y:360, w:80, h:10, type:'platform'},
       {x:540, y:360, w:80, h:10, type:'platform'},
       {x:680, y:360, w:80, h:10, type:'platform'},
       {x:820, y:360, w:80, h:10, type:'platform'},
+      {x:960, y:360, w:80, h:10, type:'platform'},
     ],
     npcs: [
-      {x:160,  name:'Pharma Sis',    role:'potion',  color:'#ff88bb'},
-      {x:300,  name:'Brok',          role:'weapon',  color:'#6b8fcc'},
-      {x:440,  name:'The Amnesiac',  role:'amnesiac',color:'#cc9944'},
-      {x:580,  name:'Sage Mira',     role:'sage',    color:'#aa66cc'},
-      {x:720,  name:'Old Arlen',     role:'info',    color:'#6aaa88'},
-      {x:860,  name:'Taxi Uncle',    role:'caravan', color:'#e8b85a'},
+      {x:160,  name:'Pharma Sis',    role:'potion',   color:'#ff88bb'},
+      {x:300,  name:'Brok',          role:'weapon',   color:'#6b8fcc'},
+      {x:440,  name:'The Amnesiac',  role:'amnesiac', color:'#cc9944'},
+      {x:580,  name:'Sage Mira',     role:'sage',     color:'#aa66cc'},
+      {x:720,  name:'Old Arlen',     role:'info',     color:'#6aaa88'},
+      {x:860,  name:'Taxi Uncle',    role:'caravan',  color:'#e8b85a'},
+      // v0.25.263 — Fashionista runs the cosmetic wardrobe.
+      {x:1000, name:'Fashionista',   role:'wardrobe', color:'#ff66cc'},
     ],
     portals: [
       {x:60,   dest:'sunsetBeach', name:'◀ Sunset Coast'},
@@ -17515,20 +17521,23 @@ function updateMonsters(dt) {
     m.animTimer += dt;
 
     // Burn DoT
-    // v0.25.262 — Active-burn cap. With many simultaneous burns + the
-    // damage-number push every tick, this loop becomes a real cost on
-    // crowded maps. Track a frame-local `_burnTickedThisFrame` counter
-    // and skip ticks past the cap. Burns still DECAY normally so they
-    // expire on schedule; only the visible damage tick is throttled.
+    // v0.25.262 — Active-burn cap. Frame-local _burnTickedThisFrame
+    // counter skips ticks past MAX_BURNING; burns still decay normally.
+    // v0.25.263 — Cadence changed to a clean 30 frames (0.5 s @ 60 fps,
+    // was 80 / ~1.3 s). Per-tick damage scaled by 30/80 = 0.375× so
+    // total burn DPS over the burn window is unchanged — players see
+    // smaller numbers tick more often, which reads better and lets the
+    // burn cap kick in more cleanly without one big damage spike.
     if (m.burnTimer > 0) {
       m.burnTimer -= dt;
-      if (m.animTimer % 80 < dt) {
+      if (m.animTimer % 30 < dt) {
         if ((game._burnTickedThisFrame | 0) < MAX_BURNING) {
           game._burnTickedThisFrame = (game._burnTickedThisFrame | 0) + 1;
-          m.currentHp -= m.burnDmg;
+          const tickDmg = Math.max(1, Math.floor(m.burnDmg * 0.375));
+          m.currentHp -= tickDmg;
           game.damageNumbers.push({
             x: m.x + m.w/2, y: m.y - 5, vy: -1,
-            text: m.burnDmg, life: 34, color: m._poisonGrandHex ? '#88ff44' : '#ff6622', size: 12
+            text: tickDmg, life: 26, color: m._poisonGrandHex ? '#88ff44' : '#ff6622', size: 11
           });
           if (m.currentHp <= 0) { killMonster(m); continue; }
         }
@@ -20039,6 +20048,13 @@ function openNPC(npc) {
   } else if (npc.role === 'caravan') {
     text = 'Need a ride? My camels have seen every dune and crypt between here and the Singularity. 50 Lumens a trip.';
     opts.push({ t:'Browse Routes 🗺', cb:() => { closeDialog(); openTaxi(); } });
+  } else if (npc.role === 'wardrobe') {
+    // v0.25.263 — Fashionista runs the cosmetic wardrobe (CharStudio).
+    // Cosmetic-only: skin / hair / eyes / mouth pickers. Q key opens
+    // the same panel from anywhere in the world.
+    text = 'Darling! Let me redo your look. Whatever class you swing or spell you cast, you should LOOK fabulous doing it.';
+    opts.push({ t:'Open Wardrobe ✨', cb:() => { closeDialog(); if (typeof openCharStudio === 'function') openCharStudio(); } });
+    opts.push({ t:'(Tip: press Q anywhere)', cb:() => closeDialog() });
   }
   // The amnesiac manages its own options (the script authors them per stage)
   if (npc.role !== 'amnesiac') {
@@ -27185,6 +27201,12 @@ function drawNPCs() {
       px(sx + 27, topY + 8, 4, 3, '#f0e0b0');
       px(sx + 27, topY + 8, 4, 1, '#ffeecc');
       px(sx + 27, topY + 11, 4, 1, '#8a6a3a');
+    } else if (npc.role === 'wardrobe') {
+      // v0.25.263 — Fashionista holds a hand mirror. Pink frame +
+      // glassy highlight reads as a vanity tool from a distance.
+      px(sx + 27, topY + 4, 4, 4, '#ff66cc');
+      px(sx + 28, topY + 5, 2, 2, '#ffccee');
+      px(sx + 27, topY + 8, 1, 4, '#aa3399');
     }
 
     // === HEAD (DQ-style cel-shaded ball matching the player) ===
