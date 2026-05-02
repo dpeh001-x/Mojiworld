@@ -3054,7 +3054,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.257';
+const GAME_VERSION = 'v0.25.258';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4681,6 +4681,11 @@ const LX_FX = (() => {
     hexmaster_grandhex:    'hexmaster_grandhex.webp',
     hexmaster_summon:      'hexmaster_summon.webp',
     hexmaster_darkpulse:   'hexmaster_darkpulse.webp',
+    // v0.25.258 — Phantom V (sleight zip burst) + improved Phantom G
+    // (voidrift execution finale). Both share the dark-violet phantom
+    // theme with spectral hands + crossed daggers + void portal motifs.
+    phantom_voidrift:      'phantom_voidrift.webp',
+    phantom_cut:           'phantom_cut.webp',
   };
   for (const [k, f] of Object.entries(files)) {
     const img = new Image();
@@ -5302,7 +5307,7 @@ const SKILLS = {
   deathBlossom: { name:'Death Blossom',  icon:'🌸', cls:'rogue', job:'ninja',    slot:'c', mp:50, cd:8000, desc:'Ultimate: Strike up to 5 nearby enemies — 3 fast waves.' },
   // Assassin
   smokeBomb:    { name:'Smoke Bomb',     icon:'☁️', cls:'rogue', job:'assassin', slot:'q', mp:20, cd:10000,  desc:'Invuln + heal 30% for 3s.' },
-  sleight:      { name:'Sleight of Hand',icon:'🪄', cls:'rogue', job:'assassin', slot:'c', mp:35, cd:17000,  desc:'Ultimate: Steal Lumens & buff self.' },
+  sleight:      { name:'Voidrift Blink',icon:'🪄', cls:'rogue', job:'assassin', slot:'c', mp:25, cd:14000,  desc:'Phantom V: 3-charge zip across half the screen — tap to blink, hits all foes in the path. Cooldown starts after the 3rd charge.' },
 
   // ============ MAGE ============
   magicBolt:    { name:'Magic Bolt',     icon:'✨', cls:'mage', slot:'d', mp:4,  cd:600,  desc:'Arcane projectile — 0.3s recast.' },
@@ -13909,6 +13914,20 @@ function castSkill(id) {
     computedCd = 12000;
   }
   player.skillCooldowns[id] = computedCd;
+  // v0.25.258 — Sleight (assassin V / Phantom V) is now a 3-charge zip.
+  // Each press consumes one charge; re-cast gate is short (250 ms) until
+  // charges are exhausted. After the 3rd charge, full cooldown applies
+  // and charges refill on the NEXT cast (after CD expires).
+  if (id === 'sleight') {
+    if (!player._sleightCharges || player._sleightCharges <= 0) {
+      player._sleightCharges = 3;       // refill on first cast after CD
+    }
+    player._sleightCharges--;
+    if (player._sleightCharges > 0) {
+      player.skillCooldowns[id] = 250;  // short re-cast gate, no full CD yet
+    }
+    // else: full computedCd already applied above; charges stay at 0
+  }
   player.attacking = true;
   // Warrior basic — heavier, longer swing animation; rogue — quick flick
   player.attackTimer = (id === 'slash') ? 360 : (id === 'stab') ? 180 : 260;
@@ -15437,61 +15456,82 @@ const SKILL_FNS = {
     showToast('VANISHED!', 'epic');
   },
   sleight: () => {
-    // Chain-teleport through every enemy in range, stealing from each
-    spawnFx('thief','mesoExplosion', player.x + player.w/2, player.y + player.h/2, player.facing, { scale: 0.8, frameMs: 60 });
-    const targets = [];
+    // v0.25.258 — Reworked from a 6-target chain-teleport (Lumen-stealing
+    // theme) into a Phantom-flavored short-zip with charges. Each press
+    // zips ~half the visible field forward, deals damage to every
+    // monster in the path's vertical band, and counts as 1 of 3 charges.
+    // Charges replenish on the FIRST cast after the full cooldown ends
+    // — see the cast-pipeline gate at line ~13911 for the cooldown
+    // logic. This function only handles the zip + damage + visuals.
+    const HALF_W = (typeof W === 'number' ? W : 1100) * 0.5;       // ~half visible field
+    const dir = player.facing;
+    const startX = player.x;
+    const startY = player.y;
+    // Compute zip target — clamp to map bounds.
+    const ww = (game.mapData && game.mapData.worldWidth) || 1100;
+    let endX = startX + dir * HALF_W;
+    if (endX < 0) endX = 0;
+    if (endX + player.w > ww) endX = ww - player.w;
+    const path = endX - startX;
+    // Damage every alive monster whose center sits inside the zip
+    // corridor (player-height tall × full zip width).
+    const corridorTop = startY - 6;
+    const corridorBot = startY + player.h + 6;
+    const xMin = Math.min(startX, endX) - 8;
+    const xMax = Math.max(startX, endX) + player.w + 8;
+    const chargeIdx = (player._sleightCharges || 0); // remaining BEFORE this hit
+    // Damage ramps mildly per consecutive charge (1.0× → 1.15× → 1.3×)
+    const ramp = 1.0 + (2 - chargeIdx) * 0.15;
+    let hitCount = 0;
     for (const m of game.monsters) {
       if (m.currentHp <= 0) continue;
-      const d = Math.hypot((m.x+m.w/2)-(player.x+player.w/2),(m.y+m.h/2)-(player.y+player.h/2));
-      if (d < 380) targets.push({ m, d });
+      const cx = m.x + m.w/2, cy = m.y + m.h/2;
+      if (cy < corridorTop || cy > corridorBot) continue;
+      if (cx < xMin || cx > xMax) continue;
+      const dmg = Math.floor(getAtk() * 2.0 * ramp);
+      const crit = rollCrit() || Math.random() < 0.5;
+      hitMonster(m, Math.floor(dmg * (crit ? getCritDmg() : 1)), crit, 'sleight');
+      m.vx += dir * 6;
+      spawnSmoothImpact(cx, cy, '#cc88ff');
+      hitCount++;
     }
-    targets.sort((a, b) => a.d - b.d);
-    const maxChain = Math.min(6, targets.length);
-    let stolen = 0;
-    for (let i = 0; i < maxChain; i++) {
-      const tgt = targets[i].m;
-      scheduleSkillTimer(() => {
-        if (player.hp <= 0 || game.paused || tgt.currentHp <= 0) return;
-        const oldX = player.x, oldY = player.y;
-        player.x = tgt.x + (tgt.facing > 0 ? -player.w - 4 : tgt.w + 4);
-        player.y = tgt.y;
-        player.facing = tgt.facing;
-        // Shadow trail
-        for (let k = 0; k < 5; k++) {
-          const t = k / 5;
-          game.afterImages.push({
-            x: oldX + (player.x - oldX) * t, y: oldY + (player.y - oldY) * t,
-            facing: player.facing, state:'attack', life: 14, maxLife: 14,
-            color: `rgba(255,180,80,${0.55 - t * 0.3})`,
-          });
-        }
-        const steal = Math.floor(tgt.mesos * 0.5);
-        stolen += steal;
-        hitMonster(tgt, Math.floor(getAtk() * 1.1), true, 'sleight');
-        // Gold coin burst
-        for (let j = 0; j < 14; j++) {
-          const a = Math.random() * Math.PI * 2;
-          game.particles.push({
-            x: tgt.x + tgt.w/2, y: tgt.y + tgt.h/2,
-            vx: Math.cos(a) * 5, vy: Math.sin(a) * 5 - 2,
-            life: 32, color: j % 2 ? '#ffdd44' : '#ff9922', size: 3
-          });
-        }
-        game.damageNumbers.push({
-          x: tgt.x + tgt.w/2 - 12, y: tgt.y - 10, vy: -2,
-          text: '+' + steal + '💰', life: 40, color: '#ffdd44', size: 13
-        });
-      }, i * 120);
+    // Move the player to the zip endpoint
+    player.x = endX;
+    player.vx = 0;          // zip neutralises momentum so re-press feels clean
+    player.invulnerable = Math.max(player.invulnerable, 320);
+    // Phantom afterimage trail along the zip path
+    const trailCount = 8;
+    for (let k = 0; k < trailCount; k++) {
+      const t = k / trailCount;
+      game.afterImages.push({
+        x: startX + path * t, y: startY,
+        facing: dir, state: 'attack', life: 22, maxLife: 22,
+        color: `rgba(180,80,255,${0.65 - t * 0.35})`,
+      });
     }
-    scheduleSkillTimer(() => {
-      if (stolen > 0) {
-        player.mesos += stolen;
-        showToast(`Stole ${stolen}💰!`, 'legendary');
-      }
-    }, maxChain * 120 + 50);
-    player.buffs.sleight = 5000;
-    player.invulnerable = Math.max(player.invulnerable, maxChain * 120 + 200);
-    flash(0.3); addShake(5);
+    // Big Voidrift slash sprite at start AND end positions for that
+    // "zipped through reality" feel.
+    spawnSpriteBurst(startX + player.w/2, startY + player.h/2, 'phantom_voidrift',
+      { size: 130, life: 22, angle: dir > 0 ? 0 : Math.PI });
+    spawnSpriteBurst(endX + player.w/2, startY + player.h/2, 'phantom_voidrift',
+      { size: 160, life: 28, angle: dir > 0 ? 0 : Math.PI, spin: dir * 0.4 });
+    // Violet void particle ring at the destination
+    for (let i = 0; i < 22; i++) {
+      const a = (i / 22) * Math.PI * 2;
+      game.particles.push({
+        x: endX + player.w/2, y: startY + player.h/2,
+        vx: Math.cos(a) * 6, vy: Math.sin(a) * 6,
+        life: 30, color: i % 2 ? '#cc88ff' : '#5522aa', size: 3,
+      });
+    }
+    // Charge UI feedback — show how many remain.
+    const remaining = chargeIdx - 1;            // chargeIdx is BEFORE consume
+    const tag = remaining > 0
+      ? `Voidrift ${remaining} charge${remaining === 1 ? '' : 's'} left`
+      : 'Voidrift — final blink';
+    if (typeof showToast === 'function') showToast(`✦ ${tag} · ${hitCount} hit${hitCount === 1 ? '' : 's'}`, remaining > 0 ? 'epic' : 'legendary');
+    flash(0.22); addShake(5);
+    if (audio && audio.play) audio.play('crit');
   },
 
   // Mage
@@ -16537,8 +16577,14 @@ const SKILL_FNS = {
     // in rapid succession. Every strike ignores DEF and crits; the final
     // mark triggers a shadow nova that radiates from the rogue's landing
     // point and damages every mob in ~220 px.
+    // v0.25.258 — Cinematic cast burst: a grand void portal sprite at
+    // the rogue's chest right before the dissolve. Sells the "tearing
+    // open reality" beat that the chain-teleport relied on imagination
+    // for previously.
     const pcx = player.x + player.w/2;
     const pcy = player.y + player.h/2;
+    spawnSpriteBurst(pcx, pcy, 'phantom_cut',
+      { size: 240, life: 50, spin: Math.PI * 0.35 });
     const candidates = game.monsters
       .filter(m => m.currentHp > 0)
       .map(m => ({
@@ -37461,6 +37507,9 @@ requestAnimationFrame(loop);
     'Sprites/fx/hexmaster_grandhex.webp',
     'Sprites/fx/hexmaster_summon.webp',
     'Sprites/fx/hexmaster_darkpulse.webp',
+    // v0.25.258 — Phantom V/G sprites
+    'Sprites/fx/phantom_voidrift.webp',
+    'Sprites/fx/phantom_cut.webp',
     'Sprites/summons/wolf_sky.webp',
     // U-panel UI art (v0.25.221 + v0.25.222).
     'Sprites/ui/char_header.webp',
