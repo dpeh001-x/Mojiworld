@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.299';
+const GAME_VERSION = 'v0.25.300';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -10426,6 +10426,15 @@ function loadState() {
     game.currentMap = 'town';
     if (typeof renderSkillBar === 'function') renderSkillBar();
     audio.muted = !!game.muted;
+    // v0.25.300 — apply the saved mute state to the mp3 BGM elements
+    // at boot, since the legacy procedural music.stop() that used to
+    // gate this path was removed. typeof guard because the BGM consts
+    // are declared near the bottom of the file (forward reference is
+    // fine at call time, not at parse time).
+    try {
+      if (typeof _bgmEl     !== 'undefined' && _bgmEl)     _bgmEl.muted     = !!game.muted;
+      if (typeof _bgmBossEl !== 'undefined' && _bgmBossEl) _bgmBossEl.muted = !!game.muted;
+    } catch (e) {}
     // Clean transient runtime state
     game.paused = false;
     game.dying = 0;
@@ -10508,281 +10517,27 @@ const audio = {
     this.muted = !this.muted;
     saveState();
     if (typeof showToast === 'function') showToast(this.muted ? '🔇 Muted' : '🔊 Unmuted', 'common');
-    // v0.22: stop any playing music immediately on mute.
-    if (this.muted && typeof music !== 'undefined' && music) music.stop();
-    else if (!this.muted && typeof music !== 'undefined' && music && music._lastMap) music.play(music._lastMap);
+    // v0.25.300 — legacy procedural music object removed; mute / unmute
+    // now drives the v0.25.233 mp3 BGM elements directly via
+    // HTMLMediaElement.muted. typeof guards because these consts are
+    // declared after the audio object is constructed (forward reference
+    // works at call time, not at parse time).
+    try {
+      if (typeof _bgmEl     !== 'undefined' && _bgmEl)     _bgmEl.muted     = !!this.muted;
+      if (typeof _bgmBossEl !== 'undefined' && _bgmBossEl) _bgmBossEl.muted = !!this.muted;
+    } catch (e) {}
   }
 };
 
 // =========================================================================
-// MUSIC (v0.22) — short looping Web-Audio chiptunes per map. All synthesis,
-// no sample files (keeps the build single-file). Respects audio.muted and
-// swaps cleanly on map change. Each track is a melody (lead) plus a
-// simple bass line running at half tempo.
+// MUSIC — v0.25.300 removed the legacy v0.22 procedural Web-Audio
+// chiptune synth (MUSIC_TRACKS / MAP_MUSIC / _mapTrackId / `music`
+// object / _mnote / REST helpers). It was running in parallel with
+// the v0.25.233 mp3 BGM (_bgmEl) so players heard two tracks layered.
+// All map music now flows through _bgmEl + _bgmBossEl exclusively
+// (defined near the bottom of this script), with _setBossBgm() flipping
+// between them when the player enters / leaves a boss arena.
 // =========================================================================
-// Note-name → frequency helper. 'A4' = 440 Hz.
-function _mnote(name) {
-  const m = /^([A-Ga-g])(#|b)?(-?\d+)$/.exec(name);
-  if (!m) return 0;
-  const base = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 }[m[1].toUpperCase()];
-  const acc  = m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0;
-  const oct  = parseInt(m[3], 10);
-  const midi = (oct + 1) * 12 + base + acc;
-  return 440 * Math.pow(2, (midi - 69) / 12);
-}
-// Rest is denoted by 0.
-const REST = 0;
-// Each track: { beat: ms per beat, lead: [note, beats], bass: [note, beats], leadWave, bassWave, leadVol, bassVol }
-// v0.23.1 — soothing piano-classical rework. All leads/basses now use sine
-// (piano-adjacent fundamental), tempos slowed, volumes softened, and the
-// envelope (see _tone) gets a longer attack + release for legato feel.
-// Melodic phrases are simple arpeggios over minor / major chord roots.
-const MUSIC_TRACKS = {
-  town: {
-    // Slow pastoral C-major arpeggios, like a lullaby
-    beat: 480,
-    leadWave: 'sine', bassWave: 'sine',
-    leadVol: 0.045, bassVol: 0.028,
-    piano: true,
-    lead: [
-      ['E5',2],['G5',2], ['C6',2],['G5',2],
-      ['F5',2],['A5',2], ['C6',2],['A5',2],
-      ['D5',2],['G5',2], ['B5',2],['G5',2],
-      ['E5',4],         ['C5',4],
-    ],
-    bass: [
-      ['C3',4],['G3',4],
-      ['F3',4],['A3',4],
-      ['G3',4],['D3',4],
-      ['C3',4],['C3',4],
-    ],
-  },
-  forest: {
-    // Rolling A-minor / C-major arpeggio — gentle overworld
-    beat: 440,
-    leadWave: 'sine', bassWave: 'sine',
-    leadVol: 0.04, bassVol: 0.026,
-    piano: true,
-    lead: [
-      ['A4',2],['C5',2],['E5',2],['A5',2],
-      ['G4',2],['C5',2],['E5',2],['G5',2],
-      ['F4',2],['A4',2],['C5',2],['F5',2],
-      ['E4',2],['G4',2],['B4',2],['E5',2],
-    ],
-    bass: [
-      ['A2',4],['A2',4],
-      ['C3',4],['C3',4],
-      ['F2',4],['F2',4],
-      ['E2',4],['E2',4],
-    ],
-  },
-  mushroom: {
-    // D-minor — contemplative, soft
-    beat: 520,
-    leadWave: 'sine', bassWave: 'sine',
-    leadVol: 0.038, bassVol: 0.025,
-    piano: true,
-    lead: [
-      ['D5',3],['F5',3], ['A5',2],
-      ['G5',3],['F5',3], ['D5',2],
-      ['A4',3],['C5',3], ['F5',2],
-      ['D5',4],          ['D5',4],
-    ],
-    bass: [
-      ['D2',4],['A2',4],
-      ['G2',4],['D2',4],
-      ['A2',4],['F2',4],
-      ['D2',4],['D2',4],
-    ],
-  },
-  boss: {
-    // C-minor — dramatic but still calm. Low strings feel.
-    beat: 420,
-    leadWave: 'sine', bassWave: 'sine',
-    leadVol: 0.042, bassVol: 0.032,
-    piano: true,
-    lead: [
-      ['C5',2],['D#5',2],['G5',2],['C6',2],
-      ['A#5',2],['G5',2],['D#5',2],['C5',2],
-      ['G4',2],['A#4',2],['D5',2],['G5',2],
-      ['C5',4],          ['C5',4],
-    ],
-    bass: [
-      ['C2',4],['G2',4],
-      ['F2',4],['C3',4],
-      ['G2',4],['D3',4],
-      ['C2',4],['C2',4],
-    ],
-  },
-  zodiac: {
-    // Shimmering A-minor → C-major — cosmic, pensive
-    beat: 500,
-    leadWave: 'sine', bassWave: 'sine',
-    leadVol: 0.036, bassVol: 0.024,
-    piano: true,
-    lead: [
-      ['A4',2],['C5',2],['E5',2],['A5',2],
-      ['F5',2],['E5',2],['C5',2],['A4',2],
-      ['E5',2],['G5',2],['B5',2],['D6',2],
-      ['C6',4],         ['A5',4],
-    ],
-    bass: [
-      ['A2',4],['E3',4],
-      ['F2',4],['C3',4],
-      ['G2',4],['D3',4],
-      ['A2',4],['A2',4],
-    ],
-  },
-  tower: {
-    // Slow ascending G-major — the climb feel, but reverent
-    beat: 460,
-    leadWave: 'sine', bassWave: 'sine',
-    leadVol: 0.038, bassVol: 0.028,
-    piano: true,
-    lead: [
-      ['G4',2],['B4',2],['D5',2],['G5',2],
-      ['A4',2],['C5',2],['E5',2],['A5',2],
-      ['B4',2],['D5',2],['G5',2],['B5',2],
-      ['G5',4],         ['D5',4],
-    ],
-    bass: [
-      ['G2',4],['D3',4],
-      ['A2',4],['E3',4],
-      ['B2',4],['G3',4],
-      ['G2',4],['G2',4],
-    ],
-  },
-};
-// Which track each map uses.
-const MAP_MUSIC = {
-  town: 'town', zodiacHall: 'zodiac',
-  forest: 'forest', elderwood: 'forest', sky: 'forest', sunset: 'forest',
-  mushroom: 'mushroom', fungal: 'mushroom',
-  frozen: 'mushroom', lava: 'boss',
-  gelwater: 'boss', queens: 'boss',
-  tower: 'tower',
-};
-function _mapTrackId(mapId) {
-  if (!mapId) return null;
-  if (MAP_MUSIC[mapId]) return MAP_MUSIC[mapId];
-  if (mapId.indexOf('zod_') === 0) return 'zodiac';
-  // Fallback — pick by coarse category
-  return 'forest';
-}
-const music = {
-  ctx: null,
-  gain: null,
-  current: null,   // track id
-  _stepIdx: 0,
-  _bassIdx: 0,
-  _nextAt: 0,
-  _timer: null,
-  _lastMap: null,
-  _init() {
-    if (!audio.ctx) audio.init();
-    this.ctx = audio.ctx;
-    if (!this.ctx) return false;
-    if (!this.gain) {
-      this.gain = this.ctx.createGain();
-      this.gain.gain.value = 0.7;
-      this.gain.connect(this.ctx.destination);
-    }
-    return true;
-  },
-  play(mapId) {
-    // v0.25.299 — Old procedural Web-Audio synth music DISABLED. The
-    // v0.25.233 _bgmEl mp3 BGM (and the v0.25.265 boss-arena
-    // variant) is now the canonical soundtrack; before this stub the
-    // synth was running in parallel, so players heard both tracks at
-    // once. Stubbed to a no-op (still records _lastMap so the unmute
-    // path at audio.toggleMute doesn't choke, and calls stop() to
-    // clear any in-flight scheduling that pre-dated this update).
-    // The synth's _schedule / _tone / MUSIC_TRACKS / _mapTrackId code
-    // is left intact in case the procedural system is ever re-
-    // enabled, but no call site triggers it now.
-    this._lastMap = mapId;
-    this.stop();
-  },
-  stop() {
-    this.current = null;
-    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
-  },
-  _schedule() {
-    if (!this.ctx || audio.muted || !this.current) return;
-    const t = MUSIC_TRACKS[this.current];
-    if (!t) return;
-    // Look ahead ~0.5 s and schedule any notes that fall within it. The
-    // re-arm timer fires every 150 ms so we stay ahead of playback.
-    const HORIZON = 0.6;
-    const until = this.ctx.currentTime + HORIZON;
-    while (this._nextAt < until) {
-      const leadNote = t.lead[this._stepIdx % t.lead.length];
-      const dur = leadNote[1] * (t.beat / 1000);
-      if (leadNote[0] !== REST) {
-        this._tone(_mnote(leadNote[0]), this._nextAt, dur, t.leadWave, t.leadVol);
-      }
-      // Bass moves at whatever cadence the bass array dictates
-      const bassNote = t.bass[this._bassIdx % t.bass.length];
-      const bassDur  = bassNote[1] * (t.beat / 1000);
-      if (bassNote[0] !== REST) {
-        this._tone(_mnote(bassNote[0]), this._nextAt, bassDur, t.bassWave, t.bassVol);
-      }
-      this._stepIdx++;
-      // Advance bass by its own duration units — rough sync, repeats if
-      // the lead is longer than the bass pattern.
-      this._bassIdx = (this._bassIdx + leadNote[1]) % t.bass.length;
-      this._nextAt += dur;
-    }
-    this._timer = setTimeout(() => this._schedule(), 150);
-  },
-  _tone(freq, when, dur, wave, vol) {
-    if (!this.ctx || !freq || freq <= 0) return;
-    const isPiano = (this.current && MUSIC_TRACKS[this.current] && MUSIC_TRACKS[this.current].piano);
-    const peak = vol || 0.04;
-    // Piano-like timbre: fundamental sine + a quiet octave partial for a
-    // warmer "struck string" feel. Longer attack / soft release = legato.
-    const fundamental = this.ctx.createOscillator();
-    const gEnv = this.ctx.createGain();
-    fundamental.type = wave || 'sine';
-    fundamental.frequency.setValueAtTime(freq, when);
-    // Envelope — piano-ish if requested
-    if (isPiano) {
-      const attack = 0.02, bodyEnd = dur * 0.85, releaseEnd = dur * 1.1;
-      gEnv.gain.setValueAtTime(0.0001, when);
-      gEnv.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), when + attack);
-      // Slow decay → gentle plateau
-      gEnv.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak * 0.38), when + bodyEnd);
-      gEnv.gain.exponentialRampToValueAtTime(0.0001, when + releaseEnd);
-    } else {
-      gEnv.gain.setValueAtTime(0.0001, when);
-      gEnv.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), when + 0.01);
-      gEnv.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak * 0.55), when + dur * 0.65);
-      gEnv.gain.exponentialRampToValueAtTime(0.0001, when + dur * 0.95);
-    }
-    fundamental.connect(gEnv);
-    gEnv.connect(this.gain);
-    fundamental.start(when);
-    fundamental.stop(when + dur + 0.12);
-
-    if (isPiano) {
-      // Quiet octave overtone for body — a second sine one octave up at
-      // ~25% amplitude. Gives the sine a "piano" bell-tone quality.
-      const over = this.ctx.createOscillator();
-      const oEnv = this.ctx.createGain();
-      over.type = 'sine';
-      over.frequency.setValueAtTime(freq * 2, when);
-      const oPeak = peak * 0.22;
-      oEnv.gain.setValueAtTime(0.0001, when);
-      oEnv.gain.exponentialRampToValueAtTime(Math.max(0.0002, oPeak), when + 0.015);
-      oEnv.gain.exponentialRampToValueAtTime(0.0001, when + dur * 0.7);
-      over.connect(oEnv);
-      oEnv.connect(this.gain);
-      over.start(when);
-      over.stop(when + dur + 0.08);
-    }
-  },
-};
-
 // =========================================================================
 // MULTIPLAYER (v0.24.0) — WebSocket client, ghost peers, chat relay.
 //
@@ -12265,8 +12020,8 @@ function loadMap(id, entryX) {
   if (typeof tickDaily === 'function') tickDaily('visit', id);
   // v0.25.61 — quest visit hook
   if (typeof tickQuestVisit === 'function' && player.cls) tickQuestVisit(id);
-  // v0.22: swap the background music to the new map's track.
-  if (typeof music !== 'undefined' && music) music.play(id);
+  // v0.25.300 — legacy procedural Web-Audio synth call removed; the
+  // v0.25.233 mp3 BGM (_bgmEl) is now the only music system.
   // v0.25.265 — swap full-track BGM (mojiworld vs Gravitos Ascends boss
   // theme) when entering / leaving a boss arena. MAPS[id].isBossArena is
   // the static, authoritative flag — game.mapData is rebuilt below from
