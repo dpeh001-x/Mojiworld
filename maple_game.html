@@ -2991,7 +2991,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.240';
+const GAME_VERSION = 'v0.25.241';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -18927,6 +18927,28 @@ function _trimVisualQueues() {
   if (game.particles.length > pc) game.particles.splice(0, game.particles.length - pc);
   if (game.damageNumbers.length > dc) game.damageNumbers.splice(0, game.damageNumbers.length - dc);
   if (game.afterImages.length > ac) game.afterImages.splice(0, game.afterImages.length - ac);
+  // v0.25.241 (P7) — reset the per-frame burst counter. Skill bursts
+  // can't use this directly (they fire once on cast), but mob-loop
+  // emitters (boss aura ticks, projectile trails, etc.) can check
+  // _frameParticleBudget() to throttle when the frame's already heavy.
+  _frameParticleCount = 0;
+}
+
+// v0.25.241 (P7) — per-frame "extras" particle budget so burst-spike
+// frames (Nightreaper ricochet × 6 + AoE freeze + multishot) don't
+// stutter. Load-bearing FX still emit unconditionally; decorative
+// trails / secondary ribbons should call _budgetedParticlePush() so
+// they're skipped past the threshold.
+let _frameParticleCount = 0;
+const _FRAME_PARTICLE_BUDGET_DESKTOP = 120;
+const _FRAME_PARTICLE_BUDGET_MOBILE  = 60;
+function _budgetedParticlePush(p) {
+  const cap = _IS_MOBILE_AT_LOAD || _perfLowFx()
+    ? _FRAME_PARTICLE_BUDGET_MOBILE : _FRAME_PARTICLE_BUDGET_DESKTOP;
+  if (_frameParticleCount >= cap) return false;
+  _frameParticleCount++;
+  game.particles.push(p);
+  return true;
 }
 
 function updateParticles(dt) {
@@ -31323,7 +31345,11 @@ function _drawMonsterSprite(m, sx, sy) {
 function drawMonster(m) {
   const sx = m.x - game.camera.x;
   const sy = m.y;
+  // v0.25.241 (P4) — full off-screen cull including Y axis. Was X-only,
+  // which meant aura draws + particle emissions still fired for mobs
+  // above/below the viewport on tall maps.
   if (sx + m.w < 0 || sx > W) return;
+  if (sy + m.h < -30 || sy > H + 30) return;
 
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
   ctx.beginPath();
@@ -34966,13 +34992,17 @@ function drawParticles() {
   // runs so particles remain visible, just without the soft halo.
   if (!_perfLowFx()) {
     // Pass 1 — glow halos for bright particles (lighter composite)
+    // v0.25.241 (P5) — tighter cull margin (10 instead of 30) and skip
+    // halo for old particles whose alpha curve has already faded the
+    // glow below visibility (life > 250).
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     for (const p of game.particles) {
       if (p.text) continue;
+      if (p.life > 250) continue;
       if (!_isBrightHex(p.color)) continue;
       const sx = p.x - camX;
-      if (sx < -30 || sx > W + 30 || p.y < -30 || p.y > H + 30) continue;
+      if (sx < -10 || sx > W + 10 || p.y < -10 || p.y > H + 10) continue;
       const alpha = p.life < 20 ? (p.life / 20) : 1;
       ctx.globalAlpha = alpha * 0.35;
       ctx.fillStyle = p.color;
@@ -34986,7 +35016,8 @@ function drawParticles() {
   let lastColor = null;
   for (const p of game.particles) {
     const sx = p.x - camX;
-    if (sx < -20 || sx > W + 20 || p.y < -20 || p.y > H + 20) continue;
+    // v0.25.241 (P5) — same tightened cull margin.
+    if (sx < -10 || sx > W + 10 || p.y < -10 || p.y > H + 10) continue;
     if (p.text) {
       ctx.fillStyle = p.color;
       ctx.font = 'bold 12px sans-serif';
