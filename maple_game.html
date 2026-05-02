@@ -3053,7 +3053,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.253';
+const GAME_VERSION = 'v0.25.254';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5728,6 +5728,11 @@ const SLOT_LEVEL_REQ = {
 };
 const JOB_ADVANCE_LEVEL    = 20;
 const MASTER_ADVANCE_LEVEL = 40;
+// v0.25.254 — Prestige sits 10 levels above master so the player gets a
+// real post-master endgame stretch before ascending. Named constant
+// replaces the previous hardcoded `50` in offerPrestige + dev cheat +
+// prestige modal copy.
+const PRESTIGE_LEVEL       = 50;
 
 const CUTE_PAL = {
   outline:    '#2a1a28',
@@ -8507,27 +8512,26 @@ window.addEventListener('keydown', e => {
     // current pick so the choice cards are actually offered.
     if (!player.cls) { showToast('Pick a class first', 'common'); return; }
     if (game.paused || player.hp <= 0) return;
-    if (player.level < 50) {
-      player.level = 50; player.exp = 0;
-      // Re-roll expToNext so the progress bar matches the new level.
-      // v0.25.47 — curve is now tiered (1.20 / 1.24 / 1.28) so a flat
-      // Math.pow won't compute the right number any more; loop through
-      // each level's multiplier to get the value for L50.
+    if (player.level < PRESTIGE_LEVEL) {
+      const _missed = PRESTIGE_LEVEL - player.level;     // e.g. 49 from Lv 1
+      player.level = PRESTIGE_LEVEL; player.exp = 0;
+      // Re-roll expToNext using the LIVE curve in _maybeLevelUp
+      // (v0.25.242 G2: 1.20 → 1.40 → 1.40 → 1.42 → 1.55 across tiers).
       let _e = 120;
-      for (let _i = 1; _i < 50; _i++) {
-        const _mul = _i >= 40 ? 1.28 : _i >= 30 ? 1.24 : 1.20;
+      for (let _i = 1; _i < PRESTIGE_LEVEL; _i++) {
+        const _mul = _i >= 40 ? 1.55 : _i >= 30 ? 1.42 : _i >= 20 ? 1.40 : _i >= 15 ? 1.40 : 1.20;
         _e *= _mul;
       }
       player.expToNext = Math.floor(_e);
       // Boost max HP/MP to match the missed level grants
       const hpGain = player.cls === 'warrior' ? 28 : player.cls === 'archer' ? 20 : player.cls === 'rogue' ? 16 : 14;
       const mpGain = player.cls === 'mage' ? 22 : 10;
-      player.maxHp += hpGain * 49;
-      player.maxMp += mpGain * 49;
-      player.baseAtk += (player.cls === 'warrior' ? 3 : 2) * 49;
-      player.baseDef += (player.cls === 'warrior' ? 2 : 1) * 49;
+      player.maxHp += hpGain * _missed;
+      player.maxMp += mpGain * _missed;
+      player.baseAtk += (player.cls === 'warrior' ? 3 : 2) * _missed;
+      player.baseDef += (player.cls === 'warrior' ? 2 : 1) * _missed;
       player.hp = getMaxHp(); player.mp = getMaxMp();
-      player.skillPoints += 49;
+      player.skillPoints += _missed;
     }
     // v0.25.5 — open the advancement picker so the player chooses. Reset
     // any existing job/master first (un-applying their stats) so the cards
@@ -8538,7 +8542,7 @@ window.addEventListener('keydown', e => {
     if (typeof updateUI === 'function') updateUI();
     if (typeof renderSkillBar === 'function') renderSkillBar();
     openAdvancement();
-    showToast('✨ Dev: Lv 50 — pick your job + master path', 'legendary');
+    showToast(`✨ Dev: Lv ${PRESTIGE_LEVEL} — pick your job + master path`, 'legendary');
     flash(0.3); audio.play('levelup');
   }
   // Dev console — 1+2+3 held together
@@ -10140,7 +10144,16 @@ function loadState() {
         }
       }
       const cap = (typeof BOON_EQUIP_CAP === 'number') ? BOON_EQUIP_CAP : 6;
-      if (clean.length > cap) clean.length = cap;
+      // v0.25.254 — surface a toast if the load truncated equipped boons
+      // so the user knows their loadout shrunk (was silent before).
+      const truncated = clean.length > cap;
+      if (truncated) {
+        clean.length = cap;
+        // Defer toast until showToast is wired (run-once after init).
+        setTimeout(() => {
+          if (typeof showToast === 'function') showToast(`◈ Boon loadout capped at ${cap} — extras unequipped`, 'common');
+        }, 600);
+      }
       player.boonsEquipped = clean;
     } else {
       player.boonsEquipped = [];
@@ -11453,7 +11466,7 @@ const DAILY_CHALLENGES = [
   { id:'chest3',   desc:'Open 3 chests',               goal:3,  track:'chest',   reward:{ mesos:500 },       minLv:6  },
   // Late — enhancement requires items + stones (wool chest / shop)
   { id:'enhance1', desc:'Enhance any item once',       goal:1,  track:'enhance', reward:{ mesos:600, sp:1 }, minLv:15 },
-  { id:'reach25',  desc:'Reach character level 20',    goal:20, track:'level',   reward:{ mesos:800, sp:1 }, minLv:12 },
+  { id:'reach20',  desc:'Reach character level 20',    goal:20, track:'level',   reward:{ mesos:800, sp:1 }, minLv:12 },
 ];
 function dailyIndex() { return Math.floor(Date.now() / 86400000); }
 // Pick a challenge deterministically per day, but filtered by level bracket
@@ -11591,11 +11604,11 @@ function respec() {
 // PRESTIGE — "Ascension" at level 50: reset to L1 with permanent bonuses
 // =========================================================================
 function offerPrestige() {
-  if (player.level < 50 || game._prestigeOffered) return;
+  if (player.level < PRESTIGE_LEVEL || game._prestigeOffered) return;
   game._prestigeOffered = true;
   const p = game.prestige || { count:0, xpMult:1, dmgMult:1, bonusAP:0 };
   const nextCount = p.count + 1;
-  const body = `Reach level 50 again from scratch, keeping these permanent bonuses:\n\n` +
+  const body = `Reach level ${PRESTIGE_LEVEL} again from scratch, keeping these permanent bonuses:\n\n` +
                `• +30% XP gain  (→ ×${(p.xpMult + 0.30).toFixed(2)})\n` +
                `• +30% damage   (→ ×${(p.dmgMult + 0.30).toFixed(2)})\n` +
                `• +1 starting attribute point  (→ +${p.bonusAP + 1})\n\n` +
@@ -19868,15 +19881,29 @@ function openShop(type) {
     // (cls === 'any', no setId) PLUS any class-specific items matching
     // the player's class. Set legendaries (setId) are excluded — those
     // are loot-only / craftable via Setshards.
+    // v0.25.254 — split the cap between generic ladder + class items
+    // so a Lv 8 Warrior sees their tier-2 class weapon (Crusader Mace)
+    // instead of having it pushed off the end by the 4-item global cap.
+    // Class items aren't capped (only 2 per class so it's bounded
+    // anyway); generics still tier-gate by level.
     const show = [];
     for (const cat of ['weapons','armors','accessories']) {
-      const filtered = ITEM_POOL[cat].filter(it => {
-        if (it.setId) return false;                                    // loot-only
-        if (!it.cls || it.cls === 'any') return true;                  // generic
-        return it.cls === player.cls;                                  // class match
+      const items = ITEM_POOL[cat].filter(it => !it.setId); // exclude loot-only set legendaries
+      const generics    = items.filter(it => !it.cls || it.cls === 'any');
+      const classItems  = items.filter(it => it.cls && it.cls !== 'any' && it.cls === player.cls);
+      const genCap = player.level < 3 ? 2 : player.level < 6 ? 3 : player.level < 10 ? 4 : 6;
+      // Class items reveal at the level where their tier becomes relevant:
+      // T2 (rare, Lv 6+) shows from Lv 6, T3 (epic, Lv 10+) from Lv 10.
+      const visibleClass = classItems.filter(it => {
+        if (!it.tier) return true;
+        if (it.tier <= 2) return player.level >= 6;
+        if (it.tier <= 3) return player.level >= 10;
+        return player.level >= 14;                      // future-proof for T4+
       });
-      const cap = player.level < 3 ? 2 : player.level < 6 ? 3 : player.level < 10 ? 4 : 8;
-      for (let i = 0; i < Math.min(cap, filtered.length); i++) show.push({...filtered[i], slot: cat.slice(0,-1)});
+      for (let i = 0; i < Math.min(genCap, generics.length); i++) {
+        show.push({ ...generics[i], slot: cat.slice(0,-1) });
+      }
+      for (const it of visibleClass) show.push({ ...it, slot: cat.slice(0,-1) });
     }
     for (const it of show) {
       list.appendChild(makeShopRow(it.icon, it.name, itemStatString(it), it.price, () => {
@@ -21666,8 +21693,8 @@ function devMobileUnlock() {
     const masterIds = Object.keys(MASTERS).filter(m => MASTERS[m].job === player.job);
     if (masterIds.length && typeof devSetMaster === 'function') devSetMaster(masterIds[0]);
   }
-  // Level to 50.
-  if (player.level < 50) devSetLevel(50);
+  // Level to prestige cap.
+  if (player.level < PRESTIGE_LEVEL) devSetLevel(PRESTIGE_LEVEL);
   // Unlock every skill-tree node for the class. canUnlock requires SP +
   // prereqs, so loop tier-by-tier and grant the SP cost back each time
   // until everything is unlocked.
