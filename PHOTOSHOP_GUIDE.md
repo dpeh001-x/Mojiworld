@@ -196,3 +196,153 @@ The existing `Sprites/character/hair/flow.webp` and
 in Photoshop, eyeball where the content sits within the 800 × 800
 canvas, match that placement for new pieces. The renderer is
 calibrated against those exact files.
+
+# Anti-misalignment for EQUIPMENT specifically
+
+Hair / eyes / mouth are stand-alone — they only need to align with the
+head silhouette. **Equipment is different:** pieces stack on each other
+in a fixed z-order, so a misaligned belt or a too-tall pair of boots
+shows up as a visible skin gap or a clipped overlap. This section is
+the equipment-specific anti-misalignment playbook.
+
+## The single most important check: composite preview
+
+Before exporting any new equipment piece, **layer it on top of the
+existing pieces it will visually touch** in your Photoshop document
+and verify the seams meet cleanly.
+
+1. In your authoring PSD, create a new group called "PREVIEW STACK".
+2. Drag-import every existing equipment file from
+   `Sprites/character/<slot>/` that lives in slots adjacent to yours
+   (see seam table below for the relevant pairs).
+3. Set each layer's opacity to **40 %** so you can see your piece
+   underneath / through them.
+4. Confirm the seams meet cleanly. If your `body_top` ends at y = 510
+   and the existing `body_bottom` starts at y = 525, you'll see a
+   15-pixel skin gap at the waist — fix it before exporting.
+5. Hide the PREVIEW STACK group before final export so it doesn't
+   render into the WebP.
+
+The renderer composites slots in z-order at runtime; the only way to
+catch seam mismatches before they ship is to composite them yourself
+in Photoshop.
+
+## Seam table — where slots meet
+
+Pieces in adjacent z-order positions share boundary pixels. Match
+these y-values within ±2 px to avoid skin gaps.
+
+| Seam | y-coord | Lower piece | Upper piece (covers seam) |
+|---|---|---|---|
+| Neckline | 350 | head | body_top, cape |
+| Wrist (front-arm + glove) | 460 | body_top sleeve cuff | gloves |
+| Hip waistline | 520 | body_top hem | body_bottom waistband |
+| Mid-shin (boot top) | 620 | body_bottom hem | boots top |
+| Foot floor | 720 | (ground) | boots sole |
+| Helmet brim | 240 | hair top + face | helmet rim |
+
+> **Note:** "lower" / "upper" refers to z-order, not Y position. The
+> slot drawn LATER renders ON TOP and covers the seam — so a body_top
+> sleeve cuff at y = 480 followed by gloves at y = 460 is fine because
+> gloves are drawn AFTER body_top in the mid-pass z-order, hiding any
+> 20-pixel overlap.
+
+## Per-slot "do not paint" zones
+
+Each slot has a Y range it MUST stay within, and zones it must NOT
+intrude on. Painting outside these is the #1 cause of "the helmet
+covers the eyes" and similar bugs.
+
+| Slot | Y range allowed | Must NOT paint | Why |
+|---|---|---|---|
+| `helmet` | 130 → 240 | y > 240 (eye line) | covers face → can't see expressions |
+| `cape` | 350 → 650 | y < 350 OR y > 650 | overlaps head / clips below feet |
+| `body_top` | 350 → 540 | y > 540 (hip) | clashes with body_bottom waistband |
+| `body_bottom` | 510 → 700 | y < 510 OR y > 700 | overlaps body_top / clips ankles |
+| `boots` | 620 → 720 | y < 620 (calf) | floats above feet at high boots |
+| `gloves` | 440 → 480 | y outside this 40px band | floats / clashes with sleeve |
+| `weapon` | anywhere | spans grip (540, 460) outward, not beyond canvas edge | renders cropped |
+
+## Mirror-flip awareness
+
+The renderer **mirrors equipment via `ctx.scale(-1, 1)`** when the
+player faces left. This means:
+
+- **Symmetric pieces are safe.** Helmets centred on x = 400, gloves
+  drawn at both hand grips, boots drawn on both feet — all flip
+  cleanly.
+- **Asymmetric pieces flip when the player turns.** An emblem on the
+  right shoulder swaps to the left shoulder when the player faces
+  left. Currently no fixed-asymmetric support — accept the flip or
+  paint symmetric.
+- **Test both facings.** In Photoshop, after authoring a piece, do
+  `Image → Image Rotation → Flip Canvas Horizontal` and check the
+  silhouette still reads correctly. (Undo immediately so the actual
+  saved file isn't flipped.)
+
+## Tint compatibility for clothing
+
+The renderer supports `item.tint = '#hex'` which applies a multiply
+blend on top of the base sprite. For multiply to produce a clean
+recolor:
+
+- **Paint in NEUTRAL light grey (`#c8c8d0`) or warm cream (`#e8d8b8`).**
+  Multiply darkens — multiplying red onto cream gives soft coral;
+  multiplying red onto pure white gives pure red.
+- **Bake highlights and shadows IN.** If you paint flat grey with no
+  shading, the multiply tint also flattens. If you paint with painterly
+  cel-shading, the tint preserves the shading. Existing
+  `Sprites/character/body_top/light_tunic.webp` is the reference.
+- **Avoid pure black** in the base. Multiply onto black stays black —
+  the tint is invisible.
+- **Weapons skip this.** Shape is the identity, not color. Paint
+  weapons at full saturation; don't enable tinting on them.
+
+## Silhouette extent — don't spill past the chibi
+
+A puffy jacket `body_top` that extends to x = 200 on the left side
+will look like the character is wearing something that extends past
+their actual body silhouette — visible as floating fabric in midair
+when no other equipment is below it.
+
+| Slot | Reasonable left edge | Reasonable right edge |
+|---|---|---|
+| body_top (with shoulder pads / pauldrons) | x = 280 | x = 520 |
+| body_top (slim) | x = 320 | x = 480 |
+| body_bottom (skirt / robe) | x = 300 | x = 500 |
+| body_bottom (slim trousers) | x = 360 | x = 440 |
+| cape (flowing) | x = 250 | x = 550 |
+| cape (short) | x = 290 | x = 510 |
+| weapon (sword/staff held vertical) | hand grip x ± 40 | hand grip x ± 40 |
+| weapon (bow/spear extending forward) | x = 540 | x = 800 (canvas edge) |
+
+## Tint-and-flip combo: the worst-case bug
+
+A piece that's **asymmetric AND tinted AND seams against another slot**
+is the highest-risk equipment item. Example: a sash crossing
+diagonally from the right shoulder, tinted gold, with a body_top
+underneath. When the player turns left:
+- The sash mirrors (now goes from left shoulder)
+- The gold tint stays the same
+- The body_top mirrors with it
+- All three need to seam cleanly in BOTH facings
+
+Test this piece in BOTH facings before approving.
+
+## Equipment quick-reject checklist
+
+Before any equipment piece ships, run through this list:
+
+- [ ] Canvas is exactly 800 × 800
+- [ ] Content sits inside the slot's allowed Y range (table above)
+- [ ] Composite preview confirms seams meet adjacent slots within ±2 px
+- [ ] Mirror-flip preview shows the silhouette reads cleanly facing left
+- [ ] (Tinted clothing) painted in neutral cream / grey with baked-in shading
+- [ ] (Weapon) hand grip pixel lands exactly at (540, 460)
+- [ ] No content extends beyond the silhouette extent ranges
+- [ ] PREVIEW STACK / reference layers are all hidden before export
+- [ ] Background is fully transparent (no white fill from flatten)
+
+If any check fails, fix in Photoshop and re-export. Don't ship a piece
+that fails any item — it'll show up as a visible bug to every player
+who equips it.
