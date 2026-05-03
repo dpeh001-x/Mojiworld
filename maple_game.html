@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.307';
+const GAME_VERSION = 'v0.25.308';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5212,16 +5212,25 @@ function _lxGetTintedEqSprite(spriteImg, tint) {
   return baked;
 }
 
+// v0.25.308 — Studio preview pointer. When the Q-key Character Studio
+// is open and showing pending equipment picks, it sets this to its
+// in-progress equipped map. _drawEquipmentLayer reads this in
+// preference to player.equipped so the studio canvas shows the
+// preview without committing the picks. null = use live player.
+let _LX_EQ_PREVIEW_OVERRIDE = null;
+
 function _drawEquipmentLayer(layer) {
-  // Defensive: bail if we're not in a real player context (Character
-  // Studio preview path uses opts.lookCustom but doesn't set
-  // player.equipped, and we don't want studio mannequins to render
-  // gear that the previewing player happens to have equipped).
-  if (typeof player === 'undefined' || !player.equipped) return;
+  // v0.25.308 — Resolve the equipped map: studio override wins, then
+  // live player.equipped, else bail. Studio preview canvas thus
+  // renders the picks-in-progress; in-game render keeps using the
+  // committed loadout.
+  const equipped = _LX_EQ_PREVIEW_OVERRIDE
+    || (typeof player !== 'undefined' && player.equipped);
+  if (!equipped) return;
   const slots = LX_EQ_SLOT_ORDER[layer];
   if (!slots) return;
   for (const slot of slots) {
-    const item = player.equipped[slot];
+    const item = equipped[slot];
     if (!item || !item.spriteId) continue;
     const reg = LX_EQ_REGISTRIES[slot];
     if (!reg) continue;
@@ -39002,6 +39011,23 @@ function startBgm() {
       <div class="face-styles" id="mouth-styles"></div>
       <h3>Sprite Skin</h3>
       <div class="face-styles" id="msx-styles"></div>
+      <!-- v0.25.308 — Equipment picker rows. Each slot is a flat
+           "None / spriteA / spriteB / ..." picker. Tint UI is a
+           follow-up commit; spriteIds equip with tint:null for now. -->
+      <h3>Body Top</h3>
+      <div class="face-styles" id="eq-body_top"></div>
+      <h3>Body Bottom</h3>
+      <div class="face-styles" id="eq-body_bottom"></div>
+      <h3>Cape</h3>
+      <div class="face-styles" id="eq-cape"></div>
+      <h3>Gloves</h3>
+      <div class="face-styles" id="eq-gloves"></div>
+      <h3>Boots</h3>
+      <div class="face-styles" id="eq-boots"></div>
+      <h3>Weapon</h3>
+      <div class="face-styles" id="eq-weapon"></div>
+      <h3>Helmet</h3>
+      <div class="face-styles" id="eq-helmet"></div>
       <p class="char-studio-hint">Press <kbd>Q</kbd> to toggle • <kbd>Esc</kbd> to close • Sprite Skin overrides the vector look</p>
     </div>
   </div>
@@ -39038,6 +39064,15 @@ const CHAR_STUDIO = {
   // the matching MapleStory chibi sprite from MSX_HERO and overrides
   // the vector path entirely.
   msxId:   null,
+  // v0.25.308 — Equipment picks-in-progress. Each slot holds either
+  // null (nothing equipped for the preview) or { spriteId, tint }.
+  // Mirrors the shape of player.equipped[slot] so the studio's render
+  // override (_LX_EQ_PREVIEW_OVERRIDE) plugs straight in.
+  equip: {
+    body_top:    null, body_bottom: null, cape: null,
+    gloves:      null, boots:       null, weapon: null,
+    helmet:      null,
+  },
   ready: true,
 };
 
@@ -39079,6 +39114,11 @@ function renderCharStudio() {
     c.translate(W / 2, H * 0.92);   // feet at ~92% down so head clears the top
     const SCALE = 5.0;
     c.scale(SCALE, SCALE);
+    // v0.25.308 — Plug the in-progress equipment picks into the
+    // render override so _drawEquipmentLayer reads them instead of
+    // the live player.equipped. Cleared right after the draw so the
+    // main game canvas keeps using player.equipped.
+    _LX_EQ_PREVIEW_OVERRIDE = CHAR_STUDIO.equip;
     // Render the vector hero on the studio canvas with the current picks.
     const FAKE_W = 28, FAKE_H = 44;
     _drawVectorHero(-FAKE_W / 2, -FAKE_H, c, {
@@ -39099,6 +39139,7 @@ function renderCharStudio() {
       animTime: ((Date.now() / 1000) % 3) / 3,  // looped idle anim time
       forcedFacing: 1,
     });
+    _LX_EQ_PREVIEW_OVERRIDE = null;
     c.restore();
   }
   // Re-render every frame so the idle bob animates / sprite preview stays live.
@@ -39231,6 +39272,45 @@ function buildCharStudioMouthStyles() {
   });
 }
 
+// v0.25.308 — Equipment picker builder. One generic helper drives all
+// 7 slots — reads `LX_EQ_REGISTRIES[slot]` for the available sprite
+// ids and prepends a "None" option. Picking writes into
+// CHAR_STUDIO.equip[slot]; the next renderCharStudio frame plugs that
+// state into _LX_EQ_PREVIEW_OVERRIDE so the preview canvas updates
+// without committing to player.equipped.
+function _csTitleCase(id) {
+  return String(id).split('_').map(w => w[0]?.toUpperCase() + w.slice(1)).join(' ');
+}
+function buildCharStudioEquipPicker(slot) {
+  const cont = document.getElementById('eq-' + slot);
+  if (!cont) return;
+  cont.dataset.built = '1';
+  cont.innerHTML = '';
+  const reg = LX_EQ_REGISTRIES[slot];
+  const ids = reg ? Object.keys(reg) : [];
+  // Compose options: "None" first, then every spriteId in the registry.
+  const options = [{ id: null, name: 'None' }]
+    .concat(ids.map(id => ({ id, name: _csTitleCase(id) })));
+  const current = CHAR_STUDIO.equip[slot] && CHAR_STUDIO.equip[slot].spriteId;
+  options.forEach((opt) => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    const isActive = (opt.id || null) === (current || null);
+    el.className = 'face-style-btn' + (isActive ? ' active' : '');
+    el.textContent = opt.name;
+    el.title = opt.id || 'unequip';
+    el.onclick = () => {
+      // Preserve any tint that was in place when swapping spriteId so
+      // future tint picker UI keeps the choice across re-picks.
+      const prevTint = (CHAR_STUDIO.equip[slot] && CHAR_STUDIO.equip[slot].tint) || null;
+      CHAR_STUDIO.equip[slot] = opt.id ? { spriteId: opt.id, tint: prevTint } : null;
+      cont.querySelectorAll('.face-style-btn').forEach((b) => b.classList.remove('active'));
+      el.classList.add('active');
+    };
+    cont.appendChild(el);
+  });
+}
+
 function openCharStudio() {
   document.getElementById('char-studio-overlay').classList.add('open');
   // Seed picks from the player's current lookCustom so the studio
@@ -39242,15 +39322,31 @@ function openCharStudio() {
     if (player.lookCustom.mouthId)         CHAR_STUDIO.mouthId = player.lookCustom.mouthId;
     if ('msxId' in player.lookCustom)      CHAR_STUDIO.msxId   = player.lookCustom.msxId;
   }
+  // v0.25.308 — Seed equipment picks from player.equipped so the
+  // studio opens with the live loadout pre-selected. Shallow-clone
+  // each slot's item ref so picker mutations don't accidentally
+  // edit the live state until Apply is clicked.
+  if (typeof player !== 'undefined' && player.equipped) {
+    for (const slot of Object.keys(CHAR_STUDIO.equip)) {
+      const cur = player.equipped[slot];
+      CHAR_STUDIO.equip[slot] = (cur && cur.spriteId)
+        ? { spriteId: cur.spriteId, tint: cur.tint || null }
+        : null;
+    }
+  }
   buildCharStudioSwatches();
   buildCharStudioFaceStyles();
   buildCharStudioEyeStyles();
   buildCharStudioMouthStyles();
   buildCharStudioHairStyles();
   buildCharStudioMsxStyles();
+  // v0.25.308 — equipment pickers, one per slot.
+  for (const slot of ['body_top', 'body_bottom', 'cape', 'gloves', 'boots', 'weapon', 'helmet']) {
+    buildCharStudioEquipPicker(slot);
+  }
   wireCharStudioActionButtons();
   const status = document.getElementById('char-studio-status');
-  if (status) status.textContent = 'Vector preview · pick skin tone + hair style, then Use in game.';
+  if (status) status.textContent = 'Vector preview · pick skin tone, hair, and equipment, then Use in game.';
   renderCharStudio();
 }
 
@@ -39390,6 +39486,19 @@ function applyCharStudioToPlayer() {
     mouthId: CHAR_STUDIO.mouthId, // v0.25.190 — sprite layer id (LX_MOUTH key)
     msxId:   CHAR_STUDIO.msxId,   // v0.25.152 — null = vector, otherwise picks MSX sprite
   };
+  // v0.25.308 — Commit equipment picks. Each slot in CHAR_STUDIO.equip
+  // is either null (unequip) or { spriteId, tint }; copy through to
+  // player.equipped which the renderer reads via _drawEquipmentLayer.
+  // Stat-bearing legacy slots (armor, accessory) are untouched here —
+  // they hold gameplay items that aren't part of the visual wardrobe.
+  if (player.equipped) {
+    for (const slot of Object.keys(CHAR_STUDIO.equip)) {
+      const pick = CHAR_STUDIO.equip[slot];
+      player.equipped[slot] = pick
+        ? { spriteId: pick.spriteId, tint: pick.tint || null }
+        : null;
+    }
+  }
   // v0.25.183 — face / hair / skin change invalidates the v0.25.176
   // hero idle bake cache so the next idle frame re-bakes with the
   // new picks.
@@ -39420,6 +39529,20 @@ function applyCharStudioToPlayer() {
 // HERO sprite (or procedural chibi if no hero loaded yet).
 function revertCharStudioFromPlayer() {
   if (typeof player !== 'undefined') player.lookCustom = null;
+  // v0.25.308 — Also strip the visual-equipment slots so Revert
+  // returns to a fully bare hero. Stat-bearing slots (armor,
+  // accessory, and legacy weapon entries) are preserved — they
+  // belong to gameplay loot, not the wardrobe.
+  if (typeof player !== 'undefined' && player.equipped) {
+    for (const slot of ['body_top', 'body_bottom', 'cape', 'gloves', 'boots', 'weapon', 'helmet']) {
+      player.equipped[slot] = null;
+    }
+  }
+  // Mirror Revert into the studio's pending picks so the next open
+  // doesn't show stale equipment from the discarded loadout.
+  if (CHAR_STUDIO.equip) {
+    for (const slot of Object.keys(CHAR_STUDIO.equip)) CHAR_STUDIO.equip[slot] = null;
+  }
   const status = document.getElementById('char-studio-status');
   if (status) status.textContent = 'Reverted · player back to default sprite hero.';
   if (typeof showToast === 'function') showToast('Reverted vector look', 'common');
