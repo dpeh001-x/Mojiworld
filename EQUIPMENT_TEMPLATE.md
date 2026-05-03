@@ -5,6 +5,12 @@ visual gear piece as a single 800×800 PNG / WebP that overlays the
 chibi character. The template below is **locked** — change it once,
 re-author every existing piece. Don't.
 
+> **Authoring in Photoshop?** See `PHOTOSHOP_GUIDE.md` (in the same
+> folder) for the full step-by-step workflow — master template PSD
+> setup, anchor layers, tint-friendly palette tips, export settings,
+> and the most common pixel-misalignment gotchas. The doc below is
+> the engine contract; the Photoshop guide is the artist's playbook.
+
 ## Canvas spec
 
 | | |
