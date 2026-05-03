@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.318';
+const GAME_VERSION = 'v0.25.319';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -38970,15 +38970,30 @@ requestAnimationFrame(loop);
   // tells the browser to prioritise these over default page resources.
   // decode() returns a promise that resolves only when the bitmap is
   // ready to draw — eliminates first-paint cost.
+  // v0.25.319 — Per-image 8 s timeout. From gameplay audit: a single
+  // hung connection that never errors AND never completes (e.g.
+  // half-loaded image stalled on slow 3G) used to block the gate
+  // for the full 30 s hard fallback. Now any single image that
+  // doesn't resolve in 8 s gets resolved as if it failed, so the
+  // gate progresses. The image element keeps trying in the
+  // background; if it eventually loads, the on-screen render uses
+  // the live result on next frame.
   const loadOne = (src, isCritical) => new Promise((resolve) => {
     const img = new Image();
     img.decoding = 'async';
     if (isCritical && 'fetchPriority' in img) img.fetchPriority = 'high';
+    let resolved = false;
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
+      if (timer) clearTimeout(timer);
+      resolve();
+    };
     img.onload = img.onerror = () => {
       // Try to decode (some browsers no-op for cached imgs).
-      const done = () => resolve();
-      if (img.decode) img.decode().then(done, done); else done();
+      if (img.decode) img.decode().then(finish, finish); else finish();
     };
+    const timer = setTimeout(finish, 8000);
     img.src = src;
   });
   // v0.25.237 — Phase 1: load BAZAAR sprites in parallel with high
