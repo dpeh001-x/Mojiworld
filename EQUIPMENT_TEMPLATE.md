@@ -70,6 +70,13 @@ Replace `[SLOT]` with the slot name (cape / body_top / etc.) and add
 the variant description at the end. Same prefix every time = consistent
 alignment + style across the wardrobe.
 
+> **Need ready-to-paste prompts?** See `EQUIPMENT_PROMPTS.md` (same
+> folder) for a copy-paste prompt library: the locked prefix, per-slot
+> anchor blocks, and ~80 pre-written variant lines (15 helmets, 12
+> capes, 15 body tops, 12 body bottoms, 10 gloves, 10 boots, 20
+> weapons). Drop into Ludo with three blocks of locked text + one
+> variant line and the output aligns to the template automatically.
+
 ## Filename → spriteId convention
 
 Filename → sprite id mapping is **direct**: lowercase, snake_case, drop the
