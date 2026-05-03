@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.317';
+const GAME_VERSION = 'v0.25.318';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -8643,6 +8643,20 @@ function _checkSetComplete() {
     }
   }
   player._lastSetCounts = counts;
+  // v0.25.318 — Cache the active-full-sets array here so drawSetAura
+  // reads it without per-frame allocation (counts {} + out [] +
+  // for-in churn was hitting 60 fps × every frame even when zero
+  // sets were active). _checkSetComplete already runs on every equip
+  // change, so this is the right cache point.
+  const active = [];
+  for (const sid in counts) {
+    if (counts[sid] < 3) continue;
+    const set = SETS[sid];
+    if (!set) continue;
+    if (set.cls && set.cls !== 'any' && set.cls !== player.cls) continue;
+    active.push(sid);
+  }
+  player._activeFullSetsCache = active;
 }
 
 // v0.25.248 — Helper: returns map of setId → equipped count.
@@ -30044,9 +30058,13 @@ function _drawMsxHero(sx, sy, _ctx, opts) {
 // to the per-frame budget noticeably even on mobile.
 function drawSetAura() {
   if (!player || !player.cls) return;
-  if (typeof _activeFullSets !== 'function') return;
-  const active = _activeFullSets();
-  if (!active.length) return;
+  // v0.25.318 — Read the cached active-full-sets array first
+  // (refreshed by _checkSetComplete on every equip change). Falls
+  // back to the live computation only when the cache hasn't been
+  // seeded yet (first frame after class pick, before any equip).
+  const active = player._activeFullSetsCache
+    || (typeof _activeFullSets === 'function' ? _activeFullSets() : null);
+  if (!active || !active.length) return;
   const sx = Math.round(player.x - game.camera.x);
   const sy = Math.round(player.y);
   const cx = sx + player.w / 2;
