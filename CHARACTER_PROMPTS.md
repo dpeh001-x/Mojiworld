@@ -1,16 +1,39 @@
-# Character sprite prompts — hair / eyes / mouth (v0.25.325)
+# Character sprite prompts — hair / eyes / mouth (v0.25.326)
 
 Copy-paste Ludo prompts for the three **character-appearance** sprite
 layers: `LX_HAIR`, `LX_EYES`, `LX_MOUTH`. These are NOT equipment —
 they sit inside the head region and follow a different anchor map
 than the 800×800 body-anchor template used by armor / weapons / boots.
 
-> **Workflow:** paste `[A] LOCKED PREFIX` + `[B] LAYER BLOCK`
-> (hair / eyes / mouth) + `[C] VARIANT LINE` into Ludo's prompt input
-> as one continuous paragraph. Set `image_type: "sprite"`,
-> `art_style: "Anime/Manga"`, `aspect_ratio: "ar_1_1"`, `n: 1`.
-> Output lands at 768×768; the renderer auto-scales to 800×800 at
-> the head-aligned dest rect `(-58, -52, 108, 108)`.
+> **Workflow:** paste `[Z] SIDE PREFIX` + `[A] LOCKED PREFIX` +
+> `[B] LAYER BLOCK` (hair / eyes / mouth) + `[C] VARIANT LINE` into
+> Ludo's prompt input as one continuous paragraph. Set
+> `image_type: "sprite"`, `art_style: "Anime/Manga"`,
+> `aspect_ratio: "ar_1_1"`, `n: 1`. Output lands at 768×768; the
+> renderer auto-scales to 800×800 at the head-aligned dest rect
+> `(-58, -52, 108, 108)`.
+
+> **Want to do this in batch?** All four blocks are pre-composed for
+> every entry in `scripts/character_sprites.config.mjs`. Run
+> `node scripts/generate_character_sprites.mjs` for a dry-run print
+> of all 36 prompts, `--json` for machine-readable output, or
+> `--generate` (with `LUDO_API_KEY` env var) to call Ludo and write
+> the WebPs straight into `Sprites/character/<layer>/`. Filter with
+> `--layer hair` or `--id flow,spiky` to regenerate one at a time.
+
+---
+
+## [Z] SIDE PREFIX — paste verbatim every time (v0.25.326)
+
+> Side facing 40 percent to the right at a slight three-quarter angle
+> (right shoulder closer to the viewer than left, head turned slightly
+> toward camera-right, NOT a flat front view).
+
+Why: the chibi's idle stance in the renderer faces right by default,
+so face features painted at a flat front view read as "looking off-
+camera" against the body. A consistent three-quarter-right pose makes
+every authored sprite read in the same direction as the body, no
+mirror tricks needed.
 
 ---
 
