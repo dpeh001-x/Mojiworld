@@ -83,6 +83,13 @@ alignment + style across the wardrobe.
 > item's authored `vis` hex colors injected so the sprite matches the
 > in-game tooltip preview without manual tweaking.
 
+> **Authoring hair, eyes, or mouth?** Those are NOT equipment — they
+> use the **head bbox** anchor (245,215)–(612,585) inside the same
+> 800×800 canvas, not the body-anchor template above. See
+> `CHARACTER_PROMPTS.md` for 36 ready-to-use Ludo prompts (12 hair
+> styles, 12 eye expressions, 12 mouth shapes) with the head-region
+> anchors baked in.
+
 ## Filename → spriteId convention
 
 Filename → sprite id mapping is **direct**: lowercase, snake_case, drop the
