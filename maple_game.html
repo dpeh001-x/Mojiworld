@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.311';
+const GAME_VERSION = 'v0.25.312';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -38840,22 +38840,36 @@ requestAnimationFrame(loop);
   const status = document.getElementById('loading-status');
   let bzLoaded = 0, critLoaded = 0, defLoaded = 0;
   let revealed = false;
+  // v0.25.312 — Loading-screen gate now waits for ALL sprites (BAZAAR
+  // + CRITICAL + DEFERRED), not just BAZAAR. Players were spawning
+  // into the world while DEFERRED sprites (boss bodies, master-class
+  // skill FX, less-used UI tiles) were still streaming in — sprites
+  // would pop in 5–30 s after gameplay started, looking unfinished.
+  // Now the loader waits until every REQUIRED path resolves; fetch
+  // priority still favours BAZAAR + CRITICAL so the bar ramps fast
+  // toward the start, slows for the tail.
   const phrases = [
     'Painting Everdawn Bazaar…',
     'Lighting the lanterns…',
     'Waking the merchants…',
     'Stocking Brok\'s anvil…',
+    'Tuning monster brushes…',
+    'Sharpening boss blades…',
+    'Loading boss arena cinematics…',
+    'Polishing skill flourishes…',
     'Almost there…',
   ];
+  const totalLoaded = () => bzLoaded + critLoaded + defLoaded;
+  const totalCount  = () => BAZAAR.length + CRITICAL.length + DEFERRED.length;
   const update = () => {
     if (revealed) return;
-    // v0.25.237 — Progress bar tracks BAZAAR only (the gate). UI tabs +
-    // dialog box load after reveal as part of CRITICAL.
-    const pct = Math.round((bzLoaded / Math.max(1, BAZAAR.length)) * 100);
+    const total = totalCount();
+    const done  = totalLoaded();
+    const pct = Math.round((done / Math.max(1, total)) * 100);
     if (bar) bar.style.width = pct + '%';
     if (status) {
-      if (bzLoaded < BAZAAR.length) {
-        const phrase = phrases[Math.min(phrases.length - 1, Math.floor((bzLoaded / BAZAAR.length) * phrases.length))];
+      if (done < total) {
+        const phrase = phrases[Math.min(phrases.length - 1, Math.floor((done / total) * phrases.length))];
         status.innerHTML = '<span class="pct">' + pct + '%</span> · <span class="pulse">' + phrase + '</span>';
       } else {
         status.innerHTML = '<span class="pct">100%</span> · <span style="color:#c8ffc8;">Ready ✓</span>';
@@ -38879,54 +38893,40 @@ requestAnimationFrame(loop);
     img.src = src;
   });
   // v0.25.237 — Phase 1: load BAZAAR sprites in parallel with high
-  // fetchPriority. Reveal gates on this set finishing — CRITICAL UI
-  // sprites (dialog box + U-panel tabs) are NOT in this gate so the
-  // bazaar paint isn't held up waiting for assets the player isn't
-  // even looking at yet.
+  // fetchPriority — the first-paint set the player sees on spawn.
+  // v0.25.312 — All three buckets now contribute to the gate. The
+  // BAZAAR + CRITICAL fetchPriority='high' hint still tells the
+  // browser to prioritise those over DEFERRED, so the progress bar
+  // ramps fast toward the start and slows for the tail.
   Promise.all(BAZAAR.map(p => loadOne(p, true).then(() => { bzLoaded++; update(); })))
     .then(() => maybeReveal());
-  // Phase 2 — Critical UI assets. Start as soon as BAZAAR phase fires;
-  // these still get fetchPriority=high so they finish well before the
-  // player taps an NPC. They don't gate reveal.
-  CRITICAL.forEach(p => loadOne(p, true).then(() => { critLoaded++; }));
-  // Phase 3 — defer everything else. Start fetching as soon as the
-  // browser idles so it doesn't fight phases 1-2 for bandwidth, but
-  // before the player can actually need the assets.
-  // v0.25.235 — also surface the deferred progress via a tiny corner
-  // pill (#defer-loader) so the player sees the asset stream while
-  // they're already playing.
-  const dlEl    = document.getElementById('defer-loader');
-  const dlCount = document.getElementById('defer-count');
-  const dlFill  = document.getElementById('defer-fill');
-  const updateDeferUI = () => {
-    if (!dlEl || !dlCount || !dlFill) return;
-    const total = DEFERRED.length;
-    const done  = defLoaded;
-    if (total <= 0) return;
-    dlCount.textContent = `${done}/${total}`;
-    dlFill.style.width = Math.round((done / total) * 100) + '%';
-    if (done >= total) {
-      dlEl.classList.add('hide');
-      setTimeout(() => { dlEl.classList.remove('show'); dlEl.classList.remove('hide'); }, 400);
-    }
-  };
+  // Phase 2 — Critical UI assets. Same high fetchPriority as BAZAAR
+  // so they finish early; now also contribute to the reveal gate.
+  Promise.all(CRITICAL.map(p => loadOne(p, true).then(() => { critLoaded++; update(); })))
+    .then(() => maybeReveal());
+  // Phase 3 — All other sprites (boss bodies, master-class FX, less-
+  // common UI). v0.25.312: started immediately (was idle-callback
+  // gated) since reveal now waits on this bucket too. Uses default
+  // fetchPriority so BAZAAR + CRITICAL still get bandwidth first.
   const startDeferred = () => {
-    if (DEFERRED.length && dlEl) {
-      dlEl.classList.add('show');
-      updateDeferUI();
-    }
     DEFERRED.forEach(p => loadOne(p, false).then(() => {
       defLoaded++;
-      updateDeferUI();
+      update();
+      maybeReveal();
     }));
+    // Edge case: empty DEFERRED (shouldn't happen, but defensive) —
+    // call maybeReveal to avoid an infinite gate.
+    if (!DEFERRED.length) maybeReveal();
   };
-  if (typeof requestIdleCallback === 'function') {
-    requestIdleCallback(startDeferred, { timeout: 1500 });
-  } else {
-    setTimeout(startDeferred, 50);
-  }
+  startDeferred();
+  // v0.25.312 — The corner-pill deferred loader (#defer-loader) is
+  // no longer used: with the gate covering all sprites, there's no
+  // mid-game "still streaming" state. The DOM element + CSS are
+  // left in place but never shown — clean removal is a follow-up.
   function maybeReveal() {
-    if (bzLoaded < BAZAAR.length) return;
+    // v0.25.312 — Gate on TOTAL sprite count, not just BAZAAR. Player
+    // sees the world only after every sprite is decoded.
+    if (totalLoaded() < totalCount()) return;
     if (revealed) return;
     revealed = true;
     hide();
@@ -38938,9 +38938,12 @@ requestAnimationFrame(loop);
     // v0.25.233 — Start the looping BGM the moment the world reveals.
     startBgm();
   }
-  // Hard fallback. v0.25.237 — gate is now BAZAAR (~14 sprites),
-  // so 4 s is plenty even on slow mobile connections.
-  setTimeout(() => { if (overlay && !overlay.classList.contains('fade')) { revealed = true; hide(); } }, 4000);
+  // Hard fallback. v0.25.312 — gate is now ALL sprites (~110+ paths),
+  // raised from 4 s to 30 s so a slow mobile connection has time to
+  // finish before the safety-net force-reveal kicks in. Players on
+  // very slow networks will still eventually see the game even if
+  // one image is wedged.
+  setTimeout(() => { if (overlay && !overlay.classList.contains('fade')) { revealed = true; hide(); } }, 30000);
 })();
 // v0.25.233 — Mojiworld main BGM (loops indefinitely).
 const _bgmEl = (() => {
