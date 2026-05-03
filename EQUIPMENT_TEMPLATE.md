@@ -77,6 +77,12 @@ alignment + style across the wardrobe.
 > weapons). Drop into Ludo with three blocks of locked text + one
 > variant line and the output aligns to the template automatically.
 
+> **Generating sprites for items that already exist in `ITEM_POOL`?**
+> See `EQUIPMENT_PROMPTS_PER_ITEM.md` for 38 palette-locked prompts —
+> one per existing weapon + armor + cape/helmet item — with each
+> item's authored `vis` hex colors injected so the sprite matches the
+> in-game tooltip preview without manual tweaking.
+
 ## Filename → spriteId convention
 
 Filename → sprite id mapping is **direct**: lowercase, snake_case, drop the

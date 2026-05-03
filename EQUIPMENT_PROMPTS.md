@@ -12,6 +12,14 @@ write a variant line at the end.
 > `aspect_ratio: "ar_1_1"`, `n: 1`. Output lands at 768×768; renderer
 > auto-scales to the 800×800 head-aligned dest rect.
 
+> **Want to generate sprites for items that already exist in
+> `ITEM_POOL`?** Use `EQUIPMENT_PROMPTS_PER_ITEM.md` (same folder)
+> instead of the variant menus below. It has 38 palette-locked prompts
+> (every weapon + armor + cape/helmet item) that match each item's
+> authored `vis` colors so the generated sprite matches the in-game
+> tooltip. The variant menus in this doc are for **new** gear you
+> haven't authored stats for yet.
+
 ---
 
 ## [A] LOCKED PREFIX — paste verbatim every time
