@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.315';
+const GAME_VERSION = 'v0.25.316';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5219,11 +5219,36 @@ function _lxGetTintedEqSprite(spriteImg, tint) {
 // preview without committing the picks. null = use live player.
 let _LX_EQ_PREVIEW_OVERRIDE = null;
 
+// v0.25.316 — Empty-equipment fast-path flag. _drawEquipmentLayer
+// fires 3× per hero frame (back / mid / front passes) and was walking
+// slot arrays + doing property lookups even when nothing was
+// equipped — pure waste at 60 FPS. _refreshEqEmptyFlag scans the
+// committed loadout once on equip change (called by Apply / Revert /
+// loadState) and sets player._eqEmpty. The renderer reads that flag
+// for an O(1) bail when nothing is on. Studio preview path still
+// goes through the full loop since CHAR_STUDIO.equip changes mid-
+// frame as the user clicks.
+function _refreshEqEmptyFlag() {
+  if (typeof player === 'undefined' || !player.equipped) return;
+  let empty = true;
+  for (const slot in LX_EQ_REGISTRIES) {
+    const item = player.equipped[slot];
+    if (item && item.spriteId) { empty = false; break; }
+  }
+  player._eqEmpty = empty;
+}
+
 function _drawEquipmentLayer(layer) {
   // v0.25.308 — Resolve the equipped map: studio override wins, then
   // live player.equipped, else bail. Studio preview canvas thus
   // renders the picks-in-progress; in-game render keeps using the
   // committed loadout.
+  // v0.25.316 — Empty-equipment fast-path. When the live player has
+  // nothing visual equipped (the common case until a player tries on
+  // gear), bail before walking slot arrays. Studio override path
+  // skips the cache since CHAR_STUDIO.equip mutates as the user
+  // clicks, so per-frame computing of "is empty" would just churn.
+  if (!_LX_EQ_PREVIEW_OVERRIDE && (typeof player === 'undefined' || !player.equipped || player._eqEmpty)) return;
   const equipped = _LX_EQ_PREVIEW_OVERRIDE
     || (typeof player !== 'undefined' && player.equipped);
   if (!equipped) return;
@@ -10579,6 +10604,9 @@ function loadState() {
     for (const _slot of ['body_top','body_bottom','cape','gloves','boots','helmet']) {
       if (!(_slot in player.equipped)) player.equipped[_slot] = null;
     }
+    // v0.25.316 — Seed the empty-equipment fast-path flag at load
+    // time so the renderer's bail kicks in from frame 1.
+    if (typeof _refreshEqEmptyFlag === 'function') _refreshEqEmptyFlag();
     if (!Array.isArray(player.inventory)) player.inventory = [];
     // v0.25.250 — setshards (crafting currency) defaults to 0 on older saves.
     if (typeof player.setshards !== 'number') player.setshards = 0;
@@ -39867,6 +39895,10 @@ function applyCharStudioToPlayer() {
           : null;
       }
     }
+    // v0.25.316 — refresh the empty-equipment fast-path flag whenever
+    // the loadout changes. Renderer reads player._eqEmpty for an O(1)
+    // bail in the common no-equipment case.
+    _refreshEqEmptyFlag();
   }
   // v0.25.183 — face / hair / skin change invalidates the v0.25.176
   // hero idle bake cache so the next idle frame re-bakes with the
@@ -39916,6 +39948,8 @@ function revertCharStudioFromPlayer() {
         player.equipped[slot] = null;
       }
     }
+    // v0.25.316 — Refresh the renderer fast-path flag.
+    _refreshEqEmptyFlag();
   }
   // Mirror Revert into the studio's pending picks so the next open
   // doesn't show stale equipment from the discarded loadout.
