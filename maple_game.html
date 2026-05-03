@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.320';
+const GAME_VERSION = 'v0.25.321';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -23117,6 +23117,16 @@ function closeAllModals() {
   }
   const dlg = document.getElementById('dialog');
   if (dlg) dlg.style.display = 'none';
+  // v0.25.321 — Wardrobe (#char-studio-overlay) uses .open class
+  // toggling rather than display:none, so the bulk loop above misses
+  // it. Without this the wardrobe stays visible after closeAllModals
+  // is called — which fires whenever a different modal is opened or
+  // when the player presses Esc on a different modal.
+  const cstudio = document.getElementById('char-studio-overlay');
+  if (cstudio && cstudio.classList.contains('open')) {
+    cstudio.classList.remove('open');
+    if (typeof _csStopPreview === 'function') _csStopPreview();
+  }
   game.paused = false;
 }
 
@@ -39740,6 +39750,17 @@ function buildWardrobeGrid() {
 
 function openCharStudio() {
   document.getElementById('char-studio-overlay').classList.add('open');
+  // v0.25.321 — Pause the game while the Wardrobe is open. Was missing
+  // since v0.25.72 — every other modal (U-panel, Quest Journal, NPC
+  // dialog, shops, taxi, world map) sets game.paused but the Wardrobe
+  // never did. Two consequences fixed here: (1) v0.25.315's paused-
+  // render-skip now actually fires, halving the redundant per-frame
+  // cost behind the modal as advertised. (2) Mobs / projectiles /
+  // timers no longer keep ticking while the player picks outfits —
+  // before this, opening Q in a boss arena could get you killed
+  // behind the overlay. closeCharStudio + closeAllModals (v0.25.321)
+  // both unpause on the way out.
+  game.paused = true;
   // Seed picks from the player's current lookCustom so the studio
   // opens showing what's already applied.
   if (typeof player !== 'undefined' && player.lookCustom) {
@@ -40022,6 +40043,31 @@ function wireCharStudioActionButtons() {
 function closeCharStudio() {
   document.getElementById('char-studio-overlay').classList.remove('open');
   if (typeof _csStopPreview === 'function') _csStopPreview();
+  // v0.25.321 — Match the open path: openCharStudio sets game.paused,
+  // close path clears it. Defensive — only unpause if no other modal
+  // is currently open so we don't resume gameplay under a stacked
+  // modal (e.g. shop opened during wardrobe). closeAllModals is the
+  // canonical "close everything + unpause" path; this branch covers
+  // the direct ✕ / Esc close.
+  if (typeof game !== 'undefined' && !_anyOtherModalOpen()) {
+    game.paused = false;
+  }
+}
+// v0.25.321 — Helper: is any other (non-wardrobe) modal still open?
+// Used by closeCharStudio so unpausing doesn't fight a stacked modal.
+function _anyOtherModalOpen() {
+  const ids = ['shop-modal','inventory-modal','skills-modal','powerup-modal',
+               'help-modal','enhance-modal','skilltree-modal','attributes-modal',
+               'dev-modal','taxi-modal','codex-modal','multiplayer-modal',
+               'quest-modal','worldmap-modal','confirm-modal','craft-modal',
+               'class-select-modal','advancement-modal','tutorial-modal'];
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (el && (el.style.display === 'flex' || el.style.display === 'block')) return true;
+  }
+  const dlg = document.getElementById('dialog');
+  if (dlg && dlg.style.display === 'block') return true;
+  return false;
 }
 const _csCloseBtn = document.getElementById('char-studio-close');
 if (_csCloseBtn) _csCloseBtn.addEventListener('click', closeCharStudio);
