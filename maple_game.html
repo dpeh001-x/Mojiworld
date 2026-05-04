@@ -41360,6 +41360,31 @@ const _bgmBossEl = (() => {
   a.preload = 'auto';
   return a;
 })();
+// v0.25.436 — per-map BGM registry. Each entry maps a MAPS[id] to a
+// dedicated track that plays while the player is on that map. Cross-fades
+// against the default _bgmEl track on map load via _setMapBgm. Lazy-built
+// (preload='auto' on first construction); the autoplay-unlock gesture in
+// startBgm walks every entry so the first user input unblocks all of them
+// in one go.
+const _BGM_MAP_FILES = {
+  shadowSlums:    'audio/bgm_shadow_slums.mp3',
+  azureAbode:     'audio/bgm_azure_abode.mp3',
+  bastion:        'audio/bgm_bastion.mp3',
+  emeraldVillage: 'audio/bgm_emerald_village.mp3',
+  azureAcademia:  'audio/bgm_azure_academia.mp3',
+};
+const _bgmMapEls = Object.create(null);
+function _bgmMapEl(mapId) {
+  if (!mapId || !_BGM_MAP_FILES[mapId]) return null;
+  if (_bgmMapEls[mapId]) return _bgmMapEls[mapId];
+  const a = new Audio(_BGM_MAP_FILES[mapId]);
+  a.loop = true;
+  a.volume = 0;
+  a.preload = 'auto';
+  _bgmMapEls[mapId] = a;
+  return a;
+}
+let _bgmActiveMapEl = null;     // the currently-playing per-map track, if any
 const _BGM_TARGET_VOL = 0.55;
 const _BGM_FADE_MS = 600;
 function _bgmFade(el, target, durationMs) {
@@ -41385,14 +41410,33 @@ function _bgmFade(el, target, durationMs) {
   requestAnimationFrame(step);
 }
 // Public API — flip between mojiworld + boss tracks. Called from loadMap.
-function _setBossBgm(isBoss) {
+// v0.25.436 — extended to take the map id so per-map BGMs (shadowSlums,
+// azureAbode, bastion, emeraldVillage, azureAcademia) can take priority
+// over both the boss and default tracks. Boss arenas still win regardless
+// of map id so the boss theme overrides any per-map track on a boss map.
+function _setBossBgm(isBoss, mapId) {
+  // Boss arena always wins.
   if (isBoss) {
+    if (_bgmActiveMapEl) { _bgmFade(_bgmActiveMapEl, 0, _BGM_FADE_MS); _bgmActiveMapEl = null; }
     _bgmFade(_bgmEl,     0,                _BGM_FADE_MS);
     _bgmFade(_bgmBossEl, _BGM_TARGET_VOL,  _BGM_FADE_MS);
-  } else {
-    _bgmFade(_bgmBossEl, 0,                _BGM_FADE_MS);
-    _bgmFade(_bgmEl,     _BGM_TARGET_VOL,  _BGM_FADE_MS);
+    return;
   }
+  _bgmFade(_bgmBossEl, 0, _BGM_FADE_MS);
+  // Per-map override?
+  const mapEl = _bgmMapEl(mapId);
+  if (mapEl) {
+    if (_bgmActiveMapEl && _bgmActiveMapEl !== mapEl) {
+      _bgmFade(_bgmActiveMapEl, 0, _BGM_FADE_MS);
+    }
+    _bgmFade(_bgmEl, 0, _BGM_FADE_MS);
+    _bgmFade(mapEl,  _BGM_TARGET_VOL, _BGM_FADE_MS);
+    _bgmActiveMapEl = mapEl;
+    return;
+  }
+  // Default world theme.
+  if (_bgmActiveMapEl) { _bgmFade(_bgmActiveMapEl, 0, _BGM_FADE_MS); _bgmActiveMapEl = null; }
+  _bgmFade(_bgmEl, _BGM_TARGET_VOL, _BGM_FADE_MS);
 }
 function startBgm() {
   if (!_bgmEl) return;
@@ -41408,6 +41452,16 @@ function startBgm() {
       try {
         _bgmBossEl.play().then(() => { try { _bgmBossEl.pause(); } catch (e) {} })
                          .catch(() => {/* blocked: try again next gesture */});
+      } catch (e) {}
+    }
+    // v0.25.436 — same gesture also unlocks every per-map BGM so the
+    // first map-load swap never gets stuck waiting on a fresh user input.
+    for (const mapId of Object.keys(_BGM_MAP_FILES)) {
+      const el = _bgmMapEl(mapId);
+      if (!el) continue;
+      try {
+        el.play().then(() => { try { el.pause(); } catch (e) {} })
+                 .catch(() => {/* blocked: try again next gesture */});
       } catch (e) {}
     }
     window.removeEventListener('pointerdown', onceUp, true);
