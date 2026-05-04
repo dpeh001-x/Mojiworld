@@ -3055,7 +3055,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.328';
+const GAME_VERSION = 'v0.25.406';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -3067,6 +3067,14 @@ const ctx = canvas.getContext('2d');
 // otherwise occur if the function shadowed `ctx` with `const ctx = ...`.
 const _MAIN_CTX = ctx;
 const W = canvas.width, H = canvas.height;
+const LX_ENTITY_IMAGE_QUALITY = 'high';
+function _lxUseEntityImageQuality(targetCtx) {
+  if (!targetCtx) return;
+  targetCtx.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in targetCtx) targetCtx.imageSmoothingQuality = LX_ENTITY_IMAGE_QUALITY;
+}
+function _lxWholePx(v) { return Math.round(v); }
+function _lxWholeSize(v) { return Math.max(1, Math.round(v)); }
 
 // v0.25.2 — HiDPI canvas upgrade. On Retina / 1.5×-2× displays, the
 // canvas's backing buffer jumps to (W × dpr) × (H × dpr), but the CSS
@@ -5169,14 +5177,17 @@ const LX_EQ_REGISTRIES = {
 };
 // Z-order — three render passes wrapped around the existing bone
 // rendering inside _drawVectorHero. The split lets cape sit BEHIND
-// the body bones (back pass), body / boots / gloves / weapon overlay
-// the bones but tuck UNDER the head silhouette (mid pass), and helmet
-// sit ON TOP of the front-hair + face features (front pass). Tuning
+// the body bones (back pass), weapon sits in front of the torso but
+// behind the left arm / hand (weapon pass), body / boots / gloves
+// overlay the bones but tuck UNDER the head silhouette (mid pass),
+// and helmet sits ON TOP of the
+// front-hair + face features (front pass). Tuning
 // individual pieces' Z further is just a matter of reordering the
 // slot arrays — no other code change.
 const LX_EQ_SLOT_ORDER = {
   back:  ['cape'],
-  mid:   ['body_bottom', 'body_top', 'boots', 'gloves', 'weapon'],
+  weapon:['weapon'],
+  mid:   ['body_bottom', 'body_top', 'boots', 'gloves'],
   front: ['helmet'],
 };
 // Dest rect for every equipment piece, expressed in chibi-scaled body
@@ -5187,6 +5198,9 @@ const LX_EQ_SLOT_ORDER = {
 // top of the rect, feet (anchor y≈720 / 800) maps near the bottom.
 // Per-slot offsets can be added later if a piece needs micro-tuning.
 const _LX_EQ_DEST = { x: -30, y: -80, w: 60, h: 80 };
+const _LX_PAINT_DEST = { x: -45, y: -120, w: 90, h: 120 };
+const HERO_VEC_DRAW_SCALE = 1.0;
+const HERO_WORLD_DISPLAY_SCALE = 0.85;
 
 // v0.25.306 — Equipment tint cache. Same multiply-blend recipe as the
 // v0.25.191 head-tint cache (see _lxBakeTintedHead): draw sprite,
@@ -5218,6 +5232,95 @@ function _lxGetTintedEqSprite(spriteImg, tint) {
 // preference to player.equipped so the studio canvas shows the
 // preview without committing the picks. null = use live player.
 let _LX_EQ_PREVIEW_OVERRIDE = null;
+let _LX_CUSTOM_PAINT_PREVIEW = null;
+const _LX_CUSTOM_PAINT_CACHE = new Map();
+const CHAR_PAINT_LAYER_IDS = ['skin','hair','body_top','body_bottom','cape','armL','armR','legL','legR','weapon','helmet'];
+const CHAR_PAINT_RENDER_ORDER = ['cape','legL','legR','armR','skin','body_bottom','body_top','weapon','armL','hair','helmet'];
+
+function _lxCleanPaintLayers(layers) {
+  const out = {};
+  if (!layers || typeof layers !== 'object') return out;
+  for (const id of CHAR_PAINT_LAYER_IDS) {
+    const src = layers[id];
+    if (typeof src === 'string' && src.indexOf('data:image/png') === 0) out[id] = src;
+  }
+  return out;
+}
+
+function _lxGetCustomPaintSource(layerId) {
+  if (_LX_CUSTOM_PAINT_PREVIEW !== null) {
+    if (typeof _LX_CUSTOM_PAINT_PREVIEW === 'string') return layerId ? null : (_LX_CUSTOM_PAINT_PREVIEW || null);
+    const layers = _LX_CUSTOM_PAINT_PREVIEW.layers || {};
+    return layerId ? (layers[layerId] || null) : (_LX_CUSTOM_PAINT_PREVIEW.full || null);
+  }
+  if (typeof player === 'undefined') return null;
+  if (layerId) return (player.customPaintLayers && player.customPaintLayers[layerId]) || null;
+  return (typeof player.customPaint === 'string') ? player.customPaint : null;
+}
+
+function _lxPaintLayerProtectsBase(layerId) {
+  return layerId === 'skin';
+}
+
+function _lxPaintLayerReplacesBase(layerId) {
+  return !!(layerId && layerId !== 'paint' && !_lxPaintLayerProtectsBase(layerId) && _lxGetCustomPaintSource(layerId));
+}
+
+function _lxCustomPaintImage(src) {
+  if (!src) return null;
+  if (!_LX_CUSTOM_PAINT_CACHE.has(src)) {
+    const img = new Image();
+    _LX_CUSTOM_PAINT_CACHE.set(src, img);
+    img.onload = () => {
+      if (typeof _LX_HERO_IDLE_BAKE_CACHE !== 'undefined' && _LX_HERO_IDLE_BAKE_CACHE.clear) {
+        _LX_HERO_IDLE_BAKE_CACHE.clear();
+      }
+    };
+    img.src = src;
+  }
+  const img = _LX_CUSTOM_PAINT_CACHE.get(src);
+  return (img && img.complete && img.naturalWidth) ? img : null;
+}
+
+function _lxDrawPaintImage(targetCtx, img, x, y, w, h) {
+  if (!targetCtx || !img) return;
+  const iw = img.naturalWidth || img.width || w;
+  const ih = img.naturalHeight || img.height || h;
+  if (!iw || !ih) return;
+  const targetAspect = w / h;
+  const imgAspect = iw / ih;
+  let dx = x, dy = y, dw = w, dh = h;
+  if (Math.abs(targetAspect - imgAspect) > 0.01) {
+    const fit = Math.min(w / iw, h / ih);
+    dw = iw * fit;
+    dh = ih * fit;
+    dx = x + (w - dw) / 2;
+    dy = y + (h - dh) / 2;
+  }
+  _lxUseEntityImageQuality(targetCtx);
+  targetCtx.drawImage(img, dx, dy, dw, dh);
+}
+
+function _drawCustomPaintLayer(layerId, targetCtx) {
+  if (typeof layerId !== 'string') { targetCtx = layerId; layerId = null; }
+  const img = _lxCustomPaintImage(_lxGetCustomPaintSource(layerId));
+  if (!img) return;
+  _lxDrawPaintImage(targetCtx || ctx, img, _LX_PAINT_DEST.x, _LX_PAINT_DEST.y, _LX_PAINT_DEST.w, _LX_PAINT_DEST.h);
+}
+
+function _drawCustomPaintLayerPinned(layerId, bone, targetCtx) {
+  const img = _lxCustomPaintImage(_lxGetCustomPaintSource(layerId));
+  if (!img) return;
+  const p = _heroVecRestPos(bone);
+  _lxDrawPaintImage(
+    targetCtx || ctx,
+    img,
+    _LX_PAINT_DEST.x - p.x,
+    _LX_PAINT_DEST.y - p.y,
+    _LX_PAINT_DEST.w,
+    _LX_PAINT_DEST.h
+  );
+}
 
 // v0.25.316 — Empty-equipment fast-path flag. _drawEquipmentLayer
 // fires 3× per hero frame (back / mid / front passes) and was walking
@@ -5238,7 +5341,8 @@ function _refreshEqEmptyFlag() {
   player._eqEmpty = empty;
 }
 
-function _drawEquipmentLayer(layer) {
+function _drawEquipmentLayer(layer, targetCtx, opts) {
+  opts = opts || {};
   // v0.25.308 — Resolve the equipped map: studio override wins, then
   // live player.equipped, else bail. Studio preview canvas thus
   // renders the picks-in-progress; in-game render keeps using the
@@ -5255,6 +5359,8 @@ function _drawEquipmentLayer(layer) {
   const slots = LX_EQ_SLOT_ORDER[layer];
   if (!slots) return;
   for (const slot of slots) {
+    if (opts.onlyLayer && slot !== opts.onlyLayer) continue;
+    if (!opts.onlyLayer && _lxPaintLayerReplacesBase(slot)) continue;
     const item = equipped[slot];
     if (!item || !item.spriteId) continue;
     const reg = LX_EQ_REGISTRIES[slot];
@@ -5265,7 +5371,19 @@ function _drawEquipmentLayer(layer) {
     // resolve to the multiply-blend baked variant. One sprite × N
     // tints = N visually distinct equipment items.
     if (item.tint) img = _lxGetTintedEqSprite(img, item.tint);
-    ctx.drawImage(img, _LX_EQ_DEST.x, _LX_EQ_DEST.y, _LX_EQ_DEST.w, _LX_EQ_DEST.h);
+    const c = targetCtx || ctx;
+    c.save();
+    _lxUseEntityImageQuality(c);
+    if (slot === 'helmet') c.translate(HERO_VEC_HEAD_ATTACHED_OFFSET.x, HERO_VEC_HEAD_ATTACHED_OFFSET.y);
+    let dx = _LX_EQ_DEST.x;
+    let dy = _LX_EQ_DEST.y;
+    if (opts.pinBone) {
+      const p = _heroVecRestPos(opts.pinBone);
+      dx -= p.x;
+      dy -= p.y;
+    }
+    c.drawImage(img, dx, dy, _LX_EQ_DEST.w, _LX_EQ_DEST.h);
+    c.restore();
   }
 }
 // =========================================================================
@@ -8471,6 +8589,8 @@ const player = {
   // Each key maps to a set of unlocked IDs. Unlocked cosmetics show up in the
   // cosmetic picker alongside the base options.
   cosmetics: { hair: {}, cape: {}, weapon: {} },
+  customPaint: null, // transparent player-painted wardrobe overlay
+  customPaintLayers: {},
   attacking:false, attackTimer:0, attackCooldown:0,
   // v0.25.109 — `skillPoints` is the legacy "ability points" pool used
   // for tree unlocks + attribute spending (relabeled in the UI to
@@ -8502,9 +8622,12 @@ const player = {
   invulnerable:0, rushTimer:0, rushDir:1,
   dodgeTimer:0, dodgeCD:0, dodgeDir:1,
   blockTimer:0, blockCD:0, parryWindow:0,
-  somersault:0, somersaultDir:1,
+  somersault:0, somersaultDir:1, somersaultDuration:0,
   hitStun:0,
   quickDashTimer:0, quickDashDir:1,
+  _rogueDashPoseAt:0, _rogueDashPoseUntil:0, _rogueDashBrakeDust:0,
+  _rogueThrowSomersaultAt:0, _rogueThrowSomersaultUntil:0,
+  _warriorGroundSmashAt:0, _warriorGroundSmashUntil:0,
   lastTapKey:null, lastTapTime:0,
   doubleJumpUsed:false, coyoteTime:0,
   breath:0, capeSway:0,
@@ -10503,7 +10626,7 @@ const PLAYER_SAVE_FIELDS = [
   'hp','maxHp','mp','maxMp','mesos','baseAtk','baseDef',
   'attrs','skillPoints','skillRankPoints','skillRanks','milestonesUnlocked','treeUnlocked','tree',
   'mods','equipped','inventory','consumables','look','pet','baseCrit','baseSpeed','baseJump',
-  'cosmetics',
+  'cosmetics','customPaint','customPaintLayers',
   // v0.25.134 — vector character studio: persisted skin tone + hairstyle picks
   'lookCustom',
   // Boon loadout (v0.19)
@@ -10610,6 +10733,10 @@ function loadState() {
     else player.buffs = {};
     if (!player.skillCooldowns) player.skillCooldowns = {};
     if (!player.consumables)    player.consumables = {};
+    if (typeof player.customPaint !== 'string' || player.customPaint.indexOf('data:image/png') !== 0) {
+      player.customPaint = null;
+    }
+    player.customPaintLayers = _lxCleanPaintLayers(player.customPaintLayers);
     if (!player.equipped)       player.equipped = { weapon: null, armor: null, accessory: null };
     // v0.25.309 — Visual-equipment slots (introduced v0.25.303) must
     // exist on player.equipped after every load, otherwise the
@@ -10636,6 +10763,9 @@ function loadState() {
     player.blockTimer = 0;
     player.parryWindow = 0;
     player.hitStun = 0;
+    player.somersault = 0;
+    player.somersaultDir = 0;
+    player.somersaultDuration = 0;
     player.attacking = false;
     player.attackTimer = 0;
     player.inRage = false;
@@ -11948,6 +12078,9 @@ function quickDash(dir) {
   // Rogue: dash is fully invincible for its duration
   if (player.cls === 'rogue') {
     player.invulnerable = Math.max(player.invulnerable, 220);
+    player._rogueDashPoseAt = (game.time | 0);
+    player._rogueDashPoseUntil = (game.time | 0) + 24;
+    player._rogueDashBrakeDust = 0;
   }
   // Puff + afterimage
   for (let i = 0; i < 10; i++) {
@@ -12594,6 +12727,8 @@ function spawnFromMap(type, boss) {
   spawnMonster(x, y, type, !!boss);
 }
 
+const MONSTER_SIZE_VARIANCE_STEPS = [0.95, 1.0, 1.05];
+
 function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   const t = monsterTypes[type];
   // Elite roll (not for bosses / miniboss)
@@ -12607,8 +12742,8 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   const mesMult = isBoss ? 1 : (isMiniBoss ? 4   : isElite ? 2.5 : 1);
   // v0.25.57 — monsters now vary in size + scale up with player level.
   // Two factors compose into the final size multiplier:
-  //   1. variance: per-spawn random ±10% for visual variety (so a pack
-  //      of slimes doesn't look like clones).
+  //   1. variance: per-spawn random +/-5% in clean steps for visual
+  //      variety without pushing sprite art into awkward scale sizes.
   //   2. levelScale: +0.8% per player level above 1, capped at Lv 41
   //      (32% bigger). Same monster type at Lv 1 vs Lv 50 looks visibly
   //      more imposing without breaking AI hitboxes.
@@ -12616,7 +12751,7 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // so cinematic boss silhouettes stay consistent across runs.
   const lvScale = isBoss ? 1 :
     (1 + Math.min(40, Math.max(0, ((typeof player !== 'undefined' && player) ? (player.level || 1) : 1) - 1)) * 0.008);
-  const variance = isBoss ? 1 : (0.92 + Math.random() * 0.16);
+  const variance = isBoss ? 1 : MONSTER_SIZE_VARIANCE_STEPS[(Math.random() * MONSTER_SIZE_VARIANCE_STEPS.length) | 0];
   const sizeMul = (isBoss ? 1 : (isMiniBoss ? 1.6 : isElite ? 1.25: 1)) * lvScale * variance;
   const prefix  = isMiniBoss ? 'Elder ' : isElite ? 'Elite ' : '';
   // Evasion scales on elite / mini-boss variants — they dodge more reliably
@@ -12867,6 +13002,22 @@ function updatePlayer(dt) {
     player.state = 'dash';
     // Maintain dash velocity with slow decay
     player.vx = player.quickDashDir * Math.max(9, Math.abs(player.vx) * 0.93);
+    if (player.cls === 'rogue' && !player._rogueDashBrakeDust && player.quickDashTimer <= 70) {
+      player._rogueDashBrakeDust = 1;
+      const footX = player.x + player.w / 2 + player.quickDashDir * 13;
+      const footY = player.y + player.h - 2;
+      for (let i = 0; i < 9; i++) {
+        game.particles.push({
+          x: footX + (Math.random() - 0.5) * 8,
+          y: footY + Math.random() * 4,
+          vx: -player.quickDashDir * (0.8 + Math.random() * 2.0),
+          vy: -0.3 - Math.random() * 1.2,
+          life: 18 + Math.random() * 8,
+          color: i % 2 ? '#d8c19a' : '#b99060',
+          size: 1.6 + Math.random() * 1.8
+        });
+      }
+    }
     if (game.time % 2 === 0) {
       game.afterImages.push({
         x: player.x, y: player.y, facing: player.facing,
@@ -13017,7 +13168,13 @@ function updatePlayer(dt) {
     player.vx *= 0.5;
   }
   // Somersault spin animation timer
-  if (player.somersault > 0) player.somersault -= dt;
+  if (player.somersault > 0) {
+    player.somersault = Math.max(0, player.somersault - dt);
+    if (player.somersault <= 0) {
+      player.somersaultDuration = 0;
+      player.somersaultDir = 0;
+    }
+  }
   // Divine Aegis — 5 hovering holy orbs pendulum in and out, striking
   // enemies in their path. Damage reduction is applied in hitMonster-style
   // incoming damage sites via towerPlayerTakeMul-like check elsewhere.
@@ -13689,10 +13846,15 @@ function respawnAtTown() {
   // in a clean idle pose.
   player.somersault = 0;
   player.somersaultDir = 0;
+  player.somersaultDuration = 0;
   player._chantRaiseUntil    = 0;
   player._impalePoseUntil    = 0;
   player._ninjaPoseUntil     = 0;
   player._ninjaCrouchUntil   = 0;
+  player._rogueDashPoseUntil = 0;
+  player._rogueDashBrakeDust = 0;
+  player._rogueThrowSomersaultUntil = 0;
+  player._warriorGroundSmashUntil = 0;
   player._levitateUntil      = 0;
   player._bigStabUntil       = 0;
   player._mageBigSwingUntil  = 0;
@@ -14278,15 +14440,30 @@ function castSkill(id) {
   // Forward-spin direction = +player.facing (matches movement intent),
   // backward-spin = -player.facing (rolls "away" / behind).
   if (id === 'groundSlam') {
-    // Warrior S — somersault hop into a heavy ground impact swing.
-    player.vy = Math.min(player.vy, -10);   // upward launch for the hop
-    player.somersault = 600;
+    // Warrior S — grounded two-handed smash. Long wind-up, apex hold,
+    // violent drop, impact hold, then labored recovery.
+    player.vy = 0;
+    player.somersault = 0;
     player.somersaultDir = player.facing;
+    player.somersaultDuration = 0;
+    player._warriorGroundSmashAt = (game.time | 0);
+    player._warriorGroundSmashUntil = (game.time | 0) + 84;
+    player.attackTimer = Math.max(player.attackTimer, 1400);
   } else if (id === 'throwDagger') {
     // Thief S — midair flip releasing the wide knife fan.
-    player.vy = Math.min(player.vy, -8);
+    // v0.25.405 - Higher rogue S flip launch for more visible airtime.
+    player.vy = Math.min(player.vy, -10.5);
     player.somersault = 480;
     player.somersaultDir = player.facing;
+    player.somersaultDuration = 480;
+    player._rogueThrowSomersaultAt = (game.time | 0);
+    player._rogueThrowSomersaultUntil = (game.time | 0) + 32;
+  } else if (id === 'flurry') {
+    // Rogue D / Flurry uses the same keyed ninja dash silhouette as the
+    // double-tap dash while the blink strike resolves.
+    player._rogueDashPoseAt = (game.time | 0);
+    player._rogueDashPoseUntil = (game.time | 0) + 24;
+    player._rogueDashBrakeDust = 0;
   } else if (id === 'backstab') {
     // Thief X — exaggerated big-stab action. v0.25.288 set a backward
     // somersault here, but the spin clashed with the 3-stab combo's
@@ -14339,6 +14516,7 @@ function castSkill(id) {
     player.vy = Math.min(player.vy, -12);
     player.somersault = 700;
     player.somersaultDir = player.facing;
+    player.somersaultDuration = 700;
     player.attackTimer = Math.max(player.attackTimer, 700);
   } else if (id === 'dragoon_skylance') {
     // v0.25.292 — Dragoon Sky Lance — exaggerated impale to the
@@ -14768,6 +14946,8 @@ function spawnSpriteBurst(x, y, spriteKey, opts) {
     size: opts.size || 80,
     angle: opts.angle || 0,
     spin: opts.spin || 0,
+    flipX: !!opts.flipX,
+    flipY: !!opts.flipY,
   });
 }
 function spawnSmoothImpact(x, y, color) {
@@ -14920,6 +15100,7 @@ function drawSmoothFx() {
       ctx.translate(sx, fx.y);
       const rot = (fx.angle || 0) + (fx.spin || 0) * t;
       if (rot) ctx.rotate(rot);
+      if (fx.flipX || fx.flipY) ctx.scale(fx.flipX ? -1 : 1, fx.flipY ? -1 : 1);
       ctx.drawImage(sprite, -sz / 2, -sz / 2, sz, sz);
       ctx.restore();
     } else if (fx.type === 'impact') {
@@ -15143,15 +15324,16 @@ const SKILL_FNS = {
     });
   },
   groundSlam: () => {
-    // Slow dramatic overhead — telegraph rings, pause at apex, then crash
+    // Slow grounded overhead smash: wind-up, held apex, violent release.
     addShake(3); flash(0.12);
-    player.vy = -13;                  // strong leap up
+    player.vx *= 0.25;
+    player.vy = Math.min(player.vy, 0);
     player.invulnerable = Math.max(player.invulnerable, 1100);
-    // Play Earthbreaker sprite at impact (~1000ms after cast — matches slam timer)
+    // Play Earthbreaker sprite at impact (~1000ms after cast, matching the slam timer).
     scheduleSkillTimer(() => spawnFx('warrior','earthbreaker',
       player.x + player.w/2 + player.facing * 80, 478, player.facing,
       { scale: 0.55, frameMs: 70 }), 1000);
-    // Launch burst — ground debris ring
+    // Launch burst - ground debris ring.
     for (let i = 0; i < 24; i++) {
       const a = (i / 24) * Math.PI * 2;
       game.particles.push({
@@ -15160,13 +15342,11 @@ const SKILL_FNS = {
         life: 28, color: i % 2 ? '#ccdddd' : '#88aabb', size: 3
       });
     }
-    // Apex hang — spin charge particles swirling around player while airborne
+    // Apex hang - charge particles swirl inward while the weapon is held overhead.
     for (let k = 0; k < 5; k++) {
       scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
-        // Continue floating near apex by capping vy
-        if (player.vy > -1) player.vy = -1;
-        // Charge rings swirling inward
+        // Charge rings swirling inward.
         const t = k * 0.7;
         for (let i = 0; i < 10; i++) {
           const a = (i / 10) * Math.PI * 2 + t;
@@ -15181,12 +15361,13 @@ const SKILL_FNS = {
         addShake(1);
       }, 180 + k * 90);
     }
-    // Dive phase — forceful slam downward
+    // Release phase - forceful grounded slam.
     scheduleSkillTimer(() => {
       if (player.hp <= 0 || game.paused) return;
-      player.vy = 22;                 // steeper slam
+      player.vx *= 0.2;
+      player.vy = 0;
       flash(0.18);
-      // Afterimages streaking down
+      // Afterimages emphasize the fast release.
       for (let k = 0; k < 4; k++) {
         scheduleSkillTimer(() => {
           game.afterImages.push({
@@ -15197,7 +15378,7 @@ const SKILL_FNS = {
         }, k * 40);
       }
     }, 700);
-    // Impact — wide front smash with triple shockwave ring burst
+    // Impact - wide front smash with triple shockwave ring burst.
     scheduleSkillTimer(() => {
       if (player.hp <= 0 || game.paused) return;
       addShake(18); flash(0.45); addHitStop(130);
@@ -15274,19 +15455,21 @@ const SKILL_FNS = {
     // sprite bursts (large outer dash, mid forward swoosh, tight focal
     // burst) read as a much grander dash impact than the previous
     // single 130 px swoosh.
-    const rushAngle = player.facing > 0 ? 0 : Math.PI;
+    // v0.25.385 - Keep the C-skill rush sprite level: mirror it with
+    // flipX when facing left instead of rotating or spinning it.
+    const rushFlipX = player.facing < 0;
     spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'rush',
-      { size: 260, life: 26, angle: rushAngle, spin: 0.4 * (player.facing > 0 ? 1 : -1) });
+      { size: 260, life: 26, flipX: rushFlipX });
     spawnSpriteBurst(
       player.x + player.w / 2 + player.facing * 50,
       player.y + player.h / 2 + 4,
       'rush',
-      { size: 200, life: 22, angle: rushAngle });
+      { size: 200, life: 22, flipX: rushFlipX });
     spawnSpriteBurst(
       player.x + player.w / 2 + player.facing * 95,
       player.y + player.h / 2,
       'rush',
-      { size: 140, life: 18, angle: rushAngle });
+      { size: 140, life: 18, flipX: rushFlipX });
     // Fire trail DoT ticks during the dash
     for (let i = 0; i < 6; i++) {
       scheduleSkillTimer(() => {
@@ -16306,11 +16489,13 @@ const SKILL_FNS = {
     const tx = Math.min(game.mapData.worldWidth - player.w, Math.max(0, player.x - player.facing * 120));
     for (let i=0;i<14;i++) { game.particles.push({x:player.x+player.w/2,y:player.y+player.h,vx:player.facing*(1+Math.random()*3),vy:-1-Math.random()*2,life:20,color:'#ccffcc',size:2}); }
     player.x = tx;
-    // Always somersault: big upward launch + spin flag
+    // Always somersault: compact upward snap + spin flag
     {
-      player.vy = -11;
-      player.somersault = 520;              // ms of spin animation
+      const compactFlipMs = 420;
+      player.vy = -8;
+      player.somersault = compactFlipMs;    // ms of spin animation
       player.somersaultDir = -player.facing;
+      player.somersaultDuration = compactFlipMs;
       // Extra ring of dust kicking up at launch
       for (let i = 0; i < 16; i++) {
         const a = (i / 16) * Math.PI;
@@ -27577,13 +27762,17 @@ const NPC_ROLE_CFG = {
   info:    { body:'#6aaa88', bodyShd:'#3a7a58', body2:'#8accaa', hair:'#5a4422', hairHi:'#8a6a32', hat:'cap'    },
   caravan: { body:'#e8b85a', bodyShd:'#a28830', body2:'#ffd880', hair:'#3a2820', hairHi:'#5a3828', hat:'scarf'  },
 };
+const NPC_WORLD_SCALE = 1.2;
+const NPC_PROCEDURAL_SCALE_X = 1.19 * NPC_WORLD_SCALE;
+const NPC_PROCEDURAL_SCALE_Y = 1.06 * NPC_WORLD_SCALE;
 
 function drawNPCs() {
   const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x | 0, y | 0, w, h); };
   for (const npc of game.npcs) {
     const cx = Math.round(npc.x - game.camera.x);
     const feetY = Math.round(npc.y + 44);      // feet line
-    if (cx + 40 < 0 || cx - 40 > W) continue;
+    const npcCullPad = 40 * NPC_WORLD_SCALE;
+    if (cx + npcCullPad < 0 || cx - npcCullPad > W) continue;
     const hb = Math.sin((game.time + npc.x) * 0.06) * 2.3;  // smooth head bobble
     const bb = Math.sin((game.time + npc.x) * 0.05) * 0.8;  // body breathe
     // v0.25.86b — hoist headY out of the procedural-only block so the name
@@ -27593,7 +27782,7 @@ function drawNPCs() {
     // Shadow (unaffected by chibi scale)
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.beginPath();
-    ctx.ellipse(cx, feetY + 2, 13, 3.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, feetY + 2, 13 * NPC_WORLD_SCALE, 3.5 * NPC_WORLD_SCALE, 0, 0, Math.PI * 2);
     ctx.fill();
 
     // v0.25.86 — if a ludo.ai NPC sprite is loaded for this NPC, draw it
@@ -27605,7 +27794,7 @@ function drawNPCs() {
     // Chibi scale transform — matches the player's (slightly taller) proportions
     ctx.save();
     ctx.translate(cx, feetY + 2);
-    ctx.scale(1.19, 1.06);
+    ctx.scale(NPC_PROCEDURAL_SCALE_X, NPC_PROCEDURAL_SCALE_Y);
     ctx.translate(-cx, -(feetY + 2));
     ctx.translate(0, -4);
 
@@ -27849,18 +28038,19 @@ function drawNPCs() {
 
     ctx.restore();   // end chibi scale wrapper
     }  // end procedural-NPC fallback else (v0.25.86)
+    const labelHeadY = _npcLabelHeadY(npc, !!_npcSpriteImg, feetY, headY);
 
     // Name tag (drawn outside the chibi scale so text stays crisp)
     ctx.font = 'bold 11px sans-serif';
     ctx.textAlign = 'center';
     const w = ctx.measureText(npc.name).width + 10;
     ctx.fillStyle = 'rgba(20,10,30,0.8)';
-    ctx.fillRect(cx - w/2, headY - 24, w, 15);
+    ctx.fillRect(cx - w/2, labelHeadY - 24, w, 15);
     ctx.strokeStyle = '#886bb8';
     ctx.lineWidth = 1;
-    ctx.strokeRect(cx - w/2, headY - 24, w, 15);
+    ctx.strokeRect(cx - w/2, labelHeadY - 24, w, 15);
     ctx.fillStyle = '#ffdd66';
-    ctx.fillText(npc.name, cx, headY - 14);
+    ctx.fillText(npc.name, cx, labelHeadY - 14);
 
     // NPC idle chat bubble (v0.22) — every ~12-25s each NPC rolls for
     // flavour text. Drawn above the head. Skipped when the player is in
@@ -27879,14 +28069,14 @@ function drawNPCs() {
     const near = Math.abs((player.x + player.w/2) - npc.x) < 70;
     if (!near && npc._chat) {
       const fade = npc._chat.life < 500 ? npc._chat.life / 500 : 1;
-      _drawBubble(cx, headY - 12, npc._chat.text, { fade });
+      _drawBubble(cx, labelHeadY - 12, npc._chat.text, { fade });
     }
     // Interact prompt (takes priority over chat bubble when nearby)
     if (near) {
       const t = Math.sin(game.time * 0.15) * 3;
       ctx.fillStyle = '#ffdd44';
       ctx.font = 'bold 12px sans-serif';
-      ctx.fillText('[N] Talk', cx, headY - 36 + t);
+      ctx.fillText('[N] Talk', cx, labelHeadY - 36 + t);
     }
 
     // Zodiac portal visual cue — the Zodiac Sanctum portal sits at the same
@@ -28001,16 +28191,18 @@ function shadeColor(hex, amt) {
 // touching the hundreds of fillRect coordinates.
 function _chibiApply(sx, sy) {
   // Anchor to the player's feet so ground contact stays visually correct
-  const footX = sx + player.w / 2;
-  const footY = player.y + player.h;
+  const footX = _lxWholePx(sx + player.w / 2);
+  const footY = _lxWholePx(player.y + player.h);
   ctx.save();
   ctx.translate(footX, footY);
-  // Slightly taller than before (0.97 → 1.06) so the player feels a bit
-  // stretched without breaking the chibi proportions. Still 19% wider.
-  ctx.scale(1.19, 1.06);
+  // v0.25.352 — visible world character stays at the requested ~80%
+  // target, nudged to a canvas-friendlier 0.85 display scale while
+  // HERO_VEC_DRAW_SCALE remains 1.0 so painter coordinates stay direct.
+  ctx.scale(HERO_WORLD_DISPLAY_SCALE, HERO_WORLD_DISPLAY_SCALE);
   // Somersault rotation — flip around the body center during evadeRoll-back
   if (player.somersault > 0) {
-    const t = 1 - player.somersault / 520;
+    const flipMs = Math.max(1, player.somersaultDuration || 520);
+    const t = Math.max(0, Math.min(1, 1 - player.somersault / flipMs));
     const ang = t * Math.PI * 2 * (player.somersaultDir || 1);
     ctx.translate(0, -player.h / 2);   // pivot near torso center instead of feet
     ctx.rotate(ang);
@@ -28308,15 +28500,17 @@ const HERO_VEC_PARTS = {
     'C 12 24 24 16 24 4 ' +       // centre chin to right lower cheek
     'C 24 -6 18 -22 0 -22 Z'      // right upper skull back to top
   ),
-  // Pear-shaped torso. Narrow at the shoulders (-4..4), wider at the
-  // hips (-14..14). Origin (0,0) at the TOP (neck) for clean rotation.
-  // Height 28 (y ∈ [0, 28]).
+  // Rounded sleeveless torso. Slightly side-facing with a higher left
+  // shoulder, fuller right side, and soft rounded hem like the reference.
+  // Origin (0,0) at the TOP (neck) for clean rotation.
+  // Height 29 (y in [1, 30]); hem still lands on the hip anchor.
   torso: new Path2D(
-    'M -4 0 ' +                   // left neck
-    'C -10 2 -14 10 -14 16 ' +    // left shoulder/side
-    'C -14 24 -8 28 0 28 ' +      // left hip to bottom centre
-    'C 8 28 14 24 14 16 ' +       // bottom centre to right hip
-    'C 14 10 10 2 4 0 Z'          // right shoulder/side back to neck
+    'M -8 3 ' +                   // smaller left shoulder
+    'C -11 6 -12 14 -11 21 ' +    // tighter left side
+    'C -10 27 -4 30 1 30 ' +      // hip anchor stays at y=30
+    'C 7 29 11 25 11 18 ' +       // slightly narrower right side
+    'C 11 10 9 3 4 2 ' +          // smaller right shoulder
+    'C 0 1 -4 1 -8 3 Z'           // collar back to left shoulder
   ),
   // Teardrop stubby limb (used for both arms and legs).
   // Origin (0,0) at the TOP joint (shoulder/hip) for perfect pivot
@@ -28343,25 +28537,47 @@ const HERO_VEC_PARTS = {
 // y=18 to y=15 so weapon overlays anchor at the new arm tip.
 // Arm + head bones are in spine-local coords, so they ride along
 // with the spine drop automatically.
+// v0.25.394 — weapon anchoring moved to a new handL child bone so the
+// weapon base, weapon paint layer, and visible left-hand ellipse all
+// share the same pivot.
 const HERO_VEC_RIG = {
   root:  { x:0,   y:0,     parent:null    },   // feet centre
-  legL:  { x:-4,  y:-15,   parent:'root'  },   // back-leg HIP pivot (15-tall limb)
-  legR:  { x:4,   y:-15,   parent:'root'  },   // front-leg HIP pivot
+  legL:  { x:-5,  y:-15,   parent:'root'  },   // back-leg HIP pivot, shifted 1px left
+  legR:  { x:5,   y:-15,   parent:'root'  },   // front-leg HIP pivot
   spine: { x:0,   y:-15,   parent:'root'  },   // torso pivot at hip line
-  armL:  { x:-12, y:-22,   parent:'spine' },   // back-arm shoulder pivot
-  armR:  { x:12,  y:-22,   parent:'spine' },   // front-arm shoulder pivot
+  armL:  { x:-12, y:-21,   parent:'spine' },   // back-arm shoulder pivot
+  armR:  { x:13,  y:-22,   parent:'spine' },   // front/free-arm shoulder pivot, shifted 1px left
   head:  { x:0,   y:-50,   parent:'spine' },   // bigger head sits high
-  handR: { x:0,   y:15,    parent:'armR'  },   // front hand at new limb tip
+  handL: { x:0,   y:14,    parent:'armL'  },   // left-hand ellipse + weapon pivot
+  handR: { x:1,   y:15,    parent:'armR'  },   // right-hand ellipse pivot
 };
-// v0.25.136 — per-class weapon overlays. Drawn at the front-hand bone
-// (handR) so the weapon naturally inherits the arm's animation
+// Visual recenter for head-attached art; keep the neck pivot stable.
+const HERO_VEC_HEAD_ATTACHED_OFFSET = { x: -3, y: -1 };
+const _HERO_VEC_REST_POS_CACHE = {};
+function _heroVecRestPos(bone) {
+  if (_HERO_VEC_REST_POS_CACHE[bone]) return _HERO_VEC_REST_POS_CACHE[bone];
+  let x = 0, y = 0, cur = bone;
+  while (cur && HERO_VEC_RIG[cur]) {
+    const r = HERO_VEC_RIG[cur];
+    x += r.x; y += r.y;
+    cur = r.parent;
+  }
+  return (_HERO_VEC_REST_POS_CACHE[bone] = { x, y });
+}
+// v0.25.136 — per-class weapon overlays. Drawn at the weapon-hand bone
+// so the weapon naturally inherits the arm's animation
 // rotation + the head/spine bob. Each fn accepts (ctx, OUT) where ctx
 // is the local renderer context and OUT is the outline colour. Weapons
 // live in hand-local coords with the grip near (0, 0) and the business
 // end pointing UP (negative y).
+const HERO_VEC_WARRIOR_SWORD_OUTWARD_TILT = -Math.PI / 9; // 20 degrees away from left-hand side
+const HERO_VEC_WEAPON_HORIZONTAL_HOLD = Math.PI / 2;
 const HERO_VEC_WEAPON = {
   warrior: function(c, OUT) {
-    // Sword: silver blade pointing up, gold crossguard, dark grip.
+    // Sword: silver blade, gold crossguard, dark grip. Tilt the whole
+    // shape away from the body without changing its authored dimensions.
+    c.save();
+    c.rotate(HERO_VEC_WARRIOR_SWORD_OUTWARD_TILT);
     c.fillStyle = '#dadde2'; c.strokeStyle = OUT; c.lineWidth = 1.5;
     c.beginPath();
     c.moveTo(-1.8, -22); c.lineTo(0, -25); c.lineTo(1.8, -22);
@@ -28384,6 +28600,7 @@ const HERO_VEC_WEAPON = {
     // Pommel
     c.fillStyle = '#e0a64a';
     c.beginPath(); c.arc(0, 3.2, 1.3, 0, Math.PI * 2); c.fill(); c.stroke();
+    c.restore();
   },
   rogue: function(c, OUT) {
     // Dagger: short silver blade with leather wrap on grip.
@@ -28656,7 +28873,7 @@ function _lxBakeHairGoo(group, hairColor, hairHi, lowFx) {
 // unique (cls, skinIdx, hairId) tuple into a 100×100 offscreen canvas.
 // Subsequent frames hit the cache and render with one drawImage instead
 // of the full per-frame Path2D pipeline. The bob is sacrificed (it's
-// barely visible at 0.62× scale) for a 60+% reduction in idle-frame
+// barely visible at the vector draw scale) for a 60+% reduction in idle-frame
 // CPU cost on mobile.
 //
 // Falls back to the live render path immediately when:
@@ -28669,7 +28886,7 @@ function _lxBakeHairGoo(group, hairColor, hairHi, lowFx) {
 const _LX_HERO_BAKE_W = 100, _LX_HERO_BAKE_H = 100;
 const _LX_HERO_BAKE_FOOT_X = 50, _LX_HERO_BAKE_FOOT_Y = 80;
 // v0.25.269 — bake at 3× the logical footprint so the cached idle frame
-// has enough source pixels to survive the _chibiApply scale (1.19 × 1.06)
+// has enough source pixels to survive the _chibiApply display scale
 // without looking pixelated or distorted. The Q-key Character Studio
 // renders the same vectors at 5× directly to its panel, which is why the
 // studio preview looks razor-sharp; matching the render quality in
@@ -28677,7 +28894,7 @@ const _LX_HERO_BAKE_FOOT_X = 50, _LX_HERO_BAKE_FOOT_Y = 80;
 // letting the browser's bilinear downsampler do the rest.
 // v0.25.271 — pushed 3× → 5× so the source pixel ratio comfortably
 // exceeds the HiDPI canvas backing buffer (1.5× DPR on desktop) plus
-// the 1.19× chibi horizontal scale combined. Memory cost per cached
+// the chibi display scale combined. Memory cost per cached
 // look ≈ 1 MB (500 × 500 × 4 bytes); with ~6–12 looks active that
 // caps at ~12 MB, well within budget. Higher SUPER values produce
 // diminishing returns once the source > 4× the destination pixel size.
@@ -28694,8 +28911,7 @@ function _lxBakeHeroIdle(cls, skinIdx, hairId, eyeId, mouthId) {
   baked.width  = _LX_HERO_BAKE_W * _LX_HERO_BAKE_SUPER;
   baked.height = _LX_HERO_BAKE_H * _LX_HERO_BAKE_SUPER;
   const offCtx = baked.getContext('2d');
-  offCtx.imageSmoothingEnabled = true;
-  offCtx.imageSmoothingQuality = 'high';
+  _lxUseEntityImageQuality(offCtx);
   // Pre-scale the bake context so _drawVectorHero's logical coordinate
   // system stays unchanged — every existing offset, anchor, and stroke
   // width still works because we just zoom in on the bake canvas.
@@ -28724,7 +28940,7 @@ function _lxBakeHeroIdle(cls, skinIdx, hairId, eyeId, mouthId) {
 // v0.25.273 — always render the live vector pipeline. The v0.25.176
 // idle bake (and the v0.25.269 / v0.25.271 super-sample escalations
 // that followed) traded crispness for caching: every cached blit
-// went through ≥1 bilinear resample (chibi 1.19×, optional 1.5×
+// went through ≥1 bilinear resample (chibi display scale, optional 1.5×
 // HiDPI), and bilinear is slightly soft by definition. Now that
 // the v0.25.157 SVG goo filter is gone — replaced by sprite hair /
 // head / eyes / mouth (LX_HAIR / LX_HEAD / LX_EYES / LX_MOUTH) —
@@ -28864,14 +29080,66 @@ function _heroVecAttackWindup(t) {
   return 0;
 }
 function _heroVecAttackArm(t) {
-  if (t < 0.18) return -0.20 - _heroEaseOutCubic(t / 0.18) * 1.65;
-  if (t < 0.56) return -1.85 + _heroEaseOutCubic((t - 0.18) / 0.38) * 3.25;
-  return 1.40 - _heroVecAttackRecover(t) * 0.95;
+  if (t < 0.16) return -0.18 - _heroEaseOutCubic(t / 0.16) * 1.92;
+  if (t < 0.23) return -2.10;
+  if (t < 0.50) return -2.10 + _heroEaseOutCubic((t - 0.23) / 0.27) * 3.88;
+  if (t < 0.62) return 1.78 - _heroEaseOutCubic((t - 0.50) / 0.12) * 0.32;
+  return 1.46 - _heroVecAttackRecover(t) * 1.46;
 }
 function _heroVecAttackOffArm(t) {
-  if (t < 0.18) return 0.20 + _heroEaseOutCubic(t / 0.18) * 0.85;
-  if (t < 0.56) return 1.05 - _heroEaseOutCubic((t - 0.18) / 0.38) * 1.70;
-  return -0.65 + _heroVecAttackRecover(t) * 0.45;
+  if (t < 0.16) return 0.18 + _heroEaseOutCubic(t / 0.16) * 0.92;
+  if (t < 0.23) return 1.10;
+  if (t < 0.50) return 1.10 - _heroEaseOutCubic((t - 0.23) / 0.27) * 1.86;
+  if (t < 0.62) return -0.76 + _heroEaseOutCubic((t - 0.50) / 0.12) * 0.18;
+  return -0.58 + _heroVecAttackRecover(t) * 0.58;
+}
+function _heroVecAttackWrist(t) {
+  if (t < 0.23) return -0.24 - _heroEaseOutCubic(t / 0.23) * 0.18;
+  if (t < 0.50) return -0.42 + _heroEaseOutCubic((t - 0.23) / 0.27) * 0.86;
+  if (t < 0.62) return 0.44 - _heroEaseOutCubic((t - 0.50) / 0.12) * 0.20;
+  return 0.24 - _heroVecAttackRecover(t) * 0.24;
+}
+function _heroVecAttackBodyX(t) {
+  return _heroVecAttackStrike(t) * 2.8 - _heroVecAttackRecover(t) * 1.4;
+}
+function _heroVecAttackLegPose(t) {
+  const bodyX = _heroVecAttackBodyX(t);
+  const keys = [
+    { p: 0.00, legR: -0.20, legL: 0.22, legRY: 0.0, legLY: 0.0, legRSy: 1.00, legLSy: 1.00 },
+    { p: 0.18, legR: -0.28, legL: 0.32, legRY: 0.1, legLY: 0.0, legRSy: 0.98, legLSy: 1.04 },
+    { p: 0.50, legR: -0.40, legL: 0.26, legRY: 0.4, legLY: -0.1, legRSy: 0.94, legLSy: 1.02 },
+    { p: 0.72, legR: -0.30, legL: 0.22, legRY: 0.2, legLY: 0.0, legRSy: 0.97, legLSy: 1.01 },
+    { p: 1.00, legR: -0.20, legL: 0.20, legRY: 0.0, legLY: 0.0, legRSy: 1.00, legLSy: 1.00 },
+  ];
+  for (let i = 0; i < keys.length - 1; i++) {
+    const a = keys[i];
+    const b = keys[i + 1];
+    if (t >= a.p && t <= b.p) {
+      const u = (t - a.p) / (b.p - a.p || 1);
+      return {
+        legR: _heroVecWalkPoseLerp(a.legR, b.legR, u),
+        legL: _heroVecWalkPoseLerp(a.legL, b.legL, u),
+        legRY: _heroVecWalkPoseLerp(a.legRY, b.legRY, u),
+        legLY: _heroVecWalkPoseLerp(a.legLY, b.legLY, u),
+        legRSy: _heroVecWalkPoseLerp(a.legRSy, b.legRSy, u),
+        legLSy: _heroVecWalkPoseLerp(a.legLSy, b.legLSy, u),
+        bodyX,
+      };
+    }
+  }
+  return { ...keys[keys.length - 1], bodyX };
+}
+function _heroVecAttackLegAngle(t, side) {
+  const pose = _heroVecAttackLegPose(t);
+  return side === 'left' ? pose.legL : pose.legR;
+}
+function _heroVecAttackLegDeform(t, side) {
+  const pose = _heroVecAttackLegPose(t);
+  return { sx: 1, sy: side === 'left' ? pose.legLSy : pose.legRSy };
+}
+function _heroVecAttackLegBob(t, side) {
+  const pose = _heroVecAttackLegPose(t);
+  return { x: pose.bodyX, y: side === 'left' ? pose.legLY : pose.legRY };
 }
 // v0.25.194 — Warrior attack: wide 2-handed slash. Both arms grip
 // the weapon and swing together in a huge horizontal arc — windup
@@ -28896,6 +29164,84 @@ function _heroVecWarriorBackArm(t) {
   if (t < 0.27) return 2.95;
   if (t < 0.55) return 2.95 - _heroEaseOutCubic((t - 0.27) / 0.28) * 5.45;
   return -2.50 + _heroVecAttackRecover(t) * 1.95;
+}
+function _heroVecWarriorWrist(t) {
+  if (t < 0.27) return -0.36 - _heroEaseOutCubic(t / 0.27) * 0.20;
+  if (t < 0.55) return -0.56 + _heroEaseOutCubic((t - 0.27) / 0.28) * 1.18;
+  return 0.62 - _heroVecAttackRecover(t) * 0.62;
+}
+function _heroVecWarriorBodyBob(t) {
+  return {
+    x: -_heroVecAttackWindup(t) * 2.4 + _heroVecAttackStrike(t) * 5.5 - _heroVecAttackRecover(t) * 3.0,
+    y: -Math.sin(t * Math.PI) * 3.0,
+  };
+}
+function _heroVecWarriorSwingLegPose(t) {
+  const keys = [
+    { p: 0.00, legR: -0.22, legL: 0.26, legRY: 0.0, legLY: 0.0, legRSy: 1.00, legLSy: 1.00 },
+    { p: 0.18, legR: -0.44, legL: 0.58, legRY: 0.2, legLY: 0.0, legRSy: 0.96, legLSy: 1.08 },
+    { p: 0.27, legR: -0.52, legL: 0.66, legRY: 0.4, legLY: 0.0, legRSy: 0.94, legLSy: 1.10 },
+    { p: 0.55, legR: -0.66, legL: 0.44, legRY: 0.8, legLY: -0.2, legRSy: 0.90, legLSy: 1.04 },
+    { p: 0.72, legR: -0.50, legL: 0.36, legRY: 0.4, legLY: 0.0, legRSy: 0.95, legLSy: 1.02 },
+    { p: 1.00, legR: -0.22, legL: 0.24, legRY: 0.0, legLY: 0.0, legRSy: 1.00, legLSy: 1.00 },
+  ];
+  for (let i = 0; i < keys.length - 1; i++) {
+    const a = keys[i];
+    const b = keys[i + 1];
+    if (t >= a.p && t <= b.p) {
+      const u = (t - a.p) / (b.p - a.p || 1);
+      return {
+        legR: _heroVecWalkPoseLerp(a.legR, b.legR, u),
+        legL: _heroVecWalkPoseLerp(a.legL, b.legL, u),
+        legRY: _heroVecWalkPoseLerp(a.legRY, b.legRY, u),
+        legLY: _heroVecWalkPoseLerp(a.legLY, b.legLY, u),
+        legRSy: _heroVecWalkPoseLerp(a.legRSy, b.legRSy, u),
+        legLSy: _heroVecWalkPoseLerp(a.legLSy, b.legLSy, u),
+      };
+    }
+  }
+  return keys[keys.length - 1];
+}
+function _heroVecWarriorLegAngle(t, side) {
+  const pose = _heroVecWarriorSwingLegPose(t);
+  return side === 'left' ? pose.legL : pose.legR;
+}
+function _heroVecWarriorLegDeform(t, side) {
+  const pose = _heroVecWarriorSwingLegPose(t);
+  return { sx: 1, sy: side === 'left' ? pose.legLSy : pose.legRSy };
+}
+function _heroVecWarriorLegBob(t, side) {
+  const pose = _heroVecWarriorSwingLegPose(t);
+  const body = _heroVecWarriorBodyBob(t);
+  return { x: body.x, y: body.y + (side === 'left' ? pose.legLY : pose.legRY) };
+}
+const HERO_VEC_WARRIOR_GROUND_SMASH_FRAMES = 84;
+const HERO_VEC_WARRIOR_GROUND_SMASH_KEYS = [
+  { p:0.00, spine:-0.16, head:-0.10, armL:-0.52, armR:-0.28, handL:-0.10, legL: 0.52, legR:-0.42, x:-0.7, y: 0.5, headX:-0.4, headY: 0.4, legLY: 0.0, legRY: 0.4, legLSy:1.08, legRSy:0.94, sx:1.02, sy:0.98, limbSy:1.00, smear:0, impact:0 },
+  { p:0.36, spine:-0.54, head:-0.36, armL:-2.22, armR:-1.82, handL:-0.34, legL: 0.70, legR:-0.58, x:-3.2, y:-0.6, headX:-1.1, headY:-1.0, legLY: 0.0, legRY: 0.8, legLSy:1.12, legRSy:0.90, sx:0.98, sy:1.04, limbSy:1.04, smear:0, impact:0 },
+  { p:0.52, spine:-0.62, head:-0.44, armL:-2.44, armR:-2.12, handL:-0.42, legL: 0.74, legR:-0.60, x:-3.8, y:-1.8, headX:-1.4, headY:-1.6, legLY:-0.1, legRY: 0.8, legLSy:1.14, legRSy:0.90, sx:0.96, sy:1.08, limbSy:1.06, smear:0, impact:0 },
+  { p:0.66, spine: 0.42, head: 0.28, armL: 1.72, armR: 1.46, handL: 0.30, legL: 0.28, legR:-0.84, x: 4.8, y: 1.8, headX: 1.2, headY: 1.6, legLY:-0.2, legRY: 1.4, legLSy:1.02, legRSy:0.84, sx:1.14, sy:0.88, limbSy:1.18, smear:1, impact:0.25 },
+  { p:0.78, spine: 0.64, head: 0.46, armL: 2.08, armR: 1.82, handL: 0.20, legL: 0.18, legR:-1.02, x: 4.0, y: 4.2, headX: 0.8, headY: 3.0, legLY: 0.2, legRY: 2.0, legLSy:0.98, legRSy:0.78, sx:1.08, sy:0.82, limbSy:1.10, smear:0.08, impact:1 },
+  { p:0.91, spine: 0.30, head: 0.22, armL: 1.34, armR: 1.10, handL: 0.08, legL: 0.30, legR:-0.58, x: 1.8, y: 2.0, headX: 0.3, headY: 1.4, legLY: 0.0, legRY: 0.8, legLSy:1.02, legRSy:0.92, sx:1.02, sy:0.94, limbSy:1.04, smear:0, impact:0.35 },
+  { p:1.00, spine: 0.02, head: 0.00, armL: 0.18, armR: 0.12, handL: 0.00, legL: 0.24, legR:-0.22, x: 0.0, y: 0.0, headX: 0.0, headY: 0.0, legLY: 0.0, legRY: 0.0, legLSy:1.00, legRSy:1.00, sx:1.00, sy:1.00, limbSy:1.00, smear:0, impact:0 },
+];
+function _heroVecWarriorGroundSmashPose(t) {
+  const p = _heroClamp01(t);
+  const keys = HERO_VEC_WARRIOR_GROUND_SMASH_KEYS;
+  for (let i = 0; i < keys.length - 1; i++) {
+    const a = keys[i];
+    const b = keys[i + 1];
+    if (p >= a.p && p <= b.p) {
+      const u = _heroEaseInOutSine((p - a.p) / (b.p - a.p || 1));
+      const out = {};
+      for (const k of Object.keys(a)) {
+        if (k === 'p') continue;
+        out[k] = a[k] + (b[k] - a[k]) * u;
+      }
+      return out;
+    }
+  }
+  return keys[keys.length - 1];
 }
 // v0.25.194 — Mage attack: raise staff overhead and point it at the
 // sky. Front arm (armR) sweeps from neutral up to ~vertical, holds
@@ -28949,48 +29295,125 @@ function _heroVecMageBackArm(t) {
 // behind the hip, fuller arm extension past the body, longer
 // committed hold. Restores the "this is THE big stab" read after
 // backstab dropped its v0.25.288 backward somersault.
+// v0.25.393 — Make the normal thief/rogue attack read as a clearer
+// stab too: deeper pullback, longer forward arm extension, stronger
+// torso lunge, and a brighter straight thrust trail. Weapon dimensions
+// are unchanged; this only moves/rotates the hand-rig pose.
+// v0.25.400 - Left-hand weapon arm now visibly draws back behind the
+// body before a fast forward thrust, so the stab reads as a loaded
+// lunge instead of an already-extended poke.
 function _heroVecRogueBigStabActive() {
   if (typeof player === 'undefined') return false;
   const t = (game && game.time) || 0;
   return ((player._bigStabUntil | 0) > t);
 }
+function _heroVecRogueThrowSomersaultTuck(t) {
+  if (typeof player === 'undefined' || player.cls !== 'rogue') return 0;
+  const now = (game && game.time) || 0;
+  if ((player._rogueThrowSomersaultUntil | 0) <= now) return 0;
+  const start = Number.isFinite(player._rogueThrowSomersaultAt) ? player._rogueThrowSomersaultAt : now;
+  const p = _heroClamp01((now - start) / 32);
+  // Compact the head most through the middle of the forward flip.
+  return Math.sin(p * Math.PI) * 2.2;
+}
+function _heroVecRogueBodyX(t) {
+  const big = _heroVecRogueBigStabActive() ? 1.35 : 1;
+  return (-_heroVecAttackWindup(t) * 2.7 + _heroVecAttackStrike(t) * 7.2 - _heroVecAttackRecover(t) * 3.4) * big;
+}
+function _heroVecRogueSpine(t) {
+  return -0.18 - _heroVecAttackWindup(t) * 0.22 + _heroVecAttackStrike(t) * 0.82 - _heroVecAttackRecover(t) * 0.42;
+}
+function _heroVecRogueDaggerWorldRotation(t) {
+  const big = _heroVecRogueBigStabActive();
+  const windupEnd = big ? 0.23 : 0.21;
+  const thrustEnd = big ? 0.38 : 0.34;
+  const holdEnd = big ? 0.66 : 0.58;
+  if (t < windupEnd) return _heroVecWalkPoseLerp(-0.70, -1.12, t / windupEnd);
+  if (t < thrustEnd) {
+    const u = _heroClamp01((t - windupEnd) / (thrustEnd - windupEnd || 1));
+    return -1.12 + _heroEaseOutCubic(u) * 2.74;
+  }
+  if (t < holdEnd) {
+    const u = _heroClamp01((t - thrustEnd) / (holdEnd - thrustEnd || 1));
+    return 1.62 + Math.sin(u * Math.PI) * (big ? 0.10 : 0.07);
+  }
+  return 1.62 - _heroVecAttackRecover(t) * 0.78;
+}
 function _heroVecRogueFrontArm(t) {
   if (_heroVecRogueBigStabActive()) {
-    // Cranked range: −1.95 (hip-cocked further back) → +2.20 (full
-    // extension past horizontal) = 4.15 rad swing (vs 3.40 baseline).
-    if (t < 0.20) return -0.30 - _heroEaseOutCubic(t / 0.20) * 1.65;            // deeper windup
-    if (t < 0.40) return -1.95 + _heroEaseOutCubic((t - 0.20) / 0.20) * 4.15;   // explosive thrust
-    if (t < 0.62) return 2.20 + Math.sin((t - 0.40) * Math.PI / 0.22) * 0.14;   // longer held thrust + tremor
-    return 2.20 - _heroVecAttackRecover(t) * 2.20;
+    if (t < 0.16) return -0.10 + _heroEaseOutCubic(t / 0.16) * 1.55;
+    if (t < 0.23) return 1.45;
+    if (t < 0.38) return 1.45 - _heroEaseOutCubic((t - 0.23) / 0.15) * 3.38;
+    if (t < 0.66) return -1.93 + Math.sin((t - 0.38) * Math.PI / 0.28) * 0.05;
+    return -1.93 + _heroVecAttackRecover(t) * 1.78;
   }
-  // Front (dagger) arm. 0 = hanging down; positive = forward/horizontal.
-  // Range -1.60 (cocked behind hip) → +1.80 (past horizontal) = 3.40 rad swing.
-  if (t < 0.18) return -0.30 - _heroEaseOutCubic(t / 0.18) * 1.30;            // BIG windup pull to -1.60
-  if (t < 0.36) return -1.60 + _heroEaseOutCubic((t - 0.18) / 0.18) * 3.40;   // EXPLOSIVE thrust to +1.80
-  if (t < 0.55) return 1.80 + Math.sin((t - 0.36) * Math.PI / 0.19) * 0.10;   // sustained held thrust + tremor
-  return 1.80 - _heroVecAttackRecover(t) * 1.80;                              // retract to neutral
+  if (t < 0.15) return -0.10 + _heroEaseOutCubic(t / 0.15) * 1.25;
+  if (t < 0.21) return 1.15;
+  if (t < 0.34) return 1.15 - _heroEaseOutCubic((t - 0.21) / 0.13) * 2.88;
+  if (t < 0.58) return -1.73 + Math.sin((t - 0.34) * Math.PI / 0.24) * 0.05;
+  return -1.73 + _heroVecAttackRecover(t) * 1.58;
 }
 function _heroVecRogueBackArm(t) {
   if (_heroVecRogueBigStabActive()) {
-    // Off-hand mirrors the bigger commit: raises higher on windup,
-    // drives further past the body on the thrust.
-    if (t < 0.20) return 0.30 + _heroEaseOutCubic(t / 0.20) * 0.85;             // raise to +1.15
-    if (t < 0.40) return 1.15 - _heroEaseOutCubic((t - 0.20) / 0.20) * 1.85;    // drive forward to -0.70
-    if (t < 0.62) return -0.70;                                                  // hold forward
-    return -0.70 + _heroVecAttackRecover(t) * 0.70;
+    if (t < 0.16) return 0.12 - _heroEaseOutCubic(t / 0.16) * 0.72;
+    if (t < 0.23) return -0.60;
+    if (t < 0.38) return -0.60 + _heroEaseOutCubic((t - 0.23) / 0.15) * 1.36;
+    if (t < 0.66) return 0.76;
+    return 0.76 - _heroVecAttackRecover(t) * 0.76;
   }
-  // Off-hand swings back HARD on windup (raises high) then DRIVES
-  // forward as the thrust commits — opposite-direction motion sells
-  // the full-body hip rotation into the stab.
-  if (t < 0.18) return 0.30 + _heroEaseOutCubic(t / 0.18) * 0.65;             // raise high to +0.95
-  if (t < 0.36) return 0.95 - _heroEaseOutCubic((t - 0.18) / 0.18) * 1.45;    // drive forward to -0.50
-  if (t < 0.55) return -0.50;                                                  // hold forward through thrust
-  return -0.50 + _heroVecAttackRecover(t) * 0.50;                             // recover to neutral
+  if (t < 0.15) return 0.12 - _heroEaseOutCubic(t / 0.15) * 0.58;
+  if (t < 0.21) return -0.46;
+  if (t < 0.34) return -0.46 + _heroEaseOutCubic((t - 0.21) / 0.13) * 1.04;
+  if (t < 0.58) return 0.58;
+  return 0.58 - _heroVecAttackRecover(t) * 0.58;
+}
+function _heroVecRogueWrist(t) {
+  const arm = _heroVecRogueFrontArm(t);
+  return _heroVecRogueDaggerWorldRotation(t) - (_heroVecRogueSpine(t) + arm);
+}
+function _heroVecRogueLegPose(t) {
+  const big = _heroVecRogueBigStabActive() ? 1.18 : 1;
+  const bodyX = _heroVecRogueBodyX(t);
+  const keys = [
+    { p: 0.00, legR: -0.26, legL: 0.30, legRY: 0.0, legLY: 0.0, legRSy: 1.00, legLSy: 1.00 },
+    { p: 0.16, legR: -0.50, legL: 0.56, legRY: 0.2, legLY: 0.0, legRSy: 0.95, legLSy: 1.07 },
+    { p: 0.42, legR: -0.68, legL: 0.42, legRY: 0.9, legLY: -0.3, legRSy: 0.88, legLSy: 1.03 },
+    { p: 0.62, legR: -0.56, legL: 0.34, legRY: 0.4, legLY: 0.0, legRSy: 0.93, legLSy: 1.02 },
+    { p: 1.00, legR: -0.24, legL: 0.24, legRY: 0.0, legLY: 0.0, legRSy: 1.00, legLSy: 1.00 },
+  ];
+  for (let i = 0; i < keys.length - 1; i++) {
+    const a = keys[i];
+    const b = keys[i + 1];
+    if (t >= a.p && t <= b.p) {
+      const u = (t - a.p) / (b.p - a.p || 1);
+      return {
+        legR: _heroVecWalkPoseLerp(a.legR, b.legR, u) * big,
+        legL: _heroVecWalkPoseLerp(a.legL, b.legL, u) * big,
+        legRY: _heroVecWalkPoseLerp(a.legRY, b.legRY, u),
+        legLY: _heroVecWalkPoseLerp(a.legLY, b.legLY, u),
+        legRSy: _heroVecWalkPoseLerp(a.legRSy, b.legRSy, u),
+        legLSy: _heroVecWalkPoseLerp(a.legLSy, b.legLSy, u),
+        bodyX,
+      };
+    }
+  }
+  return { ...keys[keys.length - 1], legR: keys[keys.length - 1].legR * big, legL: keys[keys.length - 1].legL * big, bodyX };
+}
+function _heroVecRogueLegAngle(t, side) {
+  const pose = _heroVecRogueLegPose(t);
+  return side === 'left' ? pose.legL : pose.legR;
+}
+function _heroVecRogueLegDeform(t, side) {
+  const pose = _heroVecRogueLegPose(t);
+  return { sx: 1, sy: side === 'left' ? pose.legLSy : pose.legRSy };
+}
+function _heroVecRogueLegBob(t, side) {
+  const pose = _heroVecRogueLegPose(t);
+  return { x: pose.bodyX, y: side === 'left' ? pose.legLY : pose.legRY };
 }
 // v0.25.191 — Archer attack: pull bowstring → hold → release.
-// Front arm (armR) holds the bow steady forward-up throughout. Back
-// arm (armL) raises with the bow during windup, pulls back further
-// during draw, snaps forward on release, then recovers.
+// v0.25.394 — With the bow anchored to the left hand, armL holds the
+// bow steady forward-up while armR pulls and releases the string.
 function _heroVecArcherFrontArm(t) {
   // v0.25.194 — Bow stays realistic. Front arm raises quickly into a
   // stable forward-up hold, locks there through the entire draw +
@@ -29003,10 +29426,11 @@ function _heroVecArcherFrontArm(t) {
   // recoil on release that arcs the bow up + back briefly before the
   // arm lowers. Reads as a real archery stance: steady aim, recoil,
   // recover.
-  if (t < 0.08) return -0.30 - _heroEaseOutCubic(t / 0.08) * 0.85;            // fast raise (was 0.10)
-  if (t < 0.58) return -1.15 + Math.sin(t * Math.PI * 22) * 0.018;             // hold + 22Hz tension wobble
-  if (t < 0.72) return -1.15 - _heroEaseOutCubic((t - 0.58) / 0.14) * 0.22;    // bow kicks UP on release
-  return -1.37 + _heroVecAttackRecover(t) * 1.37;                              // lower from kicked position
+  const raise = HERO_VEC_ARCHER_SHOT_HAND_RAISE;
+  if (t < 0.08) return -0.30 - _heroEaseOutCubic(t / 0.08) * (0.85 + raise);   // fast raise (was 0.10)
+  if (t < 0.58) return -1.15 - raise + Math.sin(t * Math.PI * 22) * 0.018;      // hold + 22Hz tension wobble
+  if (t < 0.72) return -1.15 - raise - _heroEaseOutCubic((t - 0.58) / 0.14) * 0.22; // bow kicks UP on release
+  return -1.37 - raise + _heroVecAttackRecover(t) * (1.37 + raise);             // lower from kicked position
 }
 function _heroVecArcherBackArm(t) {
   // String-pulling arm — windup rises with the bow, draws back during
@@ -29025,39 +29449,237 @@ function _heroVecArcherBackArm(t) {
   if (t < 0.72) return -0.55 + _heroEaseOutCubic((t - 0.63) / 0.09) * 0.25;   // settle from overshoot
   return -0.30 + _heroVecAttackRecover(t) * 0.30;                             // recover to neutral
 }
+const HERO_VEC_ARCHER_RELEASE_T = 0.58;
+const HERO_VEC_ARCHER_SHOT_HAND_RAISE = Math.PI / 18; // 10 degrees
+const HERO_VEC_ARCHER_WEAPON_HAND_INSET_X = 2;        // 2px closer to body from the left-hand anchor
+const HERO_VEC_ARCHER_BOW_POST_SHOT_TILT = -0.16;
+function _heroVecArcherBowLocalRotation(t) {
+  const counterArmTilt = -_heroVecArcherFrontArm(t);
+  if (t < HERO_VEC_ARCHER_RELEASE_T) return counterArmTilt;
+  const postShot = _heroClamp01((t - HERO_VEC_ARCHER_RELEASE_T) / (1 - HERO_VEC_ARCHER_RELEASE_T));
+  return counterArmTilt + HERO_VEC_ARCHER_BOW_POST_SHOT_TILT * Math.sin(postShot * Math.PI);
+}
 function _heroVecJumpRise() {
   return ((typeof player !== 'undefined' && player.vy) || 0) < -0.4;
+}
+function _heroVecJumpFall() {
+  return ((typeof player !== 'undefined' && player.vy) || 0) > 0.55;
+}
+function _heroVecWalkArmSwing(t, side) {
+  const phase = ((t % 1) + 1) % 1;
+  const passRight = 0.50;
+  const passLeft = -0.54;
+  const rightForward = Math.PI * 28 / 180;
+  const leftBackward = Math.PI * 34 / 180;
+  const leftForward = Math.PI * 15 / 180;
+  const rightBackward = Math.PI * 36 / 180;
+  const ease = (v) => (1 - Math.cos(_heroClamp01(v) * Math.PI)) / 2;
+  const lerp = (a, b, v) => a + (b - a) * ease(v);
+  if (side === 'left') {
+    if (phase < 0.25) return lerp(passLeft, leftBackward, phase / 0.25);
+    if (phase < 0.50) return lerp(leftBackward, passLeft, (phase - 0.25) / 0.25);
+    if (phase < 0.75) return lerp(passLeft, -leftForward, (phase - 0.50) / 0.25);
+    return lerp(-leftForward, passLeft, (phase - 0.75) / 0.25);
+  }
+  if (phase < 0.25) return lerp(passRight, -rightForward, phase / 0.25);
+  if (phase < 0.50) return lerp(-rightForward, passRight, (phase - 0.25) / 0.25);
+  if (phase < 0.75) return lerp(passRight, rightBackward, (phase - 0.50) / 0.25);
+  return lerp(rightBackward, passRight, (phase - 0.75) / 0.25);
+}
+function _heroVecWalkWeaponHand(t) {
+  const p = ((t % 1) + 1) % 1;
+  return Math.sin((p - 0.25) * Math.PI * 4) * 0.018;
+}
+const HERO_VEC_ROGUE_DASH_KEYS = [
+  // v0.25.402 - Body leans rightward through launch/smear. `head`
+  // counter-rotates the spine so the visible head keeps only a small
+  // right-side bob while its bone shifts horizontally to the right.
+  // v0.25.404 - Reduced that rightward head shift so the head stays
+  // closer to the torso line during the dash.
+  // Anticipation: compressed knees, weight back, arms/weapon loaded behind.
+  { p:0.00, spine: 0.28, head:-0.22, armL: 1.22, armR: 0.96, handL:-0.18, legL:-0.88, legR: 0.88, x:-1.4, y: 2.2, headX: 0.1, headY: 0.1, legLX:-0.8, legLY: 1.0, legRX: 0.4, legRY: 1.3, sx:0.92, sy:1.08, limbSy:1.00 },
+  // Launch: back leg kicks out, leading foot points forward, body becomes a diagonal.
+  { p:0.24, spine: 0.78, head:-0.68, armL: 1.72, armR: 1.34, handL:-0.12, legL:-0.32, legR: 1.12, x: 3.4, y:-1.2, headX: 0.45, headY:-0.1, legLX: 1.6, legLY:-1.0, legRX:-1.6, legRY: 0.0, sx:1.08, sy:0.94, limbSy:1.08 },
+  // Smear: long horizontal body stretch with both arms swept back.
+  { p:0.58, spine: 0.92, head:-0.80, armL: 2.05, armR: 1.58, handL:-0.08, legL:-0.24, legR: 0.44, x: 6.8, y:-1.8, headX: 0.65, headY:-0.2, legLX: 2.6, legLY:-1.2, legRX:-2.6, legRY:-0.6, sx:1.42, sy:0.78, limbSy:1.24 },
+  // Brake: front foot plants, torso snaps back from the stop.
+  { p:0.78, spine: 0.42, head:-0.35, armL: 1.45, armR: 0.98, handL:-0.10, legL:-1.02, legR: 0.22, x: 3.4, y: 0.8, headX: 0.35, headY: 0.1, legLX: 1.2, legLY: 0.4, legRX:-0.6, legRY: 0.8, sx:1.02, sy:0.98, limbSy:1.02 },
+  { p:1.00, spine: 0.04, head:-0.04, armL: 0.38, armR: 0.28, handL: 0.00, legL:-0.26, legR: 0.22, x: 0.5, y: 0.4, headX: 0.0, headY: 0.0, legLX: 0.0, legLY: 0.0, legRX: 0.0, legRY: 0.0, sx:1.00, sy:1.00, limbSy:1.00 },
+];
+function _heroVecRogueDashPose(t) {
+  const p = _heroClamp01(t);
+  const keys = HERO_VEC_ROGUE_DASH_KEYS;
+  for (let i = 0; i < keys.length - 1; i++) {
+    const a = keys[i];
+    const b = keys[i + 1];
+    if (p >= a.p && p <= b.p) {
+      const u = _heroEaseInOutSine((p - a.p) / (b.p - a.p || 1));
+      const out = {};
+      for (const k of Object.keys(a)) {
+        if (k === 'p') continue;
+        out[k] = a[k] + (b[k] - a[k]) * u;
+      }
+      return out;
+    }
+  }
+  return keys[keys.length - 1];
+}
+function _heroVecWalkPhase(t) {
+  return ((t % 1) + 1) % 1;
+}
+function _heroVecWalkPoseLerp(a, b, v) {
+  const eased = (1 - Math.cos(_heroClamp01(v) * Math.PI)) / 2;
+  return a + (b - a) * eased;
+}
+const HERO_VEC_WALK_GAIT_KEYS = [
+  // right contact: right heel forward, left toe back, widest stance
+  { p: 0.000, legR: -0.50, legL:  0.52, bodyY:  0.0, legRSy: 1.06, legLSy: 1.02, legRY:  0.0, legLY:  0.0 },
+  // down: weight absorbs onto the right/front leg
+  { p: 0.125, legR: -0.24, legL:  0.32, bodyY:  1.7, legRSy: 0.90, legLSy: 0.94, legRY:  0.2, legLY: -0.7 },
+  // passing: left leg swings through under the body
+  { p: 0.250, legR:  0.02, legL: -0.12, bodyY:  0.5, legRSy: 1.04, legLSy: 0.84, legRY:  0.0, legLY: -1.8 },
+  // up: right/support leg pushes tall, left leg reaches forward
+  { p: 0.375, legR:  0.32, legL: -0.46, bodyY: -1.5, legRSy: 1.08, legLSy: 0.92, legRY: -0.1, legLY: -1.3 },
+  // left contact: opposite heel strike
+  { p: 0.500, legR:  0.52, legL: -0.50, bodyY:  0.0, legRSy: 1.02, legLSy: 1.06, legRY:  0.0, legLY:  0.0 },
+  // down: weight absorbs onto the left/front leg
+  { p: 0.625, legR:  0.32, legL: -0.24, bodyY:  1.7, legRSy: 0.94, legLSy: 0.90, legRY: -0.7, legLY:  0.2 },
+  // passing: right leg swings through under the body
+  { p: 0.750, legR: -0.12, legL:  0.02, bodyY:  0.5, legRSy: 0.84, legLSy: 1.04, legRY: -1.8, legLY:  0.0 },
+  // up: left/support leg pushes tall, right leg reaches forward
+  { p: 0.875, legR: -0.46, legL:  0.32, bodyY: -1.5, legRSy: 0.92, legLSy: 1.08, legRY: -1.3, legLY: -0.1 },
+  { p: 1.000, legR: -0.50, legL:  0.52, bodyY:  0.0, legRSy: 1.06, legLSy: 1.02, legRY:  0.0, legLY:  0.0 },
+];
+function _heroVecWalkGait(t) {
+  const p = _heroVecWalkPhase(t);
+  const keys = HERO_VEC_WALK_GAIT_KEYS;
+  for (let i = 0; i < keys.length - 1; i++) {
+    const a = keys[i];
+    const b = keys[i + 1];
+    if (p >= a.p && p <= b.p) {
+      const u = (p - a.p) / (b.p - a.p || 1);
+      return {
+        legR: _heroVecWalkPoseLerp(a.legR, b.legR, u),
+        legL: _heroVecWalkPoseLerp(a.legL, b.legL, u),
+        bodyY: _heroVecWalkPoseLerp(a.bodyY, b.bodyY, u),
+        legRSy: _heroVecWalkPoseLerp(a.legRSy, b.legRSy, u),
+        legLSy: _heroVecWalkPoseLerp(a.legLSy, b.legLSy, u),
+        legRY: _heroVecWalkPoseLerp(a.legRY, b.legRY, u),
+        legLY: _heroVecWalkPoseLerp(a.legLY, b.legLY, u),
+      };
+    }
+  }
+  return keys[0];
+}
+function _heroVecWalkLegAngle(t, side) {
+  const gait = _heroVecWalkGait(t);
+  return side === 'left' ? gait.legL : gait.legR;
+}
+function _heroVecWalkLegDeform(t, side) {
+  const gait = _heroVecWalkGait(t);
+  return { sx: 1, sy: side === 'left' ? gait.legLSy : gait.legRSy };
+}
+function _heroVecWalkLegBob(t, side) {
+  const gait = _heroVecWalkGait(t);
+  return { x: 0, y: side === 'left' ? gait.legLY : gait.legRY };
+}
+function _heroVecWalkBodyBob(t) {
+  return { x: 0, y: _heroVecWalkGait(t).bodyY };
+}
+function _heroVecWalkHeadBob(t) {
+  const p = _heroVecWalkPhase(t);
+  return { x: Math.sin(p * Math.PI * 2) * 0.16, y: 0 };
+}
+function _heroVecWalkHeadTilt(t) {
+  const p = _heroVecWalkPhase(t);
+  return Math.sin(p * Math.PI * 2 + 0.35) * 0.014;
+}
+function _heroVecWalkLegTime() {
+  const now = (typeof game !== 'undefined' && game && game.time) || 0;
+  return ((now * 0.056) % 1);
+}
+function _heroVecMovingAttackLegsActive() {
+  if (typeof player === 'undefined') return false;
+  if (!player.onGround) return false;
+  if (Math.abs(player.vx || 0) > 0.35) return true;
+  const keys = (typeof game !== 'undefined' && game && game.keys) || {};
+  return !!(keys.arrowleft || keys.arrowright || keys.a || keys.d);
+}
+function _heroVecAttackMovingLegAngle(t, side, plantedFn) {
+  if (_heroVecMovingAttackLegsActive()) return _heroVecWalkLegAngle(_heroVecWalkLegTime(), side);
+  return plantedFn ? plantedFn(t, side) : 0;
+}
+function _heroVecAttackMovingLegDeform(t, side, plantedFn) {
+  if (_heroVecMovingAttackLegsActive()) return _heroVecWalkLegDeform(_heroVecWalkLegTime(), side);
+  return plantedFn ? plantedFn(t, side) : ({ sx: 1, sy: 1 });
+}
+function _heroVecAttackSpineBob(t) {
+  return { x: _heroVecAttackBodyX(t), y: -Math.sin(t * Math.PI) * 1.2 };
+}
+function _heroVecArcherAttackSpineBob(t) {
+  return { x: _heroVecAttackStrike(t) * 0.6, y: 0 };
+}
+function _heroVecMageAttackSpineBob(t) {
+  return _heroVecMageBigSwingActive()
+    ? ({ x: -_heroVecAttackWindup(t) * 1.8 + _heroVecAttackStrike(t) * 4.2 - _heroVecAttackRecover(t) * 2.2, y: -Math.sin(t * Math.PI) * 1.6 })
+    : ({ x: -_heroVecAttackStrike(t) * 0.4, y: -Math.sin(t * Math.PI) * 0.8 });
+}
+function _heroVecRogueAttackSpineBob(t) {
+  const big = _heroVecRogueBigStabActive() ? 1.5 : 1;
+  return { x: _heroVecRogueBodyX(t), y: -Math.sin(t * Math.PI) * (1.0 * big) };
+}
+function _heroVecAttackMovingLegBob(t, side, plantedFn, bodyFn) {
+  if (!_heroVecMovingAttackLegsActive()) return plantedFn ? plantedFn(t, side) : ({ x: 0, y: 0 });
+  const walk = _heroVecWalkLegBob(_heroVecWalkLegTime(), side);
+  const body = bodyFn ? bodyFn(t) : ({ x: 0, y: 0 });
+  return { x: body.x || 0, y: (body.y || 0) + (walk.y || 0) };
 }
 const HERO_VEC_ANIMS = {
   idle: {
     spine: t => Math.sin(t * Math.PI * 2) * 0.012,
     head:  t => Math.sin(t * Math.PI * 2 + 0.5) * 0.02,
-    armL:  () => 0, armR: () => 0, legL: () => 0, legR: () => 0,
+    armL:  t => Math.sin(t * Math.PI * 2 + 0.25) * 0.08,
+    armR:  t => Math.sin(t * Math.PI * 2 + 1.10) * 0.12,
+    legL: () => 0,
+    legR: () => 0,
   },
   walk: {
-    spine: t => Math.sin(t * Math.PI * 2) * 0.026,
-    head:  t => Math.sin(t * Math.PI * 4 + 0.35) * 0.024,
-    armL:  t => Math.sin(t * Math.PI * 2) * 0.38,
-    armR:  t => Math.sin(t * Math.PI * 2 + Math.PI) * 0.38,
-    legL:  t => Math.sin(t * Math.PI * 2 + Math.PI) * 0.46,
-    legR:  t => Math.sin(t * Math.PI * 2) * 0.46,
+    spine: t => Math.sin(t * Math.PI * 2) * 0.014,
+    head:  t => _heroVecWalkHeadTilt(t),
+    armL:  t => _heroVecWalkArmSwing(t, 'left'),
+    armR:  t => _heroVecWalkArmSwing(t, 'right'),
+    handL: t => _heroVecWalkWeaponHand(t),
+    legL:  t => _heroVecWalkLegAngle(t, 'left'),
+    legR:  t => _heroVecWalkLegAngle(t, 'right'),
   },
   jump: {
-    spine: () => _heroVecJumpRise() ? -0.12 : 0.08,
-    head:  () => _heroVecJumpRise() ? -0.12 : 0.07,
-    armL:  () => _heroVecJumpRise() ? -0.95 : -0.32,
-    armR:  () => _heroVecJumpRise() ? 0.95 : 0.34,
-    legL:  () => _heroVecJumpRise() ? 0.72 : 0.32,
-    legR:  () => _heroVecJumpRise() ? -0.32 : -0.72,
+    spine: () => _heroVecJumpRise() ? -0.12 : (_heroVecJumpFall() ? 0.16 : 0.02),
+    head:  () => _heroVecJumpRise() ? -0.12 : (_heroVecJumpFall() ? 0.10 : 0.02),
+    armL:  () => _heroVecJumpRise() ? -0.95 : (_heroVecJumpFall() ? 0.36 : -0.62),
+    armR:  () => _heroVecJumpRise() ? 0.95 : (_heroVecJumpFall() ? 0.52 : 0.62),
+    legL:  () => _heroVecJumpRise() ? 0.72 : (_heroVecJumpFall() ? 0.44 : 0.22),
+    legR:  () => _heroVecJumpRise() ? -0.38 : (_heroVecJumpFall() ? -0.60 : -0.48),
+  },
+  // v0.25.398 - Rogue quick dash: anticipation -> launch -> smear -> brake.
+  // Weapon is still drawn with deform:false so its dimensions stay fixed.
+  dash_rogue_ninja: {
+    spine: t => _heroVecRogueDashPose(t).spine,
+    head:  t => _heroVecRogueDashPose(t).head,
+    armL:  t => _heroVecRogueDashPose(t).armL,
+    armR:  t => _heroVecRogueDashPose(t).armR,
+    handL: t => _heroVecRogueDashPose(t).handL,
+    legL:  t => _heroVecRogueDashPose(t).legL,
+    legR:  t => _heroVecRogueDashPose(t).legR,
   },
   attack: {
     // v0.25.145 - full-body committed swing: windup, strike, follow-through.
     spine: t => -0.16 + _heroVecAttackStrike(t) * 0.50 - _heroVecAttackRecover(t) * 0.22,
     head:  t => -0.10 + _heroVecAttackStrike(t) * 0.28 - _heroVecAttackRecover(t) * 0.12,
-    armR:  t => _heroVecAttackArm(t),
-    armL:  t => _heroVecAttackOffArm(t),
-    legL:  t => -0.22 + _heroVecAttackStrike(t) * 0.18,
-    legR:  t => 0.24 - _heroVecAttackStrike(t) * 0.18,
+    armL:  t => _heroVecAttackArm(t),
+    armR:  t => _heroVecAttackOffArm(t),
+    handL: t => _heroVecAttackWrist(t),
+    legL:  t => _heroVecAttackMovingLegAngle(t, 'left', _heroVecAttackLegAngle),
+    legR:  t => _heroVecAttackMovingLegAngle(t, 'right', _heroVecAttackLegAngle),
   },
   // v0.25.191 — Archer-specific attack: bow draw + release. Body lean
   // is much subtler than the warrior swing (no heavy windup or
@@ -29082,26 +29704,36 @@ const HERO_VEC_ANIMS = {
         : t < 0.72
           ? -0.09 + _heroEaseOutCubic((t - 0.58) / 0.14) * 0.14
           : 0.05 - _heroVecAttackRecover(t) * 0.05,
-    armR:  t => _heroVecArcherFrontArm(t),
-    armL:  t => _heroVecArcherBackArm(t),
+    armL:  t => _heroVecArcherFrontArm(t),
+    armR:  t => _heroVecArcherBackArm(t),
     // Front leg braces forward (-0.20), back leg planted (+0.18) for
     // the wide archery stance.
-    legL:  t => -0.20,
-    legR:  t =>  0.18,
+    legL:  t => _heroVecAttackMovingLegAngle(t, 'left', () => -0.20),
+    legR:  t => _heroVecAttackMovingLegAngle(t, 'right', () => 0.18),
   },
   // v0.25.194 — Warrior 2-handed wide slash. Bigger spine + head
   // commit than the generic attack since both arms drive the swing.
   // v0.25.206 — Cranked dramatic factor. Spine windup −0.42 (was
   // −0.22) + strike commit 1.10 (was 0.65) + bigger recovery whip
-  // 0.55 (was 0.30). Head matches at half scale.  Leg bend on
-  // strike 0.40 (was 0.22) for the squat-into-the-swing feel.
+  // 0.55 (was 0.30). Head matches at half scale. Legs use keyed
+  // footwork so the front foot plants while the rear leg pushes.
   attack_warrior: {
     spine: t => -0.42 + _heroVecAttackStrike(t) * 1.10 - _heroVecAttackRecover(t) * 0.55,
     head:  t => -0.28 + _heroVecAttackStrike(t) * 0.55 - _heroVecAttackRecover(t) * 0.26,
-    armR:  t => _heroVecWarriorFrontArm(t),
-    armL:  t => _heroVecWarriorBackArm(t),
-    legL:  t => -0.40 + _heroVecAttackStrike(t) * 0.40,
-    legR:  t => 0.42 - _heroVecAttackStrike(t) * 0.40,
+    armL:  t => _heroVecWarriorFrontArm(t),
+    armR:  t => _heroVecWarriorBackArm(t),
+    handL: t => _heroVecWarriorWrist(t),
+    legL:  t => _heroVecAttackMovingLegAngle(t, 'left', _heroVecWarriorLegAngle),
+    legR:  t => _heroVecAttackMovingLegAngle(t, 'right', _heroVecWarriorLegAngle),
+  },
+  attack_warrior_ground_slam: {
+    spine: t => _heroVecWarriorGroundSmashPose(t).spine,
+    head:  t => _heroVecWarriorGroundSmashPose(t).head,
+    armL:  t => _heroVecWarriorGroundSmashPose(t).armL,
+    armR:  t => _heroVecWarriorGroundSmashPose(t).armR,
+    handL: t => _heroVecWarriorGroundSmashPose(t).handL,
+    legL:  t => _heroVecWarriorGroundSmashPose(t).legL,
+    legR:  t => _heroVecWarriorGroundSmashPose(t).legR,
   },
   // v0.25.194 — Mage cast. Body leans back to look up at the staff
   // tip raised overhead. Minimal horizontal twist — vertical-axis
@@ -29109,22 +29741,23 @@ const HERO_VEC_ANIMS = {
   attack_mage: {
     spine: t => 0.04 - _heroVecAttackStrike(t) * 0.18 + _heroVecAttackRecover(t) * 0.14,
     head:  t => 0.06 - _heroVecAttackStrike(t) * 0.22 + _heroVecAttackRecover(t) * 0.16,
-    armR:  t => _heroVecMageFrontArm(t),
-    armL:  t => _heroVecMageBackArm(t),
-    legL:  t => -0.14,
-    legR:  t => 0.16,
+    armL:  t => _heroVecMageFrontArm(t),
+    armR:  t => _heroVecMageBackArm(t),
+    legL:  t => _heroVecAttackMovingLegAngle(t, 'left', () => -0.14),
+    legR:  t => _heroVecAttackMovingLegAngle(t, 'right', () => 0.16),
   },
   // v0.25.219 — Rogue forward dagger thrust. Quick committed jab
   // forward, slight body lean into the thrust, smooth retract.
   // v0.25.220 — DRAMATIC. Bigger spine windup back-twist + heavier
   // forward commit + lunging leg stance for the strong stabbing read.
   attack_rogue: {
-    spine: t => -0.20 + _heroVecAttackStrike(t) * 0.50 - _heroVecAttackRecover(t) * 0.28,
-    head:  t => -0.12 + _heroVecAttackStrike(t) * 0.28 - _heroVecAttackRecover(t) * 0.16,
-    armR:  t => _heroVecRogueFrontArm(t),
-    armL:  t => _heroVecRogueBackArm(t),
-    legL:  t => -0.32 + _heroVecAttackStrike(t) * 0.18,
-    legR:  t => 0.40 - _heroVecAttackStrike(t) * 0.18,
+    spine: t => _heroVecRogueSpine(t),
+    head:  t => -0.14 + _heroVecAttackStrike(t) * 0.36 - _heroVecAttackRecover(t) * 0.22,
+    armL:  t => _heroVecRogueFrontArm(t),
+    armR:  t => _heroVecRogueBackArm(t),
+    handL: t => _heroVecRogueWrist(t),
+    legL:  t => _heroVecAttackMovingLegAngle(t, 'left', _heroVecRogueLegAngle),
+    legR:  t => _heroVecAttackMovingLegAngle(t, 'right', _heroVecRogueLegAngle),
   },
   // v0.25.293 — Shadowlord ninja pose. Held steady for ~75 % of the
   // anim, then quick relax in the last 25 %. Front arm extended
@@ -29238,7 +29871,14 @@ const HERO_VEC_ANIMS = {
 };
 const HERO_VEC_DEFORM = {
   idle: { spine: t => ({ sx: 1 - Math.sin(t * Math.PI * 2) * 0.012, sy: 1 + Math.sin(t * Math.PI * 2) * 0.012 }) },
-  walk: { spine: t => ({ sx: 1 + Math.sin(t * Math.PI * 2) * 0.008, sy: 1 + Math.abs(Math.sin(t * Math.PI * 2)) * 0.028 }) },
+  walk: {
+    spine: t => {
+      const bodyY = _heroVecWalkGait(t).bodyY;
+      return { sx: 1, sy: bodyY > 1 ? 0.985 : bodyY < -1 ? 1.012 : 1 };
+    },
+    legL: t => _heroVecWalkLegDeform(t, 'left'),
+    legR: t => _heroVecWalkLegDeform(t, 'right'),
+  },
   // v0.25.197 — Head stays circular during jump. The spine still
   // squashes/stretches for the body's "weight transfer" cue, but the
   // head bone counter-deforms (1/sx, 1/sy) so its inherited transform
@@ -29246,20 +29886,56 @@ const HERO_VEC_DEFORM = {
   // squashes on the apex/fall, but the head sprite keeps its proper
   // round chibi proportions throughout.
   jump: {
-    spine: () => _heroVecJumpRise() ? ({ sx: 0.92, sy: 1.12 }) : ({ sx: 1.08, sy: 0.92 }),
-    head:  () => _heroVecJumpRise() ? ({ sx: 1 / 0.92, sy: 1 / 1.12 }) : ({ sx: 1 / 1.08, sy: 1 / 0.92 }),
+    spine: () => _heroVecJumpRise()
+      ? ({ sx: 0.96, sy: 1.02 })
+      : (_heroVecJumpFall() ? ({ sx: 1.03, sy: 0.97 }) : ({ sx: 1, sy: 1 })),
+    head:  () => _heroVecJumpRise()
+      ? ({ sx: 1 / 0.96, sy: 1 / 1.02 })
+      : (_heroVecJumpFall() ? ({ sx: 1 / 1.03, sy: 1 / 0.97 }) : ({ sx: 1, sy: 1 })),
+  },
+  dash_rogue_ninja: {
+    spine: t => {
+      const p = _heroVecRogueDashPose(t);
+      return { sx: p.sx, sy: p.sy };
+    },
+    armL:  t => ({ sx: 1, sy: _heroVecRogueDashPose(t).limbSy }),
+    armR:  t => ({ sx: 1, sy: _heroVecRogueDashPose(t).limbSy }),
+    legL:  t => ({ sx: 1, sy: _heroVecRogueDashPose(t).limbSy }),
+    legR:  t => ({ sx: 1, sy: _heroVecRogueDashPose(t).limbSy }),
+    handL: () => ({ sx: 1, sy: 1 }),
+  },
+  attack_warrior_ground_slam: {
+    spine: t => {
+      const p = _heroVecWarriorGroundSmashPose(t);
+      return { sx: p.sx, sy: p.sy };
+    },
+    armL:  t => ({ sx: 1, sy: _heroVecWarriorGroundSmashPose(t).limbSy }),
+    armR:  t => ({ sx: 1, sy: _heroVecWarriorGroundSmashPose(t).limbSy }),
+    legL:  t => {
+      const p = _heroVecWarriorGroundSmashPose(t);
+      return { sx: 1, sy: p.legLSy };
+    },
+    legR:  t => {
+      const p = _heroVecWarriorGroundSmashPose(t);
+      return { sx: 1, sy: p.legRSy };
+    },
+    handL: () => ({ sx: 1, sy: 1 }),
   },
   attack: {
-    armR:  t => ({ sx: 1 + _heroVecAttackStrike(t) * 0.04, sy: 1 + Math.sin(t * Math.PI) * 0.36 }),
-    armL:  t => ({ sx: 1, sy: 1 + _heroVecAttackStrike(t) * 0.10 }),
+    armR:  () => ({ sx: 1, sy: 1 }),
+    armL:  () => ({ sx: 1, sy: 1 }),
+    legL:  t => _heroVecAttackMovingLegDeform(t, 'left', _heroVecAttackLegDeform),
+    legR:  t => _heroVecAttackMovingLegDeform(t, 'right', _heroVecAttackLegDeform),
     spine: t => ({ sx: 1.02 + _heroVecAttackStrike(t) * 0.08, sy: 0.98 }),
-    handR: t => { const s = 1 + _heroVecAttackStrike(t) * 0.18 + Math.sin(t * Math.PI) * 0.14; return { sx: s, sy: s }; },
+    handL: () => ({ sx: 1, sy: 1 }),
   },
-  // v0.25.191 — Archer attack deform: minimal squash/stretch. Front arm
-  // (armR) holds steady; back arm (armL) has tension during the draw.
+  // v0.25.191 — Archer attack deform: minimal squash/stretch. Weapon arm
+  // holds steady; string arm has tension during the draw.
   attack_archer: {
-    armR:  t => ({ sx: 1, sy: 1 }),
-    armL:  t => ({ sx: 1, sy: 1 + _heroVecAttackStrike(t) * 0.06 }),
+    armL:  t => ({ sx: 1, sy: 1 }),
+    armR:  t => ({ sx: 1, sy: 1 + _heroVecAttackStrike(t) * 0.06 }),
+    legL:  t => _heroVecAttackMovingLegDeform(t, 'left'),
+    legR:  t => _heroVecAttackMovingLegDeform(t, 'right'),
     spine: t => ({ sx: 1, sy: 1 }),
   },
   // v0.25.194 — Warrior 2-handed slash deform. Both arms stretch on
@@ -29268,29 +29944,35 @@ const HERO_VEC_DEFORM = {
   // 0.18 (was 0.10), spine compress 0.92 (was 0.96), hand grow on
   // impact 0.40 (was 0.22).
   attack_warrior: {
-    armR:  t => ({ sx: 1 + _heroVecAttackStrike(t) * 0.08, sy: 1 + Math.sin(t * Math.PI) * 0.65 }),
-    armL:  t => ({ sx: 1 + _heroVecAttackStrike(t) * 0.08, sy: 1 + Math.sin(t * Math.PI) * 0.65 }),
+    armR:  () => ({ sx: 1, sy: 1 }),
+    armL:  () => ({ sx: 1, sy: 1 }),
+    legL:  t => _heroVecAttackMovingLegDeform(t, 'left', _heroVecWarriorLegDeform),
+    legR:  t => _heroVecAttackMovingLegDeform(t, 'right', _heroVecWarriorLegDeform),
     spine: t => ({ sx: 1.06 + _heroVecAttackStrike(t) * 0.18, sy: 0.92 }),
-    handR: t => { const s = 1 + _heroVecAttackStrike(t) * 0.40 + Math.sin(t * Math.PI) * 0.26; return { sx: s, sy: s }; },
+    handL: () => ({ sx: 1, sy: 1 }),
   },
   // v0.25.194 — Mage cast deform. Subtle staff-arm stretch upward
   // during the channel, no twist on the body.
   attack_mage: {
-    armR:  t => ({ sx: 1, sy: 1 + Math.sin(t * Math.PI) * 0.10 }),
-    armL:  t => ({ sx: 1, sy: 1 }),
+    armL:  t => ({ sx: 1, sy: 1 + Math.sin(t * Math.PI) * 0.10 }),
+    armR:  t => ({ sx: 1, sy: 1 }),
+    legL:  t => _heroVecAttackMovingLegDeform(t, 'left'),
+    legR:  t => _heroVecAttackMovingLegDeform(t, 'right'),
     spine: t => ({ sx: 1, sy: 1 + Math.sin(t * Math.PI) * 0.04 }),
   },
   // v0.25.219 — Rogue thrust deform. Front arm stretches lengthwise
   // during the snap-forward phase to sell the lunge reach. Hand grows
   // slightly at full extension. Body stays relatively neutral.
-  // v0.25.220 — Cranked. Arm stretch 0.30 → 0.55 (more lunge reach),
-  // hand grow on impact 0.22 → 0.42, spine compress 0.99 → 0.94 with
-  // 1.02 → 1.06 horizontal stretch for the heavy hip-rotation read.
+  // v0.25.387 - Stab tuning keeps limb stretch modest so the fixed-size
+  // dagger stays visually connected while the pose and torso lunge carry
+  // the reach.
   attack_rogue: {
-    armR:  t => ({ sx: 1, sy: 1 + _heroVecAttackStrike(t) * 0.55 }),
-    armL:  t => ({ sx: 1, sy: 1 + _heroVecAttackStrike(t) * 0.10 }),
+    armL:  t => ({ sx: 1, sy: 1 + _heroVecAttackStrike(t) * 0.16 }),
+    armR:  t => ({ sx: 1, sy: 1 + _heroVecAttackStrike(t) * 0.06 }),
+    legL:  t => _heroVecAttackMovingLegDeform(t, 'left', _heroVecRogueLegDeform),
+    legR:  t => _heroVecAttackMovingLegDeform(t, 'right', _heroVecRogueLegDeform),
     spine: t => ({ sx: 1.06 + _heroVecAttackStrike(t) * 0.04, sy: 0.94 }),
-    handR: t => { const s = 1 + _heroVecAttackStrike(t) * 0.42 + Math.sin(t * Math.PI) * 0.10; return { sx: s, sy: s }; },
+    handL: t => { const s = 1 + _heroVecAttackStrike(t) * 0.42 + Math.sin(t * Math.PI) * 0.10; return { sx: s, sy: s }; },
   },
   // v0.25.293 — Ninja pose deforms. Body holds neutral scale; the
   // pose's volume comes from bone rotations, not stretching. Tiny
@@ -29313,7 +29995,7 @@ const HERO_VEC_DEFORM = {
     armR:  t => ({ sx: 1, sy: t < 0.40 ? 1 : 1 + _heroEaseOutCubic((t - 0.40) / 0.60) * 0.40 }),
     armL:  t => ({ sx: 1, sy: t < 0.40 ? 1 : 1 + _heroEaseOutCubic((t - 0.40) / 0.60) * 0.40 }),
     spine: t => ({ sx: 1, sy: t < 0.40 ? 1 : 1 - _heroEaseOutCubic((t - 0.40) / 0.60) * 0.10 }),
-    handR: t => { const s = t < 0.40 ? 1 : 1 + _heroEaseOutCubic((t - 0.40) / 0.60) * 0.30; return { sx: s, sy: s }; },
+    handL: t => { const s = t < 0.40 ? 1 : 1 + _heroEaseOutCubic((t - 0.40) / 0.60) * 0.30; return { sx: s, sy: s }; },
   },
   // v0.25.294 — Mage levitate deform. Spine stretches slightly tall
   // through the rise, then holds. Both arms stretch lengthwise on
@@ -29330,10 +30012,10 @@ const HERO_VEC_DEFORM = {
     spine: t => t < 0.55
       ? ({ sx: 1, sy: 0.97 })
       : ({ sx: 1, sy: 0.97 + _heroEaseOutCubic((t - 0.55) / 0.45) * 0.10 }),
-    armR:  t => t < 0.55
+    armL:  t => t < 0.55
       ? ({ sx: 1, sy: 1 })
       : ({ sx: 1, sy: 1 + _heroEaseOutCubic((t - 0.55) / 0.45) * 0.14 }),
-    armL:  () => ({ sx: 1, sy: 1 }),
+    armR:  () => ({ sx: 1, sy: 1 }),
   },
 };
 // v0.25.133 — per-bone position offsets layered on top of rotation +
@@ -29342,17 +30024,67 @@ const HERO_VEC_DEFORM = {
 // giving the character a visible "weight transfer" feel.
 const HERO_VEC_BOB = {
   idle:   { head: t => ({ x: 0, y: Math.sin(t * Math.PI * 2) * 0.6 }) },
-  walk:   { head: t => ({ x: Math.sin(t * Math.PI * 2) * 0.25, y: -Math.abs(Math.sin(t * Math.PI * 2)) * 2 + 1.0 }) },
-  jump:   { head: () => ({ x: 0, y: _heroVecJumpRise() ? -3.2 : 1.0 }) },
+  walk: {
+    spine: t => _heroVecWalkBodyBob(t),
+    head:  t => _heroVecWalkHeadBob(t),
+    legL:  t => _heroVecWalkLegBob(t, 'left'),
+    legR:  t => _heroVecWalkLegBob(t, 'right'),
+  },
+  jump: {
+    spine: () => ({ x: 0, y: _heroVecJumpRise() ? -2.0 : (_heroVecJumpFall() ? 1.2 : -0.2) }),
+    head:  () => ({ x: 0, y: 0 }),
+    legR:  () => ({ x: 0, y: -2 }),
+  },
+  dash_rogue_ninja: {
+    spine: t => {
+      const p = _heroVecRogueDashPose(t);
+      return { x: p.x, y: p.y };
+    },
+    head:  t => {
+      const p = _heroVecRogueDashPose(t);
+      return { x: p.headX, y: p.headY };
+    },
+    legL:  t => {
+      const p = _heroVecRogueDashPose(t);
+      return { x: p.legLX, y: p.legLY };
+    },
+    legR:  t => {
+      const p = _heroVecRogueDashPose(t);
+      return { x: p.legRX, y: p.legRY };
+    },
+  },
+  attack_warrior_ground_slam: {
+    spine: t => {
+      const p = _heroVecWarriorGroundSmashPose(t);
+      return { x: p.x, y: p.y };
+    },
+    head:  t => {
+      const p = _heroVecWarriorGroundSmashPose(t);
+      return { x: p.headX, y: p.headY };
+    },
+    legL:  t => {
+      const p = _heroVecWarriorGroundSmashPose(t);
+      return { x: p.x, y: p.y + p.legLY };
+    },
+    legR:  t => {
+      const p = _heroVecWarriorGroundSmashPose(t);
+      return { x: p.x, y: p.y + p.legRY };
+    },
+  },
   attack: {
-    spine: t => ({ x: _heroVecAttackStrike(t) * 2.8 - _heroVecAttackRecover(t) * 1.4, y: -Math.sin(t * Math.PI) * 1.2 }),
+    spine: t => _heroVecAttackSpineBob(t),
     head:  t => ({ x: _heroVecAttackStrike(t) * 1.2, y: -Math.sin(t * Math.PI) * 3.4 }),
+    legL:  t => _heroVecAttackMovingLegBob(t, 'left', _heroVecAttackLegBob, _heroVecAttackSpineBob),
+    legR:  t => _heroVecAttackMovingLegBob(t, 'right', _heroVecAttackLegBob, _heroVecAttackSpineBob),
   },
   // v0.25.191 — Archer body bob: barely-there steady aim. No big body
   // lurch since the bow keeps the upper body locked.
   attack_archer: {
-    spine: t => ({ x: _heroVecAttackStrike(t) * 0.6, y: 0 }),
+    spine: t => _heroVecArcherAttackSpineBob(t),
     head:  t => ({ x: _heroVecAttackStrike(t) * 0.4, y: -Math.sin(t * Math.PI) * 0.6 }),
+    legL:  t => _heroVecAttackMovingLegBob(t, 'left', null, _heroVecArcherAttackSpineBob),
+    legR:  t => _heroVecAttackMovingLegBob(t, 'right', null, _heroVecArcherAttackSpineBob),
+    handL: () => ({ x: HERO_VEC_ARCHER_WEAPON_HAND_INSET_X, y: 0 }),
   },
   // v0.25.194 — Warrior 2-handed slash bob: heavier forward lurch.
   // v0.25.206 — Way bigger lurch. Spine forward 5.5 (was 3.6),
@@ -29360,14 +30092,13 @@ const HERO_VEC_BOB = {
   // dip 6.5 (was 4.2). Adds a windup BACK lean before the strike
   // so the body really winds up like an axe-swing.
   attack_warrior: {
-    spine: t => ({
-      x: -_heroVecAttackWindup(t) * 2.4 + _heroVecAttackStrike(t) * 5.5 - _heroVecAttackRecover(t) * 3.0,
-      y: -Math.sin(t * Math.PI) * 3.0,
-    }),
+    spine: t => _heroVecWarriorBodyBob(t),
     head:  t => ({
       x: -_heroVecAttackWindup(t) * 1.4 + _heroVecAttackStrike(t) * 2.6,
       y: -Math.sin(t * Math.PI) * 6.5,
     }),
+    legL: t => _heroVecAttackMovingLegBob(t, 'left', _heroVecWarriorLegBob, _heroVecWarriorBodyBob),
+    legR: t => _heroVecAttackMovingLegBob(t, 'right', _heroVecWarriorLegBob, _heroVecWarriorBodyBob),
   },
   // v0.25.194 — Mage cast bob: head tilts back to look up at staff,
   // body leans back slightly. No horizontal lurch.
@@ -29375,12 +30106,12 @@ const HERO_VEC_BOB = {
   // body lurches FORWARD with the swing instead of leaning back.
   // Helper picked once per frame so spine + head agree.
   attack_mage: {
-    spine: t => _heroVecMageBigSwingActive()
-      ? ({ x: -_heroVecAttackWindup(t) * 1.8 + _heroVecAttackStrike(t) * 4.2 - _heroVecAttackRecover(t) * 2.2, y: -Math.sin(t * Math.PI) * 1.6 })
-      : ({ x: -_heroVecAttackStrike(t) * 0.4, y: -Math.sin(t * Math.PI) * 0.8 }),
+    spine: t => _heroVecMageAttackSpineBob(t),
     head:  t => _heroVecMageBigSwingActive()
       ? ({ x: -_heroVecAttackWindup(t) * 0.9 + _heroVecAttackStrike(t) * 2.0, y: -Math.sin(t * Math.PI) * 2.6 })
       : ({ x: -_heroVecAttackStrike(t) * 0.6, y: -Math.sin(t * Math.PI) * 1.4 }),
+    legL:  t => _heroVecAttackMovingLegBob(t, 'left', null, _heroVecMageAttackSpineBob),
+    legR:  t => _heroVecAttackMovingLegBob(t, 'right', null, _heroVecMageAttackSpineBob),
   },
   // v0.25.219 — Rogue thrust bob: sharp forward poke + quick recoil
   // pull. Less than warrior lurch since the dagger is small + quick.
@@ -29391,20 +30122,17 @@ const HERO_VEC_BOB = {
     // v0.25.296 — Big-stab amplifies the body lurch ~50 % so the full
     // hip-rotation reads. Default thrust values preserved when the
     // flag isn't live.
-    spine: t => {
-      const big = _heroVecRogueBigStabActive() ? 1.5 : 1;
-      return {
-        x: (-_heroVecAttackWindup(t) * 1.5 + _heroVecAttackStrike(t) * 5.0 - _heroVecAttackRecover(t) * 2.5) * big,
-        y: -Math.sin(t * Math.PI) * (1.0 * big),
-      };
-    },
+    spine: t => _heroVecRogueAttackSpineBob(t),
     head:  t => {
       const big = _heroVecRogueBigStabActive() ? 1.5 : 1;
+      const tuck = _heroVecRogueThrowSomersaultTuck(t);
       return {
         x: (-_heroVecAttackWindup(t) * 0.8 + _heroVecAttackStrike(t) * 2.2) * big,
-        y: -Math.sin(t * Math.PI) * (1.6 * big),
+        y: -Math.sin(t * Math.PI) * (1.6 * big) + tuck,
       };
     },
+    legL:  t => _heroVecAttackMovingLegBob(t, 'left', _heroVecRogueLegBob, _heroVecRogueAttackSpineBob),
+    legR:  t => _heroVecAttackMovingLegBob(t, 'right', _heroVecRogueLegBob, _heroVecRogueAttackSpineBob),
   },
   // v0.25.293 — Ninja pose bobs. Standing pose hovers with a small
   // breath wobble. Crouch pose drops the head + spine ~3-4 px to
@@ -29476,12 +30204,12 @@ function _heroVecAnimFor() {
   const inAir = Math.abs(player.vy) > 0.5 && !player.onGround;
   const walking = !inAir && Math.abs(player.vx) > 0.5;
   const now = (game && game.time) || 0;
+  const cls = (typeof player !== 'undefined' && player.cls) || 'default';
   if (_heroVecAttackActive(now)) {
     // v0.25.194 — Per-class attack animations. Warrior gets a wide
     // 2-handed slash, mage raises staff at the sky, archer holds the
     // bow steady while back arm draws + releases.
     // v0.25.219 — Rogue gets a forward dagger thrust.
-    const cls = (typeof player !== 'undefined' && player.cls) || 'default';
     // v0.25.290 — Warlock + Archmage F/V/G chant-raise pose overrides
     // the default mage cast for the duration of the flag.
     if (cls === 'mage' && (player._chantRaiseUntil | 0) > now) return 'attack_mage_chant';
@@ -29492,9 +30220,11 @@ function _heroVecAnimFor() {
     if (cls === 'mage' && (player._levitateUntil | 0) > now) return 'attack_mage_levitate';
     // v0.25.292 — Dragoon Sky Lance impale pose overrides the warrior
     // 2-handed slash for the duration of the flag.
+    if (cls === 'warrior' && (player._warriorGroundSmashUntil | 0) > now) return 'attack_warrior_ground_slam';
     if (cls === 'warrior' && (player._impalePoseUntil | 0) > now) return 'attack_warrior_impale';
     // v0.25.293 — Shadowlord ninja pose / Shinobi ninja crouch override
     // the rogue thrust for the duration of their respective flags.
+    if (cls === 'rogue' && (player._rogueDashPoseUntil | 0) > now) return 'dash_rogue_ninja';
     if (cls === 'rogue' && (player._ninjaPoseUntil   | 0) > now) return 'attack_rogue_ninja';
     if (cls === 'rogue' && (player._ninjaCrouchUntil | 0) > now) return 'attack_rogue_crouch';
     if (cls === 'archer')  return 'attack_archer';
@@ -29503,14 +30233,25 @@ function _heroVecAnimFor() {
     if (cls === 'rogue')   return 'attack_rogue';
     return 'attack';
   }
+  if (cls === 'rogue' && (player._rogueDashPoseUntil | 0) > now) return 'dash_rogue_ninja';
   if (inAir) return 'jump';
   if (walking) return 'walk';
   return 'idle';
 }
 function _heroVecTimeNorm(animName) {
   const t = (game && game.time) || 0;
-  if (animName === 'walk')   return ((t * 0.065) % 1);
+  // v0.25.380 - Slightly slower walk cycle so coordinated arm/leg poses
+  // read clearly without changing the player's actual movement speed.
+  if (animName === 'walk')   return ((t * 0.056) % 1);
   if (animName === 'idle')   return ((t * 0.02) % 1);
+  if (animName === 'dash_rogue_ninja') {
+    const start = Number.isFinite(player._rogueDashPoseAt) ? player._rogueDashPoseAt : t;
+    return Math.max(0, Math.min(1, (t - start) / 24));
+  }
+  if (animName === 'attack_warrior_ground_slam') {
+    const start = Number.isFinite(player._warriorGroundSmashAt) ? player._warriorGroundSmashAt : t;
+    return Math.max(0, Math.min(1, (t - start) / HERO_VEC_WARRIOR_GROUND_SMASH_FRAMES));
+  }
   // v0.25.290 — Mage chant-raise gets a 32-frame budget (~540 ms at
   // 60 Hz) so the chant phase + raise phase both have time to read.
   // The default 18-frame attack timer would zoom through both.
@@ -29560,6 +30301,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   // reads naturally. The right-hand side never references the local
   // `ctx` (it reads `_ctx` and `_MAIN_CTX`), so no TDZ throw.
   const ctx = _ctx || _MAIN_CTX;
+  _lxUseEntityImageQuality(ctx);
   opts = opts || {};
   const cls = opts.cls || (typeof player !== 'undefined' && player.cls) || 'default';
   const C = HERO_VEC_CLASS[cls] || HERO_VEC_CLASS.default;
@@ -29573,22 +30315,157 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   // saves keep working. Falls back to 'flow' on any unknown id.
   const hairId = _migrateHairId(lookCustom.hairId);
   const HAIR_GOO = HERO_VEC_HAIR_GOO[hairId] || HERO_VEC_HAIR_GOO.flow;
-  // Default class = "naked" mannequin: body + boots take skin colour.
-  const BODY_BASE = (cls === 'default' || !C.body) ? SKIN.base : C.body;
-  const BODY_SHD  = (cls === 'default' || !C.bodyShd) ? SKIN.mid  : C.bodyShd;
-  const BOOT_BASE = (cls === 'default' || !C.boot) ? SKIN.base : C.boot;
+  const TSHIRT_BASE = '#f8f8f2';
+  const TSHIRT_SHD = '#d8d8cf';
+  const TSHIRT_DEEP = '#babaae';
+  const LIMB_BASE = SKIN.base;
+  const LIMB_SHD = SKIN.mid;
+  const LIMB_DEEP = SKIN.deep;
+  const LEG_FOOT_Y = 14.0;
   const animName = opts.animName || _heroVecAnimFor();
   const t = (opts.animTime != null) ? opts.animTime : _heroVecTimeNorm(animName);
   const anim = HERO_VEC_ANIMS[animName] || {};
   const deform = HERO_VEC_DEFORM[animName] || {};
   const bob = HERO_VEC_BOB[animName] || {};
   const OUT = '#1a0818';
+  const onlyPaintLayer = opts.onlyPaintLayer || null;
+  const hideBasePaintLayer = opts.hideBasePaintLayer || null;
+  const _drawsLayer = (layerId) => !onlyPaintLayer || onlyPaintLayer === layerId;
+  const _baseReplacedByPaint = (layerId) => !onlyPaintLayer && (hideBasePaintLayer === layerId || _lxPaintLayerReplacesBase(layerId));
+  // v0.25.401 - Rogue dash smears the body only; keep head, hair, and
+  // head-pinned paint layers crisp so the dash does not squash the face.
+  const headDrawOpts = animName === 'dash_rogue_ninja' ? { deform: false } : null;
+  const stackWeaponFn = HERO_VEC_WEAPON[cls];
+  const weaponCarryRotation = (animName === 'idle' || animName === 'walk' || animName === 'jump' || animName === 'dash_rogue_ninja')
+    ? HERO_VEC_WEAPON_HORIZONTAL_HOLD
+    : 0;
+  const applyWeaponCarryRotation = () => {
+    if (weaponCarryRotation) ctx.rotate(weaponCarryRotation);
+  };
+  function drawWeaponLayerStack() {
+    // v0.25.397 - Drawn after torso/body clothing, before left arm/hand:
+    // weapon reads in front of the body while the grip hand still covers it.
+    const smashPose = animName === 'attack_warrior_ground_slam' ? _heroVecWarriorGroundSmashPose(t) : null;
+    const hideCleanGroundSmashWeapon = !!(smashPose && smashPose.smear > 0.35);
+    if (!onlyPaintLayer && smashPose && stackWeaponFn) {
+      if (smashPose.smear > 0.05) {
+        ctx.save();
+        applyChain('armL', { deform: false });
+        const a = smashPose.smear;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = 'rgba(255,245,210,' + (0.22 + a * 0.58) + ')';
+        ctx.lineWidth = 12 * a;
+        ctx.beginPath();
+        ctx.arc(2, 12, 48, -2.45, 1.72);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,190,80,' + (0.18 + a * 0.42) + ')';
+        ctx.lineWidth = 5 * a;
+        ctx.beginPath();
+        ctx.arc(2, 12, 39, -2.25, 1.84);
+        ctx.stroke();
+        ctx.restore();
+      }
+      if (smashPose.impact > 0.1) {
+        ctx.save();
+        applyChain('handL', { deform: false });
+        const a = smashPose.impact;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = 'rgba(255,235,180,' + (0.18 + a * 0.45) + ')';
+        ctx.lineWidth = 4 * a;
+        ctx.beginPath();
+        ctx.moveTo(-12, 0);
+        ctx.lineTo(12, 0);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(160,120,70,' + (0.16 + a * 0.34) + ')';
+        ctx.lineWidth = 2 * a;
+        ctx.beginPath();
+        ctx.moveTo(-20, 4);
+        ctx.lineTo(-6, 1);
+        ctx.moveTo(7, 1);
+        ctx.lineTo(22, 5);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+    if (!onlyPaintLayer && (animName === 'attack' || animName === 'attack_warrior' || animName === 'attack_rogue') && stackWeaponFn) {
+      ctx.save();
+      if (animName === 'attack_rogue') {
+        applyChain('handL', { deform: false });
+        const bigStab = _heroVecRogueBigStabActive();
+        const stabT = _heroClamp01((t - (bigStab ? 0.23 : 0.20)) / (bigStab ? 0.32 : 0.28));
+        const stabA = Math.max(0, Math.sin(stabT * Math.PI));
+        const big = bigStab ? 1.35 : 1;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = 'rgba(255,255,255,' + (0.18 + stabA * 0.68) + ')';
+        ctx.lineWidth = 5 * big;
+        ctx.beginPath();
+        ctx.moveTo(0, -11);
+        ctx.lineTo(0, -11 - 34 * big * stabA);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(210,170,255,' + (0.22 + stabA * 0.58) + ')';
+        ctx.lineWidth = 2 * big;
+        ctx.beginPath();
+        ctx.moveTo(0, -13);
+        ctx.lineTo(0, -13 - 42 * big * stabA);
+        ctx.stroke();
+      } else {
+        applyChain('armL', { deform: false }); // origin at shoulder; keep trail aligned to unscaled weapon
+        const isWar = animName === 'attack_warrior';
+        const swingT = _heroClamp01((t - (isWar ? 0.27 : 0.23)) / (isWar ? 0.28 : 0.27));
+        const arcSpan   = isWar ? 5.45 : 2.95;
+        const arcStart  = isWar ? -2.95 : -1.85;
+        const arcRadius = isWar ? 42    : 25;
+        const arcLead = arcStart + _heroEaseOutCubic(swingT) * arcSpan;
+        const arcTail = arcLead - (isWar ? 1.10 : 0.70) - Math.sin(swingT * Math.PI) * (isWar ? 1.20 : 0.78);
+        const trailA = Math.max(0, Math.sin(swingT * Math.PI));
+        ctx.strokeStyle = 'rgba(255,255,255,' + (0.18 + trailA * (isWar ? 0.72 : 0.56)) + ')';
+        ctx.lineWidth = isWar ? 11 : 7;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.arc(0, 12, arcRadius, arcTail, arcLead);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,240,180,' + (0.24 + trailA * (isWar ? 0.70 : 0.55)) + ')';
+        ctx.lineWidth = isWar ? 4 : 2;
+        ctx.beginPath();
+        ctx.arc(0, 12, arcRadius - 5, arcLead - (isWar ? 0.62 : 0.42), arcLead);
+        ctx.stroke();
+        if (isWar && trailA > 0.4) {
+          ctx.strokeStyle = 'rgba(255,200,80,' + ((trailA - 0.4) * 1.0) + ')';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, 12, arcRadius + 8, arcTail - 0.2, arcLead + 0.2);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+    if (!hideCleanGroundSmashWeapon && _drawsLayer('weapon') && !_baseReplacedByPaint('weapon') && stackWeaponFn) {
+      drawBone('handL', () => {
+        applyWeaponCarryRotation();
+        const archerBowRotation = (cls === 'archer' && animName === 'attack_archer')
+          ? _heroVecArcherBowLocalRotation(t)
+          : 0;
+        if (archerBowRotation) ctx.rotate(archerBowRotation);
+        stackWeaponFn(ctx, OUT);
+      }, { deform: false });
+    }
+    if (!hideCleanGroundSmashWeapon && _drawsLayer('weapon')) drawBone('handL', () => {
+      applyWeaponCarryRotation();
+      _drawEquipmentLayer('weapon', ctx, { onlyLayer: onlyPaintLayer, pinBone: 'handL' });
+    }, { deform: false });
+    if (!hideCleanGroundSmashWeapon && !onlyPaintLayer) drawBone('handL', () => {
+      applyWeaponCarryRotation();
+      _drawCustomPaintLayerPinned('weapon', 'handL', ctx);
+    }, { deform: false });
+  }
   // v0.25.137 — outlines bumped +1 px (was 1). Eye / mouth / weapon
   // strokes also +1 below for consistency.
   const HAIR_HI = (typeof _mixHex === 'function') ? _mixHex(C.hair, '#ffffff', 0.20) : C.hair;
   const HAIR_SHD = (typeof _mixHex === 'function') ? _mixHex(C.hair, '#000000', 0.38) : C.hair;
   const STROKE_W = 2;
-  function applyChain(bone) {
+  function applyChain(bone, opts) {
+    opts = opts || {};
+    const useDeform = opts.deform !== false;
     const chain = [];
     let cur = bone;
     while (cur) { chain.unshift(cur); cur = HERO_VEC_RIG[cur].parent; }
@@ -29600,11 +30477,18 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
       const rotFn = anim[b];
       if (rotFn) ctx.rotate(rotFn(t));
       const defFn = deform[b];
-      if (defFn) { const d = defFn(t); ctx.scale(d.sx, d.sy); }
+      if (useDeform && defFn) { const d = defFn(t); ctx.scale(d.sx, d.sy); }
     }
   }
-  function drawBone(bone, drawFn) {
-    ctx.save(); applyChain(bone); drawFn(); ctx.restore();
+  function drawBone(bone, drawFn, opts) {
+    ctx.save(); applyChain(bone, opts); drawFn(); ctx.restore();
+  }
+  function drawHeadAttached(drawFn, opts) {
+    ctx.save();
+    applyChain('head', opts);
+    ctx.translate(HERO_VEC_HEAD_ATTACHED_OFFSET.x, HERO_VEC_HEAD_ATTACHED_OFFSET.y);
+    drawFn();
+    ctx.restore();
   }
   function strokePath(path) {
     ctx.strokeStyle = OUT;
@@ -29729,73 +30613,91 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   // correctly at the smaller size.
   ctx.save();
   ctx.translate(sx + player.w / 2, sy + player.h);
-  // v0.25.162 — scaled down 0.9 → 0.62 because the new parts spec is
-  // ~43% taller (limb 18, torso 28, head 46 vs old 12/20/22). 0.62
-  // keeps the on-screen character footprint roughly equivalent to the
-  // old vector hero so the player.h hitbox still matches the visible
-  // silhouette and feet still touch the floor.
+  // v0.25.337 — draw at 1.0× so the vector hero, Q Wardrobe preview,
+  // and paint editor all use one unshrunk coordinate space. Earlier
+  // builds used 0.62× here, which made uploaded layer positions look
+  // correct in the painter but land elsewhere in-game.
   // v0.25.176 — entry-transform now honours opts.forcedFacing so the
   // bake-cache helper + Character Studio can render with a fixed
   // facing regardless of the live player's direction.
-  const _vecSize = 0.62;
+  const _vecSize = HERO_VEC_DRAW_SCALE;
   const _vecFacing = (opts.forcedFacing != null) ? opts.forcedFacing : (player.facing | 0);
   if (_vecFacing < 0) ctx.scale(-_vecSize, _vecSize);
   else                ctx.scale( _vecSize, _vecSize);
   ctx.lineJoin = 'round';
   ctx.lineCap  = 'round';
 
-  // Z-order: back leg → back arm → torso → head + hair → front leg →
-  // front arm. ?L = back, ?R = front. Back limbs darkened slightly.
-  // v0.25.134 — body parts sourced from BODY_BASE/SHD + SKIN palette.
+  // Z-order: legs and right arm tuck behind torso; weapon draws over
+  // torso/body clothing, then the left arm + hand cover the grip.
+  // v0.25.368 - limbs follow the selected head skin palette.
   // v0.25.157 — hair sourced from HAIR_GOO (the SVG-goo blob cluster
   // for the selected hairId, post-migration).
   // v0.25.305 — Equipment BACK pass — drawn before any bone, sits
   // behind the entire body. Currently just the cape slot. Inside the
   // chibi-scale + facing-flip, so it mirrors with the character.
-  _drawEquipmentLayer('back');
-  drawBone('legL', () => {
-    const base = (typeof _mixHex === 'function') ? _mixHex(BOOT_BASE, '#000000', 0.12) : BOOT_BASE;
-    _drawShaded(HERO_VEC_PARTS.limb, base, BODY_SHD, SKIN.deep, 3, 3);
-    ctx.fillStyle = OUT;
-    ctx.fillRect(-3, 8.2, 6, 1.5);
+  _drawEquipmentLayer('back', ctx, { onlyLayer: onlyPaintLayer });
+  if (!onlyPaintLayer) drawBone('spine', () => { _drawCustomPaintLayerPinned('cape', 'spine', ctx); });
+  if (_drawsLayer('legL') && !_baseReplacedByPaint('legL')) drawBone('legL', () => {
+    _drawShaded(HERO_VEC_PARTS.limb, LIMB_BASE, LIMB_SHD, LIMB_DEEP, 3, 3);
+    ctx.fillStyle = LIMB_DEEP;
+    ctx.fillRect(-3, 8.2, 6, 1.2);
+    ctx.fillStyle = LIMB_BASE;
+    ctx.beginPath(); ctx.ellipse(0, LEG_FOOT_Y, 3.5, 2.0, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   });
-  drawBone('armL', () => {
-    const base = (typeof _mixHex === 'function') ? _mixHex(BODY_BASE, '#000000', 0.12) : BODY_BASE;
-    _drawShaded(HERO_VEC_PARTS.limb, base, BODY_SHD, SKIN.deep, 3, 3);
+  if (!onlyPaintLayer) drawBone('legL', () => { _drawCustomPaintLayerPinned('legL', 'legL', ctx); });
+  // v0.25.379 - Right leg now tucks behind the torso in both vector and
+  // painted-layer output, so the body silhouette covers the upper thigh.
+  if (_drawsLayer('legR') && !_baseReplacedByPaint('legR')) drawBone('legR', () => {
+    _drawShaded(HERO_VEC_PARTS.limb, LIMB_BASE, LIMB_SHD, LIMB_DEEP, 3, 3);
+    ctx.fillStyle = LIMB_DEEP;
+    ctx.fillRect(-3, 8.2, 6, 1.2);
+    ctx.fillStyle = LIMB_BASE;
+    ctx.beginPath(); ctx.ellipse(0, LEG_FOOT_Y, 3.5, 2.0, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    _drawGloss(-2, -1, 1.8, 2.5, 0.55);
+  });
+  if (!onlyPaintLayer) drawBone('legR', () => { _drawCustomPaintLayerPinned('legR', 'legR', ctx); });
+  if (_drawsLayer('armR') && !_baseReplacedByPaint('armR')) drawBone('armR', () => {
+    _drawShaded(HERO_VEC_PARTS.limb, LIMB_BASE, LIMB_SHD, LIMB_DEEP, 3, 3);
+  });
+  if (!onlyPaintLayer) drawBone('armR', () => { _drawCustomPaintLayerPinned('armR', 'armR', ctx); });
+  // Right hand ellipse stays on handR; the weapon pivot now lives on handL.
+  if (_drawsLayer('armR') && !_baseReplacedByPaint('armR')) drawBone('handR', () => {
     ctx.fillStyle = SKIN.base;
-    ctx.beginPath(); ctx.ellipse(0, 9.2, 2.7, 2.1, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  });
-  drawBone('spine', () => {
-    // v0.25.162 — top-anchored torso path needs a -28 local shift so its
-    // bottom (path y=28) lands at the hip line (spine bone origin).
+    ctx.beginPath(); ctx.ellipse(0, 0, 2.7, 2.1, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    _drawGloss(-2, -1, 1.8, 2.5, 0.55);
+  }, { deform: false });
+  if (!onlyPaintLayer) drawBone('spine', () => {
+    // v0.25.376 - top-anchored torso path uses a -30 local shift so its
+    // rounded hem (path y=30) lands at the hip line (spine bone origin).
     ctx.save();
-    ctx.translate(0, -28);
-    _drawShaded(HERO_VEC_PARTS.torso, BODY_BASE, BODY_SHD, SKIN.deep, 4, 4);
+    ctx.translate(0, -30);
+    _drawShaded(HERO_VEC_PARTS.torso, TSHIRT_BASE, TSHIRT_SHD, TSHIRT_DEEP, 4, 4);
     ctx.restore();
-    // Chest accents — shifted +8 in y to compensate for the rig's
-    // spine-bone moving from y=-10 to y=-18 in v0.25.162. Visually
-    // these still land on the upper chest of the new torso.
-    ctx.strokeStyle = OUT;
-    ctx.lineWidth = 1.2;
-    ctx.fillStyle = C.accent || SKIN.light;
-    ctx.beginPath();
-    ctx.moveTo(-4.8, -0.5); ctx.lineTo(0, 3.2); ctx.lineTo(4.8, -0.5);
-    ctx.lineTo(2.8, -2.2); ctx.lineTo(0, 0.8); ctx.lineTo(-2.8, -2.2);
-    ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = OUT;
-    ctx.fillRect(-5.8, 11.8, 11.6, 1.5);
-    ctx.fillStyle = C.accent || SKIN.light;
-    ctx.fillRect(-1.7, 11.4, 3.4, 2.2);
-    _drawGloss(-4, 1, 3, 4, 0.55);
   });
   // v0.25.305 — Equipment MID pass — overlays the bone-rendered torso
   // and limbs, but sits UNDER the head silhouette so high-collar
   // shirts get cut off cleanly at the neckline. Slots: body_bottom,
-  // body_top, boots, gloves, weapon (back-hand). Authoring on the
+  // body_top, boots, gloves. Weapon draws immediately after this pass
+  // from the left-hand pivot. Authoring on the
   // 800×800 template means the body content automatically lands at
   // the right Y within the chibi figure.
-  _drawEquipmentLayer('mid');
-  drawBone('head', () => {
+  if (!onlyPaintLayer) drawHeadAttached(() => { _drawCustomPaintLayerPinned('skin', 'head', ctx); }, headDrawOpts);
+  _drawEquipmentLayer('mid', ctx, { onlyLayer: onlyPaintLayer });
+  if (!onlyPaintLayer) drawBone('spine', () => {
+    _drawCustomPaintLayerPinned('body_bottom', 'spine', ctx);
+    _drawCustomPaintLayerPinned('body_top', 'spine', ctx);
+  });
+  drawWeaponLayerStack();
+  if (_drawsLayer('armL') && !_baseReplacedByPaint('armL')) drawBone('armL', () => {
+    _drawShaded(HERO_VEC_PARTS.limb, LIMB_BASE, LIMB_SHD, LIMB_DEEP, 3, 3);
+  });
+  if (!onlyPaintLayer) drawBone('armL', () => { _drawCustomPaintLayerPinned('armL', 'armL', ctx); });
+  if (_drawsLayer('armL') && !_baseReplacedByPaint('armL')) drawBone('handL', () => {
+    ctx.fillStyle = SKIN.base;
+    ctx.beginPath(); ctx.ellipse(0, 0, 2.7, 2.1, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    _drawGloss(-2, -1, 1.8, 2.5, 0.55);
+  }, { deform: false });
+  drawHeadAttached(() => {
     // v0.25.155 — back-hair lock(s) ALWAYS draw FIRST, before any head
     // silhouette / ears / shading. Sits behind the head.
     // v0.25.162 — ears removed; the new symmetric chibi head doesn't
@@ -29808,7 +30710,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     // runs and provides the volume behind the head.
     const _hairSprite = LX_HAIR && LX_HAIR[hairId];
     const _useSpriteHair = _lxHairReady(_hairSprite);
-    if (!_useSpriteHair && HAIR_GOO.back) _drawHairGroup(HAIR_GOO.back);
+    if (_drawsLayer('hair') && !_baseReplacedByPaint('hair') && !_useSpriteHair && HAIR_GOO.back) _drawHairGroup(HAIR_GOO.back);
 
     // v0.25.182 — sprite head replaces the procedural silhouette +
     // 2-tone shading + bold outline. Sprite has all of those baked
@@ -29816,7 +30718,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     // when the sprite hasn't decoded yet — though the v0.25.173
     // preloader blocks the world reveal until it has.
     const _headSprite = LX_HEAD && LX_HEAD.flow;
-    if (_lxHeadReady(_headSprite)) {
+    if (_drawsLayer('skin') && !_baseReplacedByPaint('skin') && _lxHeadReady(_headSprite)) {
       // v0.25.188 — preserve sprite aspect ratio (do not squish).
       // New head base is 367×370 (~1:1.008 W:H). Compute width from
       // the sprite's native dimensions so any future head swap stays
@@ -29873,7 +30775,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     // (so the cream-skin head shows where the sprite has transparency)
     // and BEFORE the eyes/mouth (so face features still render on top
     // of any low-hanging hair strands the sprite designer intended).
-    if (_useSpriteHair) {
+    if (_drawsLayer('hair') && !_baseReplacedByPaint('hair') && _useSpriteHair) {
       // v0.25.190 — All hair sprites are now 800×800 head-aligned.
       // Content is positioned within the same canvas as the head /
       // eyes / mouth sprites so that the head bbox (245,215)..(612,585)
@@ -29886,7 +30788,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
       // authored, so the silhouette naturally overhangs the head.
       // Same rect used for eye + mouth layers below for canvas alignment.
       ctx.drawImage(_hairSprite, -58, -52, 108, 108);
-    } else if (HAIR_GOO.front) {
+    } else if (_drawsLayer('hair') && !_baseReplacedByPaint('hair') && HAIR_GOO.front) {
       // Vector front-hair (still used by 'spike' style): goo blob cluster
       // through SVG filter — outline pass + colour pass + cel-highlight.
       _drawHairGroup(HAIR_GOO.front);
@@ -29902,6 +30804,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     // aggressively toward the facing direction. Used by the procedural
     // mouth fallback below; the sprite mouth layer is head-aligned so
     // doesn't need this offset.
+    if (!onlyPaintLayer) {
     const FACE_DX = 7;
 
     // v0.25.197 — All vector eye renderer functions removed. The
@@ -29937,34 +30840,23 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     // each layer canvas aligns with the head silhouette on screen.
     if (_useSpriteEyes)  ctx.drawImage(_eyeSprite,   -58, -52, 108, 108);
     if (_useSpriteMouth) ctx.drawImage(_mouthSprite, -58, -52, 108, 108);
-  });
-  drawBone('legR', () => {
-    _drawShaded(HERO_VEC_PARTS.limb, BOOT_BASE, BODY_SHD, SKIN.deep, 3, 3);
-    ctx.fillStyle = OUT;
-    ctx.fillRect(-3, 8.2, 6, 1.5);
-    _drawGloss(-2, -1, 1.8, 2.5, 0.55);
-  });
-  drawBone('armR', () => {
-    _drawShaded(HERO_VEC_PARTS.limb, BODY_BASE, BODY_SHD, SKIN.deep, 3, 3);
-    ctx.fillStyle = SKIN.base;
-    ctx.beginPath(); ctx.ellipse(0, 9.2, 2.7, 2.1, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    _drawGloss(-2, -1, 1.8, 2.5, 0.55);
-  });
-  // v0.25.136 — per-class weapon overlay. Anchored at handR (child of
-  // armR) so the weapon inherits the arm's animation rotation + the
+    }
+  }, headDrawOpts);
+  if (!onlyPaintLayer) drawHeadAttached(() => { _drawCustomPaintLayerPinned('hair', 'head', ctx); }, headDrawOpts);
+  // v0.25.136 — per-class weapon overlay. Anchored at handL (child of
+  // armL) so the weapon inherits the arm's animation rotation + the
   // overall head/spine bob naturally.
   // v0.25.137 — during attack, draw a translucent slash arc behind the
   // weapon to sell the swing. Arc grows over the attack window so it
   // reads as a motion trail.
-  const weaponFn = HERO_VEC_WEAPON[cls];
   // v0.25.206 — slash arc trail now fires for both 'attack' AND
   // 'attack_warrior'. Warrior gets a much bigger / brighter arc to
   // match the more dramatic 2H swing.
-  if ((animName === 'attack' || animName === 'attack_warrior') && weaponFn) {
+  if (false) {
     ctx.save();
-    applyChain('armR');                   // origin at shoulder
+    applyChain('armL', { deform: false }); // origin at shoulder; keep trail aligned to unscaled weapon
     const isWar = animName === 'attack_warrior';
-    const swingT = _heroClamp01((t - (isWar ? 0.27 : 0.14)) / (isWar ? 0.28 : 0.48));
+    const swingT = _heroClamp01((t - (isWar ? 0.27 : 0.23)) / (isWar ? 0.28 : 0.27));
     const arcSpan   = isWar ? 5.45 : 2.95;
     const arcStart  = isWar ? -2.95 : -1.85;
     const arcRadius = isWar ? 42    : 25;
@@ -29994,17 +30886,24 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     }
     ctx.restore();
   }
-  if (weaponFn) {
-    drawBone('handR', () => {
+  if (false) {
+    drawBone('handL', () => {
+      const archerBowRotation = (cls === 'archer' && animName === 'attack_archer')
+        ? _heroVecArcherBowLocalRotation(t)
+        : 0;
+      if (archerBowRotation) ctx.rotate(archerBowRotation);
       weaponFn(ctx, OUT);
-    });
+    }, { deform: false });
   }
+  if (false && !onlyPaintLayer) drawBone('handL', () => { _drawCustomPaintLayerPinned('weapon', 'handL', ctx); }, { deform: false });
   // v0.25.305 — Equipment FRONT pass — drawn AFTER all bones + the
   // procedural class-weapon overlay, so helmet sits on top of the
   // head + front-hair + face, and (later) front-hand weapon sprites
   // can render over the procedural class weapon. Still inside the
   // chibi-scale block, so it mirrors + scales with the character.
-  _drawEquipmentLayer('front');
+  _drawEquipmentLayer('front', ctx, { onlyLayer: onlyPaintLayer });
+  if (!onlyPaintLayer) drawHeadAttached(() => { _drawCustomPaintLayerPinned('helmet', 'head', ctx); }, headDrawOpts);
+  if (!onlyPaintLayer) _drawCustomPaintLayer(ctx);
   ctx.restore();
 }
 
@@ -30028,19 +30927,19 @@ function _drawMsxHero(sx, sy, _ctx, opts) {
   // Player visual size — match the vector hero's 0.9× scale so swaps feel
   // visually equivalent. The vector hero centres feet at (sx+pw/2, sy+ph)
   // with a 0.9 scale, so use ph * 0.9 as the target sprite height.
-  const targetH = (typeof player !== 'undefined' ? player.h : 44) * 0.9;
+  const targetH = _lxWholeSize((typeof player !== 'undefined' ? player.h : 44) * 0.9);
   const fit = targetH / a.bh;
-  const drawW = a.bw * fit;
-  const drawH = a.bh * fit;
+  const drawW = _lxWholeSize(a.bw * fit);
+  const drawH = _lxWholeSize(a.bh * fit);
   // Centre horizontally on the player's bbox centre using the sprite's
   // centroid (mass centre, not bbox centre — matches the vector hero's
   // visual "weight" placement when limbs extend asymmetrically).
   const pw = (typeof player !== 'undefined' ? player.w : 28);
-  const cx = sx + pw / 2;
-  const cy = sy + (player ? player.h : 44);  // feet anchor on ground
+  const cx = _lxWholePx(sx + pw / 2);
+  const cy = _lxWholePx(sy + (player ? player.h : 44));  // feet anchor on ground
   const centroidOffsetX = (a.centroidX - (a.minX + a.bw / 2)) * fit;
-  const dstX = cx - drawW / 2 - centroidOffsetX;
-  const dstY = cy - drawH;   // feet sit on the ground line
+  const dstX = _lxWholePx(cx - drawW / 2 - centroidOffsetX);
+  const dstY = _lxWholePx(cy - drawH);   // feet sit on the ground line
   targetCtx.save();
   // Facing flip — mirror around the player's vertical centreline
   const facing = (opts.forcedFacing != null) ? opts.forcedFacing
@@ -30050,13 +30949,18 @@ function _drawMsxHero(sx, sy, _ctx, opts) {
     targetCtx.scale(-1, 1);
     targetCtx.translate(-cx, 0);
   }
-  targetCtx.imageSmoothingEnabled = true;
-  targetCtx.imageSmoothingQuality = 'high';
+  _lxUseEntityImageQuality(targetCtx);
   targetCtx.drawImage(
     entry.img,
     a.minX, a.minY, a.bw, a.bh,   // source bbox
     dstX,   dstY,   drawW, drawH  // dest rect
   );
+  for (const paintLayer of CHAR_PAINT_RENDER_ORDER) {
+    const layerImg = _lxCustomPaintImage(_lxGetCustomPaintSource(paintLayer));
+    if (layerImg) _lxDrawPaintImage(targetCtx, layerImg, dstX, dstY, drawW, drawH);
+  }
+  const paintImg = _lxCustomPaintImage(_lxGetCustomPaintSource());
+  if (paintImg) _lxDrawPaintImage(targetCtx, paintImg, dstX, dstY, drawW, drawH);
   targetCtx.restore();
   return true;
 }
@@ -30346,15 +31250,15 @@ function _drawPlayerCustomSprite() {
   // targetW from the sprite's actual aspect so proportions stay correct.
   const srcW = sprite.naturalWidth  || sprite.width  || 1;
   const srcH = sprite.naturalHeight || sprite.height || 1;
-  const targetH = player.h * 1.55;
-  const targetW = targetH * (srcW / srcH);
+  const targetH = _lxWholeSize(player.h * 1.55);
+  const targetW = _lxWholeSize(targetH * (srcW / srcH));
   ctx.save();
   ctx.translate(footX, footY);              // origin → player feet
   // Mirror when the in-game facing doesn't match the sprite's native facing.
   const spriteFacesRight = !!window.PLAYER_SPRITE_FACES_RIGHT;
   const playerFacingRight = (player.facing | 0) >= 0;
   if (spriteFacesRight !== playerFacingRight) ctx.scale(-1, 1);
-  ctx.imageSmoothingEnabled = true;
+  _lxUseEntityImageQuality(ctx);
   ctx.drawImage(sprite, -targetW / 2, -targetH * 0.92, targetW, targetH);
 
   // v0.25.125 — Archer bow overlay. The generic HERO sheets (idle / walk /
@@ -33492,6 +34396,16 @@ const NPC_SPRITE_FILES = {
 const NPC_SPRITE_HEIGHTS = {
   'Sage Mira': 115,
 };
+function _npcSpriteBaseHeight(npcName) {
+  return (npcName && NPC_SPRITE_HEIGHTS[npcName]) || 78;
+}
+function _npcSpriteTargetHeight(npcName) {
+  return _lxWholeSize(_npcSpriteBaseHeight(npcName) * NPC_WORLD_SCALE);
+}
+function _npcLabelHeadY(npc, hasSprite, feetY, fallbackHeadY) {
+  if (!hasSprite) return Math.min(fallbackHeadY, Math.round(feetY - 62 * NPC_WORLD_SCALE));
+  return Math.round(feetY + 2 - _npcSpriteTargetHeight(npc && npc.name) * 0.96 + 21);
+}
 (function _loadNpcSprites() {
   for (const name in NPC_SPRITE_FILES) {
     const img = new Image();
@@ -33505,20 +34419,19 @@ function _drawNpcSprite(sprite, cx, feetY, npcName) {
   // taller-than-wide ludo portraits don't get squashed.
   // v0.25.271 — per-NPC override via NPC_SPRITE_HEIGHTS. Falls back to
   // 78 px (the v0.25.86 default) for any NPC not in the override map.
-  const targetH = (npcName && NPC_SPRITE_HEIGHTS[npcName]) || 78;
+  const targetH = _npcSpriteTargetHeight(npcName);
   const srcW = sprite.naturalWidth  || sprite.width  || 1;
   const srcH = sprite.naturalHeight || sprite.height || 1;
-  const targetW = targetH * (srcW / srcH);
+  const targetW = _lxWholeSize(targetH * (srcW / srcH));
   // Subtle head-bobble + body-breathe so static sprite NPCs still feel alive
   const t = (game.time + cx) * 0.06;
-  const bob = Math.sin(t) * 1.5;
+  const bob = _lxWholePx(Math.sin(t) * 1.5);
   ctx.save();
   ctx.translate(cx, feetY + 2 + bob);
   // v0.25.271 — keep smoothing high-quality so larger renders (Sage
   // Mira at 115 px) stay crisp on the way down from the 640×864 source.
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(sprite, -targetW / 2, -targetH * 0.96, targetW, targetH);
+  _lxUseEntityImageQuality(ctx);
+  ctx.drawImage(sprite, _lxWholePx(-targetW / 2), _lxWholePx(-targetH * 0.96), targetW, targetH);
   ctx.restore();
 }
 
@@ -33581,10 +34494,10 @@ const ZODIAC_SPRITE_TYPES = ['aries','taurus','gemini','cancer','leo','virgo','l
 function _drawBossSprite(sprite, m, sx, sy, _isAttack) {
   const srcW = sprite.naturalWidth  || sprite.width  || 1;
   const srcH = sprite.naturalHeight || sprite.height || 1;
-  const targetH = m.h * 2.0;
-  const targetW = targetH * (srcW / srcH);
-  const footX = sx + m.w / 2;
-  const footY = sy + m.h;
+  const targetH = _lxWholeSize(m.h * 2.0);
+  const targetW = _lxWholeSize(targetH * (srcW / srcH));
+  const footX = _lxWholePx(sx + m.w / 2);
+  const footY = _lxWholePx(sy + m.h);
   // Look up bbox-bottom: bosses use BOSS_SPRITE_META[m.type] (or the
   // _ATTACK variant when an attack-pose sprite is being drawn), zodiac
   // use ZODIAC_SPRITE_META[m.zodiacSign].
@@ -33599,8 +34512,8 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack) {
   ctx.save();
   ctx.translate(footX, footY);
   if ((m.facing | 0) < 0) ctx.scale(-1, 1);  // mirror when facing left (matches monster convention)
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(sprite, -targetW / 2, dyOffset, targetW, targetH);
+  _lxUseEntityImageQuality(ctx);
+  ctx.drawImage(sprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);
   ctx.restore();
 }
 
@@ -33657,7 +34570,9 @@ function _heroExtractAndNormalize(sheet, meta, idleBh, idleFootY, idleHeadTopY, 
     const cell = document.createElement('canvas');
     cell.width = cellW;
     cell.height = cellH;
-    cell.getContext('2d').drawImage(
+    const cellCtx = cell.getContext('2d');
+    _lxUseEntityImageQuality(cellCtx);
+    cellCtx.drawImage(
       sheet, col * cellW, row * cellH, cellW, cellH, 0, 0, cellW, cellH
     );
     cells.push(cell);
@@ -33680,17 +34595,19 @@ function _heroExtractAndNormalize(sheet, meta, idleBh, idleFootY, idleHeadTopY, 
     const out = document.createElement('canvas');
     out.width = outW;
     out.height = outH;
+    const outCtx = out.getContext('2d');
+    _lxUseEntityImageQuality(outCtx);
     const a = anchors[i];
     if (!a) return out;
-    const drawW = a.bw * sheetFitScale;
-    const drawH = a.bh * sheetFitScale;
+    const drawW = _lxWholeSize(a.bw * sheetFitScale);
+    const drawH = _lxWholeSize(a.bh * sheetFitScale);
     // X: centroid maps to canvas-center (stable across asymmetric poses)
-    const dx = (outW / 2) - ((a.centroidX - a.minX) * sheetFitScale);
+    const dx = _lxWholePx((outW / 2) - ((a.centroidX - a.minX) * sheetFitScale));
     // Y: depends on anchor mode
     const dy = (anchorMode === 'head')
       ? idleHeadTopY                    // bbox-top → idleHeadTopY
       : (idleFootY - drawH);            // bbox-bottom → idleFootY
-    out.getContext('2d').drawImage(cell, a.minX, a.minY, a.bw, a.bh, dx, dy, drawW, drawH);
+    outCtx.drawImage(cell, a.minX, a.minY, a.bw, a.bh, dx, _lxWholePx(dy), drawW, drawH);
     return out;
   });
 }
@@ -33723,7 +34640,9 @@ function _heroExtractAndNormalize(sheet, meta, idleBh, idleFootY, idleHeadTopY, 
     const idleRaw = document.createElement('canvas');
     idleRaw.width = targetW;
     idleRaw.height = targetH;
-    idleRaw.getContext('2d').drawImage(idleImg, 0, 0);
+    const idleRawCtx = idleRaw.getContext('2d');
+    _lxUseEntityImageQuality(idleRawCtx);
+    idleRawCtx.drawImage(idleImg, 0, 0);
     const idleAnchor = _findChibiAnchor(idleRaw);
     const idleBbox = idleAnchor;
     const idleBh = idleAnchor.bh;
@@ -33737,10 +34656,12 @@ function _heroExtractAndNormalize(sheet, meta, idleBh, idleFootY, idleHeadTopY, 
     {
       const dx = (targetW / 2) - (idleAnchor.centroidX - idleAnchor.minX);
       const dy = idleFootY - idleAnchor.bh;
-      idleNorm.getContext('2d').drawImage(
+      const idleNormCtx = idleNorm.getContext('2d');
+      _lxUseEntityImageQuality(idleNormCtx);
+      idleNormCtx.drawImage(
         idleRaw,
         idleAnchor.minX, idleAnchor.minY, idleAnchor.bw, idleAnchor.bh,
-        dx, dy, idleAnchor.bw, idleAnchor.bh
+        _lxWholePx(dx), _lxWholePx(dy), idleAnchor.bw, idleAnchor.bh
       );
     }
     HERO.idle = idleNorm;
@@ -33803,14 +34724,14 @@ function _drawMonsterSprite(m, sx, sy) {
   const refImg = sprite || (anim && anim.image);
   const srcW = (refImg && refImg.naturalWidth)  || (refImg && refImg.width)  || 1;
   const srcH = (refImg && refImg.naturalHeight) || (refImg && refImg.height) || 1;
-  const targetH = m.h * 1.4;
-  const targetW = targetH * (srcW / srcH);
-  const footX = sx + m.w / 2;
-  const footY = sy + m.h;
+  const targetH = _lxWholeSize(m.h * 1.5);
+  const targetW = _lxWholeSize(targetH * (srcW / srcH));
+  const footX = _lxWholePx(sx + m.w / 2);
+  const footY = _lxWholePx(sy + m.h);
   ctx.save();
   ctx.translate(footX, footY);
   if ((m.facing | 0) < 0) ctx.scale(-1, 1);
-  ctx.imageSmoothingEnabled = true;
+  _lxUseEntityImageQuality(ctx);
   // Compute Y so the character's bbox-bottom lands on the foot line, with a
   // tiny ground bleed for ground mobs and a 18% lift for floating ones.
   const meta = MONSTER_SPRITE_META[m.type];
@@ -33827,19 +34748,19 @@ function _drawMonsterSprite(m, sx, sy) {
     const framesPerStep = Math.max(1, (60 / fps) | 0);
     const phase = ((m.x | 0) % anim.frames + anim.frames) % anim.frames;
     const frameIdx = ((((game.time / framesPerStep) | 0) + phase) % anim.frames + anim.frames) % anim.frames;
-    const cellW = anim.image.width  / anim.gridW;
-    const cellH = anim.image.height / anim.gridH;
+    const cellW = (anim.image.width  / anim.gridW) | 0;
+    const cellH = (anim.image.height / anim.gridH) | 0;
     const col = frameIdx % anim.gridW;
     const row = (frameIdx / anim.gridW) | 0;
     ctx.drawImage(
       anim.image,
       col * cellW, row * cellH, cellW, cellH,
-      -targetW / 2, dyOffset, targetW, targetH
+      _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH
     );
     ctx.restore();
     return;
   }
-  ctx.drawImage(sprite, -targetW / 2, dyOffset, targetW, targetH);
+  ctx.drawImage(sprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);
   ctx.restore();
 }
 
@@ -38939,14 +39860,10 @@ requestAnimationFrame(loop);
   const status = document.getElementById('loading-status');
   let bzLoaded = 0, critLoaded = 0, defLoaded = 0;
   let revealed = false;
-  // v0.25.312 — Loading-screen gate now waits for ALL sprites (BAZAAR
-  // + CRITICAL + DEFERRED), not just BAZAAR. Players were spawning
-  // into the world while DEFERRED sprites (boss bodies, master-class
-  // skill FX, less-used UI tiles) were still streaming in — sprites
-  // would pop in 5–30 s after gameplay started, looking unfinished.
-  // Now the loader waits until every REQUIRED path resolves; fetch
-  // priority still favours BAZAAR + CRITICAL so the bar ramps fast
-  // toward the start, slows for the tail.
+  // v0.25.362 — Reveal is gated only by first-play assets (BAZAAR +
+  // CRITICAL). The full manifest still streams in the background, but
+  // missing or slow late-game art must not leave the playable world
+  // hidden behind the loader.
   const phrases = [
     'Painting Everdawn Bazaar…',
     'Lighting the lanterns…',
@@ -38958,8 +39875,8 @@ requestAnimationFrame(loop);
     'Polishing skill flourishes…',
     'Almost there…',
   ];
-  const totalLoaded = () => bzLoaded + critLoaded + defLoaded;
-  const totalCount  = () => BAZAAR.length + CRITICAL.length + DEFERRED.length;
+  const totalLoaded = () => bzLoaded + critLoaded;
+  const totalCount  = () => BAZAAR.length + CRITICAL.length;
   const update = () => {
     if (revealed) return;
     const total = totalCount();
@@ -39008,10 +39925,7 @@ requestAnimationFrame(loop);
   });
   // v0.25.237 — Phase 1: load BAZAAR sprites in parallel with high
   // fetchPriority — the first-paint set the player sees on spawn.
-  // v0.25.312 — All three buckets now contribute to the gate. The
-  // BAZAAR + CRITICAL fetchPriority='high' hint still tells the
-  // browser to prioritise those over DEFERRED, so the progress bar
-  // ramps fast toward the start and slows for the tail.
+  // v0.25.362 — Only BAZAAR + CRITICAL contribute to the reveal gate.
   Promise.all(BAZAAR.map(p => loadOne(p, true).then(() => { bzLoaded++; update(); })))
     .then(() => maybeReveal());
   // Phase 2 — Critical UI assets. Same high fetchPriority as BAZAAR
@@ -39019,27 +39933,20 @@ requestAnimationFrame(loop);
   Promise.all(CRITICAL.map(p => loadOne(p, true).then(() => { critLoaded++; update(); })))
     .then(() => maybeReveal());
   // Phase 3 — All other sprites (boss bodies, master-class FX, less-
-  // common UI). v0.25.312: started immediately (was idle-callback
-  // gated) since reveal now waits on this bucket too. Uses default
-  // fetchPriority so BAZAAR + CRITICAL still get bandwidth first.
+  // common UI). These stream in the background and never block reveal.
   const startDeferred = () => {
     DEFERRED.forEach(p => loadOne(p, false).then(() => {
       defLoaded++;
       update();
       maybeReveal();
     }));
-    // Edge case: empty DEFERRED (shouldn't happen, but defensive) —
-    // call maybeReveal to avoid an infinite gate.
     if (!DEFERRED.length) maybeReveal();
   };
   startDeferred();
-  // v0.25.312 — The corner-pill deferred loader (#defer-loader) is
-  // no longer used: with the gate covering all sprites, there's no
-  // mid-game "still streaming" state. The DOM element + CSS are
-  // left in place but never shown — clean removal is a follow-up.
+  // v0.25.362 — The corner-pill deferred loader remains visually hidden;
+  // background sprite streaming is silent.
   function maybeReveal() {
-    // v0.25.312 — Gate on TOTAL sprite count, not just BAZAAR. Player
-    // sees the world only after every sprite is decoded.
+    // Gate on first-play sprite count only.
     if (totalLoaded() < totalCount()) return;
     if (revealed) return;
     revealed = true;
@@ -39052,11 +39959,8 @@ requestAnimationFrame(loop);
     // v0.25.233 — Start the looping BGM the moment the world reveals.
     startBgm();
   }
-  // Hard fallback. v0.25.312 — gate is now ALL sprites (~110+ paths),
-  // raised from 4 s to 30 s so a slow mobile connection has time to
-  // finish before the safety-net force-reveal kicks in. Players on
-  // very slow networks will still eventually see the game even if
-  // one image is wedged.
+  // Hard fallback for first-play assets. Background sprites keep streaming
+  // even if this safety net reveals the world.
   setTimeout(() => { if (overlay && !overlay.classList.contains('fade')) { revealed = true; hide(); } }, 30000);
 })();
 // v0.25.233 — Mojiworld main BGM (loops indefinitely).
@@ -39185,6 +40089,7 @@ function startBgm() {
   .face-style-btn { padding: 6px 10px; font-size: 11px; cursor: pointer; background: #2a1a44; border: 1px solid #4a3a6e; border-radius: 6px; color: #e8d8ff; text-align: left; transition: background 0.12s, border-color 0.12s; }
   .face-style-btn:hover { background: #3a2654; border-color: #c9a8ff; }
   .face-style-btn.active { background: #4a2c70; border-color: #ffd166; color: #ffd166; }
+  .face-style-btn:disabled { opacity: 0.38; cursor: default; }
   #char-studio-status { font-size: 11px; opacity: 0.55; margin: 6px 0 0; }
   #char-studio-close { position: absolute; top: 10px; right: 14px; cursor: pointer; font-size: 22px; line-height: 1; opacity: 0.5; user-select: none; }
   /* v0.25.310 — MapleStory-style loadout wardrobe grid. Replaces the
@@ -39237,6 +40142,7 @@ function startBgm() {
     line-height: 1;
   }
   .wardrobe-slot-thumb {
+    position: relative;
     flex: 1;
     display: flex;
     align-items: center;
@@ -39252,6 +40158,17 @@ function startBgm() {
   .wardrobe-slot-thumb-empty {
     font-size: 22px;
     opacity: 0.35;
+  }
+  .wardrobe-paint-dot {
+    position: absolute;
+    right: 5px;
+    bottom: 5px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #ffd166;
+    border: 2px solid #160d26;
+    box-shadow: 0 0 0 1px rgba(255,209,102,0.45);
   }
   .wardrobe-slot-skin {
     width: 60%; height: 60%;
@@ -39274,6 +40191,70 @@ function startBgm() {
     margin-bottom: 8px;
   }
   .wardrobe-picker { margin-bottom: 0; }
+  .paint-toolbox {
+    display: grid;
+    gap: 10px;
+  }
+  .wardrobe-picker .paint-toolbox { grid-column: 1 / -1; }
+  .paint-slot-host { grid-column: 1 / -1; padding-top: 8px; border-top: 1px solid #3a2a5a; }
+  .paint-stage {
+    --paint-editor-display-scale: 0.5625;
+    position: relative;
+    width: min(100%, 216px);
+    aspect-ratio: 3 / 4;
+    margin: 0 auto;
+    border: 1px solid #4a3a6e;
+    border-radius: 8px;
+    overflow: hidden;
+    background:
+      linear-gradient(45deg, rgba(255,255,255,0.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.06) 75%),
+      linear-gradient(45deg, rgba(255,255,255,0.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.06) 75%),
+      #160d26;
+    background-position: 0 0, 8px 8px;
+    background-size: 16px 16px;
+    touch-action: none;
+  }
+  .paint-stage canvas {
+    position:absolute; inset:0; width:100%; height:100%;
+    transform: scale(var(--paint-editor-display-scale));
+    transform-origin: center;
+  }
+  .char-paint-guide { opacity: 0.34; pointer-events:none; }
+  .char-paint-canvas { cursor: crosshair; }
+  .paint-row { display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap; }
+  .paint-swatch {
+    width: 24px; height: 24px; border-radius: 50%; cursor: pointer;
+    border: 2px solid rgba(255,255,255,0.18);
+    box-shadow: inset 0 -2px 5px rgba(0,0,0,0.25);
+  }
+  .paint-swatch.active { border-color:#ffd166; transform: translateY(-1px); }
+  .paint-size { width: 120px; accent-color:#ffd166; }
+  .paint-transform-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(118px, 1fr));
+    gap: 6px 10px;
+    align-items: center;
+  }
+  .paint-transform-control {
+    display: grid;
+    grid-template-columns: 32px 1fr;
+    gap: 6px;
+    align-items: center;
+    color: rgba(232,216,255,0.72);
+    font-size: 9px;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+  }
+  .paint-image-scale,
+  .paint-image-axis,
+  .paint-image-rotate {
+    width: 100%;
+    accent-color:#66dd88;
+  }
+  .paint-image-rotate { accent-color:#ffd166; }
+  .paint-transform-row input:disabled { opacity: 0.35; }
+  .paint-toolbox .face-style-btn { text-align:center; }
+  .paint-file { display:none; }
   .wardrobe-actions {
     display: flex;
     gap: 8px;
@@ -39296,7 +40277,7 @@ function startBgm() {
         <canvas id="char-studio-canvas" width="384" height="384"></canvas>
       </div>
       <div class="wardrobe-grid" id="wardrobe-grid">
-        <!-- v0.25.310 — 9 slot tiles populated by buildWardrobeGrid().
+        <!-- v0.25.324 — slot tiles populated by buildWardrobeGrid().
              Each tile is clickable; click switches the inline picker
              below to that slot's options. Live thumb shows the
              current pick. -->
@@ -39312,12 +40293,10 @@ function startBgm() {
       <button type="button" class="face-style-btn" id="char-studio-apply">▶ Use in game</button>
       <button type="button" class="face-style-btn" id="char-studio-revert">↺ Revert</button>
     </div>
-    <p id="char-studio-status" class="wardrobe-status">Pick a slot, choose an option, then Use in game.</p>
+    <p id="char-studio-status" class="wardrobe-status">Pick a slot, draw or upload, then Use in game.</p>
     <p class="char-studio-hint">Press <kbd>Q</kbd> to toggle • <kbd>Esc</kbd> to close</p>
-    <!-- Hidden legacy picker mounts kept around so the existing
-         builders (buildCharStudioHairStyles etc.) don't NPE. The new
-         grid + inline picker re-route their output through
-         #wardrobe-picker when a slot tile is active. -->
+    <!-- Hidden legacy picker mounts kept around for saved-state and
+         compatibility paths. The visible wardrobe picker is paint-only. -->
     <div style="display:none;">
       <div id="skin-swatches"></div>
       <div id="face-styles"></div>
@@ -39328,10 +40307,13 @@ function startBgm() {
       <div id="eq-body_top"></div>
       <div id="eq-body_bottom"></div>
       <div id="eq-cape"></div>
-      <div id="eq-gloves"></div>
-      <div id="eq-boots"></div>
       <div id="eq-weapon"></div>
       <div id="eq-helmet"></div>
+      <div id="paint-styles"></div>
+      <div id="paint-armL"></div>
+      <div id="paint-armR"></div>
+      <div id="paint-legL"></div>
+      <div id="paint-legR"></div>
     </div>
   </div>
 </div>
@@ -39367,6 +40349,8 @@ const CHAR_STUDIO = {
   // the matching MapleStory chibi sprite from MSX_HERO and overrides
   // the vector path entirely.
   msxId:   null,
+  customPaint: null,
+  customPaintLayers: {},
   // v0.25.308 — Equipment picks-in-progress. Each slot holds either
   // null (nothing equipped for the preview) or { spriteId, tint }.
   // Mirrors the shape of player.equipped[slot] so the studio's render
@@ -39382,6 +40366,9 @@ const CHAR_STUDIO = {
 // v0.25.134 — vector preview. Calls _drawVectorHero with explicit
 // _ctx + opts so the studio renders the same character that will
 // render in-game. Centred + scaled-up to fill the 384×384 panel.
+const CHAR_STUDIO_VECTOR_PREVIEW_SCALE = 2.55;
+const CHAR_STUDIO_VECTOR_PREVIEW_FEET_Y = 0.92;
+
 function renderCharStudio() {
   const cv = document.getElementById('char-studio-canvas');
   if (!cv) {
@@ -39410,19 +40397,28 @@ function renderCharStudio() {
     const realPlayer = (typeof player !== 'undefined') ? player : null;
     const fakePlayer = { w: STUDIO_PW, h: STUDIO_PH / 0.9, facing: 1 };
     if (typeof window !== 'undefined') window.player = fakePlayer;
+    _LX_CUSTOM_PAINT_PREVIEW = {
+      full: CHAR_STUDIO.customPaint || '',
+      layers: CHAR_STUDIO.customPaintLayers || {},
+    };
     _drawMsxHero(sx, sy, c, { msxId: CHAR_STUDIO.msxId, forcedFacing: 1 });
+    _LX_CUSTOM_PAINT_PREVIEW = null;
     if (typeof window !== 'undefined') window.player = realPlayer;
   } else {
     c.save();
-    c.translate(W / 2, H * 0.92);   // feet at ~92% down so head clears the top
-    const SCALE = 5.0;
-    c.scale(SCALE, SCALE);
+    c.translate(W / 2, H * CHAR_STUDIO_VECTOR_PREVIEW_FEET_Y);
+    c.scale(CHAR_STUDIO_VECTOR_PREVIEW_SCALE, CHAR_STUDIO_VECTOR_PREVIEW_SCALE);
     // v0.25.308 — Plug the in-progress equipment picks into the
     // render override so _drawEquipmentLayer reads them instead of
     // the live player.equipped. Cleared right after the draw so the
     // main game canvas keeps using player.equipped.
     _LX_EQ_PREVIEW_OVERRIDE = CHAR_STUDIO.equip;
+    _LX_CUSTOM_PAINT_PREVIEW = {
+      full: CHAR_STUDIO.customPaint || '',
+      layers: CHAR_STUDIO.customPaintLayers || {},
+    };
     // Render the vector hero on the studio canvas with the current picks.
+    const paintPoseLocked = _csShouldLockPaintPreviewPose();
     const FAKE_W = 28, FAKE_H = 44;
     _drawVectorHero(-FAKE_W / 2, -FAKE_H, c, {
       cls: (typeof player !== 'undefined' && player.cls) || 'default',
@@ -39438,14 +40434,15 @@ function renderCharStudio() {
         eyeId:   CHAR_STUDIO.eyeId,
         mouthId: CHAR_STUDIO.mouthId,
       },
-      animName: 'idle',
-      animTime: ((Date.now() / 1000) % 3) / 3,  // looped idle anim time
+      animName: paintPoseLocked ? CHAR_PAINT_POSE_ANIM : 'idle',
+      animTime: paintPoseLocked ? CHAR_PAINT_POSE_TIME : ((Date.now() / 1000) % 3) / 3,
       forcedFacing: 1,
     });
     _LX_EQ_PREVIEW_OVERRIDE = null;
+    _LX_CUSTOM_PAINT_PREVIEW = null;
     c.restore();
   }
-  // Re-render every frame so the idle bob animates / sprite preview stays live.
+  // Re-render every frame so idle animates; paint layers lock to rest pose while edited.
   if (CHAR_STUDIO._raf) cancelAnimationFrame(CHAR_STUDIO._raf);
   CHAR_STUDIO._raf = requestAnimationFrame(renderCharStudio);
 }
@@ -39614,24 +40611,827 @@ function buildCharStudioEquipPicker(slot) {
   });
 }
 
+const CHAR_PAINT_W = 192;
+const CHAR_PAINT_H = 256;
+const CHAR_PAINT_SIZE = CHAR_PAINT_H;
+const CHAR_PAINT_COLORS = ['#111111', '#ffffff', '#e94b6a', '#ffd166', '#66dd88', '#66aaff'];
+const CHAR_PAINT_POSE_ANIM = 'paint_pose_rest';
+const CHAR_PAINT_POSE_TIME = 0;
+
+function _csApplyPaintSpaceTransform(targetCtx, width, height) {
+  const paintSx = width / _LX_PAINT_DEST.w;
+  const paintSy = height / _LX_PAINT_DEST.h;
+  targetCtx.translate(-_LX_PAINT_DEST.x * paintSx, -_LX_PAINT_DEST.y * paintSy);
+  targetCtx.scale(paintSx / HERO_VEC_DRAW_SCALE, paintSy / HERO_VEC_DRAW_SCALE);
+}
+
+function _csShouldLockPaintPreviewPose() {
+  try {
+    const active = WARDROBE_SLOTS.find(s => s.id === _WARDROBE_ACTIVE_SLOT);
+    return !!(active && active.paintLayer);
+  } catch (e) {
+    return false;
+  }
+}
+
+function _csPaintLayerId(layerId) {
+  return (layerId && CHAR_PAINT_LAYER_IDS.includes(layerId)) ? layerId : 'paint';
+}
+
+function _csPaintSource(layerId) {
+  layerId = _csPaintLayerId(layerId);
+  return layerId === 'paint'
+    ? (CHAR_STUDIO.customPaint || null)
+    : ((CHAR_STUDIO.customPaintLayers && CHAR_STUDIO.customPaintLayers[layerId]) || null);
+}
+
+function _csSetPaintSource(layerId, src) {
+  layerId = _csPaintLayerId(layerId);
+  const prev = _csPaintSource(layerId);
+  if (prev && prev !== src && _LX_CUSTOM_PAINT_CACHE && _LX_CUSTOM_PAINT_CACHE.delete) {
+    _LX_CUSTOM_PAINT_CACHE.delete(prev);
+  }
+  if (layerId === 'paint') {
+    CHAR_STUDIO.customPaint = src || null;
+  } else {
+    if (!CHAR_STUDIO.customPaintLayers) CHAR_STUDIO.customPaintLayers = {};
+    if (src) CHAR_STUDIO.customPaintLayers[layerId] = src;
+    else delete CHAR_STUDIO.customPaintLayers[layerId];
+  }
+}
+
+function _csPaintCanvas() {
+  return CHAR_STUDIO._activePaintCanvas || document.querySelector('.char-paint-canvas');
+}
+
+function _csCommitPaintCanvas(layerId, sourceCanvas) {
+  const cv = sourceCanvas || _csPaintCanvas();
+  if (!cv) return;
+  const c = cv.getContext('2d');
+  const pixels = c.getImageData(0, 0, cv.width, cv.height).data;
+  let hasInk = false;
+  for (let i = 3; i < pixels.length; i += 4) {
+    if (pixels[i] > 0) { hasInk = true; break; }
+  }
+  layerId = _csPaintLayerId(layerId);
+  const keepEmptyReplacement = layerId !== 'paint' && !_lxPaintLayerProtectsBase(layerId);
+  _csSetPaintSource(layerId, (hasInk || keepEmptyReplacement) ? cv.toDataURL('image/png') : null);
+  _refreshWardrobeSlotTile(layerId);
+}
+
+function _csRenderRawBasePaintLayer(layerId, targetCanvas, lookOverride) {
+  layerId = _csPaintLayerId(layerId);
+  const cv = targetCanvas || _csPaintCanvas();
+  if (!cv || layerId === 'paint') return;
+  const c = cv.getContext('2d');
+  const look = lookOverride || CHAR_STUDIO;
+  c.clearRect(0, 0, cv.width, cv.height);
+  c.save();
+  _csApplyPaintSpaceTransform(c, cv.width, cv.height);
+  const prevEq = _LX_EQ_PREVIEW_OVERRIDE;
+  const prevPaint = _LX_CUSTOM_PAINT_PREVIEW;
+  _LX_EQ_PREVIEW_OVERRIDE = CHAR_STUDIO.equip;
+  _LX_CUSTOM_PAINT_PREVIEW = { full: '', layers: {} };
+  _drawVectorHero(-14, -44, c, {
+    cls: (typeof player !== 'undefined' && player.cls) || 'default',
+    lookCustom: {
+      skinIdx: look.skinIdx,
+      hairId: look.hairId,
+      eyeId: look.eyeId,
+      mouthId: look.mouthId,
+    },
+    animName: CHAR_PAINT_POSE_ANIM,
+    animTime: CHAR_PAINT_POSE_TIME,
+    forcedFacing: 1,
+    onlyPaintLayer: layerId,
+  });
+  _LX_EQ_PREVIEW_OVERRIDE = prevEq;
+  _LX_CUSTOM_PAINT_PREVIEW = prevPaint;
+  c.restore();
+}
+
+function _csRenderBasePaintLayer(layerId, targetCanvas) {
+  layerId = _csPaintLayerId(layerId);
+  if (layerId === 'paint' || _lxPaintLayerProtectsBase(layerId)) return;
+  _csRenderRawBasePaintLayer(layerId, targetCanvas);
+}
+
+function _csCurrentPlayerPaintLook() {
+  const look = (typeof player !== 'undefined' && player && player.lookCustom) ? player.lookCustom : {};
+  return {
+    skinIdx: look.skinIdx != null ? look.skinIdx : 2,
+    hairId: look.hairId || 'flow',
+    eyeId: look.eyeId || 'default',
+    mouthId: look.mouthId || 'default',
+  };
+}
+
+function _csRenderLegacyHeadCircleReference(targetCanvas, lookOverride) {
+  if (!targetCanvas) return;
+  const c = targetCanvas.getContext('2d');
+  c.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
+  c.save();
+  _csApplyPaintSpaceTransform(c, targetCanvas.width, targetCanvas.height);
+  const prevEq = _LX_EQ_PREVIEW_OVERRIDE;
+  const prevPaint = _LX_CUSTOM_PAINT_PREVIEW;
+  const headRegistry = (typeof LX_HEAD !== 'undefined') ? LX_HEAD : null;
+  const hadFlow = !!(headRegistry && Object.prototype.hasOwnProperty.call(headRegistry, 'flow'));
+  const prevFlow = hadFlow ? headRegistry.flow : null;
+  _LX_EQ_PREVIEW_OVERRIDE = CHAR_STUDIO.equip;
+  _LX_CUSTOM_PAINT_PREVIEW = { full: '', layers: {} };
+  if (hadFlow) headRegistry.flow = null;
+  const look = lookOverride || CHAR_STUDIO;
+  try {
+    _drawVectorHero(-14, -44, c, {
+      cls: (typeof player !== 'undefined' && player.cls) || 'default',
+      lookCustom: {
+        skinIdx: look.skinIdx,
+        hairId: look.hairId,
+        eyeId: look.eyeId,
+        mouthId: look.mouthId,
+      },
+      animName: CHAR_PAINT_POSE_ANIM,
+      animTime: CHAR_PAINT_POSE_TIME,
+      forcedFacing: 1,
+      onlyPaintLayer: 'skin',
+    });
+  } finally {
+    if (hadFlow) headRegistry.flow = prevFlow;
+    _LX_EQ_PREVIEW_OVERRIDE = prevEq;
+    _LX_CUSTOM_PAINT_PREVIEW = prevPaint;
+    c.restore();
+  }
+}
+
+function _csPaintPixelsCloseToRef(srcData, refData, i) {
+  if (srcData[i + 3] <= 18 || refData[i + 3] <= 18) return false;
+  const dr = srcData[i] - refData[i];
+  const dg = srcData[i + 1] - refData[i + 1];
+  const db = srcData[i + 2] - refData[i + 2];
+  const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+  if (dist < 58) return true;
+  const srcDark = srcData[i] < 72 && srcData[i + 1] < 58 && srcData[i + 2] < 72;
+  const refDark = refData[i] < 72 && refData[i + 1] < 58 && refData[i + 2] < 72;
+  return srcDark && refDark;
+}
+
+function _csPaintCanvasHasInk(sourceCanvas) {
+  if (!sourceCanvas) return false;
+  const data = sourceCanvas.getContext('2d').getImageData(0, 0, sourceCanvas.width, sourceCanvas.height).data;
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] > 0) return true;
+  }
+  return false;
+}
+
+function _csStripLegacyHeadCircleFromPaintImage(layerId, img, lookOverride) {
+  layerId = _csPaintLayerId(layerId);
+  if (!img) return { changed: false, canvas: null, src: null, hasInk: false };
+  const test = document.createElement('canvas');
+  const currentHead = document.createElement('canvas');
+  const legacyHead = document.createElement('canvas');
+  test.width = currentHead.width = legacyHead.width = CHAR_PAINT_W;
+  test.height = currentHead.height = legacyHead.height = CHAR_PAINT_H;
+  const tc = test.getContext('2d');
+  _lxDrawPaintImage(tc, img, 0, 0, test.width, test.height);
+  _csRenderRawBasePaintLayer('skin', currentHead, lookOverride);
+  _csRenderLegacyHeadCircleReference(legacyHead, lookOverride);
+  const testImage = tc.getImageData(0, 0, test.width, test.height);
+  const src = testImage.data;
+  const cur = currentHead.getContext('2d').getImageData(0, 0, currentHead.width, currentHead.height).data;
+  const old = legacyHead.getContext('2d').getImageData(0, 0, legacyHead.width, legacyHead.height).data;
+  let matches = 0;
+  let headPixels = 0;
+  for (let i = 0; i < src.length; i += 4) {
+    const inHead = cur[i + 3] > 18 || old[i + 3] > 18;
+    if (inHead) headPixels++;
+    if (inHead && (_csPaintPixelsCloseToRef(src, cur, i) || _csPaintPixelsCloseToRef(src, old, i))) matches++;
+  }
+  if (matches < 140 || (headPixels && matches / headPixels < 0.08)) {
+    return { changed: false, canvas: test, src: null, hasInk: _csPaintCanvasHasInk(test) };
+  }
+  for (let i = 0; i < src.length; i += 4) {
+    const inHead = cur[i + 3] > 18 || old[i + 3] > 18;
+    if (!inHead) continue;
+    if (_csPaintPixelsCloseToRef(src, cur, i) || _csPaintPixelsCloseToRef(src, old, i)) {
+      src[i] = 0;
+      src[i + 1] = 0;
+      src[i + 2] = 0;
+      src[i + 3] = 0;
+    }
+  }
+  tc.putImageData(testImage, 0, 0);
+  const hasInk = _csPaintCanvasHasInk(test);
+  return { changed: true, canvas: test, src: test.toDataURL('image/png'), hasInk };
+}
+
+function _csNextPaintSourceAfterHeadStrip(layerId, stripped) {
+  if (!stripped || !stripped.changed) return null;
+  if (stripped.hasInk) return stripped.src;
+  return (layerId !== 'paint' && !_lxPaintLayerProtectsBase(layerId)) ? stripped.src : null;
+}
+
+function _csScrubLegacyHeadCircleFromPaintLayerStore(store, lookOverride, onChange) {
+  if (!store || typeof store !== 'object') return;
+  for (const layerId of CHAR_PAINT_LAYER_IDS) {
+    const src = store[layerId];
+    if (typeof src !== 'string' || src.indexOf('data:image/png') !== 0) continue;
+    const scrub = (img) => {
+      if (store[layerId] !== src) return;
+      const stripped = _csStripLegacyHeadCircleFromPaintImage(layerId, img, lookOverride);
+      if (!stripped.changed) return;
+      const nextSrc = _csNextPaintSourceAfterHeadStrip(layerId, stripped);
+      if (nextSrc) store[layerId] = nextSrc;
+      else delete store[layerId];
+      if (_LX_CUSTOM_PAINT_CACHE && _LX_CUSTOM_PAINT_CACHE.delete) _LX_CUSTOM_PAINT_CACHE.delete(src);
+      if (typeof _LX_HERO_IDLE_BAKE_CACHE !== 'undefined' && _LX_HERO_IDLE_BAKE_CACHE.clear) {
+        _LX_HERO_IDLE_BAKE_CACHE.clear();
+      }
+      if (typeof onChange === 'function') onChange(layerId, nextSrc);
+    };
+    const cached = _lxCustomPaintImage(src);
+    if (cached) scrub(cached);
+    else {
+      const img = new Image();
+      img.onload = () => scrub(img);
+      img.src = src;
+    }
+  }
+}
+
+let _CS_LEGACY_HEAD_SCRUB_SAVE_TIMER = null;
+function _csQueueLegacyHeadScrubSave() {
+  if (typeof saveState !== 'function') return;
+  if (_CS_LEGACY_HEAD_SCRUB_SAVE_TIMER) clearTimeout(_CS_LEGACY_HEAD_SCRUB_SAVE_TIMER);
+  _CS_LEGACY_HEAD_SCRUB_SAVE_TIMER = setTimeout(() => {
+    _CS_LEGACY_HEAD_SCRUB_SAVE_TIMER = null;
+    saveState();
+  }, 250);
+}
+
+function _csScrubLegacyHeadCircleFromStudioLayers() {
+  const look = {
+    skinIdx: CHAR_STUDIO.skinIdx,
+    hairId: CHAR_STUDIO.hairId,
+    eyeId: CHAR_STUDIO.eyeId,
+    mouthId: CHAR_STUDIO.mouthId,
+  };
+  _csScrubLegacyHeadCircleFromPaintLayerStore(CHAR_STUDIO.customPaintLayers, look, (layerId) => {
+    _refreshWardrobeSlotTile(layerId);
+    const activeGuide = CHAR_STUDIO._activePaintGuide;
+    if (activeGuide && activeGuide.dataset && activeGuide.dataset.paintLayer === layerId) {
+      _csLoadPaintCanvas(layerId, CHAR_STUDIO._activePaintCanvas);
+    }
+  });
+}
+
+function _csScrubLegacyHeadCircleFromPlayerLayers() {
+  if (typeof player === 'undefined' || !player || !player.customPaintLayers) return;
+  _csScrubLegacyHeadCircleFromPaintLayerStore(player.customPaintLayers, _csCurrentPlayerPaintLook(), () => {
+    _csQueueLegacyHeadScrubSave();
+  });
+}
+
+function _csLoadPaintCanvas(layerId, targetCanvas) {
+  const cv = targetCanvas || _csPaintCanvas();
+  if (!cv) return;
+  const c = cv.getContext('2d');
+  c.clearRect(0, 0, cv.width, cv.height);
+  const src = _csPaintSource(layerId);
+  if (!src) {
+    if (!_lxPaintLayerProtectsBase(layerId)) _csRenderBasePaintLayer(layerId, cv);
+    return;
+  }
+  const draw = (img) => {
+    const stripped = _csStripLegacyHeadCircleFromPaintImage(layerId, img);
+    if (stripped.changed) {
+      const nextSrc = _csNextPaintSourceAfterHeadStrip(layerId, stripped);
+      _csSetPaintSource(layerId, nextSrc);
+      _refreshWardrobeSlotTile(layerId);
+      c.clearRect(0, 0, cv.width, cv.height);
+      if (stripped.canvas) c.drawImage(stripped.canvas, 0, 0);
+      return;
+    }
+    _lxDrawPaintImage(c, img, 0, 0, cv.width, cv.height);
+  };
+  const cached = _lxCustomPaintImage(src);
+  if (cached) draw(cached);
+  else {
+    const img = new Image();
+    img.onload = () => { if (_csPaintSource(layerId) === src) draw(img); };
+    img.src = src;
+  }
+}
+
+function _csRenderPaintGuide(targetGuide, layerId) {
+  const guide = targetGuide || CHAR_STUDIO._activePaintGuide || document.querySelector('.char-paint-guide');
+  if (!guide) return;
+  layerId = _csPaintLayerId(layerId || (guide.dataset && guide.dataset.paintLayer));
+  const hideBasePaintLayer = layerId !== 'paint' ? layerId : null;
+  const g = guide.getContext('2d');
+  g.clearRect(0, 0, guide.width, guide.height);
+  g.save();
+  _csApplyPaintSpaceTransform(g, guide.width, guide.height);
+  const prevEq = _LX_EQ_PREVIEW_OVERRIDE;
+  const prevPaint = _LX_CUSTOM_PAINT_PREVIEW;
+  _LX_EQ_PREVIEW_OVERRIDE = CHAR_STUDIO.equip;
+  _LX_CUSTOM_PAINT_PREVIEW = { full: '', layers: {} };
+  _drawVectorHero(-14, -44, g, {
+    cls: (typeof player !== 'undefined' && player.cls) || 'default',
+    lookCustom: {
+      skinIdx: CHAR_STUDIO.skinIdx,
+      hairId: CHAR_STUDIO.hairId,
+      eyeId: CHAR_STUDIO.eyeId,
+      mouthId: CHAR_STUDIO.mouthId,
+    },
+    animName: CHAR_PAINT_POSE_ANIM,
+    animTime: CHAR_PAINT_POSE_TIME,
+    forcedFacing: 1,
+    hideBasePaintLayer,
+  });
+  _LX_EQ_PREVIEW_OVERRIDE = prevEq;
+  _LX_CUSTOM_PAINT_PREVIEW = prevPaint;
+  g.restore();
+  if (hideBasePaintLayer) {
+    const mask = document.createElement('canvas');
+    mask.width = guide.width;
+    mask.height = guide.height;
+    _csRenderRawBasePaintLayer(hideBasePaintLayer, mask);
+    g.save();
+    g.globalCompositeOperation = 'destination-out';
+    g.drawImage(mask, 0, 0);
+    g.restore();
+  }
+}
+
+function buildCharStudioPaint(layerId, host) {
+  layerId = _csPaintLayerId(layerId);
+  const cont = host || document.getElementById('paint-styles');
+  if (!cont) return;
+  cont.dataset.built = '1';
+  cont.dataset.paintLayer = layerId;
+  cont.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'paint-toolbox';
+
+  const stage = document.createElement('div');
+  stage.className = 'paint-stage';
+  const guide = document.createElement('canvas');
+  guide.className = 'char-paint-guide';
+  guide.dataset.paintLayer = layerId;
+  guide.width = CHAR_PAINT_W;
+  guide.height = CHAR_PAINT_H;
+  const paint = document.createElement('canvas');
+  paint.className = 'char-paint-canvas';
+  paint.width = CHAR_PAINT_W;
+  paint.height = CHAR_PAINT_H;
+  CHAR_STUDIO._activePaintGuide = guide;
+  CHAR_STUDIO._activePaintCanvas = paint;
+  stage.appendChild(guide);
+  stage.appendChild(paint);
+  wrap.appendChild(stage);
+  const pc = paint.getContext('2d');
+  pc.lineCap = 'round';
+  pc.lineJoin = 'round';
+  pc.imageSmoothingEnabled = true;
+  pc.imageSmoothingQuality = 'high';
+
+  const swatches = document.createElement('div');
+  swatches.className = 'paint-row';
+  let color = cont.dataset.paintColor || CHAR_PAINT_COLORS[0];
+  let erasing = false;
+  let tool = 'draw';
+  let editableUpload = null;
+  let imageZoom = Number(cont.dataset.paintImageZoom || '100') || 100;
+  let imageStretchX = Number(cont.dataset.paintImageStretchX || '100') || 100;
+  let imageStretchY = Number(cont.dataset.paintImageStretchY || '100') || 100;
+  let imageRotation = Number(cont.dataset.paintImageRotation || '0') || 0;
+  let commitTimer = null;
+
+  const updateToolButtons = () => {
+    if (moveBtn) moveBtn.classList.toggle('active', tool === 'move');
+    if (eraseBtn) eraseBtn.classList.toggle('active', erasing && tool === 'draw');
+    const transformDisabled = !editableUpload;
+    if (imageScale) {
+      imageScale.disabled = transformDisabled;
+      imageScale.value = String(Math.round(imageZoom));
+    }
+    if (imageScaleX) {
+      imageScaleX.disabled = transformDisabled;
+      imageScaleX.value = String(Math.round(imageStretchX));
+    }
+    if (imageScaleY) {
+      imageScaleY.disabled = transformDisabled;
+      imageScaleY.value = String(Math.round(imageStretchY));
+    }
+    if (imageRotate) {
+      imageRotate.disabled = transformDisabled;
+      imageRotate.value = String(Math.round(imageRotation));
+    }
+    if (fitBtn) fitBtn.disabled = transformDisabled;
+    paint.style.cursor = tool === 'move' ? 'move' : 'crosshair';
+  };
+  const commitNow = () => {
+    if (commitTimer) { clearTimeout(commitTimer); commitTimer = null; }
+    _csCommitPaintCanvas(layerId, paint);
+  };
+  const queueCommit = () => {
+    if (commitTimer) clearTimeout(commitTimer);
+    commitTimer = setTimeout(commitNow, 120);
+  };
+  const snapshotPaintCanvas = () => {
+    const base = document.createElement('canvas');
+    base.width = paint.width;
+    base.height = paint.height;
+    base.getContext('2d').drawImage(paint, 0, 0);
+    return base;
+  };
+  const renderEditableUpload = (commit) => {
+    if (!editableUpload || !editableUpload.img) return;
+    pc.clearRect(0, 0, paint.width, paint.height);
+    if (editableUpload.baseCanvas) pc.drawImage(editableUpload.baseCanvas, 0, 0);
+    const dw = editableUpload.img.naturalWidth * editableUpload.fitScale
+      * (editableUpload.zoom / 100) * (editableUpload.stretchX / 100);
+    const dh = editableUpload.img.naturalHeight * editableUpload.fitScale
+      * (editableUpload.zoom / 100) * (editableUpload.stretchY / 100);
+    pc.save();
+    pc.translate(editableUpload.x, editableUpload.y);
+    pc.rotate((editableUpload.rotation || 0) * Math.PI / 180);
+    pc.drawImage(editableUpload.img, -dw / 2, -dh / 2, dw, dh);
+    pc.restore();
+    if (commit) commitNow();
+    else queueCommit();
+  };
+  const setEditableUploadImage = (img) => {
+    flattenEditableUpload();
+    const baseCanvas = snapshotPaintCanvas();
+    const fit = Math.min(paint.width / img.naturalWidth, paint.height / img.naturalHeight);
+    imageZoom = 100;
+    imageStretchX = 100;
+    imageStretchY = 100;
+    imageRotation = 0;
+    cont.dataset.paintImageZoom = String(imageZoom);
+    cont.dataset.paintImageStretchX = String(imageStretchX);
+    cont.dataset.paintImageStretchY = String(imageStretchY);
+    cont.dataset.paintImageRotation = String(imageRotation);
+    editableUpload = {
+      img,
+      x: paint.width / 2,
+      y: paint.height / 2,
+      fitScale: fit,
+      zoom: imageZoom,
+      stretchX: imageStretchX,
+      stretchY: imageStretchY,
+      rotation: imageRotation,
+      baseCanvas,
+    };
+    tool = 'move';
+    erasing = false;
+    renderEditableUpload(true);
+    updateToolButtons();
+  };
+  const promoteCurrentLayerToUpload = () => {
+    if (editableUpload) return true;
+    const src = _csPaintSource(layerId);
+    if (!src) return false;
+    const ready = _lxCustomPaintImage(src);
+    const adopt = (img) => {
+      const fit = Math.min(paint.width / img.naturalWidth, paint.height / img.naturalHeight);
+      imageZoom = 100;
+      imageStretchX = 100;
+      imageStretchY = 100;
+      imageRotation = 0;
+      editableUpload = {
+        img,
+        x: paint.width / 2,
+        y: paint.height / 2,
+        fitScale: fit,
+        zoom: imageZoom,
+        stretchX: imageStretchX,
+        stretchY: imageStretchY,
+        rotation: imageRotation,
+      };
+      cont.dataset.paintImageZoom = String(imageZoom);
+      cont.dataset.paintImageStretchX = String(imageStretchX);
+      cont.dataset.paintImageStretchY = String(imageStretchY);
+      cont.dataset.paintImageRotation = String(imageRotation);
+      tool = 'move';
+      erasing = false;
+      renderEditableUpload(true);
+      updateToolButtons();
+    };
+    if (ready) {
+      adopt(ready);
+    } else {
+      const img = new Image();
+      img.onload = () => adopt(img);
+      img.src = src;
+    }
+    return true;
+  };
+  const flattenEditableUpload = () => {
+    if (!editableUpload) return;
+    editableUpload = null;
+    commitNow();
+    updateToolButtons();
+  };
+  CHAR_PAINT_COLORS.forEach((hex) => {
+    const sw = document.createElement('button');
+    sw.type = 'button';
+    sw.className = 'paint-swatch' + (hex === color ? ' active' : '');
+    sw.style.background = hex;
+    sw.title = hex;
+    sw.onclick = () => {
+      flattenEditableUpload();
+      color = hex;
+      erasing = false;
+      tool = 'draw';
+      cont.dataset.paintColor = color;
+      swatches.querySelectorAll('.paint-swatch').forEach((el) => el.classList.remove('active'));
+      sw.classList.add('active');
+      updateToolButtons();
+    };
+    swatches.appendChild(sw);
+  });
+  wrap.appendChild(swatches);
+
+  const controls = document.createElement('div');
+  controls.className = 'paint-row';
+  const size = document.createElement('input');
+  size.type = 'range';
+  size.className = 'paint-size';
+  size.min = '2'; size.max = '28'; size.step = '1';
+  size.value = cont.dataset.paintSize || '10';
+  size.title = 'Brush size';
+  size.oninput = () => { cont.dataset.paintSize = size.value; };
+  const eraseBtn = document.createElement('button');
+  eraseBtn.type = 'button';
+  eraseBtn.className = 'face-style-btn';
+  eraseBtn.textContent = 'Erase';
+  eraseBtn.onclick = () => {
+    flattenEditableUpload();
+    erasing = true;
+    tool = 'draw';
+    updateToolButtons();
+  };
+  const moveBtn = document.createElement('button');
+  moveBtn.type = 'button';
+  moveBtn.className = 'face-style-btn';
+  moveBtn.textContent = 'Move';
+  moveBtn.onclick = () => {
+    if (!promoteCurrentLayerToUpload()) {
+      if (typeof showToast === 'function') showToast('Upload or draw an image first', 'common');
+      return;
+    }
+    tool = 'move';
+    erasing = false;
+    updateToolButtons();
+  };
+  const imageScale = document.createElement('input');
+  imageScale.type = 'range';
+  imageScale.className = 'paint-image-scale';
+  imageScale.min = '10'; imageScale.max = '300'; imageScale.step = '1';
+  imageScale.value = String(imageZoom);
+  imageScale.title = 'Image size';
+  const applyUploadTransform = (commit) => {
+    if (!editableUpload) return;
+    imageZoom = Number(imageScale.value) || 100;
+    imageStretchX = Number(imageScaleX.value) || 100;
+    imageStretchY = Number(imageScaleY.value) || 100;
+    imageRotation = Number(imageRotate.value) || 0;
+    cont.dataset.paintImageZoom = String(imageZoom);
+    cont.dataset.paintImageStretchX = String(imageStretchX);
+    cont.dataset.paintImageStretchY = String(imageStretchY);
+    cont.dataset.paintImageRotation = String(imageRotation);
+    editableUpload.zoom = imageZoom;
+    editableUpload.stretchX = imageStretchX;
+    editableUpload.stretchY = imageStretchY;
+    editableUpload.rotation = imageRotation;
+    renderEditableUpload(commit);
+  };
+  imageScale.oninput = () => applyUploadTransform(false);
+  imageScale.onchange = () => applyUploadTransform(true);
+  const imageScaleX = document.createElement('input');
+  imageScaleX.type = 'range';
+  imageScaleX.className = 'paint-image-axis';
+  imageScaleX.min = '10'; imageScaleX.max = '300'; imageScaleX.step = '1';
+  imageScaleX.value = String(imageStretchX);
+  imageScaleX.title = 'Image width';
+  imageScaleX.oninput = () => applyUploadTransform(false);
+  imageScaleX.onchange = () => applyUploadTransform(true);
+  const imageScaleY = document.createElement('input');
+  imageScaleY.type = 'range';
+  imageScaleY.className = 'paint-image-axis';
+  imageScaleY.min = '10'; imageScaleY.max = '300'; imageScaleY.step = '1';
+  imageScaleY.value = String(imageStretchY);
+  imageScaleY.title = 'Image height';
+  imageScaleY.oninput = () => applyUploadTransform(false);
+  imageScaleY.onchange = () => applyUploadTransform(true);
+  const imageRotate = document.createElement('input');
+  imageRotate.type = 'range';
+  imageRotate.className = 'paint-image-rotate';
+  imageRotate.min = '-180'; imageRotate.max = '180'; imageRotate.step = '1';
+  imageRotate.value = String(imageRotation);
+  imageRotate.title = 'Image rotation';
+  imageRotate.oninput = () => applyUploadTransform(false);
+  imageRotate.onchange = () => applyUploadTransform(true);
+  const fitBtn = document.createElement('button');
+  fitBtn.type = 'button';
+  fitBtn.className = 'face-style-btn';
+  fitBtn.textContent = 'Fit';
+  fitBtn.onclick = () => {
+    if (!editableUpload) return;
+    imageZoom = 100;
+    imageStretchX = 100;
+    imageStretchY = 100;
+    imageRotation = 0;
+    cont.dataset.paintImageZoom = String(imageZoom);
+    cont.dataset.paintImageStretchX = String(imageStretchX);
+    cont.dataset.paintImageStretchY = String(imageStretchY);
+    cont.dataset.paintImageRotation = String(imageRotation);
+    editableUpload.x = paint.width / 2;
+    editableUpload.y = paint.height / 2;
+    editableUpload.zoom = imageZoom;
+    editableUpload.stretchX = imageStretchX;
+    editableUpload.stretchY = imageStretchY;
+    editableUpload.rotation = imageRotation;
+    renderEditableUpload(true);
+    updateToolButtons();
+  };
+  const upload = document.createElement('input');
+  upload.type = 'file';
+  upload.className = 'paint-file';
+  upload.accept = 'image/png,image/jpeg,image/webp';
+  const uploadBtn = document.createElement('button');
+  uploadBtn.type = 'button';
+  uploadBtn.className = 'face-style-btn';
+  uploadBtn.textContent = 'Upload';
+  uploadBtn.onclick = () => upload.click();
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'face-style-btn';
+  clearBtn.textContent = 'Clear';
+  clearBtn.onclick = () => {
+    editableUpload = null;
+    paint.getContext('2d').clearRect(0, 0, paint.width, paint.height);
+    _csCommitPaintCanvas(layerId, paint);
+    updateToolButtons();
+  };
+  controls.appendChild(size);
+  controls.appendChild(eraseBtn);
+  controls.appendChild(moveBtn);
+  controls.appendChild(fitBtn);
+  controls.appendChild(uploadBtn);
+  controls.appendChild(clearBtn);
+  controls.appendChild(upload);
+  wrap.appendChild(controls);
+  const transformControls = document.createElement('div');
+  transformControls.className = 'paint-transform-row';
+  const addTransformControl = (label, input) => {
+    const item = document.createElement('label');
+    item.className = 'paint-transform-control';
+    const text = document.createElement('span');
+    text.textContent = label;
+    item.appendChild(text);
+    item.appendChild(input);
+    transformControls.appendChild(item);
+  };
+  addTransformControl('Size', imageScale);
+  addTransformControl('Wide', imageScaleX);
+  addTransformControl('Tall', imageScaleY);
+  addTransformControl('Turn', imageRotate);
+  wrap.appendChild(transformControls);
+
+  cont.appendChild(wrap);
+  _csRenderPaintGuide(guide, layerId);
+  _csLoadPaintCanvas(layerId, paint);
+  updateToolButtons();
+
+  let drawing = false;
+  let moving = false;
+  let last = null;
+  let moveStart = null;
+  const pos = (ev) => {
+    const r = paint.getBoundingClientRect();
+    return {
+      x: (ev.clientX - r.left) * (paint.width / r.width),
+      y: (ev.clientY - r.top) * (paint.height / r.height),
+    };
+  };
+  const startMove = (p) => {
+    if (!editableUpload) return false;
+    moving = true;
+    moveStart = { x: p.x, y: p.y, ox: editableUpload.x, oy: editableUpload.y };
+    return true;
+  };
+  const moveUploadTo = (p, commit) => {
+    if (!moving || !editableUpload || !moveStart) return;
+    editableUpload.x = moveStart.ox + (p.x - moveStart.x);
+    editableUpload.y = moveStart.oy + (p.y - moveStart.y);
+    renderEditableUpload(commit);
+  };
+  const drawTo = (p) => {
+    pc.globalCompositeOperation = erasing ? 'destination-out' : 'source-over';
+    pc.strokeStyle = color;
+    pc.lineWidth = Number(size.value) || 10;
+    pc.beginPath();
+    pc.moveTo(last.x, last.y);
+    pc.lineTo(p.x, p.y);
+    pc.stroke();
+    pc.globalCompositeOperation = 'source-over';
+    last = p;
+  };
+  const stamp = (p) => {
+    pc.globalCompositeOperation = erasing ? 'destination-out' : 'source-over';
+    pc.fillStyle = color;
+    pc.beginPath();
+    pc.arc(p.x, p.y, (Number(size.value) || 10) / 2, 0, Math.PI * 2);
+    pc.fill();
+    pc.globalCompositeOperation = 'source-over';
+  };
+  upload.onchange = () => {
+    const file = upload.files && upload.files[0];
+    upload.value = '';
+    if (!file) return;
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type || '')) {
+      if (typeof showToast === 'function') showToast('Use PNG, JPEG, or WebP', 'common');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        setEditableUploadImage(img);
+      };
+      img.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
+  };
+  paint.onpointerdown = (ev) => {
+    ev.preventDefault();
+    paint.setPointerCapture(ev.pointerId);
+    last = pos(ev);
+    if (tool === 'move') {
+      startMove(last);
+      return;
+    }
+    flattenEditableUpload();
+    drawing = true;
+    stamp(last);
+  };
+  paint.onpointermove = (ev) => {
+    if (moving) moveUploadTo(pos(ev), false);
+    else if (drawing) drawTo(pos(ev));
+  };
+  paint.onpointerup = (ev) => {
+    const wasMoving = moving;
+    const wasDrawing = drawing;
+    let committedMove = false;
+    if (wasMoving && ev && ev.clientX != null) {
+      moveUploadTo(pos(ev), true);
+      committedMove = true;
+    }
+    moving = false;
+    moveStart = null;
+    drawing = false;
+    last = null;
+    if (wasDrawing) commitNow();
+    else if (wasMoving && !committedMove) commitNow();
+  };
+  paint.onpointercancel = paint.onpointerup;
+}
+
 // v0.25.310 — MapleStory-style loadout grid. Replaces the linear
-// list of <h3>+row picker rows with a 9-tile grid (Hair, Skin, Top,
-// Bottom, Cape, Gloves, Boots, Weapon, Hat). Each tile is clickable;
-// click switches the inline picker below to that slot's options
-// (re-routing the existing builder's output through the
-// #wardrobe-picker container).
+// list of <h3>+row picker rows with a tile grid (Hair, Skin, Top,
+// Bottom, Cape, four limbs, Weapon, Hat). Each tile is clickable;
+// click switches the inline panel below to that slot's draw/upload tools.
 const WARDROBE_SLOTS = [
-  { id:'hair',        label:'HAIR',   build: buildCharStudioHairStyles, mount: 'hair-styles' },
-  { id:'skin',        label:'SKIN',   build: buildCharStudioSwatches,    mount: 'skin-swatches' },
-  { id:'body_top',    label:'TOP',    build: () => buildCharStudioEquipPicker('body_top'),    mount: 'eq-body_top' },
-  { id:'body_bottom', label:'BOTTOM', build: () => buildCharStudioEquipPicker('body_bottom'), mount: 'eq-body_bottom' },
-  { id:'cape',        label:'CAPE',   build: () => buildCharStudioEquipPicker('cape'),        mount: 'eq-cape' },
-  { id:'gloves',      label:'GLOVES', build: () => buildCharStudioEquipPicker('gloves'),      mount: 'eq-gloves' },
-  { id:'boots',       label:'BOOTS',  build: () => buildCharStudioEquipPicker('boots'),       mount: 'eq-boots' },
-  { id:'weapon',      label:'WEAPON', build: () => buildCharStudioEquipPicker('weapon'),      mount: 'eq-weapon' },
-  { id:'helmet',      label:'HAT',    build: () => buildCharStudioEquipPicker('helmet'),      mount: 'eq-helmet' },
+  { id:'hair',        label:'HAIR',   build: buildCharStudioHairStyles, mount: 'hair-styles', paintLayer:'hair' },
+  { id:'skin',        label:'SKIN',   build: buildCharStudioSwatches,    mount: 'skin-swatches', paintLayer:'skin' },
+  { id:'body_top',    label:'TOP',    build: () => buildCharStudioEquipPicker('body_top'),    mount: 'eq-body_top', paintLayer:'body_top' },
+  { id:'body_bottom', label:'BOTTOM', build: () => buildCharStudioEquipPicker('body_bottom'), mount: 'eq-body_bottom', paintLayer:'body_bottom' },
+  { id:'cape',        label:'CAPE',   build: () => buildCharStudioEquipPicker('cape'),        mount: 'eq-cape', paintLayer:'cape' },
+  { id:'armR',        label:'RIGHT ARM', build: () => buildCharStudioPaint('armR', document.getElementById('paint-armR')), mount: 'paint-armR', paintLayer:'armR', paintOnly:true },
+  { id:'armL',        label:'LEFT ARM',  build: () => buildCharStudioPaint('armL', document.getElementById('paint-armL')), mount: 'paint-armL', paintLayer:'armL', paintOnly:true },
+  { id:'legR',        label:'RIGHT LEG', build: () => buildCharStudioPaint('legR', document.getElementById('paint-legR')), mount: 'paint-legR', paintLayer:'legR', paintOnly:true },
+  { id:'legL',        label:'LEFT LEG',  build: () => buildCharStudioPaint('legL', document.getElementById('paint-legL')), mount: 'paint-legL', paintLayer:'legL', paintOnly:true },
+  { id:'weapon',      label:'WEAPON', build: () => buildCharStudioEquipPicker('weapon'),      mount: 'eq-weapon', paintLayer:'weapon' },
+  { id:'helmet',      label:'HAT',    build: () => buildCharStudioEquipPicker('helmet'),      mount: 'eq-helmet', paintLayer:'helmet' },
+  { id:'paint',       label:'ALL',    build: () => buildCharStudioPaint('paint'),             mount: 'paint-styles', paintLayer:'paint' },
 ];
 let _WARDROBE_ACTIVE_SLOT = null;
+
+function _wardrobeLayerPaintSource(slot) {
+  return (CHAR_STUDIO.customPaintLayers && CHAR_STUDIO.customPaintLayers[slot]) || null;
+}
+
+function _appendWardrobePaintBadge(thumb, slot) {
+  if (!_wardrobeLayerPaintSource(slot)) return;
+  const dot = document.createElement('span');
+  dot.className = 'wardrobe-paint-dot';
+  dot.title = 'custom paint layer';
+  thumb.appendChild(dot);
+}
 
 // Render a small thumbnail of the currently-picked sprite for a slot.
 // Returns either a <canvas>, <img>, or a swatch <div> ready to drop
@@ -39645,6 +41445,7 @@ function _wardrobeSlotThumb(slot) {
     sw.className = 'wardrobe-slot-skin';
     sw.style.background = tone ? tone.base : '#f0c090';
     thumb.appendChild(sw);
+    _appendWardrobePaintBadge(thumb, slot);
     return thumb;
   }
   if (slot === 'hair') {
@@ -39653,6 +41454,34 @@ function _wardrobeSlotThumb(slot) {
       const el = document.createElement('img'); el.src = img.src; thumb.appendChild(el);
     } else {
       const empty = document.createElement('div'); empty.className = 'wardrobe-slot-thumb-empty'; empty.textContent = '?'; thumb.appendChild(empty);
+    }
+    _appendWardrobePaintBadge(thumb, slot);
+    return thumb;
+  }
+  if (slot === 'paint') {
+    if (CHAR_STUDIO.customPaint) {
+      const el = document.createElement('img');
+      el.src = CHAR_STUDIO.customPaint;
+      thumb.appendChild(el);
+    } else {
+      const empty = document.createElement('div');
+      empty.className = 'wardrobe-slot-thumb-empty';
+      empty.textContent = '+';
+      thumb.appendChild(empty);
+    }
+    return thumb;
+  }
+  if (CHAR_PAINT_LAYER_IDS.includes(slot) && !LX_EQ_REGISTRIES[slot]) {
+    const src = _wardrobeLayerPaintSource(slot);
+    if (src) {
+      const el = document.createElement('img');
+      el.src = src;
+      thumb.appendChild(el);
+    } else {
+      const empty = document.createElement('div');
+      empty.className = 'wardrobe-slot-thumb-empty';
+      empty.textContent = '+';
+      thumb.appendChild(empty);
     }
     return thumb;
   }
@@ -39665,6 +41494,7 @@ function _wardrobeSlotThumb(slot) {
   } else {
     const empty = document.createElement('div'); empty.className = 'wardrobe-slot-thumb-empty'; empty.textContent = '∅'; thumb.appendChild(empty);
   }
+  _appendWardrobePaintBadge(thumb, slot);
   return thumb;
 }
 
@@ -39672,33 +41502,21 @@ function _wardrobeSlotThumb(slot) {
 function _wardrobeSlotEquipped(slot) {
   if (slot === 'skin') return CHAR_STUDIO.skinIdx != null;
   if (slot === 'hair') return !!CHAR_STUDIO.hairId;
-  return !!(CHAR_STUDIO.equip[slot] && CHAR_STUDIO.equip[slot].spriteId);
+  if (slot === 'paint') return !!CHAR_STUDIO.customPaint;
+  return !!_wardrobeLayerPaintSource(slot) || !!(CHAR_STUDIO.equip[slot] && CHAR_STUDIO.equip[slot].spriteId);
 }
 
-// Move a fully-built picker's children from the hidden mount into the
-// visible #wardrobe-picker container. Called when a slot tile is
-// clicked. The original builder still runs; we just relocate its
-// generated DOM so click events keep firing as before.
+// Mount the selected slot's visible editor. Wardrobe slot panels are paint-only
+// now: no preset "choose" buttons are moved out of the hidden legacy pickers.
 function _wardrobeMountPicker(slotEntry) {
   const picker = document.getElementById('wardrobe-picker');
   const title  = document.getElementById('wardrobe-picker-title');
   if (!picker || !title) return;
-  // Re-build the source mount so its options reflect current state.
-  if (slotEntry.build) slotEntry.build();
-  // Move every child node from the hidden mount into the visible picker.
   picker.innerHTML = '';
-  const src = document.getElementById(slotEntry.mount);
-  if (!src) return;
-  while (src.firstChild) picker.appendChild(src.firstChild);
-  title.textContent = slotEntry.label + ' — choose a variant';
-  // Hook every option button so picks update ONLY the affected slot
-  // tile's thumb. Avoids rebuilding the picker DOM (which would
-  // re-render the buttons mid-click and look glitchy).
-  picker.querySelectorAll('button, .skin-swatch').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      _refreshWardrobeSlotTile(slotEntry.id);
-    });
-  });
+  title.textContent = (slotEntry.id === 'paint')
+    ? 'ALL - draw or upload'
+    : slotEntry.label + ' - draw or upload';
+  buildCharStudioPaint(slotEntry.paintLayer || 'paint', picker);
 }
 
 // Update one slot tile in-place after its picker option changes.
@@ -39770,6 +41588,13 @@ function openCharStudio() {
     if (player.lookCustom.mouthId)         CHAR_STUDIO.mouthId = player.lookCustom.mouthId;
     if ('msxId' in player.lookCustom)      CHAR_STUDIO.msxId   = player.lookCustom.msxId;
   }
+  CHAR_STUDIO.customPaint = (typeof player !== 'undefined' && typeof player.customPaint === 'string')
+    ? player.customPaint
+    : null;
+  CHAR_STUDIO.customPaintLayers = (typeof player !== 'undefined')
+    ? _lxCleanPaintLayers(player.customPaintLayers)
+    : {};
+  _csScrubLegacyHeadCircleFromStudioLayers();
   // v0.25.308 — Seed equipment picks from player.equipped so the
   // studio opens with the live loadout pre-selected. Shallow-clone
   // each slot's item ref so picker mutations don't accidentally
@@ -39791,16 +41616,17 @@ function openCharStudio() {
   // v0.25.308 — equipment pickers, one per slot. Builders mount into
   // hidden containers; the wardrobe grid (v0.25.310) re-routes their
   // generated DOM into the visible inline picker on slot click.
-  for (const slot of ['body_top', 'body_bottom', 'cape', 'gloves', 'boots', 'weapon', 'helmet']) {
+  for (const slot of ['body_top', 'body_bottom', 'cape', 'weapon', 'helmet']) {
     buildCharStudioEquipPicker(slot);
   }
-  // v0.25.310 — Build the 9-tile loadout grid. Auto-opens the first
+  buildCharStudioPaint('paint');
+  // v0.25.324 — Build the loadout grid. Auto-opens the first
   // slot's picker below the grid so the panel has something live.
   _WARDROBE_ACTIVE_SLOT = null;
   buildWardrobeGrid();
   wireCharStudioActionButtons();
   const status = document.getElementById('char-studio-status');
-  if (status) status.textContent = 'Click a slot tile, choose a variant, then Use in game.';
+  if (status) status.textContent = 'Click a slot tile, draw or upload, then Use in game.';
   renderCharStudio();
 }
 
@@ -39881,11 +41707,13 @@ function _normalizeFrameToReference(srcCanvas, refBboxHeight, targetFootY, outW,
   const bw = b.maxX - b.minX + 1;
   const bh = b.maxY - b.minY + 1;
   const fitScale = refBboxHeight / bh;
-  const drawW = bw * fitScale;
-  const drawH = refBboxHeight;
-  const dx = (outW - drawW) / 2;
-  const dy = targetFootY - drawH;
-  out.getContext('2d').drawImage(srcCanvas, b.minX, b.minY, bw, bh, dx, dy, drawW, drawH);
+  const drawW = _lxWholeSize(bw * fitScale);
+  const drawH = _lxWholeSize(refBboxHeight);
+  const dx = _lxWholePx((outW - drawW) / 2);
+  const dy = _lxWholePx(targetFootY - drawH);
+  const oc = out.getContext('2d');
+  _lxUseEntityImageQuality(oc);
+  oc.drawImage(srcCanvas, b.minX, b.minY, bw, bh, dx, dy, drawW, drawH);
   return out;
 }
 
@@ -39918,12 +41746,12 @@ function _normalizeChibiFrame(srcCanvas, outW, outH) {
   // Character spans ~88% of output height and stays within output width.
   // Anchor feet at ~96% down. Preserves the source's aspect ratio.
   const fitScale = Math.min((outW * 0.88) / bw, (outH * 0.92) / bh);
-  const drawW = bw * fitScale;
-  const drawH = bh * fitScale;
-  const dx = (outW - drawW) / 2;
-  const dy = (outH * 0.96) - drawH;
+  const drawW = _lxWholeSize(bw * fitScale);
+  const drawH = _lxWholeSize(bh * fitScale);
+  const dx = _lxWholePx((outW - drawW) / 2);
+  const dy = _lxWholePx((outH * 0.96) - drawH);
   const oc = out.getContext('2d');
-  oc.imageSmoothingEnabled = true;
+  _lxUseEntityImageQuality(oc);
   oc.drawImage(srcCanvas, minX, minY, bw, bh, dx, dy, drawW, drawH);
   return out;
 }
@@ -39940,6 +41768,9 @@ function applyCharStudioToPlayer() {
     mouthId: CHAR_STUDIO.mouthId, // v0.25.190 — sprite layer id (LX_MOUTH key)
     msxId:   CHAR_STUDIO.msxId,   // v0.25.152 — null = vector, otherwise picks MSX sprite
   };
+  player.customPaint = CHAR_STUDIO.customPaint || null;
+  _csScrubLegacyHeadCircleFromStudioLayers();
+  player.customPaintLayers = _lxCleanPaintLayers(CHAR_STUDIO.customPaintLayers);
   // v0.25.308 — Commit equipment picks. Each slot in CHAR_STUDIO.equip
   // is either null (unequip) or { spriteId, tint }; copy through to
   // player.equipped which the renderer reads via _drawEquipmentLayer.
@@ -39991,7 +41822,8 @@ function applyCharStudioToPlayer() {
       status.textContent = 'Applied · player is now using the MapleStory ' + (opt ? opt.name : CHAR_STUDIO.msxId) + ' sprite.';
     } else {
       status.textContent = 'Applied · player is now using the vector look ('
-        + HERO_VEC_SKIN[CHAR_STUDIO.skinIdx].name + ' · ' + CHAR_STUDIO.hairId + ').';
+        + HERO_VEC_SKIN[CHAR_STUDIO.skinIdx].name + ' · ' + CHAR_STUDIO.hairId
+        + ((CHAR_STUDIO.customPaint || Object.keys(player.customPaintLayers).length) ? ' · painted' : '') + ').';
     }
   }
   if (typeof showToast === 'function') showToast(CHAR_STUDIO.msxId ? 'Sprite skin applied' : 'Vector look applied', 'rare');
@@ -40001,7 +41833,11 @@ function applyCharStudioToPlayer() {
 // Revert clears the lookCustom flag so drawPlayer falls back to the
 // HERO sprite (or procedural chibi if no hero loaded yet).
 function revertCharStudioFromPlayer() {
-  if (typeof player !== 'undefined') player.lookCustom = null;
+  if (typeof player !== 'undefined') {
+    player.lookCustom = null;
+    player.customPaint = null;
+    player.customPaintLayers = {};
+  }
   // v0.25.308 — Also strip the visual-equipment slots so Revert
   // returns to a fully bare hero. Stat-bearing slots (armor,
   // accessory, and legacy weapon entries) are preserved — they
@@ -40028,6 +41864,10 @@ function revertCharStudioFromPlayer() {
   if (CHAR_STUDIO.equip) {
     for (const slot of Object.keys(CHAR_STUDIO.equip)) CHAR_STUDIO.equip[slot] = null;
   }
+  CHAR_STUDIO.customPaint = null;
+  CHAR_STUDIO.customPaintLayers = {};
+  _refreshWardrobeSlotTile('paint');
+  for (const slot of CHAR_PAINT_LAYER_IDS) _refreshWardrobeSlotTile(slot);
   const status = document.getElementById('char-studio-status');
   if (status) status.textContent = 'Reverted · player back to default sprite hero.';
   if (typeof showToast === 'function') showToast('Reverted vector look', 'common');
@@ -40072,6 +41912,9 @@ function _anyOtherModalOpen() {
 const _csCloseBtn = document.getElementById('char-studio-close');
 if (_csCloseBtn) _csCloseBtn.addEventListener('click', closeCharStudio);
 else console.warn('[CharStudio] close button missing from DOM');
+if (typeof window !== 'undefined') {
+  window.setTimeout(_csScrubLegacyHeadCircleFromPlayerLayers, 0);
+}
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && document.getElementById('char-studio-overlay').classList.contains('open')) {
     e.preventDefault();
