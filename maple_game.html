@@ -35693,6 +35693,11 @@ const MONSTER_SPRITE_TYPES = [
 // the procedural drawing for any NPC not in NPC_SPRITE_FILES or whose load
 // failed.
 const NPC_SPRITES = Object.create(null);
+// v0.25.434 — bbox-bottom cache (lowest opaque pixel Y) per NPC sprite, parallel
+// to MONSTER_SPRITE_META. Used by _drawNpcSprite to anchor each NPC's actual
+// visible feet to the foot line so the body doesn't appear to float above the
+// ground when the source PNG has transparent padding at the bottom.
+const NPC_SPRITE_META = Object.create(null);
 const NPC_SPRITE_FILES = {
   'Pharma Sis':       'elspeth.webp',
   'Brok':          'brok.webp',
@@ -35759,7 +35764,10 @@ function _npcLabelHeadY(npc, hasSprite, feetY, fallbackHeadY) {
 (function _loadNpcSprites() {
   for (const name in NPC_SPRITE_FILES) {
     const img = new Image();
-    img.onload = () => { NPC_SPRITES[name] = img; };
+    img.onload = () => {
+      NPC_SPRITES[name] = img;
+      NPC_SPRITE_META[name] = { bboxBottomY: _detectSpriteBboxBottom(img) };
+    };
     img.onerror = () => console.warn('[NPC] failed to load', name);
     img.src = 'Sprites/npc/' + NPC_SPRITE_FILES[name];
   }
@@ -35777,11 +35785,21 @@ function _drawNpcSprite(sprite, cx, feetY, npcName) {
   const t = (game.time + cx) * 0.06;
   const bob = _lxWholePx(Math.sin(t) * 1.5);
   ctx.save();
-  ctx.translate(cx, feetY + 2 + bob);
+  ctx.translate(cx, feetY + bob);
   // v0.25.271 — keep smoothing high-quality so larger renders (Sage
   // Mira at 115 px) stay crisp on the way down from the 640×864 source.
   _lxUseEntityImageQuality(ctx);
-  ctx.drawImage(sprite, _lxWholePx(-targetW / 2), _lxWholePx(-targetH * 0.96), targetW, targetH);
+  // v0.25.434 — bbox-bottom anchor (parallel to monster sprite path). Maps
+  // the lowest opaque pixel of the source PNG to the foot line, with a tiny
+  // 2% bury so the visible feet sink slightly into the ground tile instead
+  // of hovering above it. Falls back to the historical 0.96 ratio when the
+  // bbox detector hasn't run yet (decode race) or returned null.
+  const meta = NPC_SPRITE_META[npcName];
+  const bboxBottomY = (meta && meta.bboxBottomY != null) ? meta.bboxBottomY : null;
+  const dyOffset = (bboxBottomY != null)
+    ? -((bboxBottomY + 1) / srcH) * targetH + targetH * 0.02
+    : -targetH * 0.96;
+  ctx.drawImage(sprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);
   ctx.restore();
 }
 
