@@ -2841,16 +2841,35 @@
     </div>
   </div>
 
-  <!-- v0.25.95 — World map modal (press W) -->
+  <!-- v0.25.95 — World map modal (press W).
+       v0.25.420: bumped to 1080-1320 / 92vh because the SVG canvas
+       inside grew from 760×460 → 1200×750 to give each tier ring
+       proper angular spacing. The wider 1200-px viewBox would crop
+       off the section labels at the old 1200-px max-width. -->
   <div id="worldmap-modal" class="modal-overlay">
-    <div class="modal" style="position:relative; min-width:780px; max-width:900px;">
+    <div class="modal" style="position:relative; min-width:1080px; max-width:1320px; width:92vw; max-height:92vh; overflow:auto;">
       <button class="close-btn" onclick="closeAllModals()">✕</button>
       <h2>🗺 World Map</h2>
-      <div style="text-align:center; margin-bottom:8px; color:#bbb; font-size:12px;">
-        Click a node to teleport. Hub at centre, harder biomes further out.
+      <div id="worldmap-help" style="text-align:center; margin-bottom:8px; color:#bbb; font-size:12px;">
+        Click a node to teleport. Lines show walking portals between maps.
         Press <kbd style="background:#444;padding:1px 5px;border-radius:3px;border:1px solid #666;">W</kbd> to toggle.
       </div>
+      <!-- v0.25.422 — Edit mode: click-to-pair lets you author / remove
+           portal links visually, then dump runnable JS via Generate Code. -->
+      <div id="worldmap-edit-toolbar" style="display:flex; gap:8px; justify-content:center; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
+        <button id="wm-edit-toggle" class="enhance-btn" style="font-size:12px; padding:5px 12px;">✏ Edit Connections</button>
+        <button id="wm-edit-reset"  class="enhance-btn" style="font-size:12px; padding:5px 12px; background:linear-gradient(180deg,#666,#444); border-color:#888; display:none;">↺ Reset</button>
+        <button id="wm-edit-gen"    class="enhance-btn" style="font-size:12px; padding:5px 12px; background:linear-gradient(180deg,#3a8,#266); border-color:#5cc; display:none;">⚙ Generate Code</button>
+        <span id="wm-edit-status" style="color:#bbb; font-size:11px; margin-left:8px;"></span>
+      </div>
       <div id="worldmap-grid"></div>
+      <div id="worldmap-edit-output" style="display:none; margin-top:10px;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+          <span style="color:#bbb; font-size:11px;">Generated code — paste into the post-MAPS push block in <code style="color:#cc88ff">maple_game.html</code>:</span>
+          <button id="wm-edit-copy" class="enhance-btn" style="font-size:11px; padding:3px 10px; background:linear-gradient(180deg,#48a,#266); border-color:#6ac;">📋 Copy</button>
+        </div>
+        <textarea id="wm-edit-code" readonly style="width:100%; min-height:140px; max-height:260px; background:#0e0a18; color:#dde; border:1px solid rgba(180,140,220,0.35); border-radius:6px; padding:8px; font-family:monospace; font-size:11px; resize:vertical; box-sizing:border-box;"></textarea>
+      </div>
     </div>
   </div>
 
@@ -3055,7 +3074,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.410';
+const GAME_VERSION = 'v0.25.422';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -3253,6 +3272,15 @@ function _bootstrapPhaser() {
       this.load.image('bg_everdawnMarketplace','backgrounds/bg_v3_everdawnmarketplace.png');
       this.load.image('bg_zodiacSanctum',      'backgrounds/bg_v3_zodiacSanctum.png');
       this.load.image('bg_carriageOfAscension','backgrounds/bg_v3_carriageOfAscension.png');
+      // v0.25.421 — user-authored backdrops for the new biomes
+      this.load.image('bg_shadowSlums',        'backgrounds/bg_v3_shadowSlums.png');
+      this.load.image('bg_bastion',            'backgrounds/bg_v3_bastion.png');
+      this.load.image('bg_bastionThrone',      'backgrounds/bg_v3_bastionThrone.png');
+      this.load.image('bg_bastionRampart',     'backgrounds/bg_v3_bastionRampart.png');
+      this.load.image('bg_azureAcademia',      'backgrounds/bg_v3_azureAcademia.png');
+      this.load.image('bg_azureAbode',         'backgrounds/bg_v3_azureAbode.png');
+      this.load.image('bg_jadeGrove',          'backgrounds/bg_v3_jadeGrove.png');
+      this.load.image('bg_emeraldVillage',     'backgrounds/bg_v3_emeraldVillage.png');
     }
     create() {
       this._bgTile = null;
@@ -8379,6 +8407,311 @@ const MAPS = {
       {type:'honeyBuzz',count:4},
     ],
   },
+  // v0.25.411 — The Shadow-Woven Slums: a sprawling ghetto built atop a
+  // ruined feudal-Japanese capital. Sister-zone to Sweet Candy Canyon —
+  // the candy-pastel summit gives way to violet shadow on its eastern
+  // rim. Empty spawns:[] keeps the slums monster-free (it's a rebel-
+  // faction hub, not a combat zone) without using isTown:true — that
+  // would shove the map into the W-key world-map's "hub" slot, which
+  // only renders one entry at the centre. fixedLayout:true skips the
+  // per-load platform jitter so the pagoda silhouettes line up with
+  // the rooftops every visit.
+  shadowSlums: {
+    name:'The Shadow-Woven Slums',
+    bg:'shadowSlums',
+    sky:['#0d0418','#1f0d3a','#3a1a5e'],          // pitch-black → midnight indigo → violet
+    worldWidth: 2200,
+    levelReq: 7,                                   // tier 2 (mid ring) — appears next to Candy Canyon on W
+    fixedLayout: true,                             // no platform jitter (pagodas stay aligned)
+    isShadowSlums: true,
+    taxiAccessible: true,
+    platforms: [
+      {x:0, y:480, w:2200, h:60, type:'ground'},
+      // Left tier — alley scaffolding rising out of the candy-side entry
+      {x:160,  y:410, w:160, h:14, type:'platform'},
+      {x:380,  y:350, w:140, h:14, type:'platform'},
+      // Mid plaza — a wide pagoda rooftop where Taiga holds court
+      {x:600,  y:300, w:280, h:14, type:'platform'},
+      // Cross-alley stepping stones
+      {x:940,  y:360, w:120, h:14, type:'platform'},
+      {x:1100, y:300, w:120, h:14, type:'platform'},
+      {x:1260, y:240, w:140, h:14, type:'platform'},
+      // Right tier — second pagoda + descending alley back to ground
+      {x:1460, y:300, w:240, h:14, type:'platform'},
+      {x:1740, y:360, w:140, h:14, type:'platform'},
+      {x:1920, y:410, w:160, h:14, type:'platform'},
+      // High overhead lantern beams (jump rewards)
+      {x:480,  y:180, w:120, h:12, type:'platform'},
+      {x:1480, y:180, w:120, h:12, type:'platform'},
+    ],
+    npcs: [
+      {x:740,  name:'Taiga',  role:'taiga', color:'#8a4dd8'},
+      {x:1580, name:'Kuro',   role:'kuro',  color:'#5a3a8a'},
+      {x:1100, name:'Ren',    role:'ren',   color:'#a878dd'},
+    ],
+    portals: [
+      {x:80, dest:'candyCanyon', name:'◀ Sweet Candy Canyon'},
+    ],
+    spawns: [],
+  },
+  // v0.25.412 — The Bastion: heroic knight stronghold WEST of Everdawn
+  // Bazaar. Three connected maps share the same sapphire / marble / gold
+  // palette, lion-embossed gates, navy-and-gold silk banners, glowing
+  // mana-lanterns, and zero monster spawns (sun-drenched safe complex):
+  //   bastion          → central training courtyard (Barnaby the smith)
+  //   bastionThrone    → cathedral throne room (Will + Elena the scribe)
+  //   bastionRampart   → defensive walls overlooking the green plains
+  bastion: {
+    name:'The Bastion — Courtyard',
+    bg:'bastion',
+    sky:['#cce8f8','#ffe8b0','#a8d8a8'],          // sky → marble cream → green plains
+    worldWidth: 2400,
+    levelReq: 2,                                   // tier 0 — accessible early
+    fixedLayout: true,
+    isBastion: true,
+    taxiAccessible: true,
+    platforms: [
+      {x:0, y:480, w:2400, h:60, type:'ground'},
+      // Training-yard tiers (low jumping puzzles around straw dummies)
+      {x:200,  y:400, w:140, h:14, type:'platform'},
+      {x:420,  y:340, w:160, h:14, type:'platform'},
+      {x:680,  y:280, w:180, h:14, type:'platform'},
+      {x:940,  y:340, w:160, h:14, type:'platform'},
+      {x:1180, y:400, w:140, h:14, type:'platform'},
+      {x:1420, y:340, w:160, h:14, type:'platform'},
+      {x:1680, y:280, w:160, h:14, type:'platform'},
+      {x:1920, y:340, w:160, h:14, type:'platform'},
+      {x:2160, y:400, w:140, h:14, type:'platform'},
+      // High wall walks (banner-lined stone walks above the yard)
+      {x:540,  y:200, w:120, h:12, type:'platform'},
+      {x:1740, y:200, w:120, h:12, type:'platform'},
+    ],
+    npcs: [
+      {x:600, name:'Barnaby', role:'weapon', color:'#aa6a3a'},
+    ],
+    portals: [
+      {x:80,   dest:'town',           name:'▶ Everdawn Bazaar'},
+      {x:1200, dest:'bastionThrone',  name:'⬆ Cathedral Throne Room'},
+      {x:2300, dest:'bastionRampart', name:'▶ Defensive Rampart'},
+    ],
+    spawns: [],
+  },
+  bastionThrone: {
+    name:'The Bastion — Throne Room',
+    bg:'bastionThrone',
+    sky:['#1a2050','#3a3a78','#6a5a98'],          // cathedral indigo → twilight gold
+    worldWidth: 1800,
+    levelReq: 2,
+    fixedLayout: true,
+    isBastionThrone: true,
+    taxiAccessible: true,
+    platforms: [
+      {x:0, y:480, w:1800, h:60, type:'ground'},
+      // Stair tiers ascending to the throne dais
+      {x:300, y:400, w:200, h:14, type:'platform'},
+      {x:600, y:340, w:200, h:14, type:'platform'},
+      {x:900, y:280, w:200, h:14, type:'platform'},   // throne dais
+      {x:1200,y:340, w:200, h:14, type:'platform'},
+      {x:1500,y:400, w:200, h:14, type:'platform'},
+      // Banner-walk overhead
+      {x:200, y:180, w:1400, h:12, type:'platform'},
+    ],
+    npcs: [
+      {x:600,  name:'Elena', role:'scribe',   color:'#e8e8f8'},
+      {x:1000, name:'Will',  role:'champion', color:'#88aacc'},
+    ],
+    portals: [
+      {x:80, dest:'bastion', name:'◀ Bastion Courtyard'},
+    ],
+    spawns: [],
+  },
+  bastionRampart: {
+    name:'The Bastion — Rampart',
+    bg:'bastionRampart',
+    sky:['#88c8f0','#cce8ff','#d8e8a8'],          // bright blue → cumulus → plains green
+    worldWidth: 2200,
+    levelReq: 2,
+    fixedLayout: true,
+    isBastionRampart: true,
+    taxiAccessible: true,
+    platforms: [
+      {x:0, y:480, w:2200, h:60, type:'ground'},
+      // Battlement walk — high crenellated walkway across the wall
+      {x:0,    y:280, w:2200, h:14, type:'platform'},
+      // Crenel breaks (drop-down archer notches between the wall and ground)
+      {x:240,  y:380, w:160, h:14, type:'platform'},
+      {x:600,  y:380, w:160, h:14, type:'platform'},
+      {x:960,  y:380, w:160, h:14, type:'platform'},
+      {x:1320, y:380, w:160, h:14, type:'platform'},
+      {x:1680, y:380, w:160, h:14, type:'platform'},
+    ],
+    npcs: [],
+    portals: [
+      {x:80, dest:'bastion', name:'◀ Bastion Courtyard'},
+    ],
+    spawns: [],
+  },
+  // v0.25.413 — The Azure Acadamia: arcane hub city WEST of Tidal
+  // Lagoon. Two connected maps:
+  //   azureAcademia → spires + domed libraries around a glowing
+  //                   fountain, lush ancient forest with rune-bark
+  //                   trees. Auron (scholar) and Lyra (apprentice).
+  //   azureAbode    → Hera's small floating bubble-abode sky pocket,
+  //                   cosy furniture, drifting magical motes.
+  // Strict blue/silver/white palette. No monster spawns (academy hub).
+  azureAcademia: {
+    name:'The Azure Acadamia',
+    bg:'azureAcademia',
+    sky:['#1a2858','#3a5aa8','#88c8f0'],          // sapphire → cobalt → sky blue
+    worldWidth: 2400,
+    levelReq: 10,                                  // tier 2 — adjacent to Tidal Lagoon (11)
+    fixedLayout: true,
+    isAzureAcademia: true,
+    taxiAccessible: true,
+    platforms: [
+      {x:0, y:480, w:2400, h:60, type:'ground'},
+      // Approaching the central fountain plaza (steps up to the rim)
+      {x:160,  y:400, w:140, h:14, type:'platform'},
+      {x:340,  y:340, w:160, h:14, type:'platform'},
+      // Wide fountain rim (centre plaza)
+      {x:600,  y:300, w:320, h:14, type:'platform'},
+      // Crafting district — descending pad + workbench tier
+      {x:960,  y:340, w:160, h:14, type:'platform'},
+      {x:1140, y:400, w:140, h:14, type:'platform'},
+      // Lecture-hall steps rising to the dome
+      {x:1340, y:340, w:160, h:14, type:'platform'},
+      {x:1540, y:280, w:200, h:14, type:'platform'}, // domed library roof
+      {x:1780, y:340, w:160, h:14, type:'platform'},
+      {x:1980, y:400, w:140, h:14, type:'platform'},
+      {x:2180, y:340, w:140, h:14, type:'platform'},
+      // High spire walks (banner ledges + quick traverse)
+      {x:540,  y:180, w:120, h:12, type:'platform'},
+      {x:1620, y:180, w:120, h:12, type:'platform'},
+    ],
+    npcs: [
+      {x:1040, name:'Auron', role:'scholar',   color:'#3a5a98'},
+      {x:1700, name:'Lyra',  role:'apprentice',color:'#88bce8'},
+    ],
+    portals: [
+      {x:2300, dest:'tidalLagoon', name:'▶ Tidal Lagoon'},
+      {x:760,  dest:'azureAbode',  name:'⬆ Hera\'s Floating Abode'},
+    ],
+    spawns: [],
+  },
+  azureAbode: {
+    name:'Hera\'s Floating Abode',
+    bg:'azureAbode',
+    sky:['#0a1838','#1a3a78','#4a78c8'],          // deep night sapphire → sky blue glow
+    worldWidth: 1100,                              // small squarish room
+    levelReq: 10,
+    fixedLayout: true,
+    isAzureAbode: true,
+    taxiAccessible: true,
+    platforms: [
+      {x:0, y:480, w:1100, h:60, type:'ground'},   // floor of the bubble-room
+      // Cosy furnished tiers (lounge, study desk, reading nook)
+      {x:160,  y:400, w:200, h:14, type:'platform'}, // chaise lounge
+      {x:460,  y:340, w:200, h:14, type:'platform'}, // central reading dais
+      {x:760,  y:400, w:180, h:14, type:'platform'}, // window seat
+      // Floating ledge under the skylight
+      {x:380,  y:240, w:340, h:12, type:'platform'},
+    ],
+    npcs: [
+      {x:560, name:'Hera', role:'archmage', color:'#3a78d8'},
+    ],
+    portals: [
+      {x:80, dest:'azureAcademia', name:'⬇ Azure Acadamia'},
+    ],
+    spawns: [],
+  },
+  // v0.25.414 — The Jade Grove: tranquil Eastern habitat EAST of the Sky
+  // Garden. Stilt-houses over koi ponds, paper screens, thatched roofs,
+  // sacred archery range with cherry blossoms, central plaza with a
+  // massive stone incense burner, winding wooden walkways over a misty
+  // marsh. Strict jade-green / vermilion-red / moss-brown / misty-white
+  // palette. No monster spawns (sacred sanctuary).
+  jadeGrove: {
+    name:'The Jade Grove',
+    bg:'jadeGrove',
+    sky:['#d8e8d8','#f0d8d0','#f8e8c8'],          // misty white-green → blossom pink → soft cream
+    worldWidth: 2600,
+    levelReq: 9,                                   // tier 2 — adjacent to Sky Garden (9)
+    fixedLayout: true,
+    isJadeGrove: true,
+    taxiAccessible: true,
+    platforms: [
+      {x:0, y:480, w:2600, h:60, type:'ground'},
+      // Wooden walkways crossing the marsh — left approach
+      {x:160,  y:420, w:160, h:14, type:'platform'},
+      {x:380,  y:380, w:160, h:14, type:'platform'},
+      // Sacred archery range platform (Lady Hongyu's range)
+      {x:600,  y:340, w:280, h:14, type:'platform'},
+      // Central plaza tier — stone incense burner sits at the high centre
+      {x:960,  y:280, w:340, h:14, type:'platform'},
+      // Stilt-house porches over the pond
+      {x:1380, y:340, w:160, h:14, type:'platform'},
+      {x:1600, y:380, w:160, h:14, type:'platform'},
+      // Master Shen's herb-garden tier
+      {x:1820, y:340, w:200, h:14, type:'platform'},
+      // Eastern walkway descending back to the ground
+      {x:2080, y:380, w:160, h:14, type:'platform'},
+      {x:2300, y:420, w:160, h:14, type:'platform'},
+      // High cherry-blossom canopy walks (peaceful overlooks)
+      {x:540,  y:180, w:120, h:12, type:'platform'},
+      {x:1740, y:180, w:120, h:12, type:'platform'},
+    ],
+    // v0.25.419 — NPCs relocated to the new Emerald Village map next door.
+    // Jade Grove keeps its archery range / plaza / herb-garden platforms
+    // as scenic landmarks players walk past on the way to the village.
+    npcs: [],
+    portals: [
+      {x:80,   dest:'skyGarden',     name:'◀ Sky Garden'},
+      {x:2500, dest:'emeraldVillage',name:'▶ Emerald Village'},
+    ],
+    spawns: [],
+  },
+  // v0.25.419 — Emerald Village: a small Eastern hamlet beside the Jade
+  // Grove. Houses Lady Hongyu, Yun, and Master Shen — relocated from the
+  // grove so the grove itself reads as a scenic approach + the NPCs share
+  // a tighter conversational footprint. Same jade/vermilion palette as
+  // the grove, slightly warmer / greener sky.
+  emeraldVillage: {
+    name:'Emerald Village',
+    bg:'emeraldVillage',
+    sky:['#cce8c8','#e8f0d0','#f0e8b8'],          // soft green → cream → warm gold
+    worldWidth: 1900,
+    levelReq: 9,                                   // mid tier — same as Jade Grove
+    fixedLayout: true,
+    isEmeraldVillage: true,
+    isJadeGrove: true,                             // share the cherry-blossom + lantern decor
+    taxiAccessible: true,
+    platforms: [
+      {x:0, y:480, w:1900, h:60, type:'ground'},
+      // Western training yard — Yun the sentinel patrols
+      {x:160,  y:400, w:160, h:14, type:'platform'},
+      {x:340,  y:340, w:180, h:14, type:'platform'}, // Yun
+      // Central village plaza tier — Lady Hongyu's archery shrine
+      {x:580,  y:300, w:280, h:14, type:'platform'}, // Hongyu
+      // Stilt-house porches over the eastern pond
+      {x:920,  y:340, w:160, h:14, type:'platform'},
+      {x:1140, y:380, w:160, h:14, type:'platform'},
+      // Master Shen's herb-garden tier (eastern slope)
+      {x:1360, y:340, w:200, h:14, type:'platform'}, // Shen
+      {x:1620, y:400, w:160, h:14, type:'platform'},
+      // Cherry-blossom canopy walks (peaceful overlooks)
+      {x:480,  y:180, w:120, h:12, type:'platform'},
+      {x:1260, y:180, w:120, h:12, type:'platform'},
+    ],
+    npcs: [
+      {x:680,  name:'Lady Hongyu', role:'archer',   color:'#cc3344'},
+      {x:420,  name:'Yun',         role:'sentinel', color:'#3a7a4a'},
+      {x:1440, name:'Master Shen', role:'herbalist',color:'#8a7a4a'},
+    ],
+    portals: [
+      {x:80, dest:'jadeGrove', name:'◀ The Jade Grove'},
+    ],
+    spawns: [],
+  },
 };
 
 // Add one extra portal to forest to reach slime cave
@@ -8387,6 +8720,86 @@ MAPS.forest.portals.push({x:1200, dest:'slimeCave', name:'⬇ Gelwater Grotto'})
 MAPS.mushroom.portals.push({x:1300, dest:'candyCanyon', name:'⬇ Sweet Candy Canyon'});
 // v0.25.51 — branch from Candy Canyon into Bubblegum Swamp
 MAPS.candyCanyon.portals.push({x:1300, dest:'bubblegumSwamp', name:'⬇ Bubblegum Swamp'});
+// v0.25.411 — eastern rim of Candy Canyon opens onto the Shadow-Woven Slums.
+// Portal sits between the summit and the Elderwood exit so the candy
+// pastel summit visibly bleeds into violet shadow on the right side.
+MAPS.candyCanyon.portals.push({x:2380, dest:'shadowSlums', name:'▶ Shadow-Woven Slums'});
+// v0.25.412 — western gate of Everdawn Bazaar opens onto The Bastion. Sits
+// at x:200 (just inside the existing x:60 Sunset-Coast portal) so the two
+// left-side exits read as side-by-side gates rather than overlapping.
+MAPS.town.portals.push({x:200, dest:'bastion', name:'◀ The Bastion'});
+// v0.25.413 — western shore of Tidal Lagoon opens onto The Azure Acadamia.
+// Sits at x:200 (just inside the existing x:80 town portal) so the two
+// left-side exits read as side-by-side gates rather than overlapping.
+MAPS.tidalLagoon.portals.push({x:200, dest:'azureAcademia', name:'◀ The Azure Acadamia'});
+// v0.25.414 — eastern fringe of Sky Garden opens onto The Jade Grove. Sits
+// at x:2400 (just inside the existing x:2530 Frozen Peak portal) so the
+// two right-side exits read as side-by-side gates rather than overlapping.
+MAPS.skyGarden.portals.push({x:2400, dest:'jadeGrove', name:'▶ The Jade Grove'});
+// v0.25.415 — Connectivity pass: the four "elemental" zones + Tidal Lagoon
+// were taxi-only. Each now gets a logical walking neighbour, and a return
+// portal back to that neighbour, so the world graph is fully reachable on
+// foot. The original `→ town` portal stays as the canonical exit.
+MAPS.forest.portals.push({x:1700, dest:'wildflowerPlains', name:'⬇ Wildflower Plains'});
+MAPS.wildflowerPlains.portals.push({x:2300, dest:'forest', name:'▶ Emerald Thicket'});
+MAPS.sunsetBeach.portals.push({x:1700, dest:'tidalLagoon', name:'⬇ Tidal Lagoon'});
+MAPS.tidalLagoon.portals.push({x:2400, dest:'sunsetBeach', name:'▶ Sunset Coast'});
+MAPS.lavaCavern.portals.push({x:2000, dest:'graniteBluffs', name:'⬇ Granite Bluffs'});
+MAPS.graniteBluffs.portals.push({x:2500, dest:'lavaCavern', name:'▶ Lava Cavern'});
+MAPS.duneSands.portals.push({x:1500, dest:'thunderPlateau', name:'⬆ Thunder Plateau'});
+MAPS.thunderPlateau.portals.push({x:2600, dest:'duneSands', name:'▶ Dune Sands'});
+MAPS.sanctum.portals.push({x:1000, dest:'celestialSpire', name:'⬆ Celestial Spire'});
+MAPS.celestialSpire.portals.push({x:850, dest:'sanctum', name:'▶ Aetherion\'s Sanctum'});
+
+// v0.25.418 — World-map angle authoring, redone with proper quadrant
+// spacing so nodes don't overlap. Each map gets an explicit angle so
+// the diagram reads as four labelled regions (east / west / north /
+// south) instead of a crowded ring. The companion `_WM_REGION_LABELS`
+// table below drives the section labels + quadrant backdrops drawn in
+// _renderWorldMapDiagram.
+// Angle convention (SVG y-down): 0 = east, π/2 = south, π = west,
+// -π/2 = north.
+//
+// EAST  ▶ Forest realm (forest → mushroom → candy/shadow/bubble/ancient).
+//        wildflowerPlains is the meadow off the forest edge.
+MAPS.forest.wmAngle           =  0.00;     // Early ring
+MAPS.wildflowerPlains.wmAngle =  0.45;     // Early ring (SE meadow)
+MAPS.shadowSlums.wmAngle      = -0.55;     // Mid ring (NE)
+MAPS.candyCanyon.wmAngle      = -0.25;     // Mid ring
+MAPS.mushroom.wmAngle         =  0.00;     // Mid ring (cardinal east)
+MAPS.bubblegumSwamp.wmAngle   =  0.25;     // Mid ring
+MAPS.ancient.wmAngle          =  0.55;     // Mid ring (SE, deeper)
+//
+// WEST  ◀ Knight stronghold (bastion + sub-maps) + Azure Acadamia hub.
+//        Bastion sub-maps stack vertically tight around the main hall.
+MAPS.bastion.wmAngle          =  Math.PI;          // Early ring (cardinal W)
+MAPS.bastionThrone.wmAngle    =  Math.PI + 0.45;   // Early ring (NW — throne above)
+MAPS.bastionRampart.wmAngle   =  Math.PI - 0.45;   // Early ring (SW — wall below)
+MAPS.azureAcademia.wmAngle    =  Math.PI;          // Mid ring (cardinal W)
+MAPS.azureAbode.wmAngle       =  Math.PI + 0.30;   // Mid ring (NW — Hera's bubble above)
+//
+// NORTH ▲ Sky / mountain / cosmic chain. Skygarden → frozenpeak →
+//        lavacavern across the cardinal north, then the cosmic spires
+//        (stardust + celestial) on the end ring above them.
+MAPS.lavaCavern.wmAngle       = -Math.PI / 2 - 0.60;   // Mid ring NW
+MAPS.frozenPeak.wmAngle       = -Math.PI / 2 - 0.30;   // Mid ring N
+MAPS.skyGarden.wmAngle        = -Math.PI / 2 - 0.05;   // Mid ring (just W of cardinal N)
+MAPS.jadeGrove.wmAngle        = -Math.PI / 2 + 0.20;   // Mid ring NE
+MAPS.emeraldVillage.wmAngle   = -Math.PI / 2 + 0.42;   // Mid ring NE (east of Jade Grove)
+MAPS.graniteBluffs.wmAngle    = -Math.PI / 2 + 0.65;   // Mid ring NE (further east)
+MAPS.stardustAtrium.wmAngle   = -Math.PI / 2 - 0.25;   // End ring NW
+MAPS.celestialSpire.wmAngle   = -Math.PI / 2 + 0.25;   // End ring NE
+//
+// SOUTH ▼ Coast / desert / depths chain. Sunset → tidal → dune across
+//        the south, with crypt + thunder + honeycomb on the high ring
+//        and pearl on the deep end ring.
+MAPS.sunsetBeach.wmAngle      =  Math.PI / 2;          // Early ring (cardinal S)
+MAPS.tidalLagoon.wmAngle      =  Math.PI / 2 - 0.25;   // Mid ring SE
+MAPS.thunderPlateau.wmAngle   =  Math.PI / 2 - 0.55;   // High ring (SE plateau)
+MAPS.duneSands.wmAngle        =  Math.PI / 2 - 0.20;   // High ring SE
+MAPS.honeycombHollow.wmAngle  =  Math.PI / 2 + 0.15;   // High ring SW
+MAPS.cryptHollow.wmAngle      =  Math.PI / 2 + 0.45;   // High ring SW (deeper)
+MAPS.pearlBathhouse.wmAngle   =  Math.PI / 2;          // End ring (cardinal S, deep)
 // v0.25.54 — secret descent from the Crypt of Whispers into the Pearl
 // Bathhouse. Lv 40+ gate handled by the destination map's levelReq.
 MAPS.cryptHollow.portals.push({x:1500, dest:'pearlBathhouse', name:'⬇ Pearl Bathhouse'});
@@ -11469,6 +11882,16 @@ const _WM_BIOME_ICON = {
   wildflowerPlains:'🌼', tidalLagoon:'🌊', graniteBluffs:'🪨', thunderPlateau:'⚡',
   // v0.25.102 — angel tower
   celestialSpire:'😇',
+  // v0.25.411 — Shadow-Woven Slums (rebel ninjutsu hub east of Candy Canyon)
+  shadowSlums:'🥷',
+  // v0.25.412 — The Bastion (heroic knight stronghold west of the Bazaar)
+  bastion:'🛡', bastionThrone:'👑', bastionRampart:'⚔',
+  // v0.25.413 — The Azure Acadamia (arcane hub west of the Tidal Lagoon)
+  azureAcademia:'🔮', azureAbode:'🫧',
+  // v0.25.414 — The Jade Grove (Eastern sanctuary east of the Sky Garden)
+  jadeGrove:'🌸',
+  // v0.25.419 — Emerald Village (small hamlet east of the Jade Grove)
+  emeraldVillage:'🏘',
 };
 function toggleWorldMap() {
   if (!player.cls) { showToast('Pick a class first', 'common'); return; }
@@ -11490,7 +11913,12 @@ function toggleWorldMap() {
 // (different gating: W lets you walk anywhere unlocked, Taxi requires
 // Lumens + visited).
 function _wmComputePositions() {
-  const W = 760, H = 460;
+  // v0.25.420 — Canvas blown up from 760×460 to 1200×750 so each ring
+  // has real angular breathing room. Ring radii scaled ~1.4×, node /
+  // label sizes scaled ~1.3× in _renderWorldMapDiagram. Boss-corner
+  // anchors and quadrant wedge radius were re-derived from the new
+  // W,H so corner labels still hug the edges.
+  const W = 1200, H = 750;
   const cx = W / 2, cy = H / 2;
   const positions = {};
   const buckets = { hub: [], early: [], mid: [], high: [], end: [], boss: [], tower: [] };
@@ -11512,17 +11940,27 @@ function _wmComputePositions() {
   // Hub centre
   if (buckets.hub.length) positions[buckets.hub[0][0]] = { x: cx, y: cy, tier: 'hub' };
   // Concentric rings — vertical-axis squashed by 0.85 so it fits the wider modal
+  // v0.25.415 — per-map `wmAngle` override (in radians, 0 = east, π/2 =
+  // south, π = west, -π/2 = north). When set, the map ignores its
+  // sort-by-levelReq slot and anchors at the authored angle. Lets
+  // connected biomes cluster on the diagram (e.g. all the western maps
+  // line up at angle ≈ π) without forcing a hand-authored full layout.
   const placeRing = (arr, r, tier, startAngle = -Math.PI / 2) => {
     if (!arr.length) return;
     arr.forEach(([id, m], i) => {
-      const a = startAngle + (i / arr.length) * Math.PI * 2;
+      const a = (typeof m.wmAngle === 'number')
+        ? m.wmAngle
+        : startAngle + (i / arr.length) * Math.PI * 2;
       positions[id] = { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r * 0.78, tier };
     });
   };
-  placeRing(buckets.early, 90,  'early', -Math.PI / 2);
-  placeRing(buckets.mid,   155, 'mid',   -Math.PI / 2 + 0.30);
-  placeRing(buckets.high,  220, 'high',  -Math.PI / 2 + 0.10);
-  placeRing(buckets.end,   285, 'end',   -Math.PI / 2);
+  // v0.25.420 — Ring radii scaled up for the bigger 1200×750 canvas:
+  // early 90→140, mid 155→235, high 220→320, end 285→405. Larger
+  // angular gaps between same-ring neighbours, easier to click.
+  placeRing(buckets.early, 140, 'early', -Math.PI / 2);
+  placeRing(buckets.mid,   235, 'mid',   -Math.PI / 2 + 0.30);
+  placeRing(buckets.high,  320, 'high',  -Math.PI / 2 + 0.10);
+  placeRing(buckets.end,   405, 'end',   -Math.PI / 2);
   // Boss + Tower pinned to corners (override their ring slots)
   // v0.25.272 — explicit per-id boss positions instead of falling
   // through the level-sorted slot table. The old layout collapsed the
@@ -11540,18 +11978,21 @@ function _wmComputePositions() {
   // route from forest into the grotto is the first boss-fight onramp.
   // Falls back to the legacy bottom-left corner if forest isn't on
   // the map for some reason (defensive — shouldn't happen in practice).
+  // v0.25.420 — Boss / tower corner anchors re-derived for the 1200×750
+  // canvas. Margins bumped from ~40-75 px to ~70-110 px so the larger
+  // node + label discs still clear the legend bar at the bottom.
   const _forestPos = positions.forest;
   const _slimeCaveAnchor = _forestPos
-    ? { x: _forestPos.x + 56, y: _forestPos.y }     // 56 px to the right of Emerald Thicket
-    : { x: 50, y: H - 40 };
+    ? { x: _forestPos.x + 80, y: _forestPos.y }    // 80 px to the right of Emerald Thicket (was 56)
+    : { x: 80, y: H - 70 };
   const _WM_BOSS_OVERRIDES = {
     slimeCave:     _slimeCaveAnchor,                       // beside Emerald Thicket (Jelly King)
-    boss:          { x: W - 50,  y: H - 75 },              // bottom-right, lifted ~35 px (Queen's Hollow)
-    sanctum:       { x: 50,      y: 40      },             // top-left     (Aetherion's Sanctum)
-    gravitosArena: { x: 140,     y: 40      },             // beside sanctum (The Singularity)
+    boss:          { x: W - 80,  y: H - 110 },             // bottom-right (Queen's Hollow), clears legend
+    sanctum:       { x: 80,      y: 60       },            // top-left     (Aetherion's Sanctum)
+    gravitosArena: { x: 200,     y: 60       },            // beside sanctum (The Singularity)
   };
   let _legacyBossSlot = 0;
-  const _legacySlots = [{ x: 50, y: H - 40 }, { x: W - 50, y: H - 40 }, { x: 50, y: 40 }];
+  const _legacySlots = [{ x: 80, y: H - 70 }, { x: W - 80, y: H - 70 }, { x: 80, y: 60 }];
   buckets.boss.forEach(([id]) => {
     if (_WM_BOSS_OVERRIDES[id]) {
       positions[id] = { ..._WM_BOSS_OVERRIDES[id], tier: 'boss' };
@@ -11562,7 +12003,7 @@ function _wmComputePositions() {
     }
   });
   buckets.tower.forEach(([id], i) => {
-    positions[id] = { x: W - 60, y: 60 + i * 70, tier: 'tower' };
+    positions[id] = { x: W - 90, y: 90 + i * 100, tier: 'tower' };
   });
   return { positions, W, H };
 }
@@ -11574,6 +12015,103 @@ const _WM_TIER_LABEL = {
   hub: '🏛 Hub', early: '🌱 Beginner', mid: '⚔ Intermediate',
   high: '🔥 Advanced', end: '🌟 Endgame', boss: '👑 Boss', tower: '🗼 Tower',
 };
+// v0.25.422 — Edit-mode state. Shared between the W-key world map and
+// the helper functions below. Lets the user click pairs of nodes to
+// add/remove portal links, then dump the equivalent JS via Generate Code.
+let _wmEditMode = false;
+let _wmEditSelectedId = null;
+const _wmEditDeltas = {};                // key 'A|B' (sorted) → 'add' | 'remove'
+
+function _wmEditPairKey(a, b) {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+function _wmHasOriginalPortal(a, b) {
+  const A = MAPS[a]; if (A && A.portals && A.portals.some(p => p.dest === b)) return true;
+  const B = MAPS[b]; if (B && B.portals && B.portals.some(p => p.dest === a)) return true;
+  return false;
+}
+function _wmEditTogglePair(a, b) {
+  if (a === b) return;                                       // self-loops are noise
+  const key = _wmEditPairKey(a, b);
+  // Cycle: pressing the same pair twice reverts the delta.
+  if (_wmEditDeltas[key]) { delete _wmEditDeltas[key]; return; }
+  _wmEditDeltas[key] = _wmHasOriginalPortal(a, b) ? 'remove' : 'add';
+}
+function _wmEditResetDeltas() {
+  for (const k of Object.keys(_wmEditDeltas)) delete _wmEditDeltas[k];
+  _wmEditSelectedId = null;
+}
+function _wmEditGenerateCode() {
+  // Produces JS that mirrors the deltas — both add (push) and remove
+  // (filter). The user pastes it into the post-MAPS push block. For
+  // additions we pick a sensible x: 100 from the dest's left edge for
+  // the back-link, and worldWidth-100 from the source's right edge for
+  // the forward link. Names are derived from each map's display name.
+  const lines = [];
+  lines.push('// v0.25.422 — Edit-mode generated portal deltas');
+  for (const key of Object.keys(_wmEditDeltas).sort()) {
+    const [a, b] = key.split('|');
+    const A = MAPS[a], B = MAPS[b];
+    if (!A || !B) continue;
+    const aName = (A.name || a), bName = (B.name || b);
+    if (_wmEditDeltas[key] === 'add') {
+      const xA = Math.max(100, (A.worldWidth || 1200) - 100);
+      const xB = 100;
+      lines.push(`MAPS.${a}.portals.push({x:${xA}, dest:'${b}', name:'▶ ${bName}'});`);
+      lines.push(`MAPS.${b}.portals.push({x:${xB}, dest:'${a}', name:'◀ ${aName}'});`);
+    } else {
+      lines.push(`MAPS.${a}.portals = MAPS.${a}.portals.filter(p => p.dest !== '${b}');`);
+      lines.push(`MAPS.${b}.portals = MAPS.${b}.portals.filter(p => p.dest !== '${a}');`);
+    }
+  }
+  if (lines.length === 1) lines.push('// (no edits — toggle pairs of nodes in edit mode first)');
+  return lines.join('\n');
+}
+// Wire toolbar buttons once the DOM is ready. Idempotent — safe to
+// call from renderWorldMap each open.
+function _wmEditWireToolbar() {
+  const tog = document.getElementById('wm-edit-toggle');
+  const rst = document.getElementById('wm-edit-reset');
+  const gen = document.getElementById('wm-edit-gen');
+  const out = document.getElementById('worldmap-edit-output');
+  const ta  = document.getElementById('wm-edit-code');
+  const cpy = document.getElementById('wm-edit-copy');
+  const sts = document.getElementById('wm-edit-status');
+  const help= document.getElementById('worldmap-help');
+  if (!tog || tog._wired) return;
+  tog._wired = true;
+  const refresh = () => {
+    tog.textContent = _wmEditMode ? '✓ Done Editing' : '✏ Edit Connections';
+    tog.style.background = _wmEditMode
+      ? 'linear-gradient(180deg,#cc6644,#882211)' : '';
+    rst.style.display = _wmEditMode ? '' : 'none';
+    gen.style.display = _wmEditMode ? '' : 'none';
+    if (_wmEditMode) {
+      const n = Object.keys(_wmEditDeltas).length;
+      sts.textContent = n ? `${n} pending edit${n===1?'':'s'} · click two nodes to toggle a link` : 'Click two nodes to toggle a link between them';
+      help.style.display = 'none';
+    } else {
+      sts.textContent = '';
+      help.style.display = '';
+      out.style.display = 'none';
+    }
+    if (typeof renderWorldMap === 'function') renderWorldMap();
+  };
+  tog.onclick = () => { _wmEditMode = !_wmEditMode; _wmEditSelectedId = null; refresh(); };
+  rst.onclick = () => { _wmEditResetDeltas(); refresh(); };
+  gen.onclick = () => {
+    ta.value = _wmEditGenerateCode();
+    out.style.display = '';
+    sts.textContent = `${Object.keys(_wmEditDeltas).length} pending edit(s) — code generated below`;
+  };
+  cpy.onclick = () => {
+    ta.select(); document.execCommand && document.execCommand('copy');
+    if (navigator.clipboard) navigator.clipboard.writeText(ta.value).catch(()=>{});
+    cpy.textContent = '✓ Copied'; setTimeout(()=> cpy.textContent = '📋 Copy', 1200);
+  };
+  // Initial state visibility
+  refresh();
+}
 // Shared SVG renderer. opts:
 //   mode: 'travel' (W) | 'taxi' (NPC)
 //   onPick: (id, mapDef) => void   // called for valid clicks
@@ -11588,11 +12126,35 @@ function _renderWorldMapDiagram(host, opts) {
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
   svg.setAttribute('width', '100%');
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-  // v0.25.268 — authored World Map interface art (animated gif). Layered
-  // over the original radial gradient so the parchment reads as a card on
-  // a starlit table and so the gif's transparent / dark edges still feel
-  // like they belong inside the modal.
-  svg.style.cssText = 'background:linear-gradient(rgba(10,6,24,0.45),rgba(10,6,24,0.55)),url("backgrounds/bg_v3_worldMapInterface.gif") center/cover no-repeat,radial-gradient(ellipse at center,#1e1834,#0a0618 80%); border-radius:10px; border:1px solid rgba(180,140,220,0.35); display:block;';
+  // v0.25.268 — authored World Map interface art. v0.25.418 makes the
+  // file lookup forgiving: try the new pastel-cosmic illustration in
+  // png/jpg/webp/gif, then fall back to the original gif, then to the
+  // pure radial-gradient parchment if nothing loads. CSS background-
+  // image doesn't natively probe alternates, so we preload via <Image>
+  // and apply once one resolves.
+  svg.style.cssText = 'background:linear-gradient(rgba(10,6,24,0.18),rgba(10,6,24,0.22)),radial-gradient(ellipse at center,#1e1834,#0a0618 80%); border-radius:10px; border:1px solid rgba(180,140,220,0.35); display:block;';
+  (function _wmTryBackgrounds() {
+    const candidates = [
+      'backgrounds/bg_v3_worldMap_v2.png',
+      'backgrounds/bg_v3_worldMap_v2.gif',
+      'backgrounds/bg_v3_worldMap_v2.jpg',
+      'backgrounds/bg_v3_worldMap_v2.webp',
+      'backgrounds/bg_v3_worldmap_v2.png',         // lowercase fallback
+      'backgrounds/bg_v3_worldMapInterface.gif',   // legacy gif
+    ];
+    let i = 0;
+    const next = () => {
+      if (i >= candidates.length) return;          // none worked → keep radial gradient
+      const url = candidates[i++];
+      const probe = new Image();
+      probe.onload = () => {
+        svg.style.background = `linear-gradient(rgba(10,6,24,0.18),rgba(10,6,24,0.22)),url("${url}") center/cover no-repeat,radial-gradient(ellipse at center,#1e1834,#0a0618 80%)`;
+      };
+      probe.onerror = next;
+      probe.src = url;
+    };
+    next();
+  })();
   // Background sparkle stars
   for (let i = 0; i < 60; i++) {
     const s = document.createElementNS(SVG_NS, 'circle');
@@ -11602,19 +12164,101 @@ function _renderWorldMapDiagram(host, opts) {
     s.setAttribute('fill', 'rgba(255,255,255,0.35)');
     svg.appendChild(s);
   }
-  // Connection edges from town to ring nodes (subtle paths)
-  const hubId = Object.keys(positions).find(id => positions[id].tier === 'hub');
-  if (hubId) {
-    const hub = positions[hubId];
-    for (const [id, p] of Object.entries(positions)) {
-      if (id === hubId) continue;
-      if (p.tier === 'boss' || p.tier === 'tower') continue;
+  // v0.25.418 — Quadrant backdrops + region labels. Four faint coloured
+  // wedges (one per cardinal direction) make the four regions readable
+  // at a glance: 🛡 west / 🌳 east / ☁ north / 🌅 south. Each wedge is
+  // a 90° pie sector centred on the cardinal axis, drawn before the
+  // edges so portal lines and nodes paint cleanly on top.
+  const cx = W / 2, cy = H / 2;
+  const _WM_QUADRANTS = [
+    { centerAngle:  0,           color: 'rgba(120,200,120,0.10)', label: '🌳 EASTERN FOREST',     labelX: W - 22, labelY: cy, anchor: 'end',   color2: 'rgba(160,220,140,0.55)' },
+    { centerAngle:  Math.PI,     color: 'rgba(120,180,240,0.10)', label: '🛡 WESTERN STRONGHOLD', labelX: 22,     labelY: cy, anchor: 'start', color2: 'rgba(160,200,250,0.55)' },
+    { centerAngle: -Math.PI / 2, color: 'rgba(200,160,240,0.10)', label: '☁ NORTHERN HIGHLANDS', labelX: cx,     labelY: 32, anchor: 'middle',color2: 'rgba(220,180,250,0.55)' },
+    { centerAngle:  Math.PI / 2, color: 'rgba(255,180,140,0.10)', label: '🌅 SOUTHERN COAST',    labelX: cx,     labelY: H - 50, anchor: 'middle', color2: 'rgba(255,200,160,0.55)' },
+  ];
+  const wedgeR = 470;            // v0.25.420 — outer radius (covers the new end ring at 405 + buffer)
+  for (const q of _WM_QUADRANTS) {
+    // Pie wedge: 90° span centred on q.centerAngle
+    const a0 = q.centerAngle - Math.PI / 4;
+    const a1 = q.centerAngle + Math.PI / 4;
+    const x0 = cx + Math.cos(a0) * wedgeR;
+    const y0 = cy + Math.sin(a0) * wedgeR * 0.78;
+    const x1 = cx + Math.cos(a1) * wedgeR;
+    const y1 = cy + Math.sin(a1) * wedgeR * 0.78;
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', `M ${cx} ${cy} L ${x0.toFixed(1)} ${y0.toFixed(1)} A ${wedgeR} ${wedgeR * 0.78} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)} Z`);
+    path.setAttribute('fill', q.color);
+    svg.appendChild(path);
+    // Section label at the outer edge of the quadrant
+    const lbl = document.createElementNS(SVG_NS, 'text');
+    lbl.setAttribute('x', q.labelX);
+    lbl.setAttribute('y', q.labelY);
+    lbl.setAttribute('text-anchor', q.anchor);
+    lbl.setAttribute('font-size', '18');                  // v0.25.420 — was 13, scaled for 1200px canvas
+    lbl.setAttribute('font-family', 'Trebuchet MS, sans-serif');
+    lbl.setAttribute('font-weight', '700');
+    lbl.setAttribute('letter-spacing', '2.5');            // v0.25.420 — was 1.5
+    lbl.setAttribute('fill', q.color2);
+    lbl.setAttribute('pointer-events', 'none');
+    lbl.textContent = q.label;
+    svg.appendChild(lbl);
+  }
+  // Faint cross-hair axis lines (cardinal dividers)
+  for (const [x1, y1, x2, y2] of [[cx, 4, cx, H - 30], [4, cy, W - 4, cy]]) {
+    const ln = document.createElementNS(SVG_NS, 'line');
+    ln.setAttribute('x1', x1); ln.setAttribute('y1', y1);
+    ln.setAttribute('x2', x2); ln.setAttribute('y2', y2);
+    ln.setAttribute('stroke', 'rgba(180,160,220,0.10)');
+    ln.setAttribute('stroke-width', '1');
+    ln.setAttribute('stroke-dasharray', '2,4');
+    svg.appendChild(ln);
+  }
+  // v0.25.416 — Connection edges now reflect ACTUAL portal links between
+  // maps, not the old hub-radiating decorative spokes. For every map's
+  // portals[].dest we draw one line between source and destination
+  // positions; pairs are deduped (if A→B and B→A both exist, we draw
+  // one line). The line is painted before nodes so the discs cover the
+  // line ends cleanly.
+  // v0.25.422 — In edit mode, edges respect deltas: 'remove' deltas mute
+  // the original line + paint a red strikethrough; 'add' deltas paint a
+  // bright green dashed overlay between two nodes that didn't previously
+  // share a portal.
+  const drawnEdges = new Set();
+  for (const [id, p] of Object.entries(positions)) {
+    const m = MAPS[id]; if (!m || !m.portals) continue;
+    for (const portal of m.portals) {
+      const dest = portal.dest;
+      const q = positions[dest];
+      if (!q) continue;                               // dest not on the diagram (e.g. zodiac)
+      const key = id < dest ? `${id}|${dest}` : `${dest}|${id}`;
+      if (drawnEdges.has(key)) continue;
+      drawnEdges.add(key);
+      const isRemoved = _wmEditMode && _wmEditDeltas[key] === 'remove';
       const ln = document.createElementNS(SVG_NS, 'line');
-      ln.setAttribute('x1', hub.x); ln.setAttribute('y1', hub.y);
-      ln.setAttribute('x2', p.x);   ln.setAttribute('y2', p.y);
-      ln.setAttribute('stroke', 'rgba(180,140,220,0.18)');
-      ln.setAttribute('stroke-width', '1');
-      ln.setAttribute('stroke-dasharray', '3,3');
+      ln.setAttribute('x1', p.x); ln.setAttribute('y1', p.y);
+      ln.setAttribute('x2', q.x); ln.setAttribute('y2', q.y);
+      ln.setAttribute('stroke', isRemoved ? 'rgba(255,80,80,0.65)' : 'rgba(200,170,240,0.55)');
+      ln.setAttribute('stroke-width', '2.2');             // v0.25.420 — was 1.5
+      ln.setAttribute('stroke-linecap', 'round');
+      if (isRemoved) ln.setAttribute('stroke-dasharray', '8,6');
+      svg.appendChild(ln);
+    }
+  }
+  // v0.25.422 — pending 'add' overlays. Drawn in bright green dashed,
+  // between any two positioned nodes whose pair-key was marked 'add'.
+  if (_wmEditMode) {
+    for (const key of Object.keys(_wmEditDeltas)) {
+      if (_wmEditDeltas[key] !== 'add') continue;
+      const [a, b] = key.split('|');
+      const pa = positions[a], pb = positions[b];
+      if (!pa || !pb) continue;
+      const ln = document.createElementNS(SVG_NS, 'line');
+      ln.setAttribute('x1', pa.x); ln.setAttribute('y1', pa.y);
+      ln.setAttribute('x2', pb.x); ln.setAttribute('y2', pb.y);
+      ln.setAttribute('stroke', 'rgba(80,240,140,0.85)');
+      ln.setAttribute('stroke-width', '3');
+      ln.setAttribute('stroke-linecap', 'round');
+      ln.setAttribute('stroke-dasharray', '8,6');
       svg.appendChild(ln);
     }
   }
@@ -11626,38 +12270,56 @@ function _renderWorldMapDiagram(host, opts) {
     const tierCol = _WM_TIER_COLOR[p.tier] || '#aaa';
     const g = document.createElementNS(SVG_NS, 'g');
     g.setAttribute('transform', `translate(${p.x},${p.y})`);
-    g.style.cursor = (here || !acc.ok) ? 'not-allowed' : 'pointer';
+    // v0.25.422 — In edit mode every node is clickable (we pair them up
+    // instead of teleporting), so override the lock-cursor and treat all
+    // nodes as pointer.
+    g.style.cursor = _wmEditMode ? 'crosshair' : ((here || !acc.ok) ? 'not-allowed' : 'pointer');
+    // v0.25.420 — Sizes scaled ~1.4× for the bigger 1200×750 canvas so
+    // discs read as comfortable click targets (~28-32 px radius vs the
+    // old 19-22 px). Halo, icon, and labels scaled to match.
     // Glow halo for current/accessible
     if (here) {
       const halo = document.createElementNS(SVG_NS, 'circle');
-      halo.setAttribute('r', 28);
+      halo.setAttribute('r', 40);                       // was 28
       halo.setAttribute('fill', 'rgba(255,221,136,0.18)');
       halo.setAttribute('stroke', '#ffdd88');
-      halo.setAttribute('stroke-width', '2');
+      halo.setAttribute('stroke-width', '2.5');         // was 2
       g.appendChild(halo);
+    }
+    // v0.25.422 — Selected-in-edit-mode halo (pulsing green so the user
+    // knows which node is the first half of a pair). Painted under the
+    // node disc so the icon stays legible.
+    if (_wmEditMode && id === _wmEditSelectedId) {
+      const sel = document.createElementNS(SVG_NS, 'circle');
+      sel.setAttribute('r', 44);
+      sel.setAttribute('fill', 'rgba(80,240,140,0.20)');
+      sel.setAttribute('stroke', '#5aff96');
+      sel.setAttribute('stroke-width', '3');
+      sel.setAttribute('stroke-dasharray', '6,4');
+      g.appendChild(sel);
     }
     // Node disc
     const disc = document.createElementNS(SVG_NS, 'circle');
-    disc.setAttribute('r', here ? 22 : 19);
+    disc.setAttribute('r', here ? 32 : 28);             // was 22 / 19
     disc.setAttribute('fill', acc.ok ? `rgba(40,28,60,0.85)` : 'rgba(20,15,30,0.7)');
     disc.setAttribute('stroke', here ? '#ffdd88' : tierCol);
-    disc.setAttribute('stroke-width', here ? 3 : 2);
+    disc.setAttribute('stroke-width', here ? 3.5 : 2.5);// was 3 / 2
     if (!acc.ok) disc.setAttribute('opacity', '0.55');
     g.appendChild(disc);
     // Biome icon (emoji as SVG text)
     const ico = document.createElementNS(SVG_NS, 'text');
-    ico.setAttribute('y', 6);
+    ico.setAttribute('y', 9);                            // was 6 (re-centred for 28-px disc)
     ico.setAttribute('text-anchor', 'middle');
-    ico.setAttribute('font-size', '20');
+    ico.setAttribute('font-size', '28');                 // was 20
     ico.setAttribute('pointer-events', 'none');
     ico.textContent = _WM_BIOME_ICON[id] || '📍';
     if (!acc.ok) ico.setAttribute('opacity', '0.55');
     g.appendChild(ico);
-    // Label below
+    // Label below — v0.25.420 sizes scaled for the bigger canvas
     const label = document.createElementNS(SVG_NS, 'text');
-    label.setAttribute('y', 38);
+    label.setAttribute('y', 52);                       // was 38
     label.setAttribute('text-anchor', 'middle');
-    label.setAttribute('font-size', '10');
+    label.setAttribute('font-size', '14');             // was 10
     label.setAttribute('font-family', 'Trebuchet MS, sans-serif');
     label.setAttribute('font-weight', here ? '700' : '500');
     label.setAttribute('fill', here ? '#ffe6a8' : (acc.ok ? '#ddd' : '#666'));
@@ -11666,18 +12328,36 @@ function _renderWorldMapDiagram(host, opts) {
     g.appendChild(label);
     // Sub-label (lvl req / fee / lock reason)
     const sub = document.createElementNS(SVG_NS, 'text');
-    sub.setAttribute('y', 50);
+    sub.setAttribute('y', 70);                         // was 50
     sub.setAttribute('text-anchor', 'middle');
-    sub.setAttribute('font-size', '9');
+    sub.setAttribute('font-size', '12');               // was 9
     sub.setAttribute('font-family', 'Trebuchet MS, sans-serif');
     sub.setAttribute('fill', here ? '#ffdd88' : (acc.ok ? '#999' : '#aa6677'));
     sub.setAttribute('pointer-events', 'none');
     sub.textContent = here ? '▸ YOU ARE HERE'
                     : (acc.reason || (m.levelReq ? `Lv ${m.levelReq}+` : ''));
     g.appendChild(sub);
-    if (!here && acc.ok) {
-      g.addEventListener('mouseenter', () => disc.setAttribute('r', 22));
-      g.addEventListener('mouseleave', () => disc.setAttribute('r', 19));
+    // v0.25.422 — Click handling. In edit mode every node is clickable
+    // (selects → toggles a pair). In normal mode only accessible non-here
+    // nodes teleport.
+    if (_wmEditMode) {
+      g.addEventListener('mouseenter', () => disc.setAttribute('r', 32));
+      g.addEventListener('mouseleave', () => disc.setAttribute('r', 28));
+      g.addEventListener('click', () => {
+        if (_wmEditSelectedId === null) {
+          _wmEditSelectedId = id;                     // first click — pick source
+        } else if (_wmEditSelectedId === id) {
+          _wmEditSelectedId = null;                   // click same node → deselect
+        } else {
+          _wmEditTogglePair(_wmEditSelectedId, id);   // second click — toggle pair
+          _wmEditSelectedId = null;
+        }
+        if (typeof _wmEditWireToolbar === 'function') _wmEditWireToolbar();
+        if (typeof renderWorldMap === 'function') renderWorldMap();
+      });
+    } else if (!here && acc.ok) {
+      g.addEventListener('mouseenter', () => disc.setAttribute('r', 32));   // was 22
+      g.addEventListener('mouseleave', () => disc.setAttribute('r', 28));   // was 19
       g.addEventListener('click', () => opts.onPick && opts.onPick(id, m));
     }
     // Hover tooltip via title
@@ -11686,33 +12366,36 @@ function _renderWorldMapDiagram(host, opts) {
     g.appendChild(titleEl);
     svg.appendChild(g);
   }
-  // Legend along bottom
-  const legY = H - 14;
+  // Legend along bottom — v0.25.420 sizes scaled for the bigger canvas
+  const legY = H - 18;
   const tiers = ['hub','early','mid','high','end','boss','tower'];
-  let legX = 8;
+  let legX = 14;
   const legBg = document.createElementNS(SVG_NS, 'rect');
-  legBg.setAttribute('x', 0); legBg.setAttribute('y', H - 28);
-  legBg.setAttribute('width', W); legBg.setAttribute('height', 28);
+  legBg.setAttribute('x', 0); legBg.setAttribute('y', H - 36);
+  legBg.setAttribute('width', W); legBg.setAttribute('height', 36);
   legBg.setAttribute('fill', 'rgba(0,0,0,0.4)');
   svg.appendChild(legBg);
   for (const t of tiers) {
     const dot = document.createElementNS(SVG_NS, 'circle');
-    dot.setAttribute('cx', legX + 6); dot.setAttribute('cy', legY);
-    dot.setAttribute('r', 4); dot.setAttribute('fill', _WM_TIER_COLOR[t]);
+    dot.setAttribute('cx', legX + 8); dot.setAttribute('cy', legY);
+    dot.setAttribute('r', 5); dot.setAttribute('fill', _WM_TIER_COLOR[t]);
     svg.appendChild(dot);
     const lt = document.createElementNS(SVG_NS, 'text');
-    lt.setAttribute('x', legX + 14); lt.setAttribute('y', legY + 3);
-    lt.setAttribute('font-size', '9'); lt.setAttribute('font-family', 'Trebuchet MS, sans-serif');
+    lt.setAttribute('x', legX + 18); lt.setAttribute('y', legY + 4);
+    lt.setAttribute('font-size', '12'); lt.setAttribute('font-family', 'Trebuchet MS, sans-serif');
     lt.setAttribute('fill', '#ddd');
     lt.textContent = _WM_TIER_LABEL[t];
     svg.appendChild(lt);
-    legX += 100;
+    legX += 130;
   }
   host.appendChild(svg);
 }
 function renderWorldMap() {
   const grid = document.getElementById('worldmap-grid');
   if (!grid) return;
+  // v0.25.422 — Make sure the edit-mode toolbar is wired + reflects
+  // current state. Idempotent (the wiring guard inside skips re-binding).
+  if (typeof _wmEditWireToolbar === 'function') _wmEditWireToolbar();
   const playerLv = (player && player.level) || 1;
   _renderWorldMapDiagram(grid, {
     mode: 'travel',
@@ -20663,6 +21346,96 @@ function openNPC(npc) {
     text = 'Darling! Let me redo your look. Whatever class you swing or spell you cast, you should LOOK fabulous doing it.';
     opts.push({ t:'Open Wardrobe ✨', cb:() => { closeDialog(); if (typeof openCharStudio === 'function') openCharStudio(); } });
     opts.push({ t:'(Tip: press Q anywhere)', cb:() => closeDialog() });
+  } else if (npc.role === 'taiga') {
+    // v0.25.411 — Taiga, leader of the rebel ninjutsu cell hiding in
+    // the Shadow-Woven Slums. Commanding, intimidating; speaks of the
+    // fallen empire and the violet shadow that will reclaim it.
+    text = 'You smell of sugar and sunlight, traveller. Cross the threshold quietly — the Slums have ears, and most of them are mine.\n\nWe were the Imperial Shadow once. Now we are alley smoke and rumor. But the empire will breathe again, and when it does, every blade in this ghetto will know whose hand it answered.';
+    opts.push({ t:'Who do you fight?',     cb:() => { document.getElementById('dialog-text').textContent = 'The same hand that toppled the capital. We do not name it here. But press your ear to a paper lantern at midnight and you will hear what I hear.'; } });
+    opts.push({ t:'How can I help?',       cb:() => { document.getElementById('dialog-text').textContent = 'Listen first. Watch second. The shadow magic in these alleys answers patience, not fury — Kuro will tell you the same, when he stops sharpening that ghost of a blade.'; } });
+  } else if (npc.role === 'kuro') {
+    // v0.25.411 — Kuro, the shadow samurai. Stoic, hooded, abandoned
+    // honour for speed. His katana is condensed shadow — drawn from
+    // the alleys themselves.
+    text = '…You came up the eastern stair. Few do. Fewer leave by it.\n\nI was samurai once. There was a code, and a lord, and a sun. The code is ash. The lord is bones. And the sun has not touched these streets in eleven winters. So I learned a faster art — the kind that ends an argument before the second breath.';
+    opts.push({ t:'Why the shadow blade?', cb:() => { document.getElementById('dialog-text').textContent = 'Steel rings. Shadow does not. The slums are narrow and the enemy is many — I trade a clean draw for a quiet kill, and I sleep no worse for it.'; } });
+    opts.push({ t:'Teach me the draw.',    cb:() => { document.getElementById('dialog-text').textContent = 'Earn Taiga\'s trust first. I do not put a violet edge in the hand of a stranger, no matter how candy-bright their eyes.'; } });
+  } else if (npc.role === 'ren') {
+    // v0.25.411 — Ren, the alleyway thief. Nimble, smoke-trailing,
+    // playful but dangerous. She traffics in stolen scrolls and the
+    // shadow techniques that the rest of the cell consider beneath
+    // them.
+    text = 'Heyyy, fresh face! Don\'t mind the smoke — boots leak shadow when you run as much as I do. Lock pick? Rope? A scroll Taiga doesn\'t know I have? Name your trouble, I\'ve probably got the cure.\n\nJust — keep your hands where I can see them. Habit. You\'ll learn it too, if you stick around.';
+    opts.push({ t:'What do you steal?',    cb:() => { document.getElementById('dialog-text').textContent = 'Anything that should\'ve been ours before the empire fell. Mostly scrolls. Sometimes secrets. Once a whole pagoda — long story, ask me when I\'m drunk.'; } });
+    opts.push({ t:'Show me the alleys.',   cb:() => { document.getElementById('dialog-text').textContent = 'Stay close, watch my boots, and DO NOT trip a paper lantern — they hum, and humming brings company. The good kind for me, the bad kind for you.'; } });
+  } else if (npc.role === 'champion') {
+    // v0.25.412 — Will, the High Commander. Calm booming voice,
+    // never refuses a plea for help. Embodiment of the Righteous
+    // Path. Routes the player to the level-up panel as a "training
+    // boon" so the dialog has a concrete utility hook.
+    text = 'Welcome to the Bastion, traveller. I am Will, High Commander of this order — and so long as Justice\'s Breath answers my hand, no honest plea leaves these walls unanswered.\n\nThe Moji lands have many shadows, and many more swords willing to chase them. Tell me what you carry, and I will tell you whether you carry enough.';
+    opts.push({ t:'Train with me ✦',       cb:() => { closeDialog(); if (typeof openLevelUpPanel === 'function') openLevelUpPanel(); } });
+    opts.push({ t:'Who fights beside you?', cb:() => { document.getElementById('dialog-text').textContent = 'Elena keeps our records — every victory in the lands of Moji passes through her quill. Barnaby keeps our steel — and his temper, when he can. Speak with both before you ride out. They are why this fortress still stands.'; } });
+    opts.push({ t:'Why the white blade?',   cb:() => { document.getElementById('dialog-text').textContent = 'Justice\'s Breath is older than my house. The light is not mine — I only carry it. A sword that knows its purpose does not need its bearer to shout. Remember that, when your own steel sings.'; } });
+  } else if (npc.role === 'scribe') {
+    // v0.25.412 — Elena, knight-priestess + lore guide + skill
+    // trainer. Phoenix-feather quill, leather-bound tome. Routes the
+    // player to the same skill / level-up panels as the amnesiac so
+    // training is reachable from this side of the world too.
+    text = 'A new name for the ledger! Hold a moment — quill, ink, page. There. Tell me what you have done since the last sunrise, and I will set it where it cannot be unmade.\n\nChivalry is not only the sword, friend. It is the memory of the sword. Every victory you earn in the lands of Moji passes through this tome before it earns the right to be called a deed.';
+    opts.push({ t:'Train stats',           cb:() => { closeDialog(); if (typeof openSkillsModal === 'function') openSkillsModal(); } });
+    opts.push({ t:'Level up ✦',            cb:() => { closeDialog(); if (typeof openLevelUpPanel === 'function') openLevelUpPanel(); } });
+    opts.push({ t:'Tell me of the lands.', cb:() => { document.getElementById('dialog-text').textContent = 'Moji is older than its current name. The Bastion was raised in the second age, when the lions still roamed the western plains; the gates remember them in gold. Sweet Candy Canyon to the east is younger, but no less strange. I am still cataloguing the Shadow-Woven Slums — they slip the quill.'; } });
+  } else if (npc.role === 'archmage') {
+    // v0.25.413 — Hera, the Azure Archmage. Charismatic leader of the
+    // Acadamia restoration; sapphire-haired sorceress, silver eyes,
+    // staff with a swirling blue crystal orb. Dialog routes to the
+    // level-up panel (treated as her formal "tutelage").
+    text = 'You came up the bubble-stair without burning your boots — that is the first lesson, and you passed it without me. Welcome to my abode, traveller.\n\nI am Hera, and what is left of the Acadamia is left because we refused to let it go. The arcane is not lost, only scattered. If you have come to learn, sit. If you have come to fight, sit anyway — the lesson is the same.';
+    opts.push({ t:'Tutelage ✦',            cb:() => { closeDialog(); if (typeof openLevelUpPanel === 'function') openLevelUpPanel(); } });
+    opts.push({ t:'What was the Acadamia?', cb:() => { document.getElementById('dialog-text').textContent = 'A school, once. A library, twice. A graveyard, briefly. We are rebuilding it back into the first thing — but the second and third are still under our floorboards. Mind your step in the lower halls.'; } });
+    opts.push({ t:'Why blue magic?',        cb:() => { document.getElementById('dialog-text').textContent = 'Because the old Acadamia ran on a single ley-line, and that line is sapphire. Every spell here echoes it. You will see it in the lanterns, the ink, the river, even the moths. Lean in close enough and you will see it in your own breath.'; } });
+  } else if (npc.role === 'scholar') {
+    // v0.25.413 — Auron, head librarian + lorekeeper. Slightly
+    // hunched, white beard, glowing-blue-ink quill. Wraps the same
+    // skill-training surface as Elena (it's a fellow archive role).
+    text = '…hm? Oh — yes, yes, come in, come in. Mind the third stack, the binding is rotten. I had to re-glue half of it last winter and the other half disagrees with me about its place in the index.\n\nThis tome here is a record of every spell-form that has crossed the Acadamia threshold since the rebuilding began. Yours, if you cast one near me, will join it. The quill insists.';
+    opts.push({ t:'Train stats',         cb:() => { closeDialog(); if (typeof openSkillsModal === 'function') openSkillsModal(); } });
+    opts.push({ t:'Level up ✦',          cb:() => { closeDialog(); if (typeof openLevelUpPanel === 'function') openLevelUpPanel(); } });
+    opts.push({ t:'What ruins lie below?', cb:() => { document.getElementById('dialog-text').textContent = 'The first Acadamia, a civilization older than its name. We built our libraries on top of theirs. When the lanterns flicker the wrong colour, that is them, remembering. Best left to remember alone, between you and me.'; } });
+  } else if (npc.role === 'apprentice') {
+    // v0.25.413 — Lyra, the Aspiring Sorceress. Young, eager, light-
+    // blue spiky hair, conjuring a small ball of blue mana. Acts as
+    // a low-level quest hint NPC.
+    text = 'Hi, hi — wait, hold on, almost — there! Did you see it? A whole sphere, no smoke this time! …mostly no smoke.\n\nI\'m Lyra, apprentice in the Acadamia. Hera says I\'ll have the Form down by autumn, Auron says by next century, and I say by tomorrow if you stop watching me, sorry, that came out rude. Want to see another one? I\'m getting good!';
+    opts.push({ t:'Show me a spell.',      cb:() => { document.getElementById('dialog-text').textContent = '*Lyra cups her hands and a wobbling sphere of blue mana flares between them. It sputters, sparks, and pops in a tiny puff of indigo smoke that smells faintly of citrus.*\n\nOkay. That was MOSTLY supposed to happen.'; } });
+    opts.push({ t:'Any tips for newbies?', cb:() => { document.getElementById('dialog-text').textContent = 'Yes! 1) Never lick the blue cauldrons in the Crafting District, even on a dare. 2) The fountain heals you faster than potions if you stand in it on a Sunday. 3) Auron pretends to nap. He is NOT napping. He is listening.'; } });
+  } else if (npc.role === 'archer') {
+    // v0.25.414 — Lady Hongyu, the Divine Archer. Descended deity,
+    // crimson-and-white hanfu, jade hairpins, longbow that manifests
+    // arrows of red light. Stoic but compassionate; "shield of the
+    // wilderness". Routes to the level-up panel as her formal blessing.
+    text = 'Step softly, traveller. The grove hears even your breath. I am Hongyu — and so long as the Vermilion Reach answers my hand, no shadow crosses these woods uninvited.\n\nYou have earned the right to be heard. Speak, and the forest will listen with me.';
+    opts.push({ t:'Receive blessing ✦',     cb:() => { closeDialog(); if (typeof openLevelUpPanel === 'function') openLevelUpPanel(); } });
+    opts.push({ t:'What guards the grove?', cb:() => { document.getElementById('dialog-text').textContent = 'Yun walks the borders. Master Shen tends the roots. The cherry trees remember every footfall, and the lanterns refuse to go dark even when the marsh forgets the sun. We do not need walls — we have stillness.'; } });
+    opts.push({ t:'Why descended?',          cb:() => { document.getElementById('dialog-text').textContent = 'Because somewhere, something must remain unbroken. The grove was promised that, long before I was named for it. I came down to keep the promise. The bow followed because it could not bear to be left behind.'; } });
+  } else if (npc.role === 'herbalist') {
+    // v0.25.414 — Master Shen, the Root-Singer. Hemp robes, wicker
+    // basket of fungi + glowing herbs, talks to plants like children.
+    // Routes the player to the potion shop as his "garden harvest".
+    text = '*Master Shen is murmuring to a small ginger-coloured fungus in his basket. He looks up.*\n\nOh! A sprout in human shape! Come, come — listen. Do you hear it? The forest has a heartbeat, slow as a tortoise, steady as a kettle. Most never hear it because they never stop walking long enough to be heard BY it.\n\nSit a moment. I will brew you something for the road.';
+    opts.push({ t:'Buy potions',          cb:() => { closeDialog(); if (typeof openShop === 'function') openShop('potion'); } });
+    opts.push({ t:'Listen for a heartbeat.', cb:() => { document.getElementById('dialog-text').textContent = '*You close your eyes. For a moment, you hear nothing — only the wind in the cherry blossoms. Then, faintly, a slow rhythm beneath your feet, deeper than the marsh, older than the village. Master Shen smiles, and the fungus in his basket hums in the same key.*'; } });
+    opts.push({ t:'What grows here?',     cb:() => { document.getElementById('dialog-text').textContent = 'Mossfire-cap, by the lanterns. Jade-tongue, in the shrines. Lotus-of-the-three-stones, in the marsh — but only if it likes you. The grove gives what it gives. I am only the basket.'; } });
+  } else if (npc.role === 'sentinel') {
+    // v0.25.414 — Yun, the Jade Sentinel. Forest-green lamellar,
+    // jade-tipped spear, fox mask resting on side of head. Idolizes
+    // Hongyu, patrols the borders. Routes to the gear shop / training
+    // bench (treats it as armoury inspection).
+    text = '*Yun straightens as you approach, fox mask catching the light at his temple.*\n\nHalt — peaceably. The grove\'s calm holds because we hold it. I am Yun, sentinel under Lady Hongyu, and I take that title as a debt before a privilege.\n\nIf you mean to walk the eastern borders, your steel had best be honest. Show me what you carry, and I will show you what to sharpen.';
+    opts.push({ t:'Inspect my gear',       cb:() => { closeDialog(); if (typeof openShop === 'function') openShop('weapon'); } });
+    opts.push({ t:'Train with me ✦',       cb:() => { closeDialog(); if (typeof openLevelUpPanel === 'function') openLevelUpPanel(); } });
+    opts.push({ t:'Why the fox mask?',     cb:() => { document.getElementById('dialog-text').textContent = 'My grandmother\'s. The fox is not a trickster in our house — it is the watcher who sees what the wolf does not. I wear it to the side because I have not yet earned the right to wear it forward. Lady Hongyu says I will know when I have.'; } });
   }
   // The amnesiac manages its own options (the script authors them per stage)
   if (npc.role !== 'amnesiac') {
@@ -23632,6 +24405,17 @@ const BG_IMAGES = {
   everdawnMarketplace: _loadBG('backgrounds/bg_v3_everdawnmarketplace.png'),
   zodiacSanctum:       _loadBG('backgrounds/bg_v3_zodiacSanctum.png'),
   carriageOfAscension: _loadBG('backgrounds/bg_v3_carriageOfAscension.png'),
+  // v0.25.421 — user-authored backdrops for the new biomes added since
+  // v0.25.411 (Shadow Slums + Bastion + Azure Acadamia + Jade Grove +
+  // Emerald Village). Each map below sets `bg:` to the matching key.
+  shadowSlums:         _loadBG('backgrounds/bg_v3_shadowSlums.png'),
+  bastion:             _loadBG('backgrounds/bg_v3_bastion.png'),
+  bastionThrone:       _loadBG('backgrounds/bg_v3_bastionThrone.png'),
+  bastionRampart:      _loadBG('backgrounds/bg_v3_bastionRampart.png'),
+  azureAcademia:       _loadBG('backgrounds/bg_v3_azureAcademia.png'),
+  azureAbode:          _loadBG('backgrounds/bg_v3_azureAbode.png'),
+  jadeGrove:           _loadBG('backgrounds/bg_v3_jadeGrove.png'),
+  emeraldVillage:      _loadBG('backgrounds/bg_v3_emeraldVillage.png'),
   main:          _loadBG('backgrounds/bg_v3_valley.png'),
 };
 const BG_CINEMATIC_VARIANTS = [
@@ -24626,6 +25410,15 @@ function drawBackground() {
   // v0.25.51 — Bubblegum Swamp biome (pink water, macaron lily pads,
   // willow trees with glowing teal leaves, cattails, mud puddles).
   if (game.mapData.isBubblegumSwamp) drawBubblegumSwampDecor();
+  // v0.25.411 — Shadow-Woven Slums (pagoda silhouettes, neon-purple paper
+  // lanterns, indigo mist drift, floating violet spirit-orbs).
+  if (game.mapData.isShadowSlums) drawShadowSlumsDecor();
+  // v0.25.413 — Azure Acadamia (arcane spires + glowing fountain motes)
+  // and Hera's Floating Abode (drifting bubble + magical sparkles).
+  if (game.mapData.isAzureAcademia || game.mapData.isAzureAbode) drawAzureAcademiaDecor();
+  // v0.25.414 — Jade Grove (cherry blossoms, stone toro lanterns,
+  // floating lotus, drifting morning mist, incense-smoke plume).
+  if (game.mapData.isJadeGrove) drawJadeGroveDecor();
   // v0.25.54 — Pearl Bathhouse (pastel tiled floors, coral, pearl-
   // oysters, brass bubble pipes, neon bioluminescence pinks + teals).
   if (game.mapData.isPearlBathhouse) drawPearlBathhouseDecor();
@@ -26752,6 +27545,414 @@ function drawBubblegumSwampDecor() {
 }
 
 // =========================================================================
+// SHADOW-WOVEN SLUMS BIOME DECOR  (v0.25.411)
+// =========================================================================
+// Foreground props for the slums-over-feudal-capital map. Five elements:
+//   1. Distant pagoda silhouettes — multi-tier roofs receding into the
+//      violet haze, parallax-anchored so they drift behind the player.
+//   2. Indigo mist band — drifting horizontal fog at ground level.
+//   3. Neon-purple paper lanterns — strung between rooftops on cords,
+//      with a soft animated halo + a tiny dangling tassel.
+//   4. Floating violet spirit-orbs — drift up the alleys, fading at the
+//      top. Two density layers (close + far) for parallax.
+//   5. Graffiti tag — a single faded violet kanji-ish glyph on a wall
+//      panel, to read "ghetto" not "feudal".
+// =========================================================================
+function drawShadowSlumsDecor() {
+  if (!game.mapData) return;
+  const camX = game.camera.x | 0;
+  const ww = game.mapData.worldWidth;
+  const t = game.time;
+
+  // ----- 1. Distant pagoda silhouettes (parallax 0.30) -----
+  for (let p = 0; p < 5; p++) {
+    const px = (p * 460 + 80) - (camX * 0.30) | 0;
+    if (px < -260 || px > W + 60) continue;
+    const baseY = 380 + (p % 2) * 12;
+    const tiers = 3 + (p % 2);
+    // Body column
+    ctx.fillStyle = 'rgba(28,12,52,0.85)';
+    ctx.fillRect(px - 6, baseY, 12, 100);
+    // Stacked tier roofs (each progressively wider going down)
+    for (let k = 0; k < tiers; k++) {
+      const ty = baseY + k * 26;
+      const tw = 28 + k * 14;
+      // Roof slab
+      ctx.fillStyle = 'rgba(48,22,82,0.92)';
+      ctx.beginPath();
+      ctx.moveTo(px - tw, ty + 12);
+      ctx.lineTo(px - tw + 8, ty);
+      ctx.lineTo(px + tw - 8, ty);
+      ctx.lineTo(px + tw, ty + 12);
+      ctx.closePath();
+      ctx.fill();
+      // Faded gold trim along the eave
+      ctx.fillStyle = 'rgba(180,150,80,0.45)';
+      ctx.fillRect(px - tw + 4, ty + 10, tw * 2 - 8, 1);
+    }
+    // Top finial
+    ctx.fillStyle = 'rgba(180,150,80,0.55)';
+    ctx.fillRect(px - 1, baseY - 10, 2, 10);
+  }
+
+  // ----- 2. Indigo mist band drifting at ground level -----
+  for (let i = 0; i < 6; i++) {
+    const mx = ((i * 220) - (t * 0.22) % 220 + i * 31) % (W + 160) - 80;
+    const my = 440 + (i % 3) * 8;
+    ctx.fillStyle = 'rgba(70,40,120,0.18)';
+    ctx.beginPath();
+    ctx.ellipse(mx, my, 110, 14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(120,80,180,0.10)';
+    ctx.beginPath();
+    ctx.ellipse(mx + 30, my - 4, 80, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ----- 3. Neon-purple paper lanterns strung along the alleys -----
+  for (let lx = 120; lx < ww; lx += 240) {
+    const sxw = lx - camX;
+    if (sxw < -40 || sxw > W + 40) continue;
+    const sway = Math.sin(t * 0.04 + lx * 0.013) * 4;
+    const ly = 100 + ((lx >> 6) % 3) * 24 + sway;
+    // Cord
+    ctx.strokeStyle = 'rgba(180,160,200,0.45)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(sxw, 0); ctx.lineTo(sxw, ly); ctx.stroke();
+    // Halo glow (additive feel via alpha)
+    ctx.fillStyle = 'rgba(180,90,255,0.28)';
+    ctx.beginPath(); ctx.arc(sxw, ly + 8, 22, 0, Math.PI * 2); ctx.fill();
+    // Lantern body — rounded violet bulb
+    ctx.fillStyle = '#7a3ad0';
+    ctx.beginPath(); ctx.ellipse(sxw, ly + 8, 9, 12, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#1a0828'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.ellipse(sxw, ly + 8, 9, 12, 0, 0, Math.PI * 2); ctx.stroke();
+    // Bright neon center
+    ctx.fillStyle = '#cc88ff';
+    ctx.fillRect(sxw - 5, ly + 6, 10, 4);
+    // Tassel
+    ctx.fillStyle = '#1a0828';
+    ctx.fillRect(sxw - 1, ly + 20, 2, 4);
+    ctx.fillStyle = '#caa848';
+    ctx.fillRect(sxw - 1, ly + 24, 2, 2);
+  }
+
+  // ----- 4. Floating violet spirit-orbs drifting up alleys -----
+  for (let i = 0; i < 14; i++) {
+    const ox = ((i * 170) - (camX * 0.45) % 170 + i * 23) % (W + 60) - 30;
+    const oy = (380 - ((t * 0.30 + i * 47) % 360)) | 0;
+    const fadeY = Math.max(0, Math.min(1, (oy - 60) / 320));
+    const r  = 2 + (i % 3) * 0.8;
+    ctx.fillStyle = `rgba(190,120,255,${0.25 * fadeY})`;
+    ctx.beginPath(); ctx.arc(ox, oy, r + 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = `rgba(220,170,255,${0.85 * fadeY})`;
+    ctx.beginPath(); ctx.arc(ox, oy, r, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // ----- 5. Faded violet kanji-ish graffiti on a wall panel -----
+  const tagX = 320 - (camX * 0.55) | 0;
+  if (tagX > -120 && tagX < W) {
+    ctx.fillStyle = 'rgba(20,8,38,0.55)';
+    ctx.fillRect(tagX, 280, 90, 70);
+    ctx.strokeStyle = 'rgba(180,90,220,0.55)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(tagX + 12, 300); ctx.lineTo(tagX + 78, 300);
+    ctx.moveTo(tagX + 45, 296); ctx.lineTo(tagX + 45, 340);
+    ctx.moveTo(tagX + 22, 320); ctx.lineTo(tagX + 68, 320);
+    ctx.stroke();
+  }
+}
+
+// =========================================================================
+// AZURE ACADAMIA + HERA'S ABODE DECOR  (v0.25.413)
+// =========================================================================
+// Single dispatcher used by BOTH the main Acadamia hub AND Hera's tiny
+// floating-bubble abode. The abode branch (isAzureAbode) draws the bubble
+// envelope + sparser motes; the Acadamia branch (isAzureAcademia) adds
+// rune-bark trees, blue mana-lanterns, and a glowing central fountain.
+// Strict blue/silver/white palette throughout.
+// =========================================================================
+function drawAzureAcademiaDecor() {
+  if (!game.mapData) return;
+  const camX = game.camera.x | 0;
+  const ww = game.mapData.worldWidth;
+  const t = game.time;
+  const isAbode = !!game.mapData.isAzureAbode;
+
+  // Soft blue magical aura — pervasive overlay on top of the sky gradient.
+  ctx.fillStyle = 'rgba(60,120,220,0.10)';
+  ctx.fillRect(0, 0, W, H);
+
+  // ----- Hera's floating abode: drifting bubble envelope -----
+  if (isAbode) {
+    const cx = (W / 2) | 0;
+    const cy = 260;
+    // Outer bubble ring (pulsating)
+    const pulse = 1 + Math.sin(t * 0.05) * 0.04;
+    ctx.strokeStyle = 'rgba(120,200,255,0.45)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(cx, cy, 360 * pulse, 240 * pulse, 0, 0, Math.PI * 2); ctx.stroke();
+    // Specular gloss highlight on the upper-left of the bubble
+    ctx.fillStyle = 'rgba(255,255,255,0.20)';
+    ctx.beginPath(); ctx.ellipse(cx - 140, cy - 130, 60, 22, -0.4, 0, Math.PI * 2); ctx.fill();
+    // Faint inner gradient hint (deeper sapphire core)
+    ctx.fillStyle = 'rgba(40,80,180,0.10)';
+    ctx.beginPath(); ctx.ellipse(cx, cy, 320, 200, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // ----- Rune-bark trees (Acadamia only, parallax 0.40) -----
+  if (!isAbode) {
+    for (let p = 0; p < 6; p++) {
+      const px = (p * 380 + 60) - (camX * 0.40) | 0;
+      if (px < -120 || px > W + 60) continue;
+      // Trunk
+      ctx.fillStyle = '#1a2a48';
+      ctx.fillRect(px - 6, 280, 12, 200);
+      // Glowing rune marks etched into bark
+      ctx.fillStyle = 'rgba(120,200,255,0.75)';
+      ctx.fillRect(px - 4, 320, 8, 2);
+      ctx.fillRect(px - 3, 360, 6, 2);
+      ctx.fillRect(px - 4, 400, 8, 2);
+      // Glowing canopy of blue leaves
+      ctx.fillStyle = 'rgba(80,160,240,0.85)';
+      ctx.beginPath(); ctx.arc(px, 250, 60, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(160,220,255,0.55)';
+      ctx.beginPath(); ctx.arc(px - 10, 240, 30, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(px + 16, 256, 26, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // ----- Glowing blue mana-lanterns lining the path (Acadamia only) -----
+  if (!isAbode) {
+    for (let lx = 200; lx < ww; lx += 280) {
+      const sxw = lx - camX;
+      if (sxw < -40 || sxw > W + 40) continue;
+      // Post
+      ctx.fillStyle = '#3a4a68';
+      ctx.fillRect(sxw - 2, 380, 4, 100);
+      // Lantern halo
+      ctx.fillStyle = 'rgba(120,200,255,0.30)';
+      ctx.beginPath(); ctx.arc(sxw, 372, 18, 0, Math.PI * 2); ctx.fill();
+      // Lantern bulb
+      ctx.fillStyle = '#88c8ff';
+      ctx.beginPath(); ctx.arc(sxw, 372, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(sxw - 1, 370, 3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // ----- Central glowing fountain (Acadamia only) — anchored at x:760 -----
+  if (!isAbode) {
+    const fx = 760 - camX;
+    if (fx > -120 && fx < W + 120) {
+      // Halo
+      const haloR = 60 + Math.sin(t * 0.04) * 4;
+      ctx.fillStyle = 'rgba(120,200,255,0.20)';
+      ctx.beginPath(); ctx.arc(fx, 308, haloR, 0, Math.PI * 2); ctx.fill();
+      // Basin lip
+      ctx.fillStyle = '#e8f0fa';
+      ctx.fillRect(fx - 70, 296, 140, 6);
+      ctx.strokeStyle = '#3a5a98'; ctx.lineWidth = 2;
+      ctx.strokeRect(fx - 70, 296, 140, 6);
+      // Glowing water surface
+      ctx.fillStyle = 'rgba(80,160,240,0.85)';
+      ctx.fillRect(fx - 66, 302, 132, 6);
+      // Animated water plume rising from the centre
+      for (let k = 0; k < 5; k++) {
+        const plumeY = 296 - k * 14 - ((t * 0.6 + k * 11) % 14);
+        ctx.fillStyle = `rgba(180,220,255,${0.7 - k * 0.12})`;
+        ctx.fillRect(fx - 3, plumeY, 6, 6);
+      }
+    }
+  }
+
+  // ----- Floating magical motes (both maps) — drift up + fade at top -----
+  const moteCount = isAbode ? 18 : 26;
+  for (let i = 0; i < moteCount; i++) {
+    const mx = ((i * 130) - (camX * 0.55) % 130 + i * 19) % (W + 60) - 30;
+    const my = (440 - ((t * 0.35 + i * 53) % 420)) | 0;
+    const fade = Math.max(0, Math.min(1, (my - 40) / 360));
+    const r = 1.5 + (i % 3) * 0.8;
+    ctx.fillStyle = `rgba(180,220,255,${0.30 * fade})`;
+    ctx.beginPath(); ctx.arc(mx, my, r + 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = `rgba(220,240,255,${0.95 * fade})`;
+    ctx.beginPath(); ctx.arc(mx, my, r, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // ----- Tiny sprite familiars (Acadamia only) — drifting figure-8 -----
+  if (!isAbode) {
+    for (let i = 0; i < 4; i++) {
+      const baseX = (i * 540 + 200) - (camX * 0.7) | 0;
+      const sx = baseX + Math.sin(t * 0.02 + i) * 60;
+      const sy = 200 + Math.cos(t * 0.04 + i * 1.3) * 40;
+      if (sx < -20 || sx > W + 20) continue;
+      ctx.fillStyle = 'rgba(160,220,255,0.55)';
+      ctx.beginPath(); ctx.arc(sx, sy, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(sx, sy, 2, 0, Math.PI * 2); ctx.fill();
+      // Trailing wisp
+      ctx.strokeStyle = 'rgba(160,220,255,0.30)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx - 8, sy + 6); ctx.stroke();
+    }
+  }
+}
+
+// =========================================================================
+// JADE GROVE BIOME DECOR  (v0.25.414)
+// =========================================================================
+// Foreground props for the Eastern sanctuary map. Six elements layered:
+//   1. Soft morning mist band drifting across the marsh.
+//   2. Cherry-blossom trees with vermilion-pink canopies (parallax 0.40).
+//   3. Stone toro lanterns overgrown with moss along the path.
+//   4. Massive central stone incense burner with a rising smoke plume.
+//   5. Floating lotus flowers drifting on the pond surface near ground.
+//   6. Drifting cherry blossom petals (parallax foreground).
+// Strict jade-green / vermilion / moss-brown / misty-white palette.
+// =========================================================================
+function drawJadeGroveDecor() {
+  if (!game.mapData) return;
+  const camX = game.camera.x | 0;
+  const ww = game.mapData.worldWidth;
+  const t = game.time;
+
+  // ----- 1. Morning mist band drifting across the marsh -----
+  for (let i = 0; i < 7; i++) {
+    const mx = ((i * 240) - (t * 0.18) % 240 + i * 31) % (W + 160) - 80;
+    const my = 410 + (i % 3) * 10;
+    ctx.fillStyle = 'rgba(240,250,245,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(mx, my, 130, 16, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(220,240,230,0.20)';
+    ctx.beginPath();
+    ctx.ellipse(mx + 30, my - 4, 90, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ----- 2. Cherry-blossom trees (parallax 0.40) -----
+  for (let p = 0; p < 6; p++) {
+    const px = (p * 420 + 60) - (camX * 0.40) | 0;
+    if (px < -120 || px > W + 80) continue;
+    // Trunk — moss-brown
+    ctx.fillStyle = '#5a3a22';
+    ctx.fillRect(px - 7, 280, 14, 200);
+    ctx.fillStyle = '#3a2812';
+    ctx.fillRect(px - 7, 280, 4, 200);  // shadow side
+    // Mossy bark detail
+    ctx.fillStyle = '#3a7a4a';
+    ctx.fillRect(px - 7, 360, 14, 4);
+    ctx.fillRect(px - 5, 410, 10, 3);
+    // Pink-and-vermilion canopy
+    ctx.fillStyle = '#f4b8c8';
+    ctx.beginPath(); ctx.arc(px, 250, 64, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#f8d4dc';
+    ctx.beginPath(); ctx.arc(px - 12, 240, 30, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(px + 18, 256, 28, 0, Math.PI * 2); ctx.fill();
+    // Vermilion accent blossoms
+    ctx.fillStyle = '#cc5566';
+    ctx.beginPath(); ctx.arc(px - 22, 256, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(px + 26, 244, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(px + 4, 232, 4, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // ----- 3. Stone toro lanterns overgrown with moss -----
+  for (let lx = 240; lx < ww; lx += 320) {
+    const sxw = lx - camX;
+    if (sxw < -30 || sxw > W + 30) continue;
+    // Base
+    ctx.fillStyle = '#8a8a82';
+    ctx.fillRect(sxw - 10, 460, 20, 18);
+    // Pillar
+    ctx.fillRect(sxw - 5, 430, 10, 30);
+    // Lantern box
+    ctx.fillStyle = '#9a9a92';
+    ctx.fillRect(sxw - 12, 410, 24, 22);
+    ctx.fillStyle = '#3a2812';
+    ctx.strokeStyle = '#3a2812'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(sxw - 12, 410, 24, 22);
+    // Window cutout (warm amber light)
+    ctx.fillStyle = 'rgba(255,200,120,0.85)';
+    ctx.fillRect(sxw - 6, 416, 12, 10);
+    // Roof slab
+    ctx.fillStyle = '#7a7a72';
+    ctx.beginPath();
+    ctx.moveTo(sxw - 18, 410);
+    ctx.lineTo(sxw - 12, 400);
+    ctx.lineTo(sxw + 12, 400);
+    ctx.lineTo(sxw + 18, 410);
+    ctx.closePath();
+    ctx.fill();
+    // Moss overgrowth on roof
+    ctx.fillStyle = 'rgba(60,140,80,0.85)';
+    ctx.fillRect(sxw - 16, 404, 6, 3);
+    ctx.fillRect(sxw + 8, 402, 8, 3);
+    // Faint halo
+    ctx.fillStyle = 'rgba(255,200,120,0.18)';
+    ctx.beginPath(); ctx.arc(sxw, 421, 18, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // ----- 4. Massive central stone incense burner (anchored at x:1130) -----
+  const bx = 1130 - camX;
+  if (bx > -120 && bx < W + 120) {
+    // Base block
+    ctx.fillStyle = '#7a7268';
+    ctx.fillRect(bx - 28, 460, 56, 20);
+    // Mid column
+    ctx.fillStyle = '#8a8278';
+    ctx.fillRect(bx - 22, 430, 44, 30);
+    // Bowl
+    ctx.fillStyle = '#9a9288';
+    ctx.beginPath();
+    ctx.ellipse(bx, 430, 30, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#3a2812'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(bx, 430, 30, 8, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // Embers
+    ctx.fillStyle = '#ee8844';
+    ctx.fillRect(bx - 12, 426, 24, 4);
+    ctx.fillStyle = '#ffcc66';
+    ctx.fillRect(bx - 8, 425, 16, 2);
+    // Rising smoke plume — three sinuous columns of pale curls
+    for (let k = 0; k < 6; k++) {
+      const sy = 420 - k * 40 - ((t * 0.4 + k * 23) % 40);
+      const sx = bx + Math.sin(t * 0.03 + k) * 14;
+      const r = 14 + k * 4;
+      ctx.fillStyle = `rgba(220,230,225,${0.45 - k * 0.06})`;
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // ----- 5. Floating lotus flowers on the pond surface -----
+  for (let i = 0; i < 9; i++) {
+    const lx = ((i * 290) + (t * 0.05) % 290 + i * 41 - camX * 0.85) % (W + 80) - 40;
+    const ly = 470 + (i % 2) * 4;
+    // Lily pad — green disc
+    ctx.fillStyle = '#3a7a4a';
+    ctx.beginPath(); ctx.ellipse(lx, ly, 14, 4, 0, 0, Math.PI * 2); ctx.fill();
+    // Lotus petals — pink + vermilion centre
+    ctx.fillStyle = '#f4b8c8';
+    ctx.beginPath(); ctx.ellipse(lx, ly - 2, 6, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#cc5566';
+    ctx.fillRect(lx - 1, ly - 3, 2, 2);
+  }
+
+  // ----- 6. Drifting cherry blossom petals (foreground) -----
+  for (let i = 0; i < 18; i++) {
+    const px = ((i * 110) - (t * 0.45) % 110 + i * 17 - camX * 1.10) % (W + 60) - 30;
+    const py = ((i * 73) + (t * 0.25) % 380) % 380 + 40;
+    const sway = Math.sin(t * 0.04 + i) * 6;
+    ctx.fillStyle = i % 4 === 0 ? 'rgba(220,100,120,0.85)' : 'rgba(248,200,210,0.85)';
+    ctx.beginPath();
+    ctx.ellipse(px + sway, py, 3, 1.6, t * 0.02 + i, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// =========================================================================
 // PEARL BATHHOUSE BIOME DECOR  (v0.25.54)
 // =========================================================================
 // Foreground props for the underwater bathhouse map. Drawn after the
@@ -27765,6 +28966,32 @@ const NPC_ROLE_CFG = {
   sage:    { body:'#4a2488', bodyShd:'#2a1058', body2:'#6a44a8', hair:'#c0c0d0', hairHi:'#ffffff', hat:'wizard' },
   info:    { body:'#6aaa88', bodyShd:'#3a7a58', body2:'#8accaa', hair:'#5a4422', hairHi:'#8a6a32', hat:'cap'    },
   caravan: { body:'#e8b85a', bodyShd:'#a28830', body2:'#ffd880', hair:'#3a2820', hairHi:'#5a3828', hat:'scarf'  },
+  // v0.25.411 — Shadow-Woven Slums faction. Deep violets + obsidian for
+  // Taiga (rebel leader), tarnished bronze under hood for Kuro (shadow
+  // samurai), slate + violet for Ren (alleyway thief).
+  taiga:   { body:'#3a1a5a', bodyShd:'#1a0828', body2:'#6a3aa0', hair:'#1a0820', hairHi:'#4a2a7a', hat:'topknot' },
+  kuro:    { body:'#2a1838', bodyShd:'#0e0418', body2:'#5a3870', hair:'#1a0a20', hairHi:'#caa848', hat:'wizard'  },
+  ren:     { body:'#5a4a6a', bodyShd:'#2a1f3a', body2:'#9a78c8', hair:'#1a0a18', hairHi:'#7a4aaa', hat:'bandana' },
+  // v0.25.412 — The Bastion knight order. Champion = sapphire plate +
+  // gold plume (Will). Scribe = white liturgical robes + silver chain
+  // (Elena). Barnaby reuses the existing 'weapon' role config so he
+  // opens the gear shop / forge automatically.
+  champion:{ body:'#3a5fa0', bodyShd:'#1f3870', body2:'#7aa0d8', hair:'#caa848', hairHi:'#ffe18a', hat:'topknot' },
+  scribe:  { body:'#f0eef8', bodyShd:'#a8a8c0', body2:'#ffffff', hair:'#caa848', hairHi:'#ffe18a', hat:'wizard'  },
+  // v0.25.413 — The Azure Acadamia mages. Strict blue/silver/white
+  // palette. Archmage = deep sapphire silk (Hera). Scholar = dusty
+  // grey-blue layered robes + white beard (Auron). Apprentice = sky-
+  // blue tunic + spiky light hair (Lyra).
+  archmage:  { body:'#1a3878', bodyShd:'#0e1f4a', body2:'#3a78c8', hair:'#1a3878', hairHi:'#5aa0e8', hat:'wizard'  },
+  scholar:   { body:'#3a5a78', bodyShd:'#1f3a58', body2:'#6a8ab0', hair:'#f0f0f0', hairHi:'#ffffff', hat:'wizard'  },
+  apprentice:{ body:'#5a9ad8', bodyShd:'#2a5aa0', body2:'#88c8ff', hair:'#a0d8ff', hairHi:'#e8f8ff', hat:'cap'     },
+  // v0.25.414 — The Jade Grove sanctuary. Strict jade/vermilion/moss/
+  // misty-white palette. Archer = crimson-and-white hanfu (Hongyu).
+  // Herbalist = muted hemp + white beard (Shen). Sentinel = forest-
+  // green lamellar + black hair (Yun).
+  archer:    { body:'#cc3344', bodyShd:'#8a1f2a', body2:'#f0f0f0', hair:'#1a1820', hairHi:'#3a3848', hat:'topknot' },
+  herbalist: { body:'#7a6a4a', bodyShd:'#4a3a22', body2:'#a89878', hair:'#f0f0f0', hairHi:'#ffffff', hat:'topknot' },
+  sentinel:  { body:'#3a7a4a', bodyShd:'#1f4a28', body2:'#6aaa78', hair:'#1a1820', hairHi:'#3a3848', hat:'topknot' },
 };
 const NPC_WORLD_SCALE = 1.2;
 const NPC_PROCEDURAL_SCALE_X = 1.19 * NPC_WORLD_SCALE;
@@ -34400,6 +35627,29 @@ const NPC_SPRITE_FILES = {
   // v0.25.267 — full-body cute fashion-model sprite (ludo-generated).
   // Used both in the Bazaar and the new Everdawn Marketplace map.
   'Fashionista':   'fashionista.webp',
+  // v0.25.411 — Shadow-Woven Slums faction. Files are ludo.ai-generated
+  // full-body sprites. The loader's onerror is silent-warn, so the map
+  // falls back to procedural rendering until the webps are dropped into
+  // Sprites/npc/. See SHADOW_SLUMS_LUDO_PROMPTS.md for the prompts to
+  // paste into ludo.ai's character generator.
+  'Taiga':         'taiga.webp',
+  'Kuro':          'kuro.webp',
+  'Ren':           'ren.webp',
+  // v0.25.412 — The Bastion knight order. Same fallback behaviour;
+  // generation prompts live in BASTION_LUDO_PROMPTS.md.
+  'Will':          'will.webp',
+  'Elena':         'elena.webp',
+  'Barnaby':       'barnaby.webp',
+  // v0.25.413 — The Azure Acadamia mages. Same fallback behaviour;
+  // generation prompts live in AZURE_ACADAMIA_LUDO_PROMPTS.md.
+  'Hera':          'hera.webp',
+  'Auron':         'auron.webp',
+  'Lyra':          'lyra.webp',
+  // v0.25.414 — The Jade Grove sanctuary. Same fallback behaviour;
+  // generation prompts live in JADE_GROVE_LUDO_PROMPTS.md.
+  'Lady Hongyu':   'lady_hongyu.webp',
+  'Master Shen':   'master_shen.webp',
+  'Yun':           'yun.webp',
 };
 // v0.25.271 — per-NPC render-height override. Default is 78 px (set
 // inside _drawNpcSprite). Sage Mira is taller in lore (sage / sky
