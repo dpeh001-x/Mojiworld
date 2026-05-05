@@ -14239,21 +14239,52 @@ function updatePlayer(dt) {
     player.vx = 0;
     player.state = 'attack';
   } else {
-    // Acceleration-based movement for smoother feel
-    const accel = player.onGround ? 1.1 : 0.6;
-    const fric = player.onGround ? 0.78 : 0.92;
+    // v0.25.458 — Icy Tower style ice physics on isIcy maps. Lower
+    // acceleration (0.45 vs 1.1) means it takes longer to ramp up,
+    // and much higher friction (0.96 vs 0.78) means momentum carries
+    // a long way after release — but the tradeoff is dramatic speed-
+    // boosted jumps in the path below, so building up sideways speed
+    // becomes a deliberate vertical-launch resource. Off-ice maps use
+    // the original tuning unchanged.
+    const isIcy = !!(game.mapData && game.mapData.isIcy);
+    const accel = isIcy
+      ? (player.onGround ? 0.45 : 0.5)
+      : (player.onGround ? 1.1  : 0.6);
+    const fric = isIcy
+      ? (player.onGround ? 0.96 : 0.985)
+      : (player.onGround ? 0.78 : 0.92);
     if (k['arrowleft']) {
-      player.vx = Math.max(-moveSpeed, player.vx - accel);
+      // Icy Tower allows over-cap horizontal speed when chained off
+      // earlier momentum, but only up to a generous ceiling.
+      const cap = isIcy ? Math.max(moveSpeed, Math.abs(player.vx) + accel) : moveSpeed;
+      player.vx = Math.max(-cap, player.vx - accel);
       player.facing = -1;
       player.state = player.onGround ? 'walk' : player.state;
     } else if (k['arrowright']) {
-      player.vx = Math.min(moveSpeed, player.vx + accel);
+      const cap = isIcy ? Math.max(moveSpeed, Math.abs(player.vx) + accel) : moveSpeed;
+      player.vx = Math.min(cap, player.vx + accel);
       player.facing = 1;
       player.state = player.onGround ? 'walk' : player.state;
     } else {
       player.vx *= fric;
       if (Math.abs(player.vx) < 0.1) player.vx = 0;
       if (player.onGround && !player.attacking) player.state = 'idle';
+    }
+    // v0.25.458 — Frost slipstream trail. When sliding fast on ice,
+    // emit small frost particles behind the trailing foot so the
+    // momentum reads visually. Cheap (skips when stationary or off
+    // an ice map).
+    if (isIcy && player.onGround && Math.abs(player.vx) > 4 && game.time % 4 === 0) {
+      const dir = player.vx > 0 ? -1 : 1;
+      game.particles.push({
+        x: player.x + player.w/2 + dir * 8 + (Math.random() - 0.5) * 4,
+        y: player.y + player.h - 1,
+        vx: dir * (0.6 + Math.random() * 1.4),
+        vy: -0.4 - Math.random() * 0.8,
+        life: 22 + Math.random() * 8,
+        color: Math.random() < 0.5 ? '#e8f4ff' : '#bcd9f0',
+        size: 1.4 + Math.random() * 1.6,
+      });
     }
   }
 
@@ -14296,14 +14327,41 @@ function updatePlayer(dt) {
     } else if (player.onGround || player.coyoteTime > 0) {
       player._jumpHeld = true;
       player.jumpBufferTimer = 0;
-      player.vy = -getJump();
+      // v0.25.458 — Icy Tower style speed-boosted jump. The faster the
+      // player is moving horizontally at takeoff, the higher they
+      // launch — turning lateral momentum into a vertical resource.
+      // Only fires on isIcy maps so other zones keep their authored
+      // jump curves. The boost caps so even a max-speed slide can't
+      // skip through ceilings.
+      const _isIcy = !!(game.mapData && game.mapData.isIcy);
+      const _speedJump = _isIcy ? Math.min(7.5, Math.abs(player.vx) * 0.55) : 0;
+      player.vy = -getJump() - _speedJump;
       player.onGround = false; player.coyoteTime = 0;
       player.state = 'jump';
-      for (let i = 0; i < 6; i++) {
+      // Combo tracker — every jump that lands on a NEW (higher)
+      // platform within a short window chains. The land detector
+      // below resets the combo when the player stops climbing.
+      if (_isIcy) {
+        player._iceJumpStartY = player.y;
+        if (Math.abs(player.vx) > 6) {
+          // High-speed launch: quick combo-eligible window opens.
+          player._iceComboEligible = 1;
+        }
+      }
+      for (let i = 0; i < (_speedJump > 3 ? 18 : 6); i++) {
+        // High-speed launch swaps the white puff for a sparkle ring
+        // so players see when they hit a "mega-jump" tier.
+        const ang = _speedJump > 3 ? (i / 18) * Math.PI * 2 : 0;
         game.particles.push({
-          x: player.x + player.w/2, y: player.y + player.h,
-          vx: (Math.random() - 0.5) * 3, vy: -Math.random() * 2,
-          life: 20, color: '#ffffff', size: 3
+          x: player.x + player.w/2,
+          y: player.y + player.h,
+          vx: _speedJump > 3 ? Math.cos(ang) * 2.6 : (Math.random() - 0.5) * 3,
+          vy: _speedJump > 3 ? Math.sin(ang) * 1.2 : -Math.random() * 2,
+          life: 20 + (_speedJump > 3 ? 8 : 0),
+          color: _speedJump > 5 ? '#bce4ff'
+                : _speedJump > 3 ? '#e6f4ff'
+                :                  '#ffffff',
+          size: _speedJump > 3 ? 2.5 : 3,
         });
       }
     } else if ((player.airJumps || 0) < (1 + (player.mods.extraJumps || 0))) {
@@ -14597,8 +14655,59 @@ function updatePlayer(dt) {
   player.x += player.vx;
   if (player.x < 0) player.x = 0;
   if (player.x + player.w > game.mapData.worldWidth) player.x = game.mapData.worldWidth - player.w;
+  // v0.25.458 — Track previous ground state so we can fire a "land"
+  // event for the Icy Tower combo system below.
+  const _wasInAir = !player.onGround;
   player.y += player.vy;
   checkPlatformCollision(player);
+
+  // v0.25.458 — Icy Tower combo tracker. When the player lands on
+  // an isIcy map AFTER an eligible (high-speed) launch on a HIGHER
+  // platform than they took off from, increment the combo and pop a
+  // cheer overlay. Landing on the same / lower spot or sitting still
+  // breaks the combo. Cheer text scales with combo count.
+  const _isIcyMap = !!(game.mapData && game.mapData.isIcy);
+  if (_isIcyMap && _wasInAir && player.onGround) {
+    const startY = (typeof player._iceJumpStartY === 'number') ? player._iceJumpStartY : player.y;
+    const climbed = startY - player.y;
+    if (player._iceComboEligible && climbed > 16) {
+      player._iceCombo = (player._iceCombo || 0) + 1;
+      player._iceComboTimer = 1500; // ~1.5s window before reset
+      // Cheer overlay — show only at combo milestones so it doesn't
+      // spam the screen on every eligible hop.
+      const c = player._iceCombo;
+      const tiers = [null, null, 'NICE!', 'GREAT!', 'AMAZING!', 'FANTASTIC!', 'SUPER!', 'WOW!', 'EXCELLENT!', 'INSANE!'];
+      const tierMsg = tiers[Math.min(c, tiers.length - 1)] || 'GODLIKE!';
+      if (c >= 2 && tierMsg) {
+        game._iceCheer = {
+          text: tierMsg + ' ×' + c,
+          life: 60, maxLife: 60,
+          x: player.x + player.w/2, y: player.y - 24,
+          color: c >= 6 ? '#ffd9ee' : c >= 4 ? '#ffd166' : '#bce4ff',
+        };
+      }
+      // Sparkle burst on the platform top.
+      for (let i = 0; i < 14; i++) {
+        const ang = (i / 14) * Math.PI * 2;
+        game.particles.push({
+          x: player.x + player.w/2 + Math.cos(ang) * 6,
+          y: player.y + player.h - 2,
+          vx: Math.cos(ang) * (1.6 + Math.random() * 1.2),
+          vy: Math.sin(ang) * 1.0 - 0.6,
+          life: 26 + Math.random() * 8,
+          color: c >= 4 ? '#ffd9ee' : '#bce4ff',
+          size: 1.6 + Math.random() * 1.6,
+        });
+      }
+    }
+    player._iceComboEligible = 0;
+    player._iceJumpStartY = null;
+  }
+  // Decay the combo timer + reset combo when it expires.
+  if ((player._iceComboTimer || 0) > 0) {
+    player._iceComboTimer -= dt;
+    if (player._iceComboTimer <= 0) player._iceCombo = 0;
+  }
 
   if (player.y > H + 100) {
     player.hp -= 15;
