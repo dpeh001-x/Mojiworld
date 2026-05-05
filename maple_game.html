@@ -3118,7 +3118,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.472';
+const GAME_VERSION = 'v0.25.473';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -14655,15 +14655,20 @@ function updatePlayer(dt) {
     player.state = 'attack';
   } else {
     // v0.25.458 — Icy Tower style ice physics on isIcy maps. Lower
-    // acceleration (0.45 vs 1.1) means it takes longer to ramp up,
+    // acceleration (vs 1.1 default) means it takes longer to ramp up,
     // and much higher friction (0.96 vs 0.78) means momentum carries
     // a long way after release — but the tradeoff is dramatic speed-
     // boosted jumps in the path below, so building up sideways speed
     // becomes a deliberate vertical-launch resource. Off-ice maps use
     // the original tuning unchanged.
+    // v0.25.473 — Slower ground accel (0.45 → 0.30) for more
+    // controllable starts. Player builds speed deliberately rather
+    // than instantly jolting to top speed; combined with the higher
+    // speed-jump cap below this matches the original Icy Tower feel
+    // where every floor of speed builds toward bigger combos.
     const isIcy = !!(game.mapData && game.mapData.isIcy);
     const accel = isIcy
-      ? (player.onGround ? 0.45 : 0.5)
+      ? (player.onGround ? 0.30 : 0.45)
       : (player.onGround ? 1.1  : 0.6);
     const fric = isIcy
       ? (player.onGround ? 0.96 : 0.985)
@@ -14742,30 +14747,33 @@ function updatePlayer(dt) {
     } else if (player.onGround || player.coyoteTime > 0) {
       player._jumpHeld = true;
       player.jumpBufferTimer = 0;
-      // v0.25.458 — Icy Tower style speed-boosted jump. v0.25.471
-      // tunes the curve for a juicier "build momentum → mega-jump"
-      // arc and relaxes the combo-eligibility threshold so casual
-      // climbers also chain combos.
-      //   Multiplier: 0.55 → 0.65   (lateral speed translates more)
-      //   Hard cap:   7.5  → 10     (room for clearing ~5 floors at peak)
-      // At |vx|=12 (max ground speed) the jump now adds +7.8 vy on
-      // top of base 10.5 = -18.3 vy → ~336 px peak = ~4.8 floors at
-      // 70 px spacing. Feels like Icy Tower.
+      // v0.25.458 / v0.25.471 / v0.25.473 — Icy Tower style speed-
+      // boosted jump.
+      //   Multiplier: 0.55 → 0.65 → 0.75   (every px/frame of horizontal
+      //                                     speed becomes more vertical lift)
+      //   Hard cap:   7.5  → 10  → 12      (room for clearing ~7 floors at
+      //                                     chain-momentum speeds)
+      // At |vx|=12 the boost now reaches 9.0 → vy = -19.5 → ~387 px peak
+      // ≈ 5.5 floors at 70 px spacing. At chained-momentum |vx|=16+ the
+      // 12 cap engages → vy = -22.5 → ~507 px peak ≈ 7.2 floors. The
+      // higher cap makes the "build speed → MEGA-JUMP" arc feel like
+      // Icy Tower's signature mechanic.
       const _isIcy = !!(game.mapData && game.mapData.isIcy);
-      const _speedJump = _isIcy ? Math.min(10, Math.abs(player.vx) * 0.65) : 0;
+      const _speedJump = _isIcy ? Math.min(12, Math.abs(player.vx) * 0.75) : 0;
       player.vy = -getJump() - _speedJump;
       player.onGround = false; player.coyoteTime = 0;
       player.state = 'jump';
-      // Combo tracker — v0.25.471 lowered the launch-speed threshold
-      // from |vx| > 6 to |vx| > 3 so even a casual hop builds combo
-      // as long as it lands a floor higher. The strict "high-speed
-      // launch only" gate broke the combo for anyone playing
-      // carefully — now the combo follows ANY successful upward jump.
+      // v0.25.473 — Combo system rewritten to match Icy Tower exactly.
+      // Track the launch altitude; on landing, count floors climbed.
+      // 4+ floors in a single jump = a "combo step" — the same
+      // threshold the original Icy Tower uses. 1-3 floors RESETS the
+      // combo (the player downgraded to small hops and lost the
+      // streak). 0 floors or a fall doesn't break the combo if it
+      // hadn't started, but does break an active streak. Removes the
+      // _iceComboEligible flag entirely — speed at launch no longer
+      // matters; only the altitude gained.
       if (_isIcy) {
         player._iceJumpStartY = player.y;
-        if (Math.abs(player.vx) > 3) {
-          player._iceComboEligible = 1;
-        }
       }
       for (let i = 0; i < (_speedJump > 3 ? 18 : 6); i++) {
         // High-speed launch swaps the white puff for a sparkle ring
@@ -15080,29 +15088,32 @@ function updatePlayer(dt) {
   player.y += player.vy;
   checkPlatformCollision(player);
 
-  // v0.25.458 / v0.25.471 — Icy Tower combo tracker. Increments the
-  // combo on every successful upward landing, scales the decay timer
-  // with the combo level, and tracks the highest floor reached for
-  // the persistent HUD. The cheer-overlay milestones still fire at
-  // combo ≥ 2 (NICE / GREAT / AMAZING / ...), but every successful
-  // chain land ALSO pops a tiny sparkle ring so the player feels the
-  // combo even before they hit a milestone.
+  // v0.25.473 — Icy Tower combo tracker (faithful to the original).
+  // Combo gates on FLOORS CLEARED PER JUMP, not launch speed:
+  //   • 4+ floors in a single jump  → combo step (++iceCombo)
+  //   • 1-3 floors                  → combo BREAKS (resets to 0)
+  //   • 0 floors / fell             → combo BREAKS
+  // The 4-floor minimum matches the original Icy Tower exactly. A
+  // small careful hop downgrades you out of the combo state, so the
+  // chain demands sustained big jumps — building speed → mega-jump
+  // → land high → keep speed → repeat.
   const _isIcyMap = !!(game.mapData && game.mapData.isIcy);
   if (_isIcyMap && _wasInAir && player.onGround) {
     const startY = (typeof player._iceJumpStartY === 'number') ? player._iceJumpStartY : player.y;
-    const climbed = startY - player.y;
-    if (player._iceComboEligible && climbed > 16) {
+    const floorPx = (game.mapData && game.mapData.fallFloorPx) || 70;
+    const floorsClimbed = Math.floor((startY - player.y) / floorPx);
+    if (floorsClimbed >= 4) {
+      // BIG JUMP — combo step.
       player._iceCombo = (player._iceCombo || 0) + 1;
       const c = player._iceCombo;
-      // v0.25.471 — Timer scales with combo so high streaks get more
-      // grace time. Base 2400 ms (was 1500) + 100 ms per combo step,
-      // capped at 4400 ms. Skilled players who hit ×20+ combos get
-      // ~4 s between landings before the streak resets.
+      // Timer scales with combo so high streaks get more grace time.
+      // Base 2400 ms + 100 ms per combo step, capped at 4400 ms.
       player._iceComboTimer = Math.min(4400, 2400 + c * 100);
-      // Cheer overlay at milestones (combo ≥ 2)
-      const tiers = [null, null, 'NICE!', 'GREAT!', 'AMAZING!', 'FANTASTIC!', 'SUPER!', 'WOW!', 'EXCELLENT!', 'INSANE!'];
+      // Cheer overlay at milestones (combo ≥ 1 — even the FIRST big
+      // jump deserves a "NICE!" since it cleared 4 floors).
+      const tiers = [null, 'NICE!', 'GREAT!', 'AMAZING!', 'FANTASTIC!', 'SUPER!', 'WOW!', 'EXCELLENT!', 'INSANE!', 'IMPOSSIBLE!'];
       const tierMsg = tiers[Math.min(c, tiers.length - 1)] || 'GODLIKE!';
-      if (c >= 2 && tierMsg) {
+      if (tierMsg) {
         game._iceCheer = {
           text: tierMsg + ' ×' + c,
           life: 60, maxLife: 60,
@@ -15110,31 +15121,35 @@ function updatePlayer(dt) {
           color: c >= 6 ? '#ffd9ee' : c >= 4 ? '#ffd166' : '#bce4ff',
         };
       }
-      // Sparkle burst on the platform top — sized down from 14 to 8
-      // particles at low combos so the FX doesn't overwhelm small
-      // combos, scaled back up for high combos.
-      const _ringN = c >= 4 ? 14 : c >= 2 ? 10 : 8;
+      // Star burst on the landing platform — bigger combos get more
+      // stars + brighter colours.
+      const _ringN = c >= 4 ? 16 : c >= 2 ? 12 : 8;
       for (let i = 0; i < _ringN; i++) {
         const ang = (i / _ringN) * Math.PI * 2;
         game.particles.push({
-          x: player.x + player.w/2 + Math.cos(ang) * 6,
-          y: player.y + player.h - 2,
-          vx: Math.cos(ang) * (1.4 + Math.random() * 1.0),
-          vy: Math.sin(ang) * 0.9 - 0.6,
-          life: 22 + Math.random() * 8,
+          x: player.x + player.w/2 + Math.cos(ang) * 8,
+          y: player.y + player.h - 4,
+          vx: Math.cos(ang) * (1.6 + Math.random() * 1.2),
+          vy: Math.sin(ang) * 1.0 - 0.8,
+          life: 26 + Math.random() * 10,
           color: c >= 6 ? '#ffaaff' : c >= 4 ? '#ffd166' : c >= 2 ? '#bce4ff' : '#e8f4ff',
-          size: 1.4 + Math.random() * 1.4,
+          size: 2.0 + Math.random() * 1.6,
+          shape: 'star',           // v0.25.473 — drawn as 5-pointed stars
+          rot: Math.random() * Math.PI * 2,
+          spin: (Math.random() - 0.5) * 0.20,
         });
       }
+    } else if (floorsClimbed >= 1 && floorsClimbed <= 3 && (player._iceCombo || 0) > 0) {
+      // SMALL HOP while comboing — combo breaks. Iconic Icy Tower
+      // moment: you missed the chain by going too short.
+      player._iceCombo = 0;
+      player._iceComboTimer = 0;
     }
-    player._iceComboEligible = 0;
     player._iceJumpStartY = null;
-    // v0.25.471 — Track the highest floor reached for the HUD. On
-    // tower maps the floor index = (groundY - player.y) / floorPx.
+    // Track the highest floor reached for the HUD.
     if (game.mapData && game.mapData.isVerticalTower) {
       const groundPlatform = (game.mapData.platforms || []).find(p => p.type === 'ground');
       const groundY = groundPlatform ? groundPlatform.y : 14070;
-      const floorPx = game.mapData.fallFloorPx || 70;
       const playerFloor = Math.max(0, Math.round((groundY - (player.y + player.h)) / floorPx));
       if (typeof player._iceFloorBest !== 'number' || playerFloor > player._iceFloorBest) {
         player._iceFloorBest = playerFloor;
@@ -15143,9 +15158,8 @@ function updatePlayer(dt) {
     }
   }
   // v0.25.471 — Aura sparkles around the player while a combo is
-  // active. Cheap (one particle every 6 frames at combo ≥ 3, two at
-  // ≥ 6). Gives the player a continuous "I'm in the zone" visual.
-  if (_isIcyMap && (player._iceCombo || 0) >= 3 && (game.time & 5) === 0) {
+  // active. Cheap (one particle every 6 frames at combo ≥ 1).
+  if (_isIcyMap && (player._iceCombo || 0) >= 1 && (game.time & 5) === 0) {
     const c = player._iceCombo;
     const ang = (game.time * 0.25) + Math.random() * Math.PI;
     const r = 18 + Math.random() * 10;
@@ -15158,6 +15172,32 @@ function updatePlayer(dt) {
       color: c >= 6 ? '#ffaaff' : c >= 4 ? '#ffd166' : '#bce4ff',
       size: 1.4 + Math.random() * 1.0,
     });
+  }
+  // v0.25.473 — STAR-SHAPE TRAIL during high arcs. When the player is
+  // mid-air with strong upward velocity (vy < -14), spawn a 5-pointed
+  // star particle every 3 frames trailing behind. Mimics Icy Tower's
+  // signature spread-eagle pose with stars shooting out. Brightness
+  // scales with how big the launch was.
+  if (_isIcyMap && !player.onGround && player.vy < -14 && (game.time & 3) === 0) {
+    const intensity = Math.min(1, (-player.vy - 14) / 10);   // 0 at vy=-14, 1 at vy=-24
+    const starCount = intensity > 0.6 ? 2 : 1;
+    for (let i = 0; i < starCount; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const off = 14 + Math.random() * 10;
+      game.particles.push({
+        x: player.x + player.w/2 + Math.cos(ang) * off,
+        y: player.y + player.h/2 + Math.sin(ang) * off,
+        vx: -player.vx * 0.15 + (Math.random() - 0.5) * 0.6,
+        vy: -player.vy * 0.10 + (Math.random() - 0.5) * 0.6 + 1.2,
+        life: 22 + Math.random() * 10,
+        color: intensity > 0.7 ? '#ffd166' : '#bce4ff',
+        size: 2.6 + Math.random() * 1.4,
+        shape: 'star',
+        rot: Math.random() * Math.PI * 2,
+        spin: (Math.random() - 0.5) * 0.30,
+        gravity: 0.05,             // floaty fall (default is 0.15)
+      });
+    }
   }
   // Decay the combo timer + reset combo when it expires.
   if ((player._iceComboTimer || 0) > 0) {
@@ -41863,6 +41903,18 @@ function drawParticles() {
         ctx.drawImage(p.sprite, sx - w / 2, p.y - h / 2, w, h);
       }
       lastColor = null;
+    } else if (p.shape === 'star') {
+      // v0.25.473 — 5-pointed star particle (used by Icy Tower combo
+      // landings + high-arc trail). Inscribed in a circle of radius
+      // p.size * 1.6 so a 'size: 2.6' star reads as ~8 px across.
+      // Spin via p.spin (radians/frame) — initialised on push, integrated
+      // here so the renderer doesn't have to mutate state from update.
+      const alpha = p.life < 20 ? p.life / 20 : 1;
+      if (alpha !== lastAlpha) { ctx.globalAlpha = alpha; lastAlpha = alpha; }
+      ctx.fillStyle = p.color;
+      lastColor = null;
+      _drawStar(sx, p.y, p.size * 1.6, p.size * 0.7, 5, p.rot || 0);
+      if (typeof p.spin === 'number') p.rot = (p.rot || 0) + p.spin;
     } else {
       const alpha = p.life < 20 ? p.life / 20 : 1;
       if (alpha !== lastAlpha) { ctx.globalAlpha = alpha; lastAlpha = alpha; }
@@ -41871,6 +41923,23 @@ function drawParticles() {
     }
   }
   if (lastAlpha !== 1) ctx.globalAlpha = 1;
+}
+
+// v0.25.473 — Draw a 5-point star inscribed in a circle of radius
+// `outer`, with inner-point radius `inner`. Used by `shape:'star'`
+// particles in drawParticles. ctx.fillStyle must be set by the caller.
+function _drawStar(cx, cy, outer, inner, points, rotation) {
+  const N = points || 5;
+  ctx.beginPath();
+  for (let i = 0; i < N * 2; i++) {
+    const r = (i % 2 === 0) ? outer : inner;
+    const a = (i / (N * 2)) * Math.PI * 2 + (rotation || 0) - Math.PI / 2;
+    const x = cx + Math.cos(a) * r;
+    const y = cy + Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
 }
 
 // v0.25.458 — Icy Tower combo cheer overlay. Renders the floating
@@ -41991,7 +42060,7 @@ function drawIcyHud() {
     ctx.textAlign = 'right';
     ctx.fillStyle = '#7a8fa6';
     ctx.font = '10px Inter, system-ui, sans-serif';
-    ctx.fillText('Build combo with high-speed climbing jumps', x + chipW/2 - 12, y + 30);
+    ctx.fillText('Clear 4+ floors in one jump → combo step', x + chipW/2 - 12, y + 30);
   }
   ctx.restore();
 }
