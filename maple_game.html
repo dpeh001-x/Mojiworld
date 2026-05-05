@@ -3118,7 +3118,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.479';
+const GAME_VERSION = 'v0.25.480';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -8430,7 +8430,9 @@ const MAPS = {
     // higher floors are slightly harder to hit.
     for (let i = 0; i < FP_NUM_FLOORS; i++) {
       const y = FP_GROUND_Y - FP_FLOOR_DY * (i + 1);
-      const w = Math.max(90, 140 - Math.floor(i * 0.2));
+      // v0.25.480 — platforms ~60% wider for forgiving climbs. Bottom
+      // floors 220 px, tapering to 170 px at the top.
+      const w = Math.max(170, 220 - Math.floor(i * 0.15));
       // Alternate left/right bias every 3 floors so the climb path
       // weaves rather than being a straight line.
       const sideBias = (Math.floor(i / 3) % 2 === 0)
@@ -8444,8 +8446,8 @@ const MAPS = {
     // The portal to zodiacHall sits here. Replaces the random x of the
     // last entry so the player always lands on a stable summit pad.
     platforms[platforms.length - 1] = {
-      x: (FP_WORLD_W - 200) / 2, y: FP_GROUND_Y - FP_FLOOR_DY * FP_NUM_FLOORS,
-      w: 200, h: 14, type: 'platform', tag: 'summit',
+      x: (FP_WORLD_W - 240) / 2, y: FP_GROUND_Y - FP_FLOOR_DY * FP_NUM_FLOORS,
+      w: 240, h: 14, type: 'platform', tag: 'summit',
     };
     return {
       name: 'Frozen Peak',
@@ -8456,6 +8458,13 @@ const MAPS = {
       levelReq: 11,
       isIcy: true,
       isVerticalTower: true,
+      // v0.25.480 — gravity 20% lighter so mid-air arcs hang longer
+      // and direction changes have more time to take effect.
+      gravityMul: 0.8,
+      // v0.25.480 — restrict monster spawns to the ground band only.
+      // No more dodging Frostkin while climbing — the tower itself is
+      // the challenge above the bottom floor.
+      monstersOnGround: true,
       // v0.25.470 — fall-damage tuning. Falls > FP_FALL_FREE_FLOORS
       // floors deal damage. Each FP_FALL_TIER floors over the free
       // window adds another 10 % max-HP, capping at 90 % at the top.
@@ -14352,6 +14361,17 @@ function spawnFromMap(type, boss) {
   const m = monsterTypes[type];
   const platList = game.mapData.platforms.filter(p => p.type === 'platform');
   let x, y;
+  // v0.25.480 — `monstersOnGround: true` keeps non-boss spawns on the
+  // ground band only (Frozen Peak: bottom-floor only, climb is mob-free).
+  if (!boss && game.mapData.monstersOnGround) {
+    const ground = game.mapData.platforms.find(p => p.type === 'ground');
+    if (ground) {
+      x = ground.x + 80 + Math.random() * Math.max(0, ground.w - 160 - m.w);
+      y = ground.y - m.h;
+      spawnMonster(x, y, type, !!boss);
+      return;
+    }
+  }
   if (boss) {
     x = game.mapData.worldWidth / 2 - m.w / 2;
     y = 480 - m.h;
@@ -14743,8 +14763,12 @@ function updatePlayer(dt) {
     // chained-momentum stays within control rather than escalating
     // unboundedly.
     const isIcy = !!(game.mapData && game.mapData.isIcy);
+    // v0.25.480 — boosted mid-air accel on icy maps for easier
+    // maneuvering. Air accel 0.85 → 1.10 (29% snappier). Counter-input
+    // (pressing opposite to current vx) gets a 1.6× multiplier so a
+    // mid-air direction reversal feels responsive instead of glacial.
     const accel = isIcy
-      ? (player.onGround ? 0.30 : 0.85)
+      ? (player.onGround ? 0.30 : 1.10)
       : (player.onGround ? 1.1  : 0.6);
     const fric = isIcy
       ? (player.onGround ? 0.96 : 0.985)
@@ -14754,17 +14778,21 @@ function updatePlayer(dt) {
       // Icy Tower allows over-cap horizontal speed when chained off
       // earlier momentum, but bounded by the hard ICE_MAX_VX so the
       // player always feels in control.
+      const counterBoost = (isIcy && !player.onGround && player.vx > 1.5) ? 1.6 : 1;
+      const a = accel * counterBoost;
       const cap = isIcy
-        ? Math.min(ICE_MAX_VX, Math.max(moveSpeed, Math.abs(player.vx) + accel))
+        ? Math.min(ICE_MAX_VX, Math.max(moveSpeed, Math.abs(player.vx) + a))
         : moveSpeed;
-      player.vx = Math.max(-cap, player.vx - accel);
+      player.vx = Math.max(-cap, player.vx - a);
       player.facing = -1;
       player.state = player.onGround ? 'walk' : player.state;
     } else if (k['arrowright']) {
+      const counterBoost = (isIcy && !player.onGround && player.vx < -1.5) ? 1.6 : 1;
+      const a = accel * counterBoost;
       const cap = isIcy
-        ? Math.min(ICE_MAX_VX, Math.max(moveSpeed, Math.abs(player.vx) + accel))
+        ? Math.min(ICE_MAX_VX, Math.max(moveSpeed, Math.abs(player.vx) + a))
         : moveSpeed;
-      player.vx = Math.min(cap, player.vx + accel);
+      player.vx = Math.min(cap, player.vx + a);
       player.facing = 1;
       player.state = player.onGround ? 'walk' : player.state;
     } else {
