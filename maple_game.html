@@ -3118,7 +3118,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.466';
+const GAME_VERSION = 'v0.25.467';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5575,15 +5575,30 @@ function _drawEquipmentLayer(layer, targetCtx, opts) {
   // live player.equipped, else bail. Studio preview canvas thus
   // renders the picks-in-progress; in-game render keeps using the
   // committed loadout.
-  // v0.25.316 — Empty-equipment fast-path. When the live player has
-  // nothing visual equipped (the common case until a player tries on
-  // gear), bail before walking slot arrays. Studio override path
-  // skips the cache since CHAR_STUDIO.equip mutates as the user
-  // clicks, so per-frame computing of "is empty" would just churn.
-  if (!_LX_EQ_PREVIEW_OVERRIDE && (typeof player === 'undefined' || !player.equipped || player._eqEmpty)) return;
+  if (!_LX_EQ_PREVIEW_OVERRIDE && (typeof player === 'undefined' || !player.equipped)) return;
   const equipped = _LX_EQ_PREVIEW_OVERRIDE
     || (typeof player !== 'undefined' && player.equipped);
   if (!equipped) return;
+  // v0.25.467 — Inline empty-check, replacing the v0.25.316 cached
+  // `player._eqEmpty` flag. The cache was an O(1) optimisation that
+  // ASSUMED every player.equipped[slot] = item assignment also
+  // refreshed the flag — but the inventory click handler (the
+  // primary equip path!) never called _refreshEqEmptyFlag, so the
+  // flag stayed stale at `true` after the first equip and the
+  // renderer skipped every equipment draw. Result: gear items
+  // equipped from the inventory never visually appeared on the
+  // character. Walking 9 slot keys per frame is well below the
+  // measurable cost (~0.01 ms), and skipping the cache makes the
+  // path provably correct — no future equip site can break the
+  // invariant by forgetting to call a refresh helper.
+  if (!_LX_EQ_PREVIEW_OVERRIDE) {
+    let anyEquipped = false;
+    for (const slot in LX_EQ_REGISTRIES) {
+      const item = equipped[slot];
+      if (item && item.spriteId) { anyEquipped = true; break; }
+    }
+    if (!anyEquipped) return;
+  }
   const slots = LX_EQ_SLOT_ORDER[layer];
   if (!slots) return;
   for (const slot of slots) {
@@ -24551,6 +24566,10 @@ function renderInventory(prefix) {
       if (it) {
         player.inventory.push(it);
         player.equipped[slot] = null;
+        // v0.25.467 — refresh the cached _eqEmpty flag whenever
+        // player.equipped is mutated. Drop-in defensive guard so any
+        // legacy reader that still trusts the cache stays correct.
+        if (typeof _refreshEqEmptyFlag === 'function') _refreshEqEmptyFlag();
         if (typeof _checkSetComplete === 'function') _checkSetComplete();
         renderInventory(prefix);
       }
@@ -24594,6 +24613,14 @@ function renderInventory(prefix) {
         const equipped = player.equipped[it.slot];
         if (equipped) player.inventory.push(equipped);
         player.equipped[it.slot] = it;
+        // v0.25.467 — refresh the cached _eqEmpty flag. THIS is the
+        // call site that broke gear visibility for clicks-from-
+        // inventory: previously the flag stayed at `true` after
+        // equipping the FIRST item, so the renderer kept short-
+        // circuiting. The drawEquipmentLayer fast-path now does an
+        // inline check that doesn't trust the cache, but we keep
+        // this refresh anyway as defense-in-depth.
+        if (typeof _refreshEqEmptyFlag === 'function') _refreshEqEmptyFlag();
         // Find the REAL index to splice (may have shifted if items were re-pushed)
         const realIdx = player.inventory.indexOf(it);
         if (realIdx >= 0) player.inventory.splice(realIdx, 1);

@@ -148,6 +148,32 @@
   <b>Heads-up.</b> An earlier implementation of these phases targeted <code>v0.5.1</code> and was preserved locally at tag <code>phase-1-2-3-on-v0.5.1</code>. This is the rebuild against the current <code>v0.9.8</code> codebase, which had moved substantially (new bosses like Gravitos, minimap/taxi, chibi character rewrite).
 </div>
 
+<h2>v0.25.467 <span class="tag">Studio-designed gear now shows in-game (stale empty-equipment cache fix)</span></h2>
+
+<h3><span class="pill bug">bug</span>Studio designs / equipped gear were invisible despite Apply succeeding</h3>
+<p>User report: design gear in the Q-key Character Studio, click Apply, then "use" (equip) the item in-game — the design / sprite still doesn't show on the character. Tracked down via live diagnostic: the data flow was correct (Studio Apply ✓ writes <code>player.customPaint</code> + <code>player.customPaintLayers</code> + <code>player.equipped[slot].spriteId</code>), but the <b>renderer skipped every equipment draw</b>.</p>
+
+<h3><span class="pill bug">bug</span>Root cause — stale <code>player._eqEmpty</code> cache</h3>
+<p>v0.25.316 introduced a "fast path" caching flag on <code>player._eqEmpty</code> so <code>_drawEquipmentLayer</code> could short-circuit when no visual gear was equipped (the common case for new chars). The flag was refreshed inside Studio Apply / Revert / loadState — but <b>not</b> inside the inventory click handler that's the primary equip path. So:</p>
+<ol>
+<li>New player has no gear → <code>_eqEmpty = true</code> (correct)</li>
+<li>Player opens inventory, clicks a helmet → <code>player.equipped.helmet = item</code> ✓</li>
+<li><code>_eqEmpty</code> stays at <code>true</code> (bug — the inventory handler doesn't refresh)</li>
+<li>Renderer sees <code>_eqEmpty = true</code> and short-circuits</li>
+<li>Helmet never renders</li>
+</ol>
+<p>The Studio Apply path was the special case that <i>did</i> refresh the flag, so designs that went purely through Studio worked — but anything equipped from inventory (the most common path) silently failed.</p>
+
+<h3><span class="pill polish">polish</span>Two-prong fix</h3>
+<ul>
+<li><b>Inline empty-check in <code>_drawEquipmentLayer</code>.</b> Replaces the cached-flag short-circuit with a 9-slot inline scan. The cost is well below 0.01 ms per frame — not measurable. The benefit: the path is provably correct. No future equip site can break the invariant by forgetting to call a refresh helper.</li>
+<li><b>Defensive <code>_refreshEqEmptyFlag()</code> calls</b> at both inventory click sites (equip + unequip). Belt-and-braces measure: any other site that still trusts the cached flag continues to see correct values.</li>
+</ul>
+
+<div class="callout">
+  <b>Regression-prevention.</b> The original v0.25.316 bug was an <i>invariant cache</i> — a derived value that only stays correct if <i>every</i> writer calls a refresh helper. Two writers existed; only one was wired. The fix replaces the cache with on-demand computation, eliminating the invariant. This pattern of swapping invariant-caches for inline checks is the right move whenever the cache is cheaper to recompute than to prove always-correct via writer audit.
+</div>
+
 <h2>v0.25.466 <span class="tag">Bbox-aware prop anchoring — no more floating + hanging baskets attach to platforms</span></h2>
 
 <h3><span class="pill bug">bug</span>Props were floating ~9 px above the floor / platforms</h3>
