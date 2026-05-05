@@ -3118,7 +3118,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.469';
+const GAME_VERSION = 'v0.25.470';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -8366,45 +8366,83 @@ const MAPS = {
       {type:'horny',    count:4},
     ],
   },
-  frozenPeak: {
-    name:'Frozen Peak',
-    bg:'misty',
-    sky:['#c8e0ff','#aac8e8','#e8f0ff'],
-    worldWidth: 2800,
-    levelReq: 11,       // v0.25.225: 7→11 (tier 3 — frostkin)
-    // v0.25.458 — Icy Tower physics on this map. Sets the slippery
-    // floor + speed-scaled jump + jump combo cheer system. Movement
-    // code reads game.mapData.isIcy to flip its friction / accel
-    // tables; the jump path reads it to enable the speed boost +
-    // combo tracker. Other maps unaffected.
-    isIcy: true,
-    platforms: [
-      {x:0,y:480,w:2800,h:60,type:'ground'},
-      {x:150,y:400,w:160,h:12,type:'platform'},
-      {x:380,y:340,w:150,h:12,type:'platform'},
-      {x:600,y:390,w:170,h:12,type:'platform'},
-      {x:840,y:330,w:150,h:12,type:'platform'},
-      {x:1060,y:280,w:150,h:12,type:'platform'},
-      {x:1280,y:360,w:160,h:12,type:'platform'},
-      {x:1500,y:310,w:160,h:12,type:'platform'},
-      {x:1720,y:250,w:150,h:12,type:'platform'},
-      {x:1940,y:340,w:160,h:12,type:'platform'},
-      {x:2200,y:290,w:160,h:12,type:'platform'},
-      {x:2440,y:350,w:160,h:12,type:'platform'},
-      {x:2640,y:270,w:140,h:12,type:'platform'},
-      {x:260,y:210,w:120,h:12,type:'platform'},
-      {x:760,y:180,w:120,h:12,type:'platform'},
-      {x:1360,y:170,w:120,h:12,type:'platform'},
-      {x:1860,y:150,w:120,h:12,type:'platform'},
-      {x:2350,y:180,w:120,h:12,type:'platform'},
-    ],
-    portals: [],
-    spawns: [
-      {type:'frostkin', count:6},   // v0.25.99 — ice signature
-      {type:'stump',    count:4},
-      {type:'zombie',   count:4},
-    ],
-  },
+  frozenPeak: (() => {
+    // v0.25.470 — Frozen Peak rebuilt as a 200-platform vertical
+    // skyscraper. Player spawns at the bottom and climbs upward,
+    // tower-style. The Icy Tower physics from v0.25.458 (slippery
+    // floor + speed-boosted jumps + combo cheer) keep working since
+    // isIcy stays set; the new isVerticalTower flag tells the camera
+    // to follow vertically and the renderer to translate by -camera.y.
+    // World height = 14400 px (vs 600 default), so the camera scrolls
+    // ~13800 px from bottom to top. Top platform has a portal to
+    // zodiacHall (the Zodiac Sanctum).
+    const FP_GROUND_Y = 14070;     // top of ground band (200 floors * 70 + 70 summit room)
+    const FP_FLOOR_DY = 70;        // vertical spacing between platforms
+    const FP_NUM_FLOORS = 200;
+    const FP_WORLD_W = 800;
+    const FP_WORLD_H = 14400;
+    // Deterministic pseudo-random so the layout is identical across
+    // page loads (matches fixedLayout: true). Mulberry32-style seed.
+    let _fpSeed = 0x9e3779b9;
+    const _fpRand = () => {
+      _fpSeed = (_fpSeed + 0x6d2b79f5) | 0;
+      let t = _fpSeed;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const platforms = [
+      // Ground at the bottom of the tower (60 px high, full width).
+      { x: 0, y: FP_GROUND_Y, w: FP_WORLD_W, h: 60, type: 'ground' },
+    ];
+    // 200 climbing floors, deterministic random x-position with
+    // alternating biases so consecutive floors aren't directly above
+    // each other. Width tapers from 140 (lower) → 100 (upper) so
+    // higher floors are slightly harder to hit.
+    for (let i = 0; i < FP_NUM_FLOORS; i++) {
+      const y = FP_GROUND_Y - FP_FLOOR_DY * (i + 1);
+      const w = Math.max(90, 140 - Math.floor(i * 0.2));
+      // Alternate left/right bias every 3 floors so the climb path
+      // weaves rather than being a straight line.
+      const sideBias = (Math.floor(i / 3) % 2 === 0)
+        ? _fpRand() * 0.45
+        : 0.55 + _fpRand() * 0.45;
+      const xMax = FP_WORLD_W - w - 40;
+      const x = Math.floor(40 + sideBias * (xMax - 40));
+      platforms.push({ x, y, w, h: 12, type: 'platform' });
+    }
+    // Top platform — wider + tagged so it reads as the summit landing.
+    // The portal to zodiacHall sits here. Replaces the random x of the
+    // last entry so the player always lands on a stable summit pad.
+    platforms[platforms.length - 1] = {
+      x: (FP_WORLD_W - 200) / 2, y: FP_GROUND_Y - FP_FLOOR_DY * FP_NUM_FLOORS,
+      w: 200, h: 14, type: 'platform', tag: 'summit',
+    };
+    return {
+      name: 'Frozen Peak',
+      bg: 'misty',
+      sky: ['#c8e0ff', '#aac8e8', '#e8f0ff'],
+      worldWidth: FP_WORLD_W,
+      worldHeight: FP_WORLD_H,
+      levelReq: 11,
+      isIcy: true,
+      isVerticalTower: true,
+      // v0.25.470 — fall-damage tuning. Falls > FP_FALL_FREE_FLOORS
+      // floors deal damage. Each FP_FALL_TIER floors over the free
+      // window adds another 10 % max-HP, capping at 90 % at the top.
+      fallFreeFloors: 20,
+      fallTierFloors: 20,
+      fallFloorPx: FP_FLOOR_DY,
+      fixedLayout: true,
+      platforms,
+      portals: [],
+      spawns: [
+        { type: 'frostkin', count: 6 },
+        { type: 'stump',    count: 4 },
+        { type: 'zombie',   count: 4 },
+      ],
+    };
+  })(),
   lavaCavern: {
     name:'Lava Cavern',
     bg:'dungeon',
@@ -9158,7 +9196,14 @@ MAPS.skyGarden.portals.push      ({x:100,  dest:'forest',          name:'◀ Eme
 MAPS.forest.portals.push         ({x:2300, dest:'wildflowerPlains',name:'▶ Wildflower Plains'});
 MAPS.wildflowerPlains.portals.push({x:100, dest:'forest',          name:'◀ Emerald Thicket'});
 
-MAPS.frozenPeak.portals.push     ({x:2700, dest:'skyGarden',       name:'▶ Sky Garden'});
+// v0.25.470 — Frozen Peak rebuilt as a vertical tower. The new
+// `y` field on portal entries lets a portal anchor at any world-y
+// (default 480 = old ground-line behaviour). Tower bottom links
+// back to Sky Garden; tower summit links to the Zodiac Sanctum.
+//   • Bottom (x:600, y:14070) → Sky Garden — only way OUT of the tower.
+//   • Summit (x:400, y:70)    → Zodiac Sanctum — top of the climb.
+MAPS.frozenPeak.portals.push     ({x:600, y:14070, dest:'skyGarden',       name:'◀ Sky Garden'});
+MAPS.frozenPeak.portals.push     ({x:400, y:70,    dest:'zodiacHall',      name:'⭐ Zodiac Sanctum (summit)'});
 MAPS.skyGarden.portals.push      ({x:2500, dest:'frozenPeak',      name:'▶ Frozen Peak'});
 
 MAPS.graniteBluffs.portals.push  ({x:100,  dest:'thunderPlateau',  name:'◀ Thunder Plateau'});
@@ -13899,7 +13944,18 @@ function loadMap(id, entryX) {
   game.portals = game.mapData.portals || [];
   if (entryX !== undefined) {
     player.x = entryX;
-    player.y = 400;
+    // v0.25.470 — Spawn y. Default 400 puts the player ~80 px above
+    // the canonical y=480 ground line (gravity drops them onto it on
+    // the next frame). Vertical-tower maps use a per-map ground
+    // discovered from the first 'ground' platform so the player
+    // spawns just above the tower's actual ground (typically y≈14000
+    // for Frozen Peak), not in mid-air halfway up the climb.
+    let spawnY = 400;
+    if (game.mapData && game.mapData.isVerticalTower) {
+      const groundPlatform = (game.mapData.platforms || []).find(p => p.type === 'ground');
+      if (groundPlatform) spawnY = groundPlatform.y - 80;
+    }
+    player.y = spawnY;
     player.vx = 0; player.vy = 0;
   }
   // v0.25.247 (A3) — snap the camera to the player's new position on
@@ -13910,7 +13966,17 @@ function loadMap(id, entryX) {
   if (game.camera && game.mapData) {
     const targetX = (player.x + player.w / 2) - W / 2;
     game.camera.x = Math.max(0, Math.min(game.mapData.worldWidth - W, targetX));
-    game.camera.y = 0;
+    // v0.25.470 — vertical snap for tower maps. Without this the
+    // camera would lerp from y=0 (top of tower) down to the player's
+    // actual position over ~30 frames, briefly showing the wrong
+    // slice of the world on first map paint.
+    if (game.mapData.isVerticalTower) {
+      const targetY = (player.y + player.h / 2) - H / 2;
+      const wh = game.mapData.worldHeight || H;
+      game.camera.y = Math.max(0, Math.min(wh - H, targetY));
+    } else {
+      game.camera.y = 0;
+    }
   }
   buildBackdrop();
 
@@ -15049,7 +15115,70 @@ function updatePlayer(dt) {
     if (player._iceComboTimer <= 0) player._iceCombo = 0;
   }
 
-  if (player.y > H + 100) {
+  // v0.25.470 — Fall damage on vertical-tower maps.
+  //   • Track the apex of every airborne arc (lowest y reached).
+  //   • On landing, compute fall = lastLandY - apexY (in pixels).
+  //   • Convert to floors via mapData.fallFloorPx (default 70).
+  //   • Free window: floors > mapData.fallFreeFloors (20) damages.
+  //   • Each fallTierFloors (20) over the free window = +10 % max-HP,
+  //     capped at 90 %. So a fall of 200 floors at the very top of
+  //     Frozen Peak = 90 % max-HP (devastating but not auto-kill).
+  if (game.mapData && game.mapData.isVerticalTower) {
+    if (player.onGround) {
+      const apex = player._fallApexY;
+      if (_wasInAir && typeof apex === 'number') {
+        const fallPx = player.y - apex;
+        const floorPx   = game.mapData.fallFloorPx   || 70;
+        const freeFlrs  = game.mapData.fallFreeFloors|| 20;
+        const tierFlrs  = game.mapData.fallTierFloors|| 20;
+        const fallFlrs  = Math.floor(fallPx / floorPx);
+        if (fallFlrs > freeFlrs && player.invulnerable <= 0) {
+          const tiers = Math.floor((fallFlrs - freeFlrs) / tierFlrs) + 1;
+          const dmgPct = Math.min(0.9, tiers * 0.10);
+          const dmg = Math.max(1, Math.floor(getMaxHp() * dmgPct));
+          player.hp = Math.max(0, player.hp - dmg);
+          player.invulnerable = 600;
+          player.hitStun = Math.max(player.hitStun || 0, 400);
+          game.damageNumbers.push({
+            x: player.x + 14, y: player.y - 8, vy: -2,
+            text: '-' + dmg + ' (fall)', life: 60,
+            color: dmgPct >= 0.5 ? '#ff4477' : '#ff8844', size: 18,
+          });
+          if (typeof flash === 'function') flash(0.25);
+          if (typeof addHitStop === 'function') addHitStop(80);
+          // Dust burst on landing
+          for (let i = 0; i < 14; i++) {
+            game.particles.push({
+              x: player.x + player.w / 2 + (Math.random() - 0.5) * 24,
+              y: player.y + player.h - 1,
+              vx: (Math.random() - 0.5) * 4,
+              vy: -Math.random() * 2,
+              life: 24 + Math.random() * 12,
+              color: i % 2 ? '#ddccaa' : '#aa8866',
+              size: 2 + Math.random() * 2,
+            });
+          }
+        }
+      }
+      player._fallApexY = player.y;     // reset apex tracker on every landing
+    } else {
+      // In-air: extend the apex (lowest y = highest altitude).
+      if (typeof player._fallApexY !== 'number' || player.y < player._fallApexY) {
+        player._fallApexY = player.y;
+      }
+    }
+  } else {
+    player._fallApexY = null;          // reset on non-tower maps
+  }
+
+  // v0.25.470 — Pit-fall safety net. Original threshold (H + 100) was
+  // 700 px — fine for canvas-tall maps but on a vertical-tower map
+  // the player crosses y=700 climbing UP. Now bounded by world height
+  // so the teleport-to-100,400 only fires if the player actually fell
+  // off the BOTTOM of the world (e.g. through a buggy un-grounded
+  // gap), not just by walking around in a tall map.
+  const _wh = (game.mapData && game.mapData.worldHeight) || (H + 100);
+  if (player.y > _wh + 100) {
     player.hp -= 15;
     player.x = 100; player.y = 400; player.vx = 0; player.vy = 0;
   }
@@ -22241,8 +22370,12 @@ function updateParticles(dt) {
 // =========================================================================
 function tryPortal() {
   for (const po of game.portals) {
+    // v0.25.470 — portals can carry a `y` field for tall maps (vertical
+    // tower / multi-tier interiors). Default 480 preserves the legacy
+    // single-floor proximity check around the ground line.
+    const _portalY = (typeof po.y === 'number') ? po.y : 480;
     if (Math.abs((player.x + player.w/2) - po.x) < 50 &&
-        Math.abs((player.y + player.h) - 480) < 100) {
+        Math.abs((player.y + player.h) - _portalY) < 100) {
       const dest = MAPS[po.dest];
       // v0.25.444 — Level gate fully removed. Was already non-blocking
       // (player walked through regardless of level), but the heads-up
@@ -25712,6 +25845,21 @@ function updateCamera() {
   const ease = 0.08 + Math.min(0.08, Math.abs(dx) / 600);
   game.camera.x += dx * ease;
   game.camera.x = Math.max(0, Math.min(game.mapData.worldWidth - W, game.camera.x));
+  // v0.25.470 — Vertical follow for tall maps (isVerticalTower: true,
+  // worldHeight set). Default maps stay at camera.y = 0 so the
+  // canvas-tall maps they were always designed for render unchanged.
+  // Tower maps lerp the camera so the player stays roughly centred
+  // vertically and the world scrolls past as they climb.
+  if (game.mapData && game.mapData.isVerticalTower) {
+    const targetY = player.y + player.h/2 - H/2;
+    const dy = targetY - game.camera.y;
+    const easeY = 0.10 + Math.min(0.10, Math.abs(dy) / 600);
+    game.camera.y += dy * easeY;
+    const wh = game.mapData.worldHeight || H;
+    game.camera.y = Math.max(0, Math.min(wh - H, game.camera.y));
+  } else {
+    game.camera.y = 0;
+  }
 }
 
 // =========================================================================
@@ -30562,8 +30710,14 @@ function drawPortals() {
     if (sx + 80 < 0 || sx - 80 > W) continue;
     const t = game.time * 0.05;
     const bob = Math.sin(t * 0.6) * 1.5;
+    // v0.25.470 — portal "feet" world-y. Default 420 preserves the
+    // historical ground-line drawing (sprite center ~60 px above
+    // the canvas-bottom ground at y=480). Portals on tall maps can
+    // override `po.y` to anchor at any world altitude — we render
+    // the sprite center 60 px above the supplied feet line.
+    const portalCenterY = ((typeof po.y === 'number') ? (po.y - 60) : 420) + bob;
     ctx.save();
-    ctx.translate(sx, 420 + bob);
+    ctx.translate(sx, portalCenterY);
     // Soft glow halo underneath (cheap radial gradient). Skip on lowFx.
     // v0.25.441 — was a fresh createRadialGradient + ellipse fill PER
     // portal PER frame (3-4 portals on most maps × 60 fps = 180-240
@@ -42240,6 +42394,15 @@ function loop(time) {
   ctx.clearRect(-30, -30, W + 60, H + 60);
   drawBackground();
   drawAmbient();
+  // v0.25.470 — Vertical-tower scroll. Translates the world Y so the
+  // camera's vertical follow on isVerticalTower maps actually shows
+  // the right slice of the tall map. drawBackground + drawAmbient
+  // happen BEFORE this translate so the sky / parallax stay anchored
+  // to the screen instead of scrolling 1:1 with the world (gives
+  // climbers a sense of height without parallax flicker). Default
+  // maps have camera.y === 0 so the translate is a no-op, no
+  // behaviour change for the existing 30+ horizontal maps.
+  if (game.camera.y) ctx.translate(0, -game.camera.y);
   drawPlatforms();
   drawWorldProps();    // v0.25.463 — static map props (banners, anvils, fountains, etc.)
   drawChests();
