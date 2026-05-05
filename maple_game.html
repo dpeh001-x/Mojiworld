@@ -12927,30 +12927,109 @@ function resetCombo() {
   }
 }
 function quickDash(dir) {
+  player.facing = dir;
+  if (player.vy > 1) player.vy = 0;
+
+  // v0.25.447 — Per-class dash flavour. Rogue keeps its v0.25.234 ninja-
+  // stance dash; the other three classes get distinct fantasies:
+  //   warrior → forward body charge (fast + warm trail + brief invul)
+  //   mage    → instant teleport (no in-between motion + cyan/violet bursts)
+  //   archer  → quick forward roll (somersault transform + green trail)
+
+  // ── MAGE — fast teleport ─────────────────────────────────────────
+  // Skip the maintenance phase entirely; instantly translate the
+  // player by ~150 px in the dash direction and bookend with two
+  // arcane bursts. quickDashTimer stays > 0 so the next double-tap
+  // can't fire mid-blink, but updatePlayer's dash-maintenance block
+  // explicitly opts out of vx / afterimage emission for mage.
+  if (player.cls === 'mage') {
+    const startX = player.x;
+    const ww = (game.mapData && game.mapData.worldWidth) || 9999;
+    player.x = Math.max(8, Math.min(ww - player.w - 8, player.x + dir * 150));
+    const endX = player.x;
+    player.invulnerable = Math.max(player.invulnerable, 220);
+    player.quickDashTimer = 180;        // cooldown only — no motion
+    player.quickDashDir = dir;
+    player.vx = 0;
+    // Departure burst at the original tile
+    for (let i = 0; i < 14; i++) {
+      const a = (i / 14) * Math.PI * 2;
+      game.particles.push({
+        x: startX + player.w / 2 + Math.cos(a) * 6,
+        y: player.y + player.h / 2 + Math.sin(a) * 8,
+        vx: Math.cos(a) * 2.4, vy: Math.sin(a) * 1.6,
+        life: 22, color: i % 2 ? '#aaccff' : '#cc99ff', size: 2 + Math.random()
+      });
+    }
+    // Streaking afterimages along the teleport path so the eye reads
+    // the trajectory as a blink rather than a no-op pause.
+    for (let k = 0; k < 4; k++) {
+      const t = (k + 1) / 5;
+      game.afterImages.push({
+        x: startX + (endX - startX) * t,
+        y: player.y, facing: dir, state: 'dash',
+        life: 18 - k * 2, maxLife: 18,
+        color: `rgba(170,200,255,${(0.55 - k * 0.10).toFixed(2)})`,
+      });
+    }
+    // Arrival burst — slightly tighter ring, inward velocity so it
+    // reads as the rune "snapping shut" around the destination.
+    for (let i = 0; i < 14; i++) {
+      const a = (i / 14) * Math.PI * 2;
+      game.particles.push({
+        x: endX + player.w / 2 + Math.cos(a) * 4,
+        y: player.y + player.h / 2 + Math.sin(a) * 6,
+        vx: Math.cos(a) * -1.4, vy: Math.sin(a) * -1.0,
+        life: 26, color: i % 2 ? '#cc99ff' : '#88aaff', size: 2 + Math.random() * 1.5
+      });
+    }
+    return;
+  }
+
+  // ── Default initial dash velocity for warrior / archer / rogue ──
   player.quickDashTimer = 180;
   player.quickDashDir = dir;
-  player.facing = dir;
   player.vx = dir * 14;
-  if (player.vy > 1) player.vy = 0;
-  // Rogue: dash is fully invincible for its duration
+
+  // Class-specific tweaks layered on top of the default puff/afterimage.
+  let trailHex = '#bbddff';
+  let trailRgba = 'rgba(180,220,255,0.55)';
+
   if (player.cls === 'rogue') {
+    // Unchanged: full invul + ninja stance pose for the duration.
     player.invulnerable = Math.max(player.invulnerable, 220);
     player._rogueDashPoseAt = (game.time | 0);
     player._rogueDashPoseUntil = (game.time | 0) + 24;
     player._rogueDashBrakeDust = 0;
+  } else if (player.cls === 'warrior') {
+    // Body charge — boost vx, brief shoulder-bash invul, warm trail.
+    player.vx = dir * 18;
+    player.invulnerable = Math.max(player.invulnerable, 180);
+    trailHex = '#ffcc66';
+    trailRgba = 'rgba(255,200,100,0.55)';
+  } else if (player.cls === 'archer') {
+    // Quick forward roll using the existing somersault transform
+    // (the chibi figure spins around its torso during the dash).
+    player.somersault = 220;
+    player.somersaultDir = dir;
+    player.somersaultDuration = 220;
+    player.invulnerable = Math.max(player.invulnerable, 200);
+    trailHex = '#88ffcc';
+    trailRgba = 'rgba(140,255,200,0.55)';
   }
-  // Puff + afterimage
+
+  // Puff + initial afterimage (themed colour by class)
   for (let i = 0; i < 10; i++) {
     game.particles.push({
       x: player.x + player.w/2, y: player.y + player.h - 4,
       vx: -dir * (1.5 + Math.random() * 3), vy: -Math.random() * 1.8,
-      life: 22, color: '#bbddff', size: 2 + Math.random()
+      life: 22, color: trailHex, size: 2 + Math.random()
     });
   }
   game.afterImages.push({
     x: player.x, y: player.y, facing: player.facing,
     state: 'dash', life: 16, maxLife: 16,
-    color: 'rgba(180,220,255,0.55)'
+    color: trailRgba,
   });
 }
 
