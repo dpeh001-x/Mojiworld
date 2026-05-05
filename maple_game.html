@@ -3118,7 +3118,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.485';
+const GAME_VERSION = 'v0.25.486';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -7306,14 +7306,22 @@ const monsterTypes = {
   mushmom:  { name:'Momma Shroom',   w:76,  h:86,  color:'#f0d8a8', shell:'#aa2244', hp:8200,  atk:78, def:18, evasion:130, exp:2860, mesos:1950, speed:0.9, jump:8,  boss:true },
   aetherion:{ name:'Aetherion, the Shardfather', w:160, h:160, color:'#7a5aee', shell:'#c8a8ff', hp:54000, atk:144, def:25, evasion:180, exp:18800, mesos:13000, speed:0.8, jump:0, boss:true, superBoss:true },
   gravitos: { name:'Gravitos, the Weight-Bearer', w:180, h:180, color:'#1a0a2e', shell:'#6634a8', hp:88000, atk:184, def:34, evasion:210, exp:30600, mesos:21200, speed:1.4, jump:0, boss:true, superBoss:true, hyperBoss:true },
-  // v0.25.485 — Octobaby: 8-legged angry-faced octopus boss of the
-  // Octopus Grotto (Lv 50). Massive head + huge cute angry face. Each
-  // of the 8 tentacles wields a status special (poison / freeze / skill-
-  // lock / stun, with two duplicates split between the legs). Custom
-  // AI: bubble-swarm primary, telegraphed leg specials at fixed beats.
-  // Movement is slow + short-range due to its size — the arena fight
-  // is about reading the windups, not chasing.
-  octobaby: { name:'Octobaby, the Eight-Mood Tyrant', w:200, h:160, color:'#d066b0', shell:'#5a2078', hp:120000, atk:210, def:30, evasion:140, exp:42000, mesos:28000, speed:0.4, jump:0, boss:true, superBoss:true },
+  // v0.25.485 — Octobaby: massive 8-tentacled boss. Originally a single
+  // entity with leg-attached effects; rebuilt v0.25.486 as a multi-part
+  // boss — the head + each of the 8 legs are now SEPARATE monsters with
+  // their own HP, hit-detection, and AI. Killing the legs disables each
+  // tentacle's special; the boss is only "defeated" when the HEAD dies.
+  octobaby: { name:'Octobaby, the Eight-Mood Tyrant', w:200, h:160, color:'#d066b0', shell:'#5a2078', hp:80000,  atk:210, def:30, evasion:140, exp:42000, mesos:28000, speed:0.4, jump:0, boss:true, superBoss:true },
+  // v0.25.486 — Individual leg mobs. 4 effect variants. Each is a real
+  // monster spawned by the head boss on init (orbits around the head's
+  // mid-line at a fixed angle). Lower HP than the head so the player
+  // can pick them off; killing one silences that effect for the rest
+  // of the fight. NOT flagged boss/elite — they don't trigger boss
+  // cinematics or guaranteed loot, but they DO drop normally.
+  octoLegPoison:    { name:'Venom Tentacle',     w:80, h:60, color:'#cc66ee', shell:'#5a2078', hp:9000,  atk:120, def:20, evasion:90,  exp:4200, mesos:1800, speed:0,   jump:0 },
+  octoLegFreeze:    { name:'Frostbite Tentacle', w:80, h:60, color:'#88ccff', shell:'#3a5a88', hp:9000,  atk:120, def:20, evasion:90,  exp:4200, mesos:1800, speed:0,   jump:0 },
+  octoLegSkillLock: { name:'Silence Tentacle',   w:80, h:60, color:'#ffaa44', shell:'#aa6622', hp:9000,  atk:120, def:20, evasion:90,  exp:4200, mesos:1800, speed:0,   jump:0 },
+  octoLegStun:      { name:'Shock Tentacle',     w:80, h:60, color:'#ffee44', shell:'#aa8822', hp:9000,  atk:120, def:20, evasion:90,  exp:4200, mesos:1800, speed:0,   jump:0 },
 };
 
 // v0.25.53 — Empowered tier. When the player hits Lv 25+, the gummy /
@@ -21285,104 +21293,84 @@ function bossAI(m, dt, distToPlayer) {
       showToast('Momma Shroom summons minions!', 'epic');
     }
   } else if (m.type === 'octobaby') {
-    // v0.25.485 — Octobaby boss AI. Custom pattern with telegraphed leg
-    // specials at fixed beats so mechanics are READABLE. Slow drift +
-    // bubble swarm primary + 4 leg specials cycling on a 5.5 s rotation.
-    //
-    // BEAT TIMELINE (m.patternTimer in ms; resets every 5500 ms):
-    //   0    – 700 ms: idle bob, telegraph next leg lights up
-    //   700  – 1100 ms: leg windup (charging glow + warning text)
-    //   1100 – 1400 ms: leg fires (poison/freeze/skill-lock/stun)
-    //   1400 – 5500 ms: bubble swarm spawns at 4 fixed beats
-    //                   (2000, 3000, 4000, 5000 ms)
-    //
-    // The leg index cycles 0..7 in order so the player can read which
-    // ability is next from the lit tentacle. Each leg has one of the
-    // four effects (each effect maps to 2 legs):
-    //   legs 0,4 → poison
-    //   legs 1,5 → freeze
-    //   legs 2,6 → skill-lock
-    //   legs 3,7 → stun
+    // v0.25.486 — Octobaby HEAD AI. Multi-part boss: this is the head,
+    // and 8 leg-monsters orbit it at fixed angles (each its own entity
+    // with its own HP, hitbox, and AI firing its own status special).
+    // The HEAD itself only does:
+    //   • Slow drift (limited movement — the boss is huge)
+    //   • Bubble-swarm primary attack (4 beats per 5500 ms cycle)
+    //   • Spawn the 8 legs on init
+    //   • Enrage at 50% head-HP
     if (m._octoInit !== true) {
       m._octoInit = true;
       m.patternTimer = 0;
-      m.legIndex = 0;
       m._driftDir = Math.random() < 0.5 ? -1 : 1;
       m._driftRemain = 1200 + Math.random() * 800;
       m._bubbleBeats = [false, false, false, false];
-      m._legFired = false;
-      m._legAnnounced = false;
+      m._legRefs = [];
+      // Spawn the 8 leg-monsters anchored to this head. Effect order
+      // matches the visual leg index 0..7 (poison/freeze/skillLock/stun
+      // each map to two legs on opposite sides).
+      const LEG_TYPES = [
+        'octoLegPoison', 'octoLegFreeze', 'octoLegSkillLock', 'octoLegStun',
+        'octoLegPoison', 'octoLegFreeze', 'octoLegSkillLock', 'octoLegStun',
+      ];
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+        const lt = monsterTypes[LEG_TYPES[i]];
+        // Pre-position the leg at its anchor point so first-frame draw
+        // doesn't flash at (0,0). Real position update happens in the
+        // leg's per-tick AI block below.
+        const legX = m.x + m.w / 2 + Math.cos(a) * (m.w * 0.7);
+        const legY = m.y + m.h / 2 + Math.sin(a) * (m.h * 0.5);
+        const leg = {
+          type: LEG_TYPES[i],
+          ...lt,
+          x: legX - lt.w / 2, y: legY - lt.h / 2,
+          vx: 0, vy: 0,
+          currentHp: lt.hp, maxHp: lt.hp,
+          facing: 1, onGround: false,
+          hitFlash: 0, burnTimer: 0, burnDmg: 0,
+          stunTimer: 0, freezeTimer: 0,
+          animTimer: i * 12,
+          aggroTarget: null, aggroRange: 0,
+          isBoss: false, isMiniBoss: false, isElite: false,
+          attackTimer: 0, attackCooldown: 0,
+          patternTimer: i * 600,                  // stagger initial fire
+          patternState: 'idle',
+          // Octo-specific anchoring fields:
+          _octoLegIndex: i,
+          _octoParent: m,
+          _octoAngle: a,
+          _octoFireCd: 5500,
+          _octoFireT: i * 600,                    // first fire offset per leg
+          _octoFireFlash: 0,
+        };
+        game.monsters.push(leg);
+        m._legRefs.push(leg);
+      }
     }
-    // ── Slow short-range drift (the boss is huge — barely shifts side
-    // to side, never chases far). Reverses every ~1.5 s.
+    // ── Slow short-range drift (boss is huge; barely shifts side to side).
     m._driftRemain -= dt;
     if (m._driftRemain <= 0) {
       m._driftDir *= -1;
       m._driftRemain = 1200 + Math.random() * 800;
     }
-    m.vx = m._driftDir * m.speed;            // m.speed = 0.4 → very slow
-    // Soft arena clamp so it can't slide off-screen edge
+    m.vx = m._driftDir * m.speed;
     const arenaMinX = 200, arenaMaxX = 2000 - m.w;
     if (m.x < arenaMinX) { m.x = arenaMinX; m._driftDir = 1; }
     if (m.x > arenaMaxX) { m.x = arenaMaxX; m._driftDir = -1; }
     m.facing = (player.x + player.w/2 < m.x + m.w/2) ? -1 : 1;
 
-    // ── Leg-special cycle (telegraphed → windup → fire). Resets every 5500 ms.
     const t = m.patternTimer;
-    const LEG_EFFECTS = ['poison', 'freeze', 'skillLock', 'stun'];
-    const currentEffect = LEG_EFFECTS[m.legIndex % 4];
-
-    // Telegraph announcement (one-shot, 700 ms in)
-    if (!m._legAnnounced && t >= 700 && t < 1100) {
-      m._legAnnounced = true;
-      const labels = {
-        poison:    '☠ POISON tentacle winding up...',
-        freeze:    '❄ FREEZE tentacle winding up...',
-        skillLock: '🔒 SKILL-LOCK tentacle winding up...',
-        stun:      '⚡ STUN tentacle winding up...',
-      };
-      showToast(labels[currentEffect], 'rare');
-      audio.play('hit');
-    }
-
-    // Fire the leg special at 1100 ms — projectile aimed at the player's
-    // current position, NOT homing (so dodging the windup lets you escape).
-    if (!m._legFired && t >= 1100 && t < 1400) {
-      m._legFired = true;
-      const sx = m.x + m.w / 2;
-      const sy = m.y + m.h * 0.4;
-      const tx = player.x + player.w / 2;
-      const ty = player.y + player.h / 2;
-      const dx = tx - sx, dy = ty - sy;
-      const dist = Math.max(1, Math.hypot(dx, dy));
-      const speed = 5;
-      const proj = {
-        x: sx, y: sy,
-        vx: (dx / dist) * speed, vy: (dy / dist) * speed,
-        w: 20, h: 20, life: 100,
-        damage: m.atk * 0.7, owner: 'enemy', skill: 'octoLeg',
-      };
-      // Effect tag — projectile collision handler (~line 22468) reads
-      // these fields when applying status to the player.
-      if (currentEffect === 'poison')         { proj.poison = 240; proj._poisonDmg = 18; proj.color = '#aa44dd'; }
-      else if (currentEffect === 'freeze')    { proj.freeze = 90;  proj.color = '#88ccff'; }
-      else if (currentEffect === 'skillLock') { proj.skillLock = 240; proj.color = '#ffaa44'; }
-      else                                    { proj.stun = 75;    proj.color = '#ffee44'; }
-      game.projectiles.push(proj);
-      addShake(3);
-    }
-
-    // ── Bubble-swarm primary attack — 4 distinct beats per cycle so the
-    // arena always has something to dodge. Each beat fires 3 bubbles in
-    // a small arc from a different tentacle.
-    const beatTimes = [2000, 3000, 4000, 5000];
+    // ── Bubble-swarm primary attack — 4 beats per 5500 ms cycle.
+    const beatTimes = [1000, 2300, 3600, 4900];
     for (let i = 0; i < beatTimes.length; i++) {
       if (!m._bubbleBeats[i] && t >= beatTimes[i]) {
         m._bubbleBeats[i] = true;
-        const ox = m.x + m.w * (0.2 + 0.15 * i);    // 4 different launch points
-        const oy = m.y + m.h * 0.85;                 // bubbles emerge from the tentacle base
+        const ox = m.x + m.w * (0.25 + 0.15 * i);
+        const oy = m.y + m.h * 0.6;
         for (let b = -1; b <= 1; b++) {
-          // Slight upward arc; gravity will tug them down (mob proj gravity)
           game.projectiles.push({
             x: ox, y: oy,
             vx: b * 1.6 + (player.x - ox) * 0.0015,
@@ -21394,31 +21382,23 @@ function bossAI(m, dt, distToPlayer) {
         }
       }
     }
-
-    // ── Cycle reset
     if (t >= 5500) {
       m.patternTimer = 0;
-      m.legIndex = (m.legIndex + 1) % 8;
       m._bubbleBeats = [false, false, false, false];
-      m._legFired = false;
-      m._legAnnounced = false;
     }
-
-    // ── Enrage at 50% HP — bubble cadence speeds up by spawning a 5th
-    // beat between the others. Visual cue is a one-shot toast.
+    // ── Enrage at 50% HEAD HP — speed up bubble cadence + extra fan.
     if (!m._enraged && m.currentHp < m.maxHp * 0.5) {
       m._enraged = true;
       showToast('🐙 Octobaby is FURIOUS!', 'legendary');
       flash(0.25); addShake(6);
-      // Speed bump on drift so it covers more arena post-enrage
       m.speed = 0.6;
     }
-    if (m._enraged && !m._extraBeat && t >= 2500 && t < 2550) {
+    if (m._enraged && !m._extraBeat && t >= 2900 && t < 2950) {
       m._extraBeat = true;
       const ox = m.x + m.w / 2;
       for (let b = -2; b <= 2; b++) {
         game.projectiles.push({
-          x: ox, y: m.y + m.h * 0.85,
+          x: ox, y: m.y + m.h * 0.6,
           vx: b * 1.8, vy: -2.6 - Math.random(),
           w: 16, h: 16, life: 110,
           damage: m.atk * 0.45, owner: 'enemy', skill: 'bubble',
@@ -21426,7 +21406,77 @@ function bossAI(m, dt, distToPlayer) {
         });
       }
     }
-    if (t < 2400 && m._extraBeat) m._extraBeat = false;
+    if (t < 2800 && m._extraBeat) m._extraBeat = false;
+  } else if (m.type === 'octoLegPoison' || m.type === 'octoLegFreeze' ||
+             m.type === 'octoLegSkillLock' || m.type === 'octoLegStun') {
+    // v0.25.486 — Octobaby leg AI. Each leg is anchored to its parent
+    // head's centre at a fixed angle. It does NOT move freely; it just
+    // tracks the head as the head drifts. Every 5500 ms (offset per leg
+    // so they don't all fire simultaneously) it telegraphs + fires a
+    // single status projectile aimed at the player's CURRENT position.
+    // Killed legs simply die and stop firing — head fight continues.
+    const parent = m._octoParent;
+    if (!parent || parent.currentHp <= 0) {
+      // Parent head gone — leg should already have been swept by the
+      // killMonster handler. As a safety net, mark currentHp 0 so any
+      // residual reference dies on the next monster-update pass.
+      m.currentHp = 0;
+      return;
+    }
+    // Anchor to parent head — fixed angle, gentle bob for life.
+    const a = m._octoAngle + Math.sin(game.time * 0.04 + m._octoLegIndex) * 0.05;
+    const px = parent.x + parent.w / 2;
+    const py = parent.y + parent.h / 2;
+    const radiusX = parent.w * 0.65;
+    const radiusY = parent.h * 0.50;
+    m.x = px + Math.cos(a) * radiusX - m.w / 2;
+    m.y = py + Math.sin(a) * radiusY - m.h / 2;
+    m.vx = 0; m.vy = 0;
+    m.facing = (player.x + player.w/2 < m.x + m.w/2) ? -1 : 1;
+    // Fire windup glow decays each frame.
+    if (m._octoFireFlash > 0) m._octoFireFlash -= dt;
+    // Status fire timer.
+    m._octoFireT += dt;
+    const cycle = m._octoFireCd;
+    const phase = m._octoFireT % cycle;
+    // 700 ms windup, fire at 1100 ms, idle for the remaining cycle.
+    if (phase >= 700 && phase < 1100 && !m._announced) {
+      m._announced = true;
+      m._octoFireFlash = 400;
+      const label = m.type === 'octoLegPoison'    ? '☠ POISON tentacle winding up...'
+                  : m.type === 'octoLegFreeze'    ? '❄ FREEZE tentacle winding up...'
+                  : m.type === 'octoLegSkillLock' ? '🔒 SKILL-LOCK tentacle winding up...'
+                  :                                  '⚡ STUN tentacle winding up...';
+      showToast(label, 'rare');
+      audio.play('hit');
+    }
+    if (phase >= 1100 && phase < 1400 && !m._fired) {
+      m._fired = true;
+      const sx = m.x + m.w / 2;
+      const sy = m.y + m.h / 2;
+      const tx = player.x + player.w / 2;
+      const ty = player.y + player.h / 2;
+      const dx = tx - sx, dy = ty - sy;
+      const dist = Math.max(1, Math.hypot(dx, dy));
+      const speed = 5;
+      const proj = {
+        x: sx, y: sy,
+        vx: (dx / dist) * speed, vy: (dy / dist) * speed,
+        w: 20, h: 20, life: 100,
+        damage: m.atk * 0.7, owner: 'enemy', skill: 'octoLeg',
+      };
+      if (m.type === 'octoLegPoison')         { proj.poison = 240; proj._poisonDmg = 18; proj.color = '#aa44dd'; }
+      else if (m.type === 'octoLegFreeze')    { proj.freeze = 90;  proj.color = '#88ccff'; }
+      else if (m.type === 'octoLegSkillLock') { proj.skillLock = 240; proj.color = '#ffaa44'; }
+      else                                     { proj.stun = 75;    proj.color = '#ffee44'; }
+      game.projectiles.push(proj);
+      addShake(2);
+    }
+    // Reset per-cycle one-shot flags when phase wraps.
+    if (phase < 700) {
+      m._announced = false;
+      m._fired = false;
+    }
   }
 }
 
@@ -21949,6 +21999,24 @@ function _maybeLevelUp() {
 function killMonster(m) {
   const idx = game.monsters.indexOf(m);
   if (idx < 0) return;
+  // v0.25.486 — When the Octobaby HEAD dies, sweep its 8 leg-monsters
+  // out of game.monsters too. We do a silent removal (no loot, no
+  // particles) since the cinematic boss-death effects on the head are
+  // the proper "you defeated the boss" moment — extra leg drops would
+  // dilute the climax.
+  if (m.type === 'octobaby' && Array.isArray(m._legRefs)) {
+    for (const leg of m._legRefs) {
+      const li = game.monsters.indexOf(leg);
+      if (li >= 0) game.monsters.splice(li, 1);
+    }
+    m._legRefs = [];
+  }
+  // Reverse cleanup: when a leg dies (player kills it), drop it from
+  // the head's _legRefs so the head doesn't hold a stale reference.
+  if (m._octoParent && m._octoParent._legRefs) {
+    const li = m._octoParent._legRefs.indexOf(m);
+    if (li >= 0) m._octoParent._legRefs.splice(li, 1);
+  }
   // v0.25.53 — empowered Sugar Rush gummy splits into 2 mini-gummies.
   // Spawn them BEFORE removing m from the monsters array so they can
   // share its position. Mini-gummies are smaller (60% size), faster,
@@ -39077,6 +39145,8 @@ function drawMonster(m) {
   else if (m.type === 'aetherion') drawAetherion(m, sx, sy);
   else if (m.type === 'gravitos') drawGravitos(m, sx, sy);
   else if (m.type === 'octobaby') drawOctobaby(m, sx, sy);
+  else if (m.type === 'octoLegPoison' || m.type === 'octoLegFreeze' ||
+           m.type === 'octoLegSkillLock' || m.type === 'octoLegStun') drawOctoLeg(m, sx, sy);
   else if (m.zodiacBoss && ZODIAC_SPRITES[m.zodiacSign]) _drawBossSprite(ZODIAC_SPRITES[m.zodiacSign], m, sx, sy);
   else if (m.zodiacBoss) drawZodiacBoss(m, sx, sy);
   else if (MONSTER_ANIMS[m.type] || MONSTER_SPRITES[m.type]) _drawMonsterSprite(m, sx, sy);
@@ -40277,12 +40347,10 @@ function drawGravitos(m, sx, sy) {
   }
 }
 
-// v0.25.485 — Octobaby procedural fallback. Used when ludo.ai-generated
-// octobaby.webp hasn't decoded. Renders a huge round head with a cute
-// angry face + 8 wavy tentacles around the base. The currently-charging
-// tentacle (m.legIndex) lights up bright during windup so the special's
-// telegraph reads visually. All lines use a 2 px black outline matching
-// the underwater theme spec.
+// v0.25.486 — Octobaby HEAD-only renderer. The 8 tentacles are now
+// independent monsters drawn by drawOctoLeg, so this function only
+// paints the giant round head + cute angry face. 2 px black outline
+// matches the underwater theme spec.
 function drawOctobaby(m, sx, sy) {
   const cx = sx + m.w / 2;
   const cy = sy + m.h / 2 - 6;
@@ -40290,44 +40358,9 @@ function drawOctobaby(m, sx, sy) {
   const out = '#0a0612';
   const body = m.color || '#d066b0';
   const dark = m.shell || '#5a2078';
-  const t = game.time * 0.05;
-
-  // ── 8 tentacles around the body base, evenly spaced. The active leg
-  // (m.legIndex) glows during the 700–1400 ms windup window.
-  const legBase = cy + headR * 0.45;
-  const winding = m._legAnnounced && m.patternTimer > 700 && m.patternTimer < 1400;
-  const LEG_TINTS = ['#aa44dd','#88ccff','#ffaa44','#ffee44','#aa44dd','#88ccff','#ffaa44','#ffee44'];
   ctx.lineWidth = 2;
   ctx.lineJoin = 'round';
   ctx.strokeStyle = out;
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
-    const baseX = cx + Math.cos(a) * headR * 0.85;
-    const baseY = legBase + Math.sin(a) * headR * 0.25;
-    const tipX = cx + Math.cos(a) * (headR + 60);
-    const tipY = legBase + Math.sin(a) * (headR + 30) + Math.sin(t + i) * 6;
-    const ctrlX = (baseX + tipX) / 2 + Math.cos(t + i * 0.4) * 12;
-    const ctrlY = (baseY + tipY) / 2 + Math.sin(t + i * 0.7) * 10;
-    // Active leg gets the effect tint, others get the body tone.
-    ctx.fillStyle = (winding && i === m.legIndex) ? LEG_TINTS[i] : body;
-    ctx.beginPath();
-    ctx.moveTo(baseX - 8, baseY);
-    ctx.quadraticCurveTo(ctrlX - 4, ctrlY - 4, tipX, tipY);
-    ctx.quadraticCurveTo(ctrlX + 4, ctrlY + 4, baseX + 8, baseY);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
-    // Leg windup glow — bright pulse around the tentacle base.
-    if (winding && i === m.legIndex) {
-      ctx.save();
-      ctx.shadowColor = LEG_TINTS[i];
-      ctx.shadowBlur = 18;
-      ctx.fillStyle = LEG_TINTS[i];
-      ctx.beginPath();
-      ctx.arc(tipX, tipY, 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-  }
 
   // ── Head (huge round body)
   ctx.fillStyle = body;
@@ -40381,6 +40414,82 @@ function drawOctobaby(m, sx, sy) {
   ctx.lineWidth = 3;
   ctx.strokeText(m.name, cx, sy - 4);
   ctx.fillText(m.name, cx, sy - 4);
+}
+
+// v0.25.486 — Octobaby leg renderer. Each leg is an independent monster
+// anchored to its parent head; this function draws a single bezier
+// tentacle from the parent's head edge to the leg's anchored position.
+// During the windup window (m._octoFireFlash > 0) the tentacle glows
+// brightly in its effect colour so the next attack reads visually.
+function drawOctoLeg(m, sx, sy) {
+  const out = '#0a0612';
+  const body = m.color || '#d066b0';
+  const dark = m.shell || '#5a2078';
+  // Effect-tinted glow during windup
+  const winding = m._octoFireFlash > 0;
+  const tints = {
+    octoLegPoison:    '#aa44dd',
+    octoLegFreeze:    '#88ccff',
+    octoLegSkillLock: '#ffaa44',
+    octoLegStun:      '#ffee44',
+  };
+  const tint = tints[m.type] || body;
+  const tipX = sx + m.w / 2;
+  const tipY = sy + m.h / 2;
+  // Find parent head's screen position (via game.camera). If parent is
+  // gone (just died this frame), draw a freestanding wiggly tentacle.
+  const parent = m._octoParent;
+  let baseX, baseY;
+  if (parent && parent.currentHp > 0) {
+    baseX = parent.x + parent.w / 2 - game.camera.x;
+    baseY = parent.y + parent.h / 2 - (game.camera.y || 0);
+  } else {
+    baseX = tipX;
+    baseY = tipY + 30;
+  }
+  const ctrlX = (baseX + tipX) / 2 + Math.cos(game.time * 0.05 + m._octoLegIndex) * 14;
+  const ctrlY = (baseY + tipY) / 2 + Math.sin(game.time * 0.05 + m._octoLegIndex * 0.7) * 12;
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = out;
+  // Tentacle — fat bezier outline, fill in body or windup tint.
+  ctx.fillStyle = winding ? tint : body;
+  ctx.beginPath();
+  ctx.moveTo(baseX - 10, baseY);
+  ctx.quadraticCurveTo(ctrlX - 4, ctrlY - 4, tipX, tipY);
+  ctx.quadraticCurveTo(ctrlX + 4, ctrlY + 4, baseX + 10, baseY);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Tip blob (suction-cup style end) — slightly enlarged, with a darker
+  // ring on the underside for depth.
+  ctx.fillStyle = winding ? tint : dark;
+  ctx.beginPath();
+  ctx.arc(tipX, tipY, 10, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+  // Bright glow during windup — radial pulse around the tip.
+  if (winding) {
+    ctx.save();
+    ctx.shadowColor = tint;
+    ctx.shadowBlur = 22;
+    ctx.fillStyle = tint;
+    ctx.beginPath();
+    ctx.arc(tipX, tipY, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  // Effect glyph stamped on the tip (reads the leg's role at a glance).
+  ctx.font = 'bold 12px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = winding ? '#ffffff' : tint;
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  const glyph = m.type === 'octoLegPoison' ? '☠'
+              : m.type === 'octoLegFreeze' ? '❄'
+              : m.type === 'octoLegSkillLock' ? '🔒'
+              : '⚡';
+  ctx.strokeText(glyph, tipX, tipY + 4);
+  ctx.fillText(glyph, tipX, tipY + 4);
+  ctx.lineWidth = 2;
 }
 
 // =========================================================================
