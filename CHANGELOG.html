@@ -148,6 +148,30 @@
   <b>Heads-up.</b> An earlier implementation of these phases targeted <code>v0.5.1</code> and was preserved locally at tag <code>phase-1-2-3-on-v0.5.1</code>. This is the rebuild against the current <code>v0.9.8</code> codebase, which had moved substantially (new bosses like Gravitos, minimap/taxi, chibi character rewrite).
 </div>
 
+<h2>v0.25.440 <span class="tag">Lag pass — bake per-frame gradients, lazy-preload BGM, O(n) ambient compact</span></h2>
+
+<h3><span class="pill rare">bug</span>"Very very laggy" — first round of targeted lag fixes</h3>
+<p>Profiled the running game with a per-stage instrumentation harness (samples each draw + update fn over 5 s of gameplay). Top consumers in town were <code>drawNPCs</code> (0.44 ms/frame) and <code>drawPlayer</code> (0.40 ms/frame); profiled 60 FPS rock-steady on desktop but the per-frame allocations + gradient creates were the most likely culprits for the lag the user was seeing on slower hardware. Five concrete fixes:</p>
+<ul>
+<li><b>Amnesiac sigil halo cache</b> &mdash; the floating zodiac star above the Amnesiac was creating a fresh <code>createRadialGradient</code> + 3-stop fill every frame. Bake one 90×90 RGBA halo bitmap at module scope, blit with <code>drawImage</code> per frame. Eliminates one gradient allocation + one path fill per frame in town. Profile measured drawNPCs 0.44 ms → 0.26 ms (~40% faster).</li>
+<li><b>Sky-life cloud-puff cache</b> &mdash; <code>drawSkyLifeOverlay</code> ran on every map and was allocating 12 fresh radial gradients (one per drifting cloud) every frame, ~36 <code>addColorStop</code> calls/frame. Bake one 128×128 soft-white puff once, scale-blit per cloud. Aspect-stretch via drawImage args matches the original ellipse shape closely enough; the 0.22 globalAlpha hides any sampling difference.</li>
+<li><b>Amnesiac orbit-dust gated by lowFx</b> &mdash; the 3 sparkle-arc dots are pure flair on top of the halo + star. Skip the loop when <code>_perfLowFx()</code> is true so phones / slow machines spend nothing on it under load.</li>
+<li><b>BGM lazy preload</b> &mdash; the v0.25.436 first-gesture handler eagerly instantiated all 5 per-map BGM tracks, forcing a metadata fetch + decoder slot reservation for every track even if the player never visited those maps. Now: track creation stays lazy (only when the map is actually loaded), <code>preload</code> dropped from <code>'auto'</code> to <code>'metadata'</code> to defer the body download, and a new <code>_bgmAutoplayUnlocked</code> flag lets a track created AFTER the first gesture self-unlock immediately. Frees ~15-20 MB of preemptive audio downloads on low-bandwidth connections.</li>
+<li><b>updateAmbient: O(n²) splice → O(n) write-index</b> &mdash; reverse-loop with <code>splice(i, 1)</code> per dead particle (forest leaves, snow, lava embers, etc.) was quadratic in the worst case. Single forward-pass write-index compact (matching the v0.25.247-era updateParticles fix). drawAmbient profile dropped 0.080 → 0.052 ms/frame.</li>
+</ul>
+<p>Re-measured FPS in town after all five fixes: median 16.7 ms (60.0 FPS), p95 17.2 ms, max 18.4 ms across 240 frames — perfectly steady. Profiler totals dropped from ~1.1 ms/frame → ~0.7 ms/frame across the top 6 stages.</p>
+<ul>
+<li><b>Files referenced</b> &mdash; <a href="maple_game.html">maple_game.html:29087</a> (amnesiac halo cache), <a href="maple_game.html">maple_game.html:29413</a> (drawNPCs amnesiac call), <a href="maple_game.html">maple_game.html:24743</a> (cloud-puff cache + drawSkyLifeOverlay), <a href="maple_game.html">maple_game.html:41462</a> (BGM lazy preload + autoplay-unlock flag), <a href="maple_game.html">maple_game.html:28851</a> (updateAmbient compact), <a href="maple_game.html">maple_game.html:3077</a> (version). <code>node --check</code> clean.</li>
+</ul>
+
+<h2>v0.25.439 <span class="tag">Mojiworld loading-screen autumn-forest backdrop (50% opacity)</span></h2>
+
+<h3><span class="pill polish">polish</span>Themed-biome backdrop replaces the bare gradient on the boot loading screen</h3>
+<p>User-supplied autumn-forest cell-shaded image (2912×1632 PNG) layered behind the existing starfield + gilded frame at 50% opacity. New <code>.lo-bg</code> child div with <code>position:absolute; inset:0; background:url(...) center/cover no-repeat; opacity:0.5; z-index:0</code>; sits above the dark gradient base, below the <code>::before</code> starfield + <code>.lo-frame</code>. Pointer-events disabled so the surrounding stack stays clickable.</p>
+<ul>
+<li><b>Files referenced</b> &mdash; <a href="backgrounds/loading_mojiworld.png">backgrounds/loading_mojiworld.png</a>, <a href="maple_game.html">maple_game.html:40659</a> (CSS), <a href="maple_game.html">maple_game.html:40884</a> (DOM). <code>node --check</code> clean.</li>
+</ul>
+
 <h2>v0.25.438 <span class="tag">Hero rig: leg cuff lines removed + hand pivot/ellipse split + Sage Mira renamed</span></h2>
 
 <h3><span class="pill polish">polish</span>Boot-cuff <code>fillRect</code> on each leg removed (was reading as stray pixel bands)</h3>
