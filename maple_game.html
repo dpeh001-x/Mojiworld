@@ -42319,11 +42319,112 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     hide();
   }
   function hide() {
+    // v0.25.455 — Auth gate. Assets are loaded; surface the login form
+    // and DON'T fade until the player signs in / registers / clicks
+    // "Continue as Guest". The world stays hidden behind the overlay
+    // until _finishHide runs.
+    _showAuthGate();
+  }
+  function _finishHide(session) {
     if (!overlay) return;
+    if (session && session.name) {
+      // Stash the session for any consumer that wants to reference it
+      // later (party / chat / leaderboard prefill once those exist).
+      try { window.LX_PENDING_SESSION = session; } catch (e) {}
+      // Apply the signed-in name to the hero. The earlier boot path
+      // (openClassSelect) already ran before auth resolved; we set the
+      // name retroactively here. Only fills it in if the player hasn't
+      // already chosen a custom name in-game (the "Customize" panel).
+      try {
+        if (typeof player !== 'undefined' && player && player.look && !player.look.name) {
+          player.look.name = session.name;
+        }
+      } catch (e) {}
+      // Greet returning players by name, replacing the bare "Welcome
+      // back!" toast that the boot path emits before auth resolves.
+      try {
+        if (typeof showToast === 'function') {
+          showToast('Welcome, ' + session.name + '!', session.kind === 'guest' ? 'rare' : 'epic');
+        }
+      } catch (e) {}
+    }
     overlay.classList.add('fade');
     setTimeout(() => { if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 220);
     // v0.25.233 — Start the looping BGM the moment the world reveals.
     startBgm();
+  }
+  function _setAuthError(msg) {
+    const el = document.getElementById('auth-error');
+    if (!el) return;
+    if (msg) { el.textContent = msg; el.removeAttribute('hidden'); }
+    else     { el.setAttribute('hidden', ''); el.textContent = ''; }
+  }
+  let _authWired = false;
+  function _showAuthGate() {
+    if (!overlay) return;
+    const stack = overlay.querySelector('.lo-stack');
+    const auth  = document.getElementById('lo-auth');
+    if (!stack || !auth) { _finishHide(); return; }
+    stack.classList.add('compact');
+    auth.classList.add('shown');
+    auth.removeAttribute('hidden');
+    if (!_authWired) { _wireAuthForm(); _authWired = true; }
+    // Pre-fill the username field if a previous session exists, but
+    // don't auto-pass through — the user explicitly asked for a login
+    // SCREEN, so returning players still click to confirm.
+    try {
+      const sess = (typeof LXAuth !== 'undefined') ? LXAuth.session() : null;
+      if (sess && sess.name && sess.kind === 'local') {
+        const u = document.getElementById('auth-user');
+        if (u && !u.value) u.value = sess.name;
+      }
+    } catch (e) {}
+    setTimeout(() => { try { document.getElementById('auth-user').focus(); } catch (e) {} }, 50);
+  }
+  function _wireAuthForm() {
+    const tabs   = overlay.querySelectorAll('.auth-tab');
+    const submit = document.getElementById('auth-submit');
+    const guest  = document.getElementById('auth-guest');
+    const user   = document.getElementById('auth-user');
+    const pass   = document.getElementById('auth-pass');
+    if (!submit || !guest || !user || !pass) { _finishHide(); return; }
+    let mode = 'login';
+    const setMode = (m) => {
+      mode = m;
+      tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === m));
+      submit.textContent = m === 'login' ? 'Sign in' : 'Create account';
+      pass.autocomplete  = m === 'login' ? 'current-password' : 'new-password';
+      _setAuthError('');
+    };
+    tabs.forEach(t => t.addEventListener('click', () => setMode(t.dataset.tab)));
+    const lock = (locked) => {
+      submit.disabled = guest.disabled = !!locked;
+      user.disabled = pass.disabled = !!locked;
+    };
+    const doSubmit = async () => {
+      _setAuthError(''); lock(true);
+      const u = (user.value || '').trim();
+      const p = pass.value || '';
+      let res;
+      try {
+        res = (mode === 'login') ? await LXAuth.login(u, p) : await LXAuth.register(u, p);
+      } catch (e) { res = { ok: false, error: 'Something went wrong. Try again.' }; }
+      lock(false);
+      if (!res.ok) { _setAuthError(res.error || 'Sign-in failed.'); return; }
+      _finishHide(res);
+    };
+    submit.addEventListener('click', doSubmit);
+    pass.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSubmit(); });
+    user.addEventListener('keydown', (e) => { if (e.key === 'Enter') pass.focus(); });
+    guest.addEventListener('click', () => {
+      _setAuthError(''); lock(true);
+      let res;
+      try { res = LXAuth.guest(); }
+      catch (e) { res = { ok: false, error: 'Guest sign-in failed.' }; }
+      lock(false);
+      if (!res.ok) { _setAuthError(res.error || 'Guest sign-in failed.'); return; }
+      _finishHide(res);
+    });
   }
   // Hard fallback for first-play assets. Background sprites keep streaming
   // even if this safety net reveals the world.
