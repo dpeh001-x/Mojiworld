@@ -5663,6 +5663,50 @@ function _pickMapFloorOverride() {
   return _lxTileReady(tile) ? tile : null;
 }
 
+// v0.25.462 — Map id → platform override config. Each entry can have:
+//   default: tile key (used when a platform has no .tag or its tag isn't listed)
+//   byTag:   { tagName: tileKey } — per-tag override for platforms that opt in
+// MAPS data tags individual platforms with {tag:'banner'|'roof'|...} so the
+// renderer picks the right authored art. Maps without overrides fall through
+// to the existing _THEME_PLATFORM_KEY lookup → procedural plank.
+const MAP_PLATFORM_OVERRIDES = {
+  bastion: {
+    default: 'platformBastion',
+    byTag: { banner: 'platformBastionBanner' },
+  },
+  bastionThrone: { default: 'platformBastionThrone' },
+  bastionRampart: { default: 'platformBastion' },
+  azureAcademia: { default: 'platformAzureFountain' },
+  emeraldVillage: {
+    default: 'platformEmeraldShrine',
+    byTag: { watchtower: 'platformEmeraldWatch' },
+  },
+  jadeGrove: { default: 'platformJadeGrove' },
+  shadowSlums: {
+    default: 'platformShadowEaves',
+    byTag: {
+      roof:  'platformShadowRoof',
+      alley: 'platformShadowAlley',
+    },
+  },
+  // Default-concrete fallback — same set as the floor overrides.
+  boss:           { default: 'platformConcrete' },
+  cryptHollow:    { default: 'platformConcrete' },
+  gravitosArena:  { default: 'platformConcrete' },
+  thunderPlateau: { default: 'platformConcrete' },
+};
+function _pickMapPlatformOverride(p) {
+  const id = (typeof game !== 'undefined' && game.currentMap) ? game.currentMap : null;
+  if (!id) return null;
+  const cfg = MAP_PLATFORM_OVERRIDES[id];
+  if (!cfg) return null;
+  const tag = p && p.tag;
+  const k = (tag && cfg.byTag && cfg.byTag[tag]) || cfg.default;
+  if (!k) return null;
+  const tile = LX_TILES && LX_TILES[k];
+  return _lxTileReady(tile) ? tile : null;
+}
+
 function _pickFloorTheme(md) {
   if (!md) return 'grass';
   // Per-map override first — explicit md.floorTheme wins.
@@ -29730,6 +29774,17 @@ function drawPlatforms() {
       // height and tile horizontally. We still paint the OUT halo so
       // the platform reads against busy backgrounds.
       // v0.25.97 — fall through to procedural if drawImage failed.
+      // v0.25.462 — Per-map authored platform override. Wins over the
+      // theme-based tile when the map id is listed in
+      // MAP_PLATFORM_OVERRIDES and the platform's .tag (or 'default')
+      // resolves to a loaded LX_TILES entry. Same OUT-halo treatment
+      // as the themed branch so the platform reads against busy bgs.
+      const _pmOverride = _pickMapPlatformOverride(p);
+      if (_pmOverride) {
+        ctx.fillStyle = OUT;
+        ctx.fillRect(sx - 1, p.y - 1, p.w + 2, p.h + 2);
+        if (_lxDrawTiledRow(_pmOverride, sx, p.y, p.w, p.h)) continue;
+      }
       // v0.25.129 — theme-aware platform tile to match the ground tile.
       const _ptKey = _THEME_PLATFORM_KEY[_pickFloorTheme(game.mapData)] || 'platformGrass';
       const _pt = LX_TILES[_ptKey] || LX_TILES.platformGrass;
