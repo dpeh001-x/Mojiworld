@@ -3118,7 +3118,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.467';
+const GAME_VERSION = 'v0.25.468';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -5559,6 +5559,19 @@ function _drawCustomPaintLayerPinned(layerId, bone, targetCtx) {
 // for an O(1) bail when nothing is on. Studio preview path still
 // goes through the full loop since CHAR_STUDIO.equip changes mid-
 // frame as the user clicks.
+// =========================================================================
+// _refreshEqEmptyFlag — DEFENSIVE-ONLY (v0.25.467+)
+// =========================================================================
+// As of v0.25.467 the renderer (`_drawEquipmentLayer`) does NOT trust this
+// flag. The hot path computes the empty-check inline. This helper survives
+// only as defense-in-depth — it's still called from inventory click
+// handlers and Studio Apply / Revert / loadState so any legacy reader that
+// still trusts `player._eqEmpty` continues to see correct values.
+//
+// Do NOT add new readers that gate rendering on this flag — the v0.25.316
+// invisible-gear bug was caused by exactly that pattern. See the banner
+// above _drawEquipmentLayer for the full bug history.
+// =========================================================================
 function _refreshEqEmptyFlag() {
   if (typeof player === 'undefined' || !player.equipped) return;
   let empty = true;
@@ -5569,28 +5582,40 @@ function _refreshEqEmptyFlag() {
   player._eqEmpty = empty;
 }
 
+// =========================================================================
+// _drawEquipmentLayer — DO NOT REINTRODUCE A `player._eqEmpty` SHORT-CIRCUIT
+// =========================================================================
+// HISTORY:
+//   v0.25.316 added a cached `player._eqEmpty` flag at the top of this
+//   function for an O(1) "no gear → bail" fast path. The cache was
+//   refreshed from Studio Apply / Revert / loadState but NOT from the
+//   inventory click handler — the primary equip path. Stale cache after
+//   inventory equip → renderer skipped every equipment draw → gear was
+//   invisible on the character. This was the v0.25.467 fix.
+//
+// CURRENT INVARIANT (v0.25.467+):
+//   The hot path does an INLINE 9-slot scan instead of trusting any
+//   cached flag. This is provably correct — no future equip site can
+//   break it by forgetting a refresh helper.
+//
+// IF YOU ARE TEMPTED TO RE-OPTIMISE WITH A CACHED FLAG:
+//   Don't. The 9-slot scan is < 0.01 ms / frame and below measurement
+//   noise. The bug it replaced was a 6-month silent failure mode.
+//   The regression-guard IIFE below this function will console.error
+//   on every page load if anyone re-introduces the short-circuit
+//   pattern. Restore the inline check before shipping.
+// =========================================================================
 function _drawEquipmentLayer(layer, targetCtx, opts) {
   opts = opts || {};
-  // v0.25.308 — Resolve the equipped map: studio override wins, then
-  // live player.equipped, else bail. Studio preview canvas thus
-  // renders the picks-in-progress; in-game render keeps using the
-  // committed loadout.
+  // Resolve the equipped map: studio override wins, then live
+  // player.equipped, else bail. Studio preview canvas thus renders
+  // the picks-in-progress; in-game render keeps using the committed
+  // loadout.
   if (!_LX_EQ_PREVIEW_OVERRIDE && (typeof player === 'undefined' || !player.equipped)) return;
   const equipped = _LX_EQ_PREVIEW_OVERRIDE
     || (typeof player !== 'undefined' && player.equipped);
   if (!equipped) return;
-  // v0.25.467 — Inline empty-check, replacing the v0.25.316 cached
-  // `player._eqEmpty` flag. The cache was an O(1) optimisation that
-  // ASSUMED every player.equipped[slot] = item assignment also
-  // refreshed the flag — but the inventory click handler (the
-  // primary equip path!) never called _refreshEqEmptyFlag, so the
-  // flag stayed stale at `true` after the first equip and the
-  // renderer skipped every equipment draw. Result: gear items
-  // equipped from the inventory never visually appeared on the
-  // character. Walking 9 slot keys per frame is well below the
-  // measurable cost (~0.01 ms), and skipping the cache makes the
-  // path provably correct — no future equip site can break the
-  // invariant by forgetting to call a refresh helper.
+  // v0.25.467 — INLINE empty-check (NOT a cached flag). See banner above.
   if (!_LX_EQ_PREVIEW_OVERRIDE) {
     let anyEquipped = false;
     for (const slot in LX_EQ_REGISTRIES) {
@@ -5629,6 +5654,45 @@ function _drawEquipmentLayer(layer, targetCtx, opts) {
     c.restore();
   }
 }
+
+// =========================================================================
+// REGRESSION GUARD (v0.25.468) — locks in the v0.25.467 gear-visibility fix
+// =========================================================================
+// This IIFE runs once at boot and inspects `_drawEquipmentLayer`'s source
+// for two failure patterns that re-introduce the v0.25.316 invisible-gear
+// bug. Loud console.error if either matches so a future maintainer who
+// reverts / merges / refactors the function back to a cached short-circuit
+// sees the warning the next time they open the page.
+//
+//   Pattern 1: `if (player._eqEmpty)` short-circuit — the original v0.25.316
+//              bug. Stale cache → never draws.
+//   Pattern 2: removal of the inline `for (const slot in LX_EQ_REGISTRIES)`
+//              empty-check — without it the function does extra work for
+//              the always-empty case, which is fine, but if combined with
+//              re-introducing the cached flag the bug is back.
+// =========================================================================
+(function _lxEqRenderRegressionGuard() {
+  try {
+    const src = String(_drawEquipmentLayer);
+    const hasShortCircuit = /if\s*\([^)]*player\._eqEmpty[^)]*\)\s*return/.test(src);
+    const hasInlineCheck  = /for\s*\(\s*const\s+slot\s+in\s+LX_EQ_REGISTRIES\s*\)/.test(src);
+    if (hasShortCircuit) {
+      console.error(
+        '[LX REGRESSION] _drawEquipmentLayer is back to short-circuiting on the' +
+        ' stale `player._eqEmpty` cache (v0.25.316 bug). Equipped gear will be' +
+        ' invisible whenever it was equipped via the inventory click handler.' +
+        ' Restore the inline scan from v0.25.467 — see CHANGELOG.html for the' +
+        ' bug history and the structural rationale.'
+      );
+    } else if (!hasInlineCheck) {
+      console.warn(
+        '[LX REGRESSION] _drawEquipmentLayer no longer has its v0.25.467 inline' +
+        ' empty-check. If you also reintroduce the cached _eqEmpty short-circuit,' +
+        ' the v0.25.316 invisible-gear bug returns. Audit the function carefully.'
+      );
+    }
+  } catch (e) { /* best-effort guard; never breaks the page */ }
+})();
 // =========================================================================
 // MSX_HERO — MapleStory-style chibi character sprite registry (v0.25.152)
 // =========================================================================
