@@ -3118,7 +3118,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.482';
+const GAME_VERSION = 'v0.25.483';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -10364,18 +10364,35 @@ window.addEventListener('keydown', e => {
   // (free, no potion, no gold). Reads as a "rest" hotkey rather than a
   // potion shortcut. R / T retain the legacy useQuickPotion behaviour
   // for inventory-based healing.
+  // v0.25.483 — Rest heals share the same 3-second cooldown as the
+  // potion track so the mobile HP/MP buttons (which dispatch PgUp/PgDn)
+  // can't be spam-tapped between fights for 50% heals.
   if (k === 'pageup' && !game.paused && player.hp > 0) {
-    const heal = Math.floor(getMaxHp() * 0.50);
-    player.hp = Math.min(getMaxHp(), player.hp + heal);
-    if (typeof showFloatHeal === 'function') showFloatHeal(player.x + player.w/2, player.y, '+' + heal);
-    else game.damageNumbers.push({ x: player.x + player.w/2 - 12, y: player.y - 6, vy: -2,
-      text: '+' + heal, life: 36, color: '#88ff99', size: 14 });
+    if (!_potionReady('hp')) {
+      const left = (_potionCdRemainingFrames('hp') / 60).toFixed(1);
+      showToast(`HP rest · ${left}s`, 'common');
+      audio.play('hit');
+    } else {
+      const heal = Math.floor(getMaxHp() * 0.50);
+      player.hp = Math.min(getMaxHp(), player.hp + heal);
+      if (typeof showFloatHeal === 'function') showFloatHeal(player.x + player.w/2, player.y, '+' + heal);
+      else game.damageNumbers.push({ x: player.x + player.w/2 - 12, y: player.y - 6, vy: -2,
+        text: '+' + heal, life: 36, color: '#88ff99', size: 14 });
+      _setPotionCd('hp');
+    }
   }
   if (k === 'pagedown' && !game.paused && player.hp > 0) {
-    const heal = Math.floor(getMaxMp() * 0.50);
-    player.mp = Math.min(getMaxMp(), player.mp + heal);
-    game.damageNumbers.push({ x: player.x + player.w/2 - 12, y: player.y - 6, vy: -2,
-      text: '+' + heal + ' MP', life: 36, color: '#88bbff', size: 14 });
+    if (!_potionReady('mp')) {
+      const left = (_potionCdRemainingFrames('mp') / 60).toFixed(1);
+      showToast(`MP rest · ${left}s`, 'common');
+      audio.play('hit');
+    } else {
+      const heal = Math.floor(getMaxMp() * 0.50);
+      player.mp = Math.min(getMaxMp(), player.mp + heal);
+      game.damageNumbers.push({ x: player.x + player.w/2 - 12, y: player.y - 6, vy: -2,
+        text: '+' + heal + ' MP', life: 36, color: '#88bbff', size: 14 });
+      _setPotionCd('mp');
+    }
   }
   if (k === 'r')   useQuickPotion('hp');
   if (k === 't')   useQuickPotion('mp');
@@ -25826,6 +25843,26 @@ function useConsumable(id) {
   if (!player.consumables[id] || player.consumables[id] <= 0) return;
   const p = POTION_ITEMS.find(x => x.id === id);
   if (!p) return;
+  // v0.25.483 — Centralize the 3-second potion cooldown so it applies
+  // regardless of entry point (R/T quick keys, inventory click, mobile
+  // tap, etc.). Was previously gated only inside useQuickPotion, so
+  // inventory-click and direct callers bypassed the lockout entirely.
+  if (p.type === 'hp' || p.type === 'mp') {
+    if (!_potionReady(p.type)) {
+      const left = (_potionCdRemainingFrames(p.type) / 60).toFixed(1);
+      showToast(`${p.type.toUpperCase()} potion · ${left}s`, 'common');
+      audio.play('hit');
+      return;
+    }
+  } else if (p.type === 'full') {
+    if (!_potionReady('hp') || !_potionReady('mp')) {
+      const which = !_potionReady('hp') ? 'hp' : 'mp';
+      const left = (_potionCdRemainingFrames(which) / 60).toFixed(1);
+      showToast(`Full elixir · ${left}s`, 'common');
+      audio.play('hit');
+      return;
+    }
+  }
   // v0.25.231 — heal = pct% of max stat. Math.ceil so a 25% on a
   // small pool always restores at least 1 point.
   const pct = p.pct || p.value || 0;
@@ -25833,6 +25870,11 @@ function useConsumable(id) {
   else if (p.type === 'mp') player.mp = Math.min(getMaxMp(), player.mp + Math.ceil(getMaxMp() * pct / 100));
   else if (p.type === 'full') { player.hp = getMaxHp(); player.mp = getMaxMp(); }
   player.consumables[id]--;
+  // v0.25.483 — Set cooldown on every consumption path. Full elixir
+  // burns both tracks so it can't be chained with another HP or MP
+  // potion immediately after.
+  if (p.type === 'hp' || p.type === 'mp') _setPotionCd(p.type);
+  else if (p.type === 'full') { _setPotionCd('hp'); _setPotionCd('mp'); }
   showToast(`Used ${p.name}`);
 }
 
