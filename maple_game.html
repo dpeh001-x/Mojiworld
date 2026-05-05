@@ -3110,7 +3110,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.451';
+const GAME_VERSION = 'v0.25.452';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -11108,11 +11108,66 @@ function saveState() {
 function hasSave() {
   try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; }
 }
+// v0.25.452 — Defensive numeric sanitizer for the save load path. Guards
+// against NaN / Infinity / negative-zero / non-number poisoning of the
+// critical player stats (which would cascade into NaN HP bars, broken
+// EXP curves, frozen renderer math, etc.). Triggered when a save is
+// somehow corrupted — manual localStorage edit, dev-time format
+// migration mismatch, or in the future, a server-pushed save during
+// MMORPG sync. For each guarded field, replace anything non-finite
+// with the supplied default and clamp to a sane range. Silent — no
+// toast / error. Returns the (mutated) player object.
+const _SAVE_NUMERIC_GUARDS = [
+  // [field path, default, min, max]
+  ['level',           1,    1,   200],
+  ['exp',             0,    0,   1e12],
+  ['expToNext',       100,  1,   1e12],
+  ['hp',              100,  0,   1e9],
+  ['maxHp',           100,  1,   1e9],
+  ['mp',              50,   0,   1e9],
+  ['maxMp',           50,   1,   1e9],
+  ['mesos',           0,    0,   1e12],
+  ['baseAtk',         5,    0,   1e6],
+  ['baseDef',         0,    0,   1e6],
+  ['baseCrit',        5,    0,   100],
+  ['baseSpeed',       0,    0,   100],
+  ['baseJump',        0,    0,   100],
+  ['skillPoints',     0,    0,   1000],
+  ['skillRankPoints', 0,    0,   1000],
+  ['setshards',       0,    0,   1e9],
+];
+function _sanitizePlayerSaveNumerics(p) {
+  if (!p) return p;
+  for (const [field, dflt, lo, hi] of _SAVE_NUMERIC_GUARDS) {
+    const v = p[field];
+    if (typeof v !== 'number' || !isFinite(v)) {
+      p[field] = dflt;
+      continue;
+    }
+    if (v < lo) p[field] = lo;
+    else if (v > hi) p[field] = hi;
+  }
+  // Mods is a sub-object of additive bonuses — every entry should be a
+  // finite number too. NaN here would cascade into getMaxHp() / getAtk()
+  // returning NaN and break every stat readout.
+  if (p.mods && typeof p.mods === 'object') {
+    for (const k of Object.keys(p.mods)) {
+      const v = p.mods[k];
+      if (typeof v !== 'number' || !isFinite(v)) p.mods[k] = 0;
+    }
+  }
+  return p;
+}
+
 function loadState() {
   try {
     const raw = localStorage.getItem(SAVE_KEY); if (!raw) return false;
     const s = JSON.parse(raw);
     if (!s || s.v !== SAVE_VERSION || !s.player || !s.player.cls) return false;
+    // v0.25.452 — sanitize critical numeric fields BEFORE Object.assign
+    // so any NaN / Infinity / out-of-range value on the persisted save
+    // is repaired before it reaches the player struct.
+    _sanitizePlayerSaveNumerics(s.player);
     Object.assign(player, s.player);
     Object.assign(game,   s.game || {});
     // Ensure boon arrays exist on older saves + migrate legacy _powerups

@@ -148,6 +148,71 @@
   <b>Heads-up.</b> An earlier implementation of these phases targeted <code>v0.5.1</code> and was preserved locally at tag <code>phase-1-2-3-on-v0.5.1</code>. This is the rebuild against the current <code>v0.9.8</code> codebase, which had moved substantially (new bosses like Gravitos, minimap/taxi, chibi character rewrite).
 </div>
 
+<h2>v0.25.452 <span class="tag">Save-state numeric sanitizer + MMORPG-readiness audit</span></h2>
+
+<h3><span class="pill rare">bug</span>Save load now repairs NaN / Infinity / out-of-range numeric stats</h3>
+<p>The existing <code>loadState</code> path did <code>Object.assign(player, s.player)</code> directly with no validation on the numeric stats. A single corrupted field (NaN, Infinity, negative HP, manual <code>localStorage</code> tamper, or a future server-sync gone wrong) would cascade: <code>getMaxHp()</code> returns NaN → HP bar renders as 0/NaN → every <code>Math.min(player.hp, maxHp)</code> downstream silently writes NaN → renderer math freezes.</p>
+<p>New <code>_sanitizePlayerSaveNumerics(p)</code> runs BEFORE the assign and guards 16 critical fields (<code>level / exp / expToNext / hp / maxHp / mp / maxMp / mesos / baseAtk / baseDef / baseCrit / baseSpeed / baseJump / skillPoints / skillRankPoints / setshards</code>). For each: replace non-finite values with a safe default and clamp to a sane range. Also sanitises every entry in <code>player.mods</code> (the additive-bonus map). Silent — no toast, just a clean repair.</p>
+
+<h3><span class="pill polish">polish</span>Round-5 deep audit findings (no further code changes warranted)</h3>
+<p>Audited the codebase for additional perf wins + glitches; concluded the runtime is well-optimised already and no further fixes are warranted at this size:</p>
+<ul>
+<li><b>Per-frame allocations</b> &mdash; all 5 module-scope <code>Path2D</code> definitions are one-shot at boot; no per-frame allocations in hot draw paths after the v0.25.440-442 + 451 caching rounds.</li>
+<li><b>Hot-path math</b> &mdash; <code>getMaxHp / getMaxMp</code> use <code>Math.max(1, …)</code> guards on read sites; <code>updateMonsters</code> already culls AI for off-screen non-bosses (±400 px pad).</li>
+<li><b>Map-load hygiene</b> &mdash; <code>loadMap</code> resets all 11 transient arrays + clears stuck input keys; <code>cancelPendingSkillTimers</code> drops volley / tether / follow-up-strike timers from the previous map. <code>_variedMapData</code> always returns a fresh shallow-cloned map object so per-load platform jitter never corrupts the source <code>MAPS</code> data.</li>
+<li><b>Page-lifecycle saves</b> &mdash; both <code>visibilitychange</code> and <code>beforeunload</code> handlers immediately call <code>_flushSaveStateNow</code>, so the ~1.5 s save debounce can't lose data on tab close.</li>
+<li><b>Hero asset path</b> &mdash; <code>Sprites/character/hero/</code> is empty; v0.25.449 stripped 16 dead requests. The legacy sprite-sheet renderer + MSX chibi system are now harmlessly stubbed; vector hero is the canonical render.</li>
+</ul>
+
+<h3><span class="pill epic">feat</span>MMORPG release roadmap (no code yet — design doc only)</h3>
+<p>Recommended changes if/when this ships as an MMORPG. Grouped by phase, ordered roughly by required effort.</p>
+
+<h4>Phase 1 — multiplayer plumbing</h4>
+<ul>
+<li><b>Authoritative server</b> &mdash; the existing <code>server/</code> dir has Express + auth scaffolding but the runtime is fully client-authoritative. For MMO: positions / HP / mob kills / loot / quests must run on the server; client renders + predicts. Use deterministic tick (15-30 Hz physics) + client-side reconciliation for movement.</li>
+<li><b>Account + character system</b> &mdash; replace localStorage save with a server-backed account → character → save schema. Keep the <code>SAVE_VERSION</code> + numeric sanitizer as defense-in-depth.</li>
+<li><b>Sharding</b> &mdash; each map = one shard / scene instance, 30-50 concurrent players per shard. Boss arenas / story zones can be private instances; town hubs are shared.</li>
+<li><b>WebSocket / WebTransport sync</b> &mdash; player position deltas at 15 Hz, full state snapshot every 1-2 s (delta-compressed). Existing <code>_mpTick / _mpDrawPeers</code> hooks are placeholders to wire to.</li>
+</ul>
+
+<h4>Phase 2 — anti-cheat + economy</h4>
+<ul>
+<li><b>Server-side validation</b> &mdash; never trust client damage / movement / EXP. The current client computes everything locally; that's fine for single-player but trivially exploitable in MMO.</li>
+<li><b>Mesos / Lumens economy</b> &mdash; current single-player economy uses <code>player.mesos</code>; MMO needs a server ledger with rate limits (auction house cooldowns, daily mesos cap from grinding, etc.) to prevent inflation.</li>
+<li><b>Drop tables</b> &mdash; current drops are random per-kill on client. MMO needs server-rolled drops with global rarity caps for legendaries.</li>
+<li><b>Save corruption guards</b> &mdash; the v0.25.452 sanitizer protects against client-side corruption; the server should run the same checks before persisting any save.</li>
+</ul>
+
+<h4>Phase 3 — scale + content</h4>
+<ul>
+<li><b>Trade + chat</b> &mdash; the chat-bubble system (per-NPC <code>npc._chat</code>) is a hint of the rendering pipeline. Add a global text-chat with channel routing (map / party / whisper / global) and a player-to-player trade window.</li>
+<li><b>Parties / guilds</b> &mdash; the existing single-player skill set carries cleanly into a 4-person party system. Boss arenas (Aetherion, Gravitos, the 12 Zodiac) become party content.</li>
+<li><b>Auction house</b> &mdash; a centralised marketplace map. Existing <code>everdawn_marketplace</code> is the natural location.</li>
+<li><b>PvP arenas</b> &mdash; class balance is currently designed for PvE; PvP would need a separate balance pass (warrior charge invul vs mage teleport etc.). Start with a small ranked 1v1 arena off The Bastion.</li>
+<li><b>Daily / weekly content</b> &mdash; the existing daily-challenge system + Sage Mira's 12-hour boon offering already establish the cadence pattern.</li>
+</ul>
+
+<h4>Phase 4 — production polish</h4>
+<ul>
+<li><b>Asset pipeline</b> &mdash; 35 backgrounds at 3-5 MB each = 100+ MB total. For MMO, use a streaming CDN with per-map prefetch on portal interaction. The existing tier-1 BAZAAR / tier-2 CRITICAL / tier-3 DEFERRED bucketing is a good foundation.</li>
+<li><b>Telemetry</b> &mdash; server-side analytics for boss kill rates, class pick rates, drop-out points. Use to guide content patches.</li>
+<li><b>Live-ops</b> &mdash; the changelog system + <code>raw.githack</code> deployment is great for solo dev but won't scale. Move to versioned static hosting + a live-ops dashboard for events / 2× EXP weekends / boss spawns.</li>
+<li><b>Mobile-first UX pass</b> &mdash; the on-screen mobile control deck (v5) is solid for a single-player platformer; for MMO add long-press skill tray, party-frame UI, mini-map pings, and chat-bubble auto-translate.</li>
+<li><b>Accessibility</b> &mdash; colourblind palette overrides, screen-reader-friendly damage numbers, key remapping. The current double-tap dash + Q wardrobe are nice but lock players into specific keys.</li>
+</ul>
+
+<h4>Quick wins on top of the current build</h4>
+<ul>
+<li><b>Loading-screen progress = real progress</b> &mdash; the v0.25.445 BAZAAR gate is a great pattern. Add a "first-paint complete in N ms" telemetry ping so you can spot regressions.</li>
+<li><b>Crash recovery</b> &mdash; wrap the main loop in a try/catch that logs to a server-side error sink. One stack trace per crash beats any amount of QA.</li>
+<li><b>Settings menu</b> &mdash; the v0.25.262 lowFx auto-toggle is hidden. Surface a manual "performance mode" toggle in an Esc-menu so users on weak hardware can opt in without auto-detection.</li>
+<li><b>Session-length tracker</b> &mdash; cheap to add, valuable for retention metrics.</li>
+</ul>
+
+<ul>
+<li><b>Files referenced</b> &mdash; <a href="maple_game.html">maple_game.html:11111</a> (<code>_sanitizePlayerSaveNumerics</code>), <a href="maple_game.html">maple_game.html:11168</a> (call site), <a href="maple_game.html">maple_game.html:3077</a> (version). <code>node --check</code> clean.</li>
+</ul>
+
 <h2>v0.25.451 <span class="tag">Lag pass round 4 — empty-list early-outs across draw functions</span></h2>
 
 <h3><span class="pill rare">bug</span>Eight per-frame draw functions paid full setup cost on empty arrays</h3>
