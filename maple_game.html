@@ -3118,7 +3118,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.474';
+const GAME_VERSION = 'v0.25.475';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -13972,9 +13972,18 @@ function loadMap(id, entryX) {
   // (~30 frames / 0.5 s convergence), which caused parallax / clouds /
   // background images to render at the wrong horizontal offset until
   // the player moved.
+  // v0.25.475 — narrow-world maps (worldWidth ≤ canvas W) snap the
+  // camera so the world is horizontally centred. Mirrors the same
+  // "Icy Tower-style centred column" rule used by updateCamera each
+  // frame, so initial paint also lands centred instead of pinned-left.
   if (game.camera && game.mapData) {
-    const targetX = (player.x + player.w / 2) - W / 2;
-    game.camera.x = Math.max(0, Math.min(game.mapData.worldWidth - W, targetX));
+    const _ww = game.mapData.worldWidth;
+    if (_ww <= W) {
+      game.camera.x = (_ww - W) / 2;
+    } else {
+      const targetX = (player.x + player.w / 2) - W / 2;
+      game.camera.x = Math.max(0, Math.min(_ww - W, targetX));
+    }
     // v0.25.470 — vertical snap for tower maps. Without this the
     // camera would lerp from y=0 (top of tower) down to the player's
     // actual position over ~30 frames, briefly showing the wrong
@@ -25981,15 +25990,28 @@ function _firstTimeTip(key, txt, rarity) {
 // CAMERA
 // =========================================================================
 function updateCamera() {
-  // Smooth follow with look-ahead based on player velocity — camera leads the
-  // direction the player is moving for a more fluid feel
-  const lookAhead = Math.max(-80, Math.min(80, player.vx * 12));
-  const targetX = player.x + player.w/2 - W/2 + lookAhead;
-  // Critically-damped lerp factor (higher when target is far, softer when close)
-  const dx = targetX - game.camera.x;
-  const ease = 0.08 + Math.min(0.08, Math.abs(dx) / 600);
-  game.camera.x += dx * ease;
-  game.camera.x = Math.max(0, Math.min(game.mapData.worldWidth - W, game.camera.x));
+  // v0.25.475 — When the map's world is narrower than the canvas
+  // viewport (frozenPeak's 800-wide tower vs. the 960-wide canvas),
+  // CENTER the world horizontally instead of pinning it left. Mirrors
+  // the original Icy Tower layout where the playable column sits in
+  // the middle of the screen with equal sky / wall margins on each
+  // side. Player x-bounds (0 → worldWidth - player.w) keep the
+  // character inside the column; the margins outside just show the
+  // sky / parallax background.
+  const ww = game.mapData.worldWidth;
+  if (ww <= W) {
+    game.camera.x = (ww - W) / 2;       // negative → world shifts right
+  } else {
+    // Smooth follow with look-ahead based on player velocity — camera leads the
+    // direction the player is moving for a more fluid feel
+    const lookAhead = Math.max(-80, Math.min(80, player.vx * 12));
+    const targetX = player.x + player.w/2 - W/2 + lookAhead;
+    // Critically-damped lerp factor (higher when target is far, softer when close)
+    const dx = targetX - game.camera.x;
+    const ease = 0.08 + Math.min(0.08, Math.abs(dx) / 600);
+    game.camera.x += dx * ease;
+    game.camera.x = Math.max(0, Math.min(ww - W, game.camera.x));
+  }
   // v0.25.470 — Vertical follow for tall maps (isVerticalTower: true,
   // worldHeight set). Default maps stay at camera.y = 0 so the
   // canvas-tall maps they were always designed for render unchanged.
@@ -42008,6 +42030,39 @@ function drawIceCheer() {
   if (c.life <= 0) game._iceCheer = null;
 }
 
+// v0.25.475 — Side walls for narrow / centred-column maps. When the
+// world is narrower than the canvas (Frozen Peak's 800-wide tower in
+// a 960-wide canvas), the v0.25.475 camera centring leaves visible
+// margins on the left + right where the world doesn't exist. This
+// function paints those margins with a darker tint + a soft
+// gradient at the tower boundary so the layout reads as "you're
+// inside an enclosed skyscraper" instead of "the column is
+// floating in sky". Operates in screen space, called after the
+// world render block + post-FX pass but before HUD overlays.
+function drawTowerSideWalls() {
+  if (!game.mapData) return;
+  const ww = game.mapData.worldWidth;
+  if (ww >= W) return;             // wide map — nothing to fill
+  const leftSx  = Math.max(0, 0 - game.camera.x);
+  const rightSx = Math.min(W, ww - game.camera.x);
+  // Outer margin fill — dark "outside the tower" tint
+  ctx.save();
+  ctx.fillStyle = 'rgba(15, 25, 50, 0.55)';
+  if (leftSx > 0)  ctx.fillRect(0, 0, leftSx, H);
+  if (rightSx < W) ctx.fillRect(rightSx, 0, W - rightSx, H);
+  // Soft ice-blue glow at each tower edge — reads as a frosted wall
+  for (const ex of [leftSx, rightSx]) {
+    if (ex <= 0 || ex >= W) continue;
+    const dir = (ex === leftSx) ? +1 : -1;
+    const grad = ctx.createLinearGradient(ex, 0, ex + dir * 24, 0);
+    grad.addColorStop(0, 'rgba(180, 220, 255, 0.30)');
+    grad.addColorStop(1, 'rgba(180, 220, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(Math.min(ex, ex + dir * 24), 0, 24, H);
+  }
+  ctx.restore();
+}
+
 // v0.25.471 — Persistent Icy Tower HUD. Renders a top-center chip
 // while the player is on a vertical-tower map, showing:
 //   • Floor counter (current floor / total)
@@ -42702,6 +42757,12 @@ function loop(time) {
 
   // Super-boss HP banner
   drawSuperBossBar();
+  // v0.25.475 — Tower side-walls. Fills the screen margins outside
+  // the narrow tower's worldWidth with a dark "outside the tower"
+  // tint, so the centred-column layout reads as "inside the
+  // skyscraper" not "floating in sky". No-op on horizontal maps
+  // where worldWidth ≥ canvas W.
+  drawTowerSideWalls();
   // v0.25.471 — Icy Tower HUD (floor counter + combo display).
   // Screen-space, drawn outside the world-translate so it stays
   // anchored to the viewport. Only visible on isVerticalTower maps.
