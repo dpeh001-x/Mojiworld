@@ -3110,7 +3110,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.447';
+const GAME_VERSION = 'v0.25.448';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -9055,6 +9055,11 @@ const player = {
   _rogueDashPoseAt:0, _rogueDashPoseUntil:0, _rogueDashBrakeDust:0,
   _rogueThrowSomersaultAt:0, _rogueThrowSomersaultUntil:0,
   _warriorGroundSmashAt:0, _warriorGroundSmashUntil:0,
+  // v0.25.448 — warrior dash gets its own pose flag so the renderer
+  // can show a body-charge silhouette (lean forward + leading
+  // shoulder-bash arm) instead of the generic walk/idle while the
+  // double-tap dash is active.
+  _warriorBashAt:0, _warriorBashUntil:0,
   lastTapKey:null, lastTapTime:0,
   doubleJumpUsed:false, coyoteTime:0,
   breath:0, capeSway:0,
@@ -13003,8 +13008,13 @@ function quickDash(dir) {
     player._rogueDashBrakeDust = 0;
   } else if (player.cls === 'warrior') {
     // Body charge — boost vx, brief shoulder-bash invul, warm trail.
+    // v0.25.448 — also sets the new bash pose flag so the renderer
+    // shows a body-charge silhouette (forward lean + leading shoulder
+    // arm). Same 24-frame timeline as the rogue dash pose.
     player.vx = dir * 18;
     player.invulnerable = Math.max(player.invulnerable, 180);
+    player._warriorBashAt = (game.time | 0);
+    player._warriorBashUntil = (game.time | 0) + 24;
     trailHex = '#ffcc66';
     trailRgba = 'rgba(255,200,100,0.55)';
   } else if (player.cls === 'archer') {
@@ -14879,6 +14889,7 @@ function respawnAtTown() {
   player._rogueDashBrakeDust = 0;
   player._rogueThrowSomersaultUntil = 0;
   player._warriorGroundSmashUntil = 0;
+  player._warriorBashUntil   = 0;     // v0.25.448 — clear bash pose on respawn
   player._levitateUntil      = 0;
   player._bigStabUntil       = 0;
   player._mageBigSwingUntil  = 0;
@@ -29900,6 +29911,14 @@ function _chibiApply(sx, sy) {
     const flipMs = Math.max(1, player.somersaultDuration || 520);
     const t = Math.max(0, Math.min(1, 1 - player.somersault / flipMs));
     const ang = t * Math.PI * 2 * (player.somersaultDir || 1);
+    // v0.25.448 — Archer dash somersault gets a 10 px vertical lift so
+    // the forward roll arcs ABOVE the ground tile rather than scraping
+    // through it. Detected implicitly: a somersault that fires while
+    // quickDashTimer is active is the dash-roll variant; evadeRoll
+    // (which sets somersault but not quickDashTimer) keeps its
+    // ground-hugging arc unchanged.
+    const isDashRoll = (player.quickDashTimer | 0) > 0;
+    if (isDashRoll) ctx.translate(0, -10);
     ctx.translate(0, -player.h / 2);   // pivot near torso center instead of feet
     ctx.rotate(ang);
     ctx.translate(0, player.h / 2);
@@ -30273,6 +30292,7 @@ function _heroVecWeaponUsesHorizontalCarry(animName) {
     || animName === 'walk'
     || animName === 'jump'
     || animName === 'dash_rogue_ninja'
+    || animName === 'dash_warrior_bash'
     || animName === 'paint_pose_rest';
 }
 const HERO_VEC_WEAPON = {
@@ -31227,6 +31247,44 @@ function _heroVecRogueDashPose(t) {
   }
   return keys[keys.length - 1];
 }
+// v0.25.448 — Warrior dash "bash" pose. Same data shape as the rogue
+// dash keys (spine/head/arm/leg rotations + bone offsets + body
+// squash-stretch) so the same lerp helper can resolve it. Reads as a
+// shoulder-bash body-charge: anticipation crouch → explosive launch
+// with leading fist + back arm cocked → max forward lean at the
+// charge apex → impact plant → settle. Tone is heavier and less
+// stretched than the rogue ninja smear (warrior is a bull, not a
+// blink).
+const HERO_VEC_WARRIOR_BASH_KEYS = [
+  // 0.00 — Anticipation: weight back, knees bent, lead arm cocked behind
+  { p:0.00, spine:-0.14, head: 0.06, armL: 0.20, armR:-0.30, handL: 0.00, legL: 0.30, legR:-0.25, x:-1.0, y: 1.0, headX:-0.1, headY: 0.1, legLX:-0.4, legLY: 0.6, legRX: 0.4, legRY: 0.6, sx:0.95, sy:1.05, limbSy:1.00 },
+  // 0.22 — Launch: explode forward, lead arm thrusts as battering ram
+  { p:0.22, spine: 0.45, head:-0.20, armL:-1.20, armR: 0.60, handL: 0.10, legL:-0.40, legR: 0.55, x: 2.5, y:-0.8, headX: 0.20, headY:-0.10, legLX: 0.8, legLY:-0.6, legRX:-0.8, legRY: 0.4, sx:1.10, sy:0.92, limbSy:1.04 },
+  // 0.55 — Charge apex: max forward lean, body horizontal, legs split mid-stride
+  { p:0.55, spine: 0.78, head:-0.35, armL:-1.60, armR: 0.90, handL: 0.04, legL:-0.20, legR: 0.30, x: 4.5, y:-0.4, headX: 0.32, headY:-0.05, legLX: 1.2, legLY:-0.4, legRX:-1.2, legRY: 0.0, sx:1.18, sy:0.86, limbSy:1.08 },
+  // 0.80 — Impact / follow-through: front foot plants, torso decelerates
+  { p:0.80, spine: 0.30, head:-0.10, armL:-0.80, armR: 0.40, handL: 0.06, legL:-0.65, legR: 0.10, x: 2.2, y: 0.6, headX: 0.18, headY: 0.05, legLX: 0.6, legLY: 0.2, legRX:-0.4, legRY: 0.4, sx:1.05, sy:0.96, limbSy:1.02 },
+  // 1.00 — Settle to neutral
+  { p:1.00, spine: 0.02, head: 0.00, armL: 0.20, armR:-0.05, handL: 0.00, legL:-0.10, legR: 0.05, x: 0.3, y: 0.2, headX: 0.0, headY: 0.0, legLX: 0.0, legLY: 0.0, legRX: 0.0, legRY: 0.0, sx:1.00, sy:1.00, limbSy:1.00 },
+];
+function _heroVecWarriorBashPose(t) {
+  const p = _heroClamp01(t);
+  const keys = HERO_VEC_WARRIOR_BASH_KEYS;
+  for (let i = 0; i < keys.length - 1; i++) {
+    const a = keys[i];
+    const b = keys[i + 1];
+    if (p >= a.p && p <= b.p) {
+      const u = _heroEaseInOutSine((p - a.p) / (b.p - a.p || 1));
+      const out = {};
+      for (const k of Object.keys(a)) {
+        if (k === 'p') continue;
+        out[k] = a[k] + (b[k] - a[k]) * u;
+      }
+      return out;
+    }
+  }
+  return keys[keys.length - 1];
+}
 function _heroVecWalkPhase(t) {
   return ((t % 1) + 1) % 1;
 }
@@ -31373,6 +31431,19 @@ const HERO_VEC_ANIMS = {
     handL: t => _heroVecRogueDashPose(t).handL,
     legL:  t => _heroVecRogueDashPose(t).legL,
     legR:  t => _heroVecRogueDashPose(t).legR,
+  },
+  // v0.25.448 — Warrior dash "bash" pose: shoulder-bash body charge.
+  // Same data shape + driver pattern as dash_rogue_ninja above; the
+  // separate keyframe set in HERO_VEC_WARRIOR_BASH_KEYS reads heavier
+  // and less stretched (no ninja smear).
+  dash_warrior_bash: {
+    spine: t => _heroVecWarriorBashPose(t).spine,
+    head:  t => _heroVecWarriorBashPose(t).head,
+    armL:  t => _heroVecWarriorBashPose(t).armL,
+    armR:  t => _heroVecWarriorBashPose(t).armR,
+    handL: t => _heroVecWarriorBashPose(t).handL,
+    legL:  t => _heroVecWarriorBashPose(t).legL,
+    legR:  t => _heroVecWarriorBashPose(t).legR,
   },
   attack: {
     // v0.25.145 - full-body committed swing: windup, strike, follow-through.
@@ -31607,6 +31678,17 @@ const HERO_VEC_DEFORM = {
     legR:  t => ({ sx: 1, sy: _heroVecRogueDashPose(t).limbSy }),
     handL: () => ({ sx: 1, sy: 1 }),
   },
+  dash_warrior_bash: {
+    spine: t => {
+      const p = _heroVecWarriorBashPose(t);
+      return { sx: p.sx, sy: p.sy };
+    },
+    armL:  t => ({ sx: 1, sy: _heroVecWarriorBashPose(t).limbSy }),
+    armR:  t => ({ sx: 1, sy: _heroVecWarriorBashPose(t).limbSy }),
+    legL:  t => ({ sx: 1, sy: _heroVecWarriorBashPose(t).limbSy }),
+    legR:  t => ({ sx: 1, sy: _heroVecWarriorBashPose(t).limbSy }),
+    handL: () => ({ sx: 1, sy: 1 }),
+  },
   attack_warrior_ground_slam: {
     spine: t => {
       const p = _heroVecWarriorGroundSmashPose(t);
@@ -31753,6 +31835,24 @@ const HERO_VEC_BOB = {
     },
     legR:  t => {
       const p = _heroVecRogueDashPose(t);
+      return { x: p.legRX, y: p.legRY };
+    },
+  },
+  dash_warrior_bash: {
+    spine: t => {
+      const p = _heroVecWarriorBashPose(t);
+      return { x: p.x, y: p.y };
+    },
+    head:  t => {
+      const p = _heroVecWarriorBashPose(t);
+      return { x: p.headX, y: p.headY };
+    },
+    legL:  t => {
+      const p = _heroVecWarriorBashPose(t);
+      return { x: p.legLX, y: p.legLY };
+    },
+    legR:  t => {
+      const p = _heroVecWarriorBashPose(t);
       return { x: p.legRX, y: p.legRY };
     },
   },
@@ -31928,6 +32028,7 @@ function _heroVecAnimFor() {
     // v0.25.293 — Shadowlord ninja pose / Shinobi ninja crouch override
     // the rogue thrust for the duration of their respective flags.
     if (cls === 'rogue' && (player._rogueDashPoseUntil | 0) > now) return 'dash_rogue_ninja';
+    if (cls === 'warrior' && (player._warriorBashUntil  | 0) > now) return 'dash_warrior_bash';
     if (cls === 'rogue' && (player._ninjaPoseUntil   | 0) > now) return 'attack_rogue_ninja';
     if (cls === 'rogue' && (player._ninjaCrouchUntil | 0) > now) return 'attack_rogue_crouch';
     if (cls === 'archer')  return 'attack_archer';
@@ -31937,6 +32038,7 @@ function _heroVecAnimFor() {
     return 'attack';
   }
   if (cls === 'rogue' && (player._rogueDashPoseUntil | 0) > now) return 'dash_rogue_ninja';
+  if (cls === 'warrior' && (player._warriorBashUntil | 0) > now) return 'dash_warrior_bash';
   if (inAir) return 'jump';
   if (walking) return 'walk';
   return 'idle';
@@ -31949,6 +32051,13 @@ function _heroVecTimeNorm(animName) {
   if (animName === 'idle')   return ((t * 0.02) % 1);
   if (animName === 'dash_rogue_ninja') {
     const start = Number.isFinite(player._rogueDashPoseAt) ? player._rogueDashPoseAt : t;
+    return Math.max(0, Math.min(1, (t - start) / 24));
+  }
+  // v0.25.448 — warrior bash pose: 24-frame timeline matching the
+  // rogue dash so anticipation / launch / charge / impact / settle
+  // beats line up with the 180 ms motion window + the natural fade.
+  if (animName === 'dash_warrior_bash') {
+    const start = Number.isFinite(player._warriorBashAt) ? player._warriorBashAt : t;
     return Math.max(0, Math.min(1, (t - start) / 24));
   }
   if (animName === 'attack_warrior_ground_slam') {
@@ -32037,7 +32146,11 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   const _baseReplacedByPaint = (layerId) => !onlyPaintLayer && (hideBasePaintLayer === layerId || _lxPaintLayerReplacesBase(layerId));
   // v0.25.401 - Rogue dash smears the body only; keep head, hair, and
   // head-pinned paint layers crisp so the dash does not squash the face.
-  const headDrawOpts = animName === 'dash_rogue_ninja' ? { deform: false } : null;
+  // v0.25.448 — same opt-out for the warrior bash pose: the body
+  // squash-stretch is dramatic but the head + hair should stay crisp.
+  const headDrawOpts = (animName === 'dash_rogue_ninja' || animName === 'dash_warrior_bash')
+    ? { deform: false }
+    : null;
   const stackWeaponFn = HERO_VEC_WEAPON[cls];
   const weaponCarryRotation = _heroVecWeaponUsesHorizontalCarry(animName)
     ? HERO_VEC_WEAPON_HORIZONTAL_HOLD
