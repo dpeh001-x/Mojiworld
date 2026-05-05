@@ -3118,7 +3118,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.483';
+const GAME_VERSION = 'v0.25.484';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -6925,8 +6925,34 @@ function _pickN(arr, n) {
   return out;
 }
 
-function rollAffixedItem(base, forcedRarity) {
+// v0.25.484 — Affix values scale with the source mob's "level" (the
+// active map's levelReq). Lv 1 mobs roll baseline affixes; Lv 25 mobs
+// roll +96% stronger; Lv 50 mobs roll +196% stronger. Boolean-style
+// roll outputs (multishot, burn, extraJumps) are NEVER scaled — they're
+// presence flags, not magnitudes.
+const _AFFIX_NO_SCALE = new Set(['multishot', 'burn', 'extraJumps']);
+function _scaleAffixRoll(rolled, lvlMul) {
+  if (lvlMul <= 1.0001) return rolled;
+  const out = {};
+  for (const k in rolled) {
+    const v = rolled[k];
+    if (typeof v !== 'number' || _AFFIX_NO_SCALE.has(k)) {
+      out[k] = v;
+    } else if (Number.isInteger(v)) {
+      out[k] = Math.max(1, Math.round(v * lvlMul));
+    } else {
+      out[k] = v * lvlMul;
+    }
+  }
+  return out;
+}
+
+function rollAffixedItem(base, forcedRarity, mobLevel) {
   const rarity = forcedRarity || base.rarity;
+  // mobLevel defaults to 1 (no scaling) if not supplied — preserves
+  // legacy behaviour for chest drops, quest rewards, scripted loot.
+  const _ml = Math.max(1, mobLevel || 1);
+  const lvlMul = 1 + (_ml - 1) * 0.04;
   let numPre = 0, numSuf = 0;
   if (rarity === 'common')    { numPre = Math.random() < 0.5 ? 1 : 0; numSuf = 0; }
   else if (rarity === 'rare') { numPre = 1; numSuf = Math.random() < 0.7 ? 1 : 0; }
@@ -6940,19 +6966,21 @@ function rollAffixedItem(base, forcedRarity) {
   const prefixNames = [];
   for (const id of prefixes) {
     const af = PREFIXES[id];
-    const rolled = af.roll();
+    const rolled = _scaleAffixRoll(af.roll(), lvlMul);
     for (const k in rolled) item[k] = (item[k] || 0) + rolled[k];
     prefixNames.push(af.name);
   }
   const suffixNames = [];
   for (const id of suffixes) {
     const af = SUFFIXES[id];
-    const rolled = af.roll();
+    const rolled = _scaleAffixRoll(af.roll(), lvlMul);
     for (const k in rolled) item[k] = (item[k] || 0) + rolled[k];
     suffixNames.push(af.name);
   }
   item.name = (prefixNames.join(' ') + (prefixNames.length ? ' ' : '')) + base.name + (suffixNames.length ? ' ' + suffixNames[0] : '');
   item.affixes = [...prefixes, ...suffixes];
+  // Track for tooltip / debug.
+  item.dropLevel = _ml;
   return item;
 }
 
@@ -16072,17 +16100,15 @@ function triggerDeath() {
   cancelPendingSkillTimers();
   // v0.25.7 — death meso penalty 50% → 35%. Still stings enough to make
   // deaths feel costly, but no longer wipes over a third of your stash
-  // for a single mistake on bad luck. XP penalty (0%/3%/5%/8% by level)
-  // is unchanged and still the primary "don't die" deterrent.
+  // for a single mistake on bad luck.
   const lostMesos = Math.floor(player.mesos * 0.35);
   game._pendingLoss = lostMesos;
-  // v0.24.1 — XP penalty on death scales with level. Lv 1-19: no loss.
-  // Lv 20-29: 3%. Lv 30-39: 5%. Lv 40+: 8%. Capped at the current bar's
-  // worth of XP so you never drop below zero into the previous level.
-  let lostExp = 0;
-  if (player.level >= 40)       lostExp = Math.floor(player.exp * 0.08);
-  else if (player.level >= 30)  lostExp = Math.floor(player.exp * 0.05);
-  else if (player.level >= 20)  lostExp = Math.floor(player.exp * 0.03);
+  // v0.25.484 — XP penalty FLAT 5% at every level (was tiered:
+  // 0% / 3% / 5% / 8% by level bracket). The early-level grace was
+  // removed per user request — death stings consistently regardless
+  // of how far you've levelled. Capped at the current bar's worth of
+  // XP so you never drop below zero into the previous level.
+  const lostExp = Math.floor(player.exp * 0.05);
   if (lostExp > 0) {
     player.exp = Math.max(0, player.exp - lostExp);
     game._pendingExpLoss = lostExp;
@@ -21612,23 +21638,34 @@ function _maybeLevelUp() {
   if (player.exp < player.expToNext) return;
   player.exp -= player.expToNext;
   player.level++;
-  // v0.25.7 — softened mid/late acceleration to 1.18/1.20/1.22.
-  // v0.25.123 — XP curve gets steep from L15 onwards.
-  // v0.25.242 (G2) — softened the 25-39 mid-grind that was the longest
-  // dead-zone in the curve (~8-12 hours of farming Lv 30 mobs that
-  // didn't yield enough XP). Endgame (40+) curve unchanged so the
-  // ascend-to-50 ceremony still feels earned.
-  //   1-14   : 1.20  (early curve)
-  //   15-19  : 1.40  (steep wall)
-  //   20-24  : 1.40  (was 1.45)
-  //   25-29  : 1.40  (was 1.45)
-  //   30-39  : 1.42  (was 1.50)  ← biggest cut
-  //   40+    : 1.55  (unchanged)
-  const curveMul = player.level >= 40 ? 1.55
-                 : player.level >= 30 ? 1.42
-                 : player.level >= 20 ? 1.40
-                 : player.level >= 15 ? 1.40
-                 : 1.20;
+  // v0.25.484 — Curve restructured to user's time-target spec:
+  //   Lv 1→5:  ~10–15 min total      (gentle onboarding)
+  //   Lv 5→10: ~30 min total
+  //   Lv 10→20: ~3 hours total
+  //   Lv 20→25: ~3 hours total
+  //   Lv 25→30: ~6 hours total
+  //   Lv 30+:   each level distinctly harder than the last
+  //   Lv 49→50: the single biggest jump in the game (×2.0)
+  // Per-level multipliers — applied AFTER player.level++ so the value
+  // governs the cost of the NEXT level. Brackets line up exactly with
+  // the user's per-tier time targets.
+  //   Lv 2-4   : 1.30  (smooth ramp through tutorial fights)
+  //   Lv 5-9   : 1.30  (more mobs needed; tier 2 mobs reward faster kills)
+  //   Lv 10-19 : 1.40  (mid-game wall begins)
+  //   Lv 20-24 : 1.50  (boss-tier maps unlock)
+  //   Lv 25-29 : 1.55  (underwater + endgame zones)
+  //   Lv 30-39 : 1.60  (each tier of 5 noticeably harder)
+  //   Lv 40-48 : 1.65  (endgame — gear matters)
+  //   Lv 49    : 2.00  (steep final climb to 50)
+  const _lvl = player.level;
+  const curveMul = _lvl >= 49 ? 2.00
+                 : _lvl >= 40 ? 1.65
+                 : _lvl >= 30 ? 1.60
+                 : _lvl >= 25 ? 1.55
+                 : _lvl >= 20 ? 1.50
+                 : _lvl >= 10 ? 1.40
+                 : _lvl >= 5  ? 1.30
+                 :              1.30;
   player.expToNext = Math.floor(player.expToNext * curveMul);
   // Clamp overflow — no banking toward the NEXT level-up
   if (player.exp >= player.expToNext) player.exp = Math.floor(player.expToNext * 0.95);
@@ -22109,8 +22146,13 @@ function triggerSuperBossDeath(m) {
   }
 }
 
-function rollItemDrop(tier) {
+function rollItemDrop(tier, mobLevel) {
   // tier: 0 normal, 1 elite, 2 boss
+  // mobLevel: optional, 1+ — scales rolled affix magnitudes (v0.25.484).
+  // Defaults to the active map's levelReq when not provided.
+  if (mobLevel === undefined) {
+    mobLevel = (game.mapData && game.mapData.levelReq) || 1;
+  }
   const cats = ['weapons','armors','accessories'];
   const cat = cats[Math.floor(Math.random() * cats.length)];
   const pool = ITEM_POOL[cat];
@@ -22146,7 +22188,7 @@ function rollItemDrop(tier) {
   const r = upgrade && base.rarity !== 'legendary'
     ? (base.rarity === 'epic' ? 'legendary' : base.rarity === 'rare' ? 'epic' : 'rare')
     : base.rarity;
-  return rollAffixedItem(base, r);
+  return rollAffixedItem(base, r, mobLevel);
 }
 
 // =========================================================================
