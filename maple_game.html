@@ -9309,7 +9309,12 @@ function getAtk()  {
   // Mages use INT for damage; melee/ranged use STR (pick the stronger for hybrid classes)
   const isMagic = player.cls === 'mage';
   const primary = isMagic ? attr('int') : attr('str');
-  const primaryBonus = Math.floor(attrEff(primary) * 0.8);
+  // v0.25.457 — Doubled the primary-attribute weight (0.8 → 1.6) so
+  // each STR / INT point is now a meaningful 1.6 ATK boost. Combined
+  // with the PLAYER_ATK_MUL revert below, putting points into your
+  // primary stat now visibly accelerates kill speed instead of being
+  // a marginal optimisation. Soft-cap at 40 still applies via attrEff.
+  const primaryBonus = Math.floor(attrEff(primary) * 1.6);
   const base = player.baseAtk + player.mods.atk + getEquipBonus('atk') + primaryBonus;
   let pct = 1 + player.mods.atkPct + (getEquipBonus('atkPct') || 0) + (player.inRage ? 0.3 : 0);
   if (player.buffs.warCry > 0)   pct += 0.55;
@@ -13842,7 +13847,13 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   const _distMul = (isBoss || (game.mapData && game.mapData.isBossArena))
     ? 1
     : Math.min(2.0, 1 + Math.max(0, _townDistance(game.currentMap) - 1) * 0.10);
-  const hpMult  = (isBoss ? 1 : (isMiniBoss ? 5   : isElite ? 3   : 1)) * towerHp  * _distMul;
+  // v0.25.457 — MONSTER_HP_MUL trims non-boss HP pools by ~35% to
+  // counter the ATK-rebalance asymmetry (player damage no longer
+  // halved). Bosses are exempt to preserve the cinematic encounter
+  // pacing. The knob is multiplied AFTER tier scale so elites + minis
+  // + distance-buffed mobs all get the same proportional softening.
+  const _hpKnob = isBoss ? 1 : MONSTER_HP_MUL;
+  const hpMult  = (isBoss ? 1 : (isMiniBoss ? 5   : isElite ? 3   : 1)) * towerHp  * _distMul * _hpKnob;
   const atkMult = (isBoss ? 1 : (isMiniBoss ? 2   : isElite ? 1.5 : 1)) * towerAtk * _distMul;
   const expMult = (isBoss ? 1 : (isMiniBoss ? 5   : isElite ? 2.2 : 1)) * _distMul;
   const mesMult = (isBoss ? 1 : (isMiniBoss ? 4   : isElite ? 2.5 : 1)) * _distMul;
@@ -20036,7 +20047,20 @@ const GLOBAL_ULT_DMG_MUL   = 0.75;  // extra trim on master ults (they're huge)
 // player attack across the board (basics + skills) by trimming the
 // output of getAtk() at source. Touches one knob, propagates everywhere
 // because every dmg formula in the codebase reads getAtk().
-const PLAYER_ATK_MUL       = 0.50;
+// v0.25.457 — REVERTED to 1.0. Late-game audit + user feedback: with
+// the v0.25.439 distance-difficulty multiplier (+10 % HP/ATK per portal
+// step from town, capped 2.0×) and the EMPOWERED_TIER tier upgrades,
+// the 0.50 player-damage halving stacked into a slog. Player attacks
+// now land at full strength; monster HP is independently softened via
+// the new MONSTER_HP_MUL knob below.
+const PLAYER_ATK_MUL       = 1.00;
+// v0.25.457 — Global monster-HP knob. Trims the spawned currentHp /
+// maxHp by 35 % so the player's ATK-weighted kills convert faster.
+// Applied at spawn (post-tier multipliers) so elites / mini-bosses /
+// bosses + their distance-scaled counterparts all get the same softer
+// pool relative to whatever tier they're in. Bosses kept at 1.0 — they
+// are hand-tuned cinematic encounters and shouldn't melt.
+const MONSTER_HP_MUL       = 0.65;
 // v0.25.169 — global skill-cooldown multiplier. 0.75 = every skill +
 // every job's basic-attack cooldown is reduced by 25% across the
 // board. Stacks multiplicatively with class-specific cdMul (mage 0.70,
