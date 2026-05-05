@@ -41631,6 +41631,102 @@ requestAnimationFrame(loop);
 </div>
 
 <script>
+// =========================================================================
+// LXAuth — login / register / guest / session  (v0.25.455)
+// =========================================================================
+//
+// Player accounts. Today's implementation is LOCAL-ONLY:
+//   • Account records live in localStorage under `levelx_local_accounts`.
+//   • Passwords are SHA-256 hashed (salted with the lowercase username)
+//     before storage. Local hashing is defense-in-depth only — proper
+//     server-side bcrypt + per-account salt happens once the API ships.
+//   • Sessions are tracked under `levelx_session` and survive reloads,
+//     but the loading screen still surfaces the form on every cold boot
+//     (returning players click "Sign in as <name>" to pass through —
+//     never silent auto-login, since the user explicitly asked for a
+//     login SCREEN).
+//
+// The exported API surface (LXAuth.login / .register / .guest / .session
+// / .logout) returns Promise<{ok, name, token, kind, error?}>. When the
+// server-side account system arrives, only the function bodies need to
+// change — the loading-screen UI consumes the same shape from a fetch().
+const SESSION_KEY = 'levelx_session';
+const LOCAL_ACCOUNTS_KEY = 'levelx_local_accounts';
+function _authReadAccounts() {
+  try {
+    const raw = localStorage.getItem(LOCAL_ACCOUNTS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+function _authWriteAccounts(map) {
+  try { localStorage.setItem(LOCAL_ACCOUNTS_KEY, JSON.stringify(map)); } catch (e) {}
+}
+async function _authHashPassword(saltedPw) {
+  // Web Crypto SHA-256. Caller pre-salts with the username so two
+  // accounts that share the same password produce different hashes
+  // even in this local-only mock store. Replaced by server-side
+  // bcrypt + per-account salt once the auth API ships.
+  if (!crypto || !crypto.subtle) {
+    // Plaintext fallback — only fires on http:// over insecure context
+    // which Web Crypto blocks. Loud warn so it can't slip into prod.
+    console.warn('[LXAuth] Web Crypto unavailable — storing plaintext locally.');
+    return 'plain:' + saltedPw;
+  }
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(saltedPw));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function _authNewToken() {
+  if (crypto && crypto.randomUUID) return crypto.randomUUID();
+  const arr = new Uint8Array(16);
+  if (crypto && crypto.getRandomValues) crypto.getRandomValues(arr);
+  else for (let i = 0; i < 16; i++) arr[i] = Math.floor(Math.random() * 256);
+  return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function _authValidUsername(u) { return typeof u === 'string' && /^[a-zA-Z0-9_]{3,16}$/.test(u); }
+function _authValidPassword(p) { return typeof p === 'string' && p.length >= 6 && p.length <= 64; }
+const LXAuth = {
+  async register(username, password) {
+    if (!_authValidUsername(username)) return { ok: false, error: 'Username must be 3-16 chars (letters, digits, underscore).' };
+    if (!_authValidPassword(password)) return { ok: false, error: 'Password must be 6-64 characters.' };
+    const accounts = _authReadAccounts();
+    const key = username.toLowerCase();
+    if (accounts[key]) return { ok: false, error: 'That name is already taken locally. Try signing in.' };
+    const hash = await _authHashPassword(key + ':' + password);
+    accounts[key] = { name: username, hash, created: Date.now() };
+    _authWriteAccounts(accounts);
+    const session = { name: username, token: _authNewToken(), ts: Date.now(), kind: 'local' };
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch (e) {}
+    return { ok: true, ...session };
+  },
+  async login(username, password) {
+    if (!_authValidUsername(username)) return { ok: false, error: 'Username must be 3-16 chars (letters, digits, underscore).' };
+    if (!_authValidPassword(password)) return { ok: false, error: 'Password must be 6-64 characters.' };
+    const accounts = _authReadAccounts();
+    const key = username.toLowerCase();
+    const acct = accounts[key];
+    if (!acct) return { ok: false, error: 'No local account with that name. Register one or play as guest.' };
+    const hash = await _authHashPassword(key + ':' + password);
+    if (hash !== acct.hash) return { ok: false, error: 'Wrong password.' };
+    const session = { name: acct.name, token: _authNewToken(), ts: Date.now(), kind: 'local' };
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch (e) {}
+    return { ok: true, ...session };
+  },
+  guest() {
+    const tag = _authNewToken().replace(/[^A-Za-z0-9]/g, '').slice(0, 4).toUpperCase() || 'XXXX';
+    const session = { name: 'Guest-' + tag, token: _authNewToken(), ts: Date.now(), kind: 'guest' };
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch (e) {}
+    return { ok: true, ...session };
+  },
+  session() {
+    try {
+      const raw = localStorage.getItem(SESSION_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  },
+  logout() { try { localStorage.removeItem(SESSION_KEY); } catch (e) {} },
+};
+try { window.LXAuth = LXAuth; } catch (e) {}
+
 (function _wireLoadingScreen() {
   // v0.25.173 — Per user request: ensure ALL sprites are loaded
   // before running the game. The previous v0.25.114 fast-boot only
