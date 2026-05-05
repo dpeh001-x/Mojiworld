@@ -3118,7 +3118,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.468';
+const GAME_VERSION = 'v0.25.469';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -43400,10 +43400,17 @@ try { window.LXAuth = LXAuth; } catch (e) {}
   const status = document.getElementById('loading-status');
   let bzLoaded = 0, critLoaded = 0, defLoaded = 0;
   let revealed = false;
-  // v0.25.362 — Reveal is gated only by first-play assets (BAZAAR +
-  // CRITICAL). The full manifest still streams in the background, but
-  // missing or slow late-game art must not leave the playable world
-  // hidden behind the loader.
+  // v0.25.469 — Reveal now gates on EVERY asset (BAZAAR + CRITICAL +
+  // DEFERRED) so backgrounds + sprites + UI + boss bodies + master
+  // FX + the new floors / platforms / world props are ALL decoded
+  // before the world appears. Previously v0.25.362 gated only on
+  // BAZAAR + CRITICAL — the visible-on-spawn first-paint set — and
+  // streamed DEFERRED in the background. That left players seeing
+  // pop-in for the first 30-60 s of play (boss sprites materialising
+  // mid-fight, prop tiles flashing in as they walked past, etc.).
+  // Per-image 8 s timeout (loadOne below) and the 60 s hard-fallback
+  // (extended from 30 s) bound the worst case so a single hung
+  // request can't hold the world hostage.
   const phrases = [
     'Painting Everdawn Bazaar…',
     'Lighting the lanterns…',
@@ -43413,10 +43420,11 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     'Sharpening boss blades…',
     'Loading boss arena cinematics…',
     'Polishing skill flourishes…',
+    'Floor tiles + props…',
     'Almost there…',
   ];
-  const totalLoaded = () => bzLoaded + critLoaded;
-  const totalCount  = () => BAZAAR.length + CRITICAL.length;
+  const totalLoaded = () => bzLoaded + critLoaded + defLoaded;
+  const totalCount  = () => BAZAAR.length + CRITICAL.length + DEFERRED.length;
   const update = () => {
     if (revealed) return;
     const total = totalCount();
@@ -43465,15 +43473,18 @@ try { window.LXAuth = LXAuth; } catch (e) {}
   });
   // v0.25.237 — Phase 1: load BAZAAR sprites in parallel with high
   // fetchPriority — the first-paint set the player sees on spawn.
-  // v0.25.362 — Only BAZAAR + CRITICAL contribute to the reveal gate.
+  // v0.25.469 — All three buckets now gate the reveal (see totalCount).
   Promise.all(BAZAAR.map(p => loadOne(p, true).then(() => { bzLoaded++; update(); })))
     .then(() => maybeReveal());
   // Phase 2 — Critical UI assets. Same high fetchPriority as BAZAAR
-  // so they finish early; now also contribute to the reveal gate.
+  // so they finish early; also contribute to the reveal gate.
   Promise.all(CRITICAL.map(p => loadOne(p, true).then(() => { critLoaded++; update(); })))
     .then(() => maybeReveal());
   // Phase 3 — All other sprites (boss bodies, master-class FX, less-
-  // common UI). These stream in the background and never block reveal.
+  // common UI, floors, platforms, world props). v0.25.469: these now
+  // BLOCK the reveal so the player walks into a fully-painted world
+  // instead of seeing pop-in. Per-image 8 s timeout + 60 s hard
+  // fallback bound the worst case.
   const startDeferred = () => {
     DEFERRED.forEach(p => loadOne(p, false).then(() => {
       defLoaded++;
@@ -43483,10 +43494,11 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     if (!DEFERRED.length) maybeReveal();
   };
   startDeferred();
-  // v0.25.362 — The corner-pill deferred loader remains visually hidden;
-  // background sprite streaming is silent.
   function maybeReveal() {
-    // Gate on first-play sprite count only.
+    // v0.25.469 — Gate on the FULL asset set. World stays hidden until
+    // every background + sprite + UI + boss + FX + tile + prop has
+    // loaded (or hit its 8 s per-image timeout, or the 60 s hard
+    // fallback below trips).
     if (totalLoaded() < totalCount()) return;
     if (revealed) return;
     revealed = true;
@@ -43600,9 +43612,15 @@ try { window.LXAuth = LXAuth; } catch (e) {}
       _finishHide(res);
     });
   }
-  // Hard fallback for first-play assets. Background sprites keep streaming
-  // even if this safety net reveals the world.
-  setTimeout(() => { if (overlay && !overlay.classList.contains('fade')) { revealed = true; hide(); } }, 30000);
+  // v0.25.469 — Hard fallback safety net. Bumped from 30 s → 60 s now
+  // that the gate waits for the FULL asset set (was BAZAAR + CRITICAL
+  // only). On a healthy connection the gate clears in 5-15 s; on a
+  // slow connection the per-image 8 s timeout caps each request, so
+  // 60 s is a generous worst-case ceiling that still recovers from a
+  // pathological hung CDN. If this trips, any unloaded sprite renders
+  // its procedural fallback (drawCuteMob, vector-hero, etc.) instead
+  // of nothing — the world is always playable.
+  setTimeout(() => { if (overlay && !overlay.classList.contains('fade')) { revealed = true; hide(); } }, 60000);
 })();
 // v0.25.233 — Mojiworld main BGM (loops indefinitely).
 const _bgmEl = (() => {
