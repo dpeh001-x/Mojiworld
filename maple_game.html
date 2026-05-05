@@ -41470,14 +41470,33 @@ const _BGM_MAP_FILES = {
   azureAcademia:  'audio/bgm_azure_academia.mp3',
 };
 const _bgmMapEls = Object.create(null);
+// v0.25.440 — track whether the player has produced a user gesture that
+// unlocks autoplay. Lazy-created audio elements made AFTER unlock get an
+// immediate play()+pause() to permit silent playback when the next map
+// load actually wants them. Without this, freshly-instantiated tracks
+// would silently fail to play until the next user gesture.
+let _bgmAutoplayUnlocked = false;
 function _bgmMapEl(mapId) {
   if (!mapId || !_BGM_MAP_FILES[mapId]) return null;
   if (_bgmMapEls[mapId]) return _bgmMapEls[mapId];
   const a = new Audio(_BGM_MAP_FILES[mapId]);
   a.loop = true;
   a.volume = 0;
-  a.preload = 'auto';
+  // v0.25.440 — preload 'metadata' (not 'auto') so a track that's never
+  // visited this session doesn't pay for the full 3-4 MB download +
+  // decode. The browser still fetches the small header so duration /
+  // codec are known; the body streams when .play() is finally called.
+  a.preload = 'metadata';
   _bgmMapEls[mapId] = a;
+  // If the audio context is already unlocked (player has interacted),
+  // run the play()+pause() dance now so this new element can play()
+  // silently when the next map load actually wants it.
+  if (_bgmAutoplayUnlocked) {
+    try {
+      a.play().then(() => { try { a.pause(); } catch (e) {} })
+              .catch(() => {/* still blocked: next gesture will retry */});
+    } catch (e) {}
+  }
   return a;
 }
 let _bgmActiveMapEl = null;     // the currently-playing per-map track, if any
@@ -41550,10 +41569,15 @@ function startBgm() {
                          .catch(() => {/* blocked: try again next gesture */});
       } catch (e) {}
     }
-    // v0.25.436 — same gesture also unlocks every per-map BGM so the
-    // first map-load swap never gets stuck waiting on a fresh user input.
-    for (const mapId of Object.keys(_BGM_MAP_FILES)) {
-      const el = _bgmMapEl(mapId);
+    // v0.25.440 — only unlock the per-map BGMs that have ALREADY been
+    // instantiated by an actual map load. Was iterating all 5
+    // _BGM_MAP_FILES entries which forced lazy-creation + a metadata fetch
+    // for every track even if the player never visited those maps.
+    // Tracks created LATER (after this gesture) auto-unlock themselves
+    // inside _bgmMapEl via the _bgmAutoplayUnlocked flag.
+    _bgmAutoplayUnlocked = true;
+    for (const mapId of Object.keys(_bgmMapEls)) {
+      const el = _bgmMapEls[mapId];
       if (!el) continue;
       try {
         el.play().then(() => { try { el.pause(); } catch (e) {} })
