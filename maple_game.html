@@ -3118,7 +3118,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.465';
+const GAME_VERSION = 'v0.25.466';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -4569,11 +4569,41 @@ const LX_OBJECTS_FILES = [
   'shadow_shuriken_rack', 'shadow_tatami',
   'signpost_wood', 'wagon_empty', 'well_stone',
 ];
+// v0.25.466 — Per-prop bbox metadata. Detects the topmost + bottommost
+// opaque pixel in source coords on image load so drawWorldProps can
+// anchor the visible bottom of the art to the floor (default), or the
+// visible top to a platform's top (for hanging anchors), instead of
+// the canvas edge — which left a 5-15 px gap of transparent padding
+// that read as the prop "floating" above the ground.
+const LX_OBJECTS_META = Object.create(null);
+function _detectSpriteBboxTop(img) {
+  if (!img.naturalWidth || !img.naturalHeight) return null;
+  try {
+    const cv = document.createElement('canvas');
+    cv.width = img.naturalWidth;
+    cv.height = img.naturalHeight;
+    const c = cv.getContext('2d');
+    c.drawImage(img, 0, 0);
+    const data = c.getImageData(0, 0, cv.width, cv.height).data;
+    for (let y = 0; y < cv.height; y++) {
+      for (let x = 0; x < cv.width; x++) {
+        if (data[(y * cv.width + x) * 4 + 3] > 12) return y;
+      }
+    }
+    return 0;
+  } catch (e) { return null; }
+}
 const LX_OBJECTS = (() => {
   const out = {};
   for (const k of LX_OBJECTS_FILES) {
     const img = new Image();
     img.decoding = 'async';
+    img.onload = () => {
+      LX_OBJECTS_META[k] = {
+        bboxTopY:    _detectSpriteBboxTop(img),
+        bboxBottomY: _detectSpriteBboxBottom(img),
+      };
+    };
     img.src = LX_OBJECTS_BASE + k + '.png';
     out[k] = img;
   }
@@ -29746,28 +29776,38 @@ function drawHoneycombHollowDecor() {
 // test before drawImage is invoked.
 const PROP_DEFAULT_H = 80;
 const MAP_PROPS = {
-  // ── Everdawn Central (town hub) ──
+  // ── Everdawn Central (town hub) — worldWidth: 1100 ──
+  // v0.25.466: 4 props were placed off-map (x>1100) and the hanging
+  // basket was floating in mid-air at y:380 with no platform. Now all
+  // props fit within the 1100-wide bounds and the basket anchors to
+  // the underside of the y:360-370 sidewalk platform tier.
   town: [
-    { key:'well_stone',          x:200,  y:480, scale:1.20 },
-    { key:'signpost_wood',       x:560,  y:480, scale:1.10 },
-    { key:'crate_stack',         x:1040, y:480, scale:1.00 },
-    { key:'barrel_stack',        x:1280, y:480, scale:0.95 },
-    { key:'wagon_empty',         x:1500, y:480, scale:1.30 },
-    { key:'fence_rail',          x:300,  y:480, scale:0.85 },
-    { key:'fence_rail',          x:1700, y:480, scale:0.85 },
-    { key:'hanging_flowerbasket',x:780,  y:380, scale:0.65 },
+    { key:'well_stone',          x:160, y:480, scale:1.20 },
+    { key:'signpost_wood',       x:60,  y:480, scale:1.05 },
+    { key:'crate_stack',         x:280, y:480, scale:1.00 },
+    { key:'barrel_stack',        x:780, y:480, scale:0.95 },
+    { key:'wagon_empty',         x:1020,y:480, scale:1.30 },
+    { key:'fence_rail',          x:380, y:480, scale:0.85 },
+    { key:'fence_rail',          x:720, y:480, scale:0.85 },
+    // Hanging basket — anchored to platform-tier underside (y:370)
+    { key:'hanging_flowerbasket',x:780, y:370, scale:0.55, anchor:'hang' },
   ],
-  // ── Everdawn Marketplace ──
+  // ── Everdawn Marketplace — worldWidth: 1200 ──
+  // v0.25.466: 4 props were placed off-map (x>1200). Re-positioned 4
+  // stalls behind the 4 merchant NPCs (Pharma 180, Brok 380, Arlen 640,
+  // Fashionista 910). Hanging baskets now attach to the y:230 awning
+  // beam underside (y:240).
   everdawn_marketplace: [
-    { key:'market_stall_1',      x:280,  y:480, scale:1.45 },
-    { key:'market_stall_2',      x:680,  y:480, scale:1.45 },
-    { key:'market_stall_1',      x:1480, y:480, scale:1.45 },
-    { key:'market_stall_2',      x:1880, y:480, scale:1.45 },
-    { key:'barrel_stack',        x:1080, y:480, scale:1.00 },
-    { key:'crate_stack',         x:1280, y:480, scale:1.00 },
-    { key:'hanging_flowerbasket',x:480,  y:400, scale:0.65 },
-    { key:'hanging_flowerbasket',x:1680, y:400, scale:0.65 },
-    { key:'signpost_wood',       x:120,  y:480, scale:1.10 },
+    { key:'market_stall_1',      x:160, y:480, scale:1.20 },  // Pharma's stall
+    { key:'market_stall_2',      x:380, y:480, scale:1.20 },  // Brok's stall
+    { key:'market_stall_1',      x:640, y:480, scale:1.20 },  // Arlen's stall
+    { key:'market_stall_2',      x:910, y:480, scale:1.20 },  // Fashionista's stall
+    { key:'barrel_stack',        x:500, y:480, scale:0.95 },
+    { key:'crate_stack',         x:780, y:480, scale:0.95 },
+    { key:'signpost_wood',       x:60,  y:480, scale:1.05 },
+    // Hanging baskets — attached to the long awning-beam (y:230, h:10)
+    { key:'hanging_flowerbasket',x:300, y:240, scale:0.55, anchor:'hang' },
+    { key:'hanging_flowerbasket',x:900, y:240, scale:0.55, anchor:'hang' },
   ],
   // ── The Bastion (Courtyard) ──
   bastion: [
@@ -29830,9 +29870,12 @@ const MAP_PROPS = {
   shadowSlums: [
     { key:'shadow_banner_skull',  x:200,  y:480, scale:1.40 },   // entrance
     { key:'shadow_banner_skull',  x:2000, y:480, scale:1.40 },   // exit
-    { key:'shadow_paper_lantern', x:480,  y:140, scale:0.55 },   // lantern beam
-    { key:'shadow_paper_lantern', x:1500, y:140, scale:0.55 },   // lantern beam
-    { key:'shadow_paper_lantern', x:340,  y:380, scale:0.50 },   // alley
+    // v0.25.466: paper lanterns now anchor:'hang' from the lantern-beam
+    // and alley-scaffolding undersides so they dangle correctly instead
+    // of sitting on top of the platforms.
+    { key:'shadow_paper_lantern', x:480,  y:152, scale:0.55, anchor:'hang' }, // beam y:140, h:12 → bottom 152
+    { key:'shadow_paper_lantern', x:1500, y:152, scale:0.55, anchor:'hang' },
+    { key:'shadow_paper_lantern', x:340,  y:394, scale:0.50, anchor:'hang' }, // alley y:380, h:14 → 394
     { key:'shadow_tatami',        x:1000, y:220, scale:0.85 },   // Taiga's peak
     { key:'shadow_shuriken_rack', x:1580, y:240, scale:0.95 },   // Kuro's roof
     { key:'shadow_incense_coil',  x:620,  y:330, scale:0.55 },   // Ren's roof
@@ -29856,10 +29899,35 @@ function drawWorldProps() {
     const sc = prop.scale || 1;
     const h = PROP_DEFAULT_H * sc;
     // Preserve aspect ratio from the source PNG.
-    const w = h * (img.naturalWidth / img.naturalHeight);
+    const srcW = img.naturalWidth, srcH = img.naturalHeight;
+    const w = h * (srcW / srcH);
     const sx = (prop.x - w / 2) - camX;
     if (sx + w < -20 || sx > W + 20) continue;       // off-camera cull
-    const sy = prop.y - h;
+    // v0.25.466 — bbox-aware vertical anchor.
+    //   anchor 'feet'  (default): map source-bbox-bottom to prop.y so
+    //                              the visible base sits flush on the
+    //                              floor / platform top (small +1 px
+    //                              bury so it doesn't read as floating).
+    //   anchor 'hang':            map source-bbox-top to prop.y so the
+    //                              visible top of the art lands at a
+    //                              platform's top edge — hanging items
+    //                              like flowerbaskets dangle below the
+    //                              platform they're attached to.
+    // Falls back to canvas-edge anchoring when bbox meta isn't ready
+    // yet (decode race) so the prop still renders, just with the old
+    // floating gap for one frame.
+    const meta = LX_OBJECTS_META[prop.key];
+    const anchor = prop.anchor || 'feet';
+    let sy;
+    if (anchor === 'hang' && meta && meta.bboxTopY != null) {
+      sy = prop.y - h * (meta.bboxTopY / srcH);
+    } else if (meta && meta.bboxBottomY != null) {
+      // Visible bottom flush with prop.y (1 px bury so feet read on the
+      // ground tile, not floating above it).
+      sy = prop.y - h * ((meta.bboxBottomY + 1) / srcH) + 1;
+    } else {
+      sy = prop.y - h;   // legacy fallback (canvas-edge anchored)
+    }
     try {
       ctx.drawImage(img, sx, sy, w, h);
     } catch (e) { /* ignore mid-decode draws */ }
