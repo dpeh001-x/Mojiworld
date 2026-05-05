@@ -24731,6 +24731,29 @@ function _ensureSkyLifeSeeds() {
     });
   }
 }
+// v0.25.440 — Cloud-puff bake. The 12-cloud parallax wisp layer was
+// allocating 12 fresh createRadialGradient calls every frame (each with
+// 3 addColorStop) — about 36 gradient allocations/frame on every map.
+// Bake a single 128×128 soft-white puff once with the same stops, then
+// scale-blit per cloud. Visual difference is imperceptible (clouds are
+// already drawn at globalAlpha 0.22).
+let _skyLifeCloudPuffCanvas = null;
+function _getSkyLifeCloudPuff() {
+  if (_skyLifeCloudPuffCanvas) return _skyLifeCloudPuffCanvas;
+  const cv = document.createElement('canvas');
+  cv.width = 128; cv.height = 128;
+  const c = cv.getContext('2d');
+  const g = c.createRadialGradient(64, 64, 3, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,0.55)');
+  g.addColorStop(0.55, 'rgba(255,255,255,0.28)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = g;
+  c.beginPath();
+  c.arc(64, 64, 64, 0, Math.PI * 2);
+  c.fill();
+  _skyLifeCloudPuffCanvas = cv;
+  return cv;
+}
 function drawSkyLifeOverlay() {
   _ensureSkyLifeSeeds();
   const t = game.time || 0;
@@ -24738,18 +24761,13 @@ function drawSkyLifeOverlay() {
   // Layer 1: soft moving cloud wisps
   ctx.save();
   ctx.globalAlpha = 0.22;
+  const puff = _getSkyLifeCloudPuff();
   for (const c of _skyLifeSeeds.clouds) {
     const drift = (game.camera.x * c.d + t * (0.012 + c.p * 0.01)) % (W + 360);
     const x = c.x - drift + 180;
     const y = c.y + Math.sin(t * 0.002 + c.p * 8) * 4;
-    const g = ctx.createRadialGradient(x, y, 3, x, y, c.w);
-    g.addColorStop(0, 'rgba(255,255,255,0.55)');
-    g.addColorStop(0.55, 'rgba(255,255,255,0.28)');
-    g.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.ellipse(x, y, c.w, c.h, 0, 0, Math.PI * 2);
-    ctx.fill();
+    // Stretch the square baked puff to the cloud's elliptical bbox.
+    ctx.drawImage(puff, x - c.w, y - c.h, c.w * 2, c.h * 2);
   }
   ctx.restore();
 
