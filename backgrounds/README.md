@@ -13,7 +13,6 @@ Drop the current `bg_v3_*` image files into this folder and the game will use th
 | `bg_v3_dungeon.png` | Dark dungeon art. | Gelwater Grotto and Lava Cavern. |
 | `bg_v3_everdawn bazaar.png` | Bazaar town spawn art. | Everdawn Bazaar first paint and runtime background. |
 | `bg_v3_everdawnmarketplace.png` | Covered market town art. | Everdawn Marketplace and legacy homestead alias. |
-| `bg_v3_worldMapInterface.gif` | Animated world map art. | World map modal backdrop. |
 
 Additional authored `bg_v3_*` files are registered in `maple_game.html` for candy, bubblegum, celestial, underwater, zodiac, boss, and carriage maps.
 
@@ -30,7 +29,7 @@ Additional authored `bg_v3_*` files are registered in `maple_game.html` for cand
 
 - Canvas renders at logical 960 x 560; the HiDPI pass blits at 2x on Retina.
 - 16:9 art works best because the game stretches the image to the canvas.
-- PNG is recommended; GIF is used for the world map interface backdrop.
+- PNG is recommended.
 
 ## Pin A Background
 
