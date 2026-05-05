@@ -2574,7 +2574,11 @@
   </div>
 
   <div id="right-ui">
-    <div>💎 <span id="mesos">0</span> Lumens</div>
+    <div>💎 <span id="mesos">0</span> Mojicoins</div>
+    <!-- v0.25.457 — Kaching premium currency chip. ! is the in-world
+         symbol; rendered after the value (e.g. "5000!") so it reads as
+         a cash tag rather than punctuation. -->
+    <div style="color:#ffaadd"><span style="font-weight:700;">!</span> <span id="kaching">0</span> Kaching</div>
     <div>⚔️ ATK: <span id="atk">12</span></div>
     <div>🛡️ DEF: <span id="def">5</span></div>
     <div>💥 Crit: <span id="crit">5</span>%</div>
@@ -2627,6 +2631,10 @@
         <button type="button" class="inv-tab" data-tab="etc">📦 Etc</button>
         <button type="button" class="inv-tab" data-tab="setup">🪑 Set-Up</button>
         <button type="button" class="inv-tab" data-tab="cash">✨ Cash</button>
+        <!-- v0.25.457 — P2W tab: Kaching shop. Sits at the end so it
+             reads as a premium-tier flourish rather than the default
+             item view. -->
+        <button type="button" class="inv-tab" data-tab="p2w" style="color:#ffaadd;">💖 P2W</button>
       </div>
       <div id="inv-tab-info" style="font-size:11px; color:#aaa; margin-bottom:6px;"></div>
       <div class="inventory-grid" id="inv-grid"></div>
@@ -3110,7 +3118,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.456';
+const GAME_VERSION = 'v0.25.457';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -9079,6 +9087,21 @@ const player = {
   // v0.25.47 — initial expToNext bumped 100 → 120 to nudge the early
   // grind up alongside the steeper late-game curve.
   exp:0, expToNext:120, level:1, mesos:200,
+  // v0.25.457 — Kaching: premium currency purchased with real cash.
+  // $1 USD = 1000 Kaching (symbol: !). Spent in the P2W shop on
+  // convenience items (item bags, cosmetic tickets). Saved alongside
+  // mesos and survives reload via the PLAYER_SAVE_FIELDS whitelist.
+  kaching:0,
+  // v0.25.457 — Per-tab inventory caps (max 48 each). Default 24 on new
+  // chars; the "Item Bag" P2W item bumps the chosen tab by 4 per use,
+  // clamped at 48. Each tab now renders exactly invCap[tab] slots, with
+  // pickup gated on free-slot count.
+  invCap: { equip:24, use:24, etc:24, setup:24 },
+  // v0.25.457 — First-time-free cosmetic flags. Plastic surgery /
+  // hair salon tickets are required only AFTER the first respective
+  // change; the initial visit flips the corresponding flag and the
+  // change is granted free.
+  _freeFaceUsed:false, _freeHairUsed:false,
   baseAtk:12, baseDef:5,
   cls: 'warrior', job: null, master: null,
   treeUnlocked: {},  // skill tree unlock map
@@ -11144,7 +11167,13 @@ const PLAYER_SAVE_FIELDS = [
   // Boon loadout (v0.19)
   '_powerups', 'boons','boonsEquipped', 'mastery',
   // v0.25.61 — quest progression
-  'quests'
+  'quests',
+  // v0.25.457 — Kaching premium currency, per-tab inventory caps, and
+  // first-free-cosmetic flags. invCap defaults to {equip:24, use:24,
+  // etc:24, setup:24} on new chars; item-bag P2W item bumps the chosen
+  // tab by 4 (clamped at 48). _freeFaceUsed / _freeHairUsed flip true
+  // after the first cosmetic visit so subsequent ones consume tickets.
+  'kaching','invCap','_freeFaceUsed','_freeHairUsed'
 ];
 const GAME_SAVE_FIELDS = [
   'currentMap','bossDefeated','kills','achievements',
@@ -11217,6 +11246,9 @@ const _SAVE_NUMERIC_GUARDS = [
   ['skillPoints',     0,    0,   1000],
   ['skillRankPoints', 0,    0,   1000],
   ['setshards',       0,    0,   1e9],
+  // v0.25.457 — Kaching premium currency. Same NaN/Infinity defense as
+  // the other numeric fields; can never go negative or exceed 1e12.
+  ['kaching',         0,    0,   1e12],
 ];
 function _sanitizePlayerSaveNumerics(p) {
   if (!p) return p;
@@ -11318,6 +11350,21 @@ function loadState() {
     if (!Array.isArray(player.inventory)) player.inventory = [];
     // v0.25.250 — setshards (crafting currency) defaults to 0 on older saves.
     if (typeof player.setshards !== 'number') player.setshards = 0;
+    // v0.25.457 — Kaching premium currency + per-tab inventory caps +
+    // first-free-cosmetic flags. Defaulters fire on saves that predate
+    // these fields. invCap is clamped to [0, 48] per tab.
+    if (typeof player.kaching !== 'number' || !isFinite(player.kaching)) player.kaching = 0;
+    if (!player.invCap || typeof player.invCap !== 'object') {
+      player.invCap = { equip:24, use:24, etc:24, setup:24 };
+    } else {
+      for (const _t of ['equip','use','etc','setup']) {
+        const v = player.invCap[_t];
+        if (typeof v !== 'number' || !isFinite(v) || v < 1) player.invCap[_t] = 24;
+        else if (v > 48) player.invCap[_t] = 48;
+      }
+    }
+    if (typeof player._freeFaceUsed !== 'boolean') player._freeFaceUsed = false;
+    if (typeof player._freeHairUsed !== 'boolean') player._freeHairUsed = false;
     player._bloodstorm = 0;
     player._bloodstormNextTick = 0;
     player._aegis = null;
@@ -23306,6 +23353,8 @@ function openLevelUpPanel() {
         <button type="button" class="inv-tab" data-tab="etc">📦 Etc</button>
         <button type="button" class="inv-tab" data-tab="setup">🪑 Set-Up</button>
         <button type="button" class="inv-tab" data-tab="cash">✨ Cash</button>
+        <!-- v0.25.457 — P2W tab mirror in the U-panel. -->
+        <button type="button" class="inv-tab" data-tab="p2w" style="color:#ffaadd;">💖 P2W</button>
       </div>
       <div id="u-inv-tab-info" style="font-size:11px; color:#aaa; margin-bottom:6px;"></div>
       <div class="inventory-grid" id="u-inv-grid"></div>
@@ -24090,6 +24139,14 @@ function renderInventory(prefix) {
   if (!grid) return;
   const tabInfo = document.getElementById(prefix + 'inv-tab-info');
   if (!game._invTab) game._invTab = 'equip';
+  // v0.25.457 — Reset any inline display/flex overrides set by the P2W
+  // shop renderer so a tab swap back to a slot-grid view restores the
+  // CSS-grid layout cleanly. Cheap: just clears the four properties we
+  // set in renderP2WShop().
+  grid.style.display = '';
+  grid.style.flexDirection = '';
+  grid.style.gap = '';
+  grid.style.padding = '';
 
   // Wire the tab buttons once (idempotent — onclick re-assignments are fine).
   const tabButtons = document.querySelectorAll('#' + prefix + 'inv-tabs .inv-tab');
@@ -24138,9 +24195,10 @@ function renderInventory(prefix) {
   const TAB_INFO = {
     equip: 'Weapons, armour, and accessories. Click an item to equip / unequip.',
     use:   'Potions and throwables. Click to consume.',
-    etc:   'Crafting materials and quest items.',
+    etc:   'Crafting materials, quest items, and Kaching consumables. Click P2W items to use them.',
     setup: 'Chairs, mounts, pets, and other set-up items.',
     cash:  'Cosmetic-only items that change your look without affecting stats.',
+    p2w:   'Premium shop. Spend Kaching (! symbol) on convenience items. $1 USD = 1,000 Kaching.',
   };
   if (tabInfo) tabInfo.textContent = TAB_INFO[game._invTab] || '';
 
@@ -24169,7 +24227,12 @@ function renderInventory(prefix) {
       attachTooltip(slot, it);
       grid.appendChild(slot);
     });
-    const total = Math.max(20, items.length + 5);
+    // v0.25.457 — Cap rendered slot count at player.invCap.equip
+    // (default 24, max 48). The Item Bag P2W item bumps the cap by 4
+    // per use. Falls back to the legacy items+5 minimum so empty
+    // inventories still show a few placeholders.
+    const cap = (player.invCap && player.invCap.equip) || 24;
+    const total = Math.max(cap, items.length);
     for (let i = items.length; i < total; i++) {
       const s = document.createElement('div'); s.className = 'inv-slot'; grid.appendChild(s);
     }
@@ -24199,14 +24262,26 @@ function renderInventory(prefix) {
       grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; text-align:center; color:#888; font-style:italic;">No usable items. Buy potions from Pharma Sis in town.</div>';
     }
   } else if (game._invTab === 'etc') {
+    // v0.25.457 — Etc items are now clickable for use-items (item bag,
+    // surgery / hair tickets). Non-use etc items keep their static slot
+    // render. Slots cap at player.invCap.etc (max 48).
     const items = player.inventory.map((it, idx) => ({it, idx})).filter(e => _itemTab(e.it) === 'etc');
     items.forEach(({it}) => {
       const slot = document.createElement('div');
       slot.className = 'inv-slot';
       slot.innerHTML = it.icon || '📦';
+      if (it.useId && typeof useEtcItem === 'function') {
+        slot.style.cursor = 'pointer';
+        slot.title = (it.name || 'Item') + ' — click to use';
+        slot.onclick = () => useEtcItem(it, prefix);
+      }
       attachTooltip(slot, it);
       grid.appendChild(slot);
     });
+    const cap = (player.invCap && player.invCap.etc) || 24;
+    for (let i = items.length; i < cap; i++) {
+      const s = document.createElement('div'); s.className = 'inv-slot'; grid.appendChild(s);
+    }
     if (!items.length) {
       grid.innerHTML = '<div style="grid-column:1/-1; padding:12px; text-align:center; color:#888; font-style:italic;">No crafting materials yet. Some will drop from specific foes.</div>';
     }
@@ -24222,6 +24297,10 @@ function renderInventory(prefix) {
         attachTooltip(slot, it);
         grid.appendChild(slot);
       });
+      const cap = (player.invCap && player.invCap.setup) || 24;
+      for (let i = items.length; i < cap; i++) {
+        const s = document.createElement('div'); s.className = 'inv-slot'; grid.appendChild(s);
+      }
     }
   } else if (game._invTab === 'cash') {
     const items = player.inventory.map((it, idx) => ({it, idx})).filter(e => _itemTab(e.it) === 'cash');
@@ -24236,7 +24315,307 @@ function renderInventory(prefix) {
         grid.appendChild(slot);
       });
     }
+  } else if (game._invTab === 'p2w') {
+    // v0.25.457 — P2W shop. Renders as a shop list (not a slot grid)
+    // with a Buy Kaching CTA and 3 Kaching-priced items. Real-money
+    // payment is stubbed; clicking "Buy Kaching" surfaces the $1 USD =
+    // 1000 Kaching exchange + a dev-grant button for testing.
+    if (typeof renderP2WShop === 'function') renderP2WShop(grid);
   }
+}
+
+// =========================================================================
+// P2W SHOP + Kaching items  (v0.25.457)
+// =========================================================================
+//
+// Three premium items, all classified as `etc` so they share a tab.
+// Each carries a `useId` that the inventory click-handler dispatches to
+// useEtcItem(). Real-money Kaching purchase is stubbed — clicking
+// "Buy Kaching" opens a modal that explains the $1 USD = 1000 Kaching
+// exchange and exposes a dev-only grant button for now. A real payment
+// integration would replace _buyKachingFlow().
+const P2W_ITEMS = [
+  {
+    useId: 'item_bag', kind: 'etc', name: 'Item Bag',
+    icon: '🎒', rarity: 'epic', price: 5000,
+    desc: 'Permanently expands a chosen inventory tab (equip / use / etc / set-up) by +4 slots, up to 48.',
+  },
+  {
+    useId: 'plastic_surgery', kind: 'etc', name: 'Plastic Surgery Ticket',
+    icon: '💉', rarity: 'epic', price: 10000,
+    desc: 'Visit the surgeon to change your skin tone, eye colour, or gender. First visit is on the house — subsequent visits consume a ticket.',
+  },
+  {
+    useId: 'hair_salon', kind: 'etc', name: 'Hair Salon Ticket',
+    icon: '💇', rarity: 'epic', price: 10000,
+    desc: 'Visit the salon to change your hair colour. First visit is on the house — subsequent visits consume a ticket.',
+  },
+];
+
+function _findP2W(useId) { return P2W_ITEMS.find(p => p.useId === useId); }
+
+function renderP2WShop(grid) {
+  if (!grid) return;
+  // The inventory grid is a CSS grid of square slots; the P2W view
+  // overrides that to a single flowing column for the shop list.
+  grid.style.display = 'flex';
+  grid.style.flexDirection = 'column';
+  grid.style.gap = '10px';
+  grid.style.padding = '8px 4px 4px';
+  grid.innerHTML = '';
+  // Header — current Kaching + Buy Kaching CTA
+  const hdr = document.createElement('div');
+  hdr.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:rgba(80,30,90,0.35); border:1px solid rgba(255,170,221,0.3); border-radius:8px;';
+  hdr.innerHTML = `
+    <div style="font-size:12px;">Your Kaching:
+      <b style="color:#ffaadd; font-size:15px;">${(player.kaching|0).toLocaleString()}!</b>
+    </div>
+    <button id="p2w-buy-kaching" type="button"
+      style="background:linear-gradient(180deg,#ff66aa,#cc3388); color:#fff; border:1px solid #ff99cc; border-radius:5px; padding:6px 12px; font-weight:700; cursor:pointer; letter-spacing:0.5px;">
+      💳 Buy Kaching
+    </button>
+  `;
+  grid.appendChild(hdr);
+  hdr.querySelector('#p2w-buy-kaching').onclick = () => _buyKachingFlow();
+
+  // Disclaimer + exchange rate
+  const sub = document.createElement('div');
+  sub.style.cssText = 'font-size:10.5px; color:#bbb; padding:0 4px; text-align:center;';
+  sub.innerHTML = '<b>Premium currency.</b> $1 USD = 1,000 Kaching · symbol <b style="color:#ffaadd;">!</b> · spend it on convenience items below.';
+  grid.appendChild(sub);
+
+  // Item rows
+  P2W_ITEMS.forEach(item => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:10px 12px; background:rgba(40,28,60,0.55); border:1px solid rgba(180,140,220,0.25); border-radius:8px;';
+    const can = (player.kaching|0) >= item.price;
+    row.innerHTML = `
+      <div style="font-size:30px; flex:0 0 36px; text-align:center;">${item.icon}</div>
+      <div style="flex:1; min-width:0;">
+        <div style="font-weight:700; color:#ffd9ee;">${item.name}</div>
+        <div style="font-size:11px; color:#bbb; margin-top:2px;">${item.desc}</div>
+      </div>
+      <div style="flex:0 0 130px; text-align:right;">
+        <div style="font-size:13px; color:${can ? '#ffaadd' : '#888'};"><b>${item.price.toLocaleString()}!</b></div>
+        <button type="button" data-buy="${item.useId}"
+          ${can ? '' : 'disabled'}
+          style="margin-top:4px; padding:4px 10px; border-radius:4px; border:1px solid ${can ? '#ff99cc' : '#555'}; background:${can ? 'linear-gradient(180deg,#ff66aa,#cc3388)' : '#2a2238'}; color:${can ? '#fff' : '#888'}; cursor:${can ? 'pointer' : 'not-allowed'}; font-weight:700;">
+          Buy
+        </button>
+      </div>
+    `;
+    grid.appendChild(row);
+    const btn = row.querySelector('button[data-buy]');
+    if (btn) btn.onclick = () => _purchaseP2W(item.useId);
+  });
+}
+
+function _purchaseP2W(useId) {
+  const item = _findP2W(useId);
+  if (!item) return;
+  if ((player.kaching|0) < item.price) {
+    if (typeof showToast === 'function') showToast(`Need ${(item.price - player.kaching).toLocaleString()}! more Kaching`, 'rare');
+    return;
+  }
+  // Inventory capacity check — etc tab. Refuse if no slot free so
+  // the purchase doesn't silently void the item.
+  const etcCount = (player.inventory || []).filter(it => _itemTab(it) === 'etc').length;
+  const etcCap   = (player.invCap && player.invCap.etc) || 24;
+  if (etcCount >= etcCap) {
+    if (typeof showToast === 'function') showToast('Etc tab is full — clear or expand first.', 'rare');
+    return;
+  }
+  player.kaching -= item.price;
+  // Push a fresh instance so multiple purchases stack as discrete items.
+  player.inventory.push({
+    useId: item.useId, kind: 'etc', name: item.name, icon: item.icon,
+    rarity: item.rarity, desc: item.desc,
+  });
+  if (typeof showToast === 'function') showToast(`Purchased ${item.name}!`, 'epic');
+  if (typeof saveState === 'function') saveState();
+  // Re-render BOTH the inventory grid (slot count tick) and the shop
+  // (Kaching balance tick + button enabled-state).
+  renderInventory(game._uTab === 'items' ? 'u-' : '');
+  if (typeof updateUI === 'function') updateUI();
+}
+
+function _buyKachingFlow() {
+  // Real-money payment is OUT of scope for the local build. Surface
+  // the exchange rate + a dev-grant button so testers can simulate
+  // the purchase. A real Stripe / IAP integration replaces the inner
+  // prompt + grant block with a payment SDK call resolving to a
+  // server-issued Kaching credit.
+  const choice = window.prompt(
+    'Buy Kaching\n\n' +
+    'Exchange rate: $1 USD = 1,000 Kaching (symbol !).\n\n' +
+    'Real-money checkout is not yet integrated — paste a USD amount ' +
+    'below to simulate a purchase (e.g. "5" for 5,000 Kaching). ' +
+    'Cancel to back out.',
+    '5'
+  );
+  if (choice === null) return;
+  const usd = parseFloat(choice);
+  if (!isFinite(usd) || usd <= 0) {
+    if (typeof showToast === 'function') showToast('Invalid amount.', 'rare');
+    return;
+  }
+  const credit = Math.floor(usd * 1000);
+  player.kaching = Math.min(1e12, (player.kaching|0) + credit);
+  if (typeof showToast === 'function') showToast(`+${credit.toLocaleString()}! Kaching (simulated $${usd.toFixed(2)})`, 'legendary');
+  if (typeof saveState === 'function') saveState();
+  renderInventory(game._uTab === 'items' ? 'u-' : '');
+  if (typeof updateUI === 'function') updateUI();
+}
+
+// Dispatch click on a clickable etc item (P2W consumables).
+function useEtcItem(it, prefix) {
+  if (!it || !it.useId) return;
+  if (it.useId === 'item_bag') return _useItemBag(it, prefix);
+  if (it.useId === 'plastic_surgery') return _useSurgeryTicket(it, prefix);
+  if (it.useId === 'hair_salon')      return _useHairTicket(it, prefix);
+  if (typeof showToast === 'function') showToast('Nothing happens.', 'common');
+}
+
+function _useItemBag(it, prefix) {
+  const tabs = ['equip','use','etc','setup'];
+  const labels = { equip:'Equip', use:'Use', etc:'Etc', setup:'Set-Up' };
+  // Build a compact picker dialog. window.prompt is not great here —
+  // build a small inline modal instead so the player sees current caps
+  // and the button labels read clean.
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed; inset:0; background:rgba(8,4,18,0.78); z-index:5000; display:flex; align-items:center; justify-content:center;';
+  const card = document.createElement('div');
+  card.style.cssText = 'background:#1a1028; border:1px solid #6644aa; border-radius:10px; padding:18px 22px; min-width:300px; max-width:90vw; color:#e8d8ff; box-shadow:0 22px 60px rgba(0,0,0,0.6);';
+  let body = '<div style="font-size:14px; font-weight:700; margin-bottom:6px;">🎒 Item Bag</div>';
+  body += '<div style="font-size:11px; color:#bbb; margin-bottom:12px;">Pick a tab to add <b style="color:#ffd166">+4 slots</b> (cap 48 per tab).</div>';
+  body += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">';
+  for (const t of tabs) {
+    const cap = (player.invCap && player.invCap[t]) || 24;
+    const full = cap >= 48;
+    body += `<button type="button" data-bagpick="${t}" ${full ? 'disabled' : ''} style="padding:10px 8px; border-radius:6px; border:1px solid ${full ? '#444' : '#aa66cc'}; background:${full ? '#2a2238' : 'linear-gradient(180deg,#5a3a8a,#3a1a5e)'}; color:${full ? '#777' : '#fff'}; font-weight:700; cursor:${full ? 'not-allowed' : 'pointer'}; text-align:left;">
+      ${labels[t]}<br><span style="font-size:10px; opacity:0.85;">${cap}/48 slots</span>
+    </button>`;
+  }
+  body += '</div>';
+  body += '<div style="text-align:right; margin-top:14px;"><button type="button" id="bag-cancel" style="background:transparent; border:1px solid #555; border-radius:5px; color:#bbb; padding:5px 12px; cursor:pointer;">Cancel</button></div>';
+  card.innerHTML = body;
+  modal.appendChild(card);
+  document.body.appendChild(modal);
+  card.querySelectorAll('button[data-bagpick]').forEach(b => {
+    b.onclick = () => {
+      const tab = b.dataset.bagpick;
+      const cap = (player.invCap && player.invCap[tab]) || 24;
+      if (cap >= 48) return;
+      player.invCap[tab] = Math.min(48, cap + 4);
+      // Consume the bag from inventory
+      const idx = player.inventory.indexOf(it);
+      if (idx >= 0) player.inventory.splice(idx, 1);
+      if (typeof showToast === 'function') showToast(`${labels[tab]} slots: ${cap} → ${player.invCap[tab]}`, 'epic');
+      if (typeof saveState === 'function') saveState();
+      modal.remove();
+      renderInventory(prefix || '');
+    };
+  });
+  card.querySelector('#bag-cancel').onclick = () => modal.remove();
+}
+
+function _useSurgeryTicket(it, prefix) {
+  // First visit free; after that consume 1 ticket. Open a small
+  // surgery modal that lets the player flip skin / eye / gender.
+  _openCosmeticModal('face', it, prefix);
+}
+function _useHairTicket(it, prefix) {
+  _openCosmeticModal('hair', it, prefix);
+}
+
+function _openCosmeticModal(kind, ticketItem, prefix) {
+  const flagKey = kind === 'face' ? '_freeFaceUsed' : '_freeHairUsed';
+  const isFirst = !player[flagKey];
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed; inset:0; background:rgba(8,4,18,0.78); z-index:5000; display:flex; align-items:center; justify-content:center;';
+  const card = document.createElement('div');
+  card.style.cssText = 'background:#1a1028; border:1px solid #6644aa; border-radius:10px; padding:18px 22px; min-width:340px; max-width:92vw; color:#e8d8ff; box-shadow:0 22px 60px rgba(0,0,0,0.6);';
+  const title = kind === 'face' ? '💉 Plastic Surgery' : '💇 Hair Salon';
+  const subtitle = isFirst
+    ? '<span style="color:#88ff88;">First visit — on the house!</span>'
+    : '<span style="color:#ffaa66;">Will consume 1 ticket on confirm.</span>';
+  let body = `<div style="font-size:14px; font-weight:700; margin-bottom:4px;">${title}</div>`;
+  body += `<div style="font-size:11px; margin-bottom:12px;">${subtitle}</div>`;
+  if (kind === 'face') {
+    body += '<div style="font-size:11px; color:#bbb; margin-bottom:4px;">Skin tone</div>';
+    body += '<div id="cosmetic-skin" style="display:flex; gap:6px; margin-bottom:10px;"></div>';
+    body += '<div style="font-size:11px; color:#bbb; margin-bottom:4px;">Eye colour</div>';
+    body += '<div id="cosmetic-eye"  style="display:flex; gap:6px; margin-bottom:10px;"></div>';
+    body += '<div style="font-size:11px; color:#bbb; margin-bottom:4px;">Gender</div>';
+    body += '<div id="cosmetic-gender" style="display:flex; gap:6px; margin-bottom:10px;">';
+    body += '  <button type="button" data-gender="male" style="flex:1; padding:6px; border-radius:5px; border:1px solid #4477cc; background:#1a2244; color:#ccddff; cursor:pointer;">♂ Male</button>';
+    body += '  <button type="button" data-gender="female" style="flex:1; padding:6px; border-radius:5px; border:1px solid #cc4488; background:#441a2a; color:#ffccdd; cursor:pointer;">♀ Female</button>';
+    body += '</div>';
+  } else {
+    body += '<div style="font-size:11px; color:#bbb; margin-bottom:4px;">Hair colour</div>';
+    body += '<div id="cosmetic-hair" style="display:flex; gap:6px; margin-bottom:10px;"></div>';
+  }
+  body += '<div style="display:flex; gap:8px; margin-top:8px;">';
+  body += '  <button type="button" id="cosmetic-confirm" style="flex:1; padding:8px; border-radius:5px; border:1px solid #aa66cc; background:linear-gradient(180deg,#5a3a8a,#3a1a5e); color:#fff; font-weight:700; cursor:pointer;">Confirm</button>';
+  body += '  <button type="button" id="cosmetic-cancel"  style="padding:8px 14px; border-radius:5px; border:1px solid #555; background:transparent; color:#bbb; cursor:pointer;">Cancel</button>';
+  body += '</div>';
+  card.innerHTML = body;
+  modal.appendChild(card);
+  document.body.appendChild(modal);
+  // Stage the new look into a working object — only commit on Confirm.
+  const staged = Object.assign({}, player.look || {});
+  const palettes = {
+    skin: ['#f0c090','#e4b07a','#c89870','#a67f4e','#8b5a3c','#5c3820'],
+    eye:  ['#1a0804','#2e6b3a','#2a5ab8','#884422','#4a1a88','#1a1a1a'],
+    hair: ['#3a1f0a','#8b5a2b','#e3c589','#b22222','#202020','#4a2488'],
+  };
+  const wireSwatches = (rowId, key, paletteKey) => {
+    const row = card.querySelector('#' + rowId);
+    if (!row) return;
+    palettes[paletteKey].forEach(col => {
+      const sw = document.createElement('div');
+      sw.style.cssText = `width:30px; height:30px; border-radius:6px; background:${col}; border:2px solid ${staged[key] === col ? '#ffd166' : 'transparent'}; cursor:pointer;`;
+      sw.onclick = () => {
+        staged[key] = col;
+        if (key === 'hairColor') staged.hairHi = _mixHex(col, '#ffffff', 0.25);
+        if (key === 'skin') {
+          staged.skinHi  = _mixHex(col, '#ffffff', 0.25);
+          staged.skinShd = _mixHex(col, '#000000', 0.25);
+        }
+        row.querySelectorAll('div').forEach(o => { o.style.borderColor = 'transparent'; });
+        sw.style.borderColor = '#ffd166';
+      };
+      row.appendChild(sw);
+    });
+  };
+  if (kind === 'face') {
+    wireSwatches('cosmetic-skin', 'skin', 'skin');
+    wireSwatches('cosmetic-eye',  'eyeColor', 'eye');
+    card.querySelectorAll('button[data-gender]').forEach(b => {
+      b.onclick = () => { staged.gender = b.dataset.gender; };
+    });
+  } else {
+    wireSwatches('cosmetic-hair', 'hairColor', 'hair');
+  }
+  card.querySelector('#cosmetic-cancel').onclick = () => modal.remove();
+  card.querySelector('#cosmetic-confirm').onclick = () => {
+    if (!isFirst) {
+      // Consume one ticket of the matching type from inventory.
+      if (!ticketItem) {
+        if (typeof showToast === 'function') showToast('No ticket available.', 'rare');
+        modal.remove();
+        return;
+      }
+      const idx = player.inventory.indexOf(ticketItem);
+      if (idx >= 0) player.inventory.splice(idx, 1);
+    }
+    Object.assign(player.look, staged);
+    player[flagKey] = true;
+    if (typeof showToast === 'function') showToast(isFirst ? 'Look updated — your free change is used.' : 'Look updated! (-1 ticket)', 'epic');
+    if (typeof saveState === 'function') saveState();
+    modal.remove();
+    renderInventory(prefix || '');
+  };
 }
 
 function starString(stars) {
@@ -40974,6 +41353,8 @@ function updateUI() {
   _uiSetText(d['mp-text'], Math.ceil(player.mp) + '/' + maxMp);
   _uiSetText(d['exp-text'], player.exp + '/' + player.expToNext);
   _uiSetText(d['mesos'], player.mesos);
+  // v0.25.457 — Kaching HUD chip
+  _uiSetText(d['kaching'], (player.kaching|0).toLocaleString());
   _uiSetText(d['atk'], getAtk());
   _uiSetText(d['def'], getDef());
   _uiSetText(d['crit'], getCrit());
@@ -41014,7 +41395,7 @@ function updateUI() {
   // Respec cost hint (updates while the attributes modal is open)
   if (d['respec-cost']) {
     const c = 2000 * Math.max(1, player.level - 5);
-    _uiSetText(d['respec-cost'], `Cost: ${c} Lumens (you have ${player.mesos})`);
+    _uiSetText(d['respec-cost'], `Cost: ${c} Mojicoins (you have ${player.mesos})`);
   }
 }
 
