@@ -148,6 +148,41 @@
   <b>Heads-up.</b> An earlier implementation of these phases targeted <code>v0.5.1</code> and was preserved locally at tag <code>phase-1-2-3-on-v0.5.1</code>. This is the rebuild against the current <code>v0.9.8</code> codebase, which had moved substantially (new bosses like Gravitos, minimap/taxi, chibi character rewrite).
 </div>
 
+<h2>v0.25.459 <span class="tag">Camera-shake removal across player-damage + skill paths · perf suggestions</span></h2>
+
+<h3><span class="pill polish">polish</span>Camera shake removed from damage-taken + skill-cast paths</h3>
+<p>The screen-shake was reading as too motion-heavy in two places that fire constantly during normal play:</p>
+<ul>
+<li><b>Enemy actions that reduce player HP</b> &mdash; the canonical monster contact-damage handler (<code>updateMonsters</code> &gt;&gt; aabb &gt;&gt; player), boss zip / slam / pull contact damage, and every <code>mob_*</code> hazard pulse (<code>mob_quake</code>, <code>mob_shockwave</code>, <code>mob_lightning</code>, <code>mob_frostbeam</code>, <code>mob_poisoncloud</code>, void-rift hazards). Now: damage numbers + flash + hit-stop only, no shake.</li>
+<li><b>Skill casting</b> &mdash; every <code>addShake(...)</code> call inside the <code>SKILL_FNS</code> object (lines 16579 → 18984) was stripped. That covers all four classes' base skills, jobs, and master signatures. Plus the per-hit damage-scaled shake at the top of <code>hitMonster</code>, the dragoon-impact shake outside SKILL_FNS, and the parry / block reaction shakes. Skills now still flash, hit-stop, and pop damage numbers — the <b>impact reads through the existing pipeline</b> without the screen jolt.</li>
+</ul>
+<p>What still shakes the camera (rare, narrative, intentional):</p>
+<ul>
+<li>Level-up, prestige, set complete, achievement unlock</li>
+<li>Combo milestone crossings (×50, ×100, ×150)</li>
+<li>Boss intro nameplate, boss death, miniboss death</li>
+<li>Player death overlay, treasure-pile rain</li>
+<li>Boon pickup, legendary / epic loot find</li>
+<li>Big chest open</li>
+</ul>
+<p>Removed shake calls: <b>65</b> (1 generic regex pass over SKILL_FNS + 16 explicit hand-picked sites covering every player-damage path).</p>
+
+<h3><span class="pill polish">polish</span>Performance suggestions for further lag reduction</h3>
+<p>Beyond the shake removal, here are the heaviest non-essential effect categories that could be trimmed if smoothness matters more than juice:</p>
+<ul>
+<li><b>Skill particle bursts > 40 particles.</b> Several skills (apocalypse, meteor, lich harvest, dragoon impact, beastmaster pack) emit <b>40-80</b> particles per cast. Each particle is a sin/cos + colour + per-frame draw. Trimming to <b>20-30</b> per skill would halve particle work without obvious visual loss because <code>spawnSpriteBurst</code> already carries the readable shape.</li>
+<li><b>Per-frame trail emitters.</b> <code>updatePlayer</code> + several boss AIs push particles every <code>game.time % 2 === 0</code> or even every frame — at 60 FPS that's <b>30-60 particles/sec per emitter</b>. Bumping to <code>% 4 === 0</code> halves the rate; on idle / non-combat frames the trail is mostly invisible anyway.</li>
+<li><b>Smooth-FX gradient explosions.</b> <code>spawnSmoothExplosion</code> + <code>spawnSmoothImpact</code> use radial gradients + drop shadows. They look great but are GPU-heavy on iGPUs. Capping concurrent smooth-FX to <b>3</b> at a time (oldest evicted) would prevent stack-up during boss phases.</li>
+<li><b>After-image array.</b> Dash / rush / dodge push 14-18 frame after-image entries; each redraws the full vector hero with a colour tint. On long dashes (rogue smoke-dash, archer sniper kite) this peaks at <b>~20 entries</b>. A cap of <b>8</b> with FIFO eviction keeps the trail readable without the full echo stack.</li>
+<li><b>Damage-number wobble.</b> Each pop runs a sin-based wobble + 2-pass shadow + outline + gradient stroke pipeline (line 41096+). On boss waves with 5+ mobs, the per-frame stroke calls dominate. Replacing the gradient with a flat fill (or even a pre-rendered offscreen canvas glyph atlas) would cut paint cost ~40 %.</li>
+<li><b>Boss arena ambient particles.</b> Sanctum / spire / atrium ambient drift fires <code>game.particles.push</code> every 3-4 frames at random screen positions; many are off-camera but still iterated. Adding an <b>off-camera cull</b> at spawn time (skip if not within <code>±W/2</code> of camera) drops their cost to ~zero on flat exploration.</li>
+<li><b>Mage MP regen tick interval.</b> Mages tick MP regen every <code>Math.max(1, mpRate / 2)</code> frames (~15) which is fine, but the mid-loop conditional check fires every frame. Caching <code>nextMpTickAt</code> would dodge the modulo on idle frames. Tiny win.</li>
+</ul>
+
+<div class="callout">
+  <b>Quick action items.</b> The shake removal in this version is <b>fully shipped</b>. The performance suggestions are <b>recommendations only</b> — pick any or all in a follow-up version. The biggest single wins are the particle-burst trim (skills) and the after-image cap (rogue / archer).
+</div>
+
 <h2>v0.25.458 <span class="tag">Frozen Peak — Icy Tower physics, slippery floor, jump combo cheer</span></h2>
 
 <h3><span class="pill epic">feat</span>Slippery floor on Frozen Peak</h3>
