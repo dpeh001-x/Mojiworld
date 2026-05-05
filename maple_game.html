@@ -3118,7 +3118,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.478';
+const GAME_VERSION = 'v0.25.479';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -22869,6 +22869,7 @@ function closeDialog() {
   document.getElementById('dialog').style.display = 'none';
   game.paused = false;
   game._activeNpc = null;
+  game._activeNpcSticky = false;   // v0.25.479 — clear click/tap-open flag
 }
 
 // v0.25.243 (X3) — auto-dismiss the NPC dialog if the player walks > 110 px
@@ -22878,6 +22879,10 @@ function _checkDialogWalkAway() {
   if (!npc) return;
   const dlg = document.getElementById('dialog');
   if (!dlg || dlg.style.display === 'none') return;
+  // v0.25.479 — click/tap-opened dialogs are "sticky": the user explicitly
+  // chose to talk, possibly from across the map. Don't yank the dialog away
+  // for distance. They can close it via X button or ESC.
+  if (game._activeNpcSticky) return;
   // NPCs store an x; use it directly. Some NPCs may be on a different
   // map id (rare) — if so just close.
   const npcX = (typeof npc.x === 'number') ? npc.x : null;
@@ -42983,6 +42988,109 @@ function drawSuperBossBar() {
 // Any user gesture (click or key) initializes audio (satisfies autoplay policy)
 window.addEventListener('keydown',    () => audio.init(), { once: true });
 window.addEventListener('pointerdown', () => audio.init(), { once: true });
+
+// =========================================================================
+// v0.25.479 — NPC double-click / double-tap to talk
+// =========================================================================
+// Both mouse and touchscreen users can interact with NPCs by double-clicking
+// (desktop) or double-tapping (mobile/touch) directly on them. Single click
+// is preserved for future targeting / skill use; only double activates the
+// NPC dialog. Mobile gets a larger hit-pad to forgive finger imprecision.
+(() => {
+  const _W_LOGICAL = W;       // 960
+  const _H_LOGICAL = H;       // 560
+  const _PAD_X_MOUSE = 28;    // narrow hitbox for precise mouse
+  const _PAD_X_TOUCH = 44;    // generous hitbox for fat-finger taps
+  const _HIT_TOP   = 64;      // px above feet (approx head-to-feet height)
+  const _HIT_BELOW = 14;      // small slack below feet line
+  const _DBLTAP_MS = 360;     // window for second tap
+  const _DBLTAP_PX = 32;      // max drift between taps (touch jitter)
+
+  let _lastTapTime = 0;
+  let _lastTapX = -9999, _lastTapY = -9999;
+
+  function _isAnyModalOpen() {
+    const dlg = document.getElementById('dialog');
+    if (dlg && dlg.style.display === 'block') return true;
+    if (document.body.classList.contains('forced-modal')) return true;
+    return false;
+  }
+
+  function _eventToWorld(ev) {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    const localX = (ev.clientX - rect.left) * (_W_LOGICAL / rect.width);
+    const localY = (ev.clientY - rect.top)  * (_H_LOGICAL / rect.height);
+    if (localX < 0 || localX > _W_LOGICAL) return null;
+    if (localY < 0 || localY > _H_LOGICAL) return null;
+    const worldX = localX + (game.camera.x || 0);
+    const worldY = localY + (game.camera.y || 0);
+    return { worldX, worldY };
+  }
+
+  function _findNpcAt(worldX, worldY, padX) {
+    if (!game || !Array.isArray(game.npcs)) return null;
+    let best = null, bestDist = Infinity;
+    for (const npc of game.npcs) {
+      const cx = npc.x;                  // npc.x is centre
+      const feetY = npc.y + 44;
+      const headY = feetY - _HIT_TOP;
+      if (worldX < cx - padX)             continue;
+      if (worldX > cx + padX)             continue;
+      if (worldY < headY)                 continue;
+      if (worldY > feetY + _HIT_BELOW)    continue;
+      const dx = worldX - cx;
+      const dy = worldY - (headY + feetY) * 0.5;
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) { bestDist = dist; best = npc; }
+    }
+    return best;
+  }
+
+  function _tryOpenNpcFromEvent(ev, padX) {
+    if (_isAnyModalOpen()) return false;
+    if (typeof openNPC !== 'function') return false;
+    const w = _eventToWorld(ev);
+    if (!w) return false;
+    const npc = _findNpcAt(w.worldX, w.worldY, padX);
+    if (!npc) return false;
+    openNPC(npc);
+    // Mark this dialog as click/tap-opened so the walk-away auto-close
+    // doesn't immediately yank it shut when the player is far away.
+    game._activeNpcSticky = true;
+    return true;
+  }
+
+  // Desktop: native dblclick fires reliably for mouse double-clicks.
+  canvas.addEventListener('dblclick', (ev) => {
+    if (_tryOpenNpcFromEvent(ev, _PAD_X_MOUSE)) ev.preventDefault();
+  });
+
+  // Touch / pen: detect double-tap manually via pointerup. Mouse already
+  // handled above (we early-out for pointerType==='mouse' to avoid two
+  // openNPC calls firing back-to-back).
+  canvas.addEventListener('pointerup', (ev) => {
+    if (ev.pointerType === 'mouse') return;
+    const now = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now() : Date.now();
+    const dx = ev.clientX - _lastTapX;
+    const dy = ev.clientY - _lastTapY;
+    const within = (now - _lastTapTime <= _DBLTAP_MS) &&
+                   (Math.hypot(dx, dy) <= _DBLTAP_PX);
+    if (within) {
+      _lastTapTime = 0;
+      _lastTapX = _lastTapY = -9999;
+      if (_tryOpenNpcFromEvent(ev, _PAD_X_TOUCH)) {
+        try { ev.preventDefault(); } catch (_) {}
+      }
+    } else {
+      _lastTapTime = now;
+      _lastTapX = ev.clientX;
+      _lastTapY = ev.clientY;
+    }
+  }, { passive: true });
+})();
+
 if (!loadState()) {
   loadMap('town', 300);
   openClassSelect();
