@@ -3118,7 +3118,7 @@
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.25.473';
+const GAME_VERSION = 'v0.25.474';
 document.getElementById('version-tag').textContent = GAME_VERSION;
 
 const canvas = document.getElementById('game');
@@ -14663,25 +14663,37 @@ function updatePlayer(dt) {
     // the original tuning unchanged.
     // v0.25.473 — Slower ground accel (0.45 → 0.30) for more
     // controllable starts. Player builds speed deliberately rather
-    // than instantly jolting to top speed; combined with the higher
-    // speed-jump cap below this matches the original Icy Tower feel
-    // where every floor of speed builds toward bigger combos.
+    // than instantly jolting to top speed.
+    // v0.25.474 — Mid-air control buffed: air accel 0.45 → 0.85 so
+    // input mid-flight reliably overrides momentum drift. Player can
+    // now reach for a missed platform or pull back from over-shooting
+    // without fighting the ice. Ground accel kept at 0.30 (deliberate
+    // wind-up) and ground friction kept at 0.96 (slippery slide is
+    // the signature feel). Adds a hard ICE_MAX_VX ceiling of 18 so
+    // chained-momentum stays within control rather than escalating
+    // unboundedly.
     const isIcy = !!(game.mapData && game.mapData.isIcy);
     const accel = isIcy
-      ? (player.onGround ? 0.30 : 0.45)
+      ? (player.onGround ? 0.30 : 0.85)
       : (player.onGround ? 1.1  : 0.6);
     const fric = isIcy
       ? (player.onGround ? 0.96 : 0.985)
       : (player.onGround ? 0.78 : 0.92);
+    const ICE_MAX_VX = 18;          // hard ceiling on icy map momentum
     if (k['arrowleft']) {
       // Icy Tower allows over-cap horizontal speed when chained off
-      // earlier momentum, but only up to a generous ceiling.
-      const cap = isIcy ? Math.max(moveSpeed, Math.abs(player.vx) + accel) : moveSpeed;
+      // earlier momentum, but bounded by the hard ICE_MAX_VX so the
+      // player always feels in control.
+      const cap = isIcy
+        ? Math.min(ICE_MAX_VX, Math.max(moveSpeed, Math.abs(player.vx) + accel))
+        : moveSpeed;
       player.vx = Math.max(-cap, player.vx - accel);
       player.facing = -1;
       player.state = player.onGround ? 'walk' : player.state;
     } else if (k['arrowright']) {
-      const cap = isIcy ? Math.max(moveSpeed, Math.abs(player.vx) + accel) : moveSpeed;
+      const cap = isIcy
+        ? Math.min(ICE_MAX_VX, Math.max(moveSpeed, Math.abs(player.vx) + accel))
+        : moveSpeed;
       player.vx = Math.min(cap, player.vx + accel);
       player.facing = 1;
       player.state = player.onGround ? 'walk' : player.state;
@@ -14712,7 +14724,12 @@ function updatePlayer(dt) {
   const jumpPressed = k[' '];
   if (!jumpPressed) player._jumpHeld = false;
   if (jumpPressed && !player._jumpHeld) {
-    player.jumpBufferTimer = 120;
+    // v0.25.474 — Icy maps get a longer jump-buffer window (200 ms vs
+    // 120 ms) so a press just before landing on a slippery platform
+    // still triggers the next jump. Significantly easier to chain
+    // mega-jumps without frame-perfect timing.
+    const _isIcyForBuffer = !!(game.mapData && game.mapData.isIcy);
+    player.jumpBufferTimer = _isIcyForBuffer ? 200 : 120;
     // v0.25.279 — capture the down-arrow intent AT PRESS TIME, not
     // at fire time. Previously the buffered jump consulted k['arrowdown']
     // when it fired, so a fresh mid-air space press (no arrowdown)
@@ -14725,7 +14742,13 @@ function updatePlayer(dt) {
   }
   if (player.jumpBufferTimer > 0) player.jumpBufferTimer -= dt;
 
-  if (player.onGround) { player.doubleJumpUsed = false; player.airJumps = 0; player.coyoteTime = 140; }
+  // v0.25.474 — Icy maps get a longer coyote-time window (220 ms vs
+  // 140 ms) so slipping off a platform edge still leaves a generous
+  // grace period to press space and recover. Pairs with the larger
+  // jump buffer above for maximally forgiving inputs on the slippery
+  // tower surface.
+  const _isIcyForCoyote = !!(game.mapData && game.mapData.isIcy);
+  if (player.onGround) { player.doubleJumpUsed = false; player.airJumps = 0; player.coyoteTime = _isIcyForCoyote ? 220 : 140; }
   else player.coyoteTime = Math.max(0, player.coyoteTime - dt);
 
   const tryJump = player.jumpBufferTimer > 0 && !player._jumpHeld;
