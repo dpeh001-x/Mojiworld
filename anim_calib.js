@@ -237,3 +237,8 @@ window.LX_ANIM_CALIB = {
     }
   }
 };
+// Per-(type, state) ATTACK-HITBOX overrides (_atkMonBox), authored in
+// monster_animator.html's hitbox editor. w/h = box size, ox = center x-offset,
+// oy = bottom offset from the foot line (+down) - fractions of rendered sprite
+// height. Empty = every entity keeps the game's default fraction box.
+window.LX_ATK_HITBOX = {};
