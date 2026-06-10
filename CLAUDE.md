@@ -1,5 +1,28 @@
 # LevelX — project conventions for Claude
 
+## File-safety rules (HARD, 2026-06-10 — after a 0-byte truncation incident)
+
+`mojiworld_game.html` (5.3MB, single file) was zeroed TWICE by failed writes:
+a buffered `open('w')` truncates immediately, and if the write then throws
+(e.g. lone-surrogate `\ud8xx` escapes smuggled in via the tool-call JSON
+layer), the loss is total. Parallel sessions edit this file concurrently.
+Therefore, for EVERY session:
+
+1. **Atomic writes only.** Any scripted write to `mojiworld_game.html` (or any
+   file > 100KB) goes: write to `<file>.tmp` → verify (encode succeeds, size
+   sane, `node --check` for JS payloads) → `os.replace()` / `mv` over the
+   original. Never `open(path, 'w')` directly on the target.
+2. **No emoji escapes in heredocs.** Bulk-edit Python with ANY non-ASCII
+   content must be written to a `.py` file via the Write tool and executed —
+   never inlined in a Bash heredoc. Pre-scan before writing:
+   `assert not any(0xD800 <= ord(c) <= 0xDFFF for c in s)`.
+3. **Commit after every shipped change.** This is a real git repo (local-only,
+   no `origin` on this machine — the session-start hook skips pulls). After a
+   feature/fix lands and is verified: `git add -A && git commit`. Small,
+   frequent commits make loss impossible and write races diagnosable.
+4. **Match-count guards on every replace.** `s.count(anchor) == expected` or
+   abort — a parallel session may have shifted the anchor since you read it.
+
 ## Scope + timeout guardrails (READ FIRST — v2, 2026-04-23)
 
 Default to smaller-than-you-think batches. Stream timeouts happen above ~150 lines per write or ~1200 words per response; design chunks well under that.

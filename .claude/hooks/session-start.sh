@@ -27,6 +27,13 @@ if [ -z "$BRANCH" ] || [ "$BRANCH" = "HEAD" ]; then
   exit 0
 fi
 
+# No 'origin' remote configured (local-only repo)? Bail quietly — this
+# machine commits locally for loss-prevention; there is nothing to sync.
+if ! git remote get-url origin >/dev/null 2>&1; then
+  echo "↷ no 'origin' remote — local-only repo, skipping auto-pull"
+  exit 0
+fi
+
 # Fetch. 30 s timeout so network hangs don't block session start.
 echo "⇣ git fetch origin…"
 if ! timeout 30 git fetch origin --quiet 2>&1; then
