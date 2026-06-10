@@ -1,0 +1,1019 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mojiworld — Map Placement Tool</title>
+<style>
+  :root {
+    --bg:#0c0a16; --panel:#151022; --panel-2:#1b1530;
+    --fg:#e8e4f4; --muted:#9790b4; --accent:#ffdd88; --rare:#66aaff;
+    --border:rgba(255,255,255,0.10);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+               font: 13px/1.5 -apple-system, "Segoe UI", Inter, Roboto, sans-serif; height: 100%; }
+  header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: 0.5px; }
+  h1 .accent { background: linear-gradient(90deg, #ffdd88, #ff99dd, #88ccff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  select, button, input[type=text] {
+    background: var(--panel-2); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 5px; padding: 5px 10px; font: inherit;
+  }
+  button { cursor: pointer; transition: background 0.15s; }
+  button:hover { background: #2a2240; }
+  button.primary { background: linear-gradient(180deg, #ffd166, #ffa040); color: #1a0e2a; border-color: #ffcc66; font-weight: 700; }
+  .stage-wrap { position: relative; padding: 16px; }
+  .stage {
+    position: relative;
+    background: linear-gradient(180deg, #0a0618 0%, #1a0f30 100%);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    user-select: none;
+    box-shadow: inset 0 0 30px rgba(0,0,0,0.45);
+  }
+  .stage canvas { position: absolute; inset: 0; pointer-events: none; image-rendering: -webkit-optimize-contrast; }
+  .marker {
+    position: absolute; width: 36px; height: 36px;
+    transform: translate(-50%, -100%);     /* anchor: bottom-center */
+    border-radius: 6px;
+    background: rgba(40, 28, 60, 0.9);
+    border: 2px solid var(--accent);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    cursor: grab; user-select: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    font-size: 18px;
+    transition: box-shadow 0.15s;
+  }
+  .marker.npc { border-color: #88ccff; }
+  .marker.prop { border-color: #ffd166; }
+  .marker:hover { box-shadow: 0 0 0 2px rgba(255,255,255,0.55), 0 4px 12px rgba(0,0,0,0.6); }
+  .marker:active { cursor: grabbing; }
+  .marker.selected { box-shadow: 0 0 0 2px #ff99dd, 0 4px 14px rgba(0,0,0,0.7); }
+  .marker .label {
+    position: absolute; bottom: 100%; left: 50%; transform: translate(-50%, -2px);
+    background: rgba(8, 4, 18, 0.92); padding: 2px 6px; border-radius: 3px;
+    font-size: 10px; white-space: nowrap; color: #ffe6a8;
+    border: 1px solid var(--border);
+  }
+  .stage .axis-grid {
+    position: absolute; inset: 0; pointer-events: none;
+    background-image:
+      linear-gradient(to right,  rgba(255,255,255,0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px);
+    background-size: 100px 100px;
+  }
+  /* v0.25.616 — platforms upgraded from decorative to fully interactive.
+     Drag the body to move (x/y). Drag the SE corner handle to resize (w/h).
+     Click to select; the side panel exposes type/tag fields. Z-index keeps
+     selected platforms on top so the resize handle stays clickable even
+     when overlapping neighbours. */
+  .stage .platform {
+    position: absolute;
+    background: rgba(180, 140, 220, 0.22);
+    border: 1.5px solid rgba(180, 140, 220, 0.55);
+    border-top: 2px solid rgba(180, 140, 220, 0.85);
+    cursor: grab;
+    user-select: none;
+    box-sizing: border-box;
+    transition: box-shadow 0.12s;
+  }
+  .stage .platform.ground {
+    background: rgba(120, 90, 60, 0.30);
+    border-color: rgba(180, 140, 80, 0.55);
+    border-top-color: rgba(220, 170, 100, 0.9);
+  }
+  .stage .platform:hover { box-shadow: 0 0 0 2px rgba(255,255,255,0.45); }
+  .stage .platform:active { cursor: grabbing; }
+  .stage .platform.selected {
+    box-shadow: 0 0 0 2px #ff99dd, 0 0 12px rgba(255,153,221,0.4);
+    z-index: 2;
+  }
+  .stage .platform .label {
+    position: absolute; top: -16px; left: 0;
+    background: rgba(8, 4, 18, 0.92);
+    padding: 1px 5px; border-radius: 3px;
+    font-size: 10px; white-space: nowrap; color: #d8c8ff;
+    border: 1px solid var(--border);
+    display: none;
+    pointer-events: none;
+  }
+  .stage .platform.selected .label,
+  .stage .platform:hover .label { display: block; }
+  .stage .platform .resize-handle {
+    position: absolute;
+    width: 12px; height: 12px;
+    background: #ffdd88;
+    border: 1px solid #1a0e2a;
+    border-radius: 2px;
+    right: -6px; bottom: -6px;
+    cursor: nwse-resize;
+    display: none;
+    z-index: 3;
+  }
+  .stage .platform.selected .resize-handle { display: block; }
+  /* Map dimension input strip — sits in the header next to the map picker */
+  .dim-input {
+    width: 70px;
+    text-align: right;
+  }
+  .dim-input-label {
+    color: var(--muted);
+    font-size: 11px;
+    margin-right: 4px;
+  }
+  .stage .ruler {
+    position: absolute; top: 0; left: 0;
+    color: var(--muted); font-size: 10px; pointer-events: none;
+    padding: 4px 6px;
+  }
+  .panel {
+    position: fixed; right: 16px; top: 80px; width: 360px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; max-height: calc(100vh - 100px); overflow-y: auto;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  .panel h2 { font-size: 13px; margin: 0 0 8px; letter-spacing: 0.4px; color: var(--accent); }
+  .panel .row { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
+  .panel .row label { flex: 0 0 70px; color: var(--muted); font-size: 11px; }
+  .panel .row input { flex: 1; }
+  .panel pre { background: #0a0612; border: 1px solid var(--border); border-radius: 5px; padding: 8px; font-size: 11px; color: #d8c8ff; max-height: 240px; overflow: auto; }
+  .empty { color: var(--muted); font-style: italic; padding: 6px 0; }
+  .add-row { display: flex; gap: 6px; margin-top: 8px; }
+  .add-row input { flex: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Mojiworld <span class="accent">· Map Placement Tool</span></h1>
+  <div class="controls">
+    <label>Map:
+      <select id="mapPick"></select>
+    </label>
+    <span class="dim-input-label">W</span>
+    <input id="dimW" class="dim-input" type="number" min="200" max="20000" step="50" value="1100" title="World width — drag-edit & export">
+    <span class="dim-input-label">H</span>
+    <input id="dimH" class="dim-input" type="number" min="200" max="4000" step="50" value="600" title="World height — drag-edit & export">
+    <button id="refresh">Reload</button>
+    <!-- v0.25.619 — Manual file-picker fallback. file:// origin browsers
+         (Chrome / Edge) block fetch() of sibling HTML for CORS reasons,
+         so the auto-fetch path silently falls back to demoData (which
+         only has town). User clicks this button → file dialog → loads
+         mojiworld_game.html as text → all 40 maps available. -->
+    <input type="file" id="filePick" accept=".html,text/html" style="display:none">
+    <button id="loadFile" title="Load mojiworld_game.html manually (use this if dropdown only shows 'town')">📁 Load HTML…</button>
+    <button id="exportBtn" class="primary">Export prompt ↗</button>
+    <button id="resetBtn">Reset</button>
+  </div>
+  <div id="loadStatus" style="flex-basis:100%; font-size:11px; color: var(--muted); margin-top:4px;">
+    <span id="loadStatusText">Loading…</span>
+  </div>
+  <div style="margin-left:auto; color:#9790b4; font-size:11px;">
+    Opened from the game with <kbd style="background:#242036; border:1px solid #3c3452; border-radius:3px; padding:1px 6px; color:#e8e4f4; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px;">7</kbd> · close this tab to return
+  </div>
+</header>
+
+<div class="stage-wrap">
+  <div class="stage" id="stage" style="width: 1100px; height: 600px;">
+    <div class="axis-grid"></div>
+    <div class="ruler" id="ruler">x: — &nbsp; y: —</div>
+    <!-- platforms + markers injected by JS -->
+  </div>
+</div>
+
+<div class="panel" id="panel">
+  <h2>Selection</h2>
+  <div id="selectedInfo" class="empty">Click a marker to edit. Drag any marker to move.</div>
+  <h2 style="margin-top: 14px;">Add</h2>
+  <div class="add-row">
+    <select id="addKind">
+      <option value="npc">NPC</option>
+      <option value="prop">Prop</option>
+      <option value="platform">Platform</option>
+      <option value="ground">Ground</option>
+    </select>
+    <input id="addName" placeholder="Name / key (optional for platforms)" type="text">
+    <button id="addBtn">+</button>
+  </div>
+  <h2 style="margin-top: 14px;">Export</h2>
+  <pre id="exportOut">(click Export prompt)</pre>
+</div>
+
+<script>
+// =========================================================================
+// Map placement tool — drag NPCs / props on a 2D map view, export the
+// resulting (x, y, anchor) per-entry list as a copy-paste prompt for
+// the mojiworld_game.html maintainer to paste back into MAPS / MAP_PROPS.
+//
+// Source of truth: this tool re-fetches the MAPS / MAP_PROPS objects
+// from mojiworld_game.html via a fetch() + new Function() so it always
+// reflects the live map definitions. The user drags markers; on Save
+// the tool serialises the new positions as a code block ready to paste
+// into the MAPS[mapId].npcs and MAP_PROPS[mapId] arrays.
+// =========================================================================
+
+const STAGE = document.getElementById('stage');
+const RULER = document.getElementById('ruler');
+const SEL_INFO = document.getElementById('selectedInfo');
+const PANEL = document.getElementById('panel');
+const EXPORT_OUT = document.getElementById('exportOut');
+const MAP_PICK = document.getElementById('mapPick');
+
+// Stage scaling — the tool views maps at 50% zoom so wide maps fit on
+// screen. Drag deltas reverse the zoom so output coordinates stay in
+// world space.
+const ZOOM = 0.5;
+
+// In-memory edit state.
+const STATE = {
+  mapId: null,
+  mapData: null,
+  npcs: [],     // [{name, x, y, role, color, ...}]
+  props: [],    // [{key, x, y, scale, anchor}]
+  platforms: [],
+  worldWidth: 1100,
+  worldHeight: 600,
+  selectedEl: null,
+};
+
+// =========================================================================
+// FETCH MAPS / MAP_PROPS from mojiworld_game.html
+// =========================================================================
+// Strategy: load the file as text, regex out the "const MAPS = {...}"
+// and "const MAP_PROPS = {..." blocks, eval them in an isolated
+// scope. Skips per-map IIFE wrappers (frozenPeak generates 200
+// platforms in an IIFE) by treating them as opaque values — the
+// returned object's platforms array works either way.
+//
+// Falls back to a hand-rolled tiny library of demo maps if fetch fails
+// (file:// origin, etc.) so the tool is usable standalone.
+async function loadMaps() {
+  // v0.25.619 — Robust loader. Tries fetch first; if that fails (file://
+  // CORS, network) OR if fetch succeeds but extraction returns null/few
+  // maps, surface a clear status to the user pointing at the file-picker
+  // fallback. Previously the silent demoData fallback meant the user
+  // saw only "town" with no indication WHY they couldn't see other maps.
+  const status = (msg, kind) => {
+    const el = document.getElementById('loadStatusText');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.color = kind === 'error' ? '#ff8888' : kind === 'warn' ? '#ffd166' : kind === 'ok' ? '#88dd99' : 'var(--muted)';
+  };
+  try {
+    status('Fetching mojiworld_game.html…');
+    const res = await fetch('mojiworld_game.html');
+    if (!res.ok) throw new Error('fetch returned ' + res.status);
+    const text = await res.text();
+    const maps = extractMaps(text);
+    const props = extractMapProps(text);
+    const mapCount = maps ? Object.keys(maps).length : 0;
+    // v0.26.331 — Threshold bumped 5 → 20. Post-extraction now includes
+    // the const-MAPS block + MAPS.zodiacHall + 10 synthesised tower
+    // floors, so the floor for "looks complete" is much higher.
+    if (mapCount < 20) {
+      status(`⚠ Only ${mapCount} map${mapCount === 1 ? '' : 's'} extracted (expected 60+) — try the 📁 Load HTML… button to pick the file manually.`, 'warn');
+      return demoData();
+    }
+    // v0.26.331 — Note which post-init maps merged in so the user can
+    // see at a glance that zodiacHall + tower floors landed.
+    const _hasZod   = !!(maps && maps.zodiacHall);
+    const _towerCt  = Object.keys(maps || {}).filter(k => k.startsWith('tower_b')).length;
+    status(`✓ Loaded ${mapCount} maps from auto-fetch (zodiacHall: ${_hasZod ? '✓' : '✗'}, tower floors: ${_towerCt}/10).`, 'ok');
+    return { maps, props };
+  } catch (e) {
+    console.warn('[placement-tool] auto-fetch failed:', e.message);
+    status(`⚠ Auto-fetch blocked (${e.message}). Click 📁 Load HTML… and pick mojiworld_game.html manually.`, 'warn');
+    return demoData();
+  }
+}
+
+// v0.25.619 — Manual file-load path. Triggered by the 📁 Load HTML…
+// button; user picks mojiworld_game.html, the FileReader gives us the
+// text, we extract MAPS / MAP_PROPS the same way the auto-fetch does.
+// Works on every browser regardless of file:// CORS rules because the
+// user-selected file gets read directly by the FileReader API.
+function loadMapsFromFile(file) {
+  const status = (msg, kind) => {
+    const el = document.getElementById('loadStatusText');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.color = kind === 'error' ? '#ff8888' : kind === 'warn' ? '#ffd166' : kind === 'ok' ? '#88dd99' : 'var(--muted)';
+  };
+  const reader = new FileReader();
+  reader.onload = () => {
+    const text = reader.result;
+    const maps = extractMaps(text);
+    const props = extractMapProps(text);
+    const mapCount = maps ? Object.keys(maps).length : 0;
+    if (!maps || mapCount === 0) {
+      status('⚠ Could not extract MAPS from this file — wrong file?', 'error');
+      return;
+    }
+    _maps = maps;
+    _props = props || {};
+    rebuildMapPicker();
+    // v0.26.331 — Same zodiacHall + tower-floor diagnostic on the manual
+    // load path so the user can confirm the extraction included them.
+    const _hasZod  = !!(maps && maps.zodiacHall);
+    const _towerCt = Object.keys(maps || {}).filter(k => k.startsWith('tower_b')).length;
+    status(`✓ Loaded ${mapCount} maps from ${file.name} (zodiacHall: ${_hasZod ? '✓' : '✗'}, tower floors: ${_towerCt}/10).`, 'ok');
+  };
+  reader.onerror = () => status('⚠ Read failed: ' + reader.error, 'error');
+  reader.readAsText(file);
+}
+
+function rebuildMapPicker() {
+  MAP_PICK.innerHTML = '';
+  const ids = Object.keys(_maps).sort();
+  for (const id of ids) {
+    const opt = document.createElement('option');
+    opt.value = id;
+    const m = _maps[id];
+    opt.textContent = id + (m && m.name ? ` — ${m.name}` : '');
+    MAP_PICK.appendChild(opt);
+  }
+  if (ids.length) loadMap(ids[0], _maps, _props);
+}
+
+// Walk braces (or brackets) from the first opening at/after `fromIdx` to
+// its matching close. Returns the substring INCLUDING the wrappers, or
+// null if no match. Used to grab arbitrary `{...}` / `[...]` blocks
+// without writing fragile regexes.
+function _bracedSlice(text, fromIdx, open, close) {
+  const blockStart = text.indexOf(open, fromIdx);
+  if (blockStart < 0) return null;
+  let depth = 0;
+  for (let i = blockStart; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === open) depth++;
+    else if (ch === close) {
+      depth--;
+      if (depth === 0) return text.substring(blockStart, i + 1);
+    }
+  }
+  return null;
+}
+
+function extractMaps(text) {
+  // v0.26.331 — Per user "include all the current maps". Three-stage
+  // extraction so the tool sees every map the game actually loads,
+  // not just the const-block:
+  //   (1) const MAPS = { … }              — the main literal
+  //   (2) MAPS.zodiacHall = { … };        — post-init assignment at L20323
+  //   (3) _buildTowerMaps() synthesis     — tower_b1..b10 built from
+  //                                          TOWER_FLOORS at runtime
+  // Pre-fix the tool only saw (1) — zodiacHall + the 10 tower floors
+  // were invisible. Now all three sources merge into the returned map.
+
+  // (1) const MAPS = { … }
+  const startIdx = text.indexOf('const MAPS = {');
+  if (startIdx < 0) return null;
+  const mapsBlockText = _bracedSlice(text, startIdx, '{', '}');
+  if (!mapsBlockText) return null;
+  let maps;
+  try {
+    maps = new Function(`return (${mapsBlockText});`)();
+  } catch (e) {
+    console.warn('[placement-tool] MAPS eval failed:', e.message);
+    return null;
+  }
+
+  // (2) MAPS.zodiacHall = { … };
+  // v0.26.331 — `text.indexOf('MAPS.zodiacHall = {')` matches comments
+  // too — there's an earlier mention inside a code comment. Anchor on
+  // a newline so we only catch the actual assignment (which lives at
+  // line-start in the game source). Also pre-bind ZODIAC_SIGNS — the
+  // zodiacHall block uses `...ZODIAC_SIGNS.map(...)` in a portals
+  // synthesis; without the array in scope, eval throws ReferenceError.
+  const zodMatch = text.match(/\nMAPS\.zodiacHall\s*=\s*\{/);
+  if (zodMatch) {
+    const zodIdx = zodMatch.index + zodMatch[0].lastIndexOf('{');
+    const zodText = _bracedSlice(text, zodIdx, '{', '}');
+    if (zodText) {
+      // Pull ZODIAC_SIGNS in too so the spread inside zodiacHall has
+      // its source. Falls back to a stub array if extraction fails.
+      let zodSignsText = '[]';
+      const zsStart = text.indexOf('const ZODIAC_SIGNS = [');
+      if (zsStart >= 0) {
+        const zsSlice = _bracedSlice(text, zsStart, '[', ']');
+        if (zsSlice) zodSignsText = zsSlice;
+      }
+      try {
+        maps.zodiacHall = new Function(
+          `const ZODIAC_SIGNS = ${zodSignsText}; return (${zodText});`
+        )();
+      } catch (e) {
+        console.warn('[placement-tool] MAPS.zodiacHall eval failed:', e.message);
+      }
+    }
+  }
+
+  // (3) TOWER_FLOORS → tower_b1..b10 via the same platform-synthesis
+  //     loop the game runs at L30581 area (_buildTowerMaps). The tool
+  //     reproduces the synth inline so we don't have to eval the
+  //     game's function body (which references runtime globals).
+  const tfIdx = text.indexOf('const TOWER_FLOORS = [');
+  if (tfIdx >= 0) {
+    const tfText = _bracedSlice(text, tfIdx, '[', ']');
+    if (tfText) {
+      try {
+        const towerFloors = new Function(`return (${tfText});`)();
+        // EXPEDITION_LEVEL_GATE constant lives at L29700 — extract or
+        // fall back to the v0.26.282-current 20.
+        let elg = 20;
+        const elgMatch = text.match(/const\s+EXPEDITION_LEVEL_GATE\s*=\s*(\d+)/);
+        if (elgMatch) elg = +elgMatch[1];
+        for (const cfg of towerFloors) {
+          if (maps[cfg.id]) continue;
+          const W = cfg.w, H = cfg.h, GY = H - 80;
+          const platforms = [{ x:0, y:GY, w:W, h:60, type:'ground' }];
+          if (cfg.isVerticalTower) {
+            const N = 24, DY = Math.floor((GY - 200) / N);
+            for (let i = 0; i < N; i++) {
+              const y = GY - DY * (i + 1);
+              const pw = 170 - Math.floor(i * 0.5);
+              const side = (i % 2 === 0) ? 50 : (W - pw - 50);
+              platforms.push({ x: side, y, w: pw, h: 12, type:'platform' });
+            }
+            platforms.push({ x: (W - 240) / 2, y: GY - DY * (N + 1), w: 240, h: 14, type:'platform', tag:'summit' });
+          } else if (cfg.isBossArena) {
+            platforms.push({ x: (W - 380) / 2, y: GY - 160, w: 380, h: 14, type:'platform', tag:'arena' });
+            platforms.push({ x: 80,            y: GY - 280, w: 200, h: 12, type:'platform' });
+            platforms.push({ x: W - 280,       y: GY - 280, w: 200, h: 12, type:'platform' });
+          } else {
+            platforms.push({ x: 120,         y: GY - 110, w: 260, h: 12, type:'platform' });
+            platforms.push({ x: (W - 280)/2, y: GY - 200, w: 280, h: 12, type:'platform' });
+            platforms.push({ x: W - 380,     y: GY - 110, w: 260, h: 12, type:'platform' });
+          }
+          // Bravo placement — mirrors the game's L30615-area logic.
+          let bx, by;
+          if (cfg.isVerticalTower) {
+            const _N = 24;
+            const _DY = Math.floor((GY - 200) / _N);
+            bx = (W - 240) / 2 + 110;
+            by = (GY - _DY * (_N + 1)) - 36;
+          } else if (cfg.isBossArena) {
+            bx = W - 140;
+            by = GY - 36;
+          } else {
+            bx = W - 180;
+            by = GY - 36;
+          }
+          maps[cfg.id] = {
+            name: cfg.name,
+            bg: cfg.bg || 'dungeon',
+            sky: cfg.sky,
+            worldWidth: W,
+            worldHeight: H,
+            levelReq: elg,
+            isVerticalTower: !!cfg.isVerticalTower,
+            isBossArena: !!cfg.isBossArena,
+            gravityMul: cfg.isVerticalTower ? 0.9 : 1.0,
+            platforms,
+            spawns: cfg.spawns || [],
+            portals: [],
+            npcs: [{ x: bx, y: by, name: 'Bravo', role: 'bravoGuide', color: '#ffb0d8' }],
+          };
+        }
+      } catch (e) {
+        console.warn('[placement-tool] TOWER_FLOORS synth failed:', e.message);
+      }
+    }
+  }
+
+  return maps;
+}
+
+function extractMapProps(text) {
+  const startIdx = text.indexOf('const MAP_PROPS = {');
+  if (startIdx < 0) return null;
+  const blockStart = text.indexOf('{', startIdx);
+  let depth = 0, end = -1;
+  for (let i = blockStart; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) { end = i + 1; break; }
+    }
+  }
+  if (end < 0) return null;
+  const blockText = text.substring(blockStart, end);
+  try {
+    const fn = new Function(`return (${blockText});`);
+    return fn();
+  } catch (e) {
+    console.warn('[placement-tool] MAP_PROPS eval failed:', e.message);
+    return null;
+  }
+}
+
+function demoData() {
+  // Tiny demo data so the tool loads even when fetch fails.
+  return {
+    maps: {
+      town: {
+        name: 'Everdawn Central (demo)',
+        worldWidth: 1100,
+        platforms: [
+          { x: 0, y: 480, w: 1100, h: 60, type: 'ground' },
+          { x: 120, y: 360, w: 80, h: 10, type: 'platform' },
+          { x: 540, y: 360, w: 80, h: 10, type: 'platform' },
+          { x: 820, y: 360, w: 80, h: 10, type: 'platform' },
+        ],
+        npcs: [
+          { name: 'The Amnesiac', x: 440, role: 'amnesiac', color: '#cc9944' },
+          { name: '???',          x: 600, role: 'sage',     color: '#aa66cc' },
+          { name: 'Taxi Uncle',   x: 860, role: 'caravan',  color: '#e8b85a' },
+        ],
+      },
+    },
+    props: {
+      town: [
+        { key: 'well_stone', x: 200, y: 480, scale: 1.0 },
+        { key: 'signpost_wood', x: 560, y: 480, scale: 1.0 },
+      ],
+    },
+  };
+}
+
+// =========================================================================
+// RENDER
+// =========================================================================
+function loadMap(mapId, maps, props) {
+  const m = maps[mapId];
+  if (!m) return;
+  STATE.mapId = mapId;
+  STATE.mapData = m;
+  STATE.worldWidth  = m.worldWidth  || 1100;
+  STATE.worldHeight = m.worldHeight || 600;
+  STATE.platforms   = (m.platforms || []).slice();
+  // Deep-copy NPCs + props so edits stay local until export.
+  STATE.npcs  = (m.npcs || []).map(n => ({
+    name: n.name, x: n.x, y: typeof n.y === 'number' ? n.y : 436,
+    role: n.role || '', color: n.color || '',
+  }));
+  STATE.props = ((props && props[mapId]) || []).map(p => ({
+    key: p.key, x: p.x, y: p.y, scale: p.scale || 1, anchor: p.anchor || 'feet',
+  }));
+  renderStage();
+}
+
+function renderStage() {
+  // Resize stage to fit map at ZOOM
+  const sw = STATE.worldWidth * ZOOM;
+  const sh = STATE.worldHeight * ZOOM;
+  STAGE.style.width = sw + 'px';
+  STAGE.style.height = sh + 'px';
+  // Sync the dimension input fields with current state
+  const dimW = document.getElementById('dimW');
+  const dimH = document.getElementById('dimH');
+  if (dimW) dimW.value = STATE.worldWidth;
+  if (dimH) dimH.value = STATE.worldHeight;
+  // Clear (keep axis-grid + ruler children; remove platforms / markers)
+  Array.from(STAGE.children).forEach(c => {
+    if (!c.classList.contains('axis-grid') && !c.classList.contains('ruler')) STAGE.removeChild(c);
+  });
+  // Platforms — now draggable + resizable. Same pattern as NPC/prop markers
+  // but with type/tag fields exposed in the selection panel and a SE corner
+  // handle that resizes w/h instead of moving x/y.
+  for (const p of STATE.platforms) addPlatform(p);
+  // NPC markers
+  for (const npc of STATE.npcs) addMarker('npc', npc, '🧑');
+  // Prop markers
+  for (const prop of STATE.props) {
+    const icon = propIcon(prop.key);
+    addMarker('prop', prop, icon);
+  }
+}
+
+function addPlatform(p) {
+  const el = document.createElement('div');
+  el.className = 'platform' + (p.type === 'ground' ? ' ground' : '');
+  el.style.left   = (p.x * ZOOM) + 'px';
+  el.style.top    = (p.y * ZOOM) + 'px';
+  el.style.width  = ((p.w || 80) * ZOOM) + 'px';
+  el.style.height = ((p.h || 10) * ZOOM) + 'px';
+  el._entry = p;
+  el._kind = 'platform';
+  // Floating label shows w×h + tag for fast visual scan
+  const label = document.createElement('span');
+  label.className = 'label';
+  label.textContent = `${p.type || 'platform'} · ${p.w || 80}×${p.h || 10}` + (p.tag ? ' · ' + p.tag : '');
+  el.appendChild(label);
+  // Resize handle (SE corner) — only visible when the platform is selected
+  const handle = document.createElement('div');
+  handle.className = 'resize-handle';
+  el.appendChild(handle);
+  attachPlatformDrag(el, handle);
+  el.onclick = (ev) => { ev.stopPropagation(); selectMarker(el); };
+  STAGE.appendChild(el);
+  return el;
+}
+
+function attachPlatformDrag(el, handle) {
+  // Body drag — moves the platform
+  let dragging = false, mode = '', startX = 0, startY = 0, origX = 0, origY = 0, origW = 0, origH = 0;
+  el.addEventListener('pointerdown', (e) => {
+    if (e.target === handle) return;   // resize is handled below
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    dragging = true; mode = 'move';
+    startX = e.clientX; startY = e.clientY;
+    origX = el._entry.x;
+    origY = el._entry.y;
+    el.classList.add('dragging');
+  });
+  // Resize handle — modifies w/h
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    handle.setPointerCapture(e.pointerId);
+    dragging = true; mode = 'resize';
+    startX = e.clientX; startY = e.clientY;
+    origW = el._entry.w || 80;
+    origH = el._entry.h || 10;
+  });
+  const move = (e) => {
+    if (!dragging) return;
+    const dx = (e.clientX - startX) / ZOOM;
+    const dy = (e.clientY - startY) / ZOOM;
+    const p = el._entry;
+    if (mode === 'move') {
+      const newX = Math.max(0, Math.min(STATE.worldWidth - (p.w || 80), Math.round(origX + dx)));
+      const newY = Math.max(0, Math.min(STATE.worldHeight - (p.h || 10), Math.round(origY + dy)));
+      p.x = newX; p.y = newY;
+      el.style.left = (newX * ZOOM) + 'px';
+      el.style.top  = (newY * ZOOM) + 'px';
+    } else if (mode === 'resize') {
+      const newW = Math.max(8, Math.round(origW + dx));
+      const newH = Math.max(4, Math.round(origH + dy));
+      p.w = newW; p.h = newH;
+      el.style.width  = (newW * ZOOM) + 'px';
+      el.style.height = (newH * ZOOM) + 'px';
+    }
+    const lbl = el.querySelector('.label');
+    if (lbl) lbl.textContent = `${p.type || 'platform'} · ${p.w || 80}×${p.h || 10}` + (p.tag ? ' · ' + p.tag : '');
+    selectMarker(el);
+  };
+  const up = () => { dragging = false; mode = ''; el.classList.remove('dragging'); };
+  el.addEventListener('pointermove', move);
+  el.addEventListener('pointerup',   up);
+  el.addEventListener('pointercancel', up);
+  handle.addEventListener('pointermove', move);
+  handle.addEventListener('pointerup',   up);
+  handle.addEventListener('pointercancel', up);
+  el.addEventListener('pointermove', updateRuler);
+}
+
+function propIcon(key) {
+  if (!key) return '📦';
+  if (/banner|flag|pennant/.test(key))         return '🚩';
+  if (/anvil|brazier|forge/.test(key))         return '🛠';
+  if (/throne|chair|seat/.test(key))           return '🪑';
+  if (/lantern|candle/.test(key))              return '🏮';
+  if (/well|fountain/.test(key))               return '⛲';
+  if (/wagon|cart/.test(key))                  return '🛒';
+  if (/crate|barrel|stack/.test(key))          return '📦';
+  if (/lion|statue|mirror/.test(key))          return '🗿';
+  if (/herb|pot|flower/.test(key))             return '🌿';
+  if (/cherry|tree|branch/.test(key))          return '🌸';
+  if (/koi|pond/.test(key))                    return '🐟';
+  if (/target|archery|bell/.test(key))         return '🎯';
+  if (/tatami|incense|shuriken|skull/.test(key)) return '🥷';
+  if (/stall|signpost|fence/.test(key))        return '🛍';
+  if (/desk|hearth|prayer/.test(key))          return '📚';
+  return '📦';
+}
+
+function addMarker(kind, entry, icon) {
+  const el = document.createElement('div');
+  el.className = 'marker ' + kind;
+  el.style.left = (entry.x * ZOOM) + 'px';
+  el.style.top  = ((entry.y || 480) * ZOOM) + 'px';
+  el.textContent = icon || (kind === 'npc' ? '🧑' : '📦');
+  // Label
+  const label = document.createElement('span');
+  label.className = 'label';
+  label.textContent = (kind === 'npc' ? entry.name : entry.key) + ' · ' + (entry.x | 0) + ',' + ((entry.y || 0) | 0);
+  el.appendChild(label);
+  // Drag handlers
+  el._entry = entry;
+  el._kind = kind;
+  attachDrag(el);
+  el.onclick = (ev) => {
+    ev.stopPropagation();
+    selectMarker(el);
+  };
+  STAGE.appendChild(el);
+}
+
+function attachDrag(el) {
+  let dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    dragging = true;
+    startX = e.clientX; startY = e.clientY;
+    origX = el._entry.x;
+    origY = el._entry.y || 480;
+    el.classList.add('dragging');
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = (e.clientX - startX) / ZOOM;
+    const dy = (e.clientY - startY) / ZOOM;
+    const newX = Math.max(0, Math.min(STATE.worldWidth, Math.round(origX + dx)));
+    const newY = Math.max(0, Math.min(STATE.worldHeight, Math.round(origY + dy)));
+    el._entry.x = newX;
+    el._entry.y = newY;
+    el.style.left = (newX * ZOOM) + 'px';
+    el.style.top  = (newY * ZOOM) + 'px';
+    const lbl = el.querySelector('.label');
+    if (lbl) lbl.textContent = (el._kind === 'npc' ? el._entry.name : el._entry.key) + ' · ' + newX + ',' + newY;
+    selectMarker(el);
+  });
+  el.addEventListener('pointerup', () => { dragging = false; el.classList.remove('dragging'); });
+  el.addEventListener('pointercancel', () => { dragging = false; el.classList.remove('dragging'); });
+  // Track stage-relative cursor for the ruler
+  el.addEventListener('pointermove', updateRuler);
+}
+
+function updateRuler(e) {
+  const r = STAGE.getBoundingClientRect();
+  const x = Math.round((e.clientX - r.left) / ZOOM);
+  const y = Math.round((e.clientY - r.top) / ZOOM);
+  RULER.textContent = `x: ${x}  y: ${y}`;
+}
+STAGE.addEventListener('pointermove', updateRuler);
+STAGE.addEventListener('click', () => {
+  if (STATE.selectedEl) STATE.selectedEl.classList.remove('selected');
+  STATE.selectedEl = null;
+  SEL_INFO.className = 'empty';
+  SEL_INFO.textContent = 'Click a marker to edit. Drag any marker to move.';
+});
+
+function selectMarker(el) {
+  if (STATE.selectedEl) STATE.selectedEl.classList.remove('selected');
+  STATE.selectedEl = el;
+  el.classList.add('selected');
+  const e = el._entry;
+  const kind = el._kind;
+  const isNpc      = kind === 'npc';
+  const isProp     = kind === 'prop';
+  const isPlatform = kind === 'platform';
+  SEL_INFO.className = '';
+  // Build the selection-panel rows. Different field set per kind:
+  //   NPC      — Name, x, y
+  //   Prop     — Key, x, y, scale, anchor
+  //   Platform — Type, x, y, w, h, tag
+  let html = `<div class="row"><label>Kind</label><b>${
+    isNpc ? 'NPC' : isProp ? 'Prop' : 'Platform'
+  }</b></div>`;
+  if (isPlatform) {
+    html += `
+      <div class="row"><label>Type</label>
+        <select id="selType" style="flex:1; background:var(--panel-2); color:var(--fg); border:1px solid var(--border); border-radius:5px; padding:4px;">
+          <option value="platform"${e.type !== 'ground' ? ' selected' : ''}>platform</option>
+          <option value="ground"${e.type === 'ground' ? ' selected' : ''}>ground</option>
+        </select>
+      </div>
+      <div class="row"><label>x</label><input id="selX" type="number" value="${e.x | 0}"></div>
+      <div class="row"><label>y</label><input id="selY" type="number" value="${(e.y || 0) | 0}"></div>
+      <div class="row"><label>w</label><input id="selW" type="number" value="${e.w | 0}"></div>
+      <div class="row"><label>h</label><input id="selH" type="number" value="${e.h | 0}"></div>
+      <div class="row"><label>tag</label><input id="selTag" type="text" value="${(e.tag || '').replace(/"/g, '&quot;')}" placeholder="(optional, e.g. roof / banner)"></div>
+    `;
+  } else {
+    html += `
+      <div class="row"><label>${isNpc ? 'Name' : 'Key'}</label><input id="selName" type="text" value="${(isNpc ? e.name : e.key).replace(/"/g, '&quot;')}"></div>
+      <div class="row"><label>x</label><input id="selX" type="number" value="${e.x | 0}"></div>
+      <div class="row"><label>y</label><input id="selY" type="number" value="${(e.y || 0) | 0}"></div>
+    `;
+    if (isProp) {
+      html += `
+        <div class="row"><label>scale</label><input id="selScale" type="text" value="${e.scale}"></div>
+        <div class="row"><label>anchor</label><input id="selAnchor" type="text" value="${e.anchor || 'feet'}"></div>
+      `;
+    }
+  }
+  html += `<div class="row" style="justify-content: flex-end;"><button id="delBtn">Delete</button></div>`;
+  SEL_INFO.innerHTML = html;
+  // Wire field changes — each one updates the live object + DOM in lockstep
+  const updateLabel = () => {
+    const lbl = el.querySelector('.label');
+    if (!lbl) return;
+    if (isPlatform) lbl.textContent = `${e.type || 'platform'} · ${e.w || 80}×${e.h || 10}` + (e.tag ? ' · ' + e.tag : '');
+    else lbl.textContent = (isNpc ? e.name : e.key) + ' · ' + (e.x|0) + ',' + ((e.y|0) || 0);
+  };
+  if (!isPlatform) {
+    document.getElementById('selName').oninput = (ev) => {
+      const v = ev.target.value;
+      if (isNpc) e.name = v; else e.key = v;
+      updateLabel();
+    };
+  }
+  document.getElementById('selX').oninput = (ev) => {
+    const v = parseInt(ev.target.value, 10) || 0;
+    e.x = v;
+    el.style.left = (v * ZOOM) + 'px';
+    updateLabel();
+  };
+  document.getElementById('selY').oninput = (ev) => {
+    const v = parseInt(ev.target.value, 10) || 0;
+    e.y = v;
+    el.style.top = (v * ZOOM) + 'px';
+    updateLabel();
+  };
+  if (isPlatform) {
+    document.getElementById('selW').oninput = (ev) => {
+      const v = Math.max(8, parseInt(ev.target.value, 10) || 8);
+      e.w = v; el.style.width = (v * ZOOM) + 'px'; updateLabel();
+    };
+    document.getElementById('selH').oninput = (ev) => {
+      const v = Math.max(4, parseInt(ev.target.value, 10) || 4);
+      e.h = v; el.style.height = (v * ZOOM) + 'px'; updateLabel();
+    };
+    document.getElementById('selType').onchange = (ev) => {
+      e.type = ev.target.value;
+      el.classList.toggle('ground', e.type === 'ground');
+      updateLabel();
+    };
+    document.getElementById('selTag').oninput = (ev) => {
+      e.tag = (ev.target.value || '').trim() || undefined;
+      updateLabel();
+    };
+  }
+  if (isProp) {
+    document.getElementById('selScale').oninput  = (ev) => { e.scale = parseFloat(ev.target.value) || 1; };
+    document.getElementById('selAnchor').oninput = (ev) => { e.anchor = (ev.target.value || 'feet').trim(); };
+  }
+  document.getElementById('delBtn').onclick = () => {
+    const list = isNpc ? STATE.npcs : isProp ? STATE.props : STATE.platforms;
+    const idx = list.indexOf(e);
+    if (idx >= 0) list.splice(idx, 1);
+    el.remove();
+    SEL_INFO.className = 'empty';
+    SEL_INFO.textContent = 'Deleted. Click a marker or drag to edit.';
+  };
+}
+
+// =========================================================================
+// EXPORT
+// =========================================================================
+function exportPrompt() {
+  if (!STATE.mapId) return '(no map loaded)';
+  // Compare against the original to detect what's actually changed.
+  // Snapshot the source-of-truth values; any mismatch shows up in the
+  // export so the user knows what to paste back.
+  const src = STATE.mapData || {};
+  const origW = src.worldWidth  || 1100;
+  const origH = src.worldHeight || 600;
+  const dimChanged = (STATE.worldWidth !== origW) || (STATE.worldHeight !== origH);
+  const lines = [];
+  lines.push(`# Placement update for ${STATE.mapId}`);
+  lines.push('');
+  lines.push(`Update the **${STATE.mapId}** map. Open \`mojiworld_game.html\`, find the \`MAPS.${STATE.mapId}\` entry, and apply the values below.`);
+  lines.push('');
+  // World dimensions
+  if (dimChanged) {
+    lines.push('## MAPS.' + STATE.mapId + ' — world dimensions');
+    lines.push('```js');
+    lines.push(`  worldWidth:  ${STATE.worldWidth},`);
+    lines.push(`  worldHeight: ${STATE.worldHeight},`);
+    lines.push('```');
+    lines.push('');
+  }
+  // Platforms — emit the full array because order matters in the source
+  if (STATE.platforms.length) {
+    lines.push('## MAPS.' + STATE.mapId + '.platforms');
+    lines.push('```js');
+    for (const p of STATE.platforms) {
+      const tag  = p.tag  ? `, tag:'${p.tag}'` : '';
+      const type = (p.type === 'ground') ? `, type:'ground'` : '';
+      lines.push(`  { x:${p.x|0}, y:${p.y|0}, w:${p.w|0}, h:${p.h|0}${type}${tag} },`);
+    }
+    lines.push('```');
+    lines.push('');
+  }
+  if (STATE.npcs.length) {
+    lines.push('## MAPS.' + STATE.mapId + '.npcs');
+    lines.push('```js');
+    for (const n of STATE.npcs) {
+      const yField = (typeof n.y === 'number' && n.y !== 436) ? `, y:${n.y}` : '';
+      const role = n.role ? `, role:'${n.role}'` : '';
+      const color = n.color ? `, color:'${n.color}'` : '';
+      lines.push(`  { x:${n.x|0}${yField}, name:'${n.name}'${role}${color} },`);
+    }
+    lines.push('```');
+    lines.push('');
+  }
+  if (STATE.props.length) {
+    lines.push('## MAP_PROPS.' + STATE.mapId);
+    lines.push('```js');
+    for (const p of STATE.props) {
+      const anc = (p.anchor && p.anchor !== 'feet') ? `, anchor:'${p.anchor}'` : '';
+      lines.push(`  { key:'${p.key}', x:${p.x|0}, y:${p.y|0}, scale:${p.scale}${anc} },`);
+    }
+    lines.push('```');
+  }
+  return lines.join('\n');
+}
+
+// =========================================================================
+// WIRE-UP
+// =========================================================================
+let _maps = null, _props = null;
+
+async function init() {
+  const data = await loadMaps();
+  _maps = data.maps || {};
+  _props = data.props || {};
+  rebuildMapPicker();
+}
+
+MAP_PICK.onchange = () => { loadMap(MAP_PICK.value, _maps, _props); };
+document.getElementById('refresh').onclick = init;
+// v0.25.619 — Wire the manual file-picker fallback for file:// browsers.
+document.getElementById('loadFile').onclick = () => {
+  document.getElementById('filePick').click();
+};
+document.getElementById('filePick').onchange = (ev) => {
+  const file = ev.target.files && ev.target.files[0];
+  if (file) loadMapsFromFile(file);
+  // Clear the input so re-picking the same file fires onchange again
+  ev.target.value = '';
+};
+document.getElementById('exportBtn').onclick = () => {
+  EXPORT_OUT.textContent = exportPrompt();
+  EXPORT_OUT.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+};
+document.getElementById('resetBtn').onclick = () => {
+  if (STATE.mapId) loadMap(STATE.mapId, _maps, _props);
+};
+document.getElementById('addBtn').onclick = () => {
+  const kind = document.getElementById('addKind').value;
+  const name = document.getElementById('addName').value.trim();
+  if (kind === 'npc') {
+    if (!name) return;
+    const e = { name, x: 200, y: 436, role: '', color: '' };
+    STATE.npcs.push(e);
+    addMarker('npc', e, '🧑');
+  } else if (kind === 'prop') {
+    if (!name) return;
+    const e = { key: name, x: 200, y: 480, scale: 1, anchor: 'feet' };
+    STATE.props.push(e);
+    addMarker('prop', e, propIcon(name));
+  } else if (kind === 'platform' || kind === 'ground') {
+    // Platforms/ground don't need a name — drop them in the middle of
+    // the visible area at sensible defaults so the user can drag them
+    // into place from there. Optional `name` becomes the `tag` field.
+    const isGround = (kind === 'ground');
+    const e = {
+      x: Math.round(STATE.worldWidth / 2 - 60),
+      y: Math.round(STATE.worldHeight / 2 - 5),
+      w: isGround ? Math.min(800, STATE.worldWidth) : 120,
+      h: isGround ? 60 : 12,
+      type: isGround ? 'ground' : 'platform',
+    };
+    if (name) e.tag = name;
+    STATE.platforms.push(e);
+    const el = addPlatform(e);
+    selectMarker(el);
+  }
+  document.getElementById('addName').value = '';
+};
+
+// World-dimension inputs — live update STATE + re-render the stage so the
+// canvas resizes. Also clamps marker positions inside the new bounds so
+// nothing escapes the viewport when shrinking the world.
+function _wireDimInput(id, key, max) {
+  const inp = document.getElementById(id);
+  if (!inp) return;
+  inp.oninput = () => {
+    const v = Math.max(200, Math.min(max, parseInt(inp.value, 10) || 0));
+    if (!v) return;
+    STATE[key] = v;
+    // Clamp anything that's now out of bounds
+    for (const list of [STATE.npcs, STATE.props]) {
+      for (const it of list) {
+        if (it.x > STATE.worldWidth)  it.x = STATE.worldWidth;
+        if (it.y > STATE.worldHeight) it.y = STATE.worldHeight;
+      }
+    }
+    for (const p of STATE.platforms) {
+      if (p.x + (p.w||80) > STATE.worldWidth)  p.x = Math.max(0, STATE.worldWidth - (p.w||80));
+      if (p.y + (p.h||10) > STATE.worldHeight) p.y = Math.max(0, STATE.worldHeight - (p.h||10));
+    }
+    renderStage();
+  };
+}
+_wireDimInput('dimW', 'worldWidth',  20000);
+_wireDimInput('dimH', 'worldHeight',  4000);
+
+init();
+</script>
+</body>
+</html>

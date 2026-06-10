@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>LevelX — Procedural Sprite Maker (MS-Grade)</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:#1a1024; color:#f0e4ff;
+    font-family:'Trebuchet MS', sans-serif;
+    padding:20px; min-height:100vh;
+  }
+  h1 { color:#ffdd88; margin-bottom:4px; text-shadow:2px 2px 0 #000; }
+  .sub { color:#b9a7d4; font-size:13px; margin-bottom:16px; }
+  .wrap { display:grid; grid-template-columns:280px 1fr; gap:20px; max-width:1200px; margin:0 auto; }
+  .panel { background:rgba(40,20,70,0.5); border:2px solid #5a3a7a; border-radius:8px; padding:14px; }
+  h2 { color:#ffcc66; font-size:14px; margin:12px 0 6px; letter-spacing:1px; }
+  h2:first-child { margin-top:0; }
+  select, button {
+    width:100%; padding:6px 8px;
+    background:#2a1a44; color:#f0e4ff;
+    border:1px solid #6a4a8a; border-radius:4px;
+    font-family:inherit; font-size:13px;
+    margin-bottom:8px; cursor:pointer;
+  }
+  select:hover, button:hover { background:#3a2a5a; }
+  button.primary {
+    background:linear-gradient(180deg, #cc7722, #884400);
+    border-color:#ffcc44; color:#fff; font-weight:bold;
+  }
+  button.primary:hover { background:linear-gradient(180deg, #dd8833, #995500); }
+  button.big {
+    background:linear-gradient(180deg, #4488cc, #226699);
+    border-color:#88ccff; color:#fff; font-weight:bold;
+  }
+  .preview-frame {
+    background:#2a1a3a; border:2px solid #5a3a7a; border-radius:6px;
+    padding:16px; margin-bottom:12px; text-align:center;
+  }
+  canvas.upscaled {
+    image-rendering:pixelated; image-rendering:crisp-edges;
+    background:#fff; border:1px solid #8a6aaa; border-radius:4px;
+    display:block; margin:0 auto;
+  }
+  .label { font-size:11px; color:#b9a7d4; display:block; margin-bottom:3px; }
+  .tag { display:inline-block; padding:2px 8px; margin:2px; background:rgba(255,220,100,0.15); color:#ffcc66; border:1px solid #8a6a22; border-radius:3px; font-size:11px; }
+  .batch-section { margin-top:16px; padding-top:14px; border-top:1px solid #5a3a7a; }
+  #thumb-grid {
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));
+    gap:10px; max-height:520px; overflow-y:auto;
+    padding:8px; background:rgba(0,0,0,0.3); border-radius:4px;
+  }
+  .thumb { background:#1a0f2a; border:1px solid #4a3a6a; border-radius:4px; padding:8px; }
+  .thumb canvas { background:#fff; image-rendering:pixelated; display:block; margin:0 auto 6px; border:1px solid #4a3a6a; }
+  .thumb .name { font-size:11px; color:#ddc; text-align:center; margin-bottom:4px; }
+  .thumb a { font-size:10px; text-decoration:none; color:#ffcc66; display:block; text-align:center; }
+  .frame-indicator { font-size:10px; color:#8a7aa0; margin-top:4px; font-family:monospace; letter-spacing:3px; }
+  .notice { color:#b9a7d4; font-size:11px; line-height:1.5; background:rgba(0,0,0,0.3); padding:8px; border-radius:4px; margin-bottom:10px; }
+  .footer { margin-top:30px; text-align:center; color:#8a7aa0; font-size:11px; }
+</style>
+</head>
+<body>
+  <h1>✦ LevelX Sprite Maker — MS Grade</h1>
+  <div class="sub">Procedural 32×48 × 6-frame overlay generator with 3-tone shading, detailed silhouettes, and legendary FX.</div>
+
+  <div class="wrap">
+    <div class="panel">
+      <h2>Overlay Type</h2>
+      <select id="type">
+        <option value="hair">Hair</option>
+        <option value="armor">Armor</option>
+        <option value="cape">Cape</option>
+        <option value="helmet">Helmet</option>
+        <option value="weapon">Weapon</option>
+        <option value="shield">Shield</option>
+        <option value="boots">Boots</option>
+      </select>
+
+      <h2>Style</h2>
+      <select id="style"></select>
+
+      <h2>Filename preview</h2>
+      <div class="tag" id="filename">—</div>
+
+      <div class="batch-section">
+        <button class="primary" id="downloadOne">⬇ Download This PNG</button>
+        <button class="big" id="downloadAll">⬇⬇ Download ALL Overlays</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="preview-frame">
+        <div class="label">Live preview (192×48 → shown at 4× upscale = 768×192)</div>
+        <canvas id="previewUp" class="upscaled" width="768" height="192"></canvas>
+        <div class="frame-indicator">idle · walk-1 · walk-2 · jump · attack-mid · attack-end</div>
+        <canvas id="exportCanvas" width="192" height="48" style="display:none;"></canvas>
+      </div>
+
+      <div class="notice">
+        <b>How to use:</b> Pick a type + style, download the PNG, save under <code>LevelX/sprites/character/overlays/&lt;type&gt;/&lt;filename&gt;.png</code>. The game loader picks it up on refresh. Download ALL batch-saves every style — browser will ask you to allow multiple downloads once.
+      </div>
+
+      <div class="panel">
+        <h2 style="margin-top:0;">Catalog (every overlay rendered live)</h2>
+        <div id="thumb-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">16-bit pixel art · 3-tone shading · legendary items render extra glow/particles · 192×48 output</div>
+
+<script>
+// =========================================================================
+// FRAMEWORK
+// =========================================================================
+const FW = 32, FH = 48, FRAMES = 6;
+const SHEET_W = FW * FRAMES; // 192
+const SHEET_H = FH;          // 48
+
+// Per-frame anatomy anchors — calibrated to the Gemini base sheets.
+const ANCHORS = [
+  // 0 idle
+  { head:[16,10], neck:[16,17], chest:[16,24], belt:[16,34], handR:[23,28], handL:[9,28], footL:[13,46], footR:[20,46] },
+  // 1 walk-1 (left foot fwd)
+  { head:[16,10], neck:[16,17], chest:[17,24], belt:[16,34], handR:[22,30], handL:[10,26], footL:[12,46], footR:[21,44] },
+  // 2 walk-2 (right foot fwd)
+  { head:[16,10], neck:[16,17], chest:[15,24], belt:[16,34], handR:[22,26], handL:[10,30], footL:[13,44], footR:[21,46] },
+  // 3 jump
+  { head:[16,9],  neck:[16,16], chest:[16,22], belt:[16,30], handR:[24,24], handL:[8,24],  footL:[13,40], footR:[19,40] },
+  // 4 attack-mid (arm overhead)
+  { head:[16,10], neck:[16,17], chest:[16,24], belt:[16,34], handR:[20,8],  handL:[10,30], footL:[11,46], footR:[21,46] },
+  // 5 attack-end (arm swept forward-down)
+  { head:[16,10], neck:[16,17], chest:[16,24], belt:[16,34], handR:[22,28], handL:[12,26], footL:[10,46], footR:[22,46] },
+];
+
+// Pixel-art primitives
+function pxl(ctx, x, y, color) {
+  if (x < 0 || y < 0 || x >= SHEET_W || y >= SHEET_H) return;
+  ctx.fillStyle = color; ctx.fillRect(x|0, y|0, 1, 1);
+}
+function px(ctx, x, y, w, h, color) {
+  ctx.fillStyle = color; ctx.fillRect(x|0, y|0, w, h);
+}
+function line(ctx, x, y, dx, dy, len, color) {
+  for (let i = 0; i < len; i++) pxl(ctx, x + dx*i, y + dy*i, color);
+}
+function clearSheet(ctx) {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, SHEET_W, SHEET_H);
+}
+// Clear to white inside the head region so face shows through for hair overlays
+function eraseFaceHole(ctx, ox, cx, cy, w, h) {
+  px(ctx, ox + cx - w/2, cy, w, h, '#ffffff');
+}
+// Diagonal dither between two colors
+function dither(ctx, x, y, w, h, a, b) {
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      pxl(ctx, x + i, y + j, ((i + j) % 2 === 0) ? a : b);
+    }
+  }
+}
+// Subtle sparkle dot (for legendary FX)
+function sparkle(ctx, x, y, color) {
+  pxl(ctx, x, y, color);
+  pxl(ctx, x-1, y, color);
+  pxl(ctx, x+1, y, color);
+  pxl(ctx, x, y-1, color);
+  pxl(ctx, x, y+1, color);
+}
+// Halo ring around a point (for holy FX)
+function halo(ctx, cx, cy, r, color) {
+  // Draw a thin circle
+  for (let a = 0; a < Math.PI * 2; a += 0.22) {
+    pxl(ctx, cx + Math.round(Math.cos(a) * r), cy + Math.round(Math.sin(a) * r), color);
+  }
+}
+
+// =========================================================================
+// CATALOG — every style has 3-4 tone palette + decorations
+// =========================================================================
+const CATALOG = {
+  hair: {
+    spiky_brown:     { name:'Spiky Brown',     tones:{ dark:'#2a1008', base:'#6a3a1a', hi:'#9a5a2a', shine:'#c88a52' } },
+    spiky_gold:      { name:'Spiky Gold',      tones:{ dark:'#6a4a08', base:'#ddaa22', hi:'#ffdd66', shine:'#fff5aa' } },
+    short_black:     { name:'Short Black',     tones:{ dark:'#080408', base:'#2a1a2a', hi:'#4a3a4a', shine:'#6a5a6a' } },
+    long_silver:     { name:'Long Silver',     tones:{ dark:'#4a4a6a', base:'#a8a8c8', hi:'#e8e8ff', shine:'#ffffff' } },
+    ponytail_blonde: { name:'Ponytail Blonde', tones:{ dark:'#7a5a2a', base:'#e8c866', hi:'#ffedaa', shine:'#fff5cc' } },
+    mage_hood:       { name:'Mage Hood',       tones:{ dark:'#1a0a44', base:'#3a2488', hi:'#5a44a8', shine:'#7a64c8' }, accent:'#ffcc44' },
+    elf_bob:         { name:'Elf Green Bob',   tones:{ dark:'#1a4a1a', base:'#3a7a3a', hi:'#6aaa5a', shine:'#a8dd88' } },
+    pink_twintails:  { name:'Pink Twintails',  tones:{ dark:'#6a2244', base:'#dd6699', hi:'#ff99bb', shine:'#ffccdd' } },
+  },
+  armor: {
+    cloth_tunic:     { name:'Cloth Tunic',     tones:{ dark:'#3a2818', base:'#8a7458', hi:'#aa9478', shine:'#c8ae8a' }, belt:'#4a3020' },
+    leather_vest:    { name:'Leather Vest',    tones:{ dark:'#3a1808', base:'#8a5a30', hi:'#aa7a50', shine:'#cc9866' }, belt:'#4a2810', strap:'#3a2010' },
+    chain_mail:      { name:'Chain Mail',      tones:{ dark:'#3a3a4a', base:'#8a8a9a', hi:'#b0b0c0', shine:'#d8d8e8' }, belt:'#4a2a10' },
+    plate_armor:     { name:'Plate Armor',     tones:{ dark:'#4a4a5a', base:'#a0a0b0', hi:'#d0d0e0', shine:'#f0f0ff' }, trim:'#ffcc44', emblem:'#ffaa22' },
+    dragon_scale:    { name:'Dragon Scale',    tones:{ dark:'#1a4a28', base:'#3a8a4a', hi:'#5abb6a', shine:'#88dd99' }, trim:'#ffcc44', spike:'#ccaa66' },
+    dawnshard_aegis: { name:'Dawnshard Aegis', tones:{ dark:'#aaaabb', base:'#f0f0f8', hi:'#ffffff', shine:'#ffffff' }, trim:'#ffdd44', emblem:'#66ff99', legendary:true },
+  },
+  cape: {
+    wine_red:        { name:'Wine Red',     tones:{ dark:'#3a0808', base:'#8a1818', hi:'#c82a2a', shine:'#dd4444' }, lining:'#1a0404', trim:'#ffcc66' },
+    royal_blue:      { name:'Royal Blue',   tones:{ dark:'#0a1a4a', base:'#2a4aa8', hi:'#4a6acc', shine:'#6a8aee' }, lining:'#080a2a', trim:'#c0c0e8' },
+    forest_green:    { name:'Forest Green', tones:{ dark:'#0a3a1a', base:'#2a6a3a', hi:'#4a8a5a', shine:'#6aaa7a' }, lining:'#040a04', trim:'#ddcc88' },
+    midnight_black:  { name:'Midnight Black',tones:{ dark:'#08080a', base:'#2a2a3a', hi:'#4a4a5a', shine:'#6a6a7a' }, lining:'#080008', trim:'#8844aa' },
+    dawnshard:       { name:'Dawnshard Holy',tones:{ dark:'#aaaabb', base:'#f0f0ff', hi:'#ffffff', shine:'#ffffff' }, lining:'#ddddee', trim:'#ffdd44', legendary:true },
+  },
+  helmet: {
+    iron_cap:        { name:'Iron Cap',        tones:{ dark:'#3a3a4a', base:'#8a8a9a', hi:'#aaaabb', shine:'#d0d0dd' }, strap:'#6a4428' },
+    knight_plume:    { name:'Knight Plume',    tones:{ dark:'#4a4a5a', base:'#b0b0c0', hi:'#e0e0f0', shine:'#ffffff' }, plume:'#4488ff', plumeHi:'#88bbff', rivet:'#4a3a28' },
+    mage_circlet:    { name:'Mage Circlet',    tones:{ dark:'#6a4a08', base:'#ddcc44', hi:'#ffee88', shine:'#ffffcc' }, gem:'#4488ff', gemHi:'#aaccff' },
+    horned_helm:     { name:'Horned Helm',     tones:{ dark:'#2a1a08', base:'#5a3a1a', hi:'#8a5a2a', shine:'#aa7a4a' }, horn:'#d8c8a0', hornHi:'#ffffff' },
+    dawnshard_crown: { name:'Dawnshard Crown', tones:{ dark:'#8a6622', base:'#ffdd66', hi:'#ffee99', shine:'#ffffcc' }, gem:'#cc2244', gemHi:'#ff6688', legendary:true },
+  },
+  weapon: {
+    sword_wood:      { name:'Wooden Sword',    tones:{ dark:'#3a1808', base:'#a07040', hi:'#c89868', shine:'#e8b888' }, guard:'#4a2a10', pommel:'#b8882a' },
+    sword_iron:      { name:'Iron Sword',      tones:{ dark:'#3a3a4a', base:'#8a8a9a', hi:'#aaaabb', shine:'#d8d8e8' }, guard:'#6a4a20', guardHi:'#8a6a40', pommel:'#ffcc44' },
+    sword_steel:     { name:'Steel Blade',     tones:{ dark:'#5a5a6a', base:'#c8ccd8', hi:'#ffffff', shine:'#ffffff' }, guard:'#aa8830', guardHi:'#ccaa50', pommel:'#ffdd66', gem:'#cc3344' },
+    sword_runed:     { name:'Runed Sabre',     tones:{ dark:'#2a4466', base:'#88ccff', hi:'#c0e8ff', shine:'#ffffff' }, guard:'#ffcc44', pommel:'#4488ff', glow:'#4488ff', runeColor:'#ffffff' },
+    sword_katana:    { name:'Katana',          tones:{ dark:'#3a2466', base:'#c0aaff', hi:'#e0ccff', shine:'#ffffff' }, guard:'#3a1a5a', pommel:'#cc88cc', glow:'#aa66ff', tassel:'#cc4466' },
+    sword_dawnshard: { name:'Dawnshard Blade', tones:{ dark:'#3a8866', base:'#88ffcc', hi:'#ddffee', shine:'#ffffff' }, guard:'#ffdd44', pommel:'#ff4444', glow:'#66ff99', legendary:true },
+    axe_battle:      { name:'Battle Axe',      tones:{ dark:'#4a3a2a', base:'#8a8a9a', hi:'#c0c0d0', shine:'#eaeaf8' }, haft:'#6a4420', guard:'#aa7733' },
+    staff_mage:      { name:'Mage Staff',      tones:{ dark:'#3a1a08', base:'#7a4a1a', hi:'#aa7a3a', shine:'#ccaa5a' }, gem:'#4488ff', gemHi:'#aaccff', glow:'#4488ff' },
+  },
+  shield: {
+    wooden_buckler:  { name:'Wooden Buckler',  tones:{ dark:'#3a1808', base:'#8a5a2a', hi:'#aa7a4a', shine:'#cc9866' }, rim:'#6a6a7a', boss:'#aa7722' },
+    iron_heater:     { name:'Iron Heater',     tones:{ dark:'#3a3a4a', base:'#7a7a8a', hi:'#a0a0b0', shine:'#c8c8d8' }, rim:'#aa8830', boss:'#ffcc44', cross:'#2a4466' },
+    knight_kite:     { name:'Kite Shield',     tones:{ dark:'#0a1a4a', base:'#2a4aa8', hi:'#4a6acc', shine:'#8aaade' }, rim:'#c0c0e8', cross:'#ffffff', crossHi:'#ccccff' },
+    tower_gold:      { name:'Tower Gold',      tones:{ dark:'#6a4a08', base:'#ddaa22', hi:'#ffcc44', shine:'#ffee88' }, rim:'#8a6622', boss:'#cc2244' },
+  },
+  boots: {
+    leather:         { name:'Leather Boots',  tones:{ dark:'#2a1408', base:'#6a4020', hi:'#8a6030', shine:'#aa8040' }, lace:'#3a2010' },
+    plate:           { name:'Plate Sabatons', tones:{ dark:'#4a4a5a', base:'#a0a0b0', hi:'#d0d0e0', shine:'#f0f0ff' }, trim:'#ffcc44' },
+    cloth_wraps:     { name:'Cloth Wraps',    tones:{ dark:'#3a2818', base:'#8a7458', hi:'#aa9478', shine:'#c8ae8a' }, cord:'#4a3020' },
+    dawnshard:       { name:'Dawnshard Boots',tones:{ dark:'#8a8aa0', base:'#f0f0ff', hi:'#ffffff', shine:'#ffffff' }, trim:'#ffdd44', legendary:true },
+  },
+};
+
+// =========================================================================
+// HAIR RENDERER — proper silhouettes, strand tufts, bangs, ponytails
+// =========================================================================
+function renderHair(ctx, style) {
+  clearSheet(ctx);
+  const s = CATALOG.hair[style];
+  if (!s) return;
+  const t = s.tones;
+  for (let f = 0; f < FRAMES; f++) {
+    const ox = f * FW;
+    const head = ANCHORS[f].head;
+    const cx = ox + head[0];
+    const cy = head[1];
+    // Vertical movement for jump frame
+    const yoff = f === 3 ? -1 : 0;
+    const swing = f === 3 ? 0 : f === 4 ? -1 : f === 5 ? 1 : 0;
+
+    if (style === 'spiky_brown' || style === 'spiky_gold' || style === 'short_black') {
+      // --- SHORT SPIKY HAIR ---
+      // Outline shell across crown
+      px(ctx, cx-7, cy-7 + yoff, 14, 1, t.dark);
+      px(ctx, cx-8, cy-6 + yoff, 1, 4, t.dark);
+      px(ctx, cx+7, cy-6 + yoff, 1, 4, t.dark);
+      // Main cap base
+      px(ctx, cx-7, cy-6 + yoff, 14, 4, t.base);
+      // Highlight line at crown
+      px(ctx, cx-5, cy-6 + yoff, 8, 1, t.hi);
+      px(ctx, cx-2, cy-6 + yoff, 3, 1, t.shine);
+      // Shadow under hair (on forehead)
+      px(ctx, cx-6, cy-2 + yoff, 12, 1, t.dark);
+      // Individual spike tufts rising from crown
+      const spikes = [[-5, -9], [-2, -10], [1, -10], [4, -9]];
+      for (const [dx, dh] of spikes) {
+        const sx = cx + dx;
+        const h = Math.abs(dh) - 6;
+        // Outline
+        px(ctx, sx, cy + dh + yoff, 1, 1, t.dark);
+        px(ctx, sx-1, cy + dh+1 + yoff, 3, 1, t.dark);
+        px(ctx, sx-1, cy + dh+2 + yoff, 1, 2, t.dark);
+        px(ctx, sx+1, cy + dh+2 + yoff, 1, 2, t.dark);
+        // Fill
+        px(ctx, sx, cy + dh+1 + yoff, 1, 2, t.base);
+        px(ctx, sx, cy + dh+1 + yoff, 1, 1, t.hi);
+      }
+      // Side bangs framing ears
+      px(ctx, cx-7, cy-2 + yoff, 1, 3, t.dark);
+      px(ctx, cx-6, cy-2 + yoff, 1, 2, t.base);
+      px(ctx, cx+6, cy-2 + yoff, 1, 3, t.dark);
+      px(ctx, cx+5, cy-2 + yoff, 1, 2, t.base);
+      // Bangs over forehead (covering top of face slightly)
+      px(ctx, cx-4, cy-2 + yoff, 8, 1, t.dark);
+      px(ctx, cx-3, cy-2 + yoff, 6, 1, t.base);
+      px(ctx, cx, cy-2 + yoff, 2, 1, t.hi);
+    }
+    else if (style === 'long_silver') {
+      // --- LONG FLOWING SILVER HAIR ---
+      const jump = f === 3 ? -2 : 0;
+      const sideSwing = f === 3 ? 2 : (f === 4 ? -1 : f === 5 ? 1 : 0);
+      // Top crown outline
+      px(ctx, cx-8, cy-7 + jump, 16, 1, t.dark);
+      px(ctx, cx-9, cy-6 + jump, 1, 4, t.dark);
+      px(ctx, cx+8, cy-6 + jump, 1, 4, t.dark);
+      // Main crown base
+      px(ctx, cx-8, cy-6 + jump, 16, 4, t.base);
+      // Crown highlight
+      px(ctx, cx-6, cy-6 + jump, 12, 1, t.hi);
+      px(ctx, cx-3, cy-6 + jump, 6, 1, t.shine);
+      // Volumetric bangs across forehead
+      px(ctx, cx-7, cy-2 + jump, 14, 1, t.dark);
+      px(ctx, cx-6, cy-2 + jump, 12, 1, t.base);
+      px(ctx, cx-2, cy-2 + jump, 4, 1, t.hi);
+      // Side strands falling past shoulders
+      for (let y = 0; y < 14; y++) {
+        const sx = cx-8 - sideSwing + Math.floor(y * 0.1);
+        const dx = cx+7 + sideSwing - Math.floor(y * 0.1);
+        // Left strand
+        px(ctx, sx, cy+y, 1, 1, t.dark);
+        px(ctx, sx+1, cy+y, 1, 1, t.base);
+        if (y < 8) px(ctx, sx+2, cy+y, 1, 1, t.hi);
+        // Right strand
+        px(ctx, dx, cy+y, 1, 1, t.dark);
+        px(ctx, dx-1, cy+y, 1, 1, t.base);
+        if (y < 8) px(ctx, dx-2, cy+y, 1, 1, t.hi);
+      }
+      // Back hair silhouette behind head
+      px(ctx, cx-3, cy-1 + jump, 6, 2, t.base);
+      px(ctx, cx-3, cy + jump, 6, 1, t.hi);
+    }
+    else if (style === 'ponytail_blonde') {
+      // --- PONYTAIL ---
+      // Crown outline
+      px(ctx, cx-7, cy-7 + yoff, 14, 1, t.dark);
+      px(ctx, cx-8, cy-6 + yoff, 1, 4, t.dark);
+      px(ctx, cx+7, cy-6 + yoff, 1, 4, t.dark);
+      // Crown base
+      px(ctx, cx-7, cy-6 + yoff, 14, 4, t.base);
+      px(ctx, cx-5, cy-6 + yoff, 10, 1, t.hi);
+      px(ctx, cx-2, cy-6 + yoff, 4, 1, t.shine);
+      // Bangs swept to one side
+      px(ctx, cx-6, cy-2 + yoff, 8, 1, t.dark);
+      px(ctx, cx-5, cy-2 + yoff, 6, 1, t.base);
+      // Side strands (short)
+      px(ctx, cx-8, cy-2 + yoff, 1, 3, t.dark);
+      px(ctx, cx-7, cy-1 + yoff, 1, 2, t.base);
+      // Ponytail tie at back
+      px(ctx, cx+5, cy-3 + yoff, 4, 2, t.dark);
+      px(ctx, cx+6, cy-3 + yoff, 2, 1, '#cc4466'); // red ribbon
+      px(ctx, cx+6, cy-2 + yoff, 2, 1, '#ff6688');
+      // Flowing ponytail
+      const ptSwing = f === 3 ? -4 : (f === 5 ? 3 : f === 4 ? -2 : Math.floor(Math.sin(f * 1.3) * 1));
+      for (let y = 0; y < 10; y++) {
+        const sx = cx + 8 + ptSwing + Math.floor(y * 0.3);
+        px(ctx, sx, cy - 2 + y + yoff, 1, 1, t.dark);
+        px(ctx, sx-1, cy - 2 + y + yoff, 1, 1, t.base);
+        if (y < 6) px(ctx, sx-2, cy - 2 + y + yoff, 1, 1, t.hi);
+      }
+      // Ponytail tip fan
+      px(ctx, cx+9+ptSwing+2, cy + 8 + yoff, 1, 1, t.base);
+    }
+    else if (style === 'mage_hood') {
+      // --- MAGE HOOD ---
+      // Big hood silhouette
+      px(ctx, cx-9, cy-7 + yoff, 18, 1, t.dark);
+      px(ctx, cx-10, cy-6 + yoff, 1, 10, t.dark);
+      px(ctx, cx+9, cy-6 + yoff, 1, 10, t.dark);
+      px(ctx, cx-9, cy-6 + yoff, 18, 10, t.base);
+      px(ctx, cx-8, cy-6 + yoff, 16, 1, t.hi);
+      px(ctx, cx-3, cy-6 + yoff, 6, 1, t.shine);
+      // Hood opening showing face (erase to white)
+      px(ctx, cx-5, cy-1 + yoff, 10, 6, '#ffffff');
+      // Hood opening inner shadow
+      px(ctx, cx-6, cy-1 + yoff, 1, 5, t.dark);
+      px(ctx, cx+5, cy-1 + yoff, 1, 5, t.dark);
+      px(ctx, cx-5, cy-2 + yoff, 10, 1, t.dark);
+      // Gold trim on hood
+      if (s.accent) {
+        px(ctx, cx-9, cy+3 + yoff, 18, 1, s.accent);
+        px(ctx, cx-9, cy+4 + yoff, 1, 1, s.accent);
+        px(ctx, cx+8, cy+4 + yoff, 1, 1, s.accent);
+      }
+      // Drawstring at neckline
+      px(ctx, cx-3, cy+5 + yoff, 1, 2, t.dark);
+      px(ctx, cx+2, cy+5 + yoff, 1, 2, t.dark);
+    }
+    else if (style === 'elf_bob') {
+      // --- ELF GREEN BOB ---
+      // Short bob outline
+      px(ctx, cx-7, cy-7 + yoff, 14, 1, t.dark);
+      px(ctx, cx-8, cy-6 + yoff, 1, 8, t.dark);
+      px(ctx, cx+7, cy-6 + yoff, 1, 8, t.dark);
+      // Base
+      px(ctx, cx-7, cy-6 + yoff, 14, 8, t.base);
+      px(ctx, cx-6, cy-6 + yoff, 12, 1, t.hi);
+      px(ctx, cx-2, cy-6 + yoff, 4, 1, t.shine);
+      // Bangs
+      px(ctx, cx-5, cy-2 + yoff, 10, 1, t.dark);
+      px(ctx, cx-4, cy-2 + yoff, 8, 1, t.base);
+      // Ear tips poking through
+      px(ctx, cx-7, cy-1 + yoff, 1, 2, '#f0c090');
+      px(ctx, cx+6, cy-1 + yoff, 1, 2, '#f0c090');
+      // Bottom hem
+      px(ctx, cx-7, cy+2 + yoff, 14, 1, t.dark);
+    }
+    else if (style === 'pink_twintails') {
+      // --- PINK TWINTAILS ---
+      // Crown
+      px(ctx, cx-7, cy-7 + yoff, 14, 1, t.dark);
+      px(ctx, cx-8, cy-6 + yoff, 1, 4, t.dark);
+      px(ctx, cx+7, cy-6 + yoff, 1, 4, t.dark);
+      px(ctx, cx-7, cy-6 + yoff, 14, 4, t.base);
+      px(ctx, cx-5, cy-6 + yoff, 10, 1, t.hi);
+      // Bangs with heart-shape fringe
+      px(ctx, cx-5, cy-2 + yoff, 10, 1, t.dark);
+      px(ctx, cx-4, cy-2 + yoff, 8, 1, t.base);
+      px(ctx, cx-1, cy-1 + yoff, 2, 1, t.base); // center droop
+      // Twin tails both sides
+      const twinSwing = f === 3 ? -2 : (f === 4 ? -1 : f === 5 ? 1 : (f % 2 ? -1 : 1));
+      for (let y = 0; y < 12; y++) {
+        // Left tail
+        const lx = cx-8 - Math.floor(y * 0.3) - twinSwing;
+        px(ctx, lx, cy+y+yoff, 1, 1, t.dark);
+        px(ctx, lx+1, cy+y+yoff, 2, 1, t.base);
+        if (y % 3 === 0) px(ctx, lx+2, cy+y+yoff, 1, 1, t.hi);
+        // Right tail
+        const rx = cx+7 + Math.floor(y * 0.3) + twinSwing;
+        px(ctx, rx, cy+y+yoff, 1, 1, t.dark);
+        px(ctx, rx-2, cy+y+yoff, 2, 1, t.base);
+        if (y % 3 === 0) px(ctx, rx-2, cy+y+yoff, 1, 1, t.hi);
+      }
+      // Ribbon bows
+      px(ctx, cx-7, cy-3 + yoff, 2, 2, '#ff99bb');
+      px(ctx, cx+6, cy-3 + yoff, 2, 2, '#ff99bb');
+    }
+  }
+}
+
+// =========================================================================
+// ARMOR RENDERER — pauldrons, emblems, scales, rivets
+// =========================================================================
+function renderArmor(ctx, style) {
+  clearSheet(ctx);
+  const s = CATALOG.armor[style];
+  if (!s) return;
+  const t = s.tones;
+
+  for (let f = 0; f < FRAMES; f++) {
+    const ox = f * FW;
+    const chest = ANCHORS[f].chest;
+    const cx = ox + chest[0];
+    const yShift = f === 3 ? -2 : 0;
+    const twist = f === 1 ? 1 : f === 2 ? -1 : (f === 4 ? 1 : f === 5 ? -1 : 0);
+
+    // === SHOULDER/PAULDRON shape (top outline) ===
+    // Pauldron peaks — slightly pointed at each shoulder
+    px(ctx, cx-7 + twist, 14 + yShift, 2, 1, t.dark);    // left peak outline
+    px(ctx, cx-7 + twist, 15 + yShift, 1, 1, t.dark);
+    px(ctx, cx+5 + twist, 14 + yShift, 2, 1, t.dark);    // right peak outline
+    px(ctx, cx+6 + twist, 15 + yShift, 1, 1, t.dark);
+    // Pauldron fill
+    px(ctx, cx-7 + twist, 15 + yShift, 2, 2, t.base);
+    px(ctx, cx+5 + twist, 15 + yShift, 2, 2, t.base);
+    // Pauldron highlights (top-left edge)
+    px(ctx, cx-7 + twist, 15 + yShift, 1, 1, t.hi);
+    px(ctx, cx+5 + twist, 15 + yShift, 1, 1, t.hi);
+
+    // === NECKLINE + CHEST BODY ===
+    // Top outline (neck dip + shoulders)
+    px(ctx, cx-5 + twist, 15 + yShift, 2, 1, t.dark);
+    px(ctx, cx+3 + twist, 15 + yShift, 2, 1, t.dark);
+    px(ctx, cx-3 + twist, 16 + yShift, 6, 1, t.dark);  // V-neck bottom
+
+    // Sides outline
+    px(ctx, cx-6 + twist, 17 + yShift, 1, 17, t.dark);
+    px(ctx, cx+5 + twist, 17 + yShift, 1, 17, t.dark);
+    // Bottom waist outline
+    px(ctx, cx-5 + twist, 34 + yShift, 11, 1, t.dark);
+
+    // Body fill
+    px(ctx, cx-5 + twist, 16 + yShift, 10, 18, t.base);
+    // V-neck opening
+    px(ctx, cx-2 + twist, 16 + yShift, 4, 2, '#f0c090');  // skin showing through
+    // Chest highlight (left side)
+    px(ctx, cx-5 + twist, 17 + yShift, 1, 15, t.hi);
+    px(ctx, cx-4 + twist, 17 + yShift, 1, 8, t.hi);
+    // Shine spot
+    px(ctx, cx-4 + twist, 19 + yShift, 1, 3, t.shine);
+    // Shadow (right side)
+    px(ctx, cx+4 + twist, 17 + yShift, 1, 16, t.dark);
+
+    // === STYLE-SPECIFIC DETAILS ===
+    if (style === 'cloth_tunic') {
+      // Simple belt
+      px(ctx, cx-5 + twist, 32 + yShift, 10, 2, s.belt);
+      px(ctx, cx-5 + twist, 32 + yShift, 10, 1, t.dark);
+      // Fabric fold lines
+      px(ctx, cx-2 + twist, 20 + yShift, 1, 10, t.dark);
+      px(ctx, cx+1 + twist, 22 + yShift, 1, 8, t.dark);
+      // Drawstring V-neck
+      px(ctx, cx-1 + twist, 17 + yShift, 1, 2, t.dark);
+    }
+    else if (style === 'leather_vest') {
+      // Central lace-up strip
+      px(ctx, cx-1 + twist, 17 + yShift, 2, 15, s.strap);
+      // Visible laces (X pattern)
+      for (let y = 18; y < 32; y += 3) {
+        px(ctx, cx-2 + twist, y + yShift, 1, 1, t.shine);
+        px(ctx, cx+1 + twist, y + yShift, 1, 1, t.shine);
+      }
+      // Thick belt with brass buckle
+      px(ctx, cx-5 + twist, 32 + yShift, 10, 2, s.belt);
+      px(ctx, cx-5 + twist, 32 + yShift, 10, 1, t.dark);
+      px(ctx, cx-1 + twist, 32 + yShift, 2, 2, '#ffcc44');
+      // Shoulder patches with stitching
+      px(ctx, cx-5 + twist, 17 + yShift, 3, 3, t.hi);
+      px(ctx, cx+2 + twist, 17 + yShift, 3, 3, t.hi);
+    }
+    else if (style === 'chain_mail') {
+      // Chain ring pattern (dithered dots)
+      for (let y = 17; y < 33; y += 2) {
+        for (let x = -4; x <= 3; x += 2) {
+          pxl(ctx, cx + x + twist, y + yShift, t.hi);
+          pxl(ctx, cx + x + 1 + twist, y + 1 + yShift, t.dark);
+        }
+      }
+      // Iron belt
+      px(ctx, cx-5 + twist, 32 + yShift, 10, 2, '#5a5a6a');
+      px(ctx, cx-5 + twist, 32 + yShift, 10, 1, t.dark);
+      // Fabric padding visible at neck
+      px(ctx, cx-2 + twist, 16 + yShift, 4, 1, s.belt);
+    }
+    else if (style === 'plate_armor') {
+      // Gold cross emblem (large Christian cross)
+      px(ctx, cx-1 + twist, 20 + yShift, 2, 10, s.emblem);
+      px(ctx, cx-3 + twist, 23 + yShift, 6, 2, s.emblem);
+      // Cross shine
+      px(ctx, cx-1 + twist, 20 + yShift, 1, 10, s.trim);
+      px(ctx, cx-3 + twist, 23 + yShift, 1, 2, s.trim);
+      // Rivets
+      for (const [rx, ry] of [[-5, 17], [4, 17], [-5, 31], [4, 31]]) {
+        px(ctx, cx + rx + twist, ry + yShift, 1, 1, t.shine);
+      }
+      // Central chest ridge
+      px(ctx, cx + twist, 17 + yShift, 1, 14, t.hi);
+      // Belt
+      px(ctx, cx-5 + twist, 32 + yShift, 10, 2, '#5a5a6a');
+      px(ctx, cx-5 + twist, 32 + yShift, 10, 1, t.dark);
+      px(ctx, cx-1 + twist, 32 + yShift, 2, 2, s.trim);
+    }
+    else if (style === 'dragon_scale') {
+      // Shoulder spikes
+      px(ctx, cx-8 + twist, 13 + yShift, 1, 2, t.dark);
+      px(ctx, cx-8 + twist, 14 + yShift, 1, 1, s.spike);
+      px(ctx, cx+7 + twist, 13 + yShift, 1, 2, t.dark);
+      px(ctx, cx+7 + twist, 14 + yShift, 1, 1, s.spike);
+      // Scale rows — scalloped pattern
+      for (let row = 0; row < 4; row++) {
+        const ry = 18 + row * 4 + yShift;
+        const offset = row % 2 === 0 ? 0 : 2;
+        for (let sx = -4 + offset; sx <= 3; sx += 4) {
+          // Scallop shape: rounded top, pointed bottom
+          px(ctx, cx + sx + twist, ry, 3, 1, t.dark);
+          px(ctx, cx + sx + twist, ry + 1, 3, 2, t.base);
+          px(ctx, cx + sx + 1 + twist, ry, 1, 1, t.hi);
+        }
+      }
+      // Gold trim at neckline
+      px(ctx, cx-3 + twist, 16 + yShift, 6, 1, s.trim);
+      // Belt
+      px(ctx, cx-5 + twist, 32 + yShift, 10, 2, s.trim);
+      px(ctx, cx-5 + twist, 32 + yShift, 10, 1, t.dark);
+    }
+    else if (style === 'dawnshard_aegis') {
+      // Angel-wing pauldrons
+      for (let w = 0; w < 3; w++) {
+        // Left wing feathers
+        px(ctx, cx-9-w + twist, 13-w + yShift, 2, 1, t.dark);
+        px(ctx, cx-9-w + twist, 14-w + yShift, 2, 1, t.base);
+        px(ctx, cx-8-w + twist, 14-w + yShift, 1, 1, t.hi);
+        // Right wing feathers
+        px(ctx, cx+7+w + twist, 13-w + yShift, 2, 1, t.dark);
+        px(ctx, cx+7+w + twist, 14-w + yShift, 2, 1, t.base);
+        px(ctx, cx+7+w + twist, 14-w + yShift, 1, 1, t.hi);
+      }
+      // Central maple leaf emblem
+      px(ctx, cx-2 + twist, 21 + yShift, 4, 1, t.dark);
+      px(ctx, cx-3 + twist, 22 + yShift, 6, 3, s.emblem);
+      px(ctx, cx-1 + twist, 25 + yShift, 2, 2, t.dark); // stem
+      // Gold filigree cross
+      px(ctx, cx-1 + twist, 20 + yShift, 2, 10, s.trim);
+      px(ctx, cx-3 + twist, 23 + yShift, 6, 1, s.trim);
+      // Gold belt
+      px(ctx, cx-5 + twist, 32 + yShift, 10, 2, s.trim);
+      px(ctx, cx-5 + twist, 32 + yShift, 10, 1, t.dark);
+      // Holy rim sparkles
+      if (f === 0 || f === 4) {
+        pxl(ctx, cx-7 + twist, 20 + yShift, '#ffffff');
+        pxl(ctx, cx+6 + twist, 26 + yShift, '#ffffff');
+      }
+    }
+  }
+}
+
+// =========================================================================
+// CAPE RENDERER — visible folds, trim, tattered hem, wind animation
+// =========================================================================
+function renderCape(ctx, style) {
+  clearSheet(ctx);
+  const s = CATALOG.cape[style];
+  if (!s) return;
+  const t = s.tones;
+
+  for (let f = 0; f < FRAMES; f++) {
+    const ox = f * FW;
+    const flare = f === 3 ? 3 : f === 4 ? -2 : f === 5 ? 3 : (f === 1 ? -1 : f === 2 ? 1 : 0);
+    const yLift = f === 3 ? -2 : 0;
+    const cx = ox + 16;
+
+    // Collar trim at top (gold band across shoulders)
+    if (s.trim) {
+      px(ctx, cx-9 + flare, 14 + yLift, 4, 1, s.trim);
+      px(ctx, cx+5 - flare, 14 + yLift, 4, 1, s.trim);
+    }
+
+    // LEFT wing (character's right side — we see it on left)
+    const leftTop = 14 + yLift;
+    const leftBot = 42 + yLift;
+    // Outline
+    px(ctx, cx-10 + flare, leftTop, 4, 1, t.dark);
+    px(ctx, cx-10 + flare, leftTop, 1, leftBot-leftTop, t.dark);
+    px(ctx, cx-7 + flare, leftBot, 1, 1, t.dark);
+    // Tattered bottom (zigzag pattern)
+    px(ctx, cx-9 + flare, leftBot, 1, 1, t.dark);
+    px(ctx, cx-10 + flare, leftBot+1, 1, 1, t.dark);
+    px(ctx, cx-8 + flare, leftBot-1, 1, 1, t.dark);
+    // Fill
+    px(ctx, cx-10 + flare, leftTop+1, 4, leftBot-leftTop-1, t.base);
+    // Inner fold highlight
+    px(ctx, cx-9 + flare, leftTop+1, 1, leftBot-leftTop-2, t.hi);
+    // Outer darker edge
+    px(ctx, cx-7 + flare, leftTop+1, 1, leftBot-leftTop-2, t.dark);
+    // Inner lining visible at bottom hem
+    px(ctx, cx-9 + flare, leftBot-1, 2, 1, s.lining);
+    // Mid-cape vertical fold line
+    px(ctx, cx-8 + flare, leftTop+2, 1, leftBot-leftTop-4, t.shine);
+    // Shine spot (legendary capes)
+    if (s.legendary && (f === 0 || f === 3)) {
+      sparkle(ctx, cx-9 + flare, leftTop + 5, '#ffffff');
+    }
+
+    // RIGHT wing
+    const rightTop = 14 + yLift;
+    const rightBot = 42 + yLift;
+    px(ctx, cx+6 - flare, rightTop, 4, 1, t.dark);
+    px(ctx, cx+9 - flare, rightTop, 1, rightBot-rightTop, t.dark);
+    px(ctx, cx+6 - flare, rightBot, 1, 1, t.dark);
+    // Tattered bottom
+    px(ctx, cx+8 - flare, rightBot, 1, 1, t.dark);
+    px(ctx, cx+9 - flare, rightBot+1, 1, 1, t.dark);
+    px(ctx, cx+7 - flare, rightBot-1, 1, 1, t.dark);
+    // Fill
+    px(ctx, cx+6 - flare, rightTop+1, 4, rightBot-rightTop-1, t.base);
+    // Inner (now right side)
+    px(ctx, cx+6 - flare, rightTop+1, 1, rightBot-rightTop-2, t.shine);
+    // Darker edge
+    px(ctx, cx+8 - flare, rightTop+1, 1, rightBot-rightTop-2, t.dark);
+    // Lining at bottom
+    px(ctx, cx+7 - flare, rightBot-1, 2, 1, s.lining);
+    // Fold line
+    px(ctx, cx+7 - flare, rightTop+2, 1, rightBot-rightTop-4, t.hi);
+    // Sparkle
+    if (s.legendary && (f === 0 || f === 3)) {
+      sparkle(ctx, cx+9 - flare, rightTop + 7, '#ffffff');
+    }
+
+    // Collar back (joining both sides above the head visually)
+    px(ctx, cx-3, 13 + yLift, 6, 1, t.dark);
+    px(ctx, cx-2, 14 + yLift, 4, 1, t.base);
+    if (s.trim) px(ctx, cx-2, 13 + yLift, 4, 1, s.trim);
+  }
+}
+
+// =========================================================================
+// HELMET RENDERER — dome, visor, plume, jewels
+// =========================================================================
+function renderHelmet(ctx, style) {
+  clearSheet(ctx);
+  const s = CATALOG.helmet[style];
+  if (!s) return;
+  const t = s.tones;
+
+  for (let f = 0; f < FRAMES; f++) {
+    const ox = f * FW;
+    const head = ANCHORS[f].head;
+    const cx = ox + head[0];
+    const cy = head[1];
+    const yoff = f === 3 ? -1 : 0;
+
+    // === Base helmet dome ===
+    // Outline (rounded top)
+    px(ctx, cx-5, cy-8 + yoff, 10, 1, t.dark);
+    px(ctx, cx-6, cy-7 + yoff, 1, 1, t.dark);
+    px(ctx, cx+5, cy-7 + yoff, 1, 1, t.dark);
+    px(ctx, cx-7, cy-6 + yoff, 1, 7, t.dark);
+    px(ctx, cx+6, cy-6 + yoff, 1, 7, t.dark);
+    px(ctx, cx-6, cy+1 + yoff, 13, 1, t.dark);
+    // Dome fill
+    px(ctx, cx-5, cy-7 + yoff, 10, 9, t.base);
+    px(ctx, cx-6, cy-6 + yoff, 1, 7, t.base);
+    px(ctx, cx+6, cy-6 + yoff, 1, 7, t.base);
+    // Highlight on top-left curve
+    px(ctx, cx-4, cy-8 + yoff, 6, 1, t.hi);
+    px(ctx, cx-5, cy-7 + yoff, 2, 4, t.hi);
+    px(ctx, cx-2, cy-7 + yoff, 2, 1, t.shine);
+
+    if (style === 'iron_cap') {
+      // Brow band with rivets
+      px(ctx, cx-5, cy-1 + yoff, 10, 1, t.dark);
+      px(ctx, cx-4, cy-1 + yoff, 1, 1, t.shine);
+      px(ctx, cx-1, cy-1 + yoff, 1, 1, t.shine);
+      px(ctx, cx+3, cy-1 + yoff, 1, 1, t.shine);
+      // Chin strap hanging
+      px(ctx, cx-7, cy+2 + yoff, 1, 3, s.strap);
+      px(ctx, cx+6, cy+2 + yoff, 1, 3, s.strap);
+    }
+    else if (style === 'knight_plume') {
+      // Visor slit across eyes (T-shape for visor)
+      px(ctx, cx-4, cy-1 + yoff, 8, 1, t.dark);
+      px(ctx, cx-1, cy+1 + yoff, 2, 1, t.dark);
+      // Rivets along brow
+      for (const rx of [-5, -2, 1, 4]) {
+        px(ctx, cx + rx, cy-2 + yoff, 1, 1, s.rivet);
+      }
+      // Plume mount
+      px(ctx, cx-2, cy-9 + yoff, 4, 1, t.dark);
+      px(ctx, cx-1, cy-9 + yoff, 2, 1, s.plume);
+      // Tall plume with feather shape
+      const sway = f === 4 ? -2 : f === 5 ? 2 : f === 3 ? 0 : (f % 2 ? -1 : 1);
+      // Plume outline
+      for (let y = 0; y < 8; y++) {
+        const xOff = Math.floor(y * 0.3) * Math.sign(sway || 1);
+        px(ctx, cx + sway + xOff, cy-10-y + yoff, 1, 1, t.dark);
+        px(ctx, cx-1 + sway + xOff, cy-10-y + yoff, 1, 1, s.plume);
+        px(ctx, cx+1 + sway + xOff, cy-10-y + yoff, 1, 1, t.dark);
+      }
+      // Plume fill + highlight
+      for (let y = 0; y < 6; y++) {
+        const xOff = Math.floor(y * 0.3) * Math.sign(sway || 1);
+        px(ctx, cx + sway + xOff, cy-10-y + yoff, 1, 1, s.plume);
+        pxl(ctx, cx-1 + sway + xOff, cy-10-y + yoff, s.plumeHi);
+      }
+    }
+    else if (style === 'mage_circlet') {
+      // Thin band only (no dome) — so overwrite base dome
+      px(ctx, cx-5, cy-8 + yoff, 10, 9, '#ffffff'); // clear dome
+      // Circlet band
+      px(ctx, cx-7, cy-4 + yoff, 14, 1, t.dark);
+      px(ctx, cx-7, cy-3 + yoff, 14, 2, t.base);
+      px(ctx, cx-7, cy-5 + yoff, 14, 1, t.hi);
+      // Central gem
+      px(ctx, cx-1, cy-5 + yoff, 2, 2, t.dark);
+      px(ctx, cx-1, cy-4 + yoff, 2, 1, s.gem);
+      px(ctx, cx-1, cy-5 + yoff, 1, 1, s.gemHi);
+      // Side filigree
+      px(ctx, cx-4, cy-4 + yoff, 1, 1, t.shine);
+      px(ctx, cx+3, cy-4 + yoff, 1, 1, t.shine);
+    }
+    else if (style === 'horned_helm') {
+      // Visor slit
+      px(ctx, cx-4, cy-1 + yoff, 8, 1, t.dark);
+      // Two curved horns from sides
+      for (let y = 0; y < 6; y++) {
+        const xOffL = Math.floor(y * 0.5);
+        px(ctx, cx-7-xOffL, cy-7-y + yoff, 1, 1, t.dark);
+        px(ctx, cx-6-xOffL, cy-7-y + yoff, 1, 1, s.horn);
+        const xOffR = Math.floor(y * 0.5);
+        px(ctx, cx+7+xOffR, cy-7-y + yoff, 1, 1, t.dark);
+        px(ctx, cx+6+xOffR, cy-7-y + yoff, 1, 1, s.horn);
+      }
+      // Horn tips (highlight)
+      px(ctx, cx-9, cy-12 + yoff, 1, 1, s.hornHi);
+      px(ctx, cx+9, cy-12 + yoff, 1, 1, s.hornHi);
+    }
+    else if (style === 'dawnshard_crown') {
+      // Clear dome — crown instead
+      px(ctx, cx-5, cy-8 + yoff, 10, 9, '#ffffff');
+      // Crown band
+      px(ctx, cx-7, cy-4 + yoff, 14, 1, t.dark);
+      px(ctx, cx-7, cy-3 + yoff, 14, 2, t.base);
+      px(ctx, cx-6, cy-5 + yoff, 12, 1, t.hi);
+      // Jeweled spikes (5 total)
+      const spikeHeights = [3, 4, 6, 4, 3];
+      const spikeXs = [-5, -2, 0, 3, 5];
+      for (let i = 0; i < 5; i++) {
+        const sx = cx + spikeXs[i];
+        const h = spikeHeights[i];
+        // Spike outline triangle
+        for (let y = 0; y < h; y++) {
+          px(ctx, sx, cy-5-y + yoff, 1, 1, t.dark);
+        }
+        px(ctx, sx-1, cy-4 + yoff, 3, 1, t.base);
+        px(ctx, sx, cy-4-h + yoff, 1, 1, s.gem);
+        if (i === 2) pxl(ctx, sx, cy-5-h + yoff, s.gemHi);
+      }
+      // Halo behind head
+      halo(ctx, cx, cy-2 + yoff, 11, t.shine);
+      // Sparkles
+      if (f === 0 || f === 2 || f === 4) {
+        sparkle(ctx, cx-9, cy-2 + yoff, '#ffffff');
+        sparkle(ctx, cx+9, cy-2 + yoff, '#ffffff');
+      }
+    }
+  }
+}
+
+// =========================================================================
+// WEAPON RENDERER — fullers, quillons, glow, legendary FX
+// =========================================================================
+function renderWeapon(ctx, style) {
+  clearSheet(ctx);
+  const s = CATALOG.weapon[style];
+  if (!s) return;
+  const t = s.tones;
+  for (let f = 0; f < FRAMES; f++) {
+    const ox = f * FW;
+    const hand = ANCHORS[f].handR;
+    const gx = ox + hand[0];
+    const gy = hand[1];
+    // Weapon orientation per frame:
+    // idle/walk/jump: blade UP from hand
+    // attack-mid: blade UP, elevated hand
+    // attack-end: blade horizontal, sweeping FORWARD (right)
+    const horizontal = (f === 5);
+
+    if (style === 'axe_battle') {
+      // Axe renders differently
+      drawAxe(ctx, gx, gy, s, horizontal);
+      continue;
+    }
+    if (style === 'staff_mage') {
+      drawStaff(ctx, gx, gy, s, horizontal);
+      continue;
+    }
+
+    if (!horizontal) {
+      // Vertical sword (blade up)
+      // Glow aura for enchanted weapons
+      if (s.glow) {
+        ctx.globalAlpha = 0.35;
+        for (let dx = -2; dx <= 2; dx++) {
+          px(ctx, gx + dx, gy-16, 1, 16, s.glow);
+        }
+        ctx.globalAlpha = 1;
+      }
+      // Blade outline
+      px(ctx, gx-1, gy-15, 1, 14, t.dark);
+      px(ctx, gx+1, gy-15, 1, 14, t.dark);
+      px(ctx, gx, gy-16, 1, 1, t.dark); // tip
+      // Blade base
+      px(ctx, gx, gy-15, 1, 14, t.base);
+      // Fuller (darker center line)
+      // (1-pixel wide blade is too thin for a fuller, so use a highlight instead)
+      px(ctx, gx, gy-14, 1, 10, t.hi);
+      px(ctx, gx, gy-13, 1, 4, t.shine);
+      // Tip bright pixel
+      px(ctx, gx, gy-15, 1, 1, t.shine);
+      // Runed etchings
+      if (style === 'sword_runed') {
+        for (const y of [gy-13, gy-10, gy-7, gy-4]) {
+          pxl(ctx, gx, y, s.runeColor);
+        }
+      }
+      // Crossguard
+      px(ctx, gx-3, gy-2, 7, 1, t.dark);
+      px(ctx, gx-2, gy-1, 5, 1, s.guard);
+      if (s.guardHi) px(ctx, gx-2, gy-2, 1, 1, s.guardHi);
+      // Grip
+      px(ctx, gx, gy, 1, 3, '#2a1a0a');
+      // Grip wrap lines
+      pxl(ctx, gx, gy+1, '#5a3a1a');
+      // Pommel
+      px(ctx, gx-1, gy+3, 3, 1, t.dark);
+      px(ctx, gx-1, gy+3, 3, 1, s.pommel);
+      pxl(ctx, gx, gy+3, t.shine);
+      // Gem on pommel (steel blade)
+      if (s.gem) pxl(ctx, gx, gy+4, s.gem);
+      // Legendary leaf-shape + particles
+      if (s.legendary) {
+        // Leaf-shape widening near tip
+        px(ctx, gx-1, gy-12, 3, 1, t.base);
+        px(ctx, gx-1, gy-12, 1, 1, t.dark);
+        px(ctx, gx+1, gy-12, 1, 1, t.dark);
+        px(ctx, gx-1, gy-11, 3, 1, t.hi);
+        px(ctx, gx-1, gy-13, 3, 1, t.dark);
+        // Floating leaf particle
+        if (f === 0 || f === 2) pxl(ctx, gx+3, gy-8, s.glow);
+        if (f === 1 || f === 3) pxl(ctx, gx-3, gy-10, s.glow);
+      }
+      // Katana tassel
+      if (style === 'sword_katana') {
+        px(ctx, gx+1, gy+4, 1, 3, s.tassel);
+        pxl(ctx, gx+2, gy+5, '#ff88aa');
+      }
+    } else {
+      // Horizontal sword (swept forward in attack-end) — blade to the LEFT of the hand since character just swung through
+      // Actually: character faces right. Swing follows through so blade ends up pointing FORWARD-RIGHT.
+      // Since handR is at (22,28) and frame is 32 wide, blade extends from hand rightward to frame edge.
+      const bladeStartX = gx + 2;
+      const bladeEndX = Math.min(gx + 14, ox + 30);
+      const bladeLen = bladeEndX - bladeStartX;
+      if (s.glow) {
+        ctx.globalAlpha = 0.3;
+        for (let dy = -3; dy <= 3; dy++) {
+          px(ctx, bladeStartX, gy + dy, bladeLen, 1, s.glow);
+        }
+        ctx.globalAlpha = 1;
+      }
+      // Blade outline top/bottom
+      px(ctx, bladeStartX, gy-1, bladeLen, 1, t.dark);
+      px(ctx, bladeStartX, gy+1, bladeLen, 1, t.dark);
+      px(ctx, bladeEndX, gy, 1, 1, t.dark);
+      // Blade base
+      px(ctx, bladeStartX, gy, bladeLen, 1, t.base);
+      // Blade highlight (top edge)
+      px(ctx, bladeStartX, gy, bladeLen, 1, t.hi);
+      pxl(ctx, bladeEndX-1, gy, t.shine);
+      // Runes
+      if (style === 'sword_runed') {
+        for (let x = bladeStartX + 2; x < bladeEndX; x += 3) {
+          pxl(ctx, x, gy, s.runeColor);
+        }
+      }
+      // Crossguard (vertical, near hand)
+      px(ctx, gx+1, gy-2, 1, 5, t.dark);
+      px(ctx, gx+2, gy-1, 1, 3, s.guard);
+      // Grip (horizontal, a few pixels before hand)
+      px(ctx, gx-1, gy, 2, 1, '#2a1a0a');
+      // Pommel
+      px(ctx, gx-2, gy-1, 1, 3, t.dark);
+      px(ctx, gx-2, gy, 1, 1, s.pommel);
+    }
+  }
+}
+
+function drawAxe(ctx, gx, gy, s, horizontal) {
+  const t = s.tones;
+  if (!horizontal) {
+    // Haft (long vertical grip)
+    px(ctx, gx, gy-14, 1, 16, s.haft);
+    px(ctx, gx+1, gy-14, 1, 16, t.dark);
+    // Axe head
+    px(ctx, gx-3, gy-15, 5, 1, t.dark);
+    px(ctx, gx-3, gy-14, 5, 4, t.base);
+    px(ctx, gx-4, gy-13, 1, 2, t.dark);
+    px(ctx, gx-4, gy-13, 1, 2, s.guard);
+    px(ctx, gx+2, gy-14, 1, 4, t.dark);
+    // Blade edge highlight
+    px(ctx, gx-3, gy-14, 5, 1, t.hi);
+    px(ctx, gx-2, gy-13, 3, 1, t.shine);
+    // Brass band
+    px(ctx, gx-1, gy-9, 2, 1, s.guard);
+    // Pommel
+    px(ctx, gx-1, gy+2, 2, 1, t.dark);
+    px(ctx, gx, gy+2, 1, 1, t.base);
+  }
+}
+function drawStaff(ctx, gx, gy, s, horizontal) {
+  const t = s.tones;
+  // Haft
+  px(ctx, gx, gy-15, 1, 17, s.base);
+  px(ctx, gx+1, gy-15, 1, 17, t.dark);
+  // Gem orb top
+  if (s.glow) {
+    ctx.globalAlpha = 0.4;
+    for (let dy = -2; dy <= 2; dy++)
+      for (let dx = -2; dx <= 2; dx++)
+        if (dx*dx + dy*dy <= 4) pxl(ctx, gx + dx, gy-17 + dy, s.glow);
+    ctx.globalAlpha = 1;
+  }
+  px(ctx, gx-1, gy-18, 3, 3, t.dark);
+  px(ctx, gx-1, gy-18, 3, 1, s.gem);
+  px(ctx, gx, gy-17, 1, 1, s.gemHi);
+  // Grip wrap
+  px(ctx, gx, gy-8, 1, 3, t.hi);
+  // Pommel
+  pxl(ctx, gx, gy+2, t.dark);
+}
+
+// =========================================================================
+// SHIELD RENDERER
+// =========================================================================
+function renderShield(ctx, style) {
+  clearSheet(ctx);
+  const s = CATALOG.shield[style];
+  if (!s) return;
+  const t = s.tones;
+  for (let f = 0; f < FRAMES; f++) {
+    const ox = f * FW;
+    const hand = ANCHORS[f].handL;
+    const cx = ox + hand[0];
+    const cy = hand[1];
+
+    if (style === 'knight_kite' || style === 'tower_gold') {
+      // Tall kite/tower shield
+      const w = 7, h = 14;
+      // Outline (top rounded, bottom pointed for kite)
+      px(ctx, cx-2, cy-9, 5, 1, t.dark);      // top
+      px(ctx, cx-3, cy-8, 1, 1, t.dark);
+      px(ctx, cx+3, cy-8, 1, 1, t.dark);
+      px(ctx, cx-4, cy-7, 1, 11, t.dark);     // left
+      px(ctx, cx+4, cy-7, 1, 11, t.dark);     // right
+      // Pointed bottom
+      px(ctx, cx-3, cy+4, 1, 1, t.dark);
+      px(ctx, cx+3, cy+4, 1, 1, t.dark);
+      px(ctx, cx-2, cy+5, 1, 1, t.dark);
+      px(ctx, cx+2, cy+5, 1, 1, t.dark);
+      px(ctx, cx-1, cy+6, 1, 1, t.dark);
+      px(ctx, cx+1, cy+6, 1, 1, t.dark);
+      px(ctx, cx, cy+7, 1, 1, t.dark);
+      // Fill base color
+      px(ctx, cx-3, cy-8, 7, 12, t.base);
+      px(ctx, cx-2, cy+4, 5, 1, t.base);
+      px(ctx, cx-1, cy+5, 3, 1, t.base);
+      px(ctx, cx, cy+6, 1, 1, t.base);
+      // Highlight left band
+      px(ctx, cx-3, cy-8, 1, 12, t.hi);
+      px(ctx, cx-2, cy-7, 1, 6, t.shine);
+      // Shadow right
+      px(ctx, cx+3, cy-7, 1, 10, t.dark);
+      // Emblem cross (center)
+      if (s.cross) {
+        px(ctx, cx, cy-6, 1, 10, s.cross);
+        px(ctx, cx-2, cy-3, 5, 1, s.cross);
+        if (s.crossHi) {
+          px(ctx, cx, cy-6, 1, 1, s.crossHi);
+          pxl(ctx, cx-2, cy-3, s.crossHi);
+        }
+      }
+      if (style === 'tower_gold' && s.boss) {
+        // Central gem instead of cross
+        px(ctx, cx-1, cy-2, 3, 3, s.boss);
+        pxl(ctx, cx-1, cy-2, t.shine);
+      }
+      // Gold rim
+      if (s.rim) {
+        px(ctx, cx-3, cy-8, 7, 1, s.rim);
+        pxl(ctx, cx+3, cy-6, s.rim);
+        pxl(ctx, cx-3, cy-6, s.rim);
+      }
+    } else {
+      // Round shield (wooden / iron)
+      // Outline
+      px(ctx, cx-4, cy-5, 9, 1, t.dark);
+      px(ctx, cx-5, cy-4, 1, 1, t.dark);
+      px(ctx, cx+4, cy-4, 1, 1, t.dark);
+      px(ctx, cx-5, cy-3, 1, 6, t.dark);
+      px(ctx, cx+4, cy-3, 1, 6, t.dark);
+      px(ctx, cx-5, cy+3, 1, 1, t.dark);
+      px(ctx, cx+4, cy+3, 1, 1, t.dark);
+      px(ctx, cx-4, cy+4, 9, 1, t.dark);
+      // Fill
+      px(ctx, cx-4, cy-4, 8, 8, t.base);
+      // Highlight arc
+      px(ctx, cx-4, cy-4, 8, 1, t.hi);
+      px(ctx, cx-3, cy-3, 2, 6, t.hi);
+      px(ctx, cx-2, cy-2, 1, 2, t.shine);
+      // Shadow
+      px(ctx, cx+3, cy-3, 1, 6, t.dark);
+      // Central boss
+      if (s.boss) {
+        px(ctx, cx-1, cy-1, 2, 2, s.boss);
+        pxl(ctx, cx-1, cy-1, t.shine);
+      }
+      // Rim rivets
+      if (s.rim) {
+        pxl(ctx, cx-4, cy-3, s.rim);
+        pxl(ctx, cx+3, cy-3, s.rim);
+        pxl(ctx, cx-4, cy+2, s.rim);
+        pxl(ctx, cx+3, cy+2, s.rim);
+        pxl(ctx, cx, cy-4, s.rim);
+        pxl(ctx, cx, cy+3, s.rim);
+      }
+      // Wood planks for wooden shield
+      if (style === 'wooden_buckler') {
+        px(ctx, cx-1, cy-4, 1, 8, t.dark);
+        px(ctx, cx+2, cy-4, 1, 8, t.dark);
+      }
+      // Iron cross emblem
+      if (style === 'iron_heater' && s.cross) {
+        px(ctx, cx, cy-3, 1, 6, s.cross);
+        px(ctx, cx-2, cy-1, 5, 1, s.cross);
+      }
+    }
+  }
+}
+
+// =========================================================================
+// BOOTS RENDERER — detailed shoe shape per foot
+// =========================================================================
+function renderBoots(ctx, style) {
+  clearSheet(ctx);
+  const s = CATALOG.boots[style];
+  if (!s) return;
+  const t = s.tones;
+  for (let f = 0; f < FRAMES; f++) {
+    const ox = f * FW;
+    const footL = ANCHORS[f].footL;
+    const footR = ANCHORS[f].footR;
+    const lift = f === 3 ? -2 : 0;
+    drawBoot(ctx, ox + footL[0] - 2, footL[1] - 5 + lift, s);
+    drawBoot(ctx, ox + footR[0] - 2, footR[1] - 5 + lift, s);
+  }
+}
+function drawBoot(ctx, x, y, s) {
+  const t = s.tones;
+  // Toe (left rounded)
+  px(ctx, x, y+3, 5, 1, t.dark);
+  px(ctx, x, y+4, 1, 1, t.dark);
+  px(ctx, x+4, y+4, 1, 1, t.dark);
+  px(ctx, x, y+4, 5, 1, t.base);
+  px(ctx, x, y+4, 1, 1, t.dark);
+  // Shaft (cuff + body)
+  px(ctx, x, y, 5, 1, t.dark);        // top outline
+  px(ctx, x, y+1, 1, 3, t.dark);      // left
+  px(ctx, x+4, y+1, 1, 3, t.dark);    // right
+  px(ctx, x+1, y+1, 3, 3, t.base);    // fill
+  // Highlight
+  px(ctx, x+1, y+1, 1, 3, t.hi);
+  px(ctx, x+1, y+1, 3, 1, t.hi);
+  // Lace/buckle per style
+  if (s.lace) {
+    pxl(ctx, x+2, y+1, s.lace);
+    pxl(ctx, x+2, y+3, s.lace);
+  }
+  if (s.trim) {
+    px(ctx, x, y, 5, 1, s.trim);
+    pxl(ctx, x+2, y+2, s.trim);
+  }
+  if (s.cord) {
+    for (let i = 0; i < 3; i++) {
+      pxl(ctx, x+1, y+i+1, s.cord);
+      pxl(ctx, x+3, y+i+1, s.cord);
+    }
+  }
+  if (s.legendary) {
+    // Feathered ankle wings
+    pxl(ctx, x-1, y+1, t.shine);
+    pxl(ctx, x-1, y+2, t.hi);
+    pxl(ctx, x+5, y+1, t.shine);
+    pxl(ctx, x+5, y+2, t.hi);
+  }
+}
+
+// =========================================================================
+// DISPATCH + UI
+// =========================================================================
+const renderers = {
+  hair: renderHair,
+  armor: renderArmor,
+  cape: renderCape,
+  helmet: renderHelmet,
+  weapon: renderWeapon,
+  shield: renderShield,
+  boots: renderBoots,
+};
+
+const typeEl = document.getElementById('type');
+const styleEl = document.getElementById('style');
+const filenameEl = document.getElementById('filename');
+const exportC = document.getElementById('exportCanvas');
+const exportCtx = exportC.getContext('2d');
+const prevC = document.getElementById('previewUp');
+const prevCtx = prevC.getContext('2d');
+prevCtx.imageSmoothingEnabled = false;
+
+function refreshStyleList() {
+  const type = typeEl.value;
+  styleEl.innerHTML = '';
+  for (const key of Object.keys(CATALOG[type])) {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = CATALOG[type][key].name;
+    styleEl.appendChild(opt);
+  }
+  render();
+}
+function render() {
+  const type = typeEl.value;
+  const style = styleEl.value;
+  renderers[type](exportCtx, style);
+  prevCtx.clearRect(0, 0, 768, 192);
+  prevCtx.drawImage(exportC, 0, 0, 768, 192);
+  filenameEl.textContent = `${type}/${style}.png`;
+}
+
+document.getElementById('downloadOne').onclick = () => {
+  exportC.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${styleEl.value}.png`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+};
+
+document.getElementById('downloadAll').onclick = async () => {
+  const btn = document.getElementById('downloadAll');
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+  for (const type of Object.keys(CATALOG)) {
+    for (const style of Object.keys(CATALOG[type])) {
+      renderers[type](exportCtx, style);
+      await new Promise(res => {
+        exportC.toBlob(blob => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${type}__${style}.png`;
+          a.click();
+          URL.revokeObjectURL(url);
+          setTimeout(res, 140);
+        });
+      });
+    }
+  }
+  render();
+  btn.textContent = '⬇⬇ Download ALL Overlays';
+  btn.disabled = false;
+};
+
+typeEl.onchange = refreshStyleList;
+styleEl.onchange = render;
+
+function renderThumbnails() {
+  const grid = document.getElementById('thumb-grid');
+  grid.innerHTML = '';
+  for (const type of Object.keys(CATALOG)) {
+    for (const style of Object.keys(CATALOG[type])) {
+      const card = document.createElement('div');
+      card.className = 'thumb';
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = `${type}/${CATALOG[type][style].name}`;
+      const can = document.createElement('canvas');
+      can.width = SHEET_W;
+      can.height = SHEET_H;
+      can.style.width = '192px';
+      can.style.height = '48px';
+      renderers[type](can.getContext('2d'), style);
+      card.appendChild(name);
+      card.appendChild(can);
+      const link = document.createElement('a');
+      link.href = '#';
+      link.textContent = `download ${style}.png`;
+      link.onclick = (e) => {
+        e.preventDefault();
+        can.toBlob(blob => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${style}.png`;
+          a.click();
+          URL.revokeObjectURL(url);
+        });
+      };
+      card.appendChild(link);
+      grid.appendChild(card);
+    }
+  }
+}
+
+refreshStyleList();
+renderThumbnails();
+</script>
+</body>
+</html>

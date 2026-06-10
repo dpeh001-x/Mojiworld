@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boss Attack Animation Preview</title>
+<style>
+  body { margin:0; background:#15101f; color:#e8e0ff; font:14px/1.5 system-ui, sans-serif; padding:24px; }
+  h1 { font-size:18px; color:#d9c6ff; margin:0 0 4px; }
+  p.note { color:#9a8fb5; margin:0 0 24px; }
+  .row { display:flex; flex-wrap:wrap; gap:28px; margin-bottom:32px; align-items:flex-end; }
+  .cell { text-align:center; }
+  .cell img, .cell canvas { width:220px; height:220px; image-rendering:auto; object-fit:contain;
+    background:repeating-conic-gradient(#241b33 0 25%, #1b1428 0 50%) 50%/26px 26px; border-radius:12px;
+    border:1px solid #3a2c54; }
+  .cell .lbl { margin-top:8px; font-weight:600; }
+  .cell .sub { color:#9a8fb5; font-size:12px; }
+  .anim { border-color:#b59cf0 !important; box-shadow:0 0 18px rgba(181,156,240,0.35); }
+  .controls { margin:0 0 24px; }
+  .controls label { margin-right:16px; }
+  .boss-title { font-size:16px; color:#ffcc66; margin:28px 0 12px; border-bottom:1px solid #3a2c54; padding-bottom:6px; }
+</style>
+</head>
+<body>
+  <h1>Boss Attack Animation Preview</h1>
+  <p class="note">Same 4 frames + ping-pong cadence (0-1-2-3-2-1) the game plays during a boss attack window.</p>
+  <div class="controls">
+    <label>Frame hold (ms): <input id="ms" type="range" min="60" max="240" value="110"> <span id="msv">110</span></label>
+    <label><input id="pp" type="checkbox" checked> ping-pong</label>
+  </div>
+  <div id="root"></div>
+<script>
+const BOSSES = ['octobaby', 'koopaKing', 'aetherion', 'aetherion2', 'blockRexy',
+  'gravitos', 'gravitos2', 'gravitos3', 'king', 'mushmom', 'pqConductor',
+  'sundered_smith', 'towerArbiter', 'towerSovereign', 'young_confused_barnaby'];
+// Frame-count-agnostic sequences (4, 9, ...). Ping-pong = 0..n-1..1.
+function seqFor(n, pingpong) {
+  if (n < 2) return [0];
+  if (!pingpong) return Array.from({ length: n }, (_, i) => i);
+  const s = []; for (let i = 0; i < n; i++) s.push(i); for (let i = n - 2; i >= 1; i--) s.push(i);
+  return s;
+}
+const root = document.getElementById('root');
+const msEl = document.getElementById('ms'), msv = document.getElementById('msv'), ppEl = document.getElementById('pp');
+const anims = [];
+
+for (const boss of BOSSES) {
+  const title = document.createElement('div'); title.className = 'boss-title'; title.textContent = boss;
+  root.appendChild(title);
+  const row = document.createElement('div'); row.className = 'row';
+
+  // base
+  row.appendChild(cell(`../Sprites/bosses/${boss}.png`, 'base (idle)', 'static source', false));
+  // single attack pose
+  row.appendChild(cell(`../Sprites/bosses/attack/${boss}.webp`, 'attack pose', 'single-frame fallback', false));
+  // animated cells: idle loop (slow) + attack loop (slider speed)
+  const mkAnim = (label, dir, fixedMs, straight) => {
+    const c = document.createElement('canvas'); c.width = 220; c.height = 220; c.className = 'anim';
+    const cw = document.createElement('div'); cw.className = 'cell'; cw.appendChild(c);
+    cw.insertAdjacentHTML('beforeend', `<div class="lbl">▶ ${label}</div><div class="sub">${dir}/${boss}_0..8.webp</div>`);
+    row.appendChild(cw);
+    const frames = Array.from({length:9}, (_,i) => { const im = new Image(); im.src = `../Sprites/bosses/${dir}/${boss}_${i}.webp`; return im; });
+    anims.push({ ctx: c.getContext('2d'), frames, fixedMs, straight });
+  };
+  mkAnim('idle loop', 'idle', 200);
+  mkAnim('walk loop', 'walk', 80, true);   // straight loop (matches game)
+  mkAnim('attack loop', 'attack', null, true);
+  root.appendChild(row);
+}
+
+function cell(src, lbl, sub, isAnim) {
+  const d = document.createElement('div'); d.className = 'cell';
+  const im = document.createElement('img'); im.src = src; if (isAnim) im.className = 'anim';
+  d.appendChild(im);
+  d.insertAdjacentHTML('beforeend', `<div class="lbl">${lbl}</div><div class="sub">${sub}</div>`);
+  return d;
+}
+
+let t0 = 0;
+function tick(t) {
+  if (!t0) t0 = t;
+  const ms = Number(msEl.value); msv.textContent = ms;
+  for (const a of anims) {
+    // contiguous run of decoded frames from index 0 (supports 4, 9, ...)
+    let n = 0; while (n < a.frames.length && a.frames[n].complete && a.frames[n].naturalWidth) n++;
+    const seq = a.straight ? Array.from({length:Math.max(1,n)},(_,i)=>i) : seqFor(n, ppEl.checked);
+    const idx = seq[Math.floor(t / (a.fixedMs || ms)) % seq.length];
+    const f = a.frames[idx];
+    a.ctx.clearRect(0, 0, 220, 220);
+    if (f && f.complete && f.naturalWidth) {
+      // contain-fit, bottom-anchored — mirrors how the game anchors the foot
+      const s = Math.min(220 / f.naturalWidth, 220 / f.naturalHeight);
+      const w = f.naturalWidth * s, h = f.naturalHeight * s;
+      a.ctx.drawImage(f, (220 - w) / 2, 220 - h, w, h);
+    }
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
