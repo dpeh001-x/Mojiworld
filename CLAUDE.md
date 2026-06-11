@@ -16,10 +16,13 @@ Therefore, for EVERY session:
    content must be written to a `.py` file via the Write tool and executed —
    never inlined in a Bash heredoc. Pre-scan before writing:
    `assert not any(0xD800 <= ord(c) <= 0xDFFF for c in s)`.
-3. **Commit after every shipped change.** This is a real git repo (local-only,
-   no `origin` on this machine — the session-start hook skips pulls). After a
-   feature/fix lands and is verified: `git add -A && git commit`. Small,
-   frequent commits make loss impossible and write races diagnosable.
+3. **Commit after every shipped change, push when a feature lands.** `origin`
+   is wired to `dpeh001-x/LevelX` (reconnected 2026-06-11 via an
+   `--allow-unrelated-histories` ours-merge after the folder had been
+   re-inited; both histories preserved). After a feature/fix lands and is
+   verified: `git add -A && git commit`, then `git push origin main` per the
+   sync-first rule below. Small, frequent commits make loss impossible and
+   write races diagnosable.
 4. **Match-count guards on every replace.** `s.count(anchor) == expected` or
    abort — a parallel session may have shifted the anchor since you read it.
 
