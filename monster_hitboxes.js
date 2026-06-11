@@ -67,4 +67,6 @@ vigil_vermillion:{w:64,h:80,mul:1.5}, voltipup:{w:81,h:72,mul:1.185},
 willeo:{w:68,h:80,mul:1.395}, wraith:{w:60,h:75,mul:1.5,f:1},
 young_bloodthirsty_vermillion:{w:60,h:74,mul:1.5}, young_confused_barnaby:{w:120,h:140,mul:2},
 zombie:{w:58,h:66,mul:1.32},
+// v0.26.902 — L60-70 mid-boss elites (dedicated art; values from the live game)
+blightElder:{w:130,h:150,mul:1.5}, ossuaryTyrant:{w:110,h:130,mul:1.5},
 };

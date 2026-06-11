@@ -25,10 +25,12 @@ const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 const arg = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
 
-const PREFIX = 'Chibi anime game VFX sprite for a 2D platformer in the Mojiworld aesthetic. ' +
+const PREFIX = 'Game VFX sprite for a cute 2D side-scroller RPG in the Mojiworld aesthetic. ' +
   'Pure transparent background, alpha only — no scene, no character, no ground tile. 768x768 square canvas. ' +
   'ABSOLUTELY NO TEXT of any kind: no letters, words, numbers, runes or watermark — wordless imagery only. ' +
-  'Soft painterly cel-shaded anime style, bold clean edges, vibrant saturated colors, additive glow. ' +
+  'STYLE (critical, match the game art exactly): soft painterly cel-shaded ANIME style with a bold clean DARK OUTLINE around the main shapes, ' +
+  'glossy highlights, vibrant saturated colors, smooth soft gradients and additive glow. ' +
+  'NOT pixel-art, NOT blocky, NOT thick chunky western-cartoon outlines, NOT flat watercolor, NOT photoreal. ' +
   'CRITICAL FRAMING: the ENTIRE effect must sit fully inside the frame, centered, at roughly 70% scale, ' +
   'with a generous EMPTY TRANSPARENT MARGIN on all four sides — nothing may touch, run off, or be cropped ' +
   'at the canvas edges. Must read clearly at small in-game size. ';
@@ -39,9 +41,12 @@ const VFX = {
   frost_beam:       'a horizontal pale-blue FROST BEAM / ice cone firing LEFT-TO-RIGHT: a tapering jet of icy energy with jagged frost shards, crystalline glints and drifting cold mist, sharp leading edge on the right.',
   poison_cloud:     'a bubbling TOXIC POISON puddle seen TOP-DOWN: a sickly green-and-lime gradient pool with rising round bubbles and a faint noxious haze above it, a circular flat disc shape.',
   shock_ring:       'an expanding GROUND SHOCKWAVE RING seen TOP-DOWN: a bold tan-and-gold leading ring of kicked-up dust and rock with a fainter outer halo and cracked-earth glow, mostly EMPTY in the centre (a ring, not a disc).',
-  lightning_pillar: 'a vertical ELECTRIC LIGHTNING PILLAR striking downward: a jagged white-blue bolt inside a glowing yellow energy column with crackling forked arcs and bright sparks, tall and narrow.',
-  quake_ring:       'an expanding GROUND-QUAKE shockwave seen TOP-DOWN: concentric cracked-earth rings with rising dust and tumbling rubble, a warm orange-tan seismic glow, mostly EMPTY in the centre (a ring, not a disc).',
+  lightning_pillar: 'a CUTE vertical ELECTRIC LIGHTNING PILLAR striking downward: a chunky rounded white-blue cartoon bolt with plump zig-zag segments inside a soft glowing golden energy column, a few chubby little forked arcs and tiny star sparkles around it, tall and narrow. Every shape wrapped in a THICK even ~3px solid BLACK outline. Playful kawaii energy, rounded corners, glossy bubbly highlights — still clearly a danger zone, NO face.',
+  quake_ring:       'a CUTE expanding GROUND-QUAKE shockwave ring seen TOP-DOWN: a plump rounded ring of warm tan cracked-earth chunks and chubby tumbling pebbles with puffy little dust clouds, a soft orange seismic glow, mostly EMPTY in the centre (a ring, not a disc). Every chunk and puff wrapped in a THICK even ~3px solid BLACK outline. Playful kawaii energy, rounded cartoon rocks, glossy highlights — still clearly a danger zone, NO face.',
   dash_streak:      'a horizontal SPEED-DASH motion streak firing LEFT-TO-RIGHT: sharp white-to-violet motion-blur lines and a sweeping afterimage swoosh that tapers to a point on the right, strong sense of fast lunging movement.',
+  // v0.26.897 — lava pair folded in from gen_lava.mjs so one script owns Sprites/vfx/
+  lava_drop:        'a CUTE falling MOLTEN LAVA droplet drawn like a die-cut cartoon sticker: one plump squishy teardrop blob of bright orange-gold magma with a white-hot core and big glossy highlights, two chubby little splatter beads above it, dripping downward. CRITICAL: EVERY blob is fully enclosed by a UNIFORM, THICK, PURE-BLACK ~3px CONTOUR OUTLINE on its outer edge — a bold black cartoon line all the way around each shape, exactly like the quake-ring pebbles. Playful kawaii energy, round squishy shapes — still clearly hot, NO face.',
+  lava_pool:        'a bubbling MOLTEN LAVA pool seen TOP-DOWN: a circular flat disc of bright orange-gold magma with a white-hot swirling centre, thin darker crust flecks at the rim, small rising glossy lava bubbles, glowing hot.',
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
