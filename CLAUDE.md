@@ -17,12 +17,12 @@ Therefore, for EVERY session:
    never inlined in a Bash heredoc. Pre-scan before writing:
    `assert not any(0xD800 <= ord(c) <= 0xDFFF for c in s)`.
 3. **Commit after every shipped change, push when a feature lands.** `origin`
-   is wired to `dpeh001-x/LevelX` (reconnected 2026-06-11 via an
-   `--allow-unrelated-histories` ours-merge after the folder had been
-   re-inited; both histories preserved). After a feature/fix lands and is
-   verified: `git add -A && git commit`, then `git push origin main` per the
-   sync-first rule below. Small, frequent commits make loss impossible and
-   write races diagnosable.
+   is wired to `dpeh001-x/Mojiworld` (the canonical repo as of 2026-06-11,
+   per user — previously `dpeh001-x/LevelX`; the local folder stays at
+   `Desktop\Mojiworld` and is the working copy). After a feature/fix lands
+   and is verified: `git add -A && git commit`, then `git push origin main`
+   per the sync-first rule below. Small, frequent commits make loss
+   impossible and write races diagnosable.
 4. **Match-count guards on every replace.** `s.count(anchor) == expected` or
    abort — a parallel session may have shifted the anchor since you read it.
 
@@ -102,7 +102,7 @@ Edits outside these ranges still work — the zone hook only warns; it never blo
 After any push that lands on `mobile-ui-pass`, always surface the playtest URL in the next user-facing reply:
 
 ```
-▶ Mobile preview: https://raw.githack.com/dpeh001-x/LevelX/mobile-ui-pass/mojiworld_game.html
+▶ Mobile preview: https://raw.githack.com/dpeh001-x/Mojiworld/mobile-ui-pass/mojiworld_game.html
 ```
 
 Single-file static HTML + raw.githack serves the latest branch tip with the correct MIME, so the URL never changes — reviewers / iPhone testers bookmark once.
@@ -116,7 +116,7 @@ Rules:
 - Every shipped commit on `mobile-ui-pass` must add an entry to `MOBILE_CHANGELOG.html`.
 - Match the existing styling (same palette, pill tags for `bug` / `feat` / `polish`, `<kbd>` for keys).
 - Only log mobile-specific work there. If a change touches gameplay code outside the mobile safe zones, it belongs in the main changelog instead (and probably in a different branch).
-- Shareable URL: `https://raw.githack.com/dpeh001-x/LevelX/mobile-ui-pass/MOBILE_CHANGELOG.html`.
+- Shareable URL: `https://raw.githack.com/dpeh001-x/Mojiworld/mobile-ui-pass/MOBILE_CHANGELOG.html`.
 
 ## Session start (automated)
 
@@ -162,8 +162,8 @@ The 1,200-word response cap still applies; if the summary table would blow past 
 
 A dedicated `preview` branch holds whatever build is currently under review so reviewers always bookmark the same URL:
 
-- Play URL: `https://raw.githack.com/dpeh001-x/LevelX/preview/mojiworld_game.html`
-- Changelog URL: `https://raw.githack.com/dpeh001-x/LevelX/preview/CHANGELOG.html`
+- Play URL: `https://raw.githack.com/dpeh001-x/Mojiworld/preview/mojiworld_game.html`
+- Changelog URL: `https://raw.githack.com/dpeh001-x/Mojiworld/preview/CHANGELOG.html`
 
 Behaviour:
 - Only update `preview` when the user explicitly asks (e.g. "push a preview", "update the preview"). Not automatic on every push.
