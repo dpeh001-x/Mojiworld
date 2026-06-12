@@ -63,7 +63,7 @@ function describe(rel) {
     return { cat: 'monster', when: 'Monster SFX: ' + base };
   }
   if (dir === 'skill') return { cat: 'skill', when: 'Cast SFX — plays when the player uses the "' + base.replace(/_/g, ' ') + '" skill' };
-  if (dir === 'boss')  return { cat: 'boss-theme', when: 'Boss battle music — plays during the ' + base.replace(/^boss_/, '').replace(/_/g, ' ') + ' fight' };
+  if (dir === 'boss')  return { cat: 'boss-voice', when: 'Boss intro VOICE — plays once when first entering the ' + base.replace(/^boss_/, '').replace(/_/g, ' ') + ' arena (gated by _bossIntrosSeen)' };
   if (dir === 'ambient') return { cat: 'ambient', when: 'Ambient loop layered under the BGM on ' + base + '-biome maps' };
   if (dir === 'voice') {
     const v = base.match(/^(\w+?)_(m|f)_(hit\d|death|.*)$/) || base.match(/^(cheer)_(m|f)_(\d)$/);

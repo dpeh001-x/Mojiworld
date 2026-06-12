@@ -55,7 +55,7 @@
       let advanced = false;
       const next = () => { if (advanced) return; advanced = true; i++; setTimeout(step, 250); };
       play(item, row, next);
-      const isLong = item.cat === 'bgm' || item.cat === 'boss-theme' || item.cat === 'ambient';
+      const isLong = item.cat === 'bgm' || item.cat === 'ambient';   // boss clips are short intro VOICES now
       if (isLong) setTimeout(next, 2500);
     };
     const b = document.getElementById('sfx-playall'); if (b) b.textContent = '■ Stop';

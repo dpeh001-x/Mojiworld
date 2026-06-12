@@ -18,10 +18,10 @@ const arg = (f) => { const a = process.argv.slice(2); const i = a.indexOf(f); re
 const ITEMS = {
   // ---- skill casts: SHORT + succinct (old: arrow 1.4s, evade 3.0s, meteor 3.0s...) ----
   archer_arrow:        { file: 'audio/skill/archer_arrow.mp3',        ep: 'sfx', sec: 0.45, d: 'a single quick bowstring release with a tight arrow whoosh, clean and crisp, extremely short game skill sound' },
-  archer_charged:      { file: 'audio/skill/archer_charged.mp3',      ep: 'sfx', sec: 0.8,  d: 'a brief drawn bowstring creak then one powerful snap release with a piercing whoosh, punchy, very short' },
+  archer_charged:      { file: 'audio/skill/archer_charged.mp3',      ep: 'sfx', sec: 0.7,  d: 'a charged power-shot release: a split-second rising energy hum snapping into one deep powerful bowstring TWANG with a heavy arrow whoosh, cut abruptly, very short' },
   archer_evade:        { file: 'audio/skill/archer_evade.mp3',        ep: 'sfx', sec: 0.5,  d: 'a quick acrobatic backflip dodge whoosh with a light cloth flutter, agile, extremely short' },
   ballista_volley:     { file: 'audio/skill/ballista_volley.mp3',     ep: 'sfx', sec: 0.6,  d: 'three extremely rapid heavy crossbow bolt thunks fired in under half a second, tight mechanical burst, cut abruptly with no tail, extremely short' },
-  crusader_aegis:      { file: 'audio/skill/crusader_aegis.mp3',      ep: 'sfx', sec: 0.7,  d: 'one quick bright holy shield pop: a single warm chime ping with instant shimmer, cut abruptly, no reverb tail, extremely short' },
+  crusader_aegis:      { file: 'audio/skill/crusader_aegis.mp3',      ep: 'sfx', sec: 0.8,  d: 'a holy barrier blessing: one clear bright cathedral bell ding wrapped in a quick angelic shimmer sweep, warm and protective, cut cleanly, very short' },
   deadeye:             { file: 'audio/skill/deadeye.mp3',             ep: 'sfx', sec: 0.6,  d: 'one instant precision shot: a tiny aim click then a single sharp crack, cut abruptly with no echo, extremely short' },
   dragoon_ult:         { file: 'audio/skill/dragoon_ult.mp3',         ep: 'sfx', sec: 1.4,  d: 'a thunderous dragon-lance dive impact: sharp draconic energy crack into a compact boom, epic but tight, short' },
   elementalist_cascade:{ file: 'audio/skill/elementalist_cascade.mp3',ep: 'sfx', sec: 1.1,  d: 'a quick four-element burst layered into one cascade: fire crackle, ice glint, electric spark, arcane hum, short' },
@@ -35,15 +35,16 @@ const ITEMS = {
   mspine:              { file: 'audio/mobs/mspine.mp3',               ep: 'sfx', sec: 0.4,  d: 'a quick wet needle dart spit: sharp little pop with a thin whistling whoosh, very short' },
   mob_axolotl_die:     { file: 'audio/monster/mob_axolotl_die.mp3',   ep: 'sfx', sec: 0.6,  d: 'a cute small aquatic creature defeated: soft squeaky blub deflating into bubbles, gentle and adorable, very short' },
   mob_pathsBane_die:   { file: 'audio/monster/mob_pathsBane_die.mp3', ep: 'sfx', sec: 1.0,  d: 'an eerie tide spirit dissolving: ghostly watery sigh dispersing into mist with a faint glyph chime, short' },
-  mob_potato_uncle_die:{ file: 'audio/monster/mob_potato_uncle_die.mp3', ep: 'sfx', sec: 0.8, d: 'a comical heavy potato thud followed by a short deflating grumble, funny cartoon defeat, very short' },
+  mob_potato_uncle_die:{ file: 'audio/monster/mob_potato_uncle_die.mp3', ep: 'sfx', sec: 0.9, d: 'a comical grumpy old man defeat: a short startled OOF groan dropping into a heavy soft potato-sack thump on dirt, cartoonish and funny, very short' },
   land:                { file: 'audio/ui/land.mp3',                   ep: 'sfx', sec: 0.3,  d: 'a soft quick footfall landing thump on grass, subtle and muffled, pleasant when repeated, extremely short' },
-  // ---- boss themes via /audio/music: 90s loopable battle pieces ----
-  boss_koopaloo:       { file: 'audio/boss/boss_koopaloo.mp3',        ep: 'music', sec: 90, d: 'intense playful koopa-king boss battle theme, marching brass and fiery taiko percussion, chiptune-orchestral hybrid, relentless driving tempo, seamless loop' },
-  boss_mirrorSelf:     { file: 'audio/boss/boss_mirrorSelf.mp3',      ep: 'music', sec: 90, d: 'eerie mirror-double boss battle theme, unsettling reversed piano motifs and glassy textures over a driving dark pulse, uncanny tension, seamless loop' },
-  boss_shroomaloo:     { file: 'audio/boss/boss_shroomaloo.mp3',      ep: 'music', sec: 90, d: 'whimsical giant mushroom queen boss theme, bouncy bassoon and woodwinds over heavy driving drums, sparkling spore magic shimmer, mischievous and dangerous, seamless loop' },
-  boss_young_confused_barnaby: { file: 'audio/boss/boss_young_confused_barnaby.mp3', ep: 'music', sec: 90, d: 'tragic confused sentinel boss theme, an off-kilter melancholic waltz with martial snare drums and weeping strings, beautiful but unsettling, seamless loop' },
-  boss_zodiac_taurus:  { file: 'audio/boss/boss_zodiac_taurus.mp3',   ep: 'music', sec: 90, d: 'earth-shaking taurus zodiac boss theme, massive stomping percussion, deep blaring horns, molten driving energy, unstoppable charge feel, seamless loop' },
-  boss_zodiac_virgo:   { file: 'audio/boss/boss_zodiac_virgo.mp3',    ep: 'music', sec: 90, d: 'celestial judgment virgo zodiac boss theme, austere choir voices, tolling justice bells, severe driving strings, divine and merciless, seamless loop' },
+  // ---- boss intro VOICES (played once on first arena entry, _bossIntrosSeen).
+  // NOT music: short in-character vocalizations via /audio/sound-effect.
+  boss_koopaloo:       { file: 'audio/boss/boss_koopaloo.mp3',        ep: 'sfx', sec: 1.8, d: 'a huge koopa dragon-turtle king boss intro voice: deep bellowing reptilian roar with a fiery snarl and a short smoky huff, menacing cartoon villain, short' },
+  boss_mirrorSelf:     { file: 'audio/boss/boss_mirrorSelf.mp3',      ep: 'sfx', sec: 1.8, d: 'an eerie mirror doppelganger boss intro voice: a distorted echoing human laugh that sounds reversed and wrong, ghostly uncanny double-voice, short' },
+  boss_shroomaloo:     { file: 'audio/boss/boss_shroomaloo.mp3',      ep: 'sfx', sec: 1.8, d: 'a giant mushroom queen boss intro voice: a haughty whimsical feminine giggle bubbling into a spore-puff hiss, regal and mischievous, cartoon, short' },
+  boss_young_confused_barnaby: { file: 'audio/boss/boss_young_confused_barnaby.mp3', ep: 'sfx', sec: 1.8, d: 'a confused young sentinel boss intro voice: a bewildered anguished battle cry that wavers mid-shout as if unsure, tragic and slightly comic, short' },
+  boss_zodiac_taurus:  { file: 'audio/boss/boss_zodiac_taurus.mp3',   ep: 'sfx', sec: 1.8, d: 'a celestial bull zodiac boss intro voice: an earth-shaking deep bovine bellow with a heavy nostril snort and hoof stomp, colossal, short' },
+  boss_zodiac_virgo:   { file: 'audio/boss/boss_zodiac_virgo.mp3',    ep: 'sfx', sec: 1.8, d: 'a celestial maiden judge zodiac boss intro voice: one austere ethereal feminine utterance like a verdict being pronounced, reverberant choral tone, divine and merciless, short' },
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
@@ -87,7 +88,7 @@ for (const k of keys) {
       if (buf.length < 1000) throw new Error('suspiciously small payload ' + buf.length);
       // backup original ONLY after a good generation, then atomic-ish replace
       await mkdir(dirname(bak), { recursive: true });
-      if (await exists(dest)) await copyFile(dest, bak);
+      if (await exists(dest) && !(await exists(bak))) await copyFile(dest, bak);   // keep the FIRST backup (the true original)
       const tmp = dest + '.tmp';
       await writeFile(tmp, buf);
       const { rename } = await import('node:fs/promises');
