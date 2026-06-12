@@ -44,7 +44,7 @@ const ITEMS = {
   boss_shroomaloo:     { file: 'audio/boss/boss_shroomaloo.mp3',      ep: 'sfx', sec: 1.8, d: 'a giant mushroom queen boss intro voice: a haughty whimsical feminine giggle bubbling into a spore-puff hiss, regal and mischievous, cartoon, short' },
   boss_young_confused_barnaby: { file: 'audio/boss/boss_young_confused_barnaby.mp3', ep: 'sfx', sec: 1.8, d: 'a confused young sentinel boss intro voice: a bewildered anguished battle cry that wavers mid-shout as if unsure, tragic and slightly comic, short' },
   boss_zodiac_taurus:  { file: 'audio/boss/boss_zodiac_taurus.mp3',   ep: 'sfx', sec: 1.8, d: 'a celestial bull zodiac boss intro voice: an earth-shaking deep bovine bellow with a heavy nostril snort and hoof stomp, colossal, short' },
-  boss_zodiac_virgo:   { file: 'audio/boss/boss_zodiac_virgo.mp3',    ep: 'sfx', sec: 1.8, d: 'a celestial maiden judge zodiac boss intro voice: one austere ethereal feminine utterance like a verdict being pronounced, reverberant choral tone, divine and merciless, short' },
+  boss_zodiac_virgo:   { file: 'audio/boss/boss_zodiac_virgo.mp3',    ep: 'sfx', sec: 2, d: 'a celestial maiden judge zodiac boss intro: a solemn ethereal female voice singing one short descending judgment phrase, cold cathedral reverb, divine authority, like a verdict bell tolling through a choir, short' },
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
