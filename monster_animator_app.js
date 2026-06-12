@@ -78,7 +78,23 @@
     catch (_) { _mobScaleLS = {}; }
     return _mobScaleLS;
   }
-  window.addEventListener('storage', (e) => { if (!e || e.key === null || e.key === 'lx_mob_scale') _mobScaleLS = null; });
+  // v0.26.x — full key-3 (Monster Plant) sync: BOTH live tables mirrored.
+  // lx_mob_scale multiplies the rendered sprite height in-game (targetH =
+  // m.h x 1.5 x sizeFactor x scale); lx_mob_yoff adds raw world-px to the
+  // draw-Y (positive = down). localStorage edit > baked mob_offsets.js > 1/0.
+  let _mobYoffLS = null;
+  function _mobYoffMap() {
+    if (_mobYoffLS) return _mobYoffLS;
+    try { _mobYoffLS = JSON.parse(localStorage.getItem('lx_mob_yoff') || '{}') || {}; }
+    catch (_) { _mobYoffLS = {}; }
+    return _mobYoffLS;
+  }
+  window.addEventListener('storage', (e) => {
+    if (!e || e.key === null || e.key === 'lx_mob_scale' || e.key === 'lx_mob_yoff') {
+      _mobScaleLS = null; _mobYoffLS = null;
+      if (window.__buildControls) window.__buildControls();   // refresh the plant readout live
+    }
+  });
   function liveMobScale(t) {
     const ls = _mobScaleMap();
     let v;
@@ -86,6 +102,16 @@
     else { const baked = window.LX_MOB_SCALE_DATA || {}; v = +baked[t]; }
     return (isFinite(v) && v > 0) ? clamp(v, 0.3, 4) : 1;
   }
+  function liveMobYOff(t) {
+    const ls = _mobYoffMap();
+    if (Object.prototype.hasOwnProperty.call(ls, t)) return (+ls[t]) || 0;
+    const baked = window.LX_MOB_OFFSET_DATA || {};
+    return (+baked[t]) || 0;
+  }
+  // Monster Plant values apply to MONSTERS only (bosses render through
+  // _drawBossSprite, which has no key-3 channel).
+  const plantScale = (t) => (MAN[t] && MAN[t].group === 'boss') ? 1 : liveMobScale(t);
+  const plantYOff  = (t) => (MAN[t] && MAN[t].group === 'boss') ? 0 : liveMobYOff(t);
 
   // ===== faithful render model (mirrors mojiworld_game.html) =====
   function sizeFactor(group, w, h) {
@@ -99,12 +125,25 @@
   }
   function stateGeom(ent, st) {
     const info = ent.states[st]; if (!info) return null;
-    const previewH = baseK(ent) * sizeFactor(ent.group, info.w, info.h);
+    // v0.26.x — key-3 sync: the Monster Plant scale multiplies the rendered
+    // height exactly like the game (targetH = m.h x 1.5 x sizeFactor x scale).
+    // Folding it in HERE keeps every fraction-of-height unit (calib dx/dy,
+    // atk-hitbox w/h/ox/oy) on the same basis as the game's visH.
+    const _ps = plantScale(cur);
+    const previewH = baseK(ent) * sizeFactor(ent.group, info.w, info.h) * _ps;
     const targetW = previewH * (info.w / info.h);
     const baseH = (ent.base && ent.base.h) || info.h;
     const baseFrac = (ent.base && ent.base.botFrac != null) ? ent.base.botFrac : 0.92;
     const usedBotFrac = clamp(baseFrac * baseH / info.h, 0.3, 1.3);   // game divides base bbox by THIS frame's height
-    return { previewH, targetW, usedBotFrac };
+    // world-px -> preview-px ratio for this type (for the key-3 y-offset):
+    // game base targetH = hb.h x mul x sizeFactor(base) x scale; preview base
+    // height = DISPLAY_H x scale -> scale cancels out of the ratio.
+    const hb = HB[cur];
+    const pxRatio = (hb && hb.h)
+      ? DISPLAY_H / (hb.h * (ent.group === 'boss' ? (hb.mul || 2) : 1.5) * sizeFactor(ent.group, (ent.base && ent.base.w) || info.w, baseH))
+      : 1;
+    const yoffPx = plantYOff(cur) * pxRatio;
+    return { previewH, targetW, usedBotFrac, yoffPx };
   }
 
   // ===== entity list =====
@@ -147,7 +186,7 @@
 
   function select(t) {
     cur = t; frames = loadFrames(MAN[t]); frameIdx = 0;
-    _mobScaleLS = null;   // re-read live plant-scale on entity switch (same-tab edits)
+    _mobScaleLS = null; _mobYoffLS = null;   // re-read live key-3 values on entity switch (same-tab edits)
     buildList(document.getElementById('q').value);
     buildControls();
   }
@@ -170,7 +209,9 @@
     ctx.translate(c.dx * g.previewH, c.dy * g.previewH);
     ctx.scale(c.s, c.s);
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, -g.targetW / 2, -g.usedBotFrac * g.previewH, g.targetW, g.previewH);
+    // key-3 y-offset rides INSIDE the calib transform, mirroring the game where
+    // _lxMobYOff joins dyOffset (which the calib scale wraps).
+    ctx.drawImage(img, -g.targetW / 2, -g.usedBotFrac * g.previewH + (g.yoffPx || 0), g.targetW, g.previewH);
     ctx.restore();
   }
   // Gameplay hitbox overlay. In-game: hitbox = m.w × m.h, sprite renders at
@@ -184,11 +225,12 @@
     if (!hb || !hb.w || !hb.h) return;
     const b = ent.base || (ent.states.idle ? { w: ent.states.idle.w, h: ent.states.idle.h } : { w: 768, h: 768 });
     const sf = sizeFactor(ent.group, b.w, b.h);
-    // Monsters: mul computed LIVE (1.5 × current plant-scale) so R-key editor
-    // changes reflect instantly; bosses use the snapshot mul (BOSS_DRAW_SCALE
-    // has no localStorage override channel).
+    // v0.26.x key-3 sync — the SPRITE now carries the live plant-scale (see
+    // stateGeom), so the gameplay box is constant here: in-game the hitbox is
+    // m.w x m.h regardless of visual scale, and the sprite grows around it.
+    // Scale cancels out of the conversion: hbH = DISPLAY_H / (baseMul x sf).
     const scale = ent.group === 'boss' ? 1 : liveMobScale(cur);
-    const mul = ent.group === 'boss' ? (hb.mul || 2) : 1.5 * scale;
+    const mul = ent.group === 'boss' ? (hb.mul || 2) : 1.5;
     const hbH = DISPLAY_H / (mul * sf);
     const hbW = hbH * (hb.w / hb.h);
     ctx.save();
@@ -281,6 +323,8 @@
     setFps: (v) => { fps = v; }, setOverlay: (v) => { overlay = v; }, setFocus: (v) => { focusState = v; },
     setHitbox: (v) => { showHitbox = v; _mobScaleLS = null; },   // toggle re-reads live scale too
     setHbEdit: (v) => { hbEdit = v; },
+    // key-3 (Monster Plant) live values for the panel readout
+    plantScale, plantYOff,
     fit, MAN, STATES, COL, DEF, CALIB: () => CALIB, reloadCalib: () => { CALIB = loadCalib(); },
     // ---- attack-hitbox model API (consumed by monster_animator_ui.js) ----
     HBX: () => HBX, hbFor, defaultHB: (t, st) => defaultHB(MAN[t], st),

@@ -101,7 +101,18 @@
     empty.style.display = 'none'; body.style.display = 'block';
     const ent = core.MAN[cur], C = core.CALIB()[cur];
     let html = `<div class="who">${cur}</div>` +
-      `<div class="mut" style="font-size:11px;margin-bottom:10px">${ent.group} · base ${ent.base ? ent.base.w + '×' + ent.base.h : '—'} · click a state header to focus in overlay</div>`;
+      `<div class="mut" style="font-size:11px;margin-bottom:4px">${ent.group} · base ${ent.base ? ent.base.w + '×' + ent.base.h : '—'} · click a state header to focus in overlay</div>`;
+    // key-3 (Monster Plant) sync readout — these live values are baked into the
+    // preview render exactly like the game; edit them in-game with key 3.
+    if (ent.group !== 'boss' && core.plantScale) {
+      const ps = core.plantScale(cur), py = core.plantYOff(cur);
+      const hot = ps !== 1 || py !== 0;
+      html += `<div class="mut" style="font-size:11px;margin-bottom:10px;${hot ? 'color:#9dff4d' : ''}">` +
+        `\u{1F331} Monster Plant (key 3 in-game): scale ${ps.toFixed(2)}× · y-offset ${py >= 0 ? '+' : ''}${py}px` +
+        `${hot ? ' — applied to this preview' : ' (defaults)'}</div>`;
+    } else {
+      html += `<div style="margin-bottom:6px"></div>`;
+    }
     for (const st of core.STATES) if (ent.states[st]) html += card(st, C[st]);
     if (A.hbEdit) {
       html += `<div class="mut" style="font-size:11px;margin:8px 0 6px">ATK HITBOX — the region player attacks can hit. w/h/ox/oy are fractions of sprite height; oy = bottom offset from the feet (+down). Drag the box in the stage, or its corner handle to resize.</div>`;
