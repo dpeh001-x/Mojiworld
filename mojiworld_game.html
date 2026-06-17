@@ -8205,7 +8205,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.962';
+const GAME_VERSION = 'v0.26.966';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -28643,8 +28643,12 @@ function applyClass(clsId) {
     '💡 Tip: the hotkey panel (top-left) shows your skills. Press K for full controls.', 'rare'), 1200);
   // v0.25.253 — first-time tutorial. Fires on first class pick (per
   // save slot). Subsequent picks skip it. Backed by localStorage.
-  let _alreadySeenTutorial = false;
-  try { _alreadySeenTutorial = localStorage.getItem('mojiworld_tutorial_seen') === '1'; } catch (e) {}
+  // v0.26.x — per-SAVE gate. Was a single global localStorage key, so every
+  // 2nd character on the same browser skipped the tour AND started unarmed
+  // (the starter weapon only came via the tour's weapon step). Gate on the
+  // persisted per-player flag so each fresh character sees it once; the else
+  // branch below still arms a gated-out character.
+  let _alreadySeenTutorial = !!(typeof player !== 'undefined' && player && player._tutorialSeen);
   if (!_alreadySeenTutorial) {
     setTimeout(() => {
       if (window._prologueActive) return;   // v0.26.x — apex class apply is not the player's class pick
@@ -28670,6 +28674,11 @@ function applyClass(clsId) {
       if (typeof _wireTutorialButtons === 'function') _wireTutorialButtons();
       if (typeof startTutorial === 'function') startTutorial();
     }, 600);
+  } else {
+    // v0.26.x — already-seen on this save (shouldn't normally happen at
+    // creation, but a re-pick or legacy flag could): still ARM the character
+    // so nobody starts weaponless. Deduped by the persisted _starterWeaponGiven.
+    try { if (typeof _grantTutorialStarterWeapon === 'function') _grantTutorialStarterWeapon(); } catch (e) {}
   }
 }
 // =========================================================================
@@ -30274,7 +30283,8 @@ const PLAYER_SAVE_FIELDS = [
   // gone) → Guguma "Replay the tour" → "Got it" → grant fires AGAIN, pushing
   // another free tier-2 on-class rare. Repeatable once per reload = unlimited
   // free-weapon farm. Persisting the flag makes the grant truly once-per-character.
-  '_starterWeaponGiven'
+  '_starterWeaponGiven',
+  '_tutorialSeen'   // v0.26.x — per-SAVE tutorial gate (replaces the global localStorage key)
 ];
 const GAME_SAVE_FIELDS = [
   'currentMap','bossDefeated','kills','achievements',
@@ -30805,7 +30815,7 @@ function _playStoryBeat(beatId, onClose) {
                          'help-modal','enhance-modal','skilltree-modal','attributes-modal',
                          'taxi-modal','codex-modal','mojidex-modal','quest-modal','worldmap-modal',
                          'confirm-modal','craft-modal','class-select-modal',
-                         'advancement-modal','tutorial-modal'];
+                         'advancement-modal','tutorial-modal','bravo-boon-modal'];
       for (const _id of _modalIds) {
         const _el = document.getElementById(_id);
         if (_el && (_el.style.display === 'flex' || _el.style.display === 'block')) {
@@ -32952,6 +32962,7 @@ function abandonQuest(id) {
   }
 }
 function toggleQuestJournal() {
+  if (typeof _tutPing === 'function') _tutPing('panel');
   if (!player.cls) { showToast('Pick a class first', 'common'); return; }
   if (player.hp <= 0) return;
   const modal = document.getElementById('quest-modal');
@@ -33068,6 +33079,7 @@ const _WM_BIOME_ICON = {
 const _WM_CLUSTERS       = [];   // intentionally empty — see note above
 const _WM_MAP_TO_CLUSTER = {};   // intentionally empty
 function toggleWorldMap() {
+  if (typeof _tutPing === 'function') _tutPing('worldmap');
   if (!player.cls) { showToast('Pick a class first', 'common'); return; }
   if (player.hp <= 0) return;
   const modal = document.getElementById('worldmap-modal');
@@ -36201,6 +36213,7 @@ function _mjxSeen(k) { return !!(game.mojidexSeen[k] || (game.bestiary[k] | 0) >
 function _mjxAllTypes() { return Object.keys(monsterTypes).filter(k => { const t = monsterTypes[k]; return t && t.name && t.hp && !_MOJIDEX_EXCLUDE.has(k); }); }
 function _mjxEsc(s) { return (typeof escapeHtml === 'function') ? escapeHtml(String(s)) : String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function openMojidex() {
+  if (typeof _tutPing === 'function') _tutPing('panel');
   const modal = document.getElementById('mojidex-modal'); if (!modal) return;
   if (!game.mojidexSeen) game.mojidexSeen = {}; if (!game.bestiary) game.bestiary = {};
   const types = _mjxAllTypes();
@@ -36652,6 +36665,7 @@ function offerPrestige() {
 }
 
 function bumpCombo(n = 1) {
+  if (typeof _tutPing === 'function') { _tutPing('attack'); _tutPing('combo'); }
   const prev = game.combo;
   game.combo += n;
   game.comboTimer = 2600;
@@ -37121,7 +37135,10 @@ function _tickBossCourage(dt) {
   player._braveCount = (player._braveCount || 0) + 1;
   player._courageMs = 5000;
   player._guaranteedCrit = Math.max(player._guaranteedCrit || 0, 1);   // next hit crits (rollCrit consumes)
-  player.dodgeCD = Math.max(0, (player.dodgeCD || 0) - 600);
+  // v0.26.966 — floor at 360ms (> the 350ms i-frame) for non-rogues so the
+  // -600ms counter can't drop dodgeCD below the invuln window and let a
+  // re-dodge refresh i-frames mid-window. Rogue has no dodge i-frame now.
+  player.dodgeCD = Math.max(player.cls === 'rogue' ? 0 : 360, (player.dodgeCD || 0) - 600);
   const _heal = Math.max(1, Math.floor(mxHp * 0.03));
   player.hp = Math.min(mxHp, player.hp + _heal);
   game._braveHpSample = player.hp;   // don't count our own heal as a hit
@@ -37139,7 +37156,19 @@ function startDodge() {
   if (player.tree.dodgeCdMul) baseCd *= player.tree.dodgeCdMul;
   player.dodgeCD = baseCd;
   player.lastDodgeTime = game.time;
-  player.invulnerable = Math.max(player.invulnerable, 350); // v0.26.x — was 280; dodges now reliably beat the incoming hit
+  // v0.26.966 — Rogue dodge no longer grants i-frames. The 280ms rogue CD
+  // was shorter than the 350ms i-frame, so a Shift-mash re-triggered the
+  // dodge in the gap and refreshed immunity forever (perpetual invuln).
+  // Instead the rogue's roll opens a 50% EVADE window: getEvasion() is
+  // forced to 0.5 while _dashEvadeUntil is live (same hook the Smoke Dash
+  // uses), so each incoming hit has a 50% chance to be dodged rather than
+  // the dodge granting full immunity. Non-rogues keep the i-frame — their
+  // 700ms CD can never chain it.
+  if (player.cls === 'rogue') {
+    player._dashEvadeUntil = (game.time | 0) + 17;   // ~280ms @60fps — matches dodgeTimer
+  } else {
+    player.invulnerable = Math.max(player.invulnerable, 350);
+  }
   // Milestone: Flow State — stack +10% speed (max 3) for 5s each dodge
   if (hasMilestone('flowState')) {
     player._flowStacks = Math.min(3, (player._flowStacks || 0) + 1);
@@ -37686,6 +37715,7 @@ function _bravoShowBoonPick() {
   }
   // Build modal.
   const modal = document.createElement('div');
+  modal.id = 'bravo-boon-modal';   // v0.26.966 — so the StuckPauseWatchdog sees this paused surface and never force-unpauses under it
   modal.style.cssText = 'position:fixed; inset:0; background:rgba(8,4,18,0.86); z-index:6000; display:flex; align-items:center; justify-content:center;';
   const card = document.createElement('div');
   card.style.cssText = 'background:linear-gradient(180deg,#1d1430,#1a0e2a); border:2px solid #ffb0d8; border-radius:14px; padding:24px 26px; min-width:560px; max-width:680px; color:#f4e2ff; box-shadow:0 22px 60px rgba(0,0,0,0.65), 0 0 40px rgba(255,176,216,0.22);';
@@ -43160,6 +43190,9 @@ function updatePlayer(dt) {
 }
 
 function triggerDeath() {
+  // v0.26.x — if the non-blocking tutorial dock is open when the player dies,
+  // dismiss it (don't mark seen) so it can't float over the death/respawn UI.
+  try { const _tm = document.getElementById('tutorial-modal'); if (_tm && _tm.classList.contains('tut-dock') && typeof _closeTutorial === 'function') _closeTutorial(false); } catch (e) {}
   game._diedInExpedition = false;   // v0.26.x audit -- never inherit a stale flag from an aborted prior death
   // v0.26.307 (audit MED #6) — Capture expedition-active flag BEFORE
   // _endExpedition flips it to false. The v0.26.295 5%-EXP-penalty
@@ -44128,9 +44161,15 @@ function drawClassIdentityHUD() {
       // Right-cap glow at high momentum.
       if (m >= 95) {
         ctx.globalCompositeOperation = 'lighter';
-        const g = ctx.createRadialGradient(bx + barW, by + barH / 2, 0, bx + barW, by + barH / 2, 16);
-        g.addColorStop(0, 'rgba(255,120,220,0.8)');
-        g.addColorStop(1, 'rgba(255,120,220,0)');
+        // v0.26.x perf -- gradient is fixed (HUD bar pos + static colors); cache it.
+        const _gk = (bx + barW) + '_' + (by + barH / 2);
+        let g = game._rogueMomGrad;
+        if (!g || game._rogueMomGradKey !== _gk) {
+          g = ctx.createRadialGradient(bx + barW, by + barH / 2, 0, bx + barW, by + barH / 2, 16);
+          g.addColorStop(0, 'rgba(255,120,220,0.8)');
+          g.addColorStop(1, 'rgba(255,120,220,0)');
+          game._rogueMomGrad = g; game._rogueMomGradKey = _gk;
+        }
         ctx.fillStyle = g;
         ctx.fillRect(bx + barW - 8, by - 8, 20, 20);
       }
@@ -64847,6 +64886,7 @@ function renderAttributes() {
 }
 
 function openAttributes() {
+  if (typeof _tutPing === 'function') _tutPing('panel');
   renderAttributes();
   document.getElementById('attributes-modal').style.display = 'flex';
   game.paused = true;
@@ -68001,6 +68041,7 @@ function _setBonusFmt(bonus) {
 // burns can stop wasting their Smalls on chip damage.
 const POTION_BIND_AUTO = { hp_auto: true, mp_auto: true };
 function _useBoundPotion(physKey) {
+  if (typeof _tutPing === 'function') _tutPing('potion');
   if (!player.potionBinds) player.potionBinds = { pageup: 'hp_auto', pagedown: 'mp_auto' };
   const bindId = player.potionBinds[physKey];
   if (!bindId || bindId === 'none') return;
@@ -68443,6 +68484,7 @@ function _setPotionCd(which) {
 }
 
 function useQuickPotion(which, preferElixir) {
+  if (typeof _tutPing === 'function') _tutPing('potion');
   // v0.26.x — ELIXIR PRIORITY. The bound-potion keys (PgUp / PgDn, and any key
   // the player pins to hp_auto / mp_auto) prefer a full Elixir — which restores
   // BOTH HP and MP in one drink — over any single-stat potion, per user request.
@@ -69350,6 +69392,7 @@ const TUTORIAL_STEPS = [
   {
     icon: '🎮',
     title: 'Move & Fight',
+    detect: 'attack',
     gugumaLine: 'Tweet! Hands first, feet next. Mash the keys — the road is too polite to laugh. I am not.',
     body: () => 'Use <kbd>←</kbd>/<kbd>→</kbd> to move, <kbd>Space</kbd> to jump — tap again in mid-air to double-jump (gear/boons can grant extra air-jumps), <kbd>Z</kbd> to attack. As you level you\'ll unlock more skills on <kbd>X</kbd>, <kbd>S</kbd>, <kbd>C</kbd>, <kbd>D</kbd>, <kbd>F</kbd>, <kbd>V</kbd>, <kbd>G</kbd> — and your master ultimate lands on <kbd>B</kbd> at Lv 50. Press <kbd>K</kbd> to adjust your key settings.' + ((typeof player !== 'undefined' && player && player.cls === 'archer') ? '<br><br><b>🏹 Archer tip:</b> hold <kbd>↑</kbd> or <kbd>↓</kbd> while you fire <kbd>Z</kbd> to aim your arrows upward or downward.' : ''),
   },
@@ -69359,6 +69402,7 @@ const TUTORIAL_STEPS = [
   {
     icon: '📂',
     title: 'Your Menus & Panels',
+    detect: 'panel',
     gugumaLine: 'Tweet! Three doors to memorise: U is your build, Y is the Codex, E is your quests. The rest open when you poke them.',
     body: 'Most of Moji lives behind a key — tap to open, tap again to close:' +
           '<ul style="margin:8px 0 0; padding-left:20px; line-height:1.7;">' +
@@ -69389,6 +69433,7 @@ const TUTORIAL_STEPS = [
   {
     icon: '🧪',
     title: 'Potions Keep You Breathing',
+    detect: 'potion',
     gugumaLine: 'Tweet! Red bar sulks, drink. Blue bar sulks, also drink. Simple — yet Outsiders forget, dramatically, mid-boss.',
     body: 'You\'re starting with a few <b>Red (HP)</b> and <b>Blue (MP)</b> potions. ' +
           'Press <kbd>PageUp</kbd> to quaff a <b>Health</b> potion and <kbd>PageDown</kbd> for <b>Mana</b>. ' +
@@ -69397,6 +69442,7 @@ const TUTORIAL_STEPS = [
   {
     icon: '⚔️',
     title: 'Defeat Monsters → Earn XP',
+    detect: 'combo',
     gugumaLine: 'Peep! Chain your kills — combos make the coins shinier. Impress me; it is harder than it sounds.',
     body: 'Every kill grants XP and Mojicoins (the gold currency). Build combos for bonus XP — chain kills within 2.6s to multiply rewards.',
   },
@@ -69421,6 +69467,7 @@ const TUTORIAL_STEPS = [
   {
     icon: '🗺️',
     title: 'World Map & Taxi Uncle',
+    detect: 'worldmap',
     gugumaLine: 'Cheep-cheep! Want to go somewhere? See Taxi Uncle — he only ever drives you somewhere safe. The map just shows you the lay of the land.',
     body: 'Press <kbd>W</kbd> to open the world map — it shows every area, its recommended level, and where you are now. There\'s no instant fast-travel. To actually go somewhere, visit <b>Taxi Uncle</b> in town: he\'ll only take you to places that are <b>safe</b> — spots you\'ve discovered and can handle — so you won\'t get dropped into a zone that hits too hard.<br><br>You begin in <b>The Void</b>: the ⭐ star portal leads to town. The <b>⚔ Hall of Echoes</b> — a boss-rush arena that replays bosses you\'ve already faced — stands at the base of the Interdimensional Ascension; it wakes once you\'ve met your first boss.',
   },
@@ -69530,6 +69577,7 @@ function startTutorial() {
 }
 function _showTutorialModal() {
   _tutStep = 0;
+  try { TUTORIAL_STEPS.forEach((s) => { s._done = false; }); } catch (e) {}
   const modal = document.getElementById('tutorial-modal');
   if (!modal) return;
   // v0.26.x — INTERACTIVE TUTORIAL: dock the panel instead of throwing up a
@@ -69602,6 +69650,31 @@ function _ensureTutChrome() {
     }
   }
 }
+// v0.26.x — ENGAGEMENT: the dock invites the player to try each step but never
+// noticed when they did. _tutPing(tag) is called from the matching gameplay
+// functions; if it matches the CURRENT step's `detect` tag it ticks the step
+// (✅), swaps Guguma's line to a reaction, chirps, and auto-advances after a
+// beat. Non-blocking — Next/Back/Skip still work, untagged steps are unaffected.
+function _tutPing(tag) {
+  try {
+    const modal = document.getElementById('tutorial-modal');
+    if (!modal || modal.style.display === 'none' || !modal.classList.contains('tut-dock')) return;
+    const step = TUTORIAL_STEPS[_tutStep];
+    if (!step || step._done || step.detect !== tag) return;
+    step._done = true;
+    const gl = document.getElementById('tut-guguma-line');
+    if (gl) { gl.textContent = 'Cheep! You did it — that\'s the one. \u2713'; gl.classList.remove('flash'); void gl.offsetWidth; gl.classList.add('flash'); }
+    const t = document.getElementById('tut-step-title');
+    if (t && t.textContent.indexOf('\u2705') < 0) t.textContent = '\u2705 ' + t.textContent;
+    const pg = document.getElementById('tut-progress');
+    if (pg) { let d=''; for (let i=0;i<TUTORIAL_STEPS.length;i++) d += (i===_tutStep?'\u25CF':(TUTORIAL_STEPS[i]._done?'\u2713':'\u00B7')); pg.textContent = d + '  ' + (_tutStep+1) + '/' + TUTORIAL_STEPS.length; }
+    if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('chirp'); } catch (e) {} }
+    if (_tutStep < TUTORIAL_STEPS.length - 1) {
+      const _at = _tutStep;
+      setTimeout(() => { if (TUTORIAL_STEPS[_at] === step && _tutStep === _at) { _tutStep++; _renderTutorialStep(); } }, 1100);
+    }
+  } catch (e) {}
+}
 function _renderTutorialStep() {
   const step = TUTORIAL_STEPS[_tutStep];
   if (!step) return;
@@ -69619,9 +69692,9 @@ function _renderTutorialStep() {
   if ($('tut-icon')) $('tut-icon').textContent = step.icon;
   // v0.26.x — #tut-title is now the fixed gold "Tutorial" banner; the per-step
   // title lives in #tut-step-title below it.
-  if ($('tut-step-title')) $('tut-step-title').textContent = step.title;
+  if ($('tut-step-title')) $('tut-step-title').textContent = (step._done ? '\u2705 ' : '') + step.title;
   if ($('tut-body')) $('tut-body').innerHTML = (typeof step.body === 'function') ? step.body() : step.body;
-  if ($('tut-progress')) $('tut-progress').textContent = `Step ${_tutStep + 1} / ${TUTORIAL_STEPS.length}`;
+  if ($('tut-progress')) { let _d=''; for (let i=0;i<TUTORIAL_STEPS.length;i++) _d += (i===_tutStep?'\u25CF':(TUTORIAL_STEPS[i]._done?'\u2713':'\u00B7')); $('tut-progress').textContent = _d + '  ' + (_tutStep + 1) + '/' + TUTORIAL_STEPS.length; }
   // v0.25.928 — Update the Guguma canary's line for this step + trigger
   // the fade-in slide animation so the bird visibly "speaks" each beat.
   // Falls back to the default chip line if the step has no gugumaLine.
@@ -69649,6 +69722,9 @@ function _closeTutorial(markSeen) {
   game.paused = false;
   if (markSeen) {
     try { localStorage.setItem('mojiworld_tutorial_seen', '1'); } catch (e) {}
+    // v0.26.x — also stamp the per-SAVE flag so this character (not just this
+    // browser origin) is marked done; survives reload via PLAYER_SAVE_FIELDS.
+    try { if (typeof player !== 'undefined' && player) player._tutorialSeen = true; } catch (e) {}
   }
 }
 // v0.26.x — Tutorial gift: drop the player's class starter weapon (tier-2
@@ -79743,7 +79819,14 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
       // touch so the dye reads as vivid rather than washed-out.
       const _hairHue = (lookCustom && (lookCustom.hairHue | 0)) || 0;
       const _hairPrevFilter = ctx.filter;
-      if (_hairHue) ctx.filter = (_hairPrevFilter && _hairPrevFilter !== 'none' ? _hairPrevFilter + ' ' : '') + 'hue-rotate(' + _hairHue + 'deg) saturate(1.4)';
+      if (_hairHue) {
+        if (!_hairPrevFilter || _hairPrevFilter === 'none') {
+          const _hfc = game._hairFilterCache || (game._hairFilterCache = {});
+          ctx.filter = _hfc[_hairHue] || (_hfc[_hairHue] = 'hue-rotate(' + _hairHue + 'deg) saturate(1.4)');
+        } else {
+          ctx.filter = _hairPrevFilter + ' hue-rotate(' + _hairHue + 'deg) saturate(1.4)';
+        }
+      }
       ctx.drawImage(_lxFaceLayerSrc(_hairSprite), -58, -52, 108, 108);
       if (_hairHue) ctx.filter = _hairPrevFilter || 'none';
     }
@@ -92923,7 +93006,8 @@ function drawParticles() {
     for (const p of game.particles) {
       if (p.text) continue;
       if (p.life > 250) continue;
-      if (!_isBrightHex(p.color)) continue;
+      if (p._bright === undefined) p._bright = _isBrightHex(p.color);
+      if (!p._bright) continue;
       const sx = p.x - camX;
       if (sx < -10 || sx > W + 10 || p.y < camY - 10 || p.y > camY + H + 10) continue;
       const alpha = p.life < 20 ? (p.life / 20) : 1;
@@ -94409,7 +94493,7 @@ function loop(time) {
                          'help-modal','enhance-modal','skilltree-modal','attributes-modal',
                          'dev-modal','taxi-modal','codex-modal','mojidex-modal','multiplayer-modal',
                          'quest-modal','worldmap-modal','confirm-modal','craft-modal',
-                         'class-select-modal','advancement-modal','tutorial-modal'];
+                         'class-select-modal','advancement-modal','tutorial-modal','bravo-boon-modal'];
       let _anyVisible = false;
       // v0.26.946 perf — refs cached; null entries re-query (late-created modals).
       const _mc = (game._modalElCache = game._modalElCache || {});
@@ -95077,8 +95161,8 @@ function _prologueFinish(skipped) {
   // tutorial instead of re-opening character creation. The creation call
   // stays as a fallback for any legacy pre-creation entry path.
   if (typeof player !== 'undefined' && player && player.cls) {
-    let _seenTut = false;
-    try { _seenTut = localStorage.getItem('mojiworld_tutorial_seen') === '1'; } catch (e) {}
+    // v0.26.x — per-SAVE gate (mirror of the creation path).
+    let _seenTut = !!(typeof player !== 'undefined' && player && player._tutorialSeen);
     if (!_seenTut) {
       // 1.5s delay outlasts the finish teardown (overlay dissolve +
       // loadMap modal sweep raced a 600ms timer and closed the tutorial
