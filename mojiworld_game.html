@@ -56110,7 +56110,7 @@ function bossAI(m, dt, distToPlayer) {
     if (m._octoInit === true && Array.isArray(m._legRefs) && m._legRefs.length === 0) {
       const _ocx = m.x + m.w / 2, _ocy = m.y + m.h / 2;
       const _pcx = player.x + player.w / 2, _pcy = player.y + player.h / 2;
-      if (Math.hypot(_pcx - _ocx, _pcy - _ocy) < 460) {
+      if (((_pcx - _ocx) * (_pcx - _ocx) + (_pcy - _ocy) * (_pcy - _ocy)) < 211600) {   // v0.26.x perf: 460^2, no sqrt
         const _nowOcto = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
         m.atkAnimUntil = _nowOcto + 400;
       }
@@ -58872,7 +58872,7 @@ function updateProjectiles(dt) {
         _p._msSeen = true;
         if (_p.owner !== 'player' || _p._msClone || _p._msHandled || _p._noMulti) continue;
         if (_p.bspr && _p.bspr.startsWith('bult_')) continue;   // ult / turret volleys keep their authored counts
-        const _spd = Math.hypot(_p.vx || 0, _p.vy || 0);
+        const _spd = Math.sqrt((_p.vx || 0) * (_p.vx || 0) + (_p.vy || 0) * (_p.vy || 0));   // v0.26.x perf: hypot->sqrt (hot per-projectile path)
         const _baseA = Math.atan2(_p.vy || 0, _p.vx || 0);
         for (let _k = 1; _k <= _ms; _k++) {
           const _off = (_k % 2 === 1 ? 1 : -1) * Math.ceil(_k / 2) * _spread;
@@ -69622,6 +69622,7 @@ function _ensureTutChrome() {
       btn.id = 'tut-collapse';
       btn.type = 'button';
       btn.title = 'Collapse / expand the tour (keep playing)';
+      btn.setAttribute('aria-label', 'Collapse or expand the tutorial');
       btn.textContent = '▾';
       card.appendChild(btn);
     }
@@ -69675,6 +69676,20 @@ function _tutPing(tag) {
     }
   } catch (e) {}
 }
+// v0.26.x — On touch devices the tour taught keyboard keys with no on-screen
+// equivalent. _tutTouchify rewrites <kbd>KEY</kbd> hints to the matching mobile
+// button glyph/label so phone players can follow along; K (rebind — keyboard-
+// only, no touch button) is marked as such instead of being a dead end.
+function _tutTouchify(html) {
+  try {
+    if (typeof matchMedia === 'undefined' || !matchMedia('(pointer: coarse)').matches) return html;
+    const MAP = { '\u2190':'\u25C0','\u2192':'\u25B6','\u2191':'\u25B2','\u2193':'\u25BC','Space':'\u2912 JUMP','Z':'ATTACK','U':'\u2191 LV UP','Y':'\uD83D\uDCD4 CODEX','E':'\uD83D\uDCDC QUEST','W':'\uD83D\uDDFA MAP','N':'\uD83D\uDCAC TALK','PageUp':'\u2665 HP','PageDown':'\u25C6 MP' };
+    return String(html).replace(/<kbd>([^<]+)<\/kbd>/g, (m, k) => {
+      if (k === 'K') return '<kbd>K</kbd> <span style="opacity:0.7;font-size:0.85em;">(keyboard only)</span>';
+      return '<kbd>' + (MAP[k] || k) + '</kbd>';
+    });
+  } catch (e) { return html; }
+}
 function _renderTutorialStep() {
   const step = TUTORIAL_STEPS[_tutStep];
   if (!step) return;
@@ -69693,7 +69708,7 @@ function _renderTutorialStep() {
   // v0.26.x — #tut-title is now the fixed gold "Tutorial" banner; the per-step
   // title lives in #tut-step-title below it.
   if ($('tut-step-title')) $('tut-step-title').textContent = (step._done ? '\u2705 ' : '') + step.title;
-  if ($('tut-body')) $('tut-body').innerHTML = (typeof step.body === 'function') ? step.body() : step.body;
+  if ($('tut-body')) $('tut-body').innerHTML = _tutTouchify((typeof step.body === 'function') ? step.body() : step.body);
   if ($('tut-progress')) { let _d=''; for (let i=0;i<TUTORIAL_STEPS.length;i++) _d += (i===_tutStep?'\u25CF':(TUTORIAL_STEPS[i]._done?'\u2713':'\u00B7')); $('tut-progress').textContent = _d + '  ' + (_tutStep + 1) + '/' + TUTORIAL_STEPS.length; }
   // v0.25.928 — Update the Guguma canary's line for this step + trigger
   // the fade-in slide animation so the bird visibly "speaks" each beat.
@@ -101420,11 +101435,26 @@ function startBgm() {
   #tutorial-modal.tut-dock .modal::after { display: none !important; }
   /* "game is live" hint above the nav row */
   #tut-live-hint {
-    font: 700 9px/1.4 'Consolas', 'JetBrains Mono', monospace;
-    letter-spacing: 1.2px;
+    font: 700 11px/1.4 'Consolas', 'JetBrains Mono', monospace;
+    letter-spacing: 1px;
     text-transform: uppercase;
-    color: rgba(150, 235, 170, 0.88);
+    color: rgba(170, 245, 185, 0.96);
     margin: 0 0 8px;
+  }
+  /* v0.26.x — lift dock body contrast (the muted tan reads weak on the card) */
+  #tutorial-modal.tut-dock #tut-body { color: #e8d8c0 !important; }
+  /* v0.26.x — MOBILE: re-anchor the dock to the TOP so the card never covers
+     the bottom-left D-pad or the bottom-right skill/jump cluster — the very
+     controls the tour tells the player to use. (Was inset bottom-left, a
+     direct overlap with .mc-dpad.) */
+  @media (pointer: coarse), (max-width: 900px) {
+    #tutorial-modal.tut-dock {
+      inset: 0 auto auto 0 !important;
+      top: 0 !important; bottom: auto !important;
+      padding: calc(6px + env(safe-area-inset-top)) 0 0 8px !important;
+    }
+    #tutorial-modal.tut-dock .modal { width: min(420px, 96vw) !important; }
+    #tutorial-modal.tut-dock #tut-body { max-height: 26vh !important; }
   }
   /* collapse / expand handle (top-right of the card) */
   #tut-collapse {
