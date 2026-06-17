@@ -148,6 +148,20 @@
   <b>Heads-up.</b> An earlier implementation of these phases targeted <code>v0.5.1</code> and was preserved locally at tag <code>phase-1-2-3-on-v0.5.1</code>. This is the rebuild against the current <code>v0.9.8</code> codebase, which had moved substantially (new bosses like Gravitos, minimap/taxi, chibi character rewrite).
 </div>
 
+<h2>v0.26.970 <span class="tag"><span class="pill bug">bug</span> Glitch-fix: Shackle-QTE soft-lock on death + forced map-change</h2>
+<p>Dying during a boss Shackle QTE stranded the player &mdash; <code>updatePlayer</code> early-returns while dying, so <code>_qteFrame</code> never ran again to self-clear, and the player respawned with <code>stunTimer</code> still ticking and the QTE card visible (movable but unable to act). A forced map-change mid-QTE orphaned it the same way. Both <code>triggerDeath</code> and <code>loadMap</code> now clear the QTE (matching the modal-close guards). Verified in-engine: death and map-change mid-QTE both fully clear the stun + card; the normal arrow-break still works. Sibling false-positives refuted: quest progress IS persisted (sub-key of saved <code>quests</code>), <code>_diedInExpedition</code> correctly resets not persists, XP overflow already banked + recursed.</p>
+
+<h2>v0.26.969 <span class="tag"><span class="pill polish">polish</span> Performance pass (multi-agent, 8 agents across 2 cycles): per-frame allocation, draw-cache + audio wins</span></h2>
+<p>Telemetry-grounded multi-agent audit. Live profiling confirmed the sim is healthy (<code>updateMonsters</code> ~0.39&nbsp;ms/frame with 57 mobs), so the wins are draw-path + event-path:</p>
+<ul>
+<li><strong><code>_liveMobs</code> array reuse</strong> &mdash; <code>updateProjectiles</code> reused a module-scope scratch array instead of allocating one per frame.</li>
+<li><strong>Monster death-SFX cooldown</strong> (110&nbsp;ms) &mdash; an AoE clear killing 10 mobs in one frame fired 10 overlapping <code>play()</code>s on the shared family clip; now gated like the hit SFX.</li>
+<li><strong>Loot-burst particle budget</strong> &mdash; <code>emitRarityBurst</code> (40 particles per legendary) now routes through the frame budget so a multi-drop sweep can&rsquo;t spike past the cap.</li>
+<li><strong>Draw-path caches</strong> &mdash; rogue momentum cap-glow gradient built once; dyed-hair hue filter string cached per hue; per-particle brightness memoized in the glow pass.</li>
+<li><strong>QTE timer-bar diff-guard</strong> + <strong>hot-loop <code>Math.hypot</code>&rarr;squared-distance</strong> (multishot speed, Octobaby head check).</li>
+</ul>
+<p>Several agent findings were refuted in review and deliberately NOT applied (afterImages already write-index compacted; status <code>ctx.filter</code> is interned literals; skill-bar opacity already diff-guarded). <code>node --check</code> clean.</p>
+
 <h2>v0.26.968 <span class="tag"><span class="pill polish">polish</span> Echo Keeper boss EXP halved</span></h2>
 <p>Per user: bosses re-summoned by the <b>Echo Keeper</b> now grant <b>half</b> the EXP they did, on top of the existing per-sign diminishing return (50%&rarr;38%&rarr;26%&rarr;15% across repeated summons of the same zodiac sign). Net echo EXP is now ~25%&rarr;19%&rarr;13%&rarr;7.5% of a first-time boss kill. Mojicoins and loot drops are unchanged; non-zodiac echoes remain fully reward-less as before. Trims the Echo Keeper as an EXP farm without removing it as a challenge.</p>
 
@@ -205,6 +219,7 @@
 <li><strong>Full-asset cache warmer (subsequent loads):</strong> the v0.26.949 service worker only caches what a session happens to request, so lazy categories (~6.5k anim frames etc.) still popped in on first encounter. New <code>assets_manifest.json</code> (6,511 entries, generator <code>scripts/generate_asset_manifest.mjs</code>) + a post-boot trickle-fetcher that walks the whole manifest into the SW cache — paced &times;3, resumable across sessions (localStorage cursor), pauses while the tab is hidden, skips on Save-Data/2g, and only runs when the SW controls the page. After it completes once, <em>every</em> sprite and sound serves instantly from device cache on every later visit — zero pop-in, near-zero bandwidth.</li>
 </ul>
 <p>Verified live: a fresh boot shows the fixed entries all 200; the warmer engaged post-boot (manifest fetch + cache growth, 60/60 in a forced slice; 1,089 entries cached from boot alone). The crash agent also confirmed the recent ult/summon/turret/boot systems are defensively written, all 16 save-parse sites guarded. <code>node --check</code> clean.</p>
+
 
 <h2>v0.26.962 <span class="tag"><span class="pill bug">bug</span> iPhone boot kill &mdash; decode concurrency pooled (the restart-then-black video)</h2>
 <p><strong>Diagnosed from the player&rsquo;s screen recording:</strong> the loader reached 75%, then the page visibly restarted to <strong>0% &middot; Painting Everdawn Bazaar</strong> and re-climbed &mdash; iOS Safari kills and auto-reloads a tab whose memory spikes, and repeated kills end in a blank page. The spike: boot fired <em>hundreds of image fetch+decodes at once</em> (the 266-sprite manifest via Promise.all, the warm-decode pass over ~1,000 registry sprites, and the start-map preloader), each decoded bitmap costing megabytes of transient RAM.</p>
