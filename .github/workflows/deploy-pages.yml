@@ -1,0 +1,88 @@
+name: Deploy game to moji-studios.com/mojiworld
+
+# Publishes the game to GitHub Pages under the /mojiworld path on the custom
+# domain moji-studios.com. A custom domain on a project repo serves at the
+# domain ROOT, so we assemble the artifact with the whole game inside a
+# `mojiworld/` subfolder -> https://moji-studios.com/mojiworld/.
+#
+# One-time setup outside this file (see DEPLOY.md): point DNS at GitHub Pages,
+# set repo Settings -> Pages -> Source = "GitHub Actions", and (for live
+# multiplayer) add an Actions *variable* MP_WSS_URL = wss://<your-mp-host>.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble site (game under /mojiworld)
+        env:
+          MP_WSS_URL: ${{ vars.MP_WSS_URL }}
+        run: |
+          set -euo pipefail
+          mkdir -p _site/mojiworld
+
+          # Copy the whole game tree (HTML + Sprites/ + audio/ + backgrounds/ +
+          # root JS) into the /mojiworld/ subfolder so every RELATIVE asset path
+          # the game uses resolves under /mojiworld/. Exclude VCS/dev/build dirs.
+          rsync -a ./ _site/mojiworld/ \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '_site' \
+            --exclude 'node_modules' \
+            --exclude 'mp/node_modules' \
+            --exclude 'tools/_vidframes'
+
+          # Serve the game at the clean /mojiworld/ URL (index.html == the game).
+          cp mojiworld_game.html _site/mojiworld/index.html
+
+          # Custom apex domain + disable Jekyll processing of the artifact.
+          echo 'moji-studios.com' > _site/CNAME
+          touch _site/.nojekyll
+
+          # Friendly apex redirect: moji-studios.com/ -> /mojiworld/
+          printf '<!doctype html><meta http-equiv="refresh" content="0; url=/mojiworld/">\n' > _site/index.html
+
+          # Inject the live multiplayer endpoint so the in-game Multi panel
+          # defaults to the production wss:// server instead of localhost.
+          # (Build-time only: the committed game keeps its localhost default for
+          # local dev.) Browsers block ws:// from an https page, so this MUST be
+          # a wss:// URL.
+          if [ -n "${MP_WSS_URL}" ]; then
+            for f in _site/mojiworld/index.html _site/mojiworld/mojiworld_game.html; do
+              sed -i "s#ws://localhost:8080#${MP_WSS_URL}#g" "$f"
+            done
+            echo "Injected MP endpoint: ${MP_WSS_URL}"
+          else
+            echo "::warning::MP_WSS_URL not set — Multi panel will default to ws://localhost:8080 (local only). Set an Actions variable MP_WSS_URL to enable live multiplayer."
+          fi
+
+          echo "Artifact file count: $(find _site -type f | wc -l)"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
