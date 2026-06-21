@@ -1,13 +1,20 @@
-name: Deploy game to moji-studios.com/mojiworld
+name: Deploy game to GitHub Pages
 
-# Publishes the game to GitHub Pages under the /mojiworld path on the custom
-# domain moji-studios.com. A custom domain on a project repo serves at the
-# domain ROOT, so we assemble the artifact with the whole game inside a
-# `mojiworld/` subfolder -> https://moji-studios.com/mojiworld/.
+# Publishes the game to GitHub Pages, intended to live on its OWN subdomain
+# (e.g. play.moji-studios.com) so it never touches the studio site on the apex
+# moji-studios.com (which is hosted on Cloudflare Pages). On a custom domain the
+# subdomain ROOT serves the game directly -> https://play.moji-studios.com/.
 #
-# One-time setup outside this file (see DEPLOY.md): point DNS at GitHub Pages,
-# set repo Settings -> Pages -> Source = "GitHub Actions", and (for live
-# multiplayer) add an Actions *variable* MP_WSS_URL = wss://<your-mp-host>.
+# Heavy art (Sprites/ audio/ backgrounds/, ~1.3GB) is NOT bundled — it streams
+# from jsDelivr over this repo, pinned to the commit SHA. Keeps the artifact tiny.
+#
+# One-time setup outside this file (see DEPLOY.md):
+#   - Cloudflare DNS: CNAME  play -> dpeh001-x.github.io   (DNS-only / grey cloud)
+#   - repo Settings -> Pages -> Source = "GitHub Actions"
+#   - Actions *variable* GAME_DOMAIN = play.moji-studios.com   (enables custom domain)
+#   - Actions *variable* MP_WSS_URL  = wss://<your-mp-host>    (enables live multiplayer)
+# Until GAME_DOMAIN is set, the build claims no custom domain and serves at the
+# default github.io URL — safe to run anytime.
 
 on:
   push:
@@ -29,23 +36,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Assemble site (game under /mojiworld)
+      - name: Assemble site
         env:
+          GAME_DOMAIN: ${{ vars.GAME_DOMAIN }}
           MP_WSS_URL: ${{ vars.MP_WSS_URL }}
         run: |
           set -euo pipefail
-          mkdir -p _site/mojiworld
+          mkdir -p _site
 
-          # Copy the whole game tree (HTML + Sprites/ + audio/ + backgrounds/ +
-          # root JS) into the /mojiworld/ subfolder so every RELATIVE asset path
-          # the game uses resolves under /mojiworld/. Exclude VCS/dev/build dirs.
           # Bundle the game HTML + small root JS (anim_calib.js, mob_offsets.js,
-          # etc.) + CHANGELOG. The heavy art (Sprites/ audio/ backgrounds/,
-          # ~1.3GB) is EXCLUDED here and streamed from a CDN instead (rewritten
-          # below) so the Pages artifact stays tiny and well under the 1GB limit.
-          # Drop VCS/dev/server/backup/docs — not loaded by the game, and
-          # internal design docs shouldn't be published.
-          rsync -a ./ _site/mojiworld/ \
+          # etc.) + CHANGELOG at the site ROOT (subdomain root == the game). The
+          # heavy art (Sprites/ audio/ backgrounds/, ~1.3GB) is EXCLUDED and
+          # streamed from a CDN (rewritten below) so the artifact stays tiny and
+          # well under Pages' 1GB limit. Drop VCS/dev/server/backup/docs — not
+          # loaded by the game, and internal design docs shouldn't be published.
+          rsync -a ./ _site/ \
             --exclude '.git' \
             --exclude '.github' \
             --exclude '.claude' \
@@ -69,34 +74,36 @@ jobs:
             --exclude 'serve.js' \
             --exclude 'serve.bat'
 
-          # Serve the game at the clean /mojiworld/ URL (index.html == the game).
-          cp mojiworld_game.html _site/mojiworld/index.html
-
-          # Custom apex domain + disable Jekyll processing of the artifact.
-          echo 'moji-studios.com' > _site/CNAME
+          # Serve the game at the site root (index.html == the game).
+          cp mojiworld_game.html _site/index.html
           touch _site/.nojekyll
 
-          # Friendly apex redirect: moji-studios.com/ -> /mojiworld/
-          printf '<!doctype html><meta http-equiv="refresh" content="0; url=/mojiworld/">\n' > _site/index.html
+          # Custom domain — only claimed when GAME_DOMAIN is set, so the build is
+          # safe to run before DNS exists. Set it (e.g. play.moji-studios.com)
+          # once the Cloudflare CNAME is in place.
+          if [ -n "${GAME_DOMAIN}" ]; then
+            echo "${GAME_DOMAIN}" > _site/CNAME
+            echo "Custom domain: ${GAME_DOMAIN}"
+          else
+            echo "::notice::GAME_DOMAIN not set — serving at the default github.io URL (no custom domain claimed)."
+          fi
 
-          # Heavy art (Sprites/ audio/ backgrounds/) streams from jsDelivr over
-          # this repo, PINNED to this commit SHA so the CDN copy is immutable and
-          # never stale. Rewrite every relative asset reference (JS strings, CSS
-          # url(), static HTML — all share the form <quote-or-paren>Dir/ ) to the
-          # CDN. The committed game keeps relative paths for local dev.
+          # Heavy art streams from jsDelivr over this repo, PINNED to this commit
+          # SHA so the CDN copy is immutable and never stale. Rewrite every
+          # relative asset reference (JS strings, CSS url(), static HTML — all
+          # share the form <quote-or-paren>Dir/ ) to the CDN. The committed game
+          # keeps relative paths for local dev.
           CDN_BASE="https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${GITHUB_SHA}"
-          for f in _site/mojiworld/index.html _site/mojiworld/mojiworld_game.html; do
+          for f in _site/index.html _site/mojiworld_game.html; do
             sed -i -E "s#([\"'(])(Sprites|audio|backgrounds)/#\1${CDN_BASE}/\2/#g" "$f"
           done
           echo "Heavy assets -> ${CDN_BASE}/{Sprites,audio,backgrounds}/"
 
           # Inject the live multiplayer endpoint so the in-game Multi panel
           # defaults to the production wss:// server instead of localhost.
-          # (Build-time only: the committed game keeps its localhost default for
-          # local dev.) Browsers block ws:// from an https page, so this MUST be
-          # a wss:// URL.
+          # Browsers block ws:// from an https page, so this MUST be a wss:// URL.
           if [ -n "${MP_WSS_URL}" ]; then
-            for f in _site/mojiworld/index.html _site/mojiworld/mojiworld_game.html; do
+            for f in _site/index.html _site/mojiworld_game.html; do
               sed -i "s#ws://localhost:8080#${MP_WSS_URL}#g" "$f"
             done
             echo "Injected MP endpoint: ${MP_WSS_URL}"

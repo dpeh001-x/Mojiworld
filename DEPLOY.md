@@ -1,102 +1,96 @@
-# Deploying Mojiworld to moji-studios.com/mojiworld
+# Deploying Mojiworld
 
-The game auto-deploys to **GitHub Pages** under the custom domain
-`moji-studios.com`, served at **`/mojiworld`**. Live multiplayer runs on a
-separate Node host (the relay can't run on static Pages).
+The studio site at **moji-studios.com stays exactly as-is** (Cloudflare Pages).
+The game goes live on its **own subdomain — `play.moji-studios.com`** — hosted on
+this repo's **GitHub Pages**. A subdomain keeps the game and the studio site
+completely independent (no risk to the apex site).
 
-- **Automated for you:** `.github/workflows/deploy-pages.yml` builds and publishes
-  the site on every push to `main` (and via *Actions -> Run workflow*). It puts
-  the game + small JS inside a `mojiworld/` folder so the clean URL
-  `moji-studios.com/mojiworld/` loads it, writes the `CNAME`, and injects the
-  live multiplayer URL.
-- **Heavy art on a CDN (no 1 GB Pages limit):** the ~1.3 GB of `Sprites/`,
-  `audio/`, and `backgrounds/` is **not** bundled into Pages. The build rewrites
-  every asset reference to **jsDelivr** serving this repo, pinned to the deploy's
-  commit SHA (`cdn.jsdelivr.net/gh/dpeh001-x/Mojiworld@<sha>/...`) — immutable,
-  globally cached, zero upload, no quality loss. The Pages artifact stays ~30 MB.
-  (Requires the repo to remain **public** so jsDelivr can serve it.)
-- **You do once (can't be automated from the repo):** DNS, turning Pages on,
-  and standing up the multiplayer server. Steps below.
+- **Automated for you:** `.github/workflows/deploy-pages.yml` builds + publishes on
+  every push to `main`. The subdomain root serves the game directly
+  (`https://play.moji-studios.com/`), the heavy art streams from a CDN, and the
+  live multiplayer URL is injected.
+- **Heavy art on a CDN (no 1 GB Pages limit):** ~1.3 GB of `Sprites/`, `audio/`,
+  `backgrounds/` is **not** bundled — the build rewrites every asset reference to
+  **jsDelivr** serving this repo, pinned to the deploy's commit SHA
+  (`cdn.jsdelivr.net/gh/dpeh001-x/Mojiworld@<sha>/...`): immutable, cached, zero
+  upload, no quality loss. Artifact stays ~30 MB. **Repo must stay public.**
+
+> Want a different name (e.g. `mojiworld.moji-studios.com`)? Just use that value
+> everywhere `play.moji-studios.com` appears below — it's a single variable.
 
 ---
 
-## 1. Turn on Pages (GitHub web UI)
+## 1. Cloudflare DNS — add the subdomain (your Cloudflare dashboard)
 
-Repo **Settings -> Pages -> Build and deployment -> Source = "GitHub Actions"**.
-(No branch picker — the workflow handles it.)
-
-## 2. Point DNS at GitHub Pages (your domain registrar)
-
-For the apex `moji-studios.com`, add four **A** records and (optional) four
-**AAAA** records to GitHub's Pages IPs:
+In the `moji-studios.com` zone → **DNS → Records → Add record**:
 
 ```
-A     @   185.199.108.153
-A     @   185.199.109.153
-A     @   185.199.110.153
-A     @   185.199.111.153
-AAAA  @   2606:50c0:8000::153
-AAAA  @   2606:50c0:8001::153
-AAAA  @   2606:50c0:8002::153
-AAAA  @   2606:50c0:8003::153
+Type:   CNAME
+Name:   play
+Target: dpeh001-x.github.io
+Proxy:  DNS only  (grey cloud)   <-- important: lets GitHub issue the TLS cert
+TTL:    Auto
 ```
 
-Optionally add `CNAME  www  dpeh001-x.github.io.` so `www` works too.
+> Grey-cloud (DNS only) is the reliable setup — GitHub Pages issues its own
+> Let's Encrypt cert for `play.moji-studios.com`. (Orange-cloud/proxied also works
+> but needs Cloudflare SSL mode = Full and you rely on Cloudflare's edge cert.)
 
-Then in **Settings -> Pages**, confirm the Custom domain shows `moji-studios.com`
-(the workflow's `CNAME` sets it) and tick **Enforce HTTPS** once the cert issues
-(can take a few minutes to an hour after DNS propagates).
+This does **not** touch your apex `moji-studios.com` Cloudflare Pages site.
 
-> DNS propagation: usually minutes, up to 24-48h worst case.
+## 2. Enable Pages "GitHub Actions" source
 
-## 3. Stand up the multiplayer server (Render)
+Repo **Settings → Pages → Build and deployment → Source = "GitHub Actions"**.
+(Or let me flip it for you via the API once DNS is in — see below.)
 
-The in-game Multi panel needs a `wss://` server (browsers block `ws://` from an
-https page). `render.yaml` is a ready Blueprint:
+> This switches Pages off the old legacy branch build. The current
+> `dpeh001-x.github.io/Mojiworld/` URL will then redirect to the new subdomain.
 
-1. Go to <https://dashboard.render.com> -> **New -> Blueprint** -> select this
-   repo. It reads `render.yaml` and creates the `mojiworld-mp` web service from
-   the `mp/` folder.
-2. After it deploys, copy the URL: `https://mojiworld-mp.onrender.com`. The
-   WebSocket URL is the same host with `wss://`:
-   **`wss://mojiworld-mp.onrender.com`**.
+## 3. Turn on the custom domain (one Actions variable)
 
-(Any Node host works — Fly.io, Railway, a VPS. It just needs to run
-`node mp/server.mjs` with TLS and respect `$PORT`. Free Render cold-starts after
-~15 min idle; the first connect then takes ~30-60s.)
-
-## 4. Tell the site about the MP server (GitHub Actions variable)
-
-Repo **Settings -> Secrets and variables -> Actions -> Variables -> New variable**:
+Repo **Settings → Secrets and variables → Actions → Variables → New variable**:
 
 ```
-Name:  MP_WSS_URL
-Value: wss://mojiworld-mp.onrender.com
+Name:  GAME_DOMAIN
+Value: play.moji-studios.com
 ```
 
-The next deploy injects this as the Multi panel's default URL, so players just
-click **Connect**. (Without it, the deployed game defaults to localhost and
-multiplayer only works for local testing.)
+The next deploy writes the `CNAME` and GitHub binds the subdomain. (Until this is
+set, the build claims no domain — safe to run anytime.)
+
+## 4. Stand up multiplayer (Render) — optional but you asked for it
+
+`render.yaml` is a ready Blueprint:
+
+1. <https://dashboard.render.com> → **New → Blueprint** → select this repo →
+   creates the `mojiworld-mp` service from `mp/`.
+2. Copy the URL; the WebSocket endpoint is `wss://mojiworld-mp.onrender.com`.
+3. Add Actions variable **`MP_WSS_URL` = `wss://mojiworld-mp.onrender.com`**.
+
+(Free Render cold-starts after ~15 min idle; first connect ~30-60 s.)
 
 ## 5. Deploy
 
-Push to `main`, or **Actions -> "Deploy game to moji-studios.com/mojiworld" ->
-Run workflow**. When it's green:
-
-- Game: <https://moji-studios.com/mojiworld/>
-- Multiplayer: click **🌐 Multi -> Connect** (URL pre-filled).
+Push to `main` or **Actions → Run workflow**. Live at
+**`https://play.moji-studios.com/`**, multiplayer via **🌐 Multi → Connect**.
 
 ---
 
+## What I can do for you from here (just say go)
+
+- **Set the Actions variables** `GAME_DOMAIN` and `MP_WSS_URL` (`gh variable set`).
+- **Flip Pages to the GitHub Actions source** (`gh api ... build_type=workflow`).
+- **Trigger the deploy** and verify it's green + the subdomain serves.
+
+What needs **you** (account access I don't have): the **Cloudflare DNS record**
+(step 1) and **creating the Render service** (step 4). Tell me when the DNS record
+is in and I'll do the rest.
+
 ## Notes
 
-- **Re-running after setup:** any push to `main` redeploys automatically. Changing
-  `MP_WSS_URL` requires a re-run to take effect (the URL is injected at build).
-- **Players seeing each other:** they must be on the same **room** + **channel**
-  (and, to render each other, the same in-game map). Defaults: room `lobby`,
-  channel 1.
-- **Server scale:** the relay is hardened for correctness/abuse but is a per-
-  message relay; comfortable to ~20 concurrent players per room. See
-  `mp/README.md` for the path to authoritative/persistent MMO-lite.
-- **Local dev still works:** the committed game keeps `ws://localhost:8080`; only
-  the deployed copy gets the production URL.
+- **Sequencing:** add the Cloudflare DNS record *before* I flip Pages + set
+  `GAME_DOMAIN`, so the github.io→subdomain redirect lands on a working address.
+- **Players seeing each other:** same room + channel (and same in-game map to
+  render). Defaults: room `lobby`, channel 1.
+- **Local dev unaffected:** the committed game keeps relative asset paths +
+  `ws://localhost:8080`; only the published copy is rewritten.
