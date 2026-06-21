@@ -54,22 +54,48 @@ populations on different channels never see each other.
 ## Verify
 
 ```bash
-node _smoke_test.mjs       # server must be running
+node _smoke_test.mjs       # 10 assertions — protocol + channel isolation (server on :8080)
+node _fid_regress.mjs      # 8 assertions — fidelity-audit fixes (server on :8108)
 ```
 
-10 assertions covering welcome, joined, state relay, **channel isolation**, chat,
+`_smoke_test` covers welcome, joined, state relay, **channel isolation**, chat,
 and left. The live game path was additionally verified end-to-end: the real game
 client connected, received a peer on the same map, rendered it via
 `_mpDrawPeers()` without error, and its own `_mpTick()` broadcast reached the peer
 (bidirectional).
 
+## Hardening (from a parallel fidelity audit)
+
+Five agents stress-tested the relay (protocol/field fidelity, room lifecycle,
+load to N=100, fuzzing, connection lifecycle). Field fidelity was perfect (every
+field the client sends survives byte-exact) and isolation/ordering were correct.
+Six issues were found and fixed in `server.mjs`:
+
+- **null-frame crash** — `JSON.parse('null')` then `msg.t` killed the process;
+  now non-object frames are ignored and the handler is wrapped in try/catch.
+- **silent half-open drops** — added a ping/pong heartbeat (`HB_MS`, default 15s)
+  that `terminate()`s sockets that stop responding, so dead peers don't linger.
+- **double-`hello` ghost/room leak** — one identity per socket; a second `hello`
+  is ignored.
+- **flood amplification** — per-socket token-bucket rate limit (`RATE`/`BURST`).
+- **oversized/unsanitized input** — `maxPayload: 64 KB`; every relayed string
+  field is control-char-stripped and capped (name no longer an XSS/relay-bomb).
+- **unbounded send queues** — `state` (droppable, newest-wins) is shed to any
+  socket whose `bufferedAmount` exceeds `MAX_BUFFERED`, bounding memory/latency.
+
+Still **deferred** (bigger change, only matters past ~20–50 concurrent players in
+one room): the per-message O(N²) fanout. The proper fix is tick-batched per-room
+snapshots + map-scoped interest management; naive map-scoping alone regresses the
+map-change case, so it's left for the authoritative-server rewrite below.
+
 ## Files
 
 | File | Role |
 | --- | --- |
-| `server.mjs` | Room-based presence relay + static host. ~90 lines, one dep (`ws`) |
+| `server.mjs` | Hardened room-based presence relay + static host (one dep, `ws`) |
 | `mp_demo.html` | Lightweight test peer (same protocol) |
-| `_smoke_test.mjs` | Headless protocol test |
+| `_smoke_test.mjs` | Headless protocol test (10 assertions) |
+| `_fid_regress.mjs` | Regression test for the audit fixes (8 assertions) |
 
 ## Deploy
 
