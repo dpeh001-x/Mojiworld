@@ -6,9 +6,15 @@ separate Node host (the relay can't run on static Pages).
 
 - **Automated for you:** `.github/workflows/deploy-pages.yml` builds and publishes
   the site on every push to `main` (and via *Actions -> Run workflow*). It puts
-  the whole game (HTML + `Sprites/` + `audio/` + `backgrounds/` + JS) inside a
-  `mojiworld/` folder so the clean URL `moji-studios.com/mojiworld/` loads it,
-  writes the `CNAME`, and injects the live multiplayer URL.
+  the game + small JS inside a `mojiworld/` folder so the clean URL
+  `moji-studios.com/mojiworld/` loads it, writes the `CNAME`, and injects the
+  live multiplayer URL.
+- **Heavy art on a CDN (no 1 GB Pages limit):** the ~1.3 GB of `Sprites/`,
+  `audio/`, and `backgrounds/` is **not** bundled into Pages. The build rewrites
+  every asset reference to **jsDelivr** serving this repo, pinned to the deploy's
+  commit SHA (`cdn.jsdelivr.net/gh/dpeh001-x/Mojiworld@<sha>/...`) — immutable,
+  globally cached, zero upload, no quality loss. The Pages artifact stays ~30 MB.
+  (Requires the repo to remain **public** so jsDelivr can serve it.)
 - **You do once (can't be automated from the repo):** DNS, turning Pages on,
   and standing up the multiplayer server. Steps below.
 

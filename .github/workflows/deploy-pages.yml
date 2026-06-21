@@ -39,9 +39,11 @@ jobs:
           # Copy the whole game tree (HTML + Sprites/ + audio/ + backgrounds/ +
           # root JS) into the /mojiworld/ subfolder so every RELATIVE asset path
           # the game uses resolves under /mojiworld/. Exclude VCS/dev/build dirs.
-          # Keep runtime only (Sprites/, audio/, backgrounds/, root game JS like
-          # anim_calib.js / mob_offsets.js, the game HTML, CHANGELOG.html).
-          # Drop VCS/dev/server/backup/docs — none are loaded by the game, and
+          # Bundle the game HTML + small root JS (anim_calib.js, mob_offsets.js,
+          # etc.) + CHANGELOG. The heavy art (Sprites/ audio/ backgrounds/,
+          # ~1.3GB) is EXCLUDED here and streamed from a CDN instead (rewritten
+          # below) so the Pages artifact stays tiny and well under the 1GB limit.
+          # Drop VCS/dev/server/backup/docs — not loaded by the game, and
           # internal design docs shouldn't be published.
           rsync -a ./ _site/mojiworld/ \
             --exclude '.git' \
@@ -49,6 +51,9 @@ jobs:
             --exclude '.claude' \
             --exclude '_site' \
             --exclude 'node_modules' \
+            --exclude 'Sprites' \
+            --exclude 'audio' \
+            --exclude 'backgrounds' \
             --exclude 'mp' \
             --exclude 'server' \
             --exclude 'scripts' \
@@ -73,6 +78,17 @@ jobs:
 
           # Friendly apex redirect: moji-studios.com/ -> /mojiworld/
           printf '<!doctype html><meta http-equiv="refresh" content="0; url=/mojiworld/">\n' > _site/index.html
+
+          # Heavy art (Sprites/ audio/ backgrounds/) streams from jsDelivr over
+          # this repo, PINNED to this commit SHA so the CDN copy is immutable and
+          # never stale. Rewrite every relative asset reference (JS strings, CSS
+          # url(), static HTML — all share the form <quote-or-paren>Dir/ ) to the
+          # CDN. The committed game keeps relative paths for local dev.
+          CDN_BASE="https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${GITHUB_SHA}"
+          for f in _site/mojiworld/index.html _site/mojiworld/mojiworld_game.html; do
+            sed -i -E "s#([\"'(])(Sprites|audio|backgrounds)/#\1${CDN_BASE}/\2/#g" "$f"
+          done
+          echo "Heavy assets -> ${CDN_BASE}/{Sprites,audio,backgrounds}/"
 
           # Inject the live multiplayer endpoint so the in-game Multi panel
           # defaults to the production wss:// server instead of localhost.
