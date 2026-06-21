@@ -25830,6 +25830,15 @@ function attr(k)    { return 0; }
 // Dev-console "+10,000,000 Mojicoins" button bypasses this knob
 // (it's a debug grant, not gameplay income).
 const MOJICOIN_GAIN_MULT = 0.5;
+// v0.26.x audit FIX — the DISPLAYED sell price must equal the ACTUAL payout.
+// executeSellSelection grants Math.floor(price*0.4) through _grantMojicoins,
+// which re-applies MOJICOIN_GAIN_MULT — so every "sell for N" row / summary /
+// confirm must show the post-scalar value or it overstates the payout (~2×).
+// This helper mirrors _grantMojicoins(floor(price*0.4)) exactly.
+function _sellPriceOf(it) {
+  if (!it || typeof it.price !== 'number') return 0;
+  return Math.max(0, Math.floor(Math.floor(it.price * 0.4) * MOJICOIN_GAIN_MULT));
+}
 const _coinGainMult = () => (typeof player !== 'undefined' && player && player.level <= 25 ? 0.6 : MOJICOIN_GAIN_MULT); // v0.26.x — softer mid-game coin famine
 // v0.26.437 — Per user "make loots from monsters much lesser so quests play
 // an essential role in gaining mojicoins". Monster KILL coin drops are scaled
@@ -26567,8 +26576,19 @@ window.addEventListener('keydown', e => {
   }
   // v0.26.x - Key 1 alone (no 2/3 held -> not the dev-console combo) opens the
   // DEV World-Map Editor: the W map clone with Edit-Connections restored.
+  // v0.26.x audit FIX — the '1' that STARTS the 1+2+3 console combo also
+  // satisfied this guard (2/3 aren't down yet), so the map editor popped
+  // before the combo completed. DEFER the toggle ~180 ms; cancel it if 2/3
+  // join the hold or the combo fires. A standalone '1' tap still opens it
+  // (imperceptible delay for a dev tool).
   if (k === '1' && !game.keys['2'] && !game.keys['3']) {   // (DEV PANEL) map editor
-    if (typeof toggleWorldMapEditor === 'function') toggleWorldMapEditor();
+    if (!game._devMapEdTimer) {
+      game._devMapEdTimer = setTimeout(() => {
+        game._devMapEdTimer = null;
+        if (!game.keys['2'] && !game.keys['3'] && !game._devComboFired &&
+            typeof toggleWorldMapEditor === 'function') toggleWorldMapEditor();
+      }, 180);
+    }
   }
   // v0.26.x - Dev tool number-key family: 2 = Gear Align (was T), 3 = Monster
   // Plant placement (was R). Guarded against the held 1+2+3 console combo so
@@ -27462,6 +27482,12 @@ function openSettingsModal() {
   document.getElementById('set-reducemotion').classList.toggle('on', !!s.reduceMotion);
   document.getElementById('set-difficulty').value = s.difficulty || 'normal';
   document.getElementById('settings-modal-bg').classList.add('on');
+  // v0.26.x audit FIX — pause while the settings overlay is up. It is a
+  // full-screen blurred modal, but combat used to keep ticking underneath
+  // (the player could take damage / die while adjusting volume). The
+  // stuck-pause watchdog + _anyOtherModalOpen already ASSUMED settings
+  // pauses; this makes the assumption true.
+  if (typeof game !== 'undefined' && game) game.paused = true;
   // Wire slider live-update labels + apply
   const _scaleEl = document.getElementById('set-scale');
   const _bgmEl2  = document.getElementById('set-bgm');
@@ -27481,6 +27507,12 @@ function openSettingsModal() {
 }
 function closeSettingsModal() {
   document.getElementById('settings-modal-bg').classList.remove('on');
+  // v0.26.x audit FIX — match the open path: unpause on close, but only if
+  // no other modal is stacked (mirror of closeCharStudio). The `.on` class
+  // is already removed above, so _anyOtherModalOpen won't count settings.
+  if (typeof game !== 'undefined' && typeof _anyOtherModalOpen === 'function' && !_anyOtherModalOpen()) {
+    game.paused = false;
+  }
 }
 
 // =========================================================================
@@ -31056,6 +31088,15 @@ function loadState() {
     // v0.25.452 — sanitize critical numeric fields BEFORE Object.assign
     // so any NaN / Infinity / out-of-range value on the persisted save
     // is repaired before it reaches the player struct.
+    // v0.26.x audit FIX — the `mesos`→`mojicoins` rename migration MUST run
+    // BEFORE the numeric sanitizer. `mojicoins` is in _SAVE_NUMERIC_GUARDS, so
+    // on a legacy `mesos` save the sanitizer sets the (undefined) mojicoins to
+    // its 0 default, which makes the `mojicoins == null` guard below false and
+    // silently wipes the wallet on load. Migrate first, then sanitize.
+    if (s.player['mesos'] != null && s.player.mojicoins == null) {
+      s.player.mojicoins = s.player['mesos'];
+      delete s.player['mesos'];
+    }
     _sanitizePlayerSaveNumerics(s.player);
     // v0.26.x audit -- nested numerics the top-level sanitizer missed: a
     // corrupted import propagates NaN through quest-progress math and buff
@@ -31066,18 +31107,10 @@ function loadState() {
       const _bf = s.player && s.player.buffs;
       if (_bf) for (const _bk in _bf) { if (typeof _bf[_bk] === 'number' && !isFinite(_bf[_bk])) _bf[_bk] = 0; }
     } catch (e) {}
-    // v0.26.057 — Currency rename migration. Pre-v0.26.057 saves stored
-    // the wallet field as `mesos`; v0.26.057 renamed every code path to
-    // `mojicoins` to match the user-facing currency name. Old saves still
-    // carry the legacy key on disk — copy across BEFORE Object.assign so
-    // returning players don't load with their wallet zeroed out. Bracket
-    // notation reads the literal old key (the rename pass left no
-    // `mesos` identifier in the file). Idempotent — re-running on an
-    // already-migrated save is a no-op because `mojicoins` is already set.
-    if (s.player['mesos'] != null && s.player.mojicoins == null) {
-      s.player.mojicoins = s.player['mesos'];
-      delete s.player['mesos'];
-    }
+    // v0.26.057 — Currency rename migration (`mesos`→`mojicoins`) moved
+    // ABOVE _sanitizePlayerSaveNumerics (see the fix note there); the block
+    // that used to live here was relocated so the sanitizer can't zero the
+    // wallet before the migration copies it across.
     Object.assign(player, s.player);
     Object.assign(game,   s.game || {});
     // v0.25.801 — Map rename migration: `everdawn_marketplace` was renamed
@@ -45888,7 +45921,11 @@ const SKILL_FNS = {
     // v0.25.530 — Level-10 bonus: damage corridor widened from 60 to
     // 100 px (mob:3 → mob:5).
     const _rushBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('rush') : null;
-    const _rushReach = (_rushBonus && _rushBonus.mobCap) ? 100 : 60;
+    // v0.26.x audit FIX — read the mobCap VALUE, not its truthiness. The old
+    // `? 100 : 60` made the rank-5 milestone (mobCap:4) jump straight to the
+    // full rank-10 reach (mobCap:5 → 100), so rank 5 and 10 were identical.
+    // Now: base 60 (mob:3), +20 px per mob over 3 → rank5=80, rank10=100.
+    const _rushReach = 60 + ((_rushBonus && _rushBonus.mobCap) ? (_rushBonus.mobCap - 3) * 20 : 0);
     // v0.25.565 — restored 5 damage ticks after the v0.25.561/562 cut
     // collapsed this to 2. With the dash running 300 ms and ticks scheduled
     // at i × 45 ms, 2 ticks covered only the first 90 ms (first third) of
@@ -47043,7 +47080,10 @@ const SKILL_FNS = {
     // v0.25.530 — Level-10 bonus: 3 lanes → 5 lanes (mob:5) + secondary
     // frost splash radius bumped 90 → 130 (Na:2 = bigger AoE on impact).
     const _isBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('iceSpike') : null;
-    const _isLanes = (_isBonus && _isBonus.mobCap) ? 5 : 3;
+    // v0.26.x audit FIX — read the mobCap VALUE, not its truthiness. The old
+    // `? 5 : 3` made the rank-5 milestone (mobCap:4) fire the full rank-10
+    // lane count (5) at rank 5. Now rank5=4 lanes, rank10=5 lanes.
+    const _isLanes = (_isBonus && _isBonus.mobCap) ? _isBonus.mobCap : 3;
     const _isSplash = (_isBonus && _isBonus.hits) ? 130 : 90;
     const _isHalf = (_isLanes - 1) / 2;
     for (let i = -_isHalf; i <= _isHalf; i++) {
@@ -53414,7 +53454,7 @@ function bossAI(m, dt, distToPlayer) {
           });
         }
       }
-      if (m.patternTimer === 400 && typeof showToast === 'function' && !m._gooAnnounced) {
+      if (m.patternTimer >= 400 && typeof showToast === 'function' && !m._gooAnnounced) {   // v0.26.x audit FIX — was === 400; patternTimer accumulates float dt so it almost never lands exactly on 400 (toast never fired). _gooAnnounced still prevents repeat.
         m._gooAnnounced = true;
         showToast('🌊 GOO BARRAGE — JUMP to keep moving!', 'rare');
       }
@@ -53547,7 +53587,7 @@ function bossAI(m, dt, distToPlayer) {
           });
         }
       }
-      if (m.patternTimer === 500 && typeof showToast === 'function' && !m._glueAnnounced) {
+      if (m.patternTimer >= 500 && typeof showToast === 'function' && !m._glueAnnounced) {   // v0.26.x audit FIX — was === 500; same float-accumulation miss as the goo toast. _glueAnnounced still prevents repeat.
         m._glueAnnounced = true;
         showToast('🌊 BIG GLUE BALLS — dodge wide!', 'rare');
       }
@@ -57100,7 +57140,12 @@ function hitMonster(m, dmg, isCrit, skill) {
       // in _pendingTimeouts and cleared by cancelPendingSkillTimers on
       // death/loadMap.
       (typeof scheduleSkillTimer === 'function' ? scheduleSkillTimer : setTimeout)(() => {
-        if (closest && closest.currentHp > 0) hitMonster(closest, Math.floor(finalDmg * 0.6), false, 'chain');
+        // v0.26.x audit FIX — pass PRE-combo/pre-DEF `dmg` (not the already-
+        // finalized `finalDmg`). The recursive hitMonster re-applies combo +
+        // the DEF curve itself; feeding finalDmg double-applied both (combo
+        // squared, DEF twice). Mirrors the elemChain hop above which passes
+        // `dmg * 0.5`. The hop now scales once, consistently.
+        if (closest && closest.currentHp > 0) hitMonster(closest, Math.floor(dmg * 0.6), false, 'chain');
       }, 40);
     }
   }
@@ -58643,6 +58688,11 @@ function triggerSuperBossDeath(m) {
   // Huge EXP bonus on top of normal (prestige-scaled)
   const _pXp = (game.prestige && game.prestige.xpMult) || 1;
   player.exp += Math.floor(m.exp * 0.5 * _pXp * (((player.level || 1) <= 5) ? 3 : 1) * LX_EVENT_EXP_MULT * LX_MONSTER_EXP_MULT);   // v0.26.x — +200% XP at levels 1-5 · (EVENT) opening +900% EXP · permanent ×2 monster EXP
+  // v0.26.x audit FIX — convert the banked bonus into levels NOW. The kill
+  // flow's only _maybeLevelUp runs BEFORE this grant, so without this call a
+  // Shardfather kill (a big, level-crossing bonus, more so with the ×20 EXP
+  // stack) appeared to stall until the next trivial kill chained the levels.
+  if (typeof _maybeLevelUp === 'function') _maybeLevelUp();
 
   // Dramatic toast — staggered messages
   showToast('THE SHARDFATHER FALLS!', 'legendary');
@@ -62530,7 +62580,12 @@ function closeDialog() {
   // survive the close as an orphaned card / stuck stun.
   if (typeof _QTE !== 'undefined' && _QTE.active && typeof _qteEnd === 'function') { _qteEnd(false); if (typeof _qteHide === 'function') _qteHide(0); }
   // v0.26.x — Brok/Furnax + Amnesiac category menus: always reopen at top level.
-  if (typeof game !== 'undefined' && game) { game._brokMenu = null; game._amnesiacMenu = null; }
+  // v0.26.x audit FIX — also clear the Amnesiac's narrative stage + saga
+  // view. Without this, dismissing mid-script via ESC / walk-away / click-
+  // outside (engine-driven closes, which don't run the in-script Back/No
+  // resets) left _amnesiacStage/_amnesiacSagaView deep, so the next visit
+  // dropped the player straight back into the reset-confirmation / saga.
+  if (typeof game !== 'undefined' && game) { game._brokMenu = null; game._amnesiacMenu = null; game._amnesiacStage = 0; game._amnesiacSagaView = false; }
   const dlg = document.getElementById('dialog');
   // v0.26.220 — Close SFX. Fires whenever a dialog is closed (Leave
   // option, ESC, click outside, walk-away). Silent no-op until
@@ -62715,7 +62770,7 @@ function sellByTierNow(maxTier) {
     return { count: 0, gained: 0 };
   }
   let total = 0;
-  for (const idx of game._sellSelection) { const it = player.inventory[idx]; if (it) total += Math.floor(it.price * 0.4); }
+  for (const idx of game._sellSelection) { const it = player.inventory[idx]; if (it) total += _sellPriceOf(it); }   // v0.26.x audit FIX — post-scalar payout
   const ok = (typeof confirm === 'function')
     ? confirm(`Instantly sell ${n} unequipped item${n === 1 ? '' : 's'} at Tier ${maxTier} & below for ${total}🪙?\n(Equipped gear is not affected.)`)
     : true;
@@ -62950,7 +63005,7 @@ function openShop(type, opts) {
         let total = 0;
         for (const idx of game._sellSelection) {
           const it = player.inventory[idx];
-          if (it) total += Math.floor(it.price * 0.4);
+          if (it) total += _sellPriceOf(it);   // v0.26.x audit FIX — post-scalar payout
         }
         const sumEl = document.getElementById('sell-summary');
         const btnEl = document.getElementById('sell-confirm-btn');
@@ -62986,7 +63041,7 @@ function openShop(type, opts) {
       list.appendChild(toolbar);
       // ── ROWS ──
       player.inventory.forEach((it, idx) => {
-        const val = Math.floor(it.price * 0.4);
+        const val = _sellPriceOf(it);   // v0.26.x audit FIX — show post-scalar payout, matching what's granted
         const row = document.createElement('div');
         row.className = 'sell-row rarity-' + (it.rarity || 'common');
         if (game._sellSelection.has(idx)) row.classList.add('selected');
