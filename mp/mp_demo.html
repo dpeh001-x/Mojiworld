@@ -3,90 +3,102 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Mojiworld — MMO-lite prototype</title>
+<title>Mojiworld — MP test peer</title>
 <style>
   :root { --bg:#0d1018; --panel:#161b27; --line:#2a3346; --txt:#dfe6f2; --mut:#8a97ad; --acc:#5b8cff; }
   * { box-sizing:border-box; }
   body { margin:0; font:13px/1.45 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--txt); }
-  header { display:flex; gap:10px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--panel); flex-wrap:wrap; }
-  h1 { font-size:14px; margin:0; }
+  header { display:flex; gap:8px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--panel); flex-wrap:wrap; }
+  h1 { font-size:14px; margin:0 8px 0 0; }
   input { background:#1d2434; border:1px solid var(--line); color:var(--txt); border-radius:7px; padding:6px 9px; font-size:12px; }
   button { background:var(--acc); border:1px solid var(--acc); color:#fff; border-radius:7px; padding:6px 12px; cursor:pointer; font-size:12px; font-weight:600; }
-  .mut { color:var(--mut); }
+  .mut { color:var(--mut); } #status b { color:#7ee787; }
   #wrap { padding:14px; }
   canvas { display:block; background:radial-gradient(120% 120% at 50% 0,#11151f,#0a0d14); border:1px solid var(--line); border-radius:10px; }
-  #status b { color:#7ee787; }
-  #hint { margin-top:8px; }
   kbd { background:#0a0d14; border:1px solid var(--line); border-radius:5px; padding:1px 6px; font-size:11px; }
 </style>
 </head>
 <body>
   <header>
-    <h1>🌐 Mojiworld MMO-lite prototype</h1>
-    <input id="name" placeholder="your name" maxlength="24" style="width:140px" />
-    <button id="join">Join world</button>
+    <h1>🌐 MP test peer</h1>
+    <input id="url" value="ws://localhost:8080" style="width:160px" />
+    <input id="name" placeholder="name" value="TestPeer" style="width:100px" maxlength="20" />
+    <input id="room" placeholder="room" value="lobby" style="width:90px" maxlength="24" />
+    <input id="map" placeholder="map (match the game)" value="town" style="width:90px" />
+    <button id="join">Join</button>
     <span id="status" class="mut">not connected</span>
-    <span class="mut">·</span>
-    <span id="count" class="mut">0 players</span>
+    <span id="count" class="mut">·</span>
   </header>
   <div id="wrap">
     <canvas id="c" width="960" height="560"></canvas>
-    <div id="hint" class="mut">Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows. Open this page in a 2nd tab/browser to see another player. Reload — the server remembers where you were (server-side save).</div>
+    <div class="mut" style="margin-top:8px">Move <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>. Speaks the same protocol as the in-game <code>net</code> client — set <b>room</b>+<b>map</b> to match a running game (channel 1) and you'll appear in each other's world. This is a lightweight stand-in so you don't have to boot two full games to test.</div>
   </div>
-
-  <script src="mp_net.js"></script>
   <script>
+  // Mirrors mojiworld_game.html's net protocol: hello / welcome / joined / left / state / chat.
   const cv = document.getElementById('c'), ctx = cv.getContext('2d');
   const statusEl = document.getElementById('status'), countEl = document.getElementById('count');
   const EMOJIS = ['🦊','🐸','🐯','🐼','🐧','🐙','🦉','🐲','🦄','🐝'];
-
-  // local player — position is overwritten by the server's saved value on welcome
-  const me = { x: 480, y: 280, facing: 1, anim: 'idle', hp: 100, level: 1, emoji: '🦊', name: '' };
+  const MP_TICK_MS = 70;
+  const me = { x: 480, y: 280, vx: 0, vy: 0, facing: 1, hp: 100, maxHp: 100, mp: 50, maxMp: 50, level: 1, cls: 'warrior' };
+  let ws = null, myId = null, roomId = '', myMap = 'town', lastTick = 0;
+  const peers = {};   // id -> { x,y, tx,ty, name, level, map, cls, hp, maxHp }
   const keys = {};
-  addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
-  addEventListener('keyup',   e => { keys[e.key.toLowerCase()] = false; });
-
-  LXNet.onWelcome = (you) => {
-    me.x = you.x; me.y = you.y; me.hp = you.hp; me.level = you.level;   // restore saved position
-    me.emoji = EMOJIS[you.id % EMOJIS.length];
-    statusEl.innerHTML = 'connected as <b>' + you.name + '</b> (id ' + you.id + ')';
-  };
-  LXNet.onStatus = (s) => { if (s === 'closed') statusEl.textContent = 'reconnecting…'; };
+  addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+  addEventListener('keyup',   e => keys[e.key.toLowerCase()] = false);
 
   document.getElementById('join').onclick = () => {
-    me.name = document.getElementById('name').value.trim() || 'Player';
-    LXNet.connect({ name: me.name });   // same-origin: ws://<this host>
+    myMap = document.getElementById('map').value.trim() || 'town';
+    roomId = (document.getElementById('room').value.trim().toLowerCase() || 'lobby') + '__ch1';   // channel 1
+    const name = document.getElementById('name').value.trim() || 'TestPeer';
+    if (ws) { try { ws.close(); } catch (_) {} }
+    ws = new WebSocket(document.getElementById('url').value.trim());
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ t:'hello', name, room: roomId, cls: me.cls, level: me.level, map: myMap,
+        x: me.x, y: me.y, facing: me.facing, hp: me.hp, maxHp: me.maxHp, mp: me.mp, maxMp: me.maxMp }));
+      statusEl.innerHTML = 'connected · room <b>' + roomId + '</b>';
+    };
+    ws.onclose = () => statusEl.textContent = 'disconnected';
+    ws.onerror = () => statusEl.textContent = 'connection error';
+    ws.onmessage = (ev) => { let m; try { m = JSON.parse(ev.data); } catch { return; } handle(m); };
   };
 
-  function step() {
-    const sp = 4;
-    let dx = 0, dy = 0;
-    if (keys['a'] || keys['arrowleft'])  dx -= sp;
-    if (keys['d'] || keys['arrowright']) dx += sp;
-    if (keys['w'] || keys['arrowup'])    dy -= sp;
-    if (keys['s'] || keys['arrowdown'])  dy += sp;
-    me.x = Math.max(20, Math.min(940, me.x + dx));
-    me.y = Math.max(20, Math.min(540, me.y + dy));
-    if (dx) me.facing = dx < 0 ? -1 : 1;
-    me.anim = (dx || dy) ? 'walk' : 'idle';
-    LXNet.sendState(me);
+  function handle(m) {
+    if (m.t === 'welcome') { myId = m.id; for (const p of (m.players || [])) addPeer(p); }
+    else if (m.t === 'joined') addPeer(m);
+    else if (m.t === 'left') delete peers[m.id];
+    else if (m.t === 'state') { if (m.id === myId) return; const p = peers[m.id] || addPeer(m); p.tx = m.x; p.ty = m.y;
+      p.name = m.name ?? p.name; p.level = m.level ?? p.level; p.map = m.map ?? p.map; p.hp = m.hp; p.maxHp = m.maxHp; }
+  }
+  function addPeer(p) { return peers[p.id] = { x: p.x||0, y: p.y||0, tx: p.x||0, ty: p.y||0,
+    name: p.name||'?', level: p.level||1, map: p.map, cls: p.cls, hp: p.hp, maxHp: p.maxHp }; }
 
+  function loop() {
+    const sp = 4; let dx = 0, dy = 0;
+    if (keys['a']||keys['arrowleft']) dx -= sp; if (keys['d']||keys['arrowright']) dx += sp;
+    if (keys['w']||keys['arrowup']) dy -= sp;   if (keys['s']||keys['arrowdown']) dy += sp;
+    me.x = Math.max(20, Math.min(940, me.x + dx)); me.y = Math.max(20, Math.min(540, me.y + dy));
+    me.vx = dx; me.vy = dy; if (dx) me.facing = dx < 0 ? -1 : 1;
+    const now = performance.now();
+    if (ws && ws.readyState === 1 && now - lastTick > MP_TICK_MS) {
+      lastTick = now;
+      ws.send(JSON.stringify({ t:'state', x: me.x, y: me.y, vx: me.vx, vy: me.vy, facing: me.facing, map: myMap,
+        hp: me.hp, maxHp: me.maxHp, mp: me.mp, maxMp: me.maxMp, level: me.level, cls: me.cls,
+        anim: (dx||dy) ? 'run' : 'idle' }));
+    }
     ctx.clearRect(0, 0, cv.width, cv.height);
-    const others = LXNet.interpolated(performance.now());
-    countEl.textContent = (others.length + (LXNet.connected ? 1 : 0)) + ' players';
-    for (const p of others) drawPlayer(p.x, p.y, EMOJIS[p.id % EMOJIS.length], p.name, p.anim, false);
-    if (LXNet.connected) drawPlayer(me.x, me.y, me.emoji, me.name + ' (you)', me.anim, true);
-    requestAnimationFrame(step);
+    let shown = 0;
+    for (const id in peers) { const p = peers[id]; if (p.map && p.map !== myMap) continue;
+      p.x += (p.tx - p.x) * 0.3; p.y += (p.ty - p.y) * 0.3;
+      draw(p.x, p.y, EMOJIS[id % EMOJIS.length], p.name + ' Lv' + p.level, false); shown++; }
+    if (ws && ws.readyState === 1) draw(me.x, me.y, EMOJIS[(myId||0) % EMOJIS.length], (document.getElementById('name').value||'you') + ' (you)', true);
+    countEl.textContent = '· ' + (shown + (ws && ws.readyState===1 ? 1 : 0)) + ' on this map';
+    requestAnimationFrame(loop);
   }
-  function drawPlayer(x, y, emoji, name, anim, isMe) {
-    const bob = anim === 'walk' ? Math.sin(performance.now() / 90) * 3 : 0;
-    ctx.font = '34px serif'; ctx.textAlign = 'center';
-    ctx.fillText(emoji, x, y + bob);
-    ctx.font = '11px system-ui'; ctx.fillStyle = isMe ? '#7ee787' : '#b9c4da';
-    ctx.fillText(name || '?', x, y - 26);
-    ctx.fillStyle = '#fff';
+  function draw(x, y, emoji, label, isMe) {
+    ctx.font = '34px serif'; ctx.textAlign = 'center'; ctx.fillText(emoji, x, y);
+    ctx.font = '11px system-ui'; ctx.fillStyle = isMe ? '#7ee787' : '#b9c4da'; ctx.fillText(label, x, y - 26); ctx.fillStyle = '#fff';
   }
-  step();
+  loop();
   </script>
 </body>
 </html>
