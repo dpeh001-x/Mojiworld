@@ -35587,6 +35587,30 @@ function _wmDeoverlapLabels(svg) {
     if (!moved) break;
   }
 }
+// v0.26.x exploit FIX — destination level-gate lookup for W-map fast-travel.
+// Scans every map's portals once and records, per destination, the MAX
+// `levelGate` of any portal leading there (the same value tryPortal enforces
+// when you walk through). Lazily built on first W-map open (after all the
+// MAPS.<id>.portals.push() calls at boot have run). Returns 0 = no gate.
+let _wmGateLookup = null;
+function _wmMaxLevelGate(id) {
+  if (!_wmGateLookup) {
+    _wmGateLookup = Object.create(null);
+    try {
+      for (const mid in MAPS) {
+        const mm = MAPS[mid];
+        if (!mm || !mm.portals) continue;
+        for (const po of mm.portals) {
+          if (po && po.dest && po.levelGate &&
+              (!_wmGateLookup[po.dest] || po.levelGate > _wmGateLookup[po.dest])) {
+            _wmGateLookup[po.dest] = po.levelGate;
+          }
+        }
+      }
+    } catch (e) {}
+  }
+  return _wmGateLookup[id] || 0;
+}
 function renderWorldMap() {
   const grid = document.getElementById('worldmap-grid');
   if (!grid) return;
@@ -35612,14 +35636,16 @@ function renderWorldMap() {
   _renderWorldMapDiagram(grid, {
     mode: 'travel',
     isAccessible: (id, m) => {
-      // v0.25.444 — generic levelReq is now a soft recommendation (no
-      // gate), so all maps fast-travel regardless of player level. The
-      // exception: Zodiac Sanctum has a hard unlock — match the
-      // walking-portal `levelGate` on gravitosArena → zodiacHall so
-      // the W-map cursor + click both reflect the same lock state.
-      // v0.25.580 — gate bumped from Lv 50 → Lv 70 to match the zodiac
-      // tier promotion (signs now span Lv 70-90).
-      if (id === 'zodiacHall' && playerLv < 70) return { ok: false, reason: `🔒 Lv 70` };
+      // v0.26.x exploit FIX — the W-map fast-travel used to ignore EVERY
+      // walking-portal levelGate except Zodiac Sanctum, so a Lv 1 player could
+      // teleport straight into Lv 40-55 boss/elite zones (e.g. Rexy's Den,
+      // the Distorted chain, Confused Vigil) — a real level-pacing skip.
+      // Now mirror the on-foot contract: gate fast-travel on the destination's
+      // max incoming levelGate (the same value tryPortal enforces). This also
+      // covers Zodiac (gravitosArena → zodiacHall carries levelGate:70), so the
+      // old special-case is subsumed.
+      const _g = _wmMaxLevelGate(id);
+      if (_g && playerLv < _g) return { ok: false, reason: `🔒 Lv ${_g}` };
       return { ok: true };
     },
     onPick: (id, m) => {
@@ -49794,7 +49820,13 @@ const SKILL_FNS = {
     // (free spam; full cooldown locks once 10 are fired or the window ends).
     const _now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     const _active = (player._sageUntil || 0) > _now;
-    player.mp = Math.min(getMaxMp(), player.mp + Math.ceil((SKILLS.sage_ult.mp || 92) * 1.3));
+    // v0.26.x exploit FIX — refund the mage-discounted CAST COST (0.80×, the
+    // same discount castSkill applies for the mage tree that sage belongs to),
+    // not an inflated 1.3×. The old over-refund returned ~120 MP against a ~74
+    // MP cost, so every tap NET-GAINED ~46 MP — the ult window topped your MP
+    // bar up instead of being cost-neutral. Now the window is free (net 0), not
+    // free-plus-profit. Worst case (Overload milestone) is a small drain, never a gain.
+    player.mp = Math.min(getMaxMp(), player.mp + Math.ceil((SKILLS.sage_ult.mp || 92) * 0.80));
     if (!_active) {
       player._sageUntil = _now + 8000; player._sageShots = 0;
       spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'sage_ult', { size: 240, life: 80 });
