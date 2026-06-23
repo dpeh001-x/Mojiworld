@@ -7939,7 +7939,7 @@ The sleeping world is listening.</div>
       <label title="Background music volume (0 = silent, 100 = max).">BGM Volume</label>
       <div class="ctrl">
         <input type="range" id="set-bgm" min="0" max="100" step="5" value="90" style="--moji-slider-pct: 90.00;">
-        <span class="val" id="set-bgm-val">55%</span>
+        <span class="val" id="set-bgm-val">90%</span>
       </div>
     </div>
     <div class="settings-row">
@@ -26886,6 +26886,15 @@ function _mkeyBind(btn) {
     active = false;
     _mkeyDispatch('keyup', k);
   };
+  // v0.26.x audit FIX — register a force-reset so _releaseAllVirtualKeys (fired
+  // on backgrounding / blur / pagehide) can clear THIS button's `active` latch.
+  // It only reset game.keys + the d-pad before, so a face/menu button held when
+  // the app backgrounded stayed active=true → the next tap was swallowed (dead
+  // button for one press). Mirrors the d-pad's _mDpadForceReset.
+  (window._mBtnResets = window._mBtnResets || []).push(() => {
+    if (pendingReleaseId) { clearTimeout(pendingReleaseId); pendingReleaseId = 0; }
+    active = false;
+  });
   const press = (ev) => {
     if (ev) ev.preventDefault();
     // v0.26.946 — capture mouse/pen so pointerup retargets to this button
@@ -27088,6 +27097,9 @@ function _wireDynamicFButton() {
     _mkeyDispatch('keyup', activeKey);
     activeKey = null;
   };
+  // v0.26.x audit FIX — see _mkeyBind: let _releaseAllVirtualKeys clear the
+  // dynamic F button's latch on backgrounding so it isn't dead for one tap.
+  (window._mBtnResets = window._mBtnResets || []).push(() => { active = false; activeKey = null; });
   btn.addEventListener('pointerdown',   press,   { passive: false });
   btn.addEventListener('pointerup',     release, { passive: false });
   btn.addEventListener('pointercancel', release, { passive: false });
@@ -27277,6 +27289,10 @@ function _initMobileControls() {
           window._mDpadActivePointer = null;
         }
         if (window._mDpadForceReset) window._mDpadForceReset();   // v0.26.946
+        // v0.26.x audit FIX — clear every per-button `active` latch too (face
+        // buttons + dynamic F), not just the d-pad, so no button stays dead
+        // after backgrounding mid-press.
+        if (window._mBtnResets) for (const _r of window._mBtnResets) { try { _r(); } catch (_e2) {} }
       } catch (_e) {}
     };
     window.addEventListener('visibilitychange', () => {
@@ -31096,7 +31112,15 @@ function _sanitizePlayerSaveNumerics(p) {
   if (p.mods && typeof p.mods === 'object') {
     for (const k of Object.keys(p.mods)) {
       const v = p.mods[k];
-      if (typeof v !== 'number' || !isFinite(v)) p.mods[k] = 0;
+      if (typeof v !== 'number' || !isFinite(v)) { p.mods[k] = 0; continue; }
+      // v0.26.x audit FIX — clamp each mod to a generous band. Boon-derived
+      // mods are tiny (fractions to low hundreds; applyBoon caps each), so this
+      // never touches a legitimate value, but it blocks an edited-import save
+      // from injecting e.g. mods.atkPct:1000 for permanent god stats. (_apply-
+      // EquippedBoons also recomputes mods from boons on the next equip, so the
+      // imported value was already transient — this closes the window fully.)
+      if (v > 1e5) p.mods[k] = 1e5;
+      else if (v < -1e5) p.mods[k] = -1e5;
     }
   }
   return p;
@@ -32205,7 +32229,7 @@ const ACHIEVEMENTS = [
   { id:'kill10000',    name:'Worldbreaker',      desc:'Defeat 10,000 enemies',            test:()=>game.kills>=10000 },
   { id:'boss6',        name:'Boss Slayer',       desc:'Defeat 6 different bosses',        test:()=>Object.keys(game.bossDefeated||{}).length>=6 },
   { id:'boss12',       name:'Boss Conqueror',    desc:'Defeat 12 different bosses',       test:()=>Object.keys(game.bossDefeated||{}).length>=12 },
-  { id:'aetherionDown',name:'Warden Undone',     desc:'Vanquish Aetherion',               test:()=>!!(game.bossDefeated && game.bossDefeated.aetherion) },
+  { id:'aetherionDown',name:'Warden Undone',     desc:'Vanquish Aetherion',               test:()=>!!(game.bestiary && game.bestiary['_boss_aetherion']) },   // v0.26.x audit FIX — was game.bossDefeated.aetherion, which is NEVER set (kills stamp bossDefeated[currentMap]='sanctum'); read the bestiary flag the kill actually writes (matches how zodiac achievements read _boss_zodiac_*)
   { id:'gravitosDown', name:'The Weight Lifted', desc:'Defeat Gravitos at the Singularity', test:()=>!!(game.bossDefeated && game.bossDefeated.gravitos) },
   { id:'zodiac1',      name:'Star-Toucher',      desc:'Defeat your first Zodiac',         test:()=>(typeof zodiacDefeated==='function' && typeof ZODIAC_SIGNS!=='undefined' && ZODIAC_SIGNS.some(z=>zodiacDefeated(z.id))) },
   { id:'zodiacAll',    name:'The Twelve Houses', desc:'Defeat all 12 Zodiac signs',       test:()=>(typeof zodiacDefeated==='function' && typeof ZODIAC_SIGNS!=='undefined' && ZODIAC_SIGNS.every(z=>zodiacDefeated(z.id))) },
@@ -36484,6 +36508,10 @@ function tickDaily(kind, n) {
   const d = game.dailyState; if (!d || d.claimed) return;
   const c = DAILY_CHALLENGES.find(x => x.id === d.challenge);
   if (!c || c.track !== kind) return;
+  // v0.26.x audit FIX — honor a challenge's `target` filter (gravitos1 targets
+  // the gravitos boss). startsWith so a multi-form boss (final form 'gravitos3')
+  // still matches target 'gravitos'. Only gates challenges that declare a target.
+  if (c.target && !String(n == null ? '' : n).startsWith(c.target)) return;
   // Set-tracked kinds (visit / talk) dedupe by id instead of adding
   if (kind === 'visit' || kind === 'talk') {
     const bucket = kind === 'visit' ? 'seenMaps' : 'seenNpcs';
@@ -57941,6 +57969,7 @@ function killMonster(m) {
   }
   game.kills++;
   tickDaily('kills');
+  if (m.isBoss || m.isMiniBoss) tickDaily('boss', m.type);   // v0.26.x audit FIX — boss-track daily challenges (e.g. gravitos1) had NO tick caller, so they could never complete; credit boss/miniboss kills here
   checkAchievements();
   // v0.26.261 — Synergy: Blood Ritual (ls + atk). Each kill stamps a
   // 2-s buff window granting +20 % ATK. Refreshes on stack so chained
@@ -95202,6 +95231,11 @@ function _prologueOverlay(stanzas, onDone) {
 }
 function _startPrologue() {
   window._prologueActive = true;
+  // v0.26.x audit FIX (soft-lock) — absolute safety cap. The cinematic runs
+  // ~30 s; if anything stalls the tick loop or the finish path, force-finish
+  // at 50 s so the keyboard lockdown can never persist and freeze the player
+  // out of every menu. _prologueFinish is idempotent (clears its own timer).
+  setTimeout(() => { if (window._prologueActive) { try { _prologueFinish(true); } catch (_) {} } }, 50000);
   loadMap('void', 400);
   _prologueOverlay([
     'EONS FROM NOW — AT THE FAR END OF THE DREAM',
@@ -95214,6 +95248,7 @@ function _startPrologue() {
 }
 function _prologueApexSegment() {
   // Snapshot the untouched fresh state — restored verbatim afterwards.
+  window._prologueSnapP = null; window._prologueSnapG = null;
   try {
     window._prologueSnapP = JSON.stringify(player);
     window._prologueSnapG = JSON.stringify({
@@ -95221,41 +95256,55 @@ function _prologueApexSegment() {
       bossDefeated: game.bossDefeated || {}, kills: game.kills,
     });
   } catch (e) {}
-  // Pre-mark advancement story beats so devSetMasterChain can't pop their
-  // dialogs mid-cinematic (the snapshot restore un-marks them again).
-  player._storyBeatsSeen = Object.assign({}, player._storyBeatsSeen,
-    { advancement_1: true, advancement_2: true, advancement_3: true });
+  // v0.26.x audit FIX (soft-lock) — if the snapshot FAILED we must NOT mutate
+  // the player into the Lv100 apex form: the restore would be skipped, leaving
+  // a fresh save permanently stranded at Lv100/master. Bail cleanly (no
+  // mutation has happened yet) instead of pressing on.
+  if (!window._prologueSnapP) { try { _prologueFinish(true); } catch (_) {} return; }
+  // v0.26.x audit FIX (soft-lock) — wrap the ENTIRE apex setup. If anything
+  // here throws (loadMap, devSetMasterChain, getMaxHp…) before the tick timer
+  // arms, _prologueActive would stay true forever and the input lockdown would
+  // swallow every menu key permanently. On any failure, finish the prologue
+  // (which restores the snapshot and clears the lockdown).
   try {
-    // v0.26.957 — the apex form follows the class the player just chose,
-    // so the flash-forward stars THEIR character design (look persists via
-    // player.lookCustom; the snapshot/restore returns them to Lv.1 after).
-    const _apexByClass = {
-      warrior: ['warrior', 'berserker', 'warlord'],
-      rogue:   ['rogue',   'ninja',     'shinobi'],
-      mage:    ['mage',    'archmage',  'sage'],
-      archer:  ['archer',  'sniper',    'marksman'],
-    };
-    const _apex = _apexByClass[player.cls] || _apexByClass.rogue;
-    if (typeof devSetMasterChain === 'function') devSetMasterChain(_apex[0], _apex[1], _apex[2]);
-    if (typeof devSetLevel === 'function') devSetLevel(99);
-    player.level = 100;   // the memory stands one step beyond the mortal cap
-    player.hp = getMaxHp(); player.mp = getMaxMp();
-  } catch (e) {}
-  loadMap('gravitosArena', 300);
-  // Defensive: if any advancement/ceremony modal opened during the apex
-  // class chain, clear it — the prologue plays clean, no tabs, no pauses.
-  setTimeout(() => {
-    if (!window._prologueActive) return;
-    const _adv = document.getElementById('advancement-modal');
-    if (_adv) _adv.style.display = 'none';
-    if (typeof closeAllModals === 'function') { try { closeAllModals(); } catch (e) {} }
-    game.paused = false;
-  }, 1000);
-  setTimeout(_prologueHardenBoss, 1600);
-  _prologueHud(true);
-  window._prologueLeftMs = 30000;
-  window._prologueLastTick = Date.now();
-  window._prologueTimer = setInterval(_prologueTick, 250);
+    // Pre-mark advancement story beats so devSetMasterChain can't pop their
+    // dialogs mid-cinematic (the snapshot restore un-marks them again).
+    player._storyBeatsSeen = Object.assign({}, player._storyBeatsSeen,
+      { advancement_1: true, advancement_2: true, advancement_3: true });
+    try {
+      // v0.26.957 — the apex form follows the class the player just chose,
+      // so the flash-forward stars THEIR character design (look persists via
+      // player.lookCustom; the snapshot/restore returns them to Lv.1 after).
+      const _apexByClass = {
+        warrior: ['warrior', 'berserker', 'warlord'],
+        rogue:   ['rogue',   'ninja',     'shinobi'],
+        mage:    ['mage',    'archmage',  'sage'],
+        archer:  ['archer',  'sniper',    'marksman'],
+      };
+      const _apex = _apexByClass[player.cls] || _apexByClass.rogue;
+      if (typeof devSetMasterChain === 'function') devSetMasterChain(_apex[0], _apex[1], _apex[2]);
+      if (typeof devSetLevel === 'function') devSetLevel(99);
+      player.level = 100;   // the memory stands one step beyond the mortal cap
+      player.hp = getMaxHp(); player.mp = getMaxMp();
+    } catch (e) {}
+    loadMap('gravitosArena', 300);
+    // Defensive: if any advancement/ceremony modal opened during the apex
+    // class chain, clear it — the prologue plays clean, no tabs, no pauses.
+    setTimeout(() => {
+      if (!window._prologueActive) return;
+      const _adv = document.getElementById('advancement-modal');
+      if (_adv) _adv.style.display = 'none';
+      if (typeof closeAllModals === 'function') { try { closeAllModals(); } catch (e) {} }
+      game.paused = false;
+    }, 1000);
+    setTimeout(_prologueHardenBoss, 1600);
+    _prologueHud(true);
+    window._prologueLeftMs = 30000;
+    window._prologueLastTick = Date.now();
+    window._prologueTimer = setInterval(_prologueTick, 250);
+  } catch (e) {
+    try { _prologueFinish(true); } catch (_) {}
+  }
 }
 function _prologueHardenBoss() {
   // The memory's Gravitos cannot realistically die in 30s — and if he
@@ -95633,6 +95682,22 @@ renderSkillBar();
 // the 1.5 s debounce window elapses and silently drop the latest changes.
 window.addEventListener('visibilitychange', () => { if (document.hidden && player.cls && !game._resetting) _flushSaveStateNow(); });
 window.addEventListener('beforeunload',     () => { if (player.cls && !game._resetting) _flushSaveStateNow(); });
+// v0.26.x audit FIX (multi-tab) — a second tab sharing this origin can clobber
+// the save (last-writer-wins on one localStorage key), and was exploitable to
+// dupe consumed resources. A storage event fires in THIS tab when ANOTHER tab
+// writes SAVE_KEY. Warn once so the player consolidates to a single tab. This
+// is deliberately a WARNING, not a save-write guard: gating the write path
+// risks a tab silently dropping real progress, which is worse than the niche
+// two-tab self-dupe. The import path sets game._resetting, so its reload-write
+// won't false-trigger for the importing tab.
+window.addEventListener('storage', (e) => {
+  try {
+    if (e && e.key === SAVE_KEY && e.newValue && !game._resetting && player && player.cls && !game._multiTabWarned) {
+      game._multiTabWarned = true;
+      if (typeof showToast === 'function') showToast('⚠ Mojiworld is open in another tab — saves can overwrite each other. Please play in ONE tab to avoid losing progress.', 'danger');
+    }
+  } catch (_e) {}
+});
 // v0.26.x — Periodic autosave heartbeat. The debounce guarantees a flush
 // 1.5 s after any saveState() call — but a mutation on a code path that
 // FORGOT to call saveState() persists only when the next event saves, or
