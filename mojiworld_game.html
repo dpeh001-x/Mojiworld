@@ -12864,7 +12864,7 @@ const SKILLS = {
   bloodlust:    { name:'Bloodlust',      icon:'🩸', cls:'warrior', job:'berserker', slot:'q', mp:22, cd:48000, desc:'20 s rage (+ATK, lifesteal, speed). While active, basic Z attacks launch forward shockwaves.' },
   rampage:      { name:'Rampage',        icon:'🌪️', cls:'warrior', job:'berserker', slot:'c', mp:45, cd:8000,  desc:'Ultimate: 3.5s spinning AoE (8 radial pulses).' },
   // Knight
-  guardian:     { name:'Guardian',       icon:'🛡️', cls:'warrior', job:'knight',    slot:'q', mp:18, cd:11000,  desc:'80% damage reduction + 50% damage reflect for 6s.' },
+  guardian:     { name:'Guardian',       icon:'🛡️', cls:'warrior', job:'knight',    slot:'q', mp:18, cd:11000,  desc:'+50% DEF + 50% damage reflect for 6s.' },
   holyShield:   { name:'Holy Shield',    icon:'✨', cls:'warrior', job:'knight',    slot:'c', mp:45, cd:22000, desc:'Ultimate: 2.5s invulnerability + 5s damage reflect.' },
 
   // ============ ROGUE ============
@@ -46217,6 +46217,13 @@ const SKILL_FNS = {
   },
   holyShield: () => {
     player.buffs.holyShield = 5000;
+    // v0.26.x audit FIX — the desc promises "5s damage reflect" and the comment
+    // below says "the 5s reflect buff stays", but the reflect flag was never
+    // actually set — only invuln + a DEF spike were. The damage pipeline's
+    // reflect (line ~52358) reads player._guardianReflect, so set it (5s = 300
+    // frames) to deliver the advertised reflect (meaningful in the 2.5–5s window
+    // after the 2.5s invuln ends).
+    player._guardianReflect = game.time + 300;
     // v0.26.x — balance audit: i-frame window 5000->2500ms (was 22.7% uptime
     // on the 22s cd, the longest non-ult immunity in the game). The 5s reflect
     // buff stays; only the hard invulnerability is halved.
@@ -49735,7 +49742,7 @@ const SKILL_FNS = {
     // ends a scheduled lock applies the full cooldown.
     const _now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     const _active = (player._warlordEnrageUntil || 0) > _now;
-    player.mp = Math.min(getMaxMp(), player.mp + Math.ceil((SKILLS.warlord_ult.mp || 70) * 1.3)); // free spam in-window
+    player.mp = Math.min(getMaxMp(), player.mp + (SKILLS.warlord_ult.mp || 70)); // v0.26.x audit FIX — refund the cast COST (warlord is a warrior, no MP discount), not 1.3× of it. The old 1.3× net-GAINED ~21 MP per tap; the window is now cost-neutral (free spam), not free-plus-profit. Mirrors the sage_ult fix.
     player.skillCooldowns.warlord_ult = 250;                 // spammable re-cast gate
     const dir = player.facing || 1, cx = player.x + player.w / 2, cy = player.y + player.h / 2;
     if (!_active) {
@@ -50150,6 +50157,12 @@ function _applyMobStatus(m, kind, ms, opts) {
   if (opts.chance != null && opts.chance < 100 && Math.random() * 100 >= opts.chance) return false;
   const _isBoss = !!(m.isBoss || m.boss);
   const _isMini = !_isBoss && !!m.isMiniBoss;
+  // v0.26.x audit FIX — full bosses are FREEZE-IMMUNE (v0.26.458 intent). Reject
+  // freeze here so it never sets a timer or wastes the resistance roll. Pairs
+  // with the AI-skip guard fix below (which had checked the always-falsy m.boss
+  // instead of m.isBoss, so the immunity was actually broken — a player could
+  // chain-freeze a boss and AI-lock it to death). Minibosses still freezable.
+  if (kind === 'freeze' && _isBoss) return false;
   if (_isBoss || _isMini) {
     const _res = _isBoss ? MOB_STATUS_RESIST.boss : MOB_STATUS_RESIST.miniboss;
     if (Math.random() < _res) {
@@ -51547,7 +51560,7 @@ function updateMonsters(dt) {
       }
     }
     if (m.stunTimer > 0) { m.stunTimer -= dt; m.vx *= 0.5; continue; }
-    if (m.freezeTimer > 0 && !m.boss) {   // v0.26.458 - bosses are freeze-IMMUNE (no AI-skip); closes the Grand Hex / any-freeze perma-lock exploit on apex bosses like Gravitos
+    if (m.freezeTimer > 0 && !(m.isBoss || m.boss)) {   // v0.26.458 - bosses freeze-IMMUNE (no AI-skip); v0.26.x audit FIX — was `!m.boss`, but spawned bosses carry `isBoss` (m.boss is always falsy on live instances), so this guard never protected them and the Grand-Hex / freeze-lock exploit on apex bosses like Gravitos was still open. Now checks isBoss.
       m.freezeTimer -= dt;
       m.vx *= 0.85;
       // Frozen frost particles
@@ -59518,7 +59531,7 @@ function updateProjectiles(dt) {
         // Zodiac projectile status effects on player
         if (p.freeze)  player.frozenTimer = Math.max(player.frozenTimer || 0, p.freeze);
         if (p.poison)  {
-          player._poisonTimer = (p.poison);
+          player._poisonTimer = Math.max(player._poisonTimer || 0, p.poison);   // v0.26.x audit FIX — was a raw overwrite, so a shorter poison hit could SHORTEN an active longer poison; every other CC (freeze above, and the other poison-apply sites) uses Math.max refresh-or-extend. The dmg line already maxes — this matches it.
           player._poisonDmg   = Math.max(player._poisonDmg || 0, p._poisonDmg || Math.floor(p.damage * 0.25));
         }
         // v0.25.485 — Octobaby tentacle: skill-lock effect (silences active skills,
