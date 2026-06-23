@@ -38772,6 +38772,16 @@ function loadMap(id, entryX, entryY) {
   // so a song picked in Everdawn Central kept playing (and the saved original
   // src stayed stale) across every later map. Restore the auto-picker here.
   try { if (_jukeboxPlaying && typeof jukeboxStop === 'function') jukeboxStop({ silent: true }); } catch (e) {}
+  // v0.26.x audit FIX — close any open NPC dialog when leaving the map. loadMap
+  // clears game.npcs but didn't close the dialog or null _activeNpc, so a
+  // sticky (click/tap-opened) dialog could survive a portal/warp and linger on
+  // the next map with its option callbacks still pointing at the despawned NPC.
+  try {
+    if (typeof game !== 'undefined' && game && game._activeNpc) {
+      if (typeof closeDialog === 'function') closeDialog();
+      game._activeNpc = null; game._activeNpcSticky = false;
+    }
+  } catch (e) {}
   // v0.26.946 — warm this map's frames as the transition starts (no await;
   // the gate covers the boot map, this covers every later map enter).
   try {
@@ -40167,8 +40177,22 @@ function openChest(c) {
   if (!pool.length) pool = ITEM_POOL[cat].filter(it => (it.tier | 0) <= _chestTierCap);   // fallback: any rarity within the cap
   if (pool.length) {
     const it = { ...pool[Math.floor(Math.random() * pool.length)], slot: _catToSlot(cat) };
-    player.inventory.push(it);
-    showToast(`Chest: ${mojicoins}🪙 + ${it.name}`, it.rarity);
+    // v0.26.x audit FIX — honor the inventory tab cap, like the ground-drop and
+    // quest-reward paths do (v0.25.774). Pushing past invCap put the item in the
+    // array but BEYOND the UI-rendered slots — silent invisible loot. If the tab
+    // is full, drop the item on the ground at the chest so it's recoverable
+    // (not lost) and tell the player, instead of swallowing it.
+    const _tab = (typeof _itemTab === 'function') ? _itemTab(it) : 'etc';
+    const _cap = (player.invCap && typeof player.invCap[_tab] === 'number') ? player.invCap[_tab] : 24;
+    let _used = 0;
+    for (const _it of player.inventory) { if (_it && (((typeof _itemTab === 'function') ? _itemTab(_it) : 'etc') === _tab)) _used++; }
+    if (_used >= _cap) {
+      game.drops.push({ x: c.x + (c.w || 24) / 2, y: c.y, vy: -5, type: 'item', item: it, life: 5400 });
+      showToast(`Chest: ${mojicoins}🪙 + ${it.name} (bag full — dropped on the ground)`, it.rarity);
+    } else {
+      player.inventory.push(it);
+      showToast(`Chest: ${mojicoins}🪙 + ${it.name}`, it.rarity);
+    }
   } else {
     showToast(`Chest: ${mojicoins}🪙 + potions`, c.tier === 'gold' ? 'epic' : c.tier === 'silver' ? 'rare' : 'common');
   }
@@ -43331,6 +43355,13 @@ function triggerDeath() {
   // v0.26.x — if the non-blocking tutorial dock is open when the player dies,
   // dismiss it (don't mark seen) so it can't float over the death/respawn UI.
   try { const _tm = document.getElementById('tutorial-modal'); if (_tm && _tm.classList.contains('tut-dock') && typeof _closeTutorial === 'function') _closeTutorial(false); } catch (e) {}
+  // v0.26.x audit FIX (visual glitch) — clear the map-event overlays. Their
+  // decay only runs in the alive branch (updateMapEvents, gated on hp>0), but
+  // the overlay RENDER runs while dead — so dying during a held eclipse or a
+  // lightning flash froze that tint at full strength over the death screen
+  // until respawn. The low-HP vignette already guards on !game.dying; match it.
+  game._lightningFlash = 0; game._lightningCD = null;
+  game._eclipseAlpha = 0; game._eclipseState = null; game._eclipseCD = null;
   game._diedInExpedition = false;   // v0.26.x audit -- never inherit a stale flag from an aborted prior death
   // v0.26.x glitch-fix -- death mid-Shackle-QTE: updatePlayer early-returns while
   // dying so _qteFrame never fires again to self-clear; do it here so the player
@@ -60872,26 +60903,28 @@ function tryInteract(mode) {
   const _dlgOpen = (() => { const e = document.getElementById('dialog'); return e && e.style.display === 'block'; })();
   if (_csOpen || _advOpen || _dlgOpen) return;
   game._lastInteractT = _now;
-  // Chest
+  const _pcx = player.x + player.w/2;
+  // Chest — v0.26.x audit FIX — pick the NEAREST in-range chest, not the first
+  // one in array order (matters when two chests are authored close together).
   if (mode === 'chest' || mode === 'all') {
+    let _best = null, _bestD = Infinity;
     for (const c of game.chests) {
-      if (!c.opened && Math.abs((player.x + player.w/2) - (c.x + c.w/2)) < 40 &&
-          Math.abs((player.y + player.h) - (c.y + c.h)) < 60) {
-        openChest(c);
-        return;
-      }
+      if (c.opened) continue;
+      const _dx = Math.abs(_pcx - (c.x + c.w/2)), _dy = Math.abs((player.y + player.h) - (c.y + c.h));
+      if (_dx < 40 && _dy < 60 && _dx < _bestD) { _bestD = _dx; _best = c; }
     }
+    if (_best) { openChest(_best); return; }
   }
   // v0.24.2 — portals no longer trigger on F. Use ↑ (ArrowUp) to enter
   // portals; F is reserved for chests / pickups / job signature casts.
-  // NPC
+  // NPC — v0.26.x audit FIX — nearest in-range NPC (mirrors the N-key handler).
   if (mode === 'npc' || mode === 'all') {
+    let _best = null, _bestD = Infinity;
     for (const npc of game.npcs) {
-      if (Math.abs((player.x + player.w/2) - npc.x) < 60) {
-        openNPC(npc);
-        return;
-      }
+      const _dx = Math.abs(_pcx - npc.x);
+      if (_dx < 60 && _dx < _bestD) { _bestD = _dx; _best = npc; }
     }
+    if (_best) { openNPC(_best); return; }
   }
 }
 
@@ -62949,7 +62982,7 @@ function openShop(type, opts) {
         `<div class="name" style="flex:1; min-width:180px;">` +
           `<div><b>${p.name}</b></div>` +
           `<div style="font-size:11px; color:#bbb;">${desc}<br>` +
-            `<span style="color:#ffdd44;">${p.price}<span class="coin-ico"></span> each</span></div>` +
+            `<span style="color:#ffdd44;">${_pp}<span class="coin-ico"></span> each</span></div>` +   /* v0.26.x audit FIX — show the actually-charged (level-scaled/surcharged) unit price _pp, not the base p.price, so the "each" label matches the total + the charge */
         `</div>` +
         `<div style="display:flex; align-items:center; gap:4px; margin: 0 6px;">` +
           `<button class="pot-step" data-id="${p.id}" data-step="-10" title="-10" style="background:#3a2848; color:#fff; border:1px solid #555; border-radius:6px; padding:4px 7px; cursor:pointer; font-size:11px; font-weight:bold;">−10</button>` +
@@ -104816,6 +104849,13 @@ function openCharStudio() {
   // live every frame) and CHAR_STUDIO.hairHue (so the studio preview matches).
   try {
     CHAR_STUDIO.hairHue = (player.lookCustom && (player.lookCustom.hairHue | 0)) || 0;
+    // v0.26.x audit FIX — snapshot the hue at open. The dye slider writes LIVE
+    // to player.lookCustom.hairHue (so the preview recolours instantly), which
+    // meant (1) closing without Apply still kept the hue, and (2) the makeover
+    // fee never charged for a dye-only change (it wasn't in the change-sig).
+    // This baseline lets Apply detect/charge a dye change and lets close revert
+    // an un-applied one.
+    CHAR_STUDIO._origHairHue = CHAR_STUDIO.hairHue;
   } catch (e) { console.error('[wardrobe seed:hairHue]', e); }
   try {
     CHAR_STUDIO.customPaint = (typeof player !== 'undefined' && typeof player.customPaint === 'string')
@@ -105076,6 +105116,10 @@ function applyCharStudioToPlayer() {
     const _paintSig = (paint, layers) => JSON.stringify([paint || null, layers || null]);
     const _changed =
       _lookSig(CHAR_STUDIO) !== _lookSig(_lc) ||
+      // v0.26.x audit FIX — compare the dye against the OPEN-time baseline, not
+      // player.lookCustom (which the live slider already updated), so a dye-only
+      // makeover is detected and billed instead of slipping through free.
+      ((CHAR_STUDIO.hairHue | 0) !== (CHAR_STUDIO._origHairHue | 0)) ||
       _paintSig(CHAR_STUDIO.customPaint, CHAR_STUDIO.customPaintLayers) !== _paintSig(player.customPaint, player.customPaintLayers);
     // v0.26.x - Per user: "Use in game" must ALWAYS finalize the design. Never
     // abort on insufficient coins - charge the makeover fee only when affordable,
@@ -105086,6 +105130,9 @@ function applyCharStudioToPlayer() {
       if (typeof showToast === 'function') showToast('✨ Makeover applied! (-' + MAKEOVER_COST + '🪙)', 'epic');
     }
   }
+  // v0.26.x audit FIX — re-baseline the dye snapshot to the just-committed hue,
+  // so closeCharStudio's revert-on-cancel won't undo an applied dye change.
+  if (typeof CHAR_STUDIO !== 'undefined') CHAR_STUDIO._origHairHue = (CHAR_STUDIO.hairHue | 0);
   player.lookCustom = {
     skinIdx: CHAR_STUDIO.skinIdx,
     hairId:  CHAR_STUDIO.hairId, hairHue: (CHAR_STUDIO.hairHue|0),
@@ -105262,6 +105309,18 @@ function wireCharStudioActionButtons() {
 }
 function closeCharStudio() {
   document.getElementById('char-studio-overlay').classList.remove('open');
+  // v0.26.x audit FIX — revert an un-APPLIED dye. The slider writes the hue live
+  // (for the preview), and Apply re-baselines _origHairHue; so if the live hue
+  // still differs from the baseline here, the player dragged the dye but closed
+  // without Apply — undo it (runs before the save-flush below so the revert,
+  // not the abandoned dye, is what persists).
+  try {
+    if (typeof CHAR_STUDIO !== 'undefined' && CHAR_STUDIO._origHairHue != null &&
+        player && player.lookCustom && (player.lookCustom.hairHue | 0) !== (CHAR_STUDIO._origHairHue | 0)) {
+      player.lookCustom.hairHue = CHAR_STUDIO._origHairHue | 0;
+      CHAR_STUDIO.hairHue = CHAR_STUDIO._origHairHue | 0;
+    }
+  } catch (e) {}
   if (typeof _csStopPreview === 'function') _csStopPreview();
   // v0.25.981 — BUG-001 L7 safety net. Force-flush any pending debounced
   // save before tearing down the wardrobe state. Apply already flushes
