@@ -7938,7 +7938,7 @@ The sleeping world is listening.</div>
     <div class="settings-row">
       <label title="Background music volume (0 = silent, 100 = max).">BGM Volume</label>
       <div class="ctrl">
-        <input type="range" id="set-bgm" min="0" max="100" step="5" value="55" style="--moji-slider-pct: 55.00;">
+        <input type="range" id="set-bgm" min="0" max="100" step="5" value="90" style="--moji-slider-pct: 90.00;">
         <span class="val" id="set-bgm-val">55%</span>
       </div>
     </div>
@@ -27469,7 +27469,7 @@ if (document.readyState === 'loading') {
 // =========================================================================
 const LX_SETTINGS_DEFAULTS = {
   scale: 2.0,        // canvas scale multiplier (0.5 - 3.0)
-  bgm:   55,         // BGM volume %  (0 - 100)
+  bgm:   90,         // BGM volume %  (0 - 100) — v0.26.x: was 55. The slider is now authoritative (the fade ramps to (bgm/100)*0.6); 90% → 0.54 keeps the long-standing default loudness (the old hardcoded 0.55 fade target).
   sfx:   70,         // v0.25.799 — SFX master volume % (ambient + voice + skill + boss + monster). Default 70 → 30% softer.
   mute:  false,      // mute all audio
   lowfx: false,      // reduce visual effects
@@ -27718,8 +27718,16 @@ function applySettingsLive() {
   _applySettings(s);
 }
 function _applySettings(s) {
-  // BGM volume
-  if (typeof _bgmEl !== 'undefined' && _bgmEl) _bgmEl.volume = (s.bgm / 100) * 0.6;
+  // BGM volume — v0.26.x audit FIX — apply to ALL three BGM pools (default,
+  // boss, per-map), not just _bgmEl, so a live slider drag affects the music
+  // you're actually hearing. _bgmTargetVol() reads this same value, so the
+  // next map/boss fade ramps TO the slider setting instead of overriding it.
+  {
+    const _bv = Math.max(0, Math.min(1, (s.bgm / 100) * 0.6));
+    if (typeof _bgmEl !== 'undefined' && _bgmEl) _bgmEl.volume = _bv;
+    if (typeof _bgmBossEl !== 'undefined' && _bgmBossEl) _bgmBossEl.volume = _bv;
+    if (typeof _bgmMapEls !== 'undefined' && _bgmMapEls) { for (const _mid of Object.keys(_bgmMapEls)) { const _e = _bgmMapEls[_mid]; if (_e) _e.volume = _bv; } }
+  }
   // v0.25.799 — SFX master volume (recomputes every cached audio element)
   if (typeof _setSfxMasterVolume === 'function') {
     const sfxPct = (s.sfx != null) ? s.sfx : 70;
@@ -85967,7 +85975,11 @@ function drawMonster(m) {
     // signal "this mob is on fire" without the cosmetic flicker.
     const _vlBurn = (typeof _perfVeryLowFx === 'function') && _perfVeryLowFx();
     if (_burnTick === 0 && !_vlBurn) {
-      if (flashOn) ctx.filter = 'none';
+      // v0.26.x audit FIX — was `if (flashOn)`, so on a burning mob that is
+      // ALSO dying (grayscale) or frozen (cool tint) — but not flashing — the
+      // orange flame spark drew through that filter and came out desaturated.
+      // Clear the filter whenever the save block set one (_didFilterSave).
+      if (_didFilterSave) ctx.filter = 'none';
       ctx.fillStyle = _BURN_FLAME_COLORS[(game.time | 0) & 3];
       const fx = sx + Math.random() * m.w;
       const fy = sy + Math.random() * m.h;
@@ -98022,7 +98034,18 @@ function _bgmMapEl(mapId) {
   return a;
 }
 let _bgmActiveMapEl = null;     // the currently-playing per-map track, if any
-const _BGM_TARGET_VOL = 0.55;
+// v0.26.x audit FIX — BGM fade target now TRACKS the BGM volume slider instead
+// of a hardcoded 0.55. Previously every map/boss fade ramped back to 0.55, so
+// lowering BGM in Settings had no lasting effect (it reverted on the next map
+// load). Mirrors the (bgm/100)*0.6 formula the slider uses; the default setting
+// was bumped 55→90 so a fresh player keeps the long-standing ~0.55 loudness.
+function _bgmTargetVol() {
+  try {
+    const s = (typeof _lxGetSettings === 'function') ? _lxGetSettings() : null;
+    const v = (s && typeof s.bgm === 'number') ? s.bgm : 90;
+    return Math.max(0, Math.min(1, (v / 100) * 0.6));
+  } catch (e) { return 0.55; }
+}
 const _BGM_FADE_MS = 600;
 function _bgmFade(el, target, durationMs) {
   if (!el) return;
@@ -98074,7 +98097,7 @@ function _setBossBgm(isBoss, mapId) {
     }
     _bgmFade(_bgmEl,     0, _BGM_FADE_MS);
     _bgmFade(_bgmBossEl, 0, _BGM_FADE_MS);
-    _bgmFade(mapEl,      _BGM_TARGET_VOL, _BGM_FADE_MS);
+    _bgmFade(mapEl,      _bgmTargetVol(), _BGM_FADE_MS);
     _bgmActiveMapEl = mapEl;
     return;
   }
@@ -98082,13 +98105,13 @@ function _setBossBgm(isBoss, mapId) {
   if (isBoss) {
     if (_bgmActiveMapEl) { _bgmFade(_bgmActiveMapEl, 0, _BGM_FADE_MS); _bgmActiveMapEl = null; }
     _bgmFade(_bgmEl,     0,                _BGM_FADE_MS);
-    _bgmFade(_bgmBossEl, _BGM_TARGET_VOL,  _BGM_FADE_MS);
+    _bgmFade(_bgmBossEl, _bgmTargetVol(),  _BGM_FADE_MS);
     return;
   }
   _bgmFade(_bgmBossEl, 0, _BGM_FADE_MS);
   // Default world theme.
   if (_bgmActiveMapEl) { _bgmFade(_bgmActiveMapEl, 0, _BGM_FADE_MS); _bgmActiveMapEl = null; }
-  _bgmFade(_bgmEl, _BGM_TARGET_VOL, _BGM_FADE_MS);
+  _bgmFade(_bgmEl, _bgmTargetVol(), _BGM_FADE_MS);
 }
 function startBgm() {
   if (!_bgmEl) return;
