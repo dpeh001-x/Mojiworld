@@ -25884,8 +25884,12 @@ function _grantMojicoins(n, opts) {
   if (typeof game !== 'undefined' && game.expedition && game.expedition.active) return 0;
   const mult = (opts && opts.full) ? 1 : MOJICOIN_GAIN_MULT;
   const granted = Math.max(0, Math.floor(n * mult));
-  player.mojicoins += granted;
-  return granted;
+  // v0.26.x audit FIX — clamp to the same 1e12 ceiling the save-load sanitizer
+  // enforces, so the wallet doesn't briefly exceed the cap in-session and then
+  // snap back on reload. (Return the amount actually added so toasts match.)
+  const _before = player.mojicoins || 0;
+  player.mojicoins = Math.min(1e12, _before + granted);
+  return player.mojicoins - _before;
 }
 function getAtk()  {
   // v0.25.738 — STR / INT primary-attribute bonus removed. ATK now
@@ -36630,31 +36634,9 @@ function _amnesiacReset() {
   } catch (e) { location.reload(); }
 }
 
-function respec() {
-  const cost = 2000 * Math.max(1, player.level - 5);
-  if (player.mojicoins < cost) { showToast(`Need ${cost} Mojicoins to respec`, 'rare'); return; }
-  // v0.25.244 (X4) — in-game confirm for the respec flow.
-  uiConfirm({
-    title: '⟳ Respec attributes?',
-    body: `Refund all attribute points and reset milestone perks for ${cost} Mojicoins.\n\nYour skill tree, level, and gear are unaffected.`,
-    yesLabel: 'Pay & reset',
-    noLabel: 'Cancel',
-  }).then((ok) => {
-    if (!ok) return;
-    player.mojicoins -= cost;
-    // v0.25.738 — Attribute pool was removed in entirety. The respec
-    // hook used to refund (total - base*6) SP from STR/VIT/AGI/INT/WIS/LCK
-    // back to skillPoints; now SP is only ever spent on the LEVELUP_OPTIONS
-    // cards (ATK/DEF/HP/MP/ACC/etc.) which have their own per-option
-    // refund tracking via `player._levelUpSpent`. Respec still clears
-    // milestones + re-syncs HP/MP.
-    player.milestonesUnlocked = {};
-    player.hp = getMaxHp(); player.mp = getMaxMp();
-    if (typeof renderAttributes === 'function') renderAttributes();
-    showToast('⟳ Attributes and perks reset.', 'epic');
-    flash(0.25); addShake(4); saveState();
-  });
-}
+// v0.26.x — respec() REMOVED (per user). Its button was deleted last build; the
+// function charged Mojicoins but refunded nothing (attribute pool retired in
+// v0.25.738, milestone perks now removed). The real SP refund is resetStats().
 
 // =========================================================================
 // v0.26.x — Per user: "Reset Stats" button on the U panel. Refunds every
@@ -39483,6 +39465,13 @@ function loadMap(id, entryX, entryY) {
     player.ultPet = null;
     player.pack = [];
     if (player.buffs) { for (const _bk in player.buffs) player.buffs[_bk] = 0; }
+    // v0.26.x audit FIX — also clear DOT timers on map-change. The buff wipe
+    // above missed burn/poison/electrocute, so portaling out while burning
+    // carried the DOT onto the (often safe) next map, chipping HP there.
+    // Mirrors the respawnAtTown clear (death already handled this).
+    player.burnTimer = 0; player.burnDmg = 0; player._burnTickAcc = 0;
+    player._poisonTimer = 0; player._poisonDmg = 0; player._poisonTickAcc = 0;
+    player._electrocuteTimer = 0; player._electrocuteDmg = 0; player._electrocuteTickAcc = 0;
     // v0.25.649 — Pose flags too. Mid-cast portal-transits left a frozen
     // levitate / chant / ninja-stance pose visible on the new map until
     // the timer expired. Now symmetric with triggerDeath + respawnAtTown.
@@ -57325,6 +57314,11 @@ function _applyInnateLevelupRng() {
 
 function _maybeLevelUp() {
   if (!player.cls) return;
+  // v0.26.x audit FIX — enforce the Lv 200 cap at the ENTRY point, not only in
+  // the recursion tail. Every XP-grant site calls _maybeLevelUp() directly, so
+  // a single big grant (very reachable now with the ×20 EXP stack) could push a
+  // Lv 200 player to 201+ with unbounded stat growth. Freeze EXP at the cap.
+  if ((player.level || 0) >= 200) { player.exp = 0; return; }
   if (player.exp < player.expToNext) return;
   player.exp -= player.expToNext;
   player.level++;
@@ -69575,7 +69569,7 @@ const TUTORIAL_STEPS = [
     icon: '⭐',
     title: 'Level Up & Allocate Points',
     gugumaLine: 'Cheep! Every level asks a question. Pick a stat like you mean it — respec exists, but Brok charges for it.',
-    body: 'Leveling up grants <b>3 Skill Points (SP)</b>. Press <kbd>U</kbd> to open the character panel and spend them on the stats that shape your build: <b>HP, MP, ATK, DEF, ACC, Speed</b> and <b>Jump</b> — read each card. New skill slots keep unlocking as you level — at Lv 5, 10, 15, 18, 20, 25, 40 and 50. Changed your mind on a stat? <b>Brok the Blacksmith</b> can respec your points for a fee.',
+    body: 'Leveling up grants <b>3 Skill Points (SP)</b>. Press <kbd>U</kbd> to open the character panel and spend them on the stats that shape your build: <b>HP, MP, ATK, DEF, ACC, Speed</b> and <b>Jump</b> — read each card. New skill slots keep unlocking as you level — at Lv 5, 10, 15, 18, 20, 25, 40 and 50. Changed your mind? You can <b>reset and respend</b> your points anytime from the <kbd>U</kbd> panel.',
   },
   {
     icon: '🎒',
@@ -94315,11 +94309,7 @@ function updateUI() {
     }
   }
 
-  // Respec cost hint (updates while the attributes modal is open)
-  if (d['respec-cost']) {
-    const c = 2000 * Math.max(1, player.level - 5);
-    _uiSetText(d['respec-cost'], `Cost: ${c} Mojicoins (you have ${player.mojicoins})`);
-  }
+  // v0.26.x — respec cost-hint updater REMOVED with the respec button.
 }
 
 // =========================================================================
