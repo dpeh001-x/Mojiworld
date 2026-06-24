@@ -37,9 +37,13 @@ export default {
     }
 
     const originUrl = ORIGIN + path + url.search;
+    // Tag our own origin fetch so the play->canonical redirect rule skips it
+    // (otherwise that rule would redirect this subrequest too -> infinite loop).
+    const headers = new Headers(request.headers);
+    headers.set('x-mojiworld-origin', '1');
     const upstream = await fetch(originUrl, {
       method: request.method,
-      headers: request.headers,
+      headers,
       body: (request.method === 'GET' || request.method === 'HEAD') ? undefined : request.body,
       redirect: 'manual',
     });
