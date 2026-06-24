@@ -1676,6 +1676,23 @@
     z-index: 11;   /* v0.25.44 — sits above the standard z:8 HUD ladder */
   }
   #version-tag:hover { background: linear-gradient(135deg, rgba(100,60,150,0.95), rgba(60,30,100,0.95)); }
+  /* v0.26.x — beta build badge, fixed top-right of the screen (per request). */
+  #beta-tag {
+    position: fixed;
+    top: calc(6px + env(safe-area-inset-top));
+    right: calc(8px + env(safe-area-inset-right));
+    z-index: 60;
+    font: 700 11px/1 Inter, system-ui, sans-serif;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: #ffd27a;
+    background: linear-gradient(135deg, rgba(70,35,120,0.92), rgba(35,18,70,0.92));
+    border: 1px solid rgba(255,210,122,0.45);
+    border-radius: 6px;
+    padding: 3px 8px;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.45);
+  }
 
   /* v0.25.793 — Save indicator. Sits just under the version tag in the
      top-right corner. Fades in for ~900ms whenever saveState() commits.
@@ -6748,6 +6765,8 @@ Current ACC: 0
   <button id="mobile-dev-btn" aria-label="Open developer console" title="Developer console (Lv 50 + skills)">🛠</button>
 
   <div id="version-tag" title="Mojiworld build version — updates with every release">v0.26.853</div>
+  <div id="beta-tag" aria-hidden="true">beta 0.00.001</div>
+  <script>/* keep the beta badge a direct child of <body> so position:fixed is viewport-relative even if a HUD ancestor uses transform */(function(){try{var b=document.getElementById('beta-tag');if(b&&document.body&&b.parentElement!==document.body)document.body.appendChild(b);}catch(e){}})();</script>
   <!-- v0.25.793 — Save indicator. Briefly fades in whenever saveState()
        fires (debounced ~15s autosave + on every map change / level-up /
        boon equip / kill milestone). Players asked for visible feedback
@@ -8204,7 +8223,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.986';
+const GAME_VERSION = 'v0.26.987';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11728,7 +11747,7 @@ function _lxSeBuild() {
   const u = _LX_SE.ui = {};
   function btn(label, cb) { const b = document.createElement('button'); b.textContent = label; b.style.cssText = 'flex:1;padding:5px 4px;background:#1d2536;color:#e4ecf4;border:1px solid #43505f;border-radius:6px;cursor:pointer;font-size:11px;'; b.onclick = cb; return b; }
   const hdr = document.createElement('div'); hdr.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
-  hdr.innerHTML = '<b style="color:#ffd166;">🎭 Stage Editor (5)</b>';
+  hdr.innerHTML = '<b style="color:#ffd166;">🎭 Stage Editor (R)</b>';
   const xb = btn('✕', () => _lxSeToggle()); xb.style.cssText += 'flex:0 0 26px;'; hdr.appendChild(xb); root.appendChild(hdr);
   const tip = document.createElement('div'); tip.style.cssText = 'color:#90a4b4;font-size:10.5px;margin-bottom:6px;line-height:1.35;';
   tip.textContent = 'Click an NPC/portal on the canvas, drag to move (live + this session). Snap drops it onto the platform below. ＋NPC places an EXISTING NPC from the roster (with their real role). Export copies the npcs/portals arrays to hardbake into MAPS.';
@@ -13732,7 +13751,7 @@ const ACTION_KEY_DEFAULT = Object.freeze({
   hpPotion:     'pageup',
   mpPotion:     'pagedown',
   wardrobe:     'q',
-  resetSave:    '9',
+  resetSave:    't',          // dev save-reset — moved 9 -> T per request (shown in the K keybind map)
   changeClass:  '0',
 });
 // Returns true if the player's pressed `physicalKey` is currently bound
@@ -26557,7 +26576,7 @@ window.addEventListener('keydown', e => {
     if (typeof showToast === 'function') showToast('🔒 Dev mode locked', 'common');
     return;
   }
-  if (LX_DEV_TOOLS && k === '9' && !game.paused) {           // (DEV PANEL) save reset
+  if (LX_DEV_TOOLS && k === 't' && !game.paused) {           // (DEV PANEL) save reset — moved 9 -> T per request
     resetSave();
   }
   // v0.23.1 — press `-` to open the job / master selection page any time.
@@ -26647,7 +26666,7 @@ window.addEventListener('keydown', e => {
   if (LX_DEV_TOOLS && k === '4' && !game.keys['1'] && !game.keys['2'] && !game.keys['3']) {   // (DEV PANEL) NPC Plant
     if (typeof _lxNpToggle === 'function') _lxNpToggle();
   }
-  if (LX_DEV_TOOLS && k === '5' && !game.keys['1'] && !game.keys['2'] && !game.keys['3']) {   // (DEV PANEL) Stage Editor — live NPC/portal place/move/remove + export
+  if (LX_DEV_TOOLS && k === 'r' && !game.keys['1'] && !game.keys['2'] && !game.keys['3']) {   // Stage Editor — moved 5 -> R per request   // (DEV PANEL) Stage Editor — live NPC/portal place/move/remove + export
     if (typeof _lxSeToggle === 'function') _lxSeToggle();
   }
 
@@ -32112,6 +32131,35 @@ function _mpCloseChat(sendText) {
   inp.blur();
   net.chatOpen = false;
 }
+// v0.26.x — Mobile: the TALK button opens the multiplayer chat bar (and raises
+// the on-screen keyboard) when there is nothing nearby to interact with. NPC /
+// chest interaction stays on the button's existing data-mkey="n" dispatch; this
+// only adds the "nothing nearby -> chat" path, run inside the tap gesture so the
+// mobile keyboard actually appears (focus() must be user-initiated).
+function _wireMobileTalkChat() {
+  const btn = document.querySelector('.mc-btn[data-mkey="n"]');
+  if (!btn || btn._talkChatWired) return;
+  btn._talkChatWired = true;
+  const openChatIfClear = () => {
+    if (!player || !player.cls || player.hp <= 0) return;
+    if (typeof net !== 'undefined' && net.chatOpen) return;
+    const dlg = document.getElementById('dialog');
+    if (dlg && dlg.style.display && dlg.style.display !== 'none') return;   // a dialog is open -> 'n' handles it
+    const pcx = player.x + player.w / 2;
+    const nearChest = (game.chests || []).some(c => !c.opened &&
+      Math.abs((player.x + player.w / 2) - (c.x + c.w / 2)) < 40 &&
+      Math.abs((player.y + player.h) - (c.y + c.h)) < 60);
+    let nearNpc = false;
+    if (game.npcs) for (const npc of game.npcs) { if (Math.abs(pcx - npc.x) < 81) { nearNpc = true; break; } }
+    if (!nearChest && !nearNpc && typeof _mpOpenChat === 'function') _mpOpenChat();
+  };
+  btn.addEventListener('touchend', openChatIfClear);
+  btn.addEventListener('click', openChatIfClear);
+}
+try { _wireMobileTalkChat(); } catch (_) {}
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', () => { try { _wireMobileTalkChat(); } catch (_) {} });
+}
 // Ghost peer render — called from the main render loop in world space
 // (inside the camera translate). Draws only peers in the same map.
 function _mpDrawPeers() {
@@ -33873,7 +33921,7 @@ function _kbActionByKey() {
   // board. These functions are tied to their literal key (not rebindable from
   // here); showing them lets the player see what a key already does before
   // dropping a skill onto it. P = Postal Wisp mail, J = Quest Journal alias,
-  // R / T = dev overlays (Monster Plant / Gear Align).
+  // R = Stage Editor, T = Save Reset (dev tools, moved from 5 / 9 per request).
   const HARDCODED = { p:'Mail', j:'Quest', '-':'Advance', enter:'Chat', '4':'Dev', '5':'Emote',
                       r:'Dev', t:'Dev', '6':'Dev', '7':'Dev', '8':'Dev', '1':'Dev', '2':'Dev', '3':'Dev' };
   for (const hk in HARDCODED) if (!(hk in map)) map[hk] = HARDCODED[hk];
