@@ -8204,7 +8204,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.970';
+const GAME_VERSION = 'v0.26.985';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -31777,6 +31777,16 @@ function _mpStatus(text, color) {
   if (el) { el.textContent = text; el.style.color = color || '#bbb'; }
   const btn = document.getElementById('mp-btn');
   if (btn) btn.classList.toggle('connected', net.connected);
+  _mpUpdateBadge();
+}
+// Live player-count badge on the 🌐 Multi button so activity is visible
+// without opening the panel. Count = you + peers in your room/channel.
+function _mpUpdateBadge() {
+  const btn = document.getElementById('mp-btn');
+  if (!btn) return;
+  btn.textContent = net.connected
+    ? `🌐 Multi (${1 + Object.keys(net.peers || {}).length})`
+    : '🌐 Multi';
 }
 function _mpPushLog(line, cls) {
   net.chatLog.push({ text: line, cls: cls || '' });
@@ -31803,6 +31813,7 @@ function _mpRenderPlayerList() {
   el.innerHTML = rows.length ? rows.join('') : '<span style="color:#888;">No one here yet</span>';
   const rn = document.getElementById('mp-roomname');
   if (rn) rn.textContent = net.connected ? `"${net.roomId}"` : '';
+  _mpUpdateBadge();
 }
 function _mpLocalName() {
   return (localStorage.getItem(MP_NAME_KEY) || (player.look && player.look.name) || 'Hero').slice(0, 20);
@@ -31909,7 +31920,18 @@ function mpConnect(url, name, room) {
     _mpStatus('Bad URL: ' + e.message, '#ff8888');
     return;
   }
+  // Free-tier hosts (e.g. Render) sleep when idle; the first connect after a
+  // quiet spell spins the server back up and can take ~30-60s. If we're still
+  // CONNECTING (readyState 0) after 4s, swap "Connecting…" for a reassuring
+  // note so it doesn't look frozen.
+  if (net._warmTimer) clearTimeout(net._warmTimer);
+  net._warmTimer = setTimeout(() => {
+    if (net.ws && net.ws.readyState === 0) {
+      _mpStatus('Waking the server (free host — first connect can take ~30–60s)…', '#ffcc66');
+    }
+  }, 4000);
   net.ws.onopen = () => {
+    if (net._warmTimer) { clearTimeout(net._warmTimer); net._warmTimer = null; }
     net._reconnectTries = 0;
     const hello = {
       t: 'hello',
@@ -31935,6 +31957,7 @@ function mpConnect(url, name, room) {
     _mpHandle(msg);
   };
   net.ws.onclose = () => {
+    if (net._warmTimer) { clearTimeout(net._warmTimer); net._warmTimer = null; }
     const wasConnected = net.connected;
     net.connected = false;
     net.peers = {};
@@ -31943,10 +31966,12 @@ function mpConnect(url, name, room) {
     _mpRenderPlayerList();
   };
   net.ws.onerror = () => {
+    if (net._warmTimer) { clearTimeout(net._warmTimer); net._warmTimer = null; }
     _mpStatus('Connection error', '#ff8888');
   };
 }
 function mpDisconnect() {
+  if (net._warmTimer) { clearTimeout(net._warmTimer); net._warmTimer = null; }
   if (net.ws) { try { net.ws.close(); } catch (e) {} }
   net.ws = null;
   net.connected = false;
