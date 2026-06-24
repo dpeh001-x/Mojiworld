@@ -86,6 +86,35 @@ What needs **you** (account access I don't have): the **Cloudflare DNS record**
 (step 1) and **creating the Render service** (step 4). Tell me when the DNS record
 is in and I'll do the rest.
 
+## Path form — `moji-studios.com/mojiworld` (instead of the subdomain)
+
+The subdomain (`play.moji-studios.com`) is already live and is the actual host.
+To *also* expose the game at the apex path **`moji-studios.com/mojiworld`**, put a
+small Cloudflare Worker on the apex zone that transparently proxies `/mojiworld*`
+to the subdomain origin and strips the prefix. The apex Cloudflare Pages studio
+site is untouched — the Worker only runs on the `/mojiworld*` route.
+
+Worker script: [`deploy/cf-worker-mojiworld.js`](deploy/cf-worker-mojiworld.js)
+(no HTML rewriting needed — every game asset is a relative path or an absolute
+CDN/wss URL, so under the trailing-slash subpath it just works).
+
+Steps (your Cloudflare dashboard — account access I don't have):
+
+1. **Workers & Pages → Create → Worker** → name it `mojiworld-proxy` → replace the
+   starter code with the contents of `deploy/cf-worker-mojiworld.js` → **Deploy**.
+2. **The Worker → Settings → Domains & Routes → Add → Route**:
+   ```
+   Route:  moji-studios.com/mojiworld*
+   Zone:   moji-studios.com
+   ```
+   (The trailing `*` is required so sub-resources like `/mojiworld/anim_calib.js`
+   also hit the Worker.)
+3. Visit **`https://moji-studios.com/mojiworld`** — it 301s to `/mojiworld/` and
+   serves the game while the address bar stays on the apex path.
+
+> The subdomain stays the real origin; `/mojiworld` is a friendly alias in front
+> of it.
+
 ## Notes
 
 - **Sequencing:** add the Cloudflare DNS record *before* I flip Pages + set
