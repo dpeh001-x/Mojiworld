@@ -1,6 +1,11 @@
 // Exercises the Durable Object via `wrangler dev`: protocol compat + persistence.
 import { WebSocket } from 'ws';
 const URL = process.env.CF_URL || 'ws://127.0.0.1:8789';
+// Unique per run: DO storage is durable across `wrangler dev` runs, so a fixed
+// token would already have a save from a prior run and the "first login: no
+// saved record" assertion would falsely fail. P1 and P2 share this same token
+// within the run, so the reconnect-restore check still exercises persistence.
+const TOK = 'tok_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 function client() {
   const ws = new WebSocket(URL); const msgs = [];
@@ -46,7 +51,7 @@ B.close(); C.close(); await wait(150);
 
 // ---- persistence: respawn where you logged off (server-side save keyed on token) ----
 const P1 = client(); await P1.ready;
-P1.send({ t: 'hello', token: 'tokPERSIST', name: 'Persist', room: 'save__ch1', map: 'town', x: 100, y: 100, level: 2, hp: 50, maxHp: 80 });
+P1.send({ t: 'hello', token: TOK, name: 'Persist', room: 'save__ch1', map: 'town', x: 100, y: 100, level: 2, hp: 50, maxHp: 80 });
 await wait(200);
 ok(P1.last('welcome').you === null, 'first login: no saved record');
 P1.send({ t: 'state', x: 777, y: 888, map: 'cave', level: 4, hp: 33, maxHp: 80, cls: 'rogue' });
@@ -54,7 +59,7 @@ await wait(300);
 P1.close(); await wait(400);              // save flushes on close
 
 const P2 = client(); await P2.ready;
-P2.send({ t: 'hello', token: 'tokPERSIST', name: 'Persist', room: 'save__ch1', map: 'somewhere', x: 0, y: 0, level: 1, hp: 1, maxHp: 1 });
+P2.send({ t: 'hello', token: TOK, name: 'Persist', room: 'save__ch1', map: 'somewhere', x: 0, y: 0, level: 1, hp: 1, maxHp: 1 });
 await wait(300);
 const you = P2.last('welcome').you;
 ok(you && you.x === 777 && you.y === 888 && you.map === 'cave', 'reconnect restored saved position (777,888,cave) -> ' + JSON.stringify(you && {x:you.x,y:you.y,map:you.map}));
