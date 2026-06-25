@@ -8223,7 +8223,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.987';
+const GAME_VERSION = 'v0.26.988';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -31837,6 +31837,18 @@ function _mpRenderPlayerList() {
 function _mpLocalName() {
   return (localStorage.getItem(MP_NAME_KEY) || (player.look && player.look.name) || 'Hero').slice(0, 20);
 }
+// Stable per-browser identity token sent in `hello`, so the Durable Object
+// backend can store/return THIS player's save (respawn where you logged off).
+// Generated once and persisted; harmless against the plain relay (it ignores it).
+function _mpToken() {
+  let t = localStorage.getItem('levelx_mp_token');
+  if (!t) {
+    t = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+        : 'tok-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+    try { localStorage.setItem('levelx_mp_token', t); } catch (e) {}
+  }
+  return t;
+}
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
@@ -31956,6 +31968,8 @@ function mpConnect(url, name, room) {
       t: 'hello',
       name: (name || 'Hero').slice(0, 20),
       room: net.roomId,
+      token: _mpToken(),
+
       cls: player.cls || 'warrior',
       job: player.job || null,
       master: player.master || null,
@@ -32007,6 +32021,19 @@ function _mpHandle(msg) {
       for (const p of (msg.players || [])) net.peers[p.id] = { ...p, _last: performance.now() };
       _mpPushLog(`Joined room "${net.roomId}" · ${Object.keys(net.peers).length} other player(s)`, 'sys');
       _mpRenderPlayerList();
+      // Persistence (DO backend): msg.you is this token's last saved record.
+      // Restore POSITION ONLY, once per page session, and only on the SAME map.
+      // Rationale: snapping across maps or overriding level/class/HP (owned by
+      // the local single-player save) would be disruptive/wrong, and re-applying
+      // on a channel-switch reconnect would yank the player mid-play. So this
+      // fires just once, letting a returning player respawn where they logged off.
+      if (!net._restoredSave && msg.you && msg.you.map === game.currentMap
+          && Number.isFinite(+msg.you.x) && Number.isFinite(+msg.you.y)) {
+        player.x = +msg.you.x;
+        player.y = +msg.you.y;
+        net._restoredSave = true;
+        if (typeof showToast === 'function') showToast('Restored your last position');
+      }
       break;
     case 'joined':
       net.peers[msg.id] = { ...msg, _last: performance.now() };
