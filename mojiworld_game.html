@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.991';
+const GAME_VERSION = 'v0.26.992';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -36873,6 +36873,10 @@ function offerPrestige() {
     player.level = 1; player.exp = 0; player.expToNext = 30;     // v0.26.329 — matches 200 × 1^2.5 × 0.15 = 30 (was 37 under 250-base poly)
     player.maxHp = 100; player.maxMp = 50;
     player.baseAtk = 12; player.baseDef = 5;
+    // Clear the invested-stat ledger too. Without this, a post-ascension Reset
+    // Stats reverses deltas that were already wiped above (maxHp -> 1, baseAtk
+    // negative) and refunds free skill points for ranks that no longer exist.
+    player._levelUpSpent = {};
     player.skillPoints = p.bonusAP;
     // v0.25.738 — Attribute pool removed; no `player.attrs` reset needed.
     player.milestonesUnlocked = {};
@@ -43641,6 +43645,10 @@ function triggerDeath() {
   player.pet = null;
   player.ultPet = null;
   player.pack = [];
+  // Warlock/Lich undead minions were NOT cleared here, so they kept running full
+  // AI (and landing credited kills) on whatever killed you during the multi-second
+  // death overlay. Clear them with the rest of the summons.
+  game.minions = [];
   // Class identity: cancel any pending charge / root / momentum state so
   // a half-charged swing or stale root doesn't carry through respawn.
   player._warCharge = null;
@@ -48288,6 +48296,7 @@ const SKILL_FNS = {
     // to the next contact hit.
     if (player.pet) player.pet.hp = Math.min(player.pet.maxHp || player.pet.hp, player.pet.hp + 80);
     if (player.pack) for (const w of player.pack) w.hp = Math.min(w.maxHp || w.hp, w.hp + 80);
+    if (player.ultPet) player.ultPet.hp = Math.min(player.ultPet.maxHp || player.ultPet.hp, player.ultPet.hp + 80);
     performAround(200, 2.2 + stacks * 0.15, { color:'#ff8844', kb:5 });
     // v0.25.214 — epic banner sprite planted at the player's feet for
     // the rally moment. Held visible ~50 frames while the buff ramps in.
@@ -62133,6 +62142,7 @@ function openNPC(npc) {
       opts.push({ t:`Claim all milestones (+${_pendingTotal.toLocaleString()} mojicoins)`, cb:() => {
         let _paid = 0, _count = 0;
         for (const p of _pending) {
+          if (player.claimedMilestones[p.key]) continue;   // live guard — re-clicking the still-open button must not re-pay (was an infinite mojicoin farm)
           const _pay = _BOUNTY[p.milestone] || 0;
           player.mojicoins += _pay;
           player.claimedMilestones[p.key] = true;
