@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.993';
+const GAME_VERSION = 'v0.26.994';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -26475,7 +26475,8 @@ window.addEventListener('keydown', e => {
   // warrior basic attack as well") so the heavy slash swing is one
   // press = one swing rather than auto-repeating while Z is held.
   if (KEY_TO_SLOT[k] === 'd' && (player.cls === 'archer' || player.cls === 'warrior')
-      && !game.paused && player.hp > 0 && player.hitStun <= 0) {   // v0.26.x — follow the rebound Basic-Attack key (was hardcoded 'z', which broke on remap)
+      && !game.paused && player.hp > 0 && player.hitStun <= 0
+      && !(((player.frozenTimer | 0) > 0 || (typeof _QTE !== 'undefined' && _QTE.active)) && !player._god)) {   // v0.26.x — rebound Basic-Attack key; also gate freeze / shackle-QTE (these paths bypass the poll-loop CC gate)
     const found = skillBySlot('d');
     if (found && player.attackCooldown <= 0 && (typeof isReady !== 'function' || isReady(found.id))) {
       castSkill(found.id);
@@ -31836,7 +31837,7 @@ function _mpRenderPlayerList() {
   }
   for (const id in net.peers) {
     const p = net.peers[id];
-    rows.push(`<div>• ${escapeHtml(p.name || '?')} <span style="color:#888;">(Lv ${p.level || '?'} ${p.cls || '?'}${p.map ? ' · ' + p.map : ''})</span></div>`);
+    rows.push(`<div>• ${escapeHtml(p.name || '?')} <span style="color:#888;">(Lv ${p.level || '?'} ${escapeHtml(p.cls || '?')}${p.map ? ' · ' + escapeHtml(p.map) : ''})</span></div>`);
   }
   el.innerHTML = rows.length ? rows.join('') : '<span style="color:#888;">No one here yet</span>';
   const rn = document.getElementById('mp-roomname');
@@ -32095,7 +32096,7 @@ function _mpHandle(msg) {
       break;
     }
     case 'error':
-      _mpPushLog('[server] ' + (msg.message || msg.code || 'error'), 'sys');
+      _mpPushLog('[server] ' + escapeHtml(msg.message || msg.code || 'error'), 'sys');
       break;
   }
   // Roster render is triggered ONLY by welcome/joined/left (which call it in
@@ -38319,7 +38320,7 @@ function _expeditionSpawnFinalBoss() {
       m.atk = Math.floor((m.atk || 1) * _scale);
       m.def = Math.floor((m.def || 0) * _scale);
       m.exp = Math.floor((m.exp || 0) * _scale);
-      m.mojicoins = Math.floor((m.mojicoins || 0) * _scale);
+      m.mojicoins = 0;   // expedition mobs grant no coins (the run reward is the completion bonus); the F10 boss was the one mob still leaking a scaled, non-snapshot-restored coin drop
     }
     if (typeof showToast === 'function') {
       showToast(`⚜ FLOOR 10 — Echo of ${sign.toUpperCase()} awakens!`, 'legendary');
@@ -44271,6 +44272,7 @@ function tryStartClassCharge(slotKey) {
   const found = skillBySlot(slot);
   if (!found || !isReady(found.id)) return false;
   if (player.hp <= 0 || game.paused || game.dying > 0) return false;
+  if (((player.frozenTimer | 0) > 0 || (typeof _QTE !== 'undefined' && _QTE.active)) && !player._god) return false;  // frozen / shackle-QTE: no voluntary action (poll-loop gate doesn't cover charge)
   if (player._warCharge) return true;  // already charging
   player._warCharge = { slotKey, start: game.time, skillId: found.id, power: 0, cls: player.cls };
   return true;
@@ -44285,8 +44287,9 @@ function tryReleaseClassCharge(slotKey) {
   // past it on the same frame the player drops to 0 HP. Without this
   // guard the cast then deducts MP and sets a cooldown on a corpse,
   // observable in some job death animations. Bail cleanly.
-  if (player.hp <= 0 || (game.dying | 0) > 0) {
-    player._warCharge = null;
+  if (player.hp <= 0 || (game.dying | 0) > 0
+      || (((player.frozenTimer | 0) > 0 || (typeof _QTE !== 'undefined' && _QTE.active)) && !player._god)) {
+    player._warCharge = null;   // dead / frozen / shackle-QTE drops the charge silently
     return true;
   }
   const held = game.time - c.start;
