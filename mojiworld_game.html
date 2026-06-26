@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.995';
+const GAME_VERSION = 'v0.26.996';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -32405,9 +32405,9 @@ const ACHIEVEMENTS = [
   { id:'star10',       name:'Astral Forge',      desc:'Enhance an item to ★10',           test:()=>player.inventory.concat(Object.values(player.equipped||{})).some(i=>i && i.stars>=10) },
   { id:'coin50k',      name:'Coin Hoarder',      desc:'Hold 50,000 Mojicoins at once',    test:()=>(player.mojicoins||0)>=50000 },
   { id:'coin100k',     name:'Mojibaron',         desc:'Hold 100,000 Mojicoins at once',   test:()=>(player.mojicoins||0)>=100000 },
-  { id:'bestiary20',   name:'Field Researcher',  desc:'Log 20 monster types',             test:()=>(game.bestiary && Object.keys(game.bestiary).length>=20) },
-  { id:'bestiary40',   name:'Naturalist',        desc:'Log 40 monster types',             test:()=>(game.bestiary && Object.keys(game.bestiary).length>=40) },
-  { id:'bestiary60',   name:'Compendium Keeper', desc:'Log 60 monster types',             test:()=>(game.bestiary && Object.keys(game.bestiary).length>=60) },
+  { id:'bestiary20',   name:'Field Researcher',  desc:'Log 20 monster types',             test:()=>(game.bestiary && Object.keys(game.bestiary).filter(k=>k.indexOf('_')!==0).length>=20) },
+  { id:'bestiary40',   name:'Naturalist',        desc:'Log 40 monster types',             test:()=>(game.bestiary && Object.keys(game.bestiary).filter(k=>k.indexOf('_')!==0).length>=40) },
+  { id:'bestiary60',   name:'Compendium Keeper', desc:'Log 60 monster types',             test:()=>(game.bestiary && Object.keys(game.bestiary).filter(k=>k.indexOf('_')!==0).length>=60) },
   { id:'boonAttuned',  name:'Attuned',           desc:'Equip a full boon loadout',        test:()=>((player.boonsEquipped||[]).length>=3) },
   { id:'boonHunter',   name:'Boon Hunter',       desc:'Collect 10 boons',                 test:()=>((player.boons||[]).length>=10) },
   { id:'combo200',     name:'Unstoppable',       desc:'Reach a 200-hit combo',            test:()=>(game.comboRecord||0)>=200 },
@@ -50382,7 +50382,10 @@ function applyEnhOnHit(m, dmg, enh) {
       { chance: 30, dmg: Math.floor(getAtk() * (enh.poisonOnHit ? 0.08 : 0.12)) });
   }
   if (enh.slow) {
-    _applyMobStatus(m, 'freeze', enh.slow, { chance: 100 });
+    // "Slow on hit" routed to a 100%-chance freeze (full AI halt), which on a
+    // normal mob was refreshable every hit into a permanent lock. Gate the chance
+    // and cap the duration so it staggers rather than perma-locks.
+    _applyMobStatus(m, 'freeze', Math.min(enh.slow, 600), { chance: 40 });
   }
   if (enh.lifesteal) {
     const heal = Math.max(1, Math.floor(dmg * enh.lifesteal));
@@ -59716,13 +59719,17 @@ function updateProjectiles(dt) {
         // `_normalMob`-tagged shots — boss / zodiac / heavy-floor specials are
         // exempt and keep full punch.
         if (p._normalMob) {
-          // v0.26.355 — Per user, normal-mob PROJECTILE damage reduced a
-          // further 20% (applied after mitigation), then the 40%-maxHp cap.
+          // v0.26.355 — Per user, normal-mob PROJECTILE damage reduced a further 20%.
           dmg = Math.max(1, Math.floor(dmg * 0.8));
-          const _nmCap = Math.floor(getMaxHp() * 0.40);
-          if (dmg > _nmCap) dmg = _nmCap;
         }
-        player.hp -= (player._god ? 0 : _diffDmg(dmg));
+        // v0.26.x — the 40%-maxHp normal-mob cap must clamp the FINAL HP loss.
+        // It was applied to `dmg` BEFORE _diffDmg, which then multiplied past it
+        // (up to ~9x at Lv80+/Hard), so field mobs one-shot — exactly what the
+        // v0.26.354 cap exists to prevent. Boss/zodiac/heavy-floor shots aren't
+        // _normalMob, so they keep full punch.
+        let _projLost = (player._god ? 0 : _diffDmg(dmg));
+        if (p._normalMob && _projLost > 0) _projLost = Math.min(_projLost, Math.floor(getMaxHp() * 0.40));
+        player.hp -= _projLost;
         player.lastHitTime = game.time;
         // v0.25.243 (X1) — projectile origin label (or skill name fallback).
         player._lastDamageSource = p.sourceLabel || p.skill || 'a stray bolt';
@@ -62157,7 +62164,10 @@ function openNPC(npc) {
     }
     const _pendingTotal = _pending.reduce((s, p) => s + (_BOUNTY[p.milestone] || 0), 0);
     // Build the un-defeated bosses list.
-    const _bossList = (typeof BOSS_SPRITE_TYPES !== 'undefined' && Array.isArray(BOSS_SPRITE_TYPES)) ? BOSS_SPRITE_TYPES : [];
+    // Exclude phantom phase/attack sprite keys — they're never a real m.type and
+    // never get a _boss_ flag, so they kept the list from ever emptying.
+    const _phantomBoss = /^(aetherion2|gravitos2|gravitos3|gravitos2star|gravitos3star)$/;
+    const _bossList = (typeof BOSS_SPRITE_TYPES !== 'undefined' && Array.isArray(BOSS_SPRITE_TYPES)) ? BOSS_SPRITE_TYPES.filter(b => !_phantomBoss.test(b)) : [];
     const _undef = _bossList.filter(b => !(game.bestiary && game.bestiary['_boss_' + b]));   // v0.26.x audit FIX — was reading game.bossDefeated[bossType], which is keyed by MAP not type, so it was NEVER set for a type and the list ALWAYS showed every boss as undefeated even after a full clear. Read the bestiary _boss_<type> flag the kill actually writes.
     const _undefShort = _undef.slice(0, 4).join(', ') + (_undef.length > 4 ? ` and ${_undef.length - 4} more` : '');
     text = `*Marbella is hunched over a glass case full of trinkets — a single-bone earring, a thimble, a feather. She straightens, brushing dust off a vest stitched with map-tile patches.*\n\nMarbella, of the Lost-and-Found. People leave things here on purpose — trophies, mostly. I keep track of what gets killed and what doesn't, and the Mall pays me to pay you for the bigger numbers. ${_pending.length ? `\n\n*You have ${_pending.length} unclaimed kill milestone${_pending.length === 1 ? '' : 's'} — worth ${_pendingTotal.toLocaleString()} mojicoins total.*` : '\n\n*No unclaimed milestones today.*'}\n\nBosses still walking the world: ${_undef.length ? _undefShort : 'none — you\'ve cleared them all'}.`;
