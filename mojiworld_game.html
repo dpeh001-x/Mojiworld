@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.990';
+const GAME_VERSION = 'v0.26.991';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -17319,7 +17319,9 @@ const MONSTER_SKILL_FNS = {
         if (player.blockTimer > 0) { final = Math.max(1, Math.floor(final * 0.3)); if (typeof triggerBlock === "function") triggerBlock(); }
         if (player.cls === "warrior") final = Math.max(1, Math.floor(final * (_warriorDr() - 0.08)));
         if (player._aegis) final = Math.max(1, Math.floor(final * 0.5));
-        player.hp -= (player._god ? 0 : final);
+        // Route through _diffDmg like every other direct monster hit, else this
+        // pulse skipped the level-gap punish + difficulty multiplier.
+        player.hp -= (player._god ? 0 : (typeof _diffDmg === 'function' ? _diffDmg(final) : final));
         player.lastHitTime = (typeof game !== "undefined") ? game.time : 0;
         player.invulnerable = Math.max(player.invulnerable, 250);
         player._lastDamageSource = m.name + "'s lantern flare";
@@ -39588,6 +39590,10 @@ function loadMap(id, entryX, entryY) {
     const _bKilledAt = (game._bossDefeatedAt && game._bossDefeatedAt[id]) || 0;
     if (game.bossDefeated[id] && ((game._playMs || 0) - _bKilledAt) >= _BOSS_RESPAWN_MS) {
       delete game.bossDefeated[id];
+      // Re-arm the setshard drop along with the boss. This flag was never
+      // cleared, so every respawn-kill after the first dropped 0 setshards —
+      // silently breaking the repeatable reward the 10-min cooldown exists for.
+      delete game.bossDefeated[id + '_shardsAwarded'];
       if (game._bossDefeatedAt) delete game._bossDefeatedAt[id];
     }
     // v0.26.451 — chest gating moved to a persisted per-map restock cooldown
@@ -52499,7 +52505,8 @@ function updateMonsters(dt) {
         const _dr = Math.min(0.25, Math.floor(_maxHp / 100) * 0.01);
         if (_dr > 0) dmg = Math.max(1, Math.floor(dmg * (1 - _dr)));
       }
-      player.hp -= (player._god ? 0 : _diffDmg(dmg));
+      const _shownDmg = _diffDmg(dmg);   // amplified value actually lost — reused for the floating number so it matches HP lost
+      player.hp -= (player._god ? 0 : _shownDmg);
       player.lastHitTime = game.time;
       // v0.26.085 — Virgo Sin Counter increment. If this melee hit
       // came from the player's currently-tracking Virgo, add a sin.
@@ -52553,7 +52560,7 @@ function updateMonsters(dt) {
       player.vy = -2.4 * kbMul;
       game.damageNumbers.push({
         x: player.x + 14, y: player.y, vy: -2,
-        text: dmg, life: 40, color: '#ff4444', size: 16
+        text: _shownDmg, life: 40, color: '#ff4444', size: 16
       });
       // v0.26.249 — Apply contact-damage status effects (burn / poison /
       // slow / electrocute / freeze) based on the mob's entry in
@@ -57872,7 +57879,7 @@ function killMonster(m) {
   // that way every modifier the player has earned through the run
   // composes correctly. Pattern timers reset, hazards scrub, and a
   // 1.5 s iframe + cinematic burst sells each transformation.
-  if (m.type === 'gravitos' && !m._gravitosFinalForm) {
+  if (m.type === 'gravitos' && !m._gravitosFinalForm && !m._echoBoss && !m._rushBoss) {
     const phase = m._gravitosPhase || 1;
     // Cache base stats on the first transition (always once, idempotent)
     // v0.26.305 — Cache w/h baselines too so the form-grow scaling
