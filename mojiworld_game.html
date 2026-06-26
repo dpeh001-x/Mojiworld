@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.996';
+const GAME_VERSION = 'v0.26.997';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -31140,6 +31140,7 @@ const _SAVE_NUMERIC_GUARDS = [
   ['skillPoints',     0,    0,   1000],
   ['skillRankPoints', 0,    0,   1000],
   ['setshards',       0,    0,   1e9],
+  ['bankBalance',     0,    0,   1e12],   // was unguarded — a NaN/Infinity here propagated into the wallet on "Withdraw all"
   // v0.26.x — persisted cooldown/boost timestamps: NaN/Infinity from a corrupted
   // save -> 0 (sage ready / spawn-boost off). lo/hi never clamp a valid value.
   ['_sageNextAt',      0,    0,   1e15],
@@ -61929,7 +61930,7 @@ function openNPC(npc) {
     const _earningBase = Math.min(player.bankBalance, _BANK_CAP);
     const _interestEarned = Math.floor(_earningBase * _BANK_RATE * (_hoursElapsed / 24));
     if (_interestEarned > 0) {
-      player.bankBalance += _interestEarned;
+      player.bankBalance = Math.min(1e12, player.bankBalance + _interestEarned);
       player.bankLastTick = _nowMs;
     }
     const _capLine = player.bankBalance >= _BANK_CAP
@@ -61938,20 +61939,20 @@ function openNPC(npc) {
     text = `*Felina counts a stack of ledgers as you approach, abacus beads clicking like crickets. She glances up over half-moon spectacles.*\n\nWelcome to the Mojibank, dear. I am Felina — secretary, manager, and the only person in this building who can read both columns. Your savings work harder than you do, given the proper accounts. ${_interestEarned > 0 ? `\n\n*Your account earned ${_interestEarned.toLocaleString()} mojicoins since your last visit.*` : ''}\n\nCurrent balance: ${player.bankBalance.toLocaleString()} mojicoins. Wallet: ${(player.mojicoins|0).toLocaleString()} mojicoins.\n\n${_capLine}`;
     opts.push({ t:'Deposit 1,000 mojicoins', cb:() => {
       if ((player.mojicoins|0) < 1000) { document.getElementById('dialog-text').textContent = 'I admire ambition, but the coin pouch needs to contain coins first. Come back when you can spare the 1,000.'; return; }
-      player.mojicoins -= 1000; player.bankBalance += 1000; player.bankLastTick = Date.now();
+      player.mojicoins -= 1000; player.bankBalance = Math.min(1e12, player.bankBalance + 1000); player.bankLastTick = _monoNow();
       if (typeof saveState === 'function') saveState();
       document.getElementById('dialog-text').textContent = `*Felina ticks a column.*\n\n1,000 mojicoins deposited. Balance: ${player.bankBalance.toLocaleString()} mojicoins. Wallet: ${(player.mojicoins|0).toLocaleString()} mojicoins.`;
     } });
     opts.push({ t:'Deposit 10,000 mojicoins', cb:() => {
       if ((player.mojicoins|0) < 10000) { document.getElementById('dialog-text').textContent = '10,000 mojicoins short of 10,000 mojicoins. The math is unforgiving, dear.'; return; }
-      player.mojicoins -= 10000; player.bankBalance += 10000; player.bankLastTick = Date.now();
+      player.mojicoins -= 10000; player.bankBalance = Math.min(1e12, player.bankBalance + 10000); player.bankLastTick = _monoNow();
       if (typeof saveState === 'function') saveState();
       document.getElementById('dialog-text').textContent = `*Felina logs the larger deposit with a small approving nod.*\n\n10,000 mojicoins deposited. Balance: ${player.bankBalance.toLocaleString()} mojicoins. Wallet: ${(player.mojicoins|0).toLocaleString()} mojicoins.`;
     } });
     opts.push({ t:'Withdraw all', cb:() => {
       if ((player.bankBalance|0) <= 0) { document.getElementById('dialog-text').textContent = 'The vault is dust and echoes for you, dear. Nothing to withdraw.'; return; }
       const _amt = player.bankBalance|0;
-      player.mojicoins += _amt; player.bankBalance = 0; player.bankLastTick = Date.now();
+      player.mojicoins = Math.min(1e12, player.mojicoins + _amt); player.bankBalance = 0; player.bankLastTick = _monoNow();
       if (typeof saveState === 'function') saveState();
       document.getElementById('dialog-text').textContent = `*Felina counts ${_amt.toLocaleString()} mojicoins into a velvet pouch and slides it across the counter.*\n\nDo come back. Your money was very fond of us.`;
     } });
@@ -105099,6 +105100,11 @@ function openCharStudio() {
     // This baseline lets Apply detect/charge a dye change and lets close revert
     // an un-applied one.
     CHAR_STUDIO._origHairHue = CHAR_STUDIO.hairHue;
+    // Same baseline for POSTURE: _csPersistPosture live-copies the pose into
+    // player.lookCustom, so the change-sig (which compares the two) never saw a
+    // pose-only edit — it was a free, un-revertable makeover. Capture the
+    // open-time pose so Apply can bill it and close can revert an un-applied one.
+    try { CHAR_STUDIO._origPostureJSON = JSON.stringify((typeof _normalizePosture === 'function') ? _normalizePosture(CHAR_STUDIO.posture) : (CHAR_STUDIO.posture || null)); } catch (e2) { CHAR_STUDIO._origPostureJSON = null; }
   } catch (e) { console.error('[wardrobe seed:hairHue]', e); }
   try {
     CHAR_STUDIO.customPaint = (typeof player !== 'undefined' && typeof player.customPaint === 'string')
@@ -105363,6 +105369,9 @@ function applyCharStudioToPlayer() {
       // player.lookCustom (which the live slider already updated), so a dye-only
       // makeover is detected and billed instead of slipping through free.
       ((CHAR_STUDIO.hairHue | 0) !== (CHAR_STUDIO._origHairHue | 0)) ||
+      // posture vs the open-time baseline (same reason as the dye): a pose-only
+      // makeover was invisible to the fee gate before this.
+      (CHAR_STUDIO._origPostureJSON != null && JSON.stringify(_np(CHAR_STUDIO)) !== CHAR_STUDIO._origPostureJSON) ||
       _paintSig(CHAR_STUDIO.customPaint, CHAR_STUDIO.customPaintLayers) !== _paintSig(player.customPaint, player.customPaintLayers);
     // v0.26.x - Per user: "Use in game" must ALWAYS finalize the design. Never
     // abort on insufficient coins - charge the makeover fee only when affordable,
@@ -105375,7 +105384,10 @@ function applyCharStudioToPlayer() {
   }
   // v0.26.x audit FIX — re-baseline the dye snapshot to the just-committed hue,
   // so closeCharStudio's revert-on-cancel won't undo an applied dye change.
-  if (typeof CHAR_STUDIO !== 'undefined') CHAR_STUDIO._origHairHue = (CHAR_STUDIO.hairHue | 0);
+  if (typeof CHAR_STUDIO !== 'undefined') {
+    CHAR_STUDIO._origHairHue = (CHAR_STUDIO.hairHue | 0);
+    try { CHAR_STUDIO._origPostureJSON = JSON.stringify((typeof _normalizePosture === 'function') ? _normalizePosture(CHAR_STUDIO.posture) : (CHAR_STUDIO.posture || null)); } catch (e) {}
+  }
   player.lookCustom = {
     skinIdx: CHAR_STUDIO.skinIdx,
     hairId:  CHAR_STUDIO.hairId, hairHue: (CHAR_STUDIO.hairHue|0),
@@ -105562,6 +105574,14 @@ function closeCharStudio() {
         player && player.lookCustom && (player.lookCustom.hairHue | 0) !== (CHAR_STUDIO._origHairHue | 0)) {
       player.lookCustom.hairHue = CHAR_STUDIO._origHairHue | 0;
       CHAR_STUDIO.hairHue = CHAR_STUDIO._origHairHue | 0;
+    }
+    // Revert an un-applied POSTURE the same way (Apply re-baselines _origPostureJSON).
+    if (typeof CHAR_STUDIO !== 'undefined' && CHAR_STUDIO._origPostureJSON != null && player && player.lookCustom) {
+      const _liveSig = JSON.stringify((typeof _normalizePosture === 'function') ? _normalizePosture(CHAR_STUDIO.posture) : (CHAR_STUDIO.posture || null));
+      if (_liveSig !== CHAR_STUDIO._origPostureJSON) {
+        player.lookCustom.posture = JSON.parse(CHAR_STUDIO._origPostureJSON);
+        CHAR_STUDIO.posture = JSON.parse(CHAR_STUDIO._origPostureJSON);
+      }
     }
   } catch (e) {}
   if (typeof _csStopPreview === 'function') _csStopPreview();
