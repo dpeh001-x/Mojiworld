@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.999';
+const GAME_VERSION = 'v0.26.1000';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -41365,6 +41365,32 @@ function _applyMobContactStatuses(m, dmg) {
   }
 }
 
+// Player fall-gravity step — map-scaled gM (+ speed-scaling, Levity, underwater
+// buoyancy). Single source of truth so the CC blocks (hit-stun / freeze / QTE)
+// fall at the same rate as the normal step instead of a flat 0.5 / cap-14
+// (which made a CC'd player hang on heavy maps and sink ~5x too fast underwater).
+function _playerGravityStep() {
+  let gM = gravMul();
+  const _md = game.mapData;
+  if (_md && _md.speedReducesGravity) {
+    const _spd = Math.abs(player.vx);
+    const _full = _md.gravityMulSpeedFull || 18;
+    const _t = Math.min(1, _spd / _full);
+    const _gMin = (_md.gravityMulMin != null) ? _md.gravityMulMin : gM;
+    gM = gM + (_gMin - gM) * _t;
+  }
+  const _gReduce = (player.mods && player.mods.gravityReduce) || 0;
+  if (_gReduce > 0) gM = Math.max(gM * (1 - _gReduce), Math.min(gM, 0.45));
+  player.vy += 0.5 * gM;
+  let vyCap = 14 * Math.sqrt(gM);
+  if (_md && _md.isUnderwater) {
+    vyCap = 3;
+    if (player.vy > vyCap) player.vy = vyCap;
+    if (player.vy > 0) player.vy = Math.max(0, player.vy - 0.05);
+  } else if (player.vy > vyCap) {
+    player.vy = vyCap;
+  }
+}
 function updatePlayer(dt) {
   // v0.26.249 — Reset per-frame status-FX toast guards. _applyMobContactStatuses
   // sets these so multiple mobs of the same type can't toast "🔥 Burning!"
@@ -41556,9 +41582,8 @@ function updatePlayer(dt) {
     player.state = 'hit';
     // Let physics carry knockback; apply light friction only when grounded
     if (player.onGround) player.vx *= 0.92;
-    // Gravity still applies
-    player.vy += 0.5;
-    if (player.vy > 14) player.vy = 14;
+    // Gravity still applies (map-scaled, same as the normal step)
+    _playerGravityStep();
     // Apply motion + collisions
     player.x += player.vx;
     if (player.x < 0) player.x = 0;
@@ -41619,7 +41644,7 @@ function updatePlayer(dt) {
   if ((player.frozenTimer | 0) > 0 && !player._god) {
     player.state = 'idle';
     if (player.onGround) player.vx *= 0.8;
-    player.vy += 0.5; if (player.vy > 14) player.vy = 14;
+    _playerGravityStep();
     player.x += player.vx;
     if (player.x < 0) player.x = 0;
     if (player.x + player.w > game.mapData.worldWidth) player.x = game.mapData.worldWidth - player.w;
@@ -41638,7 +41663,7 @@ function updatePlayer(dt) {
       _qteFrame(dt);
       player.state = 'idle';
       if (player.onGround) player.vx *= 0.7;
-      player.vy += 0.5; if (player.vy > 14) player.vy = 14;
+      _playerGravityStep();
       player.x += player.vx;
       if (player.x < 0) player.x = 0;
       if (player.x + player.w > game.mapData.worldWidth) player.x = game.mapData.worldWidth - player.w;
@@ -42476,44 +42501,8 @@ function updatePlayer(dt) {
   // `gravityMul` at |vx|=0 down to `gravityMulMin` at |vx|≥`gravityMulSpeedFull`.
   // Player-only — monster/projectile gravity (which calls gravMul()
   // directly) keeps the map baseline so AI behaviour doesn't drift.
-  let gM = gravMul();
-  const _md = game.mapData;
-  if (_md && _md.speedReducesGravity) {
-    const _spd = Math.abs(player.vx);
-    const _full = _md.gravityMulSpeedFull || 18;
-    const _t = Math.min(1, _spd / _full);
-    const _gMin = (_md.gravityMulMin != null) ? _md.gravityMulMin : gM;
-    gM = gM + (_gMin - gM) * _t;
-  }
-  // v0.26.416 — Levity (anti-gravity) boon. Reduce the player's effective
-  // gravity by mods.gravityReduce (0..0.35), with REALISTIC LIMITS:
-  //   • Never below 0.45× absolute → the player always falls under control,
-  //     can't float off the top of the screen or hang weightless.
-  //   • Never ABOVE the map's own baseline → on already-floaty maps (underwater
-  //     0.30×) the boon is a no-op rather than making you sink faster.
-  // On heavy maps it genuinely "defies the map" (Gravitos ×3 → ×1.95 at max
-  // roll) while staying firmly bounded. Player-only — monster/projectile
-  // gravity is untouched.
-  const _gReduce = (player.mods && player.mods.gravityReduce) || 0;
-  if (_gReduce > 0) {
-    gM = Math.max(gM * (1 - _gReduce), Math.min(gM, 0.45));
-  }
-  player.vy += 0.5 * gM;
-  let vyCap = 14 * Math.sqrt(gM);
-  // v0.25.482 — Underwater buoyancy. On isUnderwater maps, the player
-  // floats slowly downward — vy capped at +3 (vs default 14), and a
-  // small upward drift (-0.05) is added each frame so a fully idle
-  // player gradually rises. The result feels like buoyant sinking
-  // rather than free-fall, perfect for the coral reef / abyssal trench.
-  // Combined with gravityMul: 0.30 on the maps, the descent rate is
-  // about ~10% of normal — a deliberate, weightless sink.
-  if (game.mapData && game.mapData.isUnderwater) {
-    vyCap = 3;
-    if (player.vy > vyCap) player.vy = vyCap;
-    if (player.vy > 0) player.vy = Math.max(0, player.vy - 0.05);
-  } else if (player.vy > vyCap) {
-    player.vy = vyCap;
-  }
+  // Gravity (map-scaled, speed-scaling, Levity, underwater) — see _playerGravityStep.
+  _playerGravityStep();
 
   // v0.26.123 — Per user "put it as a hard cap". The v0.26.068 caps on
   // getSpeed / getJump only constrain the RETURN VALUES of those getters;
@@ -59798,7 +59787,11 @@ function updateProjectiles(dt) {
         addShake(5);
         flash(0.18);
         resetCombo();
-        hit = true;
+        // Pierce enemy projectiles (e.g. Sundered Smith's boomerang forge hammer)
+        // shouldn't despawn on first contact. The player's post-hit iframe (~1.2s,
+        // the aabb entry gate above) naturally spaces re-hits, so the return leg
+        // can land instead of the shot dying on the first clip — no per-frame hit.
+        if (!p.pierce) hit = true;
       }
     }
 
