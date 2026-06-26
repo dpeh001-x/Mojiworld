@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.992';
+const GAME_VERSION = 'v0.26.993';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -26841,6 +26841,9 @@ window.addEventListener('keydown', e => {
   }
 });
 window.addEventListener('keyup', e => {
+  // Don't let a keyup delivered to a focused text field clear game-key / charge
+  // state (symmetry with the keydown handler's typing guard).
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
   const rawKey = e.key.toLowerCase();
   // v0.25.602 — mirror the keydown action-binding translation so a
   // released remapped key correctly clears `game.keys[canonical]`
@@ -31603,7 +31606,9 @@ const audio = {
       try { o.frequency.exponentialRampToValueAtTime(end, t + dur); } catch (e) {}
     }
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak || 0.15), t + 0.01);
+    // Scale by the SFX master volume — the synth cues (hit/crit/levelup/death/…)
+    // were ignoring the Settings SFX slider entirely; only mute silenced them.
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, (peak || 0.15) * (typeof _SFX_MASTER_VOL !== 'undefined' ? _SFX_MASTER_VOL : 1)), t + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g); g.connect(this.ctx.destination);
     o.start(t); o.stop(t + dur + 0.02);
@@ -32166,6 +32171,9 @@ function _mpOpenChat() {
   inp.value = '';
   inp.style.display = 'block';
   inp.focus();
+  // Release any held movement/action keys: their keyup gets swallowed by the
+  // focused chat input, so without this the player keeps walking while typing.
+  for (const kk in game.keys) game.keys[kk] = false;
 }
 function _mpCloseChat(sendText) {
   const inp = document.getElementById('mp-chat-input');
@@ -39900,7 +39908,7 @@ function loadMap(id, entryX, entryY) {
   // "Icy Tower-style centred column" rule used by updateCamera each
   // frame, so initial paint also lands centred instead of pinned-left.
   if (game.camera && game.mapData) {
-    const _ww = game.mapData.worldWidth;
+    const _ww = game.mapData.worldWidth || W;   // mirror updateCamera's guard — a map missing worldWidth was NaN-ing camera.x and blanking the scene for a frame
     if (_ww <= W) {
       game.camera.x = (_ww - W) / 2;
     } else {
@@ -105631,8 +105639,8 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && document.getElementById('char-studio-overlay').classList.contains('open')) {
     e.preventDefault();
     closeCharStudio();
-  } else if ((e.key === 'Q' || e.key === 'q') && !e.repeat) {
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+  } else if (!e.repeat && typeof _isAction === 'function' && _isAction(e.key.toLowerCase(), 'wardrobe')) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
     e.preventDefault();
     if (document.getElementById('char-studio-overlay').classList.contains('open')) closeCharStudio();
     else openCharStudio();
