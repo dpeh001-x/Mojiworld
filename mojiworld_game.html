@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.994';
+const GAME_VERSION = 'v0.26.995';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -31862,6 +31862,18 @@ function _mpToken() {
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
+// Defense-in-depth: strip HTML tag chars + cap every STRING field on an inbound
+// peer/server object at ingestion (welcome/joined/state), so no downstream
+// innerHTML render site can be XSS'd by a malicious peer even if it forgets to
+// escape. Removing `<`/`>` makes tag injection impossible; per-site escapeHtml
+// still runs as a second layer. Canvas fillText paths were always safe.
+function _mpScrubStrings(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  for (const k in obj) {
+    if (typeof obj[k] === 'string') obj[k] = obj[k].replace(/[<>]/g, '').slice(0, 64);
+  }
+  return obj;
+}
 // v0.25.548 — Render the 5 channel pills inside the multiplayer modal.
 // Selected channel is highlighted in cream/gold; clicking a pill swaps
 // the active channel + writes to player.channel + localStorage. If
@@ -32028,7 +32040,7 @@ function _mpHandle(msg) {
       net.myId = msg.id;
       net.roomId = msg.room || net.roomId;
       net.peers = {};
-      for (const p of (msg.players || [])) net.peers[p.id] = { ...p, _last: performance.now() };
+      for (const p of (msg.players || [])) net.peers[p.id] = { ..._mpScrubStrings(p), _last: performance.now() };
       _mpPushLog(`Joined room "${net.roomId}" · ${Object.keys(net.peers).length} other player(s)`, 'sys');
       _mpRenderPlayerList();
       // Persistence (DO backend): msg.you is this token's last saved record.
@@ -32053,7 +32065,7 @@ function _mpHandle(msg) {
       }
       break;
     case 'joined':
-      net.peers[msg.id] = { ...msg, _last: performance.now() };
+      net.peers[msg.id] = { ..._mpScrubStrings(msg), _last: performance.now() };
       _mpPushLog(`${escapeHtml(msg.name || 'Someone')} joined.`, 'sys');
       _mpRenderPlayerList();
       break;
@@ -32074,7 +32086,7 @@ function _mpHandle(msg) {
       for (const _f of ['x','y','vx','vy','hp','maxHp','level','facing']) {
         if (msg[_f] !== undefined && !Number.isFinite(+msg[_f])) delete msg[_f];
       }
-      Object.assign(net.peers[msg.id], msg);
+      Object.assign(net.peers[msg.id], _mpScrubStrings(msg));
       net.peers[msg.id]._last = performance.now();
       break;
     }
