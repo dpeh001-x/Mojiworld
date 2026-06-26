@@ -1680,7 +1680,9 @@
   #beta-tag {
     position: fixed;
     top: calc(6px + env(safe-area-inset-top));
-    right: calc(8px + env(safe-area-inset-right));
+    /* sit left of the settings gear (right:10px, 30px wide) so it doesn't
+       render under it — v0.26.989 overlap fix */
+    right: calc(46px + env(safe-area-inset-right));
     z-index: 60;
     font: 700 11px/1 Inter, system-ui, sans-serif;
     letter-spacing: 0.6px;
@@ -7080,7 +7082,7 @@ The sleeping world is listening.</div>
           <div class="kb"><span>Open Chest / Pickup</span><span><kbd>F</kbd></span></div>
           <div class="kb"><span>Inventory</span><span><kbd>B</kbd></span></div>
           <div class="kb"><span>Character panel (Level Up / Boons / Skills)</span><span><kbd>K</kbd> / <kbd>U</kbd></span></div>
-          <div class="kb"><span>Reset Save</span><span><kbd>9</kbd></span></div>
+          <div class="kb"><span>Reset Save</span><span><kbd>T</kbd></span></div>
           <div class="kb"><span>Change Class / Master</span><span><kbd>0</kbd></span></div>
           <div class="kb"><span>Dev Console</span><span><kbd>1</kbd>+<kbd>2</kbd>+<kbd>3</kbd></span></div>
           <div class="kb"><span>Help Panel</span><span><kbd>?</kbd></span></div>
@@ -8223,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.988';
+const GAME_VERSION = 'v0.26.989';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -32027,23 +32029,30 @@ function _mpHandle(msg) {
       // the local single-player save) would be disruptive/wrong, and re-applying
       // on a channel-switch reconnect would yank the player mid-play. So this
       // fires just once, letting a returning player respawn where they logged off.
-      if (!net._restoredSave && msg.you && msg.you.map === game.currentMap
+      if (!net._restoredSave && player.cls && msg.you && msg.you.map === game.currentMap
           && Number.isFinite(+msg.you.x) && Number.isFinite(+msg.you.y)) {
-        player.x = +msg.you.x;
-        player.y = +msg.you.y;
+        // Clamp into the map exactly like every spawn path (loadMap, respawn) so
+        // a stale (older-build map dims) or tampered DO record can't drop the
+        // player off-world / through the floor. Gate on player.cls so it can't
+        // fire during class-select/the opening Void beat. Zero velocity so they
+        // settle onto the platform below rather than carrying a saved fall.
+        const _ww = (game.mapData && game.mapData.worldWidth) || 2000;
+        player.x = Math.max(8, Math.min(_ww - player.w - 8, +msg.you.x));
+        player.y = Math.max(-200, Math.min(2000, +msg.you.y));
+        player.vx = 0; player.vy = 0;
         net._restoredSave = true;
         if (typeof showToast === 'function') showToast('Restored your last position');
       }
       break;
     case 'joined':
       net.peers[msg.id] = { ...msg, _last: performance.now() };
-      _mpPushLog(`${msg.name || 'Someone'} joined.`, 'sys');
+      _mpPushLog(`${escapeHtml(msg.name || 'Someone')} joined.`, 'sys');
       _mpRenderPlayerList();
       break;
     case 'left': {
       const p = net.peers[msg.id];
       delete net.peers[msg.id];
-      if (p) _mpPushLog(`${p.name || 'Someone'} left.`, 'sys');
+      if (p) _mpPushLog(`${escapeHtml(p.name || 'Someone')} left.`, 'sys');
       _mpRenderPlayerList();
       break;
     }
@@ -32114,10 +32123,14 @@ function _mpTick() {
   // net.peers forever (slow memory growth + ghost name-pips). Drop any
   // peer not heard from in 30 s.
   const _peerNow = performance.now();
+  let _pruned = false;
   for (const id in net.peers) {
     const _last = net.peers[id] && net.peers[id]._last;
-    if (typeof _last === 'number' && _peerNow - _last > 30000) delete net.peers[id];
+    if (typeof _last === 'number' && _peerNow - _last > 30000) { delete net.peers[id]; _pruned = true; }
   }
+  // Refresh the list + Multi-button count when a ghost was dropped, else the
+  // badge/list keep showing the higher count until the next join/left/welcome.
+  if (_pruned) _mpRenderPlayerList();
 }
 function _mpSendChat(text) {
   // v0.24.3 — 60-char hard cap per bubble. Always surfaces a local
