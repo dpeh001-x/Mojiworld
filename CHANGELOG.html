@@ -162,6 +162,16 @@
 <li><strong>The &ldquo;completely frozen&rdquo; intro is now correctly timed.</strong> That frozen narration is the intentional <code>tutorial_intro</code> cinematic (the interactive dock tour that follows it stays non-blocking &mdash; you can move and try things). It simply used to play late, in town; now it plays at the natural start, in the Void.</li>
 </ul>
 
+<h2>v0.26.990 <span class="tag"><span class="pill bug">bug</span><span class="pill polish">polish</span> Multiplayer load-test round — server persistence scoping + a 400×/sec client perf cliff</h2>
+<p>Spun up <strong>12+ concurrent bot players</strong> against the live server and ran two parallel analysis agents (client rendering + server concurrency). The protocol held up well under load — presence mesh, channel isolation, chat/emote fan-out, a 250-message rate-limit flood, reconnect-churn ghost checks, and room cleanup all passed (13/13). Four fixes from what the load test + agents surfaced:</p>
+<ul>
+<li><strong>🔴 Server — cross-channel save clobber (confirmed live).</strong> Player saves were keyed only on the per-browser token, not the room/channel. The same token in two channels (two tabs, or a channel switch) clobbered one save and could restore a <em>foreign channel&rsquo;s</em> position. The load harness reproduced it in production. Now the save key is room/channel-scoped. <em>(Re-ran live post-deploy: cross-channel reconnect now correctly gets its own/empty record.)</em></li>
+<li><strong>🟠 Server — dead-state persistence.</strong> The periodic + on-close save snapshotted whatever the player last sent, including <code>hp:0</code> (dead) or a mid-fall position — so a returning player could respawn at the spot they died. Now skips persisting a dead snapshot.</li>
+<li><strong>🔴 Client — ~400 DOM rebuilds/second at scale.</strong> <code>_mpHandle</code> rebuilt the entire player-list <code>innerHTML</code> on <em>every</em> inbound frame, including ~14 Hz/peer position updates — roughly <strong>420 full rebuilds per second in a 30-player room</strong>, a hard stutter cliff. Now the roster only re-renders on join/leave/welcome (verified: 100 position frames → 0 rebuilds).</li>
+<li><strong>🟡 Client — peers drawn at the wrong height on tall maps.</strong> Peer X was camera-relative but Y wasn&rsquo;t, so on vertical-scrolling maps (<code>camera.y &gt; 0</code>) other players rendered offset from their real position. Now camera.y-corrected, with an added vertical off-screen cull.</li>
+</ul>
+<p>Agents also verified clean under load: one-identity-per-socket, the reaper + room cleanup (no leak under churn), rate-limit resilience, and that canvas-drawn peer nameplates/bubbles are XSS-safe. A reusable <code>scripts/_mp_loadtest.mjs</code> harness was added for future regression runs.</p>
+
 <h2>v0.26.989 <span class="tag"><span class="pill bug">bug</span> Multi-agent bug-hunt round — MP security + safety hardening</h2>
 <p>Three parallel analysis agents audited the just-shipped multiplayer stack and the recent <code>v0.26.986/987</code> changes. Five confirmed fixes (each verified against live code before changing):</p>
 <ul>

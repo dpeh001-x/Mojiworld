@@ -28,6 +28,12 @@ const pick = (msg, st) => {
   return st;
 };
 const saveOf = (st) => { const o = {}; for (const k of SAVE_FIELDS) if (k in st) o[k] = st[k]; return o; };
+// Save key is scoped to the ROOM (which includes the channel suffix) so the same
+// browser token in two channels/tabs can't clobber one global save or restore a
+// foreign channel's position. `aliveSt` skips persisting a dead snapshot so a
+// returning player isn't respawned at the spot they died.
+const saveKey = (conn) => 'save:' + conn.token + ':' + conn.roomId;
+const aliveSt = (st) => !(Number.isFinite(+st.hp) && +st.hp <= 0);
 
 export default {
   async fetch(request, env) {
@@ -90,7 +96,7 @@ export class MojiRoom {
         conn.token = msg.token ? String(msg.token).slice(0, 64) : null;
         const st = pick(msg, { id: conn.id });
         this.room(conn.roomId).set(conn.id, { ws, st });
-        const you = conn.token ? (await this.storage.get('save:' + conn.token)) || null : null;
+        const you = conn.token ? (await this.storage.get(saveKey(conn))) || null : null;
         const others = [];
         for (const [oid, c] of this.rooms.get(conn.roomId)) if (oid !== conn.id) others.push(c.st);
         ws.send(JSON.stringify({ t: 'welcome', id: conn.id, room: conn.roomId, players: others, you }));
@@ -116,7 +122,7 @@ export class MojiRoom {
     if (conn.roomId && conn.id && this.rooms.get(conn.roomId)) {
       const m = this.rooms.get(conn.roomId);
       const me = m.get(conn.id);
-      if (me && conn.token) { try { await this.storage.put('save:' + conn.token, saveOf(me.st)); } catch (_) {} }
+      if (me && conn.token && aliveSt(me.st)) { try { await this.storage.put(saveKey(conn), saveOf(me.st)); } catch (_) {} }
       m.delete(conn.id);
       this.broadcast(conn.roomId, { t: 'left', id: conn.id }, conn.id);
       if (m.size === 0) this.rooms.delete(conn.roomId);
@@ -133,7 +139,7 @@ export class MojiRoom {
         // periodic save for active players (survives crashes between clean closes)
         if (conn.token && conn.roomId) {
           const me = this.rooms.get(conn.roomId)?.get(conn.id);
-          if (me) this.storage.put('save:' + conn.token, saveOf(me.st)).catch(() => {});
+          if (me && aliveSt(me.st)) this.storage.put(saveKey(conn), saveOf(me.st)).catch(() => {});
         }
       }
     }, REAP_MS);
