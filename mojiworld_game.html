@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.997';
+const GAME_VERSION = 'v0.26.998';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -27846,7 +27846,13 @@ function _applySettings(s) {
   // Resolution — trigger refit so the scale slider value takes effect
   if (typeof game !== 'undefined' && game) {
     game._reduceMotion = !!s.reduceMotion;
-    game._diffDmgMul = (s.difficulty === 'story') ? 0.5 : (s.difficulty === 'hard') ? 1.5 : 1.0;
+    const _newDiffMul = (s.difficulty === 'story') ? 0.5 : (s.difficulty === 'hard') ? 1.5 : 1.0;
+    // Don't let a difficulty change take effect mid-boss (opening Settings and
+    // switching to Story to halve incoming damage was a cheese). Defer it to the
+    // next map load if a boss is currently alive.
+    const _bossAlive = Array.isArray(game.monsters) && game.monsters.some(m => m && m.isBoss && m.currentHp > 0);
+    if (_bossAlive) { game._pendingDiffMul = _newDiffMul; }
+    else { game._diffDmgMul = _newDiffMul; game._pendingDiffMul = null; }
   }
   if (typeof _fitGameToViewport === 'function') _fitGameToViewport();
 }
@@ -38948,6 +38954,8 @@ function loadMap(id, entryX, entryY) {
   // so a song picked in Everdawn Central kept playing (and the saved original
   // src stayed stale) across every later map. Restore the auto-picker here.
   try { if (_jukeboxPlaying && typeof jukeboxStop === 'function') jukeboxStop({ silent: true }); } catch (e) {}
+  // Apply any difficulty change that was deferred during a boss fight (anti-cheese).
+  if (game._pendingDiffMul != null) { game._diffDmgMul = game._pendingDiffMul; game._pendingDiffMul = null; }
   // v0.26.x audit FIX — close any open NPC dialog when leaving the map. loadMap
   // clears game.npcs but didn't close the dialog or null _activeNpc, so a
   // sticky (click/tap-opened) dialog could survive a portal/warp and linger on
@@ -50349,6 +50357,11 @@ function _applyMobStatus(m, kind, ms, opts) {
   if (opts.chance != null && opts.chance < 100 && Math.random() * 100 >= opts.chance) return false;
   const _isBoss = !!(m.isBoss || m.boss);
   const _isMini = !_isBoss && !!m.isMiniBoss;
+  const _ccNow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  // Anti-chain-lock: after a freeze/stun lands on a non-boss it's CC-immune until
+  // that effect ends + a short grace, so it can't be perma-refreshed into a
+  // permanent lock — it gets a window to act between locks.
+  if ((kind === 'freeze' || kind === 'stun') && !_isBoss && _ccNow < (m._ccGraceUntil || 0)) return false;
   // v0.26.x audit FIX — full bosses are FREEZE-IMMUNE (v0.26.458 intent). Reject
   // freeze here so it never sets a timer or wastes the resistance roll. Pairs
   // with the AI-skip guard fix below (which had checked the always-falsy m.boss
@@ -50374,6 +50387,8 @@ function _applyMobStatus(m, kind, ms, opts) {
   } else if (kind === 'stun') {
     m.stunTimer = Math.max(m.stunTimer || 0, ms);
   }
+  // Block re-locking a non-boss until this effect ends + ~0.5s grace.
+  if ((kind === 'freeze' || kind === 'stun') && !_isBoss) m._ccGraceUntil = _ccNow + ms + 500;
   return true;
 }
 function applyEnhOnHit(m, dmg, enh) {
@@ -69187,7 +69202,7 @@ const SAGE_COOLDOWN_MS = 12 * 60 * 60 * 1000;   // 12 hours
 function _sageReadyAt() { return (player._sageNextAt | 0) || 0; }
 function _sageReady() { return _monoNow() >= _sageReadyAt(); }
 function _sageWaitText() {
-  const wait = _sageReadyAt() - Date.now();
+  const wait = _sageReadyAt() - _monoNow();   // gate uses _monoNow; match it so the countdown label isn't skewed after a clock change
   if (wait <= 0) return '';
   const h = Math.floor(wait / 3600000);
   const m = Math.floor((wait % 3600000) / 60000);
@@ -95755,7 +95770,9 @@ function _bossRushComplete() {
   const isBest = !prev || br.downs > prev.downs || (br.downs === prev.downs && totalMs < prev.timeMs);
   if (isBest) game.bossRushBest = { timeMs: totalMs, downs: br.downs, grade, when: Date.now() };
   // Once-per-day payout (anti-farm): 2 shards per echo + grade bonus.
-  const today = new Date().toDateString();
+  // Use the monotonic UTC day index (like the other dailies) instead of a local
+  // date string, so the reward can't be re-claimed by rolling the system clock.
+  const today = (typeof dailyIndex === 'function') ? dailyIndex() : new Date().toDateString();
   let payoutTxt = 'Daily reward already claimed — run logged for glory.';
   if (game._bossRushRewardDay !== today) {
     game._bossRushRewardDay = today;
@@ -105136,6 +105153,10 @@ function openCharStudio() {
           ? { spriteId: cur.spriteId, tint: cur.tint || null }
           : null;
       }
+      // Open-time equip baseline so the makeover fee bills an equipment-only
+      // change (the change-sig didn't include CHAR_STUDIO.equip). Equip commits
+      // only on Apply, so billing detection is all that's needed (no revert).
+      try { CHAR_STUDIO._origEquipJSON = JSON.stringify(CHAR_STUDIO.equip || {}); } catch (e3) { CHAR_STUDIO._origEquipJSON = null; }
     }
   } catch (e) { console.error('[wardrobe seed:equip]', e); }
   // BUG-001 ZONE B — builder chain (see KNOWN_BUGS.md, Architectural Rule 1).
@@ -105372,6 +105393,8 @@ function applyCharStudioToPlayer() {
       // posture vs the open-time baseline (same reason as the dye): a pose-only
       // makeover was invisible to the fee gate before this.
       (CHAR_STUDIO._origPostureJSON != null && JSON.stringify(_np(CHAR_STUDIO)) !== CHAR_STUDIO._origPostureJSON) ||
+      // equipment vs the open-time baseline — an equip-only change was free before.
+      (CHAR_STUDIO._origEquipJSON != null && JSON.stringify(CHAR_STUDIO.equip || {}) !== CHAR_STUDIO._origEquipJSON) ||
       _paintSig(CHAR_STUDIO.customPaint, CHAR_STUDIO.customPaintLayers) !== _paintSig(player.customPaint, player.customPaintLayers);
     // v0.26.x - Per user: "Use in game" must ALWAYS finalize the design. Never
     // abort on insufficient coins - charge the makeover fee only when affordable,
@@ -105387,6 +105410,7 @@ function applyCharStudioToPlayer() {
   if (typeof CHAR_STUDIO !== 'undefined') {
     CHAR_STUDIO._origHairHue = (CHAR_STUDIO.hairHue | 0);
     try { CHAR_STUDIO._origPostureJSON = JSON.stringify((typeof _normalizePosture === 'function') ? _normalizePosture(CHAR_STUDIO.posture) : (CHAR_STUDIO.posture || null)); } catch (e) {}
+    try { CHAR_STUDIO._origEquipJSON = JSON.stringify(CHAR_STUDIO.equip || {}); } catch (e) {}
   }
   player.lookCustom = {
     skinIdx: CHAR_STUDIO.skinIdx,
