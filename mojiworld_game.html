@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1007';
+const GAME_VERSION = 'v0.26.1008';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -43452,57 +43452,10 @@ function updatePlayer(dt) {
     if (d.life <= 0) game.drops.splice(i, 1);
   }
 
-  // Milestone: Miracle Evasion — survive the lethal blow at 1 HP, once per map
-  if (player.hp <= 0 && !game.dying && hasMilestone('miracleEvasion') && !player._miracleUsedThisMap) {
-    player._miracleUsedThisMap = true;
-    player.hp = 1;
-    player.invulnerable = Math.max(player.invulnerable, 2000);
-    flash(0.7);     for (let i = 0; i < 3; i++) {
-      const a = (i / 3) * Math.PI * 2;
-      game.particles.push({
-        x: player.x + player.w/2, y: player.y + player.h/2,
-        vx: Math.cos(a) * 6, vy: Math.sin(a) * 6,
-        life: 50, color: i % 2 ? '#88ff88' : '#ffffff', size: 3
-      });
-    }
-    game.damageNumbers.push({ x: player.x, y: player.y - 18, vy: -2, text: 'MIRACLE!', life: 60, color: '#88ff88', size: 20 });
-    showToast('Miracle Evasion — saved!', 'legendary');
-  }
-  // v0.26.265 — Synergy: Phoenix Heart (burn + maxhp). Once-per-map
-  // cheat death. Lethal damage leaves you at 1 HP, applies a burst-
-  // burn aura to all on-screen enemies. Mirrors the Miracle Evasion
-  // structure but tracks its own _phoenixUsedThisMap flag so the two
-  // safeties don't share a budget.
-  if (player.hp <= 0 && !game.dying && !player._phoenixUsedThisMap &&
-      player._activeSynergies && player._activeSynergies.phoenixHeart) {
-    player._phoenixUsedThisMap = true;
-    player.hp = 1;
-    player.invulnerable = Math.max(player.invulnerable, 2000);
-    // Burst-burn nearby enemies on the rebirth pulse.
-    if (game.monsters && game.monsters.length) {
-      const _cx = player.x + player.w / 2, _cy = player.y + player.h / 2;
-      const _maxHp = (typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp;
-      for (const m of game.monsters) {
-        if (!m || m.currentHp <= 0) continue;
-        const _dx = (m.x + m.w/2) - _cx;
-        const _dy = (m.y + m.h/2) - _cy;
-        if (_dx * _dx + _dy * _dy < 240 * 240) {
-          _applyMobStatus(m, 'burn', 5000, { chance: 75, dmg: Math.max(4, Math.floor(_maxHp * 0.02)) });
-        }
-      }
-    }
-    flash(0.8);
-    for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2;
-      game.particles.push({
-        x: player.x + player.w/2, y: player.y + player.h/2,
-        vx: Math.cos(a) * 7, vy: Math.sin(a) * 7,
-        life: 60, color: i % 2 ? '#ff8844' : '#ffe089', size: 4
-      });
-    }
-    game.damageNumbers.push({ x: player.x, y: player.y - 18, vy: -2, text: '🔥 PHOENIX!', life: 65, color: '#ffaa44', size: 22 });
-    showToast('🔥 Phoenix Heart — risen from ash!', 'legendary');
-  }
+  // Miracle Evasion + Phoenix Heart cheat-deaths now live in the top-of-frame
+  // death gate (main loop), so they fire on ANY lethal source. They used to be
+  // here in updatePlayer, which doesn't run once HP hits 0 from a combat/projectile
+  // hit — so the two safeties only ever caught DOT (poison/burn) deaths.
   // Milestone: Flow State — decay speed stacks
   if (player._flowStackExpiry && game.time > player._flowStackExpiry) {
     player._flowStacks = 0;
@@ -51756,8 +51709,9 @@ function updateMonsters(dt) {
     // radius. Capped at maxHp. Spawns a soft pink heal pulse particle
     // ring on tick so the player can see the aura is active.
     if (m._empoweredAura && m.currentHp > 0 && !m.isBoss) {
-      m.animTimer = m.animTimer || 0;
-      if (Math.floor(m.animTimer) % 28 === 0) {
+      m._auraT = (m._auraT || 0) + dt;
+      if (m._auraT >= 466) {   // ~28 frames @60fps; was Math.floor(animTimer)%28 — a frame modulo on a ms accumulator, so it barely ever fired
+        m._auraT = 0;
         const heal = Math.max(2, Math.floor(m.maxHp * 0.018));
         m.currentHp = Math.min(m.maxHp, m.currentHp + heal);
         // v0.26.067 — Multi-mob lag pass. Same pattern as the seraph
@@ -58148,6 +58102,7 @@ function killMonster(m) {
     for (let _mi = game.monsters.length - 1; _mi >= 0; _mi--) {
       const _orph = game.monsters[_mi];
       if (_orph && _orph.type === 'horny' && _orph._shroomaloos === true) {
+        _orph.currentHp = 0;   // release any homing locks before the silent splice (else a projectile orbits the ghost)
         game.monsters.splice(_mi, 1);
       }
     }
@@ -58159,6 +58114,7 @@ function killMonster(m) {
   // dilute the climax.
   if (m.type === 'octobaby' && Array.isArray(m._legRefs)) {
     for (const leg of m._legRefs) {
+      if (leg) leg.currentHp = 0;   // release homing locks before the silent splice
       const li = game.monsters.indexOf(leg);
       if (li >= 0) game.monsters.splice(li, 1);
     }
@@ -58732,6 +58688,7 @@ function killMonster(m) {
             life: 40, color: _leg.color || '#cc66ee', size: 3,
           });
         }
+        _leg.currentHp = 0;   // release homing locks before the silent splice
         game.monsters.splice(_i, 1);
       }
     }
@@ -94789,6 +94746,40 @@ function loop(time) {
           life: 50, color: '#ff5566', size: 3
         });
       }
+    } else if (hasMilestone('miracleEvasion') && !player._miracleUsedThisMap) {
+      // Milestone: Miracle Evasion — survive the lethal blow at 1 HP, once per map.
+      // (Moved here from updatePlayer so it fires on ANY lethal source, not just DOTs.)
+      player._miracleUsedThisMap = true;
+      player.hp = 1;
+      player.invulnerable = Math.max(player.invulnerable, 2000);
+      flash(0.7);
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2;
+        game.particles.push({ x: player.x + player.w/2, y: player.y + player.h/2, vx: Math.cos(a) * 6, vy: Math.sin(a) * 6, life: 50, color: i % 2 ? '#88ff88' : '#ffffff', size: 3 });
+      }
+      game.damageNumbers.push({ x: player.x, y: player.y - 18, vy: -2, text: 'MIRACLE!', life: 60, color: '#88ff88', size: 20 });
+      showToast('Miracle Evasion — saved!', 'legendary');
+    } else if (!player._phoenixUsedThisMap && player._activeSynergies && player._activeSynergies.phoenixHeart) {
+      // Synergy: Phoenix Heart — once-per-map cheat death + burst-burn aura.
+      player._phoenixUsedThisMap = true;
+      player.hp = 1;
+      player.invulnerable = Math.max(player.invulnerable, 2000);
+      if (game.monsters && game.monsters.length) {
+        const _cx = player.x + player.w / 2, _cy = player.y + player.h / 2;
+        const _maxHp = (typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp;
+        for (const m of game.monsters) {
+          if (!m || m.currentHp <= 0) continue;
+          const _dx = (m.x + m.w/2) - _cx, _dy = (m.y + m.h/2) - _cy;
+          if (_dx * _dx + _dy * _dy < 240 * 240) _applyMobStatus(m, 'burn', 5000, { chance: 75, dmg: Math.max(4, Math.floor(_maxHp * 0.02)) });
+        }
+      }
+      flash(0.8);
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2;
+        game.particles.push({ x: player.x + player.w/2, y: player.y + player.h/2, vx: Math.cos(a) * 7, vy: Math.sin(a) * 7, life: 60, color: i % 2 ? '#ff8844' : '#ffe089', size: 4 });
+      }
+      game.damageNumbers.push({ x: player.x, y: player.y - 18, vy: -2, text: '🔥 PHOENIX!', life: 65, color: '#ffaa44', size: 22 });
+      showToast('🔥 Phoenix Heart — risen from ash!', 'legendary');
     } else {
       player.hp = 0;
       triggerDeath();
