@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1003';
+const GAME_VERSION = 'v0.26.1005';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -13069,7 +13069,7 @@ const CLASSES = {
     // tempo · combat shape.
     roleSummary:'Tanky · Slow · Trades hits',
     // v0.26.177 — Base speed −1 across all starting classes per user request.
-    stats:{ hp:150, mp:40, atk:15, def:11, crit:5, speed:2.6, jump:11 },
+    stats:{ hp:150, mp:40, atk:15, def:11, crit:8, speed:2.6, jump:11 }  /* v0.26.1005 — base crit 5->8: warrior is the only class whose crit never grows; still far below rogue 25 / archer 14 */,
     perk: { name:'Fortitude', desc:'−15% to −45% damage taken (Lv-scaled). 3× HP regen out of combat.' },
     identity: { name:'Charge & Release', desc:'HOLD a skill key (0.75 s) → release for up to +100 % damage.' },
     jobs:['berserker','knight'],
@@ -26027,8 +26027,8 @@ function getAtk()  {
   // Z". Warrior 1.00 / rogue 1.15 unchanged (intended risk/reward spread).
   const _clsAtkMul = player.cls === 'mage'   ? 1.22
                    : player.cls === 'archer'  ? 1.10
-                   : player.cls === 'rogue'  ? 1.18
-                   :                           1.05;   // warrior baseline
+                   : player.cls === 'rogue'  ? 1.15   /* v0.26.1005 — 1.18->1.15 trim: restores documented spread (header says rogue 1.15) + pulls the burst/mobility/crit over-performer back */
+                   :                           1.10;   // v0.26.1005 — warrior baseline 1.05->1.10 (lift weakest sustained-DPS class toward the pack; tanky identity untouched)
   // v0.25.55 — global player-damage knob. See PLAYER_ATK_MUL declaration
   // for context; halves every attack (basics + skills) so mobs don't
   // melt instantly.
@@ -39609,6 +39609,13 @@ function loadMap(id, entryX, entryY) {
   game.particles = [];
   game.damageNumbers = [];
   game.hazards = [];
+  // Reset environmental-event state unconditionally (eclipse darkness, lightning
+  // flash, gust, lava). It was only cleared by updateMapEvents' else-branch, which
+  // doesn't run while paused — so a paused map-exit could carry a tint/overlay over.
+  game._eclipseAlpha = 0; game._eclipseState = null; game._eclipseCD = null;
+  game._lightningFlash = 0; game._lightningCD = null;
+  game._gustState = null; game._gustCD = null; game._gustAxis = null;
+  game._lavaEruptCD = null; game._lavaEruptSeen = false; game._lavaTimer = 0;
   game.chests = [];
   game.powerupOrbs = [];
   game.afterImages = [];
@@ -47837,7 +47844,9 @@ const SKILL_FNS = {
     // L10259); previously only gear + tree fed the multiShot count. Now
     // the boon also contributes.
     const boonBonus = (player.mods && player.mods.multishot) || 0;
-    const count = 3 + bonus + treeBonus + boonBonus;
+    // Cap like the rogue dagger-fan (Math.min(6,…)) and the basic-attack shot
+    // count — stacked multishot gear/set/tree/boon could otherwise fire 10+ arrows.
+    const count = Math.min(8, 3 + bonus + treeBonus + boonBonus);
     const speed = 10;
     // v0.25.546 — New multi_shot VFX sprite at the muzzle.
     // v0.26.036 → 043 → 044 — Progressive size bumps: 130 → 260 → 400 → 470.
@@ -57168,7 +57177,7 @@ function hitMonster(m, dmg, isCrit, skill) {
   // Death Mark bonus (Nightreaper)
   if (m.deathMark > 0 && skill !== 'thorns') dmg = Math.floor(dmg * 1.5);
   // Void proc: rare massive damage on this hit
-  const voidCh = getEquipBonus('voidChance');
+  const voidCh = Math.min(1, getEquipBonus('voidChance'));   // clamp so stacked void gear can't exceed a guaranteed proc
   if (voidCh > 0 && skill !== 'thorns' && Math.random() < voidCh) {
     dmg = Math.floor(dmg * 2.5);
     game.damageNumbers.push({
@@ -68781,6 +68790,9 @@ function _useCurePotion() {
 }
 function useConsumable(id) {
   if (!player.consumables[id] || player.consumables[id] <= 0) return;
+  // Centralized dead guard (the inventory-click path didn't gate it). NOT gated on
+  // game.paused — legitimate inventory "Use" happens while the inventory modal (paused) is open.
+  if (player.hp <= 0 || (game.dying | 0) > 0) return;
   const p = POTION_ITEMS.find(x => x.id === id);
   if (!p) return;
   // v0.25.987 — Per-map potion lockout. Maps that flip `noPotion: true`
@@ -68978,19 +68990,24 @@ function useQuickPotion(which, preferElixir) {
   const pick = affordable.reduce((a, b) => a.price <= b.price ? a : b);
   player.mojicoins -= pick.price;
   // Apply the potion effect inline (avoids bumping inventory for a single tick)
+  // pick.value/pct is a PERCENT of max (25/50/75), not a flat amount — mirror
+  // useConsumable (incl. potionBoost talent) instead of adding it raw, else a
+  // high-maxHP player auto-buys a Large potion for full price and heals ~75 HP.
+  const _potMul = (() => { const t = (typeof talentFx === 'function') ? talentFx() : null; return (t && t.potionBoost) ? 1 + t.potionBoost : 1; })();
+  const _autoAmt = Math.ceil((pick.type === 'hp' ? getMaxHp() : getMaxMp()) * (pick.pct || pick.value || 0) * _potMul / 100);
   if (pick.type === 'hp') {
-    player.hp = Math.min(getMaxHp(), player.hp + pick.value);
+    player.hp = Math.min(getMaxHp(), player.hp + _autoAmt);
     game.damageNumbers.push({
       x: player.x + 14, y: player.y, vy: -1.5,
-      text: '+' + pick.value, life: 40, color: '#44ff44', size: 14
+      text: '+' + _autoAmt, life: 40, color: '#44ff44', size: 14
     });
     audio.play('potion_hp');
     showToast(`${pick.icon} Auto-bought for ${pick.price}🪙`, 'common');
   } else if (pick.type === 'mp') {
-    player.mp = Math.min(getMaxMp(), player.mp + pick.value);
+    player.mp = Math.min(getMaxMp(), player.mp + _autoAmt);
     game.damageNumbers.push({
       x: player.x + 14, y: player.y, vy: -1.5,
-      text: '+' + pick.value, life: 40, color: '#4488ff', size: 14
+      text: '+' + _autoAmt, life: 40, color: '#4488ff', size: 14
     });
     audio.play('potion_mp');
     showToast(`${pick.icon} Auto-bought for ${pick.price}🪙`, 'common');
