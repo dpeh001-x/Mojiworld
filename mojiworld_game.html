@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1001';
+const GAME_VERSION = 'v0.26.1002';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -30963,18 +30963,10 @@ function _playStoryBeat(beatId, onClose) {
       // New behaviour: if ANY recognised modal is still visible after
       // the beat closes, leave paused alone (the modal owns the
       // pause). Otherwise unpause as before.
-      let _modalStillOpen = false;
-      const _modalIds = ['shop-modal','inventory-modal','skills-modal','powerup-modal',
-                         'help-modal','enhance-modal','skilltree-modal','attributes-modal',
-                         'taxi-modal','codex-modal','mojidex-modal','quest-modal','worldmap-modal',
-                         'confirm-modal','craft-modal','class-select-modal',
-                         'advancement-modal','tutorial-modal','bravo-boon-modal'];
-      for (const _id of _modalIds) {
-        const _el = document.getElementById(_id);
-        if (_el && (_el.style.display === 'flex' || _el.style.display === 'block')) {
-          _modalStillOpen = true; break;
-        }
-      }
+      // v0.26.x — use the canonical pause-owner check instead of a private list
+      // that had drifted (missing multiplayer/dev/sage/recipe/lore overlays), so
+      // a beat closing under one of those no longer unpauses combat behind it.
+      const _modalStillOpen = (typeof _anyOtherModalOpen === 'function' && _anyOtherModalOpen());
       if (!_modalStillOpen) {
         game.paused = false;
       }
@@ -39662,7 +39654,7 @@ function loadMap(id, entryX, entryY) {
     player._releasedCharge = null;
     player._chargeStart = 0;
     player._rootedTimer = 0;
-    player._classSkillMul = 1;
+    player._classSkillMul = 1; player._guaranteedCrit = 0;   // clear the next-N-crits stack too, so a Nightreaper ult can't carry onto a fresh map / past death
     player._holyShieldDr = 0;
     player._holyShieldDrUntil = 0;
     player._dragoonExtraSlam = 0;
@@ -43683,7 +43675,7 @@ function triggerDeath() {
   player._releasedCharge = null;
   player._chargeStart = 0;            // v0.25.605 — was missing; charge timer leaked across maps
   player._rootedTimer = 0;
-  player._classSkillMul = 1;
+  player._classSkillMul = 1; player._guaranteedCrit = 0;   // clear the next-N-crits stack too, so a Nightreaper ult can't carry onto a fresh map / past death
   // v0.25.536 — also clear the v0.25.530 L10-bonus transient flags so
   // a Holy Shield DR window or Sky Lance double-slam can't bleed
   // through the death/respawn boundary.
@@ -43977,7 +43969,7 @@ function respawnAtTown() {
   player._mageLastCastT = 0;
   player._mageLastCastId = null;
   player._mageChainPing = 0;
-  player._classSkillMul = 1;
+  player._classSkillMul = 1; player._guaranteedCrit = 0;   // clear the next-N-crits stack too, so a Nightreaper ult can't carry onto a fresh map / past death
   // v0.25.648 — Audit-flagged respawn cleanup gaps. Mirror the v0.25.536
   // L10-bonus flags from triggerDeath (Holy Shield DR / Dragoon extra
   // slam) so they don't survive across a world-reset / class-change
@@ -57025,6 +57017,7 @@ function hitMonster(m, dmg, isCrit, skill) {
   // most recent cast. Expires 2 s after the cast to catch delayed volleys.
   if (player._classSkillMul && player._classSkillMul > 1 &&
       skill !== 'melee' && skill !== 'thorns' && skill !== 'aegis' &&
+      skill === player._classSkillMulSkillId &&   // only the ORIGINATING cast's hits (it was bleeding onto basic arrows/bolts + other skills for 2s)
       game.time <= (player._classSkillMulExpires || 0)) {
     dmg = Math.floor(dmg * player._classSkillMul);
   }
@@ -94919,36 +94912,16 @@ function loop(time) {
       // Check every recognised modal surface. If ANY is visible, the
       // pause is legitimate and we leave it alone. If NONE are visible,
       // the player is stuck — force-unpause and log.
-      const _modalIds = ['shop-modal','inventory-modal','skills-modal','powerup-modal',
-                         'help-modal','enhance-modal','skilltree-modal','attributes-modal',
-                         'dev-modal','taxi-modal','codex-modal','mojidex-modal','multiplayer-modal',
-                         'quest-modal','worldmap-modal','confirm-modal','craft-modal',
-                         'class-select-modal','advancement-modal','tutorial-modal','bravo-boon-modal'];
-      let _anyVisible = false;
-      // v0.26.946 perf — refs cached; null entries re-query (late-created modals).
+      // v0.26.x — single source of truth: _anyOtherModalOpen() covers every
+      // pause-owning surface. It deliberately EXCLUDES the wardrobe, so check
+      // that separately. Replaces two inline lists that had drifted out of date
+      // (the watchdog was force-unpausing under sage / recipe-scrolls / lore /
+      // keybind / exp-door modals that weren't in the stale list).
       const _mc = (game._modalElCache = game._modalElCache || {});
       const _gid = (id) => (_mc[id] || (_mc[id] = document.getElementById(id)));
-      for (const _id of _modalIds) {
-        const _el = _gid(_id);
-        if (_el && (_el.style.display === 'flex' || _el.style.display === 'block')) {
-          _anyVisible = true; break;
-        }
-      }
-      if (!_anyVisible) {
-        // Also check .on-class overlays (story-beat / boss-intro /
-        // jukebox / settings / wardrobe — these don't use display:flex)
-        const _classOverlayIds = ['story-beat-overlay','boss-intro-overlay','jukebox-modal-bg',
-                                  'settings-modal-bg','char-studio-overlay','dialog'];
-        for (const _id of _classOverlayIds) {
-          const _el = _gid(_id);
-          if (_el) {
-            const _cls = _el.classList;
-            if (_cls && (_cls.contains('on') || _cls.contains('open'))) { _anyVisible = true; break; }
-            // #dialog uses display:block
-            if (_id === 'dialog' && _el.style.display === 'block') { _anyVisible = true; break; }
-          }
-        }
-      }
+      const _csEl = _gid('char-studio-overlay');
+      const _anyVisible = (typeof _anyOtherModalOpen === 'function' && _anyOtherModalOpen()) ||
+                          !!(_csEl && _csEl.classList && (_csEl.classList.contains('open') || _csEl.classList.contains('on')));
       if (!_anyVisible) {
         try { console.warn('[StuckPauseWatchdog] paused >3s with no visible modal — force-unpausing'); } catch(_) {}
         game.paused = false;
