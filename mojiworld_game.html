@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1005';
+const GAME_VERSION = 'v0.26.1006';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -26599,9 +26599,9 @@ window.addEventListener('keydown', e => {
     // If the player has no job yet, offer the 1st advancement. Otherwise
     // let them re-pick at any level (resetJobAndMaster) so jobs aren't a
     // one-and-done trap.
-    if (!player.job || !player.master) {
-      if (typeof resetJobAndMaster === 'function') resetJobAndMaster();
-    }
+    // Always reset before a re-pick — re-advancing with a job+master already set
+    // would otherwise re-apply (double) the flat stat blocks each time.
+    if (typeof resetJobAndMaster === 'function') resetJobAndMaster();
     // v0.25.959 — Dev cheat bypass per user "when pressing the dev cheat
     // dont need to complete the distorted portal to job advance". The
     // v0.25.955 master-advancement quest gate (q_distorted_portal) is
@@ -31544,6 +31544,11 @@ function loadState() {
     // 'loading, then a black screen'. Town is the same killbox-safe
     // landing (isTown: no spawns) but actually looks alive. Fresh starts
     // keep the void (creation/prologue ceremony); only CONTINUE moves.
+    // A persisted ACTIVE expedition can't be resumed (resume always lands in
+    // town), and a stale `active` flag permanently zeroes ALL mojicoin income
+    // (the grant guard checks expedition.active, not the map) and blocks starting
+    // a new run. Treat an interrupted expedition as abandoned.
+    if (game.expedition && game.expedition.active) game.expedition.active = false;
     loadMap('town', 600);
     game.currentMap = 'town';
     if (typeof renderSkillBar === 'function') renderSkillBar();
@@ -86356,7 +86361,7 @@ function drawMonster(m) {
   if (m.currentHp < m.maxHp) {
     // v0.26.x — guard maxHp:0 like the three sibling hp-bar sites (NaN here
     // wedged m._hpBarTier and drew an invisible/wrong-color bar).
-    const hpPct = m.maxHp > 0 ? m.currentHp / m.maxHp : 0;
+    const hpPct = m.maxHp > 0 ? Math.min(1, m.currentHp / m.maxHp) : 0;   // clamp <=1 so a transient maxHp shrink can't paint the fill past the bar
     const _hpTier = hpPct > 0.5 ? 0 : hpPct > 0.25 ? 1 : 2;
     if (m._hpBarTier !== _hpTier) {
       m._hpBarTier = _hpTier;
@@ -94224,7 +94229,7 @@ function renderSkillBar() {
         s._cdShown = true;
         s.cdEl.style.display = 'flex';
       }
-      const frac = Math.min(1, cd / matched.cd);
+      const frac = (matched.cd > 0) ? Math.min(1, cd / matched.cd) : 1;   // guard cd:0/undefined -> no Infinity/NaN width (mirrors the HUD-deck path)
       // v0.25.35 — conic-gradient pie-wipe via --cd-pct (was height fill)
       const pctTxt = (frac * 100).toFixed(1);
       const cdTxt = (cd / 1000).toFixed(1);
