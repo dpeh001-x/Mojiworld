@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1010';
+const GAME_VERSION = 'v0.26.1011';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -51017,8 +51017,13 @@ function updateMonsters(dt) {
     // Aetherion / Gravitos / reanimate). hitMonster now respects this
     // flag, so it needs to decay back to 0 normally.
     if (m.invulnerable > 0) m.invulnerable -= dt;
+    // v0.26.x — CC must halt ranged/special attacks too, not just locomotion. The
+    // stun/freeze gate further below only `continue`s past movement, so a frozen/
+    // stunned mob kept shooting + dropping telegraphed smashes/columns. Mirror the
+    // gate's semantics here: stun halts all; freeze halts non-bosses (freeze-immune).
+    const _ccHalted = (m.stunTimer > 0) || (m.freezeTimer > 0 && !(m.isBoss || m.boss));
     // Monster ranged attack
-    if (m.shoot && !m.isBoss && m.currentHp > 0) {
+    if (m.shoot && !m.isBoss && m.currentHp > 0 && !_ccHalted) {
       if (m.shootTimer === undefined) m.shootTimer = m.shootCd + Math.random() * 1000;
       m.shootTimer -= dt;
       const dxs = Math.abs((player.x + player.w/2) - (m.x + m.w/2));
@@ -51153,7 +51158,7 @@ function updateMonsters(dt) {
     // Sovereign declared bigMelee/columnStrike traits but the
     // `!m.isBoss` guard meant the windup never started — they just
     // stood there. Allow opt-in via `m.traits.activeBoss`.
-    if (m.traits && m.traits.bigMelee && (!m.isBoss || m.traits.activeBoss) && m.currentHp > 0) {
+    if (m.traits && m.traits.bigMelee && (!m.isBoss || m.traits.activeBoss) && m.currentHp > 0 && !_ccHalted) {
       const bm = m.traits.bigMelee;
       if (m._bigMeleeCd === undefined) m._bigMeleeCd = bm.cdMs * 0.5 + Math.random() * bm.cdMs * 0.5;
       m._bigMeleeCd -= dt;
@@ -51278,7 +51283,7 @@ function updateMonsters(dt) {
     // v0.26.318 — Same activeBoss opt-in as bigMelee. Lets Tower bosses
     // actually fire the telegraphed pillar instead of letting the
     // trait sit declared-but-dormant.
-    if (m.traits && m.traits.columnStrike && (!m.isBoss || m.traits.activeBoss) && m.currentHp > 0) {
+    if (m.traits && m.traits.columnStrike && (!m.isBoss || m.traits.activeBoss) && m.currentHp > 0 && !_ccHalted) {
       const cs = m.traits.columnStrike;
       if (m._columnCd === undefined) m._columnCd = cs.cdMs * 0.5 + Math.random() * cs.cdMs * 0.5;
       m._columnCd -= dt;
@@ -90289,8 +90294,9 @@ const ZODIAC_AI = {
     if (player && player.hp > 0) {
       const _maxHp = (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100);
       const _lowHp = (player.hp / Math.max(1, _maxHp)) < 0.25;
-      if (_lowHp && !m._scorpStingerArmed) {
+      if (_lowHp && !m._scorpStingerArmed && m._scorpStingerReady !== false) {   // _scorpStingerReady gates re-arm (default-true via !==false; consumed on arm; restored only when HP climbs >35%) — fixes the inescapable execute loop
         m._scorpStingerArmed = true;
+        m._scorpStingerReady = false;   // consume readiness so it can't instantly re-arm while the player is floored at <25% HP
         m._scorpStingerT = 1500;
         if (typeof showToast === 'function') {
           showToast('🦂 SCORPIO — STINGER EXECUTE! Get out of range!', 'legendary');
@@ -90329,7 +90335,8 @@ const ZODIAC_AI = {
       if (m._scorpStingerArmed === false && (player.hp / Math.max(1, _maxHp)) > 0.35) {
         m._scorpStingerReady = true;
       }
-      if (!m._scorpStingerReady) m._scorpStingerArmed = false;   // safety: don't re-fire on lingering low HP
+      // (re-arm is now gated by `m._scorpStingerReady !== false` at the arm condition above;
+      // the old safety line here was a no-op — armed was already false at this point — and is removed)
     }
     // v0.26.086 — Per user "Scorpio Burrow Ambush — Scorpio disappears
     // and attacks from beneath marked tiles." Every 15 s: Scorpio
