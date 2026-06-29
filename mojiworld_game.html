@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1009';
+const GAME_VERSION = 'v0.26.1010';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -26581,7 +26581,7 @@ window.addEventListener('keydown', e => {
     if (typeof showToast === 'function') showToast('🔒 Dev mode locked', 'common');
     return;
   }
-  if (LX_DEV_TOOLS && k === 't' && !game.paused) {           // (DEV PANEL) save reset — moved 9 -> T per request
+  if (LX_DEV_TOOLS && k === 't' && !game.paused && !KEY_TO_SLOT['t']) {           // (DEV PANEL) save reset — moved 9 -> T per request
     resetSave();
   }
   // v0.23.1 — press `-` to open the job / master selection page any time.
@@ -26671,7 +26671,7 @@ window.addEventListener('keydown', e => {
   if (LX_DEV_TOOLS && k === '4' && !game.keys['1'] && !game.keys['2'] && !game.keys['3']) {   // (DEV PANEL) NPC Plant
     if (typeof _lxNpToggle === 'function') _lxNpToggle();
   }
-  if (LX_DEV_TOOLS && k === 'r' && !game.keys['1'] && !game.keys['2'] && !game.keys['3']) {   // Stage Editor — moved 5 -> R per request   // (DEV PANEL) Stage Editor — live NPC/portal place/move/remove + export
+  if (LX_DEV_TOOLS && k === 'r' && !game.paused && !KEY_TO_SLOT['r'] && !game.keys['1'] && !game.keys['2'] && !game.keys['3']) {   // Stage Editor — moved 5 -> R per request   // (DEV PANEL) Stage Editor — live NPC/portal place/move/remove + export
     if (typeof _lxSeToggle === 'function') _lxSeToggle();
   }
 
@@ -32069,8 +32069,9 @@ function _mpHandle(msg) {
         // fire during class-select/the opening Void beat. Zero velocity so they
         // settle onto the platform below rather than carrying a saved fall.
         const _ww = (game.mapData && game.mapData.worldWidth) || 2000;
+        const _wh = (game.mapData && game.mapData.worldHeight) || 2000;   // was hardcoded 2000 -> tall maps (towers ~14000px) dropped a returning player to the wrong floor
         player.x = Math.max(8, Math.min(_ww - player.w - 8, +msg.you.x));
-        player.y = Math.max(-200, Math.min(2000, +msg.you.y));
+        player.y = Math.max(-200, Math.min(_wh - player.h - 8, +msg.you.y));
         player.vx = 0; player.vy = 0;
         net._restoredSave = true;
         if (typeof showToast === 'function') showToast('Restored your last position');
@@ -45988,7 +45989,7 @@ const SKILL_FNS = {
     pixelBurst('arc', player.x + player.w/2 + player.facing * 40, player.y + player.h/2, player.facing, { color:'#ffffff', color2:'#ffdd88', speed:4 });
     // v0.26.385 — basic-attack nerf (1.55→1.10) + wider sweep (160→230) so
     // warrior clears more mobs per swing for faster grinding.
-    performMelee(230, 1.10, { color:'#fff', kb:5, burst:14 });
+    performMelee(230, 1.10, { color:'#fff', kb:5, burst:14, basic:true });
     const cx = player.x + player.w/2, cy = player.y + player.h/2;
     // v0.25.227 — sprite removed per user request. The Z basic attack
     // now reads as the procedural pixelBurst flourish only; the
@@ -46455,7 +46456,7 @@ const SKILL_FNS = {
     // v0.26.410 — playtest found rogue was the weakest overall package (lowest
     // basic DPS + 3rd-lowest EHP); nudged 0.45→0.55 to restore a viable basic
     // floor without re-opening the old 2.5× dominance (backstab stays the burst).
-    const hits = performMelee(160, 0.68, { color:'#ff99ff', burst:6 });
+    const hits = performMelee(160, 0.68, { color:'#ff99ff', burst:6, basic:true });
     if (hits) {
       // Brief afterimage
       game.afterImages.push({
@@ -48012,7 +48013,7 @@ const SKILL_FNS = {
       if (aabb(hitbox, _atkMonBox(m))) {
         const crit = rollCrit();
         const dmg = Math.floor((getAtk() * 1.1 + Math.random() * 4) * (crit ? getCritDmg() : 1));
-        hitMonster(m, dmg, crit, 'melee');
+        hitMonster(m, dmg, crit, 'meleeSkill');   // skill melee burst (not the basic Z): non-basic so job-talent skillDmg applies + basicLifesteal stays basic-only
         m.vx += player.facing * 10;
         m.vy -= 2;
         m.stunTimer = Math.max(m.stunTimer || 0, 200);
@@ -50229,7 +50230,7 @@ function performMelee(range, dmgPct, opts = {}) {
       const critCh = getCrit() + (enh && enh.critBonus ? enh.critBonus : 0);
       const crit = opts.alwaysCrit || (critRoll < critCh);
       const dmg = Math.floor((getAtk() * dmgPct + Math.random() * 6) * (crit ? getCritDmg() : 1));
-      hitMonster(m, dmg, crit, 'melee');
+      hitMonster(m, dmg, crit, opts.basic ? 'melee' : 'meleeSkill');   // only the basic Z attack passes basic:true; melee SKILLS tag 'meleeSkill' so job-talent skillDmg applies + basicLifesteal doesn't over-heal off skills
       applyEnhOnHit(m, dmg, enh);
       if (opts.kb) m.vx += player.facing * opts.kb * 1.35; // global knockback boost
       if (opts.vy) m.vy += opts.vy;
@@ -61069,7 +61070,11 @@ function tryPortal() {
         const _backIdx = Math.min(_forwardIdx, _backs.length - 1);
         backPortal = _backs[_backIdx];
       }
-      const _entryOffset = 50;
+      // v0.26.x — clear the back-portal's OWN trigger radius (|center - po.x| < 50)
+      // by offsetting against the player CENTRE, not the top-left. A right-half
+      // back-portal used to land the player ~30px inside its radius, so an ↑ press
+      // bounced them straight back to the map they just left.
+      const _entryOffset = 50 + (player.w / 2) + 6;
       const entryX = backPortal
         ? (backPortal.x + (backPortal.x < destMap.worldWidth / 2 ? _entryOffset : -_entryOffset))
         : 100;
