@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1011';
+const GAME_VERSION = 'v0.26.1012';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -27739,6 +27739,14 @@ function jukeboxStop(opts) {
     if (_jukeboxOriginalBgmSrc) {
       _bgmEl.src = _jukeboxOriginalBgmSrc;
       _jukeboxOriginalBgmSrc = null;
+      // Resume the restored hub BGM on an EXPLICIT user Stop — pause()+src-restore
+      // alone leaves it silent (only loadMap/_setBossBgm restart _bgmEl otherwise),
+      // so town went silent on Stop. Skip on the silent map-change cleanup, where
+      // loadMap sets the next map's BGM immediately after.
+      const _muted = (typeof audio !== 'undefined' && audio && audio.muted) || (typeof game !== 'undefined' && game && game.muted);
+      if (!opts.silent && !_muted) {
+        try { _bgmEl.currentTime = 0; const _p = _bgmEl.play(); if (_p && _p.catch) _p.catch(() => {}); } catch (_) {}
+      }
     }
   }
   _jukeboxPlaying = null;
@@ -28747,6 +28755,18 @@ function applyClass(clsId) {
   player.hp = c.stats.hp;
   player.mp = c.stats.mp;
   player.skillCooldowns = {};
+  // Refund + clear rank points spent on the OLD class's skills — skill IDs are
+  // unique per class, so after a swap those ranks are never shown, never
+  // refundable, and give zero benefit. Return the points to the pool so they can
+  // be re-spent on the new class (honors the swap dialog's "skill points stay").
+  if (player.skillRanks && typeof player.skillRanks === 'object' && typeof SKILLS !== 'undefined') {
+    let _rankRefund = 0;
+    for (const _sid in player.skillRanks) {
+      const _sk = SKILLS[_sid];
+      if (_sk && _sk.cls && _sk.cls !== clsId) { _rankRefund += (player.skillRanks[_sid] | 0); delete player.skillRanks[_sid]; }
+    }
+    if (_rankRefund > 0) player.skillRankPoints = (player.skillRankPoints || 0) + _rankRefund;
+  }
   // Clear in-flight class-identity state so a held charge / crit-stack / cast
   // multiplier from the old class doesn't linger (or combine with another class).
   player._warCharge = null; player._releasedCharge = null;
@@ -40366,7 +40386,7 @@ function openChest(c) {
     game.drops.push({
       x: c.x + c.w/2 + (Math.random() - 0.5) * 30,
       y: c.y, vy: -Math.random() * 6 - 2,
-      type: 'mojicoin', value: Math.ceil(mojicoins / 10), life: 400
+      type: 'mojicoin', value: 0, life: 400   // VISUAL ONLY — the full chest coin roll is already granted by _grantMojicoins above; a real value here re-grants on pickup (~20% extra/chest)
     });
   }
   // Potions
