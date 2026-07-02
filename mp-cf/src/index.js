@@ -35,12 +35,48 @@ const saveOf = (st) => { const o = {}; for (const k of SAVE_FIELDS) if (k in st)
 const saveKey = (conn) => 'save:' + conn.token + ':' + conn.roomId;
 const aliveSt = (st) => !(Number.isFinite(+st.hp) && +st.hp <= 0);
 
+// ---- HTTP account + cloud-save API (server-sided MMO-lite) --------------------
+// Simple, self-contained auth on DO storage: register/login return a bearer token
+// that GET/POST /api/save use to load/store the player's FULL character save
+// (level, gear, boons, coins, ...) so it syncs across devices. Passwords are
+// per-account salted SHA-256 (Web Crypto) — good for a game, not bank-grade.
+const ACCT_KEY = (u) => 'acct:' + u;      // account record, keyed by lowercased username
+const TOK_KEY = (t) => 'tok:' + t;        // session token -> lowercased username (multi-device)
+const CSAVE_KEY = (u) => 'csave:' + u;    // full cloud save JSON, keyed by account
+const CSAVE_CAP = 512 * 1024;             // max stored save size (bytes)
+const U_RE = /^[a-zA-Z0-9_]{3,16}$/;
+const okUser = (u) => typeof u === 'string' && U_RE.test(u);
+const okPass = (p) => typeof p === 'string' && p.length >= 6 && p.length <= 64;
+const CORS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, POST, OPTIONS',
+  'access-control-allow-headers': 'content-type, authorization',
+  'access-control-max-age': '86400',
+};
+const jsonResp = (obj, status) => new Response(JSON.stringify(obj), {
+  status: status || 200, headers: { 'content-type': 'application/json', ...CORS },
+});
+const randHex = (n) => { const a = new Uint8Array(n); crypto.getRandomValues(a); return Array.from(a).map((b) => b.toString(16).padStart(2, '0')).join(''); };
+const randToken = () => (crypto.randomUUID ? crypto.randomUUID() : randHex(16));
+async function hashPw(password, salt) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(salt + ':' + password));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+function eqHash(a, b) {   // length-safe constant-time-ish compare of two hex hashes
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+
 export default {
   async fetch(request, env) {
-    if (request.headers.get('Upgrade') === 'websocket') {
+    const url = new URL(request.url);
+    // The WebSocket relay AND the HTTP account/cloud-save API are both served by
+    // the one global Durable Object (shared storage). Route both to it.
+    if (request.headers.get('Upgrade') === 'websocket' || url.pathname.startsWith('/api/')) {
       return env.ROOMS.get(env.ROOMS.idFromName('global')).fetch(request);
     }
-    return new Response('Mojiworld MP (Durable Object). Connect via WebSocket.\n', {
+    return new Response('Mojiworld MP (Durable Object). WebSocket relay + /api/{register,login,save}.\n', {
       status: 200, headers: { 'content-type': 'text/plain' },
     });
   },
@@ -63,7 +99,7 @@ export class MojiRoom {
   }
 
   async fetch(request) {
-    if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 });
+    if (request.headers.get('Upgrade') !== 'websocket') return this.handleApi(request);
     const pair = new WebSocketPair();
     const client = pair[0], ws = pair[1];
     ws.accept();
@@ -143,5 +179,83 @@ export class MojiRoom {
         }
       }
     }, REAP_MS);
+  }
+
+  // ---- HTTP API: accounts + cloud saves --------------------------------------
+  async handleApi(request) {
+    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+    const path = new URL(request.url).pathname;
+    try {
+      if (path === '/api/register' && request.method === 'POST') return await this.apiRegister(request);
+      if (path === '/api/login' && request.method === 'POST') return await this.apiLogin(request);
+      if (path === '/api/save' && request.method === 'GET') return await this.apiGetSave(request);
+      if (path === '/api/save' && request.method === 'POST') return await this.apiPutSave(request);
+      return jsonResp({ ok: false, error: 'not found' }, 404);
+    } catch (_) {
+      return jsonResp({ ok: false, error: 'server error' }, 500);
+    }
+  }
+
+  async apiRegister(request) {
+    let body; try { body = await request.json(); } catch { return jsonResp({ ok: false, error: 'bad request' }, 400); }
+    const name = String((body && body.username) || '');
+    const pass = String((body && body.password) || '');
+    if (!okUser(name)) return jsonResp({ ok: false, error: 'Username must be 3-16 chars (letters, digits, underscore).' }, 400);
+    if (!okPass(pass)) return jsonResp({ ok: false, error: 'Password must be 6-64 characters.' }, 400);
+    const key = name.toLowerCase();
+    if (await this.storage.get(ACCT_KEY(key))) return jsonResp({ ok: false, error: 'That name is already taken.' }, 409);
+    const salt = randHex(16);
+    const hash = await hashPw(pass, salt);
+    const token = randToken();
+    await this.storage.put(ACCT_KEY(key), { name, salt, hash, created: Date.now() });
+    await this.storage.put(TOK_KEY(token), key);
+    return jsonResp({ ok: true, name, token, kind: 'cloud' });
+  }
+
+  async apiLogin(request) {
+    let body; try { body = await request.json(); } catch { return jsonResp({ ok: false, error: 'bad request' }, 400); }
+    const name = String((body && body.username) || '');
+    const pass = String((body && body.password) || '');
+    if (!okUser(name) || !okPass(pass)) return jsonResp({ ok: false, error: 'Invalid username or password.' }, 400);
+    const key = name.toLowerCase();
+    const fk = 'fail:' + key, now = Date.now();
+    const fr = (await this.storage.get(fk)) || { n: 0, until: 0 };
+    if (fr.until && now < fr.until) return jsonResp({ ok: false, error: 'Too many attempts — try again shortly.' }, 429);
+    const acct = await this.storage.get(ACCT_KEY(key));
+    if (!acct) return jsonResp({ ok: false, error: 'No account with that name. Register one, or play as guest.' }, 404);
+    const hash = await hashPw(pass, acct.salt);
+    if (!eqHash(hash, acct.hash)) {
+      const n = (fr.n || 0) + 1;
+      await this.storage.put(fk, { n, until: n >= 8 ? now + 5 * 60 * 1000 : 0 });
+      return jsonResp({ ok: false, error: 'Wrong password.' }, 401);
+    }
+    if (fr.n) this.storage.delete(fk).catch(() => {});
+    const token = randToken();
+    await this.storage.put(TOK_KEY(token), key);
+    return jsonResp({ ok: true, name: acct.name, token, kind: 'cloud' });
+  }
+
+  async _userForToken(request) {
+    const auth = request.headers.get('authorization') || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    if (!token) return null;
+    return (await this.storage.get(TOK_KEY(token))) || null;
+  }
+
+  async apiGetSave(request) {
+    const key = await this._userForToken(request);
+    if (!key) return jsonResp({ ok: false, error: 'unauthorized' }, 401);
+    const save = (await this.storage.get(CSAVE_KEY(key))) || null;
+    return jsonResp({ ok: true, save });
+  }
+
+  async apiPutSave(request) {
+    const key = await this._userForToken(request);
+    if (!key) return jsonResp({ ok: false, error: 'unauthorized' }, 401);
+    const text = await request.text();
+    if (!text || text.length > CSAVE_CAP) return jsonResp({ ok: false, error: 'save missing or too large' }, 413);
+    let save; try { save = JSON.parse(text); } catch { return jsonResp({ ok: false, error: 'bad save json' }, 400); }
+    await this.storage.put(CSAVE_KEY(key), save);
+    return jsonResp({ ok: true });
   }
 }

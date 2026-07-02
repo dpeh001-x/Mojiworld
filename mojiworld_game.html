@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1012';
+const GAME_VERSION = 'v0.26.1013';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -30519,6 +30519,9 @@ function _flushSaveStateNow() {
     };
     const _json = JSON.stringify(s);
     localStorage.setItem(SAVE_KEY, _json);
+    // Server-sided MMO-lite: also push the save to the cloud account (throttled,
+    // best-effort, cloud sessions only — no-op for Guest / local / offline).
+    try { if (typeof _lxCloudPushSave === 'function') _lxCloudPushSave(_json); } catch (e) {}
     game._saveDirty = false;
     game._lastSaveAt = Date.now();
     // v0.25.905 — Track payload size so the next "approaching quota"
@@ -96139,10 +96142,86 @@ function _authNewToken() {
 }
 function _authValidUsername(u) { return typeof u === 'string' && /^[a-zA-Z0-9_]{3,16}$/.test(u); }
 function _authValidPassword(p) { return typeof p === 'string' && p.length >= 6 && p.length <= 64; }
+// ---- Cloud account + save sync (server-sided MMO-lite) ----------------------
+// The Durable Object exposes /api/register|login|save at the same host as the MP
+// relay. LXAuth.register/login (below) try the server first and fall back to a
+// LOCAL account when offline; the full character save syncs via _lxCloudPushSave
+// (on every flush, throttled) and _lxCloudSyncOnLogin (reconcile on sign-in).
+const _LX_API_BASE = (function () {
+  try { const o = localStorage.getItem('levelx_api_base'); if (o) return o.replace(/\/+$/, ''); } catch (e) {}
+  try {
+    const u = (typeof MP_URL_KEY !== 'undefined') ? (localStorage.getItem(MP_URL_KEY) || '') : '';
+    if (/^wss?:\/\//.test(u) && !/localhost|127\.0\.0\.1/.test(u)) return u.replace(/^ws/, 'http').replace(/\/+$/, '');
+  } catch (e) {}
+  return 'https://mojiworld-mp.dpeh001.workers.dev';
+})();
+async function _lxApiAuth(kind, username, password) {
+  try {
+    const r = await fetch(_LX_API_BASE + '/api/' + kind, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const j = await r.json().catch(() => ({}));
+    const base = (j && typeof j === 'object') ? j : { ok: false, error: 'Unexpected server response.' };
+    return { ...base, _status: r.status };
+  } catch (e) { return { ok: false, error: 'offline', _network: true }; }
+}
+let _lxCloudPushAt = 0;
+function _lxCloudPushSave(json, force) {
+  try {
+    const sess = (typeof LXAuth !== 'undefined') ? LXAuth.session() : null;
+    if (!sess || sess.kind !== 'cloud' || !sess.token) return;   // only cloud accounts push
+    const now = Date.now();
+    if (!force && now - _lxCloudPushAt < 15000) return;          // throttle: <= 1 push / 15s
+    _lxCloudPushAt = now;
+    fetch(_LX_API_BASE + '/api/save', {
+      method: 'POST', keepalive: !!force,
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + sess.token },
+      body: json,
+    }).catch(() => {});
+  } catch (e) {}
+}
+// Reconcile the account's cloud save with the local one on sign-in. Cloud wins on
+// a fresh device, when it's a higher level, or when it's newer; a more-advanced
+// LOCAL save wins otherwise and is pushed up. First cloud login migrates the local
+// save up. Returns 'reloading' when it applied a cloud save (page reloads to load it).
+async function _lxCloudSyncOnLogin(session) {
+  if (!session || session.kind !== 'cloud' || !session.token) return;
+  let cloud;
+  try {
+    const r = await fetch(_LX_API_BASE + '/api/save', { headers: { authorization: 'Bearer ' + session.token } });
+    const j = await r.json().catch(() => ({}));
+    if (!j || !j.ok) return;             // unauthorized / server error -> keep local
+    cloud = j.save;                       // may be null
+  } catch (e) { return; }                 // offline -> keep local
+  let localRaw = null, localSave = null;
+  try { localRaw = localStorage.getItem(SAVE_KEY); localSave = localRaw ? JSON.parse(localRaw) : null; } catch (e) {}
+  const pushLocal = () => { try { if (localRaw) fetch(_LX_API_BASE + '/api/save', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + session.token }, body: localRaw }).catch(() => {}); } catch (e) {} };
+  if (!cloud) { pushLocal(); return; }    // first cloud login -> migrate local up
+  const localLevel = (localSave && localSave.player && localSave.player.level) || 0;
+  const cloudLevel = (cloud && cloud.player && cloud.player.level) || 0;
+  const localT = (localSave && localSave.t) || 0;
+  const cloudT = (cloud && cloud.t) || 0;
+  if (localSave && cloudT === localT) return;                          // identical (same device) -> no reload
+  if (localLevel <= 1 || cloudLevel > localLevel || cloudT > localT) {  // fresh device / cloud more advanced / cloud newer -> apply cloud
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(cloud)); } catch (e) {}
+    try { sessionStorage.setItem('lx_resume', JSON.stringify(session)); } catch (e) {}
+    location.reload();
+    return 'reloading';
+  }
+  pushLocal();                                                          // local is more advanced -> keep + push up
+}
+try { window._lxCloudPushSave = _lxCloudPushSave; window._lxCloudSyncOnLogin = _lxCloudSyncOnLogin; } catch (e) {}
+try { window.addEventListener('pagehide', () => { try { const raw = localStorage.getItem(SAVE_KEY); if (raw) _lxCloudPushSave(raw, true); } catch (e) {} }); } catch (e) {}
+
 const LXAuth = {
   async register(username, password) {
     if (!_authValidUsername(username)) return { ok: false, error: 'Username must be 3-16 chars (letters, digits, underscore).' };
     if (!_authValidPassword(password)) return { ok: false, error: 'Password must be 6-64 characters.' };
+    // Cloud account first; fall back to a LOCAL account only when the server is unreachable.
+    const cloud = await _lxApiAuth('register', username, password);
+    if (cloud.ok) { const s = { name: cloud.name, token: cloud.token, ts: Date.now(), kind: 'cloud' }; try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch (e) {} return { ok: true, ...s }; }
+    if (!cloud._network) return cloud;   // server rejected (name taken / validation) — surface it
     const accounts = _authReadAccounts();
     const key = username.toLowerCase();
     if (accounts[key]) return { ok: false, error: 'That name is already taken locally. Try signing in.' };
@@ -96156,10 +96235,16 @@ const LXAuth = {
   async login(username, password) {
     if (!_authValidUsername(username)) return { ok: false, error: 'Username must be 3-16 chars (letters, digits, underscore).' };
     if (!_authValidPassword(password)) return { ok: false, error: 'Password must be 6-64 characters.' };
+    // Cloud account first; fall back to a LOCAL account only when the server is unreachable.
+    const cloud = await _lxApiAuth('login', username, password);
+    if (cloud.ok) { const s = { name: cloud.name, token: cloud.token, ts: Date.now(), kind: 'cloud' }; try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch (e) {} return { ok: true, ...s }; }
+    // Surface server rejections (wrong password / throttle) — EXCEPT a 404 "no account",
+    // which may be a legacy LOCAL account, so fall through to the local login below.
+    if (!cloud._network && cloud._status !== 404) return cloud;
     const accounts = _authReadAccounts();
     const key = username.toLowerCase();
     const acct = accounts[key];
-    if (!acct) return { ok: false, error: 'No local account with that name. Register one or play as guest.' };
+    if (!acct) return { ok: false, error: 'No account with that name (offline). Register one, or play as guest.' };
     const hash = await _authHashPassword(key + ':' + password);
     if (hash !== acct.hash) return { ok: false, error: 'Wrong password.' };
     const session = { name: acct.name, token: _authNewToken(), ts: Date.now(), kind: 'local' };
@@ -96918,6 +97003,9 @@ try { window.LXAuth = LXAuth; } catch (e) {}
   let _authWired = false;
   function _showAuthGate() {
     if (!overlay) return;
+    // Seamless resume right after a cloud-save pull reload — we already authenticated
+    // this tab session, so skip the form and reveal the (now cloud-loaded) world.
+    try { const _rs = sessionStorage.getItem('lx_resume'); if (_rs) { sessionStorage.removeItem('lx_resume'); _finishHide(JSON.parse(_rs)); return; } } catch (e) {}
     const stack = overlay.querySelector('.lo-stack');
     const auth  = document.getElementById('lo-auth');
     if (!stack || !auth) { _finishHide(); return; }
@@ -96978,6 +97066,14 @@ try { window.LXAuth = LXAuth; } catch (e) {}
       } catch (e) { res = { ok: false, error: 'Something went wrong. Try again.' }; }
       lock(false);
       if (!res.ok) { _setAuthError(res.error || 'Sign-in failed.'); return; }
+      // Cloud account: reconcile the character save with the server before the
+      // world reveals (may apply a newer cloud save via a quick reload).
+      if (res.kind === 'cloud' && res.token && typeof _lxCloudSyncOnLogin === 'function') {
+        lock(true);
+        let synced; try { synced = await _lxCloudSyncOnLogin(res); } catch (e) {}
+        if (synced === 'reloading') return;   // page reloading to load the cloud save
+        lock(false);
+      }
       _finishHide(res);
     };
     submit.addEventListener('click', doSubmit);
