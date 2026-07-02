@@ -8225,7 +8225,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1013';
+const GAME_VERSION = 'v0.26.1014';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -76448,6 +76448,10 @@ function drawNPCs() {
     if (_npcSpriteImg) {
       _drawNpcSprite(_npcSpriteImg, cx, feetY, npc.name, npc);
     } else {
+    // v0.26.1014 — self-heal: this NPC has a registered sprite that never
+    // decoded (iOS boot decode-kill drops a random subset -> stuck procedural).
+    // Re-fetch it lazily now that it's on-screen; recovers within a frame or two.
+    if (typeof _lxRetryNpcSprite === 'function') _lxRetryNpcSprite(npc.name);
     // Chibi scale transform — matches the player's (slightly taller) proportions
     ctx.save();
     ctx.translate(cx, feetY + 2);
@@ -84445,24 +84449,31 @@ function _npcLabelHeadY(npc, hasSprite, feetY, fallbackHeadY) {
   if (!hasSprite) return Math.min(fallbackHeadY, Math.round(feetY - 62 * NPC_WORLD_SCALE));
   return Math.round(feetY + 2 - _npcSpriteTargetHeight(npc && npc.name) * 0.96 + 21);
 }
-(function _loadNpcSprites() {
-  // v0.25.956 — NPC loader now matches the monster/boss loader pattern
-  // (v0.25.498): try .webp first, fall back to .png on miss. Per user
-  // "I have also updated the NPC sprites somg PNG and some webp format
-  // please help me sort out". This way the registry filename can be
-  // either extension and the loader silently picks whichever exists on
-  // disk — no more chasing per-NPC extension casing. Only after BOTH
-  // extensions miss do we warn (procedural NPC body keeps drawing).
-  for (const name in NPC_SPRITE_FILES) {
+// v0.26.1014 — NPC sprite loader. Was a bare loop that fired all ~44
+// `new Image()` decodes at once during module init — a contributor to the
+// iOS boot decode memory-kill: mobile Safari drops a random subset of
+// in-flight decodes under memory pressure, and since NPC_SPRITES[name] then
+// stays unset with nothing to retry it, those NPCs (Ren, the Postal Wisp, …)
+// were stuck on their procedural body forever. Now the boot load runs through
+// _lxAsyncPool x6 (like the map/manifest loaders) and drawNPCs self-heals any
+// on-screen NPC whose sprite never decoded via _lxRetryNpcSprite (below).
+// Tries the registered extension first, then the other (.webp <-> .png), so
+// the registry filename can be either; only after BOTH miss do we warn.
+function _lxLoadNpcSpriteInto(name) {
+  // Resolves true if a sprite decoded + registered, false if both extensions
+  // missed. Never rejects, so the pool never stalls.
+  return new Promise((resolve) => {
+    const registered = NPC_SPRITE_FILES[name];
+    if (!registered) { resolve(false); return; }
     const onLoad = (img) => {
       NPC_SPRITES[name] = img;
-      // v0.25.816 — Detect both bbox top + bottom so the renderer can size
-      // each NPC proportionally to how much of the source canvas the
-      // visible character actually occupies.
+      // v0.25.816 — bbox top+bottom so the renderer sizes each NPC to how much
+      // of the source canvas the visible character actually occupies.
       NPC_SPRITE_META[name] = {
         bboxTopY:    _detectSpriteBboxTop(img),
         bboxBottomY: _detectSpriteBboxBottom(img),
       };
+      resolve(true);
     };
     const tryExt = (filename, onMiss) => {
       const img = new Image();
@@ -84470,20 +84481,43 @@ function _npcLabelHeadY(npc, hasSprite, feetY, fallbackHeadY) {
       img.onerror = onMiss;
       img.src = 'Sprites/npc/' + filename;
     };
-    const registered = NPC_SPRITE_FILES[name];
     const altExt = registered.endsWith('.webp') ? '.png'
                  : registered.endsWith('.png')  ? '.webp'
                  : null;
     tryExt(registered, () => {
       if (altExt) {
         const altName = registered.replace(/\.(webp|png)$/, altExt);
-        tryExt(altName, () => console.warn('[NPC] failed to load', name, '(tried both', registered, '+', altName, ')'));
+        tryExt(altName, () => { console.warn('[NPC] failed to load', name, '(tried both', registered, '+', altName, ')'); resolve(false); });
       } else {
         console.warn('[NPC] failed to load', name);
+        resolve(false);
       }
     });
-  }
+  });
+}
+(function _loadNpcSprites() {
+  const names = Object.keys(NPC_SPRITE_FILES);
+  if (typeof _lxAsyncPool === 'function') _lxAsyncPool(6, names, _lxLoadNpcSpriteInto);
+  else names.forEach(_lxLoadNpcSpriteInto);
 })();
+// v0.26.1014 — self-healing lazy reload for an on-screen NPC whose registered
+// sprite never decoded at boot (iOS decode-kill). Called from drawNPCs's
+// procedural-fallback branch. Bounded: <=4 attempts/NPC, <=2 concurrent
+// reloads globally (mobile-safe); no-op for NPCs with no registered sprite
+// (those are legitimately procedural).
+const _NPC_SPRITE_RETRY = Object.create(null);   // name -> attempts (-1 = in-flight)
+let _npcSpriteRetryInFlight = 0;
+function _lxRetryNpcSprite(name) {
+  if (!name || NPC_SPRITES[name] || !NPC_SPRITE_FILES[name]) return;
+  const tries = _NPC_SPRITE_RETRY[name] || 0;
+  if (tries === -1 || tries >= 4 || _npcSpriteRetryInFlight >= 2) return;
+  _NPC_SPRITE_RETRY[name] = -1;
+  _npcSpriteRetryInFlight++;
+  _lxLoadNpcSpriteInto(name).then((ok) => {
+    _npcSpriteRetryInFlight = Math.max(0, _npcSpriteRetryInFlight - 1);
+    _NPC_SPRITE_RETRY[name] = ok ? 0 : (tries + 1);
+  });
+}
 // v0.26.360 — NPC idle frame animations, lazy-loaded per NPC from
 // Sprites/npc/idle/<basename>_0..8.webp (basename = the on-disk filename, which
 // may contain spaces — encodeURIComponent handles that). Ping-pong loop;
