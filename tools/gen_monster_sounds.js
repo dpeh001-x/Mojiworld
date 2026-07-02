@@ -187,9 +187,30 @@ const HIT_OVERRIDE = {
   zodiac_pisces:      'a celestial twin-fish struck — an ethereal watery bubble-burst and a soft shimmering flinch',
 };
 
+// --- Per-monster bespoke DIE descriptions -------------------------------------
+// v0.26.1016 — boss deaths now PLAY in-game (engine change), so the headline
+// finale bosses get authored death prompts instead of the generic family yelp.
+// Same contract as HIT_OVERRIDE: replaces family base + element/size flavor.
+const DIE_OVERRIDE = {
+  pqConductor: 'a clockwork train conductor defeated — a long sad falling train-whistle, gears winding down with a final steam-burst hiss and a heavy metallic collapse',
+  towerSovereign: 'the sovereign of a mystic spire defeated — a deep regal groan collapsing into shattering arcane crystal and a resonant fading power-down hum',
+  zodiac_aries:       'a celestial fire-ram defeated — a final defiant bleating roar collapsing into a burst of flame that fizzles to embers',
+  zodiac_taurus:      'a celestial earth-bull defeated — a deep dying bellow and a colossal ground-shaking body-fall thud with crumbling stone',
+  zodiac_gemini:      'a twin celestial spirit defeated — two intertwined voices crying out in falling harmony, dissolving into a cosmic chime scatter',
+  zodiac_cancer:      'a celestial crab defeated — a hard shell-crack splitting open with a watery burst and a sad bubbling deflate',
+  zodiac_leo:         'a celestial sun-lion defeated — a majestic final roar fading into a soft solar flare whoosh and a heavy noble collapse',
+  zodiac_virgo:       'a serene celestial maiden defeated — a gentle sorrowful vocal sigh dissolving into crystalline chimes and scattering leaves',
+  zodiac_libra:       'a celestial arbiter defeated — great brass scales crashing out of balance, a cascade of ringing metal settling to one final toll',
+  zodiac_scorpio:     'a celestial scorpion defeated — a piercing chitinous screech cut short, claws clattering down with a dark venomous hiss fading out',
+  zodiac_sagittarius: 'a celestial centaur-archer defeated — a final arrow-twang, a whinnying cry and a heavy body-fall with embers crackling out',
+  zodiac_capricorn:   'a celestial sea-goat defeated — a gruff bleat trailing into a splash, ice cracking apart and sinking with a cold fading gurgle',
+  zodiac_aquarius:    'a celestial water-bearer defeated — a great vessel shattering, a rushing cascade of water draining away with an airy fading gasp',
+  zodiac_pisces:      'a celestial twin-fish defeated — two soft watery cries spiraling down into a stream of fading bubbles and an ethereal shimmer',
+};
+
 // Compose the final SFX description for one (monster, kind).
 function buildSoundPrompt(id, kind) {
-  const override = (kind === 'hit') ? HIT_OVERRIDE[id] : null;
+  const override = (kind === 'hit') ? HIT_OVERRIDE[id] : DIE_OVERRIDE[id];
   let base, tail;
   if (override) {
     base = override;
@@ -202,8 +223,15 @@ function buildSoundPrompt(id, kind) {
     tail = extra.length ? `, ${extra.join(', ')}` : '';
   }
   // Trailing constraints keep clips game-ready: dry, mono-ish, no music/tail.
+  // v0.26.1016 — game-wide tone baked in per review: this is a cute chibi
+  // MapleStory-style RPG, so regular mobs sound adorable/cartoon-cute; big
+  // bosses stay weighty and dramatic but still cartoon-game friendly, never
+  // realistic-scary.
+  const tone = BOSSES.has(id)
+    ? 'Powerful boss monster: weighty and dramatic, but cartoonish video-game style, not realistic or scary.'
+    : 'Cute, adorable cartoon creature for a chibi MapleStory-style RPG: playful, endearing, toy-like.';
   return `Video game monster ${kind === 'die' ? 'death' : 'hit'} sound effect: ${base}${tail}. ` +
-         `Short, dry, punchy, no music, no reverb tail, retro arcade game SFX.`;
+         `${tone} Short, dry, punchy, no music, no reverb tail, retro arcade game SFX.`;
 }
 
 module.exports = {

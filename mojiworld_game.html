@@ -57891,7 +57891,11 @@ function killMonster(m) {
   // always truthy on boss kills → bosses incorrectly got the generic
   // death SFX overlapping their dedicated boss outro. Matches the same
   // pattern fixed for the recipe-scroll drop in v0.25.810.
-  if (typeof _playMonsterSfx === 'function' && !m.isBoss) _playMonsterSfx(m, 'die');
+  // v0.26.1016 — bosses now play a die clip too (per sound-review order: the
+  // 13 boss die clips exist now, "strong boss" direction). _playMonsterSfx is
+  // custom-or-silent for boss deaths — it never falls back to a generic family
+  // yelp (the v0.25.829 concern), so removing the !m.isBoss guard is safe.
+  if (typeof _playMonsterSfx === 'function') _playMonsterSfx(m, 'die');
   // v0.25.643 — UNIQUE GAUNTLET BEHAVIORS. Check the mob's `traits` flag
   // bag (set in monsterTypes definitions). Two pre-splice traits:
   //   • revivesOnce — Lichkin / Path's Bane: restore HP and continue
@@ -98244,6 +98248,23 @@ function _monsterSfxEl(key) {
 // forever after with zero overhead. Full naming guide + monster-id list lives
 // in audio/monster/CUSTOM_SOUNDS.md.
 const _monsterCustomSfx = Object.create(null);   // 'type_kind' → Audio | null(unavailable) | 'probing'
+// v0.26.1016 — probe-and-cache a per-monster custom clip. Extracted from
+// _playMonsterSfx so the boss die-clip prewarm (first hit) shares the exact
+// same null-caching contract: undefined = never probed, 'probing' = loading,
+// null = 404 (use family), Audio = ready.
+function _probeMonsterCustomSfx(type, kind) {
+  const ck = type + '_' + kind;
+  if (_monsterCustomSfx[ck] !== undefined) return;
+  const a = new Audio('audio/monster/mob_' + type + '_' + kind + '.mp3');
+  a.loop = false;
+  a._sfxBase = _MONSTER_SFX_TARGET_VOL;
+  a.volume = _MONSTER_SFX_TARGET_VOL * _SFX_MASTER_VOL;
+  a.preload = 'auto';
+  if (typeof audio !== 'undefined' && audio) a.muted = !!audio.muted;
+  a.addEventListener('error', () => { _monsterCustomSfx[ck] = null; });
+  a.addEventListener('canplaythrough', () => { if (_monsterCustomSfx[ck] === 'probing') _monsterCustomSfx[ck] = a; });
+  _monsterCustomSfx[ck] = 'probing';
+}
 function _playMonsterSfx(m, kind) {
   try {
     if (typeof audio !== 'undefined' && audio && audio.muted) return;
@@ -98260,19 +98281,16 @@ function _playMonsterSfx(m, kind) {
     // 1) Per-monster custom override (audio/monster/mob_<type>_<kind>.mp3).
     const _type = m && m.type;
     if (_type) {
+      // v0.26.1016 — bosses now play their die clip (see the death gate).
+      // Pre-warm the die probe on the boss's FIRST HIT so the clip is decoded
+      // long before it dies — bosses take many hits first, so by death time
+      // the custom clip is cached and plays instead of silence.
+      if (kind === 'hit' && m.isBoss) _probeMonsterCustomSfx(_type, 'die');
       const ck = _type + '_' + kind;
       const slot = _monsterCustomSfx[ck];
       if (slot === undefined) {
         // First encounter — start loading; the family clip covers this kill.
-        const a = new Audio('audio/monster/mob_' + _type + '_' + kind + '.mp3');
-        a.loop = false;
-        a._sfxBase = _MONSTER_SFX_TARGET_VOL;
-        a.volume = _MONSTER_SFX_TARGET_VOL * _SFX_MASTER_VOL;
-        a.preload = 'auto';
-        if (typeof audio !== 'undefined' && audio) a.muted = !!audio.muted;
-        a.addEventListener('error', () => { _monsterCustomSfx[ck] = null; });
-        a.addEventListener('canplaythrough', () => { if (_monsterCustomSfx[ck] === 'probing') _monsterCustomSfx[ck] = a; });
-        _monsterCustomSfx[ck] = 'probing';
+        _probeMonsterCustomSfx(_type, kind);
       } else if (slot && slot !== 'probing') {
         try { slot.currentTime = 0; } catch (_) {}
         const cp = slot.play();
@@ -98281,6 +98299,10 @@ function _playMonsterSfx(m, kind) {
       }
       // slot === null (no custom file) or 'probing' → fall through to family
     }
+    // v0.26.1016 — boss deaths never fall back to a generic family clip (a
+    // stock beast yelp under a zodiac finale reads wrong). Custom-or-silent:
+    // if the per-boss die clip is missing or still probing, stay quiet.
+    if (kind === 'die' && m && m.isBoss) return;
     // 2) Family fallback (slime / ghost / bat / skeleton / dragon / beast / …).
     const family = _monsterSfxFamily(m);
     const key = family + '_' + kind;
