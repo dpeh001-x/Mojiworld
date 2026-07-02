@@ -43,6 +43,19 @@ const onlyArg = arg('--only');
 const onlySet = onlyArg ? new Set(onlyArg.split(',').map((s) => s.trim())) : null;
 const skipBosses = has('--skip-bosses');
 
+// --notes <file>: per-clip creative direction from the review page
+// (monster_sound_review.html "Export work order" -> regen_notes.json).
+// Keys are `<id>_<kind>`, values are free-text comments; each one is
+// appended to that clip's composed prompt as an explicit direction, so
+// "too metallic — should be a wet squelch" actually steers the regen.
+const notesArg = arg('--notes');
+let notes = {};
+if (notesArg) {
+  const { readFileSync } = await import('node:fs');
+  try { notes = JSON.parse(readFileSync(join(repoRoot, notesArg), 'utf8')); }
+  catch (e) { console.error(`--notes: could not read/parse ${notesArg}: ${e.message}`); process.exit(1); }
+}
+
 // Build the work manifest: one entry per (monster, kind).
 let work = [];
 for (const id of MONSTERS) {
@@ -51,9 +64,10 @@ for (const id of MONSTERS) {
     // Bosses never play a die clip (engine guards die with !m.isBoss). With
     // --skip-bosses we drop those wasted generations; hit clips always kept.
     if (skipBosses && kind === 'die' && BOSSES.has(id)) continue;
+    const note = typeof notes[`${id}_${kind}`] === 'string' ? notes[`${id}_${kind}`].trim() : '';
     work.push({
       id, kind, family: familyFor(id), boss: BOSSES.has(id),
-      prompt: buildSoundPrompt(id, kind),
+      prompt: buildSoundPrompt(id, kind) + (note ? ` Creative direction from review: ${note}.` : ''),
       targetPath: `audio/monster/mob_${id}_${kind}.mp3`,
     });
   }
