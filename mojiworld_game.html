@@ -8226,7 +8226,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1020';
+const GAME_VERSION = 'v0.26.1021';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -31320,6 +31320,7 @@ function loadState() {
     if (!player.mods)         player.mods = { extraJumps: 0 };
     if (!player.buffs)        player.buffs = {};
     if (!player.treeUnlocked) player.treeUnlocked = {};
+    if (!player.tree || typeof player.tree !== 'object') player.tree = {};   // v0.26.1021 — re-guard tree (corrupt/imported save could carry tree:null -> crash on first tree.X read)
     // v0.25.916 — Cross-class job/master consistency check. Debug recon
     // (agent ae107d46) flagged that a corrupt or hand-edited save could
     // have e.g. player.cls = 'warrior' but player.job = 'wizard'. The
@@ -31361,6 +31362,7 @@ function loadState() {
     if (!player.mods)         player.mods = { extraJumps: 0 };
     if (!player.buffs)        player.buffs = {};
     if (!player.treeUnlocked) player.treeUnlocked = {};
+    if (!player.tree || typeof player.tree !== 'object') player.tree = {};   // v0.26.1021 — re-guard tree (corrupt/imported save could carry tree:null -> crash on first tree.X read)
     // v0.25.881 — Defensive defaulter for player.look. Debug recon
     // (agent a515c5ee, BUG-LOOK-1 / BUG-LOOK-HAIR-1) flagged that the
     // wardrobe code at L17831 / L17840 / L17862-65 writes player.look.X
@@ -59892,7 +59894,7 @@ function updateProjectiles(dt) {
     // which on vertical-tower maps killed projectiles the moment they
     // crossed the canvas-bottom-equivalent in world space — way before
     // they'd actually leave the playable world).
-    if (hit || p.life <= 0 || p.x < 0 || p.x > game.mapData.worldWidth || p.y > (game.mapData.worldHeight || H) + 50) {
+    if (hit || p.life <= 0 || p.x < 0 || p.x > game.mapData.worldWidth || p.y < -50 || p.y > (game.mapData.worldHeight || H) + 50) {
       game.projectiles.splice(i, 1);
     }
   }
@@ -60869,6 +60871,12 @@ function _trimVisualQueues() {
   // ceiling. Drop the oldest beyond 40 (animations are short; 40 is generous).
   if (game.fxInstances && game.fxInstances.length > 40) {
     game.fxInstances.splice(0, game.fxInstances.length - 40);
+  }
+  // v0.26.1021 — death-fade monster list (drained only by age) had no count
+  // cap; a 30+ kill AoE burst pinned that many full monster objects, redrawn
+  // uncapped each frame. Drop the oldest (furthest into fade) beyond 24.
+  if (game._fadingMonsters && game._fadingMonsters.length > 24) {
+    game._fadingMonsters.splice(0, game._fadingMonsters.length - 24);
   }
   // Hard-cap player projectile queue. If skill spawns piled up past the
   // cap, drop the OLDEST so the visual flow keeps moving (newer shots
@@ -105681,7 +105689,7 @@ function applyCharStudioToPlayer() {
     for (const slot of Object.keys(CHAR_STUDIO.equip)) {
       const pick = CHAR_STUDIO.equip[slot];
       const existing = player.equipped[slot];
-      const isStatBearing = !!(existing && existing.id);
+      const isStatBearing = !!(existing && (existing.baseName || existing.rarity || existing.name || existing.atk != null || existing.def != null));   // v0.26.1021 — gear has no .id; test real fields so Apply patches visuals instead of replacing the stat item
       if (isStatBearing) {
         if (pick) { existing.spriteId = pick.spriteId; existing.tint = pick.tint || null; }
         else      { delete existing.spriteId; delete existing.tint; }
@@ -105782,7 +105790,7 @@ function revertCharStudioFromPlayer() {
   if (typeof player !== 'undefined' && player.equipped) {
     for (const slot of ['body_top', 'body_bottom', 'cape', 'gloves', 'boots', 'weapon', 'helmet']) {
       const existing = player.equipped[slot];
-      if (existing && existing.id) {
+      if (existing && (existing.baseName || existing.rarity || existing.name || existing.atk != null || existing.def != null)) {   // v0.26.1021 — gear has no .id; strip only visuals off a real item, never null it
         delete existing.spriteId;
         delete existing.tint;
       } else {
