@@ -1066,6 +1066,7 @@
     .mobile-deck .mc-btn.mc-locked {
       opacity: 0.32 !important;
       filter: grayscale(1) brightness(0.85);
+      pointer-events: none !important;   /* v0.26.1019 — was visual-only; block taps on locked skills */
     }
     /* Cooldown sweep overlay — circular MOBA-style "pie wipe" that
        slowly retreats as the cooldown timer ticks down. Driven by
@@ -8225,7 +8226,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1018';
+const GAME_VERSION = 'v0.26.1019';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -38444,7 +38445,7 @@ function _completeExpedition() {
   // v0.26.293 — Grant the coin reward AFTER _endExpedition's restore so
   // it survives the mojicoin wipe. Setshards / titles were already
   // applied above and don't get snapshotted, so they survive natively.
-  player.mojicoins = (player.mojicoins | 0) + _coinReward;
+  player.mojicoins = Math.min(1e12, (player.mojicoins | 0) + _coinReward);   // v0.26.1019 — respect the 1e12 clamp
   if (typeof saveState === 'function') saveState();
 }
 
@@ -39072,9 +39073,14 @@ function loadMap(id, entryX, entryY) {
   // during the intro fade). Otherwise the resume-paused callback fires
   // 600 ms later on whatever map we landed on, un-pausing without a
   // boss in sight.
-  if (game._bossIntroTimer) {
-    clearTimeout(game._bossIntroTimer);
-    game._bossIntroTimer = null;
+  // v0.26.1019 — was a bare timer-clear that stranded the overlay + pause on a
+  // map change mid-cinematic (hard soft-lock; watchdog blind to the .on overlay).
+  if (game._bossIntroTimer ||
+      (game._bossIntroEls && game._bossIntroEls.overlay && game._bossIntroEls.overlay.classList.contains('on'))) {
+    try { if (typeof _dismissBossIntro === 'function') _dismissBossIntro(); } catch (e) {}
+    if (game._bossIntroTimer) { clearTimeout(game._bossIntroTimer); game._bossIntroTimer = null; }
+    if (game._bossIntroEls && game._bossIntroEls.overlay) game._bossIntroEls.overlay.classList.remove('on');
+    game.paused = false;
   }
   // v0.26.x glitch-fix -- a Shackle QTE active across a forced map change would
   // strand the card + player.stunTimer on the new map. Clear it like the modal
@@ -51771,6 +51777,7 @@ function updateMonsters(dt) {
       }
     }
     if (m.stunTimer > 0) { m.stunTimer -= dt; m.vx *= 0.5; continue; }
+    if (m.freezeTimer > 0 && (m.isBoss || m.boss)) m.freezeTimer -= dt;   // v0.26.1019 — decay the phantom timer for freeze-immune bosses
     if (m.freezeTimer > 0 && !(m.isBoss || m.boss)) {   // v0.26.458 - bosses freeze-IMMUNE (no AI-skip); v0.26.x audit FIX — was `!m.boss`, but spawned bosses carry `isBoss` (m.boss is always falsy on live instances), so this guard never protected them and the Grand-Hex / freeze-lock exploit on apex bosses like Gravitos was still open. Now checks isBoss.
       m.freezeTimer -= dt;
       m.vx *= 0.85;
@@ -54062,6 +54069,12 @@ function bossAI(m, dt, distToPlayer) {
       m.phase = phase;
       m.patternTimer = 0;
       m.patternState = 'idle';
+      // v0.26.1019 — clear every per-pattern fire/announce latch so no pattern
+      // stays dead after a phase jump interrupts it mid-cast.
+      m._volleyFired = m._beamFired = m._teleported = m._astralFired = m._astralAnnounced =
+        m._orbsFired = m._orbsAnnounced = m._quakeFired = m._quakeAnnounced = m._tearFired =
+        m._summonedThisPhase = false;
+      m._orbsFiredCount = 0; m._rainTicks = 0;
       if (phase === 2) {
         showToast('⚡ AETHERION SHIFTS — reality fractures', 'legendary');
         flash(0.5); addShake(10); addHitStop(90);
@@ -54525,6 +54538,12 @@ function bossAI(m, dt, distToPlayer) {
       m.phase = phase;
       m.patternTimer = 0;
       m.patternState = 'idle';
+      // v0.26.1019 — clear every per-pattern fire/announce latch so no pattern
+      // stays dead after a phase jump interrupts it mid-cast.
+      m._volleyFired = m._beamFired = m._teleported = m._astralFired = m._astralAnnounced =
+        m._orbsFired = m._orbsAnnounced = m._quakeFired = m._quakeAnnounced = m._tearFired =
+        m._summonedThisPhase = false;
+      m._orbsFiredCount = 0; m._rainTicks = 0;
       if (phase === 2) {
         showToast('🌑 GRAVITOS COLLAPSES — density rises', 'legendary');
         flash(0.5); addShake(10); addHitStop(90);
@@ -61984,9 +62003,14 @@ function openNPC(npc) {
       document.getElementById('dialog-text').textContent = `*Felina logs the larger deposit with a small approving nod.*\n\n10,000 mojicoins deposited. Balance: ${player.bankBalance.toLocaleString()} mojicoins. Wallet: ${(player.mojicoins|0).toLocaleString()} mojicoins.`;
     } });
     opts.push({ t:'Withdraw all', cb:() => {
-      if ((player.bankBalance|0) <= 0) { document.getElementById('dialog-text').textContent = 'The vault is dust and echoes for you, dear. Nothing to withdraw.'; return; }
-      const _amt = player.bankBalance|0;
-      player.mojicoins = Math.min(1e12, player.mojicoins + _amt); player.bankBalance = 0; player.bankLastTick = _monoNow();
+      // v0.26.1019 — no 32-bit |0 coercion (wrapped >2.1B balances negative),
+      // and withdraw only what the wallet can absorb so no coins are destroyed
+      // at the 1e12 cap; any remainder stays banked.
+      if (!(player.bankBalance > 0)) { document.getElementById('dialog-text').textContent = 'The vault is dust and echoes for you, dear. Nothing to withdraw.'; return; }
+      const _room = Math.max(0, 1e12 - (player.mojicoins || 0));
+      if (_room <= 0) { document.getElementById('dialog-text').textContent = 'Your purse is already fit to burst, dear. Spend a little of it first.'; return; }
+      const _amt = Math.min(Math.floor(player.bankBalance), _room);
+      player.mojicoins = (player.mojicoins || 0) + _amt; player.bankBalance = Math.max(0, player.bankBalance - _amt); player.bankLastTick = _monoNow();
       if (typeof saveState === 'function') saveState();
       document.getElementById('dialog-text').textContent = `*Felina counts ${_amt.toLocaleString()} mojicoins into a velvet pouch and slides it across the counter.*\n\nDo come back. Your money was very fond of us.`;
     } });
@@ -62212,7 +62236,7 @@ function openNPC(npc) {
         for (const p of _pending) {
           if (player.claimedMilestones[p.key]) continue;   // live guard — re-clicking the still-open button must not re-pay (was an infinite mojicoin farm)
           const _pay = _BOUNTY[p.milestone] || 0;
-          player.mojicoins += _pay;
+          player.mojicoins = Math.min(1e12, (player.mojicoins || 0) + _pay);   // v0.26.1019 — respect the 1e12 clamp
           player.claimedMilestones[p.key] = true;
           _paid += _pay; _count++;
         }
@@ -85581,6 +85605,7 @@ function _getCachedScaledSprite(keyPrefix, sprite, srcW, srcH, targetW, targetH)
     }
   } catch (_) { baked = null; }
   if (!baked) return null;
+  if (_MOB_SPRITE_CACHE.size >= 400) { _MOB_SPRITE_CACHE.delete(_MOB_SPRITE_CACHE.keys().next().value); }   // v0.26.1019 — FIFO cap
   _MOB_SPRITE_CACHE.set(key, baked);
   return baked;
 }
