@@ -8226,7 +8226,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1019';
+const GAME_VERSION = 'v0.26.1020';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -32102,6 +32102,7 @@ function _mpHandle(msg) {
       }
       break;
     case 'joined':
+      if (msg.id === net.myId) break;   // v0.26.1020 — ignore self-echo on broadcast relays (match 'chat')
       net.peers[msg.id] = { ..._mpScrubStrings(msg), _last: performance.now() };
       _mpPushLog(`${escapeHtml(msg.name || 'Someone')} joined.`, 'sys');
       _mpRenderPlayerList();
@@ -32114,6 +32115,7 @@ function _mpHandle(msg) {
       break;
     }
     case 'state': {
+      if (msg.id === net.myId) break;   // v0.26.1020 — ignore self-echo on broadcast relays (match 'chat')
       if (!net.peers[msg.id]) net.peers[msg.id] = { id: msg.id, _last: performance.now() };
       // v0.26.x audit FIX — drop any non-finite numeric field from the frame
       // BEFORE merging, so a buggy/tampered peer can't push NaN x/y/hp into a
@@ -32133,10 +32135,11 @@ function _mpHandle(msg) {
       if (msg.id === net.myId) break;
       const p = net.peers[msg.id];
       const name = (p && p.name) || msg.name || '?';
-      const line = `<b>${escapeHtml(name)}:</b> ${escapeHtml(msg.text)}`;
+      const _ctext = String(msg.text || '').slice(0, 60);   // v0.26.1020 — cap inbound like outbound
+      const line = `<b>${escapeHtml(name)}:</b> ${escapeHtml(_ctext)}`;
       _mpPushLog(line);
       // Float a bubble above the sender for 4 s
-      if (p) p.chat = { text: msg.text, life: 4000 };
+      if (p) p.chat = { text: _ctext, life: 4000 };
       break;
     }
     case 'emote': {
@@ -33967,10 +33970,18 @@ function renderKbmReference() {
       }
     }
     if (!player.keybinds) player.keybinds = { ...KEY_TO_SLOT_DEFAULT };
+    // v0.26.1020 — if the captured key already belongs to ANOTHER slot, SWAP
+    // rather than clobber it (else that slot is left with no key = dead skill).
+    const _prevSlot = (k in player.keybinds) ? player.keybinds[k]
+                    : ((typeof KEY_TO_SLOT !== 'undefined') ? KEY_TO_SLOT[k] : undefined);
     // One key per slot: drop any existing key currently mapped to this slot.
-    for (const kk in player.keybinds) { if (player.keybinds[kk] === slot) delete player.keybinds[kk]; }
+    let _freedKey = null;
+    for (const kk in player.keybinds) { if (player.keybinds[kk] === slot) { _freedKey = kk; delete player.keybinds[kk]; } }
     // The captured key now belongs to this slot (overwrites any other slot use).
     player.keybinds[k] = slot;
+    if (_prevSlot && _prevSlot !== slot && _freedKey && _freedKey !== k) {
+      player.keybinds[_freedKey] = _prevSlot;   // displaced slot inherits the freed key
+    }
     if (typeof applyKeybinds === 'function') applyKeybinds();
     if (typeof saveState === 'function') saveState();
     if (typeof showToast === 'function') showToast('Bound skill → ' + _kbDisplay(k), 'rare');
@@ -49706,10 +49717,11 @@ const SKILL_FNS = {
       { size: 460, life: 150, spin: 0 });
     showToast('JUDGMENT OF THE HOLY GRAIL', 'legendary');
     // Schedule 7 pillars
+    const _castMap = game.currentMap;   // v0.26.1020 — bail if the player warps mid-cast
     for (let i = 0; i < 7; i++) {
       const _delay = 200 + i * 280;
       const t = setTimeout(() => {
-        if (!player || player.hp <= 0) return;
+        if (!player || player.hp <= 0 || game.currentMap !== _castMap) return;
         // Pick the enemy with the highest current HP within ±520 px;
         // fall back to a forward strike at the player's facing.
         let target = null, bestHp = -1;
@@ -98575,12 +98587,14 @@ function _bgmFade(el, target, durationMs) {
   if (!el) return;
   const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
   const start = el.volume;
+  const _myFade = (el._fadeId = (el._fadeId || 0) + 1);   // v0.26.1020 — fade cancellation token
   const dur = Math.max(1, durationMs | 0);
   // If we're fading IN, make sure the element is actually playing first.
   if (target > 0.0001 && el.paused) {
     try { el.play().catch(() => {/* autoplay-blocked: gesture unlocker handles */}); } catch (e) {}
   }
   const step = () => {
+    if (el._fadeId !== _myFade) return;   // v0.26.1020 — a newer fade superseded this loop; abort so a stale fade-out can't pause the element a fade-in just started
     const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
     const k = Math.min(1, Math.max(0, (now - t0) / dur));
     el.volume = start + (target - start) * k;
@@ -105870,7 +105884,7 @@ function _anyOtherModalOpen() {
                'help-modal','enhance-modal','skilltree-modal','attributes-modal',
                'dev-modal','taxi-modal','codex-modal','mojidex-modal','multiplayer-modal',
                'quest-modal','worldmap-modal','confirm-modal','craft-modal',
-               'class-select-modal','advancement-modal','tutorial-modal'];
+               'class-select-modal','advancement-modal','tutorial-modal','bravo-boon-modal'];
   for (const id of ids) {
     const el = document.getElementById(id);
     if (el && (el.style.display === 'flex' || el.style.display === 'block')) return true;
