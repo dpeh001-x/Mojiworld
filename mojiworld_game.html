@@ -8226,7 +8226,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1021';
+const GAME_VERSION = 'v0.26.1022';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -63056,7 +63056,7 @@ function closeDialog() {
   // outside (engine-driven closes, which don't run the in-script Back/No
   // resets) left _amnesiacStage/_amnesiacSagaView deep, so the next visit
   // dropped the player straight back into the reset-confirmation / saga.
-  if (typeof game !== 'undefined' && game) { game._brokMenu = null; game._amnesiacMenu = null; game._amnesiacStage = 0; game._amnesiacSagaView = false; }
+  if (typeof game !== 'undefined' && game) { game._brokMenu = null; game._amnesiacMenu = null; game._amnesiacStage = 0; game._amnesiacSagaView = false; game._sageStage = 0; }
   const dlg = document.getElementById('dialog');
   // v0.26.220 — Close SFX. Fires whenever a dialog is closed (Leave
   // option, ESC, click outside, walk-away). Silent no-op until
@@ -64315,7 +64315,15 @@ async function reforgeRandomEquipment() {
   // strip the union of keys that any active PREFIX or SUFFIX could have
   // written, dynamically derived from the affix tables.
   const stars = pick.item.stars || 0;
-  const base  = { ...pick.item };
+  // v0.26.1022 — reforge from the PRISTINE catalog base so the affix-key strip
+  // below can't delete the item's INHERENT base stats (base atk/def/hp are
+  // stored under the same bare keys an affix can roll).
+  const _rfBaseName = pick.item.baseName || pick.item.name;
+  const _rfCat = (typeof ITEM_POOL === 'object')
+    ? [...(ITEM_POOL.weapons || []), ...(ITEM_POOL.armors || []), ...(ITEM_POOL.accessories || [])].find(x => x && x.name === _rfBaseName)
+    : null;
+  const _fromCat = !!_rfCat;
+  const base  = _rfCat ? { ..._rfCat, dropLevel: pick.item.dropLevel || 50 } : { ...pick.item };
   const _strip = new Set();
   try {
     if (typeof PREFIXES === 'object') for (const id in PREFIXES) {
@@ -64327,7 +64335,7 @@ async function reforgeRandomEquipment() {
       for (const k in sample) _strip.add(k);
     }
   } catch (e) { /* fall through — partial strip is still better than none */ }
-  for (const k of _strip) delete base[k];
+  if (!_fromCat) for (const k of _strip) delete base[k];   // v0.26.1022 — pristine catalog base has no affixes to strip
   delete base.affixes;
   // Also clear the affixed name decoration so rollAffixedItem rebuilds it
   // from the bare base name (it concatenates new prefix + base.name + suffix).
@@ -67405,6 +67413,11 @@ function devTeleport(mapId) {
 }
 
 function openDevConsole() {
+  // v0.26.1022 — hard gate at the single chokepoint. The mobile dev button and
+  // the version-tag long-press reached this ungated (one tap = MAX-STATS /
+  // teleport / unlock console for any player). Require the dev flag the
+  // keyboard openers already check: localStorage LX_DEV=1 or ?dev=1.
+  try { if (!(localStorage.getItem('LX_DEV') === '1' || /[?&]dev=1/.test(location.search))) return; } catch (e) { return; }
   renderDev();
   document.getElementById('dev-modal').style.display = 'flex';
   game.paused = true;
@@ -80794,7 +80807,7 @@ function _drawPlayerCustomSprite() {
     const attackFramesPerStep = Math.max(1, (60 / attackFps) | 0);
     const attackTotalFrames = attackFrames ? attackFrames.length : 0;
     const attackTotalDuration = attackFramesPerStep * attackTotalFrames;
-    if (player.attacking && !player._heroAtkAt) player._heroAtkAt = game.time;
+    if (player.attacking && (!player._heroAtkAt || (game.time - player._heroAtkAt) >= attackTotalDuration)) player._heroAtkAt = game.time;   // v0.26.1022 — re-anchor each chained swing
     const attackElapsed = player._heroAtkAt ? (game.time - player._heroAtkAt) : -1;
     const attackPlaying = attackElapsed >= 0 && attackElapsed < attackTotalDuration;
     if (!player.attacking && !attackPlaying) player._heroAtkAt = 0;
