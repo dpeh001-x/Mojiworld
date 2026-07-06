@@ -8226,7 +8226,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1023';
+const GAME_VERSION = 'v0.26.1024';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -15299,7 +15299,8 @@ function _renderPqObjectivePin() {
   const _curMap = (typeof game !== 'undefined' && game) ? game.currentMap : null;
   const _isPqMap = _curMap === 'clockworkUnderpassLobby' ||
                    _curMap === 'clockworkSpire' ||
-                   _curMap === 'clockworkExpress';
+                   _curMap === 'clockworkExpress' ||
+                   _curMap === 'tower';   // v0.26.1024 — Stage-3 Carriage; pin was hidden all of Stage 3
   if (!_isPqMap) {
     pin.style.display = 'none';
     return;
@@ -31597,6 +31598,7 @@ function loadState() {
     game.paused = false;
     game.dying = 0;
     game.hitStop = 0;
+    game.blackFlashOverlay = 0; game.blackHoldFrames = 0;   // v0.26.1024 — never resume into a stale blackout overlay
     game.combo = 0; game.comboTimer = 0; game.comboMult = 1;
     // Daily rollover + achievement re-check on return
     try { checkDaily(); } catch(e) {}
@@ -39613,6 +39615,7 @@ function loadMap(id, entryX, entryY) {
   // hit-stop "boom" beats) while the screen stays black; finally a colossal quake
   // + heavy white-edged flash as the blackout releases into the boss cinematic.
   if (id === 'gravitosArena') {
+    const _gGen = game._gravIntroGen = (game._gravIntroGen || 0) + 1;   // v0.26.1024 — stale-timer token
     if (typeof blackHold === 'function') blackHold(95);      // ~1.6s of solid black
     if (typeof blackFlash === 'function') blackFlash(1.0);
     if (typeof addShake === 'function') addShake(14);
@@ -39621,6 +39624,7 @@ function loadMap(id, entryX, entryY) {
     const _quakes = [[300,18],[600,24],[950,30],[1300,40,160],[1650,30]];
     for (const q of _quakes) {
       setTimeout(() => {
+        if (game.currentMap !== 'gravitosArena' || game._gravIntroGen !== _gGen) return;   // v0.26.1024 — bailed the arena; don't shake the new map
         if (typeof addShake === 'function') addShake(q[1]);
         if (q[2] && typeof addHitStop === 'function') addHitStop(q[2]);
       }, q[0]);
@@ -39628,6 +39632,7 @@ function loadMap(id, entryX, entryY) {
     // Release: blackout fades (blackHold has expired), colossal final quake + a
     // hard flash-edge as the cinematic reveal takes the screen.
     setTimeout(() => {
+      if (game.currentMap !== 'gravitosArena' || game._gravIntroGen !== _gGen) return;   // v0.26.1024 — bailed the arena; don't flash/freeze the new map
       if (typeof addShake === 'function') addShake(46);
       if (typeof addHitStop === 'function') addHitStop(200);
       if (typeof flash === 'function') flash(0.5);
@@ -39781,6 +39786,9 @@ function loadMap(id, entryX, entryY) {
     player.attacking = false;
     player.airJumps = 0;
     player.dodgeTimer = 0;   // v0.26.1023 — a portal entered mid-roll no longer slides on arrival
+    // v0.26.1024 — a portal mid-ult cancels the ONLY cd-restore timer; end the
+    // open window so the next B press re-casts under normal cooldown gating.
+    player._warlordEnrageUntil = 0; player._sageUntil = 0; player._sageShots = 0;
     player.doubleJumpUsed = false;
     if (typeof cancelPendingSkillTimers === 'function') cancelPendingSkillTimers();
   }
@@ -43566,6 +43574,7 @@ function triggerDeath() {
   // until respawn. The low-HP vignette already guards on !game.dying; match it.
   game._lightningFlash = 0; game._lightningCD = null;
   game._eclipseAlpha = 0; game._eclipseState = null; game._eclipseCD = null;
+  game.blackFlashOverlay = 0; game.blackHoldFrames = 0;   // v0.26.1024 — same class: overlay renders while dead, decay only runs alive
   game._diedInExpedition = false;   // v0.26.x audit -- never inherit a stale flag from an aborted prior death
   // v0.26.x glitch-fix -- death mid-Shackle-QTE: updatePlayer early-returns while
   // dying so _qteFrame never fires again to self-clear; do it here so the player
@@ -94802,6 +94811,8 @@ function loop(time) {
   // a little more slack on slow frames without unbounding it (a tab-
   // backgrounded 30 s would still be 600 frames of 50 ms each — bounded
   // and survivable, just one second of in-game time).
+  try {   // v0.26.1024 — CRITICAL: guard the whole sim+render so a single
+  // malformed-entity throw can't skip the tail rAF and hard-freeze the tab.
   const dt = Math.min(50, time - lastTime);
   lastTime = time;
   game.time++;
@@ -95315,6 +95326,10 @@ function loop(time) {
   // queue growth (e.g. Nightreaper ricochet + AoE in one frame).
   _trimVisualQueues();
   requestAnimationFrame(loop);
+  } catch (_loopErr) {   // v0.26.1024 — a transient sim/draw throw no longer freezes the tab
+    try { console.error('[loop]', _loopErr); } catch (_e) {}
+    requestAnimationFrame(loop);
+  }
 }
 
 // v0.25.535 — Boss-bar gradient cache. The HP fill gradient is rebuilt
