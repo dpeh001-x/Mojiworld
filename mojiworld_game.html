@@ -8226,7 +8226,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1025';
+const GAME_VERSION = 'v0.26.1026';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -27846,6 +27846,9 @@ function _applySettings(s) {
   }
   // Force-desktop class
   document.body.classList.toggle('force-desktop', !!s.fdesk);
+  // v0.26.1026 — mirror into the secondary boot key so the two stores never diverge
+  // (the fullscreen button writes _lx_forceDesktop; Settings must too).
+  try { if (s.fdesk) localStorage.setItem('_lx_forceDesktop', '1'); else localStorage.removeItem('_lx_forceDesktop'); } catch (e) {}
   // Debug overlay
   if (s.debug) localStorage.setItem('LX_DEBUG_SCALE', '1');
   else {
@@ -31605,6 +31608,9 @@ function loadState() {
     game.currentMap = 'town';
     if (typeof renderSkillBar === 'function') renderSkillBar();
     audio.muted = !!game.muted;
+    // v0.26.1026 — mirror the loaded mute into LX_SETTINGS so the Settings modal
+    // reads the real state and a later applySettingsLive can't force-unmute.
+    try { if (typeof _lxGetSettings === 'function' && typeof _lxSaveSettings === 'function') { const _ms = _lxGetSettings(); _ms.mute = !!game.muted; _lxSaveSettings(_ms); } } catch (e) {}
     // v0.25.300 — apply the saved mute state to the mp3 BGM elements
     // at boot, since the legacy procedural music.stop() that used to
     // gate this path was removed. typeof guard because the BGM consts
@@ -41578,6 +41584,7 @@ function updatePlayer(dt) {
   } else {
     // Poison ended — reset accumulator so the next application starts fresh.
     player._poisonTickAcc = 0;
+    player._poisonDmg = 0;   // v0.26.1026 — also clear the damage field (burn/electrocute already do) so a strong poison doesn't floor later weaker ones
   }
   // v0.26.249 — BURN DoT TICK. The player.burnTimer field was being SET by
   // mob attacks (e.g. v0.25.860 zodiac aries L71454) but never ticked
@@ -43071,8 +43078,10 @@ function updatePlayer(dt) {
   // gap), not just by walking around in a tall map.
   const _wh = (game.mapData && game.mapData.worldHeight) || (H + 100);
   if (player.y > _wh + 100) {
-    player.hp -= 15;
-    player.x = 100; player.y = 400; player.vx = 0; player.vy = 0;
+    if (!player._god) player.hp -= 15;   // v0.26.1026 — honor god mode
+    // v0.26.1026 — a fallen vertical-tower climber lands near the bottom, not warped to the summit (y=400).
+    const _resetY = (game.mapData && game.mapData.isVerticalTower) ? Math.max(200, Math.min(player.y, _wh - 200)) : 400;
+    player.x = 100; player.y = _resetY; player.vx = 0; player.vy = 0;
   }
 
   if (player.invulnerable > 0) player.invulnerable -= dt;
@@ -43594,7 +43603,7 @@ function triggerDeath() {
   if (typeof _mpCloseChat === 'function' && typeof net !== 'undefined' && net && net.chatOpen) _mpCloseChat(false);
   // v0.26.x — if the non-blocking tutorial dock is open when the player dies,
   // dismiss it (don't mark seen) so it can't float over the death/respawn UI.
-  try { const _tm = document.getElementById('tutorial-modal'); if (_tm && _tm.classList.contains('tut-dock') && typeof _closeTutorial === 'function') _closeTutorial(false); } catch (e) {}
+  try { const _tm = document.getElementById('tutorial-modal'); if (_tm && _tm.classList.contains('tut-dock') && typeof _closeTutorial === 'function') { if (typeof _grantTutorialStarterWeapon === 'function') _grantTutorialStarterWeapon(); _closeTutorial(false); } } catch (e) {}   // v0.26.1026 — guarantee the starter weapon before dismissing the dock on death
   // v0.26.x audit FIX (visual glitch) — clear the map-event overlays. Their
   // decay only runs in the alive branch (updateMapEvents, gated on hp>0), but
   // the overlay RENDER runs while dead — so dying during a held eclipse or a
@@ -49533,11 +49542,11 @@ const SKILL_FNS = {
       // map-wide 2s hard-CC with no boss exception trivialised every add/pack
       // (and chip-froze bosses). The poison DoT below is unchanged.
       if (!m.isBoss && !m.isMiniBoss && !m.boss) m.freezeTimer = Math.max(m.freezeTimer || 0, 1200);
-      _applyMobStatus(m, 'poison', 8000, { chance: 75 });
+      const _hexLanded = _applyMobStatus(m, 'poison', 8000, { chance: 75 });
       // v0.25.116 — Grand Hex DOT bumped 0.08×atk → 0.20×atk per tick.
       // Ticks every ~40 frames over the 8 s duration → ~12 ticks total.
       // Old ceiling: ~96% of atk total. New: ~240%. Properly ult-tier.
-      m.burnDmg = Math.max(3, Math.floor(getAtk() * 0.75));   // v0.26.455 - DOT buff (was 0.35x)
+      if (_hexLanded) m.burnDmg = Math.max(3, Math.floor(getAtk() * 0.75));   // v0.26.455 - DOT buff (was 0.35x); v0.26.1026 — only set when the poison actually landed (a resisted roll stranded a huge burnDmg later burns inherited via Math.max)
       // v0.26.455 - Grand Hex now lands an instant curse BURST (the master's promised
       // 'massive damage'), not just freeze + DoT. Map-wide, on top of the poison.
       if (typeof hitMonster === 'function') hitMonster(m, Math.floor(getAtk() * 1.9), (typeof rollCrit === 'function' && rollCrit()), 'magic');
@@ -51923,7 +51932,7 @@ function updateMonsters(dt) {
       m.burnTimer -= dt;
       // v0.26.x — clear the DOT flavor (icon/tint kind) the moment the
       // timer runs out, so a later plain burn can't inherit poison green.
-      if (m.burnTimer <= 0) { m._dotKind = null; m._poisonGrandHex = false; }
+      if (m.burnTimer <= 0) { m._dotKind = null; m._poisonGrandHex = false; m.burnDmg = 0; }   // v0.26.1026 — clear burnDmg on expiry so a later plain burn can't inherit a stranded value via Math.max
       // v0.25.557 — burn tick rate 30 frames → 60 frames (1 s).
       // v0.25.591 — rate halved again 60 → 120 frames (2 s) per user spec.
       // Per-tick damage now 2× m.burnDmg so total burn DPS is preserved.
@@ -54132,6 +54141,7 @@ function bossAI(m, dt, distToPlayer) {
       m._volleyFired = m._beamFired = m._teleported = m._astralFired = m._astralAnnounced =
         m._orbsFired = m._orbsAnnounced = m._quakeFired = m._quakeAnnounced = m._tearFired =
         m._summonedThisPhase = false;
+      m._sgSpawned = m._drainFired = m._drainAnnounced = false;   // v0.26.1026 — these 3 latches were omitted; a phase-cross mid-Singularity/Soul-Drain telegraph left them stuck true -> next cast dudded
       m._orbsFiredCount = 0; m._rainTicks = 0;
       if (phase === 2) {
         showToast('⚡ AETHERION SHIFTS — reality fractures', 'legendary');
@@ -54601,6 +54611,7 @@ function bossAI(m, dt, distToPlayer) {
       m._volleyFired = m._beamFired = m._teleported = m._astralFired = m._astralAnnounced =
         m._orbsFired = m._orbsAnnounced = m._quakeFired = m._quakeAnnounced = m._tearFired =
         m._summonedThisPhase = false;
+      m._sgSpawned = m._drainFired = m._drainAnnounced = false;   // v0.26.1026 — these 3 latches were omitted; a phase-cross mid-Singularity/Soul-Drain telegraph left them stuck true -> next cast dudded
       m._orbsFiredCount = 0; m._rainTicks = 0;
       if (phase === 2) {
         showToast('🌑 GRAVITOS COLLAPSES — density rises', 'legendary');
@@ -69482,7 +69493,7 @@ function closeAllModals() {
   // synthetic Skip click on the tutorial first, so the seen-flag IS
   // stamped and the modal closes cleanly. Class-select + advancement
   // stay as forced-no-Esc (mandatory decisions per their design).
-  if (tt && tt.style.display === 'flex') {
+  if (tt && (tt.style.display === 'flex' || tt.classList.contains('tut-dock'))) {   // v0.26.1026 — the live tutorial is a display:'block' dock, never 'flex'; detect by class so Esc actually dismisses it
     const _skip = document.getElementById('tut-skip');
     if (_skip) { try { _skip.click(); } catch (_) {} }
     return;
@@ -94502,16 +94513,26 @@ function _updateBuffRow() {
   }
   // Each frame, update the timer-bar width on every pill.
   const pills = row.children;
+  // v0.26.1026 — peak-track each buff's timer (raised on cast/refresh, pruned when
+  // it drops) and divide by that instead of the static BUFF_META.dur, so the bar
+  // always opens at 100% and drains truthfully regardless of rank / Lv10 bonus.
+  if (!game._buffBarMax) game._buffBarMax = {};
+  const _bbSeen = {};
   for (let i = 0; i < active.length && i < pills.length; i++) {
     const a = active[i];
     const t = a.timer;
-    const pct = Math.max(0, Math.min(100, (t / a.meta.dur) * 100));
+    const _bk = a.meta.key;
+    _bbSeen[_bk] = 1;
+    if (!(game._buffBarMax[_bk] > 0) || t > game._buffBarMax[_bk]) game._buffBarMax[_bk] = t;
+    const _den = game._buffBarMax[_bk] || a.meta.dur || 1;
+    const pct = Math.max(0, Math.min(100, (t / _den) * 100));
     const bar = pills[i].lastElementChild;
     if (bar && bar._lastPct !== pct) {
       bar._lastPct = pct;
       bar.style.width = pct.toFixed(1) + '%';
     }
   }
+  for (const _bk in game._buffBarMax) { if (!_bbSeen[_bk]) delete game._buffBarMax[_bk]; }
 }
 let _LX_CACHED_BUFF_ROW = null;
 function _uiSetStyle(el, prop, val) {
