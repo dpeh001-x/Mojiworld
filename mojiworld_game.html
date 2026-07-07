@@ -8226,7 +8226,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1027';
+const GAME_VERSION = 'v0.26.1028';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -26388,7 +26388,7 @@ function getJump() {
   // CLASSES.<cls>.stats.jump still flow through unchanged (warrior 10,
   // rogue 12, mage 10, archer 11); this fallback only fires for code
   // paths that read getJump() before a class has been selected.
-  const base = (player.baseJump || 10) + player.mods.jump;
+  const base = (player.baseJump || 10) + player.mods.jump + (typeof getEquipBonus === 'function' ? getEquipBonus('jump') : 0);   // v0.26.1028 — fold in gear jump (Nimble affix was dead; getSpeed already does this)
   const mul = (game.mapData && game.mapData.jumpMul) || 1;
   // v0.26.068 — Hard ceiling applied LAST so base × mods × map mul are
   // all bounded. Prevents off-screen launches on flat terrain and
@@ -26423,7 +26423,13 @@ window.addEventListener('keydown', e => {
   // in ACTION_KEY_DEFAULT either; they continue through KEY_TO_SLOT
   // as before.
   const resolved = (typeof _resolveActionKey === 'function') ? _resolveActionKey(rawKey) : rawKey;
-  if (resolved === null) { e.preventDefault(); return; }
+  if (resolved === null) {
+    // v0.26.1028 — Cure shares Shift with Dodge via a raw-key match; when Dodge is
+    // rebound off Shift, Shift becomes a stale default and this null-bail used to
+    // swallow the Cure press. Fire Cure here too (same guard as the normal site).
+    if (rawKey === (player.cureKey || 'shift') && !(KEY_TO_SLOT && KEY_TO_SLOT[rawKey]) && !e.repeat && !game.paused && player.hp > 0) _useCurePotion();
+    e.preventDefault(); return;
+  }
   const k = resolved;
   const repeat = e.repeat;
   game.keys[k] = true;
@@ -38491,7 +38497,7 @@ function _completeExpedition() {
   // v0.26.293 — Grant the coin reward AFTER _endExpedition's restore so
   // it survives the mojicoin wipe. Setshards / titles were already
   // applied above and don't get snapshotted, so they survive natively.
-  player.mojicoins = Math.min(1e12, (player.mojicoins | 0) + _coinReward);   // v0.26.1019 — respect the 1e12 clamp
+  player.mojicoins = Math.min(1e12, (player.mojicoins || 0) + _coinReward);   // v0.26.1019 respect 1e12 clamp; v0.26.1028 — `|| 0` not `| 0` so a >2.147B wallet isn't ToInt32-wrapped
   if (typeof saveState === 'function') saveState();
 }
 
@@ -38833,7 +38839,7 @@ _expeditionSpawnFinalBoss = function () {
 const _expeditionSnapshotPlayer_v1 = _expeditionSnapshotPlayer;
 _expeditionSnapshotPlayer = function () {
   const snap = _expeditionSnapshotPlayer_v1();
-  snap.mojicoins = player.mojicoins | 0;
+  snap.mojicoins = Math.min(1e12, Math.max(0, Math.floor(player.mojicoins || 0)));   // v0.26.1028 — was `| 0` (ToInt32) -> a >2.147B wallet wrapped negative and was restored as garbage
   // v0.26.399 — was `player.equipment` (a field that does not exist; canon
   // is `player.equipped`), so the documented "drops + Bravo gear stay
   // sandboxed" wipe was a silent no-op and in-tower gear persisted. Fixed.
@@ -38844,7 +38850,7 @@ const _expeditionRestorePlayer_v1 = _expeditionRestorePlayer;
 _expeditionRestorePlayer = function (snap) {
   _expeditionRestorePlayer_v1(snap);
   if (!snap) return;
-  if (typeof snap.mojicoins === 'number') player.mojicoins = snap.mojicoins;
+  if (typeof snap.mojicoins === 'number') player.mojicoins = Math.min(1e12, Math.max(0, snap.mojicoins));   // v0.26.1028 — re-clamp on restore (defense)
   if (snap.equipped) player.equipped = snap.equipped;
   if (typeof invalidateEquipBonusCache === 'function') invalidateEquipBonusCache();
   if (typeof _applyEquippedBoons === 'function') _applyEquippedBoons();
@@ -39632,7 +39638,7 @@ function loadMap(id, entryX, entryY) {
         // v0.26.x — the Gravitos final-boss arena holds a longer dramatic entrance
         // (held blackout + building quake) BEFORE the cinematic, so delay its intro.
         const _introDelay = (id === 'gravitosArena') ? 2300 : 500;
-        setTimeout(() => _playBossIntro(_bossSpawn.type), _introDelay);
+        const _biMap = id; setTimeout(() => { if (game.currentMap === _biMap) _playBossIntro(_bossSpawn.type); }, _introDelay);   // v0.26.1028 — bail if the player left the arena during the delay
       }
     }
   }
@@ -64535,6 +64541,13 @@ function _readRecipeScrollAt(idx, slot) {
   const crafted = _craftFromScroll(scroll, slot);
   if (crafted) {
     if (!player.inventory) player.inventory = [];
+    // v0.26.1028 — respect the per-tab inventory cap (was unchecked -> craft into a
+    // full tab lost the piece AND ate the scroll). Leave the scroll if the tab is full.
+    const _tab = (typeof _itemTab === 'function') ? _itemTab(crafted) : 'etc';
+    const _cap = (player.invCap && typeof player.invCap[_tab] === 'number') ? player.invCap[_tab] : 24;
+    let _used = 0;
+    for (const _it of player.inventory) { if (_it && (((typeof _itemTab === 'function') ? _itemTab(_it) : 'etc') === _tab)) _used++; }
+    if (_used >= _cap) { showToast('🎒 ' + _tab + ' inventory full — free a slot first.', 'rare'); if (typeof audio !== 'undefined' && audio && audio.play) audio.play('hit'); return; }
     player.inventory.push(crafted);
     player.recipeScrolls.splice(idx, 1);
     showToast(`📜 Crafted ${crafted.name} (${slot})!`, 'legendary');
@@ -64563,6 +64576,12 @@ function _readRecipeScrollsBulk(setIdFilter) {
     const piece = _craftFromScroll(s, _slot);
     if (piece) {
       if (!player.inventory) player.inventory = [];
+      // v0.26.1028 — per-tab cap; a full tab leaves the scroll unconsumed (no item loss).
+      const _tab = (typeof _itemTab === 'function') ? _itemTab(piece) : 'etc';
+      const _cap = (player.invCap && typeof player.invCap[_tab] === 'number') ? player.invCap[_tab] : 24;
+      let _used = 0;
+      for (const _it of player.inventory) { if (_it && (((typeof _itemTab === 'function') ? _itemTab(_it) : 'etc') === _tab)) _used++; }
+      if (_used >= _cap) continue;
       player.inventory.push(piece);
       player.recipeScrolls.splice(i, 1);
       crafted++;
