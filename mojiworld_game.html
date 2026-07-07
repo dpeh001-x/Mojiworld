@@ -8226,7 +8226,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1026';
+const GAME_VERSION = 'v0.26.1027';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -42314,7 +42314,7 @@ function updatePlayer(dt) {
             // pressure" to "meaningful boss DPS" while the 16 s Aegis
             // duration is still single-cast per fight.
             const dmg = Math.floor(getAtk() * 6.0 + 40);
-            hitMonster(m, dmg, rollCrit(), 'aegis');
+            const _c = rollCrit(); hitMonster(m, Math.floor(dmg * (_c ? getCritDmg() : 1)), _c, 'aegis');   // v0.26.1027 — apply crit damage
             spawnSmoothImpact(ox, oy, '#fff1a0');
             // v0.25.557 — per-orb tick rate 350ms → 1000ms per global spec.
             orb.hitCd = 1000;
@@ -46330,7 +46330,7 @@ const SKILL_FNS = {
         for (const m of game.monsters) {
           if (m.currentHp <= 0) continue;
           if (Math.abs((m.x + m.w/2) - cx) < _rushReach && Math.abs(m.y - player.y) < 60) {
-            hitMonster(m, Math.floor(getAtk() * 0.8), rollCrit(), 'rush');   // v0.26.385 — was hardcoded false; Rush can now crit like every other warrior skill
+            const _c = rollCrit(); hitMonster(m, Math.floor(getAtk() * 0.8 * (_c ? getCritDmg() : 1)), _c, 'rush');   // v0.26.385; v0.26.1027 — apply crit DAMAGE (the flag alone did nothing)
           }
         }
         for (let k = 0; k < 5; k++) {
@@ -47545,7 +47545,7 @@ const SKILL_FNS = {
       const mcx = m.x + m.w/2, mcy = m.y + m.h/2;
       if (mcx < lo || mcx > hi) continue;
       if (mcy < top || mcy > bot) continue;
-      hitMonster(m, _dmg, rollCrit(), 'blink');
+      const _c = rollCrit(); hitMonster(m, Math.floor(_dmg * (_c ? getCritDmg() : 1)), _c, 'blink');   // v0.26.1027 — apply crit damage
       _hits++;
     }
     // Streak of arcane motes along the swept path so the AoE reads visually.
@@ -47671,8 +47671,9 @@ const SKILL_FNS = {
       // ≈ 22× ATK direct + 1.6×ATK burn DoT = ~24× ATK per cast. At a
       // 14 s cd that's ~1.7× ATK sustained — finally in the "viable
       // ultimate" tier alongside the v0.26.150 Crusader Aegis buff.
-      const dmg = Math.floor(getAtk() * 2.4 * jumpMul + 12);   // v0.26.x audit: 3.8x+24 -> 2.4x+12
-      hitMonster(current, dmg, true, 'lightning');
+      const _c = rollCrit();
+      const dmg = Math.floor((getAtk() * 2.4 * jumpMul + 12) * (_c ? getCritDmg() : 1));   // v0.26.x audit: 3.8x+24 -> 2.4x+12; v0.26.1027 — real crit roll (was hardcoded true w/ no getCritDmg -> fake crit + streak inflation)
+      hitMonster(current, dmg, _c, 'lightning');
       _applyMobStatus(current, 'stun', 1200, { chance: 100 });   // v0.26.x audit: 2200 -> 1200ms (pack-lock)
       _applyMobStatus(current, 'burn', 3000, { chance: 75, dmg: Math.max(8, Math.floor(getAtk() * 0.18)) });
       spawnSmoothImpact(cx, cy, '#ffee66');
@@ -47773,7 +47774,7 @@ const SKILL_FNS = {
         // there's a raise + drain payload). Bumped to 2.0× ATK per tick
         // so the damage path is meaningful on its own.
         const dmg = Math.floor(getAtk() * 2.0);
-        hitMonster(m, dmg, rollCrit(), 'siphon');
+        const _c = rollCrit(); hitMonster(m, Math.floor(dmg * (_c ? getCritDmg() : 1)), _c, 'siphon');   // v0.26.1027 — apply crit damage (drain below stays on base dmg)
         drained += Math.floor(dmg * 0.3);
         victims.push(m);
         for (let i = 0; i < 2; i++) {
@@ -59306,7 +59307,7 @@ function rollItemDrop(tier, mobLevel, forceCat) {
   for (const it of pool) {
     let w = rarityWeights[it.rarity] || 0;
     if (it.cls && it.cls !== 'any') {
-      w = (it.cls === playerCls) ? Math.round(w * 1.5) : Math.max(1, Math.round(w * 0.3));
+      w = (it.cls === playerCls) ? Math.round(w * 1.5) : (w > 0 ? Math.max(1, Math.round(w * 0.3)) : 0);   // v0.26.1027 — don't resurrect a rarity the table zeroed (else a tier-2 base ships as epic/legendary)
     }
     // v0.26.392 — Apex-scarcity: even when a top tier is level-eligible, make
     // T8-10 progressively rarer within the weighted bag so endgame gear stays
@@ -59557,6 +59558,7 @@ function updateProjectiles(dt) {
       const hitIds = p._hitIds = p._hitIds || new Set();
       for (const m of _liveMobs) {
         if (hitIds.has(m)) continue;
+        if (m.currentHp <= 0 || m._dying) continue;   // v0.26.1027 — _liveMobs is a once-built snapshot; skip an intra-frame corpse so a non-piercing shot isn't consumed by it
         if (aabb(p, _atkMonBox(m))) {
           // Apply job enhancement baked into projectile when fired
           const pEnh = p._enh;
@@ -95097,7 +95099,7 @@ function loop(time) {
     // Dropping the guard lets FX keep animating while dead (queues are still
     // capped, so no leak).
     updateCamera();
-    updateMinions(dt);
+    if (!game.paused) updateMinions(dt);   // v0.26.1027 — don't drain minion lifetime / deal damage while a modal has the game paused (still ticks while dead/frozen)
     updateParticles(dt);
     updateFxInstances(dt);
     updateSmoothFx(dt);
