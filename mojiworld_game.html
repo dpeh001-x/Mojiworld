@@ -8226,7 +8226,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1028';
+const GAME_VERSION = 'v0.26.1029';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -32115,7 +32115,7 @@ function _mpHandle(msg) {
   switch (msg.t) {
     case 'welcome':
       net.myId = msg.id;
-      net.roomId = msg.room || net.roomId;
+      net.roomId = String(msg.room || net.roomId || '').replace(/[<>]/g, '').slice(0, 64);   // v0.26.1029 — scrub at ingestion; roomId feeds an innerHTML log sink (XSS from a hostile/MITM relay)
       net.peers = {};
       for (const p of (msg.players || [])) net.peers[p.id] = { ..._mpScrubStrings(p), _last: performance.now() };
       _mpPushLog(`Joined room "${net.roomId}" · ${Object.keys(net.peers).length} other player(s)`, 'sys');
@@ -33281,6 +33281,10 @@ function acceptQuest(id) {
   if (player.quests.progress && player.quests.progress[id] != null) {
     delete player.quests.progress[id];
   }
+  // v0.26.1029 — Spire chest pieces live outside quest progress; a Journal
+  // abandon+re-accept left them stale so only the uncollected chests spawned and
+  // 4/4 was unreachable (whole PQ soft-locked). Reset on any accept of the Spire.
+  if (id === 'q_pq_spire') player._pqSpirePieces = {};
   player.quests.active[id] = { progress: 0 };
   if (typeof _playUiSfx === 'function') _playUiSfx('quest_accept');   // v0.26.x — SFX-review gap fill
   // v0.26.433 — Init per-target progress map for multi-objective quests.
@@ -55751,7 +55755,9 @@ function bossAI(m, dt, distToPlayer) {
       if (m.patternTimer > 500 && !m._summonFired) {
         m._summonFired = true;
         const minionType = Math.random() < 0.5 ? 'mushroom' : 'mushpup';
-        for (let i = 0; i < 4; i++) {
+        let _shAlive = 0; for (const _mm of game.monsters) if (_mm && _mm._shroomaloos && _mm.currentHp > 0) _shAlive++;
+        const _shSpawn = Math.max(0, Math.min(4, 8 - _shAlive));   // v0.26.1029 — cap total live adds at 8 (was an uncapped batch of 4 per cycle)
+        for (let i = 0; i < _shSpawn; i++) {
           const _ox = m.x + (i - 1.5) * 50;
           const _oy = m.y - 30;
           spawnMonster(_ox, _oy, minionType, false);
@@ -56182,10 +56188,10 @@ function bossAI(m, dt, distToPlayer) {
         m._kFired = true;
         addShake(22); flash(0.35);
         // Apply only when player is on ground (jumping clears it).
-        if (player.onGround && player.hp > 0) {
+        if (player.onGround && player.hp > 0 && (player.invulnerable | 0) <= 0) {   // v0.26.1029 — honor i-frames like other executes
           const dmg = Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp) * 0.55);  // v0.26.468 — 90% → 55% (per user "avoid OHKO"): still a heavy, telegraphed, jump-avoidable hit but no longer near-lethal. true maxHP basis.
-          player.hp = Math.max(1, player.hp - dmg);
-          player.mp = 0;
+          player.hp = Math.max(1, player.hp - (player._god ? 0 : dmg));   // v0.26.1029 — honor god mode
+          player.mp = player._god ? player.mp : 0;
           game.damageNumbers.push({
             x: player.x + 14, y: player.y - 10, vy: -2,
             text: '-' + dmg + ' EARTHQUAKE', life: 60, color: '#ff4444', size: 18,
@@ -58230,7 +58236,7 @@ function killMonster(m) {
     // boss-death toast — dilutes the climax. Silent removal (no loot drop).
     for (let _mi = game.monsters.length - 1; _mi >= 0; _mi--) {
       const _orph = game.monsters[_mi];
-      if (_orph && _orph.type === 'horny' && _orph._shroomaloos === true) {
+      if (_orph && _orph._shroomaloos === true) {   // v0.26.1029 — was also testing type==='horny', but the adds are mushroom/mushpup so the death-sweep never fired
         _orph.currentHp = 0;   // release any homing locks before the silent splice (else a projectile orbits the ghost)
         game.monsters.splice(_mi, 1);
       }
@@ -60607,7 +60613,7 @@ function updateProjectiles(dt) {
     // v0.26.x — marker-only meteor_warn (mortarLob landing telegraph): purely
     // visual, no detonation damage (the lobbed mlob projectile deals the hit).
     // Just clean it up when its timer expires.
-    if (h.type === 'meteor_warn' && h._markerOnly) {
+    if (h.type === 'meteor_warn' && (h._markerOnly || h._aquaFlood)) {   // v0.26.1029 — Aqua flood is a slow-zone (slow applied on overlap), never a detonating meteor
       if (h.life <= 0) game.hazards.splice(i, 1);
       continue;
     }
@@ -81056,7 +81062,7 @@ function drawCuteCharacter(sx, sy) {
   // v0.26.x — Swing-curve reference scaled by ATTACK_PACE_MUL so the easing
   // still normalizes 0→1 over the (now 20% longer) attackTimer countdown.
   const _swingRef = 320 * (typeof ATTACK_PACE_MUL === 'number' ? ATTACK_PACE_MUL : 1);
-  const swingT = isAtk ? Math.min(1, (_swingRef - player.attackTimer) / _swingRef) : 0;
+  const swingT = isAtk ? Math.max(0, Math.min(1, (_swingRef - player.attackTimer) / _swingRef)) : 0;   // v0.26.1029 — lower-clamp; windup attackTimer>_swingRef made swingT<0 -> Math.pow(neg,0.7)=NaN pose
   const swingBase = isAtk
     ? Math.sin(Math.pow(swingT, 0.7) * Math.PI)
     : 0;
@@ -93530,7 +93536,7 @@ function drawHazards() {
       }
       // v0.26.x — marker-only telegraph (mortarLob): draw just the ground rune,
       // not a falling meteor (the mortar's own arcing mlob projectile is visible).
-      if (h._markerOnly) continue;
+      if (h._markerOnly || h._aquaFlood) continue;   // v0.26.1029 — Aqua flood draws only its ground rune, not a falling meteor
       // v0.25.209 — Sprite-based meteor replaces the procedural circle
       // stack. Used by the mage's Meteor (job F) and Sage's Meteor Shower
       // (master G) — both push 'meteor_warn' hazards. Falls back to the
