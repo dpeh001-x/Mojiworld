@@ -8226,7 +8226,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1024';
+const GAME_VERSION = 'v0.26.1025';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -31212,6 +31212,19 @@ function _sanitizePlayerSaveNumerics(p) {
       else if (v < -1e5) p.mods[k] = -1e5;
     }
   }
+  // v0.26.1025 — a tampered/edited import save with a non-finite equipped-item
+  // stat (weapon.atk = 1e999 -> Infinity) poisons getEquipBonus -> getMaxHp/
+  // getAtk -> every player stat becomes NaN/Infinity. Neutralise any non-finite
+  // numeric field on every equipped item (leaves names/rarity/affix arrays alone).
+  if (p.equipped && typeof p.equipped === 'object') {
+    for (const _slot of Object.keys(p.equipped)) {
+      const _it = p.equipped[_slot];
+      if (!_it || typeof _it !== 'object') continue;
+      for (const _k of Object.keys(_it)) {
+        if (typeof _it[_k] === 'number' && !isFinite(_it[_k])) _it[_k] = 0;
+      }
+    }
+  }
   return p;
 }
 
@@ -31551,6 +31564,7 @@ function loadState() {
     // deliberately don't restore the old wolves: they're transient
     // summons with a 100 s lifetime, so a fresh array is correct.
     if (!Array.isArray(player.pack)) player.pack = [];
+    player.pet = null; player.ultPet = null;   // v0.26.1025 — transient summons aren't restored (match _clones/_ballista/pack); a persisted pet resurfaced on stale coords
     // v0.25.531 — clear transient L10 buff state on load (not persisted in
     // PLAYER_SAVE_FIELDS; resetting these prevents leftover flags from
     // an old session masking the no-buff state).
@@ -31580,7 +31594,13 @@ function loadState() {
     // town), and a stale `active` flag permanently zeroes ALL mojicoin income
     // (the grant guard checks expedition.active, not the map) and blocks starting
     // a new run. Treat an interrupted expedition as abandoned.
-    if (game.expedition && game.expedition.active) game.expedition.active = false;
+    if (game.expedition && game.expedition.active) {
+      // v0.26.1025 — restore the pre-run snapshot on an interrupted-expedition
+      // resume; the flip alone let in-run boons/inventory/equipped (mutated in
+      // place and mid-run autosaved) leak permanently into the persistent world.
+      try { if (typeof _expeditionRestorePlayer === 'function') _expeditionRestorePlayer(game.expedition.snapshot); } catch (e) {}
+      game.expedition = { active: false, floor: 0, bravoReady: false, currentQuest: null };
+    }
     loadMap('town', 600);
     game.currentMap = 'town';
     if (typeof renderSkillBar === 'function') renderSkillBar();
@@ -33296,7 +33316,7 @@ function toggleQuestJournal() {
   if (!modal) return;
   if (modal.style.display === 'flex') {
     modal.style.display = 'none';
-    game.paused = false;
+    if (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen()) game.paused = false;   // v0.26.1025 — don't unpause under a story-beat/boss-intro opened on top
     return;
   }
   // Tick unlocks once before rendering so any newly-eligible quests show
@@ -33413,7 +33433,7 @@ function toggleWorldMap() {
   if (!modal) return;
   if (modal.style.display === 'flex') {
     modal.style.display = 'none';
-    game.paused = false;
+    if (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen()) game.paused = false;   // v0.26.1025 — don't unpause under a story-beat/boss-intro opened on top
     return;
   }
   // v0.26.x - The player-facing W map always opens CLEAN: any leftover dev
@@ -33459,7 +33479,7 @@ function toggleWorldMapEditor() {
     modal.style.display = 'none';
     _wmEditMode = false; _wmEditSelectedId = null;
     if (bar) bar.style.display = 'none';
-    game.paused = false;
+    if (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen()) game.paused = false;   // v0.26.1025 — don't unpause under a story-beat/boss-intro opened on top
     return;
   }
   if (bar) bar.style.display = '';
@@ -39259,6 +39279,14 @@ function loadMap(id, entryX, entryY) {
   // v0.26.288 — Clear the quest pin on any non-tower map load (safety net
   // in case the player exits the tower without going through _endExpedition).
   if (id && !id.startsWith('tower_b')) {
+    // v0.26.1025 — a non-tower map load with active=true means the player left
+    // the tower without _endExpedition (world map / taxi / stray portal). That
+    // stale flag zeroes all mojicoin income for the session and skips the boon/
+    // gear restore. Abandon inline here (no loadMap recursion): restore snapshot.
+    if (game.expedition && game.expedition.active) {
+      try { if (typeof _expeditionRestorePlayer === 'function') _expeditionRestorePlayer(game.expedition.snapshot); } catch (e) {}
+      game.expedition = { active: false, floor: 0, bravoReady: false, currentQuest: null };
+    }
     if (typeof game !== 'undefined' && game.expedition) game.expedition.currentQuest = null;
     if (typeof _renderExpeditionQuestPin === 'function') _renderExpeditionQuestPin();
   }
@@ -53254,8 +53282,9 @@ function _bossSpecialAttacks(m, dt) {
         // (≈ 350 ms apart) — gives the player a moment to read each
         // before the next telegraph starts.
         const _delay = _pi * 350;
+        const _mapAtSched = game.currentMap;   // v0.26.1025 — stale-map guard for the delayed pillar
         setTimeout(() => {
-          if (!game.hazards || !m || m.currentHp <= 0) return;
+          if (!game.hazards || !_zSafeFire(m, _mapAtSched)) return;   // v0.26.1025 — was currentHp-only; block a stale-map hazard push after death/portal
           game.hazards.push({
             type: 'sovereign_drain_pillar',
             x: _xs[_pi] - _pillarW/2,
@@ -55045,9 +55074,10 @@ function bossAI(m, dt, distToPlayer) {
       } else if (!m._laserFired) {
         m._laserFired = true;
         const shots = phase === 3 ? 5 : phase === 2 ? 3 : 2;
+        const _mapAtLaser = game.currentMap;   // v0.26.1025 — stale-map guard for the delayed laser
         for (let i = 0; i < shots; i++) {
           setTimeout(() => {
-            if (m.currentHp <= 0) return;
+            if (!_zSafeFire(m, _mapAtLaser)) return;   // v0.26.1025 — was currentHp-only; block a stale-map laser after death/portal
             const bx = m.x + m.w/2;
             const by = m.y + m.h/2;
             const px = player.x + player.w/2;
