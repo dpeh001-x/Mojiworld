@@ -26062,7 +26062,7 @@ function getDef()  {
   let d = player.baseDef + player.mods.def + getEquipBonus('def');
   if (player.buffs.warCry > 0)   d = Math.floor(d * 1.25);
   if (player.buffs.guardian > 0) d = Math.floor(d * 1.5 + 40);
-  if (player.buffs.holyShield > 0) d += 9999;
+  if (player.buffs.holyShield > 0 && (game.time | 0) < (player._holyShieldDefUntil || 0)) d += 9999;   // v0.26.x bug round 11 — DEF wall now only during the 2.5s invuln window, not the full 5s buff (see holyShield caster)
   // Milestone: Second Wind — +80% DEF for 10s when HP<20%, triggered once per 2min
   if (hasMilestone('secondWind')) {
     const hpP = player.hp / Math.max(1, getMaxHp());
@@ -28787,6 +28787,7 @@ function applyClass(clsId) {
   // multiplier from the old class doesn't linger (or combine with another class).
   player._warCharge = null; player._releasedCharge = null;
   player._classSkillMul = 1; player._guaranteedCrit = 0;
+  player._prismCharges = 0;   // v0.26.x bug round 11 — drop carried priest Prism Charges on class swap too
   player._momentum = 0; player._steady = 0;
   // v0.26.223 — Clear keybinds pointing at OTHER-CLASS skills on class
   // change. Pre-fix, a warrior who bound 'X' → 'powerStrike' and then
@@ -39772,6 +39773,7 @@ function loadMap(id, entryX, entryY) {
     player._chargeStart = 0;
     player._rootedTimer = 0;
     player._classSkillMul = 1; player._guaranteedCrit = 0;   // clear the next-N-crits stack too, so a Nightreaper ult can't carry onto a fresh map / past death
+    player._prismCharges = 0;   // v0.26.x bug round 11 — priest Prism Charges (Holy Light builds, Celestial Aurora consumes for +5%/charge heal) also leaked across death/respawn/map like _guaranteedCrit did
     player._holyShieldDr = 0;
     player._holyShieldDrUntil = 0;
     player._dragoonExtraSlam = 0;
@@ -42728,8 +42730,8 @@ function updatePlayer(dt) {
   // burst + screen shake. Per-pothole cooldown (≈3 s) keeps the player
   // from being stun-locked while standing on one. Skipped while
   // airborne so jumping across reads as "skipping the pothole".
-  if (player.onGround && player.hitStun <= 0 && game.mapData &&
-      Array.isArray(game.mapData.potholes)) {
+  if (player.onGround && player.hitStun <= 0 && !player._god && player.invulnerable <= 0 && game.mapData &&
+      Array.isArray(game.mapData.potholes)) {   // v0.26.x bug round 11 — potholes were the one hazard that stun-locked a god-mode / mid-dodge (i-frame) player; every other hazard honors _god / invulnerable
     if (!player._potholeCD) player._potholeCD = {};
     const _phs = game.mapData.potholes;
     const _fx0 = player.x;
@@ -43041,7 +43043,7 @@ function updatePlayer(dt) {
         const tierPct   = game.mapData.fallTierPct   ?? 0.06;
         const maxPct    = game.mapData.fallMaxPct    ?? 0.50;
         const fallFlrs  = Math.floor(fallPx / floorPx);
-        if (fallFlrs > freeFlrs && player.invulnerable <= 0) {
+        if (fallFlrs > freeFlrs && player.invulnerable <= 0 && !player._god) {   // v0.26.x bug round 11 — tower fall damage was the one player-damage path that ignored god mode (pit-fall below, lava, and all DoTs honor _god); a god player could be hurt/killed by a long tower drop
           const tiers = Math.floor((fallFlrs - freeFlrs) / tierFlrs) + 1;
           const dmgPct = Math.min(maxPct, tiers * tierPct);
           const dmg = Math.max(1, Math.floor(getMaxHp() * dmgPct));
@@ -43092,6 +43094,7 @@ function updatePlayer(dt) {
     // v0.26.1026 — a fallen vertical-tower climber lands near the bottom, not warped to the summit (y=400).
     const _resetY = (game.mapData && game.mapData.isVerticalTower) ? Math.max(200, Math.min(player.y, _wh - 200)) : 400;
     player.x = 100; player.y = _resetY; player.vx = 0; player.vy = 0;
+    player._fallApexY = player.y;   // v0.26.x bug round 11 — clear the stale climb apex; without this the NEXT landing measured the fall against the pre-teleport summit and dealt a phantom big fall-damage hit
   }
 
   if (player.invulnerable > 0) player.invulnerable -= dt;
@@ -46496,6 +46499,12 @@ const SKILL_FNS = {
     // on the 22s cd, the longest non-ult immunity in the game). The 5s reflect
     // buff stays; only the hard invulnerability is halved.
     player.invulnerable = Math.max(player.invulnerable, 2500);
+    // v0.26.x bug round 11 — getDef() granted the flat +9999 DEF wall for the
+    // FULL 5 s buff, so the 2.5–5 s window (meant to be vulnerable-with-reflect
+    // after the halved i-frames) still floored every hit to 1 dmg = near-total
+    // immunity, silently undoing the "only the hard invulnerability is halved"
+    // audit. Gate the DEF spike to the 2.5 s invuln window (150 frames @ 60fps).
+    player._holyShieldDefUntil = (game.time | 0) + 150;
     // v0.25.530 — Level-10 bonus: +25% damage reduction for 10 s.
     // Read in the damage pipeline alongside getDef.
     const _hsBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('holyShield') : null;
@@ -58579,11 +58588,18 @@ function killMonster(m) {
   // v0.26.x economy audit -- hard ceiling on the per-kill coin multiplier so
   // greed-boon stacking x treasureCrits can't compound past 2.5x.
   _coinMul = Math.min(_coinMul, 2.5);
+  // v0.26.x bug round 11 — split the per-kill coin reward so the drops SUM to
+  // the intended total. The old code did `ceil(total / count)` on every coin
+  // independently, so N coins summed to up to N-1 MORE than intended (e.g.
+  // total 10 / 3 coins -> ceil(3.33)=4 each -> 12, +20%), an always-in-favor
+  // drift on every mob kill and a mismatch with the kill-toast expected value.
+  const _coinTot = Math.max(0, Math.floor(m.mojicoins * _coinMul * (typeof _monsterCoinMult === 'function' ? _monsterCoinMult(m) : 1)));
+  const _coinEach = Math.floor(_coinTot / mojicoinCount);
   for (let i = 0; i < mojicoinCount; i++) {
     game.drops.push({
       x: m.x + m.w/2 + (Math.random() - 0.5) * 20, y: m.y + m.h/2,
       vy: -Math.random() * 4 - 2, type: 'mojicoin',
-      value: Math.ceil(m.mojicoins * _coinMul * (typeof _monsterCoinMult === 'function' ? _monsterCoinMult(m) : 1) / mojicoinCount), life: 400,
+      value: (i === mojicoinCount - 1) ? (_coinTot - _coinEach * (mojicoinCount - 1)) : _coinEach, life: 400,
     });
   }
 
@@ -59679,7 +59695,12 @@ function updateProjectiles(dt) {
           // DefBreak (Ballista): permanent stun vulnerability
           if (p.defBreak) {
             m.stunTimer = Math.max(m.stunTimer || 0, 400);
-            m.atk = Math.max(1, Math.floor(m.atk * 0.85));
+            // v0.26.x bug round 11 — the -15% ATK shred ran on EVERY defBreak
+            // hit. Siege fires 2 pierce arrows / 9 frames (~13 hits/sec), so
+            // 0.85^N collapsed a boss's ATK to the floor of 1 within ~2s and
+            // it stayed there permanently (mutated on the live instance) —
+            // trivializing every apex boss. Make the shred one-time per mob.
+            if (!m._defBroken) { m._defBroken = true; m.atk = Math.max(1, Math.floor(m.atk * 0.85)); }
           }
           // Status
           // v0.26.041 — Optional `freezeChance` (0..1) + `freezeBossImmune`
@@ -63266,6 +63287,7 @@ function selectSellByTier(maxTier) {
     let equipped = false;
     for (const s in (player.equipped || {})) { if (player.equipped[s] === it) { equipped = true; break; } }
     if (equipped) continue;
+    if (typeof it.price !== 'number') continue;   // v0.26.x bug round 11 — priceless items (no .tier either -> tier|0=0) were swept by "Tier ≤ 0" and destroyed
     if ((it.tier | 0) <= _cap) { game._sellSelection.add(i); n++; }
   }
   return n;
@@ -63284,6 +63306,10 @@ function executeSellSelection() {
   for (const idx of ordered) {
     const it = player.inventory[idx];
     if (!it) continue;
+    // v0.26.x bug round 11 — a priceless item (recipe scrolls, quest items have
+    // no numeric .price) gave val = floor(undefined*0.4) = NaN, granted 0 coins,
+    // then STILL spliced out of the bag — destroyed for nothing. Never sell one.
+    if (typeof it.price !== 'number') continue;
     const val = Math.floor(it.price * 0.4);
     for (const s in player.equipped) { if (player.equipped[s] === it) player.equipped[s] = null; }
     gained += _grantMojicoins(val);
@@ -63588,6 +63614,7 @@ function openShop(type, opts) {
       list.appendChild(toolbar);
       // ── ROWS ──
       player.inventory.forEach((it, idx) => {
+        if (!it || typeof it.price !== 'number') return;   // v0.26.x bug round 11 — only list sellable (priced) gear; recipe scrolls / quest items are priceless and were shown as 0-value rows that deleted the item when sold
         const val = _sellPriceOf(it);   // v0.26.x audit FIX — show post-scalar payout, matching what's granted
         const row = document.createElement('div');
         row.className = 'sell-row rarity-' + (it.rarity || 'common');
@@ -63626,7 +63653,7 @@ function openShop(type, opts) {
       list.appendChild(footer);
       // Toolbar handlers
       toolbar.querySelector('#sell-all').onclick = () => {
-        for (let i = 0; i < player.inventory.length; i++) game._sellSelection.add(i);
+        for (let i = 0; i < player.inventory.length; i++) { const it = player.inventory[i]; if (it && typeof it.price === 'number') game._sellSelection.add(i); }   // v0.26.x bug round 11 — never bulk-select priceless items (recipe scrolls / quest items)
         openShop('sell');
       };
       toolbar.querySelector('#sell-clear').onclick = () => {
@@ -63636,7 +63663,7 @@ function openShop(type, opts) {
       toolbar.querySelector('#sell-common').onclick = () => {
         for (let i = 0; i < player.inventory.length; i++) {
           const it = player.inventory[i];
-          if (it && (it.rarity || 'common') === 'common') game._sellSelection.add(i);
+          if (it && typeof it.price === 'number' && (it.rarity || 'common') === 'common') game._sellSelection.add(i);
         }
         openShop('sell');
       };
@@ -89123,6 +89150,17 @@ function zodiacBossAI(m, dt, distToPlayer) {
     m.phase = phase;
     m.patternTimer = 0;
     m.patternState = 'idle';
+    // v0.26.x bug round 11 — forcing patternState to 'idle' skips the burrow
+    // exit branch (the ONLY place these latches clear). If a burn/thorns DoT
+    // crossed a phase boundary while Scorpio was underground (_invulnBurrow
+    // true, _noGravity true), the boss was left permanently invulnerable and
+    // frozen sunk into the ground until 'idle' happened to re-roll burrow.
+    // Clear the burrow latches here too (Scorpio-only fields; no-op for the
+    // other 11 signs, which never set them).
+    m._invulnBurrow = false;
+    m._noGravity = false;
+    m._erupted = false;
+    m._burrowGroundY = null;
     m.phaseFx = 40;
     if (phase > 1) {
       showToast(`${z.glyph} ${z.name.split(' ')[0]} — Phase ${phase}!`, 'legendary');
