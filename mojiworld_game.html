@@ -27262,6 +27262,17 @@ function _wireMobileCooldownSweep() {
         cd = player.attackCooldown || 0;
         if (cd > 0 && (!max || max <= 0)) max = cd;
       }
+      // v0.26.x bug round 14 — peak-track the ACTUAL started cooldown so CDR /
+      // mage 0.90 / Lv10 reductions don't open the ring below 100% (base
+      // found.def.cd exceeds the real started cd). Mirrors the desktop-slot fix.
+      const _cdKey = found ? found.id : (slot === 'd' ? '_basic' : null);
+      if (cd > 0 && _cdKey) {
+        if (btn._cdMaxId !== _cdKey) { btn._cdMaxId = _cdKey; btn._cdMax = 0; }
+        if (!(btn._cdMax > 0) || cd > btn._cdMax) btn._cdMax = cd;
+        if (btn._cdMax > 0) max = btn._cdMax;
+      } else {
+        btn._cdMax = 0;
+      }
       const cooling = cd > 0 && max > 0;
       const overlay = btn._cachedOverlay;
       if (cooling) {
@@ -28767,6 +28778,14 @@ function applyClass(clsId) {
   const c = CLASSES[clsId];
   if (!c) return;
   player.cls = clsId;
+  // v0.26.x bug round 14 — invalidate the equip-bonus cache on class change.
+  // getEquipBonus() bakes class-dependent values into _equipBonusCache: the
+  // affinity multiplier (it.cls===player.cls ? 1.20 : 0.75) and the class-gated
+  // set-bonus fold. The cache is refreshed on equip/enhance/sell/reforge but NOT
+  // here, so a class swap (NPC / prestige rebuild / dev) kept the OLD class's set
+  // bonuses + affinity until some unrelated gear action happened to clear it —
+  // and the getMaxHp()/getMaxMp() re-sync just below read the stale numbers.
+  if (typeof refreshGearCache === 'function') refreshGearCache();
   player.baseAtk = c.stats.atk;
   player.baseDef = c.stats.def;
   player.baseCrit = c.stats.crit || 5;
@@ -39681,7 +39700,7 @@ function loadMap(id, entryX, entryY) {
         // v0.26.x — the Gravitos final-boss arena holds a longer dramatic entrance
         // (held blackout + building quake) BEFORE the cinematic, so delay its intro.
         const _introDelay = (id === 'gravitosArena') ? 2300 : 500;
-        const _biMap = id; setTimeout(() => { if (game.currentMap === _biMap) _playBossIntro(_bossSpawn.type); }, _introDelay);   // v0.26.1028 — bail if the player left the arena during the delay
+        const _biMap = id; setTimeout(() => { if (game.currentMap === _biMap && (game.monsters || []).some(x => x && x.isBoss)) _playBossIntro(_bossSpawn.type); }, _introDelay);   // v0.26.1028 — bail if the player left the arena during the delay // v0.26.x bug round 14 — also require a real boss to be present: re-entering a DEFEATED arena within the 10-min respawn cooldown spawns no boss (gated on bossDefeated) yet still played the 3.2s cinematic + forced pause with only the Echo Keeper standing there
       }
     }
   }
@@ -39874,6 +39893,7 @@ function loadMap(id, entryX, entryY) {
     // open window so the next B press re-casts under normal cooldown gating.
     player._warlordEnrageUntil = 0; player._sageUntil = 0; player._sageShots = 0;
     player.doubleJumpUsed = false;
+    player.hitStun = 0;   // v0.26.x bug round 14 — hitStun was the one lock omitted from this map-reset family. A hit / pothole stumble / long tower fall sets hitStun (up to 700ms); if a scripted or boss-defeat loadMap fires in that window the player arrived on the new map frozen — can't move, attack, or portal — until it ticked out.
     if (typeof cancelPendingSkillTimers === 'function') cancelPendingSkillTimers();
   }
   // v0.25.453 — NPC y override: if a map defines an explicit `y` on an NPC
@@ -46801,7 +46821,7 @@ const SKILL_FNS = {
     }
     // Big upward leap
     player.vy = -11;
-    player.doubleJumpUsed = false;                       // refreshes air jump
+    player.doubleJumpUsed = false; player.airJumps = 0;  // refreshes air jump — v0.26.x bug round 14: the air-jump gate reads airJumps, not the write-only doubleJumpUsed, so the advertised refresh was a no-op
     for (let i = 0; i < 2; i++) {
       game.particles.push({
         x: player.x + player.w/2 + (Math.random() - 0.5) * 14,
@@ -47312,7 +47332,7 @@ const SKILL_FNS = {
     // FIRST SOMERSAULT — bigger initial leap than the basic Shuriken
     // (was -11, now -15) so the second somersault has room to land at apex.
     player.vy = -15;
-    player.doubleJumpUsed = false;
+    player.doubleJumpUsed = false; player.airJumps = 0;   // v0.26.x bug round 14 — refresh the REAL air-jump gate (airJumps), not the dead doubleJumpUsed
     player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
     // v0.25.963 — Drive the chibi's somersault transform directly so the
     // player visibly does a FAST 360° spin on the first round. The basic
@@ -47350,7 +47370,7 @@ const SKILL_FNS = {
     scheduleSkillTimer(() => {
       if (player.hp <= 0 || game.paused) return;
       player.vy = Math.min(player.vy, -9);              // re-boost upward
-      player.doubleJumpUsed = false;
+      player.doubleJumpUsed = false; player.airJumps = 0;   // v0.26.x bug round 14 — refresh the REAL air-jump gate (airJumps)
       // v0.25.963 — Second fast somersault. Same 220 ms duration as the
       // first so the two spins chain into a continuous "double somersault
       // FAST" read. Direction matches facing (which may have changed if
@@ -51533,7 +51553,7 @@ function updateMonsters(dt) {
     //   PHASE 3 — dash:  vx = _dashDir × (distance/dashFrames). Mob
     //                   slides fast in the chosen direction.
     //   PHASE 4 — cooldown: _dashCd resets
-    if (m.traits && m.traits.lateralDash && !m.isBoss && m.currentHp > 0) {
+    if (m.traits && m.traits.lateralDash && !m.isBoss && m.currentHp > 0 && !_ccHalted) {   // v0.26.x bug round 14 — parity: don't advance the dash telegraph/timers (leaving vx primed to fire on CC-end) while frozen/stunned
       const ld = m.traits.lateralDash;
       if (m._dashCd === undefined) m._dashCd = ld.cdMs * 0.6 + Math.random() * ld.cdMs * 0.4;
       m._dashCd -= dt;
@@ -51696,8 +51716,8 @@ function updateMonsters(dt) {
     // Strength ramps with proximity (stronger at the edge, near-zero at
     // contact) so melee builds can fight in close instead of being yanked
     // into the kraken's contact hitbox. Respects iframes + godmode.
-    if (m.currentHp > 0 && m.traits && m.traits.pullsPlayer && player &&
-        player.hp > 0 && (player.invulnerable | 0) <= 0 && !player._god) {
+    if (m.currentHp > 0 && !_ccHalted && m.traits && m.traits.pullsPlayer && player &&
+        player.hp > 0 && (player.invulnerable | 0) <= 0 && !player._god) {   // v0.26.x bug round 14 — a frozen/stunned Brinekraken kept yanking the player; missed the _ccHalted retrofit that silenced shoot/bigMelee/columnStrike
       const P = m.traits.pullsPlayer;
       const range = P.range || 240;
       const strength = P.strength || 0.18;
@@ -51717,7 +51737,7 @@ function updateMonsters(dt) {
     // Independent of m.shoot — gives mid+late-game mobs a unique
     // mechanic to play around (groundStun / homingShot / poisonCloud
     // / dashCharge). Skipped for bosses (they have their own full AI).
-    if (!m.isBoss && m.currentHp > 0 && MONSTER_SKILLS[m.type]) {
+    if (!m.isBoss && m.currentHp > 0 && !_ccHalted && MONSTER_SKILLS[m.type]) {   // v0.26.x bug round 14 — signature skills (homingShot/groundStun/poisonCloud/dashCharge) fired mid-freeze/stun; missed the _ccHalted retrofit
       if (m._mskTimer === undefined) {
         // Stagger the first cast so a pack doesn't all fire at once.
         m._mskTimer = MONSTER_SKILLS[m.type].cd * (0.5 + Math.random() * 0.6);
@@ -59008,7 +59028,13 @@ function killMonster(m) {
     // branch — only the FINAL boss death reaches this code.
     {
       const _shardMapKey = (game.currentMap || 'unknown') + '_shardsAwarded';
-      if (!game.bossDefeated[_shardMapKey]) {
+      // v0.26.x bug round 14 — exclude expedition / echo bosses, matching the
+      // sibling reward blocks (bossDefeated stamp, boon wheel, epitaph). Setshards
+      // aren't in the expedition snapshot, so this leaked a persistent-world gain
+      // through the roguelite boundary; worse, it stamped tower_bN_shardsAwarded
+      // which the respawn-delete never clears for expedition bosses, so only the
+      // FIRST expedition ever dropped them and every later run silently gave none.
+      if (!m._echoBoss && !m._expeditionBoss && !game.bossDefeated[_shardMapKey]) {
         const _bossLvl = (m.level && m.level > 0) ? m.level
                        : (typeof _mobLevel === 'function' ? _mobLevel(m) : 50);
         const SHARDS = Math.min(50, Math.max(1, Math.floor(_bossLvl * 0.5)));
@@ -59539,7 +59565,11 @@ function updateProjectiles(dt) {
       }
     } else if (p.homing && p.homing !== true) {
       // Target gone — dead reckoning
-      p.homing = null;
+      // v0.26.x bug round 14 — also stamp _arc. Without it, next frame the
+      // one-time launch-arc block below (guarded on !p.homing && !p._arc) fires
+      // a retroactive `vy -= 2.0` on a mid-flight homing fireball whose target
+      // just died — a visible upward hop.
+      p.homing = null; p._arc = true;
     }
     // Archer class perk — arrows/projectiles fly much further
     if (p.owner === 'player' && !p._ranged && player.cls === 'archer') {
@@ -94523,7 +94553,14 @@ function renderSkillBar() {
         s._cdShown = true;
         s.cdEl.style.display = 'flex';
       }
-      const frac = (matched.cd > 0) ? Math.min(1, cd / matched.cd) : 1;   // guard cd:0/undefined -> no Infinity/NaN width (mirrors the HUD-deck path)
+      // v0.26.x bug round 14 — divide by the ACTUAL cooldown that was started,
+      // not the static base skill.cd. CDR gear / mage 0.90 / Lv10 cd-cuts make
+      // skillCooldowns[id] start below skill.cd, so the pie-wipe opened already
+      // partly drained (a mage ring never showed full). Track the peak observed
+      // cd per slot (reset on clear or slot-skill change) like the buff-bar fix.
+      if (s._cdMaxId !== matchId) { s._cdMaxId = matchId; s._cdMax = 0; }
+      if (!(s._cdMax > 0) || cd > s._cdMax) s._cdMax = cd;
+      const frac = (s._cdMax > 0) ? Math.min(1, cd / s._cdMax) : (matched.cd > 0 ? Math.min(1, cd / matched.cd) : 1);   // guard cd:0/undefined -> no Infinity/NaN width
       // v0.25.35 — conic-gradient pie-wipe via --cd-pct (was height fill)
       const pctTxt = (frac * 100).toFixed(1);
       const cdTxt = (cd / 1000).toFixed(1);
@@ -94539,6 +94576,7 @@ function renderSkillBar() {
       s._cdShown = false;
       s._cdPct = null;
       s._cdTxt = null;
+      s._cdMax = 0;   // v0.26.x bug round 14 — reset peak so the next cast's ring opens at 100%
       s.cdEl.style.display = 'none';
       s.root.style.removeProperty('--cd-pct');
     }
