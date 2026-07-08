@@ -17457,8 +17457,14 @@ const MONSTER_SKILL_FNS = {
     // new map damages them on the wrong map. (Debug recon: RACE #5.)
     const _mapAtStart = game.currentMap;
     const fire = () => {
-      if (!m || m.currentHp <= 0) return;
-      if (game.currentMap !== _mapAtStart) return;
+      // v0.26.x bug round 12 — this hand-rolled guard checked hp + map but NOT
+      // game.paused or monsters.includes, unlike every boss pattern (which use
+      // _zSafeFire). Opening the world-map/inventory mid-volley let the wall-
+      // clock setTimeout chain queue shots 2-4 during the pause; on unpause all
+      // three launched at once at the player's frozen position — an unavoidable
+      // point-blank burst instead of the staggered 80ms-spaced volley. Use the
+      // shared gate, which subsumes the hp/map checks and adds pause+membership.
+      if (!_zSafeFire(m, _mapAtStart)) return;
       const mx = m.x + m.w / 2, my = m.y + m.h / 2;
       const dx = (player.x + player.w / 2) - mx;
       const dy = (player.y + player.h / 2) - my;
@@ -32186,7 +32192,12 @@ function _mpHandle(msg) {
     }
     case 'emote': {
       const p = net.peers[msg.id];
-      if (p) p.emote = { kind: msg.kind, life: 2000 };
+      // v0.26.x bug round 12 — emote.kind was the one inbound peer field that
+      // skipped all validation/scrub (chat is capped+scrubbed, welcome/joined/
+      // state run _mpScrubStrings). A hostile/MITM relay could send a 200KB
+      // kind that _mpDrawPeers renders via ctx.fillText every frame for 2s ->
+      // main-thread jank. Coerce, strip control/angle chars, cap length.
+      if (p) p.emote = { kind: String(msg.kind || '').replace(/[\u0000-\u001f\u007f<>]/g, '').slice(0, 24), life: 2000 };
       break;
     }
     case 'error':
@@ -36992,8 +37003,16 @@ function offerPrestige() {
     game.prestige = p;
     // Reset progression
     player.level = 1; player.exp = 0; player.expToNext = 30;     // v0.26.329 — matches 200 × 1^2.5 × 0.15 = 30 (was 37 under 250-base poly)
-    player.maxHp = 100; player.maxMp = 50;
-    player.baseAtk = 12; player.baseDef = 5;
+    // v0.26.x bug round 12 — prestige hardcoded the base stats to 100/50/12/5,
+    // which match NO class (fresh mage MP is 130, warrior HP 150), and never
+    // reset baseCrit/baseSpeed/baseJump — so job/master-granted crit & speed
+    // leaked into the PERMANENT base and re-mastering re-stacked them every
+    // ascension. Prestige keeps player.cls, so re-derive the base from the class
+    // exactly like applyClass() does, instead of writing bogus flat numbers.
+    const _pc = (CLASSES[player.cls] && CLASSES[player.cls].stats) || { hp:100, mp:50, atk:12, def:5, crit:5, speed:3, jump:11 };
+    player.maxHp = _pc.hp; player.maxMp = _pc.mp;
+    player.baseAtk = _pc.atk; player.baseDef = _pc.def;
+    player.baseCrit = _pc.crit || 5; player.baseSpeed = _pc.speed; player.baseJump = _pc.jump;
     // Clear the invested-stat ledger too. Without this, a post-ascension Reset
     // Stats reverses deltas that were already wiped above (maxHp -> 1, baseAtk
     // negative) and refunds free skill points for ranks that no longer exist.
@@ -93716,6 +93735,13 @@ function drawParticles() {
     // v0.25.556 — Y cull camera.y aware (vertical-tower fix).
     if (sx < -10 || sx > W + 10 || p.y < camY - 10 || p.y > camY + H + 10) continue;
     if (p.text) {
+      // v0.26.x bug round 12 — the text branch was the only particle kind that
+      // never set ctx.globalAlpha, so it inherited whatever alpha the previous
+      // particle left in lastAlpha. The Shackle threat icon then flickered in
+      // opacity frame-to-frame (and popped out at life:0 with no fade tail).
+      // Mirror the sibling branches: compute the life-based fade + set alpha.
+      const alpha = p.life < 20 ? p.life / 20 : 1;
+      if (alpha !== lastAlpha) { ctx.globalAlpha = alpha; lastAlpha = alpha; }
       if (p.color !== lastColor) { ctx.fillStyle = p.color; lastColor = p.color; }
       ctx.fillText(p.text, sx, p.y);
     } else if (p.sprite) {
