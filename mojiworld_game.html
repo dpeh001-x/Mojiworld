@@ -31241,6 +31241,19 @@ function _sanitizePlayerSaveNumerics(p) {
       }
     }
   }
+  // v0.26.x bug round 13 — the v0.26.1025 guard above only scrubbed EQUIPPED
+  // items, but getEquipBonus folds numeric fields the moment an item is equipped.
+  // A tampered import with a non-finite stat sitting in the INVENTORY passed the
+  // shape check, loaded clean, then poisoned every stat on the first equip-click.
+  // Scrub inventory items the same way.
+  if (Array.isArray(p.inventory)) {
+    for (const _it of p.inventory) {
+      if (!_it || typeof _it !== 'object') continue;
+      for (const _k of Object.keys(_it)) {
+        if (typeof _it[_k] === 'number' && !isFinite(_it[_k])) _it[_k] = 0;
+      }
+    }
+  }
   return p;
 }
 
@@ -32280,6 +32293,12 @@ function _mpOpenChat() {
   // Release any held movement/action keys: their keyup gets swallowed by the
   // focused chat input, so without this the player keeps walking while typing.
   for (const kk in game.keys) game.keys[kk] = false;
+  // v0.26.x bug round 13 — also drop any in-flight class charge. Chat doesn't
+  // pause, so _tickClassIdentity keeps running; an archer holding a charge when
+  // they hit Enter gets vx forced to 0 every frame (rooted) because the skill
+  // key's keyup is swallowed by the focused input and never releases the charge.
+  // Clearing game.keys alone left _warCharge set → stuck-rooted until re-press.
+  if (typeof player !== 'undefined' && player) { player._warCharge = null; player._releasedCharge = null; }
 }
 function _mpCloseChat(sendText) {
   const inp = document.getElementById('mp-chat-input');
@@ -40579,6 +40598,13 @@ function spawnFromMap(type, boss, opts) {
     return;
   }
   const platList = game.mapData.platforms.filter(p => p.type === 'platform');
+  // v0.26.x bug round 13 — derive the ground line from the actual ground
+  // platform instead of the literal flat-map 480. On tall / vertical-tower maps
+  // (B9 Stormlit Antechamber, Honeycomb Hollow) the ground sits at worldHeight-80,
+  // so ~40% of grounded spawns (the else branch below) plus bosses materialised
+  // near the CEILING at y≈480 and rained down / piled at the base — breaking the
+  // "climb the platforms to reach them" objective. Flat maps already have ground≈480.
+  const _groundY = (game.mapData.platforms.find(p => p.type === 'ground') || { y: 480 }).y;
   let x, y;
   let lockedPlat = null;
   // v0.25.543 — `platformLocked` spawns force a real platform (not the
@@ -40601,7 +40627,7 @@ function spawnFromMap(type, boss, opts) {
   }
   if (boss) {
     x = game.mapData.worldWidth / 2 - m.w / 2;
-    y = 480 - m.h;
+    y = _groundY - m.h;
   } else if (_platformLocked && platList.length) {
     const p = platList[Math.floor(Math.random() * platList.length)];
     x = p.x + Math.random() * Math.max(0, p.w - m.w);
@@ -40613,7 +40639,7 @@ function spawnFromMap(type, boss, opts) {
     y = p.y - m.h;
   } else {
     x = Math.random() * (game.mapData.worldWidth - 100) + 50;
-    y = 480 - m.h;
+    y = _groundY - m.h;
   }
   const spawned = spawnMonster(x, y, type, !!boss);
   if (spawned && lockedPlat) {
@@ -52641,17 +52667,8 @@ function updateMonsters(dt) {
       }
       // Tower: Glass Hero — +50% damage taken
       if (game.tower) dmg = Math.ceil(dmg * towerPlayerTakeMul());
-      // Tower: Vampiric Foes — attacker heals for 20% of damage dealt
-      if (towerVampiric() && m.currentHp > 0) {
-        const heal = Math.floor(dmg * 0.20);
-        m.currentHp = Math.min(m.maxHp, m.currentHp + heal);
-        if (heal > 0) {
-          game.damageNumbers.push({
-            x: m.x + m.w/2 - 12, y: m.y - 6, vy: -2,
-            text: '+' + heal + ' HP', life: 28, color: '#ff88aa', size: 12
-          });
-        }
-      }
+      // Tower: Vampiric Foes heal — moved below, after all mitigation + the
+      // god-mode gate, so it heals off damage the player ACTUALLY took (v0.26.x bug round 13).
       // Skill tree: Mana Shield — consume MP first (2 MP : 1 HP)
       if (player.tree.manaShield && player.mp > 0) {
         const mpAbsorb = Math.min(player.mp, dmg * 2);
@@ -52670,8 +52687,24 @@ function updateMonsters(dt) {
         if (_dr > 0) dmg = Math.max(1, Math.floor(dmg * (1 - _dr)));
       }
       const _shownDmg = _diffDmg(dmg);   // amplified value actually lost — reused for the floating number so it matches HP lost
-      player.hp -= (player._god ? 0 : _shownDmg);
+      const _hpLost = player._god ? 0 : _shownDmg;
+      player.hp -= _hpLost;
       player.lastHitTime = game.time;
+      // v0.26.x bug round 13 — Vampiric Foes heal (relocated from above the
+      // Mana Shield / Iron Will / god gate). It used to heal 20% of the RAW
+      // pre-mitigation swing, so a full-absorb Mana-Shield or god-mode player
+      // who took 0 damage still topped the monster back up — stalling/reversing
+      // the fight. Now heals off HP the player ACTUALLY lost.
+      if (towerVampiric() && m.currentHp > 0 && _hpLost > 0) {
+        const _vheal = Math.floor(_hpLost * 0.20);
+        if (_vheal > 0) {
+          m.currentHp = Math.min(m.maxHp, m.currentHp + _vheal);
+          game.damageNumbers.push({
+            x: m.x + m.w/2 - 12, y: m.y - 6, vy: -2,
+            text: '+' + _vheal + ' HP', life: 28, color: '#ff88aa', size: 12
+          });
+        }
+      }
       // v0.26.085 — Virgo Sin Counter increment. If this melee hit
       // came from the player's currently-tracking Virgo, add a sin.
       // Stacks across the fight; at 5+ Virgo's AI fires JUDGMENT.
@@ -57386,6 +57419,7 @@ function hitMonster(m, dmg, isCrit, skill) {
     finalDmg = Math.max(1, Math.floor(finalDmg * BOSS_STAGGER_BONUS));
     game.damageNumbers.push({ x: m.x + m.w/2 - 16, y: m.y - 36, vy: -1.8, text: 'PUNISH!', life: 22, color: '#ffdd55', size: 12 });
   }
+  const _lsHpBefore = m.currentHp;   // v0.26.x bug round 13 — capture pre-hit HP so lifesteal heals off damage ACTUALLY dealt, not overkill (see L57581)
   m.currentHp -= finalDmg;
   // v0.26.x — SKILL-HIT WEIGHT (per audit: "the i-frame sweep made combat
   // fairer; now it needs impact"). A hit that removes ≥25% of a monster's
@@ -57578,7 +57612,13 @@ function hitMonster(m, dmg, isCrit, skill) {
     if (player._activeSynergies && player._activeSynergies.sanguineFlame && m.burnTimer > 0) {
       _lsMul = 2;
     }
-    const heal = Math.max(1, Math.floor(finalDmg * totalLS * _lsMul));
+    // v0.26.x bug round 13 — heal off damage ACTUALLY dealt, not the full swing.
+    // finalDmg is uncapped overkill (m.currentHp goes deeply negative at L57389),
+    // so a high-ATK hit on a 40-HP trash mob leaked a heal off the entire 12k
+    // overkill — pegging the player to full and defeating the documented 0.50
+    // cap. Clamp to pre-hit HP; the "full-damage heal" intent = damage dealt.
+    const _lsEff = Math.max(0, Math.min(finalDmg, _lsHpBefore));
+    const heal = Math.max(1, Math.floor(_lsEff * totalLS * _lsMul));
     player.hp = Math.min(getMaxHp(), player.hp + heal);
   }
   // Burn (powerup + equipment)
@@ -69129,6 +69169,13 @@ function useQuickPotion(which, preferElixir) {
     useConsumable('full');   // gates both tracks + sets both cooldowns internally
     return;
   }
+  // v0.26.x bug round 13 — bail when the target track is already full. Without
+  // this the cascade below quaffs a stocked potion, and the auto-buy fallback
+  // SPENDS GOLD, for a 0-point overheal — repeatable every 3s on a held PgUp/PgDn
+  // at full HP. The elixir branch above already guarded this; the single-stat
+  // cascade + gold-buy paths didn't.
+  const _trackFull = which === 'hp' ? player.hp >= getMaxHp() : player.mp >= getMaxMp();
+  if (_trackFull) return;
   // Cooldown gate — every potion use locks that slot for 3 s so players
   // can't spam-tank their way through.
   if (!_potionReady(which)) {
@@ -96464,6 +96511,13 @@ async function _lxCloudSyncOnLogin(session) {
   try { localRaw = localStorage.getItem(SAVE_KEY); localSave = localRaw ? JSON.parse(localRaw) : null; } catch (e) {}
   const pushLocal = () => { try { if (localRaw) fetch(_LX_API_BASE + '/api/save', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + session.token }, body: localRaw }).catch(() => {}); } catch (e) {} };
   if (!cloud) { pushLocal(); return; }    // first cloud login -> migrate local up
+  // v0.26.x bug round 13 — never overwrite the local save with a cloud save of a
+  // different schema version. Applying it and reloading hits loadState's
+  // `s.v !== SAVE_VERSION` guard, which starts fresh — silently WIPING a valid,
+  // advanced local save when a device on an older/newer build pushed a newer-
+  // timestamp cloud record. Keep local; don't push either (a mismatched cloud
+  // may be genuinely newer). Sync resumes once both devices are on the same build.
+  if (cloud.v !== SAVE_VERSION) return;
   const localLevel = (localSave && localSave.player && localSave.player.level) || 0;
   const cloudLevel = (cloud && cloud.player && cloud.player.level) || 0;
   const localT = (localSave && localSave.t) || 0;
