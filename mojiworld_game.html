@@ -27840,6 +27840,7 @@ function _applySettings(s) {
     if (typeof _bgmEl !== 'undefined' && _bgmEl) _bgmEl.muted = _m;
     if (typeof _bgmBossEl !== 'undefined' && _bgmBossEl) _bgmBossEl.muted = _m;
     if (typeof _bgmMapEls !== 'undefined' && _bgmMapEls) { for (const _mid of Object.keys(_bgmMapEls)) { const _e = _bgmMapEls[_mid]; if (_e) _e.muted = _m; } }
+    if (typeof _ambientEls !== 'undefined' && _ambientEls) { for (const _ak in _ambientEls) { const _ae = _ambientEls[_ak]; if (_ae) _ae.muted = _m; } }   // v0.26.x bug round 15 — ambient loop pool was left out of the settings mute path (same gap as toggleMute)
   }
   // Low-FX flag (read by _perfLowFx at draw time)
   // v0.25.917 — Debug recon (agent ab3b86fd) flagged that this only
@@ -31384,7 +31385,13 @@ function loadState() {
     // unapplied until the next equip cycle. Move the mods/buffs/tree
     // defaulters UP before this call so the boon-application path sees
     // a valid mods object on the first frame after load.
-    if (!player.mods)         player.mods = { extraJumps: 0 };
+    // v0.26.x bug round 15 — rebuild the FULL zeroed mods shape, not just
+    // {extraJumps:0}. A save with null/partial mods left mods.atk/def/maxHp/crit/
+    // critDmg undefined; the getters read them raw (base + player.mods.atk), so
+    // getAtk()/getMaxHp()/getCritDmg() returned NaN — bricking the save (NaN dmg,
+    // NaN HP bar). Merge any surviving keys OVER the complete default (runs
+    // unconditionally so a partial mods object gets its missing keys backfilled).
+    player.mods = Object.assign({ atk:0, atkPct:0, def:0, maxHp:0, maxMp:0, maxHpPct:0, maxMpPct:0, crit:0, critDmg:0, speed:0, jump:0, lifesteal:0, burn:0, multishot:0, mpRegen:0, thorns:0, greed:0, xpBoost:0, extraJumps:0, accuracy:0, cdrChance:0, gravityReduce:0 }, player.mods || {});
     if (!player.buffs)        player.buffs = {};
     if (!player.treeUnlocked) player.treeUnlocked = {};
     if (!player.tree || typeof player.tree !== 'object') player.tree = {};   // v0.26.1021 — re-guard tree (corrupt/imported save could carry tree:null -> crash on first tree.X read)
@@ -31426,7 +31433,13 @@ function loadState() {
     // early-returns when player.mods is undefined) AND could produce NaN HP
     // because getMaxHp reads through mods. Moved the inits BEFORE the maxHp
     // computation so the curve starts from a sane state on every load.
-    if (!player.mods)         player.mods = { extraJumps: 0 };
+    // v0.26.x bug round 15 — rebuild the FULL zeroed mods shape, not just
+    // {extraJumps:0}. A save with null/partial mods left mods.atk/def/maxHp/crit/
+    // critDmg undefined; the getters read them raw (base + player.mods.atk), so
+    // getAtk()/getMaxHp()/getCritDmg() returned NaN — bricking the save (NaN dmg,
+    // NaN HP bar). Merge any surviving keys OVER the complete default (runs
+    // unconditionally so a partial mods object gets its missing keys backfilled).
+    player.mods = Object.assign({ atk:0, atkPct:0, def:0, maxHp:0, maxMp:0, maxHpPct:0, maxMpPct:0, crit:0, critDmg:0, speed:0, jump:0, lifesteal:0, burn:0, multishot:0, mpRegen:0, thorns:0, greed:0, xpBoost:0, extraJumps:0, accuracy:0, cdrChance:0, gravityReduce:0 }, player.mods || {});
     if (!player.buffs)        player.buffs = {};
     if (!player.treeUnlocked) player.treeUnlocked = {};
     if (!player.tree || typeof player.tree !== 'object') player.tree = {};   // v0.26.1021 — re-guard tree (corrupt/imported save could carry tree:null -> crash on first tree.X read)
@@ -31823,6 +31836,13 @@ const audio = {
           const el = _bgmMapEls[mapId];
           if (el) el.muted = !!this.muted;
         }
+      }
+      // v0.26.x bug round 15 — mirror mute onto the ambient loop pool too. The
+      // ambient-SFX elements (forest birds / water / wind) set .muted only at
+      // creation, so muting the game left the current biome's ambient loop — and
+      // its 7-15s auto-replay timer — playing audibly through the mute.
+      if (typeof _ambientEls !== 'undefined' && _ambientEls) {
+        for (const k in _ambientEls) { const el = _ambientEls[k]; if (el) el.muted = !!this.muted; }
       }
     } catch (e) {}
   }
@@ -46575,7 +46595,12 @@ const SKILL_FNS = {
     const _hsBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('holyShield') : null;
     if (_hsBonus && _hsBonus.drMs) {
       player._holyShieldDr = _hsBonus.drBonus || 0;
-      player._holyShieldDrUntil = (game.time | 0) + (_hsBonus.drMs | 0);
+      // v0.26.x bug round 15 — drMs is MILLISECONDS but game.time is a per-frame
+      // counter (~60fps). The v0.26.397 ms->frame sweep missed this line because
+      // the value lives in a lookup table, so the +25% DR window lasted 10000
+      // frames (~166s) instead of 10s — near-permanent DR on a ~22s cooldown.
+      // Convert to frames like every sibling *Until field (_guardianReflect etc).
+      player._holyShieldDrUntil = (game.time | 0) + Math.round((_hsBonus.drMs | 0) * 60 / 1000);
     }
     showToast('HOLY SHIELD!' + (_hsBonus && _hsBonus.drBonus ? ' · +25% DR / 10 s' : ''), 'legendary');
     flash(0.7);     // Three expanding light waves that damage enemies
@@ -56681,12 +56706,15 @@ function bossAI(m, dt, distToPlayer) {
             player.lastHitTime = game.time;
             player._lastDamageSource = 'Octobaby Eight-Mood Meltdown';
             player.hitStun = Math.max(player.hitStun | 0, 1800);
-            // Same death-trigger pattern as v0.25.684 Gravitos fix —
-            // call triggerDeath synchronously so the overlay shows the
-            // same frame as the damage, not next frame via safety net.
-            if (player.hp <= 0 && !game.dying && typeof triggerDeath === 'function') {
-              try { triggerDeath(); } catch (_) {}
-            }
+            // v0.26.x bug round 15 — do NOT call triggerDeath() inline here.
+            // Meltdown is mitigable damage (49% maxHp), not a designed OHKO, so a
+            // lethal Meltdown must route through the death gate like every other
+            // hit — otherwise the synchronous triggerDeath sets game.dying and the
+            // gate's Miracle Evasion / Phoenix Heart / Second Wind checks (which
+            // round 14 deliberately made fire on ALL lethal direct hits) never run.
+            // Leave hp clamped; the next-frame death gate handles death + revives.
+            // (Contrast Gravitos Singularity Collapse, a documented true OHKO that
+            // keeps its inline trigger.)
           }
         }
       } else if (m._crazyPhase === 'unleash' && m._crazyTime <= 0) {
@@ -95109,6 +95137,17 @@ function loop(time) {
   // the next-frame death trigger fires. Clamping here keeps every downstream
   // reader sane while preserving the death detection (≤ 0 still triggers).
   if (typeof player.hp === 'number' && player.hp < 0) player.hp = 0;
+  // v0.26.x bug round 15 — an in-place cheat-death revive (below) that leaves an
+  // active DoT ticking gets undone ~1.5s later: the next poison/burn/electrocute
+  // tick drops hp<=0 again, but the once-per-map flag is now spent so it routes
+  // straight to death. Invuln doesn't help (the DoTs gate on hp>0/!_god only).
+  // Clear the ailments on revive, mirroring respawnAtTown's cleanup.
+  const _clearReviveAilments = () => {
+    player._poisonTimer = 0; player._poisonDmg = 0; player._poisonTickAcc = 0;
+    player.burnTimer = 0; player.burnDmg = 0; player._burnTickAcc = 0;
+    player._electrocuteTimer = 0; player._electrocuteDmg = 0; player._electrocuteTickAcc = 0;
+    player.freezeTimer = 0; player.frozenTimer = 0; player.stunTimer = 0; player.hitStun = 0;
+  };
   // Death check — runs every frame regardless of who dealt the killing blow
   if (player.hp <= 0 && !game.dying) {
     // Skill tree: Second Wind — revive once per map
@@ -95118,6 +95157,7 @@ function loop(time) {
       player.mp = getMaxMp();
       player.invulnerable = 2000;
       player.hitStun = 0;
+      _clearReviveAilments();   // v0.26.x bug round 15 — don't let a lingering DoT re-kill the revive
       showToast('❤️ Second Wind!', 'legendary');
       flash(0.6); addShake(10);
       for (let i = 0; i < 3; i++) {
@@ -95134,6 +95174,7 @@ function loop(time) {
       player._miracleUsedThisMap = true;
       player.hp = 1;
       player.invulnerable = Math.max(player.invulnerable, 2000);
+      _clearReviveAilments();   // v0.26.x bug round 15 — clear DoTs or a poison/burn death instantly re-kills at 1 HP
       flash(0.7);
       for (let i = 0; i < 3; i++) {
         const a = (i / 3) * Math.PI * 2;
@@ -95146,6 +95187,7 @@ function loop(time) {
       player._phoenixUsedThisMap = true;
       player.hp = 1;
       player.invulnerable = Math.max(player.invulnerable, 2000);
+      _clearReviveAilments();   // v0.26.x bug round 15 — clear DoTs so the phoenix revive isn't undone by lingering poison/burn
       if (game.monsters && game.monsters.length) {
         const _cx = player.x + player.w / 2, _cy = player.y + player.h / 2;
         const _maxHp = (typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp;
