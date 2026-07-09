@@ -14434,12 +14434,21 @@ function itemScore(it) {
   // the v0.26.273 in-engine tier mul (flat stats only) — applied to the
   // entire score since auto-equip rates the whole item's combat value.
   const tierMul = (typeof _tierMul === 'function') ? _tierMul(it.tier) : 1;
-  let v = 0;
+  // v0.26.1033 — the discrete count-stats in _AFFIX_NO_SCALE (multishot/extraJumps/
+  // burn) do NOT scale with star or tier in getEquipBonus (that was the whole point
+  // of the v0.26.441 combat fix), yet itemScore blanket-multiplied the entire sum by
+  // starMult*tierMul, over-weighting those counts and firing false upgrade arrows /
+  // bad auto-equips. Split them out: scalable stats keep the deliberate whole-score
+  // star*tier (documented above); no-scale counts are added flat afterward.
+  let v = 0, vFlat = 0;
   for (const k in ITEM_STAT_WEIGHTS) {
-    v += (it[k] || 0) * ITEM_STAT_WEIGHTS[k];
+    const _w = (it[k] || 0) * ITEM_STAT_WEIGHTS[k];
+    if (!_w) continue;
+    if ((typeof _AFFIX_NO_SCALE !== 'undefined') && _AFFIX_NO_SCALE.has(k)) vFlat += _w;
+    else v += _w;
   }
   const _clsAff = (it.cls && it.cls !== 'any') ? (it.cls === player.cls ? 1.20 : 0.75) : 1;   // v0.26.1030 — match getEquipBonus so off-class drops aren't mis-scored as upgrades
-  return v * rarityW * starMult(it) * tierMul * _clsAff;
+  return (v * starMult(it) * tierMul + vFlat) * rarityW * _clsAff;
 }
 
 // Pretty labels for gear-change toast
@@ -27547,7 +27556,16 @@ function _lxGetSettings() {
     const raw = localStorage.getItem('LX_SETTINGS');
     if (!raw) return { ...LX_SETTINGS_DEFAULTS };
     const parsed = JSON.parse(raw);
-    return { ...LX_SETTINGS_DEFAULTS, ...parsed };
+    const out = { ...LX_SETTINGS_DEFAULTS, ...parsed };
+    // v0.26.1033 — a corrupt/tampered store could override a numeric setting with
+    // a non-number; openSettingsModal then called s.scale.toFixed(2) -> throw ->
+    // the whole Settings panel wouldn't open. Coerce the numeric fields back to a
+    // finite value (falling back to the default) so the UI can never throw on them.
+    for (const _k of ['scale', 'bgm', 'sfx']) {
+      const _v = Number(out[_k]);
+      out[_k] = Number.isFinite(_v) ? _v : LX_SETTINGS_DEFAULTS[_k];
+    }
+    return out;
   } catch (e) {
     return { ...LX_SETTINGS_DEFAULTS };
   }
@@ -36745,6 +36763,14 @@ const DAILY_CHALLENGES = [
 function _monoNow() {
   const n = Date.now();
   if (typeof game === 'undefined' || !game) return n;
+  // v0.26.1033 — self-heal a persisted FUTURE high-water mark. A device clock set
+  // forward (dead RTC / bad NTP / VM defaulting to a future year) then corrected
+  // used to leave game._timeHW (persisted in GAME_SAVE_FIELDS) pinned in the
+  // future, freezing dailyIndex() + bank interest for honest players until real
+  // time caught up. If the mark is more than ~6h ahead of the real clock, snap it
+  // back to now. The intra-session rollback guard below is untouched; forward-roll
+  // within one session remains the documented, unavoidable client-side limit.
+  if (typeof game._timeHW === 'number' && game._timeHW > n + 6 * 3600000) game._timeHW = n;
   if (typeof game._timeHW !== 'number' || n > game._timeHW) { game._timeHW = n; return n; }
   return game._timeHW;
 }
@@ -36982,7 +37008,7 @@ function offerPrestige() {
   const nextCount = p.count + 1;
   const body = `Reach level ${PRESTIGE_LEVEL} again from scratch (ascension ${((game.prestige && game.prestige.count) || 0) + 1}/${typeof PRESTIGE_CAP !== 'undefined' ? PRESTIGE_CAP : 20}), keeping these permanent bonuses:\n\n` +
                `• +30% XP gain  (→ ×${(p.xpMult + 0.30).toFixed(2)})\n` +
-               `• +30% damage   (→ ×${(p.dmgMult + 0.30).toFixed(2)})\n` +
+               `• +30% damage   (→ ×${Math.min(3, p.dmgMult + 0.30).toFixed(2)}${(p.dmgMult + 0.30) > 3 ? ' — capped' : ''})\n` +   // v0.26.1033 — getAtk clamps the prestige dmg mult at ×3; the dialog used to promise the uncapped value (up to ×7), so ascensions 8-20 advertised damage they never granted. Show the effective (capped) figure.
                `• +1 starting attribute point  (→ +${p.bonusAP + 1})\n\n` +
                `Ascension #${nextCount}. Your inventory, equipment, and bosses reset.`;
   // v0.25.244 (X4) — in-game styled prestige confirm.
@@ -58653,7 +58679,11 @@ function killMonster(m) {
   // the column doesn't flash an empty pill.
   if (typeof showKillToast === 'function') {
     const _monMul = (typeof _monsterCoinMult === 'function' ? _monsterCoinMult(m) : 1);
-    const _mojExpected = Math.floor((m.mojicoins || 0) * _monMul * (typeof MOJICOIN_GAIN_MULT === 'number' ? MOJICOIN_GAIN_MULT : 1));
+    // v0.26.1033 — include the greed multiplier the real pickup applies (drop.value
+    // * (1 + greed + equipGreed) at the magnetize site) so the kill-feed pill isn't
+    // a persistent under-count for greed/Goldhand builds.
+    const _greedMul = 1 + ((player.mods && player.mods.greed) || 0) + (typeof getEquipBonus === 'function' ? getEquipBonus('greed') : 0);
+    const _mojExpected = Math.floor((m.mojicoins || 0) * _monMul * _greedMul * (typeof MOJICOIN_GAIN_MULT === 'number' ? MOJICOIN_GAIN_MULT : 1));
     if (_xpGain > 0 || _mojExpected > 0) showKillToast(_xpGain, _mojExpected);
   }
   if (mpCoopMul > 1 && (game._lastCoopToast | 0) + 6000 < game.time) {
@@ -62192,18 +62222,18 @@ function openNPC(npc) {
     const _capLine = player.bankBalance >= _BANK_CAP
       ? '*Your balance is at the interest cap — anything above 50,000 mojicoins sits dormant.*'
       : `*Each day you earn 1.5 % on the first 50,000 mojicoins on deposit.*`;
-    text = `*Felina counts a stack of ledgers as you approach, abacus beads clicking like crickets. She glances up over half-moon spectacles.*\n\nWelcome to the Mojibank, dear. I am Felina — secretary, manager, and the only person in this building who can read both columns. Your savings work harder than you do, given the proper accounts. ${_interestEarned > 0 ? `\n\n*Your account earned ${_interestEarned.toLocaleString()} mojicoins since your last visit.*` : ''}\n\nCurrent balance: ${player.bankBalance.toLocaleString()} mojicoins. Wallet: ${(player.mojicoins|0).toLocaleString()} mojicoins.\n\n${_capLine}`;
+    text = `*Felina counts a stack of ledgers as you approach, abacus beads clicking like crickets. She glances up over half-moon spectacles.*\n\nWelcome to the Mojibank, dear. I am Felina — secretary, manager, and the only person in this building who can read both columns. Your savings work harder than you do, given the proper accounts. ${_interestEarned > 0 ? `\n\n*Your account earned ${_interestEarned.toLocaleString()} mojicoins since your last visit.*` : ''}\n\nCurrent balance: ${player.bankBalance.toLocaleString()} mojicoins. Wallet: ${Math.floor(player.mojicoins||0).toLocaleString()} mojicoins.\n\n${_capLine}`;
     opts.push({ t:'Deposit 1,000 mojicoins', cb:() => {
-      if ((player.mojicoins|0) < 1000) { document.getElementById('dialog-text').textContent = 'I admire ambition, but the coin pouch needs to contain coins first. Come back when you can spare the 1,000.'; return; }
+      if ((player.mojicoins||0) < 1000) { document.getElementById('dialog-text').textContent = 'I admire ambition, but the coin pouch needs to contain coins first. Come back when you can spare the 1,000.'; return; }   // v0.26.1033 — was |0: wrapped negative >2.147B, blocking deposits for the richest players
       player.mojicoins -= 1000; player.bankBalance = Math.min(1e12, player.bankBalance + 1000); player.bankLastTick = _monoNow();
       if (typeof saveState === 'function') saveState();
-      document.getElementById('dialog-text').textContent = `*Felina ticks a column.*\n\n1,000 mojicoins deposited. Balance: ${player.bankBalance.toLocaleString()} mojicoins. Wallet: ${(player.mojicoins|0).toLocaleString()} mojicoins.`;
+      document.getElementById('dialog-text').textContent = `*Felina ticks a column.*\n\n1,000 mojicoins deposited. Balance: ${player.bankBalance.toLocaleString()} mojicoins. Wallet: ${Math.floor(player.mojicoins||0).toLocaleString()} mojicoins.`;
     } });
     opts.push({ t:'Deposit 10,000 mojicoins', cb:() => {
-      if ((player.mojicoins|0) < 10000) { document.getElementById('dialog-text').textContent = '10,000 mojicoins short of 10,000 mojicoins. The math is unforgiving, dear.'; return; }
+      if ((player.mojicoins||0) < 10000) { document.getElementById('dialog-text').textContent = '10,000 mojicoins short of 10,000 mojicoins. The math is unforgiving, dear.'; return; }   // v0.26.1033 — was |0: wrapped negative >2.147B
       player.mojicoins -= 10000; player.bankBalance = Math.min(1e12, player.bankBalance + 10000); player.bankLastTick = _monoNow();
       if (typeof saveState === 'function') saveState();
-      document.getElementById('dialog-text').textContent = `*Felina logs the larger deposit with a small approving nod.*\n\n10,000 mojicoins deposited. Balance: ${player.bankBalance.toLocaleString()} mojicoins. Wallet: ${(player.mojicoins|0).toLocaleString()} mojicoins.`;
+      document.getElementById('dialog-text').textContent = `*Felina logs the larger deposit with a small approving nod.*\n\n10,000 mojicoins deposited. Balance: ${player.bankBalance.toLocaleString()} mojicoins. Wallet: ${Math.floor(player.mojicoins||0).toLocaleString()} mojicoins.`;
     } });
     opts.push({ t:'Withdraw all', cb:() => {
       // v0.26.1019 — no 32-bit |0 coercion (wrapped >2.1B balances negative),
@@ -64774,6 +64804,17 @@ async function useRecipeScrollItem(it, prefix) {
   if (haveNow.length < 3) { if (typeof showToast === 'function') showToast('No longer have 3 different Zodiac Sigils.', 'rare'); return; }
   const crafted = (typeof _craftFromScroll === 'function') ? _craftFromScroll({ setId: it.setId }, it.recipeSlot) : null;
   if (!crafted) { if (typeof showToast === 'function') showToast('That set has no matching piece.', 'rare'); return; }
+  // v0.26.1033 — respect the per-tab inventory cap BEFORE spending, mirroring the
+  // other three craft paths (this v0.26.496 sigil path was added after the invCap
+  // guards and skipped them -> crafting into a full equip tab silently lost the
+  // piece AND burned 3 sigils + the scroll). Check first; spend nothing if full.
+  {
+    const _tab = (typeof _itemTab === 'function') ? _itemTab(crafted) : 'equip';
+    const _cap = (player.invCap && typeof player.invCap[_tab] === 'number') ? player.invCap[_tab] : 24;
+    let _used = 0;
+    for (const _it of player.inventory) { if (_it && (((typeof _itemTab === 'function') ? _itemTab(_it) : 'etc') === _tab)) _used++; }
+    if (_used >= _cap) { if (typeof showToast === 'function') showToast('🎒 ' + _tab + ' inventory full — free a slot first.', 'rare'); if (typeof audio !== 'undefined' && audio && audio.play) audio.play('hit'); return; }
+  }
   // Spend one item of each of 3 distinct sigil signs.
   for (const sid of haveNow.slice(0, 3)) {
     const i = player.inventory.findIndex(inv => inv && inv.zodiacSigil === sid);
@@ -94817,7 +94858,7 @@ function updateUI() {
   // here too, plus dynamic title-tooltips on the ⚔ and 🎯 stat-items
   // for the ATK-range and accuracy-vs-+5 detail that used to render
   // inline in the right panel.
-  _uiSetText(d['hud-mojicoins'], _fmtBig(player.mojicoins | 0));
+  _uiSetText(d['hud-mojicoins'], _fmtBig(Math.floor(player.mojicoins || 0)));   // v0.26.1033 — was `| 0`: 32-bit truncation showed garbage/negative for balances >2.147B (save allows up to 1e12); _fmtBig already guards non-finite
   // v0.26.269 — Setshard counter refresh.
   _uiSetText(d['hud-setshards'], _fmtBig(player.setshards | 0));
   _uiSetText(d['hud-atk'],   _hAtk);
