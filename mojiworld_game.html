@@ -26911,6 +26911,18 @@ function _mkeyDispatch(type, k) {
       }
     }
   }
+  // v0.26.1033 — SKILL-slot translation. Skill keys (x/s/c/d/f/v/g/b) live in
+  // KEY_TO_SLOT (mutated in place on remap), NOT ACTION_KEY_DEFAULT, so the mobile
+  // skill button still carried its hardcoded default letter and dispatched a key
+  // no longer in KEY_TO_SLOT -> the poll loop never cast it. Resolve the button's
+  // default key to its slot, then dispatch the slot's CURRENT bound physical key.
+  if (typeof KEY_TO_SLOT_DEFAULT === 'object' && typeof SLOT_TO_KEY === 'object') {
+    const _slot = KEY_TO_SLOT_DEFAULT[k];
+    if (_slot && SLOT_TO_KEY[_slot]) {
+      const _cur = ('' + SLOT_TO_KEY[_slot]).toLowerCase();
+      if (_cur && _cur !== k) k = _cur;
+    }
+  }
   const info = _mkeyCode(k);
   try {
     const ev = new KeyboardEvent(type, { key: info.key, code: info.code, bubbles: true, repeat: false });
@@ -27111,6 +27123,20 @@ function _wireDynamicFButton() {
   btn._dynFWired = true;
   let active = false;
   let activeKey = null;
+  let pressedAt = 0;
+  let pendingReleaseId = 0;
+  // v0.26.1033 — mirror _mkeyBind's hold floor. The Q-slot skill this button can
+  // dispatch ('f') casts via the per-frame game.keys poll loop, so a fast tap
+  // (keydown+keyup in one browser tick) was swallowed before any tick observed
+  // the key held. Block/interact survive (edge-triggered on keydown); only the
+  // poll-cast Q skill needed this. Deferring keyup is harmless for the others.
+  const HOLD_FLOOR_MS = 60;
+  const doRelease = () => {
+    if (!active) return;
+    active = false;
+    _mkeyDispatch('keyup', activeKey);
+    activeKey = null;
+  };
   const pick = () => {
     try {
       if (typeof game !== 'undefined' && typeof player !== 'undefined' && player) {
@@ -27141,21 +27167,28 @@ function _wireDynamicFButton() {
   const press = (ev) => {
     if (ev) ev.preventDefault();
     if (active) return;
+    if (pendingReleaseId) { clearTimeout(pendingReleaseId); pendingReleaseId = 0; }
     active = true;
     activeKey = pick();
+    pressedAt = performance.now();
     if (!audio.ctx) audio.init();
     _mkeyDispatch('keydown', activeKey);
   };
   const release = (ev) => {
     if (ev) ev.preventDefault();
     if (!active) return;
-    active = false;
-    _mkeyDispatch('keyup', activeKey);
-    activeKey = null;
+    const held = performance.now() - pressedAt;
+    if (held < HOLD_FLOOR_MS) {
+      // Too quick — defer the keyup so >=1 game tick sees the key held. Re-press cancels it.
+      if (pendingReleaseId) clearTimeout(pendingReleaseId);
+      pendingReleaseId = setTimeout(() => { pendingReleaseId = 0; doRelease(); }, HOLD_FLOOR_MS - held);
+    } else {
+      doRelease();
+    }
   };
   // v0.26.x audit FIX — see _mkeyBind: let _releaseAllVirtualKeys clear the
   // dynamic F button's latch on backgrounding so it isn't dead for one tap.
-  (window._mBtnResets = window._mBtnResets || []).push(() => { active = false; activeKey = null; });
+  (window._mBtnResets = window._mBtnResets || []).push(() => { if (pendingReleaseId) { clearTimeout(pendingReleaseId); pendingReleaseId = 0; } active = false; activeKey = null; });
   btn.addEventListener('pointerdown',   press,   { passive: false });
   btn.addEventListener('pointerup',     release, { passive: false });
   btn.addEventListener('pointercancel', release, { passive: false });
@@ -27325,9 +27358,12 @@ function _initMobileControls() {
   // its onclick is wired below before this gate is checked.
   const _isMobileNow = (typeof _LX_IS_MOBILE !== 'undefined' && _LX_IS_MOBILE)
     || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
-  if (!_isMobileNow && document.body.classList.contains('force-desktop')) {
-    return;
-  }
+  // v0.26.1033 — the tab-hidden / blur / pagehide key-flush is registered BEFORE
+  // the force-desktop early return (moved down) so it runs for EVERY client. A
+  // desktop player who ever clicked the fullscreen (force-desktop) button used to
+  // skip this registration -> their held movement/attack keys stuck after an
+  // alt-tab (nothing else globally clears game.keys on blur). The mobile-only latch
+  // resets inside are guarded no-ops on desktop, so wiring it everywhere is safe.
   // v0.25.775 — Visibility-change handler synthesises keyup for every
   // wired mobile button when the tab is hidden / app is backgrounded.
   // Without this, a virtual key held at the moment the user swipes home
@@ -27357,6 +27393,11 @@ function _initMobileControls() {
     window._lxReleaseAllVKeys = _releaseAllVirtualKeys;   // v0.26.946 — for the rotation hook
     window.addEventListener('pagehide', _releaseAllVirtualKeys);
     window.addEventListener('blur',     _releaseAllVirtualKeys);
+  }
+  // v0.26.1033 — NOW gate the rest of the mobile-controls init on actual mobile
+  // (moved down from the top so the key-flush handler above always registers).
+  if (!_isMobileNow && document.body.classList.contains('force-desktop')) {
+    return;
   }
   // Bind buttons in BOTH the in-wrapper HUD (pots) and the outside deck
   // (D-pad + actions). Same dispatch path for all — except d-pad arrow
@@ -35963,9 +36004,19 @@ function renderWorldMap() {
       if (_md.isBossArena && _md.taxiAccessible !== true) return { ok: false, reason: '🔒 walk in' };
       return { ok: true };
     },
-    onPick: (id, m) => {
+    onPick: async (id, m) => {
       if (id === game.currentMap) { showToast('Already here', 'common'); return; }
       if (typeof loadMap !== 'function') return;
+      // v0.26.1033 — fast-travelling off a Tower floor silently abandoned an
+      // active expedition (all floor progress + boons lost, no warning). Confirm.
+      if (game.expedition && game.expedition.active && !(id && id.startsWith('tower_b'))) {
+        const ok = (typeof uiConfirm === 'function') ? await uiConfirm({
+          title: 'Leave the Expedition?',
+          body: `Fast-travelling to ${m.name || id} ends your current Tower run — your floor progress and boons will be lost.`,
+          yesLabel: 'Leave run', noLabel: 'Stay',
+        }) : true;
+        if (!ok) return;
+      }
       closeAllModals();
       loadMap(id);
       showToast(`Travelling to ${m.name || id}…`, 'rare');
@@ -39338,8 +39389,10 @@ function loadMap(id, entryX, entryY) {
     // stale flag zeroes all mojicoin income for the session and skips the boon/
     // gear restore. Abandon inline here (no loadMap recursion): restore snapshot.
     if (game.expedition && game.expedition.active) {
+      const _abFloor = game.expedition.floor || 0;   // v0.26.1033 — surface the abandon (was silent)
       try { if (typeof _expeditionRestorePlayer === 'function') _expeditionRestorePlayer(game.expedition.snapshot); } catch (e) {}
       game.expedition = { active: false, floor: 0, bravoReady: false, currentQuest: null };
+      if (typeof showToast === 'function') showToast(`Expedition abandoned${_abFloor ? ' at Floor ' + _abFloor : ''}.`, 'rare');
     }
     if (typeof game !== 'undefined' && game.expedition) game.expedition.currentQuest = null;
     if (typeof _renderExpeditionQuestPin === 'function') _renderExpeditionQuestPin();
@@ -39680,7 +39733,12 @@ function loadMap(id, entryX, entryY) {
         // v0.26.x — the Gravitos final-boss arena holds a longer dramatic entrance
         // (held blackout + building quake) BEFORE the cinematic, so delay its intro.
         const _introDelay = (id === 'gravitosArena') ? 2300 : 500;
-        const _biMap = id; setTimeout(() => { if (game.currentMap === _biMap) _playBossIntro(_bossSpawn.type); }, _introDelay);   // v0.26.1028 — bail if the player left the arena during the delay
+        // v0.26.1033 — generation token like the gravitos quake sequence. Two
+        // overlapping entries into the same arena within _introDelay left two
+        // pending timers, both seeing game.currentMap===_biMap -> the intro played
+        // twice (mid-fight cinematic). Only the latest entry's timer now fires.
+        const _biMap = id; const _biGen = game._bossIntroGen = (game._bossIntroGen || 0) + 1;
+        setTimeout(() => { if (game.currentMap === _biMap && game._bossIntroGen === _biGen) _playBossIntro(_bossSpawn.type); }, _introDelay);   // v0.26.1028 — bail if the player left the arena during the delay
       }
     }
   }
@@ -60716,7 +60774,7 @@ function updateProjectiles(dt) {
         const _pullForce = h._bhAwakened ? 1.7 : 0.8;
         // PULL — gated against iframes / god / stun (same idiom as Gravitos pull)
         if (dist < _pullR && (player.invulnerable | 0) <= 0 && !player._god &&
-            (player.stunTimer | 0) <= 0 && (player.freezeTimer | 0) <= 0) {
+            (player.stunTimer | 0) <= 0 && (player.frozenTimer | 0) <= 0) {
           const force = _pullForce * (1 - dist / _pullR);
           player.vx += (dxp / dist) * force;
           player.vy += (dyp / dist) * force;
@@ -67967,8 +68025,19 @@ function renderTaxi() {
       if (player.mojicoins < _taxiFare()) return { ok: false, reason: `${_taxiFare()}🪙 fare` };
       return { ok: true, reason: `${_taxiFare()}🪙 fare` };
     },
-    onPick: (id, m) => {
+    onPick: async (id, m) => {
       if (id === game.currentMap) { showToast('Already here', 'common'); return; }
+      // v0.26.1033 — the Taxi is reachable on non-boss Tower floors; taking it
+      // silently ended the expedition AND charged the fare. Confirm first, and
+      // gate the fare deduction behind that confirm so a cancel costs nothing.
+      if (game.expedition && game.expedition.active && !(id && id.startsWith('tower_b'))) {
+        const ok = (typeof uiConfirm === 'function') ? await uiConfirm({
+          title: 'Leave the Expedition?',
+          body: `The taxi to ${m.name} leaves the Tower and ends your run — floor progress and boons are lost. The ${_taxiFare()}🪙 fare still applies.`,
+          yesLabel: 'Leave run', noLabel: 'Stay',
+        }) : true;
+        if (!ok) return;
+      }
       player.mojicoins -= _taxiFare();
       closeAllModals();
       if (typeof loadMap === 'function') loadMap(id, 200);
@@ -75770,7 +75839,7 @@ function updateMapEvents(dt) {
       // counter-walk, stacking with knockback velocity into a void-toss
       // off a platform edge.
       const _gustOk = player && player.hp > 0 && (player.invulnerable | 0) <= 0 && !player._god &&
-          (player.stunTimer | 0) <= 0 && (player.freezeTimer | 0) <= 0 && (player.hitStun | 0) <= 0;
+          (player.stunTimer | 0) <= 0 && (player.frozenTimer | 0) <= 0 && (player.hitStun | 0) <= 0;
       if (_gustOk) {
         if (game._gustAxis === 'vertical') {
           // v0.25.842 — Apply UPWARD impulse. Pulse-fire rather than
@@ -91186,7 +91255,7 @@ const ZODIAC_AI = {
       // dodging or blocking player still got yanked toward Capricorn.
       if (phase === 3 && player && player.hp > 0 &&
           (player.invulnerable | 0) <= 0 && !player._god &&
-          (player.stunTimer | 0) <= 0 && (player.freezeTimer | 0) <= 0) {
+          (player.stunTimer | 0) <= 0 && (player.frozenTimer | 0) <= 0) {
         const towards = Math.sign((m.x + m.w/2) - (player.x + player.w/2));
         player.vx += towards * 0.20;
         if (game.time % 4 === 0) {
@@ -91653,7 +91722,7 @@ const ZODIAC_AI = {
     // player still got yanked into Pisces's whirlpool.
     if (phase === 3 && player && player.hp > 0 &&
         (player.invulnerable | 0) <= 0 && !player._god &&
-        (player.stunTimer | 0) <= 0 && (player.freezeTimer | 0) <= 0) {
+        (player.stunTimer | 0) <= 0 && (player.frozenTimer | 0) <= 0) {
       const dx = (m.x + m.w/2) - (player.x + player.w/2);
       const dy = (m.y + m.h/2) - (player.y + player.h/2);
       const dlen = Math.max(1, Math.sqrt(dx * dx + dy * dy));   // v0.26.216 — hypot→sqrt
