@@ -8226,7 +8226,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1030';
+const GAME_VERSION = 'v0.26.1031';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -15090,21 +15090,13 @@ const BOON_SYNERGIES = [
     pair: ['crit', 'critd'], icon: '👁💢',
     desc: 'Critical hits deal an additional +25 % damage.',
   },
-  {
-    key: 'midAirVolley', name: 'Mid-Air Volley',
-    pair: ['jmp', 'multi'], icon: '🦘🎯',
-    desc: 'Attacks while airborne fire one additional projectile.',
-  },
+  // v0.26.1031 — 'midAirVolley' synergy removed: it was detected + advertised as active but never applied (no consumer reads the flag). Re-add with a real effect if/when implemented.
   {
     key: 'flameVolley', name: 'Flame Volley',
     pair: ['burn', 'multi'], icon: '🔥🎯',
     desc: 'Every projectile applies a brief burn (1 s, light damage).',
   },
-  {
-    key: 'resonantMind', name: 'Resonant Mind',
-    pair: ['mpreg', 'cdSkip'], icon: '♻️⚡',
-    desc: 'Successful skill casts restore 8 % MP and shave 100 ms off active CDs.',
-  },
+  // v0.26.1031 — 'resonantMind' synergy removed: detected + advertised as active but never applied (no consumer). Re-add with a real effect if/when implemented.
   {
     key: 'battleMage', name: 'Battle Mage',
     pair: ['atk', 'maxmp'], icon: '🗡️💙',
@@ -49942,13 +49934,14 @@ const SKILL_FNS = {
     // v0.25.540 — Cap reduced 4 → 2 (tight pair of alpha wolves).
     // v0.25.546 — New beastmaster_pack VFX sprite at the player's feet.
     // v0.25.554 — spin removed for visual consistency with Wild Bond.
-    spawnSpriteBurst(player.x + player.w/2, player.y + player.h - 12, 'beastmaster_pack',
-      { size: 220, life: 50 });
     const SUMMON_CAP = 4;   // v0.26.x — raised 2→4 per user (beastmaster/ranger shared wolf cap)
     player.pack = player.pack || [];
     const _petCount = (player.pet ? 1 : 0);
     const slots = Math.max(0, SUMMON_CAP - _petCount - player.pack.length);
     if (slots <= 0) { if (typeof showToast === 'function') showToast('Summon cap (' + SUMMON_CAP + ') reached', 'rare'); return '_lxNoCast'; }   // v0.26.1030 — refund cd/MP instead of burning it on a no-op
+    // v0.26.1031 — paint the cast burst only after a slot is confirmed (was above the cap check -> replayed on a no-op cast).
+    spawnSpriteBurst(player.x + player.w/2, player.y + player.h - 12, 'beastmaster_pack',
+      { size: 220, life: 50 });
     for (let i = 0; i < slots; i++) {
       player.pack.push({
         x: player.x + (i - 1) * 50, y: player.y, vx: 0, vy: 0,
@@ -56196,7 +56189,7 @@ function bossAI(m, dt, distToPlayer) {
             x: player.x + 14, y: player.y - 10, vy: -2,
             text: '-' + dmg + ' EARTHQUAKE', life: 60, color: '#ff4444', size: 18,
           });
-          showToast('💥 90% HP + ALL MP drained!', 'legendary');
+          showToast('💥 -' + dmg + ' HP + ALL MP drained!', 'legendary');   // v0.26.1031 — was a stale "90%"; the hit is 55% maxHP
           player._lastDamageSource = 'King Koopaloo\'s earthquake';
         } else {
           showToast('🦘 Earthquake evaded!', 'epic');
@@ -60631,7 +60624,8 @@ function updateProjectiles(dt) {
       const isEnemyOwned = (h.owner === 'enemy');
       // v0.25.622 — DEFENSIVE cx FALLBACK (see prior comment).
       const _cx = (h.cx != null) ? h.cx : (h.x + (h.w || 0) / 2);
-      const radius = 180;   // was 90 half-width -> 180
+      const radius = h.radius || 180;   // v0.26.1031 — honor the authored radius so narrow fire/forge pillars hit only where telegraphed (default zodiac meteors carry no radius -> 180, unchanged)
+      const _inner = Math.min(120, radius * 0.7);
       // v0.25.844 — Hitbox now follows camera.y so embers / lava / etc. hit
       // wherever the player is on tall (isVerticalTower) maps. Pre-fix the
       // hbox spanned world y:0..H — on a non-tower map that's the visible
@@ -60648,7 +60642,7 @@ function updateProjectiles(dt) {
         // godmode). Skipped if player is dead or already iframe-immune.
         if (player && player.hp > 0 && (player.invulnerable | 0) <= 0 && aabb(hbox, player)) {
           const dx = Math.abs((player.x + player.w/2) - _cx);
-          const falloff = dx < 120 ? 1 : 1 - Math.min(1, (dx - 120) / (radius - 120)) * 0.5;
+          const falloff = dx < _inner ? 1 : 1 - Math.min(1, (dx - _inner) / Math.max(1, radius - _inner)) * 0.5;   // v0.26.1031 — plateau scales to the authored radius
           let dmg = Math.max(1, Math.floor((h.damage || 30) * falloff));
           // DEF mitigation
           const _def = (typeof getDef === 'function') ? getDef() : 0;
@@ -60685,7 +60679,7 @@ function updateProjectiles(dt) {
           if (aabb(hbox, m)) {
             // Falloff — full damage inside 120 px, halved at the outer edge
             const dx = Math.abs((m.x + m.w/2) - _cx);
-            const falloff = dx < 120 ? 1 : 1 - Math.min(1, (dx - 120) / (radius - 120)) * 0.5;
+            const falloff = dx < _inner ? 1 : 1 - Math.min(1, (dx - _inner) / Math.max(1, radius - _inner)) * 0.5;   // v0.26.1031 — plateau scales to the authored radius
             const crit = rollCrit();
             const dmg = Math.floor((damage * falloff + Math.random() * 20) * (crit ? getCritDmg() : 1));
             hitMonster(m, dmg, crit, 'meteor');
@@ -63284,6 +63278,7 @@ function executeSellSelection() {
   for (const idx of ordered) {
     const it = player.inventory[idx];
     if (!it) continue;
+    if (typeof it.price !== 'number' || !isFinite(it.price)) continue;   // v0.26.1031 — never destroy price-less items (recipe scrolls, Zodiac Sigils) for 0 coins
     const val = Math.floor(it.price * 0.4);
     for (const s in player.equipped) { if (player.equipped[s] === it) player.equipped[s] = null; }
     gained += _grantMojicoins(val);
