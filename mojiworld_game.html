@@ -8226,7 +8226,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1031';
+const GAME_VERSION = 'v0.26.1032';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -27693,7 +27693,7 @@ function openJukebox() {
 }
 function closeJukebox() {
   document.getElementById('jukebox-modal-bg').classList.remove('on');
-  if (typeof game !== 'undefined' && game) game.paused = false;
+  if (typeof game !== 'undefined' && game && (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen())) game.paused = false;   // v0.26.1032 — don't unpause if the Codex/beat is still open on top
 }
 function jukeboxPlay(t) {
   if (!t || !t.file) return;
@@ -30192,7 +30192,7 @@ function closeLoreMap() {
   const modal = document.getElementById('lore-modal');
   if (!modal) return;
   modal.style.display = 'none';
-  game.paused = false;
+  if (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen()) game.paused = false;   // v0.26.1032 — don't unpause under a story-beat/boss-intro/jukebox still open beneath
 }
 
 function toggleLoreMap() {
@@ -32919,7 +32919,7 @@ function _sagaState() {
 // rewards.dawnFragment.
 function _grantDawnFragment(fragId) {
   if (!fragId || !DAWN_FRAGMENTS[fragId]) return null;
-  if (!player.dawnFragments) player.dawnFragments = [];
+  if (!Array.isArray(player.dawnFragments)) player.dawnFragments = [];   // v0.26.1032 — was a truthy check; a corrupt non-array crashed .indexOf
   if (player.dawnFragments.indexOf(fragId) !== -1) return null;   // already held
   player.dawnFragments.push(fragId);
   return DAWN_FRAGMENTS[fragId];
@@ -36986,6 +36986,11 @@ function offerPrestige() {
     player.level = 1; player.exp = 0; player.expToNext = 30;     // v0.26.329 — matches 200 × 1^2.5 × 0.15 = 30 (was 37 under 250-base poly)
     player.maxHp = 100; player.maxMp = 50;
     player.baseAtk = 12; player.baseDef = 5;
+    // v0.26.1032 — also reset the Acc/Speed/Jump lanes (grown by the level-up panel),
+    // else the invested base stat survives while _levelUpSpent is wiped -> re-investable.
+    player.baseAcc = 0;
+    player.baseSpeed = (CLASSES[player.cls] && CLASSES[player.cls].stats && CLASSES[player.cls].stats.speed) || 3.5;
+    player.baseJump  = (CLASSES[player.cls] && CLASSES[player.cls].stats && CLASSES[player.cls].stats.jump)  || 10;
     // Clear the invested-stat ledger too. Without this, a post-ascension Reset
     // Stats reverses deltas that were already wiped above (maxHp -> 1, baseAtk
     // negative) and refunds free skill points for ranks that no longer exist.
@@ -69126,17 +69131,18 @@ function useQuickPotion(which, preferElixir) {
   // affordable potion. v0.26.394 — `pool` is now sorted DESCENDING (Large-first,
   // for the inventory-drain order in v0.26.389), so `affordable[0]` was the most
   // EXPENSIVE potion → up to an 8× gold drain on auto-buy. Pick cheapest explicitly.
-  const affordable = pool.filter(p => player.mojicoins >= p.price);
+  const _potLvMult = 1 + Math.min(2, Math.max(0, (((typeof player !== 'undefined' && player.level) || 1) - 5)) * 0.03);   // v0.26.1032 — match the shop's level economy sink (auto-buy was raw base price)
+  const affordable = pool.filter(p => player.mojicoins >= Math.ceil(p.price * _potLvMult));
   if (!affordable.length) {
     const cheapest = pool.length ? pool.reduce((a, b) => a.price <= b.price ? a : b) : null;
     if (cheapest) {
-      showToast(`Need ${cheapest.price} 🪙 for ${cheapest.name}`, 'common');
+      showToast(`Need ${Math.ceil(cheapest.price * _potLvMult)} 🪙 for ${cheapest.name}`, 'common');
       audio.play('hit');
     }
     return;
   }
   const pick = affordable.reduce((a, b) => a.price <= b.price ? a : b);
-  player.mojicoins -= pick.price;
+  player.mojicoins -= Math.ceil(pick.price * _potLvMult);   // v0.26.1032 — level-scaled like the shop
   // Apply the potion effect inline (avoids bumping inventory for a single tick)
   // pick.value/pct is a PERCENT of max (25/50/75), not a flat amount — mirror
   // useConsumable (incl. potionBoost talent) instead of adding it raw, else a
