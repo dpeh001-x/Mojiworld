@@ -31801,6 +31801,13 @@ const audio = {
 // the 🌐 Multi modal and click Connect for any socket to open.
 // =========================================================================
 const MP_TICK_MS = 70;
+// v0.26.1033 — hard cap on tracked peers. The chat log is capped at 30 but the
+// peer map was unbounded: a hostile/buggy relay (or a connection-flood exploiting
+// a server missing the one-identity guard) can emit unlimited distinct ids, each
+// spawning a net.peers entry that _mpDrawPeers iterates every frame and
+// _mpRenderPlayerList turns into a DOM node -> the victim's tab freezes. Ignore
+// NEW peers past the cap (existing peers still update); a real room is <= 16/relay.
+const MP_MAX_PEERS = 64;
 const MP_URL_KEY    = 'levelx_mp_url';
 const MP_NAME_KEY   = 'levelx_mp_name';
 const MP_ROOM_KEY   = 'levelx_mp_room';
@@ -32137,6 +32144,7 @@ function _mpHandle(msg) {
       break;
     case 'joined':
       if (msg.id === net.myId) break;   // v0.26.1020 — ignore self-echo on broadcast relays (match 'chat')
+      if (!net.peers[msg.id] && Object.keys(net.peers).length >= MP_MAX_PEERS) break;   // v0.26.1033 — peer-flood cap
       net.peers[msg.id] = { ..._mpScrubStrings(msg), _last: performance.now() };
       _mpPushLog(`${escapeHtml(msg.name || 'Someone')} joined.`, 'sys');
       _mpRenderPlayerList();
@@ -32150,6 +32158,7 @@ function _mpHandle(msg) {
     }
     case 'state': {
       if (msg.id === net.myId) break;   // v0.26.1020 — ignore self-echo on broadcast relays (match 'chat')
+      if (!net.peers[msg.id] && Object.keys(net.peers).length >= MP_MAX_PEERS) break;   // v0.26.1033 — peer-flood cap
       if (!net.peers[msg.id]) net.peers[msg.id] = { id: msg.id, _last: performance.now() };
       // v0.26.x audit FIX — drop any non-finite numeric field from the frame
       // BEFORE merging, so a buggy/tampered peer can't push NaN x/y/hp into a
@@ -94894,6 +94903,15 @@ function loop(time) {
   // and survivable, just one second of in-game time).
   try {   // v0.26.1024 — CRITICAL: guard the whole sim+render so a single
   // malformed-entity throw can't skip the tail rAF and hard-freeze the tab.
+  // v0.26.1033 — reset the canvas to the known-good base transform at the TOP of
+  // every frame. A draw-phase throw between the render ctx.save()/restore() leaks
+  // the shake + (-camera.y) translate and an unbalanced save-stack; the catch
+  // re-queues rAF but the leaked matrix persists forever on tall/tower maps
+  // (camera.y large) -> the whole scene draws thousands of px off-screen, a
+  // permanent soft-freeze indistinguishable from the hard-freeze this guard
+  // prevents. setTransform is absolute, so this wipes any leak regardless of
+  // how the previous frame exited. Cheap (~once/frame), idempotent.
+  try { ctx.setTransform(_LX_DPR, 0, 0, _LX_DPR, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; } catch (_e) {}
   const dt = Math.min(50, time - lastTime);
   lastTime = time;
   game.time++;
@@ -95412,6 +95430,10 @@ function loop(time) {
   requestAnimationFrame(loop);
   } catch (_loopErr) {   // v0.26.1024 — a transient sim/draw throw no longer freezes the tab
     try { console.error('[loop]', _loopErr); } catch (_e) {}
+    // v0.26.1033 — clear any leaked transform/alpha/composite from the throwing
+    // frame so the next frame paints clean (belt-and-braces with the top-of-frame
+    // reset; a throw during teardown could otherwise still leave a dirty context).
+    try { ctx.setTransform(_LX_DPR, 0, 0, _LX_DPR, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; } catch (_e) {}
     requestAnimationFrame(loop);
   }
 }
