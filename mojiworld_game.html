@@ -33570,7 +33570,11 @@ function toggleKeybindModal() {
   const existing = document.getElementById('keybind-modal');
   if (existing && existing.style.display === 'flex') {
     existing.style.display = 'none';
-    game.paused = false;
+    // v0.26.1033 — don't unpause under a story-beat/boss-intro (or any other
+    // modal) opened on top. Sibling toggles (worldmap/quest/lore) already guard
+    // this; the keybind modal was the one missed -> K-open-K-close during a
+    // cinematic silently resumed combat behind the overlay.
+    if (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen()) game.paused = false;
     _kbPickup = null; _kbHover = null;
     _actionPickup = null; _skillPickup = null;
     _cureKeyPickup = false; _interactKeyPickup = false;
@@ -44305,6 +44309,14 @@ function _tickClassIdentity(dt) {
 
   // --- Charge meter (warrior free-move, archer force-rooted) ---
   if (player._warCharge) {
+    // v0.26.1033 — cancel a charge whose owning key is no longer held. The
+    // game.keys map is flushed on MP-chat open and window blur/visibilitychange
+    // WITHOUT clearing _warCharge, so the charge ring used to persist forever and
+    // discharge on a later unrelated tap of that key. During normal charging the
+    // key is physically held (game.keys true), so this only fires on a flush.
+    if (!game.keys || !game.keys[player._warCharge.slotKey]) { player._warCharge = null; }
+  }
+  if (player._warCharge) {
     const held = game.time - player._warCharge.start;
     player._warCharge.power = Math.min(1, held / WAR_CHARGE_FRAMES);
     // Archer: holding to charge locks the feet — freeze horizontal motion
@@ -44461,9 +44473,13 @@ function tryReleaseClassCharge(slotKey) {
   // past it on the same frame the player drops to 0 HP. Without this
   // guard the cast then deducts MP and sets a cooldown on a corpse,
   // observable in some job death animations. Bail cleanly.
-  if (player.hp <= 0 || (game.dying | 0) > 0
+  if (player.hp <= 0 || (game.dying | 0) > 0 || game.paused
       || (((player.frozenTimer | 0) > 0 || (typeof _QTE !== 'undefined' && _QTE.active)) && !player._god)) {
-    player._warCharge = null;   // dead / frozen / shackle-QTE drops the charge silently
+    // v0.26.1033 — game.paused added: releasing a held charge key while a menu is
+    // open (tryStartClassCharge already gates on game.paused, as do basic attack /
+    // dodge / block / the poll loop) no longer casts behind the paused overlay,
+    // burning MP + cooldown and spawning frozen projectiles that all fire on unpause.
+    player._warCharge = null;   // dead / frozen / shackle-QTE / paused drops the charge silently
     return true;
   }
   const held = game.time - c.start;
@@ -69687,7 +69703,12 @@ function closeAllModals() {
   /* Forced-choice overlays (expedition door/puzzle, ticket puzzle, credits) have
      no Esc path by design - do NOT unpause underneath them. */
   const _forcedUp = document.querySelector('#exp-door-modal, #exp-puzzle-modal, .tp-backdrop, #game-complete-overlay.on');
-  game.paused = !!_forcedUp;
+  // v0.26.1033 — also keep paused under a story-beat / boss-intro cinematic (and
+  // any other pause-owner _anyOtherModalOpen tracks). closeAllModals has already
+  // hidden every modal it manages, so this only stays paused for the cutscene
+  // overlays it does NOT own -> a modal-toggle key during a beat no longer
+  // resumes combat behind the overlay.
+  game.paused = !!_forcedUp || (typeof _anyOtherModalOpen === 'function' && _anyOtherModalOpen());
 }
 
 // v0.25.472 — Map placement tool launcher (key '7'). Opens the
