@@ -43611,9 +43611,80 @@ function updatePlayer(dt) {
   }
   // Death → trigger respawn sequence
   if (player.hp <= 0 && !game.dying) {
-    player.hp = 0;
-    triggerDeath();
+    // v0.26.1033 — route through the cheat-death chain so a DoT tick (poison/burn/
+    // electrocute applied above in this same updatePlayer call) can trigger Second
+    // Wind / Miracle / Phoenix instead of dying outright.
+    if (!_tryCheatDeathRevive()) {
+      player.hp = 0;
+      triggerDeath();
+    }
   }
+}
+
+// v0.26.1033 — Cheat-death chokepoint. Second Wind / Miracle Evasion / Phoenix
+// Heart used to live INLINE in the main-loop death gate, so any death gate that
+// called triggerDeath() directly bypassed them. In particular the updatePlayer
+// gate (where poison/burn/electrocute DoT ticks land) and the synchronous boss
+// one-shot gates (Octobaby, Gravitos) killed the player outright even with an
+// unused revive charge. Extracted here so EVERY gate routes through it. Returns
+// true if a revive fired (caller must NOT trigger death), false otherwise.
+function _tryCheatDeathRevive() {
+  // Skill tree: Second Wind — revive once per map
+  if (player.tree && player.tree.secondWind && player.tree.secondWindReady) {
+    player.tree.secondWindReady = false;
+    player.hp = Math.floor(getMaxHp() * 0.5);
+    player.mp = getMaxMp();
+    player.invulnerable = 2000;
+    player.hitStun = 0;
+    player.burnTimer = 0; player.burnDmg = 0; player._burnTickAcc = 0; player._poisonTimer = 0; player._poisonDmg = 0; player._poisonTickAcc = 0; player._electrocuteTimer = 0; player._electrocuteDmg = 0; player._electrocuteTickAcc = 0; player.frozenTimer = 0; player.stunTimer = 0; player.freezeTimer = 0;   // clear DoT/CC so the invuln window is usable and no instant re-death
+    showToast('❤️ Second Wind!', 'legendary');
+    flash(0.6); addShake(10);
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2;
+      game.particles.push({ x: player.x + player.w/2, y: player.y + player.h/2, vx: Math.cos(a) * 6, vy: Math.sin(a) * 6, life: 50, color: '#ff5566', size: 3 });
+    }
+    return true;
+  }
+  // Milestone: Miracle Evasion — survive the lethal blow at 1 HP, once per map.
+  if (hasMilestone('miracleEvasion') && !player._miracleUsedThisMap) {
+    player._miracleUsedThisMap = true;
+    player.hp = 1;
+    player.invulnerable = Math.max(player.invulnerable, 2000);
+    player.burnTimer = 0; player.burnDmg = 0; player._burnTickAcc = 0; player._poisonTimer = 0; player._poisonDmg = 0; player._poisonTickAcc = 0; player._electrocuteTimer = 0; player._electrocuteDmg = 0; player._electrocuteTickAcc = 0; player.frozenTimer = 0; player.stunTimer = 0; player.freezeTimer = 0;   // clear DoT/CC on revive
+    flash(0.7);
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2;
+      game.particles.push({ x: player.x + player.w/2, y: player.y + player.h/2, vx: Math.cos(a) * 6, vy: Math.sin(a) * 6, life: 50, color: i % 2 ? '#88ff88' : '#ffffff', size: 3 });
+    }
+    game.damageNumbers.push({ x: player.x, y: player.y - 18, vy: -2, text: 'MIRACLE!', life: 60, color: '#88ff88', size: 20 });
+    showToast('Miracle Evasion — saved!', 'legendary');
+    return true;
+  }
+  // Synergy: Phoenix Heart — once-per-map cheat death + burst-burn aura.
+  if (!player._phoenixUsedThisMap && player._activeSynergies && player._activeSynergies.phoenixHeart) {
+    player._phoenixUsedThisMap = true;
+    player.hp = 1;
+    player.invulnerable = Math.max(player.invulnerable, 2000);
+    player.burnTimer = 0; player.burnDmg = 0; player._burnTickAcc = 0; player._poisonTimer = 0; player._poisonDmg = 0; player._poisonTickAcc = 0; player._electrocuteTimer = 0; player._electrocuteDmg = 0; player._electrocuteTickAcc = 0; player.frozenTimer = 0; player.stunTimer = 0; player.freezeTimer = 0;   // clear DoT/CC on revive
+    if (game.monsters && game.monsters.length) {
+      const _cx = player.x + player.w / 2, _cy = player.y + player.h / 2;
+      const _maxHp = (typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp;
+      for (const m of game.monsters) {
+        if (!m || m.currentHp <= 0) continue;
+        const _dx = (m.x + m.w/2) - _cx, _dy = (m.y + m.h/2) - _cy;
+        if (_dx * _dx + _dy * _dy < 240 * 240) _applyMobStatus(m, 'burn', 5000, { chance: 75, dmg: Math.max(4, Math.floor(_maxHp * 0.02)) });
+      }
+    }
+    flash(0.8);
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      game.particles.push({ x: player.x + player.w/2, y: player.y + player.h/2, vx: Math.cos(a) * 7, vy: Math.sin(a) * 7, life: 60, color: i % 2 ? '#ff8844' : '#ffe089', size: 4 });
+    }
+    game.damageNumbers.push({ x: player.x, y: player.y - 18, vy: -2, text: '🔥 PHOENIX!', life: 65, color: '#ffaa44', size: 22 });
+    showToast('🔥 Phoenix Heart — risen from ash!', 'legendary');
+    return true;
+  }
+  return false;
 }
 
 function triggerDeath() {
@@ -46395,7 +46466,7 @@ const SKILL_FNS = {
       if (d < 340) {
         m.aggroTarget = player;
         if (d < 180) {
-          hitMonster(m, Math.floor(getAtk() * 0.9), rollCrit(), 'warCry');
+          { const _c = rollCrit(); hitMonster(m, Math.floor(getAtk() * 0.9 * (_c ? getCritDmg() : 1)), _c, 'warCry'); }   // v0.26.1033 — was flag-only: crit showed but dealt no bonus dmg
           m.vx += Math.sign(m.x - player.x) * 4;
           m.vy -= 2;
         }
@@ -46820,7 +46891,7 @@ const SKILL_FNS = {
         // with cloud trim below, total per-cast drops 4.1× → ~2.9×,
         // back inside C-tier target 2.0-3.0×.
         const laneDmg = Math.abs(midY - pCy) < 24 ? 1.4 : 1.0;
-        hitMonster(m, Math.floor(getAtk() * laneDmg), rollCrit(), 'smokeDash');
+        { const _c = rollCrit(); hitMonster(m, Math.floor(getAtk() * laneDmg * (_c ? getCritDmg() : 1)), _c, 'smokeDash'); }   // v0.26.1033 — apply crit dmg (was flag-only)
       }
     }
     // Afterimage trail
@@ -46841,7 +46912,7 @@ const SKILL_FNS = {
           if (m.currentHp <= 0) continue;
           if (Math.abs((m.x + m.w/2) - cloudX) < 90 && Math.abs(m.y - player.y) < 80) {
             // v0.25.658 — P1 REBALANCE. Cloud per-tick 0.8 → 0.5.
-            hitMonster(m, Math.floor(getAtk() * 0.5), rollCrit(), 'smokeDash');
+            { const _c = rollCrit(); hitMonster(m, Math.floor(getAtk() * 0.5 * (_c ? getCritDmg() : 1)), _c, 'smokeDash'); }   // v0.26.1033 — apply crit dmg (was flag-only)
           }
         }
         for (let i = 0; i < 3; i++) {
@@ -47162,7 +47233,7 @@ const SKILL_FNS = {
         candidates.sort((a, b) => a.dSq - b.dSq);
         const targets = candidates.slice(0, HIT_CAP);
         for (const t of targets) {
-          hitMonster(t.m, Math.floor(getAtk() * 1.25), rollCrit(), 'deathBlossom');
+          { const _c = rollCrit(); hitMonster(t.m, Math.floor(getAtk() * 1.25 * (_c ? getCritDmg() : 1)), _c, 'deathBlossom'); }   // v0.26.1033 — apply crit dmg (was flag-only)
         }
         // v0.25.212 — flashy sakura petal burst sprite per wave (slow spin
         // so the 3 waves stack into a layered rotating bloom).
@@ -48824,7 +48895,7 @@ const SKILL_FNS = {
           if (m.currentHp <= 0) continue;
           const dx = (m.x + m.w / 2) - ax, dy = (m.y + m.h / 2) - ay;
           if (dx * dx + dy * dy <= _R2 && typeof hitMonster === 'function') {
-            hitMonster(m, Math.floor(getAtk() * 4.5), (typeof rollCrit === 'function' && rollCrit()), 'magic');
+            { const _c = (typeof rollCrit === 'function' && rollCrit()); const _cd = (_c && typeof getCritDmg === 'function') ? getCritDmg() : 1; hitMonster(m, Math.floor(getAtk() * 4.5 * _cd), _c, 'magic'); }   // v0.26.1033 — apply crit dmg (was flag-only)
           }
         }
       }
@@ -49565,7 +49636,7 @@ const SKILL_FNS = {
       if (_hexLanded) m.burnDmg = Math.max(3, Math.floor(getAtk() * 0.75));   // v0.26.455 - DOT buff (was 0.35x); v0.26.1026 — only set when the poison actually landed (a resisted roll stranded a huge burnDmg later burns inherited via Math.max)
       // v0.26.455 - Grand Hex now lands an instant curse BURST (the master's promised
       // 'massive damage'), not just freeze + DoT. Map-wide, on top of the poison.
-      if (typeof hitMonster === 'function') hitMonster(m, Math.floor(getAtk() * 1.9), (typeof rollCrit === 'function' && rollCrit()), 'magic');
+      if (typeof hitMonster === 'function') { const _c = (typeof rollCrit === 'function' && rollCrit()); const _cd = (_c && typeof getCritDmg === 'function') ? getCritDmg() : 1; hitMonster(m, Math.floor(getAtk() * 1.9 * _cd), _c, 'magic'); }   // v0.26.1033 — apply crit dmg (was flag-only)
       count++;
       // Poison aura rise
       for (let i = 0; i < 4; i++) {
@@ -51860,7 +51931,16 @@ function updateMonsters(dt) {
         }
       }
     }
-    if (m.stunTimer > 0) { m.stunTimer -= dt; m.vx *= 0.5; continue; }
+    if (m.stunTimer > 0) {
+      m.stunTimer -= dt; m.vx *= 0.5;
+      // v0.26.1033 — bosses are stun-resistant like they are freeze-immune: decay
+      // the timer and slow them, but NEVER skip bossAI. Many player stun sources
+      // (Ballista defBreak, dagger rain, eclipse_snap, performMelee opts.stun...)
+      // write m.stunTimer directly, bypassing _applyMobStatus's boss resist roll
+      // + anti-chain grace — at a fast fire rate that refreshed the timer every
+      // frame and this `continue` perma-locked the boss (never acted, free kill).
+      if (!(m.isBoss || m.boss)) continue;
+    }
     if (m.freezeTimer > 0 && (m.isBoss || m.boss)) m.freezeTimer -= dt;   // v0.26.1019 — decay the phantom timer for freeze-immune bosses
     if (m.freezeTimer > 0 && !(m.isBoss || m.boss)) {   // v0.26.458 - bosses freeze-IMMUNE (no AI-skip); v0.26.x audit FIX — was `!m.boss`, but spawned bosses carry `isBoss` (m.boss is always falsy on live instances), so this guard never protected them and the Grand-Hex / freeze-lock exploit on apex bosses like Gravitos was still open. Now checks isBoss.
       m.freezeTimer -= dt;
@@ -56611,7 +56691,8 @@ function bossAI(m, dt, distToPlayer) {
             // call triggerDeath synchronously so the overlay shows the
             // same frame as the damage, not next frame via safety net.
             if (player.hp <= 0 && !game.dying && typeof triggerDeath === 'function') {
-              try { triggerDeath(); } catch (_) {}
+              // v0.26.1033 — honor an unused cheat-death charge on this nuke too.
+              try { if (typeof _tryCheatDeathRevive !== 'function' || !_tryCheatDeathRevive()) triggerDeath(); } catch (_) {}
             }
           }
         }
@@ -56908,6 +56989,14 @@ function hitMonster(m, dmg, isCrit, skill) {
   // overwriting the real cause-of-death, and combo counter ticking on
   // corpses. One-line gate at the entry kills the whole class.
   if (!m || m.currentHp <= 0) return;
+  // v0.26.1033 — resolve the basic-attack MISS roll ONCE up front so on-hit
+  // side effects (Arcane Ember stacks, Cancer Bubble break counter, talent
+  // lifesteal) don't fire on a whiff. The visible MISS marker + early return
+  // still happen at the original site below, reusing this same result (the RNG
+  // is rolled exactly once — the inline roll there was removed).
+  const _lxBasicMiss = (BASIC_HIT_SKILLS.has(skill) && typeof player !== 'undefined' && player && !player._oneShot)
+    ? ((!m.boss && !_rollHitVsLevelGap(m.level || 1)) || ((m.evasion || 0) > 0 && !_rollAccuracyHit(getAccuracy(), m.evasion, m.boss ? 0.45 : 0.15)))
+    : false;
   // v0.26.889 — JOB TALENT combat hooks + mage Arcane Embers, at the
   // canonical player→monster damage sink so every attack path is covered.
   if (typeof player !== 'undefined' && player) {
@@ -56920,7 +57009,7 @@ function hitMonster(m, dmg, isCrit, skill) {
       if (_tfx.basicLifesteal && _basicSkill) player.hp = Math.min(game._mxHp, player.hp + Math.max(1, Math.floor(dmg * _tfx.basicLifesteal)));
       if (_tfx.critMp && isCrit) player.mp = Math.min(game._mxMp, player.mp + _tfx.critMp);
     }
-    if (player.cls === 'mage' && skill === 'bolt') {
+    if (player.cls === 'mage' && skill === 'bolt' && !_lxBasicMiss) {   // v0.26.1033 — a missed bolt no longer grants an Ember stack
       const _now = Date.now();
       if (!player._emberT || _now - player._emberT > 6000) player._emberStacks = 0;
       player._emberStacks = Math.min(5, (player._emberStacks || 0) + 1);
@@ -56951,7 +57040,7 @@ function hitMonster(m, dmg, isCrit, skill) {
   // breaking out. The bubble auto-bursts at 4 hits via the Cancer AI
   // tick — we just increment the counter here at the canonical
   // hit-applied site.
-  if (typeof player !== 'undefined' && player && (player._cancerBubble | 0) > 0) {
+  if (typeof player !== 'undefined' && player && (player._cancerBubble | 0) > 0 && !_lxBasicMiss) {   // v0.26.1033 — a missed basic no longer counts toward the bubble break
     player._cancerBubbleHits = ((player._cancerBubbleHits | 0) + 1);
   }
   // v0.26.086 — Gemini Lie Phase penalty. When the lying twin is hit
@@ -57122,10 +57211,9 @@ function hitMonster(m, dmg, isCrit, skill) {
     // high evasion) and use a 45% evasion floor. Normal mobs are unchanged, and
     // cooldown skills still always connect, so this doesn't trivialize bosses —
     // it just lets a non-BiS player land basics while skills carry the burst.
-    const _isBossTgt = !!m.boss;
-    const _missed = (!_isBossTgt && !_rollHitVsLevelGap(m.level || 1)) ||
-                    ((m.evasion || 0) > 0 && !_rollAccuracyHit(getAccuracy(), m.evasion, _isBossTgt ? 0.45 : 0.15));
-    if (_missed) {
+    // v0.26.1033 — reuse the miss result resolved at the top of hitMonster (so
+    // on-hit effects above already respected it); no second RNG roll here.
+    if (_lxBasicMiss) {
       game.damageNumbers.push({
         x: m.x + m.w/2 - 16, y: m.y - 6, vy: -2,
         text: 'MISS', life: 36, color: '#bbbbbb', size: 14
@@ -60441,7 +60529,8 @@ function updateProjectiles(dt) {
           // inside the hazard loop, after updatePlayer's death check has run, so
           // we close the 1-frame 'no death popup' window here.
           if (!game.dying && typeof triggerDeath === 'function') {
-            try { triggerDeath(); } catch (_) {}
+            // v0.26.1033 — honor an unused cheat-death charge on this nuke too.
+            try { if (typeof _tryCheatDeathRevive !== 'function' || !_tryCheatDeathRevive()) triggerDeath(); } catch (_) {}
           }
         }
       }
@@ -89481,7 +89570,7 @@ const ZODIAC_AI = {
         // looped game.monsters and applied damage there — Aries' charge
         // hazard was hitting the very boss that spawned it. User reported
         // "Aries is damaging itself".
-        game.hazards.push({ type: 'meteor_warn', x: _cx, y: m.y + m.h - 8, cx: _cx, timer: 20, damage: m.atk * 0.5, owner: 'enemy' });
+        game.hazards.push({ type: 'meteor_warn', x: _cx, y: m.y + m.h - 8, cx: _cx, timer: 20, damage: m.atk * 0.5, owner: 'enemy', radius: 90 });   // v0.26.1033 — match drawn telegraph width (resolver default 180 vs renderer 90)
       }
       if (m.patternTimer > 900) {
         m.patternState = 'chargeBurst'; m.patternTimer = 0; m.vx = 0;
@@ -90180,7 +90269,7 @@ const ZODIAC_AI = {
         game.hazards.push({
           // v0.25.622 — added cx field (was missing — same NaN cascade as Aries)
           // v0.25.634 — owner:'enemy' so the resolver damages player, not Leo itself
-          type: 'meteor_warn', x: tx, y: 440, cx: tx, timer: 70, damage: m.atk * 1.4, color: '#ffaa33', owner: 'enemy',
+          type: 'meteor_warn', x: tx, y: 440, cx: tx, timer: 70, damage: m.atk * 1.4, color: '#ffaa33', owner: 'enemy', radius: 90,   // v0.26.1033 — was radius-less: resolver default 180 vs renderer default 90 -> unavoidable hits ±80px outside the drawn cue
         });
       }
       if (m.patternTimer > 500) { m.patternState = 'idle'; m.patternTimer = 0; m._leoFired = false; }
@@ -90202,7 +90291,7 @@ const ZODIAC_AI = {
               // v0.25.622 — added cx (was missing — NaN cascade)
               // v0.25.634 — owner:'enemy' so the resolver targets player not Leo
               type: 'meteor_warn', x: tx, y: 440, cx: tx, timer: 80,
-              damage: m.atk * 1.2, color: '#ffaa33', owner: 'enemy',
+              damage: m.atk * 1.2, color: '#ffaa33', owner: 'enemy', radius: 90,   // v0.26.1033 — match drawn telegraph width (see comet fix above)
             });
           }, i * 220);
         }
@@ -90333,7 +90422,7 @@ const ZODIAC_AI = {
         const _vCx = player.x + 14;
         game.hazards.push({
           type: 'meteor_warn', x: _vCx, y: 440, cx: _vCx, timer: 55,
-          damage: m.atk * 1.3, color: '#ffeecc', owner: 'enemy',
+          damage: m.atk * 1.3, color: '#ffeecc', owner: 'enemy', radius: 90,   // v0.26.1033 — match drawn telegraph width (see Leo comet fix)
         });
         m._virgoChannel = 0;
         m._virgoChannelHp = null;
@@ -94983,61 +95072,11 @@ function loop(time) {
   if (typeof player.hp === 'number' && player.hp < 0) player.hp = 0;
   // Death check — runs every frame regardless of who dealt the killing blow
   if (player.hp <= 0 && !game.dying) {
-    // Skill tree: Second Wind — revive once per map
-    if (player.tree.secondWind && player.tree.secondWindReady) {
-      player.tree.secondWindReady = false;
-      player.hp = Math.floor(getMaxHp() * 0.5);
-      player.mp = getMaxMp();
-      player.invulnerable = 2000;
-      player.hitStun = 0;
-      player.burnTimer = 0; player.burnDmg = 0; player._burnTickAcc = 0; player._poisonTimer = 0; player._poisonDmg = 0; player._poisonTickAcc = 0; player._electrocuteTimer = 0; player._electrocuteDmg = 0; player._electrocuteTickAcc = 0; player.frozenTimer = 0; player.stunTimer = 0; player.freezeTimer = 0;   // v0.26.1030 — clear DoT/CC so the invuln window is usable and no instant re-death
-      showToast('❤️ Second Wind!', 'legendary');
-      flash(0.6); addShake(10);
-      for (let i = 0; i < 3; i++) {
-        const a = (i / 3) * Math.PI * 2;
-        game.particles.push({
-          x: player.x + player.w/2, y: player.y + player.h/2,
-          vx: Math.cos(a) * 6, vy: Math.sin(a) * 6,
-          life: 50, color: '#ff5566', size: 3
-        });
-      }
-    } else if (hasMilestone('miracleEvasion') && !player._miracleUsedThisMap) {
-      // Milestone: Miracle Evasion — survive the lethal blow at 1 HP, once per map.
-      // (Moved here from updatePlayer so it fires on ANY lethal source, not just DOTs.)
-      player._miracleUsedThisMap = true;
-      player.hp = 1;
-      player.invulnerable = Math.max(player.invulnerable, 2000);
-      player.burnTimer = 0; player.burnDmg = 0; player._burnTickAcc = 0; player._poisonTimer = 0; player._poisonDmg = 0; player._poisonTickAcc = 0; player._electrocuteTimer = 0; player._electrocuteDmg = 0; player._electrocuteTickAcc = 0; player.frozenTimer = 0; player.stunTimer = 0; player.freezeTimer = 0;   // v0.26.1030 — clear DoT/CC on revive
-      flash(0.7);
-      for (let i = 0; i < 3; i++) {
-        const a = (i / 3) * Math.PI * 2;
-        game.particles.push({ x: player.x + player.w/2, y: player.y + player.h/2, vx: Math.cos(a) * 6, vy: Math.sin(a) * 6, life: 50, color: i % 2 ? '#88ff88' : '#ffffff', size: 3 });
-      }
-      game.damageNumbers.push({ x: player.x, y: player.y - 18, vy: -2, text: 'MIRACLE!', life: 60, color: '#88ff88', size: 20 });
-      showToast('Miracle Evasion — saved!', 'legendary');
-    } else if (!player._phoenixUsedThisMap && player._activeSynergies && player._activeSynergies.phoenixHeart) {
-      // Synergy: Phoenix Heart — once-per-map cheat death + burst-burn aura.
-      player._phoenixUsedThisMap = true;
-      player.hp = 1;
-      player.invulnerable = Math.max(player.invulnerable, 2000);
-      player.burnTimer = 0; player.burnDmg = 0; player._burnTickAcc = 0; player._poisonTimer = 0; player._poisonDmg = 0; player._poisonTickAcc = 0; player._electrocuteTimer = 0; player._electrocuteDmg = 0; player._electrocuteTickAcc = 0; player.frozenTimer = 0; player.stunTimer = 0; player.freezeTimer = 0;   // v0.26.1030 — clear DoT/CC on revive
-      if (game.monsters && game.monsters.length) {
-        const _cx = player.x + player.w / 2, _cy = player.y + player.h / 2;
-        const _maxHp = (typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp;
-        for (const m of game.monsters) {
-          if (!m || m.currentHp <= 0) continue;
-          const _dx = (m.x + m.w/2) - _cx, _dy = (m.y + m.h/2) - _cy;
-          if (_dx * _dx + _dy * _dy < 240 * 240) _applyMobStatus(m, 'burn', 5000, { chance: 75, dmg: Math.max(4, Math.floor(_maxHp * 0.02)) });
-        }
-      }
-      flash(0.8);
-      for (let i = 0; i < 12; i++) {
-        const a = (i / 12) * Math.PI * 2;
-        game.particles.push({ x: player.x + player.w/2, y: player.y + player.h/2, vx: Math.cos(a) * 7, vy: Math.sin(a) * 7, life: 60, color: i % 2 ? '#ff8844' : '#ffe089', size: 4 });
-      }
-      game.damageNumbers.push({ x: player.x, y: player.y - 18, vy: -2, text: '🔥 PHOENIX!', life: 65, color: '#ffaa44', size: 22 });
-      showToast('🔥 Phoenix Heart — risen from ash!', 'legendary');
-    } else {
+    // v0.26.1033 — revive chain extracted to _tryCheatDeathRevive() so the
+    // updatePlayer death gate + synchronous boss one-shot gates share it (they
+    // used to call triggerDeath() directly, bypassing all three revives — DoT
+    // and boss-nuke deaths killed the player even with an unused charge).
+    if (!_tryCheatDeathRevive()) {
       player.hp = 0;
       triggerDeath();
     }
