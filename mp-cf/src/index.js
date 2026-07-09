@@ -196,12 +196,28 @@ export class MojiRoom {
     }
   }
 
+  // Per-IP sliding-window throttle. Register/login share the one global DO with
+  // the WebSocket relay, so an unauthenticated request flood serializes ahead of
+  // live gameplay and stalls every room. Keyed on the requester's IP so a flood
+  // only slows its own source, never other players. Returns true if allowed.
+  async _ipThrottle(request, bucket, limit, windowMs) {
+    const ip = request.headers.get('cf-connecting-ip') || 'unknown';
+    const rk = 'rl:' + bucket + ':' + ip, now = Date.now();
+    const r = (await this.storage.get(rk)) || { n: 0, reset: now + windowMs };
+    if (now > r.reset) { r.n = 0; r.reset = now + windowMs; }
+    r.n += 1;
+    await this.storage.put(rk, r);
+    return r.n <= limit;
+  }
+
   async apiRegister(request) {
     let body; try { body = await request.json(); } catch { return jsonResp({ ok: false, error: 'bad request' }, 400); }
     const name = String((body && body.username) || '');
     const pass = String((body && body.password) || '');
     if (!okUser(name)) return jsonResp({ ok: false, error: 'Username must be 3-16 chars (letters, digits, underscore).' }, 400);
     if (!okPass(pass)) return jsonResp({ ok: false, error: 'Password must be 6-64 characters.' }, 400);
+    if (!(await this._ipThrottle(request, 'reg', 5, 60 * 1000)))
+      return jsonResp({ ok: false, error: 'Too many registrations — try again shortly.' }, 429);
     const key = name.toLowerCase();
     if (await this.storage.get(ACCT_KEY(key))) return jsonResp({ ok: false, error: 'That name is already taken.' }, 409);
     const salt = randHex(16);
@@ -217,8 +233,16 @@ export class MojiRoom {
     const name = String((body && body.username) || '');
     const pass = String((body && body.password) || '');
     if (!okUser(name) || !okPass(pass)) return jsonResp({ ok: false, error: 'Invalid username or password.' }, 400);
+    if (!(await this._ipThrottle(request, 'login', 15, 60 * 1000)))
+      return jsonResp({ ok: false, error: 'Too many attempts — try again shortly.' }, 429);
     const key = name.toLowerCase();
-    const fk = 'fail:' + key, now = Date.now();
+    const ip = request.headers.get('cf-connecting-ip') || 'unknown';
+    // Brute-force lockout scoped to (ip + username), NOT the target account alone.
+    // The old 'fail:'+key let anyone lock a victim out of their own CORRECT password
+    // by spamming wrong ones (the gate runs before the password check). Keying on the
+    // requester's IP means the counter only ever throttles the attacking source; the
+    // victim logging in from their own IP is never gated by someone else's failures.
+    const fk = 'fail:' + ip + ':' + key, now = Date.now();
     const fr = (await this.storage.get(fk)) || { n: 0, until: 0 };
     if (fr.until && now < fr.until) return jsonResp({ ok: false, error: 'Too many attempts — try again shortly.' }, 429);
     const acct = await this.storage.get(ACCT_KEY(key));

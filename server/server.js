@@ -64,6 +64,9 @@ const MAX_CHAT_LEN   = parseInt(process.env.MAX_CHAT_LEN   || '200', 10);
 const MAX_NAME_LEN   = parseInt(process.env.MAX_NAME_LEN   || '20', 10);
 const TICK_STATE_MIN_MS = 40;
 const IDLE_KICK_MS   = 60_000;
+const WS_MAX_PAYLOAD = 64 * 1024;   // reject oversized frames (default ws limit is 100 MB -> OOM vector)
+const WS_RATE        = 40;          // sustained msgs/sec per socket (client ticks ~14/s)
+const WS_BURST       = 60;          // burst bucket
 const VERSION        = '0.25.0';
 
 // ----- Room registry (identical to v0.24.x, unchanged wire format) --------
@@ -325,15 +328,25 @@ const httpServer = http.createServer(async (req, res) => {
 
 // ----- WebSocket handling -------------------------------------------------
 
-const wss = new WebSocketServer({ server: httpServer });
+const wss = new WebSocketServer({ server: httpServer, maxPayload: WS_MAX_PAYLOAD });
 
 wss.on('connection', (ws, req) => {
   ws._lastMsgAt   = Date.now();
   ws._lastStateAt = 0;
   ws._accountId   = null;  // populated by successful `auth` message
+  // Per-socket token bucket: one client can no longer flood hello/chat/emote/map/save
+  // (only `state` was throttled) and stall the shared event loop for every room.
+  ws._tokens = WS_BURST;
+  ws._lastRefill = Date.now();
 
   ws.on('message', (data) => {
     ws._lastMsgAt = Date.now();
+    // Flood guard — refill then spend one token; drop the frame past the burst.
+    const _now = Date.now();
+    ws._tokens = Math.min(WS_BURST, ws._tokens + (_now - ws._lastRefill) / 1000 * WS_RATE);
+    ws._lastRefill = _now;
+    if (ws._tokens < 1) return;
+    ws._tokens -= 1;
     let msg;
     try { msg = JSON.parse(data); } catch (e) { return; }
     if (!msg || typeof msg.t !== 'string') return;
@@ -351,6 +364,11 @@ wss.on('connection', (ws, req) => {
 
     // ---- Hello / join room ----
     if (msg.t === 'hello') {
+      // One identity per socket. Without this, a second hello leaves ws in the
+      // previous room's client Set (broadcast leak + never-'left' ghost peer) and
+      // mints a new id every time -> unbounded room growth + a permanent socket
+      // leak on close (leaveRoom only cleans ws._roomId). Matches mp/server.mjs:95.
+      if (ws._player) { wsSend(ws, { t: 'error', code: 'already_joined', message: 'Already in a room' }); return; }
       const name = sanitizeString(msg.name, MAX_NAME_LEN) || (ws._accountId ? `User${ws._accountId}` : 'Hero');
       const roomId = sanitizeString(msg.room, 24).toLowerCase() || 'lobby';
       if (!joinRoom(ws, roomId)) { ws.close(); return; }
