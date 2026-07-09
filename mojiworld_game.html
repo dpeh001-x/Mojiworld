@@ -8226,7 +8226,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.26.1029';
+const GAME_VERSION = 'v0.26.1030';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -14438,7 +14438,8 @@ function itemScore(it) {
   for (const k in ITEM_STAT_WEIGHTS) {
     v += (it[k] || 0) * ITEM_STAT_WEIGHTS[k];
   }
-  return v * rarityW * starMult(it) * tierMul;
+  const _clsAff = (it.cls && it.cls !== 'any') ? (it.cls === player.cls ? 1.20 : 0.75) : 1;   // v0.26.1030 — match getEquipBonus so off-class drops aren't mis-scored as upgrades
+  return v * rarityW * starMult(it) * tierMul * _clsAff;
 }
 
 // Pretty labels for gear-change toast
@@ -30423,7 +30424,7 @@ const PLAYER_SAVE_FIELDS = [
   // through reload; killMonster's `game.time < player._spawnBoostUntil`
   // check still gates correctly since the saved value is a future
   // timestamp.
-  '_spawnBoostUntil',
+  // v0.26.1030 — '_spawnBoostUntil' NOT persisted: it holds a game.time (frame) deadline, and game.time resets to 0 on reload, so a persisted value renewed the paid buff. Session-only now.
   // v0.26.215 — CRITICAL PQ save-loss fix. Two Ticket Rush flags that
   // were being written + read by gameplay code but missing from this
   // whitelist. Same pattern as the v0.26.200 Stormbearer fix.
@@ -39082,10 +39083,11 @@ function loadMap(id, entryX, entryY) {
   // v0.26.x — Boss Rush: ANY map change away from the hall ends the rush
   // (death respawn, exit portal, dev warp, expedition start — one choke
   // point catches them all; the spawn reset below clears the echoes).
-  if (game.bossRush && game.bossRush.active && id !== 'boss_rush') {
+  if (game.bossRush && id !== 'boss_rush') {   // v0.26.1030 — was gated on .active; a completed rush (active=false) orphaned its results card onto the next map
     const _br = game.bossRush;
     game.bossRush = null;
     if (typeof _bossRushHud === 'function') _bossRushHud(false);
+    try { const _rr = document.getElementById('boss-rush-results'); if (_rr) _rr.remove(); } catch (e) {}
     if (typeof showToast === 'function' && _br.queue && _br.downs < _br.queue.length) {
       showToast('⚔ Boss Rush over — ' + _br.downs + '/' + _br.queue.length + ' echoes laid to rest.', 'warn');
     }
@@ -44794,6 +44796,7 @@ function castSkill(id) {
   cdMul *= getCdrMult();
   cdMul *= JOB_CD_MUL;
   let computedCd = s.cd * cdMul;
+  const _preCastCd = player.skillCooldowns[id] || 0, _preCastMp = player.mp;   // v0.26.1030 — for refund if the SKILL_FN no-ops
   player.skillCooldowns[id] = computedCd;
   player.mp -= cost;
   // v0.25.796 — Skill SFX. Single chokepoint covers every active skill
@@ -45026,7 +45029,9 @@ function castSkill(id) {
   player._classSkillMulExpires = game.time + 120;
   player._classSkillMulSkillId = id;
   const f = SKILL_FNS[id];
-  if (f) f();
+  // v0.26.1030 — if the SKILL_FN no-ops (returns '_lxNoCast', e.g. a summon at cap),
+  // refund the cd + MP committed above so the cast isn't silently wasted.
+  if (f && f() === '_lxNoCast') { player.skillCooldowns[id] = _preCastCd; player.mp = _preCastMp; }
   // v0.25.576 — Anti-spam cast lock, computed AFTER the SKILL_FN body
   // and the *Until flag block both ran. Lock duration = the latest
   // active anim / channel timer the cast just installed; default
@@ -48332,7 +48337,7 @@ const SKILL_FNS = {
     const _allyCount = (player.pet ? 1 : 0) + ((player.pack && player.pack.length) || 0);
     if (_allyCount >= SUMMON_CAP) {
       showToast('Summon cap (' + SUMMON_CAP + ') reached', 'rare');
-      return;
+      return '_lxNoCast';   // v0.26.1030 — refund cd/MP (castSkill now commits cost BEFORE the body; the old "CD does NOT consume" comment was stale)
     }
     // v0.25.557 — Wild Bond rebalance: HP 10000 → 8000 per spec.
     player.pet = {
@@ -49251,19 +49256,13 @@ const SKILL_FNS = {
         // v0.25.255 — base 2.6x → 2.2x to bring per-hit damage in line
         // with Nightreaper's 1.8x (Phantom's shorter 6-target chain
         // already justifies higher per-hit, but +44% per-hit was over).
-        const baseDmg = Math.floor(getAtk() * 2.4);   // v0.26.x balance audit: 3.2x->2.4x (was the top non-ult burst ~21x; nightreaper-aligned)
-        const defRed = Math.floor((target.def || 0) * 0.4);
+        // v0.26.1030 — route through hitMonster so every boss-immunity gate applies
+        // (phase i-frames, Mirror shroud/1%-cap, Gemini reject+punish, Taurus block,
+        // Cancer/Virgo/Libra DR). The old direct HP write nuked bosses through immune
+        // phases. hitMonster owns the DEF curve, crit mult, lifesteal, and killMonster.
         const crit = rollCrit() || Math.random() < 0.7;       // strong crit bias
-        const dmg = Math.max(1, Math.floor((baseDmg - defRed) * (crit ? getCritDmg() : 1)));
-        target.currentHp -= dmg;
-        target.hitFlash = 120;
-        game.damageNumbers.push({
-          x: target.x + target.w/2, y: target.y - 6, vy: -2.6,
-          text: (i === candidates.length - 1 ? '✦ ' : '') + dmg + (crit ? '!!' : '!'),
-          life: 55, color: '#c8a8ff', size: 22, crit: crit
-        });
         delete target._voidBrand;
-        if (target.currentHp <= 0) killMonster(target);
+        hitMonster(target, Math.floor(getAtk() * 2.4), crit, 'phantom_cut');
         flash(0.22); audio.play('crit');
         // After-image trail — shadow chain connecting the strikes
         for (let k = 0; k < 14; k++) {
@@ -49949,6 +49948,7 @@ const SKILL_FNS = {
     player.pack = player.pack || [];
     const _petCount = (player.pet ? 1 : 0);
     const slots = Math.max(0, SUMMON_CAP - _petCount - player.pack.length);
+    if (slots <= 0) { if (typeof showToast === 'function') showToast('Summon cap (' + SUMMON_CAP + ') reached', 'rare'); return '_lxNoCast'; }   // v0.26.1030 — refund cd/MP instead of burning it on a no-op
     for (let i = 0; i < slots; i++) {
       player.pack.push({
         x: player.x + (i - 1) * 50, y: player.y, vx: 0, vy: 0,
@@ -58933,7 +58933,7 @@ function killMonster(m) {
     // branch — only the FINAL boss death reaches this code.
     {
       const _shardMapKey = (game.currentMap || 'unknown') + '_shardsAwarded';
-      if (!game.bossDefeated[_shardMapKey]) {
+      if (!m._echoBoss && !m._expeditionBoss && !game.bossDefeated[_shardMapKey]) {   // v0.26.1030 — echo/rush + expedition bosses don't grant per-boss shards (payout is once at run end)
         const _bossLvl = (m.level && m.level > 0) ? m.level
                        : (typeof _mobLevel === 'function' ? _mobLevel(m) : 50);
         const SHARDS = Math.min(50, Math.max(1, Math.floor(_bossLvl * 0.5)));
@@ -68459,11 +68459,13 @@ function _itemCompareHtml(it) {
   if (cur === it) return '';   // hovering the equipped slot itself — nothing to compare
   const _mul = (x) => (typeof _tierMul === 'function') ? _tierMul(x && x.tier) : 1;
   const nMul = _mul(it), oMul = cur ? _mul(cur) : 1;
+  const _star = (x) => (typeof starMult === 'function' && x) ? starMult(x) : 1;   // v0.26.1030 — compare ignored star enhancement -> false upgrade arrows
+  const nStar = _star(it), oStar = cur ? _star(cur) : 1;
   const fmtFlat = (v) => Math.abs(v) < 10 ? (Math.round(v * 10) / 10) : Math.round(v);
   const rows = [];
   // Flat (tier-scaled) main stats + damage.
   for (const [k, label] of [['atk','ATK'],['def','DEF'],['hp','HP'],['mp','MP'],['crit','% Crit']]) {
-    const d = (it[k] || 0) * nMul - (cur ? (cur[k] || 0) * oMul : 0);
+    const d = (it[k] || 0) * nMul * nStar - (cur ? (cur[k] || 0) * oMul * oStar : 0);   // v0.26.1030 — include star
     if (Math.abs(d) < 0.05) continue;
     rows.push(_cmpRow(label, d, fmtFlat));
   }
@@ -94969,6 +94971,7 @@ function loop(time) {
       player.mp = getMaxMp();
       player.invulnerable = 2000;
       player.hitStun = 0;
+      player.burnTimer = 0; player.burnDmg = 0; player._burnTickAcc = 0; player._poisonTimer = 0; player._poisonDmg = 0; player._poisonTickAcc = 0; player._electrocuteTimer = 0; player._electrocuteDmg = 0; player._electrocuteTickAcc = 0; player.frozenTimer = 0; player.stunTimer = 0; player.freezeTimer = 0;   // v0.26.1030 — clear DoT/CC so the invuln window is usable and no instant re-death
       showToast('❤️ Second Wind!', 'legendary');
       flash(0.6); addShake(10);
       for (let i = 0; i < 3; i++) {
@@ -94985,6 +94988,7 @@ function loop(time) {
       player._miracleUsedThisMap = true;
       player.hp = 1;
       player.invulnerable = Math.max(player.invulnerable, 2000);
+      player.burnTimer = 0; player.burnDmg = 0; player._burnTickAcc = 0; player._poisonTimer = 0; player._poisonDmg = 0; player._poisonTickAcc = 0; player._electrocuteTimer = 0; player._electrocuteDmg = 0; player._electrocuteTickAcc = 0; player.frozenTimer = 0; player.stunTimer = 0; player.freezeTimer = 0;   // v0.26.1030 — clear DoT/CC on revive
       flash(0.7);
       for (let i = 0; i < 3; i++) {
         const a = (i / 3) * Math.PI * 2;
@@ -94997,6 +95001,7 @@ function loop(time) {
       player._phoenixUsedThisMap = true;
       player.hp = 1;
       player.invulnerable = Math.max(player.invulnerable, 2000);
+      player.burnTimer = 0; player.burnDmg = 0; player._burnTickAcc = 0; player._poisonTimer = 0; player._poisonDmg = 0; player._poisonTickAcc = 0; player._electrocuteTimer = 0; player._electrocuteDmg = 0; player._electrocuteTickAcc = 0; player.frozenTimer = 0; player.stunTimer = 0; player.freezeTimer = 0;   // v0.26.1030 — clear DoT/CC on revive
       if (game.monsters && game.monsters.length) {
         const _cx = player.x + player.w / 2, _cy = player.y + player.h / 2;
         const _maxHp = (typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp;
