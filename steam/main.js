@@ -7,18 +7,31 @@
 // relay URL is injected via preload as window.MOJI_RELAY_URL so the game's
 // MP_DEFAULT_URL picks it up without the player ever typing a ws:// address.
 'use strict';
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, shell, powerSaveBlocker } = require('electron');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+
+// Reduce Chromium's throttling of an unfocused/occluded window so a co-op HOST
+// keeps simulating smoothly when the player alt-tabs (the common case). A fully
+// MINIMIZED host can still have rAF throttled — the game degrades gracefully
+// there: followers detect the host went quiet (~5s) and fall back to local
+// simulation, and host re-election kicks in, so nobody freezes.
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
 // Dev: serve the repo root (../). Packaged: electron-builder copies the game
 // into resources/app (see extraResources in package.json).
 const ROOT = app.isPackaged ? path.join(process.resourcesPath, 'app') : path.join(__dirname, '..');
 const ENTRY = '/mojiworld_game.html';
-// Point this at your hosted relay for the shipped build (see STEAM.md). Env var
-// wins so QA/beta can override without a rebuild.
-const RELAY_URL = process.env.MOJI_RELAY_URL || 'wss://your-relay.example.workers.dev';
+// Relay URL: env var wins. We do NOT ship a bogus placeholder default — a packaged
+// build with no relay is a hard error (co-op would silently fail). In dev we pass
+// '' so the game's own ws://localhost default engages.
+const RELAY_URL = process.env.MOJI_RELAY_URL || '';
+if (app.isPackaged && !RELAY_URL) {
+  throw new Error('MOJI_RELAY_URL must be set for packaged Steam builds (see STEAM.md).');
+}
 
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
@@ -48,6 +61,8 @@ function startServer() {
 
 async function createWindow() {
   const port = await startServer();
+  // Prevent the OS from suspending the app (co-op host authority + audio).
+  try { powerSaveBlocker.start('prevent-app-suspension'); } catch (e) {}
   const win = new BrowserWindow({
     width: 1280, height: 800, minWidth: 960, minHeight: 560,
     backgroundColor: '#0b0713',

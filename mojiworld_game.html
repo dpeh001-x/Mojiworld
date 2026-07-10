@@ -32221,7 +32221,12 @@ function _coopRecomputeHost() {
 function _coopHostMap() {
   if (net.isHost) return game.currentMap;
   const h = (net.hostId != null) ? net.peers[net.hostId] : null;
-  return h ? h.map : null;
+  if (!h) return null;
+  // A host we haven't heard from in ~5s (crashed tab / silent drop) is treated as
+  // absent, so we leave following mode and resume local simulation instead of
+  // staring at frozen mirrors until the 30s stale-peer prune re-elects.
+  if (typeof h._last === 'number' && performance.now() - h._last > 5000) return null;
+  return h.map;
 }
 // True only when I'm a NON-host actively mirroring the host's monsters on the
 // SAME map. When false I simulate my own monsters (solo / host / split-up).
@@ -32281,6 +32286,10 @@ function _coopApplyMonsters(msg) {
       net._coopSpawning = false;
       if (!m || m._suppressed) continue;
       m.uid = e.u; m._coopMirror = true;
+      // Keep our local uid counter ahead of every adopted uid, so if THIS client
+      // is later promoted to host its next spawn can't collide with an inherited
+      // mirror uid (host-handoff collision).
+      if (+e.u > (game._monUid | 0)) game._monUid = +e.u;
     }
     m.x = +e.x; m.y = +e.y; m.vx = +e.vx || 0; m.vy = +e.vy || 0;
     m.facing = e.f === -1 ? -1 : 1;
@@ -32293,7 +32302,16 @@ function _coopApplyMonsters(msg) {
     if (m && m.uid != null && m._coopMirror && !seen.has(m.uid)) game.monsters.splice(i, 1);
   }
 }
-// NON-HOST: forward a damage event to the host (who is authoritative).
+// Resolve ONLY the attacker-side mitigation (the non-host's own combo + tower
+// buff) before forwarding. DEF and the monster's variant multipliers are resolved
+// HOST-side (in _coopHostApplyDamage) because only the host holds the authoritative
+// m.def / isElite / isBoss — the lightweight mirror doesn't sync them.
+function _coopResolveDamage(m, dmg, skill) {
+  let d = Math.max(1, Math.floor((+dmg || 0) * (game.comboMult || 1)));
+  if (game.tower && typeof towerPlayerDmgMul === 'function') d = Math.floor(d * towerPlayerDmgMul());
+  return Math.max(1, d);
+}
+// NON-HOST: forward a (fully static-resolved) damage event to the host.
 function _coopSendDamage(m, dmg, isCrit, skill) {
   if (!m || m.uid == null) return;
   try { net.ws.send(JSON.stringify({ t: 'dmg', u: m.uid, d: Math.max(0, Math.round(dmg) || 0), c: isCrit ? 1 : 0, k: String(skill || '').slice(0, 16) })); } catch (e) {}
@@ -32302,13 +32320,28 @@ function _coopSendDamage(m, dmg, isCrit, skill) {
 // already rolled crit/mults on their client), keeping the monster-side gates
 // hitMonster would apply. Routes death through killMonster so loot/XP/removal
 // (and the kill broadcast below) all fire exactly as for a local kill.
-function _coopHostApplyDamage(uid, dmg, isCrit) {
+function _coopHostApplyDamage(uid, dmg, isCrit, skill) {
   if (!net.isHost) return;
   const m = _coopFindByUid(uid);
   if (!m || m.currentHp <= 0) return;
-  let d = Math.max(0, Math.round(dmg) || 0);
-  if (m.zodiacSign === 'libra' && (m._libraOrbsAlive | 0) > 0 && !m._libraShield) d = Math.floor(d * 0.5);
-  if (m._virgoChanneling) d = Math.max(1, Math.floor(d * 0.4));
+  // The incoming value is combo/tower-resolved on the attacker's client. The HOST
+  // applies the monster-side mitigation it alone holds authoritatively: the DEF
+  // armor curve (+ variant multipliers) and the dynamic reject/DR gates — mirroring
+  // hitMonster so peers can't melt a high-DEF boss or hit through an invuln window.
+  if ((m.invulnerable | 0) > 0) return;                                   // i-frame / revive window
+  if (m._geminiLying && m.zodiacSign === 'gemini') return;                // hitting the lying twin is rejected
+  let d = Math.max(1, Math.round(dmg) || 1);
+  if (m.def && skill !== 'breakDef' && skill !== 'siege' && skill !== 'thorns') {
+    let defVal = m.def;
+    if (m.isElite)    defVal *= 1.4;
+    if (m.isMiniBoss) defVal *= 1.8;
+    if (m.isBoss)     defVal *= 2.2;
+    d = Math.max(1, Math.floor(d * (300 / (defVal + 300))));              // armor curve (host-authoritative DEF)
+  }
+  if (m._cancerShellClosed) d = Math.max(1, Math.floor(d * 0.3));         // sealed shell
+  if (m._virgoChanneling)   d = Math.max(1, Math.floor(d * 0.4));         // channel DR
+  if (m._libraShield)       d = Math.max(1, Math.floor(d * (m._libraShieldFactor || 0.5)));
+  else if (m.zodiacSign === 'libra' && (m._libraOrbsAlive | 0) > 0) d = Math.floor(d * 0.5);
   m.currentHp -= d;
   m.hitFlash = Math.max(m.hitFlash | 0, 6);
   if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2 - 8, y: m.y - 6, vy: -2, text: '' + d, life: 30, color: isCrit ? '#ffd24a' : '#fff', size: isCrit ? 18 : 14 });
@@ -32318,20 +32351,35 @@ function _coopHostApplyDamage(uid, dmg, isCrit) {
 // the death pop so co-op progression works for everyone, not just the host.
 function _coopBroadcastKill(m, exp, coins) {
   if (!_coopActive() || !net.isHost || !m) return;
-  try { net.ws.send(JSON.stringify({ t: 'kill', u: m.uid, e: Math.round(exp) || 0, c: Math.round(coins) || 0, x: Math.round(m.x), y: Math.round(m.y), map: game.currentMap })); } catch (e) {}
+  try { net.ws.send(JSON.stringify({ t: 'kill', u: m.uid, e: Math.round(exp) || 0, c: Math.round(coins) || 0, x: Math.round(m.x), y: Math.round(m.y), map: game.currentMap, tp: m.type, b: m.isBoss ? 1 : 0 })); } catch (e) {}
 }
-// NON-HOST: award XP/coins from a host kill (same map only) + death pop.
+// NON-HOST: award XP/coins from a host kill (same map only) + progression + pop.
 function _coopApplyKill(msg) {
   if (net.isHost || !msg || msg.map !== game.currentMap) return;
   const m = (msg.u != null) ? _coopFindByUid(msg.u) : null;
   if (m) { const i = game.monsters.indexOf(m); if (i >= 0) game.monsters.splice(i, 1); }
-  const exp = Math.max(0, +msg.e || 0);
-  const coins = Math.max(0, +msg.c || 0);
+  // Scale the base exp by THIS peer's own non-party multipliers (the host sent
+  // base m.exp) so a guest earns comparably instead of a tiny raw fraction.
+  let exp = Math.max(0, +msg.e || 0);
   if (exp > 0 && typeof player !== 'undefined' && player) {
+    const boost = 1 + ((player.mods && player.mods.xpBoost) || 0) + (typeof getEquipBonus === 'function' ? getEquipBonus('xpBoost') : 0);
+    const early = ((player.level || 1) <= 5) ? 3 : 1;
+    const evt = (typeof LX_EVENT_EXP_MULT === 'number') ? LX_EVENT_EXP_MULT : 1;
+    const mon = (typeof LX_MONSTER_EXP_MULT === 'number') ? LX_MONSTER_EXP_MULT : 1;
+    exp = Math.floor(exp * boost * early * evt * mon);
     player.exp = (player.exp || 0) + exp;
     if (typeof _maybeLevelUp === 'function') { try { _maybeLevelUp(); } catch (e) {} }
   }
+  const coins = Math.max(0, +msg.c || 0);
   if (coins > 0 && typeof _grantMojicoins === 'function') { try { _grantMojicoins(coins); } catch (e) {} }
+  // Progression parity: a shared boss kill counts for the peer too (defeat flag +
+  // bestiary), so co-op boss runs advance everyone's unlocks.
+  if (msg.b && typeof game !== 'undefined') {
+    try { if (game.bossDefeated) game.bossDefeated[game.currentMap] = true; } catch (e) {}
+    try { if (msg.tp) { if (!game.mojidexSeen) game.mojidexSeen = {}; game.mojidexSeen[msg.tp] = true; if (game.mojidexKilled) game.mojidexKilled[msg.tp] = (game.mojidexKilled[msg.tp] | 0) + 1; } } catch (e) {}
+  } else if (msg.tp) {
+    try { if (!game.mojidexSeen) game.mojidexSeen = {}; game.mojidexSeen[msg.tp] = true; if (game.mojidexKilled) game.mojidexKilled[msg.tp] = (game.mojidexKilled[msg.tp] | 0) + 1; } catch (e) {}
+  }
   // Small death pop so the kill reads on the peer (host's inline VFX isn't networked).
   if (Number.isFinite(+msg.x) && game.particles) {
     for (let i = 0; i < 8; i++) {
@@ -32340,11 +32388,43 @@ function _coopApplyKill(msg) {
     }
   }
 }
+// NON-HOST danger: mirrored monsters must still hurt the follower. ALL real
+// monster->player damage lives inside the suppressed updateMonsters, so without
+// this a follower would be invincible. Lightweight contact model (aabb + dodge +
+// normal-mob 0.28x / boss 1.0x + a 1s i-frame), matching the essence of the real
+// contact-damage site. Projectile / telegraphed-special damage from mirrors is
+// not synced in v1 (see COOP_NOTES). Called from the follower branch each frame.
+function _coopFollowerContactTick() {
+  if (typeof player === 'undefined' || !player || player.hp <= 0 || player._god) return;
+  if ((player.invulnerable | 0) > 0) return;
+  const arr = game.monsters || [];
+  for (let i = 0; i < arr.length; i++) {
+    const m = arr[i];
+    if (!m || !m._coopMirror || m.currentHp <= 0) continue;
+    if (typeof aabb === 'function' && !aabb(player, m)) continue;
+    const dodgeC = (typeof getEvasion === 'function') ? getEvasion() : 0;
+    if (dodgeC > 0 && Math.random() < dodgeC) {
+      if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: 'DODGE', life: 40, color: '#88ffcc', size: 14 });
+      player.invulnerable = 300; return;
+    }
+    const _normalMul = (!m.isBoss && !m.isMiniBoss) ? 0.28 : 1.0;
+    let dmg = Math.max(1, Math.floor((m.atk || 20) * _normalMul));
+    if (typeof _diffDmg === 'function') { try { dmg = _diffDmg(dmg); } catch (e) {} }
+    player.hp -= dmg;
+    player.lastHitTime = game.time;
+    player._lastDamageSource = m.label || m.type || 'an enemy';
+    player.hitStun = (player.tree && player.tree.stunImmune) ? 0 : Math.floor(140 * (1 - ((typeof getStunResist === 'function') ? getStunResist() : 0)));
+    player.invulnerable = 1000;
+    if (typeof flash === 'function') { try { flash(0.2); } catch (e) {} }
+    if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 10, y: player.y - 8, vy: -2, text: '' + dmg, life: 40, color: '#ff6666', size: 15 });
+    return;   // one hit per tick; the i-frame gates the rest
+  }
+}
 
 function _mpHandle(msg) {
   switch (msg.t) {
     case 'mon':  _coopApplyMonsters(msg); return;   // v0.27.0 host monster state (non-host mirrors)
-    case 'dmg':  if (net.isHost) _coopHostApplyDamage(msg.u, +msg.d || 0, !!msg.c); return;   // remote damage -> host applies
+    case 'dmg':  if (net.isHost) _coopHostApplyDamage(msg.u, +msg.d || 0, !!msg.c, msg.k); return;   // remote damage -> host applies
     case 'kill': _coopApplyKill(msg); return;       // host kill -> peers award XP/coins
     case 'welcome':
       net.myId = msg.id;
@@ -32471,7 +32551,7 @@ function _mpTick() {
   }
   // Refresh the list + Multi-button count when a ghost was dropped, else the
   // badge/list keep showing the higher count until the next join/left/welcome.
-  if (_pruned) _mpRenderPlayerList();
+  if (_pruned) { if (typeof _coopRecomputeHost === 'function') _coopRecomputeHost(); _mpRenderPlayerList(); }   // v0.27.0 — a pruned (silently-dropped) host must trigger re-election
 }
 function _mpSendChat(text) {
   // v0.24.3 — 60-char hard cap per bubble. Always surfaces a local
@@ -51297,6 +51377,7 @@ function updateMonsters(dt) {
       if (m.hitFlash > 0) m.hitFlash -= dt;
       m.animTimer = (m.animTimer || 0) + dt;
     }
+    _coopFollowerContactTick();   // mirrored monsters still deal contact damage (else follower is invincible)
     return;
   }
   if (window.__UMS) window.__UMtEnter = performance.now();   // DEBUG profiling stamp
@@ -57297,10 +57378,18 @@ function hitMonster(m, dmg, isCrit, skill) {
   // applying a remote hit and must fall through. When host/solo, this is skipped.
   if (m.uid != null && skill !== '__coop'
       && typeof _coopFollowingHost === 'function' && _coopFollowingHost()) {
-    _coopSendDamage(m, dmg, isCrit, skill);
-    m.currentHp = Math.max(0, m.currentHp - (Math.max(0, Math.round(dmg) || 0)));
+    const _cd = _coopResolveDamage(m, dmg, skill);   // attacker-side (combo+tower); host applies DEF + gates
+    _coopSendDamage(m, _cd, isCrit, skill);
+    // Local prediction: approximate the host's DEF reduction with the mirror's own
+    // def so the HP dip roughly matches (the host re-syncs the true value in ~100ms).
+    let _pred = _cd;
+    if (m.def && skill !== 'breakDef' && skill !== 'siege') {
+      let _dv = m.def; if (m.isElite) _dv *= 1.4; if (m.isMiniBoss) _dv *= 1.8; if (m.isBoss) _dv *= 2.2;
+      _pred = Math.max(1, Math.floor(_cd * (300 / (_dv + 300))));
+    }
+    m.currentHp = Math.max(0, m.currentHp - _pred);    // local prediction (host re-syncs true HP)
     m.hitFlash = Math.max(m.hitFlash | 0, 6);
-    if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2 - 8, y: m.y - 6, vy: -2, text: '' + (Math.max(0, Math.round(dmg) || 0)), life: 30, color: isCrit ? '#ffd24a' : '#fff', size: isCrit ? 18 : 14 });
+    if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2 - 8, y: m.y - 6, vy: -2, text: '' + _pred, life: 30, color: isCrit ? '#ffd24a' : '#fff', size: isCrit ? 18 : 14 });
     return;
   }
   // v0.26.1033 — resolve the basic-attack MISS roll ONCE up front so on-hit
