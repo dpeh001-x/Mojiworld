@@ -29227,10 +29227,19 @@ function openClassSelect() {
   }
   // Wire up name input + cosmetic swatches
   const nameInput = document.getElementById('hero-name-input');
-  if (nameInput && !nameInput._wired) {
-    nameInput._wired = true;
-    nameInput.value = (player.look && player.look.name) || '';
-    nameInput.oninput = () => { player.look.name = nameInput.value.trim() || ''; };
+  if (nameInput) {
+    // v0.27.0 — re-sync to the hero's current name on EVERY open (not one-shot),
+    // pre-filled from the gate name / co-op name, so the two never diverge.
+    nameInput.value = (player.look && player.look.name) || localStorage.getItem(MP_NAME_KEY) || '';
+    if (!nameInput._wired) {
+      nameInput._wired = true;
+      nameInput.oninput = () => {
+        const v = nameInput.value.replace(/[^\p{L}\p{N} _-]/gu, '').trim().slice(0, 16);
+        // Only commit a non-empty name (never wipe the gate name), and mirror it to
+        // the co-op display key so peers see the same name.
+        if (v) { player.look.name = v; try { localStorage.setItem(MP_NAME_KEY, v); } catch (e) {} }
+      };
+    }
   }
   const paletteMap = {
     hair: ['#3a1f0a','#8b5a2b','#e3c589','#b22222','#202020','#4a2488'],
@@ -51401,6 +51410,17 @@ function updateMonsters(dt) {
     }
     _coopFollowerContactTick();   // mirrored monsters still deal contact damage (else follower is invincible)
     return;
+  }
+  // v0.27.0 — orphaned-mirror cleanup: a connected NON-HOST that is no longer
+  // following (the host left this map / went quiet) must DROP the host's stale
+  // mirrors rather than let them resurrect under local AI on an otherwise-empty
+  // map. (When we became host, net.isHost is true so this is skipped — mirrors are
+  // adopted as our own authoritative monsters.)
+  if (typeof _coopActive === 'function' && _coopActive() && !net.isHost) {
+    for (let i = game.monsters.length - 1; i >= 0; i--) {
+      const _m = game.monsters[i];
+      if (_m && _m._coopMirror) game.monsters.splice(i, 1);
+    }
   }
   if (window.__UMS) window.__UMtEnter = performance.now();   // DEBUG profiling stamp
   // v0.26.215 — Per-frame hoisted reads. Pre-fix each trait block
@@ -96988,7 +97008,7 @@ const LXAuth = {
   // v0.27.0 — Steam co-op pivot: name-only entry, no accounts/passwords. The
   // chosen name is the local save owner AND the co-op display name peers see.
   character(name) {
-    const clean = String(name || '').replace(/[^A-Za-z0-9 _-]/g, '').trim().slice(0, 16);
+    const clean = String(name || '').replace(/[^\p{L}\p{N} _-]/gu, '').trim().slice(0, 16);   // v0.27.0 — allow Unicode letters/digits (international names) while stripping control/tag/punct chars
     if (!clean) return { ok: false, error: 'Please enter a character name.' };
     const session = { name: clean, token: _authNewToken(), ts: Date.now(), kind: 'character' };
     try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch (e) {}
@@ -97786,7 +97806,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
       } catch (e) {}
       _setAuthError('');
       // Strip control/tag chars, cap 16. Empty -> a friendly auto-name so nobody is blocked.
-      let name = (user.value || '').replace(/[^A-Za-z0-9 _-]/g, '').trim().slice(0, 16);
+      let name = (user.value || '').replace(/[^\p{L}\p{N} _-]/gu, '').trim().slice(0, 16);   // v0.27.0 — allow Unicode letters/digits (international names)
       if (!name) name = 'Hero-' + (Math.random().toString(36).replace(/[^a-z0-9]/gi, '').slice(0, 4).toUpperCase() || 'XXXX');
       lock(true);
       let res;
