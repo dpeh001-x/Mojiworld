@@ -79,18 +79,20 @@ per-peer XP scaling + boss/bestiary progression.
 
 The launch bug hunt hardened the co-op layer substantially (guest damage now equals
 solo — the full hitMonster multiplier stack runs before the forward; DEF/invuln/
-shield gates + an anti-one-shot cap host-side; host-only trust on mon/kill; XP with
-xpCurveMul + PQ damper; level-scaled coins; trackPickup progression; on-the-fly uids
-for boss adds; orphan-mirror cleanup). One real gap remains, plus minor polish:
+shield gates + an anti-one-shot cap host-side; host-only trust on mon/kill/proj; XP
+with xpCurveMul + PQ damper; level-scaled coins; trackPickup progression; on-the-fly
+uids for boss adds; orphan-mirror cleanup; **enemy-projectile sync**). Remaining are
+minor polish:
 
-1. **⚠️ THE co-op launch decision — followers take no RANGED damage.** Followers
-   take **contact** damage from mirrored monsters, but ranged/AoE/telegraph attacks
-   (projectiles, meteors, hazards) are host-spawned and **not networked**, so a
-   follower can facetank a ranged boss. Non-boss co-op is fine; **co-op BOSS fights
-   are trivialized for guests.** Options before store-live: (a) implement enemy-
-   projectile sync (the proper fix — a focused, separately-tested feature, ~contact-
-   tick sized), or (b) **gate co-op entry on boss arenas** (host-only bosses) so the
-   headline bosses aren't visibly broken. Do NOT ship co-op boss fights as-is.
+1. **RANGED damage — DONE (projectile sync shipped).** The host now broadcasts enemy
+   (monster-fired) projectiles; followers inject them into their own `game.projectiles`
+   and the existing `updateProjectiles` collides them with the local player, so
+   followers take ranged damage and co-op boss fights are no longer facetankable.
+   Live-certified 2-client (`scripts/coop_projectile_test.mjs`, 8/8). *Not yet synced:*
+   ground **hazards** (meteor telegraphs, floor pillars) are a separate system from
+   projectiles — most bosses primarily use projectiles, but a few telegraph-heavy
+   bosses (zodiac meteors) still under-threaten guests; sync `game.hazards` the same
+   way if a live boss run shows it.
 2. **XP is approximate (fair, not identical).** Peers scale the host's base kill exp
    by their own xpBoost / early-level / event / xpCurveMul / PQ-damper; combo and
    prestige stay host-side (not networked).
