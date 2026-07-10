@@ -32412,6 +32412,38 @@ function _coopTickHazards() {
   }
   try { net.ws.send(JSON.stringify({ t: 'haz', map: game.currentMap, list })); } catch (e) {}
 }
+// HOST→ALL: broadcast physical loot — gear/item drops + boon (power-up) orbs — so co-op
+// guests get loot from shared monster kills. ALL drop creation lives in the host-only
+// killMonster, so a follower previously saw ZERO drops. Instanced: each guest receives
+// its OWN copy (no loot-stealing), picked up by the guest's already-running updateDrops
+// / updatePowerupOrbs. Coins are NOT synced here (guests are paid numerically via the
+// 'kill' event) — only type 'item' drops + boon orbs. Scans game.drops each frame and
+// sends anything not yet flagged _coopSent, so it captures every drop source (normal /
+// boss / super-boss) regardless of which branch created it.
+const COOP_DROP_CAP = 40;   // max drops broadcast per tick (payload bound; drops are rare)
+function _coopTickDrops() {
+  if (typeof _coopActive !== 'function' || !_coopActive() || !net.isHost || !net.ws) return;
+  let sent = 0;
+  const drops = game.drops || [];
+  for (let i = 0; i < drops.length && sent < COOP_DROP_CAP; i++) {
+    const d = drops[i];
+    if (!d || d._coopSent || d._coopMirror) continue;
+    d._coopSent = true;                                   // mark once; never rescan (coins included)
+    if (d.type !== 'item' || !d.item) continue;           // coins/other: guests already paid via 'kill'
+    d._duid = (game._dropUid = (game._dropUid || 0) + 1);
+    try { net.ws.send(JSON.stringify({ t: 'drop', k: 'item', u: d._duid, map: game.currentMap,
+      x: Math.round(d.x || 0), y: Math.round(d.y || 0), nm: d.noMagnet ? 1 : 0, l: Math.round(d.life || 900), it: d.item })); sent++; } catch (e) {}
+  }
+  const orbs = game.powerupOrbs || [];
+  for (let i = 0; i < orbs.length && sent < COOP_DROP_CAP; i++) {
+    const o = orbs[i];
+    if (!o || o._coopSent || o._coopMirror) continue;
+    o._coopSent = true;
+    o._duid = (game._dropUid = (game._dropUid || 0) + 1);
+    try { net.ws.send(JSON.stringify({ t: 'drop', k: 'orb', u: o._duid, map: game.currentMap,
+      x: Math.round(o.x || 0), y: Math.round(o.y || 0), rr: String(o.rarity || 'common').slice(0, 12) })); sent++; } catch (e) {}
+  }
+}
 // NON-HOST: inject the host's enemy hazards for the VISUAL telegraph (reticle) only
 // — reconcile add/update/remove-on-absent. Mirror hazards are flagged _coopMirror so
 // the hazard loop skips DAMAGE for them (see updateProjectiles guard); the actual
@@ -32521,6 +32553,37 @@ function _coopApplyBossHit(msg) {
   player._lastDamageSource = msg.sl || 'a boss attack';
   if (typeof flash === 'function') { try { flash(0.25); } catch (e) {} }
   if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: '-' + dmg, life: 40, color: msg.c || '#ff5555', big: true });
+}
+// Drop-frame idempotency (a relay may redeliver a 'drop'); ignore repeats by uid.
+const _coopDropSeen = new Set();
+const _coopDropRing = [];
+function _coopDropDup(uid) {
+  if (uid == null) return false;
+  const key = +uid;
+  if (_coopDropSeen.has(key)) return true;
+  _coopDropSeen.add(key); _coopDropRing.push(key);
+  if (_coopDropRing.length > 256) _coopDropSeen.delete(_coopDropRing.shift());
+  return false;
+}
+// NON-HOST: inject a copy of the host's loot drop into the follower's own game.drops /
+// game.powerupOrbs (flagged _coopMirror), then the existing updateDrops/updatePowerupOrbs
+// walk-over pickup grants it locally. Instanced — this guest's copy is independent of
+// the host's and of other guests'.
+function _coopApplyDrop(msg) {
+  if (net.isHost || !msg || msg.map !== game.currentMap) return;
+  if (net.hostId == null || +msg.id !== +net.hostId) return;   // host-only, fail-closed
+  if (!_coopFollowingHost()) return;
+  if (_coopDropDup(msg.u)) return;
+  if (msg.k === 'item' && msg.it && typeof msg.it === 'object') {
+    if (!game.drops) game.drops = [];
+    game.drops.push({ x: +msg.x || 0, y: +msg.y || 0, vy: -4, type: 'item', item: msg.it,
+      life: Math.max(60, +msg.l || 900), noMagnet: !!msg.nm, _coopMirror: true });
+  } else if (msg.k === 'orb') {
+    if (!game.powerupOrbs) game.powerupOrbs = [];
+    const pw = (typeof POWERUPS !== 'undefined' && POWERUPS.length) ? POWERUPS[Math.floor(Math.random() * POWERUPS.length)] : null;
+    game.powerupOrbs.push({ x: +msg.x || 0, y: +msg.y || 0, w: 26, h: 26, pw, rarity: String(msg.rr || 'common').slice(0, 12),
+      bob: 0, life: 30000, collected: false, vy: -4, _coopMirror: true });
+  }
 }
 // NON-HOST: apply the host's authoritative monster list (reconcile by uid).
 function _coopApplyMonsters(msg) {
@@ -32700,6 +32763,7 @@ function _mpHandle(msg) {
     case 'haz':  _coopApplyHazards(msg); return;     // v0.27.0 host enemy hazard telegraphs (visual)
     case 'hazhit': _coopApplyHazHit(msg); return;    // v0.27.0 host hazard detonation -> follower takes the strike
     case 'bosshit': _coopApplyBossHit(msg); return;  // v0.27.2 host boss direct-hit -> follower takes the strike
+    case 'drop': _coopApplyDrop(msg); return;        // v0.27.2 host loot drop -> follower gets its own copy
     case 'dmg':  if (net.isHost) _coopHostApplyDamage(msg.u, +msg.d || 0, !!msg.c, msg.k); return;   // remote damage -> host applies
     case 'kill': _coopApplyKill(msg); return;       // host kill -> peers award XP/coins
     case 'welcome':
@@ -95959,6 +96023,7 @@ function loop(time) {
     if (typeof _coopTickMonsters === 'function') _coopTickMonsters();  // v0.27.0 — host broadcasts monster state
     if (typeof _coopTickProjectiles === 'function') _coopTickProjectiles();  // v0.27.0 — host broadcasts enemy projectiles
     if (typeof _coopTickHazards === 'function') _coopTickHazards();  // v0.27.0 — host broadcasts enemy hazard telegraphs
+    if (typeof _coopTickDrops === 'function') _coopTickDrops();  // v0.27.2 — host broadcasts loot drops (guests get their own copy)
   } else {
     // v0.26.399 — light update path. Previously gated by `player.hp > 0`, so
     // when the player was DEAD neither branch ran and death-explosion
