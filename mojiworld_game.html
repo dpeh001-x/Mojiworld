@@ -32327,7 +32327,7 @@ function _coopTickMonsters() {
       vx: +(+m.vx || 0).toFixed(1), vy: +(+m.vy || 0).toFixed(1),
       f: m.facing === -1 ? -1 : 1, h: Math.round(m.currentHp),
       m: Math.round(m.maxHp || m.currentHp), t: m.type,
-      b: m.isBoss ? 1 : (m.isMiniBoss ? 2 : 0),
+      b: m.isBoss ? 1 : (m.isMiniBoss ? 2 : (m.isElite ? 3 : 0)),   // v0.27.2 — 3 = elite (folds elite variant into the flag, zero extra bytes)
     });
   }
   try { net.ws.send(JSON.stringify({ t: 'mon', map: game.currentMap, list })); } catch (e) {}
@@ -32471,6 +32471,57 @@ function _coopApplyHazHit(msg) {
   player._lastDamageSource = msg.sl || 'a meteor strike';
   if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: '-' + dmg, life: 40, color: msg.c || '#ffaa33', big: true });
 }
+// HOST→ALL: a boss "direct hit" — an attack that writes player.hp INSIDE the boss AI
+// tick (proximity nukes, ground quakes, cone bites, sustained fields), bypassing the
+// projectile + hazard systems. A follower never runs boss AI, so without this the
+// guest facetanks the entire moveset. The host calls this at each direct-hit site to
+// broadcast the strike; the follower applies it to its OWN player if in range.
+//   cx/cy/radius — strike center + reach (radius<=0 or >=9000 = arena-wide, no dodge)
+//   dmgRaw       — raw damage (atk-based hits; DEF applies)
+//   dmgFrac      — fraction of the RECEIVER's maxHp (%-maxHp nukes; unmitigable by DEF
+//                  so each guest takes the same % the host modeled, not the host's raw)
+function _coopBroadcastBossHit(cx, cy, radius, dmgRaw, dmgFrac, label, color) {
+  if (!net.isHost || typeof _coopActive !== 'function' || !_coopActive() || !net.ws) return;
+  try {
+    net.ws.send(JSON.stringify({ t: 'bosshit', map: game.currentMap,
+      x: Math.round(cx || 0), y: Math.round(cy || 0), r: Math.round(radius || 0),
+      d: dmgRaw ? Math.max(0, Math.round(dmgRaw)) : 0,
+      fr: dmgFrac ? +Math.min(1, Math.max(0, +dmgFrac)).toFixed(3) : 0,
+      sl: String(label || 'a boss attack').slice(0, 24), c: String(color || '#ff5555').slice(0, 9) }));
+  } catch (e) {}
+}
+function _coopApplyBossHit(msg) {
+  if (net.isHost || !msg || msg.map !== game.currentMap) return;
+  if (net.hostId == null || +msg.id !== +net.hostId) return;   // host-only, fail-closed
+  if (!_coopFollowingHost()) return;
+  if (!player || player.hp <= 0 || player._god || (player.invulnerable | 0) > 0) return;
+  const r = Math.max(0, +msg.r || 0);
+  if (r > 0 && r < 9000) {   // positional attack — the guest can dodge out of the radius
+    const cx = +msg.x, cy = +msg.y;
+    if (Number.isFinite(cx)) {
+      const dx = (player.x + player.w / 2) - cx;
+      const dy = (Number.isFinite(cy) && cy !== 0) ? (player.y + player.h / 2) - cy : 0;
+      if (Math.hypot(dx, dy) > r) return;   // outside the strike -> safe
+    }
+  }
+  const isFrac = (+msg.fr > 0);
+  let dmg = isFrac ? Math.floor(player.maxHp * Math.min(1, +msg.fr)) : Math.max(1, +msg.d || 0);
+  if (dmg <= 0) return;
+  if (!isFrac) {   // raw atk-based hits are DEF-reducible (like contact/hazhit); %-nukes are not
+    const _def = (typeof getDef === 'function') ? getDef() : 0;
+    dmg = Math.max(1, dmg - Math.floor(_def * 0.4));
+  }
+  // Active defensive tools always honored, in co-op as in solo.
+  if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
+  if (player.cls === 'warrior' && typeof _warriorDr === 'function') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));
+  if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
+  player.hp -= (typeof _diffDmg === 'function') ? _diffDmg(dmg) : dmg;
+  player.lastHitTime = game.time;
+  player.invulnerable = 600;
+  player._lastDamageSource = msg.sl || 'a boss attack';
+  if (typeof flash === 'function') { try { flash(0.25); } catch (e) {} }
+  if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: '-' + dmg, life: 40, color: msg.c || '#ff5555', big: true });
+}
 // NON-HOST: apply the host's authoritative monster list (reconcile by uid).
 function _coopApplyMonsters(msg) {
   if (net.isHost || !msg) return;
@@ -32501,8 +32552,9 @@ function _coopApplyMonsters(msg) {
     let m = byUid[e.u];
     if (!m) {
       net._coopSpawning = true;   // bypass the non-host spawn-suppression for mirror creation
+      net._coopForceElite = (e.b === 3);   // v0.27.2 — b===3 means the host's monster is an Elite; force the mirror to the elite variant (matching name/size/atk/hitbox) instead of re-rolling the 3% chance locally.
       try { m = spawnMonster(+e.x, +e.y, e.t, e.b === 1, e.b === 2); } catch (err) { m = null; }
-      net._coopSpawning = false;
+      net._coopSpawning = false; net._coopForceElite = false;
       if (!m || m._suppressed) continue;
       m.uid = e.u; m._coopMirror = true;
       // Keep our local uid counter ahead of every adopted uid, so if THIS client
@@ -32647,6 +32699,7 @@ function _mpHandle(msg) {
     case 'proj': _coopApplyProjectiles(msg); return; // v0.27.0 host enemy projectiles (non-host takes ranged damage)
     case 'haz':  _coopApplyHazards(msg); return;     // v0.27.0 host enemy hazard telegraphs (visual)
     case 'hazhit': _coopApplyHazHit(msg); return;    // v0.27.0 host hazard detonation -> follower takes the strike
+    case 'bosshit': _coopApplyBossHit(msg); return;  // v0.27.2 host boss direct-hit -> follower takes the strike
     case 'dmg':  if (net.isHost) _coopHostApplyDamage(msg.u, +msg.d || 0, !!msg.c, msg.k); return;   // remote damage -> host applies
     case 'kill': _coopApplyKill(msg); return;       // host kill -> peers award XP/coins
     case 'welcome':
@@ -41211,7 +41264,7 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   if (t && t.traits && t.traits.miniElite && Math.random() < 0.15) { isMiniBoss = true; _miniElitePromoted = true; }
   // Elite roll (not for bosses / miniboss)
   // v0.26.x — Per user "reduce the occurrence of elite / elder". 0.13 → 0.07 → 0.03.
-  const isElite = !isBoss && !isMiniBoss && Math.random() < 0.03;
+  const isElite = !isBoss && !isMiniBoss && ((typeof net === 'object' && net && net._coopForceElite) || Math.random() < 0.03);   // v0.27.2 co-op — honor a forced-elite mirror spawn (b===3) so a guest's mirror matches the host's elite variant
   // Tower escalation multipliers compound on top of regular tiering
   const towerHp  = game.tower ? (game._towerHpMul  || 1) : 1;
   const towerAtk = game.tower ? (game._towerAtkMul || 1) : 1;
@@ -53737,6 +53790,7 @@ function mirrorSelfAI(m, dt, distToPlayer) {
         // unfair. Now: if the clamp removes all damage, the hit is a no-op.
         if (_bd > 0) {
           if (!player._god) player.hp -= _diffDmg(_bd);
+          if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, 160, 0, 0.25, (m._mirrorClass === 'warrior') ? 'Mirror Cleave' : 'Mirror Smoke', '#ff66cc');
           player.invulnerable = 700;
           player.hitStun = 400;
           player.vx = Math.sign(dx || 1) * -8;                      // knockback away
@@ -53854,6 +53908,7 @@ function mirrorSelfAI(m, dt, distToPlayer) {
       strikeDmg = Math.min(strikeDmg, Math.max(0, (player.hp | 0) - 1));
       if (strikeDmg > 0) {
         if (!player._god) player.hp -= _diffDmg(strikeDmg);
+        if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, 200, 0, 0.80, 'Mirror Strike', '#ff44aa');
         player.invulnerable = 900;
         player.hitStun     = 700;
         player._lastDamageSource = 'Mirror Strike';
@@ -54816,6 +54871,7 @@ function bossAI(m, dt, distToPlayer) {
           const _maxHpNow = (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100);
           const dmg = Math.max(1, Math.floor(_maxHpNow * 0.50));
           player.hp -= (player._god ? 0 : _diffDmg(dmg));
+          if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, 0, 0, 0, 0.50, "King Gloopaloo's earthquake", '#ff8844');
           player.lastHitTime = game.time;
           player._lastDamageSource = "King Gloopaloo's earthquake";
           player.hitStun = 1500;
@@ -55155,6 +55211,7 @@ function bossAI(m, dt, distToPlayer) {
           if (player.cls === 'warrior') hpDmg = Math.max(1, Math.floor(hpDmg * (_warriorDr() - 0.08)));  /* v0.25.856 — hp-direct path stays 8% stronger than the main DR */
           if (player._aegis) hpDmg = Math.max(1, Math.floor(hpDmg * 0.5));
           player.hp -= (player._god ? 0 : hpDmg);
+          if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, 0, 0, 0, 0.59, "Aetherion's Astral Judgement", '#ffe899');
           player.lastHitTime = game.time;
           player._lastDamageSource = "Aetherion's Astral Judgement";
           if (game.damageNumbers) {
@@ -55884,6 +55941,7 @@ function bossAI(m, dt, distToPlayer) {
         if (aabb(m, player) && player.invulnerable <= 0) {
           const dmg = Math.max(1, Math.floor(m.atk * 1.3 - getDef() * 0.4));
           player.hp -= (player._god ? 0 : _diffDmg(dmg));
+          if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, m.w/2 + 40, dmg, 0, (m.name || m.type || 'a boss') + "'s charge", '#ff4466');
           player.hitStun = 800;
           // v0.26.069 — Post-boss-charge iframe 900 → 1800 ms.
           player.invulnerable = 1800;
@@ -55956,6 +56014,7 @@ function bossAI(m, dt, distToPlayer) {
           if (Math.abs((player.x + player.w/2) - cx) < 180 && player.invulnerable <= 0) {
             const dmg = Math.max(1, Math.floor(m.atk * 2.2 - getDef() * 0.4));  // v0.25.716 — was 1.3 (+69 %)
             player.hp -= (player._god ? 0 : _diffDmg(dmg));
+            if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(cx, 0, 180, dmg, 0, (m.name || m.type || 'a boss') + "'s slam", '#ff4444');
             player.hitStun = 900;                        // long stun — easy to stun
             // v0.26.069 — Post-boss-slam iframe 900 → 1800 ms.
             player.invulnerable = 1800;
@@ -56539,6 +56598,7 @@ function bossAI(m, dt, distToPlayer) {
           const _maxHpNow = (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100);
           const dmg = Math.max(1, Math.floor(_maxHpNow * 0.50));
           player.hp -= (player._god ? 0 : _diffDmg(dmg));
+          if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, 0, 0, 0, 0.50, "Queen Shroomaloo's earthquake", '#ff8844');
           player.lastHitTime = game.time;
           player._lastDamageSource = "Queen Shroomaloo's earthquake";
           player.hitStun = 1500;
@@ -56627,6 +56687,7 @@ function bossAI(m, dt, distToPlayer) {
           if (player.onGround && inRange) {
             const dmg = Math.max(1, Math.floor(_maxHpNow * 0.75));
             player.hp -= (player._god ? 0 : _diffDmg(dmg));
+            if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, 0, 220, 0, 0.75, "Queen Shroomaloo's ground-shake", '#ff5522');
             player.lastHitTime = game.time;
             player._lastDamageSource = "Queen Shroomaloo's ground-shake";
             player.hitStun = 1800;
@@ -57311,6 +57372,7 @@ function bossAI(m, dt, distToPlayer) {
               color: '#ff44ff', size: 22,
             });
             player.hp -= dmg;
+            if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(cx, 0, 0, 0, 0.49, 'Octobaby Eight-Mood Meltdown', '#ff44ff');
             player.lastHitTime = game.time;
             player._lastDamageSource = 'Octobaby Eight-Mood Meltdown';
             player.hitStun = Math.max(player.hitStun | 0, 1800);
@@ -76305,7 +76367,11 @@ function updateMapEvents(dt) {
   // drop without forking the engine: Hollow Sepulchre rains rib-bones,
   // Wayfarer's Gate rains embers, Lava Cavern stays lava. Same warning →
   // detonate pipeline; same DEF / block / iframes / godmode respect.
-  const cfg = game.mapData.lavaEruptions || game.mapData.ceilingHazards;
+  // v0.27.2 co-op — a FOLLOWER must NOT self-spawn timed ceiling/lava hazards: the
+  // host already broadcasts them as haz/hazhit mirrors, so running the local RNG too
+  // gave the guest ~2× eruptions at positions the host never saw (unfair deaths). The
+  // host's synced strikes are the sole source while following.
+  const cfg = (typeof _coopFollowingHost === 'function' && _coopFollowingHost()) ? null : (game.mapData.lavaEruptions || game.mapData.ceilingHazards);
   if (cfg) {
     if (game._lavaEruptCD == null) {
       // Seed initial delay so the player isn't blasted on map entry
@@ -76371,7 +76437,9 @@ function updateMapEvents(dt) {
   // chain, Glasswind chain) use this to thread *lift* moments between the
   // sideways shoves — momentarily helping the pilgrim instead of toppling
   // them, surfacing the Wayfarer-wind narrative of "the road testing you".
-  const wg = game.mapData.windGusts;
+  // v0.27.2 co-op — same rationale as the ceiling hazards: don't run independent gust
+  // RNG on a follower (it could shove the guest off a ledge the host never faced).
+  const wg = (typeof _coopFollowingHost === 'function' && _coopFollowingHost()) ? null : game.mapData.windGusts;
   if (wg) {
     if (game._gustCD == null) game._gustCD = wg.minDelayMs;
     if (game._gustState == null) game._gustState = 'idle';
@@ -90948,6 +91016,7 @@ const ZODIAC_AI = {
           const _rm = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
           const _rd = Math.floor(_rm * 0.20);
           player.hp -= (player._god ? 0 : _rd);
+          if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, 260, 0, 0.20, "Leo's Royal Roar", '#ffdd44');
           player.lastHitTime = game.time;
           player._lastDamageSource = "Leo's Royal Roar";
           if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: '-' + _rd + ' ROAR', life: 55, color: '#ffdd44', size: 18, big: true });
@@ -91604,6 +91673,7 @@ const ZODIAC_AI = {
         const _km = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
         const _kd = Math.floor(_km * 0.12);
         player.hp -= (player._god ? 0 : _kd);
+        if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, 140, 0, 0.12, "Sagittarius's Point-Blank Volley", '#ffcc44');
         player.lastHitTime = game.time; player._lastDamageSource = "Sagittarius's Point-Blank Volley";
         if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: '-' + _kd, life: 45, color: '#ffcc44', size: 16 });
       }
@@ -91712,6 +91782,7 @@ const ZODIAC_AI = {
           const _sm = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
           const _sd = Math.floor(_sm * 0.24);
           player.hp -= (player._god ? 0 : _sd);
+          if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, 0, 0, 0, 0.24, "Sagittarius's Marked Shot", '#ffaa44');
           player.lastHitTime = game.time; player._lastDamageSource = "Sagittarius's Marked Shot";
           if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: '-' + _sd + ' MARKED', life: 60, color: '#ffaa44', size: 20, big: true });
         }
@@ -91765,6 +91836,7 @@ const ZODIAC_AI = {
           const _max = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
           const _tick = Math.max(1, Math.floor(_max * 0.015));
           player.hp -= (player._god ? 0 : _tick);
+          if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, 0, 0, 0, 0.015, "Capricorn's Altitude Pressure", '#bba078');
           player.lastHitTime = game.time;
           player._lastDamageSource = "Capricorn's Altitude Pressure";
           if (game.damageNumbers) {
@@ -91799,6 +91871,7 @@ const ZODIAC_AI = {
           const _max = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
           const dmg = Math.floor(_max * 0.45);
           player.hp -= (player._god ? 0 : _diffDmg(dmg));
+          if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, 0, 280, 0, 0.45, "Capricorn's hoofquake", '#bba078');
           player.lastHitTime = game.time;
           player._lastDamageSource = "Capricorn's hoofquake";
           player.vy = -14;
@@ -92008,6 +92081,7 @@ const ZODIAC_AI = {
             const _max = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
             const _shock = Math.floor(_max * 0.35);
             player.hp -= (player._god ? 0 : _shock);
+            if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, 0, 0, 0, 0.35, "Aquarius's Conductive Pool", '#ffee44');
             player.lastHitTime = game.time;
             player._lastDamageSource = "Aquarius's Conductive Pool";
             player.hitStun = 200;
@@ -92178,6 +92252,7 @@ const ZODIAC_AI = {
             const _tm = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
             const _td = Math.floor(_tm * 0.26);
             player.hp -= (player._god ? 0 : _td);
+            if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m._tidalX, m._tidalY, 240, 0, 0.26, "Pisces's Tidal Crush", '#aa66ff');
             player.lastHitTime = game.time; player._lastDamageSource = "Pisces's Tidal Crush"; player.hitStun = 300;
             if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: '-' + _td + ' CRUSH', life: 60, color: '#aa66ff', size: 20, big: true });
           }
