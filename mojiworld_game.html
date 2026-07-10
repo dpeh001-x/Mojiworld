@@ -1898,11 +1898,22 @@
     padding: 48px 40px;
     opacity: 0;
     transform: translateY(12px);
-    transition: opacity 700ms ease, transform 700ms ease;
+    /* v0.27.4 — 700ms → 360ms. The old fade re-ran on EVERY stanza advance
+       (the overlay re-toggled .on), so each click meant ~0.7s of blank before
+       the next slide faded back — read as "story slides lag". The first open
+       keeps a (quicker) fade; advances now use the .re fast path below. */
+    transition: opacity 360ms ease, transform 360ms ease;
   }
   #story-beat-overlay.on #story-beat-stage {
     opacity: 1;
     transform: translateY(0);
+  }
+  /* v0.27.4 — fast per-stanza refresh: text swaps in-place with a 180ms dip
+     instead of dropping the whole overlay and re-running the entry fade. */
+  #story-beat-stage.re { animation: storyStanzaIn 180ms ease; }
+  @keyframes storyStanzaIn {
+    from { opacity: 0.25; transform: translateY(5px); }
+    to   { opacity: 1;    transform: translateY(0); }
   }
   #story-beat-speaker {
     font-style: italic;
@@ -4278,11 +4289,12 @@
     display: flex;
     flex-direction: column-reverse;
     align-items: center;
-    gap: 6px;
+    gap: 4px;   /* v0.27.4 — 6 → 4px: tighter stack */
     pointer-events: none;
     z-index: var(--moji-z-toast, 400);
-    /* Don't let the column grow off-screen — clip after a few stack. */
-    max-height: 60vh;
+    /* Don't let the column grow off-screen — clip after a few stack.
+       v0.27.4 — 60vh → 30vh (per user: notifications flooded the screen). */
+    max-height: 30vh;
     overflow: hidden;
   }
   .toast {
@@ -4293,10 +4305,16 @@
     background:
       linear-gradient(180deg, rgba(40, 24, 64, 0.95) 0%, rgba(20, 14, 36, 0.95) 100%);
     border: 1px solid rgba(180, 140, 232, 0.55);
-    padding: 9px 18px;
+    /* v0.27.4 — compact toasts (per user: "make them smaller so they don't
+       flood the screen"): padding 9/18 → 5/12, font 13 → 11px, and a width
+       cap + wrapping so a long quest-complete line becomes a narrow 2-liner
+       instead of a banner spanning the screen. */
+    padding: 5px 12px;
     border-radius: var(--moji-r-md, 8px);
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 600;
+    max-width: min(64vw, 460px);
+    line-height: 1.45;
     color: #ffeabf;
     letter-spacing: 0.4px;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
@@ -4312,7 +4330,8 @@
       0 0 0 0.5px rgba(255, 255, 255, 0.04),
       inset 0 1px 0 rgba(255, 255, 255, 0.08);
     animation: toastSlide 3s ease-out;
-    white-space: nowrap;
+    white-space: normal;   /* v0.27.4 — was nowrap: long quest lines now wrap inside the max-width instead of spanning the screen */
+    text-align: center;
     /* Slight left-accent stripe — flips per rarity below. */
     border-left-width: 3px;
   }
@@ -31052,11 +31071,18 @@ function _playStoryBeat(beatId, onClose) {
     const s = beat.stanzas[idx];
     els.speaker.textContent = s.speaker || '';
     els.text.textContent    = s.text    || '';
-    // Re-trigger the stage fade-in for each stanza by toggling the .on
-    // class off → reflow → on. CSS handles the actual fade.
-    els.overlay.classList.remove('on');
-    void els.overlay.offsetWidth;   // force reflow
-    els.overlay.classList.add('on');
+    // v0.27.4 — only the FIRST stanza runs the overlay entry fade. Advances
+    // used to re-toggle .on (hiding everything + re-running the full 700ms
+    // fade → each click felt laggy); now the text swaps in-place with the
+    // 180ms .re dip on #story-beat-stage.
+    const stage = els.stage || (els.stage = document.getElementById('story-beat-stage'));
+    if (!els.overlay.classList.contains('on')) {
+      els.overlay.classList.add('on');
+    } else if (stage) {
+      stage.classList.remove('re');
+      void stage.offsetWidth;   // restart the animation
+      stage.classList.add('re');
+    }
   };
   const advance = () => {
     idx++;
@@ -70836,7 +70862,7 @@ function showToast(txt, rarity) {
     // viewport. Drop the oldest .toast children until we're back at or
     // under the cap. The host may also contain non-.toast siblings (the
     // container is dedicated but defensive: scope to .toast only).
-    const TOAST_CAP = 7;
+    const TOAST_CAP = 4;   // v0.27.4 — 7 → 4 (per user: pop-ups flooded the screen)
     const live = host.querySelectorAll('.toast');
     if (live.length > TOAST_CAP) {
       for (let i = 0; i < live.length - TOAST_CAP; i++) {
@@ -103407,14 +103433,17 @@ function startBgm() {
   }
   /* Burst rarities — larger size + tighter outline for the "BIG MOMENT" feel
      (TRIPLE CRIT, COMBO 50/100/150, LEGENDARY FIND, BOSS DEFEATED). */
+  /* v0.27.4 — burst tiers shrunk (per user: pop-ups flooded the screen):
+     legendary 16px/12·22 → 12px/6·14, epic 14 → 11.5px. Still a step above
+     the 11px base so the "big moment" reads, without the banner bulk. */
   .toast[data-rarity="legendary"] {
-    font-size: 16px !important;
-    letter-spacing: 1.5px !important;
-    padding: 12px 22px !important;
+    font-size: 12px !important;
+    letter-spacing: 1.2px !important;
+    padding: 6px 14px !important;
   }
   .toast[data-rarity="epic"] {
-    font-size: 14px !important;
-    letter-spacing: 1.2px !important;
+    font-size: 11.5px !important;
+    letter-spacing: 1px !important;
   }
 
   /* L92. Inv-tile trash button — hover-revealed top-right corner control */
