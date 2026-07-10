@@ -74,6 +74,11 @@ function startServer() {
       // port so the game still LAUNCHES; saves for that session use a different
       // origin, but launching beats crashing.
       const fb = http.createServer(server.listeners('request')[0]);
+      // Guard the fallback bind too — without an error handler a failed listen(0)
+      // emits an uncaught 'error' and the startServer() promise would hang forever
+      // (black window). Resolve on FIXED_PORT so the window still loads (and shows a
+      // clear failure) instead of never resolving.
+      fb.on('error', () => resolve(FIXED_PORT));
       fb.listen(0, '127.0.0.1', () => resolve(fb.address().port));
     });
     server.listen(FIXED_PORT, '127.0.0.1', () => resolve(FIXED_PORT));
