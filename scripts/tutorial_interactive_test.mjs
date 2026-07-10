@@ -69,18 +69,60 @@ try {
   const s3done = await page.evaluate(() => (document.getElementById('tut-try') || {}).classList.contains('done'));
   ok('opening the U panel ticks step 3 ✅', s3done === true);
 
-  // Polish: pill styling + informational steps hide the pill.
-  const style = await page.evaluate(() => {
+  // AAA presentation: hero objective, keycaps, prose behind Details, glass card.
+  const aaa = await page.evaluate(() => {
+    _tutStep = 1; _renderTutorialStep();   // objective step (attack)
+    const m = document.getElementById('tutorial-modal');
     const pill = document.getElementById('tut-try');
-    const cs = getComputedStyle(pill);
-    // jump to an informational step (Systems to Explore — no tryIt)
+    const body = document.getElementById('tut-body');
+    const db = document.getElementById('tut-details-btn');
+    const kbd = pill.querySelector('kbd');
+    const out = {
+      heroSize: getComputedStyle(pill).fontSize,
+      kbdCap: kbd ? getComputedStyle(kbd).borderBottomWidth : null,
+      hasTry: m.classList.contains('has-try'),
+      bodyHiddenByDefault: getComputedStyle(body).display === 'none',
+      detailsBtnShown: db && getComputedStyle(db).display !== 'none',
+    };
+    db.click();
+    out.bodyShownAfterDetails = getComputedStyle(body).display !== 'none';
+    db.click();
+    out.bodyReHidden = getComputedStyle(body).display === 'none';
+    return out;
+  });
+  ok('hero objective is BIG (15px) with 3D keycaps', aaa.heroSize === '15px' && aaa.kbdCap === '3px', aaa);
+  ok('prose hidden behind Details on objective steps', aaa.hasTry && aaa.bodyHiddenByDefault && aaa.detailsBtnShown, aaa);
+  ok('Details toggle reveals + re-hides the prose', aaa.bodyShownAfterDetails && aaa.bodyReHidden, aaa);
+  // completion sweep fires on tick
+  const flash = await page.evaluate(() => { _tutPing('attack'); return document.querySelector('#tutorial-modal .modal').classList.contains('tut-flash-done'); });
+  ok('completion sweep animates the card', flash === true);
+
+  // Informational steps: pill hidden, body visible, no Details button.
+  const style = await page.evaluate(() => {
     const infoIdx = TUTORIAL_STEPS.findIndex(s => !s.tryIt);
     _tutStep = infoIdx; _renderTutorialStep();
-    const hidden = pill.style.display === 'none';
-    return { radius: cs.borderRadius, infoIdx, hiddenOnInfoStep: hidden };
+    const m = document.getElementById('tutorial-modal');
+    return {
+      infoIdx,
+      hiddenOnInfoStep: document.getElementById('tut-try').style.display === 'none',
+      bodyVisible: getComputedStyle(document.getElementById('tut-body')).display !== 'none',
+      detailsHidden: getComputedStyle(document.getElementById('tut-details-btn')).display === 'none',
+      hasTryOff: !m.classList.contains('has-try'),
+    };
   });
-  ok('pill is styled (rounded chip)', /999|9999/.test(style.radius), style);
   ok('informational steps hide the pill (no fake objectives)', style.hiddenOnInfoStep === true, style);
+  ok('informational steps show prose directly (no Details gate)', style.bodyVisible && style.detailsHidden && style.hasTryOff, style);
+
+  // Screenshot for a visual check: full page + log the card's box.
+  await page.evaluate(() => {
+    const lo = document.getElementById('loading-overlay'); if (lo && lo.parentNode) lo.parentNode.removeChild(lo);
+    const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none';
+    _showTutorialModal(); _tutStep = 1; TUTORIAL_STEPS[1]._done = false; _renderTutorialStep();
+  });
+  await page.waitForTimeout(400);
+  const box = await page.evaluate(() => { const r = document.querySelector('#tutorial-modal .modal').getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  console.log('CARD BOX:', JSON.stringify(box));
+  await page.screenshot({ path: process.env.SHOT || '/tmp/tutorial_aaa.png', fullPage: false });
 
   // Cleanup + safety: closing clears the movement gate.
   await page.evaluate(() => { window._tutWantsMove = true; _closeTutorial(false); });
