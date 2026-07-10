@@ -48,6 +48,8 @@ is byte-identical to before the pivot. Do not add a co-op hook that can run whil
 | `proj` | host→all | `{map, list:[enemy projectiles]}` | `_coopApplyProjectiles` |
 | `haz` | host→all | `{map, list:[telegraphed hazards]}` | `_coopApplyHazards` |
 | `hazhit` | host→all | `{map, x, r, d, c, sl}` | `_coopApplyHazHit` |
+| `bosshit` | host→all | `{map, x, y, r, d, fr, sl, c}` | `_coopApplyBossHit` |
+| `drop` | host→all | `{map, k, u, x, y, it/rr, nm, l}` | `_coopApplyDrop` |
 
 All gated by same-map checks; ids are relay-assigned and echoed to everyone except
 the sender.
@@ -55,7 +57,8 @@ the sender.
 ## Certification status (automated 2-client live tests)
 
 The co-op layer is exercised by real 2-browser Playwright tests against the relay
-(`scripts/coop_*_test.mjs`). Current status — **48/48 passing**:
+(`scripts/coop_*_test.mjs`). Current status — **90/90 passing** (run individually; a
+back-to-back batch is timing-flaky under browser load — re-run a low suite alone):
 
 - `coop_2client_test.mjs` (17/17): host election, full monster mirroring (matching
   uids, zero duplicates), shared HP (non-host damage reaches host + syncs back),
@@ -72,6 +75,16 @@ The co-op layer is exercised by real 2-browser Playwright tests against the rela
 - `coop_hazard_test.mjs` (6/6): host meteor telegraphs mirror to the follower, the
   detonation `hazhit` strikes a follower standing in the radius (439 dmg), misses
   outside it, no page errors.
+- `coop_bosshit_test.mjs` (9/9): %-maxHp proximity nuke hits in range / misses outside,
+  arena-wide (r=0) hits anywhere, raw atk hit lands, i-frames negate, host no self-hit.
+- `coop_elite_test.mjs` (7/7): a host Elite mirrors as an Elite (b===3), matching size/
+  atk (not re-rolled to a plain mob).
+- `coop_env_test.mjs` (7/7): host self-spawns timed lava hazards; a following guest
+  spawns ZERO (no double-sim); the guest resumes local hazards when not following.
+- `coop_loot_test.mjs` (9/9): follower receives item drops (full stats) + a boon-orb
+  copy, coins excluded (no double-pay), picks up its copy (inventory grows).
+- `coop_peerfeel_test.mjs` (6/6): peer seen, facing/anim on the wire, all render states
+  don't throw, position interpolates toward the snapshot.
 
 > The test harness pumps the outbound ticks (`_mpTick`/`_coopTickMonsters`) via
 > `setInterval` because headless Chromium throttles `requestAnimationFrame`; all
@@ -83,6 +96,35 @@ Fixed after the adversarial review + live tests (see git log): relay now forward
 applied host-side; followers take contact damage; follower duplicate/ghost mobs
 purged; silent-host-drop re-election (~5s, was 30s); host-handoff uid collisions;
 per-peer XP scaling + boss/bestiary progression.
+
+v0.27.2 "sync ALL real-time elements" pass (5-dimension parallel-agent audit): closed
+the remaining gaps a follower experienced differently from the host —
+1. **Boss direct-hits** — 16 boss attacks wrote `player.hp` inside their AI tick
+   (proximity nukes, ground quakes, cone bites, sustained fields), bypassing the
+   projectile/hazard channels; a follower runs no boss AI, so it facetanked the whole
+   moveset. Host now broadcasts each strike (`bosshit`); `_coopApplyBossHit` applies it
+   to a follower in range — %-maxHp nukes as a fraction of the RECEIVER's maxHp (fair
+   per-player), raw atk hits DEF-reducible, radius 0 = arena-wide. (raw hits carry the
+   host's already-DEF-reduced value; a follower re-applies its own DEF → a slight
+   over-reduction on the 2 raw sites — acceptable, guest still threatened.)
+2. **Loot drops** — all drop creation lived in host-only `killMonster`, so guests saw
+   ZERO gear/boon-orb loot. Host `_coopTickDrops` broadcasts item drops + boon orbs
+   (`drop`); each guest gets its OWN instanced copy, picked up by its own pickup loop.
+   Coins are NOT synced (guests are paid numerically via `kill`).
+3. **Environmental double-sim** — timed lava/ceiling hazards + wind gusts ran locally
+   on followers ON TOP of the host's synced mirrors (~2× hazards at unseen positions =
+   unfair deaths). Spawning gated behind `!_coopFollowingHost()`; weather cosmetics
+   still run.
+4. **Elite variants** — the `mon` snapshot's `b` flag only carried boss/mini, so an
+   Elite on the host re-rolled as a plain mob on the guest (wrong name/size/atk/hitbox +
+   corrupt contact prediction). Folded elite into `b===3` (zero extra bytes).
+5. **Remote-player feel** — peers rendered as a static, non-interpolated pill though
+   facing/anim/vx/vy were on the wire. `_mpDrawPeers` now lerp-smooths position, flips
+   by facing, walk-bobs, flashes a swing on attack, and greys/`DOWN`-tags a KO'd peer.
+Live-certified 2-client: coop_bosshit 9/9, coop_elite 7/7, coop_env 7/7, coop_loot 9/9,
+coop_peerfeel 6/6. Still cosmetic-only / deferred: monster status tints, enrage
+particles, pet/summon rendering on peers, full player-projectile VFX, a revive mechanic,
+chest-state sync (per-client chests are fine for casual co-op), portal auto-follow.
 
 v0.27.1 Steam launch hunt (5-dimension parallel-agent audit): kill-frame idempotency
 (a redelivered `kill` no longer double-awards XP/coins); all host-only guards fail
