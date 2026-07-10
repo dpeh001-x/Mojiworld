@@ -32972,18 +32972,49 @@ function _mpDrawPeers() {
   for (const id in net.peers) {
     const p = net.peers[id];
     if (!p || p.map !== myMap) continue;
-    const sx = (p.x || 0) - game.camera.x;
-    const sy = (p.y || 0) - ((game.camera && game.camera.y) || 0);   // camera.y is non-zero on tall maps; was drawing peers at the wrong height
+    // v0.27.2 — smooth (lerp) the render position toward the last-received snapshot so
+    // peers GLIDE instead of teleporting at the ~14 Hz tick. Snap on a big jump (respawn
+    // / map edge) instead of sliding across the screen. facing / anim / vx / vy are all
+    // already on the wire — read here to animate the avatar (was drawn as a static pill).
+    const _tx = p.x || 0, _ty = p.y || 0;
+    if (p._rx == null || Math.abs(_tx - p._rx) > 200 || Math.abs(_ty - (p._ry || 0)) > 200) { p._rx = _tx; p._ry = _ty; }
+    else { p._rx += (_tx - p._rx) * 0.35; p._ry += (_ty - p._ry) * 0.35; }
+    const _dead = !!(p.maxHp && (p.hp || 0) <= 0);
+    const _face = (p.facing === -1) ? -1 : 1;
+    const _bob = (!_dead && p.anim === 'run') ? Math.round(Math.sin((game.time + (+id || 0) * 7) * 0.3) * 2) : 0;
+    const sx = p._rx - game.camera.x;
+    const sy = p._ry - ((game.camera && game.camera.y) || 0) + _bob;
     if (sx < -40 || sx > W + 40 || sy < -60 || sy > H + 60) continue;
-    // Silhouette body — reuse a simple pill so we don't need sprite data
+    // Silhouette body — a simple pill (no sprite data needed), now facing-aware +
+    // greyed/KO'd when the peer is down so a partner's death is visible.
     ctx.save();
-    ctx.globalAlpha = 0.7;
-    ctx.fillStyle = 'rgba(200,168,255,0.55)';
+    ctx.globalAlpha = _dead ? 0.4 : 0.7;
+    ctx.fillStyle = _dead ? 'rgba(140,140,150,0.5)' : 'rgba(200,168,255,0.55)';
     ctx.fillRect(sx, sy, 28, 44);
-    ctx.fillStyle = '#1a0830';
-    ctx.fillRect(sx + 6, sy + 8, 4, 4);     // eye
-    ctx.fillRect(sx + 18, sy + 8, 4, 4);    // eye
+    ctx.fillStyle = _dead ? '#555' : '#1a0830';
+    const _eo = _dead ? 0 : (_face === 1 ? 2 : -2);   // shift both eyes toward the facing side
+    ctx.fillRect(sx + 6 + _eo, sy + 8, 4, 4);
+    ctx.fillRect(sx + 18 + _eo, sy + 8, 4, 4);
     ctx.restore();
+    // Attack swing flash — a quick golden arc on the facing side when the peer swings,
+    // so a partner reads as fighting (not idly sliding while monsters mysteriously die).
+    if (!_dead && p.anim === 'attack') {
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      ctx.strokeStyle = '#ffe08a'; ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(sx + 14 + _face * 16, sy + 22, 15, _face === 1 ? -0.9 : Math.PI + 0.9, _face === 1 ? 0.9 : Math.PI - 0.9);
+      ctx.stroke();
+      ctx.restore();
+    }
+    // "down" tag so a KO'd partner is unmistakable (the HP bar also reads empty).
+    if (_dead) {
+      ctx.save();
+      ctx.globalAlpha = 0.85; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = '#ff7777';
+      ctx.fillText('DOWN', sx + 14, sy - 10);
+      ctx.restore();
+    }
     // Shadow
     ctx.save();
     ctx.fillStyle = 'rgba(0,0,0,0.28)';
