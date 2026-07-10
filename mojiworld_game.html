@@ -32234,7 +32234,10 @@ const COOP_MON_TICK_MS = 100;   // host monster-state broadcast cadence (~10 Hz)
 const COOP_MON_CAP     = 80;    // max monsters synced per frame (payload bound)
 
 function _coopActive() {
-  return !!(net.connected && net.ws && net.ws.readyState === 1);
+  // Require net.myId (set by 'welcome') so a just-connected client — which defaults
+  // net.isHost=true before it knows the roster — does NOT act as authoritative host
+  // (broadcast monsters / suppress spawns) during the connect->welcome window.
+  return !!(net.connected && net.ws && net.ws.readyState === 1 && net.myId != null);
 }
 // Host election: lowest id among {me + peers}. Deterministic across clients,
 // and self-heals when the host leaves (next-lowest id takes over).
@@ -32391,7 +32394,11 @@ function _coopApplyKill(msg) {
     const early = ((player.level || 1) <= 5) ? 3 : 1;
     const evt = (typeof LX_EVENT_EXP_MULT === 'number') ? LX_EVENT_EXP_MULT : 1;
     const mon = (typeof LX_MONSTER_EXP_MULT === 'number') ? LX_MONSTER_EXP_MULT : 1;
-    exp = Math.floor(exp * boost * early * evt * mon * 1.35);
+    // Honor the Party-Quest anti-farm damper for THIS peer's own quest state, so
+    // co-op doesn't re-open a farm the host pipeline already nerfed.
+    const _pqQ = { clockworkUnderpassLobby: 'q_clockwork_underpass', clockworkSpire: 'q_pq_spire', tower: 'q_pq_carriage', clockworkExpress: 'q_pq_carriage' }[game.currentMap];
+    const _pqMul = (_pqQ && player.quests && player.quests.completed && player.quests.completed[_pqQ]) ? 0.2 : 1;
+    exp = Math.floor(exp * boost * early * evt * mon * 1.35 * _pqMul);
     player.exp = (player.exp || 0) + exp;
     if (typeof _maybeLevelUp === 'function') { try { _maybeLevelUp(); } catch (e) {} }
   }
@@ -59088,7 +59095,10 @@ function killMonster(m) {
     // * (1 + greed + equipGreed) at the magnetize site) so the kill-feed pill isn't
     // a persistent under-count for greed/Goldhand builds.
     const _greedMul = 1 + ((player.mods && player.mods.greed) || 0) + (typeof getEquipBonus === 'function' ? getEquipBonus('greed') : 0);
-    const _mojExpected = Math.floor((m.mojicoins || 0) * _monMul * _greedMul * (typeof MOJICOIN_GAIN_MULT === 'number' ? MOJICOIN_GAIN_MULT : 1));
+    // v0.27.0 — include the Hunter's Bounty (treasureCrits) 2x the actual pickup
+    // applies on a lethal-crit kill, else the pill under-reports by half on those kills.
+    const _bountyMul = (m._killedByCrit && player._activeSynergies && player._activeSynergies.treasureCrits) ? 2 : 1;
+    const _mojExpected = Math.floor((m.mojicoins || 0) * _monMul * _greedMul * _bountyMul * (typeof MOJICOIN_GAIN_MULT === 'number' ? MOJICOIN_GAIN_MULT : 1));
     if (_xpGain > 0 || _mojExpected > 0) showKillToast(_xpGain, _mojExpected);
   }
   if (mpCoopMul > 1 && (game._lastCoopToast | 0) + 6000 < game.time) {
