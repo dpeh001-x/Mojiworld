@@ -34,7 +34,11 @@ try {
   // it with a fixed raw amount; the host must apply the DEF-curve-reduced value,
   // not the raw amount.
   const tUid = bUids[0];
+  // DEF is resolved ATTACKER-side now (the mirror carries the type's def, same as
+  // the host's). Set def on BOTH the host monster and the attacker's mirror to
+  // reflect a real high-DEF boss (both spawn from the same type in real play).
   await ev(A, (u) => { const m = game.monsters.find(x => x.uid === u); if (m) { m.def = 600; m.isBoss = false; m.currentHp = 100000; m.maxHp = 100000; } }, tUid);
+  await ev(B, (u) => { const m = game.monsters.find(x => x.uid === u); if (m) { m.def = 600; m.isBoss = false; } }, tUid);
   await sleep(300);
   const rawHit = 10000;
   const hpBefore = await ev(A, (u) => { const m = game.monsters.find(x => x.uid === u); return m ? m.currentHp : null; }, tUid);
