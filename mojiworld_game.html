@@ -32232,6 +32232,8 @@ function mpDisconnect() {
 // =====================================================================
 const COOP_MON_TICK_MS = 100;   // host monster-state broadcast cadence (~10 Hz)
 const COOP_MON_CAP     = 80;    // max monsters synced per frame (payload bound)
+const COOP_PROJ_TICK_MS = 90;   // host enemy-projectile broadcast cadence
+const COOP_PROJ_CAP     = 60;   // max enemy projectiles synced per frame
 
 function _coopActive() {
   // Require net.myId (set by 'welcome') so a just-connected client — which defaults
@@ -32293,6 +32295,58 @@ function _coopTickMonsters() {
     });
   }
   try { net.ws.send(JSON.stringify({ t: 'mon', map: game.currentMap, list })); } catch (e) {}
+}
+// HOST: broadcast enemy (monster-fired) projectiles so followers take RANGED /
+// telegraph damage from shared monsters (contact damage alone let guests facetank
+// ranged bosses). Followers inject these into their own game.projectiles and their
+// existing updateProjectiles moves/collides/renders/expires them — reusing the real
+// i-frame-respecting player-damage path. Throttled; snapshot + follower dead-reckon.
+function _coopTickProjectiles() {
+  if (!_coopActive() || !net.isHost) return;
+  const now = performance.now();
+  if (now - (net._coopProjAt || 0) < COOP_PROJ_TICK_MS) return;
+  net._coopProjAt = now;
+  const list = [];
+  const arr = game.projectiles || [];
+  for (let i = 0; i < arr.length && list.length < COOP_PROJ_CAP; i++) {
+    const p = arr[i];
+    if (!p || p.owner !== 'enemy' || (p.life | 0) <= 0) continue;
+    if (p._puid == null) p._puid = (game._projUid = (game._projUid || 0) + 1);
+    list.push({
+      u: p._puid, x: Math.round(p.x), y: Math.round(p.y),
+      vx: +(+p.vx || 0).toFixed(1), vy: +(+p.vy || 0).toFixed(1),
+      w: Math.round(p.w || 12), h: Math.round(p.h || 12), l: Math.round(p.life),
+      d: Math.round(p.damage || 0), s: String(p.skill || '').slice(0, 12),
+      c: String(p.color || '').slice(0, 9), n: p._normalMob ? 1 : 0, z: p._zodiacAttacker ? 1 : 0,
+    });
+  }
+  try { net.ws.send(JSON.stringify({ t: 'proj', map: game.currentMap, list })); } catch (e) {}
+}
+// NON-HOST: reconcile the host's enemy projectiles into game.projectiles by uid
+// (add new, correct positions of existing, drop absent). The follower's own
+// updateProjectiles then simulates + collides them against the local player.
+function _coopApplyProjectiles(msg) {
+  if (net.isHost || !msg) return;
+  if (net.hostId != null && msg.id != null && +msg.id !== +net.hostId) return;   // host-only
+  if (msg.map !== game.currentMap) return;
+  const incoming = (msg.list || []).slice(0, COOP_PROJ_CAP);
+  const seen = new Set();
+  const byUid = {};
+  for (const p of game.projectiles) if (p && p._coopMirror && p._puid != null) byUid[p._puid] = p;
+  for (const e of incoming) {
+    if (!e || e.u == null || !Number.isFinite(+e.x) || !Number.isFinite(+e.y)) continue;
+    seen.add(e.u);
+    let p = byUid[e.u];
+    if (!p) { p = { _coopMirror: true, _puid: e.u, owner: 'enemy' }; game.projectiles.push(p); }
+    p.x = +e.x; p.y = +e.y; p.vx = +e.vx || 0; p.vy = +e.vy || 0;
+    p.w = +e.w || 12; p.h = +e.h || 12; p.life = +e.l || 60;
+    p.damage = +e.d || 0; p.skill = e.s || 'mbolt'; p.color = e.c || '#ff6688';
+    p._normalMob = !!e.n; p._zodiacAttacker = !!e.z;
+  }
+  for (let i = game.projectiles.length - 1; i >= 0; i--) {
+    const p = game.projectiles[i];
+    if (p && p._coopMirror && p._puid != null && !seen.has(p._puid)) game.projectiles.splice(i, 1);
+  }
 }
 // NON-HOST: apply the host's authoritative monster list (reconcile by uid).
 function _coopApplyMonsters(msg) {
@@ -32462,6 +32516,7 @@ function _mpHandle(msg) {
   if (!msg || typeof msg !== 'object') return;   // v0.27.0 — a malformed/JSON-null relay frame must not throw on switch(msg.t)
   switch (msg.t) {
     case 'mon':  _coopApplyMonsters(msg); return;   // v0.27.0 host monster state (non-host mirrors)
+    case 'proj': _coopApplyProjectiles(msg); return; // v0.27.0 host enemy projectiles (non-host takes ranged damage)
     case 'dmg':  if (net.isHost) _coopHostApplyDamage(msg.u, +msg.d || 0, !!msg.c, msg.k); return;   // remote damage -> host applies
     case 'kill': _coopApplyKill(msg); return;       // host kill -> peers award XP/coins
     case 'welcome':
@@ -95669,6 +95724,7 @@ function loop(time) {
     updateCamera();
     if (typeof _mpTick === 'function') _mpTick();  // multiplayer presence tick
     if (typeof _coopTickMonsters === 'function') _coopTickMonsters();  // v0.27.0 — host broadcasts monster state
+    if (typeof _coopTickProjectiles === 'function') _coopTickProjectiles();  // v0.27.0 — host broadcasts enemy projectiles
   } else {
     // v0.26.399 — light update path. Previously gated by `player.hp > 0`, so
     // when the player was DEAD neither branch ran and death-explosion
