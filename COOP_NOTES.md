@@ -84,6 +84,16 @@ applied host-side; followers take contact damage; follower duplicate/ghost mobs
 purged; silent-host-drop re-election (~5s, was 30s); host-handoff uid collisions;
 per-peer XP scaling + boss/bestiary progression.
 
+v0.27.1 Steam launch hunt (5-dimension parallel-agent audit): kill-frame idempotency
+(a redelivered `kill` no longer double-awards XP/coins); all host-only guards fail
+CLOSED (reject missing/mismatched sender id — the relay stamps id, so legit frames
+still pass); mon/proj/haz/hazhit appliers ignore straggler frames once the follower
+falls back to local sim (a late frame could purge freshly-spawned locals); orphan-
+mirror cleanup now also drops mirrored enemy projectiles + hazards on host-leaves-map;
+reconnect race fixed (stale `onclose` guarded by socket identity, can't clobber a live
+reconnect). A parallel UI audit also fixed a first-session soft-lock (panels opened
+over the class-select gate were unclosable) — see CHANGELOG v0.27.1.
+
 ## Known limitations / needs live human QA (v1)
 
 The launch bug hunt hardened the co-op layer substantially (guest damage now equals
