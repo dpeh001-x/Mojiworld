@@ -31895,6 +31895,11 @@ const net = {
   _lastTickAt: 0,
   _reconnectTries: 0,
   _lastUrl: null,
+  // v0.27.0 — co-op host authority. isHost defaults true so the solo/host path
+  // (local monster simulation) is the norm until a lower-id peer appears.
+  isHost: true,
+  hostId: null,
+  _coopMonAt: 0,
 };
 
 // v0.25.245 (S2) — Multiplayer co-op XP wedge. If a peer is on the same
@@ -32164,13 +32169,156 @@ function mpDisconnect() {
   _mpStatus('Disconnected', '#bbb');
   _mpRenderPlayerList();
 }
+// =====================================================================
+// v0.27.0 — CASUAL CO-OP: host-authoritative shared monsters.
+// One player per room (the lowest net.myId) is the HOST and simulates all
+// monsters; everyone else on the host's map renders the host's monster
+// state and forwards their damage to the host. FULLY GATED: when not
+// connected — or when a non-host is on a different map than the host —
+// behaviour is identical to solo play (each client simulates locally).
+// This is the "fight the same monsters together" layer over the presence relay.
+// =====================================================================
+const COOP_MON_TICK_MS = 100;   // host monster-state broadcast cadence (~10 Hz)
+const COOP_MON_CAP     = 80;    // max monsters synced per frame (payload bound)
+
+function _coopActive() {
+  return !!(net.connected && net.ws && net.ws.readyState === 1);
+}
+// Host election: lowest id among {me + peers}. Deterministic across clients,
+// and self-heals when the host leaves (next-lowest id takes over).
+function _coopRecomputeHost() {
+  if (!_coopActive() || net.myId == null) { net.isHost = true; net.hostId = net.myId; return; }
+  let lowest = +net.myId, hostId = +net.myId;
+  for (const id in net.peers) { const n = +id; if (Number.isFinite(n) && n < lowest) { lowest = n; hostId = n; } }
+  net.hostId = hostId;
+  net.isHost = (hostId === +net.myId);
+}
+// The host's current map (from presence), or our own map when we ARE the host.
+function _coopHostMap() {
+  if (net.isHost) return game.currentMap;
+  const h = (net.hostId != null) ? net.peers[net.hostId] : null;
+  return h ? h.map : null;
+}
+// True only when I'm a NON-host actively mirroring the host's monsters on the
+// SAME map. When false I simulate my own monsters (solo / host / split-up).
+function _coopFollowingHost() {
+  return _coopActive() && !net.isHost && _coopHostMap() === game.currentMap;
+}
+function _coopFindByUid(uid) {
+  const arr = game.monsters || [];
+  for (let i = 0; i < arr.length; i++) if (arr[i] && arr[i].uid === uid) return arr[i];
+  return null;
+}
+// HOST: broadcast the authoritative monster list (throttled). Called each frame.
+function _coopTickMonsters() {
+  if (!_coopActive() || !net.isHost) return;
+  const now = performance.now();
+  if (now - (net._coopMonAt || 0) < COOP_MON_TICK_MS) return;
+  net._coopMonAt = now;
+  const list = [];
+  const arr = game.monsters || [];
+  for (let i = 0; i < arr.length && list.length < COOP_MON_CAP; i++) {
+    const m = arr[i];
+    if (!m || m.uid == null || m.currentHp <= 0) continue;
+    list.push({
+      u: m.uid, x: Math.round(m.x), y: Math.round(m.y),
+      vx: +(+m.vx || 0).toFixed(1), vy: +(+m.vy || 0).toFixed(1),
+      f: m.facing === -1 ? -1 : 1, h: Math.round(m.currentHp),
+      m: Math.round(m.maxHp || m.currentHp), t: m.type,
+      b: m.isBoss ? 1 : (m.isMiniBoss ? 2 : 0),
+    });
+  }
+  try { net.ws.send(JSON.stringify({ t: 'mon', map: game.currentMap, list })); } catch (e) {}
+}
+// NON-HOST: apply the host's authoritative monster list (reconcile by uid).
+function _coopApplyMonsters(msg) {
+  if (net.isHost || !msg) return;
+  if (msg.map !== game.currentMap) return;   // only mirror the host's current map
+  const incoming = msg.list || [];
+  const seen = new Set();
+  const byUid = {};
+  for (const m of game.monsters) if (m && m.uid != null) byUid[m.uid] = m;
+  for (const e of incoming) {
+    if (!e || e.u == null || !Number.isFinite(+e.x) || !Number.isFinite(+e.y)) continue;
+    seen.add(e.u);
+    let m = byUid[e.u];
+    if (!m) {
+      net._coopSpawning = true;   // bypass the non-host spawn-suppression for mirror creation
+      try { m = spawnMonster(+e.x, +e.y, e.t, e.b === 1, e.b === 2); } catch (err) { m = null; }
+      net._coopSpawning = false;
+      if (!m || m._suppressed) continue;
+      m.uid = e.u; m._coopMirror = true;
+    }
+    m.x = +e.x; m.y = +e.y; m.vx = +e.vx || 0; m.vy = +e.vy || 0;
+    m.facing = e.f === -1 ? -1 : 1;
+    if (Number.isFinite(+e.m)) m.maxHp = +e.m;
+    if (Number.isFinite(+e.h)) m.currentHp = +e.h;
+  }
+  // Drop mirrors the host no longer reports (killed / despawned upstream).
+  for (let i = game.monsters.length - 1; i >= 0; i--) {
+    const m = game.monsters[i];
+    if (m && m.uid != null && m._coopMirror && !seen.has(m.uid)) game.monsters.splice(i, 1);
+  }
+}
+// NON-HOST: forward a damage event to the host (who is authoritative).
+function _coopSendDamage(m, dmg, isCrit, skill) {
+  if (!m || m.uid == null) return;
+  try { net.ws.send(JSON.stringify({ t: 'dmg', u: m.uid, d: Math.max(0, Math.round(dmg) || 0), c: isCrit ? 1 : 0, k: String(skill || '').slice(0, 16) })); } catch (e) {}
+}
+// HOST: apply an inbound remote-damage event as FINAL damage (the attacker
+// already rolled crit/mults on their client), keeping the monster-side gates
+// hitMonster would apply. Routes death through killMonster so loot/XP/removal
+// (and the kill broadcast below) all fire exactly as for a local kill.
+function _coopHostApplyDamage(uid, dmg, isCrit) {
+  if (!net.isHost) return;
+  const m = _coopFindByUid(uid);
+  if (!m || m.currentHp <= 0) return;
+  let d = Math.max(0, Math.round(dmg) || 0);
+  if (m.zodiacSign === 'libra' && (m._libraOrbsAlive | 0) > 0 && !m._libraShield) d = Math.floor(d * 0.5);
+  if (m._virgoChanneling) d = Math.max(1, Math.floor(d * 0.4));
+  m.currentHp -= d;
+  m.hitFlash = Math.max(m.hitFlash | 0, 6);
+  if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2 - 8, y: m.y - 6, vy: -2, text: '' + d, life: 30, color: isCrit ? '#ffd24a' : '#fff', size: isCrit ? 18 : 14 });
+  if (m.currentHp <= 0) { m.currentHp = 0; try { killMonster(m); } catch (e) {} }
+}
+// HOST -> peers: a monster died. Peers award their share of XP/coins and play
+// the death pop so co-op progression works for everyone, not just the host.
+function _coopBroadcastKill(m, exp, coins) {
+  if (!_coopActive() || !net.isHost || !m) return;
+  try { net.ws.send(JSON.stringify({ t: 'kill', u: m.uid, e: Math.round(exp) || 0, c: Math.round(coins) || 0, x: Math.round(m.x), y: Math.round(m.y), map: game.currentMap })); } catch (e) {}
+}
+// NON-HOST: award XP/coins from a host kill (same map only) + death pop.
+function _coopApplyKill(msg) {
+  if (net.isHost || !msg || msg.map !== game.currentMap) return;
+  const m = (msg.u != null) ? _coopFindByUid(msg.u) : null;
+  if (m) { const i = game.monsters.indexOf(m); if (i >= 0) game.monsters.splice(i, 1); }
+  const exp = Math.max(0, +msg.e || 0);
+  const coins = Math.max(0, +msg.c || 0);
+  if (exp > 0 && typeof player !== 'undefined' && player) {
+    player.exp = (player.exp || 0) + exp;
+    if (typeof _maybeLevelUp === 'function') { try { _maybeLevelUp(); } catch (e) {} }
+  }
+  if (coins > 0 && typeof _grantMojicoins === 'function') { try { _grantMojicoins(coins); } catch (e) {} }
+  // Small death pop so the kill reads on the peer (host's inline VFX isn't networked).
+  if (Number.isFinite(+msg.x) && game.particles) {
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      game.particles.push({ x: +msg.x, y: +msg.y, vx: Math.cos(a) * 3, vy: Math.sin(a) * 3 - 1, life: 26, color: '#ffd7a0', size: 2 });
+    }
+  }
+}
+
 function _mpHandle(msg) {
   switch (msg.t) {
+    case 'mon':  _coopApplyMonsters(msg); return;   // v0.27.0 host monster state (non-host mirrors)
+    case 'dmg':  if (net.isHost) _coopHostApplyDamage(msg.u, +msg.d || 0, !!msg.c); return;   // remote damage -> host applies
+    case 'kill': _coopApplyKill(msg); return;       // host kill -> peers award XP/coins
     case 'welcome':
       net.myId = msg.id;
       net.roomId = String(msg.room || net.roomId || '').replace(/[<>]/g, '').slice(0, 64);   // v0.26.1029 — scrub at ingestion; roomId feeds an innerHTML log sink (XSS from a hostile/MITM relay)
       net.peers = {};
       for (const p of (msg.players || [])) net.peers[p.id] = { ..._mpScrubStrings(p), _last: performance.now() };
+      _coopRecomputeHost();   // v0.27.0 — decide host the moment we know the roster
       _mpPushLog(`Joined room "${net.roomId}" · ${Object.keys(net.peers).length} other player(s)`, 'sys');
       _mpRenderPlayerList();
       // Persistence (DO backend): msg.you is this token's last saved record.
@@ -32199,12 +32347,14 @@ function _mpHandle(msg) {
       if (msg.id === net.myId) break;   // v0.26.1020 — ignore self-echo on broadcast relays (match 'chat')
       if (!net.peers[msg.id] && Object.keys(net.peers).length >= MP_MAX_PEERS) break;   // v0.26.1033 — peer-flood cap
       net.peers[msg.id] = { ..._mpScrubStrings(msg), _last: performance.now() };
+      _coopRecomputeHost();   // v0.27.0 — a lower-id peer joining can hand off host
       _mpPushLog(`${escapeHtml(msg.name || 'Someone')} joined.`, 'sys');
       _mpRenderPlayerList();
       break;
     case 'left': {
       const p = net.peers[msg.id];
       delete net.peers[msg.id];
+      _coopRecomputeHost();   // v0.27.0 — if the host left, the next-lowest id takes over
       if (p) _mpPushLog(`${escapeHtml(p.name || 'Someone')} left.`, 'sys');
       _mpRenderPlayerList();
       break;
@@ -40695,6 +40845,14 @@ function spawnFromMap(type, boss, opts) {
 const MONSTER_SIZE_VARIANCE_STEPS = [0.95, 1.0, 1.05];
 
 function spawnMonster(x, y, type, isBoss, isMiniBoss) {
+  // v0.27.0 co-op — a NON-HOST mirroring the host's map does not spawn its own
+  // monsters (they arrive via the host's 'mon' sync). Return a harmless throwaway
+  // stub (not added to game.monsters) so the many callers that set fields on the
+  // returned object don't crash. The mirror-creation path sets net._coopSpawning
+  // to bypass this. When disconnected / host / split-up, spawns run normally.
+  if (typeof _coopFollowingHost === 'function' && _coopFollowingHost() && !net._coopSpawning) {
+    return { _suppressed: true };
+  }
   const t = monsterTypes[type];
   // v0.26.378 — Mojidex: record this monster type as encountered the moment
   // it spawns (not just on kill), so fled-from / unkilled mobs still register.
@@ -40865,6 +41023,7 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   const _yAdjusted = y - (_scaledH - t.h);
   game.monsters.push({
     type, ...t,
+    uid: (game._monUid = (game._monUid || 0) + 1),   // v0.27.0 — stable network id for co-op host-authoritative sync (object identity doesn't survive JSON)
     name: prefix + t.name,
     atk:   Math.floor(t.atk   * atkMult),
     // v0.26.109 — overrides the `def` field that `...t` would otherwise
@@ -51092,6 +51251,21 @@ function fireMonsterProjectile(m, angleOffset) {
 }
 
 function updateMonsters(dt) {
+  // v0.27.0 co-op — a NON-HOST mirroring the host's map does NOT run monster AI/
+  // physics/attacks/spawning; monster positions + HP come from the host's 'mon'
+  // sync. Keep only light cosmetic housekeeping (hit-flash + animation timers)
+  // so mirrors still flash on hit and animate. When disconnected / host / split-
+  // up, the full simulation below runs exactly as in solo play.
+  if (typeof _coopFollowingHost === 'function' && _coopFollowingHost()) {
+    const arr = game.monsters || [];
+    for (let i = 0; i < arr.length; i++) {
+      const m = arr[i];
+      if (!m) continue;
+      if (m.hitFlash > 0) m.hitFlash -= dt;
+      m.animTimer = (m.animTimer || 0) + dt;
+    }
+    return;
+  }
   if (window.__UMS) window.__UMtEnter = performance.now();   // DEBUG profiling stamp
   // v0.26.215 — Per-frame hoisted reads. Pre-fix each trait block
   // (bigMelee, columnStrike, lateralDash, lowHpHide, empoweredVenom,
@@ -57083,6 +57257,19 @@ function hitMonster(m, dmg, isCrit, skill) {
   // overwriting the real cause-of-death, and combo counter ticking on
   // corpses. One-line gate at the entry kills the whole class.
   if (!m || m.currentHp <= 0) return;
+  // v0.27.0 co-op — a NON-HOST mirroring the host's monsters is NOT authoritative:
+  // forward the (already crit/mult-resolved) damage to the host, predict the hit
+  // locally for responsiveness (the host re-syncs the true HP within ~100 ms), and
+  // return before the local damage/kill pipeline. skill '__coop' is the host
+  // applying a remote hit and must fall through. When host/solo, this is skipped.
+  if (m.uid != null && skill !== '__coop'
+      && typeof _coopFollowingHost === 'function' && _coopFollowingHost()) {
+    _coopSendDamage(m, dmg, isCrit, skill);
+    m.currentHp = Math.max(0, m.currentHp - (Math.max(0, Math.round(dmg) || 0)));
+    m.hitFlash = Math.max(m.hitFlash | 0, 6);
+    if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2 - 8, y: m.y - 6, vy: -2, text: '' + (Math.max(0, Math.round(dmg) || 0)), life: 30, color: isCrit ? '#ffd24a' : '#fff', size: isCrit ? 18 : 14 });
+    return;
+  }
   // v0.26.1033 — resolve the basic-attack MISS roll ONCE up front so on-hit
   // side effects (Arcane Ember stacks, Cancer Bubble break counter, talent
   // lifesteal) don't fire on a whiff. The visible MISS marker + early return
@@ -58724,6 +58911,12 @@ function killMonster(m) {
   const _earlyLvlXpMul = ((player.level || 1) <= 5) ? 3 : 1;
   const _xpGain = Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul * mpCoopMul * _pqFarmMul * _earlyLvlXpMul * LX_EVENT_EXP_MULT * LX_MONSTER_EXP_MULT);   // (EVENT) opening +900% EXP · permanent ×2 monster EXP
   player.exp += _xpGain;
+  // v0.27.0 co-op — when I'm the host, tell peers on my map this monster died so
+  // they get their share of XP/coins + a death pop (they suppressed their own
+  // kill pipeline). Base exp/coins broadcast; each peer applies its own scaling.
+  if (typeof _coopBroadcastKill === 'function' && net.isHost && _coopActive() && m.uid != null) {
+    _coopBroadcastKill(m, m.exp || 0, m.mojicoins || 0);
+  }
   // Bottom-right kill summary. Mojicoin amount shown is the EXPECTED
   // pickup (m.mojicoins × the global MOJICOIN_GAIN_MULT) — matches what
   // the player will receive when the dropped pile is magnetized in.
@@ -95305,6 +95498,7 @@ function loop(time) {
     if (typeof updateSpireFireballs === 'function') updateSpireFireballs(dt);   // v0.26.127
     updateCamera();
     if (typeof _mpTick === 'function') _mpTick();  // multiplayer presence tick
+    if (typeof _coopTickMonsters === 'function') _coopTickMonsters();  // v0.27.0 — host broadcasts monster state
   } else {
     // v0.26.399 — light update path. Previously gated by `player.hp > 0`, so
     // when the player was DEAD neither branch ran and death-explosion
