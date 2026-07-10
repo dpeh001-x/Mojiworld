@@ -6602,18 +6602,12 @@
            the loading IIFE swaps the bar + status for this form via
            the .compact / .shown class flip. Server-side accounts are
            planned; today's API resolves locally (LXAuth.login etc.). -->
-      <div class="lo-auth" id="lo-auth" hidden><!-- v0.26.904 — hidden until assets+decode finish AND handlers are wired (_showAuthGate); clicking a dead form was the "multiple clicks" bug -->
-        <div class="auth-tabs">
-          <button class="auth-tab active" data-tab="login" type="button">Sign in</button>
-          <button class="auth-tab" data-tab="register" type="button">Register</button>
-        </div>
+      <div class="lo-auth" id="lo-auth" hidden><!-- v0.27.0 — Steam co-op: name your hero, no accounts/passwords -->
+        <div class="auth-name-label" style="font-family:'Cinzel','Inter',Georgia,serif;font-weight:700;letter-spacing:1px;color:#ffd166;font-size:15px;margin-bottom:10px;text-align:center;">Name your hero</div>
         <div class="auth-error" id="auth-error" hidden=""></div>
-        <input class="auth-input" id="auth-user" placeholder="Username" autocomplete="username" maxlength="16" spellcheck="false" autocapitalize="off">
-        <input class="auth-input" id="auth-pass" type="password" placeholder="Password" autocomplete="current-password" maxlength="64">
-        <button class="auth-submit" id="auth-submit" type="button">Sign in</button>
-        <div class="auth-divider"><span>or</span></div>
-        <button class="auth-guest" id="auth-guest" type="button">Continue as Guest</button>
-        <p class="auth-note">Preview · Local-only accounts. Server sync arriving in a future update.</p>
+        <input class="auth-input" id="auth-user" placeholder="Character name" autocomplete="off" maxlength="16" spellcheck="false" autocapitalize="off">
+        <button class="auth-submit" id="auth-submit" type="button">Enter Mojiworld</button>
+        <p class="auth-note">Casual co-op adventure · your progress saves on this device.</p>
       </div>
     </div>
   </div>
@@ -96657,6 +96651,16 @@ const LXAuth = {
     try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch (e) {}
     return { ok: true, ...session };
   },
+  // v0.27.0 — Steam co-op pivot: name-only entry, no accounts/passwords. The
+  // chosen name is the local save owner AND the co-op display name peers see.
+  character(name) {
+    const clean = String(name || '').replace(/[^A-Za-z0-9 _-]/g, '').trim().slice(0, 16);
+    if (!clean) return { ok: false, error: 'Please enter a character name.' };
+    const session = { name: clean, token: _authNewToken(), ts: Date.now(), kind: 'character' };
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch (e) {}
+    try { localStorage.setItem(MP_NAME_KEY, clean); } catch (e) {}   // co-op peers see this name (_mpLocalName reads it first)
+    return { ok: true, ...session };
+  },
   session() {
     try {
       const raw = localStorage.getItem(SESSION_KEY);
@@ -97424,75 +97428,41 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     // SCREEN, so returning players still click to confirm.
     try {
       const sess = (typeof LXAuth !== 'undefined') ? LXAuth.session() : null;
-      if (sess && sess.name && sess.kind === 'local') {
+      const _prevName = (sess && sess.name && sess.kind !== 'guest') ? sess.name
+                      : (localStorage.getItem(MP_NAME_KEY) || '');   // v0.27.0 — pre-fill the last character name
+      if (_prevName) {
         const u = document.getElementById('auth-user');
-        if (u && !u.value) u.value = sess.name;
+        if (u && !u.value) u.value = _prevName;
       }
     } catch (e) {}
     setTimeout(() => { try { document.getElementById('auth-user').focus(); } catch (e) {} }, 50);
   }
   function _wireAuthForm() {
-    const tabs   = overlay.querySelectorAll('.auth-tab');
+    // v0.27.0 — Steam co-op pivot: accounts/passwords removed. The gate now just
+    // names your hero (stored locally + used as your co-op display name).
     const submit = document.getElementById('auth-submit');
-    const guest  = document.getElementById('auth-guest');
     const user   = document.getElementById('auth-user');
-    const pass   = document.getElementById('auth-pass');
-    if (!submit || !guest || !user || !pass) { _finishHide(); return; }
-    let mode = 'login';
-    const setMode = (m) => {
-      mode = m;
-      tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === m));
-      submit.textContent = m === 'login' ? 'Sign in' : 'Create account';
-      pass.autocomplete  = m === 'login' ? 'current-password' : 'new-password';
+    if (!submit || !user) { _finishHide(); return; }
+    const lock = (locked) => { submit.disabled = user.disabled = !!locked; };
+    const enter = () => {
+      try {
+        if ((window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
+            && !document.fullscreenElement && !document.webkitFullscreenElement
+            && typeof _lxMobileFullscreen === 'function') _lxMobileFullscreen();
+      } catch (e) {}
       _setAuthError('');
-    };
-    tabs.forEach(t => t.addEventListener('click', () => setMode(t.dataset.tab)));
-    const lock = (locked) => {
-      submit.disabled = guest.disabled = !!locked;
-      user.disabled = pass.disabled = !!locked;
-    };
-    const doSubmit = async () => {
-      try {
-        if ((window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
-            && !document.fullscreenElement && !document.webkitFullscreenElement
-            && typeof _lxMobileFullscreen === 'function') _lxMobileFullscreen();
-      } catch (e) {}
-      _setAuthError(''); lock(true);
-      const u = (user.value || '').trim();
-      const p = pass.value || '';
+      // Strip control/tag chars, cap 16. Empty -> a friendly auto-name so nobody is blocked.
+      let name = (user.value || '').replace(/[^A-Za-z0-9 _-]/g, '').trim().slice(0, 16);
+      if (!name) name = 'Hero-' + (Math.random().toString(36).replace(/[^a-z0-9]/gi, '').slice(0, 4).toUpperCase() || 'XXXX');
+      lock(true);
       let res;
-      try {
-        res = (mode === 'login') ? await LXAuth.login(u, p) : await LXAuth.register(u, p);
-      } catch (e) { res = { ok: false, error: 'Something went wrong. Try again.' }; }
-      lock(false);
-      if (!res.ok) { _setAuthError(res.error || 'Sign-in failed.'); return; }
-      // Cloud account: reconcile the character save with the server before the
-      // world reveals (may apply a newer cloud save via a quick reload).
-      if (res.kind === 'cloud' && res.token && typeof _lxCloudSyncOnLogin === 'function') {
-        lock(true);
-        let synced; try { synced = await _lxCloudSyncOnLogin(res); } catch (e) {}
-        if (synced === 'reloading') return;   // page reloading to load the cloud save
-        lock(false);
-      }
+      try { res = (typeof LXAuth !== 'undefined' && LXAuth.character) ? LXAuth.character(name) : { ok: true, name, kind: 'character' }; }
+      catch (e) { res = { ok: false, error: 'Something went wrong. Try again.' }; }
+      if (!res.ok) { lock(false); _setAuthError(res.error || 'Try again.'); return; }
       _finishHide(res);
     };
-    submit.addEventListener('click', doSubmit);
-    pass.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSubmit(); });
-    user.addEventListener('keydown', (e) => { if (e.key === 'Enter') pass.focus(); });
-    guest.addEventListener('click', () => {
-      try {
-        if ((window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
-            && !document.fullscreenElement && !document.webkitFullscreenElement
-            && typeof _lxMobileFullscreen === 'function') _lxMobileFullscreen();
-      } catch (e) {}
-      _setAuthError(''); lock(true);
-      let res;
-      try { res = LXAuth.guest(); }
-      catch (e) { res = { ok: false, error: 'Guest sign-in failed.' }; }
-      lock(false);
-      if (!res.ok) { _setAuthError(res.error || 'Guest sign-in failed.'); return; }
-      _finishHide(res);
-    });
+    submit.addEventListener('click', enter);
+    user.addEventListener('keydown', (e) => { if (e.key === 'Enter') enter(); });
   }
   // v0.25.469 — Hard fallback safety net. Bumped from 30 s → 60 s now
   // that the gate waits for the FULL asset set (was BAZAAR + CRITICAL
