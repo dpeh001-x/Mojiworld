@@ -39789,6 +39789,82 @@ function _lxPreloadMapAssets(id, onProgress) {
   const all = _lxAsyncPool(6, _imgs, _loadOne);
   return Promise.race([all, new Promise((res) => setTimeout(res, 25000))]).then(() => total);
 }
+// =========================================================================
+// v0.27.6 — WORLD STREAMER (per user: "sprites load very slowly while the
+// player is already in midgame … it all MUST be done when the player plays").
+// The boot gate only covers the START map; every other map's monster anim
+// frames / NPC sprites, plus the lazy projectile/FX/summon anim sets, loaded
+// on FIRST USE — visible pop-in mid-game, worst on the CDN. After the world
+// reveals, this streams EVERYTHING in the background: maps in portal-BFS
+// order from where the player stands (the next map is ready before they walk
+// through), then a full monster-type / projectile / FX / summon sweep.
+// Sequential map-by-map (each preload has its own x6 pool + 25s cap) so
+// gameplay bandwidth isn't strangled. On coarse-pointer/mobile devices only
+// the reachable-map BFS runs (no full-registry sweep) — mobile Safari's
+// decode memory-kill history says don't mass-decode there.
+// =========================================================================
+function _lxMapNeighbors(id) {
+  try {
+    const md = (typeof MAPS !== 'undefined') ? MAPS[id] : null;
+    const out = [];
+    for (const p of (md && md.portals) || []) {
+      if (p && p.dest && MAPS[p.dest]) out.push(p.dest);
+    }
+    return out;
+  } catch (e) { return []; }
+}
+function _lxWarmMap(id) {   // dedupe + preload one map's full sprite set
+  window._lxMapPreloaded = window._lxMapPreloaded || {};
+  if (!id || window._lxMapPreloaded[id] || typeof MAPS === 'undefined' || !MAPS[id]) return Promise.resolve(0);
+  window._lxMapPreloaded[id] = 1;
+  try { return Promise.resolve(_lxPreloadMapAssets(id)); } catch (e) { return Promise.resolve(0); }
+}
+function _lxStreamWorld() {
+  if (window._lxWorldStreamed) return;
+  window._lxWorldStreamed = true;
+  const coarse = (typeof matchMedia !== 'undefined')
+    && (matchMedia('(pointer: coarse)').matches || matchMedia('(max-width: 900px)').matches);
+  // PHASE 1 (immediate, small, highest-frequency-use): every projectile / FX /
+  // summon anim set — a few hundred tiny webps. These fire the first time ANY
+  // skill or enemy shot lands, so they must never wait behind the map sweep.
+  try { if (typeof _PROJ_ANIM_KEYS !== 'undefined' && typeof _projAnimFrame === 'function') for (const k of _PROJ_ANIM_KEYS) { try { _projAnimFrame(k); } catch (e) {} } } catch (e) {}
+  try { if (typeof _FX_ANIM_KEYS !== 'undefined' && typeof _fxAnimFrames === 'function') for (const k of _FX_ANIM_KEYS) { try { _fxAnimFrames(k); } catch (e) {} } } catch (e) {}
+  try { if (typeof LX_SUMMON !== 'undefined' && typeof _summonAnimFrame === 'function') for (const k in LX_SUMMON) { try { _summonAnimFrame(k, 'walk'); _summonAnimFrame(k, 'attack'); } catch (e) {} } } catch (e) {}
+  // PHASE 2: portal-BFS map sweep from the player's current map — nearest maps
+  // stream first, so the next map is resident before they walk through.
+  const order = [], seen = new Set(), q = [game.currentMap || 'town'];
+  while (q.length) {
+    const id = q.shift();
+    if (!id || seen.has(id)) continue;
+    seen.add(id); order.push(id);
+    for (const n of _lxMapNeighbors(id)) if (!seen.has(n)) q.push(n);
+  }
+  // Desktop: append every unreachable-by-portal map too (taxi/warp targets).
+  if (!coarse && typeof MAPS !== 'undefined') for (const id in MAPS) if (!seen.has(id)) order.push(id);
+  let i = 0;
+  const nextMap = () => {
+    if (i >= order.length) { if (!coarse) setTimeout(_lxStreamMonWorld, 800); return; }
+    const step = () => setTimeout(nextMap, 120);
+    _lxWarmMap(order[i++]).then(step, step);
+  };
+  nextMap();
+}
+// PHASE 3 (desktop): every monster type's anim frames — covers bosses injected
+// at runtime (Hall of Echoes) and boss adds that never appear in a map's
+// spawns list. Paced 4 types/beat so it's never a main-thread burst.
+function _lxStreamMonWorld() {
+  try {
+    if (typeof monsterTypes !== 'undefined' && typeof _monsterFramesFor === 'function') {
+      const keys = Object.keys(monsterTypes);
+      let j = 0;
+      const step = () => {
+        for (let n = 0; n < 4 && j < keys.length; n++, j++) { try { _monsterFramesFor(keys[j]); } catch (e) {} }
+        if (j < keys.length) setTimeout(step, 300);
+      };
+      step();
+    }
+  } catch (e) {}
+}
 function loadMap(id, entryX, entryY) {
   // Close a stale MP chat bar on map change (else its input lingers + eats Enter).
   if (typeof _mpCloseChat === 'function' && typeof net !== 'undefined' && net && net.chatOpen) _mpCloseChat(false);
@@ -39815,6 +39891,10 @@ function loadMap(id, entryX, entryY) {
   try {
     window._lxMapPreloaded = window._lxMapPreloaded || {};
     if (!window._lxMapPreloaded[id]) { window._lxMapPreloaded[id] = 1; _lxPreloadMapAssets(id); }
+    // v0.27.6 — neighbor prefetch: 3s after arriving (the entered map's own
+    // load settles first), warm every map reachable through this map's portals
+    // so the NEXT map is already resident before the player walks through.
+    setTimeout(() => { try { if (typeof _lxWarmMap === 'function') for (const n of _lxMapNeighbors(id)) _lxWarmMap(n); } catch (e) {} }, 3000);
   } catch (e) {}
   // v0.26.438 — Record the map being LEFT into the return-warp history
   // (most-recent-first, deduped, capped). game.currentMap is still the
@@ -98189,6 +98269,11 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     setTimeout(() => { if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 220);
     // v0.25.233 — Start the looping BGM the moment the world reveals.
     startBgm();
+    // v0.27.6 — WORLD STREAMER: once the world has revealed and the first map
+    // has settled, background-stream every remaining map's sprites (portal-BFS
+    // from the player) + the full monster/FX/summon registries, so nothing
+    // pops in mid-game. Single kick — _lxStreamWorld self-dedupes.
+    setTimeout(() => { try { if (typeof _lxStreamWorld === 'function') _lxStreamWorld(); } catch (e) {} }, 4500);
     // v0.26.950 — flash the sprite-load bar at reveal ("✓ All sprites
     // loaded" for 1.8s, or live progress if anything is still streaming).
     try { if (typeof _lxSpritePillTick === 'function') _lxSpritePillTick(); } catch (e) {}
