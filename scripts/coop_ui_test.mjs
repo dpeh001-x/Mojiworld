@@ -42,6 +42,10 @@ try {
   ok('entering a name reveals the world', afterEnter.overlayGone === true, afterEnter);
   ok('character name persisted for co-op', afterEnter.mpName === 'Zephyr', afterEnter);
 
+  // Entering a name pops the class-select modal; a real player picks a class
+  // (dismissing it) before reaching the Multiplayer button. Do the same so the
+  // panel isn't opened underneath class-select (whose canvas eats the click).
+  await page.evaluate(() => { const c = document.getElementById('class-select-modal'); if (c) c.style.display = 'none'; });
   // Open the Multiplayer panel and verify the friendly party-code UI.
   await page.evaluate(() => { try { openMultiplayer(); } catch (e) {} });
   await page.waitForTimeout(400);
