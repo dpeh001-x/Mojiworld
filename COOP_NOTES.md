@@ -77,23 +77,33 @@ per-peer XP scaling + boss/bestiary progression.
 
 ## Known limitations / needs live human QA (v1)
 
-Deliberate v1 scope cuts. None break the core loop; all are tuning/polish:
+The launch bug hunt hardened the co-op layer substantially (guest damage now equals
+solo — the full hitMonster multiplier stack runs before the forward; DEF/invuln/
+shield gates + an anti-one-shot cap host-side; host-only trust on mon/kill; XP with
+xpCurveMul + PQ damper; level-scaled coins; trackPickup progression; on-the-fly uids
+for boss adds; orphan-mirror cleanup). One real gap remains, plus minor polish:
 
-1. **Projectile / telegraphed-special damage from mirrors isn't synced.** Followers
-   take **contact** damage from mirrored monsters, but ranged/AoE boss attacks
-   (projectiles, meteors, hazards) are host-spawned and not networked, so a follower
-   won't take those yet. Contact danger is live; ranged danger is a follow-up.
-2. **XP is approximate.** Peers scale the host's **base** kill exp by their own
-   xpBoost/early/event multipliers (not combo/prestige). Fair, not identical.
-3. **Dropped damage under extreme load.** `dmg` events share the relay's 40/s
-   per-socket cap. A very-high-APM AoE build could shed a few hits; batch per-tick
-   if playtesting shows it.
-4. **Fully-minimized host.** An alt-tabbed/occluded host keeps simulating (Electron
-   anti-throttle flags); a fully **minimized** host may slow rAF — followers then
-   detect it went quiet (~5s) and fall back to local sim, so nobody freezes.
+1. **⚠️ THE co-op launch decision — followers take no RANGED damage.** Followers
+   take **contact** damage from mirrored monsters, but ranged/AoE/telegraph attacks
+   (projectiles, meteors, hazards) are host-spawned and **not networked**, so a
+   follower can facetank a ranged boss. Non-boss co-op is fine; **co-op BOSS fights
+   are trivialized for guests.** Options before store-live: (a) implement enemy-
+   projectile sync (the proper fix — a focused, separately-tested feature, ~contact-
+   tick sized), or (b) **gate co-op entry on boss arenas** (host-only bosses) so the
+   headline bosses aren't visibly broken. Do NOT ship co-op boss fights as-is.
+2. **XP is approximate (fair, not identical).** Peers scale the host's base kill exp
+   by their own xpBoost / early-level / event / xpCurveMul / PQ-damper; combo and
+   prestige stay host-side (not networked).
+3. **Dropped damage under extreme load.** `dmg` events share the relay's 40/s cap;
+   a very-high-APM AoE build could shed a few hits. Batch per-tick if playtests show it.
+4. **Fully-minimized host.** Alt-tabbed/occluded hosts keep simulating (Electron
+   anti-throttle + powerSaveBlocker); a fully minimized host may slow rAF — followers
+   detect the quiet host (~5s) and fall back to local sim, so nobody freezes.
 5. **Boss-fight chrome on the mirror.** Mirrored bosses render, take shared damage,
-   and the kill now stamps the peer's bossDefeated + bestiary — but the boss HP bar
-   / intro cinematic on the follower still needs a human eyeball in a live boss run.
+   and the kill stamps the peer's bossDefeated + bestiary (trackPickup) — but the boss
+   HP bar / intro cinematic on the follower needs a human eyeball in a live boss run.
+6. **Setshards / boon pick on shared boss kills.** Guests don't yet receive Setshards
+   or a boon pick from a host-landed boss kill (LOW; deferred).
 
 ## Test matrix (minimum before store-live)
 
