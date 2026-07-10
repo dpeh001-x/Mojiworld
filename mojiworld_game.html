@@ -30266,6 +30266,11 @@ function closeLoreMap() {
 }
 
 function toggleLoreMap() {
+  // v0.27.1 — guard like every sibling toggle (worldmap/quest/keybind): during
+  // character creation player.cls is null, and the Codex (DOM-later than class-select
+  // at equal z-index) would paint ON TOP of the mandatory gate. Refuse until a class
+  // is chosen so a stray 'Y' in the first session can't bury the class picker.
+  if (!player.cls) { if (typeof showToast === 'function') showToast('Pick a class first', 'common'); return; }
   const modal = document.getElementById('lore-modal');
   if (!modal) return;
   if (modal.style.display === 'flex') closeLoreMap();
@@ -32089,6 +32094,10 @@ function _renderChannelPills(active) {
 }
 
 function openMultiplayer() {
+  // v0.27.1 — match the sibling panel-openers: refuse to open while the mandatory
+  // class-select gate is still up. Otherwise the MP panel lands UNDER class-select
+  // (equal z-index, earlier in DOM) and the gate's canvas eats its buttons.
+  if (typeof player !== 'undefined' && player && !player.cls) { if (typeof showToast === 'function') showToast('Pick a class first', 'common'); return; }
   const modal = document.getElementById('multiplayer-modal');
   if (!modal) return;
   // Pre-fill from localStorage. v0.27.0 — server URL defaults to the shipped
@@ -32141,7 +32150,13 @@ function openMultiplayer() {
 }
 
 function mpConnect(url, name, room) {
-  if (net.ws) { try { net.ws.close(); } catch (e) {} }
+  if (net.ws) {
+    // v0.27.1 — detach the OLD socket's handlers before closing. close() fires
+    // onclose asynchronously; without this, a rapid reconnect's new onopen sets
+    // net.connected=true and then the stale onclose lands and clobbers it back to
+    // false (wiping net.peers) — a silent co-op drop on reconnect.
+    try { net.ws.onopen = net.ws.onclose = net.ws.onerror = net.ws.onmessage = null; net.ws.close(); } catch (e) {}
+  }
   net.peers = {};
   // v0.25.548 — Suffix the room with the player's chosen channel so
   // populations on different channels don't broadcast positions to
@@ -32154,8 +32169,10 @@ function mpConnect(url, name, room) {
   net.roomId = baseRoom + '__ch' + ch;
   net._lastUrl = url;
   _mpStatus(`Connecting to ${url} · ${baseRoom} · Ch ${ch}…`, '#ffcc66');
+  let ws;
   try {
-    net.ws = new WebSocket(url);
+    ws = new WebSocket(url);
+    net.ws = ws;
   } catch (e) {
     _mpStatus('Bad URL: ' + e.message, '#ff8888');
     return;
@@ -32170,7 +32187,8 @@ function mpConnect(url, name, room) {
       _mpStatus('Waking the server (free host — first connect can take ~30–60s)…', '#ffcc66');
     }
   }, 4000);
-  net.ws.onopen = () => {
+  ws.onopen = () => {
+    if (net.ws !== ws) return;   // v0.27.1 — a newer connect superseded this socket
     if (net._warmTimer) { clearTimeout(net._warmTimer); net._warmTimer = null; }
     net._reconnectTries = 0;
     const hello = {
@@ -32188,17 +32206,19 @@ function mpConnect(url, name, room) {
       hp: player.hp, maxHp: getMaxHp ? getMaxHp() : player.maxHp,
       mp: player.mp, maxMp: getMaxMp ? getMaxMp() : player.maxMp,
     };
-    net.ws.send(JSON.stringify(hello));
+    ws.send(JSON.stringify(hello));
     net.connected = true;
     _mpStatus(`Connected · ${net.baseRoom || net.roomId} · Ch ${net.channel || 1}`, '#88ffaa');
     _mpPushLog(`Connected to ${url} · room "${net.roomId}"`, 'sys');
     _mpRenderPlayerList();
   };
-  net.ws.onmessage = (ev) => {
+  ws.onmessage = (ev) => {
+    if (net.ws !== ws) return;   // v0.27.1 — ignore frames from a superseded socket
     let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
     _mpHandle(msg);
   };
-  net.ws.onclose = () => {
+  ws.onclose = () => {
+    if (net.ws !== ws) return;   // v0.27.1 — a stale onclose must not clobber the live connection
     if (net._warmTimer) { clearTimeout(net._warmTimer); net._warmTimer = null; }
     const wasConnected = net.connected;
     net.connected = false;
@@ -32207,7 +32227,8 @@ function mpConnect(url, name, room) {
     if (wasConnected) _mpPushLog('Disconnected from server.', 'sys');
     _mpRenderPlayerList();
   };
-  net.ws.onerror = () => {
+  ws.onerror = () => {
+    if (net.ws !== ws) return;   // v0.27.1
     if (net._warmTimer) { clearTimeout(net._warmTimer); net._warmTimer = null; }
     _mpStatus('Connection error', '#ff8888');
   };
@@ -32234,6 +32255,21 @@ const COOP_MON_TICK_MS = 100;   // host monster-state broadcast cadence (~10 Hz)
 const COOP_MON_CAP     = 80;    // max monsters synced per frame (payload bound)
 const COOP_PROJ_TICK_MS = 90;   // host enemy-projectile broadcast cadence
 const COOP_PROJ_CAP     = 60;   // max enemy projectiles synced per frame
+// v0.27.1 — kill-frame idempotency. A relay may redeliver a 'kill' frame (at-least-
+// once echo, reconnect replay, or a double host broadcast); _coopApplyKill awards XP
+// + coins from the payload regardless of whether the monster is still present, so a
+// duplicate used to double-pay the guest (progression/economy dupe). Track recently-
+// applied kill uids in a small ring and ignore repeats.
+const _coopKillSeen = new Set();
+const _coopKillRing = [];
+function _coopKillDup(uid) {                 // true if this kill uid was already applied
+  if (uid == null) return false;            // no uid -> can't dedup; let it through (rare)
+  const key = +uid;
+  if (_coopKillSeen.has(key)) return true;
+  _coopKillSeen.add(key); _coopKillRing.push(key);
+  if (_coopKillRing.length > 256) _coopKillSeen.delete(_coopKillRing.shift());
+  return false;
+}
 
 function _coopActive() {
   // Require net.myId (set by 'welcome') so a just-connected client — which defaults
@@ -32327,7 +32363,8 @@ function _coopTickProjectiles() {
 // updateProjectiles then simulates + collides them against the local player.
 function _coopApplyProjectiles(msg) {
   if (net.isHost || !msg) return;
-  if (net.hostId != null && msg.id != null && +msg.id !== +net.hostId) return;   // host-only
+  if (net.hostId == null || +msg.id !== +net.hostId) return;   // host-only, fail-closed (v0.27.1)
+  if (!_coopFollowingHost()) return;
   if (msg.map !== game.currentMap) return;
   const incoming = (msg.list || []).slice(0, COOP_PROJ_CAP);
   const seen = new Set();
@@ -32382,7 +32419,8 @@ function _coopTickHazards() {
 // a follower can't double-detonate.
 function _coopApplyHazards(msg) {
   if (net.isHost || !msg) return;
-  if (net.hostId != null && msg.id != null && +msg.id !== +net.hostId) return;   // host-only
+  if (net.hostId == null || +msg.id !== +net.hostId) return;   // host-only, fail-closed (v0.27.1)
+  if (!_coopFollowingHost()) return;
   if (msg.map !== game.currentMap) return;
   const incoming = (msg.list || []).slice(0, COOP_PROJ_CAP);
   const seen = new Set();
@@ -32410,7 +32448,8 @@ function _coopApplyHazards(msg) {
 // (event-based) vs. trying to reproduce the host's per-frame detonation timing.
 function _coopApplyHazHit(msg) {
   if (net.isHost || !msg || msg.map !== game.currentMap) return;
-  if (net.hostId != null && msg.id != null && +msg.id !== +net.hostId) return;
+  if (net.hostId == null || +msg.id !== +net.hostId) return;   // host-only, fail-closed (v0.27.1)
+  if (!_coopFollowingHost()) return;
   if (!player || player.hp <= 0 || player._god || (player.invulnerable | 0) > 0) return;
   const cx = +msg.x, radius = Math.max(1, +msg.r || 180);
   if (!Number.isFinite(cx)) return;
@@ -32435,9 +32474,13 @@ function _coopApplyHazHit(msg) {
 // NON-HOST: apply the host's authoritative monster list (reconcile by uid).
 function _coopApplyMonsters(msg) {
   if (net.isHost || !msg) return;
-  // Trust monster state only from the ELECTED host (the relay stamps sender id);
-  // a non-host peer must not be able to inject/teleport monsters into your world.
-  if (net.hostId != null && msg.id != null && +msg.id !== +net.hostId) return;
+  // Trust monster state only from the ELECTED host (the relay stamps sender id,
+  // overriding any client-supplied id); a non-host peer must not inject/teleport
+  // monsters. v0.27.1 — fail CLOSED: reject a missing/mismatched id (was fail-open
+  // when id was absent) and ignore straggler frames once we've stopped following
+  // (quiet-host fallback), so a late frame can't purge our freshly-spawned locals.
+  if (net.hostId == null || +msg.id !== +net.hostId) return;
+  if (!_coopFollowingHost()) return;
   if (msg.map !== game.currentMap) return;   // only mirror the host's current map
   const incoming = (msg.list || []).slice(0, COOP_MON_CAP);   // clamp to the promised bound (payload-flood guard)
   const seen = new Set();
@@ -32521,7 +32564,8 @@ function _coopBroadcastKill(m, exp, coins) {
 // NON-HOST: award XP/coins from a host kill (same map only) + progression + pop.
 function _coopApplyKill(msg) {
   if (net.isHost || !msg || msg.map !== game.currentMap) return;
-  if (net.hostId != null && msg.id != null && +msg.id !== +net.hostId) return;   // host-only (no peer-forged kills/XP)
+  if (net.hostId == null || +msg.id !== +net.hostId) return;   // host-only, fail-closed (no peer-forged / id-less kills/XP)
+  if (_coopKillDup(msg.u)) return;   // v0.27.1 — a redelivered kill frame must not re-award XP/coins
   const m = (msg.u != null) ? _coopFindByUid(msg.u) : null;
   // XP: scale the host's base exp by THIS peer's own non-party multipliers,
   // including the global xpCurveMul (1.35) the host applies (was omitted -> ~26%
@@ -42412,8 +42456,9 @@ function updatePlayer(dt) {
       if (m.currentHp <= 0) continue;
       if (player._rushHitSet && player._rushHitSet.has(m)) continue;
       if (aabb(player, m)) {
-        const dmg = Math.floor(getAtk() * 1.8);
-        hitMonster(m, dmg, rollCrit(), 'rush');
+        const _rc = rollCrit();   // v0.27.1 — apply crit DAMAGE, not just the flag: the
+        const dmg = Math.floor(getAtk() * 1.8 * (_rc ? getCritDmg() : 1));   // sibling rush path (47014) already did this; here the gold crit number showed but dealt base damage (+ inflated critStreak / crit-proc for free).
+        hitMonster(m, dmg, _rc, 'rush');
         m.vx += player.rushDir * 4;
         if (player._rushHitSet) player._rushHitSet.add(m);
       }
@@ -51569,6 +51614,16 @@ function updateMonsters(dt) {
       const _m = game.monsters[i];
       if (_m && _m._coopMirror) game.monsters.splice(i, 1);
     }
+    // v0.27.1 — also drop mirrored enemy projectiles / hazards. Their appliers now
+    // early-return once we stop following, so a batch injected just before the host
+    // left this map would otherwise linger (and mirror projectiles still damage us)
+    // until they self-expire. Purge them alongside the monster mirrors.
+    if (game.projectiles) for (let i = game.projectiles.length - 1; i >= 0; i--) {
+      const _p = game.projectiles[i]; if (_p && _p._coopMirror) game.projectiles.splice(i, 1);
+    }
+    if (game.hazards) for (let i = game.hazards.length - 1; i >= 0; i--) {
+      const _h = game.hazards[i]; if (_h && _h._coopMirror) game.hazards.splice(i, 1);
+    }
   }
   if (window.__UMS) window.__UMtEnter = performance.now();   // DEBUG profiling stamp
   // v0.26.215 — Per-frame hoisted reads. Pre-fix each trait block
@@ -57561,6 +57616,11 @@ function hitMonster(m, dmg, isCrit, skill) {
   // overwriting the real cause-of-death, and combo counter ticking on
   // corpses. One-line gate at the entry kills the whole class.
   if (!m || m.currentHp <= 0) return;
+  // v0.27.1 — NaN/Infinity guard. Math.max(1, NaN) === NaN (Math.max is not a NaN
+  // filter), so a single caller ever passing a non-finite dmg (a 0/0 stat helper, an
+  // undefined multiplier, a corrupt save feeding getAtk()) would poison m.currentHp to
+  // NaN — NaN<=0 is false, so the monster becomes IMMORTAL and never fires on-kill.
+  if (!Number.isFinite(dmg)) return;
   // v0.27.0 co-op — the NON-HOST damage forward moved DOWN to just before the
   // authoritative HP write (search "co-op forward"), so hitMonster runs its FULL
   // multiplier stack (crit / G-skill / execution / void / mastery / rank / streak
@@ -70257,8 +70317,13 @@ function closeAllModals() {
     if (_skip) { try { _skip.click(); } catch (_) {} }
     return;
   }
-  if ((cs && cs.style.display === 'flex') ||
-      (av && av.style.display === 'flex')) return;
+  // v0.27.1 — do NOT early-return while the mandatory class-select / advancement
+  // gate is open. This used to bail before the hide-loop below, so any panel opened
+  // on top of the gate (multiplayer, codex) became impossible to close via Esc or ✕
+  // — a first-session soft-lock. The gate modals are absent from every hide-list in
+  // this function, so they survive; and the final pause line keeps the sim paused
+  // while the gate is up (_anyOtherModalOpen() tracks class-select/advancement).
+  void cs; void av;   // referenced for clarity; gate teardown is intentionally skipped
   // v0.25.247 (U5) — if a uiConfirm Promise is in flight, resolve it
   // (as cancel) before tearing down the modal so callers don't hang.
   if (game && typeof game._uiConfirmCleanup === 'function') {
@@ -95637,7 +95702,7 @@ function loop(time) {
   // prevents. setTransform is absolute, so this wipes any leak regardless of
   // how the previous frame exited. Cheap (~once/frame), idempotent.
   try { ctx.setTransform(_LX_DPR, 0, 0, _LX_DPR, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; } catch (_e) {}
-  const dt = Math.min(50, time - lastTime);
+  const dt = Math.max(0, Math.min(50, time - lastTime));   // v0.27.1 — clamp the LOWER bound too: a backward rAF-timestamp delta (clock regression / first frame) made dt<0, and every `x -= dt` (i-frames, cooldowns, skill timers) then RAN BACKWARD.
   lastTime = time;
   game.time++;
   game._playMs = (game._playMs || 0) + dt;   // v0.26.453 - accumulated in-game playtime (ms) for boss respawn gating
