@@ -49,27 +49,51 @@ is byte-identical to before the pivot. Do not add a co-op hook that can run whil
 All gated by same-map checks; ids are relay-assigned and echoed to everyone except
 the sender.
 
-## Known limitations / needs-playtesting (v1)
+## Certification status (automated 2-client live tests)
 
-These are deliberate v1 scope cuts or areas that need **2-client QA** before launch.
-The adversarial review pass (see git log) tightened the crash/desync-critical ones;
-the rest are tuning:
+The co-op layer is exercised by real 2-browser Playwright tests against the relay
+(`scripts/coop_*_test.mjs`). Current status — **34/34 passing**:
 
-1. **Boss-fight UI on the mirror.** Mirrored bosses render + take shared damage, but
-   boss-specific chrome (HP bar, intro cinematic, arena-lock, defeat trigger) is
-   driven by the host's spawn path. Verify the non-host sees a boss HP bar / can
-   register the kill for gates. (Review-tracked.)
-2. **XP fairness.** Peers receive **base** `m.exp` / `m.mojicoins` from the kill
-   broadcast (no per-peer multipliers); the host gets its full multiplier stack.
-   Acceptable for casual; unify later if it feels off.
-3. **Dropped damage under load.** `dmg` events share the relay's per-socket rate
-   limit (40/s). A very fast attacker could have some hits dropped. Batch damage
-   per tick if playtesting shows it.
-4. **Host migration monster identity.** `uid` is per-client (`game._monUid`). On a
-   host handoff the new host re-broadcasts its own uids; peers reconcile. Confirm no
-   duplicate/ghost monsters across a handoff in a live test.
-5. **Mirror cleanup on host map-change while you stay.** If the host leaves the map
-   and you remain, its mirrors may briefly become local until your next map load.
+- `coop_2client_test.mjs` (17/17): host election, full monster mirroring (matching
+  uids, zero duplicates), shared HP (non-host damage reaches host + syncs back),
+  shared kills + XP, host-side kills reaching the peer.
+- `coop_edge_test.mjs` (10/10): solo fallback on a different map, switchover +
+  local-purge when joining the host's map, host handoff (monsters survive, new
+  host simulates).
+- `coop_hardening_test.mjs` (7/7): forwarded damage is DEF-reduced host-side
+  (10000 raw → 3333 vs DEF 600), host rejects damage in an invuln window, follower
+  takes contact damage (no longer invincible).
+
+> The test harness pumps the outbound ticks (`_mpTick`/`_coopTickMonsters`) via
+> `setInterval` because headless Chromium throttles `requestAnimationFrame`; all
+> inbound handling and game logic run through the real code paths. In a real
+> browser the rAF loop drives those ticks.
+
+Fixed after the adversarial review + live tests (see git log): relay now forwards
+`mon`/`dmg`/`kill` (was a total no-op) on all three relays; DEF/invuln/shield gates
+applied host-side; followers take contact damage; follower duplicate/ghost mobs
+purged; silent-host-drop re-election (~5s, was 30s); host-handoff uid collisions;
+per-peer XP scaling + boss/bestiary progression.
+
+## Known limitations / needs live human QA (v1)
+
+Deliberate v1 scope cuts. None break the core loop; all are tuning/polish:
+
+1. **Projectile / telegraphed-special damage from mirrors isn't synced.** Followers
+   take **contact** damage from mirrored monsters, but ranged/AoE boss attacks
+   (projectiles, meteors, hazards) are host-spawned and not networked, so a follower
+   won't take those yet. Contact danger is live; ranged danger is a follow-up.
+2. **XP is approximate.** Peers scale the host's **base** kill exp by their own
+   xpBoost/early/event multipliers (not combo/prestige). Fair, not identical.
+3. **Dropped damage under extreme load.** `dmg` events share the relay's 40/s
+   per-socket cap. A very-high-APM AoE build could shed a few hits; batch per-tick
+   if playtesting shows it.
+4. **Fully-minimized host.** An alt-tabbed/occluded host keeps simulating (Electron
+   anti-throttle flags); a fully **minimized** host may slow rAF — followers then
+   detect it went quiet (~5s) and fall back to local sim, so nobody freezes.
+5. **Boss-fight chrome on the mirror.** Mirrored bosses render, take shared damage,
+   and the kill now stamps the peer's bossDefeated + bestiary — but the boss HP bar
+   / intro cinematic on the follower still needs a human eyeball in a live boss run.
 
 ## Test matrix (minimum before store-live)
 
