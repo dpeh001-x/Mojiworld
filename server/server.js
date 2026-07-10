@@ -444,6 +444,15 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
+    // ---- Casual co-op host-authoritative monster sync (v0.27.0) ----
+    // Forward monster state / damage / kill events verbatim to the room. The
+    // relay stays dumb (never inspects game state); payloads are bounded by the
+    // WS maxPayload + the per-socket token bucket added earlier.
+    if (msg.t === 'mon' || msg.t === 'dmg' || msg.t === 'kill') {
+      broadcast(ws._roomId, { ...msg, id: ws._player.id }, ws);
+      return;
+    }
+
     // ---- Explicit map change ----
     if (msg.t === 'map') {
       const map = sanitizeString(msg.map, 24);
