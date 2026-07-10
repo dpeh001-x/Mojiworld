@@ -28898,16 +28898,23 @@ function applyClass(clsId) {
       // _prologueFinish so it still fires after the cinematic.
       if (window._prologueAfterCreation) {
         window._prologueAfterCreation = false;
-        const _go = () => { try { if (typeof _startPrologue === 'function') _startPrologue(); } catch (e) {} };
+        // v0.27.3 — start the cinematic IMMEDIATELY (per user: "I am left
+        // stranded before that"). The old flow ran this preload race FIRST —
+        // up to 15s of the player standing idle in the void before anything
+        // happened. The stanza overlay is pure DOM/CSS (zero sprite deps), so
+        // it now covers the screen instantly while the arena preloads BEHIND
+        // the text; _startPrologue awaits _prologueArenaReady only at the
+        // stanzas→arena handoff (usually already resolved by then).
         try {
-          Promise.race([
+          window._prologueArenaReady = Promise.race([
             Promise.allSettled([
               (typeof _lxPreloadMapAssets === 'function') ? _lxPreloadMapAssets('gravitosArena') : null,
               (typeof _warmDecodeRegistries === 'function') ? _warmDecodeRegistries(true) : null,
             ]),
             new Promise((r) => setTimeout(r, 15000)),
-          ]).then(_go, _go);
-        } catch (e) { _go(); }
+          ]);
+        } catch (e) { window._prologueArenaReady = null; }
+        try { if (typeof _startPrologue === 'function') _startPrologue(); } catch (e) {}
         return;
       }
       if (typeof _wireTutorialButtons === 'function') _wireTutorialButtons();
@@ -85501,7 +85508,7 @@ const NPC_SPRITE_FILES = {
   'Tincture Aunt':           'tincture_aunt.png',
   'Coach Stride':            'coach_stride.png',
   'Master Kaze':             'master_kaze.webp',
-  'Whisper':                 'whisper.webp',
+  'Whisper':                 'whisper.png',   // v0.27.3 — the on-disk file is .png (registry said .webp → 404 everywhere)
   // v0.25.956 — Milo NPC sprite registered. File is on disk as
   // 'milo.png' under Sprites/npc/. The v0.25.956 loader has
   // .webp ↔ .png fallback so either extension works; we register
@@ -85613,8 +85620,14 @@ function _lxLoadNpcSpriteInto(name) {
 }
 (function _loadNpcSprites() {
   const names = Object.keys(NPC_SPRITE_FILES);
-  if (typeof _lxAsyncPool === 'function') _lxAsyncPool(6, names, _lxLoadNpcSpriteInto);
-  else names.forEach(_lxLoadNpcSpriteInto);
+  // v0.27.3 — expose the pool's completion so the BOOT DECODE GATE can wait on
+  // it (per user: "ensure that all sprites especially NPC … are all loaded prior
+  // to starting the game"). This fill was fire-and-forget: the reveal gate never
+  // waited for NPC_SPRITES to populate, so NPCs could pop in after the world
+  // showed. The gate's 30s safety cap still bounds a pathological connection.
+  window._lxNpcSpritesReady = (typeof _lxAsyncPool === 'function')
+    ? _lxAsyncPool(6, names, _lxLoadNpcSpriteInto)
+    : Promise.allSettled(names.map(_lxLoadNpcSpriteInto));
 })();
 // v0.26.1014 — self-healing lazy reload for an on-screen NPC whose registered
 // sprite never decoded at boot (iOS decode-kill). Called from drawNPCs's
@@ -96638,7 +96651,27 @@ function _startPrologue() {
     'You remember this.\n\nYou have not lived it yet — but you remember.',
   ], (skipped) => {
     if (skipped) { _prologueFinish(true); return; }
-    _prologueApexSegment();
+    // v0.27.3 — the arena preload now runs BEHIND the stanzas (see the
+    // applyClass site). Usually resolved by the time the player clicks
+    // through; if the CDN is still streaming, hold a black "memory
+    // sharpens" beat instead of dropping the player back into the void.
+    const _ready = window._prologueArenaReady || Promise.resolve();
+    let _went = false;
+    let _cover = null;
+    const _go = () => {
+      if (_went) return; _went = true;
+      try { if (_cover) _cover.remove(); } catch (e) {}
+      if (window._prologueActive) _prologueApexSegment();
+    };
+    try {
+      _cover = document.createElement('div');
+      _cover.style.cssText = 'position:fixed;inset:0;z-index:1499;background:#02010a;display:flex;'
+        + 'align-items:center;justify-content:center;font:700 15px monospace;color:#8b7fb8;letter-spacing:3px;';
+      _cover.textContent = 'the memory sharpens…';
+      document.body.appendChild(_cover);
+    } catch (e) {}
+    _ready.then(_go, _go);
+    setTimeout(_go, 16000);   // absolute cap (mirrors the preload race) — never hold the beat forever
   });
 }
 function _prologueApexSegment() {
@@ -97776,6 +97809,26 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     'backgrounds/bg_v3_jadeGrove.png',
     'backgrounds/bg_v3_emeraldVillage.png',
   ];
+  // v0.27.3 — drift-proof NPC gate (per user: "ensure that all sprites
+  // especially NPC … are all loaded prior to starting the game"). The
+  // hand-maintained list above had rotted: 25 of 44 NPC_SPRITE_FILES
+  // entries — including 5 of the 9 TOWN NPCs (DJ Vinyl, Postal Wisp,
+  // Milo, Guguma, Bravo) — were absent from the whole boot loader, so
+  // they popped in AFTER the world revealed. Append every registry
+  // entry programmatically: any future NPC is gated automatically, no
+  // manual manifest upkeep. (Reveal gates on the FULL set — see
+  // maybeReveal — so appended entries block it like the literals.)
+  try {
+    if (typeof NPC_SPRITE_FILES !== 'undefined') {
+      const _seen = new Set(REQUIRED);
+      for (const _k in NPC_SPRITE_FILES) {
+        const _f = NPC_SPRITE_FILES[_k];
+        if (!_f || typeof _f !== 'string') continue;
+        const _p = 'Sprites/npc/' + _f;
+        if (!_seen.has(_p)) { _seen.add(_p); REQUIRED.push(_p); }
+      }
+    }
+  } catch (e) {}
 
   // v0.25.237 — Three-tier loader. BAZAAR is the smallest bucket and
   // exclusively gates the world reveal: only the sprites the player
@@ -98022,7 +98075,10 @@ try { window.LXAuth = LXAuth; } catch (e) {}
             if (status) status.innerHTML = '<span class="pct">100%</span> · <span class="pulse">Decoding world… ' + d + '/' + t + '</span>';
           })
         : Promise.resolve(0);
-      Promise.allSettled([_warmDecodeRegistries(), _mapPre]).then(_proceed, _proceed);
+      // v0.27.3 — the gate now ALSO waits for the NPC sprite registry fill
+      // (window._lxNpcSpritesReady) so every NPC_SPRITES entry is decoded
+      // before the world reveals — no NPC pop-in. Same 30s cap above.
+      Promise.allSettled([_warmDecodeRegistries(), _mapPre, window._lxNpcSpritesReady || null]).then(_proceed, _proceed);
     } catch (e) { _proceed(); }
   }
   function _finishHide(session) {
