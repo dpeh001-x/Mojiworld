@@ -32348,6 +32348,90 @@ function _coopApplyProjectiles(msg) {
     if (p && p._coopMirror && p._puid != null && !seen.has(p._puid)) game.projectiles.splice(i, 1);
   }
 }
+// HOST: broadcast enemy ground HAZARDS (meteor telegraphs, pillars, quakes) so a
+// follower sees the reticle AND its own updateProjectiles hazard-loop detonates it
+// against the local player — covers telegraph-heavy bosses (zodiac meteors) that
+// projectile sync alone misses.
+function _coopTickHazards() {
+  if (!_coopActive() || !net.isHost) return;
+  const now = performance.now();
+  if (now - (net._coopHazAt || 0) < COOP_PROJ_TICK_MS) return;
+  net._coopHazAt = now;
+  const list = [];
+  const arr = game.hazards || [];
+  for (let i = 0; i < arr.length && list.length < COOP_PROJ_CAP; i++) {
+    const h = arr[i];
+    if (!h || h.owner !== 'enemy') continue;   // only player-facing hazards
+    if (h._huid == null) h._huid = (game._hazUid = (game._hazUid || 0) + 1);
+    list.push({
+      u: h._huid, t: String(h.type || '').slice(0, 16),
+      x: Math.round(h.x || 0), y: Math.round(h.y || 0),
+      cx: (h.cx != null) ? Math.round(h.cx) : undefined, cy: (h.cy != null) ? Math.round(h.cy) : undefined,
+      w: Math.round(h.w || 0), h: Math.round(h.h || 0), r: Math.round(h.radius || 0),
+      l: Math.round((h.life != null) ? h.life : (h.timer || 0)), ml: Math.round(h.maxLife || h.timer || 0),
+      d: Math.round(h.damage || 0), c: String(h.color || '').slice(0, 9),
+      mk: h._markerOnly ? 1 : 0, sl: String(h._sourceLabel || '').slice(0, 24),
+    });
+  }
+  try { net.ws.send(JSON.stringify({ t: 'haz', map: game.currentMap, list })); } catch (e) {}
+}
+// NON-HOST: inject the host's enemy hazards for the VISUAL telegraph (reticle) only
+// — reconcile add/update/remove-on-absent. Mirror hazards are flagged _coopMirror so
+// the hazard loop skips DAMAGE for them (see updateProjectiles guard); the actual
+// hit is applied by the host's 'hazhit' detonation event, so timing is reliable and
+// a follower can't double-detonate.
+function _coopApplyHazards(msg) {
+  if (net.isHost || !msg) return;
+  if (net.hostId != null && msg.id != null && +msg.id !== +net.hostId) return;   // host-only
+  if (msg.map !== game.currentMap) return;
+  const incoming = (msg.list || []).slice(0, COOP_PROJ_CAP);
+  const seen = new Set();
+  const byUid = {};
+  for (const h of game.hazards) if (h && h._coopMirror && h._huid != null) byUid[h._huid] = h;
+  for (const e of incoming) {
+    if (!e || e.u == null) continue;
+    seen.add(e.u);
+    let h = byUid[e.u];
+    if (!h) { h = { _coopMirror: true, _huid: e.u, owner: 'enemy' }; h.maxLife = +e.ml || +e.l || 60; game.hazards.push(h); }
+    h.type = e.t; h.x = +e.x || 0; h.y = +e.y || 0;
+    if (e.cx !== undefined) h.cx = +e.cx; if (e.cy !== undefined) h.cy = +e.cy;
+    h.w = +e.w || 0; h.h = +e.h || 0; h.radius = +e.r || 0; h.life = +e.l;
+    h.damage = +e.d || 0; h.color = e.c || '#ffaa33';
+    if (e.mk) h._markerOnly = 1;
+    if (e.sl) h._sourceLabel = e.sl;
+  }
+  for (let i = game.hazards.length - 1; i >= 0; i--) {
+    const h = game.hazards[i];
+    if (h && h._coopMirror && h._huid != null && !seen.has(h._huid)) game.hazards.splice(i, 1);
+  }
+}
+// NON-HOST: apply an inbound hazard DETONATION (meteor strike zone) to the local
+// player, mirroring the enemy-hazard damage path in updateProjectiles. Reliable
+// (event-based) vs. trying to reproduce the host's per-frame detonation timing.
+function _coopApplyHazHit(msg) {
+  if (net.isHost || !msg || msg.map !== game.currentMap) return;
+  if (net.hostId != null && msg.id != null && +msg.id !== +net.hostId) return;
+  if (!player || player.hp <= 0 || player._god || (player.invulnerable | 0) > 0) return;
+  const cx = +msg.x, radius = Math.max(1, +msg.r || 180);
+  if (!Number.isFinite(cx)) return;
+  const _camY = (game.camera && game.camera.y) || 0;
+  const hbox = { x: cx - radius, y: _camY, w: radius * 2, h: (typeof H === 'number' ? H : 560) };
+  if (typeof aabb === 'function' && !aabb(hbox, player)) return;
+  const _inner = Math.min(120, radius * 0.7);
+  const dx = Math.abs((player.x + player.w / 2) - cx);
+  const falloff = dx < _inner ? 1 : 1 - Math.min(1, (dx - _inner) / Math.max(1, radius - _inner)) * 0.5;
+  let dmg = Math.max(1, Math.floor((+msg.d || 30) * falloff));
+  const _def = (typeof getDef === 'function') ? getDef() : 0;
+  dmg = Math.max(1, dmg - Math.floor(_def * 0.4));
+  if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
+  if (player.cls === 'warrior' && typeof _warriorDr === 'function') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));
+  if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
+  player.hp -= (typeof _diffDmg === 'function') ? _diffDmg(dmg) : dmg;
+  player.lastHitTime = game.time;
+  player.invulnerable = 600;
+  player._lastDamageSource = msg.sl || 'a meteor strike';
+  if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: '-' + dmg, life: 40, color: msg.c || '#ffaa33', big: true });
+}
 // NON-HOST: apply the host's authoritative monster list (reconcile by uid).
 function _coopApplyMonsters(msg) {
   if (net.isHost || !msg) return;
@@ -32517,6 +32601,8 @@ function _mpHandle(msg) {
   switch (msg.t) {
     case 'mon':  _coopApplyMonsters(msg); return;   // v0.27.0 host monster state (non-host mirrors)
     case 'proj': _coopApplyProjectiles(msg); return; // v0.27.0 host enemy projectiles (non-host takes ranged damage)
+    case 'haz':  _coopApplyHazards(msg); return;     // v0.27.0 host enemy hazard telegraphs (visual)
+    case 'hazhit': _coopApplyHazHit(msg); return;    // v0.27.0 host hazard detonation -> follower takes the strike
     case 'dmg':  if (net.isHost) _coopHostApplyDamage(msg.u, +msg.d || 0, !!msg.c, msg.k); return;   // remote damage -> host applies
     case 'kill': _coopApplyKill(msg); return;       // host kill -> peers award XP/coins
     case 'welcome':
@@ -61256,10 +61342,17 @@ function updateProjectiles(dt) {
       const _camY = (game.camera && game.camera.y) || 0;
       const hbox = { x: _cx - radius, y: _camY, w: radius * 2, h: H };
       if (isEnemyOwned) {
+        // v0.27.0 co-op — when I'm the HOST, broadcast this meteor's detonation zone
+        // so followers apply it to THEIR player (reliable event vs. reproducing the
+        // per-frame detonation). A _coopMirror hazard on a follower is a VISUAL-only
+        // telegraph, so it skips local damage here (the hit arrives via 'hazhit').
+        if (net.isHost && typeof _coopActive === 'function' && _coopActive() && net.ws) {
+          try { net.ws.send(JSON.stringify({ t: 'hazhit', map: game.currentMap, x: Math.round(_cx), r: Math.round(radius), d: Math.round(h.damage || 30), c: h.color || '#ffaa33', sl: h._sourceLabel || '' })); } catch (e) {}
+        }
         // Player-targeted: standard pattern from the projectile-hit
         // pipeline (respects player.invulnerable / blockTimer / DEF /
         // godmode). Skipped if player is dead or already iframe-immune.
-        if (player && player.hp > 0 && (player.invulnerable | 0) <= 0 && aabb(hbox, player)) {
+        if (!h._coopMirror && player && player.hp > 0 && (player.invulnerable | 0) <= 0 && aabb(hbox, player)) {
           const dx = Math.abs((player.x + player.w/2) - _cx);
           const falloff = dx < _inner ? 1 : 1 - Math.min(1, (dx - _inner) / Math.max(1, radius - _inner)) * 0.5;   // v0.26.1031 — plateau scales to the authored radius
           let dmg = Math.max(1, Math.floor((h.damage || 30) * falloff));
@@ -95725,6 +95818,7 @@ function loop(time) {
     if (typeof _mpTick === 'function') _mpTick();  // multiplayer presence tick
     if (typeof _coopTickMonsters === 'function') _coopTickMonsters();  // v0.27.0 — host broadcasts monster state
     if (typeof _coopTickProjectiles === 'function') _coopTickProjectiles();  // v0.27.0 — host broadcasts enemy projectiles
+    if (typeof _coopTickHazards === 'function') _coopTickHazards();  // v0.27.0 — host broadcasts enemy hazard telegraphs
   } else {
     // v0.26.399 — light update path. Previously gated by `player.hp > 0`, so
     // when the player was DEAD neither branch ran and death-explosion

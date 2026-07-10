@@ -45,6 +45,9 @@ is byte-identical to before the pivot. Do not add a co-op hook that can run whil
 | `mon` | host→all | `{map, list:[{u,x,y,vx,vy,f,h,m,t,b}]}` | `_coopApplyMonsters` |
 | `dmg` | non-host→host | `{u,d,c,k}` | `_coopHostApplyDamage` (host only) |
 | `kill` | host→all | `{u,e,c,x,y,map}` | `_coopApplyKill` |
+| `proj` | host→all | `{map, list:[enemy projectiles]}` | `_coopApplyProjectiles` |
+| `haz` | host→all | `{map, list:[telegraphed hazards]}` | `_coopApplyHazards` |
+| `hazhit` | host→all | `{map, x, r, d, c, sl}` | `_coopApplyHazHit` |
 
 All gated by same-map checks; ids are relay-assigned and echoed to everyone except
 the sender.
@@ -52,7 +55,7 @@ the sender.
 ## Certification status (automated 2-client live tests)
 
 The co-op layer is exercised by real 2-browser Playwright tests against the relay
-(`scripts/coop_*_test.mjs`). Current status — **34/34 passing**:
+(`scripts/coop_*_test.mjs`). Current status — **48/48 passing**:
 
 - `coop_2client_test.mjs` (17/17): host election, full monster mirroring (matching
   uids, zero duplicates), shared HP (non-host damage reaches host + syncs back),
@@ -63,6 +66,12 @@ The co-op layer is exercised by real 2-browser Playwright tests against the rela
 - `coop_hardening_test.mjs` (7/7): forwarded damage is DEF-reduced host-side
   (10000 raw → 3333 vs DEF 600), host rejects damage in an invuln window, follower
   takes contact damage (no longer invincible).
+- `coop_projectile_test.mjs` (8/8): host enemy projectiles mirror to the follower
+  (damage + size preserved), the follower's own `updateProjectiles` applies RANGED
+  damage, mirror removed when the host clears it, host injects no self-mirrors.
+- `coop_hazard_test.mjs` (6/6): host meteor telegraphs mirror to the follower, the
+  detonation `hazhit` strikes a follower standing in the radius (439 dmg), misses
+  outside it, no page errors.
 
 > The test harness pumps the outbound ticks (`_mpTick`/`_coopTickMonsters`) via
 > `setInterval` because headless Chromium throttles `requestAnimationFrame`; all
@@ -88,11 +97,13 @@ minor polish:
    (monster-fired) projectiles; followers inject them into their own `game.projectiles`
    and the existing `updateProjectiles` collides them with the local player, so
    followers take ranged damage and co-op boss fights are no longer facetankable.
-   Live-certified 2-client (`scripts/coop_projectile_test.mjs`, 8/8). *Not yet synced:*
-   ground **hazards** (meteor telegraphs, floor pillars) are a separate system from
-   projectiles — most bosses primarily use projectiles, but a few telegraph-heavy
-   bosses (zodiac meteors) still under-threaten guests; sync `game.hazards` the same
-   way if a live boss run shows it.
+   Live-certified 2-client (`scripts/coop_projectile_test.mjs`, 8/8).
+   **Ground HAZARDS — DONE (hazard sync shipped).** The host now also broadcasts
+   telegraphed ground hazards (meteor reticles etc.) as visual `_coopMirror` hazards
+   (`{t:'haz'}`) and, on detonation, a strike event (`{t:'hazhit'}`) that
+   `_coopApplyHazHit` applies to the follower's player if they stand in the radius.
+   Telegraph-heavy bosses (zodiac meteors) now threaten guests too. Live-certified
+   2-client (`scripts/coop_hazard_test.mjs`, 6/6).
 2. **XP is approximate (fair, not identical).** Peers scale the host's base kill exp
    by their own xpBoost / early-level / event / xpCurveMul / PQ-damper; combo and
    prestige stay host-side (not networked).

@@ -149,7 +149,7 @@ export class MojiRoom {
         if (text) this.broadcast(conn.roomId, { t: 'chat', id: conn.id, name: me.st.name || '?', text }, conn.id);
       } else if (msg.t === 'emote') {
         this.broadcast(conn.roomId, { t: 'emote', id: conn.id, kind: String(msg.kind || '').replace(CTRL, '').slice(0, 24) }, conn.id);
-      } else if (msg.t === 'mon' || msg.t === 'dmg' || msg.t === 'kill' || msg.t === 'proj') {
+      } else if (msg.t === 'mon' || msg.t === 'dmg' || msg.t === 'kill' || msg.t === 'proj' || msg.t === 'haz' || msg.t === 'hazhit') {
         // v0.27.0 — casual co-op host-authoritative monster sync. Forward verbatim
         // to the room; the relay never inspects game state. Bounded by the inbound
         // frame cap + per-connection rate limit already enforced above.
