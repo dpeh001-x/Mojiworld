@@ -8672,7 +8672,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.28.10';
+const GAME_VERSION = 'v0.28.11';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -60041,6 +60041,51 @@ function _applyInnateLevelupRng() {
   return total;
 }
 
+// v0.28.9 — KILL-COUNT-ANCHORED LEVELING CURVE (per user request).
+// expToNext at level L is set so that grinding LEVEL-ADJACENT monsters (±2
+// levels, at current live rates including the ×10 opening event) takes about:
+//   Lv  5 →    50 kills
+//   Lv 10 →   250 kills
+//   Lv 20 → 1,000 kills
+//   Lv 50 → 5,000 kills
+//   Lv 70 → 20,000 kills
+// Each anchor's EXP cost = targetKills × the level-adjacent average per-kill
+// EXP at that level (snapshotted from the live mob tables via
+// scripts/exp_breakdown). Between anchors the cost is log-linearly
+// interpolated (smooth, strictly increasing); Lv 1-4 ease in with a power
+// ramp into the Lv-5 anchor (fast onboarding); above Lv 70 the last segment's
+// per-level slope continues.
+// CAVEAT: anchors assume the ×10 event (LX_EVENT_EXP_MULT) is live — that's
+// what players see right now. When the event reverts to ×1, per-kill EXP drops
+// ×10 so kill counts rise ×10; divide _LX_LEVEL_COST_ANCHORS by 10 then. If mob
+// EXP is retuned, re-derive with scripts/exp_breakdown and update the anchors.
+const _LX_LEVEL_COST_ANCHORS = [
+  [5,          65800],
+  [10,        252500],
+  [20,      13239000],
+  [50,     293285000],
+  [70,    5764500000],
+];
+function _lxLevelCost(L) {
+  const A = _LX_LEVEL_COST_ANCHORS;
+  const lo = A[0], hi = A[A.length - 1];
+  if (L <= lo[0]) {
+    // Levels 1-4: smooth ease-in toward the Lv-5 anchor (fast early game).
+    return Math.max(30, Math.floor(lo[1] * Math.pow(L / lo[0], 3.5)));
+  }
+  for (let i = 0; i < A.length - 1; i++) {
+    const a = A[i], b = A[i + 1];
+    if (L <= b[0]) {
+      const t = (L - a[0]) / (b[0] - a[0]);
+      return Math.floor(a[1] * Math.pow(b[1] / a[1], t));   // log-linear interpolation
+    }
+  }
+  // Above the top anchor: continue the last segment's per-level growth factor.
+  const a = A[A.length - 2], b = hi;
+  const perLvl = Math.pow(b[1] / a[1], 1 / (b[0] - a[0]));
+  return Math.floor(b[1] * Math.pow(perLvl, L - b[0]));
+}
+
 function _maybeLevelUp() {
   if (!player.cls) return;
   // v0.26.x audit FIX — enforce the Lv 200 cap at the ENTRY point, not only in
@@ -60131,12 +60176,12 @@ function _maybeLevelUp() {
   // boost typically hit ~20-28 h — anchored to the user's "about 24h"
   // ask. Cumulative to Lv 100: ~702 M (down from 487 B under v0.26.141
   // — 700× lighter while still meaningfully heavy past Lv 50).
-  const _polyBase = 200 * Math.pow(_lvl, 2.5);
-  // v0.26.177 — Apply a 0.15× discount on cost for next level when
-  // next level ≤ 5 (transitions 1→2, 2→3, 3→4, 4→5). Kept identical
-  // through the v0.26.329 rebalance.
-  const _earlyDiscount = _lvl <= 2 ? 0.15 : _lvl <= 4 ? 0.30 : _lvl <= 7 ? 0.60 : 1.0; // v0.26.x — graduated ramp, no Lv5 cliff
-  player.expToNext = Math.floor(_polyBase * _earlyDiscount);
+  // v0.28.9 — KILL-COUNT-ANCHORED CURVE (per user). Replaces the 200×L^2.5
+  // polynomial + endgame ramp. Cost to level is tuned so a player killing
+  // LEVEL-ADJACENT monsters (±2 lvl) needs approximately:
+  //   Lv 5 → 50 kills · Lv 10 → 250 · Lv 20 → 1,000 · Lv 50 → 5,000 · Lv 70 → 20,000
+  // See _lxLevelCost (defined just below the loop) for the interpolation.
+  player.expToNext = _lxLevelCost(_lvl);
   // v0.25.773 — REMOVED the "no banking" clamp that discarded overflow EXP.
   // Previously a single quest reward of 50k EXP on a Lv 3 player only granted
   // ONE level (Lv 4), with the remaining ~49.8k EXP thrown away. Overflow
