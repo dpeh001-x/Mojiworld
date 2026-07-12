@@ -1,5 +1,12 @@
 # cinematicremakehiggsfield — Mojiworld Cinematic Remake Brief (Higgsfield)
 
+> **GENERATION LOG (2026-07-12):** All 24 shots below (7 core scenes) were
+> generated on the linked Higgsfield account — Seedance 2.0, 16:9, 8 s each;
+> first three at 1080p, the rest at 720p per "be economical". Two prompts
+> tripped a false-positive NSFW filter (credits auto-refunded) and were
+> covered by clean re-runs. Clips are in the account's Video history
+> awaiting download + QC → `steam/higgsfield/cinematics/` per the checklist.
+
 Production spec for regenerating the game's story-beat cinematics as short video
 clips with Higgsfield. Run each shot prompt with your linked Higgsfield account;
 the in-game overlay supplies the stanza text, so **generate clean plates — no
