@@ -32651,7 +32651,12 @@ function _coopTryDowned() {
   if (player._downed) return true;   // already down — never double-enter
   if (player._noDownUntil && performance.now() < player._noDownUntil) return false;   // just bled out: die for real
   if (game.expedition && game.expedition.active) return false;   // expedition keeps its own death rules
-  if (!_coopPeerAliveOnMyMap()) return false;
+  // v0.27.10 (per user) — the downed beat now plays in SOLO too: 30s on the
+  // ground with a "Respawn now" button to fast-forward to the void respawn.
+  // In co-op a live partner can still channel the revive; solo (or partner-less)
+  // downs can only skip. The death itself (and its penalties) is unchanged —
+  // just delayed by the window, or skipped instantly via the button.
+  player._downRevivable = _coopPeerAliveOnMyMap();
   player._downed = true;
   player._downedUntil = performance.now() + COOP_DOWN_MS;
   player.hp = 1;                     // keeps every death gate quiet while down
@@ -32659,10 +32664,15 @@ function _coopTryDowned() {
   player.vx = 0; player.hitStun = 0;
   // clear DoT/CC so the window is the timer, not a poison tick
   player.burnTimer = 0; player.burnDmg = 0; player._burnTickAcc = 0; player._poisonTimer = 0; player._poisonDmg = 0; player._poisonTickAcc = 0; player._electrocuteTimer = 0; player._electrocuteDmg = 0; player._electrocuteTickAcc = 0; player.frozenTimer = 0; player.stunTimer = 0; player.freezeTimer = 0;
-  try { net.ws.send(JSON.stringify({ t: 'down', map: game.currentMap, x: Math.round(player.x), y: Math.round(player.y) })); } catch (e) {}
-  if (typeof showToast === 'function') showToast('⛑ You are DOWN — a partner can revive you!', 'danger');
+  if (net && net.connected && net.ws) { try { net.ws.send(JSON.stringify({ t: 'down', map: game.currentMap, x: Math.round(player.x), y: Math.round(player.y) })); } catch (e) {} }
+  if (typeof showToast === 'function') showToast(player._downRevivable ? '⛑ You are DOWN — a partner can revive you!' : '⛑ You are DOWN!', 'danger');
   if (typeof flash === 'function') { try { flash(0.4); } catch (e) {} }
   return true;
+}
+// The banner's "Respawn now" button — fast-forward the window to the real death.
+function _coopDownedGiveUp() {
+  if (!player || !player._downed) return;
+  player._downedUntil = 0;   // next _coopDownedTick frame runs the bleed-out path
 }
 // Per-frame while down (early gate in updatePlayer): frozen in place, unhittable,
 // counting down. Bleed-out ends in the real death flow.
@@ -32676,12 +32686,15 @@ function _coopDownedTick(dt) {
     player._downed = false;
     player._noDownUntil = performance.now() + 4000;
     _coopDownedBanner(null);
-    try { net.ws.send(JSON.stringify({ t: 'up', map: game.currentMap, ok: 0 })); } catch (e) {}
+    if (net && net.connected && net.ws) { try { net.ws.send(JSON.stringify({ t: 'up', map: game.currentMap, ok: 0 })); } catch (e) {} }
     player.invulnerable = 0;
     player.hp = 0;
     if (typeof triggerDeath === 'function' && !game.dying) { try { triggerDeath(); } catch (e) {} }
   }
 }
+// v0.27.10 — the banner is built ONCE (so the Respawn button keeps its handler)
+// and only the countdown span updates per frame. Solo and co-op variants share
+// the skeleton; the subtitle differs by whether a partner can actually revive.
 function _coopDownedBanner(secs) {
   let b = document.getElementById('coop-downed-banner');
   if (secs == null) { if (b) b.remove(); return; }
@@ -32689,13 +32702,27 @@ function _coopDownedBanner(secs) {
     b = document.createElement('div');
     b.id = 'coop-downed-banner';
     b.style.cssText = 'position:fixed; top:14%; left:50%; transform:translateX(-50%); z-index:520;'
-      + 'padding:10px 22px; border-radius:12px; background:rgba(40,6,10,0.88); border:1px solid rgba(255,90,90,0.6);'
+      + 'padding:10px 22px 12px; border-radius:12px; background:rgba(40,6,10,0.88); border:1px solid rgba(255,90,90,0.6);'
       + 'font:800 15px/1.5 Inter,system-ui,sans-serif; color:#ffd6d6; text-align:center; letter-spacing:0.5px;'
       + 'box-shadow:0 10px 40px rgba(0,0,0,0.6), 0 0 24px rgba(255,60,60,0.25); pointer-events:none;';
+    const revivable = !!player._downRevivable;
+    b.innerHTML = '⛑ <b>DOWNED</b> · <span id="coop-downed-secs" style="color:#fff;">' + secs + 's</span>'
+      + '<div style="font-size:11px; font-weight:600; color:rgba(255,214,214,0.7); margin-top:2px;">'
+      + (revivable ? 'a partner can revive you — they must stand beside you for 3s' : 'no one can reach you out here…')
+      + '</div>';
+    const btn = document.createElement('button');
+    btn.id = 'coop-downed-skip';
+    btn.type = 'button';
+    btn.textContent = revivable ? 'Give up — respawn now ▸' : '▸ Respawn now';
+    btn.style.cssText = 'pointer-events:auto; margin-top:8px; padding:6px 16px; border-radius:8px; cursor:pointer;'
+      + 'background:linear-gradient(180deg,#5a2030,#3a1420); border:1px solid rgba(255,120,120,0.55);'
+      + 'color:#ffdada; font:700 12px Inter,system-ui,sans-serif; letter-spacing:1px;';
+    btn.onclick = () => { if (typeof _coopDownedGiveUp === 'function') _coopDownedGiveUp(); };
+    b.appendChild(btn);
     document.body.appendChild(b);
   }
-  b.innerHTML = '⛑ <b>DOWNED</b> — a partner can revive you · <span style="color:#fff;">' + secs + 's</span>'
-    + '<div style="font-size:11px; font-weight:600; color:rgba(255,214,214,0.7); margin-top:2px;">they must stand beside you for 3s</div>';
+  const s = document.getElementById('coop-downed-secs');
+  if (s && s.textContent !== secs + 's') s.textContent = secs + 's';
 }
 // Peer notifications (down/up are self-reports keyed by relay-stamped sender id).
 function _coopApplyDown(msg) {

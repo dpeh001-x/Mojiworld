@@ -41,6 +41,7 @@ try {
     return { saved, downed: !!player._downed, hp: player.hp, dying: !!game.dying };
   });
   ok('death with a live partner -> DOWNED, not dead', downed.saved === true && downed.downed === true && downed.hp === 1 && !downed.dying, downed);
+  await sleep(400);   // the banner is created by the first downed tick (80ms pump)
   ok('downed banner shown', await ev(B, () => !!document.getElementById('coop-downed-banner')));
 
   // A learns B is down.
