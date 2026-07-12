@@ -57,13 +57,20 @@ const MONSTERS = [
   'zodiac_aries','zodiac_taurus','zodiac_gemini','zodiac_cancer','zodiac_leo',
   'zodiac_virgo','zodiac_libra','zodiac_scorpio','zodiac_sagittarius',
   'zodiac_capricorn','zodiac_aquarius','zodiac_pisces',
+  // v0.26.1019 — mapping-audit gap-fill: game-roster types that were missing
+  // from this registry (all already have custom clips on disk from earlier
+  // rounds; listed here so the review page + future orders cover them).
+  'thornmaw','elderbark','pinechad','meloncholy','blightElder','ossuaryTyrant',
 ];
 
 // Bosses that skip the generic die clip. goblinScout/goblinMauler are normal
 // mobs despite living under the "named" header, so they are NOT bosses here.
+// v0.26.1019 — mayo removed per review order: it's a regular tidepool mob in
+// the game registry (spawns x6, no boss flag) and was mislabeled here, which
+// gave it the weighty boss prompt-tone and a bogus BOSS tag on the review page.
 const BOSSES = new Set([
   'king','mushmom','aetherion','gravitos','octobaby','koopaKing','mirrorSelf',
-  'fatLizard','fatDragon','sundered_smith','mayo','brinekraken',
+  'fatLizard','fatDragon','sundered_smith','brinekraken',
   'deranged_kuro','future_lyra','potato_uncle','willeo',
   'young_bloodthirsty_vermillion','vigil_vermillion','young_confused_barnaby',
   'towerArbiter','towerSovereign',
