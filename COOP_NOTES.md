@@ -50,6 +50,15 @@ is byte-identical to before the pivot. Do not add a co-op hook that can run whil
 | `hazhit` | host→all | `{map, x, r, d, c, sl}` | `_coopApplyHazHit` |
 | `bosshit` | host→all | `{map, x, y, r, d, fr, sl, c}` | `_coopApplyBossHit` |
 | `drop` | host→all | `{map, k, u, x, y, it/rr, nm, l}` | `_coopApplyDrop` |
+| `down` | peer→all | `{map, x, y}` (self-report) | `_coopApplyDown` |
+| `up` | peer→all | `{map, ok}` (revived / bled out) | `_coopApplyUp` |
+| `revive` | peer→all | `{map}` (channel complete beside a body) | `_coopApplyRevive` |
+| `ping` | peer→all | `{map, x, y}` | `_coopAddPing` |
+
+v0.27.9 — the AAA co-op layer: DOWNED/REVIVE (die with a live same-map partner →
+30s downed window, partner stands within 90px for 3s → revive at 50% HP; bleed-out
+→ normal death; runs as the LAST link of `_tryCheatDeathRevive`, so solo death is
+byte-identical), T-key PING markers, and party-frame HUD plates for same-map peers.
 
 All gated by same-map checks; ids are relay-assigned and echoed to everyone except
 the sender.
