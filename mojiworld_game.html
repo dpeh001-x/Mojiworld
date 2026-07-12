@@ -31928,6 +31928,165 @@ function clearSave() {
 }
 
 // =========================================================================
+// v0.27.8 — SAVE BACKUP SLOTS. Steam-style local "save states": snapshot
+// the live SAVE_KEY blob into up to 5 timestamped localStorage slots,
+// restore any of them (reload, same pattern as importSave), download a
+// slot as a .json file, or delete it. Reachable pre-game from the main
+// menu and in-game from Settings → Hard Save → 🗂 Slots.
+// =========================================================================
+const BACKUP_KEY = 'lx_save_backups_v1';
+const BACKUP_MAX = 5;
+function _lxGetBackups() {
+  try { const a = JSON.parse(localStorage.getItem(BACKUP_KEY)); return Array.isArray(a) ? a : []; }
+  catch (e) { return []; }
+}
+function _lxStoreBackups(arr) {
+  // Quota guard: the save blob is 10-40 KB, so 5 slots is ~200 KB worst
+  // case — but painted-layer data URLs can inflate it. On quota failure
+  // drop the OLDEST slot and retry until it fits or nothing is left.
+  for (let n = arr.length; n >= 0; n--) {
+    try { localStorage.setItem(BACKUP_KEY, JSON.stringify(arr.slice(0, n))); return n === arr.length; }
+    catch (e) { /* try one slot fewer */ }
+  }
+  return false;
+}
+function _lxSaveMetaFrom(data) {
+  // Pull display metadata out of a raw save-blob string. Never throws.
+  try {
+    const s = JSON.parse(data);
+    const p = (s && s.player) || {};
+    const mapId = s && s.game && s.game.currentMap;
+    const mapName = (typeof MAPS !== 'undefined' && MAPS[mapId] && MAPS[mapId].name) ? MAPS[mapId].name : (mapId || '');
+    return { name: (p.look && p.look.name) || '', level: p.level || 0, cls: p.cls || '', map: mapName, t: (s && s.t) || 0 };
+  } catch (e) { return { name: '', level: 0, cls: '', map: '', t: 0 }; }
+}
+function _lxCreateBackup(label) {
+  try {
+    // Flush the debounced save first so the snapshot is NOW, not ~1.5s stale.
+    if (typeof _flushSaveStateNow === 'function' && typeof game !== 'undefined' && !game._resetting) {
+      try { _flushSaveStateNow(); } catch (_) {}
+    }
+    const data = localStorage.getItem(SAVE_KEY);
+    if (!data) { if (typeof showToast === 'function') showToast('No save to back up yet.', 'common'); return false; }
+    const meta = _lxSaveMetaFrom(data);
+    const arr = _lxGetBackups();
+    arr.unshift({
+      id: 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      ts: Date.now(), label: label || '',
+      name: meta.name, level: meta.level, cls: meta.cls, map: meta.map, data
+    });
+    while (arr.length > BACKUP_MAX) arr.pop();
+    const full = _lxStoreBackups(arr);
+    if (typeof showToast === 'function') showToast(full ? '🗂 Backup saved.' : '🗂 Backup saved (older slots pruned — storage full).', 'rare');
+    try { _renderBackupSlots(); } catch (e) {}
+    try { _lxMenuBackupCount(); } catch (e) {}
+    return true;
+  } catch (e) { if (typeof showToast === 'function') showToast('Backup failed.', 'danger'); return false; }
+}
+function _lxRestoreBackup(id) {
+  const b = _lxGetBackups().find(x => x && x.id === id);
+  if (!b || !b.data) return;
+  try {
+    localStorage.setItem(SAVE_KEY, b.data);
+    // Block the beforeunload save-flush from clobbering the restored blob
+    // with the still-live session state (same guard as importSave).
+    try { if (typeof game !== 'undefined') { game._resetting = true; if (game._saveTimer) { clearTimeout(game._saveTimer); game._saveTimer = null; } } } catch (e) {}
+    if (typeof showToast === 'function') showToast('⟳ Backup restored — reloading…', 'legendary');
+    setTimeout(() => location.reload(), 600);
+  } catch (e) { if (typeof showToast === 'function') showToast('Restore failed.', 'danger'); }
+}
+function _lxDeleteBackup(id) {
+  const arr = _lxGetBackups().filter(x => x && x.id !== id);
+  _lxStoreBackups(arr);
+  try { _renderBackupSlots(); } catch (e) {}
+  try { _lxMenuBackupCount(); } catch (e) {}
+}
+function _lxDownloadBackup(id) {
+  const b = _lxGetBackups().find(x => x && x.id === id);
+  if (!b || !b.data) return;
+  try {
+    const payload = JSON.stringify({ _lxSave: 1, key: SAVE_KEY, savedAt: b.ts, data: b.data });
+    const blob = new Blob([payload], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'mojiworld-backup-lv' + (b.level || 0) + '.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    if (typeof showToast === 'function') showToast('⬇ Backup exported.', 'rare');
+  } catch (e) { if (typeof showToast === 'function') showToast('Export failed.', 'danger'); }
+}
+function _lxTimeAgo(ts) {
+  const d = Date.now() - ts;
+  if (!ts || d < 0) return '';
+  const m = Math.floor(d / 60000);
+  if (m < 1)    return 'just now';
+  if (m < 60)   return m + 'm ago';
+  const h = Math.floor(m / 60);
+  if (h < 24)   return h + 'h ago';
+  return Math.floor(h / 24) + 'd ago';
+}
+// Destructive slot actions use a TWO-STEP confirm baked into the button
+// itself ("Sure?" for 2.5s) — no dependency on uiConfirm, whose modal
+// would stack UNDER the pre-game loading overlay (z 9999 vs 10002 here).
+function _lxArmOrRun(btn, fn) {
+  if (btn.classList.contains('armed')) { fn(); return; }
+  const orig = btn.textContent;
+  btn.classList.add('armed'); btn.textContent = 'Sure?';
+  setTimeout(() => { try { btn.classList.remove('armed'); btn.textContent = orig; } catch (e) {} }, 2500);
+}
+function _renderBackupSlots() {
+  const host = document.getElementById('backup-slots');
+  if (!host) return;
+  const arr = _lxGetBackups();
+  host.textContent = '';
+  if (!arr.length) {
+    const e = document.createElement('div');
+    e.className = 'bk-empty';
+    e.textContent = 'No backups yet — hit "＋ Backup current save" to snapshot your progress.';
+    host.appendChild(e);
+    return;
+  }
+  const CLS = { warrior: 'Warrior', mage: 'Mage', rogue: 'Rogue', archer: 'Archer' };
+  for (const b of arr) {
+    const row = document.createElement('div'); row.className = 'bk-row';
+    const meta = document.createElement('div'); meta.className = 'bk-meta';
+    const title = document.createElement('div'); title.className = 'bk-title';
+    title.textContent = (b.name ? b.name + ' · ' : '') + 'Lv.' + (b.level || '?') + (b.cls ? ' ' + (CLS[b.cls] || b.cls) : '');
+    const sub = document.createElement('div'); sub.className = 'bk-sub';
+    const when = b.ts ? new Date(b.ts).toLocaleString() : '';
+    sub.textContent = (b.map ? b.map + ' — ' : '') + when + (b.ts ? ' (' + _lxTimeAgo(b.ts) + ')' : '') + (b.label ? ' · ' + b.label : '');
+    meta.appendChild(title); meta.appendChild(sub);
+    const mk = (cls, txt, tip, fn, arm) => {
+      const bt = document.createElement('button');
+      bt.type = 'button'; bt.className = 'bk-btn ' + cls; bt.textContent = txt; bt.title = tip;
+      bt.onclick = arm ? (() => _lxArmOrRun(bt, fn)) : fn;
+      return bt;
+    };
+    row.appendChild(meta);
+    row.appendChild(mk('bk-restore', '⟳ Restore', 'Overwrite the current save with this snapshot and reload. Click twice to confirm.', () => _lxRestoreBackup(b.id), true));
+    row.appendChild(mk('bk-dl', '⬇', 'Download this snapshot as a .json file.', () => _lxDownloadBackup(b.id), false));
+    row.appendChild(mk('bk-del', '✕', 'Delete this snapshot. Click twice to confirm.', () => _lxDeleteBackup(b.id), true));
+    host.appendChild(row);
+  }
+}
+function openBackupModal() {
+  _renderBackupSlots();
+  const nowBtn = document.getElementById('backup-now-btn');
+  if (nowBtn) nowBtn.style.display = (typeof hasSave === 'function' && hasSave()) ? '' : 'none';
+  const bg = document.getElementById('backup-modal-bg');
+  if (bg) bg.classList.add('on');
+  // Pause only when actually in-game (pre-game the world isn't running yet).
+  try { if (typeof game !== 'undefined' && typeof player !== 'undefined' && player && player.cls) game.paused = true; } catch (e) {}
+}
+function closeBackupModal() {
+  const bg = document.getElementById('backup-modal-bg');
+  if (bg) bg.classList.remove('on');
+  try {
+    if (typeof game !== 'undefined' && typeof _anyOtherModalOpen === 'function' && !_anyOtherModalOpen()) game.paused = false;
+  } catch (e) {}
+}
+
+// =========================================================================
 // AUDIO — Web Audio synthesized SFX (hit / crit / levelup / death)
 // Must init on a user gesture to satisfy autoplay policy.
 // =========================================================================
