@@ -113,3 +113,95 @@ a follow-up once `steamworks.js` is wired.
 
 See **COOP_NOTES.md** for the netcode design, known limitations, and the areas
 that most need playtesting before you flip the store page live.
+
+---
+
+## 7. Steamworks SDK integration (v0.28.0) — cloud saves, controller, achievements
+
+All native Steam code lives in the Electron main process (`steam/`) and is
+**fully defensive**: if Steam isn't running or the native module is missing, the
+bridge returns a stub (`available:false`) and the game runs exactly as on the web.
+The renderer talks to it only through `window.SteamAPI` (exposed by `preload.js`),
+which is **absent entirely on the web build** — so every Steam feature in
+`mojiworld_game.html` is a guaranteed no-op at play.moji-studios.com.
+
+### Files
+- `steam/steam_integration.js` — wraps [`steamworks.js`](https://github.com/ceifa/steamworks.js); `init()` → `{ available, cloud, achievement, input }` (or a safe stub).
+- `steam/main.js` — inits the bridge, registers IPC (`steam:cloud-read/write`, `steam:ach-unlock`, `steam:input-snapshot`), passes `--moji-steam=1` to preload.
+- `steam/preload.js` — exposes `window.SteamAPI` (cloud/achievement async over IPC; input snapshot sync).
+- `steam/steam_appid.txt` — dev App ID (**480 = Spacewar placeholder; set your real App ID and DELETE this file before shipping**).
+- `steam/controller_config/game_actions_480.vdf` — Steam Input Game Actions File (rename to your App ID).
+
+### Setup
+1. `cd steam && npm install` — pulls `steamworks.js` (prebuilt native binaries).
+2. Set your real App ID: `echo <APPID> > steam/steam_appid.txt` (dev) and rename the VDF to `game_actions_<APPID>.vdf`. In production the App ID comes from Steam; `steam_appid.txt` is dev-only.
+3. Build: `cd steam && npm run dist:win` (etc.). `package.json` bundles `steamworks.js` (asar-unpacked) + the controller config.
+
+### Cloud saves (ISteamRemoteStorage)
+The game mirrors its localStorage save to Steam Cloud on every flush and, on boot,
+adopts the cloud save when it's newer / more advanced (newest-wins, same logic as
+the account cloud). In Steamworks → **Cloud**, enable Steam Cloud and either use
+Auto-Cloud (pattern `levelx_save_v1`) or the API quota — the game writes one file
+keyed `levelx_save_v1`. Certified 2-client-independent: mirror on push, adopt a
+newer cloud save, keep + push a more-advanced local save.
+
+### Controller (Steam Input + Gamepad API)
+The game polls the browser Gamepad API and maps a standard pad → synthetic key
+events, reusing the full keyboard input pipeline (rebinds respected). **Steam
+presents a Steam Controller as a virtual gamepad by default, so this works out of
+the box.** For a custom Steam Input config, the native `ISteamInput` action states
+(from `game_actions_<appid>.vdf`) are ORed in. Default layout: A jump · B dodge ·
+X attack · Y interact · LB/RB/LT/RT + stick-clicks skills · Back character panel ·
+Start pause · D-pad/left-stick move. Enable **Steam Input** for the app and upload
+the Game Actions File under *Edit Steam Input Configuration*.
+
+### Achievements
+The game's existing in-game achievements are mirrored to Steam — **the Steam
+achievement API name must equal the game achievement `id`** below. Create these 38
+in Steamworks → **Achievements** (API Name column = the `id`). Unlocks fire live;
+already-earned achievements sync up on load.
+
+| API Name (id) | Display name | How to earn |
+| --- | --- | --- |
+| `firstBlood` | First Blood | Defeat 1 enemy |
+| `slayer100` | Slayer | Defeat 100 enemies |
+| `exterminator` | Exterminator | Defeat 1000 enemies |
+| `bossHunter` | Boss Hunter | Defeat 3 different bosses |
+| `lv10` | Adept | Reach level 10 |
+| `lv20` | Apprentice | Reach level 20 |
+| `lv50` | Master | Reach level 50 |
+| `legendary` | Legendary Find | Possess a legendary item |
+| `combo50` | Combo Striker | Reach a 50-hit combo |
+| `combo100` | Centurion | Reach a 100-hit combo |
+| `starforged` | Starforged | Enhance an item to ★5 |
+| `ascendant` | Ascendant | Complete your first ascension |
+| `firstCalling` | First Calling | Take your first class advancement |
+| `truePath` | True Path | Reach a Master class |
+| `lv30` | Veteran | Reach level 30 |
+| `lv70` | Champion | Reach level 70 |
+| `lv100` | Ascended | Reach level 100 |
+| `lv150` | Mythic | Reach level 150 |
+| `kill5000` | Annihilator | Defeat 5,000 enemies |
+| `kill10000` | Worldbreaker | Defeat 10,000 enemies |
+| `boss6` | Boss Slayer | Defeat 6 different bosses |
+| `boss12` | Boss Conqueror | Defeat 12 different bosses |
+| `aetherionDown` | Warden Undone | Vanquish Aetherion |
+| `gravitosDown` | The Weight Lifted | Defeat Gravitos at the Singularity |
+| `zodiac1` | Star-Toucher | Defeat your first Zodiac |
+| `zodiacAll` | The Twelve Houses | Defeat all 12 Zodiac signs |
+| `star8` | Master Smith | Enhance an item to ★8 |
+| `star10` | Astral Forge | Enhance an item to ★10 |
+| `coin50k` | Coin Hoarder | Hold 50,000 Mojicoins at once |
+| `coin100k` | Mojibaron | Hold 100,000 Mojicoins at once |
+| `bestiary20` | Field Researcher | Log 20 monster types |
+| `bestiary40` | Naturalist | Log 40 monster types |
+| `bestiary60` | Compendium Keeper | Log 60 monster types |
+| `boonAttuned` | Attuned | Equip a full boon loadout |
+| `boonHunter` | Boon Hunter | Collect 10 boons |
+| `combo200` | Unstoppable | Reach a 200-hit combo |
+| `prestige5` | Reborn | Ascend 5 times |
+| `prestige20` | Apex Ascendant | Reach the prestige cap (20) |
+
+> **Ship checklist additions:** enable Steam Cloud + Steam Input + create the 38
+> achievements in Steamworks; set the real App ID (delete `steam_appid.txt`);
+> `npm install` in `steam/` so `steamworks.js` binaries are bundled.

@@ -31062,6 +31062,159 @@ const GAME_SAVE_FIELDS = [
 // work; saveState() is now a debounced trampoline. Critical save points
 // (visibilitychange, beforeunload, prestige, death) call _flushSaveStateNow
 // directly so they never lose data to the debounce window.
+// =========================================================================
+// v0.28.0 — STEAM INTEGRATION (desktop build only) + GAMEPAD / STEAM INPUT.
+// Two features, both graceful no-ops on the web build (window.SteamAPI absent):
+//   1. STEAM CLOUD SAVES — mirror the localStorage save to Steam Cloud and, on
+//      boot, adopt the cloud save when it's newer/more-advanced (cross-machine
+//      sync). Bridged from the Electron main process (steam/steam_integration.js)
+//      via preload as window.SteamAPI.cloud.{read,write}.
+//   2. CONTROLLER — a Gamepad-API poller maps a standard pad to synthetic key
+//      events, so ALL existing input logic (move/jump/attack/skills/menus) works
+//      unchanged. Steam Input presents a Steam Controller AS a virtual gamepad by
+//      default, so this covers Steam controllers out of the box; when the native
+//      Steam Input bridge (window.SteamAPI.input) is present its digital action
+//      states are ORed in too (for custom Steam controller configs).
+// =========================================================================
+function _steamAvailable() { try { return !!(window.SteamAPI && window.SteamAPI.available); } catch (e) { return false; } }
+// --- Steam Cloud -------------------------------------------------------------
+let _lxSteamCloudPushT = 0;
+function _lxSteamCloudPush(json, force) {
+  if (!_steamAvailable() || !window.SteamAPI.cloud || !json) return;
+  const now = Date.now();
+  if (!force && now - _lxSteamCloudPushT < 4000) return;   // throttle (matches _lxCloudPushSave cadence)
+  _lxSteamCloudPushT = now;
+  try { Promise.resolve(window.SteamAPI.cloud.write(SAVE_KEY, json)).catch(() => {}); } catch (e) {}
+}
+// Boot-time sync: adopt the cloud save when it is newer / more advanced than
+// local (mirrors _lxCloudSyncOnLogin's newest-wins logic). Returns 'reloading'
+// when it applied a cloud save (caller lets the natural reload load it).
+async function _lxSteamCloudSync() {
+  if (!_steamAvailable() || !window.SteamAPI.cloud) return;
+  let cloudRaw = null;
+  try { cloudRaw = await window.SteamAPI.cloud.read(SAVE_KEY); } catch (e) { return; }
+  let localRaw = null, localSave = null, cloudSave = null;
+  try { localRaw = localStorage.getItem(SAVE_KEY); localSave = localRaw ? JSON.parse(localRaw) : null; } catch (e) {}
+  try { cloudSave = cloudRaw ? JSON.parse(cloudRaw) : null; } catch (e) { cloudSave = null; }
+  if (!cloudSave) { if (localRaw) _lxSteamCloudPush(localRaw, true); return; }   // first launch on this machine -> migrate local up
+  const localLevel = (localSave && localSave.player && localSave.player.level) || 0;
+  const cloudLevel = (cloudSave && cloudSave.player && cloudSave.player.level) || 0;
+  const localT = (localSave && localSave.t) || 0;
+  const cloudT = (cloudSave && cloudSave.t) || 0;
+  if (localSave && cloudT === localT) return;                                    // identical -> nothing to do
+  if (localLevel <= 1 || cloudLevel > localLevel || cloudT > localT) {           // cloud is fresher / more advanced -> adopt it
+    try { localStorage.setItem(SAVE_KEY, cloudRaw); } catch (e) {}
+    return 'reloading';
+  }
+  if (localRaw) _lxSteamCloudPush(localRaw, true);                               // local is ahead -> push it up
+}
+// --- Steam Achievements ------------------------------------------------------
+// The game's own ACHIEVEMENTS (see checkAchievements) are mirrored to Steam: the
+// Steam achievement API name === the game achievement `id` (configure matching
+// API names in the Steamworks partner site — the full id list is in STEAM.md).
+// Steam de-dupes unlocks; a local Set avoids redundant IPC. No-op without Steam.
+const _lxSteamAchDone = new Set();
+function _lxSteamUnlock(id) {
+  if (!id || _lxSteamAchDone.has(id)) return;
+  _lxSteamAchDone.add(id);
+  if (!_steamAvailable() || !window.SteamAPI.achievement) return;
+  try { Promise.resolve(window.SteamAPI.achievement.unlock(String(id))).catch(() => {}); } catch (e) {}
+}
+// On load, push every achievement the player has ALREADY unlocked up to Steam
+// (covers saves that predate the Steam build / first launch on Steam).
+function _lxSteamSyncAchievements() {
+  if (!_steamAvailable() || !window.SteamAPI.achievement) return;
+  try { if (game && game.achievements) for (const id in game.achievements) if (game.achievements[id]) _lxSteamUnlock(id); } catch (e) {}
+}
+try { window._lxSteamUnlock = _lxSteamUnlock; window._lxSteamSyncAchievements = _lxSteamSyncAchievements; } catch (e) {}
+// --- Controller (Gamepad API + optional native Steam Input) ------------------
+// Xbox/standard button index -> game input. {a:'action'} resolves through the
+// player's live rebinds; {k:'key'} is a literal physical key (skill slots /
+// attack / pause aren't in actionBinds). Left stick + D-pad both drive arrows.
+const _LX_PAD_MAP = {
+  0:  { a: 'jump' },          // A     — jump
+  1:  { a: 'dodge' },         // B     — dodge / roll
+  2:  { k: 'z' },             // X     — attack
+  3:  { a: 'talkNpc' },       // Y     — interact / talk
+  4:  { k: 'x' },             // LB    — skill
+  5:  { k: 's' },             // RB    — skill
+  6:  { k: 'c' },             // LT    — skill
+  7:  { k: 'd' },             // RT    — skill
+  8:  { a: 'attributesU' },   // Back  — character panel (U)
+  9:  { k: 'escape' },        // Start — pause / close
+  10: { k: 'f' },             // LS click — skill
+  11: { k: 'v' },             // RS click — skill
+  12: { a: 'moveUp' },        // D-pad up
+  13: { a: 'moveDown' },      // D-pad down
+  14: { a: 'moveLeft' },      // D-pad left
+  15: { a: 'moveRight' },     // D-pad right
+};
+const _LX_PAD_AXIS = { lxNeg: { a: 'moveLeft' }, lxPos: { a: 'moveRight' }, lyNeg: { a: 'moveUp' }, lyPos: { a: 'moveDown' } };
+const _LX_PAD_DEADZONE = 0.55;
+const _lxPadPrev = {};        // resolved-key -> pressed(bool) last poll, for edge detection
+let _lxPadConnectedToasted = false;
+function _lxPadResolveKey(spec) {
+  if (!spec) return null;
+  if (spec.k) return spec.k;
+  const ab = (typeof player !== 'undefined' && player && player.actionBinds) || (typeof ACTION_KEY_DEFAULT === 'object' ? ACTION_KEY_DEFAULT : null);
+  return (ab && ab[spec.a]) || (typeof ACTION_KEY_DEFAULT === 'object' ? ACTION_KEY_DEFAULT[spec.a] : null) || null;
+}
+function _lxPadDispatch(key, down) {
+  if (!key) return;
+  // A key already held from the keyboard must not be stomped by the pad edge.
+  try {
+    const kc = key.length === 1 ? key.toUpperCase() : (key === ' ' ? 'Space' : key.charAt(0).toUpperCase() + key.slice(1));
+    const ev = new KeyboardEvent(down ? 'keydown' : 'keyup', { key: key === 'escape' ? 'Escape' : (key === ' ' ? ' ' : key), code: kc, bubbles: true, cancelable: true });
+    window.dispatchEvent(ev);
+  } catch (e) {}
+}
+function _lxPadPoll() {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.getGamepads) return;
+    // Don't fight a focused text field (chat / name entry).
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+    const pads = navigator.getGamepads();
+    let pad = null;
+    for (let i = 0; i < pads.length; i++) if (pads[i] && pads[i].connected) { pad = pads[i]; break; }
+    // Native Steam Input digital states (custom Steam controller configs), ORed in.
+    let steamBtns = null;
+    if (_steamAvailable() && window.SteamAPI.input && typeof window.SteamAPI.input.snapshot === 'function') {
+      try { steamBtns = window.SteamAPI.input.snapshot(); } catch (e) { steamBtns = null; }
+    }
+    if (!pad && !steamBtns) return;
+    if (pad && !_lxPadConnectedToasted) {
+      _lxPadConnectedToasted = true;
+      if (typeof showToast === 'function') showToast('🎮 Controller connected', 'success');
+    }
+    // Build the pressed set (resolved physical key -> pressed).
+    const pressed = {};
+    const mark = (spec, isDown) => { const k = _lxPadResolveKey(spec); if (k && isDown) pressed[k] = true; };
+    if (pad) {
+      for (const idx in _LX_PAD_MAP) { const b = pad.buttons[idx]; if (b && (b.pressed || b.value > 0.5)) mark(_LX_PAD_MAP[idx], true); }
+      const ax = pad.axes || [];
+      if (ax[0] < -_LX_PAD_DEADZONE) mark(_LX_PAD_AXIS.lxNeg, true);
+      if (ax[0] > _LX_PAD_DEADZONE) mark(_LX_PAD_AXIS.lxPos, true);
+      if (ax[1] < -_LX_PAD_DEADZONE) mark(_LX_PAD_AXIS.lyNeg, true);
+      if (ax[1] > _LX_PAD_DEADZONE) mark(_LX_PAD_AXIS.lyPos, true);
+    }
+    if (steamBtns && typeof steamBtns === 'object') {
+      // { actionName: bool } from the native bridge — actionName maps 1:1 to _LX_PAD map specs by key/action.
+      for (const idx in _LX_PAD_MAP) { const spec = _LX_PAD_MAP[idx]; const nm = spec.a || spec.k; if (steamBtns[nm]) mark(spec, true); }
+    }
+    // Edge-detect vs last poll and dispatch keydown/keyup for changes only.
+    for (const k in pressed) if (!_lxPadPrev[k]) { _lxPadDispatch(k, true); _lxPadPrev[k] = true; }
+    for (const k in _lxPadPrev) if (_lxPadPrev[k] && !pressed[k]) { _lxPadDispatch(k, false); _lxPadPrev[k] = false; }
+  } catch (e) {}
+}
+let _lxPadStarted = false;
+function _lxStartGamepad() {
+  if (_lxPadStarted) return; _lxPadStarted = true;
+  const loop = () => { _lxPadPoll(); try { requestAnimationFrame(loop); } catch (e) { setTimeout(loop, 16); } };
+  try { requestAnimationFrame(loop); } catch (e) { setInterval(_lxPadPoll, 16); }
+}
+try { window._lxSteamCloudPush = _lxSteamCloudPush; window._lxSteamCloudSync = _lxSteamCloudSync; window._lxStartGamepad = _lxStartGamepad; window._lxPadPoll = _lxPadPoll; } catch (e) {}
+
 function _flushSaveStateNow() {
   // v0.26.x — Prologue: the flash-forward plays at Lv.100 on a fresh save;
   // a flush here would persist the apex state. Hard-gated until restore.
@@ -31089,6 +31242,8 @@ function _flushSaveStateNow() {
     // Server-sided MMO-lite: also push the save to the cloud account (throttled,
     // best-effort, cloud sessions only — no-op for Guest / local / offline).
     try { if (typeof _lxCloudPushSave === 'function') _lxCloudPushSave(_json); } catch (e) {}
+    // v0.28.0 — Steam Cloud mirror (desktop build only; no-op on web/without Steam).
+    try { if (typeof _lxSteamCloudPush === 'function') _lxSteamCloudPush(_json); } catch (e) {}
     game._saveDirty = false;
     game._lastSaveAt = Date.now();
     // v0.25.905 — Track payload size so the next "approaching quota"
@@ -34215,6 +34370,8 @@ function checkAchievements() {
       game.achievements[a.id] = Date.now();
       showToast('🏆 ' + a.name + ' — ' + a.desc, 'legendary');
       flash(0.25); audio.play('levelup');
+      // v0.28.0 — mirror to Steam (desktop build; no-op on web / without Steam).
+      try { if (typeof _lxSteamUnlock === 'function') _lxSteamUnlock(a.id); } catch (e) {}
       unlocked++;
     }
   }
@@ -98464,6 +98621,14 @@ function _bossRushComplete() {
   if (typeof showToast === 'function') showToast('🏆 Boss Rush complete — grade ' + grade + ' in ' + timeStr + '!', 'legendary');
   if (typeof flash === 'function') flash(0.5);
 }
+
+// v0.28.0 — start the controller poller (harmless on web; covers Steam's virtual
+// gamepad) and kick the Steam Cloud sync (desktop-only no-op otherwise). The sync
+// is async: if the cloud save is newer it writes localStorage + reloads so the
+// natural boot load picks it up — mirrors the account-cloud login-sync pattern.
+try { if (typeof _lxStartGamepad === 'function') _lxStartGamepad(); } catch (e) {}
+try { if (typeof _lxSteamCloudSync === 'function') _lxSteamCloudSync().then((r) => { if (r === 'reloading') { try { location.reload(); } catch (e) {} } }, () => {}); } catch (e) {}
+try { if (typeof _lxSteamSyncAchievements === 'function') setTimeout(_lxSteamSyncAchievements, 1500); } catch (e) {}
 
 if (!loadState()) {
   // v0.26.x — Fresh-start now opens on the flash-forward prologue: a

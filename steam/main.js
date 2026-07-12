@@ -12,12 +12,26 @@
 // player's entire character save. We bind a FIXED port + hold a single-instance
 // lock so two copies never fight over it.
 'use strict';
-const { app, BrowserWindow, shell, powerSaveBlocker } = require('electron');
+const { app, BrowserWindow, shell, powerSaveBlocker, ipcMain } = require('electron');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
 const FIXED_PORT = 47821;   // stable loopback port -> stable origin -> saves persist
+
+// v0.28.0 — Steamworks bridge (cloud saves + controller/Steam Input). Fully
+// defensive: init() returns a stub with available=false if Steam isn't running
+// or the native module is missing, so the app launches + plays regardless.
+let steam = require('./steam_integration').STUB;
+try { steam = require('./steam_integration').init(); } catch (e) { console.warn('[steam] bridge load failed:', e && e.message); }
+// Renderer <-> Steam IPC. Cloud read/write are async (invoke/handle); the input
+// snapshot is a fast synchronous read polled each frame by the game.
+ipcMain.handle('steam:cloud-read',  (_e, name) => { try { return steam.cloud.read(name); } catch (e) { return null; } });
+ipcMain.handle('steam:cloud-write', (_e, name, content) => { try { return steam.cloud.write(name, content); } catch (e) { return false; } });
+ipcMain.handle('steam:ach-unlock',  (_e, name) => { try { return steam.achievement.unlock(name); } catch (e) { return false; } });
+ipcMain.on('steam:input-snapshot',  (e) => { try { e.returnValue = steam.input.snapshot(); } catch (err) { e.returnValue = null; } });
+// Pump Steamworks callbacks periodically (cloud/input housekeeping). No-op on the stub.
+if (steam.available) { try { setInterval(() => { try { steam.runCallbacks(); } catch (e) {} }, 200); } catch (e) {} }
 
 // Reduce Chromium's throttling of an unfocused/occluded window so a co-op HOST
 // keeps simulating when the player alt-tabs. A fully MINIMIZED host degrades
@@ -95,7 +109,7 @@ async function createWindow() {
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      additionalArguments: ['--moji-relay=' + RELAY_URL],
+      additionalArguments: ['--moji-relay=' + RELAY_URL, '--moji-steam=' + (steam.available ? '1' : '0')],
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
@@ -119,6 +133,7 @@ if (!app.requestSingleInstanceLock()) {
     if (w) { if (w.isMinimized()) w.restore(); w.focus(); }
   });
   app.whenReady().then(createWindow);
+  app.on('will-quit', () => { try { steam.shutdown(); } catch (e) {} });
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 }
