@@ -27843,6 +27843,10 @@ function openSettingsModal() {
 }
 function closeSettingsModal() {
   document.getElementById('settings-modal-bg').classList.remove('on');
+  // v0.27.8 — the start-page menu hoists the modal above the loading
+  // overlay (z 10001); drop back to the stylesheet z-index (200) here so
+  // in-game modal stacking is untouched.
+  try { const _sbg = document.getElementById('settings-modal-bg'); if (_sbg && _sbg._menuRaised) { _sbg.style.zIndex = ''; _sbg._menuRaised = false; } } catch (e) {}
   // v0.26.x audit FIX — match the open path: unpause on close, but only if
   // no other modal is stacked (mirror of closeCharStudio). The `.on` class
   // is already removed above, so _anyOtherModalOpen won't count settings.
@@ -98620,6 +98624,23 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     setTimeout(() => { if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 220);
     // v0.25.233 — Start the looping BGM the moment the world reveals.
     startBgm();
+    // v0.27.8 — Play Co-op from the main menu: auto-connect to the party
+    // once the world reveals. On a fresh save the class-select gate is
+    // still up (mpConnect-time UI would land under it), so the code is
+    // kept in MP_ROOM_KEY and the player is pointed at 🌐 Multi instead.
+    if (window._lxCoopPending) {
+      const _cp = window._lxCoopPending; window._lxCoopPending = null;
+      setTimeout(() => {
+        try {
+          if (typeof player !== 'undefined' && player && player.cls && typeof mpConnect === 'function') {
+            mpConnect(_cp.url, _cp.name, _cp.room);
+            if (typeof showToast === 'function') showToast('🌐 Joining party ' + _cp.room.toUpperCase() + '…', 'rare');
+          } else if (typeof showToast === 'function') {
+            showToast('Party code ' + _cp.room.toUpperCase() + ' saved — create your hero, then hit 🌐 Multi.', 'rare');
+          }
+        } catch (e) {}
+      }, 900);
+    }
     // v0.27.6 — WORLD STREAMER: once the world has revealed and the first map
     // has settled, background-stream every remaining map's sprites (portal-BFS
     // from the player) + the full monster/FX/summon registries, so nothing
@@ -98742,6 +98763,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     const _tipEl = overlay.querySelector('.lo-tip');
     if (_tipEl) _tipEl.style.display = 'none';
     if (!_authWired) { _wireAuthForm(); _authWired = true; }
+    try { _lxMenuInit(); } catch (e) {}   // v0.27.8 — Steam-style main menu
     // Pre-fill the username field if a previous session exists, but
     // don't auto-pass through — the user explicitly asked for a login
     // SCREEN, so returning players still click to confirm.
@@ -98754,7 +98776,139 @@ try { window.LXAuth = LXAuth; } catch (e) {}
         if (u && !u.value) u.value = _prevName;
       }
     } catch (e) {}
-    setTimeout(() => { try { document.getElementById('auth-user').focus(); } catch (e) {} }, 50);
+    // v0.27.8 — the menu shows first; the name input only gets focus when
+    // its sub-panel opens (see the New Game handler in _lxMenuInit).
+  }
+  // ------------------------------------------------------------------
+  // v0.27.8 — STEAM-STYLE MAIN MENU. The gate opens on a proper front
+  // page: Continue (character card from the save blob), New Game (auto-
+  // backup + wipe + reload), Play Co-op (party code, auto-connects after
+  // reveal), Settings (the in-game modal, hoisted above the overlay) and
+  // Save Backups (slot modal). The old name form survives as a sub-panel.
+  // ------------------------------------------------------------------
+  let _menuWired = false;
+  const _MENU_PANELS = ['lo-menu', 'menu-name-panel', 'menu-coop-panel'];
+  function _lxMenuShow(id) {
+    // NOTE: #lo-menu and .menu-item carry explicit CSS display rules, so
+    // the [hidden] UA style loses — drive inline display instead.
+    for (const p of _MENU_PANELS) {
+      const el = document.getElementById(p);
+      if (!el) continue;
+      el.removeAttribute('hidden');
+      el.style.display = (p === id) ? (p === 'lo-menu' ? 'flex' : 'block') : 'none';
+    }
+  }
+  window._lxMenuBackupCount = function () {
+    try {
+      const sub = document.getElementById('menu-backups-sub');
+      if (!sub) return;
+      const n = (typeof _lxGetBackups === 'function') ? _lxGetBackups().length : 0;
+      sub.textContent = (n ? n + ' snapshot' + (n === 1 ? '' : 's') : 'Snapshot') + ' · restore · export to file';
+    } catch (e) {}
+  };
+  const _MENU_CLS = { warrior: 'Warrior', mage: 'Mage', rogue: 'Rogue', archer: 'Archer' };
+  function _lxMenuRefresh() {
+    // Continue card + New Game emphasis reflect the live save state.
+    let meta = null;
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (raw && typeof _lxSaveMetaFrom === 'function') meta = _lxSaveMetaFrom(raw);
+    } catch (e) {}
+    const hasCls = !!(meta && meta.cls);
+    const cont = document.getElementById('menu-continue');
+    if (cont) {
+      cont.removeAttribute('hidden');
+      cont.style.display = hasCls ? 'flex' : 'none';
+      if (hasCls) {
+        const sub = document.getElementById('menu-continue-sub');
+        const name = meta.name || localStorage.getItem(MP_NAME_KEY) || 'Hero';
+        if (sub) sub.textContent = name + ' · Lv.' + (meta.level || 1) + ' ' + (_MENU_CLS[meta.cls] || meta.cls)
+          + (meta.map ? ' · ' + meta.map : '') + (meta.t ? ' · saved ' + (typeof _lxTimeAgo === 'function' ? _lxTimeAgo(meta.t) : '') : '');
+      }
+    }
+    const ng = document.getElementById('menu-newgame');
+    if (ng) ng.classList.toggle('primary', !hasCls);
+    window._lxMenuBackupCount();
+    return meta;
+  }
+  function _lxMenuSession(name) {
+    // Persist the chosen hero name as the local session + co-op display
+    // name (LXAuth.character writes MP_NAME_KEY); never blocks the menu.
+    let res;
+    try { res = (typeof LXAuth !== 'undefined' && LXAuth.character) ? LXAuth.character(name) : null; } catch (e) { res = null; }
+    return (res && res.ok) ? res : { ok: true, name, kind: 'character' };
+  }
+  function _lxMenuInit() {
+    const meta = _lxMenuRefresh();
+    if (_menuWired) return;
+    _menuWired = true;
+    const $ = (id) => document.getElementById(id);
+    // CONTINUE — resume the saved hero with one click, no typing.
+    const cont = $('menu-continue');
+    if (cont) cont.onclick = () => {
+      const m = _lxMenuRefresh();
+      const name = (m && m.name) || localStorage.getItem(MP_NAME_KEY) || 'Hero';
+      _finishHide(_lxMenuSession(name));
+    };
+    // NEW GAME — opens the name panel; warns + arms the auto-backup wipe
+    // path (handled in enter()) when a hero already exists.
+    const ng = $('menu-newgame');
+    if (ng) ng.onclick = () => {
+      const m = _lxMenuRefresh();
+      window._lxMenuNewGame = !!(m && m.cls);
+      const warn = $('menu-newgame-warn');
+      if (warn) warn.hidden = !window._lxMenuNewGame;
+      _lxMenuShow('menu-name-panel');
+      setTimeout(() => { try { $('auth-user').focus(); } catch (e) {} }, 40);
+    };
+    const nb = $('menu-name-back');
+    if (nb) nb.onclick = () => { window._lxMenuNewGame = false; _setAuthError(''); _lxMenuShow('lo-menu'); };
+    // PLAY CO-OP — party code up front; connects right after the reveal.
+    const co = $('menu-coop');
+    if (co) co.onclick = () => {
+      try {
+        const n = $('menu-coop-name'), c = $('menu-coop-code');
+        if (n && !n.value) n.value = localStorage.getItem(MP_NAME_KEY) || (meta && meta.name) || '';
+        if (c && !c.value) c.value = (localStorage.getItem(MP_ROOM_KEY) || '').toUpperCase();
+      } catch (e) {}
+      _lxMenuShow('menu-coop-panel');
+      setTimeout(() => { try { $('menu-coop-code').focus(); } catch (e) {} }, 40);
+    };
+    const cb = $('menu-coop-back');
+    if (cb) cb.onclick = () => _lxMenuShow('lo-menu');
+    const nc = $('menu-coop-newcode');
+    if (nc) nc.onclick = () => {
+      try { $('menu-coop-code').value = (typeof _mpNewPartyCode === 'function') ? _mpNewPartyCode().toUpperCase() : Math.random().toString(36).replace(/[^a-z0-9]/g, '').slice(0, 6).toUpperCase(); } catch (e) {}
+    };
+    const cp = $('menu-coop-play');
+    if (cp) cp.onclick = () => {
+      let name = ($('menu-coop-name').value || '').replace(/[^\p{L}\p{N} _-]/gu, '').trim().slice(0, 16);
+      if (!name) name = 'Hero-' + (Math.random().toString(36).replace(/[^a-z0-9]/gi, '').slice(0, 4).toUpperCase() || 'XXXX');
+      let room = ($('menu-coop-code').value || '').trim();
+      if (!room) {
+        room = (typeof _mpNewPartyCode === 'function') ? _mpNewPartyCode() : 'lobby';
+        try { $('menu-coop-code').value = room.toUpperCase(); } catch (e) {}
+      }
+      room = room.toLowerCase();
+      try {
+        localStorage.setItem(MP_ROOM_KEY, room);
+        const url = localStorage.getItem(MP_URL_KEY) || (typeof MP_DEFAULT_URL !== 'undefined' ? MP_DEFAULT_URL : '');
+        window._lxCoopPending = { url, name, room };
+      } catch (e) {}
+      _finishHide(_lxMenuSession(name));
+    };
+    // SETTINGS — the in-game modal, hoisted above the overlay (z 9999).
+    const st = $('menu-settings');
+    if (st) st.onclick = () => {
+      try {
+        const bg = document.getElementById('settings-modal-bg');
+        if (bg) { bg.style.zIndex = '10001'; bg._menuRaised = true; }
+        if (typeof openSettingsModal === 'function') openSettingsModal();
+      } catch (e) {}
+    };
+    // SAVE BACKUPS — slot modal (z 10002, works pre-game).
+    const bk = $('menu-backups');
+    if (bk) bk.onclick = () => { try { if (typeof openBackupModal === 'function') openBackupModal(); } catch (e) {} };
   }
   function _wireAuthForm() {
     // v0.27.0 — Steam co-op pivot: accounts/passwords removed. The gate now just
@@ -98778,6 +98932,18 @@ try { window.LXAuth = LXAuth; } catch (e) {}
       try { res = (typeof LXAuth !== 'undefined' && LXAuth.character) ? LXAuth.character(name) : { ok: true, name, kind: 'character' }; }
       catch (e) { res = { ok: false, error: 'Something went wrong. Try again.' }; }
       if (!res.ok) { lock(false); _setAuthError(res.error || 'Try again.'); return; }
+      // v0.27.8 — New Game from the main menu while a hero already exists:
+      // snapshot the old save into a backup slot, wipe it, and reload. The
+      // lx_resume stash skips the menu on the way back, landing straight in
+      // the fresh-hero flow (prologue + class select).
+      if (window._lxMenuNewGame && typeof hasSave === 'function' && hasSave()) {
+        try { if (typeof _lxCreateBackup === 'function') _lxCreateBackup('auto · before New Game'); } catch (e) {}
+        try { sessionStorage.setItem('lx_resume', JSON.stringify({ name: res.name || name, kind: res.kind || 'character' })); } catch (e) {}
+        try { if (typeof game !== 'undefined') { game._resetting = true; if (game._saveTimer) { clearTimeout(game._saveTimer); game._saveTimer = null; } } } catch (e) {}
+        try { if (typeof clearSave === 'function') clearSave(); else localStorage.removeItem(SAVE_KEY); } catch (e) {}
+        location.reload();
+        return;
+      }
       _finishHide(res);
     };
     submit.addEventListener('click', enter);
