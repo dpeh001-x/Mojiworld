@@ -8468,9 +8468,10 @@ The sleeping world is listening.</div>
 <div id="backup-modal-bg" onclick="if(event.target===this) closeBackupModal()">
   <div id="backup-modal">
     <h2>🗂 SAVE BACKUPS</h2>
-    <p class="bk-lede">Snapshot your progress into a slot before risky runs, restore an older state, or download a slot as a <code>.json</code> file. Up to 5 slots — oldest is dropped when full. Restoring reloads the game.</p>
+    <p class="bk-lede">Snapshot your progress into a slot before risky runs, restore an older state, or download a slot as a signed <code>.mojisave</code> file (tamper-checked on import). Up to 5 slots — oldest is dropped when full. Restoring reloads the game. Use <b>🔒 Secure Save</b> for a signed hard backup of your <em>current</em> progress.</p>
     <div id="backup-slots"></div>
     <div class="bk-actions">
+      <button class="bk-now" id="backup-secure-btn" onclick="exportSaveSecure()" type="button" title="Download your current progress as a signed, tamper-evident .mojisave file." style="background:linear-gradient(180deg,#c86ac8 0%,#8a3a9a 100%);border-color:#e0a0e0;color:#fff;">🔒 Secure Save</button>
       <button class="bk-now" id="backup-now-btn" onclick="_lxCreateBackup('')" type="button">＋ Backup current save</button>
       <button class="bk-close" onclick="closeBackupModal()" type="button">✓ Done</button>
     </div>
@@ -32149,21 +32150,29 @@ function _lxHmacSaveHex(msgStr){
 function _lxSaveSigBody(o){ return String(o.key)+'\n'+String(o.gameV)+'\n'+String(o.savedAt)+'\n'+String(o.data); }
 // length-safe compare (short-circuit only on length; still fine for integrity)
 function _lxSigEqual(a,b){ a=String(a||''); b=String(b||''); if(a.length!==b.length) return false; let d=0; for(let i=0;i<a.length;i++) d|=a.charCodeAt(i)^b.charCodeAt(i); return d===0; }
+// Build a signed secure-save payload string for arbitrary save `data`. Shared by
+// the Secure Save button and the backup-slot downloads so both produce the same
+// verifiable .mojisave format.
+function _lxSecureSavePayload(data, savedAt) {
+  var body = { _lxSave: 2, alg: 'hmac-sha256', key: SAVE_KEY, gameV: (typeof SAVE_VERSION !== 'undefined' ? SAVE_VERSION : 1), savedAt: (savedAt || Date.now()), data: data };
+  body.sig = _lxHmacSaveHex(_lxSaveSigBody(body));
+  return JSON.stringify(body);
+}
+function _lxDownloadFile(text, filename, mime) {
+  var blob = new Blob([text], { type: mime || 'application/json' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+}
 function exportSaveSecure() {
   try {
     if (typeof _flushSaveStateNow === 'function' && typeof game !== 'undefined' && !game._resetting) { try { _flushSaveStateNow(); } catch (_) {} }
     var data = localStorage.getItem(SAVE_KEY);
     if (!data) { if (typeof showToast === 'function') showToast('No save to export yet.', 'common'); return; }
-    var body = { _lxSave: 2, alg: 'hmac-sha256', key: SAVE_KEY, gameV: (typeof SAVE_VERSION !== 'undefined' ? SAVE_VERSION : 1), savedAt: Date.now(), data: data };
-    body.sig = _lxHmacSaveHex(_lxSaveSigBody(body));
-    var payload = JSON.stringify(body);
-    var blob = new Blob([payload], { type: 'application/json' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
     var lvl = (typeof player !== 'undefined' && player && player.level) ? player.level : 0;
-    a.href = url; a.download = 'mojiworld-secure-lv' + lvl + '.mojisave';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    _lxDownloadFile(_lxSecureSavePayload(data, Date.now()), 'mojiworld-secure-lv' + lvl + '.mojisave');
     if (typeof showToast === 'function') showToast('🔒 Secure save exported — signed & tamper-checked.', 'legendary');
   } catch (e) { if (typeof showToast === 'function') showToast('Secure export failed.', 'danger'); }
 }
@@ -32821,14 +32830,11 @@ function _lxDownloadBackup(id) {
   const b = _lxGetBackups().find(x => x && x.id === id);
   if (!b || !b.data) return;
   try {
-    const payload = JSON.stringify({ _lxSave: 1, key: SAVE_KEY, savedAt: b.ts, data: b.data });
-    const blob = new Blob([payload], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'mojiworld-backup-lv' + (b.level || 0) + '.json';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-    if (typeof showToast === 'function') showToast('⬇ Backup exported.', 'rare');
+    // Signed (secure) by default — the slot downloads as a tamper-evident
+    // .mojisave so a restored backup is integrity-checked on import.
+    const payload = _lxSecureSavePayload(b.data, b.ts);
+    _lxDownloadFile(payload, 'mojiworld-backup-lv' + (b.level || 0) + '.mojisave');
+    if (typeof showToast === 'function') showToast('🔒 Secure backup exported.', 'rare');
   } catch (e) { if (typeof showToast === 'function') showToast('Export failed.', 'danger'); }
 }
 function _lxTimeAgo(ts) {
@@ -32887,8 +32893,11 @@ function _renderBackupSlots() {
 }
 function openBackupModal() {
   _renderBackupSlots();
+  const _haveSave = (typeof hasSave === 'function' && hasSave());
   const nowBtn = document.getElementById('backup-now-btn');
-  if (nowBtn) nowBtn.style.display = (typeof hasSave === 'function' && hasSave()) ? '' : 'none';
+  if (nowBtn) nowBtn.style.display = _haveSave ? '' : 'none';
+  const secBtn = document.getElementById('backup-secure-btn');
+  if (secBtn) secBtn.style.display = _haveSave ? '' : 'none';
   const bg = document.getElementById('backup-modal-bg');
   if (bg) bg.classList.add('on');
   // Pause only when actually in-game (pre-game the world isn't running yet).
