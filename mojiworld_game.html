@@ -97843,6 +97843,14 @@ function _prologueApexSegment() {
       mojidexSeen: game.mojidexSeen || {}, bestiary: game.bestiary || {},
       bossDefeated: game.bossDefeated || {}, kills: game.kills,
     });
+    // v0.27.24 — tab-durable redundancy for the restore. The window globals can
+    // be cleared by another script between here and _prologueFinish; a
+    // sessionStorage copy (scoped to exactly this tab session, i.e. the
+    // prologue's lifetime) survives that so the restore can't fail open.
+    try {
+      sessionStorage.setItem('lx_prologue_snap_p', window._prologueSnapP);
+      sessionStorage.setItem('lx_prologue_snap_g', window._prologueSnapG);
+    } catch (_) {}
   } catch (e) {}
   // v0.26.x audit FIX (soft-lock) — if the snapshot FAILED we must NOT mutate
   // the player into the Lv100 apex form: the restore would be skipped, leaving
@@ -97957,19 +97965,42 @@ function _prologueFinish(skipped) {
   if (window._prologueTimer) { clearInterval(window._prologueTimer); window._prologueTimer = null; }
   _prologueHud(false);
   // Restore the untouched fresh state (level, class, beats — everything).
+  let _restored = false;
   try {
-    const fp = JSON.parse(window._prologueSnapP || 'null');
+    // v0.27.24 — fall back to the tab-durable sessionStorage copy if the window
+    // global was cleared between apex-start and here (fail-open guard).
+    let _snapP = window._prologueSnapP;
+    if (!_snapP) { try { _snapP = sessionStorage.getItem('lx_prologue_snap_p'); } catch (_) {} }
+    const fp = JSON.parse(_snapP || 'null');
     if (fp) {
       for (const k of Object.keys(player)) delete player[k];
       Object.assign(player, fp);
+      _restored = true;
     }
-    const fg = JSON.parse(window._prologueSnapG || 'null');
+    let _snapG = window._prologueSnapG;
+    if (!_snapG) { try { _snapG = sessionStorage.getItem('lx_prologue_snap_g'); } catch (_) {} }
+    const fg = JSON.parse(_snapG || 'null');
     if (fg) {
       game.mojidexSeen = fg.mojidexSeen; game.bestiary = fg.bestiary;
       game.bossDefeated = fg.bossDefeated; game.kills = fg.kills;
     }
   } catch (e) {}
+  // v0.27.24 — FAIL-SAFE: if the snapshot was truly unrecoverable, the player is
+  // still in the Lv.100 apex flash-forward form. Never let that persist as the
+  // real character — hard-clamp back to a fresh Lv.1 (zero invested mods,
+  // refill HP/MP) so a lost snapshot degrades to "start the intro at Lv.1"
+  // instead of "keep a maxed character". (Class may read as an advancement tier
+  // until the next level-up path corrects it, but the power is gone.)
+  if (!_restored && player && ((player.level | 0) > 1)) {
+    try {
+      player.level = 1; player.exp = 0;
+      if (player.mods) { for (const mk of Object.keys(player.mods)) player.mods[mk] = 0; }
+      if (typeof getMaxHp === 'function') player.hp = getMaxHp();
+      if (typeof getMaxMp === 'function') player.mp = getMaxMp();
+    } catch (e) {}
+  }
   window._prologueSnapP = window._prologueSnapG = null;
+  try { sessionStorage.removeItem('lx_prologue_snap_p'); sessionStorage.removeItem('lx_prologue_snap_g'); } catch (e) {}
   window._prologueActive = false;
   try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {}   // once-ever (see boot gate)
   if (typeof refreshGearCache === 'function') { try { refreshGearCache(); } catch (e) {} }
@@ -98540,13 +98571,35 @@ async function _lxCloudSyncOnLogin(session) {
   const localT = (localSave && localSave.t) || 0;
   const cloudT = (cloud && cloud.t) || 0;
   if (localSave && cloudT === localT) return;                          // identical (same device) -> no reload
-  if (localLevel <= 1 || cloudLevel > localLevel || cloudT > localT) {  // fresh device / cloud more advanced / cloud newer -> apply cloud
+  // v0.27.24 — DATA-LOSS FIX: a newer cloud TIMESTAMP alone used to overwrite a
+  // more-advanced local save. `t` is raw Date.now() at flush time, so a second
+  // device with a fast clock could stamp a low-level save "in the future" and
+  // clobber a high-level character on the next login here — no confirmation, no
+  // backup. Now a newer timestamp only wins when it is NOT a level regression;
+  // a fresh device (localLevel<=1) or a strictly-higher cloud level still
+  // applies unconditionally, so normal cross-device play is unaffected.
+  const _applyCloud = (localLevel <= 1) || (cloudLevel > localLevel) || (cloudT > localT && cloudLevel >= localLevel);
+  if (_applyCloud) {
+    // Snapshot the local save we're about to replace into a backup slot so an
+    // unwanted sync (or skew that still slips past the guard) stays recoverable
+    // from the Save Backups menu. Skip trivial Lv<=1 saves (fresh-device pull).
+    try {
+      if (localRaw && localLevel > 1 && typeof _lxGetBackups === 'function' && typeof _lxStoreBackups === 'function') {
+        const meta = (typeof _lxSaveMetaFrom === 'function') ? _lxSaveMetaFrom(localRaw) : {};
+        const arr = _lxGetBackups();
+        arr.unshift({ id: 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          ts: Date.now(), label: 'auto · before cloud sync',
+          name: meta.name, level: meta.level, cls: meta.cls, map: meta.map, data: localRaw });
+        while (arr.length > ((typeof BACKUP_MAX !== 'undefined') ? BACKUP_MAX : 8)) arr.pop();
+        _lxStoreBackups(arr);
+      }
+    } catch (e) {}
     try { localStorage.setItem(SAVE_KEY, JSON.stringify(cloud)); } catch (e) {}
     try { sessionStorage.setItem('lx_resume', JSON.stringify(session)); } catch (e) {}
     location.reload();
     return 'reloading';
   }
-  pushLocal();                                                          // local is more advanced -> keep + push up
+  pushLocal();                                                          // local is more advanced / cloud stale -> keep + push up
 }
 try { window._lxCloudPushSave = _lxCloudPushSave; window._lxCloudSyncOnLogin = _lxCloudSyncOnLogin; } catch (e) {}
 try { window.addEventListener('pagehide', () => { try { const raw = localStorage.getItem(SAVE_KEY); if (raw) _lxCloudPushSave(raw, true); } catch (e) {} }); } catch (e) {}
