@@ -98441,6 +98441,48 @@ try { window.LXAuth = LXAuth; } catch (e) {}
   const overlay = document.getElementById('loading-overlay');
   const bar = document.getElementById('loading-bar');
   const status = document.getElementById('loading-status');
+  // v0.27.11 — LOADING SOUND: "Moji is loading.mp3" plays while the boot
+  // overlay is up. Autoplay is gesture-gated in every modern browser, so
+  // the immediate play() below only succeeds where the site already has
+  // autoplay permission; otherwise the capture-phase listeners start the
+  // track on the first pointer/key/touch on the loading page (the auth
+  // gate guarantees at least one such gesture). Loops for long loads;
+  // _finishHide fades it out just before startBgm() takes over.
+  const _loSnd = new Audio('audio/Moji is loading.mp3');
+  _loSnd.loop = true;
+  _loSnd.preload = 'auto';
+  let _loSndDone = false;
+  const _loSndUnhook = () => {
+    document.removeEventListener('pointerdown', _loSndTry, true);
+    document.removeEventListener('keydown', _loSndTry, true);
+    document.removeEventListener('touchstart', _loSndTry, true);
+  };
+  const _loSndTry = () => {
+    if (_loSndDone || !_loSnd.paused) return;
+    try {
+      // Respect the global mute if the audio engine is already up.
+      if (typeof audio !== 'undefined' && audio && audio.muted) return;
+      // Track the BGM volume slider when available (defined in a later
+      // script block — guard for the parse-time first attempt).
+      let v = 0.55;
+      try { if (typeof _bgmTargetVol === 'function') v = _bgmTargetVol(); } catch (e) {}
+      _loSnd.volume = v;
+      _loSnd.play().then(_loSndUnhook).catch(() => {/* autoplay-blocked: gesture listeners retry */});
+    } catch (e) {}
+  };
+  const _loSndStop = () => {
+    if (_loSndDone) return;
+    _loSndDone = true;
+    _loSndUnhook();
+    try {
+      if (typeof _bgmFade === 'function' && !_loSnd.paused) _bgmFade(_loSnd, 0, 500);
+      else _loSnd.pause();
+    } catch (e) { try { _loSnd.pause(); } catch (e2) {} }
+  };
+  document.addEventListener('pointerdown', _loSndTry, true);
+  document.addEventListener('keydown', _loSndTry, true);
+  document.addEventListener('touchstart', _loSndTry, true);
+  _loSndTry();
   let bzLoaded = 0, critLoaded = 0, defLoaded = 0;
   let revealed = false;
   // v0.25.469 — Reveal now gates on EVERY asset (BAZAAR + CRITICAL +
@@ -98629,6 +98671,8 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     }
     overlay.classList.add('fade');
     setTimeout(() => { if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 220);
+    // v0.27.11 — fade the loading-screen track out before the world BGM starts.
+    _loSndStop();
     // v0.25.233 — Start the looping BGM the moment the world reveals.
     startBgm();
     // v0.27.6 — WORLD STREAMER: once the world has revealed and the first map
