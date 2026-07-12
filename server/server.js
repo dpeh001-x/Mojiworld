@@ -448,7 +448,7 @@ wss.on('connection', (ws, req) => {
     // Forward monster state / damage / kill events verbatim to the room. The
     // relay stays dumb (never inspects game state); payloads are bounded by the
     // WS maxPayload + the per-socket token bucket added earlier.
-    if (msg.t === 'mon' || msg.t === 'dmg' || msg.t === 'kill' || msg.t === 'proj' || msg.t === 'haz' || msg.t === 'hazhit' || msg.t === 'bosshit' || msg.t === 'drop') {
+    if (msg.t === 'mon' || msg.t === 'dmg' || msg.t === 'kill' || msg.t === 'proj' || msg.t === 'haz' || msg.t === 'hazhit' || msg.t === 'bosshit' || msg.t === 'drop' || msg.t === 'down' || msg.t === 'up' || msg.t === 'revive' || msg.t === 'ping') {
       broadcast(ws._roomId, { ...msg, id: ws._player.id }, ws);
       return;
     }

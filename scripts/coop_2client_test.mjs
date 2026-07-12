@@ -41,7 +41,11 @@ try {
   const B = await boot(browser, 'Bob');
 
   await ev(A, ({ ws, room }) => mpConnect(ws, 'Alice', room), { ws: WS, room: ROOM });
-  await sleep(600);
+  // Wait for A's WELCOME (id assigned) before B connects — a fixed sleep raced:
+  // a backgrounded page's socket-open callback can lag, letting B's hello reach
+  // the relay first and win the lower id (correctly becoming host, breaking the
+  // test's A-is-host assumption). Deterministic ordering, same intent.
+  await A.waitForFunction(() => net.myId != null, null, { timeout: 10000 }).catch(() => {});
   await ev(B, ({ ws, room }) => mpConnect(ws, 'Bob', room), { ws: WS, room: ROOM });
   await sleep(800);
   await startPump(A); await startPump(B);        // drive outbound ticks on both

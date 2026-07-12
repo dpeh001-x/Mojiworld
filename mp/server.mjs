@@ -113,7 +113,7 @@ wss.on('connection', (ws) => {
         if (text) broadcast(roomId, { t: 'chat', id, name: me.st.name || '?', text }, id);
       } else if (msg.t === 'emote') {
         broadcast(roomId, { t: 'emote', id, kind: String(msg.kind || '').replace(CTRL, '').slice(0, 24) }, id);
-      } else if (msg.t === 'mon' || msg.t === 'dmg' || msg.t === 'kill' || msg.t === 'proj' || msg.t === 'haz' || msg.t === 'hazhit' || msg.t === 'bosshit' || msg.t === 'drop') {
+      } else if (msg.t === 'mon' || msg.t === 'dmg' || msg.t === 'kill' || msg.t === 'proj' || msg.t === 'haz' || msg.t === 'hazhit' || msg.t === 'bosshit' || msg.t === 'drop' || msg.t === 'down' || msg.t === 'up' || msg.t === 'revive' || msg.t === 'ping') {
         // v0.27.0 — casual co-op host-authoritative monster sync. Forward verbatim
         // to the room (payload already bounded by maxPayload + the token bucket).
         // 'mon' (host→all, full monster state) is droppable under backpressure —

@@ -4281,6 +4281,35 @@
      a clean gap, newest at top via column-reverse so the eye lands
      on the freshest message. Pointer-events:none lets clicks pass
      through. */
+  /* v0.27.9 — CO-OP PARTY FRAMES: Diablo-style partner plates under the HUD */
+  #party-frames {
+    position: fixed;
+    left: 12px;
+    top: 218px;
+    z-index: 12;
+    display: none;
+    pointer-events: none;
+    font-family: Inter, 'Segoe UI', system-ui, sans-serif;
+  }
+  #party-frames .pf-row {
+    width: 150px;
+    margin-bottom: 6px;
+    padding: 5px 8px 6px;
+    background: rgba(12, 10, 26, 0.72);
+    border: 1px solid rgba(180, 150, 232, 0.35);
+    border-radius: 8px;
+    backdrop-filter: blur(3px);
+  }
+  #party-frames .pf-name { font: 700 11px/1.3 inherit; color: #e8ddff; letter-spacing: 0.3px; margin-bottom: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px #000; }
+  #party-frames .pf-lv { color: rgba(255, 214, 130, 0.85); font-weight: 600; font-size: 10px; }
+  #party-frames .pf-tag { color: #ff8888; font-size: 9px; letter-spacing: 1px; }
+  #party-frames .pf-bar { height: 5px; border-radius: 3px; background: rgba(0, 0, 0, 0.55); overflow: hidden; margin-top: 2px; }
+  #party-frames .pf-bar i { display: block; height: 100%; border-radius: 3px; transition: width 200ms ease; }
+  #party-frames .pf-hp i { background: linear-gradient(90deg, #d43f4f, #ff7061); }
+  #party-frames .pf-mp i { background: linear-gradient(90deg, #3a66d4, #61a2ff); }
+  #party-frames .pf-down { border-color: rgba(255, 100, 100, 0.6); }
+  #party-frames .pf-down .pf-name { color: #ffb8b8; }
   #toast-container {
     position: absolute;
     left: 50%;
@@ -26713,6 +26742,14 @@ window.addEventListener('keydown', e => {
     if (typeof toggleLoreMap === 'function') toggleLoreMap();
   }
 
+  // v0.27.9 — CO-OP PING (T): drop a "look here" marker at your position on
+  // every party member's screen (Deep Rock style). Only fires while connected,
+  // and yields to any player-bound skill on T.
+  if (k === 't' && typeof net !== 'undefined' && net && net.connected
+      && !(typeof KEY_TO_SLOT !== 'undefined' && KEY_TO_SLOT['t'])) {
+    if (typeof _coopSendPing === 'function') _coopSendPing();
+  }
+
   // Emotes (v0.22) — number keys pop a speech bubble above the player
   // for ~2s. 8 is reserved for the dev XP cheat (v0.24.2).
   // v0.25.508 — Trimmed from 4–7 to 4–5 because 6 + 7 were silently
@@ -32587,6 +32624,144 @@ function _coopApplyBossHit(msg) {
   if (typeof flash === 'function') { try { flash(0.25); } catch (e) {} }
   if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: '-' + dmg, life: 40, color: msg.c || '#ff5555', big: true });
 }
+// =========================================================================
+// v0.27.9 — CO-OP DOWNED / REVIVE (the AAA co-op signature: It Takes Two /
+// Deep Rock / Diablo). Dying with a living partner on your map no longer
+// teleports you to town alone — you go DOWN for 30s; a partner who stands
+// beside your body for 3s channels a revive (50% HP). Bleed out → normal
+// death. Runs as the LAST link of the cheat-death chain, so Second Wind /
+// Miracle / Phoenix still fire first, and SOLO play is byte-identical
+// (requires a connected, recently-heard, alive peer on the same map).
+// =========================================================================
+const COOP_DOWN_MS = 30000;      // bleed-out window
+const COOP_REVIVE_MS = 3000;     // channel time standing beside the body
+const COOP_REVIVE_RANGE = 90;    // px, reviver-to-body
+
+function _coopPeerAliveOnMyMap() {
+  if (typeof _coopActive !== 'function' || !_coopActive()) return false;
+  const now = performance.now();
+  for (const id in net.peers) {
+    const p = net.peers[id];
+    if (p && p.map === game.currentMap && !p._downed && (p.hp == null || p.hp > 0)
+        && (typeof p._last !== 'number' || now - p._last < 6000)) return true;
+  }
+  return false;
+}
+function _coopTryDowned() {
+  if (player._downed) return true;   // already down — never double-enter
+  if (player._noDownUntil && performance.now() < player._noDownUntil) return false;   // just bled out: die for real
+  if (game.expedition && game.expedition.active) return false;   // expedition keeps its own death rules
+  if (!_coopPeerAliveOnMyMap()) return false;
+  player._downed = true;
+  player._downedUntil = performance.now() + COOP_DOWN_MS;
+  player.hp = 1;                     // keeps every death gate quiet while down
+  player.invulnerable = 2000;
+  player.vx = 0; player.hitStun = 0;
+  // clear DoT/CC so the window is the timer, not a poison tick
+  player.burnTimer = 0; player.burnDmg = 0; player._burnTickAcc = 0; player._poisonTimer = 0; player._poisonDmg = 0; player._poisonTickAcc = 0; player._electrocuteTimer = 0; player._electrocuteDmg = 0; player._electrocuteTickAcc = 0; player.frozenTimer = 0; player.stunTimer = 0; player.freezeTimer = 0;
+  try { net.ws.send(JSON.stringify({ t: 'down', map: game.currentMap, x: Math.round(player.x), y: Math.round(player.y) })); } catch (e) {}
+  if (typeof showToast === 'function') showToast('⛑ You are DOWN — a partner can revive you!', 'danger');
+  if (typeof flash === 'function') { try { flash(0.4); } catch (e) {} }
+  return true;
+}
+// Per-frame while down (early gate in updatePlayer): frozen in place, unhittable,
+// counting down. Bleed-out ends in the real death flow.
+function _coopDownedTick(dt) {
+  player.invulnerable = 1000;
+  player.vx = 0; player.vy = 0;
+  player.hp = 1;
+  const left = (player._downedUntil || 0) - performance.now();
+  _coopDownedBanner(Math.max(0, Math.ceil(left / 1000)));
+  if (left <= 0) {
+    player._downed = false;
+    player._noDownUntil = performance.now() + 4000;
+    _coopDownedBanner(null);
+    try { net.ws.send(JSON.stringify({ t: 'up', map: game.currentMap, ok: 0 })); } catch (e) {}
+    player.invulnerable = 0;
+    player.hp = 0;
+    if (typeof triggerDeath === 'function' && !game.dying) { try { triggerDeath(); } catch (e) {} }
+  }
+}
+function _coopDownedBanner(secs) {
+  let b = document.getElementById('coop-downed-banner');
+  if (secs == null) { if (b) b.remove(); return; }
+  if (!b) {
+    b = document.createElement('div');
+    b.id = 'coop-downed-banner';
+    b.style.cssText = 'position:fixed; top:14%; left:50%; transform:translateX(-50%); z-index:520;'
+      + 'padding:10px 22px; border-radius:12px; background:rgba(40,6,10,0.88); border:1px solid rgba(255,90,90,0.6);'
+      + 'font:800 15px/1.5 Inter,system-ui,sans-serif; color:#ffd6d6; text-align:center; letter-spacing:0.5px;'
+      + 'box-shadow:0 10px 40px rgba(0,0,0,0.6), 0 0 24px rgba(255,60,60,0.25); pointer-events:none;';
+    document.body.appendChild(b);
+  }
+  b.innerHTML = '⛑ <b>DOWNED</b> — a partner can revive you · <span style="color:#fff;">' + secs + 's</span>'
+    + '<div style="font-size:11px; font-weight:600; color:rgba(255,214,214,0.7); margin-top:2px;">they must stand beside you for 3s</div>';
+}
+// Peer notifications (down/up are self-reports keyed by relay-stamped sender id).
+function _coopApplyDown(msg) {
+  if (!msg || msg.id == null) return;
+  const p = net.peers[msg.id]; if (!p) return;
+  p._downed = true; p._reviveMs = 0;
+  if (Number.isFinite(+msg.x)) { p.x = +msg.x; p.y = +msg.y; }
+  if (msg.map === game.currentMap && typeof showToast === 'function') showToast('⛑ ' + (p.name || 'Partner') + ' is DOWN — get to them!', 'danger');
+}
+function _coopApplyUp(msg) {
+  if (!msg || msg.id == null) return;
+  const p = net.peers[msg.id]; if (!p) return;
+  p._downed = false; p._reviveMs = 0;
+  if (msg.ok && msg.map === game.currentMap && typeof showToast === 'function') showToast('✚ ' + (p.name || 'Partner') + ' is back up!', 'success');
+}
+// A partner finished channeling beside MY body.
+function _coopApplyRevive(msg) {
+  if (!player || !player._downed || !msg || msg.id == null) return;
+  const p = net.peers[msg.id];
+  if (!p || p.map !== game.currentMap) return;
+  const dx = (p.x || 0) - player.x, dy = (p.y || 0) - player.y;
+  if (Math.hypot(dx, dy) > COOP_REVIVE_RANGE * 2.5) return;   // generous vs presence lag, still local
+  player._downed = false;
+  _coopDownedBanner(null);
+  player.hp = Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100)) * 0.5);
+  player.invulnerable = 2500;
+  try { net.ws.send(JSON.stringify({ t: 'up', map: game.currentMap, ok: 1 })); } catch (e) {}
+  if (typeof showToast === 'function') showToast('✚ Revived by ' + (p.name || 'a partner') + ' — back to the fight!', 'legendary');
+  if (typeof flash === 'function') { try { flash(0.5); } catch (e) {} }
+}
+// Reviver side — called each frame from the main loop: stand beside a downed
+// partner to fill the channel; walking away drains it.
+function _coopReviveTick(dt) {
+  if (typeof _coopActive !== 'function' || !_coopActive() || !player || player.hp <= 0 || player._downed) return;
+  for (const id in net.peers) {
+    const p = net.peers[id];
+    if (!p || !p._downed || p.map !== game.currentMap) continue;
+    const dx = (p.x || 0) - player.x, dy = (p.y || 0) - player.y;
+    if (Math.hypot(dx, dy) <= COOP_REVIVE_RANGE) {
+      p._reviveMs = (p._reviveMs || 0) + dt;
+      if (p._reviveMs >= COOP_REVIVE_MS) {
+        p._reviveMs = 0;
+        p._downed = false;   // optimistic; their 'up' broadcast confirms
+        try { net.ws.send(JSON.stringify({ t: 'revive', map: game.currentMap })); } catch (e) {}
+      }
+    } else if (p._reviveMs) {
+      p._reviveMs = Math.max(0, p._reviveMs - dt * 2);
+    }
+  }
+}
+// ===== CO-OP PING (v0.27.9 — Deep Rock / Apex style “look here”) ==========
+function _coopSendPing() {
+  if (!net.connected || !net.ws) return;
+  const now = performance.now();
+  if (now - (net._lastPingAt || 0) < 1200) return;   // anti-spam
+  net._lastPingAt = now;
+  const px = Math.round(player.x + player.w / 2), py = Math.round(player.y);
+  _coopAddPing(px, py, 'You', true);
+  try { net.ws.send(JSON.stringify({ t: 'ping', map: game.currentMap, x: px, y: py })); } catch (e) {}
+}
+function _coopAddPing(x, y, name, mine) {
+  net._pings = net._pings || [];
+  net._pings.push({ x, y, name: String(name || '').slice(0, 16), mine: !!mine, born: performance.now() });
+  if (net._pings.length > 8) net._pings.shift();
+  try { if (typeof audio !== 'undefined' && audio && audio.play) audio.play('chirp'); } catch (e) {}
+}
 // Drop-frame idempotency (a relay may redeliver a 'drop'); ignore repeats by uid.
 const _coopDropSeen = new Set();
 const _coopDropRing = [];
@@ -32797,6 +32972,10 @@ function _mpHandle(msg) {
     case 'hazhit': _coopApplyHazHit(msg); return;    // v0.27.0 host hazard detonation -> follower takes the strike
     case 'bosshit': _coopApplyBossHit(msg); return;  // v0.27.2 host boss direct-hit -> follower takes the strike
     case 'drop': _coopApplyDrop(msg); return;        // v0.27.2 host loot drop -> follower gets its own copy
+    case 'down': _coopApplyDown(msg); return;        // v0.27.9 partner went down (revivable)
+    case 'up':   _coopApplyUp(msg); return;          // v0.27.9 partner revived / bled out
+    case 'revive': _coopApplyRevive(msg); return;    // v0.27.9 partner finished channeling on my body
+    case 'ping': if (msg && msg.map === game.currentMap) _coopAddPing(+msg.x || 0, +msg.y || 0, (net.peers[msg.id] && net.peers[msg.id].name) || 'Partner', false); return;   // v0.27.9
     case 'dmg':  if (net.isHost) _coopHostApplyDamage(msg.u, +msg.d || 0, !!msg.c, msg.k); return;   // remote damage -> host applies
     case 'kill': _coopApplyKill(msg); return;       // host kill -> peers award XP/coins
     case 'welcome':
@@ -33012,7 +33191,7 @@ function _mpDrawPeers() {
     const _tx = p.x || 0, _ty = p.y || 0;
     if (p._rx == null || Math.abs(_tx - p._rx) > 200 || Math.abs(_ty - (p._ry || 0)) > 200) { p._rx = _tx; p._ry = _ty; }
     else { p._rx += (_tx - p._rx) * 0.35; p._ry += (_ty - p._ry) * 0.35; }
-    const _dead = !!(p.maxHp && (p.hp || 0) <= 0);
+    const _dead = !!(p.maxHp && (p.hp || 0) <= 0) || !!p._downed;   // v0.27.9 — downed partners read as down (they hold 1 HP while down)
     const _face = (p.facing === -1) ? -1 : 1;
     const _bob = (!_dead && p.anim === 'run') ? Math.round(Math.sin((game.time + (+id || 0) * 7) * 0.3) * 2) : 0;
     const sx = p._rx - game.camera.x;
@@ -33045,7 +33224,26 @@ function _mpDrawPeers() {
       ctx.save();
       ctx.globalAlpha = 0.85; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
       ctx.fillStyle = '#ff7777';
-      ctx.fillText('DOWN', sx + 14, sy - 10);
+      ctx.fillText(p._downed ? '⛑ DOWN — stand close to revive' : 'DOWN', sx + 14, sy - 10);
+      ctx.restore();
+    }
+    // v0.27.9 — revive channel ring: radius marker around a downed partner +
+    // a filling arc while THIS player stands inside it.
+    if (p._downed) {
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.strokeStyle = '#7de08a'; ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath(); ctx.arc(sx + 14, sy + 22, COOP_REVIVE_RANGE, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      const frac = Math.max(0, Math.min(1, (p._reviveMs || 0) / COOP_REVIVE_MS));
+      if (frac > 0) {
+        ctx.globalAlpha = 0.95;
+        ctx.strokeStyle = '#a5f0a8'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.arc(sx + 14, sy + 22, 26, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2); ctx.stroke();
+        ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#c8f2c2';
+        ctx.fillText('REVIVING ' + Math.round(frac * 100) + '%', sx + 14, sy + 62);
+      }
       ctx.restore();
     }
     // Shadow
@@ -33102,6 +33300,71 @@ function _mpDrawPeers() {
       ctx.fillText(p.emote.kind, sx + 14, sy - 72);
       ctx.restore();
     }
+  }
+  // v0.27.9 — PINGS: gold "look here" markers (T). Expanding double-ring +
+  // chevron + name, 4s life. Partner pings gold, own pings pale.
+  if (net._pings && net._pings.length) {
+    const now = performance.now();
+    for (let i = net._pings.length - 1; i >= 0; i--) {
+      const pg = net._pings[i];
+      const age = now - pg.born;
+      if (age > 4000) { net._pings.splice(i, 1); continue; }
+      const px = pg.x - game.camera.x;
+      const py = pg.y - ((game.camera && game.camera.y) || 0);
+      if (px < -80 || px > W + 80 || py < -80 || py > H + 80) continue;
+      const col = pg.mine ? '#e8e2ff' : '#ffd166';
+      const fade = age > 3200 ? 1 - (age - 3200) / 800 : 1;
+      ctx.save();
+      ctx.globalAlpha = 0.9 * fade;
+      const ringT = (age % 900) / 900;
+      ctx.strokeStyle = col; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(px, py, 8 + ringT * 26, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 0.45 * fade;
+      ctx.beginPath(); ctx.arc(px, py, 8 + ((ringT + 0.5) % 1) * 26, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 0.95 * fade;
+      const bob = Math.sin(now * 0.008) * 3;
+      ctx.fillStyle = col;
+      ctx.font = 'bold 18px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('▼', px, py - 16 + bob);
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText(pg.name, px, py - 34 + bob);
+      ctx.restore();
+    }
+  }
+  // v0.27.9 — PARTY FRAMES: Diablo-style plates for same-map partners.
+  if (typeof _mpPartyFrames === 'function') _mpPartyFrames();
+}
+// v0.27.9 — Party-frame plates (DOM, change-cached so per-frame calls are cheap):
+// partner name/level + HP/MP bars pinned under the player's own HUD while in
+// co-op on the same map. Hidden when solo / alone on a map.
+function _mpPartyFrames() {
+  let host = document.getElementById('party-frames');
+  const rows = [];
+  if (net.connected) {
+    for (const id in net.peers) {
+      const p = net.peers[id];
+      if (!p || p.map !== game.currentMap) continue;
+      const hpF = p.maxHp ? Math.max(0, Math.min(1, (p.hp || 0) / p.maxHp)) : 1;
+      const mpF = p.maxMp ? Math.max(0, Math.min(1, (p.mp || 0) / p.maxMp)) : 1;
+      const down = p._downed || (p.maxHp && (p.hp || 0) <= 0);
+      rows.push('<div class="pf-row' + (down ? ' pf-down' : '') + '">'
+        + '<div class="pf-name">' + String(p.name || '?').replace(/[<>&]/g, '') + ' <span class="pf-lv">Lv' + (p.level || 1) + '</span>' + (down ? ' <span class="pf-tag">⛑ DOWN</span>' : '') + '</div>'
+        + '<div class="pf-bar pf-hp"><i style="width:' + Math.round(hpF * 100) + '%"></i></div>'
+        + '<div class="pf-bar pf-mp"><i style="width:' + Math.round(mpF * 100) + '%"></i></div>'
+        + '</div>');
+    }
+  }
+  const html = rows.join('');
+  if (!host) {
+    if (!html) return;
+    host = document.createElement('div');
+    host.id = 'party-frames';
+    document.body.appendChild(host);
+  }
+  if (host._cache !== html) {
+    host._cache = html;
+    host.innerHTML = html;
+    host.style.display = html ? 'block' : 'none';
   }
 }
 
@@ -42359,6 +42622,10 @@ function _playerGravityStep() {
   }
 }
 function updatePlayer(dt) {
+  // v0.27.9 — CO-OP DOWNED early gate: while down you're frozen in place,
+  // unhittable, and counting down to bleed-out; a partner beside you revives.
+  // Solo play never enters this state (_coopTryDowned requires a live peer).
+  if (player._downed) { if (typeof _coopDownedTick === 'function') _coopDownedTick(dt); return; }
   // v0.26.249 — Reset per-frame status-FX toast guards. _applyMobContactStatuses
   // sets these so multiple mobs of the same type can't toast "🔥 Burning!"
   // 6× in one frame; the reset here lets the NEXT frame's first inflicting
@@ -44528,6 +44795,9 @@ function _tryCheatDeathRevive() {
     showToast('🔥 Phoenix Heart — risen from ash!', 'legendary');
     return true;
   }
+  // v0.27.9 — LAST link: co-op DOWNED state. With a living partner on this map,
+  // go down (revivable, 30s) instead of dying. No-op solo / disconnected.
+  if (typeof _coopTryDowned === 'function' && _coopTryDowned()) return true;
   return false;
 }
 
@@ -96250,6 +96520,7 @@ function loop(time) {
     if (typeof _coopTickProjectiles === 'function') _coopTickProjectiles();  // v0.27.0 — host broadcasts enemy projectiles
     if (typeof _coopTickHazards === 'function') _coopTickHazards();  // v0.27.0 — host broadcasts enemy hazard telegraphs
     if (typeof _coopTickDrops === 'function') _coopTickDrops();  // v0.27.2 — host broadcasts loot drops (guests get their own copy)
+    if (typeof _coopReviveTick === 'function') _coopReviveTick(dt);  // v0.27.9 — channel a revive while standing beside a downed partner
   } else {
     // v0.26.399 — light update path. Previously gated by `player.hp > 0`, so
     // when the player was DEAD neither branch ran and death-explosion
