@@ -20,6 +20,16 @@ try {
   ok('Continue hidden on fresh run', !(await page.isVisible('#menu-continue')));
   ok('New Game primary on fresh run', await page.evaluate(() => document.getElementById('menu-newgame').classList.contains('primary')));
 
+  // v0.27.9 — title-screen ambience + entrance + music wiring
+  await page.waitForTimeout(1600);   // let the ember fade-in (1.4s transition) land
+  ok('menu-up entrance class stamped', await page.evaluate(() => document.getElementById('loading-overlay').classList.contains('menu-up')));
+  ok('key art applied to backdrop', await page.evaluate(() => getComputedStyle(document.querySelector('#loading-overlay .lo-bg')).backgroundImage.includes('title_keyart')));
+  ok('embers layer active', await page.evaluate(() => Number(getComputedStyle(document.querySelector('#loading-overlay .lo-embers')).opacity) > 0.5));
+  ok('menu items cascade in (animation set)', await page.evaluate(() => getComputedStyle(document.querySelector('#lo-menu .menu-item')).animationName.includes('lo-menu-in')));
+  ok('version tag filled', /v0\.\d+/.test(await page.textContent('#lo-version')));
+  ok('menu bgm element wired to Moji is loading', await page.evaluate(() => typeof _menuBgm !== 'undefined' && _menuBgm._srcs[0].includes('Moji is loading')));
+  ok('menu bgm survives missing file (fallback chain)', await page.evaluate(() => typeof _menuBgm !== 'undefined' && (_menuBgm._dead === true || _menuBgm._i < _menuBgm._srcs.length)));
+
   await page.click('#menu-settings');
   await page.waitForSelector('#settings-modal', { state: 'visible', timeout: 5000 });
   const z = await page.evaluate(() => getComputedStyle(document.getElementById('settings-modal-bg')).zIndex);
@@ -63,6 +73,10 @@ try {
   ok('Continue card visible with save', await page.isVisible('#menu-continue'));
   const sub = await page.textContent('#menu-continue-sub');
   ok('Continue card shows name/level/class/map', sub.includes('Aurora') && sub.includes('Lv.42') && sub.includes('Mage'), sub.trim());
+  ok('Continue card shows class portrait', await page.evaluate(() => {
+    const i = document.getElementById('menu-continue-icon');
+    return i && i.style.display !== 'none' && i.src.includes('Class/mage.png');
+  }));
 
   await page.click('#menu-backups');
   await page.waitForSelector('#backup-now-btn', { state: 'visible', timeout: 5000 });
