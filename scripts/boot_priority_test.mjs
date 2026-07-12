@@ -39,6 +39,8 @@ try {
   ok('non-start backgrounds stay LOW', gate.forestStillLow === 'low', gate);
 
   // Enter; the streamer kicks at ~8s and streams maps LOW.
+  await page.click('#menu-newgame').catch(() => {});
+  await page.waitForSelector('#auth-user', { state: 'visible', timeout: 10000 }).catch(() => {});
   await page.fill('#auth-user', 'Prio');
   await page.click('#auth-submit');
   const t0 = Date.now();

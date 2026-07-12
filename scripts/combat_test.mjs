@@ -14,6 +14,8 @@ try {
   await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForFunction(() => typeof performMelee === 'function' && typeof hitMonster === 'function', null, { timeout: 30000 });
   await page.waitForFunction(() => { const a = document.getElementById('lo-auth'); return a && !a.hidden; }, null, { timeout: 45000 }).catch(() => {});
+  await page.click('#menu-newgame').catch(() => {});
+  await page.waitForSelector('#auth-user', { state: 'visible', timeout: 10000 }).catch(() => {});
   await page.fill('#auth-user', 'Fighter').catch(() => {}); await page.click('#auth-submit').catch(() => {});
   await sleep(1500);
   const ev = (f, a) => page.evaluate(f, a);

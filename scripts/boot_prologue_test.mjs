@@ -41,6 +41,9 @@ try {
   ok('case-fixed Whisper sprite loads (was 404 whisper.webp)', fetched.whisper, fetched);
 
   // Enter a name -> class select appears.
+  // v0.27.8 Steam-style menu gates naming behind New Game — click through it first.
+  await page.click('#menu-newgame').catch(() => {});
+  await page.waitForSelector('#auth-user', { state: 'visible', timeout: 10000 }).catch(() => {});
   await page.fill('#auth-user', 'Tester');
   await page.click('#auth-submit');
   await page.waitForFunction(() => { const c = document.getElementById('class-select-modal'); return c && getComputedStyle(c).display !== 'none'; }, null, { timeout: 20000 });

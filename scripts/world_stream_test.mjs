@@ -19,6 +19,8 @@ try {
   await page.waitForFunction(() => { const a = document.getElementById('lo-auth'); return a && !a.hidden; }, null, { timeout: 90000 });
 
   // Enter through the REAL flow — _finishHide is the streamer's kick point.
+  await page.click('#menu-newgame').catch(() => {});
+  await page.waitForSelector('#auth-user', { state: 'visible', timeout: 10000 }).catch(() => {});
   await page.fill('#auth-user', 'Streamer');
   await page.click('#auth-submit');
   await sleep(1000);

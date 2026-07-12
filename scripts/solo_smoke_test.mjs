@@ -22,6 +22,9 @@ try {
   await page.waitForFunction(() => typeof game === 'object' && typeof spawnMonster === 'function', null, { timeout: 30000 });
   // Real UI entry: name the hero and click Enter.
   await page.waitForFunction(() => { const a = document.getElementById('lo-auth'); return a && !a.hidden; }, null, { timeout: 45000 }).catch(() => {});
+  // v0.27.8 Steam-style menu gates naming behind New Game — click through it first.
+  await page.click('#menu-newgame').catch(() => {});
+  await page.waitForSelector('#auth-user', { state: 'visible', timeout: 10000 }).catch(() => {});
   await page.fill('#auth-user', 'SoloHero').catch(() => {});
   await page.click('#auth-submit').catch(() => {});
   await sleep(1500);

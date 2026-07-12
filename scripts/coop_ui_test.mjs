@@ -30,6 +30,8 @@ try {
   ok('submit says Enter Mojiworld', /enter mojiworld/i.test(gate.submitText || ''), gate);
 
   // Type a name and click Enter — the world should reveal (overlay removed) and the name applied.
+  await page.click('#menu-newgame').catch(() => {});
+  await page.waitForSelector('#auth-user', { state: 'visible', timeout: 10000 }).catch(() => {});
   await page.fill('#auth-user', 'Zephyr');
   await page.click('#auth-submit');
   await page.waitForTimeout(1500);
