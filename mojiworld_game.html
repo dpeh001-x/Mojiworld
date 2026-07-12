@@ -8672,7 +8672,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.28.9';
+const GAME_VERSION = 'v0.28.10';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -32967,11 +32967,14 @@ const net = {
 };
 
 // v0.25.245 (S2) — Multiplayer co-op XP wedge. If a peer is on the same
-// map and within 400 px of the killed monster, grant +50% XP for that
+// map and within 400 px of the killed monster, grant bonus XP for that
 // kill. Pure client-side — uses the existing presence ticks (peers
 // already broadcast x/y/map every 70 ms). The threshold is generous
 // enough that party play feels instantly cooperative without forcing
 // pixel-perfect grouping.
+// v0.28.7 — bonus raised ×1.5 → ×2 (per user "with an ally/friend on
+// multiplayer mode you get 2x exp"). The same ×2 now also applies to the
+// EXP SHARE a player receives from an ally's kill (see _coopApplyKill).
 function _coopXpMul(monster) {
   if (!net.connected || !net.peers) return 1;
   const myMap = game.currentMap || 'town';
@@ -32995,9 +32998,19 @@ function _coopXpMul(monster) {
     if (typeof p._last === 'number' && p._last < _staleCutoff) continue;
     const dx = (p.x || 0) + player.w / 2 - mx;   // v0.26.1023 — center the peer coord (peer broadcasts top-left; monster is centered)
     const dy = (p.y || 0) + player.h / 2 - my;
-    if (dx * dx + dy * dy <= RANGE) return 1.5;
+    if (dx * dx + dy * dy <= RANGE) return 2;   // v0.28.7 — was 1.5
   }
   return 1;
+}
+// v0.28.7 — receiver-side proximity check for the ally-kill EXP share: is MY
+// player within the 400px co-op wedge of the broadcast kill position? Mirrors
+// _coopXpMul's rule from the recipient's perspective (own position — no
+// stale-peer concerns).
+function _coopNearKill(kx, ky) {
+  if (!Number.isFinite(+kx) || !Number.isFinite(+ky)) return false;
+  const dx = (player.x + player.w / 2) - +kx;
+  const dy = (player.y + player.h / 2) - +ky;
+  return dx * dx + dy * dy <= 400 * 400;
 }
 
 function _mpStatus(text, color) {
@@ -33912,7 +33925,11 @@ function _coopApplyKill(msg) {
     // co-op doesn't re-open a farm the host pipeline already nerfed.
     const _pqQ = { clockworkUnderpassLobby: 'q_clockwork_underpass', clockworkSpire: 'q_pq_spire', tower: 'q_pq_carriage', clockworkExpress: 'q_pq_carriage' }[game.currentMap];
     const _pqMul = (_pqQ && player.quests && player.quests.completed && player.quests.completed[_pqQ]) ? 0.2 : 1;
-    exp = Math.floor(exp * boost * early * evt * mon * 1.35 * _pqMul);
+    // v0.28.7 — the ally-kill share gets the same ×2 co-op wedge the killer
+    // gets, when THIS peer is within 400px of the kill (msg.x/y). A same-map
+    // ally farther away still receives the base share.
+    const coop = (typeof _coopNearKill === 'function' && _coopNearKill(msg.x, msg.y)) ? 2 : 1;
+    exp = Math.floor(exp * boost * early * evt * mon * 1.35 * _pqMul * coop);
     player.exp = (player.exp || 0) + exp;
     if (typeof _maybeLevelUp === 'function') { try { _maybeLevelUp(); } catch (e) {} }
   }
@@ -60867,9 +60884,9 @@ function killMonster(m) {
   // this takes ~8% off the L1→50 grind, which prestige compounds on.
   const xpCurveMul = 1.35;
   // v0.25.245 (S2) — multiplayer combo XP. If at least one peer is on
-  // the same map within 400 px of the kill, grant +50% XP. Doesn't
-  // require any new network messages — uses existing presence ticks.
-  // Toast surfaces the bonus the first time it fires per kill chain.
+  // the same map within 400 px of the kill, grant bonus XP (v0.28.7: ×2,
+  // was +50%). Doesn't require any new network messages — uses existing
+  // presence ticks. Toast surfaces the bonus once per kill chain.
   let mpCoopMul = 1;
   if (typeof _coopXpMul === 'function') mpCoopMul = _coopXpMul(m);
   // v0.26.061 — Track exact EXP delta this kill so the new bottom-right
@@ -60913,7 +60930,7 @@ function killMonster(m) {
   }
   if (mpCoopMul > 1 && (game._lastCoopToast | 0) + 6000 < game.time) {
     game._lastCoopToast = game.time;
-    showToast('🤝 Co-op bonus +50% XP', 'rare');
+    showToast('🤝 Co-op bonus ×2 XP', 'rare');
   }
   // Press 8 cheat + any other XP pump call into _maybeLevelUp via the
   // inline call below. Extracting it as a named helper above the body of
