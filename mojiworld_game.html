@@ -8371,12 +8371,13 @@ The sleeping world is listening.</div>
       </div>
     </div>
     <div class="settings-row">
-      <label title="Combat assist. Story = take 50% damage · Normal = standard · Hard = take 50% more damage.">Difficulty</label>
+      <label title="Risk vs reward. Story = take 50% damage, −20% EXP/coins · Normal = standard · Hard = take +50% damage, +30% EXP/coins, +25% gear drops · Nightmare = take DOUBLE damage, +60% EXP, +75% coins, +50% gear drops. Changes mid-boss apply on the next map.">Difficulty</label>
       <div class="ctrl" style="justify-content:flex-end;">
         <select id="set-difficulty" onchange="applySettingsLive();" style="background:rgba(0,0,0,0.45); color:#fff; border:1px solid #777; border-radius:6px; padding:5px 8px; font-size:13px; font-weight:600;">
-          <option value="story">Story — easy</option>
+          <option value="story">Story — easy · −20% rewards</option>
           <option value="normal">Normal</option>
-          <option value="hard">Hard</option>
+          <option value="hard">Hard — +30% rewards</option>
+          <option value="nightmare">Nightmare — 2× dmg · best loot</option>
         </select>
       </div>
     </div>    <div class="settings-row">
@@ -8671,7 +8672,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.28.5';
+const GAME_VERSION = 'v0.28.6';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -28389,13 +28390,19 @@ function _applySettings(s) {
   // Resolution — trigger refit so the scale slider value takes effect
   if (typeof game !== 'undefined' && game) {
     game._reduceMotion = !!s.reduceMotion;
-    const _newDiffMul = (s.difficulty === 'story') ? 0.5 : (s.difficulty === 'hard') ? 1.5 : 1.0;
+    // v0.28.6 — 'nightmare' tier added (2× damage taken, best rewards). The
+    // tier string travels alongside the damage mul so the reward helpers
+    // (_diffExpMul/_diffCoinMul/_diffDropMul at the _diffDmg site) stay in
+    // lock-step with the SAME anti-cheese deferral — otherwise flipping to
+    // Nightmare mid-boss would buff the kill loot without the risk.
+    const _newDiffTier = (['story','hard','nightmare'].includes(s.difficulty)) ? s.difficulty : 'normal';
+    const _newDiffMul = { story: 0.5, normal: 1.0, hard: 1.5, nightmare: 2.0 }[_newDiffTier];
     // Don't let a difficulty change take effect mid-boss (opening Settings and
     // switching to Story to halve incoming damage was a cheese). Defer it to the
     // next map load if a boss is currently alive.
     const _bossAlive = Array.isArray(game.monsters) && game.monsters.some(m => m && m.isBoss && m.currentHp > 0);
-    if (_bossAlive) { game._pendingDiffMul = _newDiffMul; }
-    else { game._diffDmgMul = _newDiffMul; game._pendingDiffMul = null; }
+    if (_bossAlive) { game._pendingDiffMul = _newDiffMul; game._pendingDiffTier = _newDiffTier; }
+    else { game._diffDmgMul = _newDiffMul; game._diffTier = _newDiffTier; game._pendingDiffMul = null; game._pendingDiffTier = null; }
   }
   if (typeof _fitGameToViewport === 'function') _fitGameToViewport();
 }
@@ -41149,6 +41156,7 @@ function loadMap(id, entryX, entryY) {
   try { if (_jukeboxPlaying && typeof jukeboxStop === 'function') jukeboxStop({ silent: true }); } catch (e) {}
   // Apply any difficulty change that was deferred during a boss fight (anti-cheese).
   if (game._pendingDiffMul != null) { game._diffDmgMul = game._pendingDiffMul; game._pendingDiffMul = null; }
+  if (game._pendingDiffTier != null) { game._diffTier = game._pendingDiffTier; game._pendingDiffTier = null; }   // v0.28.6 — reward tier follows the same defer
   // v0.26.x audit FIX — close any open NPC dialog when leaving the map. loadMap
   // clears game.npcs but didn't close the dialog or null _activeNpc, so a
   // sticky (click/tap-opened) dialog could survive a portal/warp and linger on
