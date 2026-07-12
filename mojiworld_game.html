@@ -27141,7 +27141,13 @@ window.addEventListener('keydown', e => {
   if (player.cls && !game.paused && player.hp > 0) {
     const EMOTES = { '1': '😊', '2': '😂', '3': '😲', '4': '❤', '5': '👍',
                      '6': '😢', '7': '😡', '8': '⚔️', '9': '💤', '0': '👋' };
-    if (EMOTES[k] && !(typeof KEY_TO_SLOT !== 'undefined' && KEY_TO_SLOT[k])) {
+    // v0.27.24 — yield the digit not only to an explicit skill bind
+    // (KEY_TO_SLOT) but also to a RAW-key action the player rebound onto a
+    // number: Status-Cure and Open-Chest/Pickup both match the raw key and
+    // their rebind pickups accept digits, so pre-fix binding Cure→4 or
+    // Pickup→1 fired the action AND popped + relayed an emote every press.
+    const _digitOwnedByAction = (k === (player.cureKey || 'shift')) || (k === (player.interactKey || 'f'));
+    if (EMOTES[k] && !(typeof KEY_TO_SLOT !== 'undefined' && KEY_TO_SLOT[k]) && !_digitOwnedByAction) {
       player._emote = { kind: EMOTES[k], life: 2000, maxLife: 2000 };
       if (typeof _mpSendEmote === 'function') _mpSendEmote(EMOTES[k]);
     }
@@ -33359,7 +33365,15 @@ function _coopApplyDrop(msg) {
   if (_coopDropDup(msg.u)) return;
   if (msg.k === 'item' && msg.it && typeof msg.it === 'object') {
     if (!game.drops) game.drops = [];
-    game.drops.push({ x: +msg.x || 0, y: +msg.y || 0, vy: -4, type: 'item', item: msg.it,
+    // v0.27.24 — SECURITY: scrub the host-supplied item's string fields
+    // (name, slot, …) before it enters game.drops → player.inventory → the
+    // item tooltip, which renders it.name/it.slot via innerHTML UNescaped.
+    // _mpScrubStrings was applied to peers/chat/roomId but this nested-object
+    // drop path was missed (the recurring "MP peer string → innerHTML" class).
+    // The item is a flat descriptor, so top-level string scrubbing covers the
+    // rendered fields; strips <> and caps length.
+    const _it = _mpScrubStrings(msg.it);
+    game.drops.push({ x: +msg.x || 0, y: +msg.y || 0, vy: -4, type: 'item', item: _it,
       life: Math.max(60, +msg.l || 900), noMagnet: !!msg.nm, _coopMirror: true });
   } else if (msg.k === 'orb') {
     if (!game.powerupOrbs) game.powerupOrbs = [];
@@ -35648,9 +35662,13 @@ function _kbActionByKey() {
   const HARDCODED = { p:'Mail', j:'Quest', enter:'Chat', t:'Ping' };   // v0.27.22 — R dev label dropped (Stage Editor locked + hidden); T stays Ping (co-op)
   for (const hk in HARDCODED) if (!(hk in map)) map[hk] = HARDCODED[hk];
   // v0.27.17 — the WHOLE number row is emotes (dev tools hidden + locked).
-  // Forced after the action-bind fill so a stale default (e.g. the dead
-  // changeClass '0' bind) can't relabel a number key.
-  for (const nk of ['1','2','3','4','5','6','7','8','9','0']) map[nk] = 'Emote';
+  // v0.27.24 — label a digit 'Emote' only if no live action already owns it.
+  // The dead changeClass/resetSave binds this force was guarding against are
+  // no longer in `L` (removed), so they can't populate `map` anymore — but an
+  // UNCONDITIONAL force also clobbered LEGITIMATE binds (e.g. HP Potion→5,
+  // Cure→4), showing 'Emote' on a key that actually fires the action. Guard it
+  // so the board matches what the key really does.
+  for (const nk of ['1','2','3','4','5','6','7','8','9','0']) if (!(nk in map)) map[nk] = 'Emote';
   return map;
 }
 function renderKeybindKeyboard() {
