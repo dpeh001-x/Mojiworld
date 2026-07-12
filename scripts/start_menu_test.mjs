@@ -77,9 +77,9 @@ try {
   ok('Continue card visible with save', await page.isVisible('#menu-continue'));
   const sub = await page.textContent('#menu-continue-sub');
   ok('Continue card shows name/level/class/map', sub.includes('Aurora') && sub.includes('Lv.42') && sub.includes('Mage'), sub.trim());
-  ok('Continue card shows class portrait', await page.evaluate(() => {
+  ok('Continue card shows class crest', await page.evaluate(() => {
     const i = document.getElementById('menu-continue-icon');
-    return i && i.style.display !== 'none' && i.src.includes('Class/mage.png');
+    return i && i.style.display !== 'none' && i.complete && i.naturalWidth > 0 && i.src.includes('class_crest_mage');
   }));
 
   await page.click('#menu-backups');
