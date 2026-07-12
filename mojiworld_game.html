@@ -8663,7 +8663,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.27.23';
+const GAME_VERSION = 'v0.27.25';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -72307,8 +72307,12 @@ function _tutPing(tag) {
     if (gl) { gl.textContent = 'Cheep! You did it — that\'s the one. \u2713'; gl.classList.remove('flash'); void gl.offsetWidth; gl.classList.add('flash'); }
     const t = document.getElementById('tut-step-title');
     if (t && t.textContent.indexOf('\u2705') < 0) t.textContent = '\u2705 ' + t.textContent;
-    const pg = document.getElementById('tut-progress');
-    if (pg) { let d=''; for (let i=0;i<TUTORIAL_STEPS.length;i++) d += (i===_tutStep?'\u25CF':(TUTORIAL_STEPS[i]._done?'\u2713':'\u00B7')); pg.textContent = d + '  ' + (_tutStep+1) + '/' + TUTORIAL_STEPS.length; }
+    // v0.27.25 \u2014 Shared DOM pip renderer (current pip flips green live)
+    // + arm the Next button's "ready" pulse so the player sees both the
+    // tick AND the way forward without reading anything.
+    if (typeof _renderTutPips === 'function') _renderTutPips();
+    const _nb = document.getElementById('tut-next');
+    if (_nb) _nb.classList.add('ready');
     if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('chirp'); } catch (e) {} }
     if (_tutStep < TUTORIAL_STEPS.length - 1) {
       const _at = _tutStep;
@@ -72331,6 +72335,40 @@ function _tutTouchify(html) {
       return '<kbd>' + (MAP[k] || k) + '</kbd>';
     });
   } catch (e) { return html; }
+}
+// v0.27.25 — SEGMENTED PROGRESS PIPS (DOM, clickable). Replaces the
+// monospace text-pip string (●✓···) with real pip elements: green fill
+// for completed steps, pulsing gold ring on the current step, hollow
+// for upcoming. Each pip is clickable to jump straight to its step —
+// fast re-reads without hammering Back/Next 11 times. Shared by
+// _renderTutorialStep (full redraw) and _tutPing (live tick) so the
+// two callers can't drift apart visually.
+function _renderTutPips() {
+  const pg = document.getElementById('tut-progress');
+  if (!pg) return;
+  pg.innerHTML = '';
+  const wrap = document.createElement('span');
+  wrap.id = 'tut-pips';
+  for (let i = 0; i < TUTORIAL_STEPS.length; i++) {
+    const pip = document.createElement('span');
+    pip.className = 'tut-pip'
+      + (i === _tutStep ? ' cur' : '')
+      + (TUTORIAL_STEPS[i]._done ? ' done' : '');
+    pip.title = (i + 1) + '. ' + TUTORIAL_STEPS[i].title;
+    // IIFE captures the index; stopPropagation so the card's other
+    // click surfaces don't also fire on the same tap.
+    pip.onclick = ((idx) => (e) => {
+      if (e) e.stopPropagation();
+      _tutStep = idx;
+      _renderTutorialStep();
+    })(i);
+    wrap.appendChild(pip);
+  }
+  pg.appendChild(wrap);
+  const ct = document.createElement('span');
+  ct.className = 'tut-pip-count';
+  ct.textContent = (_tutStep + 1) + '/' + TUTORIAL_STEPS.length;
+  pg.appendChild(ct);
 }
 function _renderTutorialStep() {
   const step = TUTORIAL_STEPS[_tutStep];
@@ -72399,7 +72437,8 @@ function _renderTutorialStep() {
   // v0.27.5 \u2014 arm the zero-cost movement-ping gate only while the 'move' step
   // is the live, un-done step (read each frame by the updatePlayer input read).
   window._tutWantsMove = (step.detect === 'move' && !step._done);
-  if ($('tut-progress')) { let _d=''; for (let i=0;i<TUTORIAL_STEPS.length;i++) _d += (i===_tutStep?'\u25CF':(TUTORIAL_STEPS[i]._done?'\u2713':'\u00B7')); $('tut-progress').textContent = _d + '  ' + (_tutStep + 1) + '/' + TUTORIAL_STEPS.length; }
+  // v0.27.25 \u2014 DOM pip renderer replaces the monospace text-pip string.
+  if (typeof _renderTutPips === 'function') _renderTutPips();
   // v0.25.928 — Update the Guguma canary's line for this step + trigger
   // the fade-in slide animation so the bird visibly "speaks" each beat.
   // Falls back to the default chip line if the step has no gugumaLine.
@@ -72413,7 +72452,27 @@ function _renderTutorialStep() {
   const prevBtn = $('tut-prev');
   if (prevBtn) prevBtn.style.visibility = _tutStep === 0 ? 'hidden' : 'visible';
   const nextBtn = $('tut-next');
-  if (nextBtn) nextBtn.textContent = _tutStep === TUTORIAL_STEPS.length - 1 ? 'Got it ✨' : 'Next ▶';
+  if (nextBtn) {
+    nextBtn.textContent = _tutStep === TUTORIAL_STEPS.length - 1 ? 'Got it ✨' : 'Next ▶';
+    // v0.27.25 — "ready" pulse: once the current step's objective is
+    // ticked (or the step has no objective at all… no — info steps
+    // shouldn't pulse, they'd pulse permanently), glow the Next button
+    // so the player knows the tour is waiting on them, not vice versa.
+    nextBtn.classList.toggle('ready', !!step._done);
+  }
+  // v0.27.25 — Step-change transition. Re-trigger a short fade+lift on
+  // the step content (title / objective pill / icon / body) so paging
+  // reads as a deliberate scene change instead of an instant text swap.
+  // Class lives on the MODAL (not the card) so it can't clash with the
+  // card-level tut-flash-done animation from _tutPing.
+  {
+    const _tm = document.getElementById('tutorial-modal');
+    if (_tm) {
+      _tm.classList.remove('tut-step-in');
+      void _tm.offsetWidth;   // reflow so the keyframes restart
+      _tm.classList.add('tut-step-in');
+    }
+  }
 }
 function _closeTutorial(markSeen) {
   const modal = document.getElementById('tutorial-modal');
@@ -104903,6 +104962,102 @@ function startBgm() {
   #tutorial-modal.tut-dock.tut-collapsed #tut-live-hint,
   #tutorial-modal.tut-dock.tut-collapsed #tut-nav-row { display: none !important; }
   #tutorial-modal.tut-dock.tut-collapsed #tut-title { margin: 2px 0 6px !important; padding-bottom: 8px; }
+
+  /* =========================================================================
+     v0.27.25 — TUTORIAL UI POLISH ROUND 3
+     ─────────────────────────────────────────────────────────────────────────
+     (1) Segmented progress pips — real DOM elements replacing the
+         monospace ●✓··· string. Green fill = done, pulsing gold = current,
+         hollow = upcoming. Clickable to jump to any step; hover grows the
+         pip vertically so it reads as a button, with the step name in the
+         native title tooltip.
+     (2) Step-change transition — content fades in with a 5px lift on
+         every page so the swap reads as a scene change.
+     (3) Next-button "ready" pulse — once the current objective ticks ✅,
+         Next breathes green-gold so the path forward is unmissable.
+     ========================================================================= */
+  #tut-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #tut-pips {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+    pointer-events: auto;
+  }
+  .tut-pip {
+    width: 14px; height: 5px;
+    border-radius: 3px;
+    background: rgba(210, 220, 235, 0.16);
+    border: 0.5px solid rgba(210, 220, 235, 0.28);
+    cursor: pointer;
+    transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
+  }
+  .tut-pip:hover {
+    transform: scaleY(1.7);
+    border-color: rgba(255, 220, 140, 0.75);
+    background: rgba(255, 220, 140, 0.30);
+  }
+  .tut-pip.done {
+    background: linear-gradient(90deg, #8ee08a, #57b060);
+    border-color: rgba(140, 230, 150, 0.65);
+  }
+  .tut-pip.cur {
+    background: linear-gradient(90deg, #ffe89a, #ffd166);
+    border-color: #fff6c8;
+    animation: tutPipPulse 1.6s ease-in-out infinite;
+  }
+  /* a step that is BOTH current and done reads green-with-gold-ring */
+  .tut-pip.cur.done {
+    background: linear-gradient(90deg, #8ee08a, #57b060);
+    border-color: #fff6c8;
+  }
+  @keyframes tutPipPulse {
+    0%, 100% { box-shadow: 0 0 4px rgba(255, 209, 102, 0.45); }
+    50%      { box-shadow: 0 0 11px rgba(255, 209, 102, 0.90); }
+  }
+  .tut-pip-count {
+    font: 700 10px/1 'Consolas', 'JetBrains Mono', monospace;
+    color: rgba(255, 214, 130, 0.70);
+    letter-spacing: 1px;
+  }
+  /* collapsed dock: pips live in the hidden nav row already — nothing extra */
+
+  /* (2) step-change fade+lift on the content region. Class sits on the
+     MODAL so it can't collide with the card-level tut-flash-done
+     animation. Guguma chip + banner intentionally excluded — only the
+     step-specific content moves. */
+  #tutorial-modal.tut-step-in #tut-icon,
+  #tutorial-modal.tut-step-in #tut-step-title,
+  #tutorial-modal.tut-step-in #tut-try,
+  #tutorial-modal.tut-step-in #tut-body {
+    animation: tutStepIn 260ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  @keyframes tutStepIn {
+    0%   { opacity: 0; transform: translateY(5px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+
+  /* (3) Next "ready" pulse — green-gold breathing once the objective is
+     ticked. Dock + full-modal variants share the rule. */
+  #tutorial-modal #tut-next.ready {
+    animation: tutNextReady 1.3s ease-in-out infinite;
+  }
+  @keyframes tutNextReady {
+    0%, 100% {
+      box-shadow:
+        0 4px 18px rgba(255, 209, 102, 0.40),
+        inset 0 1px 0 rgba(255, 255, 255, 0.55);
+    }
+    50% {
+      box-shadow:
+        0 4px 26px rgba(120, 230, 140, 0.70),
+        0 0 0 2px rgba(120, 230, 140, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.65);
+    }
+  }
 
   /* =========================================================================
      v0.25.945 — COIN-TOAST ZONE + BURST-TOAST TYPOGRAPHY POLISH
