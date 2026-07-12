@@ -38,7 +38,11 @@ const STUB = {
   appId: 0,
   cloud: { read() { return null; }, write() { return false; } },
   achievement: { unlock() { return false; }, isUnlocked() { return false; } },
+  presence: { set() { return false; }, clear() {} },
+  overlay: { open() { return false; }, openWebPage() { return false; } },
+  stats: { set() { return false; } },
   input: { snapshot() { return null; } },
+  enableOverlay() { return false; },
   runCallbacks() {},
   shutdown() {},
 };
@@ -90,6 +94,51 @@ function init() {
         } catch (e) { return false; }
       },
     },
+    // Friends Rich Presence — status + party group + `connect` (drives Join Game).
+    presence: {
+      set(p) {
+        try {
+          if (!client.friends || typeof client.friends.setRichPresence !== 'function' || !p) return false;
+          const sr = (k, v) => { try { client.friends.setRichPresence(k, v == null ? '' : String(v)); } catch (_) {} };
+          if ('status' in p)    { sr('status', p.status); sr('steam_display', '#Status_Playing'); sr('game_status', p.status); }
+          if ('group' in p)     sr('steam_player_group', p.group);
+          if ('groupSize' in p) sr('steam_player_group_size', p.groupSize ? String(p.groupSize) : '');
+          if ('connect' in p)   sr('connect', p.connect);
+          return true;
+        } catch (e) { return false; }
+      },
+      clear() { try { if (client.friends && client.friends.clearRichPresence) client.friends.clearRichPresence(); } catch (e) {} },
+    },
+    // Steam overlay — open a dialog ('friends' | 'community' | ...) or a web page.
+    overlay: {
+      open(dialog) {
+        try {
+          const ov = client.overlay || (client.friends && client.friends);
+          if (ov && typeof ov.activateDialog === 'function') { ov.activateDialog(String(dialog || 'friends')); return true; }
+          if (client.overlay && typeof client.overlay.activateToUser === 'function') { /* needs a steamid — skip */ }
+          return false;
+        } catch (e) { return false; }
+      },
+      openWebPage(url) { try { if (client.overlay && client.overlay.activateToWebPage) { client.overlay.activateToWebPage(String(url)); return true; } } catch (e) {} return false; },
+    },
+    // Stat counters (Steamworks stat API names must match the keys the game sends).
+    stats: {
+      set(obj) {
+        try {
+          if (!client.stats || !obj) return false;
+          let any = false;
+          for (const k in obj) {
+            const v = obj[k];
+            try {
+              if (typeof v === 'number' && Number.isInteger(v) && client.stats.setInt) { client.stats.setInt(k, v); any = true; }
+              else if (typeof v === 'number' && client.stats.setFloat) { client.stats.setFloat(k, v); any = true; }
+            } catch (_) {}
+          }
+          if (any && client.stats.store) client.stats.store();
+          return any;
+        } catch (e) { return false; }
+      },
+    },
     achievement: {
       unlock(name) {
         try {
@@ -116,6 +165,9 @@ function init() {
         } catch (e) { return null; }
       },
     },
+    // Enable the in-game Steam overlay for Electron (Shift+Tab: friends,
+    // screenshots, notifications, browser). Best-effort; safe if unsupported.
+    enableOverlay() { try { if (typeof steamworks.electronEnableSteamOverlay === 'function') { steamworks.electronEnableSteamOverlay(); return true; } } catch (e) {} return false; },
     runCallbacks() { try { if (client.runCallbacks) client.runCallbacks(); } catch (e) {} },
     shutdown() { try { if (steamworks.shutdown) steamworks.shutdown(); } catch (e) {} },
     _steamworks: steamworks,

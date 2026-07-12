@@ -24,13 +24,27 @@ const FIXED_PORT = 47821;   // stable loopback port -> stable origin -> saves pe
 // or the native module is missing, so the app launches + plays regardless.
 let steam = require('./steam_integration').STUB;
 try { steam = require('./steam_integration').init(); } catch (e) { console.warn('[steam] bridge load failed:', e && e.message); }
-// Renderer <-> Steam IPC. Cloud read/write are async (invoke/handle); the input
-// snapshot is a fast synchronous read polled each frame by the game.
-ipcMain.handle('steam:cloud-read',  (_e, name) => { try { return steam.cloud.read(name); } catch (e) { return null; } });
-ipcMain.handle('steam:cloud-write', (_e, name, content) => { try { return steam.cloud.write(name, content); } catch (e) { return false; } });
-ipcMain.handle('steam:ach-unlock',  (_e, name) => { try { return steam.achievement.unlock(name); } catch (e) { return false; } });
-ipcMain.on('steam:input-snapshot',  (e) => { try { e.returnValue = steam.input.snapshot(); } catch (err) { e.returnValue = null; } });
-// Pump Steamworks callbacks periodically (cloud/input housekeeping). No-op on the stub.
+// Enable the Steam overlay (Shift+Tab) BEFORE any window is created.
+if (steam.available) { try { steam.enableOverlay(); } catch (e) {} }
+
+// Friends "Join Game": Steam launches us with the `connect` rich-presence value
+// appended to argv — we set it to "--moji-join=<relay>~<CODE>". Extract it so the
+// renderer auto-joins that party. (Second-instance handled in the lock block.)
+function extractJoin(argv) {
+  try { const a = (argv || []).find((x) => typeof x === 'string' && x.startsWith('--moji-join=')); return a ? a.slice('--moji-join='.length) : ''; } catch (e) { return ''; }
+}
+const LAUNCH_JOIN = extractJoin(process.argv);
+
+// Renderer <-> Steam IPC. Cloud/achievement/presence/overlay/stats are async
+// (invoke/handle); the input snapshot is a fast synchronous read polled per frame.
+ipcMain.handle('steam:cloud-read',   (_e, name) => { try { return steam.cloud.read(name); } catch (e) { return null; } });
+ipcMain.handle('steam:cloud-write',  (_e, name, content) => { try { return steam.cloud.write(name, content); } catch (e) { return false; } });
+ipcMain.handle('steam:ach-unlock',   (_e, name) => { try { return steam.achievement.unlock(name); } catch (e) { return false; } });
+ipcMain.handle('steam:presence-set', (_e, p) => { try { return steam.presence.set(p); } catch (e) { return false; } });
+ipcMain.handle('steam:overlay-open', (_e, dialog) => { try { return steam.overlay.open(dialog); } catch (e) { return false; } });
+ipcMain.handle('steam:stats-set',    (_e, obj) => { try { return steam.stats.set(obj); } catch (e) { return false; } });
+ipcMain.on('steam:input-snapshot',   (e) => { try { e.returnValue = steam.input.snapshot(); } catch (err) { e.returnValue = null; } });
+// Pump Steamworks callbacks periodically (cloud/input/presence housekeeping).
 if (steam.available) { try { setInterval(() => { try { steam.runCallbacks(); } catch (e) {} }, 200); } catch (e) {} }
 
 // Reduce Chromium's throttling of an unfocused/occluded window so a co-op HOST
@@ -109,7 +123,7 @@ async function createWindow() {
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      additionalArguments: ['--moji-relay=' + RELAY_URL, '--moji-steam=' + (steam.available ? '1' : '0')],
+      additionalArguments: ['--moji-relay=' + RELAY_URL, '--moji-steam=' + (steam.available ? '1' : '0'), '--moji-launch-join=' + LAUNCH_JOIN],
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
@@ -128,9 +142,15 @@ async function createWindow() {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_e, argv) => {
     const w = BrowserWindow.getAllWindows()[0];
-    if (w) { if (w.isMinimized()) w.restore(); w.focus(); }
+    if (w) {
+      if (w.isMinimized()) w.restore(); w.focus();
+      // A friend clicked "Join Game" while we were already running: forward the
+      // new party's connect string to the renderer, which switches parties.
+      const join = extractJoin(argv);
+      if (join) { try { w.webContents.send('moji-join', join); } catch (e) {} }
+    }
   });
   app.whenReady().then(createWindow);
   app.on('will-quit', () => { try { steam.shutdown(); } catch (e) {} });

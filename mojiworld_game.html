@@ -31127,6 +31127,76 @@ function _lxSteamSyncAchievements() {
   try { if (game && game.achievements) for (const id in game.achievements) if (game.achievements[id]) _lxSteamUnlock(id); } catch (e) {}
 }
 try { window._lxSteamUnlock = _lxSteamUnlock; window._lxSteamSyncAchievements = _lxSteamSyncAchievements; } catch (e) {}
+// --- Steam Rich Presence + Friends "Join Game" -------------------------------
+// Reports a friends-list status ("In co-op — Lv12 Warrior"), a party GROUP (so
+// Steam clusters partied friends), and a `connect` launch string. Setting the
+// Steam `connect` key makes "Join Game" appear on your friend entry; Steam then
+// launches the friend's copy with that string in argv, which main.js parses and
+// forwards as window.MOJI_JOIN -> the game auto-joins your party (see below).
+function _lxSteamConnectString() {
+  try {
+    if (!net || !net.connected || !net.baseRoom) return '';
+    const relay = net._lastUrl || MP_DEFAULT_URL || '';
+    return '--moji-join=' + encodeURIComponent(relay) + '~' + String(net.baseRoom).toUpperCase();
+  } catch (e) { return ''; }
+}
+let _lxSteamPresenceT = 0;
+function _lxSteamPresence(force) {
+  if (!_steamAvailable() || !window.SteamAPI.presence) return;
+  const now = Date.now();
+  if (!force && now - _lxSteamPresenceT < 6000) return;
+  _lxSteamPresenceT = now;
+  try {
+    const lvl = (typeof player !== 'undefined' && player && player.level) || 1;
+    const cls = (typeof player !== 'undefined' && player && player.cls) ? (player.cls.charAt(0).toUpperCase() + player.cls.slice(1)) : 'Hero';
+    const inCoop = !!(net && net.connected);
+    const status = inCoop ? ('In co-op — Lv' + lvl + ' ' + cls) : ('Playing — Lv' + lvl + ' ' + cls);
+    window.SteamAPI.presence.set({
+      status,
+      group: inCoop ? String(net.baseRoom || '').toUpperCase() : '',
+      groupSize: inCoop ? (1 + (net.peers ? Object.keys(net.peers).length : 0)) : 0,
+      connect: _lxSteamConnectString(),
+    });
+  } catch (e) {}
+}
+// Friend clicked "Join Game" (or launched via a connect string): auto-join the
+// party. window.MOJI_JOIN = '<relay>~<CODE>' (relay URL-encoded) from main.js.
+let _lxSteamJoinDone = false;
+function _lxSteamTryAutoJoin(joinStr) {
+  try {
+    let s = joinStr || (typeof window !== 'undefined' ? window.MOJI_JOIN : '');
+    if (!s || typeof s !== 'string') return;
+    if (s.indexOf('--moji-join=') === 0) s = s.slice('--moji-join='.length);   // tolerate the raw connect string (launch vs forwarded)
+    const bar = s.indexOf('~');
+    if (bar < 0) return;
+    const relay = decodeURIComponent(s.slice(0, bar)) || MP_DEFAULT_URL;
+    const code = s.slice(bar + 1).replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 12);
+    if (!code) return;
+    _lxSteamJoinDone = true;
+    const name = (typeof _mpLocalName === 'function') ? _mpLocalName() : ((player && player.look && player.look.name) || 'Hero');
+    if (typeof mpConnect === 'function') { mpConnect(relay, name, code); if (typeof showToast === 'function') showToast('🎮 Joining your friend\'s party…', 'epic'); }
+  } catch (e) {}
+}
+// Open the Steam overlay to friends so the player can invite (friends Join Game
+// via the rich-presence connect key). Returns false when Steam isn't present.
+function _lxSteamInviteFriends() {
+  if (!_steamAvailable() || !window.SteamAPI.overlay) return false;
+  try { window.SteamAPI.overlay.open('friends'); return true; } catch (e) { return false; }
+}
+// --- Steam Stats + achievement progress --------------------------------------
+// Lifetime stat counters (configure matching stat API names in Steamworks).
+function _lxSteamPushStats() {
+  if (!_steamAvailable() || !window.SteamAPI.stats) return;
+  try {
+    window.SteamAPI.stats.set({
+      lifetime_kills: (game && game.kills) || 0,
+      highest_level: (player && player.level) || 1,
+      lifetime_coins: (player && player.mojicoins) || 0,
+      bosses_defeated: (game && game.bossDefeated) ? Object.keys(game.bossDefeated).length : 0,
+    });
+  } catch (e) {}
+}
+try { window._lxSteamPresence = _lxSteamPresence; window._lxSteamTryAutoJoin = _lxSteamTryAutoJoin; window._lxSteamInviteFriends = _lxSteamInviteFriends; window._lxSteamPushStats = _lxSteamPushStats; } catch (e) {}
 // --- Controller (Gamepad API + optional native Steam Input) ------------------
 // Xbox/standard button index -> game input. {a:'action'} resolves through the
 // player's live rebinds; {k:'key'} is a literal physical key (skill slots /
@@ -31244,6 +31314,8 @@ function _flushSaveStateNow() {
     try { if (typeof _lxCloudPushSave === 'function') _lxCloudPushSave(_json); } catch (e) {}
     // v0.28.0 — Steam Cloud mirror (desktop build only; no-op on web/without Steam).
     try { if (typeof _lxSteamCloudPush === 'function') _lxSteamCloudPush(_json); } catch (e) {}
+    // v0.28.1 — Steam Stats push (lifetime kills / level / coins / bosses).
+    try { if (typeof _lxSteamPushStats === 'function') _lxSteamPushStats(); } catch (e) {}
     game._saveDirty = false;
     game._lastSaveAt = Date.now();
     // v0.25.905 — Track payload size so the next "approaching quota"
@@ -33033,6 +33105,17 @@ function openMultiplayer() {
     b.onclick = () => { _roomEl.value = _mpNewPartyCode(); };
     _roomEl.insertAdjacentElement('afterend', b);
   }
+  // v0.28.1 — Steam build only: "Invite Friends" opens the Steam overlay; friends
+  // can then Join Game via rich presence. Absent on the web (no window.SteamAPI).
+  if (typeof _steamAvailable === 'function' && _steamAvailable() && !document.getElementById('mp-invite-btn')) {
+    const inv = document.createElement('button');
+    inv.id = 'mp-invite-btn'; inv.type = 'button'; inv.textContent = '🎮 Invite Steam Friends';
+    inv.title = 'Open the Steam overlay — friends can then Join Game from your profile';
+    inv.style.cssText = 'margin-top:6px; margin-left:6px; padding:5px 8px; font-size:11px; background:rgba(40,80,60,0.6); color:#a8f0c0; border:1px solid #5a9c78; border-radius:4px; cursor:pointer;';
+    inv.onclick = () => { try { _lxSteamInviteFriends(); } catch (e) {} };
+    const _nc = document.getElementById('mp-newcode-btn');
+    if (_nc) _nc.insertAdjacentElement('afterend', inv); else _roomEl.insertAdjacentElement('afterend', inv);
+  }
   // v0.27.0 — Advanced (server URL + channel) toggle. Casual players never open it.
   const _advT = document.getElementById('mp-advanced-toggle');
   const _adv = document.getElementById('mp-advanced');
@@ -33125,6 +33208,9 @@ function mpConnect(url, name, room) {
     };
     ws.send(JSON.stringify(hello));
     net.connected = true;
+    // v0.28.1 — refresh Steam Rich Presence now that we're in a party (enables
+    // friends' "Join Game" via the connect key). No-op without Steam.
+    try { if (typeof _lxSteamPresence === 'function') _lxSteamPresence(true); } catch (e) {}
     _mpStatus(`Connected · ${net.baseRoom || net.roomId} · Ch ${net.channel || 1}`, '#88ffaa');
     _mpPushLog(`Connected to ${url} · room "${net.roomId}"`, 'sys');
     _mpRenderPlayerList();
@@ -98681,6 +98767,12 @@ function _bossRushComplete() {
 try { if (typeof _lxStartGamepad === 'function') _lxStartGamepad(); } catch (e) {}
 try { if (typeof _lxSteamCloudSync === 'function') _lxSteamCloudSync().then((r) => { if (r === 'reloading') { try { location.reload(); } catch (e) {} } }, () => {}); } catch (e) {}
 try { if (typeof _lxSteamSyncAchievements === 'function') setTimeout(_lxSteamSyncAchievements, 1500); } catch (e) {}
+// v0.28.1 — Steam: auto-join a friend's party if launched via "Join Game"
+// (window.MOJI_JOIN), and start the rich-presence + stats heartbeat (self-
+// throttled; all no-ops without Steam).
+try { if (typeof _lxSteamTryAutoJoin === 'function') setTimeout(() => _lxSteamTryAutoJoin(), 2500); } catch (e) {}
+try { if (window.SteamAPI && window.SteamAPI.onJoin) window.SteamAPI.onJoin((s) => { try { _lxSteamTryAutoJoin(s); } catch (e) {} }); } catch (e) {}
+try { setInterval(() => { try { if (typeof _lxSteamPresence === 'function') _lxSteamPresence(); } catch (e) {} }, 6000); } catch (e) {}
 
 if (!loadState()) {
   // v0.26.x — Fresh-start now opens on the flash-forward prologue: a

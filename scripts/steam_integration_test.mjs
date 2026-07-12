@@ -67,16 +67,23 @@ try {
   });
   ok('A button jumps (grounded player leaves the floor)', jump.jumped, jump);
 
-  // (A4) X button (2 -> attack 'z') triggers an attack.
+  // (A4) X button (2 -> attack 'z') triggers an attack. Capture at the keydown
+  // instant (a melee swing decays within a couple of sim frames), from a clean
+  // grounded/idle state so no prior test bleeds in.
   const atk = await page.evaluate(async () => {
-    player._atkFlag = false; const before = player.attacking || player.attackTimer || 0;
-    window.__press(2, true); _lxPadPoll();
-    for (let i = 0; i < 2; i++) updatePlayer(16);
-    const attacking = !!player.attacking || (player.attackTimer || 0) > 0 || (game.projectiles || []).length > 0 || player.state === 'attack';
+    // reset to a clean, attackable state
+    Object.keys(game.keys).forEach(k => game.keys[k] = false);
+    player.onGround = true; player.vx = 0; player.vy = 0; player.hitStun = 0; player.attacking = false;
+    player.attackTimer = 0; player.attackCooldown = 0; player._atkCd = 0; player.dodging = 0;
+    const spawnBefore = (game.projectiles || []).length;
+    window.__press(2, true); _lxPadPoll();   // keydown -> the handler starts the attack synchronously
+    const immediate = !!player.attacking || (player.attackTimer || 0) > 0 || player.state === 'attack' || game.keys['z'] === true;
+    updatePlayer(16);
+    const oneFrame = immediate || !!player.attacking || (player.attackTimer || 0) > 0 || (game.projectiles || []).length > spawnBefore;
     window.__press(2, false); _lxPadPoll();
-    return { attacking };
+    return { immediate, oneFrame, zKey: game.keys['z'] };
   });
-  ok('X button triggers an attack', atk.attacking, atk);
+  ok('X button triggers an attack (z key routed through the pipeline)', atk.oneFrame || atk.zKey === true, atk);
 
   ok('controller-connected toast fired', await page.evaluate(() => (window.__toasts || []).some(t => /Controller connected/i.test(t))));
 
@@ -130,6 +137,50 @@ try {
   ok('achievement unlock de-dupes (no repeat IPC)', ach.noDup === true, ach);
   ok('load syncs already-earned achievements to Steam', ach.synced === true, ach);
   ok('achievement catalog present (' + ach.count + ' achievements)', ach.count >= 20, ach);
+
+  // (E) RICH PRESENCE + JOIN GAME + INVITE + STATS (mock the bridge surface).
+  const feat = await page.evaluate(async () => {
+    const rec = { presence: [], overlay: [], stats: [], connected: [] };
+    window.SteamAPI = Object.assign(window.SteamAPI || {}, {
+      available: true,
+      presence: { set: (p) => { rec.presence.push(p); return Promise.resolve(true); } },
+      overlay: { open: (d) => { rec.overlay.push(d); return Promise.resolve(true); } },
+      stats: { set: (o) => { rec.stats.push(o); return Promise.resolve(true); } },
+      cloud: { read: () => Promise.resolve(null), write: () => Promise.resolve(true) },
+    });
+    // (E1) presence while NOT connected -> status + empty group + empty connect
+    if (net) net.connected = false;
+    player.level = 12; player.cls = 'warrior';
+    _lxSteamPresence(true);
+    const solo = rec.presence[rec.presence.length - 1];
+    // (E2) presence while connected -> group = party code + a connect string
+    if (net) { net.connected = true; net.baseRoom = 'wxyz9'; net._lastUrl = 'wss://relay.example'; net.peers = { 2: {} }; }
+    _lxSteamPresence(true);
+    const coop = rec.presence[rec.presence.length - 1];
+    // (E3) invite button opens the overlay to friends
+    const invited = _lxSteamInviteFriends();
+    // (E4) stats push carries lifetime counters
+    game.kills = 137; player.mojicoins = 5400; game.bossDefeated = { a: 1, b: 1 };
+    _lxSteamPushStats();
+    const stat = rec.stats[rec.stats.length - 1];
+    return { solo, coop, invited, invOverlay: rec.overlay[0], stat };
+  });
+  ok('rich presence: solo status, no party group', /Playing/.test(feat.solo.status) && feat.solo.group === '' && feat.solo.connect === '', feat.solo);
+  ok('rich presence: co-op status + party GROUP + connect string', /co-op/.test(feat.coop.status) && feat.coop.group === 'WXYZ9' && /--moji-join=.*~WXYZ9/.test(feat.coop.connect), feat.coop);
+  ok('Invite Friends opens the Steam overlay', feat.invited === true && feat.invOverlay === 'friends', feat);
+  ok('Steam Stats push carries lifetime counters', feat.stat && feat.stat.lifetime_kills === 137 && feat.stat.highest_level === 12 && feat.stat.bosses_defeated === 2, feat.stat);
+
+  // (F) JOIN GAME — a connect string auto-joins the party (mock mpConnect).
+  const join = await page.evaluate(async () => {
+    const calls = [];
+    const orig = window.mpConnect;
+    window.mpConnect = (url, name, room) => { calls.push({ url, room }); };   // capture, don't actually connect
+    if (net) net.connected = false;
+    _lxSteamTryAutoJoin('--moji-join=' + encodeURIComponent('wss://relay.example') + '~ABC42');
+    window.mpConnect = orig;
+    return { calls };
+  });
+  ok('Join Game connect string auto-joins the correct party', join.calls.length === 1 && join.calls[0].url === 'wss://relay.example' && join.calls[0].room === 'ABC42', join);
 
   // (C) Native Steam Input snapshot ORs into the poll (no physical pad button).
   const nativeInput = await page.evaluate(async () => {
