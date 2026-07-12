@@ -38529,7 +38529,7 @@ function resetStats() {
   if (typeof uiConfirm === 'function') {
     uiConfirm({
       title: '⟳ Reset invested stats?',
-      body: 'Refund every Attribute/Skill point you have invested (HP, MP, ATK, DEF, ACC, Speed, Jump) back to SP for ' + cost + ' Mojicoins — 20% of your current ' + (player.mojicoins | 0) + '.',
+      body: 'Refund every Attribute/Skill point you have invested (HP, MP, ATK, DEF, ACC, Speed, Jump) back to SP for ' + cost + ' Mojicoins — 20% of your current ' + ((typeof _fmtBig === 'function') ? _fmtBig(Math.floor(player.mojicoins || 0)) : Math.floor(player.mojicoins || 0)) + '.',
       yesLabel: 'Pay & refund', noLabel: 'Cancel',
     }).then((ok) => { if (ok) _go(); });
   } else { _go(); }
@@ -40066,7 +40066,10 @@ function _completeExpedition() {
   // 50 % chance: 5-15 setshards (unchanged).
   if (Math.random() < 0.50) {
     const _shards = 5 + Math.floor(Math.random() * 11);
-    player.setshards = (player.setshards | 0) + _shards;
+    // v0.27.24 — was `| 0` (ToInt32): a balance above 2.147B wraps negative
+    // and the load-time guard then clamps it to 0 (permanent shard wipe).
+    // Matches the `|| 0` fix already applied to every mojicoin grant site.
+    player.setshards = (player.setshards || 0) + _shards;
     _extras.push(`◈ +${_shards} setshards`);
   }
   // v0.26.311 — Apex shard cache (30 % chance 10-20) REMOVED. Tone-down
@@ -63257,13 +63260,22 @@ function _playNpcTalkSfx(npc) {
     if (slot === undefined) {
       const a = new Audio('audio/npc/npc_' + k + '.mp3');
       a.loop = false;
-      a.volume = 0.5 * ((typeof _SFX_MASTER_VOL === 'number') ? _SFX_MASTER_VOL : 1);
+      // v0.27.24 — store the category base vol so _setSfxMasterVolume can
+      // re-volume this element live (it was baking master in once and was
+      // absent from the setter's cache list, so the SFX slider never reached
+      // already-probed NPC voices — including a stuck-silent 0% probe).
+      a._sfxBase = 0.5;
+      a.volume = a._sfxBase * ((typeof _SFX_MASTER_VOL === 'number') ? _SFX_MASTER_VOL : 1);
       a.preload = 'auto';
       const probedAt = now;
       a.addEventListener('error', () => { _NPC_TALK_SFX[k] = null; });
       a.addEventListener('canplaythrough', () => {
         if (_NPC_TALK_SFX[k] !== 'probing') return;
         _NPC_TALK_SFX[k] = a;
+        // v0.27.24 — re-check mute at fire time: the probe-time guard at the
+        // top of _playNpcTalkSfx can be up to 3s stale, so honor a mute (M)
+        // toggled during the load window instead of playing anyway.
+        if (typeof audio !== 'undefined' && audio && audio.muted) return;
         if (Date.now() - probedAt < 3000) {          // first-open late play
           _npcTalkLastAt = Date.now();
           const p = a.play(); if (p && p.catch) p.catch(() => {});
@@ -99747,6 +99759,10 @@ function _setSfxMasterVolume(v) {
       (typeof _bossSfxEls !== 'undefined') ? _bossSfxEls : null,
       (typeof _monsterSfxEls !== 'undefined') ? _monsterSfxEls : null,
       (typeof _uiSfxEls !== 'undefined') ? _uiSfxEls : null,
+      // v0.27.24 — per-NPC talk voices (v0.27.23). Values are Audio |
+      // 'probing' | null; the `el && el._sfxBase != null` guard below skips
+      // the non-element sentinels safely.
+      (typeof _NPC_TALK_SFX !== 'undefined') ? _NPC_TALK_SFX : null,
     ];
     for (const cache of caches) {
       if (!cache) continue;
