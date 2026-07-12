@@ -81,7 +81,7 @@ async function main() {
 
   await compose('store_capsule_header', 920, 430, [
     await cover(WIDE, 920, 430, 0.62, 0.62),
-    placeLogo(await logoArt(470, { tagline: TAG }), 262, 60),
+    placeLogo(await logoArt(430, { star: false }), 245, 18),
   ]);
 
   await compose('store_capsule_small', 462, 174, [
@@ -91,7 +91,7 @@ async function main() {
 
   // vertical art: keep starry top for the logo, platform cast lower half
   await compose('store_capsule_vertical', 748, 896, [
-    await cover(VERT, 748, 896, 0.5, 0.45),
+    await cover(VERT, 748, 896, 0.5, 0.55),
     placeLogo(await logoArt(600), 374, 34),
   ]);
 
@@ -100,7 +100,7 @@ async function main() {
   ]);
 
   await compose('library_capsule', 600, 900, [
-    await cover(VERT, 600, 900, 0.5, 0.48),
+    await cover(VERT, 600, 900, 0.5, 0.55),
     placeLogo(await logoArt(500), 300, 40),
   ]);
 
