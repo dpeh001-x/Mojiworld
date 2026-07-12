@@ -27,6 +27,10 @@ try {
   ok('embers layer active', await page.evaluate(() => Number(getComputedStyle(document.querySelector('#loading-overlay .lo-embers')).opacity) > 0.5));
   ok('menu items cascade in (animation set)', await page.evaluate(() => getComputedStyle(document.querySelector('#lo-menu .menu-item')).animationName.includes('lo-menu-in')));
   ok('version tag filled', /v0\.\d+/.test(await page.textContent('#lo-version')));
+  ok('logo image loaded (not fallback text)', await page.evaluate(() => {
+    const el = document.getElementById('lo-logo');
+    return !!el && el.tagName === 'IMG' && el.complete && el.naturalWidth > 0 && el.src.includes('mojiworld_logo');
+  }));
   ok('menu bgm element wired to Moji is loading', await page.evaluate(() => typeof _menuBgm !== 'undefined' && _menuBgm._srcs[0].includes('Moji is loading')));
   ok('menu bgm survives missing file (fallback chain)', await page.evaluate(() => typeof _menuBgm !== 'undefined' && (_menuBgm._dead === true || _menuBgm._i < _menuBgm._srcs.length)));
 
