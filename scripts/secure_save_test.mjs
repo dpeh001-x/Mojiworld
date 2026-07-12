@@ -103,6 +103,39 @@ try { const o = JSON.parse(dl.text); dlOk = o._lxSave === 2 && o.alg === 'hmac-s
 ok('exportSaveSecure writes a .mojisave file', /\.mojisave$/.test(dl.name), { name: dl.name });
 ok('exported file is a valid signed secure save', dlOk);
 
+// 6) The Save Backups modal (reached from the front-page menu) has the Secure
+//    Save button, and slot downloads are signed .mojisave by default.
+const bkSurf = await page.evaluate(() => {
+  const btn = document.getElementById('backup-secure-btn');
+  const opensSecure = !!(btn && /secure save/i.test(btn.textContent) && /exportSaveSecure/.test(btn.getAttribute('onclick') || ''));
+  // create a backup slot, then intercept its download bytes + filename
+  return { opensSecure, hasCreate: typeof _lxCreateBackup === 'function', hasDownload: typeof _lxDownloadBackup === 'function' };
+});
+ok('Save Backups modal has a 🔒 Secure Save button', bkSurf.opensSecure);
+
+const slot = await page.evaluate(() => new Promise((resolve) => {
+  try {
+    _lxCreateBackup('test');
+    const arr = (typeof _lxGetBackups === 'function') ? _lxGetBackups() : [];
+    const id = arr.length ? arr[arr.length - 1].id : null;
+    if (!id) return resolve({ err: 'no slot' });
+    const origCreate = URL.createObjectURL, origClick = HTMLAnchorElement.prototype.click;
+    let name = '';
+    HTMLAnchorElement.prototype.click = function () { name = this.download || name; };
+    URL.createObjectURL = function (blob) {
+      const fr = new FileReader();
+      fr.onload = () => { URL.createObjectURL = origCreate; HTMLAnchorElement.prototype.click = origClick; resolve({ name, text: String(fr.result || '') }); };
+      fr.readAsText(blob); return 'blob:captured';
+    };
+    _lxDownloadBackup(id);
+    setTimeout(() => { URL.createObjectURL = origCreate; HTMLAnchorElement.prototype.click = origClick; resolve({ name, text: '' }); }, 4000);
+  } catch (e) { resolve({ err: String(e) }); }
+}));
+let slotSigned = false;
+try { const o = JSON.parse(slot.text); slotSigned = o._lxSave === 2 && crypto.createHmac('sha256', Buffer.from(SECRET, 'utf8')).update(Buffer.from(String(o.key) + '\n' + String(o.gameV) + '\n' + String(o.savedAt) + '\n' + String(o.data), 'utf8')).digest('hex') === o.sig; } catch (e) {}
+ok('backup-slot download is a signed .mojisave', /\.mojisave$/.test(slot.name || ''), { name: slot.name });
+ok('backup-slot file signature is valid', slotSigned);
+
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 console.log(`\n${pass}/${pass + fail} checks passed`);
 await browser.close();
