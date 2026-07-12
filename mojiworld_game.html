@@ -3036,6 +3036,14 @@
     backdrop-filter: blur(3px);
     -webkit-backdrop-filter: blur(3px);
   }
+  /* v0.28.3 — a confirm dialog MUST sit above the modal that triggered it.
+     #confirm-modal is a .modal-overlay (z-index 100) like the talent /
+     advancement, class-select, respec, reset-save modals — and it appears
+     EARLIER in the DOM, so at equal z-index it stacked BEHIND them. Clicking a
+     talent card popped an invisible confirm behind the still-open talent modal
+     and the pick hung (the awaited Promise never got its Yes/No click) — the
+     "stuck on Choose Your Talent" report. Force it above every modal layer. */
+  #confirm-modal { z-index: 100050 !important; }
   /* v0.25.113 — plush / cute modal pass. Rounder corners, soft inner
      top-edge sheen (like the highlight on a plushie), warmer accent
      border, deeper diffuse shadow underneath. The lore modal keeps
@@ -8663,7 +8671,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.28.1';
+const GAME_VERSION = 'v0.28.3';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -97556,6 +97564,16 @@ function updateUI() {
 // MAIN LOOP
 // =========================================================================
 let lastTime = 0;
+// v0.28.3 — FIXED 60 Hz TIMESTEP (high-refresh fast-forward fix). The sim is
+// frame-locked: movement/physics advance a fixed amount PER FRAME (e.g.
+// `player.x += player.vx`, vx a constant px/frame), NOT scaled by dt. So on a
+// 120/144/240 Hz display, rAF fired 2-4× more often and the whole game ran in
+// fast-forward. We gate the sim to ~60 processed frames/sec regardless of
+// refresh: accumulate real elapsed time and only run a frame once a full 1/60 s
+// step has banked, carrying the remainder so the long-run average is exactly
+// 60 Hz. dt is the fixed step below, so the dt-scaled timers stay real-time.
+let _lxSimAccumMs = 0;
+const _LX_SIM_STEP_MS = 1000 / 60;   // 16.667 ms
 // v0.26.x -- OFF-SCREEN THREAT INDICATOR (round-2 audit, top-ranked item).
 // On a 960x560 viewport, bosses / minibosses aggro from outside the camera and
 // deaths read as unfair. Draw a pulsing arrow clamped to the screen edge along
@@ -97609,6 +97627,20 @@ function loop(time) {
     }
     window._lxBootGateDone = true;   // overlay gone — skip the DOM query from now on
   }
+  // v0.28.3 — FIXED 60 Hz TIMESTEP GATE (high-refresh fast-forward fix, see
+  // _lxSimAccumMs above). Bank real elapsed time; skip this rAF until a whole
+  // 1/60 s step has accrued, carrying the remainder. On >60 Hz displays most
+  // rAF ticks now run 0 steps, so the frame-locked sim advances at ~60 fps
+  // regardless of monitor refresh instead of fast-forwarding.
+  {
+    const _elapsed = Math.max(0, Math.min(100, time - lastTime));
+    lastTime = time;
+    _lxSimAccumMs += _elapsed;
+    if (_lxSimAccumMs < _LX_SIM_STEP_MS) { requestAnimationFrame(loop); return; }
+    _lxSimAccumMs -= _LX_SIM_STEP_MS;
+    // Clamp the backlog so a long stall / tab-away can't unleash a burst.
+    if (_lxSimAccumMs > _LX_SIM_STEP_MS * 4) _lxSimAccumMs = _LX_SIM_STEP_MS * 4;
+  }
   // v0.25.775 — dt cap bumped 32 → 50 ms. Pre-fix: a 5 s tab-switch
   // replayed as a flood of 32 ms frames, ticking boss-attack windups
   // but collapsing the player's reaction window because everything
@@ -97627,8 +97659,7 @@ function loop(time) {
   // prevents. setTransform is absolute, so this wipes any leak regardless of
   // how the previous frame exited. Cheap (~once/frame), idempotent.
   try { ctx.setTransform(_LX_DPR, 0, 0, _LX_DPR, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; } catch (_e) {}
-  const dt = Math.max(0, Math.min(50, time - lastTime));   // v0.27.1 — clamp the LOWER bound too: a backward rAF-timestamp delta (clock regression / first frame) made dt<0, and every `x -= dt` (i-frames, cooldowns, skill timers) then RAN BACKWARD.
-  lastTime = time;
+  const dt = _LX_SIM_STEP_MS;   // v0.28.3 — fixed 60 Hz step (the gate above already banked/consumed the real elapsed time and updated lastTime). Replaces the old wall-clock delta so the frame-locked sim is refresh-independent; dt-scaled timers stay real-time because the sim runs at a true 60 steps/sec.
   game.time++;
   game._playMs = (game._playMs || 0) + dt;   // v0.26.453 - accumulated in-game playtime (ms) for boss respawn gating
   // v0.26.317 — Low-HP audio warning. Fires a one-shot `low_hp` SFX
