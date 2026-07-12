@@ -8672,7 +8672,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.28.6';
+const GAME_VERSION = 'v0.28.8';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -28390,7 +28390,7 @@ function _applySettings(s) {
   // Resolution — trigger refit so the scale slider value takes effect
   if (typeof game !== 'undefined' && game) {
     game._reduceMotion = !!s.reduceMotion;
-    // v0.28.6 — 'nightmare' tier added (2× damage taken, best rewards). The
+    // v0.28.7 — 'nightmare' tier added (2× damage taken, best rewards). The
     // tier string travels alongside the damage mul so the reward helpers
     // (_diffExpMul/_diffCoinMul/_diffDropMul at the _diffDmg site) stay in
     // lock-step with the SAME anti-cheese deferral — otherwise flipping to
@@ -30787,6 +30787,25 @@ function toggleLoreMap() {
 // use raw hp -=. Stamp the frame so the hit-grunt fires ONLY on a real monster
 // attack (not on DOT/environmental) — per user "only groan when attacked by monster".
 function _diffDmg(d) { try { if (typeof player !== 'undefined' && player && typeof game !== 'undefined' && game) player._monsterHitAt = game.time; } catch (_) {} var m = (typeof game !== 'undefined' && game && game._diffDmgMul) ? game._diffDmgMul : 1; var _pl = (typeof player !== 'undefined' && player && player.level) ? (player.level | 0) : 1; var _MOB_DMG_PUNISH = (_pl <= 20) ? (1.3 + Math.max(0, _pl - 1) * (1.7 / 19)) : Math.min(6, 3 + (_pl - 20) * 0.05); /* v0.26.x - per user: punish ramps 1.3x (L1) -> 3x (L20) -> 6x (L80+), piecewise-linear. Stacks with difficulty + the level-gap amplifier. */ m *= _MOB_DMG_PUNISH; return Math.max(0, Math.round(d * m)); }
+// v0.28.7 — Difficulty reward scaling ("risk vs reward"). The damage side of
+// the difficulty setting lives in _diffDmg above (via game._diffDmgMul); these
+// three read the tier string game._diffTier — which follows the SAME mid-boss
+// deferral in _applySettings/loadMap — so a mid-fight flip can't farm Nightmare
+// loot at Normal risk. Fallback derives the tier from the damage mul so the
+// helpers stay correct even if a caller runs before _applySettings' first tick.
+function _lxDiffTier() {
+  try {
+    if (typeof game !== 'undefined' && game) {
+      if (game._diffTier) return game._diffTier;
+      const m = game._diffDmgMul;
+      if (m != null) return (m <= 0.5) ? 'story' : (m >= 2.0) ? 'nightmare' : (m >= 1.5) ? 'hard' : 'normal';
+    }
+  } catch (_) {}
+  return 'normal';
+}
+function _diffExpMul()  { return { story: 0.8, normal: 1, hard: 1.3,  nightmare: 1.6  }[_lxDiffTier()] || 1; }
+function _diffCoinMul() { return { story: 0.8, normal: 1, hard: 1.3,  nightmare: 1.75 }[_lxDiffTier()] || 1; }
+function _diffDropMul() { return { story: 1,   normal: 1, hard: 1.25, nightmare: 1.5  }[_lxDiffTier()] || 1; }
 function addShake(amount) {
   if (typeof game !== 'undefined' && game && game._reduceMotion) return;
   if (typeof game._shakeFrame !== 'number' || game._shakeFrame !== game.time) {
@@ -31636,14 +31655,15 @@ const STORY_BEATS = {
     mode: 'epilogue',
     stanzas: [
       { text: 'The Weight-Bearer falls.\nNot in defeat — in relief.' },
-      { text: 'For twelve ages he carried a world that could not dream.\nYou gave him a reason to set it down.' },
-      { text: 'The constellations breathe.\nThe bell in the bazaar finishes its swing\nand rings — once, clear — for the first time in an age.' },
-      { text: 'Far below, the nightmare that gripped every sleeper\nfinally loosens — and the first true dream in twelve ages\nbegins to climb.' },
-      { text: 'The Amnesiac looks up, and remembers his name at last.\nThe lanterns at the chain\'s end go dark —\ntheir long vigil over.' },
-      { text: 'And the faces the road kept lifting from your childhood\nstep back into the light they came from.\nThey were never asking you to stay.\nThey were thanking you for coming.' },
-      { text: 'You were not from here.\nYou were sent — and you answered.\nThe dream is theirs again now, foreigner.\nYou taught the world to dream.' },
-      { text: 'The seam in the sky opens once more,\nsoft as a held breath let go.' },
-      { text: 'You are not finished —\nbut this world, at last, is awake.\n\nThank you for walking it.' },
+      { text: 'For twelve ages he carried a world\nthat could not dream.\nYou gave him a reason to set it down.' },
+      { text: 'The bell in the bazaar\nfinishes its swing —\nand rings, once, clear,\nfor the first time in an age.' },
+      { text: 'All across the Everdawn,\nthe nightmare loosens its grip\nlike a hand finally trusted\nenough to let go.' },
+      { text: 'The Amnesiac remembers his name at last.\nHe laughs — and then he cries —\nand both sound like the same word.' },
+      { text: 'At the chain\'s end, the lanterns\ngutter out one by one.\nNot abandoned. Finished.\nTheir long vigil over.' },
+      { text: 'And the faces the road lifted\nfrom your childhood\nstep back into the light they came from.\n\nOne of them waves.\nThey were never asking you to stay.\nThey were thanking you for coming.' },
+      { text: 'The seam in the sky opens once more,\nsoft as a held breath let go.\n\nNo one says goodbye.\nEveryone means it.' },
+      { text: 'And as the world falls, at last,\ninto its first true dream in twelve ages —\n\nyou wake.' },
+      { text: 'Somewhere far away, on an ordinary morning,\nyou will think of them once.\n\nThat will be enough.\nThat will be everything.\n\nThank you for walking with us.' },
     ],
   },
   zodiac_twelve_done: {
@@ -31738,6 +31758,21 @@ const STORY_BEATS = {
       { text: 'You have out-wanted a version of yourself\nthat never decided what to be.' },
       { text: 'Mastery is not power.\nIt is a single wish, sharpened to one edge.' },
       { text: 'The Singularity is nearer now —\nand it can feel you coming.' },
+    ],
+  },
+  // v0.28.6 — THE WARDEN FALLS. The Amnesiac's farewell, fired once
+  // ~3.5s after Aetherion's first defeat (triggerSuperBossDeath). The
+  // bittersweet hinge of the endgame: his memory returning means the
+  // parting is coming — waking the world sends everything borrowed
+  // home, including the player.
+  warden_falls: {
+    mode: 'dialog',
+    stanzas: [
+      { speaker: 'The Amnesiac', text: '*they are waiting for you outside the Sanctum, and for once they do not look lost*\n\nThe Warden fell. I felt my name come back.\nMost of it.' },
+      { speaker: 'The Amnesiac', text: 'I should be happy. I am happy.\n\nIt is only — remembering who I was\nmeans remembering how this ends.' },
+      { speaker: 'The Amnesiac', text: 'When the world wakes, everything borrowed goes home.\nThe faces the road lent you.\nThe shard that wears my shape.\n\nEven you, foreigner. Especially you.' },
+      { speaker: 'The Amnesiac', text: '*they smile — the first smile you have seen here that isn\'t holding something back*\n\nDon\'t slow down on our account.\nA short spring is still a spring.' },
+      { speaker: 'The Amnesiac', text: 'Go and wake the world.\n\nAnd someday, back in your own plane,\non some ordinary morning — think of us once.\n\nThat will be enough. That will be everything.' },
     ],
   },
   // v0.27.26 — CONTINENT-ARRIVAL BEATS. One per story act (II–VI); fired
@@ -41156,7 +41191,7 @@ function loadMap(id, entryX, entryY) {
   try { if (_jukeboxPlaying && typeof jukeboxStop === 'function') jukeboxStop({ silent: true }); } catch (e) {}
   // Apply any difficulty change that was deferred during a boss fight (anti-cheese).
   if (game._pendingDiffMul != null) { game._diffDmgMul = game._pendingDiffMul; game._pendingDiffMul = null; }
-  if (game._pendingDiffTier != null) { game._diffTier = game._pendingDiffTier; game._pendingDiffTier = null; }   // v0.28.6 — reward tier follows the same defer
+  if (game._pendingDiffTier != null) { game._diffTier = game._pendingDiffTier; game._pendingDiffTier = null; }   // v0.28.7 — reward tier follows the same defer
   // v0.26.x audit FIX — close any open NPC dialog when leaving the map. loadMap
   // clears game.npcs but didn't close the dialog or null _activeNpc, so a
   // sticky (click/tap-opened) dialog could survive a portal/warp and linger on
@@ -60851,7 +60886,7 @@ function killMonster(m) {
   // v0.26.x — Per user: +200% XP (×3) while the player is level 1-5, so the
   // earliest levels fly by. Drops to ×1 the moment they reach level 6.
   const _earlyLvlXpMul = ((player.level || 1) <= 5) ? 3 : 1;
-  const _xpGain = Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul * mpCoopMul * _pqFarmMul * _earlyLvlXpMul * LX_EVENT_EXP_MULT * LX_MONSTER_EXP_MULT);   // (EVENT) opening +900% EXP · monster EXP knob (v0.28.5: ×1, was ×2)
+  const _xpGain = Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul * mpCoopMul * _pqFarmMul * _earlyLvlXpMul * LX_EVENT_EXP_MULT * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1));   // (EVENT) opening +900% EXP · monster EXP knob (v0.28.5: ×1, was ×2) · v0.28.7 difficulty risk/reward
   player.exp += _xpGain;
   // v0.27.0 co-op — when I'm the host, tell peers on my map this monster died so
   // they get their share of XP/coins + a death pop (they suppressed their own
@@ -60873,7 +60908,7 @@ function killMonster(m) {
     // v0.27.0 — include the Hunter's Bounty (treasureCrits) 2x the actual pickup
     // applies on a lethal-crit kill, else the pill under-reports by half on those kills.
     const _bountyMul = (m._killedByCrit && player._activeSynergies && player._activeSynergies.treasureCrits) ? 2 : 1;
-    const _mojExpected = Math.floor((m.mojicoins || 0) * _monMul * _greedMul * _bountyMul * (typeof MOJICOIN_GAIN_MULT === 'number' ? MOJICOIN_GAIN_MULT : 1));
+    const _mojExpected = Math.floor((m.mojicoins || 0) * _monMul * _greedMul * _bountyMul * (typeof MOJICOIN_GAIN_MULT === 'number' ? MOJICOIN_GAIN_MULT : 1) * (typeof _diffCoinMul === 'function' ? _diffCoinMul() : 1));   // v0.28.7 — keep the kill-feed pill in sync with the difficulty coin mul
     if (_xpGain > 0 || _mojExpected > 0) showKillToast(_xpGain, _mojExpected);
   }
   if (mpCoopMul > 1 && (game._lastCoopToast | 0) + 6000 < game.time) {
@@ -60914,7 +60949,7 @@ function killMonster(m) {
     game.drops.push({
       x: m.x + m.w/2 + (Math.random() - 0.5) * 20, y: m.y + m.h/2,
       vy: -Math.random() * 4 - 2, type: 'mojicoin',
-      value: Math.ceil(m.mojicoins * _coinMul * (typeof _monsterCoinMult === 'function' ? _monsterCoinMult(m) : 1) / mojicoinCount), life: 400,
+      value: Math.ceil(m.mojicoins * _coinMul * (typeof _monsterCoinMult === 'function' ? _monsterCoinMult(m) : 1) * (typeof _diffCoinMul === 'function' ? _diffCoinMul() : 1) / mojicoinCount), life: 400,   // v0.28.7 — difficulty risk/reward coin scaling
     });
   }
 
@@ -61065,7 +61100,7 @@ function killMonster(m) {
   // total). Pre-luck effective rate 1.40% → 5.60%. Now that elites (3%) / elders
   // (15%) are much rarer, each is a meaningfully rewarding kill. Normal (tier 0)
   // and boss (tier 2) rates unchanged.
-  const dropChance = (tier === 2 ? 1.0 : tier === 1 ? 1.12 : 0.04) * (1 + luck) * 0.05;
+  const dropChance = (tier === 2 ? 1.0 : tier === 1 ? 1.12 : 0.04) * (1 + luck) * 0.05 * (typeof _diffDropMul === 'function' ? _diffDropMul() : 1);   // v0.28.7 — Hard +25% / Nightmare +50% gear-drop chance
   if (itemRoll < dropChance) {
     // v0.25.678 — Pass the killed mob's effective level so rarity weights
     // (and affix magnitudes downstream) grade with mob difficulty. _mobLevel
@@ -61497,7 +61532,7 @@ function triggerSuperBossDeath(m) {
 
   // Huge EXP bonus on top of normal (prestige-scaled)
   const _pXp = (game.prestige && game.prestige.xpMult) || 1;
-  player.exp += Math.floor(m.exp * 0.5 * _pXp * (((player.level || 1) <= 5) ? 3 : 1) * LX_EVENT_EXP_MULT * LX_MONSTER_EXP_MULT);   // v0.26.x — +200% XP at levels 1-5 · (EVENT) opening +900% EXP · monster EXP knob (v0.28.5: ×1, was ×2)
+  player.exp += Math.floor(m.exp * 0.5 * _pXp * (((player.level || 1) <= 5) ? 3 : 1) * LX_EVENT_EXP_MULT * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1));   // v0.26.x — +200% XP at levels 1-5 · (EVENT) opening +900% EXP · monster EXP knob (v0.28.5: ×1, was ×2) · v0.28.7 difficulty risk/reward
   // v0.26.x audit FIX — convert the banked bonus into levels NOW. The kill
   // flow's only _maybeLevelUp runs BEFORE this grant, so without this call a
   // Shardfather kill (a big, level-crossing bonus, more so with the ×20 EXP
@@ -61526,6 +61561,12 @@ function triggerSuperBossDeath(m) {
   // true ending beat belongs to the Weight-Bearer.
   if (m.type === 'gravitos' && typeof _playStoryBeat === 'function') {
     setTimeout(() => _playStoryBeat('epilogue_gravitos', _showGameComplete), 3500);
+  }
+  // v0.28.6 — Aetherion's first defeat gets its own quieter scene: the
+  // Amnesiac's farewell (warden_falls). Same 3.5s stagger so the loot
+  // rain + toast cascade land first. First-time-only via _storyBeatsSeen.
+  if (m.type === 'aetherion' && typeof _playStoryBeat === 'function') {
+    setTimeout(() => _playStoryBeat('warden_falls'), 3500);
   }
 }
 
