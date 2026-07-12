@@ -8673,7 +8673,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.3';
+const GAME_VERSION = 'v0.29.4';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -33348,6 +33348,46 @@ function openMultiplayer() {
   game.paused = true;
 }
 
+// v0.29.4 — CO-OP DURABILITY. Two problems made co-op look broken: (1) the hosted
+// relay closes any socket after ~45s of silence (observed close code 1001,
+// reason "idle"), and the only keepalive was the per-frame `state` send in
+// _mpTick — which is gated behind `!game.paused && hp>0 && !frozen`, so a player
+// standing in a menu / dialogue / dead / AFK stopped sending and got dropped.
+// (2) There was NO auto-reconnect, so once dropped they never came back and the
+// partner saw them vanish. Fix: a game-loop-INDEPENDENT keepalive timer + an
+// exponential-backoff reconnect that re-issues the same hello (same party code).
+const MP_KEEPALIVE_MS = 20000;   // < the relay's ~45s idle cutoff, with margin
+function _mpStartKeepalive() {
+  _mpStopKeepalive();
+  net._kaTimer = setInterval(() => {
+    // Only ping a live socket. Runs regardless of game.paused, so pausing,
+    // reading dialogue, sitting in the K/U menus, or being downed no longer
+    // starves the connection into an idle close.
+    if (net.ws && net.ws.readyState === 1) {
+      try { net.ws.send(JSON.stringify({ t: 'ka' })); } catch (e) {}   // 'ka' has no handler case -> peers ignore it; it exists only to reset the relay idle timer
+    }
+  }, MP_KEEPALIVE_MS);
+}
+function _mpStopKeepalive() {
+  if (net._kaTimer) { clearInterval(net._kaTimer); net._kaTimer = null; }
+}
+// Schedule a reconnect after an UNEXPECTED close (not a user-initiated hang-up).
+// Backoff 1s,2s,4s,8s… capped at 15s so a flapping relay isn't hammered, but a
+// real drop recovers within seconds and the re-sent hello restores presence +
+// host election automatically.
+function _mpScheduleReconnect() {
+  if (net._userClosed) return;                 // user pressed Disconnect / left co-op
+  if (!net._lastUrl) return;
+  if (net._reconnectTimer) return;             // one pending attempt at a time
+  const tries = (net._reconnectTries = (net._reconnectTries || 0) + 1);
+  const delay = Math.min(15000, 1000 * Math.pow(2, tries - 1));
+  _mpStatus(`Reconnecting to your party… (try ${tries})`, '#ffcc66');
+  net._reconnectTimer = setTimeout(() => {
+    net._reconnectTimer = null;
+    if (net._userClosed) return;
+    mpConnect(net._lastUrl, net._lastName, net._lastRoom);
+  }, delay);
+}
 function mpConnect(url, name, room) {
   if (net.ws) {
     // v0.27.1 — detach the OLD socket's handlers before closing. close() fires
@@ -33367,6 +33407,14 @@ function mpConnect(url, name, room) {
   net.channel = ch;
   net.roomId = baseRoom + '__ch' + ch;
   net._lastUrl = url;
+  // v0.29.4 — remember name + base room so the auto-reconnect (added below) can
+  // re-issue the exact same hello and land us back in the SAME party after an
+  // unexpected drop.
+  net._lastName = name;
+  net._lastRoom = room;
+  // A fresh, intentional connect clears the "user hung up" flag so onclose knows
+  // any drop from here is unexpected and should trigger a reconnect.
+  net._userClosed = false;
   _mpStatus(`Connecting to ${url} · ${baseRoom} · Ch ${ch}…`, '#ffcc66');
   let ws;
   try {
@@ -33407,6 +33455,8 @@ function mpConnect(url, name, room) {
     };
     ws.send(JSON.stringify(hello));
     net.connected = true;
+    net._reconnectTries = 0;   // v0.29.4 — clean open resets the backoff counter
+    _mpStartKeepalive();       // v0.29.4 — keep the socket alive through pauses / menus / AFK
     // v0.28.1 — refresh Steam Rich Presence now that we're in a party (enables
     // friends' "Join Game" via the connect key). No-op without Steam.
     try { if (typeof _lxSteamPresence === 'function') _lxSteamPresence(true); } catch (e) {}
@@ -33422,12 +33472,22 @@ function mpConnect(url, name, room) {
   ws.onclose = () => {
     if (net.ws !== ws) return;   // v0.27.1 — a stale onclose must not clobber the live connection
     if (net._warmTimer) { clearTimeout(net._warmTimer); net._warmTimer = null; }
+    _mpStopKeepalive();          // v0.29.4 — no live socket to ping
     const wasConnected = net.connected;
     net.connected = false;
     net.peers = {};
-    _mpStatus('Disconnected', '#bbb');
-    if (wasConnected) _mpPushLog('Disconnected from server.', 'sys');
     _mpRenderPlayerList();
+    // v0.29.4 — auto-reconnect on an UNEXPECTED drop (idle timeout, relay
+    // restart, transient network blip). mpDisconnect() sets _userClosed so a
+    // deliberate hang-up doesn't loop. The re-sent hello re-joins the same
+    // party code and re-runs host election, so co-op survives the drop.
+    if (!net._userClosed) {
+      if (wasConnected) _mpPushLog('Connection lost — reconnecting…', 'sys');
+      _mpScheduleReconnect();
+    } else {
+      _mpStatus('Disconnected', '#bbb');
+      if (wasConnected) _mpPushLog('Disconnected from server.', 'sys');
+    }
   };
   ws.onerror = () => {
     if (net.ws !== ws) return;   // v0.27.1
@@ -33436,6 +33496,12 @@ function mpConnect(url, name, room) {
   };
 }
 function mpDisconnect() {
+  // v0.29.4 — a deliberate hang-up. Flag it so onclose does NOT auto-reconnect,
+  // and tear down both timers.
+  net._userClosed = true;
+  _mpStopKeepalive();
+  if (net._reconnectTimer) { clearTimeout(net._reconnectTimer); net._reconnectTimer = null; }
+  net._reconnectTries = 0;
   if (net._warmTimer) { clearTimeout(net._warmTimer); net._warmTimer = null; }
   if (net.ws) { try { net.ws.close(); } catch (e) {} }
   net.ws = null;
