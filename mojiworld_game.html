@@ -8663,7 +8663,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.27.22';
+const GAME_VERSION = 'v0.27.23';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -63231,8 +63231,57 @@ function tryInteract(mode) {
   }
 }
 
+// v0.27.23 — Per-NPC talk vocalization (ludo-generated Animal-Crossing-style
+// babble at audio/npc/npc_<key>.mp3; gender/pitch/tone cast per character).
+// Probe-and-cache like _playMonsterSfx: undefined = never probed, 'probing' =
+// loading, null = no file (silent), Audio = ready. On the FIRST open of an
+// NPC the clip streams in and plays as soon as it decodes (<3s window) so
+// even one-time conversations get their voice. 1.2s cooldown stops rapid
+// re-opens / follow-up pages from stacking voices.
+const _NPC_TALK_SFX = Object.create(null);
+let _npcTalkLastAt = 0;
+function _npcTalkKey(name) {
+  if (name === '???') return 'mystery_sage';
+  return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+function _playNpcTalkSfx(npc) {
+  try {
+    if (typeof audio !== 'undefined' && audio && audio.muted) return;
+    const name = npc && npc.name;
+    if (!name) return;
+    const k = _npcTalkKey(name);
+    if (!k) return;
+    const now = Date.now();
+    if (now - _npcTalkLastAt < 1200) return;
+    let slot = _NPC_TALK_SFX[k];
+    if (slot === undefined) {
+      const a = new Audio('audio/npc/npc_' + k + '.mp3');
+      a.loop = false;
+      a.volume = 0.5 * ((typeof _SFX_MASTER_VOL === 'number') ? _SFX_MASTER_VOL : 1);
+      a.preload = 'auto';
+      const probedAt = now;
+      a.addEventListener('error', () => { _NPC_TALK_SFX[k] = null; });
+      a.addEventListener('canplaythrough', () => {
+        if (_NPC_TALK_SFX[k] !== 'probing') return;
+        _NPC_TALK_SFX[k] = a;
+        if (Date.now() - probedAt < 3000) {          // first-open late play
+          _npcTalkLastAt = Date.now();
+          const p = a.play(); if (p && p.catch) p.catch(() => {});
+        }
+      });
+      _NPC_TALK_SFX[k] = 'probing';
+      return;
+    }
+    if (!slot || slot === 'probing') return;
+    _npcTalkLastAt = now;
+    try { slot.currentTime = 0; } catch (_) {}
+    const p = slot.play();
+    if (p && p.catch) p.catch(() => {});
+  } catch (_) {}
+}
 function openNPC(npc) {
   if (typeof _playUiSfx === 'function') _playUiSfx('dialog_blip');   // v0.26.x — SFX-review gap fill
+  _playNpcTalkSfx(npc);                                              // v0.27.23 — per-NPC talk voice
   const dlg = document.getElementById('dialog');
   // v0.25.830 — One-time interception of the dialog-text element's
   // textContent setter so every legacy `element.textContent = 'foo'`
