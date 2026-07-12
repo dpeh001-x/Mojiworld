@@ -8674,7 +8674,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.5';
+const GAME_VERSION = 'v0.29.7';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -35243,7 +35243,26 @@ function _completeQuest(id) {
   // multiplier) and the toast shows the real granted amount. Quests are the
   // reliable paycheck that funds the now-expensive potion economy.
   const _coinsGained = r.mojicoins ? _grantMojicoins(r.mojicoins, { full: true }) : 0;
-  if (r.exp)   { player.exp += Math.floor(r.exp * (((player.level || 1) <= 5) ? 3 : 1) * LX_EVENT_EXP_MULT); if (typeof _maybeLevelUp === 'function') _maybeLevelUp(); }   // v0.26.x — +200% XP at levels 1-5 · (EVENT) opening +900% EXP
+  if (r.exp)   {
+    // Authored payout: flat r.exp × early-level ×3 × opening event. This stays
+    // GENEROUS at low levels (a Lv-1 quest is worth several early levels) — keep it.
+    const _early = ((player.level || 1) <= 5) ? 3 : 1;
+    const _authored = Math.floor(r.exp * _early * LX_EVENT_EXP_MULT);
+    // v0.29.7 — MEANINGFUL FLOOR. Quest EXP was authored against the old
+    // 200·L^2.5 curve and was already negligible at high levels (a Lv-44 quest
+    // = ~0.01 of a level); the v0.28.11 kill-anchored curve made it far worse.
+    // Guarantee every quest is worth an importance-weighted fraction of a level
+    // on the LIVE curve: codex/minor ≈ 4%, standard ≈ 8%, big/finale up to 35%.
+    // Weight comes from the authored r.exp so quest tiers still differ. Uses the
+    // quest's DESIGN level (q.levelReq) so back-tracking a low quest at high
+    // level can't be farmed. Floor is event-independent → quests never go
+    // negligible whether or not the opening ×10 event is running.
+    const _qL = Math.max(1, (q && q.levelReq) || player.level || 1);
+    const _frac = Math.max(0.04, Math.min(0.35, r.exp / 30000));
+    const _floor = (typeof _lxLevelCost === 'function') ? Math.floor(_lxLevelCost(_qL) * _frac) : 0;
+    player.exp += Math.max(_authored, _floor);   // v0.26.x — +200% XP at Lv 1-5 · (EVENT) +900% EXP · v0.29.7 curve-relative floor
+    if (typeof _maybeLevelUp === 'function') _maybeLevelUp();
+  }
   // v0.26.400 — Potion rewards. A quest may carry `rewards.potions`, a map of
   // POTION_ITEMS id → quantity (e.g. { hp_m: 3, mp_m: 2 }). Grants land
   // straight in player.consumables (same store the shop fills) and surface as
