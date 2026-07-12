@@ -8673,7 +8673,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.4';
+const GAME_VERSION = 'v0.29.5';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -60439,24 +60439,37 @@ const _LX_LEVEL_COST_ANCHORS = [
   [50,     293285000],
   [70,    5764500000],
 ];
+// v0.29.5 — global level-cost scale (per user "reduce exp needed for level up
+// by half"). Multiplies EVERY level's EXP requirement, so the whole curve — the
+// anchors above, the Lv 1-4 ease-in and the Lv 70+ extrapolation — halves
+// uniformly and kill counts halve with it (Lv 5 ~25 kills, 10 ~125, 20 ~500,
+// 50 ~2,500, 70 ~10,000). Change this one number to re-tune (0.25 = quarter).
+const _LX_LEVEL_COST_MUL = 0.5;
 function _lxLevelCost(L) {
   const A = _LX_LEVEL_COST_ANCHORS;
   const lo = A[0], hi = A[A.length - 1];
+  let raw;
   if (L <= lo[0]) {
     // Levels 1-4: smooth ease-in toward the Lv-5 anchor (fast early game).
-    return Math.max(30, Math.floor(lo[1] * Math.pow(L / lo[0], 3.5)));
-  }
-  for (let i = 0; i < A.length - 1; i++) {
-    const a = A[i], b = A[i + 1];
-    if (L <= b[0]) {
-      const t = (L - a[0]) / (b[0] - a[0]);
-      return Math.floor(a[1] * Math.pow(b[1] / a[1], t));   // log-linear interpolation
+    raw = Math.max(30, lo[1] * Math.pow(L / lo[0], 3.5));
+  } else {
+    raw = null;
+    for (let i = 0; i < A.length - 1; i++) {
+      const a = A[i], b = A[i + 1];
+      if (L <= b[0]) {
+        const t = (L - a[0]) / (b[0] - a[0]);
+        raw = a[1] * Math.pow(b[1] / a[1], t);   // log-linear interpolation
+        break;
+      }
+    }
+    if (raw == null) {
+      // Above the top anchor: continue the last segment's per-level growth factor.
+      const a = A[A.length - 2], b = hi;
+      const perLvl = Math.pow(b[1] / a[1], 1 / (b[0] - a[0]));
+      raw = b[1] * Math.pow(perLvl, L - b[0]);
     }
   }
-  // Above the top anchor: continue the last segment's per-level growth factor.
-  const a = A[A.length - 2], b = hi;
-  const perLvl = Math.pow(b[1] / a[1], 1 / (b[0] - a[0]));
-  return Math.floor(b[1] * Math.pow(perLvl, L - b[0]));
+  return Math.max(15, Math.floor(raw * _LX_LEVEL_COST_MUL));
 }
 
 function _maybeLevelUp() {
