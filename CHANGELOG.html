@@ -148,6 +148,69 @@
   <b>Heads-up.</b> An earlier implementation of these phases targeted <code>v0.5.1</code> and was preserved locally at tag <code>phase-1-2-3-on-v0.5.1</code>. This is the rebuild against the current <code>v0.9.8</code> codebase, which had moved substantially (new bosses like Gravitos, minimap/taxi, chibi character rewrite).
 </div>
 
+<h2>v0.29.10 <span class="tag"><span class="pill feat">feat</span> Co-op battle sync verified end-to-end + real-time mirror motion (60 fps monster movement for guests)</h2>
+
+<p>Per user "ensure that coop mode battle, sprites, damage to monsters are all synced in real time". Full audit of the co-op combat pipeline plus one shipped fix for the last non-real-time link.</p>
+
+<h3>Verified already-synced (audit, no changes needed)</h3>
+<ul>
+  <li><b>Monsters (host-authoritative):</b> the elected host broadcasts the full monster list at 10 Hz (<code>_coopTickMonsters</code>, 80-mob cap) — position, velocity, facing, HP/maxHP, type, boss/elite tier. Guests mirror by uid: add / update / remove-on-absent, elite variants forced to match the host's roll.</li>
+  <li><b>Damage to monsters:</b> a guest's hit resolves ALL attacker multipliers + DEF locally, forwards the final number to the host (<code>_coopSendDamage</code>), and <b>predicts locally</b> — instant damage number + HP bar movement on the guest's screen, host re-syncs true HP within ~100 ms. The host applies with authoritative gates (i-frames, shell/channel/shield DR, burrow) + an anti-one-shot cap, and routes death through the real <code>killMonster</code>.</li>
+  <li><b>Kills:</b> host broadcasts each kill; guests get XP/coin shares through their own multiplier stack (idempotent — redelivered frames can't double-pay), plus bestiary/achievement/quest progression parity.</li>
+  <li><b>Enemy projectiles + hazards:</b> host broadcasts both (~11 Hz); guests inject them into their own update loops so ranged bosses and meteor telegraphs hurt guests through the real i-frame-respecting damage path.</li>
+  <li><b>Loot:</b> item drops + boon orbs broadcast instanced per guest (no loot stealing).</li>
+  <li><b>Player sprites:</b> v0.29.9 (below) put the full character look + equipment on the wire — partners render as real characters with real attack poses.</li>
+</ul>
+
+<h3>The fix — real-time mirror motion</h3>
+<p>The one non-real-time link: guests' mirrored monsters <b>froze between the host's 10 Hz snapshots, then teleported</b> — a 10 fps slideshow while everything else ran at 60. Now:</p>
+<ul>
+  <li>Snapshots write an interpolation <b>target</b> (<code>_tx/_ty</code>) instead of hard-snapping the mirror's position.</li>
+  <li>Every frame, the follower <b>dead-reckons the target</b> by the broadcast velocity (monsters keep walking between snapshots) and <b>eases the mirror toward it</b> (0.35/frame — closes ~92 % of the gap within one tick window).</li>
+  <li>Big divergence (host-side teleport / knockback burst / lag spike) snaps outright, mirroring the v0.27.2 peer-avatar rule, so a mirror never glides across half the arena.</li>
+  <li>Collision reads the same smoothed <code>m.x/m.y</code> — what the guest sees is exactly what they hit.</li>
+</ul>
+
+<h3>Files touched</h3>
+<ul>
+  <li><code>mojiworld_game.html</code> — <code>_coopApplyMonsters</code> stores targets + first-sight snap; <code>updateMonsters</code>' follower branch gains the dead-reckon + ease pass (runs alongside the existing hit-flash/anim housekeeping).</li>
+  <li><code>GAME_VERSION</code> bumped v0.29.9 → v0.29.10.</li>
+  <li>Syntax: all 5 <code>&lt;script&gt;</code> blocks pass <code>node --check</code>.</li>
+</ul>
+
+<h2>v0.29.9 <span class="tag"><span class="pill feat">feat</span> Co-op partners now render as full characters &mdash; sprite, face &amp; equipment on the wire</h2>
+
+<p>Per user "in coop mode my friend should be able to see my full character sprite and equipment". Until now a co-op partner rendered as a translucent purple pill with two dot-eyes — functional, but nothing like the character their friend actually built. Partners now render through the <b>real character pipeline</b>: same body, hair, eyes, mouth and equipment art as the local player.</p>
+
+<h3>What goes on the wire</h3>
+<p>The ~14 Hz state tick now carries two compact extras (~120 bytes):</p>
+<ul>
+  <li><b><code>look</code></b> — the sprite-layer face: hair id, eye id, mouth id, skin index.</li>
+  <li><b><code>eq</code></b> — per-slot equipment visuals, generic over ALL equipped slots (weapon / armor / accessory plus wardrobe visual slots like body_top / cape / helmet): <code>spriteId</code> for explicit art, <code>baseName</code> for auto-mapped catalog art, <code>tint</code> for tinted variants.</li>
+</ul>
+<p>Sent every tick rather than join-only, so late joiners and mid-fight equipment swaps stay in sync with zero extra protocol.</p>
+
+<h3>How the render works</h3>
+<p>New <code>_mpDrawPeerAvatar()</code> reuses the proven Mirror-Self field-swap pattern: save the local player's identity fields, swap in the peer's class / job / master / facing / position / velocity / look, route the peer's gear through the existing <code>_LX_EQ_PREVIEW_OVERRIDE</code> hook (the wardrobe-preview override), draw through the same <code>_chibiApply</code> + <code>drawCuteCharacter</code> pipeline the local hero uses, and restore everything in a <code>finally</code>. A peer mid-swing gets <code>attacking</code> swapped in, so partners show a <b>real attack pose with their actual weapon</b> instead of the old golden-arc glyph.</p>
+
+<h3>Fallbacks &amp; safety</h3>
+<ul>
+  <li><b>Older builds:</b> a peer that doesn't broadcast <code>look</code> (pre-v0.29.9 client) keeps the legacy purple pill — mixed-version rooms degrade gracefully.</li>
+  <li><b>Downed partners:</b> keep the grey KO pill (clear "DOWN" semantic, no grey-out filter cost); the revive ring / name tag / HP bar are unchanged.</li>
+  <li><b>Any renderer hiccup:</b> the avatar call is fully try/caught — a failure falls back to the pill for that frame.</li>
+  <li><b>Peer-string hardening:</b> all peer-supplied ids are whitelist-sanitized at ingestion (<code>[\w -]</code> charset for ids, strict <code>#hex</code> regex for tints, <code>\w</code> keys for slots) before touching registry lookups or sprite-path construction. None of these strings ever reach innerHTML.</li>
+</ul>
+
+<h3>Files touched</h3>
+<ul>
+  <li><code>mojiworld_game.html</code> — <code>_mpTick</code> state message gains <code>look</code> + <code>eq</code>; new <code>_mpDrawPeerAvatar()</code> (mirror-swap render); <code>_mpDrawPeers</code> tries the full avatar first, pill as fallback (attack-arc flash now pill-only since the real pose replaces it).</li>
+  <li><code>GAME_VERSION</code> bumped v0.29.8 → v0.29.9.</li>
+  <li>Syntax: all 5 <code>&lt;script&gt;</code> blocks pass <code>node --check</code>.</li>
+</ul>
+
+<h3>Save compatibility</h3>
+<p>No save schema changes. The relay protocol is additive — old clients ignore the new fields, new clients render pills for old peers. No relay-server change needed.</p>
+
 <h2>v0.29.8 <span class="tag"><span class="pill polish">polish</span> Painted class crests on the Continue card &mdash; gold-rimmed medallions with a 2px black outline</h2>
 <p>The start page&rsquo;s Continue card gets the same art treatment as the MOJIWORLD logo (live-certified, <code>scripts/start_menu_test.mjs</code> 30/30 + visual review):</p>
 <ul>
