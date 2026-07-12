@@ -28210,6 +28210,9 @@ function _applySettings(s) {
     if (typeof _bgmEl !== 'undefined' && _bgmEl) _bgmEl.volume = _bv;
     if (typeof _bgmBossEl !== 'undefined' && _bgmBossEl) _bgmBossEl.volume = _bv;
     if (typeof _bgmMapEls !== 'undefined' && _bgmMapEls) { for (const _mid of Object.keys(_bgmMapEls)) { const _e = _bgmMapEls[_mid]; if (_e) _e.volume = _bv; } }
+    // v0.27.9 — the loading/menu track follows the slider live too (it's
+    // audible while Settings is open on the start page). Mute → volume 0.
+    try { if (typeof _menuBgm !== 'undefined' && _menuBgm && !_menuBgm._dead) _menuBgm.volume = s.mute ? 0 : _bv; } catch (e) {}
   }
   // v0.25.799 — SFX master volume (recomputes every cached audio element)
   if (typeof _setSfxMasterVolume === 'function') {
@@ -98783,6 +98786,8 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     }
     overlay.classList.add('fade');
     setTimeout(() => { if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 220);
+    // v0.27.9 — fade the loading/menu track out under the main theme.
+    try { if (typeof window._lxMenuBgmStop === 'function') window._lxMenuBgmStop(700); } catch (e) {}
     // v0.25.233 — Start the looping BGM the moment the world reveals.
     startBgm();
     // v0.27.8 — Play Co-op from the main menu: auto-connect to the party
@@ -98925,6 +98930,13 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     if (_tipEl) _tipEl.style.display = 'none';
     if (!_authWired) { _wireAuthForm(); _authWired = true; }
     try { _lxMenuInit(); } catch (e) {}   // v0.27.8 — Steam-style main menu
+    // v0.27.9 — fire the title-screen entrance (key art crossfade, gold
+    // flash, frame settle, title reveal, menu cascade, embers) + version tag.
+    try {
+      overlay.classList.add('menu-up');
+      const _vt = document.getElementById('lo-version');
+      if (_vt) _vt.textContent = 'Mojiworld · ' + (typeof GAME_VERSION !== 'undefined' ? GAME_VERSION : '');
+    } catch (e) {}
     // Pre-fill the username field if a previous session exists, but
     // don't auto-pass through — the user explicitly asked for a login
     // SCREEN, so returning players still click to confirm.
@@ -98985,6 +98997,10 @@ try { window.LXAuth = LXAuth; } catch (e) {}
         const name = meta.name || localStorage.getItem(MP_NAME_KEY) || 'Hero';
         if (sub) sub.textContent = name + ' · Lv.' + (meta.level || 1) + ' ' + (_MENU_CLS[meta.cls] || meta.cls)
           + (meta.map ? ' · ' + meta.map : '') + (meta.t ? ' · saved ' + (typeof _lxTimeAgo === 'function' ? _lxTimeAgo(meta.t) : '') : '');
+        // v0.27.9 — class portrait beside the Continue label.
+        const icon = document.getElementById('menu-continue-icon');
+        if (icon && _MENU_CLS[meta.cls]) { icon.src = 'Sprites/ui/Class/' + meta.cls + '.png'; icon.style.display = ''; }
+        else if (icon) icon.style.display = 'none';
       }
     }
     const ng = document.getElementById('menu-newgame');
@@ -99004,6 +99020,20 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     if (_menuWired) return;
     _menuWired = true;
     const $ = (id) => document.getElementById(id);
+    // v0.27.9 — soft UI tick on every menu button (one delegated listener;
+    // volume follows the SFX slider + mute like in-game UI sounds).
+    const _menuClickSfx = () => {
+      try {
+        let v = 0.5;
+        try { if (typeof _lxGetSettings === 'function') { const s = _lxGetSettings(); v = s.mute ? 0 : (s.sfx / 100) * 0.7; } } catch (e) {}
+        if (v <= 0) return;
+        const a = new Audio('audio/ui/option_click.mp3');
+        a.volume = Math.min(1, v);
+        a.play().catch(() => {});
+      } catch (e) {}
+    };
+    const _authRoot = $('lo-auth');
+    if (_authRoot) _authRoot.addEventListener('click', (ev) => { if (ev.target && ev.target.closest && ev.target.closest('button')) _menuClickSfx(); }, true);
     // CONTINUE — resume the saved hero with one click, no typing.
     const cont = $('menu-continue');
     if (cont) cont.onclick = () => {
@@ -99128,6 +99158,64 @@ const _bgmEl = (() => {
   a.preload = 'none';     // v0.26.946 — don't fight boot sprite fetches; warmed post-auth
   return a;
 })();
+// v0.27.9 — LOADING / START-PAGE MUSIC ("Moji is loading"). Loops from the
+// first loading frame through the main menu, then fades out as the world
+// reveals (see _finishHide) while the main theme takes over. Autoplay
+// policies usually block sound before the first gesture — on rejection the
+// play retries on the first pointer/key input. The track ships from the
+// user's working copy at audio/"Moji is loading".<ext>; every candidate
+// extension is tried and a fully missing file just stays silent (no errors).
+const _menuBgm = (() => {
+  const a = new Audio();
+  a.loop = true; a.preload = 'auto';
+  a._srcs = ['audio/Moji is loading.mp3', 'audio/Moji is loading.m4a', 'audio/Moji is loading.wav', 'audio/Moji is loading.ogg'];
+  a._i = 0; a._dead = false;
+  a.addEventListener('error', () => {
+    a._i++;
+    if (a._i < a._srcs.length) { a.src = a._srcs[a._i]; a.load(); }
+    else a._dead = true;   // no candidate exists — permanent silence, zero retries
+  });
+  a.src = a._srcs[0];
+  return a;
+})();
+function _lxMenuBgmVol() {
+  // Follows the BGM slider + mute; same 0.6 ceiling ballpark as the fade
+  // target of the main theme so the loading track doesn't blast.
+  let v = 0.54, muted = false;
+  try { if (typeof _lxGetSettings === 'function') { const s = _lxGetSettings(); v = (s.bgm / 100) * 0.6; muted = !!s.mute; } } catch (e) {}
+  return muted ? 0 : Math.max(0, Math.min(1, v));
+}
+window._lxMenuBgmStart = function () {
+  if (_menuBgm._dead || window._lxMenuBgmStopped) return;
+  try {
+    _menuBgm.volume = _lxMenuBgmVol();
+    const p = _menuBgm.play();
+    if (p && p.catch) p.catch(() => {
+      if (window._lxMenuBgmArmed) return;
+      window._lxMenuBgmArmed = true;
+      const kick = () => {
+        if (window._lxMenuBgmStopped || _menuBgm._dead) return;
+        try { _menuBgm.volume = _lxMenuBgmVol(); _menuBgm.play().catch(() => {}); } catch (e) {}
+      };
+      window.addEventListener('pointerdown', kick, { once: true, capture: true });
+      window.addEventListener('keydown', kick, { once: true, capture: true });
+    });
+  } catch (e) {}
+};
+window._lxMenuBgmStop = function (fadeMs) {
+  window._lxMenuBgmStopped = true;
+  try {
+    if (_menuBgm.paused || _menuBgm.volume <= 0) { _menuBgm.pause(); return; }
+    const steps = 12, dur = fadeMs || 500, v0 = _menuBgm.volume;
+    let i = 0;
+    const t = setInterval(() => {
+      i++;
+      try { _menuBgm.volume = Math.max(0, v0 * (1 - i / steps)); } catch (e) {}
+      if (i >= steps) { clearInterval(t); try { _menuBgm.pause(); } catch (e) {} }
+    }, dur / steps);
+  } catch (e) { try { _menuBgm.pause(); } catch (e2) {} }
+};
+window._lxMenuBgmStart();   // loading screen is already on screen at parse time
 // v0.25.265 — Boss arena BGM ("Gravitos Ascends"). Same loop pattern as
 // the main BGM; plays exclusively while the active map has
 // isBossArena: true. Hard-swap with a quick fade so the transition reads
