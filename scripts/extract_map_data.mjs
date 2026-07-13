@@ -49,6 +49,7 @@ try {
         icon: _WM_BIOME_ICON[id] || '📍',
         isVoid: !!m.isVoid,
         wm: pos ? { x: Math.round(pos.x), y: Math.round(pos.y), tier: pos.tier || '' } : null,
+        platforms: (m.platforms || []).map(clean),
         npcs: (m.npcs || []).map(clean),
         portals: (m.portals || []).map(clean),
       };
