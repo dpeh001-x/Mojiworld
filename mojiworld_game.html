@@ -58317,7 +58317,15 @@ function bossAI(m, dt, distToPlayer) {
     //     from any other tick.
     // v0.25.882 — Same maxHp:0 guard as the Aetherion path above.
     const hpPct = m.maxHp > 0 ? m.currentHp / m.maxHp : 1;
-    const phase = hpPct > 0.66 ? 1 : hpPct > 0.33 ? 2 : 3;
+    // v0.29.x — the prologue "memory" fight is HP-locked (HP refills, boss has
+    // ×4 HP), so it would otherwise never leave phase 1. Drive the phase off a
+    // scripted timer (window._prologuePhase, set in _prologueTick) so the player
+    // actually sees the Collapse (P2) and Event Horizon (P3) spectacle inside
+    // the 30s window. Gated on _prologueActive → the real endgame fight is
+    // untouched (there, _prologuePhase is null so this falls through to HP).
+    const phase = (window._prologueActive && window._prologuePhase)
+      ? window._prologuePhase
+      : (hpPct > 0.66 ? 1 : hpPct > 0.33 ? 2 : 3);
     // Independent ultimate timers (millisecond units, ticked alongside
     // patternTimer). First Soul Drain fires at 8 s into the fight so the
     // player has a moment to engage; first Singularity at 30 s.
@@ -99267,6 +99275,10 @@ function loop(time) {
   // the next-frame death trigger fires. Clamping here keeps every downstream
   // reader sane while preserving the death detection (≤ 0 still triggers).
   if (typeof player.hp === 'number' && player.hp < 0) player.hp = 0;
+  // v0.29.x — the flash-forward memory can never fall. The scripted P2/P3
+  // escalation routes real OHKOs here; refill on any lethal hit instead of
+  // dying so the death overlay never appears during the prologue.
+  if (window._prologueActive && player.hp <= 0 && typeof getMaxHp === 'function') player.hp = getMaxHp();
   // Death check — runs every frame regardless of who dealt the killing blow
   if (player.hp <= 0 && !game.dying) {
     // v0.26.1033 — revive chain extracted to _tryCheatDeathRevive() so the
@@ -100123,11 +100135,22 @@ function _prologueTick() {
   if (!game.paused && !document.hidden) window._prologueLeftMs -= Math.min(dt, 600);
   // The memory cannot fall — it refills. (Also dodges the death overlay.)
   if (player.hp < getMaxHp() * 0.15) player.hp = getMaxHp();
+  // v0.29.x — scripted phase escalation + boss "will" bar. The memory runs 30s;
+  // advance P1→P2→P3 on a timer (read by the Gravitos AI) so the signature
+  // Collapse / Event Horizon mechanics actually show, and render a will bar that
+  // slides toward ~6% — a "you almost had it" read — before the Void reclaims you.
+  const _elapsed = 30000 - window._prologueLeftMs;
+  window._prologuePhase = _elapsed < 10000 ? 1 : _elapsed < 20000 ? 2 : 3;
+  const _will = Math.max(6, Math.round(100 - (_elapsed / 30000) * 94));
   const el = document.getElementById('prologue-hud');
   if (el) {
     const s = Math.max(0, Math.ceil(window._prologueLeftMs / 1000));
+    const _barCol = _will > 45 ? '#c58bff' : _will > 20 ? '#ff9c6b' : '#ff5470';
     el.innerHTML = '✦ MEMORY OF WHAT YOU BECOME — 0:' + String(s).padStart(2, '0')
-      + '<br><span style="font-size:11px;color:#bdaaff;">Z attack · X S C D F V G skills · SPACE jump</span>';
+      + '<div style="margin:5px auto 2px;width:230px;height:9px;border-radius:5px;background:rgba(0,0,0,0.55);border:1px solid #6a4aa0;overflow:hidden;">'
+      + '<div style="height:100%;width:' + _will + '%;background:linear-gradient(90deg,' + _barCol + ',rgba(255,255,255,0.4));transition:width .25s linear;"></div></div>'
+      + '<span style="font-size:10px;color:#d8b0ff;letter-spacing:0.5px;">GRAVITOS, THE WEIGHT-BEARER</span>'
+      + '<br><span style="font-size:10px;color:#9a8fc8;">Z attack · X S C D F V G skills · SPACE jump</span>';
   }
   const bossGone = !((game.monsters || []).some(m => m && m.type === 'gravitos'))
     && window._prologueLeftMs < 25000;
@@ -100137,14 +100160,72 @@ function _prologueTick() {
   }
 }
 function _prologueStrip() {
+  window._prologuePhase = null;   // stop feeding scripted phases to the AI
   _prologueHud(false);
+  // v0.29.x — climax beat: Gravitos endures, your apex-form power is torn away.
+  // Heavy supernova-black flash + hit-stop + max shake so the strip lands as a
+  // defeat, not a fade. Each helper is guard-called (headless / effect-off safe).
+  if (typeof blackFlash === 'function') blackFlash(1.0);
   if (typeof flash === 'function') flash(1.0);
-  if (typeof addShake === 'function') addShake(12);
-  _prologueOverlay([
+  if (typeof addHitStop === 'function') addHitStop(220);
+  if (typeof addShake === 'function') addShake(34);
+  if (typeof blackHold === 'function') blackHold(14);
+  if (typeof showToast === 'function') showToast('✦ GRAVITOS ENDURES.', 'epic');
+  // Higgsfield transcension cutscene → prologue strip stanzas → finish. The
+  // cutscene is fail-open: a missing file / blocked autoplay just calls onDone.
+  _prologueVoidCutscene(() => _prologueOverlay([
     'The memory frays.\n\nThe Void reclaims what you have not yet earned.',
     'Power is never given, foreigner.\n\nIt is re-earned — step by step, plane by plane.',
     'Walk out of the Void.\n\nIt is time to begin.',
-  ], () => _prologueFinish(false));
+  ], () => _prologueFinish(false)));
+}
+// v0.29.x — short Higgsfield cutscene of the hero's golden apex-power shattering
+// into violet stardust and spiralling into the singularity Void, bridging the
+// prologue death to the Lv.1 restart for continuity. Robust by construction:
+// onDone fires exactly once, whether the clip ends, the player skips
+// (click / Enter / Esc), the file is missing, autoplay is blocked, or a 9s
+// safety timer trips — so a bad asset can never soft-lock the intro.
+function _prologueVoidCutscene(onDone) {
+  let done = false;
+  const finish = () => {
+    if (done) return; done = true;
+    if (timer) { clearTimeout(timer); timer = null; }
+    window.removeEventListener('keydown', onKey, true);
+    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+    try { onDone(); } catch (e) {}
+  };
+  const ov = document.createElement('div');
+  ov.id = 'prologue-void-cine';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:1600;background:#02010a;display:flex;'
+    + 'align-items:center;justify-content:center;cursor:pointer;overflow:hidden;';
+  ov.innerHTML =
+    '<video id="plg-void-vid" src="steam/higgsfield/cinematics/prologue_void_transcend.mp4" '
+    + 'muted autoplay playsinline '
+    + 'style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#02010a;"></video>'
+    + '<div style="position:absolute;top:0;left:0;right:0;height:56px;background:linear-gradient(#000,rgba(0,0,0,0));"></div>'
+    + '<div style="position:absolute;bottom:0;left:0;right:0;height:56px;background:linear-gradient(rgba(0,0,0,0),#000);"></div>'
+    + '<button id="plg-void-skip" style="position:absolute;top:16px;right:18px;z-index:2;padding:5px 14px;'
+    + 'border-radius:8px;border:1px solid #5a4490;background:rgba(20,8,44,0.85);color:#cdb8ff;'
+    + 'font:700 12px monospace;cursor:pointer;">Skip ▸▸</button>';
+  function onKey(e) {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation(); finish();
+    }
+  }
+  document.body.appendChild(ov);
+  const vid = ov.querySelector('#plg-void-vid');
+  if (vid) {
+    vid.onended = finish;
+    vid.onerror = finish;
+    try { const pp = vid.play(); if (pp && pp.catch) pp.catch(finish); } catch (e) { finish(); }
+  }
+  ov.addEventListener('click', finish);
+  const sk = ov.querySelector('#plg-void-skip');
+  if (sk) sk.onclick = (e) => { e.stopPropagation(); finish(); };
+  window.addEventListener('keydown', onKey, true);
+  // Safety net: never let a stalled/looping/missing clip hold the intro. The
+  // real clip is ~5s; 9s covers buffering with margin.
+  let timer = setTimeout(finish, 9000);
 }
 function _prologueFinish(skipped) {
   if (window._prologueTimer) { clearInterval(window._prologueTimer); window._prologueTimer = null; }
@@ -100186,6 +100267,7 @@ function _prologueFinish(skipped) {
   }
   window._prologueSnapP = window._prologueSnapG = null;
   try { sessionStorage.removeItem('lx_prologue_snap_p'); sessionStorage.removeItem('lx_prologue_snap_g'); } catch (e) {}
+  window._prologuePhase = null;   // never leak scripted phases into the real game
   window._prologueActive = false;
   try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {}   // once-ever (see boot gate)
   if (typeof refreshGearCache === 'function') { try { refreshGearCache(); } catch (e) {} }
