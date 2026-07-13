@@ -18,9 +18,10 @@ try {
   // ── Baked data + boot loads town ────────────────────────────────────────
   const md = await page.evaluate(() => ({ maps: Object.keys(MAP_DATA.maps).length, town: !!MAP_DATA.maps.town, W: MAP_DATA.W }));
   ok('map data baked in (100+ maps)', md.maps > 100 && md.town, md);
-  const boot = await page.evaluate(() => ({ id: state.mapId, n: state.npcs.length, p: state.portals.length, sel: $('mapId').value, opts: $('mapId').options.length }));
-  ok('boots on town with its real NPCs/portals loaded', boot.id === 'town' && boot.n === 9 && boot.p === 3, boot);
+  const boot = await page.evaluate(() => ({ id: state.mapId, n: state.npcs.length, p: state.portals.length, pl: state.platforms.length, sel: $('mapId').value, opts: $('mapId').options.length }));
+  ok('boots on town with its real platforms/NPCs/portals loaded', boot.id === 'town' && boot.n === 9 && boot.p === 3 && boot.pl === 21, boot);
   ok('dropdown is populated + selected on town', boot.sel === 'town' && boot.opts > 100, boot);
+  ok('town platforms are captured + rendered', await page.evaluate(() => MAP_DATA.maps.town.platforms.length === 21 && state.platforms.every(p => 'w' in p && 'h' in p && 'type' in p)), boot);
 
   // ── Dropdown change loads a different map's data ─────────────────────────
   await page.selectOption('#mapId', 'boss_rush');
@@ -65,9 +66,35 @@ try {
   ok('W opens the world map, Esc closes it', wOpen === true && wClosed === false, { wOpen, wClosed });
 
   // ── Clean slate for placement tests ─────────────────────────────────────
-  await page.evaluate(() => { state.npcs = []; state.portals = []; state.sel = null; state.dirty = false; syncPanel(); draw(); });
+  await page.evaluate(() => { state.platforms = []; state.npcs = []; state.portals = []; state.sel = null; state.dirty = false; syncPanel(); draw(); });
   const rect = await page.evaluate(() => { const r = cv.getBoundingClientRect(); return { l: r.left, t: r.top, w: r.width, h: r.height, cw: cv.width, ch: cv.height }; });
   const toClient = (wx, wy) => ({ x: rect.l + wx * (rect.w / rect.cw), y: rect.t + wy * (rect.h / rect.ch) });
+
+  // ── Platform: place, drag, resize (gold corner handle), edit ────────────
+  await page.click('#addPlat');
+  let cp = toClient(600, 350);
+  await page.mouse.click(cp.x, cp.y);
+  const plPlaced = await page.evaluate(() => ({ n: state.platforms.length, o: state.platforms[0], sel: state.sel && state.sel.kind }));
+  ok('platform tool places a 200×20 platform (centered on click)', plPlaced.n === 1 && plPlaced.o.w === 200 && plPlaced.o.h === 20 && plPlaced.sel === 'platform', plPlaced);
+  ok('placed platform is centered around click-x (~600)', Math.abs((plPlaced.o.x + plPlaced.o.w / 2) - 600) <= 25, plPlaced.o);
+  // drag the platform body
+  const pFrom = toClient(plPlaced.o.x + 100, plPlaced.o.y + 10);
+  const pTo = toClient(plPlaced.o.x + 300, plPlaced.o.y + 60);
+  await page.mouse.move(pFrom.x, pFrom.y); await page.mouse.down(); await page.mouse.move(pTo.x, pTo.y, { steps: 6 }); await page.mouse.up();
+  const plMoved = await page.evaluate(() => state.platforms[0]);
+  ok('platform drags to a new position (moved ~200px right)', plMoved.x > plPlaced.o.x + 150, { before: plPlaced.o.x, after: plMoved.x });
+  // resize via the bottom-right handle
+  const hFrom = toClient(plMoved.x + plMoved.w, plMoved.y + plMoved.h);
+  const hTo = toClient(plMoved.x + 360, plMoved.y + 48);
+  await page.mouse.move(hFrom.x, hFrom.y); await page.mouse.down(); await page.mouse.move(hTo.x, hTo.y, { steps: 6 }); await page.mouse.up();
+  const plResized = await page.evaluate(() => state.platforms[0]);
+  ok('dragging the gold corner resizes w & h', plResized.w > 300 && plResized.h > 30, plResized);
+  // edit type via property editor
+  await page.selectOption('#ftype', 'ground');
+  const plType = await page.evaluate(() => state.platforms[0].type);
+  ok('platform type edit applies', plType === 'ground', { plType });
+  // clean the platform before marker tests so export assertions stay simple
+  await page.evaluate(() => { state.platforms = []; state.sel = null; syncPanel(); draw(); });
 
   // place NPC via tool
   await page.click('#addNpc');
@@ -90,17 +117,25 @@ try {
   const edited = await page.evaluate(() => state.portals[0]);
   ok('portal dest/name/star edits apply', edited.dest === 'forest' && edited.name === '▶ Whisperwood' && edited.iconStar === true, edited);
 
-  // export re-parses; keys/format match the game
+  // import a platform (round-trip) so export carries all three arrays
+  await page.fill('#imp', "platforms: [ {x:0, y:480, w:1600, h:60, type:'ground'} ]");
+  await page.click('#impPlat');
+  const plImp = await page.evaluate(() => state.platforms);
+  ok('import adds a platform from a pasted array', plImp.length === 1 && plImp[0].type === 'ground' && plImp[0].w === 1600, plImp);
+
+  // export re-parses; keys/format/order match the game (platforms → npcs → portals)
   await page.click('#exportBtn');
   const out = await page.evaluate(() => $('out').value);
   const evalArr = (label) => { const m = out.match(new RegExp(label + ':\\s*(\\[[\\s\\S]*?\\]),')); return Function('"use strict";return (' + m[1] + ');')(); };
-  let pn, pp, perr = null;
-  try { pn = evalArr('npcs'); pp = evalArr('portals'); } catch (e) { perr = String(e); }
-  ok('export re-parses as valid JS arrays', Array.isArray(pn) && pn.length === 1 && Array.isArray(pp) && pp.length === 1, perr || { pn, pp });
+  let ppl, pn, pp, perr = null;
+  try { ppl = evalArr('platforms'); pn = evalArr('npcs'); pp = evalArr('portals'); } catch (e) { perr = String(e); }
+  ok('export re-parses platforms + npcs + portals as valid JS', Array.isArray(ppl) && ppl.length === 1 && Array.isArray(pn) && pn.length === 1 && Array.isArray(pp) && pp.length === 1, perr || { ppl, pn, pp });
+  ok('export orders platforms → npcs → portals (matches MAPS)', out.indexOf('platforms:') < out.indexOf('npcs:') && out.indexOf('npcs:') < out.indexOf('portals:'), { pi: out.indexOf('platforms:'), ni: out.indexOf('npcs:'), poi: out.indexOf('portals:') });
+  ok('exported platform keeps w/h/type', ppl[0].w === 1600 && ppl[0].h === 60 && ppl[0].type === 'ground', ppl[0]);
   ok('export keeps iconStar + string dest, drops no fields', pp[0].dest === 'forest' && pp[0].iconStar === true && 'role' in pn[0] && 'color' in pn[0], { pn, pp });
-  ok('export header names the selected map id', /MAPS\.forest|MAPS\.town|MAPS\.\w+/.test(out) && !/_[a-zA-Z]+:/.test(out), out.slice(0, 40));
+  ok('export header names the selected map id, no _-keys', /MAPS\.\w+/.test(out) && !/\b_[a-zA-Z]+:/.test(out), out.slice(0, 40));
 
-  // import round-trip
+  // NPC import round-trip
   await page.fill('#imp', "npcs: [ {x:200, y:434, name:'Milo', role:'usher', color:'#4a8acc'} ]");
   await page.click('#impNpc');
   const imp = await page.evaluate(() => state.npcs.map(n => n.name));
