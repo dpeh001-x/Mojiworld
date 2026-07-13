@@ -8685,7 +8685,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.17';
+const GAME_VERSION = 'v0.29.19';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -34266,7 +34266,24 @@ function _mpHandle(msg) {
     case 'down': _coopApplyDown(msg); return;        // v0.27.9 partner went down (revivable)
     case 'up':   _coopApplyUp(msg); return;          // v0.27.9 partner revived / bled out
     case 'revive': _coopApplyRevive(msg); return;    // v0.27.9 partner finished channeling on my body
-    case 'ping': if (msg && msg.map === game.currentMap) _coopAddPing(+msg.x || 0, +msg.y || 0, (net.peers[msg.id] && net.peers[msg.id].name) || 'Partner', false); return;   // v0.27.9
+    case 'ping': {
+      // v0.29.x — LOOK-SYNC CARRIER (see _mpTick). A ping carrying lk/eq/v is
+      // avatar data riding a verbatim-forwarded frame type, for relays whose
+      // state whitelist strips look/eq/v (the deployed CF worker). Merge into
+      // the peer exactly like the state path would have. Same peer-flood cap.
+      if (msg && (msg.lk || msg.eq || msg.v) && msg.id !== net.myId) {
+        if (net.peers[msg.id] || Object.keys(net.peers).length < MP_MAX_PEERS) {
+          const _pp = net.peers[msg.id] || (net.peers[msg.id] = { id: msg.id, _last: performance.now() });
+          if (msg.lk && typeof msg.lk === 'object') _pp.look = msg.lk;
+          if (msg.eq && typeof msg.eq === 'object') _pp.eq = msg.eq;
+          if (typeof msg.v === 'string') { _pp.v = msg.v.slice(0, 16); _mpNoteVersion(_pp, _pp.v); }
+          _pp._last = performance.now();
+        }
+      }
+      // v0.27.9 — co-op map-ping marker (carrier frames send no map → skipped).
+      if (msg && msg.map === game.currentMap) _coopAddPing(+msg.x || 0, +msg.y || 0, (net.peers[msg.id] && net.peers[msg.id].name) || 'Partner', false);
+      return;
+    }
     case 'dmg':  if (net.isHost) _coopHostApplyDamage(msg.u, +msg.d || 0, !!msg.c, msg.k); return;   // remote damage -> host applies
     case 'kill': _coopApplyKill(msg); return;       // host kill -> peers award XP/coins
     case 'welcome':
@@ -34329,21 +34346,10 @@ function _mpHandle(msg) {
       }
       Object.assign(net.peers[msg.id], _mpScrubStrings(msg));
       net.peers[msg.id]._last = performance.now();
-      // v0.29.x — version-skew hint (once per peer). A partner on a stale
-      // cached build sends an older `v` — their avatar data is missing
-      // fields, so what you see CAN'T match their screen. Say so instead
-      // of leaving the mismatch silent; a hard refresh on their side fixes
-      // it. Fires ONLY on an explicit mismatch (v present AND different):
-      // a relay that predates the 'v' presence field strips it, and an
-      // absent stamp must not false-positive every partner.
-      try {
-        const _pv = net.peers[msg.id];
-        if (!_pv._verWarned && typeof GAME_VERSION !== 'undefined' && typeof msg.v === 'string' && msg.v !== GAME_VERSION) {
-          _pv._verWarned = true;
-          const _pn = _pv.name || 'Your partner';
-          if (typeof showToast === 'function') showToast('⚠ ' + _pn + ' is on a different game version (' + msg.v + ' vs ' + GAME_VERSION + ') — their look may not display exactly. A hard refresh (Ctrl+Shift+R) on both sides syncs it.', 'common');
-        }
-      } catch (e) {}
+      // v0.29.x — first-state stamp for the missing-avatar hint in _mpTick.
+      if (net.peers[msg.id]._firstStateAt === undefined) net.peers[msg.id]._firstStateAt = performance.now();
+      // v0.29.x — version-skew hint (shared with the 'ping' look-sync path).
+      if (typeof msg.v === 'string') _mpNoteVersion(net.peers[msg.id], msg.v);
       break;
     }
     case 'chat': {
@@ -34372,12 +34378,87 @@ function _mpHandle(msg) {
   // their case). Doing it here ran a full player-list innerHTML rebuild on every
   // inbound frame — incl. ~14 Hz/peer `state` (≈420 rebuilds/s at 30 peers).
 }
+// v0.29.x — shared avatar wire payload (look + equipment visuals), used by
+// BOTH the 14 Hz state tick and the slow 'ping' look-sync carrier below.
+function _mpAvatarWire() {
+  const look = player.lookCustom ? {
+    h: player.lookCustom.hairId, e: player.lookCustom.eyeId,
+    m: player.lookCustom.mouthId, s: player.lookCustom.skinIdx | 0,
+    // Full look fidelity: hh = hair-dye hue, x = MSX sprite-style pick,
+    // p = doll-editor pose. All omitted (undefined → dropped by
+    // JSON.stringify) when at defaults, so the common-case frame stays small.
+    hh: (player.lookCustom.hairHue | 0) || undefined,
+    x: player.lookCustom.msxId || undefined,
+    p: (function () {
+      const po = player.lookCustom.posture;
+      if (!po || typeof po !== 'object') return undefined;
+      const out = {}; let any = false;
+      for (const k in po) {
+        const e = po[k];
+        const a = (typeof e === 'number') ? e : (e ? +e.angle : NaN);
+        if (isFinite(a) && Math.round(a)) { out[k] = Math.round(a); any = true; }
+      }
+      return any ? out : undefined;
+    })(),
+  } : null;
+  // Generic over ALL equipped slots (weapon / armor / accessory + wardrobe
+  // visual slots) so _drawEquipmentLayer's slot walk finds everything. Only
+  // the render-relevant fields go on the wire: spriteId (explicit art),
+  // baseName/name (auto art via _itemKey), tint.
+  const e = player.equipped || {};
+  const eq = {};
+  for (const k in e) {
+    const it = e[k];
+    if (!it) continue;
+    // Prefer the affix-stripped base name: the receiver feeds bn straight
+    // into _itemKey for the art lookup, and an affixed display name maps
+    // to a key with no sprite. Mirrors _itemKey's own strip-affixes rule.
+    const _bn = it.baseName
+      || ((it.affixes && it.affixes.length && typeof _stripAffixes === 'function')
+            ? _stripAffixes(it.name) : it.name)
+      || undefined;
+    eq[k] = { sid: it.spriteId || undefined, bn: _bn, tn: it.tint || undefined };
+  }
+  return { look, eq };
+}
+// v0.29.x — version-skew hint (once per peer). A partner on a stale cached
+// build sends an older `v` — their avatar data is missing fields, so what
+// you see CAN'T match their screen. Say so instead of leaving the mismatch
+// silent; a hard refresh on their side fixes it. Fires ONLY on an explicit
+// mismatch (v present AND different): a relay that predates the 'v' field
+// strips it, and an absent stamp must not false-positive every partner.
+function _mpNoteVersion(peer, v) {
+  try {
+    if (!peer || peer._verWarned) return;
+    if (typeof GAME_VERSION === 'undefined' || typeof v !== 'string' || v === GAME_VERSION) return;
+    peer._verWarned = true;
+    const _pn = peer.name || 'Your partner';
+    if (typeof showToast === 'function') showToast('⚠ ' + _pn + ' is on a different game version (' + v + ' vs ' + GAME_VERSION + ') — their look may not display exactly. A hard refresh (Ctrl+Shift+R) on both sides syncs it.', 'common');
+  } catch (e) {}
+}
 // Called from the main loop after updatePlayer runs
 function _mpTick() {
   if (!net.connected || !net.ws || net.ws.readyState !== 1) return;
   const now = performance.now();
   if (now - net._lastTickAt < MP_TICK_MS) return;
   net._lastTickAt = now;
+  const _av = _mpAvatarWire();
+  // v0.29.x — LOOK-SYNC CARRIER for whitelist relays. The deployed Cloudflare
+  // worker forwards `state` through a presence-field whitelist that predates
+  // look/eq/v and STRIPS them (live-probed) — which is exactly why partners
+  // saw each other's default bodies instead of the real customisation. It
+  // does, however, forward 'ping' frames VERBATIM. So every ~2.5 s we also
+  // ship the avatar payload on a 'ping' with NO map field: old clients no-op
+  // (their ping handler requires msg.map === current map), new clients merge
+  // it into the peer (see _mpHandle 'ping'). Redundant-but-harmless on relays
+  // whose state path already carries look/eq/v natively.
+  if (now - (net._lastLookSyncAt || 0) > 2500) {
+    net._lastLookSyncAt = now;
+    try {
+      net.ws.send(JSON.stringify({ t: 'ping', lk: _av.look, eq: _av.eq,
+        v: (typeof GAME_VERSION !== 'undefined') ? GAME_VERSION : undefined }));
+    } catch (e) { /* ignore */ }
+  }
   try {
     net.ws.send(JSON.stringify({
       t: 'state',
@@ -34400,55 +34481,11 @@ function _mpTick() {
       // partner (stale cached build) and say so instead of silently
       // rendering a slightly-wrong avatar.
       v: (typeof GAME_VERSION !== 'undefined') ? GAME_VERSION : undefined,
-      look: (player.lookCustom ? {
-        h: player.lookCustom.hairId, e: player.lookCustom.eyeId,
-        m: player.lookCustom.mouthId, s: player.lookCustom.skinIdx | 0,
-        // v0.29.x — FULL look fidelity (user: "should be identical to what
-        // he sees on his screen"). hh = hair-dye hue, x = MSX sprite-style
-        // pick, p = doll-editor pose. All omitted (undefined → dropped by
-        // JSON.stringify) when at defaults, so the common-case tick doesn't
-        // grow.
-        hh: (player.lookCustom.hairHue | 0) || undefined,
-        x: player.lookCustom.msxId || undefined,
-        p: (function () {
-          const po = player.lookCustom.posture;
-          if (!po || typeof po !== 'object') return undefined;
-          const out = {}; let any = false;
-          for (const k in po) {
-            const e = po[k];
-            const a = (typeof e === 'number') ? e : (e ? +e.angle : NaN);
-            if (isFinite(a) && Math.round(a)) { out[k] = Math.round(a); any = true; }
-          }
-          return any ? out : undefined;
-        })(),
-      } : null),
-      eq: (function () {
-        // Generic over ALL equipped slots (weapon / armor / accessory +
-        // any wardrobe visual slots like body_top / cape / helmet) so
-        // _drawEquipmentLayer's slot walk finds everything it needs.
-        // Only the render-relevant fields go on the wire: spriteId
-        // (explicit art), baseName/name (auto art via _itemKey), tint.
-        const e = player.equipped || {};
-        const out = {};
-        for (const k in e) {
-          const it = e[k];
-          if (!it) continue;
-          // v0.29.12 — prefer the affix-stripped base name: the receiver
-          // feeds bn straight into _itemKey for the art lookup, and an
-          // affixed display name ("Sharp Eclipse Daggers") maps to a key
-          // with no sprite. Mirrors _itemKey's own strip-affixes rule.
-          const _bn = it.baseName
-            || ((it.affixes && it.affixes.length && typeof _stripAffixes === 'function')
-                  ? _stripAffixes(it.name) : it.name)
-            || undefined;
-          out[k] = {
-            sid: it.spriteId || undefined,
-            bn: _bn,
-            tn: it.tint || undefined,
-          };
-        }
-        return out;
-      })(),
+      // v0.29.x — look/eq built by the shared _mpAvatarWire() (also shipped
+      // on the 'ping' look-sync carrier above for whitelist relays that
+      // strip these from the state path).
+      look: _av.look,
+      eq: _av.eq,
     }));
   } catch (e) { /* ignore */ }
   // Decay peer chat / emote lifetimes
@@ -34456,6 +34493,17 @@ function _mpTick() {
     const p = net.peers[id];
     if (p.chat)  { p.chat.life  -= MP_TICK_MS; if (p.chat.life  <= 0) p.chat  = null; }
     if (p.emote) { p.emote.life -= MP_TICK_MS; if (p.emote.life <= 0) p.emote = null; }
+    // v0.29.x — honest missing-avatar hint (once per peer). If a partner has
+    // been streaming state for >12 s but their `look` never arrived — via
+    // neither the state path nor the ping carrier — then either they run an
+    // old build, or the relay strips/drops avatar frames (the deployed CF
+    // worker pre-update did both). Their avatar is rendering as a DEFAULT
+    // body that cannot match their screen; say so instead of staying silent.
+    if (!p.look && !p._lookWarned && typeof p._firstStateAt === 'number'
+        && performance.now() - p._firstStateAt > 12000) {
+      p._lookWarned = true;
+      try { if (typeof showToast === 'function') showToast('👤 ' + (p.name || 'Your partner') + "'s avatar data isn't coming through (older game build or relay) — showing a default look.", 'common'); } catch (e) {}
+    }
   }
   // v0.26.399 — prune stale peers. A peer that crashes / kills its tab /
   // drops without a clean `disconnect` message would otherwise linger in
