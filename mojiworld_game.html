@@ -8676,7 +8676,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.14';
+const GAME_VERSION = 'v0.29.15';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -34275,6 +34275,21 @@ function _mpHandle(msg) {
       }
       Object.assign(net.peers[msg.id], _mpScrubStrings(msg));
       net.peers[msg.id]._last = performance.now();
+      // v0.29.x — version-skew hint (once per peer). A partner on a stale
+      // cached build sends an older `v` — their avatar data is missing
+      // fields, so what you see CAN'T match their screen. Say so instead
+      // of leaving the mismatch silent; a hard refresh on their side fixes
+      // it. Fires ONLY on an explicit mismatch (v present AND different):
+      // a relay that predates the 'v' presence field strips it, and an
+      // absent stamp must not false-positive every partner.
+      try {
+        const _pv = net.peers[msg.id];
+        if (!_pv._verWarned && typeof GAME_VERSION !== 'undefined' && typeof msg.v === 'string' && msg.v !== GAME_VERSION) {
+          _pv._verWarned = true;
+          const _pn = _pv.name || 'Your partner';
+          if (typeof showToast === 'function') showToast('⚠ ' + _pn + ' is on a different game version (' + msg.v + ' vs ' + GAME_VERSION + ') — their look may not display exactly. A hard refresh (Ctrl+Shift+R) on both sides syncs it.', 'common');
+        }
+      } catch (e) {}
       break;
     }
     case 'chat': {
@@ -34327,9 +34342,31 @@ function _mpTick() {
       // Compact keys keep the 14 Hz tick light (~120 extra bytes). Sent
       // every tick (not join-only) so late joiners + mid-fight equipment
       // swaps stay in sync with zero extra protocol.
+      // v0.29.x — build stamp: lets the receiver detect a version-skewed
+      // partner (stale cached build) and say so instead of silently
+      // rendering a slightly-wrong avatar.
+      v: (typeof GAME_VERSION !== 'undefined') ? GAME_VERSION : undefined,
       look: (player.lookCustom ? {
         h: player.lookCustom.hairId, e: player.lookCustom.eyeId,
         m: player.lookCustom.mouthId, s: player.lookCustom.skinIdx | 0,
+        // v0.29.x — FULL look fidelity (user: "should be identical to what
+        // he sees on his screen"). hh = hair-dye hue, x = MSX sprite-style
+        // pick, p = doll-editor pose. All omitted (undefined → dropped by
+        // JSON.stringify) when at defaults, so the common-case tick doesn't
+        // grow.
+        hh: (player.lookCustom.hairHue | 0) || undefined,
+        x: player.lookCustom.msxId || undefined,
+        p: (function () {
+          const po = player.lookCustom.posture;
+          if (!po || typeof po !== 'object') return undefined;
+          const out = {}; let any = false;
+          for (const k in po) {
+            const e = po[k];
+            const a = (typeof e === 'number') ? e : (e ? +e.angle : NaN);
+            if (isFinite(a) && Math.round(a)) { out[k] = Math.round(a); any = true; }
+          }
+          return any ? out : undefined;
+        })(),
       } : null),
       eq: (function () {
         // Generic over ALL equipped slots (weapon / armor / accessory +
@@ -34490,6 +34527,7 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
     _castLockUntil: player._castLockUntil,
     somersault: player.somersault, frozenTimer: player.frozenTimer,
     lookCustom: player.lookCustom,
+    customPaint: player.customPaint, customPaintLayers: player.customPaintLayers,
   };
   // v0.29.11 (co-op live-test fix #2) — drawCuteCharacter WRITES one-shot
   // animation anchors on the player object (_heroAtkAt / _heroDeathAt /
@@ -34549,7 +34587,24 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
       eyeId:   _ok(lk.e) || 'default',
       mouthId: _ok(lk.m) || 'default',
       skinIdx: Math.max(0, Math.min(7, lk.s | 0)),
+      // v0.29.x — full look fidelity: hair-dye hue, MSX sprite-style pick,
+      // and doll-editor pose now travel on the wire (see _mpTick). Hue is
+      // integer-clamped; msxId must be a real MSX_HERO key; posture goes
+      // through _normalizePosture (per-part finite check + range clamp),
+      // so a hostile peer can't smuggle anything past the renderer.
+      hairHue: Math.max(0, Math.min(359, lk.hh | 0)),
+      msxId:   (_ok(lk.x) && typeof MSX_HERO !== 'undefined' && MSX_HERO[lk.x]) ? lk.x : null,
+      posture: (lk.p && typeof lk.p === 'object' && typeof _normalizePosture === 'function')
+                 ? _normalizePosture(lk.p) : undefined,
     };
+    // v0.29.x — the viewer's own hand-painted wardrobe layers live on
+    // player.customPaint / customPaintLayers, which _lxGetCustomPaintSource
+    // reads GLOBALLY — without nulling them here every peer would render
+    // wearing the VIEWER's paint job. (A peer's own paint can't travel —
+    // canvas data blows the relay's 64 KB frame cap — so peers render
+    // their base parts instead; documented limitation.)
+    player.customPaint = null;
+    player.customPaintLayers = null;
     // Rebuild the peer's equipment map for the override hook. Generic
     // over whatever slots arrived so wardrobe visual slots (body_top /
     // cape / helmet) render too, not just weapon/armor/accessory. An
@@ -34584,7 +34639,13 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
     // client hasn't seen yet (pops in a frame or two later). It reads
     // only swapped player fields (vx/lookCustom/w/h/facing/cls/
     // attacking — audited v0.29.12).
-    if (typeof _drawVectorHero === 'function') _drawVectorHero(sx, sy);
+    // v0.29.x — mirror drawPlayer's renderer dispatch: a peer whose look
+    // carries an MSX sprite-style pick renders through _drawMsxHero (the
+    // same priority order the peer's own screen uses), so their chosen
+    // STYLE matches — not just their parts.
+    const _pMsx = player.lookCustom && player.lookCustom.msxId;
+    if (_pMsx && typeof _msxReady === 'function' && _msxReady(_pMsx) && typeof _drawMsxHero === 'function') _drawMsxHero(sx, sy);
+    else if (typeof _drawVectorHero === 'function') _drawVectorHero(sx, sy);
     else drawCuteCharacter(sx, sy);
     if (typeof _chibiRestore === 'function') { _chibiRestore(); _ctxSaves--; }
     ctx.restore(); _ctxSaves--;
@@ -34607,6 +34668,7 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
     player._castLockUntil = _saved._castLockUntil;
     player.somersault = _saved.somersault; player.frozenTimer = _saved.frozenTimer;
     player.lookCustom = _saved.lookCustom;
+    player.customPaint = _saved.customPaint; player.customPaintLayers = _saved.customPaintLayers;
     // Restore the one-shot animation anchors drawCuteCharacter mutated
     // while posing the peer (see _savedAnchors note above).
     for (const k in _savedAnchors) player[k] = _savedAnchors[k];
