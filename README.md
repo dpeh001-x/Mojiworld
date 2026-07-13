@@ -1,31 +1,55 @@
-# 🗡️ Mojiworld — Shardfall Expedition
+# 🗡️ Mojiworld — The Everdawn Cycle
 
-A 2D action-platformer RPG with roguelite elements. Four classes, eight job advancements, sixteen master classes, skill trees, affix-roll loot, star enhancement, procedural dungeons, and mini-bosses. **v0.24.0 adds optional multiplayer** — run the server in `server/` and friends can join your room to run around and chat together.
+> _Once upon a time…_ a 2D action-platformer RPG with roguelite loot and **drop-in co-op**. Four classes, eight job advancements, sixteen master classes, branching skill trees, affix-roll gear, star enhancement, procedural dungeons, and mini-bosses — all in a single HTML file, no build step.
+
+**Current build: v0.29.25.** The whole game lives in `mojiworld_game.html` (open it in a browser and play). Since the last README, the project has grown a full **shared-world co-op layer** (fight the *same* monsters with a friend via a Party Code) and a **Steam desktop wrapper** — see below.
 
 ## 🎮 Play
 
-**Open `mojiworld_game.html` in a browser.** Solo play needs no setup.
+**Open `mojiworld_game.html` in any modern browser.** Solo play needs zero setup — no install, no server, no accounts.
 
-Optional art mode: append `?art=cinematic` for the high-fidelity background pack.
-Optional scene post-processing: **default is OFF**. Opt in with `?artfx=soft`, `?artfx=vivid`, or `?artfx=noir`. Enabling the URL param turns on the colour grade, atmospheric bloom, film grain, depth fog, god rays, foreground foliage framing, and animated sky-life (cloud wisps + distant birds) all together. The plain bitmap art reads cleaner without these passes — they exist as a power-user opt-in.
+Play the latest `main` build straight from GitHub (correct MIME, always the branch tip):
 
-Live play URL (once GitHub Pages is enabled): **https://dpeh001-x.github.io/LevelX/mojiworld_game.html**
+**▶ https://raw.githack.com/dpeh001-x/Mojiworld/main/mojiworld_game.html**
 
-## 🌐 Multiplayer (optional, v0.24.0)
+Reviewers can bookmark the stable preview build (whatever is currently under review):
+
+**▶ https://raw.githack.com/dpeh001-x/Mojiworld/preview/mojiworld_game.html**
+
+### Optional visual modes (URL params)
+
+| Param | Effect |
+|---|---|
+| `?art=cinematic` | High-fidelity cinematic background pack |
+| `?artfx=soft` / `?artfx=vivid` / `?artfx=noir` | Scene post-processing (off by default): colour grade, bloom, film grain, depth fog, god rays, foliage framing, animated sky-life |
+
+The plain bitmap art reads cleaner without post-processing, so the FX passes are an opt-in for power users.
+
+## 🤝 Co-op multiplayer
+
+Co-op is the headline feature now — not just presence + chat, but a **shared, host-authoritative world**: you and a friend fight the *same* monsters, with the same HP and the same kills, and split the XP/coins on the same map.
+
+**How it works:** the game ships with a relay baked in — just **name your hero** and share a **Party Code**. The lowest-id player in the party hosts and simulates all monsters; everyone else mirrors them. No accounts, no server-side anti-cheat — the right trust model for playing with people you know. Chat and emotes relay across everyone in the room, and each partner shows a health bar above their head.
+
+### Running your own relay (optional)
+
+The relay is a small Node WebSocket server (`server/`, `mp/`, and a Cloudflare Workers variant in `mp-cf/`). The `server/` build also adds optional accounts, password auth, and per-account save persistence (SQLite, zero native deps):
 
 ```sh
 cd server
 npm install
-npm start         # [levelx-server] listening on port 8080
+npm start          # [levelx-server] listening on :8080
 ```
 
-In the game, click **🌐 Multi** (top-right of the HUD), enter `ws://localhost:8080`, pick a name + room, hit **Connect**. Share the URL + room name with a friend. See `server/README.md` for Fly.io / Railway / VPS deploy instructions and the full protocol table.
+In-game, click **🌐 Multi**, point it at your `ws://…` URL, name your hero, and enter a Party Code. See `server/README.md` for the full HTTP/WebSocket protocol and Fly.io / Railway / VPS deploy notes, and `COOP_NOTES.md` for the netcode design and invariants.
 
-**Scope.** Presence + chat + emote relay across everyone in the same room. Combat and mobs are still per-client — two players next to the same Slippy are each fighting their own. Server-authoritative combat is the next milestone.
+## 🖥️ Steam
+
+A desktop build (casual co-op pivot) is in progress under `steam/` — it wraps the same `mojiworld_game.html` as a native app with the shipped relay baked in. See `STEAM.md` for the packaging + launch guide.
 
 ## 🎯 Controls
 
-Skills are laid out as a left-hand cluster (`Z X S C D F V G`) so you can reach every attack without leaving WASD-adjacent position. Press `?` in-game for a live keybind panel that shows your current class's skill names + cooldowns, or `I` for a short skill reference card.
+Press **`?`** in-game for the live keybind panel (always current), or **`K`** / **`U`** for the character panel with a per-class skill reference. Skills sit in a left-hand cluster so you can attack without leaving WASD-adjacent position.
 
 ### Movement
 
@@ -33,10 +57,10 @@ Skills are laid out as a left-hand cluster (`Z X S C D F V G`) so you can reach 
 |---|---|
 | Move left / right | `←` `→` |
 | Jump (double / triple) | `Space` |
-| Drop through platform | `↓` + `Space` |
 | Enter portal | `↑` |
-| Dodge roll | `Shift` |
-| Block / Parry | `A` |
+| Drop through platform | `↓` |
+| Dodge / avoid | `Shift` |
+| Block / parry | `A` |
 | Quick dash | double-tap `←` or `→` |
 
 ### Combat
@@ -44,31 +68,29 @@ Skills are laid out as a left-hand cluster (`Z X S C D F V G`) so you can reach 
 | Action | Key |
 |---|---|
 | Basic attack | `Z` |
-| Skill 2 | `X` |
-| Skill 3 | `S` |
-| Skill 4 | `C` |
-| Skill 5 | `D` |
-| Job signature (Lv 10) | `F` |
-| Job ultimate (Lv 10) | `V` |
+| Skill 2 / 3 | `X` `S` |
+| Skill 4 / 5 | `C` `D` |
+| Class signature (Lv 10) | `F` |
+| Class ultimate (Lv 10) | `V` |
 | Master signature (Lv 20) | `G` |
 
 ### UI & utility
 
 | Action | Key |
 |---|---|
-| Talk to NPC (or open chest in range) | `N` |
-| Codex / achievements | `Y` |
-| Open chest / pick up drop | `F` |
+| Talk to NPC | `N` |
+| Open chest / pickup | `F` |
 | Inventory | `B` |
-| Character panel — Level Up / Boons / Skills | `K` or `U` |
-| Help panel | `?` |
+| Character panel (Level Up / Boons / Skills) | `K` or `U` |
+| Codex of Mojiworld | `Y` |
+| Wardrobe (Fashionista) | `Q` |
+| HP / MP potion | `PgUp` / `PgDn` |
 | Mute / unmute | `M` |
-| HP / MP potion (3 s CD, buys with Lumen if none) | `R` / `T` (or `PgUp` / `PgDn`) |
-| Reset save (confirms) | `9` |
-| Re-pick job / master | `0` |
+| Close menus | `Esc` |
+| Help panel | `?` |
+| Change class / master | `0` |
+| Reset save (confirms) | `T` |
 | Dev console | hold `1` + `2` + `3` |
-
-> `N` is the interact key: next to an NPC it opens their dialog, on a chest it opens the chest. The Codex now lives on its own key, `Y` (v0.25.180). `F` is reserved for chest / pickup / job signature skill — pressing `F` next to an NPC still talks as a legacy fallback, but `N` is the primary talk key.
 
 ## ⚔️ Classes
 
@@ -79,27 +101,35 @@ Pick one at character creation (gender toggle included), advance at level 10, ma
 - **Mage** → Archmage / Warlock → Sage, Elementalist, Lich, Hexmaster
 - **Archer** → Sniper / Ranger → Marksman, Ballista, Beastmaster, Skyhunter
 
-Each class has a unique passive perk and a skill tree of 6 unlockable nodes branching across 3 tiers.
+Each class has a unique passive perk and a skill tree of unlockable nodes across three tiers. Choosing a job upgrades all your starter skills with job-specific effects.
 
 ## 🗺️ World
 
-Nine interconnected maps: Everdawn Village, Sunset Coast, Emerald Thicket, Fungal Hollow, Elderwood Grove, Sky Garden, Frozen Peak, Lava Cavern, plus two boss arenas (Gelwater Grotto, Queen's Hollow).
+A dozen-plus interconnected maps — a hub village plus combat zones and boss arenas, including Sunset Coast, Emerald Thicket, Fungal Hollow, Elderwood Grove, Sky Garden, Frozen Peak, Lava Cavern, Jade Grove, Frostbite Hollow, the Clockwork Underpass, Azure Academia, and the Bastion, plus boss arenas like Gelwater Grotto and Queen's Hollow.
 
-Every combat map gets a **mini-boss** (Elder variant of the strongest local mob) every 60–90 seconds. Mini-bosses drop guaranteed epic loot + a powerup orb.
+Every combat map spawns a **mini-boss** (an Elder variant of the strongest local mob) on a timer, dropping guaranteed epic loot and a powerup orb.
 
 ## 🎁 Features
 
-- **16 equipment affixes** (prefixes + suffixes) for roguelite-style randomized gear
-- **Star enhancement** system (★0 → ★10) at Brok the Blacksmith
-- **Skill tree** — 24 passive nodes across 4 classes
-- **Job basic-skill enhancements** — choosing a job upgrades all your starter skills with unique effects
-- **Procedural pixel-art character** — base body + hair/armor/cape/weapon/helmet/shield/boots overlays
-- **In-browser sprite maker** (`sprite_maker.html`) — generate your own 40+ style variants
-- **Death → respawn** at town with 50% Lumen penalty
+- **Affix-roll loot** — prefixes + suffixes for roguelite-style randomized gear
+- **Star enhancement** (★0 → ★10) at Brok the Blacksmith
+- **Skill trees** — passive nodes branching across three tiers per class
+- **Job basic-skill enhancements** — advancing upgrades every starter skill
+- **Procedural pixel-art character** — base body + hair / armor / cape / weapon / helmet / shield / boots overlays, plus a Wardrobe
+- **In-browser sprite maker** (`sprite_maker.html`) — generate your own style variants
+- **Shared-world co-op** — same monsters, HP, kills, and XP with a friend
+- **Death → respawn** at town with a Lumen penalty
 
-## 🤝 Contributing
+## 📄 Docs
 
-Branches, forks, and pull requests welcome. Every edit to `mojiworld_game.html` is live-previewed just by opening the file. No build step.
+- `CHANGELOG.html` — the canonical, human-facing release notes (open in a browser)
+- `COOP_NOTES.md` — co-op netcode design, invariants, and limitations
+- `STEAM.md` — desktop packaging + Steam launch guide
+- `server/README.md` — relay/backend API and deploy instructions
+
+## 🛠️ Contributing
+
+Branches, forks, and pull requests welcome. Every edit to `mojiworld_game.html` is live-previewed just by opening the file — no build step. `mojiworld_game.html` is a single ~6 MB file edited by parallel sessions, so keep changes small, atomic, and committed frequently.
 
 ## 📝 License
 
