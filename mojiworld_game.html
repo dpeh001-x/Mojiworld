@@ -8712,7 +8712,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.36';
+const GAME_VERSION = 'v0.29.39';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -32039,19 +32039,74 @@ function _sbAttachClip(beatId) {
   v.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;'
     + 'object-fit:cover;opacity:0;transition:opacity 900ms ease;'
     + 'pointer-events:none;';
-  v.addEventListener('canplay', () => { v.style.opacity = '0.5'; }, { once: true });
+  // v0.29.39 — SMOOTH START. Don't fade in / start playback until the clip
+  // can play THROUGH its short loop without a mid-stream stall (readyState
+  // 4 = HAVE_ENOUGH_DATA). Previously we faded in on `canplay` (readyState
+  // 3) and called play() immediately, so a clip still streaming over the
+  // CDN popped in late and stuttered as it buffered. Now the stanza text
+  // shows over the dark gradient (unchanged) until the clip is buffered
+  // enough for a seamless loop, then one clean fade-in. A fallback timer
+  // starts it anyway on a slow pipe so we never withhold it forever; the
+  // neighbor-prefetch (_sbPreloadForMap) usually has it cached already, so
+  // readyState is 4 on arrival and it starts instantly.
+  let _started = false;
+  const _start = () => {
+    if (_started || !v.isConnected) return;
+    _started = true;
+    if (game._storyBeatClipTimer) { clearTimeout(game._storyBeatClipTimer); game._storyBeatClipTimer = null; }
+    const p = v.play(); if (p && p.catch) p.catch(() => {});
+    v.style.opacity = '0.5';
+  };
+  v.addEventListener('canplaythrough', _start, { once: true });
   v.addEventListener('error', () => { try { v.remove(); } catch (e) {} }, { once: true });
+  // Slow-pipe fallback: if we at least reached HAVE_FUTURE_DATA but never
+  // HAVE_ENOUGH, start rather than stay black behind the text.
+  game._storyBeatClipTimer = setTimeout(() => { if (v.readyState >= 3) _start(); }, 2600);
   v.src = src;
   overlay.insertBefore(v, overlay.firstChild);
-  const p = v.play(); if (p && p.catch) p.catch(() => {});
+  if (v.readyState >= 4) _start();   // already warm (prefetched) → instant
   game._storyBeatClipEl = v;
 }
 function _sbDetachClip() {
+  if (game._storyBeatClipTimer) { clearTimeout(game._storyBeatClipTimer); game._storyBeatClipTimer = null; }
   const v = game._storyBeatClipEl || document.getElementById('story-beat-clip');
   if (!v) return;
   try { v.pause(); v.removeAttribute('src'); v.load(); v.remove(); } catch (e) {}
   game._storyBeatClipEl = null;
 }
+// v0.29.39 — CINEMATIC PRELOAD. Warm a beat's clip into the HTTP cache
+// BEFORE its checkpoint fires, so the <video> built at beat time starts
+// instantly and never stutters. Driven from the neighbor-prefetch pass
+// (arrival beats — a destination map's act clip) and just before the
+// boss / milestone beat setTimeouts (which already stagger 2.6–3.5 s).
+// Single-flight per URL; skipped on data-saver / 2g and for beats already
+// seen. A plain fetch (not a <video>) stays decode-free and iOS-safe —
+// iOS clamps <video preload=auto> to metadata, but fetch downloads fully.
+const _sbWarmed = new Set();
+function _sbPreloadClip(beatId) {
+  try {
+    if (!beatId) return;
+    const src = STORY_BEAT_CLIPS[beatId];
+    if (!src || _sbWarmed.has(src)) return;
+    if (typeof player !== 'undefined' && player && player._storyBeatsSeen && player._storyBeatsSeen[beatId]) return;
+    const _con = (typeof navigator !== 'undefined' && navigator.connection) || {};
+    if (_con.saveData || /(^|-)2g$/.test(_con.effectiveType || '')) return;
+    _sbWarmed.add(src);
+    // Read to completion so the response lands in the HTTP cache, then drop
+    // the blob (GC). Re-arm on failure so a later attempt can retry.
+    fetch(src).then((r) => (r && r.ok) ? r.blob() : null).then(() => {}).catch(() => { _sbWarmed.delete(src); });
+  } catch (e) {}
+}
+function _sbBeatForMap(id) {
+  // Mirror loadMap's precedence: map-specific beat first, else the act beat.
+  if (id === 'wayfarersLantern2') return 'first_gate_visit';
+  if (id === 'forest') return 'memory_echo';
+  try {
+    const act = (typeof _storyActForMap === 'function') ? _storyActForMap(id) : null;
+    return (act && act.beat) ? act.beat : null;
+  } catch (e) { return null; }
+}
+function _sbPreloadForMap(id) { const b = _sbBeatForMap(id); if (b) _sbPreloadClip(b); }
 
 function _playStoryBeat(beatId, onClose) {
   if (!player._storyBeatsSeen) player._storyBeatsSeen = {};
@@ -42289,7 +42344,15 @@ function loadMap(id, entryX, entryY) {
     // v0.27.6 — neighbor prefetch: 3s after arriving (the entered map's own
     // load settles first), warm every map reachable through this map's portals
     // so the NEXT map is already resident before the player walks through.
-    setTimeout(() => { try { if (typeof _lxWarmMap === 'function') for (const n of _lxMapNeighbors(id)) _lxWarmMap(n); } catch (e) {} }, 3000);
+    setTimeout(() => { try {
+      const _ns = _lxMapNeighbors(id);
+      for (const n of _ns) {
+        if (typeof _lxWarmMap === 'function') _lxWarmMap(n);
+        // v0.29.39 — also warm each neighbor's arrival-cinematic clip so the
+        // beat that fires on entering it plays instantly + stutter-free.
+        if (typeof _sbPreloadForMap === 'function') _sbPreloadForMap(n);
+      }
+    } catch (e) {} }, 3000);
   } catch (e) {}
   // v0.26.438 — Record the map being LEFT into the return-warp history
   // (most-recent-first, deduped, capped). game.currentMap is still the
@@ -62080,6 +62143,7 @@ function killMonster(m) {
       if (typeof ZODIAC_SIGNS !== 'undefined' && ZODIAC_SIGNS.every(z => z.id === m.zodiacSign || zodiacDefeated(z.id))) {
         if (typeof acceptQuest === 'function') acceptQuest('q_zodiac_twelve');
         if (typeof _completeQuest === 'function') _completeQuest('q_zodiac_twelve');
+        if (typeof _sbPreloadClip === 'function') _sbPreloadClip('zodiac_twelve_done');   // v0.29.39 — warm the clip during the 2.6s stagger
         if (typeof _playStoryBeat === 'function') setTimeout(() => _playStoryBeat('zodiac_twelve_done'), 2600);
       }
       // Radial golden burst at boss center
@@ -62835,12 +62899,14 @@ function triggerSuperBossDeath(m) {
   // does NOT fire this — Aetherion is the mid-endgame super-boss, the
   // true ending beat belongs to the Weight-Bearer.
   if (m.type === 'gravitos' && typeof _playStoryBeat === 'function') {
+    if (typeof _sbPreloadClip === 'function') _sbPreloadClip('epilogue_gravitos');   // v0.29.39 — warm during the 3.5s stagger
     setTimeout(() => _playStoryBeat('epilogue_gravitos', _showGameComplete), 3500);
   }
   // v0.28.6 — Aetherion's first defeat gets its own quieter scene: the
   // Amnesiac's farewell (warden_falls). Same 3.5s stagger so the loot
   // rain + toast cascade land first. First-time-only via _storyBeatsSeen.
   if (m.type === 'aetherion' && typeof _playStoryBeat === 'function') {
+    if (typeof _sbPreloadClip === 'function') _sbPreloadClip('warden_falls');   // v0.29.39 — warm during the 3.5s stagger
     setTimeout(() => _playStoryBeat('warden_falls'), 3500);
   }
 }
