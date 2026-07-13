@@ -94,10 +94,16 @@ try {
   const wm = await page.evaluate(() => ({ open: $('wmOverlay').style.display === 'block', nodes: $('wmStar').children.length, chips: $('wmMore').children.length }));
   ok('world map opens with star nodes', wm.open && wm.nodes > 50, wm);
   ok('world map lists unpinned maps as chips', wm.chips > 0, wm);
+  // connector lines between nodes (mirrors the in-game W map, derived from portals)
+  const conn = await page.evaluate(() => {
+    const svg = document.querySelector('#wmStar svg.wmEdges');
+    return { hasSvg: !!svg, paths: svg ? svg.querySelectorAll('path[stroke]').length : 0, arrow: svg ? !!svg.querySelector('marker#wmArrow') : false };
+  });
+  ok('world map draws portal-link connector lines', conn.hasSvg && conn.paths > 20 && conn.arrow, conn);
   // search filters
   await page.fill('#wmSearch', 'forest');
   const filtered = await page.evaluate(() => {
-    const vis = [...$('wmStar').children].filter(e => !e.classList.contains('dim')).map(e => e._id);
+    const vis = [...$('wmStar').children].filter(e => e.classList.contains('wmNode') && !e.classList.contains('dim')).map(e => e._id);
     return { vis };
   });
   ok('world-map search filters nodes', filtered.vis.length > 0 && filtered.vis.every(id => id.toLowerCase().includes('forest') || (MAP_DATA.maps[id].name || '').toLowerCase().includes('forest')), filtered);
@@ -162,13 +168,18 @@ try {
   await page.mouse.move(from.x, from.y); await page.mouse.down(); await page.mouse.move(to.x, to.y, { steps: 6 }); await page.mouse.up();
   const afterDrag = await page.evaluate(() => state.npcs[0]);
   ok('drag moves the NPC to the drop point (x~1000)', Math.abs(afterDrag.x - 1000) <= 25, afterDrag);
+  // NPC name is a dropdown of the existing cast (+custom)
+  const nameTag = await page.evaluate(() => { select({ o: state.npcs[0], kind: 'npc' }); const el = document.getElementById('fname'); return { tag: el && el.tagName, opts: el ? el.options.length : 0, custom: el ? [...el.options].some(o => o.value === '__custom') : false }; });
+  ok('NPC name is a dropdown of the cast (+custom)', nameTag.tag === 'SELECT' && nameTag.opts > 5 && nameTag.custom, nameTag);
 
   // place + edit a portal
   await page.click('#addPortal');
   c = toClient(500, 420); await page.mouse.click(c.x, c.y);
-  await page.fill('#fdest', 'forest'); await page.fill('#fname', '▶ Whisperwood'); await page.check('#fstar');
+  const destTag = await page.evaluate(() => { const el = document.getElementById('fdest'); return { tag: el && el.tagName, opts: el ? el.options.length : 0, custom: el ? [...el.options].some(o => o.value === '__custom') : false }; });
+  ok('portal dest is a dropdown of existing maps (+custom)', destTag.tag === 'SELECT' && destTag.opts > 100 && destTag.custom, destTag);
+  await page.selectOption('#fdest', 'coralReef'); await page.fill('#fname', '▶ Whisperwood'); await page.check('#fstar');
   const edited = await page.evaluate(() => state.portals[0]);
-  ok('portal dest/name/star edits apply', edited.dest === 'forest' && edited.name === '▶ Whisperwood' && edited.iconStar === true, edited);
+  ok('portal dest/name/star edits apply', edited.dest === 'coralReef' && edited.name === '▶ Whisperwood' && edited.iconStar === true, edited);
 
   // import a platform (round-trip) so export carries all three arrays
   await page.fill('#imp', "platforms: [ {x:0, y:480, w:1600, h:60, type:'ground'} ]");
@@ -184,8 +195,9 @@ try {
   try { ppl = evalArr('platforms'); pn = evalArr('npcs'); pp = evalArr('portals'); } catch (e) { perr = String(e); }
   ok('export re-parses platforms + npcs + portals as valid JS', Array.isArray(ppl) && ppl.length === 1 && Array.isArray(pn) && pn.length === 1 && Array.isArray(pp) && pp.length === 1, perr || { ppl, pn, pp });
   ok('export orders platforms → npcs → portals (matches MAPS)', out.indexOf('platforms:') < out.indexOf('npcs:') && out.indexOf('npcs:') < out.indexOf('portals:'), { pi: out.indexOf('platforms:'), ni: out.indexOf('npcs:'), poi: out.indexOf('portals:') });
+  ok('export compiles all edited fields (worldWidth/Height/groundY)', /worldWidth:/.test(out) && /worldHeight:/.test(out) && /groundY:/.test(out), out.slice(0, 120));
   ok('exported platform keeps w/h/type', ppl[0].w === 1600 && ppl[0].h === 60 && ppl[0].type === 'ground', ppl[0]);
-  ok('export keeps iconStar + string dest, drops no fields', pp[0].dest === 'forest' && pp[0].iconStar === true && 'role' in pn[0] && 'color' in pn[0], { pn, pp });
+  ok('export keeps iconStar + string dest, drops no fields', pp[0].dest === 'coralReef' && pp[0].iconStar === true && 'role' in pn[0] && 'color' in pn[0], { pn, pp });
   ok('export header names the selected map id, no _-keys', /MAPS\.\w+/.test(out) && !/\b_[a-zA-Z]+:/.test(out), out.slice(0, 40));
 
   // NPC import round-trip

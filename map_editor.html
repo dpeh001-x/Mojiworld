@@ -61,7 +61,10 @@
   #wmClose { background:#2a1f45; border:1px solid #5a3a8a; color:#e8d8ff; border-radius:8px; padding:7px 12px; cursor:pointer; }
   #wmBody { flex:1; overflow-y:auto; }
   #wmStar { position:relative; width:100%; aspect-ratio:1528/888; margin:0 auto 12px; }
-  .wmNode { position:absolute; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center;
+  /* Portal-link connector layer — sits behind the node buttons; mirrors the
+     in-game W-map lines (straight, violet, cyan glow, arrow on 1-way links). */
+  .wmEdges { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:0; overflow:visible; }
+  .wmNode { position:absolute; z-index:1; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center;
     gap:1px; cursor:pointer; background:none; border:0; padding:0; transition:opacity .12s; }
   .wmNode .dot { width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center;
     font-size:19px; background:radial-gradient(circle at 35% 30%, rgba(120,95,185,.95), rgba(22,14,42,.95));
@@ -175,6 +178,18 @@ const markDirty = () => { state.dirty = true; };
 // Known NPC roles (from MAPS placements across the game) + a palette default.
 const ROLES = ['info','amnesiac','caravan','jukebox','courier','usher','guguma',
   'expedition','innkeeper','shop','quest','healer','blacksmith','banker','guide'];
+
+// Catalog of every distinct NPC placed anywhere in the game, so the +NPC tool
+// picks from the existing cast (name → its role + color) instead of free text.
+const NPC_CATALOG = (() => {
+  const byName = new Map();
+  for (const id of Object.keys(MAP_DATA.maps)) {
+    for (const n of (MAP_DATA.maps[id].npcs || [])) {
+      if (n && n.name && !byName.has(n.name)) byName.set(n.name, { name: n.name, role: n.role || 'info', color: n.color || '#88ccaa' });
+    }
+  }
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+})();
 
 const worldW = () => Math.max(480, +$('worldW').value || 1600);
 // Full vertical extent — tall/underwater maps (Coral Reef 2200, Abyssal Trench
@@ -377,14 +392,22 @@ function renderSelbox() {
   let h = '<div class="row"><label>x</label><input id="fx" type="number" value="' + o.x + '">'
         + '<label style="flex:0 0 14px;">y</label><input id="fy" type="number" value="' + o.y + '"></div>';
   if (kind === 'npc') {
-    h += '<div class="row"><label>name</label><input id="fname" type="text" value="' + escAttr(o.name || '') + '"></div>';
+    const inCat = NPC_CATALOG.some(n => n.name === o.name);
+    h += '<div class="row"><label>name</label><select id="fname">'
+      + (inCat ? '' : '<option value="' + escAttr(o.name || '') + '" selected>' + esc(o.name || '(unnamed)') + ' (custom)</option>')
+      + NPC_CATALOG.map(n => '<option value="' + escAttr(n.name) + '"' + (n.name === o.name ? ' selected' : '') + '>' + esc(n.name) + ' · ' + esc(n.role) + '</option>').join('')
+      + '<option value="__custom">✎ Custom name…</option></select></div>';
     h += '<div class="row"><label>role</label><select id="frole">'
       + ROLES.map(r => '<option' + (r === o.role ? ' selected' : '') + '>' + r + '</option>').join('')
       + (ROLES.includes(o.role) ? '' : '<option selected>' + esc(o.role) + '</option>') + '</select></div>';
     h += '<div class="row"><label>color</label><input id="fcolor" type="color" value="' + (o.color || '#88ccaa') + '">'
       + '<input id="fcolorT" type="text" value="' + escAttr(o.color || '#88ccaa') + '"></div>';
   } else if (kind === 'portal') {
-    h += '<div class="row"><label>dest (map id)</label><input id="fdest" type="text" value="' + escAttr(o.dest || '') + '"></div>';
+    const knownDest = MAP_IDS.includes(o.dest);
+    h += '<div class="row"><label>dest (map)</label><select id="fdest">'
+      + (knownDest ? '' : '<option value="' + escAttr(o.dest || '') + '" selected>' + esc(o.dest || '(none)') + ' (custom)</option>')
+      + MAP_IDS.map(mid => '<option value="' + escAttr(mid) + '"' + (mid === o.dest ? ' selected' : '') + '>' + esc((MAP_DATA.maps[mid] && MAP_DATA.maps[mid].name) || mid) + ' · ' + esc(mid) + '</option>').join('')
+      + '<option value="__custom">✎ Custom map id…</option></select></div>';
     h += '<div class="row"><label>name</label><input id="fname" type="text" value="' + escAttr(o.name || '') + '"></div>';
     h += '<div class="row"><label>icon star</label><input id="fstar" type="checkbox"' + (o.iconStar ? ' checked' : '') + '><span class="muted" style="flex:1;">render ⭐ instead of 🌀</span></div>';
   } else {   // platform
@@ -409,12 +432,30 @@ function wireSelFields() {
   on('fx', 'input', e => { o.x = Math.round(+e.target.value || 0); draw(); syncListCoords(); });
   on('fy', 'input', e => { o.y = Math.round(+e.target.value || 0); draw(); syncListCoords(); });
   if (kind === 'npc') {
-    on('fname', 'input', e => { o.name = e.target.value; draw(); syncListCoords(); });
+    // Name is a dropdown of the existing cast; picking one adopts its role+color.
+    on('fname', 'change', e => {
+      let v = e.target.value;
+      if (v === '__custom') v = (prompt('NPC name:', o.name || '') || o.name || '').trim();
+      o.name = v;
+      const c = NPC_CATALOG.find(n => n.name === v);
+      if (c) { o.role = c.role; o.color = c.color; }
+      renderSelbox(); draw(); syncListCoords();
+    });
     on('frole', 'change', e => { o.role = e.target.value; });
     on('fcolor', 'input', e => { o.color = e.target.value; $('fcolorT').value = e.target.value; draw(); });
     on('fcolorT', 'input', e => { o.color = e.target.value; try { $('fcolor').value = e.target.value; } catch (x) {} draw(); });
   } else if (kind === 'portal') {
-    on('fdest', 'input', e => { o.dest = e.target.value; draw(); syncListCoords(); });
+    // Destination is a dropdown of existing map ids; auto-names a blank portal.
+    on('fdest', 'change', e => {
+      let v = e.target.value;
+      if (v === '__custom') v = (prompt('Destination map id:', o.dest || '') || o.dest || '').trim();
+      o.dest = v;
+      if (!o.name || o.name === '▶ Everdawn Central') {
+        const nm = (MAP_DATA.maps[v] && MAP_DATA.maps[v].name) || v;
+        if (nm) o.name = '▶ ' + nm;
+      }
+      renderSelbox(); draw(); syncListCoords();
+    });
     on('fname', 'input', e => { o.name = e.target.value; draw(); syncListCoords(); });
     on('fstar', 'change', e => { if (e.target.checked) o.iconStar = true; else delete o.iconStar; draw(); });
   } else {   // platform
@@ -477,6 +518,7 @@ function buildExport() {
     '// Paste these keys into the MAPS.' + id + ' entry.\n' +
     'worldWidth: ' + worldW() + ',\n' +
     'worldHeight: ' + wh + ',' + (wh > 560 ? '   // tall map — pair with isVerticalTower:true so the camera follows' : '') + '\n' +
+    'groundY: ' + groundY() + ',\n' +
     'platforms: [\n' + arr(state.platforms) + '],\n' +
     'npcs: [\n' + arr(state.npcs) + '],\n' +
     'portals: [\n' + arr(state.portals) + '],';
@@ -599,10 +641,61 @@ function cycleMap(dir) {
 }
 
 // ── World-map overlay (the W-key travel map, click a node to load) ────────
+const SVG_NS = 'http://www.w3.org/2000/svg';
+// Connector lines between W-map nodes — mirrors the in-game W map: one line per
+// connected pair (derived from ACTUAL portal links), a violet core with a cyan
+// glow underlay, an arrowhead on 1-way links, and links touching the current
+// map brightened. Drawn as an SVG layer behind the node buttons.
+function buildWMConnectors(star, W, H) {
+  const cur = state.mapId;
+  const pos = {};
+  for (const id of MAP_IDS) { const m = MAP_DATA.maps[id]; if (m && m.wm && !m.isVoid) pos[id] = m.wm; }
+  // Pass 1 — collapse portal links into per-pair direction flags.
+  const dir = Object.create(null);
+  for (const id of Object.keys(pos)) {
+    for (const p of (MAP_DATA.maps[id].portals || [])) {
+      const dest = p && p.dest;
+      if (!dest || !pos[dest] || dest === id) continue;
+      const lo = id < dest ? id : dest, hi = id < dest ? dest : id, k = lo + '|' + hi;
+      if (!dir[k]) dir[k] = { lo, hi, fromLo: false, fromHi: false };
+      if (id === lo) dir[k].fromLo = true; else dir[k].fromHi = true;
+    }
+  }
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'wmEdges');
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  svg.setAttribute('preserveAspectRatio', 'none');
+  const defs = document.createElementNS(SVG_NS, 'defs');
+  const mk = document.createElementNS(SVG_NS, 'marker');
+  mk.setAttribute('id', 'wmArrow'); mk.setAttribute('viewBox', '0 0 10 10');
+  mk.setAttribute('refX', '9'); mk.setAttribute('refY', '5');
+  mk.setAttribute('markerWidth', '7'); mk.setAttribute('markerHeight', '7'); mk.setAttribute('orient', 'auto');
+  const mp = document.createElementNS(SVG_NS, 'path'); mp.setAttribute('d', 'M 0,0 L 10,5 L 0,10 z'); mp.setAttribute('fill', 'rgba(200,170,240,0.85)');
+  mk.appendChild(mp); defs.appendChild(mk); svg.appendChild(defs);
+  for (const k of Object.keys(dir)) {
+    const d = dir[k], twoWay = d.fromLo && d.fromHi;
+    const from = (twoWay || d.fromLo) ? pos[d.lo] : pos[d.hi];
+    const to   = (twoWay || d.fromLo) ? pos[d.hi] : pos[d.lo];
+    const active = (d.lo === cur || d.hi === cur);
+    const dAttr = 'M ' + from.x.toFixed(1) + ',' + from.y.toFixed(1) + ' L ' + to.x.toFixed(1) + ',' + to.y.toFixed(1);
+    const glow = document.createElementNS(SVG_NS, 'path');
+    glow.setAttribute('d', dAttr); glow.setAttribute('fill', 'none');
+    glow.setAttribute('stroke', 'rgba(120,200,255,0.14)'); glow.setAttribute('stroke-width', '6.5'); glow.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(glow);
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', dAttr); path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', active ? 'rgba(170,225,255,0.92)' : 'rgba(205,180,255,0.72)');
+    path.setAttribute('stroke-width', active ? '2.6' : '2.2'); path.setAttribute('stroke-linecap', 'round');
+    if (!twoWay) path.setAttribute('marker-end', 'url(#wmArrow)');
+    svg.appendChild(path);
+  }
+  star.appendChild(svg);   // appended first (star was just cleared) → behind nodes
+}
 function buildWorldMap() {
   const star = $('wmStar'); star.innerHTML = '';
   const more = $('wmMore'); more.innerHTML = '';
   const W = MAP_DATA.W || 1528.8, H = MAP_DATA.H || 888.8;
+  buildWMConnectors(star, W, H);
   for (const id of MAP_IDS) {
     const m = MAP_DATA.maps[id];
     if (m.isVoid) continue;
@@ -627,7 +720,7 @@ function buildWorldMap() {
 function filterWorldMap(q) {
   q = (q || '').trim().toLowerCase();
   const test = (id) => { const m = MAP_DATA.maps[id]; return !q || id.toLowerCase().includes(q) || (m.name || '').toLowerCase().includes(q); };
-  for (const el of $('wmStar').children) el.classList.toggle('dim', !test(el._id));
+  for (const el of $('wmStar').children) { if (!el._id) continue; el.classList.toggle('dim', !test(el._id)); }   // skip the connector SVG layer
   for (const el of $('wmMore').children) el.classList.toggle('dim', !test(el._id));
 }
 function openWorldMap() { buildWorldMap(); $('wmSearch').value = ''; $('wmOverlay').style.display = 'block'; $('wmSearch').focus(); }
