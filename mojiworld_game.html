@@ -79265,11 +79265,12 @@ function drawLaunchPads() {
   const _prevSmooth = ctx.imageSmoothingEnabled;
   ctx.imageSmoothingEnabled = true;
   if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
-  for (const pad of list) {
+  for (let _i = 0; _i < list.length; _i++) {
+    const pad = list[_i];
     const pw = pad.w || 90;
     const sx = pad.x - camX;
     if (sx + pw < -10 || sx > W + 10) continue;
-    // taller top margin so the tall flame + rising chevrons aren't culled early
+    // taller top margin so the tall flame + burst chevrons aren't culled early
     if (pad.y + 40 < _camY - 30 || pad.y - 160 > _camY + H + 30) continue;
     const col = pad.color || '#66ddff';
     const pulse = 0.5 + 0.4 * Math.abs(Math.sin(_t));
@@ -79326,26 +79327,55 @@ function drawLaunchPads() {
     ctx.fill();
     ctx.restore();
 
-    // the pad sprite
+    // the pad sprite (disc + flame). v0.29.x — the constant rising chevrons
+    // were removed; the pad idles clean (flame + glow) and only pops chevrons
+    // on an actual launch (below).
     try { ctx.drawImage(padImg, dx, dy, drawW, drawH); } catch (e) {}
 
-    // rising energy chevrons scrolling along the launch vector
-    if (arrowReady) {
-      const aw = pw * 0.42;
-      const ah = aw * (arrowImg.naturalHeight / arrowImg.naturalWidth);
+    // ---- launch-burst: flash + chevron pop when the player fires the pad ----
+    // Driven purely off the per-pad launch stamp set in updatePlayer
+    // (player._launchPadCD[_i] = game.time); no extra physics hook needed.
+    const _lt = (typeof player !== 'undefined' && player && player._launchPadCD)
+      ? player._launchPadCD[_i] : undefined;
+    const _BURST = 20;                                   // ~0.33s @ 60fps
+    const _since = (_lt != null) ? (game.time - _lt) : 9999;
+    if (_since >= 0 && _since < _BURST) {
+      const bp = _since / _BURST;                        // 0..1 progress
+      const ease = 1 - Math.pow(1 - bp, 2);              // fast-out
       const ux = Math.cos(ang), uy = Math.sin(ang);
-      const originY = cy - drawH * 0.34;   // just above the disc top
-      const span = 60;
-      for (let k = 0; k < 3; k++) {
-        const prog = ((_t * 12 + k * 20) % span) / span;   // 0..1 rising loop
-        const d = prog * span;
-        const fade = Math.sin(prog * Math.PI);             // fade in + out
-        ctx.save();
-        ctx.globalAlpha = 0.9 * fade;
-        ctx.translate(cx + ux * d, originY + uy * d);
-        ctx.rotate(ang + Math.PI / 2);   // arrow art points up by default
-        try { ctx.drawImage(arrowImg, -aw / 2, -ah / 2, aw, ah); } catch (e) {}
-        ctx.restore();
+      const burstY = cy - drawH * 0.32;                  // just above the disc
+      // bright flash bloom
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const fa = (1 - bp) * 0.9;
+      const fr = drawW * (0.30 + 0.72 * ease);
+      const fg = ctx.createRadialGradient(cx, burstY, 1, cx, burstY, fr);
+      fg.addColorStop(0, 'rgba(255,255,255,' + fa.toFixed(3) + ')');
+      fg.addColorStop(0.4, col);
+      fg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = fa;
+      ctx.fillStyle = fg;
+      ctx.beginPath();
+      ctx.arc(cx, burstY, fr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      // chevron pop — a few energy arrows bursting out along the launch vector
+      if (arrowReady) {
+        const aw = pw * 0.5;
+        const ah = aw * (arrowImg.naturalHeight / arrowImg.naturalWidth);
+        for (let k = 0; k < 3; k++) {
+          const kp = Math.min(1, ease + k * 0.14);       // staggered lead
+          const d = kp * (pw * 0.95);                    // pop distance
+          const a = (1 - bp) * (1 - k * 0.24);
+          if (a <= 0) continue;
+          const s = (1 + 0.28 * ease) * (1 - k * 0.12);
+          ctx.save();
+          ctx.globalAlpha = a;
+          ctx.translate(cx + ux * d, burstY + uy * d);
+          ctx.rotate(ang + Math.PI / 2);                 // arrow art points up
+          try { ctx.drawImage(arrowImg, -aw * s / 2, -ah * s / 2, aw * s, ah * s); } catch (e) {}
+          ctx.restore();
+        }
       }
     }
   }
