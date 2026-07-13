@@ -8685,7 +8685,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.24';
+const GAME_VERSION = 'v0.29.26';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -34280,6 +34280,20 @@ function _mpHandle(msg) {
           _pp._last = performance.now();
         }
       }
+      // v0.29.x — RTT probe (latency visibility). A carrier ping carrying `rt`
+      // is echoed straight back addressed to its sender; receiving our own
+      // echo (`rte` + `to` = my id) yields the full two-leg round trip, kept
+      // as a rolling average on the peer and shown in the party frames.
+      if (msg && msg.rt != null && msg.id !== net.myId && net.ws && net.ws.readyState === 1) {
+        try { net.ws.send(JSON.stringify({ t: 'ping', rte: +msg.rt, to: msg.id })); } catch (e) {}
+      }
+      if (msg && msg.rte != null && +msg.to === +net.myId && msg.id !== net.myId) {
+        const _pp2 = net.peers[msg.id];
+        if (_pp2) {
+          const _rtt = Math.max(0, Math.min(9999, performance.now() - (+msg.rte)));
+          _pp2._rttMs = (_pp2._rttMs == null) ? _rtt : (_pp2._rttMs * 0.6 + _rtt * 0.4);
+        }
+      }
       // v0.27.9 — co-op map-ping marker (carrier frames send no map → skipped).
       if (msg && msg.map === game.currentMap) _coopAddPing(+msg.x || 0, +msg.y || 0, (net.peers[msg.id] && net.peers[msg.id].name) || 'Partner', false);
       return;
@@ -34348,6 +34362,11 @@ function _mpHandle(msg) {
       net.peers[msg.id]._last = performance.now();
       // v0.29.x — first-state stamp for the missing-avatar hint in _mpTick.
       if (net.peers[msg.id]._firstStateAt === undefined) net.peers[msg.id]._firstStateAt = performance.now();
+      // v0.29.x — snapshot arrival stamp for peer dead-reckoning: the renderer
+      // extrapolates the avatar by its broadcast velocity for the frames since
+      // this snapshot landed, so partners move at 60 fps instead of visibly
+      // trailing the 14 Hz tick (same approach as the v0.29.10 monster mirrors).
+      net.peers[msg.id]._snapAt = performance.now();
       // v0.29.x — version-skew hint (shared with the 'ping' look-sync path).
       if (typeof msg.v === 'string') _mpNoteVersion(net.peers[msg.id], msg.v);
       break;
@@ -34443,6 +34462,14 @@ function _mpTick() {
   if (now - net._lastTickAt < MP_TICK_MS) return;
   net._lastTickAt = now;
   const _av = _mpAvatarWire();
+  // v0.29.x — LATENCY: avatar payload change-detection. `_sendAv` gates the
+  // look/eq fields on the state tick below: send when the payload CHANGED
+  // (equip swap / dye / pose — appears on the partner within one tick) or on
+  // a ~700 ms refresher; skip otherwise so the steady 14 Hz tick stays tiny.
+  net._tickN = (net._tickN | 0) + 1;
+  const _avStr = JSON.stringify(_av);
+  const _sendAv = (_avStr !== net._lastAvStr) || (net._tickN % 10 === 0);
+  if (_sendAv) net._lastAvStr = _avStr;
   // v0.29.x — LOOK-SYNC CARRIER for whitelist relays. The deployed Cloudflare
   // worker forwards `state` through a presence-field whitelist that predates
   // look/eq/v and STRIPS them (live-probed) — which is exactly why partners
@@ -34452,10 +34479,15 @@ function _mpTick() {
   // (their ping handler requires msg.map === current map), new clients merge
   // it into the peer (see _mpHandle 'ping'). Redundant-but-harmless on relays
   // whose state path already carries look/eq/v natively.
+  // v0.29.x — LATENCY: the carrier doubles as the RTT probe. `rt` carries our
+  // clock; each peer echoes it straight back ({rte, to}) and we compute the
+  // full player→relay→player→relay→player round trip — the number that
+  // actually governs co-op feel — shown live in the party frames.
   if (now - (net._lastLookSyncAt || 0) > 2500) {
     net._lastLookSyncAt = now;
     try {
       net.ws.send(JSON.stringify({ t: 'ping', lk: _av.look, eq: _av.eq,
+        rt: Math.round(performance.now()),
         v: (typeof GAME_VERSION !== 'undefined') ? GAME_VERSION : undefined }));
     } catch (e) { /* ignore */ }
   }
@@ -34474,18 +34506,18 @@ function _mpTick() {
       // my full character sprite and equipment". Broadcast the sprite-layer
       // look (hair/eyes/mouth/skin) + minimal equipment visuals so peers
       // can render the REAL character instead of the purple-pill ghost.
-      // Compact keys keep the 14 Hz tick light (~120 extra bytes). Sent
-      // every tick (not join-only) so late joiners + mid-fight equipment
-      // swaps stay in sync with zero extra protocol.
       // v0.29.x — build stamp: lets the receiver detect a version-skewed
       // partner (stale cached build) and say so instead of silently
       // rendering a slightly-wrong avatar.
       v: (typeof GAME_VERSION !== 'undefined') ? GAME_VERSION : undefined,
-      // v0.29.x — look/eq built by the shared _mpAvatarWire() (also shipped
-      // on the 'ping' look-sync carrier above for whitelist relays that
-      // strip these from the state path).
-      look: _av.look,
-      eq: _av.eq,
+      // v0.29.x — LATENCY: look/eq ride the state tick only when they CHANGED
+      // (instant equip-swap visibility) or on the ~700 ms refresher — not every
+      // 70 ms tick. Steady-state payload drops ~60-70%, which trims send/parse
+      // time and queue jitter on weak links. Receivers merge via Object.assign
+      // (absent keys never clobber), the relay's stored presence keeps the last
+      // look for late joiners, and the 2.5 s ping carrier is a further backstop.
+      look: _sendAv ? _av.look : undefined,
+      eq: _sendAv ? _av.eq : undefined,
     }));
   } catch (e) { /* ignore */ }
   // Decay peer chat / emote lifetimes
@@ -34787,9 +34819,17 @@ function _mpDrawPeers() {
     // peers GLIDE instead of teleporting at the ~14 Hz tick. Snap on a big jump (respawn
     // / map edge) instead of sliding across the screen. facing / anim / vx / vy are all
     // already on the wire — read here to animate the avatar (was drawn as a static pill).
-    const _tx = p.x || 0, _ty = p.y || 0;
-    if (p._rx == null || Math.abs(_tx - p._rx) > 200 || Math.abs(_ty - (p._ry || 0)) > 200) { p._rx = _tx; p._ry = _ty; }
-    else { p._rx += (_tx - p._rx) * 0.35; p._ry += (_ty - p._ry) * 0.35; }
+    // v0.29.x — LATENCY FEEL: DEAD-RECKONED target. Extrapolate the snapshot by the
+    // broadcast velocity for the frames elapsed since it ARRIVED (capped at 8 frames so
+    // a stalled peer doesn't glide away), then ease harder (0.45) toward that live
+    // target. Removes the 0–70 ms tick staleness + most of the lerp catch-up trail, so
+    // a running partner tracks in real time instead of rubber-banding behind. Velocity
+    // units are px/frame (60 Hz fixed step), matching the sender's physics.
+    const _snapFrames = p._snapAt ? Math.min(8, (performance.now() - p._snapAt) / 16.67) : 0;
+    const _tx = (p.x || 0) + (p.vx || 0) * _snapFrames;
+    const _ty = (p.y || 0) + (p.vy || 0) * _snapFrames;
+    if (p._rx == null || Math.abs((p.x || 0) - p._rx) > 200 || Math.abs((p.y || 0) - (p._ry || 0)) > 200) { p._rx = _tx; p._ry = _ty; }
+    else { p._rx += (_tx - p._rx) * 0.45; p._ry += (_ty - p._ry) * 0.45; }
     const _dead = !!(p.maxHp && (p.hp || 0) <= 0) || !!p._downed;   // v0.27.9 — downed partners read as down (they hold 1 HP while down)
     const _face = (p.facing === -1) ? -1 : 1;
     const _bob = (!_dead && p.anim === 'run') ? Math.round(Math.sin((game.time + (+id || 0) * 7) * 0.3) * 2) : 0;
@@ -34963,8 +35003,14 @@ function _mpPartyFrames() {
       const hpF = p.maxHp ? Math.max(0, Math.min(1, (p.hp || 0) / p.maxHp)) : 1;
       const mpF = p.maxMp ? Math.max(0, Math.min(1, (p.mp || 0) / p.maxMp)) : 1;
       const down = p._downed || (p.maxHp && (p.hp || 0) <= 0);
+      // v0.29.x — live ping chip (rolling RTT from the carrier probe): green
+      // <90ms, amber <180ms, red beyond — so "is it lag or the game?" has an
+      // answer on screen.
+      const _rtt = (p._rttMs != null) ? Math.round(p._rttMs) : null;
+      const _rttCol = _rtt == null ? '' : (_rtt < 90 ? '#7fdf9a' : (_rtt < 180 ? '#ffd166' : '#ff7a7a'));
+      const _rttChip = _rtt == null ? '' : ' <span class="pf-ping" style="color:' + _rttCol + ';font-size:9px;">' + _rtt + 'ms</span>';
       rows.push('<div class="pf-row' + (down ? ' pf-down' : '') + '">'
-        + '<div class="pf-name">' + String(p.name || '?').replace(/[<>&]/g, '') + ' <span class="pf-lv">Lv' + (p.level || 1) + '</span>' + (down ? ' <span class="pf-tag">⛑ DOWN</span>' : '') + '</div>'
+        + '<div class="pf-name">' + String(p.name || '?').replace(/[<>&]/g, '') + ' <span class="pf-lv">Lv' + (p.level || 1) + '</span>' + _rttChip + (down ? ' <span class="pf-tag">⛑ DOWN</span>' : '') + '</div>'
         + '<div class="pf-bar pf-hp"><i style="width:' + Math.round(hpF * 100) + '%"></i></div>'
         + '<div class="pf-bar pf-mp"><i style="width:' + Math.round(mpF * 100) + '%"></i></div>'
         + '</div>');
@@ -54106,6 +54152,21 @@ function updateMonsters(dt) {
   // Bosses + minibosses are unconditionally exempt (always fully ticked)
   // so kited bosses still chase / shoot from across the map.
   const VERY_FAR_PAD = 1200;
+  // v0.29.x — CO-OP LATENCY/FEEL: the very-far LOD above is measured from MY
+  // camera, but as HOST I simulate the world for everyone — a partner
+  // exploring the far side of the map was standing in a field of FROZEN
+  // monsters (total-skip tier). Collect same-map partner positions once per
+  // frame; a mob near ANY partner is exempt from the total skip below (it
+  // still gets the cheaper far-tick tiers). One or two peers → negligible cost.
+  let _vfPeers = null;
+  if (typeof _coopActive === 'function' && _coopActive() && net.isHost && net.peers) {
+    for (const _pid in net.peers) {
+      const _pp = net.peers[_pid];
+      if (_pp && _pp.map === game.currentMap && Number.isFinite(+_pp.x)) {
+        (_vfPeers = _vfPeers || []).push({ x: +_pp.x, y: +_pp.y || 0 });
+      }
+    }
+  }
   // v0.25.653 — manual mob-index counter for the mob-mob soft-spread
   // pass below. The `for...of` loop doesn't expose an index, and using
   // `indexOf` inside the loop would be O(n²). Increment manually each
@@ -54141,7 +54202,16 @@ function updateMonsters(dt) {
       const _vfDy = (m.y + m.h/2) - (camY + H/2);
       if (Math.abs(_vfDx) > W/2 + VERY_FAR_PAD ||
           Math.abs(_vfDy) > H/2 + VERY_FAR_PAD) {
-        continue;
+        // v0.29.x — co-op: a mob far from ME but near a PARTNER stays live
+        // (see _vfPeers above); otherwise total-skip as before.
+        let _nearPeer = false;
+        if (_vfPeers) {
+          const _mcx = m.x + m.w/2, _mcy = m.y + m.h/2;
+          for (const _q of _vfPeers) {
+            if (Math.abs(_mcx - _q.x) < W/2 + VERY_FAR_PAD && Math.abs(_mcy - _q.y) < H/2 + VERY_FAR_PAD) { _nearPeer = true; break; }
+          }
+        }
+        if (!_nearPeer) continue;
       }
     }
     // Chat bubble tick (v0.22) — cheap and runs for every mob even while
@@ -98544,6 +98614,19 @@ function _lxCoopWorldStep(dt) {
     if (window._prologueActive || window._prologuePending) return;
     updateMonsters(dt);        // enemy AI/physics + monster→player contact & hazard damage
     updateProjectiles(dt);     // enemy projectiles keep flying + hitting (i-frame-respecting)
+    // Death check — MUST run here too. The normal check lives in loop(), which
+    // is frozen while hidden/paused; without this, contact damage kept applying
+    // past 0 (deep-negative HP) and the hp>0 guard above then silently halted
+    // the world for everyone. Mirrors loop(): clamp, then route through the
+    // revive chain → in co-op that lands in the DOWNED state (held at 1 HP),
+    // so the world keeps running and the partner can walk over and revive.
+    if (typeof player.hp === 'number' && player.hp < 0) player.hp = 0;
+    if (player.hp <= 0 && !game.dying) {
+      if (typeof _tryCheatDeathRevive === 'function' && !_tryCheatDeathRevive()) {
+        player.hp = 0;
+        if (typeof triggerDeath === 'function') triggerDeath();
+      }
+    }
     if (typeof _coopTickMonsters    === 'function') _coopTickMonsters();     // host rebroadcasts so guests stay live
     if (typeof _coopTickProjectiles === 'function') _coopTickProjectiles();
     if (typeof _coopTickHazards     === 'function') _coopTickHazards();
