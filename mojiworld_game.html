@@ -8674,7 +8674,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.11';
+const GAME_VERSION = 'v0.29.12';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -34386,9 +34386,17 @@ function _mpTick() {
         for (const k in e) {
           const it = e[k];
           if (!it) continue;
+          // v0.29.12 — prefer the affix-stripped base name: the receiver
+          // feeds bn straight into _itemKey for the art lookup, and an
+          // affixed display name ("Sharp Eclipse Daggers") maps to a key
+          // with no sprite. Mirrors _itemKey's own strip-affixes rule.
+          const _bn = it.baseName
+            || ((it.affixes && it.affixes.length && typeof _stripAffixes === 'function')
+                  ? _stripAffixes(it.name) : it.name)
+            || undefined;
           out[k] = {
             sid: it.spriteId || undefined,
-            bn: it.baseName || it.name || undefined,
+            bn: _bn,
             tn: it.tint || undefined,
           };
         }
@@ -34504,9 +34512,16 @@ if (typeof document !== 'undefined') {
 // the MP peer-string hardening note (escape at ingestion, not per-sink).
 function _mpDrawPeerAvatar(p, sx, sy, face) {
   if (typeof drawCuteCharacter !== 'function' || typeof player === 'undefined') return false;
-  const lk = p.look;
-  if (!lk || typeof lk !== 'object') return false;   // pre-v0.29.9 peer → pill fallback
-  const _ok   = (s) => (typeof s === 'string' && /^[\w -]{1,40}$/.test(s)) ? s : undefined;
+  // v0.29.12 — a peer with NO look on the wire (pre-v0.29.9 build on the
+  // other side) now renders the DEFAULT full body instead of the purple
+  // pill. The pill is reserved for downed peers + genuine render errors.
+  const lk = (p.look && typeof p.look === 'object') ? p.look : {};
+  // v0.29.12 — apostrophes allowed (straight + curly): half the item
+  // catalog is possessive ("Assassin's Garb", "Hunter's Tunic", …) and
+  // the old charset silently dropped their art. bn/sid only ever feed
+  // canvas sprite lookups (_itemKey strips punctuation anyway) — never
+  // innerHTML — so the widened charset stays XSS-inert.
+  const _ok   = (s) => (typeof s === 'string' && /^[\w '’-]{1,40}$/.test(s)) ? s : undefined;
   const _okTint = (s) => (typeof s === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(s)) ? s : undefined;
   const _saved = {
     cls: player.cls, job: player.job, master: player.master,
@@ -34558,6 +34573,14 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
     // Peer swing → real attack pose (replaces the golden-arc-only read).
     player.attacking   = p.anim === 'attack';
     player.attackTimer = p.anim === 'attack' ? 200 : 0;
+    // v0.29.12 — per-peer swing timeline. The vector hero animates its
+    // attack off player._heroAtkAt (seeded on first attacking frame,
+    // advanced against game.time). The generic _hero* snapshot/restore
+    // below wipes it every frame, so a peer's swing would re-seed at
+    // t=0 each draw and freeze on the wind-up pose. Seed from the PEER
+    // object and write back in the finally — each peer keeps its own
+    // animation clock across frames.
+    player._heroAtkAt = p._heroAtkAt || 0;
     player.hitStun      = 0;
     player.dying        = 0;
     player.invulnerable = 0;
@@ -34596,13 +34619,26 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
     ctx.save(); _ctxSaves++;
     ctx.globalAlpha = 0.95;   // hair's-breadth ghosting so YOUR character stays the visual anchor
     if (typeof _chibiApply === 'function') { _chibiApply(sx, sy); _ctxSaves++; }   // _chibiApply pushes exactly one ctx.save
-    drawCuteCharacter(sx, sy);
+    // v0.29.12 — peers render through _drawVectorHero: the SAME pipeline
+    // the local player uses (drawPlayer dispatch). The legacy
+    // drawCuteCharacter chibi it replaces (a) is a different art style,
+    // and (b) never calls _drawEquipmentLayer — the eq data on the wire
+    // was invisible. The vector hero honors _LX_EQ_PREVIEW_OVERRIDE for
+    // every equipment layer, and _lxEquipSprite lazy-loads any art this
+    // client hasn't seen yet (pops in a frame or two later). It reads
+    // only swapped player fields (vx/lookCustom/w/h/facing/cls/
+    // attacking — audited v0.29.12).
+    if (typeof _drawVectorHero === 'function') _drawVectorHero(sx, sy);
+    else drawCuteCharacter(sx, sy);
     if (typeof _chibiRestore === 'function') { _chibiRestore(); _ctxSaves--; }
     ctx.restore(); _ctxSaves--;
     return true;
   } catch (e) {
     return false;   // any renderer hiccup → caller draws the pill
   } finally {
+    // v0.29.12 — persist the peer's swing clock BEFORE the anchor
+    // restore below stomps it (see the per-peer timeline note above).
+    p._heroAtkAt = player._heroAtkAt;
     // Pop any ctx saves a mid-draw throw left open (see ledger note above).
     while (_ctxSaves > 0) { try { ctx.restore(); } catch (_e) {} _ctxSaves--; }
     player.cls = _saved.cls; player.job = _saved.job; player.master = _saved.master;
@@ -34640,12 +34676,13 @@ function _mpDrawPeers() {
     const sx = p._rx - game.camera.x;
     const sy = p._ry - ((game.camera && game.camera.y) || 0) + _bob;
     if (sx < -40 || sx > W + 40 || sy < -60 || sy > H + 60) continue;
-    // v0.29.9 — FULL AVATAR FIRST. Alive peers who broadcast their look
-    // (v0.29.9+ builds) render with the real character pipeline — same
-    // body / hair / eyes / mouth sprites + equipment art the local player
-    // uses. Downed peers keep the grey pill (clear KO semantic, no
-    // grey-out filter cost); peers on older builds (no look on the wire)
-    // and any renderer hiccup fall back to the legacy purple pill.
+    // v0.29.9 — FULL AVATAR FIRST. Alive peers render with the real
+    // character pipeline — same body / hair / eyes / mouth sprites +
+    // equipment art the local player uses (v0.29.12: _drawVectorHero,
+    // the actual drawPlayer path). Peers on older builds with no look
+    // on the wire draw the DEFAULT body (v0.29.12) — the purple pill
+    // remains only for genuine renderer errors; downed peers keep the
+    // grey pill (clear KO semantic, no grey-out filter cost).
     const _drewFull = !_dead && typeof _mpDrawPeerAvatar === 'function' && _mpDrawPeerAvatar(p, sx, sy, _face);
     if (!_drewFull) {
       // Silhouette body — a simple pill (no sprite data needed), facing-aware +
