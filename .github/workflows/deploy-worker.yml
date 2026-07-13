@@ -1,0 +1,44 @@
+# Deploys the Cloudflare Worker relay (mp-cf → mojiworld-mp.dpeh001.workers.dev)
+# whenever its source changes on main, or manually via workflow_dispatch.
+#
+# REQUIRES a repository secret: CLOUDFLARE_API_TOKEN
+#   Create at https://dash.cloudflare.com/profile/api-tokens with the
+#   "Edit Cloudflare Workers" template, then add it under
+#   Repo → Settings → Secrets and variables → Actions.
+# Until the secret exists the job skips itself with a notice (never fails CI).
+#
+# Why this matters: the game's live co-op relay is this worker. If it lags the
+# repo, its presence whitelist / frame forward-list are stale — peers lose
+# avatar look/eq data, monster sync ('mon'), map pings, and down/revive frames.
+name: Deploy multiplayer worker
+on:
+  push:
+    branches: [main]
+    paths: ['mp-cf/**']
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for Cloudflare token
+        id: gate
+        run: |
+          if [ -n "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::CLOUDFLARE_API_TOKEN secret not set — skipping worker deploy. Add it (Edit Cloudflare Workers template) to enable automatic relay deploys."
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.ok == 'true'
+        with: { node-version: 20 }
+      - name: Deploy worker
+        if: steps.gate.outputs.ok == 'true'
+        working-directory: mp-cf
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          npm ci || npm install
+          npx wrangler deploy
