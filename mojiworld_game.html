@@ -8685,7 +8685,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.26';
+const GAME_VERSION = 'v0.29.29';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -31951,6 +31951,58 @@ function _storyActForMap(id) {
   return n ? (STORY_ACTS[n - 1] || null) : null;
 }
 
+// v0.29.27 — CINEMATIC CLIP BACKDROPS. Story beats can carry a short
+// Higgsfield-generated painterly clip (steam/higgsfield/cinematics/,
+// 720p, 6–8 s) that plays muted + looping behind the stanza text.
+// Lazy by design: the <video> element is created only when the beat
+// actually fires — never at boot (iOS kills tabs that mass-decode
+// media; see the _lxAsyncPool notes) — and is fully unloaded when the
+// beat closes. Any load failure (local copy without the clips, CDN
+// hiccup, data-saver) silently falls back to the classic text-only
+// presentation.
+const STORY_BEAT_CLIPS = {
+  epilogue_gravitos:     'steam/higgsfield/cinematics/clip_gravitos_s1.mp4',
+  warden_falls:          'steam/higgsfield/cinematics/clip_amnesiac_s1.mp4',
+  arrival_frontier:      'steam/higgsfield/cinematics/clip_093232.mp4',
+  arrival_broken_sky:    'steam/higgsfield/cinematics/clip_095142.mp4',
+  arrival_sundered_deep: 'steam/higgsfield/cinematics/clip_forge_s1.mp4',
+  arrival_chains_end:    'steam/higgsfield/cinematics/clip_100640.mp4',
+  arrival_sky_beyond:    'steam/higgsfield/cinematics/clip_101725.mp4',
+  first_gate_visit:      'steam/higgsfield/cinematics/clip_100914.mp4',
+  memory_echo:           'steam/higgsfield/cinematics/clip_094612.mp4',
+  zodiac_twelve_done:    'steam/higgsfield/cinematics/clip_101446.mp4',
+};
+function _sbAttachClip(beatId) {
+  const src = STORY_BEAT_CLIPS[beatId];
+  const overlay = game._storyBeatEls && game._storyBeatEls.overlay;
+  if (!src || !overlay) return;
+  _sbDetachClip();
+  const v = document.createElement('video');
+  v.id = 'story-beat-clip';
+  v.muted = true; v.loop = true; v.playsInline = true;
+  v.setAttribute('playsinline', '');
+  v.preload = 'auto';
+  // First child of the overlay = painted behind #story-beat-stage
+  // (the stage's transform makes it its own stacking context above).
+  // Fades in at half opacity over the dark gradient so the stanza
+  // text keeps its contrast; pointer-events off so taps still advance.
+  v.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;'
+    + 'object-fit:cover;opacity:0;transition:opacity 900ms ease;'
+    + 'pointer-events:none;';
+  v.addEventListener('canplay', () => { v.style.opacity = '0.5'; }, { once: true });
+  v.addEventListener('error', () => { try { v.remove(); } catch (e) {} }, { once: true });
+  v.src = src;
+  overlay.insertBefore(v, overlay.firstChild);
+  const p = v.play(); if (p && p.catch) p.catch(() => {});
+  game._storyBeatClipEl = v;
+}
+function _sbDetachClip() {
+  const v = game._storyBeatClipEl || document.getElementById('story-beat-clip');
+  if (!v) return;
+  try { v.pause(); v.removeAttribute('src'); v.load(); v.remove(); } catch (e) {}
+  game._storyBeatClipEl = null;
+}
+
 function _playStoryBeat(beatId, onClose) {
   if (!player._storyBeatsSeen) player._storyBeatsSeen = {};
   if (player._storyBeatsSeen[beatId]) return false;
@@ -31972,6 +32024,8 @@ function _playStoryBeat(beatId, onClose) {
   // Reset mode classes.
   els.overlay.classList.remove('mode-dialog', 'mode-epilogue');
   els.overlay.classList.add('mode-' + (beat.mode || 'dialog'));
+  // v0.29.27 — cinematic clip backdrop (no-op for beats without one).
+  _sbAttachClip(beatId);
   game.paused = true;
   let idx = 0;
   const renderStanza = () => {
@@ -31998,6 +32052,7 @@ function _playStoryBeat(beatId, onClose) {
   };
   const closeBeat = () => {
     els.overlay.classList.remove('on');
+    _sbDetachClip();   // v0.29.27 — unload the clip with the overlay
     els.overlay.removeEventListener('click', advance);
     document.removeEventListener('keydown', onKey, true);
     setTimeout(() => {
@@ -99517,6 +99572,13 @@ function _prologueOverlay(stanzas, onDone) {
     + '@keyframes plg-in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}'
     + '@keyframes plg-star{0%,100%{opacity:0.25}50%{opacity:0.9}}</style>'
     + '<div style="position:absolute;inset:-80px;background:radial-gradient(ellipse at 50% 60%,#241048 0%,#0b0420 45%,#02010a 80%);animation:plg-drift 16s ease-out forwards;"></div>'
+    // v0.29.27 — Higgsfield POV cinematic behind the prologue stanzas:
+    // first-person Shinobi daggers vs Gravitos phase 1 in the
+    // Singularity arena. Muted+looping (autoplay-safe); a load failure
+    // just leaves the classic starfield. pointer-events off so
+    // click-to-advance still lands on the overlay.
+    + '<video id="plg-pov" src="steam/higgsfield/cinematics/clip_prologue_pov.mp4" muted loop playsinline '
+    + 'style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.55;pointer-events:none;"></video>'
     + Array.from({ length: 26 }, (_, k) =>
         '<div style="position:absolute;left:' + ((k * 137) % 100) + '%;top:' + ((k * 61) % 100) + '%;'
         + 'width:2px;height:2px;border-radius:50%;background:#cdb8ff;'
@@ -99529,6 +99591,12 @@ function _prologueOverlay(stanzas, onDone) {
     + '<button id="plg-skip" style="position:absolute;top:16px;right:18px;z-index:2;padding:5px 14px;border-radius:8px;'
     + 'border:1px solid #5a4490;background:rgba(20,8,44,0.85);color:#cdb8ff;font:700 12px monospace;cursor:pointer;">Skip prologue ▸▸</button>';
   document.body.appendChild(ov);
+  // v0.29.27 — kick the POV cinematic (muted, so autoplay is allowed;
+  // a rejected play() just leaves the starfield backdrop).
+  try {
+    const _pv = ov.querySelector('#plg-pov');
+    if (_pv) { const _pp = _pv.play(); if (_pp && _pp.catch) _pp.catch(() => {}); }
+  } catch (e) {}
   const txt = ov.querySelector('#plg-text');
   function show() {
     txt.style.animation = 'none'; void txt.offsetWidth;
