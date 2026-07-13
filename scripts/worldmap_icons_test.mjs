@@ -46,17 +46,23 @@ const loadResults = await page.evaluate(async (hrefs) => {
 }, res.hrefs);
 ok('every rendered region sprite loads (naturalWidth>0)', loadResults.every(([, r]) => r), loadResults.filter(([, r]) => !r).map(([n]) => n));
 
-// Fog-of-war: an UNVISITED region must NOT leak a sprite.
-const leak = await page.evaluate(() => {
+// v0.29.9 — Per user: the painted SYMBOL now shows on UNVISITED nodes too
+// (was fog-gated). The NAME/level stay fogged as "???"; only the icon reveals.
+const undisc = await page.evaluate(() => {
   const seen = new Set(Object.keys(game.visitedMaps || {}));
-  // pick a region id in the manifest that is NOT visited
   const cand = [...WM_REGION_ICON_IDS].find(id => !seen.has(id) && MAPS[id]);
   if (!cand) return { skipped: true };
-  const imgs = Array.from(document.querySelectorAll('#worldmap-grid image'))
-    .map(im => im.getAttribute('href') || '').filter(Boolean);
-  return { cand, leaked: imgs.some(h => h === 'Sprites/world/regions/' + cand + '.webp') };
+  const node = document.querySelector('#worldmap-grid [data-map-id="' + cand + '"]');
+  const hrefs = node ? Array.from(node.querySelectorAll('image'))
+    .map(im => im.getAttribute('href') || im.getAttributeNS('http://www.w3.org/1999/xlink', 'href') || '') : [];
+  const spriteShown = hrefs.some(h => h === 'Sprites/world/regions/' + cand + '.webp');
+  const labelText = node ? Array.from(node.querySelectorAll('.wm-node-label, text'))
+    .map(t => t.textContent).join(' ') : '';
+  const nameFogged = /\?\?\?/.test(labelText) && !(labelText.includes((MAPS[cand].name || '')) && (MAPS[cand].name || '').length > 2);
+  return { cand, spriteShown, nameFogged, labelText };
 });
-ok('fog-safe: unvisited region does not render its sprite', leak.skipped || !leak.leaked, leak);
+ok('undiscovered region NOW shows its painted symbol', undisc.skipped || undisc.spriteShown, undisc);
+ok('undiscovered region keeps its NAME fogged as "???"', undisc.skipped || undisc.nameFogged, undisc);
 
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 console.log(`\n${pass}/${pass + fail} checks passed`);
