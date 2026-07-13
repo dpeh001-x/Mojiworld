@@ -79,10 +79,20 @@ try {
   const paused = await ev(A, () => {
     game.paused = true;                 // as if a UI modal opened
     const m = game.monsters.find(mm => mm && mm.currentHp > 0);
-    const hp0 = player.hp, mx0 = m.x;
+    const hp0 = player.hp;
+    let movedAny = false; let px = m.x;
     // Reproduce loop()'s visible+paused path: it calls _lxCoopWorldStep(dt).
-    for (let i = 0; i < 60; i++) { player.invulnerable = 0; _lxCoopWorldStep(1000 / 60); }
-    return { paused: game.paused, moved: Math.abs(m.x - mx0) > 0.5, tookDmg: player.hp < hp0, hp0, hp1: player.hp };
+    // Track movement across steps, but PIN the monster back onto the host each
+    // frame so the contact-damage assertion isn't at the mercy of the AI's
+    // flanking-offset walk (v0.29.x co-op aggro can also pick the guest).
+    for (let i = 0; i < 60; i++) {
+      player.invulnerable = 0;
+      _lxCoopWorldStep(1000 / 60);
+      if (Math.abs(m.x - px) > 0.5) movedAny = true;
+      px = m.x;
+      if (i % 5 === 4) { m.x = player.x + 4; m.y = player.y; m.facing = (player.x >= m.x) ? 1 : -1; px = m.x; }
+    }
+    return { paused: game.paused, moved: movedAny, tookDmg: player.hp < hp0, hp0, hp1: player.hp };
   });
   ok('co-op: monsters KEEP MOVING while the host is paused in a menu', paused && paused.moved, paused);
   ok('co-op: the paused (in-menu) host STILL TAKES monster damage', paused && paused.tookDmg, paused);
