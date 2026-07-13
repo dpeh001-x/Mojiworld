@@ -28,6 +28,30 @@ try {
   const switched = await page.evaluate(() => ({ id: state.mapId, n: state.npcs.length, p: state.portals.length, dirty: state.dirty }));
   ok('selecting a map loads its layout', switched.id === 'boss_rush' && switched.dirty === false, switched);
 
+  // ── Tall underwater maps express their FULL vertical height ─────────────
+  await page.selectOption('#mapId', 'coralReef');
+  const tall = await page.evaluate(() => ({
+    wh: +$('worldH').value, cvH: cv.height,
+    deepPlats: state.platforms.filter(p => p.y > 560).length,
+    bottomGround: state.platforms.some(p => p.type === 'ground' && p.y >= 2000),
+  }));
+  ok('coralReef loads its 2200px world height into the canvas', tall.wh === 2200 && tall.cvH === 2200, tall);
+  ok('coralReef deep platforms (y>560) are present + renderable', tall.deepPlats > 15 && tall.bottomGround, tall);
+  // place an NPC DEEP (y=1800) — previously clamped to 540
+  const deepPlace = await page.evaluate(() => { place('npc', 700, 1800); const o = state.npcs[state.npcs.length - 1]; return { y: o.y }; });
+  ok('placement works below the old 540px clamp (y=1800 sticks)', deepPlace.y === 1800, deepPlace);
+  const deepExport = await page.evaluate(() => { const t = buildExport(); return { hasWH: /worldHeight: 2200,/.test(t), hasTowerNote: /isVerticalTower/.test(t) }; });
+  ok('export carries worldHeight + isVerticalTower note for tall maps', deepExport.hasWH && deepExport.hasTowerNote, deepExport);
+  // frozenPeak (14400px) also loads full-height without error
+  await page.evaluate(() => { state.dirty = false; });
+  await page.selectOption('#mapId', 'frozenPeak');
+  const fp = await page.evaluate(() => ({ cvH: cv.height, plats: state.platforms.length }));
+  ok('frozenPeak loads its full 14400px height', fp.cvH === 14400 && fp.plats > 50, fp);
+  await page.evaluate(() => { state.dirty = false; });
+  await page.selectOption('#mapId', 'boss_rush');
+  const flat = await page.evaluate(() => ({ cvH: cv.height }));
+  ok('flat maps stay at standard 560px height', flat.cvH === 560, flat);
+
   // ── prev/next cycling ───────────────────────────────────────────────────
   const cyc = await page.evaluate(() => {
     const before = state.mapId; cycleMap(1); const after1 = state.mapId; cycleMap(-1); const back = state.mapId;
