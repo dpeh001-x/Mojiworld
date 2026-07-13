@@ -28,6 +28,35 @@ try {
   const switched = await page.evaluate(() => ({ id: state.mapId, n: state.npcs.length, p: state.portals.length, dirty: state.dirty }));
   ok('selecting a map loads its layout', switched.id === 'boss_rush' && switched.dirty === false, switched);
 
+  // ── Undefined-y portals: snapped to platform + visible ──────────────────
+  // 173 MAPS portals carry no y (the game grounds them via _defaultPortalY).
+  // The editor must fill the same y at load so they render + list + export.
+  await page.selectOption('#mapId', 'town');
+  const undef = await page.evaluate(() => {
+    const src = MAP_DATA.maps.town.portals;                       // baked data (some without y)
+    const srcNoY = src.filter(p => typeof p.y !== 'number').length;
+    const loaded = state.portals;
+    const g = state.platforms.find(p => p.type === 'ground');
+    return {
+      srcNoY,
+      allNumeric: loaded.every(p => typeof p.y === 'number' && isFinite(p.y)),
+      groundedOk: loaded.filter((p, i) => typeof src[i].y !== 'number').every(p => p.y === g.y),
+      listHasUndefined: $('list').textContent.includes('undefined'),
+    };
+  });
+  ok('town source has y-less portals (fixture is real)', undef.srcNoY > 0, undef);
+  ok('loaded portals ALL have a numeric y (visible on canvas)', undef.allNumeric, undef);
+  ok('y-less portals snapped to the ground platform (game rule)', undef.groundedOk, undef);
+  ok('placed list shows no "undefined" labels', !undef.listHasUndefined, undef);
+  const undefExport = await page.evaluate(() => {
+    const t = buildExport();
+    const m = t.match(/portals:\s*(\[[\s\S]*?\]),/);
+    const arr = Function('"use strict";return (' + m[1] + ');')();
+    return { allY: arr.every(p => typeof p.y === 'number') };
+  });
+  ok('export hardbakes an explicit y on every portal', undefExport.allY, undefExport);
+  await page.evaluate(() => { state.dirty = false; });
+
   // ── Tall underwater maps express their FULL vertical height ─────────────
   await page.selectOption('#mapId', 'coralReef');
   const tall = await page.evaluate(() => ({
