@@ -35,12 +35,33 @@ async function cover(src, w, h, focusX = 0.5, focusY = 0.5, { blur = 0, darken =
   return { input: buf, left: 0, top: 0 };
 }
 
-// Real MOJIWORLD wordmark PNG resized to `width`. The 2nd arg (star/tagline)
-// is accepted but ignored — kept so existing call sites don't need touching.
-async function logoArt(width, _opts = {}) {
-  const buf = await sharp(WORDMARK).resize({ width }).png().toBuffer();
-  const meta = await sharp(buf).metadata();
-  return { buf, w: meta.width, h: meta.height };
+// Real MOJIWORLD wordmark PNG resized to `width`, optionally with the italic
+// "Once upon a time…" tagline stacked beneath it. Returns the combined art.
+async function logoArt(width, { tagline = '' } = {}) {
+  const mark = await sharp(WORDMARK).resize({ width }).png().toBuffer();
+  const mm = await sharp(mark).metadata();
+  if (!tagline) return { buf: mark, w: mm.width, h: mm.height };
+
+  // Tagline rendered at 2x for crisp downscaling; storybook serif italic with a
+  // dark stroke behind the fill so it reads over busy key art.
+  const S = 2;
+  const fs = Math.round(width * 0.058);          // final tagline font size (px)
+  const gap = Math.round(width * 0.015);         // gap under the wordmark
+  const box = Math.round(fs * 1.7);              // tagline row height (descenders + stroke)
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width * S}" height="${box * S}">
+    <text x="50%" y="${Math.round(fs * 1.05 * S)}" text-anchor="middle"
+      font-family="Georgia, 'Times New Roman', serif" font-style="italic" font-weight="600"
+      font-size="${fs * S}" fill="#fdf3ff" stroke="#221543"
+      stroke-width="${Math.round(fs * S * 0.11)}" stroke-linejoin="round"
+      paint-order="stroke">${tagline}</text></svg>`;
+  const tag = await sharp(Buffer.from(svg)).resize({ width }).png().toBuffer();
+  const tm = await sharp(tag).metadata();
+
+  const H = mm.height + gap + tm.height;
+  const buf = await sharp({ create: { width, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: mark, left: 0, top: 0 }, { input: tag, left: 0, top: mm.height + gap }])
+    .png().toBuffer();
+  return { buf, w: width, h: H };
 }
 
 const placeLogo = (lg, cx, top) => [{ input: lg.buf, left: Math.round(cx - lg.w / 2), top: Math.round(top) }];
@@ -77,7 +98,7 @@ async function main() {
   // vertical art: keep starry top for the logo, platform cast lower half
   await compose('store_capsule_vertical', 748, 896, [
     await cover(VERT, 748, 896, 0.5, 0.55),
-    placeLogo(await logoArt(600), 374, 34),
+    placeLogo(await logoArt(600, { tagline: TAG }), 374, 34),
   ]);
 
   await compose('store_page_background', 1438, 810, [
