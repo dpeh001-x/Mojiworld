@@ -8685,7 +8685,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.19';
+const GAME_VERSION = 'v0.29.24';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -98518,6 +98518,64 @@ let lastTime = 0;
 // 60 Hz. dt is the fixed step below, so the dt-scaled timers stay real-time.
 let _lxSimAccumMs = 0;
 const _LX_SIM_STEP_MS = 1000 / 60;   // 16.667 ms
+// =========================================================================
+// v0.29.x — CO-OP LIVE WORLD. Two co-op problems, one cause: the shared
+// monster world only advanced inside the main rAF loop's `!game.paused`
+// branch, so it stopped whenever the host (a) opened a UI modal (game.paused
+// = true) or (b) switched away / backgrounded the tab (browsers throttle
+// requestAnimationFrame to ~0 fps in a hidden tab). A stalled HOST stops
+// broadcasting 'mon' frames, so every guest's monsters freeze / loop in
+// place — and a paused host is invincible.
+//
+// Fix: keep the SHARED ENEMY SIMULATION alive independently of pause + rAF,
+// but ONLY in co-op (solo is 100% untouched and still pauses fully):
+//   • _lxCoopWorldStep(dt) — runs monster AI/physics/contact-damage +
+//     enemy projectiles + host broadcasts, WITHOUT player input or render.
+//     A menu still stops YOUR actions; the world (and the monsters that can
+//     hit you) keeps living.
+//   • While VISIBLE + paused → the paused branch of loop() calls it.
+//   • While HIDDEN → a Web-Worker heartbeat drives it. Worker timers are NOT
+//     throttled in a hidden tab, and their 'message' events still run on the
+//     main thread, so the host keeps simulating at ~60 Hz off the frozen rAF.
+function _lxCoopWorldStep(dt) {
+  try {
+    if (!(typeof _coopActive === 'function' && _coopActive())) return;
+    if (!player || !player.cls || game._resetting || game.dying || player.hp <= 0) return;
+    if (window._prologueActive || window._prologuePending) return;
+    updateMonsters(dt);        // enemy AI/physics + monster→player contact & hazard damage
+    updateProjectiles(dt);     // enemy projectiles keep flying + hitting (i-frame-respecting)
+    if (typeof _coopTickMonsters    === 'function') _coopTickMonsters();     // host rebroadcasts so guests stay live
+    if (typeof _coopTickProjectiles === 'function') _coopTickProjectiles();
+    if (typeof _coopTickHazards     === 'function') _coopTickHazards();
+    if (typeof _mpTick === 'function') _mpTick();   // presence + keepalive
+  } catch (e) { /* never let the background sim throw out of the pump/loop */ }
+}
+let _lxCoopPumpWorker = null, _lxCoopPumpLast = 0;
+function _lxStartCoopPump() {
+  if (_lxCoopPumpWorker || typeof Worker === 'undefined') return;
+  try {
+    // Tiny self-contained worker: a plain interval that pings the main thread.
+    const _src = 'let t=null;onmessage=function(e){if(e.data===1){if(!t)t=setInterval(function(){postMessage(1);},33);}else{clearInterval(t);t=null;}};';
+    const _url = URL.createObjectURL(new Blob([_src], { type: 'application/javascript' }));
+    _lxCoopPumpWorker = new Worker(_url);
+    _lxCoopPumpWorker.onmessage = function () {
+      // Only drive the sim when the main rAF loop is effectively stalled (tab
+      // hidden). When visible, loop() runs everything and this pump idles.
+      if (!document.hidden) { _lxCoopPumpLast = 0; return; }
+      if (!(typeof _coopActive === 'function' && _coopActive())) { _lxCoopPumpLast = 0; return; }
+      const _now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      let _acc = _lxCoopPumpLast ? (_now - _lxCoopPumpLast) : _LX_SIM_STEP_MS;
+      _lxCoopPumpLast = _now;
+      if (_acc > _LX_SIM_STEP_MS * 6) _acc = _LX_SIM_STEP_MS * 6;   // clamp a long hidden stretch (no burst on return)
+      while (_acc >= _LX_SIM_STEP_MS) { _acc -= _LX_SIM_STEP_MS; game.time++; _lxCoopWorldStep(_LX_SIM_STEP_MS); }
+    };
+    _lxCoopPumpWorker.postMessage(1);
+    // Reset the pump's time base when the tab becomes visible again so the
+    // first hidden→visible transition doesn't bank a stale gap.
+    try { document.addEventListener('visibilitychange', function () { _lxCoopPumpLast = 0; }); } catch (e) {}
+  } catch (e) { _lxCoopPumpWorker = null; }
+}
+try { _lxStartCoopPump(); } catch (e) {}
 // v0.26.x -- OFF-SCREEN THREAT INDICATOR (round-2 audit, top-ranked item).
 // On a 960x560 viewport, bosses / minibosses aggro from outside the camera and
 // deaths read as unfair. Draw a pulsing arrow clamped to the screen edge along
@@ -98798,6 +98856,14 @@ function loop(time) {
     updateFxInstances(dt);
     updateSmoothFx(dt);
     updateAmbient();
+    // v0.29.x — CO-OP: keep the shared enemy world alive while this player is
+    // PAUSED in a menu (the else branch means game.paused OR dead/frozen; the
+    // world step self-guards on !game.dying && hp>0). Monsters keep moving and
+    // can still hit the menu-open player, and the host keeps broadcasting so
+    // guests never freeze. Only while VISIBLE — a hidden tab is driven by the
+    // Web-Worker pump instead (avoids double-stepping). Solo is unaffected
+    // (_lxCoopWorldStep no-ops when not in co-op).
+    if (game.paused && !document.hidden) _lxCoopWorldStep(dt);
   }
 
   // Screen shake decay
