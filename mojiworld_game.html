@@ -34886,6 +34886,23 @@ function _coopPeerAliveOnMyMap() {
   }
   return false;
 }
+// v0.29.48 (per user) — "onboarding" = the scripted intro period: the prologue
+// flash-forward cinematic, an active story beat, or the first-run tutorial before
+// it's marked seen. Going down during any of these should NOT raise the intrusive
+// DOWNED banner (its bleed-out tick can also stall while the game is paused mid-
+// cinematic, trapping the player). Instead we suppress the banner and auto-respawn
+// after a short 5s window via a pause-independent timer.
+function _isOnboardingActive() {
+  try {
+    if (window._prologueActive || window._prologuePending) return true;
+    if (document.body && document.body.classList.contains('sb-active')) return true;
+    const tut = document.getElementById('tutorial-modal');
+    if (tut && !tut.hidden && getComputedStyle(tut).display !== 'none') return true;
+    if (typeof player !== 'undefined' && player && !player._tutorialSeen) return true;
+  } catch (e) {}
+  return false;
+}
+const COOP_DOWN_ONBOARD_MS = 5000;   // short auto-respawn window during onboarding
 function _coopTryDowned() {
   if (player._downed) return true;   // already down — never double-enter
   if (player._noDownUntil && performance.now() < player._noDownUntil) return false;   // just bled out: die for real
@@ -34899,11 +34916,13 @@ function _coopTryDowned() {
   // only if this map's single team revive hasn't been spent in the last 10 min.
   // After that, going down is a real death — breaks the infinite revive loop and
   // the leave-and-return refresh exploit.
+  const _onboarding = _isOnboardingActive();
   const _reviveSpent = _coopReviveSpent(game.currentMap);
   player._downAlreadyRevived = _reviveSpent;
-  player._downRevivable = _coopPeerAliveOnMyMap() && !_reviveSpent;
+  player._downRevivable = !_onboarding && _coopPeerAliveOnMyMap() && !_reviveSpent;
   player._downed = true;
-  player._downedUntil = performance.now() + COOP_DOWN_MS;
+  player._downedSilent = _onboarding;   // banner is suppressed while this is set
+  player._downedUntil = performance.now() + (_onboarding ? COOP_DOWN_ONBOARD_MS : COOP_DOWN_MS);
   player.hp = 1;                     // keeps every death gate quiet while down
   player.invulnerable = 2000;
   player.vx = 0; player.hitStun = 0;
@@ -34912,6 +34931,26 @@ function _coopTryDowned() {
   // rev flag tells partners whether channeling can still bring this player back
   // (0 = revive already spent this map → don't waste a channel).
   if (net && net.connected && net.ws) { try { net.ws.send(JSON.stringify({ t: 'down', map: game.currentMap, x: Math.round(player.x), y: Math.round(player.y), rev: player._downRevivable ? 1 : 0 })); } catch (e) {} }
+  if (_onboarding) {
+    // No banner, no toast, no flash — auto-respawn after 5s. _coopDownedTick only
+    // runs while updatePlayer ticks, which stalls when the game is paused mid-
+    // cinematic; this pause-independent timer guarantees the respawn fires.
+    try { clearTimeout(player._downedAutoTimer); } catch (e) {}
+    player._downedAutoTimer = setTimeout(() => {
+      try {
+        if (!(player && player._downed)) return;
+        player._downed = false;
+        player._downedSilent = false;
+        player._noDownUntil = performance.now() + 4000;
+        _coopDownedBanner(null);
+        if (net && net.connected && net.ws) { try { net.ws.send(JSON.stringify({ t: 'up', map: game.currentMap, ok: 0 })); } catch (e) {} }
+        player.invulnerable = 0;
+        player.hp = 0;
+        if (typeof triggerDeath === 'function' && !game.dying) { try { triggerDeath(); } catch (e) {} }
+      } catch (e) {}
+    }, COOP_DOWN_ONBOARD_MS);
+    return true;
+  }
   if (typeof showToast === 'function') showToast(player._downRevivable ? '⛑ You are DOWN — a partner can revive you!' : '⛑ You are DOWN!', 'danger');
   if (typeof flash === 'function') { try { flash(0.4); } catch (e) {} }
   return true;
@@ -34931,6 +34970,8 @@ function _coopDownedTick(dt) {
   _coopDownedBanner(Math.max(0, Math.ceil(left / 1000)));
   if (left <= 0) {
     player._downed = false;
+    player._downedSilent = false;
+    try { clearTimeout(player._downedAutoTimer); } catch (e) {}
     player._noDownUntil = performance.now() + 4000;
     _coopDownedBanner(null);
     if (net && net.connected && net.ws) { try { net.ws.send(JSON.stringify({ t: 'up', map: game.currentMap, ok: 0 })); } catch (e) {} }
@@ -34945,6 +34986,8 @@ function _coopDownedTick(dt) {
 function _coopDownedBanner(secs) {
   let b = document.getElementById('coop-downed-banner');
   if (secs == null) { if (b) b.remove(); return; }
+  // v0.29.48 — onboarding downs are silent: never build/show the banner.
+  if (typeof player !== 'undefined' && player && player._downedSilent) { if (b) b.remove(); return; }
   if (!b) {
     b = document.createElement('div');
     b.id = 'coop-downed-banner';
@@ -108955,6 +108998,59 @@ function startBgm() {
   #class-select-modal .class-card .cls-stats {
     font-family: 'Calibri', 'Segoe UI', system-ui, -apple-system, sans-serif !important;
   }
+
+  /* v0.29.48 (per user) — COMPACT-FIT PASS. "Compress such that everything fits
+     so we can remove the scroll bar." Shrinks BOTH "Choose your story" pages
+     (look + class) so they fit inside the modal's height cap without a vertical
+     scrollbar at common laptop heights (>=720px). Scoped to #class-select-modal
+     so nothing else is touched; loaded last so it wins the cascade. */
+  #class-select-modal .modal.cs-epic {
+    padding-top: 4px !important;
+    padding-bottom: 5px !important;
+    /* Content now fits inside the scaled wrapper on both pages, so clip instead
+       of auto-scroll — kills the residual thin scrollbar the compaction left
+       behind (subpixel + decorative-layer overflow was still tripping overflow-y
+       auto). The hair/eye/mouth dropdown lists flip UP when there's no room below
+       (cs-dd-up), so hiding overflow never clips an open picker. */
+    overflow: hidden !important;
+  }
+  #class-select-modal .cs-title { margin-top: 3px !important; margin-bottom: 0 !important; }
+  #class-select-modal .cs-preamble {
+    margin: 1px auto 3px !important;
+    font-size: 10.5px !important;
+    line-height: 1.34 !important;
+    max-width: 540px !important;
+  }
+  /* --- Page 1 (look): smaller preview + tightly-packed pickers so BOTH columns
+         are short enough to clear the scaled wrapper's ~520px logical budget. --- */
+  #class-select-modal .cs-look-layout { gap: 16px !important; align-items: center !important; }
+  #class-select-modal .cs-look-left { gap: 7px !important; }
+  #class-select-modal .cs-look-preview-wrap { width: 158px !important; height: 158px !important; }
+  #class-select-modal #cs-look-canvas { width: 146px !important; height: 146px !important; }
+  #class-select-modal .cs-look-preview-wrap::after { bottom: 10px !important; }
+  #class-select-modal .cs-randomize-btn { width: 26px !important; height: 26px !important; font-size: 13px !important; }
+  #class-select-modal .cs-field { width: 176px !important; }
+  #class-select-modal .cs-field-label { margin-bottom: 2px !important; font-size: 9px !important; }
+  #class-select-modal #hero-name-input { padding: 5px 12px !important; font-size: 12px !important; }
+  #class-select-modal .cs-look-right { gap: 6px !important; }
+  #class-select-modal .cs-picker-section { padding: 6px 12px !important; }
+  #class-select-modal .cs-dropdown-label { margin-bottom: 3px !important; padding-bottom: 3px !important; font-size: 9px !important; }
+  #class-select-modal .cs-dropdown,
+  #class-select-modal .cs-dd-trigger { padding-top: 6px !important; padding-bottom: 6px !important; font-size: 11.5px !important; }
+  /* --- Page 2 (class): a touch tighter than the v0.26.x pass. --- */
+  #class-select-modal #class-options { gap: 9px !important; }
+  #class-select-modal .class-card { padding: 7px 11px !important; }
+  #class-select-modal .class-card .cls-icon { font-size: 26px !important; margin-bottom: 0 !important; }
+  #class-select-modal .class-card .cls-name { font-size: 17px !important; margin-bottom: 1px !important; }
+  #class-select-modal .class-card .cls-tagline { font-size: 10px !important; margin-bottom: 3px !important; min-height: 0 !important; line-height: 1.25 !important; }
+  #class-select-modal .class-card .cls-role { margin: 0 0 4px !important; padding: 3px 6px !important; }
+  #class-select-modal .class-card .cls-perk { padding: 5px 8px !important; margin: 0 0 4px !important; }
+  #class-select-modal .class-card .cls-perk-name { font-size: 9.5px !important; }
+  #class-select-modal .class-card .cls-perk-desc { font-size: 9px !important; line-height: 1.26 !important; }
+  #class-select-modal .class-card .cls-jobs { margin-top: 3px !important; font-size: 9px !important; }
+  /* --- Bottom nav tighter --- */
+  #class-select-modal .cs-page-nav { margin-top: 5px !important; }
+  #class-select-modal .cs-nav-btn { padding-top: 7px !important; padding-bottom: 7px !important; }
 
   /* =========================================================================
      v0.25.943 — TUTORIAL MODAL LUX LIFT
