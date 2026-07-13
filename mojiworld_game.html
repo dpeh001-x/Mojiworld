@@ -8685,7 +8685,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.29';
+const GAME_VERSION = 'v0.29.31';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -33879,6 +33879,11 @@ function _coopApplyHazHit(msg) {
 //   dmgFrac      — fraction of the RECEIVER's maxHp (%-maxHp nukes; unmitigable by DEF
 //                  so each guest takes the same % the host modeled, not the host's raw)
 function _coopBroadcastBossHit(cx, cy, radius, dmgRaw, dmgFrac, label, color) {
+  // v0.29.x — co-op boss aggro tap: while bossAI runs a PARTNER-targeted tick
+  // (player fields swapped), direct-hit writes to `player` get discarded on
+  // restore — this hook captures the strike so the dispatcher can re-apply it
+  // to the host POSITIONALLY at their real location (see the bossAI dispatch).
+  if (game && game._bossHitTap) { try { game._bossHitTap(cx, cy, radius, dmgRaw, dmgFrac, label, color); } catch (e) {} }
   if (!net.isHost || typeof _coopActive !== 'function' || !_coopActive() || !net.ws) return;
   try {
     net.ws.send(JSON.stringify({ t: 'bosshit', map: game.currentMap,
@@ -33919,6 +33924,39 @@ function _coopApplyBossHit(msg) {
   player._lastDamageSource = msg.sl || 'a boss attack';
   if (typeof flash === 'function') { try { flash(0.25); } catch (e) {} }
   if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: '-' + dmg, life: 40, color: msg.c || '#ff5555', big: true });
+}
+// v0.29.x — SELF (host) positional boss hit. During a PARTNER-targeted bossAI
+// tick, direct player.hp writes are discarded on restore (they measured range
+// against the partner's position). This re-applies the same strike to the
+// HOST at their REAL position — identical range gate + mitigation chain as
+// the guest-side _coopApplyBossHit above, so both players experience the same
+// positional attack rules.
+function _coopSelfBossHit(cx, cy, radius, dmgRaw, dmgFrac, label, color) {
+  if (!player || player.hp <= 0 || player._god || (player.invulnerable | 0) > 0) return;
+  const r = Math.max(0, +radius || 0);
+  if (r > 0 && r < 9000) {
+    if (Number.isFinite(+cx)) {
+      const dx = (player.x + player.w / 2) - (+cx);
+      const dy = (Number.isFinite(+cy) && +cy !== 0) ? (player.y + player.h / 2) - (+cy) : 0;
+      if (Math.hypot(dx, dy) > r) return;   // host outside the strike -> safe
+    }
+  }
+  const isFrac = (+dmgFrac > 0);
+  let dmg = isFrac ? Math.floor(player.maxHp * Math.min(1, +dmgFrac)) : Math.max(1, +dmgRaw || 0);
+  if (dmg <= 0) return;
+  if (!isFrac) {
+    const _def = (typeof getDef === 'function') ? getDef() : 0;
+    dmg = Math.max(1, dmg - Math.floor(_def * 0.4));
+  }
+  if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
+  if (player.cls === 'warrior' && typeof _warriorDr === 'function') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));
+  if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
+  player.hp -= (typeof _diffDmg === 'function') ? _diffDmg(dmg) : dmg;
+  player.lastHitTime = game.time;
+  player.invulnerable = 600;
+  player._lastDamageSource = label || 'a boss attack';
+  if (typeof flash === 'function') { try { flash(0.25); } catch (e) {} }
+  if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: '-' + dmg, life: 40, color: color || '#ff5555', big: true });
 }
 // =========================================================================
 // v0.27.9 — CO-OP DOWNED / REVIVE (the AAA co-op signature: It Takes Two /
@@ -54259,11 +54297,21 @@ function updateMonsters(dt) {
   // frame; a mob near ANY partner is exempt from the total skip below (it
   // still gets the cheaper far-tick tiers). One or two peers → negligible cost.
   let _vfPeers = null;
+  // v0.29.x — CO-OP BOSS/AGGRO: alive same-map partners are also TARGETS.
+  // _aggroPeers feeds (a) the regular-mob closest-target pick below (mobs
+  // split naturally between both players instead of all mobbing the host)
+  // and (b) the boss target swap at the bossAI dispatch. Downed/dead
+  // partners are excluded — a boss won't camp a corpse.
+  let _aggroPeers = null;
   if (typeof _coopActive === 'function' && _coopActive() && net.isHost && net.peers) {
     for (const _pid in net.peers) {
       const _pp = net.peers[_pid];
       if (_pp && _pp.map === game.currentMap && Number.isFinite(+_pp.x)) {
         (_vfPeers = _vfPeers || []).push({ x: +_pp.x, y: +_pp.y || 0 });
+        const _ppAlive = !_pp._downed && !(_pp.maxHp && (+_pp.hp || 0) <= 0);
+        if (_ppAlive) {
+          (_aggroPeers = _aggroPeers || []).push({ id: +_pid, x: +_pp.x, y: +_pp.y || 0, vx: +_pp.vx || 0, vy: +_pp.vy || 0 });
+        }
       }
     }
   }
@@ -54401,8 +54449,18 @@ function updateMonsters(dt) {
     // Skip expensive AI for faraway non-bosses
     const dx = (m.x + m.w/2) - (camX + W/2);
     const dy = (m.y + m.h/2) - (camY + H/2);
-    const far = (Math.abs(dx) > W/2 + ACTIVE_PAD) ||
-                (Math.abs(dy) > H/2 + ACTIVE_PAD);
+    let far = (Math.abs(dx) > W/2 + ACTIVE_PAD) ||
+              (Math.abs(dy) > H/2 + ACTIVE_PAD);
+    // v0.29.x — co-op: "far" is measured from MY camera, but as host I run
+    // the AI for everyone — a mob near a PARTNER gets the full tick (same
+    // exemption as the very-far total-skip above), so the guest's side of
+    // the map fights back instead of idling in the cheap tier.
+    if (far && _aggroPeers) {
+      const _mcx3 = m.x + m.w/2, _mcy3 = m.y + m.h/2;
+      for (const _q of _aggroPeers) {
+        if (Math.abs(_mcx3 - (_q.x + 14)) <= W/2 + ACTIVE_PAD && Math.abs(_mcy3 - (_q.y + 22)) <= H/2 + ACTIVE_PAD) { far = false; break; }
+      }
+    }
     if (far && !m.isBoss && !m.isMiniBoss) {
       if (m.hitFlash > 0) m.hitFlash -= dt;
       if (m.stunTimer > 0) m.stunTimer -= dt;
@@ -55315,7 +55373,7 @@ function updateMonsters(dt) {
     // v0.26.x - Per user "make monsters move towards and attack the summoned
     // creatures also". Undead minions (warlock/lich) now draw aggro like wolves.
     const _hasMinions = !!(game.minions && game.minions.length);
-    if (!m.isBoss && (_hasPet || _hasPack || _hasUlt || _hasMinions)) {
+    if (!m.isBoss && (_hasPet || _hasPack || _hasUlt || _hasMinions || _aggroPeers)) {
       const _mcx = m.x + m.w/2, _mcy = m.y + m.h/2;
       // Player score: squared distance with a 60 px subtracted-distance
       // bias = (sqrt(d²) − 60). To compare without sqrt we compute the
@@ -55357,6 +55415,12 @@ function updateMonsters(dt) {
           }
         }
       }
+      // v0.29.x — co-op: alive same-map PARTNERS are targets too (unbiased,
+      // like pets), so mobs chase whichever player is actually closest —
+      // the guest stops being invisible to the host-simulated world.
+      if (_aggroPeers) {
+        for (const _q of _aggroPeers) _consider(_q.x + 14, _q.y + 22, _q);
+      }
     }
     const distToPlayer = Math.abs(_tgtX - (m.x + m.w/2));
     const yDiff = Math.abs(_tgtY - (m.y + m.h/2));
@@ -55373,7 +55437,68 @@ function updateMonsters(dt) {
 
     if (m.isBoss) {
       m._preAiVy = m.vy;   // v0.26.x — snapshot for the "no upward hit-knockback" clamp in physics
-      bossAI(m, dt, distToPlayer);
+      // v0.29.x — CO-OP BOSS AGGRO. bossAI reads the global `player` ~160×,
+      // so instead of refactoring every site, we use the codebase's
+      // established field-swap pattern (see _mpDrawPeerAvatar): when the
+      // boss's chosen target is a PARTNER, temporarily move `player`'s
+      // position fields onto the partner for the AI tick and restore after.
+      //   • Movement / telegraphs / projectiles aim at the partner ✓
+      //   • Direct player.hp writes during a swapped tick are DISCARDED on
+      //     restore — the partner takes the real strike via the existing
+      //     _coopBroadcastBossHit → bosshit channel, and the HOST is
+      //     re-applied the strike POSITIONALLY via the tap below (so a host
+      //     standing in the same AoE still takes it at their real position).
+      //   • Target choice: nearest of {host, alive same-map partners} with
+      //     25% hysteresis so the boss commits instead of ping-ponging.
+      let _bSwap = null, _bTapHits = null, _bDist = distToPlayer;
+      if (_aggroPeers && _aggroPeers.length) {
+        const _bmx = m.x + m.w / 2, _bmy = m.y + m.h / 2;
+        const _dHost = Math.hypot(player.x + player.w / 2 - _bmx, player.y + player.h / 2 - _bmy);
+        let _best = null, _bestD = _dHost;
+        for (const _q of _aggroPeers) {
+          const _d = Math.hypot(_q.x + 14 - _bmx, _q.y + 22 - _bmy);
+          if (_d < _bestD) { _bestD = _d; _best = _q; }
+        }
+        let _chosen = _best ? _best.id : null;
+        const _prev = m._coopAggroId;
+        if (_prev !== undefined && _prev !== _chosen) {
+          let _prevD = _dHost;
+          if (_prev != null) {
+            const _pq = _aggroPeers.find((qq) => qq.id === _prev);
+            _prevD = _pq ? Math.hypot(_pq.x + 14 - _bmx, _pq.y + 22 - _bmy) : Infinity;
+          }
+          if (_prevD !== Infinity && !(_bestD < _prevD * 0.75)) _chosen = _prev;   // hysteresis: stick unless 25% closer
+        }
+        m._coopAggroId = _chosen;
+        if (_chosen != null) {
+          const _q = _aggroPeers.find((qq) => qq.id === _chosen);
+          if (_q) {
+            _bSwap = { x: player.x, y: player.y, vx: player.vx, vy: player.vy, facing: player.facing,
+                       hp: player.hp, invulnerable: player.invulnerable, hitStun: player.hitStun,
+                       frozenTimer: player.frozenTimer, freezeTimer: player.freezeTimer,
+                       _slowTimer: player._slowTimer, burnTimer: player.burnTimer,
+                       _poisonTimer: player._poisonTimer, _electrocuteTimer: player._electrocuteTimer };
+            player.x = _q.x; player.y = _q.y; player.vx = _q.vx; player.vy = _q.vy;
+            _bDist = Math.abs((_q.x + 14) - _bmx);
+            // Tap boss direct-hit broadcasts fired during this tick so the
+            // HOST can be hit positionally at their REAL location.
+            _bTapHits = [];
+            game._bossHitTap = (cx, cy, r, d, fr, sl, c) => { _bTapHits.push({ cx, cy, r, d, fr, sl, c }); };
+          }
+        }
+      }
+      try {
+        bossAI(m, dt, _bDist);
+      } finally {
+        if (_bSwap) {
+          for (const _k in _bSwap) player[_k] = _bSwap[_k];
+          game._bossHitTap = null;
+          // Re-apply tapped direct hits at the host's REAL position.
+          if (_bTapHits && _bTapHits.length && typeof _coopSelfBossHit === 'function') {
+            for (const _hh of _bTapHits) _coopSelfBossHit(_hh.cx, _hh.cy, _hh.r, _hh.d, _hh.fr, _hh.sl, _hh.c);
+          }
+        }
+      }
     } else {
       // Regular AI
       const _tSpd = towerSpeedMul();
