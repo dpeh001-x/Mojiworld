@@ -8712,7 +8712,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.45';
+const GAME_VERSION = 'v0.29.46';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -32189,6 +32189,12 @@ function _playStoryBeat(beatId, onClose) {
   els.overlay.classList.add('mode-' + (beat.mode || 'dialog'));
   // v0.29.27 — cinematic clip backdrop (no-op for beats without one).
   _sbAttachClip(beatId);
+  // v0.29.x — Per user "the tutorial tab should be behind the storytelling tab":
+  // the interactive tutorial dock (z-600, position:fixed) otherwise floats OVER
+  // the story-beat overlay (z-105, inside the game-wrapper stacking context), so
+  // a raise-z alone can't win across contexts. Flag the body while a beat is on
+  // and hide the dock via CSS — the storytelling reads clean, dock returns after.
+  try { document.body.classList.add('sb-active'); } catch (e) {}
   game.paused = true;
   let idx = 0;
   const renderStanza = () => {
@@ -32215,6 +32221,7 @@ function _playStoryBeat(beatId, onClose) {
   };
   const closeBeat = () => {
     els.overlay.classList.remove('on');
+    try { document.body.classList.remove('sb-active'); } catch (e) {}   // v0.29.x — restore the tutorial dock
     _sbDetachClip();   // v0.29.27 — unload the clip with the overlay
     els.overlay.removeEventListener('click', advance);
     document.removeEventListener('keydown', onKey, true);
@@ -34309,6 +34316,22 @@ function _coopDownedBanner(secs) {
   const s = document.getElementById('coop-downed-secs');
   if (s && s.textContent !== secs + 's') s.textContent = secs + 's';
 }
+// v0.29.x — DOWNED-banner watchdog (per user "the downed is still stuck").
+// The banner is normally cleared by _coopDownedTick / respawnAtTown, but both
+// live in flows that stall during cinematics/prologue/onboarding. This tiny
+// loop-independent timer guarantees the banner can NEVER survive: if it exists
+// while the player isn't actually downed, it's removed within ~0.6s no matter
+// what state the game loop is in. Cheap — a getElementById on an idle timer.
+try {
+  setInterval(() => {
+    try {
+      if (!(typeof player !== 'undefined' && player && player._downed)) {
+        const _b = document.getElementById('coop-downed-banner');
+        if (_b) _b.remove();
+      }
+    } catch (e) {}
+  }, 600);
+} catch (e) {}
 // Peer notifications (down/up are self-reports keyed by relay-stamped sender id).
 function _coopApplyDown(msg) {
   if (!msg || msg.id == null) return;
@@ -47500,6 +47523,14 @@ function respawnAtTown() {
   // contract. The 2200 ms death overlay already handles its own
   // dim/blur; pause is for gameplay only.
   game.paused = false;
+  // v0.29.x — Per user "the downed tab should be gone after respawn": the co-op
+  // downed banner + flag are only cleared inside _coopDownedTick, which stops
+  // running the moment the update loop stalls (e.g. a cinematic/prologue) — so a
+  // give-up → respawn could leave the DOWNED banner frozen on screen forever.
+  // Clear both here, the definitive respawn hook, so it can never survive.
+  player._downed = false;
+  player._downedUntil = 0;
+  try { const _dbn = document.getElementById('coop-downed-banner'); if (_dbn) _dbn.remove(); } catch (e) {}
   player.hp = getMaxHp();
   player.mp = getMaxMp();
   player.vx = 0; player.vy = 0;
@@ -99620,6 +99651,16 @@ function loop(time) {
 
   _drawOffscreenThreats();   // v0.26.x -- edge arrows for off-screen boss-tier mobs
   updateUI();
+  // v0.29.x — DOWNED-banner safety net (per user "the downed is still stuck").
+  // The banner is created by _coopDownedTick, which lives in the UPDATE loop —
+  // that loop stalls during cinematics/prologue, so a give-up→respawn there
+  // could freeze the banner forever. The RENDER loop always runs, so force the
+  // banner gone here whenever the player isn't actually downed. Cheap: a single
+  // getElementById that only touches the DOM on the rare frame the node lingers.
+  if (!(typeof player !== 'undefined' && player && player._downed)) {
+    const _dbn = document.getElementById('coop-downed-banner');
+    if (_dbn) _dbn.remove();
+  }
   // v0.25.240 (B5) — visual-queue trim now actually runs every frame.
   // The cap helpers (_particleCap / _afterImageCap) already account for
   // mobile + lowFx, so this is the canonical guard against burst-spike
@@ -106040,18 +106081,20 @@ function startBgm() {
   /* L61b — v0.29.x per user: the Persona-5 comic graphic (variant A — shards,
      gears, moon/shield motifs) sits behind the "Choose your story" content at
      25% opacity (baked into the webp). This later same-specificity !important
-     rule wins the cascade over L61 above; the brushed-steel gradient stack is
-     restated beneath the image layer, and L61's blur/border/shadow still apply. */
+     rule wins the cascade over L61 above; L61's blur/border/shadow still apply.
+     v0.29.45 — per user "slightly darker and more purplish": the pewter
+     brushed-steel stack is replaced with a deep-violet one (higher alphas =
+     darker panel), and the conic accents shift lavender. */
   #class-select-modal .modal.cs-epic {
     background:
       url('Sprites/ui/panel_p5_cs.webp') center / cover no-repeat,
-      radial-gradient(circle at 50% -5%, rgba(255, 220, 140, 0.12) 0%, transparent 38%),
-      conic-gradient(from 220deg at 80% 100%, rgba(220, 220, 230, 0.10) 0deg, transparent 80deg, rgba(180, 195, 210, 0.10) 160deg, transparent 240deg, rgba(255, 220, 140, 0.08) 320deg, transparent 360deg),
+      radial-gradient(circle at 50% -5%, rgba(255, 220, 140, 0.10) 0%, transparent 38%),
+      conic-gradient(from 220deg at 80% 100%, rgba(190, 160, 240, 0.08) 0deg, transparent 80deg, rgba(150, 120, 220, 0.08) 160deg, transparent 240deg, rgba(255, 220, 140, 0.06) 320deg, transparent 360deg),
       linear-gradient(150deg,
-        rgba(96, 100, 115, 0.55) 0%,
-        rgba(72, 76, 92, 0.58) 30%,
-        rgba(54, 58, 72, 0.62) 60%,
-        rgba(38, 42, 56, 0.66) 100%) !important;
+        rgba(74, 56, 118, 0.64) 0%,
+        rgba(56, 42, 98, 0.68) 30%,
+        rgba(40, 28, 76, 0.74) 60%,
+        rgba(24, 16, 50, 0.80) 100%) !important;
   }
 
   /* L62. PREVIEW WRAP — match the grey body (was violet) */
@@ -106861,6 +106904,10 @@ function startBgm() {
     padding: 0 0 16px 16px;
     z-index: 600;                  /* float above other modals so it stays readable */
   }
+  /* v0.29.x — Per user: keep the tutorial dock BEHIND the storytelling overlay.
+     While a story beat is playing (body.sb-active), hide the dock so the
+     narrative reads clean; it returns the instant the beat closes. */
+  body.sb-active #tutorial-modal.tut-dock { visibility: hidden !important; }
   #tutorial-modal.tut-dock .modal {
     pointer-events: auto;          /* the card itself stays interactive */
     margin: 0 !important;
