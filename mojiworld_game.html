@@ -8674,7 +8674,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.10';
+const GAME_VERSION = 'v0.29.11';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -33366,6 +33366,19 @@ function openMultiplayer() {
 // partner saw them vanish. Fix: a game-loop-INDEPENDENT keepalive timer + an
 // exponential-backoff reconnect that re-issues the same hello (same party code).
 const MP_KEEPALIVE_MS = 20000;   // < the relay's ~45s idle cutoff, with margin
+// v0.29.11 — DATA LIFELINE (live co-op test finding). The 'ka' ping below
+// keeps the SOCKET open, but presence + host-authority broadcasts only ran
+// from the rAF loop — which browsers fully starve in hidden tabs, and which
+// early-returns while game.paused. Real-world result: a host who alt-tabs
+// (Discord!) or sits in a menu stops broadcasting 'state'/'mon' frames →
+// every guest's world freezes for ~5 s, forks to local simulation, then
+// violently re-merges when the host returns. This 500 ms interval drives
+// the same self-throttled tick functions loop-independently: visible tabs
+// see at most one extra send per 500 ms (the internal 70/100 ms throttles
+// gate them); hidden tabs degrade to ~1 Hz (browser interval clamp) —
+// degraded but ALIVE, so guests keep a truthful frozen-host world instead
+// of forking. All tick functions early-return when disconnected/non-host.
+const MP_LIFELINE_MS = 500;
 function _mpStartKeepalive() {
   _mpStopKeepalive();
   net._kaTimer = setInterval(() => {
@@ -33376,9 +33389,20 @@ function _mpStartKeepalive() {
       try { net.ws.send(JSON.stringify({ t: 'ka' })); } catch (e) {}   // 'ka' has no handler case -> peers ignore it; it exists only to reset the relay idle timer
     }
   }, MP_KEEPALIVE_MS);
+  net._lifelineTimer = setInterval(() => {
+    try {
+      if (!net.ws || net.ws.readyState !== 1) return;
+      if (typeof _mpTick === 'function') _mpTick();
+      if (typeof _coopTickMonsters    === 'function') _coopTickMonsters();
+      if (typeof _coopTickProjectiles === 'function') _coopTickProjectiles();
+      if (typeof _coopTickHazards     === 'function') _coopTickHazards();
+      if (typeof _coopTickDrops       === 'function') _coopTickDrops();
+    } catch (e) { /* a tick hiccup must never kill the interval */ }
+  }, MP_LIFELINE_MS);
 }
 function _mpStopKeepalive() {
   if (net._kaTimer) { clearInterval(net._kaTimer); net._kaTimer = null; }
+  if (net._lifelineTimer) { clearInterval(net._lifelineTimer); net._lifelineTimer = null; }
 }
 // Schedule a reconnect after an UNEXPECTED close (not a user-initiated hang-up).
 // Backoff 1s,2s,4s,8s… capped at 15s so a flapping relay isn't hammered, but a
@@ -34496,14 +34520,40 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
     somersault: player.somersault, frozenTimer: player.frozenTimer,
     lookCustom: player.lookCustom,
   };
+  // v0.29.11 (co-op live-test fix #2) — drawCuteCharacter WRITES one-shot
+  // animation anchors on the player object (_heroAtkAt / _heroDeathAt /
+  // _heroHitAt + friends): drawing a swinging peer re-anchored the LOCAL
+  // player's attack animation, and drawing any alive peer cleared the
+  // local death/hit anim anchors mid-animation. Snapshot every _hero*
+  // key generically (robust against future anchor additions) and restore
+  // in the finally below.
+  const _savedAnchors = {};
+  for (const k in player) {
+    if (k.indexOf('_hero') === 0) _savedAnchors[k] = player[k];
+  }
   const _savedOverride = _LX_EQ_PREVIEW_OVERRIDE;
+  // v0.29.11 (fix #3) — ctx save-depth ledger. Pre-fix, a throw inside
+  // drawCuteCharacter leaked the outer ctx.save() (and _chibiApply's
+  // inner one), leaving a chibi transform + 0.95 alpha applied to every
+  // subsequent draw — compounding each frame into total canvas chaos.
+  // Count every push; the finally pops exactly what's still open.
+  let _ctxSaves = 0;
   try {
     player.cls    = _ok(p.cls)    || _saved.cls;
     player.job    = _ok(p.job)    || null;
     player.master = _ok(p.master) || null;
     player.facing = face;
     player.w = 28; player.h = 44;          // canonical hero dims (pill footprint)
-    player.x = p._rx; player.y = p._ry;    // world coords → foot-anchor math lands on the peer's feet
+    player.x = p._rx;
+    // v0.29.11 (fix #1) — SCREEN-space vertical anchor. _chibiApply
+    // anchors the figure's feet at player.y + player.h, but its
+    // horizontal comes from the sx ARG (screen coords). Feeding world-Y
+    // here (like the mirror-self does) only works when camera.y === 0;
+    // on vertical maps (Frozen Peak / towers) the avatar would render
+    // offset by the camera scroll. sy is the pill's screen-space top —
+    // setting player.y = sy puts the feet exactly on the pill's foot
+    // line on EVERY map, including the run-bob offset.
+    player.y = sy;
     player.vx = p.vx || 0; player.vy = p.vy || 0;
     // Peer swing → real attack pose (replaces the golden-arc-only read).
     player.attacking   = p.anim === 'attack';
@@ -34530,6 +34580,12 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
     if (p.eq && typeof p.eq === 'object') {
       for (const k in p.eq) {
         if (!/^[\w]{1,24}$/.test(k)) continue;
+        // v0.29.11 (fix #4) — the \w charset matches "__proto__";
+        // assigning _ov["__proto__"] would SWAP the override object's
+        // prototype instead of adding a slot, letting a hostile peer
+        // inject inherited properties into the equipment walk. Reject
+        // the three prototype-tunnelling keys outright.
+        if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
         const o = p.eq[k];
         if (!o || typeof o !== 'object') continue;
         const bn = _ok(o.bn);
@@ -34537,16 +34593,18 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
       }
     }
     _LX_EQ_PREVIEW_OVERRIDE = _ov;
-    ctx.save();
+    ctx.save(); _ctxSaves++;
     ctx.globalAlpha = 0.95;   // hair's-breadth ghosting so YOUR character stays the visual anchor
-    if (typeof _chibiApply === 'function')   _chibiApply(sx, sy);
+    if (typeof _chibiApply === 'function') { _chibiApply(sx, sy); _ctxSaves++; }   // _chibiApply pushes exactly one ctx.save
     drawCuteCharacter(sx, sy);
-    if (typeof _chibiRestore === 'function') _chibiRestore();
-    ctx.restore();
+    if (typeof _chibiRestore === 'function') { _chibiRestore(); _ctxSaves--; }
+    ctx.restore(); _ctxSaves--;
     return true;
   } catch (e) {
     return false;   // any renderer hiccup → caller draws the pill
   } finally {
+    // Pop any ctx saves a mid-draw throw left open (see ledger note above).
+    while (_ctxSaves > 0) { try { ctx.restore(); } catch (_e) {} _ctxSaves--; }
     player.cls = _saved.cls; player.job = _saved.job; player.master = _saved.master;
     player.facing = _saved.facing; player.w = _saved.w; player.h = _saved.h;
     player.x = _saved.x; player.y = _saved.y;
@@ -34557,6 +34615,9 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
     player._castLockUntil = _saved._castLockUntil;
     player.somersault = _saved.somersault; player.frozenTimer = _saved.frozenTimer;
     player.lookCustom = _saved.lookCustom;
+    // Restore the one-shot animation anchors drawCuteCharacter mutated
+    // while posing the peer (see _savedAnchors note above).
+    for (const k in _savedAnchors) player[k] = _savedAnchors[k];
     _LX_EQ_PREVIEW_OVERRIDE = _savedOverride;
   }
 }

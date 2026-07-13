@@ -148,6 +148,42 @@
   <b>Heads-up.</b> An earlier implementation of these phases targeted <code>v0.5.1</code> and was preserved locally at tag <code>phase-1-2-3-on-v0.5.1</code>. This is the rebuild against the current <code>v0.9.8</code> codebase, which had moved substantially (new bosses like Gravitos, minimap/taxi, chibi character rewrite).
 </div>
 
+<h2>v0.29.11 <span class="tag"><span class="pill bug">bug</span> Live co-op test — relay was stripping the avatar data + hidden-tab hosts froze guests (5 bugs found &amp; fixed)</h2>
+
+<p>Per user "test coop with my friend and report any bugs, it currently seems rather buggy". Ran a LIVE two-client session: local relay + a scripted partner speaking the real protocol (patrolling, swinging, broadcasting the new look/eq fields) + the actual game client driven in a browser. Five real bugs found; all fixed and re-verified live.</p>
+
+<h3>🔴 Bug 1 — the relay stripped <code>look</code> + <code>eq</code>: full peer avatars were dead on arrival</h3>
+<p>The relay whitelists state fields (<code>PRESENCE_FIELDS</code> in <code>mp/server.mjs</code>) and the v0.29.9 <code>look</code>/<code>eq</code> fields weren't on the list — the server silently dropped them from every rebroadcast frame. Verified live: the client received the peer with <code>look: null, eq: null</code> while the partner was provably sending both. <b>Partners were still rendering as purple pills despite v0.29.9</b> — the feature never worked over the real wire. Fix: both fields whitelisted; verified arriving intact after relay restart. <b>The hosted relay (Render) redeploys from this push — co-op avatars only work once it's live.</b></p>
+
+<h3>🔴 Bug 2 — hidden-tab / paused hosts starved every guest</h3>
+<p>Presence + host-authority broadcasts (<code>state</code>/<code>mon</code>/<code>proj</code>/<code>haz</code>/<code>drop</code>) only ran from the rAF render loop — which browsers <b>fully stop in hidden tabs</b>, and which early-returns while <code>game.paused</code>. Real-world translation: the host alt-tabs to Discord, or opens the U/K menu → guests' monsters freeze ~5 s → guests fork to local simulation → worlds violently re-merge when the host returns. Verified live: with the tab hidden, <code>game.time</code> froze and zero ticks flowed. This is almost certainly the day-to-day "co-op feels buggy". Fix: a 500 ms <b>data lifeline</b> interval on the keepalive lifecycle drives the same self-throttled tick functions loop-independently — visible tabs are unaffected (internal 70/100 ms throttles gate the extra calls), hidden tabs degrade to ~1 Hz but stay ALIVE. Verified live: presence ticks kept advancing with the tab fully hidden.</p>
+
+<h3>🟠 Bug 3 — a mid-draw throw in the peer renderer corrupted the whole canvas</h3>
+<p>A throw inside <code>drawCuteCharacter</code> during a peer draw leaked the outer <code>ctx.save()</code> + the chibi transform — every subsequent draw that frame (and compounding each frame) rendered scaled/translated/ghosted. Fix: a ctx save-depth ledger; the <code>finally</code> pops exactly what a throw left open.</p>
+
+<h3>🟠 Bug 4 — drawing a peer corrupted the local player's animation anchors</h3>
+<p><code>drawCuteCharacter</code> <b>writes</b> one-shot animation anchors on the player object (<code>_heroAtkAt</code>/<code>_heroDeathAt</code>/<code>_heroHitAt</code>): posing a swinging partner re-anchored YOUR attack animation mid-swing, and posing any alive partner cleared your death/hit anim anchors mid-animation. Fix: all <code>_hero*</code> keys are snapshotted before the swap and restored in the <code>finally</code>.</p>
+
+<h3>🟡 Bug 5 — peer avatars would render camera-offset on vertical maps</h3>
+<p><code>_chibiApply</code> anchors the figure's feet at <code>player.y + player.h</code> (world-space) while horizontal placement comes from the screen-space <code>sx</code> arg. Feeding world-Y (as the mirror-self does) only works when <code>camera.y === 0</code> — on Frozen Peak / tower maps peers would draw offset by the camera scroll. Fix: the peer swap now sets <code>player.y</code> to the pill's screen-space top so the feet land on the pill's foot line on every map. (Bonus hardening: <code>__proto__</code>/<code>constructor</code>/<code>prototype</code> equipment-slot keys from hostile peers are rejected.)</p>
+
+<h3>Verified live (two-client session)</h3>
+<ul>
+  <li>Partner joins, patrols, swings — position/facing/anim sync at 14 Hz ✓</li>
+  <li><code>look</code> + <code>eq</code> arrive intact post-relay-fix ✓</li>
+  <li>Full avatar pipeline: 3/3 draws with real wire data, both facings, zero exceptions, local player state + look + equipment override fully restored ✓</li>
+  <li>Presence ticks continue with the tab fully hidden (lifeline) ✓</li>
+  <li>Host-election, follower mode, stale-host fallback all behaved as designed ✓</li>
+</ul>
+
+<h3>Files touched</h3>
+<ul>
+  <li><code>mojiworld_game.html</code> — peer-renderer fixes (ctx ledger, anchor snapshot, screen-space Y, proto-key guard); data-lifeline interval on the keepalive lifecycle.</li>
+  <li><code>mp/server.mjs</code> — <code>look</code> + <code>eq</code> added to <code>PRESENCE_FIELDS</code>.</li>
+  <li><code>scripts/_mp_local_friend.mjs</code> — reusable local test partner (patrols, swings, broadcasts look/eq) for future co-op testing.</li>
+  <li><code>GAME_VERSION</code> bumped v0.29.10 → v0.29.11. All 5 script blocks + relay pass syntax check.</li>
+</ul>
+
 <h2>v0.29.10 <span class="tag"><span class="pill feat">feat</span> Co-op battle sync verified end-to-end + real-time mirror motion (60 fps monster movement for guests)</h2>
 
 <p>Per user "ensure that coop mode battle, sprites, damage to monsters are all synced in real time". Full audit of the co-op combat pipeline plus one shipped fix for the last non-real-time link.</p>

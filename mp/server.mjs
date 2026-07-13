@@ -24,8 +24,14 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');   // repo root (serves the game too)
 const PORT = process.env.PORT || 8080;
+// v0.29.11 — 'look' + 'eq' added for the full-peer-avatar feature (client
+// v0.29.9+): look = sprite-layer face {h,e,m,s}, eq = per-slot equipment
+// visuals {sid,bn,tn}. Both are small nested objects; the client whitelist-
+// sanitizes every string at ingestion before any registry lookup, and the
+// relay's maxPayload + token bucket bound the frame size — consistent with
+// the verbatim-forwarded 'mon'/'proj' frames ("the relay stays dumb").
 const PRESENCE_FIELDS = ['name', 'cls', 'job', 'master', 'level', 'map', 'x', 'y', 'vx', 'vy',
-  'facing', 'hp', 'maxHp', 'mp', 'maxMp', 'anim'];
+  'facing', 'hp', 'maxHp', 'mp', 'maxMp', 'anim', 'look', 'eq'];
 const CTRL = /[\u0000-\u001f\u007f]/g;     // strip control chars (matches the in-game sanitizer)
 const STR_CAP = 48;                        // cap every relayed string presence field
 const MAX_BUFFERED = 256 * 1024;           // shed droppable (state) frames to a backed-up socket past this
