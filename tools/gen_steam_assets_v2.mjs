@@ -6,7 +6,12 @@
 // then overlays the gold MOJIWORLD logotype (SVG → sharp). Same 9 outputs as v1.
 // Run: node tools/gen_steam_assets_v2.mjs
 import sharp from 'sharp';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rename } from 'node:fs/promises';
+
+// The real hand-made MOJIWORLD wordmark (art of record) — overlaid on every
+// capsule instead of a synthetic SVG logotype so the store art matches the
+// in-game title and app icon exactly.
+const WORDMARK = 'Sprites/ui/mojiworld_logo.png';
 
 const OUT = 'steam_assets';
 const WIDE = 'steam_assets/keyart/keyart_wide.png';
@@ -30,32 +35,10 @@ async function cover(src, w, h, focusX = 0.5, focusY = 0.5, { blur = 0, darken =
   return { input: buf, left: 0, top: 0 };
 }
 
-// gold MOJIWORLD logotype (+optional tagline), rendered 2x then downsampled
-async function logoArt(width, { tagline = '', star = true } = {}) {
-  const W = width * 2;
-  const F = Math.round(W / 7.4);
-  const tagF = Math.round(F * 0.30), starF = Math.round(F * 0.52);
-  const topPad = star ? Math.round(starF * 1.15) : Math.round(F * 0.18);
-  const textY = topPad + F;
-  const H = textY + Math.round(F * 0.30) + (tagline ? Math.round(tagF * 2.1) : 0);
-  const fam = `Segoe UI Black, Arial Black, sans-serif`;
-  const t = (fill, stroke) => `<text x="50%" y="${textY}" text-anchor="middle"
-      font-family="${fam}" font-weight="900" font-size="${F}" letter-spacing="${Math.round(F * 0.02)}"
-      ${stroke ? `stroke="${stroke}" stroke-width="${Math.round(F * 0.17)}" stroke-linejoin="round"` : ''}
-      fill="${fill}">MOJIWORLD</text>`;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-    <defs><linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#fff7d0"/><stop offset="0.45" stop-color="#ffd94a"/>
-      <stop offset="1" stop-color="#ff9331"/></linearGradient></defs>
-    ${t('#221543', '#221543')}${t('url(#gold)', null)}
-    ${star ? `<text x="50%" y="${Math.round(starF * 0.95)}" text-anchor="middle" font-family="Segoe UI Symbol, ${fam}"
-        font-size="${starF}" fill="#ffe9a8" stroke="#221543" stroke-width="${Math.round(starF * 0.10)}"
-        stroke-linejoin="round">&#10022;</text>` : ''}
-    ${tagline ? `<text x="50%" y="${H - Math.round(tagF * 0.55)}" text-anchor="middle" font-family="Segoe UI, sans-serif"
-        font-style="italic" font-weight="600" font-size="${tagF}" fill="#fdf3ff" stroke="#221543"
-        stroke-width="${Math.round(tagF * 0.14)}" stroke-linejoin="round">${tagline}</text>` : ''}
-  </svg>`;
-  const buf = await sharp(Buffer.from(svg)).resize(width).png().toBuffer();
+// Real MOJIWORLD wordmark PNG resized to `width`. The 2nd arg (star/tagline)
+// is accepted but ignored — kept so existing call sites don't need touching.
+async function logoArt(width, _opts = {}) {
+  const buf = await sharp(WORDMARK).resize({ width }).png().toBuffer();
   const meta = await sharp(buf).metadata();
   return { buf, w: meta.width, h: meta.height };
 }
@@ -64,7 +47,9 @@ const placeLogo = (lg, cx, top) => [{ input: lg.buf, left: Math.round(cx - lg.w 
 
 async function compose(name, w, h, layers, { transparent = false } = {}) {
   const base = sharp({ create: { width: w, height: h, channels: 4, background: transparent ? { r: 0, g: 0, b: 0, alpha: 0 } : '#1b1440' } });
-  await base.composite(layers.flat()).png().toFile(`${OUT}/${name}.png`);
+  const tmp = `${OUT}/${name}.png.tmp`;
+  await base.composite(layers.flat()).png().toFile(tmp);
+  await rename(tmp, `${OUT}/${name}.png`);
   console.log(`${name}.png  ${w}x${h}`);
 }
 
