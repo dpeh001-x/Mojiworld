@@ -32727,6 +32727,13 @@ function _playStoryBeat(beatId, onClose) {
   // and hide the dock via CSS — the storytelling reads clean, dock returns after.
   try { document.body.classList.add('sb-active'); } catch (e) {}
   game.paused = true;
+  // v0.29.50 — cinematic SCORE for the epilogue-styled cards (act arrivals,
+  // milestones, the Gravitos finale). These were silent (their backdrop clips
+  // are muted). Duck the map/boss BGM and rise a contemplative bed; the two
+  // climactic finales resolve on the Singularity theme (_CINE_BEAT_TRACK).
+  if ((beat.mode || 'dialog') === 'epilogue') {
+    try { if (typeof _cineScoreStart === 'function') _cineScoreStart(_CINE_BEAT_TRACK[beatId] || _CINE_EPILOGUE_DEFAULT, { loop: true, vol: 0.85 }); } catch (e) {}
+  }
   let idx = 0;
   // v0.29.60 — choice-stanza state. While `choosing` is true the normal
   // click/Enter advance path is dead: only picking an option (or the
@@ -32806,6 +32813,7 @@ function _playStoryBeat(beatId, onClose) {
   const advance = (fromChoice) => {
     if (choosing && fromChoice !== true) return;   // a live choice owns the stanza
     idx++;
+    if (idx < beat.stanzas.length) { try { if (typeof _playUiSfx === 'function') _playUiSfx('dialog_blip'); } catch (e) {} }   // v0.29.50 — soft page-turn cue
     renderStanza();
   };
   const closeBeat = () => {
@@ -32813,6 +32821,7 @@ function _playStoryBeat(beatId, onClose) {
     els.overlay.classList.remove('on');
     try { document.body.classList.remove('sb-active'); } catch (e) {}   // v0.29.x — restore the tutorial dock
     _sbDetachClip();   // v0.29.27 — unload the clip with the overlay
+    try { if (typeof _cineScoreStop === 'function') _cineScoreStop(900, true); } catch (e) {}   // v0.29.50 — fade the cinematic score, restore map BGM
     els.overlay.removeEventListener('click', advance);
     document.removeEventListener('keydown', onKey, true);
     setTimeout(() => {
@@ -34905,6 +34914,14 @@ function _isOnboardingActive() {
 const COOP_DOWN_ONBOARD_MS = 5000;   // short auto-respawn window during onboarding
 function _coopTryDowned() {
   if (player._downed) return true;   // already down — never double-enter
+  // v0.29.50 (per user) — PROLOGUE GODMODE. The first 15s of the flash-forward
+  // battle are truly invulnerable: absorb any lethal blow, refill, never fall.
+  // After the window expires the player is mortal and a down runs the sandboxed
+  // 5s in-arena respawn below (via _coopDownedFinish), not the real death flow.
+  if (window._prologueActive && window._prologueGodUntil && Date.now() < window._prologueGodUntil) {
+    try { player.hp = (typeof getMaxHp === 'function') ? getMaxHp() : player.hp; player.invulnerable = Math.max(player.invulnerable || 0, 800); } catch (e) {}
+    return true;
+  }
   if (player._noDownUntil && performance.now() < player._noDownUntil) return false;   // just bled out: die for real
   if (game.expedition && game.expedition.active) return false;   // expedition keeps its own death rules
   // v0.27.10 (per user) — the downed beat now plays in SOLO too: 30s on the
@@ -34936,19 +34953,7 @@ function _coopTryDowned() {
     // runs while updatePlayer ticks, which stalls when the game is paused mid-
     // cinematic; this pause-independent timer guarantees the respawn fires.
     try { clearTimeout(player._downedAutoTimer); } catch (e) {}
-    player._downedAutoTimer = setTimeout(() => {
-      try {
-        if (!(player && player._downed)) return;
-        player._downed = false;
-        player._downedSilent = false;
-        player._noDownUntil = performance.now() + 4000;
-        _coopDownedBanner(null);
-        if (net && net.connected && net.ws) { try { net.ws.send(JSON.stringify({ t: 'up', map: game.currentMap, ok: 0 })); } catch (e) {} }
-        player.invulnerable = 0;
-        player.hp = 0;
-        if (typeof triggerDeath === 'function' && !game.dying) { try { triggerDeath(); } catch (e) {} }
-      } catch (e) {}
-    }, COOP_DOWN_ONBOARD_MS);
+    player._downedAutoTimer = setTimeout(() => { try { _coopDownedFinish(); } catch (e) {} }, COOP_DOWN_ONBOARD_MS);
     return true;
   }
   if (typeof showToast === 'function') showToast(player._downRevivable ? '⛑ You are DOWN — a partner can revive you!' : '⛑ You are DOWN!', 'danger');
@@ -34960,6 +34965,29 @@ function _coopDownedGiveUp() {
   if (!player || !player._downed) return;
   player._downedUntil = 0;   // next _coopDownedTick frame runs the bleed-out path
 }
+// v0.29.50 — single terminal for a bleed-out. Both the onboarding auto-timer and
+// the per-frame _coopDownedTick end here. Normally runs the real death flow; but
+// during the PROLOGUE flash-forward the down is sandboxed — revive IN the arena
+// (full HP/MP + brief i-frames) and never call triggerDeath / respawn-to-town, so
+// the Lv.100 memory state can't leak into the fresh save.
+function _coopDownedFinish() {
+  if (!(player && player._downed)) return;
+  player._downed = false;
+  player._downedSilent = false;
+  try { clearTimeout(player._downedAutoTimer); } catch (e) {}
+  player._noDownUntil = performance.now() + 4000;
+  _coopDownedBanner(null);
+  if (net && net.connected && net.ws) { try { net.ws.send(JSON.stringify({ t: 'up', map: game.currentMap, ok: 0 })); } catch (e) {} }
+  if (window._prologueActive) {
+    player.invulnerable = Math.max(player.invulnerable || 0, 1500);
+    try { player.hp = (typeof getMaxHp === 'function') ? getMaxHp() : player.hp; } catch (e) {}
+    try { player.mp = (typeof getMaxMp === 'function') ? getMaxMp() : player.mp; } catch (e) {}
+    return;
+  }
+  player.invulnerable = 0;
+  player.hp = 0;
+  if (typeof triggerDeath === 'function' && !game.dying) { try { triggerDeath(); } catch (e) {} }
+}
 // Per-frame while down (early gate in updatePlayer): frozen in place, unhittable,
 // counting down. Bleed-out ends in the real death flow.
 function _coopDownedTick(dt) {
@@ -34968,17 +34996,7 @@ function _coopDownedTick(dt) {
   player.hp = 1;
   const left = (player._downedUntil || 0) - performance.now();
   _coopDownedBanner(Math.max(0, Math.ceil(left / 1000)));
-  if (left <= 0) {
-    player._downed = false;
-    player._downedSilent = false;
-    try { clearTimeout(player._downedAutoTimer); } catch (e) {}
-    player._noDownUntil = performance.now() + 4000;
-    _coopDownedBanner(null);
-    if (net && net.connected && net.ws) { try { net.ws.send(JSON.stringify({ t: 'up', map: game.currentMap, ok: 0 })); } catch (e) {} }
-    player.invulnerable = 0;
-    player.hp = 0;
-    if (typeof triggerDeath === 'function' && !game.dying) { try { triggerDeath(); } catch (e) {} }
-  }
+  if (left <= 0) _coopDownedFinish();   // v0.29.50 — shared terminal (prologue-aware)
 }
 // v0.27.10 — the banner is built ONCE (so the Respawn button keeps its handler)
 // and only the countdown span updates per frame. Solo and co-op variants share
@@ -100997,10 +101015,14 @@ function loop(time) {
   // the next-frame death trigger fires. Clamping here keeps every downstream
   // reader sane while preserving the death detection (≤ 0 still triggers).
   if (typeof player.hp === 'number' && player.hp < 0) player.hp = 0;
-  // v0.29.x — the flash-forward memory can never fall. The scripted P2/P3
-  // escalation routes real OHKOs here; refill on any lethal hit instead of
-  // dying so the death overlay never appears during the prologue.
-  if (window._prologueActive && player.hp <= 0 && typeof getMaxHp === 'function') player.hp = getMaxHp();
+  // v0.29.x — the flash-forward memory can never fall DURING the 15s godmode
+  // window (per user): the scripted P2/P3 escalation routes real OHKOs here, so
+  // refill on any lethal hit while godmode is up instead of surfacing the death
+  // overlay. Once the window expires the player is mortal — a lethal hit falls
+  // through to the death gate below, which routes to the sandboxed 5s in-arena
+  // respawn (_coopTryDowned → _coopDownedFinish), never a real death.
+  if (window._prologueActive && window._prologueGodUntil && Date.now() < window._prologueGodUntil
+      && player.hp <= 0 && typeof getMaxHp === 'function') player.hp = getMaxHp();
   // Death check — runs every frame regardless of who dealt the killing blow
   if (player.hp <= 0 && !game.dying) {
     // v0.26.1033 — revive chain extracted to _tryCheatDeathRevive() so the
@@ -101703,6 +101725,11 @@ function _prologueOverlay(stanzas, onDone, opts) {
     const _pv = ov.querySelector('#plg-pov');
     if (_pv) { const _pp = _pv.play(); if (_pp && _pp.catch) _pp.catch(() => {}); }
   } catch (e) {}
+  // v0.29.50 — cinematic SCORE under the prologue: the Singularity theme (the
+  // arena this flash-forward is set in), so the intro bridges seamlessly into
+  // the apex arena, which plays the same track. No restore on close — the
+  // loadMap that follows (arena or void) reasserts the map BGM itself.
+  try { if (typeof _cineScoreStart === 'function') _cineScoreStart('audio/The Singularity.mp3', { loop: true, vol: 0.9 }); } catch (e) {}
   const txt = ov.querySelector('#plg-text');
   function show() {
     txt.style.animation = 'none'; void txt.offsetWidth;
@@ -101712,11 +101739,14 @@ function _prologueOverlay(stanzas, onDone, opts) {
   function close(skipAll) {
     ov.remove();
     window.removeEventListener('keydown', onKey, true);
+    try { if (typeof _cineScoreStop === 'function') _cineScoreStop(700, false); } catch (e) {}   // v0.29.50 — next loadMap sets the map BGM
     onDone(skipAll === true);
   }
   function adv(e) {
     if (e && e.target && e.target.id === 'plg-skip') return;
-    i++; if (i >= stanzas.length) close(false); else show();
+    i++;
+    if (i >= stanzas.length) { close(false); }
+    else { try { if (typeof _playUiSfx === 'function') _playUiSfx('dialog_blip'); } catch (e2) {} show(); }   // v0.29.50 — soft page-turn cue
   }
   function onKey(e) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); adv(); }
@@ -101909,6 +101939,15 @@ function _prologueApexSegment() {
       if (!window._prologueActive) return;
       if (typeof closeAllModals === 'function') { try { closeAllModals(); } catch (e) {} }
       game.paused = false;
+      // v0.29.108 (per user) — 15s of TRUE GODMODE from the moment you enter the
+      // Singularity and the fight arms: the character takes ZERO damage. Uses the
+      // engine's godmode flag (player._god), honored at every damage site
+      // (`hp -= player._god ? 0 : dmg` — contact, projectiles, DoT, freeze/CC,
+      // boss one-shots). _prologueTick re-asserts it and clears it when the 15s
+      // window expires; after that main's mortal rules apply (a down ends the memory).
+      window._prologueGodUntil = Date.now() + 15000;
+      window._prologuePrevGod = !!player._god;
+      player._god = true;
       setTimeout(_prologueHardenBoss, 200);
       _prologueHud(true);
       window._prologueLeftMs = 30000;
@@ -101962,6 +102001,13 @@ function _prologueTick() {
   // accumulates (no more HP-refill immortality), and the main death gate routes
   // player.hp<=0 into _prologueStrip while _prologueActive. The 30s countdown
   // below stays as a soft backstop for a player who dodges everything.
+  // v0.29.108 (per user) — but the FIRST 15s are TRUE godmode: player._god (honored
+  // at every damage site) makes the character take zero damage. Re-assert it each
+  // tick during the window and pin HP full; clear it when the window expires so
+  // main's v0.29.71 mortal rules take over (a down then ends the memory).
+  const _godLeftMs = (window._prologueGodUntil || 0) - now;
+  if (_godLeftMs > 0) { player._god = true; try { player.hp = getMaxHp(); } catch (e) {} }
+  else if (window._prologueGodUntil && !window._prologuePrevGod) { player._god = false; }
   // v0.29.x — scripted phase escalation + boss "will" bar. The memory runs 30s;
   // advance P1→P2→P3 on a timer (read by the Gravitos AI) so the signature
   // Collapse / Event Horizon mechanics actually show, and render a will bar that
@@ -101972,8 +102018,10 @@ function _prologueTick() {
   const el = document.getElementById('prologue-hud');
   if (el) {
     const s = Math.max(0, Math.ceil(window._prologueLeftMs / 1000));
+    const _god = _godLeftMs > 0;
     const _barCol = _will > 45 ? '#c58bff' : _will > 20 ? '#ff9c6b' : '#ff5470';
     el.innerHTML = '✦ MEMORY OF WHAT YOU BECOME — 0:' + String(s).padStart(2, '0')
+      + (_god ? '<br><span style="font-size:12px;color:#ffe089;font-weight:800;letter-spacing:2px;text-shadow:0 0 10px rgba(255,210,90,0.7);">★ INVULNERABLE · ' + Math.ceil(_godLeftMs / 1000) + 's ★</span>' : '')
       + '<div style="margin:5px auto 2px;width:230px;height:9px;border-radius:5px;background:rgba(0,0,0,0.55);border:1px solid #6a4aa0;overflow:hidden;">'
       + '<div style="height:100%;width:' + _will + '%;background:linear-gradient(90deg,' + _barCol + ',rgba(255,255,255,0.4));transition:width .25s linear;"></div></div>'
       + '<span style="font-size:10px;color:#d8b0ff;letter-spacing:0.5px;">GRAVITOS, THE WEIGHT-BEARER</span>'
@@ -102420,6 +102468,7 @@ function _prologueVoidCutscene(onDone) {
 }
 function _prologueFinish(skipped) {
   if (window._prologueTimer) { clearInterval(window._prologueTimer); window._prologueTimer = null; }
+  window._prologueGodUntil = 0;   // v0.29.50 — end the godmode window with the memory
   _prologueHud(false);
   // Restore the untouched fresh state (level, class, beats — everything).
   let _restored = false;
@@ -104253,6 +104302,89 @@ const _bgmBossEl = (() => {
   a.preload = 'none';     // v0.26.946 — first boss room is minutes away
   return a;
 })();
+// ==================================================================
+// v0.29.50 — CINEMATIC SCORE. A dedicated music bed for the two silent
+// cinematics: the flash-forward PROLOGUE overlay and the epilogue-styled
+// story cards (STORY_BEATS with mode:'epilogue'). Their backdrop clips are
+// muted, so these moments played in silence. Modeled on _menuBgm — it
+// follows the BGM slider + mute (_cineVol), unlocks on the first gesture if
+// autoplay is blocked, fades in/out, and DUCKS the live map + boss BGM while
+// it plays so two tracks never fight, restoring them on stop.
+// Tracks are existing, already-shipping themes chosen to match each moment.
+// ==================================================================
+const _cineBgm = (() => { const a = new Audio(); a.loop = true; a.preload = 'none'; return a; })();
+// Per-beat epilogue track; falls back to _CINE_EPILOGUE_DEFAULT. The two
+// climactic finales resolve on the Singularity (final-boss) theme; the quieter
+// act-arrival / milestone cards ride the contemplative Void bed.
+const _CINE_EPILOGUE_DEFAULT = 'audio/bgm_void.mp3';
+const _CINE_BEAT_TRACK = {
+  epilogue_gravitos:  'audio/The Singularity.mp3',
+  zodiac_twelve_done: 'audio/The Singularity.mp3',
+};
+let _cineDuckedVols = null;   // { bgm, boss } captured when the score ducks the BGM
+function _cineVol() {
+  let v = 0.55, muted = false;
+  try { if (typeof _lxGetSettings === 'function') { const s = _lxGetSettings(); v = (s.bgm / 100) * 0.62; muted = !!s.mute; } } catch (e) {}
+  return muted ? 0 : Math.max(0, Math.min(1, v));
+}
+function _cineScoreStart(src, opts) {
+  opts = opts || {};
+  try {
+    if (!src) return;
+    // Duck the live map + boss BGM so the cinematic score sits alone. Capture
+    // the pre-duck volumes once so a nested start doesn't overwrite them.
+    if (_cineDuckedVols == null) {
+      _cineDuckedVols = {
+        bgm:  (typeof _bgmEl !== 'undefined' && _bgmEl) ? _bgmEl.volume : null,
+        boss: (typeof _bgmBossEl !== 'undefined' && _bgmBossEl) ? _bgmBossEl.volume : null,
+      };
+    }
+    if (typeof _bgmFade === 'function') {
+      if (typeof _bgmEl !== 'undefined' && _bgmEl && !_bgmEl.paused) _bgmFade(_bgmEl, 0, 700);
+      if (typeof _bgmBossEl !== 'undefined' && _bgmBossEl && !_bgmBossEl.paused) _bgmFade(_bgmBossEl, 0, 700);
+    }
+    if (_cineBgm._srcName !== src) { _cineBgm._srcName = src; _cineBgm.src = src; }
+    _cineBgm.loop = opts.loop !== false;
+    try { _cineBgm.currentTime = 0; } catch (e) {}
+    const target = _cineVol() * (opts.vol != null ? opts.vol : 1);
+    _cineBgm.volume = 0;
+    const p = _cineBgm.play();
+    if (p && p.catch) p.catch(() => {
+      // Autoplay blocked (no gesture yet) — arm a one-shot unlocker.
+      if (_cineBgm._armed) return; _cineBgm._armed = true;
+      const g = () => {
+        _cineBgm._armed = false;
+        if (!_cineBgm._on) return;   // cinematic already closed — don't start late
+        try { const q = _cineBgm.play(); if (q && q.catch) q.catch(() => {}); } catch (e) {}
+        if (typeof _bgmFade === 'function') _bgmFade(_cineBgm, target, 800);
+      };
+      window.addEventListener('pointerdown', g, { once: true, capture: true });
+      window.addEventListener('keydown', g, { once: true, capture: true });
+    });
+    if (typeof _bgmFade === 'function') _bgmFade(_cineBgm, target, 900);
+    else _cineBgm.volume = target;
+    _cineBgm._on = true;
+  } catch (e) {}
+}
+function _cineScoreStop(fadeMs, restoreBgm) {
+  try {
+    _cineBgm._on = false;
+    if (typeof _bgmFade === 'function') _bgmFade(_cineBgm, 0, fadeMs || 800);
+    else { try { _cineBgm.pause(); } catch (e) {} }
+    // Restore the ducked map/boss BGM to their pre-duck volumes. Skipped when
+    // the caller knows a loadMap will reassert the track itself (the prologue).
+    if (restoreBgm && _cineDuckedVols) {
+      const d = _cineDuckedVols;
+      try {
+        if (typeof _bgmFade === 'function') {
+          if (typeof _bgmEl !== 'undefined' && _bgmEl && d.bgm != null && d.bgm > 0.001) _bgmFade(_bgmEl, d.bgm, fadeMs || 800);
+          if (typeof _bgmBossEl !== 'undefined' && _bgmBossEl && d.boss != null && d.boss > 0.001) _bgmFade(_bgmBossEl, d.boss, fadeMs || 800);
+        }
+      } catch (e) {}
+    }
+    _cineDuckedVols = null;
+  } catch (e) {}
+}
 // v0.25.436 — per-map BGM registry. Each entry maps a MAPS[id] to a
 // dedicated track that plays while the player is on that map. Cross-fades
 // against the default _bgmEl track on map load via _setMapBgm. Lazy-built
