@@ -44,6 +44,7 @@ try {
         id,
         name: m.name || id,
         worldWidth: m.worldWidth || 1600,
+        worldHeight: m.worldHeight || 560,   // tall/underwater maps scroll vertically in-game
         groundY: groundOf(m),
         levelReq: m.levelReq || 0,
         icon: _WM_BIOME_ICON[id] || '📍',
