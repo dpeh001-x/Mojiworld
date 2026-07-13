@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mojiworld — Map Editor (NPCs + Portals)</title>
+<style>
+  :root { --bg:#0b0e17; --panel:#10141f; --line:#43505f; --ink:#e4ecf4; --dim:#90a4b4; --accent:#ffd166; --blue:#7fb3ff; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:13px/1.4 Inter,system-ui,Segoe UI,sans-serif; }
+  header { display:flex; align-items:center; gap:14px; padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--line); }
+  header h1 { font-size:15px; margin:0; color:var(--accent); }
+  header .hint { color:var(--dim); font-size:11.5px; }
+  #wrap { display:flex; height:calc(100% - 46px); }
+  #stage { flex:1; overflow:auto; position:relative; background:#070a12; padding:14px; }
+  #cvWrap { position:relative; margin:0 auto; box-shadow:0 10px 40px rgba(0,0,0,.6); }
+  canvas { display:block; background:#111; image-rendering:auto; }
+  aside { width:320px; flex:0 0 320px; background:var(--panel); border-left:1px solid var(--line); overflow-y:auto; padding:12px; }
+  aside h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--blue); margin:16px 0 6px; }
+  aside h2:first-child { margin-top:0; }
+  .row { display:flex; gap:6px; margin-bottom:6px; align-items:center; }
+  .row label { flex:0 0 78px; color:var(--dim); font-size:11.5px; }
+  input, select, button, textarea { font:inherit; }
+  input[type=text], input[type=number], select, textarea {
+    flex:1; min-width:0; background:#1d2536; color:var(--ink); border:1px solid var(--line);
+    border-radius:6px; padding:5px 7px; font-size:12px; }
+  input[type=color] { flex:0 0 34px; height:28px; padding:0; border:1px solid var(--line); border-radius:6px; background:#1d2536; }
+  button { background:#1d2536; color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:6px 10px; cursor:pointer; font-size:12px; }
+  button:hover { border-color:var(--blue); }
+  button.primary { background:#20304a; border-color:#3a5b8a; }
+  button.armed { background:var(--accent); color:#1a1400; border-color:var(--accent); font-weight:600; }
+  button.danger:hover { border-color:#e06a6a; color:#ffbcbc; }
+  .btnrow { display:flex; gap:6px; margin-bottom:8px; }
+  .btnrow button { flex:1; }
+  #list { list-style:none; margin:0 0 6px; padding:0; max-height:160px; overflow-y:auto; border:1px solid var(--line); border-radius:6px; }
+  #list li { padding:5px 8px; cursor:pointer; border-bottom:1px solid #1a2130; font-size:11.5px; display:flex; justify-content:space-between; gap:6px; }
+  #list li:last-child { border-bottom:0; }
+  #list li.sel { background:#20304a; }
+  #list li .co { color:var(--dim); }
+  textarea { width:100%; height:120px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; resize:vertical; white-space:pre; }
+  .out { width:100%; height:180px; }
+  .muted { color:var(--dim); font-size:11px; margin:4px 0 8px; }
+  .pill { display:inline-block; padding:1px 7px; border-radius:999px; font-size:10px; font-weight:600; }
+  .pill.npc { background:#2a3a2a; color:#a8e6a0; }
+  .pill.portal { background:#2a2a4a; color:#b0b0ff; }
+  .selbox { border:1px solid var(--line); border-radius:8px; padding:9px; margin-bottom:8px; background:#0d1119; }
+  .selbox.empty { color:var(--dim); text-align:center; font-size:11.5px; }
+  .kv { display:flex; gap:6px; font-size:11px; color:var(--dim); margin-top:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🗺️ Mojiworld Map Editor</h1>
+  <span class="hint">Click a tool then click the canvas to place · drag any marker to move · Export → paste into <code>MAPS.&lt;id&gt;</code></span>
+</header>
+<div id="wrap">
+  <div id="stage"><div id="cvWrap"><canvas id="cv"></canvas></div></div>
+  <aside>
+    <h2>World</h2>
+    <div class="row"><label>Map id</label><input id="mapId" type="text" value="myMap"></div>
+    <div class="row"><label>World width</label><input id="worldW" type="number" value="1600" min="480" step="20"></div>
+    <div class="row"><label>Ground Y</label><input id="groundY" type="number" value="480" min="0" step="2"></div>
+    <div class="muted">Ground line is where NPCs stand. NPCs sit ~46px above it (y=434 for ground 480).</div>
+
+    <h2>Place</h2>
+    <div class="btnrow">
+      <button id="addNpc">＋ NPC tool</button>
+      <button id="addPortal">＋ Portal tool</button>
+    </div>
+    <div class="muted" id="modeHint">No tool armed — click a marker to select/drag.</div>
+
+    <h2>Placed <span id="counts" class="muted"></span></h2>
+    <ul id="list"></ul>
+
+    <h2>Selected</h2>
+    <div id="selbox" class="selbox empty">Nothing selected.</div>
+
+    <h2>Export</h2>
+    <div class="btnrow">
+      <button id="exportBtn" class="primary">⬇ Build code</button>
+      <button id="copyBtn">📋 Copy</button>
+    </div>
+    <textarea id="out" class="out" readonly placeholder="npcs / portals arrays appear here…"></textarea>
+
+    <h2>Import (optional)</h2>
+    <div class="muted">Paste an existing <code>npcs:[…]</code> or <code>portals:[…]</code> array (or a bare <code>[…]</code>) to edit it.</div>
+    <textarea id="imp" placeholder="[ {x:480, y:434, name:'…', role:'info', color:'#88ccaa'} ]"></textarea>
+    <div class="btnrow">
+      <button id="impNpc">Load as NPCs</button>
+      <button id="impPortal">Load as Portals</button>
+      <button id="clearAll" class="danger">Clear all</button>
+    </div>
+  </aside>
+</div>
+<script>
+"use strict";
+// ── Mojiworld Map Editor — standalone. Click-place + drag NPCs/portals,
+//    export npcs:[…] / portals:[…] arrays that paste straight into MAPS.<id>.
+//    Data formats mirror the in-game key-5 Stage Editor exactly:
+//      NPC    = {x, y, name, role, color}
+//      Portal = {x, y, dest, name, iconStar?}
+const $ = (id) => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+const state = { npcs: [], portals: [], sel: null, mode: null, drag: null };
+
+// Known NPC roles (from MAPS placements across the game) + a palette default.
+const ROLES = ['info','amnesiac','caravan','jukebox','courier','usher','guguma',
+  'expedition','innkeeper','shop','quest','healer','blacksmith','banker','guide'];
+
+const worldW = () => Math.max(480, +$('worldW').value || 1600);
+const groundY = () => +$('groundY').value || 480;
+const VIEW_H = 540;                    // logical world height (game camera height)
+function fitScale() {                  // scale the world to fit the stage width
+  const avail = Math.max(320, ($('stage').clientWidth || 900) - 28);
+  return Math.min(1, avail / worldW());
+}
+
+function resize() {
+  const s = fitScale();
+  cv.width = worldW(); cv.height = VIEW_H;
+  cv.style.width = Math.round(worldW() * s) + 'px';
+  cv.style.height = Math.round(VIEW_H * s) + 'px';
+  draw();
+}
+
+// ── Rendering ────────────────────────────────────────────────────────────
+function draw() {
+  const W = cv.width, gY = groundY();
+  const g = ctx.createLinearGradient(0, 0, 0, VIEW_H);
+  g.addColorStop(0, '#1a2a44'); g.addColorStop(0.6, '#2a4a6a'); g.addColorStop(1, '#3a6a4a');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, VIEW_H);
+  ctx.fillStyle = '#243019'; ctx.fillRect(0, gY, W, VIEW_H - gY);
+  ctx.strokeStyle = '#5a7a3a'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, gY); ctx.lineTo(W, gY); ctx.stroke();
+  ctx.lineWidth = 1; ctx.font = '10px monospace'; ctx.textAlign = 'left';
+  for (let x = 0; x <= W; x += 100) {
+    ctx.strokeStyle = (x % 500 === 0) ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.06)';
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, VIEW_H); ctx.stroke();
+    if (x % 500 === 0) { ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fillText(x, x + 3, 12); }
+  }
+  for (const p of state.portals) drawMarker(p, 'portal');
+  for (const n of state.npcs) drawMarker(n, 'npc');
+}
+function drawMarker(o, kind) {
+  const isSel = state.sel && state.sel.o === o;
+  const emoji = kind === 'npc' ? '🧍' : (o.iconStar ? '⭐' : '🌀');
+  const label = kind === 'npc' ? (o.name || '?') : (o.name || o.dest || '?');
+  const color = kind === 'npc' ? (o.color || '#88ccaa') : '#8aa0ff';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = isSel ? '#ffd166' : 'rgba(0,0,0,.35)';
+  ctx.beginPath(); ctx.arc(o.x, o.y, isSel ? 7 : 4, 0, Math.PI * 2); ctx.fill();
+  ctx.font = '34px serif';
+  ctx.fillText(emoji, o.x, o.y - 8);
+  ctx.font = '12px Inter,sans-serif';
+  const tw = ctx.measureText(label).width + 12;
+  const ly = o.y - 48;
+  ctx.fillStyle = isSel ? 'rgba(255,209,102,.92)' : 'rgba(10,14,25,.85)';
+  roundRect(o.x - tw / 2, ly - 13, tw, 17, 5); ctx.fill();
+  ctx.fillStyle = isSel ? '#1a1400' : color;
+  ctx.fillText(label, o.x, ly);
+}
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+// ── Coordinate mapping + hit testing ─────────────────────────────────────
+function evWorld(e) {
+  const r = cv.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * (cv.width / r.width),
+           y: (e.clientY - r.top) * (cv.height / r.height) };
+}
+function hitTest(w) {
+  const all = state.npcs.map(o => ({ o, kind: 'npc' }))
+    .concat(state.portals.map(o => ({ o, kind: 'portal' })));
+  for (let i = all.length - 1; i >= 0; i--) {
+    const o = all[i].o;
+    if (Math.abs(w.x - o.x) <= 26 && w.y >= o.y - 52 && w.y <= o.y + 12) return all[i];
+  }
+  return null;
+}
+
+// ── Placement + drag ─────────────────────────────────────────────────────
+function place(kind, x, y) {
+  const yy = Math.round(Math.max(0, Math.min(VIEW_H, y)));
+  const xx = Math.round(Math.max(0, Math.min(worldW(), x)));
+  let o;
+  if (kind === 'npc') { o = { x: xx, y: yy, name: 'New NPC', role: 'info', color: '#88ccaa' }; state.npcs.push(o); }
+  else { o = { x: xx, y: yy, dest: 'town', name: '▶ Everdawn Central' }; state.portals.push(o); }
+  select({ o, kind });
+}
+function select(entry) { state.sel = entry; syncPanel(); draw(); }
+
+cv.addEventListener('mousedown', (e) => {
+  const w = evWorld(e);
+  if (state.mode) { place(state.mode, w.x, w.y); setMode(null); return; }
+  const hit = hitTest(w);
+  if (hit) { state.drag = { dx: w.x - hit.o.x, dy: w.y - hit.o.y }; select(hit); }
+  else { select(null); }
+});
+window.addEventListener('mousemove', (e) => {
+  if (!state.drag || !state.sel) return;
+  const w = evWorld(e);
+  state.sel.o.x = Math.round(Math.max(0, Math.min(worldW(), w.x - state.drag.dx)));
+  state.sel.o.y = Math.round(Math.max(0, Math.min(VIEW_H, w.y - state.drag.dy)));
+  syncSelFields(); draw();
+});
+window.addEventListener('mouseup', () => { state.drag = null; });
+
+function setMode(m) {
+  state.mode = m;
+  $('addNpc').classList.toggle('armed', m === 'npc');
+  $('addPortal').classList.toggle('armed', m === 'portal');
+  $('modeHint').textContent = m
+    ? ('Click the canvas to drop a ' + m + '.')
+    : 'No tool armed — click a marker to select/drag.';
+  cv.style.cursor = m ? 'crosshair' : 'default';
+}
+
+// ── Side panel: list + selected-entity property editor ───────────────────
+function syncPanel() {
+  $('counts').textContent = '(' + state.npcs.length + ' NPCs · ' + state.portals.length + ' portals)';
+  const ul = $('list'); ul.innerHTML = '';
+  const rows = state.npcs.map(o => ({ o, kind: 'npc' }))
+    .concat(state.portals.map(o => ({ o, kind: 'portal' })));
+  for (const r of rows) {
+    const li = document.createElement('li');
+    if (state.sel && state.sel.o === r.o) li.className = 'sel';
+    const nm = r.kind === 'npc' ? (r.o.name || '?') : (r.o.name || r.o.dest || '?');
+    li.innerHTML = '<span><span class="pill ' + r.kind + '">' + r.kind + '</span> ' + esc(nm) + '</span>'
+      + '<span class="co">' + r.o.x + ',' + r.o.y + '</span>';
+    li.onclick = () => select(r);
+    ul.appendChild(li);
+  }
+  renderSelbox();
+}
+function esc(s) { return String(s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])); }
+
+function renderSelbox() {
+  const box = $('selbox');
+  if (!state.sel) { box.className = 'selbox empty'; box.textContent = 'Nothing selected — pick a tool or click a marker.'; return; }
+  box.className = 'selbox';
+  const { o, kind } = state.sel;
+  let h = '<div class="row"><label>x</label><input id="fx" type="number" value="' + o.x + '">'
+        + '<label style="flex:0 0 14px;">y</label><input id="fy" type="number" value="' + o.y + '"></div>';
+  if (kind === 'npc') {
+    h += '<div class="row"><label>name</label><input id="fname" type="text" value="' + escAttr(o.name || '') + '"></div>';
+    h += '<div class="row"><label>role</label><select id="frole">'
+      + ROLES.map(r => '<option' + (r === o.role ? ' selected' : '') + '>' + r + '</option>').join('')
+      + (ROLES.includes(o.role) ? '' : '<option selected>' + esc(o.role) + '</option>') + '</select></div>';
+    h += '<div class="row"><label>color</label><input id="fcolor" type="color" value="' + (o.color || '#88ccaa') + '">'
+      + '<input id="fcolorT" type="text" value="' + escAttr(o.color || '#88ccaa') + '"></div>';
+  } else {
+    h += '<div class="row"><label>dest (map id)</label><input id="fdest" type="text" value="' + escAttr(o.dest || '') + '"></div>';
+    h += '<div class="row"><label>name</label><input id="fname" type="text" value="' + escAttr(o.name || '') + '"></div>';
+    h += '<div class="row"><label>icon star</label><input id="fstar" type="checkbox"' + (o.iconStar ? ' checked' : '') + '><span class="muted" style="flex:1;">render ⭐ instead of 🌀</span></div>';
+  }
+  h += '<div class="btnrow"><button id="snapBtn">⤓ Snap to ground</button><button id="delBtn" class="danger">🗑 Delete</button></div>';
+  box.innerHTML = h;
+  wireSelFields();
+}
+function escAttr(s) { return String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+
+function wireSelFields() {
+  const o = state.sel.o, kind = state.sel.kind;
+  const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  on('fx', 'input', e => { o.x = Math.round(+e.target.value || 0); draw(); syncListCoords(); });
+  on('fy', 'input', e => { o.y = Math.round(+e.target.value || 0); draw(); syncListCoords(); });
+  if (kind === 'npc') {
+    on('fname', 'input', e => { o.name = e.target.value; draw(); syncListCoords(); });
+    on('frole', 'change', e => { o.role = e.target.value; });
+    on('fcolor', 'input', e => { o.color = e.target.value; $('fcolorT').value = e.target.value; draw(); });
+    on('fcolorT', 'input', e => { o.color = e.target.value; try { $('fcolor').value = e.target.value; } catch (x) {} draw(); });
+  } else {
+    on('fdest', 'input', e => { o.dest = e.target.value; draw(); syncListCoords(); });
+    on('fname', 'input', e => { o.name = e.target.value; draw(); syncListCoords(); });
+    on('fstar', 'change', e => { if (e.target.checked) o.iconStar = true; else delete o.iconStar; draw(); });
+  }
+  on('snapBtn', 'click', () => { o.y = groundY() - 46; draw(); syncSelFields(); syncListCoords(); });
+  on('delBtn', 'click', () => {
+    const arr = kind === 'npc' ? state.npcs : state.portals;
+    const i = arr.indexOf(o); if (i >= 0) arr.splice(i, 1);
+    state.sel = null; syncPanel(); draw();
+  });
+}
+// Light-touch updates while dragging (avoid rebuilding the whole selbox).
+function syncSelFields() {
+  if (!state.sel) return;
+  const fx = $('fx'), fy = $('fy'); if (fx) fx.value = state.sel.o.x; if (fy) fy.value = state.sel.o.y;
+  syncListCoords();
+}
+function syncListCoords() { syncPanel(); }
+
+// ── Export ───────────────────────────────────────────────────────────────
+// Mirrors the game's _lxSeFmt: skip _-prefixed / undefined / function keys;
+// strings single-quoted (escaped), numbers/booleans raw, else JSON.
+function fmt(o) {
+  const ks = Object.keys(o).filter(k => k[0] !== '_' && o[k] !== undefined && typeof o[k] !== 'function');
+  return '{' + ks.map(k => k + ':' + (typeof o[k] === 'string'
+    ? "'" + String(o[k]).replace(/'/g, "\\'") + "'"
+    : (typeof o[k] === 'number' || typeof o[k] === 'boolean' ? o[k] : JSON.stringify(o[k])))).join(', ') + '}';
+}
+function buildExport() {
+  const id = ($('mapId').value || 'myMap').trim();
+  const npcLines = state.npcs.length ? state.npcs.map(n => '      ' + fmt(n) + ',').join('\n') : '';
+  const poLines = state.portals.length ? state.portals.map(p => '      ' + fmt(p) + ',').join('\n') : '';
+  const txt =
+    '// ── MAPS.' + id + ' — NPCs + portals (from Map Editor) ──\n' +
+    '// Paste these two keys into the MAPS.' + id + ' entry.\n' +
+    'npcs: [\n' + npcLines + (npcLines ? '\n' : '') + '],\n' +
+    'portals: [\n' + poLines + (poLines ? '\n' : '') + '],';
+  $('out').value = txt;
+  return txt;
+}
+
+// ── Import ───────────────────────────────────────────────────────────────
+function parseArray(text) {
+  let t = text.trim();
+  // strip a leading "npcs:" / "portals:" label and a trailing comma
+  t = t.replace(/^\s*(npcs|portals)\s*:\s*/i, '').replace(/,\s*$/, '');
+  if (!t.startsWith('[')) t = '[' + t + ']';
+  // Local dev tool: object-literal syntax (unquoted keys) → eval via Function.
+  const arr = Function('"use strict";return (' + t + ');')();
+  if (!Array.isArray(arr)) throw new Error('not an array');
+  return arr.filter(o => o && typeof o === 'object');
+}
+function doImport(kind) {
+  const raw = $('imp').value;
+  if (!raw.trim()) { alert('Paste an array into the Import box first.'); return; }
+  let arr;
+  try { arr = parseArray(raw); }
+  catch (err) { alert('Could not parse that array:\n' + err.message); return; }
+  const norm = arr.map(o => {
+    const n = {};
+    for (const k in o) n[k] = o[k];
+    n.x = Math.round(+n.x || 0); n.y = Math.round(+n.y || (groundY() - 46));
+    return n;
+  });
+  if (kind === 'npc') state.npcs.push(...norm); else state.portals.push(...norm);
+  state.sel = null; syncPanel(); draw();
+}
+
+// ── Wiring ───────────────────────────────────────────────────────────────
+$('addNpc').onclick = () => setMode(state.mode === 'npc' ? null : 'npc');
+$('addPortal').onclick = () => setMode(state.mode === 'portal' ? null : 'portal');
+$('exportBtn').onclick = buildExport;
+$('copyBtn').onclick = () => {
+  const t = buildExport();
+  try { navigator.clipboard.writeText(t).then(() => { $('copyBtn').textContent = '✓ Copied'; setTimeout(() => $('copyBtn').textContent = '📋 Copy', 1200); }); }
+  catch (e) { $('out').select(); document.execCommand('copy'); }
+};
+$('impNpc').onclick = () => doImport('npc');
+$('impPortal').onclick = () => doImport('portal');
+$('clearAll').onclick = () => { if (confirm('Remove all NPCs and portals?')) { state.npcs = []; state.portals = []; state.sel = null; syncPanel(); draw(); } };
+$('worldW').addEventListener('input', resize);
+$('groundY').addEventListener('input', draw);
+$('mapId').addEventListener('input', () => {});
+window.addEventListener('resize', resize);
+window.addEventListener('keydown', (e) => {
+  if ((e.key === 'Delete' || e.key === 'Backspace') && state.sel && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+    const arr = state.sel.kind === 'npc' ? state.npcs : state.portals;
+    const i = arr.indexOf(state.sel.o); if (i >= 0) arr.splice(i, 1);
+    state.sel = null; syncPanel(); draw();
+  }
+  if (e.key === 'Escape') setMode(null);
+});
+
+// ── Boot with a friendly starter layout ──────────────────────────────────
+state.npcs.push({ x: 480, y: 434, name: 'Guguma', role: 'guguma', color: '#ffd84a' });
+state.portals.push({ x: 1400, y: 420, dest: 'town', name: '▶ Everdawn Central' });
+resize(); syncPanel();
+</script>
+</body>
+</html>
