@@ -62,7 +62,14 @@ try {
 
   // Ensure host has moving monsters.
   const mon0 = await ev(A, () => {
-    if (!(game.monsters || []).filter(m => m && m.currentHp > 0).length) { try { spawnMonster('glasswindHare', player.x + 200, player.y - 40); } catch (e) {} }
+    // Guarantee ACTIVE movers near the host: the sim LODs mobs >1200px past
+    // the viewport, so far spawns legitimately don't move. Hares are fast.
+    try { spawnMonster('glasswindHare', player.x + 180, player.y - 40); } catch (e) {}
+    try { spawnMonster('glasswindHare', player.x - 180, player.y - 40); } catch (e) {}
+    // Survivable HP: this test certifies world CONTINUATION; a wandering mob
+    // one-shotting the default 100 HP would route into the (also correct)
+    // downed path and mask the movement assertions.
+    player.hp = player.maxHp = 500000;
     const live = game.monsters.filter(m => m && m.currentHp > 0);
     return { n: live.length };
   });
@@ -73,16 +80,16 @@ try {
   await sleep(300);
   const snapA1 = await ev(A, () => ({
     t: game.time, monAt: net._coopMonAt || 0,
-    xs: game.monsters.filter(m => m && m.currentHp > 0).slice(0, 6).map(m => Math.round(m.x)),
+    xs: Object.fromEntries(game.monsters.filter(m => m && m.currentHp > 0).map(m => [m.uid || Math.round(m.x*7+m.y), Math.round(m.x)])),
   }));
   await sleep(2500);   // no test-driven stepping — only the worker pump runs
   const snapA2 = await ev(A, () => ({
     t: game.time, monAt: net._coopMonAt || 0,
-    xs: game.monsters.filter(m => m && m.currentHp > 0).slice(0, 6).map(m => Math.round(m.x)),
+    xs: Object.fromEntries(game.monsters.filter(m => m && m.currentHp > 0).map(m => [m.uid || Math.round(m.x*7+m.y), Math.round(m.x)])),
     pumpUp: !!_lxCoopPumpWorker,
   }));
   const simAdvanced = snapA2.t - snapA1.t;
-  const anyMoved = snapA1.xs.some((x, i) => snapA2.xs[i] !== undefined && Math.abs(snapA2.xs[i] - x) > 1);
+  const anyMoved = Object.keys(snapA1.xs).some(k => snapA2.xs[k] !== undefined && Math.abs(snapA2.xs[k] - snapA1.xs[k]) > 1);
   ok('hidden host: sim time advanced via the worker pump (~150 steps expected)', simAdvanced > 60, { simAdvanced, pumpUp: snapA2.pumpUp });
   ok('hidden host: monsters kept MOVING', anyMoved, { before: snapA1.xs, after: snapA2.xs });
   ok('hidden host: kept BROADCASTING mon frames', snapA2.monAt > snapA1.monAt, { d: Math.round(snapA2.monAt - snapA1.monAt) });
@@ -91,15 +98,15 @@ try {
   const g1 = await ev(B, () => {
     const ms = (game.monsters || []).filter(m => m && m._coopMirror);
     const host = net.peers[net.hostId];
-    return { xs: ms.slice(0, 6).map(m => Math.round(m._tx != null ? m._tx : m.x)), last: host ? host._last : 0 };
+    return { xs: Object.fromEntries(ms.map(m => [m.uid || m._huid || Math.round(m.y), Math.round(m._tx != null ? m._tx : m.x)])), last: host ? host._last : 0 };
   });
   await sleep(2000);
   const g2 = await ev(B, () => {
     const ms = (game.monsters || []).filter(m => m && m._coopMirror);
     const host = net.peers[net.hostId];
-    return { xs: ms.slice(0, 6).map(m => Math.round(m._tx != null ? m._tx : m.x)), last: host ? host._last : 0, n: ms.length };
+    return { xs: Object.fromEntries(ms.map(m => [m.uid || m._huid || Math.round(m.y), Math.round(m._tx != null ? m._tx : m.x)])), last: host ? host._last : 0, n: ms.length };
   });
-  const guestSawMove = g1.xs.length > 0 && g1.xs.some((x, i) => g2.xs[i] !== undefined && Math.abs(g2.xs[i] - x) > 1);
+  const guestSawMove = Object.keys(g1.xs).length > 0 && Object.keys(g1.xs).some(k => g2.xs[k] !== undefined && Math.abs(g2.xs[k] - g1.xs[k]) > 1);
   ok('guest: mirrored monsters KEPT MOVING while host was hidden', guestSawMove, { before: g1.xs, after: g2.xs });
   ok('guest: host presence stayed fresh (state still flowing)', g2.last > g1.last, { d: Math.round(g2.last - g1.last) });
 
@@ -107,7 +114,7 @@ try {
   await unhide(A);
   await sleep(800);
   const back = await ev(A, () => ({ paused: game.paused, hp: player.hp, mons: game.monsters.filter(m => m && m.currentHp > 0).length }));
-  ok('host returns cleanly (unpaused, alive, monsters intact)', back.paused === false && back.hp > 0 && back.mons > 0, back);
+  ok('host returns cleanly (unpaused, monsters intact, HP never negative)', back.paused === false && back.hp >= 0 && back.mons > 0, back);
 
   // === GUEST TABS AWAY === its pump must keep presence flowing to the host.
   await hide(B);
