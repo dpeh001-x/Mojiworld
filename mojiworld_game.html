@@ -8712,7 +8712,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.39';
+const GAME_VERSION = 'v0.29.41';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -13093,6 +13093,59 @@ const _THEME_PLATFORM_KEY = {
   grass:'platformGrass', stone:'platformStone', ice:'platformIce', lava:'platformLava', sand:'platformSand',
   candy:'platformCandy', swamp:'platformSwamp', cosmic:'platformCosmic', honey:'platformHoney', coral:'platformCoral',
 };
+// v0.29.x — Per-biome 2-tone palette for CUTE procedural platforms. Keeps
+// platforms sprite-free (they draw at any width without stretch) but gives each
+// biome a lit "surface" cap + a darker earthy body, cel-shaded with a 2px black
+// outline — the classic cute platformer slab. `top` = lit surface band, `body`
+// = the mass below.
+const _PLATFORM_THEME_TINT = {
+  grass:  { top:'#7ec850', body:'#5a3a26' },
+  stone:  { top:'#9a94a6', body:'#43404e' },
+  ice:    { top:'#d8f4ff', body:'#6fa6cc' },
+  lava:   { top:'#ff9a52', body:'#4a231a' },
+  sand:   { top:'#f0d89a', body:'#bd8f52' },
+  candy:  { top:'#ffb6d8', body:'#b85f8f' },
+  swamp:  { top:'#8fbf6a', body:'#37452a' },
+  cosmic: { top:'#c8a8ff', body:'#352a55' },
+  honey:  { top:'#ffd45a', body:'#b9852a' },
+  coral:  { top:'#ffb08a', body:'#b85f4f' },
+};
+const _PLATFORM_TINT_DEFAULT = { top:'#c9a3ff', body:'#2a1e3c' };
+// Draw one cute cel-shaded slab: top-rounded, lit surface cap, dark body, a
+// gloss line, a soft inner bottom shadow, and a crisp 2px black outline.
+// Width-independent (no sprites) so it never stretches. `ground` slabs round
+// their top corners less and cap a thicker surface band.
+// v0.29.x — Per user: whole slab draws at 55% opacity so the painted map
+// backgrounds glow through while the silhouette + outline still read.
+function _drawCutePlatform(sx, y, w, h, tint, ground) {
+  const OUT = '#0a0510';
+  const _pa = ctx.globalAlpha;
+  ctx.globalAlpha = _pa * 0.55;
+  if (w < 6 || h < 6) {   // too small for banding — flat fill + outline
+    ctx.fillStyle = tint.body; ctx.fillRect(sx, y, w, h);
+    ctx.lineWidth = 2; ctx.strokeStyle = OUT; ctx.strokeRect(sx + 1, y + 1, w - 2, h - 2);
+    ctx.globalAlpha = _pa;
+    return;
+  }
+  const r = Math.min(ground ? 5 : 8, w / 2, h / 2);
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(sx, y, w, h, ground ? [r, r, 0, 0] : [r, r, 3, 3]);
+  else ctx.rect(sx, y, w, h);
+  ctx.fillStyle = tint.body; ctx.fill();
+  ctx.save(); ctx.clip();
+  // lit surface cap
+  const band = Math.max(5, Math.min(ground ? 13 : 11, h * (ground ? 0.32 : 0.46)));
+  ctx.fillStyle = tint.top; ctx.fillRect(sx, y, w, band);
+  // gloss highlight just under the top edge
+  ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(sx, y + 1.5, w, 1.5);
+  // soft inner bottom shadow for depth
+  const sh = Math.min(7, h * 0.34);
+  ctx.fillStyle = 'rgba(0,0,0,0.20)'; ctx.fillRect(sx, y + h - sh, w, sh);
+  ctx.restore();
+  // crisp 2px black outline
+  ctx.lineWidth = 2; ctx.strokeStyle = OUT; ctx.stroke();
+  ctx.globalAlpha = _pa;
+}
 // v0.25.461 — Map id → floor-tile key. Wins over the theme lookup
 // when the player is on one of these maps and the matching authored
 // tile is loaded. Maps not listed here fall through to _pickFloorTheme()
@@ -79294,6 +79347,11 @@ function drawPlatforms() {
   // dispatch finishes early — but the dispatch itself ran. With the
   // Y-cull, we skip the entire row before any tile lookup.
   const _camY = (game.camera && game.camera.y) || 0;
+  // v0.29.x — resolve the biome 2-tone palette ONCE per frame (not per platform)
+  // for the cute cel-shaded slabs drawn below.
+  const _pt = (typeof _pickFloorTheme === 'function'
+    ? (_PLATFORM_THEME_TINT[_pickFloorTheme(game.mapData)] || _PLATFORM_TINT_DEFAULT)
+    : _PLATFORM_TINT_DEFAULT);
   for (const p of game.mapData.platforms) {
     const sx = p.x - game.camera.x;
     if (sx + p.w < 0 || sx > W) continue;
@@ -79310,79 +79368,16 @@ function drawPlatforms() {
         ctx.fillRect(sx, p.y, p.w, 1);
         continue;
       }
-      // ---- v0.25.93: ludo-generated grass+dirt tile if available ----
-      // The image already includes scalloped grass top + flowers + dirt
-      // body, so when it loads we let it replace the procedural pass
-      // entirely. Keep the grass band ABOVE p.y so the visible tile
-      // matches the legacy outline (grass tufts protrude over the line).
-      // v0.25.97 — only `continue` when the image actually painted; if
-      // _lxDrawTiledRow returned false (image not ready, drawImage
-      // threw, etc.) fall through to procedural so the platform still
-      // renders instead of being skipped entirely.
-      // v0.25.766 — Per-map sprite-tile override REMOVED per user "Do not
-      // use sprites for platform and floors". Every map (including town,
-      // bastion, jadeGrove, emeraldVillage, azureAcademia, shadowWovenHood,
-      // duneSands, and the concrete-fallback boss arenas — all of which
-      // previously rendered authored floor tiles via MAP_FLOOR_OVERRIDES)
-      // now renders the minimal silhouette below. The MAP_FLOOR_OVERRIDES
-      // data structure + _pickMapFloorOverride() function stay in the file
-      // for now (no behaviour change, just dead code) so they're trivial to
-      // re-enable if the decision is reversed.
-      //
-      // Minimal silhouette spec (v0.25.760): 40 % opacity black body with
-      // an 80 % opaque 3 px outline.
-      {
-        const _OW = 3;
-        // v0.25.774 — Narrow / thin platforms (w or h &lt; 2*_OW = 6 px)
-        // had outline strips overlap and the body collapse to zero —
-        // resulting in a solid black bar with no translucency. Fall back
-        // to a single fillRect at the outline alpha for these cases.
-        if (p.w < 2 * _OW || p.h < 2 * _OW) {
-          ctx.fillStyle = 'rgba(0,0,0,0.80)';
-          ctx.fillRect(sx, p.y, p.w, p.h);
-        } else {
-          // 80 % opaque outline — 4 perimeter strips so the inner body's
-          // 40 % black doesn't bleed into the border edge.
-          ctx.fillStyle = 'rgba(0,0,0,0.80)';
-          ctx.fillRect(sx, p.y, p.w, _OW);                                       // top
-          ctx.fillRect(sx, p.y + p.h - _OW, p.w, _OW);                           // bottom
-          ctx.fillRect(sx, p.y + _OW, _OW, p.h - 2 * _OW);                       // left
-          ctx.fillRect(sx + p.w - _OW, p.y + _OW, _OW, p.h - 2 * _OW);           // right
-          // 40 % black body — sits inside the outline frame.
-          ctx.fillStyle = 'rgba(0,0,0,0.40)';
-          ctx.fillRect(sx + _OW, p.y + _OW, p.w - 2 * _OW, p.h - 2 * _OW);
-        }
-      }
+      // v0.29.x — CUTE procedural floor. Per user: less plain + a 2px black
+      // outline + biome-suitable. Still sprite-free (no stretched tiles): a
+      // cel-shaded slab with a lit "surface" cap (grass/snow/sand/…), a dark
+      // earthy body, a gloss line, and a crisp 2px black outline. The old
+      // MAP_FLOOR_OVERRIDES data + _pickMapFloorOverride() stay as dead code.
+      _drawCutePlatform(sx, p.y, p.w, p.h, _pt, true);
     } else {
-      // v0.25.766 — Per-map sprite-tile override REMOVED per user "Do not
-      // use sprites for platform and floors". Every map's platforms now
-      // render the minimal silhouette below. Like the floor branch above,
-      // MAP_PLATFORM_OVERRIDES + _pickMapPlatformOverride() stay defined
-      // in the file as dead code so they're cheap to re-enable.
-      //
-      // Minimal silhouette spec (v0.25.760): 25 % opacity WHITE body with
-      // a black outline. v0.25.807: outline opacity dropped 50 % → 35 %
-      // per user request — softens the platform border so the slab reads
-      // less framed and the white body carries more of the silhouette.
-      {
-        const _OW = 2;
-        // v0.25.774 — Same narrow-platform guard as the floor branch above.
-        if (p.w < 2 * _OW || p.h < 2 * _OW) {
-          ctx.fillStyle = 'rgba(0,0,0,0.35)';
-          ctx.fillRect(sx, p.y, p.w, p.h);
-        } else {
-          ctx.fillStyle = 'rgba(0,0,0,0.35)';
-          ctx.fillRect(sx, p.y, p.w, _OW);                                       // top
-          ctx.fillRect(sx, p.y + p.h - _OW, p.w, _OW);                           // bottom
-          ctx.fillRect(sx, p.y + _OW, _OW, p.h - 2 * _OW);                       // left
-          ctx.fillRect(sx + p.w - _OW, p.y + _OW, _OW, p.h - 2 * _OW);           // right
-          // v0.26.694 — Per user "for platforms use black instead of white".
-          // Body swapped from 25% white → 25% black translucent slab (same
-          // outline; platforms now read as dark slabs like the floor band).
-          ctx.fillStyle = 'rgba(0,0,0,0.25)';
-          ctx.fillRect(sx + _OW, p.y + _OW, p.w - 2 * _OW, p.h - 2 * _OW);
-        }
-      }
+      // v0.29.x — CUTE procedural floating platform. Same cel-shaded, black-
+      // outlined slab as the floor but rounded on top for a friendlier read.
+      _drawCutePlatform(sx, p.y, p.w, p.h, _pt, false);
     }
   }
   // v0.25.482 — outlinePlatforms post-pass. Strokes a 2 px near-black
