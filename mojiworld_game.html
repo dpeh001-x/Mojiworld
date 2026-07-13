@@ -33843,7 +33843,11 @@ function _coopTryDowned() {
   // In co-op a live partner can still channel the revive; solo (or partner-less)
   // downs can only skip. The death itself (and its penalties) is unchanged —
   // just delayed by the window, or skipped instantly via the button.
-  player._downRevivable = _coopPeerAliveOnMyMap();
+  // v0.29.15 — ONCE PER MAP. A partner can only channel a revive if this player
+  // hasn't ALREADY used their single revive on this map (reset by loadMap). After
+  // that, going down is a real death — this is what breaks the infinite revive loop.
+  player._downAlreadyRevived = !!player._coopRevivedThisMap;
+  player._downRevivable = _coopPeerAliveOnMyMap() && !player._coopRevivedThisMap;
   player._downed = true;
   player._downedUntil = performance.now() + COOP_DOWN_MS;
   player.hp = 1;                     // keeps every death gate quiet while down
@@ -33851,7 +33855,9 @@ function _coopTryDowned() {
   player.vx = 0; player.hitStun = 0;
   // clear DoT/CC so the window is the timer, not a poison tick
   player.burnTimer = 0; player.burnDmg = 0; player._burnTickAcc = 0; player._poisonTimer = 0; player._poisonDmg = 0; player._poisonTickAcc = 0; player._electrocuteTimer = 0; player._electrocuteDmg = 0; player._electrocuteTickAcc = 0; player.frozenTimer = 0; player.stunTimer = 0; player.freezeTimer = 0;
-  if (net && net.connected && net.ws) { try { net.ws.send(JSON.stringify({ t: 'down', map: game.currentMap, x: Math.round(player.x), y: Math.round(player.y) })); } catch (e) {} }
+  // rev flag tells partners whether channeling can still bring this player back
+  // (0 = revive already spent this map → don't waste a channel).
+  if (net && net.connected && net.ws) { try { net.ws.send(JSON.stringify({ t: 'down', map: game.currentMap, x: Math.round(player.x), y: Math.round(player.y), rev: player._downRevivable ? 1 : 0 })); } catch (e) {} }
   if (typeof showToast === 'function') showToast(player._downRevivable ? '⛑ You are DOWN — a partner can revive you!' : '⛑ You are DOWN!', 'danger');
   if (typeof flash === 'function') { try { flash(0.4); } catch (e) {} }
   return true;
@@ -33893,9 +33899,15 @@ function _coopDownedBanner(secs) {
       + 'font:800 15px/1.5 Inter,system-ui,sans-serif; color:#ffd6d6; text-align:center; letter-spacing:0.5px;'
       + 'box-shadow:0 10px 40px rgba(0,0,0,0.6), 0 0 24px rgba(255,60,60,0.25); pointer-events:none;';
     const revivable = !!player._downRevivable;
+    // v0.29.15 — distinct line when the single per-map revive is already spent.
+    const subtitle = revivable
+      ? 'a partner can revive you — they must stand beside you for 3s'
+      : (player._downAlreadyRevived
+          ? 'already revived on this map — no second revive here'
+          : 'no one can reach you out here…');
     b.innerHTML = '⛑ <b>DOWNED</b> · <span id="coop-downed-secs" style="color:#fff;">' + secs + 's</span>'
       + '<div style="font-size:11px; font-weight:600; color:rgba(255,214,214,0.7); margin-top:2px;">'
-      + (revivable ? 'a partner can revive you — they must stand beside you for 3s' : 'no one can reach you out here…')
+      + subtitle
       + '</div>';
     const btn = document.createElement('button');
     btn.id = 'coop-downed-skip';
@@ -33916,6 +33928,9 @@ function _coopApplyDown(msg) {
   if (!msg || msg.id == null) return;
   const p = net.peers[msg.id]; if (!p) return;
   p._downed = true; p._reviveMs = 0;
+  // v0.29.15 — a partner who has already spent their one revive on this map
+  // reports rev:0; mark them so _coopReviveTick won't even start a channel.
+  p._downNoRevive = (msg.rev === 0);
   if (Number.isFinite(+msg.x)) { p.x = +msg.x; p.y = +msg.y; }
   if (msg.map === game.currentMap && typeof showToast === 'function') showToast('⛑ ' + (p.name || 'Partner') + ' is DOWN — get to them!', 'danger');
 }
@@ -33928,16 +33943,22 @@ function _coopApplyUp(msg) {
 // A partner finished channeling beside MY body.
 function _coopApplyRevive(msg) {
   if (!player || !player._downed || !msg || msg.id == null) return;
+  // v0.29.15 — ONCE PER MAP (authoritative gate, on the revived player's side).
+  // If this player already used their single revive on the current map, refuse:
+  // they stay down and bleed out into a real death. This is the hard stop that
+  // guarantees no infinite revive loop even if a partner's client tries anyway.
+  if (player._coopRevivedThisMap) return;
   const p = net.peers[msg.id];
   if (!p || p.map !== game.currentMap) return;
   const dx = (p.x || 0) - player.x, dy = (p.y || 0) - player.y;
   if (Math.hypot(dx, dy) > COOP_REVIVE_RANGE * 2.5) return;   // generous vs presence lag, still local
+  player._coopRevivedThisMap = true;   // spend the one revive for this map
   player._downed = false;
   _coopDownedBanner(null);
   player.hp = Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100)) * 0.5);
   player.invulnerable = 2500;
   try { net.ws.send(JSON.stringify({ t: 'up', map: game.currentMap, ok: 1 })); } catch (e) {}
-  if (typeof showToast === 'function') showToast('✚ Revived by ' + (p.name || 'a partner') + ' — back to the fight!', 'legendary');
+  if (typeof showToast === 'function') showToast('✚ Revived by ' + (p.name || 'a partner') + ' — back to the fight! (one revive per map)', 'legendary');
   if (typeof flash === 'function') { try { flash(0.5); } catch (e) {} }
 }
 // Reviver side — called each frame from the main loop: stand beside a downed
@@ -33946,7 +33967,9 @@ function _coopReviveTick(dt) {
   if (typeof _coopActive !== 'function' || !_coopActive() || !player || player.hp <= 0 || player._downed) return;
   for (const id in net.peers) {
     const p = net.peers[id];
-    if (!p || !p._downed || p.map !== game.currentMap) continue;
+    // v0.29.15 — skip partners who have already spent their one revive on this
+    // map (p._downNoRevive from their down broadcast): no channel, no wasted 3s.
+    if (!p || !p._downed || p._downNoRevive || p.map !== game.currentMap) continue;
     const dx = (p.x || 0) - player.x, dy = (p.y || 0) - player.y;
     if (Math.hypot(dx, dy) <= COOP_REVIVE_RANGE) {
       p._reviveMs = (p._reviveMs || 0) + dt;
@@ -41861,6 +41884,11 @@ function _lxStreamMonWorld() {
 function loadMap(id, entryX, entryY) {
   // Close a stale MP chat bar on map change (else its input lingers + eats Enter).
   if (typeof _mpCloseChat === 'function' && typeof net !== 'undefined' && net && net.chatOpen) _mpCloseChat(false);
+  // v0.29.15 — CO-OP REVIVE = ONCE PER MAP. Clear the per-map revive-used flag on
+  // every map load so each new map grants a fresh single revive. This is the reset
+  // that makes the once-per-map cap (set in _coopApplyRevive) hold — without it a
+  // partner could revive → down → revive endlessly on the same map (infinite loop).
+  try { if (typeof player !== 'undefined' && player) player._coopRevivedThisMap = false; } catch (e) {}
   // v0.26.x audit FIX — clear any jukebox track override when LEAVING a map.
   // The jukebox is specced to override the auto-BGM "until you pick another
   // track, hit Stop, or LEAVE THE MAP" — but nothing cleared it on map change,
