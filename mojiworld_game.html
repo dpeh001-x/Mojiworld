@@ -9128,6 +9128,12 @@ const LX_OBJECTS_FILES_EXPLICIT = {
   chest_wood_open:   'chest_wood_open.png',
   chest_silver_open: 'chest_silver_open.png',
   chest_gold_open:   'chest_gold_open.png',
+  // v0.29.x — animated hyper-launch-pad art (replaces the procedural slab +
+  // chevron draw in drawLaunchPads). Runic energy disc + a rising energy
+  // chevron, both with a baked 2px black outline. Color-neutral cyan so the
+  // per-pad `color` glow reads on top.
+  launchpad_pad:   'launchpad_pad.webp',
+  launchpad_arrow: 'launchpad_arrow.webp',
 };
 // v0.25.466 — Per-prop bbox metadata. Detects the topmost + bottommost
 // opaque pixel in source coords on image load so drawWorldProps can
@@ -21863,6 +21869,10 @@ const MAPS = {
       { x:1560, y:320, w:120, vx:-20, vy:-28, color:'#ff88dd' },
     ],
     launchPadMul: 1.4,
+    // v0.29.x — animated runic-energy launch-pad sprite, scoped to the
+    // Gravitos arena (the cosmic/void theme fits the runes + flame). Other
+    // maps' launch pads keep the procedural look.
+    launchPadSprite: 'launchpad_pad',
     portals: [],
     spawns: [
       {type:'gravitos', count:1, boss:true},
@@ -79244,42 +79254,102 @@ function drawLaunchPads() {
   const camX = game.camera.x;
   const _camY = (game.camera && game.camera.y) || 0;
   const _t = game.time * 0.12;
+  // v0.29.x — animated sprite art is OPT-IN per map (or per pad) via
+  // `launchPadSprite` / `pad.sprite` (a key into LX_OBJECTS). Maps that don't
+  // set it keep the original procedural slab + chevrons unchanged. The Gravitos
+  // arena opts in with 'launchpad_pad' (the runic energy disc). The world pass
+  // is already translated by -camera.y, so pads draw at WORLD y (pad.y).
+  const arrowImg = (typeof LX_OBJECTS !== 'undefined') ? LX_OBJECTS['launchpad_arrow'] : null;
+  const arrowReady = !!(arrowImg && arrowImg.complete && arrowImg.naturalWidth);
+  const _mapSprite = game.mapData && game.mapData.launchPadSprite;
+  const _prevSmooth = ctx.imageSmoothingEnabled;
+  ctx.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
   for (const pad of list) {
     const pw = pad.w || 90;
     const sx = pad.x - camX;
     if (sx + pw < -10 || sx > W + 10) continue;
-    if (pad.y + 20 < _camY - 30 || pad.y - 20 > _camY + H + 30) continue;
+    // taller top margin so the tall flame + rising chevrons aren't culled early
+    if (pad.y + 40 < _camY - 30 || pad.y - 160 > _camY + H + 30) continue;
     const col = pad.color || '#66ddff';
     const pulse = 0.5 + 0.4 * Math.abs(Math.sin(_t));
-    // Pad base — rounded glowing slab.
-    ctx.save();
-    ctx.globalAlpha = 0.85;
-    ctx.fillStyle = col;
-    ctx.fillRect(sx, pad.y - 8, pw, 10);
-    // Bright top rim
-    ctx.globalAlpha = pulse;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(sx, pad.y - 8, pw, 3);
-    ctx.globalAlpha = 1;
-    // Direction chevrons — point along the launch vector.
+    const cx = sx + pw / 2, cy = pad.y;
     const vx = pad.vx || 0, vy = pad.vy != null ? pad.vy : -22;
     const ang = Math.atan2(vy, vx);   // launch direction
-    const cx = sx + pw / 2, cy = pad.y - 16;
-    ctx.strokeStyle = col;
-    ctx.lineWidth = 3;
-    ctx.globalAlpha = pulse;
-    for (let k = 0; k < 3; k++) {
-      const off = k * 9 + ((_t * 14) % 9);   // upward-scrolling chevrons
-      const yy = cy - off;
-      const dx = Math.cos(ang) * 8, dy = Math.sin(ang) * 8;
-      ctx.beginPath();
-      ctx.moveTo(cx - 7 - dx * 0.4, yy + 5 - dy * 0.4);
-      ctx.lineTo(cx + dx, yy - 3 + dy);
-      ctx.lineTo(cx + 7 - dx * 0.4, yy + 5 - dy * 0.4);
-      ctx.stroke();
+    // per-pad sprite override, else the map default; unset -> procedural.
+    const _spriteKey = pad.sprite || _mapSprite;
+    const padImg = (_spriteKey && typeof LX_OBJECTS !== 'undefined') ? LX_OBJECTS[_spriteKey] : null;
+    const padReady = !!(padImg && padImg.complete && padImg.naturalWidth);
+
+    if (!padReady) {
+      // ---- procedural fallback (original v0.26.345 slab + chevrons) ----
+      ctx.save();
+      ctx.globalAlpha = 0.85; ctx.fillStyle = col;
+      ctx.fillRect(sx, cy - 8, pw, 10);
+      ctx.globalAlpha = pulse; ctx.fillStyle = '#ffffff';
+      ctx.fillRect(sx, cy - 8, pw, 3);
+      ctx.globalAlpha = pulse; ctx.strokeStyle = col; ctx.lineWidth = 3;
+      const by = cy - 16;
+      for (let k = 0; k < 3; k++) {
+        const off = k * 9 + ((_t * 14) % 9);
+        const yy = by - off;
+        const dx = Math.cos(ang) * 8, dy = Math.sin(ang) * 8;
+        ctx.beginPath();
+        ctx.moveTo(cx - 7 - dx * 0.4, yy + 5 - dy * 0.4);
+        ctx.lineTo(cx + dx, yy - 3 + dy);
+        ctx.lineTo(cx + 7 - dx * 0.4, yy + 5 - dy * 0.4);
+        ctx.stroke();
+      }
+      ctx.restore();
+      continue;
     }
+
+    // ---- animated sprite render ----
+    const bob   = Math.sin(_t * 0.9) * 2;
+    const drawW = pw * 1.42;
+    const drawH = drawW * (padImg.naturalHeight / padImg.naturalWidth);
+    const dx    = cx - drawW / 2;
+    // anchor the disc's visible bottom ~ pad.y (sprite bottom flush, 6px bury)
+    const dy    = cy - drawH + 6 + bob;
+    const glowCy = cy - drawH * 0.30;
+
+    // per-pad colour glow halo (keeps the pad's colour identity)
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.26 + 0.20 * pulse;
+    const g = ctx.createRadialGradient(cx, glowCy, 2, cx, glowCy, drawW * 0.62);
+    g.addColorStop(0, col);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(cx, glowCy, drawW * 0.60, drawH * 0.44, 0, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
+
+    // the pad sprite
+    try { ctx.drawImage(padImg, dx, dy, drawW, drawH); } catch (e) {}
+
+    // rising energy chevrons scrolling along the launch vector
+    if (arrowReady) {
+      const aw = pw * 0.42;
+      const ah = aw * (arrowImg.naturalHeight / arrowImg.naturalWidth);
+      const ux = Math.cos(ang), uy = Math.sin(ang);
+      const originY = cy - drawH * 0.34;   // just above the disc top
+      const span = 60;
+      for (let k = 0; k < 3; k++) {
+        const prog = ((_t * 12 + k * 20) % span) / span;   // 0..1 rising loop
+        const d = prog * span;
+        const fade = Math.sin(prog * Math.PI);             // fade in + out
+        ctx.save();
+        ctx.globalAlpha = 0.9 * fade;
+        ctx.translate(cx + ux * d, originY + uy * d);
+        ctx.rotate(ang + Math.PI / 2);   // arrow art points up by default
+        try { ctx.drawImage(arrowImg, -aw / 2, -ah / 2, aw, ah); } catch (e) {}
+        ctx.restore();
+      }
+    }
   }
+  ctx.imageSmoothingEnabled = _prevSmooth;
 }
 
 function drawWorldProps() {
@@ -101273,6 +101343,8 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     'Sprites/objects/signpost_wood.png',
     'Sprites/objects/wagon_empty.png',
     'Sprites/objects/well_stone.png',
+    'Sprites/objects/launchpad_pad.webp',    // v0.29.x — animated hyper-launch-pad art
+    'Sprites/objects/launchpad_arrow.webp',
     // v0.25.228 — Every map biome background the game references via
     // BG_IMAGES (line 21083) AND the LXBackgroundScene Phaser preloader
     // (line 2897). Any future bg additions need a matching entry here
