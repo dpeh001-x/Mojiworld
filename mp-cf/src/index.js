@@ -12,8 +12,10 @@
 // applies it on welcome to restore position/level. Back-compatible: clients that
 // send no token and ignore `you` behave exactly like against the plain relay.
 
+// v0.29.x — 'look' + 'eq' (full peer avatar, matching mp/server.mjs since
+// v0.29.11) and 'v' (client build stamp for version-skew detection).
 const PRESENCE_FIELDS = ['name', 'cls', 'job', 'master', 'level', 'map', 'x', 'y', 'vx', 'vy',
-  'facing', 'hp', 'maxHp', 'mp', 'maxMp', 'anim'];
+  'facing', 'hp', 'maxHp', 'mp', 'maxMp', 'anim', 'look', 'eq', 'v'];
 const SAVE_FIELDS = ['x', 'y', 'map', 'level', 'hp', 'maxHp', 'mp', 'maxMp', 'cls', 'job', 'master'];
 const CTRL = /[\u0000-\u001f\u007f]/g;
 const STR_CAP = 48, RATE = 40, BURST = 60;

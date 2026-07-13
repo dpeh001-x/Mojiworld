@@ -135,6 +135,9 @@ function playerSnap(ws) {
     map: p.map,
     hp: p.hp, maxHp: p.maxHp, mp: p.mp, maxMp: p.maxMp,
     anim: p.anim,
+    // v0.29.x — full peer avatar (look/eq, matching mp/server.mjs since
+    // v0.29.11) + client build stamp (version-skew detection).
+    look: p.look, eq: p.eq, v: p.v,
   };
 }
 
@@ -424,6 +427,13 @@ wss.on('connection', (ws, req) => {
       if (typeof msg.job    === 'string') p.job    = sanitizeString(msg.job, 16);
       if (typeof msg.master === 'string') p.master = sanitizeString(msg.master, 20);
       if (typeof msg.anim   === 'string') p.anim   = sanitizeString(msg.anim, 16);
+      // v0.29.x — full peer avatar (look/eq) + build stamp. Small nested
+      // objects forwarded opaquely (the client whitelist-sanitizes every
+      // field at ingestion before any registry lookup); the relay's frame
+      // cap bounds their size, consistent with the verbatim 'mon' frames.
+      if (msg.look && typeof msg.look === 'object') p.look = msg.look;
+      if (msg.eq   && typeof msg.eq   === 'object') p.eq   = msg.eq;
+      if (typeof msg.v === 'string') p.v = sanitizeString(msg.v, 16);
       broadcast(ws._roomId, { t: 'state', ...playerSnap(ws) }, ws);
       return;
     }

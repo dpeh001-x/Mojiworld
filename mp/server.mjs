@@ -30,8 +30,10 @@ const PORT = process.env.PORT || 8080;
 // sanitizes every string at ingestion before any registry lookup, and the
 // relay's maxPayload + token bucket bound the frame size — consistent with
 // the verbatim-forwarded 'mon'/'proj' frames ("the relay stays dumb").
+// v0.29.x — 'v' (client build stamp) rides along so peers can detect a
+// version-skewed partner and explain look mismatches instead of hiding them.
 const PRESENCE_FIELDS = ['name', 'cls', 'job', 'master', 'level', 'map', 'x', 'y', 'vx', 'vy',
-  'facing', 'hp', 'maxHp', 'mp', 'maxMp', 'anim', 'look', 'eq'];
+  'facing', 'hp', 'maxHp', 'mp', 'maxMp', 'anim', 'look', 'eq', 'v'];
 const CTRL = /[\u0000-\u001f\u007f]/g;     // strip control chars (matches the in-game sanitizer)
 const STR_CAP = 48;                        // cap every relayed string presence field
 const MAX_BUFFERED = 256 * 1024;           // shed droppable (state) frames to a backed-up socket past this
