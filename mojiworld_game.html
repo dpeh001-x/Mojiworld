@@ -1879,6 +1879,17 @@
                         speaker label, body text in book-page styling)
      • `mode-epilogue`— end-credits style (centered, larger, no speaker,
                         gold-on-black with a slow ken-burns-ish drift) */
+  /* v0.29.60 — nightmare-touched (cursed) map vignette. Pointer-events
+     off so it never blocks input; a slow pulse sells the dread without
+     obscuring gameplay. Toggled by body.map-cursed in loadMap. */
+  #cursed-vignette {
+    position: fixed; inset: 0; z-index: 96; pointer-events: none;
+    opacity: 0; transition: opacity 700ms ease;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 42%, rgba(40,0,30,0.55) 100%);
+    box-shadow: inset 0 0 200px 40px rgba(20,0,20,0.6);
+  }
+  body.map-cursed #cursed-vignette { opacity: 1; animation: cursed-pulse 4s ease-in-out infinite; }
+  @keyframes cursed-pulse { 0%,100% { opacity: 0.8; } 50% { opacity: 1; } }
   #story-beat-overlay {
     position: absolute; inset: 0;
     background: radial-gradient(ellipse at center, rgba(10,5,30,0.92), rgba(0,0,0,0.96));
@@ -7212,6 +7223,8 @@ Current ACC: 0
        Amnesiac flashbacks at class advancements + the Gravitos epilogue.
        Sentences fade in sequentially, click/tap/Enter advances. Pauses
        game for the duration. JS at L_TBD authors each beat. -->
+  <!-- v0.29.60 — cursed-map vignette (shown via body.map-cursed) -->
+  <div id="cursed-vignette"></div>
   <div id="story-beat-overlay" class="mode-epilogue">
     <div id="story-beat-stage">
       <div id="story-beat-speaker"></div>
@@ -31035,7 +31048,7 @@ function toggleLoreMap() {
 // (contact / projectile / boss strike); DOT ticks (poison/burn) + environmental
 // use raw hp -=. Stamp the frame so the hit-grunt fires ONLY on a real monster
 // attack (not on DOT/environmental) — per user "only groan when attacked by monster".
-function _diffDmg(d) { try { if (typeof player !== 'undefined' && player && typeof game !== 'undefined' && game) player._monsterHitAt = game.time; } catch (_) {} var m = (typeof game !== 'undefined' && game && game._diffDmgMul) ? game._diffDmgMul : 1; var _pl = (typeof player !== 'undefined' && player && player.level) ? (player.level | 0) : 1; var _MOB_DMG_PUNISH = (_pl <= 20) ? (1.3 + Math.max(0, _pl - 1) * (1.7 / 19)) : Math.min(6, 3 + (_pl - 20) * 0.05); /* v0.26.x - per user: punish ramps 1.3x (L1) -> 3x (L20) -> 6x (L80+), piecewise-linear. Stacks with difficulty + the level-gap amplifier. */ m *= _MOB_DMG_PUNISH; return Math.max(0, Math.round(d * m)); }
+function _diffDmg(d) { try { if (typeof player !== 'undefined' && player && typeof game !== 'undefined' && game) player._monsterHitAt = game.time; } catch (_) {} var m = (typeof game !== 'undefined' && game && game._diffDmgMul) ? game._diffDmgMul : 1; var _pl = (typeof player !== 'undefined' && player && player.level) ? (player.level | 0) : 1; var _MOB_DMG_PUNISH = (_pl <= 20) ? (1.3 + Math.max(0, _pl - 1) * (1.7 / 19)) : Math.min(6, 3 + (_pl - 20) * 0.05); /* v0.26.x - per user: punish ramps 1.3x (L1) -> 3x (L20) -> 6x (L80+), piecewise-linear. Stacks with difficulty + the level-gap amplifier. */ m *= _MOB_DMG_PUNISH; if (typeof game !== 'undefined' && game && game._curseHex && game._curseHex.kills > 0) m *= 3; /* v0.29.60 - cursed-chest hex: x3 incoming damage until N kills lift it */ return Math.max(0, Math.round(d * m)); }
 // v0.28.7 — Difficulty reward scaling ("risk vs reward"). The damage side of
 // the difficulty setting lives in _diffDmg above (via game._diffDmgMul); these
 // three read the tier string game._diffTier — which follows the SAME mid-boss
@@ -43395,6 +43408,8 @@ function loadMap(id, entryX, entryY) {
   game._lightningFlash = 0; game._lightningCD = null;
   game._gustState = null; game._gustCD = null; game._gustAxis = null;
   game._lavaEruptCD = null; game._lavaEruptSeen = false; game._lavaTimer = 0;
+  game._curseHex = null;   // v0.29.60 — cursed-chest hex never follows you out of its map
+  try { document.body.classList.remove('map-cursed'); } catch (e) {}   // v0.29.60 — clear nightmare vignette; re-added below if this load rolls cursed
   game.chests = [];
   game.powerupOrbs = [];
   game.afterImages = [];
@@ -43758,6 +43773,28 @@ function loadMap(id, entryX, entryY) {
   }
   buildBackdrop();
 
+  // v0.29.60 — CURSED MAPS (Dead Cells-style opt-in gamble). ~10% of
+  // wilderness loads become "nightmare-touched": a dark vignette + an
+  // up-front toast (so it's opt-in — the player can just leave), a big
+  // jump in elite density, and one guaranteed Cursed Chest carrying
+  // tier+1 loot behind a hex. Excluded everywhere risk shouldn't
+  // intrude: towns, boss arenas, expedition/PQ floors, the Void. The
+  // decision is per-load and cleared first so re-entering re-rolls.
+  game._mapCursed = false;
+  const _curseEligible = !game.mapData.isTown && !game.mapData.isBossArena
+    && !game.mapData.isVoid && !game._expeditionMap
+    && !(game.expedition && game.expedition.active)
+    && (id.indexOf('tower_b') !== 0) && (id.indexOf('clockwork') !== 0)
+    && id !== 'void' && !game.mapData._noNaturalChests;
+  if (_curseEligible && Math.random() < 0.10) {
+    game._mapCursed = true;
+    try { document.body.classList.add('map-cursed'); } catch (e) {}   // v0.29.60 — dark nightmare vignette
+    if (typeof showToast === 'function') {
+      showToast('🌑 This place is NIGHTMARE-TOUCHED. Stronger foes — and a Cursed Chest worth the risk. Leave, or take the gamble.', 'legendary');
+    }
+    if (typeof flash === 'function') flash(0.4);
+    if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('void'); } catch (e) {} }
+  }
   // Spawn monsters from map config. Per-load variation: ±25% count jitter on
   // non-boss spawns so a reload feels a bit different. Very rare chance (8%)
   // to inject a single "wandering" mob from an adjacent tier for flavour.
@@ -43873,6 +43910,18 @@ function loadMap(id, entryX, entryY) {
     // are: boss kills (powerup pick at line 19087) + Sage Mira's daily
     // 12-hour offering. Tightens the boon economy so each pick is
     // earned, not stumbled into.
+  }
+  // v0.29.60 — CURSED CHEST. A nightmare-touched map always carries
+  // exactly one, regardless of the normal chest cooldown/roll above:
+  // a gold-tier chest flagged _cursed, spawned mid-map so it's found.
+  // Opening it grants tier+1 loot but lays the hex (see openChest).
+  if (game._mapCursed && typeof spawnChest === 'function') {
+    const _cplats = (game.mapData.platforms || []).filter(p => p.type === 'platform');
+    const _cp = _cplats.length ? _cplats[Math.floor(Math.random() * _cplats.length)]
+                               : { x: (game.mapData.worldWidth || 960) / 2, y: 440, w: 120 };
+    const _cc = spawnChest(_cp.x + _cp.w / 2 - 14, _cp.y - 24, 'gold');
+    if (_cc) _cc._cursed = true;
+    else if (game.chests && game.chests.length) game.chests[game.chests.length - 1]._cursed = true;
   }
 
   // Reset mini-boss state on map change
@@ -44149,7 +44198,8 @@ function openChest(c) {
   player.consumables.hp_s = (player.consumables.hp_s || 0) + r.hpPot;
   player.consumables.mp_s = (player.consumables.mp_s || 0) + r.mpPot;
   // Item
-  const chosenRarity = r.rarity[Math.floor(Math.random() * r.rarity.length)];
+  // v0.29.60 — a Cursed Chest guarantees a legendary roll (the gamble's payoff).
+  const chosenRarity = c._cursed ? 'legendary' : r.rarity[Math.floor(Math.random() * r.rarity.length)];
   const cats = ['weapons','armors','accessories'];
   const cat = cats[Math.floor(Math.random() * cats.length)];
   // v0.26.391 — Per user "very hard to obtain higher tier gears, especially
@@ -44160,7 +44210,9 @@ function openChest(c) {
   // chests top out well below the apex: wood ≤T2, silver ≤T5, gold ≤T7.
   // (legendary spans T5-10, so gold chests can still drop a T5-7 legendary,
   // just never the T8-10 endgame pieces.)
-  const _chestTierCap = c.tier === 'gold' ? 7 : c.tier === 'silver' ? 5 : 2;
+  // v0.29.60 — Cursed Chest = gold cap +1 (T8) — one rung of the apex
+  // gate opened as the reward for taking (and surviving) the hex.
+  const _chestTierCap = c._cursed ? 8 : (c.tier === 'gold' ? 7 : c.tier === 'silver' ? 5 : 2);
   let pool = ITEM_POOL[cat].filter(it => it.rarity === chosenRarity && (it.tier | 0) <= _chestTierCap);
   if (!pool.length) pool = ITEM_POOL[cat].filter(it => (it.tier | 0) <= _chestTierCap);   // fallback: any rarity within the cap
   if (pool.length) {
@@ -44208,10 +44260,24 @@ function openChest(c) {
       });
     }, i * 20);
   }
-  addShake(c.tier === 'gold' ? 7 : c.tier === 'silver' ? 5 : 4);
-  flash(c.tier === 'gold' ? 0.35 : 0.25);
+  addShake(c._cursed ? 12 : c.tier === 'gold' ? 7 : c.tier === 'silver' ? 5 : 4);
+  flash(c._cursed ? 0.6 : c.tier === 'gold' ? 0.35 : 0.25);
   // Hook for cosmetic unlock tracking
   trackPickup('chest', { tier: c.tier });
+  // v0.29.60 — THE HEX. Opening a Cursed Chest lays a curse: incoming
+  // damage is TRIPLED (via _diffDmg) until you slay 8 foes, which lift
+  // it one by one (see the kill hook). This is the whole gamble — the
+  // T8 legendary is already in your bag; now you have to live long
+  // enough to enjoy it. Cleared on map change / death so it never
+  // follows you out of the map you gambled in.
+  if (c._cursed) {
+    game._curseHex = { kills: 8, total: 8 };
+    if (typeof showToast === 'function') {
+      showToast('🩸 THE CHEST WAS CURSED. Damage taken ×3 until you slay 8 foes. Run, or fight it off!', 'legendary');
+    }
+    if (typeof addShake === 'function') addShake(20);
+    if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('void'); } catch (e) {} }
+  }
 }
 
 function spawnFromMap(type, boss, opts) {
@@ -44311,7 +44377,8 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   if (t && t.traits && t.traits.miniElite && Math.random() < 0.15) { isMiniBoss = true; _miniElitePromoted = true; }
   // Elite roll (not for bosses / miniboss)
   // v0.26.x — Per user "reduce the occurrence of elite / elder". 0.13 → 0.07 → 0.03.
-  const isElite = !isBoss && !isMiniBoss && ((typeof net === 'object' && net && net._coopForceElite) || Math.random() < 0.03);   // v0.27.2 co-op — honor a forced-elite mirror spawn (b===3) so a guest's mirror matches the host's elite variant
+  const _eliteChance = (typeof game !== 'undefined' && game && game._mapCursed) ? 0.18 : 0.03;   // v0.29.60 — nightmare-touched maps spike elite density (6×)
+  const isElite = !isBoss && !isMiniBoss && ((typeof net === 'object' && net && net._coopForceElite) || Math.random() < _eliteChance);   // v0.27.2 co-op — honor a forced-elite mirror spawn (b===3) so a guest's mirror matches the host's elite variant
   // Tower escalation multipliers compound on top of regular tiering
   const towerHp  = game.tower ? (game._towerHpMul  || 1) : 1;
   const towerAtk = game.tower ? (game._towerAtkMul || 1) : 1;
@@ -62187,6 +62254,19 @@ function killMonster(m) {
   }
   const idx = game.monsters.indexOf(m);
   if (idx < 0) return;
+  // v0.29.60 — Cursed-chest hex: every slain foe lifts one stack. At
+  // zero the curse breaks with a relief flash + toast; until then
+  // _diffDmg keeps incoming damage ×3. Bosses count too.
+  if (game._curseHex && game._curseHex.kills > 0) {
+    game._curseHex.kills--;
+    if (game._curseHex.kills <= 0) {
+      game._curseHex = null;
+      if (typeof showToast === 'function') showToast('✨ The hex breaks — the curse lifts. The gamble paid off.', 'legendary');
+      if (typeof flash === 'function') flash(0.5);
+    } else if (typeof showToast === 'function') {
+      showToast(`🩸 Hex: ${game._curseHex.kills} more…`, 'rare');
+    }
+  }
   // v0.25.797 — Monster death SFX. Fires once per kill (no cooldown).
   // Skipped for boss monsters since they have their own intro SFX +
   // existing super-boss death pipeline.
