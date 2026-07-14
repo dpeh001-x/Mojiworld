@@ -8725,7 +8725,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.75';
+const GAME_VERSION = 'v0.29.76';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -28607,6 +28607,32 @@ const JUKEBOX_TRACKS = [
   ]},
 ];
 
+// v0.29.73 — JUKEBOX DISCOVERY. DJ Vinyl only lets you replay tracks you've
+// actually HEARD in the world; undiscovered themes show locked. A track is
+// marked heard the moment its BGM becomes the audible track on a map (hooked
+// in _setBossBgm). Persisted as game._jukeboxHeard = {trackId:true}.
+// Reverse map: bgm file → jukebox track id (first match wins; several maps
+// share one file, and that's fine — they all unlock the same jukebox entry).
+const _JUKEBOX_FILE_TO_ID = (() => {
+  const m = {};
+  for (const g of JUKEBOX_TRACKS) for (const t of g.tracks) if (t.file && !m[t.file]) m[t.file] = t.id;
+  return m;
+})();
+function _jukeboxHeardSet() { if (typeof game !== 'undefined' && game) { if (!game._jukeboxHeard) game._jukeboxHeard = {}; return game._jukeboxHeard; } return {}; }
+function _isTrackHeard(id) { return !!_jukeboxHeardSet()[id]; }
+function _markBgmHeard(file) {
+  if (!file) return;
+  // Normalise: _bgmEl.src may be an absolute/encoded URL; match on the
+  // registered relative path (or its basename) instead of strict equality.
+  let id = _JUKEBOX_FILE_TO_ID[file];
+  if (!id) {
+    const base = String(file).split('/').pop();
+    for (const f in _JUKEBOX_FILE_TO_ID) { if (String(f).split('/').pop() === base) { id = _JUKEBOX_FILE_TO_ID[f]; break; } }
+  }
+  if (!id) return;
+  const heard = _jukeboxHeardSet();
+  if (!heard[id]) { heard[id] = true; if (typeof saveState === 'function') saveState(); }
+}
 let _jukeboxPlaying = null;        // {trackId, audio} or null
 let _jukeboxOriginalBgmSrc = null; // saved on first play so we can restore on close
 function openJukebox() {
@@ -28623,13 +28649,27 @@ function openJukebox() {
       const row = document.createElement('div');
       row.className = 'jb-track';
       row.dataset.trackId = t.id;
-      row.innerHTML = '<span class="jb-icon">▶</span>' +
-                      '<span class="jb-name">' + t.name + '</span>' +
-                      '<span class="jb-tag">' + t.tag + '</span>';
-      row.onclick = () => jukeboxPlay(t);
-      if (_jukeboxPlaying && _jukeboxPlaying.trackId === t.id) {
-        row.classList.add('playing');
-        row.querySelector('.jb-icon').textContent = '♪';
+      // v0.29.73 — locked until heard in-world. Locked rows hide the title
+      // (a discovery tease), dim out, and can't be played; clicking nudges
+      // the player toward finding it.
+      const heard = (typeof _isTrackHeard === 'function') ? _isTrackHeard(t.id) : true;
+      if (!heard) {
+        row.classList.add('locked');
+        row.style.opacity = '0.45';
+        row.style.cursor = 'default';
+        row.innerHTML = '<span class="jb-icon">🔒</span>' +
+                        '<span class="jb-name" style="font-style:italic;color:#9a8fb8;">??? — undiscovered</span>' +
+                        '<span class="jb-tag">' + t.tag + '</span>';
+        row.onclick = () => { if (typeof showToast === 'function') showToast('🔒 Hear this theme somewhere in the Everdawn to unlock it in the jukebox.', 'rare'); };
+      } else {
+        row.innerHTML = '<span class="jb-icon">▶</span>' +
+                        '<span class="jb-name">' + t.name + '</span>' +
+                        '<span class="jb-tag">' + t.tag + '</span>';
+        row.onclick = () => jukeboxPlay(t);
+        if (_jukeboxPlaying && _jukeboxPlaying.trackId === t.id) {
+          row.classList.add('playing');
+          row.querySelector('.jb-icon').textContent = '♪';
+        }
       }
       list.appendChild(row);
     }
@@ -28645,6 +28685,12 @@ function closeJukebox() {
 }
 function jukeboxPlay(t) {
   if (!t || !t.file) return;
+  // v0.29.73 — defense in depth: never play a track the player hasn't
+  // discovered, even if a stale/queued click reaches here.
+  if (typeof _isTrackHeard === 'function' && !_isTrackHeard(t.id)) {
+    if (typeof showToast === 'function') showToast('🔒 That theme is still undiscovered.', 'rare');
+    return;
+  }
   // Stop any currently-playing jukebox preview
   jukeboxStop({silent:true});
   // Save the live BGM source ONCE so we can hand the auto-picker back
@@ -31496,6 +31542,7 @@ const GAME_SAVE_FIELDS = [
   'currentMap','bossDefeated','kills','achievements',
   // v0.26.451 - per-map chest restock cooldown (anti re-entry farm); persisted so reload can't reset it.
   '_chestCooldown',
+  '_jukeboxHeard',   // v0.29.73 — DJ Vinyl jukebox: tracks the player has heard in-world ({trackId:true})
   'edicts',   // v0.29.66 — Edicts of the Weight-Bearer heat toggles ({edictId:true})
   '_timeHW',   // v0.26.452 - monotonic clock high-water mark (rollback guard)
   '_playMs','_bossDefeatedAt',   // v0.26.453 - boss respawn playtime cooldown
@@ -104653,6 +104700,7 @@ function _setBossBgm(isBoss, mapId) {
     _bgmFade(_bgmBossEl, 0, _BGM_FADE_MS);
     _bgmFade(mapEl,      _bgmTargetVol(), _BGM_FADE_MS);
     _bgmActiveMapEl = mapEl;
+    if (typeof _markBgmHeard === 'function') _markBgmHeard(_BGM_MAP_FILES[mapId]);   // v0.29.73 — jukebox discovery
     return;
   }
   // No per-map track. Boss arena fallback → generic boss theme.
@@ -104660,12 +104708,14 @@ function _setBossBgm(isBoss, mapId) {
     if (_bgmActiveMapEl) { _bgmFade(_bgmActiveMapEl, 0, _BGM_FADE_MS); _bgmActiveMapEl = null; }
     _bgmFade(_bgmEl,     0,                _BGM_FADE_MS);
     _bgmFade(_bgmBossEl, _bgmTargetVol(),  _BGM_FADE_MS);
+    if (typeof _markBgmHeard === 'function') _markBgmHeard('audio/bgm_boss.mp3');   // v0.29.73 — jukebox discovery
     return;
   }
   _bgmFade(_bgmBossEl, 0, _BGM_FADE_MS);
   // Default world theme.
   if (_bgmActiveMapEl) { _bgmFade(_bgmActiveMapEl, 0, _BGM_FADE_MS); _bgmActiveMapEl = null; }
   _bgmFade(_bgmEl, _bgmTargetVol(), _BGM_FADE_MS);
+  if (typeof _markBgmHeard === 'function') _markBgmHeard('audio/bgm_mojiworld.mp3');   // v0.29.73 — jukebox discovery
 }
 function startBgm() {
   if (!_bgmEl) return;
