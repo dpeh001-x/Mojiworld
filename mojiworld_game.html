@@ -41176,6 +41176,45 @@ function _variedMapData(id) {
   return { ...base, platforms: plats, layoutVariant };
 }
 
+// v0.29.60 — EXPEDITION RUN-END DIALOGUE. Hades' lesson: a failed run
+// should feel like the story moving, not just a wipe. When an expedition
+// ends, the Amnesiac says one line — a rotating pool per outcome (death /
+// complete / abandon), scaled to how far you got. These are transient
+// inline story beats (no _storyBeatsSeen flag → they repeat every run),
+// and a per-outcome cursor walks the pool so you rarely hear the same
+// line twice in a row. Shown after the end toast, back in town.
+const _EXPEDITION_END_LINES = {
+  death: [
+    'You fell. Good.\n\nNot the falling — the getting-up that always follows it. The Void keeps a tally, and it has started to respect yours.',
+    'The tower took you back.\n\nIt is not cruel, foreigner. It is a whetstone. You come out the other side of each fall a little harder to break.',
+    'I felt you drop. I feel every one.\n\nEleven expeditions never fell — they simply stopped climbing. You are not them. Go again when you are ready.',
+    'Down again. Dust yourself off.\n\nThe ones the road remembers are never the ones who never fell. They are the ones who kept choosing the next floor anyway.',
+  ],
+  deathDeep: [
+    'So close I could taste the summit through your eyes.\n\nThe fall from high up is the one that teaches most. You will not make that mistake twice — I can already feel you planning the next climb.',
+    'Floor after floor, and then the dark.\n\nDo not mourn the run. That deep, you were rehearsing the person who finishes it. Come back and finish it.',
+  ],
+  complete: [
+    'All ten floors.\n\nThe tower has nothing left to teach you today — so it will simply be harder tomorrow. That is the only thanks a whetstone knows how to give.',
+    'You walked out the top of the Void and kept your feet.\n\nRemember this the next time a realm tells you the road is too long. You just proved it wrong.',
+  ],
+  abandon: [
+    'You stepped out. No shame in it.\n\nKnowing when to leave the tower is its own kind of strength — the eleven who vanished never learned it.',
+  ],
+};
+function _expeditionEndDialogue(reason, floorReached) {
+  if (typeof _playStoryBeat !== 'function') return;
+  let pool;
+  if (reason === 'complete') pool = _EXPEDITION_END_LINES.complete;
+  else if (reason === 'death') pool = (floorReached >= 7 ? _EXPEDITION_END_LINES.deathDeep : _EXPEDITION_END_LINES.death);
+  else pool = _EXPEDITION_END_LINES.abandon;
+  if (!pool || !pool.length) return;
+  if (!game._expEndCursor) game._expEndCursor = {};
+  const key = (reason === 'death' && floorReached >= 7) ? 'deathDeep' : reason;
+  const i = (game._expEndCursor[key] || 0) % pool.length;
+  game._expEndCursor[key] = i + 1;
+  _playStoryBeat({ mode: 'dialog', stanzas: [{ speaker: 'The Amnesiac', text: pool[i] }] });
+}
 // =========================================================================
 // EXPEDITION SYSTEM (v0.26.263)
 // =========================================================================
@@ -41392,6 +41431,10 @@ function _endExpedition(reason) {
   // Return to Everdawn Central.
   if (typeof loadMap === 'function') loadMap('town', 600);
   if (typeof saveState === 'function') saveState();
+  // v0.29.60 — the Amnesiac reflects on the run (Hades-style
+  // death-as-story). Deferred so it lands after the town load + the
+  // end-of-run toasts, not on top of them.
+  setTimeout(() => _expeditionEndDialogue(reason, _floorReached), 1400);
 }
 // Apply level-based stat scaling to mobs spawned inside an expedition.
 // Called from spawnMonster via a hook in v0.26.264. Conservative scale
