@@ -8725,7 +8725,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.71';
+const GAME_VERSION = 'v0.29.72';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -100726,6 +100726,61 @@ function _prologueOverlay(stanzas, onDone, opts) {
   window.addEventListener('keydown', onKey, true);
   show();
 }
+// v0.29.72 — THE DAGGER POV. Opens the prologue: the first-person
+// Shinobi-daggers-vs-Gravitos Higgsfield clip (clip_prologue_pov.mp4) now plays
+// as its OWN foreground beat FIRST — before the opening stanzas — instead of
+// only tinting the stanza backdrop. Same fail-open contract as the other
+// prologue cutscenes: onDone fires exactly once whether the clip ends, is
+// skipped (click / Enter / Space / Esc / button), the file is missing, autoplay
+// is blocked, or the safety timer trips — so it can never soft-lock the intro.
+function _prologueDaggerCutscene(onDone) {
+  let done = false;
+  const finish = () => {
+    if (done) return; done = true;
+    if (timer) { clearTimeout(timer); timer = null; }
+    window.removeEventListener('keydown', onKey, true);
+    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+    try { onDone && onDone(); } catch (e) {}
+  };
+  const ov = document.createElement('div');
+  ov.id = 'prologue-dagger-cine';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:1600;background:#02010a;display:flex;'
+    + 'align-items:center;justify-content:center;cursor:pointer;overflow:hidden;';
+  ov.innerHTML =
+    '<video id="plg-dagger-vid" src="steam/higgsfield/cinematics/clip_prologue_pov.mp4" '
+    + 'autoplay playsinline '
+    + 'style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#02010a;"></video>'
+    + '<div style="position:absolute;top:0;left:0;right:0;height:56px;background:linear-gradient(#000,rgba(0,0,0,0));"></div>'
+    + '<div style="position:absolute;bottom:0;left:0;right:0;height:56px;background:linear-gradient(rgba(0,0,0,0),#000);"></div>'
+    + '<button id="plg-dagger-skip" style="position:absolute;top:16px;right:18px;z-index:2;padding:5px 14px;'
+    + 'border-radius:8px;border:1px solid #5a4490;background:rgba(20,8,44,0.85);color:#cdb8ff;'
+    + 'font:700 12px monospace;cursor:pointer;">Skip &#9656;&#9656;</button>';
+  function onKey(e) {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation(); finish();
+    }
+  }
+  document.body.appendChild(ov);
+  const vid = ov.querySelector('#plg-dagger-vid');
+  if (vid) {
+    vid.onended = finish;
+    vid.onerror = finish;
+    vid.volume = 0.9;
+    try {
+      const pp = vid.play();
+      if (pp && pp.catch) pp.catch(() => {
+        vid.muted = true;   // unmuted autoplay refused → retry silent rather than dying
+        const p2 = vid.play(); if (p2 && p2.catch) p2.catch(finish);
+      });
+    } catch (e) { finish(); }
+  }
+  ov.addEventListener('click', finish);
+  const sk = ov.querySelector('#plg-dagger-skip');
+  if (sk) sk.onclick = (e) => { e.stopPropagation(); finish(); };
+  window.addEventListener('keydown', onKey, true);
+  // Safety net: covers buffering with margin (the clip is short).
+  let timer = setTimeout(finish, 12000);
+}
 function _startPrologue() {
   window._prologueActive = true;
   // v0.26.x audit FIX (soft-lock) — absolute safety cap. The cinematic runs
@@ -100738,6 +100793,12 @@ function _startPrologue() {
   // cutscenes. 50s used to race that chain and skip the Void video.
   setTimeout(() => { if (window._prologueActive) { try { _prologueFinish(true); } catch (_) {} } }, 120000);
   loadMap('void', 400);
+  // v0.29.72 — Per user: play the "dagger" POV clip FIRST as its own foreground
+  // beat, THEN these opening stanzas (starfield backdrop only — the POV no
+  // longer tints them, so it doesn't replay), THEN the Gravitos entrance
+  // cinematic (in _prologueApexSegment), THEN the boss fight.
+  const _showOpeningStanzas = () => {
+  if (!window._prologueActive) return;
   _prologueOverlay([
     'EONS FROM NOW — AT THE FAR END OF THE DREAM',
     'One law remains. One bearer of the world’s weight.\n\nAnd one foreigner who climbed every plane to face him.',
@@ -100765,7 +100826,12 @@ function _startPrologue() {
     } catch (e) {}
     _ready.then(_go, _go);
     setTimeout(_go, 16000);   // absolute cap (mirrors the preload race) — never hold the beat forever
-  });
+  }, { noPovVideo: true });   // v0.29.72 — POV plays first as its own clip; stanzas keep just the starfield
+  };
+  // v0.29.72 — dagger POV clip FIRST, then the stanzas above. Fail-open: if the
+  // helper is missing the stanzas still open.
+  if (typeof _prologueDaggerCutscene === 'function') _prologueDaggerCutscene(_showOpeningStanzas);
+  else _showOpeningStanzas();
 }
 function _prologueApexSegment() {
   // Snapshot the untouched fresh state — restored verbatim afterwards.
