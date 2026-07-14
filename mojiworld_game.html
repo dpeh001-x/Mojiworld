@@ -8725,7 +8725,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.72';
+const GAME_VERSION = 'v0.29.73';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -57885,7 +57885,11 @@ function bossAI(m, dt, distToPlayer) {
     // slower boss with longer telegraphs (room to learn the dodge), proven
     // dodgers (ema->1) face a ~12% faster one. ema 0.5 == the old flat 0.5.
     const _zdE = (game._zdEma == null) ? 0.5 : game._zdEma;
-    m.patternTimer += dt * (0.35 + 0.3 * _zdE);
+    // v0.29.73 — PHASE TEMPO: later phases tick every sign's pattern clock
+    // faster (P2 ×1.15, P3 ×1.3) so the fight audibly escalates. Composes
+    // with the dodge-skill EMA above through the same single channel.
+    const _zPhTempo = (m.phase >= 3) ? 1.3 : (m.phase === 2) ? 1.15 : 1;
+    m.patternTimer += dt * (0.35 + 0.3 * _zdE) * _zPhTempo;
     zodiacBossAI(m, dt, distToPlayer);
     return;
   }
@@ -90013,6 +90017,54 @@ function _zodiacFrame(sign, state) {
   if (state === 'walk')   return _bossLoopFrame(ZODIAC_WALK_FRAMES[sign], _BOSS_WALK_FRAME_MS);
   return _bossPingPongFrame(ZODIAC_IDLE_FRAMES[sign], _BOSS_IDLE_FRAME_MS);
 }
+// =========================================================================
+// v0.29.73 — ZODIAC ANIM STATE MACHINE (smooth transitions).
+// _bossLoopFrame/_bossPingPongFrame index off the GLOBAL wall clock, so a
+// state switch (idle→attack etc.) landed on an arbitrary mid-cycle frame —
+// the swing could start at frame 6/9 and "snap". Zodiac bosses now track a
+// per-instance anim state with a STATE-RELATIVE clock (attack always begins
+// at frame 0 = the authored wind-up), plus:
+//   • walk↔idle hysteresis (enter walk at |vx|>0.85, exit at <0.35) so the
+//     0.6 threshold can't flicker between sets on drifting bosses;
+//   • a 140ms crossfade — the outgoing state's exit frame fades out over the
+//     incoming state's frames instead of a hard swap.
+// =========================================================================
+const _Z_XFADE_MS = 140;
+function _zodiacRelFrame(frames, frameMs, elapsedMs, pingpong) {
+  if (!frames) return null;
+  let n = frames._readyN || 0;   // same monotonic decoded-count cache as the global pickers
+  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
+  frames._readyN = n;
+  if (n === 0) return null;
+  if (n === 1) return frames[0];
+  const step = Math.max(0, Math.floor(elapsedMs / frameMs));
+  if (!pingpong) return frames[step % n];
+  const seqLen = 2 * n - 2;
+  const i = step % seqLen;
+  return frames[i < n ? i : seqLen - i];
+}
+function _zodiacStateImg(sign, state, elapsedMs) {
+  if (state === 'attack') return _zodiacRelFrame(ZODIAC_ATTACK_FRAMES[sign], _BOSS_ATK_FRAME_MS, elapsedMs, false);
+  if (state === 'walk')   return _zodiacRelFrame(ZODIAC_WALK_FRAMES[sign], _BOSS_WALK_FRAME_MS, elapsedMs, false);
+  return _zodiacRelFrame(ZODIAC_IDLE_FRAMES[sign], _BOSS_IDLE_FRAME_MS, elapsedMs, true);
+}
+function _zodiacAnimTick(m, now) {
+  const atk = (m.patternState && m.patternState !== 'idle') || (m.atkAnimUntil && now < m.atkAnimUntil);
+  const vx = Math.abs(m.vx || 0);
+  let a = m._zAnim;
+  const wasWalk = !!(a && a.state === 'walk');
+  const st = atk ? 'attack' : (wasWalk ? (vx > 0.35 ? 'walk' : 'idle') : (vx > 0.85 ? 'walk' : 'idle'));
+  if (!a) {
+    a = m._zAnim = { state: st, since: now, prev: null, prevElapsed: 0, transAt: -1e9 };
+  } else if (a.state !== st) {
+    a.prev = a.state;
+    a.prevElapsed = now - a.since;   // freeze the outgoing state on its exit frame
+    a.transAt = now;
+    a.state = st;
+    a.since = now;
+  }
+  return a;
+}
 
 // Boss sprites are bigger than regular mobs — render at ~2× the bbox height
 // to fit the mini-boss/boss aura halo silhouette on screen. v0.25.93 — bbox-
@@ -91316,7 +91368,28 @@ function drawMonster(m) {
   }
   else if (m.type === 'koopaKing') drawKoopaKing(m, sx, sy);
   else if (m.type === 'mirrorSelf') _drawMirrorSelf(m, sx, sy);
-  else if (m.zodiacBoss && ZODIAC_SPRITES[m.zodiacSign]) _drawBossSprite(_zodiacFrame(m.zodiacSign, _bossAttacking ? 'attack' : (_bossMoving(m) ? 'walk' : 'idle')) || ZODIAC_SPRITES[m.zodiacSign], m, sx, sy, _bossAttacking, true);
+  else if (m.zodiacBoss && ZODIAC_SPRITES[m.zodiacSign]) {
+    // v0.29.73 — per-instance anim state machine: state-relative frame clock
+    // (attack starts on its authored frame-0 wind-up), walk/idle hysteresis,
+    // and a 140ms crossfade where the outgoing state's exit frame fades out
+    // over the incoming animation instead of a hard swap. _nowAtk is the
+    // performance.now() computed above for the attack-window check.
+    const _za = _zodiacAnimTick(m, _nowAtk);
+    const _zCur = _zodiacStateImg(m.zodiacSign, _za.state, _nowAtk - _za.since) || ZODIAC_SPRITES[m.zodiacSign];
+    _drawBossSprite(_zCur, m, sx, sy, _za.state === 'attack', true);
+    const _zT = (_nowAtk - _za.transAt) / _Z_XFADE_MS;
+    if (_za.prev && _zT >= 0 && _zT < 1) {
+      const _zPrev = _zodiacStateImg(m.zodiacSign, _za.prev, _za.prevElapsed);
+      if (_zPrev && _zPrev !== _zCur) {
+        const _kvW = m._visW, _kvH = m._visH;   // keep the CURRENT frame's visual box authoritative for hit-region math
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, 1 - _zT) * 0.85;
+        _drawBossSprite(_zPrev, m, sx, sy, _za.prev === 'attack', true);
+        ctx.restore();
+        m._visW = _kvW; m._visH = _kvH;
+      }
+    }
+  }
   else if (m.zodiacBoss) drawZodiacBoss(m, sx, sy);
   else if (MONSTER_ANIMS[m.type] || MONSTER_SPRITES[m.type]) _drawMonsterSprite(m, sx, sy);
   else if (FISH_MOB_TYPES.has(m.type)) drawFishMob(m, sx, sy);
@@ -94049,10 +94122,32 @@ function zodiacBossAI(m, dt, distToPlayer) {
     m.patternTimer = 0;
     m.patternState = 'idle';
     m.phaseFx = 40;
+    // v0.29.73 — PHASE ESCALATION. The phase change is now mechanical, not
+    // just a toast: the boss speeds up (P2 +15%, P3 +30% over its authored
+    // base — stored once so re-entering a phase can't compound), and erupts a
+    // dodgeable radial nova (the "power surge") the player must weave. The
+    // attack-anim window is stamped so the sprite visibly surges with it.
+    if (m._zBaseSpeed == null) m._zBaseSpeed = m.speed || 0.8;
+    m.speed = m._zBaseSpeed * (phase >= 3 ? 1.3 : phase === 2 ? 1.15 : 1);
     if (phase > 1) {
       showToast(`${z.glyph} ${z.name.split(' ')[0]} — Phase ${phase}!`, 'legendary');
       flash(0.5); addShake(12); addHitStop(80);
       audio.play('crit');
+      const _ncx = m.x + m.w / 2, _ncy = m.y + m.h / 2;
+      const _novaN = phase >= 3 ? 14 : 10;
+      for (let i = 0; i < _novaN; i++) {
+        const _nang = (i / _novaN) * Math.PI * 2 + (phase === 3 ? Math.PI / _novaN : 0);
+        game.projectiles.push({
+          x: _ncx, y: _ncy,
+          vx: Math.cos(_nang) * 3.1, vy: Math.sin(_nang) * 3.1,
+          w: 16, h: 16, life: 85,
+          damage: m.atk * 0.7,
+          owner: 'enemy', skill: 'zodiac', color: z.colors.aura,
+          noGravity: true,
+          _zodiacAttacker: true,
+        });
+      }
+      m.atkAnimUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + 700;
     }
   }
   // v0.25.636 — Shared "desperation" telegraph that fires before the
@@ -94065,6 +94160,47 @@ function zodiacBossAI(m, dt, distToPlayer) {
   // Hover / drift behavior by default — specific signs override in their handler
   const fn = ZODIAC_AI[z.id] || _zodiacAiGeneric;
   fn(m, dt, distToPlayer, phase, z);
+  // v0.29.73 — SHARED REPOSITION LUNGE. All 12 signs drift at ~0.8 speed, so
+  // fights read as a slow float-at-the-player. Every few seconds (tighter in
+  // later phases), when the boss is between patterns and the player has range,
+  // it bursts a short telegraphed dash toward them — sudden motion the player
+  // must react to, with an aura afterimage trail and the attack anim stamped
+  // so the sprite lunges with it. Runs AFTER the per-sign handler so the dash
+  // velocity wins over the handler's drift for the window; suppressed during
+  // an active pattern or a desperation warning so it can't stack chaos.
+  if (m._zLungeMs > 0) {
+    m._zLungeMs -= dt;
+    m.vx = m._zLungeVx;
+    if ((game.time | 0) % 3 === 0) {
+      game.particles.push({
+        x: m.x + m.w / 2 + (Math.random() - 0.5) * m.w * 0.5,
+        y: m.y + m.h / 2 + (Math.random() - 0.5) * m.h * 0.5,
+        vx: -Math.sign(m._zLungeVx) * (0.5 + Math.random()), vy: (Math.random() - 0.5) * 0.8,
+        life: 20, color: z.colors.aura, size: 3 + Math.random() * 2,
+      });
+    }
+    if (m._zLungeMs <= 0) m.vx *= 0.35;   // ease out of the dash, no hard stop
+  } else {
+    if (m._zLungeCd == null) m._zLungeCd = 4200 + Math.random() * 2000;
+    m._zLungeCd -= dt;
+    const _zIdle = !m.patternState || m.patternState === 'idle';
+    if (m._zLungeCd <= 0 && _zIdle && m._despState !== 'warning'
+        && player && player.hp > 0 && distToPlayer > 150) {
+      const _zDir = Math.sign((player.x + player.w / 2) - (m.x + m.w / 2)) || 1;
+      m._zLungeMs = 300 + phase * 40;
+      m._zLungeVx = _zDir * (5 + phase * 0.9);
+      m._zLungeCd = (phase >= 3 ? 3000 : phase === 2 ? 4000 : 5200) + Math.random() * 1800;
+      m.atkAnimUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + 550;
+      for (let i = 0; i < 8; i++) {
+        game.particles.push({
+          x: m.x + m.w / 2, y: m.y + m.h / 2,
+          vx: -_zDir * (1 + Math.random() * 2), vy: (Math.random() - 0.5) * 2,
+          life: 24, color: z.colors.aura, size: 3,
+        });
+      }
+      if (typeof addShake === 'function') addShake(2);
+    }
+  }
   // Contact damage is handled by updateMonsters physics loop
 }
 

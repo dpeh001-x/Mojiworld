@@ -24,8 +24,8 @@ const JOBS = [
   { key: 'scale',          base: 'p_scale.png',          ops: { removeShadow: true } },
   { key: 'droplet',        base: 'p_droplet.png',        ops: { removeShadow: true } },
   { key: 'gemini_shard', base: 'p_gemini_shard.png', ops: { removeShadow: true, pointRight: true } },
-  { key: 'icePillar',    base: 'p_icepillar.png',    ops: { pointRight: true } },   // shadow removed via ludo first
-  { key: 'cancerBubble', base: 'p_cancerbubble.png', ops: { removeShadow: true } },
+  { key: 'icePillar',    base: 'p_icepillar.png',    ops: { flipX: true } },
+  { key: 'cancerBubble', base: 'p_cancerbubble.png', ops: { removeShadow: true, shadowRad: 0 } },
   { key: 'zodiac',       base: 'p_zodiacbolt.png',   ops: { flipX: true } },
 ].filter(j => !KEYFILTER.length || KEYFILTER.includes(j.key));
 
@@ -34,7 +34,7 @@ const JOBS = [
 // borders through every non-outline pixel; anything the flood can't reach is
 // enclosed by the outline (the object). Clear exterior non-outline pixels —
 // that's the shadow (and any detached sparkle debris, acceptable). ---
-function removeShadow(data, w, h) {
+function removeShadow(data, w, h, rad) {
   const N = w * h;
   const rawOutline = new Uint8Array(N);
   for (let i = 0; i < N; i++) {
@@ -44,8 +44,9 @@ function removeShadow(data, w, h) {
   // Dilate the outline into a CLOSED barrier (radius R) so flood can't leak
   // through gaps in a shattered outline (e.g. the ice crystal). The barrier is
   // only used to stop the flood; kept pixels use their original color.
-  const RAD = 3;
+  const RAD = (rad == null) ? 3 : rad;
   const barrier = new Uint8Array(N);
+  if (RAD === 0) { for (let i = 0; i < N; i++) barrier[i] = rawOutline[i]; }
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     if (!rawOutline[y * w + x]) continue;
     for (let dy = -RAD; dy <= RAD; dy++) for (let dx = -RAD; dx <= RAD; dx++) {
@@ -113,7 +114,7 @@ async function processBuf(buf, ops, rotDeg, W, H) {
   let img = sharp(buf).ensureAlpha();
   if (ops.removeShadow) {
     const { data, info } = await img.raw().toBuffer({ resolveWithObject: true });
-    removeShadow(data, info.width, info.height);
+    removeShadow(data, info.width, info.height, ops.shadowRad);
     img = sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } });
   }
   if (ops.flipX) img = img.flop();
