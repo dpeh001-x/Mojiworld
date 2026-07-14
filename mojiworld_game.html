@@ -8712,7 +8712,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.59';
+const GAME_VERSION = 'v0.29.61';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -32203,13 +32203,31 @@ function _sbBeatForMap(id) {
 }
 function _sbPreloadForMap(id) { const b = _sbBeatForMap(id); if (b) _sbPreloadClip(b); }
 
+// v0.29.60 — beatId may also be an INLINE beat object ({mode, stanzas})
+// for transient one-off lines (e.g. expedition death dialogue): inline
+// beats skip the _storyBeatsSeen bookkeeping entirely, so they can
+// repeat. Stanzas gained two optional powers:
+//   • text may be a FUNCTION (choices) => string — lets a follow-up
+//     stanza react to what the player picked (choices = the persisted
+//     player._storyChoices map).
+//   • stanza.choice = { flag, options: [{label, value}], seconds,
+//     default } renders a Witcher-style decision: buttons under the
+//     text, an optional countdown (seconds > 0) that picks `default`
+//     on expiry, and the pick stored at player._storyChoices[flag].
+//     While a choice is live, click/Enter CANNOT skip the stanza.
 function _playStoryBeat(beatId, onClose) {
-  if (!player._storyBeatsSeen) player._storyBeatsSeen = {};
-  if (player._storyBeatsSeen[beatId]) return false;
-  const beat = STORY_BEATS[beatId];
+  let beat;
+  if (beatId && typeof beatId === 'object') {
+    beat = beatId;               // inline transient beat — repeatable
+  } else {
+    if (!player._storyBeatsSeen) player._storyBeatsSeen = {};
+    if (player._storyBeatsSeen[beatId]) return false;
+    beat = STORY_BEATS[beatId];
+    if (!beat || !beat.stanzas || !beat.stanzas.length) return false;
+    player._storyBeatsSeen[beatId] = true;
+    if (typeof saveState === 'function') saveState();
+  }
   if (!beat || !beat.stanzas || !beat.stanzas.length) return false;
-  player._storyBeatsSeen[beatId] = true;
-  if (typeof saveState === 'function') saveState();
   // Cache DOM lookups.
   if (!game._storyBeatEls) {
     game._storyBeatEls = {
@@ -32234,11 +32252,67 @@ function _playStoryBeat(beatId, onClose) {
   try { document.body.classList.add('sb-active'); } catch (e) {}
   game.paused = true;
   let idx = 0;
+  // v0.29.60 — choice-stanza state. While `choosing` is true the normal
+  // click/Enter advance path is dead: only picking an option (or the
+  // countdown expiring on its default) moves the beat forward.
+  let choosing = false;
+  let choiceTimers = [];
+  const _clearChoiceUi = () => {
+    choosing = false;
+    for (const t of choiceTimers) { try { clearTimeout(t); clearInterval(t); } catch (e) {} }
+    choiceTimers = [];
+    const box = document.getElementById('story-beat-choices');
+    if (box) box.remove();
+    if (els.hint) els.hint.style.display = '';
+  };
+  const _renderChoice = (s) => {
+    choosing = true;
+    if (els.hint) els.hint.style.display = 'none';
+    const stage = els.stage || (els.stage = document.getElementById('story-beat-stage'));
+    const box = document.createElement('div');
+    box.id = 'story-beat-choices';
+    box.style.cssText = 'margin-top:26px;display:flex;flex-direction:column;gap:10px;align-items:center;';
+    const pick = (value) => {
+      if (!choosing) return;
+      if (!player._storyChoices) player._storyChoices = {};
+      player._storyChoices[s.choice.flag] = value;
+      if (typeof saveState === 'function') saveState();
+      _clearChoiceUi();
+      advance(true);
+    };
+    for (const opt of s.choice.options) {
+      const b = document.createElement('button');
+      b.textContent = opt.label;
+      b.style.cssText = 'min-width:300px;max-width:520px;padding:11px 22px;border-radius:10px;'
+        + 'border:1px solid rgba(180,140,255,0.5);background:rgba(30,16,58,0.85);color:#e8e0f8;'
+        + 'font:600 15px/1.4 Inter,system-ui,sans-serif;cursor:pointer;transition:all .15s;';
+      b.onmouseenter = () => { b.style.background = 'rgba(70,40,120,0.9)'; b.style.borderColor = '#c8a8ff'; };
+      b.onmouseleave = () => { b.style.background = 'rgba(30,16,58,0.85)'; b.style.borderColor = 'rgba(180,140,255,0.5)'; };
+      b.onclick = (ev) => { ev.stopPropagation(); pick(opt.value); };
+      box.appendChild(b);
+    }
+    // Optional Witcher-style countdown: a thin draining bar; expiry
+    // silently picks the default (usually "you said nothing").
+    if (s.choice.seconds > 0) {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'width:300px;height:4px;border-radius:2px;background:rgba(255,255,255,0.12);overflow:hidden;margin-top:4px;';
+      const bar = document.createElement('div');
+      bar.style.cssText = 'height:100%;width:100%;background:linear-gradient(90deg,#c8a8ff,#ff9ae8);'
+        + 'transition:width ' + s.choice.seconds + 's linear;';
+      wrap.appendChild(bar);
+      box.appendChild(wrap);
+      requestAnimationFrame(() => { bar.style.width = '0%'; });
+      choiceTimers.push(setTimeout(() => pick(s.choice.default), s.choice.seconds * 1000));
+    }
+    if (stage) stage.appendChild(box);
+  };
   const renderStanza = () => {
     if (idx >= beat.stanzas.length) { closeBeat(); return; }
     const s = beat.stanzas[idx];
     els.speaker.textContent = s.speaker || '';
-    els.text.textContent    = s.text    || '';
+    // v0.29.60 — stanza text may be a function of the player's choices.
+    const _t = (typeof s.text === 'function') ? s.text(player._storyChoices || {}) : s.text;
+    els.text.textContent = _t || '';
     // v0.27.4 — only the FIRST stanza runs the overlay entry fade. Advances
     // used to re-toggle .on (hiding everything + re-running the full 700ms
     // fade → each click felt laggy); now the text swaps in-place with the
@@ -32251,12 +32325,15 @@ function _playStoryBeat(beatId, onClose) {
       void stage.offsetWidth;   // restart the animation
       stage.classList.add('re');
     }
+    if (s.choice && s.choice.options && s.choice.options.length) _renderChoice(s);
   };
-  const advance = () => {
+  const advance = (fromChoice) => {
+    if (choosing && fromChoice !== true) return;   // a live choice owns the stanza
     idx++;
     renderStanza();
   };
   const closeBeat = () => {
+    _clearChoiceUi();   // v0.29.60 — kill any live countdown + buttons
     els.overlay.classList.remove('on');
     try { document.body.classList.remove('sb-active'); } catch (e) {}   // v0.29.x — restore the tutorial dock
     _sbDetachClip();   // v0.29.27 — unload the clip with the overlay
@@ -54689,6 +54766,34 @@ function updateMonsters(dt) {
     // toast. Excludes super/hyper bosses (Aetherion / Gravitos —
     // already hand-tuned phase 3 mechanics) and mirrorSelf (boss-clone
     // damage cap means stat surge would break the design).
+    // v0.29.60 — BOSS PHASE 2 at 60% HP. Top-2D-RPG three-act fight
+    // structure: opening kit (100-60%) → PHASE 2 twist (60-25%) → the
+    // existing 25% enrage as the final act. Phase 2 is a one-time beat:
+    // announce + fx, +10% speed, ranged cds ×0.85, +18% pattern cadence
+    // (bossAI reads m._bossPhase2), and it UNLOCKS a per-boss signature:
+    //   • King Gloopaloo — goo barrage extends to 12 shots and every
+    //     teleport combos straight into a barrage (emerge → point-blank).
+    //   • Queen Shroomaloo — SPORE BLOOM: each leap impact detonates a
+    //     radial 10-spore ring the player weaves between.
+    //   • King Koopaloo — SHELL CYCLONE: twice-across-the-arena shell
+    //     dash, ends dizzy (guaranteed punish window).
+    //   • Trait bosses (Smith / Rexy / Barnaby / Arbiter / Sovereign)
+    //     get the stat surge + cadence through their shared kits.
+    // Same exclusions as the enrage below, plus zodiacs (they carry the
+    // adaptive-tempo EMA + per-sign signature phases already).
+    if (m.isBoss && !m._bossPhase2 && !m._aetherionEvolved &&
+        !m.superBoss && !m.hyperBoss && !m.zodiacBoss && m.type !== 'mirrorSelf' &&
+        m.currentHp > 0 && m.currentHp <= m.maxHp * 0.60) {
+      m._bossPhase2 = true;
+      m.speed = (m.speed || 1) * 1.10;
+      if (m.shootCd) m.shootCd = Math.floor(m.shootCd * 0.85);
+      if (typeof showToast === 'function') {
+        showToast(`⚔ ${m.name || 'Boss'} — PHASE 2! The fight changes.`, 'epic');
+      }
+      if (typeof flash === 'function') flash(0.22);
+      if (typeof addShake === 'function') addShake(5);
+      if (typeof audio !== 'undefined' && audio.play) audio.play('hit');
+    }
     if (m.isBoss && !m._enraged && !m._aetherionEvolved &&
         !m.superBoss && !m.hyperBoss && m.type !== 'mirrorSelf' &&
         m.currentHp > 0 && m.currentHp <= m.maxHp * 0.25) {
@@ -57411,6 +57516,11 @@ function bossAI(m, dt, distToPlayer) {
   // v0.26.x — Gravitos Awakened/Ascendant attack faster (extra cadence layered
   // on top of the global x1.30); only forms 2/3 set m._gravCadenceMul.
   if (m._gravCadenceMul) m.patternTimer += dt * (m._gravCadenceMul - 1);
+  // v0.29.60 — BOSS PHASE 2 cadence (+18%). Set by the universal 60%-HP
+  // phase trigger (see the enrage block in updateMonsters) on normal
+  // bosses only — supers/zodiacs keep their bespoke phase pacing. Layered
+  // the same way as _gravCadenceMul so telegraph windows still resolve.
+  if (m._bossPhase2) m.patternTimer += dt * 0.18;
   // v0.26.x — PUNISH WINDOW: tick cooldown, open a window on attack->idle, and
   // while staggered freeze the boss (stunned + vulnerable) and skip its attacks.
   if (m._staggerCd > 0) m._staggerCd -= dt;
@@ -57666,7 +57776,11 @@ function bossAI(m, dt, distToPlayer) {
         showToast('🌊 GOO BARRAGE — JUMP to keep moving!', 'rare');
       }
       // Fire 8 goos paced 110 ms apart starting at t = 400.
-      if (m.patternTimer >= 400 && m._gooFired < 8 && m.patternTimer >= (m._gooNextAt || 400)) {
+      // v0.29.60 — PHASE 2: the barrage extends to 12 shots. Same pacing,
+      // same per-shot damage — the pressure comes from duration (the
+      // player must keep moving ~40% longer per barrage).
+      const _gooMax = m._bossPhase2 ? 12 : 8;
+      if (m.patternTimer >= 400 && m._gooFired < _gooMax && m.patternTimer >= (m._gooNextAt || 400)) {
         m._gooFired += 1;
         m._gooNextAt = m.patternTimer + 110;
         const sx = m.x + m.w/2;
@@ -57693,8 +57807,8 @@ function bossAI(m, dt, distToPlayer) {
         });
         if (typeof addShake === 'function') addShake(2);
       }
-      // End pattern after all 8 fired + a brief cooldown.
-      if (m._gooFired >= 8 && m.patternTimer > 400 + 8 * 110 + 200) {
+      // End pattern after all shots fired + a brief cooldown.
+      if (m._gooFired >= _gooMax && m.patternTimer > 400 + _gooMax * 110 + 200) {
         m._gooFired = 0;
         m._gooNextAt = 0;
         m._gooAnnounced = false;
@@ -57770,7 +57884,19 @@ function bossAI(m, dt, distToPlayer) {
         m._teleportAnnounced = false;
         m._teleportVanished = false;
         m._teleportFired = false;
-        m.patternState = 'idle';
+        // v0.29.60 — PHASE 2 combo: the teleport chains STRAIGHT into a
+        // goo barrage from the emerge position (classic 2D-boss "reposition
+        // → immediate pressure" combo). The barrage's own 400 ms wind-up
+        // telegraph still gives the reaction window; the emerge burst +
+        // dissolve toast are the early warning.
+        if (m._bossPhase2) {
+          m.patternState = 'gooBarrage';
+          m._gooFired = 0;
+          m._gooNextAt = 0;
+          m._gooAnnounced = false;
+        } else {
+          m.patternState = 'idle';
+        }
         m.patternTimer = 0;
       }
     } else if (m.patternState === 'gluespray') {
@@ -59718,6 +59844,26 @@ function bossAI(m, dt, distToPlayer) {
             })) break;
           }
         }
+        // v0.29.60 — PHASE 2 signature: SPORE BLOOM. The landing detonates
+        // a radial ring of 10 slow spores the player weaves between (the
+        // gaps are the dodge — bullet-hell ring at beginner speed). Slight
+        // upward bias + mild gravity so the ring blooms and falls like a
+        // puffball bursting. Moderate per-spore damage; the ground-shake
+        // itself remains the lethal threat.
+        if (m._bossPhase2) {
+          if (typeof showToast === 'function') showToast('☁ SPORE BLOOM — slip between the spores!', 'epic');
+          for (let i = 0; i < 10; i++) {
+            const ang = -Math.PI + (i / 9) * Math.PI;   // upper half-circle fan
+            game.projectiles.push({
+              x: m.x + m.w/2, y: m.y + m.h * 0.4,
+              vx: Math.cos(ang) * 4.2,
+              vy: Math.sin(ang) * 4.2 - 1.2,
+              w: 18, h: 18, life: 110,
+              damage: m.atk * 0.6, owner: 'enemy', skill: 'spore',
+              color: '#cc88ee', gravity: 0.05,
+            });
+          }
+        }
       }
       // Exit ~600 ms after impact, or 2400 ms hard timeout if she
       // somehow never grounds (mid-air physics edge case).
@@ -59778,7 +59924,19 @@ function bossAI(m, dt, distToPlayer) {
         // pool when ready. ~22 % chance per idle cycle when off-CD →
         // averages once per ~30-40 s mid-fight, "occasionally" per spec.
         const _firebombReady = (_now - (m._lastFirebombAt || 0)) > 720;   // v0.26.394 — 12000→720 frames (12s)
-        if (_megaReady && r < 0.18) {
+        // v0.29.60 — PHASE 2 signature: SHELL CYCLONE. Unlocks below 60%
+        // HP (m._bossPhase2), own 14 s cooldown, top priority slot when
+        // ready. Bowser-meets-Koopa-shell: telegraph, then two full
+        // horizontal passes across the arena, ending DIZZY (a guaranteed
+        // punish window via the existing stagger freeze).
+        const _shellReady = m._bossPhase2 && ((_now - (m._lastShellAt || 0)) > 840);   // 14s in frames
+        if (_shellReady && r < 0.30) {
+          m._lastShellAt = _now;
+          m.patternState = 'shellSpin';
+          m._shellDir = 0;
+          m._shellPasses = 0;
+        }
+        else if (_megaReady && r < 0.18) {
           m._lastMegaAt = _now;
           m.patternState = 'megaFireball';
         }
@@ -59812,6 +59970,62 @@ function bossAI(m, dt, distToPlayer) {
         addShake(4);
       }
       if (t > 700) { m.patternState = 'idle'; m.patternTimer = 0; }
+    } else if (m.patternState === 'shellSpin') {
+      // v0.29.60 — SHELL CYCLONE (phase-2 signature). 700 ms crouch-and-
+      // -spin telegraph (dust kicks + toast), then Koopa rockets
+      // horizontally at 13 px/frame, bouncing off the arena walls; after
+      // TWO full passes he pops out dizzy — m._stagger fires the existing
+      // punish-window freeze + "STAGGERED" callout, so the cyclone is a
+      // risk the PLAYER can cash in on by jumping it. Contact damage is
+      // the standard boss touch (already amplified by _lvGapDmgMul).
+      if (!m._kAnnounced && t < 100) {
+        m._kAnnounced = true;
+        showToast('🐢 SHELL CYCLONE — JUMP the shell, punish the dizzy!', 'legendary');
+        if (typeof audio !== 'undefined' && audio.play) audio.play('hit');
+      }
+      if (t < 700) {
+        m.vx = 0;
+        // Spin-up dust telegraph
+        if ((game.time & 3) === 0 && typeof _budgetedParticlePush === 'function') {
+          for (let i = 0; i < 2; i++) {
+            _budgetedParticlePush({
+              x: m.x + m.w/2 + (Math.random() - 0.5) * m.w,
+              y: m.y + m.h - 6,
+              vx: (Math.random() - 0.5) * 3, vy: -0.8 - Math.random(),
+              life: 14, color: '#aa8844', size: 3,
+            });
+          }
+        }
+      } else {
+        if (!m._shellDir) m._shellDir = m.facing || 1;
+        m.vx = m._shellDir * 13;
+        // Spin trail
+        if ((game.time & 1) === 0 && typeof _budgetedParticlePush === 'function') {
+          _budgetedParticlePush({
+            x: m.x + (m._shellDir > 0 ? 0 : m.w), y: m.y + m.h * (0.3 + Math.random() * 0.5),
+            vx: -m._shellDir * 2, vy: (Math.random() - 0.5) * 1.5,
+            life: 16, color: '#88aa44', size: 3.5,
+          });
+        }
+        // Wall bounce → count a pass.
+        const _ww = (game.mapData && game.mapData.worldWidth) || 2400;
+        if ((m._shellDir < 0 && m.x <= 30) || (m._shellDir > 0 && m.x + m.w >= _ww - 30)) {
+          m._shellDir *= -1;
+          m._shellPasses = (m._shellPasses || 0) + 1;
+          if (typeof addShake === 'function') addShake(7);
+        }
+        // Two passes done (or 9 s hard timeout) → dizzy punish window.
+        if ((m._shellPasses || 0) >= 2 || t > 9000) {
+          m._shellDir = 0;
+          m.vx = 0;
+          m._stagger = 1500;   // freeze + existing "STAGGERED — punish it!" flow
+          m._staggerCd = 6000;
+          if (typeof showToast === 'function') showToast('💫 Koopa spins out — DIZZY!', 'epic');
+          m._kAnnounced = false;
+          m.patternState = 'idle';
+          m.patternTimer = 0;
+        }
+      }
     } else if (m.patternState === 'firebomb') {
       // v0.26.156 — Per user "make koopa boss occasionally spit out
       // p_firebomb in multi directions". 600 ms telegraphed windup
@@ -61475,63 +61689,52 @@ function _applyInnateLevelupRng() {
   return total;
 }
 
-// v0.28.11 — KILL-COUNT-ANCHORED LEVELING CURVE (per user request).
-// expToNext at level L is set so that grinding LEVEL-ADJACENT monsters (±2
-// levels, at current live rates including the ×10 opening event) takes about:
-//   Lv  5 →    50 kills
-//   Lv 10 →   250 kills
-//   Lv 20 → 1,000 kills
-//   Lv 50 → 5,000 kills
-//   Lv 70 → 20,000 kills
-// Each anchor's EXP cost = targetKills × the level-adjacent average per-kill
-// EXP at that level (snapshotted from the live mob tables via
-// scripts/exp_breakdown). Between anchors the cost is log-linearly
-// interpolated (smooth, strictly increasing); Lv 1-4 ease in with a power
-// ramp into the Lv-5 anchor (fast onboarding); above Lv 70 the last segment's
-// per-level slope continues.
-// CAVEAT: anchors assume the ×10 event (LX_EVENT_EXP_MULT) is live — that's
-// what players see right now. When the event reverts to ×1, per-kill EXP drops
-// ×10 so kill counts rise ×10; divide _LX_LEVEL_COST_ANCHORS by 10 then. If mob
-// EXP is retuned, re-derive with scripts/exp_breakdown and update the anchors.
-const _LX_LEVEL_COST_ANCHORS = [
-  [5,          65800],
-  [10,        252500],
-  [20,      13239000],
-  [25,       3190000],   // v0.28.11 — extra mid anchor (~1,300 kills): the Lv 24-26 mobs are EXP-poor, so plain 20→50 interpolation ballooned Lv 25 to ~9,100 kills (a spike ABOVE the Lv-50 target). This lands Lv 25 on-trend between Lv 20 (1,000) and Lv 50 (5,000).
-  [50,     293285000],
-  [70,    5764500000],
+// v0.29.61 — TIME-ANCHORED LEVELING CURVE (per user). Calibrated so a SOLO
+// player fighting LEVEL-ADJACENT (±2) monsters at ~5 s/kill, with the ×10
+// opening EVENT OFF (steady state — the PERMANENT ×10 monster multiplier
+// LX_MONSTER_EXP_MULT stays on), reaches:
+//   Lv 50  → ~10 hours cumulative   (~7,200 kills)
+//   Lv 80  → ~40 hours cumulative   (~28,800 kills)
+//   Lv 100 → ~77 hours cumulative   (~55,500 kills)
+// While the live ×10 opening event is ON, leveling is ~10× FASTER than the
+// above (Lv 50 ≈ 1 h) — the event reverting to ×1 snaps play to these targets.
+// HOW: per-level EXP cost is BAKED below as target_kills(L) × the live
+// adjacent-mob EXP/kill at that level, so the KILL (and thus time) counts come
+// out smooth + strictly increasing even where the mob-EXP tables are lumpy —
+// this removes the old Lv-20 cost spike. target_kills follows a power law fit
+// through the two anchors (7,200 @50 · 28,800 @80); Lv 1-6 floored at 8 kills
+// for a substantive early game. REGENERATE with scripts/level_time_retune.mjs
+// if mob EXP or the multiplier stack (LX_MONSTER_EXP_MULT / xpCurveMul /
+// early-level ×3) changes — the bake assumes the values live at v0.29.61.
+const _LX_LEVEL_COST_TABLE = [
+  6480,7695,7695,10287,10530,4293,6525,8677,11727,19027,
+  24815,29909,52006,80317,89249,114121,133614,154851,155083,206371,
+  235927,282327,258270,314250,324068,481515,518070,645422,848748,908136,
+  959355,1175809,1954800,2078300,2317574,2688035,3045565,5568256,6520835,6620898,
+  7094439,8648787,7692088,8049860,9683044,13214059,13411545,15704465,20969493,24663727,
+  24829586,25773303,43330657,49451085,51036361,62756966,62660764,64319114,60011035,63727004,
+  59760932,97227216,95134253,106221827,115439234,135726587,147636472,181237698,197477595,239007976,
+  253836761,319020486,267711447,274780015,281935909,289179016,296509221,303926414,311430483,319021320,
+  326698818,334462872,342313377,350250230,358273331,366382579,374577874,382859121,391226222,399679082,
+  408217608,416841706,425551284,434346253,443226523,452192005,461242612,470378257,479598855,488904322,
+  498294573,507769526,517329100,526973213,536701786,546514738,556411993,566393472,576459099,586608797,
+  596842492,607160109,617561574,628046815,638615758,649268333,660004468,670824094,681727140,692713538,
+  703783220,714936118,726172164,737491292,748893437,760378533,771946516,783597320,795330884,807147143,
+  819046035,831027499,843091472,855237894,867466705,879777843,892171251,904646869,917204638,929844500,
+  942566398,955370275,968256074,981223739,994273213,1007404442,1020617370,1033911944,1047288108,1060745809,
+  1074284994,1087905609,1101607603,1115390922,1129255516,1143201332,1157228320,1171336428,1185525607,1199795806,
+  1214146976,1228579067,1243092031,1257685818,1272360380,1287115670,1301951639,1316868240,1331865427,1346943151,
+  1362101368,1377340030,1392659092,1408058508,1423538233,1439098222,1454738430,1470458813,1486259326,1502139926,
+  1518100569,1534141211,1550261810,1566462323,1582742707,1599102920,1615542920,1632062664,1648662112,1665341221,
+  1682099952,1698938262,1715856112,1732853461,1749930268,1767086495,1784322100,1801637046,1819031291,1836504798
 ];
-// v0.29.5 — global level-cost scale (per user "reduce exp needed for level up
-// by half"). Multiplies EVERY level's EXP requirement, so the whole curve — the
-// anchors above, the Lv 1-4 ease-in and the Lv 70+ extrapolation — halves
-// uniformly and kill counts halve with it (Lv 5 ~25 kills, 10 ~125, 20 ~500,
-// 50 ~2,500, 70 ~10,000). Change this one number to re-tune (0.25 = quarter).
-const _LX_LEVEL_COST_MUL = 0.5;
 function _lxLevelCost(L) {
-  const A = _LX_LEVEL_COST_ANCHORS;
-  const lo = A[0], hi = A[A.length - 1];
-  let raw;
-  if (L <= lo[0]) {
-    // Levels 1-4: smooth ease-in toward the Lv-5 anchor (fast early game).
-    raw = Math.max(30, lo[1] * Math.pow(L / lo[0], 3.5));
-  } else {
-    raw = null;
-    for (let i = 0; i < A.length - 1; i++) {
-      const a = A[i], b = A[i + 1];
-      if (L <= b[0]) {
-        const t = (L - a[0]) / (b[0] - a[0]);
-        raw = a[1] * Math.pow(b[1] / a[1], t);   // log-linear interpolation
-        break;
-      }
-    }
-    if (raw == null) {
-      // Above the top anchor: continue the last segment's per-level growth factor.
-      const a = A[A.length - 2], b = hi;
-      const perLvl = Math.pow(b[1] / a[1], 1 / (b[0] - a[0]));
-      raw = b[1] * Math.pow(perLvl, L - b[0]);
-    }
-  }
-  return Math.max(15, Math.floor(raw * _LX_LEVEL_COST_MUL));
+  const T = _LX_LEVEL_COST_TABLE;
+  if (L < 1) return T[0];
+  if (L <= T.length) return T[L - 1];
+  // Beyond the baked range (Lv 200 cap): continue the final per-level ratio.
+  const ratio = T[T.length - 1] / T[T.length - 2];
+  return Math.floor(T[T.length - 1] * Math.pow(ratio, L - T.length));
 }
 
 function _maybeLevelUp() {
@@ -62687,6 +62890,18 @@ function killMonster(m) {
   // and despawn them too, with a small per-leg particle burst for
   // visual feedback. Runs BEFORE the splice + boon modal so the boss
   // sequence reads as one clean defeat.
+  // v0.29.60 — Octobaby fight rhythm: killing a TENTACLE makes the head
+  // reel for 1.3 s (direct m._stagger — bossAI's freeze block honors it
+  // even though octobaby is excluded from the auto attack→idle punish).
+  // Turns the 8-limb fight into a clear loop: focus a tentacle → head
+  // reels → free damage window on the head → repeat. Each severed limb
+  // now has tactical value beyond removing its status special.
+  if (m._octoParent && m._octoParent.currentHp > 0 && m._octoParent.type === 'octobaby') {
+    const _head = m._octoParent;
+    _head._stagger = Math.max(_head._stagger || 0, 1300);
+    if (typeof showToast === 'function') showToast('🐙 A tentacle falls — Octobaby REELS! Hit the head!', 'epic');
+    if (typeof addShake === 'function') addShake(5);
+  }
   if (m.type === 'octobaby') {
     for (let _i = game.monsters.length - 1; _i >= 0; _i--) {
       const _leg = game.monsters[_i];
