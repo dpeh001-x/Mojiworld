@@ -26665,6 +26665,85 @@ function _grantMojicoins(n, opts) {
   player.mojicoins = Math.min(1e12, _before + granted);
   return player.mojicoins - _before;
 }
+// =========================================================================
+// v0.29.66 — EDICTS OF THE WEIGHT-BEARER (à-la-carte "heat" system).
+// Hades' Heat / Slay the Spire's Ascension, in Everdawn terms: the player
+// petitions Gravitos (via the Amnesiac) to press harder. Each Edict toggled
+// on adds +1 WEIGHT; total Weight raises EXP and gear-drop rate a little
+// (a modest, always-worth-it bribe for a genuinely harder game). Purely
+// opt-in — all default OFF. Enemy edicts bake into mob stats at spawn
+// (apply on the next map you enter); player edicts read live through the
+// stat accessors. Persisted as game.edicts (GAME_SAVE_FIELDS).
+const EDICTS = [
+  { id:'ironVerdict',  name:'Iron Verdict',   icon:'🛡', desc:'Enemy DEF +50%',      line:'Their forms refuse to yield.' },
+  { id:'unwakingVigil',name:'Unwaking Vigil', icon:'💜', desc:'Enemy HP +50%',       line:'The nightmare holds on longer.' },
+  { id:'cruelHour',    name:'Cruel Hour',     icon:'⚔️', desc:'Enemy ATK +50%',      line:'Every blow of theirs lands heavier.' },
+  { id:'waningHand',   name:'Waning Hand',    icon:'🌙', desc:'Your ATK −50%',        line:'Your strength thins to a rumor.' },
+  { id:'frayedThread', name:'Frayed Thread',  icon:'🧵', desc:'Your Max HP −25%',     line:'The thread of your life pulls taut.' },
+  { id:'glassSkin',    name:'Glass Skin',     icon:'💎', desc:'You take +25% damage', line:'Every wound cuts a little deeper.' },
+];
+function _edictOn(id) { return !!(typeof game !== 'undefined' && game && game.edicts && game.edicts[id]); }
+function _edictWeight() { let w = 0; if (typeof game !== 'undefined' && game && game.edicts) { for (const e of EDICTS) if (game.edicts[e.id]) w++; } return w; }
+// Modest reward bribe: +8% EXP and +6% gear-drop rate per Weight.
+function _edictExpMul()  { return 1 + _edictWeight() * 0.08; }
+function _edictDropMul() { return 1 + _edictWeight() * 0.06; }
+function openEdictsPanel() {
+  if (!game.edicts) game.edicts = {};
+  let ov = document.getElementById('edicts-modal');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'edicts-modal';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:520;display:flex;align-items:center;'
+      + 'justify-content:center;background:rgba(4,2,12,0.82);backdrop-filter:blur(3px);';
+    document.body.appendChild(ov);
+  }
+  const close = () => { try { ov.remove(); } catch (e) {} if (typeof saveState === 'function') saveState(); };
+  const render = () => {
+    const w = _edictWeight();
+    const rows = EDICTS.map(e => {
+      const on = _edictOn(e.id);
+      return '<button class="edict-row" data-id="' + e.id + '" style="'
+        + 'display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:11px 14px;'
+        + 'margin:0;border-radius:11px;cursor:pointer;transition:all .12s;'
+        + 'border:1px solid ' + (on ? '#c8a8ff' : 'rgba(150,120,200,0.28)') + ';'
+        + 'background:' + (on ? 'linear-gradient(90deg,rgba(90,50,150,0.6),rgba(50,26,90,0.6))' : 'rgba(24,14,42,0.7)') + ';">'
+        + '<span style="font-size:22px;filter:' + (on ? 'none' : 'grayscale(0.7) opacity(0.6)') + ';">' + e.icon + '</span>'
+        + '<span style="flex:1;">'
+        +   '<span style="display:block;font:700 15px Inter,system-ui,sans-serif;color:' + (on ? '#f0e6ff' : '#b8a8d0') + ';">' + e.name + '  <span style="font-weight:600;color:#ff9ac8;">' + e.desc + '</span></span>'
+        +   '<span style="display:block;font:400 12px Inter,system-ui,sans-serif;color:#9a8fc0;font-style:italic;">' + e.line + '</span>'
+        + '</span>'
+        + '<span style="font:700 12px Inter,system-ui,sans-serif;padding:3px 10px;border-radius:9px;'
+        +   'background:' + (on ? '#7a4fd0' : 'rgba(0,0,0,0.35)') + ';color:' + (on ? '#fff' : '#8a7fb0') + ';">' + (on ? 'BORNE ✦' : 'set down') + '</span>'
+        + '</button>';
+    }).join('');
+    ov.innerHTML =
+      '<div style="width:min(560px,92vw);max-height:90vh;overflow:auto;background:linear-gradient(180deg,#1a0f30,#120a24);'
+      + 'border:1px solid rgba(180,140,255,0.4);border-radius:18px;padding:22px 22px 18px;box-shadow:0 20px 80px rgba(0,0,0,0.6);">'
+      + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px;">'
+      +   '<h2 style="margin:0;font:800 20px Inter,system-ui,sans-serif;background:linear-gradient(90deg,#c8a8ff,#ff9ae8);-webkit-background-clip:text;background-clip:text;color:transparent;">🌌 Edicts of the Weight-Bearer</h2>'
+      +   '<button id="edicts-close" style="border:1px solid rgba(180,140,255,0.4);background:rgba(30,16,58,0.85);color:#cdb8ff;border-radius:9px;padding:5px 12px;font:700 13px Inter;cursor:pointer;">Close ✕</button>'
+      + '</div>'
+      + '<p style="margin:0 0 14px;font:400 13px/1.5 Inter,system-ui,sans-serif;color:#b0a0d0;">Petition the Weight-Bearer to press harder. Each burden you shoulder adds <b style="color:#ff9ac8;">Weight</b> — and the heavier you walk, the more the dreaming world rewards you.</p>'
+      + '<div style="display:flex;flex-direction:column;gap:8px;">' + rows + '</div>'
+      + '<div style="margin-top:16px;padding:12px 14px;border-radius:12px;background:rgba(0,0,0,0.3);border:1px solid rgba(180,140,255,0.22);text-align:center;">'
+      +   '<span style="font:800 17px Inter,system-ui,sans-serif;color:#f0e6ff;">WEIGHT ' + w + '</span>'
+      +   '<span style="display:block;margin-top:3px;font:600 13px Inter,system-ui,sans-serif;color:#8fe0a0;">+' + Math.round((_edictExpMul() - 1) * 100) + '% EXP  ·  +' + Math.round((_edictDropMul() - 1) * 100) + '% gear-drop rate</span>'
+      +   '<span style="display:block;margin-top:4px;font:400 11px Inter,system-ui,sans-serif;color:#9a8fc0;">Enemy edicts take hold the next time you enter a map.</span>'
+      + '</div></div>';
+    ov.querySelector('#edicts-close').onclick = close;
+    ov.querySelectorAll('.edict-row').forEach(btn => {
+      btn.onclick = () => {
+        const id = btn.getAttribute('data-id');
+        game.edicts[id] = !game.edicts[id];
+        if (typeof _applyEquippedBoons === 'function') { try { _applyEquippedBoons(); } catch (e) {} }
+        if (typeof _refreshHud === 'function') { try { _refreshHud(); } catch (e) {} }
+        render();
+      };
+    });
+  };
+  ov.onclick = (ev) => { if (ev.target === ov) close(); };
+  render();
+}
 function getAtk()  {
   // v0.25.738 — STR / INT primary-attribute bonus removed. ATK now
   // grows from baseAtk (per-level class gains) + mods.atk (boons) +
@@ -26767,7 +26846,8 @@ function getAtk()  {
   // v0.25.55 — global player-damage knob. See PLAYER_ATK_MUL declaration
   // for context; halves every attack (basics + skills) so mobs don't
   // melt instantly.
-  return Math.floor(base * pct * pDmg * PLAYER_ATK_MUL * _clsAtkMul);
+  const _edAtk = _edictOn('waningHand') ? 0.5 : 1;   // v0.29.66 — Edict: Waning Hand (your ATK −50%)
+  return Math.floor(base * pct * pDmg * PLAYER_ATK_MUL * _clsAtkMul * _edAtk);
 }
 // v0.25.856 — Warrior Fortitude Lv-scaling. Returns the damage-taken
 // multiplier that warrior-class damage paths use. At Lv ≤50 it stays at
@@ -26858,6 +26938,7 @@ function getMaxHp(){
   if (_hpPct) h = Math.floor(h * (1 + _hpPct));
   // v0.26.889 — job talent: max HP%
   { const _tfx = (typeof talentFx === 'function') ? talentFx() : null; if (_tfx && _tfx.maxHpPct) h = Math.floor(h * (1 + _tfx.maxHpPct)); }
+  if (_edictOn('frayedThread')) h = Math.floor(h * 0.75);   // v0.29.66 — Edict: Frayed Thread (your Max HP −25%)
   return h;
 }
 function getMaxMp(){
@@ -31048,7 +31129,7 @@ function toggleLoreMap() {
 // (contact / projectile / boss strike); DOT ticks (poison/burn) + environmental
 // use raw hp -=. Stamp the frame so the hit-grunt fires ONLY on a real monster
 // attack (not on DOT/environmental) — per user "only groan when attacked by monster".
-function _diffDmg(d) { try { if (typeof player !== 'undefined' && player && typeof game !== 'undefined' && game) player._monsterHitAt = game.time; } catch (_) {} var m = (typeof game !== 'undefined' && game && game._diffDmgMul) ? game._diffDmgMul : 1; var _pl = (typeof player !== 'undefined' && player && player.level) ? (player.level | 0) : 1; var _MOB_DMG_PUNISH = (_pl <= 20) ? (1.3 + Math.max(0, _pl - 1) * (1.7 / 19)) : Math.min(6, 3 + (_pl - 20) * 0.05); /* v0.26.x - per user: punish ramps 1.3x (L1) -> 3x (L20) -> 6x (L80+), piecewise-linear. Stacks with difficulty + the level-gap amplifier. */ m *= _MOB_DMG_PUNISH; if (typeof game !== 'undefined' && game && game._curseHex && game._curseHex.kills > 0) m *= 3; /* v0.29.60 - cursed-chest hex: x3 incoming damage until N kills lift it */ return Math.max(0, Math.round(d * m)); }
+function _diffDmg(d) { try { if (typeof player !== 'undefined' && player && typeof game !== 'undefined' && game) player._monsterHitAt = game.time; } catch (_) {} var m = (typeof game !== 'undefined' && game && game._diffDmgMul) ? game._diffDmgMul : 1; var _pl = (typeof player !== 'undefined' && player && player.level) ? (player.level | 0) : 1; var _MOB_DMG_PUNISH = (_pl <= 20) ? (1.3 + Math.max(0, _pl - 1) * (1.7 / 19)) : Math.min(6, 3 + (_pl - 20) * 0.05); /* v0.26.x - per user: punish ramps 1.3x (L1) -> 3x (L20) -> 6x (L80+), piecewise-linear. Stacks with difficulty + the level-gap amplifier. */ m *= _MOB_DMG_PUNISH; if (typeof game !== 'undefined' && game && game._curseHex && game._curseHex.kills > 0) m *= 3; /* v0.29.60 - cursed-chest hex: x3 incoming damage until N kills lift it */ if (typeof _edictOn === 'function' && _edictOn('glassSkin')) m *= 1.25; /* v0.29.66 - Edict: Glass Skin (+25% damage taken) */ return Math.max(0, Math.round(d * m)); }
 // v0.28.7 — Difficulty reward scaling ("risk vs reward"). The damage side of
 // the difficulty setting lives in _diffDmg above (via game._diffDmgMul); these
 // three read the tier string game._diffTier — which follows the SAME mid-boss
@@ -31339,6 +31420,7 @@ const GAME_SAVE_FIELDS = [
   'currentMap','bossDefeated','kills','achievements',
   // v0.26.451 - per-map chest restock cooldown (anti re-entry farm); persisted so reload can't reset it.
   '_chestCooldown',
+  'edicts',   // v0.29.66 — Edicts of the Weight-Bearer heat toggles ({edictId:true})
   '_timeHW',   // v0.26.452 - monotonic clock high-water mark (rollback guard)
   '_playMs','_bossDefeatedAt',   // v0.26.453 - boss respawn playtime cooldown
   '_qteStats',   // v0.26.x -- shackle-QTE ledger (caught/breaks/clean) for the future achievement
@@ -44456,8 +44538,13 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // max) — so high-level mobs still hit hard but no longer instakill. HP,
   // EXP, DEF and all sub-L50 ATK are untouched (softener = 1 at/below L50).
   const _atkHiLvSoften = isBoss ? 1 : (1 - Math.min(0.50, Math.max(0, _natLvForExp - 50) * 0.025));
-  const hpMult  = (isBoss ? 1 : (isMiniBoss ? 5   : isElite ? 3   : 1)) * towerHp  * _distMul * _hpKnob * _mapMul * UNIVERSAL_HP_MUL * (isBoss ? 1 : MONSTER_STAT_MUL) * _hpAtkLvExp * _hpAtkLinLv;   // v0.26.398 — bosses exempt from MONSTER_STAT_MUL (was double-dipped onto bosses → ~17.5% of authored HP; now authored × UNIVERSAL_HP_MUL only)
-  const atkMult = (isBoss ? 1 : (isMiniBoss ? 2   : isElite ? 1.5 : 1)) * towerAtk * _distMul * _mapMul * MONSTER_STAT_MUL * _hpAtkLvExp * _hpAtkLinLv * _atkHiLvSoften;   // v0.26.400 — boss ATK exemption REVERTED (HP-only split). v0.26.398 had exempted boss ATK too → ~2.86× hits that outpaced player HP buffs; bosses keep the HP exemption (tankier) but ATK returns to the calibrated ~0.35× value.
+  // v0.29.66 — Edict enemy multipliers (Unwaking Vigil / Cruel Hour). Apply
+  // to every monster incl. bosses — a heat system makes the WHOLE game harder,
+  // and it's opt-in. Baked at spawn, so a toggle takes effect on the next map.
+  const _edHp  = _edictOn('unwakingVigil') ? 1.5 : 1;
+  const _edAtk = _edictOn('cruelHour')     ? 1.5 : 1;
+  const hpMult  = (isBoss ? 1 : (isMiniBoss ? 5   : isElite ? 3   : 1)) * towerHp  * _distMul * _hpKnob * _mapMul * UNIVERSAL_HP_MUL * (isBoss ? 1 : MONSTER_STAT_MUL) * _hpAtkLvExp * _hpAtkLinLv * _edHp;   // v0.26.398 — bosses exempt from MONSTER_STAT_MUL (was double-dipped onto bosses → ~17.5% of authored HP; now authored × UNIVERSAL_HP_MUL only)
+  const atkMult = (isBoss ? 1 : (isMiniBoss ? 2   : isElite ? 1.5 : 1)) * towerAtk * _distMul * _mapMul * MONSTER_STAT_MUL * _hpAtkLvExp * _hpAtkLinLv * _atkHiLvSoften * _edAtk;   // v0.26.400 — boss ATK exemption REVERTED (HP-only split). v0.26.398 had exempted boss ATK too → ~2.86× hits that outpaced player HP buffs; bosses keep the HP exemption (tankier) but ATK returns to the calibrated ~0.35× value.
   // v0.26.134 — Per user "reduce all monster EXP gained by half". Global
   // ×0.5 on the final EXP multiplier — applies to normal mobs, elites,
   // mini-bosses, and bosses uniformly.
@@ -44538,7 +44625,7 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     // v0.26.169 — Linear coefficient 0.30 → 0.10 to match the HP/ATK
     // cut. Endgame DEFs were getting silly (Path's Bane 660 → ~325 now);
     // mid-game stays meaningful (Archon ~90 instead of 180).
-    def:   Math.floor((t.def || 0) * MONSTER_STAT_MUL * (1 + 0.10 * _natLvForExp)),
+    def:   Math.floor((t.def || 0) * MONSTER_STAT_MUL * (1 + 0.10 * _natLvForExp) * (_edictOn('ironVerdict') ? 1.5 : 1)),   // v0.29.66 — Edict: Iron Verdict (enemy DEF +50%)
     evasion: Math.floor((t.evasion || 40) * evaMult),
     exp:   Math.floor(t.exp   * expMult),
     mojicoins: Math.floor(t.mojicoins * mesMult),
@@ -63031,7 +63118,7 @@ function killMonster(m) {
   // total). Pre-luck effective rate 1.40% → 5.60%. Now that elites (3%) / elders
   // (15%) are much rarer, each is a meaningfully rewarding kill. Normal (tier 0)
   // and boss (tier 2) rates unchanged.
-  const dropChance = (tier === 2 ? 1.0 : tier === 1 ? 1.12 : 0.04) * (1 + luck) * 0.05 * (typeof _diffDropMul === 'function' ? _diffDropMul() : 1);   // v0.28.7 — Hard +25% / Nightmare +50% gear-drop chance
+  const dropChance = (tier === 2 ? 1.0 : tier === 1 ? 1.12 : 0.04) * (1 + luck) * 0.05 * (typeof _diffDropMul === 'function' ? _diffDropMul() : 1) * (typeof _edictDropMul === 'function' ? _edictDropMul() : 1);   // v0.28.7 — Hard +25% / Nightmare +50% gear-drop chance · v0.29.66 Edict Weight drop bonus
   if (itemRoll < dropChance) {
     // v0.25.678 — Pass the killed mob's effective level so rarity weights
     // (and affix magnitudes downstream) grade with mob difficulty. _mobLevel
@@ -63475,7 +63562,7 @@ function triggerSuperBossDeath(m) {
 
   // Huge EXP bonus on top of normal (prestige-scaled)
   const _pXp = (game.prestige && game.prestige.xpMult) || 1;
-  player.exp += Math.floor(m.exp * 0.5 * _pXp * (((player.level || 1) <= 5) ? 3 : 1) * LX_EVENT_EXP_MULT * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1));   // v0.26.x — +200% XP at levels 1-5 · (EVENT) opening +900% EXP · monster EXP knob (v0.28.5: ×1, was ×2) · v0.28.7 difficulty risk/reward
+  player.exp += Math.floor(m.exp * 0.5 * _pXp * (((player.level || 1) <= 5) ? 3 : 1) * LX_EVENT_EXP_MULT * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _edictExpMul === 'function' ? _edictExpMul() : 1));   // v0.26.x — +200% XP at levels 1-5 · (EVENT) opening +900% EXP · monster EXP knob (v0.28.5: ×1, was ×2) · v0.28.7 difficulty risk/reward · v0.29.66 Edict Weight EXP bonus
   // v0.26.x audit FIX — convert the banked bonus into levels NOW. The kill
   // flow's only _maybeLevelUp runs BEFORE this grant, so without this call a
   // Shardfather kill (a big, level-crossing bonus, more so with the ×20 EXP
@@ -65914,6 +66001,12 @@ function openNPC(npc) {
             { t:'✦ Train — level up' + (_canSwap ? ' · change path' : ''), cb: () => { game._amnesiacMenu = 'train'; openNPC(npc); } },
           ];
           if (_canTrial) _top.push({ t:'🌀 Trials — the second advancement', cb: () => { game._amnesiacMenu = 'trial'; openNPC(npc); } });
+          // v0.29.66 — Edicts of the Weight-Bearer (heat system). The
+          // Amnesiac, being a fellow shard of the Weight-Bearer's law,
+          // relays the petition. Weight readout shown inline so the
+          // player sees their current burden without opening the panel.
+          { const _w = (typeof _edictWeight === 'function') ? _edictWeight() : 0;
+            _top.push({ t:'🌌 Edicts — petition the Weight-Bearer' + (_w > 0 ? ' (Weight ' + _w + ')' : ''), cb: () => { game._amnesiacMenu = null; game._amnesiacStage = 0; closeDialog(); if (typeof openEdictsPanel === 'function') openEdictsPanel(); } }); }
           _top.push({ t:'Leave', cb:() => { game._amnesiacMenu = null; game._amnesiacStage = 0; closeDialog(); } });
           return _top;
         })()
@@ -106287,6 +106380,30 @@ function startBgm() {
     text-shadow: 0 0 12px rgba(140, 200, 230, 0.40) !important;
   }
 
+  /* v0.29.66 — Per user: standardise the character-creation page typography to
+     Calibri (was a mix of Cinzel / Cormorant Garamond serif + Inter) for a
+     cleaner, more organised look, and bold every header/label. Scoped to
+     #class-select-modal so the rest of the game's fonts are untouched. Calibri
+     is the target (Windows / Steam desktop); web-safe fallbacks follow. Emoji
+     glyphs still route to the system emoji font regardless of this family. */
+  #class-select-modal,
+  #class-select-modal * {
+    font-family: 'Calibri', 'Segoe UI', 'Helvetica Neue', system-ui, -apple-system, sans-serif !important;
+  }
+  /* Bold all headers on the page: the "Choose Your Story" title, the Guguma
+     chip name, the picker labels (HAIR / EYES / MOUTH / SKIN TONE) and the
+     Name / Gender field labels. */
+  #class-select-modal .cs-title,
+  #class-select-modal .cs-title-line,
+  #class-select-modal .cs-title-main,
+  #class-select-modal .cs-title-sub,
+  #class-select-modal .guguma-name,
+  #class-select-modal .cs-dropdown-label,
+  #class-select-modal .cs-section-label,
+  #class-select-modal .cs-field-label {
+    font-weight: 700 !important;
+  }
+
   /* L46. CLASS-SELECT — corner brackets (uses .cs-corner spans we'll add) */
   #class-select-modal .cs-corner {
     position: absolute;
@@ -107182,7 +107299,7 @@ function startBgm() {
   /* Ornamented serif title */
   #class-select-modal .cs-title .cs-title-line {
     display: block;
-    font: 600 17px/1.2 'Cormorant Garamond', 'Times New Roman', serif !important;
+    font: 700 18px/1.2 'Calibri', 'Segoe UI', system-ui, sans-serif !important;   /* v0.29.66 — Calibri + bold to match the page's standardised type (was 600 Cormorant Garamond serif); gold gradient below is preserved */
     letter-spacing: 5px !important;
     text-transform: uppercase;
     background: linear-gradient(180deg, #fff3cf 0%, #ffdd88 55%, #c9933e 100%);
