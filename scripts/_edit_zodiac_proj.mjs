@@ -20,6 +20,9 @@ if (!APPLY && !existsSync(PREV)) mkdirSync(PREV, { recursive: true });
 
 const KEYFILTER = (process.env.KEYS || '').split(',').filter(Boolean);
 const JOBS = [
+  { key: 'taurus_boulder', base: 'p_taurus_boulder.png', ops: { removeShadow: true } },
+  { key: 'scale',          base: 'p_scale.png',          ops: { removeShadow: true } },
+  { key: 'droplet',        base: 'p_droplet.png',        ops: { removeShadow: true } },
   { key: 'gemini_shard', base: 'p_gemini_shard.png', ops: { removeShadow: true, pointRight: true } },
   { key: 'icePillar',    base: 'p_icepillar.png',    ops: { pointRight: true } },   // shadow removed via ludo first
   { key: 'cancerBubble', base: 'p_cancerbubble.png', ops: { removeShadow: true } },
