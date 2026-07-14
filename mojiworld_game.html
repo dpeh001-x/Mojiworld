@@ -8725,7 +8725,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.74';
+const GAME_VERSION = 'v0.29.75';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -9459,6 +9459,33 @@ const LX_VFX = (() => {
   return out;
 })();
 function _lxVfxReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+// v0.29.74 — Shared-combat-VFX frame animation. Each Sprites/vfx/<key>.webp now
+// has an optional 9-frame loop at Sprites/vfx/anim/<basename>_0..8.webp (ludo.ai
+// sprite-animate — intrinsic effect only, no transform, the renderer still
+// scales/positions the hazard). _lxVfxFrame(camelKey) returns the current loop
+// frame once decoded, else the static base image, so every render site that
+// draws it animates smoothly and falls back cleanly. Frames lazy-load on the
+// FIRST render of that effect (never at boot), so there is no boot decode storm.
+const VFX_ANIM_FRAMES = Object.create(null);
+const _VFX_FRAME_MS = 70;
+const _VFX_ANIM_BASE = {
+  gravityWell: 'gravity_well', frostBeam: 'frost_beam', poisonCloud: 'poison_cloud',
+  shockRing: 'shock_ring', lightningPillar: 'lightning_pillar', quakeRing: 'quake_ring',
+  dashStreak: 'dash_streak', lavaDrop: 'lava_drop', lavaPool: 'lava_pool',
+};
+function _lxVfxFrame(camelKey) {
+  const staticImg = LX_VFX[camelKey];
+  const base = _VFX_ANIM_BASE[camelKey];
+  if (!base) return staticImg;
+  let arr = VFX_ANIM_FRAMES[camelKey];
+  if (arr === undefined) {
+    arr = new Array(9).fill(null);
+    for (let i = 0; i < 9; i++) { const img = new Image(); img.decoding = 'async'; img.onerror = () => {}; img.src = 'Sprites/vfx/anim/' + base + '_' + i + '.webp'; arr[i] = img; }
+    VFX_ANIM_FRAMES[camelKey] = arr;
+  }
+  const f = (typeof _bossLoopFrame === 'function') ? _bossLoopFrame(arr, _VFX_FRAME_MS) : null;
+  return (f && f.complete && f.naturalWidth > 0) ? f : staticImg;
+}
 // =========================================================================
 // LX_WORLD — world-decoration sprites (v0.25.172)
 // =========================================================================
@@ -18795,16 +18822,11 @@ const MAPS = {
       {x:1000, y:180, w:240, h:14, type:'platform'},  // canopy centre (highest)
       {x:1700, y:200, w:200, h:14, type:'platform'},  // canopy east
     ],
-    // v0.25.850 — Mushroom-rot sinkholes. Three soft spots where the
-    // cavern floor has rotted through from below. Each is ~70 px wide.
-    // Stepping on one trips a 700 ms hitStun + dust burst — beginner
-    // map (Lv 9 gate) gets a gentle introduction to the pothole hazard
-    // before the harsher Crypt of Whispers and Dune Sands instances.
-    potholes: [
-      { x:680,  w:70 },
-      { x:1340, w:80 },
-      { x:1880, w:70 },
-    ],
+    // v0.29.75 — Per user: the mushroom-rot STUN sinkholes were REMOVED from
+    // this beginner map (Lv 9) — a stumble-stun is too punishing an intro
+    // hazard. The black stun-pits now live in the Bone Graveyard / Hollow
+    // Sepulchre catacombs and the higher-level Bloom Reaches Thornspire
+    // Thicket instead (see their `potholes` fields).
     portals: [],
     // v0.25.840 — Mushrooms now spawn platformLocked. They perch on the
     // mid-cap and high-canopy tiers and patrol their cap only — they
@@ -20520,6 +20542,15 @@ const MAPS = {
       {x:700,  y:210, w:260, h:14, type:'platform'},
       {x:1560, y:200, w:280, h:14, type:'platform'},
     ],
+    // v0.29.75 — Thorn-choked sinkholes. A few bramble-hidden pits in the
+    // higher-level Bloom Reaches thicket — the same 700 ms stumble-stun hazard
+    // (moved off the beginner Fungal Hollow). Only "some parts" of the map are
+    // trapped, in the open floor gaps between the low thorn platforms.
+    potholes: [
+      { x:820,  w:70 },
+      { x:1620, w:80 },
+      { x:2060, w:70 },
+    ],
     portals:[],
     spawns:[
       {type:'pinechad', count:6},
@@ -20564,6 +20595,17 @@ const MAPS = {
       {x:2080, y:300, w:200, h:14, type:'platform'},
       // Upper bone-bridge (single, traversable)
       {x:600,  y:180, w:1400, h:14, type:'platform'},
+    ],
+    // v0.29.75 — Open graves. Collapsed burial shafts on the catacomb floor —
+    // stepping in one trips the 700 ms stumble-stun + grit burst (the hazard
+    // moved here from the beginner Fungal Hollow). Placed in the floor gaps
+    // between the bone-pile stepping stones so straight-line running is
+    // punished but a careful hop between platforms clears them.
+    potholes: [
+      { x:620,  w:80 },
+      { x:1180, w:80 },
+      { x:1560, w:70 },
+      { x:2020, w:80 },
     ],
     portals:[],
     spawns:[
@@ -21261,6 +21303,16 @@ const MAPS = {
       { x:380,  y:220, w:180, h:12, type:'platform' },
       { x:1360, y:180, w:240, h:12, type:'platform' },
       { x:2180, y:220, w:180, h:12, type:'platform' },
+    ],
+    // v0.29.75 — Collapsed tomb shafts. Deep-catacomb burial pits — the same
+    // 700 ms stumble-stun hazard (moved off the beginner Fungal Hollow).
+    // Spread across the ground floor, clear of the spawn edge, so the phasing
+    // Bone Wraiths can bait a careless player onto one.
+    potholes: [
+      { x:760,  w:80 },
+      { x:1180, w:70 },
+      { x:1600, w:80 },
+      { x:2320, w:80 },
     ],
     portals: [],
     // v0.25.759 — Lichkin + Sepulchre Hound removed per user request.
@@ -91070,13 +91122,13 @@ function drawMonster(m) {
   // behind the mob while _dashCharging is live, trailing opposite its facing.
   // Purely cosmetic; if the sprite isn't present the existing trail particles
   // remain the only cue (graceful no-op).
-  if (m._dashCharging > 0 && typeof LX_VFX !== 'undefined' && _lxVfxReady(LX_VFX.dashStreak)) {
+  if (m._dashCharging > 0 && typeof LX_VFX !== 'undefined' && _lxVfxReady(_lxVfxFrame('dashStreak'))) {
     const _dsW = m.w * 2.6, _dsH = m.h * 1.15;
     ctx.save();
     ctx.globalAlpha = Math.min(0.85, m._dashCharging / 280);
     ctx.translate(sx + m.w / 2, m.y + m.h / 2);
     if ((m.facing | 0) < 0) ctx.scale(-1, 1);
-    ctx.drawImage(LX_VFX.dashStreak, -_dsW * 0.72, -_dsH / 2, _dsW, _dsH);
+    ctx.drawImage(_lxVfxFrame('dashStreak'), -_dsW * 0.72, -_dsH / 2, _dsW, _dsH);
     ctx.restore();
   }
 
@@ -97935,8 +97987,8 @@ function drawHazards() {
       if (!h._landed) {
         ctx.fillStyle = 'rgba(255,80,0,0.28)';
         ctx.beginPath(); ctx.ellipse(lx, h._groundY - 2, h.w * 0.55, 6, 0, 0, Math.PI * 2); ctx.fill();
-        if (typeof _lxVfxReady === 'function' && _lxVfxReady(LX_VFX.lavaDrop)) {
-          ctx.drawImage(LX_VFX.lavaDrop, lx - h.w * 0.8, h.y - h.h * 0.3, h.w * 1.6, h.h * 1.6);
+        if (typeof _lxVfxReady === 'function' && _lxVfxReady(_lxVfxFrame('lavaDrop'))) {
+          ctx.drawImage(_lxVfxFrame('lavaDrop'), lx - h.w * 0.8, h.y - h.h * 0.3, h.w * 1.6, h.h * 1.6);
         } else {
           ctx.fillStyle = '#ffcc33';
           ctx.beginPath(); ctx.ellipse(lx, h.y + h.h/2, h.w*0.5, h.h*0.6, 0, 0, Math.PI*2); ctx.fill();
@@ -97946,9 +97998,9 @@ function drawHazards() {
       } else {
         const _fade = Math.min(1, h.life / 30);
         const _pw = h.w * 1.7;
-        if (typeof _lxVfxReady === 'function' && _lxVfxReady(LX_VFX.lavaPool)) {
+        if (typeof _lxVfxReady === 'function' && _lxVfxReady(_lxVfxFrame('lavaPool'))) {
           ctx.globalAlpha = 0.85 * _fade;
-          ctx.drawImage(LX_VFX.lavaPool, lx - _pw/2, h._groundY - _pw*0.22, _pw, _pw*0.44);
+          ctx.drawImage(_lxVfxFrame('lavaPool'), lx - _pw/2, h._groundY - _pw*0.22, _pw, _pw*0.44);
           ctx.globalAlpha = 1;
         } else {
           ctx.fillStyle = `rgba(255,90,20,${0.65 * _fade})`;
@@ -98014,10 +98066,10 @@ function drawHazards() {
       const a = 0.30 + t * 0.55;
       // v0.26.x — authored ring sprite (Sprites/vfx/quake_ring.webp) scaled to
       // the current telegraph radius; else the procedural rings below.
-      if (_lxVfxReady(LX_VFX.quakeRing)) {
+      if (_lxVfxReady(_lxVfxFrame('quakeRing'))) {
         const _d = r * 2.1;
         ctx.save(); ctx.globalAlpha = Math.min(1, a);
-        ctx.drawImage(LX_VFX.quakeRing, sx - _d / 2, (h.y + 16) - _d * 0.30, _d, _d * 0.60);
+        ctx.drawImage(_lxVfxFrame('quakeRing'), sx - _d / 2, (h.y + 16) - _d * 0.30, _d, _d * 0.60);
         ctx.restore();
         continue;
       }
@@ -98048,10 +98100,10 @@ function drawHazards() {
       const fade = Math.min(1, h.life / 60);
       // v0.26.x — authored sprite when present (Sprites/vfx/poison_cloud.webp);
       // else the procedural puddle below. Ground-projected (squashed) ellipse.
-      if (_lxVfxReady(LX_VFX.poisonCloud)) {
+      if (_lxVfxReady(_lxVfxFrame('poisonCloud'))) {
         const _w = h.w * 1.2, _hh = _w * 0.42;
         ctx.save(); ctx.globalAlpha = 0.92 * fade;
-        ctx.drawImage(LX_VFX.poisonCloud, sx - _w / 2, h.y + 8 - _hh * 0.62, _w, _hh);
+        ctx.drawImage(_lxVfxFrame('poisonCloud'), sx - _w / 2, h.y + 8 - _hh * 0.62, _w, _hh);
         ctx.restore();
         continue;
       }
@@ -98087,10 +98139,10 @@ function drawHazards() {
       const cy = h.cy;
       // v0.26.x — authored ring sprite (Sprites/vfx/shock_ring.webp) scaled to
       // the current expanding radius; else the procedural rings below.
-      if (_lxVfxReady(LX_VFX.shockRing)) {
+      if (_lxVfxReady(_lxVfxFrame('shockRing'))) {
         const _d = (r + 6) * 2;
         ctx.save(); ctx.globalAlpha = Math.max(0, fade);
-        ctx.drawImage(LX_VFX.shockRing, sx - _d / 2, cy - _d * 0.32, _d, _d * 0.64);
+        ctx.drawImage(_lxVfxFrame('shockRing'), sx - _d / 2, cy - _d * 0.32, _d, _d * 0.64);
         ctx.restore();
         continue;
       }
@@ -98144,10 +98196,10 @@ function drawHazards() {
         const fade = Math.max(0, 1 - since / h.tele);
         // v0.26.x — authored pillar sprite (Sprites/vfx/lightning_pillar.webp)
         // as the vertical strike column; else the procedural jagged bolt below.
-        if (_lxVfxReady(LX_VFX.lightningPillar)) {
+        if (_lxVfxReady(_lxVfxFrame('lightningPillar'))) {
           const _pw = 64;
           ctx.save(); ctx.globalAlpha = Math.max(0.2, fade);
-          ctx.drawImage(LX_VFX.lightningPillar, sx - _pw / 2, 0, _pw, 480);
+          ctx.drawImage(_lxVfxFrame('lightningPillar'), sx - _pw / 2, 0, _pw, 480);
           ctx.restore();
           continue;
         }
@@ -98181,7 +98233,7 @@ function drawHazards() {
       }
       continue;
     }
-    // v0.25.101 — mob_frostbeam: render the LX_VFX.frostBeam image
+    // v0.25.101 — mob_frostbeam: render the _lxVfxFrame('frostBeam') image
     // along the hazard box, mirrored if dir < 0. Telegraph fades in
     // before the strike frame; strike phase pulses at full alpha.
     if (h.type === 'mob_frostbeam') {
@@ -98193,13 +98245,13 @@ function drawHazards() {
         : 0.65 + 0.35 * Math.abs(Math.sin(h.life * 0.45));
       ctx.save();
       ctx.globalAlpha = a;
-      if (_lxVfxReady(LX_VFX.frostBeam)) {
+      if (_lxVfxReady(_lxVfxFrame('frostBeam'))) {
         if (h.dir < 0) {
           ctx.translate(beamSx + h.w, h.y);
           ctx.scale(-1, 1);
-          ctx.drawImage(LX_VFX.frostBeam, 0, 0, h.w, h.h);
+          ctx.drawImage(_lxVfxFrame('frostBeam'), 0, 0, h.w, h.h);
         } else {
-          ctx.drawImage(LX_VFX.frostBeam, beamSx, h.y, h.w, h.h);
+          ctx.drawImage(_lxVfxFrame('frostBeam'), beamSx, h.y, h.w, h.h);
         }
       } else {
         // v0.25.757 — Procedural frost-cone fallback rewritten. The
@@ -98291,7 +98343,7 @@ function drawHazards() {
       }
       continue;
     }
-    // v0.25.101 — mob_gravity: render LX_VFX.gravityWell at hazard
+    // v0.25.101 — mob_gravity: render _lxVfxFrame('gravityWell') at hazard
     // center with a continuous slow rotation tied to game.time so the
     // swirl visually "spins". Falls back to a solid purple ellipse if
     // the image isn't loaded.
@@ -98303,8 +98355,8 @@ function drawHazards() {
       ctx.translate(sx, cy);
       ctx.rotate((game.time || 0) * 0.04);
       const size = h.radius * 1.4;
-      if (_lxVfxReady(LX_VFX.gravityWell)) {
-        ctx.drawImage(LX_VFX.gravityWell, -size / 2, -size * 0.18, size, size * 0.36);
+      if (_lxVfxReady(_lxVfxFrame('gravityWell'))) {
+        ctx.drawImage(_lxVfxFrame('gravityWell'), -size / 2, -size * 0.18, size, size * 0.36);
       } else {
         ctx.fillStyle = `rgba(168,102,221,${0.55 * fade})`;
         ctx.beginPath();
