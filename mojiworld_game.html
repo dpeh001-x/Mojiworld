@@ -8712,7 +8712,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.61';
+const GAME_VERSION = 'v0.29.62';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -43156,6 +43156,24 @@ function loadMap(id, entryX, entryY) {
   // would otherwise trigger Mirror Self's first-visit cinematic — wrong
   // boss, wrong narrative context. F10 plays its own custom toast +
   // shake in _expeditionSpawnFinalBoss.
+  // v0.27.24 — Gravitos entry cinematic (Higgsfield). The FIRST time the player
+  // enters The Singularity per save, play the 8s power-reveal video IN PLACE OF
+  // the quake + boss-intro card below. game._gravitosCinePlaying suppresses both
+  // for this entry; later entries keep the quake/card. The cutscene pauses the
+  // game so the boss can't act, and unpauses on finish (fail-open — a missing
+  // clip just ends immediately, leaving the normal arena).
+  if (id === 'gravitosArena' && !(game.expedition && game.expedition.active)
+      && typeof player !== 'undefined' && player && !player._gravitosCineSeen
+      && typeof _gravitosEntryCutscene === 'function') {
+    player._gravitosCineSeen = true;
+    if (typeof saveState === 'function') { try { saveState(); } catch (e) {} }
+    game._gravitosCinePlaying = true;
+    game.paused = true;
+    _gravitosEntryCutscene(() => {
+      game._gravitosCinePlaying = false;
+      setTimeout(() => { if (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen()) game.paused = false; }, 300);
+    });
+  }
   if (typeof _playBossIntro === 'function' && typeof MAPS !== 'undefined' && MAPS[id]
       && !(game.expedition && game.expedition.active)) {
     const _bm = MAPS[id];
@@ -43170,7 +43188,7 @@ function loadMap(id, entryX, entryY) {
         // pending timers, both seeing game.currentMap===_biMap -> the intro played
         // twice (mid-fight cinematic). Only the latest entry's timer now fires.
         const _biMap = id; const _biGen = game._bossIntroGen = (game._bossIntroGen || 0) + 1;
-        setTimeout(() => { if (game.currentMap === _biMap && game._bossIntroGen === _biGen) _playBossIntro(_bossSpawn.type); }, _introDelay);   // v0.26.1028 — bail if the player left the arena during the delay
+        setTimeout(() => { if (game.currentMap === _biMap && game._bossIntroGen === _biGen && !game._gravitosCinePlaying) _playBossIntro(_bossSpawn.type); }, _introDelay);   // v0.26.1028 — bail if the player left the arena during the delay; v0.27.24 — suppressed while the Gravitos entry video owns the screen
       }
     }
   }
@@ -43186,7 +43204,7 @@ function loadMap(id, entryX, entryY) {
   // sharp jolt, then deep ground-quakes build and intensify (with a couple of
   // hit-stop "boom" beats) while the screen stays black; finally a colossal quake
   // + heavy white-edged flash as the blackout releases into the boss cinematic.
-  if (id === 'gravitosArena') {
+  if (id === 'gravitosArena' && !game._gravitosCinePlaying) {   // v0.27.24 — the entry video owns the first-entry reveal; skip the quake beat under it
     const _gGen = game._gravIntroGen = (game._gravIntroGen || 0) + 1;   // v0.26.1024 — stale-timer token
     if (typeof blackHold === 'function') blackHold(95);      // ~1.6s of solid black
     if (typeof blackFlash === 'function') blackFlash(1.0);
@@ -100595,6 +100613,66 @@ function _prologuePunchCutscene(onDone) {
   window.addEventListener('keydown', onKey, true);
   // Safety net: the clip is 6s; 10s covers buffering with margin.
   let timer = setTimeout(finish, 10000);
+}
+// v0.27.24 — Gravitos MAP-ENTRY cinematic. 8s Higgsfield power-reveal (the
+// starfield titan resolving from the singularity, chest-star flare, gravity
+// buckling inward) that plays the FIRST time the player enters The Singularity
+// per save — in place of the quake + boss-intro card (later entries keep
+// those). Same proven structure as the prologue cutscenes: BGM ducks under the
+// clip's own epic audio, unmuted-first with a muted fallback, skippable
+// (click / Enter / Space / Esc / button), and onDone fires EXACTLY once whether
+// the clip ends, is skipped, the file is missing, autoplay is blocked, or the
+// 10s safety timer trips — so a bad/absent asset can never soft-lock the arena.
+function _gravitosEntryCutscene(onDone) {
+  let done = false;
+  const _bgmWasPlaying = (typeof _bgmEl !== 'undefined' && _bgmEl && !_bgmEl.paused);
+  if (_bgmWasPlaying) { try { _bgmEl.pause(); } catch (e) {} }
+  const finish = () => {
+    if (done) return; done = true;
+    if (timer) { clearTimeout(timer); timer = null; }
+    window.removeEventListener('keydown', onKey, true);
+    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+    if (_bgmWasPlaying) { try { const _rp = _bgmEl.play(); if (_rp && _rp.catch) _rp.catch(() => {}); } catch (e) {} }
+    try { onDone && onDone(); } catch (e) {}
+  };
+  const ov = document.createElement('div');
+  ov.id = 'gravitos-entry-cine';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:1600;background:#02010a;display:flex;'
+    + 'align-items:center;justify-content:center;cursor:pointer;overflow:hidden;';
+  ov.innerHTML =
+    '<video id="grav-entry-vid" src="steam/higgsfield/cinematics/clip_gravitos_entry.mp4" '
+    + 'autoplay playsinline '
+    + 'style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#02010a;"></video>'
+    + '<div style="position:absolute;top:0;left:0;right:0;height:56px;background:linear-gradient(#000,rgba(0,0,0,0));"></div>'
+    + '<div style="position:absolute;bottom:0;left:0;right:0;height:56px;background:linear-gradient(rgba(0,0,0,0),#000);"></div>'
+    + '<button id="grav-entry-skip" style="position:absolute;top:16px;right:18px;z-index:2;padding:5px 14px;'
+    + 'border-radius:8px;border:1px solid #5a4490;background:rgba(20,8,44,0.85);color:#cdb8ff;'
+    + 'font:700 12px monospace;cursor:pointer;">Skip &#9656;&#9656;</button>';
+  function onKey(e) {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation(); finish();
+    }
+  }
+  document.body.appendChild(ov);
+  const vid = ov.querySelector('#grav-entry-vid');
+  if (vid) {
+    vid.onended = finish;
+    vid.onerror = finish;
+    vid.volume = 0.9;
+    try {
+      const pp = vid.play();
+      if (pp && pp.catch) pp.catch(() => {
+        vid.muted = true;
+        const p2 = vid.play(); if (p2 && p2.catch) p2.catch(finish);
+      });
+    } catch (e) { finish(); }
+  }
+  ov.addEventListener('click', finish);
+  const sk = ov.querySelector('#grav-entry-skip');
+  if (sk) sk.onclick = (e) => { e.stopPropagation(); finish(); };
+  window.addEventListener('keydown', onKey, true);
+  // Safety net: the clip is 8s; 11s covers buffering with margin.
+  let timer = setTimeout(finish, 11000);
 }
 // v0.29.x — short Higgsfield cutscene of the hero's golden apex-power shattering
 // into violet stardust and spiralling into the singularity Void, bridging the
