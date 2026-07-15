@@ -8725,7 +8725,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.92';
+const GAME_VERSION = 'v0.29.93';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -63964,8 +63964,19 @@ function triggerSuperBossDeath(m) {
   // does NOT fire this — Aetherion is the mid-endgame super-boss, the
   // true ending beat belongs to the Weight-Bearer.
   if (m.type === 'gravitos' && typeof _playStoryBeat === 'function') {
-    if (typeof _sbPreloadClip === 'function') _sbPreloadClip('epilogue_gravitos');   // v0.29.39 — warm during the 3.5s stagger
-    setTimeout(() => _playStoryBeat('epilogue_gravitos', _showGameComplete), 3500);
+    if (typeof _sbPreloadClip === 'function') _sbPreloadClip('epilogue_gravitos');   // warm during the loot-rain stagger
+    // v0.29.93 — On the 3rd (Ascendant) form's true death, the black-flame
+    // disintegration cutscene plays FIRST, then hands off to the epilogue →
+    // game-complete. Shortened the pre-stagger 3.5s → 1.9s so the legendary
+    // loot rain + toast cascade still land before the screen takes over, then
+    // the defeat cinematic owns the moment. Fail-open: if the cutscene helper
+    // is somehow absent, fall straight through to the original epilogue path so
+    // the ending can never soft-lock.
+    const _afterGravDefeat = () => { _playStoryBeat('epilogue_gravitos', _showGameComplete); };
+    setTimeout(() => {
+      if (typeof _gravitosDefeatCutscene === 'function') _gravitosDefeatCutscene(_afterGravDefeat);
+      else _afterGravDefeat();
+    }, 1900);
   }
   // v0.28.6 — Aetherion's first defeat gets its own quieter scene: the
   // Amnesiac's farewell (warden_falls). Same 3.5s stagger so the loot
@@ -101732,6 +101743,162 @@ function _gravitosEntryCutscene(onDone) {
   window.addEventListener('keydown', onKey, true);
   // Safety net: the clip is 8s; 11s covers buffering with margin.
   let timer = setTimeout(finish, 11000);
+}
+// v0.29.93 — GRAVITOS DEFEAT CUTSCENE. Fires the moment the 3rd (Ascendant)
+// form is defeated at the Singularity, just before the epilogue. Two layers,
+// both fail-open so a bad asset can never soft-lock the endgame:
+//   1. Higgsfield realistic clip (clip_gravitos_defeat.mp4) — plays fullscreen
+//      if present (drop-in slot for the "3rd form disintegrates in black
+//      flames" render; auto-swaps in the instant the file exists).
+//   2. Procedural black-flame disintegration — a self-contained <canvas> scene
+//      (the gravitos3 sprite consumed bottom-up by black flames + violet
+//      embers, then imploded into the singularity with a white flash). Runs
+//      whenever the clip is missing/blocked, so the beat ships today.
+// onDone fires exactly once (clip end / skip / error / safety timer).
+function _gravitosDefeatCutscene(onDone) {
+  let done = false, raf = 0, timer = 0;
+  const _bgmWasPlaying = (typeof _bgmEl !== 'undefined' && _bgmEl && !_bgmEl.paused);
+  if (_bgmWasPlaying) { try { _bgmEl.pause(); } catch (e) {} }
+  const finish = () => {
+    if (done) return; done = true;
+    if (raf) cancelAnimationFrame(raf);
+    if (timer) clearTimeout(timer);
+    window.removeEventListener('keydown', onKey, true);
+    window.removeEventListener('resize', resize);
+    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+    if (_bgmWasPlaying) { try { const _rp = _bgmEl.play(); if (_rp && _rp.catch) _rp.catch(() => {}); } catch (e) {} }
+    try { onDone && onDone(); } catch (e) {}
+  };
+  const ov = document.createElement('div');
+  ov.id = 'gravitos-defeat-cine';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:1600;background:#010007;display:flex;'
+    + 'align-items:center;justify-content:center;cursor:pointer;overflow:hidden;';
+  ov.innerHTML =
+    '<canvas id="grav-def-cv" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>'
+    + '<video id="grav-def-vid" playsinline preload="auto" '
+    + 'style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#010007;opacity:0;transition:opacity 400ms ease;"></video>'
+    + '<div id="grav-def-title" style="position:absolute;left:0;right:0;bottom:12%;text-align:center;'
+    + 'font:800 clamp(22px,5vw,54px)/1.1 \'Segoe UI\',system-ui,sans-serif;letter-spacing:2px;color:#f4ecff;'
+    + 'text-shadow:0 0 26px rgba(120,40,220,0.85),0 2px 4px #000;opacity:0;transition:opacity 900ms ease;pointer-events:none;">'
+    + 'GRAVITOS FALLS<div style="font:600 clamp(12px,2.2vw,20px)/1.4 \'Segoe UI\',system-ui,sans-serif;'
+    + 'letter-spacing:5px;color:#b79bff;margin-top:10px;text-shadow:0 0 16px rgba(90,30,180,0.9);">THE WEIGHT IS LIFTED</div></div>'
+    + '<button id="grav-def-skip" style="position:absolute;top:16px;right:18px;z-index:2;padding:5px 14px;'
+    + 'border-radius:8px;border:1px solid #5a4490;background:rgba(20,8,44,0.85);color:#cdb8ff;font:700 12px monospace;cursor:pointer;">Skip ▸▸</button>';
+  function onKey(e) { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(); } }
+  document.body.appendChild(ov);
+  ov.addEventListener('click', finish);
+  const sk = ov.querySelector('#grav-def-skip'); if (sk) sk.onclick = (e) => { e.stopPropagation(); finish(); };
+  window.addEventListener('keydown', onKey, true);
+  const titleEl = ov.querySelector('#grav-def-title');
+
+  // --- Higgsfield clip slot (progressive enhancement) ---
+  const vid = ov.querySelector('#grav-def-vid');
+  let usingVideo = false;
+  if (vid) {
+    vid.oncanplay = () => {
+      if (done || usingVideo) return;
+      usingVideo = true;
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      vid.style.opacity = '1'; vid.volume = 0.9;
+      const pp = vid.play(); if (pp && pp.catch) pp.catch(() => { vid.muted = true; const p2 = vid.play(); if (p2 && p2.catch) p2.catch(finish); });
+      if (timer) clearTimeout(timer); timer = setTimeout(finish, 12000);
+    };
+    vid.onended = finish;
+    vid.onerror = () => {};   // missing/blocked → stay on the procedural scene
+    vid.src = 'steam/higgsfield/cinematics/clip_gravitos_defeat.mp4';
+  }
+
+  // --- Procedural black-flame disintegration (default / fallback) ---
+  const cv = ov.querySelector('#grav-def-cv');
+  const dpr = Math.min(2, (window.devicePixelRatio || 1));
+  let W = 0, H = 0;
+  const resize = () => { W = ov.clientWidth || window.innerWidth; H = ov.clientHeight || window.innerHeight; cv.width = Math.floor(W * dpr); cv.height = Math.floor(H * dpr); };
+  resize(); window.addEventListener('resize', resize);
+  const ctx = cv.getContext('2d');
+  const spr = (typeof BOSS_SPRITES !== 'undefined' && BOSS_SPRITES) ? (BOSS_SPRITES['gravitos3'] || BOSS_SPRITES['gravitos'] || null) : null;
+  const DUR = 4200; let t0 = 0;
+  const parts = [];
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const spawnFlame = (x, y) => { parts.push({ x, y, vx: rnd(-0.5, 0.5), vy: rnd(-3.2, -1.4), life: 0, max: rnd(38, 74), r: rnd(10, 26), hot: Math.random() < 0.24, orange: Math.random() < 0.14, wob: rnd(0, 6.28) }); };
+  const draw = (ts) => {
+    if (done) return;
+    if (!t0) t0 = ts;
+    if (usingVideo) { raf = requestAnimationFrame(draw); return; }
+    let p = (ts - t0) / DUR; if (p > 1) p = 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#010007'; ctx.fillRect(0, 0, W, H);
+    const cx = W / 2, cy = H / 2;
+    const glowR = Math.max(W, H) * (0.62 - 0.5 * p);
+    let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, glowR));
+    g.addColorStop(0, 'rgba(60,20,120,' + (0.5 * (1 - p)).toFixed(3) + ')');
+    g.addColorStop(0.5, 'rgba(30,10,60,' + (0.28 * (1 - p)).toFixed(3) + ')');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    let sh = H * 0.52, sw = sh; const sx = cx, sy = cy;
+    if (spr && spr.naturalWidth) sw = sh * (spr.naturalWidth / spr.naturalHeight);
+    const left = sx - sw / 2, top = sy - sh / 2;
+    const bp = Math.max(0, Math.min(1, (p - 0.05) / 0.77));
+    const burnY = top + sh * (1 - bp);
+    if (spr && spr.naturalWidth && p < 0.9) {
+      ctx.save();
+      ctx.beginPath();
+      const jag = 10 + 8 * Math.sin(ts * 0.02);
+      ctx.rect(left - 40, top - 40, sw + 80, Math.max(0, (burnY - (top - 40)) + jag));
+      ctx.clip();
+      ctx.globalAlpha = 1; ctx.drawImage(spr, left, top, sw, sh);
+      // Incandescent glow on the sprite's OWN pixels — re-blit additively so
+      // only the silhouette brightens (a fillRect would paint the whole bbox
+      // as a hard purple rectangle).
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.22 + 0.26 * Math.abs(Math.sin(ts * 0.01));
+      ctx.drawImage(spr, left, top, sw, sh);
+      ctx.restore(); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+    }
+    if (p < 0.86) { for (let i = 0; i < 6; i++) spawnFlame(rnd(left, left + sw), burnY + rnd(-6, 10)); }
+    const implode = p > 0.8;
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const q = parts[i]; q.life++;
+      if (implode) { q.vx += (cx - q.x) * 0.008; q.vy += (cy - q.y) * 0.008; q.vx *= 0.94; q.vy *= 0.94; }
+      q.x += q.vx + Math.sin(q.life * 0.1 + q.wob) * 0.8; q.y += q.vy; q.vy *= 0.985;
+      const lp = q.life / q.max; if (lp >= 1) { parts.splice(i, 1); continue; }
+      const rr = q.r * (0.7 + lp * 1.5), a = (1 - lp) * 0.85;
+      ctx.globalCompositeOperation = 'source-over';
+      let sg = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, rr);
+      sg.addColorStop(0, 'rgba(20,6,34,' + a.toFixed(3) + ')'); sg.addColorStop(1, 'rgba(2,0,8,0)');
+      ctx.fillStyle = sg; ctx.beginPath(); ctx.arc(q.x, q.y, rr, 0, 6.283); ctx.fill();
+      if (q.hot || q.orange) {
+        ctx.globalCompositeOperation = 'lighter';
+        const cr = rr * 0.45, ca = (1 - lp) * 0.9;
+        let cg = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, cr);
+        if (q.orange) { cg.addColorStop(0, 'rgba(255,150,50,' + ca.toFixed(3) + ')'); cg.addColorStop(1, 'rgba(255,80,20,0)'); }
+        else { cg.addColorStop(0, 'rgba(180,90,255,' + ca.toFixed(3) + ')'); cg.addColorStop(1, 'rgba(90,30,180,0)'); }
+        ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(q.x, q.y, cr, 0, 6.283); ctx.fill();
+      }
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    if (p < 0.18) {
+      const rp = p / 0.18; ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = 'rgba(150,80,255,' + ((1 - rp) * 0.8).toFixed(3) + ')'; ctx.lineWidth = 6 * (1 - rp) + 1;
+      ctx.beginPath(); ctx.arc(cx, cy, rp * Math.max(W, H) * 0.5, 0, 6.283); ctx.stroke();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    if (p > 0.82) {
+      const fp = (p - 0.82) / 0.18, fa = Math.max(0, fp < 0.6 ? fp / 0.6 : 1 - (fp - 0.6) / 0.4);
+      ctx.globalCompositeOperation = 'lighter';
+      let fg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.6 * fp);
+      fg.addColorStop(0, 'rgba(255,255,255,' + fa.toFixed(3) + ')');
+      fg.addColorStop(0.4, 'rgba(200,160,255,' + (fa * 0.6).toFixed(3) + ')');
+      fg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = fg; ctx.fillRect(0, 0, W, H); ctx.globalCompositeOperation = 'source-over';
+    }
+    if (p > 0.9) { ctx.fillStyle = 'rgba(0,0,0,' + ((p - 0.9) / 0.1).toFixed(3) + ')'; ctx.fillRect(0, 0, W, H); }
+    if (p > 0.55 && titleEl) titleEl.style.opacity = '1';
+    if (p >= 1) { finish(); return; }
+    raf = requestAnimationFrame(draw);
+  };
+  raf = requestAnimationFrame(draw);
+  timer = setTimeout(finish, DUR + 900);   // safety net (procedural path)
 }
 // v0.29.x — short Higgsfield cutscene of the hero's golden apex-power shattering
 // into violet stardust and spiralling into the singularity Void, bridging the
