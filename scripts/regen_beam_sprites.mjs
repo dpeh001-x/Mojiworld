@@ -56,10 +56,23 @@ const ITEMS = {
     dest: join(repoRoot, 'Sprites', 'fx', 'fx_col_blightelder.webp'),
     fmt: 'webp', kind: 'column', prefix: COL_PREFIX,
     prompt:
-      'A blighted pillar of rotting nature-green (#88cc66) — rising spores and drifting ' +
-      'fungal motes wound through creeping vines and withered curling leaves, a sickly ' +
-      'luminous green core, faint drifting decay-mist. Organic, corrupted, overgrown — ' +
-      "the Verge's rotten heart erupting.",
+      'A SIMPLE, CLEAN, BRIGHT glowing column of vivid emerald-green energy (#88cc66) — a ' +
+      'luminous white-green hot core down the centerline, a soft even green glow, and just ' +
+      'a FEW small bright spore-motes drifting upward. Minimal detail, smooth and clean, ' +
+      'high brightness. VIVID and LUMINOUS — absolutely NOT dark, NOT muddy, NOT brown, NOT ' +
+      'grey, NOT cluttered. NO vines, NO leaves, NO debris, NO mist — just clean bright ' +
+      'green light.',
+  },
+  fx_col_ossuarytyrant: {
+    dest: join(repoRoot, 'Sprites', 'fx', 'fx_col_ossuarytyrant.webp'),
+    fmt: 'webp', kind: 'column', prefix: COL_PREFIX,
+    prompt:
+      'A SIMPLE, CLEAN, BRIGHT column of pale bone-white and cream energy (#e8dcc0) — a ' +
+      'luminous white hot core down the centerline, a soft even bone-pale glow, and just a ' +
+      'FEW clean bone-shard fragments drifting upward. Minimal detail, smooth and clean, ' +
+      'high brightness, pale and luminous. Absolutely NOT dark, NOT muddy, NOT brown, NOT ' +
+      'grey, NOT cluttered. NO skulls, NO gore, NO debris pile — just clean bright ' +
+      'bone-pale light with a few drifting shards.',
   },
   p_starbeam: {
     dest: join(repoRoot, 'Sprites', 'projectiles', 'p_starbeam.png'),
