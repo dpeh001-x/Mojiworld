@@ -8725,7 +8725,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.78';
+const GAME_VERSION = 'v0.29.79';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -62308,6 +62308,14 @@ function _maybeLevelUp() {
     });
   }
 
+  // v0.29.77 — FIRST LEVEL-UP ONBOARDING (one-shot). The very first
+  // level-up (Lv 2) guides the player to the U panel to spend the +3 SP
+  // on stats + the +1 Skill Point. Deferred past the LEVEL UP banner +
+  // innate-roll toast; guarded against the prologue's Lv-100 apex chain.
+  if (player.level === 2 && !window._prologueActive && typeof _firstLevelUpGuide === 'function') {
+    setTimeout(() => { try { _firstLevelUpGuide(); } catch (e) {} }, 1600);
+  }
+
   // v0.25.785 — Class advancement at Lv 20 is now gated on the Mirror
   // Self Trial. Previously the advancement modal auto-opened on the
   // level-up frame; now we just toast a hint pointing the player at
@@ -62360,10 +62368,12 @@ function _maybeLevelUp() {
       let skill = null;
       for (const id in kit) if (kit[id].slot === slotId) { skill = kit[id]; break; }
       if (!skill && slotId === 'b') continue;  // no unlock toast for the ultimate slot until its skills exist
+      // v0.29.77 — Per user: the unlock reads as "new skill LEARNT" and
+      // leads with the skill's own icon (first felt at Lv 5's X-slot).
       const label = skill
-        ? `🔓 ${key}-slot unlocked: ${skill.name} — ${skill.desc}`
+        ? `${skill.icon || '🔓'} New skill learnt — ${skill.name}! Press ${key} to use it. ${skill.desc}`
         : `🔓 ${key}-slot unlocks on next advancement`;
-      setTimeout(() => showToast(label, 'epic'), 1200);
+      setTimeout(() => showToast(label, 'legendary'), 1200);
     }
   }
   audio.play('levelup');
@@ -70835,6 +70845,12 @@ function openSkillsReference() {
 }
 
 function openLevelUpPanel() {
+  // v0.29.77 — first-level-up guide hand-off: the moment the panel opens
+  // (U key, chip tap, or the Amnesiac), retire the chip and stage the two
+  // in-panel pointers (SP + buttons, then the Skills tab).
+  if (document.getElementById('first-lvlup-chip') && typeof _removeFirstLvlupChip === 'function') {
+    _removeFirstLvlupChip(true);
+  }
   if (!player._levelUpSpent) player._levelUpSpent = {};
   if (!game._uTab) game._uTab = 'lp';
   const modal = document.getElementById('attributes-modal');
@@ -75320,6 +75336,61 @@ function _firstTimeTip(key, txt, rarity) {
   } catch (e) { /* no localStorage (private mode) — still show once per session */ }
   showToast(txt, rarity || 'rare');
   return true;
+}
+
+// v0.29.77 — FIRST LEVEL-UP GUIDE. A persistent (but modest) pulsing chip
+// that walks a brand-new player into the U panel after their first level-up.
+// Deliberately glitchless by construction:
+//   • one-shot via the same mojiworld_tip_* localStorage convention;
+//   • never fires during the prologue; idempotent (double-call = no-op);
+//   • pure DOM chip — it never touches game.paused, never blocks input,
+//     sits at z-99 (UNDER story beats z-105 and every modal) and has
+//     pointer-events only on itself;
+//   • dismissed the moment the panel opens (U key, chip tap, or the
+//     Amnesiac's Train menu) via the openLevelUpPanel hook, and
+//     self-expires after 2 minutes so it can never linger forever.
+// Once the panel opens, two staged toasts point at the two spends: the
+// SP + buttons on the landing tab, then the Skills tab for the rank point.
+function _firstLevelUpGuide() {
+  if (window._prologueActive) return;
+  try {
+    if (localStorage.getItem('mojiworld_tip_first_levelup')) return;
+    localStorage.setItem('mojiworld_tip_first_levelup', '1');
+  } catch (e) { /* private mode — still show once this session */ }
+  if (document.getElementById('first-lvlup-chip')) return;
+  const chip = document.createElement('button');
+  chip.id = 'first-lvlup-chip';
+  chip.type = 'button';
+  chip.innerHTML = '⬆️ <b>Level up!</b> Press '
+    + '<kbd style="background:#2a1a4a;border:1px solid #8a5df0;border-radius:5px;padding:1px 7px;font:700 12px monospace;">U</kbd>'
+    + ' to spend your <b>+3 SP</b> &amp; <b>+1 Skill Point</b> — or tap here';
+  chip.style.cssText = 'position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:99;'
+    + 'padding:9px 18px;border-radius:22px;cursor:pointer;'
+    + 'border:1px solid #a87df8;background:linear-gradient(180deg,rgba(48,26,88,0.96),rgba(30,14,58,0.96));'
+    + 'color:#efe6ff;font:600 13px Inter,system-ui,sans-serif;letter-spacing:0.2px;'
+    + 'box-shadow:0 4px 24px rgba(120,70,220,0.45);animation:flu-pulse 1.8s ease-in-out infinite;';
+  if (!document.getElementById('first-lvlup-style')) {
+    const st = document.createElement('style');
+    st.id = 'first-lvlup-style';
+    st.textContent = '@keyframes flu-pulse{0%,100%{transform:translateX(-50%) scale(1);box-shadow:0 4px 24px rgba(120,70,220,0.45);}50%{transform:translateX(-50%) scale(1.04);box-shadow:0 4px 32px rgba(160,110,255,0.7);}}';
+    document.head.appendChild(st);
+  }
+  chip.onclick = () => {
+    if (player && player.cls && player.hp > 0 && typeof toggleSharedModal === 'function') {
+      toggleSharedModal('attributes-modal', 'lp', openLevelUpPanel);   // same path as the U key
+    }
+  };
+  document.body.appendChild(chip);
+  window._firstLvlupChipTimer = setTimeout(() => _removeFirstLvlupChip(false), 120000);
+}
+function _removeFirstLvlupChip(openedPanel) {
+  const c = document.getElementById('first-lvlup-chip');
+  if (c) { try { c.remove(); } catch (e) {} }
+  if (window._firstLvlupChipTimer) { clearTimeout(window._firstLvlupChipTimer); window._firstLvlupChipTimer = null; }
+  if (openedPanel && typeof showToast === 'function') {
+    setTimeout(() => showToast('💪 Spend SP with the ＋ buttons on your stats below — you earn +3 SP every level.', 'epic'), 700);
+    setTimeout(() => showToast('🎯 Then open the Skills tab at the top — spend your Skill Point to rank up a skill.', 'epic'), 3600);
+  }
 }
 
 // =========================================================================
