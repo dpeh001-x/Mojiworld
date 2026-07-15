@@ -8725,7 +8725,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.80';
+const GAME_VERSION = 'v0.29.82';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -27143,9 +27143,15 @@ function _rollHitVsLevelGap(monsterLevel) {
   return Math.random() * 100 < hitPct;
 }
 // Hit-chance roll against a monster's evasion. Returns true on hit, false
-// on miss. Only basic attacks (melee / arrow / dagger / bolt) run this —
-// skill AOEs always connect so casts never feel wasted.
+// on miss. Basic attacks (melee / arrow / dagger / bolt) run this.
+// v0.29.81 — Per user "all skills should also follow the same miss rate":
+// the miss roll now applies to EVERY directly-cast skill too (it used to
+// be basics-only). Only indirect, non-aimed damage always connects —
+// reflected thorns, burn DoT ticks, and autonomous summon attacks
+// (pet / minion / pack / afterimage). Everything else shares the exact
+// same level-gap + evasion roll as a basic attack.
 const BASIC_HIT_SKILLS = new Set(['melee','arrow','dagger','bolt']);
+const MISS_EXEMPT_SKILLS = new Set(['thorns','burn','minion','pet','pack','afterimage']);
 function _rollAccuracyHit(attackerAccuracy, targetEvasion, minFloor) {
   const ev = +targetEvasion || 0;
   if (ev <= 0) return true;
@@ -61341,7 +61347,10 @@ function hitMonster(m, dmg, isCrit, skill) {
   // lifesteal) don't fire on a whiff. The visible MISS marker + early return
   // still happen at the original site below, reusing this same result (the RNG
   // is rolled exactly once — the inline roll there was removed).
-  const _lxBasicMiss = (BASIC_HIT_SKILLS.has(skill) && typeof player !== 'undefined' && player && !player._oneShot)
+  // v0.29.81 — miss roll now covers ALL directly-cast skills, not just
+  // basics; only MISS_EXEMPT_SKILLS (thorns / burn DoT / summon attacks)
+  // bypass it. The var name is kept for churn-safety.
+  const _lxBasicMiss = (!MISS_EXEMPT_SKILLS.has(skill) && typeof player !== 'undefined' && player && !player._oneShot)
     ? ((!m.boss && !_rollHitVsLevelGap(m.level || 1)) || ((m.evasion || 0) > 0 && !_rollAccuracyHit(getAccuracy(), m.evasion, m.boss ? 0.45 : 0.15)))
     : false;
   // v0.26.889 — JOB TALENT combat hooks + mage Arcane Embers, at the
@@ -61540,24 +61549,26 @@ function hitMonster(m, dmg, isCrit, skill) {
     if (rmul !== 1) dmg = Math.floor(dmg * rmul);
   }
   // Accuracy roll (v0.21 + v0.25.510 level-gap layer).
-  // Only basic attacks respect this; skill AOEs always connect so a big
-  // MP / CD cast never whiffs on a fluke. Thorns / burn / skill hazards
-  // also always connect. Two checks run in series for basic attacks:
-  //   1) Level-gap hit (v0.25.510): 90 % at same level, falling to 20 %
-  //      at +15 levels above the player. ACC stat + class innate add %.
+  // v0.29.81 — ALL directly-cast skills respect this now (per user "all
+  // skills should also follow the same miss rate"); only MISS_EXEMPT_SKILLS
+  // (reflected thorns, burn DoT, autonomous summon attacks) always connect.
+  // Two checks run in series:
+  //   1) Level-gap hit (v0.25.510): 90 % at same level, falling to a 10 %
+  //      floor at +16 levels above the player. ACC stat + class innate add %.
   //      Applies to every monster regardless of evasion stat.
   //   2) Evasion roll (v0.21 legacy): only on monsters with non-zero
   //      m.evasion. Some elite mobs / bosses use this for an additional
   //      dodge layer beyond the level-gap base.
   // Either check missing → MISS marker + early return.
-  if (BASIC_HIT_SKILLS.has(skill) && !player._oneShot && m) {
+  if (!MISS_EXEMPT_SKILLS.has(skill) && !player._oneShot && m) {
     // v0.26.410 — accuracy wall fix (playtest finding). Vs a BOSS, the two
     // gates (level-gap roll × evasion roll) compounded to ~11% basic-hit for a
     // level-appropriate mid-gear player, making bosses feel spongy and basics
-    // useless. Bosses now SKIP the level-gap roll (it double-dips with their
-    // high evasion) and use a 45% evasion floor. Normal mobs are unchanged, and
-    // cooldown skills still always connect, so this doesn't trivialize bosses —
-    // it just lets a non-BiS player land basics while skills carry the burst.
+    // useless. Bosses SKIP the level-gap roll (it double-dips with their high
+    // evasion) and use a 45% evasion floor. v0.29.81 — skills now share this
+    // same gate, so on bosses they respect the merciful 45% floor too (never
+    // the harsh level-gap curve); against normal mobs skills roll the full
+    // level-gap + evasion miss exactly like a basic attack.
     // v0.26.1033 — reuse the miss result resolved at the top of hitMonster (so
     // on-hit effects above already respected it); no second RNG roll here.
     if (_lxBasicMiss) {
@@ -97751,18 +97762,31 @@ function drawProjectiles() {
         ctx.restore();
       } else if (p.skill === 'swing' && _lxFxReady(LX_FX.fx_heavyswing)) {
         // v0.26.172 — bigMelee heavy swing arc. Mirrored on facing so
-        // the swing trails in the direction of attack. Hitbox is wide
-        // (180-240 px) × tall (70-100 px) — sprite stretches to fill.
+        // the swing trails in the direction of attack.
+        // v0.29.82 — the crescent sprite only paints its curved edge, so on a
+        // WIDE hitbox (e.g. the Arbiter's 440×190) the near half read as empty
+        // even though it damages. Fix: (a) shade the whole hitbox rect as a
+        // soft danger-zone in the effect's colour, and (b) overscan the arc
+        // ~12% so the visible slash clearly spans the full reach. The visual
+        // now matches the hitbox for any swingW/swingH.
         const _swingAlpha = Math.min(1, p.life / 10);
+        const _ox = p.w * 0.10, _oy = p.h * 0.12;
         ctx.save();
+        // (a) danger-zone glow across the exact hitbox (elliptical so it reads
+        // as a sweep, not a box), brightest at spawn then fading with life.
+        ctx.globalAlpha = _swingAlpha * 0.20;
+        ctx.fillStyle = p.color || '#ffaa55';
+        ctx.beginPath();
+        ctx.ellipse(sx + p.w / 2, p.y + p.h / 2, p.w / 2, p.h / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // (b) the crescent slash, overscanned to fill/span the hitbox.
         ctx.globalAlpha = _swingAlpha;
-        // Flip horizontally if the swing is left-facing (vx < 0).
         if (p.vx < 0) {
-          ctx.translate(sx + p.w, p.y);
+          ctx.translate(sx + p.w + _ox, p.y - _oy);
           ctx.scale(-1, 1);
-          ctx.drawImage(LX_FX.fx_heavyswing, 0, 0, p.w, p.h);
+          ctx.drawImage(LX_FX.fx_heavyswing, 0, 0, p.w + _ox * 2, p.h + _oy * 2);
         } else {
-          ctx.drawImage(LX_FX.fx_heavyswing, sx, p.y, p.w, p.h);
+          ctx.drawImage(LX_FX.fx_heavyswing, sx - _ox, p.y - _oy, p.w + _ox * 2, p.h + _oy * 2);
         }
         ctx.restore();
       } else if (p.skill === 'mticket') {
