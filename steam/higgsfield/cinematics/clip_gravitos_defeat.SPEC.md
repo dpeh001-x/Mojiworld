@@ -19,21 +19,29 @@ auto-plays fullscreen the instant it exists — no code change needed.
 
 - Model `seedance_2_0` · **720p** (36 cr, per project economy note — never 1080p) ·
   **6–8 s** · epic genre · `generate_audio` on · reference-driven identity.
-- **Reference image:** the Gravitos 3rd-form / character art (living-void titan,
-  molten-orange veins, violet aura, glowing eyes) — same identity fed to the
-  entry clip. Use `Sprites/bosses/gravitos3.png` or the user's supplied key art.
+- **Reference image (v2, current):** the user-supplied Gravitos 3rd-form art —
+  a colossal **demonic dragon-knight**: near-black plated armor veined with
+  glowing crimson magma cracks, huge dark bat/dragon wings rimmed with
+  red-orange fire, a blazing yellow-white core in the chest, horned helm,
+  glowing yellow eyes, wreathed in red & orange flames on black. (Supersedes
+  the earlier purple void-titan look.) Feed this identity as the reference
+  image when Higgsfield upload is available.
 
-### Prompt
+### Prompt (v2 — matches the demonic dragon-knight reference, more cinematic)
 
-> Cinematic, dramatic, semi-realistic. A colossal void-titan boss (dark purple
-> armored body laced with molten-orange cracks, glowing eyes, violet aura) is
-> defeated. Its body ignites and **disintegrates into black flames** — dark
-> fire tongues with violet and hot-orange cores erupt across its form,
-> consuming it from the ground up as ash and embers peel away and spiral
-> upward. The chest-core cracks and the whole silhouette collapses inward into
-> a single bright point, then a white flash. Deep black void background,
-> volumetric embers, heavy atmosphere, slow-motion, high contrast, epic scale.
-> No text, no UI.
+> Cinematic, dramatic, hyper-detailed dark-fantasy, shallow depth of field,
+> slow motion, volumetric lighting. A colossal demonic dragon-knight boss is
+> defeated: near-black plated armor veined with glowing crimson magma cracks,
+> huge dark bat-like dragon wings rimmed with red-orange fire, a blazing
+> yellow-white core burning in its chest, horned helm, glowing yellow eyes. Its
+> body ignites and **disintegrates into black flames** — dark fire tongues with
+> crimson and hot-orange cores erupt across its armor, consuming it from the
+> ground up as glowing embers and ash peel away and spiral upward. The wings
+> crumble to cinders, the chest-core cracks and flares, and the whole silhouette
+> collapses inward into a single searing point, then a blinding white flash with
+> lens flare. Deep black void background, dense volumetric embers, drifting
+> smoke, god-rays, rim lighting, high contrast, epic cinematic scale, film
+> grain. No text, no UI.
 
 ## Generating (when Higgsfield is authorized)
 
