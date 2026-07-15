@@ -18,14 +18,18 @@ const PREVIEW = process.env.METEOR_PREVIEW_DIR
   || 'C:/Users/Xenon/AppData/Local/Temp/claude/C--Users-Xenon-Desktop-Mojiworld/9083e3fe-54a2-484f-aa5b-becd472911d2/scratchpad/meteor_blue';
 
 const PROMPT =
-  'A fast cosmic meteor projectile for a cute 2D anime action game. A molten ' +
-  'glowing icy blue-white core at the RIGHT end, trailing a long dynamic tail ' +
-  'of electric-blue and cyan flame and energy streaking to the LEFT, with frost ' +
-  'shards, sparks and glowing embers in the trail. Vibrant electric blue, cyan ' +
-  'and teal palette with deep navy accents and a bright white-hot center. Thick ' +
-  'clean cel-shaded outline, dramatic glow and bloom, strong horizontal motion ' +
-  'pointing to the right, single object centered, full transparent background, ' +
-  'no text, no border, no background panel.';
+  'A MASSIVE, devastating cosmic meteor projectile for a 2D anime action game — ' +
+  'an overwhelmingly powerful attack. A huge dense molten rock core at the RIGHT ' +
+  'end, cracked open with blazing white-hot blue fissures and a searing star-' +
+  'bright plasma center, wrapped in a crackling orb of arcing electric-blue ' +
+  'lightning and a violent shockwave ring of energy. Behind it a thick, ' +
+  'turbulent comet tail of intense electric-blue and cyan fire, plasma and ' +
+  'shattered ice shards streaking far to the LEFT with heavy motion blur and ' +
+  'trailing sparks. Vibrant electric blue, cyan and teal with deep navy rock, ' +
+  'brilliant white-hot core and glowing rune-like energy veins. Epic, imposing, ' +
+  'high-impact, destructive. Thick bold cel-shaded outline, dramatic volumetric ' +
+  'glow and bloom, strong horizontal motion pointing to the right, single object ' +
+  'centered, full transparent background, no text, no border, no background panel.';
 
 const args = process.argv.slice(2);
 const installIdx = args.includes('--install') ? Number(args[args.indexOf('--install') + 1]) : null;
