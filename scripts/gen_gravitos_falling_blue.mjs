@@ -19,19 +19,19 @@ const SCRATCH = process.env.BLUE_PREVIEW_DIR
 const TARGETS = {
   meteor: {
     dest: `${REPO}/Sprites/projectiles/p_meteor_blue.webp`,
-    W: 680, H: 680, ar: 'ar_1_1',
+    W: 680, H: 680, ar: 'ar_1_1', inner: 0.78,
     prompt:
-      'A MASSIVE, devastating falling meteor for a 2D anime action game — an ' +
-      'overwhelmingly powerful attack plummeting straight DOWN. A huge dense ' +
-      'molten rock ball core cracked open with blazing white-hot blue fissures ' +
-      'and a searing plasma-bright center, topped by a towering roaring plume of ' +
-      'intense electric-blue and cyan fire rising ABOVE it, wreathed in crackling ' +
-      'blue lightning and shattered ice shards. Vibrant electric blue, cyan and ' +
-      'teal with deep navy rock, brilliant white-hot core and glowing energy ' +
-      'veins. Epic, imposing, high-impact, destructive. Thick bold cel-shaded ' +
-      'outline, dramatic volumetric glow and bloom, vertical composition (flame ' +
-      'on top, rock below), single object centered, full transparent background, ' +
-      'no text, no border, no background panel.',
+      'A powerful falling meteor for a 2D anime action game, plummeting straight ' +
+      'DOWN. A single round molten rock ball core cracked with glowing blue ' +
+      'fissures and a bright plasma center, with a clean plume of electric-blue ' +
+      'and cyan fire rising above it. Simple, bold, readable silhouette. Vibrant ' +
+      'electric blue and cyan with deep navy rock and a bright white-blue core. ' +
+      'Thick cel-shaded outline, dramatic glow. Vertical composition, flame on ' +
+      'top and rock below. IMPORTANT: the ENTIRE object is fully visible and ' +
+      'small in frame, centered with generous empty padding on all four sides, ' +
+      'nothing touching or cropped at any edge, flames taper to soft pointed ' +
+      'tips well inside the frame. Full transparent background, single object, ' +
+      'no text, no border, no background panel, no ground, no shadow.',
   },
   marker: {
     dest: `${REPO}/Sprites/fx/meteor_marker_blue.webp`,
@@ -57,7 +57,8 @@ const dir = `${SCRATCH}/${target}`;
 
 async function fit(raw) {
   let c; try { c = await sharp(raw).trim({ threshold: 14 }).toBuffer(); } catch { c = raw; }
-  const inner = await sharp(c).resize(Math.round(T.W * 0.94), Math.round(T.H * 0.94), { fit: 'inside' }).png().toBuffer();
+  const pad = T.inner || 0.94;
+  const inner = await sharp(c).resize(Math.round(T.W * pad), Math.round(T.H * pad), { fit: 'inside' }).png().toBuffer();
   return sharp({ create: { width: T.W, height: T.H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
     .composite([{ input: inner, gravity: 'center' }]).webp({ quality: 92 }).toBuffer();
 }
