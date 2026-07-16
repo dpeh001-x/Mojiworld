@@ -64,7 +64,9 @@
 
   // ---- runtime state ----
   let cur = null, frames = {}, frameIdx = 0, fps = 8, lastT = 0, overlay = false, focusState = 'idle';
-  let showHitbox = false, hbEdit = false, compose = false;
+  // v2 — SINGLE hitbox model. The old green read-only "gameplay hitbox" +
+  // orange "edit hitbox" pair confused (per user); now one editable box.
+  let hbEdit = false, compose = false;
   const HB = window.LX_MOB_HITBOX || {};   // per-type gameplay hitbox (monster_hitboxes.js)
   // ---- LIVE mob plant-scale (mirrors the game's _lxMobScale merge) ----
   // localStorage 'lx_mob_scale' (R-key Monster Plant editor) > baked
@@ -231,39 +233,15 @@
     ctx.drawImage(img, -g.targetW / 2, -g.usedBotFrac * g.previewH + (g.yoffPx || 0), g.targetW, g.previewH);
     ctx.restore();
   }
-  // Gameplay hitbox overlay. In-game: hitbox = m.w × m.h, sprite renders at
-  // spriteH = m.h × mul × sizeFactor(base) foot-anchored at the hitbox's
-  // bottom-center. The animator normalizes the base sprite to DISPLAY_H, so
-  // in preview px: hbH = DISPLAY_H / (mul × sizeFactor(base)), hbW by aspect.
-  // Deliberately NOT affected by calib s/dx/dy — the game hitbox never moves;
-  // seeing the sprite drift against the fixed box is the point of the toggle.
-  function drawHitbox(ent, cx, groundY) {
-    const hb = HB[cur];
-    if (!hb || !hb.w || !hb.h) return;
-    const b = ent.base || (ent.states.idle ? { w: ent.states.idle.w, h: ent.states.idle.h } : { w: 768, h: 768 });
-    const sf = sizeFactor(ent.group, b.w, b.h);
-    // v0.26.x key-3 sync — the SPRITE now carries the live plant-scale (see
-    // stateGeom), so the gameplay box is constant here: in-game the hitbox is
-    // m.w x m.h regardless of visual scale, and the sprite grows around it.
-    // Scale cancels out of the conversion: hbH = DISPLAY_H / (baseMul x sf).
-    const scale = ent.group === 'boss' ? 1 : liveMobScale(cur);
-    const mul = ent.group === 'boss' ? (hb.mul || 2) : 1.5;
-    const hbH = DISPLAY_H / (mul * sf);
-    const hbW = hbH * (hb.w / hb.h);
-    ctx.save();
-    ctx.strokeStyle = '#7CFC00'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
-    ctx.fillStyle = 'rgba(124,252,0,0.07)';
-    ctx.fillRect(cx - hbW / 2, groundY - hbH, hbW, hbH);
-    ctx.strokeRect(cx - hbW / 2, groundY - hbH, hbW, hbH);
-    ctx.setLineDash([]);
-    ctx.fillStyle = '#9dff4d'; ctx.font = '600 10px system-ui'; ctx.textAlign = 'center';
-    const _scaleTag = (ent.group !== 'boss' && Math.abs(scale - 1) > 0.001) ? ` · scale ${scale.toFixed(2)}` : '';
-    ctx.fillText(`hitbox ${hb.w}×${hb.h}${hb.f ? ' · flies' : ''}${_scaleTag}`, cx, groundY - hbH - 5);
-    ctx.restore();
-  }
-  // Editable ATTACK hitbox overlay (orange). Solid = customized, dashed =
-  // game default. Returns the on-canvas rect so the UI layer can hit-test
-  // drags (body = move, bottom-right handle = resize).
+  // THE hitbox (orange, editable) — the region player attacks can hit
+  // (_atkMonBox override). v2: the old green read-only gameplay box was
+  // removed (per user — two boxes confused); this single box is the only one.
+  // All scaling is hardbaked into its px size: units are fractions of the
+  // rendered sprite height, and stateGeom's previewH already folds in
+  // sizeFactor AND the live Monster Plant scale — what you see is the final
+  // scaled box. Solid = customized, dashed = game default. Returns the
+  // on-canvas rect so the UI layer can hit-test drags (body = move,
+  // bottom-right handle = resize).
   function drawAtkHitbox(ent, st, cx, groundY) {
     const g = stateGeom(ent, st); if (!g) return null;
     const custom = hbFor(cur, st);
@@ -283,7 +261,7 @@
     ctx.fillRect(x + w - 7, y + h - 7, 14, 14);
     ctx.strokeRect(x + w - 7, y + h - 7, 14, 14);
     ctx.font = '600 10px system-ui'; ctx.textAlign = 'center';
-    ctx.fillText('atk box' + (custom ? '' : ' (default)'), x + w / 2, y - 5);
+    ctx.fillText('hitbox' + (custom ? '' : ' (default)'), x + w / 2, y - 5);
     ctx.restore();
     return { x, y, w, h, st, previewH: g.previewH };
   }
@@ -318,7 +296,6 @@
       const cx = cv.width / 2;
       drawGround(cx, groundY, cv.width * 0.8, '', '#fff');
       for (const st of states) { drawState(ent, st, cx, groundY, st === focusState ? 1 : 0.4); columns.push({ state: st, cx, groundY }); }
-      if (showHitbox) drawHitbox(ent, cx, groundY);
       // overlay mode: edit only the focused state's box (stacked boxes confuse)
       if (hbEdit && ent.states[focusState]) { const r = drawAtkHitbox(ent, focusState, cx, groundY); if (r) hbRects.push(r); }
       ctx.fillStyle = COL[focusState]; ctx.font = '600 12px system-ui'; ctx.textAlign = 'center';
@@ -328,7 +305,6 @@
       states.forEach((st, i) => {
         const cx = slotW * (i + 0.5);
         drawState(ent, st, cx, groundY, 1);
-        if (showHitbox) drawHitbox(ent, cx, groundY);
         if (hbEdit) { const r = drawAtkHitbox(ent, st, cx, groundY); if (r) hbRects.push(r); }
         drawGround(cx, groundY, slotW * 0.86, st, COL[st]);
         columns.push({ state: st, cx, groundY, slotW });
@@ -340,8 +316,7 @@
   // expose a few bits chunk B + init use
   window.__animCore = { buildList, select, buildControls: () => buildControls(), loadCalib,
     setFps: (v) => { fps = v; }, setOverlay: (v) => { overlay = v; }, setFocus: (v) => { focusState = v; },
-    setHitbox: (v) => { showHitbox = v; _mobScaleLS = null; },   // toggle re-reads live scale too
-    setHbEdit: (v) => { hbEdit = v; },
+    setHbEdit: (v) => { hbEdit = v; _mobScaleLS = null; },   // toggle re-reads live scale too
     // key-3 (Monster Plant) live values for the panel readout
     plantScale, plantYOff,
     fit, MAN, STATES, COL, DEF, CALIB: () => CALIB, reloadCalib: () => { CALIB = loadCalib(); },

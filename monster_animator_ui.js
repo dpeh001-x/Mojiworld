@@ -91,7 +91,7 @@
     const custom = core.hbFor(A.cur, st);
     const v = custom || core.defaultHB(A.cur, st);
     return `<div class="scard" data-hbcard="${st}" style="border-color:${custom ? '#ff9e3d' : 'var(--line)'}">` +
-      `<div class="srow"><h3><i class="dot" style="background:#ff9e3d"></i>${st} · atk hitbox${custom ? '' : ' <span class="mut">(default)</span>'}</h3>` +
+      `<div class="srow"><h3><i class="dot" style="background:#ff9e3d"></i>${st} · hitbox${custom ? '' : ' <span class="mut">(default)</span>'}</h3>` +
       `<button class="reset" data-hbreset="${st}">default</button></div>` +
       hbSlider(st, 'w', v.w) + hbSlider(st, 'h', v.h) + hbSlider(st, 'ox', v.ox) + hbSlider(st, 'oy', v.oy) + `</div>`;
   }
@@ -115,7 +115,7 @@
     }
     for (const st of core.STATES) if (ent.states[st]) html += card(st, C[st]);
     if (A.hbEdit) {
-      html += `<div class="mut" style="font-size:11px;margin:8px 0 6px">ATK HITBOX — the region player attacks can hit. w/h/ox/oy are fractions of sprite height; oy = bottom offset from the feet (+down). Drag the box in the stage, or its corner handle to resize.</div>`;
+      html += `<div class="mut" style="font-size:11px;margin:8px 0 6px">HITBOX — the region player attacks can hit. All scaling (size factor + Monster Plant) is baked into the box you see. w/h/ox/oy are fractions of sprite height; oy = bottom offset from the feet (+down). Drag the box in the stage, or its corner handle to resize.</div>`;
       for (const st of core.STATES) if (ent.states[st]) html += hbCard(st);
     }
     html += `<button class="warn reset" id="resetAll" style="width:100%;margin-top:2px">Reset ${cur} to defaults</button>`;
@@ -279,13 +279,14 @@
   // ---- top bar wiring ----
   document.getElementById('q').addEventListener('input', e => core.buildList(e.target.value));
   document.getElementById('overlay').addEventListener('change', e => core.setOverlay(e.target.checked));
+  // v2 — ONE hitbox checkbox: shows THE editable box (drag to move, corner
+  // handle / scroll-wheel to resize). The old separate read-only green box
+  // toggle is gone.
   const hbEl = document.getElementById('hitbox');
-  if (hbEl && core.setHitbox) hbEl.addEventListener('change', e => core.setHitbox(e.target.checked));
-  const hbeEl = document.getElementById('hbedit');
   const hintEl = document.getElementById('hint');
   const HINT_SPRITE = 'Drag a sprite in the stage to nudge its X/Y · scroll-wheel over a sprite to scale';
-  const HINT_HB = 'EDIT HITBOX: drag anywhere in a column to move that state’s box · drag the orange corner handle to resize · scroll-wheel to scale the box';
-  if (hbeEl) hbeEl.addEventListener('change', e => {
+  const HINT_HB = 'HITBOX: drag anywhere in a column to move that state’s box · drag the orange corner handle to resize · scroll-wheel to scale the box';
+  if (hbEl) hbEl.addEventListener('change', e => {
     core.setHbEdit(e.target.checked);
     if (hintEl) hintEl.textContent = e.target.checked ? HINT_HB : HINT_SPRITE;
     window.__buildControls();
