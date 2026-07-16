@@ -182,12 +182,12 @@ window.LX_ANIM_CALIB = {
   "aetherion2": {
     "idle": {
       "s": 0.87,
-      "dx": 0.015,
+      "dx": -0.015,
       "dy": 0.025
     },
     "walk": {
       "s": 1.11,
-      "dx": 0.04,
+      "dx": -0.04,
       "dy": 0.025
     },
     "attack": {
