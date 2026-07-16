@@ -1,12 +1,20 @@
 # Gravitos Defeat Cinematic — Higgsfield generation spec
 
-**Status:** the in-game defeat cutscene ships with a **procedural black-flame
-disintegration** (canvas) as of v0.29.93. This clip is an optional drop-in that
-auto-plays fullscreen the instant it exists — no code change needed.
+**Status:** the in-game defeat cutscene ships with an on-model **procedural
+black-flame disintegration** (canvas, rewritten v0.29.95 — hero-shot reveal of
+the actual `gravitos3` dragon-knight + a silhouette-preserving per-pixel
+dissolve). A realistic clip is an optional drop-in that auto-plays the instant a
+correctly-referenced file exists — no code change needed.
+
+> ⚠️ **v0.29.95:** the earlier `clip_gravitos_defeat.mp4` (v0.29.94) was
+> generated from the WRONG reference (a purple void-titan) and did not resemble
+> the in-game dragon-knight, so the code no longer points at it. The drop-in
+> path is now the `_dragonknight` filename below. Generate the replacement from
+> the `gravitos3.png` dragon-knight identity, not the void-titan.
 
 ## Drop-in slot (exact)
 
-- **Output path (must match exactly):** `steam/higgsfield/cinematics/clip_gravitos_defeat.mp4`
+- **Output path (must match exactly):** `steam/higgsfield/cinematics/clip_gravitos_defeat_dragonknight.mp4`
 - Wired in `mojiworld_game.html` → `_gravitosDefeatCutscene()` (`#grav-def-vid`).
   On `canplay` it fades in over the procedural canvas and plays with audio;
   on error/missing it silently stays on the procedural scene. Fail-open — a bad
