@@ -64,7 +64,7 @@
 
   // ---- runtime state ----
   let cur = null, frames = {}, frameIdx = 0, fps = 8, lastT = 0, overlay = false, focusState = 'idle';
-  let showHitbox = false, hbEdit = false;
+  let showHitbox = false, hbEdit = false, compose = false;
   const HB = window.LX_MOB_HITBOX || {};   // per-type gameplay hitbox (monster_hitboxes.js)
   // ---- LIVE mob plant-scale (mirrors the game's _lxMobScale merge) ----
   // localStorage 'lx_mob_scale' (R-key Monster Plant editor) > baked
@@ -145,6 +145,20 @@
     const yoffPx = plantYOff(cur) * pxRatio;
     return { previewH, targetW, usedBotFrac, yoffPx };
   }
+  // Compose-mode geometry: same render math as stateGeom but keyed to an
+  // EXPLICIT type (not the single `cur`), so multiple different sprites can be
+  // sized correctly on one stage. Returns preview px height + width for (type,st).
+  function composeGeom(type, st) {
+    const ent = MAN[type]; if (!ent) return null;
+    const info = ent.states[st]; if (!info) return null;
+    const _ps = (ent.group === 'boss') ? 1 : liveMobScale(type);
+    const previewH = baseK(ent) * sizeFactor(ent.group, info.w, info.h) * _ps;
+    const targetW = previewH * (info.w / info.h);
+    const baseH = (ent.base && ent.base.h) || info.h;
+    const baseFrac = (ent.base && ent.base.botFrac != null) ? ent.base.botFrac : 0.92;
+    const usedBotFrac = clamp(baseFrac * baseH / info.h, 0.3, 1.3);
+    return { previewH, targetW, usedBotFrac };
+  }
 
   // ===== entity list =====
   const listEl = document.getElementById('list');
@@ -185,6 +199,9 @@
   }
 
   function select(t) {
+    // compose mode: list clicks ADD the entity as an overlay layer instead of
+    // switching the single calibration target.
+    if (compose && window.__compose) { window.__compose.addLayer(t); return; }
     cur = t; frames = loadFrames(MAN[t]); frameIdx = 0;
     _mobScaleLS = null; _mobYoffLS = null;   // re-read live key-3 values on entity switch (same-tab edits)
     buildList(document.getElementById('q').value);
@@ -291,6 +308,8 @@
   function paint() {
     ctx.clearRect(0, 0, cv.width, cv.height);
     columns = []; hbRects = [];
+    // compose mode owns the whole stage — overlay of arbitrary sprites.
+    if (compose && window.__compose) { window.__compose.paint(ctx, cv, frameIdx); return; }
     if (!cur) return;
     const ent = MAN[cur];
     const states = STATES.filter(s => ent.states[s]);
@@ -332,6 +351,10 @@
     clearHB: (t, st) => { if (HBX[t]) delete HBX[t][st]; },
     // undo support: wholesale state restore (deep objects come pre-cloned)
     restore: (c, h) => { if (c) CALIB = c; if (h) HBX = h; },
+    // ---- compose mode (multi-sprite overlay) API ----
+    setCompose: (v) => { compose = v; }, getCompose: () => compose,
+    composeGeom, loadFramesFor: (t) => loadFrames(MAN[t]),
+    baseK: (t) => (MAN[t] ? baseK(MAN[t]) : DISPLAY_H), DISPLAY_H,
     paint: () => paint(), step: () => { frameIdx++; paint(); } };
   // buildControls is defined in chunk B; declare a placeholder so early calls no-op.
   function buildControls() { if (window.__buildControls) window.__buildControls(); }
