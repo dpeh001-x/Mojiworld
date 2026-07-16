@@ -15,7 +15,7 @@ async function writeRetry(dest, buf) {
 }
 
 const SC = 'C:/Users/Xenon/AppData/Local/Temp/claude/C--Users-Xenon-Desktop-Mojiworld/9083e3fe-54a2-484f-aa5b-becd472911d2/scratchpad/p5_panels';
-const W = 1200, H = 670, ALPHA = 0.30;
+const W = 1200, H = 670, ALPHA = 0.20;   // v0.29.x — per user: 30% -> 20% opacity
 
 const JOBS = [
   { src: `${SC}/shop_src.png`,    dest: 'Sprites/ui/panel_p5_shop.webp' },
