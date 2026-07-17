@@ -7308,6 +7308,22 @@ The sleeping world is listening.</div>
           <button id="mp-connect-btn" type="button" style="flex:2; padding:10px; background:linear-gradient(180deg,#3a2a7a,#2a1a5a); color:#ffee88; border:1px solid #ffdd44; border-radius:5px; cursor:pointer; font-weight:bold; font-size:14px;">▶ Play together</button>
           <button id="mp-disconnect-btn" type="button" style="flex:1; padding:10px; background:rgba(100,40,40,0.7); color:#ffd0d0; border:1px solid #aa4444; border-radius:5px; cursor:pointer;">Leave</button>
         </div>
+        <!-- v0.29.101 — DIRECT CONNECT (desktop / Steam build only). The host's
+             game process runs the co-op relay itself (Electron main embeds it),
+             so two players connect straight to each other — no external server.
+             Hidden unless the desktop preload exposes window.mojiDirect. -->
+        <div id="mp-direct" style="display:none; margin-top:12px; padding:10px 12px; background:rgba(18,48,34,0.4); border:1px solid #3a6c52; border-radius:6px;">
+          <div style="font-size:12px; color:#a8f0c0; font-weight:bold; letter-spacing:0.4px; margin-bottom:7px;">🔗 Direct Connect — play together with no server</div>
+          <button id="mp-direct-host" type="button" style="width:100%; padding:9px; background:linear-gradient(180deg,#1f5a3a,#164028); color:#c8ffdf; border:1px solid #4a9c6f; border-radius:5px; cursor:pointer; font-weight:bold; font-size:13px;">🏠 Host — my game becomes the server</button>
+          <div id="mp-direct-hostinfo" style="display:none; font-size:12px; color:#ffe08a; margin-top:7px; line-height:1.5;"></div>
+          <div style="display:grid; grid-template-columns:1fr auto; gap:6px; margin-top:8px;">
+            <input id="mp-direct-ip" type="text" maxlength="48" placeholder="friend's address, e.g. 192.168.1.23" style="padding:6px 10px; font-size:13px; background:rgba(0,0,0,0.4); color:#dfffe9; border:1px solid #4a9c6f; border-radius:4px;">
+            <button id="mp-direct-join" type="button" style="padding:6px 14px; background:rgba(30,70,50,0.7); color:#c8ffdf; border:1px solid #4a9c6f; border-radius:4px; cursor:pointer; font-weight:bold;">Join</button>
+          </div>
+          <div style="font-size:11px; color:#9ec8b0; margin-top:7px; line-height:1.45;">
+            Same Wi-Fi / LAN: works instantly — host clicks <b>Host</b>, friend types the address shown + the same party code. Over the internet: the host forwards <b>TCP port 17894</b> on their router, or just use <b>Steam Remote Play Together</b>.
+          </div>
+        </div>
       </div>
       <div style="margin-top:12px;">
         <div style="color:#c8a8ff; font-size:12px; margin-bottom:4px;">Players in room <span id="mp-roomname" style="color:#bbb;"></span></div>
@@ -8742,7 +8758,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.100';
+const GAME_VERSION = 'v0.29.101';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -34094,6 +34110,59 @@ function openMultiplayer() {
     const _nc = document.getElementById('mp-newcode-btn');
     if (_nc) _nc.insertAdjacentElement('afterend', inv); else _roomEl.insertAdjacentElement('afterend', inv);
   }
+  // v0.29.101 — DIRECT CONNECT (desktop only). The Electron preload exposes
+  // window.mojiDirect; when present, reveal the section and wire it. Host:
+  // boots the embedded relay in the game's own process, shows the address a
+  // friend types, and self-connects via loopback. Join: normalizes an
+  // "ip" / "ip:port" into ws:// and connects with the shared party code.
+  const _dc = document.getElementById('mp-direct');
+  if (_dc && window.mojiDirect) {
+    _dc.style.display = 'block';
+    const _dcHost = document.getElementById('mp-direct-host');
+    const _dcInfo = document.getElementById('mp-direct-hostinfo');
+    const _dcIp   = document.getElementById('mp-direct-ip');
+    const _dcJoin = document.getElementById('mp-direct-join');
+    if (_dcHost && !_dcHost._wired) {
+      _dcHost._wired = true;
+      _dcHost.onclick = async () => {
+        try {
+          _dcHost.disabled = true; _dcHost.textContent = '⏳ Starting…';
+          const r = await window.mojiDirect.start();
+          _dcHost.disabled = false; _dcHost.textContent = '🏠 Host — my game becomes the server';
+          if (!r || r.error || !r.port) { _mpStatus('Direct host failed: ' + ((r && r.error) || 'unknown'), '#ff8888'); return; }
+          const roomEl = document.getElementById('mp-room');
+          if (roomEl && !roomEl.value.trim()) roomEl.value = _mpNewPartyCode();
+          const room = roomEl.value.trim().toLowerCase() || 'lobby';
+          const name = document.getElementById('mp-name').value.trim() || 'Hero';
+          const ip = (r.ips && r.ips[0]) || 'your LAN IP';
+          const portSuffix = (r.port === 17894) ? '' : (':' + r.port);
+          _dcInfo.style.display = 'block';
+          _dcInfo.innerHTML = '✅ Hosting! Your friend enters address <b style="color:#c8ffdf;">' + ip + portSuffix +
+            '</b> and party code <b style="color:#c8ffdf;">' + room.toUpperCase() + '</b>, then hits Join.';
+          window._mpDirectHosting = true;
+          localStorage.setItem(MP_NAME_KEY, name);
+          localStorage.setItem(MP_ROOM_KEY, room);
+          mpConnect('ws://127.0.0.1:' + r.port, name, room);
+        } catch (e) {
+          _dcHost.disabled = false; _dcHost.textContent = '🏠 Host — my game becomes the server';
+          _mpStatus('Direct host failed', '#ff8888');
+        }
+      };
+    }
+    if (_dcJoin && !_dcJoin._wired) {
+      _dcJoin._wired = true;
+      _dcJoin.onclick = () => {
+        let a = (_dcIp.value || '').trim().replace(/^ws:\/\//i, '').replace(/\/+$/, '');
+        if (!a) { _mpStatus("Enter your friend's address first", '#ff8888'); return; }
+        if (!/:\d+$/.test(a)) a += ':17894';
+        const name = document.getElementById('mp-name').value.trim() || 'Hero';
+        const room = document.getElementById('mp-room').value.trim().toLowerCase() || 'lobby';
+        localStorage.setItem(MP_NAME_KEY, name);
+        localStorage.setItem(MP_ROOM_KEY, room);
+        mpConnect('ws://' + a, name, room);
+      };
+    }
+  }
   // v0.27.0 — Advanced (server URL + channel) toggle. Casual players never open it.
   const _advT = document.getElementById('mp-advanced-toggle');
   const _adv = document.getElementById('mp-advanced');
@@ -34310,6 +34379,14 @@ function mpDisconnect() {
   net.ws = null;
   net.connected = false;
   net.peers = {};
+  // v0.29.101 — if this client was direct-hosting (desktop embedded relay),
+  // shut the relay down too and clear the host-info banner.
+  if (window._mpDirectHosting) {
+    window._mpDirectHosting = false;
+    try { if (window.mojiDirect) window.mojiDirect.stop(); } catch (e) {}
+    const _dh = document.getElementById('mp-direct-hostinfo');
+    if (_dh) { _dh.style.display = 'none'; _dh.innerHTML = ''; }
+  }
   _mpStatus('Disconnected', '#bbb');
   _mpRenderPlayerList();
 }

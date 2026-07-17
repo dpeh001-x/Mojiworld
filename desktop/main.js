@@ -2,10 +2,14 @@
 // Serves the game folder over a loopback HTTP server (fixed port, so the
 // origin — and therefore localStorage saves — stays stable across launches),
 // then opens it in a fullscreen-capable BrowserWindow. No game-code changes.
-const { app, BrowserWindow, shell, Menu } = require('electron');
+const { app, BrowserWindow, shell, Menu, ipcMain } = require('electron');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+// v0.29.101 — direct-connect co-op: the host's game process runs the relay
+// itself (see direct_relay.js), so two Steam players connect straight to each
+// other with no external server.
+const directRelay = require('./direct_relay');
 
 const PORT = 17893; // fixed: origin stability keeps saves; see pickPort()
 // Packaged: resources/game/. Dev (`npm start` from desktop/): the repo root.
@@ -70,7 +74,10 @@ function createWindow(port) {
     width: 1280, height: 760, minWidth: 960, minHeight: 560,
     backgroundColor: '#07070c', show: false, autoHideMenuBar: true,
     title: 'Mojiworld',
-    webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false },
+    webPreferences: {
+      contextIsolation: true, sandbox: true, backgroundThrottling: false,
+      preload: path.join(__dirname, 'preload.js'),   // v0.29.101 — direct-connect bridge
+    },
   });
   Menu.setApplicationMenu(null); // F11 fullscreen still works below
   win.webContents.on('before-input-event', (e, input) => {
@@ -87,6 +94,16 @@ function createWindow(port) {
   win.loadURL(`http://127.0.0.1:${port}/mojiworld_game.html`);
 }
 
+// v0.29.101 — direct-connect IPC. start is idempotent (returns the live
+// port if already hosting); every handler is exception-safe so a relay
+// hiccup can never take down the shell.
+ipcMain.handle('direct:start', async () => {
+  try { return await directRelay.start(); }
+  catch (e) { return { error: String(e && e.message || e) }; }
+});
+ipcMain.handle('direct:stop', () => { try { directRelay.stop(); } catch (_) {} return { ok: true }; });
+ipcMain.handle('direct:status', () => { try { return directRelay.status(); } catch (_) { return { hosting: false, port: 0, ips: [] }; } });
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -96,4 +113,5 @@ if (!app.requestSingleInstanceLock()) {
     pickPort(server, PORT, 10, (port) => createWindow(port));
   });
   app.on('window-all-closed', () => app.quit());
+  app.on('will-quit', () => { try { directRelay.stop(); } catch (_) {} });
 }
