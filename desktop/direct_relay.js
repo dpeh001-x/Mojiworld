@@ -22,6 +22,42 @@ const RATE = 40, BURST = 60;
 const HB_MS = 15000;
 
 let httpServer = null, wss = null, hbTimer = null, activePort = 0;
+let natClient = null, upnpState = { upnpOk: false, publicIp: null };
+
+// v0.29.102 — zero-knowledge internet hosting: ask the router to open the
+// port itself (UPnP / NAT-PMP — on by default on most home routers) and
+// discover the public address, so the host just reads one address to a
+// friend. Fail-open with a timeout: if the router refuses or doesn't speak
+// UPnP, hosting still works on LAN and the UI shows the manual fallback.
+function tryUpnp(port, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (r) => { if (!done) { done = true; resolve(r); } };
+    const timer = setTimeout(() => finish({ upnpOk: false, publicIp: null }), timeoutMs);
+    try {
+      const NatAPI = require('nat-api');
+      natClient = new NatAPI({ enablePMP: true });
+      natClient.map({ publicPort: port, privatePort: port, protocol: 'TCP', ttl: 7200, description: 'Mojiworld Direct Co-op' }, (err) => {
+        if (err) { clearTimeout(timer); finish({ upnpOk: false, publicIp: null }); return; }
+        natClient.externalIp((e2, ip) => {
+          clearTimeout(timer);
+          finish({ upnpOk: true, publicIp: (!e2 && ip) ? String(ip) : null });
+        });
+      });
+    } catch (e) { clearTimeout(timer); finish({ upnpOk: false, publicIp: null }); }
+  });
+}
+
+// Public-IP fallback for routers that map fine but won't report the external
+// address. Only consulted when the mapping SUCCEEDED (a public IP without an
+// open port would be a misleading thing to show).
+async function publicIpFallback() {
+  try {
+    const r = await fetch('https://api.ipify.org', { signal: AbortSignal.timeout(5000) });
+    if (r.ok) { const t = (await r.text()).trim(); if (/^\d+\.\d+\.\d+\.\d+$/.test(t)) return t; }
+  } catch (_) {}
+  return null;
+}
 
 function lanIPs() {
   const out = [];
@@ -36,9 +72,19 @@ function lanIPs() {
   return out;
 }
 
-function start(port = 17894, tries = 5) {
-  if (httpServer && activePort) return Promise.resolve({ port: activePort, ips: lanIPs() });
-  return new Promise((resolve, reject) => {
+async function start(port = 17894, tries = 5) {
+  if (httpServer && activePort) return { port: activePort, ips: lanIPs(), ...upnpState };
+  const listened = await new Promise((resolveListen, rejectListen) => {
+    const resolve = resolveListen, reject = rejectListen;
+    startInner(port, tries, resolve, reject);
+  });
+  // Router auto-open (UPnP/NAT-PMP) + public address, fail-open in <=8s.
+  upnpState = await tryUpnp(listened.port);
+  if (upnpState.upnpOk && !upnpState.publicIp) upnpState.publicIp = await publicIpFallback();
+  return { ...listened, ...upnpState };
+}
+function startInner(port, tries, resolve, reject) {
+  {
     const rooms = new Map();
     let nextId = 1;
     const room = (r) => rooms.get(r) || (rooms.set(r, new Map()), rooms.get(r));
@@ -134,16 +180,18 @@ function start(port = 17894, tries = 5) {
       httpServer.listen(p, '0.0.0.0', () => { activePort = p; resolve({ port: p, ips: lanIPs() }); });
     };
     tryListen(port, tries);
-  });
+  }
 }
 
 function stop() {
   if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
+  if (natClient) { try { natClient.unmap({ publicPort: activePort || 17894 }, () => { try { natClient.destroy(() => {}); } catch (_) {} }); } catch (_) {} natClient = null; }
+  upnpState = { upnpOk: false, publicIp: null };
   if (wss) { try { for (const c of wss.clients) c.terminate(); wss.close(); } catch (_) {} wss = null; }
   if (httpServer) { try { httpServer.close(); } catch (_) {} httpServer = null; }
   activePort = 0;
 }
 
-function status() { return { hosting: !!activePort, port: activePort, ips: activePort ? lanIPs() : [] }; }
+function status() { return { hosting: !!activePort, port: activePort, ips: activePort ? lanIPs() : [], ...upnpState }; }
 
 module.exports = { start, stop, status, lanIPs };
