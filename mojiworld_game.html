@@ -90192,7 +90192,7 @@ const MONSTER_SPRITE_TYPES = [
 // can differ from the in-game type key. Used by MONSTER_SPRITE_ALIASES
 // to map e.g. `pearlSprite` (in-game type) → `pearl.png` (the actual
 // filename the user dropped into Sprites/monsters/).
-function _loadEntitySprite(map, metaMap, basePath, type, label, fileBase) {
+function _loadEntitySprite(map, metaMap, basePath, type, label, fileBase, _attempt) {
   const fname = fileBase || type;
   const tryExt = (ext, onMiss) => {
     const img = new Image();
@@ -90204,7 +90204,22 @@ function _loadEntitySprite(map, metaMap, basePath, type, label, fileBase) {
     img.src = basePath + fname + ext;
   };
   tryExt('.webp', () => {
-    tryExt('.png', () => console.warn('[' + label + '] failed to load', type, fileBase ? '(file: ' + fileBase + ')' : ''));
+    tryExt('.png', () => {
+      // v0.29.x — TRANSIENT-FAILURE RETRY. All ~140 monster/boss sprites load
+      // in one burst at boot; on a congested connection (e.g. joining a co-op
+      // channel while the peer sync + map assets fetch in parallel) a couple
+      // of those fetches can drop. Previously a single onerror meant that mob
+      // rendered as the procedural fallback blob for the WHOLE session
+      // (user report: mushpups without sprites in co-op). Retry with backoff
+      // (2s / 6s / 18s); a genuine 404 costs 3 extra request pairs then stops
+      // warning-free draws stay on the procedural fallback as before.
+      const a = _attempt | 0;
+      if (a < 3) {
+        setTimeout(() => { if (!map[type]) _loadEntitySprite(map, metaMap, basePath, type, label, fileBase, a + 1); }, 2000 * Math.pow(3, a));
+      } else {
+        console.warn('[' + label + '] failed to load', type, fileBase ? '(file: ' + fileBase + ')' : '');
+      }
+    });
   });
 }
 // v0.25.556 — Filename aliases for monster sprites. Use when the on-disk
@@ -90230,6 +90245,23 @@ const MONSTER_SPRITE_ALIASES = {
     _loadEntitySprite(MONSTER_SPRITES, MONSTER_SPRITE_META, 'Sprites/monsters/', type, 'MonsterSprite', fileBase);
   }
 })();
+// v0.29.x — DRAW-TIME SELF-HEAL. If a REGISTERED type is being drawn but its
+// sprite never made it into MONSTER_SPRITES (all boot retries lost — e.g. a
+// long connectivity blip while joining a co-op channel), kick a rate-limited
+// reload from the fallback-draw path. The moment a fetch succeeds the
+// dispatch flips from the procedural blob to the real sprite mid-session.
+// One attempt per type per 60s, and only while such a mob is actually on
+// screen — for deliberately file-less types (octoLeg paint-over slots are
+// excluded at the call site) this costs nothing.
+const _MONSTER_SPRITE_TYPE_SET = new Set(MONSTER_SPRITE_TYPES);
+const _monSpriteRetryAt = Object.create(null);
+function _lxNudgeMonsterSprite(type) {
+  if (!type || MONSTER_SPRITES[type] || !_MONSTER_SPRITE_TYPE_SET.has(type)) return;
+  const now = Date.now();
+  if (_monSpriteRetryAt[type] && now - _monSpriteRetryAt[type] < 60000) return;
+  _monSpriteRetryAt[type] = now;
+  _loadEntitySprite(MONSTER_SPRITES, MONSTER_SPRITE_META, 'Sprites/monsters/', type, 'MonsterSprite(heal)', MONSTER_SPRITE_ALIASES[type]);
+}
 
 // === NPC SPRITES (v0.25.86) === ludo.ai-generated NPC portraits replace the
 // procedural pixel-NPC body when the matching .webp is loaded. Falls back to
@@ -92273,8 +92305,12 @@ function drawMonster(m) {
   }
   else if (m.zodiacBoss) drawZodiacBoss(m, sx, sy);
   else if (MONSTER_ANIMS[m.type] || MONSTER_SPRITES[m.type]) _drawMonsterSprite(m, sx, sy);
-  else if (FISH_MOB_TYPES.has(m.type)) drawFishMob(m, sx, sy);
-  else drawCuteMob(m, sx, sy);
+  // v0.29.x — fallback paths nudge a rate-limited sprite reload for
+  // registered types (see _lxNudgeMonsterSprite): a mob whose sprite fetch
+  // failed at boot heals to its real art mid-session instead of staying a
+  // procedural blob forever (co-op "monsters loaded without sprites" report).
+  else if (FISH_MOB_TYPES.has(m.type)) { _lxNudgeMonsterSprite(m.type); drawFishMob(m, sx, sy); }
+  else { _lxNudgeMonsterSprite(m.type); drawCuteMob(m, sx, sy); }
 
   // v0.26.x — PUNISH WINDOW overlay: golden additive glow + pulsing "!" so the
   // staggered (vulnerable) boss reads at a glance. Centralised here so every
