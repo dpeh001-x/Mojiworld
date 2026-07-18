@@ -82,7 +82,7 @@ async function main() {
   // cast in wide art sits ~x 0.55-0.92; calm scenery on the left for the logo
   await compose('store_capsule_main', 1232, 706, [
     await cover(WIDE, 1232, 706, 0.5, 0.5),
-    placeLogo(await logoArt(560, { tagline: TAG }), 330, 48),
+    placeLogo(await logoArt(560), 330, 48),          // wordmark only — no tagline
   ]);
 
   await compose('store_capsule_header', 920, 430, [
@@ -121,7 +121,7 @@ async function main() {
   ]);
 
   await compose('library_logo', 1280, 720, [
-    placeLogo(await logoArt(1080, { tagline: TAG }), 640, 190),
+    placeLogo(await logoArt(1080), 640, 253),        // wordmark only, vertically centered — no tagline
   ], { transparent: true });
 
   console.log('done → ' + OUT + '/');
