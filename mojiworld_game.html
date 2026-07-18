@@ -31448,6 +31448,53 @@ function _defAbsorbMul() {
   const absorb = Math.min(0.90, d / (d + 500));
   return 1 - absorb;
 }
+// v0.29.x — GRAVITOS HEAVY-HIT REBALANCE (per user "I am getting one shotted
+// by gravitos ... rebalance so DEF and HP does matter, hard but not
+// impossible"). Root cause: every Gravitos hit ran through _diffDmg's Lv-80+
+// ×6 punish AFTER mitigation — and his heavy hits additionally floored at
+// 34-50% maxHp BEFORE that ×6, so comets/rings/touch resolved at 200-300% of
+// max HP: guaranteed one-shots no stat could prevent (the "2HKO" / "chunks a
+// BiS tank ~20%" comments predate the punish ramp). New model: every
+// non-OHKO Gravitos hit clamps the FINAL HP loss into a phase-scaled band of
+// player maxHp:
+//   • input is the fully-MITIGATED damage (flat DEF + absorb curve, block,
+//     class DR, aegis, mana shield) ×difficulty — DEF/HP genuinely move the
+//     result inside the band;
+//   • the cap bounds the worst case (glass builds lose big chunks, never the
+//     whole bar to a non-OHKO hit);
+//   • the floor keeps the apex boss scary for max-tank builds;
+//   • bands escalate P1 → P2 → P3 so later forms hit harder.
+// The ×6 punish is deliberately NOT applied inside the band — it's what broke
+// the fight. True OHKOs (Singularity Collapse / Collapse Rain, phase ≥2) are
+// untouched: safe-zone / i-frame phase / perfect-parry remain the counters.
+function _gravPhaseOf(m) {
+  try {
+    if (typeof window !== 'undefined' && window._prologueActive && window._prologuePhase) return window._prologuePhase;
+    const hpPct = (m && m.maxHp) ? (m.currentHp / m.maxHp) : 1;
+    return hpPct > 0.66 ? 1 : hpPct > 0.33 ? 2 : 3;
+  } catch (e) { return 1; }
+}
+function _gravHeavyBand(phase, kind) {
+  const p = (phase >= 3) ? 3 : (phase === 2 ? 2 : 1);
+  const T = {
+    touch:  [{ f: 0.12, c: 0.35 }, { f: 0.16, c: 0.45 }, { f: 0.20, c: 0.55 }],
+    comet:  [{ f: 0.10, c: 0.35 }, { f: 0.14, c: 0.45 }, { f: 0.18, c: 0.55 }],
+    ring:   [{ f: 0.08, c: 0.30 }, { f: 0.12, c: 0.40 }, { f: 0.16, c: 0.50 }],
+    skill:  [{ f: 0.07, c: 0.30 }, { f: 0.11, c: 0.38 }, { f: 0.15, c: 0.46 }],
+    bhCore: [{ f: 0.08, c: 0.25 }, { f: 0.12, c: 0.38 }, { f: 0.14, c: 0.44 }],
+  };
+  const b = (T[kind] || T.skill)[p - 1];
+  return { floor: b.f, cap: b.c };
+}
+function _gravBandClamp(mitigated, band) {
+  const mh = (typeof getMaxHp === 'function') ? getMaxHp()
+    : ((typeof player !== 'undefined' && player && player.maxHp) || 100);
+  // Difficulty still matters (Hard/Nightmare push toward the cap faster,
+  // Story sinks toward the floor) — but the Lv-punish does not.
+  const diff = (typeof game !== 'undefined' && game && game._diffDmgMul) ? game._diffDmgMul : 1;
+  const scaled = Math.floor(mitigated * diff);
+  return Math.max(Math.floor(mh * band.floor), Math.min(scaled, Math.floor(mh * band.cap)));
+}
 // v0.25.691 — Cap hit-stop at 220 ms regardless of caller. The 40+ call
 // sites range from 30 ms (basic contact) to 300 ms (ultimate skills);
 // a chain of skill procs OR an Octobaby Meltdown landing during a Sage
@@ -57306,17 +57353,12 @@ function updateMonsters(dt) {
         const _heavyFloor = Math.floor(getMaxHp() * _zHeavyPct);
         if (dmg < _heavyFloor) dmg = _heavyFloor;
       }
-      // v0.26.330 — Per user "Gravitos touch damage should deal a
-      // substantial 34% of HP". Hard floor at 34 % of player maxHp on
-      // every Gravitos contact tick, applied AFTER def/block/aegis so
-      // the floor always lands regardless of defensive stacks. Matches
-      // the v0.25.822 zodiac heavy-floor pattern but as a guaranteed
-      // floor (not a 20 % roll) — Gravitos is the apex boss, touching
-      // him is supposed to be catastrophic.
-      if (m.type === 'gravitos') {
-        const _gravTouchFloor = Math.floor(getMaxHp() * 0.34);
-        if (dmg < _gravTouchFloor) dmg = _gravTouchFloor;
-      }
+      // v0.26.330 — Gravitos touch used to hard-floor at 34% maxHp HERE,
+      // i.e. BEFORE _diffDmg's Lv-80+ ×6 punish — which multiplied every
+      // touch to ~200% maxHp: an unavoidable one-shot no stat prevented.
+      // v0.29.x — replaced by the _gravBandClamp on the FINAL loss below
+      // (phase-scaled 35/45/55% cap with a 12/16/20% floor), so touching
+      // the apex boss stays catastrophic but survivable, and DEF/HP matter.
       // Tower: Glass Hero — +50% damage taken
       if (game.tower) dmg = Math.ceil(dmg * towerPlayerTakeMul());
       // Tower: Vampiric Foes — attacker heals for 20% of damage dealt
@@ -57347,7 +57389,13 @@ function updateMonsters(dt) {
         const _dr = Math.min(0.25, Math.floor(_maxHp / 100) * 0.01);
         if (_dr > 0) dmg = Math.max(1, Math.floor(dmg * (1 - _dr)));
       }
-      const _shownDmg = _diffDmg(dmg);   // amplified value actually lost — reused for the floating number so it matches HP lost
+      let _shownDmg = _diffDmg(dmg);   // amplified value actually lost — reused for the floating number so it matches HP lost
+      // v0.29.x — Gravitos contact: clamp the FINAL loss into the phase band.
+      // Input is the fully-mitigated pre-punish damage so DEF/block/aegis
+      // genuinely move the result inside the band (see _gravHeavyBand).
+      if (m.type === 'gravitos' && typeof _gravBandClamp === 'function') {
+        _shownDmg = _gravBandClamp(dmg, _gravHeavyBand(_gravPhaseOf(m), 'touch'));
+      }
       player.hp -= (player._god ? 0 : _shownDmg);
       player.lastHitTime = game.time;
       // v0.26.085 — Virgo Sin Counter increment. If this melee hit
@@ -59532,8 +59580,15 @@ function bossAI(m, dt, distToPlayer) {
       const _ohkoReady = (m._instaTimer <= 0) ||
                          (m._rainTimer  <= 0 && phase >= 2) ||
                          (m._soulTimer  <= 0);
-      const _instaCd = phase >= 3 ? 14000 : 18000;
-      const _rainCd  = phase >= 3 ? 16000 : 25000;
+      // v0.29.x — per user "make the 2nd form harder and the 3rd form hardest
+      // with more frequent OHKO moves": OHKO re-arm cds step down each phase
+      // (P1 → P2 → P3). The 8 s all-skill isolation gap above still bounds
+      // the true rate, so P3 approaches one OHKO every ~9 s (was ~14-16 s)
+      // while staying fair — full telegraph + safe zones / i-frame phase /
+      // perfect-parry remain the counters. P1's singularity is the
+      // survivable −99% variant, so the lighter cd there isn't lethal.
+      const _instaCd = phase >= 3 ? 9000 : phase === 2 ? 14000 : 20000;
+      const _rainCd  = phase >= 3 ? 11000 : 20000;
       const _soulCd  = phase >= 3 ? 14000 : 12000;
       if (m._instaTimer <= 0 && _skillSpaced) {
         m.patternState = 'singularity';
@@ -59856,6 +59911,7 @@ function bossAI(m, dt, distToPlayer) {
               damage: m.atk * 1.6, owner: 'enemy', skill: 'voidbeam',  // v0.25.716 — was 0.95 (+68 %)
               color: '#ff66ff', pierce: true, noGravity: true,
               stunHit: 1800,                   // long stun on connect
+              _gravBand: _gravHeavyBand(phase, 'skill'),   // v0.29.x — final-loss band clamp
             });
             addShake(5); flash(0.15);
           }, i * 180);
@@ -59911,8 +59967,12 @@ function bossAI(m, dt, distToPlayer) {
         if (Math.abs(m.vy) > vc) m.vy = Math.sign(m.vy) * vc;
         // Contact damage + stun on collide
         if (aabb(m, player) && player.invulnerable <= 0) {
-          const dmg = Math.max(1, Math.floor(m.atk * 1.3 - getDef() * 0.4));
-          player.hp -= (player._god ? 0 : _diffDmg(dmg));
+          // v0.29.x — zip now runs the absorb curve too (was flat-def only)
+          // and clamps the FINAL loss into the phase 'skill' band instead of
+          // eating the ×6 punish (which made the dive an unavoidable OHKO).
+          const dmg = Math.max(1, Math.floor(Math.max(1, m.atk * 1.3 - getDef() * 0.4) * _defAbsorbMul()));
+          const _zipLost = player._god ? 0 : _gravBandClamp(dmg, _gravHeavyBand(phase, 'skill'));
+          player.hp -= _zipLost;
           if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, m.w/2 + 40, dmg, 0, (m.name || m.type || 'a boss') + "'s charge", '#ff4466');
           player.hitStun = 800;
           // v0.26.069 — Post-boss-charge iframe 900 → 1800 ms.
@@ -59921,7 +59981,7 @@ function bossAI(m, dt, distToPlayer) {
           player.vy = -5;
           // v0.25.773 — Attribute on the death overlay (was missing).
           player._lastDamageSource = (m.name || m.type || 'a boss') + "'s charge";
-          game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: dmg, life: 44, color:'#ff4466', size: 18 });
+          game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: _zipLost || dmg, life: 44, color:'#ff4466', size: 18 });
           flash(0.35); addHitStop(100);
           m.patternTimer = 9999;    // end pattern after hit
         }
@@ -59957,6 +60017,7 @@ function bossAI(m, dt, distToPlayer) {
             damage: Math.max(100, Math.floor(m.atk * 1.2)),  // v0.25.716 — was 0.7 (+71 %)
             color: '#aa44ff',
             _sourceLabel: 'a Gravity Crush column',
+            _gravBand: _gravHeavyBand(phase, 'skill'),   // v0.29.x — final-loss band clamp
           });
         }
         showToast('⬇ GRAVITY CRUSH', 'epic');
@@ -59984,8 +60045,11 @@ function bossAI(m, dt, distToPlayer) {
           // unnecessary iterations per slam on a saturated arena.
           // Damage player if nearby
           if (Math.abs((player.x + player.w/2) - cx) < 180 && player.invulnerable <= 0) {
-            const dmg = Math.max(1, Math.floor(m.atk * 2.2 - getDef() * 0.4));  // v0.25.716 — was 1.3 (+69 %)
-            player.hp -= (player._god ? 0 : _diffDmg(dmg));
+            // v0.29.x — slam runs the absorb curve + phase 'skill' band clamp
+            // (was flat-def then ×6 punish → unavoidable OHKO at Lv 80+).
+            const dmg = Math.max(1, Math.floor(Math.max(1, m.atk * 2.2 - getDef() * 0.4) * _defAbsorbMul()));  // v0.25.716 — was 1.3 (+69 %)
+            const _slamLost = player._god ? 0 : _gravBandClamp(dmg, _gravHeavyBand(phase, 'skill'));
+            player.hp -= _slamLost;
             if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(cx, 0, 180, dmg, 0, (m.name || m.type || 'a boss') + "'s slam", '#ff4444');
             player.hitStun = 900;                        // long stun — easy to stun
             // v0.26.069 — Post-boss-slam iframe 900 → 1800 ms.
@@ -59994,7 +60058,7 @@ function bossAI(m, dt, distToPlayer) {
             player.vy = -5;
             // v0.25.773 — Attribute on the death overlay (was missing).
             player._lastDamageSource = (m.name || m.type || 'a boss') + "'s slam";
-            game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: dmg, life: 44, color:'#ff4444', size: 18 });
+            game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: _slamLost || dmg, life: 44, color:'#ff4444', size: 18 });
                       }
           // Ground wave particles — v0.25.527 budget-guarded; breaks
           // early when the frame is already at particle cap.
@@ -60042,6 +60106,7 @@ function bossAI(m, dt, distToPlayer) {
             damage: m.atk * 1.7, owner: 'enemy', skill: 'shock',  // v0.25.716 — was 1.0 (+70 %)
             color: '#aa44ff', pierce: true, noGravity: true,
             stunHit: 1200,
+            _gravBand: _gravHeavyBand(phase, 'skill'),   // v0.29.x — final-loss band clamp
           });
         }
         addShake(8); flash(0.2);
@@ -60081,6 +60146,7 @@ function bossAI(m, dt, distToPlayer) {
           _bhPullRadius: _pullR,
           _bhCoreRadius: _coreR,
           _bhAwakened: _awakened,
+          _gravBand: _gravHeavyBand(phase, 'bhCore'),   // v0.29.x — per-tick final-loss band clamp
         });
         showToast(_awakened ? '🕳 BLACK HOLE — EVENT HORIZON' : '🕳 BLACK HOLE', 'legendary');
         flash(_awakened ? 0.45 : 0.2); addShake(_awakened ? 12 : 4);
@@ -60115,21 +60181,18 @@ function bossAI(m, dt, distToPlayer) {
             damage: m.atk * 1.5, owner: 'enemy', skill: 'comet',  // v0.26.330 — was 1.25 (+20 %)
             color: '#cc66ff', noGravity: true, homing: true,
             stunHit: 600,
-            // v0.26.330 — Per user "Homing attacks should be extremely
-            // dangerous, 2HKO moves". Floor every chase-comet hit at
-            // 50 % of player maxHp via the v0.26.326 _heavyFloorPct
-            // generic projectile flag (handler at L49050 area). Two
-            // hits = death; the player MUST kite or block, not eat
-            // a single homer to "see how bad it is". Pairs with the
-            // boss's +20 % comet damage bump so even mitigated hits
-            // land at the 50 % floor reliably.
-            _heavyFloorPct: 0.50,
-            // v0.26.330 — Per user "ignore defence occasionally". 40 %
-            // of comet shots tagged ignore-def so the projectile ticks
-            // bypass the standard def subtraction. Stacks naturally
-            // with the heavy floor — players running pure-DEF builds
-            // can't tank the homers any more than a glass cannon can.
-            _ignoreDef: phase === 3 ? true : (Math.random() < 0.40),   // v0.26.403 — P3 comets ALWAYS pierce DEF (anti-facetank: a maxed warrior can no longer eat the homers)
+            // v0.29.x — heavy-hit rebalance: the old `_heavyFloorPct: 0.50`
+            // pre-punish floor became a guaranteed ~300%-maxHp one-shot once
+            // the Lv-80+ ×6 ramp multiplied past it. Comets now clamp the
+            // FINAL loss into the phase band (35/45/55% cap, 10/14/18% floor
+            // of maxHp) — still ~2HKO for glass builds in P3, tankable to
+            // ~4-6 hits with real DEF investment. Kiting remains king.
+            _gravBand: _gravHeavyBand(phase, 'comet'),
+            // v0.26.330 — "ignore defence occasionally": skips the flat DEF
+            // subtraction (the absorb curve still applies). v0.29.x — chance
+            // scales by phase instead of P3-always so DEF keeps mattering in
+            // P3 while the pierce pressure still escalates each form.
+            _ignoreDef: Math.random() < (phase >= 3 ? 0.55 : phase === 2 ? 0.35 : 0.15),
           });
           // Spawn-puff at the comet origin
           for (let k = 0; k < 5; k++) {
@@ -60172,10 +60235,11 @@ function bossAI(m, dt, distToPlayer) {
             // locks skill for 5 seconds and stuns". Three layered
             // punishment flags so a single ring shard turns a
             // mispositioned moment into a full reset:
-            //   • _heavyFloorPct: 0.50 — floors the resolved damage
-            //     at 50 % of player maxHp, AFTER all defensive
-            //     reductions (matches the v0.25.822 zodiac heavy-
-            //     floor mechanic; new handler at L49050 area).
+            //   • _gravBand (v0.29.x, was _heavyFloorPct 0.50 which the
+            //     Lv-80+ ×6 punish turned into a ~300%-maxHp one-shot) —
+            //     clamps the FINAL loss into the phase band (30/40/50%
+            //     cap, 8/12/16% floor of maxHp): a shard is a heavy
+            //     punish DEF can shave, not an instant kill.
             //   • skillLock: 5000 — 5 s silence on every active
             //     skill (basic attack still allowed) via the
             //     v0.25.485 player._skillLockTimer pipeline.
@@ -60183,7 +60247,7 @@ function bossAI(m, dt, distToPlayer) {
             //     with the v0.26.069 stunBase * 2 + 800 iframe so
             //     the player stays locked + invuln in roughly the
             //     same window as the active skill silence.
-            _heavyFloorPct: 0.50,
+            _gravBand: _gravHeavyBand(phase, 'ring'),
             skillLock: 5000,
             stunHit: 1500,
           });
@@ -60235,6 +60299,7 @@ function bossAI(m, dt, distToPlayer) {
             color: '#aa44ff',
             _sourceLabel: 'a Crush Tendril',
             _gravBlue: true,   // v0.29.78 — Gravitos-only blue meteor + marker
+            _gravBand: _gravHeavyBand(phase, 'skill'),   // v0.29.x — final-loss band clamp
           });
           // v0.26.172 — Authored tendril sprite descending into the
           // tendril column. Anchored at the top of the viewport and
@@ -60283,6 +60348,7 @@ function bossAI(m, dt, distToPlayer) {
             color: '#ff44aa',
             _sourceLabel: 'a Decay Pillar',
             _gravBlue: true,   // v0.29.78 — Gravitos-only blue meteor + marker
+            _gravBand: _gravHeavyBand(phase, 'skill'),   // v0.29.x — final-loss band clamp
           });
         }
         showToast(phase === 3 ? '╳ DECAY FLOOR — find the gap' : '╳ DECAY FLOOR', 'legendary');
@@ -64858,6 +64924,12 @@ function updateProjectiles(dt) {
         // v0.26.354 cap exists to prevent. Boss/zodiac/heavy-floor shots aren't
         // _normalMob, so they keep full punch.
         let _projLost = (player._god ? 0 : _diffDmg(dmg));
+        // v0.29.x — GRAVITOS heavy-hit band: clamp the FINAL loss using the
+        // fully-mitigated (pre-punish) damage so DEF/block genuinely scale
+        // the hit inside the phase band. Replaces the old pre-punish
+        // _heavyFloorPct floors that the Lv-80+ ×6 ramp turned into
+        // guaranteed one-shots (see _gravHeavyBand).
+        if (p._gravBand && _projLost > 0) _projLost = _gravBandClamp(dmg, p._gravBand);
         if (p._normalMob && _projLost > 0) _projLost = Math.min(_projLost, Math.floor(getMaxHp() * 0.40));
         player.hp -= _projLost;
         player.lastHitTime = game.time;
@@ -65590,7 +65662,14 @@ function updateProjectiles(dt) {
             }
             if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR (0.90 at L≤50 → 0.60 at L100) */
             if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
-            player.hp -= (player._god ? 0 : _diffDmg(dmg));
+            let _bhLost = (player._god ? 0 : _diffDmg(dmg));
+            // v0.29.x — Gravitos black-hole core: clamp each tick's FINAL
+            // loss into the phase band stamped on the hazard at spawn
+            // (DEF still shaves it; ~2 capped ticks over the hazard life).
+            if (_bhLost > 0 && h._gravBand && typeof _gravBandClamp === 'function') {
+              _bhLost = _gravBandClamp(dmg, h._gravBand);
+            }
+            player.hp -= _bhLost;
             player.lastHitTime = game.time;
             // v0.26.348 — core iframe 120 → 75 frames so the buffed black hole
             // lands ~2 ticks over its 2.4 s life when the player is held in
@@ -65600,7 +65679,7 @@ function updateProjectiles(dt) {
             if (game.damageNumbers) {
               game.damageNumbers.push({
                 x: player.x + 14, y: player.y, vy: -2,
-                text: '-' + dmg, life: 32, color: '#cc66ff', size: 13,
+                text: '-' + (_bhLost || dmg), life: 32, color: '#cc66ff', size: 13,
               });
             }
             h._coreTickCD = 12;
@@ -65668,14 +65747,21 @@ function updateProjectiles(dt) {
           if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR (0.90 at L≤50 → 0.60 at L100) */
           // Divine Aegis halves damage
           if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
-          player.hp -= (player._god ? 0 : _diffDmg(dmg));
+          let _mLost = (player._god ? 0 : _diffDmg(dmg));
+          // v0.29.x — Gravitos pillar hits (crush / tendril / decay) clamp
+          // the FINAL loss into the phase band stamped on the hazard at
+          // spawn — DEF still shaves it, the ×6 punish no longer one-shots.
+          if (_mLost > 0 && h._gravBand && typeof _gravBandClamp === 'function') {
+            _mLost = _gravBandClamp(dmg, h._gravBand);
+          }
+          player.hp -= _mLost;
           player.lastHitTime = game.time;
           player.invulnerable = 600;   // standard iframe window after a meteor
           player._lastDamageSource = h._sourceLabel || 'a meteor strike';
           if (typeof game.damageNumbers !== 'undefined') {
             game.damageNumbers.push({
               x: player.x + 14, y: player.y, vy: -2,
-              text: '-' + dmg, life: 40, color: h.color || '#ffaa33', big: true,
+              text: '-' + (_mLost || dmg), life: 40, color: h.color || '#ffaa33', big: true,
             });
           }
         }
