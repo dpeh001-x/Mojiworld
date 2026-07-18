@@ -13,9 +13,9 @@
 // lock so two copies never fight over it.
 'use strict';
 const { app, BrowserWindow, shell, powerSaveBlocker, ipcMain } = require('electron');
-const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const staticServer = require('./static_server');
 
 const FIXED_PORT = 47821;   // stable loopback port -> stable origin -> saves persist
 
@@ -26,6 +26,15 @@ let steam = require('./steam_integration').STUB;
 try { steam = require('./steam_integration').init(); } catch (e) { console.warn('[steam] bridge load failed:', e && e.message); }
 // Enable the Steam overlay (Shift+Tab) BEFORE any window is created.
 if (steam.available) { try { steam.enableOverlay(); } catch (e) {} }
+
+// Steam Deck detection. SteamOS's gamescope session sets SteamDeck=1 in the
+// environment; the Steamworks utils call is the authoritative check when the
+// bridge is up. On Deck we launch fullscreen (1280×800 native) and the renderer
+// pops Steam's floating gamepad keyboard when a text field takes focus.
+const ON_DECK = (() => {
+  try { if (steam.available && steam.utils && steam.utils.isOnDeck()) return true; } catch (e) {}
+  return process.env.SteamDeck === '1' || process.env.STEAM_DECK === '1';
+})();
 
 // Friends "Join Game": Steam launches us with the `connect` rich-presence value
 // appended to argv — we set it to "--moji-join=<relay>~<CODE>". Extract it so the
@@ -44,6 +53,9 @@ ipcMain.handle('steam:presence-set', (_e, p) => { try { return steam.presence.se
 ipcMain.handle('steam:overlay-open', (_e, dialog) => { try { return steam.overlay.open(dialog); } catch (e) { return false; } });
 ipcMain.handle('steam:stats-set',    (_e, obj) => { try { return steam.stats.set(obj); } catch (e) { return false; } });
 ipcMain.on('steam:input-snapshot',   (e) => { try { e.returnValue = steam.input.snapshot(); } catch (err) { e.returnValue = null; } });
+// Steam Deck / Big Picture: pop the floating gamepad keyboard over the game so
+// text fields (hero name, party code, chat) are typeable without a keyboard.
+ipcMain.handle('steam:show-text-input', (_e, opts) => { try { return steam.utils.showTextInput(opts || {}); } catch (e) { return false; } });
 // Pump Steamworks callbacks periodically (cloud/input/presence housekeeping).
 if (steam.available) { try { setInterval(() => { try { steam.runCallbacks(); } catch (e) {} }, 200); } catch (e) {} }
 
@@ -75,55 +87,22 @@ function resolveRelayUrl() {
 }
 const RELAY_URL = resolveRelayUrl();
 
-const MIME = {
-  '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
-  '.css': 'text/css', '.json': 'application/json', '.png': 'image/png',
-  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
-  '.gif': 'image/gif', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
-  '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav',
-  '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
-};
-
-function startServer() {
-  return new Promise((resolve) => {
-    const server = http.createServer((req, res) => {
-      let p = decodeURIComponent((req.url || '/').split('?')[0]);
-      if (p === '/') p = ENTRY;
-      const abs = path.normalize(path.join(ROOT, p));
-      if (!abs.startsWith(ROOT)) { res.writeHead(403).end('forbidden'); return; }  // path-traversal guard
-      fs.readFile(abs, (err, buf) => {
-        if (err) { res.writeHead(404).end('not found'); return; }
-        res.writeHead(200, { 'content-type': MIME[path.extname(abs).toLowerCase()] || 'application/octet-stream' });
-        res.end(buf);
-      });
-    });
-    server.on('error', () => {
-      // FIXED_PORT is in use (rare — an unrelated app). Fall back to an ephemeral
-      // port so the game still LAUNCHES; saves for that session use a different
-      // origin, but launching beats crashing.
-      const fb = http.createServer(server.listeners('request')[0]);
-      // Guard the fallback bind too — without an error handler a failed listen(0)
-      // emits an uncaught 'error' and the startServer() promise would hang forever
-      // (black window). Resolve on FIXED_PORT so the window still loads (and shows a
-      // clear failure) instead of never resolving.
-      fb.on('error', () => resolve(FIXED_PORT));
-      fb.listen(0, '127.0.0.1', () => resolve(fb.address().port));
-    });
-    server.listen(FIXED_PORT, '127.0.0.1', () => resolve(FIXED_PORT));
-  });
-}
+// Static file serving (MIME incl. mp4 cinematics, Range support for <video>
+// seeking, traversal guard, fixed-port-with-fallback) lives in static_server.js
+// so it stays testable in plain Node — see that file for the details.
 
 async function createWindow() {
-  const port = await startServer();
+  const port = await staticServer.start(ROOT, ENTRY, FIXED_PORT);
   try { powerSaveBlocker.start('prevent-app-suspension'); } catch (e) {}
   const win = new BrowserWindow({
-    width: 1280, height: 800, minWidth: 960, minHeight: 560,
+    width: 1280, height: 800, minWidth: 960, minHeight: 560,   // 1280×800 = Steam Deck native
+    fullscreen: ON_DECK,           // gamescope expects fullscreen on Deck
     backgroundColor: '#0b0713',
     title: 'Mojiworld',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      additionalArguments: ['--moji-relay=' + RELAY_URL, '--moji-steam=' + (steam.available ? '1' : '0'), '--moji-launch-join=' + LAUNCH_JOIN],
+      additionalArguments: ['--moji-relay=' + RELAY_URL, '--moji-steam=' + (steam.available ? '1' : '0'), '--moji-deck=' + (ON_DECK ? '1' : '0'), '--moji-launch-join=' + LAUNCH_JOIN],
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,

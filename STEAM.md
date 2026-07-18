@@ -116,6 +116,50 @@ that most need playtesting before you flip the store page live.
 
 ---
 
+## 6b. Steam Deck (v0.29)
+
+The wrapper is Deck-aware end to end; target **Steam Deck Verified**.
+
+**What the build does on Deck**
+
+- **Detection** — `steam.utils.isOnDeck()` (Steamworks `IsSteamRunningOnSteamDeck`)
+  with an env fallback (`SteamDeck=1`, set by the gamescope session).
+- **Fullscreen at 1280×800** — the window opens `fullscreen: true` on Deck
+  (1280×800 is also the default windowed size, so the UI is authored for it).
+- **On-screen keyboard** — when any text field takes focus (hero name, party
+  code, chat), the preload pops Steam's **floating gamepad keyboard**
+  (`ShowFloatingGamepadTextInput`) positioned off the field's rect. Steam types
+  straight into the DOM input — the game needed zero changes.
+- **Controller** — two independent layers: Steam Input digital actions (the
+  `game_actions_<appid>.vdf` set, polled via `SteamAPI.input.snapshot()`), and
+  the game's own browser **Gamepad API** support (`_LX_PAD_MAP`) as fallback, so
+  the Deck controller works even under Proton with no Steam Input config.
+- **Video/cinematics** — the loopback server (`static_server.js`) serves correct
+  MIME for the mp4 story-beat cinematics and supports **HTTP Range** so seeking
+  doesn't stall on Deck's slower storage. The 15 game-referenced clips are
+  packaged (`extraResources`); the review-gallery clips are not.
+
+**Shipping for Deck**
+
+Preferred: ship the **Linux build** as its own depot —
+`npm run dist:steamdeck` → `release/linux-unpacked/` → upload that directory as
+the Linux depot; set the launch option to the `mojiworld` binary. Electron runs
+natively on SteamOS (no Proton needed). Alternative: ship Windows-only and mark
+Proton compatibility — the Gamepad API fallback still gives full controller play.
+
+**Deck-verified checklist**
+
+- [ ] Default controller config uploaded (Steam Input `.vdf`) + tested on Deck.
+- [ ] All text entry pops the floating keyboard (name your hero, party code, chat).
+- [ ] Text legible at 1280×800 from couch distance (in-game UI scale ≥ 100%).
+- [ ] No launcher/DRM prompt before gameplay; single-instance lock verified.
+- [ ] Suspend/resume: game state intact after Deck sleep (localStorage saves are
+      synchronous — safe), relay reconnects after resume.
+- [ ] Battery: `powerSaveBlocker` keeps the co-op host simulating; solo players
+      can still let the Deck sleep normally.
+
+---
+
 ## 7. Steamworks SDK integration (v0.28.0) — cloud saves, controller, achievements
 
 All native Steam code lives in the Electron main process (`steam/`) and is

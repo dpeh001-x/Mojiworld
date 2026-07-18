@@ -42,6 +42,7 @@ const STUB = {
   overlay: { open() { return false; }, openWebPage() { return false; } },
   stats: { set() { return false; } },
   input: { snapshot() { return null; } },
+  utils: { isOnDeck() { return false; }, showTextInput() { return false; } },
   enableOverlay() { return false; },
   runCallbacks() {},
   shutdown() {},
@@ -163,6 +164,40 @@ function init() {
           }
           return out;
         } catch (e) { return null; }
+      },
+    },
+    // Steam Deck helpers. Both are best-effort probes across the API names
+    // steamworks.js has used; every path is guarded so a missing binding is a no-op.
+    utils: {
+      isOnDeck() {
+        try {
+          const u = client.utils;
+          if (u && typeof u.isSteamRunningOnSteamDeck === 'function') return !!u.isSteamRunningOnSteamDeck();
+          if (u && typeof u.isOnSteamDeck === 'function') return !!u.isOnSteamDeck();
+        } catch (e) {}
+        return process.env.SteamDeck === '1';
+      },
+      // Floating gamepad keyboard over the game (Deck / Big Picture). Steam types
+      // straight into the focused DOM field, so no text round-trip is needed.
+      // opts: { x, y, w, h } — the focused field's screen rect, so the keyboard
+      // docks away from it. Falls back to a bottom-half default.
+      showTextInput(opts) {
+        try {
+          const u = client.utils;
+          if (!u) return false;
+          const o = opts || {};
+          const x = o.x | 0, y = o.y | 0, w = (o.w | 0) || 1280, h = (o.h | 0) || 40;
+          if (typeof u.showFloatingGamepadTextInput === 'function') {
+            // mode 0 = single line; steamworks.js exposes the enum as plain int.
+            u.showFloatingGamepadTextInput(0, x, y, w, h);
+            return true;
+          }
+          if (typeof u.showGamepadTextInput === 'function') {
+            u.showGamepadTextInput(0, 0, 'Enter text', 128, String(o.existing || ''));
+            return true;
+          }
+        } catch (e) {}
+        return false;
       },
     },
     // Enable the in-game Steam overlay for Electron (Shift+Tab: friends,
