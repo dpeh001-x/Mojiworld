@@ -35130,6 +35130,54 @@ function _coopSendPing() {
   _coopAddPing(px, py, 'You', true);
   try { net.ws.send(JSON.stringify({ t: 'ping', map: game.currentMap, x: px, y: py })); } catch (e) {}
 }
+// v0.29.x — PARTY HEAL (priest support). Per user "ensure the priest's
+// F V G B skill heals all party members as well". The caster broadcasts a
+// %-of-maxpool heal; each partner applies it against THEIR OWN maxHp/maxMp
+// (pools differ per player). Rides a 'ping' carrier frame — the deployed
+// relay only verbatim-forwards known frame types (same trick as the
+// look-sync carrier) — and omits map/x/y so the map-pin branch skips it;
+// the heal scopes to the caster's map via `hm` instead.
+function _coopPartyHeal(hpPct, mpPct, label) {
+  if (typeof _coopActive !== 'function' || !_coopActive() || !net.ws || net.ws.readyState !== 1) return;
+  const now = performance.now();
+  if (now - (net._lastPhealAt || 0) < 150) return;   // flood guard
+  net._lastPhealAt = now;
+  try {
+    net.ws.send(JSON.stringify({ t: 'ping', phl: 1, hm: game.currentMap,
+      hp: +Math.min(1, Math.max(0, hpPct || 0)).toFixed(3),
+      mpp: +Math.min(1, Math.max(0, mpPct || 0)).toFixed(3),
+      sl: String(label || 'a blessing').slice(0, 24) }));
+  } catch (e) {}
+}
+function _coopApplyPartyHeal(msg) {
+  if (!msg || msg.hm !== game.currentMap) return;
+  if (!player || player.hp <= 0) return;   // downed partners go through the revive channel, not heals
+  const hpPct = Math.min(1, Math.max(0, +msg.hp || 0));
+  const mpPct = Math.min(1, Math.max(0, +msg.mpp || 0));
+  if (hpPct <= 0 && mpPct <= 0) return;
+  const healHp = Math.floor(getMaxHp() * hpPct);
+  const healMp = Math.floor(getMaxMp() * mpPct);
+  if (healHp > 0) player.hp = Math.min(getMaxHp(), player.hp + healHp);
+  if (healMp > 0) player.mp = Math.min(getMaxMp(), player.mp + healMp);
+  if (game.damageNumbers && (healHp > 0 || healMp > 0)) {
+    game.damageNumbers.push({
+      x: player.x + 14, y: player.y - 6, vy: -2,
+      text: '☀ +' + healHp + ' HP' + (healMp > 0 ? ' · +' + healMp + ' MP' : ''),
+      life: 34, color: '#ffe89a', size: 13,
+    });
+  }
+  // gentle golden shimmer so the blessed partner sees the source flavour
+  if (typeof _budgetedParticlePush === 'function') {
+    for (let i = 0; i < 4; i++) {
+      if (!_budgetedParticlePush({
+        x: player.x + player.w / 2 + (Math.random() - 0.5) * 30,
+        y: player.y + player.h - Math.random() * player.h,
+        vx: (Math.random() - 0.5) * 0.5, vy: -0.8 - Math.random() * 0.6,
+        life: 30, color: i % 2 ? '#ffe89a' : '#fff5cc', size: 2, shape: 'star',
+      })) break;
+    }
+  }
+}
 function _coopAddPing(x, y, name, mine) {
   net._pings = net._pings || [];
   net._pings.push({ x, y, name: String(name || '').slice(0, 16), mine: !!mine, born: performance.now() });
@@ -35399,6 +35447,12 @@ function _mpHandle(msg) {
           const _rtt = Math.max(0, Math.min(9999, performance.now() - (+msg.rte)));
           _pp2._rttMs = (_pp2._rttMs == null) ? _rtt : (_pp2._rttMs * 0.6 + _rtt * 0.4);
         }
+      }
+      // v0.29.x — PARTY-HEAL CARRIER (priest F/V/G/B). Heals ride a ping
+      // frame so the deployed relay forwards them verbatim; no `map` field
+      // → the map-pin branch below skips them (scoped via `hm` instead).
+      if (msg && msg.phl && msg.id !== net.myId && typeof _coopApplyPartyHeal === 'function') {
+        _coopApplyPartyHeal(msg);
       }
       // v0.27.9 — co-op map-ping marker (carrier frames send no map → skipped).
       if (msg && msg.map === game.currentMap) _coopAddPing(+msg.x || 0, +msg.y || 0, (net.peers[msg.id] && net.peers[msg.id].name) || 'Partner', false);
@@ -54291,6 +54345,10 @@ const SKILL_FNS = {
     const healMp = Math.min(_holyLightCost, Math.floor(getMaxMp() * healPct * 0.5));
     player.hp = Math.min(getMaxHp(), player.hp + healHp);
     player.mp = Math.min(getMaxMp(), player.mp + healMp);
+    // v0.29.x — party heal: every co-op partner receives the same %-heal
+    // against their own pools (MP share capped at 10% so the priest's own
+    // MP-economy cap reasoning carries over).
+    if (typeof _coopPartyHeal === 'function') _coopPartyHeal(healPct, Math.min(0.10, healPct * 0.5), 'Holy Light');
     player._prismCharges = Math.min(5, (player._prismCharges || 0) + 1);
     if (typeof _renderPrismPips === 'function') _renderPrismPips();   // v0.26.891
     const cx = player.x + player.w/2, cy = player.y + player.h/2;
@@ -54392,6 +54450,9 @@ const SKILL_FNS = {
     spawnSpriteBurst(player.x + player.w/2, player.y + player.h/2 - 20, 'archbishop_grail',
       { size: 460, life: 150, spin: 0 });
     showToast('JUDGMENT OF THE HOLY GRAIL', 'legendary');
+    // v0.29.x — party blessing: the Grail judgment also heals every co-op
+    // partner on the map (25% HP / 15% MP of their own pools).
+    if (typeof _coopPartyHeal === 'function') _coopPartyHeal(0.25, 0.15, 'Judgment of the Holy Grail');
     // Schedule 7 pillars
     const _castMap = game.currentMap;   // v0.26.1020 — bail if the player warps mid-cast
     for (let i = 0; i < 7; i++) {
@@ -54827,9 +54888,13 @@ const SKILL_FNS = {
     spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'archbishop_ult', { size: 300, life: 100, frameGap: 3 });   // v0.26.x — smaller frame gap per user
     player.hp = getMaxHp();
     player.invulnerable = Math.max(player.invulnerable, 5000);
+    // v0.29.x — party heal: Apotheosis fully heals every co-op partner on
+    // cast (100% HP / 50% MP of their own pools), its judgment pulses tick
+    // +6% HP to the party, and the final pillar full-heals the party again.
+    if (typeof _coopPartyHeal === 'function') _coopPartyHeal(1.0, 0.5, 'Apotheosis');
     showToast('APOTHEOSIS — cannot die', 'legendary'); flash(0.7); audio.play('levelup');
-    for (let i = 0; i < 5; i++) scheduleSkillTimer(() => { if (player.hp <= 0) return; spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'archbishop_ult', { size: 480, life: 30, frameGap: 3 }); performAround(440, 3.2, { color: '#fff1a0', kb: 8 }); flash(0.22); player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.06)); }, 300 + i * 720);
-    scheduleSkillTimer(() => { if (player.hp <= 0) return; spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'archbishop_ult', { size: 660, life: 90, frameGap: 3 }); performAround(620, 9.0, { color: '#ffffff', kb: 14 }); player.hp = getMaxHp(); flash(0.85); addShake(14); }, 300 + 5 * 720 + 200);
+    for (let i = 0; i < 5; i++) scheduleSkillTimer(() => { if (player.hp <= 0) return; spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'archbishop_ult', { size: 480, life: 30, frameGap: 3 }); performAround(440, 3.2, { color: '#fff1a0', kb: 8 }); flash(0.22); player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.06)); if (typeof _coopPartyHeal === 'function') _coopPartyHeal(0.06, 0, 'Apotheosis'); }, 300 + i * 720);
+    scheduleSkillTimer(() => { if (player.hp <= 0) return; spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'archbishop_ult', { size: 660, life: 90, frameGap: 3 }); performAround(620, 9.0, { color: '#ffffff', kb: 14 }); player.hp = getMaxHp(); if (typeof _coopPartyHeal === 'function') _coopPartyHeal(1.0, 0, 'Apotheosis'); flash(0.85); addShake(14); }, 300 + 5 * 720 + 200);
   },
   marksman_ult: () => {
     spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'marksman_ult', { size: 240, life: 60 });
@@ -65925,6 +65990,12 @@ function updateProjectiles(dt) {
             life: 30, color: '#88ffaa', size: 12,
           });
         }
+        // v0.29.x — party heal: each field tick also blesses every co-op
+        // partner on the map at the same %-per-tick (their own pools; no
+        // positional gate — per user the aurora reaches the whole party).
+        // The field hazard only exists on the caster's client, so this
+        // sends exactly once per tick.
+        if (typeof _coopPartyHeal === 'function') _coopPartyHeal(h.healPct, h.healPct, 'Celestial Aurora');
         // Holy DoT to enemies inside
         // v0.26.x — snapshot so a kill+splice can't skip the next target.
         for (const m of [...game.monsters]) {
