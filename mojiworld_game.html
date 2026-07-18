@@ -8758,7 +8758,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.103';
+const GAME_VERSION = 'v0.29.104';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -38932,6 +38932,11 @@ function _renderWorldMapDiagram(host, opts) {
   // width-driven sizing (its grid has no definite height, so height:100%
   // would collapse the SVG there).
   const _wmFit = !!(opts && opts.mode === 'travel');
+  // v0.29.x — devMode (Dev Console teleport view): reveal every node's real
+  // name/level (no fog-of-war "???"), and skip the undiscovered dimming —
+  // devs need to see where they're jumping. Click gating stays with the
+  // caller's isAccessible/onPick, so this flag is presentation-only.
+  const _wmDev = !!(opts && opts.devMode);
   const _fitCss = _wmFit ? 'width:100%; height:100%; max-height:100%; min-height:0; flex:1 1 auto; ' : 'width:100%; ';
   svg.style.cssText = _fitCss + 'background:radial-gradient(ellipse at 24% 18%, rgba(88,44,160,0.40), transparent 52%),radial-gradient(ellipse at 78% 80%, rgba(30,90,190,0.34), transparent 55%),radial-gradient(ellipse at 55% 40%, rgba(190,60,160,0.16), transparent 45%),radial-gradient(ellipse at center, #14102e, #060314 82%); border-radius:12px; border:1px solid rgba(160,120,255,0.45); box-shadow:0 0 26px rgba(120,80,220,0.25) inset, 0 0 18px rgba(120,80,220,0.30); display:block;';   // v0.26.868 — galaxy canvas
   // v0.26.868 — GALAXY BACKDROP (per user "galaxy themed and very fancy").
@@ -39309,7 +39314,7 @@ function _renderWorldMapDiagram(host, opts) {
     // v0.26.x — visual hierarchy: ① next-hop ring (one portal away — pairs
     // with the bright starlane), ② undiscovered maps recede (whole node
     // dimmed so explored space pops), ③ filter-free hover halo.
-    const _undiscovered = !here && !(game.visitedMaps && game.visitedMaps[id]);
+    const _undiscovered = !here && !(game.visitedMaps && game.visitedMaps[id]) && !_wmDev;
     if (_undiscovered && !_taxiDim && !_nodeHidden && !_wmEditMode) {
       g.setAttribute('opacity', '0.58');
     }
@@ -39399,7 +39404,7 @@ function _renderWorldMapDiagram(host, opts) {
     // v0.26.x — Per user: show the "Lv N" pill ONLY for maps the player has
     // already travelled to (game.visitedMaps[id]). Unvisited maps stay
     // unknown — no level revealed until you've been there.
-    const _visitedMap = !!(game.visitedMaps && game.visitedMaps[id]);
+    const _visitedMap = !!(game.visitedMaps && game.visitedMaps[id]) || _wmDev;   // devMode reveals all names/levels
     if (_pillLv !== null && _visitedMap) {
       // Tier-coloured background pill for readability against the
       // painted W-map backdrop.
@@ -72470,14 +72475,44 @@ function renderDev() {
   //      max-height:88vh added to #dev-modal, the dev console now
   //      reliably fits any viewport with the Class chart visible at
   //      the top.
-  const tpSec = makeSection('🗺 Teleport', '#88ff88');
+  // v0.29.x — Per user "the teleport map function should include the world
+  // map W view instead, enable teleport to all maps": the flat 60+ button
+  // wall is replaced by the real W-map star diagram in devMode (all names
+  // revealed, every node clickable → devTeleport, no level/visit gating).
+  // Maps that don't sit on the diagram (The Void, wmHidden maps, zodiac
+  // domains, tower floors…) get a chip row underneath, so ALL of MAPS is
+  // one click away.
+  const tpSec = makeSection('🗺 Teleport — world map (click any node)', '#88ff88');
   tpSec.style.gridColumn = '1 / -1';
-  const tpScroll = document.createElement('div');
-  tpScroll.style.cssText = 'max-height:240px; overflow-y:auto; display:flex; flex-wrap:wrap; gap:4px; padding:4px; background:rgba(0,0,0,0.2); border-radius:4px;';
-  for (const mapId in MAPS) {
-    tpScroll.appendChild(btn(MAPS[mapId].name, () => devTeleport(mapId), '#3a5a3a'));
+  const tpWrap = document.createElement('div');
+  tpWrap.style.cssText = 'max-height:420px; overflow-y:auto; padding:4px; background:rgba(0,0,0,0.2); border-radius:6px;';
+  let _tpPositions = {};
+  try {
+    _renderWorldMapDiagram(tpWrap, {
+      mode: 'dev',
+      devMode: true,
+      isAccessible: () => ({ ok: true }),         // every node clickable
+      onPick: (id) => devTeleport(id),
+    });
+    _tpPositions = (_wmComputePositions().positions) || {};
+  } catch (e) { devLog('W-map render failed (' + e + ') — falling back to buttons'); }
+  // Chip row: every MAPS id absent from the diagram (or everything, if the
+  // diagram failed) — guarantees full teleport coverage.
+  const rest = Object.keys(MAPS).filter((id) => !_tpPositions[id]);
+  if (rest.length) {
+    const lbl = document.createElement('div');
+    lbl.style.cssText = 'color:#8fb; font-size:11px; margin:6px 2px 3px; opacity:0.8;';
+    lbl.textContent = 'Not pinned on the star map:';
+    tpWrap.appendChild(lbl);
+    const chips = document.createElement('div');
+    chips.style.cssText = 'display:flex; flex-wrap:wrap; gap:4px;';
+    rest.sort((a, b) => (MAPS[a].name || a).localeCompare(MAPS[b].name || b));
+    for (const mapId of rest) {
+      chips.appendChild(btn(((typeof _WM_BIOME_ICON !== 'undefined' && _WM_BIOME_ICON[mapId]) || '📍') + ' ' + (MAPS[mapId].name || mapId), () => devTeleport(mapId), '#3a5a3a'));
+    }
+    tpWrap.appendChild(chips);
   }
-  tpSec.appendChild(tpScroll);
+  tpSec.appendChild(tpWrap);
   grid.appendChild(tpSec);
 }
 
@@ -72625,7 +72660,16 @@ function devSetMaster(id) {
 function devTeleport(mapId) {
   if (!MAPS[mapId]) return;
   loadMap(mapId, 200);
-  player.x = 200; player.y = 400; player.vx = 0; player.vy = 0;
+  // v0.29.x — land ON the map's ground line (same rule as _defaultPortalY:
+  // first ground-type platform). The old hardcoded y=400 dropped the player
+  // mid-air on tall maps — on Frozen Peak (ground y=14070) that was a
+  // ~13,000 px freefall straight into max fall damage on arrival.
+  const _g = ((game.mapData && game.mapData.platforms) || []).find((p) => p.type === 'ground');
+  const _gy = _g ? _g.y : 480;
+  const _gx = _g ? Math.max(_g.x + 30, Math.min(_g.x + _g.w - 60, 200)) : 200;
+  player.x = _gx; player.y = _gy - (player.h || 46); player.vx = 0; player.vy = 0;
+  player.onGround = true;
+  player._fallApexY = player.y;   // no phantom fall-damage arc from the warp
   devLog('Teleported to ' + MAPS[mapId].name);
   closeAllModals();
 }
