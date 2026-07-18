@@ -35994,7 +35994,15 @@ function _mpNoteVersion(peer, v) {
 function _mpTick() {
   if (!net.connected || !net.ws || net.ws.readyState !== 1) return;
   const now = performance.now();
-  if (now - net._lastTickAt < MP_TICK_MS) return;
+  // v0.29.x (peer-coordinate accuracy) — AIRBORNE-FLIP FLUSH. Send an immediate
+  // state frame the moment we leave the ground or land (the two instants where
+  // a partner's linear extrapolation of our old velocity is most wrong), instead
+  // of letting the flip sit up to a full 70 ms tick. _mpTick runs every rAF
+  // frame, so the transition frame goes out within ~16 ms.
+  const _air = Math.abs((typeof player !== 'undefined' && player && player.vy) || 0) > 0.5;
+  const _airFlip = _air !== !!net._lastAir;
+  net._lastAir = _air;
+  if (!_airFlip && now - net._lastTickAt < MP_TICK_MS) return;
   net._lastTickAt = now;
   const _av = _mpAvatarWire();
   // v0.29.x — LATENCY: avatar payload change-detection. `_sendAv` gates the
@@ -36344,6 +36352,22 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
     _LX_EQ_PREVIEW_OVERRIDE = _savedOverride;
   }
 }
+// v0.29.x (per user "occasionally the coordinates for my teammate does not
+// match") — where would a peer at column `px` come to REST on the local map?
+// Scans the platforms whose span contains the peer's center for the highest
+// top at-or-below the snapshot's feet (6px tolerance so standing peers match
+// their own platform), and returns the body-top y for a 44px-tall avatar
+// resting there. null = nothing below (pit / off-map) — caller skips.
+function _mpPeerRestY(px, py) {
+  const plats = (game.mapData && game.mapData.platforms) || [];
+  const cx = (px || 0) + 14, feet = (py || 0) + 44;
+  let best = Infinity;
+  for (const pl of plats) {
+    if (!pl || cx < pl.x || cx > pl.x + pl.w) continue;
+    if (pl.y >= feet - 6 && pl.y < best) best = pl.y;
+  }
+  return (best === Infinity) ? null : best - 44;
+}
 function _mpDrawPeers() {
   if (!net.connected) return;
   const myMap = game.currentMap;
@@ -36360,9 +36384,28 @@ function _mpDrawPeers() {
     // target. Removes the 0–70 ms tick staleness + most of the lerp catch-up trail, so
     // a running partner tracks in real time instead of rubber-banding behind. Velocity
     // units are px/frame (60 Hz fixed step), matching the sender's physics.
-    const _snapFrames = p._snapAt ? Math.min(8, (performance.now() - p._snapAt) / 16.67) : 0;
-    const _tx = (p.x || 0) + (p.vx || 0) * _snapFrames;
-    const _ty = (p.y || 0) + (p.vy || 0) * _snapFrames;
+    const _ageMs = p._snapAt ? (performance.now() - p._snapAt) : 0;
+    const _snapFrames = p._snapAt ? Math.min(8, _ageMs / 16.67) : 0;
+    let _tx = (p.x || 0) + (p.vx || 0) * _snapFrames;
+    // v0.29.x (per user "occasionally the coordinates for my teammate does not
+    // match") — three accuracy fixes to the dead-reckoned target:
+    //   1. GRAVITY-AWARE: an airborne snapshot (|vy|>0.5) follows its ballistic
+    //      arc (+½·g·f², g = 0.5 px/frame² like the sender's physics) instead of
+    //      a straight line, so jumps track the real trajectory between ticks.
+    //   2. FLOOR CLAMP: extrapolation never pushes the avatar through a local
+    //      platform — a falling peer stops at the surface they'd land on.
+    //   3. STALL SETTLE: when the state feed stalls (>400 ms without a frame —
+    //      packet loss / hidden-tab sender), a mid-jump snapshot no longer
+    //      hovers frozen in the air: the avatar settles onto the nearest
+    //      platform below it (downward only). The next fresh frame resumes live
+    //      tracking, and the >200px snap below absorbs any correction.
+    let _ty = (p.y || 0) + (p.vy || 0) * _snapFrames
+            + ((Math.abs(p.vy || 0) > 0.5) ? 0.25 * _snapFrames * _snapFrames : 0);
+    const _restY = _mpPeerRestY(p.x, p.y);
+    if (_restY != null && _ty > _restY) _ty = _restY;
+    if (p._snapAt && _ageMs > 400 && !p._downed && _restY != null && _restY > (p.y || 0) - 4) {
+      _tx = p.x || 0; _ty = _restY;
+    }
     if (p._rx == null || Math.abs((p.x || 0) - p._rx) > 200 || Math.abs((p.y || 0) - (p._ry || 0)) > 200) { p._rx = _tx; p._ry = _ty; }
     else { p._rx += (_tx - p._rx) * 0.45; p._ry += (_ty - p._ry) * 0.45; }
     const _dead = !!(p.maxHp && (p.hp || 0) <= 0) || !!p._downed;   // v0.27.9 — downed partners read as down (they hold 1 HP while down)
