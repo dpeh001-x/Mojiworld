@@ -31476,12 +31476,17 @@ function _gravPhaseOf(m) {
 }
 function _gravHeavyBand(phase, kind) {
   const p = (phase >= 3) ? 3 : (phase === 2 ? 2 : 1);
+  // v0.29.x — per user "push the cap higher by almost 2 times, with max cap
+  // at 99 for p3, and floor being 35%": caps ~doubled (P3 heavy hits max at
+  // 99% — a full-bar chunk that still never strictly one-shots), floors ramp
+  // 25/30/35% by phase. DEF still moves the result inside the (much taller)
+  // band; the telegraphed OHKOs remain the only true kills.
   const T = {
-    touch:  [{ f: 0.12, c: 0.35 }, { f: 0.16, c: 0.45 }, { f: 0.20, c: 0.55 }],
-    comet:  [{ f: 0.10, c: 0.35 }, { f: 0.14, c: 0.45 }, { f: 0.18, c: 0.55 }],
-    ring:   [{ f: 0.08, c: 0.30 }, { f: 0.12, c: 0.40 }, { f: 0.16, c: 0.50 }],
-    skill:  [{ f: 0.07, c: 0.30 }, { f: 0.11, c: 0.38 }, { f: 0.15, c: 0.46 }],
-    bhCore: [{ f: 0.08, c: 0.25 }, { f: 0.12, c: 0.38 }, { f: 0.14, c: 0.44 }],
+    touch:  [{ f: 0.25, c: 0.70 }, { f: 0.30, c: 0.90 }, { f: 0.35, c: 0.99 }],
+    comet:  [{ f: 0.25, c: 0.70 }, { f: 0.30, c: 0.90 }, { f: 0.35, c: 0.99 }],
+    ring:   [{ f: 0.25, c: 0.60 }, { f: 0.30, c: 0.80 }, { f: 0.35, c: 0.99 }],
+    skill:  [{ f: 0.25, c: 0.60 }, { f: 0.30, c: 0.76 }, { f: 0.35, c: 0.92 }],
+    bhCore: [{ f: 0.25, c: 0.50 }, { f: 0.30, c: 0.76 }, { f: 0.35, c: 0.88 }],
   };
   const b = (T[kind] || T.skill)[p - 1];
   return { floor: b.f, cap: b.c };
@@ -57409,17 +57414,22 @@ function updateMonsters(dt) {
       // (Pisces 70 %, Leo / Aquarius 60 %, Cancer / Capricorn 55 %)
       // hit harder than the default tier; signs not in the override
       // table stay at 50 %.
-      if (_zodiacHeavyMelee) {
-        const _zHeavyPct = (typeof m.heavyHitPct === 'number') ? m.heavyHitPct : 0.50;
-        const _heavyFloor = Math.floor(getMaxHp() * _zHeavyPct);
-        if (dmg < _heavyFloor) dmg = _heavyFloor;
-      }
+      // v0.29.x — per user "ensure that the zodiac bosses are not too over
+      // powered as well": the pre-punish floor here became a 200-350%-maxHp
+      // one-shot once the Lv-20+ punish ramp multiplied past it (same class
+      // of bug as Gravitos). The empowered swing now clamps the FINAL loss
+      // below — the authored per-sign pct (Pisces 70%, Leo/Aquarius 60%,
+      // Cancer/Capricorn 55%, default 50%) becomes the CAP, half of it the
+      // floor — so the "tagged by an empowered swing" moment stays scary
+      // while DEF/HP stay relevant and it can never one-shot outright.
+      const _zHeavyPctHit = _zodiacHeavyMelee
+        ? ((typeof m.heavyHitPct === 'number') ? m.heavyHitPct : 0.50) : 0;
       // v0.26.330 — Gravitos touch used to hard-floor at 34% maxHp HERE,
       // i.e. BEFORE _diffDmg's Lv-80+ ×6 punish — which multiplied every
       // touch to ~200% maxHp: an unavoidable one-shot no stat prevented.
       // v0.29.x — replaced by the _gravBandClamp on the FINAL loss below
-      // (phase-scaled 35/45/55% cap with a 12/16/20% floor), so touching
-      // the apex boss stays catastrophic but survivable, and DEF/HP matter.
+      // (phase-scaled 70/90/99% cap with a 25/30/35% floor), so touching
+      // the apex boss is near-lethal at the cap but never a strict one-shot.
       // Tower: Glass Hero — +50% damage taken
       if (game.tower) dmg = Math.ceil(dmg * towerPlayerTakeMul());
       // Tower: Vampiric Foes — attacker heals for 20% of damage dealt
@@ -57456,6 +57466,11 @@ function updateMonsters(dt) {
       // genuinely move the result inside the band (see _gravHeavyBand).
       if (m.type === 'gravitos' && typeof _gravBandClamp === 'function') {
         _shownDmg = _gravBandClamp(dmg, _gravHeavyBand(_gravPhaseOf(m), 'touch'));
+      } else if (_zHeavyPctHit > 0 && typeof _gravBandClamp === 'function') {
+        // v0.29.x — zodiac empowered swing: FINAL loss clamped to the
+        // authored per-sign pct as cap (floor = half of it). See the
+        // comment at the old floor site above.
+        _shownDmg = _gravBandClamp(dmg, { floor: _zHeavyPctHit * 0.5, cap: _zHeavyPctHit });
       }
       player.hp -= (player._god ? 0 : _shownDmg);
       player.lastHitTime = game.time;
@@ -60245,9 +60260,10 @@ function bossAI(m, dt, distToPlayer) {
             // v0.29.x — heavy-hit rebalance: the old `_heavyFloorPct: 0.50`
             // pre-punish floor became a guaranteed ~300%-maxHp one-shot once
             // the Lv-80+ ×6 ramp multiplied past it. Comets now clamp the
-            // FINAL loss into the phase band (35/45/55% cap, 10/14/18% floor
-            // of maxHp) — still ~2HKO for glass builds in P3, tankable to
-            // ~4-6 hits with real DEF investment. Kiting remains king.
+            // FINAL loss into the phase band (70/90/99% cap, 25/30/35% floor
+            // of maxHp) — a P3 comet at the cap is near-lethal but never a
+            // strict one-shot; DEF investment sinks it toward the floor.
+            // Kiting remains king.
             _gravBand: _gravHeavyBand(phase, 'comet'),
             // v0.26.330 — "ignore defence occasionally": skips the flat DEF
             // subtraction (the absorb curve still applies). v0.29.x — chance
@@ -60298,8 +60314,8 @@ function bossAI(m, dt, distToPlayer) {
             // mispositioned moment into a full reset:
             //   • _gravBand (v0.29.x, was _heavyFloorPct 0.50 which the
             //     Lv-80+ ×6 punish turned into a ~300%-maxHp one-shot) —
-            //     clamps the FINAL loss into the phase band (30/40/50%
-            //     cap, 8/12/16% floor of maxHp): a shard is a heavy
+            //     clamps the FINAL loss into the phase band (60/80/99%
+            //     cap, 25/30/35% floor of maxHp): a shard is a heavy
             //     punish DEF can shave, not an instant kill.
             //   • skillLock: 5000 — 5 s silence on every active
             //     skill (basic attack still allowed) via the
@@ -64951,10 +64967,15 @@ function updateProjectiles(dt) {
         // the projectile is spawned in zodiacBossAI (zodiac/zodiacHoming
         // skills) and in the generic enemy-shoot path. The `p.skill`
         // fallback catches any zodiac-themed spawn that forgot the flag.
+        // v0.29.x — per user "ensure that the zodiac bosses are not too over
+        // powered as well": the empowered 50%-floor was applied pre-punish,
+        // so the Lv-20+ ramp turned it into a 200-300%-maxHp one-shot. The
+        // roll now just tags the hit; the FINAL loss is clamped below
+        // (cap 50% maxHp, floor 25%) after _diffDmg.
+        let _zEmpowered = false;
         if ((p._zodiacAttacker || (typeof p.skill === 'string' && p.skill.startsWith('zodiac'))) &&
             Math.random() < 0.20) {
-          const _heavyFloor = Math.floor(getMaxHp() * 0.50);
-          if (dmg < _heavyFloor) dmg = _heavyFloor;
+          _zEmpowered = true;
         }
         // v0.26.326 — Generic per-projectile heavy-floor flag. Reuses
         // the zodiac heavy-floor pattern (apply AFTER def/block/aegis
@@ -64991,6 +65012,9 @@ function updateProjectiles(dt) {
         // _heavyFloorPct floors that the Lv-80+ ×6 ramp turned into
         // guaranteed one-shots (see _gravHeavyBand).
         if (p._gravBand && _projLost > 0) _projLost = _gravBandClamp(dmg, p._gravBand);
+        // v0.29.x — zodiac empowered projectile: same final-loss treatment
+        // (cap 50% maxHp, floor 25%) so it chunks hard but never one-shots.
+        if (_zEmpowered && _projLost > 0) _projLost = _gravBandClamp(dmg, { floor: 0.25, cap: 0.50 });
         if (p._normalMob && _projLost > 0) _projLost = Math.min(_projLost, Math.floor(getMaxHp() * 0.40));
         player.hp -= _projLost;
         player.lastHitTime = game.time;
