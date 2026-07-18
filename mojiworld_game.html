@@ -62827,6 +62827,39 @@ function _lxLevelCost(L) {
   return Math.floor(T[T.length - 1] * Math.pow(ratio, L - T.length));
 }
 
+// v0.29.x — CLASS-ADVANCEMENT PROMPT (per user "When levelling to level 20 and
+// 40 put a notification or prompt user to do the class advancement quest").
+// Lv 20 = First Advancement (job) → the Mirror Self Trial from your class
+// instructor; Lv 40 = Master Advancement → the Distorted Portal chain. Fired
+// from _maybeLevelUp once per session per tier (see the seen-flags), only
+// while the matching advancement is still pending. Delayed so it lands just
+// after the LEVEL UP banner, mirroring the Lv-50 story-beat cadence.
+const _ADV_INSTRUCTORS = {
+  warrior: { npc: 'Will',      where: 'the Bastion Throne' },
+  mage:    { npc: 'Hera',      where: "Hera's Floating Abode" },
+  archer:  { npc: 'Lady Hong', where: 'Emerald Village' },
+  rogue:   { npc: 'Taiga',     where: 'the Shadow-Woven Hood' },
+};
+function _promptClassAdvancement(tier) {
+  const fire = () => {
+    try {
+      if (tier === 1) {
+        const ins = _ADV_INSTRUCTORS[player.cls] || { npc: 'your class instructor', where: 'your home town' };
+        showToast('⚜️ LEVEL 20 — First Class Advancement is ready!', 'legendary');
+        setTimeout(() => showToast('🪞 Speak to ' + ins.npc + ' at ' + ins.where + ' to start the Mirror Self Trial, then choose your job.', 'story'), 1500);
+      } else {
+        showToast('⚜️ LEVEL 40 — Master Advancement is ready!', 'legendary');
+        setTimeout(() => showToast('🌀 Take the “Distorted Portal — Find the Lost Sentinel” quest (Everdawn Central, west awning) to master your class.', 'story'), 1500);
+      }
+      if (typeof audio !== 'undefined' && audio && audio.play) audio.play('levelup');
+      // Make it actionable, not just transient: re-tick unlocks so the now-
+      // eligible advancement quest appears, then refresh the HUD quest tracker.
+      if (typeof tickQuestUnlocks === 'function') { try { tickQuestUnlocks(); } catch (_) {} }
+      if (typeof renderQuestTracker === 'function') { try { renderQuestTracker(); } catch (_) {} }
+    } catch (e) {}
+  };
+  setTimeout(fire, 1400);
+}
 function _maybeLevelUp() {
   if (!player.cls) return;
   // v0.26.x audit FIX — enforce the Lv 200 cap at the ENTRY point, not only in
@@ -62848,6 +62881,20 @@ function _maybeLevelUp() {
     // Small delay so the level-up toast + flash play first, then the
     // beat steals focus a beat later for narrative weight.
     setTimeout(() => { _playStoryBeat('lv_50_milestone'); }, 1200);
+  }
+  // v0.29.x — Class-advancement prompts. Nudge the player toward the
+  // advancement quest the moment they reach the gate level and haven't taken
+  // it yet. Once per session per tier (flag is not persisted, so it re-nudges
+  // on the next level-up after a reload until the advancement is done — a
+  // gentle reminder, never per-frame spam). The `>=` (not `===`) catches a
+  // save that is already past the gate but still un-advanced.
+  if (player.level >= 20 && !player.job && !player._advNudge20) {
+    player._advNudge20 = true;
+    if (typeof _promptClassAdvancement === 'function') _promptClassAdvancement(1);
+  }
+  if (player.level >= 40 && player.job && !player.master && !player._advNudge40) {
+    player._advNudge40 = true;
+    if (typeof _promptClassAdvancement === 'function') _promptClassAdvancement(2);
   }
   // v0.25.484 — Curve restructured for time-target spec (15 min Lv 1-5,
   // 1 hour Lv 5-10, > 1 hour each Lv 30+).
