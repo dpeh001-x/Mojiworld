@@ -131,6 +131,14 @@ Every combat map spawns a **mini-boss** (an Elder variant of the strongest local
 
 Branches, forks, and pull requests welcome. Every edit to `mojiworld_game.html` is live-previewed just by opening the file — no build step. `mojiworld_game.html` is a single ~6 MB file edited by parallel sessions, so keep changes small, atomic, and committed frequently.
 
-## 📝 License
+## 📝 License & Copyright
 
-MIT
+**© 2026 Moji-world · DADPEH. All rights reserved.**
+
+Mojiworld — The Everdawn Cycle and all associated content (source code, game
+design, artwork, sprites, animations, audio, music, cinematics, text, lore,
+characters, names, maps, and marketing assets) are the property of
+**Moji-world** and **DADPEH**. The Work is proprietary — see the [LICENSE](LICENSE)
+file. Playing the game through its official distributions is permitted; all
+other rights are reserved. No part may be copied, redistributed, sold, or used
+to create derivative works without prior written permission.
