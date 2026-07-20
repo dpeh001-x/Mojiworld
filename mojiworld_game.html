@@ -8895,7 +8895,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.132';
+const GAME_VERSION = 'v0.29.133';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -27049,7 +27049,7 @@ function getAtk()  {
   // grows from baseAtk (per-level class gains) + mods.atk (boons) +
   // equipment, then scaled by atkPct + buffs + prestige + the global
   // PLAYER_ATK_MUL knob.
-  const base = player.baseAtk + player.mods.atk + getEquipBonus('atk');
+  const base = player.baseAtk + player.mods.atk + getEquipBonus('atk') + ((game.dexPerm && game.dexPerm.atk) || 0);   // v0.29.x — Mojidex completion perm-bonus
   let pct = 1 + player.mods.atkPct + (getEquipBonus('atkPct') || 0) + (player.inRage ? 0.3 : 0);
   if (player.buffs.warCry > 0)   pct += 0.55;
   if (player.buffs.bloodlust > 0) pct += 0.4;
@@ -27115,7 +27115,7 @@ function getAtk()  {
   // v0.26.400 — applied value capped at 3.0 (≈ reached by ~7 ascensions).
   // Each ascension still adds +0.30 to the stored stat, but the damage
   // effect no longer scales without limit (was ~×7 at the 20-ascension cap).
-  const pDmg = Math.min(3, (game.prestige && game.prestige.dmgMult) || 1);
+  const pDmg = Math.min(3, (game.prestige && game.prestige.dmgMult) || 1) + 0.02 * Math.max(0, ((game.prestige && game.prestige.count) || 0) - 7);   // v0.29.x — keep the x3 soft cap but add an uncapped +2%/ascension past #7 so 8-20 aren't dead
   // v0.26.358 — Per user "increase the DPS of non-warrior characters".
   // The Warrior owns the DEFENSIVE identity (+25% HP, +20% DEF, Lv-scaled
   // DR) and a higher baseAtk growth (+3/lvl vs +2), letting it facetank-DPS
@@ -27172,7 +27172,7 @@ function getDef()  {
   // level class gains) + mods.def + equipment, plus the buff multipliers
   // below. This is also the value `getMagicDef()` used to return — those
   // two are now unified per user "DEF = Magic DEF".
-  let d = player.baseDef + player.mods.def + getEquipBonus('def');
+  let d = player.baseDef + player.mods.def + getEquipBonus('def') + ((game.dexPerm && game.dexPerm.def) || 0);   // v0.29.x — Mojidex completion perm-bonus
   if (player.buffs.warCry > 0)   d = Math.floor(d * 1.25);
   if (player.buffs.guardian > 0) d = Math.floor(d * 1.5 + 40);
   if (player.buffs.holyShield > 0) d += 9999;
@@ -27211,7 +27211,7 @@ function getMaxHp(){
   // per-level class gains (warrior +28, archer +20, rogue +16, mage +14)
   // + mods.maxHp (boons / gear). Warrior class still gets its +25 %
   // multiplier on top.
-  let h = player.maxHp + player.mods.maxHp + getEquipBonus('hp');
+  let h = player.maxHp + player.mods.maxHp + getEquipBonus('hp') + ((game.prestige && game.prestige.hpBonus) || 0);   // v0.29.x — uncapped per-ascension HP (fixes prestige 8-20 dead zone)
   // v0.26.386 — class HP multipliers, STRICTLY ORDERED so WARRIOR is always
   // the tankiest and MAGE always the squishiest (per user). Multipliers rank
   // warrior > rogue > archer > mage (v0.26.385 mistakenly gave mage the
@@ -27277,7 +27277,7 @@ function _eagleEyeLv10CritBonus() {
 function getCrit() {
   // v0.25.738 — LCK contribution removed. Crit% grows from base floor
   // (5 %) + mods.crit (Sharp Eye boon) + equipment Critical Strike rolls.
-  let c = (player.baseCrit || 5) + player.mods.crit + getEquipBonus('crit');
+  let c = (player.baseCrit || 5) + player.mods.crit + getEquipBonus('crit') + ((game.prestige && game.prestige.critBonus) || 0);   // v0.29.x — uncapped per-ascension crit (fixes prestige 8-20 dead zone)
   if (player.buffs.eagleEye > 0) c += 20 + _eagleEyeLv10CritBonus();   // v0.25.541 — was +40
   if (player.job === 'ninja' && player.buffs.smokeBomb > 0) c += 100;
   // v0.26.889 — job talent: flat crit points
@@ -35902,6 +35902,17 @@ function _mpHandle(msg) {
       const p = net.peers[msg.id];
       const name = (p && p.name) || msg.name || '?';
       const _ctext = String(msg.text || '').slice(0, 60);   // v0.26.1020 — cap inbound like outbound
+      // v0.29.x — co-op loot brag: a leading sparkle (U+2728) marks a rare-drop
+      // announcement (see _mpBroadcastDrop). Render it gold with a chime + a
+      // sparkle bubble over the finder instead of a plain chat line.
+      if (_ctext.charCodeAt(0) === 0x2728) {
+        const _msg = _ctext.slice(2).trim();
+        _mpPushLog(`✨ <b style="color:#ffd76a">${escapeHtml(name)}</b> ${escapeHtml(_msg)}`, 'loot');
+        if (typeof showToast === 'function') showToast(`✨ ${name} ${_msg}`, 'legendary');
+        try { if (typeof _playUiSfx === 'function') _playUiSfx('pickup_item'); } catch (e) {}
+        if (p) { p.chat = { text: _ctext, life: 4000 }; p.emote = { kind: '✨', life: 1800 }; }
+        break;
+      }
       const line = `<b>${escapeHtml(name)}:</b> ${escapeHtml(_ctext)}`;
       _mpPushLog(line);
       // Float a bubble above the sender for 4 s
@@ -36698,6 +36709,65 @@ function checkAchievements() {
   }
   if (unlocked > 0) saveState();
 }
+
+// =========================================================================
+// v0.29.x — MOJIDEX COMPLETION REWARDS. Logging the bestiary now pays out:
+// coins + setshards at each threshold, plus a small PERMANENT +ATK/+DEF at the
+// half and full marks (stored on game.dexPerm so it survives prestige, since
+// mojidexSeen does too), read live in getAtk/getDef. Fractional thresholds so
+// the rewards track content growth. Claimed marks persist in game.dexMilestones.
+const DEX_MILESTONES = [
+  { frac: 0.25, coins: 5000,  shards: 10, atk: 0,  def: 0,  name: 'Field Notes' },
+  { frac: 0.50, coins: 15000, shards: 20, atk: 5,  def: 5,  name: 'Naturalist' },
+  { frac: 0.75, coins: 35000, shards: 35, atk: 0,  def: 0,  name: 'Loremaster' },
+  { frac: 1.00, coins: 80000, shards: 60, atk: 12, def: 12, name: 'Compendium Complete' },
+];
+function _checkDexMilestones() {
+  try {
+    if (typeof player === 'undefined' || !player || !player.cls) return;
+    if (!game.dexMilestones) game.dexMilestones = {};
+    if (!game.dexPerm) game.dexPerm = { atk: 0, def: 0 };
+    const types = (typeof _mjxAllTypes === 'function') ? _mjxAllTypes() : [];
+    if (!types.length) return;
+    let disc = 0;
+    for (const k of types) if (typeof _mjxSeen === 'function' && _mjxSeen(k)) disc++;
+    const frac = disc / types.length;
+    let changed = false;
+    for (const m of DEX_MILESTONES) {
+      const key = String(m.frac);
+      if (frac + 1e-9 >= m.frac && !game.dexMilestones[key]) {
+        game.dexMilestones[key] = Date.now();
+        if (m.coins && typeof _grantMojicoins === 'function') _grantMojicoins(m.coins, { full: true });
+        if (m.shards) player.setshards = (player.setshards | 0) + m.shards;
+        if (m.atk) game.dexPerm.atk += m.atk;
+        if (m.def) game.dexPerm.def += m.def;
+        const _stat = m.atk ? ` · +${m.atk} ATK/DEF (permanent)` : '';
+        if (typeof showToast === 'function') showToast(`✦ Mojidex: ${m.name} — +${m.coins.toLocaleString()}c · +${m.shards}◈${_stat}`, 'legendary');
+        if (typeof flash === 'function') flash(0.25);
+        try { audio.play('levelup'); } catch (e) {}
+        changed = true;
+      }
+    }
+    if (changed && typeof saveState === 'function') saveState();
+  } catch (e) {}
+}
+try { window._checkDexMilestones = _checkDexMilestones; } catch (e) {}
+
+// v0.29.x — CO-OP RARE-DROP BROADCAST. When a party member loots an epic or
+// legendary, tell the room via a chat frame tagged with a leading sparkle so
+// receivers style it gold + chime + a sparkle over the finder (see the 'chat'
+// case in _mpHandle). Reuses the sanitised, XSS-safe chat pipeline; no server
+// change. Rare drops are infrequent, so the relay rate limit is never a factor.
+function _mpBroadcastDrop(item) {
+  try {
+    if (!item || (item.rarity !== 'epic' && item.rarity !== 'legendary')) return;
+    if (typeof net === 'undefined' || !net || !net.connected || !net.ws || net.ws.readyState !== 1) return;
+    const tag = item.rarity === 'legendary' ? '★' : '✦';
+    const txt = ('✨ found ' + tag + ' ' + String(item.name || 'treasure')).slice(0, 60);
+    net.ws.send(JSON.stringify({ t: 'chat', text: txt }));
+  } catch (e) {}
+}
+try { window._mpBroadcastDrop = _mpBroadcastDrop; } catch (e) {}
 
 // =========================================================================
 // v0.25.61 — QUEST HOOKS
@@ -41562,9 +41632,11 @@ function offerPrestige() {
   const p = game.prestige || { count:0, xpMult:1, dmgMult:1, bonusAP:0 };
   const nextCount = p.count + 1;
   const body = `Reach level ${PRESTIGE_LEVEL} again from scratch (ascension ${((game.prestige && game.prestige.count) || 0) + 1}/${typeof PRESTIGE_CAP !== 'undefined' ? PRESTIGE_CAP : 20}), keeping these permanent bonuses:\n\n` +
-               `• +30% XP gain  (→ ×${(p.xpMult + 0.30).toFixed(2)})\n` +
-               `• +30% damage   (→ ×${Math.min(3, p.dmgMult + 0.30).toFixed(2)}${(p.dmgMult + 0.30) > 3 ? ' — capped' : ''})\n` +   // v0.26.1033 — getAtk clamps the prestige dmg mult at ×3; the dialog used to promise the uncapped value (up to ×7), so ascensions 8-20 advertised damage they never granted. Show the effective (capped) figure.
-               `• +1 starting attribute point  (→ +${p.bonusAP + 1})\n\n` +
+               `• +30% XP gain  (-> x${(p.xpMult + 0.30).toFixed(2)}, uncapped)\n` +
+               `• Damage: soft-capped ~x3, then +2% more every ascension past #7\n` +
+               `• +1% crit chance  (-> +${(p.critBonus || 0) + 1}%, uncapped)\n` +
+               `• +12 max HP  (-> +${(p.hpBonus || 0) + 12}, uncapped)\n` +
+               `• +1 starting attribute point  (-> +${p.bonusAP + 1})\n\n` +
                `Ascension #${nextCount}. Your inventory, equipment, and bosses reset.`;
   // v0.25.244 (X4) — in-game styled prestige confirm.
   uiConfirm({
@@ -41575,6 +41647,7 @@ function offerPrestige() {
   }).then((ok) => {
     if (!ok) { game._prestigeOffered = false; return; }
     p.count++; p.xpMult += 0.30; p.dmgMult += 0.30; p.bonusAP += 1;
+    p.critBonus = (p.critBonus || 0) + 1; p.hpBonus = (p.hpBonus || 0) + 12;   // v0.29.x — uncapped per-ascension crit + HP so ascensions 8-20 (where dmgMult caps at x3) still grow the character
     game.prestige = p;
     // Reset progression
     player.level = 1; player.exp = 0; player.expToNext = 30;     // v0.26.329 — matches 200 × 1^2.5 × 0.15 = 30 (was 37 under 250-base poly)
@@ -45650,7 +45723,12 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   const t = monsterTypes[type];
   // v0.26.378 — Mojidex: record this monster type as encountered the moment
   // it spawns (not just on kill), so fled-from / unkilled mobs still register.
-  if (t && type) { if (!game.mojidexSeen) game.mojidexSeen = {}; game.mojidexSeen[type] = true; }
+  if (t && type) {
+    if (!game.mojidexSeen) game.mojidexSeen = {};
+    const _wasNew = !game.mojidexSeen[type];
+    game.mojidexSeen[type] = true;
+    if (_wasNew && typeof _checkDexMilestones === 'function') _checkDexMilestones();   // v0.29.x — Mojidex completion rewards on new discovery
+  }
   // v0.26.395 — wire the `miniElite` trait. Mobs authored with traits.miniElite
   // (graveReaver, tombKeeper, smithgolem, towerOssifer, …) were tagged as mini-
   // elites but the flag was NEVER read — they spawned as plain normals. Promote
@@ -48613,6 +48691,8 @@ function updatePlayer(dt) {
         showToast(_better ? `★ Better ${d.item.name}` : `Looted ${d.item.name}`, d.item.rarity);
         // Progress bestiary/achievement hooks for cosmetic unlocks
         trackPickup('item', d.item);
+        // v0.29.x — brag an epic/legendary find to co-op party members
+        if (typeof _mpBroadcastDrop === 'function') _mpBroadcastDrop(d.item);
       }
       game.drops.splice(i, 1); continue;
     }
