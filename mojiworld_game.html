@@ -8543,6 +8543,23 @@ The sleeping world is listening.</div>
         <div class="toggle" id="set-reducemotion" onclick="this.classList.toggle('on'); applySettingsLive();"></div>
       </div>
     </div>
+    <!-- v0.29.125 — accessibility intensity sliders (finer-grained than the
+         Reduce Motion master switch): scale screen shake + fullscreen flashes
+         from 0% (off) to 100% (current default). -->
+    <div class="settings-row">
+      <label title="Screen-shake intensity. 100% = normal, 0% = no shake at all. Reduce Motion overrides this to off.">Screen Shake</label>
+      <div class="ctrl">
+        <input type="range" id="set-shake" min="0" max="100" step="10" value="100" style="--moji-slider-pct: 100.00;">
+        <span class="val" id="set-shake-val">100%</span>
+      </div>
+    </div>
+    <div class="settings-row">
+      <label title="Full-screen flash intensity (white impact flashes + black boss flashes). Lower this if you're photosensitive. 0% removes them entirely.">Screen Flashes</label>
+      <div class="ctrl">
+        <input type="range" id="set-flash" min="0" max="100" step="10" value="100" style="--moji-slider-pct: 100.00;">
+        <span class="val" id="set-flash-val">100%</span>
+      </div>
+    </div>
     <div class="settings-row">
       <label title="Risk vs reward. Story = take 50% damage, −20% EXP/coins · Normal = standard · Hard = take +50% damage, +30% EXP/coins, +25% gear drops · Nightmare = take DOUBLE damage, +60% EXP, +75% coins, +50% gear drops. Changes mid-boss apply on the next map.">Difficulty</label>
       <div class="ctrl" style="justify-content:flex-end;">
@@ -28658,6 +28675,12 @@ const LX_SETTINGS_DEFAULTS = {
   grid:  false,      // v0.25.749 — calibration grid overlay (100-px world)
   reduceMotion: false,
   difficulty: 'normal',
+  // v0.29.125 — ACCESSIBILITY intensity sliders. Per user (AAA-parity pass):
+  // photosensitivity + comfort controls. 100 = current behaviour; 0 = off.
+  // reduceMotion remains the hard master switch (kills shake entirely, caps
+  // flashes at 0.2) — these sliders give finer-grained control without it.
+  shakePct: 100,     // screen-shake intensity % (0 - 100)
+  flashPct: 100,     // full-screen flash intensity % (0 - 100, incl. black flashes)
 };
 function _lxGetSettings() {
   try {
@@ -28669,7 +28692,7 @@ function _lxGetSettings() {
     // a non-number; openSettingsModal then called s.scale.toFixed(2) -> throw ->
     // the whole Settings panel wouldn't open. Coerce the numeric fields back to a
     // finite value (falling back to the default) so the UI can never throw on them.
-    for (const _k of ['scale', 'bgm', 'sfx']) {
+    for (const _k of ['scale', 'bgm', 'sfx', 'shakePct', 'flashPct']) {
       const _v = Number(out[_k]);
       out[_k] = Number.isFinite(_v) ? _v : LX_SETTINGS_DEFAULTS[_k];
     }
@@ -28689,6 +28712,11 @@ function openSettingsModal() {
   document.getElementById('set-bgm-val').textContent = s.bgm + '%';
   document.getElementById('set-sfx').value       = s.sfx;
   document.getElementById('set-sfx-val').textContent = s.sfx + '%';
+  // v0.29.125 — accessibility intensity sliders (guarded: fail-open if a
+  // cached page serves pre-slider HTML).
+  const _shEl = document.getElementById('set-shake'), _flEl = document.getElementById('set-flash');
+  if (_shEl) { _shEl.value = s.shakePct; const _v = document.getElementById('set-shake-val'); if (_v) _v.textContent = s.shakePct + '%'; }
+  if (_flEl) { _flEl.value = s.flashPct; const _v = document.getElementById('set-flash-val'); if (_v) _v.textContent = s.flashPct + '%'; }
   document.getElementById('set-mute').classList.toggle('on', !!s.mute);
   document.getElementById('set-lowfx').classList.toggle('on', !!s.lowfx);
   document.getElementById('set-fdesk').classList.toggle('on', !!s.fdesk);
@@ -28717,6 +28745,16 @@ function openSettingsModal() {
   };
   _sfxEl.oninput = function() {
     document.getElementById('set-sfx-val').textContent = this.value + '%';
+    applySettingsLive();
+  };
+  // v0.29.125 — accessibility intensity sliders: live label + live apply,
+  // so dragging Screen Shake to 0 is felt on the very next hit.
+  if (_shEl) _shEl.oninput = function() {
+    const _v = document.getElementById('set-shake-val'); if (_v) _v.textContent = this.value + '%';
+    applySettingsLive();
+  };
+  if (_flEl) _flEl.oninput = function() {
+    const _v = document.getElementById('set-flash-val'); if (_v) _v.textContent = this.value + '%';
     applySettingsLive();
   };
 }
@@ -28959,8 +28997,13 @@ function applySettingsLive() {
     grid:  document.getElementById('set-grid').classList.contains('on'),
     reduceMotion: document.getElementById('set-reducemotion') ? document.getElementById('set-reducemotion').classList.contains('on') : false,
     difficulty: document.getElementById('set-difficulty') ? document.getElementById('set-difficulty').value : 'normal',
+    // v0.29.125 — accessibility intensity sliders (fall back to 100 = full).
+    shakePct: document.getElementById('set-shake') ? parseInt(document.getElementById('set-shake').value, 10) : 100,
+    flashPct: document.getElementById('set-flash') ? parseInt(document.getElementById('set-flash').value, 10) : 100,
   };
   if (isNaN(s.sfx)) s.sfx = 70;     // safety: missing slider value → default
+  if (isNaN(s.shakePct)) s.shakePct = 100;
+  if (isNaN(s.flashPct)) s.flashPct = 100;
   _lxSaveSettings(s);
   _applySettings(s);
 }
@@ -29037,6 +29080,11 @@ function _applySettings(s) {
   // Resolution — trigger refit so the scale slider value takes effect
   if (typeof game !== 'undefined' && game) {
     game._reduceMotion = !!s.reduceMotion;
+    // v0.29.125 — accessibility intensity multipliers, read by addShake /
+    // flash / blackFlash. Clamped 0-1; null-safe defaults handled at the
+    // read sites so a pre-slider save behaves as 100%.
+    game._shakeMul = Math.max(0, Math.min(1, (Number(s.shakePct != null ? s.shakePct : 100)) / 100));
+    game._flashMul = Math.max(0, Math.min(1, (Number(s.flashPct != null ? s.flashPct : 100)) / 100));
     // v0.28.7 — 'nightmare' tier added (2× damage taken, best rewards). The
     // tier string travels alongside the damage mul so the reward helpers
     // (_diffExpMul/_diffCoinMul/_diffDropMul at the _diffDmg site) stay in
@@ -31474,6 +31522,8 @@ function _diffCoinMul() { return { story: 0.8, normal: 1, hard: 1.3,  nightmare:
 function _diffDropMul() { return { story: 1,   normal: 1, hard: 1.25, nightmare: 1.5  }[_lxDiffTier()] || 1; }
 function addShake(amount) {
   if (typeof game !== 'undefined' && game && game._reduceMotion) return;
+  // v0.29.125 — accessibility: user shake-intensity slider (0-100%).
+  if (game._shakeMul != null) { amount *= game._shakeMul; if (amount <= 0.01) return; }
   if (typeof game._shakeFrame !== 'number' || game._shakeFrame !== game.time) {
     game._shakeFrame = game.time;
     game._shakeAddedThisFrame = 0;
@@ -31596,11 +31646,18 @@ function flash(a) {
   // photosensitivity concern), not just screen shake. Cap the intensity rather
   // than removing the cue entirely so feedback is still legible.
   if (game._reduceMotion) a = Math.min(a, 0.2);
+  // v0.29.125 — accessibility: user flash-intensity slider (0-100%).
+  if (game._flashMul != null) a *= game._flashMul;
   game.flashOverlay = Math.max(game.flashOverlay, a);
 }
 // v0.26.x — dramatic BLACK screen flash (e.g. gravitos3 supernova cast). Separate
 // overlay from the white flash; lingers a touch longer for a blackout beat.
-function blackFlash(a) { game.blackFlashOverlay = Math.max(game.blackFlashOverlay || 0, a); }
+// v0.29.125 — black flashes honor the same accessibility flash slider (they're
+// the harsher photosensitivity event of the two).
+function blackFlash(a) {
+  if (game._flashMul != null) a *= game._flashMul;
+  game.blackFlashOverlay = Math.max(game.blackFlashOverlay || 0, a);
+}
 // v0.26.x — pin the screen FULLY black for N render frames (held blackout) before
 // the normal decay resumes. Used for the Gravitos final-boss arena entrance.
 function blackHold(f) { game.blackHoldFrames = Math.max(game.blackHoldFrames || 0, f | 0); }
@@ -32007,6 +32064,81 @@ function _lxPadDispatch(key, down) {
     window.dispatchEvent(ev);
   } catch (e) {}
 }
+// v0.29.125 — CONTROLLER MENU NAVIGATION (Steam Deck parity pass). When a
+// modal is open, the pad stops driving game actions and instead navigates the
+// panel: D-pad cycles focus across the modal's interactive elements (gold
+// outline), A activates, D-pad left/right nudges a focused slider, B / Start
+// closes. Keyboard/mouse behaviour is untouched — this only re-routes the
+// gamepad while a panel is up, so the character no longer runs around behind
+// an open inventory.
+const _LX_PAD_MODAL_IDS = ['settings-modal-bg', 'confirm-modal', 'class-select-modal', 'advancement-modal',
+  'inventory-modal', 'skills-modal', 'skilltree-modal', 'attributes-modal', 'codex-modal', 'quest-modal',
+  'worldmap-modal', 'shop-modal', 'craft-modal', 'enhance-modal', 'recipe-scrolls-modal', 'taxi-modal',
+  'multiplayer-modal', 'help-modal', 'lore-modal', 'mojidex-modal', 'tutorial-modal', 'powerup-modal',
+  'sage-blessing-modal', 'keybind-modal', 'dev-modal'];
+function _lxPadModalRoot() {
+  for (const id of _LX_PAD_MODAL_IDS) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width > 4 && r.height > 4 && getComputedStyle(el).visibility !== 'hidden') return el;
+  }
+  return null;
+}
+let _lxPadNavPrev = {};
+let _lxPadNavCssDone = false;
+function _lxPadMenuNav(root, pad) {
+  if (!_lxPadNavCssDone) {
+    _lxPadNavCssDone = true;
+    try { const st = document.createElement('style');
+      st.textContent = '.pad-focus{outline:2px solid #ffd166 !important;outline-offset:2px;border-radius:6px;box-shadow:0 0 10px rgba(255,209,102,0.45) !important;}';
+      document.head.appendChild(st); } catch (e) {}
+  }
+  const down = (i) => { const b = pad.buttons[i]; return !!(b && (b.pressed || b.value > 0.5)); };
+  const edge = (i) => { const d = down(i); const was = !!_lxPadNavPrev[i]; _lxPadNavPrev[i] = d; return d && !was; };
+  // Also fold the left stick into up/down edges (axis crossing threshold).
+  const ax = pad.axes || [];
+  const stickY = ax[1] || 0;
+  const sUp = stickY < -0.6, sDn = stickY > 0.6;
+  const sUpEdge = sUp && !_lxPadNavPrev._sUp; _lxPadNavPrev._sUp = sUp;
+  const sDnEdge = sDn && !_lxPadNavPrev._sDn; _lxPadNavPrev._sDn = sDn;
+  const seen = new Set();
+  const els = [];
+  for (const el of root.querySelectorAll('button, [role="button"], input, select, .toggle, .qj-btn, [data-qaccept], [data-qabandon], [onclick]')) {
+    if (seen.has(el) || el.disabled) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 5 || r.height < 5) continue;
+    seen.add(el); els.push(el);
+  }
+  if (!els.length) { if (edge(1) || edge(9)) _lxPadDispatch('escape', true); return; }
+  let idx = (root._padIdx | 0);
+  const clamp = (i) => (i + els.length) % els.length;
+  const cur = () => els[clamp(idx)];
+  const isRange = (el) => el && el.tagName === 'INPUT' && el.type === 'range';
+  const moved = (edge(13) || sDnEdge) ? 1 : (edge(12) || sUpEdge) ? -1 : 0;
+  const lateral = edge(15) ? 1 : edge(14) ? -1 : 0;
+  if (moved) idx = clamp(idx + moved);
+  else if (lateral && !isRange(cur())) idx = clamp(idx + lateral);
+  root._padIdx = idx;
+  const el = cur();
+  try {
+    const old = root.querySelector('.pad-focus');
+    if (old && old !== el) old.classList.remove('pad-focus');
+    el.classList.add('pad-focus');
+    if (moved || lateral) { el.scrollIntoView({ block: 'nearest' }); try { el.focus({ preventScroll: true }); } catch (e) {} }
+  } catch (e) {}
+  if (lateral && isRange(el)) {
+    const step = Number(el.step) || 1;
+    el.value = Number(el.value) + lateral * step;
+    try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+  }
+  if (edge(0)) { try { el.click(); } catch (e) {} }
+  if (edge(1) || edge(9)) {
+    const closer = root.querySelector('.mc-modal-close, [id$="-close"], .modal-close, .close-x');
+    if (closer) { try { closer.click(); } catch (e) {} }
+    else _lxPadDispatch('escape', true);
+  }
+}
 function _lxPadPoll() {
   try {
     if (typeof navigator === 'undefined' || !navigator.getGamepads) return;
@@ -32026,6 +32158,16 @@ function _lxPadPoll() {
       _lxPadConnectedToasted = true;
       if (typeof showToast === 'function') showToast('🎮 Controller connected', 'success');
     }
+    // v0.29.125 — modal-aware routing: while a panel is open the pad drives
+    // MENU navigation, not the character. Release any held game keys first so
+    // movement doesn't stick under the open panel, then hand off and return.
+    const _mroot = pad ? _lxPadModalRoot() : null;
+    if (_mroot) {
+      for (const k in _lxPadPrev) if (_lxPadPrev[k]) { _lxPadDispatch(k, false); _lxPadPrev[k] = false; }
+      _lxPadMenuNav(_mroot, pad);
+      return;
+    }
+    _lxPadNavPrev = {};   // leaving menu mode — reset nav edge state
     // Build the pressed set (resolved physical key -> pressed).
     const pressed = {};
     const mark = (spec, isDown) => { const k = _lxPadResolveKey(spec); if (k && isDown) pressed[k] = true; };
@@ -62637,6 +62779,30 @@ function hitMonster(m, dmg, isCrit, skill) {
   // of non-lethal crits doesn't accidentally trip the flag at death.
   if (m.currentHp <= 0) m._killedByCrit = !!isCrit;
   else m._killedByCrit = false;
+  // v0.29.125 — KILL-BLOW FINISHER (AAA-feel pass). Deaths are rare relative
+  // to hits, so this is where weight is cheap: a distinct beat on every kill,
+  // escalating by rank. Normal mob = longer hit-stop + gold ring burst.
+  // Mini-boss/elite = + small shake + thin flash. Boss = the full stop, a
+  // heavier shake and a bright flash (their killMonster paths already layer
+  // their own theatrics on top). Shake/flash both honor the new accessibility
+  // sliders; particles go through the budgeted push; thorns kills stay quiet.
+  if (m.currentHp <= 0 && skill !== 'thorns') {
+    const _rank = m.isBoss ? 2 : (m.isMiniBoss || (m.traits && m.traits.miniElite)) ? 1 : 0;
+    addHitStop(_rank === 2 ? 140 : _rank === 1 ? 110 : 70);
+    if (_rank === 2) { if (typeof addShake === 'function') addShake(10); flash(0.4); }
+    else if (_rank === 1) { if (typeof addShake === 'function') addShake(5); flash(0.22); }
+    const _fLow = (typeof _perfLowFx === 'function' && _perfLowFx());
+    const _fN = _fLow ? (_rank ? 6 : 3) : (_rank ? 12 : 7);
+    const _fPush = (typeof _budgetedParticlePush === 'function') ? _budgetedParticlePush : null;
+    for (let _fi = 0; _fi < _fN; _fi++) {
+      const _fa = (_fi / _fN) * 6.283, _fs = 4.5 + _rank * 2;
+      const _fp = { x: m.x + m.w / 2, y: m.y + m.h / 2,
+        vx: Math.cos(_fa) * _fs, vy: Math.sin(_fa) * _fs - 1,
+        life: 24 + Math.random() * 10, color: _fi % 2 ? '#ffee66' : '#ffffff',
+        size: 3 + Math.random() * (2 + _rank) };
+      if (_fPush) { if (!_fPush(_fp)) break; } else { game.particles.push(_fp); }
+    }
+  }
   // v0.26.x — On a kill, the player vocalises a short laugh / "yeah!" (the
   // positive cheer for when YOU are attacking, vs the groan when attacked).
   // Chance-gated + the cheer branch's own 2.6s cooldown keep it occasional.
@@ -62673,7 +62839,17 @@ function hitMonster(m, dmg, isCrit, skill) {
     // Hit-stop + the impact flash + the squash-pop carry the feel; they pause
     // or tint rather than adding redraw work.
     addHitStop(isCrit ? 80 : 35);
-    if (!m.isBoss && !m.isMiniBoss) m.vx = (m.vx || 0) + (((m.x + m.w / 2) >= (player.x + player.w / 2)) ? 1 : -1) * 1.2; // v0.26.x feel: mobs visibly react to hits
+    // v0.29.125 — WEIGHTED knockback (AAA-feel pass). The old flat 1.2 nudge
+    // read identically for a poke and a nuke. Now the shove scales with the
+    // HP fraction the hit removed (up to +2.2) plus a crit kicker, and a crit
+    // on a small grounded mob pops it slightly airborne — light juggle feel
+    // without touching boss/mini-boss AI (they stay planted, as before).
+    if (!m.isBoss && !m.isMiniBoss) {
+      const _kbFrac = Math.min(1, finalDmg / Math.max(1, m.maxHp || finalDmg));
+      const _kbDir = (((m.x + m.w / 2) >= (player.x + player.w / 2)) ? 1 : -1);
+      m.vx = (m.vx || 0) + _kbDir * (1.2 + Math.min(2.2, _kbFrac * 4) + (isCrit ? 0.6 : 0));
+      if (isCrit && !m.flies && m.currentHp > 0) m.vy = Math.min(m.vy || 0, -Math.min(3.5, 1.5 + _kbFrac * 4));
+    }
     // Impact flash — thin on basics, thicker on crits
     flash(isCrit ? 0.35 : 0.1);
     // v0.25.171 — frame-coalesce the hit audio so AoE skills that
