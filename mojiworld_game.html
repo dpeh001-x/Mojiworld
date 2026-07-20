@@ -2346,6 +2346,14 @@
   #quest-tracker .qt-objs { display: flex; flex-wrap: wrap; gap: 1px 8px; padding-left: 22px; }
   #quest-tracker .qt-obj { font-size: 10px; color: #ffd27f; font-variant-numeric: tabular-nums; white-space: nowrap; }
   #quest-tracker .qt-obj.done { color: #88dd66; }
+  /* v0.29.124 — Guidance line: the quest's next step / where to go. Soft
+     sky-blue so it reads as wayfinding, flips green once it's "return to
+     the giver". The ◀/▶ glyph is refreshed live (~2x/sec). */
+  #quest-tracker .qt-guide {
+    font-size: 10px; color: #9ec8ff; padding-left: 22px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #quest-tracker .qt-guide.done { color: #88dd66; font-weight: 600; }
   /* v0.25.852 — Mobile quest tracker. Pre-fix the tracker was anchored to
      the desktop minimap pocket (bottom-right), which on mobile collides
      with the on-screen control deck. Repositioned to the top-right HUD
@@ -3775,6 +3783,23 @@
   .inv-slot.rarity-rare { border-color: #4488ff; }
   .inv-slot.rarity-epic { border-color: #aa66ff; }
   .inv-slot.rarity-legendary { border-color: #ff9944; box-shadow: 0 0 6px rgba(255,160,60,0.4); }
+  /* v0.29.127 — COLORBLIND-SAFE RARITY PALETTE (Settings toggle). The default
+     ladder leans on blue-vs-purple (rare/epic) — the classic confusion pair
+     for tritanopia and low vision — and orange (legendary) that reads close
+     to epic's purple under deuteranopia. The alternate ladder is Okabe-Ito
+     based with hues that stay distinct under all three common CVD types AND
+     monotonically rising luminance (gray → blue → pink → bright yellow), so
+     tier still reads in pure grayscale. Toggled via body.cb-rarity; the JS
+     canvas colors follow through _lxRarityColor(). */
+  body.cb-rarity .rarity-rare { border-left-color: #56b4e9; }
+  body.cb-rarity .rarity-epic { border-left-color: #cc79a7; }
+  body.cb-rarity .rarity-legendary { border-left-color: #f0e442; }
+  body.cb-rarity .rarity-text-rare { color: #56b4e9; }
+  body.cb-rarity .rarity-text-epic { color: #e59fc7; }
+  body.cb-rarity .rarity-text-legendary { color: #f0e442; text-shadow: 0 0 8px rgba(240,228,66,0.5); }
+  body.cb-rarity .inv-slot.rarity-rare { border-color: #56b4e9; }
+  body.cb-rarity .inv-slot.rarity-epic { border-color: #cc79a7; }
+  body.cb-rarity .inv-slot.rarity-legendary { border-color: #f0e442; box-shadow: 0 0 6px rgba(240,228,66,0.4); }
   .inv-slot.equipped::after {
     content: 'E'; position: absolute; top: 1px; right: 2px;
     font-size: 9px; color: #88ff88; font-weight: bold;
@@ -8558,6 +8583,12 @@ The sleeping world is listening.</div>
       <div class="ctrl">
         <input type="range" id="set-flash" min="0" max="100" step="10" value="100" style="--moji-slider-pct: 100.00;">
         <span class="val" id="set-flash-val">100%</span>
+      </div>
+    </div>
+    <div class="settings-row">
+      <label title="Swap the loot-rarity colours (rare/epic/legendary) to a colorblind-friendly palette — distinct hues under deuteranopia, protanopia and tritanopia, with brightness rising by tier so rarity reads even in grayscale.">Colorblind Rarity Colors</label>
+      <div class="ctrl" style="justify-content:flex-end;">
+        <div class="toggle" id="set-cbrarity" onclick="this.classList.toggle('on'); applySettingsLive();"></div>
       </div>
     </div>
     <div class="settings-row">
@@ -15366,7 +15397,13 @@ function showGearChange(oldIt, newIt, scoreDelta) {
     document.querySelector('.game-wrapper').appendChild(el);
   }
   clearTimeout(el._hideTimer);
-  const rarityColor = { common:'#ccc', rare:'#66aaff', epic:'#cc66ff', legendary:'#ffcc44' };
+  // v0.29.127 — reads through the colorblind-safe palette when it's enabled.
+  const rarityColor = {
+    common:    _lxRarityColor('common', '#ccc'),
+    rare:      _lxRarityColor('rare', '#66aaff'),
+    epic:      _lxRarityColor('epic', '#cc66ff'),
+    legendary: _lxRarityColor('legendary', '#ffcc44'),
+  };
   const newCol = rarityColor[newIt.rarity] || '#fff';
   const oldCol = oldIt ? rarityColor[oldIt.rarity] || '#aaa' : '#666';
   const deltas = gearDeltas(oldIt, newIt);
@@ -28681,7 +28718,18 @@ const LX_SETTINGS_DEFAULTS = {
   // flashes at 0.2) — these sliders give finer-grained control without it.
   shakePct: 100,     // screen-shake intensity % (0 - 100)
   flashPct: 100,     // full-screen flash intensity % (0 - 100, incl. black flashes)
+  cbRarity: false,   // v0.29.127 — colorblind-safe loot-rarity palette
 };
+// v0.29.127 — COLORBLIND-SAFE RARITY PALETTE (JS side; CSS overrides live on
+// body.cb-rarity). Okabe-Ito-based hues that stay distinct under deuteranopia,
+// protanopia and tritanopia, with monotonically rising luminance (gray → blue
+// → pink → bright yellow) so tier still reads in pure grayscale. Canvas draw
+// sites read through _lxRarityColor(rarity, standardColor): it returns the
+// caller's own standard shade until the Settings toggle flips game._cbRarity.
+const _LX_CB_RARITY = { common: '#cfd3d8', rare: '#56b4e9', epic: '#cc79a7', legendary: '#f0e442' };
+function _lxRarityColor(rarity, standard) {
+  return (typeof game !== 'undefined' && game && game._cbRarity && _LX_CB_RARITY[rarity]) || standard;
+}
 function _lxGetSettings() {
   try {
     const raw = localStorage.getItem('LX_SETTINGS');
@@ -28717,6 +28765,8 @@ function openSettingsModal() {
   const _shEl = document.getElementById('set-shake'), _flEl = document.getElementById('set-flash');
   if (_shEl) { _shEl.value = s.shakePct; const _v = document.getElementById('set-shake-val'); if (_v) _v.textContent = s.shakePct + '%'; }
   if (_flEl) { _flEl.value = s.flashPct; const _v = document.getElementById('set-flash-val'); if (_v) _v.textContent = s.flashPct + '%'; }
+  const _cbEl = document.getElementById('set-cbrarity');
+  if (_cbEl) _cbEl.classList.toggle('on', !!s.cbRarity);   // v0.29.127 — colorblind rarity palette
   document.getElementById('set-mute').classList.toggle('on', !!s.mute);
   document.getElementById('set-lowfx').classList.toggle('on', !!s.lowfx);
   document.getElementById('set-fdesk').classList.toggle('on', !!s.fdesk);
@@ -29000,6 +29050,7 @@ function applySettingsLive() {
     // v0.29.125 — accessibility intensity sliders (fall back to 100 = full).
     shakePct: document.getElementById('set-shake') ? parseInt(document.getElementById('set-shake').value, 10) : 100,
     flashPct: document.getElementById('set-flash') ? parseInt(document.getElementById('set-flash').value, 10) : 100,
+    cbRarity: document.getElementById('set-cbrarity') ? document.getElementById('set-cbrarity').classList.contains('on') : false,
   };
   if (isNaN(s.sfx)) s.sfx = 70;     // safety: missing slider value → default
   if (isNaN(s.shakePct)) s.shakePct = 100;
@@ -29085,6 +29136,11 @@ function _applySettings(s) {
     // read sites so a pre-slider save behaves as 100%.
     game._shakeMul = Math.max(0, Math.min(1, (Number(s.shakePct != null ? s.shakePct : 100)) / 100));
     game._flashMul = Math.max(0, Math.min(1, (Number(s.flashPct != null ? s.flashPct : 100)) / 100));
+    // v0.29.127 — colorblind rarity palette: JS reads game._cbRarity through
+    // _lxRarityColor; the DOM side (tooltips, inventory borders) follows the
+    // body.cb-rarity class.
+    game._cbRarity = !!s.cbRarity;
+    try { document.body.classList.toggle('cb-rarity', !!s.cbRarity); } catch (e) {}
     // v0.28.7 — 'nightmare' tier added (2× damage taken, best rewards). The
     // tier string travels alongside the damage mul so the reward helpers
     // (_diffExpMul/_diffCoinMul/_diffDropMul at the _diffDmg site) stay in
@@ -32096,12 +32152,21 @@ function _lxPadMenuNav(root, pad) {
   }
   const down = (i) => { const b = pad.buttons[i]; return !!(b && (b.pressed || b.value > 0.5)); };
   const edge = (i) => { const d = down(i); const was = !!_lxPadNavPrev[i]; _lxPadNavPrev[i] = d; return d && !was; };
-  // Also fold the left stick into up/down edges (axis crossing threshold).
   const ax = pad.axes || [];
   const stickY = ax[1] || 0;
   const sUp = stickY < -0.6, sDn = stickY > 0.6;
-  const sUpEdge = sUp && !_lxPadNavPrev._sUp; _lxPadNavPrev._sUp = sUp;
-  const sDnEdge = sDn && !_lxPadNavPrev._sDn; _lxPadNavPrev._sDn = sDn;
+  // v0.29.127 — HOLD-TO-REPEAT. Long lists (shop, quest journal, codex) took
+  // one press per row; holding a direction now fires once, waits 380 ms, then
+  // repeats every 140 ms until release — the standard console-menu cadence.
+  // Direction changes reset the delay so taps stay precise. Same treatment
+  // for left/right (sweeping a focused slider by holding).
+  const _navNow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const _repeat = (stateKey, dir) => {
+    const p = _lxPadNavPrev;
+    if (dir !== (p[stateKey] | 0)) { p[stateKey] = dir; p[stateKey + 'N'] = _navNow + 380; return dir; }
+    if (dir && _navNow >= (p[stateKey + 'N'] || 0)) { p[stateKey + 'N'] = _navNow + 140; return dir; }
+    return 0;
+  };
   const seen = new Set();
   const els = [];
   for (const el of root.querySelectorAll('button, [role="button"], input, select, .toggle, .qj-btn, [data-qaccept], [data-qabandon], [onclick]')) {
@@ -32115,8 +32180,8 @@ function _lxPadMenuNav(root, pad) {
   const clamp = (i) => (i + els.length) % els.length;
   const cur = () => els[clamp(idx)];
   const isRange = (el) => el && el.tagName === 'INPUT' && el.type === 'range';
-  const moved = (edge(13) || sDnEdge) ? 1 : (edge(12) || sUpEdge) ? -1 : 0;
-  const lateral = edge(15) ? 1 : edge(14) ? -1 : 0;
+  const moved = _repeat('_v', (down(13) || sDn) ? 1 : (down(12) || sUp) ? -1 : 0);
+  const lateral = _repeat('_l', down(15) ? 1 : down(14) ? -1 : 0);
   if (moved) idx = clamp(idx + moved);
   else if (lateral && !isRange(cur())) idx = clamp(idx + lateral);
   root._padIdx = idx;
@@ -36508,7 +36573,8 @@ function cancelPendingSkillTimers() {
 // FEEL HELPER — rarity-keyed loot bursts + near-miss shimmer (Phase 3.3)
 // =========================================================================
 function emitRarityBurst(x, y, rarity) {
-  const col = { legendary:'#ffb24a', epic:'#c68aff', rare:'#66aaff', common:'#cfd3d8' }[rarity] || null;
+  // v0.29.127 — reads through the colorblind-safe palette when it's enabled.
+  const col = _lxRarityColor(rarity, { legendary:'#ffb24a', epic:'#c68aff', rare:'#66aaff', common:'#cfd3d8' }[rarity]) || null;
   if (!col) return;
   const count = rarity === 'legendary' ? 40 : rarity === 'epic' ? 24 : 14;
   const _push = (typeof _budgetedParticlePush === 'function') ? _budgetedParticlePush : (pp) => { game.particles.push(pp); return true; };
@@ -36918,6 +36984,73 @@ function tickQuestKill(monsterType, isBoss) {
 // the right-edge tracker overlay above the minimap. Hides the panel
 // when no eligible quests are active. Called on quest kill-progress
 // (live update) and on accept / abandon / complete (membership change).
+// v0.29.124 — Quest-tracker GUIDANCE ("what do I do / where do I go next").
+// Completes the wayfinding loop with the NPC "!" marks + edge chevrons:
+// each tracked quest now carries a next-step line — a live ◀/▶ pointer when
+// the goal is on the current map, or the destination map's name when not.
+// World lookups (which map spawns a monster type / hosts an NPC) come from
+// the authored MAPS data and are cached once per session.
+let _qtMobMap = null, _qtNpcMap = null;
+function _qtBuildWorldIndex() {
+  _qtMobMap = {}; _qtNpcMap = {};
+  try {
+    for (const mid in MAPS) {
+      const m = MAPS[mid];
+      if (Array.isArray(m.spawns)) for (const sp of m.spawns) {
+        if (sp && sp.type && !_qtMobMap[sp.type]) _qtMobMap[sp.type] = mid;
+      }
+      if (Array.isArray(m.npcs)) for (const n of m.npcs) {
+        if (n && n.name && !_qtNpcMap[n.name]) _qtNpcMap[n.name] = mid;
+      }
+    }
+  } catch (e) {}
+}
+function _qtMapName(mid) { return (typeof MAPS === 'object' && MAPS[mid] && MAPS[mid].name) || mid; }
+function _qtDirGlyph(x) {
+  const dx = x - (player.x + (player.w || 0) / 2);
+  if (Math.abs(dx) < 48) return '📍';
+  return dx > 0 ? '▶' : '◀';
+}
+// Guidance for one active quest → { icon, text, done? } or null.
+function _questGuidance(id, q, a) {
+  if (!_qtMobMap) _qtBuildWorldIndex();
+  // 1. Objectives met — walk back to the giver (live pointer if they're here).
+  if (a && a.readyToHandIn && q.giver) {
+    const here = (game.npcs || []).find(n => n && n.name === q.giver);
+    if (here) return { icon: _qtDirGlyph(here.x), text: 'Return to ' + q.giver, done: true };
+    const mid = _qtNpcMap[q.giver];
+    return { icon: '↩', text: 'Return to ' + q.giver + (mid ? ' · ' + _qtMapName(mid) : ''), done: true };
+  }
+  // 2. Kill/boss — point at the nearest wanted mob here, else name its map.
+  if (q.kind === 'kill' || q.kind === 'boss') {
+    const wanted = new Set();
+    if (Array.isArray(q.objectives) && q.objectives.length) {
+      const ap = (a && a.objProgress) || {};
+      for (const o of q.objectives) if ((ap[o.target] || 0) < o.count) wanted.add(o.target);
+    } else if (q.target) wanted.add(q.target);
+    if (wanted.size) {
+      let best = null, bd = Infinity;
+      for (const m of (game.monsters || [])) {
+        if (!m || m.hp <= 0 || m._dying || !wanted.has(m.type)) continue;
+        const d = Math.abs(m.x - player.x);
+        if (d < bd) { bd = d; best = m; }
+      }
+      if (best) return { icon: _qtDirGlyph(best.x), text: 'Target nearby' };
+      for (const t of wanted) {
+        const mid = _qtMobMap[t];
+        if (mid && mid !== game.currentMap) return { icon: '→', text: _qtMapName(mid) };
+      }
+    }
+    return null;
+  }
+  // 3. Visit — name the destination map.
+  if (q.kind === 'visit' && q.target) {
+    if (q.target === game.currentMap) return { icon: '📍', text: 'You are here' };
+    return { icon: '→', text: _qtMapName(q.target) };
+  }
+  return null;
+}
+
 function renderQuestTracker() {
   const el = document.getElementById('quest-tracker');
   if (!el) return;
@@ -36927,8 +37060,13 @@ function renderQuestTracker() {
   const ids = [];
   for (const id of Object.keys(player.quests.active)) {
     const q = QUESTS[id];
-    if (!q || !q.count) continue;
-    if (q.kind !== 'kill' && q.kind !== 'boss') continue;
+    if (!q) continue;
+    // v0.29.124 — visit quests and done-but-unclaimed quests are now
+    // tracked too (they carry guidance lines); previously only countable
+    // kill/boss quests showed.
+    const _a = player.quests.active[id];
+    const _countable = q.count && (q.kind === 'kill' || q.kind === 'boss');
+    if (!_countable && q.kind !== 'visit' && !(_a && _a.readyToHandIn)) continue;
     ids.push(id);
     if (ids.length >= 3) break;
   }
@@ -36960,32 +37098,59 @@ function renderQuestTracker() {
     // v0.26.434 — Multi-objective quests render a live per-target breakdown
     // beneath the name (e.g. "Slime 8/12 · Petalfly 3/8") so the HUD tracker
     // shows exactly what's left to hunt, not just an aggregate count.
+    // v0.29.124 — Every row is now the stacked (qt-multi) layout: top line,
+    // optional per-target chips, then a guidance line ("where do I go").
+    let chips = '';
     if (Array.isArray(q.objectives) && q.objectives.length) {
       const ap = a.objProgress || {};
-      const chips = q.objectives.map(o => {
+      chips = '<div class="qt-objs">' + q.objectives.map(o => {
         const nm = (typeof monsterTypes !== 'undefined' && monsterTypes[o.target] && monsterTypes[o.target].name) || o.target;
         const got = Math.min(o.count, ap[o.target] || 0);
         const ok = got >= o.count;
         return `<span class="qt-obj${ok ? ' done' : ''}">${ok ? '✓ ' : ''}${nm} ${got}/${o.count}</span>`;
-      }).join('');
-      return `<div class="qt-row qt-multi">
-        <div class="qt-top">
-          <span class="qt-icon">${q.icon || '📜'}</span>
-          <span class="qt-name">${q.name}</span>
-          <span class="${cls}">${prog}/${total}</span>
-        </div>
-        <div class="qt-objs">${chips}</div>
-      </div>`;
+      }).join('') + '</div>';
     }
-    return `<div class="qt-row">
-      <span class="qt-icon">${q.icon || '📜'}</span>
-      <span class="qt-name">${q.name}</span>
-      <span class="${cls}">${prog}/${total}</span>
+    const _ready = !!a.readyToHandIn;
+    const progTxt = _ready ? '✓ Turn in'
+      : (q.kind === 'visit' && !(q.count > 1)) ? ''
+      : prog + '/' + total;
+    const g = (typeof _questGuidance === 'function') ? _questGuidance(id, q, a) : null;
+    const guide = g ? `<div class="qt-guide${g.done ? ' done' : ''}" data-qid="${id}">${g.icon} ${g.text}</div>` : `<div class="qt-guide" data-qid="${id}" style="display:none;"></div>`;
+    return `<div class="qt-row qt-multi">
+      <div class="qt-top">
+        <span class="qt-icon">${q.icon || '📜'}</span>
+        <span class="qt-name">${q.name}</span>
+        <span class="${_ready ? 'qt-prog done' : cls}">${progTxt}</span>
+      </div>
+      ${chips}
+      ${guide}
     </div>`;
   }).join('');
   el.innerHTML = `<div class="qt-head">📜 Quests</div>${_nbRow}${rows}`;
   el.classList.add('show');
 }
+// v0.29.124 — Live guidance refresh. The ◀/▶ pointer tracks the player and
+// the nearest target as they move, without rebuilding the tracker DOM: only
+// the small .qt-guide lines are re-evaluated (~2x/sec, guarded + cheap).
+setInterval(() => {
+  try {
+    if (typeof game === 'undefined' || !game || game.paused) return;
+    if (typeof player === 'undefined' || !player || !player.quests || !player.quests.active) return;
+    const el = document.getElementById('quest-tracker');
+    if (!el || !el.classList.contains('show')) return;
+    el.querySelectorAll('.qt-guide[data-qid]').forEach(gel => {
+      const id = gel.getAttribute('data-qid');
+      const q = QUESTS[id];
+      if (!q) return;
+      const g = _questGuidance(id, q, player.quests.active[id]);
+      if (!g) { gel.style.display = 'none'; return; }
+      gel.style.display = '';
+      const txt = g.icon + ' ' + g.text;
+      if (gel.textContent !== txt) gel.textContent = txt;
+      gel.classList.toggle('done', !!g.done);
+    });
+  } catch (e) {}
+}, 500);
 // Visit-type quests trigger on map entry.
 function tickQuestVisit(mapId) {
   _ensureQuests();
@@ -62257,6 +62422,30 @@ function _isGSkill(id) {
   }
   return _G_SKILL_IDS.has(id);
 }
+// v0.29.127 — PER-SKILL IMPACT PROFILES (AAA-feel pass II). Every hit used a
+// flat 35 ms hit-stop (80 on crit), so a 62 s-cooldown ultimate landed with
+// the same weight as a basic poke. Weight is now derived from the skill's own
+// cooldown in the SKILLS table — the game's existing signal for "how big a
+// moment is this" — and cached per skill id (hitMonster fires 12+/frame on
+// AoE builds; no per-hit table walks):
+//   light  (cd < 4 s, all basics) — 35/80 ms, unchanged from today
+//   medium (cd 4-12 s)            — 60/95 ms
+//   heavy  (cd 12-30 s)           — 95/120 ms + a thin 0.14 impact flash
+//   ultra  (cd ≥ 30 s, class ults)— 120/140 ms + a 0.22 flash
+// Flashes route through flash() (max-coalescing + accessibility slider), and
+// shake stays out of the per-hit path (the v0.26.x lag complaint).
+const _lxSkillImpactCache = Object.create(null);
+function _lxSkillImpact(skill) {
+  if (!skill) return 0;
+  const c = _lxSkillImpactCache[skill];
+  if (c !== undefined) return c;
+  const def = (typeof SKILLS === 'object' && SKILLS[skill]) || null;
+  const cd = (def && def.cd) || 0;
+  const w = cd >= 30000 ? 3 : cd >= 12000 ? 2 : cd >= 4000 ? 1 : 0;
+  return (_lxSkillImpactCache[skill] = w);
+}
+const _LX_IMPACT_STOP = [[35, 80], [60, 95], [95, 120], [120, 140]];   // [weight][isCrit]
+const _LX_IMPACT_FLASH = [0, 0, 0.14, 0.22];
 function hitMonster(m, dmg, isCrit, skill) {
   // v0.25.605 — Dead-monster gate. Without this, a delayed projectile or
   // setTimeout-scheduled bonus hit (ninja extraHit, splashOnHit, chain
@@ -62838,7 +63027,11 @@ function hitMonster(m, dmg, isCrit, skill) {
     // the full scene at a random offset — constant render cost in AoE combat.
     // Hit-stop + the impact flash + the squash-pop carry the feel; they pause
     // or tint rather than adding redraw work.
-    addHitStop(isCrit ? 80 : 35);
+    // v0.29.127 — per-skill impact profile: heavier skills stop time longer
+    // (see _lxSkillImpact above); heavy/ultra tiers add a thin impact flash.
+    const _iw = _lxSkillImpact(skill);
+    addHitStop(_LX_IMPACT_STOP[_iw][isCrit ? 1 : 0]);
+    if (_LX_IMPACT_FLASH[_iw]) flash(_LX_IMPACT_FLASH[_iw]);
     // v0.29.125 — WEIGHTED knockback (AAA-feel pass). The old flat 1.2 nudge
     // read identically for a poke and a nuke. Now the shove scales with the
     // HP fraction the hit removed (up to +2.2) plus a crit kicker, and a crit
@@ -83379,6 +83572,46 @@ function _heroBlinkFactor() {
   const close = Math.sin(Math.max(0, Math.min(1, prog)) * Math.PI); // 0→1→0 (shut mid-blink)
   return 1 - 0.88 * close;                                       // 1 → ~0.12 → 1
 }
+// v0.29.127 — SPRITE ANIMATION WEIGHT. Cheap procedural squash & stretch so
+// the chibi cast feels like it has mass instead of sliding: SQUASH on landing
+// (damped spring, scaled by impact speed), STRETCH on jump takeoff, and a
+// tiny ANTICIPATION crouch → follow-through STRETCH on attack. Returns a
+// {sx,sy} scale delta, or null when neutral. `dy` is the vertical stretch
+// (+ taller / − shorter); x compensates the opposite way (~volume-ish) so a
+// squash reads as "wider & shorter". Local player only — drawPlayer stamps
+// _chibiWeightPending right before its _chibiApply call, and peer/preview
+// draws leave it null so they never inherit the viewer's impulses. Honors
+// Reduce Motion (off entirely) and never fires during the prologue.
+function _computeChibiWeight() {
+  try {
+    if (window._prologueActive) return null;
+    if (typeof _lxGetSettings === 'function' && _lxGetSettings().reduceMotion) return null;
+  } catch (e) {}
+  const t = game.time;
+  // Rising-edge attack stamp — covers every attack path (melee / ranged /
+  // skills) without hooking each trigger site.
+  if (player.attacking && !player._prevAtk) player._atkWtT = t;
+  player._prevAtk = player.attacking;
+  let dy = 0;
+  if (player._landSqT) {                                   // land squash (damped overshoot)
+    const u = (t - player._landSqT) / 16;
+    if (u >= 0 && u < 1) dy -= 0.16 * (player._landSqStr || 0.6) * Math.exp(-u * 4.5) * Math.cos(u * Math.PI * 2.2);
+    else player._landSqT = 0;
+  }
+  if (player._jumpStT) {                                   // jump stretch (takeoff)
+    const u = (t - player._jumpStT) / 12;
+    if (u >= 0 && u < 1) dy += 0.12 * Math.exp(-u * 5);
+    else player._jumpStT = 0;
+  }
+  if (player._atkWtT) {                                    // attack anticipation → follow-through
+    const u = (t - player._atkWtT) / 12;
+    if (u >= 0 && u < 1) dy += 0.09 * (u < 0.28 ? -(u / 0.28) : Math.exp(-(u - 0.28) * 6));
+    else player._atkWtT = 0;
+  }
+  if (!dy) return null;
+  if (dy > 0.22) dy = 0.22; else if (dy < -0.18) dy = -0.18;
+  return { sx: 1 - dy * 0.65, sy: 1 + dy };
+}
 function _chibiApply(sx, sy) {
   // Anchor to the player's feet so ground contact stays visually correct
   const footX = _lxWholePx(sx + player.w / 2);
@@ -83389,6 +83622,14 @@ function _chibiApply(sx, sy) {
   // target, nudged to a canvas-friendlier 0.85 display scale while
   // HERO_VEC_DRAW_SCALE remains 1.0 so painter coordinates stay direct.
   ctx.scale(HERO_WORLD_DISPLAY_SCALE, HERO_WORLD_DISPLAY_SCALE);
+  // v0.29.127 — squash/stretch weight. Feet sit at the origin here, so this
+  // non-uniform scale keeps ground contact while the body deforms. Applied
+  // before any somersault/spin rotation below so it composes as a
+  // feet-anchored deform under rotation. Consumed once (peer draws see null).
+  {
+    const _cw = window._chibiWeightPending; window._chibiWeightPending = null;
+    if (_cw && (_cw.sx !== 1 || _cw.sy !== 1)) ctx.scale(_cw.sx, _cw.sy);
+  }
   // Somersault rotation — flip around the body center during evadeRoll-back
   if (player.somersault > 0) {
     const flipMs = Math.max(1, player.somersaultDuration || 520);
@@ -87096,6 +87337,9 @@ function drawPlayer() {
     ctx.restore();
   }
   _spawnPlayerTrail();
+  // v0.29.127 — stamp this frame's squash/stretch weight for the LOCAL player
+  // only; _chibiApply consumes it. Peer/preview draws never set it.
+  window._chibiWeightPending = (typeof _computeChibiWeight === 'function') ? _computeChibiWeight() : null;
   _chibiApply(sx, sy);
   // Block / parry shield bubble — drawn under the character so it haloes behind
   if (player.blockTimer > 0) {
