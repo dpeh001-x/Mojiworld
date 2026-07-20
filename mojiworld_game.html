@@ -3085,6 +3085,26 @@
                 inset 0 1px 0 rgba(255,255,255,0.28);
   }
   #dialog .options button:hover::after { transform: translateX(100%); }
+  /* v0.29.120 — Visited/selected option: greys out once picked so already-
+     read choices are obvious at a glance. Still clickable (some options are
+     repeatable — Rest, shop pages); hover lightens a touch to signal that.
+     Declared after the opt-* tints and base :hover so the grey wins. */
+  #dialog .options button.dlg-visited {
+    background: linear-gradient(180deg, #4c4556, #2e2938);
+    border-color: #776f86;
+    color: #b8b2c4;
+    opacity: 0.72;
+    text-shadow: none;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  #dialog .options button.dlg-visited:hover {
+    transform: translateY(-1px);
+    background: linear-gradient(180deg, #5c5566, #3e3948);
+    border-color: #9a92aa;
+    color: #d8d2e4;
+    opacity: 0.92;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.40);
+  }
   #dialog .options button:active {
     transform: scale(0.96) translateY(0);
     box-shadow: 0 1px 3px rgba(74,40,112,0.4),
@@ -8817,7 +8837,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.114';
+const GAME_VERSION = 'v0.29.120';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -36567,6 +36587,36 @@ function _injectGiverQuests(npc, opts) {
     } });
   }
   for (let i = built.length - 1; i >= 0; i--) opts.unshift(built[i]);
+}
+
+// v0.29.120 — Overhead quest marker state for an NPC. Mirrors the exact
+// eligibility rules of _injectGiverQuests above (giver match, not completed,
+// unlocked + levelReq + prereq + class for offers) so the "!" above a head
+// never disagrees with the options the dialog would actually show.
+// Returns { rank, color } — rank 3 = ready to turn in (green), 2 = quest
+// available (gold), 1 = in progress (silver) — or null. Cached on the npc
+// for 500 ms; a per-frame QUESTS scan per NPC is wasted work.
+function _npcQuestMarker(npc) {
+  if (!npc || !npc.name || typeof QUESTS !== 'object' || typeof player === 'undefined' || !player) return null;
+  const now = Date.now();
+  if (npc._qmCacheAt && now - npc._qmCacheAt < 500) return npc._qmCache;
+  npc._qmCacheAt = now;
+  const Q = player.quests || {};
+  const active = Q.active || {}, completed = Q.completed || {}, unlocked = Q.unlocked || {};
+  let rank = 0;
+  for (const id in QUESTS) {
+    const q = QUESTS[id];
+    if (!q || q.giver !== npc.name || completed[id]) continue;
+    const a = active[id];
+    if (a) rank = Math.max(rank, a.readyToHandIn ? 3 : 1);
+    else if (unlocked[id] && (player.level || 0) >= (q.levelReq || 1) &&
+             (!q.prereq || [].concat(q.prereq).every(p => completed[p])) && (!q.cls || q.cls === player.cls)) {
+      rank = Math.max(rank, 2);
+    }
+    if (rank === 3) break;
+  }
+  npc._qmCache = rank ? { rank, color: rank === 3 ? '#7dff9a' : rank === 2 ? '#ffd84a' : '#c9d4e8' } : null;
+  return npc._qmCache;
 }
 
 function tickQuestKill(monsterType, isBoss) {
@@ -68410,7 +68460,11 @@ function openNPC(npc) {
     }
     const b = document.createElement('button');
     b.textContent = o.t;
-    b.onclick = o.cb;
+    // v0.29.120 — Per user "after selecting a button, grey out the area".
+    // The picked option greys out (visited state) so re-reads are obvious;
+    // it stays clickable — some options are repeatable actions (Rest, shop
+    // pages), so a hard disable would break those flows.
+    b.onclick = () => { b.classList.add('dlg-visited'); if (typeof o.cb === 'function') o.cb(); };
     // v0.25.830 — Auto-classify the option button for visual hierarchy.
     // Shop / sell / craft → gold accent. "Leave" → muted grey. Combat /
     // train / fight / quest action → red-tint purple. Everything else
@@ -82378,6 +82432,73 @@ function drawPortals() {
   }
 }
 
+// v0.29.103 — EARLY-GAME WAYFINDING (per user: "help new players get around
+// the early maps by putting indicators, but not too much"). When a portal is
+// OFF-SCREEN, a small pulsing gold chevron at the screen edge points toward
+// it, with the destination name. Deliberately restrained so it reads as a
+// nudge, not a quest marker:
+//   • new players only (Lv ≤ 12) on early maps only (levelReq ≤ 10),
+//   • at most ONE hint per side — the NEAREST off-screen portal each way,
+//   • skipped in boss arenas / the Void / prologue / while paused,
+//   • soft alpha with a gentle pulse; no boxes, no lines across the screen.
+function drawPortalEdgeHints() {
+  if (typeof player === 'undefined' || !player || (player.level | 0) > 12) return;
+  if (game.paused || window._prologueActive) return;
+  const _md = (typeof MAPS !== 'undefined') ? MAPS[game.currentMap] : null;
+  if (!_md || _md.isBossArena || _md.isVoid || (_md.levelReq || 0) > 10) return;
+  if (!game.portals || !game.portals.length) return;
+  let bestL = null, bestR = null, bxL = -1e9, bxR = 1e9;
+  for (const po of game.portals) {
+    const sx = po.x - game.camera.x;
+    if (sx + 80 < 0)      { if (sx > bxL) { bxL = sx; bestL = po; } }
+    else if (sx - 80 > W) { if (sx < bxR) { bxR = sx; bestR = po; } }
+  }
+  if (!bestL && !bestR) return;
+  const t = game.time * 0.05;
+  const a = 0.5 + 0.22 * Math.sin(t * 1.7);
+  const drawHint = (po, dir) => {   // dir: -1 = left edge, +1 = right edge
+    let name = String(po.name || (MAPS[po.dest] && MAPS[po.dest].name) || 'Onward').replace(/^⭐\s*/, '');
+    if (name.length > 26) name = name.slice(0, 25) + '…';
+    const feetY = (typeof po.y === 'number') ? po.y : ((typeof _defaultPortalY === 'function') ? _defaultPortalY() : 480);
+    const sy = Math.max(90, Math.min(H - 100, feetY - 96));
+    const ex = dir < 0 ? 18 : W - 18;
+    const wob = Math.sin(t * 2.1) * 2.5 * dir;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = '#ffd873';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (let i = 0; i < 2; i++) {
+      const bx = ex + dir * (i * 7 - 4) + wob;
+      ctx.beginPath();
+      ctx.moveTo(bx - dir * 6, sy - 7);
+      ctx.lineTo(bx, sy);
+      ctx.lineTo(bx - dir * 6, sy + 7);
+      ctx.stroke();
+    }
+    ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = dir < 0 ? 'left' : 'right';
+    ctx.textBaseline = 'middle';
+    const lx = ex - dir * 18;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+    ctx.strokeText(name, lx, sy);
+    ctx.fillStyle = '#ffe9b0';
+    ctx.fillText(name, lx, sy);
+    ctx.restore();
+  };
+  if (bestL) drawHint(bestL, -1);
+  if (bestR) drawHint(bestR, 1);
+  // One-shot explainer the first time a hint is ever shown. Session flag on
+  // top of the tip store — _firstTimeTip's private-mode fallback would
+  // otherwise re-toast every frame from this per-frame call site.
+  if (!window._pehTipFired && typeof _firstTimeTip === 'function') {
+    window._pehTipFired = true;
+    _firstTimeTip('portal_edge_hints', '✨ New here? The soft gold arrows at the screen edges point to this map\'s exits.', 'rare');
+  }
+}
+
 // Per-role palette / flavour for NPC chibis — reuses CUTE_PAL values
 const NPC_ROLE_CFG = {
   potion:  { body:'#cc4466', bodyShd:'#8a2848', body2:'#ff7799', hair:'#cc4422', hairHi:'#ee6644', hat:'pigtails' },
@@ -82879,6 +83000,22 @@ function drawNPCs() {
       ctx.fillStyle = '#ffdd44';
       ctx.font = 'bold 12px sans-serif';
       ctx.fillText('[N] Talk', cx, labelHeadY - 36 + t);
+    }
+
+    // v0.29.120 — Quest marker "!" above the head: gold = quest available,
+    // silver = in progress, green = ready to turn in (see _npcQuestMarker).
+    // Sits above the name tag; lifts higher when the [N] Talk prompt is up.
+    const _qm = (typeof _npcQuestMarker === 'function') ? _npcQuestMarker(npc) : null;
+    if (_qm) {
+      const qBob = Math.sin(game.time * 0.09) * 2.5;
+      const qy = labelHeadY - (near ? 52 : 38) + qBob;
+      ctx.font = 'bold 18px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = 'rgba(12,6,20,0.92)';
+      ctx.strokeText('!', cx, qy);
+      ctx.fillStyle = _qm.color;
+      ctx.fillText('!', cx, qy);
     }
 
     // Zodiac portal visual cue — the Zodiac Sanctum portal sits at the same
@@ -101546,6 +101683,7 @@ function loop(time) {
   drawChests();
   drawPowerupOrbs();
   drawPortals();
+  if (typeof drawPortalEdgeHints === 'function') drawPortalEdgeHints();   // v0.29.103 — early-game off-screen exit chevrons
   drawNPCs();
   drawMemoryEchoes();   /* v0.26.465 - memory-echo apparitions */
   drawDrops();
