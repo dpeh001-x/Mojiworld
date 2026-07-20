@@ -8837,7 +8837,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.121';
+const GAME_VERSION = 'v0.29.122';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -91073,6 +91073,18 @@ const _BOSS_ATK_UNIFORM = {};
 // DOWN, so a reared-back/overhead swing pose never shrinks the body (the weapon
 // just extends past the idle height instead). See _drawBossSprite content-norm.
 const _BOSS_ATK_NOSHRINK = new Set(['sundered_smith', 'gravitos2star', 'gravitos3star']);
+// v0.29.122 — STRICT-SIZE bosses. Per user "ensure the size of gravitos first
+// form sprite stays consistent, it sometimes suddenly changes": the standard
+// content-norm only rescales frames deviating >8% from the idle-set reference,
+// which on a ~578px-tall Gravitos render lets a 2-4% smaller walk-cycle figure
+// (audit: walk contentH 1123-1148 vs idle ref ~1167) slip through — he visibly
+// shrank ~20px every time he started moving and popped back on stop. Types in
+// this set (keyed like the content-norm `_key`: _gravStarKey||_phaseSprite||
+// type) use a tight 2% threshold instead, AND run the content-norm on the
+// STATIC-sprite path too (not just animation frames), so a stale-cached
+// static from a different art generation (old fill 0.667 vs new 0.585 after
+// the v0.29.100 regen) can't draw the figure 12-14% off next to the frames.
+const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star']);
 // v0.26.x — Per-type ATTACK-frame size MULTIPLIER, applied on top of the
 // content-normalised size in _drawBossSprite (so the attack pose reads bigger
 // than idle/walk while staying foot-anchored). Distinct from _BOSS_ATK_UNIFORM
@@ -91572,7 +91584,11 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
   // already match (zodiac signs, gravitos, blockRexy) are untouched. Scale is
   // clamped 0.5-2.0 so a near-empty frame can't blow the sprite up.
   let _contentNorm = false;
-  if (_animated) {
+  // v0.29.122 — strict-size bosses run the content-norm on the STATIC sprite
+  // path too (see _BOSS_SIZE_STRICT above) so a cached static from another art
+  // generation can't render the figure a different size than the frame sets.
+  const _sizeStrict = _BOSS_SIZE_STRICT.has(m._gravStarKey || m._phaseSprite || m.type);
+  if (_animated || _sizeStrict) {
     // v0.26.352 — key the content-norm reference on the ACTUAL sprite being
     // drawn: phase-swap bosses (Aetherion->aetherion2, Gravitos->gravitos2/3)
     // ship a different-sized phase sprite with its own idle/walk/attack set,
@@ -91615,7 +91631,12 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
       // Normalise ANY frame (attack OR idle/walk) whose body deviates >8% from the
       // reference — keeps a CONSTANT on-screen size across every state. Idle bob is
       // positional (sy), not size, so this never flattens the breathing motion.
-      if (_ref != null && Math.abs(_cH - _ref) > _ref * 0.08) {
+      // v0.29.122 — strict-size bosses (Gravitos family) tighten the threshold to
+      // 2%: on their ~578px render the old 8% tolerance let a 2-4% smaller
+      // walk-cycle figure through un-normalised (a visible ~20px shrink every
+      // time he started moving). Idle frames vary ±0.4%, so breathing is
+      // untouched even at 2%.
+      if (_ref != null && Math.abs(_cH - _ref) > _ref * (_sizeStrict ? 0.02 : 0.08)) {
         // v0.26.351 — `_BOSS_ATK_NOSHRINK` types may be scaled UP (to lift a
         // leaning/crouched swing pose back to idle height) but never DOWN: a
         // taller-than-ref frame (hammer reared overhead) keeps the body at full
