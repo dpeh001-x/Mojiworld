@@ -8895,7 +8895,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.130';
+const GAME_VERSION = 'v0.29.131';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -31668,6 +31668,28 @@ function _gravHeavyBand(phase, kind) {
   };
   const b = (T[kind] || T.skill)[p - 1];
   return { floor: b.f, cap: b.c };
+}
+// v0.29.131 — GENERIC BOSS HIT BANDS (per user "boss mechanics + damage
+// rebalance: hard but not ridiculous"). Extends the sanctioned Gravitos /
+// zodiac band-clamp philosophy to EVERY boss: the FINAL HP loss of a boss
+// hit is clamped into a %-of-maxHP band. The CAP kills the "ridiculous"
+// (the _diffDmg level-punish ramp — up to ×6 — could turn an un-banded boss
+// projectile / trait strike / touch into a clean one-shot); the FLOOR keeps
+// them "hard" (a boss hit always chunks, even for an over-geared player —
+// same reasoning as Gravitos's 25-35% floors). Telegraphed set-piece OHKOs
+// (Sovereign collapse, Gravitos singularity) stay the only true kills.
+// Tiers: gravitos keeps its own phase bands; super/hyper/zodiac bosses hit
+// harder than story bosses. Returns null for non-bosses (no clamp).
+function _bossHitBand(m, kind) {
+  if (!m || !(m.isBoss || m.boss || m.zodiacBoss)) return null;
+  if (m.type === 'gravitos') {
+    return _gravHeavyBand(_gravPhaseOf(m), kind === 'heavy' ? 'skill' : (kind === 'ranged' ? 'comet' : 'touch'));
+  }
+  const s = !!(m.superBoss || m.hyperBoss || m.zodiacBoss || m.zodiacSign);
+  const T = s
+    ? { touch: { floor: 0.12, cap: 0.60 }, heavy: { floor: 0.20, cap: 0.80 }, ranged: { floor: 0.10, cap: 0.55 } }
+    : { touch: { floor: 0.08, cap: 0.45 }, heavy: { floor: 0.15, cap: 0.65 }, ranged: { floor: 0.06, cap: 0.40 } };
+  return T[kind] || T.heavy;
 }
 function _gravBandClamp(mitigated, band) {
   const mh = (typeof getMaxHp === 'function') ? getMaxHp()
@@ -56051,6 +56073,10 @@ function fireMonsterProjectile(m, angleOffset) {
     // impact resolver can clamp their damage (see L50305-area cap). True
     // bosses (boss / zodiacBoss) are exempt and keep full punch.
     _normalMob: !(m.isBoss || m.boss || m.zodiacBoss),
+    // v0.29.131 — boss shots get the tier ranged band (final-loss clamp at
+    // the impact resolver): hard floor, no punish-ramp one-shots. Null for
+    // field mobs (they keep the _normalMob 40% cap above).
+    _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null,
   });
   // v0.25.177 — stamp the attack-cast flash so drawMonster renders the
   // matching aura sprite (LX_MOB_CAST[m.shoot]) overlaying the monster
@@ -56605,6 +56631,7 @@ function updateMonsters(dt) {
               color: '#ff7722',
               noGravity: true,
               _sourceLabel: m.name || 'Ground Smash',
+              _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'heavy') : null,   // v0.29.131 — boss heavy-hit band (null for elites)
             });
             addShake(8);
             // Outward shockwave particle ring.
@@ -56633,6 +56660,7 @@ function updateMonsters(dt) {
               color: '#ffaa55',
               noGravity: true,
               _sourceLabel: m.name || 'Heavy Swing',
+              _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'heavy') : null,   // v0.29.131 — boss heavy-hit band (null for elites)
             });
             addShake(5);
             // Swing arc particle trail.
@@ -56727,6 +56755,7 @@ function updateMonsters(dt) {
             // render falls back to the procedural beam if unset / undecoded.
             _colSprite: cs.sprite || null,
             _sourceLabel: m.name || 'Pillar Strike',
+            _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'heavy') : null,   // v0.29.131 — boss heavy-hit band (null for elites)
           });
           addShake(12); flash(0.18);
           // Ground-impact ring at the foot of the column.
@@ -58010,6 +58039,13 @@ function updateMonsters(dt) {
         // authored per-sign pct as cap (floor = half of it). See the
         // comment at the old floor site above.
         _shownDmg = _gravBandClamp(dmg, { floor: _zHeavyPctHit * 0.5, cap: _zHeavyPctHit });
+      } else if ((m.isBoss || m.boss || m.zodiacBoss) && typeof _bossHitBand === 'function' && typeof _gravBandClamp === 'function') {
+        // v0.29.131 — every OTHER boss's touch now lands inside its tier band
+        // (super/zodiac 12-60% maxHP, story bosses 8-45%): the Lv-punish ramp
+        // can no longer inflate a contact hit past the cap, and over-geared
+        // players still feel the floor. Same final-loss idiom as above.
+        const _bb = _bossHitBand(m, 'touch');
+        if (_bb) _shownDmg = _gravBandClamp(dmg, _bb);
       }
       player.hp -= (player._god ? 0 : _shownDmg);
       player.lastHitTime = game.time;
@@ -65676,6 +65712,11 @@ function updateProjectiles(dt) {
         // v0.29.x — zodiac empowered projectile: same final-loss treatment
         // (cap 50% maxHp, floor 25%) so it chunks hard but never one-shots.
         if (_zEmpowered && _projLost > 0) _projLost = _gravBandClamp(dmg, { floor: 0.25, cap: 0.50 });
+        // v0.29.131 — generic boss band: every boss projectile + bigMelee /
+        // columnStrike trait strike (they resolve through this path) lands
+        // inside its tier band. Skipped when a more specific clamp already
+        // ran (Gravitos band / zodiac empowered).
+        if (!p._gravBand && !_zEmpowered && p._bossBand && _projLost > 0) _projLost = _gravBandClamp(dmg, p._bossBand);
         if (p._normalMob && _projLost > 0) _projLost = Math.min(_projLost, Math.floor(getMaxHp() * 0.40));
         player.hp -= _projLost;
         player.lastHitTime = game.time;
