@@ -50,7 +50,13 @@
   function drawLayer(ctx, L, frameIdx) {
     const g = core.composeGeom(L.type, L.state); if (!g) return;
     const arr = L.frames[L.state]; if (!arr || !arr.length) return;
-    const img = arr[frameIdx % arr.length];
+    // v0.29.139 — compose layers use the same game-accurate per-mode clock
+    // (idle ping-pong 130ms / walk 80ms / attack 48ms) when game timing is on.
+    const idx = (core.gameFrameIndex && core.getGameTiming && core.getGameTiming())
+      ? core.gameFrameIndex(L.state, arr)
+      : (frameIdx % arr.length);
+    if (idx < 0) return;
+    const img = arr[idx];
     if (!img || !img.complete || !img.naturalWidth) return;
     const w = g.targetW * L.scale, h = g.previewH * L.scale;
     const x = L.x - w / 2, y = L.y - g.usedBotFrac * h;   // foot-anchored at (L.x, L.y)

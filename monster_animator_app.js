@@ -64,6 +64,38 @@
 
   // ---- runtime state ----
   let cur = null, frames = {}, frameIdx = 0, fps = 8, lastT = 0, overlay = false, focusState = 'idle';
+  // v0.29.139 — GAME-ACCURATE playback + scale (reconciled per user: "the
+  // editor must play exactly what plays in the game, to on-screen scale").
+  //   gameTiming (default ON): per-mode frame clocks lifted verbatim from the
+  //     game — idle 130ms PING-PONG (_bossPingPongFrame: 0..n-1..1, 2n-2 step
+  //     sequence), walk 80ms + attack 48ms straight loops (_bossLoopFrame) —
+  //     driven by the same wall-clock modulo the game uses. The old flat-fps
+  //     linear index remains only when the toggle is off.
+  //   gameScale (default ON): render at the game's ON-SCREEN pixel size —
+  //     targetH = hitbox.h x (boss ? mul||2 : 1.5) x sizeFactor(frame) x
+  //     plantScale — instead of the DISPLAY_H-normalized preview size.
+  //   No additional frames: only the leading run of DECODED frames plays
+  //     (exact _readyN semantics); a 1-frame set holds static, never repeats
+  //     or pads. The ping-pong seam means idle never double-plays frame 0/n-1
+  //     back-to-back — identical to in-game.
+  let gameTiming = true, gameScale = true, nowT = 0;
+  const GAME_FRAME_MS = { idle: 130, walk: 80, attack: 48 };   // _BOSS_IDLE/WALK/ATK_FRAME_MS
+  function decodedN(arr) {   // mirrors the game's monotonic _readyN cache
+    let n = arr._readyN || 0;
+    while (n < arr.length && arr[n] && arr[n].complete && arr[n].naturalWidth > 0) n++;
+    return (arr._readyN = n);
+  }
+  function gameFrameIndex(st, arr, t) {
+    const n = decodedN(arr);
+    if (n === 0) return -1;              // nothing decoded -> draw nothing (game falls to static)
+    if (n === 1) return 0;               // single frame holds
+    if (st === 'idle') {                 // _bossPingPongFrame
+      const seqLen = 2 * n - 2;
+      const i = Math.floor(t / GAME_FRAME_MS.idle) % seqLen;
+      return i < n ? i : seqLen - i;
+    }
+    return Math.floor(t / GAME_FRAME_MS[st] ) % n;   // _bossLoopFrame
+  }
   // v2 — SINGLE hitbox model. The old green read-only "gameplay hitbox" +
   // orange "edit hitbox" pair confused (per user); now one editable box.
   let hbEdit = false, compose = false;
@@ -132,16 +164,26 @@
     // Folding it in HERE keeps every fraction-of-height unit (calib dx/dy,
     // atk-hitbox w/h/ox/oy) on the same basis as the game's visH.
     const _ps = plantScale(cur);
-    const previewH = baseK(ent) * sizeFactor(ent.group, info.w, info.h) * _ps;
+    const hb = HB[cur];
+    // v0.29.139 — gameScale (default ON): render at the game's ON-SCREEN size,
+    // targetH = hb.h x (boss ? mul||2 : 1.5) x sizeFactor(THIS frame) x scale —
+    // the exact in-game formula, so 1 editor px == 1 game logical px. Falls
+    // back to the DISPLAY_H-normalized preview when toggled off or when the
+    // type has no hitbox entry.
+    const _gameBase = (gameScale && hb && hb.h)
+      ? hb.h * (ent.group === 'boss' ? (hb.mul || 2) : 1.5)
+      : null;
+    const previewH = (_gameBase != null ? _gameBase : baseK(ent)) * sizeFactor(ent.group, info.w, info.h) * _ps;
     const targetW = previewH * (info.w / info.h);
     const baseH = (ent.base && ent.base.h) || info.h;
     const baseFrac = (ent.base && ent.base.botFrac != null) ? ent.base.botFrac : 0.92;
     const usedBotFrac = clamp(baseFrac * baseH / info.h, 0.3, 1.3);   // game divides base bbox by THIS frame's height
     // world-px -> preview-px ratio for this type (for the key-3 y-offset):
     // game base targetH = hb.h x mul x sizeFactor(base) x scale; preview base
-    // height = DISPLAY_H x scale -> scale cancels out of the ratio.
-    const hb = HB[cur];
-    const pxRatio = (hb && hb.h)
+    // height = DISPLAY_H x scale -> scale cancels out of the ratio. In
+    // gameScale mode preview px == world px, so the ratio is exactly 1.
+    const pxRatio = _gameBase != null ? 1
+      : (hb && hb.h)
       ? DISPLAY_H / (hb.h * (ent.group === 'boss' ? (hb.mul || 2) : 1.5) * sizeFactor(ent.group, (ent.base && ent.base.w) || info.w, baseH))
       : 1;
     const yoffPx = plantYOff(cur) * pxRatio;
@@ -154,7 +196,13 @@
     const ent = MAN[type]; if (!ent) return null;
     const info = ent.states[st]; if (!info) return null;
     const _ps = (ent.group === 'boss') ? 1 : liveMobScale(type);
-    const previewH = baseK(ent) * sizeFactor(ent.group, info.w, info.h) * _ps;
+    // v0.29.139 — compose stage honors gameScale too (relative sizes between
+    // sprites then match the game exactly).
+    const _chb = HB[type];
+    const _cBase = (gameScale && _chb && _chb.h)
+      ? _chb.h * (ent.group === 'boss' ? (_chb.mul || 2) : 1.5)
+      : baseK(ent);
+    const previewH = _cBase * sizeFactor(ent.group, info.w, info.h) * _ps;
     const targetW = previewH * (info.w / info.h);
     const baseH = (ent.base && ent.base.h) || info.h;
     const baseFrac = (ent.base && ent.base.botFrac != null) ? ent.base.botFrac : 0.92;
@@ -219,7 +267,11 @@
   function drawState(ent, st, cx, groundY, alpha) {
     const g = stateGeom(ent, st); if (!g) return;
     const arr = frames[st]; if (!arr || !arr.length) return;
-    const img = arr[frameIdx % arr.length];
+    // v0.29.139 — game-accurate frame pick: per-mode clock + idle ping-pong +
+    // decoded-only (_readyN). Legacy flat-fps linear index when toggled off.
+    const idx = gameTiming ? gameFrameIndex(st, arr, nowT) : (frameIdx % arr.length);
+    if (idx < 0) return;
+    const img = arr[idx];
     if (!img.complete || !img.naturalWidth) return;
     const c = CALIB[cur][st];
     ctx.save();
@@ -278,6 +330,7 @@
   let hbRects = [];   // [{x,y,w,h,st,previewH}] — attack-hitbox rects this paint
   function frame(t) {
     requestAnimationFrame(frame);
+    nowT = t;   // v0.29.139 — wall-clock for the game-accurate per-mode frame clocks
     if (t - lastT > 1000 / fps) { frameIdx++; lastT = t; }
     paint();
   }
@@ -316,6 +369,11 @@
   // expose a few bits chunk B + init use
   window.__animCore = { buildList, select, buildControls: () => buildControls(), loadCalib,
     setFps: (v) => { fps = v; }, setOverlay: (v) => { overlay = v; }, setFocus: (v) => { focusState = v; },
+    // v0.29.139 — game-accurate playback + on-screen-scale toggles
+    setGameTiming: (v) => { gameTiming = !!v; }, getGameTiming: () => gameTiming,
+    setGameScale: (v) => { gameScale = !!v; }, getGameScale: () => gameScale,
+    gameFrameIndex: (st, arr) => gameFrameIndex(st, arr, nowT),   // compose layers share the clock
+    _setNow: (t) => { nowT = t; },   // headless-verification hook (rAF is suspended in hidden tabs)
     setHbEdit: (v) => { hbEdit = v; _mobScaleLS = null; },   // toggle re-reads live scale too
     // key-3 (Monster Plant) live values for the panel readout
     plantScale, plantYOff,

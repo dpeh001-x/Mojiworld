@@ -293,6 +293,15 @@
   });
   const fpsEl = document.getElementById('fps');
   fpsEl.addEventListener('input', e => { core.setFps(+e.target.value); document.getElementById('fpsv').textContent = e.target.value; });
+  // v0.29.139 — game-accurate playback + scale toggles. Game timing disables
+  // the manual fps slider (the game's per-mode clocks own the cadence).
+  const gtEl = document.getElementById('gametiming'), gsEl = document.getElementById('gamescale');
+  if (gtEl) gtEl.addEventListener('change', e => {
+    core.setGameTiming(e.target.checked);
+    fpsEl.disabled = e.target.checked;
+    const w = document.getElementById('fpswrap'); if (w) w.style.opacity = e.target.checked ? 0.35 : 1;
+  });
+  if (gsEl) gsEl.addEventListener('change', e => { core.setGameScale(e.target.checked); });
   document.getElementById('save').onclick = () => { persist(false); persistHB(true); };
   document.getElementById('download').onclick = exportFile;
   const undoBtn = document.getElementById('undo');
