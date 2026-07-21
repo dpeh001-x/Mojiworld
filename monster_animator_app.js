@@ -1,8 +1,9 @@
 /* monster_animator_app.js — drives monster_animator.html.
  * Replays idle/walk/attack for any animated monster/boss using the SAME
  * foot-anchor + sizeFactor math as the game, and lets you hand-tune a per-state
- * { s, dx, dy } calibration. Saves live to localStorage('lx_anim_calib') (the
- * running game picks it up via its 'storage' listener) and exports anim_calib.js. */
+ * { s, dx, dy } calibration. Edits are in-memory only and ship via the UI's
+ * "Export anim_calib.js" (bake); legacy localStorage live-saves are merged
+ * once at boot and then cleared by the UI. */
 (function () {
   'use strict';
   const MAN = window.LX_ANIM_MANIFEST || {};

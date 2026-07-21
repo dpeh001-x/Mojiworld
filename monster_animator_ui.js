@@ -1,8 +1,10 @@
-/* monster_animator_ui.js — controls panel, canvas drag/scroll, save + export.
+/* monster_animator_ui.js — controls panel, canvas drag/scroll, export.
  * Consumes the globals exposed by monster_animator_app.js (window.__animCore /
- * window.__anim). Persisting writes localStorage('lx_anim_calib'); when the tool
- * and game are served from the SAME origin (e.g. both via the local preview
- * server) the game's 'storage' listener applies edits live with no reload. */
+ * window.__anim). Edits live in memory only — nothing is written to
+ * localStorage. Ship a tuning by clicking "Export anim_calib.js" and committing
+ * the file (the bake). Legacy live-saves found in localStorage are imported
+ * once at boot and the keys removed, so the baked file is the single source
+ * of truth for the game. */
 (function () {
   'use strict';
   const core = window.__animCore, A = window.__anim;
@@ -48,9 +50,25 @@
     }
     return out;
   }
+  // ---- dirty tracking (in-memory edits, shipped only via Export) ----
+  let dirty = false;
+  function markDirty() {
+    dirty = true;
+    const b = document.getElementById('download');
+    if (b && !/•/.test(b.textContent)) b.textContent = b.textContent.replace(/\s*$/, ' •');
+  }
+  function clearDirty() {
+    dirty = false;
+    const b = document.getElementById('download');
+    if (b) b.textContent = b.textContent.replace(/\s*•\s*$/, '');
+  }
+  window.addEventListener('beforeunload', e => {
+    if (dirty) { e.preventDefault(); e.returnValue = ''; }
+  });
+
   function persist(silent) {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(compact())); if (!silent) toast('Saved — live in same-origin game tabs'); }
-    catch (e) { toast('localStorage write failed'); }
+    markDirty();
+    if (!silent) toast('Edited — Export anim_calib.js to keep');
   }
   // hitbox entries only exist when customized — persist them all, drop empties
   function compactHB() {
@@ -63,8 +81,8 @@
     return out;
   }
   function persistHB(silent) {
-    try { localStorage.setItem(HB_LS_KEY, JSON.stringify(compactHB())); if (!silent) toast('Hitboxes saved — live in same-origin game tabs'); }
-    catch (e) { toast('localStorage write failed'); }
+    markDirty();
+    if (!silent) toast('Edited — Export anim_calib.js to keep');
   }
 
   // ---- controls panel ----
@@ -310,7 +328,8 @@
     const blob = new Blob([txt], { type: 'text/javascript' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'anim_calib.js';
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-    toast('Downloaded anim_calib.js (' + Object.keys(data).length + ' calib + ' + Object.keys(hbData).length + ' hitbox entries)');
+    clearDirty();
+    toast('Exported anim_calib.js (' + Object.keys(data).length + ' calib + ' + Object.keys(hbData).length + ' hitbox entries) — commit it to ship');
   }
 
   // ---- top bar wiring ----
@@ -339,8 +358,18 @@
     const w = document.getElementById('fpswrap'); if (w) w.style.opacity = e.target.checked ? 0.35 : 1;
   });
   if (gsEl) gsEl.addEventListener('change', e => { core.setGameScale(e.target.checked); });
-  document.getElementById('save').onclick = () => { persist(false); persistHB(true); };
+  const saveBtn = document.getElementById('save');
+  if (saveBtn) saveBtn.remove(); // stale-cache HTML — live save is gone
   document.getElementById('download').onclick = exportFile;
+  // One-time migration: legacy live-saves were merged into memory by app.js at
+  // boot; drop the keys so the baked anim_calib.js is the game's only source.
+  try {
+    if (localStorage.getItem(LS_KEY) !== null || localStorage.getItem(HB_LS_KEY) !== null) {
+      localStorage.removeItem(LS_KEY); localStorage.removeItem(HB_LS_KEY);
+      markDirty();
+      toast('Imported legacy live-save — Export anim_calib.js to keep it');
+    }
+  } catch (_) {}
   const undoBtn = document.getElementById('undo');
   if (undoBtn) undoBtn.onclick = undo;
   window.addEventListener('keydown', e => {
