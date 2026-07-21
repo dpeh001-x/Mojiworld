@@ -290,12 +290,12 @@ window.LX_ANIM_CALIB = {
   },
   "gravitos": {
     "walk": {
-      "s": 1.1,
+      "s": 1,
       "dx": 0,
       "dy": 0
     },
     "attack": {
-      "s": 1.37,
+      "s": 1,
       "dx": 0,
       "dy": 0
     }
