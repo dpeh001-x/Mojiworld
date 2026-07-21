@@ -215,19 +215,19 @@ window.LX_ANIM_CALIB = {
   },
   "blockRexy": {
     "idle": {
-      "s": 1,
+      "s": 0.5,
       "dx": 0,
-      "dy": 0.01
+      "dy": 0.015
     },
     "walk": {
-      "s": 1,
-      "dx": -0.035,
+      "s": 0.5,
+      "dx": 0,
       "dy": 0.015
     },
     "attack": {
-      "s": 1.3,
-      "dx": 0.09,
-      "dy": 0
+      "s": 0.5,
+      "dx": 0,
+      "dy": 0.015
     }
   },
   "gravitos2star": {
@@ -271,9 +271,9 @@ window.LX_ANIM_CALIB = {
       "dy": 0.015
     },
     "attack": {
-      "s": 2.48,
+      "s": 2.11,
       "dx": 0.005,
-      "dy": 0.38
+      "dy": 0.275
     }
   },
   "gravitos3": {
@@ -283,7 +283,7 @@ window.LX_ANIM_CALIB = {
       "dy": 0.025
     },
     "attack": {
-      "s": 1.43,
+      "s": 1.28,
       "dx": 0,
       "dy": 0.01
     }
@@ -309,24 +309,24 @@ window.LX_ANIM_CALIB = {
   },
   "koopaKing": {
     "walk": {
-      "s": 0.94,
+      "s": 0.97,
       "dx": 0,
       "dy": 0
     },
     "attack": {
-      "s": 1.11,
+      "s": 0.99,
       "dx": 0,
       "dy": 0
     }
   },
   "mushmom": {
     "walk": {
-      "s": 1.07,
-      "dx": -0.045,
+      "s": 1,
+      "dx": -0.01,
       "dy": 0
     },
     "attack": {
-      "s": 1.35,
+      "s": 1,
       "dx": 0.07,
       "dy": 0
     }
@@ -362,13 +362,18 @@ window.LX_ANIM_CALIB = {
   },
   "sundered_smith": {
     "walk": {
-      "s": 1.16,
-      "dx": 0,
+      "s": 1.08,
+      "dx": 0.105,
       "dy": 0
     },
     "attack": {
-      "s": 1.51,
-      "dx": 0,
+      "s": 1.4,
+      "dx": 0.165,
+      "dy": 0
+    },
+    "idle": {
+      "s": 1,
+      "dx": 0.09,
       "dy": 0
     }
   },
@@ -391,18 +396,18 @@ window.LX_ANIM_CALIB = {
   },
   "towerSovereign": {
     "idle": {
-      "s": 1,
-      "dx": 0.035,
+      "s": 0.59,
+      "dx": -0.025,
       "dy": 0.01
     },
     "walk": {
-      "s": 1,
-      "dx": -0.04,
+      "s": 0.55,
+      "dx": -0.035,
       "dy": 0.01
     },
     "attack": {
-      "s": 1.3,
-      "dx": -0.045,
+      "s": 0.72,
+      "dx": -0.025,
       "dy": 0.01
     }
   },
