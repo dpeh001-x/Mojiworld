@@ -322,6 +322,38 @@
     fatDragon: 1.951, smithgolem: 1.881, tombKeeper: 2.13, forgewight: 2.327,
     pathsBane: 1.604, echoKnight: 2.10, conductorMech: 1.69,
   };
+  // v0.29.x — FULL game foot-anchor chain (per user "ensure it sees exactly
+  // what it sees in game and vice versa"). The game does far more than
+  // -botFrac×H: float lift / ground bury, per-type nudges, a 6px bury clamp
+  // (which effectively re-plants most tall ground sprites at canvas-bottom =
+  // foot+6px — the reason low-botFrac sprites hover in-game), and post-clamp
+  // per-type pixel pushes. Ported verbatim. KEEP IN SYNC with
+  // mojiworld_game.html (GROUND_BURY_FRAC / FLOATING_GROUND_BLEED /
+  // _BURY_MAX_PX / _MOB_SPRITE_FOOT_NUDGE / the per-type px nudges /
+  // _BOSS_SPRITE_PUSH_DOWN).
+  const GROUND_BURY_FRAC = 0.02, FLOATING_GROUND_BLEED = 0.04, BURY_MAX_PX = 6;
+  const FOOT_NUDGE_FRAC = { slime: 0.14 };                     // monster, pre-clamp, ×targetH
+  const PRE_CLAMP_PX  = { boneGolem: 10, seastar: 10 };        // monster, pre-clamp (usually eaten by the clamp — kept for exactness)
+  const POST_CLAMP_PX = { boneGolem: 10, grumpsquid: 4, echoKnight: 7, future_lyra: 9, seastar: 6 };  // monster, post-clamp
+  const BOSS_PUSH_DOWN_PX = { young_confused_barnaby: 6 };     // boss, post-clamp
+  function gameAnchorY(isBoss, type, flies, previewH, usedBotFrac, isNormed, pxR, yoffPx) {
+    let a = -usedBotFrac * previewH;
+    if (flies) a -= previewH * FLOATING_GROUND_BLEED;
+    else a += previewH * GROUND_BURY_FRAC;
+    if (!flies && !isBoss && FOOT_NUDGE_FRAC[type]) a += previewH * FOOT_NUDGE_FRAC[type];
+    if (!flies && !isBoss && PRE_CLAMP_PX[type]) a += PRE_CLAMP_PX[type] * pxR;
+    if (!flies) {
+      // game: the VISIBLE bottom may sit at most 6px below the foot line.
+      // Boss content-normed frames measure the content bottom; everything
+      // else the canvas bottom.
+      const visBottom = (isBoss && isNormed) ? (a + usedBotFrac * previewH) : (a + previewH);
+      const cap = BURY_MAX_PX * pxR;
+      if (visBottom > cap) a -= (visBottom - cap);
+    }
+    if (!isBoss && !flies && POST_CLAMP_PX[type]) a += POST_CLAMP_PX[type] * pxR;
+    if (isBoss && BOSS_PUSH_DOWN_PX[type]) a += BOSS_PUSH_DOWN_PX[type] * pxR;
+    return a + (yoffPx || 0);
+  }
   // Live BASE-sprite images (monster path reads dims off the live base file —
   // same stale-manifest protection as the per-state live-dims fix, but from
   // the image the game actually measures).
@@ -479,7 +511,18 @@
       ? DISPLAY_H / (hb.h * (ent.group === 'boss' ? (hb.mul || 2) : 1.5) * sizeFactor(ent.group, (ent.base && ent.base.w) || info.w, baseH))
       : 1;
     const yoffPx = plantYOff(cur) * pxRatio;
-    return { previewH, targetW, usedBotFrac, yoffPx, atkMul, diag: _diag };
+    // v0.29.x — full game anchor (see gameAnchorY): the top-of-canvas offset
+    // relative to the foot line, with float/bury/nudges/6px-clamp/key-3 folded
+    // in exactly like drawMonster/_drawBossSprite.
+    const anchorY = gameAnchorY(_isBoss, cur, !!(hb && hb.f), previewH, usedBotFrac, !!_nm, pxRatio, yoffPx);
+    // v0.29.x — DRAW width follows the state frame's own aspect (game
+    // v0.29.160 "Thunderpork unsquished"): drawW = targetH × frameW/frameH.
+    // The BOX (targetW, base aspect) still drives the hitbox — the game stamps
+    // _visW from the base box before this correction, so both stay in sync.
+    const drawW = (!_isBoss && img && img.naturalWidth)
+      ? previewH * (img.naturalWidth / img.naturalHeight)
+      : targetW;
+    return { previewH, targetW, drawW, usedBotFrac, yoffPx, atkMul, anchorY, diag: _diag };
   }
   // v0.29.x — CONSOLIDATED game metrics for a state (drives the 📐 card + the
   // on-stage dimension labels): everything that produces the in-game size, plus
@@ -491,7 +534,7 @@
     const arr = frames && frames[st];
     return {
       state: st,
-      gameW: Math.round(g.targetW * c.s * (g.atkMul || 1)), gameH: Math.round(g.previewH * c.s * (g.atkMul || 1)),   // v0.29.x — monster attack-box multiplier folded into the reported on-screen size
+      gameW: Math.round((g.drawW != null ? g.drawW : g.targetW) * c.s * (g.atkMul || 1)), gameH: Math.round(g.previewH * c.s * (g.atkMul || 1)),   // v0.29.x — frame-aspect width + attack multiplier = true on-screen size
       calibS: +(+c.s).toFixed(3),
       srcW: g.diag ? g.diag.fw : null, srcH: g.diag ? g.diag.fh : null,
       contentH: g.diag ? g.diag.contentH : null,
@@ -536,7 +579,15 @@
     if (_nm) { previewH *= _nm.scale; targetW *= _nm.scale; usedBotFrac = _nm.botFrac; }
     if (st === 'attack' && _isBoss && ATK_SCALE[type]) { previewH *= ATK_SCALE[type]; targetW *= ATK_SCALE[type]; }
     const atkMul = (!_isBoss && st === 'attack' && ATK_FRAME_SCALE[type]) || 1;
-    return { previewH, targetW, usedBotFrac, atkMul };
+    // v0.29.x — same full game anchor as stateGeom (compose stage plants
+    // layers exactly like the game; px constants map 1:1 in gameScale mode).
+    const anchorY = gameAnchorY(_isBoss, type, !!(_chb && _chb.f), previewH, usedBotFrac, !!_nm,
+      1, (ent.group === 'boss') ? 0 : liveMobYOff(type));
+    // frame-aspect draw width (game v0.29.160 "unsquish"), monsters only
+    const drawW = (!_isBoss && img && img.naturalWidth)
+      ? previewH * (img.naturalWidth / img.naturalHeight)
+      : targetW;
+    return { previewH, targetW, drawW, usedBotFrac, atkMul, anchorY };
   }
 
   // ===== entity list =====
@@ -615,14 +666,15 @@
     // v0.29.x — monster attack-box multiplier: the game scales box dims AND the
     // whole dyOffset (incl. the key-3 y-off) by _ATK_FRAME_SCALE (_bW/_bH/_bDy).
     const _am = g.atkMul || 1;
-    ctx.drawImage(img, -g.targetW * _am / 2, (-g.usedBotFrac * g.previewH + (g.yoffPx || 0)) * _am, g.targetW * _am, g.previewH * _am);
+    const _dw = g.drawW != null ? g.drawW : g.targetW;   // frame-aspect draw width (game v0.29.160)
+    ctx.drawImage(img, -_dw * _am / 2, (g.anchorY != null ? g.anchorY : (-g.usedBotFrac * g.previewH + (g.yoffPx || 0))) * _am, _dw * _am, g.previewH * _am);
     ctx.restore();
     // v0.29.x (per user "show exactly the size and dimensions it displays on
     // the game") — annotate each state with its FINAL in-game render size
     // (calib scale folded in; in gameScale mode 1 stage px == 1 game px) plus
     // the inputs that produced it. Overlay mode labels only the focused state.
     if (!overlay || st === focusState) {
-      const gw = Math.round(g.targetW * c.s * _am), gh = Math.round(g.previewH * c.s * _am);   // v0.29.x — label shows the true drawn size incl. attack multiplier
+      const gw = Math.round((g.drawW != null ? g.drawW : g.targetW) * c.s * _am), gh = Math.round(g.previewH * c.s * _am);   // v0.29.x — true drawn size: frame-aspect width + attack multiplier
       ctx.save();
       ctx.textAlign = 'center';
       ctx.fillStyle = COL[st]; ctx.font = '700 12px system-ui';
@@ -1209,8 +1261,8 @@
     // v0.29.x — monster attack-box multiplier (game's _ATK_FRAME_SCALE): padded
     // attack canvases draw into a proportionally larger box, anchor scaled too.
     const _am = g.atkMul || 1;
-    const w = g.targetW * L.scale * _am, h = g.previewH * L.scale * _am;
-    const x = L.x - w / 2, y = L.y - g.usedBotFrac * g.previewH * L.scale * _am;   // foot-anchored at (L.x, L.y)
+    const w = (g.drawW != null ? g.drawW : g.targetW) * L.scale * _am, h = g.previewH * L.scale * _am;   // frame-aspect draw width (game v0.29.160)
+    const x = L.x - w / 2, y = L.y + (g.anchorY != null ? g.anchorY : -g.usedBotFrac * g.previewH) * L.scale * _am;   // foot-anchored at (L.x, L.y), full game anchor chain
     ctx.save();
     ctx.globalAlpha = L.alpha;
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
