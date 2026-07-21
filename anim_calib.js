@@ -210,7 +210,7 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.6,
       "dx": 0,
-      "dy": 0
+      "dy": 0.01
     }
   },
   "blockRexy": {
@@ -265,10 +265,15 @@ window.LX_ANIM_CALIB = {
     }
   },
   "gravitos3star": {
+    "idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.04
+    },
     "walk": {
       "s": 1.23,
       "dx": 0,
-      "dy": 0.015
+      "dy": 0.04
     },
     "attack": {
       "s": 2.11,
@@ -277,15 +282,20 @@ window.LX_ANIM_CALIB = {
     }
   },
   "gravitos3": {
+    "idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.045
+    },
     "walk": {
       "s": 1.23,
       "dx": 0,
-      "dy": 0.025
+      "dy": 0.04
     },
     "attack": {
       "s": 1.28,
       "dx": 0,
-      "dy": 0.01
+      "dy": 0.035
     }
   },
   "gravitos": {
@@ -337,32 +347,37 @@ window.LX_ANIM_CALIB = {
     },
     "walk": {
       "s": 1,
-      "dx": -0.01,
+      "dx": 0,
       "dy": 0.305
     },
     "attack": {
       "s": 1,
-      "dx": 0.07,
+      "dx": 0,
       "dy": 0.305
     }
   },
   "octobaby": {
+    "idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.025
+    },
     "walk": {
       "s": 1.09,
       "dx": 0,
-      "dy": 0
+      "dy": 0.025
     },
     "attack": {
       "s": 1.26,
       "dx": 0,
-      "dy": 0
+      "dy": 0.025
     }
   },
   "pqConductor": {
     "idle": {
       "s": 1,
       "dx": 0,
-      "dy": 0.01
+      "dy": 0.02
     },
     "walk": {
       "s": 1.03,
@@ -372,24 +387,24 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.42,
       "dx": 0.115,
-      "dy": 0.005
+      "dy": 0.02
     }
   },
   "sundered_smith": {
     "idle": {
       "s": 1,
       "dx": 0.09,
-      "dy": 0
+      "dy": 0.01
     },
     "walk": {
       "s": 1.08,
       "dx": 0.105,
-      "dy": 0
+      "dy": 0.01
     },
     "attack": {
       "s": 1.4,
       "dx": 0.165,
-      "dy": 0
+      "dy": 0.01
     }
   },
   "towerArbiter": {
@@ -399,14 +414,14 @@ window.LX_ANIM_CALIB = {
       "dy": 0.02
     },
     "walk": {
-      "s": 1,
-      "dx": 0.07,
-      "dy": 0.02
+      "s": 1.54,
+      "dx": 0.0949,
+      "dy": 0.4984
     },
     "attack": {
       "s": 1.78,
-      "dx": 0.085,
-      "dy": 0.03
+      "dx": 0.1106,
+      "dy": 0.0193
     }
   },
   "towerSovereign": {
@@ -427,15 +442,20 @@ window.LX_ANIM_CALIB = {
     }
   },
   "young_confused_barnaby": {
-    "walk": {
-      "s": 1.04,
+    "idle": {
+      "s": 0.89,
       "dx": 0,
-      "dy": 0
+      "dy": 0.015
+    },
+    "walk": {
+      "s": 0.9,
+      "dx": 0,
+      "dy": 0.015
     },
     "attack": {
-      "s": 1.35,
+      "s": 1.16,
       "dx": 0,
-      "dy": 0
+      "dy": 0.015
     }
   }
 };
