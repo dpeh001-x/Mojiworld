@@ -5,13 +5,12 @@
 // offset from the foot line (+down) — all fractions of rendered sprite height.
 // Missing entries keep the game defaults.
 window.LX_ANIM_CALIB = {
-  "forgewight": {
-    "attack": {
-      "s": 1.87,
-      "dx": 0.0301,
-      "dy": 0.6
-    }
-  },
+  // v0.29.x — forgewight attack calib (s:1.87, dy:0.6) REMOVED: it was a
+  // hand-dialed compensation against the animator's pre-fix preview (which
+  // lacked the _ATK_FRAME_SCALE 2.327 multiplier + game anchor). In-game it
+  // stacked ON TOP of the correct table, drawing the attack ~1.87x oversized
+  // and shifted 0.6H down — the "forgewight attack anomaly". Defaults (s:1)
+  // restore the authored constant-body size.
   "goblinMauler": {
     "attack": {
       "s": 1.05,
