@@ -152,13 +152,101 @@
     const ref = group === 'boss' ? 1024 : 768, f = Math.max(w, h) / ref;
     return group === 'boss' ? clamp(f, 0.7, 1.6) : clamp(f, 0.85, 1.2);
   }
+  // ===== cross-state CONTENT NORMALISATION (game v0.26.479 + v0.29.122) =====
+  // Per user: "the size calibration between walk idle and attack does not seem
+  // synced with the html editor". The game does NOT scale bosses purely by
+  // canvas dimensions — _drawBossSprite measures each frame's OPAQUE content
+  // height, compares it with the idle-set median reference, and rescales any
+  // frame deviating >8% (>2% for the strict Gravitos family) so the figure is
+  // a CONSTANT on-screen size across idle/walk/attack. The editor lacked this
+  // pass, so states whose art fills the canvas differently rendered at
+  // different sizes than in-game. This block is a faithful port:
+  //   _BOSS_SIZE_STRICT   -> 2% tolerance (Gravitos family)
+  //   _BOSS_ATK_NOSHRINK  -> attack frames may scale UP but never DOWN
+  //   _BOSS_ATK_SCALE     -> per-type post-norm attack multiplier
+  //   _BOSS_BODYLOCK      -> normalise on the SOLID body (alpha>235), not the
+  //                          full silhouette (Aetherion's flared wings)
+  const SIZE_STRICT   = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star']);
+  const ATK_NOSHRINK  = new Set(['sundered_smith', 'gravitos2star', 'gravitos3star']);
+  const ATK_SCALE     = { koopaKing: 1.10 };
+  const BODYLOCK      = new Set(['aetherion', 'aetherion2']);
+  // Per-image content boxes (alpha>16) + solid-body boxes (alpha>235), row-scan
+  // top/bottom only (the norm keys on HEIGHT + bottom anchor). Cached on the
+  // element — each frame is measured exactly once.
+  function frameBoxes(img) {
+    if (img.__nboxes !== undefined) return img.__nboxes;
+    if (!img.complete || !img.naturalWidth) return null;   // not decoded yet — retry next frame (don't cache)
+    try {
+      const w = img.naturalWidth, h = img.naturalHeight;
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const x = c.getContext('2d', { willReadFrequently: true });
+      x.drawImage(img, 0, 0);
+      const d = x.getImageData(0, 0, w, h).data;
+      let cT = -1, cB = -1, bT = -1, bB = -1;
+      for (let y = 0; y < h; y++) {
+        let any = false, solid = false;
+        for (let p = y * w * 4 + 3, X = 0; X < w; X++, p += 4) {
+          const a = d[p];
+          if (a > 16) { any = true; if (a > 235) { solid = true; break; } }
+        }
+        if (any)   { if (cT < 0) cT = y; cB = y; }
+        if (solid) { if (bT < 0) bT = y; bB = y; }
+      }
+      return (img.__nboxes = (cT < 0 ? null : { top: cT, bottom: cB, bodyTop: bT, bodyBottom: bB }));
+    } catch (e) { return (img.__nboxes = null); }   // canvas taint — norm off for this frame
+  }
+  function _boxH(img, useBody, srcH) {
+    const bx = frameBoxes(img); if (!bx) return null;
+    if (useBody && bx.bodyTop >= 0 && (bx.bodyBottom - bx.bodyTop) >= srcH * 0.05)
+      return { h: bx.bodyBottom - bx.bodyTop + 1, bottom: bx.bodyBottom };
+    return { h: bx.bottom - bx.top + 1, bottom: bx.bottom };
+  }
+  // Idle-set median content height per type (game's _deriveBossRefHeight):
+  // derived from the DECODED idle frames, cached once the full set is measured.
+  const _normRef = new Map();
+  function bossRefH(type, idleFrames, useBody) {
+    const hit = _normRef.get(type);
+    if (hit && hit.final) return hit.h;
+    const hs = [];
+    let all = true;
+    for (const im of (idleFrames || [])) {
+      const b = im && _boxH(im, useBody, (im.naturalHeight || 1));   // each idle frame's OWN height for the body-plausibility gate
+      if (b) hs.push(b.h); else all = false;
+    }
+    if (!hs.length) return hit ? hit.h : null;
+    hs.sort((a, b) => a - b);
+    const med = hs[Math.floor(hs.length / 2)];
+    _normRef.set(type, { h: med, final: all });
+    return med;
+  }
+  // The norm itself — returns {scale, botFrac} when the frame deviates, else null.
+  function contentNorm(type, group, st, img, infoH, idleFrames) {
+    if (group !== 'boss' || !img) return null;
+    const useBody = BODYLOCK.has(type);
+    const box = _boxH(img, useBody, infoH);
+    if (!box) return null;
+    let ref = bossRefH(type, idleFrames, useBody);
+    if (ref == null) { _normRef.set(type, { h: box.h, final: false }); ref = box.h; }
+    const tol = SIZE_STRICT.has(type) ? 0.02 : 0.08;
+    if (Math.abs(box.h - ref) <= ref * tol) return null;
+    const minScale = (st === 'attack' && ATK_NOSHRINK.has(type)) ? 1.0 : 0.5;
+    const scale = Math.max(minScale, Math.min(2.0, ref / box.h));
+    return { scale, botFrac: clamp((box.bottom + 1) / infoH, 0.3, 1.3) };
+  }
   // K so the base sprite renders to DISPLAY_H; every state scales relative to it.
   function baseK(ent) {
     const b = ent.base || (ent.states.idle ? { w: ent.states.idle.w, h: ent.states.idle.h } : { w: 768, h: 768 });
     return DISPLAY_H / sizeFactor(ent.group, b.w, b.h);
   }
-  function stateGeom(ent, st) {
+  function stateGeom(ent, st, img) {
     const info = ent.states[st]; if (!info) return null;
+    // v0.29.x — default to the CURRENT playing frame so every caller (sprite
+    // draw, hitbox draw/seed, UI drag math) shares one content-normalised
+    // geometry without call-site changes.
+    if (img === undefined && frames && frames[st] && frames[st].length) {
+      const _i = gameTiming ? gameFrameIndex(st, frames[st], nowT) : (frameIdx % frames[st].length);
+      img = (_i >= 0 && frames[st][_i] && frames[st][_i].complete && frames[st][_i].naturalWidth) ? frames[st][_i] : null;
+    }
     // v0.26.x — key-3 sync: the Monster Plant scale multiplies the rendered
     // height exactly like the game (targetH = m.h x 1.5 x sizeFactor x scale).
     // Folding it in HERE keeps every fraction-of-height unit (calib dx/dy,
@@ -173,11 +261,22 @@
     const _gameBase = (gameScale && hb && hb.h)
       ? hb.h * (ent.group === 'boss' ? (hb.mul || 2) : 1.5)
       : null;
-    const previewH = (_gameBase != null ? _gameBase : baseK(ent)) * sizeFactor(ent.group, info.w, info.h) * _ps;
-    const targetW = previewH * (info.w / info.h);
-    const baseH = (ent.base && ent.base.h) || info.h;
+    // v0.29.x — the GAME reads srcW/srcH off the LIVE image (naturalWidth/
+    // Height); the manifest's recorded dims can be stale after an asset re-render
+    // (audit: koopaKing's walk manifest said 1800x1400, the shipped webp is
+    // 990x770 — sizeFactor was 1.6 instead of 0.967, drawing walk ~60% too big).
+    const fw = (img && img.naturalWidth) || info.w, fh = (img && img.naturalHeight) || info.h;
+    let previewH = (_gameBase != null ? _gameBase : baseK(ent)) * sizeFactor(ent.group, fw, fh) * _ps;
+    let targetW = previewH * (fw / fh);
+    const baseH = (ent.base && ent.base.h) || fh;
     const baseFrac = (ent.base && ent.base.botFrac != null) ? ent.base.botFrac : 0.92;
-    const usedBotFrac = clamp(baseFrac * baseH / info.h, 0.3, 1.3);   // game divides base bbox by THIS frame's height
+    let usedBotFrac = clamp(baseFrac * baseH / fh, 0.3, 1.3);   // game divides base bbox by THIS frame's height
+    // v0.29.x — game content-norm (see block above): rescale frames whose body
+    // deviates from the idle reference + re-anchor at the frame's own content
+    // bottom; then the per-type post-norm attack multiplier.
+    const _nm = contentNorm(cur, ent.group, st, img, fh, frames && frames.idle);
+    if (_nm) { previewH *= _nm.scale; targetW *= _nm.scale; usedBotFrac = _nm.botFrac; }
+    if (st === 'attack' && ent.group === 'boss' && ATK_SCALE[cur]) { previewH *= ATK_SCALE[cur]; targetW *= ATK_SCALE[cur]; }
     // world-px -> preview-px ratio for this type (for the key-3 y-offset):
     // game base targetH = hb.h x mul x sizeFactor(base) x scale; preview base
     // height = DISPLAY_H x scale -> scale cancels out of the ratio. In
@@ -192,7 +291,7 @@
   // Compose-mode geometry: same render math as stateGeom but keyed to an
   // EXPLICIT type (not the single `cur`), so multiple different sprites can be
   // sized correctly on one stage. Returns preview px height + width for (type,st).
-  function composeGeom(type, st) {
+  function composeGeom(type, st, img, idleFrames) {
     const ent = MAN[type]; if (!ent) return null;
     const info = ent.states[st]; if (!info) return null;
     const _ps = (ent.group === 'boss') ? 1 : liveMobScale(type);
@@ -202,11 +301,18 @@
     const _cBase = (gameScale && _chb && _chb.h)
       ? _chb.h * (ent.group === 'boss' ? (_chb.mul || 2) : 1.5)
       : baseK(ent);
-    const previewH = _cBase * sizeFactor(ent.group, info.w, info.h) * _ps;
-    const targetW = previewH * (info.w / info.h);
-    const baseH = (ent.base && ent.base.h) || info.h;
+    // v0.29.x — live-image dims beat stale manifest dims (see stateGeom).
+    const fw = (img && img.naturalWidth) || info.w, fh = (img && img.naturalHeight) || info.h;
+    let previewH = _cBase * sizeFactor(ent.group, fw, fh) * _ps;
+    let targetW = previewH * (fw / fh);
+    const baseH = (ent.base && ent.base.h) || fh;
     const baseFrac = (ent.base && ent.base.botFrac != null) ? ent.base.botFrac : 0.92;
-    const usedBotFrac = clamp(baseFrac * baseH / info.h, 0.3, 1.3);
+    let usedBotFrac = clamp(baseFrac * baseH / fh, 0.3, 1.3);
+    // v0.29.x — same content-norm as stateGeom, keyed to the layer's own type +
+    // frame (compose passes its current frame + idle set).
+    const _nm = contentNorm(type, ent.group, st, img, fh, idleFrames);
+    if (_nm) { previewH *= _nm.scale; targetW *= _nm.scale; usedBotFrac = _nm.botFrac; }
+    if (st === 'attack' && ent.group === 'boss' && ATK_SCALE[type]) { previewH *= ATK_SCALE[type]; targetW *= ATK_SCALE[type]; }
     return { previewH, targetW, usedBotFrac };
   }
 
@@ -265,7 +371,6 @@
     cv.width = Math.max(560, w); cv.height = document.getElementById('stagewrap').clientHeight - 4;
   }
   function drawState(ent, st, cx, groundY, alpha) {
-    const g = stateGeom(ent, st); if (!g) return;
     const arr = frames[st]; if (!arr || !arr.length) return;
     // v0.29.139 — game-accurate frame pick: per-mode clock + idle ping-pong +
     // decoded-only (_readyN). Legacy flat-fps linear index when toggled off.
@@ -273,6 +378,8 @@
     if (idx < 0) return;
     const img = arr[idx];
     if (!img.complete || !img.naturalWidth) return;
+    // v0.29.x — geometry from THIS frame (content-norm needs the live image).
+    const g = stateGeom(ent, st, img); if (!g) return;
     const c = CALIB[cur][st];
     ctx.save();
     ctx.globalAlpha = alpha;
