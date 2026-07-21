@@ -8882,7 +8882,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.159';
+const GAME_VERSION = 'v0.29.160';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -92290,6 +92290,21 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
   // v0.26.132 — Fallback when bbox detection is unavailable (canvas taint /
   // image not yet decoded): assume ~8% bottom padding.
   let bboxBottomY = (meta.bboxBottomY != null) ? meta.bboxBottomY : Math.floor(srcH * 0.92);
+  // v0.29.x — CANVAS-GEOMETRY GUARD (Legosaurus float fix). The canonical
+  // meta bbox comes from the STATIC boss sprite, but some bosses ship frame
+  // sets on a DIFFERENT canvas size (blockRexy static 1290×749 vs 940×546
+  // frames) — the static's pixel bbox is meaningless against this frame's
+  // srcH ((738+1)/546 = 1.35 → the art was lifted ~35% of its height off
+  // the floor; the old anim_calib dy:0.275 hand-compensated exactly this).
+  // When the anchor row is impossible for the sprite actually being drawn,
+  // detect THIS sprite's own bbox (cached on the image) and use that.
+  if (bboxBottomY >= srcH) {
+    if (sprite._lxBboxSelf == null) {
+      const _d = (typeof _detectSpriteBboxBottom === 'function') ? _detectSpriteBboxBottom(sprite) : null;
+      sprite._lxBboxSelf = (_d != null) ? _d : Math.floor(srcH * 0.92);
+    }
+    bboxBottomY = sprite._lxBboxSelf;
+  }
   // v0.26.479 — Keep EVERY frame-animated boss a CONSTANT on-screen size across
   // states. Many bosses' attack art draws a smaller body inside the same canvas
   // as idle (audit: 11 of 27 shrank ~10-34% mid-attack — king, mushmom,
@@ -92983,12 +92998,23 @@ function _drawMonsterSprite(m, sx, sy) {
     // scales the draw box so the CHARACTER renders at the unchanged idle size
     // while the weapon extends into the margin. Idle/walk frames (authored at
     // base size) and every other mob are untouched.
+    // v0.29.x — draw the state frame at ITS OWN aspect ratio. The draw-box
+    // aspect (targetW) comes from the STATIC base sprite; any type whose frame
+    // canvas aspect differs got every animation frame stretched into the wrong
+    // box — Thunderpork (voltipup): base 1000×700 vs square 768×768 frames →
+    // the pig rendered ~43% too wide ("squished vertically", per user).
+    // Height (and with it the Y anchor and all Monster Plant bakes) is
+    // unchanged; only the width now follows the frame being drawn. Types whose
+    // frames match the base aspect are untouched (frameW === targetW).
+    const _fsW = _stateImg.naturalWidth || _stateImg.width || srcW;
+    const _fsH = _stateImg.naturalHeight || _stateImg.height || srcH;
+    const _frameW = _lxWholeSize(targetH * (_fsW / _fsH));
     const _atkScale = (m._frameIsAttack && _ATK_FRAME_SCALE[m.type]) || 1;
     if (_atkScale !== 1) {
-      const _bW = Math.round(targetW * _atkScale), _bH = Math.round(targetH * _atkScale), _bDy = dyOffset * _atkScale;   // v0.26.x perf — integer blit dims
+      const _bW = Math.round(_frameW * _atkScale), _bH = Math.round(targetH * _atkScale), _bDy = dyOffset * _atkScale;   // v0.26.x perf — integer blit dims
       ctx.drawImage(_stateImg, _lxWholePx(-_bW / 2), _lxWholePx(_bDy), _bW, _bH);
     } else {
-      ctx.drawImage(_stateImg, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);
+      ctx.drawImage(_stateImg, _lxWholePx(-_frameW / 2), _lxWholePx(dyOffset), _frameW, targetH);
     }
   } else {
     const _cachedSprite = _getCachedScaledSprite(m.type, sprite, srcW, srcH, targetW, targetH);

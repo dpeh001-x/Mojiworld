@@ -214,21 +214,9 @@ window.LX_ANIM_CALIB = {
     }
   },
   "blockRexy": {
-    "idle": {
-      "s": 0.8,
-      "dx": 0,
-      "dy": 0.275
-    },
-    "walk": {
-      "s": 0.8,
-      "dx": 0,
-      "dy": 0.275
-    },
-    "attack": {
-      "s": 0.8,
-      "dx": 0,
-      "dy": 0.275
-    }
+    "idle": { "s": 0.8, "dx": 0, "dy": 0 },
+    "walk": { "s": 0.8, "dx": 0, "dy": 0 },
+    "attack": { "s": 0.8, "dx": 0, "dy": 0 }
   },
   "gravitos2star": {
     "idle": {
@@ -323,21 +311,9 @@ window.LX_ANIM_CALIB = {
     }
   },
   "koopaKing": {
-    "idle": {
-      "s": 1.05,
-      "dx": 0,
-      "dy": 0.12
-    },
-    "walk": {
-      "s": 1.68,
-      "dx": 0.01,
-      "dy": 0.585
-    },
-    "attack": {
-      "s": 1.62,
-      "dx": 0,
-      "dy": 0.56
-    }
+    "idle": { "s": 1, "dx": 0, "dy": 0 },
+    "walk": { "s": 1, "dx": 0, "dy": 0 },
+    "attack": { "s": 1, "dx": 0, "dy": 0 }
   },
   "mushmom": {
     "idle": {
