@@ -8882,7 +8882,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.157';
+const GAME_VERSION = 'v0.29.158';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -12112,9 +12112,44 @@ function _lxMpSpawn() {
   if (typeof spawnMonster !== 'function' || !_LX_MP.type) return;
   try {
     const dir = ((player.facing | 0) < 0) ? -1 : 1;
-    spawnMonster(player.x + dir * 120, player.y - 40, _LX_MP.type);
-    if (typeof showToast === 'function') showToast('Spawned ' + _lxMpLabel(_LX_MP.type), 'rare');
+    // Spawn just ahead of the player at their feet line, so exactly ONE mob of
+    // the selected type drops in on solid footing regardless of facing.
+    const m = spawnMonster(player.x + dir * 120, player.y - 40, _LX_MP.type);
+    if (m && m._suppressed) {
+      // Co-op guest: monsters are host-authoritative (spawnMonster no-ops).
+      if (typeof showToast === 'function') showToast('Spawn is host-only in co-op — run it on the host.', 'rare');
+    } else if (typeof showToast === 'function') {
+      showToast('Spawned 1× ' + _lxMpLabel(_LX_MP.type), 'rare');
+    }
   } catch (e) { if (typeof showToast === 'function') showToast('Spawn failed: ' + e.message, 'rare'); }
+  _lxMpSyncUI();
+}
+// v0.29.x — dev "clear the field": remove every hostile mob so the tester can
+// start clean. Quiet despawn (no loot/XP flood the way a real kill would),
+// with a small poof per mob. Keeps the player's OWN allies/summons. On the
+// host this propagates to guests automatically (the removed mobs simply stop
+// appearing in the next 'mon' sync); as a co-op guest the host owns the field.
+function _lxMpKillAll() {
+  if (typeof _coopFollowingHost === 'function' && _coopFollowingHost()) {
+    if (typeof showToast === 'function') showToast('Host owns the field — clear it on the host.', 'rare');
+    return;
+  }
+  let n = 0;
+  const list = (game.monsters || []).slice();
+  for (const m of list) {
+    if (!m || m.currentHp <= 0) continue;
+    if (m.ally || m.isSummon || m._playerOwned) continue;   // keep the player's own allies/summons
+    try {
+      const cx = m.x + (m.w || 32) / 2, cy = m.y + (m.h || 32) / 2;
+      for (let i = 0; i < 6; i++) {
+        const a = (Math.PI * 2 * i) / 6;
+        game.particles.push({ x: cx, y: cy, vx: Math.cos(a) * 3, vy: Math.sin(a) * 3 - 1, life: 18, color: i % 2 ? '#c8a0ff' : '#ffffff', size: 3 });
+      }
+    } catch (_) {}
+    const i = game.monsters.indexOf(m);
+    if (i >= 0) { game.monsters.splice(i, 1); n++; }
+  }
+  if (typeof showToast === 'function') showToast(n ? ('☠ Cleared ' + n + ' monster' + (n === 1 ? '' : 's')) : 'No monsters on the field', 'rare');
   _lxMpSyncUI();
 }
 function _lxMpBuild() {
@@ -12163,6 +12198,10 @@ function _lxMpBuild() {
   ab.appendChild(btn('Reset Y', () => _lxMpSetVal(0)));
   ab.appendChild(btn('Reset ×', () => _lxMpSetScale(1)));
   root.appendChild(ab);
+  const kb = document.createElement('div'); kb.style.cssText = 'display:flex;gap:4px;margin:4px 0 0;';
+  const killBtn = btn('☠ Kill all monsters', () => _lxMpKillAll());
+  killBtn.style.cssText += 'background:#3a1d1d;border-color:#7a4040;color:#ffc8c8;';
+  kb.appendChild(killBtn); root.appendChild(kb);
   const eb = document.createElement('div'); eb.style.cssText = 'display:flex;gap:4px;margin:4px 0 0;';
   eb.appendChild(btn('⬇ Export ALL (copy)', () => _lxMpExport())); root.appendChild(eb);
   u.out = document.createElement('pre'); u.out.style.cssText = 'margin:8px 0 0;padding:6px;background:#0c0a16;border-radius:6px;font-size:10px;white-space:pre-wrap;word-break:break-all;color:#88dd88;'; root.appendChild(u.out);
