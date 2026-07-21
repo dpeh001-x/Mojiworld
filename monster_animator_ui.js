@@ -113,6 +113,13 @@
     } else {
       html += `<div style="margin-bottom:6px"></div>`;
     }
+    // v0.29.x (per user "consolidate all info") — 📐 GAME METRICS card: one
+    // place with everything the render uses, per state — the FINAL in-game
+    // draw size (exactly what the stage shows at game-scale 1:1) plus source
+    // dims, measured content height, sizeFactor, content-norm & attack scales,
+    // frame decode status — and the shared hitbox / mul / plant values.
+    // Values refresh live (see wire()) as frames decode.
+    html += `<div class="scard" id="gm-card"><h3>\u{1F4D0} Game metrics (live)</h3><div id="gm-body" class="mut" style="font-size:11px;line-height:1.55">measuring…</div></div>`;
     for (const st of core.STATES) if (ent.states[st]) html += card(st, C[st]);
     if (A.hbEdit) {
       html += `<div class="mut" style="font-size:11px;margin:8px 0 6px">HITBOX — the region player attacks can hit. All scaling (size factor + Monster Plant) is baked into the box you see. w/h/ox/oy are fractions of sprite height; oy = bottom offset from the feet (+down). Drag the box in the stage, or its corner handle to resize.</div>`;
@@ -142,7 +149,37 @@
     document.querySelectorAll(`[data-hbst="${st}"][data-k="${k}"]`).forEach(el => { el.value = v; });
     persistHB(true);
   }
+  // v0.29.x — 📐 Game-metrics card refresher. Re-renders every 600ms while the
+  // card exists (values settle as frames decode; norm scales react to live
+  // calib edits). One shared interval — cleared/re-armed on every rebuild.
+  function updateGM() {
+    const el = document.getElementById('gm-body');
+    if (!el || !A.cur || !core.gameMetrics) return;
+    const rows = [];
+    let shared = null;
+    for (const st of core.STATES) {
+      const m = core.gameMetrics(st); if (!m) continue;
+      shared = m;
+      const col = ({ idle: 'var(--idle)', walk: 'var(--walk)', attack: 'var(--attack)' })[st] || '#fff';
+      rows.push(`<div style="margin-bottom:5px"><b style="color:${col}">${st}</b>` +
+        ` — <b style="color:#dfe6f2">${m.gameW} × ${m.gameH} px in-game</b>` +
+        `<br>src ${m.srcW}×${m.srcH} · content ${m.contentH != null ? m.contentH + 'px' : '—'} · sf ${m.sizeFactor}` +
+        `${m.normScale !== 1 ? ' · norm ×' + m.normScale : ''}` +
+        `${m.atkScale !== 1 ? ' · atk ×' + m.atkScale : ''}` +
+        `${m.calibS !== 1 ? ' · calib ×' + m.calibS : ''}` +
+        ` · frames ${m.decoded}/${m.frames}</div>`);
+    }
+    if (shared) {
+      rows.push(`<div style="border-top:1px solid var(--line);padding-top:5px;margin-top:2px">` +
+        (shared.hb ? `hitbox ${shared.hb.w}×${shared.hb.h} · mul ${shared.hb.mul}` : 'hitbox —') +
+        ` · plant ${(+shared.plant).toFixed(2)}×</div>`);
+    }
+    el.innerHTML = rows.length ? rows.join('') : 'measuring…';
+  }
   function wire() {
+    clearInterval(window.__gmT);
+    window.__gmT = setInterval(updateGM, 600);
+    updateGM();
     document.querySelectorAll('#ctrlBody input[data-st]').forEach(el => {
       el.addEventListener('focus', snapshot, { once: true });
       el.addEventListener('input', () => setVal(el.dataset.st, el.dataset.k, el.value));

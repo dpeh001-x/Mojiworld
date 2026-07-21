@@ -277,6 +277,15 @@
     const _nm = contentNorm(cur, ent.group, st, img, fh, frames && frames.idle);
     if (_nm) { previewH *= _nm.scale; targetW *= _nm.scale; usedBotFrac = _nm.botFrac; }
     if (st === 'attack' && ent.group === 'boss' && ATK_SCALE[cur]) { previewH *= ATK_SCALE[cur]; targetW *= ATK_SCALE[cur]; }
+    // v0.29.x — diagnostics for the consolidated Game-metrics card + on-stage
+    // dimension labels (all the inputs that produced this on-screen size).
+    var _diag = {
+      fw, fh,
+      sf: +sizeFactor(ent.group, fw, fh).toFixed(3),
+      normScale: _nm ? +_nm.scale.toFixed(3) : 1,
+      contentH: (function () { const bx = img && frameBoxes(img); return bx ? (bx.bottom - bx.top + 1) : null; })(),
+      atkScale: (st === 'attack' && ent.group === 'boss' && ATK_SCALE[cur]) ? ATK_SCALE[cur] : 1,
+    };
     // world-px -> preview-px ratio for this type (for the key-3 y-offset):
     // game base targetH = hb.h x mul x sizeFactor(base) x scale; preview base
     // height = DISPLAY_H x scale -> scale cancels out of the ratio. In
@@ -286,7 +295,29 @@
       ? DISPLAY_H / (hb.h * (ent.group === 'boss' ? (hb.mul || 2) : 1.5) * sizeFactor(ent.group, (ent.base && ent.base.w) || info.w, baseH))
       : 1;
     const yoffPx = plantYOff(cur) * pxRatio;
-    return { previewH, targetW, usedBotFrac, yoffPx };
+    return { previewH, targetW, usedBotFrac, yoffPx, diag: _diag };
+  }
+  // v0.29.x — CONSOLIDATED game metrics for a state (drives the 📐 card + the
+  // on-stage dimension labels): everything that produces the in-game size, plus
+  // the final on-screen W×H exactly as the game draws it (calib scale folded in).
+  function gameMetrics(st) {
+    const ent = MAN[cur]; if (!ent || !ent.states[st]) return null;
+    const g = stateGeom(ent, st); if (!g) return null;
+    const c = (CALIB[cur] && CALIB[cur][st]) || { s: 1 };
+    const arr = frames && frames[st];
+    return {
+      state: st,
+      gameW: Math.round(g.targetW * c.s), gameH: Math.round(g.previewH * c.s),
+      calibS: +(+c.s).toFixed(3),
+      srcW: g.diag ? g.diag.fw : null, srcH: g.diag ? g.diag.fh : null,
+      contentH: g.diag ? g.diag.contentH : null,
+      sizeFactor: g.diag ? g.diag.sf : null,
+      normScale: g.diag ? g.diag.normScale : 1,
+      atkScale: g.diag ? g.diag.atkScale : 1,
+      frames: arr ? arr.length : 0, decoded: arr ? decodedN(arr) : 0,
+      hb: HB[cur] ? { w: HB[cur].w, h: HB[cur].h, mul: HB[cur].mul || (ent.group === 'boss' ? 2 : 1.5) } : null,
+      plant: plantScale(cur),
+    };
   }
   // Compose-mode geometry: same render math as stateGeom but keyed to an
   // EXPLICIT type (not the single `cur`), so multiple different sprites can be
@@ -391,6 +422,27 @@
     // _lxMobYOff joins dyOffset (which the calib scale wraps).
     ctx.drawImage(img, -g.targetW / 2, -g.usedBotFrac * g.previewH + (g.yoffPx || 0), g.targetW, g.previewH);
     ctx.restore();
+    // v0.29.x (per user "show exactly the size and dimensions it displays on
+    // the game") — annotate each state with its FINAL in-game render size
+    // (calib scale folded in; in gameScale mode 1 stage px == 1 game px) plus
+    // the inputs that produced it. Overlay mode labels only the focused state.
+    if (!overlay || st === focusState) {
+      const gw = Math.round(g.targetW * c.s), gh = Math.round(g.previewH * c.s);
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.fillStyle = COL[st]; ctx.font = '700 12px system-ui';
+      ctx.fillText('in-game  ' + gw + ' × ' + gh + ' px', cx, groundY + 36);
+      if (g.diag) {
+        ctx.fillStyle = '#8a97ad'; ctx.font = '10px system-ui';
+        ctx.fillText('src ' + g.diag.fw + '×' + g.diag.fh
+          + ' · content ' + (g.diag.contentH != null ? g.diag.contentH + 'px' : '—')
+          + ' · sf ' + g.diag.sf
+          + (g.diag.normScale !== 1 ? ' · norm ×' + g.diag.normScale : '')
+          + (g.diag.atkScale !== 1 ? ' · atk ×' + g.diag.atkScale : '')
+          + (c.s !== 1 ? ' · calib ×' + (+c.s).toFixed(2) : ''), cx, groundY + 50);
+      }
+      ctx.restore();
+    }
   }
   // THE hitbox (orange, editable) — the region player attacks can hit
   // (_atkMonBox override). v2: the old green read-only gameplay box was
@@ -484,6 +536,7 @@
     setHbEdit: (v) => { hbEdit = v; _mobScaleLS = null; },   // toggle re-reads live scale too
     // key-3 (Monster Plant) live values for the panel readout
     plantScale, plantYOff,
+    gameMetrics,   // v0.29.x — consolidated in-game render metrics per state (📐 card)
     fit, MAN, STATES, COL, DEF, CALIB: () => CALIB, reloadCalib: () => { CALIB = loadCalib(); },
     // ---- attack-hitbox model API (consumed by monster_animator_ui.js) ----
     HBX: () => HBX, hbFor, defaultHB: (t, st) => defaultHB(MAN[t], st),
