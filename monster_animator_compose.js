@@ -60,8 +60,11 @@
     // v0.29.x — pass the live frame + idle set so the game's content-norm
     // (cross-state size constancy) applies on the compose stage too.
     const g = core.composeGeom(L.type, L.state, img, L.frames.idle); if (!g) return;
-    const w = g.targetW * L.scale, h = g.previewH * L.scale;
-    const x = L.x - w / 2, y = L.y - g.usedBotFrac * h;   // foot-anchored at (L.x, L.y)
+    // v0.29.x — monster attack-box multiplier (game's _ATK_FRAME_SCALE): padded
+    // attack canvases draw into a proportionally larger box, anchor scaled too.
+    const _am = g.atkMul || 1;
+    const w = g.targetW * L.scale * _am, h = g.previewH * L.scale * _am;
+    const x = L.x - w / 2, y = L.y - g.usedBotFrac * g.previewH * L.scale * _am;   // foot-anchored at (L.x, L.y)
     ctx.save();
     ctx.globalAlpha = L.alpha;
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';

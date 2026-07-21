@@ -170,6 +170,29 @@
   const SIZE_STRICT   = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star']);
   const ATK_NOSHRINK  = new Set(['sundered_smith', 'gravitos2star', 'gravitos3star']);
   const ATK_SCALE     = { koopaKing: 1.10 };
+  // v0.29.x — MONSTER-path attack-box multiplier (per user: "forgewight attack
+  // sprite is an anomaly compared to its normal sprite"). In the game, MONSTERS
+  // don't run the boss content-norm at all: drawMonster derives the whole box
+  // (sizeFactor, aspect, foot anchor) from the STATIC BASE sprite (refImg =
+  // MONSTER_SPRITES[type]) and stretches every state frame into it; the ONLY
+  // per-state size rule is _ATK_FRAME_SCALE — attack frames authored inside a
+  // padded canvas get the box AND its dyOffset multiplied. KEEP IN SYNC with
+  // _ATK_FRAME_SCALE in mojiworld_game.html.
+  const ATK_FRAME_SCALE = {
+    fatDragon: 1.951, smithgolem: 1.881, tombKeeper: 2.13, forgewight: 2.327,
+    pathsBane: 1.604, echoKnight: 2.10, conductorMech: 1.69,
+  };
+  // Live BASE-sprite images (monster path reads dims off the live base file —
+  // same stale-manifest protection as the per-state live-dims fix, but from
+  // the image the game actually measures).
+  const _baseImgs = new Map();
+  function baseImg(type) {
+    const ent = MAN[type];
+    if (!ent || !ent.basePath) return null;
+    let im = _baseImgs.get(type);
+    if (!im) { im = new Image(); im.src = ent.basePath; _baseImgs.set(type, im); }
+    return (im.complete && im.naturalWidth) ? im : null;
+  }
   const BODYLOCK      = new Set(['aetherion', 'aetherion2']);
   // Per-image content boxes (alpha>16) + solid-body boxes (alpha>235), row-scan
   // top/bottom only (the norm keys on HEIGHT + bottom anchor). Cached on the
@@ -266,18 +289,38 @@
     // Height); the manifest's recorded dims can be stale after an asset re-render
     // (audit: koopaKing's walk manifest said 1800x1400, the shipped webp is
     // 990x770 — sizeFactor was 1.6 instead of 0.967, drawing walk ~60% too big).
-    const fw = (img && img.naturalWidth) || info.w, fh = (img && img.naturalHeight) || info.h;
+    // v0.29.x — per-group dims source (game-faithful):
+    //   BOSS: the live state frame (their pipeline content-norms per frame).
+    //   MONSTER: the live STATIC BASE sprite — drawMonster's refImg is
+    //   MONSTER_SPRITES[type], never the state frame, so per-state canvas
+    //   dims (e.g. forgewight's 692×640 attack vs 765×708 base) must NOT
+    //   change the box. Live base dims still beat a stale manifest.
+    const _isBoss = ent.group === 'boss';
+    const _bim = _isBoss ? null : baseImg(cur);
+    const fw = _isBoss ? ((img && img.naturalWidth)  || info.w)
+             : ((_bim && _bim.naturalWidth)  || (ent.base && ent.base.w) || info.w);
+    const fh = _isBoss ? ((img && img.naturalHeight) || info.h)
+             : ((_bim && _bim.naturalHeight) || (ent.base && ent.base.h) || info.h);
     let previewH = (_gameBase != null ? _gameBase : baseK(ent)) * sizeFactor(ent.group, fw, fh) * _ps;
     let targetW = previewH * (fw / fh);
     const baseH = (ent.base && ent.base.h) || fh;
     const baseFrac = (ent.base && ent.base.botFrac != null) ? ent.base.botFrac : 0.92;
-    let usedBotFrac = clamp(baseFrac * baseH / fh, 0.3, 1.3);   // game divides base bbox by THIS frame's height
+    // Monsters: the game anchors every state at the BASE bbox-bottom fraction
+    // (dyOffset = -(bboxBottomY+1)/srcH × targetH, base dims) — no per-frame
+    // division. Bosses keep the ported per-frame behaviour.
+    let usedBotFrac = _isBoss ? clamp(baseFrac * baseH / fh, 0.3, 1.3)
+                              : clamp(baseFrac, 0.3, 1.3);
     // v0.29.x — game content-norm (see block above): rescale frames whose body
     // deviates from the idle reference + re-anchor at the frame's own content
     // bottom; then the per-type post-norm attack multiplier.
     const _nm = contentNorm(cur, ent.group, st, img, fh, frames && frames.idle);
     if (_nm) { previewH *= _nm.scale; targetW *= _nm.scale; usedBotFrac = _nm.botFrac; }
-    if (st === 'attack' && ent.group === 'boss' && ATK_SCALE[cur]) { previewH *= ATK_SCALE[cur]; targetW *= ATK_SCALE[cur]; }
+    if (st === 'attack' && _isBoss && ATK_SCALE[cur]) { previewH *= ATK_SCALE[cur]; targetW *= ATK_SCALE[cur]; }
+    // Monster attack-box multiplier (_ATK_FRAME_SCALE) — applied at the DRAW
+    // (box + top offset), NOT here: previewH stays the unit basis for calib
+    // dx/dy and the atk-hitbox fractions, mirroring the game where _visW/_visH
+    // are stamped before the multiplier.
+    const atkMul = (!_isBoss && st === 'attack' && ATK_FRAME_SCALE[cur]) || 1;
     // v0.29.x — diagnostics for the consolidated Game-metrics card + on-stage
     // dimension labels (all the inputs that produced this on-screen size).
     var _diag = {
@@ -285,7 +328,7 @@
       sf: +sizeFactor(ent.group, fw, fh).toFixed(3),
       normScale: _nm ? +_nm.scale.toFixed(3) : 1,
       contentH: (function () { const bx = img && frameBoxes(img); return bx ? (bx.bottom - bx.top + 1) : null; })(),
-      atkScale: (st === 'attack' && ent.group === 'boss' && ATK_SCALE[cur]) ? ATK_SCALE[cur] : 1,
+      atkScale: (st === 'attack' && _isBoss && ATK_SCALE[cur]) ? ATK_SCALE[cur] : atkMul,
     };
     // world-px -> preview-px ratio for this type (for the key-3 y-offset):
     // game base targetH = hb.h x mul x sizeFactor(base) x scale; preview base
@@ -296,7 +339,7 @@
       ? DISPLAY_H / (hb.h * (ent.group === 'boss' ? (hb.mul || 2) : 1.5) * sizeFactor(ent.group, (ent.base && ent.base.w) || info.w, baseH))
       : 1;
     const yoffPx = plantYOff(cur) * pxRatio;
-    return { previewH, targetW, usedBotFrac, yoffPx, diag: _diag };
+    return { previewH, targetW, usedBotFrac, yoffPx, atkMul, diag: _diag };
   }
   // v0.29.x — CONSOLIDATED game metrics for a state (drives the 📐 card + the
   // on-stage dimension labels): everything that produces the in-game size, plus
@@ -308,7 +351,7 @@
     const arr = frames && frames[st];
     return {
       state: st,
-      gameW: Math.round(g.targetW * c.s), gameH: Math.round(g.previewH * c.s),
+      gameW: Math.round(g.targetW * c.s * (g.atkMul || 1)), gameH: Math.round(g.previewH * c.s * (g.atkMul || 1)),   // v0.29.x — monster attack-box multiplier folded into the reported on-screen size
       calibS: +(+c.s).toFixed(3),
       srcW: g.diag ? g.diag.fw : null, srcH: g.diag ? g.diag.fh : null,
       contentH: g.diag ? g.diag.contentH : null,
@@ -333,19 +376,27 @@
     const _cBase = (gameScale && _chb && _chb.h)
       ? _chb.h * (ent.group === 'boss' ? (_chb.mul || 2) : 1.5)
       : baseK(ent);
-    // v0.29.x — live-image dims beat stale manifest dims (see stateGeom).
-    const fw = (img && img.naturalWidth) || info.w, fh = (img && img.naturalHeight) || info.h;
+    // v0.29.x — per-group dims source, matching stateGeom: bosses use the live
+    // state frame (content-norm pipeline); monsters use the live STATIC BASE
+    // sprite (the game's refImg) so per-state canvas dims never change the box.
+    const _isBoss = ent.group === 'boss';
+    const _bim = _isBoss ? null : baseImg(type);
+    const fw = _isBoss ? ((img && img.naturalWidth)  || info.w)
+             : ((_bim && _bim.naturalWidth)  || (ent.base && ent.base.w) || info.w);
+    const fh = _isBoss ? ((img && img.naturalHeight) || info.h)
+             : ((_bim && _bim.naturalHeight) || (ent.base && ent.base.h) || info.h);
     let previewH = _cBase * sizeFactor(ent.group, fw, fh) * _ps;
     let targetW = previewH * (fw / fh);
     const baseH = (ent.base && ent.base.h) || fh;
     const baseFrac = (ent.base && ent.base.botFrac != null) ? ent.base.botFrac : 0.92;
-    let usedBotFrac = clamp(baseFrac * baseH / fh, 0.3, 1.3);
+    let usedBotFrac = _isBoss ? clamp(baseFrac * baseH / fh, 0.3, 1.3) : clamp(baseFrac, 0.3, 1.3);
     // v0.29.x — same content-norm as stateGeom, keyed to the layer's own type +
     // frame (compose passes its current frame + idle set).
     const _nm = contentNorm(type, ent.group, st, img, fh, idleFrames);
     if (_nm) { previewH *= _nm.scale; targetW *= _nm.scale; usedBotFrac = _nm.botFrac; }
-    if (st === 'attack' && ent.group === 'boss' && ATK_SCALE[type]) { previewH *= ATK_SCALE[type]; targetW *= ATK_SCALE[type]; }
-    return { previewH, targetW, usedBotFrac };
+    if (st === 'attack' && _isBoss && ATK_SCALE[type]) { previewH *= ATK_SCALE[type]; targetW *= ATK_SCALE[type]; }
+    const atkMul = (!_isBoss && st === 'attack' && ATK_FRAME_SCALE[type]) || 1;
+    return { previewH, targetW, usedBotFrac, atkMul };
   }
 
   // ===== entity list =====
@@ -421,14 +472,17 @@
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
     // key-3 y-offset rides INSIDE the calib transform, mirroring the game where
     // _lxMobYOff joins dyOffset (which the calib scale wraps).
-    ctx.drawImage(img, -g.targetW / 2, -g.usedBotFrac * g.previewH + (g.yoffPx || 0), g.targetW, g.previewH);
+    // v0.29.x — monster attack-box multiplier: the game scales box dims AND the
+    // whole dyOffset (incl. the key-3 y-off) by _ATK_FRAME_SCALE (_bW/_bH/_bDy).
+    const _am = g.atkMul || 1;
+    ctx.drawImage(img, -g.targetW * _am / 2, (-g.usedBotFrac * g.previewH + (g.yoffPx || 0)) * _am, g.targetW * _am, g.previewH * _am);
     ctx.restore();
     // v0.29.x (per user "show exactly the size and dimensions it displays on
     // the game") — annotate each state with its FINAL in-game render size
     // (calib scale folded in; in gameScale mode 1 stage px == 1 game px) plus
     // the inputs that produced it. Overlay mode labels only the focused state.
     if (!overlay || st === focusState) {
-      const gw = Math.round(g.targetW * c.s), gh = Math.round(g.previewH * c.s);
+      const gw = Math.round(g.targetW * c.s * _am), gh = Math.round(g.previewH * c.s * _am);   // v0.29.x — label shows the true drawn size incl. attack multiplier
       ctx.save();
       ctx.textAlign = 'center';
       ctx.fillStyle = COL[st]; ctx.font = '700 12px system-ui';
