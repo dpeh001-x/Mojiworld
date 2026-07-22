@@ -13359,17 +13359,18 @@ const _PLATFORM_THEME_TINT = {
   coral:  { top:'#ffb08a', body:'#b85f4f' },
 };
 const _PLATFORM_TINT_DEFAULT = { top:'#c9a3ff', body:'#2a1e3c' };
-// v0.29.67 — Per user: town-map platforms take the town's OWN base colour
-// instead of the generic grass theme, so each hub's floor reads as part of
-// its palette. The base colour is the map's first sky band (sky[0]); the
-// lit surface cap keeps it bright, and the body is that same hue mixed
-// toward near-black for the cel-shaded slab. Cached per map id so the hex
-// math runs once, not per-frame. Falls back to the default tint if a town
-// map somehow has no sky array.
-const _TOWN_PLATFORM_TINT_CACHE = {};
-function _townPlatformTint(md) {
+// v0.29.67 — town-map platforms took the town's OWN base colour. v0.29.x — Per
+// user: EVERY map now colours its floor + platforms from its OWN main colour
+// instead of a shared per-biome theme, so each map's slabs read as part of its
+// palette. The main colour is the map's first sky band (sky[0]); the lit surface
+// cap keeps it bright, and the body is that same hue mixed toward near-black for
+// the cel-shaded slab. Cached per map id so the hex math runs once, not
+// per-frame. A map with no usable sky colour falls back to its per-biome floor
+// theme (the old behaviour), then to the default tint.
+const _MAP_PLATFORM_TINT_CACHE = {};
+function _mapPlatformTint(md) {
   const id = (typeof game !== 'undefined' && game.currentMap) ? game.currentMap : (md && (md.id || md.name)) || 'town';
-  if (_TOWN_PLATFORM_TINT_CACHE[id]) return _TOWN_PLATFORM_TINT_CACHE[id];
+  if (_MAP_PLATFORM_TINT_CACHE[id]) return _MAP_PLATFORM_TINT_CACHE[id];
   const sky = md && md.sky;
   const base = (sky && sky.length) ? sky[0] : null;
   let tint;
@@ -13378,9 +13379,10 @@ function _townPlatformTint(md) {
     // the base hue pulled deep toward near-black for contrast + outline.
     tint = { top: _mixHex(base, '#ffffff', 0.12), body: _mixHex(base, '#140a1e', 0.72) };
   } else {
-    tint = _PLATFORM_TINT_DEFAULT;
+    // No explicit main colour → fall back to the per-biome floor theme.
+    tint = (typeof _pickFloorTheme === 'function' ? (_PLATFORM_THEME_TINT[_pickFloorTheme(md)] || _PLATFORM_TINT_DEFAULT) : _PLATFORM_TINT_DEFAULT);
   }
-  _TOWN_PLATFORM_TINT_CACHE[id] = tint;
+  _MAP_PLATFORM_TINT_CACHE[id] = tint;
   return tint;
 }
 // Draw one cute cel-shaded slab: top-rounded, lit surface cap, dark body, a
@@ -81939,10 +81941,12 @@ function drawPlatforms() {
   const _camY = (game.camera && game.camera.y) || 0;
   // v0.29.x — resolve the biome 2-tone palette ONCE per frame (not per platform)
   // for the cute cel-shaded slabs drawn below.
-  // v0.29.67 — town maps colour their platforms from the town's own base
-  // (sky[0]); everything else uses the biome floor theme as before.
-  const _pt = (game.mapData && game.mapData.isTown && !game.mapData.isVoid && typeof _townPlatformTint === 'function')
-    ? _townPlatformTint(game.mapData)
+  // v0.29.67 — town maps coloured their platforms from the town's own base
+  // (sky[0]). v0.29.x — Per user: EVERY non-void map now colours its floor +
+  // platforms from its own main colour (sky[0]); maps with no sky fall back to
+  // the biome floor theme inside _mapPlatformTint.
+  const _pt = (game.mapData && !game.mapData.isVoid && typeof _mapPlatformTint === 'function')
+    ? _mapPlatformTint(game.mapData)
     : (typeof _pickFloorTheme === 'function'
       ? (_PLATFORM_THEME_TINT[_pickFloorTheme(game.mapData)] || _PLATFORM_TINT_DEFAULT)
       : _PLATFORM_TINT_DEFAULT);
