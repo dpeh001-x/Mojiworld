@@ -159,7 +159,7 @@
   // boss content-norm tables (verbatim)
   const SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star']);
   const ATK_NOSHRINK = new Set(['sundered_smith', 'gravitos2star', 'gravitos3star']);
-  const BOSS_ATK_SCALE = { kingKrook: 1.10 };
+  const BOSS_ATK_SCALE = {};   // v0.29.183 — kingKrook 1.10 retired (state-geometry guard)
   const BODYLOCK = new Set(['aetherion', 'aetherion2']);
   const GAME_FRAME_MS = { idle: 130, walk: 80, attack: 48 };
 
@@ -274,6 +274,28 @@
     const scale = Math.max(minScale, Math.min(2.0, ref / box.h));
     return { scale, botFrac: clamp((box.bottom + 1) / infoH, 0.3, 1.3) };
   }
+  // v0.29.183 — per-state geometry lock (game parity: _BOSS_STATE_GEOM_GUARD /
+  // _deriveBossStateGeom). These three ship each state on a different canvas;
+  // medians come from the baked manifest cb so the lock is deterministic on
+  // file:// too. { botFrac, hFrac, sf } in fractions of the state's canvas.
+  const STATE_GEOM_GUARD = new Set(['legosaurus', 'mooma', 'kingKrook']);
+  const _stateGeomCache = new Map();
+  function stateGeomFor(type, st) {
+    const ck = type + ':' + st;
+    const hit = _stateGeomCache.get(ck); if (hit !== undefined) return hit;
+    const ent = MAN[type]; const info = ent && ent.states && ent.states[st];
+    let g = null;
+    if (info && info.cb && info.h) {
+      const bots = [], hs = [];
+      for (const cb of info.cb) if (cb) { bots.push((cb[1] + 1) / info.h); hs.push((cb[1] - cb[0] + 1) / info.h); }
+      if (bots.length >= 3) {
+        bots.sort((a, b) => a - b); hs.sort((a, b) => a - b);
+        g = { botFrac: bots[bots.length >> 1], hFrac: hs[hs.length >> 1],
+              sf: sizeFactor('boss', info.w, info.h) };
+      }
+    }
+    _stateGeomCache.set(ck, g); return g;
+  }
 
   // ---- full game foot-anchor chain (verbatim order) ----
   function gameAnchorY(isBoss, type, flies, previewH, usedBotFrac, isNormed, pxR, yoffPx) {
@@ -322,15 +344,32 @@
     const baseFrac = (ent.base && ent.base.botFrac != null) ? ent.base.botFrac : 0.92;
     const baseH = (ent.base && ent.base.h) || fh;
     let usedBotFrac = isBoss ? clamp(baseFrac * baseH / fh, 0.3, 1.3) : clamp(baseFrac, 0.3, 1.3);
-    // v0.29.181 — canvas-geometry guard REMOVED (per user). The defect class
-    // it patched (boss static on a different canvas than its frames) is now
-    // fixed in the DATA (v0.29.180: statics normalized onto frame canvases)
-    // and enforced at bake time by gen_anim_manifest.mjs's validation — a
-    // mismatch can no longer ship, so the anchor comes straight from the
-    // base bbox with no runtime correction.
-    // boss content-norm + boss attack scale (order: norm → atk → anchor)
-    const nm = contentNorm(type, ent.group, st, img, fh, idleFrames);
-    if (nm) { previewH *= nm.scale; targetW *= nm.scale; usedBotFrac = nm.botFrac; }
+    // v0.29.183 — canvas-geometry guard RESTORED (game parity): the base bbox
+    // row can be impossible for a frame on a smaller canvas (kingKrook attack:
+    // row 1399 on a 731px canvas) — fall back to THIS frame's own box.
+    if (isBoss && baseFrac * baseH >= fh) {
+      const _bx = img && frameBoxes(img);
+      usedBotFrac = clamp(_bx ? (_bx.bottom + 1) / fh : 0.92, 0.3, 1.3);
+    }
+    // v0.29.183 — per-state geometry lock for legosaurus / mooma / kingKrook:
+    // one state-uniform scale (idle-visual height, sizeFactor-aware) + the
+    // state's median-bottom anchor. Replaces the per-frame content-norm for
+    // these types (that norm warped them across their per-state canvases).
+    // boss content-norm + boss attack scale (order: guard → norm → atk → anchor)
+    let nm = null;
+    if (isBoss && STATE_GEOM_GUARD.has(type)) {
+      const _sg = stateGeomFor(type, st), _ig = (st === 'idle') ? _sg : stateGeomFor(type, 'idle');
+      if (_sg && _ig) {
+        const _ss = Math.max(0.4, Math.min(2.6, (_ig.sf * _ig.hFrac) / (_sg.sf * _sg.hFrac)));
+        previewH *= _ss; targetW *= _ss;
+        usedBotFrac = _sg.botFrac;
+        nm = { scale: _ss, botFrac: usedBotFrac };
+      }
+    }
+    if (!nm) {
+      nm = contentNorm(type, ent.group, st, img, fh, idleFrames);
+      if (nm) { previewH *= nm.scale; targetW *= nm.scale; usedBotFrac = nm.botFrac; }
+    }
     if (st === 'attack' && isBoss && BOSS_ATK_SCALE[type]) { previewH *= BOSS_ATK_SCALE[type]; targetW *= BOSS_ATK_SCALE[type]; }
     // monster attack-box multiplier: applied at DRAW (box+anchor), previewH
     // stays the unit basis (game stamps _visW/_visH pre-multiplier)
