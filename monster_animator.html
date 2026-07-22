@@ -232,7 +232,7 @@
         let any = false, solid = false;
         for (let p = y * w * 4 + 3, X = 0; X < w; X++, p += 4) {
           const a = d[p];
-          if (a > 16) { any = true; if (a > 235) { solid = true; break; } }
+          if (a > 64) { any = true; if (a > 235) { solid = true; break; } }
         }
         if (any) { if (cT < 0) cT = y; cB = y; }
         if (solid) { if (bT < 0) bT = y; bB = y; }
@@ -274,28 +274,9 @@
     const scale = Math.max(minScale, Math.min(2.0, ref / box.h));
     return { scale, botFrac: clamp((box.bottom + 1) / infoH, 0.3, 1.3) };
   }
-  // v0.29.183 — per-state geometry lock (game parity: _BOSS_STATE_GEOM_GUARD /
-  // _deriveBossStateGeom). These three ship each state on a different canvas;
-  // medians come from the baked manifest cb so the lock is deterministic on
-  // file:// too. { botFrac, hFrac, sf } in fractions of the state's canvas.
-  const STATE_GEOM_GUARD = new Set(['legosaurus', 'mooma', 'kingKrook']);
-  const _stateGeomCache = new Map();
-  function stateGeomFor(type, st) {
-    const ck = type + ':' + st;
-    const hit = _stateGeomCache.get(ck); if (hit !== undefined) return hit;
-    const ent = MAN[type]; const info = ent && ent.states && ent.states[st];
-    let g = null;
-    if (info && info.cb && info.h) {
-      const bots = [], hs = [];
-      for (const cb of info.cb) if (cb) { bots.push((cb[1] + 1) / info.h); hs.push((cb[1] - cb[0] + 1) / info.h); }
-      if (bots.length >= 3) {
-        bots.sort((a, b) => a - b); hs.sort((a, b) => a - b);
-        g = { botFrac: bots[bots.length >> 1], hFrac: hs[hs.length >> 1],
-              sf: sizeFactor('boss', info.w, info.h) };
-      }
-    }
-    _stateGeomCache.set(ck, g); return g;
-  }
+  // v0.29.185 — the v0.29.183/184 per-state geometry lock was removed (game
+  // parity): the affected bosses' frames are rebased onto one canvas with the
+  // character height locked at bake time (scripts/rebase_anim_canvas.mjs).
 
   // ---- full game foot-anchor chain (verbatim order) ----
   function gameAnchorY(isBoss, type, flies, previewH, usedBotFrac, isNormed, pxR, yoffPx) {
@@ -351,31 +332,11 @@
       const _bx = img && frameBoxes(img);
       usedBotFrac = clamp(_bx ? (_bx.bottom + 1) / fh : 0.92, 0.3, 1.3);
     }
-    // v0.29.183 — per-state geometry lock for legosaurus / mooma / kingKrook:
-    // one state-uniform scale (idle-visual height, sizeFactor-aware) + the
-    // state's median-bottom anchor. Replaces the per-frame content-norm for
-    // these types (that norm warped them across their per-state canvases).
     // boss content-norm + boss attack scale (order: guard → norm → atk → anchor)
-    let nm = null;
-    if (isBoss && STATE_GEOM_GUARD.has(type)) {
-      const _sg = stateGeomFor(type, st), _ig = (st === 'idle') ? _sg : stateGeomFor(type, 'idle');
-      if (_sg && _ig) {
-        // v0.29.184 — PER-FRAME character lock (game parity): scale by THIS
-        // frame's own content height so the character measures exactly the
-        // idle-visual height in every frame; the STATE-MEDIAN bottom anchor
-        // keeps grounded frames planted while authored lifts stay positional.
-        const _bx = img && frameBoxes(img);
-        const _fbFrac = (_bx && _bx.bottom > _bx.top) ? (_bx.bottom - _bx.top + 1) / fh : _sg.hFrac;
-        const _ss = Math.max(0.4, Math.min(2.6, (_ig.sf * _ig.hFrac) / (_sg.sf * _fbFrac)));
-        previewH *= _ss; targetW *= _ss;
-        usedBotFrac = _sg.botFrac;
-        nm = { scale: _ss, botFrac: usedBotFrac };
-      }
-    }
-    if (!nm) {
-      nm = contentNorm(type, ent.group, st, img, fh, idleFrames);
-      if (nm) { previewH *= nm.scale; targetW *= nm.scale; usedBotFrac = nm.botFrac; }
-    }
+    // (v0.29.185 — the per-state geometry lock that lived here was removed:
+    // frames are rebased onto one canvas at bake time, see rebase_anim_canvas.mjs.)
+    const nm = contentNorm(type, ent.group, st, img, fh, idleFrames);
+    if (nm) { previewH *= nm.scale; targetW *= nm.scale; usedBotFrac = nm.botFrac; }
     if (st === 'attack' && isBoss && BOSS_ATK_SCALE[type]) { previewH *= BOSS_ATK_SCALE[type]; targetW *= BOSS_ATK_SCALE[type]; }
     // monster attack-box multiplier: applied at DRAW (box+anchor), previewH
     // stays the unit basis (game stamps _visW/_visH pre-multiplier)

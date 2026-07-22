@@ -8882,7 +8882,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.184';
+const GAME_VERSION = 'v0.29.185';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -92284,49 +92284,14 @@ function _deriveBossRefHeight(key, sign) {
   _bossRefContentH.set(key, med);
   return med;
 }
-// v0.29.183 — PER-STATE CANVAS-GEOMETRY GUARD (per user: "implement the
-// previous sprite canvas guards but tailor for legosaurus / kingKrook /
-// mooma so the character never warps in size or floats"). These three ship
-// each animation state on a DIFFERENT canvas (kingKrook idle 1800×1400 vs
-// walk 990×770 vs attack 940×731; legosaurus walk 990×575 vs 940×546 idle;
-// mooma walk 990×729 vs 940×693), which broke BOTH sizing paths at once:
-// sizeFactor (canvas-max ÷ 1024) re-sized the figure per state, and the
-// px-space content-norm compared frame content heights across different
-// canvases (kingKrook's walk saturated its 2.0 clamp → ~2× body). This
-// guard derives, per (type, state), the MEDIAN content-bottom and content-
-// height as FRACTIONS of that state's own canvas plus that canvas's
-// sizeFactor, then applies ONE state-uniform scale so the median on-screen
-// body height equals the idle set's, anchored at the state's median bottom
-// row. No per-frame rescale — authored squash (Mooma's scrunch) and lifts
-// (her attack spring) survive, grounded frames plant, size cannot pulse.
-const _BOSS_STATE_GEOM_GUARD = new Set(['legosaurus', 'mooma', 'kingKrook']);
-const _bossStateGeom = new Map();
-function _deriveBossStateGeom(key, state) {
-  const ck = key + ':' + state;
-  const hit = _bossStateGeom.get(ck);
-  if (hit) return hit;
-  const set = state === 'attack' ? BOSS_ATTACK_FRAMES[key]
-            : state === 'walk'   ? BOSS_WALK_FRAMES[key]
-            :                      BOSS_IDLE_FRAMES[key];
-  if (!set || !set.length) return null;
-  const bots = [], hs = []; let W = 0, H = 0;
-  for (const im of set) {
-    if (!im || !im.naturalHeight) continue;
-    const b = _spriteContentBox(im);
-    if (b && b.bottom > b.top) {
-      bots.push((b.bottom + 1) / im.naturalHeight);
-      hs.push((b.bottom - b.top + 1) / im.naturalHeight);
-      W = im.naturalWidth; H = im.naturalHeight;
-    }
-  }
-  if (hs.length < 3) return null;              // wait for ≥3 decoded frames (of 9)
-  bots.sort((a, b) => a - b); hs.sort((a, b) => a - b);
-  const g = { botFrac: bots[bots.length >> 1], hFrac: hs[hs.length >> 1],
-              // same clamp band as _drawBossSprite's sizeFactor (BOSS_SIZE_REF 1024)
-              sf: Math.max(0.7, Math.min(1.6, Math.max(W, H) / 1024)) };
-  if (hs.length === set.length) _bossStateGeom.set(ck, g);   // cache once all decoded
-  return g;
-}
+// v0.29.185 — the v0.29.183/184 per-state geometry guard (legosaurus / mooma
+// / kingKrook) was REMOVED: its defect class — states shipping on different
+// canvases with Ludo frame drift — is now fixed in the DATA. Every state of
+// the affected bosses (+ towerArbiter) was rebased onto ONE canvas with the
+// character pre-scaled to the idle-median content height per frame
+// (scripts/rebase_anim_canvas.mjs), and gen_anim_manifest.mjs validates
+// cross-state canvases + character drift at bake time. The generic
+// content-norm below stays as the dormant safety net for all bosses.
 // v0.26.501 — Per-zodiac-sign sprite overrides (per user). `flipX` mirrors the
 // sprite on the x-axis (XOR'd with facing), `sizeMul` scales every animation
 // frame (idle/walk/attack), and `dyPx` pushes the sprite down (applied AFTER
@@ -92423,12 +92388,9 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
     }
     bboxBottomY = sprite._lxBboxSelf;
   }
-  // v0.29.183 — tailored per-state geometry for legosaurus / mooma / kingKrook
-  // (see _BOSS_STATE_GEOM_GUARD): one state-uniform size lock (idle-visual
-  // height, sizeFactor-aware) + the state's median-bottom foot anchor. For
-  // these types this REPLACES the per-frame px-space content-norm below —
-  // that norm is what made them warp between states.
-  let _stateGeom = false;
+  // (v0.29.185 — the tailored per-state geometry branch that lived here was
+  // removed: the affected bosses' frames are rebased onto one canvas with the
+  // character height locked at bake time — see rebase_anim_canvas.mjs.)
   // v0.26.479 — Keep EVERY frame-animated boss a CONSTANT on-screen size across
   // states. Many bosses' attack art draws a smaller body inside the same canvas
   // as idle (audit: 11 of 27 shrank ~10-34% mid-attack — king, mooma,
@@ -92441,43 +92403,11 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
   // already match (zodiac signs, gravitos, legosaurus) are untouched. Scale is
   // clamped 0.5-2.0 so a near-empty frame can't blow the sprite up.
   let _contentNorm = false;
-  if (_animated && !m.zodiacSign && _BOSS_STATE_GEOM_GUARD.has(_metaKey)) {
-    const _gst = _isAttack ? 'attack'
-               : ((typeof _bossMoving === 'function' && _bossMoving(m)) ? 'walk' : 'idle');
-    const _sg = _deriveBossStateGeom(_metaKey, _gst);
-    const _ig = (_gst === 'idle') ? _sg : _deriveBossStateGeom(_metaKey, 'idle');
-    if (_sg && _ig) {
-      // v0.29.184 — PER-FRAME character lock (per user: v0.29.183's state-
-      // median scale still let Ludo's frame-to-frame drift through — the
-      // character must MEASURE the same in every frame, like the old
-      // content-norm delivered). Scale THIS frame by its OWN content height
-      // so the drawn character is exactly the idle-visual height
-      // H* = m.h × mul × sf_idle × hFrac_idle in all 27 frames. The anchor
-      // stays the STATE-MEDIAN bottom row — grounded frames plant, authored
-      // lifts (Mooma's attack spring) survive as position, never as size.
-      // Wider clamp than the content-norm's 0.5–2.0: the cross-canvas sf
-      // ratio alone approaches 1.75 (kingKrook idle 1800px vs attack 940px).
-      const _fb = _spriteContentBox(sprite);
-      const _fbFrac = (_fb && _fb.bottom > _fb.top) ? (_fb.bottom - _fb.top + 1) / srcH : _sg.hFrac;
-      const _ss = Math.max(0.4, Math.min(2.6, (_ig.sf * _ig.hFrac) / (_sg.sf * _fbFrac)));
-      // hit-region stash (_atkMonBox caps to 60% of _visW/_visH) uses the
-      // state-MEDIAN scale so it can't wobble with per-frame drift, while
-      // still tracking the uniform visual (raw targetH under-sized it ~40%
-      // during kingKrook's walk/attack).
-      const _ssMed = Math.max(0.4, Math.min(2.6, (_ig.sf * _ig.hFrac) / (_sg.sf * _sg.hFrac)));
-      m._visW = _lxWholeSize(targetW * _ssMed); m._visH = _lxWholeSize(targetH * _ssMed);
-      targetH = _lxWholeSize(targetH * _ss);
-      targetW = _lxWholeSize(targetW * _ss);
-      bboxBottomY = Math.round(_sg.botFrac * srcH) - 1;
-      _contentNorm = true;           // floor-clamp by the CONTENT bottom below
-      _stateGeom = true;
-    }
-  }
   // v0.29.122 — strict-size bosses run the content-norm on the STATIC sprite
   // path too (see _BOSS_SIZE_STRICT above) so a cached static from another art
   // generation can't render the figure a different size than the frame sets.
   const _sizeStrict = _BOSS_SIZE_STRICT.has(m._gravStarKey || m._phaseSprite || m.type);
-  if (!_stateGeom && (_animated || _sizeStrict)) {
+  if (_animated || _sizeStrict) {
     // v0.26.352 — key the content-norm reference on the ACTUAL sprite being
     // drawn: phase-swap bosses (Aetherion->aetherion2, Gravitos->gravitos2/3)
     // ship a different-sized phase sprite with its own idle/walk/attack set,
