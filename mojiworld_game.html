@@ -8882,7 +8882,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.188';
+const GAME_VERSION = 'v0.29.189';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -32276,9 +32276,28 @@ function _lxPadMenuNav(root, pad) {
     else _lxPadDispatch('escape', true);
   }
 }
+// v0.29.x PERF — controller presence flag. The pad poller runs on its own
+// per-frame rAF; `navigator.getGamepads()` allocates a fresh snapshot array
+// every call and was ~7% of CPU under load even with NO controller attached.
+// The Gamepad API only surfaces a pad after its first button press (which
+// fires `gamepadconnected`), so gating the poll on this flag is lossless —
+// controllers still light up the instant they're used. Steam Input forces
+// polling on separately (desktop configs need it even without a std gamepad).
+let _lxPadPresent = false;
+try {
+  window.addEventListener('gamepadconnected', () => { _lxPadPresent = true; });
+  window.addEventListener('gamepaddisconnected', () => {
+    try { const ps = navigator.getGamepads ? navigator.getGamepads() : []; _lxPadPresent = Array.prototype.some.call(ps, (g) => g && g.connected); }
+    catch (e) { _lxPadPresent = false; }
+  });
+} catch (e) {}
 function _lxPadPoll() {
   try {
     if (typeof navigator === 'undefined' || !navigator.getGamepads) return;
+    // v0.29.x PERF — cheap early-out before the getGamepads() allocation: no
+    // controller connected AND no Steam Input bridge → nothing to poll.
+    const _steamInputOn = _steamAvailable() && window.SteamAPI.input && typeof window.SteamAPI.input.snapshot === 'function';
+    if (!_lxPadPresent && !_steamInputOn) return;
     // Don't fight a focused text field (chat / name entry).
     const ae = document.activeElement;
     if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
@@ -99276,9 +99295,14 @@ function emitProjectileTrails() {
     if (sx + p.w < -80 || sx > W + 80 || p.y + p.h < camY - 80 || p.y > camY + H + 80) continue;
     if (lowFx && (game.time & 1)) continue;
     if (p.owner === 'player') {
-      if (p.skill === 'fire') {
-        // Fireball trail (every frame, unconditional)
-        game.particles.push({
+      if (p.skill === 'fire' && (game.time & 1) === 0) {
+        // v0.29.x PERF — the player fireball trail was the ONLY trail branch
+        // pushing a particle every frame AND bypassing the per-frame particle
+        // budget (every sibling gates on game.time%N + uses the budget). Halve
+        // the emission and route through _budgetedParticlePush so a multishot
+        // fire volley can't flood updateParticles + cap-trim. Visually identical
+        // (a 30 Hz trail still reads as a continuous flame streak).
+        _budgetedParticlePush({
           x: p.x + p.w/2, y: p.y + p.h/2,
           vx: -p.vx * 0.15, vy: -1 - Math.random(),
           life: 20, color: '#ff9944', size: 3,
@@ -102850,7 +102874,18 @@ function loop(time) {
   }
 
   _drawOffscreenThreats();   // v0.26.x -- edge arrows for off-screen boss-tier mobs
-  updateUI();
+  // v0.29.x PERF — HUD at ~30 Hz. updateUI() (HP/MP bars, coins, skill-bar
+  // icons via renderSkillBar → _applySkillIcon, buff row) ran EVERY render
+  // frame — the single biggest controllable cost under load (~25% of CPU),
+  // and pure waste on 120/144 Hz displays. The HUD carries no gameplay-
+  // critical timing, so a 33 ms cadence is imperceptible; the DOM setters are
+  // already skip-if-unchanged, and every event-driven updateUI() call (level
+  // up, cast, buy, equip…) still fires immediately. `time` is the monotonic
+  // rAF timestamp.
+  if (!game._hudNextMs || time >= game._hudNextMs) {
+    game._hudNextMs = time + 33;
+    updateUI();
+  }
   // v0.29.x — DOWNED-banner safety net (per user "the downed is still stuck").
   // The banner is created by _coopDownedTick, which lives in the UPDATE loop —
   // that loop stalls during cinematics/prologue, so a give-up→respawn there
