@@ -27,6 +27,28 @@ async function baseInfo(path) {
   } catch { return null; }
 }
 
+// Per-frame content boxes, mirroring the game's _spriteContentBox /
+// _spriteBodyBox thresholds (alpha>16 = content, alpha>235 = solid body).
+// Baked so the animator's content-normalisation still works when canvas
+// pixel readback is blocked (file:// taint) — [top, bottom, bodyTop, bodyBottom].
+async function frameBox(path) {
+  try {
+    const { data, info } = await sharp(await readFile(path)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const W = info.width, H = info.height, C = info.channels;
+    let cT = -1, cB = -1, bT = -1, bB = -1;
+    for (let y = 0; y < H; y++) {
+      let any = false, solid = false;
+      for (let x = 0; x < W; x++) {
+        const a = data[(y * W + x) * C + 3];
+        if (a > 16) { any = true; if (a > 235) { solid = true; break; } }
+      }
+      if (any) { if (cT < 0) cT = y; cB = y; }
+      if (solid) { if (bT < 0) bT = y; bB = y; }
+    }
+    return cT < 0 ? null : [cT, cB, bT, bB];
+  } catch { return null; }
+}
+
 async function scanGroup(group, dir) {
   // discover entity types from the idle/walk/attack subdirs
   const types = new Set();
@@ -48,12 +70,14 @@ async function scanGroup(group, dir) {
     }
     const states = {};
     for (const st of STATES) {
-      let count = 0; let dims = null;
+      let count = 0; let dims = null; const cb = [];
       while (await exists(join(dir, st, `${type}_${count}.webp`))) {
-        if (count === 0) { try { const mm = await sharp(await readFile(join(dir, st, `${type}_0.webp`))).metadata(); dims = { w: mm.width, h: mm.height }; } catch {} }
+        const fp = join(dir, st, `${type}_${count}.webp`);
+        if (count === 0) { try { const mm = await sharp(await readFile(fp)).metadata(); dims = { w: mm.width, h: mm.height }; } catch {} }
+        cb.push(await frameBox(fp));
         count++;
       }
-      if (count) states[st] = { count, ...(dims || {}), dir: `Sprites/${group === 'boss' ? 'bosses' : 'monsters'}/${st}/${type}` };
+      if (count) states[st] = { count, ...(dims || {}), dir: `Sprites/${group === 'boss' ? 'bosses' : 'monsters'}/${st}/${type}`, cb };
     }
     if (Object.keys(states).length) out[type] = { group, base, basePath, states };
   }

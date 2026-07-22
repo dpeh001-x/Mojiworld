@@ -110,7 +110,7 @@
   <div id="toast"></div>
   <!-- shared DATA files — the game loads these same files; that sharing IS the parity guarantee -->
   <script src="anim_calib.js?v=14"></script>
-  <script src="anim_calib_manifest.js?v=13"></script>
+  <script src="anim_calib_manifest.js?v=14"></script>
   <script src="mob_offsets.js?v=13"></script>
   <script src="monster_hitboxes.js?v=13"></script>
   <script>
@@ -199,6 +199,25 @@
   }
 
   // ---- boss content-norm (verbatim port of _drawBossSprite's pass) ----
+  // Pixel readback FAILS on file:// pages (canvas taint) — that silently
+  // disabled the norm and previewed boss walk/attack ~40% small (the King
+  // Doopa screenshot bug). Fallback: per-frame content boxes baked into the
+  // manifest by gen_anim_manifest.mjs (img.__mcb, stamped at frame load).
+  let taintSeen = false;
+  function noteTaint() {
+    if (taintSeen) return; taintSeen = true;
+    try {
+      const el = document.createElement('div');
+      el.style.cssText = 'position:fixed;top:44px;left:50%;transform:translateX(-50%);background:#3a2b12;border:1px solid #ff9e3d;color:#ffd9a8;padding:6px 14px;border-radius:8px;font-size:11px;z-index:99';
+      el.textContent = 'Pixel readback blocked (file:// page) — using content boxes baked in the manifest. Preview stays game-exact.';
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 12000);
+    } catch (_) {}
+  }
+  function mcbFallback(img) {
+    const b = img.__mcb;
+    return b ? { top: b[0], bottom: b[1], bodyTop: b[2] == null ? -1 : b[2], bodyBottom: b[3] == null ? -1 : b[3] } : null;
+  }
   function frameBoxes(img) {
     if (img.__nboxes !== undefined) return img.__nboxes;
     if (!img.complete || !img.naturalWidth) return null;
@@ -219,7 +238,7 @@
         if (solid) { if (bT < 0) bT = y; bB = y; }
       }
       return (img.__nboxes = (cT < 0 ? null : { top: cT, bottom: cB, bodyTop: bT, bodyBottom: bB }));
-    } catch (e) { return (img.__nboxes = null); }
+    } catch (e) { noteTaint(); return (img.__nboxes = mcbFallback(img)); }
   }
   function _boxH(img, useBody, srcH) {
     const bx = frameBoxes(img); if (!bx) return null;
@@ -472,6 +491,7 @@
       for (let i = 0; i < info.count; i++) {
         const img = new Image();
         img.src = `${info.dir}_${i}.webp`;
+        if (info.cb && info.cb[i]) img.__mcb = info.cb[i];   // baked content box — file:// taint fallback
         out[st].push(img);
       }
     }
