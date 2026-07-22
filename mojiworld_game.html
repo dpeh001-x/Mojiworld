@@ -8882,7 +8882,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.186';
+const GAME_VERSION = 'v0.29.187';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -91895,7 +91895,7 @@ const _BOSS_ATK_NOSHRINK = new Set(['sundered_smith', 'gravitos2star', 'gravitos
 // STATIC-sprite path too (not just animation frames), so a stale-cached
 // static from a different art generation (old fill 0.667 vs new 0.585 after
 // the v0.29.100 regen) can't draw the figure 12-14% off next to the frames.
-const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star']);
+const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star', 'gravitospunch']);
 // v0.26.x — Per-type ATTACK-frame size MULTIPLIER, applied on top of the
 // content-normalised size in _drawBossSprite (so the attack pose reads bigger
 // than idle/walk while staying foot-anchored). Distinct from _BOSS_ATK_UNIFORM
@@ -91926,6 +91926,13 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
   // in drawMonster; registered here so their static + bbox meta load.
   'gravitos2star',
   'gravitos3star',
+  // v0.29.x — Gravitos form-1 "GRAVITY CRUSH" punch set. A dedicated 9-frame
+  // powerful-punch sequence (Sprites/bosses/attack/gravitospunch_0..8.webp)
+  // drawn via the _gravStarKey override while form-1 casts Gravity Crush —
+  // played ONCE across the pattern window (see _gravitosPunchFrame). Registered
+  // here so the frames + static pose load; idle/walk sets don't exist (the key
+  // is only ever active mid-attack).
+  'gravitospunch',
   // v0.25.812 — Sundered Smith Lv 45 mini-boss (added in v0.25.809).
   // Authored sprite landed in Sprites/bosses/sundered_smith.png.
   'sundered_smith',
@@ -92034,6 +92041,22 @@ const BOSS_ATTACK_FRAMES = Object.create(null);
 _loadBossFrames(BOSS_ATTACK_FRAMES, 'attack');
 const _BOSS_ATK_FRAME_MS = 48;   // v0.26.645 — shorter inter-frame gap for a smoother/faster attack loop (~0.43s/9-frame cycle, was 70ms/0.63s)
 function _bossAttackFrame(key) { return _bossLoopFrame(BOSS_ATTACK_FRAMES[key], _BOSS_ATK_FRAME_MS); }
+// v0.29.x — Gravitos form-1 GRAVITY CRUSH punch. Plays the 9-frame punch ONCE
+// across the pattern's 1500 ms window, driven by m.patternTimer instead of the
+// generic 48 ms wall-clock loop (which would replay the punch ~3.5×): windup
+// (fist charge) over the 0-500 ms telegraph, the punch extends right as the
+// crush columns spawn at ~500 ms, follow-through + recovery to the pattern end.
+// Returns null until frames decode — caller falls back to the regular attack set.
+function _gravitosPunchFrame(m) {
+  const frames = BOSS_ATTACK_FRAMES['gravitospunch'];
+  if (!frames) return null;
+  let n = frames._readyN || 0;
+  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
+  frames._readyN = n;
+  if (n === 0) return null;
+  const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / 1500));
+  return frames[Math.min(n - 1, Math.floor(t * n))];
+}
 
 // === BOSS IDLE ANIMATION (v0.26.314) === optional 4-frame gentle idle loop per
 // boss, from Sprites/bosses/idle/<type>_0..3.webp. Played (slower than the
@@ -93482,11 +93505,20 @@ function drawMonster(m) {
     if (m._phaseSprite === 'gravitos3' && _bossAttackFrame('gravitos3star')) m._gravStarKey = 'gravitos3star';
     else if (m._phaseSprite === 'gravitos2' && _bossAttackFrame('gravitos2star')) m._gravStarKey = 'gravitos2star';
   }
+  // v0.29.x — form-1 GRAVITY CRUSH punch: while base-form Gravitos (no phase
+  // sprite — the art is form-1) casts 'crush', swap to the dedicated 9-frame
+  // punch set via the same override key. _gravitosPunchFrame (in the attack-img
+  // pick below) plays it once across the pattern window. Falls through to the
+  // regular attack set until the punch frames decode.
+  if (m.type === 'gravitos' && !m._phaseSprite && m.patternState === 'crush' && _gravitosPunchFrame(m)) {
+    m._gravStarKey = 'gravitospunch';
+  }
   const _spriteKey = m._gravStarKey || m._phaseSprite || m.type;
   // v0.26.310 — prefer the 4-frame attack animation when its frames have
   // decoded; otherwise the single static attack pose, then idle.
   const _bossAttackImg = _bossAttacking
-    ? (_bossAttackFrame(_spriteKey) || BOSS_ATTACK_SPRITES[_spriteKey])
+    ? ((_spriteKey === 'gravitospunch' && _gravitosPunchFrame(m))
+       || _bossAttackFrame(_spriteKey) || BOSS_ATTACK_SPRITES[_spriteKey])
     : null;
   // v0.26.314/322 — when not attacking: walk loop while moving, else idle loop,
   // else the static sprite.
