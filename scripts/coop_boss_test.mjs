@@ -58,7 +58,7 @@ try {
     // clear mobs so nothing else interferes
     game.monsters.length = 0;
     let b = null;
-    try { b = spawnMonster(1900, player.y, 'mushmom', true); } catch (e) { return { err: String(e) }; }
+    try { b = spawnMonster(1900, player.y, 'mooma', true); } catch (e) { return { err: String(e) }; }
     if (!b) return { err: 'no boss spawned' };
     b.currentHp = b.maxHp = 999999;
     const hostBefore = { x: player.x, hp: player.hp, vx: player.vx };

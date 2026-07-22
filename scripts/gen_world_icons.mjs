@@ -77,7 +77,7 @@ const REGIONS = {
   lavaCavern:        'a cute glowing molten lava blob with a small flame and orange cracks',
   octopusGrotto:     'an adorable round purple octopus with big friendly eyes and curly tentacles',
   sauroSlope:        'a cute chubby green baby dinosaur with tiny back plates',
-  koopaThrone:       'a cute round turtle with a shiny spiky green shell',
+  krookThrone:       'a cute round turtle with a shiny spiky green shell',
   tidalLagoon:       'a cute curling turquoise ocean wave with a little spiral seashell',
   graniteBluffs:     'a cute rounded grey boulder with a patch of green moss on top',
   thunderPlateau:    'a cute dark storm cloud with a bright yellow lightning bolt',

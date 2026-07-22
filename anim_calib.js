@@ -206,7 +206,7 @@ window.LX_ANIM_CALIB = {
       "dy": 0.01
     }
   },
-  "blockRexy": {
+  "legosaurus": {
     "idle": {
       "s": 0.8,
       "dx": 0,
@@ -315,7 +315,7 @@ window.LX_ANIM_CALIB = {
       "dy": 0
     }
   },
-  "mushmom": {
+  "mooma": {
     "idle": {
       "s": 1,
       "dx": 0,
@@ -476,7 +476,7 @@ window.LX_ATK_HITBOX = {
       "oy": -0.0045
     }
   },
-  "blockRexy": {
+  "legosaurus": {
     "idle": {
       "w": 0.6764,
       "h": 0.6955,
@@ -616,7 +616,7 @@ window.LX_ATK_HITBOX = {
       "oy": 0.0136
     }
   },
-  "koopaKing": {
+  "kingKrook": {
     "idle": {
       "w": 0.6455,
       "h": 0.6,
@@ -636,7 +636,7 @@ window.LX_ATK_HITBOX = {
       "oy": -0.0136
     }
   },
-  "mushmom": {
+  "mooma": {
     "idle": {
       "w": 0.5052,
       "h": 0.7182,

@@ -8,7 +8,7 @@
 // with: node scripts/normalize_boss_attack.mjs --dir idle
 //
 //   node scripts/generate_boss_idle_anim.mjs                 # dry-run list
-//   node scripts/generate_boss_idle_anim.mjs --only koopaKing --generate
+//   node scripts/generate_boss_idle_anim.mjs --only kingKrook --generate
 //   node scripts/generate_boss_idle_anim.mjs --generate      # all (skips done)
 //
 // Needs LUDO_API_KEY. Skips a boss whose 4 idle frames already exist (--force).
@@ -36,13 +36,13 @@ const MOTION_PROMPT =
   'position, does not zoom, step, lunge, or rescale; only soft idle motion.' + FACING;
 const MOTION_OVERRIDES = {
   // v0.29.136 — new art: quadruped brick-built stegosaurus (green bricks, red back plates).
-  blockRexy: 'the brick-built toy stegosaurus idles in place — slow heavy breathing, the chunky brick belly rises and falls, the red back-plates sway ever so slightly, the tail tip swings gently, an occasional grumpy blink. It stays a FOUR-LEGGED quadruped standing on all fours: do NOT stand it up on two legs, do NOT add arms. Stays the EXACT same size and position; no zoom, no rescale; the brick construction stays rigid and intact.' + FACING,
-  // v0.29.x — Queen Shroomaloo (new user-dropped art): chubby cream body, big
+  legosaurus: 'the brick-built toy stegosaurus idles in place — slow heavy breathing, the chunky brick belly rises and falls, the red back-plates sway ever so slightly, the tail tip swings gently, an occasional grumpy blink. It stays a FOUR-LEGGED quadruped standing on all fours: do NOT stand it up on two legs, do NOT add arms. Stays the EXACT same size and position; no zoom, no rescale; the brick construction stays rigid and intact.' + FACING,
+  // v0.29.x — Mooma (new user-dropped art): chubby cream body, big
   // domed pink cap with light spots, two tiny stubby arms, little nub-feet.
-  mushmom: 'the big cute mushroom idles IN PLACE — its chubby cream body breathes with a gentle squishy squash-and-stretch, the large pink domed cap sways ever so slightly while its light spots shimmer, its two tiny stubby arms sway at its sides, and it gives an occasional happy blink. CRITICAL: the BODY and CAP stay the EXACT same size, scale and position in EVERY frame — do NOT zoom, enlarge, grow, shrink or lean toward the camera; the silhouette outline stays virtually identical with only tiny soft idle motion. It does NOT walk, hop or attack.' + FACING,
+  mooma: 'the big cute mushroom idles IN PLACE — its chubby cream body breathes with a gentle squishy squash-and-stretch, the large pink domed cap sways ever so slightly while its light spots shimmer, its two tiny stubby arms sway at its sides, and it gives an occasional happy blink. CRITICAL: the BODY and CAP stay the EXACT same size, scale and position in EVERY frame — do NOT zoom, enlarge, grow, shrink or lean toward the camera; the silhouette outline stays virtually identical with only tiny soft idle motion. It does NOT walk, hop or attack.' + FACING,
   octobaby: 'the octopus idles in place — gentle breathing, tentacles sway softly, an occasional slow blink behind the shades. Stays the EXACT same size and position; no zoom, no rescale.' + FACING,
-  // v0.29.136 — DoopaKing (red lizard king, replaces the old turtle art).
-  koopaKing: 'the chubby red crocodile-lizard king idles in place — slow heavy breathing, the big cream belly rises and falls, his purple fur-trimmed royal cape sways gently, claws flex subtly on the ground, an occasional slow regal blink; the gold crown stays firmly on his head. Stays the EXACT same size and position; no zoom, no rescale.' + FACING,
+  // v0.29.136 — KrookKing (red lizard king, replaces the old turtle art).
+  kingKrook: 'the chubby red crocodile-lizard king idles in place — slow heavy breathing, the big cream belly rises and falls, his purple fur-trimmed royal cape sways gently, claws flex subtly on the ground, an occasional slow regal blink; the gold crown stays firmly on his head. Stays the EXACT same size and position; no zoom, no rescale.' + FACING,
   // v0.26.321 — gravitos (FORM 1 ONLY) was duplicating/detaching legs. Lock anatomy.
   gravitos: 'the cosmic-energy golem idles in place — gentle breathing, a slight sway, the chest core softly pulses and the arms flex subtly. It is ONE single connected body with EXACTLY two arms and two legs all attached to the torso; do NOT add, duplicate, split, mirror, or detach any limbs, and no floating body parts — the full body stays intact.' + FACING,
 };

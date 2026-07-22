@@ -10,7 +10,7 @@
 // fallback when frames are absent.
 //
 //   node scripts/generate_boss_attack_anim.mjs                 # dry-run list
-//   node scripts/generate_boss_attack_anim.mjs --only koopaKing --generate
+//   node scripts/generate_boss_attack_anim.mjs --only kingKrook --generate
 //   node scripts/generate_boss_attack_anim.mjs --generate      # all (skips done)
 //
 // Needs LUDO_API_KEY. Skips a boss whose 4 frames already exist (unless --force).
@@ -47,12 +47,12 @@ const MOTION_PROMPT =
   'position, does not zoom, lunge, or rescale; only its mouth/limbs move and ' +
   'elemental energy / effects charge and burst around it.' + FACING;
 const MOTION_OVERRIDES = {
-  // v0.29.x — Queen Shroomaloo (new art). In-place spore-poof, NOT a beam — a
+  // v0.29.x — Mooma (new art). In-place spore-poof, NOT a beam — a
   // facing-agnostic charge close around its own cap can never read "wrong way".
-  mushmom: 'the big cute mushroom attacks IN PLACE — it squashes down and scrunches, then springs up and flares its large pink cap while a small burst of glowing pink spores puffs outward CLOSE around its own cap (a short spore-poof, NOT a beam or projectile crossing the frame), then settles back to its stance, in a smooth even-spaced loop. CRITICAL: the BODY and CAP stay the EXACT same size, scale and centered position in EVERY frame — do NOT zoom, enlarge, shrink or reposition it. Keep the WHOLE mushroom INSIDE the frame with clear margin — never clip the cap or any part at any edge. ONE single connected body; do not duplicate or detach limbs.' + FACING,
+  mooma: 'the big cute mushroom attacks IN PLACE — it squashes down and scrunches, then springs up and flares its large pink cap while a small burst of glowing pink spores puffs outward CLOSE around its own cap (a short spore-poof, NOT a beam or projectile crossing the frame), then settles back to its stance, in a smooth even-spaced loop. CRITICAL: the BODY and CAP stay the EXACT same size, scale and centered position in EVERY frame — do NOT zoom, enlarge, shrink or reposition it. Keep the WHOLE mushroom INSIDE the frame with clear margin — never clip the cap or any part at any edge. ONE single connected body; do not duplicate or detach limbs.' + FACING,
   octobaby: 'the octopus stays the EXACT same size and position; only its mouth opens into a roar and four small glowing status orbs (toxic purple, ice cyan, silence amber, shock yellow) charge in around its tentacle tips. Do not zoom or rescale the character.' + FACING,
-  // v0.29.136 — DoopaKing (red lizard king, replaces the old turtle art).
-  koopaKing: 'the chubby red crocodile-lizard king stays the EXACT same size and position; only his huge jaws open wide to ROAR and belch a fireball while his clawed fists raise and slam down, his purple royal cape flaring with the motion; the gold crown stays on his head. Do not zoom or rescale the character.' + FACING,
+  // v0.29.136 — KrookKing (red lizard king, replaces the old turtle art).
+  kingKrook: 'the chubby red crocodile-lizard king stays the EXACT same size and position; only his huge jaws open wide to ROAR and belch a fireball while his clawed fists raise and slam down, his purple royal cape flaring with the motion; the gold crown stays on his head. Do not zoom or rescale the character.' + FACING,
   // v0.26.317/318 — NO long directional beam (the model aimed it backward / in
   // two directions across frames, which breaks once the game mirrors the
   // sprite). A charge-up at the mouth is facing-agnostic, so it can never read
@@ -66,7 +66,7 @@ const MOTION_OVERRIDES = {
   // charge and the energy ring flares.
   aetherion2: 'the golden dragon-warrior raises its clawed hands and brilliant golden energy charges and glows AT ITS OPEN MOUTH and claws, while the swirling golden energy RING around its torso flares brighter and spins faster; ornate gold armor glints and small sparks crackle CLOSE to its body. It stays STANDING UPRIGHT on two legs in the EXACT same compact pose, size, position and facing as the source. Do NOT grow, spread, unfurl, or flare large wings; do NOT add bat-wings or a wide wingspan; keep the SAME TIGHT SILHOUETTE as the source with arms, claws and tail held close to the body. Do NOT emit a long beam or projectile in any direction — keep the energy as a concentrated charge at the mouth/claws. ONE single connected body; do not duplicate, split, or detach any limbs.' + FACING,
   // v0.29.136 — new art: quadruped brick-built stegosaurus (green bricks, red back plates).
-  blockRexy: 'the brick-built toy STEGOSAURUS attacks IN PLACE — it rears its head back with an angry snarl, the red back-plates flaring and rattling, then whips its head forward in a heavy headbutt-roar as a glowing warm energy charges AT ITS MOUTH, tiny brick studs shaking loose motion-lines only. Do NOT emit a long beam or projectile — keep the energy as a small charge at the mouth. It stays a FOUR-LEGGED quadruped: do NOT stand it up on two legs, do NOT add arms or hands. CRITICAL: the BODY stays the EXACT same size, scale and centered position in EVERY frame — do NOT zoom, enlarge, shrink or reposition it; keep the WHOLE creature inside the frame with clear margin. ONE single connected body; do not duplicate or detach parts.' + FACING,
+  legosaurus: 'the brick-built toy STEGOSAURUS attacks IN PLACE — it rears its head back with an angry snarl, the red back-plates flaring and rattling, then whips its head forward in a heavy headbutt-roar as a glowing warm energy charges AT ITS MOUTH, tiny brick studs shaking loose motion-lines only. Do NOT emit a long beam or projectile — keep the energy as a small charge at the mouth. It stays a FOUR-LEGGED quadruped: do NOT stand it up on two legs, do NOT add arms or hands. CRITICAL: the BODY stays the EXACT same size, scale and centered position in EVERY frame — do NOT zoom, enlarge, shrink or reposition it; keep the WHOLE creature inside the frame with clear margin. ONE single connected body; do not duplicate or detach parts.' + FACING,
   // v0.26.321 — gravitos (FORM 1 ONLY) was duplicating/detaching legs at the
   // top of the frame. Lock the anatomy to one intact body.
   gravitos: 'the cosmic-energy golem powers up in place — its chest core flares with bright energy and its arms flex and clench. It is ONE single connected body with EXACTLY two arms and two legs, all attached to the torso; do NOT add, duplicate, split, mirror, or detach any limbs, and no floating body parts — the full body stays intact and in one piece.' + FACING,

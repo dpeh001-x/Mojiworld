@@ -383,7 +383,7 @@ body.push(new Paragraph({ children:[new TextRun('')] }));
 body.push(new Paragraph({ heading:HeadingLevel.HEADING_2, children:[new TextRun('Suggested generation order')] }));
 const bgPri = [
   'town (everdawnCentral) + everdawn_megamall — town hub is the player\'s first impression; both currently fall through to procedural fill.',
-  'koopaThrone — boss arena hero piece; placeholder dungeon undercuts the Bowser-throne identity.',
+  'krookThrone — boss arena hero piece; placeholder dungeon undercuts the Bowser-throne identity.',
   'tower_b1..b10 — 10 expedition floors; bg fields name distinct themes (entry, mirror, tomb, echo, midboss, aether, crystal, bone, storm, finale) but five still ride dungeon.',
   'slimeCave, abyssalTrench, octopusGrotto, lavaCavern — themed combat zones currently sharing the dungeon backdrop.',
   'skyGarden (zodiacDawn), boss (cosmos), void (voidBlack) — cosmic / void-themed zones with distinct palettes baked into other systems.',

@@ -48,7 +48,7 @@ const OVERRIDES = {
     'pattern, four-coloured status orbs (toxic purple, ice cyan, silence amber, ' +
     'shock yellow) charging at each tentacle tip, full storm-cloud aura behind. ' +
     'Keep the identical character design, colours, outline and style as the source.',
-  koopaKing:
+  kingKrook:
     'Same character mid-roar — mouth wide open belching a wide diagonal fireball ' +
     'geyser, eyes glowing pure red, both clawed fists raised, crimson mohawk ' +
     'flames stretched tall, full-body ember shockwave halo. Keep the identical ' +

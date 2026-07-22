@@ -3,7 +3,7 @@
 // Replaces two monster designs that read as protected characters:
 //   seasponge  (alias 'ogsponge') — the old art is a yellow rectangular sponge
 //                                   with lashed eyes: reads as SpongeBob.
-//   koopaKing  (King Koopaloo)    — the old art is a green shell-backed tyrant
+//   kingKrook  (King Koopaloo)    — the old art is a green shell-backed tyrant
 //                                   with a red mohawk: reads as Bowser.
 // Both replacements are designed from scratch to share NO signature element
 // with those characters (form, palette and silhouette all deliberately differ)
@@ -49,8 +49,8 @@ const SPECS = {
       'no trousers, no shoes, no arms, no hands, no legs, no feet. Just a knobbly porous coral mound with a face and ' +
       'a few short stubby coral nubs around its base.',
   },
-  // --- replaces the Bowser-like 'koopaKing' ---------------------------------
-  koopaKing: {
+  // --- replaces the Bowser-like 'kingKrook' ---------------------------------
+  kingKrook: {
     dir: 'bosses',
     desc:
       'an ORIGINAL colossal EMBER DESERT TORTOISE TYRANT boss — a hulking armored reptile colossus standing heavy on ' +

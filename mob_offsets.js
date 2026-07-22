@@ -85,7 +85,7 @@ window.LX_MOB_SCALE_DATA = {
   "blightElder": 1.71,
   "blockGary": 1.06,
   "blockPopo": 1.16,
-  "blockRexy": 0.9,
+  "legosaurus": 0.9,
   "blockRhirhi": 0.84,
   "blockTigreal": 0.95,
   "boneWraith": 1.31,

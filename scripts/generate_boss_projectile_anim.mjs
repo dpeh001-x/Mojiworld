@@ -73,8 +73,8 @@ const PROJ = {
   cancerBubble: { file: 'p_cancerbubble.png', prompt: 'a clawed water-bubble (Cancer) — the translucent bubble surface wobbles and ripples, the crab-claw silhouette inside flickers, tiny bubbles rise and the iridescent sheen shifts.' },
   icePillar:    { file: 'p_icepillar.png',    prompt: 'a jagged ice-spire shard (Capricorn) pointing up/forward — frost facets glint and sparkle, cold vapour wisps curl off it, a pale-cyan icy gleam pulses along the spike.' },
   markedShot:   { file: 'p_markedshot.png',   prompt: 'a blazing marked arrow-star (Sagittarius) pointing right — the orange flame trail flickers and licks, the golden target-star reticle pulses and rotates, hot sparks shed.' },
-  // v0.26.517 — Queen Shroomaloo boss spore-pod (her signature projectile).
-  spore:        { file: 'p_spore.png',         prompt: 'a cute kawaii pink mushroom spore-pod (Queen Shroomaloo) — its chubby round body gently squishes and breathes, the domed cap bobs and wobbles softly, its rosy cheeks and happy face stay adorable, a soft pink glow pulses brighter and dimmer, and a few sparkly heart-shaped spore motes puff and drift off it cheerfully.' },
+  // v0.26.517 — Mooma boss spore-pod (her signature projectile).
+  spore:        { file: 'p_spore.png',         prompt: 'a cute kawaii pink mushroom spore-pod (Mooma) — its chubby round body gently squishes and breathes, the domed cap bobs and wobbles softly, its rosy cheeks and happy face stay adorable, a soft pink glow pulses brighter and dimmer, and a few sparkly heart-shaped spore motes puff and drift off it cheerfully.' },
   // v0.26.518 — King Koopaloo firebomb. Base is m_firebomb.webp; output frames
   // land at anim/firebomb_*.webp (key-named) to match the engine skill 'firebomb'.
   firebomb:     { file: 'm_firebomb.webp',      prompt: 'an explosive fire-bomb (King Koopaloo) — the molten orange-red core pulses and flares brighter and dimmer, flame licks flicker around the casing, hot embers and sparks shed and a heat-haze shimmers off it.' },

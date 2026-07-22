@@ -35,13 +35,13 @@ const MONSTERS = [
   // Celestial / cosmic
   'cherub','seraph','archon','nimbusFox','cosmicMochi',
   // Block-land
-  'blockPopo','blockHupo','blockEle','blockRhirhi','blockGary','blockTigreal','blockRexy',
+  'blockPopo','blockHupo','blockEle','blockRhirhi','blockGary','blockTigreal','legosaurus',
   // Mechanical (Ticket Rush)
   'ticketMech','conductorMech','expressTicketMech',
   // Octopus boss legs
   'octoLegPoison','octoLegFreeze','octoLegSkillLock','octoLegStun',
   // Bosses / named
-  'king','mushmom','aetherion','gravitos','octobaby','koopaKing','mirrorSelf',
+  'king','mooma','aetherion','gravitos','octobaby','kingKrook','mirrorSelf',
   'fatLizard','fatDragon','sundered_smith','goblinScout','goblinMauler','mayo',
   // Story / inner-dimension
   'deranged_kuro','future_lyra','potato_uncle','willeo','young_bloodthirsty_vermillion',
@@ -69,7 +69,7 @@ const MONSTERS = [
 // the game registry (spawns x6, no boss flag) and was mislabeled here, which
 // gave it the weighty boss prompt-tone and a bogus BOSS tag on the review page.
 const BOSSES = new Set([
-  'king','mushmom','aetherion','gravitos','octobaby','koopaKing','mirrorSelf',
+  'king','mooma','aetherion','gravitos','octobaby','kingKrook','mirrorSelf',
   'fatLizard','fatDragon','sundered_smith','brinekraken',
   'deranged_kuro','future_lyra','potato_uncle','willeo',
   'young_bloodthirsty_vermillion','vigil_vermillion','young_confused_barnaby',
