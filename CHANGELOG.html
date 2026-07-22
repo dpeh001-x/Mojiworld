@@ -148,6 +148,40 @@
   <b>Heads-up.</b> An earlier implementation of these phases targeted <code>v0.5.1</code> and was preserved locally at tag <code>phase-1-2-3-on-v0.5.1</code>. This is the rebuild against the current <code>v0.9.8</code> codebase, which had moved substantially (new bosses like Gravitos, minimap/taxi, chibi character rewrite).
 </div>
 
+<h2>v0.29.175 <span class="tag"><span class="pill bug">bug</span> Side jump-pad sprite &mdash; white halo trimmed off the edges</h2>
+<p>Per user &mdash; the background-removal on the new side-view launch pad left a faint white/gray fringe around the silhouette. Defringed: grayish light semi-transparent edge pixels are zeroed (the cyan flame is high-saturation so it&rsquo;s spared, and the black outline&rsquo;s anti-aliasing is dark so it stays crisp), plus a 1&nbsp;px erosion of any remaining near-transparent outer ring. Verified clean against both dark and light backdrops. Same 355&times;512 sprite, drop-in.</p>
+
+<h2>v0.29.174 <span class="tag"><span class="pill feat">feat</span> Side-view jump-pad sprite for every non-Gravitos map</h2>
+<p>Per user &mdash; <em>&ldquo;create a 2D side-scroller style sprite for the non-Gravitos map launchpads.&rdquo;</em> The shared launch-pad art was a top-down runic disc &mdash; correct for the Gravitos arena&rsquo;s overhead camera, but it read wrong in the side-on platformer maps. A new <b>side-view spring launch pad</b> is now the default everywhere else: a runed stone base sitting on the ground, a coiled metal spring, a rounded bounce plate, and a rising cyan energy flame &mdash; drawn in true side elevation so it sits naturally on the platform.</p>
+<ul>
+<li>Generated with Higgsfield (<code>nano_banana_pro</code>), background-removed to a clean cutout, thresholded and trimmed, saved as <code>Sprites/objects/launchpad_pad_side.webp</code> (355&times;512).</li>
+<li>The <b>Gravitos arena keeps its top-down runic disc</b> (it sets <code>launchPadSprite: 'launchpad_pad'</code> explicitly, which still wins); only the default fallback changed to <code>'launchpad_side'</code>, so all nine non-Gravitos launch-pad maps pick up the new art.</li>
+<li>Everything else is unchanged: the per-pad colour glow still tints the sprite to its biome, and the launch-burst flash + arrow-chevron pop still fire on activation.</li>
+</ul>
+<p><b>Verified:</b> the sprite renders at true in-game scale &mdash; anchored on the platform with its runed base on the ground line and the flame rising &mdash; confirmed in an offscreen draw matching <code>drawLaunchPads</code>&rsquo; exact math; <code>node --check</code> clean, zero page errors on boot.</p>
+
+<h2>v0.29.173 <span class="tag"><span class="pill polish">polish</span> Perf micro-pass &mdash; two more redundant recomputations cached</h2>
+<p>Follow-ups from the same hot-path audit, both mechanical and behaviour-identical: <b>updateUI</b> called the (multi-branch) <code>getAtk()</code> twice per frame &mdash; now computed once and reused for the ATK-range readout; and <b>zodiac bosses</b> re-ran a <code>ZODIAC_SIGNS.find()</code> ~3&times; per frame across the update + draw loops &mdash; now memoised on the mob (re-resolves only if the sign changes). <code>node --check</code> clean.</p>
+
+<h2>v0.29.172 <span class="tag"><span class="pill feat">feat</span> Jump pads get real art on every map</h2>
+<p>Per user &mdash; <em>&ldquo;implement sprites for the jump pads.&rdquo;</em> The hyper-jump launch pads rendered as procedural cyan chevrons on every map except the Gravitos arena (the only one that had opted into the sprite). This first pass made the <b>runic launch-disc sprite</b> the default for every jump pad; v0.29.174 above then swapped the non-Gravitos default to the proper side-view sprite.</p>
+<ul>
+<li>Each pad keeps its <b>colour identity</b> &mdash; the per-pad glow halo tints the pad (icy blue, warm gold, etc.), so pads still read at a glance and match their biome.</li>
+<li>The <b>launch burst</b> (flash bloom + <code>launchpad_arrow</code> chevron pop along the fling vector) still fires on every activation.</li>
+<li>The old procedural chevrons remain as the pre-decode fallback, and a map/pad can still force that look explicitly with <code>launchPadSprite: false</code> / <code>sprite: false</code>.</li>
+</ul>
+<p><b>Verified:</b> the sprite (eager-loaded) renders at true in-game scale &mdash; anchored on the platform with the coloured halo &mdash; confirmed in an offscreen draw matching <code>drawLaunchPads</code>&rsquo; exact math; <code>node --check</code> clean, zero page errors on boot.</p>
+
+<h2>v0.29.171 <span class="tag"><span class="pill polish">polish</span> Gameplay performance pass &mdash; less GC churn &amp; fewer GPU stalls in combat</h2>
+<p>A hot-path debugging pass (fan-out static analysis across allocations, Canvas2D cost, projectile/particle, DOM and sprite dimensions) found the frame-time leaks that survived the earlier optimisation rounds. Eleven behaviour-preserving fixes &mdash; identical visuals, less per-frame work, aimed squarely at the &ldquo;laggy when lots is happening&rdquo; frames:</p>
+<ul>
+<li><b>🎯 Attack-box reuse (biggest win).</b> The projectile hit-test built a fresh hitbox object (plus a <code>performance.now()</code> + hitbox-table lookup) for <em>every projectile &times; every monster</em>, every frame. Monster positions are frozen during that pass (knockback only sets velocity), so the box is now memoised per mob per frame &mdash; a bullet-hell of arrows against a swarm collapses P&times;M allocations to at most one per monster.</li>
+<li><b>❄️ Status-tint filter cap.</b> A <code>ctx.filter</code> (the priciest per-mob GPU op) was set on <em>every</em> frozen / burning / stunned mob every frame &mdash; a mass-freeze or mass-burn left 15&ndash;30 filtered blits rendering for seconds. Now capped per frame (12 desktop / 4 in perf mode), mirroring the existing hit-flash budget; the damage-over-time and crowd-control themselves are untouched, only the cosmetic wash on the later-drawn mobs is dropped.</li>
+<li><b>🧮 Zero-alloc combat UI.</b> The buff-row rebuilt a fresh array + per-buff objects + a map/join signature + a scratch object every frame during any buffed fight (30&nbsp;s buffs = constant GC pressure). Now fully pooled &mdash; no allocations while buffs are active.</li>
+<li><b>🏷️ Cached nameplates.</b> The fish, boss and zodiac renderers rebuilt their <code>Lv N · Name</code> string every frame; now reuse a cached label like the standard path. Plus: soul-vortex no longer copies the whole monster array each frame, mushroom mobs stop allocating a dot-table + closures per frame, loot drops stop re-parsing the font per coin, the NPC quest-marker gradient is cached, and the minimap stops re-querying its canvas 15&times;/s.</li>
+</ul>
+<p><b>Verified:</b> <code>node --check</code> clean, zero page errors on boot, and a functional pass confirming the changed functions run and the attack-box memo returns identical boxes within a frame. No visual or gameplay change intended &mdash; purely less work per frame.</p>
+
 <h2>v0.29.170 <span class="tag"><span class="pill bug">bug</span> Gravity Crush stays blue even before the sprite loads (no red flash)</h2>
 <p>Follow-up to v0.29.167 (which flagged Gravity Crush as a blue Gravitos attack). The meteor renderer had a latent fallback: when a hazard was tagged blue but the blue sprite (<code>p_meteor_blue</code> / <code>meteor_marker_blue</code>) hadn&rsquo;t finished decoding, it fell back to the <b>red</b> sprite &mdash; so on a slow load (or if that one file dropped while joining a busy channel) Gravity Crush could still flash red. Blue meteors now <b>never</b> fall back to the red sprite: until the blue art decodes they use the procedural blue meteor + rune, so the attack reads blue from the very first frame. Non-Gravitos meteors are unaffected.</p>
 <p><i>Verified: 6/6 core checks still pass (all three Gravitos patterns tag every hazard blue, control meteor red); plus a fault-injection check &mdash; with the blue sprite forced unavailable, Gravity Crush draws <b>zero</b> red-sprite blits (procedural blue instead).</i></p>

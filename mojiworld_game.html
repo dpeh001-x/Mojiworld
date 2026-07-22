@@ -8882,7 +8882,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.170';
+const GAME_VERSION = 'v0.29.175';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -9303,6 +9303,7 @@ const LX_OBJECTS_FILES_EXPLICIT = {
   // chevron, both with a baked 2px black outline. Color-neutral cyan so the
   // per-pad `color` glow reads on top.
   launchpad_pad:   'launchpad_pad.webp',
+  launchpad_side:  'launchpad_pad_side.webp',   // v0.29.x — side-view spring launch pad (default on non-Gravitos maps)
   launchpad_arrow: 'launchpad_arrow.webp',
 };
 // v0.25.466 — Per-prop bbox metadata. Detects the topmost + bottommost
@@ -46385,6 +46386,19 @@ function _atkMonBox(m) {
   }
   return { x: cx - hw, y: top, w: hw * 2, h: hgt };
 }
+// v0.29.x perf — per-frame memoized _atkMonBox. During updateProjectiles the
+// projectile hit-test calls _atkMonBox(m) for EVERY player-projectile × mob pair,
+// each call allocating a fresh box + doing a performance.now()/_lxAtkHitbox lookup.
+// But mob position + anim state are frozen through that pass (knockback only sets
+// m.vx), so the box is identical across all projectiles the same frame. Cache it
+// on the mob keyed by game.time: the P×M allocations collapse to at most one per
+// distinct mob actually hit-tested, and mobs no projectile reaches cost nothing.
+function _atkMonBoxCached(m) {
+  if (m && m._abFrame === game.time) return m._abBox;
+  const b = _atkMonBox(m);
+  if (m) { m._abFrame = game.time; m._abBox = b; }
+  return b;
+}
 function checkPlatformCollision(entity) {
   const prevOnGround = entity.onGround;
   const prevVy = entity.vy;
@@ -65583,7 +65597,7 @@ function updateProjectiles(dt) {
       for (const m of _liveMobs) {
         if (hitIds.has(m)) continue;
         if (m.currentHp <= 0 || m._dying) continue;   // v0.26.1027 — _liveMobs is a once-built snapshot; skip an intra-frame corpse so a non-piercing shot isn't consumed by it
-        if (aabb(p, _atkMonBox(m))) {
+        if (aabb(p, _atkMonBoxCached(m))) {
           // Apply job enhancement baked into projectile when fired
           const pEnh = p._enh;
           if (game._crT !== game.time) { game._crT = game.time; game._crV = getCrit(); game._crD = getCritDmg(); }   // v0.26.x perf — frame cache
@@ -66856,7 +66870,14 @@ function updateProjectiles(dt) {
       const RADIUS_SQ = RADIUS * RADIUS;
       const _drainTick = (h.tick % 60 === 0);
       // v0.26.x — snapshot so a kill+splice can't skip the next target.
-      for (const m of [...game.monsters]) {
+      // v0.29.x perf — refill a persistent scratch instead of spreading a fresh
+      // array copy EVERY frame the vortex is alive (a multi-second channel).
+      // Identical forward-snapshot semantics (splice-safe), zero per-frame alloc.
+      const _vsc = game._vortexScratch || (game._vortexScratch = []);
+      _vsc.length = 0;
+      for (let _vi = 0; _vi < game.monsters.length; _vi++) _vsc[_vi] = game.monsters[_vi];
+      for (let _vmi = 0; _vmi < _vsc.length; _vmi++) {
+        const m = _vsc[_vmi];
         if (m.currentHp <= 0) continue;
         const dxp = cx - (m.x + m.w/2), dyp = cy - (m.y + m.h/2);
         const distSq = dxp * dxp + dyp * dyp;
@@ -74040,9 +74061,11 @@ function devMobileUnlock() {
 // MINIMAP
 // =========================================================================
 function drawMinimap() {
-  const canvas = document.getElementById('minimap-canvas');
+  // v0.29.x perf — cache the canvas + context refs (was a getElementById +
+  // getContext on every call, ~15 Hz). Self-heals if the node isn't present yet.
+  const canvas = game._mmCanvas || (game._mmCanvas = document.getElementById('minimap-canvas'));
   if (!canvas || !game.mapData) return;
-  const mctx = canvas.getContext('2d');
+  const mctx = game._mmCtx || (game._mmCtx = canvas.getContext('2d'));
   const mw = canvas.width, mh = canvas.height;
   mctx.clearRect(0, 0, mw, mh);
   const worldW = game.mapData.worldWidth || 2000;
@@ -74127,7 +74150,7 @@ function drawMinimap() {
     mctx.strokeRect(game.camera.x * scaleX, 0, W * scaleX, mh);
   }
   // Map name + (on tower maps) floor counter
-  const nameEl = document.getElementById('minimap-name');
+  const nameEl = game._mmNameEl || (game._mmNameEl = document.getElementById('minimap-name'));
   if (nameEl) {
     let label = game.mapData.name || '—';
     if (isVerticalTower) {
@@ -81658,8 +81681,14 @@ function drawLaunchPads() {
     const cx = sx + pw / 2, cy = pad.y;
     const vx = pad.vx || 0, vy = pad.vy != null ? pad.vy : -22;
     const ang = Math.atan2(vy, vx);   // launch direction
-    // per-pad sprite override, else the map default; unset -> procedural.
-    const _spriteKey = pad.sprite || _mapSprite;
+    // per-pad sprite override, else the map default, else the side-view launch
+    // pad. v0.29.x — every jump pad renders as art by default. The default is the
+    // 2D side-scroller SIDE-view sprite ('launchpad_side'); the Gravitos arena
+    // keeps the top-down runic disc via its explicit launchPadSprite:'launchpad_pad'.
+    // A pad/map can still force the procedural look with `sprite: false` /
+    // `launchPadSprite: false`.
+    const _spriteKey = (pad.sprite === false || _mapSprite === false) ? null
+                     : (pad.sprite || _mapSprite || 'launchpad_side');
     const padImg = (_spriteKey && typeof LX_OBJECTS !== 'undefined') ? LX_OBJECTS[_spriteKey] : null;
     const padReady = !!(padImg && padImg.complete && padImg.naturalWidth);
 
@@ -83685,9 +83714,17 @@ function drawNPCs() {
       ctx.strokeStyle = '#0a0612';
       ctx.lineWidth = 6;                          // 3px visible black ring
       ctx.stroke();
-      const qGrad = ctx.createLinearGradient(0, -18, 0, 2);
-      qGrad.addColorStop(0, _qm.colorLight || '#ffffff');
-      qGrad.addColorStop(1, _qm.color);
+      // v0.29.x perf — cache the quest-marker gradient by its fixed colour pair
+      // (was rebuilt per marked NPC every frame). Coords are local, so the CTM
+      // positions the same object correctly under each NPC's translate.
+      const _qmKey = _qm.color + '|' + (_qm.colorLight || '');
+      let qGrad = (game._qmGrad || (game._qmGrad = {}))[_qmKey];
+      if (!qGrad) {
+        qGrad = ctx.createLinearGradient(0, -18, 0, 2);
+        qGrad.addColorStop(0, _qm.colorLight || '#ffffff');
+        qGrad.addColorStop(1, _qm.color);
+        game._qmGrad[_qmKey] = qGrad;
+      }
       ctx.fillStyle = qGrad;
       ctx.fill();
       // shine glint on the bar's shoulder
@@ -89769,6 +89806,9 @@ function _drawDQSnail(m, sx, sy, cx, cy, f, base, shade, acc, accShd, stroke, ev
 }
 
 // ---- MUSHROOM / ORANGE MUSHROOM — dome cap + stubby body ----
+// v0.29.x perf — dot table hoisted to module scope (was a nested array-of-arrays
+// literal + a destructuring forEach closure allocated every frame per mushroom).
+const _MUSH_CAP_DOTS = [[-8, -6, 3], [6, -3, 2.5], [-2, -10, 2]];
 function _drawDQMushroom(m, sx, sy, cx, cy, f, base, shade, acc, accShd, stroke, evil, isOrange) {
   // Body (stem) — rounded trapezoid
   const byTop = sy + 16, byBot = sy + m.h - 2;
@@ -89798,13 +89838,15 @@ function _drawDQMushroom(m, sx, sy, cx, cy, f, base, shade, acc, accShd, stroke,
   };
   _celFillPath(capPath, acc, accShd, cx, capCY, capW);
   _celStroke(capPath, stroke, 2);
-  // Polka dots on cap
+  // Polka dots on cap — v0.29.x perf: indexed loop over the hoisted table, no
+  // per-frame array literal / destructuring closure / dotCol closure.
   ctx.fillStyle = '#ffffff';
-  const dotCol = () => { ctx.strokeStyle = stroke; ctx.lineWidth = 1.2; };
-  [[-8, -6, 3], [6, -3, 2.5], [-2, -10, 2]].forEach(([dx, dy, r]) => {
+  for (let _di = 0; _di < _MUSH_CAP_DOTS.length; _di++) {
+    const _d = _MUSH_CAP_DOTS[_di], dx = _d[0], dy = _d[1], r = _d[2];
     ctx.beginPath(); ctx.arc(cx + dx, capCY + dy, r, 0, Math.PI * 2); ctx.fill();
-    dotCol(); ctx.beginPath(); ctx.arc(cx + dx, capCY + dy, r, 0, Math.PI * 2); ctx.stroke();
-  });
+    ctx.strokeStyle = stroke; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(cx + dx, capCY + dy, r, 0, Math.PI * 2); ctx.stroke();
+  }
   // Eyes on stem
   const eyeY = byTop + 5;
   _celEye(cx - 5, eyeY, 3.5, f, stroke, null, isOrange);
@@ -92982,11 +93024,27 @@ function _drawMonsterSprite(m, sx, sy) {
   // and clears with this function's ctx.restore(). sepia()+hue-rotate()
   // gives a uniform colourise over any sprite palette. Priority:
   // freeze > burn > stun (freeze is the hard CC; it should dominate).
-  if (m.freezeTimer > 0)    ctx.filter = 'sepia(0.85) saturate(3.0) hue-rotate(175deg) brightness(1.10)';
-  else if (m.burnTimer > 0) ctx.filter = (m._dotKind === 'poison')
-    ? 'sepia(0.70) saturate(2.6) hue-rotate(60deg) brightness(1.02)'
-    : 'sepia(0.75) saturate(3.2) hue-rotate(-18deg) brightness(1.05)';
-  else if (m.stunTimer > 0) ctx.filter = 'sepia(0.50) saturate(2.0) hue-rotate(15deg) brightness(1.12)';
+  // v0.29.x perf — cap concurrent status-tint ctx.filter blits per frame. A
+  // ctx.filter forces an off-screen buffer + separate composite pass PER blit
+  // (the priciest per-mob GPU op), and a mass freeze / mass-burn DoT leaves
+  // 15-30 mobs afflicted for SECONDS — so 15-30 filtered blits render every
+  // frame, sustained. Beyond the cap the sprite draws untinted; the DoT/CC
+  // itself is applied in updateMonsters and is unaffected — only the cosmetic
+  // wash is dropped for the later-drawn mobs. Mirrors the hit-flash budget.
+  if (game._statusTintFrame !== game.time) { game._statusTintFrame = game.time; game._statusTintUsed = 0; }
+  const _stCap = (typeof _perfLowFx === 'function' && _perfLowFx()) ? 4 : 12;
+  let _statusTintOn = (m.freezeTimer > 0 || m.burnTimer > 0 || m.stunTimer > 0);
+  if (_statusTintOn) {
+    if (game._statusTintUsed >= _stCap) _statusTintOn = false;
+    else game._statusTintUsed++;
+  }
+  if (_statusTintOn) {
+    if (m.freezeTimer > 0)    ctx.filter = 'sepia(0.85) saturate(3.0) hue-rotate(175deg) brightness(1.10)';
+    else if (m.burnTimer > 0) ctx.filter = (m._dotKind === 'poison')
+      ? 'sepia(0.70) saturate(2.6) hue-rotate(60deg) brightness(1.02)'
+      : 'sepia(0.75) saturate(3.2) hue-rotate(-18deg) brightness(1.05)';
+    else if (m.stunTimer > 0) ctx.filter = 'sepia(0.50) saturate(2.0) hue-rotate(15deg) brightness(1.12)';
+  }
   const _stateImg = sprite ? _monsterStateFrame(m) : null;
   if (_stateImg) {
     // v0.26.351 — Weapon-swing attack frames. A few big melee mobs author their
@@ -93964,7 +94022,12 @@ function drawFishMob(m, sx, sy) {
   ctx.fillStyle = m.isBoss ? '#ff8866' : '#fff';
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 3;
-  const _fishLabel = 'Lv ' + _mobLevel(m) + ' · ' + m.name;
+  // v0.29.x perf — reuse the cached label string (was rebuilt every frame per
+  // sea mob). Isolated _np* keys so this never touches the general path's baked
+  // nameplate sprite cache. Identical rendered text.
+  const _npLv = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);
+  if (m._npLv !== _npLv || m._npName !== m.name) { m._npLv = _npLv; m._npName = m.name; m._npLabel = 'Lv ' + _npLv + ' · ' + m.name; }
+  const _fishLabel = m._npLabel;
   ctx.strokeText(_fishLabel, sx + m.w / 2, sy + m.h + 12);
   ctx.fillText(_fishLabel, sx + m.w / 2, sy + m.h + 12);
 }
@@ -94974,7 +95037,9 @@ function drawOctobaby(m, sx, sy) {
   ctx.fillStyle = '#ff8866';
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 3;
-  const _bossLabel = 'Lv ' + _mobLevel(m) + ' · ' + m.name;
+  const _npLv = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);   // v0.29.x perf — cached label, no per-frame string alloc
+  if (m._npLv !== _npLv || m._npName !== m.name) { m._npLv = _npLv; m._npName = m.name; m._npLabel = 'Lv ' + _npLv + ' · ' + m.name; }
+  const _bossLabel = m._npLabel;
   ctx.strokeText(_bossLabel, cx, sy - 4);
   ctx.fillText(_bossLabel, cx, sy - 4);
 }
@@ -95358,7 +95423,9 @@ function drawKoopaKing(m, sx, sy) {
   ctx.fillStyle = '#ff8866';
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 3;
-  const _zodiacLabel = 'Lv ' + _mobLevel(m) + ' · ' + m.name;
+  const _npLv = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);   // v0.29.x perf — cached label, no per-frame string alloc
+  if (m._npLv !== _npLv || m._npName !== m.name) { m._npLv = _npLv; m._npName = m.name; m._npLabel = 'Lv ' + _npLv + ' · ' + m.name; }
+  const _zodiacLabel = m._npLabel;
   ctx.strokeText(_zodiacLabel, sx + m.w / 2, sy - 4);
   ctx.fillText(_zodiacLabel, sx + m.w / 2, sy - 4);
   ctx.lineWidth = 2;
@@ -95369,7 +95436,11 @@ function drawKoopaKing(m, sx, sy) {
 // Each sign has its own visual silhouette + its own attack set.
 // =========================================================================
 function _zodiacConfig(m) {
-  return ZODIAC_SIGNS.find(s => s.id === m.zodiacSign);
+  // v0.29.x perf — memoise the sign lookup on the mob (was a ZODIAC_SIGNS.find()
+  // ~3x/frame per zodiac boss across the update + draw loops). Re-resolves if the
+  // sign ever changes (it doesn't mid-fight) or the previous lookup missed.
+  if (m._zc && m._zc.id === m.zodiacSign) return m._zc;
+  return (m._zc = ZODIAC_SIGNS.find(s => s.id === m.zodiacSign));
 }
 
 // Starfield glyph backdrop — every zodiac boss gets a pulsing sigil halo.
@@ -100732,6 +100803,8 @@ function drawHazards() {
 
 function drawDrops() {
   if (!game.drops || game.drops.length === 0) return;   // v0.25.451: empty-list early-out
+  ctx.textAlign = 'center';   // v0.29.x perf — hoisted out of the loop (was re-set per drop); font guarded below
+  let _lastDropFont = '';
   for (const d of game.drops) {
     const sx = d.x - game.camera.x;
     const blink = d.life < 100 && Math.floor(d.life / 10) % 2 === 0;
@@ -100742,7 +100815,7 @@ function drawDrops() {
       ctx.fillStyle = '#ffdd44';
       ctx.beginPath(); ctx.arc(sx, d.y, 5, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#aa7700';
-      ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
+      if (_lastDropFont !== 'bold 9px sans-serif') ctx.font = _lastDropFont = 'bold 9px sans-serif';
       ctx.fillText('$', sx, d.y + 3);
     } else if (d.type === 'potion_hp') {
       ctx.fillStyle = '#444'; ctx.fillRect(sx - 3, d.y - 8, 6, 3);
@@ -100762,7 +100835,7 @@ function drawDrops() {
       ctx.beginPath(); ctx.arc(sx, d.y, 14 + glow, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = col;
       ctx.beginPath(); ctx.arc(sx, d.y, 9, 0, Math.PI * 2); ctx.fill();
-      ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
+      if (_lastDropFont !== '14px sans-serif') ctx.font = _lastDropFont = '14px sans-serif';
       ctx.fillText(d.item.icon, sx, d.y + 5);
     }
   }
@@ -101646,19 +101719,33 @@ const BUFF_META = [
   { key: 'comboXp',       icon: '⭐', label: 'Combo XP',     dur: 10000 },
 ];
 
+// v0.29.x perf — persistent scratch for _updateBuffRow so the per-frame rebuild
+// allocates nothing while buffs are active (was: a fresh array + N {meta,timer}
+// literals + a map/join signature + a fresh _bbSeen object EVERY frame during any
+// buffed fight — e.g. Eagle Eye / Lich last 30 s). Slots are pooled and reused;
+// _bbSeen is frame-token stamped instead of reallocated.
+const _buffActive = [];
+let _buffActiveN = 0;
+const _bbSeen = {};
+let _bbToken = 0;
 function _updateBuffRow() {
   const row = (typeof _LX_CACHED_BUFF_ROW !== 'undefined' && _LX_CACHED_BUFF_ROW)
     || (_LX_CACHED_BUFF_ROW = document.getElementById('buff-row'));
   if (!row || !player || !player.buffs) return;
-  // Collect currently-active buffs (timer > 0).
-  const active = [];
+  // Collect currently-active buffs (timer > 0) into the pooled scratch.
+  _buffActiveN = 0;
   for (let i = 0; i < BUFF_META.length; i++) {
     const m = BUFF_META[i];
     const t = player.buffs[m.key] | 0;
-    if (t > 0) active.push({ meta: m, timer: t });
+    if (t > 0) {
+      let slot = _buffActive[_buffActiveN];
+      if (!slot) slot = _buffActive[_buffActiveN] = { meta: null, timer: 0 };
+      slot.meta = m; slot.timer = t;
+      _buffActiveN++;
+    }
   }
   // Toggle the row's visibility based on whether any are active.
-  if (!active.length) {
+  if (!_buffActiveN) {
     if (row.style.opacity !== '0') row.style.opacity = '0';
     // Lazy-clear the row's children — wait until the fade-out finishes
     // before purging DOM so the pills don't snap-disappear.
@@ -101679,11 +101766,13 @@ function _updateBuffRow() {
   if (row.style.opacity !== '1') row.style.opacity = '1';
   // Diff against last keys signature so we only rebuild DOM when the
   // SET of active buffs changes — not on every timer tick.
-  const keys = active.map(a => a.meta.key).join('|');
+  let keys = '';
+  for (let i = 0; i < _buffActiveN; i++) keys += _buffActive[i].meta.key + '|';
   if (row._lastKeys !== keys) {
     row._lastKeys = keys;
     row.innerHTML = '';
-    for (const a of active) {
+    for (let i = 0; i < _buffActiveN; i++) {
+      const a = _buffActive[i];
       const pill = document.createElement('div');
       pill.className = 'moji-buff-pill';
       pill.setAttribute('data-buff', a.meta.key);
@@ -101699,12 +101788,12 @@ function _updateBuffRow() {
   // it drops) and divide by that instead of the static BUFF_META.dur, so the bar
   // always opens at 100% and drains truthfully regardless of rank / Lv10 bonus.
   if (!game._buffBarMax) game._buffBarMax = {};
-  const _bbSeen = {};
-  for (let i = 0; i < active.length && i < pills.length; i++) {
-    const a = active[i];
+  _bbToken++;
+  for (let i = 0; i < _buffActiveN && i < pills.length; i++) {
+    const a = _buffActive[i];
     const t = a.timer;
     const _bk = a.meta.key;
-    _bbSeen[_bk] = 1;
+    _bbSeen[_bk] = _bbToken;
     if (!(game._buffBarMax[_bk] > 0) || t > game._buffBarMax[_bk]) game._buffBarMax[_bk] = t;
     const _den = game._buffBarMax[_bk] || a.meta.dur || 1;
     const pct = Math.max(0, Math.min(100, (t / _den) * 100));
@@ -101714,7 +101803,7 @@ function _updateBuffRow() {
       bar.style.width = pct.toFixed(1) + '%';
     }
   }
-  for (const _bk in game._buffBarMax) { if (!_bbSeen[_bk]) delete game._buffBarMax[_bk]; }
+  for (const _bk in game._buffBarMax) { if (_bbSeen[_bk] !== _bbToken) delete game._buffBarMax[_bk]; }
 }
 let _LX_CACHED_BUFF_ROW = null;
 function _uiSetStyle(el, prop, val) {
@@ -101815,7 +101904,8 @@ function updateUI() {
   const _fmtBig = _FMT_BIG;   // v0.26.x perf — hoisted (see _FMT_BIG above)
   // v0.26.x — round combat stats to whole numbers for the HUD (hoisted above
   // the stat-text gate because the gate's change-signature reads them).
-  const _hAtk = Math.round(getAtk()), _hDef = Math.round(getDef()), _hCrit = Math.round(getCrit());
+  const _atkRaw = getAtk();   // v0.29.x perf — compute the (multi-branch) ATK once; reused by the ATK-range readout below
+  const _hAtk = Math.round(_atkRaw), _hDef = Math.round(getDef()), _hCrit = Math.round(getCrit());
   // v0.26.x (perf) — STAT-TEXT GATE. Every readout/tooltip below is a pure
   // function of these numbers; when none changed since last frame, skip ALL
   // the string building (the _uiSetText guards only deduped the DOM write —
@@ -101898,7 +101988,7 @@ function updateUI() {
   // Attack range shows the 0.85×–1.15× spread that hitMonster's variance
   // path applies to the headline ATK figure.
   if (typeof _hitRateVsLevelGap === 'function') {
-    const _atk = getAtk();
+    const _atk = _atkRaw;   // v0.29.x perf — reuse the ATK computed at the top of updateUI (no second getAtk())
     const _atkLo = Math.max(1, Math.floor(_atk * 0.85));
     const _atkHi = Math.ceil(_atk * 1.15);
     _uiSetText(d['atk-range'], '(' + _atkLo + '–' + _atkHi + ')');
@@ -104714,6 +104804,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     'Sprites/objects/wagon_empty.png',
     'Sprites/objects/well_stone.png',
     'Sprites/objects/launchpad_pad.webp',    // v0.29.x — animated hyper-launch-pad art
+    'Sprites/objects/launchpad_pad_side.webp', // v0.29.x — side-view launch pad (non-Gravitos default)
     'Sprites/objects/launchpad_arrow.webp',
     // v0.25.228 — Every map biome background the game references via
     // BG_IMAGES (line 21083) AND the LXBackgroundScene Phaser preloader
