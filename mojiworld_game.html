@@ -8882,7 +8882,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.187';
+const GAME_VERSION = 'v0.29.188';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -33584,10 +33584,27 @@ function loadState() {
         if (_sg.bossDefeated && Object.prototype.hasOwnProperty.call(_sg.bossDefeated, 'koopaThrone')) {
           if (_sg.bossDefeated.krookThrone == null) _sg.bossDefeated.krookThrone = _sg.bossDefeated.koopaThrone;
           delete _sg.bossDefeated.koopaThrone; }
+        // v0.29.187 (deep debug) — the boss-respawn stamp map is ALSO keyed by
+        // map id; migrate it alongside bossDefeated so the 10-min respawn gate
+        // survives the koopaThrone→krookThrone rename.
+        if (_sg._bossDefeatedAt && Object.prototype.hasOwnProperty.call(_sg._bossDefeatedAt, 'koopaThrone')) {
+          if (_sg._bossDefeatedAt.krookThrone == null) _sg._bossDefeatedAt.krookThrone = _sg._bossDefeatedAt.koopaThrone;
+          delete _sg._bossDefeatedAt.koopaThrone; }
       }
       if (s.player) { _remap(s.player._bossIntrosSeen);
+        // v0.29.187 (deep debug) — recipe-scroll history is keyed by boss type;
+        // remap it too so the Recipe Journal doesn't show raw legacy keys /
+        // split one boss's history across two entries.
+        _remap(s.player.scrollsByBoss);
+        // v0.29.187 (deep debug) — CRITICAL migration fix: saved active-quest
+        // entries track multi-objective kills in `objProgress` (per-target
+        // counters, see the accept/kill paths) — there is NO `objectives` field
+        // on the saved entry (that array lives on the QUESTS definition). The
+        // old guard `if (_q2.objectives)` was never true, so boss-trio quest
+        // progress under the legacy keys was silently orphaned: completed
+        // objectives read as 0 after the rename and had to be re-killed.
         const _qa2 = s.player.quests && s.player.quests.active;
-        if (_qa2) for (const _qk2 in _qa2) { const _q2 = _qa2[_qk2]; if (_q2 && _q2.objectives) _remap(_q2.objectives); } }
+        if (_qa2) for (const _qk2 in _qa2) { const _q2 = _qa2[_qk2]; if (_q2 && _q2.objProgress) _remap(_q2.objProgress); } }
     } catch (e) {}
     _sanitizePlayerSaveNumerics(s.player);
     // v0.26.x audit -- nested numerics the top-level sanitizer missed: a
@@ -60283,11 +60300,21 @@ function bossAI(m, dt, distToPlayer) {
       m.patternState = 'idle';
       // v0.26.1019 — clear every per-pattern fire/announce latch so no pattern
       // stays dead after a phase jump interrupts it mid-cast.
-      m._volleyFired = m._beamFired = m._teleported = m._astralFired = m._astralAnnounced =
-        m._orbsFired = m._orbsAnnounced = m._quakeFired = m._quakeAnnounced = m._tearFired =
-        m._summonedThisPhase = false;
+      // v0.29.187 (deep debug) — this latch list was copy-pasted from
+      // AETHERION's phase reset (volley/beam/teleport/astral/orbs/quake/tear —
+      // none used by Gravitos), so GRAVITOS'S OWN latches were never cleared:
+      // a phase-cross mid-pattern stranded e.g. _crushFired / _slamPrep /
+      // _laserFired true and the FIRST cast of that pattern after every phase
+      // jump silently dudded (guard `!m._crushFired` false -> no columns; the
+      // pattern burned its window and exited, which finally cleared the latch).
+      // Replaced with the real Gravitos latch set, audited from the pattern
+      // blocks below.
+      m._laserFired = m._zipPrep = m._crushFired = m._slamPrep = m._slamHit =
+        m._waveFired = m._bhFired = m._cometsFired = m._ringFired = m._decayFired =
+        m._tendrilSpawned = false;
+      m._tendrilNextIdx = 0; m._tendrilTargets = null;
       m._sgSpawned = m._drainFired = m._drainAnnounced = false;   // v0.26.1026 — these 3 latches were omitted; a phase-cross mid-Singularity/Soul-Drain telegraph left them stuck true -> next cast dudded
-      m._orbsFiredCount = 0; m._rainTicks = 0;
+      m._rainIdx = 0; m._rainTicks = 0;
       if (phase === 2) {
         showToast('🌑 GRAVITOS COLLAPSES — density rises', 'legendary');
         flash(0.5); addShake(10); addHitStop(90);
@@ -64126,6 +64153,16 @@ function killMonster(m) {
     m.stunTimer = 0; m.freezeTimer = 0;
     m.attackTimer = 0; m.attackCooldown = 0;
     m.patternTimer = 0; m.patternState = 'idle';
+    // v0.29.187 (deep debug) — same latch-strand class as the HP-phase reset:
+    // the form ascension interrupted a mid-cast pattern without clearing its
+    // fire latch, dudding that pattern's first cast in the new form. Clear the
+    // full Gravitos latch set here too.
+    m._laserFired = m._zipPrep = m._crushFired = m._slamPrep = m._slamHit =
+      m._waveFired = m._bhFired = m._cometsFired = m._ringFired = m._decayFired =
+      m._tendrilSpawned = false;
+    m._tendrilNextIdx = 0; m._tendrilTargets = null;
+    m._sgSpawned = m._drainFired = m._drainAnnounced = false;
+    m._rainIdx = 0; m._rainTicks = 0;
     m.invulnerable = 1500;  // 1.5 s ascension iframe
     m.hitFlash = 90;
     // Scrub lingering singularity telegraphs from the previous phase
@@ -66675,7 +66712,13 @@ function updateProjectiles(dt) {
             // v0.26.348 — core iframe 120 → 75 frames so the buffed black hole
             // lands ~2 ticks over its 2.4 s life when the player is held in
             // the core (was effectively a single tick).
-            player.invulnerable = Math.max(player.invulnerable, 75);
+            // v0.29.187 (deep debug) — UNIT FIX: player.invulnerable is in
+            // MILLISECONDS (decremented by dt everywhere), but the 75 above was
+            // authored as frames — the intended 1.25 s inter-tick i-frame
+            // collapsed to 75 ms, so the core landed ~8-9 ticks over its 2.4 s
+            // life instead of the designed ~2 (an unavoidable near-kill for
+            // squishy builds). 75 frames @ 60 fps = 1250 ms.
+            player.invulnerable = Math.max(player.invulnerable, 1250);
             player._lastDamageSource = h._sourceLabel || "Gravitos's black hole";
             if (game.damageNumbers) {
               game.damageNumbers.push({
@@ -96322,6 +96365,17 @@ function zodiacBossAI(m, dt, distToPlayer) {
     m.patternTimer = 0;
     m.patternState = 'idle';
     m.phaseFx = 40;
+    // v0.29.187 (deep debug) — SCORPIO BURROW STRAND. This shared reset snaps
+    // any sign to 'idle' mid-pattern, but Scorpio's burrow restores
+    // _noGravity/_invulnBurrow ONLY in its own exit branch — a phase-cross
+    // during the burrow left the boss floating with physics suspended, and (via
+    // a burn/thorns DoT tick crossing the threshold while underground) could
+    // strand _invulnBurrow=true: immune to all non-DoT damage until a later
+    // burrow completed — a near-softlock. Clear the scorpio pattern state here;
+    // these fields are undefined no-ops for every other sign. _stung cleared
+    // too (sting has no entry-clear; a stranded true dudded the next sting).
+    m._noGravity = false; m._invulnBurrow = false; m._burrowGroundY = null;
+    m._stung = false; m._erupted = false;
     // v0.29.74 — PHASE ESCALATION. The phase change is now mechanical, not
     // just a toast: the boss speeds up (P2 +15%, P3 +30% over its authored
     // base — stored once so re-entering a phase can't compound), and erupts a
