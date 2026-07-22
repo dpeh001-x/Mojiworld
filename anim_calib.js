@@ -315,23 +315,6 @@ window.LX_ANIM_CALIB = {
       "dy": 0
     }
   },
-  "koopaKing": {
-    "idle": {
-      "s": 1,
-      "dx": 0,
-      "dy": 0.12
-    },
-    "walk": {
-      "s": 1.64,
-      "dx": 0,
-      "dy": 0.585
-    },
-    "attack": {
-      "s": 1.64,
-      "dx": 0,
-      "dy": 0.565
-    }
-  },
   "mushmom": {
     "idle": {
       "s": 1,
