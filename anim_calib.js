@@ -5,12 +5,6 @@
 // offset from the foot line (+down) — all fractions of rendered sprite height.
 // Missing entries keep the game defaults.
 window.LX_ANIM_CALIB = {
-  // v0.29.x — forgewight attack calib (s:1.87, dy:0.6) REMOVED: it was a
-  // hand-dialed compensation against the animator's pre-fix preview (which
-  // lacked the _ATK_FRAME_SCALE 2.327 multiplier + game anchor). In-game it
-  // stacked ON TOP of the correct table, drawing the attack ~1.87x oversized
-  // and shifted 0.6H down — the "forgewight attack anomaly". Defaults (s:1)
-  // restore the authored constant-body size.
   "goblinMauler": {
     "attack": {
       "s": 1.05,
@@ -213,9 +207,21 @@ window.LX_ANIM_CALIB = {
     }
   },
   "blockRexy": {
-    "idle": { "s": 0.8, "dx": 0, "dy": 0 },
-    "walk": { "s": 0.8, "dx": 0, "dy": 0 },
-    "attack": { "s": 0.8, "dx": 0, "dy": 0 }
+    "idle": {
+      "s": 0.8,
+      "dx": 0,
+      "dy": 0.265
+    },
+    "walk": {
+      "s": 0.8,
+      "dx": 0,
+      "dy": 0.265
+    },
+    "attack": {
+      "s": 0.8,
+      "dx": 0,
+      "dy": 0.265
+    }
   },
   "gravitos2star": {
     "idle": {
@@ -263,9 +269,9 @@ window.LX_ANIM_CALIB = {
       "dy": 0.04
     },
     "attack": {
-      "s": 2.11,
+      "s": 2.34,
       "dx": 0.005,
-      "dy": 0.33
+      "dy": 0.4
     }
   },
   "gravitos3": {
@@ -310,9 +316,21 @@ window.LX_ANIM_CALIB = {
     }
   },
   "koopaKing": {
-    "idle": { "s": 1, "dx": 0, "dy": 0 },
-    "walk": { "s": 1, "dx": 0, "dy": 0 },
-    "attack": { "s": 1, "dx": 0, "dy": 0 }
+    "idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.12
+    },
+    "walk": {
+      "s": 1.64,
+      "dx": 0,
+      "dy": 0.585
+    },
+    "attack": {
+      "s": 1.64,
+      "dx": 0,
+      "dy": 0.565
+    }
   },
   "mushmom": {
     "idle": {
@@ -326,7 +344,7 @@ window.LX_ANIM_CALIB = {
       "dy": 0.305
     },
     "attack": {
-      "s": 1,
+      "s": 1.02,
       "dx": 0,
       "dy": 0.305
     }
@@ -418,17 +436,17 @@ window.LX_ANIM_CALIB = {
   },
   "young_confused_barnaby": {
     "idle": {
-      "s": 0.89,
+      "s": 0.84,
       "dx": 0,
       "dy": 0.015
     },
     "walk": {
-      "s": 0.9,
+      "s": 0.85,
       "dx": 0,
       "dy": 0.015
     },
     "attack": {
-      "s": 1.16,
+      "s": 1.12,
       "dx": 0,
       "dy": 0.015
     }
