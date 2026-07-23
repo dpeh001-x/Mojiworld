@@ -35784,7 +35784,9 @@ function _coopHostApplyDamage(uid, dmg, isCrit, skill) {
   else if (m.zodiacSign === 'libra' && (m._libraOrbsAlive | 0) > 0) d = Math.floor(d * 0.5);
   d = Math.min(d, Math.max(1, Math.floor(m.maxHp || m.currentHp)));       // cap: no single peer packet exceeds one HP bar (anti one-shot)
   m.currentHp -= d;
-  m.hitFlash = Math.max(m.hitFlash | 0, 6);
+  // v0.29.x — was 6 (ms): with dt≈16.7/step the white hit-flash lasted ONE
+  // frame on co-op hits vs 3-6 frames (50-90ms) on solo hits. Match solo.
+  m.hitFlash = Math.max(m.hitFlash | 0, 50);
   if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2 - 8, y: m.y - 6, vy: -2, text: '' + d, life: 30, color: isCrit ? '#ffd24a' : '#fff', size: isCrit ? 18 : 14 });
   if (m.currentHp <= 0) { m.currentHp = 0; try { killMonster(m); } catch (e) {} }
 }
@@ -50846,8 +50848,11 @@ function drawMinions() {
         _botFrac = _summonContentBottomFrac(_sprite);
       }
       const _targetW = Math.round(_targetH * (_srcW / _srcH));
-      const _drawX = sx + mn.w / 2 - _targetW / 2;
-      const _drawY = yOff + mn.h - _targetH * _botFrac + 6 + _SUMMON_PUSH_DOWN;   // content bottom on the foot line (+6px floor nudge, +global push-down)
+      // v0.29.x — round to whole px like the mob/player draw paths
+      // (_lxWholePx discipline): unrounded coords made summons the one
+      // entity class that could land on sub-pixels and shimmer.
+      const _drawX = Math.round(sx + mn.w / 2 - _targetW / 2);
+      const _drawY = Math.round(yOff + mn.h - _targetH * _botFrac + 6 + _SUMMON_PUSH_DOWN);   // content bottom on the foot line (+6px floor nudge, +global push-down)
       // v0.26.x — Per user: flip the sprite to face the move/walk direction
       // (undead summons are authored facing right; mirror when heading left).
       ctx.save();
@@ -63244,7 +63249,8 @@ function hitMonster(m, dmg, isCrit, skill) {
   if (m.uid != null && skill !== '__coop' && typeof _coopFollowingHost === 'function' && _coopFollowingHost()) {
     _coopSendDamage(m, finalDmg, isCrit, skill);
     m.currentHp = Math.max(0, m.currentHp - finalDmg);
-    m.hitFlash = Math.max(m.hitFlash | 0, 6);
+    // v0.29.x — was 6ms (one frame); match the solo 50ms flash duration.
+    m.hitFlash = Math.max(m.hitFlash | 0, 50);
     if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2 - 8, y: m.y - 6, vy: -2, text: '' + finalDmg, life: 30, color: isCrit ? '#ffd24a' : '#fff', size: isCrit ? 18 : 14 });
     return;
   }
@@ -102679,7 +102685,10 @@ function loop(time) {
   if (game._pausedSinceMs) game._pausedSinceMs = 0;
 
   ctx.save();
-  ctx.translate(game.shakeX, game.shakeY);
+  // v0.29.x — snap the shake to whole px: a fractional full-scene translate
+  // resamples EVERY sprite through bilinear filtering for the entire shake
+  // (soft/blurry frames). Integer shake keeps the impact feel, stays crisp.
+  ctx.translate(Math.round(game.shakeX), Math.round(game.shakeY));
 
   ctx.clearRect(-30, -30, W + 60, H + 60);
   drawBackground();
@@ -102692,7 +102701,11 @@ function loop(time) {
   // climbers a sense of height without parallax flicker). Default
   // maps have camera.y === 0 so the translate is a no-op, no
   // behaviour change for the existing 30+ horizontal maps.
-  if (game.camera.y) ctx.translate(0, -game.camera.y);
+  // v0.29.x — whole-px camera Y: entities round their coords in LOCAL space,
+  // so a fractional global Y-translate re-broke pixel alignment for the whole
+  // scene on vertical/tower maps (Frozen Peak, Coral Reef, Abyssal Trench…) —
+  // the one camera axis that wasn't snapped. X is already rounded per-entity.
+  if (game.camera.y) ctx.translate(0, -Math.round(game.camera.y));
   drawPlatforms();
   drawPotholes();      // v0.25.850 — depressions on the ground at pothole x-positions
   drawLaunchPads();    // v0.26.345 — hyper-jump launch pads
