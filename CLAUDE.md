@@ -131,6 +131,17 @@ Behaviour:
 
 If editing the hook, keep it idempotent and always exit 0 so it never blocks session start.
 
+## Animator canonical link (durable)
+
+The bookmarkable animator entry point is the **launcher**:
+`https://raw.githack.com/dpeh001-x/Mojiworld/main/animator.html`
+It resolves main's current commit via the GitHub API and redirects to that
+build's pinned `rawcdn.githack.com/<sha>/monster_animator.html` — immutable,
+so there is no CDN/browser cache window at all. Surface THIS link (not the
+`/main/monster_animator.html` one, which lags ~5 min behind pushes) whenever
+giving the user an animator URL. The animator's build badge links to it
+("latest↗") and must be bumped on every animator change.
+
 ## Animator calibration patches (durable)
 
 The animator's **📋 Copy patch** button copies a one-monster JSON blob tagged
