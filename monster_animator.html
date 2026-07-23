@@ -108,11 +108,20 @@
     <div id="ctrlBody" style="display:none"></div>
   </aside>
   <div id="toast"></div>
-  <!-- shared DATA files — the game loads these same files; that sharing IS the parity guarantee -->
-  <script src="anim_calib.js?v=14"></script>
-  <script src="anim_calib_manifest.js?v=14"></script>
-  <script src="mob_offsets.js?v=13"></script>
-  <script src="monster_hitboxes.js?v=13"></script>
+  <!-- shared DATA files — the game loads these same files; that sharing IS the parity guarantee.
+       v0.29.x — per-LOAD cache-bust (per user "clear cache every time it loads"): every data file
+       is fetched with a fresh timestamp on every page load, so a stale browser/CDN copy of the
+       calib/manifest/offsets/hitboxes can never mix with fresh code or fresh art again. -->
+  <script>
+    (function () {
+      var t = Date.now();
+      var files = ['anim_calib.js', 'anim_calib_manifest.js', 'mob_offsets.js', 'monster_hitboxes.js'];
+      for (var i = 0; i < files.length; i++) {
+        document.write('<scr' + 'ipt src="' + files[i] + '?t=' + t + '"></scr' + 'ipt>');
+      }
+      window.__LX_LOAD_STAMP = '?t=' + t;   // frame URLs reuse the same per-load stamp
+    })();
+  </script>
   <script>
 /* ============================================================================
  * MONSTER ANIMATOR v2 — built from scratch (v0.29.x) around one hard rule:
@@ -194,7 +203,10 @@
     const ent = MAN[type];
     if (!ent || !ent.basePath) return null;
     let im = _baseImgs.get(type);
-    if (!im) { im = new Image(); im.src = ent.basePath + (typeof STAMP === 'string' ? STAMP : ''); _baseImgs.set(type, im); }
+    // v0.29.x — per-load stamp on base sprites too (the old `typeof STAMP` never
+    // resolved here: STAMP was const-scoped to the app module, so bases loaded
+    // unstamped and could serve from a stale cache).
+    if (!im) { im = new Image(); im.src = ent.basePath + (typeof window.__LX_LOAD_STAMP === 'string' ? window.__LX_LOAD_STAMP : ''); _baseImgs.set(type, im); }
     return (im.complete && im.naturalWidth) ? im : null;
   }
 
@@ -317,8 +329,13 @@
     const mul = isBoss ? ((hb && hb.mul) || 2.0) : 1.5;
     const gameBase = (gameScale && hb && hb.h) ? hb.h * mul : null;
     const baseK = DISPLAY_H / sizeFactor(ent.group, (ent.base && ent.base.w) || fw, (ent.base && ent.base.h) || fh);
-    let previewH = (gameBase != null ? gameBase : baseK) * sf * _ps;
-    let targetW = previewH * (fw / fh);
+    // v0.29.x — game-exact whole-px rounding (_lxWholeSize) at the SAME points
+    // the game rounds. Without it the preview drifted 1-2px on chained
+    // multiplier paths (kingKrook walk, towerArbiter attack). Only in game-
+    // scale mode — the normalized tool preview stays fractional.
+    const R = gameBase != null ? ((v) => Math.max(1, Math.round(v))) : ((v) => v);
+    let previewH = R((gameBase != null ? gameBase : baseK) * sf * _ps);
+    let targetW = R(previewH * (fw / fh));
     // anchor fraction: MONSTER = base bbox over base height (game META);
     // BOSS = base bbox row over THIS frame's height (the game divides the
     // base-space bboxBottomY by the current frame's srcH — mixed on purpose).
@@ -336,8 +353,8 @@
     // (v0.29.185 — the per-state geometry lock that lived here was removed:
     // frames are rebased onto one canvas at bake time, see rebase_anim_canvas.mjs.)
     const nm = contentNorm(type, ent.group, st, img, fh, idleFrames);
-    if (nm) { previewH *= nm.scale; targetW *= nm.scale; usedBotFrac = nm.botFrac; }
-    if (st === 'attack' && isBoss && BOSS_ATK_SCALE[type]) { previewH *= BOSS_ATK_SCALE[type]; targetW *= BOSS_ATK_SCALE[type]; }
+    if (nm) { previewH = R(previewH * nm.scale); targetW = R(targetW * nm.scale); usedBotFrac = nm.botFrac; }
+    if (st === 'attack' && isBoss && BOSS_ATK_SCALE[type]) { previewH = R(previewH * BOSS_ATK_SCALE[type]); targetW = R(targetW * BOSS_ATK_SCALE[type]); }
     // monster attack-box multiplier: applied at DRAW (box+anchor), previewH
     // stays the unit basis (game stamps _visW/_visH pre-multiplier)
     const atkMul = (!isBoss && st === 'attack' && ATK_FRAME_SCALE[type]) || 1;
@@ -347,9 +364,10 @@
     const yoffPx = plantYOff(type) * pxR;
     const anchorY = gameAnchorY(isBoss, type, !!(hb && hb.f), previewH, usedBotFrac, !!nm, pxR, yoffPx);
     // draw width follows the state frame's own aspect (game v0.29.160), monsters only
-    const drawW = (!isBoss && img && img.naturalWidth) ? previewH * (img.naturalWidth / img.naturalHeight) : targetW;
+    const drawW = (!isBoss && img && img.naturalWidth) ? R(previewH * (img.naturalWidth / img.naturalHeight)) : targetW;
     return {
       previewH, targetW, drawW, usedBotFrac, anchorY, atkMul, pxR,
+      roundMode: gameBase != null,   // v0.29.x — drawState mirrors the game's whole-px blit when true
       diag: { fw, fh, sf: +sf.toFixed(3), normScale: nm ? +nm.scale.toFixed(3) : 1,
               atkScale: (st === 'attack' && isBoss && BOSS_ATK_SCALE[type]) ? BOSS_ATK_SCALE[type] : atkMul,
               contentH: (function () { const bx = img && frameBoxes(img); return bx ? (bx.bottom - bx.top + 1) : null; })() },
@@ -499,8 +517,13 @@
   // with fresh code produced phantom size variance (a user screenshot showed a
   // content height that no longer existed on disk). The manifest bakes a stamp;
   // every image URL carries it, so a re-bake always busts the cache.
-  const STAMP = (typeof window.LX_ANIM_MANIFEST_STAMP === 'string' && window.LX_ANIM_MANIFEST_STAMP)
-    ? ('?v=' + encodeURIComponent(window.LX_ANIM_MANIFEST_STAMP)) : '';
+  // v0.29.x — per-LOAD stamp (per user "clear cache every time it loads"): every
+  // frame URL carries the page-load timestamp, so stale cached frames can never
+  // mix with fresh code/data. Falls back to the manifest's bake stamp.
+  const STAMP = (typeof window.__LX_LOAD_STAMP === 'string' && window.__LX_LOAD_STAMP)
+    ? window.__LX_LOAD_STAMP
+    : ((typeof window.LX_ANIM_MANIFEST_STAMP === 'string' && window.LX_ANIM_MANIFEST_STAMP)
+      ? ('?v=' + encodeURIComponent(window.LX_ANIM_MANIFEST_STAMP)) : '');
   function loadFrames(ent) {
     const out = {};
     for (const st of STATES) {
@@ -545,8 +568,13 @@
     ctx.translate(cx + c.dx * g.previewH, groundY + c.dy * g.previewH);
     ctx.scale(c.s, c.s);
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    // v0.29.x — game-exact blit rounding: the game draws attack-scaled monster
+    // frames at Math.round(box) and positions with _lxWholePx. Mirror both in
+    // game-scale mode so the on-stage pixels match the game's 1:1.
     const am = g.atkMul || 1, dw = g.drawW != null ? g.drawW : g.targetW;
-    ctx.drawImage(img, -dw * am / 2, g.anchorY * am, dw * am, g.previewH * am);
+    let bw = dw * am, bh = g.previewH * am, bx = -bw / 2, by = g.anchorY * am;
+    if (g.roundMode) { if (am !== 1) { bw = Math.round(bw); bh = Math.round(bh); } bx = Math.round(-bw / 2); by = Math.round(by); }
+    ctx.drawImage(img, bx, by, bw, bh);
     ctx.restore();
     if (!overlay || st === focusState) {
       const gw = Math.round(dw * c.s * am), gh = Math.round(g.previewH * c.s * am);

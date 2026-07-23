@@ -17,15 +17,39 @@ const exists = async (p) => { try { await access(p); return true; } catch { retu
 const STATES = ['idle', 'walk', 'attack'];
 
 // Alpha bbox-bottom fraction of a sprite (mirrors the game's foot anchor).
+// v0.29.x — EXACT mirror of the game's _detectSpriteBboxBottom: alpha > 64
+// (not 16 — low-alpha ghost rows at the canvas bottom of Ludo-generated art
+// fooled the old threshold) and require TWO opaque pixels in a row (single-
+// pixel speckles are noise). The old 16-threshold produced botFrac values a
+// few % below the game's, planting animator previews lower than in-game.
 async function baseInfo(path) {
   try {
     const { data, info } = await sharp(await readFile(path)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
     const W = info.width, H = info.height, C = info.channels;
-    let bottom = 0;
-    for (let y = H - 1; y >= 0; y--) { let hit = false; for (let x = 0; x < W; x++) if (data[(y * W + x) * C + 3] > 16) { hit = true; break; } if (hit) { bottom = y; break; } }
+    let bottom = H - 1, found = false;
+    for (let y = H - 1; y >= 0 && !found; y--) {
+      let run = 0;
+      for (let x = 0; x < W; x++) {
+        if (data[(y * W + x) * C + 3] > 64) { if (++run >= 2) { bottom = y; found = true; break; } }
+        else run = 0;
+      }
+    }
     return { w: W, h: H, botFrac: +(((bottom + 1) / H).toFixed(4)) };
   } catch { return null; }
 }
+
+// v0.29.x — base-sprite filename aliases. KEEP IN SYNC with the game's
+// MONSTER_SPRITE_ALIASES (mojiworld_game.html ~L91437): these types ship
+// their base art under a different filename, and the missing base left the
+// animator on a 0.92 default foot anchor while the game measured the real
+// sprite (grumpsquid previewed 6px low — the Δbot parity failure).
+const BASE_ALIASES = {
+  pearlSprite: 'pearl',
+  seasponge: 'reefmaw',
+  seastar: 'tankstar',
+  grumpsquid: 'sourpus',
+  vigil_vermillion: 'young_bloodthirsty_vermillion',
+};
 
 // Per-frame content boxes, mirroring the game's _spriteContentBox /
 // _spriteBodyBox thresholds (alpha>16 = content, alpha>235 = solid body).
@@ -62,11 +86,15 @@ async function scanGroup(group, dir) {
   }
   const out = {};
   for (const type of types) {
-    // base sprite (for the foot-anchor bbox) — png then webp
+    // base sprite (for the foot-anchor bbox) — png then webp, under the type
+    // key first, then its alias filename (see BASE_ALIASES above).
     let base = null, basePath = null;
-    for (const ext of ['.png', '.webp']) {
-      const p = join(dir, type + ext);
-      if (await exists(p)) { base = await baseInfo(p); basePath = `Sprites/${group === 'boss' ? 'bosses' : 'monsters'}/${type}${ext}`; break; }
+    for (const name of [type, BASE_ALIASES[type]].filter(Boolean)) {
+      for (const ext of ['.png', '.webp']) {
+        const p = join(dir, name + ext);
+        if (await exists(p)) { base = await baseInfo(p); basePath = `Sprites/${group === 'boss' ? 'bosses' : 'monsters'}/${name}${ext}`; break; }
+      }
+      if (base) break;
     }
     const states = {};
     for (const st of STATES) {
