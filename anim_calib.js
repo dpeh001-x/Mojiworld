@@ -210,17 +210,17 @@ window.LX_ANIM_CALIB = {
     "idle": {
       "s": 0.8,
       "dx": 0,
-      "dy": 0
+      "dy": 0.265
     },
     "walk": {
       "s": 0.8,
       "dx": 0,
-      "dy": 0
+      "dy": 0.265
     },
     "attack": {
       "s": 0.8,
       "dx": 0,
-      "dy": 0
+      "dy": 0.265
     }
   },
   "gravitos2star": {
@@ -319,17 +319,17 @@ window.LX_ANIM_CALIB = {
     "idle": {
       "s": 1,
       "dx": 0,
-      "dy": 0
+      "dy": 0.305
     },
     "walk": {
       "s": 1,
       "dx": 0,
-      "dy": 0
+      "dy": 0.305
     },
     "attack": {
       "s": 1.02,
       "dx": 0,
-      "dy": 0
+      "dy": 0.305
     }
   },
   "octobaby": {
@@ -390,9 +390,9 @@ window.LX_ANIM_CALIB = {
       "dy": 0.02
     },
     "walk": {
-      "s": 1,
+      "s": 1.54,
       "dx": 0.0949,
-      "dy": 0.02
+      "dy": 0.4984
     },
     "attack": {
       "s": 1.78,
