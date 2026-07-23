@@ -131,6 +131,21 @@ Behaviour:
 
 If editing the hook, keep it idempotent and always exit 0 so it never blocks session start.
 
+## Animator calibration patches (durable)
+
+The animator's **📋 Copy patch** button copies a one-monster JSON blob tagged
+`LX_ANIM_PATCH:1` (the selected entity's calib + attack hitboxes). When the
+user pastes such a blob in chat, hardbake it with:
+
+```bash
+node scripts/apply_anim_patch.mjs '<pasted json>'
+```
+
+The patch is declarative for its entity (calib block replaced, pure-default
+states dropped; hitbox block replaced, or removed when absent); all other
+entities are untouched. After baking: `node --check anim_calib.js`, commit,
+push per the sync-first rule. Never hand-edit the values in transit.
+
 ## Changelog policy (durable)
 
 **Always update `CHANGELOG.html` whenever a new implementation lands.**
