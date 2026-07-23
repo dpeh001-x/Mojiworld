@@ -8882,7 +8882,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.204';
+const GAME_VERSION = 'v0.29.210';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11830,6 +11830,13 @@ function _lxAnimCalib(type, state) {
     let dx = +e.dx; if (!isFinite(dx)) dx = 0; dx = Math.max(-1.5, Math.min(1.5, dx));
     let dy = +e.dy; if (!isFinite(dy)) dy = 0; dy = Math.max(-1.5, Math.min(1.5, dy));
     res = { s, dx, dy };
+    // v0.29.x — optional per-frame scale array (fs[frameIdx]). Normalises
+    // frame sets whose ART draws the figure at inconsistent sizes between
+    // frames (same canvas, smaller body — e.g. towerArbiter walk/attack).
+    if (Array.isArray(e.fs)) {
+      const _fs = e.fs.map(v => { v = +v; return (v > 0) ? Math.max(0.2, Math.min(5, v)) : 1; });
+      if (_fs.some(v => v !== 1)) res.fs = _fs;
+    }
   }
   (_tc || (_LX_ANIM_CALIB_CACHE[type] = Object.create(null)))[state] = res;
   return res;
@@ -92087,6 +92094,7 @@ function _loadBossFrames(map, subdir, types) {
       img.decoding = 'async';
       img.onerror = () => { /* frame absent — handled by the contiguous-run check */ };
       img.src = 'Sprites/bosses/' + subdir + '/' + type + '_' + i + '.webp';
+      img._lxFi = i;   // frame index — keys the per-frame calib scale (fs)
       arr[i] = img;
     }
     map[type] = arr;
@@ -92657,7 +92665,11 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
     const _bst = _isAttack ? 'attack' : ((typeof _bossMoving === 'function' && _bossMoving(m)) ? 'walk' : 'idle');
     const _bk  = m._phaseSprite || (m.zodiacSign ? ('zodiac_' + m.zodiacSign) : m.type);
     const _bc  = _lxAnimCalib(_bk, _bst);
-    if (_bc.s !== 1 || _bc.dx || _bc.dy) { ctx.translate(_bc.dx * targetH, _bc.dy * targetH); ctx.scale(_bc.s, _bc.s); }
+    // v0.29.x — per-frame scale (fs[frameIdx]) folds into s. Anchored at the
+    // feet like s, so an under-drawn frame grows in place instead of hopping.
+    const _bfs = (_bc.fs && _animated && sprite._lxFi != null && _bc.fs[sprite._lxFi] > 0) ? _bc.fs[sprite._lxFi] : 1;
+    const _bcs = _bc.s * _bfs;
+    if (_bcs !== 1 || _bc.dx || _bc.dy) { ctx.translate(_bc.dx * targetH, _bc.dy * targetH); ctx.scale(_bcs, _bcs); }
   }
   _lxUseEntityImageQuality(ctx);
   // v0.26.248 — Boss sprites now flow through the same lazy cache as

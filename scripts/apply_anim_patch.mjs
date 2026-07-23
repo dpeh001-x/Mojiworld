@@ -36,9 +36,15 @@ const hitbox = JSON.parse(m[3]);
 
 const isDefault = v => +v.s === 1 && +v.dx === 0 && +v.dy === 0;
 const entity = {};
+const hasFs = (a) => Array.isArray(a) && a.some(f => +f !== 1);
 for (const [st, v] of Object.entries(patch.calib)) {
   const e = { s: +v.s, dx: +v.dx, dy: +v.dy };
-  if (!isDefault(e)) entity[st] = e;
+  // per-frame scale array: take the patch's, else preserve the baked one —
+  // patches from animators that predate fs must not silently strip it.
+  const fs = hasFs(v.fs) ? v.fs.map(Number)
+    : (calib[t] && calib[t][st] && hasFs(calib[t][st].fs) ? calib[t][st].fs : null);
+  if (fs) e.fs = fs;
+  if (!isDefault(e) || e.fs) entity[st] = e;
 }
 const before = JSON.stringify({ c: calib[t] || null, h: hitbox[t] || null });
 if (Object.keys(entity).length) calib[t] = entity; else delete calib[t];

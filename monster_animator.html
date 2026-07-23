@@ -77,7 +77,7 @@
       <div class="mut" style="font-size:11px;margin-top:3px">renders EXACTLY what the game renders</div>
       <!-- build badge: bump alongside GAME_VERSION on every animator change,
            so a stale cached copy is identifiable at a glance -->
-      <div style="font-size:11px;margin-top:4px"><span style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.29.206</span>
+      <div style="font-size:11px;margin-top:4px"><span style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.29.210</span>
         <a href="animator.html" title="Cache-proof launcher: resolves main's current commit via the GitHub API and opens that exact build — use this if the badge looks old" style="color:#5b8cff;margin-left:6px">latest&#8599;</a></div>
       <input id="q" placeholder="search… (e.g. doopa, gravitos)" />
     </header>
@@ -484,6 +484,8 @@
       for (const s of STATES) {
         const e = (ls && ls[t] && ls[t][s]) || (C.BAKED_CALIB[t] && C.BAKED_CALIB[t][s]) || DEF();
         out[t][s] = { s: +e.s > 0 ? +e.s : 1, dx: +e.dx || 0, dy: +e.dy || 0 };
+        // per-frame scale array (game parity) — rides along untouched by the sliders
+        if (Array.isArray(e.fs)) out[t][s].fs = e.fs.map(v => +v > 0 ? +v : 1);
       }
     }
     return out;
@@ -625,10 +627,12 @@
     if (!img.complete || !img.naturalWidth) return;
     const g = geomFor(st, img); if (!g) return;
     const c = CALIB[cur][st];
+    // per-frame scale (fs[idx]) folds into s — game parity (see _drawBossSprite)
+    const _pf = (c.fs && c.fs[idx] > 0) ? c.fs[idx] : 1;
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.translate(cx + c.dx * g.previewH, groundY + c.dy * g.previewH);
-    ctx.scale(c.s, c.s);
+    ctx.scale(c.s * _pf, c.s * _pf);
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
     // v0.29.x — game-exact blit rounding: the game draws attack-scaled monster
     // frames at Math.round(box) and positions with _lxWholePx. Mirror both in
@@ -865,7 +869,13 @@
     const CC = A.CALIB(), out = {};
     for (const t of Object.keys(CC)) {
       const st = {};
-      for (const s of A.STATES) { const v = CC[t][s]; if (v && !isDefault(v)) st[s] = { s: +v.s.toFixed(4), dx: +v.dx.toFixed(4), dy: +v.dy.toFixed(4) }; }
+      for (const s of A.STATES) {
+        const v = CC[t][s]; if (!v) continue;
+        const hasFs = Array.isArray(v.fs) && v.fs.some(f => +f !== 1);
+        if (isDefault(v) && !hasFs) continue;
+        st[s] = { s: +v.s.toFixed(4), dx: +v.dx.toFixed(4), dy: +v.dy.toFixed(4) };
+        if (hasFs) st[s].fs = v.fs.map(f => +(+f).toFixed(4));
+      }
       if (Object.keys(st).length) out[t] = st;
     }
     return out;
@@ -1133,7 +1143,10 @@
     const r4 = v => +(+v).toFixed(4);
     const calib = {}, hitbox = {};
     for (const st of A.STATES) {
-      if (C[st]) calib[st] = { s: r4(C[st].s), dx: r4(C[st].dx), dy: r4(C[st].dy) };
+      if (C[st]) {
+        calib[st] = { s: r4(C[st].s), dx: r4(C[st].dx), dy: r4(C[st].dy) };
+        if (Array.isArray(C[st].fs) && C[st].fs.some(f => +f !== 1)) calib[st].fs = C[st].fs.map(r4);
+      }
       if (H[st]) hitbox[st] = { w: r4(H[st].w), h: r4(H[st].h), ox: r4(H[st].ox), oy: r4(H[st].oy) };
     }
     const patch = { LX_ANIM_PATCH: 1, type: cur, calib };
