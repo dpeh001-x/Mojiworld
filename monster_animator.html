@@ -380,6 +380,56 @@
     };
   }
 
+  // ---- edge feather (game parity, v0.29.198) --------------------------------
+  // The GAME softens sprites whose art is clipped at the canvas border
+  // (left/right/top only — bottom is full-bleed feet by design): a one-time
+  // 48px alpha probe per image, then a ~4%-of-draw-size destination-out fade
+  // on ONLY the touched edges. Mirrored here verbatim so the animator's
+  // preview shows exactly what the game renders.
+  const _EDGE_PROBE = document.createElement('canvas');
+  function edgesTouched(img) {
+    if (img.__lxEdges !== undefined) return img.__lxEdges;
+    let res = null;
+    try {
+      const S = 48;
+      _EDGE_PROBE.width = S; _EDGE_PROBE.height = S;
+      const g = _EDGE_PROBE.getContext('2d', { willReadFrequently: true });
+      g.clearRect(0, 0, S, S); g.drawImage(img, 0, 0, S, S);
+      const d = g.getImageData(0, 0, S, S).data;
+      const a = (x, y) => d[(y * S + x) * 4 + 3];
+      let L = 0, R2 = 0, T = 0;
+      for (let i = 0; i < S; i++) { if (a(0, i) > 24) L++; if (a(S - 1, i) > 24) R2++; if (a(i, 0) > 24) T++; }
+      const th = 3;
+      res = (L > th || R2 > th || T > th) ? { l: L > th, r: R2 > th, t: T > th } : null;
+    } catch (e) { res = null; }
+    img.__lxEdges = res;
+    return res;
+  }
+  let _featherCv = null, _featherCtx = null;
+  function softDraw(c, img, dx, dy, dw, dh) {
+    const e = edgesTouched(img);
+    if (!e || dw < 14 || dh < 14) { c.drawImage(img, dx, dy, dw, dh); return; }
+    try {
+      const W2 = Math.ceil(dw), H2 = Math.ceil(dh);
+      if (!_featherCv) { _featherCv = document.createElement('canvas'); _featherCtx = _featherCv.getContext('2d'); }
+      if (_featherCv.width < W2) _featherCv.width = W2;
+      if (_featherCv.height < H2) _featherCv.height = H2;
+      const g = _featherCtx;
+      g.clearRect(0, 0, W2, H2);
+      g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+      g.drawImage(img, 0, 0, W2, H2);
+      g.globalCompositeOperation = 'destination-out';
+      const F = Math.max(3, Math.round(Math.min(W2, H2) * 0.04));
+      if (e.l) { const gr = g.createLinearGradient(0, 0, F, 0); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, F, H2); }
+      if (e.r) { const gr = g.createLinearGradient(W2, 0, W2 - F, 0); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(W2 - F, 0, F, H2); }
+      if (e.t) { const gr = g.createLinearGradient(0, 0, 0, F); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, W2, F); }
+      g.globalCompositeOperation = 'source-over';
+      c.drawImage(_featherCv, 0, 0, W2, H2, dx, dy, dw, dh);
+    } catch (err) {
+      try { c.drawImage(img, dx, dy, dw, dh); } catch (e2) {}
+    }
+  }
+
   // ---- game frame clocks (verbatim: decoded-prefix, ping-pong idle) ----
   function decodedN(arr) {
     let n = arr._readyN || 0;
@@ -400,6 +450,7 @@
 
   window.__core = {
     MAN, HB, STATES, COL, BAKED_CALIB, BAKED_HB, clamp, DISPLAY_H,
+    softDraw, edgesTouched,   // v0.29.198 — game-parity edge feather
     geometry, gameFrameIndex, decodedN, plantScale, plantYOff, baseImg,
     setGameScale: v => { gameScale = !!v; }, getGameScale: () => gameScale,
     GAME_FRAME_MS,
@@ -580,7 +631,7 @@
     const am = g.atkMul || 1, dw = g.drawW != null ? g.drawW : g.targetW;
     let bw = dw * am, bh = g.previewH * am, bx = -bw / 2, by = g.anchorY * am;
     if (g.roundMode) { if (am !== 1) { bw = Math.round(bw); bh = Math.round(bh); } bx = Math.round(-bw / 2); by = Math.round(by); }
-    ctx.drawImage(img, bx, by, bw, bh);
+    C.softDraw(ctx, img, bx, by, bw, bh);   // v0.29.198 — game-parity edge feather
     ctx.restore();
     if (!overlay || st === focusState) {
       const gw = Math.round(dw * c.s * am), gh = Math.round(g.previewH * c.s * am);
@@ -1109,7 +1160,7 @@
     ctx.save();
     ctx.globalAlpha = L.alpha;
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, x, y, w, h);
+    C.softDraw(ctx, img, x, y, w, h);   // v0.29.198 — game-parity edge feather
     ctx.restore();
     L._rect = { x, y, w, h };
   }
