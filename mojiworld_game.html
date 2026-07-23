@@ -8882,7 +8882,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.195';
+const GAME_VERSION = 'v0.29.198';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -92659,9 +92659,9 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
   const _bossKey = (m.zodiacSign || m.type) + (_isAttack ? '_atk' : '_idle');
   const _cachedBossSprite = _animated ? null : _getCachedScaledSprite(_bossKey, sprite, srcW, srcH, targetW, targetH);
   if (_cachedBossSprite) {
-    ctx.drawImage(_cachedBossSprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset));
+    _lxDrawSoft(ctx, _cachedBossSprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset));   // v0.29.x — edge feather (clipped-art softening)
   } else {
-    ctx.drawImage(sprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);
+    _lxDrawSoft(ctx, sprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);   // v0.29.x — edge feather
   }
   ctx.restore();
 }
@@ -92902,6 +92902,73 @@ const MONSTER_ANIM_DEFS = {};
 // (e.g. elite scale-up, per-map size modifiers) get their own entry.
 // Built lazily on first draw of each (type, size) tuple — never
 // invalidated since (type, targetW, targetH) is content-addressable.
+// =========================================================================
+// v0.29.x — EDGE FEATHER (per user: "monster sprite edges sometimes cut off
+// harshly into a square edge — soften the edge cutting off").
+// Asset audit: 223 monster/boss images have opaque art running INTO their
+// canvas border on the left/right/top (bellowsbat wing tips mid-flap,
+// bonebosn's hat, brinekraken tentacles, …) — on screen that clips as a
+// dead-straight line. Regenerating all the art isn't practical, so the
+// renderer softens it: images whose border rows carry opaque pixels are
+// composited through a shared scratch canvas with a short destination-out
+// alpha fade on ONLY the touched edges (~4% of the draw size, min 3 px).
+//   • One-time 48×48 alpha probe per image, memoised on the image object —
+//     clean sprites (the vast majority) stay on the exact old drawImage path
+//     with zero added cost.
+//   • The BOTTOM edge is never feathered: feet are full-bleed by design
+//     (the rebake normalises feet to the canvas bottom; fading them would
+//     make every planted mob look like it's dissolving into the floor).
+//   • try/catch throughout — any failure (tainted canvas etc.) falls back
+//     to the raw draw, so this can never break rendering.
+// =========================================================================
+const _LX_EDGE_PROBE = (typeof document !== 'undefined') ? document.createElement('canvas') : null;
+function _lxEdgesTouched(img) {
+  if (img._lxEdges !== undefined) return img._lxEdges;
+  let res = null;
+  try {
+    const S = 48;
+    _LX_EDGE_PROBE.width = S; _LX_EDGE_PROBE.height = S;
+    const g = _LX_EDGE_PROBE.getContext('2d', { willReadFrequently: true });
+    g.clearRect(0, 0, S, S);
+    g.drawImage(img, 0, 0, S, S);
+    const d = g.getImageData(0, 0, S, S).data;
+    const a = (x, y) => d[(y * S + x) * 4 + 3];
+    let L = 0, R = 0, T = 0;
+    for (let i = 0; i < S; i++) { if (a(0, i) > 24) L++; if (a(S - 1, i) > 24) R++; if (a(i, 0) > 24) T++; }
+    const th = 3;   // ≥ ~6% of the border opaque → the art is genuinely clipped there
+    res = (L > th || R > th || T > th) ? { l: L > th, r: R > th, t: T > th } : null;
+  } catch (e) { res = null; }
+  img._lxEdges = res;
+  return res;
+}
+let _lxFeatherCv = null, _lxFeatherCtx = null;
+function _lxDrawSoft(c, img, dx, dy, dw, dh) {
+  if (dw == null) { dw = img.width; dh = img.height; }
+  const e = _lxEdgesTouched(img);
+  if (!e || dw < 14 || dh < 14) { c.drawImage(img, dx, dy, dw, dh); return; }
+  try {
+    const W2 = Math.ceil(dw), H2 = Math.ceil(dh);
+    if (!_lxFeatherCv) {
+      _lxFeatherCv = document.createElement('canvas');
+      _lxFeatherCtx = _lxFeatherCv.getContext('2d');
+    }
+    if (_lxFeatherCv.width < W2) _lxFeatherCv.width = W2;
+    if (_lxFeatherCv.height < H2) _lxFeatherCv.height = H2;
+    const g = _lxFeatherCtx;
+    g.clearRect(0, 0, W2, H2);
+    g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+    g.drawImage(img, 0, 0, W2, H2);
+    g.globalCompositeOperation = 'destination-out';
+    const F = Math.max(3, Math.round(Math.min(W2, H2) * 0.04));
+    if (e.l) { const gr = g.createLinearGradient(0, 0, F, 0); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, F, H2); }
+    if (e.r) { const gr = g.createLinearGradient(W2, 0, W2 - F, 0); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(W2 - F, 0, F, H2); }
+    if (e.t) { const gr = g.createLinearGradient(0, 0, 0, F); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, W2, F); }
+    g.globalCompositeOperation = 'source-over';
+    c.drawImage(_lxFeatherCv, 0, 0, W2, H2, dx, dy, dw, dh);
+  } catch (err) {
+    try { c.drawImage(img, dx, dy, dw, dh); } catch (e2) {}
+  }
+}
 // v0.26.248 — Cache extended to bosses + zodiac bosses with explicit
 // keyPrefix to disambiguate idle vs attack-pose sprites. Same memory
 // strategy + multi-step bake as the mob path. Boss target sizes are
@@ -93231,16 +93298,16 @@ function _drawMonsterSprite(m, sx, sy) {
     const _atkScale = (m._frameIsAttack && _ATK_FRAME_SCALE[m.type]) || 1;
     if (_atkScale !== 1) {
       const _bW = Math.round(_frameW * _atkScale), _bH = Math.round(targetH * _atkScale), _bDy = dyOffset * _atkScale;   // v0.26.x perf — integer blit dims
-      ctx.drawImage(_stateImg, _lxWholePx(-_bW / 2), _lxWholePx(_bDy), _bW, _bH);
+      _lxDrawSoft(ctx, _stateImg, _lxWholePx(-_bW / 2), _lxWholePx(_bDy), _bW, _bH);   // v0.29.x — edge feather
     } else {
-      ctx.drawImage(_stateImg, _lxWholePx(-_frameW / 2), _lxWholePx(dyOffset), _frameW, targetH);
+      _lxDrawSoft(ctx, _stateImg, _lxWholePx(-_frameW / 2), _lxWholePx(dyOffset), _frameW, targetH);   // v0.29.x — edge feather
     }
   } else {
     const _cachedSprite = _getCachedScaledSprite(m.type, sprite, srcW, srcH, targetW, targetH);
     if (_cachedSprite) {
-      ctx.drawImage(_cachedSprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset));
+      _lxDrawSoft(ctx, _cachedSprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset));   // v0.29.x — edge feather
     } else {
-      ctx.drawImage(sprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);
+      _lxDrawSoft(ctx, sprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);   // v0.29.x — edge feather
     }
   }
   ctx.restore();
