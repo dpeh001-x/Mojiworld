@@ -75,6 +75,32 @@ try {
   ok('stage caption announces the feather for clipped art (bonebosn: top, one per state panel)',
      cap.clipped.length >= 1 && cap.clipped.every(t => t.includes('top')), cap.clipped);
   ok('stage caption stays silent for unclipped art (kingKrook)', cap.clean.length === 0, cap.clean);
+
+  // 4) magnified before/after inset: clipped art gets the "raw vs in game"
+  //    zoom panes; unclipped art gets no inset.
+  const inset = await p.evaluate(async () => {
+    const texts = [];
+    const orig = CanvasRenderingContext2D.prototype.fillText;
+    CanvasRenderingContext2D.prototype.fillText = function (t, ...a) { texts.push(String(t)); return orig.call(this, t, ...a); };
+    const run = async (type) => {
+      window.__app.select(type);
+      await new Promise(res => setTimeout(res, 1200));
+      texts.length = 0;
+      window.__app._setNow(performance.now()); window.__app.paint();
+      return {
+        title: texts.some(t => t.includes('edge feather (')),
+        panes: texts.filter(t => t === 'raw sprite (hard cut)' || t === 'in game (feathered)').length,
+      };
+    };
+    const clipped = await run('bonebosn');
+    const clean = await run('kingKrook');
+    CanvasRenderingContext2D.prototype.fillText = orig;
+    return { clipped, clean };
+  });
+  ok('zoom inset shows raw-vs-feathered panes for clipped art (bonebosn)',
+     inset.clipped.title && inset.clipped.panes === 2, inset.clipped);
+  ok('zoom inset absent for unclipped art (kingKrook)',
+     !inset.clean.title && inset.clean.panes === 0, inset.clean);
   ok('no page errors', errs.length === 0, errs.slice(0, 3));
 } finally { await b.close(); }
 let pass = 0, fail = 0;

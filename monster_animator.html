@@ -650,8 +650,8 @@
       // edges, so "is the feather working?" is answerable at a glance.
       const _fe = C.edgesTouched(img);
       if (_fe) {
-        ctx.fillStyle = '#7ddba0';
-        ctx.fillText('✂ edge feather active: ' + ['top', 'left', 'right'].filter((k, i) => [_fe.t, _fe.l, _fe.r][i]).join(' + '), cx, groundY + 64);
+        ctx.fillStyle = '#7ddba0'; ctx.font = '600 10px system-ui';
+        ctx.fillText('✂ edge feather active: ' + ['top', 'left', 'right'].filter((k, i) => [_fe.t, _fe.l, _fe.r][i]).join(' + '), cx, groundY + 62);
       }
       ctx.restore();
     }
@@ -684,6 +684,60 @@
     if (label) { ctx.fillStyle = color; ctx.font = '600 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText(label, cx, groundY + 20); }
   }
 
+  // v0.29.202 — the feather is a ~4% fade, invisible at 128px. When the
+  // selected monster has border-clipped art, magnify the clipped edge raw
+  // vs feathered over a checkerboard so the softening is unmistakable.
+  let _insetRaw = null, _insetSoft = null;
+  function drawFeatherInset() {
+    if (!cur) return;
+    let img = null, e = null, edgeSt = null;
+    for (const st of STATES) {
+      const arr = frames[st]; if (!arr || !arr.length) continue;
+      for (const f of arr) {
+        if (f.complete && f.naturalWidth) {
+          const fe = C.edgesTouched(f);
+          if (fe) { img = f; e = fe; edgeSt = st; break; }
+        }
+      }
+      if (img) break;
+    }
+    if (!img) return;
+    const BASE = 128;
+    if (!_insetRaw) {
+      _insetRaw = document.createElement('canvas'); _insetRaw.width = BASE; _insetRaw.height = BASE;
+      _insetSoft = document.createElement('canvas'); _insetSoft.width = BASE; _insetSoft.height = BASE;
+    }
+    const ga = _insetRaw.getContext('2d'), gb = _insetSoft.getContext('2d');
+    ga.clearRect(0, 0, BASE, BASE); gb.clearRect(0, 0, BASE, BASE);
+    ga.drawImage(img, 0, 0, BASE, BASE);
+    C.softDraw(gb, img, 0, 0, BASE, BASE);
+    let sx, sy, sw, sh, edgeName;
+    if (e.t) { sw = 56; sh = 36; sx = (BASE - sw) / 2; sy = 0; edgeName = 'top'; }
+    else if (e.l) { sw = 36; sh = 56; sx = 0; sy = (BASE - sh) / 2; edgeName = 'left'; }
+    else { sw = 36; sh = 56; sx = BASE - sw; sy = (BASE - sh) / 2; edgeName = 'right'; }
+    const Z = 5, pw = sw * Z, ph = sh * Z, x0 = 14, y0 = 14, gap = 12, py = y0 + 20;
+    ctx.save();
+    ctx.textAlign = 'left'; ctx.fillStyle = '#7ddba0'; ctx.font = '700 12px system-ui';
+    ctx.fillText('✂ edge feather (' + edgeSt + ' · ' + edgeName + ' edge · ×' + Z + ' zoom)', x0, y0 + 10);
+    const drawPane = (src, px, label) => {
+      const cs = 8;   // checkerboard: the alpha fade must read against any art
+      for (let yy = 0; yy < ph; yy += cs) for (let xx = 0; xx < pw; xx += cs) {
+        ctx.fillStyle = ((xx + yy) / cs) % 2 ? '#39415a' : '#272e42';
+        ctx.fillRect(px + xx, py + yy, Math.min(cs, pw - xx), Math.min(cs, ph - yy));
+      }
+      ctx.imageSmoothingEnabled = false;   // magnify texels honestly
+      ctx.drawImage(src, sx, sy, sw, sh, px, py, pw, ph);
+      ctx.imageSmoothingEnabled = true;
+      ctx.strokeStyle = '#3d475e'; ctx.lineWidth = 1;
+      ctx.strokeRect(px + 0.5, py + 0.5, pw, ph);
+      ctx.fillStyle = '#8a97ad'; ctx.font = '600 11px system-ui';
+      ctx.fillText(label, px, py + ph + 14);
+    };
+    drawPane(_insetRaw, x0, 'raw sprite (hard cut)');
+    drawPane(_insetSoft, x0 + pw + gap, 'in game (feathered)');
+    ctx.restore();
+  }
+
   let columns = [];   // [{state, cx, groundY}] — this paint's layout
   let hbRects = [];   // [{x,y,w,h,st,previewH}] — this paint's hitbox rects
   function paint() {
@@ -711,6 +765,7 @@
         columns.push({ state: st, cx, groundY, slotW });
       });
     }
+    drawFeatherInset();
   }
   function frame(t) {
     requestAnimationFrame(frame);
