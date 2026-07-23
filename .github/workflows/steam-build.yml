@@ -1,0 +1,69 @@
+# Builds the Steam depot payloads:
+#   - Windows: steam/release/win-unpacked/  (launch: Mojiworld.exe)
+#   - Linux:   steam/release/linux-unpacked/ (launch: mojiworld — Steam Deck native)
+# Download the artifacts, then upload with steamcmd + steam/steam_upload/*.vdf.
+#
+# Repo variables (Settings > Secrets and variables > Actions > Variables):
+#   STEAM_APP_ID   — your real Steam App ID (falls back to 480/Spacewar for QA)
+#   MOJI_RELAY_URL — wss:// relay baked into the build (omit = co-op off, solo fine)
+name: Build Steam depots (Mojiworld.exe)
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['steam-v*']
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults: { run: { shell: bash, working-directory: steam } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: steam/package-lock.json }
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Bake App ID + relay
+        run: |
+          echo "${{ vars.STEAM_APP_ID || 480 }}" > steam_appid.txt
+          if [ -n "${{ vars.MOJI_RELAY_URL }}" ]; then
+            printf '{"relay":"%s"}' "${{ vars.MOJI_RELAY_URL }}" > relay.config.json
+          fi
+          cat steam_appid.txt
+      - name: Build (win-unpacked)
+        run: npm run dist:steamwin
+      - name: Verify Mojiworld.exe
+        run: |
+          test -f "release/win-unpacked/Mojiworld.exe" || { echo "::error::Mojiworld.exe missing"; ls -la release/win-unpacked || true; exit 1; }
+          ls -la release/win-unpacked | head -20
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mojiworld-windows-depot
+          path: steam/release/win-unpacked/
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    defaults: { run: { shell: bash, working-directory: steam } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: steam/package-lock.json }
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Bake App ID + relay
+        run: |
+          echo "${{ vars.STEAM_APP_ID || 480 }}" > steam_appid.txt
+          if [ -n "${{ vars.MOJI_RELAY_URL }}" ]; then
+            printf '{"relay":"%s"}' "${{ vars.MOJI_RELAY_URL }}" > relay.config.json
+          fi
+      - name: Build (linux-unpacked)
+        run: npm run dist:steamdeck
+      - name: Verify executable
+        run: |
+          test -x "release/linux-unpacked/mojiworld" || { echo "::error::mojiworld binary missing"; ls -la release/linux-unpacked || true; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mojiworld-linux-depot
+          path: steam/release/linux-unpacked/
+          if-no-files-found: error

@@ -65,6 +65,47 @@ the game's `MP_DEFAULT_URL` uses it, so players **never type a ws:// URL**.
 > Baking the URL: edit the `RELAY_URL` fallback in `steam/main.js` if you prefer
 > a hardcoded default over the env var.
 
+### 3b. Steam-store install & launch — `Mojiworld.exe` (v0.29)
+
+Steam **is** the installer: you upload the *unpacked* build as a depot and
+Steam places those files on the player's disk; the launch option then runs
+the executable from the depot root. No NSIS installer is involved.
+
+**Build the depot payloads** — easiest via CI: run the **"Build Steam depots
+(Mojiworld.exe)"** GitHub Actions workflow (`.github/workflows/steam-build.yml`,
+manual `workflow_dispatch` or push a `steam-v*` tag). It builds on real
+Windows/Linux runners and uploads two artifacts:
+
+- `mojiworld-windows-depot` → contents of `win-unpacked/`, with **`Mojiworld.exe`**
+  at the root (`productName` drives the exe name).
+- `mojiworld-linux-depot` → `linux-unpacked/` with the `mojiworld` binary
+  (Steam Deck native).
+
+Set repo Actions **variables** first: `STEAM_APP_ID` (falls back to 480 for QA)
+and `MOJI_RELAY_URL`. The workflow bakes both into the build (`steam_appid.txt`
+ships with your real App ID — the wrapper reads it at runtime).
+Local equivalent: `npm run dist:steamwin` (Windows box) / `npm run dist:steamdeck`.
+
+**Upload the depots** with steamcmd + the scripts in `steam/steam_upload/`
+(`app_build.vdf`, `depot_windows.vdf`, `depot_linux.vdf` — replace the
+`1000000/1000001/1000002` placeholders with your App/Depot IDs, drop the
+artifact contents into `steam/release/win-unpacked/` + `linux-unpacked/`):
+
+```
+steamcmd +login <builder_account> +run_app_build <abs-path>/steam/steam_upload/app_build.vdf +quit
+```
+
+**Steamworks App Admin → Installation → General Installation**, add launch options:
+
+| Launch option | Executable | OS |
+|---|---|---|
+| Launch | `Mojiworld.exe` | Windows |
+| Launch | `mojiworld` | Linux + SteamOS |
+
+Then publish the build to a branch on **SteamPipe → Builds**, set it live on
+`default`, and Install/Play in the Steam client installs the depot and starts
+`Mojiworld.exe`.
+
 ---
 
 ## 4. Steamworks
@@ -109,7 +150,7 @@ a follow-up once `steamworks.js` is wired.
 - [ ] Windowed + fullscreen + alt-tab (host keeps simulating — `backgroundThrottling:false`).
 - [ ] Controller support if claimed on the store page.
 - [ ] Age rating / content survey submitted.
-- [ ] `steam_appid.txt` present only in dev, not shipped.
+- [ ] `steam_appid.txt` ships with your REAL App ID (the CI workflow bakes it; the wrapper reads it at runtime — 480 means you shipped the Spacewar placeholder).
 
 See **COOP_NOTES.md** for the netcode design, known limitations, and the areas
 that most need playtesting before you flip the store page live.
@@ -173,12 +214,12 @@ which is **absent entirely on the web build** — so every Steam feature in
 - `steam/steam_integration.js` — wraps [`steamworks.js`](https://github.com/ceifa/steamworks.js); `init()` → `{ available, cloud, achievement, input }` (or a safe stub).
 - `steam/main.js` — inits the bridge, registers IPC (`steam:cloud-read/write`, `steam:ach-unlock`, `steam:input-snapshot`), passes `--moji-steam=1` to preload.
 - `steam/preload.js` — exposes `window.SteamAPI` (cloud/achievement async over IPC; input snapshot sync).
-- `steam/steam_appid.txt` — dev App ID (**480 = Spacewar placeholder; set your real App ID and DELETE this file before shipping**).
+- `steam/steam_appid.txt` — App ID the wrapper passes to `steamworks.init()` (**480 = Spacewar placeholder; the steam-build workflow overwrites it with `vars.STEAM_APP_ID` for shipped builds**).
 - `steam/controller_config/game_actions_480.vdf` — Steam Input Game Actions File (rename to your App ID).
 
 ### Setup
 1. `cd steam && npm install` — pulls `steamworks.js` (prebuilt native binaries).
-2. Set your real App ID: `echo <APPID> > steam/steam_appid.txt` (dev) and rename the VDF to `game_actions_<APPID>.vdf`. In production the App ID comes from Steam; `steam_appid.txt` is dev-only.
+2. Set your real App ID: `echo <APPID> > steam/steam_appid.txt` (or set the `STEAM_APP_ID` repo variable for CI builds) and rename the VDF to `game_actions_<APPID>.vdf`.
 3. Build: `cd steam && npm run dist:win` (etc.). `package.json` bundles `steamworks.js` (asar-unpacked) + the controller config.
 
 ### Cloud saves (ISteamRemoteStorage)
@@ -247,5 +288,5 @@ already-earned achievements sync up on load.
 | `prestige20` | Apex Ascendant | Reach the prestige cap (20) |
 
 > **Ship checklist additions:** enable Steam Cloud + Steam Input + create the 38
-> achievements in Steamworks; set the real App ID (delete `steam_appid.txt`);
+> achievements in Steamworks; set the real App ID (repo var `STEAM_APP_ID` / `steam_appid.txt`);
 > `npm install` in `steam/` so `steamworks.js` binaries are bundled.
