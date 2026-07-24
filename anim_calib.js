@@ -430,10 +430,15 @@ window.LX_ANIM_CALIB = {
     }
   },
   "octobaby": {
-    "attack": {
-      "s": 1.33,
+    "walk": {
+      "s": 1.07,
       "dx": 0,
-      "dy": 0.025
+      "dy": 0
+    },
+    "attack": {
+      "s": 1.23,
+      "dx": 0,
+      "dy": 0
     }
   }
 };
