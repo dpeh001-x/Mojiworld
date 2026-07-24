@@ -298,7 +298,7 @@ window.LX_ANIM_CALIB = {
       "dy": 0.035
     },
     "walk": {
-      "s": 1,
+      "s": 0.949,
       "dx": 0,
       "dy": 0.035
     },
@@ -315,7 +315,7 @@ window.LX_ANIM_CALIB = {
       "dy": 0.01
     },
     "walk": {
-      "s": 1,
+      "s": 0.949,
       "dx": 0,
       "dy": 0.01
     },
@@ -337,7 +337,7 @@ window.LX_ANIM_CALIB = {
       "dy": 0.02
     },
     "attack": {
-      "s": 1.04,
+      "s": 1.2,
       "dx": 0.105,
       "dy": 0.02
     }
@@ -386,6 +386,11 @@ window.LX_ANIM_CALIB = {
       "s": 0.86,
       "dx": 0,
       "dy": 0
+    },
+    "attack": {
+      "s": 1.08,
+      "dx": 0,
+      "dy": 0.015
     }
   },
   "gravitospunch": {
@@ -402,12 +407,12 @@ window.LX_ANIM_CALIB = {
       "dy": 0.04
     },
     "walk": {
-      "s": 1,
+      "s": 1.655,
       "dx": 0,
       "dy": 0.04
     },
     "attack": {
-      "s": 1,
+      "s": 1.743,
       "dx": 0,
       "dy": 0.03
     }
@@ -422,6 +427,13 @@ window.LX_ANIM_CALIB = {
       "s": 1.77,
       "dx": 0,
       "dy": 0
+    }
+  },
+  "octobaby": {
+    "attack": {
+      "s": 1.33,
+      "dx": 0,
+      "dy": 0.025
     }
   }
 };
