@@ -18,27 +18,47 @@
   <p id="msg" class="mut">finding the latest build…</p>
 </div>
 <script>
-// CACHE-PROOF LAUNCHER (v0.29.206). This page's logic never changes, so it
-// does not matter how long CDNs cache it. On every open it asks the GitHub
-// API for main's current commit and redirects to that build's PINNED
-// rawcdn.githack.com URL — immutable, never stale, no cache window at all.
-// Bookmark THIS page; never bookmark the /main/ animator URL directly.
+// CACHE-PROOF LAUNCHER v2 (v0.29.222). Asks the GitHub API for main's current
+// commit and redirects to that build's PINNED rawcdn.githack.com URL.
+// v2: ETag CONDITIONAL requests — GitHub does not count 304 responses against
+// the unauthenticated rate limit, so heavy tuning sessions can reload as often
+// as they like without ever tripping the 60/hr cap (which previously dropped
+// the launcher onto the laggy branch URL). Last-known sha is kept in
+// localStorage as a second fallback before the branch URL.
 (async function () {
   const msg = document.getElementById('msg');
   const OWNER = 'dpeh001-x', REPO = 'Mojiworld';
+  const API = 'https://api.github.com/repos/' + OWNER + '/' + REPO + '/commits/main';
+  const LS = 'lx_launcher_sha';
   const FALLBACK = 'https://raw.githack.com/' + OWNER + '/' + REPO + '/main/monster_animator.html';
+  const pinned = sha => 'https://rawcdn.githack.com/' + OWNER + '/' + REPO + '/' + sha + '/monster_animator.html';
+  const cache = (() => { try { return JSON.parse(localStorage.getItem(LS) || 'null'); } catch (e) { return null; } })();
   try {
-    const r = await fetch('https://api.github.com/repos/' + OWNER + '/' + REPO + '/commits/main',
-      { headers: { Accept: 'application/vnd.github+json' } });
-    if (!r.ok) throw new Error('GitHub API ' + r.status);
-    const sha = (await r.json()).sha;
+    const headers = { Accept: 'application/vnd.github+json' };
+    if (cache && cache.etag) headers['If-None-Match'] = cache.etag;
+    const r = await fetch(API, { headers });
+    let sha;
+    if (r.status === 304 && cache && cache.sha) {
+      sha = cache.sha;                       // no new commits since last check — free request
+    } else if (r.ok) {
+      sha = (await r.json()).sha;
+      try { localStorage.setItem(LS, JSON.stringify({ sha, etag: r.headers.get('ETag') })); } catch (e) {}
+    } else {
+      throw new Error('GitHub API ' + r.status);
+    }
     msg.innerHTML = 'opening build <code>' + sha.slice(0, 7) + '</code>…';
-    location.replace('https://rawcdn.githack.com/' + OWNER + '/' + REPO + '/' + sha + '/monster_animator.html');
+    location.replace(pinned(sha));
   } catch (e) {
-    // rate-limited or offline API: fall back to the branch URL (may be cached)
-    msg.innerHTML = 'could not resolve the latest commit (' + e.message +
-      ') — <a href="' + FALLBACK + '">opening the branch URL instead</a> (may lag a few minutes)';
-    setTimeout(() => location.replace(FALLBACK), 2500);
+    if (cache && cache.sha) {
+      // API unreachable (offline / hard rate limit): last-known pinned build
+      // still beats the possibly-stale branch URL.
+      msg.innerHTML = 'API unavailable (' + e.message + ') — opening last-known build <code>' + cache.sha.slice(0, 7) + '</code>';
+      setTimeout(() => location.replace(pinned(cache.sha)), 1200);
+    } else {
+      msg.innerHTML = 'could not resolve the latest commit (' + e.message +
+        ') — <a href="' + FALLBACK + '">opening the branch URL instead</a> (may lag a few minutes)';
+      setTimeout(() => location.replace(FALLBACK), 2500);
+    }
   }
 })();
 </script>
