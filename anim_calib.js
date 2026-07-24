@@ -445,6 +445,18 @@ window.LX_ANIM_CALIB = {
       "dx": 0,
       "dy": 0
     }
+  },
+  "forgewight": {
+    "walk": {
+      "s": 1.01,
+      "dx": 0,
+      "dy": 0
+    },
+    "attack": {
+      "s": 1.26,
+      "dx": 0,
+      "dy": 0
+    }
   }
 };
 window.LX_ATK_HITBOX = {

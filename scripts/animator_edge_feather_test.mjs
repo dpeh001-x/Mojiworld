@@ -1,5 +1,8 @@
 // Animator edge-feather parity certification: the monster_animator preview
 // must soften clipped sprite edges exactly like the game (v0.29.198).
+// Negative control is 'king' (Gloopaloo, 0 clipped frames); kingKrook's
+// restored original frames are genuinely right-edge-clipped since
+// v0.29.218, so it now feathers (correctly) and can't be the control.
 import { chromium } from 'playwright-core';
 const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
@@ -68,13 +71,13 @@ try {
       return texts.filter(t => t.includes('edge feather active'));
     };
     const clipped = await run('bonebosn');
-    const clean = await run('kingKrook');
+    const clean = await run('king');
     CanvasRenderingContext2D.prototype.fillText = orig;
     return { clipped, clean };
   });
   ok('stage caption announces the feather for clipped art (bonebosn: top, one per state panel)',
      cap.clipped.length >= 1 && cap.clipped.every(t => t.includes('top')), cap.clipped);
-  ok('stage caption stays silent for unclipped art (kingKrook)', cap.clean.length === 0, cap.clean);
+  ok('stage caption stays silent for unclipped art (king/Gloopaloo)', cap.clean.length === 0, cap.clean);
 
   // 4) magnified before/after inset: clipped art gets the "raw vs in game"
   //    zoom panes; unclipped art gets no inset.
@@ -93,13 +96,13 @@ try {
       };
     };
     const clipped = await run('bonebosn');
-    const clean = await run('kingKrook');
+    const clean = await run('king');
     CanvasRenderingContext2D.prototype.fillText = orig;
     return { clipped, clean };
   });
   ok('zoom inset shows raw-vs-feathered panes for clipped art (bonebosn)',
      inset.clipped.title && inset.clipped.panes === 2, inset.clipped);
-  ok('zoom inset absent for unclipped art (kingKrook)',
+  ok('zoom inset absent for unclipped art (king/Gloopaloo)',
      !inset.clean.title && inset.clean.panes === 0, inset.clean);
   ok('no page errors', errs.length === 0, errs.slice(0, 3));
 } finally { await b.close(); }
