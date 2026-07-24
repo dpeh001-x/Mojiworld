@@ -411,6 +411,18 @@ window.LX_ANIM_CALIB = {
       "dx": 0,
       "dy": 0.03
     }
+  },
+  "towerArbiter": {
+    "walk": {
+      "s": 1.515,
+      "dx": 0,
+      "dy": 0
+    },
+    "attack": {
+      "s": 1.77,
+      "dx": 0,
+      "dy": 0
+    }
   }
 };
 window.LX_ATK_HITBOX = {
