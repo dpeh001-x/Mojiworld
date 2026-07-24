@@ -1,20 +1,23 @@
-// Per-frame calib scale (fs) certification — v0.29.x. Frame sets whose ART
-// draws the figure at inconsistent sizes (towerArbiter walk/attack) are
-// normalised by a baked per-frame scale array, applied identically in the
-// game renderer and the animator preview.
+// Per-frame calib scale (fs) certification — v0.29.216 policy.
+// The fs ENGINE CAPABILITY (game + animator) must keep working, but as of
+// v0.29.216 NO boss bakes it: the user prefers frames to render at the raw
+// art's proportions ("reflect how it shows on the raw form without warping").
+// The capability is certified by injecting fs at runtime, not via a bake.
 import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 
-// ---- static checks: bake + plumbing present in both renderers ----
+// ---- policy: no fs baked anywhere (raw rendering) ----
 const calibSrc = readFileSync('anim_calib.js', 'utf8');
 const calib = JSON.parse(calibSrc.match(/window\.LX_ANIM_CALIB = (\{[\s\S]*?\n\});/)[1]);
-const ta = calib.towerArbiter || {};
-ok('bake: towerArbiter walk.fs is a 9-frame array with a real correction',
-   Array.isArray(ta.walk && ta.walk.fs) && ta.walk.fs.length === 9 && ta.walk.fs.some(f => f > 1.2), ta.walk && ta.walk.fs);
-ok('bake: towerArbiter attack.fs is a 9-frame array', Array.isArray(ta.attack && ta.attack.fs) && ta.attack.fs.length === 9, ta.attack && ta.attack.fs);
+const baked = [];
+for (const [t, states] of Object.entries(calib))
+  for (const [st, e] of Object.entries(states))
+    if (Array.isArray(e.fs)) baked.push(`${t}.${st}`);
+ok('policy: no per-frame fs baked (bosses render at raw art proportions)', baked.length === 0, baked);
 
+// ---- plumbing: capability present in both renderers ----
 const game = readFileSync('mojiworld_game.html', 'utf8');
 ok('game: frame images stamped with their index (_lxFi)', game.includes("img._lxFi = i;"));
 ok('game: calib loader passes fs through', game.includes('Array.isArray(e.fs)'));
@@ -24,7 +27,7 @@ const anim = readFileSync('monster_animator.html', 'utf8');
 ok('animator: loadCalib preserves fs', anim.includes('out[t][s].fs = e.fs.map'));
 ok('animator: stage draw applies fs[idx]', anim.includes('c.fs[idx]'));
 
-// ---- headless: the animator actually renders the correction ----
+// ---- headless: runtime-injected fs still scales (capability alive) ----
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--disable-gpu', '--mute-audio'] });
 try {
   const p = await b.newContext({ serviceWorkers: 'block' }).then(c => c.newPage());
@@ -34,9 +37,6 @@ try {
   const r = await p.evaluate(async () => {
     window.__app.select('towerArbiter');
     await new Promise(res => setTimeout(res, 2000));
-    const c = window.__app.CALIB().towerArbiter;
-    // paint the tiny walk frame (idx 1, 80ms clock) and the full-size frame
-    // (idx 0); measure the knight's painted height in the walk column.
     const cv = document.querySelector('canvas'), ctx = cv.getContext('2d');
     const colH = (t) => {
       window.__app._setNow(t); window.__app.paint();
@@ -52,18 +52,16 @@ try {
       }
       return walk.groundY - top;
     };
-    const fs = c.walk.fs;
-    const hWith = colH(80);            // frame 1, correction on
-    c.walk.fs = null;
-    const hWithout = colH(80);         // same frame, correction off
-    c.walk.fs = fs;
-    return { fsLoaded: fs, hWith, hWithout };
+    const c = window.__app.CALIB().towerArbiter.walk;
+    const bakedFs = c.fs || null;
+    const hRaw = colH(80);              // walk frame 1, no fs
+    c.fs = [1, 1.8, 1, 1, 1, 1, 1, 1, 1];
+    const hScaled = colH(80);           // same frame, injected fs
+    if (bakedFs) c.fs = bakedFs; else delete c.fs;
+    return { hRaw, hScaled };
   });
-  ok('animator CALIB carries the baked fs array', Array.isArray(r.fsLoaded) && r.fsLoaded[1] > 1.2, r.fsLoaded);
-  // the row-mass threshold skips thin sword rows, so the measured growth is
-  // the knight body (< the raw fs factor) — >1.15x still proves fs applied
-  ok('fs correction visibly scales the under-drawn walk frame up on stage',
-     r.hWith > r.hWithout * 1.15, { hWith: r.hWith, hWithout: r.hWithout });
+  ok('runtime-injected fs scales the frame on stage (capability alive)',
+     r.hScaled > r.hRaw * 1.15, r);
   ok('no page errors', errs.length === 0, errs.slice(0, 3));
 } finally { await b.close(); }
 
