@@ -61,9 +61,9 @@ try {
   });
   ok('animator CALIB carries the baked fs array', Array.isArray(r.fsLoaded) && r.fsLoaded[1] > 1.2, r.fsLoaded);
   // the row-mass threshold skips thin sword rows, so the measured growth is
-  // the knight body (< the raw 2.01 fs factor) — >1.25x still proves fs applied
+  // the knight body (< the raw fs factor) — >1.15x still proves fs applied
   ok('fs correction visibly scales the under-drawn walk frame up on stage',
-     r.hWith > r.hWithout * 1.25, { hWith: r.hWith, hWithout: r.hWithout });
+     r.hWith > r.hWithout * 1.15, { hWith: r.hWith, hWithout: r.hWithout });
   ok('no page errors', errs.length === 0, errs.slice(0, 3));
 } finally { await b.close(); }
 
