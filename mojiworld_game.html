@@ -8887,7 +8887,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.248';
+const GAME_VERSION = 'v0.29.252';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10303,6 +10303,14 @@ const LX_FX = (() => {
     arrow_rain:         'arrow_rain.png',
     elemental_arrows:   'elemental_arrows.png',
     dragoon_impact:     'dragoon_impact.png',
+    // v0.29.250 — per-class SKILL-HIT impact sparks (Ludo-generated,
+    // Sprites/fx/hit_<cls>.png — white-hot starburst + ink splatter in the
+    // class colour). Spawned from hitMonster on landed non-basic skill
+    // hits, coalesced to one per frame; see the _hitKey block there.
+    hit_warrior:        'hit_warrior.png',
+    hit_rogue:          'hit_rogue.png',
+    hit_mage:           'hit_mage.png',
+    hit_archer:         'hit_archer.png',
     // v0.25.238 — bigger / nicer sprites for under-served kit slots:
     //   warrior knight V (holy_shield), berserker doombringer G (apoc),
     //   berserker rampage V (rampage), mage elementalist G (cascade),
@@ -33708,6 +33716,26 @@ function loadState() {
       player.boonsEquipped = [];
     }
     if (typeof _migrateLegacyPowerups === 'function') _migrateLegacyPowerups();
+    // v0.29.249 — Per user "ensure make stats of speed any class can invest
+    // in is 10 sp". The Speed lane's cap dropped 50 → 10 ranks (1 SP each,
+    // so 10 SP max total). Saves that already invested past the new cap get
+    // the excess refunded here: +1 SP and −0.5 baseSpeed per rank above 10,
+    // so the invariant holds on every class and every existing save. The
+    // deltas mirror resetStats()'s reverse-apply — keep in sync with the
+    // LEVELUP_OPTIONS speed lane.
+    {
+      const _spdCap = 10;
+      const _spd = (player._levelUpSpent && player._levelUpSpent.speed) || 0;
+      if (_spd > _spdCap) {
+        const _exc = _spd - _spdCap;
+        player._levelUpSpent.speed = _spdCap;
+        player.baseSpeed = (player.baseSpeed || 0) - 0.5 * _exc;
+        player.skillPoints = (player.skillPoints || 0) + _exc;
+        setTimeout(() => {
+          if (typeof showToast === 'function') showToast(`⚡ Speed investment now caps at 10 SP — ${_exc} rank${_exc === 1 ? '' : 's'} refunded (+${_exc} SP)`, 'rare');
+        }, 600);
+      }
+    }
     // v0.25.886 — BUG-MODS-1 fix. Debug recon (agent a515c5ee) found
     // that _applyEquippedBoons() early-returns silently if player.mods
     // is undefined (see L9324). The v0.25.855 defaulter set player.mods
@@ -51610,7 +51638,12 @@ const SKILL_FNS = {
     pixelBurst('arc', player.x + player.w/2 + player.facing * 40, player.y + player.h/2, player.facing, { color:'#ffffff', color2:'#ffdd88', speed:4 });
     // v0.26.385 — basic-attack nerf (1.55→1.10) + wider sweep (160→230) so
     // warrior clears more mobs per swing for faster grinding.
-    performMelee(230, 1.10, { color:'#fff', kb:5, burst:14, basic:true });
+    // v0.29.252 — Per user "Make warrior Z attack vertical and horizontal
+    // range slightly bigger": sweep 230 → 255 (+11%) and tall:10 extends
+    // the hit band 10 px above AND below the player's box (performMelee's
+    // vertical reach option), so slightly-airborne / low-slung mobs no
+    // longer slip under or over the swing. Damage unchanged.
+    performMelee(255, 1.10, { color:'#fff', kb:5, burst:14, basic:true, tall: 10 });
     const cx = player.x + player.w/2, cy = player.y + player.h/2;
     // v0.25.227 — sprite removed per user request. The Z basic attack
     // now reads as the procedural pixelBurst flourish only; the
@@ -63511,6 +63544,29 @@ function hitMonster(m, dmg, isCrit, skill) {
     if (_budget) { if (!_budget(_p)) break; } else { game.particles.push(_p); }
   }
 
+  // v0.29.250 — per-class SKILL-HIT spark (user: "ensure that every class
+  // has a special hit sprite"). Landed, directly-cast NON-basic skills only —
+  // basics keep the plain particle burst so the sprite stays a skill reward.
+  // Coalesced to one spawn per frame (AoE skills land 12+ hits/tick; a
+  // sprite burst per hit would bury the screen) and skipped on lowFx,
+  // mirroring the hit-audio coalescing above. Crits draw bigger + longer.
+  if (typeof player !== 'undefined' && player && skill
+      && !(skill === 'bolt' || skill === 'slash' || skill === 'arrow' || skill === 'dagger' || skill === 'basic' || skill === 'melee')
+      && !MISS_EXEMPT_SKILLS.has(skill)
+      && !_lowFxImpact
+      && game._lastClassHitFxFrame !== game.time
+      && typeof spawnSpriteBurst === 'function') {
+    const _hitKey = ({ warrior: 'hit_warrior', rogue: 'hit_rogue', mage: 'hit_mage', archer: 'hit_archer' })[player.cls];
+    if (_hitKey) {
+      game._lastClassHitFxFrame = game.time;
+      spawnSpriteBurst(m.x + m.w / 2, m.y + m.h / 2, _hitKey, {
+        life: isCrit ? 16 : 12,
+        size: isCrit ? 96 : 72,
+        angle: (Math.random() - 0.5) * 1.2,
+      });
+    }
+  }
+
   // v0.25.872 — Damage-tier visual escalation (GAMEPLAY_AUDIT §2.1).
   // The old tier thresholds (80 / 200 / 500) were ABSOLUTE constants —
   // so by Lv 60+ every hit was tier 3 and the tiering collapsed into
@@ -71913,7 +71969,12 @@ const LEVELUP_OPTIONS = [
   // maxing it costs 50 SP instead of 100. The respec refund reads
   // o.cost, so it follows automatically — only the apply() delta needs
   // manual syncing with the reset switch.
-  { id:'speed', label:'+0.5 Speed',    cost: 1, cap: 50,  apply: () => { player.baseSpeed += 0.5; } },
+  // v0.29.249 — Per user "ensure make stats of speed any class can invest
+  // in is 10 sp": cap 50 → 10 ranks. At 1 SP/rank that makes 10 SP the
+  // maximum total Speed investment for every class (+5.0 cumulative).
+  // Saves already past 10 ranks get the excess refunded by the loadState
+  // migration (search "_spdCap") — keep its deltas in sync with apply().
+  { id:'speed', label:'+0.5 Speed',    cost: 1, cap: 10,  apply: () => { player.baseSpeed += 0.5; } },
   // v0.26.x — Per user: addable Jump stat. 2 SP per rank, +1 jump each; the
   // cap is dynamic so total base jump can never exceed 20 (= 20 - the class's
   // authored base jump). PLAYER_JUMP_HARD_CAP (20) also clamps the effective
@@ -95640,21 +95701,32 @@ function _drawMirrorSelf(m, sx, sy) {
     // even when the player clearly hit it. Fix: drop the scale —
     // mirror now renders at the same size as its actual hitbox.
     // Visual identity is preserved by the violet duotone tint below.
-    drawCuteCharacter(sx, sy);
-    // Lightweight violet/red duotone overlay (replaces ctx.filter).
-    // Composite mode "source-atop" only paints over already-drawn
-    // pixels, so the tint follows the silhouette without bleeding.
-    ctx.globalCompositeOperation = 'source-atop';
-    ctx.fillStyle = _raging
-      ? 'rgba(220, 40, 80, 0.35)'    // red-violet wash for rage
-      : 'rgba(120, 60, 220, 0.30)';  // violet wash for default
-    // Estimate a tight bounding rect around where drawCuteCharacter
-    // painted — feet at sy, head ~m.h up. Slight padding so the wash
-    // catches sprite edges fully.
-    const _tintW = (m.w + 24);
-    const _tintH = (m.h + 12);
-    ctx.fillRect(sx - 12, sy - _tintH + 8, _tintW, _tintH);
-    ctx.globalCompositeOperation = 'source-over';
+    // v0.29.251 — Per user "make the mirror self monster look exactly like
+    // the character sprites". Two changes:
+    //   1) Renderer dispatch now mirrors drawPlayer's priority chain (MSX
+    //      sprite pick → vector hero → legacy chibi) instead of always
+    //      calling the legacy procedural drawCuteCharacter. The reflection
+    //      is drawn by the SAME pipeline as the player — including the
+    //      equipment / weapon layer stack the chibi path never rendered.
+    //      Same pattern as the coop peer renderer (v0.29.12).
+    //   2) The always-on violet duotone wash is REMOVED — the base look is
+    //      an exact copy of the player. The red rage wash and the shroud
+    //      alpha remain: those are temporary combat-state telegraphs
+    //      (rage / phased-untargetable), not part of the base look.
+    const _mMsx = player.lookCustom && player.lookCustom.msxId;
+    if (_mMsx && typeof _msxReady === 'function' && _msxReady(_mMsx) && typeof _drawMsxHero === 'function') _drawMsxHero(sx, sy);
+    else if (typeof _drawVectorHero === 'function') _drawVectorHero(sx, sy);
+    else drawCuteCharacter(sx, sy);
+    if (_raging) {
+      // Rage telegraph — red wash via source-atop so the tint follows the
+      // silhouette without bleeding past drawn pixels.
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.fillStyle = 'rgba(220, 40, 80, 0.35)';
+      const _tintW = (m.w + 24);
+      const _tintH = (m.h + 12);
+      ctx.fillRect(sx - 12, sy - _tintH + 8, _tintW, _tintH);
+      ctx.globalCompositeOperation = 'source-over';
+    }
     if (typeof _chibiRestore === 'function') _chibiRestore();
     ctx.restore();
   } finally {
