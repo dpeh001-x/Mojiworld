@@ -247,7 +247,7 @@ window.LX_ANIM_CALIB = {
       "dy": 0.03
     },
     "walk": {
-      "s": 1,
+      "s": 1.04,
       "dx": 0,
       "dy": 0.03
     },
@@ -264,7 +264,7 @@ window.LX_ANIM_CALIB = {
       "dy": 0.0632
     },
     "walk": {
-      "s": 1,
+      "s": 1.23,
       "dx": 0,
       "dy": 0.0842
     },
@@ -454,6 +454,13 @@ window.LX_ANIM_CALIB = {
     },
     "attack": {
       "s": 1.26,
+      "dx": 0,
+      "dy": 0
+    }
+  },
+  "king": {
+    "attack": {
+      "s": 1.37,
       "dx": 0,
       "dy": 0
     }
