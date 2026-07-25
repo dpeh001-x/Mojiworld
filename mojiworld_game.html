@@ -3839,6 +3839,11 @@
   .lu-card .lu-name { flex:1; font-weight:bold; color: var(--lu-color, #fff); letter-spacing:0.2px; font-size:10.5px; }
   .lu-card .lu-count { color:#ddd; font-size:9.5px; font-variant-numeric: tabular-nums; }
   .lu-card.maxed .lu-count { color:#88dd88; }
+  /* v0.29.238 — rank ceiling shown next to the invested count ("12/50") so
+     the cap is visible BEFORE the lane locks out. Dimmed + lighter weight so
+     the live number still reads as the primary figure at a glance. */
+  .lu-card .lu-cap { color:#8a8a9a; font-weight:normal; }
+  .lu-card.maxed .lu-cap { color:#6faa6f; }
   .lu-card .lu-track {
     height: 4px; background: #110820; border:1px solid #0a0510; border-radius:3px; overflow:hidden;
   }
@@ -8882,7 +8887,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.234';
+const GAME_VERSION = 'v0.29.243';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10394,6 +10399,16 @@ const LX_FX = (() => {
     shin_shuriken2:     'shinshuriken2.png',
     meteor_marker:      'meteor_marker.webp',
     meteor_marker_blue: 'meteor_marker_blue.webp', // Gravitos-only blue impact rune
+    // v0.29.240 — Per user "replace the dash effects for all class with
+    // sprites made from ludo.ai". One quick-dash VFX sprite per class,
+    // spawned by quickDash() via spawnSpriteBurst when decoded; until the
+    // art is generated (prompts: DASH_FX_LUDO_PROMPTS.md) the files 404
+    // harmlessly and the procedural particle dash FX stays as fallback.
+    // Base art reads LEFT-TO-RIGHT; call sites mirror with flipX.
+    dash_warrior:       'dash_warrior.png',  // amber body-charge shockwave streak
+    dash_mage:          'dash_mage.png',     // violet/blue arcane blink rune burst
+    dash_archer:        'dash_archer.png',   // emerald wind-roll gust spiral
+    dash_rogue:         'dash_rogue.png',    // violet shadow-smoke ninja streak
 
     // v0.26.041 — Per user "for elementalist G skill also simultaneous
     // summon 3 progressively bigger ice blocks forward from the
@@ -41740,7 +41755,7 @@ function resetStats() {
         case 'atk':   player.baseAtk = (player.baseAtk || 0) - 10 * sN; break;
         case 'def':   player.baseDef = (player.baseDef || 0) - 10 * sN; break;
         case 'acc':   player.baseAcc = (player.baseAcc || 0) - 5 * sN; break;
-        case 'speed': player.baseSpeed = (player.baseSpeed || 0) - 1.0 * sN; break;
+        case 'speed': player.baseSpeed = (player.baseSpeed || 0) - 0.5 * sN; break;
         case 'jump':  player.baseJump = (player.baseJump || 0) - 0.5 * sN; break;
       }
     }
@@ -41965,6 +41980,15 @@ function resetCombo() {
     }
   }
 }
+// v0.29.240 — Per-class quick-dash sprite gate (ludo.ai art). Returns the
+// LX_FX key for the player's class dash VFX once that sprite has decoded,
+// else null so every call site keeps its procedural particle fallback.
+// Generation prompts: DASH_FX_LUDO_PROMPTS.md → Sprites/fx/dash_<cls>.png.
+function _classDashSpriteReady() {
+  const key = 'dash_' + player.cls;
+  const img = (typeof LX_FX !== 'undefined') && LX_FX[key];
+  return (img && img.complete && img.naturalWidth > 0) ? key : null;
+}
 function quickDash(dir) {
   player.facing = dir;
   if (player.vy > 1) player.vy = 0;
@@ -41990,15 +42014,27 @@ function quickDash(dir) {
     player.quickDashTimer = 240;        // cooldown only — no motion (≥ invuln window, v0.26.399)
     player.quickDashDir = dir;
     player.vx = 0;
-    // Departure burst at the original tile
-    for (let i = 0; i < 14; i++) {
-      const a = (i / 14) * Math.PI * 2;
-      game.particles.push({
-        x: startX + player.w / 2 + Math.cos(a) * 6,
-        y: player.y + player.h / 2 + Math.sin(a) * 8,
-        vx: Math.cos(a) * 2.4, vy: Math.sin(a) * 1.6,
-        life: 22, color: i % 2 ? '#aaccff' : '#cc99ff', size: 2 + Math.random()
-      });
+    // v0.29.240 — ludo.ai blink sprite (dash_mage). When decoded, the two
+    // 14-particle arcane rings are replaced by a departure + arrival sprite
+    // burst; the procedural rings stay as fallback until the art lands.
+    // The silhouette afterimages along the path are kept in BOTH branches —
+    // same precedent as the rogue Shadow Dash sprite swap (v0.26.018).
+    const _mageDashSpr = _classDashSpriteReady();
+    if (_mageDashSpr) {
+      // Departure — rune burst at the origin tile, mirrored to travel dir.
+      spawnSpriteBurst(startX + player.w / 2, player.y + player.h / 2, _mageDashSpr,
+        { size: 120, life: 20, flipX: dir < 0 });
+    } else {
+      // Departure burst at the original tile
+      for (let i = 0; i < 14; i++) {
+        const a = (i / 14) * Math.PI * 2;
+        game.particles.push({
+          x: startX + player.w / 2 + Math.cos(a) * 6,
+          y: player.y + player.h / 2 + Math.sin(a) * 8,
+          vx: Math.cos(a) * 2.4, vy: Math.sin(a) * 1.6,
+          life: 22, color: i % 2 ? '#aaccff' : '#cc99ff', size: 2 + Math.random()
+        });
+      }
     }
     // Streaking afterimages along the teleport path so the eye reads
     // the trajectory as a blink rather than a no-op pause.
@@ -42011,16 +42047,22 @@ function quickDash(dir) {
         color: `rgba(170,200,255,${(0.55 - k * 0.10).toFixed(2)})`,
       });
     }
-    // Arrival burst — slightly tighter ring, inward velocity so it
-    // reads as the rune "snapping shut" around the destination.
-    for (let i = 0; i < 14; i++) {
-      const a = (i / 14) * Math.PI * 2;
-      game.particles.push({
-        x: endX + player.w / 2 + Math.cos(a) * 4,
-        y: player.y + player.h / 2 + Math.sin(a) * 6,
-        vx: Math.cos(a) * -1.4, vy: Math.sin(a) * -1.0,
-        life: 26, color: i % 2 ? '#cc99ff' : '#88aaff', size: 2 + Math.random() * 1.5
-      });
+    if (_mageDashSpr) {
+      // Arrival — slightly larger burst "snapping shut" on the destination.
+      spawnSpriteBurst(endX + player.w / 2, player.y + player.h / 2, _mageDashSpr,
+        { size: 150, life: 24, flipX: dir < 0 });
+    } else {
+      // Arrival burst — slightly tighter ring, inward velocity so it
+      // reads as the rune "snapping shut" around the destination.
+      for (let i = 0; i < 14; i++) {
+        const a = (i / 14) * Math.PI * 2;
+        game.particles.push({
+          x: endX + player.w / 2 + Math.cos(a) * 4,
+          y: player.y + player.h / 2 + Math.sin(a) * 6,
+          vx: Math.cos(a) * -1.4, vy: Math.sin(a) * -1.0,
+          life: 26, color: i % 2 ? '#cc99ff' : '#88aaff', size: 2 + Math.random() * 1.5
+        });
+      }
     }
     return;
   }
@@ -42076,12 +42118,22 @@ function quickDash(dir) {
   }
 
   // Puff + initial afterimage (themed colour by class)
-  for (let i = 0; i < 2; i++) {
-    game.particles.push({
-      x: player.x + player.w/2, y: player.y + player.h - 4,
-      vx: -dir * (1.5 + Math.random() * 3), vy: -Math.random() * 1.8,
-      life: 22, color: trailHex, size: 2 + Math.random()
-    });
+  // v0.29.240 — ludo.ai dash sprite (dash_warrior / dash_archer /
+  // dash_rogue). When decoded, one mirrored sprite burst trails the launch
+  // point instead of the two loose puff particles; procedural fallback
+  // until the art lands. Afterimage silhouette kept in both branches.
+  const _dashSpr = _classDashSpriteReady();
+  if (_dashSpr) {
+    spawnSpriteBurst(player.x + player.w / 2 - dir * 20, player.y + player.h / 2, _dashSpr,
+      { size: 130, life: 22, flipX: dir < 0 });
+  } else {
+    for (let i = 0; i < 2; i++) {
+      game.particles.push({
+        x: player.x + player.w/2, y: player.y + player.h - 4,
+        vx: -dir * (1.5 + Math.random() * 3), vy: -Math.random() * 1.8,
+        life: 22, color: trailHex, size: 2 + Math.random()
+      });
+    }
   }
   game.afterImages.push({
     x: player.x, y: player.y, facing: player.facing,
@@ -47153,16 +47205,25 @@ function updatePlayer(dt) {
       player._rogueDashBrakeDust = 1;
       const footX = player.x + player.w / 2 + player.quickDashDir * 13;
       const footY = player.y + player.h - 2;
-      for (let i = 0; i < 9; i++) {
-        game.particles.push({
-          x: footX + (Math.random() - 0.5) * 8,
-          y: footY + Math.random() * 4,
-          vx: -player.quickDashDir * (0.8 + Math.random() * 2.0),
-          vy: -0.3 - Math.random() * 1.2,
-          life: 18 + Math.random() * 8,
-          color: i % 2 ? '#d8c19a' : '#b99060',
-          size: 1.6 + Math.random() * 1.8
-        });
+      // v0.29.240 — ludo.ai dash sprite: with dash_rogue decoded, the brake
+      // moment lands a small foot-level smoke puff of the same sprite
+      // instead of the 9 sand particles; procedural dust stays as fallback.
+      const _brakeSpr = (typeof _classDashSpriteReady === 'function') ? _classDashSpriteReady() : null;
+      if (_brakeSpr) {
+        spawnSpriteBurst(footX, footY - 8, _brakeSpr,
+          { size: 64, life: 16, flipX: player.quickDashDir < 0 });
+      } else {
+        for (let i = 0; i < 9; i++) {
+          game.particles.push({
+            x: footX + (Math.random() - 0.5) * 8,
+            y: footY + Math.random() * 4,
+            vx: -player.quickDashDir * (0.8 + Math.random() * 2.0),
+            vy: -0.3 - Math.random() * 1.2,
+            life: 18 + Math.random() * 8,
+            color: i % 2 ? '#d8c19a' : '#b99060',
+            size: 1.6 + Math.random() * 1.8
+          });
+        }
       }
     }
     if (!_isMageBlink && game.time % 2 === 0) {
@@ -71842,7 +71903,17 @@ const LEVELUP_OPTIONS = [
   // cumulative, per-rank bumped 0.2 → 1.0 (5×). Cost stays at 2 SP
   // per rank, cap stays at 50 ranks. Net ceiling: +50.0 Speed total,
   // matching the user-named max.
-  { id:'speed', label:'+1.0 Speed',    cost: 2, cap: 50,  apply: () => { player.baseSpeed += 1.0; } },
+  // v0.29.235 — Per user "use 2sp to +0.5 speed": per-rank halved 1.0 → 0.5
+  // while the 2 SP cost stays. Cap stays at 50 ranks, so the cumulative
+  // ceiling drops +50.0 → +25.0 Speed. Keep the respec deltas in
+  // renderLevelUp's reset switch in sync with this number.
+  // v0.29.238 — Per user "use 1sp to +0.5 spd instead": cost 2 → 1 SP,
+  // per-rank payout unchanged at +0.5. Speed is now priced like every
+  // other lane (1 SP/rank); cap stays 50 ranks / +25.0 cumulative, so
+  // maxing it costs 50 SP instead of 100. The respec refund reads
+  // o.cost, so it follows automatically — only the apply() delta needs
+  // manual syncing with the reset switch.
+  { id:'speed', label:'+0.5 Speed',    cost: 1, cap: 50,  apply: () => { player.baseSpeed += 0.5; } },
   // v0.26.x — Per user: addable Jump stat. 2 SP per rank, +1 jump each; the
   // cap is dynamic so total base jump can never exceed 20 (= 20 - the class's
   // authored base jump). PLAYER_JUMP_HARD_CAP (20) also clamps the effective
@@ -73388,12 +73459,15 @@ function renderLevelUp() {
     card.className = 'lu-card' + (atCap ? ' maxed' : canAfford ? ' affordable' : ' locked');
     card.style.setProperty('--lu-color',  st.color);
     card.style.setProperty('--lu-shadow', st.shadow);
-    const pctFilled = Math.round((spent / o.cap) * 100);
+    // v0.29.238 — guard cap 0 (the Jump lane's dynamic cap is 0 for a class
+    // whose authored base jump already sits at the 20 hard cap): 0/0 is NaN,
+    // which emits an invalid `width:NaN%` the browser silently drops.
+    const pctFilled = o.cap > 0 ? Math.round((spent / o.cap) * 100) : 100;
     card.innerHTML = `
       <div class="lu-header">
         <span class="lu-icon">${st.icon}</span>
         <span class="lu-name">${o.label}</span>
-        <span class="lu-count">${spent}</span>
+        <span class="lu-count">${spent}<span class="lu-cap">/${o.cap}</span></span>
       </div>
       <div class="lu-track"><div class="lu-fill" style="width:${pctFilled}%"></div></div>
       <div class="lu-foot">
@@ -80316,7 +80390,7 @@ function drawBossDecor() {
   for (const px of [Math.round(ww * 0.12), Math.round(ww * 0.88)]) {
     const sx = px - game.camera.x;
     if (sx < -dw || sx > W + dw) continue;
-    try { ctx.drawImage(img, sx - dw / 2, baseY - dh, dw, dh); } catch (e) {}
+    try { _lxDrawSoft(ctx, img, sx - dw / 2, baseY - dh, dw, dh); } catch (e) {}   // v0.29.239 — edge feather
   }
 }
 
@@ -81986,7 +82060,8 @@ function drawWorldProps() {
       sy = prop.y - h;   // legacy fallback (canvas-edge anchored)
     }
     try {
-      ctx.drawImage(img, sx, sy, w, h);
+      // v0.29.239 — edge feather; hang props keep a hard top (attached above)
+      _lxDrawSoft(ctx, img, sx, sy, w, h, anchor === 'hang' ? { noTop: true } : null);
     } catch (e) { /* ignore mid-decode draws */ }
   }
   ctx.imageSmoothingEnabled = _prevSmooth;
@@ -84360,9 +84435,9 @@ function drawShadowClones() {
       if (c.facing < 0) {
         ctx.translate(sx + SW / 2, _cy);
         ctx.scale(-1, 1);
-        ctx.drawImage(_cloneDraw, 0, 0, SW, SH);
+        _lxDrawSoft(ctx, _cloneDraw, 0, 0, SW, SH);   // v0.29.239 — edge feather
       } else {
-        ctx.drawImage(_cloneDraw, sx - SW / 2, _cy, SW, SH);
+        _lxDrawSoft(ctx, _cloneDraw, sx - SW / 2, _cy, SW, SH);   // v0.29.239 — edge feather
       }
       ctx.restore();
       // v0.25.236 — 360° AOE sweep overlay during attack (was a directional
@@ -86195,6 +86270,33 @@ const HERO_VEC_ANIMS = {
     legR:  () => 0.12,
   },
 };
+// v0.29.243 — WEAPON FRAME LOCK. The equipped weapon must hold ONE size and
+// aspect through walk / attack / dash (per user: "ensure that the weapon does
+// not get squished or have major size changes with movement attack or dash").
+// Three distortion sources hit the weapon's transform frame:
+//   1. Leaf-bone deforms: `deform:false` undoes PARENT scales only, so anims
+//      that grow handL itself (attack_rogue up to ~+52%, impale +30%) grew
+//      the weapon with it.
+//   2. Rotation-interleaved shear: the undo multiplies 1/S AFTER the arm's
+//      rotations, and S·R·(1/S) ≠ R — dash/attack poses left a pose-dependent
+//      shear on the weapon.
+//   3. The v0.29.127 chibi-weight squash (land/jump/attack) scales the whole
+//      canvas non-uniformly OUTSIDE the rig, invisible to any chain undo.
+// This helper re-orthonormalizes the live context matrix: position, rotation
+// and mirroring are kept exactly; the scale is forced uniform to √|det| (area-
+// preserving), so shear and squash vanish no matter where they came from.
+function _lxWeaponFrameLock(c) {
+  try {
+    const m = c.getTransform();
+    const det = m.a * m.d - m.b * m.c;
+    if (!det || !isFinite(det)) return;
+    const k = Math.sqrt(Math.abs(det));
+    const rot = Math.atan2(m.b, m.a);
+    const s = det < 0 ? -1 : 1;              // preserve facing mirror handedness
+    const cos = Math.cos(rot) * k, sin = Math.sin(rot) * k;
+    c.setTransform(cos, sin, -sin * s, cos * s, m.e, m.f);
+  } catch (e) { /* getTransform unavailable → keep the raw frame */ }
+}
 const HERO_VEC_DEFORM = {
   idle: { spine: t => ({ sx: 1 - Math.sin(t * Math.PI * 2) * 0.012, sy: 1 + Math.sin(t * Math.PI * 2) * 0.012 }) },
   walk: {
@@ -86940,13 +87042,13 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
           : 0;
         if (archerBowRotation) ctx.rotate(archerBowRotation);
         stackWeaponFn(ctx, OUT);
-      }, { deform: false });
+      }, { deform: false, weaponLock: true });   // v0.29.243 — weapon holds one size
     }
     if (!hideCleanGroundSmashWeapon && _drawsLayer('weapon')) drawBone('handL', () => {
       applyWeaponCarryRotation();
       applyMageWandCounter();
       _drawEquipmentLayer('weapon', ctx, { onlyLayer: onlyPaintLayer, pinBone: 'handL' });
-    }, { deform: false });
+    }, { deform: false, weaponLock: true });   // v0.29.243 — weapon holds one size
     // v0.25.574 — gate now allows the WEAPON paint layer to render when
     // `onlyPaintLayer === 'weapon'` (the paint editor's preview canvas
     // path). The previous `!onlyPaintLayer` check skipped this block
@@ -86962,7 +87064,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
       applyWeaponCarryRotation();
       applyMageWandCounter();
       _drawCustomPaintLayerPinned('weapon', 'handL', ctx);
-    }, { deform: false });
+    }, { deform: false, weaponLock: true });   // v0.29.243 — weapon holds one size
   }
   // v0.25.137 — outlines bumped +1 px (was 1). Eye / mouth / weapon
   // strokes also +1 below for consistency.
@@ -87011,6 +87113,11 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     // the deformed parent's coordinate frame — head stays attached AND
     // doesn't squash. The leaf's own deform (if any) is preserved.
     const undoLeafDeform = opts.deform === false;
+    // v0.29.243 — weaponLock: the weapon draw chains also fold the LEAF's own
+    // deform into the undo (attack_rogue / impale grow handL itself), then
+    // re-orthonormalize the frame so no squash/shear from any source (pose
+    // deforms through rotations, chibi-weight canvas scale) reaches the art.
+    const weaponLock = !!opts.weaponLock;
     const chain = [];
     let cur = bone;
     while (cur) { chain.unshift(cur); cur = HERO_VEC_RIG[cur].parent; }
@@ -87030,7 +87137,8 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
         ctx.scale(d.sx, d.sy);
         // Track cumulative scale from PARENT bones only — the leaf's own
         // deform (if any) is the bone's intentional stretch and stays.
-        if (i < lastIdx) {
+        // (weaponLock: leaf included — the weapon must never inherit it.)
+        if (i < lastIdx || weaponLock) {
           cumParentSx *= d.sx;
           cumParentSy *= d.sy;
         }
@@ -87046,6 +87154,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     if (undoLeafDeform && (cumParentSx !== 1 || cumParentSy !== 1)) {
       ctx.scale(1 / cumParentSx, 1 / cumParentSy);
     }
+    if (weaponLock) _lxWeaponFrameLock(ctx);   // v0.29.243 — strip residual squash/shear
   }
   function drawBone(bone, drawFn, opts) {
     ctx.save(); applyChain(bone, opts); drawFn(); ctx.restore();
@@ -88016,7 +88125,7 @@ function _drawPlayerCustomSprite() {
   const playerFacingRight = (player.facing | 0) >= 0;
   if (spriteFacesRight !== playerFacingRight) ctx.scale(-1, 1);
   _lxUseEntityImageQuality(ctx);
-  ctx.drawImage(sprite, -targetW / 2, -targetH * 0.92, targetW, targetH);
+  _lxDrawSoft(ctx, sprite, -targetW / 2, -targetH * 0.92, targetW, targetH);   // v0.29.239 — edge feather (hero sheets clip too, e.g. weapon swings)
 
   // v0.25.125 — Archer bow overlay. The generic HERO sheets (idle / walk /
   // jump / hit / death / attack) don't include any weapon — only the
@@ -91959,7 +92068,7 @@ function _drawNpcSprite(sprite, cx, feetY, npcName, npc) {
   let _npcFrame = null;
   if (_wandering && typeof _npcWalkFrame === 'function') _npcFrame = _npcWalkFrame(npcName);
   if (!_npcFrame && typeof _npcIdleFrame === 'function') _npcFrame = _npcIdleFrame(npcName);
-  ctx.drawImage(_npcFrame || sprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);
+  _lxDrawSoft(ctx, _npcFrame || sprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);   // v0.29.239 — edge feather (parity with monsters)
   ctx.restore();
 }
 
@@ -92997,10 +93106,14 @@ function _lxEdgesTouched(img) {
   return res;
 }
 let _lxFeatherCv = null, _lxFeatherCtx = null;
-function _lxDrawSoft(c, img, dx, dy, dw, dh) {
+function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
   if (dw == null) { dw = img.width; dh = img.height; }
   const e = _lxEdgesTouched(img);
-  if (!e || dw < 14 || dh < 14) { c.drawImage(img, dx, dy, dw, dh); return; }
+  // v0.29.239 — opts.noTop: hang-anchored art (flowerbaskets etc.) is full-bleed
+  // at the TOP by design (it attaches to the platform above), so fading it would
+  // detach it visually — same rationale as the permanent bottom-edge exclusion.
+  const _noTop = !!(opts && opts.noTop);
+  if (!e || dw < 14 || dh < 14 || (_noTop && !e.l && !e.r)) { c.drawImage(img, dx, dy, dw, dh); return; }
   try {
     const W2 = Math.ceil(dw), H2 = Math.ceil(dh);
     if (!_lxFeatherCv) {
@@ -93025,7 +93138,7 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh) {
     };
     if (e.l) { const F = depth(e.l.f), [y0, hh] = span(e.l, H2); const gr = g.createLinearGradient(0, 0, F, 0); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, y0, F, hh); }
     if (e.r) { const F = depth(e.r.f), [y0, hh] = span(e.r, H2); const gr = g.createLinearGradient(W2, 0, W2 - F, 0); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(W2 - F, y0, F, hh); }
-    if (e.t) { const F = depth(e.t.f), [x0, ww] = span(e.t, W2); const gr = g.createLinearGradient(0, 0, 0, F); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x0, 0, ww, F); }
+    if (e.t && !_noTop) { const F = depth(e.t.f), [x0, ww] = span(e.t, W2); const gr = g.createLinearGradient(0, 0, 0, F); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x0, 0, ww, F); }
     g.globalCompositeOperation = 'source-over';
     c.drawImage(_lxFeatherCv, 0, 0, W2, H2, dx, dy, dw, dh);
   } catch (err) {
@@ -100301,9 +100414,9 @@ function drawWolf(pet, tintColor) {
       // Mirror horizontally for left-facing
       ctx.translate(_left + _dW, _top);
       ctx.scale(-1, 1);
-      ctx.drawImage(_wolfDraw, 0, 0, _dW, _dH);
+      _lxDrawSoft(ctx, _wolfDraw, 0, 0, _dW, _dH);   // v0.29.239 — edge feather
     } else {
-      ctx.drawImage(_wolfDraw, _left, _top, _dW, _dH);
+      _lxDrawSoft(ctx, _wolfDraw, _left, _top, _dW, _dH);   // v0.29.239 — edge feather
     }
     ctx.restore();
   } else {
@@ -100649,12 +100762,19 @@ function drawHazards() {
       ctx.save();
       ctx.globalAlpha = a;
       if (_lxVfxReady(_lxVfxFrame('frostBeam'))) {
+        // v0.29.241 — The source art is a chunky ice shard (~1.6:1), but the
+        // hazard box is 280x32 (8.75:1), so drawing it box-tight squashed the
+        // shard into a flat horizontal smear. Draw the sprite 3.4x taller than
+        // the box, centred on the beam's midline, so it reads as an icicle
+        // again. Hitbox is untouched — this is purely the visual footprint.
+        const vh = h.h * 3.4;
+        const vy = h.y + h.h / 2 - vh / 2;
         if (h.dir < 0) {
-          ctx.translate(beamSx + h.w, h.y);
+          ctx.translate(beamSx + h.w, vy);
           ctx.scale(-1, 1);
-          ctx.drawImage(_lxVfxFrame('frostBeam'), 0, 0, h.w, h.h);
+          ctx.drawImage(_lxVfxFrame('frostBeam'), 0, 0, h.w, vh);
         } else {
-          ctx.drawImage(_lxVfxFrame('frostBeam'), beamSx, h.y, h.w, h.h);
+          ctx.drawImage(_lxVfxFrame('frostBeam'), beamSx, vy, h.w, vh);
         }
       } else {
         // v0.25.757 — Procedural frost-cone fallback rewritten. The
@@ -103392,6 +103512,114 @@ function _prologueOverlay(stanzas, onDone, opts) {
   window.addEventListener('keydown', onKey, true);
   show();
 }
+// =========================================================================
+// CUTSCENE BGM DUCKING (v0.29.242)
+// =========================================================================
+// Per user: "in the introduction videos before the tutorial, the sound and
+// bgm seem to be playing concurrently, ensure that there is ducking of the
+// sounds". The prologue clips carry their own mix, so the music beds must
+// sit UNDER them rather than fight for the same space.
+//
+// The dagger clip (the very first thing a new save sees) had no BGM handling
+// at all. The punch / Gravitos-entry clips did, but by hard-PAUSING _bgmEl —
+// which kills the score mid-bar, and since _bgmFade rewinds currentTime
+// whenever it lands on zero, the track restarted from the top afterwards.
+// This ducks properly: fast ramp down to a floor, held for the clip, slower
+// ramp back up.
+//
+// Two wrinkles drive the hold interval:
+//   • _startPrologue fires loadMap('void') and the dagger clip back to back,
+//     so the map track's fade-IN begins just AFTER we duck and would simply
+//     override us (every _bgmFade cancels the prior one via el._fadeId).
+//     Re-asserting on a timer wins that race.
+//   • Beds appear mid-clip (ambient loops, a boss theme swapping in), so the
+//     target list is re-scanned each tick instead of captured once.
+//
+// Restore levels come from the game's own canonical sources (_bgmTargetVol /
+// _sfxBase × master / _cineVol) rather than a captured sample, so ducking
+// during a fade can't latch a bed at the wrong volume. Ref-counted for the
+// back-to-back chain; every path is wrapped because an audio throw inside a
+// cutscene's finish() would soft-lock the intro.
+const _VID_DUCK_FLOOR   = 0.15;   // fraction of nominal left audible under a clip
+const _VID_DUCK_HOLD_MS = 250;
+let _vidDuckDepth = 0;
+let _vidDuckSet   = null;   // beds we actually ducked (only these get restored)
+let _vidDuckTimer = null;
+
+function _vidDuckBeds() {
+  const out = [];
+  const add = (el) => { if (el && out.indexOf(el) < 0) out.push(el); };
+  try { if (typeof _bgmEl          !== 'undefined') add(_bgmEl); } catch (e) {}
+  try { if (typeof _bgmBossEl      !== 'undefined') add(_bgmBossEl); } catch (e) {}
+  try { if (typeof _bgmActiveMapEl !== 'undefined') add(_bgmActiveMapEl); } catch (e) {}
+  try { if (typeof _cineBgm        !== 'undefined') add(_cineBgm); } catch (e) {}
+  try {
+    if (typeof _ambientEls !== 'undefined' && _ambientEls) for (const k in _ambientEls) add(_ambientEls[k]);
+  } catch (e) {}
+  return out;
+}
+// Canonical un-ducked level for a bed.
+function _vidBedVol(el) {
+  try {
+    if (typeof _cineBgm !== 'undefined' && el === _cineBgm && typeof _cineVol === 'function') return _cineVol();
+    if (el && el._sfxBase != null) {
+      const m = (typeof _SFX_MASTER_VOL !== 'undefined') ? _SFX_MASTER_VOL : 1;
+      return Math.max(0, Math.min(1, el._sfxBase * m));
+    }
+    if (typeof _bgmTargetVol === 'function') return _bgmTargetVol();
+  } catch (e) {}
+  return 0.5;
+}
+function _vidDuckApply() {
+  try {
+    for (const el of _vidDuckBeds()) {
+      let cur, paused;
+      try { cur = el.volume; paused = el.paused; } catch (e) { continue; }
+      if (paused) continue;   // silent bed — leave it alone, and don't restore it later
+      // Floor stays > 0: _bgmFade treats a zero target as "fade out and rewind".
+      const floor = Math.max(0.004, _vidBedVol(el) * _VID_DUCK_FLOOR);
+      if (cur > floor + 0.005) {
+        if (typeof _bgmFade === 'function') _bgmFade(el, floor, 220);
+        else el.volume = floor;
+      }
+      if (_vidDuckSet) _vidDuckSet.add(el);
+    }
+  } catch (e) {}
+}
+function _vidDuckBgm() {
+  try {
+    if (_vidDuckDepth++ > 0) return;   // already ducked — nest
+    _vidDuckSet = new Set();
+    _vidDuckApply();
+    if (_vidDuckTimer) clearInterval(_vidDuckTimer);
+    _vidDuckTimer = setInterval(_vidDuckApply, _VID_DUCK_HOLD_MS);
+  } catch (e) {}
+}
+function _vidUnduckBgm(ms) {
+  try {
+    if (_vidDuckDepth > 0) _vidDuckDepth--;
+    if (_vidDuckDepth > 0) return;     // an outer clip still owns the duck
+    if (_vidDuckTimer) { clearInterval(_vidDuckTimer); _vidDuckTimer = null; }
+    if (_vidDuckSet) {
+      // Only restore beds that are STILL live. Two ways one stops being live
+      // mid-clip, and raising either back to nominal would resurrect music the
+      // mix had deliberately retired:
+      //   • a map track cross-faded out — _bgmActiveMapEl now points elsewhere,
+      //     so it drops out of the current bed list;
+      //   • any bed _bgmFade drove to zero — it ends up paused.
+      const live = _vidDuckBeds();
+      for (const el of _vidDuckSet) {
+        try {
+          if (live.indexOf(el) < 0 || el.paused) continue;
+          const v = _vidBedVol(el);
+          if (typeof _bgmFade === 'function') _bgmFade(el, v, ms == null ? 700 : ms);
+          else el.volume = v;
+        } catch (e) {}
+      }
+    }
+    _vidDuckSet = null;
+  } catch (e) {}
+}
 // v0.29.72 — THE DAGGER POV. Opens the prologue: the first-person
 // Shinobi-daggers-vs-Gravitos Higgsfield clip (clip_prologue_pov.mp4) now plays
 // as its OWN foreground beat FIRST — before the opening stanzas — instead of
@@ -103401,11 +103629,20 @@ function _prologueOverlay(stanzas, onDone, opts) {
 // is blocked, or the safety timer trips — so it can never soft-lock the intro.
 function _prologueDaggerCutscene(onDone) {
   let done = false;
+  // v0.29.242 — this clip previously played its 0.9-volume mix straight over
+  // the void map BGM (loadMap fires immediately before it), which is the
+  // "sound and bgm playing concurrently" the user reported. Duck the beds
+  // under it. _unduck is exactly-once so the muted-autoplay fallback below
+  // can release the duck early without unbalancing the ref-count.
+  let _ducked = true;
+  _vidDuckBgm();
+  const _unduck = () => { if (_ducked) { _ducked = false; try { _vidUnduckBgm(); } catch (e) {} } };
   const finish = () => {
     if (done) return; done = true;
     if (timer) { clearTimeout(timer); timer = null; }
     window.removeEventListener('keydown', onKey, true);
     if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+    _unduck();
     try { onDone && onDone(); } catch (e) {}
   };
   const ov = document.createElement('div');
@@ -103436,6 +103673,7 @@ function _prologueDaggerCutscene(onDone) {
       const pp = vid.play();
       if (pp && pp.catch) pp.catch(() => {
         vid.muted = true;   // unmuted autoplay refused → retry silent rather than dying
+        _unduck();          // v0.29.242 — silent clip: nothing to duck under, give the score back
         const p2 = vid.play(); if (p2 && p2.catch) p2.catch(finish);
       });
     } catch (e) { finish(); }
@@ -103712,16 +103950,19 @@ function _prologuePunchCutscene(onDone) {
   // v0.29.59 — duck the game BGM for the cutscene so the clip's own
   // sound mix (rumble → impact boom → ringing) owns the moment; the
   // track resumes on finish only if it was actually playing before.
-  const _bgmWasPlaying = (typeof _bgmEl !== 'undefined' && _bgmEl && !_bgmEl.paused);
-  if (_bgmWasPlaying) { try { _bgmEl.pause(); } catch (e) {} }
+  // v0.29.242 — was a hard pause/resume of _bgmEl only: it cut the score
+  // dead mid-bar, restarted it from 0:00 on resume (_bgmFade rewinds on a
+  // zero target), and ignored the per-map / boss / ambient beds entirely.
+  // Swapped to the shared ducking helper, which covers all of them.
+  let _ducked = true;
+  _vidDuckBgm();
+  const _unduck = () => { if (_ducked) { _ducked = false; try { _vidUnduckBgm(); } catch (e) {} } };
   const finish = () => {
     if (done) return; done = true;
     if (timer) { clearTimeout(timer); timer = null; }
     window.removeEventListener('keydown', onKey, true);
     if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
-    if (_bgmWasPlaying) {
-      try { const _rp = _bgmEl.play(); if (_rp && _rp.catch) _rp.catch(() => {}); } catch (e) {}
-    }
+    _unduck();
     try { onDone(); } catch (e) {}
   };
   const ov = document.createElement('div');
@@ -103753,6 +103994,7 @@ function _prologuePunchCutscene(onDone) {
       if (pp && pp.catch) pp.catch(() => {
         // Un-muted autoplay refused → retry silent rather than dying.
         vid.muted = true;
+        _unduck();   // v0.29.242 — silent clip: nothing to duck under
         const p2 = vid.play(); if (p2 && p2.catch) p2.catch(finish);
       });
     } catch (e) { finish(); }
@@ -103775,14 +104017,19 @@ function _prologuePunchCutscene(onDone) {
 // 10s safety timer trips — so a bad/absent asset can never soft-lock the arena.
 function _gravitosEntryCutscene(onDone) {
   let done = false;
-  const _bgmWasPlaying = (typeof _bgmEl !== 'undefined' && _bgmEl && !_bgmEl.paused);
-  if (_bgmWasPlaying) { try { _bgmEl.pause(); } catch (e) {} }
+  // v0.29.242 — was a hard pause/resume of _bgmEl (see _prologuePunchCutscene
+  // for why that misbehaved). This arena is a boss map, so the bed that
+  // actually needs ducking is usually _bgmBossEl or a per-map track, neither
+  // of which the old code touched — the clip really did play over the score.
+  let _ducked = true;
+  _vidDuckBgm();
+  const _unduck = () => { if (_ducked) { _ducked = false; try { _vidUnduckBgm(); } catch (e) {} } };
   const finish = () => {
     if (done) return; done = true;
     if (timer) { clearTimeout(timer); timer = null; }
     window.removeEventListener('keydown', onKey, true);
     if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
-    if (_bgmWasPlaying) { try { const _rp = _bgmEl.play(); if (_rp && _rp.catch) _rp.catch(() => {}); } catch (e) {} }
+    _unduck();
     try { onDone && onDone(); } catch (e) {}
   };
   const ov = document.createElement('div');
@@ -103813,6 +104060,7 @@ function _gravitosEntryCutscene(onDone) {
       const pp = vid.play();
       if (pp && pp.catch) pp.catch(() => {
         vid.muted = true;
+        _unduck();   // v0.29.242 — silent clip: nothing to duck under
         const p2 = vid.play(); if (p2 && p2.catch) p2.catch(finish);
       });
     } catch (e) { finish(); }
@@ -103838,8 +104086,16 @@ function _gravitosEntryCutscene(onDone) {
 // onDone fires exactly once (clip end / skip / error / safety timer).
 function _gravitosDefeatCutscene(onDone) {
   let done = false, raf = 0, timer = 0;
-  const _bgmWasPlaying = (typeof _bgmEl !== 'undefined' && _bgmEl && !_bgmEl.paused);
-  if (_bgmWasPlaying) { try { _bgmEl.pause(); } catch (e) {} }
+  // v0.29.242 — same hard pause/resume swapped for the shared ducking helper
+  // as the other clips. This one is a boss-arena beat, so the live bed is the
+  // boss / per-map track that the old _bgmEl-only pause never touched.
+  // Ducked LAZILY here, unlike the other cutscenes: the dragon-knight clip
+  // isn't shipped yet, so the live path is the SILENT procedural canvas scene
+  // — the old code muted the score under it for nothing. Only the real clip
+  // (oncanplay, below) takes the duck.
+  let _ducked = false;
+  const _duck   = () => { if (!_ducked) { _ducked = true;  try { _vidDuckBgm();   } catch (e) {} } };
+  const _unduck = () => { if (_ducked)  { _ducked = false; try { _vidUnduckBgm(); } catch (e) {} } };
   const finish = () => {
     if (done) return; done = true;
     if (raf) cancelAnimationFrame(raf);
@@ -103847,7 +104103,7 @@ function _gravitosDefeatCutscene(onDone) {
     window.removeEventListener('keydown', onKey, true);
     window.removeEventListener('resize', resize);
     if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
-    if (_bgmWasPlaying) { try { const _rp = _bgmEl.play(); if (_rp && _rp.catch) _rp.catch(() => {}); } catch (e) {} }
+    _unduck();
     try { onDone && onDone(); } catch (e) {}
   };
   const ov = document.createElement('div');
@@ -103881,7 +104137,8 @@ function _gravitosDefeatCutscene(onDone) {
       usingVideo = true;
       if (raf) { cancelAnimationFrame(raf); raf = 0; }
       vid.style.opacity = '1'; vid.volume = 0.9;
-      const pp = vid.play(); if (pp && pp.catch) pp.catch(() => { vid.muted = true; const p2 = vid.play(); if (p2 && p2.catch) p2.catch(finish); });
+      _duck();   // v0.29.242 — real clip took over: duck the beds under its mix
+      const pp = vid.play(); if (pp && pp.catch) pp.catch(() => { vid.muted = true; _unduck(); const p2 = vid.play(); if (p2 && p2.catch) p2.catch(finish); });
       if (timer) clearTimeout(timer); timer = setTimeout(finish, 12000);
     };
     vid.onended = finish;

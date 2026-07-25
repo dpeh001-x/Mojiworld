@@ -148,6 +148,61 @@
   <b>Heads-up.</b> An earlier implementation of these phases targeted <code>v0.5.1</code> and was preserved locally at tag <code>phase-1-2-3-on-v0.5.1</code>. This is the rebuild against the current <code>v0.9.8</code> codebase, which had moved substantially (new bosses like Gravitos, minimap/taxi, chibi character rewrite).
 </div>
 
+<h2>v0.29.241 <span class="tag"><span class="pill bug">bug</span> Frostkin&rsquo;s ice beam un-squashed &mdash; the shard is 3.4&times; taller and reads as an icicle again</h2>
+<p>Per user &mdash; <em>&ldquo;this icicle sprite by frost kin appears to be horizontally extremely stretched, the vertical height should be more to make it look less stretched&rdquo;.</em> Frostkin&rsquo;s <code>freezeBeam</code> hazard box is 280&times;32 px (8.75:1), and the renderer was drawing <code>frost_beam.webp</code> box-tight into it. The source art is a chunky ice shard at roughly 1.6:1, so it was being crushed ~9&times; vertically &mdash; on screen it read as a flat horizontal smear skewering the mob rather than a spike of ice.</p>
+<ul>
+<li><b>&#10052; Visual footprint decoupled from the hitbox</b> &mdash; the sprite now draws at <code>h.h &times; 3.4</code> (32 &rarr; ~109 px) centred on the beam&rsquo;s midline, restoring a ~4:1 on-screen aspect. Elongated, as a beam should be, but no longer a stretched line.</li>
+<li><b>&#9878; Gameplay untouched</b> &mdash; the hazard rect, 280 px reach, damage, and the 1.5 s movement-slow are all unchanged; only the drawn rect grew. Mirroring for <code>dir &lt; 0</code> follows the same taller box.</li>
+<li><b>&#128736; Fallback unaffected</b> &mdash; the procedural frost-cone (used only before the art decodes) still fills the hazard box exactly as before.</li>
+</ul>
+
+<h2>v0.29.242 <span class="tag"><span class="pill bug">bug</span> Cinematics no longer talk over the score &mdash; real BGM ducking on every video clip</h2>
+<p>Per user &mdash; <em>&ldquo;in the introduction videos before the tutorial, the sound and bgm seem to be playing concurrently, ensure that there is ducking&rdquo;.</em> Correct on both counts, and the cause was worse than it sounded:</p>
+<ul>
+<li><b>&#127909; The dagger POV clip had no audio handling whatsoever.</b> It is the first thing a new save sees, it plays at <code>volume&nbsp;0.9</code>, and <code>_startPrologue</code> fires <code>loadMap('void')</code> immediately before it &mdash; so the void theme faded up to full underneath the clip's own mix. That is the doubled audio.</li>
+<li><b>&#9208; The other clips &ldquo;ducked&rdquo; by hard-pausing <code>_bgmEl</code>.</b> Not ducking &mdash; the score stopped dead mid-bar, and because <code>_bgmFade</code> rewinds <code>currentTime</code> whenever it lands on zero, the track restarted from 0:00 afterwards. Worse, they only ever paused the <em>default</em> bed: the Gravitos clips play in a boss arena, where the live music is <code>_bgmBossEl</code> or a per-map track that the pause never touched. Those genuinely played over the score.</li>
+</ul>
+<p><b>The fix</b> &mdash; one shared helper (<code>_vidDuckBgm</code> / <code>_vidUnduckBgm</code>) now used by all four video cutscenes: dagger POV, Gravitos entry, the knockdown punch, and the Gravitos defeat. It ramps every live bed &mdash; default, boss, per-map, cinematic score and ambient loops &mdash; down to <b>15&#8239;% of nominal</b> over ~220&#8239;ms, holds it there for the clip, then ramps back over ~700&#8239;ms. The floor is deliberately non-zero so <code>_bgmFade</code> never treats it as a fade-out and rewinds the track.</p>
+<p>Three details that make it hold up:</p>
+<ul>
+<li><b>The duck is re-asserted on a 250&#8239;ms timer.</b> <code>loadMap</code> and the dagger clip fire back to back, so the map track's fade-<em>in</em> starts just <em>after</em> the duck and would otherwise override it outright (each <code>_bgmFade</code> cancels the previous via <code>el._fadeId</code>). Re-asserting wins that race, and also catches beds that appear mid-clip.</li>
+<li><b>Restore levels come from the game's own sources</b> (<code>_bgmTargetVol()</code>, <code>_sfxBase &times; master</code>, <code>_cineVol()</code>) rather than a captured sample &mdash; ducking during a fade can't latch a bed at the wrong volume. Beds that stopped being live mid-clip (cross-faded out, or driven to zero and paused) are skipped, so the restore can't resurrect music the mix had retired.</li>
+<li><b>Silent clips release the duck.</b> If unmuted autoplay is refused and a clip falls back to muted, it hands the score straight back. The Gravitos <em>defeat</em> beat ducks lazily for the same reason &mdash; its clip isn't shipped yet, so the live path is the silent procedural canvas scene, which the old code was muting the score under for nothing.</li>
+</ul>
+<p>Ref-counted for the back-to-back chain, and every path is wrapped &mdash; an audio throw inside a cutscene's <code>finish()</code> would soft-lock the intro. The Void transcension clip is untouched: it ships <code>muted</code>, so there is nothing to duck under.</p>
+
+<h2>v0.29.240 <span class="tag"><span class="pill feat">feat</span> Class dashes go ludo &mdash; per-class sprite VFX replace the procedural dash puffs</h2>
+<p>Per user &mdash; <em>&ldquo;replace the dash effects for all class with sprites made from ludo.ai&rdquo;.</em> The double-tap quick dash swaps its hand-rolled particle effects for dedicated ludo.ai sprite bursts, one per class fantasy:</p>
+<ul>
+<li><b>&#9876; Four new LX_FX slots</b> &mdash; <code>dash_warrior</code> (amber charge shockwave), <code>dash_mage</code> (arcane blink burst), <code>dash_archer</code> (emerald wind roll), <code>dash_rogue</code> (violet shadow-smoke streak), loaded from <code>Sprites/fx/</code> with the usual <code>.png</code>&#8596;<code>.webp</code> retry.</li>
+<li><b>&#128168; Spawn points:</b> warrior / archer / rogue fire one mirrored burst trailing the launch point; the mage blink spawns a departure burst at the origin tile and a larger snap-shut burst at the destination; the rogue&rsquo;s end-of-dash brake dust becomes a small foot-level puff of the same sprite.</li>
+<li><b>&#128736; Graceful fallback:</b> every spawn is gated on the sprite having decoded &mdash; until the art is dropped in, the previous procedural particle rings / puffs render unchanged. Afterimage silhouette trails stay in both branches (same precedent as the rogue Shadow Dash sprite swap in v0.26.018), so the dash never loses readability mid-rollout.</li>
+<li><b>&#127912; Prompt library:</b> new <code>DASH_FX_LUDO_PROMPTS.md</code> &mdash; locked Mojiworld style prefix, one block per class, ludo.ai settings and the drop-in checklist. Files can land one at a time in any order; no code change needed after the drop.</li>
+</ul>
+
+<h2>v0.29.239 <span class="tag"><span class="pill polish">polish</span> Edge feather goes universal &mdash; every cut-off sprite now fades out softly</h2>
+<p>Per user &mdash; <em>&ldquo;ensure that the sprites that are cut off by the edges are feathered nicely so they don&rsquo;t look like there is a sudden cutoff&rdquo;.</em> The v0.29.198 edge feather (a short <code>destination-out</code> alpha fade on any sprite whose art runs into its own canvas border) only covered monsters and bosses. An audit of every other bitmap draw path in the renderer found six that still drew raw hard-cut edges &mdash; each now routes through <code>_lxDrawSoft</code>:</p>
+<ul>
+<li><b>&#129489; NPCs:</b> static sprites plus their idle-breathing and walk-cycle frames (<code>_drawNpcSprite</code>) &mdash; the largest previously-unfeathered art on screen, up to 115&nbsp;px tall.</li>
+<li><b>&#9876; The player:</b> hero sheets &mdash; idle / walk / jump / hit / death / attack frames, where weapon-swing poses are the usual edge-clippers.</li>
+<li><b>&#128058; Summons:</b> ranger / beastmaster / skyhunter wolves, the eagle and the werewolf (<code>drawWolf</code>), plus the ninja&rsquo;s three shadow clones.</li>
+<li><b>&#127794; World props:</b> banners, lanterns, groves&hellip; with one deliberate exception &mdash; <b>hang-anchored</b> props (flowerbaskets) keep a hard TOP edge via the new <code>noTop</code> option, since their art is full-bleed at the top by design where it attaches to the platform above. Same rationale as the feather&rsquo;s permanent bottom-edge exclusion for planted feet.</li>
+<li><b>&#127963; Boss-arena pillars:</b> the brick-and-flame columns flanking every arena.</li>
+</ul>
+<p>Deliberately skipped: projectiles (tiny, fast, rotating &mdash; a feather would only blur them) and UI portraits (full-bleed squares by design). Clean sprites still take the exact old <code>drawImage</code> path &mdash; the one-time 48&times;48 alpha probe per image means zero per-frame cost for the vast majority of art.</p>
+
+<h2>v0.29.238 <span class="tag"><span class="pill polish">polish</span> Speed lane repriced &mdash; <b>1 SP now buys +0.5 Speed</b>, and every stat card now shows its rank cap</h2>
+<p>Per user &mdash; <em>&ldquo;change use 2sp to +0.5 speed&rdquo;</em>, then <em>&ldquo;use 1sp to +0.5 spd instead&rdquo;.</em> The level-up panel&rsquo;s Speed lane used to grant <code>+1.0</code> base speed per <b>2 SP</b> rank, which made movement the runaway-best SP sink: 50 ranks stacked to <code>+50.0</code> cumulative, enough to outrun mob aggro logic and trivialise platforming gaps.</p>
+<ul>
+<li><b>&#9889; Per-rank payout:</b> <code>+1.0</code> &rarr; <code>+0.5</code> base speed.</li>
+<li><b>&#128176; Cost:</b> <b>2 SP</b> &rarr; <b>1 SP</b> per rank. Speed is now priced like every other lane, so the panel no longer shows a lone &ldquo;2 SP&rdquo; outlier.</li>
+<li><b>Net effect:</b> the rank cap stays at <b>50</b>, so the ceiling drops <code>+50.0</code> &rarr; <code>+25.0</code> cumulative, and maxing the lane costs <b>50 SP</b> instead of 100. Per <em>SP spent</em>, speed is now exactly half as efficient as before.</li>
+<li><b>&#8635; Respec kept in sync:</b> the Mojicoin stat-reset path reverses <code>&minus;0.5 &times; ranks</code> to match the new <code>apply()</code> delta &mdash; left unchanged it would have subtracted speed the player never received, driving <code>baseSpeed</code> negative. The SP refund reads <code>o.cost</code> directly, so it tracks the new price automatically.</li>
+<li><b>&#9888; Existing saves:</b> ranks already bought keep the <code>baseSpeed</code> they granted. But a respec refunds at the <em>new</em> 1 SP price &mdash; a character who bought 20 speed ranks at 2 SP gets 20 SP back, not 40. Anyone sitting on heavy pre-patch speed investment loses that surplus if they reset.</li>
+</ul>
+<p>Per user &mdash; <em>&ldquo;show on the bar the max speed stat&rdquo;.</em> Every stat lane has a rank ceiling, but the card only printed the <em>current</em> invested count &mdash; so the first sign a cap existed was the lane abruptly flipping to <span class="pill">MAXED</span> mid-spend. The count now reads <code>12<span style="color:#8a8a9a">/50</span></code>, cap dimmed so the live figure still leads. Applied to all lanes, not just Speed &mdash; the ceiling was invisible on every one of them.</p>
+<p>Also fixed while in the renderer: the fill-bar percentage computed <code>spent / o.cap</code> unguarded. The Jump lane&rsquo;s cap is dynamic (<code>(20 &minus; class base jump) &times; 2</code>) and evaluates to <b>0</b> for a class already authored at the jump hard cap &mdash; <code>0/0</code> is <code>NaN</code>, emitting a <code>width:NaN%</code> the browser silently discards. Now clamps to a full bar.</p>
+
 <h2>v0.29.234 <span class="tag"><span class="pill polish">polish</span> Animator refreshed to the current build &mdash; manifests regenerated, zero cache holes</h2>
 <p>Per user &mdash; <em>&ldquo;update the monster animator to the most current build, ensure it does not cache&rdquo;.</em> Audit of every path a stale byte could reach the tool:</p>
 <ul>
