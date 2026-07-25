@@ -18,8 +18,12 @@ Therefore, for EVERY session:
    `assert not any(0xD800 <= ord(c) <= 0xDFFF for c in s)`.
 3. **Commit after every shipped change, push when a feature lands.** `origin`
    is wired to `dpeh001-x/Mojiworld` (the canonical repo as of 2026-06-11,
-   per user — previously `dpeh001-x/LevelX`; the local folder stays at
-   `Desktop\Mojiworld` and is the working copy). After a feature/fix lands
+   per user — previously `dpeh001-x/LevelX`). **The working copy is
+   `C:\Users\dpeh0\Mojiworld` (local disk, as of 2026-07-25 per user)** —
+   the old `OneDrive\Desktop\Mojiworld` folder is a git-free static copy
+   only; OneDrive sync fought git (lock contention, minutes-long status,
+   corrupted fetches), so never re-create a `.git` there. All edits, commits
+   and pushes happen in `C:\Users\dpeh0\Mojiworld`. After a feature/fix lands
    and is verified: `git add -A && git commit`, then `git push origin main`
    per the sync-first rule below. Small, frequent commits make loss
    impossible and write races diagnosable.
