@@ -8887,7 +8887,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.243';
+const GAME_VERSION = 'v0.29.247';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -106215,7 +106215,55 @@ const _CINE_BEAT_TRACK = {
   epilogue_gravitos:  'audio/The Singularity.mp3',
   zodiac_twelve_done: 'audio/The Singularity.mp3',
 };
-let _cineDuckedVols = null;   // { bgm, boss } captured when the score ducks the BGM
+// v0.29.244 — CINEMATIC MIX OWNERSHIP. Per user: "ensure that 2 bgms do not
+// play together at the same time especially when the story cutscene plays".
+// The v0.29.50 duck only silenced _bgmEl + _bgmBossEl — but most maps play a
+// PER-MAP track (_bgmActiveMapEl / _bgmMapEls), and the loading theme
+// (_menuBgm) can still be fading when the prologue opens, so the cinematic
+// score layered straight over whatever was already running. Now a cinematic
+// owns the mix outright:
+//   • every rival bed is faded to true silence (not a floor) on start;
+//   • a 250 ms re-assert wins the race against the loadMap that fires
+//     mid-cutscene and would otherwise fade its map track back in;
+//   • _setBossBgm parks its request instead of starting a second track;
+//   • the hand-back replays exactly ONE track, and only after the score has
+//     finished fading out — so the two never overlap even for a crossfade.
+let _cineOwnsMix      = false;
+let _cinePendingBgm   = null;   // {isBoss, mapId} parked by loadMap during a cinematic
+let _cineHoldTimer    = null;   // re-assert interval while the score owns the mix
+let _cineHandbackTimer = null;  // delayed "give the map its track back" timer
+// Every music bed that is NOT the cinematic score. Re-scanned per pass because
+// beds appear mid-cutscene (a map track lazily built by _bgmMapEl, a boss theme
+// swapping in). Each lookup is individually guarded: these are declared further
+// down this script, so an early call would otherwise throw on the TDZ.
+function _cineRivalBeds() {
+  const out = [];
+  const add = (el) => { if (el && el !== _cineBgm && out.indexOf(el) < 0) out.push(el); };
+  try { add(_bgmEl); } catch (e) {}
+  try { add(_bgmBossEl); } catch (e) {}
+  try { add(_bgmActiveMapEl); } catch (e) {}
+  try { add(_menuBgm); } catch (e) {}
+  // Every per-map element, not just the active one: a cross-fade in flight
+  // leaves the OUTGOING track playing for ~600 ms and _bgmActiveMapEl already
+  // points at the incoming one, so the outgoing track would slip the net.
+  try { for (const _id in _bgmMapEls) add(_bgmMapEls[_id]); } catch (e) {}
+  return out;
+}
+function _cineSilenceRivals() {
+  try {
+    for (const el of _cineRivalBeds()) {
+      let paused, vol;
+      try { paused = el.paused; vol = el.volume; } catch (e) { continue; }
+      if (paused && vol <= 0.0005) continue;   // already silent — leave it alone
+      try {
+        // Target 0, not a floor: a ducked-but-audible second theme is exactly
+        // what this fix exists to remove. _bgmFade pauses + rewinds at zero.
+        if (typeof _bgmFade === 'function') _bgmFade(el, 0, 450);
+        else { el.pause(); el.volume = 0; }
+      } catch (e) {}
+    }
+  } catch (e) {}
+}
 function _cineVol() {
   let v = 0.55, muted = false;
   try { if (typeof _lxGetSettings === 'function') { const s = _lxGetSettings(); v = (s.bgm / 100) * 0.62; muted = !!s.mute; } } catch (e) {}
@@ -106225,18 +106273,21 @@ function _cineScoreStart(src, opts) {
   opts = opts || {};
   try {
     if (!src) return;
-    // Duck the live map + boss BGM so the cinematic score sits alone. Capture
-    // the pre-duck volumes once so a nested start doesn't overwrite them.
-    if (_cineDuckedVols == null) {
-      _cineDuckedVols = {
-        bgm:  (typeof _bgmEl !== 'undefined' && _bgmEl) ? _bgmEl.volume : null,
-        boss: (typeof _bgmBossEl !== 'undefined' && _bgmBossEl) ? _bgmBossEl.volume : null,
-      };
-    }
-    if (typeof _bgmFade === 'function') {
-      if (typeof _bgmEl !== 'undefined' && _bgmEl && !_bgmEl.paused) _bgmFade(_bgmEl, 0, 700);
-      if (typeof _bgmBossEl !== 'undefined' && _bgmBossEl && !_bgmBossEl.paused) _bgmFade(_bgmBossEl, 0, 700);
-    }
+    // v0.29.244 — a pending hand-back from a previous cinematic must not fire
+    // into this one (back-to-back prologue beats).
+    if (_cineHandbackTimer) { clearTimeout(_cineHandbackTimer); _cineHandbackTimer = null; }
+    // A jukebox pick hijacks _bgmEl.src. Stop it cleanly so the hand-back later
+    // reasserts the MAP theme rather than resuming the player's jukebox track.
+    try { if (_jukeboxPlaying && typeof jukeboxStop === 'function') jukeboxStop({ silent: true }); } catch (e) {}
+    // The loading/menu theme has its own fade + first-gesture retry; retire it
+    // outright so that retry can't resurrect it on top of the cinematic.
+    try { if (typeof window._lxMenuBgmStop === 'function') window._lxMenuBgmStop(400); } catch (e) {}
+    // Take the mix: silence every rival bed, then hold them silent for the
+    // duration (loadMap / gesture unlockers keep trying to start music).
+    _cineOwnsMix = true;
+    _cineSilenceRivals();
+    if (_cineHoldTimer) clearInterval(_cineHoldTimer);
+    _cineHoldTimer = setInterval(_cineSilenceRivals, 250);
     if (_cineBgm._srcName !== src) { _cineBgm._srcName = src; _cineBgm.src = src; }
     _cineBgm.loop = opts.loop !== false;
     try { _cineBgm.currentTime = 0; } catch (e) {}
@@ -106262,21 +106313,37 @@ function _cineScoreStart(src, opts) {
 }
 function _cineScoreStop(fadeMs, restoreBgm) {
   try {
+    const _ms = fadeMs || 800;
     _cineBgm._on = false;
-    if (typeof _bgmFade === 'function') _bgmFade(_cineBgm, 0, fadeMs || 800);
+    _cineOwnsMix = false;
+    if (_cineHoldTimer) { clearInterval(_cineHoldTimer); _cineHoldTimer = null; }
+    if (typeof _bgmFade === 'function') _bgmFade(_cineBgm, 0, _ms);
     else { try { _cineBgm.pause(); } catch (e) {} }
-    // Restore the ducked map/boss BGM to their pre-duck volumes. Skipped when
-    // the caller knows a loadMap will reassert the track itself (the prologue).
-    if (restoreBgm && _cineDuckedVols) {
-      const d = _cineDuckedVols;
-      try {
-        if (typeof _bgmFade === 'function') {
-          if (typeof _bgmEl !== 'undefined' && _bgmEl && d.bgm != null && d.bgm > 0.001) _bgmFade(_bgmEl, d.bgm, fadeMs || 800);
-          if (typeof _bgmBossEl !== 'undefined' && _bgmBossEl && d.boss != null && d.boss > 0.001) _bgmFade(_bgmBossEl, d.boss, fadeMs || 800);
-        }
-      } catch (e) {}
+    // v0.29.244 — hand the mix back by replaying the canonical selector rather
+    // than un-ducking remembered volumes. _setBossBgm fades every bed it does
+    // not want to zero, so this can never leave two themes running, and it
+    // picks the RIGHT one even if the player changed maps mid-cutscene.
+    // A map change that arrived DURING the cinematic was parked in
+    // _cinePendingBgm and wins — it is honoured even when the caller passed
+    // restoreBgm=false (that flag means "a loadMap will follow"; the parked
+    // request IS that loadMap, already spent and otherwise lost to silence).
+    // Deferred by the full fade so the score is inaudible before the map theme
+    // starts: strictly one track at a time, no crossfade window.
+    const req = _cinePendingBgm;
+    _cinePendingBgm = null;
+    if (restoreBgm || req) {
+      if (_cineHandbackTimer) clearTimeout(_cineHandbackTimer);
+      _cineHandbackTimer = setTimeout(() => {
+        _cineHandbackTimer = null;
+        try {
+          if (typeof _setBossBgm !== 'function') return;
+          if (req) { _setBossBgm(req.isBoss, req.mapId); return; }
+          const _id = (typeof game !== 'undefined' && game) ? game.currentMap : null;
+          const _mb = (typeof MAPS !== 'undefined' && MAPS && _id) ? MAPS[_id] : null;
+          _setBossBgm(!!(_mb && _mb.isBossArena), _id);
+        } catch (e) {}
+      }, _ms + 60);
     }
-    _cineDuckedVols = null;
   } catch (e) {}
 }
 // v0.25.436 — per-map BGM registry. Each entry maps a MAPS[id] to a
@@ -107711,6 +107778,22 @@ function _bgmFade(el, target, durationMs) {
 // over both the boss and default tracks. Boss arenas still win regardless
 // of map id so the boss theme overrides any per-map track on a boss map.
 function _setBossBgm(isBoss, mapId) {
+  // v0.29.244 — a cinematic score owns the mix while it plays. loadMap fires
+  // during the prologue (and during any map-changing story beat), and its
+  // fade-in used to layer the map theme straight over the cinematic. Park the
+  // request, keep the beds silent, and let _cineScoreStop replay it once the
+  // score has faded. Guarded: _cineOwnsMix is declared later in this script.
+  try {
+    if (_cineOwnsMix) {
+      _cinePendingBgm = { isBoss: !!isBoss, mapId: mapId || null };
+      _cineSilenceRivals();
+      return;
+    }
+    // A real map change supersedes any pending hand-back — without this, a
+    // loadMap right after a cutscene closes would be overwritten ~1 s later
+    // by the parked request for the map the player already left.
+    if (_cineHandbackTimer) { clearTimeout(_cineHandbackTimer); _cineHandbackTimer = null; _cinePendingBgm = null; }
+  } catch (e) {}
   // v0.25.767 — Priority order changed: per-map BGM now wins over the
   // generic boss track. Previously every isBossArena: true map played the
   // shared bgm_boss.mp3 regardless of map id. With the v0.25.767 audio
