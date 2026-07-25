@@ -242,31 +242,42 @@ window.LX_ANIM_CALIB = {
   },
   "gravitos3": {
     "idle": {
-      "s": 1,
+      "s": 1.02,
       "dx": 0,
       "dy": 0.03
     },
     "walk": {
-      "s": 1.04,
+      "s": 1.22,
       "dx": 0,
-      "dy": 0.03
+      "dy": 0.05,
+      "fs": [
+        1.0705,
+        1.0549,
+        1,
+        1.0449,
+        0.9843,
+        0.8929,
+        0.8814,
+        0.865,
+        1.065
+      ]
     },
     "attack": {
-      "s": 1.06,
+      "s": 1.12,
       "dx": 0,
-      "dy": 0.03
+      "dy": 0.04
     }
   },
   "gravitos3star": {
     "idle": {
       "s": 1,
       "dx": 0,
-      "dy": 0.0632
+      "dy": 0.03
     },
     "walk": {
       "s": 1.23,
       "dx": 0,
-      "dy": 0.0842
+      "dy": 0.05
     },
     "attack": {
       "s": 2.8,
@@ -354,7 +365,7 @@ window.LX_ANIM_CALIB = {
       "dy": 0
     },
     "attack": {
-      "s": 1,
+      "s": 1.09,
       "dx": 0.265,
       "dy": 0
     }
@@ -390,7 +401,7 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.08,
       "dx": 0,
-      "dy": 0.015
+      "dy": -0.01
     }
   },
   "gravitospunch": {
@@ -409,12 +420,12 @@ window.LX_ANIM_CALIB = {
     "walk": {
       "s": 1.655,
       "dx": 0,
-      "dy": 0.55
+      "dy": 0.08
     },
     "attack": {
-      "s": 1.743,
+      "s": 1.66,
       "dx": 0,
-      "dy": 0.55
+      "dy": 0.045
     }
   },
   "towerArbiter": {
@@ -426,12 +437,12 @@ window.LX_ANIM_CALIB = {
     "walk": {
       "s": 1.515,
       "dx": 0.065,
-      "dy": 0.46
+      "dy": 0.02
     },
     "attack": {
       "s": 1.77,
       "dx": 0.115,
-      "dy": 0
+      "dy": -0.005
     }
   },
   "octobaby": {
