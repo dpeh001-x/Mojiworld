@@ -8887,7 +8887,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.252';
+const GAME_VERSION = 'v0.29.253';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -46541,7 +46541,7 @@ function _atkMonBox(m) {
     const _hbSt = (m._frameIsAttack || (m.atkAnimUntil != null &&
         ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) < m.atkAnimUntil))
       ? 'attack' : ((Math.abs(m.vx || 0) > 0.6) ? 'walk' : 'idle');
-    const _chb = _lxAtkHitbox(m._phaseSprite || m.type, _hbSt);
+    const _chb = _lxAtkHitbox(m._gravStarKey || m._phaseSprite || m.type, _hbSt);   // v0.29.253 — star-form key resolved first, matching the draw path (gravitos2star/3star hitbox entries were unreachable)
     if (_chb) {
       const _flip = ((m.facing | 0) < 0) !== (!m.isBoss && typeof _MOB_SPRITE_XFLIP !== 'undefined' && _MOB_SPRITE_XFLIP.has(m.type));
       const _bw = _chb.w * visH, _bh = _chb.h * visH;
@@ -92855,13 +92855,24 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
   // zodiac bosses key on 'zodiac_<sign>'. No-op when {s:1,dx:0,dy:0}.
   if (typeof _lxAnimCalib === 'function') {
     const _bst = _isAttack ? 'attack' : ((typeof _bossMoving === 'function' && _bossMoving(m)) ? 'walk' : 'idle');
-    const _bk  = m._phaseSprite || (m.zodiacSign ? ('zodiac_' + m.zodiacSign) : m.type);
+    // v0.29.253 — resolve _gravStarKey FIRST, like every sibling key in this
+    // function (_metaKey/_sizeStrict/_frameTrust/content-norm). It was omitted
+    // here only, so the animator-authored gravitospunch / gravitos2star /
+    // gravitos3star calibs (attack s 2.62 / 1.67 / 2.8) never applied in-game.
+    const _bk  = m._gravStarKey || m._phaseSprite || (m.zodiacSign ? ('zodiac_' + m.zodiacSign) : m.type);
     const _bc  = _lxAnimCalib(_bk, _bst);
     // v0.29.x — per-frame scale (fs[frameIdx]) folds into s. Anchored at the
     // feet like s, so an under-drawn frame grows in place instead of hopping.
     const _bfs = (_bc.fs && _animated && sprite._lxFi != null && _bc.fs[sprite._lxFi] > 0) ? _bc.fs[sprite._lxFi] : 1;
     const _bcs = _bc.s * _bfs;
     if (_bcs !== 1 || _bc.dx || _bc.dy) { ctx.translate(_bc.dx * targetH, _bc.dy * targetH); ctx.scale(_bcs, _bcs); }
+    // v0.29.253 — hitbox fractions are authored in the animator against the
+    // SCALED sprite ("all scaling is baked into the box you see"), so the
+    // stashed visual box must include calib s (not per-frame fs — hit regions
+    // must not pulse frame-to-frame). Was stashed pre-scale: every calibrated
+    // boss's hit region ignored s (e.g. gravitos3 walk drew 22% larger than
+    // the box _atkMonBox reasoned over).
+    m._visW = targetW * _bc.s; m._visH = targetH * _bc.s;
   }
   _lxUseEntityImageQuality(ctx);
   // v0.26.248 — Boss sprites now flow through the same lazy cache as
@@ -103707,6 +103718,7 @@ function _prologueDaggerCutscene(onDone) {
   // under it. _unduck is exactly-once so the muted-autoplay fallback below
   // can release the duck early without unbalancing the ref-count.
   let _ducked = true;
+  let timer = 0;   // hoisted above finish(): a sync play() throw calls finish() before the bottom declaration (TDZ) and would strand the duck
   _vidDuckBgm();
   const _unduck = () => { if (_ducked) { _ducked = false; try { _vidUnduckBgm(); } catch (e) {} } };
   const finish = () => {
@@ -103755,7 +103767,7 @@ function _prologueDaggerCutscene(onDone) {
   if (sk) sk.onclick = (e) => { e.stopPropagation(); finish(); };
   window.addEventListener('keydown', onKey, true);
   // Safety net: covers buffering with margin (the clip is short).
-  let timer = setTimeout(finish, 12000);
+  timer = setTimeout(finish, 12000);
 }
 function _startPrologue() {
   window._prologueActive = true;
@@ -104027,6 +104039,7 @@ function _prologuePunchCutscene(onDone) {
   // zero target), and ignored the per-map / boss / ambient beds entirely.
   // Swapped to the shared ducking helper, which covers all of them.
   let _ducked = true;
+  let timer = 0;   // hoisted above finish(): a sync play() throw calls finish() before the bottom declaration (TDZ) and would strand the duck
   _vidDuckBgm();
   const _unduck = () => { if (_ducked) { _ducked = false; try { _vidUnduckBgm(); } catch (e) {} } };
   const finish = () => {
@@ -104076,7 +104089,7 @@ function _prologuePunchCutscene(onDone) {
   if (sk) sk.onclick = (e) => { e.stopPropagation(); finish(); };
   window.addEventListener('keydown', onKey, true);
   // Safety net: the clip is 6s; 10s covers buffering with margin.
-  let timer = setTimeout(finish, 10000);
+  timer = setTimeout(finish, 10000);
 }
 // v0.27.24 — Gravitos MAP-ENTRY cinematic. 8s Higgsfield power-reveal (the
 // starfield titan resolving from the singularity, chest-star flare, gravity
@@ -104094,6 +104107,7 @@ function _gravitosEntryCutscene(onDone) {
   // actually needs ducking is usually _bgmBossEl or a per-map track, neither
   // of which the old code touched — the clip really did play over the score.
   let _ducked = true;
+  let timer = 0;   // hoisted above finish(): a sync play() throw calls finish() before the bottom declaration (TDZ) and would strand the duck
   _vidDuckBgm();
   const _unduck = () => { if (_ducked) { _ducked = false; try { _vidUnduckBgm(); } catch (e) {} } };
   const finish = () => {
@@ -104142,7 +104156,7 @@ function _gravitosEntryCutscene(onDone) {
   if (sk) sk.onclick = (e) => { e.stopPropagation(); finish(); };
   window.addEventListener('keydown', onKey, true);
   // Safety net: the clip is 8s; 11s covers buffering with margin.
-  let timer = setTimeout(finish, 11000);
+  timer = setTimeout(finish, 11000);
 }
 // v0.29.93 — GRAVITOS DEFEAT CUTSCENE. Fires the moment the 3rd (Ascendant)
 // form is defeated at the Singularity, just before the epilogue. Two layers,
