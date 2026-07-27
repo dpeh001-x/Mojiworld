@@ -275,11 +275,23 @@ X attack · Y interact · LB/RB/LT/RT + stick-clicks skills · Back character pa
 Start pause · D-pad/left-stick move. Enable **Steam Input** for the app and upload
 the Game Actions File under *Edit Steam Input Configuration*.
 
+### Stats (create these 4 in Steamworks → Stats & Achievements → Stats)
+The game pushes exactly these INT stats; the Steamworks stat **API Name** must
+match verbatim or the push is silently dropped:
+
+| API Name | Type | What it tracks |
+| --- | --- | --- |
+| `lifetime_kills` | INT | total enemies defeated |
+| `highest_level` | INT | highest character level reached |
+| `lifetime_coins` | INT | Mojicoins currently held (snapshot) |
+| `bosses_defeated` | INT | distinct bosses defeated |
+
 ### Achievements
 The game's existing in-game achievements are mirrored to Steam — **the Steam
 achievement API name must equal the game achievement `id`** below. Create these 38
-in Steamworks → **Achievements** (API Name column = the `id`). Unlocks fire live;
-already-earned achievements sync up on load.
+in Steamworks → **Achievements** (API Name column = the `id`); the same list ships
+machine-readable in `steam/achievements_manifest.json` (parity-checked against the
+game and this table). Unlocks fire live; already-earned achievements sync up on load.
 
 | API Name (id) | Display name | How to earn |
 | --- | --- | --- |
