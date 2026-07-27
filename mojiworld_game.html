@@ -8908,7 +8908,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.278';
+const GAME_VERSION = 'v0.29.279';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -46908,7 +46908,7 @@ function _atkMonBox(m) {
   if (typeof _lxAtkHitbox === 'function') {
     const _hbSt = (m._frameIsAttack || (m.atkAnimUntil != null &&
         ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) < m.atkAnimUntil))
-      ? 'attack' : ((Math.abs(m.vx || 0) > 0.6) ? 'walk' : 'idle');
+      ? 'attack' : (((typeof _mobWalking === 'function') ? _mobWalking(m) : Math.abs(m.vx || 0) > 0.6) ? 'walk' : 'idle');   // v0.29.273 — match the draw path's displacement-aware state
     const _chb = _lxAtkHitbox(m._gravStarKey || m._phaseSprite || m.type, _hbSt);   // v0.29.253 — star-form key resolved first, matching the draw path (gravitos2star/3star hitbox entries were unreachable)
     if (_chb) {
       const _flip = ((m.facing | 0) < 0) !== (!m.isBoss && typeof _MOB_SPRITE_XFLIP !== 'undefined' && _MOB_SPRITE_XFLIP.has(m.type));
@@ -58945,6 +58945,15 @@ function updateMonsters(dt) {
       // so the death overlay can name the killer. `m.label` falls back
       // to type since some mobs don't carry a display name.
       player._lastDamageSource = m.label || m.type || 'an enemy';
+      // v0.29.273 — CONTACT ATTACKS ANIMATE (per user "some bosses are not
+      // playing their attacking animation such as mooma and aetherion").
+      // Touch damage — the DOMINANT aggression for hop/march bosses and for
+      // every regular mob — never set atkAnimUntil, so the boss hurt you
+      // while showing idle/walk art; attack frames only flashed during the
+      // occasional cast pattern (~20% of a fight, measured). Pulse the
+      // attack loop exactly when a contact hit lands (same time-based field
+      // every other attack path uses, so it self-clears).
+      try { m.atkAnimUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + 650; } catch (_) {}
       // Knight Guardian reflect — bounce 50% of damage back to the attacker
       if (player._guardianReflect && game.time < player._guardianReflect && m.currentHp > 0) {
         const reflect = Math.floor(dmg * 0.5);
@@ -64133,9 +64142,11 @@ function hitMonster(m, dmg, isCrit, skill) {
       let _hv = 0;
       for (let _hi = 0; _hi < skill.length; _hi++) _hv = (_hv * 31 + skill.charCodeAt(_hi)) | 0;
       const _hVar = ((_hv % 3) + 3) % 3;
+      // v0.29.279 — per user: sparks render at 50% of the original size
+      // (96/72 → 48/36) so the impact reads as punctuation, not a screen fill.
       spawnSpriteBurst(m.x + m.w / 2, m.y + m.h / 2, _hVar === 0 ? _hitKey : _hitKey + '_' + (_hVar + 1), {
         life: isCrit ? 16 : 12,
-        size: isCrit ? 96 : 72,
+        size: isCrit ? 48 : 36,
         angle: (Math.random() - 0.5) * 1.2,
       });
     }
@@ -92948,8 +92959,18 @@ const BOSS_WALK_FRAMES = Object.create(null);
 _loadBossFrames(BOSS_WALK_FRAMES, 'walk');
 const _BOSS_WALK_FRAME_MS = 80;    // brisker than idle
 function _bossWalkFrame(key) { return _bossLoopFrame(BOSS_WALK_FRAMES[key], _BOSS_WALK_FRAME_MS); }
-// A boss counts as "walking" when its horizontal speed clears a small threshold.
-function _bossMoving(m) { return Math.abs((m && m.vx) || 0) > 0.6; }
+// v0.29.273 — WALKING SIGNAL: vx OR actual per-frame X displacement. The old
+// vx-only gate (>0.6) made slow walkers glide in idle pose (snail speed 0.4
+// peaks at vx 0.54 — it NEVER walked), and bosses that reposition by writing
+// m.x directly (charges, strafes) glided too. drawMonster maintains
+// m._animXV — an EMA of |Δx| per rendered frame, teleport-clamped — so any
+// real horizontal motion drives the walk loop regardless of how it happened.
+function _mobWalking(m) {
+  if (!m) return false;
+  return Math.abs(m.vx || 0) > 0.6 || (m._animXV || 0) > 0.25;
+}
+// A boss counts as "walking" when its horizontal motion clears the threshold.
+function _bossMoving(m) { return _mobWalking(m); }
 // v0.26.x -- Per-arena art warm-up. The boot decode gate (v0.26.880) only
 // decodes images that finished NETWORK-loading before it ran; boss frame sets
 // finish later, so the first arena draw paid a synchronous decode stall
@@ -93059,7 +93080,10 @@ function _zodiacAnimTick(m, now) {
   const vx = Math.abs(m.vx || 0);
   let a = m._zAnim;
   const wasWalk = !!(a && a.state === 'walk');
-  const st = atk ? 'attack' : (wasWalk ? (vx > 0.35 ? 'walk' : 'idle') : (vx > 0.85 ? 'walk' : 'idle'));
+  // v0.29.273 — displacement signal joins the hysteresis: a zodiac that
+  // repositions by writing m.x directly (or drifts under the vx gate) walks.
+  const _dispWalk = (m._animXV || 0) > 0.25;
+  const st = atk ? 'attack' : ((_dispWalk || (wasWalk ? vx > 0.35 : vx > 0.85)) ? 'walk' : 'idle');
   if (!a) {
     a = m._zAnim = { state: st, since: now, prev: null, prevElapsed: 0, transAt: -1e9 };
   } else if (a.state !== st) {
@@ -93938,7 +93962,7 @@ function _monsterStateFrame(m) {
   // state only — never to idle/walk.
   m._frameIsAttack = !!attacking;
   if (attacking) return _bossLoopFrame(set.attack, _BOSS_ATK_FRAME_MS);
-  if (Math.abs(m.vx || 0) > 0.6) return _bossLoopFrame(set.walk, _BOSS_WALK_FRAME_MS);
+  if (_mobWalking(m)) return _bossLoopFrame(set.walk, _BOSS_WALK_FRAME_MS);   // v0.29.273 — displacement-aware (slow mobs glided)
   return _bossPingPongFrame(set.idle, _BOSS_IDLE_FRAME_MS);
 }
 // v0.26.351 — Per-type draw-box multiplier for padded weapon-swing attack
@@ -94012,7 +94036,7 @@ function _drawMonsterSprite(m, sx, sy) {
   // scale around the planted foot + nudge by a fraction of the rendered height.
   // Applied here so every draw branch below inherits it; no-op when {s:1,dx:0,dy:0}.
   if (typeof _lxAnimCalib === 'function') {
-    const _cst = m._frameIsAttack ? 'attack' : ((Math.abs(m.vx || 0) > 0.6) ? 'walk' : 'idle');
+    const _cst = m._frameIsAttack ? 'attack' : (_mobWalking(m) ? 'walk' : 'idle');   // v0.29.273 — displacement-aware
     const _ac = _lxAnimCalib(m.type, _cst);
     if (_ac.s !== 1 || _ac.dx || _ac.dy) { ctx.translate(_ac.dx * targetH, _ac.dy * targetH); ctx.scale(_ac.s, _ac.s); }
   }
@@ -94270,6 +94294,14 @@ function drawMonster(m) {
   if (sx + m.w < 0 || sx > W) return;
   if (sy + m.h < _camY - 30 || sy > _camY + H + 30) return;
 
+  // v0.29.273 — ANIM X-SPEED tracker (see _mobWalking). EMA of the per-frame
+  // X displacement so the walk anim fires on ANY real horizontal motion —
+  // slow patrollers and direct-x boss repositions included. Clamped to 8 px
+  // so a teleport spike doesn't read as a sprint (EMA decays it in ~3 frames).
+  const _axDx = Math.min(8, Math.abs(m.x - (m._animPX != null ? m._animPX : m.x)));
+  m._animPX = m.x;
+  m._animXV = (m._animXV || 0) * 0.7 + _axDx * 0.3;
+
   // v0.26.x — dashCharge motion streak (Sprites/vfx/dash_streak.webp). Drawn
   // behind the mob while _dashCharging is live, trailing opposite its facing.
   // Purely cosmetic; if the sprite isn't present the existing trail particles
@@ -94293,11 +94325,26 @@ function drawMonster(m) {
   // above the feet. Anchor the ellipse a touch below the foot line so it
   // sits directly under the sprite's base. Floating mobs are excluded
   // (their hover offset lives in _drawMonsterSprite).
+  // v0.29.273 — SHADOW STAYS ON THE GROUND (per user "when monsters jump, the
+  // shadow eclipse should not follow"). The ellipse used to anchor at the
+  // mob's CURRENT feet, so it rose with every hop. Track the last grounded
+  // foot line (m.onGround, maintained by checkPlatformCollision) and pin the
+  // shadow there while airborne; if the mob falls BELOW the stored line
+  // (walked off a ledge), follow the feet down until it lands. Shrinks +
+  // fades slightly with air height for the classic eclipse read.
   if (!m.flies) {
+    const _feetY = m.y + m.h;
+    if (m.onGround !== false || m._shadowGY == null) m._shadowGY = _feetY;
+    const _shY = Math.max(m._shadowGY, _feetY);
+    const _air = _shY - _feetY;
+    const _shK = _air > 0 ? Math.max(0.55, 1 - _air / 260) : 1;
     ctx.fillStyle = 'rgba(0,0,0,0.32)';
+    const _pShA = ctx.globalAlpha;
+    if (_air > 0) ctx.globalAlpha = _pShA * Math.max(0.5, 1 - _air / 320);
     ctx.beginPath();
-    ctx.ellipse(sx + m.w/2, m.y + m.h + 1, m.w/2, 2.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(sx + m.w/2, _shY + 1, (m.w/2) * _shK, 2.5 * _shK, 0, 0, Math.PI * 2);
     ctx.fill();
+    if (_air > 0) ctx.globalAlpha = _pShA;
   }
 
   // Death Mark visual (floating skull)
