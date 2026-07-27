@@ -29,7 +29,9 @@ const SUFFIX = ' game UI icon for a 2D side-scroller, cel-shaded anime style wit
 
 // file (Sprites/ui/<key>.png) -> prompt.
 const ICONS = {
-  block_shield: 'A single ornate fantasy kite shield icon facing forward, polished silver metal plates with gold trim edging and rivets, a glowing sapphire-blue gem boss at the center, subtle radial shine,',
+  // v2 per user: simpler, more cel-shaded, more generic, kite-shaped —
+  // dropped the ornate gem/cross/rivets vocabulary entirely.
+  block_shield: 'A single simple kite shield game icon facing forward, classic kite shape with a rounded top edge tapering to a point at the bottom, flat steel blue-grey fill with one plain gold border trim, minimal detail, clean bold simple shapes, flat cel shading with a single highlight,',
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
