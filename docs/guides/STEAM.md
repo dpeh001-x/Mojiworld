@@ -179,6 +179,18 @@ The wrapper is Deck-aware end to end; target **Steam Deck Verified**.
   MIME for the mp4 story-beat cinematics and supports **HTTP Range** so seeking
   doesn't stall on Deck's slower storage. The 15 game-referenced clips are
   packaged (`extraResources`); the review-gallery clips are not.
+- **Haptics (v0.29.254)** — dual-rumble on Xbox pads + Deck via
+  `gamepad.vibrationActuator`, hooked into the central `audio.play` switchboard
+  (hit/crit/block/parry/death/level-up). Fires only when the pad was used in the
+  last 8 s, so a keyboard player with an idle pad plugged in never buzzes.
+  Rumble survives audio mute (deliberate — haptics aren't sound).
+- **Glyphs & discoverability (v0.29.255)** — the connect toast primes the core
+  layout (Ⓐ jump · Ⓑ dodge · Ⓧ attack · Ⓨ talk), and Help carries a full
+  🎮 CONTROLLER section mirroring `_LX_PAD_MAP`. In-world portal prompts use the
+  directional `[↑]` glyph, which is already D-pad-correct.
+- **Quit path (v0.29.255)** — Settings shows a wrapper-only **Quit to Desktop**
+  row (hidden on web), so a Deck player can exit from the pad without the Steam
+  button: Start → Settings → Quit. Save is flushed before close.
 
 **Shipping for Deck**
 
