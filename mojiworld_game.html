@@ -8908,7 +8908,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.281';
+const GAME_VERSION = 'v0.29.282';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -62094,17 +62094,48 @@ function bossAI(m, dt, distToPlayer) {
         // at only ~10%. Tightened the special bands to 0.50 cumulative so spores
         // keeps a reliable 0.50–0.78 slice (~28% late / ~38% early), and her
         // spore-pod projectile shows up regularly again.
-        if (_summonReady && choice < 0.18) {
+        // v0.29.282 — per user "ensure bosses such as mooma and kingkrook
+        // use their special attacks every 10-20 seconds": special-pressure
+        // clock. When no special (summon / groundShake / quake) has fired
+        // inside a rolled 10-20 s window, the next pick FORCES the first
+        // off-cooldown special instead of leaving it to the dice (which
+        // could starve specials for 30 s+). The attack sprite plays
+        // automatically — any non-idle patternState selects the 9-frame
+        // attack set in the draw path.
+        if (m._specialDue == null) m._specialDue = 600 + Math.random() * 600;   // 10-20 s in frames
+        if (m._lastSpecialAt == null) m._lastSpecialAt = _now;
+        const _forceSpecial = (_now - m._lastSpecialAt) > m._specialDue &&
+                              (_summonReady || _shakeReady || _quakeReady);
+        if (_forceSpecial) {
+          m._specialDue = 600 + Math.random() * 600;
+          m._lastSpecialAt = _now;
+          if (_shakeReady) {
+            m._lastShakeAt = _now;
+            m.patternState = 'groundShake';
+            m._shakeAnnounced = false;
+            m._shakeJumped = false;
+            m._shakeFired = false;
+          } else if (_quakeReady) {
+            m._lastQuakeAt = _now;
+            m.patternState = 'quake';
+          } else {
+            m._lastSummonAt = _now;
+            m.patternState = 'summon';
+          }
+        } else if (_summonReady && choice < 0.18) {
           m._lastSummonAt = _now;
+          m._lastSpecialAt = _now;
           m.patternState = 'summon';
         } else if (_shakeReady && choice < 0.34) {
           m._lastShakeAt = _now;
+          m._lastSpecialAt = _now;
           m.patternState = 'groundShake';
           m._shakeAnnounced = false;
           m._shakeJumped = false;
           m._shakeFired = false;
         } else if (_quakeReady && choice < 0.50) {
           m._lastQuakeAt = _now;
+          m._lastSpecialAt = _now;
           m.patternState = 'quake';
         } else if (choice < 0.40) m.patternState = 'slam';
         else if (choice < 0.78) m.patternState = 'spores';
@@ -62461,25 +62492,51 @@ function bossAI(m, dt, distToPlayer) {
         // DIZZY (a guaranteed punish window via the existing stagger freeze).
         // (patternState key stays 'shellSpin' internally to avoid a rename.)
         const _shellReady = m._bossPhase2 && ((_now - (m._lastShellAt || 0)) > 840);   // 14s in frames
-        if (_shellReady && r < 0.30) {
+        // v0.29.282 — per user: special-pressure clock (rolled 10-20 s).
+        // When the dice starve out a special, FORCE one: ROYAL CHARGE →
+        // megaFireball → firebomb by readiness, else the uncapped ultimates
+        // (earthquake when grounded / fireballRain) — so a special always
+        // lands inside the window. Attack sprites play automatically (any
+        // non-idle patternState selects the attack frame set).
+        if (m._specialDue == null) m._specialDue = 600 + Math.random() * 600;
+        if (m._lastSpecialAt == null) m._lastSpecialAt = _now;
+        const _forceSpecial = (_now - m._lastSpecialAt) > m._specialDue;
+        if (_forceSpecial) {
+          m._specialDue = 600 + Math.random() * 600;
+          m._lastSpecialAt = _now;
+          if (_shellReady) {
+            m._lastShellAt = _now;
+            m.patternState = 'shellSpin';
+            m._shellDir = 0;
+            m._shellPasses = 0;
+          }
+          else if (_megaReady) { m._lastMegaAt = _now; m.patternState = 'megaFireball'; }
+          else if (_firebombReady) { m._lastFirebombAt = _now; m.patternState = 'firebomb'; }
+          else if (m.onGround) m.patternState = 'earthquake';
+          else m.patternState = 'fireballRain';
+        }
+        else if (_shellReady && r < 0.30) {
           m._lastShellAt = _now;
+          m._lastSpecialAt = _now;
           m.patternState = 'shellSpin';
           m._shellDir = 0;
           m._shellPasses = 0;
         }
         else if (_megaReady && r < 0.18) {
           m._lastMegaAt = _now;
+          m._lastSpecialAt = _now;
           m.patternState = 'megaFireball';
         }
         else if (_firebombReady && r < 0.22) {
           m._lastFirebombAt = _now;
+          m._lastSpecialAt = _now;
           m.patternState = 'firebomb';
         }
         else if (r < 0.25) m.patternState = 'claw';
         else if (r < 0.50) m.patternState = 'fireBreath';
         else if (r < 0.70) m.patternState = 'jumpSlam';
-        else if (r < 0.85 && m.onGround) m.patternState = 'earthquake';
-        else               m.patternState = 'fireballRain';
+        else if (r < 0.85 && m.onGround) { m.patternState = 'earthquake'; m._lastSpecialAt = _now; }
+        else               { m.patternState = 'fireballRain'; m._lastSpecialAt = _now; }
         m.patternTimer = 0;
         m._kSubTimer = 0;
         m._kAnnounced = false;
@@ -101108,8 +101165,16 @@ function drawWolf(pet, tintColor) {
   // flap loop ('walk') and does NOT toggle to 'attack' — its rapid fire cadence
   // was flipping it between walk/attack every cycle (a "ping-pong"). Ground pets
   // (werewolf etc.) keep the attack pose on bites / the near-monster pulse.
+  // v0.29.282 — per user "eagle_attack sprites does not seem to be playing":
+  // the flying-shooter hard-pin to 'walk' (the old anti-ping-pong fix) meant
+  // the eagle's attack set could NEVER play. Replaced with a pose LATCH:
+  // each shot (fireCd resets to 600/350, decrements by dt) refreshes a hold
+  // window ~0.7 s long, so during sustained fire the eagle STAYS in the
+  // attack pose (no per-cycle flicker — the window outlasts the fire cadence)
+  // and glides back to the flap loop once it stops shooting.
+  if (pet && pet.flying && (pet.fireCd || 0) > 250) pet._atkHoldF = game.time + 42;
   const _petState = !_petKey ? null
-    : (pet && pet.flying) ? 'walk'
+    : (pet && pet.flying) ? (((pet._atkHoldF || 0) > game.time) ? 'attack' : 'walk')
     : (((pet.fireCd || 0) > 250 || (pet.cdAtk || 0) > 600 || _poseAtk) ? 'attack' : 'walk');
   const _petAnim = _petState ? _summonAnimFrame(_petKey, _petState) : null;
   const _petSpr = (_petKey && _lxSummonReady(LX_SUMMON[_petKey])) ? LX_SUMMON[_petKey] : null;
