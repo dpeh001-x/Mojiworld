@@ -52,11 +52,17 @@ try {
   // Pick a class through the REAL path and time the cinematic's arrival.
   const t0 = Date.now();
   await page.evaluate(() => { applyClass('warrior'); });
-  await page.waitForFunction(() => !!document.getElementById('prologue-cine'), null, { timeout: 10000 }).catch(() => {});
+  // v0.29.72 plays the dagger POV clip (#prologue-dagger-cine) BEFORE the
+  // stanza overlay (#prologue-cine) — the first visible cinematic beat is
+  // what the "not stranded" budget applies to.
+  await page.waitForFunction(() => !!(document.getElementById('prologue-cine') || document.getElementById('prologue-dagger-cine')), null, { timeout: 10000 }).catch(() => {});
   const dtMs = Date.now() - t0;
-  const cineUp = await page.evaluate(() => !!document.getElementById('prologue-cine'));
+  const cineUp = await page.evaluate(() => !!(document.getElementById('prologue-cine') || document.getElementById('prologue-dagger-cine')));
   ok('Gravitos prologue overlay appears after class pick', cineUp, { dtMs });
   ok('…and appears FAST (<3s, was up to 15.6s stranded)', cineUp && dtMs < 3000, { dtMs });
+  // If the dagger clip is still playing, skip it so the stanza loop lands.
+  const daggerUp = await page.evaluate(() => !!document.getElementById('prologue-dagger-cine'));
+  if (daggerUp) { await page.keyboard.press('Enter'); await page.waitForTimeout(400); }
 
   // Advance through the 3 stanzas -> "memory sharpens" handoff -> arena.
   for (let i = 0; i < 3; i++) { await page.keyboard.press('Enter'); await page.waitForTimeout(400); }

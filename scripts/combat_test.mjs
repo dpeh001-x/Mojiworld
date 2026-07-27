@@ -19,13 +19,16 @@ try {
   await page.fill('#auth-user', 'Fighter').catch(() => {}); await page.click('#auth-submit').catch(() => {});
   await sleep(1500);
   const ev = (f, a) => page.evaluate(f, a);
-  await ev((m) => { player.cls = 'warrior'; player.level = 20; player.mp = player.maxMp = 500; game.paused = false; window._prologueActive = false; const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none'; loadMap(m); }, MAP);
+  // baseAcc 20 pushes the level-gap hit rate to the 100% clamp — without it
+  // even an overleveled warrior misses 10% of the time and the direct
+  // hitMonster checks flake (evasion is zeroed per-check for the same reason).
+  await ev((m) => { player.cls = 'warrior'; player.level = 20; player.baseAcc = 20; player.mp = player.maxMp = 500; game.paused = false; window._prologueActive = false; const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none'; loadMap(m); }, MAP);
   await sleep(700);
 
   // (1) BASIC MELEE hits a nearby monster.
   const melee = await ev(() => {
     const m = game.monsters.find(x => x && x.currentHp > 0); if (!m) return null;
-    m.x = player.x + 30; m.y = player.y; player.facing = 1;
+    m.x = player.x + 30; m.y = player.y; player.facing = 1; m.evasion = 0;   // deterministic: no dodge roll
     const hp0 = m.currentHp;
     performMelee(120, 1.0, {});
     return { hp0, hp1: m.currentHp, dropped: hp0 - m.currentHp };
@@ -36,7 +39,7 @@ try {
   const crit = await ev(() => {
     const cd = (typeof getCritDmg === 'function') ? getCritDmg() : 0;
     const m = game.monsters.find(x => x && x.currentHp > 0); if (!m) return null;
-    m.currentHp = m.maxHp = 100000; m.def = 0;
+    m.currentHp = m.maxHp = 100000; m.def = 0; m.evasion = 0;   // deterministic: no dodge roll (razorgale has designed evasion 200)
     const base = 1000;
     const h0 = m.currentHp; hitMonster(m, base, false, 'slash'); const noCrit = h0 - m.currentHp;
     const h1 = m.currentHp; hitMonster(m, Math.floor(base * cd), true, 'slash'); const withCrit = h1 - m.currentHp;
@@ -75,7 +78,7 @@ try {
   // (5) Kill grants XP + removes the monster.
   const kill = await ev(() => {
     const m = game.monsters.find(x => x && x.currentHp > 0); if (!m) return null;
-    const xp0 = player.exp || 0; m.currentHp = 1; hitMonster(m, 999999, false, 'slash');
+    const xp0 = player.exp || 0; m.currentHp = 1; m.evasion = 0; hitMonster(m, 999999, false, 'slash');
     return { gained: (player.exp || 0) - xp0, removed: !game.monsters.includes(m) };
   });
   ok('kill grants XP and removes the monster', kill && kill.gained > 0 && kill.removed, kill);
