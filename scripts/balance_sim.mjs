@@ -70,9 +70,11 @@ const CLASS_BASE = {
 // "Average gear": class-appropriate armor+weapon+accessory at the tier a
 // normally-progressing player wears in that level band.
 const GEAR = {
-  warrior: { 20:{t:2,d:18,h:50}, 30:{t:3,d:21,h:130}, 40:{t:4,d:68,h:270},
+  warrior: { 1:{t:0,d:2,h:8},   5:{t:0,d:5,h:18},  10:{t:1,d:9,h:30},  15:{t:1,d:13,h:38},
+             20:{t:2,d:18,h:50}, 30:{t:3,d:21,h:130}, 40:{t:4,d:68,h:270},
              50:{t:5,d:56,h:430}, 60:{t:6,d:95,h:420}, 70:{t:7,d:135,h:410}, 80:{t:8,d:170,h:520} },
-  mage:    { 20:{t:2,d:6,h:25},  30:{t:3,d:12,h:50},  40:{t:4,d:36,h:75},
+  mage:    { 1:{t:0,d:1,h:5},   5:{t:0,d:3,h:14},  10:{t:1,d:6,h:25},  15:{t:1,d:7,h:27},
+             20:{t:2,d:6,h:25},  30:{t:3,d:12,h:50},  40:{t:4,d:36,h:75},
              50:{t:5,d:18,h:140}, 60:{t:6,d:50,h:190}, 70:{t:7,d:70,h:255},  80:{t:8,d:90,h:320} },
 };
 const TIER_MUL = [1, 1, 1, 1, 1, 1, 1.12, 1.28, 1.48, 1.72, 2.00];
@@ -117,10 +119,22 @@ export function projDmg(P, lv, atk) {
 }
 
 // Representative authored ATK values for at-level mobs (weak / hot of the band).
-const ENC = { 20:{w:55,h:230}, 30:{w:62,h:128}, 40:{w:98,h:234}, 50:{w:148,h:387},
+const ENC = { 1:{w:9,h:24}, 5:{w:11,h:29}, 10:{w:15,h:33}, 15:{w:29,h:62},
+              20:{w:55,h:230}, 30:{w:62,h:128}, 40:{w:98,h:234}, 50:{w:148,h:387},
               60:{w:378,h:604}, 70:{w:495,h:850}, 80:{w:610,h:850} };
-const LEVELS = [20, 30, 40, 50, 60, 70, 80];
-const targetHits = lv => Math.max(2, 7 - 0.1 * (lv - 20));
+const LEVELS = [1, 5, 10, 15, 20, 30, 40, 50, 60, 70, 80];
+// v0.29.273 design targets: casual on-ramp below Lv 20, harder mid/late game.
+const TARGET_HITS = [[1,12.0],[5,10.0],[10,8.0],[15,6.3],[20,5.0],[30,4.4],
+                     [40,3.8],[50,3.2],[60,2.5],[70,1.8],[100,1.8]];
+function targetHits(lv) {
+  const L = Math.max(1, Math.min(100, lv | 0));
+  let v = TARGET_HITS[TARGET_HITS.length - 1][1];
+  for (let i = 0; i < TARGET_HITS.length - 1; i++) {
+    const a = TARGET_HITS[i], b = TARGET_HITS[i + 1];
+    if (L >= a[0] && L <= b[0]) { v = a[1] + (b[1] - a[1]) * ((L - a[0]) / (b[0] - a[0])); break; }
+  }
+  return v;
+}
 const pctOf = (d, hp) => `${(100 * d / hp).toFixed(0)}%`;
 
 console.log(`band constants read from game file: capRatio ${CAP_RATIO}, touchRatio ${TOUCH_RATIO}, ` +
@@ -137,7 +151,7 @@ for (const cls of ['warrior', 'mage']) {
       `${tLo}-${tHi}`.padEnd(11) + `(${pctOf(tLo, P.maxHp)}-${pctOf(tHi, P.maxHp)})`.padEnd(10) + ' | ' +
       `${pLo}-${pHi}`.padEnd(12) + `(${pctOf(pLo, P.maxHp)}-${pctOf(pHi, P.maxHp)})`.padEnd(10) + ' | ' +
       `${(P.maxHp / pHi).toFixed(1)}-${(P.maxHp / pLo).toFixed(1)}`.padEnd(12) +
-      `[~${targetHits(lv).toFixed(0)}]`);
+      `[~${targetHits(lv).toFixed(1)}]`);
   }
 }
 // v0.29.270 — contact is linear in ATK, so mobs of the same level should now
