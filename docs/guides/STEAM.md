@@ -106,6 +106,15 @@ Then publish the build to a branch on **SteamPipe → Builds**, set it live on
 `default`, and Install/Play in the Steam client installs the depot and starts
 `Mojiworld.exe`.
 
+> **Smart App Control (2026-07-27):** the depot `Mojiworld.exe` (and the
+> repo-root csc launcher stub) are unsigned. Windows 11 machines with Smart
+> App Control enforced block unsigned exes with **no** "run anyway" and no
+> per-app allowlist — the v0.29.266 Defender hardening doesn't help. Local
+> workaround: `Mojiworld.cmd` at repo root (batch → signed `cmd.exe`/
+> `node.exe`, so SAC allows it). Durable fix for the Steam depot: code-sign
+> the Electron build with a trusted-CA cert (e.g. Azure Trusted Signing)
+> before launch — self-signed certs do NOT pass SAC.
+
 ---
 
 ## 4. Steamworks
