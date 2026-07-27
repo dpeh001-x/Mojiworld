@@ -91,7 +91,12 @@ function build(cls, lv) {
 const refHp   = (lv, cls) => Math.round((104 + 23.6 * Math.max(1, lv)) * GEAR_ALLOW * (CLASS_REF[cls] || 1));
 const absorb  = (def, p) => { if (def <= 0) return 1; let a = Math.min(0.90, def / (def + 500)); if (p < 1) a *= p; return 1 - a; };
 const pierce  = (ml, pl) => { const b = Math.max(0, Math.min(0.15, (ml - 50) * 0.003)); const g = ml - pl; const gp = g > 2 ? Math.min(0.60, (g - 2) * 0.06) : 0; return 1 - Math.min(0.75, b + gp); };
-const warrDr  = lv => lv <= 50 ? 0.85 : 0.85 - Math.min(1, (lv - 50) / 50) * 0.30;
+// Warrior DR is read from the game file too (base / cap / slope), so a
+// retune there shows up here without editing the sim.
+const DR_BASE  = parseFloat(grab(/function _warriorDr\(\)[\s\S]*?if \(lv <= 50\) return ([\d.]+);/, '_warriorDr base'));
+const DR_CAP   = parseFloat(grab(/function _warriorDr\(\)[\s\S]*?return Math\.min\(([\d.]+),/, '_warriorDr cap'));
+const DR_SLOPE = parseFloat(grab(/function _warriorDr\(\)[\s\S]*?return Math\.min\([\d.]+, [\d.]+ \+ t \* ([\d.]+)\);/, '_warriorDr slope'));
+const warrDr = lv => lv <= 50 ? DR_BASE : Math.min(DR_CAP, DR_BASE + Math.min(1, (lv - 50) / 50) * DR_SLOPE);
 const diffDmg = (d, src, pl) => Math.max(0, Math.round(d * Math.min(6, 1.3 + Math.max(0, pl - src) * 0.08)));
 
 export function touchDmg(P, lv, atk) {
