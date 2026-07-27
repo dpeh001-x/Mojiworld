@@ -39,10 +39,29 @@ const ON_DECK = (() => {
 // Friends "Join Game": Steam launches us with the `connect` rich-presence value
 // appended to argv — we set it to "--moji-join=<relay>~<CODE>". Extract it so the
 // renderer auto-joins that party. (Second-instance handled in the lock block.)
-function extractJoin(argv) {
-  try { const a = (argv || []).find((x) => typeof x === 'string' && x.startsWith('--moji-join=')); return a ? a.slice('--moji-join='.length) : ''; } catch (e) { return ''; }
-}
+// Friend-INVITE accepted from a cold start instead appends "+connect_lobby <id64>";
+// deliverLobbyJoin() resolves that lobby back to the party code. Parsers live in
+// launch_args.js (plain Node, unit-testable).
+const { extractJoin, extractConnectLobby } = require('./launch_args');
 const LAUNCH_JOIN = extractJoin(process.argv);
+const LAUNCH_LOBBY = extractConnectLobby(process.argv);
+
+// Resolve a Steam lobby id -> {code, relay} from its lobby data, rebuild the
+// standard connect string, and hand it to the renderer over the SAME 'moji-join'
+// channel Join Game uses — the game prefills the party code and auto-joins.
+async function deliverLobbyJoin(lobbyId, win) {
+  if (!lobbyId || !steam.available || !steam.lobby) return;
+  let info = null;
+  try { info = await steam.lobby.join(lobbyId); } catch (e) {}
+  if (!info || !info.code) { console.warn('[steam] +connect_lobby ' + lobbyId + ': no party_code in lobby data (host on an older build?)'); return; }
+  const str = '--moji-join=' + encodeURIComponent(info.relay || '') + '~' + info.code;
+  try {
+    const w = win || BrowserWindow.getAllWindows()[0];
+    if (!w) return;
+    const send = () => { try { w.webContents.send('moji-join', str); } catch (e) {} };
+    if (w.webContents.isLoading()) w.webContents.once('did-finish-load', send); else send();
+  } catch (e) {}
+}
 
 // Renderer <-> Steam IPC. Cloud/achievement/presence/overlay/stats are async
 // (invoke/handle); the input snapshot is a fast synchronous read polled per frame.
@@ -56,6 +75,13 @@ ipcMain.on('steam:input-snapshot',   (e) => { try { e.returnValue = steam.input.
 // Steam Deck / Big Picture: pop the floating gamepad keyboard over the game so
 // text fields (hero name, party code, chat) are typeable without a keyboard.
 ipcMain.handle('steam:show-text-input', (_e, opts) => { try { return steam.utils.showTextInput(opts || {}); } catch (e) { return false; } });
+// Steam lobby (friend invites). host: mirror the current party code into a
+// FriendsOnly lobby; invite: open Steam's invite dialog on it; leave: drop it.
+ipcMain.handle('steam:lobby-host',   (_e, data) => { try { return steam.lobby.host(data || {}); } catch (e) { return ''; } });
+ipcMain.handle('steam:lobby-leave',  () => { try { return steam.lobby.leave(); } catch (e) { return false; } });
+ipcMain.handle('steam:lobby-invite', () => { try { return steam.lobby.invite(); } catch (e) { return false; } });
+// Invite accepted while we're already running: resolve the lobby -> party code.
+if (steam.available) { try { steam.onLobbyJoinRequested((id) => deliverLobbyJoin(id)); } catch (e) {} }
 // Pump Steamworks callbacks periodically (cloud/input/presence housekeeping).
 if (steam.available) { try { setInterval(() => { try { steam.runCallbacks(); } catch (e) {} }, 200); } catch (e) {} }
 
@@ -129,9 +155,18 @@ if (!app.requestSingleInstanceLock()) {
       // new party's connect string to the renderer, which switches parties.
       const join = extractJoin(argv);
       if (join) { try { w.webContents.send('moji-join', join); } catch (e) {} }
+      // Invite-accept relaunch attempt: Steam handed +connect_lobby to the NEW
+      // instance (which exits on the lock) — argv reaches us here instead.
+      const lob = extractConnectLobby(argv);
+      if (lob) deliverLobbyJoin(lob, w);
     }
   });
-  app.whenReady().then(createWindow);
+  app.whenReady().then(async () => {
+    const w = await createWindow();
+    // Cold-start friend invite: resolve the lobby once the window exists (the
+    // 'moji-join' send inside waits for did-finish-load, so nothing is lost).
+    if (LAUNCH_LOBBY) deliverLobbyJoin(LAUNCH_LOBBY, w);
+  });
   app.on('will-quit', () => { try { steam.shutdown(); } catch (e) {} });
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

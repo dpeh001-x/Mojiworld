@@ -43,6 +43,8 @@ const STUB = {
   stats: { set() { return false; } },
   input: { snapshot() { return null; } },
   utils: { isOnDeck() { return false; }, showTextInput() { return false; } },
+  lobby: { async host() { return ''; }, leave() { return false; }, async join() { return null; }, invite() { return false; }, id() { return ''; } },
+  onLobbyJoinRequested() { return false; },
   enableOverlay() { return false; },
   runCallbacks() {},
   shutdown() {},
@@ -66,6 +68,8 @@ function init() {
   // Steam Input: init + resolve the digital-action handles once (best-effort).
   let inputReady = false;
   const actionHandles = {};
+  // The invite lobby we currently host (party-code carrier; null = none).
+  let curLobby = null;
   try {
     if (client.input && typeof client.input.init === 'function') {
       client.input.init();
@@ -150,6 +154,72 @@ function init() {
       isUnlocked(name) {
         try { return !!(client.achievement && client.achievement.isActivated(String(name))); } catch (e) { return false; }
       },
+    },
+    // --- Steam lobby: one-click friend INVITES -> +connect_lobby ------------
+    // The lobby is a pure PARTY-CODE CARRIER, not the multiplayer transport
+    // (the party itself lives on the WebSocket relay). Hosting a party mirrors
+    // the code into lobby data; a friend accepting the invite gets launched
+    // with "+connect_lobby <id>", which join() resolves back to {code, relay}.
+    lobby: {
+      async host(data) {
+        try {
+          if (!client.matchmaking || typeof client.matchmaking.createLobby !== 'function') return '';
+          const code = String((data && data.code) || '').toUpperCase();
+          if (!code) return '';
+          if (!curLobby) {
+            // FriendsOnly (enum 1): invite/join only via friends — matches the
+            // trust model (host-authoritative co-op with people you know).
+            const LT = (steamworks.LobbyType && steamworks.LobbyType.FriendsOnly !== undefined) ? steamworks.LobbyType.FriendsOnly
+              : (client.matchmaking.LobbyType && client.matchmaking.LobbyType.FriendsOnly !== undefined) ? client.matchmaking.LobbyType.FriendsOnly : 1;
+            const max = Math.max(2, Math.min(16, ((data && data.size) | 0) || 8));
+            curLobby = await client.matchmaking.createLobby(LT, max);
+          }
+          try { curLobby.setData('party_code', code); } catch (e) {}
+          try { curLobby.setData('relay', String((data && data.relay) || '')); } catch (e) {}
+          try { if (typeof curLobby.setJoinable === 'function') curLobby.setJoinable(true); } catch (e) {}
+          return String(curLobby.id);
+        } catch (e) { curLobby = null; return ''; }
+      },
+      leave() { try { if (curLobby) curLobby.leave(); } catch (e) {} curLobby = null; return true; },
+      async join(idStr) {
+        try {
+          if (!client.matchmaking || typeof client.matchmaking.joinLobby !== 'function') return null;
+          const digits = String(idStr == null ? '' : idStr).replace(/[^0-9]/g, '');
+          if (!digits) return null;
+          const lb = await client.matchmaking.joinLobby(BigInt(digits));
+          if (!lb) return null;
+          const code = String(lb.getData('party_code') || '').toUpperCase();
+          const relay = String(lb.getData('relay') || '');
+          try { lb.leave(); } catch (e) {}   // code carrier only — the party lives on the relay
+          return code ? { code, relay } : null;
+        } catch (e) { return null; }
+      },
+      invite() {
+        try { if (curLobby && typeof curLobby.openInviteDialog === 'function') { curLobby.openInviteDialog(); return true; } } catch (e) {}
+        return false;
+      },
+      id() { try { return curLobby ? String(curLobby.id) : ''; } catch (e) { return ''; } },
+    },
+    // Friend accepted an invite while we're ALREADY RUNNING (no relaunch, so no
+    // +connect_lobby argv): Steam fires GameLobbyJoinRequested instead. cb gets
+    // the lobby id64 as a string; main.js resolves it exactly like the argv path.
+    onLobbyJoinRequested(cb) {
+      try {
+        if (typeof cb !== 'function' || !client.callback || typeof client.callback.register !== 'function') return false;
+        const evt = client.callback.SteamCallback && client.callback.SteamCallback.GameLobbyJoinRequested;
+        if (evt === undefined || evt === null) return false;
+        client.callback.register(evt, (d) => {
+          try {
+            let raw = d && (d.lobbySteamId !== undefined ? d.lobbySteamId
+              : d.lobby_steam_id !== undefined ? d.lobby_steam_id
+              : d.steamIdLobby !== undefined ? d.steamIdLobby : null);
+            if (raw && typeof raw === 'object') raw = (raw.steamId64 !== undefined) ? raw.steamId64 : (raw.raw !== undefined ? raw.raw : null);
+            const id = (raw == null) ? '' : String(raw).replace(/[^0-9]/g, '');
+            if (id) cb(id);
+          } catch (e) {}
+        });
+        return true;
+      } catch (e) { return false; }
     },
     input: {
       snapshot() {

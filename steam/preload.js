@@ -15,8 +15,16 @@ const onDeck = getArg('--moji-deck=') === '1';
 const launchJoin = getArg('--moji-launch-join=');
 
 // Second-instance "Join Game" callbacks (registered by the game via onJoin).
+// A lobby resolve can land BEFORE the game's inline script registers its
+// callback (cold-start +connect_lobby) — buffer the last string and replay it
+// on registration so the invite is never lost to that race.
 const _joinCbs = [];
-ipcRenderer.on('moji-join', (_e, str) => { for (const cb of _joinCbs) { try { cb(String(str || '')); } catch (e) {} } });
+let _joinPending = '';
+ipcRenderer.on('moji-join', (_e, str) => {
+  const s = String(str || '');
+  if (!_joinCbs.length) { _joinPending = s; return; }
+  for (const cb of _joinCbs) { try { cb(s); } catch (e) {} }
+});
 
 const SteamAPI = {
   available: steamAvailable,
@@ -39,13 +47,26 @@ const SteamAPI = {
   input: {
     snapshot() { try { return ipcRenderer.sendSync('steam:input-snapshot'); } catch (e) { return null; } },
   },
+  // Steam lobby — one-click friend invites. The game mirrors its party code in
+  // via host(); invite() opens Steam's invite dialog on that lobby; a friend
+  // accepting is delivered back through onJoin (main resolves +connect_lobby).
+  lobby: {
+    host(data) { try { return ipcRenderer.invoke('steam:lobby-host', data || {}); } catch (e) { return Promise.resolve(''); } },
+    leave() { try { return ipcRenderer.invoke('steam:lobby-leave'); } catch (e) { return Promise.resolve(false); } },
+    invite() { try { return ipcRenderer.invoke('steam:lobby-invite'); } catch (e) { return Promise.resolve(false); } },
+  },
   deck: onDeck,
   // Pop Steam's floating gamepad keyboard (Deck / Big Picture). Steam types
   // directly into the focused DOM field.
   showTextInput(rect) { try { return ipcRenderer.invoke('steam:show-text-input', rect || {}); } catch (e) { return Promise.resolve(false); } },
   // The game registers this at boot; it fires when a friend clicks Join Game
   // while the app is already running (main forwards the new party's connect str).
-  onJoin(cb) { if (typeof cb === 'function') _joinCbs.push(cb); },
+  // Replays a join that arrived before registration (cold-start lobby resolve).
+  onJoin(cb) {
+    if (typeof cb !== 'function') return;
+    _joinCbs.push(cb);
+    if (_joinPending) { const s = _joinPending; _joinPending = ''; try { cb(s); } catch (e) {} }
+  },
 };
 
 try {
