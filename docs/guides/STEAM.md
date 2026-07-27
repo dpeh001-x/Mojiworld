@@ -165,8 +165,9 @@ it in.
 - [ ] Death/boss/expedition flows verified in co-op (see COOP_NOTES.md caveats).
 - [ ] Windowed + fullscreen + alt-tab (host keeps simulating — `backgroundThrottling:false`).
 - [x] Controller support — the full pad chain (mapping → menus → rumble → quit)
-      plus lobby invites is exercised by `scripts/steam_integration_test.mjs`
-      (40/40; env-overridable browser via `MOJI_PW_EXE`, game URL via `MOJI_GAME_URL`).
+      plus lobby invites, the fresh-save invite deferral and the text-field
+      escape hatch are exercised by `scripts/steam_integration_test.mjs`
+      (44/44; env-overridable browser via `MOJI_PW_EXE`, game URL via `MOJI_GAME_URL`).
 - [ ] Friend invite → accept on a second Steam account (real `+connect_lobby`
       launch): party code prefilled + auto-join. (Live-Steam check; the argv →
       prefill → join plumbing is covered by the test suite.)
