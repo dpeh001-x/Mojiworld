@@ -8908,7 +8908,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.261';
+const GAME_VERSION = 'v0.29.263';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -31748,22 +31748,39 @@ function _gravPhaseOf(m) {
     return hpPct > 0.66 ? 1 : hpPct > 0.33 ? 2 : 3;
   } catch (e) { return 1; }
 }
+// v0.29.262 — RAW-DAMAGE ANCHORS (per user "without using %, just raw
+// damage ... HP and DEF stats do add definite survivability"). Reference
+// HP curves indexed by MONSTER level, not the player's actual maxHP:
+//   _refHpAtLv  — average base maxHP of an at-level character across the
+//                 four classes (warrior 1.30×(122+28L) ... mage 1.12×(56+14L)).
+//   _refLoAtLv  — squishiest class (mage) base maxHP at level L. Boss caps
+//                 anchor here so a near-level hit can never OHKO ANY class.
+// Because the anchor is a fixed raw number per monster level, every point
+// of player HP buys real extra hits-to-die and every point of DEF shrinks
+// the landed number — no floor or player-maxHP % can cancel investment.
+function _refHpAtLv(lv) {
+  const L = Math.max(1, lv | 0);
+  return Math.round(104 + 23.6 * L);
+}
+function _refLoAtLv(lv) {
+  const L = Math.max(1, lv | 0);
+  return Math.round(63 + 15.7 * L);
+}
 function _gravHeavyBand(phase, kind) {
   const p = (phase >= 3) ? 3 : (phase === 2 ? 2 : 1);
-  // v0.29.x — per user "push the cap higher by almost 2 times, with max cap
-  // at 99 for p3, and floor being 35%": caps ~doubled (P3 heavy hits max at
-  // 99% — a full-bar chunk that still never strictly one-shots), floors ramp
-  // 25/30/35% by phase. DEF still moves the result inside the (much taller)
-  // band; the telegraphed OHKOs remain the only true kills.
+  // v0.29.262 — bands re-anchored from %-of-player-maxHP to fractions of
+  // the Lv-100 squishiest-class reference (raw ~1633 HP). Caps keep the
+  // v0.29.x phase escalation shape; floors dropped to 0 so DEF always
+  // shows up in the landed number. Telegraphed OHKOs remain untouched.
   const T = {
-    touch:  [{ f: 0.25, c: 0.70 }, { f: 0.30, c: 0.90 }, { f: 0.35, c: 0.99 }],
-    comet:  [{ f: 0.25, c: 0.70 }, { f: 0.30, c: 0.90 }, { f: 0.35, c: 0.99 }],
-    ring:   [{ f: 0.25, c: 0.60 }, { f: 0.30, c: 0.80 }, { f: 0.35, c: 0.99 }],
-    skill:  [{ f: 0.25, c: 0.60 }, { f: 0.30, c: 0.76 }, { f: 0.35, c: 0.92 }],
-    bhCore: [{ f: 0.25, c: 0.50 }, { f: 0.30, c: 0.76 }, { f: 0.35, c: 0.88 }],
+    touch:  [0.70, 0.90, 0.99],
+    comet:  [0.70, 0.90, 0.99],
+    ring:   [0.60, 0.80, 0.99],
+    skill:  [0.60, 0.76, 0.92],
+    bhCore: [0.50, 0.76, 0.88],
   };
-  const b = (T[kind] || T.skill)[p - 1];
-  return { floor: b.f, cap: b.c };
+  const c = (T[kind] || T.skill)[p - 1];
+  return { floor: 0, cap: c, ref: _refLoAtLv(100) };
 }
 // v0.29.131 — GENERIC BOSS HIT BANDS (per user "boss mechanics + damage
 // rebalance: hard but not ridiculous"). Extends the sanctioned Gravitos /
@@ -31781,31 +31798,34 @@ function _bossHitBand(m, kind) {
   if (m.type === 'gravitos') {
     return _gravHeavyBand(_gravPhaseOf(m), kind === 'heavy' ? 'skill' : (kind === 'ranged' ? 'comet' : 'touch'));
   }
+  // v0.29.262 — UNCAPPED FROM PLAYER maxHP (per user): boss ceilings are now
+  // raw numbers — fractions of the squishiest-class base HP AT THE BOSS'S
+  // LEVEL. All caps < 1.0, so a near-level player of any class is never
+  // OHKO'd by a banded hit; an underleveled player gets no such mercy (the
+  // anchor tracks the BOSS's level, not theirs). Floors removed entirely —
+  // DEF mitigation passes straight through to the landed number.
   const s = !!(m.superBoss || m.hyperBoss || m.zodiacBoss || m.zodiacSign);
   const T = s
-    ? { touch: { floor: 0.12, cap: 0.60 }, heavy: { floor: 0.20, cap: 0.80 }, ranged: { floor: 0.10, cap: 0.55 } }
-    : { touch: { floor: 0.08, cap: 0.45 }, heavy: { floor: 0.15, cap: 0.65 }, ranged: { floor: 0.06, cap: 0.40 } };
-  return T[kind] || T.heavy;
+    ? { touch: { floor: 0, cap: 0.60 }, heavy: { floor: 0, cap: 0.92 }, ranged: { floor: 0, cap: 0.75 } }
+    : { touch: { floor: 0, cap: 0.50 }, heavy: { floor: 0, cap: 0.80 }, ranged: { floor: 0, cap: 0.65 } };
+  const b = T[kind] || T.heavy;
+  const lv = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);
+  return { floor: b.floor, cap: b.cap, ref: _refLoAtLv(lv) };
 }
 function _gravBandClamp(mitigated, band) {
-  const mh = (typeof getMaxHp === 'function') ? getMaxHp()
+  // v0.29.262 — the clamp anchor is band.ref (a raw level-indexed HP number)
+  // when present; legacy %-of-maxHP behaviour only as fallback for band
+  // objects without a ref. Floors are gone from all first-party bands, so
+  // this is a pure ceiling: DEF/block/class-DR output passes through intact.
+  const mh = (band && band.ref) ? band.ref
+    : (typeof getMaxHp === 'function') ? getMaxHp()
     : ((typeof player !== 'undefined' && player && player.maxHp) || 100);
   // Difficulty still matters (Hard/Nightmare push toward the cap faster,
-  // Story sinks toward the floor) — but the Lv-punish does not.
+  // Story sinks below it) — but the Lv-punish does not.
   const diff = (typeof game !== 'undefined' && game && game._diffDmgMul) ? game._diffDmgMul : 1;
   const scaled = Math.floor(mitigated * diff);
-  // v0.29.x — hard 99.9%-maxHP ceiling: a banded %-hit never strictly one-shots
-  // a full-HP player (band caps are already <= 0.99, this future-proofs any
-  // caller that sets a higher cap).
-  const _hi = Math.min(Math.floor(mh * band.cap), Math.floor(mh * 0.999));
-  // v0.29.132 — DEF ALWAYS matters (per user): the band FLOOR scales with the
-  // player's DEF absorption. A hard floor used to override DEF's work — once
-  // mitigation pushed a hit below the floor, more DEF changed nothing. Now
-  // the floor itself shrinks with absorb (down to ×0.55 at the 90% DEF cap),
-  // so a tank build takes visibly less even from floored hits, while the
-  // floor never collapses below ~half (bosses still always chunk).
-  const _floorMul = (typeof _defAbsorbMul === 'function') ? (0.5 + 0.5 * _defAbsorbMul()) : 1;
-  return Math.max(Math.floor(mh * band.floor * _floorMul), Math.min(scaled, _hi));
+  const _hi = Math.floor(mh * band.cap);
+  return Math.max(Math.floor(mh * (band.floor || 0)), Math.min(scaled, _hi));
 }
 // v0.25.691 — Cap hit-stop at 220 ms regardless of caller. The 40+ call
 // sites range from 30 ms (basic contact) to 300 ms (ultimate skills);
@@ -56432,7 +56452,20 @@ function fireMonsterProjectile(m, angleOffset) {
   // a glyph / spore / bolt land are punished, while incidental
   // collisions chip rather than spike. Boss projectile damage paths
   // unaffected (they bypass this function).
-  const dmg = Math.max(3, Math.floor(m.atk * 1.2 * ((typeof _lvGapDmgMul === 'function') ? _lvGapDmgMul(m) : 1)));
+  // v0.29.262 — NORMAL-MOB PROJECTILE BAND (per user "projectile: approx
+  // 30-44% ... just raw damage"). The atk×1.2 shot is clamped into
+  // 30-44% of _refHpAtLv(mob level) — a fixed raw number per level, so a
+  // let-through glyph always punishes (~2× a touch graze, preserving the
+  // v0.26.281 "projectiles ≫ touch" intent) but a hot-statted shooter
+  // (razorgale / tower octet / Lv-76+ elites) can no longer delete a cloth
+  // class in one hit. Level-gap mul scales the clamped value after; DEF
+  // mitigation applies downstream and lands below the band.
+  let dmg = Math.floor(m.atk * 1.2);
+  if (typeof _refHpAtLv === 'function') {
+    const _pref = _refHpAtLv((typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1));
+    dmg = Math.min(Math.floor(_pref * 0.44), Math.max(Math.floor(_pref * 0.30), dmg));
+  }
+  dmg = Math.max(3, Math.floor(dmg * ((typeof _lvGapDmgMul === 'function') ? _lvGapDmgMul(m) : 1)));
   // v0.26.162 — Themed-projectile fallback color table.
   const color = m.shoot === 'mspore'       ? '#ffaa44'
               : m.shoot === 'mdark'        ? '#aa44cc'
@@ -57072,7 +57105,7 @@ function updateMonsters(dt) {
           _fireShot();
           m.shootTimer = m.shootCd + Math.random() * 1200;
         }
-      } else if (_shootOnScreen && m.shootTimer <= 0 && dxs < _shootMaxX && dxs > _shootMinX && dys < _shootMaxY && m.aggroTarget) {
+      } else if (_shootOnScreen && m.shootTimer <= 0 && !(m._dirOpenT > 0) && dxs < _shootMaxX && dxs > _shootMinX && dys < _shootMaxY && m.aggroTarget) {   // v0.29.263 — winded bosses hold their shots
         if (_mobAttackReady(m.type)) {
           // Telegraph: hold the attack pose, then fire at the strike point.
           // Per-mob override via m.shootWindupMs; ~240 ms ≈ 3-4 attack frames.
@@ -57085,6 +57118,58 @@ function updateMonsters(dt) {
           _fireShot();
           m.shootTimer = m.shootCd + Math.random() * 1200;
         }
+      }
+    }
+    // v0.29.263 — BOSS COMBAT DIRECTOR (every boss EXCEPT the Gravitos
+    // family, which runs its own bespoke OHKO cadence). Per user "make the
+    // other bosses smarter AI as well, with occasional gaps for players to
+    // rush attacks... for some higher level bosses occasionally have higher
+    // evasion or defence for about 5-10 seconds". Two behaviours:
+    //   • OPENINGS — every ~12-20 s (rolled), and 35% of the time right
+    //     after a heavy swing resolves (recovery lag), the boss is WINDED
+    //     for ~4 s: it starts no new attacks (bigMelee / ranged / column
+    //     gates below all hold), drags to a crawl, and shows a gold
+    //     stagger cue + "OPEN!" tag — the rush window.
+    //   • STANCES (Lv 40+ bosses only) — every ~18-30 s (rolled, never
+    //     during an opening) the boss raises its guard for 5-10 s:
+    //     GUARD UP (−55% damage taken, blue cue) or GHOST STEP (×2.5
+    //     evasion +60 flat, violet cue) — resolved in hitMonster. Smart
+    //     play banks burst for the next opening instead of feeding it in.
+    if ((m.isBoss || m.boss) && m.currentHp > 0 && !((m.type || '').indexOf('gravitos') === 0)) {
+      if (m._dirRollT == null) { m._dirRollT = 6000 + Math.random() * 8000; m._dirStanceT = 12000 + Math.random() * 10000; }
+      if (m._dirOpenT > 0) {
+        m._dirOpenT -= dt;
+        m.vx *= 0.85;   // staggered — barely moves
+        if ((game.time & 7) === 0 && typeof _budgetedParticlePush === 'function') {
+          _budgetedParticlePush({ x: m.x + m.w * (0.3 + Math.random() * 0.4), y: m.y + m.h * 0.2, vx: (Math.random() - 0.5) * 1.5, vy: -1.2, life: 26, color: '#ffe27a', size: 3 });
+        }
+      } else {
+        m._dirRollT -= dt;
+        if (m._dirRollT <= 0 && !m._bigMeleeFiring && !(m._dirGuardT > 0) && !(m._dirGhostT > 0)) {
+          m._dirRollT = 12000 + Math.random() * 8000;
+          m._dirOpenT = 4000;
+          if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2, y: m.y - 8, vy: -1.2, text: 'OPEN!', life: 55, color: '#ffe27a', big: true });
+        }
+      }
+      if (m._dirGuardT > 0) m._dirGuardT -= dt;
+      if (m._dirGhostT > 0) m._dirGhostT -= dt;
+      if (!(m._dirOpenT > 0) && !(m._dirGuardT > 0) && !(m._dirGhostT > 0) &&
+          typeof _mobLevel === 'function' && _mobLevel(m) >= 40) {
+        m._dirStanceT -= dt;
+        if (m._dirStanceT <= 0) {
+          m._dirStanceT = 18000 + Math.random() * 12000;
+          const _dirDur = 5000 + Math.random() * 5000;   // 5-10 s per user
+          if (Math.random() < 0.5) {
+            m._dirGuardT = _dirDur;
+            if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2, y: m.y - 8, vy: -1.2, text: 'GUARD UP', life: 60, color: '#9fd4ff', big: true });
+          } else {
+            m._dirGhostT = _dirDur;
+            if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2, y: m.y - 8, vy: -1.2, text: 'GHOST STEP', life: 60, color: '#cdb6ff', big: true });
+          }
+        }
+      }
+      if ((m._dirGuardT > 0 || m._dirGhostT > 0) && (game.time & 7) === 0 && typeof _budgetedParticlePush === 'function') {
+        _budgetedParticlePush({ x: m.x + m.w * Math.random(), y: m.y + m.h * (0.3 + Math.random() * 0.5), vx: 0, vy: -0.8, life: 22, color: m._dirGuardT > 0 ? '#9fd4ff' : '#cdb6ff', size: 3 });
       }
     }
     // v0.26.165 — Per user "make some monsters especially bigger monsters
@@ -57126,7 +57211,7 @@ function updateMonsters(dt) {
         if (m.x + m.w < _bcx || m.x > _bcx + W || m.y + m.h < _bcy || m.y > _bcy + H) _bmOnScreen = false;
       }
       // PHASE 1 — start telegraph when cd is up + in range + on screen.
-      if (!m._bigMeleeFiring && m._bigMeleeCd <= 0 && _bmInRange && _bmOnScreen) {
+      if (!m._bigMeleeFiring && m._bigMeleeCd <= 0 && !(m._dirOpenT > 0) && _bmInRange && _bmOnScreen) {   // v0.29.263 — winded bosses can't start a heavy
         m._bigMeleeFiring = true;
         m._bigMeleeT = bm.telegraphMs;
         m.vx = 0;   // root during windup
@@ -57156,7 +57241,16 @@ function updateMonsters(dt) {
         if (m._bigMeleeT <= 0) {
           m._bigMeleeFiring = false;
           m._bigMeleeCd = bm.cdMs;
-          const _dmg = Math.max(8, Math.floor(m.atk * (bm.dmgMul || 1.5)));
+          let _dmg = Math.max(8, Math.floor(m.atk * (bm.dmgMul || 1.5)));
+          // v0.29.262 — non-boss heavy swings join the 30-44% raw skill band
+          // (of _refHpAtLv at the mob's level). Kills the elite spikes the
+          // Lv-20+ audit flagged (echoKnight 1150, tombKeeper 1064, ossuary
+          // 1151 raw) while keeping heavies ≈ 2× a touch graze. Boss swings
+          // keep raw atk×mul — their ceiling is the _bossBand on the hit.
+          if (!m.isBoss && !m.boss && typeof _refHpAtLv === 'function') {
+            const _href = _refHpAtLv((typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1));
+            _dmg = Math.min(Math.floor(_href * 0.44), Math.max(Math.floor(_href * 0.30), _dmg));
+          }
           if (bm.kind === 'smash') {
             // Wide ground shock — projectile-style hitbox along the
             // ground line, ±arcW/2 around the mob's centre. Player can
@@ -57216,6 +57310,13 @@ function updateMonsters(dt) {
               }
             }
           }
+          // v0.29.263 — boss director: 35% of boss heavy swings leave the
+          // boss WINDED for 3.5 s (recovery lag) — the punish window smart
+          // players wait for. Elites keep their instant recovery.
+          if ((m.isBoss || m.boss) && !((m.type || '').indexOf('gravitos') === 0) && Math.random() < 0.35) {
+            m._dirOpenT = 3500;
+            if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2, y: m.y - 8, vy: -1.2, text: 'OPEN!', life: 55, color: '#ffe27a', big: true });
+          }
         }
       }
     }
@@ -57251,7 +57352,7 @@ function updateMonsters(dt) {
         if (m.x + m.w < _ccx || m.x > _ccx + W || m.y + m.h < _ccy || m.y > _ccy + H) _csOnScreen = false;
       }
       // PHASE 1 — start telegraph
-      if (!m._columnFiring && m._columnCd <= 0 && _csInRange && _csOnScreen) {
+      if (!m._columnFiring && m._columnCd <= 0 && !(m._dirOpenT > 0) && _csInRange && _csOnScreen) {   // v0.29.263 — winded bosses hold column strikes
         m._columnFiring = true;
         m._columnT = cs.telegraphMs;
         m._columnTargetX = _playerCx;    // v0.26.218
@@ -57279,7 +57380,14 @@ function updateMonsters(dt) {
         if (m._columnT <= 0) {
           m._columnFiring = false;
           m._columnCd = cs.cdMs;
-          const _csDmg = Math.max(10, Math.floor(m.atk * (cs.dmgMul || 1.5)));
+          let _csDmg = Math.max(10, Math.floor(m.atk * (cs.dmgMul || 1.5)));
+          // v0.29.262 — non-boss columns join the 30-44% raw skill band
+          // (same rationale as the bigMelee clamp above; boss columns keep
+          // raw atk×mul and are ceilinged by _bossBand on the hit).
+          if (!m.isBoss && !m.boss && typeof _refHpAtLv === 'function') {
+            const _cref = _refHpAtLv((typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1));
+            _csDmg = Math.min(Math.floor(_cref * 0.44), Math.max(Math.floor(_cref * 0.30), _csDmg));
+          }
           const _camY2 = (game.camera && game.camera.y) || 0;
           const _colY = _camY2 - 200;
           const _colH = H + 400;   // covers full viewport + buffer above/below
@@ -58480,9 +58588,27 @@ function updateMonsters(dt) {
       // win out.
       if (m.type === 'towerArbiter') _normalMobMul = 0.25;
       const _gapMul = (typeof _lvGapDmgMul === 'function') ? _lvGapDmgMul(m) : 1;
-      const _atkBase = (m._selfRageTimer | 0) > 0
+      let _atkBase = (m._selfRageTimer | 0) > 0
         ? Math.floor(m.atk * 1.5 * _normalMobMul * _gapMul)
         : Math.floor(m.atk * _normalMobMul * _gapMul);
+      // v0.29.262 — NORMAL-MOB TOUCH BAND (per user "touch: approx 15-22% of
+      // max HP ... without using %, just raw damage"). Every non-boss contact
+      // hit is clamped into 15-22% of _refHpAtLv(mob level) — a fixed raw
+      // number per level, NOT a fraction of the player's own bar. Weak mobs
+      // rise to the band floor (an at-level graze genuinely stings); hot
+      // elites — incl. the 15% miniElite promotions, which previously kept
+      // full 1.0× atk touch with no clamp — cap at the band top. ATK still
+      // decides where a mob sits inside the band; the level-gap mul scales
+      // the clamped value after, so out-leveling mobs pierce the band by
+      // design. DEF / block / class DR apply later and push the landed
+      // number below the band — survivability is bought, never floored
+      // away. Octobaby legs are boss limbs → exempt (kept on raw atk×1.4).
+      if (!m.isBoss && !m.boss && !m._octoParent && typeof _refHpAtLv === 'function') {
+        const _tref = _refHpAtLv((typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1));
+        const _tpre = Math.floor(m.atk * _normalMobMul * ((m._selfRageTimer | 0) > 0 ? 1.5 : 1));
+        const _tband = Math.min(Math.floor(_tref * 0.22), Math.max(Math.floor(_tref * 0.15), _tpre));
+        _atkBase = Math.floor(_tband * _gapMul);
+      }
       // v0.26.356 — "Meaningful DEF": flat subtraction halved (was full
       // − getDef()). DEF's weight now lives mostly in the smooth % curve
       // (_defAbsorbMul, cap raised to 80%) so a little DEF no longer cliffs
@@ -58578,7 +58704,12 @@ function updateMonsters(dt) {
         // v0.29.x — zodiac empowered swing: FINAL loss clamped to the
         // authored per-sign pct as cap (floor = half of it). See the
         // comment at the old floor site above.
-        _shownDmg = _gravBandClamp(dmg, { floor: _zHeavyPctHit * 0.5, cap: _zHeavyPctHit });
+        // v0.29.262 — re-anchored: per-sign pct is now a cap on a RAW
+        // number (squishiest-class HP at the ZODIAC's level), floor 0 —
+        // an empowered swing chunks hard but HP/DEF investment always
+        // shows, and a near-level player is never OHKO'd (pcts < 1.0).
+        _shownDmg = _gravBandClamp(dmg, { floor: 0, cap: _zHeavyPctHit,
+          ref: (typeof _refLoAtLv === 'function') ? _refLoAtLv((typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 70)) : undefined });
       } else if ((m.isBoss || m.boss || m.zodiacBoss) && typeof _bossHitBand === 'function' && typeof _gravBandClamp === 'function') {
         // v0.29.131 — every OTHER boss's touch now lands inside its tier band
         // (super/zodiac 12-60% maxHP, story bosses 8-45%): the Lv-punish ramp
@@ -63110,8 +63241,12 @@ function hitMonster(m, dmg, isCrit, skill) {
   // basics. v0.29.84 — summon attacks roll it too; only MISS_EXEMPT_SKILLS
   // (thorns reflect / burn DoT) bypass it. The var name is kept for
   // churn-safety.
+  // v0.29.263 — GHOST STEP stance (boss combat director): while active the
+  // boss dodges at ×2.5 evasion +60 flat for 5-10 s. Resolved here so every
+  // attack path shares one roll.
+  const _lxEffEva = (m._dirGhostT > 0) ? Math.floor((m.evasion || 0) * 2.5) + 60 : (m.evasion || 0);
   const _lxBasicMiss = (!MISS_EXEMPT_SKILLS.has(skill) && typeof player !== 'undefined' && player && !player._oneShot)
-    ? ((!m.boss && !_rollHitVsLevelGap(m.level || 1)) || ((m.evasion || 0) > 0 && !_rollAccuracyHit(getAccuracy(), m.evasion, m.boss ? 0.45 : 0.15)))
+    ? ((!m.boss && !_rollHitVsLevelGap(m.level || 1)) || (_lxEffEva > 0 && !_rollAccuracyHit(getAccuracy(), _lxEffEva, m.boss ? 0.45 : 0.15)))
     : false;
   // v0.26.889 — JOB TALENT combat hooks + mage Arcane Embers, at the
   // canonical player→monster damage sink so every attack path is covered.
@@ -63147,6 +63282,9 @@ function hitMonster(m, dmg, isCrit, skill) {
   // v0.26.398 — Cancer sealed-shell: 70% damage reduction (was full invuln →
   // boss untouchable for the whole sealed window). Chip-able + telegraphed.
   if (m._cancerShellClosed) dmg = Math.max(1, Math.floor(dmg * 0.3));
+  // v0.29.263 — GUARD UP stance (boss combat director): −55% damage taken
+  // for 5-10 s. Same chip-able pattern as the Cancer shell above.
+  if (m._dirGuardT > 0) dmg = Math.max(1, Math.floor(dmg * 0.45));
   // v0.26.402 — Virgo's Banishment is a committed channel: 60% DR while it
   // resolves, so the player can't burst-cancel it (the cast now reliably fires
   // and arms the Sin → Judgment loop).
@@ -66313,7 +66451,13 @@ function updateProjectiles(dt) {
         // projectile spawn to gain the same heavy-floor behaviour
         // without piggy-backing on the zodiac flag.
         if (typeof p._heavyFloorPct === 'number' && p._heavyFloorPct > 0) {
-          const _hFloor = Math.floor(getMaxHp() * p._heavyFloorPct);
+          // v0.29.262 — raw anchor: heavy specials now floor at pct × HALF
+          // the Lv-100 squishiest-class ref (a fixed number), not the
+          // player's own maxHp — HP stacking buys hits-to-die again and
+          // DEF owns everything above the (much lower) floor.
+          const _hFloor = (typeof _refLoAtLv === 'function')
+            ? Math.floor(_refLoAtLv(100) * p._heavyFloorPct * 0.5)
+            : Math.floor(getMaxHp() * p._heavyFloorPct);
           if (dmg < _hFloor) dmg = _hFloor;
         }
         // v0.26.354 — NORMAL-MOB PROJECTILE CAP. Balance audit found field-mob
@@ -66323,10 +66467,9 @@ function updateProjectiles(dt) {
         // CURRENT maxHp (gear-aware). Applied AFTER all mitigation but only to
         // `_normalMob`-tagged shots — boss / zodiac / heavy-floor specials are
         // exempt and keep full punch.
-        if (p._normalMob) {
-          // v0.26.355 — Per user, normal-mob PROJECTILE damage reduced a further 20%.
-          dmg = Math.max(1, Math.floor(dmg * 0.8));
-        }
+        // v0.29.262 — the v0.26.355 blanket ×0.8 normal-mob haircut is gone:
+        // the spawn-side 30-44% raw band (mspawnProjectile) is now the
+        // authoritative statement of what a let-through shot costs.
         // v0.26.x — the 40%-maxHp normal-mob cap must clamp the FINAL HP loss.
         // It was applied to `dmg` BEFORE _diffDmg, which then multiplied past it
         // (up to ~9x at Lv80+/Hard), so field mobs one-shot — exactly what the
@@ -66339,15 +66482,22 @@ function updateProjectiles(dt) {
         // _heavyFloorPct floors that the Lv-80+ ×6 ramp turned into
         // guaranteed one-shots (see _gravHeavyBand).
         if (p._gravBand && _projLost > 0) _projLost = _gravBandClamp(dmg, p._gravBand);
-        // v0.29.x — zodiac empowered projectile: same final-loss treatment
-        // (cap 50% maxHp, floor 25%) so it chunks hard but never one-shots.
-        if (_zEmpowered && _projLost > 0) _projLost = _gravBandClamp(dmg, { floor: 0.25, cap: 0.50 });
+        // v0.29.262 — zodiac empowered projectile: cap re-anchored to the
+        // zodiac's own level ref (carried on p._bossBand.ref) instead of
+        // player maxHp; floor dropped so DEF always moves the number.
+        if (_zEmpowered && _projLost > 0) _projLost = _gravBandClamp(dmg,
+          { floor: 0, cap: 0.50, ref: (p._bossBand && p._bossBand.ref) || undefined });
         // v0.29.131 — generic boss band: every boss projectile + bigMelee /
         // columnStrike trait strike (they resolve through this path) lands
         // inside its tier band. Skipped when a more specific clamp already
         // ran (Gravitos band / zodiac empowered).
         if (!p._gravBand && !_zEmpowered && p._bossBand && _projLost > 0) _projLost = _gravBandClamp(dmg, p._bossBand);
-        if (p._normalMob && _projLost > 0) _projLost = Math.min(_projLost, Math.floor(getMaxHp() * 0.40));
+        // v0.29.262 — final normal-mob guard is RAW, not %-of-maxHp: the
+        // landed loss may exceed the spawn-time banded damage by at most
+        // 35% (difficulty headroom). Kills the _diffDmg double-dip runaway
+        // (gap is already priced into p.damage at spawn) without capping
+        // against the player's own bar — HP investment keeps full value.
+        if (p._normalMob && _projLost > 0) _projLost = Math.min(_projLost, Math.floor((p.damage || dmg) * 1.35));
         player.hp -= _projLost;
         player.lastHitTime = game.time;
         // v0.25.243 (X1) — projectile origin label (or skill name fallback).
