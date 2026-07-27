@@ -165,9 +165,10 @@ it in.
 - [ ] Death/boss/expedition flows verified in co-op (see COOP_NOTES.md caveats).
 - [ ] Windowed + fullscreen + alt-tab (host keeps simulating — `backgroundThrottling:false`).
 - [x] Controller support — the full pad chain (mapping → menus → rumble → quit)
-      plus lobby invites, the fresh-save invite deferral and the text-field
-      escape hatch are exercised by `scripts/steam_integration_test.mjs`
-      (44/44; env-overridable browser via `MOJI_PW_EXE`, game URL via `MOJI_GAME_URL`).
+      plus lobby invites, the fresh-save invite deferral, the text-field escape
+      hatch, host-conditional wake lock, overlay auto-pause and the synchronous
+      quit-time cloud mirror are exercised by `scripts/steam_integration_test.mjs`
+      (49/49; env-overridable browser via `MOJI_PW_EXE`, game URL via `MOJI_GAME_URL`).
 - [ ] Friend invite → accept on a second Steam account (real `+connect_lobby`
       launch): party code prefilled + auto-join. (Live-Steam check; the argv →
       prefill → join plumbing is covered by the test suite.)
@@ -212,7 +213,13 @@ The wrapper is Deck-aware end to end; target **Steam Deck Verified**.
   directional `[↑]` glyph, which is already D-pad-correct.
 - **Quit path (v0.29.255)** — Settings shows a wrapper-only **Quit to Desktop**
   row (hidden on web), so a Deck player can exit from the pad without the Steam
-  button: Start → Settings → Quit. Save is flushed before close.
+  button: Start → Settings → Quit. Save is flushed before close; any OS-level
+  close (window ✕, Alt+F4, Deck power) also lands a **synchronous** final Steam
+  Cloud mirror (v0.29.272) so the freshest save always reaches the cloud.
+- **Overlay auto-pause (v0.29.272)** — opening the Steam overlay (Shift+Tab /
+  Steam button) pauses a **solo** session and resumes it on close. Latched:
+  a pause owned by a panel (class select, death) is never force-released, and
+  co-op is never frozen (the host's sim is the party's world).
 
 **Shipping for Deck**
 
@@ -230,8 +237,10 @@ Proton compatibility — the Gamepad API fallback still gives full controller pl
 - [ ] No launcher/DRM prompt before gameplay; single-instance lock verified.
 - [ ] Suspend/resume: game state intact after Deck sleep (localStorage saves are
       synchronous — safe), relay reconnects after resume.
-- [ ] Battery: `powerSaveBlocker` keeps the co-op host simulating; solo players
-      can still let the Deck sleep normally.
+- [x] Battery: `powerSaveBlocker` is HOST-conditional (v0.29.272) — it engages
+      only while this player hosts a party (renderer reports over
+      `moji-host-state`); solo players can let the Deck sleep normally, and
+      localStorage saves are synchronous so resume just works.
 
 ---
 
