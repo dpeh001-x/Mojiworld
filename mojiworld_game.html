@@ -7473,7 +7473,8 @@ The sleeping world is listening.</div>
 
   <div id="skill-bar"><div class="skill-slot defense ready" title="Block / Parry — hold to mitigate 70% damage; perfect timing triggers a parry (400ms window).">
     <div class="skill-key">A</div>
-    <div class="skill-icon">🛡</div>
+    <!-- v0.29.254 — ludo.ai shield icon (Sprites/ui/block_shield.png); the 🛡 emoji swaps back in via onerror if the file is missing -->
+    <div class="skill-icon"><img src="Sprites/ui/block_shield.png" alt="" style="width:24px;height:24px;object-fit:contain;display:block" onerror="this.parentNode.textContent='🛡'"></div>
     <div class="skill-mp">Block</div>
     <div class="skill-cd" style="display:none"></div></div><div class="skill-slot ready" title="Slash — Heavy sword sweep — slow but long reach. (Lv 1+)">
     <div class="skill-key">Z</div>
@@ -8476,7 +8477,7 @@ The sleeping world is listening.</div>
        independently without fighting the grid layout or display:contents
        quirks on iOS Safari. Styled as a standalone fixed-position circle. -->
   <!-- Block (A) — floating button above the d-pad on the left. -->
-  <button class="mc-btn mc-block" data-mkey="a" aria-label="Block / Parry">🛡</button>
+  <button class="mc-btn mc-block" data-mkey="a" aria-label="Block / Parry"><img src="Sprites/ui/block_shield.png" alt="" style="width:66%;height:66%;object-fit:contain;pointer-events:none" onerror="this.parentNode.textContent='🛡'"></button>
   <!-- Right side of deck: Jump + defense + skill grid -->
   <div class="mc-actions">
     <button class="mc-btn mc-jump" data-mkey=" " aria-label="Jump"><span class="ui-ico ico-jump" style="width:1.9em;height:1.9em;vertical-align:middle;"></span></button>
@@ -8887,7 +8888,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.253';
+const GAME_VERSION = 'v0.29.254';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -32372,6 +32373,49 @@ function _lxPadPoll() {
     // Edge-detect vs last poll and dispatch keydown/keyup for changes only.
     for (const k in pressed) if (!_lxPadPrev[k]) { _lxPadDispatch(k, true); _lxPadPrev[k] = true; }
     for (const k in _lxPadPrev) if (_lxPadPrev[k] && !pressed[k]) { _lxPadDispatch(k, false); _lxPadPrev[k] = false; }
+  } catch (e) {}
+}
+// v0.29.254 — CONTROLLER HAPTICS (Steam-ready pass). Rumble piggybacks on the
+// central audio.play(kind) switchboard — every damage/death/level-up path
+// already routes through it, so one hook covers all 100+ call sites without
+// touching them. Gated on the pad having been USED recently (_lxPadActive):
+// a keyboard player with a pad plugged in but idle on the desk never buzzes.
+// Chrome/Electron expose dual-rumble via gamepad.vibrationActuator (Xbox pads
+// + Steam Deck under both native SteamOS and Proton); absent actuator = no-op.
+const _LX_RUMBLE_MAP = {
+  hit:     [0.00, 0.30, 55],    // dealing damage — weak motor tick
+  crit:    [0.20, 0.55, 90],    // crit — sharper snap
+  block:   [0.35, 0.15, 70],    // mitigation thud
+  parry:   [0.45, 0.20, 80],
+  death:   [0.95, 0.65, 450],   // player death — heavy
+  levelup: [0.30, 0.50, 260],   // celebratory roll
+  void:    [0.60, 0.40, 300],
+};
+let _lxPadLastInput = 0;        // perf.now() of last real pad input (buttons/axes)
+let _lxRumbleLast = 0;
+function _lxPadActive(windowMs) {
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  return (now - _lxPadLastInput) < (windowMs || 8000);
+}
+function _lxPadRumble(kind) {
+  try {
+    if (!_lxPadPresent || !_lxPadActive()) return;
+    const spec = _LX_RUMBLE_MAP[kind];
+    if (!spec) return;
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    if (now - _lxRumbleLast < 60) return;   // coalesce AoE bursts (mirrors sfx gating)
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    for (let i = 0; i < pads.length; i++) {
+      const p = pads[i];
+      if (p && p.connected && p.vibrationActuator && typeof p.vibrationActuator.playEffect === 'function') {
+        _lxRumbleLast = now;
+        p.vibrationActuator.playEffect('dual-rumble', {
+          strongMagnitude: spec[0], weakMagnitude: spec[1], duration: spec[2],
+          startDelay: 0,
+        });
+        break;   // first connected pad only — the one in the player's hands
+      }
+    }
   } catch (e) {}
 }
 let _lxPadStarted = false;
@@ -101957,6 +102001,9 @@ function drawDamageNumbers() {
 // helper. Slot entries no longer carry hudRoot / hudIconEl / hudCdEl.
 const _sbSlots = {};   // { 'block': slotEl, 'd': slotEl, ... }
 let   _sbBuiltFor = null;   // invalidated when kit changes (job/master picked)
+// v0.29.254 — ludo.ai shield icon for the Block (A) slot; onerror falls back
+// to the 🛡 emoji so a missing/failed file never leaves an empty slot.
+const _SB_SHIELD_ICON = '<img src="Sprites/ui/block_shield.png" alt="" style="width:24px;height:24px;object-fit:contain;display:block" onerror="this.parentNode.textContent=\'\u{1F6E1}️\'">';
 function _sbMakeSlot(cls, key, icon, title) {
   const slot = document.createElement('div');
   slot.className = cls;
@@ -101974,7 +102021,7 @@ function _sbBuild() {
   Object.keys(_sbSlots).forEach(k => delete _sbSlots[k]);
   // Defense slot (Block/Parry on A)
   const blockTitle = 'Block / Parry — hold to mitigate 70% damage; perfect timing triggers a parry (400ms window).';
-  const bs = _sbMakeSlot('skill-slot defense', 'A', '🛡', blockTitle);
+  const bs = _sbMakeSlot('skill-slot defense', 'A', _SB_SHIELD_ICON, blockTitle);
   bar.appendChild(bs);
   _sbSlots.block = {
     root: bs,
@@ -102077,10 +102124,12 @@ function renderSkillBar() {
     const parrying  = (player.parryWindow || 0) > 0;
     const readyNow = !onBlockCd && !blocking;
     bs.root.classList.toggle('ready', readyNow);
-    const iconTxt = parrying ? '⚡' : '🛡';
+    // v0.29.254 — shield state is the ludo.ai img (innerHTML); parry flash
+    // stays the ⚡ emoji. Writes only on state change, so no per-frame churn.
+    const iconTxt = parrying ? '⚡' : _SB_SHIELD_ICON;
     if (bs._ic !== iconTxt) {
       bs._ic = iconTxt;
-      bs.iconEl.textContent = iconTxt;
+      bs.iconEl.innerHTML = iconTxt;
     }
     const mpTxt = onBlockCd ? (player.blockCD / 1000).toFixed(1) + 's' : 'Block';
     if (bs._mp !== mpTxt) { bs._mp = mpTxt; bs.mpEl.textContent = mpTxt; }
