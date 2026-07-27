@@ -35,6 +35,21 @@ const TOUCH_RATIO = parseFloat(grab(/const _BAND_TOUCH_RATIO = ([\d.]+)/, '_BAND
 const GEAR_ALLOW  = parseFloat(grab(/const _REF_GEAR_ALLOWANCE = ([\d.]+)/, '_REF_GEAR_ALLOWANCE'));
 const CLASS_REF   = JSON.parse('{' + grab(/const _CLASS_HP_REF = \{([^}]*)\}/, '_CLASS_HP_REF')
   .replace(/(\w+):/g, '"$1":').replace(/,\s*$/, '') + '}');
+const MED_ATK = JSON.parse(
+  '[' + grab(/const _MOB_MED_ATK = \[([\s\S]*?)\];/, '_MOB_MED_ATK')
+    .replace(/\s+/g, '').replace(/,$/, '') + ']');
+const TOUCH_MIN = parseFloat(grab(/const _TOUCH_ATK_MIN = ([\d.]+)/, '_TOUCH_ATK_MIN'));
+const TOUCH_MAX = parseFloat(grab(/_TOUCH_ATK_MAX = ([\d.]+)/, '_TOUCH_ATK_MAX'));
+
+function medAtk(lv) {
+  const L = Math.max(1, Math.min(100, lv | 0));
+  let v = MED_ATK[MED_ATK.length - 1][1];
+  for (let i = 0; i < MED_ATK.length - 1; i++) {
+    const a = MED_ATK[i], b = MED_ATK[i + 1];
+    if (L >= a[0] && L <= b[0]) { v = a[1] + (b[1] - a[1]) * ((L - a[0]) / (b[0] - a[0])); break; }
+  }
+  return Math.max(1, v);
+}
 
 function bandPct(lv) {
   const L = Math.max(1, Math.min(100, lv | 0));
@@ -79,7 +94,9 @@ const diffDmg = (d, src, pl) => Math.max(0, Math.round(d * Math.min(6, 1.3 + Mat
 
 export function touchDmg(P, lv, atk) {
   const r = refHp(lv, P.cls), bp = bandPct(lv);
-  const band = Math.min(Math.floor(r * bp.tCap), Math.max(Math.floor(r * bp.tFloor), Math.floor(atk * 0.28)));
+  // v0.29.270 — contact is linear in the mob's ATK relative to its tier median
+  const hot = Math.max(TOUCH_MIN, Math.min(TOUCH_MAX, atk / medAtk(lv)));
+  const band = Math.max(2, Math.floor(r * bp.tFloor * hot));
   const pc = pierce(lv, P.lv);
   let d = Math.max(1, band - Math.floor(P.def * 0.5 * pc) + 2);
   if (P.cls === 'warrior') d = Math.max(1, Math.floor(d * warrDr(P.lv)));
@@ -123,6 +140,22 @@ for (const cls of ['warrior', 'mage']) {
       `[~${targetHits(lv).toFixed(0)}]`);
   }
 }
+// v0.29.270 — contact is linear in ATK, so mobs of the same level should now
+// differ on touch. This section is the regression guard for that.
+const ROSTER = {
+  20: [['skywisp',35],['frog',36],['cookie',40],['honeyBuzz',55],['towerHexer',160],['towerStormcaller',230]],
+  80: [['lanternWisp',521],['boneWraith',610],['tombKeeper',665],['mournshade',685],['echoKnight',767],['pathsBane',850]],
+};
+console.log('\n=== ATK drives touch: same level, different monsters (mage) ===');
+for (const lv of Object.keys(ROSTER).map(Number)) {
+  const P = build('mage', lv);
+  console.log(`  Lv ${lv} (mage maxHP ${P.maxHp}, median ATK ${Math.round(medAtk(lv))}):`);
+  for (const [id, atk] of ROSTER[lv]) {
+    const d = touchDmg(P, lv, atk);
+    console.log(`    ${id.padEnd(18)} atk ${String(atk).padStart(4)}  ->  touch ${String(d).padStart(4)}  (${pctOf(d, P.maxHp)} of bar)`);
+  }
+}
+
 console.log('\n=== does DEF investment still pay off? (Lv 60 mage, at-level shot) ===');
 for (const extra of [0, 150, 400, 900]) {
   const P = build('mage', 60); P.def += extra;

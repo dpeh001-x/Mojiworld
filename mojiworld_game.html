@@ -8908,7 +8908,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.269';
+const GAME_VERSION = 'v0.29.270';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -31831,6 +31831,42 @@ function _dmgBandPct(lv) {
   const t = p * _BAND_TOUCH_RATIO;
   return { pFloor: p, pCap: p * _BAND_CAP_RATIO, tFloor: t, tCap: t * _BAND_CAP_RATIO };
 }
+// v0.29.270 — ATK-DRIVEN TOUCH (per user "instead of bands could you make it
+// such that the monster ATK is the primary influencer to touch damage").
+// The v0.29.269 band clamped contact into [tFloor, tCap] of the level anchor.
+// Because 0.28 × ATK never reached even the floor for ANY mob in the game
+// (a Lv-60 mob would have needed ATK 1222; the hottest is Path's Bane at
+// 850), every mob pinned to the floor and hit identically on contact — a
+// Spireling landed the same touch as an Ossuary Tyrant.
+// Contact damage is now LINEAR in the monster's own ATK:
+//     touch = (m.atk / medianATK(level)) × levelAnchor
+// The ratio is "how hot is this mob for its level", so doubling a mob's ATK
+// doubles its contact damage — ATK is the primary driver, exactly as asked.
+// The level anchor only sets the SCALE per level, which keeps the v0.29.269
+// difficulty ramp intact while restoring per-mob character. Ratio is clamped
+// to [0.30, 3.00] purely as an outlier guard so a freak stat block can't
+// one-shot; real mobs span ~×0.55-3.83 at Lv 20 and ~×0.77-1.26 at Lv 80,
+// so the clamp almost never binds.
+// _MOB_MED_ATK is the measured median authored ATK of every normal mob with
+// a resolved level (106 mobs; see scripts/balance_sim.mjs). Re-measure it if
+// the roster's ATK values are re-tuned in bulk.
+const _MOB_MED_ATK = [
+  [1, 11], [10, 29], [20, 62], [30, 62], [40, 112], [50, 209],
+  [60, 527], [70, 538], [80, 685], [90, 800], [100, 900],
+];
+const _TOUCH_ATK_MIN = 0.30, _TOUCH_ATK_MAX = 3.00;
+function _medAtkAtLv(lv) {
+  const L = Math.max(1, Math.min(100, lv | 0));
+  let v = _MOB_MED_ATK[_MOB_MED_ATK.length - 1][1];
+  for (let i = 0; i < _MOB_MED_ATK.length - 1; i++) {
+    const a = _MOB_MED_ATK[i], b = _MOB_MED_ATK[i + 1];
+    if (L >= a[0] && L <= b[0]) {
+      v = a[1] + (b[1] - a[1]) * ((L - a[0]) / (b[0] - a[0]));
+      break;
+    }
+  }
+  return Math.max(1, v);
+}
 // v0.29.265 — DEF PIERCE (per user "higher level monsters should have some
 // aspect of DEF piercing especially if their level is much higher than
 // players"). Returns the fraction of player DEF that still applies to this
@@ -32296,6 +32332,10 @@ function _lxSteamPresence(force) {
   // v0.29.258 — keep the invite lobby in step with the party on the same 6s
   // heartbeat (host on co-op connect, drop on disconnect, re-host on code change).
   try { _lxSteamLobbySync(); } catch (e) {}
+  // v0.29.269 — Deck battery: keep the machine awake ONLY while HOSTING a
+  // party (the host's sim is the party's world). Deduped in the preload, so
+  // riding the heartbeat costs one boolean compare per 6s.
+  try { if (window.SteamAPI.hostState) window.SteamAPI.hostState(!!(net && net.connected && net.isHost)); } catch (e) {}
 }
 // Friend clicked "Join Game" (or launched via a connect string): auto-join the
 // party. window.MOJI_JOIN = '<relay>~<CODE>' (relay URL-encoded) from main.js.
@@ -32369,7 +32409,27 @@ function _lxSteamPushStats() {
     });
   } catch (e) {}
 }
-try { window._lxSteamPresence = _lxSteamPresence; window._lxSteamTryAutoJoin = _lxSteamTryAutoJoin; window._lxSteamInviteFriends = _lxSteamInviteFriends; window._lxSteamPushStats = _lxSteamPushStats; window._lxSteamLobbySync = _lxSteamLobbySync; } catch (e) {}
+// v0.29.269 — Steam overlay auto-pause. Opening the overlay (Shift+Tab /
+// Steam button) freezes a SOLO game's sim; closing it resumes — but only if
+// WE paused (the latch), so a pause-holding panel opened meanwhile (class
+// select, death screen) is never force-unpaused. Never fires in co-op (the
+// host's sim is the party's world) or during the prologue cinematic chain
+// (its handoffs run on their own timers).
+let _lxSteamOverlayPausedByUs = false;
+function _lxSteamOverlayPause(active) {
+  try {
+    if (typeof game === 'undefined' || !game) return;
+    if (net && net.connected) return;
+    if (window._prologueActive || window._prologuePending) return;
+    if (active) {
+      if (!game.paused) { game.paused = true; _lxSteamOverlayPausedByUs = true; }
+    } else if (_lxSteamOverlayPausedByUs) {
+      _lxSteamOverlayPausedByUs = false;
+      if (!(typeof _lxPadModalRoot === 'function' && _lxPadModalRoot())) game.paused = false;
+    }
+  } catch (e) {}
+}
+try { window._lxSteamPresence = _lxSteamPresence; window._lxSteamTryAutoJoin = _lxSteamTryAutoJoin; window._lxSteamInviteFriends = _lxSteamInviteFriends; window._lxSteamPushStats = _lxSteamPushStats; window._lxSteamLobbySync = _lxSteamLobbySync; window._lxSteamOverlayPause = _lxSteamOverlayPause; } catch (e) {}
 // --- Controller (Gamepad API + optional native Steam Input) ------------------
 // Xbox/standard button index -> game input. {a:'action'} resolves through the
 // player's live rebinds; {k:'key'} is a literal physical key (skill slots /
@@ -58698,25 +58758,26 @@ function updateMonsters(dt) {
       let _atkBase = (m._selfRageTimer | 0) > 0
         ? Math.floor(m.atk * 1.5 * _normalMobMul * _gapMul)
         : Math.floor(m.atk * _normalMobMul * _gapMul);
-      // v0.29.262 — NORMAL-MOB TOUCH BAND (per user "touch: approx 15-22% of
-      // max HP ... without using %, just raw damage"). Every non-boss contact
-      // hit is clamped into 15-22% of _refHpAtLv(mob level) — a fixed raw
-      // number per level, NOT a fraction of the player's own bar. Weak mobs
-      // rise to the band floor (an at-level graze genuinely stings); hot
-      // elites — incl. the 15% miniElite promotions, which previously kept
-      // full 1.0× atk touch with no clamp — cap at the band top. ATK still
-      // decides where a mob sits inside the band; the level-gap mul scales
-      // the clamped value after, so out-leveling mobs pierce the band by
-      // design. DEF / block / class DR apply later and push the landed
-      // number below the band — survivability is bought, never floored
-      // away. Octobaby legs are boss limbs → exempt (kept on raw atk×1.4).
+      // v0.29.270 — ATK-DRIVEN NORMAL-MOB TOUCH (replaces the v0.29.262 band
+      // clamp; see _MOB_MED_ATK). Contact damage is now LINEAR in the mob's
+      // own ATK: its ratio against the median ATK for its level scales the
+      // level's touch anchor, so a mob with twice its tier's ATK deals twice
+      // the contact damage and each creature finally feels distinct on touch.
+      // The anchor keeps the v0.29.269 difficulty ramp; the level-gap mul
+      // still applies after; DEF / block / class DR mitigate downstream.
+      // Every mob reaching here has _normalMobMul === 0.28 (the boss/Krook/
+      // Gravitos/Arbiter/zodiac overrides above are all boss-only, and
+      // Octobaby legs are excluded), so the 0.28 baseline is folded into the
+      // anchor rather than applied twice.
       if (!m.isBoss && !m.boss && !m._octoParent && typeof _refHpAtLv === 'function') {
         const _tlv = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);
         const _tref = _refHpAtLv(_tlv);
-        const _tb = _dmgBandPct(_tlv);   // v0.29.269 — level-ramped band
-        const _tpre = Math.floor(m.atk * _normalMobMul * ((m._selfRageTimer | 0) > 0 ? 1.5 : 1));
-        const _tband = Math.min(Math.floor(_tref * _tb.tCap), Math.max(Math.floor(_tref * _tb.tFloor), _tpre));
-        _atkBase = Math.floor(_tband * _gapMul);
+        const _tb = _dmgBandPct(_tlv);
+        const _tmed = (typeof _medAtkAtLv === 'function') ? _medAtkAtLv(_tlv) : 0;
+        let _hot = (_tmed > 0) ? (m.atk / _tmed) : 1;
+        _hot = Math.max(_TOUCH_ATK_MIN, Math.min(_TOUCH_ATK_MAX, _hot));   // outlier guard only
+        if ((m._selfRageTimer | 0) > 0) _hot *= 1.5;
+        _atkBase = Math.max(2, Math.floor(_tref * _tb.tFloor * _hot * _gapMul));
       }
       // v0.26.356 — "Meaningful DEF": flat subtraction halved (was full
       // − getDef()). DEF's weight now lives mostly in the smooth % curve
@@ -105191,6 +105252,8 @@ try { if (typeof _lxSteamSyncAchievements === 'function') setTimeout(_lxSteamSyn
 // throttled; all no-ops without Steam).
 try { if (typeof _lxSteamTryAutoJoin === 'function') setTimeout(() => _lxSteamTryAutoJoin(), 2500); } catch (e) {}
 try { if (window.SteamAPI && window.SteamAPI.onJoin) window.SteamAPI.onJoin((s) => { try { _lxSteamTryAutoJoin(s); } catch (e) {} }); } catch (e) {}
+// v0.29.269 — overlay open/close pauses a solo game (see _lxSteamOverlayPause).
+try { if (window.SteamAPI && window.SteamAPI.onOverlay) window.SteamAPI.onOverlay((a) => { try { _lxSteamOverlayPause(a); } catch (e) {} }); } catch (e) {}
 try { setInterval(() => { try { if (typeof _lxSteamPresence === 'function') _lxSteamPresence(); } catch (e) {} }, 6000); } catch (e) {}
 
 if (!loadState()) {
@@ -105282,7 +105345,20 @@ renderSkillBar();
 // IMMEDIATELY: backgrounding tabs and unloading windows can fire before
 // the 1.5 s debounce window elapses and silently drop the latest changes.
 window.addEventListener('visibilitychange', () => { if (document.hidden && player.cls && !game._resetting) _flushSaveStateNow(); });
-window.addEventListener('beforeunload',     () => { if (player.cls && !game._resetting) _flushSaveStateNow(); });
+window.addEventListener('beforeunload',     () => {
+  if (player.cls && !game._resetting) _flushSaveStateNow();
+  // v0.29.269 — FINAL Steam Cloud mirror, SYNCHRONOUS. The flush above mirrors
+  // via async IPC, which renderer teardown can drop — and its 4s throttle can
+  // skip the very last save entirely. writeSync blocks until the native write
+  // returns, so an Alt+F4 / window-X / Deck-power quit always lands the
+  // freshest blob in the cloud. No-op on the web (no SteamAPI).
+  try {
+    if (!game._resetting && window.SteamAPI && window.SteamAPI.cloud && window.SteamAPI.cloud.writeSync) {
+      const _raw = localStorage.getItem(SAVE_KEY);
+      if (_raw) window.SteamAPI.cloud.writeSync(SAVE_KEY, _raw);
+    }
+  } catch (e) {}
+});
 // v0.26.x audit FIX (multi-tab) — a second tab sharing this origin can clobber
 // the save (last-writer-wins on one localStorage key), and was exploitable to
 // dupe consumed resources. A storage event fires in THIS tab when ANOTHER tab
