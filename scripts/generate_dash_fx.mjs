@@ -38,7 +38,9 @@ const SUFFIX = ' special-effect for a 2D side-scroller game, simple flat cel-sha
 
 // file (Sprites/fx/<key>.png) -> prompt. Keys mirror the LX_FX entries.
 const FX = {
-  dash_warrior: 'A single simple amber-orange speed swoosh, one smooth horizontal crescent arc that tapers to fine sharp points at both ends, two or three small ember dots trailing behind,',
+  // v4 per user: v3 came out as a closed round crescent (read as a moon, not
+  // motion) — force a WIDE SHALLOW arc, much wider than tall, laid flat.
+  dash_warrior: 'A single simple amber-orange horizontal speed swoosh laid flat, a wide shallow sweeping arc at least four times wider than tall, thick glowing center thinning to fine sharp points at the left and right ends, two small ember dots trailing behind, strong sense of fast sideways motion,',
   dash_mage:    'A single simple violet-blue arcane streak, one smooth horizontal energy trail with a soft bright core that fades out at both ends, three or four small four-pointed star sparkles around it,',
   dash_archer:  'A single simple emerald-green wind streak, two smooth curved horizontal wind lines that taper to fine points at both ends, one small leaf fleck trailing behind,',
   // "ninja smoke" made ludo draw a literal ninja head in the smoke — keep it
