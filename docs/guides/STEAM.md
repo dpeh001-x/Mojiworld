@@ -111,19 +111,35 @@ Then publish the build to a branch on **SteamPipe → Builds**, set it live on
 ## 4. Steamworks
 
 1. **Steam Direct**: pay the $100 app deposit, get your AppID.
-2. **Steam Play / Steamworks SDK**: for a v1 you can ship without deep SDK
-   integration. If you want Rich Presence / Steam friend invites, add
-   [`steamworks.js`](https://github.com/ceifa/steamworks.js) to `steam/` and call
-   it from `main.js` (Steam overlay works out of the box for a normal app).
+2. **Steam Play / Steamworks SDK**: [`steamworks.js`](https://github.com/ceifa/steamworks.js)
+   is wired in `steam/` (cloud, achievements, Rich Presence, Steam Input,
+   lobbies/friend invites — see §7); everything degrades to a no-op stub when
+   Steam isn't running, so the same build runs standalone.
 3. **Depot**: point your Steam depot at `steam/release/` (electron-builder output).
 4. **Store page**: see positioning below.
 5. **`steam_appid.txt`** in the run dir during dev if you integrate the SDK.
 
-### Steam invites → party code
-Simplest v1: the host shares the **Party Code** in Steam chat / Discord; the
-friend types it in. For one-click Steam invites, have `main.js` read the
-`+connect_lobby` launch arg (Steam friend-invite) and pre-fill the party code —
-a follow-up once `steamworks.js` is wired.
+### Steam invites → party code (BUILT, v0.29.259)
+One-click friend invites are wired end to end; the Steam lobby is a pure
+**party-code carrier** (play still runs on the WebSocket relay):
+
+1. **Host**: while in co-op, the 6 s presence heartbeat mirrors the party into
+   a FriendsOnly lobby (`_lxSteamLobbySync` → `SteamAPI.lobby.host`, lobby data
+   `party_code` + `relay`). The lobby is dropped when the party ends.
+2. **Invite**: the 🎮 Invite Steam Friends button opens Steam's **invite
+   dialog** on that lobby (hosting on demand if the heartbeat hasn't run yet);
+   fallback is the plain friends overlay + rich-presence Join Game.
+3. **Accept**: Steam launches the friend's copy with `+connect_lobby <id64>`
+   (cold start or second instance — both parsed by `steam/launch_args.js`), or
+   fires `GameLobbyJoinRequested` if their game is already running. `main.js`
+   joins the lobby, reads `party_code`/`relay`, leaves, and forwards the same
+   `--moji-join=<relay>~<CODE>` string the Join Game path uses.
+4. **Prefill + join**: the game fills the party code into the start-menu co-op
+   panel, the 🌐 Multi modal and the saved room key, then auto-joins — so the
+   code survives even if the join can't complete yet (class select still up).
+
+Manual fallback still works: share the **Party Code** in chat; the friend types
+it in.
 
 ---
 
@@ -148,7 +164,12 @@ a follow-up once `steamworks.js` is wired.
       friend on a different map (falls back to solo cleanly).
 - [ ] Death/boss/expedition flows verified in co-op (see COOP_NOTES.md caveats).
 - [ ] Windowed + fullscreen + alt-tab (host keeps simulating — `backgroundThrottling:false`).
-- [ ] Controller support if claimed on the store page.
+- [x] Controller support — the full pad chain (mapping → menus → rumble → quit)
+      plus lobby invites is exercised by `scripts/steam_integration_test.mjs`
+      (40/40; env-overridable browser via `MOJI_PW_EXE`, game URL via `MOJI_GAME_URL`).
+- [ ] Friend invite → accept on a second Steam account (real `+connect_lobby`
+      launch): party code prefilled + auto-join. (Live-Steam check; the argv →
+      prefill → join plumbing is covered by the test suite.)
 - [ ] Age rating / content survey submitted.
 - [ ] `steam_appid.txt` ships with your REAL App ID (the CI workflow bakes it; the wrapper reads it at runtime — 480 means you shipped the Spacewar placeholder).
 
@@ -223,9 +244,10 @@ which is **absent entirely on the web build** — so every Steam feature in
 `mojiworld_game.html` is a guaranteed no-op at play.moji-studios.com.
 
 ### Files
-- `steam/steam_integration.js` — wraps [`steamworks.js`](https://github.com/ceifa/steamworks.js); `init()` → `{ available, cloud, achievement, input }` (or a safe stub).
-- `steam/main.js` — inits the bridge, registers IPC (`steam:cloud-read/write`, `steam:ach-unlock`, `steam:input-snapshot`), passes `--moji-steam=1` to preload.
-- `steam/preload.js` — exposes `window.SteamAPI` (cloud/achievement async over IPC; input snapshot sync).
+- `steam/steam_integration.js` — wraps [`steamworks.js`](https://github.com/ceifa/steamworks.js); `init()` → `{ available, cloud, achievement, input, lobby, presence, overlay, stats, utils }` (or a safe stub).
+- `steam/main.js` — inits the bridge, registers IPC (`steam:cloud-read/write`, `steam:ach-unlock`, `steam:input-snapshot`, `steam:lobby-host/leave/invite`), resolves `+connect_lobby` → `moji-join`, passes `--moji-steam=1` to preload.
+- `steam/launch_args.js` — plain-Node parsing of `--moji-join=` / `+connect_lobby` argv (unit-testable, no Electron deps).
+- `steam/preload.js` — exposes `window.SteamAPI` (cloud/achievement/lobby async over IPC; input snapshot sync; buffers a `moji-join` that lands before the game registers `onJoin`).
 - `steam/steam_appid.txt` — App ID the wrapper passes to `steamworks.init()` (**480 = Spacewar placeholder; the steam-build workflow overwrites it with `vars.STEAM_APP_ID` for shipped builds**).
 - `steam/controller_config/game_actions_480.vdf` — Steam Input Game Actions File (rename to your App ID).
 
