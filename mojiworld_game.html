@@ -8908,7 +8908,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.276';
+const GAME_VERSION = 'v0.29.278';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -63999,9 +63999,22 @@ function hitMonster(m, dmg, isCrit, skill) {
   // longer to relax — felt as "weighted" hits rather than just a flash.
   // v0.26.x — Per user: gentler hit-squash on BOSSES (big sprites read poorly
   // when heavily squashed). Bosses pop ~half as much; normal mobs unchanged.
+  // v0.29.278 — Per user "significantly reduce the squish animation when hit
+  // by the player's high attack" for bosses AND bigger monsters. A high-atk
+  // crit squashed a boss to 86% height every hit — on a 300-400 px sprite
+  // that's a 40-50 px vertical pump, pure jelly. Bosses now barely flex
+  // (±2-4%); a new middle tier catches BIG non-boss mobs (Elder promotions
+  // + anything drawn ≥80 px wide or ≥90 px tall: elderbark, boneGolem,
+  // goblinMauler, smithgolem, brinekraken, tower Warden…) at roughly the
+  // old boss level. Small mobs keep the full cartoon pop — on a 40 px
+  // sprite it reads as juice, not jelly. hitFlash + hit-stop + knockback
+  // still carry the impact feel on the big frames.
   if (m.isBoss) {
-    m.scaleX = isCrit ? 1.16 : 1.07;
-    m.scaleY = isCrit ? 0.86 : 0.93;
+    m.scaleX = isCrit ? 1.05 : 1.02;
+    m.scaleY = isCrit ? 0.96 : 0.98;
+  } else if (m.isMiniBoss || m.w >= 80 || m.h >= 90) {
+    m.scaleX = isCrit ? 1.12 : 1.06;
+    m.scaleY = isCrit ? 0.90 : 0.95;
   } else {
     m.scaleX = isCrit ? 1.42 : 1.14;
     m.scaleY = isCrit ? 0.62 : 0.82;
@@ -93467,10 +93480,15 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
   // for animation frames (_animated) and draw the frame directly.
   const _bossKey = (m.zodiacSign || m.type) + (_isAttack ? '_atk' : '_idle');
   const _cachedBossSprite = _animated ? null : _getCachedScaledSprite(_bossKey, sprite, srcW, srcH, targetW, targetH);
+  // v0.29.278 — glow-heavy skins (star forms) get a guaranteed feather: the
+  // resolved sprite key opts them into _lxDrawSoft's force path, which
+  // covers any edge the alpha probe can't detect through the soft glow.
+  const _feKey = m._gravStarKey || m._phaseSprite || (m.zodiacSign ? ('zodiac_' + m.zodiacSign) : m.type);
+  const _softOpts = (typeof _LX_FORCE_FEATHER !== 'undefined' && _LX_FORCE_FEATHER.has(_feKey)) ? { force: true } : undefined;
   if (_cachedBossSprite) {
-    _lxDrawSoft(ctx, _cachedBossSprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset));   // v0.29.x — edge feather (clipped-art softening)
+    _lxDrawSoft(ctx, _cachedBossSprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), undefined, undefined, _softOpts);   // v0.29.x — edge feather (clipped-art softening)
   } else {
-    _lxDrawSoft(ctx, sprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);   // v0.29.x — edge feather
+    _lxDrawSoft(ctx, sprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH, _softOpts);   // v0.29.x — edge feather
   }
   ctx.restore();
 }
@@ -93733,6 +93751,13 @@ const MONSTER_ANIM_DEFS = {};
 const _LX_EDGE_PROBE = (typeof document !== 'undefined') ? document.createElement('canvas') : null;
 function _lxEdgesTouched(img) {
   if (img._lxEdges !== undefined) return img._lxEdges;
+  // v0.29.278 — don't MEMOIZE before the image has decoded. The star-form
+  // swaps (gravitos2star/3star) draw on the same frame their art first
+  // resolves; probing a not-yet-decoded image reads all-transparent, and the
+  // old code stamped that null onto the image forever — the sprite was
+  // permanently classified "clean" and never feathered. Return null (no
+  // feather this frame) but leave _lxEdges unset so the next frame re-probes.
+  if (!(img.width > 0 && img.height > 0) || (img.complete !== undefined && !img.complete)) return null;
   let res = null;
   try {
     const S = 48;
@@ -93759,9 +93784,26 @@ function _lxEdgesTouched(img) {
   return res;
 }
 let _lxFeatherCv = null, _lxFeatherCtx = null;
+// v0.29.278 — FORCED feather (per user "ensure that the edges of the boss
+// sprites such as gravitos2star gravitos3star are feathered so that the cut
+// off is not so obvious"). The supernova star forms carry soft glow art out
+// to the canvas border; its edge alpha can sit UNDER the probe's opaque
+// threshold (24) while still reading as an obvious straight cut against a
+// dark arena. Keys listed here always get a full-span feather on left/right/
+// top even when the probe reports the image clean. The boss draw path
+// resolves its sprite key (incl. _gravStarKey) and passes {force:true}.
+// Add future glow-heavy boss skins here.
+const _LX_FORCE_FEATHER = new Set(['gravitos2star', 'gravitos3star']);
+const _LX_FORCED_EDGES = { l: { f: 0.35, a: 0, b: 1 }, r: { f: 0.35, a: 0, b: 1 }, t: { f: 0.35, a: 0, b: 1 } };
 function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
   if (dw == null) { dw = img.width; dh = img.height; }
-  const e = _lxEdgesTouched(img);
+  let e = _lxEdgesTouched(img);
+  // force: fill in any edge the probe missed (partial detections keep their
+  // measured span; sides the glow defeated get the full-span fallback).
+  if (opts && opts.force) {
+    e = e ? { l: e.l || _LX_FORCED_EDGES.l, r: e.r || _LX_FORCED_EDGES.r, t: e.t || _LX_FORCED_EDGES.t }
+          : _LX_FORCED_EDGES;
+  }
   // v0.29.239 — opts.noTop: hang-anchored art (flowerbaskets etc.) is full-bleed
   // at the TOP by design (it attaches to the platform above), so fading it would
   // detach it visually — same rationale as the permanent bottom-edge exclusion.
