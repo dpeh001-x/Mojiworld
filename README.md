@@ -41,11 +41,11 @@ npm install
 npm start          # [levelx-server] listening on :8080
 ```
 
-In-game, click **🌐 Multi**, point it at your `ws://…` URL, name your hero, and enter a Party Code. See `server/README.md` for the full HTTP/WebSocket protocol and Fly.io / Railway / VPS deploy notes, and `COOP_NOTES.md` for the netcode design and invariants.
+In-game, click **🌐 Multi**, point it at your `ws://…` URL, name your hero, and enter a Party Code. See `server/README.md` for the full HTTP/WebSocket protocol and Fly.io / Railway / VPS deploy notes, and `docs/guides/COOP_NOTES.md` for the netcode design and invariants.
 
 ## 🖥️ Steam
 
-A desktop build (casual co-op pivot) is in progress under `steam/` — it wraps the same `mojiworld_game.html` as a native app with the shipped relay baked in. See `STEAM.md` for the packaging + launch guide.
+A desktop build (casual co-op pivot) is in progress under `steam/` — it wraps the same `mojiworld_game.html` as a native app with the shipped relay baked in. See `docs/guides/STEAM.md` for the packaging + launch guide.
 
 ## 🎯 Controls
 
@@ -123,8 +123,10 @@ Every combat map spawns a **mini-boss** (an Elder variant of the strongest local
 ## 📄 Docs
 
 - `CHANGELOG.html` — the canonical, human-facing release notes (open in a browser)
-- `COOP_NOTES.md` — co-op netcode design, invariants, and limitations
-- `STEAM.md` — desktop packaging + Steam launch guide
+- `docs/guides/` — setup, deploy, Steam packaging, and co-op netcode notes
+- `docs/design/` — specs, lore, balance sheets, and roadmaps
+- `docs/prompts/` — asset-generation prompt libraries (ludo.ai / Gemini / audio)
+- `docs/reports/` — gameplay audits and playtest reports
 - `server/README.md` — relay/backend API and deploy instructions
 
 ## 🛠️ Contributing

@@ -208,9 +208,20 @@ Behaviour:
 - `preview` is force-overwritten each time — safe to force-push with lease, it carries no durable history.
 - Fast-forward `preview` from the current branch tip (or a chosen commit), not via merge commits.
 
-## File layout
+## File layout (reorganised 2026-07-27)
+
+Root holds ONLY runtime + entry-point files; loose docs live under `docs/`.
+When adding a new doc, put it in the right `docs/` bucket — do not recreate
+root clutter. Keep at root anything a raw.githack URL points at.
 
 - `mojiworld_game.html` — the entire game in one file (canvas, HUD, systems, logic).
-- `CHANGELOG.html` — human-facing shareable changelog (see policy above).
-- `sprite_*.md`, `character_*.md`, `gear_*.md` — asset-generation notes.
-- `sprite_maker.html` — sprite preview tool.
+- `CHANGELOG.html` / `MOBILE_CHANGELOG.html` — shareable changelogs (see policy above; raw.githack-linked, never move).
+- `animator.html` / `monster_animator.html` — animator launcher + tool (raw.githack-linked, never move).
+- `anim_calib*.js`, `gear_*.js`, `mob_offsets.js`, `npc_offsets.js`, `monster_hitboxes.js`, `sfx_manifest.js`, `assets_manifest.json`, `sw.js` — runtime data loaded by the game/animator; must stay at root.
+- `sprite_maker.html`, `sprite_preview.html`, `map_editor.html`, `map_placement_tool.html`, `monster_sound_review.html`, `zodiac_vfx_review.html` — dev tools (referenced by game/changelog/scripts; stay at root).
+- `docs/prompts/` — asset-generation prompt libraries (ludo.ai, Gemini, audio) + production .docx.
+- `docs/design/` — specs, lore, balance, roadmaps.
+- `docs/reports/` — audits, playtest reports, session summaries.
+- `docs/guides/` — SETUP / DEPLOY / STEAM / co-op notes.
+- `docs/_REORG_MANIFEST.txt` — the 2026-07-27 move map (old → new paths).
+- `scripts/`, `tools/` — build + calibration utilities.

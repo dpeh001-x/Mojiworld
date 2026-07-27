@@ -471,8 +471,8 @@ const doc = new Document({
 });
 
 Packer.toBuffer(doc).then(buf => {
-  fs.writeFileSync('MOJIWORLD_SPRITE_PRODUCTION_LIST.docx', buf);
-  console.log('✓ Wrote MOJIWORLD_SPRITE_PRODUCTION_LIST.docx  (' + buf.length + ' bytes)');
+  fs.writeFileSync('docs/prompts/MOJIWORLD_SPRITE_PRODUCTION_LIST.docx', buf);
+  console.log('✓ Wrote docs/prompts/MOJIWORLD_SPRITE_PRODUCTION_LIST.docx  (' + buf.length + ' bytes)');
   console.log('  Missing-asset audit summary:');
   for (const [c, paths] of Object.entries(byCat)) {
     console.log(`    ${c}: ${paths.length}`);
