@@ -31,16 +31,18 @@ const SUFFIX = ' impact special-effect for a 2D side-scroller game, white-hot br
 // file (Sprites/fx/<key>.png) -> prompt. _2/_3 join the existing base art as
 // skill-keyed variants.
 const FX = {
-  hit_warrior_2: 'A single heavy vertical cleave slash impact, one thick ember-orange downward slash arc splitting a white-hot flash, black ink splatter bursting sideways from the cut,',
+  // v2 per user: cleave slash replaced — heavy blunt concussion read instead.
+  hit_warrior_2: 'A single heavy blunt concussion impact, thick ember-orange cracked shockwave fractures radiating from a dense white-hot core, a few chunky debris fragments flying out, black ink splatter mass behind,',
   hit_warrior_3: 'A single brutal ground-shock impact burst, ember-orange and gold jagged shockwave ring around a white-hot core, chunky black ink splatter flecks thrown upward,',
   hit_rogue_2:   'A single X-shaped cross slash impact, two thin crossing violet-magenta blade arcs over a white-hot flash core, fine black ink splatter spray,',
-  // v2: "fan of slice arcs" made ludo draw a literal folding fan (same trap
-  // as the dash art's "ninja smoke") — keep to slash/cut vocabulary only.
-  hit_rogue_3:   'A single trio of thin parallel violet-magenta diagonal slash cut lines raking across a white-hot flash core, sharp curved blade streaks, small black ink splatter dots trailing off the tips, abstract slash marks only, no object, no weapon,',
+  // v2: "fan of slice arcs" drew a literal folding fan (prompt-trap list).
+  // v3 per user: slash trio replaced — single crescent shadow-cut read.
+  hit_rogue_3:   'A single large curved crescent cut arc sweeping through a white-hot flash core, deep violet-magenta with a dark shadowy trailing edge, black ink splatter spraying off the outer curve, abstract cut mark only, no object, no weapon,',
   hit_mage_2:    'A single arcane ring-shock impact, a cyan-blue circular rune ring pulsing around a white-hot core flash, black ink splatter breaking outward through the ring,',
   hit_mage_3:    'A single crystalline shatter impact, sharp cyan-and-ice-blue glass shards exploding from a white-hot flash core, black ink splatter behind the shards,',
   hit_archer_2:  'A single piercing arrow-strike impact, thin leaf-green and gold needle spikes radiating from a small intense white-hot puncture flash, black ink splatter streaking in one direction,',
-  hit_archer_3:  'A single swirling leaf-burst impact, emerald-green curved wind arcs and small leaves spiraling out of a white-hot flash core, black ink splatter flecks between the leaves,',
+  // v2 per user: leaf burst replaced — multi-hit volley cluster read instead.
+  hit_archer_3:  'A single tight cluster of three small white-hot puncture bursts overlapping, each rimmed with leaf-green spikes and tiny gold sparks between them, black ink splatter spraying outward from the cluster,',
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
