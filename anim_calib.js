@@ -395,9 +395,9 @@ window.LX_ANIM_CALIB = {
   },
   "gravitospunch": {
     "attack": {
-      "s": 2.62,
+      "s": 1.01,
       "dx": 0,
-      "dy": 0
+      "dy": 0.015
     }
   },
   "kingKrook": {
