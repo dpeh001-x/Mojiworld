@@ -5,8 +5,9 @@
 // save on boot; (C) native Steam Input snapshot ORs into the pad poll; (D) with
 // no SteamAPI (the web build) everything is a clean no-op.
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
-const URL = 'http://localhost:8080/mojiworld_game.html';
+// Overridable so the suite runs anywhere (Windows: MOJI_PW_EXE to local Chrome).
+const EXE = process.env.MOJI_PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const URL = process.env.MOJI_GAME_URL || 'http://localhost:8080/mojiworld_game.html';
 const results = [];
 const ok = (n, c, extra) => results.push({ n, pass: !!c, extra });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -27,6 +28,8 @@ try {
       buttons: Array.from({ length: 16 }, () => ({ pressed: false, value: 0, touched: false })),
       axes: [0, 0, 0, 0] };
     navigator.getGamepads = () => [window.__pad, null, null, null];
+    // flip the _lxPadPresent perf gate exactly like a real first button press
+    window.dispatchEvent(new Event('gamepadconnected'));
     window.__press = (i, on) => { window.__pad.buttons[i] = { pressed: !!on, value: on ? 1 : 0, touched: !!on }; };
     window.__axis = (i, v) => { window.__pad.axes[i] = v; };
     // spy showToast so the connect toast is captured regardless of fade timing
@@ -182,6 +185,52 @@ try {
   });
   ok('Join Game connect string auto-joins the correct party', join.calls.length === 1 && join.calls[0].url === 'wss://relay.example' && join.calls[0].room === 'ABC42', join);
 
+  // (J) STEAM LOBBY — friend invites end to end: the party mirrors into a
+  // lobby (code carrier), Invite uses the lobby dialog, and a resolved
+  // +connect_lobby prefills the party-code UI everywhere before auto-joining.
+  const lobby = await page.evaluate(async () => {
+    const rec = { host: [], leave: 0, invite: 0, overlay: [] };
+    window.SteamAPI = Object.assign(window.SteamAPI || {}, {
+      available: true,
+      lobby: { host: (d) => { rec.host.push(d); return Promise.resolve('109775240000000001'); },
+               leave: () => { rec.leave++; return Promise.resolve(true); },
+               invite: () => { rec.invite++; return Promise.resolve(true); } },
+      overlay: { open: (d) => { rec.overlay.push(d); return Promise.resolve(true); } },
+    });
+    if (net) { net.connected = true; net.baseRoom = 'wxyz9'; net._lastUrl = 'wss://relay.example'; net.peers = { 2: {} }; }
+    _lxSteamLobbyCode = '';
+    _lxSteamPresence(true); await new Promise(r => setTimeout(r, 20));
+    const hosted = rec.host.length === 1 ? rec.host[0] : null;
+    _lxSteamPresence(true); await new Promise(r => setTimeout(r, 20));   // same code -> no re-host
+    const hostCallsAfterRepeat = rec.host.length;
+    const invited = _lxSteamInviteFriends(); await new Promise(r => setTimeout(r, 30));
+    const inviteUsedLobby = rec.invite >= 1 && rec.overlay.length === 0;
+    net.connected = false;
+    _lxSteamPresence(true); await new Promise(r => setTimeout(r, 20));   // party over -> drop lobby
+    const left = rec.leave >= 1;
+    // invite right after (re)connecting, BEFORE any heartbeat -> hosts on demand
+    net.connected = true; net.baseRoom = 'newp2';
+    const invited2 = _lxSteamInviteFriends(); await new Promise(r => setTimeout(r, 30));
+    const onDemand = rec.host.length === 2 && rec.host[1].code === 'NEWP2' && rec.invite >= 2;
+    net.connected = false; _lxSteamLobbySync();   // cleanup
+    // friend side: main resolved +connect_lobby -> moji-join -> PREFILL + join
+    localStorage.removeItem(MP_ROOM_KEY);
+    const joins = []; const mpOrig = window.mpConnect;
+    window.mpConnect = (url, name, room) => { joins.push({ url, room }); };
+    _lxSteamTryAutoJoin('--moji-join=' + encodeURIComponent('wss://relay.example') + '~QQ7PL');
+    window.mpConnect = mpOrig;
+    const prefRoom = (document.getElementById('mp-room') || {}).value;
+    const prefMenu = (document.getElementById('menu-coop-code') || {}).value;
+    const prefSaved = localStorage.getItem(MP_ROOM_KEY);
+    return { hosted, hostCallsAfterRepeat, invited, inviteUsedLobby, left, invited2, onDemand, joins, prefRoom, prefMenu, prefSaved };
+  });
+  ok('co-op heartbeat hosts the invite lobby with the party code', !!lobby.hosted && lobby.hosted.code === 'WXYZ9' && /relay\.example/.test(lobby.hosted.relay), lobby.hosted);
+  ok('heartbeat re-run does NOT re-host the same lobby', lobby.hostCallsAfterRepeat === 1, lobby.hostCallsAfterRepeat);
+  ok('Invite Friends prefers the lobby INVITE DIALOG over the overlay', lobby.invited === true && lobby.inviteUsedLobby === true, lobby);
+  ok('party end drops the lobby', lobby.left === true, lobby.left);
+  ok('invite before the heartbeat hosts the lobby on demand', lobby.invited2 === true && lobby.onDemand === true, lobby);
+  ok('accepted invite prefills the party code everywhere + auto-joins', lobby.joins.length === 1 && lobby.joins[0].room === 'QQ7PL' && lobby.prefRoom === 'QQ7PL' && lobby.prefMenu === 'QQ7PL' && lobby.prefSaved === 'QQ7PL', { joins: lobby.joins, room: lobby.prefRoom, menu: lobby.prefMenu, saved: lobby.prefSaved });
+
   // (C) Native Steam Input snapshot ORs into the poll (no physical pad button).
   const nativeInput = await page.evaluate(async () => {
     window.__pad.buttons.forEach((_, i) => window.__press(i, false)); window.__axis(0, 0);
@@ -195,21 +244,102 @@ try {
   });
   ok('native Steam Input snapshot drives the game (jump action)', nativeInput.jumped, nativeInput);
 
+  // (G) CONTROLLER MENU NAV — with a panel open the pad navigates the MENU
+  // (focus ring, D-pad moves, B closes) and stops driving the character.
+  const nav = await page.evaluate(async () => {
+    window.__pad.buttons.forEach((_, i) => window.__press(i, false)); window.__axis(0, 0); window.__axis(1, 0); _lxPadPoll();
+    openSettingsModal(); await new Promise(r => setTimeout(r, 50));
+    const openBefore = !!_lxPadModalRoot();
+    window.__press(13, true); _lxPadPoll(); window.__press(13, false); _lxPadPoll();
+    const f1 = document.querySelector('.pad-focus');
+    window.__press(13, true); _lxPadPoll(); window.__press(13, false); _lxPadPoll();
+    const f2 = document.querySelector('.pad-focus');
+    const movedFocus = !!(f1 && f2 && f1 !== f2);
+    const leaked = !!(game.keys['arrowdown'] || game.keys['arrowup']);
+    window.__press(1, true); _lxPadPoll(); window.__press(1, false); _lxPadPoll();
+    await new Promise(r => setTimeout(r, 60));
+    const closed = !_lxPadModalRoot();
+    return { openBefore, first: f1 ? (f1.id || f1.className || f1.tagName) : null, movedFocus, leaked, closed };
+  });
+  ok('pad enters menu mode with a focus ring on a control', nav.openBefore && !!nav.first, nav);
+  ok('D-pad moves focus between menu controls', nav.movedFocus === true, nav);
+  ok('menu mode: movement does not leak to the character', nav.leaked === false, nav);
+  ok('B closes the open panel from the pad', nav.closed === true, nav);
+
+  // (H) RUMBLE — haptics ride the audio.play switchboard: fire even when the
+  // game is MUTED, and never when the pad has sat untouched 8s+ (idle gate).
+  const rumble = await page.evaluate(async () => {
+    window.__rumbles = [];
+    window.__pad.vibrationActuator = { playEffect: (type, p) => { window.__rumbles.push(Object.assign({ type }, p)); return Promise.resolve('complete'); } };
+    window.__press(14, true); _lxPadPoll(); window.__press(14, false); _lxPadPoll();   // pad "in use" now
+    const wasMuted = audio.muted; audio.muted = true;
+    _lxRumbleLast = 0; audio.play('hit');
+    await new Promise(r => setTimeout(r, 90));
+    audio.play('death');
+    const got = window.__rumbles.slice();
+    _lxPadLastInput = performance.now() - 9000;   // pad idle 9s -> gate closes
+    _lxRumbleLast = 0;
+    const before = window.__rumbles.length;
+    audio.play('crit');
+    const gated = window.__rumbles.length === before;
+    audio.muted = wasMuted;
+    return { got, gated };
+  });
+  ok('rumble fires through audio.play while MUTED (hit tick)', rumble.got.some(r => r.type === 'dual-rumble' && r.duration === 55), rumble.got);
+  ok('death lands the heavy rumble', rumble.got.some(r => r.duration === 450 && r.strongMagnitude > 0.9), rumble.got);
+  ok('idle-pad gate: no rumble when the pad is untouched 8s+', rumble.gated === true, rumble.gated);
+
+  // (I) QUIT — the Deck exit path: wrapper-only row unhidden, REACHED WITH THE
+  // PAD from the open Settings panel, flushes the save, then window.close().
+  const quit = await page.evaluate(async () => {
+    window.__closed = 0;
+    const origClose = window.close; window.close = () => { window.__closed++; };
+    openSettingsModal(); await new Promise(r => setTimeout(r, 30));   // SteamAPI mock present -> wrapper build
+    const rowShown = document.getElementById('set-quit-row').style.display !== 'none';
+    const quitBtn = document.querySelector('#set-quit-row button');
+    window.__pad.buttons.forEach((_, i) => window.__press(i, false)); _lxPadPoll();
+    let steps = 0, focused = null;
+    while (steps++ < 120) {
+      window.__press(13, true); _lxPadPoll(); window.__press(13, false); _lxPadPoll();
+      focused = document.querySelector('.pad-focus');
+      if (focused === quitBtn) break;
+    }
+    const reached = focused === quitBtn;
+    localStorage.removeItem(SAVE_KEY);
+    window.__press(0, true); _lxPadPoll(); window.__press(0, false); _lxPadPoll();   // A on the quit button
+    await new Promise(r => setTimeout(r, 30));
+    const saved = !!localStorage.getItem(SAVE_KEY);
+    const closed = window.__closed > 0;
+    window.close = origClose;
+    try { closeSettingsModal(); } catch (e) {}
+    return { rowShown, reached, steps, saved, closed };
+  });
+  ok('wrapper build unhides the Quit row in Settings', quit.rowShown === true, quit);
+  ok('quit row is REACHABLE with the pad (D-pad walk)', quit.reached === true, { steps: quit.steps });
+  ok('A on Quit flushes the save before closing', quit.saved === true, quit);
+  ok('A on Quit calls window.close()', quit.closed === true, quit);
+
   // (D) WEB BUILD (no SteamAPI): every Steam path is a clean no-op.
   const web = await page.evaluate(async () => {
     delete window.SteamAPI;
     const avail = _steamAvailable();
     let threw = false;
-    try { _lxSteamCloudPush('{"x":1}', true); const r = await _lxSteamCloudSync(); void r; } catch (e) { threw = true; }
-    return { avail, threw };
+    try { _lxSteamCloudPush('{"x":1}', true); const r = await _lxSteamCloudSync(); void r; _lxSteamLobbySync(); _lxSteamInviteFriends(); } catch (e) { threw = true; }
+    // quit row must STAY hidden on the web (no SteamAPI / MOJI_RELAY_URL)
+    document.getElementById('set-quit-row').style.display = 'none';
+    openSettingsModal(); await new Promise(r => setTimeout(r, 30));
+    const quitHidden = document.getElementById('set-quit-row').style.display === 'none';
+    try { closeSettingsModal(); } catch (e) {}
+    return { avail, threw, quitHidden };
   });
-  ok('web build: Steam unavailable + cloud calls are safe no-ops', web.avail === false && web.threw === false, web);
+  ok('web build: Steam unavailable + cloud/lobby/invite calls are safe no-ops', web.avail === false && web.threw === false, web);
+  ok('web build: quit row stays hidden', web.quitHidden === true, web.quitHidden);
 
   ok('no page errors', page._errors.length === 0, page._errors.slice(0, 5));
 } catch (e) { results.push({ n: 'HARNESS ERROR', pass: false, extra: String(e).slice(0, 300) }); }
 finally { await browser.close(); }
 const passed = results.filter(r => r.pass).length;
-console.log('\n=== STEAM INTEGRATION (controller + cloud saves) ===');
+console.log('\n=== STEAM INTEGRATION (mapping → menus → rumble → quit · cloud · lobby invites) ===');
 for (const r of results) console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra !== undefined ? '  ' + JSON.stringify(r.extra) : ''}`);
 console.log(`\n${passed}/${results.length} checks passed`);
 process.exit(passed === results.length ? 0 : 1);
