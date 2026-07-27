@@ -72,6 +72,20 @@ ipcMain.handle('steam:presence-set', (_e, p) => { try { return steam.presence.se
 ipcMain.handle('steam:overlay-open', (_e, dialog) => { try { return steam.overlay.open(dialog); } catch (e) { return false; } });
 ipcMain.handle('steam:stats-set',    (_e, obj) => { try { return steam.stats.set(obj); } catch (e) { return false; } });
 ipcMain.on('steam:input-snapshot',   (e) => { try { e.returnValue = steam.input.snapshot(); } catch (err) { e.returnValue = null; } });
+// SYNCHRONOUS cloud write — the beforeunload final mirror only. The async
+// invoke path can be torn down with the renderer mid-flight; sendSync blocks
+// until the native write returns, so the freshest save always lands.
+ipcMain.on('steam:cloud-write-sync', (e, name, content) => { try { e.returnValue = steam.cloud.write(name, content); } catch (err) { e.returnValue = false; } });
+// Deck battery: keep the machine awake ONLY while this player HOSTS a co-op
+// party (the host's sim is the party's world). Solo players can let the Deck
+// sleep normally — localStorage saves are synchronous, resume just works.
+let _psbId = null;
+ipcMain.on('moji-host-state', (_e, hosting) => {
+  try {
+    if (hosting && _psbId == null) _psbId = powerSaveBlocker.start('prevent-app-suspension');
+    else if (!hosting && _psbId != null) { powerSaveBlocker.stop(_psbId); _psbId = null; }
+  } catch (e) {}
+});
 // Steam Deck / Big Picture: pop the floating gamepad keyboard over the game so
 // text fields (hero name, party code, chat) are typeable without a keyboard.
 ipcMain.handle('steam:show-text-input', (_e, opts) => { try { return steam.utils.showTextInput(opts || {}); } catch (e) { return false; } });
@@ -88,6 +102,12 @@ if (steam.available) {
   try {
     steam.onRichPresenceJoinRequested((s) => {
       try { const w = BrowserWindow.getAllWindows()[0]; if (w) w.webContents.send('moji-join', String(s || '')); } catch (e) {}
+    });
+  } catch (e) {}
+  // Overlay open/close -> the game pauses a SOLO session under the overlay.
+  try {
+    steam.onOverlayActivated((active) => {
+      try { const w = BrowserWindow.getAllWindows()[0]; if (w) w.webContents.send('moji-overlay', !!active); } catch (e) {}
     });
   } catch (e) {}
 }
@@ -128,7 +148,8 @@ const RELAY_URL = resolveRelayUrl();
 
 async function createWindow() {
   const port = await staticServer.start(ROOT, ENTRY, FIXED_PORT);
-  try { powerSaveBlocker.start('prevent-app-suspension'); } catch (e) {}
+  // powerSaveBlocker is NOT started here anymore — it's host-conditional (see
+  // the 'moji-host-state' IPC above) so a solo Deck player can let it sleep.
   const win = new BrowserWindow({
     width: 1280, height: 800, minWidth: 960, minHeight: 560,   // 1280×800 = Steam Deck native
     fullscreen: ON_DECK,           // gamescope expects fullscreen on Deck

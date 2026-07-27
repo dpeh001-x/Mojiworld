@@ -46,6 +46,7 @@ const STUB = {
   lobby: { async host() { return ''; }, leave() { return false; }, async join() { return null; }, invite() { return false; }, id() { return ''; } },
   onLobbyJoinRequested() { return false; },
   onRichPresenceJoinRequested() { return false; },
+  onOverlayActivated() { return false; },
   enableOverlay() { return false; },
   runCallbacks() {},
   shutdown() {},
@@ -227,6 +228,23 @@ function init() {
             if (raw && typeof raw === 'object') raw = (raw.steamId64 !== undefined) ? raw.steamId64 : (raw.raw !== undefined ? raw.raw : null);
             const id = (raw == null) ? '' : String(raw).replace(/[^0-9]/g, '');
             if (id) cb(id);
+          } catch (e) {}
+        });
+        return true;
+      } catch (e) { return false; }
+    },
+    // Steam overlay opened/closed (Shift+Tab / Steam button). cb(active:bool);
+    // the game auto-pauses a SOLO session while the overlay is up.
+    onOverlayActivated(cb) {
+      try {
+        if (typeof cb !== 'function' || !client.callback || typeof client.callback.register !== 'function') return false;
+        const en = steamCallbackEnum();
+        const evt = en && en.GameOverlayActivated;
+        if (evt === undefined || evt === null) return false;
+        client.callback.register(evt, (d) => {
+          try {
+            const a = d && (d.active !== undefined ? d.active : d.bActive !== undefined ? d.bActive : d.m_bActive);
+            cb(!!(typeof a === 'number' ? a : a));
           } catch (e) {}
         });
         return true;

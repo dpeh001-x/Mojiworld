@@ -355,6 +355,45 @@ try {
   ok('typing focus parks the pad (no game key leaks)', hatch.focusedBefore && hatch.anyKey === false, hatch);
   ok('B blurs a focused text field (pad never bricks)', hatch.blurred === true, hatch);
 
+  // (M) SMOOTH-TRANSITION TRIO — host-conditional power block, overlay
+  // auto-pause (solo only, latched), synchronous final cloud mirror.
+  const trio = await page.evaluate(async () => {
+    const rec = { host: [], sync: [] };
+    window.SteamAPI = Object.assign(window.SteamAPI || {}, { available: true,
+      hostState: (v) => rec.host.push(v),
+      cloud: { read: () => Promise.resolve(null), write: () => Promise.resolve(true),
+               writeSync: (n, c) => { rec.sync.push([n, (c || '').length]); return true; } } });
+    // hosting -> true; follower -> false; disconnected -> false
+    if (net) { net.connected = true; net.baseRoom = 'pwr01'; net.isHost = true; }
+    _lxSteamPresence(true); const h1 = rec.host[rec.host.length - 1];
+    net.isHost = false; _lxSteamPresence(true); const h2 = rec.host[rec.host.length - 1];
+    net.connected = false; _lxSteamPresence(true); const h3 = rec.host[rec.host.length - 1];
+    // overlay pause: solo + unpaused -> pause on open, resume on close
+    window._prologueActive = false; window._prologuePending = false;
+    game.paused = false; _lxSteamOverlayPausedByUs = false;
+    _lxSteamOverlayPause(true);  const pausedOnOpen = game.paused === true;
+    _lxSteamOverlayPause(false); const resumedOnClose = game.paused === false;
+    // latch: someone ELSE's pause is never force-released
+    game.paused = true; _lxSteamOverlayPause(true); _lxSteamOverlayPause(false);
+    const foreignPauseKept = game.paused === true;
+    game.paused = false;
+    // co-op: overlay never freezes the party
+    net.connected = true; _lxSteamOverlayPause(true);
+    const coopUntouched = game.paused === false;
+    net.connected = false;
+    // final mirror: beforeunload runs the SYNC cloud write with the saved blob
+    localStorage.setItem(SAVE_KEY, '{"v":1,"t":1,"player":{}}');
+    game._resetting = false;
+    window.dispatchEvent(new Event('beforeunload'));
+    const synced = rec.sync.length > 0 && rec.sync[rec.sync.length - 1][0] === SAVE_KEY && rec.sync[rec.sync.length - 1][1] > 0;
+    return { h1, h2, h3, pausedOnOpen, resumedOnClose, foreignPauseKept, coopUntouched, synced };
+  });
+  ok('power block follows HOST state (true/false/false)', trio.h1 === true && trio.h2 === false && trio.h3 === false, trio);
+  ok('overlay pauses a solo game and resumes on close', trio.pausedOnOpen && trio.resumedOnClose, trio);
+  ok('overlay never force-releases a foreign pause', trio.foreignPauseKept === true, trio);
+  ok('overlay never freezes a co-op session', trio.coopUntouched === true, trio);
+  ok('beforeunload lands the final cloud mirror SYNCHRONOUSLY', trio.synced === true, trio);
+
   // (D) WEB BUILD (no SteamAPI): every Steam path is a clean no-op.
   const web = await page.evaluate(async () => {
     delete window.SteamAPI;

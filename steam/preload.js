@@ -20,6 +20,9 @@ const launchJoin = getArg('--moji-launch-join=');
 // on registration so the invite is never lost to that race.
 const _joinCbs = [];
 let _joinPending = '';
+// Overlay open/close callbacks (registered by the game via onOverlay).
+const _overlayCbs = [];
+ipcRenderer.on('moji-overlay', (_e, active) => { for (const cb of _overlayCbs) { try { cb(!!active); } catch (e) {} } });
 ipcRenderer.on('moji-join', (_e, str) => {
   const s = String(str || '');
   if (!_joinCbs.length) { _joinPending = s; return; }
@@ -31,6 +34,10 @@ const SteamAPI = {
   cloud: {
     read(name) { try { return ipcRenderer.invoke('steam:cloud-read', String(name)); } catch (e) { return Promise.resolve(null); } },
     write(name, content) { try { return ipcRenderer.invoke('steam:cloud-write', String(name), String(content)); } catch (e) { return Promise.resolve(false); } },
+    // beforeunload-only: blocks until the native write returns, so the final
+    // save mirror can't be dropped in renderer teardown. Everywhere else use
+    // the async write().
+    writeSync(name, content) { try { return ipcRenderer.sendSync('steam:cloud-write-sync', String(name), String(content)); } catch (e) { return false; } },
   },
   achievement: {
     unlock(name) { try { return ipcRenderer.invoke('steam:ach-unlock', String(name)); } catch (e) { return Promise.resolve(false); } },
@@ -59,6 +66,17 @@ const SteamAPI = {
   // Pop Steam's floating gamepad keyboard (Deck / Big Picture). Steam types
   // directly into the focused DOM field.
   showTextInput(rect) { try { return ipcRenderer.invoke('steam:show-text-input', rect || {}); } catch (e) { return Promise.resolve(false); } },
+  // Deck battery: report whether this player currently HOSTS a co-op party.
+  // Deduped here so the 6s presence heartbeat doesn't spam main with IPC.
+  hostState(on) {
+    const v = !!on;
+    if (SteamAPI._lastHostState === v) return;
+    SteamAPI._lastHostState = v;
+    try { ipcRenderer.send('moji-host-state', v); } catch (e) {}
+  },
+  // Steam overlay open/close (GameOverlayActivated). The game pauses a solo
+  // session while the overlay is up.
+  onOverlay(cb) { if (typeof cb === 'function') _overlayCbs.push(cb); },
   // The game registers this at boot; it fires when a friend clicks Join Game
   // while the app is already running (main forwards the new party's connect str).
   // Replays a join that arrived before registration (cold-start lobby resolve).
