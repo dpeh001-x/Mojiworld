@@ -8908,7 +8908,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.258';
+const GAME_VERSION = 'v0.29.259';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -32148,6 +32148,29 @@ function _lxSteamConnectString() {
   } catch (e) { return ''; }
 }
 let _lxSteamPresenceT = 0;
+let _lxSteamLobbyCode = '';   // party code currently mirrored into a Steam invite lobby
+function _lxSteamPartyRelay() {
+  try { return (net && net._lastUrl) || (typeof MP_DEFAULT_URL !== 'undefined' ? MP_DEFAULT_URL : '') || ''; } catch (e) { return ''; }
+}
+// v0.29.258 — mirror the party into a Steam LOBBY (the friend-invite carrier;
+// lobby data = party_code + relay — play itself still runs on the WebSocket
+// relay). Hosts / re-hosts while in co-op, drops the lobby when the party
+// ends. A friend accepting an invite is launched with +connect_lobby <id>,
+// which the wrapper resolves back to this code (prefill + auto-join).
+// Returns the host() promise when a (re)host started, else null.
+function _lxSteamLobbySync() {
+  try {
+    if (!_steamAvailable() || !window.SteamAPI.lobby) return null;
+    const L = window.SteamAPI.lobby;
+    const code = (net && net.connected && net.baseRoom) ? String(net.baseRoom).toUpperCase() : '';
+    if (code && code !== _lxSteamLobbyCode) {
+      _lxSteamLobbyCode = code;
+      return L.host({ code: code, relay: _lxSteamPartyRelay(), size: 8 });
+    }
+    if (!code && _lxSteamLobbyCode) { _lxSteamLobbyCode = ''; L.leave(); }
+  } catch (e) {}
+  return null;
+}
 function _lxSteamPresence(force) {
   if (!_steamAvailable() || !window.SteamAPI.presence) return;
   const now = Date.now();
@@ -32165,6 +32188,9 @@ function _lxSteamPresence(force) {
       connect: _lxSteamConnectString(),
     });
   } catch (e) {}
+  // v0.29.258 — keep the invite lobby in step with the party on the same 6s
+  // heartbeat (host on co-op connect, drop on disconnect, re-host on code change).
+  try { _lxSteamLobbySync(); } catch (e) {}
 }
 // Friend clicked "Join Game" (or launched via a connect string): auto-join the
 // party. window.MOJI_JOIN = '<relay>~<CODE>' (relay URL-encoded) from main.js.
@@ -32179,15 +32205,42 @@ function _lxSteamTryAutoJoin(joinStr) {
     const relay = decodeURIComponent(s.slice(0, bar)) || MP_DEFAULT_URL;
     const code = s.slice(bar + 1).replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 12);
     if (!code) return;
+    // v0.29.258 — PREFILL the party-code UI + saved room BEFORE connecting, so
+    // the invite's code survives even when the auto-join can't complete yet
+    // (class select still up, relay hiccup): every co-op entry point — the
+    // start-menu Play Co-op panel and the 🌐 Multi modal — already shows it,
+    // and the player just presses Join.
+    try { localStorage.setItem(MP_ROOM_KEY, code); } catch (e) {}
+    try { const _r = document.getElementById('mp-room'); if (_r) _r.value = code; } catch (e) {}
+    try { const _m = document.getElementById('menu-coop-code'); if (_m) _m.value = code; } catch (e) {}
     _lxSteamJoinDone = true;
     const name = (typeof _mpLocalName === 'function') ? _mpLocalName() : ((player && player.look && player.look.name) || 'Hero');
     if (typeof mpConnect === 'function') { mpConnect(relay, name, code); if (typeof showToast === 'function') showToast('🎮 Joining your friend\'s party…', 'epic'); }
   } catch (e) {}
 }
-// Open the Steam overlay to friends so the player can invite (friends Join Game
-// via the rich-presence connect key). Returns false when Steam isn't present.
+// Invite Steam friends to the party. v0.29.258 — preferred path: Steam's
+// INVITE DIALOG on the party lobby, so a friend gets a one-click "Accept"
+// that launches them straight into the party (+connect_lobby → party code
+// prefilled + auto-join). Hosts the lobby on demand — the 6s heartbeat may
+// not have run yet right after connecting. Fallback: the plain friends
+// overlay (Join Game via the rich-presence connect key). False = no Steam.
 function _lxSteamInviteFriends() {
-  if (!_steamAvailable() || !window.SteamAPI.overlay) return false;
+  if (!_steamAvailable()) return false;
+  try {
+    const L = window.SteamAPI.lobby;
+    if (L && net && net.connected && net.baseRoom) {
+      const pend = _lxSteamLobbySync();
+      const fire = () => {
+        try {
+          const p = L.invite();
+          if (p && typeof p.then === 'function') p.then((ok) => { try { if (!ok && window.SteamAPI.overlay) window.SteamAPI.overlay.open('friends'); } catch (e) {} });
+        } catch (e) {}
+      };
+      if (pend && typeof pend.then === 'function') pend.then(fire, fire); else fire();
+      return true;
+    }
+  } catch (e) {}
+  if (!window.SteamAPI.overlay) return false;
   try { window.SteamAPI.overlay.open('friends'); return true; } catch (e) { return false; }
 }
 // --- Steam Stats + achievement progress --------------------------------------
@@ -32203,7 +32256,7 @@ function _lxSteamPushStats() {
     });
   } catch (e) {}
 }
-try { window._lxSteamPresence = _lxSteamPresence; window._lxSteamTryAutoJoin = _lxSteamTryAutoJoin; window._lxSteamInviteFriends = _lxSteamInviteFriends; window._lxSteamPushStats = _lxSteamPushStats; } catch (e) {}
+try { window._lxSteamPresence = _lxSteamPresence; window._lxSteamTryAutoJoin = _lxSteamTryAutoJoin; window._lxSteamInviteFriends = _lxSteamInviteFriends; window._lxSteamPushStats = _lxSteamPushStats; window._lxSteamLobbySync = _lxSteamLobbySync; } catch (e) {}
 // --- Controller (Gamepad API + optional native Steam Input) ------------------
 // Xbox/standard button index -> game input. {a:'action'} resolves through the
 // player's live rebinds; {k:'key'} is a literal physical key (skill slots /
