@@ -32214,6 +32214,14 @@ function _lxSteamTryAutoJoin(joinStr) {
     try { const _r = document.getElementById('mp-room'); if (_r) _r.value = code; } catch (e) {}
     try { const _m = document.getElementById('menu-coop-code'); if (_m) _m.value = code; } catch (e) {}
     _lxSteamJoinDone = true;
+    // v0.29.261 — fresh save: while class select is still up an mpConnect
+    // here would land its UI under the gate (the exact case the Play Co-op
+    // menu flow defers on). The code is already prefilled + saved above —
+    // tell the player and let hero creation finish the join.
+    if (typeof player === 'undefined' || !player || !player.cls) {
+      if (typeof showToast === 'function') showToast('Party code ' + code + ' saved — create your hero, then hit 🌐 Multi.', 'rare');
+      return;
+    }
     const name = (typeof _mpLocalName === 'function') ? _mpLocalName() : ((player && player.look && player.look.name) || 'Hero');
     if (typeof mpConnect === 'function') { mpConnect(relay, name, code); if (typeof showToast === 'function') showToast('🎮 Joining your friend\'s party…', 'epic'); }
   } catch (e) {}
@@ -32391,6 +32399,7 @@ function _lxPadMenuNav(root, pad) {
 // controllers still light up the instant they're used. Steam Input forces
 // polling on separately (desktop configs need it even without a std gamepad).
 let _lxPadPresent = false;
+let _lxPadBlurHeld = false;   // v0.29.261 — edge state for the text-field B/Start blur hatch
 try {
   window.addEventListener('gamepadconnected', () => { _lxPadPresent = true; });
   window.addEventListener('gamepaddisconnected', () => {
@@ -32411,7 +32420,25 @@ function _lxPadPoll() {
     // dead in Settings until a mouse click, i.e. bricked on Deck. Same type
     // list the Deck floating-keyboard hook (preload) treats as typeable.
     const ae = document.activeElement;
-    if (ae && (ae.tagName === 'TEXTAREA' || (ae.tagName === 'INPUT' && /^(text|search|number|password|email|url|tel)$/i.test(ae.type || 'text')))) return;
+    if (ae && (ae.tagName === 'TEXTAREA' || (ae.tagName === 'INPUT' && /^(text|search|number|password|email|url|tel)$/i.test(ae.type || 'text')))) {
+      // v0.29.261 — ESCAPE HATCH: menu nav itself can focus a text field
+      // (party code / hero name), and the Deck floating keyboard doesn't
+      // blur on Enter — without this the pad is dead until a mouse click.
+      // B or Start blurs the field; the press is pre-marked as held in the
+      // nav edge state so the SAME press doesn't also close the panel.
+      try {
+        const _ps = navigator.getGamepads ? navigator.getGamepads() : [];
+        let _p0 = null; for (let i = 0; i < _ps.length; i++) if (_ps[i] && _ps[i].connected) { _p0 = _ps[i]; break; }
+        const _bd = (i) => { const b = _p0 && _p0.buttons[i]; return !!(b && (b.pressed || b.value > 0.5)); };
+        const _esc = _bd(1) || _bd(9);
+        if (_esc && !_lxPadBlurHeld) {
+          _lxPadBlurHeld = true;
+          try { ae.blur(); } catch (e) {}
+          _lxPadNavPrev[1] = _bd(1); _lxPadNavPrev[9] = _bd(9);
+        } else if (!_esc) _lxPadBlurHeld = false;
+      } catch (e) {}
+      return;
+    }
     const pads = navigator.getGamepads();
     let pad = null;
     for (let i = 0; i < pads.length; i++) if (pads[i] && pads[i].connected) { pad = pads[i]; break; }
