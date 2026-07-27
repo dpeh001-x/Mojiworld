@@ -8908,7 +8908,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.263';
+const GAME_VERSION = 'v0.29.264';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -31705,7 +31705,7 @@ function addShake(amount) {
 // block / aegis / warrior / holyShield so it works alongside the existing
 // DR pipeline rather than replacing it. Applied at the main damage entry
 // points (contact, projectile, hazard) so all incoming damage benefits.
-function _defAbsorbMul() {
+function _defAbsorbMul(pierceMul) {
   const d = (typeof getDef === 'function') ? getDef() : 0;
   if (d <= 0) return 1;
   // v0.26.356 — "Meaningful DEF" pass. Old curve: min(0.50, d/(d+400)) —
@@ -31719,7 +31719,10 @@ function _defAbsorbMul() {
   // v0.26.357 — absorb cap raised 80% → 90% (DEF stacking rewarded further;
   // only reachable at very high DEF, ~4500+, so it lifts the ceiling for
   // dedicated tank builds without changing the early/mid curve).
-  const absorb = Math.min(0.90, d / (d + 500));
+  let absorb = Math.min(0.90, d / (d + 500));
+  // v0.29.263 — optional DEF-pierce: a high-level / out-leveling attacker
+  // passes pierceMul < 1 (see _defPierceMul) to shrink the absorb fraction.
+  if (typeof pierceMul === 'number' && pierceMul < 1) absorb *= pierceMul;
   return 1 - absorb;
 }
 // v0.29.x — GRAVITOS HEAVY-HIT REBALANCE (per user "I am getting one shotted
@@ -31758,13 +31761,39 @@ function _gravPhaseOf(m) {
 // Because the anchor is a fixed raw number per monster level, every point
 // of player HP buys real extra hits-to-die and every point of DEF shrinks
 // the landed number — no floor or player-maxHP % can cancel investment.
+// v0.29.263 — ×1.5 GEAR ALLOWANCE (per user "increase the raw damage by
+// 1.5x to account for potential def they may have gained from equipments").
+// Both anchors scale up so the landed post-mitigation number on a GEARED
+// at-level player stays in the authored bands; a naked base-stat player
+// now feels them ~1.5× hotter.
+const _REF_GEAR_ALLOWANCE = 1.5;
 function _refHpAtLv(lv) {
   const L = Math.max(1, lv | 0);
-  return Math.round(104 + 23.6 * L);
+  return Math.round((104 + 23.6 * L) * _REF_GEAR_ALLOWANCE);
 }
 function _refLoAtLv(lv) {
   const L = Math.max(1, lv | 0);
-  return Math.round(63 + 15.7 * L);
+  return Math.round((63 + 15.7 * L) * _REF_GEAR_ALLOWANCE);
+}
+// v0.29.263 — DEF PIERCE (per user "higher level monsters should have some
+// aspect of DEF piercing especially if their level is much higher than
+// players"). Returns the fraction of player DEF that still applies to this
+// attacker's hits (1 = full DEF, 0.25 = 75% pierced — the hard cap):
+//   • baseline by monster level: nothing below Lv 50, then +0.3%/level
+//     (Lv 60 → 3%, Lv 80 → 9%, Lv 100 → 15%) — apex creatures shred armor;
+//   • level gap: +6% per level the monster out-levels the player beyond a
+//     2-level grace, capped at 60% — an out-leveled zone's mobs go through
+//     gear that would trivialize them at-level.
+// Applied to BOTH the flat DEF subtraction and the _defAbsorbMul % curve.
+function _defPierceMul(m) {
+  const ml = (m && typeof m === 'object')
+    ? ((typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1))
+    : ((m | 0) || 1);
+  const pl = (typeof player !== 'undefined' && player) ? (player.level || 1) : 1;
+  const base = Math.max(0, Math.min(0.15, (ml - 50) * 0.003));
+  const gap = ml - pl;
+  const gapP = gap > 2 ? Math.min(0.60, (gap - 2) * 0.06) : 0;
+  return 1 - Math.min(0.75, base + gapP);
 }
 function _gravHeavyBand(phase, kind) {
   const p = (phase >= 3) ? 3 : (phase === 2 ? 2 : 1);
@@ -57148,7 +57177,9 @@ function updateMonsters(dt) {
         if (m._dirRollT <= 0 && !m._bigMeleeFiring && !(m._dirGuardT > 0) && !(m._dirGhostT > 0)) {
           m._dirRollT = 12000 + Math.random() * 8000;
           m._dirOpenT = 4000;
-          if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2, y: m.y - 8, vy: -1.2, text: 'OPEN!', life: 55, color: '#ffe27a', big: true });
+          // v0.29.264 — no "OPEN!" tag (per user: players must recognise the
+          // opening themselves). The tell is behavioural: the boss drags to a
+          // crawl, stops attacking, and gold stagger sparks rise.
         }
       }
       if (m._dirGuardT > 0) m._dirGuardT -= dt;
@@ -57315,7 +57346,8 @@ function updateMonsters(dt) {
           // players wait for. Elites keep their instant recovery.
           if ((m.isBoss || m.boss) && !((m.type || '').indexOf('gravitos') === 0) && Math.random() < 0.35) {
             m._dirOpenT = 3500;
-            if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2, y: m.y - 8, vy: -1.2, text: 'OPEN!', life: 55, color: '#ffe27a', big: true });
+            // v0.29.264 — no "OPEN!" tag here either; post-swing recovery lag
+            // reads through the stagger sparks + crawl alone.
           }
         }
       }
@@ -58613,7 +58645,10 @@ function updateMonsters(dt) {
       // − getDef()). DEF's weight now lives mostly in the smooth % curve
       // (_defAbsorbMul, cap raised to 80%) so a little DEF no longer cliffs
       // contact damage to 1; instead each point gives steady % returns.
-      let dmg = Math.max(1, _atkBase - Math.floor(getDef() * 0.5) + Math.floor(Math.random() * 4));
+      // v0.29.263 — DEF pierce: high-level / out-leveling attackers shave
+      // both the flat subtraction and (below) the absorb curve.
+      const _pierce = (typeof _defPierceMul === 'function') ? _defPierceMul(m) : 1;
+      let dmg = Math.max(1, _atkBase - Math.floor(getDef() * 0.5 * _pierce) + Math.floor(Math.random() * 4));
       // Block reduces damage by 70% (outside parry window)
       if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); triggerBlock(); }
       if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR (0.90 at L≤50 → 0.60 at L100) */
@@ -58624,7 +58659,8 @@ function updateMonsters(dt) {
       if (_hsMul < 1) dmg = Math.max(1, Math.floor(dmg * _hsMul));
       // v0.25.692 — DEF significance booster. Asymptotic % reduction on top
       // of the linear (atk - def) subtraction earlier in this block.
-      dmg = Math.max(1, Math.floor(dmg * _defAbsorbMul()));
+      // v0.29.263 — pierce-aware (same _pierce as the flat subtraction).
+      dmg = Math.max(1, Math.floor(dmg * _defAbsorbMul(_pierce)));
       // v0.26.x -- CONTACT FLOOR (per user "normal-mob contact damage floors
       // to ~1-2 HP ... walking through a crowd of same-level melee mobs is
       // nearly free"). The 0.28x touch mul minus flat DEF zeroed out, making
@@ -66413,7 +66449,11 @@ function updateProjectiles(dt) {
         // getDef()). The smooth % curve (_defAbsorbMul, 80% cap) now carries
         // DEF's weight so projectiles scale down smoothly with DEF instead of
         // cliffing to 1. `_ignoreDef` boss shots still bypass entirely.
-        const defUsed = p._ignoreDef ? 0 : Math.floor(getDef() * 0.5);  // v0.25.738 — magic/physical defense unified
+        // v0.29.263 — DEF pierce rides the projectile (p._defPierce, set at
+        // spawn from _defPierceMul of the firing mob): shaves the flat
+        // subtraction here and the absorb curve below.
+        const _pjPierce = (typeof p._defPierce === 'number') ? p._defPierce : 1;
+        const defUsed = p._ignoreDef ? 0 : Math.floor(getDef() * 0.5 * _pjPierce);  // v0.25.738 — magic/physical defense unified
         let dmg = Math.max(1, Math.floor(p.damage) - defUsed);
         // Block reduces projectile damage by 70%
         if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); triggerBlock(); }
@@ -66424,7 +66464,8 @@ function updateProjectiles(dt) {
       const _hsMul = _holyShieldDrMul();
       if (_hsMul < 1) dmg = Math.max(1, Math.floor(dmg * _hsMul));
       // v0.25.692 — DEF significance booster (projectile path).
-      dmg = Math.max(1, Math.floor(dmg * _defAbsorbMul()));
+      // v0.29.263 — pierce-aware (p._defPierce from the firing mob).
+      dmg = Math.max(1, Math.floor(dmg * _defAbsorbMul(_pjPierce)));
         // v0.25.822 — ZODIAC EMPOWERED PROJECTILE. 20 % chance per zodiac
         // projectile to amplify the impact to at least 50 % of player
         // max-HP, applied AFTER defensive reductions (same logic as the
