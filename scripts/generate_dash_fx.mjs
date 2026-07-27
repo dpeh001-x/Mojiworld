@@ -31,18 +31,19 @@ const arg = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : nu
 // characters no matter what follows. Short, effect-FIRST prompts with
 // explicit no-character negations produce clean cel-shaded VFX. Style tail
 // stays compact: 2D side-scroller + cel-shaded anime + bold dark outlines.
-const SUFFIX = ' special-effect for a 2D side-scroller game, cel-shaded anime style with bold dark outlines, glossy highlights, vibrant saturated colors, game VFX element only, no character, no person, no creature, no text, fully inside the frame with empty margin on all sides, transparent background';
+// v3 per user "make it simple and not look like an edge is cut-off": simpler
+// shapes, and EVERY stroke must taper/fade to nothing well before the frame
+// border — art that touches the border reads as sliced once trimmed in-game.
+const SUFFIX = ' special-effect for a 2D side-scroller game, simple flat cel-shaded anime style with bold dark outlines, minimal detail, clean bold simple shapes, vibrant saturated colors, game VFX element only, no character, no person, no creature, no text, every stroke tapers and fades to nothing well before the image border, nothing touching or clipped by the frame edge, generous empty margin on all sides, transparent background';
 
 // file (Sprites/fx/<key>.png) -> prompt. Keys mirror the LX_FX entries.
 const FX = {
-  dash_warrior: 'A single amber-orange charging shockwave swoosh with a crescent leading edge on the right and small ember flecks, horizontal motion streak firing left-to-right,',
-  dash_mage:    'A single violet-and-blue arcane teleport flash burst with radiating cyan sparkles, wispy lavender energy trails streaming left-to-right and a bright white-violet core,',
-  // v2 per user: not a standalone tornado — a HORIZONTAL sweeping gust.
-  dash_archer:  'A single emerald-green horizontal wind gust streak sweeping left-to-right, long curved wind arcs and swirl ribbons stretched horizontally, dense at the right and tapering off to the left, a few small leaf flecks trailing behind, strong sense of fast sideways motion,',
+  dash_warrior: 'A single simple amber-orange speed swoosh, one smooth horizontal crescent arc that tapers to fine sharp points at both ends, two or three small ember dots trailing behind,',
+  dash_mage:    'A single simple violet-blue arcane streak, one smooth horizontal energy trail with a soft bright core that fades out at both ends, three or four small four-pointed star sparkles around it,',
+  dash_archer:  'A single simple emerald-green wind streak, two smooth curved horizontal wind lines that taper to fine points at both ends, one small leaf fleck trailing behind,',
   // "ninja smoke" made ludo draw a literal ninja head in the smoke — keep it
   // to abstract smoke/shadow vocabulary only, and forbid faces explicitly.
-  // v2 per user: longer and faster — a stretched streak, not a round puff.
-  dash_rogue:   'A single very long thin horizontal violet-grey shadow-smoke dash streak firing left-to-right, stretched trailing smoke wisps and dark purple speed lines tapering to a sharp point on the left, dense compact smoke at the right edge, strong sense of extremely fast sideways motion, abstract smoke only, no face, no eyes,',
+  dash_rogue:   'A single simple violet-grey smoke streak, one smooth stretched horizontal smoke wisp that tapers to fine points at both ends with two tiny puffs trailing behind, abstract smoke only, no face, no eyes,',
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
