@@ -231,6 +231,21 @@ try {
   ok('invite before the heartbeat hosts the lobby on demand', lobby.invited2 === true && lobby.onDemand === true, lobby);
   ok('accepted invite prefills the party code everywhere + auto-joins', lobby.joins.length === 1 && lobby.joins[0].room === 'QQ7PL' && lobby.prefRoom === 'QQ7PL' && lobby.prefMenu === 'QQ7PL' && lobby.prefSaved === 'QQ7PL', { joins: lobby.joins, room: lobby.prefRoom, menu: lobby.prefMenu, saved: lobby.prefSaved });
 
+  // (L) FRESH-SAVE INVITE — no class picked yet (class select still up): the
+  // join must NOT connect; it prefills, saves and tells the player instead.
+  const fresh = await page.evaluate(async () => {
+    const calls = []; const orig = window.mpConnect;
+    window.mpConnect = (u, n, r) => calls.push(r);
+    const savedCls = player.cls; player.cls = null;
+    window.__toasts.length = 0;
+    localStorage.removeItem(MP_ROOM_KEY);
+    _lxSteamTryAutoJoin('--moji-join=' + encodeURIComponent('wss://relay.example') + '~FRSH1');
+    player.cls = savedCls; window.mpConnect = orig;
+    return { calls, saved: localStorage.getItem(MP_ROOM_KEY), toast: (window.__toasts || []).some(t => /FRSH1 saved/.test(t)) };
+  });
+  ok('fresh save: invite does NOT auto-connect under class select', fresh.calls.length === 0, fresh.calls);
+  ok('fresh save: code saved + player told what to do', fresh.saved === 'FRSH1' && fresh.toast === true, fresh);
+
   // (C) Native Steam Input snapshot ORs into the poll (no physical pad button).
   const nativeInput = await page.evaluate(async () => {
     window.__pad.buttons.forEach((_, i) => window.__press(i, false)); window.__axis(0, 0);
@@ -318,6 +333,27 @@ try {
   ok('quit row is REACHABLE with the pad (D-pad walk)', quit.reached === true, { steps: quit.steps });
   ok('A on Quit flushes the save before closing', quit.saved === true, quit);
   ok('A on Quit calls window.close()', quit.closed === true, quit);
+
+  // (K) TEXT-FIELD ESCAPE HATCH — a focused typeable field parks the pad
+  // (no game leaks), and B blurs it so navigation resumes (Deck keyboard's
+  // Enter doesn't blur; without this the pad bricked in the MP modal).
+  const hatch = await page.evaluate(async () => {
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.id = '__hatch'; document.body.appendChild(inp);
+    inp.focus();
+    const focusedBefore = document.activeElement === inp;
+    Object.keys(game.keys).forEach(k => game.keys[k] = false);
+    window.__press(0, true); _lxPadPoll();
+    const anyKey = Object.keys(game.keys).some(k => game.keys[k]);
+    window.__press(0, false); _lxPadPoll();
+    window.__press(1, true); _lxPadPoll();
+    const blurred = document.activeElement !== inp;
+    window.__press(1, false); _lxPadPoll();
+    inp.remove();
+    return { focusedBefore, anyKey, blurred };
+  });
+  ok('typing focus parks the pad (no game key leaks)', hatch.focusedBefore && hatch.anyKey === false, hatch);
+  ok('B blurs a focused text field (pad never bricks)', hatch.blurred === true, hatch);
 
   // (D) WEB BUILD (no SteamAPI): every Steam path is a clean no-op.
   const web = await page.evaluate(async () => {
