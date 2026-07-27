@@ -8908,7 +8908,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.259';
+const GAME_VERSION = 'v0.29.260';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -60757,14 +60757,18 @@ function bossAI(m, dt, distToPlayer) {
       if (m._lastSkillAt == null) m._lastSkillAt = -999999;
       const _skillSpaced    = (_nowOhko - m._lastSkillAt) >= _GAP;
       const _ohkoTrailClear = (_nowOhko - (m._lastOhkoAt || -999999)) >= _GAP;
-      // v0.29.258 — per user: hard OHKO-to-OHKO floor per form — "3rd form
-      // does not spam OHKO... 15 seconds between each cast" and "same with
-      // gravitos 2nd form, at least 25 seconds". The floor gates the three
-      // OHKO branches AND folds into _ohkoReady, so while an OHKO waits out
-      // its floor the regular rotation keeps rolling (branch 4 is only held
-      // by _ohkoReady when the OHKO is truly eligible) — the boss never
-      // stands idle through the wait. Phase 1 keeps the plain 8 s isolation.
-      const _OHKO_GAP = phase >= 3 ? 15 * 60 : phase === 2 ? 25 * 60 : _GAP;
+      // v0.29.258 — hard OHKO-to-OHKO floor per form; the floor gates the
+      // OHKO casts AND folds into _ohkoReady, so while an OHKO waits out its
+      // window the regular rotation keeps rolling — the boss never stands
+      // idle through the wait. Phase 1 keeps the plain 8 s isolation.
+      // v0.29.260 — per user: the window is RANDOM, not fixed — P3 rolls
+      // 15-45 s between casts, P2 rolls 25-60 s (less frequent). One roll
+      // per cast (re-rolled when the move fires), so timing is
+      // unpredictable but bounded.
+      if (m._ohkoGapRoll == null) m._ohkoGapRoll = Math.random();
+      const _OHKO_GAP = phase >= 3 ? (15 + 30 * m._ohkoGapRoll) * 60
+                      : phase === 2 ? (25 + 35 * m._ohkoGapRoll) * 60
+                      : _GAP;
       const _ohkoSpaced = (_nowOhko - (m._lastOhkoAt || -999999)) >= _OHKO_GAP;
       const _ohkoReady = _ohkoSpaced && (
                          (m._instaTimer <= 0) ||
@@ -60780,27 +60784,47 @@ function bossAI(m, dt, distToPlayer) {
       const _instaCd = phase >= 3 ? 9000 : phase === 2 ? 14000 : 20000;
       const _rainCd  = phase >= 3 ? 11000 : 20000;
       const _soulCd  = phase >= 3 ? 14000 : 12000;
-      if (m._instaTimer <= 0 && _skillSpaced && _ohkoSpaced) {
-        m.patternState = 'singularity';
-        m.patternTimer = 0;
-        m._instaTimer = _instaCd;
-        m._lastOhkoAt = _nowOhko; m._lastSkillAt = _nowOhko;
-        // v0.26.x — gravitos3 (phase 3) SUPERNOVA: dramatic black-screen flash on cast.
-        if (phase >= 3 && typeof blackFlash === 'function') { blackFlash(0.96); if (typeof addShake === 'function') addShake(22); if (typeof addHitStop === 'function') addHitStop(120); }
-      } else if (m._rainTimer <= 0 && phase >= 2 && _skillSpaced && _ohkoSpaced) {
-        // v0.26.075 — Phase 2+ only — phase 1 keeps headroom.
-        m.patternState = 'collapseRain';
-        m.patternTimer = 0;
-        m._rainTimer = _rainCd;
-        m._rainIdx = 0;
-        m._rainSafe = null;
-        m._lastOhkoAt = _nowOhko; m._lastSkillAt = _nowOhko;
-      } else if (m._soulTimer <= 0 && _skillSpaced && _ohkoSpaced) {
-        m.patternState = 'soulDrain';
-        m.patternTimer = 0;
-        m._soulTimer = _soulCd;
-        m._lastOhkoAt = _nowOhko; m._lastSkillAt = _nowOhko;
-      } else if (!_ohkoReady && _ohkoTrailClear && m.patternTimer > cycleBase) {
+      // v0.29.260 — per user "ensure that there is a clear signal 2s before
+      // the OHKO move": an eligible OHKO no longer fires instantly. It queues
+      // and telegraphs for 2 s (danger toast + screen flash + shake at warn
+      // start, a second pulse at the 1 s mark), THEN casts. Regular patterns
+      // stay held through the warn window via _ohkoReady (queued ⇒ ready).
+      if (m._ohkoWarnUntil != null) {
+        if (_nowOhko === m._ohkoWarnUntil - 60) { flash(0.28); addShake(9); }   // 1 s pulse
+        if (_nowOhko >= m._ohkoWarnUntil) {
+          const _pick = m._ohkoQueued;
+          m._ohkoWarnUntil = null; m._ohkoQueued = null;
+          m._ohkoGapRoll = Math.random();   // re-roll the next random window
+          m.patternTimer = 0;
+          m._lastOhkoAt = _nowOhko; m._lastSkillAt = _nowOhko;
+          if (_pick === 'collapseRain') {
+            // v0.26.075 — Phase 2+ only — phase 1 keeps headroom.
+            m.patternState = 'collapseRain';
+            m._rainTimer = _rainCd;
+            m._rainIdx = 0;
+            m._rainSafe = null;
+          } else if (_pick === 'soulDrain') {
+            m.patternState = 'soulDrain';
+            m._soulTimer = _soulCd;
+          } else {
+            m.patternState = 'singularity';
+            m._instaTimer = _instaCd;
+            // v0.26.x — gravitos3 (phase 3) SUPERNOVA: dramatic black-screen flash on cast.
+            if (phase >= 3 && typeof blackFlash === 'function') { blackFlash(0.96); if (typeof addShake === 'function') addShake(22); if (typeof addHitStop === 'function') addHitStop(120); }
+          }
+        }
+      } else if (_skillSpaced && _ohkoSpaced &&
+                 ((m._instaTimer <= 0) || (m._rainTimer <= 0 && phase >= 2) || (m._soulTimer <= 0))) {
+        m._ohkoQueued = (m._instaTimer <= 0) ? 'singularity'
+                      : (m._rainTimer <= 0 && phase >= 2) ? 'collapseRain'
+                      : 'soulDrain';
+        m._ohkoWarnUntil = _nowOhko + 2 * 60;
+        const _warnName = m._ohkoQueued === 'collapseRain' ? 'COLLAPSE RAIN'
+                        : m._ohkoQueued === 'soulDrain' ? 'SOUL DRAIN'
+                        : (phase >= 3 ? 'SUPERNOVA' : 'SINGULARITY');
+        if (typeof showToast === 'function') showToast('⚠ ' + _warnName + ' INCOMING — MOVE!', 'danger');
+        flash(0.35); addShake(14);
+      } else if (!_ohkoReady && m._ohkoWarnUntil == null && _ohkoTrailClear && m.patternTimer > cycleBase) {
         // v0.25.641 — Expanded pattern roll. Four new patterns join the
         // rotation (chaseComets / orbitalRing / crushTendrils / decayFloor)
         // and phase-3 has a 12% chance of a follow-up double-cast where
