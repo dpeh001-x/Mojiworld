@@ -8908,7 +8908,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.257';
+const GAME_VERSION = 'v0.29.258';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -60704,9 +60704,19 @@ function bossAI(m, dt, distToPlayer) {
       if (m._lastSkillAt == null) m._lastSkillAt = -999999;
       const _skillSpaced    = (_nowOhko - m._lastSkillAt) >= _GAP;
       const _ohkoTrailClear = (_nowOhko - (m._lastOhkoAt || -999999)) >= _GAP;
-      const _ohkoReady = (m._instaTimer <= 0) ||
+      // v0.29.258 — per user: hard OHKO-to-OHKO floor per form — "3rd form
+      // does not spam OHKO... 15 seconds between each cast" and "same with
+      // gravitos 2nd form, at least 25 seconds". The floor gates the three
+      // OHKO branches AND folds into _ohkoReady, so while an OHKO waits out
+      // its floor the regular rotation keeps rolling (branch 4 is only held
+      // by _ohkoReady when the OHKO is truly eligible) — the boss never
+      // stands idle through the wait. Phase 1 keeps the plain 8 s isolation.
+      const _OHKO_GAP = phase >= 3 ? 15 * 60 : phase === 2 ? 25 * 60 : _GAP;
+      const _ohkoSpaced = (_nowOhko - (m._lastOhkoAt || -999999)) >= _OHKO_GAP;
+      const _ohkoReady = _ohkoSpaced && (
+                         (m._instaTimer <= 0) ||
                          (m._rainTimer  <= 0 && phase >= 2) ||
-                         (m._soulTimer  <= 0);
+                         (m._soulTimer  <= 0));
       // v0.29.x — per user "make the 2nd form harder and the 3rd form hardest
       // with more frequent OHKO moves": OHKO re-arm cds step down each phase
       // (P1 → P2 → P3). The 8 s all-skill isolation gap above still bounds
@@ -60717,14 +60727,14 @@ function bossAI(m, dt, distToPlayer) {
       const _instaCd = phase >= 3 ? 9000 : phase === 2 ? 14000 : 20000;
       const _rainCd  = phase >= 3 ? 11000 : 20000;
       const _soulCd  = phase >= 3 ? 14000 : 12000;
-      if (m._instaTimer <= 0 && _skillSpaced) {
+      if (m._instaTimer <= 0 && _skillSpaced && _ohkoSpaced) {
         m.patternState = 'singularity';
         m.patternTimer = 0;
         m._instaTimer = _instaCd;
         m._lastOhkoAt = _nowOhko; m._lastSkillAt = _nowOhko;
         // v0.26.x — gravitos3 (phase 3) SUPERNOVA: dramatic black-screen flash on cast.
         if (phase >= 3 && typeof blackFlash === 'function') { blackFlash(0.96); if (typeof addShake === 'function') addShake(22); if (typeof addHitStop === 'function') addHitStop(120); }
-      } else if (m._rainTimer <= 0 && phase >= 2 && _skillSpaced) {
+      } else if (m._rainTimer <= 0 && phase >= 2 && _skillSpaced && _ohkoSpaced) {
         // v0.26.075 — Phase 2+ only — phase 1 keeps headroom.
         m.patternState = 'collapseRain';
         m.patternTimer = 0;
@@ -60732,7 +60742,7 @@ function bossAI(m, dt, distToPlayer) {
         m._rainIdx = 0;
         m._rainSafe = null;
         m._lastOhkoAt = _nowOhko; m._lastSkillAt = _nowOhko;
-      } else if (m._soulTimer <= 0 && _skillSpaced) {
+      } else if (m._soulTimer <= 0 && _skillSpaced && _ohkoSpaced) {
         m.patternState = 'soulDrain';
         m.patternTimer = 0;
         m._soulTimer = _soulCd;
