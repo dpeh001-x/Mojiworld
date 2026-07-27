@@ -41,7 +41,10 @@ function requestHandler(root, entry) {
     let p = decodeURIComponent((req.url || '/').split('?')[0]);
     if (p === '/') p = entry;
     const abs = path.normalize(path.join(root, p));
-    if (!abs.startsWith(root)) { res.writeHead(403); res.end('forbidden'); return; }
+    // Prefix guard with a separator: bare startsWith(root) would also admit
+    // SIBLING directories that share the prefix (root "…\Mojiworld" matching
+    // "…\Mojiworld2\secret") via a crafted ../ path.
+    if (abs !== root && !abs.startsWith(root.endsWith(path.sep) ? root : root + path.sep)) { res.writeHead(403); res.end('forbidden'); return; }
     fs.stat(abs, (err, st) => {
       if (err || !st.isFile()) { res.writeHead(404); res.end('not found'); return; }
       const type = MIME[path.extname(abs).toLowerCase()] || 'application/octet-stream';

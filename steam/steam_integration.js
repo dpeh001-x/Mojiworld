@@ -45,6 +45,7 @@ const STUB = {
   utils: { isOnDeck() { return false; }, showTextInput() { return false; } },
   lobby: { async host() { return ''; }, leave() { return false; }, async join() { return null; }, invite() { return false; }, id() { return ''; } },
   onLobbyJoinRequested() { return false; },
+  onRichPresenceJoinRequested() { return false; },
   enableOverlay() { return false; },
   runCallbacks() {},
   shutdown() {},
@@ -70,6 +71,13 @@ function init() {
   const actionHandles = {};
   // The invite lobby we currently host (party-code carrier; null = none).
   let curLobby = null;
+  // The SteamCallback enum has lived on the module root AND on client.callback
+  // across steamworks.js versions — probe both so registration never no-ops.
+  function steamCallbackEnum() {
+    try { if (steamworks.SteamCallback) return steamworks.SteamCallback; } catch (e) {}
+    try { if (client.callback && client.callback.SteamCallback) return client.callback.SteamCallback; } catch (e) {}
+    return null;
+  }
   try {
     if (client.input && typeof client.input.init === 'function') {
       client.input.init();
@@ -196,6 +204,8 @@ function init() {
       },
       invite() {
         try { if (curLobby && typeof curLobby.openInviteDialog === 'function') { curLobby.openInviteDialog(); return true; } } catch (e) {}
+        // Some steamworks.js versions expose the dialog on the overlay namespace.
+        try { if (curLobby && client.overlay && typeof client.overlay.activateInviteDialog === 'function') { client.overlay.activateInviteDialog(curLobby.id); return true; } } catch (e) {}
         return false;
       },
       id() { try { return curLobby ? String(curLobby.id) : ''; } catch (e) { return ''; } },
@@ -206,7 +216,8 @@ function init() {
     onLobbyJoinRequested(cb) {
       try {
         if (typeof cb !== 'function' || !client.callback || typeof client.callback.register !== 'function') return false;
-        const evt = client.callback.SteamCallback && client.callback.SteamCallback.GameLobbyJoinRequested;
+        const en = steamCallbackEnum();
+        const evt = en && en.GameLobbyJoinRequested;
         if (evt === undefined || evt === null) return false;
         client.callback.register(evt, (d) => {
           try {
@@ -216,6 +227,24 @@ function init() {
             if (raw && typeof raw === 'object') raw = (raw.steamId64 !== undefined) ? raw.steamId64 : (raw.raw !== undefined ? raw.raw : null);
             const id = (raw == null) ? '' : String(raw).replace(/[^0-9]/g, '');
             if (id) cb(id);
+          } catch (e) {}
+        });
+        return true;
+      } catch (e) { return false; }
+    },
+    // Rich-presence "Join Game" clicked while we're ALREADY RUNNING: Steam
+    // fires this callback with our own `connect` string instead of spawning a
+    // second instance. cb gets the string; main.js forwards it as moji-join.
+    onRichPresenceJoinRequested(cb) {
+      try {
+        if (typeof cb !== 'function' || !client.callback || typeof client.callback.register !== 'function') return false;
+        const en = steamCallbackEnum();
+        const evt = en && en.GameRichPresenceJoinRequested;
+        if (evt === undefined || evt === null) return false;
+        client.callback.register(evt, (d) => {
+          try {
+            const s = d && (d.connect !== undefined ? d.connect : d.connectString !== undefined ? d.connectString : d.rgchConnect);
+            if (s) cb(String(s));
           } catch (e) {}
         });
         return true;

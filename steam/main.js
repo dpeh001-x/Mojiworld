@@ -81,7 +81,16 @@ ipcMain.handle('steam:lobby-host',   (_e, data) => { try { return steam.lobby.ho
 ipcMain.handle('steam:lobby-leave',  () => { try { return steam.lobby.leave(); } catch (e) { return false; } });
 ipcMain.handle('steam:lobby-invite', () => { try { return steam.lobby.invite(); } catch (e) { return false; } });
 // Invite accepted while we're already running: resolve the lobby -> party code.
-if (steam.available) { try { steam.onLobbyJoinRequested((id) => deliverLobbyJoin(id)); } catch (e) {} }
+if (steam.available) {
+  try { steam.onLobbyJoinRequested((id) => deliverLobbyJoin(id)); } catch (e) {}
+  // Rich-presence "Join Game" while running fires a callback with our own
+  // connect string (no second instance) — forward it over the same channel.
+  try {
+    steam.onRichPresenceJoinRequested((s) => {
+      try { const w = BrowserWindow.getAllWindows()[0]; if (w) w.webContents.send('moji-join', String(s || '')); } catch (e) {}
+    });
+  } catch (e) {}
+}
 // Pump Steamworks callbacks periodically (cloud/input/presence housekeeping).
 if (steam.available) { try { setInterval(() => { try { steam.runCallbacks(); } catch (e) {} }, 200); } catch (e) {} }
 

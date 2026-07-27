@@ -41,6 +41,10 @@ ok('mp4 full -> 200 + accept-ranges', full.status === 200 && full.headers['accep
 
 const trav = await get(port, '/../etc/passwd');
 ok('traversal blocked', trav.status === 403 || trav.status === 404, trav.status);
+// A sibling dir sharing the root's name as a PREFIX (…/Mojiworld matching
+// …/Mojiworld-sib) must hit the guard (403), not fall through to stat (404).
+const sib = await get(port, '/../' + path.basename(ROOT) + '-sib/secret.txt');
+ok('sibling-prefix dir blocked by the guard (403)', sib.status === 403, sib.status);
 const missing = await get(port, '/nope.png');
 ok('missing file -> 404', missing.status === 404, missing.status);
 
