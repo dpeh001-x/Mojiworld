@@ -4709,7 +4709,7 @@
   /* v0.26.288 — Per-floor expedition quest pin. Top-left, anchored above
      the minimap. Visible only during an active expedition with a current
      floor quest. Compact card: amber title + dim goal line. */
-  /* v0.29.290 — QUARRY MASTERY BAR. Bottom-centre, above the skill deck.
+  /* v0.29.293 — QUARRY MASTERY BAR. Bottom-centre, above the skill deck.
      Pops in on a kill, shows progress to the next mastery star for that
      foe, then fades. Deliberately cute: a chunky rounded capsule, a hatching
      egg -> chick -> bird face that levels with the stars, and a candy-stripe
@@ -8544,7 +8544,7 @@ The sleeping world is listening.</div>
        map. Rendered by _renderAffixPin() from the loadMap hook. -->
   <div id="world-affix-pin" style="display:none;"></div>
 
-  <!-- v0.29.290 — quarry-mastery bar. Pops in on a kill showing progress
+  <!-- v0.29.293 — quarry-mastery bar. Pops in on a kill showing progress
        toward the next mastery star for THAT foe type, then fades. Rendered
        by _renderMasteryBar() from the kill handler. -->
   <div id="mastery-bar" style="display:none;">
@@ -9036,7 +9036,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.290';
+const GAME_VERSION = 'v0.29.293';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11617,6 +11617,7 @@ function _lxBakeToLong(im, maxLong) {
     }
     cv.complete = true; cv.naturalWidth = bw; cv.naturalHeight = bh;
     cv._lxSrc = im;   // keep the original addressable for debugging / future re-bake
+    cv._lxOrigLong = Math.max(w, h);   // v0.29.293 — see _lxBitmapToCanvas
     return cv;
   } catch (e) { return null; }
 }
@@ -11639,6 +11640,16 @@ function _lxBitmapToCanvas(bmp, src) {
   g.drawImage(bmp, 0, 0);
   cv.complete = true; cv.naturalWidth = bmp.width; cv.naturalHeight = bmp.height;
   cv._lxSrc = src;
+  // v0.29.293 — SIZE-DERIVATION GUARD. _drawBossSprite / _drawMonsterSprite
+  // scale the rendered figure by (source long edge ÷ a reference), so a
+  // right-sized raster would silently make the character SMALLER on screen —
+  // measured at 0.505× for Gravitos and 0.66× for the zodiac. The original
+  // long edge travels with the canvas and those two sites read it, so the
+  // draw SIZE is identical to pre-shrink while the raster is cheaper. Only
+  // this one number must come from the original: the aspect ratio survives
+  // the bake, and every bbox/content-box ratio stays in the canvas's own
+  // pixel space, so those remain self-consistent.
+  cv._lxOrigLong = Math.max(src.naturalWidth || src.width || 0, src.naturalHeight || src.height || 0) || undefined;
   return cv;
 }
 function _lxAsyncBake(frames, idx, im, maxLong) {
@@ -11664,6 +11675,24 @@ function _lxAsyncBake(frames, idx, im, maxLong) {
       })
       .catch(() => finish(null));
   } catch (e) { finish(null); }
+}
+// Single-image variant (holder[key] rather than an array of frames) — used for
+// the static monster sprites, which live in MONSTER_SPRITES rather than a frame
+// array and so never reached the array shrink.
+function _lxShrinkSlot(holder, key, baseLogical) {
+  const im = holder && holder[key];
+  if (!im || im.tagName === 'CANVAS' || im._lxNoShrink || im._lxBaking) return;
+  if (!(im.complete && im.naturalWidth > 0)) return;
+  const maxLong = _lxShrinkCap(baseLogical);
+  if (Math.max(im.naturalWidth, im.naturalHeight) <= maxLong) { im._lxNoShrink = true; return; }
+  if (typeof createImageBitmap === 'function') {
+    if (_lxBakeInFlight >= 2) return;
+    _lxAsyncBake(holder, key, im, maxLong);
+  } else {
+    const cv = _lxBakeToLong(im, maxLong);
+    if (cv && holder[key] === im) holder[key] = cv;
+    else if (!cv) im._lxNoShrink = true;
+  }
 }
 function _lxShrinkFrames(frames, baseLogical) {
   if (!frames || frames._lxShrunk) return frames;
@@ -43358,7 +43387,7 @@ const EXPEDITION_FLOOR_COUNT = 10;
 // elite density reuses the cursed-map lever.
 // =========================================================================
 // =========================================================================
-// v0.29.290 — QUARRY MASTERY BAR (per user: "a cutely designed on-screen bar
+// v0.29.293 — QUARRY MASTERY BAR (per user: "a cutely designed on-screen bar
 // that fills"). Per-type mastery has existed since v0.24.1 (100/500/1000
 // kills -> +1/2/3% damage vs that foe) but was only visible in the bestiary
 // dossier, so mid-fight it read as nothing at all. This surfaces it at the
@@ -43404,7 +43433,7 @@ function _renderMasteryBar(m, kills, starUp) {
     _lxMasteryHideTimer = setTimeout(() => { el.style.display = 'none'; }, 260);
   }, starUp ? 3200 : 1900);
 }
-// v0.29.290 — dust trickle rate. One shard on 3% of normal kills. Kept as a
+// v0.29.293 — dust trickle rate. One shard on 3% of normal kills. Kept as a
 // named constant so the economy knob is greppable and tunable in one place.
 const LX_DUST_TRICKLE_CHANCE = 0.03;
 // Small floating "+1◈" mote at the kill, so the trickle is FELT rather than
@@ -66001,9 +66030,9 @@ function killMonster(m) {
       showToast(`⭐ MASTERY — ${m.name || m.type} ${'★'.repeat(t)} (+${t}% dmg vs this foe)`, 'legendary');
       flash(0.25); audio.play('levelup');
     }
-    // v0.29.290 — surface the progress the moment it moves.
+    // v0.29.293 — surface the progress the moment it moves.
     if (typeof _renderMasteryBar === 'function') _renderMasteryBar(m, next, _starUp);
-    // v0.29.290 — DUST TRICKLE (per user: "a very low element of dust
+    // v0.29.293 — DUST TRICKLE (per user: "a very low element of dust
     // trickle"). Normal kills return gear only ~0.2% of the time, so ~499
     // of every 500 kills paid out nothing the player could feel. A small
     // setshard trickle means the bar always moves and the player chooses
@@ -93988,20 +94017,38 @@ function _zodiacAnimTick(m, now) {
 // the image. Used to rescale animation frames whose art draws a smaller body in
 // the same canvas (King Gloopaloo's attack pose). Returns null if not decoded /
 // readback blocked (cross-origin) — caller falls back to canvas sizing.
+// v0.29.293 — measure the ORIGINAL when handed a right-sized raster. The boss
+// renderer feeds this box back into targetH, so measuring the resampled copy
+// moved the drawn figure by ~1% (anti-aliased edges cross the alpha threshold
+// at slightly different rows). Scanning the retained source and scaling the
+// result into the canvas's own pixel space keeps the ratio math self-consistent
+// AND bit-identical to pre-shrink behaviour — and it is the same readback the
+// code did before the shrink existed, so it costs nothing extra.
+function _lxBoxSourceOf(img) {
+  const src = img && img._lxSrc;
+  if (src && src.naturalWidth > 0 && img.naturalHeight > 0) {
+    return { img: src, W: src.naturalWidth, H: src.naturalHeight, scale: img.naturalHeight / src.naturalHeight };
+  }
+  return { img, W: img.naturalWidth, H: img.naturalHeight, scale: 1 };
+}
 function _spriteContentBox(img) {
   if (!img) return null;
   if (img._lxCBox !== undefined) return img._lxCBox;
-  const W = img.naturalWidth, H = img.naturalHeight;
+  const _s = _lxBoxSourceOf(img);
+  const W = _s.W, H = _s.H;
   if (!W || !H) return null;                 // not decoded yet — retry next frame
   let res = null;
   try {
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-    const c = cv.getContext('2d'); c.drawImage(img, 0, 0);
+    const c = cv.getContext('2d'); c.drawImage(_s.img, 0, 0);
     const d = c.getImageData(0, 0, W, H).data;
     let top = -1, bottom = -1;
     for (let y = 0; y < H && top < 0; y++) for (let x = 0; x < W; x++) { if (d[(y*W+x)*4+3] > 64) { top = y; break; } }
     for (let y = H - 1; y >= 0 && bottom < 0; y--) for (let x = 0; x < W; x++) { if (d[(y*W+x)*4+3] > 64) { bottom = y; break; } }
-    if (top >= 0 && bottom >= top) res = { top, bottom };
+    if (top >= 0 && bottom >= top) {
+      res = (_s.scale === 1) ? { top, bottom }
+                             : { top: Math.round(top * _s.scale), bottom: Math.round(bottom * _s.scale) };
+    }
   } catch (_) { res = null; }
   img._lxCBox = res;                          // cache (incl. null) so we scan once
   return res;
@@ -94016,17 +94063,21 @@ function _spriteContentBox(img) {
 function _spriteBodyBox(img) {
   if (!img) return null;
   if (img._lxBBox !== undefined) return img._lxBBox;
-  const W = img.naturalWidth, H = img.naturalHeight;
+  const _s = _lxBoxSourceOf(img);            // v0.29.293 — measure the original (see _spriteContentBox)
+  const W = _s.W, H = _s.H;
   if (!W || !H) return null;                 // not decoded yet — retry next frame
   let res = null;
   try {
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-    const c = cv.getContext('2d'); c.drawImage(img, 0, 0);
+    const c = cv.getContext('2d'); c.drawImage(_s.img, 0, 0);
     const d = c.getImageData(0, 0, W, H).data;
     let top = -1, bottom = -1;
     for (let y = 0; y < H && top < 0; y++) for (let x = 0; x < W; x++) { if (d[(y*W+x)*4+3] > 235) { top = y; break; } }
     for (let y = H - 1; y >= 0 && bottom < 0; y--) for (let x = 0; x < W; x++) { if (d[(y*W+x)*4+3] > 235) { bottom = y; break; } }
-    if (top >= 0 && bottom >= top) res = { top, bottom };
+    if (top >= 0 && bottom >= top) {
+      res = (_s.scale === 1) ? { top, bottom }
+                             : { top: Math.round(top * _s.scale), bottom: Math.round(bottom * _s.scale) };
+    }
   } catch (_) { res = null; }
   img._lxBBox = res;                          // cache (incl. null) so we scan once
   return res;
@@ -94160,7 +94211,10 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
   // ~1.0 baseline; very-small re-renders are floored at 0.7× so they
   // can't disappear.
   const BOSS_SIZE_REF = 1024;
-  const sourceMaxDim = Math.max(srcW, srcH);
+  // v0.29.293 — read the ORIGINAL long edge when the frame has been right-sized
+  // (see _lxBitmapToCanvas); otherwise a cheaper raster would shrink the boss on
+  // screen — measured 0.505× for Gravitos, 0.66× for zodiac signs.
+  const sourceMaxDim = sprite._lxOrigLong || Math.max(srcW, srcH);
   const sizeFactor = Math.max(0.7, Math.min(1.6, sourceMaxDim / BOSS_SIZE_REF));
   // v0.26.x — per-boss draw-scale override (default 2.0). Lets a boss grow its
   // hitbox without growing its sprite — see BOSS_DRAW_SCALE (e.g. Gravitos).
@@ -94853,9 +94907,18 @@ function _monsterStateFrame(m) {
   // per-type attack-frame box scale (padded swing/smash frames) to the attack
   // state only — never to idle/walk.
   m._frameIsAttack = !!attacking;
-  if (attacking) return _bossLoopFrame(set.attack, _BOSS_ATK_FRAME_MS);
-  if (_mobWalking(m)) return _bossLoopFrame(set.walk, _BOSS_WALK_FRAME_MS);   // v0.29.273 — displacement-aware (slow mobs glided)
-  return _bossPingPongFrame(set.idle, _BOSS_IDLE_FRAME_MS);
+  // v0.29.293 — MOB SHRINK BASE. These sets were flowing through the boss
+  // getters with the boss default (720 logical -> an 828 px cap at DPR 1), and
+  // monster art is authored 709-850 px square — just UNDER that cap, so not a
+  // single monster frame was ever right-sized while the 612 MP of attack art
+  // (plus idle + walk) kept getting resampled from full size every frame.
+  // 480 is the measured ceiling with margin: the largest monster draw observed
+  // across dense maps is 425 logical (Astrofox), including the _ATK_FRAME_SCALE
+  // padding blow-up and the LX_MOB_SCALE_DATA per-type multipliers. Same
+  // DPR-aware rule as everything else, so it is still a pure down-scale.
+  if (attacking) return _bossLoopFrame(set.attack, _BOSS_ATK_FRAME_MS, 480);
+  if (_mobWalking(m)) return _bossLoopFrame(set.walk, _BOSS_WALK_FRAME_MS, 480);   // v0.29.273 — displacement-aware (slow mobs glided)
+  return _bossPingPongFrame(set.idle, _BOSS_IDLE_FRAME_MS, 480);
 }
 // v0.26.351 — Per-type draw-box multiplier for padded weapon-swing attack
 // frames (fatDragon, smithgolem, tombKeeper, forgewight). Each attack frame
@@ -94902,7 +94965,11 @@ function _drawMonsterSprite(m, sx, sy) {
   // combat. Hitbox (m.w × m.h) stays unchanged so collision and
   // projectile aim still follow the authored monsterTypes dimensions.
   const MONSTER_SIZE_REF = 768;
-  const sourceMaxDim = Math.max(srcW, srcH);
+  // v0.29.293 — same guard as the boss path: refImg is normally the static
+  // sprite (never shrunk), but a type with no static art falls back to a frame,
+  // which may be right-sized. Reading the original long edge keeps the rendered
+  // monster exactly the size it was before.
+  const sourceMaxDim = (refImg && refImg._lxOrigLong) || Math.max(srcW, srcH);
   const sizeFactor = Math.max(0.85, Math.min(1.20, sourceMaxDim / MONSTER_SIZE_REF));
   // R-key "Monster Plant" editor — per-type visual size multiplier (baked
   // mob_offsets.js + live localStorage). Applied to the rendered height here so
