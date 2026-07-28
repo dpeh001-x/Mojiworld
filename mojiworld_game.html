@@ -8908,7 +8908,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.284';
+const GAME_VERSION = 'v0.29.286';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10053,7 +10053,9 @@ function _projAnimFrame(skill) {
     for (let i = 0; i < 9; i++) { const img = new Image(); img.decoding = 'async'; img.onerror = () => {}; img.src = 'Sprites/projectiles/anim/' + skill + '_' + i + '.webp'; arr[i] = img; }
     PROJ_ANIM_FRAMES[skill] = arr;
   }
-  return (typeof _bossLoopFrame === 'function') ? _bossLoopFrame(arr, _PROJ_ANIM_FRAME_MS) : null;
+  // v0.29.284 — projectile anim art is ~768-922 px square but draws at 30-90 px;
+  // a 320 long edge is still 3-4× the largest on-screen size.
+  return (typeof _bossLoopFrame === 'function') ? _bossLoopFrame(arr, _PROJ_ANIM_FRAME_MS, 320) : null;   // base 320 logical: biggest blit is ~250 (size 2.8 × a ~90 px hitbox)
 }
 // =========================================================================
 // LX_PLAYER_PROJ — player projectile-skill sprites (v0.25.208)
@@ -10222,7 +10224,7 @@ function _summonAnimFrame(key, state) {
     SUMMON_ANIM_FRAMES[tag] = arr;
   }
   const ms = _SUMMON_ANIM_MS_OVERRIDE[key] || _SUMMON_ANIM_FRAME_MS;
-  const fr = (typeof _bossLoopFrame === 'function') ? _bossLoopFrame(arr, ms) : null;
+  const fr = (typeof _bossLoopFrame === 'function') ? _bossLoopFrame(arr, ms, 256) : null;   // v0.29.284 — base 256 logical: summons draw ~80-140 px
   return _lxSummonReady(fr) ? fr : null;
 }
 // v0.26.x — content-bottom fraction of a (padded) summon anim frame, cached.
@@ -10608,6 +10610,11 @@ function _fxAnimFrames(key) {
     for (let i = 0; i < 9; i++) { const img = new Image(); img.decoding = 'async'; img.onerror = () => {}; img.src = 'Sprites/fx/anim/' + key + '_' + i + '.webp'; arr[i] = img; }
     FX_ANIM_FRAMES[key] = arr;
   }
+  // v0.29.284 — fx frames are authored ~952×952 (347 MP across the pack).
+  // Base 640 logical = the largest fx draw measured in a boss fight
+  // (gravitos_blackhole at 614); on a DPR-2 display the cap lands above the
+  // authored size so these are left untouched, which is the correct answer.
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(arr, 640);
   return arr;
 }
 // Heuristic colour-buckets so a spawn call with a warrior gold colour
@@ -11420,6 +11427,143 @@ function _lxBakeDownscaled(img, targetW, targetH) {
   if ('imageSmoothingQuality' in fctx) fctx.imageSmoothingQuality = 'high';
   fctx.drawImage(cur, 0, 0, targetW, targetH);
   return final;
+}
+// =========================================================================
+// v0.29.284 — UNIVERSAL LAZY FRAME SHRINK (per user "reduce the lag at each
+// boss fight significantly, it should run very very smoothly").
+// v0.29.283 baked oversized boss art at arena load, but only for bosses the
+// map declared in `spawns[].boss` — measured gaps: tower_b5/b10 (Arbiter
+// 1500×1300, Sovereign 2000×1587), boss_rush and blockland_apex (Legosaurus)
+// declare NO boss spawn, so they got nothing; and the 347 MP of fx/anim +
+// 200 MP of projectiles/anim art was never covered anywhere.
+// This shrinks lazily at the FRAME-GETTER chokepoints instead, so every
+// animated draw in the game is covered with no per-map enumeration:
+//   • a frame is baked to a right-sized canvas the first time it is used;
+//   • canvases are stable rasters — the browser cannot evict + re-decode
+//     them mid-fight (the 90-110 ms spikes v0.29.283 diagnosed);
+//   • the source Image drops out of the array and becomes GC-able, so peak
+//     memory falls too (a 3000×2200 frame is ~26 MB decoded vs ~2 MB baked);
+//   • budgeted to 2 bakes per call so a first-display burst spreads over a
+//     few frames instead of one long hitch;
+//   • baked canvases duck-type complete/naturalWidth/naturalHeight, which is
+//     exactly what _lxFxReady / _lxMobProjReady / _lxSummonReady / the
+//     _readyN scan in _bossLoopFrame all probe.
+// Anything already small is flagged _lxNoShrink so it is tested only once.
+// NO VISIBLE CHANGE (per user "ensure that by shrinking it does not cause
+// visible changes to the sprites"). The cap is never a guess: it is the
+// number of DEVICE pixels the sprite can actually occupy on screen, so the
+// final blit is always a DOWN-scale of the baked canvas (identical to the
+// down-scale the engine was already doing from the raw art) and never an
+// up-scale, which is the only thing that would soften a sprite.
+//   cap = maxDrawLogical × devicePixelRatio × 1.15 safety margin
+// The logical bases below are MEASURED maxima from instrumented boss fights
+// (bosses/zodiac peak at 720 logical incl. the animator calib scale on the
+// Gravitos star forms; fx peaks ~614; projectiles ~250; summons ~140), and
+// the DPR term means a retina display automatically keeps more pixels — at
+// DPR 2 a 952 px fx frame is left untouched because it genuinely needs them.
+// Anything already at or below its cap is flagged and never touched at all.
+function _lxShrinkCap(baseLogical) {
+  const dpr = (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? Math.min(3, _LX_DPR) : 1;
+  return Math.ceil(baseLogical * Math.max(1, dpr) * 1.15);
+}
+function _lxBakeToLong(im, maxLong) {
+  try {
+    const w = im.naturalWidth || im.width, h = im.naturalHeight || im.height;
+    if (!(w > 0 && h > 0)) return null;
+    const long = Math.max(w, h);
+    if (long <= maxLong) return null;               // already small enough — leave the original alone
+    const s = maxLong / long;
+    const bw = Math.max(1, Math.round(w * s)), bh = Math.max(1, Math.round(h * s));
+    let cv = null;
+    // A single high-quality pass is both faster and visually equivalent for
+    // gentle reductions; only chain the halving bake when the ratio is steep
+    // enough for one-pass sampling to alias (that chain is what made the
+    // first lazy build cost 300-545 ms in a frame).
+    if (long / maxLong > 2.2) { try { cv = _lxBakeDownscaled(im, bw, bh); } catch (e) {} }
+    if (!cv) {
+      cv = document.createElement('canvas'); cv.width = bw; cv.height = bh;
+      const g = cv.getContext('2d');
+      if (!g) return null;
+      g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+      g.drawImage(im, 0, 0, bw, bh);
+    }
+    cv.complete = true; cv.naturalWidth = bw; cv.naturalHeight = bh;
+    cv._lxSrc = im;   // keep the original addressable for debugging / future re-bake
+    return cv;
+  } catch (e) { return null; }
+}
+// OFF-THREAD RESIZE. Resampling a 3000×2200 boss frame on the main thread
+// costs 100-160 ms even one at a time — measured as a 157 ms hitch the first
+// time Gravitos cast, i.e. the cure was as bad as the disease. createImageBitmap
+// with resizeWidth/Height does the expensive resample off the main thread; we
+// then blit the ALREADY-SMALL bitmap into a canvas (~1-3 ms) so the result
+// duck-types complete/naturalWidth like everything else expects. At most two
+// bakes are in flight at once, so a set trickles in over a few frames without
+// ever blocking one. Falls back to the synchronous path only where
+// createImageBitmap is unavailable (budgeted to 1/frame there).
+let _lxBakeInFlight = 0;
+let _lxShrinkStamp = -1, _lxShrinkUsed = 0;
+function _lxBitmapToCanvas(bmp, src) {
+  const cv = document.createElement('canvas');
+  cv.width = bmp.width; cv.height = bmp.height;
+  const g = cv.getContext('2d');
+  if (!g) return null;
+  g.drawImage(bmp, 0, 0);
+  cv.complete = true; cv.naturalWidth = bmp.width; cv.naturalHeight = bmp.height;
+  cv._lxSrc = src;
+  return cv;
+}
+function _lxAsyncBake(frames, idx, im, maxLong) {
+  const w = im.naturalWidth, h = im.naturalHeight;
+  const s = maxLong / Math.max(w, h);
+  const bw = Math.max(1, Math.round(w * s)), bh = Math.max(1, Math.round(h * s));
+  im._lxBaking = true;
+  _lxBakeInFlight++;
+  let done = false;
+  const finish = (cv) => {
+    if (done) return; done = true;
+    _lxBakeInFlight--;
+    im._lxBaking = false;
+    if (cv && frames[idx] === im) { frames[idx] = cv; frames._readyN = 0; }
+  };
+  try {
+    createImageBitmap(im, { resizeWidth: bw, resizeHeight: bh, resizeQuality: 'high' })
+      .then((bmp) => {
+        let cv = null;
+        try { cv = _lxBitmapToCanvas(bmp, im); } catch (e) {}
+        try { bmp.close && bmp.close(); } catch (e) {}
+        finish(cv);
+      })
+      .catch(() => finish(null));
+  } catch (e) { finish(null); }
+}
+function _lxShrinkFrames(frames, baseLogical) {
+  if (!frames || frames._lxShrunk) return frames;
+  const t = (typeof game !== 'undefined' && game) ? game.time : 0;
+  if (t !== _lxShrinkStamp) { _lxShrinkStamp = t; _lxShrinkUsed = 0; }
+  const maxLong = _lxShrinkCap(baseLogical);
+  const canAsync = (typeof createImageBitmap === 'function');
+  let pending = false;
+  for (let i = 0; i < frames.length; i++) {
+    const im = frames[i];
+    if (!im) { pending = true; continue; }
+    if (im.tagName === 'CANVAS' || im._lxNoShrink) continue;
+    if (im._lxBaking) { pending = true; continue; }
+    if (!(im.complete && im.naturalWidth > 0)) { pending = true; continue; }
+    if (Math.max(im.naturalWidth, im.naturalHeight) <= maxLong) { im._lxNoShrink = true; continue; }
+    if (canAsync) {
+      if (_lxBakeInFlight >= 2) { pending = true; break; }
+      _lxAsyncBake(frames, i, im, maxLong);
+      pending = true;
+    } else {
+      if (_lxShrinkUsed >= 1) { pending = true; break; }
+      const cv = _lxBakeToLong(im, maxLong);
+      if (cv) { frames[i] = cv; frames._readyN = 0; _lxShrinkUsed++; }
+      else im._lxNoShrink = true;
+    }
+  }
+  if (!pending) frames._lxShrunk = true;
+  return frames;
 }
 // v0.25.862 — Face layers (eye / mouth / hair) all render at 108×108 in
 // _drawVectorHero. Baking at 2× that = 216×216 gives crisp downscale even
@@ -43062,6 +43206,76 @@ const EXPEDITION_FLOOR_COUNT = 10;
 // excludes town hubs (already in the persistent world feel), already-
 // designed boss arenas (handled by F10's zodiac roll), and the
 // expedition-only PQ maps that we'll fold in via v0.26.264.
+// =========================================================================
+// v0.29.286 — SEEDED RNG (per user: "seeded expedition runs").
+// mulberry32: fast, well-distributed, and crucially DETERMINISTIC — the same
+// seed replays the same run. Nothing in the game was seeded before this
+// (every roll is a bare Math.random()), so two players could never compare
+// runs and `towerBestFloor` was an unfalsifiable local number. A seeded
+// expedition turns a run into a shareable artifact.
+// SCOPE: floor maps are already fixed (TOWER_FLOORS, v0.26.282), so the seed
+// governs what actually varies — the puzzle questions and the Floor-10 zodiac
+// draw. Combat/damage/drop rolls stay UNSEEDED on purpose: seeding those
+// would let a player farm a known-good seed for guaranteed loot.
+// =========================================================================
+function _lxMulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+// Fold an arbitrary string into a 32-bit seed (FNV-1a).
+function _lxSeedFromString(s) {
+  const str = String(s == null ? '' : s);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h >>> 0;
+}
+// Seed <-> short readable code. Alphabet drops 0/O/1/I/L so a code read off
+// a screenshot can't be mistyped into a different run.
+const _LX_SEED_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+function _lxSeedToCode(seed) {
+  let n = (seed >>> 0), out = '';
+  for (let i = 0; i < 6; i++) { out = _LX_SEED_ALPHABET[n % 31] + out; n = Math.floor(n / 31); }
+  return out;
+}
+function _lxCodeToSeed(code) {
+  const s = String(code || '').toUpperCase().replace(/[^0-9A-Z]/g, '')
+    .replace(/O/g, '0').replace(/[IL]/g, '1');
+  if (!s) return null;
+  // A canonical 6-char code decodes exactly; anything else is hashed, so
+  // "banana" is a perfectly good seed too.
+  if (s.length === 6 && [...s].every(ch => _LX_SEED_ALPHABET.includes(ch))) {
+    let n = 0;
+    for (const ch of s) n = n * 31 + _LX_SEED_ALPHABET.indexOf(ch);
+    return n >>> 0;
+  }
+  return _lxSeedFromString(s);
+}
+// Draw from the ACTIVE expedition's seeded stream; falls back to Math.random()
+// outside a run so callers never branch. The generator itself can't be
+// serialised into the save, so it is rehydrated from (seed, _draws) — the
+// draw counter fast-forwards the stream to where it was, which keeps a run
+// deterministic across a save/quit/reload.
+function _expRand() {
+  const e = (typeof game !== 'undefined' && game) ? game.expedition : null;
+  if (!e || !e.active || !(e.seed >= 0)) return Math.random();
+  if (typeof e._rng !== 'function') {
+    e._rng = _lxMulberry32(e.seed >>> 0);
+    for (let i = 0, n = e._draws | 0; i < n; i++) e._rng();
+  }
+  e._draws = (e._draws | 0) + 1;
+  return e._rng();
+}
+// Queue a seed for the NEXT expedition. Accepts a 6-char code or any string.
+function _setExpeditionSeed(code) {
+  const s = _lxCodeToSeed(code);
+  if (s == null) { game._nextExpeditionSeed = null; return null; }
+  game._nextExpeditionSeed = s;
+  return _lxSeedToCode(s);
+}
 const EXPEDITION_MAP_POOL = {
   // Lv 20-29 entry: gentle starter pool
   early:   ['forest', 'mushroom', 'candyCanyon', 'slimeCave', 'bubblegumSwamp', 'sunsetBeach', 'frostbiteHollow', 'graniteBluffs', 'wildflowerPlains', 'sauroSlope', 'tidalLagoon'],
@@ -43134,10 +43348,20 @@ function _startExpedition() {
     if (typeof showToast === 'function') showToast(`⚜ Expedition gated at Lv ${EXPEDITION_LEVEL_GATE}+`, 'rare');
     return false;
   }
+  // v0.29.286 — seed the run. Either the player queued one (_setExpeditionSeed
+  // / the Seeded Run dialog option) or we roll a fresh one. Either way the
+  // code is surfaced so the run can be shared or replayed.
+  const _seed = (game._nextExpeditionSeed != null)
+    ? (game._nextExpeditionSeed >>> 0)
+    : ((Math.random() * 0xFFFFFFFF) >>> 0);
+  game._nextExpeditionSeed = null;
   // Initialise state.
   game.expedition = {
     active: true,
     floor: 1,
+    seed: _seed,
+    seedCode: _lxSeedToCode(_seed),
+    _draws: 0,
     startLevel: player.level || 1,
     snapshot: _expeditionSnapshotPlayer(),
     // v0.26.291 — Baseline counts captured here as a SECOND defence
@@ -43160,7 +43384,7 @@ function _startExpedition() {
     enteredAt: Date.now(),
   };
   if (typeof showToast === 'function') {
-    showToast(`⚜ EXPEDITION BEGUN — Floor 1 of ${EXPEDITION_FLOOR_COUNT}. Boons collected in here vanish on exit.`, 'legendary');
+    showToast(`⚜ EXPEDITION BEGUN — Floor 1 of ${EXPEDITION_FLOOR_COUNT}  ·  seed ${game.expedition.seedCode}. Boons collected in here vanish on exit.`, 'legendary');
   }
   if (typeof flash === 'function') flash(0.5);
   if (typeof addShake === 'function') addShake(8);
@@ -43580,6 +43804,7 @@ function _expeditionShowDoorChoice() {
       </button>
     </div>
     <div style="text-align:center; margin-top:14px; font-size:10.5px; color:#888;">Advancing to Floor ${_next} of ${EXPEDITION_FLOOR_COUNT}${_next === EXPEDITION_FLOOR_COUNT ? ' — the Echo of the Twelve awaits.' : ''}</div>
+    <div style="text-align:center; margin-top:5px; font-size:10px; color:#6f6a86; letter-spacing:1.5px;">SEED <b style="color:#a99ad0; letter-spacing:2px;">${(game.expedition && game.expedition.seedCode) || '——————'}</b></div>
   `;
   modal.appendChild(card);
   document.body.appendChild(modal);
@@ -43639,10 +43864,12 @@ const EXPEDITION_PUZZLES = [
 ];
 function _expeditionShowPuzzle() {
   // Pick 3 random questions without replacement.
+  // v0.29.286 — drawn from the run's seeded stream, so the same seed always
+  // asks the same riddles in the same order.
   const pool = EXPEDITION_PUZZLES.slice();
   const qs = [];
   for (let i = 0; i < 3 && pool.length; i++) {
-    const idx = Math.floor(Math.random() * pool.length);
+    const idx = Math.floor(_expRand() * pool.length);
     qs.push(pool.splice(idx, 1)[0]);
   }
   let correct = 0, qIdx = 0;
@@ -43722,16 +43949,20 @@ function _expeditionSpawnFinalBoss() {
   });
   // Build weighted pool: undefeated signs ×3, defeated ×1.
   // If ALL defeated, fall back to uniform.
+  // v0.29.286 — the draw comes from the run's seeded stream, so a shared seed
+  // always ends on the same Echo. Note the WEIGHTS still read live progress
+  // (undefeated signs ×3), so a seed replayed on a different save can land a
+  // different sign — the seed fixes the roll, not the player's history.
   let sign;
   if (_undefeated.length === 0) {
-    sign = ZODIAC[Math.floor(Math.random() * ZODIAC.length)];
+    sign = ZODIAC[Math.floor(_expRand() * ZODIAC.length)];
   } else {
     const _pool = [];
     for (const s of ZODIAC) {
       const _weight = _undefeated.includes(s) ? 3 : 1;
       for (let i = 0; i < _weight; i++) _pool.push(s);
     }
-    sign = _pool[Math.floor(Math.random() * _pool.length)];
+    sign = _pool[Math.floor(_expRand() * _pool.length)];
   }
   // Load the canonical boss-arena map (innerDimension is a clean symmetric
   // arena; the cosmic backdrop also suits a zodiac boss thematically).
@@ -61277,9 +61508,20 @@ function bossAI(m, dt, distToPlayer) {
         }
       } else if (_skillSpaced && _ohkoSpaced &&
                  ((m._instaTimer <= 0) || (m._rainTimer <= 0 && phase >= 2) || (m._soulTimer <= 0))) {
-        m._ohkoQueued = (m._instaTimer <= 0) ? 'singularity'
-                      : (m._rainTimer <= 0 && phase >= 2) ? 'collapseRain'
-                      : 'soulDrain';
+        // v0.29.286 — ROTATE the OHKO queue instead of a fixed priority. The
+        // gate above only opens every 15-60 s while each OHKO re-arms in
+        // 9-20 s, so singularity was ALWAYS ready first and permanently
+        // outranked the other two. An empirical 25-minute-per-phase census
+        // recorded collapseRain ZERO times and soulDrain once — two whole
+        // signature mechanics (the safe-zone rain, the HP/MP drain) were dead
+        // content on the final boss. Each timer keeps counting down past 0
+        // while it waits, so the MOST-NEGATIVE ready timer is the
+        // longest-starved move; pick that and the three rotate naturally.
+        let _ohkoPick = null, _ohkoWait = Infinity;
+        if (m._instaTimer <= 0 && m._instaTimer < _ohkoWait) { _ohkoWait = m._instaTimer; _ohkoPick = 'singularity'; }
+        if (m._rainTimer <= 0 && phase >= 2 && m._rainTimer < _ohkoWait) { _ohkoWait = m._rainTimer; _ohkoPick = 'collapseRain'; }
+        if (m._soulTimer <= 0 && m._soulTimer < _ohkoWait) { _ohkoWait = m._soulTimer; _ohkoPick = 'soulDrain'; }
+        m._ohkoQueued = _ohkoPick || 'singularity';
         m._ohkoWarnUntil = _nowOhko + 2 * 60;
         // v0.29.261 — per user: the named danger toast applies through
         // phase 2 only. The 3rd form drops the verbal callout to raise
@@ -61302,12 +61544,18 @@ function bossAI(m, dt, distToPlayer) {
         if (phase === 1) {
           // Phase 1: introduce laser, zip, crush, slam, plus chase comets
           // as a movement primer.
+          // v0.29.286 — 'pull' (GRAVITY WELL) added to every phase ladder. Its
+          // 23-line handler has always existed but NOTHING ever assigned it —
+          // a file-wide sweep found the only occurrence of the string was the
+          // handler test itself, so the gravity boss's most on-theme move was
+          // dead code. Weights rescaled so each ladder still totals 1.0.
           m.patternState =
-            roll < 0.22 ? 'laser' :
-            roll < 0.40 ? 'zip' :
-            roll < 0.58 ? 'crush' :
-            roll < 0.78 ? 'slam' :
-                          'chaseComets';
+            roll < 0.20 ? 'laser' :
+            roll < 0.36 ? 'zip' :
+            roll < 0.52 ? 'crush' :
+            roll < 0.70 ? 'slam' :
+            roll < 0.88 ? 'chaseComets' :
+                          'pull';
         } else if (phase === 2) {
           // Phase 2: add orbital ring + decay floor for stricter spacing.
           // v0.26.330 — Awakened (phase 2) now rolls the wide-AOE
@@ -61315,28 +61563,30 @@ function bossAI(m, dt, distToPlayer) {
           // rotation. The hazard's _bhAwakened flag scales pull radius
           // and damage automatically (see L45073-area spawn block).
           m.patternState =
-            roll < 0.14 ? 'laser' :
-            roll < 0.26 ? 'zip' :
-            roll < 0.38 ? 'crush' :
-            roll < 0.50 ? 'slam' :
-            roll < 0.62 ? 'wave' :
-            roll < 0.74 ? 'chaseComets' :
-            roll < 0.84 ? 'orbitalRing' :
-            roll < 0.96 ? 'blackhole' :
-                          'decayFloor';
+            roll < 0.13 ? 'laser' :
+            roll < 0.24 ? 'zip' :
+            roll < 0.34 ? 'crush' :
+            roll < 0.45 ? 'slam' :
+            roll < 0.56 ? 'wave' :
+            roll < 0.67 ? 'chaseComets' :
+            roll < 0.76 ? 'orbitalRing' :
+            roll < 0.87 ? 'blackhole' :
+            roll < 0.90 ? 'decayFloor' :
+                          'pull';
         } else {
           // Phase 3: all patterns in rotation including crushTendrils +
           // blackhole. Weights skew toward the new high-pressure patterns.
           m.patternState =
-            roll < 0.12 ? 'laser' :
-            roll < 0.22 ? 'zip' :
-            roll < 0.32 ? 'slam' :
-            roll < 0.42 ? 'wave' :
-            roll < 0.52 ? 'blackhole' :
-            roll < 0.64 ? 'chaseComets' :
-            roll < 0.76 ? 'orbitalRing' :
-            roll < 0.88 ? 'crushTendrils' :
-                          'decayFloor';
+            roll < 0.11 ? 'laser' :
+            roll < 0.20 ? 'zip' :
+            roll < 0.29 ? 'slam' :
+            roll < 0.38 ? 'wave' :
+            roll < 0.47 ? 'blackhole' :
+            roll < 0.58 ? 'chaseComets' :
+            roll < 0.69 ? 'orbitalRing' :
+            roll < 0.80 ? 'crushTendrils' :
+            roll < 0.90 ? 'decayFloor' :
+                          'pull';
         }
         m.patternTimer = 0;
         m._lastSkillAt = _nowOhko;   // v0.26.347 — stamp regular-skill launch so the next OHKO honours the 8 s gap
@@ -62196,22 +62446,33 @@ function bossAI(m, dt, distToPlayer) {
           }
         } else if (_summonReady && choice < 0.18) {
           m._lastSummonAt = _now;
-          m._lastSpecialAt = _now;
+          _bossSpecialFired(m, _now);
           m.patternState = 'summon';
         } else if (_shakeReady && choice < 0.34) {
           m._lastShakeAt = _now;
-          m._lastSpecialAt = _now;
+          _bossSpecialFired(m, _now);
           m.patternState = 'groundShake';
           m._shakeAnnounced = false;
           m._shakeJumped = false;
           m._shakeFired = false;
         } else if (_quakeReady && choice < 0.50) {
           m._lastQuakeAt = _now;
-          m._lastSpecialAt = _now;
+          _bossSpecialFired(m, _now);
           m.patternState = 'quake';
-        } else if (choice < 0.40) m.patternState = 'slam';
-        else if (choice < 0.78) m.patternState = 'spores';
-        else m.patternState = 'charge';
+        } else {
+          // v0.29.286 — the regular pool now rolls its OWN number. It used to
+          // share `choice` with the special ladder above, where quake's
+          // `choice < 0.50` band sat ABOVE slam's `choice < 0.40` — so
+          // whenever quake was off cooldown, `slam` was mathematically
+          // unreachable and only ever fired inside quake's 14 s CD window
+          // (census: slam ~60 vs spores ~170 over the same fight). A separate
+          // roll decouples the ladders entirely, so both keep their intended
+          // weights: slam 40% / spores 38% / charge 22% of non-special cycles.
+          const _rr = Math.random();
+          if (_rr < 0.40) m.patternState = 'slam';
+          else if (_rr < 0.78) m.patternState = 'spores';
+          else m.patternState = 'charge';
+        }
         m.patternTimer = 0;
       }
     } else if (m.patternState === 'slam') {
@@ -62598,26 +62859,36 @@ function bossAI(m, dt, distToPlayer) {
         // shell 30%, mega 18%, firebomb 22%.
         else if (_shellReady && r < 0.30) {
           m._lastShellAt = _now;
-          m._lastSpecialAt = _now;
+          _bossSpecialFired(m, _now);
           m.patternState = 'shellSpin';
           m._shellDir = 0;
           m._shellPasses = 0;
         }
         else if (_megaReady && r < 0.48) {
           m._lastMegaAt = _now;
-          m._lastSpecialAt = _now;
+          _bossSpecialFired(m, _now);
           m.patternState = 'megaFireball';
         }
         else if (_firebombReady && r < 0.70) {
           m._lastFirebombAt = _now;
-          m._lastSpecialAt = _now;
+          _bossSpecialFired(m, _now);
           m.patternState = 'firebomb';
         }
-        else if (r < 0.25) m.patternState = 'claw';
-        else if (r < 0.50) m.patternState = 'fireBreath';
-        else if (r < 0.70) m.patternState = 'jumpSlam';
-        else if (r < 0.85 && m.onGround) { m.patternState = 'earthquake'; m._lastSpecialAt = _now; }
-        else               { m.patternState = 'fireballRain'; m._lastSpecialAt = _now; }
+        else {
+          // v0.29.286 — regular pool rolls its OWN number. Making the special
+          // bands cumulative in v0.29.284 fixed the shadowing between shell /
+          // mega / firebomb, but firebomb's widened `r < 0.70` then squeezed
+          // the basics off the bottom of the same shared roll — a census
+          // measured `claw` collapsing to 2% in phase 2. Decoupling the two
+          // ladders restores both: specials keep 30/18/22%, basics keep
+          // claw 25 / fireBreath 25 / jumpSlam 20 / quake 15 / rain 15.
+          const _rr = Math.random();
+          if (_rr < 0.25) m.patternState = 'claw';
+          else if (_rr < 0.50) m.patternState = 'fireBreath';
+          else if (_rr < 0.70) m.patternState = 'jumpSlam';
+          else if (_rr < 0.85 && m.onGround) { m.patternState = 'earthquake'; _bossSpecialFired(m, _now); }
+          else               { m.patternState = 'fireballRain'; _bossSpecialFired(m, _now); }
+        }
         m.patternTimer = 0;
         m._kSubTimer = 0;
         m._kAnnounced = false;
@@ -69390,6 +69661,15 @@ function openNPC(npc) {
       text = `*Bravo offers her hand. The portal behind her shimmers in tones of violet and gold.*\n\nGood. You're ready. Here's the truth no one tells you about the Everdawn: you don't climb toward a sunrise. You <b>descend</b> — into the part of yourself that decided the nightmare was safer than waking — and you carry the dream back UP out of it. That's what the tower is. A grief you walk down on purpose, so you remember how to climb.\n\nI'll meet you at each threshold with three blessings to choose from. Hades does the same, apparently. I learned from the best.\n\n<b>The Rules</b>\n• 10 floors (B1 → B10). Each is its own crucible.\n• Mobs scale to <b>your</b> level — no coasting.\n• Clear the floor's quest → I appear → pick <b>one of three boons</b>.\n• B5 is a mid-tower trial. B10 is the Apex. They are not gentle.\n• Boons, items, coins, and EXP gained inside <b>vanish on exit</b>. Roguelite rules.\n• Death = run ends. The world above stays untouched.`;
       opts.push({ t:`⚜ Begin Expedition (Lv ${_lv})`, cb:() => {
         closeDialog();
+        if (typeof _startExpedition === 'function') _startExpedition();
+      } });
+      // v0.29.286 — seeded run. Entering a code replays that descent's
+      // riddles and final Echo, so a run can be shared or re-attempted.
+      opts.push({ t:'🎲 Begin a seeded run…', cb: async () => {
+        closeDialog();
+        const _code = await _expeditionSeedPrompt();
+        if (_code === null) return;   // cancelled — don't start a run
+        if (_code) _setExpeditionSeed(_code);
         if (typeof _startExpedition === 'function') _startExpedition();
       } });
       opts.push({ t:'Maybe later', cb: closeDialog });
@@ -93046,7 +93326,8 @@ function _loadBossFrames(map, subdir, types) {
 }
 // Ping-pong over the contiguous run of DECODED frames from index 0
 // (0,1,..,n-1,n-2,..,1) so the loop is seamless for any frame count.
-function _bossPingPongFrame(frames, frameMs) {
+function _bossPingPongFrame(frames, frameMs, maxLong) {
+  if (frames && typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, maxLong || 720);   // v0.29.284 — base 720 logical = measured max boss draw (incl. star-form calib scale)
   if (!frames) return null;
   let n = frames._readyN || 0;   // v0.26.x perf — monotonic decoded-count cache
   while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
@@ -93060,8 +93341,9 @@ function _bossPingPongFrame(frames, frameMs) {
 }
 // Straight forward loop (0,1,..,n-1,0,...) — for cycles authored to loop
 // seamlessly (e.g. walk), where ping-pong would play the motion in reverse.
-function _bossLoopFrame(frames, frameMs) {
+function _bossLoopFrame(frames, frameMs, maxLong) {
   if (!frames) return null;
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, maxLong || 720);   // v0.29.284 — base 720 logical = measured max boss draw (incl. star-form calib scale)
   let n = frames._readyN || 0;   // v0.26.x perf — monotonic decoded-count cache
   while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
   frames._readyN = n;
@@ -93088,6 +93370,7 @@ const _GRAV_PUNCH_PATTERNS = { crush: 1500, slam: 1100, zip: 1400 };
 function _gravitosPunchFrame(m) {
   const frames = BOSS_ATTACK_FRAMES['gravitospunch'];
   if (!frames) return null;
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);   // v0.29.284 — same base as the other boss sets
   let n = frames._readyN || 0;
   while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
   frames._readyN = n;
@@ -93178,8 +93461,19 @@ function _warmMapArt(id) {
     if (im && typeof HTMLImageElement !== 'undefined' && im instanceof HTMLImageElement) slots.push({ holder, key, im, bakeKey });
   };
   const addSet = (fr, bakeKey) => { if (fr && fr.length) for (let i = 0; i < fr.length; i++) addImg(fr, i, bakeKey); };
-  for (const sp of (def.spawns || [])) {
-    if (!sp.boss || !sp.type) continue;
+  // v0.29.284 — the old loop only walked `spawns[].boss`, so arenas that spawn
+  // their boss another way warmed NOTHING: tower_b5/b10 (Arbiter 1500×1300,
+  // Sovereign 2000×1587), boss_rush, and blockland_apex (Legosaurus) all
+  // declare no boss spawn. Seed the list from the map's `bossType` too, and
+  // include the arena's regular mob types (elites in a boss room stutter on
+  // first display for exactly the same reason). The lazy shrink at the frame
+  // getters is the real safety net; this just front-loads it under the fade.
+  const _types = [];
+  for (const sp of (def.spawns || [])) if (sp.type) _types.push({ type: sp.type, boss: !!sp.boss });
+  if (def.bossType) _types.push({ type: def.bossType, boss: true });
+  for (const k of (def.bossSequence || [])) if (k) _types.push({ type: k, boss: true });
+  for (const sp of _types) {
+    if (!sp.type) continue;
     if (sp.type.indexOf('zodiac_') === 0) {
       const sign = sp.type.slice(7);
       addImg(ZODIAC_SPRITES, sign, sign);
