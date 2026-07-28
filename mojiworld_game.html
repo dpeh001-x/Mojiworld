@@ -8908,7 +8908,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.283';
+const GAME_VERSION = 'v0.29.284';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -60190,22 +60190,43 @@ function bossAI(m, dt, distToPlayer) {
         const _tpReady    = (_now - (m._lastTeleportAt || 0)) > 600;   // v0.26.394 — 10000→600 frames (10s)
         const _glueReady  = (_now - (m._lastGlueAt     || 0)) > 780;   // v0.26.394 — 13000→780 frames (13s)
         const r = Math.random();
-        if (_tpReady && r < 0.20) {
+        // v0.29.284 — special-pressure clock (see _bossSpecialDue). Gloopaloo
+        // was the last main boss with no safety net: teleport is capped at a
+        // flat 20% band no matter what else is ready, and the `&& m.onGround`
+        // gate above can stall picks entirely through a leap chain. When the
+        // rolled 10-20 s window lapses, force the longest-waiting ready
+        // special instead of rolling for one.
+        if (_bossSpecialDue(m, _now) && (_tpReady || _glueReady || _gooReady || _quakeReady)) {
+          _bossSpecialFired(m, _now);
+          let _pick = null, _best = -1;
+          if (_tpReady    && (_now - (m._lastTeleportAt || 0)) > _best) { _best = _now - (m._lastTeleportAt || 0); _pick = 'teleport'; }
+          if (_glueReady  && (_now - (m._lastGlueAt     || 0)) > _best) { _best = _now - (m._lastGlueAt     || 0); _pick = 'gluespray'; }
+          if (_gooReady   && (_now - (m._lastGooAt      || 0)) > _best) { _best = _now - (m._lastGooAt      || 0); _pick = 'gooBarrage'; }
+          if (_quakeReady && (_now - (m._lastQuakeAt    || 0)) > _best) { _best = _now - (m._lastQuakeAt    || 0); _pick = 'quake'; }
+          if (_pick === 'teleport') { m._lastTeleportAt = _now; m.patternState = 'teleport'; m._teleportFired = false; }
+          else if (_pick === 'gluespray') { m._lastGlueAt = _now; m.patternState = 'gluespray'; m._glueFired = 0; m._glueNextAt = 0; }
+          else if (_pick === 'gooBarrage') { m._lastGooAt = _now; m.patternState = 'gooBarrage'; m._gooFired = 0; m._gooNextAt = 0; }
+          else { m._lastQuakeAt = _now; m.patternState = 'quake'; m._quakeAnnounced = false; m._quakeFired = false; }
+        } else if (_tpReady && r < 0.20) {
           m._lastTeleportAt = _now;
+          _bossSpecialFired(m, _now);
           m.patternState = 'teleport';
           m._teleportFired = false;
         } else if (_glueReady && r < 0.42) {
           m._lastGlueAt = _now;
+          _bossSpecialFired(m, _now);
           m.patternState = 'gluespray';
           m._glueFired = 0;
           m._glueNextAt = 0;
         } else if (_gooReady && r < 0.62) {
           m._lastGooAt = _now;
+          _bossSpecialFired(m, _now);
           m.patternState = 'gooBarrage';
           m._gooFired = 0;
           m._gooNextAt = 0;
         } else if (_quakeReady && r < 0.82) {
           m._lastQuakeAt = _now;
+          _bossSpecialFired(m, _now);
           m.patternState = 'quake';
           m._quakeAnnounced = false;
           m._quakeFired = false;
@@ -62552,17 +62573,29 @@ function bossAI(m, dt, distToPlayer) {
         const _forceSpecial = _bossSpecialDue(m, _now);
         if (_forceSpecial) {
           _bossSpecialFired(m, _now);
-          if (_shellReady) {
+          // v0.29.284 — force the LONGEST-WAITING ready special instead of a
+          // fixed priority, so ROYAL CHARGE can't monopolise every forced
+          // window while mega/firebomb sit idle behind it.
+          let _pick = null, _best = -1;
+          if (_shellReady    && (_now - (m._lastShellAt    || 0)) > _best) { _best = _now - (m._lastShellAt    || 0); _pick = 'shellSpin'; }
+          if (_megaReady     && (_now - (m._lastMegaAt     || 0)) > _best) { _best = _now - (m._lastMegaAt     || 0); _pick = 'megaFireball'; }
+          if (_firebombReady && (_now - (m._lastFirebombAt || 0)) > _best) { _best = _now - (m._lastFirebombAt || 0); _pick = 'firebomb'; }
+          if (_pick === 'shellSpin') {
             m._lastShellAt = _now;
             m.patternState = 'shellSpin';
             m._shellDir = 0;
             m._shellPasses = 0;
           }
-          else if (_megaReady) { m._lastMegaAt = _now; m.patternState = 'megaFireball'; }
-          else if (_firebombReady) { m._lastFirebombAt = _now; m.patternState = 'firebomb'; }
+          else if (_pick === 'megaFireball') { m._lastMegaAt = _now; m.patternState = 'megaFireball'; }
+          else if (_pick === 'firebomb') { m._lastFirebombAt = _now; m.patternState = 'firebomb'; }
           else if (m.onGround) m.patternState = 'earthquake';
           else m.patternState = 'fireballRain';
         }
+        // v0.29.284 — bands made CUMULATIVE (were 0.30 / 0.18 / 0.22 on one
+        // shared roll, so shell's wider band fully CONTAINED the other two:
+        // whenever ROYAL CHARGE was off cooldown, megaFireball and firebomb
+        // were mathematically unreachable). Nominal per-cycle rates preserved:
+        // shell 30%, mega 18%, firebomb 22%.
         else if (_shellReady && r < 0.30) {
           m._lastShellAt = _now;
           m._lastSpecialAt = _now;
@@ -62570,12 +62603,12 @@ function bossAI(m, dt, distToPlayer) {
           m._shellDir = 0;
           m._shellPasses = 0;
         }
-        else if (_megaReady && r < 0.18) {
+        else if (_megaReady && r < 0.48) {
           m._lastMegaAt = _now;
           m._lastSpecialAt = _now;
           m.patternState = 'megaFireball';
         }
-        else if (_firebombReady && r < 0.22) {
+        else if (_firebombReady && r < 0.70) {
           m._lastFirebombAt = _now;
           m._lastSpecialAt = _now;
           m.patternState = 'firebomb';
@@ -98669,8 +98702,13 @@ const ZODIAC_AI = {
       if (m.patternTimer > cycle) {
         m.patternTimer = 0;
         const r = Math.random();
+        // v0.29.284 — the old `r < 0.5 || phase === 3` made roarWindup
+        // UNCONDITIONAL for every r >= 0.3 in phase 3, so `comet` was
+        // structurally unreachable exactly when the fight should be widest.
+        // Same defect Sagittarius had (fixed in v0.26.390); P3 now reads
+        // flare 30% / roar 38% / comet 32%. P1-P2 weighting is unchanged.
         if (phase === 3 && r < 0.3) m.patternState = 'flare';
-        else if (r < 0.5 || phase === 3) m.patternState = 'roarWindup';
+        else if (r < 0.5 || (phase === 3 && r < 0.68)) m.patternState = 'roarWindup';
         else m.patternState = 'comet';
         m._leoFired = false; m._leoRoarDir = dir;
       }
