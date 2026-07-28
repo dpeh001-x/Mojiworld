@@ -88,13 +88,19 @@ try {
   ok('candy-stripe fill gradient applied', css.hasStripes, css.fillBg);
 
   // ---- 4) render the bar for real, at each tier ----
-  const bar = await page.evaluate(() => {
+  const bar = await page.evaluate(async () => {
     const out = [];
     for (const [kills, label] of [[47, 't0'], [300, 't1'], [750, 't2'], [1000, 'max']]) {
       _renderMasteryBar({ name: 'Test Quarry ' + label, type: 'slime', x: 100, y: 100, w: 30 }, kills, kills === 1000);
       const el = document.getElementById('mastery-bar');
+      const faceEl = document.getElementById('mb-face');
+      const faceImg = faceEl.querySelector('img');
+      // Wait for the sprite to actually decode — reading .complete straight
+      // after setting innerHTML always reports false.
+      if (faceImg) { try { await faceImg.decode(); } catch (e) {} }
       out.push({ kills, width: document.getElementById('mb-fill').style.width,
-                 face: document.getElementById('mb-face').textContent,
+                 face: faceImg ? faceImg.getAttribute('src').split('/').pop() : faceEl.textContent,
+                 faceOk: !!faceImg && faceImg.complete && faceImg.naturalWidth > 0,
                  stars: document.getElementById('mb-stars').textContent,
                  count: document.getElementById('mb-count').textContent,
                  shown: el.classList.contains('mb-show'), max: el.classList.contains('mb-max') });
@@ -102,22 +108,30 @@ try {
     return out;
   });
   ok('bar renders at every tier without throwing', bar.length === 4);
-  ok('tier 0 (47/100) fills 47%', bar[0].width === '47%' && bar[0].face === '🥚', bar[0]);
-  ok('tier 1 (300/500) fills 50%', bar[1].width === '50%' && bar[1].face === '🐣', bar[1]);
-  ok('tier 2 (750/1000) fills 50%', bar[2].width === '50%' && bar[2].face === '🐤', bar[2]);
+  ok('tier 0 (47/100) fills 47%', bar[0].width === '47%' && bar[0].face === 'tier0.webp', bar[0]);
+  ok('tier 1 (300/500) fills 50%', bar[1].width === '50%' && bar[1].face === 'tier1.webp', bar[1]);
+  ok('tier 2 (750/1000) fills 50%', bar[2].width === '50%' && bar[2].face === 'tier2.webp', bar[2]);
   ok('mastered pins 100% + MASTERED label', bar[3].width === '100%' && bar[3].count === 'MASTERED'
-      && bar[3].face === '🦅' && bar[3].max, bar[3]);
+      && bar[3].face === 'tier3.webp' && bar[3].max, bar[3]);
+  // v0.29.293 — the generated art must actually DECODE, not silently fall
+  // back to the emoji glyph (a 404 would make onerror swap it out).
+  ok('all 4 mastery rank sprites decode (no emoji fallback)',
+     bar.every(b => b.faceOk), bar.map(b => ({ t: b.kills, ok: b.faceOk })));
 
   // ---- 5) affix pin renders + buff text matches the table ----
-  const affix = await page.evaluate(() => {
+  const affix = await page.evaluate(async () => {
     const out = {};
     for (const a of WORLD_AFFIXES) {
       if (a.id === 'none') continue;
       game._mapAffix = a;
       _renderAffixPin();
       const el = document.getElementById('world-affix-pin');
+      const img = el.querySelector('.afx-ico img');
+      if (img) { try { await img.decode(); } catch (e) {} }
       out[a.id] = { disp: el.style.display, txt: el.textContent.trim(),
-                    accent: el.style.getPropertyValue('--afx'), buff: _affixBuffText(a) };
+                    accent: el.style.getPropertyValue('--afx'), buff: _affixBuffText(a),
+                    icon: img ? img.getAttribute('src').split('/').pop() : null,
+                    iconOk: !!img && img.complete && img.naturalWidth > 0 };
     }
     game._mapAffix = WORLD_AFFIXES[0];
     _renderAffixPin();
@@ -128,6 +142,9 @@ try {
   ok('pin hides when the map has no affix', affix._noneHidden);
   ok('Gilded pin shows its accent + buff text', affix.gilded.disp === 'flex'
       && affix.gilded.buff === '+60% coin' && affix.gilded.accent.trim() === '#ffd870', affix.gilded);
+  ok('all 5 affix sigils decode (no emoji fallback)',
+     ['gilded', 'teeming', 'lucid', 'hoarded', 'restless'].every(k => affix[k].iconOk),
+     Object.fromEntries(['gilded', 'teeming', 'lucid', 'hoarded', 'restless'].map(k => [k, affix[k].iconOk])));
   ok('Teeming buff text lists all three riders',
       affix.teeming.buff === '+15% EXP · +25% drop · +14% elite', affix.teeming.buff);
 
