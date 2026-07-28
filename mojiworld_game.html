@@ -8430,6 +8430,10 @@ The sleeping world is listening.</div>
        hook + _expeditionFloorCleared. -->
   <div id="expedition-quest-pin" style="display:none;"></div>
 
+  <!-- v0.29.288 — world-affix pin. Shows the day's affix for the current
+       map. Rendered by _renderAffixPin() from the loadMap hook. -->
+  <div id="world-affix-pin" style="display:none;"></div>
+
   <!-- v0.26.301 — PQ objective pin. Visible whenever any PQ stage is
        active (q_clockwork_underpass / q_pq_spire / q_pq_finale).
        Rendered by _renderPqObjectivePin() on loadMap + quest ticks. -->
@@ -8908,7 +8912,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.288';
+const GAME_VERSION = 'v0.29.289';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -43218,6 +43222,64 @@ const EXPEDITION_FLOOR_COUNT = 10;
 // draw. Combat/damage/drop rolls stay UNSEEDED on purpose: seeding those
 // would let a player farm a known-good seed for guaranteed loot.
 // =========================================================================
+// =========================================================================
+// v0.29.288 — ROTATING WORLD AFFIXES (per user: "rotate world affixes").
+// Generalises the v0.29.60 cursed-map gamble into a standing world state:
+// every wilderness map carries ONE affix per day, chosen deterministically
+// from (mapId, dayIndex). Deterministic matters twice over — every player
+// sees the same world on the same day (so "the Foundry is Gilded today" is
+// shareable), and a reload can't reroll a map into a better affix.
+// Affixes are pure multipliers on existing, already-plumbed levers, so no
+// combat code changes: exp/coin/drop mirror _diffExpMul/_edictDropMul, and
+// elite density reuses the cursed-map lever.
+// =========================================================================
+const WORLD_AFFIXES = [
+  { id: 'none',    name: '',              icon: '',  color: '',        desc: '' },
+  { id: 'gilded',  name: 'Gilded',        icon: '🪙', color: '#ffd870',
+    desc: 'Coin purses run heavy here.',            coin: 1.60, exp: 1.00, drop: 1.00, elite: 0 },
+  { id: 'teeming', name: 'Teeming',       icon: '🩸', color: '#ff8a7a',
+    desc: 'Elites stalk this ground.',              coin: 1.00, exp: 1.15, drop: 1.25, elite: 0.14 },
+  { id: 'lucid',   name: 'Lucid',         icon: '✦',  color: '#9ad8ff',
+    desc: 'Experience settles deeper.',             coin: 1.00, exp: 1.45, drop: 1.00, elite: 0 },
+  { id: 'hoarded', name: 'Hoard-Touched', icon: '💎', color: '#c8a2ff',
+    desc: 'The ground gives up its keepsakes.',     coin: 1.00, exp: 1.00, drop: 1.90, elite: 0.05 },
+  { id: 'restless',name: 'Restless',      icon: '🌙', color: '#8fe3c0',
+    desc: 'Everything here is awake, and richer for it.', coin: 1.25, exp: 1.25, drop: 1.15, elite: 0.08 },
+];
+// Weighted draw — 'none' dominates so an affix stays an event, not wallpaper.
+const _WORLD_AFFIX_WEIGHTS = { none: 52, gilded: 12, teeming: 10, lucid: 10, hoarded: 6, restless: 10 };
+// Which day is it? Shares the daily-challenge clock (_monoNow) so affixes and
+// dailies roll over together and a clock rollback can't farm a reroll.
+function _worldAffixDay() {
+  const t = (typeof _monoNow === 'function') ? _monoNow() : Date.now();
+  return Math.floor(t / 86400000);
+}
+// The affix for a map on a given day. Pure function of (mapId, day).
+function _worldAffixFor(mapId, day) {
+  if (!mapId) return WORLD_AFFIXES[0];
+  const m = (typeof MAPS !== 'undefined') ? MAPS[mapId] : null;
+  // Same exclusions as the cursed-map roll: nowhere risk/reward shouldn't
+  // intrude, plus expedition floors (the run has its own modifiers).
+  if (!m || m.isTown || m.isBossArena || m.isVoid || mapId === 'void') return WORLD_AFFIXES[0];
+  if (mapId.indexOf('tower_b') === 0 || mapId.indexOf('clockwork') === 0) return WORLD_AFFIXES[0];
+  const d = (day == null) ? _worldAffixDay() : day;
+  const rng = _lxMulberry32(_lxSeedFromString(mapId + '@' + d));
+  let total = 0;
+  for (const a of WORLD_AFFIXES) total += (_WORLD_AFFIX_WEIGHTS[a.id] || 0);
+  let r = rng() * total;
+  for (const a of WORLD_AFFIXES) {
+    r -= (_WORLD_AFFIX_WEIGHTS[a.id] || 0);
+    if (r < 0) return a;
+  }
+  return WORLD_AFFIXES[0];
+}
+// Live affix for the map the player is standing in (cached per load).
+function _activeAffix() {
+  return (typeof game !== 'undefined' && game && game._mapAffix) ? game._mapAffix : WORLD_AFFIXES[0];
+}
+function _affixExpMul()  { const a = _activeAffix(); return a.exp  || 1; }
+function _affixCoinMul() { const a = _activeAffix(); return a.coin || 1; }
+function _affixDropMul() { const a = _activeAffix(); return a.drop || 1; }
 function _lxMulberry32(a) {
   return function () {
     a |= 0; a = (a + 0x6D2B79F5) | 0;
@@ -46070,6 +46132,25 @@ function loadMap(id, entryX, entryY) {
   // tier+1 loot behind a hex. Excluded everywhere risk shouldn't
   // intrude: towns, boss arenas, expedition/PQ floors, the Void. The
   // decision is per-load and cleared first so re-entering re-rolls.
+  // v0.29.288 — resolve TODAY's affix for this map. Deterministic from
+  // (mapId, day), so re-entering can't reroll it and every player sees the
+  // same world state today. Announced once per map per day; the pin stays up
+  // for as long as the player is here.
+  try {
+    game._mapAffix = _worldAffixFor(id);
+    if (game._mapAffix && game._mapAffix.id !== 'none') {
+      if (!game._affixSeen) game._affixSeen = {};
+      const _k = id + '@' + _worldAffixDay();
+      if (!game._affixSeen[_k]) {
+        game._affixSeen[_k] = 1;
+        const a = game._mapAffix;
+        if (typeof showToast === 'function') {
+          showToast(`${a.icon} ${a.name.toUpperCase()} — ${a.desc}`, 'epic');
+        }
+      }
+    }
+    if (typeof _renderAffixPin === 'function') _renderAffixPin();
+  } catch (e) { game._mapAffix = null; }
   game._mapCursed = false;
   const _curseEligible = !game.mapData.isTown && !game.mapData.isBossArena
     && !game.mapData.isVoid && !game._expeditionMap
@@ -65816,7 +65897,7 @@ function killMonster(m) {
   // v0.26.x — Per user: +200% XP (×3) while the player is level 1-5, so the
   // earliest levels fly by. Drops to ×1 the moment they reach level 6.
   const _earlyLvlXpMul = ((player.level || 1) <= 5) ? 3 : 1;
-  const _xpGain = Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul * mpCoopMul * _pqFarmMul * _earlyLvlXpMul * LX_EVENT_EXP_MULT * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1));   // (EVENT) opening +900% EXP · monster EXP knob (v0.28.5: ×1, was ×2) · v0.28.7 difficulty risk/reward
+  const _xpGain = Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul * mpCoopMul * _pqFarmMul * _earlyLvlXpMul * LX_EVENT_EXP_MULT * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _affixExpMul === 'function' ? _affixExpMul() : 1));   // (EVENT) opening +900% EXP · monster EXP knob (v0.28.5: ×1, was ×2) · v0.28.7 difficulty risk/reward · v0.29.288 world affix
   player.exp += _xpGain;
   // v0.27.0 co-op — when I'm the host, tell peers on my map this monster died so
   // they get their share of XP/coins + a death pop (they suppressed their own
@@ -65838,7 +65919,7 @@ function killMonster(m) {
     // v0.27.0 — include the Hunter's Bounty (treasureCrits) 2x the actual pickup
     // applies on a lethal-crit kill, else the pill under-reports by half on those kills.
     const _bountyMul = (m._killedByCrit && player._activeSynergies && player._activeSynergies.treasureCrits) ? 2 : 1;
-    const _mojExpected = Math.floor((m.mojicoins || 0) * _monMul * _greedMul * _bountyMul * (typeof MOJICOIN_GAIN_MULT === 'number' ? MOJICOIN_GAIN_MULT : 1) * (typeof _diffCoinMul === 'function' ? _diffCoinMul() : 1));   // v0.28.7 — keep the kill-feed pill in sync with the difficulty coin mul
+    const _mojExpected = Math.floor((m.mojicoins || 0) * _monMul * _greedMul * _bountyMul * (typeof MOJICOIN_GAIN_MULT === 'number' ? MOJICOIN_GAIN_MULT : 1) * (typeof _diffCoinMul === 'function' ? _diffCoinMul() : 1) * (typeof _affixCoinMul === 'function' ? _affixCoinMul() : 1));   // v0.28.7 — keep the kill-feed pill in sync with the difficulty coin mul · v0.29.288 world affix
     if (_xpGain > 0 || _mojExpected > 0) showKillToast(_xpGain, _mojExpected);
   }
   if (mpCoopMul > 1 && (game._lastCoopToast | 0) + 6000 < game.time) {
@@ -65879,7 +65960,7 @@ function killMonster(m) {
     game.drops.push({
       x: m.x + m.w/2 + (Math.random() - 0.5) * 20, y: m.y + m.h/2,
       vy: -Math.random() * 4 - 2, type: 'mojicoin',
-      value: Math.ceil(m.mojicoins * _coinMul * (typeof _monsterCoinMult === 'function' ? _monsterCoinMult(m) : 1) * (typeof _diffCoinMul === 'function' ? _diffCoinMul() : 1) / mojicoinCount), life: 400,   // v0.28.7 — difficulty risk/reward coin scaling
+      value: Math.ceil(m.mojicoins * _coinMul * (typeof _monsterCoinMult === 'function' ? _monsterCoinMult(m) : 1) * (typeof _diffCoinMul === 'function' ? _diffCoinMul() : 1) * (typeof _affixCoinMul === 'function' ? _affixCoinMul() : 1) / mojicoinCount), life: 400,   // v0.28.7 — difficulty risk/reward coin scaling · v0.29.288 world affix
     });
   }
 
@@ -66030,7 +66111,7 @@ function killMonster(m) {
   // total). Pre-luck effective rate 1.40% → 5.60%. Now that elites (3%) / elders
   // (15%) are much rarer, each is a meaningfully rewarding kill. Normal (tier 0)
   // and boss (tier 2) rates unchanged.
-  const dropChance = (tier === 2 ? 1.0 : tier === 1 ? 1.12 : 0.04) * (1 + luck) * 0.05 * (typeof _diffDropMul === 'function' ? _diffDropMul() : 1) * (typeof _edictDropMul === 'function' ? _edictDropMul() : 1);   // v0.28.7 — Hard +25% / Nightmare +50% gear-drop chance · v0.29.66 Edict Weight drop bonus
+  const dropChance = (tier === 2 ? 1.0 : tier === 1 ? 1.12 : 0.04) * (1 + luck) * 0.05 * (typeof _diffDropMul === 'function' ? _diffDropMul() : 1) * (typeof _edictDropMul === 'function' ? _edictDropMul() : 1) * (typeof _affixDropMul === 'function' ? _affixDropMul() : 1);   // v0.28.7 — Hard +25% / Nightmare +50% gear-drop chance · v0.29.66 Edict Weight drop bonus · v0.29.288 world affix
   if (itemRoll < dropChance) {
     // v0.25.678 — Pass the killed mob's effective level so rarity weights
     // (and affix magnitudes downstream) grade with mob difficulty. _mobLevel
@@ -93491,31 +93572,11 @@ function _bossMoving(m) { return _mobWalking(m); }
 // per-frame GPU uploads shrink ~26 MB → ~2 MB. Baked canvases are duck-typed
 // (complete / naturalWidth / naturalHeight) so every readiness probe keeps
 // working. Bakes run chunked (6 per tick) under the map-fade overlay.
-const _WARM_BAKE_AREA = 1500000;   // only bake sources above ~1.5 MP
-function _warmBakeTargetH(key) {
-  // star forms + the punch draw with animator calib s up to ~2.8 → keep more
-  // pixels; regular forms draw ≤ ~400 px tall.
-  return (/star|punch/.test(key || '')) ? 720 : 480;
-}
-function _warmBakeImg(im, maxH) {
-  try {
-    const w = im.naturalWidth || im.width, h = im.naturalHeight || im.height;
-    if (!(w > 0 && h > 0) || w * h <= _WARM_BAKE_AREA || h <= maxH) return null;
-    const s = maxH / h;
-    const bw = Math.max(1, Math.round(w * s)), bh = Math.max(1, Math.round(h * s));
-    let cv = null;
-    if (typeof _lxBakeDownscaled === 'function') { try { cv = _lxBakeDownscaled(im, bw, bh); } catch (e) {} }
-    if (!cv) {
-      cv = document.createElement('canvas'); cv.width = bw; cv.height = bh;
-      const g = cv.getContext('2d');
-      g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
-      g.drawImage(im, 0, 0, bw, bh);
-    }
-    // duck-type the readiness fields every probe in the codebase checks
-    cv.complete = true; cv.naturalWidth = bw; cv.naturalHeight = bh;
-    return cv;
-  } catch (e) { return null; }
-}
+// v0.29.289 — the v0.29.283 synchronous bake helpers (_warmBakeTargetH /
+// _warmBakeImg, and their _WARM_BAKE_AREA threshold) are gone: the whole file
+// now shares ONE sizing rule (_lxShrinkCap, DPR-derived) and ONE bake path
+// (createImageBitmap off-thread, canvas fallback), so there is no second
+// definition of "how big should this sprite be" to drift out of sync.
 function _warmMapArt(id) {
   const def = (typeof MAPS === 'object' && MAPS[id]) || null;
   if (!def || !def.isBossArena) return Promise.resolve(0);
@@ -93559,27 +93620,47 @@ function _warmMapArt(id) {
     else { im.addEventListener('load', dec, { once: true }); im.addEventListener('error', res, { once: true }); }
   }));
   const settle = (Promise.allSettled ? Promise.allSettled(jobs) : Promise.all(jobs));
-  // chunked bake pass — 6 frames per tick so the fade overlay stays smooth
+  // v0.29.289 — bake pass now runs OFF-THREAD via createImageBitmap's resize
+  // (see _lxAsyncBake). The old chunked synchronous pass resampled 6.6 MP boss
+  // frames on the main thread — measured 100-160 ms per frame, which simply
+  // moved the stutter from "first cast" to "arena entry". Four resizes are
+  // kept in flight; the caller holds the map fade until this settles (with its
+  // own 1400 ms cap), so by the time the arena is playable the whole set is
+  // already right-sized and no longer evictable. Whatever misses this window
+  // is still caught by the lazy shrink at the frame getters.
+  const CAP = _lxShrinkCap(720);
+  const bakeOne = (sl) => new Promise((res) => {
+    const im = sl.im;
+    if (!(im && im.complete && im.naturalWidth > 0)) return res();
+    const w = im.naturalWidth, h = im.naturalHeight;
+    if (Math.max(w, h) <= CAP) { im._lxNoShrink = true; return res(); }
+    const s = CAP / Math.max(w, h);
+    const bw = Math.max(1, Math.round(w * s)), bh = Math.max(1, Math.round(h * s));
+    const swap = (cv) => { if (cv && sl.holder[sl.key] === im) { sl.holder[sl.key] = cv; sl.holder._readyN = 0; } res(); };
+    const fallback = () => { try { swap(_lxBakeToLong(im, CAP)); } catch (e) { res(); } };
+    if (typeof createImageBitmap !== 'function') return fallback();
+    try {
+      createImageBitmap(im, { resizeWidth: bw, resizeHeight: bh, resizeQuality: 'high' })
+        .then((bmp) => {
+          let cv = null;
+          try { cv = _lxBitmapToCanvas(bmp, im); } catch (e) {}
+          try { bmp.close && bmp.close(); } catch (e) {}
+          if (cv) swap(cv); else fallback();
+        })
+        .catch(fallback);
+    } catch (e) { fallback(); }
+  });
   return settle.then(() => new Promise((done) => {
-    let i = 0;
-    const step = () => {
-      const end = Math.min(slots.length, i + 6);
-      for (; i < end; i++) {
-        const sl = slots[i];
-        // only bake what actually decoded, and don't re-bake canvases
-        if (sl.im && sl.im.complete && (sl.im.naturalWidth > 0)) {
-          const baked = _warmBakeImg(sl.im, _warmBakeTargetH(sl.bakeKey));
-          if (baked && sl.holder[sl.key] === sl.im) sl.holder[sl.key] = baked;
-        }
+    let next = 0, active = 0;
+    const pump = () => {
+      while (active < 4 && next < slots.length) {
+        const sl = slots[next++];
+        active++;
+        bakeOne(sl).then(() => { active--; pump(); });
       }
-      if (i < slots.length) {
-        // hidden tabs clamp setTimeout to >=1s — nobody sees jank there, so
-        // just finish synchronously instead of crawling one chunk per second.
-        if (typeof document !== 'undefined' && document.hidden) step();
-        else setTimeout(step, 0);
-      } else done(slots.length);
+      if (active === 0 && next >= slots.length) done(slots.length);
     };
-    step();
+    if (!slots.length) done(0); else pump();
   }));
 }
 
