@@ -8908,7 +8908,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.286';
+const GAME_VERSION = 'v0.29.288';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -43235,9 +43235,15 @@ function _lxSeedFromString(s) {
 }
 // Seed <-> short readable code. Alphabet drops 0/O/1/I/L so a code read off
 // a screenshot can't be mistyped into a different run.
+// Seeds live in [0, 31^6) rather than the full 32-bit range: a 6-char code
+// over a 31-char alphabet addresses 887,503,681 values, so every seed has
+// EXACTLY one code and every code decodes back to the seed that made it.
+// (Allowing full 32-bit seeds silently broke that roundtrip — a shared code
+// would have started a different run than the one it came from.)
 const _LX_SEED_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+const _LX_SEED_SPACE = 887503681;   // 31^6
 function _lxSeedToCode(seed) {
-  let n = (seed >>> 0), out = '';
+  let n = ((seed >>> 0) % _LX_SEED_SPACE), out = '';
   for (let i = 0; i < 6; i++) { out = _LX_SEED_ALPHABET[n % 31] + out; n = Math.floor(n / 31); }
   return out;
 }
@@ -43250,9 +43256,11 @@ function _lxCodeToSeed(code) {
   if (s.length === 6 && [...s].every(ch => _LX_SEED_ALPHABET.includes(ch))) {
     let n = 0;
     for (const ch of s) n = n * 31 + _LX_SEED_ALPHABET.indexOf(ch);
-    return n >>> 0;
+    return n % _LX_SEED_SPACE;
   }
-  return _lxSeedFromString(s);
+  // Free-text seed ("banana"): fold into the same space so it too has a
+  // canonical code the player can share.
+  return _lxSeedFromString(s) % _LX_SEED_SPACE;
 }
 // Draw from the ACTIVE expedition's seeded stream; falls back to Math.random()
 // outside a run so callers never branch. The generator itself can't be
@@ -43352,8 +43360,8 @@ function _startExpedition() {
   // / the Seeded Run dialog option) or we roll a fresh one. Either way the
   // code is surfaced so the run can be shared or replayed.
   const _seed = (game._nextExpeditionSeed != null)
-    ? (game._nextExpeditionSeed >>> 0)
-    : ((Math.random() * 0xFFFFFFFF) >>> 0);
+    ? ((game._nextExpeditionSeed >>> 0) % _LX_SEED_SPACE)
+    : Math.floor(Math.random() * _LX_SEED_SPACE);
   game._nextExpeditionSeed = null;
   // Initialise state.
   game.expedition = {
@@ -43775,6 +43783,62 @@ function _bravoShowBoonPick() {
 //   • Combat   — next floor has +50 % mob count, +50 % drop rate
 //   • Treasure — next floor starts with a chest, half mob count
 //   • Puzzle   — solve a 3-question quiz to skip the next floor
+// v0.29.286 — seed-entry modal. Built inline in the same self-contained style
+// as the door/puzzle modals rather than reusing #confirm-modal (which is
+// text-only) or window.prompt (disabled in Electron, so it would silently
+// no-op in the Steam build). Resolves to a seed string, '' for a random run,
+// or null if cancelled.
+function _expeditionSeedPrompt() {
+  return new Promise((resolve) => {
+    const modal = document.createElement('div');
+    modal.id = 'exp-seed-modal';
+    modal.style.cssText = 'position:fixed; inset:0; background:rgba(8,4,18,0.86); z-index:6000; display:flex; align-items:center; justify-content:center;';
+    const card = document.createElement('div');
+    card.style.cssText = 'background:linear-gradient(180deg,#1d1430,#1a0e2a); border:2px solid #aa66ff; border-radius:14px; padding:24px 26px; min-width:440px; max-width:520px; color:#e8d8ff; box-shadow:0 22px 60px rgba(0,0,0,0.65), 0 0 40px rgba(170,100,255,0.25);';
+    const _last = game._lastExpeditionSeedCode || '';
+    card.innerHTML = `
+      <h2 style="margin:0 0 8px; text-align:center; font-size:22px; color:#e0c8ff;">🎲 Seeded Expedition</h2>
+      <div style="text-align:center; color:#bbb; font-size:12px; line-height:1.5; margin-bottom:16px;">
+        A seed fixes the descent&rsquo;s riddles and the Echo waiting on Floor&nbsp;10.<br>
+        Share the code and someone else can run the same tower.
+      </div>
+      <input id="exp-seed-input" maxlength="24" placeholder="K7M2QF  ·  or any word" value="${_last.replace(/"/g, '')}"
+        style="display:block; width:100%; box-sizing:border-box; padding:11px 13px; font-size:16px; font-family:'Inter',sans-serif; letter-spacing:3px; text-align:center; text-transform:uppercase; background:#120a20; border:1px solid #6a4a9a; border-radius:8px; color:#ffe89a; outline:none;">
+      <div style="text-align:center; color:#7a6f95; font-size:10.5px; margin-top:7px;">Leave blank for a random seed.</div>
+      <div style="display:flex; gap:10px; margin-top:18px;">
+        <button id="exp-seed-go" style="flex:2; padding:10px 0; background:linear-gradient(180deg,#5a3a8a,#3a1a5e); color:#fff; border:1px solid #aa66cc; border-radius:6px; font-weight:700; cursor:pointer;">Descend</button>
+        <button id="exp-seed-cancel" style="flex:1; padding:10px 0; background:#241a38; color:#b0a0c8; border:1px solid #4a3a6a; border-radius:6px; font-weight:600; cursor:pointer;">Cancel</button>
+      </div>
+    `;
+    modal.appendChild(card);
+    document.body.appendChild(modal);
+    const _prevPaused = game.paused;
+    game.paused = true;
+    const input = card.querySelector('#exp-seed-input');
+    const done = (val) => {
+      modal.remove();
+      window.removeEventListener('keydown', onKey, true);
+      game.paused = _prevPaused;
+      resolve(val);
+    };
+    const submit = () => {
+      const v = (input.value || '').trim();
+      if (v) game._lastExpeditionSeedCode = v.toUpperCase();
+      done(v);
+    };
+    // Capture-phase so Esc resolves here instead of being eaten by the global
+    // modal-close handler (same hazard uiConfirm documents at v0.25.247).
+    const onKey = (e) => {
+      if (e.key === 'Escape' || e.key === 'Esc') { e.preventDefault(); e.stopPropagation(); done(null); }
+      else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); submit(); }
+      else e.stopPropagation();   // keep WASD/hotkeys from driving the game while typing
+    };
+    window.addEventListener('keydown', onKey, true);
+    card.querySelector('#exp-seed-go').onclick = submit;
+    card.querySelector('#exp-seed-cancel').onclick = () => done(null);
+    try { input.focus(); input.select(); } catch (e) {}
+  });
+}
 function _expeditionShowDoorChoice() {
   const modal = document.createElement('div');
   modal.id = 'exp-door-modal';
