@@ -148,6 +148,39 @@
   <b>Heads-up.</b> An earlier implementation of these phases targeted <code>v0.5.1</code> and was preserved locally at tag <code>phase-1-2-3-on-v0.5.1</code>. This is the rebuild against the current <code>v0.9.8</code> codebase, which had moved substantially (new bosses like Gravitos, minimap/taxi, chibi character rewrite).
 </div>
 
+<h2>v0.29.288&ndash;291 <span class="tag"><span class="pill feat">feat</span> Grind texture pass &mdash; rotating world affixes, a mastery bar that fills, a dust trickle, and seeded expedition runs</span></h2>
+<p>Per user, four asks in one pass. They share a diagnosis: a normal mob returns gear on roughly <b>0.20%</b> of kills, so about <b>499 of every 500 kills</b> paid out nothing the player could feel. Each change puts something back into those 499.</p>
+
+<h3>🌍 Rotating world affixes</h3>
+<p>Generalises the v0.29.60 cursed-map gamble into a standing daily world state. Every wilderness map carries <b>one affix per day</b>, drawn deterministically from <code>(mapId, dayIndex)</code>. Deterministic matters twice over: every player sees the same world on the same day (so &ldquo;the Foundry is Gilded today&rdquo; is shareable), and re-entering a map can&rsquo;t reroll it into a better affix.</p>
+<table>
+<thead><tr><th>Affix</th><th>Effect</th><th>Weight</th></tr></thead>
+<tbody>
+<tr><td>&mdash; none &mdash;</td><td>Ordinary ground</td><td>52%</td></tr>
+<tr><td>🪙 <b>Gilded</b></td><td>+60% coin</td><td>12%</td></tr>
+<tr><td>🩸 <b>Teeming</b></td><td>+15% EXP · +25% drop · +14% elite</td><td>10%</td></tr>
+<tr><td>✦ <b>Lucid</b></td><td>+45% EXP</td><td>10%</td></tr>
+<tr><td>🌙 <b>Restless</b></td><td>+25% coin · +25% EXP · +15% drop · +8% elite</td><td>10%</td></tr>
+<tr><td>💎 <b>Hoard-Touched</b></td><td>+90% drop · +5% elite</td><td>6%</td></tr>
+</tbody>
+</table>
+<p>Built entirely as multipliers on levers that already existed, so no combat code changed &mdash; EXP and coin join the <code>_diffExpMul</code>/<code>_diffCoinMul</code> chains, drops join <code>_diffDropMul</code>/<code>_edictDropMul</code>, and elite density reuses the cursed-map lever through a <code>Math.max</code> so an affix can only <em>raise</em> the rate, never lower it. A tinted HUD pin names the live affix and shows its computed buff summary, derived from the affix table so the displayed numbers can&rsquo;t drift from the real multipliers. The day boundary shares the daily-challenge clock (<code>_monoNow</code>), so affixes and dailies roll over together and a clock rollback can&rsquo;t farm a reroll.</p>
+
+<h3>⭐ Quarry-mastery bar</h3>
+<p>Per-type mastery has existed since v0.24.1 &mdash; 100 / 500 / 1000 kills grant +1% / +2% / +3% damage against that specific foe &mdash; but it lived only in the bestiary dossier, so mid-fight it read as nothing at all. It now surfaces <b>at the moment it moves</b>: kill something and a capsule pops in bottom-centre showing that foe&rsquo;s progress toward its next star, then fades after 1.9&#8239;s (3.2&#8239;s on a star-up, so the milestone is readable). Cute by design &mdash; a hatching egg that grows 🥚&nbsp;&rarr;&nbsp;🐣&nbsp;&rarr;&nbsp;🐤&nbsp;&rarr;&nbsp;🦅 across the four tiers, a bobbing face, a candy-stripe fill that shimmers, and a golden swell on star-up. Purely presentational: not one mastery number changed. Reduce-motion is honoured both via the in-game toggle and the OS-level <code>prefers-reduced-motion</code> setting.</p>
+
+<h3>◈ Dust trickle</h3>
+<p>3% of normal kills now drop <b>1 setshard</b>, with a small floating <code>+1◈</code> mote at the kill so it&rsquo;s felt rather than silently accruing in the HUD. Deliberately thin &mdash; about <b>30 shards per 1000 kills</b>, roughly 15% of a single 200◈ craft. This is texture, not an economy rewrite: the bar always moves, and the player chooses what it becomes (craft 200◈ / reforge 100◈ / respec 300◈). Bosses are excluded (they already pay 5&ndash;50◈) and so are Expedition floors, which block shard and coin earning by design.</p>
+
+<h3>🎲 Seeded expedition runs</h3>
+<p>Nothing in the game was seeded before this &mdash; every roll was a bare <code>Math.random()</code>, so two runs could never be compared and <code>towerBestFloor</code> was an unfalsifiable local number. Expeditions now carry a <b>seed</b>, surfaced as a short code (<code>K7M2QF</code>) in the start toast and on every door screen. Enter a code &mdash; or any word, <code>banana</code> works &mdash; to replay that exact descent: the same riddles in the same order, the same Echo of the Twelve waiting on Floor&nbsp;10.</p>
+<ul>
+<li><b>Deliberately partial scope:</b> the seed governs what actually varies. Floor maps are already fixed (<code>TOWER_FLOORS</code>, v0.26.282), and combat, damage and drop rolls stay <em>unseeded on purpose</em> &mdash; seeding those would let a player farm a known-good seed for guaranteed loot.</li>
+<li><b>Survives a save/quit/reload:</b> the generator can&rsquo;t be serialised into the save, so it&rsquo;s rebuilt from <code>(seed, drawCount)</code> &mdash; the draw counter fast-forwards the stream back to where it was.</li>
+<li><b>Codes round-trip exactly.</b> The first cut drew seeds from the full 32-bit range while a 6-character code over a 31-character alphabet only addresses 31<sup>6</sup>&nbsp;=&nbsp;887,503,681 values &mdash; so a shared code frequently started a <em>different</em> run than the one it came from, quietly defeating the entire feature. Seeds are now confined to that space: every seed has exactly one code, and every code decodes back to its seed. The alphabet drops <code>0/O/1/I/L</code> so a code read off a screenshot can&rsquo;t be mistyped into another run.</li>
+</ul>
+<p><b>Certified</b> by three new permanent test scripts &mdash; 40 checks total. <code>seeded_run_test.mjs</code> (11): determinism, divergence, range, uniformity within 3%, a 20,000-sample code round-trip, and mid-run rehydration. <code>world_affix_test.mjs</code> (8): determinism, per-map and per-day rotation, exclusion of towns/arenas/void/tower/clockwork maps, and a 20,000-draw distribution landing within <b>0.34 percentage points</b> of the declared weights. <code>mastery_bar_test.mjs</code> (21): the full progress curve across all four tiers and both band resets, and the dust rate&rsquo;s bounds, exclusions and expected yield.</p>
+
 <h2>v0.29.289 <span class="tag"><span class="pill feat">feat</span> Every boss fight runs smooth &mdash; universal off-thread sprite right-sizing, with pixel-verified zero visual change</span></h2>
 <p>Per user &mdash; <em>&ldquo;reduce the lag at each boss fight significantly, it should run very very smoothly&rdquo;</em> and <em>&ldquo;ensure that by shrinking it does not cause visible changes to the sprites&rdquo;.</em> v0.29.283 fixed Gravitos; profiling the rest of the roster found two holes and a new problem the first fix introduced.</p>
 <ul>
