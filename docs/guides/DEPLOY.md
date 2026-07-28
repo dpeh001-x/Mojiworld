@@ -107,8 +107,8 @@ Steps (your Cloudflare dashboard — account access I don't have):
    Route:  moji-studios.com/mojiworld*
    Zone:   moji-studios.com
    ```
-   (The trailing `*` is required so sub-resources like `/mojiworld/anim_calib.js`
-   also hit the Worker.)
+   (The trailing `*` is required so sub-resources like
+   `/mojiworld/data/anim_calib.js` also hit the Worker.)
 3. Visit **`https://moji-studios.com/mojiworld`** — it 301s to `/mojiworld/` and
    serves the game while the address bar stays on the apex path.
 

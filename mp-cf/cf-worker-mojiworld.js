@@ -8,7 +8,7 @@
 // the GitHub Pages site does the actual serving.
 //
 // Why this works with no HTML rewriting: every local asset in the game is a
-// RELATIVE path (anim_calib.js, Sprites/..., backgrounds/...) and the heavy art
+// RELATIVE path (data/anim_calib.js, Sprites/..., backgrounds/...) and the heavy art
 // is already absolute jsDelivr URLs. Served under the trailing-slash subpath
 // /mojiworld/, the browser requests /mojiworld/<file>, this Worker strips the
 // prefix, and the origin returns /<file>. The multiplayer wss:// endpoint is
