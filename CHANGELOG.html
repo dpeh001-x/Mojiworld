@@ -148,6 +148,23 @@
   <b>Heads-up.</b> An earlier implementation of these phases targeted <code>v0.5.1</code> and was preserved locally at tag <code>phase-1-2-3-on-v0.5.1</code>. This is the rebuild against the current <code>v0.9.8</code> codebase, which had moved substantially (new bosses like Gravitos, minimap/taxi, chibi character rewrite).
 </div>
 
+<h2>v0.29.294 <span class="tag"><span class="pill feat">feat</span> Sprite edge-feather is now cached &mdash; the busiest map got <b>2.4&times;</b> faster, p99 down 8.3&#8239;&rarr;&#8239;1.7&#8239;ms</span></h2>
+<p>Per user &mdash; <em>&ldquo;further work on reducing lag of the game&rdquo;.</em> Rather than shrink more art, this pass <em>measured</em> where the frame actually goes. The answer was surprising: <b>every <code>drawImage</code> in a frame totalled only 0.025&#8239;ms</b> &mdash; 94% of the frame was something else entirely. Wrapping the loop&rsquo;s phase functions put <b><code>drawMonster</code> at 60% of the frame</b> (0.508&#8239;ms with 36 mobs), and drilling in found the real culprit.</p>
+<ul>
+<li><b>&#127912; The find:</b> <code>_lxDrawSoft</code> cost <b>0.19&#8239;ms/frame for just ~5 sprites</b> (~0.04&#8239;ms each). That was not blitting &mdash; it was re-running the edge-feather composite (scratch clear + blit + up to three gradient fills + blit) for the <em>same sprite at the same size</em> on <em>every frame</em>.</li>
+<li><b>&#9889; The fix:</b> the composite depends only on (image, draw size, flags), and an entity&rsquo;s draw size is stable frame to frame (the hit-squash is a ctx transform, not a size change) &mdash; so each feathered image now keeps its finished canvas and the steady state collapses to a single <code>drawImage</code>. Output is <b>byte-identical</b> (verified: max pixel delta <b>0</b> against a freshly computed composite, with the feather still measurably softening edges &mdash; edge alpha 8 vs centre 255).</li>
+<li><b>&#128269; Bonus fix:</b> <code>_lxEdgesTouched</code> re-ran its alpha probe <em>every frame forever</em> for sprites that 404 (many monster types ship no art for one or more states) &mdash; 0.025&#8239;ms/frame of pure waste on a busy map. A definitively-loaded-and-empty image is now memoized; &ldquo;not loaded yet&rdquo; still re-probes, which is the case the v0.29.278 fix exists to protect.</li>
+</ul>
+<table>
+<thead><tr><th>Map</th><th>drawMonster</th><th>frame</th><th>p99 before &rarr; after</th></tr></thead>
+<tbody>
+<tr><td>Stardust Atrium (36 mobs)</td><td>0.508 &rarr; <b>0.059&#8239;ms</b></td><td>0.85 &rarr; <b>0.36&#8239;ms</b></td><td>9.5 &rarr; <b>1.7&#8239;ms</b></td></tr>
+<tr><td>Clockwork Underpass (23)</td><td>&mdash;</td><td>&mdash;</td><td>8.3 &rarr; <b>1.3&#8239;ms</b></td></tr>
+<tr><td>Ossuary Sprawl (15)</td><td>&mdash;</td><td>&mdash;</td><td>8.2 &rarr; <b>1.1&#8239;ms</b></td></tr>
+</tbody>
+</table>
+<p>Every map measured now sits at <b>p50 0.2&ndash;0.3&#8239;ms, p99 1.1&ndash;2.9&#8239;ms</b>, boss arenas included.</p>
+
 <h2>v0.29.293 <span class="tag"><span class="pill bug">bug</span><span class="pill feat">feat</span> Bosses were rendering at HALF size &mdash; caught and fixed; plus monster art right-sized game-wide</span></h2>
 <p>Per user &mdash; <em>&ldquo;further reduce the lag of the game&rdquo;.</em> Widening the sweep past boss arenas turned up a <b>regression shipped in v0.29.289</b> and one large remaining cost.</p>
 <ul>

@@ -4745,11 +4745,24 @@
   #mastery-bar .mb-row { display: flex; align-items: center; gap: 9px; }
   #mastery-bar .mb-face {
     font-size: 19px; line-height: 1;
-    filter: drop-shadow(0 0 6px rgba(190, 160, 255, 0.6));
+    width: 26px; height: 26px; flex: none;              /* v0.29.293 — fixed slot: art and emoji fallback occupy identical space */
+    display: flex; align-items: center; justify-content: center;
     animation: mbBob 1.6s ease-in-out infinite;
   }
+  /* v0.29.293 — generated HUD art. The sprites carry their own baked glow, so
+     no drop-shadow here; that only applies to the emoji fallback. */
+  .lx-hud-ico {
+    width: 100%; height: 100%; object-fit: contain;
+    image-rendering: auto; user-select: none; -webkit-user-drag: none;
+  }
+  #mastery-bar .mb-face:not(:has(.lx-hud-ico)) { filter: drop-shadow(0 0 6px rgba(190, 160, 255, 0.6)); }
   @keyframes mbBob { 0%, 100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-2.5px) rotate(4deg); } }
-  #mastery-bar .mb-body { min-width: 168px; }
+  /* v0.29.293 — FIXED width, not min-width. The capsule is re-rendered on
+     every kill; sizing it to content made it visibly jitter wider/narrower as
+     the name and the "47 / 100" -> "1,000 / 1,000" counter changed length.
+     A fixed body + a fixed-width counter keeps the outline dead still while
+     only the fill moves. */
+  #mastery-bar .mb-body { width: 172px; flex: none; }
   #mastery-bar .mb-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 3px; }
   #mastery-bar .mb-name {
     font-size: 10.5px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase;
@@ -4777,7 +4790,11 @@
     animation: mbShine 2.4s ease-in-out infinite;
   }
   @keyframes mbShine { 0% { transform: translateX(-100%); } 60%, 100% { transform: translateX(100%); } }
-  #mastery-bar .mb-count { font-size: 10.5px; font-weight: 700; color: #b6a8d8; white-space: nowrap; }
+  #mastery-bar .mb-count {
+    font-size: 10.5px; font-weight: 700; color: #b6a8d8; white-space: nowrap;
+    width: 74px; flex: none; text-align: right;   /* v0.29.293 — reserve the widest counter ("1,000 / 1,000") so the capsule never resizes */
+    font-variant-numeric: tabular-nums;           /* digits stop dancing as the count ticks */
+  }
   /* Respect the accessibility toggle. Reduce-motion is a JS flag
      (game._reduceMotion), not a body class, so the renderer stamps .mb-still
      on the element; the media query covers OS-level preference too. */
@@ -4810,7 +4827,12 @@
     font-family: 'Inter', sans-serif;
     animation: mojiBuffPop 320ms cubic-bezier(.22,1.4,.36,1);
   }
-  #world-affix-pin .afx-ico { font-size: 15px; line-height: 1; filter: drop-shadow(0 0 5px var(--afx, #b09ad0)); }
+  #world-affix-pin .afx-ico {
+    font-size: 15px; line-height: 1;
+    width: 20px; height: 20px; flex: none;              /* v0.29.293 — fixed slot for the sigil art / emoji fallback */
+    display: flex; align-items: center; justify-content: center;
+  }
+  #world-affix-pin .afx-ico:not(:has(.lx-hud-ico)) { filter: drop-shadow(0 0 5px var(--afx, #b09ad0)); }
   #world-affix-pin .afx-name {
     font-size: 11px; font-weight: 800; letter-spacing: 0.7px; text-transform: uppercase;
     color: var(--afx, #e0d4ff); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
@@ -9036,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.293';
+const GAME_VERSION = 'v0.29.294';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -43397,7 +43419,18 @@ const EXPEDITION_FLOOR_COUNT = 10;
 // =========================================================================
 const _LX_MASTERY_TIERS = [100, 500, 1000];
 // The face levels with the stars — egg -> hatching -> chick -> bird.
+// v0.29.293 — custom art replaces the system emoji (which rendered in a
+// different typeface on every OS and read as pasted-in against the HUD). The
+// emoji remain the fallback glyph if a sprite is missing or fails to decode.
 const _LX_MASTERY_FACES = ['🥚', '🐣', '🐤', '🦅'];
+const _LX_MASTERY_ICONS = ['tier0', 'tier1', 'tier2', 'tier3']
+  .map(n => 'Sprites/ui/mastery/' + n + '.webp');
+// Shared <img> factory for both HUD elements: swap in the art, and if it
+// fails to decode drop back to the emoji so the slot is never blank.
+function _lxIconHtml(src, fallback) {
+  return `<img class="lx-hud-ico" src="${src}" alt="" draggable="false"`
+    + ` onerror="this.parentNode.textContent='${fallback}';">`;
+}
 function _masteryTierOf(n) { return n >= 1000 ? 3 : n >= 500 ? 2 : n >= 100 ? 1 : 0; }
 let _lxMasteryHideTimer = null;
 function _renderMasteryBar(m, kills, starUp) {
@@ -43410,7 +43443,13 @@ function _renderMasteryBar(m, kills, starUp) {
     ? Math.max(2, Math.min(100, ((kills - prevThr) / (nextThr - prevThr)) * 100))
     : 100;
   const set = (id, v) => { const n = document.getElementById(id); if (n) n.textContent = v; };
-  set('mb-face', _LX_MASTERY_FACES[tier]);
+  const faceEl = document.getElementById('mb-face');
+  // Only rewrite the face when the tier actually changes — reassigning the
+  // <img> every kill would restart its decode and make the icon flicker.
+  if (faceEl && faceEl.dataset.tier !== String(tier)) {
+    faceEl.dataset.tier = String(tier);
+    faceEl.innerHTML = _lxIconHtml(_LX_MASTERY_ICONS[tier], _LX_MASTERY_FACES[tier]);
+  }
   set('mb-name', m.name || m.type || 'Quarry');
   set('mb-stars', tier > 0 ? '★'.repeat(tier) + '☆'.repeat(3 - tier) : '☆☆☆');
   set('mb-count', nextThr ? kills.toLocaleString() + ' / ' + nextThr.toLocaleString() : 'MASTERED');
@@ -43512,7 +43551,8 @@ function _renderAffixPin() {
   const a = _activeAffix();
   if (!a || a.id === 'none') { el.style.display = 'none'; return; }
   el.style.setProperty('--afx', a.color || '#b09ad0');
-  el.innerHTML = `<span class="afx-ico">${a.icon}</span>`
+  // v0.29.293 — custom sigil art, emoji fallback (see _lxIconHtml).
+  el.innerHTML = `<span class="afx-ico">${_lxIconHtml('Sprites/ui/affix/' + a.id + '.webp', a.icon)}</span>`
     + `<span class="afx-name">${a.name}</span>`
     + `<span class="afx-buff">${_affixBuffText(a)}</span>`;
   // Both pins claim top:84px — stack below the expedition pin when it's up.
@@ -94721,7 +94761,18 @@ function _lxEdgesTouched(img) {
   // old code stamped that null onto the image forever — the sprite was
   // permanently classified "clean" and never feathered. Return null (no
   // feather this frame) but leave _lxEdges unset so the next frame re-probes.
-  if (!(img.width > 0 && img.height > 0) || (img.complete !== undefined && !img.complete)) return null;
+  // v0.29.294 — but DO memoize a definitive failure. An <img> that finished
+  // loading with naturalWidth 0 is a 404 (many monster types ship no art for
+  // one or more states), and the un-memoized early return re-ran this probe for
+  // it on every frame forever — measured 0.025 ms/frame of pure waste on a busy
+  // map. "Loaded and empty" can never become non-empty, so it is safe to cache;
+  // "not loaded yet" still re-probes next frame, which is the case v0.29.278
+  // was protecting.
+  const _loaded = (img.complete === undefined) || !!img.complete;
+  if (!(img.width > 0 && img.height > 0) || !_loaded) {
+    if (_loaded && img.naturalWidth === 0) { img._lxEdges = null; }
+    return null;
+  }
   let res = null;
   try {
     const S = 48;
@@ -94747,7 +94798,9 @@ function _lxEdgesTouched(img) {
   img._lxEdges = res;
   return res;
 }
-let _lxFeatherCv = null, _lxFeatherCtx = null;
+// v0.29.294 — the shared grow-only feather scratch canvas is retired: each
+// feathered image now owns a canvas sized to its draw, which is what makes the
+// composite cacheable across frames (see _lxDrawSoft).
 // v0.29.278 — FORCED feather (per user "ensure that the edges of the boss
 // sprites such as gravitos2star gravitos3star are feathered so that the cut
 // off is not so obvious"). The supernova star forms carry soft glow art out
@@ -94773,16 +94826,26 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
   // detach it visually — same rationale as the permanent bottom-edge exclusion.
   const _noTop = !!(opts && opts.noTop);
   if (!e || dw < 14 || dh < 14 || (_noTop && !e.l && !e.r)) { c.drawImage(img, dx, dy, dw, dh); return; }
+  // v0.29.294 — FEATHERED-RESULT CACHE. Profiling a busy map put _lxDrawSoft at
+  // 0.19 ms/frame for only ~5 sprites (~0.04 ms each) while ALL drawImage in the
+  // frame totalled 0.025 ms — i.e. the cost was re-running the composite
+  // (scratch clear + blit + up to three gradient fills + blit) for the SAME
+  // sprite at the SAME size on every single frame. The result only depends on
+  // (image, draw size, flags), and an entity's draw size is stable frame to
+  // frame (hit-squash is a ctx transform, not a size change), so one cached
+  // canvas per image collapses the steady state to a single drawImage.
+  // Pixel output is byte-identical — it is literally the same composite, reused.
+  const _fkey = Math.ceil(dw) + 'x' + Math.ceil(dh) + (_noTop ? 'T' : '') + ((opts && opts.deep) ? 'D' : '') + ((opts && opts.force) ? 'F' : '');
+  const _fc = img._lxFeatherC;
+  if (_fc && _fc.k === _fkey) { c.drawImage(_fc.cv, dx, dy, dw, dh); return; }
   try {
     const W2 = Math.ceil(dw), H2 = Math.ceil(dh);
-    if (!_lxFeatherCv) {
-      _lxFeatherCv = document.createElement('canvas');
-      _lxFeatherCtx = _lxFeatherCv.getContext('2d');
-    }
-    if (_lxFeatherCv.width < W2) _lxFeatherCv.width = W2;
-    if (_lxFeatherCv.height < H2) _lxFeatherCv.height = H2;
-    const g = _lxFeatherCtx;
-    g.clearRect(0, 0, W2, H2);
+    // Build into a per-image canvas sized exactly to this draw, so it can be
+    // kept; the old shared scratch was grow-only and could not be cached.
+    const _own = document.createElement('canvas');
+    _own.width = W2; _own.height = H2;
+    const g = _own.getContext('2d');
+    if (!g) { c.drawImage(img, dx, dy, dw, dh); return; }
     g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
     g.drawImage(img, 0, 0, W2, H2);
     g.globalCompositeOperation = 'destination-out';
@@ -94805,7 +94868,8 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
     if (e.r) { const F = depth(e.r.f), [y0, hh] = span(e.r, H2); const gr = g.createLinearGradient(W2, 0, W2 - F, 0); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(W2 - F, y0, F, hh); }
     if (e.t && !_noTop) { const F = depth(e.t.f), [x0, ww] = span(e.t, W2); const gr = g.createLinearGradient(0, 0, 0, F); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x0, 0, ww, F); }
     g.globalCompositeOperation = 'source-over';
-    c.drawImage(_lxFeatherCv, 0, 0, W2, H2, dx, dy, dw, dh);
+    img._lxFeatherC = { k: _fkey, cv: _own };   // v0.29.294 — single entry per image; a size change just rebuilds it
+    c.drawImage(_own, 0, 0, W2, H2, dx, dy, dw, dh);
   } catch (err) {
     try { c.drawImage(img, dx, dy, dw, dh); } catch (e2) {}
   }
