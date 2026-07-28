@@ -9,7 +9,7 @@ const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 
 // ---- policy: no fs baked anywhere (raw rendering) ----
-const calibSrc = readFileSync('anim_calib.js', 'utf8');
+const calibSrc = readFileSync('data/anim_calib.js', 'utf8');
 const calib = JSON.parse(calibSrc.match(/window\.LX_ANIM_CALIB = (\{[\s\S]*?\n\});/)[1]);
 const baked = [];
 for (const [t, states] of Object.entries(calib))

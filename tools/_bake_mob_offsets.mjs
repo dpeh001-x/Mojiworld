@@ -2,7 +2,7 @@
 // preserving the header comment. Atomic write + node --check verify.
 import { readFile, writeFile, rename } from 'node:fs/promises';
 import { execSync } from 'node:child_process';
-const FILE = new URL('../mob_offsets.js', import.meta.url);
+const FILE = new URL('../data/mob_offsets.js', import.meta.url);
 const src = await readFile(FILE, 'utf8');
 
 // Keep everything before the first table assignment as the header.
@@ -49,7 +49,7 @@ const emit = (name, obj) => {
 
 const out = header + emit('LX_MOB_OFFSET_DATA', OFFSET) + emit('LX_MOB_SCALE_DATA', SCALE);
 
-const tmp = new URL('../mob_offsets.js.tmp', import.meta.url);
+const tmp = new URL('../data/mob_offsets.js.tmp', import.meta.url);
 await writeFile(tmp, out, 'utf8');
 execSync('node --check "' + tmp.pathname.replace(/^\//, '') + '"');   // verify it parses
 await rename(tmp, FILE);

@@ -168,7 +168,7 @@ document.getElementById('btnExport').onclick = () => {
 render();
 `;
 
-const skelPath = R('zodiac_vfx_review.html');
+const skelPath = R('tools/zodiac_vfx_review.html');
 let html = readFileSync(skelPath, 'utf8');
 html = html.replace('__DATA__', JSON.stringify(DATA))
            .replace('__SCRIPT__', SCRIPT);

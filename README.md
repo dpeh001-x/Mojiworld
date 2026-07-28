@@ -116,7 +116,7 @@ Every combat map spawns a **mini-boss** (an Elder variant of the strongest local
 - **Skill trees** — passive nodes branching across three tiers per class
 - **Job basic-skill enhancements** — advancing upgrades every starter skill
 - **Procedural pixel-art character** — base body + hair / armor / cape / weapon / helmet / shield / boots overlays, plus a Wardrobe
-- **In-browser sprite maker** (`sprite_maker.html`) — generate your own style variants
+- **In-browser sprite maker** (`tools/sprite_maker.html`) — generate your own style variants
 - **Shared-world co-op** — same monsters, HP, kills, and XP with a friend
 - **Death → respawn** at town with a Lumen penalty
 

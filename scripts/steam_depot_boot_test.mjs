@@ -34,7 +34,7 @@ const dirCache = new Map();
 const listing = (dir) => { let l = dirCache.get(dir); if (!l) { try { l = new Set(fs.readdirSync(dir)); } catch (e) { l = new Set(); } dirCache.set(dir, l); } return l; };
 const caseExact = (rel) => { let dir = ROOT; for (const seg of rel.split('/')) { if (!listing(dir).has(seg)) return false; dir = path.join(dir, seg); } return true; };
 const refs = new Set();
-try { for (const a of JSON.parse(fs.readFileSync(path.join(ROOT, 'assets_manifest.json'), 'utf8'))) if (typeof a === 'string') refs.add(a.replace(/^\.?\//, '')); } catch (e) {}
+try { for (const a of JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'assets_manifest.json'), 'utf8'))) if (typeof a === 'string') refs.add(a.replace(/^\.?\//, '')); } catch (e) {}
 const html = fs.readFileSync(path.join(ROOT, 'mojiworld_game.html'), 'utf8');
 const re = /(?:Sprites|audio|backgrounds|steam\/higgsfield\/cinematics)\/[A-Za-z0-9_\-./]+?\.(?:png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|mp4|webm|json)/g;
 let m; while ((m = re.exec(html))) { if (!m[0].includes('..')) refs.add(m[0]); }

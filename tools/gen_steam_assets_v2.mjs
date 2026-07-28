@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// gen_steam_assets_v2.mjs — Steam art from Higgsfield (Nano Banana Pro) key art.
-// Sources: steam_assets/keyart/keyart_wide.png (5504x3072, cast right-of-centre)
-//          steam_assets/keyart/keyart_vertical.png (3392x5056, dragon top / girl low)
+// gen_steam/assets_v2.mjs — Steam art from Higgsfield (Nano Banana Pro) key art.
+// Sources: steam/assets/keyart/keyart_wide.png (5504x3072, cast right-of-centre)
+//          steam/assets/keyart/keyart_vertical.png (3392x5056, dragon top / girl low)
 // Crops each official template size out of the key art with a tuned focus point,
 // then overlays the gold MOJIWORLD logotype (SVG → sharp). Same 9 outputs as v1.
-// Run: node tools/gen_steam_assets_v2.mjs
+// Run: node tools/gen_steam/assets_v2.mjs
 import sharp from 'sharp';
 import { mkdir, rename } from 'node:fs/promises';
 
@@ -13,9 +13,9 @@ import { mkdir, rename } from 'node:fs/promises';
 // in-game title and app icon exactly.
 const WORDMARK = 'Sprites/ui/mojiworld_logo.png';
 
-const OUT = 'steam_assets';
-const WIDE = 'steam_assets/keyart/keyart_wide.png';
-const VERT = 'steam_assets/keyart/keyart_vertical.png';
+const OUT = 'steam/assets';
+const WIDE = 'steam/assets/keyart/keyart_wide.png';
+const VERT = 'steam/assets/keyart/keyart_vertical.png';
 
 // cover-crop src to w x h; focusX/focusY are fractions picking the crop window centre
 async function cover(src, w, h, focusX = 0.5, focusY = 0.5, { blur = 0, darken = 0 } = {}) {

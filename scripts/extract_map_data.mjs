@@ -1,5 +1,5 @@
 // Extracts per-map data from the live game (MAPS + _wmComputePositions +
-// _WM_BIOME_ICON) so the standalone map_editor.html can offer a real map
+// _WM_BIOME_ICON) so the standalone tools/map_editor.html can offer a real map
 // dropdown and a W-key world-map switcher with the game's own node layout.
 // Writes scripts/map_data.json (consumed by the embed step below).
 import { chromium } from 'playwright-core';

@@ -1,16 +1,16 @@
 #!/usr/bin/env node
-// gen_steam_assets.mjs — compose Steam store/library art from in-game assets.
+// gen_steam/assets.mjs — compose Steam store/library art from in-game assets.
 // Sizes follow Valve's official "Steam Game Templates" PSD set (2024+ specs):
 //   store_capsule_main     1232x706    store_capsule_header  920x430
 //   store_capsule_small    462x174     store_capsule_vertical 748x896
 //   store_page_background  1438x810    library_capsule       600x900
 //   library_header         920x430     library_hero          3840x1240 (no logo)
 //   library_logo           1280x720 transparent
-// Run: node tools/gen_steam_assets.mjs   → writes PNGs into steam_assets/
+// Run: node tools/gen_steam/assets.mjs   → writes PNGs into steam/assets/
 import sharp from 'sharp';
 import { mkdir } from 'node:fs/promises';
 
-const OUT = 'steam_assets';
+const OUT = 'steam/assets';
 const BG = {
   atrium: 'backgrounds/bg_v3_celestialAtrium.png',
   galaxy: 'backgrounds/bg_v3_galaxy.png',

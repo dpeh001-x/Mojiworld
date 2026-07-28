@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const CALIB = join(root, 'anim_calib.js');
+const CALIB = join(root, 'data', 'anim_calib.js');
 
 const arg = process.argv[2];
 if (!arg) { console.error('usage: apply_anim_patch.mjs <patch-json-or-file>'); process.exit(2); }

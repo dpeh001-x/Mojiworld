@@ -6,8 +6,8 @@ import { readFile } from 'node:fs/promises';
 import { execSync } from 'node:child_process';
 
 const ROOT = 'C:/Users/Xenon/Desktop/Mojiworld';
-const SOURCES = ['mojiworld_game.html', 'anim_calib.js', 'anim_calib_manifest.js',
-  'mob_offsets.js', 'monster_hitboxes.js', 'monster_animator.html'];   // v0.29.x — animator logic consolidated into the HTML
+const SOURCES = ['mojiworld_game.html', 'data/anim_calib.js', 'data/anim_calib_manifest.js',
+  'data/mob_offsets.js', 'data/monster_hitboxes.js', 'monster_animator.html'];   // v0.29.x — animator logic consolidated into the HTML
 
 const tracked = execSync('git ls-files', { cwd: ROOT, maxBuffer: 64e6 })
   .toString().split('\n').filter(Boolean);

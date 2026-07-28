@@ -1,7 +1,7 @@
-// Injects scripts/map_data.json into map_editor.html's <script id="MAP_DATA">
+// Injects scripts/map_data.json into tools/map_editor.html's <script id="MAP_DATA">
 // placeholder. Atomic write (tmp → rename). Run after extract_map_data.mjs.
 import { readFileSync, writeFileSync, renameSync } from 'fs';
-const HTML = 'map_editor.html';
+const HTML = 'tools/map_editor.html';
 const html = readFileSync(HTML, 'utf8');
 let json = readFileSync('scripts/map_data.json', 'utf8').trim();
 // Never let a string value break out of the <script> tag.

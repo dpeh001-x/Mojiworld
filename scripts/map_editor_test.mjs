@@ -4,7 +4,7 @@
 // and import. Data is baked from the live game (scripts/extract_map_data.mjs).
 import { chromium } from 'playwright-core';
 const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
-const URL = 'file:///home/user/Mojiworld/map_editor.html';
+const URL = 'file:///home/user/Mojiworld/tools/map_editor.html';
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--disable-gpu'] });

@@ -33,7 +33,7 @@ const exists = async (p) => { try { await access(p); return true; } catch { retu
 
 // hitboxes (hb.h × hb.mul) — needed to preserve the exact on-screen size
 const _w = {};
-new Function('window', await readFile(join(root, 'monster_hitboxes.js'), 'utf8'))(_w);
+new Function('window', await readFile(join(root, 'data', 'monster_hitboxes.js'), 'utf8'))(_w);
 const hbTable = _w.LX_MOB_HITBOX || {};
 
 async function box(buf) {                     // content box, alpha>64 (GAME _spriteContentBox convention)

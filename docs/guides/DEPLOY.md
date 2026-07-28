@@ -94,14 +94,14 @@ small Cloudflare Worker on the apex zone that transparently proxies `/mojiworld*
 to the subdomain origin and strips the prefix. The apex Cloudflare Pages studio
 site is untouched — the Worker only runs on the `/mojiworld*` route.
 
-Worker script: [`deploy/cf-worker-mojiworld.js`](deploy/cf-worker-mojiworld.js)
+Worker script: [`mp-cf/cf-worker-mojiworld.js`](mp-cf/cf-worker-mojiworld.js)
 (no HTML rewriting needed — every game asset is a relative path or an absolute
 CDN/wss URL, so under the trailing-slash subpath it just works).
 
 Steps (your Cloudflare dashboard — account access I don't have):
 
 1. **Workers & Pages → Create → Worker** → name it `mojiworld-proxy` → replace the
-   starter code with the contents of `deploy/cf-worker-mojiworld.js` → **Deploy**.
+   starter code with the contents of `mp-cf/cf-worker-mojiworld.js` → **Deploy**.
 2. **The Worker → Settings → Domains & Routes → Add → Route**:
    ```
    Route:  moji-studios.com/mojiworld*

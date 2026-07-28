@@ -44,7 +44,7 @@ const onlySet = onlyArg ? new Set(onlyArg.split(',').map((s) => s.trim())) : nul
 const skipBosses = has('--skip-bosses');
 
 // --notes <file>: per-clip creative direction from the review page
-// (monster_sound_review.html "Export work order" -> regen_notes.json).
+// (tools/monster_sound_review.html "Export work order" -> regen_notes.json).
 // Keys are `<id>_<kind>`, values are free-text comments; each one is
 // appended to that clip's composed prompt as an explicit direction, so
 // "too metallic — should be a wet squelch" actually steers the regen.
