@@ -8908,7 +8908,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.282';
+const GAME_VERSION = 'v0.29.283';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -9855,6 +9855,12 @@ const LX_MOB_PROJ = (() => {
     // until the file is dropped in, _lxMobProjReady() is false so the renderer
     // falls back to the procedural ember-coloured projectile.
     forgeHammer: 'p_forgehammer.png', // Sundered Smith spinning forge hammer
+    // v0.29.283 — Gravitos placeholder cleanup (per user "there are a few pink
+    // rectangular missiles and circles, change them to more apt sprites using
+    // ludo.ai"): the laser-sweep bullet (was a bare 28×10 pink rect on skill
+    // 'voidbeam') and the zip/slam shock burst (was the default pink ellipse).
+    gravbolt:    'p_gravbolt.png',    // Gravitos laser-sweep void bolt
+    shock:       'p_gravshock.png',   // Gravitos zip/slam gravity shock orb
     // v0.26.x — Bloom Reaches plant chain (tools/gen_plant_mob_proj.mjs).
     // Only meloncholy fires today (shoot:'mseed'); the other three are
     // pre-staged so a future ranged attack is a one-line def change.
@@ -9984,6 +9990,8 @@ const _PROJ_SPRITE_BLIT = {
   icePillar:    { mode: 'orient', size: 1.0 },                  // Capricorn ice spire — points along velocity
   markedShot:   { mode: 'orient', size: 1.0 },                  // Sagittarius arrow-star — directional
   voidring:    { mode: 'spin',   size: 1.0, spinRate: 0.08 },   // cosmic ring — slow rotation
+  gravbolt:    { mode: 'orient', size: 2.2 },                   // v0.29.283 — gravitos sweep bolt, points along velocity (hitbox 28×10, drawn larger for read)
+  shock:       { mode: 'spin',   size: 1.6, spinRate: 0.04 },   // v0.29.283 — gravitos zip/slam shock orb
   deathOrb:    { mode: 'spin',   size: 1.0, spinRate: 0.05 },   // v0.26.506 — void singularity, slow ominous spin
   roar:        { mode: 'static', size: 1.0 },                   // concentric sound — no rotation
   whirl:       { mode: 'spin',   size: 1.0, spinRate: 0.35 },   // water vortex — fastest spin
@@ -22266,14 +22274,26 @@ const MAPS = {
        a way to fling across the arena to dodge the collapse. vy tuned strong
        (~-30) to beat the 3x pull; the two y:320 pads are angled cross-arena
        launches. Rendered by drawLaunchPads(), applied in physics. */
+    /* v0.29.283 — per user "enable the launch to be higher and further as the
+       gravity is very high in the map". Root cause found by stepping the live
+       physics: the airborne pad clamp hard-capped vy at 44, so EVERY authored
+       vector above it (-52/-54 incl.) launched identically — rise ~170 px,
+       apex ~y:266, the y:180 perches unreachable from the floor. The clamp
+       now honors the authored vector (see _padVxCap/_padVyCap at the physics
+       clamp), and the vectors below are EMPIRICAL — measured by stepping the
+       live physics (the arena has air-drag on top of the 3× gravity):
+       vy:-95 → feet peak ~y:160, landing the y:180 perches with margin
+       (measured: -62 → feet 286, -90 → 173, -110 → 106). Cross pads
+       -28 → -46 with vx 20 → 27 and launchPadMul 1.4 → 1.6 for a higher,
+       visibly further cross-arena fling. */
     launchPads: [
-      { x:240,  y:480, w:120, vx:2,   vy:-54, color:'#aa66cc' },
-      { x:1840, y:480, w:120, vx:-2,  vy:-54, color:'#aa66cc' },
-      { x:1040, y:480, w:120, vx:0,   vy:-52, color:'#66ddff' },
-      { x:560,  y:320, w:120, vx:20,  vy:-28, color:'#ff88dd' },
-      { x:1560, y:320, w:120, vx:-20, vy:-28, color:'#ff88dd' },
+      { x:240,  y:480, w:120, vx:3,   vy:-95, color:'#aa66cc' },
+      { x:1840, y:480, w:120, vx:-3,  vy:-95, color:'#aa66cc' },
+      { x:1040, y:480, w:120, vx:0,   vy:-92, color:'#66ddff' },
+      { x:560,  y:320, w:120, vx:27,  vy:-46, color:'#ff88dd' },
+      { x:1560, y:320, w:120, vx:-27, vy:-46, color:'#ff88dd' },
     ],
-    launchPadMul: 1.4,
+    launchPadMul: 1.6,
     // v0.29.x — animated runic-energy launch-pad sprite, scoped to the
     // Gravitos arena (the cosmic/void theme fits the runes + flame). Other
     // maps' launch pads keep the procedural look.
@@ -48448,7 +48468,16 @@ function updatePlayer(dt) {
   // back to a plain jump. Caps revert to normal on every non-icy map.
   let _hCap = PLAYER_SPEED_HARD_CAP, _jCap = PLAYER_JUMP_HARD_CAP;
   if (game.mapData && game.mapData.isIcy) { _hCap = 18; _jCap = 36; }
-  if (player._padLaunch) { _hCap = Math.max(_hCap, 30); _jCap = Math.max(_jCap, 44); }  // v0.26.432 — bigger pad caps for the much-higher/further block-land launch (was 26/40)
+  // v0.26.432 — bigger pad caps for the much-higher/further block-land launch (was 26/40).
+  // v0.29.283 — the caps additionally honor the AUTHORED pad vector (stashed at
+  // fire time as _padVxCap/_padVyCap): the flat 44 silently clamped any pad
+  // authored above it, so the Gravitos arena's high-gravity vents (vy up to
+  // -62 under the 3× pull) launched at less than half their authored height —
+  // measured apex identical for vy:-54 and vy:-90. Caps still revert on landing.
+  if (player._padLaunch) {
+    _hCap = Math.max(_hCap, 30, player._padVxCap || 0);
+    _jCap = Math.max(_jCap, 44, player._padVyCap || 0);
+  }
   // v0.26.440 — Death Blossom dash window temporarily DOUBLES the horizontal
   // speed limit so the 2x walk speed (getSpeed) + the forward somersault leap
   // aren't clipped back to the normal cap mid-cast.
@@ -48619,12 +48648,14 @@ function updatePlayer(dt) {
         player.vx = _mv * 28;                      // v0.26.432 — far horizontal, toward movement (was 20)
         player.vy = -19;                           // v0.26.437 — screen-height world: launch up to the long floor (no vertical pan)
         player._padFlingUntil = game.time + 60;    // v0.26.432 — ~1s gentle air-drag so the bigger fling carries far
+        player._padVxCap = Math.abs(player.vx) + 2; player._padVyCap = Math.abs(player.vy) + 2;   // v0.29.283 — authored-vector caps
       } else {
         const _vxMul = (_pad.vxMul != null) ? _pad.vxMul
                      : (game.mapData.launchPadMul != null) ? game.mapData.launchPadMul : 1.35;  // v0.26.421 — more drastic horizontal fling (was 1.2)
         const _vyMul = (_pad.vyMul != null) ? _pad.vyMul : 1.0;
         player.vx = ((_pad.vx != null) ? _pad.vx : 0) * _vxMul;
         player.vy = ((_pad.vy != null) ? _pad.vy : -22) * _vyMul;
+        player._padVxCap = Math.abs(player.vx) + 2; player._padVyCap = Math.abs(player.vy) + 2;   // v0.29.283 — authored-vector caps (see physics clamp)
       }
       player.onGround = false;
       player.coyoteTime = 0;
@@ -58976,6 +59007,7 @@ function updateMonsters(dt) {
       // hit instead of getting clipped twice in close succession by a
       // patrolling pack.
       player.invulnerable = 1000;
+      player._hitIframeAt = game.time;   // v0.29.283 — mark this invuln as HIT-GRANTED (see singularity resolve)
       // Cancel voluntary actions
       player.attacking = false;
       player.attackTimer = 0;
@@ -59940,6 +59972,28 @@ function _maybeStartBossStagger(m) {
     if (typeof addShake === 'function') addShake(6);
     if (typeof flash === 'function') flash(0.12);
   }
+}
+// v0.29.283 — SHARED BOSS SPECIAL-PRESSURE CLOCK.
+// Cooldown-gated boss specials also sit behind a per-cycle probability band,
+// so an unlucky run starves them well past their cooldown: a special with a
+// 15 s cd and a 20 % band on a 1.8 s cycle averages ~9 s of EXTRA waiting and
+// routinely stretches past 30 s. v0.29.282 fixed Mooma + King Krook inline;
+// this is the same idea factored out so every boss can share it.
+//   • _bossSpecialDue(m, now)  — true when the rolled 10-20 s window has
+//     elapsed with no special; the caller then FORCES its highest-priority
+//     ready special instead of rolling for one.
+//   • _bossSpecialFired(m, now) — stamp on EVERY special launch (organic or
+//     forced) and re-roll the next window, so a lucky fight never double-fires.
+// UNITS: game.time is a per-frame counter (~60 fps) — 600 frames = 10 s.
+function _bossSpecialWindow() { return 600 + Math.random() * 600; }   // 10-20 s
+function _bossSpecialDue(m, now) {
+  if (m._specialDue == null) { m._specialDue = _bossSpecialWindow(); m._lastSpecialAt = now; return false; }
+  if (m._lastSpecialAt == null) { m._lastSpecialAt = now; return false; }
+  return (now - m._lastSpecialAt) > m._specialDue;
+}
+function _bossSpecialFired(m, now) {
+  m._lastSpecialAt = now;
+  m._specialDue = _bossSpecialWindow();
 }
 function bossAI(m, dt, distToPlayer) {
   // v0.26.032 — Per user "make bosses have shorter delay when attacking
@@ -61515,7 +61569,7 @@ function bossAI(m, dt, distToPlayer) {
               x: bx, y: by,
               vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed,
               w: 28, h: 10, life: 120,
-              damage: m.atk * 1.6, owner: 'enemy', skill: 'voidbeam',  // v0.25.716 — was 0.95 (+68 %)
+              damage: m.atk * 1.6, owner: 'enemy', skill: 'gravbolt',  // v0.25.716 — was 0.95 (+68 %). v0.29.283 — own sprite key (was 'voidbeam', which rendered these 28×10 bullets as bare pink rects)
               color: '#ff66ff', pierce: true, noGravity: true,
               stunHit: 1800,                   // long stun on connect
               _gravBand: _gravHeavyBand(phase, 'skill'),   // v0.29.x — final-loss band clamp
@@ -62102,13 +62156,10 @@ function bossAI(m, dt, distToPlayer) {
         // could starve specials for 30 s+). The attack sprite plays
         // automatically — any non-idle patternState selects the 9-frame
         // attack set in the draw path.
-        if (m._specialDue == null) m._specialDue = 600 + Math.random() * 600;   // 10-20 s in frames
-        if (m._lastSpecialAt == null) m._lastSpecialAt = _now;
-        const _forceSpecial = (_now - m._lastSpecialAt) > m._specialDue &&
+        const _forceSpecial = _bossSpecialDue(m, _now) &&
                               (_summonReady || _shakeReady || _quakeReady);
         if (_forceSpecial) {
-          m._specialDue = 600 + Math.random() * 600;
-          m._lastSpecialAt = _now;
+          _bossSpecialFired(m, _now);
           if (_shakeReady) {
             m._lastShakeAt = _now;
             m.patternState = 'groundShake';
@@ -62498,12 +62549,9 @@ function bossAI(m, dt, distToPlayer) {
         // (earthquake when grounded / fireballRain) — so a special always
         // lands inside the window. Attack sprites play automatically (any
         // non-idle patternState selects the attack frame set).
-        if (m._specialDue == null) m._specialDue = 600 + Math.random() * 600;
-        if (m._lastSpecialAt == null) m._lastSpecialAt = _now;
-        const _forceSpecial = (_now - m._lastSpecialAt) > m._specialDue;
+        const _forceSpecial = _bossSpecialDue(m, _now);
         if (_forceSpecial) {
-          m._specialDue = 600 + Math.random() * 600;
-          m._lastSpecialAt = _now;
+          _bossSpecialFired(m, _now);
           if (_shellReady) {
             m._lastShellAt = _now;
             m.patternState = 'shellSpin';
@@ -66705,7 +66753,7 @@ function updateProjectiles(dt) {
         // Magic-type projectiles use magic defense
         const isMagic = p.skill === 'bolt' || p.skill === 'fire' || p.skill === 'ice' ||
                         p.skill === 'lightning' || p.skill === 'void' || p.skill === 'shard' ||
-                        p.skill === 'voidbeam' || p.skill === 'spore' || p.skill === 'mdark';
+                        p.skill === 'voidbeam' || p.skill === 'gravbolt' || p.skill === 'spore' || p.skill === 'mdark';   // v0.29.283 — gravbolt keeps voidbeam's magic typing
         // v0.26.330 — Per user "Gravitos damage should be much higher
         // with ignore defence occasionally". New `p._ignoreDef` flag
         // on projectile spawns bypasses the standard def subtraction
@@ -66834,6 +66882,7 @@ function updateProjectiles(dt) {
         // bump (500 → 1000 ms) so every monster-damage path now grants
         // 2× the recovery window.
         player.invulnerable = Math.max(player.invulnerable, Math.min(3000, stunBase * 2 + 800));
+        player._hitIframeAt = game.time;   // v0.29.283 — mark this invuln as HIT-GRANTED (see singularity resolve)
         player.attacking = false;
         player.attackTimer = 0;
         player.rushTimer = 0;
@@ -67343,11 +67392,25 @@ function updateProjectiles(dt) {
           if (typeof showToast === 'function') showToast('🛡 PERFECT PARRY — Singularity negated!', 'legendary');
           if (typeof addHitStop === 'function') addHitStop(180);
           if (typeof flash === 'function') flash(0.4);
-        } else if (player.invulnerable > 0) {
+        } else if (player.invulnerable >= 900 &&
+                   !(player._hitIframeAt != null && (game.time - player._hitIframeAt) < 190)) {
           // v0.26.459 - an ACTIVE i-frame (dodge / ult / shield) phases you THROUGH
           // the singularity OHKO, but at a steep cost: dropped to 1 HP + 1 MP (like
           // Soul Drain). A clutch save, not free immunity - you come out one tick
           // from death and resource-starved, so it can't be facetanked.
+          // v0.29.283 — per user "it does not seem to actually OHKO ... ensure it
+          // does OHKO". The old check was `> 0`, but HIT-GRANTED i-frames also
+          // live in player.invulnerable (1000 ms after every melee contact, up to
+          // 3000 ms after a heavy-stun projectile like Gravitos' own lasers) — in
+          // the bullet-hell the player nearly always had residual invuln at
+          // resolve, so the "clutch phase" fired on almost every collapse and the
+          // OHKO practically never killed. Two gates now: ≥900 ms REMAINING (a
+          // deliberate ult/bastion/apotheosis grant is 2000-2500 ms) AND no
+          // hit-granted invuln in the last 190 frames (~3.2 s — covers the 3000 ms
+          // max post-hit window, stamped via player._hitIframeAt at both damage
+          // sites). Getting tagged right before the collapse no longer converts
+          // the punishment into a save; the perfect parry above stays the
+          // skill-timing counter, and safe zones remain the real answer.
           player.hp = 1;
           player.mp = 1;
           player.lastHitTime = game.time;
@@ -93035,34 +93098,98 @@ function _bossMoving(m) { return _mobWalking(m); }
 // the map-fade overlay holds until this settles. Covers the boss base sprite,
 // its idle/walk/attack frame sets, phase forms (key-prefix match: gravitos ->
 // gravitos2/3/star...), and zodiac sign sets for zodiac arenas.
+// v0.29.283 — WARM-UP BAKE (per user "reduce the lag especially when facing
+// bosses such as gravitos"). Profiling the live fight showed steady-state
+// frames at ~0.2 ms but 90-110 ms SPIKES — one per animation frame the first
+// time it displays, and again at random later. Root cause: boss frame art is
+// authored at 2200×2000-3000×2200 px (26 MB decoded EACH); decode() during
+// the old warm-up helped once, but the browser EVICTS decoded bitmaps of that
+// size under memory pressure, so mid-fight draws re-decode synchronously.
+// Fix: after decode, each oversized frame is BAKED into a canvas downscaled
+// to its actual in-game draw ceiling and swapped into the frame array in
+// place. Canvases are stable rasters — nothing to evict or re-decode — and
+// per-frame GPU uploads shrink ~26 MB → ~2 MB. Baked canvases are duck-typed
+// (complete / naturalWidth / naturalHeight) so every readiness probe keeps
+// working. Bakes run chunked (6 per tick) under the map-fade overlay.
+const _WARM_BAKE_AREA = 1500000;   // only bake sources above ~1.5 MP
+function _warmBakeTargetH(key) {
+  // star forms + the punch draw with animator calib s up to ~2.8 → keep more
+  // pixels; regular forms draw ≤ ~400 px tall.
+  return (/star|punch/.test(key || '')) ? 720 : 480;
+}
+function _warmBakeImg(im, maxH) {
+  try {
+    const w = im.naturalWidth || im.width, h = im.naturalHeight || im.height;
+    if (!(w > 0 && h > 0) || w * h <= _WARM_BAKE_AREA || h <= maxH) return null;
+    const s = maxH / h;
+    const bw = Math.max(1, Math.round(w * s)), bh = Math.max(1, Math.round(h * s));
+    let cv = null;
+    if (typeof _lxBakeDownscaled === 'function') { try { cv = _lxBakeDownscaled(im, bw, bh); } catch (e) {} }
+    if (!cv) {
+      cv = document.createElement('canvas'); cv.width = bw; cv.height = bh;
+      const g = cv.getContext('2d');
+      g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+      g.drawImage(im, 0, 0, bw, bh);
+    }
+    // duck-type the readiness fields every probe in the codebase checks
+    cv.complete = true; cv.naturalWidth = bw; cv.naturalHeight = bh;
+    return cv;
+  } catch (e) { return null; }
+}
 function _warmMapArt(id) {
   const def = (typeof MAPS === 'object' && MAPS[id]) || null;
   if (!def || !def.isBossArena) return Promise.resolve(0);
-  const imgs = [];
-  const addImg = (im) => { if (im && typeof HTMLImageElement !== 'undefined' && im instanceof HTMLImageElement) imgs.push(im); };
-  const addSet = (fr) => { if (fr && fr.length) for (let i = 0; i < fr.length; i++) addImg(fr[i]); };
+  const slots = [];   // {holder, key, im, bakeKey} — holder[key] is replaced by the bake
+  const addImg = (holder, key, bakeKey) => {
+    const im = holder && holder[key];
+    if (im && typeof HTMLImageElement !== 'undefined' && im instanceof HTMLImageElement) slots.push({ holder, key, im, bakeKey });
+  };
+  const addSet = (fr, bakeKey) => { if (fr && fr.length) for (let i = 0; i < fr.length; i++) addImg(fr, i, bakeKey); };
   for (const sp of (def.spawns || [])) {
     if (!sp.boss || !sp.type) continue;
     if (sp.type.indexOf('zodiac_') === 0) {
       const sign = sp.type.slice(7);
-      addImg(ZODIAC_SPRITES[sign]);
-      addSet(ZODIAC_IDLE_FRAMES[sign]); addSet(ZODIAC_WALK_FRAMES[sign]); addSet(ZODIAC_ATTACK_FRAMES[sign]);
+      addImg(ZODIAC_SPRITES, sign, sign);
+      addSet(ZODIAC_IDLE_FRAMES[sign], sign); addSet(ZODIAC_WALK_FRAMES[sign], sign); addSet(ZODIAC_ATTACK_FRAMES[sign], sign);
       continue;
     }
     const keys = Object.keys(BOSS_SPRITES || {}).filter((k) => k === sp.type || k.indexOf(sp.type) === 0);
     for (const k of keys) {
-      addImg(BOSS_SPRITES[k]);
-      addSet(BOSS_IDLE_FRAMES[k]); addSet(BOSS_WALK_FRAMES[k]); addSet(BOSS_ATTACK_FRAMES[k]);
+      addImg(BOSS_SPRITES, k, k);
+      addSet(BOSS_IDLE_FRAMES[k], k); addSet(BOSS_WALK_FRAMES[k], k); addSet(BOSS_ATTACK_FRAMES[k], k);
     }
   }
-  const jobs = imgs.map((im) => new Promise((res) => {
+  const jobs = slots.map((slot) => new Promise((res) => {
+    const im = slot.im;
     const dec = () => { try { if (im.decode) im.decode().then(res, res); else res(); } catch (e) { res(); } };
     // complete covers BOTH loaded and already-errored images (an errored image
     // never re-fires its listeners, which would leave this promise unsettled).
     if (im.complete) dec();
     else { im.addEventListener('load', dec, { once: true }); im.addEventListener('error', res, { once: true }); }
   }));
-  return (Promise.allSettled ? Promise.allSettled(jobs) : Promise.all(jobs)).then(() => jobs.length);
+  const settle = (Promise.allSettled ? Promise.allSettled(jobs) : Promise.all(jobs));
+  // chunked bake pass — 6 frames per tick so the fade overlay stays smooth
+  return settle.then(() => new Promise((done) => {
+    let i = 0;
+    const step = () => {
+      const end = Math.min(slots.length, i + 6);
+      for (; i < end; i++) {
+        const sl = slots[i];
+        // only bake what actually decoded, and don't re-bake canvases
+        if (sl.im && sl.im.complete && (sl.im.naturalWidth > 0)) {
+          const baked = _warmBakeImg(sl.im, _warmBakeTargetH(sl.bakeKey));
+          if (baked && sl.holder[sl.key] === sl.im) sl.holder[sl.key] = baked;
+        }
+      }
+      if (i < slots.length) {
+        // hidden tabs clamp setTimeout to >=1s — nobody sees jank there, so
+        // just finish synchronously instead of crawling one chunk per second.
+        if (typeof document !== 'undefined' && document.hidden) step();
+        else setTimeout(step, 0);
+      } else done(slots.length);
+    };
+    step();
+  }));
 }
 
 // === ZODIAC BOSS SPRITES (v0.25.92) === one per zodiac sign, keyed by m.zodiacSign.
