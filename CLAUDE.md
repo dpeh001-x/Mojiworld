@@ -24,11 +24,25 @@ Therefore, for EVERY session:
    only; OneDrive sync fought git (lock contention, minutes-long status,
    corrupted fetches), so never re-create a `.git` there. All edits, commits
    and pushes happen in `C:\Users\dpeh0\Mojiworld`. After a feature/fix lands
-   and is verified: `git add -A && git commit`, then `git push origin main`
-   per the sync-first rule below. Small, frequent commits make loss
-   impossible and write races diagnosable.
+   and is verified: `git add <your paths> && git commit`, then
+   `git push origin main` per the sync-first rule below. Small, frequent
+   commits make loss impossible and write races diagnosable.
 4. **Match-count guards on every replace.** `s.count(anchor) == expected` or
    abort — a parallel session may have shifted the anchor since you read it.
+5. **Stage explicit paths, never `git add -A`** (HARD, 2026-07-28 — after a
+   half-applied-refactor incident). `-A` sweeps whatever a *parallel* session
+   has staged but not yet committed into YOUR commit. Real case: session A had
+   `git mv`'d nine data files into `data/` and was still editing the game's
+   `<script src>` tags; session B ran `git add -A && git commit`, capturing
+   A's renames while writing `mojiworld_game.html` from its own stale buffer.
+   The result was a commit where the files had moved but every reference still
+   pointed at the old paths — the game booted with zero calibration data and
+   nothing failed loudly. Stage the paths you actually touched.
+6. **Re-verify after every reload, not just once.** In the same incident the
+   first in-browser check passed and the second, minutes later, showed empty
+   tables — because the file had been rewritten underneath. If a check that
+   passed starts failing, suspect a concurrent write before your own change:
+   compare the served bytes against the file on disk (`git diff`, mtime).
 
 ## Scope + timeout guardrails (READ FIRST — v2, 2026-04-23)
 
@@ -208,20 +222,33 @@ Behaviour:
 - `preview` is force-overwritten each time — safe to force-push with lease, it carries no durable history.
 - Fast-forward `preview` from the current branch tip (or a chosen commit), not via merge commits.
 
-## File layout (reorganised 2026-07-27)
+## File layout (tightened 2026-07-28)
 
-Root holds ONLY runtime + entry-point files; loose docs live under `docs/`.
-When adding a new doc, put it in the right `docs/` bucket — do not recreate
-root clutter. Keep at root anything a raw.githack URL points at.
+Root holds ONLY entry points and files a fixed URL or external tool must find
+there. Everything else lives in a bucket. **Adding a file to root needs a
+reason from the list below** — otherwise it belongs in `data/`, `tools/`,
+`scripts/`, or `docs/`.
+
+Root files (17), and why each one has to be there:
 
 - `mojiworld_game.html` — the entire game in one file (canvas, HUD, systems, logic).
-- `CHANGELOG.html` / `MOBILE_CHANGELOG.html` — shareable changelogs (see policy above; raw.githack-linked, never move).
+- `CHANGELOG.html` / `MOBILE_CHANGELOG.html` — shareable changelogs (raw.githack-linked, never move).
 - `animator.html` / `monster_animator.html` — animator launcher + tool (raw.githack-linked, never move).
-- `anim_calib*.js`, `gear_*.js`, `mob_offsets.js`, `npc_offsets.js`, `monster_hitboxes.js`, `sfx_manifest.js`, `assets_manifest.json`, `sw.js` — runtime data loaded by the game/animator; must stay at root.
-- `sprite_maker.html`, `sprite_preview.html`, `map_editor.html`, `map_placement_tool.html`, `monster_sound_review.html`, `zodiac_vfx_review.html` — dev tools (referenced by game/changelog/scripts; stay at root).
+- `sw.js` — service worker; its cache scope is the directory it is served from, so it CANNOT move.
+- `Mojiworld.cmd` / `Mojiworld.exe` / `serve.js` / `serve.bat` — desktop launchers + the static server they spawn. The launchers `cd` to their own folder and run `node serve.js`, so these four travel together at root.
+- `render.yaml` — Render reads the blueprint from the repo root only.
+- `package.json`, `package-lock.json`, `.gitignore`, `README.md`, `LICENSE`, `CLAUDE.md` — conventional root files.
+
+Buckets:
+
+- `data/` — runtime tables loaded by the game and animator: `anim_calib.js`, `anim_calib_manifest.js`, `gear_calibration.js`, `gear_erase.js`, `mob_offsets.js`, `npc_offsets.js`, `monster_hitboxes.js`, `sfx_manifest.js`, `assets_manifest.json`. Referenced as `data/<file>` from `mojiworld_game.html`, `monster_animator.html` and `steam/package.json`'s `extraResources` filter — **update all three when adding one.**
+- `tools/` — dev tools: the six standalone pages (`sprite_maker`, `sprite_preview`, `map_editor`, `map_placement_tool`, `monster_sound_review`, `zodiac_vfx_review`) plus calibration/asset utilities and `tools/launcher/` (the csc source for `Mojiworld.exe`). A tool page that reads repo-root art needs `<base href="../">` in its `<head>` — that is how `zodiac_vfx_review` keeps its 430 `Sprites/` URLs working from a subdirectory.
+- `scripts/` — build, bake and test utilities. `_tmp_*` is gitignored scratch.
 - `docs/prompts/` — asset-generation prompt libraries (ludo.ai, Gemini, audio) + production .docx.
 - `docs/design/` — specs, lore, balance, roadmaps.
 - `docs/reports/` — audits, playtest reports, session summaries.
 - `docs/guides/` — SETUP / DEPLOY / STEAM / co-op notes.
-- `docs/_REORG_MANIFEST.txt` — the 2026-07-27 move map (old → new paths).
-- `scripts/`, `tools/` — build + calibration utilities.
+- `docs/_REORG_MANIFEST.txt` — the 2026-07-27 and 2026-07-28 move maps (old → new paths).
+- `Sprites/`, `audio/`, `backgrounds/`, `assets/` — art. Streamed from jsDelivr on the Pages deploy, so their root-relative paths are load-bearing; do not move them.
+- `steam/` — Electron desktop build, `steam/assets/` (store art), `steam/higgsfield/cinematics/` (**runtime**: the game `<video>`-plays 15 of these).
+- `mp/`, `mp-cf/`, `server/` — three independently deployable relay services, each with its own lockfile and deploy target (Render blueprint / Cloudflare Worker / container). They look redundant but are not; merging them breaks live deploys.
