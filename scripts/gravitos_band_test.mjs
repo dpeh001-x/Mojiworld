@@ -57,17 +57,19 @@ const check = (label, actual, expected) => {
 
 console.log('\n== ceilings per kind (P1 / P2 / P3) ==');
 const EXPECTED = {
-  touch:  [1717, 2828, 4000],
-  comet:  [1717, 2828, 4000],
-  ring:   [1470, 2586, 4000],
-  skill:  [1470, 2505, 3717],
-  bhCore: [1224, 2343, 3556],
+  touch:  [1717, 2828, 17750],
+  comet:  [1717, 2828, 17750],
+  ring:   [1470, 2586, 14200],
+  skill:  [1470, 2505, 17750],
+  bhCore: [1224, 2343,  3550],
 };
 for (const k of KINDS) check(k, [1, 2, 3].map(p => ceiling(k, p)), EXPECTED[k]);
 
-console.log('\n== the headline invariant ==');
+console.log('\n== the headline invariants ==');
 const hardest = Math.max(...KINDS.flatMap(k => [1, 2, 3].map(p => ceiling(k, p))));
-check('hardest landable non-OHKO hit is 4000', hardest, 4000);
+check('hardest landable non-OHKO hit is 17750', hardest, 17750);
+check('forms 1-2 untouched by the P3 regime (max 2828)',
+  Math.max(...KINDS.flatMap(k => [1, 2].map(p => ceiling(k, p)))), 2828);
 check('anchor is Gravitos-specific, not _refLoAtLv(100)', REF !== api._refLoAtLv(100), true);
 check('generic boss anchor still 2450', api._refLoAtLv(100), 2450);
 
@@ -78,21 +80,43 @@ for (const k of KINDS) {
 }
 
 console.log('\n== phase multiplier reaches the mitigated number ==');
-// A geared build sits BELOW every cap, so the multiplier — not the ceiling —
-// is what makes forms 2 and 3 hit harder for it. Regression-guard that:
+// A geared build sits BELOW the P1/P2 caps, so the multiplier — not the
+// ceiling — is what makes form 2 hit harder for it. Regression-guard that:
 // raising only the caps left this case identical across all three phases.
-const MIT = 1042;   // measured: BiS balanced warrior, Gravitos contact
-const geared = [1, 2, 3].map(p => api._gravBandClamp(MIT, api._gravHeavyBand(p, 'touch')));
-check('geared build below the cap still escalates', geared, [1042, 1406, 1823]);
-check('  ...and is never clamped', geared.every((v, i) => v < EXPECTED.touch[i]), true);
+const MIT_WARRIOR = 1042;   // measured: BiS balanced warrior, Gravitos contact
+const MIT_MAGE    = 2327;   // measured: BiS pure attack mage, same
+const touchAt = (mit, p) => api._gravBandClamp(mit, api._gravHeavyBand(p, 'touch'));
+const geared = [1, 2, 3].map(p => touchAt(MIT_WARRIOR, p));
+check('geared build escalates across all three forms', geared, [1042, 1406, 17714]);
+check('forms 1-2 stay under their caps (DEF, not the ceiling, decides)',
+  [0, 1].every(i => geared[i] < EXPECTED.touch[i]), true);
+
+console.log('\n== the two build targets that were asked for ==');
+// HP figures are the measured BiS builds these targets were solved against.
+const HP_WARRIOR = 35319, HP_MAGE = 9183;
+const hits = (hp, mit) => Math.ceil(hp / touchAt(mit, 3));
+check('balanced warrior dies to exactly 2 P3 touches', hits(HP_WARRIOR, MIT_WARRIOR), 2);
+check('pure attack mage dies to exactly 1 P3 touch',   hits(HP_MAGE,    MIT_MAGE),    1);
+// The warrior must SURVIVE the first touch, or "2-shot" is really "1-shot".
+check('balanced warrior survives one P3 touch', touchAt(MIT_WARRIOR, 3) < HP_WARRIOR, true);
+// DEF still separates builds inside P3 while mitigated × 17 is under the cap.
+const MIT_TANK = 843;   // measured: BiS pure tank warrior
+check('pure tank warrior stays under the P3 cap', touchAt(MIT_TANK, 3), 14331);
+check('  ...so armor still buys P3 survival', Math.ceil(45824 / touchAt(MIT_TANK, 3)), 4);
+
+console.log('\n== the black-hole DoT opts out of the P3 spike ==');
+// It ticks repeatedly; riding ×17 would make it an unavoidable instant kill.
+check('bhCore P3 keeps the old ramp, not ×17', api._gravHeavyBand(3, 'bhCore').mul, 1.75);
+check('touch P3 does ride ×17', api._gravHeavyBand(3, 'touch').mul, 17.0);
+check('bhCore P3 tick stays survivable for the mage', touchAt(MIT_MAGE, 3) > ceiling('bhCore', 3) * 4, true);
 
 console.log('\n== floors stay at 0 so DEF always shows ==');
 for (const k of KINDS) check(`${k} floor is 0`, api._gravHeavyBand(2, k).floor, 0);
-check('a tiny mitigated hit is not floored up', api._gravBandClamp(7, api._gravHeavyBand(3, 'touch')), Math.floor(7 * 1.75));
+check('a tiny mitigated hit is not floored up', api._gravBandClamp(7, api._gravHeavyBand(3, 'touch')), Math.floor(7 * 17.0));
 
 console.log('\n== phase argument is clamped, not trusted ==');
 check('phase 0 falls back to P1', ceiling('touch', 0), 1717);
-check('phase 9 clamps to P3', ceiling('touch', 9), 4000);
+check('phase 9 clamps to P3', ceiling('touch', 9), 17750);
 check('unknown kind falls back to skill', ceiling('nonsense', 3), EXPECTED.skill[2]);
 
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'} — ${pass}/${pass + fail} checks\n`);
