@@ -148,6 +148,35 @@
   <b>Heads-up.</b> An earlier implementation of these phases targeted <code>v0.5.1</code> and was preserved locally at tag <code>phase-1-2-3-on-v0.5.1</code>. This is the rebuild against the current <code>v0.9.8</code> codebase, which had moved substantially (new bosses like Gravitos, minimap/taxi, chibi character rewrite).
 </div>
 
+<h2>v0.29.305 <span class="tag"><span class="pill bug">bug</span><span class="pill polish">polish</span> Milestone windows: a 16.7&times; duration bug, a co-op gap, and a balance retune</span></h2>
+<p>Per user &mdash; <em>&ldquo;ensure that there are no glitches with the above and don&rsquo;t skew the balance too greatly&rdquo;.</em> Three problems found in the v0.29.300 milestone abilities, one of them serious.</p>
+<h3>🐛 Every window ran 16.7&times; too long</h3>
+<p><code>game.time</code> is a <b>frame counter</b> incrementing on a fixed 60&#8239;Hz step &mdash; not milliseconds. The windows compared it against raw millisecond values, so every duration was interpreted as frames:</p>
+<table>
+<thead><tr><th>Window</th><th>Intended</th><th>Actually ran</th></tr></thead>
+<tbody>
+<tr><td>Basic attack (4,000)</td><td>4 s</td><td><b>66.7 s</b></td></tr>
+<tr><td>Ultimate (10,000)</td><td>10 s</td><td><b>166 s</b></td></tr>
+<tr><td>Mark (8,000)</td><td>8 s</td><td><b>133 s</b></td></tr>
+</tbody>
+</table>
+<p>Effects balanced around short bursts were effectively permanent &mdash; the single largest balance skew the feature could have shipped. Durations stay authored in milliseconds (readable, and consistent with <code>cdMs</code>/<code>buffMs</code> elsewhere) and are converted at the point of use. The original runtime suite missed it because it set deadlines directly instead of exercising the conversion; there are now three regression checks that advance the clock and assert a window is alive at 479 frames and gone at 481.</p>
+<h3>🤝 Co-op guests got none of it</h3>
+<p>The host-forward branch returns before the milestone hook, so a guest who ranked an ultimate to 10 received no ability at all &mdash; the same &ldquo;guests feel weak&rdquo; class of bug the v0.27.0 forward-point move fixed for the multiplier stack. Guests now resolve the authority-safe half locally: <b>lifesteal</b> (purely their own HP) and <b>chain</b> (extra packets the host still validates). <b>Execute</b> stays host-only on purpose &mdash; it rewrites damage from a possibly-stale local HP read, which is exactly how a desync starts. <b>Mark</b> already applied upstream.</p>
+<h3>⚖ Balance retune &mdash; six outliers at up to 2&times;</h3>
+<p>A new model (<code>scripts/skill_milestone_balance.mjs</code>) weights each window by how often it can actually be up: <code>uptime = window ÷ cooldown</code>. That exposed the real problem &mdash; low-cooldown spammable skills have <b>100% uptime</b>, so a <code>chain n:2 @50%</code> was a permanent damage doubling:</p>
+<table>
+<thead><tr><th>Skill</th><th>Before</th><th>After</th></tr></thead>
+<tbody>
+<tr><td>Shuriken · Magic Bolt · Multi Shot</td><td>×2.00</td><td>×1.32&ndash;1.35</td></tr>
+<tr><td>Arrow Shot</td><td>×1.90</td><td>×1.28</td></tr>
+<tr><td>Kage Rush</td><td>×1.73</td><td>×1.37</td></tr>
+<tr><td>Elemental Arrows</td><td>×1.62</td><td>×1.37</td></tr>
+</tbody>
+</table>
+<p>The ultimates were never the problem &mdash; their long cooldowns already held them to ×1.01&ndash;1.24. The curve now runs a <b>median of ×1.10</b>, topping out at ×1.44 on Hundred-Hand Shadow Dance, which is a 20%-uptime burst payoff rather than sustained throughput. The model is a permanent gate that fails the build if any milestone exceeds ×1.60.</p>
+<p>Also verified: the window is transient and never written to the save, and every timing path now routes through the frame conversion. <b>21/21</b> runtime checks, 18/18 structural, 32/32 smoke.</p>
+
 <h2>v0.29.304 <span class="tag"><span class="pill feat">feat</span><span class="pill bug">bug</span> Hunts, not errands &mdash; kill quests now run 200&ndash;5,000 kills and pay like campaigns</span></h2>
 <p>Per user &mdash; <em>&ldquo;quests should involve at least 200 kills all the way to 5000 kills. and give great rewards accordingly&rdquo;.</em> Authored kill counts were 18&ndash;150, a couple of minutes of work at current EXP rates &mdash; far too small to be the spine of the mid/late game the last few passes have been building toward.</p>
 <ul>

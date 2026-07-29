@@ -165,6 +165,39 @@ try {
     _msOpenWindow('doombringer_ult');
     out.rank5 = { ms: player._msWin && player._msWin.ms,
                   frac: player._msWin && player._msWin.execute && player._msWin.execute.frac };
+
+    // ---- UNIT CORRECTNESS (v0.29.301 regression) ----
+    // game.time is a 60 Hz FRAME counter, not milliseconds. The first cut
+    // compared it against raw ms, so every window ran 16.67x too long.
+    // Open an 8 s window and check the deadline is ~480 frames, not 8000.
+    reset();
+    player.skillRanks = { doombringer_ult: 10 };
+    player._msWin = null;
+    const t0 = game.time || 0;
+    _msOpenWindow('doombringer_ult');
+    out.units = { declaredMs: player._msWin.ms, frames: player._msWin.until - t0,
+                  expectedFrames: 8000 * 60 / 1000 };
+
+    // and it must actually expire once that many frames elapse
+    reset();
+    player.skillRanks = { doombringer_ult: 10 };
+    player._msWin = null;
+    _msOpenWindow('doombringer_ult');
+    const savedTime = game.time;
+    game.time = savedTime + 479;            // just inside 8 s
+    const aliveAt479 = !!_msWin();
+    game.time = savedTime + 481;            // just past 8 s
+    const aliveAt481 = !!_msWin();
+    game.time = savedTime;
+    out.expiry = { aliveAt479, aliveAt481 };
+
+    // mark deadline uses the same conversion
+    reset();
+    const um = mkMob(1e9, 1e9); game.monsters.push(um);
+    const mt0 = game.time || 0;
+    openWin({ mark: { mul: 1.5, ms: 6000 } });
+    hitMonster(um, 100, false, 'aoe');
+    out.markUnits = { frames: um._msMarkUntil - mt0, expectedFrames: 6000 * 60 / 1000 };
     return out;
   });
 
@@ -196,6 +229,13 @@ try {
   ok('a rank-10 cast opens its real window', r.realOpen.id === 'doombringer_ult' && r.realOpen.hasExecute, r.realOpen);
   ok('rank 4 opens no window (below the rank-5 gate)', r.belowGate.win === null, r.belowGate);
   ok('rank 5 opens the weaker tier', r.rank5.ms === 4500 && r.rank5.frac === 0.11, r.rank5);
+  // v0.29.301 — the unit bug that made every window 16.67x too long.
+  ok('window deadline is in FRAMES, not raw ms (60 Hz conversion)',
+     Math.abs(r.units.frames - r.units.expectedFrames) < 1, r.units);
+  ok('an 8 s window is still up at 479 frames and gone at 481',
+     r.expiry.aliveAt479 && !r.expiry.aliveAt481, r.expiry);
+  ok('mark deadline uses the same frame conversion',
+     Math.abs(r.markUnits.frames - r.markUnits.expectedFrames) < 1, r.markUnits);
   ok('no uncaught page errors during the whole run', errs.length === 0, errs.slice(0, 3));
 } finally { await b.close(); }
 
