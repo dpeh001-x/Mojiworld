@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.323';
+const GAME_VERSION = 'v0.29.324';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -9807,7 +9807,7 @@ const VFX_ANIM_FRAMES = Object.create(null);
 const _VFX_FRAME_MS = 70;
 const _VFX_ANIM_BASE = {
   gravityWell: 'gravity_well', frostBeam: 'frost_beam', poisonCloud: 'poison_cloud',
-  shockRing: 'shock_ring', lightningPillar: 'lightning_pillar', quakeRing: 'quake_ring', auroraField: 'aurora_field', voidTear: 'void_tear', drainPillar: 'sovereign_drain_pillar',
+  shockRing: 'shock_ring', lightningPillar: 'lightning_pillar', quakeRing: 'quake_ring', auroraField: 'aurora_field', voidTear: 'void_tear', drainPillar: 'sovereign_drain_pillar', gloopPuddle: 'gloop_puddle', beamCore: 'beam_core',
   dashStreak: 'dash_streak', lavaDrop: 'lava_drop', lavaPool: 'lava_pool',
 };
 function _lxVfxFrame(camelKey) {
@@ -18728,13 +18728,7 @@ function _generateBestiaryQuests() {
     // grants a Dawn Fragment; the auto b_aetherion didn't). Also skip the
     // trial-only Mirror Self (no free-spawn path → its bestiary quest is
     // uncompletable and class-agnostic).
-    if (monId === 'mirrorSelf') continue;
-    // v0.29.313 — young_bloodthirsty_vermillion has NO spawn entry in any map.
-    // v0.25.991 replaced the two in Distorted Vigil with a single, stronger
-    // `vigil_vermillion`, and nothing else ever spawns it. A codex hunt for it
-    // could never be completed, so it is excluded exactly like mirrorSelf
-    // rather than left to generate a dead quest against a dead mob.
-    if (monId === 'young_bloodthirsty_vermillion') continue;
+    if (LX_CODEX_UNSPAWNABLE.has(monId)) continue;
     // Resolve display level — natural-level override, else m.level, else 1
     const isBossQ = !!mt.boss;
     // v0.26.x — Per user: boss-line quests must only appear within ~10 levels
@@ -18860,6 +18854,21 @@ function _generateBestiaryQuests() {
     }
   }
 }
+// v0.29.324 — MOBS THE CODEX MUST NEVER WRITE A HUNT FOR. Each is present in
+// monsterTypes (and some carry a MONSTER_BESTIARY entry and a natural level)
+// but has NO spawn entry in any map, so a "kill N of these" quest against one
+// can never be completed by anybody. Previously these were two loose id checks
+// inside the generator; that was fragile, and v0.29.323 proved it — retargeting
+// the class questline off `stump` removed the duplicate-suppression that had
+// been hiding it, and the codex immediately generated two dead quests.
+//
+// Keep this list in step with the maps: if a mob is given a spawn entry, take
+// it out of here and the codex will pick it up on the next load.
+const LX_CODEX_UNSPAWNABLE = new Set([
+  'mirrorSelf',                     // trial-only; no free-spawn path, and class-agnostic
+  'young_bloodthirsty_vermillion',  // v0.25.991 replaced the Distorted Vigil pair with one vigil_vermillion
+  'stump',                          // Stumpy: bestiary entry + natural Lv 32, but spawns in no map
+]);
 // v0.29.313 — the tier at which the codex switches from "one entry unless a
 // hand-written quest already covers it" to "three entries, always".
 const LX_CODEX_HIGH_LV = 50;
@@ -53953,12 +53962,47 @@ function drawSmoothFx() {
         if (_bgm.size >= 16) _bgm.delete(_bgm.keys().next().value);
         _bgm.set(_bgKey, g1);
       }
-      ctx.globalAlpha = alpha * 0.4;
-      ctx.fillStyle = g1;
-      ctx.fillRect(0, -w, len, w * 2);
-      // Hot core
+      // v0.29.319 — authored beam art (Sprites/vfx/beam_core.webp), TINTED per
+      // caller. The art is deliberately neutral white because this one effect
+      // is fired in several colours and layered at three widths (the marksman
+      // railshot stacks 8/16/24 px), so the colour has to keep coming from
+      // code — a pre-coloured sprite would break every caller but one.
+      // Tinting recipe: draw white art -> 'multiply' the colour over it (keeps
+      // the luminance structure, so the hot core stays hot) -> 'destination-in'
+      // the art again to restore its original alpha. Cached by colour, same
+      // 16-entry LRU discipline as the gradient cache above.
+      const _bcImg = _lxVfxFrame('beamCore');
+      let _bcTint = null;
+      if (_lxVfxReady(_bcImg)) {
+        const _tm = window._beamTintCache || (window._beamTintCache = new Map());
+        _bcTint = _tm.get(fx.color);
+        if (!_bcTint) {
+          const _cv = document.createElement('canvas');
+          _cv.width = _bcImg.naturalWidth || 1024; _cv.height = _bcImg.naturalHeight || 256;
+          const _c2 = _cv.getContext('2d');
+          _c2.drawImage(_bcImg, 0, 0);
+          _c2.globalCompositeOperation = 'multiply';
+          _c2.fillStyle = fx.color;
+          _c2.fillRect(0, 0, _cv.width, _cv.height);
+          _c2.globalCompositeOperation = 'destination-in';
+          _c2.drawImage(_bcImg, 0, 0);
+          _bcTint = _cv;
+          if (_tm.size >= 16) _tm.delete(_tm.keys().next().value);
+          _tm.set(fx.color, _bcTint);
+        }
+      }
+      if (_bcTint) {
+        ctx.globalAlpha = alpha * 0.95;
+        ctx.drawImage(_bcTint, 0, -w, len, w * 2);
+      } else {
+        ctx.globalAlpha = alpha * 0.4;
+        ctx.fillStyle = g1;
+        ctx.fillRect(0, -w, len, w * 2);
+      }
+      // Hot core — kept in both paths; it is what sells the beam as hot at the
+      // thin widths, and additively it just brightens the sprite's own core.
       ctx.fillStyle = '#ffffff';
-      ctx.globalAlpha = alpha * 0.85;
+      ctx.globalAlpha = alpha * (_bcTint ? 0.45 : 0.85);
       ctx.fillRect(0, -w * 0.25, len, w * 0.5);
       ctx.restore();
       ctx.globalCompositeOperation = 'source-over';
