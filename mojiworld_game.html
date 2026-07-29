@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.312';
+const GAME_VERSION = 'v0.29.313';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -45023,6 +45023,19 @@ function _endExpedition(reason) {
 // Called from spawnMonster via a hook in v0.26.264. Conservative scale
 // (no big spikes); the doors + boon-pickup variety carry the difficulty
 // arc, not raw stat inflation.
+// v0.29.313 — SCALED-CONTENT LEVEL CAP (per user: "for Train Rush quest and
+// Tower expedition, scale the monsters level to the player's level up to a
+// maximum of level 85").
+// Both modes re-stat their monsters against the LIVE player level, and neither
+// had a ceiling — a Lv 200 ascended player pulled Lv 200 mechs and tower mobs.
+// The cap is shared so the two modes can never drift apart, and is set at 85:
+// five above the highest field monster (Lv 80), so the scaled modes stay the
+// hardest content in the game without scaling into the level-200 stratosphere.
+const LX_SCALED_LEVEL_CAP = 85;
+// The level a scaled monster should be built against, for any mode.
+function _lxScaledMobLevel(playerLevel) {
+  return Math.max(1, Math.min(LX_SCALED_LEVEL_CAP, Math.floor(playerLevel || 1)));
+}
 function _expeditionScaleMob(m, playerLevel) {
   if (!game.expedition || !game.expedition.active) return m;
   // v0.26.418 — MAP-GATE. The active flag alone was leaking: if any expedition
@@ -45052,7 +45065,10 @@ function _expeditionScaleMob(m, playerLevel) {
   //   • EXP scales mildly (×√scale) to avoid trivialising the level
   //     progression at high player levels.
   const _baseLv = (m.level | 0) || 20;
-  const _scale  = Math.max(1, Math.min(12, (playerLevel || 1) / _baseLv));
+  // v0.29.313 — scale against the CAPPED level, not the raw player level, so
+  // HP/ATK/DEF/EXP and the stamped level all agree on the same ceiling.
+  const _capLv  = _lxScaledMobLevel(playerLevel);
+  const _scale  = Math.max(1, Math.min(12, _capLv / _baseLv));
   m.maxHp     = Math.floor((m.maxHp || 1) * _scale);
   m.currentHp = m.maxHp;
   m.atk       = Math.floor((m.atk || 1) * _scale);
@@ -45060,7 +45076,7 @@ function _expeditionScaleMob(m, playerLevel) {
   // EXP scaling uses sqrt so a Lv 100 player doesn't get 5× the EXP
   // they'd get at Lv 20 — caps the run-as-EXP-farm potential.
   m.exp       = Math.floor((m.exp || 0) * Math.sqrt(_scale));
-  m.level     = Math.max(_baseLv, Math.floor(playerLevel || _baseLv));
+  m.level     = Math.max(_baseLv, _capLv);
   return m;
 }
 // v0.26.264 — Floor-clear detector. Called after every monster kill
@@ -48510,7 +48526,11 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // to effort. Name is prefixed with "Express " for the player feedback.
   if (!isBoss && !isMiniBoss && game.mapData && game.mapData.expressScaling) {
     const _m = game.monsters[game.monsters.length - 1];
-    const _pLv = (typeof player !== 'undefined' && player) ? Math.max(1, player.level || 1) : 25;
+    // v0.29.313 — capped at LX_SCALED_LEVEL_CAP (85), same ceiling the Tower
+    // Expedition uses, so the two scaled modes cannot drift apart.
+    const _pLv = (typeof _lxScaledMobLevel === 'function')
+      ? _lxScaledMobLevel((typeof player !== 'undefined' && player) ? player.level : 25)
+      : 25;
     // Baseline curves for "an average mob at level L":
     //   hp  ≈ 200 + L × 20   (Lv 25 → 700, Lv 50 → 1200, Lv 75 → 1700)
     //   atk ≈ 15  + L × 1.2  (Lv 25 → 45,  Lv 50 → 75,   Lv 75 → 105)
@@ -48527,6 +48547,12 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     _m.atk       = Math.floor(_baselineAtk * 2);
     _m.exp       = Math.floor(_baselineExp);
     _m.mojicoins     = Math.floor(_baselineMes);
+    // v0.29.313 — stamp the LEVEL too. This block re-statted HP/ATK/EXP to the
+    // player's level but left m.level at the authored value (the ticket mechs
+    // are Lv 31/36), so a high-level player fought a level-31 nameplate, and
+    // the level-gap EXP penalty was applied against that stale number even
+    // though the mob was built at their level. Now the whole monster agrees.
+    _m.level     = _pLv;
     _m.name      = 'Express ' + (_m.name || 'Ticket Mech');
     // Visual cue — slightly bigger silhouette so the player reads
     // "elite version" at a glance, even without seeing the HP bar.
@@ -104344,17 +104370,39 @@ function drawHazards() {
       const t = game.time * 0.12;
       const fade = Math.min(1, h.life / 500);
       const ccy = h.y + h.h / 2;
-      // Event horizon core
-      ctx.fillStyle = `rgba(0,0,0,${0.92 * fade})`;
-      ctx.beginPath(); ctx.arc(sx, ccy, 36, 0, Math.PI * 2); ctx.fill();
-      // Glowing rim
-      ctx.strokeStyle = `rgba(200,100,255,${0.9 * fade})`;
-      ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(sx, ccy, 38, 0, Math.PI * 2); ctx.stroke();
-      // Accretion disc
+      // v0.29.313 — TELEGRAPH NOW MATCHES THE HITBOX. The core was drawn at a
+      // hardcoded r=36 while updateHazards damages at `h._bhCoreRadius || 50`
+      // (and Awakened spawns raise that further), so the visible event horizon
+      // UNDER-drew the kill zone — the player could be inside the damage
+      // radius while looking clear of the sprite. Both now derive from the
+      // same `_coreR`.
+      // Also: `gravitos_blackhole` art already existed in LX_FX but was only
+      // ever used as a 60-frame spawn burst — the 40 s persistent hazard fell
+      // back to flat arcs. It is now blitted for the whole lifetime, slowly
+      // counter-rotating, with the arcs kept as the pre-decode fallback.
+      const _coreR = h._bhCoreRadius || 50;
+      const _bhImg = (typeof LX_FX !== 'undefined') ? LX_FX['gravitos_blackhole'] : null;
+      if (_lxFxReady(_bhImg)) {
+        const _d = _coreR * 2.7;   // art has transparent margin around the disc
+        ctx.save();
+        ctx.globalAlpha = fade;
+        ctx.translate(sx, ccy);
+        ctx.rotate(t * 0.18);
+        ctx.drawImage(_bhImg, -_d / 2, -_d / 2, _d, _d);
+        ctx.restore();
+      } else {
+        // Event horizon core
+        ctx.fillStyle = `rgba(0,0,0,${0.92 * fade})`;
+        ctx.beginPath(); ctx.arc(sx, ccy, _coreR, 0, Math.PI * 2); ctx.fill();
+        // Glowing rim
+        ctx.strokeStyle = `rgba(200,100,255,${0.9 * fade})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(sx, ccy, _coreR + 2, 0, Math.PI * 2); ctx.stroke();
+      }
+      // Accretion disc — scales with the core so an Awakened blackhole reads bigger
       for (let i = 0; i < 3; i++) {
         const a = t + i * Math.PI / 4;
-        const r = 55 + Math.sin(t * 2 + i) * 6;
+        const r = _coreR * 1.1 + Math.sin(t * 2 + i) * 6;
         ctx.strokeStyle = `rgba(${180 + i * 8},${60 + i * 10},${255},${0.6 * fade})`;
         ctx.lineWidth = 2;
         ctx.beginPath();
