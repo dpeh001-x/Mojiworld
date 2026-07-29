@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.339';
+const GAME_VERSION = 'v0.29.340';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -58871,7 +58871,7 @@ function performMelee(range, dmgPct, opts = {}) {
       const dmg = Math.floor((getAtk() * dmgPct + Math.random() * 6) * (crit ? getCritDmg() : 1));
       hitMonster(m, dmg, crit, opts.basic ? 'melee' : 'meleeSkill');   // only the basic Z attack passes basic:true; melee SKILLS tag 'meleeSkill' so job-talent skillDmg applies + basicLifesteal doesn't over-heal off skills
       applyEnhOnHit(m, dmg, enh);
-      if (opts.kb) m.vx += player.facing * opts.kb * 1.35; // global knockback boost
+      if (opts.kb) m.vx += player.facing * opts.kb * 1.35 * _mobKbMul(m); // global knockback boost (× heavy-mob resist)
       if (opts.vy) m.vy += opts.vy;
       if (opts.stun) m.stunTimer = Math.max(m.stunTimer || 0, opts.stun);
       // Bright modern impact flash at each hit
@@ -58932,7 +58932,7 @@ function performAround(radius, dmgPct, opts = {}) {
       applyEnhOnHit(m, dmg, enh);
       spawnSmoothImpact(m.x + m.w/2, m.y + m.h/2, opts.color || '#ffffff');
       if (opts.kb) {
-        const kb = opts.kb * 1.35; // global knockback boost
+        const kb = opts.kb * 1.35 * _mobKbMul(m); // global knockback boost (× heavy-mob resist)
         const ang = Math.atan2(dy, dx);
         m.vx += Math.cos(ang) * kb;
         m.vy -= Math.abs(Math.sin(ang) * kb * 0.5);
@@ -66847,7 +66847,7 @@ function hitMonster(m, dmg, isCrit, skill) {
     if (!m.isBoss && !m.isMiniBoss) {
       const _kbFrac = Math.min(1, finalDmg / Math.max(1, m.maxHp || finalDmg));
       const _kbDir = (((m.x + m.w / 2) >= (player.x + player.w / 2)) ? 1 : -1);
-      m.vx = (m.vx || 0) + _kbDir * (1.2 + Math.min(2.2, _kbFrac * 4) + (isCrit ? 0.6 : 0));
+      m.vx = (m.vx || 0) + _kbDir * (1.2 + Math.min(2.2, _kbFrac * 4) + (isCrit ? 0.6 : 0)) * _mobKbMul(m);
       if (isCrit && !m.flies && m.currentHp > 0) m.vy = Math.min(m.vy || 0, -Math.min(3.5, 1.5 + _kbFrac * 4));
     }
     // Impact flash — thin on basics, thicker on crits
@@ -100645,6 +100645,22 @@ function zodiacBossAI(m, dt, distToPlayer) {
   // Hover / drift behavior by default — specific signs override in their handler
   const fn = ZODIAC_AI[z.id] || _zodiacAiGeneric;
   fn(m, dt, distToPlayer, phase, z);
+  // v0.29.340 — SIGNATURE GAIT. Per user: each House should carry a unique
+  // movement trait on top of its attacks ("Ariel weaving in and out fast
+  // towards and away the player"). Attacks were already per-sign, but every
+  // boss MOVED identically — a slow drift plus the shared lunge below — so
+  // twelve very different creatures all floated at you the same way.
+  // This layer owns locomotion only; it never spawns damage, so it composes
+  // with whatever the sign's attack handler is doing. Signs whose identity
+  // contradicts the shared "dash at the player" lunge set noLunge and drive
+  // their own approach instead.
+  // Horizontal-first by design: zodiac bosses are gravity-bound (jump:0), and
+  // the burrow bug at the top of this function is a standing reminder that
+  // stranding _noGravity is a near-softlock. Vertical moves here are ordinary
+  // hops — gravity always brings them back down.
+  _zodiacGaitTick(m, dt, distToPlayer, phase, z);
+  const _zGait = _ZODIAC_GAIT[z.id];
+  if (!(_zGait && _zGait.noLunge)) {
   // v0.29.74 — SHARED REPOSITION LUNGE. All 12 signs drift at ~0.8 speed, so
   // fights read as a slow float-at-the-player. Every few seconds (tighter in
   // later phases), when the boss is between patterns and the player has range,
@@ -100686,7 +100702,189 @@ function zodiacBossAI(m, dt, distToPlayer) {
       if (typeof addShake === 'function') addShake(2);
     }
   }
+  }   // v0.29.340 — end of the !noLunge gate (see SIGNATURE GAIT above)
   // Contact damage is handled by updateMonsters physics loop
+}
+
+// =========================================================================
+// ZODIAC SIGNATURE GAIT (v0.29.340) — per-sign locomotion
+// =========================================================================
+// One movement identity per House. These set velocity only; damage stays in
+// each sign's own attack handler, so the two layers never fight. All of them
+// no-op while a pattern is mid-cast or a desperation warning is up, so a
+// telegraph is never yanked out from under the player.
+//   noLunge: this sign drives its own approach and must NOT also receive the
+//            shared dash-at-the-player lunge (it would contradict the gait).
+const _ZODIAC_GAIT = {
+  // Ariel — WEAVE. The user's brief: in and out, fast. Rushes to knife range,
+  // recoils, rushes again. Never sits still, never commits.
+  aries: { noLunge: true, fn: (m, dt, dist, phase, z, dir) => {
+    m._gPhase = (m._gPhase || 0) + dt * (phase >= 3 ? 0.0075 : phase === 2 ? 0.0062 : 0.005);
+    const io = Math.sin(m._gPhase);            // +1 = charge in, −1 = peel out
+    m.vx = dir * io * (4.6 + phase * 0.8);
+    if (io > 0.75 && (game.time & 3) === 0) _gaitPuff(m, z, -dir);
+  } },
+  // Taur — UNSTOPPABLE. Never retreats. Grinds forward and gains momentum the
+  // longer the player keeps away, so backing off only makes the bull faster.
+  taurus: { noLunge: true, fn: (m, dt, dist, phase, z, dir) => {
+    m._gMomentum = Math.min(1, (m._gMomentum || 0) + dt * (dist > 220 ? 0.00055 : -0.0012));
+    m.vx = dir * (1.5 + m._gMomentum * (3.2 + phase * 0.6));
+    if (m._gMomentum > 0.6 && (game.time & 7) === 0) _gaitPuff(m, z, -dir);
+  } },
+  // Gem & Mini — SIDE-SWAP. Blinks across to the player's other flank, so the
+  // side you are guarding is never the side it arrives on.
+  gemini: { noLunge: false, fn: (m, dt, dist, phase, z, dir) => {
+    // Drift between blinks — a blink-only gait left the twins standing
+    // perfectly still for seconds at a time (caught by the gait harness).
+    m.vx += dir * 0.09;
+    if (Math.abs(m.vx) > 2.6) m.vx = Math.sign(m.vx) * 2.6;
+    m._gCd = (m._gCd == null ? 2600 : m._gCd) - dt;
+    if (m._gCd <= 0 && dist < 620) {
+      m._gCd = (phase >= 3 ? 2100 : 3000) + Math.random() * 1200;
+      const px = player.x + player.w / 2;
+      const off = 150 + Math.random() * 90;
+      _gaitBlink(m, z, px + dir * off - m.w / 2);
+    }
+  } },
+  // Cancer — SIDLE. Crabs sideways, holding a ring instead of closing head-on.
+  cancer: { noLunge: false, fn: (m, dt, dist, phase, z, dir) => {
+    const want = 210;
+    m._gStrafe = m._gStrafe || (Math.random() < 0.5 ? -1 : 1);
+    if (((game.time | 0) % 150) === 0) m._gStrafe *= -1;
+    m.vx = dir * (dist > want + 60 ? 1.5 : dist < want - 60 ? -1.4 : 0) + m._gStrafe * (1.6 + phase * 0.3);
+  } },
+  // Regulus — POUNCE & PRIDE. A long leap in, then a deliberate stand: the
+  // punish window is the pride, not the pounce.
+  leo: { noLunge: true, fn: (m, dt, dist, phase, z, dir) => {
+    m._gCd = (m._gCd == null ? 1800 : m._gCd) - dt;
+    if (m._gStand > 0) { m._gStand -= dt; m.vx *= 0.7; return; }
+    if (m._gCd <= 0 && dist > 120 && m.onGround) {
+      m._gCd = (phase >= 3 ? 2400 : 3300) + Math.random() * 900;
+      m.vx = dir * (6.2 + phase * 0.7);
+      m.vy = -9.5;
+      m._gStand = 700;
+      if (typeof addShake === 'function') addShake(3);
+      _gaitPuff(m, z, -dir, 8);
+    } else { m.vx += dir * 0.05; if (Math.abs(m.vx) > 2.4) m.vx = Math.sign(m.vx) * 2.4; }
+  } },
+  // Virga — ALOFT. Periodic levitation hops that lift her out of melee reach;
+  // gravity always returns her, so no _noGravity stranding risk.
+  virgo: { noLunge: false, fn: (m, dt, dist, phase, z, dir) => {
+    m._gCd = (m._gCd == null ? 2200 : m._gCd) - dt;
+    if (m._gCd <= 0 && m.onGround) {
+      m._gCd = (phase >= 3 ? 2300 : 3200) + Math.random() * 1000;
+      m.vy = -11 - phase * 0.6;
+      m.vx = dir * 1.2;
+      _gaitPuff(m, z, 0, 10);
+    }
+  } },
+  // Libra — MIRROR. Holds perfect symmetry: close in and it withdraws by the
+  // same amount, back off and it advances. The scales always re-balance.
+  libra: { noLunge: true, fn: (m, dt, dist, phase, z, dir) => {
+    if (m._gAnchor == null) m._gAnchor = dist;
+    const err = dist - m._gAnchor;
+    m.vx = dir * Math.max(-3.6, Math.min(3.6, err * 0.035));
+    if ((game.time | 0) % 240 === 0) m._gAnchor = 170 + Math.random() * 120;
+  } },
+  // Scorpio — SKITTER. Short jittering darts rather than a smooth glide; you
+  // can never quite read where the stinger will be.
+  scorpio: { noLunge: false, fn: (m, dt, dist, phase, z, dir) => {
+    m._gCd = (m._gCd == null ? 500 : m._gCd) - dt;
+    if (m._gCd <= 0) {
+      m._gCd = 260 + Math.random() * 320;
+      const lateral = Math.random() < 0.4 ? (Math.random() < 0.5 ? -1 : 1) : dir;
+      m.vx = lateral * (3.4 + phase * 0.6) * (0.6 + Math.random() * 0.7);
+    }
+  } },
+  // Sagitta — KITE. Actively backpedals to keep the shot open; walking her
+  // down is the fight. The shared lunge is off — she never charges.
+  sagittarius: { noLunge: true, fn: (m, dt, dist, phase, z, dir) => {
+    // Proportional, not banded: the original had a 170px dead zone that she
+    // could come to rest inside and then never leave (span 0 in the harness).
+    // She now always eases toward her preferred range and strafes inside it,
+    // so she keeps repositioning instead of freezing.
+    const want = 330;
+    const err = dist - want;
+    if (Math.abs(err) > 40) {
+      m.vx = Math.max(-3.5, Math.min(3.5, (err > 0 ? 1 : -1) * dir * (1.6 + phase * 0.5) * Math.min(1, Math.abs(err) / 120)));
+    } else {
+      m._gStrafe = m._gStrafe || (Math.random() < 0.5 ? -1 : 1);
+      if (((game.time | 0) % 90) === 0) m._gStrafe *= -1;
+      m.vx = m._gStrafe * (1.1 + phase * 0.2);
+    }
+  } },
+  // Caprikor — ANCHOR. A mountain: slow, deliberate, and very hard to shove.
+  // The knockback resist is what sells the weight.
+  capricorn: { noLunge: true, fn: (m, dt, dist, phase, z, dir) => {
+    // Dead zone: once he is on top of the player he plants rather than
+    // reversing every frame — a mountain does not vibrate.
+    m.vx = (dist < 70) ? m.vx * 0.6 : dir * (0.9 + phase * 0.25);
+    if (Math.abs(m.vx) > 2.2) m.vx = Math.sign(m.vx) * 2.2;
+    m._kbResist = 0.82;                       // consumed by the knockback path
+    if ((game.time | 0) % 26 === 0 && m.onGround) _gaitPuff(m, z, 0, 2);
+  } },
+  // Aqua — TIDE. A long ebb-and-flow swell instead of a straight approach.
+  aquarius: { noLunge: false, fn: (m, dt, dist, phase, z, dir) => {
+    m._gPhase = (m._gPhase || 0) + dt * 0.0022;
+    const swell = Math.sin(m._gPhase);
+    m.vx = dir * (1.1 + swell * (1.9 + phase * 0.4));
+  } },
+  // Pisces — SLIPSTREAM. Does not stop at the player: it flows straight past
+  // and reforms on the far side, so melee keeps ending up behind it.
+  pisces: { noLunge: true, fn: (m, dt, dist, phase, z, dir) => {
+    if (m._gPassMs > 0) { m._gPassMs -= dt; m.vx = m._gPassVx; if ((game.time & 3) === 0) _gaitPuff(m, z, -Math.sign(m._gPassVx)); return; }
+    m._gCd = (m._gCd == null ? 2000 : m._gCd) - dt;
+    if (m._gCd <= 0 && dist < 520) {
+      m._gCd = (phase >= 3 ? 2000 : 2800) + Math.random() * 900;
+      m._gPassMs = 520 + phase * 40;
+      m._gPassVx = dir * (5.4 + phase * 0.8);
+    } else { m.vx += dir * 0.06; if (Math.abs(m.vx) > 2.0) m.vx = Math.sign(m.vx) * 2.0; }
+  } },
+};
+// v0.29.340 — heavy-mob knockback resist. Set by a gait (Caprikor's ANCHOR) or
+// any future trait that wants a mob to feel immovable; read by all three
+// knockback sites (melee, AoE, hit-flinch). 0 = normal, 0.82 = shoved 18% as
+// far. Clamped so a bad value can never invert knockback into a pull.
+function _mobKbMul(m) {
+  const r = (m && +m._kbResist) || 0;
+  return 1 - Math.max(0, Math.min(0.95, r));
+}
+function _gaitPuff(m, z, dirAway, n) {
+  if (typeof _budgetedParticlePush !== 'function') return;
+  for (let i = 0; i < (n || 3); i++) {
+    _budgetedParticlePush({
+      x: m.x + m.w / 2 + (Math.random() - 0.5) * m.w * 0.6,
+      y: m.y + m.h * (0.4 + Math.random() * 0.5),
+      vx: (dirAway || 0) * (0.8 + Math.random() * 1.6) + (Math.random() - 0.5) * 0.8,
+      vy: (Math.random() - 0.5) * 1.2,
+      life: 18 + Math.random() * 10, color: z.colors.aura, size: 2 + Math.random() * 2,
+    });
+  }
+}
+function _gaitBlink(m, z, toX) {
+  const ww = (game.mapData && game.mapData.worldWidth) || 2200;
+  _gaitPuff(m, z, 0, 10);
+  m.x = Math.max(8, Math.min(ww - m.w - 8, toX));
+  m.vx = 0;
+  _gaitPuff(m, z, 0, 10);
+  if (typeof addShake === 'function') addShake(2);
+}
+function _zodiacGaitTick(m, dt, distToPlayer, phase, z) {
+  const g = _ZODIAC_GAIT[z.id];
+  if (!g || !player || player.hp <= 0) return;
+  // Never override an in-progress attack, a desperation telegraph, or a
+  // sign-specific special state (Scorpio's burrow, Cancer's sealed shell).
+  if (m.patternState && m.patternState !== 'idle') return;
+  if (m._despState === 'warning') return;
+  if (m._noGravity || m._invulnBurrow || m._cancerShellClosed) return;
+  if (m._zLungeMs > 0) return;                       // shared lunge owns motion
+  const dir = Math.sign((player.x + player.w / 2) - (m.x + m.w / 2)) || 1;
+  try { g.fn(m, dt, distToPlayer, phase, z, dir); } catch (e) {}
+  // Face the PLAYER, not the direction of travel. Deriving facing from vx made
+  // the sprite flip every frame for the oscillating gaits (the harness counted
+  // 3271 sign changes in 60 s for Caprikor, 1216 for Aqua) — a visible flicker.
+  // Bosses that weave, kite or ebb are still watching you while they move.
+  m.facing = dir;
 }
 
 // =========================================================================
