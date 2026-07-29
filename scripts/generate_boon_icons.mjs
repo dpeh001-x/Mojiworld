@@ -44,6 +44,9 @@ const BOON = {
   acc:    'a fierce eagle head in profile with a sharp focused eye',
   cdSkip: 'a bright yellow lightning bolt overlapping a small clock, fast-cooldown theme',
   lowg:   'a single soft white feather floating gently with a faint upward glow',
+  // v0.29.298 boons — added with the roster so the art pipeline stays complete.
+  chain:  'a jagged yellow-white lightning bolt forking into two branches that arc apart, electric storm theme',
+  freeze: 'a pale blue crystalline snowflake with sharp icy facets and a cold glow',
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
