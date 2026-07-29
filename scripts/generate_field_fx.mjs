@@ -1,20 +1,22 @@
 #!/usr/bin/env node
-// Ground-field VFX sprites — ludo.ai text→sprite (static, wide band)
+// Ground-field + beam VFX sprites — ludo.ai text→sprite (static)
 // =============================================================================
-// Art for wide horizontal ground fields (first use: the priest/bishop
-// Celestial Aurora heal zone, a 550×100 band that previously rendered as a
-// plain gold fillRect). Output -> Sprites/vfx/<key>.webp.
+// Authored art for effects that would otherwise render as raw canvas shapes.
+// Each entry carries its OWN target dir, aspect and canvas, because these are
+// two different shapes of art:
+//   • wide ground bands  (aurora_field, void_tear)      -> Sprites/vfx/*.webp
+//   • tall beam columns  (fx_col_*, drain pillar)       -> Sprites/fx/*.webp
+// Column canvases match the existing fx_col_archon (552×1206) so the new ones
+// drop into the same render path with no scaling surprises.
 //
 //   node scripts/generate_field_fx.mjs                 # dry-run list
 //   node scripts/generate_field_fx.mjs --generate
 //   flags: --force --only a,b
 // Needs LUDO_API_KEY. Resumable: skips a file that already exists.
 //
-// ASPECT: these draw at ~5.5:1, so they are generated WIDE (16:9) and composed
-// onto a 2:1 canvas. The art is deliberately specified as soft horizontal
-// bands/rays with no hard focal detail, so the final horizontal stretch to the
-// hazard's real width is invisible — the usual failure mode for field art is a
-// centred emblem that smears when stretched.
+// ASPECT NOTE: art that gets stretched to a hazard box must have NO central
+// focal emblem — a centred motif smears. Bands are specified as soft repeated
+// structure; columns as vertical banding that survives a height change.
 // =============================================================================
 import sharp from 'sharp';
 import { writeFile, mkdir, access } from 'node:fs/promises';
@@ -23,17 +25,48 @@ import { fileURLToPath } from 'node:url';
 sharp.cache(false);
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-// Sprites/vfx/<key>.webp — the manifest convention shared with quake_ring,
-// lava_pool etc. (see the LX_VFX `files` map in mojiworld_game.html).
-const FX_DIR = join(repoRoot, 'Sprites', 'vfx');
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 const arg = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
 
-const SUFFIX = ' wide horizontal ground-effect band for a 2D side-scroller game, simple flat cel-shaded anime style, soft glow, minimal detail, no central emblem, no character, no person, no creature, no text, the effect spans the full width and fades out softly at the left and right ends, nothing clipped by the frame edge, transparent background';
+// Shared style tail. Cel-shaded with banded light rather than smooth gradients
+// — that is what makes a glow read as hand-painted game art instead of a CSS
+// gradient, and it matches the existing fx_col_* set.
+const STYLE = ' for a 2D side-scroller RPG, high quality cel-shaded anime game art, crisp banded light with clean hard-edged colour steps, glowing but not blurry, bold confident shapes, no character, no person, no creature, no weapon, no text, no UI frame, effect only, fades out softly before the image border, nothing clipped by the frame edge, transparent background';
 
 const FX = {
-  aurora_field: 'A soft golden-white holy light field lying flat on the ground, gentle vertical light rays rising from a bright horizontal base line, a few small four-pointed sparkles floating above it, warm gold and cream colors,',
+  // ---- wide ground bands (Sprites/vfx) ------------------------------------
+  aurora_field: {
+    dir: 'vfx', ar: 'ar_16_9', cw: 1024, ch: 512, fill: 0.96,
+    prompt: 'A soft golden-white holy light field lying flat on the ground, gentle vertical light rays rising from a bright horizontal base line, a few small four-pointed sparkles floating above it, warm gold and cream colors,',
+  },
+  void_tear: {
+    dir: 'vfx', ar: 'ar_16_9', cw: 1024, ch: 512, fill: 0.94,
+    // Drawn as a wide flat rift near the top of its box; the Spire seeds these
+    // as permanent obstacles, so it must read as "hole in space", not a puddle.
+    prompt: 'A horizontal tear ripped open in space, a long thin jagged slit with a pitch-black void core, glowing violet and magenta energy along the torn edges, a few small purple shards and wisps drifting out of the rip, the slit stretches horizontally and tapers to sharp points at both ends,',
+  },
+  // ---- tall beam columns (Sprites/fx, matching fx_col_archon) --------------
+  fx_col_arbiter: {
+    dir: 'fx', ar: 'ar_9_16', cw: 552, ch: 1206, fill: 0.92,
+    // The Arbiter — the Spire's judge. Warm amber-gold (#ffd870), 120 px wide.
+    prompt: 'A tall narrow vertical beam of amber-gold judgement light striking down from above, bright white-hot core with layered gold edges, small glowing motes and thin sparks drifting beside the beam, the column runs the full height of the image,',
+  },
+  fx_col_sovereign: {
+    dir: 'fx', ar: 'ar_9_16', cw: 552, ch: 1206, fill: 0.92,
+    // The Sovereign — the Spire's ruler. Pale cream-white (#fff5d0), 140 px —
+    // wider and brighter than the Arbiter's so it reads as the bigger threat.
+    // v2: the words "pillar", "regal" and "crown-like" made ludo draw a literal
+    // stone column with a metal crown on it — scenery, not an attack, and the
+    // exact confusion that got a drain-pillar sprite reverted in v0.26.340.
+    // Beam/light vocabulary only, with architecture explicitly negated.
+    prompt: 'A tall wide vertical shaft of brilliant pale cream-white light blasting straight down from the sky, blinding white core with ivory and pale gold banded edges, thin light streaks and drifting golden motes along its length, pure energy beam, no stone, no marble, no architecture, no pillar structure, no crown, no jewellery, no metal object,',
+  },
+  sovereign_drain_pillar: {
+    dir: 'vfx', ar: 'ar_9_16', cw: 512, ch: 1152, fill: 0.92,
+    // Drains HP/MP to 1 — should read as siphoning UPWARD, not just a beam.
+    prompt: 'A tall vertical column of draining golden energy, glowing amber light being pulled upward in thin ribbons and rising motes, brighter at the top where it is siphoned away, hollow darker centre, thin gold edges framing the column, the column runs the full height of the image,',
+  },
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
@@ -43,9 +76,11 @@ let keys = Object.keys(FX);
 const only = arg('--only'); if (only) keys = keys.filter((k) => only.split(',').some((o) => k === o || k.startsWith(o)));
 if (!keys.length) { console.error('No matching FX.'); process.exit(1); }
 
+const destOf = (k) => join(repoRoot, 'Sprites', FX[k].dir, `${k}.webp`);
+
 if (!has('--generate')) {
-  console.log(`# ${keys.length} field VFX -> Sprites/vfx/<key>.webp:\n`);
-  for (const k of keys) console.log(`  ${k}.webp`);
+  console.log(`# ${keys.length} VFX:\n`);
+  for (const k of keys) console.log(`  Sprites/${FX[k].dir}/${k}.webp   (${FX[k].cw}x${FX[k].ch}, ${FX[k].ar})`);
   console.log('\n# Re-run with --generate (needs LUDO_API_KEY). Flags: --force --only a,b');
   process.exit(0);
 }
@@ -57,30 +92,42 @@ const force = has('--force');
 const TIMEOUT = Number(process.env.LUDO_REQ_TIMEOUT_MS || 150000);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+async function askLudo(prompt, ar) {
+  const res = await fetch(`${API}/assets/image`, {
+    method: 'POST', headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(TIMEOUT),
+    body: JSON.stringify({ image_type: 'sprite', art_style: 'Anime/Manga', aspect_ratio: ar, n: 1, augment_prompt: false, prompt }),
+  });
+  if (!res.ok) throw new Error(`image ${res.status}: ${(await res.text()).slice(0, 120)}`);
+  const data = await res.json();
+  const url = Array.isArray(data) ? data[0]?.url : (data?.url || data?.images?.[0]?.url);
+  if (!url) throw new Error(`no url: ${JSON.stringify(data).slice(0, 120)}`);
+  return url;
+}
+
 async function genOne(k) {
-  const dest = join(FX_DIR, `${k}.webp`);
+  const cfg = FX[k];
+  const dest = destOf(k);
   if (!force && await exists(dest)) return 'skip';
   let lastErr;
   for (let attempt = 1; attempt <= 4; attempt++) {
     try {
-      const res = await fetch(`${API}/assets/image`, {
-        method: 'POST', headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(TIMEOUT),
-        body: JSON.stringify({ image_type: 'sprite', art_style: 'Anime/Manga', aspect_ratio: 'ar_16_9', n: 1, augment_prompt: false, prompt: FX[k] + SUFFIX }),
-      });
-      if (!res.ok) throw new Error(`image ${res.status}: ${(await res.text()).slice(0, 140)}`);
-      const data = await res.json();
-      const url = Array.isArray(data) ? data[0]?.url : (data?.url || data?.images?.[0]?.url);
-      if (!url) throw new Error(`no url: ${JSON.stringify(data).slice(0, 140)}`);
-      await mkdir(FX_DIR, { recursive: true });
-      // trim to drawn content, then fit onto a 1024×512 (2:1) transparent
-      // canvas at 96% width — the renderer stretches this to the hazard box.
+      let url;
+      try { url = await askLudo(cfg.prompt + STYLE, cfg.ar); }
+      catch (e) {
+        // not every account/model exposes every aspect — fall back to square
+        // and let the compose step letterbox it into the real canvas.
+        if (!/aspect|ar_/i.test(String(e.message))) throw e;
+        url = await askLudo(cfg.prompt + STYLE, 'ar_1_1');
+      }
+      await mkdir(dirname(dest), { recursive: true });
       const raw = await fetchBuf(url);
       let content; try { content = await sharp(raw).trim().toBuffer(); } catch { content = raw; }
-      const CW = 1024, CH = 512;
-      const inner = await sharp(content).resize(Math.round(CW * 0.96), Math.round(CH * 0.9), { fit: 'inside' }).png().toBuffer();
-      const out = await sharp({ create: { width: CW, height: CH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      const inner = await sharp(content)
+        .resize(Math.round(cfg.cw * cfg.fill), Math.round(cfg.ch * cfg.fill), { fit: 'inside' })
+        .png().toBuffer();
+      const out = await sharp({ create: { width: cfg.cw, height: cfg.ch, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
         .composite([{ input: inner, gravity: 'center' }])
-        .webp({ quality: 88 }).toBuffer();
+        .webp({ quality: 90 }).toBuffer();
       await writeFile(dest, out);
       return 'ok';
     } catch (e) { lastErr = e; if (attempt < 4) await sleep(4000 * attempt); }
@@ -88,7 +135,7 @@ async function genOne(k) {
   throw lastErr;
 }
 
-console.log(`Generating ${keys.length} field VFX (force:${force})...`);
+console.log(`Generating ${keys.length} VFX (force:${force})...`);
 let made = 0, skipped = 0, failed = 0;
 for (const k of keys) {
   process.stdout.write(`  ${k} ... `);
