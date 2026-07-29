@@ -16349,9 +16349,20 @@ const POWERUPS = [
   { id:'atk_p',  name:'Iron Muscles',   icon:'💪', stat:'atkPct',    min:10, max:25, unit:'%', fmt:r=>`+${r}% ATK`,                     scale:r=>r/100 },
   // v0.26.225 — Now level-scaled. _rollBoonValue computes per-level min/max
   // so the roll lands proportional to player ATK at any tier.
-  { id:'atk',    name:'Keen Edge',      icon:'🗡️', stat:'atk',       min:10, max:250,unit:'',  fmt:r=>`+${r} ATK`,                      scale:r=>r, lvlScale:true },
+  // v0.29.298 — BALANCE: max 250 → 110. Measured live at Lv 60, a max-roll
+  // Keen Edge (+166 ATK) bought +93 % DPS on warrior / +123 % on archer, while
+  // its percentage counterpart Iron Muscles (+25 % ATK) bought +23-27 % — the
+  // flat boon was ~4× the % boon for the same slot, so it was never a choice.
+  // 110 lands ~+39 % ungeared at Lv 60, converging on Iron Muscles once gear
+  // ATK is layered in (flat stays deliberately a touch ahead early, since %
+  // scales with gear and flat does not).
+  { id:'atk',    name:'Keen Edge',      icon:'🗡️', stat:'atk',       min:10, max:110,unit:'',  fmt:r=>`+${r} ATK`,                      scale:r=>r, lvlScale:true },
   // v0.26.225 — Same level-scaled treatment as Keen Edge.
-  { id:'def',    name:'Thick Skin',     icon:'🛡️', stat:'def',       min:10, max:500,unit:'',  fmt:r=>`+${r} DEF`,                      scale:r=>r, lvlScale:true },
+  // v0.29.298 — BALANCE: max 500 → 300. Measured live through the real contact
+  // pipeline (half-weight flat subtraction + _defAbsorbMul + contact floor), a
+  // max-roll Thick Skin took a Lv 60 warrior from 3.5 to 5.8 hits-to-die
+  // (+66 % EHP) while Vitality gave +17 % — again ~4× its opposite number.
+  { id:'def',    name:'Thick Skin',     icon:'🛡️', stat:'def',       min:10, max:300,unit:'',  fmt:r=>`+${r} DEF`,                      scale:r=>r, lvlScale:true },
   // v0.26.176 — Vitality CHANGED to percentage-of-maxHp scaling (was
   // flat +20-60). Applied multiplicatively in getMaxHp() via new
   // `player.mods.maxHpPct` field.
@@ -38143,7 +38154,27 @@ const STORY_HOOKS = [
   { id: 's_quest10', storyScoped: true, quests: 10, name: 'Thread of the Story',coins: 22000, pots: { hp_l: 5, mp_l: 4 }, shards: 14, atk: 3, def: 3 },
 ];
 function _earlyState() {
-  if (!game.early) game.early = { kills: 0, quests: 0, done: {} };
+  if (!game.early) {
+    game.early = { kills: 0, quests: 0, done: {} };
+    // v0.29.299 — GRANDFATHER EXISTING SAVES. The ladder is brand new, so every
+    // established character meets its level gates already: without this, the
+    // first kill after updating fired the whole combat chapter at once — a
+    // toast storm plus a windfall (~22k coins, 26 shards, +2 ATK/DEF) for
+    // content that character finished long ago, and the Lv-10 "the story
+    // begins" beat landing on someone at Lv 40. Anyone past graduation is
+    // silently credited with chapter 1 (no rewards, no toasts) and moved
+    // straight to the story chapter, with the quest baseline stamped so its
+    // rungs measure turn-ins from HERE rather than retro-claiming.
+    // Characters still inside the on-ramp (Lv < 10) are left alone — they get
+    // the real ladder, which is the point.
+    try {
+      if (typeof player !== 'undefined' && player && (player.level || 1) >= 10) {
+        for (const h of EARLY_HOOKS) game.early.done[h.id] = 0;   // 0 = grandfathered, not earned
+        game.early.questBase = 0;
+        game.early.grandfathered = true;
+      }
+    } catch (e) {}
+  }
   if (!game.early.done) game.early.done = {};
   return game.early;
 }
