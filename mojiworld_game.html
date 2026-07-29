@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.304';
+const GAME_VERSION = 'v0.29.306';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16412,7 +16412,11 @@ const POWERUPS = [
   { id:'burn',   name:'Burning Touch',  icon:'🔥', stat:'burn',      min:2,  max:3,  unit:'×', fmt:r=>`Attacks burn enemies (×${r})`,   scale:r=>r },
   // v0.26.225 — max 1 → 2 (binary roll: ~50 % chance of +2 projectiles).
   // Cap at L10555 raised in tandem so the contribution actually lands.
-  { id:'multi',  name:'Double Shot',    icon:'🎯', stat:'multishot', min:1,  max:2,  unit:'',  fmt:r=>`+${r} Projectile`,               scale:r=>r },
+  // v0.29.304 — roll range 1-2 → 1-1 to match the restored +1 cap (see
+  // _applyEquippedBoons). A 1-2 roll against a cap of 1 would have made the
+  // "+2" half of the range silently do nothing — the same inert-roll trap
+  // Burning Touch was just fixed for.
+  { id:'multi',  name:'Double Shot',    icon:'🎯', stat:'multishot', min:1,  max:1,  unit:'',  fmt:r=>`+${r} Projectile`,               scale:r=>r },
   // v0.26.225 — min 1 → 2 (tier-1 felt negligible vs tier-5).
   { id:'mpreg',  name:'Mana Surge',     icon:'♻️', stat:'mpRegen',   min:2,  max:5,  unit:'',  fmt:r=>`+${r} MP regen tier`,            scale:r=>r },
   // v0.26.225 — min 15 → 20 (paired tightening).
@@ -16630,7 +16634,14 @@ function _applyEquippedBoons() {
   // A single max-roll Double Shot hits the ceiling; further copies are
   // pure redundancy (intentional — +2 extra projectiles already triples
   // basic-attack DPS at the cost of three boon slots).
-  if (M.multishot > 2) M.multishot = 2;
+  // v0.29.304 — cap back to 1. Measured on a Lv 60 archer, a max-roll (+2)
+  // Double Shot bought +184 % DPS and even its MIN roll (+1) bought +96 % —
+  // i.e. the worst roll of this boon beat the best roll of every other boon
+  // in the game (next best: Keen Edge +53 %). +1 projectile is intrinsically
+  // ~+100 % for a single-shot basic, so +2 was simply out of the roll band's
+  // reach to balance. At +1 it lands ~1.8× the next-best boon, inside the
+  // same tolerance the Keen Edge / Iron Muscles pass was tuned to.
+  if (M.multishot > 1) M.multishot = 1;
   // v0.25.269 — Quickening's bypass-cooldown chance was capped at 20 %.
   // v0.26.176 — Cap raised to 30 % per the new roll range (1-30 %).
   // A single god-roll Quickening can hit the ceiling; further copies
@@ -46200,6 +46211,30 @@ function _lxStreamMonWorld() {
     }
   } catch (e) {}
 }
+// v0.29.306 — Teleport carried summons to the player's new spawn point after a
+// map change. Summons persist across maps (same objects → same hp / life), but
+// their x/y are map-relative: left alone they would sit at the OLD map's
+// coordinates, chasing monsters off-screen or falling through geometry that no
+// longer exists. Called from loadMap once the entry position is settled.
+// Flyers are parked above the player (their own update lerps them into place);
+// ground pets are dropped beside the player and left to the normal platform
+// collision. Velocities are zeroed so nothing inherits mid-air momentum.
+function _lxRelocateSummons() {
+  if (typeof player === 'undefined' || !player) return;
+  const px = player.x, py = player.y, face = player.facing || 1;
+  const place = (s, i) => {
+    if (!s) return;
+    const spread = 34 + (i % 3) * 26;
+    if (s.flying || s.shooter) { s.x = px - 80 * face; s.y = py - 80; }
+    else { s.x = px - face * spread; s.y = py; }
+    s.vx = 0; s.vy = 0;
+    s.dmgCD = 0;                 // don't carry a contact-damage cooldown across the load
+    if (s.fireCd != null) s.fireCd = Math.max(s.fireCd, 250);   // small grace so it doesn't insta-fire on arrival
+  };
+  place(player.pet, 0);
+  place(player.ultPet, 1);
+  if (Array.isArray(player.pack)) player.pack.forEach((p, i) => place(p, i + 2));
+}
 function loadMap(id, entryX, entryY) {
   // Close a stale MP chat bar on map change (else its input lingers + eats Enter).
   if (typeof _mpCloseChat === 'function' && typeof net !== 'undefined' && net && net.chatOpen) _mpCloseChat(false);
@@ -47014,9 +47049,18 @@ function loadMap(id, entryX, entryY) {
     player._dragoonExtraSlam = 0;
     player._skillLockTimer = 0;
     player._castLockUntil = 0;
-    player.pet = null;
-    player.ultPet = null;
-    player.pack = [];
+    // v0.29.306 — per user "ensure that the summons stay even when the player
+    // goes to a different map, but still has the same HP and timespan".
+    // Summons used to be destroyed here. The original reason (see the comment
+    // above) was NOT that carrying them is wrong — it was that they kept the
+    // OLD map's coordinates, so they ghost-fired off-screen on the new one.
+    // Keeping the same objects preserves hp/maxHp and life/maxLife for free;
+    // the stale-coordinate problem is fixed properly by teleporting them to
+    // the player once the new spawn point is known (see _lxRelocateSummons
+    // below, called after the entry placement). Targets are re-resolved from
+    // game.monsters every frame, so nothing holds a dead monster reference.
+    player._lxCarrySummons = !!(player.pet || player.ultPet || (player.pack && player.pack.length));
+    if (!Array.isArray(player.pack)) player.pack = [];
     if (player.buffs) { for (const _bk in player.buffs) player.buffs[_bk] = 0; }
     // v0.26.x audit FIX — also clear DOT timers on map-change. The buff wipe
     // above missed burn/poison/electrocute, so portaling out while burning
@@ -47280,6 +47324,13 @@ function loadMap(id, entryX, entryY) {
       player.x = Math.max(8, Math.min(_ww - player.w - 8, Math.floor(_ww / 2)));
       player.y = 400; player.vx = 0; player.vy = 0;
     }
+  }
+  // v0.29.306 — the player's entry position is final by here, so bring any
+  // carried summons across to it (see _lxRelocateSummons). Runs before the
+  // camera snap so they are already in frame on the first painted frame.
+  if (player && player._lxCarrySummons) {
+    _lxRelocateSummons();
+    player._lxCarrySummons = false;
   }
   // v0.25.247 (A3) — snap the camera to the player's new position on
   // map load. Was lerping from the previous map's last camera offset
