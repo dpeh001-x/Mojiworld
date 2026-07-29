@@ -46,6 +46,22 @@ const FX = {
     // as permanent obstacles, so it must read as "hole in space", not a puddle.
     prompt: 'A horizontal tear ripped open in space, a long thin jagged slit with a pitch-black void core, glowing violet and magenta energy along the torn edges, a few small purple shards and wisps drifting out of the rip, the slit stretches horizontally and tapers to sharp points at both ends,',
   },
+  gloop_puddle: {
+    dir: 'vfx', ar: 'ar_16_9', cw: 512, ch: 256, fill: 0.94,
+    // King Gloopaloo is the GEL WATER grotto boss — the puddle is cyan/blue,
+    // not green slime (body rgba(102,200,255), sheen rgba(180,235,255)).
+    // 60×18 on screen, so the shape has to read at a glance: one clean blob.
+    prompt: 'A small glossy cyan-blue gel puddle seen from a low angle, one smooth rounded blob shape with a bright white highlight near the top left, darker blue rim, a couple of tiny droplets beside it, wet jelly-like surface,',
+  },
+  beam_core: {
+    dir: 'vfx', ar: 'ar_16_9', cw: 1024, ch: 256, fill: 0.98,
+    // NEUTRAL WHITE ON PURPOSE. The renderer tints this per caller (the same
+    // beam is fired in yellow / cyan / white / pale blue and layered at three
+    // widths for the marksman railshot), so the art must carry SHAPE only and
+    // let the colour come from code — a coloured sprite would break the
+    // parametric callers this effect exists to serve.
+    prompt: 'A horizontal beam of pure white energy, a bright solid white core line running left to right with soft feathered edges above and below, tapering to fine points at both the left and right ends, a few faint white speed streaks along it, pure white and pale grey only, no colour tint,',
+  },
   // ---- tall beam columns (Sprites/fx, matching fx_col_archon) --------------
   fx_col_arbiter: {
     dir: 'fx', ar: 'ar_9_16', cw: 552, ch: 1206, fill: 0.92,
