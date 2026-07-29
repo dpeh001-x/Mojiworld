@@ -45109,6 +45109,85 @@ const LX_SCALED_LEVEL_CAP = 85;
 function _lxScaledMobLevel(playerLevel) {
   return Math.max(1, Math.min(LX_SCALED_LEVEL_CAP, Math.floor(playerLevel || 1)));
 }
+// v0.29.314 — THE per-level stat curve, factored out of spawnMonster so the
+// scaled modes can reuse the EXACT same math natural monsters get. Must stay
+// in lockstep with _hpAtkLvExp / _hpAtkLinLv / _atkHiLvSoften at the spawn site.
+//
+// This is the fix for a real correlation bug: Train Rush and the Tower
+// Expedition invented their own linear baselines (hp = 200 + L x 20) while
+// every field monster went through this exponential-x-linear curve. The two
+// diverge catastrophically — a field mob at Lv 80 spawns with ~346,000 HP
+// (Path's Bane: 52,069 authored x 6.6) while a "Lv 85" Train Rush mech had
+// 3,800. The nameplate said 85; the creature was a Lv-20 pushover.
+function _lxLevelStatCurve(L) {
+  const lv = Math.max(1, Math.floor(L || 1));
+  const base = Math.pow(1.015, Math.max(0, lv - 1)) * (1 + 0.10 * lv);
+  return {
+    hp:  base,
+    atk: base * (1 - Math.min(0.50, Math.max(0, lv - 50) * 0.025)),   // high-level ATK softener
+  };
+}
+// v0.29.314 — WHAT AN AVERAGE FIELD MONSTER AT LEVEL L LOOKS LIKE, after spawn.
+// Re-curving a scaled mob's own base is NOT enough to make it match its level:
+// authored base HP grows ~900x across the roster on its own (slime 57 at Lv 4,
+// Path's Bane 52,069 at Lv 80), so a re-curved slime is still a slime. A scaled
+// mode has to target the level-appropriate BASELINE, which this derives from
+// the same tables and the same global multipliers spawnMonster uses — so it
+// correlates by construction and cannot drift when the roster is retuned.
+const _LX_FIELD_BASE_CACHE = new Map();
+function _lxFieldBaseline(L) {
+  const lv = Math.max(1, Math.floor(L || 1));
+  if (_LX_FIELD_BASE_CACHE.has(lv)) return _LX_FIELD_BASE_CACHE.get(lv);
+  let out = { hp: 200, atk: 20, exp: 10 };
+  try {
+    const NAT = (typeof MOB_NATURAL_LEVEL !== 'undefined') ? MOB_NATURAL_LEVEL : null;
+    if (NAT && typeof monsterTypes !== 'undefined') {
+      const rows = [];
+      for (const id in NAT) {
+        const t = monsterTypes[id];
+        if (!t || t.isBoss || t.boss) continue;
+        if (/^(tower|express|ticket|conductor|mirror)/i.test(id)) continue;
+        rows.push({ lv: NAT[id] | 0, hp: t.hp | 0, atk: t.atk | 0, exp: t.exp | 0 });
+      }
+      if (rows.length) {
+        const top = Math.max(...rows.map(r => r.lv));
+        // The roster stops at Lv 80; past that, keep the top tier's authored
+        // stats and let the level curve carry the rest.
+        const at = Math.min(lv, top);
+        let near = rows.filter(r => Math.abs(r.lv - at) <= 3);
+        if (!near.length) {
+          near = rows.slice().sort((a, b) => Math.abs(a.lv - at) - Math.abs(b.lv - at)).slice(0, 4);
+        }
+        const avg = k => near.reduce((s, r) => s + r[k], 0) / near.length;
+        const c = _lxLevelStatCurve(lv);
+        const uhm = (typeof UNIVERSAL_HP_MUL === 'number') ? UNIVERSAL_HP_MUL : 0.5;
+        const msm = (typeof MONSTER_STAT_MUL === 'number') ? MONSTER_STAT_MUL : 0.35;
+        out = {
+          hp:  Math.max(1, Math.round(avg('hp')  * uhm * msm * c.hp)),
+          atk: Math.max(1, Math.round(avg('atk') * msm * c.atk)),
+          exp: Math.max(1, Math.round(avg('exp') * 0.1)),   // matches expMult's ×0.1
+        };
+      }
+    }
+  } catch (e) {}
+  _LX_FIELD_BASE_CACHE.set(lv, out);
+  return out;
+}
+// Re-stat a monster to be a level-L creature. `stat` scales HP/ATK above the
+// field baseline (Train Rush ships ×2 by design); `exp` scales the reward.
+function _lxStatToLevel(m, L, opts) {
+  if (!m) return null;
+  const b = _lxFieldBaseline(L);
+  const k = (opts && opts.stat) || 1;
+  const xp = (opts && opts.exp) || 1;
+  m.maxHp     = Math.max(1, Math.floor(b.hp * k));
+  m.currentHp = m.maxHp;
+  m.atk       = Math.max(1, Math.floor(b.atk * k));
+  m.def       = Math.max(0, Math.floor((b.atk * 0.35) * k));
+  m.exp       = Math.max(1, Math.floor(b.exp * xp));
+  m.level     = Math.max(1, Math.floor(L));
+  return b;
+}
 function _expeditionScaleMob(m, playerLevel) {
   if (!game.expedition || !game.expedition.active) return m;
   // v0.26.418 — MAP-GATE. The active flag alone was leaking: if any expedition
@@ -45141,15 +45220,18 @@ function _expeditionScaleMob(m, playerLevel) {
   // v0.29.313 — scale against the CAPPED level, not the raw player level, so
   // HP/ATK/DEF/EXP and the stamped level all agree on the same ceiling.
   const _capLv  = _lxScaledMobLevel(playerLevel);
-  const _scale  = Math.max(1, Math.min(12, _capLv / _baseLv));
-  m.maxHp     = Math.floor((m.maxHp || 1) * _scale);
-  m.currentHp = m.maxHp;
-  m.atk       = Math.floor((m.atk || 1) * _scale);
-  m.def       = Math.floor((m.def || 0) * _scale);
-  // EXP scaling uses sqrt so a Lv 100 player doesn't get 5× the EXP
-  // they'd get at Lv 20 — caps the run-as-EXP-farm potential.
-  m.exp       = Math.floor((m.exp || 0) * Math.sqrt(_scale));
-  m.level     = Math.max(_baseLv, _capLv);
+  const _toLv   = Math.max(_baseLv, _capLv);
+  // v0.29.314 — stats now ride the SAME per-level curve every field monster
+  // gets (_lxLevelStatCurve), instead of the old flat `playerLevel / baseLv`
+  // ratio. That ratio was linear while the real curve is exponential x linear,
+  // so a "Lv 85" tower mob came out at 4,250 HP against a Lv-80 field mob's
+  // ~346,000 — the level label meant nothing. Re-basing from the mob's own
+  // build level onto the target level makes the two agree by construction.
+  // Tower mobs are re-statted to BE a level-_toLv creature — same HP/ATK as an
+  // average field monster of that level, and the same EXP. Previously the
+  // scale was a flat playerLevel/baseLv ratio against a Lv-20 base, so a
+  // "Lv 85" tower mob had 4,250 HP where a Lv-80 field mob has ~350,000.
+  _lxStatToLevel(m, _toLv, { stat: 1, exp: 1 });
   return m;
 }
 // v0.26.264 — Floor-clear detector. Called after every monster kill
@@ -48611,15 +48693,18 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     //   mes ≈ 30  + L × 2.5  (Lv 25 → 92,  Lv 50 → 155,  Lv 75 → 218)
     // ×2 multiplier applied to HP + ATK per spec; EXP stays at baseline
     // ("average for mobs that level"); mojicoins also at baseline.
-    const _baselineHp  = 200 + _pLv * 20;
-    const _baselineAtk = 15  + _pLv * 1.2;
-    const _baselineExp = 80  + _pLv * 5;
-    const _baselineMes = 30  + _pLv * 2.5;
-    _m.maxHp     = Math.floor(_baselineHp  * 2);
-    _m.currentHp = _m.maxHp;
-    _m.atk       = Math.floor(_baselineAtk * 2);
-    _m.exp       = Math.floor(_baselineExp);
-    _m.mojicoins     = Math.floor(_baselineMes);
+    // v0.29.314 — the linear baselines above are RETIRED. They were invented
+    // for this mode while every field monster rides the exponential x linear
+    // per-level curve, so the two diverged by orders of magnitude: at Lv 85
+    // this produced a 3,800 HP "Lv 85" mech against a Lv-80 field mob's
+    // ~346,000. The mech now re-bases its ALREADY-SPAWNED stats (which were
+    // built at its own natural level) onto the player's capped level using the
+    // shared curve, then takes this mode's ×2 HP/ATK on top — so "twice as
+    // tough as a monster your level" is finally literally true.
+    // The mech is re-statted to BE a level-_pLv creature at this mode's stated
+    // ×2 HP/ATK, and pays the EXP a same-level field monster pays.
+    _lxStatToLevel(_m, _pLv, { stat: 2, exp: 1 });
+    _m.mojicoins = Math.max(1, Math.floor(30 + _pLv * 2.5));
     // v0.29.313 — stamp the LEVEL too. This block re-statted HP/ATK/EXP to the
     // player's level but left m.level at the authored value (the ticket mechs
     // are Lv 31/36), so a high-level player fought a level-31 nameplate, and

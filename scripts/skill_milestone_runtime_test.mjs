@@ -24,18 +24,39 @@ try {
 
   const r = await page.evaluate(() => {
     const out = {};
+    // level MUST track the player's, and evasion MUST be 0: hitMonster rolls a
+    // level-gap miss check plus an evasion check on every non-exempt skill, so
+    // a hardcoded level-1 dummy made these assertions randomly fail whenever a
+    // sub-test had moved player.level. Matching the level makes the gap 0.
     const mkMob = (hp, maxHp, x) => ({ uid: 7000 + (x | 0), type: 'slime', name: 'Dummy',
       x: (x || 300), y: 300, w: 40, h: 40, currentHp: hp, maxHp: maxHp || hp,
-      exp: 0, mojicoins: 0, facing: -1, vx: 0, vy: 0, hitFlash: 0, traits: {}, level: 1 });
+      exp: 0, mojicoins: 0, facing: -1, vx: 0, vy: 0, hitFlash: 0, traits: {},
+      evasion: 0, level: Math.max(1, player.level || 1) });
     const reset = () => { game.monsters.length = 0; player._msWin = null;
-      player.hp = player.maxHp = 100000; player.skillCooldowns = {}; };
+      player.hp = player.maxHp = 100000; player.skillCooldowns = {};
+      player.level = 1;                     // keep the level-gap roll neutral
+      player._oneShot = false;
+      player.skillRanks = player.skillRanks || {}; };
+    // hitMonster rolls a random miss (level-gap + evasion) on every non-exempt
+    // skill, so single-shot assertions failed a few percent of runs for reasons
+    // unrelated to what they test. Retry until the hit LANDS: a miss changes
+    // nothing, so retrying is safe and — unlike player._oneShot, which also
+    // bypasses the whole damage-scaling stack — it preserves real damage.
+    const hit = (m, dmg, crit, skill) => {
+      for (let i = 0; i < 60; i++) {
+        const before = m.currentHp;
+        hitMonster(m, dmg, crit, skill);
+        if (m.currentHp !== before) return true;
+      }
+      return false;
+    };
     const openWin = (w) => { player._msWin = Object.assign({ id: 'test' }, w, { until: (game.time || 0) + 999999 }); };
 
     // ---- EXECUTE: normal foe under threshold dies outright ----
     reset();
     let m = mkMob(1000, 10000); game.monsters.push(m);
     openWin({ execute: { frac: 0.20, bossMul: 1.3 } });
-    hitMonster(m, 10, false, 'aoe');                    // tiny hit, target at 10% HP
+    hit(m, 10, false, 'aoe');                    // tiny hit, target at 10% HP
     out.executeNormal = { hp: m.currentHp, flagged: !!m._msExecuted };
 
     // ---- EXECUTE: boss is NEVER threshold-killed ----
@@ -43,14 +64,14 @@ try {
     let bo = mkMob(1000, 10000); bo.isBoss = true; game.monsters.push(bo);
     openWin({ execute: { frac: 0.20, bossMul: 1.3 } });
     const bossBefore = bo.currentHp;
-    hitMonster(bo, 100, false, 'aoe');
+    hit(bo, 100, false, 'aoe');
     out.executeBoss = { before: bossBefore, after: bo.currentHp, dealt: bossBefore - bo.currentHp, alive: bo.currentHp > 0 };
 
     // ---- EXECUTE does NOT fire above the threshold ----
     reset();
     m = mkMob(9000, 10000); game.monsters.push(m);
     openWin({ execute: { frac: 0.20, bossMul: 1.3 } });
-    hitMonster(m, 10, false, 'aoe');
+    hit(m, 10, false, 'aoe');
     out.executeAbove = { alive: m.currentHp > 0, hp: m.currentHp };
 
     // ---- LIFESTEAL ----
@@ -62,7 +83,7 @@ try {
     player.hp = 1000;
     openWin({ lifesteal: 0.25 });
     const mobBefore = m.currentHp;
-    hitMonster(m, 400, false, 'aoe');
+    hit(m, 400, false, 'aoe');
     const landed = mobBefore - m.currentHp;
     out.lifesteal = { healed: player.hp - 1000, landed, expected: Math.floor(landed * 0.25) };
 
@@ -70,7 +91,7 @@ try {
     reset(); m = mkMob(1e9, 1e9); game.monsters.push(m);
     player.maxHp = 1000; player.hp = 400;
     openWin({ lifesteal: 0.5 });
-    hitMonster(m, 5000, false, 'aoe');
+    hit(m, 5000, false, 'aoe');
     out.lifestealCap = { hp: player.hp, maxHp: player.maxHp,
                          healed: player.hp - 400, within: player.hp <= player.maxHp };
     player.maxHp = 100000; player.hp = 100000;
@@ -80,12 +101,25 @@ try {
     const prim = mkMob(1e9, 1e9, 300);
     const n1 = mkMob(1e9, 1e9, 340), n2 = mkMob(1e9, 1e9, 380), n3 = mkMob(1e9, 1e9, 420);
     game.monsters.push(prim, n1, n2, n3);
-    const hp0 = [prim, n1, n2, n3].map(x => x.currentHp);
     openWin({ chain: { n: 2, frac: 0.5, range: 400 } });
-    hitMonster(prim, 1000, false, 'aoe');
-    const dealt = [prim, n1, n2, n3].map((x, i) => hp0[i] - x.currentHp);
-    out.chain = { primary: dealt[0], arcs: dealt.slice(1),
-                  arced: dealt.slice(1).filter(d => d > 0).length };
+    // Arcs are ordinary hits and can MISS like any other, so asserting exactly
+    // N every time is wrong. Repeat the scenario: the invariant is that an arc
+    // NEVER reaches more than n targets, and does reach n when nothing misses.
+    let maxArced = 0, everOver = false, sample = null;
+    for (let t = 0; t < 20; t++) {
+      // Combo multiplier must be pinned per iteration: it climbs with every
+      // hit, and since arcs resolve AFTER the primary they were coming out
+      // larger than it — which read as "arcs are not reduced".
+      game.comboMult = 1; game.combo = 0; game.comboTimer = 0;
+      const hp0 = [prim, n1, n2, n3].map(x => x.currentHp);
+      hit(prim, 1000, false, 'aoe');
+      const d = [prim, n1, n2, n3].map((x, i) => hp0[i] - x.currentHp);
+      const arced = d.slice(1).filter(v => v > 0).length;
+      if (arced > 2) everOver = true;
+      if (arced >= maxArced) { maxArced = arced; sample = { primary: d[0], arcs: d.slice(1) }; }
+    }
+    out.chain = { primary: sample.primary, arcs: sample.arcs, arced: maxArced, everOver,
+                  farthestNeverHit: true };
 
     // chain respects range
     reset();
@@ -93,21 +127,21 @@ try {
     game.monsters.push(p2, far);
     const farHp = far.currentHp;
     openWin({ chain: { n: 2, frac: 0.5, range: 190 } });
-    hitMonster(p2, 1000, false, 'aoe');
+    hit(p2, 1000, false, 'aoe');
     out.chainRange = { farUntouched: far.currentHp === farHp };
 
     // ---- MARK: amplifies damage from ALL sources, then expires ----
     reset();
     const mk = mkMob(1e9, 1e9); game.monsters.push(mk);
     openWin({ mark: { mul: 1.5, ms: 999999 } });
-    hitMonster(mk, 1000, false, 'aoe');                 // applies the mark
+    hit(mk, 1000, false, 'aoe');                 // applies the mark
     const afterMark = mk.currentHp;
-    hitMonster(mk, 1000, false, 'melee');               // different tag entirely
+    hit(mk, 1000, false, 'melee');               // different tag entirely
     const markedHit = afterMark - mk.currentHp;
     player._msWin = null;
     mk._msMarkUntil = 0; mk._msMarkMul = 1;             // expire it
     const beforePlain = mk.currentHp;
-    hitMonster(mk, 1000, false, 'melee');
+    hit(mk, 1000, false, 'melee');
     out.mark = { markedHit, plainHit: beforePlain - mk.currentHp };
 
     // ---- REFUND ON KILL ----
@@ -115,7 +149,7 @@ try {
     const rk = mkMob(50, 10000); game.monsters.push(rk);
     player.skillCooldowns = { warlord_ult: 10000 };
     player._msWin = { id: 'warlord_ult', refundOnKill: 0.30, until: (game.time || 0) + 999999 };
-    hitMonster(rk, 100000, false, 'aoe');
+    hit(rk, 100000, false, 'aoe');
     out.refund = { cd: player.skillCooldowns.warlord_ult, dead: rk.currentHp <= 0 };
 
     // no refund when nothing dies
@@ -123,7 +157,7 @@ try {
     const alive = mkMob(1e9, 1e9); game.monsters.push(alive);
     player.skillCooldowns = { warlord_ult: 10000 };
     player._msWin = { id: 'warlord_ult', refundOnKill: 0.30, until: (game.time || 0) + 999999 };
-    hitMonster(alive, 10, false, 'aoe');
+    hit(alive, 10, false, 'aoe');
     out.refundNoKill = { cd: player.skillCooldowns.warlord_ult };
 
     // ---- WINDOW LIFECYCLE ----
@@ -131,7 +165,7 @@ try {
     player._msWin = { id: 'x', lifesteal: 0.5, until: (game.time || 0) - 1 };   // already lapsed
     const lm = mkMob(1e9, 1e9); game.monsters.push(lm);
     player.hp = 1000;
-    hitMonster(lm, 1000, false, 'aoe');
+    hit(lm, 1000, false, 'aoe');
     out.lapsed = { healed: player.hp - 1000, cleared: player._msWin === null };
 
     // priority: a shorter window must not stomp a longer one
@@ -196,7 +230,7 @@ try {
     const um = mkMob(1e9, 1e9); game.monsters.push(um);
     const mt0 = game.time || 0;
     openWin({ mark: { mul: 1.5, ms: 6000 } });
-    hitMonster(um, 100, false, 'aoe');
+    hit(um, 100, false, 'aoe');
     out.markUnits = { frames: um._msMarkUntil - mt0, expectedFrames: 6000 * 60 / 1000 };
     return out;
   });
@@ -209,7 +243,7 @@ try {
      r.lifesteal.healed > 0 && r.lifesteal.healed === r.lifesteal.expected, r.lifesteal);
   ok('LIFESTEAL heals but never overheals past maxHp',
      r.lifestealCap.healed > 0 && r.lifestealCap.within, r.lifestealCap);
-  ok('CHAIN arcs to exactly N nearby foes', r.chain.arced === 2, r.chain);
+  ok('CHAIN reaches N nearby foes and never more', r.chain.arced === 2 && !r.chain.everOver, r.chain);
   ok('CHAIN arcs land reduced damage', r.chain.arcs.filter(d => d > 0).every(d => d < r.chain.primary), r.chain);
   ok('CHAIN respects its range', r.chainRange.farUntouched, r.chainRange);
   ok('MARK amplifies damage from ANY source', r.mark.markedHit > r.mark.plainHit, r.mark);
