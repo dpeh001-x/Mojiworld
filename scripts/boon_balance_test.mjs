@@ -145,6 +145,16 @@ try {
       try { hitMonster(d2, 1000, false, 'slash'); } catch (e) {}
       res.shatter = { frozenHit, normalHit: b2 - d2.currentHp };
     }
+    // (E) Double Shot cap. Measured on a Lv 60 archer, +2 projectiles bought
+    // +184 % DPS and even +1 bought +96 % — the boon's WORST roll beat every
+    // other boon's best. Capped at +1; the roll range must match the cap or
+    // the "+2" half of the range would be silently inert.
+    build('archer');
+    equip('multi', 'multi', 'multi');            // stacking must not exceed the cap
+    res.multiStacked = player.mods.multishot;
+    const mDef = POWERUPS.find((p) => p.id === 'multi');
+    res.multiRange = { min: mDef.min, max: mDef.max };
+
     res.synergyKeys = BOON_SYNERGIES.map((s) => s.key);
     res.boonCount = POWERUPS.length;
     return res;
@@ -166,6 +176,10 @@ try {
   ok('Shatter Point synergy is detected when freeze+critd are equipped', out.shatterDetected === true);
   ok('Shatter Point: a hit on a FROZEN target crits (more damage than unfrozen)',
     out.shatter.frozenHit > out.shatter.normalHit, out.shatter);
+  ok('Double Shot is capped at +1 projectile even when stacked',
+    out.multiStacked === 1, { stacked: out.multiStacked });
+  ok('Double Shot roll range matches its cap (no silently-inert half-range)',
+    out.multiRange.max === 1, out.multiRange);
   ok(`roster grew to ${out.boonCount} boons / ${out.synergyKeys.length} synergies`,
     out.boonCount >= 21 && out.synergyKeys.length >= 20, { boons: out.boonCount, synergies: out.synergyKeys.length });
   ok('no page errors', errs.length === 0, errs.slice(0, 4));
