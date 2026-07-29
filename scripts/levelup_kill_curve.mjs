@@ -17,6 +17,8 @@ await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'do
 await page.waitForFunction(() => typeof game !== 'undefined' && typeof monsterTypes !== 'undefined', null, { timeout: 60000 });
 await page.waitForTimeout(2500);
 
+const DUMP = process.argv.find(a => a.startsWith('--dump='));
+if (DUMP) await page.evaluate(() => { window.__LX_DUMP_ALL = true; });
 const data = await page.evaluate(() => {
   const out = { rows: [], cap: (typeof MAX_LEVEL === 'number' ? MAX_LEVEL : null), notes: [] };
 
@@ -108,6 +110,17 @@ const data = await page.evaluate(() => {
   out.maxMobLevel = Math.max(...out.levelsAvailable);
   out.levelCap = (typeof MAX_LEVEL === 'number') ? MAX_LEVEL
                 : (typeof LEVEL_CAP === 'number') ? LEVEL_CAP : null;
+  // --dump mode: measure EVERY level so the retune bake has a real per-level
+  // EXP/kill table instead of a model. Above the highest field-monster level
+  // this measures the nearest available mob INCLUDING its level-gap penalty,
+  // which is exactly what a player at that level actually earns.
+  if (window.__LX_DUMP_ALL) {
+    out.perLevel = {};
+    for (let lv = 1; lv <= 100; lv++) {
+      const r = measure(lv);
+      if (r) out.perLevel[lv] = { perKill: r.perKill, monsterLevel: r.monsterLevel, n: r.n };
+    }
+  }
   const cap = out.cap || 100;
   for (let lv = 5; lv <= Math.min(cap, 100); lv += 5) {
     const r = measure(lv);
@@ -142,6 +155,11 @@ const data = await page.evaluate(() => {
 
 await b.close();
 
+if (DUMP && data.perLevel) {
+  const { writeFileSync } = await import('node:fs');
+  writeFileSync(DUMP.slice(7), JSON.stringify(data.perLevel, null, 1));
+  console.log('measured EXP/kill for ' + Object.keys(data.perLevel).length + ' levels -> ' + DUMP.slice(7) + '\n');
+}
 console.log('KILLS TO LEVEL UP — same-level monsters, Normal difficulty, no combo/gear/prestige\n');
 console.log('  Lv    EXP to next        EXP/kill    KILLS      cumulative kills 1->Lv');
 console.log('  ---   ---------------    --------    ------     ----------------------');
@@ -166,3 +184,4 @@ for (const r of data.rows) {
   console.log('    Lv ' + String(r.level).padStart(3) + '  n=' + String(r.n).padStart(2)
     + '   ' + r.spread[0].toLocaleString() + ' - ' + r.spread[1].toLocaleString());
 }
+
