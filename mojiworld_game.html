@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.338';
+const GAME_VERSION = 'v0.29.339';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -68413,7 +68413,7 @@ function killMonster(m) {
     // (and affix magnitudes downstream) grade with mob difficulty. _mobLevel
     // is the canonical helper — falls back to MOB_NATURAL_LEVEL or
     // map.levelReq if the mob doesn't carry an explicit .level field.
-    const item = rollItemDrop(tier, _mobLevel(m));
+    const item = rollItemDrop(tier, _mobLevel(m), undefined, null, _bossLootTierCap(m));
     if (item) {
       game.drops.push({
         x: m.x + m.w/2, y: m.y + m.h/2, vy: -6,
@@ -68450,7 +68450,7 @@ function killMonster(m) {
     for (let i = 0; i < _bossBonusDrops; i++) {
       // v0.25.678 — Boss bonus drops also grade by mob level — the boss's
       // own level dictates how spicy its retinue of extra rolls is.
-      const extra = rollItemDrop(2, _mobLevel(m));
+      const extra = rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m));
       if (extra) {
         game.drops.push({
           x: m.x + m.w/2 + (Math.random()-0.5)*60,
@@ -68731,11 +68731,35 @@ function killMonster(m) {
 // only". Player-class items get a 3× weight bias (vs 1× for cross-
 // class) so the Gravitos kill mostly hands out class-relevant apex
 // gear without locking cross-class loot entirely out of the pool.
+// v0.29.338 — BOSS LOOT LADDER (per user). Levels for bosses the engine
+// cannot resolve: king/mooma/octobaby carry no .level field, and the tower
+// pair are expedition bosses that scale to the player, so all five are named
+// here rather than trusting a fallback that returns 1.
+const LX_BOSS_LOOT_LV = { king: 10, mooma: 18, octobaby: 50, towerArbiter: 60, towerSovereign: 60 };
+const LX_BOSS_LOW_MAX = 29;        // at or below this, a boss tops out at T3
+const LX_BOSS_MID_MAX = 60;        // at or below this, up to T6
+const LX_ZODIAC_T8_CHANCE = 0.12;  // "rarely T8"
+// Returns the highest item tier this boss may drop, or null for non-bosses
+// (which keep the ordinary level-derived cap).
+function _bossLootTierCap(m) {
+  if (!m || !m.type) return null;
+  const t = m.type;
+  if (!(monsterTypes[t] && monsterTypes[t].boss)) return null;
+  if (t === 'gravitos') return 10;                       // its own T9+ pool handles the floor
+  if (/^zodiac_/.test(t)) return (Math.random() < LX_ZODIAC_T8_CHANCE) ? 8 : 7;
+  const lv = LX_BOSS_LOOT_LV[t] || ((typeof _mobLevel === 'function') ? _mobLevel(m) : 0) || 1;
+  if (lv <= LX_BOSS_LOW_MAX) return 3;
+  if (lv <= LX_BOSS_MID_MAX) return 6;
+  return 7;                                               // Aetherion (65), Legosaurus (69)
+}
 function _rollGravitosHighTierItem() {
   if (typeof ITEM_POOL === 'undefined' || typeof rollAffixedItem !== 'function') return null;
   const cats = ['weapons', 'armors', 'accessories'];
   const cat = cats[Math.floor(Math.random() * cats.length)];
-  const pool = (ITEM_POOL[cat] || []).filter(it => (it.tier | 0) >= 8 && it.rarity === 'legendary');
+  // v0.29.338 — was >= 8. T8 now belongs to the zodiac (rarely); Gravitos is
+  // the only source of T9 and T10. Verified 4 legendaries per slot at each of
+  // T9/T10 covering all four classes, so this pool cannot come back empty.
+  const pool = (ITEM_POOL[cat] || []).filter(it => (it.tier | 0) >= 9 && it.rarity === 'legendary');
   if (!pool.length) return null;
   const playerCls = (player && player.cls) || 'any';
   const weighted = [];
@@ -68785,7 +68809,7 @@ function triggerSuperBossDeath(m) {
   // Legendary loot pile — 4 guaranteed legendaries + 2 high tier
   for (let i = 0; i < 4; i++) {
     // v0.26.327 — Gravitos kill rolls from the T8+ pool exclusively.
-    const leg = _isGravitosKill ? _rollGravitosHighTierItem() : rollItemDrop(2);
+    const leg = _isGravitosKill ? _rollGravitosHighTierItem() : rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m));
     if (leg) {
       leg.rarity = 'legendary';
       game.drops.push({
@@ -68800,7 +68824,7 @@ function triggerSuperBossDeath(m) {
   }
   for (let i = 0; i < 2; i++) {
     // v0.26.327 — Gravitos T8+ pool override (same pattern as legendary loop above).
-    const extra = _isGravitosKill ? _rollGravitosHighTierItem() : rollItemDrop(2);
+    const extra = _isGravitosKill ? _rollGravitosHighTierItem() : rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m));
     if (extra) {
       game.drops.push({
         x: m.x + m.w/2 + (Math.random()-0.5)*160,
@@ -68834,7 +68858,7 @@ function triggerSuperBossDeath(m) {
   // converted into more equipment.
   for (let i = 0; i < 3; i++) {
     // v0.26.327 — Gravitos T8+ pool override (same pattern as above).
-    const _gear = _isGravitosKill ? _rollGravitosHighTierItem() : rollItemDrop(2, _mobLevel(m));
+    const _gear = _isGravitosKill ? _rollGravitosHighTierItem() : rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m));
     if (_gear) {
       _gear.rarity = 'legendary';
       game.drops.push({
@@ -68902,7 +68926,7 @@ function triggerSuperBossDeath(m) {
   }
 }
 
-function rollItemDrop(tier, mobLevel, forceCat, forceTier) {
+function rollItemDrop(tier, mobLevel, forceCat, forceTier, capTier) {
   // tier: 0 normal, 1 elite, 2 boss
   // mobLevel: optional, 1+ — scales rolled affix magnitudes (v0.25.484).
   // forceCat: optional 'weapons'|'armors'|'accessories' — when set, the
@@ -68946,7 +68970,14 @@ function rollItemDrop(tier, mobLevel, forceCat, forceTier) {
   // (Gravitos is exempt — it uses its own _rollGravitosHighTierItem T8+ pool.)
   const _lvTierCap = mobLevel >= 85 ? 10 : mobLevel >= 75 ? 9 : mobLevel >= 65 ? 8
                    : mobLevel >= 55 ? 7  : mobLevel >= 45 ? 6 : mobLevel >= 30 ? 5 : 4;
-  let pool = ITEM_POOL[cat].filter(it => (it.tier | 0) <= _lvTierCap);
+  // v0.29.338 — capTier REPLACES the level-derived cap (it does not merely
+  // clamp it). Boss loot is authored by boss identity, not by the level the
+  // engine happens to resolve: several bosses carry no .level field at all and
+  // fall back to the map levelReq, which is swept to 1 on open maps — Octobaby
+  // and the two tower bosses all resolved to Lv 1 and would otherwise have been
+  // graded as low-tier. Only boss death paths pass this.
+  const _cap = (typeof capTier === 'number') ? capTier : _lvTierCap;
+  let pool = ITEM_POOL[cat].filter(it => (it.tier | 0) <= _cap);
   if (tier < 2) pool = pool.filter(it => (it.tier | 0) <= 7);
   // v0.29.336 — forceTier pins the pool to ONE item tier and deliberately
   // bypasses _lvTierCap. It is only ever passed by an authored quest reward
