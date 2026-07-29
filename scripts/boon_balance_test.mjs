@@ -145,15 +145,30 @@ try {
       try { hitMonster(d2, 1000, false, 'slash'); } catch (e) {}
       res.shatter = { frozenHit, normalHit: b2 - d2.currentHp };
     }
-    // (E) Double Shot cap. Measured on a Lv 60 archer, +2 projectiles bought
-    // +184 % DPS and even +1 bought +96 % — the boon's WORST roll beat every
-    // other boon's best. Capped at +1; the roll range must match the cap or
-    // the "+2" half of the range would be silently inert.
+    // (E) Double Shot — assert the MECHANISM, not a windowed DPS number.
+    // A swing-window measurement reads this boon as +167 % because spent
+    // arrows stay in flight between swings and doubling the arrow count
+    // doubles that carry-over. Instrument the projectiles instead: each extra
+    // projectile is an echo at HALF damage, so +1 is +50 % per cast. That is
+    // the real balance lever and it cannot be faked by harness drift.
     build('archer');
     equip('multi', 'multi', 'multi');            // stacking must not exceed the cap
     res.multiStacked = player.mods.multishot;
     const mDef = POWERUPS.find((p) => p.id === 'multi');
     res.multiRange = { min: mDef.min, max: mDef.max };
+    {
+      const shot = () => {
+        game.projectiles.length = 0; player.skillCooldowns = {}; player.mp = 9e6;
+        try { castSkill('arrowShot'); } catch (e) {}
+        game.time++; try { updateProjectiles(16); } catch (e) {}
+        return game.projectiles.map((p) => Math.round(p.damage || 0));
+      };
+      build('archer'); const off = shot();
+      build('archer'); equip('multi'); const on = shot();
+      const sum = (a) => a.reduce((x, y) => x + y, 0);
+      res.echo = { off, on, offTotal: sum(off), onTotal: sum(on),
+        gainPct: +(((sum(on) - sum(off)) / Math.max(1, sum(off))) * 100).toFixed(1) };
+    }
 
     res.synergyKeys = BOON_SYNERGIES.map((s) => s.key);
     res.boonCount = POWERUPS.length;
@@ -176,10 +191,22 @@ try {
   ok('Shatter Point synergy is detected when freeze+critd are equipped', out.shatterDetected === true);
   ok('Shatter Point: a hit on a FROZEN target crits (more damage than unfrozen)',
     out.shatter.frozenHit > out.shatter.normalHit, out.shatter);
-  ok('Double Shot is capped at +1 projectile even when stacked',
-    out.multiStacked === 1, { stacked: out.multiStacked });
+  ok('Double Shot is capped at +2 projectiles even when stacked',
+    out.multiStacked === 2, { stacked: out.multiStacked });
   ok('Double Shot roll range matches its cap (no silently-inert half-range)',
-    out.multiRange.max === 1, out.multiRange);
+    out.multiRange.max === out.multiStacked, { range: out.multiRange, cap: out.multiStacked });
+  // Roll-independent: whatever the roll, each EXTRA projectile must be a
+  // half-damage echo. That ratio is the balance lever (a max roll of +2 is
+  // therefore ~+100% per cast, in band with Keen Edge, not the +167% a
+  // swing-window measurement wrongly reported).
+  {
+    const primary = out.echo.on[0] || 0;
+    const echoes = out.echo.on.slice(1);
+    const ratios = echoes.map((d) => +(d / Math.max(1, primary)).toFixed(2));
+    ok('extra projectiles are HALF-damage echoes (each ~0.5x the primary)',
+      echoes.length === out.multiStacked && ratios.every((r) => r > 0.4 && r < 0.6),
+      { primary, echoes, ratios, cap: out.multiStacked, totalGainPct: out.echo.gainPct });
+  }
   ok(`roster grew to ${out.boonCount} boons / ${out.synergyKeys.length} synergies`,
     out.boonCount >= 21 && out.synergyKeys.length >= 20, { boons: out.boonCount, synergies: out.synergyKeys.length });
   ok('no page errors', errs.length === 0, errs.slice(0, 4));
