@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.294';
+const GAME_VERSION = 'v0.29.296';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -27621,7 +27621,14 @@ function getDef()  {
   let d = player.baseDef + player.mods.def + getEquipBonus('def') + ((game.dexPerm && game.dexPerm.def) || 0);   // v0.29.x — Mojidex completion perm-bonus
   if (player.buffs.warCry > 0)   d = Math.floor(d * 1.25);
   if (player.buffs.guardian > 0) d = Math.floor(d * 1.5 + 40);
-  if (player.buffs.holyShield > 0) d += 9999;
+  // v0.29.288 — the +9999 DEF spike now matches the 2.5 s I-FRAME window, not
+  // the 5 s buff. v0.26.x halved the hard invuln (5000→2500 ms) to cut Holy
+  // Shield's uptime, but this spike still rode the full 5 s buff timer, so
+  // effective immunity stayed ~5 s and the nerf was only half-applied (the
+  // skill's own desc promises "2.5s invulnerability"). buffs.holyShield counts
+  // DOWN from 5000 ms, so ">2500" IS exactly the first 2.5 s — no new state.
+  // The remaining 2.5 s keeps the advertised damage reflect + the Lv10 DR.
+  if (player.buffs.holyShield > 2500) d += 9999;
   // Milestone: Second Wind — +80% DEF for 10s when HP<20%, triggered once per 2min
   if (hasMilestone('secondWind')) {
     const hpP = player.hp / Math.max(1, getMaxHp());
@@ -32391,6 +32398,36 @@ const LX_MONSTER_EXP_MULT = 10;
 // v0.29.x — quest EXP knob, mirrors the monster knob. Applied once at the
 // quest-completion grant in _completeQuest. Scope: quest reward EXP only.
 const LX_QUEST_EXP_MULT = 10;
+// =========================================================================
+// v0.29.296 — EARLY-GAME EXP RAMP-DOWN (per user "reduce the 10x exp gain
+// gradually to normal after level 10 is obtained").
+// Replaces TWO abrupt knobs that used to be multiplied in raw at every award
+// site: the flat opening-event ×10 (LX_EVENT_EXP_MULT) and a ×3 kicker that
+// cliff-dropped to ×1 the instant the player hit Lv 6. A brand-new player
+// therefore went from ×30 to ×10 between one kill and the next, and then kept
+// the full ×10 forever — the boost never actually "eventually reverted" the
+// way its own comment promised.
+// Now it is one continuous curve, strongest exactly where a new player needs
+// the pull and easing to normal once they are invested:
+//   Lv 1  ×30   (fastest first hour — levels land every couple of fights)
+//   Lv 5  ×19
+//   Lv 10 ×10   (full event bonus still intact at the "graduation" level)
+//   Lv 15 ×7.75 · Lv 20 ×5.5 · Lv 25 ×3.25
+//   Lv 30+ ×1   — normal. The permanent LX_MONSTER_EXP_MULT / LX_QUEST_EXP_MULT
+//                 knobs are untouched; THEY define "normal" for this game.
+// Continuous at Lv 10 (both branches evaluate to exactly the event mult), so
+// there is no cliff anywhere on the curve. Setting LX_EVENT_EXP_MULT back to 1
+// still reverts the event cleanly: the early kicker degrades to ×3→×1 and
+// everything from Lv 10 on is flat ×1.
+const LX_EARLY_EXP_KICK = 3;    // extra multiplier at Lv 1, decaying to 1 by Lv 10
+const LX_EARLY_EXP_END  = 30;   // level at which the boost has fully returned to normal
+function _lxEarlyExpMul(lv) {
+  const L = Math.max(1, lv | 0);
+  const peak = (typeof LX_EVENT_EXP_MULT === 'number' && LX_EVENT_EXP_MULT > 0) ? LX_EVENT_EXP_MULT : 1;
+  if (L <= 10) return peak * (1 + (LX_EARLY_EXP_KICK - 1) * (10 - L) / 9);
+  if (L < LX_EARLY_EXP_END) return 1 + (peak - 1) * (LX_EARLY_EXP_END - L) / (LX_EARLY_EXP_END - 10);
+  return 1;
+}
 const SAVE_KEY = 'levelx_save_v1';
 const SAVE_VERSION = 1;
 const PLAYER_SAVE_FIELDS = [
@@ -32581,7 +32618,15 @@ const GAME_SAVE_FIELDS = [
   // state; the rest of the fields are dormant in that case.
   'expedition',
   // v0.26.x — Boss Rush: best-run record + once-per-day reward stamp.
-  'bossRushBest','_bossRushRewardDay'
+  'bossRushBest','_bossRushRewardDay',
+  // v0.29.296 — Trainee Path ladder ({kills, quests, done:{id:ts}}). Without
+  // this a reload resets the counters and re-grants every rung.
+  'early',
+  // v0.29.296 — dexMilestones / dexPerm were NEVER in this whitelist, so the
+  // Mojidex milestone rewards silently re-granted on every reload and their
+  // PERMANENT +ATK/+DEF was thrown away each session. Found while wiring the
+  // Trainee Path, whose final rung grants through the same dexPerm store.
+  'dexMilestones','dexPerm'
 ];
 // v0.25.264 — saveState() is called from ~30 sites: every kill, quest tick,
 // boon equip, skill unlock, level-up, etc. Each call serializes the whole
@@ -37656,6 +37701,110 @@ function _checkDexMilestones() {
 }
 try { window._checkDexMilestones = _checkDexMilestones; } catch (e) {}
 
+// =========================================================================
+// v0.29.296 — TRAINEE PATH (per user "create hooks for early players to keep
+// on playing"). The first session had no visible short-term goal: quests are
+// spread across NPCs the player has not met, the Mojidex milestones need a
+// quarter of the bestiary, and the mastery bar is a late-game system. So a new
+// player's only feedback was the level bar — and once the ×10 EXP ramp starts
+// easing (see _lxEarlyExpMul) that bar visibly slows, which is precisely when
+// people quit.
+// This is a short ladder of first-hour goals that pays out immediately and,
+// critically, ANNOUNCES THE NEXT ONE on every completion — so there is always
+// a named, close, concrete reason to keep playing. It retires itself the
+// moment the last rung is claimed, so it never clutters a real save.
+// Rungs alternate "keep fighting" and "keep levelling" so neither activity
+// stalls, and the rewards are deliberately consumables + coins: exactly what
+// a new player is short of, and what makes the next fight feel survivable.
+const EARLY_HOOKS = [
+  { id: 'first_blood', kills: 1,  name: 'First Blood',        coins: 200,  pots: { hp_s: 3 } },
+  { id: 'lv3',         level: 3,  name: 'Finding Your Feet',  coins: 500,  pots: { hp_s: 4, mp_s: 3 } },
+  { id: 'kills15',     kills: 15, name: 'Pest Control',       coins: 900,  pots: { hp_s: 5 } },
+  { id: 'lv5',         level: 5,  name: 'Adventurer',         coins: 1600, pots: { hp_m: 3, mp_s: 4 }, shards: 3 },
+  { id: 'quest1',      quests: 1, name: 'Errand Runner',      coins: 2000, pots: { hp_m: 3 } },
+  { id: 'kills50',     kills: 50, name: 'Monster Hunter',     coins: 3000, pots: { hp_m: 4, mp_m: 2 }, shards: 5 },
+  { id: 'lv8',         level: 8,  name: 'Seasoned',           coins: 4000, pots: { hp_m: 5, mp_m: 3 }, shards: 6 },
+  // Final rung lands exactly where the EXP ramp hands over to the normal
+  // curve, so "graduation" is a reward rather than a slowdown the player
+  // notices on their own. The permanent stat makes it feel like a threshold.
+  { id: 'lv10',        level: 10, name: 'Graduate of the Dawn', coins: 8000, pots: { hp_l: 3, mp_l: 2 }, shards: 12, atk: 2, def: 2 },
+];
+function _earlyState() {
+  if (!game.early) game.early = { kills: 0, quests: 0, done: {} };
+  if (!game.early.done) game.early.done = {};
+  return game.early;
+}
+function _earlyHooksComplete() {
+  const st = _earlyState();
+  return EARLY_HOOKS.every(h => st.done[h.id]);
+}
+// Human-readable "what's next" line — this is the actual retention hook.
+function _earlyHookLabel(h) {
+  if (h.level)  return `reach Lv ${h.level}`;
+  if (h.kills)  return `defeat ${h.kills} monsters`;
+  if (h.quests) return `complete a quest`;
+  return h.name;
+}
+function _earlyHookProgress(h, st) {
+  if (h.level)  return Math.min(player.level || 1, h.level) + '/' + h.level;
+  if (h.kills)  return Math.min(st.kills, h.kills) + '/' + h.kills;
+  if (h.quests) return Math.min(st.quests, h.quests) + '/' + h.quests;
+  return '';
+}
+function _checkEarlyHooks() {
+  try {
+    if (typeof player === 'undefined' || !player || !player.cls) return;
+    const st = _earlyState();
+    let changed = false;
+    for (const h of EARLY_HOOKS) {
+      if (st.done[h.id]) continue;
+      const met = (h.level  && (player.level || 1) >= h.level)
+               || (h.kills  && st.kills  >= h.kills)
+               || (h.quests && st.quests >= h.quests);
+      if (!met) continue;
+      st.done[h.id] = Date.now();
+      changed = true;
+      const parts = [];
+      if (h.coins && typeof _grantMojicoins === 'function') {
+        _grantMojicoins(h.coins, { full: true });
+        parts.push(`+${h.coins.toLocaleString()}c`);
+      }
+      if (h.pots) {
+        if (!player.consumables) player.consumables = {};
+        for (const pid in h.pots) {
+          const qty = h.pots[pid] | 0;
+          if (qty <= 0) continue;
+          player.consumables[pid] = (player.consumables[pid] || 0) + qty;
+          const def = (typeof POTION_ITEMS !== 'undefined') && POTION_ITEMS.find(p => p.id === pid);
+          parts.push(`${def ? def.icon : '🧪'}×${qty}`);
+        }
+      }
+      if (h.shards) { player.setshards = (player.setshards | 0) + h.shards; parts.push(`+${h.shards}◈`); }
+      if (h.atk || h.def) {
+        if (!game.dexPerm) game.dexPerm = { atk: 0, def: 0 };
+        game.dexPerm.atk += (h.atk | 0); game.dexPerm.def += (h.def | 0);
+        parts.push(`+${h.atk | 0} ATK/+${h.def | 0} DEF (permanent)`);
+      }
+      if (typeof showToast === 'function') showToast(`🌟 ${h.name} — ${parts.join(' · ')}`, 'legendary');
+      if (typeof flash === 'function') flash(0.22);
+      try { audio.play('levelup'); } catch (e) {}
+      // Announce the NEXT rung a beat later so the reward toast lands first.
+      const next = EARLY_HOOKS.find(n => !st.done[n.id]);
+      if (next && typeof showToast === 'function') {
+        setTimeout(() => {
+          try { showToast(`▶ Next: ${_earlyHookLabel(next)} → ${next.name}`, 'epic'); } catch (e) {}
+        }, 1500);
+      } else if (!next && typeof showToast === 'function') {
+        setTimeout(() => {
+          try { showToast('🎓 Trainee Path complete — the world opens up from here!', 'legendary'); } catch (e) {}
+        }, 1500);
+      }
+    }
+    if (changed && typeof saveState === 'function') saveState();
+  } catch (e) {}
+}
+try { window._checkEarlyHooks = _checkEarlyHooks; } catch (e) {}
+
 // v0.29.x — CO-OP RARE-DROP BROADCAST. When a party member loots an epic or
 // legendary, tell the room via a chat frame tagged with a leading sparkle so
 // receivers style it gold + chime + a sparkle over the finder (see the 'chat'
@@ -38284,6 +38433,11 @@ function _completeQuest(id) {
   const _activeSnap = player.quests.active[id] || {};
   delete player.quests.active[id];
   player.quests.completed[id] = Date.now();
+  // v0.29.296 — Trainee Path: count the turn-in. Placed after the idempotency
+  // guard above so a re-entrant call can never inflate the counter.
+  try {
+    if (typeof _earlyHooksComplete === 'function' && !_earlyHooksComplete()) _earlyState().quests++;
+  } catch (e) {}
   // v0.25.916 — Clean up multi-visit progress counter so a repeatable
   // quest re-accepted later starts from 0, not whatever the last run
   // ended on. Debug recon (agent aa7651a9) flagged the orphan-progress
@@ -38310,8 +38464,10 @@ function _completeQuest(id) {
   if (r.exp)   {
     // Authored payout: flat r.exp × early-level ×3 × opening event. This stays
     // GENEROUS at low levels (a Lv-1 quest is worth several early levels) — keep it.
-    const _early = ((player.level || 1) <= 5) ? 3 : 1;
-    const _authored = Math.floor(r.exp * _early * LX_EVENT_EXP_MULT);
+    // v0.29.296 — same continuous early ramp as monster kills (was ×3 below
+    // Lv 6 times a flat event ×10, which never tapered).
+    const _early = (typeof _lxEarlyExpMul === 'function') ? _lxEarlyExpMul(player.level || 1) : 1;
+    const _authored = Math.floor(r.exp * _early);
     // v0.29.7 — MEANINGFUL FLOOR. Quest EXP was authored against the old
     // 200·L^2.5 curve and was already negligible at high levels (a Lv-44 quest
     // = ~0.01 of a level); the v0.28.11 kill-anchored curve made it far worse.
@@ -49764,7 +49920,13 @@ function updatePlayer(dt) {
           const sq = dx * dx + dy * dy;
           if (sq < bestSq) { bestSq = sq; tgt = m; }
         }
-        if (_checkContact && !m.isBoss && !m.isMiniBoss) {
+        // v0.29.288 — BOSSES CAN HURT SUMMONS (per user "summons should be
+        // susceptible to monster attacks"). The `!m.isBoss && !m.isMiniBoss`
+        // exclusion made every wolf/eagle/werewolf INVULNERABLE in exactly the
+        // fight you summon them for — they tanked a boss forever for free.
+        // Contact damage is m.atk on a 1 s per-summon cooldown, so a boss now
+        // grinds a 10 000 HP wolf down in ~20 s instead of never.
+        if (_checkContact) {
           if (m.x < _pbX + _pbW && m.x + m.w > _pbX &&
               m.y < _pbY + _pbH && m.y + m.h > _pbY) {
             _totalDmg += (m.atk || 0);
@@ -49864,7 +50026,13 @@ function updatePlayer(dt) {
           const sq = dx * dx + dy * dy;
           if (sq < bestSq) { bestSq = sq; tgt = m; }
         }
-        if (_checkContact && !m.isBoss && !m.isMiniBoss) {
+        // v0.29.288 — BOSSES CAN HURT SUMMONS (per user "summons should be
+        // susceptible to monster attacks"). The `!m.isBoss && !m.isMiniBoss`
+        // exclusion made every wolf/eagle/werewolf INVULNERABLE in exactly the
+        // fight you summon them for — they tanked a boss forever for free.
+        // Contact damage is m.atk on a 1 s per-summon cooldown, so a boss now
+        // grinds a 10 000 HP wolf down in ~20 s instead of never.
+        if (_checkContact) {
           if (m.x < _pbX + _pbW && m.x + m.w > _pbX &&
               m.y < _pbY + _pbH && m.y + m.h > _pbY) {
             _totalDmg += (m.atk || 0);
@@ -51863,7 +52031,10 @@ function updateMinions(dt) {
       if (sq < bestSq) { bestSq = sq; tgt = m; }
       // v0.26.x - monster contact damage TO the minion (mirrors the wolf-pet
       // model: sum atk of overlapping non-boss mobs, applied once per second).
-      if (_mnTakeHit && !m.isBoss && !m.isMiniBoss &&
+      // v0.29.288 — boss/mini-boss exemption removed here too (same fix as the
+      // wolf/eagle summons): minions were immortal against exactly the enemies
+      // worth summoning against.
+      if (_mnTakeHit &&
           m.x < mn.x + mn.w && m.x + m.w > mn.x &&
           m.y < mn.y + mn.h && m.y + m.h > mn.y) {
         _mnIncoming += (m.atk || 0);
@@ -53107,7 +53278,10 @@ const SKILL_FNS = {
     const _hsBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('holyShield') : null;
     if (_hsBonus && _hsBonus.drMs) {
       player._holyShieldDr = _hsBonus.drBonus || 0;
-      player._holyShieldDrUntil = (game.time | 0) + (_hsBonus.drMs | 0);
+      // v0.29.288 — UNIT FIX: game.time is a FRAME counter (~60/s), but drMs is
+      // milliseconds, so `game.time + 10000` ran the Lv10 DR for 10 000 frames
+      // ≈ 166 s instead of the advertised 10 s (16.6× over). Convert ms→frames.
+      player._holyShieldDrUntil = (game.time | 0) + Math.round((_hsBonus.drMs | 0) * 0.06);
     }
     showToast('HOLY SHIELD!' + (_hsBonus && _hsBonus.drBonus ? ' · +25% DR / 10 s' : ''), 'legendary');
     flash(0.7);     // Three expanding light waves that damage enemies
@@ -65386,6 +65560,10 @@ function _maybeLevelUp() {
   player.baseAtk += player.cls === 'warrior' ? 3 : player.cls === 'mage' ? 2 : 2;
   player.baseDef += player.cls === 'warrior' ? 2 : 1;
   player.skillPoints += 3;
+  // v0.29.296 — Trainee Path: level-gated rungs resolve the instant the level
+  // lands, so the reward toast rides the level-up moment instead of waiting
+  // for the next kill.
+  try { if (typeof _checkEarlyHooks === 'function' && !_earlyHooksComplete()) _checkEarlyHooks(); } catch (e) {}
   // v0.25.109 — also grant +1 SKILL POINT (per-skill upgrade currency,
   // distinct from the legacy `skillPoints` which is now labelled
   // "ability points" in the UI). Spend in U → 🎯 Skill Ranks.
@@ -66193,9 +66371,20 @@ function killMonster(m) {
   const _pqFarmMul = (_pqFarmQ && player.quests && player.quests.completed && player.quests.completed[_pqFarmQ]) ? 0.2 : 1;
   // v0.26.x — Per user: +200% XP (×3) while the player is level 1-5, so the
   // earliest levels fly by. Drops to ×1 the moment they reach level 6.
-  const _earlyLvlXpMul = ((player.level || 1) <= 5) ? 3 : 1;
-  const _xpGain = Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul * mpCoopMul * _pqFarmMul * _earlyLvlXpMul * LX_EVENT_EXP_MULT * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _affixExpMul === 'function' ? _affixExpMul() : 1));   // (EVENT) opening +900% EXP · monster EXP knob (v0.28.5: ×1, was ×2) · v0.28.7 difficulty risk/reward · v0.29.288 world affix
+  // v0.29.296 — the ×3 kicker and the flat opening-event ×10 are now ONE
+  // continuous ramp (see _lxEarlyExpMul): ×30 at Lv 1 → ×10 at Lv 10 → ×1 by
+  // Lv 30. No cliff at Lv 6, and the boost genuinely returns to normal.
+  const _earlyLvlXpMul = (typeof _lxEarlyExpMul === 'function') ? _lxEarlyExpMul(player.level || 1) : 1;
+  const _xpGain = Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul * mpCoopMul * _pqFarmMul * _earlyLvlXpMul * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _affixExpMul === 'function' ? _affixExpMul() : 1));   // v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.288 world affix
   player.exp += _xpGain;
+  // v0.29.296 — Trainee Path: count the kill, then test the ladder. Skipped
+  // entirely once the path is finished so a long-running save pays nothing.
+  try {
+    if (typeof _earlyHooksComplete === 'function' && !_earlyHooksComplete()) {
+      _earlyState().kills++;
+      _checkEarlyHooks();
+    }
+  } catch (e) {}
   // v0.27.0 co-op — when I'm the host, tell peers on my map this monster died so
   // they get their share of XP/coins + a death pop (they suppressed their own
   // kill pipeline). Base exp/coins broadcast; each peer applies its own scaling.
@@ -66852,7 +67041,7 @@ function triggerSuperBossDeath(m) {
 
   // Huge EXP bonus on top of normal (prestige-scaled)
   const _pXp = (game.prestige && game.prestige.xpMult) || 1;
-  player.exp += Math.floor(m.exp * 0.5 * _pXp * (((player.level || 1) <= 5) ? 3 : 1) * LX_EVENT_EXP_MULT * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _edictExpMul === 'function' ? _edictExpMul() : 1));   // v0.26.x — +200% XP at levels 1-5 · (EVENT) opening +900% EXP · monster EXP knob (v0.28.5: ×1, was ×2) · v0.28.7 difficulty risk/reward · v0.29.66 Edict Weight EXP bonus
+  player.exp += Math.floor(m.exp * 0.5 * _pXp * ((typeof _lxEarlyExpMul === 'function') ? _lxEarlyExpMul(player.level || 1) : 1) * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _edictExpMul === 'function' ? _edictExpMul() : 1));   // v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.66 Edict Weight EXP bonus
   // v0.26.x audit FIX — convert the banked bonus into levels NOW. The kill
   // flow's only _maybeLevelUp runs BEFORE this grant, so without this call a
   // Shardfather kill (a big, level-crossing bonus, more so with the ×20 EXP
@@ -67072,6 +67261,40 @@ function rollItemDrop(tier, mobLevel, forceCat) {
 // PROJECTILES
 // =========================================================================
 const _LIVE_MOBS_SCRATCH = [];
+// v0.29.288 — SUMMONS BLOCK / TAKE ENEMY FIRE (per user "summons should be
+// susceptible to monster attacks"). Enemy projectiles previously tested
+// collision against the PLAYER only, so every shot passed straight THROUGH a
+// wolf/eagle/werewolf as if it weren't there — combined with the boss-contact
+// exemption, summons were untouchable by ranged mobs and bosses alike.
+// Returns the summon that was hit (already damaged), else null. Damage is the
+// projectile's own p.damage, on the same 1 s per-summon cooldown that gates
+// contact damage, so a dense volley can't delete a summon in a single frame.
+function _lxSummonProjHit(p) {
+  if (!p || !player) return null;
+  const list = [];
+  if (player.pet) list.push(player.pet);
+  if (player.ultPet) list.push(player.ultPet);
+  if (Array.isArray(player.pack)) for (const w of player.pack) if (w) list.push(w);
+  if (Array.isArray(game.minions)) for (const mn of game.minions) if (mn) list.push(mn);
+  if (!list.length) return null;
+  const px = p.x, py = p.y, pw = p.w || 8, ph = p.h || 8;
+  for (const s of list) {
+    // wolves/eagles carry `hp`; warlock/lich minions carry `currentHp`.
+    const usesCur = (s.hp == null && s.currentHp != null);
+    const cur = usesCur ? s.currentHp : s.hp;
+    if (cur == null || cur <= 0) continue;
+    if ((s.dmgCD || 0) > 0) continue;                       // still in its post-hit grace
+    const sw = s.w || 40, sh = s.h || 40;
+    if (px < s.x + sw && px + pw > s.x && py < s.y + sh && py + ph > s.y) {
+      const dmg = Math.max(1, Math.floor(p.damage || 0));
+      if (usesCur) s.currentHp = Math.max(0, cur - dmg);
+      else s.hp = Math.max(0, cur - dmg);
+      s.dmgCD = 1000;
+      return s;
+    }
+  }
+  return null;
+}
 function updateProjectiles(dt) {
   // v0.26.217 — Pre-filter live mobs once per frame for the per-projectile
   // collision loops below. Pre-fix every projectile iterated game.monsters
@@ -67471,6 +67694,12 @@ function updateProjectiles(dt) {
       if (_projOffScreen) {
         // Ignore damage; let the projectile keep updating until life
         // expires or it crosses the world bound.
+      } else
+      // v0.29.288 — a summon standing in the line of fire now EATS the shot
+      // (see _lxSummonProjHit). Checked before the player so a wolf actually
+      // body-blocks for you; the projectile is consumed unless it pierces.
+      if (_lxSummonProjHit(p)) {
+        if (!p.pierce) hit = true;
       } else
       if (aabb(p, player) && player.invulnerable <= 0) {
         // Parry — absorb + stun nearest monster
@@ -106464,10 +106693,31 @@ if (!loadState()) {
 if (typeof LX_EVENT_EXP_MULT === 'number' && LX_EVENT_EXP_MULT > 1) {
   setTimeout(() => {
     if (typeof showToast === 'function') {
-      showToast(`🎉 OPENING EVENT — +${(LX_EVENT_EXP_MULT - 1) * 100}% bonus EXP on everything, for a limited time!`, 'legendary');
+      // v0.29.296 — quote the ramp's CURRENT value rather than the raw constant,
+      // so the banner tells the truth as the bonus eases off instead of
+      // promising ×10 to a Lv-25 player who is actually getting ~×3.
+      const _cur = (typeof _lxEarlyExpMul === 'function' && typeof player !== 'undefined' && player)
+        ? _lxEarlyExpMul(player.level || 1) : LX_EVENT_EXP_MULT;
+      if (_cur > 1.05) {
+        showToast(`🎉 OPENING EVENT — +${Math.round((_cur - 1) * 100)}% bonus EXP right now (eases to normal by Lv ${LX_EARLY_EXP_END})`, 'legendary');
+      }
     }
   }, 4000);
 }
+// v0.29.296 — Trainee Path: show the first rung to a brand-new player so the
+// very first thing they see is a named, reachable goal. Only fires when the
+// ladder is genuinely untouched (fresh save), never on a returning character.
+setTimeout(() => {
+  try {
+    if (typeof _earlyHooksComplete !== 'function' || _earlyHooksComplete()) return;
+    const st = _earlyState();
+    if ((st.kills | 0) > 0 || (st.quests | 0) > 0 || Object.keys(st.done || {}).length) return;
+    const first = EARLY_HOOKS.find(h => !st.done[h.id]);
+    if (first && typeof showToast === 'function') {
+      showToast(`▶ Trainee Path — ${_earlyHookLabel(first)} → ${first.name}`, 'epic');
+    }
+  } catch (e) {}
+}, 7000);
 renderSkillBar();
 
 // v0.25.28 — wire the hotkey-hint chip so tap/click dispatches a real K
