@@ -22,6 +22,20 @@ const PREFIX = 'A die-cut STICKER of the SUBJECT described below — the object/
   'Clean simple chibi-anime game-icon style: bold simple shapes with a thin EVEN ~2px solid BLACK outline (uniform weight, NOT thick or chunky), vibrant flat colors, light cel shading, a soft glow. ' +
   'Centered, about 82% of the square image. ABSOLUTELY NO TEXT: no letters, numbers, words or watermark. Subject: ';
 
+// Some subjects (a sword, an eye) are so strongly associated with classic
+// game-icon tiles that the model paints a rounded-square badge behind them
+// even though PREFIX forbids it — crit and atk both came back framed twice.
+// STUBBORN reframes the request as a physical vinyl sticker photographed on
+// nothing, which breaks that association, and names the failure explicitly.
+const STUBBORN = 'A single physical die-cut VINYL STICKER, floating alone on a FULLY TRANSPARENT alpha background — ' +
+  'like a sticker peeled off its sheet with nothing behind it. The ONLY thing in the image is the subject shape itself. ' +
+  'CRITICAL: do NOT paint any square, rounded-square, circle, badge, tile, card, plaque, panel, medallion, button or coloured backdrop behind the subject. ' +
+  'The area around the subject must be EMPTY / transparent — not dark blue, not navy, not teal, not white, not any colour. ' +
+  'Style: clean chibi-anime game art, bold simple shapes, thin even ~2px solid black outline, vibrant flat colours, light cel shading, thin white sticker rim around the silhouette. ' +
+  'Centered, about 82% of the frame. NO TEXT of any kind. The sticker subject is: ';
+// Per-id prompt override for the two that keep coming back framed.
+const PREFIX_FOR = { crit: STUBBORN, atk: STUBBORN };
+
 // id (POWERUPS id) -> concrete subject
 const BOON = {
   atk_p:  'a strong flexed muscular arm showing a big bicep, with a small power-spark',
@@ -53,7 +67,11 @@ const exists = async (p) => { try { await access(p); return true; } catch { retu
 async function fetchBuf(u) { const r = await fetch(u, { signal: AbortSignal.timeout(120000) }); if (!r.ok) throw new Error('fetch ' + r.status); return Buffer.from(await r.arrayBuffer()); }
 
 let keys = Object.keys(BOON);
-const only = arg('--only'); if (only) keys = keys.filter((k) => only.split(',').some((o) => k === o || k.startsWith(o)));
+// --only is EXACT by default. It used to prefix-match, so `--only crit,atk`
+// silently also regenerated critd and atk_p (two already-correct icons).
+// Opt into prefix matching explicitly with a trailing '*', e.g. `--only atk*`.
+const only = arg('--only');
+if (only) keys = keys.filter((k) => only.split(',').some((o) => (o.endsWith('*') ? k.startsWith(o.slice(0, -1)) : k === o)));
 if (!keys.length) { console.error('No matching boons.'); process.exit(1); }
 if (!has('--generate')) {
   console.log(`# ${keys.length} boon icons -> Sprites/boons/<id>.png (${SIZE}x${SIZE})\n`);
@@ -77,7 +95,7 @@ async function gen(k) {
     try {
       const res = await fetch(`${API}/assets/image`, {
         method: 'POST', headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(TIMEOUT),
-        body: JSON.stringify({ image_type: 'sprite', art_style: 'Anime/Manga', aspect_ratio: 'ar_1_1', n: 1, augment_prompt: false, prompt: PREFIX + BOON[k] + '.' }),
+        body: JSON.stringify({ image_type: 'sprite', art_style: 'Anime/Manga', aspect_ratio: 'ar_1_1', n: 1, augment_prompt: false, prompt: (PREFIX_FOR[k] || PREFIX) + BOON[k] + '.' }),
       });
       if (!res.ok) { const t = await res.text(); if (/\b402\b/.test(t)) throw new Error('402 OUT OF CREDITS'); throw new Error(res.status + ': ' + t.slice(0, 140)); }
       const data = await res.json();
