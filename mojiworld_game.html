@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.309';
+const GAME_VERSION = 'v0.29.310';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -43485,6 +43485,50 @@ function tickDaily(kind, n) {
 }
 
 // =========================================================================
+// v0.29.310 — COIN PENALTIES BILL THE BANK TOO (per user)
+// =========================================================================
+// Percentage-based mojicoin deductions (the death haircut, the Reset Stats
+// fee) used to read `player.mojicoins` alone, so parking a stash with Felina
+// made both of them effectively free — deposit everything, die for 0, reset
+// stats for 0. They now measure against TOTAL net worth (wallet + vault) and
+// draw the charge from the wallet first, falling through to the bank for the
+// remainder. The bank keeps its real value (1.5 %/day interest, no fee) but
+// is no longer a penalty shelter.
+//
+// Both helpers are the single source of truth for that rule — any future
+// percentage penalty should use totalCoins() to size it and chargeCoins() to
+// collect it, so wallet/bank stay consistent in one place.
+function totalCoins() {
+  const w = (typeof player !== 'undefined' && player && isFinite(player.mojicoins)) ? +player.mojicoins : 0;
+  const b = (typeof player !== 'undefined' && player && isFinite(player.bankBalance)) ? +player.bankBalance : 0;
+  return Math.max(0, w) + Math.max(0, b);
+}
+
+// Deduct `amount` from the wallet, then the bank. Returns what was actually
+// taken (< amount only when the player is genuinely broke on both sides).
+function chargeCoins(amount) {
+  let owed = Math.max(0, Math.floor(amount || 0));
+  if (!owed || typeof player === 'undefined' || !player) return 0;
+  let taken = 0;
+  const wallet = (isFinite(player.mojicoins) ? Math.max(0, +player.mojicoins) : 0);
+  const fromWallet = Math.min(wallet, owed);
+  player.mojicoins = wallet - fromWallet;
+  owed -= fromWallet; taken += fromWallet;
+  if (owed > 0) {
+    const bank = (isFinite(player.bankBalance) ? Math.max(0, +player.bankBalance) : 0);
+    const fromBank = Math.min(bank, owed);
+    if (fromBank > 0) {
+      player.bankBalance = bank - fromBank;
+      // Re-stamp the interest clock so the drained balance doesn't retro-earn
+      // interest on coins that are no longer there.
+      player.bankLastTick = (typeof _monoNow === 'function') ? _monoNow() : Date.now();
+      taken += fromBank;
+    }
+  }
+  return taken;
+}
+
+// =========================================================================
 // RESPEC — refund attributes + reset milestone perks for a Mojicoin cost
 // =========================================================================
 // Full reset — wipe the save and return to a fresh game.
@@ -43591,10 +43635,12 @@ function resetStats() {
   const spent = player._levelUpSpent || {};
   const totalRanks = (typeof LEVELUP_OPTIONS !== 'undefined' ? LEVELUP_OPTIONS : []).reduce((a, o) => a + (spent[o.id] || 0), 0);
   if (totalRanks <= 0) { if (typeof showToast === 'function') showToast('No invested stats to reset.', 'common'); return; }
-  const cost = Math.floor((player.mojicoins || 0) * 0.20);
+  // v0.29.310 — priced off wallet + bank, and collected from both. Banking
+  // the stash before hitting Reset Stats used to make the refund free.
+  const cost = Math.floor(totalCoins() * 0.20);
   const _go = () => {
-    if ((player.mojicoins || 0) < cost) { if (typeof showToast === 'function') showToast('Not enough Mojicoins.', 'rare'); return; }
-    player.mojicoins -= cost;
+    if (totalCoins() < cost) { if (typeof showToast === 'function') showToast('Not enough Mojicoins.', 'rare'); return; }
+    chargeCoins(cost);
     let refund = 0;
     for (const o of LEVELUP_OPTIONS) {
       const sN = spent[o.id] || 0; if (!sN) continue;
@@ -43623,7 +43669,7 @@ function resetStats() {
   if (typeof uiConfirm === 'function') {
     uiConfirm({
       title: '⟳ Reset invested stats?',
-      body: 'Refund every Attribute/Skill point you have invested (HP, MP, ATK, DEF, ACC, Speed, Jump) back to SP for ' + cost + ' Mojicoins — 20% of your current ' + ((typeof _fmtBig === 'function') ? _fmtBig(Math.floor(player.mojicoins || 0)) : Math.floor(player.mojicoins || 0)) + '.',
+      body: 'Refund every Attribute/Skill point you have invested (HP, MP, ATK, DEF, ACC, Speed, Jump) back to SP for ' + cost + ' Mojicoins — 20% of your total ' + ((typeof _fmtBig === 'function') ? _fmtBig(Math.floor(totalCoins())) : Math.floor(totalCoins())) + ' (wallet + Mojibank). Paid from your wallet first, then your bank balance.',
       yesLabel: 'Pay & refund', noLabel: 'Cancel',
     }).then((ok) => { if (ok) _go(); });
   } else { _go(); }
@@ -51542,7 +51588,10 @@ function triggerDeath() {
   // v0.25.504 — hard cap at 100 000 mojicoins so a single death can't
   // wipe an absurd amount from a high-stash player. 35% still applies
   // below the cap.
-  const lostMojicoins = Math.min(100000, Math.floor(player.mojicoins * 0.35));
+  // v0.29.310 — the haircut now measures TOTAL net worth (wallet + Mojibank)
+  // and is collected wallet-first, bank-second. Felina's vault used to be a
+  // death shelter: deposit everything before a risky fight and die for free.
+  const lostMojicoins = Math.min(100000, Math.floor(totalCoins() * 0.35));
   // v0.25.585 — bug fix. Was deferring the mojicoin deduction to respawnAtTown
   // via game._pendingLoss. But _pendingLoss lives on `game` (not player) so
   // it isn't part of the saved state. A player who died and refreshed the
@@ -51552,7 +51601,7 @@ function triggerDeath() {
   // already deducts immediately. _pendingLoss is kept (set to lostMojicoins)
   // for backward compat with the death overlay copy and respawnAtTown's
   // (now no-op) deduction line.
-  player.mojicoins = Math.max(0, player.mojicoins - lostMojicoins);
+  chargeCoins(lostMojicoins);
   game._pendingLoss = lostMojicoins;
   // v0.25.484 — XP penalty FLAT 5% at every level (was tiered:
   // 0% / 3% / 5% / 8% by level bracket). The early-level grace was
@@ -103699,7 +103748,7 @@ function drawHazards() {
     if (h.type === 'aurora_field') {
       const fade = Math.min(1, h.life / 60);
       const baseA = 0.18 * fade;
-      // v0.29.309 — per user "there is a rectangle yellow/gold that shows,
+      // v0.29.310 — per user "there is a rectangle yellow/gold that shows,
       // perhaps you can generate a sprite to replace it": authored holy-field
       // sprite (Sprites/vfx/aurora_field.webp — ludo.ai, see
       // scripts/generate_field_fx.mjs) drawn across the hazard box, with the
