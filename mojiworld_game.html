@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.314';
+const GAME_VERSION = 'v0.29.315';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -18770,17 +18770,37 @@ function _generateBestiaryQuests() {
     const _lvlReq = isBossQ ? Math.max(1, lvl - 10) : Math.max(1, lvl - 2);
     if (!isBossQ && _lvlReq < 10) continue;
     const count = isBossQ ? (cfg.count || 1) : _bestiaryHuntCount(monId, _lvlReq);
+    // v0.29.315 — TIER COUNTS ARE ORDERED. Each tier rolls inside its own
+    // level band, and the rolls are independent, so 22 of 26 creatures ended up
+    // with an "Apex Study" asking for FEWER kills than the study before it
+    // (smithgolem: 3,900 → 4,000 → 1,600). The rolls stay deterministic; they
+    // are just floored against the previous tier now, and clamped to the top of
+    // their own band so a Lv-49 study can never inherit a Lv-57 band's number.
+    // Band maxima never decrease with level, so clamping to this tier's own cap
+    // can only ever produce a tie with the tier below, never a drop.
+    const _tierFloor = (roll, floor, lv) =>
+      Math.min(Math.max(roll, floor), _lxHuntBand(lv).max);
     // Reward formula. Non-boss entries now pay off the ROLLED hunt size, so a
     // 2,000-kill entry is worth ~20× a 100-kill one — "the more kills required
     // the more rewards", as asked — while the per-kill rate stays flat so no
     // single entry is the obviously correct one to farm.
+    // v0.29.315 — REWARDS ARE A SHARE OF THE HUNT, NOT A LINEAR CURVE. The old
+    // formula paid `count * (4 + lvl * 0.7)`, which is linear in level while
+    // monster EXP values are not. Measured across the live codex, quest EXP as a
+    // bonus over simply killing the same monsters was: Lv10-29 median 17.2%,
+    // Lv30-49 2.8%, Lv50-69 0.8%, Lv70+ 0.6% (min 0.1%). A 4,700-kill hunt paid
+    // a 0.3% bonus — the quest was worth less than the time spent reading it.
+    // Every tier now pays a fixed share of what the hunt itself yields, so the
+    // incentive is the same at Lv 80 as it was at Lv 15. The 80%-of-a-level
+    // ceiling in _completeQuest still clamps the payout.
+    const _grindExp = (mt.exp || 0), _grindCoin = (mt.mojicoins || 0);
     let mojicoins, exp;
     if (isBossQ) {
       mojicoins = Math.max(400, Math.min(5000, lvl * 80));
       exp   = Math.max(200, Math.min(2500, lvl * 40));
     } else {
-      mojicoins = Math.round(count * (6 + lvl * 0.9));
-      exp   = Math.round(count * (4 + lvl * 0.7));
+      mojicoins = Math.round(count * _grindCoin * LX_CODEX_PAY.study);
+      exp   = Math.round(count * _grindExp  * LX_CODEX_PAY.study);
     }
     const name = '📖 ' + (mt.name || monId);
     QUESTS[qid] = {
@@ -18800,7 +18820,8 @@ function _generateBestiaryQuests() {
     // quests for level 30 and up" buys: the codex roughly doubles across the
     // back half of the game while the opening hours stay story-led.
     if (!isBossQ && lvl >= 30) {
-      const gCount = _bestiaryHuntCount(monId + "_greater", Math.max(_lvlReq + 5, lvl + 3));
+      const _gLv = Math.max(_lvlReq + 5, lvl + 3);
+      const gCount = _tierFloor(_bestiaryHuntCount(monId + "_greater", _gLv), count + 100, _gLv);
       QUESTS[qid + '_greater'] = {
         name: '📖 ' + (mt.name || monId) + ' — Greater Study',
         icon: '📕',
@@ -18808,7 +18829,7 @@ function _generateBestiaryQuests() {
         kind: 'kill', target: monId, count: gCount,
         npc: cfg.npc || 'a passing scholar',
         desc: `The first study only sketched the ${mt.name || monId}. A full entry needs a population, not a specimen — behaviour under pressure, how they die when they are tired of dying. Bring me ${gCount} of them.`,
-        rewards: { mojicoins: Math.round(gCount * (9 + lvl * 1.3)), exp: Math.round(gCount * (6 + lvl * 1.0)) },
+        rewards: { mojicoins: Math.round(gCount * _grindCoin * LX_CODEX_PAY.greater), exp: Math.round(gCount * _grindExp * LX_CODEX_PAY.greater) },
         bestiary: true,
       };
     }
@@ -18820,7 +18841,8 @@ function _generateBestiaryQuests() {
     // sent at something wildly off your own tier.
     if (!isBossQ && lvl >= LX_CODEX_HIGH_LV) {
       const aLv = lvl + 6;
-      const aCount = _bestiaryHuntCount(monId + "_apex", aLv);
+      const aCount = _tierFloor(_bestiaryHuntCount(monId + "_apex", aLv),
+                                 (QUESTS[qid + '_greater'] ? QUESTS[qid + '_greater'].count : count) + 100, aLv);
       QUESTS[qid + '_apex'] = {
         name: '📖 ' + (mt.name || monId) + ' — Apex Study',
         icon: '📗',
@@ -18828,7 +18850,7 @@ function _generateBestiaryQuests() {
         kind: 'kill', target: monId, count: aCount,
         npc: cfg.npc || 'a passing scholar',
         desc: `Two studies in and the ${mt.name || monId} still has the last word. What is missing is not another specimen — it is the shape of a whole population thinning: what they do when there are fewer of them left than there were yesterday. ${aCount} of them, and the entry closes for good.`,
-        rewards: { mojicoins: Math.round(aCount * (13 + lvl * 1.7)), exp: Math.round(aCount * (8 + lvl * 1.35)) },
+        rewards: { mojicoins: Math.round(aCount * _grindCoin * LX_CODEX_PAY.apex), exp: Math.round(aCount * _grindExp * LX_CODEX_PAY.apex) },
         bestiary: true,
       };
     }
@@ -18837,6 +18859,12 @@ function _generateBestiaryQuests() {
 // v0.29.313 — the tier at which the codex switches from "one entry unless a
 // hand-written quest already covers it" to "three entries, always".
 const LX_CODEX_HIGH_LV = 50;
+// v0.29.315 — what each codex tier pays, as a multiple of the EXP and coins the
+// hunt itself yields. 0.18 matches the bonus the low-level codex already paid
+// (median 17.2% at Lv 10-29), so this is the healthy end of the existing curve
+// extended to the whole game rather than a new number invented for the top.
+// Later tiers pay more per kill, which is what makes them worth unlocking.
+const LX_CODEX_PAY = { study: 0.18, greater: 0.26, apex: 0.36 };
 // v0.29.307 — deterministic 100-2000 roll for a codex hunt. Hashed from the
 // quest's own key so it is stable forever: the journal can show the real
 // target before the player accepts, a reload never re-rolls it, and there is
