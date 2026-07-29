@@ -7341,7 +7341,7 @@
         </div>
       </div>
       <div class="stats-divider"></div>
-      <div class="bar" title="Health Points (HP) — your life pool. Reaches 0 = death (respawn at the Void — costs 35% of CARRIED mojicoins, capped at 100k, plus 5% of current EXP; coins banked with Felina are safe; levels and items are kept). Grows with each level-up (per-class HP gain) plus +10 per VIT point invested in the Level Up panel. Restored by potions (PgUp), heal skills, and resting at hubs."><div class="bar-fill hp-fill" id="hp-bar" style="width:100%"></div><div class="bar-text" id="hp-text">195 / 195</div></div>
+      <div class="bar" title="Health Points (HP) — your life pool. Reaches 0 = death (respawn at the Void — costs 35% of your TOTAL mojicoins — wallet AND Mojibank balance — capped at 100k, plus 5% of current EXP; the bank is no longer a shelter, it is billed after your wallet runs out; levels and items are kept). Grows with each level-up (per-class HP gain) plus +10 per VIT point invested in the Level Up panel. Restored by potions (PgUp), heal skills, and resting at hubs."><div class="bar-fill hp-fill" id="hp-bar" style="width:100%"></div><div class="bar-text" id="hp-text">195 / 195</div></div>
       <div class="bar" title="Mana Points (MP) — fuel for skill casts. Most skills (X, S, C, D, F, V, G slots) consume MP; basic attack (Z) and block (A) do not. Grows with each level-up (per-class MP gain). Regenerates passively + faster at hubs. Refilled by potions (T)."><div class="bar-fill mp-fill" id="mp-bar" style="width:100%"></div><div class="bar-text" id="mp-text">50 / 50</div></div>
       <div class="bar" title="Experience (EXP) — fill the bar to level up. Awarded from monster kills, quest rewards, and milestones. Each level grants +3 SP base, +0-1 bonus SP from the innate-growth dice roll (binomial(1, 0.5) — see U panel for your CDF), and per-class HP/MP/ATK/DEF gains."><div class="bar-fill exp-fill" id="exp-bar" style="width:0%"></div><div class="bar-text" id="exp-text">0 / 30 (0%)</div></div>
       <!-- v0.25.730 — Combat-stats footer row.
@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.310';
+const GAME_VERSION = 'v0.29.311';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -33120,9 +33120,12 @@ const PLAYER_SAVE_FIELDS = [
   // after the first cosmetic visit so subsequent ones consume tickets.
   'invCap','_freeFaceUsed','_freeHairUsed',
   // v0.26.257 — Mojibank Manager Felina. Balance held in the bank
-  // separate from player.mojicoins so it persists across deaths +
-  // earns daily interest. bankLastTick stamps the last interest
-  // computation (ms epoch) — used by openNPC for the banker role.
+  // separate from player.mojicoins so it earns daily interest.
+  // bankLastTick stamps the last interest computation (ms epoch) —
+  // used by openNPC for the banker role.
+  // v0.29.311 — the balance is NO LONGER death-proof: percentage coin
+  // penalties (death, Reset Stats) size off wallet + bank and collect
+  // from both via totalCoins() / chargeCoins().
   'bankBalance','bankLastTick',
   // v0.26.258 — Lost-and-Found Curator Marbella. Object mapping
   // 'type:milestone' (e.g. 'snail:100') → true once claimed so the
@@ -43485,7 +43488,7 @@ function tickDaily(kind, n) {
 }
 
 // =========================================================================
-// v0.29.310 — COIN PENALTIES BILL THE BANK TOO (per user)
+// v0.29.311 — COIN PENALTIES BILL THE BANK TOO (per user)
 // =========================================================================
 // Percentage-based mojicoin deductions (the death haircut, the Reset Stats
 // fee) used to read `player.mojicoins` alone, so parking a stash with Felina
@@ -43635,7 +43638,7 @@ function resetStats() {
   const spent = player._levelUpSpent || {};
   const totalRanks = (typeof LEVELUP_OPTIONS !== 'undefined' ? LEVELUP_OPTIONS : []).reduce((a, o) => a + (spent[o.id] || 0), 0);
   if (totalRanks <= 0) { if (typeof showToast === 'function') showToast('No invested stats to reset.', 'common'); return; }
-  // v0.29.310 — priced off wallet + bank, and collected from both. Banking
+  // v0.29.311 — priced off wallet + bank, and collected from both. Banking
   // the stash before hitting Reset Stats used to make the refund free.
   const cost = Math.floor(totalCoins() * 0.20);
   const _go = () => {
@@ -45998,6 +46001,11 @@ _expeditionSnapshotPlayer = function () {
   // is `player.equipped`), so the documented "drops + Bravo gear stay
   // sandboxed" wipe was a silent no-op and in-tower gear persisted. Fixed.
   snap.equipped = JSON.parse(JSON.stringify(player.equipped || {}));
+  // v0.29.311 — snapshot the Mojibank balance too. The death haircut now bills
+  // the vault as well as the wallet, and inside a tower run the wallet side is
+  // already reverted by this restore; without the bank here a tower death would
+  // permanently drain savings that a wallet-carrying player gets refunded.
+  snap.bankBalance = (isFinite(player.bankBalance) ? Math.max(0, +player.bankBalance) : 0);
   return snap;
 };
 const _expeditionRestorePlayer_v1 = _expeditionRestorePlayer;
@@ -46005,6 +46013,7 @@ _expeditionRestorePlayer = function (snap) {
   _expeditionRestorePlayer_v1(snap);
   if (!snap) return;
   if (typeof snap.mojicoins === 'number') player.mojicoins = Math.min(1e12, Math.max(0, snap.mojicoins));   // v0.26.1028 — re-clamp on restore (defense)
+  if (typeof snap.bankBalance === 'number') player.bankBalance = Math.min(1e12, Math.max(0, snap.bankBalance));   // v0.29.311 — undo any in-tower bank drain (death haircut)
   if (snap.equipped) player.equipped = snap.equipped;
   if (typeof invalidateEquipBonusCache === 'function') invalidateEquipBonusCache();
   if (typeof _applyEquippedBoons === 'function') _applyEquippedBoons();
@@ -51588,7 +51597,7 @@ function triggerDeath() {
   // v0.25.504 — hard cap at 100 000 mojicoins so a single death can't
   // wipe an absurd amount from a high-stash player. 35% still applies
   // below the cap.
-  // v0.29.310 — the haircut now measures TOTAL net worth (wallet + Mojibank)
+  // v0.29.311 — the haircut now measures TOTAL net worth (wallet + Mojibank)
   // and is collected wallet-first, bank-second. Felina's vault used to be a
   // death shelter: deposit everything before a risky fight and die for free.
   const lostMojicoins = Math.min(100000, Math.floor(totalCoins() * 0.35));
@@ -71408,7 +71417,7 @@ function openNPC(npc) {
       if (typeof saveState === 'function') saveState();
       document.getElementById('dialog-text').textContent = `*Felina counts ${_amt.toLocaleString()} mojicoins into a velvet pouch and slides it across the counter.*\n\nDo come back. Your money was very fond of us.`;
     } });
-    opts.push({ t:'How does interest work?', cb:() => { document.getElementById('dialog-text').textContent = '*Felina folds her hands like she\'s explained this twice today already.*\n\nSimple as soup. The first 50,000 mojicoins on deposit earns 1.5 % each day. Money over the cap rests safely, but earns nothing — banks are not charities, dear. Withdraw anytime, no fee. The clock ticks per the day, not per the visit.'; } });
+    opts.push({ t:'How does interest work?', cb:() => { document.getElementById('dialog-text').textContent = '*Felina folds her hands like she\'s explained this twice today already.*\n\nSimple as soup. The first 50,000 mojicoins on deposit earns 1.5 % each day. Money over the cap rests safely, but earns nothing — banks are not charities, dear. Withdraw anytime, no fee. The clock ticks per the day, not per the visit.\n\n*She lowers her voice.*\n\nAnd before you ask, dear — no, the vault is not a hiding place. Death collects its 35 % from your purse first and my ledgers second, and the same is true of the fee for unlearning what you have learned. I keep your money working, not safe from consequence.'; } });
   } else if (npc.role === 'bravoGuide') {
     // v0.26.289 — Per-floor Bravo. Three states:
     //   1. Player just arrived, quest not yet cleared → flavor flavor,
@@ -79636,7 +79645,7 @@ const TUTORIAL_STEPS = [
     gugumaLine: 'Tweet! Red bar sulks, drink. Blue bar sulks, also drink. Simple — yet Outsiders forget, dramatically, mid-boss.',
     body: 'You\'re starting with a few <b>Red (HP)</b> and <b>Blue (MP)</b> potions. ' +
           'Press <kbd>PageUp</kbd> to quaff a <b>Health</b> potion and <kbd>PageDown</kbd> for <b>Mana</b>. ' +
-          'Buy more from <b>Brok the Blacksmith</b> in the Everdawn Megamall, and you can rebind the potion keys anytime in the <kbd>K</kbd> menu.<br><br>If your <b>HP</b> hits 0 you respawn in <b>The Void</b> — you keep your levels and items, but drop a slice of your <em>carried</em> Mojicoins (coins banked with Felina are safe).',
+          'Buy more from <b>Brok the Blacksmith</b> in the Everdawn Megamall, and you can rebind the potion keys anytime in the <kbd>K</kbd> menu.<br><br>If your <b>HP</b> hits 0 you respawn in <b>The Void</b> — you keep your levels and items, but drop a slice of your Mojicoins — <em>including</em> anything banked with Felina, which is charged once your wallet is empty.',
   },
   {
     icon: '⚔️',
