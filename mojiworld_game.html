@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.343';
+const GAME_VERSION = 'v0.29.344';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16484,6 +16484,37 @@ const POWERUPS = [
   // lone boss, which is exactly the Zeus-chain tradeoff.
   { id:'chain',  name:'Storm Chain',    icon:'⚡', stat:'chainChance',  min:12, max:25, unit:'%', fmt:r=>`${r}% chance hits arc to a 2nd enemy`, scale:r=>r/100 },
   { id:'freeze', name:'Frostbite',      icon:'❄️', stat:'freezeChance', min:10, max:25, unit:'%', fmt:r=>`${r}% chance to freeze on hit`,        scale:r=>r/100 },
+  // =====================================================================
+  // v0.29.344 — ACTION BOONS (per user "flame dash, hyper teleport, change
+  // normal attack to diagonal slash … take inspiration from hades").
+  // =====================================================================
+  // v0.29.298 already noted the roster was almost entirely flat stat sticks
+  // and added two behavioural boons that rode read-sites the engine happened
+  // to have. These six go further: they are modelled on Hades' SLOT system,
+  // where a boon does not buff a number, it rewrites one of your verbs.
+  //
+  //   DASH slot   — Flame Dash · Hyper Teleport · Nova Step
+  //   ATTACK slot — Diagonal Slash · Phantom Echo
+  //   ON-KILL     — Death Bloom
+  //
+  // Each has a purpose-built read-site (see the mods block at L27809 for the
+  // map). Every one is class-agnostic BY CONSTRUCTION: the attack boons read
+  // whatever that class's basic is, so Diagonal Slash widens a warrior's sweep
+  // AND fans a mage's bolt rather than being melee-only dead weight. The dash
+  // boons hook the shared dash entry points, so they work on the universal
+  // Shift dodge and the double-tap dash alike, including the mage's blink.
+  //
+  // Stacking copies is already impossible — _boonTypeEquipped enforces
+  // one-per-id across the whole roster (v0.26.400) — so with BOON_EQUIP_CAP
+  // at 3 the decision these create is which THREE verbs you rewrite. That is
+  // exactly the Hades pick, and it is why they are priced as build-defining
+  // rather than incremental.
+  { id:'flamedash', name:'Flame Dash',      icon:'🔥', stat:'dashFlame',  min:35, max:80,  unit:'%', fmt:r=>`Dash trails fire — ${r}% ATK/tick + burn`,        scale:r=>r/100, unique:true },
+  { id:'blink',     name:'Hyper Teleport',  icon:'🌀', stat:'dashBlink',  min:60, max:140, unit:'%', fmt:r=>`Dash goes +${r}% further & phases through foes`, scale:r=>r/100, unique:true },
+  { id:'novastep',  name:'Nova Step',       icon:'💥', stat:'dashNova',   min:90, max:200, unit:'%', fmt:r=>`Dash ends in a shockwave (${r}% ATK)`,           scale:r=>r/100, unique:true },
+  { id:'diagslash', name:'Diagonal Slash',  icon:'⚔️', stat:'diagSlash',  min:45, max:95,  unit:'%', fmt:r=>`Basics sweep diagonally — +${r}% reach, hits high & low`, scale:r=>r/100, unique:true },
+  { id:'echo',      name:'Phantom Echo',    icon:'👻', stat:'echoStrike', min:25, max:55,  unit:'%', fmt:r=>`Basics echo for ${r}% damage a moment later`,    scale:r=>r/100, unique:true },
+  { id:'bloom',     name:'Death Bloom',     icon:'🌸', stat:'deathBloom', min:8,  max:20,  unit:'%', fmt:r=>`Your kills detonate for ${r}% of their max HP`,  scale:r=>r/100, unique:true },
 ];
 // v0.26.x — eager-preload boon icon sprites at startup so the one-shot Boon
 // panel shows them on first open (it doesn't redraw on async decode like the
@@ -16570,6 +16601,19 @@ function boonRerollCost(boon) {
 function _applyEquippedBoons() {
   if (!player.mods) return;
   const M = player.mods;
+  // v0.29.344 — BACKFILL NEW BOON STATS ONTO OLD SAVES. player.mods is restored
+  // verbatim from the save, so a mods field added in a later build is absent on
+  // every character created before it — the reset loop below (`for k in M`) can
+  // only zero keys that already EXIST, which is the whole reason each new stat
+  // gets declared in the player literal. Seeding every POWERUPS stat here makes
+  // that guarantee hold for pre-existing saves too, and means the next boon
+  // added needs no migration of its own. Verified against a live save: the six
+  // v0.29.344 action-boon fields were missing until this ran.
+  try {
+    if (typeof POWERUPS !== 'undefined') {
+      for (const p of POWERUPS) if (p && p.stat && typeof M[p.stat] === 'undefined') M[p.stat] = 0;
+    }
+  } catch (e) {}
   for (const k in M) {
     // extraJumps is integer max across sources; others additive
     M[k] = 0;
@@ -27819,7 +27863,22 @@ const player = {
           // here so the `for (const k in M) M[k]=0` recompute in
           // _applyEquippedBoons always resets them, and so the gear-side reads
           // in hitMonster can add mods + equip bonus without an undefined.
-          chainChance:0, freezeChance:0 },
+          chainChance:0, freezeChance:0,
+          // v0.29.344 — ACTION BOONS (Hades-style, per user "flame dash, hyper
+          // teleport, change normal attack to diagonal slash"). Unlike every
+          // mod above, these do not scale a number the engine already reads —
+          // each one CHANGES what an action does, and has an explicit read-site
+          // in the dash / basic-attack / kill path. Declared here so the
+          // `for (const k in M) M[k]=0` recompute in _applyEquippedBoons resets
+          // them and every read-site can assume a number.
+          //   dashFlame  — dash lays a burning trail        (updateDashTrail)
+          //   dashBlink  — dash goes further + phases       (quickDash/startDodge)
+          //   dashNova   — dash ends in a shockwave         (_dashNovaBurst)
+          //   diagSlash  — basic attack sweeps diagonally   (performMelee/proj)
+          //   echoStrike — basic attacks repeat, delayed    (hitMonster)
+          //   deathBloom — your kills detonate              (killMonster)
+          dashFlame:0, dashBlink:0, dashNova:0,
+          diagSlash:0, echoStrike:0, deathBloom:0 },
   // v0.25.303 — Six new visual-equipment slots added alongside the
   // existing stat-bearing weapon / armor / accessory. Each visual slot
   // holds an item ref (or null); the renderer reads `item.spriteId`
@@ -28608,7 +28667,11 @@ function _rollHitVsLevelGap(monsterLevel) {
 // already-applied effects, not aimed attacks). Everything else shares the
 // exact same level-gap + evasion roll as a basic attack.
 const BASIC_HIT_SKILLS = new Set(['melee','arrow','dagger','bolt']);
-const MISS_EXEMPT_SKILLS = new Set(['thorns','burn']);
+// v0.29.344 — the Flame Dash trail and the Nova Step shockwave join thorns
+// and burn as already-applied effects rather than aimed attacks: a patch of
+// fire on the ground does not "miss". Death Bloom is the slain enemy's own
+// corpse detonating, so it does not roll either.
+const MISS_EXEMPT_SKILLS = new Set(['thorns','burn','flamedash','nova','bloom']);
 function _rollAccuracyHit(attackerAccuracy, targetEvasion, minFloor) {
   const ev = +targetEvasion || 0;
   if (ev <= 0) return true;
@@ -44330,7 +44393,116 @@ function _classDashSpriteReady() {
   const img = (typeof LX_FX !== 'undefined') && LX_FX[key];
   return (img && img.complete && img.naturalWidth > 0) ? key : null;
 }
+// =========================================================================
+// v0.29.344 — ACTION-BOON DASH ENGINE (Flame Dash · Hyper Teleport · Nova Step)
+// =========================================================================
+// There are TWO dashes in this game — the universal Shift dodge (startDodge)
+// and the per-class double-tap (quickDash, which for a mage is a blink and
+// for everyone else a lunge). A Dash boon that only hooked one of them would
+// be a bug the player experiences as "this boon does nothing sometimes", so
+// both call _dashBoonBegin() and the trail/nova state lives in one place.
+//
+// Returns the distance multiplier the caller should apply to its own motion,
+// so each dash keeps its authored feel and only its MAGNITUDE is boon-scaled.
+function _dashBoonBegin(dir) {
+  const M = (typeof player !== 'undefined' && player && player.mods) || {};
+  let distMul = 1;
+  // ── HYPER TELEPORT ──────────────────────────────────────────────────
+  // Further, and you pass through what you would have hit. "Phasing" is
+  // implemented as i-frames for the dash window rather than collision
+  // surgery: the observable promise is "you don't get stopped or hurt by
+  // bodies mid-dash", and i-frames deliver exactly that without touching
+  // the physics broadphase.
+  if (M.dashBlink > 0) {
+    distMul += M.dashBlink;
+    player.invulnerable = Math.max(player.invulnerable || 0, 320);
+    player._blinkPhaseUntil = (game.time | 0) + 20;
+  }
+  // ── FLAME DASH ──────────────────────────────────────────────────────
+  // Arm the trail. Segments are dropped by _updateDashTrail while the dash
+  // is live, so the fire follows the ACTUAL path taken (including a mage's
+  // teleport endpoints) instead of a predicted line.
+  if (M.dashFlame > 0) player._flameTrailUntil = (game.time | 0) + 22;
+  // ── NOVA STEP ───────────────────────────────────────────────────────
+  // Armed here, detonated by _updateDashTrail when the dash ends, so the
+  // burst lands where the dash FINISHED rather than where it began.
+  if (M.dashNova > 0) player._novaArmed = true;
+  return distMul;
+}
+
+// Per-frame trail + nova tick. Called from updatePlayer.
+function _updateDashTrail(dt) {
+  if (typeof player === 'undefined' || !player) return;
+  const M = player.mods || {};
+  const now = (game.time | 0);
+  const dashing = (player.dodgeTimer > 0) || (player.quickDashTimer > 0);
+  // Drop a fire segment at the player's feet while a Flame Dash is live.
+  if (M.dashFlame > 0 && (player._flameTrailUntil | 0) > now && dashing) {
+    if (!game.flameTrail) game.flameTrail = [];
+    // Cap the pool — a mashing player must not be able to grow it unbounded.
+    if (game.flameTrail.length < 60) {
+      game.flameTrail.push({ x: player.x + player.w / 2, y: player.y + player.h - 6,
+                             r: 34, life: 150, max: 150, hitAt: {} });
+    }
+  }
+  // Detonate the Nova once the dash has actually ended.
+  if (player._novaArmed && !dashing) {
+    player._novaArmed = false;
+    _dashNovaBurst();
+  }
+  // Tick existing fire.
+  const T = game.flameTrail;
+  if (!T || !T.length) return;
+  const atk = (typeof getAtk === 'function') ? getAtk() : 50;
+  const tickDmg = Math.max(1, Math.floor(atk * (M.dashFlame || 0)));
+  for (let i = T.length - 1; i >= 0; i--) {
+    const f = T[i];
+    f.life -= dt;
+    if (f.life <= 0) { T.splice(i, 1); continue; }
+    if (!(M.dashFlame > 0)) continue;
+    for (const m of game.monsters) {
+      if (!m || m.currentHp <= 0) continue;
+      const mcx = m.x + m.w / 2, mcy = m.y + m.h / 2;
+      const dx = mcx - f.x, dy = mcy - f.y;
+      if (dx * dx + dy * dy > (f.r + Math.max(m.w, m.h) / 2) ** 2) continue;
+      // Re-tick the same enemy at most every 400 ms per patch, so standing
+      // in fire is a damage-over-time and not a per-frame shredder.
+      const key = m.uid || m.type;
+      if (f.hitAt[key] && (now - f.hitAt[key]) < 24) continue;
+      f.hitAt[key] = now;
+      hitMonster(m, tickDmg, false, 'flamedash');
+      m.burnTimer = Math.max(m.burnTimer || 0, 1600);
+      m.burnDmg = Math.max(m.burnDmg || 0, Math.max(1, Math.floor(tickDmg * 0.35)));
+    }
+  }
+}
+
+// Nova Step's end-of-dash shockwave.
+function _dashNovaBurst() {
+  const M = player.mods || {};
+  if (!(M.dashNova > 0)) return;
+  const cx = player.x + player.w / 2, cy = player.y + player.h / 2;
+  const R = 150;
+  const atk = (typeof getAtk === 'function') ? getAtk() : 50;
+  const dmg = Math.max(1, Math.floor(atk * M.dashNova));
+  for (const m of game.monsters) {
+    if (!m || m.currentHp <= 0) continue;
+    const dx = (m.x + m.w / 2) - cx, dy = (m.y + m.h / 2) - cy;
+    if (dx * dx + dy * dy > R * R) continue;
+    hitMonster(m, dmg, false, 'nova');
+    m.vx = (m.vx || 0) + Math.sign(dx || 1) * 5;
+  }
+  if (typeof spawnSmoothExplosion === 'function') { try { spawnSmoothExplosion(cx, cy, R * 1.4); } catch (e) {} }
+  if (typeof addShake === 'function') addShake(7);
+  for (let i = 0; i < 18; i++) {
+    const a = (i / 18) * Math.PI * 2;
+    game.particles.push({ x: cx, y: cy, vx: Math.cos(a) * 7, vy: Math.sin(a) * 5,
+      life: 26, color: i % 2 ? '#ffd27a' : '#ff8a3a', size: 3 });
+  }
+}
+
 function quickDash(dir) {
+  const _boonDist = _dashBoonBegin(dir);
   player.facing = dir;
   if (player.vy > 1) player.vy = 0;
 
@@ -44349,7 +44521,9 @@ function quickDash(dir) {
   if (player.cls === 'mage') {
     const startX = player.x;
     const ww = (game.mapData && game.mapData.worldWidth) || 9999;
-    player.x = Math.max(8, Math.min(ww - player.w - 8, player.x + dir * 150));
+    // v0.29.344 — Hyper Teleport scales the blink itself, so the mage's dash
+    // stays a teleport (its identity) and only its reach grows.
+    player.x = Math.max(8, Math.min(ww - player.w - 8, player.x + dir * 150 * _boonDist));
     const endX = player.x;
     player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
     player.quickDashTimer = 240;        // cooldown only — no motion (≥ invuln window, v0.26.399)
@@ -44481,6 +44655,15 @@ function quickDash(dir) {
     state: 'dash', life: 16, maxLife: 16,
     color: trailRgba,
   });
+  // v0.29.344 — NOTE: Hyper Teleport is NOT applied to launch velocity here.
+  // Two earlier attempts were: at the shared `vx = dir * 14` (clobbered by the
+  // per-class branches below it) and at the end of this function (applied
+  // correctly — vx really became 43 instead of 18 — but worth zero extra
+  // distance, because updatePlayer's movement clamp pulls vx back to run speed
+  // on the first frame). The lunge's reach comes entirely from the dash
+  // maintenance floor, so that is where the boon lands; see updatePlayer.
+  // The mage is handled separately above, where its teleport distance is
+  // scaled directly.
 }
 
 // Per-class Z defence profile — timing widths shift the tradeoff between safety and skill
@@ -44799,7 +44982,9 @@ function startDodge() {
   if (k['arrowleft']) { player.dodgeDir = -1; player.facing = -1; }
   else if (k['arrowright']) { player.dodgeDir = 1; player.facing = 1; }
   else player.dodgeDir = player.facing;
-  player.vx = player.dodgeDir * 9;
+  // v0.29.344 — Dash boons hook the Shift dodge too, not just the double-tap,
+  // so Flame Dash / Hyper Teleport / Nova Step fire on BOTH dashes.
+  player.vx = player.dodgeDir * 9 * _dashBoonBegin(player.dodgeDir);
   player.vy = Math.min(player.vy, -1);
   // v0.25.851 — Dodge whoosh sfx + a more visible afterimage-style spark
   // trail behind the player. The old 2-particle burst was almost invisible
@@ -47848,6 +48033,7 @@ function loadMap(id, entryX, entryY) {
   game.projectiles = [];
   game.drops = [];
   game.particles = [];
+  game.flameTrail = [];   // v0.29.344 — Flame Dash patches must not survive a map change
   game.damageNumbers = [];
   game.hazards = [];
   // Reset environmental-event state unconditionally (eclipse darkness, lightning
@@ -49845,6 +50031,10 @@ function updatePlayer(dt) {
   player._poisonFxThisFrame  = false;
   player._slowFxThisFrame    = false;
   player._electroFxThisFrame = false;
+  // v0.29.344 — action-boon dash tick (Flame Dash trail + Nova Step detonation).
+  // Placed before the movement block so a trail segment is dropped at the
+  // position the player is dashing FROM this frame, not after the step.
+  try { _updateDashTrail(dt); } catch (e) {}
   const k = game.keys;
   // v0.25.243 (X3) — auto-dismiss NPC dialog when the player walks
   // > 110 px from the NPC. Called every frame; cheap (one number compare).
@@ -50138,7 +50328,14 @@ function updatePlayer(dt) {
     const _isMageBlink = (player.cls === 'mage');
     if (!_isMageBlink) {
       // Maintain dash velocity with slow decay
-      player.vx = player.quickDashDir * Math.max(9, Math.abs(player.vx) * 0.93);
+      // v0.29.344 — Hyper Teleport scales the SUSTAIN FLOOR, which is what
+      // actually determines dash distance. Scaling the launch velocity in
+      // quickDash looked right (vx really was 43 instead of 18) but measured
+      // as zero extra distance: the movement clamp earlier in updatePlayer
+      // pulls vx back to run speed on the very first frame, so every class
+      // travelled the same 127 px carried entirely by this floor of 9.
+      const _blinkMul = 1 + ((player.mods && player.mods.dashBlink) || 0);
+      player.vx = player.quickDashDir * Math.max(9 * _blinkMul, Math.abs(player.vx) * 0.93);
     }
     if (player.cls === 'rogue' && !player._rogueDashBrakeDust && player.quickDashTimer <= 70) {
       player._rogueDashBrakeDust = 1;
@@ -51005,6 +51202,17 @@ function updatePlayer(dt) {
   // speed limit so the 2x walk speed (getSpeed) + the forward somersault leap
   // aren't clipped back to the normal cap mid-cast.
   if (player._blossomDashUntil && player._blossomDashUntil > game.time) { _hCap = Math.max(_hCap, PLAYER_SPEED_HARD_CAP * 2); }
+  // v0.29.344 — Hyper Teleport needs the same exemption Blossom Dash gets.
+  // This global cap (normally 10) is applied immediately before `x += vx`, so
+  // it — not the launch velocity and not the dash sustain floor — is the true
+  // governor of dash distance. Both earlier attempts at this boon raised
+  // numbers upstream of here and measured as +0 % and +13 % respectively;
+  // the raised velocity was simply clipped back to 10 every frame before it
+  // could move anyone. Scoped to the dash window via _blinkPhaseUntil (set in
+  // _dashBoonBegin) so it can never leak into normal running.
+  if (player.mods && player.mods.dashBlink > 0 && (player._blinkPhaseUntil | 0) > (game.time | 0)) {
+    _hCap = Math.max(_hCap, _hCap * (1 + player.mods.dashBlink));
+  }
   if (player.vx >  _hCap) player.vx =  _hCap;
   if (player.vx < -_hCap) player.vx = -_hCap;
   if (player.vy < -_jCap) player.vy = -_jCap;
@@ -58902,8 +59110,19 @@ function performMelee(range, dmgPct, opts = {}) {
   if (player._warlordBanner && game.time < player._warlordBanner) range *= 1.5;
   // Optional vertical reach boost — `opts.tall` adds extra rows above/below
   // the player's hitbox so cleave-type skills sweep airborne monsters too.
-  const tall   = opts.tall  || 0;
+  let tall     = opts.tall  || 0;
   const yShift = opts.yShift || 0;
+  // v0.29.344 — DIAGONAL SLASH (action boon). The sweep stops being a flat
+  // horizontal box: reach grows and the band opens vertically, so the same
+  // swing now catches a hopping mob above you and a crouched one below.
+  // Applied to `opts.basic` swings only — the boon rewrites your NORMAL
+  // attack, per the request; melee SKILLS keep their authored hitboxes so a
+  // single boon can't silently rescale the whole warrior kit.
+  const _diag = (opts.basic && player.mods && player.mods.diagSlash > 0) ? player.mods.diagSlash : 0;
+  if (_diag > 0) {
+    range *= (1 + _diag);
+    tall  += Math.round(player.h * (0.55 + _diag));   // the vertical half of the "diagonal"
+  }
   const hitbox = {
     x: player.facing > 0 ? player.x + player.w - 5 : player.x - range + 5,
     y: player.y - 5 - tall + yShift,
@@ -59137,9 +59356,17 @@ function applyEnhOnHit(m, dmg, enh) {
 // SKILL EXECUTION
 // =========================================================================
 function performBolt() {
-  const shots = 1;   // v0.26.x — per user: mage Z (Magic Bolt) is UNAFFECTED by projectile-count upgrades (multishot boon + equip). Single bolt always; _msHandled below also skips the universal Double Shot.
+  // v0.29.344 — DIAGONAL SLASH on a caster. The boon rewrites your NORMAL
+  // attack, and the mage's normal attack is a bolt — so the "diagonal" it buys
+  // is a vertical fan (one bolt angled up, one down) instead of a wider sweep.
+  // Same promise as the melee branch: your basic now covers high and low.
+  // Deliberately NOT routed through multishot — the v0.26.x rule that Magic
+  // Bolt ignores projectile-count upgrades still holds; this is a different
+  // boon expressing itself in the medium the class actually uses.
+  const _diagBolt = (player.mods && player.mods.diagSlash > 0) ? player.mods.diagSlash : 0;
+  const shots = _diagBolt > 0 ? 3 : 1;   // v0.26.x — per user: mage Z (Magic Bolt) is UNAFFECTED by projectile-count upgrades (multishot boon + equip). Single bolt always; _msHandled below also skips the universal Double Shot.
   for (let i = 0; i < shots; i++) {
-    const spread = (i - (shots - 1) / 2) * 0.2;
+    const spread = (i - (shots - 1) / 2) * (_diagBolt > 0 ? 0.55 : 0.2);
     game.projectiles.push({
       x: player.x + (player.facing > 0 ? player.w : -20),
       y: player.y + 18,
@@ -59154,7 +59381,12 @@ function performBolt() {
       // v0.26.410 — playtest: Magic Bolt still slightly overshadowed the mage's
       // own burst rotation (fireball/arcaneBurst) as a damage source for the
       // most-mobile class. Trimmed 1.4→1.25 so the rotation leads.
-      damage: getAtk() * 1.40 + 6,
+      // v0.29.344 — each bolt of a Diagonal Slash fan carries 55 % damage, so
+      // the fan is a COVERAGE upgrade (reliably tags high/low targets, ~1.65×
+      // only if all three land point-blank) rather than a flat 3× to the
+      // mage's basic. Same intent as the melee branch, which widens the box
+      // without touching dmgPct.
+      damage: (getAtk() * 1.40 + 6) * (_diagBolt > 0 ? 0.55 : 1),
       owner: 'player', skill: 'bolt',
       _enh: player._enh, _msHandled: true,   // v0.26.x — self-applies multishot; opt out of universal Double Shot
     });
@@ -66307,6 +66539,26 @@ function hitMonster(m, dmg, isCrit, skill) {
       if (_tfx.basicLifesteal && _basicSkill) player.hp = Math.min(game._mxHp, player.hp + Math.max(1, Math.floor(dmg * _tfx.basicLifesteal)));
       if (_tfx.critMp && isCrit) player.mp = Math.min(game._mxMp, player.mp + _tfx.critMp);
     }
+    // v0.29.344 — PHANTOM ECHO (action boon). A basic that CONNECTS repeats a
+    // moment later for a fraction of its damage. Gated on _basicSkill so it
+    // rewrites your normal attack only, and on !_lxBasicMiss so a whiff cannot
+    // echo. `_echoing` breaks the recursion — the echo is tagged 'melee' to
+    // stay a basic for downstream hooks, which would otherwise re-enter here
+    // and spawn an echo of the echo forever.
+    if (_basicSkill && !_lxBasicMiss && !player._echoing &&
+        player.mods && player.mods.echoStrike > 0 && dmg > 0) {
+      const _eDmg = Math.max(1, Math.floor(dmg * player.mods.echoStrike));
+      const _target = m;
+      setTimeout(() => {
+        try {
+          if (!_target || _target.currentHp <= 0 || game.monsters.indexOf(_target) < 0) return;
+          player._echoing = true;
+          hitMonster(_target, _eDmg, false, 'melee');
+          game.damageNumbers.push({ x: _target.x + _target.w / 2 - 10, y: _target.y - 18, vy: -1.6,
+            text: '👻', life: 20, color: '#cdb8ff', size: 12 });
+        } catch (e) {} finally { player._echoing = false; }
+      }, 250);
+    }
     if (player.cls === 'mage' && skill === 'bolt' && !_lxBasicMiss) {   // v0.26.1033 — a missed bolt no longer grants an Ember stack
       const _now = Date.now();
       if (!player._emberT || _now - player._emberT > 6000) player._emberStacks = 0;
@@ -67652,6 +67904,34 @@ function killMonster(m) {
   }
   const idx = game.monsters.indexOf(m);
   if (idx < 0) return;
+  // v0.29.344 — DEATH BLOOM (action boon). The corpse detonates, scaled off
+  // the SLAIN enemy's max HP rather than your ATK, so it stays a clear-speed
+  // tool that reads the same at every level instead of scaling with your gear
+  // into a screen-wipe. Runs before the corpse leaves game.monsters so the
+  // blast can chain into neighbours — deliberately, that is the fantasy — but
+  // `_bloomChain` depth-limits it to 2 so a dense pack can't cascade into an
+  // unbounded recursive wipe. Bosses are excluded: a boss's max HP is millions
+  // and any fraction of it would trivialise everything standing near one.
+  try {
+    const _bloom = (player.mods && player.mods.deathBloom) || 0;
+    if (_bloom > 0 && !m.isBoss && !m.boss && (game._bloomChain | 0) < 2) {
+      game._bloomChain = (game._bloomChain | 0) + 1;
+      const bx = m.x + m.w / 2, by = m.y + m.h / 2, R = 130;
+      const bdmg = Math.max(1, Math.floor((m.maxHp || 1) * _bloom));
+      for (const o of game.monsters) {
+        if (!o || o === m || o.currentHp <= 0) continue;
+        const dx = (o.x + o.w / 2) - bx, dy = (o.y + o.h / 2) - by;
+        if (dx * dx + dy * dy > R * R) continue;
+        hitMonster(o, bdmg, false, 'bloom');
+      }
+      for (let i = 0; i < 14; i++) {
+        const a = (i / 14) * Math.PI * 2;
+        game.particles.push({ x: bx, y: by, vx: Math.cos(a) * 5, vy: Math.sin(a) * 4,
+          life: 24, color: i % 2 ? '#ffaad8' : '#ff66aa', size: 3 });
+      }
+      game._bloomChain = Math.max(0, (game._bloomChain | 0) - 1);
+    }
+  } catch (e) {}
   // v0.29.60 — Cursed-chest hex: every slain foe lifts one stack. At
   // zero the curse breaks with a relief flash + toast; until then
   // _diffDmg keeps incoming damage ×3. Bosses count too.
@@ -105710,7 +105990,31 @@ function _isBrightHex(hex) {
   return maxC > 200;
 }
 
+// v0.29.344 — Flame Dash trail render. Drawn BEFORE drawParticles so the
+// existing spark layer reads on top of the fire rather than under it. Kept
+// separate from game.particles because these patches are damage volumes with
+// their own lifetime and per-enemy re-tick bookkeeping, not decoration.
+function drawFlameTrail() {
+  const T = game.flameTrail;
+  if (!T || !T.length) return;
+  const camX = game.camera.x, camY = game.camera.y || 0;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const f of T) {
+    const t = Math.max(0, Math.min(1, f.life / f.max));
+    const x = f.x - camX, y = f.y - camY;
+    const r = f.r * (0.55 + 0.45 * t);
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0,   `rgba(255,226,150,${0.55 * t})`);
+    g.addColorStop(0.45,`rgba(255,140,50,${0.38 * t})`);
+    g.addColorStop(1,   'rgba(180,40,10,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.ellipse(x, y, r, r * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
 function drawParticles() {
+  try { drawFlameTrail(); } catch (e) {}
   // v0.25.18 — Phase 4a gate. LXParticleScene on the UI canvas owns the
   // per-frame particle render when flag is on. Vanilla skips entirely.
   if (_phaserHandlingParticles()) return;
