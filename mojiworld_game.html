@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.348';
+const GAME_VERSION = 'v0.29.349';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -39883,8 +39883,21 @@ function _completeQuest(id) {
     // were authored at. With the flag the authored number is the payout, still
     // multiplied by the event knob and the mid/late weighting like everything
     // else, and still clamped by the 80% ceiling below.
-    const _expBase = (q && q.noExpFloor) ? _authored : Math.max(_authored, _floor);
-    let _questExp = Math.floor(_expBase * _questMul * _payMul);   // v0.26.x — +200% XP at Lv 1-5 · v0.29.7 curve-relative floor · v0.29.x ×10 quest EXP knob · v0.29.299 mid/late weighting · v0.29.302 hunt-scale payout
+    // v0.29.320 — THE MULTIPLIERS APPLY TO THE AUTHORED VALUE ONLY.
+    // _floor is ALREADY a fraction of a level (4% codex → 35% finale), so
+    // multiplying it again by the ×10 quest knob and the ×3 late weighting was
+    // double-counting the same intent: a 35% floor came out at up to 1050% of a
+    // level and was then clamped. Audited before this fix, 240 of 270 quests
+    // paid EXACTLY the 80% ceiling — the median in every level band was 80.0%,
+    // so the tutorial errand and the Gravitos finale were worth the same
+    // fraction of a level and the authored numbers meant nothing.
+    // Now: the authored path takes the multipliers (the early game stays
+    // deliberately generous and still clamps), and the floor stands on its own
+    // as the curve-relative guarantee it was written to be — which restores the
+    // tier spread exactly where it had been lost, in the mid and late game.
+    const _authoredPaid = Math.floor(_authored * _questMul * _payMul);
+    const _expBase = (q && q.noExpFloor) ? _authoredPaid : Math.max(_authoredPaid, _floor);
+    let _questExp = _expBase;   // v0.26.x — +200% XP at Lv 1-5 · v0.29.7 curve-relative floor · v0.29.x ×10 quest EXP knob · v0.29.299 mid/late weighting · v0.29.302 hunt-scale payout
     // v0.29.309 — HARD CEILING: 80% of the CURRENT level's cost (per user
     // "ensure that the rewards are worth the effort without exceeding 80% of
     // the current level EXP"). Four multipliers now stack on a quest payout —
@@ -60716,7 +60729,17 @@ function updateMonsters(dt) {
       const _haDx = _playerCx - (m.x + m.w/2), _haDy = _playerCy - (m.y + m.h/2);
       if (m._heatT <= 0 && (_haDx * _haDx + _haDy * _haDy) < _haR * _haR) {
         m._heatT = 950;
-        const _haDmg = _diffDmg(Math.floor((m.atk || 50) * 0.30), (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1));
+        // v0.29.321 — BALANCE FIX. The first cut routed this through _diffDmg,
+        // whose level-punish multiplier (×5 at Lv60) is meant for projectiles;
+        // contact-range damage uses the banded ANCHOR system so an at-level
+        // hit can never one-shot. Measured before the fix: 206% of an
+        // at-level mage's maxHp in one aura tick. Now: a fraction of the
+        // mob's own touch anchor, hard-capped at 18% of player maxHp.
+        const _haLv = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);
+        const _haRef = (typeof _refHpAtLv === 'function') ? _refHpAtLv(_haLv) : 200;
+        const _haB = (typeof _dmgBandPct === 'function') ? _dmgBandPct(_haLv) : { tFloor: 0.10 };
+        let _haDmg = Math.max(1, Math.floor(_haRef * (_haB.tFloor || 0.10) * 0.40) - Math.floor(getDef() * 0.25));
+        _haDmg = Math.min(_haDmg, Math.floor(getMaxHp() * 0.18));
         player.hp -= _haDmg;
         player.lastHitTime = game.time;
         player._lastDamageSource = m.label || m.type || 'searing heat';
@@ -60816,7 +60839,15 @@ function updateMonsters(dt) {
           if ((player.invulnerable | 0) <= 0 && !player._god &&
               Math.abs((player.x + player.w/2) - m._spikeX) < _gsHalf &&
               Math.abs((player.y + player.h) - m._spikeY) < 60) {
-            const _gsDmg = _diffDmg(Math.floor((m.atk || 60) * 1.5), (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1));
+            // v0.29.321 — BALANCE FIX, same as heatAura above: the _diffDmg
+            // level-punish made a spike hit 863% of an at-level mage's maxHp.
+            // A dodgeable telegraphed hit should hurt HARD but never one-shot
+            // at-level: 1.25x the mob's touch anchor, capped at 55% maxHp.
+            const _gsLv = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);
+            const _gsRef = (typeof _refHpAtLv === 'function') ? _refHpAtLv(_gsLv) : 300;
+            const _gsB = (typeof _dmgBandPct === 'function') ? _dmgBandPct(_gsLv) : { tFloor: 0.10 };
+            let _gsDmg = Math.max(2, Math.floor(_gsRef * (_gsB.tFloor || 0.10) * 1.25) - Math.floor(getDef() * 0.5));
+            _gsDmg = Math.min(_gsDmg, Math.floor(getMaxHp() * 0.55));
             player.hp -= _gsDmg;
             player.lastHitTime = game.time;
             player._lastDamageSource = m.label || m.type || 'glass spikes';
@@ -68542,9 +68573,18 @@ function killMonster(m) {
       });
     }
   }
+  // v0.29.321 — ILLUSIONS DON'T COUNT. Mirage Stalker's splitsOnHit copies
+  // (m._isMirage, 18% HP, already exp/coin-free) must not feed kill credit:
+  // each real stalker would otherwise pay out 3 kills toward hunt quests
+  // ("bring the harvest from 18 stalkers"), dailies and kill-count
+  // achievements — a 3x quest accelerator from nearly-free kills. Pack-call
+  // and Keeper-hound spawns still count: they're full-HP real fights.
+  const _isIllusionKill = !!m._isMirage;
+  if (!_isIllusionKill) {
   game.kills++;
   tickDaily('kills');
   if (m.isBoss || m.isMiniBoss) tickDaily('boss', m.type);   // v0.26.x audit FIX — boss-track daily challenges (e.g. gravitos1) had NO tick caller, so they could never complete; credit boss/miniboss kills here
+  }
   checkAchievements();
   // v0.26.261 — Synergy: Blood Ritual (ls + atk). Each kill stamps a
   // 2-s buff window granting +20 % ATK. Refreshes on stack so chained
@@ -68626,7 +68666,7 @@ function killMonster(m) {
   // STANDARD TICK PATH — skipped for ticket-family kills (already direct-
   // ticked above) to prevent double-counting. All other mob types
   // (non-ticket world mobs) still go through the regular pipeline.
-  if (m.type && !_inExp && !m._pqDirectTicked) tickQuestKill(m.type, !!m.isBoss);
+  if (m.type && !_inExp && !m._pqDirectTicked && !_isIllusionKill) tickQuestKill(m.type, !!m.isBoss);   // v0.29.321 — mirages don't advance hunt quests
   // Mastery (v0.24.1) — per-mob-type kill counter. Hitting thresholds of
   // 100 / 500 / 1000 kills grants +1% / +2% / +3% damage vs that type.
   // Classic MMO "paragon-lite" grind that rewards long-term farming.
@@ -106988,7 +107028,16 @@ function renderSkillBar() {
     const mpTxt = onBlockCd ? (player.blockCD / 1000).toFixed(1) + 's' : 'Block';
     if (bs._mp !== mpTxt) { bs._mp = mpTxt; bs.mpEl.textContent = mpTxt; }
     if (onBlockCd) {
-      const frac = Math.min(1, player.blockCD / 2000);
+      // v0.29.349 — the pie-wipe was divided by a hardcoded 2000ms, but the
+      // block cooldown is class-specific (warrior 1800, archer 2200, rogue and
+      // mage 2500). Every class read wrong: warrior's ring started already 10%
+      // drained, and the three longer cooldowns sat pinned at full for the
+      // first 200-500ms before appearing to move. Divide by the cooldown that
+      // is actually running — _blockProfile is stamped by startBlock, and it is
+      // the right source even mid-cooldown after a class change, because the
+      // value in flight belongs to the profile that started it.
+      const _cdFull = (player._blockProfile && player._blockProfile.cd) || 2000;
+      const frac = Math.min(1, Math.max(0, player.blockCD / _cdFull));
       if (bs._cd !== onBlockCd) {
         bs._cd = onBlockCd;
         bs.cdEl.style.display = 'flex';
