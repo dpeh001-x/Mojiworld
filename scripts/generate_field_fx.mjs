@@ -83,6 +83,39 @@ const FX = {
     // Drains HP/MP to 1 — should read as siphoning UPWARD, not just a beam.
     prompt: 'A tall vertical column of draining golden energy, glowing amber light being pulled upward in thin ribbons and rising motes, brighter at the top where it is siphoned away, hollow darker centre, thin gold edges framing the column, the column runs the full height of the image,',
   },
+  // ---- v0.29.351 — action-boon combat FX (Flame Dash / Nova Step / Death
+  // Bloom / Phantom Echo). First shipped v0.29.347 via the Higgsfield
+  // fallback; regenerated here through the canonical pipeline per user
+  // "redo using ludo.ai, high quality cel-shaded 2d sidescroller artwork".
+  flame_patch: {
+    dir: 'vfx', ar: 'ar_16_9', cw: 512, ch: 256, fill: 0.96,
+    // Drawn bottom-anchored by drawFlameTrail and tiled along the dash path,
+    // so like the other bands it must be repeated structure with NO central
+    // emblem — a focal flame would read as a row of identical torches.
+    prompt: 'A low wide band of fierce orange and gold fire burning along the ground, many small licking flame tongues of varied heights rising from a white-hot molten base line, deep red undertones at the roots and bright yellow-white tips, a few glowing embers drifting above, painted with dramatic layered flame shapes,',
+  },
+  nova_ring: {
+    dir: 'fx', ar: 'ar_1_1', cw: 768, ch: 768, fill: 0.94,
+    // spawnSpriteBurst scales it uniformly from the dash end-point; the ring
+    // must be a complete circle so the burst reads centred at any size.
+    prompt: 'A complete circular shockwave ring of orange and white energy viewed straight on, a full unbroken blazing circle with a white-hot inner edge, sharp triangular energy spikes radiating outward from the entire circumference, small glowing shards and speed-line sparks flying away from the ring, hollow transparent centre, dramatic explosive impact frame,',
+  },
+  bloom_burst: {
+    dir: 'fx', ar: 'ar_1_1', cw: 768, ch: 768, fill: 0.94,
+    // v2 — the first ludo pass drew whole five-petal FLOWERS on branching
+    // stems, a wreath rather than a detonation. Detached single petals only,
+    // flowers and stems explicitly negated.
+    prompt: 'A violent radial explosion of loose single flower petals bursting outward from one brilliant white-pink flash at the centre, dozens of individual detached pink petals of varied sizes tumbling and spinning away in every direction with curved motion streaks, denser near the centre and sparser at the edge, deep magenta petal shadows and pale highlights, individual petals only, no whole flowers, no blossoms, no stems, no branches, no leaves,',
+  },
+  echo_slash: {
+    dir: 'fx', ar: 'ar_1_1', cw: 768, ch: 768, fill: 0.94,
+    // Mirrored via flipX at the spawn site, so the sweep direction just needs
+    // to be consistent; drawn over the struck monster at ~its height.
+    // v2 — "crescent sword slash" made ludo paint an actual ornate SWORD with
+    // a trail; this overlay lands ON the struck monster, so it must be the
+    // energy arc alone. Weapon vocabulary removed and explicitly negated.
+    prompt: 'A single huge ghostly crescent arc of pure spectral energy sweeping diagonally, a sharp curved streak of glowing violet and white light with a crisp bright leading edge tapering to fine points, two fainter translucent purple afterimage arcs trailing behind it, small spirit wisps and speed lines along the sweep, energy trail only, no sword, no blade, no hilt, no handle, no weapon, no object,',
+  },
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };

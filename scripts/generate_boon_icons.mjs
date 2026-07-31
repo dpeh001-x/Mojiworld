@@ -34,7 +34,7 @@ const STUBBORN = 'A single physical die-cut VINYL STICKER, floating alone on a F
   'Style: clean chibi-anime game art, bold simple shapes, thin even ~2px solid black outline, vibrant flat colours, light cel shading, thin white sticker rim around the silhouette. ' +
   'Centered, about 82% of the frame. NO TEXT of any kind. The sticker subject is: ';
 // Per-id prompt override for the two that keep coming back framed.
-const PREFIX_FOR = { crit: STUBBORN, atk: STUBBORN };
+const PREFIX_FOR = { crit: STUBBORN, atk: STUBBORN, diagslash: STUBBORN };   // v0.29.351 — diagslash came back with a frame-corner artifact on the plain PREFIX
 
 // id (POWERUPS id) -> concrete subject
 const BOON = {
@@ -61,16 +61,17 @@ const BOON = {
   // v0.29.298 boons — added with the roster so the art pipeline stays complete.
   chain:  'a jagged yellow-white lightning bolt forking into two branches that arc apart, electric storm theme',
   freeze: 'a pale blue crystalline snowflake with sharp icy facets and a cold glow',
-  // v0.29.344 action boons (icons shipped v0.29.347). NOTE: generated via
-  // the Higgsfield MCP (Recraft V4.1, same sticker spec) because no
-  // LUDO_API_KEY was available in that session — re-running this script with
-  // --force --only <id> regenerates them through the canonical ludo pipeline.
-  flamedash: 'a winged boot dashing to the right leaving a trail of orange flames behind it',
-  blink:     'a swirling cyan and violet teleport vortex ring with small arcane sparks around it',
-  novastep:  'a bright orange starburst shockwave ring exploding outward with sharp radial spikes',
-  diagslash: 'a sword sweeping a glowing diagonal slash arc from lower-left to upper-right',
-  echo:      'a ghostly translucent purple crescent slash with two fading afterimage copies behind it',
-  bloom:     'a pink flower blossom bursting open with petals scattering outward and a small sparkle',
+  // v0.29.344 action boons. v0.29.347 shipped stopgap icons via the
+  // Higgsfield fallback (no key that session); v0.29.351 regenerated all six
+  // through THIS canonical pipeline per user "redo using ludo.ai, high
+  // quality cel-shaded". Subjects were enriched for dynamic angles + layered
+  // cel shading — the flat first-pass reads were the complaint.
+  flamedash: 'a sleek winged leather boot mid-sprint at a dynamic three-quarter angle, powerful orange and gold flames streaming off its heel in layered tongues, ember sparks in its wake, strong two-tone cel shading with a warm rim light',
+  blink:     'a luminous teleport portal ring of swirling cyan and violet energy seen at a slight tilt, spiral arms wrapping into a bright white core, small arcane runes and sparks orbiting it, deep indigo shadow bands and electric highlights',
+  novastep:  'an explosive orange shockwave starburst with a white-hot core, layered jagged rays of fire bursting outward over a thin expanding ring, tiny debris shards flying, bold impact-frame energy with crisp cel shade steps',
+  diagslash: 'a gleaming longsword captured mid-swing on a steep diagonal, a curved arc of white-blue slash energy trailing the blade edge, motion speed-lines, polished steel with hard cel-shaded reflections and a cold rim light',
+  echo:      'three overlapping ghostly crescent slash arcs in fading shades of violet, the front arc sharp and bright with spectral white edge-light, the two behind progressively dimmer and more transparent, small spirit wisps drifting off them',
+  bloom:     'a stylised sakura blossom bursting open, curved pink petals flying outward from a glowing magenta heart with a four-point gold sparkle, each petal with a darker underside and bright cel-shaded top, petals caught mid-spin',
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
