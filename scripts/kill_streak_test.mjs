@@ -1,4 +1,4 @@
-// Slaughter Ladder (v0.29.352) â€” kill-streak boons, verified through the live
+// Slaughter Ladder (v0.29.352, rebased 1k-100k + cap 4.5x in v0.29.353) â€” kill-streak boons, verified through the live
 // game rather than the ladder table: kill real monsters via killMonster(),
 // measure getAtk()/getSpeed()/EXP/coins before vs after, and prove the three
 // lifecycle rules â€” map change resets the COUNTER but keeps the boons, death
@@ -55,11 +55,13 @@ const o = await page.evaluate(() => {
 
   r.spd0 = getSpeed();
 
-  // ---- climb to 100 (BLOODED, +3% EXP) --------------------------------
-  killN(100);
-  r.streakAt100 = game.mapKillStreak | 0;
-  r.tierAt100 = player._ksTier | 0;
-  r.xpMulAt100 = _ksXpMul();
+  // ---- climb to 1,000 (BLOODED, +3% EXP) ------------------------------
+  // v0.29.353 rebase: tier 1 moved 100 → 1,000. Still climbed with real
+  // kills; the top tiers (25k/50k/100k) are forced-tier checks below.
+  killN(1000);
+  r.streakAt1000 = game.mapKillStreak | 0;
+  r.tierAt1000k = player._ksTier | 0;
+  r.xpMulAt1000 = _ksXpMul();
 
   // EXP boon must show up in a real kill's payout. Slime EXP at level 200
   // floors to 0 through the level-gap curve, so pin m.exp to a big constant
@@ -71,10 +73,11 @@ const o = await page.evaluate(() => {
     const savedLvl = player.level; player.level = 60;
     const saved = player._ksTier; player._ksTier = tier;
     // _ksOnKill re-derives the tier from the streak on every kill (by design —
-    // the ladder is monotonic). A "tier 0" probe with streak still at 100+
-    // instantly re-tiers to 1 mid-kill and pays the boon anyway, which made an
-    // earlier draft compare 1.03x against 1.03x. Pin the streak per probe.
-    game.mapKillStreak = (tier === 0) ? 0 : 150;
+    // the ladder is monotonic). A "tier 0" probe with streak past tier 1's
+    // threshold instantly re-tiers mid-kill and pays the boon anyway, which
+    // made an earlier draft compare 1.03x against 1.03x. Pin the streak per
+    // probe: 0 for the control, mid-band (1,500 < 2,500) for the tier-1 kill.
+    game.mapKillStreak = (tier === 0) ? 0 : 1500;
     const m = spawnMonster(ww * 0.5 + 100, gy - 60, 'slime', false);
     let guard = 0;
     while (game.monsters.indexOf(m) >= 0 && guard++ < 6) {
@@ -88,30 +91,30 @@ const o = await page.evaluate(() => {
   r.expPaidT1 = paidWithTier(1);
   r.expPaidT0 = paidWithTier(0);
   r.expBoonPays = r.expPaidT0 > 0 && r.expPaidT1 > r.expPaidT0;
-  game.mapKillStreak = 100; // the two probe kills above also fed the counter; re-pin
+  game.mapKillStreak = 1000; // the two probe kills above also fed the counter; re-pin
 
-  // ---- climb to 500 (SLAYER, +2% ATK) ---------------------------------
-  killN(400);
-  r.tierAt500 = player._ksTier | 0;
+  // ---- climb to 2,500 (FRENZIED, +2% speed +2% ATK) --------------------
+  killN(1500);
+  r.tierAt2500 = player._ksTier | 0;
+  r.spdAt2500 = getSpeed();
+  r.spdGrew = r.spdAt2500 > r.spd0;
+  const climbedTier = player._ksTier | 0;
 
-  // ---- coin boon at 1000 (BUTCHER, +5% coins) -------------------------
-  killN(500);
-  r.tierAt1000 = player._ksTier | 0;
+  // ---- coin boon (first appears at SLAYER/5,000: +5%) ------------------
+  // Forced tier — climbing 5,000 real kills per run buys no extra coverage.
+  const savedT = player._ksTier; player._ksTier = 3;
   const w0 = player.mojicoins;
   _grantMojicoins(1000, { full: true });
   r.coinPaid = player.mojicoins - w0;                    // expect 1050
   r.coinBoonPays = r.coinPaid > 1000;
-
-  // ---- speed at 250 threshold was crossed on the way; check now --------
-  r.spdAt1000 = getSpeed();
-  r.spdGrew = r.spdAt1000 > r.spd0;
+  player._ksTier = savedT;
 
   // ---- map change: counter resets, boons stay -------------------------
   const otherMap = Object.entries(MAPS).find(([id, mp]) => id !== arena[0] && !mp.isVoid && (mp.platforms || []).length);
   loadMap(otherMap[0]);
   r.streakAfterMapChange = game.mapKillStreak | 0;
   r.tierAfterMapChange = player._ksTier | 0;
-  r.mapChangeKeepsBoons = r.tierAfterMapChange === r.tierAt1000 && r.streakAfterMapChange === 0;
+  r.mapChangeKeepsBoons = r.tierAfterMapChange === climbedTier && r.streakAfterMapChange === 0;
   r.atkAfterMapChange = getAtk();
 
   // ---- illusion kills feed nothing ------------------------------------
@@ -128,14 +131,14 @@ const o = await page.evaluate(() => {
   // can contaminate the ratio.
   const savedBase = player.baseAtk; player.baseAtk = 10000;
   player._ksTier = 0; r.atkT0 = getAtk();
-  player._ksTier = 3; r.atkT3 = getAtk();          // SLAYER: +2%
-  player._ksTier = 7; r.atkT7 = getAtk();          // GODSLAYER: +10%
-  r.atkT3Ratio = +(r.atkT3 / r.atkT0).toFixed(3);
+  player._ksTier = 4; r.atkT4 = getAtk();          // BUTCHER/10k: +10% — the user's original anchor
+  player._ksTier = 7; r.atkT7 = getAtk();          // GODSLAYER/100k: +25%
+  r.atkT4Ratio = +(r.atkT4 / r.atkT0).toFixed(3);
   r.atkT7Ratio = +(r.atkT7 / r.atkT0).toFixed(3);
   player.baseAtk = savedBase;
 
   // ---- death wipes everything -----------------------------------------
-  player._ksTier = r.tierAt1000; game.mapKillStreak = 777;
+  player._ksTier = climbedTier; game.mapKillStreak = 777;
   _ksOnDeath();
   r.tierAfterDeath = player._ksTier | 0;
   r.streakAfterDeath = game.mapKillStreak | 0;
@@ -145,16 +148,15 @@ const o = await page.evaluate(() => {
 
 const results = [];
 const ok = (n, c, e) => results.push({ n, pass: !!c, e });
-ok('100 kills reaches tier 1 (BLOODED)', o.tierAt100 === 1, `tier ${o.tierAt100}, streak ${o.streakAt100}`);
+ok('1,000 kills reaches tier 1 (BLOODED)', o.tierAt1000k === 1, `tier ${o.tierAt1000k}, streak ${o.streakAt1000}`);
 ok('EXP boon pays out on a real kill', o.expBoonPays, `${o.expPaidT1} vs ${o.expPaidT0} XP`);
-ok('500 kills reaches tier 3 (SLAYER)', o.tierAt500 === 3, `tier ${o.tierAt500}`);
-ok('1000 kills reaches tier 4 (BUTCHER)', o.tierAt1000 === 4, `tier ${o.tierAt1000}`);
-ok('coin boon pays out (+5%)', o.coinBoonPays, `1000 granted as ${o.coinPaid}`);
-ok('speed rises with the ladder', o.spdGrew, `${o.spd0} -> ${o.spdAt1000}`);
+ok('2,500 kills reaches tier 2 (FRENZIED)', o.tierAt2500 === 2, `tier ${o.tierAt2500}`);
+ok('coin boon pays out (+5% at SLAYER)', o.coinBoonPays, `1000 granted as ${o.coinPaid}`);
+ok('speed rises with the ladder', o.spdGrew, `${o.spd0} -> ${o.spdAt2500}`);
 ok('map change resets counter, keeps boons', o.mapChangeKeepsBoons, `streak ${o.streakAfterMapChange}, tier ${o.tierAfterMapChange}`);
 ok('mirage kills feed nothing', !o.mirageFeedsStreak);
-ok('SLAYER ATK is +2%', o.atkT3Ratio >= 1.015 && o.atkT3Ratio <= 1.025, `x${o.atkT3Ratio}`);
-ok('GODSLAYER ATK caps at +10%', o.atkT7Ratio >= 1.095 && o.atkT7Ratio <= 1.105, `x${o.atkT7Ratio}`);
+ok('BUTCHER (10k anchor) ATK is +10%', o.atkT4Ratio >= 1.095 && o.atkT4Ratio <= 1.105, `x${o.atkT4Ratio}`);
+ok('GODSLAYER (100k) ATK caps at +25%', o.atkT7Ratio >= 1.245 && o.atkT7Ratio <= 1.255, `x${o.atkT7Ratio}`);
 ok('death wipes boons and streak', o.deathWipes, `tier -> ${o.tierAfterDeath}, streak -> ${o.streakAfterDeath}`);
 
 for (const t of results) console.log(`${t.pass ? 'PASS' : 'FAIL'}  ${t.n}${t.e ? '  (' + t.e + ')' : ''}`);
