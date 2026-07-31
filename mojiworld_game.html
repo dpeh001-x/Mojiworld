@@ -18733,6 +18733,16 @@ const QUESTS = {
 //                       exp   = clamp(L × N × 1.5,  60, 2000)
 //   boss quest reward:  mojicoins = clamp(L × 80,      400, 5000)
 //                       exp   = clamp(L × 40,      200, 2500)
+// v0.29.320 — ceiling on a codex entry's AUTHORED exp. _completeQuest derives
+// a quest's tier weight from this number (_frac = exp/30000, capped at 0.35),
+// so anything above ~10,500 buys no extra weight and only serves to overshoot
+// the 80%-of-a-level payout ceiling. 4,000 puts the codex at ~13% of a level
+// where a story finale sits at 35% — a codex entry should never out-pay the
+// saga. See the clamp site in the bestiary generator for the full rationale.
+// Declared HERE, above the generator that reads it: the generator lives in
+// _generateBestiaryQuests, and a `const` further down the file would sit in
+// the temporal dead zone if that function is ever called during load.
+const LX_CODEX_EXP_CAP = 4000;
 const MONSTER_BESTIARY = {
   // ─── Tier 1 — starter biomes ──────────────────────────────────────
   snail:        { npc:'Nurse Joyce',   count:6,  flavor:'They\'re slow but the trail of slime burns through canvas.' },
@@ -18942,6 +18952,22 @@ function _generateBestiaryQuests() {
     } else {
       mojicoins = Math.round(count * _grindCoin * LX_CODEX_PAY.study);
       exp   = Math.round(count * _grindExp  * LX_CODEX_PAY.study);
+      // v0.29.320 — CLAMP INTO THE CODEX TIER BAND.
+      // `count × grindExp` is the RAW value of the hunt, and _completeQuest
+      // then multiplies the authored figure by the whole payout stack (×10
+      // quest knob × up to ×3 late weighting × the early ramp) — roughly ×300.
+      // Unclamped that produced authored values in the tens of MILLIONS
+      // (b_pathsBane_apex: 42,620,544 against the Gravitos finale's 21,000),
+      // which blew straight past the 80%-of-a-level ceiling. Every such quest
+      // therefore paid exactly 80%, so a codex entry was worth MORE than the
+      // saga's capstone and the authored numbers carried no information.
+      // Clamped, the curve-relative floor in _completeQuest governs instead —
+      // the same mechanism the hand-written quests use — and the codex lands
+      // at 4-13% of a level against a story finale's 35%, restoring the
+      // "background pacing income, not a replacement for boss runs" intent
+      // this table's own header states.
+      exp       = Math.max(200, Math.min(LX_CODEX_EXP_CAP,  exp));
+      mojicoins = Math.max(150, Math.min(lvl * 800,         mojicoins));
     }
     const name = '📖 ' + (mt.name || monId);
     QUESTS[qid] = {
@@ -18970,7 +18996,9 @@ function _generateBestiaryQuests() {
         kind: 'kill', target: monId, count: gCount,
         npc: cfg.npc || 'a passing scholar',
         desc: `The first study only sketched the ${mt.name || monId}. A full entry needs a population, not a specimen — behaviour under pressure, how they die when they are tired of dying. Bring me ${gCount} of them. ${LX_CODEX_FRAME.greater}`,
-        rewards: { mojicoins: Math.round(gCount * _grindCoin * LX_CODEX_PAY.greater), exp: Math.round(gCount * _grindExp * LX_CODEX_PAY.greater) },
+        // v0.29.320 — same tier-band clamp as the base study (see there).
+        rewards: { mojicoins: Math.max(150, Math.min(_gLv * 800, Math.round(gCount * _grindCoin * LX_CODEX_PAY.greater))),
+                   exp: Math.max(200, Math.min(LX_CODEX_EXP_CAP, Math.round(gCount * _grindExp * LX_CODEX_PAY.greater))) },
         bestiary: true,
       };
     }
@@ -18991,7 +19019,9 @@ function _generateBestiaryQuests() {
         kind: 'kill', target: monId, count: aCount,
         npc: cfg.npc || 'a passing scholar',
         desc: `Two studies in and the ${mt.name || monId} still has the last word. What is missing is not another specimen — it is the shape of a whole population thinning: what they do when there are fewer of them left than there were yesterday. ${aCount} of them, and the entry closes for good. ${LX_CODEX_FRAME.apex}`,
-        rewards: { mojicoins: Math.round(aCount * _grindCoin * LX_CODEX_PAY.apex), exp: Math.round(aCount * _grindExp * LX_CODEX_PAY.apex) },
+        // v0.29.320 — same tier-band clamp as the base study (see there).
+        rewards: { mojicoins: Math.max(150, Math.min(aLv * 800, Math.round(aCount * _grindCoin * LX_CODEX_PAY.apex))),
+                   exp: Math.max(200, Math.min(LX_CODEX_EXP_CAP, Math.round(aCount * _grindExp * LX_CODEX_PAY.apex))) },
         bestiary: true,
       };
     }
