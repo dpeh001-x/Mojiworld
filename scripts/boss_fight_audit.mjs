@@ -104,12 +104,26 @@ for (const type of BOSSES) {
         if (ph !== prevPhase) { phases++; prevPhase = ph; }
         if (m.x < -300 || m.x > ww + 300) off++;
         if (m.y < gy - 900) air++;
-        // Below every surface in the map. 200 px clears every legitimate
-        // burrow/dive depth (Scorpio's underground travel sits at 70).
+        // FEET below every surface in the map.
+        //
+        // Two calibration mistakes were made here before this line settled, both
+        // caught by running the detector against a known-bad input rather than
+        // trusting that it looked right:
+        //   • comparing m.y (the top edge) instead of the feet — a 142 px-tall
+        //     Scorpio stranded with her top at 821, in an arena whose deepest
+        //     platform is 660, slipped under the threshold while her feet were a
+        //     full 300 px through the bottom of the world.
+        //   • 200 px of slack — only marginally tighter than the real defect
+        //     (~303 px past the floor), so a slightly milder ratchet passed.
+        // 100 px sits comfortably between the two populations: the deepest
+        // LEGITIMATE position across all 25 bosses is ~310 px ABOVE this line
+        // (bosses roam platforms at many heights, and the burrow travels 70 px
+        // below whichever one it started from), while the defect sat ~300 px
+        // below it.
+        //
         // Deliberately NOT gated on !m.onGround: a boss that has drifted under
-        // the world keeps a stale onGround=true, which is exactly the case this
-        // needs to catch.
-        if (m.y > floorY + 200) { under++; underRun++; maxUnderRun = Math.max(maxUnderRun, underRun); } else underRun = 0;
+        // the world keeps a stale onGround=true, which is exactly what to catch.
+        if (m.y + m.h > floorY + 100) { under++; underRun++; maxUnderRun = Math.max(maxUnderRun, underRun); } else underRun = 0;
         maxMon = Math.max(maxMon, game.monsters.length);
         maxProj = Math.max(maxProj, (game.projectiles || []).length);
         maxPart = Math.max(maxPart, (game.particles || []).length);
