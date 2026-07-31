@@ -93,43 +93,50 @@ const o = await page.evaluate(() => {
     r.cancer_iframeLeaks = duringIFrames;
   }
 
-  // SCORPIO — the burrow sinks, relocates to the marked ambush X, and comes
-  // back up. Mirrors the pattern block so a change there shows up here.
+  // SCORPIO — the burrow must return her to the surface every cycle. This
+  // drives the REAL fight rather than re-implementing the burrow here: an
+  // earlier version of this test hand-copied the logic, so it happily passed
+  // while the shipped game ratcheted Scorpio ~400 px under the floor over six
+  // burrows (two systems both writing m.y). Assert the observable instead —
+  // she goes under, and she always comes back.
   {
-    const m = mk('scorpio', 0.85); resetPlayer();
-    const homeY = m.y;
-    m._burrowing = true; m._burrowT = 1400; m._burrowSunk = true;
-    m._burrowHomeY = homeY; m._burrowX = player.x + player.w / 2;
-    let deepest = m.y;
-    for (let i = 0; i < 120; i++) {
-      if (m._burrowSunk) {
-        m.vx = 0;
-        m.y += Math.min(9, ((m._burrowHomeY + m.h * 1.15) - m.y) * 0.28);
-        deepest = Math.max(deepest, m.y);
+    const arena = Object.entries(MAPS)
+      .filter(([id, mp]) => !mp.isVoid && !mp.isTown && (mp.platforms || []).some(p => p.w > 900))
+      .sort((a, b) => b[1].worldWidth - a[1].worldWidth)[0];
+    if (arena) {
+      loadMap(arena[0]);
+      const aw = game.mapData.worldWidth;
+      const gy = (game.mapData.platforms || []).filter(p => p.w > 900).sort((a, b) => a.y - b.y)[0].y;
+      game.monsters.length = 0;
+      for (const k of ['projectiles', 'particles', 'hazards', 'minions']) if (game[k]) game[k].length = 0;
+      game.keys = {};
+      player.level = 200; player.maxHp = 999999; player.hp = 999999;
+      player.x = aw * 0.5; player.y = gy - 80; player.vx = 0; player.vy = 0; player._god = false;
+      const m = spawnMonster(aw * 0.5 + 260, gy - 200, 'zodiac_scorpio', true);
+      const restY = gy - m.h;                       // y when standing on the floor
+      let burrows = 0, wasBurrowing = false, deepest = -1e9, belowRun = 0, maxBelowRun = 0;
+      for (let i = 0; i < 5400; i++) {              // ~90 s, several burrow cycles
+        m.currentHp = Math.max(1, Math.floor(m.maxHp * (1 - i / 5400 * 0.995)));
+        if (m.hp != null) m.hp = m.currentHp;
+        player.hp = player.maxHp;
+        game.time = (game.time | 0) + 1;            // loop() owns this; burrow cadence keys off it
+        if (typeof updatePlayer === 'function') updatePlayer(16.667);
+        updateMonsters(16.667); updateProjectiles(16.667);
+        if (typeof updateParticles === 'function') updateParticles(16.667);
+        if (game.monsters.indexOf(m) < 0) break;
+        const burrowing = !!m._burrowing || m.patternState === 'burrow';
+        if (burrowing && !wasBurrowing) burrows++;
+        wasBurrowing = burrowing;
+        const below = m.y - restY;
+        deepest = Math.max(deepest, below);
+        // 120 px is comfortably past the burrow machine's own 70 px travel depth
+        if (below > 120) { belowRun++; maxBelowRun = Math.max(maxBelowRun, belowRun); } else belowRun = 0;
       }
-      m._burrowT -= 16.667;
-      if (m._burrowT <= 0) {
-        if (m._burrowX != null) m.x = Math.max(8, Math.min(WW - m.w - 8, m._burrowX - m.w / 2));
-        m.y = m._burrowHomeY; m.vy = -7.5;
-        m._burrowSunk = false; m._burrowing = false;
-        break;
-      }
+      r.scorpio_burrowCycles = burrows;
+      r.scorpio_deepest = Math.round(deepest);
+      r.scorpio_stuckUnderSec = +(maxBelowRun / 60).toFixed(1);
+      r.scorpio_endsOnSurface = Math.abs(m.y - restY) < 120;
     }
-    r.scorpio_sinkDepth = Math.round(deepest - homeY);
-    r.scorpio_ambushErr = Math.round(Math.abs((m.x + m.w / 2) - (player.x + player.w / 2)));
-    r.scorpio_yRestored = m.y === homeY;
-    r.scorpio_eruptVy = +m.vy.toFixed(1);
-
-    // A phase change while sunk must lift her back out, or she is stranded a
-    // body-height underground with the burrow flags already cleared.
-    const m3 = mk('scorpio', 0.85); const hY = m3.y;
-    m3._burrowSunk = true; m3._burrowHomeY = hY; m3.y = hY + 160;
-    if (m3._burrowSunk && m3._burrowHomeY != null) m3.y = m3._burrowHomeY;
-    r.scorpio_phaseSafe = m3.y === hY;
-
-    const m4 = mk('scorpio', 0.85); m4._burrowSunk = true; m4.vx = 0;
-    _zodiacGaitTick(m4, 16.667, 300, 2, zOf('scorpio'));
-    r.scorpio_gaitSkipsBuried = m4.vx === 0;
   }
   return r;
 });
@@ -145,12 +152,10 @@ ok('taur push is not spammy', o.taur_forcePushes <= 15, `${o.taur_forcePushes} i
 ok('cancer undertow pulls player in', o.cancer_pullTicks > 100, `${o.cancer_pullTicks} ticks`);
 ok('cancer riptide fires', o.cancer_riptides > 0, `${o.cancer_riptides} in 30s`);
 ok('cancer respects i-frames', o.cancer_iframeLeaks === 0, `${o.cancer_iframeLeaks} leaks`);
-ok('scorpio sinks underground', o.scorpio_sinkDepth > 20, `${o.scorpio_sinkDepth}px`);
-ok('scorpio sprouts at the ambush X', o.scorpio_ambushErr < 40, `${o.scorpio_ambushErr}px off`);
-ok('scorpio restores its ground Y', o.scorpio_yRestored);
-ok('scorpio erupts upward', o.scorpio_eruptVy < 0, `vy ${o.scorpio_eruptVy}`);
-ok('phase change never strands a buried scorpio', o.scorpio_phaseSafe);
-ok('gait never walks a buried scorpio', o.scorpio_gaitSkipsBuried);
+ok('scorpio burrows during a fight', o.scorpio_burrowCycles > 0, `${o.scorpio_burrowCycles} cycles`);
+ok('scorpio never ratchets below the floor', o.scorpio_deepest < 120, `deepest ${o.scorpio_deepest}px`);
+ok('scorpio never stays buried', o.scorpio_stuckUnderSec < 3, `${o.scorpio_stuckUnderSec}s stuck`);
+ok('scorpio ends the fight on the surface', o.scorpio_endsOnSurface);
 
 for (const t of results) console.log(`${t.pass ? 'PASS' : 'FAIL'}  ${t.name}${t.extra ? '  (' + t.extra + ')' : ''}`);
 const failed = results.filter(t => !t.pass);
