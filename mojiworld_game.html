@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.345';
+const GAME_VERSION = 'v0.29.347';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -9788,6 +9788,7 @@ const LX_VFX = (() => {
     drainPillar:     'sovereign_drain_pillar.webp', // v0.29.316 — Sovereign HP/MP drain column
     gloopPuddle:     'gloop_puddle.webp',      // v0.29.325 — King Gloopaloo cyan gel puddle
     beamCore:        'beam_core.webp',         // v0.29.325 — smoothFx beam (neutral white, tinted per caller)
+    flamePatch:      'flame_patch.webp',       // v0.29.347 — Flame Dash boon ground-fire patch (drawFlameTrail)
   };
   for (const [k, f] of Object.entries(files)) {
     const img = new Image();
@@ -10694,6 +10695,12 @@ const LX_FX = (() => {
     // pillars in boss arenas, not the columnStrike projectile. Sprite
     // moved to Sprites/objects/ and registered as a MAP_PROPS decoration
     // overlay instead — see LX_OBJECTS_FILES at L7304 area.
+    // v0.29.347 — Action-boon burst sprites (Recraft V4.1, cel-shaded spec).
+    // One-shot spriteBurst art for the v0.29.344 boons; each render site keeps
+    // its particle fallback so a 404 degrades to the shipped procedural look.
+    nova_ring:          'nova_ring.webp',      // Nova Step — end-of-dash shockwave
+    bloom_burst:        'bloom_burst.webp',    // Death Bloom — corpse petal detonation
+    echo_slash:         'echo_slash.webp',     // Phantom Echo — ghost slash on the echo hit
   };
   // v0.25.558 — `.webp` ↔ `.png` fallback. The data above lists the
   // expected extension per sprite; if that file 404s (e.g. user
@@ -44492,6 +44499,12 @@ function _dashNovaBurst() {
     hitMonster(m, dmg, false, 'nova');
     m.vx = (m.vx || 0) + Math.sign(dx || 1) * 5;
   }
+  // v0.29.347 — authored shockwave burst (Sprites/fx/nova_ring.webp). Layered
+  // on top of the explosion + particles rather than replacing them: the ring
+  // sprite carries the shape, the particles carry the motion.
+  if (typeof _lxVfxReady === 'function' && typeof LX_FX !== 'undefined' && _lxVfxReady(LX_FX.nova_ring)) {
+    try { spawnSpriteBurst(cx, cy, 'nova_ring', { size: R * 2.1, life: 22, spin: 0.02 }); } catch (e) {}
+  }
   if (typeof spawnSmoothExplosion === 'function') { try { spawnSmoothExplosion(cx, cy, R * 1.4); } catch (e) {} }
   if (typeof addShake === 'function') addShake(7);
   for (let i = 0; i < 18; i++) {
@@ -66760,6 +66773,13 @@ function hitMonster(m, dmg, isCrit, skill) {
           if (!_target || _target.currentHp <= 0 || game.monsters.indexOf(_target) < 0) return;
           player._echoing = true;
           hitMonster(_target, _eDmg, false, 'melee');
+          // v0.29.347 — ghost-slash sprite on the echo hit (falls back to the
+          // 👻 number alone until the art decodes). Mirrored to the side the
+          // player is on so the arc sweeps INTO the target.
+          if (typeof _lxVfxReady === 'function' && typeof LX_FX !== 'undefined' && _lxVfxReady(LX_FX.echo_slash)) {
+            try { spawnSpriteBurst(_target.x + _target.w / 2, _target.y + _target.h / 2, 'echo_slash',
+              { size: Math.max(70, _target.h * 1.1), life: 18, flipX: (player.x > _target.x) }); } catch (e) {}
+          }
           game.damageNumbers.push({ x: _target.x + _target.w / 2 - 10, y: _target.y - 18, vy: -1.6,
             text: '👻', life: 20, color: '#cdb8ff', size: 12 });
         } catch (e) {} finally { player._echoing = false; }
@@ -68129,6 +68149,10 @@ function killMonster(m) {
         const dx = (o.x + o.w / 2) - bx, dy = (o.y + o.h / 2) - by;
         if (dx * dx + dy * dy > R * R) continue;
         hitMonster(o, bdmg, false, 'bloom');
+      }
+      // v0.29.347 — authored petal-burst sprite over the particle spray.
+      if (typeof _lxVfxReady === 'function' && typeof LX_FX !== 'undefined' && _lxVfxReady(LX_FX.bloom_burst)) {
+        try { spawnSpriteBurst(bx, by, 'bloom_burst', { size: R * 1.9, life: 24, spin: 0.015 }); } catch (e) {}
       }
       for (let i = 0; i < 14; i++) {
         const a = (i / 14) * Math.PI * 2;
@@ -106169,11 +106193,24 @@ function drawFlameTrail() {
   const T = game.flameTrail;
   if (!T || !T.length) return;
   const camX = game.camera.x, camY = game.camera.y || 0;
+  // v0.29.347 — authored fire-patch sprite (Sprites/vfx/flame_patch.webp,
+  // Recraft cel-shaded). Bottom-anchored to the patch's ground point so the
+  // flames rise OUT of the floor; alpha follows remaining life. The radial-
+  // gradient ellipse stays as the pre-decode / 404 fallback.
+  const _fp = (typeof LX_VFX !== 'undefined') ? LX_VFX.flamePatch : null;
+  const _fpReady = (typeof _lxVfxReady === 'function') && _lxVfxReady(_fp);
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   for (const f of T) {
     const t = Math.max(0, Math.min(1, f.life / f.max));
     const x = f.x - camX, y = f.y - camY;
+    if (_fpReady) {
+      const w = f.r * 2.4, h = w * (_fp.naturalHeight / _fp.naturalWidth);
+      ctx.globalAlpha = 0.85 * t;
+      ctx.drawImage(_fp, x - w / 2, y - h + f.r * 0.35, w, h);
+      ctx.globalAlpha = 1;
+      continue;
+    }
     const r = f.r * (0.55 + 0.45 * t);
     const g = ctx.createRadialGradient(x, y, 0, x, y, r);
     g.addColorStop(0,   `rgba(255,226,150,${0.55 * t})`);

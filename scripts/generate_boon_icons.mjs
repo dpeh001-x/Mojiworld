@@ -61,6 +61,16 @@ const BOON = {
   // v0.29.298 boons — added with the roster so the art pipeline stays complete.
   chain:  'a jagged yellow-white lightning bolt forking into two branches that arc apart, electric storm theme',
   freeze: 'a pale blue crystalline snowflake with sharp icy facets and a cold glow',
+  // v0.29.344 action boons (icons shipped v0.29.347). NOTE: generated via
+  // the Higgsfield MCP (Recraft V4.1, same sticker spec) because no
+  // LUDO_API_KEY was available in that session — re-running this script with
+  // --force --only <id> regenerates them through the canonical ludo pipeline.
+  flamedash: 'a winged boot dashing to the right leaving a trail of orange flames behind it',
+  blink:     'a swirling cyan and violet teleport vortex ring with small arcane sparks around it',
+  novastep:  'a bright orange starburst shockwave ring exploding outward with sharp radial spikes',
+  diagslash: 'a sword sweeping a glowing diagonal slash arc from lower-left to upper-right',
+  echo:      'a ghostly translucent purple crescent slash with two fading afterimage copies behind it',
+  bloom:     'a pink flower blossom bursting open with petals scattering outward and a small sparkle',
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
