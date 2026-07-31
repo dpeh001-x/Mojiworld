@@ -60661,6 +60661,153 @@ function updateMonsters(dt) {
         }
       }
     }
+    // =====================================================================
+    // v0.29.320 — DEAD-TRAIT IMPLEMENTATION PASS (tick half). Six trait keys
+    // sat declared on monsters for months with no reader — the exact
+    // advertised-but-never-applied trap. Each below follows an existing
+    // idiom (lowHpHide's cycle, columnStrike's phases, lanternPulse's
+    // proximity damage). The on-hit half (parryChance / phantomDodge /
+    // armorShield / splitsOnHit) lives at the top of hitMonster.
+    // ---------------------------------------------------------------------
+    // phasesOut (boneWraith: "Phases out of phase. Briefly untargetable.")
+    // Cycle: every cdMs go immaterial for dur — same m.invulnerable channel
+    // lowHpHide uses, so hitMonster already no-ops without a new guard.
+    if (m.traits && m.traits.phasesOut && !m.isBoss && m.currentHp > 0) {
+      const po = m.traits.phasesOut;
+      if (m._phaseCd === undefined) m._phaseCd = (po.cdMs || 5000) * (0.4 + Math.random() * 0.6);
+      m._phaseCd -= dt;
+      if (m._phaseCd <= 0) {
+        m._phaseCd = po.cdMs || 5000;
+        m.invulnerable = Math.max(m.invulnerable || 0, po.dur || 600);
+        for (let i = 0; i < 10; i++) {
+          game.particles.push({ x: m.x + m.w/2 + (Math.random() - 0.5) * m.w, y: m.y + Math.random() * m.h,
+            vx: (Math.random() - 0.5) * 3, vy: -Math.random() * 2, life: 24, color: '#aab0e8', size: 2, gravity: 0.01 });
+        }
+      }
+    }
+    // heatAura (forgewight: "Body-forged anvil.") — standing next to the
+    // living forge burns. Proximity tick, ~1 damage beat per second, routed
+    // through _diffDmg like every monster hit; brief iframe so it never
+    // stacks with the 1s contact iframe into a double-tap.
+    if (m.traits && m.traits.heatAura && m.currentHp > 0 && player.hp > 0 && (player.invulnerable | 0) <= 0 && !player._god) {
+      if (m._heatT === undefined) m._heatT = 0;
+      m._heatT -= dt;
+      const _haR = 150;
+      const _haDx = _playerCx - (m.x + m.w/2), _haDy = _playerCy - (m.y + m.h/2);
+      if (m._heatT <= 0 && (_haDx * _haDx + _haDy * _haDy) < _haR * _haR) {
+        m._heatT = 950;
+        const _haDmg = _diffDmg(Math.floor((m.atk || 50) * 0.30), (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1));
+        player.hp -= _haDmg;
+        player.lastHitTime = game.time;
+        player._lastDamageSource = m.label || m.type || 'searing heat';
+        player.invulnerable = 450;
+        game.damageNumbers.push({ x: player.x + player.w/2 - 10, y: player.y - 8, vy: -1.6, text: String(_haDmg), life: 26, color: '#ff8844', size: 12 });
+        for (let i = 0; i < 6; i++) {
+          game.particles.push({ x: player.x + Math.random() * player.w, y: player.y + player.h - Math.random() * 12,
+            vx: (Math.random() - 0.5) * 2, vy: -1.5 - Math.random() * 2, life: 20, color: i % 2 ? '#ff6622' : '#ffaa33', size: 2, gravity: -0.02 });
+        }
+      }
+    }
+    // packHunter (sepulchreHound: "Packs of three. Coordinated lunge.") —
+    // with 2+ same-type packmates nearby the hound hits harder and closes
+    // faster. Bonus is stored on the mob and consumed by the contact-damage
+    // site ((m._packBonus || 1) multiplier); decays instantly when alone.
+    if (m.traits && m.traits.packHunter && m.currentHp > 0) {
+      if (m._packScanT === undefined) m._packScanT = 0;
+      m._packScanT -= dt;
+      if (m._packScanT <= 0) {
+        m._packScanT = 700;                       // re-scan ~1.4x/s, cheap
+        let _mates = 0;
+        for (const o of game.monsters) {
+          if (o === m || !o || o.currentHp <= 0 || o.type !== m.type) continue;
+          const _pdx = o.x - m.x, _pdy = o.y - m.y;
+          if (_pdx * _pdx + _pdy * _pdy < 420 * 420) _mates++;
+        }
+        m._packBonus = _mates >= 2 ? 1.35 : (_mates === 1 ? 1.15 : 1);
+      }
+      if (m._packBonus > 1 && Math.abs(m.vx) > 0.2) m.vx *= 1.012;   // pack closes faster
+    }
+    // packCall (drownedCur: "Hunts in shifting packs.") — an aggro'd cur
+    // howls in reinforcements, up to 2 per original mob, 12s apart. Spawned
+    // allies carry no exp/coins so the pack cannot be farmed.
+    if (m.traits && m.traits.packCall && !m._isPackSpawn && m.currentHp > 0) {
+      const _pcDx = Math.abs(_playerCx - (m.x + m.w/2));
+      if (m._packCallCd === undefined) m._packCallCd = 2500;
+      m._packCallCd -= dt;
+      if (m._packCallCd <= 0 && _pcDx < 500 && (m._packCalled || 0) < 2) {
+        m._packCallCd = 12000;
+        m._packCalled = (m._packCalled || 0) + 1;
+        const _pcAlly = spawnMonster(m.x + (Math.random() < 0.5 ? -180 : 180), m.y - 10, m.type, false, false);
+        if (_pcAlly) { _pcAlly._isPackSpawn = true; _pcAlly.exp = 0; _pcAlly.mojicoins = 0; }
+        if (typeof audio !== 'undefined' && audio.play) audio.play('hit');
+        for (let i = 0; i < 8; i++) {
+          game.particles.push({ x: m.x + m.w/2, y: m.y, vx: (Math.random() - 0.5) * 5, vy: -Math.random() * 3,
+            life: 22, color: '#66aacc', size: 2, gravity: 0.03 });
+        }
+      }
+    }
+    // summonsHounds (tombKeeper: "Summons hounds on engage.") — once per
+    // keeper, first time the player closes in: two sepulchreHounds rise.
+    // The hounds carry packHunter, so the keeper's own summons feed their
+    // pack bonus — the two traits were designed for each other.
+    if (m.traits && m.traits.summonsHounds && !m._houndsDone && m.currentHp > 0) {
+      const _shDx = Math.abs(_playerCx - (m.x + m.w/2));
+      if (_shDx < 430) {
+        m._houndsDone = true;
+        for (let i = 0; i < 2; i++) {
+          const _hnd = spawnMonster(m.x + (i === 0 ? -140 : 140), m.y, 'sepulchreHound', false, false);
+          if (_hnd) { _hnd._isPackSpawn = true; _hnd.exp = 0; _hnd.mojicoins = 0; }
+        }
+        if (typeof addShake === 'function') addShake(4);
+        if (typeof showToast === 'function') showToast('⚰ The Keeper calls its hounds!', 'rare');
+      }
+    }
+    // groundSpikes (shardlich: "Caster. Glass spikes from below.") — the
+    // columnStrike phase idiom rotated 90°: lock the player's x, telegraph
+    // rising shard motes at the floor for telegraphMs, then erupt a spike
+    // zone that hits if the player is still inside it.
+    if (m.traits && m.traits.groundSpikes && m.currentHp > 0 && player.hp > 0) {
+      if (m._spikeCd === undefined) m._spikeCd = 3000 + Math.random() * 3000;
+      if (!m._spikeFiring) m._spikeCd -= dt;
+      const _gsDx = Math.abs(_playerCx - (m.x + m.w/2));
+      if (!m._spikeFiring && m._spikeCd <= 0 && _gsDx < 460) {
+        m._spikeFiring = true;
+        m._spikeT = 700;
+        m._spikeX = _playerCx;
+        m._spikeY = player.y + player.h;         // floor line at lock time
+      }
+      if (m._spikeFiring) {
+        m._spikeT -= dt;
+        if (game.time % 2 === 0) {
+          for (let i = 0; i < 3; i++) {
+            game.particles.push({ x: m._spikeX + (Math.random() - 0.5) * 90, y: m._spikeY - Math.random() * 8,
+              vx: 0, vy: -0.8 - Math.random() * 1.4, life: 16, color: '#a0c8ff', size: 2, gravity: -0.01 });
+          }
+        }
+        if (m._spikeT <= 0) {
+          m._spikeFiring = false;
+          m._spikeCd = 5200 + Math.random() * 1800;
+          for (let i = 0; i < 16; i++) {
+            game.particles.push({ x: m._spikeX + (Math.random() - 0.5) * 100, y: m._spikeY - Math.random() * 30,
+              vx: (Math.random() - 0.5) * 3, vy: -3 - Math.random() * 4, life: 26, color: i % 2 ? '#cfe4ff' : '#7aa8e8', size: 3, gravity: 0.18 });
+          }
+          if (typeof addShake === 'function') addShake(3);
+          const _gsHalf = 55;
+          if ((player.invulnerable | 0) <= 0 && !player._god &&
+              Math.abs((player.x + player.w/2) - m._spikeX) < _gsHalf &&
+              Math.abs((player.y + player.h) - m._spikeY) < 60) {
+            const _gsDmg = _diffDmg(Math.floor((m.atk || 60) * 1.5), (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1));
+            player.hp -= _gsDmg;
+            player.lastHitTime = game.time;
+            player._lastDamageSource = m.label || m.type || 'glass spikes';
+            player.invulnerable = 900;
+            player.vy = Math.min(player.vy, -5);   // knock-up sells the eruption
+            game.damageNumbers.push({ x: player.x + player.w/2 - 10, y: player.y - 10, vy: -2, text: String(_gsDmg), life: 30, color: '#a0c8ff', size: 13 });
+          }
+        }
+      }
+    }
+    // =====================================================================
     // v0.25.53 — empowered frog passive: emit a slow venom puff every
     // ~1.6 s. Acts like a short-range mtoxic projectile aimed at the
     // player. Fires regardless of m.shoot state so it stacks with the
@@ -61704,6 +61851,7 @@ function updateMonsters(dt) {
         let _hot = (_tmed > 0) ? (m.atk / _tmed) : 1;
         _hot = Math.max(_TOUCH_ATK_MIN, Math.min(_TOUCH_ATK_MAX, _hot));   // outlier guard only
         if ((m._selfRageTimer | 0) > 0) _hot *= 1.5;
+        if ((m._packBonus || 1) > 1) _hot *= m._packBonus;   // v0.29.320 — packHunter: coordinated pack hits harder (same idiom as enrageSelf above)
         _atkBase = Math.max(2, Math.floor(_tref * _tb.tFloor * _hot * _gapMul));
       }
       // v0.26.356 — "Meaningful DEF": flat subtraction halved (was full
@@ -66492,6 +66640,64 @@ function hitMonster(m, dmg, isCrit, skill) {
   // undefined multiplier, a corrupt save feeding getAtk()) would poison m.currentHp to
   // NaN — NaN<=0 is false, so the monster becomes IMMORTAL and never fires on-kill.
   if (!Number.isFinite(dmg)) return;
+  // =====================================================================
+  // v0.29.320 — DEAD-TRAIT IMPLEMENTATION PASS (on-hit half; tick half is
+  // in updateMonsters after lowHpHide). DoT ticks are exempt from the
+  // defensive rolls so burn/thorns can't spam PARRY/DODGE markers.
+  if (m.traits && !m._dying) {
+    const _dtDoT = (skill === 'thorns' || skill === 'burn' || skill === 'chain' || skill === 'pack');
+    // parryChance (bonebosn: "Twin-cutlass pirate skeleton.") — riposte
+    // flash that negates the hit. Rolled once per direct hit.
+    if (!_dtDoT && m.traits.parryChance && Math.random() < m.traits.parryChance) {
+      game.damageNumbers.push({ x: m.x + m.w/2 - 16, y: m.y - 8, vy: -1.8, text: '⚔ PARRY', life: 26, color: '#ffd166', size: 12 });
+      if (typeof audio !== 'undefined' && audio.play) audio.play('block');
+      m.atkAnimUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + 420;
+      return;
+    }
+    // phantomDodge (glasswindHare: "Phantom-quick.") — blinks a short hop
+    // sideways instead of eating the hit.
+    if (!_dtDoT && m.traits.phantomDodge && Math.random() < m.traits.phantomDodge) {
+      game.damageNumbers.push({ x: m.x + m.w/2 - 16, y: m.y - 8, vy: -1.8, text: 'DODGE', life: 24, color: '#bfe3ff', size: 12 });
+      const _pdDir = (Math.random() < 0.5 ? -1 : 1);
+      m.x += _pdDir * 46; m.facing = -_pdDir;
+      for (let i = 0; i < 6; i++) {
+        game.particles.push({ x: m.x + m.w/2, y: m.y + m.h/2, vx: -_pdDir * (1 + Math.random() * 2), vy: (Math.random() - 0.5) * 2,
+          life: 16, color: '#dceaff', size: 2, gravity: 0 });
+      }
+      return;
+    }
+    // armorShield (smithgolem: "Half-forge, half-titan. Frontal shield.")
+    // — hits landing on the shielded FACING side are reduced at entry, so
+    // the whole downstream multiplier stack scales with it. Flank for full
+    // damage: the value is the blocked fraction (0.5 = half).
+    if (m.traits.armorShield && typeof player !== 'undefined' && player) {
+      const _asFrontal = (Math.sign((player.x + player.w/2) - (m.x + m.w/2)) || 1) === (m.facing | 0 || 1);
+      if (_asFrontal) {
+        dmg = Math.max(1, Math.floor(dmg * (1 - m.traits.armorShield)));
+        if (game.time % 3 === 0) game.damageNumbers.push({ x: m.x + m.w/2 - 12, y: m.y - 6, vy: -1.2, text: '⛨', life: 18, color: '#ccd6dd', size: 12 });
+      }
+    }
+    // splitsOnHit (mirageStalker: "Splits into 3 mirages on first strike.")
+    // — the FIRST hit splinters it into N shadow copies at a fraction of
+    // the parent's HP. Copies are flagged so they can never re-split, and
+    // carry no exp/coins so the split cannot be farmed.
+    if (m.traits.splitsOnHit && !m._splitDone && !m._isMirage) {
+      m._splitDone = true;
+      const _soN = m.traits.splitsOnHit | 0 || 2;
+      for (let i = 0; i < _soN; i++) {
+        const _mir = spawnMonster(m.x + (i === 0 ? -70 : 70), m.y, m.type, false, false);
+        if (_mir) {
+          _mir._isMirage = true; _mir._splitDone = true;
+          _mir.maxHp = Math.max(1, Math.floor((m.maxHp || 1) * 0.18));
+          _mir.currentHp = _mir.maxHp;
+          _mir.exp = 0; _mir.mojicoins = 0;
+        }
+      }
+      if (typeof addShake === 'function') addShake(2);
+      game.damageNumbers.push({ x: m.x + m.w/2 - 20, y: m.y - 12, vy: -1.6, text: '✦ SPLIT', life: 26, color: '#9fb8e8', size: 12 });
+    }
+  }
+  // =====================================================================
   // v0.27.0 co-op — the NON-HOST damage forward moved DOWN to just before the
   // authoritative HP write (search "co-op forward"), so hitMonster runs its FULL
   // multiplier stack (crit / G-skill / execution / void / mastery / rank / streak
