@@ -116,6 +116,58 @@ const FX = {
     // energy arc alone. Weapon vocabulary removed and explicitly negated.
     prompt: 'A single huge ghostly crescent arc of pure spectral energy sweeping diagonally, a sharp curved streak of glowing violet and white light with a crisp bright leading edge tapering to fine points, two fainter translucent purple afterimage arcs trailing behind it, small spirit wisps and speed lines along the sweep, energy trail only, no sword, no blade, no hilt, no handle, no weapon, no object,',
   },
+  // ---- v0.29.355 — Tier-1 boon FX (docs/design/boon_ideas_v2.md). Art
+  // generated ahead of the mechanics; keys are binding for the render sites.
+  // Riposte Nova has no entry ON PURPOSE — it reuses nova_ring. Mirror Step's
+  // decoy is a procedural afterimage + the existing smoke_puff.
+  time_ripple: {
+    dir: 'fx', ar: 'ar_1_1', cw: 768, ch: 768, fill: 0.94,
+    // Bullet Waltz slow-field overlay: drawn centred on the player and scaled
+    // to the field radius, so it must be concentric structure with a hollow
+    // readable middle — the player stands in the centre.
+    prompt: 'Concentric expanding rings of translucent cyan-blue time energy viewed straight on, three thin glowing circular bands with faint clock tick marks along them, a subtle spiral hand sweep between the rings, hollow open centre, cool white-blue palette,',
+  },
+  crescendo_hit: {
+    dir: 'fx', ar: 'ar_1_1', cw: 768, ch: 768, fill: 0.94,
+    prompt: 'A brilliant golden impact starburst, a sharp four-point crit star flash with layered radiating shards of amber light, two tiny music notes flung outward among the sparks, bold anime hit-frame energy,',
+  },
+  execute_mark: {
+    dir: 'fx', ar: 'ar_1_1', cw: 768, ch: 768, fill: 0.94,
+    // Lands over a culled enemy for ~20 frames. A skull FLASH is the read;
+    // axe/scythe vocabulary avoided so it cannot paint a weapon (echo_slash
+    // lesson) — the axe lives on the icon, not the kill mark.
+    // NOTE: the shipped v0.29.355 render slipped a small scythe into the
+    // upper-right arm despite the negation. KEPT deliberately: unlike
+    // echo_slash (mid-combat overlay on a living target), this is a death
+    // stamp on an already-culled enemy, and the reaper read fits. If it is
+    // ever regenerated and comes back weaponless, that is fine too.
+    prompt: 'A dramatic X-shaped double slash burst of crimson and black energy, two crossing curved streaks with ragged dark edges, a small white skull-shaped flash at the crossing point, red sparks scattering, ominous execution finisher effect, energy only, no axe, no scythe, no blade, no weapon,',
+  },
+  skin_ward: {
+    dir: 'fx', ar: 'ar_1_1', cw: 768, ch: 768, fill: 0.94,
+    prompt: 'A translucent teal hexagonal energy barrier flash, a curved honeycomb shield surface seen front-on with one hexagon panel flaring brilliant white at the impact point, thin cracks of light spreading to neighbouring panels, small deflection sparks, glassy sci-fi ward,',
+  },
+  coin_burst: {
+    dir: 'fx', ar: 'ar_1_1', cw: 768, ch: 768, fill: 0.94,
+    prompt: 'A burst of shiny gold coins and golden droplets exploding outward from a bright warm flash, coins at varied angles catching light on their rims, small red-tinted droplets among them, curved motion streaks, rich metallic glints,',
+  },
+  doppel_flash: {
+    dir: 'fx', ar: 'ar_1_1', cw: 768, ch: 768, fill: 0.94,
+    prompt: 'Two overlapping violet arcane casting circles slightly offset, the front circle sharp and luminous with bright runic marks around its rim, the back circle a fading translucent ghost copy, a single bright spark flashing at both centres, mystic double-cast effect,',
+  },
+  rampage_aura: {
+    dir: 'fx', ar: 'ar_1_1', cw: 768, ch: 768, fill: 0.94,
+    // Drawn behind the player as a buff aura; needs an open lower-middle so
+    // the character silhouette reads through it.
+    prompt: 'A rising aura of fierce red-orange fury flames forming an open arch shape, layered flame tongues climbing up both sides and meeting in streaming embers at the top, the lower middle open and empty, three faint white chevron arrows ascending in the flames, aggressive power-up energy,',
+  },
+  overflow_arc: {
+    dir: 'fx', ar: 'ar_16_9', cw: 1024, ch: 512, fill: 0.94,
+    // Spawned between the killed enemy and the overflow target (keepAspect,
+    // rotated along the line between them), so it must be a single
+    // horizontal arc with clear directionality and pointed ends.
+    prompt: 'A single crackling arc of crimson lightning-like energy leaping horizontally from left to right, a jagged bright red-white bolt with a thicker origin flare on the left tapering to a sharp striking point on the right, small sparks shed along its length,',
+  },
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };

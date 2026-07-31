@@ -72,6 +72,21 @@ const BOON = {
   diagslash: 'a gleaming longsword captured mid-swing on a steep diagonal, a curved arc of white-blue slash energy trailing the blade edge, motion speed-lines, polished steel with hard cel-shaded reflections and a cold rim light',
   echo:      'three overlapping ghostly crescent slash arcs in fading shades of violet, the front arc sharp and bright with spectral white edge-light, the two behind progressively dimmer and more transparent, small spirit wisps drifting off them',
   bloom:     'a stylised sakura blossom bursting open, curved pink petals flying outward from a glowing magenta heart with a four-point gold sparkle, each petal with a darker underside and bright cel-shaded top, petals caught mid-spin',
+  // v0.29.355 — Tier-1 boon roster (docs/design/boon_ideas_v2.md). Art is
+  // generated AHEAD of the mechanics per user "lets work on tier 1, create
+  // the VFX sprites and icons" — these ids are therefore the BINDING ids the
+  // POWERUPS entries must use when each boon is implemented. Riposte reuses
+  // the nova_ring FX for its blast; the icon here is its shield identity.
+  waltz:     'an elegant golden pocket watch mid-dissolve, its face breaking into swirling ribbons of cyan time-energy with tiny clock ticks and two small music notes caught in the swirl, cool blue glow with crisp cel shade bands',
+  mirror:    'an ornate standing mirror with a crack down the glass, a bright cyan ghost-flame stepping out of the reflection leaving a fading translucent copy inside, indigo shadows and cold rim light',
+  crescendo: 'three ascending golden music notes, the third and largest note exploding into a bright four-point crit star with sharp impact sparks and speed lines, warm gold cel shading over deep amber shadows',
+  execute:   'a heavy dark executioner axe blade falling edge-down, wicked crimson energy searing along the cutting edge and a small white skull-shaped spark at the tip, black steel with hard red rim light',
+  riposte:   'a round knight shield angled mid-deflect, a bright orange shockwave ring bursting off its face with sharp recoil sparks flying back, polished steel boss and layered cel-shaded highlights',
+  skin:      'a translucent teal hexagonal energy barrier shell, one hex panel flashing brilliant white as it absorbs a strike, small deflection sparks and a faint inner glow, glassy cel-shaded facets',
+  rampage:   'a fierce rising aura of layered red-orange fury flames with three stacked white chevron arrows climbing inside it, each flame band a crisp cel shade step, embers streaming upward',
+  goldblood: 'a large faceted golden droplet splashing down into a burst of small gold coins, a deep red gleam at the droplet core, rich metallic cel shading with bright coin glints',
+  overflow:  'an industrial brass pressure-valve wheel bursting open, a crackling crimson energy arc jetting out sideways under pressure, steam wisps and rivets, warm metal tones with hard shadows',
+  doppel:    'two overlapping violet arcane spell circles casting the same bright spark, the front circle sharp and luminous, the back circle a fading ghost copy slightly offset, mystic runes around both rims',
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
