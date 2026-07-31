@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.344';
+const GAME_VERSION = 'v0.29.345';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -100942,12 +100942,11 @@ function zodiacBossAI(m, dt, distToPlayer) {
     // too (sting has no entry-clear; a stranded true dudded the next sting).
     m._noGravity = false; m._invulnBurrow = false; m._burrowGroundY = null;
     m._stung = false; m._erupted = false;
-    // v0.29.341 — the sprout state joins the same reset. A phase change while
-    // Scorpio is sunk would otherwise strand her a body-height underground
-    // with the burrow flags cleared and nothing left to lift her out; restore
-    // the pre-burrow Y before dropping the flags.
-    if (m._burrowSunk && m._burrowHomeY != null) m.y = m._burrowHomeY;
-    m._burrowSunk = false; m._burrowHomeY = null; m._burrowX = null; m._burrowing = false;
+    // v0.29.341a — the telegraph half joins the same reset, so a phase change
+    // mid-burrow can't leave Scorpio permanently alpha-faded with a dangling
+    // burrow timer. (The movement half is owned by the patternState machine,
+    // whose _noGravity / _burrowGroundY are already cleared on the line above.)
+    m._burrowing = false;
     // v0.29.74 — PHASE ESCALATION. The phase change is now mechanical, not
     // just a toast: the boss speeds up (P2 +15%, P3 +30% over its authored
     // base — stored once so re-entering a phase can't compound), and erupts a
@@ -101304,7 +101303,7 @@ function _zodiacGaitTick(m, dt, distToPlayer, phase, z) {
   // sign-specific special state (Scorpio's burrow, Cancer's sealed shell).
   if (m.patternState && m.patternState !== 'idle') return;
   if (m._despState === 'warning') return;
-  if (m._noGravity || m._invulnBurrow || m._cancerShellClosed || m._burrowSunk) return;   // v0.29.341 — never walk a buried Scorpio
+  if (m._noGravity || m._invulnBurrow || m._cancerShellClosed) return;   // never walk a buried / phased-out boss
   if (m._zLungeMs > 0) return;                       // shared lunge owns motion
   const dir = Math.sign((player.x + player.w / 2) - (m.x + m.w / 2)) || 1;
   try { g.fn(m, dt, distToPlayer, phase, z, dir); } catch (e) {}
@@ -102739,19 +102738,15 @@ const ZODIAC_AI = {
       m._burrowAt = (game.time | 0) + 900;
       m.invulnerable = 800;   // v0.26.390 — was 1500 (1.5s untouchable per burrow, over-long & redundant); covers the sink only so less player-time is wasted
       m._dreamPhase = true;   // reuse alpha-fade flag for "underground" visual
-      // v0.29.341 — per user "occasional underground bury and sprout from the
-      // ground". The burrow used to be cosmetic: alpha faded, a marker spawned,
-      // and the boss stayed exactly where it was — the comment below even
-      // claimed it emerged "at the ambush X" but nothing ever moved it. It now
-      // genuinely goes under (velocity killed, sunk out of sight, untargetable)
-      // and SPROUTS at the marked spot with an eruption, so the marker is a
-      // real "get off this tile" warning rather than decoration.
-      m._burrowSunk = true;
-      m._burrowHomeY = m.y;
-      m.vx = 0; m.vy = 0;
+      // v0.29.341a — this block is the TELEGRAPH half of Scorpio's burrow: alpha
+      // fade + the ambush marker. The physical sink/travel/erupt is owned by the
+      // `patternState === 'burrow'` machine further down, which already goes
+      // under, tracks the player underground, and erupts. v0.29.341 briefly made
+      // this block ALSO move the boss; the two then fought over m.y and ratcheted
+      // her ~400 px below the floor over six cycles, permanently unreachable.
+      // Movement stays with the one machine that owns it.
       // Mark the ambush spot at the player's CURRENT X.
       const _ambX = player.x + player.w/2;
-      m._burrowX = _ambX;
       const _groundY = (m.y + m.h - 4);
       game.hazards.push({
         type: 'meteor_warn',
@@ -102770,44 +102765,14 @@ const ZODIAC_AI = {
     }
     if (m._burrowing) {
       m._burrowT -= dt;
-      // v0.29.341 — UNDER THE SAND. Sink for the first ~350 ms, sit buried,
-      // then SPROUT at the marked X. Held down by hand rather than _noGravity:
-      // the strand bug documented at the top of zodiacBossAI is exactly what
-      // happens when a phase-change interrupts a _noGravity state, and the
-      // shared phase reset already force-clears _burrowSunk with it.
-      if (m._burrowSunk) {
-        m.vx = 0;
-        const sinkTo = (m._burrowHomeY || m.y) + m.h * 1.15;
-        m.y += Math.min(9, (sinkTo - m.y) * 0.28);
-        if ((game.time & 3) === 0 && typeof _budgetedParticlePush === 'function') {
-          _budgetedParticlePush({
-            x: m.x + m.w / 2 + (Math.random() - 0.5) * m.w, y: (m._burrowHomeY || m.y) + m.h - 6,
-            vx: (Math.random() - 0.5) * 2.4, vy: -0.6 - Math.random() * 1.2,
-            life: 22, color: '#9a6a3a', size: 2 + Math.random() * 2,
-          });
-        }
-      }
+      // v0.29.341a — the sink/sprout that briefly lived here has been removed.
+      // It duplicated the `patternState === 'burrow'` machine below (which does
+      // sink → underground travel → erupt properly, on _noGravity with absolute
+      // y-targets), and the two writing m.y in the same frame ratcheted Scorpio
+      // ~400 px under the floor across a fight. This half stays a telegraph.
       if (m._burrowT <= 0) {
         m._burrowing = false;
         m._dreamPhase = false;
-        // SPROUT — relocate to the marked ambush X and erupt out of the ground.
-        if (m._burrowSunk) {
-          const ww = (game.mapData && game.mapData.worldWidth) || 2200;
-          if (m._burrowX != null) m.x = Math.max(8, Math.min(ww - m.w - 8, m._burrowX - m.w / 2));
-          m.y = (m._burrowHomeY != null) ? m._burrowHomeY : m.y;
-          m.vy = -7.5;                       // burst up out of the sand
-          m._burrowSunk = false; m._burrowHomeY = null; m._burrowX = null;
-          for (let i = 0; i < 18; i++) {
-            if (typeof _budgetedParticlePush !== 'function') break;
-            const a = -Math.PI * (0.15 + Math.random() * 0.7);
-            if (!_budgetedParticlePush({
-              x: m.x + m.w / 2 + (Math.random() - 0.5) * m.w, y: m.y + m.h - 4,
-              vx: Math.cos(a) * (2 + Math.random() * 4), vy: Math.sin(a) * (3 + Math.random() * 4),
-              life: 30, color: i % 3 === 0 ? '#aa44dd' : '#9a6a3a', size: 3 + Math.random() * 2,
-            })) break;
-          }
-          if (typeof addHitStop === 'function') addHitStop(60);
-        }
         if (typeof flash === 'function') flash(0.2);
         if (typeof addShake === 'function') addShake(8);
       }
