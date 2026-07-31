@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.347';
+const GAME_VERSION = 'v0.29.348';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -50299,6 +50299,13 @@ function updatePlayer(dt) {
     player.y += player.vy;
     checkPlatformCollision(player);
     if (player.invulnerable > 0) player.invulnerable -= dt;
+    // Keep a concurrent shackle's clock running. This gate returns before the
+    // QTE block below, so pre-fix freeze PAUSED the shackle instead of
+    // overlapping with it: the two effects stacked end-to-end and a 3 s shackle
+    // measured 13 s against Capricorn (who freezes and shackles), or forever
+    // under sustained freeze. Timer only — no arrow input is accepted while
+    // frozen, so freeze still does its job.
+    if (typeof _QTE !== 'undefined' && _QTE.active) _qteFrame(dt, true);
     return;
   }
 
@@ -79761,13 +79768,22 @@ function _qtePress(key) {
   }
 }
 // Per-frame while shackled (called from the updatePlayer lock). dt in ms.
-function _qteFrame(dt) {
+// timerOnly — run the countdown and expiry but accept no arrow input. Used by
+// the freeze gate in updatePlayer: freeze returns before the shackle block, so
+// pre-fix a frozen player's shackle timer stopped draining entirely and the two
+// crowd-control effects SERIALISED instead of overlapping. Every second of
+// freeze added a second of shackle (measured: a 3 s shackle running 13 s against
+// Capricorn, and unbounded under sustained freeze). The timer now always drains;
+// withholding the input is what keeps freeze meaningful, rather than pausing the
+// other effect's clock.
+function _qteFrame(dt, timerOnly) {
   if (player.hp <= 0) { _qteEnd(false); return; }
   if ((player.stunTimer | 0) <= 0) { _qteEnd(false, true); return; }   // cure remedy broke it
   _QTE.remain -= dt;
   if (_QTE.remain <= 0) { _qteEnd(false); return; }
   player.stunTimer = _QTE.remain;
   if (_QTE.fill) { const _w = Math.max(0, (_QTE.remain / _QTE.total) * 100).toFixed(1) + '%'; if (_QTE._lastW !== _w) { _QTE._lastW = _w; _QTE.fill.style.width = _w; } }
+  if (timerOnly) return;
   const k = game.keys || {};
   for (const key of _QTE_KEYS) {
     const down = !!k[key];
