@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.349';
+const GAME_VERSION = 'v0.29.352';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -28269,7 +28269,11 @@ function _grantMojicoins(n, opts) {
   // this guard correctly.
   if (typeof game !== 'undefined' && game.expedition && game.expedition.active) return 0;
   const mult = (opts && opts.full) ? 1 : MOJICOIN_GAIN_MULT;
-  const granted = Math.max(0, Math.floor(n * mult));
+  // v0.29.352 — Slaughter Ladder coin boon (up to +10% at RECKONING). Applied
+  // at the single choke-point every earn path routes through, so "coin gain"
+  // means ALL coin gain while the boon holds — kills, chests, rebates alike.
+  const _ksMul = (typeof _ksCoinMul === 'function') ? _ksCoinMul() : 1;
+  const granted = Math.max(0, Math.floor(n * mult * _ksMul));
   // v0.26.x audit FIX — clamp to the same 1e12 ceiling the save-load sanitizer
   // enforces, so the wallet doesn't briefly exceed the cap in-session and then
   // snap back on reload. (Return the amount actually added so toasts match.)
@@ -28417,6 +28421,9 @@ function getAtk()  {
   if (treeHas('m_surge')) {
     pct += (player.mp / Math.max(1, getMaxMp()));
   }
+  // v0.29.352 — Slaughter Ladder kill-streak boon (up to +10% at GODSLAYER).
+  // Added before the cap so the 4.0 ceiling bounds it like every other buff.
+  pct += _ksAtk();
   // v0.26.400 — cap the additive buff stack. warCry+bloodlust+rampage+
   // comboAtk+bloodRitual+battleMage+forgedEdge+berserker+blood/berserk tree+
   // arcaneSurge could sum past +400% with no ceiling, trivializing bosses at
@@ -28822,6 +28829,9 @@ function getSpeed(){
   if (player.buffs.bloodlust > 0) s += 1.2;
   // Milestone: Flow State — +10% per dodge stack
   if (player._flowStacks > 0) s *= (1 + 0.10 * player._flowStacks);
+  // v0.29.352 — Slaughter Ladder kill-streak boon (up to +5% at RECKONING).
+  // Before the hard ceiling below, so it is bounded like everything else.
+  s *= (1 + _ksSpd());
   // v0.25.101 — Frostkin's freezeBeam slow: 50% movement penalty while
   // _slowTimer > 0 (decremented in the main update loop). The timer
   // is set by the mob_frostbeam hazard hit branch.
@@ -48090,6 +48100,10 @@ function loadMap(id, entryX, entryY) {
   game.drops = [];
   game.particles = [];
   game.flameTrail = [];   // v0.29.344 — Flame Dash patches must not survive a map change
+  // v0.29.352 — Slaughter Ladder: the streak is "combo kills in the same
+  // map", so leaving the map restarts the COUNTER. Earned boons
+  // (player._ksTier) deliberately survive — only death takes those.
+  game.mapKillStreak = 0;
   game.damageNumbers = [];
   game.hazards = [];
   // Reset environmental-event state unconditionally (eclipse darkness, lightning
@@ -52346,6 +52360,8 @@ function triggerDeath() {
   // dying so _qteFrame never fires again to self-clear; do it here so the player
   // doesn't respawn stunned with an orphaned QTE card.
   if (typeof _QTE !== 'undefined' && _QTE.active && typeof _qteEnd === 'function') { _qteEnd(false); if (typeof _qteHide === 'function') _qteHide(0); }
+  // v0.29.352 — Slaughter Ladder: death is the one thing that takes the boons.
+  if (typeof _ksOnDeath === 'function') _ksOnDeath();
   // v0.26.307 (audit MED #6) — Capture expedition-active flag BEFORE
   // _endExpedition flips it to false. The v0.26.295 5%-EXP-penalty
   // waiver later in this function reads `game.expedition.active`, but
@@ -68185,6 +68201,75 @@ function _drawFadingMonsters() {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// v0.29.352 — SLAUGHTER LADDER (kill-streak boons). Per user: "for combo
+// kills in the same map, grant a temporary benefit for achieving high
+// kill combos … for 10000 kills up until next player death grant up to
+// +10% atk". Kills chain per map (the counter resets when you leave);
+// each threshold crossed grants a boon that then sticks UNTIL DEATH —
+// changing maps keeps every boon you have earned, only the counter
+// restarts. Death wipes the lot. Boons are deliberately session-
+// transient: they do not save, which is what makes them a streak's
+// reward instead of a permanent stat.
+// Read paths: getAtk (ATK%), getSpeed (move%), the _xpGain formula in
+// killMonster (EXP%), and _grantMojicoins (coin%).
+// ═══════════════════════════════════════════════════════════════════
+const _KS_TIERS = [
+  { kills:   100, name: 'BLOODED',   icon: '🩸', atk: 0,    spd: 0,    xp: 0.03, coin: 0    },
+  { kills:   250, name: 'FRENZIED',  icon: '🔪', atk: 0,    spd: 0.02, xp: 0,    coin: 0    },
+  { kills:   500, name: 'SLAYER',    icon: '⚔️', atk: 0.02, spd: 0,    xp: 0,    coin: 0    },
+  { kills:  1000, name: 'BUTCHER',   icon: '🥩', atk: 0,    spd: 0,    xp: 0,    coin: 0.05 },
+  { kills:  2500, name: 'WARPATH',   icon: '🔥', atk: 0.03, spd: 0,    xp: 0.03, coin: 0    },
+  { kills:  5000, name: 'RECKONING', icon: '⚡', atk: 0,    spd: 0.03, xp: 0,    coin: 0.05 },
+  { kills: 10000, name: 'GODSLAYER', icon: '💀', atk: 0.05, spd: 0,    xp: 0.04, coin: 0    },
+];
+// Cumulative totals per tier index (tier deltas above sum to the caps:
+// ATK +10%, speed +5%, EXP +10%, coins +10% at GODSLAYER).
+const _KS_CUM = (() => {
+  const out = []; let a = 0, s = 0, x = 0, c = 0;
+  for (const t of _KS_TIERS) { a += t.atk; s += t.spd; x += t.xp; c += t.coin;
+    out.push({ atk: a, spd: s, xp: x, coin: c }); }
+  return out;
+})();
+function _ksBonus() {
+  const i = (typeof player !== 'undefined' && player) ? (player._ksTier | 0) - 1 : -1;
+  return i >= 0 ? _KS_CUM[Math.min(i, _KS_CUM.length - 1)] : null;
+}
+function _ksAtk()     { const b = _ksBonus(); return b ? b.atk : 0; }
+function _ksSpd()     { const b = _ksBonus(); return b ? b.spd : 0; }
+function _ksXpMul()   { const b = _ksBonus(); return b ? 1 + b.xp : 1; }
+function _ksCoinMul() { const b = _ksBonus(); return b ? 1 + b.coin : 1; }
+// Called once per REAL kill (inside killMonster's illusion-gated block).
+function _ksOnKill() {
+  game.mapKillStreak = (game.mapKillStreak | 0) + 1;
+  const n = game.mapKillStreak;
+  let tier = player._ksTier | 0;                    // tiers already earned (0 = none)
+  while (tier < _KS_TIERS.length && n >= _KS_TIERS[tier].kills) {
+    tier++;
+    const t = _KS_TIERS[tier - 1], b = _KS_CUM[tier - 1];
+    player._ksTier = tier;
+    const parts = [];
+    if (b.atk)  parts.push(`+${Math.round(b.atk * 100)}% ATK`);
+    if (b.spd)  parts.push(`+${Math.round(b.spd * 100)}% speed`);
+    if (b.xp)   parts.push(`+${Math.round(b.xp * 100)}% EXP`);
+    if (b.coin) parts.push(`+${Math.round(b.coin * 100)}% coins`);
+    if (typeof showToast === 'function') {
+      const next = tier < _KS_TIERS.length ? ` — next boon at ${_KS_TIERS[tier].kills.toLocaleString()}` : ' — the ladder is yours';
+      showToast(`${t.icon} ${t.name} — ${n.toLocaleString()} kills on this map: ${parts.join(', ')} until you fall${next}`,
+                tier >= 5 ? 'legendary' : 'epic');
+    }
+    if (typeof addShake === 'function') addShake(4);
+  }
+}
+// Death wipes the boons; the streak dies with you wherever you are.
+function _ksOnDeath() {
+  const had = player._ksTier | 0;
+  player._ksTier = 0;
+  game.mapKillStreak = 0;
+  if (had > 0 && typeof showToast === 'function') {
+    showToast(`💔 Slaughter boons lost — ${_KS_TIERS[had - 1].name} died with you.`, 'danger');
+  }
+}
 function killMonster(m) {
   // v0.26.x — if called while the main monster loop is iterating, defer the
   // whole kill to that loop's post-iteration _pendingKills drain. Splicing
@@ -68613,6 +68698,7 @@ function killMonster(m) {
   if (!_isIllusionKill) {
   game.kills++;
   tickDaily('kills');
+  _ksOnKill();   // v0.29.352 — Slaughter Ladder: same real-kill gate as kill credit, so mirages can't feed the streak
   if (m.isBoss || m.isMiniBoss) tickDaily('boss', m.type);   // v0.26.x audit FIX — boss-track daily challenges (e.g. gravitos1) had NO tick caller, so they could never complete; credit boss/miniboss kills here
   }
   checkAchievements();
@@ -68840,7 +68926,7 @@ function killMonster(m) {
   // continuous ramp (see _lxEarlyExpMul): ×30 at Lv 1 → ×10 at Lv 10 → ×1 by
   // Lv 30. No cliff at Lv 6, and the boost genuinely returns to normal.
   const _earlyLvlXpMul = (typeof _lxEarlyExpMul === 'function') ? _lxEarlyExpMul(player.level || 1) : 1;
-  const _xpGain = Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul * mpCoopMul * _pqFarmMul * _earlyLvlXpMul * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _affixExpMul === 'function' ? _affixExpMul() : 1));   // v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.288 world affix
+  const _xpGain = Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul * mpCoopMul * _pqFarmMul * _earlyLvlXpMul * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _affixExpMul === 'function' ? _affixExpMul() : 1) * _ksXpMul());   // v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.288 world affix · v0.29.352 Slaughter Ladder EXP boon
   player.exp += _xpGain;
   // v0.29.296 — Trainee Path: count the kill, then test the ladder. Skipped
   // entirely once the path is finished so a long-running save pays nothing.
@@ -80836,10 +80922,15 @@ function showKillToast(expGain, mojicoinGain) {
   // mob, no-mojicoin training dummy, etc.).
   const _exp = Math.max(0, Math.floor(expGain || 0));
   const _moj = Math.max(0, Math.floor(mojicoinGain || 0));
+  // v0.29.352 — Slaughter Ladder: show the map kill streak once it is worth
+  // watching (≥25), so the climb toward the next boon threshold is visible
+  // on every kill without a dedicated HUD element.
+  const _ks = (typeof game !== 'undefined' && (game.mapKillStreak | 0) >= 25)
+    ? `<span class="kill-sep">·</span><span class="kill-streak">💀${(game.mapKillStreak | 0).toLocaleString()}</span>` : '';
   t.innerHTML =
     `<span class="kill-exp">+${_exp}<span class="kill-exp-tag"> XP</span></span>` +
     `<span class="kill-sep">·</span>` +
-    `<span class="coin-amt">+${_moj}</span><span class="coin-icon">🪙</span>`;
+    `<span class="coin-amt">+${_moj}</span><span class="coin-icon">🪙</span>` + _ks;
   host.appendChild(t);
   setTimeout(() => { if (t && t.parentNode) t.parentNode.removeChild(t); }, 3200);
 }
