@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.360';
+const GAME_VERSION = 'v0.29.361';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -76313,9 +76313,13 @@ function _towerOnKill(m) {
 
 // Per-frame tower maintenance — called from the main update loop.
 function updateTower(dt) {
-  const hud = document.getElementById('tower-hud');
+  // v0.29.x perf — the node is static markup; cache the lookup, and only write
+  // style.display when it actually changes (was an unconditional write per
+  // frame on every non-tower map). Inline-style reads don't force layout.
+  if (game._towerHudEl === undefined) game._towerHudEl = document.getElementById('tower-hud');
+  const hud = game._towerHudEl;
   if (!game.tower) {
-    if (hud) hud.style.display = 'none';
+    if (hud && hud.style.display !== 'none') hud.style.display = 'none';
     return;
   }
   const t = game.tower;
@@ -76346,12 +76350,18 @@ function updateTower(dt) {
   if (hud) {
     const killed = t.waveTotal - t.aliveTarget;
     const total  = t.waveTotal;
-    hud.style.display = 'block';
-    hud.innerHTML =
-      `<span class="floor">🚇 Stop ${t.floor}</span>` +
-      ` · <span class="mod">${t.modifierName}</span>` +
-      `<span class="waves">${killed}/${total} cleared</span>` +
-      `<span class="best">best: ${game.towerBestFloor || 0}</span>`;
+    if (hud.style.display !== 'block') hud.style.display = 'block';
+    // v0.29.x perf — the markup is a pure function of these five values; the
+    // old unconditional innerHTML was a parse + DOM rebuild at 60 Hz.
+    const _sig = t.floor + '|' + t.modifierName + '|' + killed + '|' + total + '|' + (game.towerBestFloor || 0);
+    if (hud._lxSig !== _sig) {
+      hud._lxSig = _sig;
+      hud.innerHTML =
+        `<span class="floor">🚇 Stop ${t.floor}</span>` +
+        ` · <span class="mod">${t.modifierName}</span>` +
+        `<span class="waves">${killed}/${total} cleared</span>` +
+        `<span class="best">best: ${game.towerBestFloor || 0}</span>`;
+    }
   }
 }
 
@@ -107962,7 +107972,13 @@ function updateUI() {
   // v0.25.737 — Dynamic ATK + ACC tooltips. Static description in the
   // HTML title gets the LIVE numbers + an extra-clear accuracy line:
   // "X% of basic attacks land against monsters Y levels above you".
-  if (d['hud-atk-item']) {
+  // v0.29.x perf — both tooltip strings are pure functions of these four
+  // values; gate the builds so hover text (read only on mouseover) stops
+  // being reassembled on every HUD tick during combat.
+  const _ttSig = _hAtk + '|' + (player.baseAcc | 0) + '|' + (player.level | 0) + '|' + player.cls;
+  const _ttStale = (game._ttSig !== _ttSig);
+  if (_ttStale) game._ttSig = _ttSig;
+  if (_ttStale && d['hud-atk-item']) {
     const _atkLo2 = Math.max(1, Math.floor(_hAtk * 0.85));
     const _atkHi2 = Math.ceil(_hAtk * 1.15);
     d['hud-atk-item'].title =
@@ -107971,7 +107987,7 @@ function updateUI() {
       'Click to open the Level Up panel.\n\n' +
       'Current: ' + _hAtk + ' (range ' + _atkLo2 + '-' + _atkHi2 + ')';
   }
-  if (d['hud-acc-item'] && typeof _hitRateVsLevelGap === 'function') {
+  if (_ttStale && d['hud-acc-item'] && typeof _hitRateVsLevelGap === 'function') {
     const _plvl = (player.level | 0) || 1;
     const _hit5 = Math.round(_hitRateVsLevelGap(5));
     const _hit0 = Math.round(_hitRateVsLevelGap(0));
