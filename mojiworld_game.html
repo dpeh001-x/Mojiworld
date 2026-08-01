@@ -9146,7 +9146,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.386';
+const GAME_VERSION = 'v0.29.389';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -13372,9 +13372,12 @@ function _lxGaOpenErase() {
   const dctx = disp.getContext('2d');
   const redraw = () => { dctx.clearRect(0, 0, DSP, DSP); dctx.drawImage(work, 0, 0, NW, NH, 0, 0, DSP, DSP); };
   redraw();
-  let brush = 40, painting = false;
+  let brush = 40, eop = 100, painting = false;   // v0.29.387 — eop: eraser opacity %
   const toWork = (ev) => { const r = disp.getBoundingClientRect(); return { x: (ev.clientX - r.left) * (NW / r.width), y: (ev.clientY - r.top) * (NH / r.height) }; };
-  const stroke = (ev) => { const p = toWork(ev); wctx.save(); wctx.globalCompositeOperation = 'destination-out'; wctx.beginPath(); wctx.arc(p.x, p.y, brush, 0, Math.PI * 2); wctx.fill(); wctx.restore(); redraw(); };
+  // v0.29.387 — the eraser honours an opacity: at 100 it punches pixels out
+  // fully (old behaviour); lower values thin the alpha per pass, so repeated
+  // strokes fade an area gradually instead of hard-deleting it.
+  const stroke = (ev) => { const p = toWork(ev); wctx.save(); wctx.globalCompositeOperation = 'destination-out'; wctx.globalAlpha = Math.max(0.05, Math.min(1, eop / 100)); wctx.beginPath(); wctx.arc(p.x, p.y, brush, 0, Math.PI * 2); wctx.fill(); wctx.restore(); redraw(); };
   disp.addEventListener('pointerdown', (ev) => { undo.push(wctx.getImageData(0, 0, NW, NH)); if (undo.length > 20) undo.shift(); painting = true; stroke(ev); disp.setPointerCapture(ev.pointerId); });
   disp.addEventListener('pointermove', (ev) => { if (painting) stroke(ev); });
   disp.addEventListener('pointerup', () => { painting = false; });
@@ -13382,6 +13385,12 @@ function _lxGaOpenErase() {
   const ctrls = document.createElement('div'); ctrls.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;';
   const bsl = document.createElement('input'); bsl.type = 'range'; bsl.min = 6; bsl.max = 120; bsl.value = brush; bsl.style.flex = '1'; bsl.oninput = () => brush = +bsl.value;
   ctrls.innerHTML = '<span>Brush</span>'; ctrls.appendChild(bsl);
+  // v0.29.387 — eraser opacity slider (5-100%). Live label so the current
+  // strength is always visible.
+  const eLab = document.createElement('span'); eLab.textContent = 'Opacity 100%'; eLab.style.cssText = 'min-width:86px;text-align:right;';
+  const esl = document.createElement('input'); esl.type = 'range'; esl.min = 5; esl.max = 100; esl.value = eop; esl.style.flex = '1';
+  esl.oninput = () => { eop = +esl.value; eLab.textContent = 'Opacity ' + eop + '%'; };
+  ctrls.appendChild(eLab); ctrls.appendChild(esl);
   const mkb = (label, cb, col) => { const b = document.createElement('button'); b.textContent = label; b.style.cssText = 'padding:6px 10px;background:' + (col || '#241d36') + ';color:#e8e4f4;border:1px solid #4a4360;border-radius:6px;cursor:pointer;'; b.onclick = cb; return b; };
   ctrls.appendChild(mkb('Undo', () => { const d = undo.pop(); if (d) { wctx.putImageData(d, 0, 0); redraw(); } }));
   ctrls.appendChild(mkb('Clear erase', () => { _lxEqSetErase(sid, null); document.body.removeChild(modal); if (typeof showToast === 'function') showToast('Erase cleared for ' + name, 'rare'); }));
@@ -15551,12 +15560,16 @@ const ACTION_KEY_DEFAULT = Object.freeze({
   characterK:   'k',          // Character panel — opens this very keybind UI
   attributesU:  'u',          // Level Up / Boons / Skills panel
   worldMap:     'w',
-  questJournal: 'e',          // E for quests (v0.25.600)
+  questJournal: 'q',          // v0.29.387 — quests move E -> Q (per user); J stays a hard alias
   mojidex:      'l',          // v0.26.378 — L opens the Mojidex (monster encyclopedia)
   mute:         'm',
   hpPotion:     'pageup',
   mpPotion:     'pagedown',
-  wardrobe:     'q',
+  // v0.29.387 — Q belongs to the Quest Journal now. The walk-to-Fashionista
+  // hotkey ships unbound; the K menu row remains so players can bind one.
+  // Walking up to her (N / interact) is unaffected.
+  wardrobe:     '',
+  gearEditor:   'e',          // v0.29.387 — dev weapon editor (was orphaned; per user "put back")
   // v0.27.20 — resetSave + changeClass action binds REMOVED: both were dead
   // (the dev save-reset hardcodes 't' behind LX_DEV_TOOLS; changeClass was
   // never dispatched anywhere) and their K-modal rows advertised keys that
@@ -22622,7 +22635,7 @@ const MAPS = {
     bg: 'witheringTide',         // v0.25.702 — dedicated painted backdrop
     sky: ['#0a1a2a', '#1a3a4a', '#3a5a6a'],
     worldWidth: 2800,
-    // v0.29.385 — was 57. Its whole roster is Lv42-45 (drownedCur 42,
+    // v0.29.388 — was 57. Its whole roster is Lv42-45 (drownedCur 42,
     // bonebosn 43, spectreCannoneer 44, brinekraken 45) with stats to match,
     // and the branch runs boneGraveyard (Lv43-50) → here → Drowned Hold →
     // abyssalTrench. Five quests pin those mobs at those levels, and
@@ -22962,7 +22975,7 @@ const MAPS = {
     bg: 'witheringTide2',
     sky: ['#050a18', '#0a2030', '#1a3a4a'],
     worldWidth: 2800,
-    levelReq: 46,          // v0.29.385 — was 59; same roster as Withering Tide (Lv42-45)
+    levelReq: 46,          // v0.29.388 — was 59; same roster as Withering Tide (Lv42-45)
     taxiAccessible: true,
     gravityMul: 1.15,
     platforms: [
@@ -29373,10 +29386,15 @@ window.addEventListener('keydown', e => {
     else if (player.hp > 0) { toggleSharedModal('attributes-modal', 'lp', openLevelUpPanel); }
   }
   // v0.25.61 — J opens the Quest Journal
-  // v0.25.600 — E is the new primary key per user request; J kept as
-  // alias so existing muscle memory still works.
-  if (k === 'e' || k === 'j') {
+  // v0.25.600 — E was the primary; v0.29.387 moves the primary to Q (via the
+  // action bind so K-menu remaps still win). J stays a hard alias.
+  if (_isAction(k, 'questJournal') || k === 'j') {
     if (typeof toggleQuestJournal === 'function') toggleQuestJournal();
+  }
+  // v0.29.387 — E toggles the developer weapon editor (gear align + erase).
+  // _lxGearAlignToggle had no caller since its old binding was removed.
+  if (_isAction(k, 'gearEditor')) {
+    if (typeof _lxGearAlignToggle === 'function') _lxGearAlignToggle();
   }
   // v0.25.95 — W opens the World Map (overview of every reachable map,
   // grouped by recommended level, with the current location highlighted).
@@ -41463,7 +41481,8 @@ function renderKbmReference() {
       <div class="kb"><span>Character (K / U)</span><span>${actionChip('characterK')} / ${actionChip('attributesU')}</span></div>
       <div class="kb"><span>World Map</span><span>${actionChip('worldMap')}</span></div>
       <div class="kb"><span>Potions (HP · MP · Cure)</span><span><kbd data-kbmgoto="potions" style="cursor:pointer; background:rgba(255,120,120,0.15); border-color:rgba(255,150,150,0.45); color:#ffc4c4;">🧪 tab</kbd></span></div>
-      <div class="kb"><span>Go to the Fashionista (wardrobe)</span><span>${actionChip('wardrobe')}</span></div>
+      <div class="kb"><span>Go to the Fashionista (unbound — click to set)</span><span>${actionChip('wardrobe')}</span></div>
+      <div class="kb"><span>Weapon Editor (dev)</span><span>${actionChip('gearEditor')}</span></div>
       <div class="kb"><span>Toggle Mute</span><span>${actionChip('mute')}</span></div>
       <div class="kb"><span>Emotes (😊 😂 😲 ❤ 👍 😢 😡 ⚔️ 💤 👋)</span><span>${lockedChip('1')}–${lockedChip('0')}</span></div>
       <div class="kb"><span>Chat (online &amp; offline)</span><span>${lockedChip('Enter')}</span></div>
@@ -60759,7 +60778,10 @@ function updateMonsters(dt) {
       m.speed = (m.speed || 1) * 1.10;
       if (m.shootCd) m.shootCd = Math.floor(m.shootCd * 0.85);
       if (typeof showToast === 'function') {
-        showToast(`⚔ ${m.name || 'Boss'} — PHASE 2! The fight changes.`, 'epic');
+        // v0.29.388 — per user, phase numbers are not shown. The beat itself
+        // still fires (it is the cue that the kit just changed); only the
+        // "PHASE 2" wording is gone.
+        showToast(`⚔ ${m.name || 'Boss'} — the fight changes!`, 'epic');
       }
       if (typeof flash === 'function') flash(0.22);
       if (typeof addShake === 'function') addShake(5);
@@ -73387,7 +73409,7 @@ function openNPC(npc) {
       } });
     }
     opts.push({ t:'…last season\'s hair?', cb:() => { document.getElementById('dialog-text').textContent = '*She gasps, scandalised.* You haven\'t HEARD? The Slime Sovereign\'s court issued a fatwa on under-bangs three ages ago. THREE. AGES. AGO. And I still see travellers shuffling through the Bastion with — I cannot finish that sentence.'; } });
-    opts.push({ t:'(Tip: Q brings you straight to me)', cb:() => closeDialog() });   // v0.29.375 — Q routes here now, it no longer opens the mirror itself
+    opts.push({ t:'(Tip: walk up and press N to see me anytime)', cb:() => closeDialog() });   // v0.29.387 — Q is the Quest Journal now; N/interact is the way in
   } else if (npc.role === 'taiga') {
     // v0.25.411 — Taiga, leader of the rebel ninjutsu cell hiding in
     // the Shadow-Woven Hood. Commanding, intimidating; speaks of the
@@ -98005,12 +98027,42 @@ function _zodiacAnimTick(m, now) {
 // result into the canvas's own pixel space keeps the ratio math self-consistent
 // AND bit-identical to pre-shrink behaviour — and it is the same readback the
 // code did before the shrink existed, so it costs nothing extra.
+// v0.29.388 — SCAN-RESOLUTION CAP. The readback below is ~98% of a box scan's
+// cost (measured: 138 ms of a 141 ms cold scan on gravitos3), and it scales with
+// source AREA — so the giant boss sources punished it hardest. Gravitos ships
+// the biggest art in the game (2200x2000 .. 3000x2200) AND five sprite forms, so
+// _deriveBossRefHeight (which scans a whole 9-frame idle set in ONE synchronous
+// call) blocked for 1,036 ms on gravitos3 alone and 3.7 s across the five forms —
+// per state, and idle/walk/attack all come online together at a phase swap. That
+// is a multi-second main-thread stall mid-fight; on a slower machine it crosses
+// the browser's "page unresponsive" threshold and the tab hard-freezes.
+//
+// The scan only needs the first/last opaque ROW, and that survives downsampling:
+// measured against the full-res ground truth across all five Gravitos forms, a
+// 1100 px scan reproduces the content ratio to within 0.018 % — a 0.11 px shift
+// at the ~828 px size these actually draw at. That is two orders of magnitude
+// inside the ~1 % drift v0.29.293 was written to prevent, so the invariant that
+// note protects ("the box feeds targetH, so a mismeasure MOVES the figure")
+// still holds. Sources at or under the cap are untouched and stay bit-identical,
+// which is every boss but the handful of oversized ones.
+const _LX_BOX_SCAN_MAX_H = 1100;
 function _lxBoxSourceOf(img) {
   const src = img && img._lxSrc;
+  let sImg, sW, sH, scale;
   if (src && src.naturalWidth > 0 && img.naturalHeight > 0) {
-    return { img: src, W: src.naturalWidth, H: src.naturalHeight, scale: img.naturalHeight / src.naturalHeight };
+    sImg = src; sW = src.naturalWidth; sH = src.naturalHeight;
+    scale = img.naturalHeight / src.naturalHeight;   // original -> drawn raster
+  } else {
+    sImg = img; sW = img.naturalWidth; sH = img.naturalHeight; scale = 1;
   }
-  return { img, W: img.naturalWidth, H: img.naturalHeight, scale: 1 };
+  if (sH > _LX_BOX_SCAN_MAX_H) {
+    const k  = _LX_BOX_SCAN_MAX_H / sH;
+    const nW = Math.max(1, Math.round(sW * k));
+    const nH = Math.max(1, Math.round(sH * k));
+    scale *= sH / nH;        // compose: scan space -> original -> drawn raster
+    sW = nW; sH = nH;
+  }
+  return { img: sImg, W: sW, H: sH, scale };
 }
 function _spriteContentBox(img) {
   if (!img) return null;
@@ -98021,7 +98073,7 @@ function _spriteContentBox(img) {
   let res = null;
   try {
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-    const c = cv.getContext('2d'); c.drawImage(_s.img, 0, 0);
+    const c = cv.getContext('2d'); c.drawImage(_s.img, 0, 0, W, H);   // v0.29.388 — explicit dest size: W/H may be the capped scan resolution
     const d = c.getImageData(0, 0, W, H).data;
     let top = -1, bottom = -1;
     for (let y = 0; y < H && top < 0; y++) for (let x = 0; x < W; x++) { if (d[(y*W+x)*4+3] > 64) { top = y; break; } }
@@ -98050,7 +98102,7 @@ function _spriteBodyBox(img) {
   let res = null;
   try {
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-    const c = cv.getContext('2d'); c.drawImage(_s.img, 0, 0);
+    const c = cv.getContext('2d'); c.drawImage(_s.img, 0, 0, W, H);   // v0.29.388 — explicit dest size: W/H may be the capped scan resolution
     const d = c.getImageData(0, 0, W, H).data;
     let top = -1, bottom = -1;
     for (let y = 0; y < H && top < 0; y++) for (let x = 0; x < W; x++) { if (d[(y*W+x)*4+3] > 235) { top = y; break; } }
@@ -109575,7 +109627,7 @@ function drawSuperBossBar() {
   ctx.textAlign = 'center';
   const namePrefix = hyper ? '⚠ HYPER BOSS — ' : '';
   ctx.fillText((namePrefix + sb.name).toUpperCase(), W / 2, y - 6);
-  // v0.29.385 — per user, the "PHASE n/3" readout is no longer drawn. It was
+  // v0.29.388 — per user, the "PHASE n/3" readout is no longer drawn. It was
   // added in v0.26.x as an a11y cue so phase wasn't signalled by colour alone;
   // that job now falls back to the bar tint, the name tint and the 33%/66%
   // tick marks below. Nothing else reads this text, and `phase` still drives
@@ -109608,7 +109660,11 @@ function drawSuperBossBar() {
   // HP text
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 11px sans-serif';
-  ctx.fillText(`${sb.currentHp | 0} / ${sb.maxHp | 0}  ·  PHASE ${phase}`, W / 2, y + 13);
+  // v0.29.388 — per user, no phase readout on screen. The bar centre now shows
+  // HP only; the "· PHASE n" suffix that used to trail it is gone, as is the
+  // "PHASE n/3" badge that sat beside the bar. `phase` still drives the plate,
+  // border, name and bar tints plus the 33%/66% tick marks.
+  ctx.fillText(`${sb.currentHp | 0} / ${sb.maxHp | 0}`, W / 2, y + 13);
   ctx.textAlign = 'left';
 }
 
