@@ -125,5 +125,22 @@ check('monster call site passes boss flag', /_waltzMulAt\(m\.x \+ m\.w \/ 2, m\.
 // every dash frame spawns a fresh patch with a fresh map.
 check('flame trail has global per-enemy throttle', /_flameTickAt \| 0\)\) < 20\) continue;\s*\n\s*m\._flameTickAt = now;/.test(src));
 
+// v0.29.373 — BOON RARITY. Better outcomes must stay rarer: every POWERUPS
+// entry carries a tier, all acquisition paths draw through the weighted
+// picker (zero uniform draws left), and the weights keep their ordering.
+console.log('\n== boon rarity ==');
+const powerupsBlock = src.match(/const POWERUPS = \[[\s\S]*?\n\];/)[0];
+const entries = [...powerupsBlock.matchAll(/\{ id:'([a-zA-Z_]+)', tier:'(common|rare|epic)'/g)];
+check('all 37 active entries tiered', entries.length === 37, 'got ' + entries.length);
+const tiers = Object.fromEntries(entries.map(e => [e[1], e[2]]));
+for (const id of ['blink', 'echo', 'doppel', 'waltz', 'execute', 'skin'])
+  check(`${id} is epic (audit-flagged strongest)`, tiers[id] === 'epic');
+check('no uniform POWERUPS draws remain', !/Math\.random\(\) \* POWERUPS\.length/.test(src));
+const w = src.match(/BOON_TIER_WEIGHT = \{ common: (\d+), rare: (\d+), epic: (\d+) \}/);
+check('weights exist and are ordered common > rare > epic',
+  !!w && Number(w[1]) > Number(w[2]) && Number(w[2]) > Number(w[3]));
+check('Bravo bag draws weighted', /_weightedBoonPick\(_bag\)/.test(src));
+check('Sage gacha draws weighted', /_weightedBoonPick\(POWERUPS\);\s*\/\/[^\n]*Sage/.test(src));
+
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'} — ${pass}/${pass + fail} checks\n`);
 process.exit(fail ? 1 : 0);
