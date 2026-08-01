@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.364';
+const GAME_VERSION = 'v0.29.365';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -33003,6 +33003,13 @@ function _diffDmg(d, srcLv, capPct) { try { if (typeof player !== 'undefined' &&
         text: 'NEGATED', life: 30, color: '#7ae0d8', size: 13 });
       return 0;
     }
+    // v0.29.364 — stale-stamp wipe (audit finding). Every hit's banded clamp
+    // runs AFTER its own _diffDmg call, so a stamp still live when a
+    // NON-negating _diffDmg runs can only belong to an earlier, already-
+    // resolved hit this frame. Wiping it here means _gravBandClamp can only
+    // ever honour a stamp set by the _diffDmg call immediately preceding it —
+    // the same-hit pairing the stamp was designed for.
+    if (game._skinNegateAt === game.time) game._skinNegateAt = -1;
   } catch (_e) {}
   return _r; }
 // v0.28.7 — Difficulty reward scaling ("risk vs reward"). The damage side of
@@ -44966,6 +44973,7 @@ function startBlock() {
 
 function triggerParry(source) {
   const P = player._blockProfile || { color:'#ffdd44', accent:'#ffdd44' };
+  _riposteProc();   // v0.29.364 — perfect parries detonate the Riposte Nova too
   // Fully negate damage, brief i-frames, stun attacker, refund some MP
   player.invulnerable = Math.max(player.invulnerable, 350);
   player.mp = Math.min(getMaxMp(), player.mp + 15);
@@ -45025,29 +45033,35 @@ function triggerParry(source) {
   showToast('PARRY!', 'legendary');
 }
 
+// v0.29.362 — RIPOSTE NOVA (Tier-1). A defended hit detonates a shockwave.
+// v0.29.364 — extracted from triggerBlock so PERFECT PARRIES proc it too
+// (audit finding): the boon's promise is "blocking a hit", and a parry is
+// the best block in the game — it firing on the sloppy version but not the
+// precise one was exactly backwards. Both call sites share the 30-frame
+// internal cooldown, so a parry chained into a held block still procs once.
+// Tag 'nova' is MISS_EXEMPT and shares Nova Step's ring art per the doc.
+function _riposteProc() {
+  if (!(player.mods && player.mods.riposteNova > 0)) return;
+  if ((game.time - (player._riposteAt | 0)) <= 30) return;
+  player._riposteAt = game.time;
+  const _rcx = player.x + player.w / 2, _rcy = player.y + player.h / 2, _rr = 150;
+  const _rdmg = Math.max(1, Math.floor(((typeof getAtk === 'function') ? getAtk() : 50) * player.mods.riposteNova));
+  for (const _rm of game.monsters) {
+    if (!_rm || _rm.currentHp <= 0) continue;
+    const _rdx = (_rm.x + _rm.w / 2) - _rcx, _rdy = (_rm.y + _rm.h / 2) - _rcy;
+    if (_rdx * _rdx + _rdy * _rdy > _rr * _rr) continue;
+    hitMonster(_rm, _rdmg, false, 'nova');
+    _rm.vx = (_rm.vx || 0) + Math.sign(_rdx || 1) * 5;
+  }
+  if (typeof _lxVfxReady === 'function' && typeof LX_FX !== 'undefined' && _lxVfxReady(LX_FX.nova_ring)) {
+    try { spawnSpriteBurst(_rcx, _rcy, 'nova_ring', { size: _rr * 2.1, life: 20, spin: 0.02 }); } catch (e) {}
+  }
+  if (typeof addShake === 'function') addShake(5);
+}
+
 function triggerBlock() {
   const P = player._blockProfile || { color:'#88ccff' };
-  // v0.29.362 — RIPOSTE NOVA (Tier-1). Every mitigated block detonates a
-  // shockwave — this function IS the single "block connected" call site.
-  // 30-frame internal cooldown so a multi-hit volley landing on one held
-  // block procs once, not once per pellet. Tag 'nova' is MISS_EXEMPT and
-  // shares Nova Step's ring art, per the design doc.
-  if (player.mods && player.mods.riposteNova > 0 && (game.time - (player._riposteAt | 0)) > 30) {
-    player._riposteAt = game.time;
-    const _rcx = player.x + player.w / 2, _rcy = player.y + player.h / 2, _rr = 150;
-    const _rdmg = Math.max(1, Math.floor(((typeof getAtk === 'function') ? getAtk() : 50) * player.mods.riposteNova));
-    for (const _rm of game.monsters) {
-      if (!_rm || _rm.currentHp <= 0) continue;
-      const _rdx = (_rm.x + _rm.w / 2) - _rcx, _rdy = (_rm.y + _rm.h / 2) - _rcy;
-      if (_rdx * _rdx + _rdy * _rdy > _rr * _rr) continue;
-      hitMonster(_rm, _rdmg, false, 'nova');
-      _rm.vx = (_rm.vx || 0) + Math.sign(_rdx || 1) * 5;
-    }
-    if (typeof _lxVfxReady === 'function' && typeof LX_FX !== 'undefined' && _lxVfxReady(LX_FX.nova_ring)) {
-      try { spawnSpriteBurst(_rcx, _rcy, 'nova_ring', { size: _rr * 2.1, life: 20, spin: 0.02 }); } catch (e) {}
-    }
-    if (typeof addShake === 'function') addShake(5);
-  }
+  _riposteProc();   // v0.29.364 — see _riposteProc
   flash(0.12);
   game.damageNumbers.push({
     x: player.x + player.w/2 - 16, y: player.y - 6, vy: -2,
@@ -67100,7 +67114,11 @@ function hitMonster(m, dmg, isCrit, skill) {
     // beat isn't double-credited — the getCritDmg() promotion only fires
     // when the hit wasn't already critical. The roll is flat bonus damage
     // on top, and the knockback is real (m.vx), not cosmetic.
-    if (_basicSkill && !_lxBasicMiss && player.mods && player.mods.crescendoCrit > 0) {
+    // v0.29.364 — !player._echoing (audit finding): Phantom Echo's delayed
+    // hit re-enters here tagged 'melee', so it advanced the beat and could
+    // consume the guaranteed crit on a 25-55% echo — the crescendo landing
+    // on the quietest note. The beat now counts only the player's own swings.
+    if (_basicSkill && !_lxBasicMiss && !player._echoing && player.mods && player.mods.crescendoCrit > 0) {
       player._crescendoN = ((player._crescendoN | 0) + 1);
       if (player._crescendoN >= 4) {
         player._crescendoN = 0;
@@ -82563,19 +82581,20 @@ function _getSkyLifeCloudPuff() {
 // string compare) so every other map pays zero. Render cost on town
 // frames is ~28 lightweight ctx ops (5 birds × 4 ops + 18 confetti ×
 // 1 op) — well within budget.
+const _TOWN_FLOCKS = [
+  { yBase:  62, phase:   0, speed: 0.45, dx:   0 },
+  { yBase:  78, phase: 130, speed: 0.55, dx: 240 },
+  { yBase:  92, phase: 280, speed: 0.40, dx: 540 },
+  { yBase: 110, phase: 410, speed: 0.50, dx: 880 },
+  { yBase:  70, phase: 560, speed: 0.60, dx:1240 },
+];   // v0.29.x perf — frozen flock table (see _drawTownLivelinessLayer)
 function _drawTownLivelinessLayer() {
   if (game.currentMap !== 'town') return;
   const t = game.time || 0;
   const ww = (game.mapData && game.mapData.worldWidth) || W;
   // --- BIRDS ---
   // Five flock anchors at deterministic Y heights / phase offsets.
-  const _flocks = [
-    { yBase:  62, phase:   0, speed: 0.45, dx:   0 },
-    { yBase:  78, phase: 130, speed: 0.55, dx: 240 },
-    { yBase:  92, phase: 280, speed: 0.40, dx: 540 },
-    { yBase: 110, phase: 410, speed: 0.50, dx: 880 },
-    { yBase:  70, phase: 560, speed: 0.60, dx:1240 },
-  ];
+  const _flocks = _TOWN_FLOCKS;   // v0.29.x perf — module-scope constant, was 1 array + 5 objects per town frame
   ctx.save();
   ctx.strokeStyle = 'rgba(40, 30, 50, 0.55)';
   ctx.lineWidth = 1.4;
@@ -84006,7 +84025,10 @@ function drawCarriageInterior() {
   }
 
   // Central handrail (drawn over the top platform if it exists)
-  const topPlat = game.mapData.platforms.find(p => p.type === 'platform' && p.y < 320);
+  // v0.29.x perf — platforms are static per map; memoize (null kept distinct
+  // from "not yet computed" via the undefined sentinel).
+  if (game.mapData._lxTopPlat === undefined) game.mapData._lxTopPlat = game.mapData.platforms.find(p => p.type === 'platform' && p.y < 320) || null;
+  const topPlat = game.mapData._lxTopPlat;
   if (topPlat) {
     const px = topPlat.x - camX;
     const py = topPlat.y;
@@ -87504,6 +87526,9 @@ function updateMapEvents(dt) {
 function updateAmbient() {
   const W2 = game.mapData.worldWidth;
   const id = game.currentMap;
+  // v0.29.x perf — loop invariants, were re-derived per particle below.
+  const _ambWh = (game.mapData && game.mapData.worldHeight) || 540;
+  const _ambWw = W2 || 1200;
   const lowFx = _perfLowFx();
   const ambientCap = Math.max(24, Math.floor(MAX_AMBIENT * (lowFx ? 0.45 : 1)));
   // Spawn rate / type depends on map — richer palette and motion per biome
@@ -87726,8 +87751,7 @@ function updateAmbient() {
       // v0.25.556 — `> 540` was the historical canvas-height despawn; on
       // vertical-tower maps that killed ambient particles spawned anywhere
       // below the canvas-equivalent world-Y. Use the actual world height.
-      const _wh = (game.mapData && game.mapData.worldHeight) || 540;
-      const _ww = (game.mapData && game.mapData.worldWidth) || 1200;
+      const _wh = _ambWh, _ww = _ambWw;   // v0.29.x perf — hoisted (loop-invariant)
       // v0.26.236 — bubble + glint added to the "rises-upward" despawn group
       // alongside ember / firefly / wisp. All five spawn from below + drift up.
       // v0.26.240 — firefly_dense added too (same rise pattern as firefly).
@@ -105064,6 +105088,7 @@ function drawProjectiles() {
   // v0.25.451 — empty-list early-out (no projectiles in town/idle frames).
   if (!game.projectiles || game.projectiles.length === 0) return;
   const camX = game.camera.x;
+  const _pjCamY = (game.camera && game.camera.y) || 0;   // v0.29.x perf — was re-derived per projectile
   for (const p of game.projectiles) {
     // v0.25.21 — Phase 4c-2 gate: ask LXProjectileScene whether it owns
     // this specific projectile (every type with a pre-rendered texture).
@@ -105076,8 +105101,7 @@ function drawProjectiles() {
     // cull visible projectiles.
     if (sx + p.w < -60 || sx > W + 60) continue;
     {
-      const _camY = (game.camera && game.camera.y) || 0;
-      if (p.y + p.h < _camY - 60 || p.y > _camY + H + 60) continue;
+      if (p.y + p.h < _pjCamY - 60 || p.y > _pjCamY + H + 60) continue;   // v0.29.x perf — camY hoisted
     }
     // v0.26.x — Lv-50 B-ult dedicated projectile sprite override. When the
     // projectile carries a `bspr` key whose art has decoded, draw it here and
@@ -106835,13 +106859,15 @@ function drawFlameTrail() {
   // gradient ellipse stays as the pre-decode / 404 fallback.
   const _fp = (typeof LX_VFX !== 'undefined') ? LX_VFX.flamePatch : null;
   const _fpReady = (typeof _lxVfxReady === 'function') && _lxVfxReady(_fp);
+  const _fpAsp = _fpReady ? (_fp.naturalHeight / _fp.naturalWidth) : 1;   // v0.29.x perf — invariant per frame
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   for (const f of T) {
     const t = Math.max(0, Math.min(1, f.life / f.max));
     const x = f.x - camX, y = f.y - camY;
+    if (x + f.r * 3 < 0 || x - f.r * 3 > W) continue;   // v0.29.x perf — off-camera cull (fire lines span whole arenas)
     if (_fpReady) {
-      const w = f.r * 2.4, h = w * (_fp.naturalHeight / _fp.naturalWidth);
+      const w = f.r * 2.4, h = w * _fpAsp;
       ctx.globalAlpha = 0.85 * t;
       ctx.drawImage(_fp, x - w / 2, y - h + f.r * 0.35, w, h);
       ctx.globalAlpha = 1;
