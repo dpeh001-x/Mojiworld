@@ -1,13 +1,16 @@
-// Fashionista wardrobe gate + makeover fee (v0.29.375).
+// Fashionista wardrobe gate + makeover fee (v0.29.377).
 //   - the Wardrobe opens ONLY through her dialog (Q no longer opens it)
 //   - Q routes to her chat when she is present, and says where she is when not
 //   - a look CHANGE costs WARDROBE_FEE Mojicoins
 //   - browsing (open, apply nothing, close) is free
-//   - an unaffordable makeover ABORTS with the look untouched
+//   - a player who cannot pay is never SEATED (the gate is at her door)
+//   - a seated player NEVER loses their work at Apply
 //
-// The fee used to be advertised but optional: the pre-v0.29.375 rule was
-// "never abort on insufficient coins", so once you were broke every restyle
-// was free. These assertions pin that it is now binding.
+// History worth keeping: the fee was advertised but optional for a long time.
+// v0.29.375 made it binding by ABORTING Apply when you were short -- which
+// silently discarded the whole makeover and brought back the recurring
+// "weapon edits don't save" report. v0.29.377 moved the gate to her door
+// instead: the fee stays mandatory, and Apply never throws work away.
 //   node scripts/wardrobe_fashionista_test.mjs
 // Env: PW_EXE / PW_CHANNEL (default msedge), PORT (default 8937)
 import { chromium } from 'playwright-core';
@@ -36,6 +39,10 @@ const o = await page.evaluate(() => {
     const el = document.getElementById(id); if (el && el.classList) el.classList.remove('on');
   }
   player.cls = player.cls || 'warrior'; player.level = 30; player.hp = 500; player.maxHp = 500;
+  // Solvent by default: since v0.29.377 the fee is enforced at the DOOR, so an
+  // unfunded player is (correctly) never seated and every later step would
+  // fail for that reason rather than the one under test.
+  player.mojicoins = 50000;
   const isOpen = () => { const el = document.getElementById('char-studio-overlay');
                          return !!el && el.classList.contains('open'); };
   const shut = () => { try { if (typeof closeCharStudio === 'function') closeCharStudio(); } catch (e) {}
@@ -103,15 +110,29 @@ const o = await page.evaluate(() => {
   out.chargedForNoChange = before2 - player.mojicoins;
   shut();
 
-  // 8. UNAFFORDABLE: aborts, look untouched, no coins move
+  // 8. UNAFFORDABLE: the gate is at the DOOR — she won't seat you at all.
   player.mojicoins = FEE - 1;
+  _csGrantWardrobe();
+  try { openCharStudio(); } catch (e) { out.poorThrew = String(e).slice(0, 100); }
+  out.poorGotSeated = isOpen();
+  shut();
+
+  // 9. THE REGRESSION GUARD. Anyone who IS in the chair must never lose their
+  // work at Apply. v0.29.375 aborted Apply when the purse was short, which
+  // silently discarded the whole makeover — the recurring "weapon edits don't
+  // save" report. Simulate a purse drained AFTER being seated (a second
+  // makeover in one sitting): the look must still commit.
+  player.equipped = player.equipped || {};
+  player.equipped.weapon = { name: 'Test Blade', baseName: 'Blade', rarity: 'rare', atk: 42 };
+  player.mojicoins = FEE;                 // affordable at the door
   _csGrantWardrobe(); openCharStudio();
-  const skinBefore = (player.lookCustom || {}).skinIdx;
-  const coinsBefore = player.mojicoins;
-  CHAR_STUDIO.skinIdx = ((CHAR_STUDIO.skinIdx | 0) + 2) % 8;
-  try { applyCharStudioToPlayer(); } catch (e) { out.poorThrew = String(e).slice(0, 100); }
-  out.poorCoinsMoved = coinsBefore - player.mojicoins;
-  out.poorLookChanged = (player.lookCustom || {}).skinIdx !== skinBefore;
+  player.mojicoins = 0;                   // ...and broke by the time they hit Apply
+  CHAR_STUDIO.equip = CHAR_STUDIO.equip || {};
+  CHAR_STUDIO.equip.weapon = { spriteId: 'wpn_regression_probe', tint: '#00ffcc' };
+  try { applyCharStudioToPlayer(); } catch (e) { out.brokeApplyThrew = String(e).slice(0, 100); }
+  const w = (player.equipped || {}).weapon || {};
+  out.brokeWeaponSaved = w.spriteId === 'wpn_regression_probe' && w.tint === '#00ffcc';
+  out.brokeStatsKept = w.atk === 42;
   shut();
 
   player.mojicoins = 1000;
@@ -130,8 +151,10 @@ ok('Q on her map does not open the wardrobe directly', !o.qHereOpenedWardrobe);
 ok('a look change costs exactly the fee', o.chargedForChange === (o.fee || 1000), `charged ${o.chargedForChange}`);
 ok('the changed look is committed', o.lookCommitted, o.applyThrew);
 ok('browsing without changes is free', o.chargedForNoChange === 0, `charged ${o.chargedForNoChange}`);
-ok('an unaffordable makeover moves no coins', o.poorCoinsMoved === 0, `moved ${o.poorCoinsMoved}`);
-ok('an unaffordable makeover leaves the look untouched', !o.poorLookChanged, o.poorThrew);
+ok('a player who cannot pay is never seated', !o.poorGotSeated, o.poorThrew);
+// The regression this file exists to prevent: work is never discarded at Apply.
+ok('a seated player NEVER loses their weapon edit, even if broke', o.brokeWeaponSaved, o.brokeApplyThrew);
+ok('the weapon keeps its gameplay stats through the edit', o.brokeStatsKept);
 
 for (const t of results) console.log(`${t.pass ? 'PASS' : 'FAIL'}  ${t.n}${t.e ? '  (' + t.e + ')' : ''}`);
 const failed = results.filter(t => !t.pass);
