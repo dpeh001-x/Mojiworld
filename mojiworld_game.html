@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.373';
+const GAME_VERSION = 'v0.29.375';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -13790,12 +13790,84 @@ const _PLATFORM_TINT_DEFAULT = { top:'#c9a3ff', body:'#2a1e3c' };
 // the cel-shaded slab. Cached per map id so the hex math runs once, not
 // per-frame. A map with no usable sky colour falls back to its per-biome floor
 // theme (the old behaviour), then to the default tint.
+// v0.29.321 — DOMINANT COLOUR OF THE MAP'S PAINTED BACKDROP (per user: "the
+// platform and floor colour takes the predominant colour of the map").
+// The tint used to come from sky[0] — the first band of the PROCEDURAL sky
+// gradient. Almost every map also ships a hand-painted backdrop bitmap, and
+// the two are authored independently, so the slabs were keyed to a colour the
+// player often cannot see. This samples the artwork itself.
+//
+// Not a plain average: averaging a whole painting collapses to mud. Pixels are
+// binned at 4 bits per channel, near-black / near-white / transparent pixels
+// are discarded (so a vignette or a blown-out sky can't win), and each bin is
+// scored by population WEIGHTED BY SATURATION so a large flat grey loses to
+// the colour that actually gives the map its character. The winning bin's
+// member pixels are then averaged for a precise hex.
+let _lxDomCv = null, _lxDomCtx = null;
+function _lxDominantColor(img) {
+  if (!img) return null;
+  if (img._lxDom !== undefined) return img._lxDom;
+  // Not decoded yet — return null WITHOUT memoising, so the next frame retries
+  // and the tint upgrades the moment the art lands.
+  if (!img._loaded || !(img.naturalWidth > 0)) return null;
+  let out = null;
+  try {
+    const S = 48;
+    if (!_lxDomCv) {
+      _lxDomCv = document.createElement('canvas');
+      _lxDomCtx = _lxDomCv.getContext('2d', { willReadFrequently: true });
+    }
+    _lxDomCv.width = S; _lxDomCv.height = S;
+    _lxDomCtx.clearRect(0, 0, S, S);
+    _lxDomCtx.drawImage(img, 0, 0, S, S);
+    const d = _lxDomCtx.getImageData(0, 0, S, S).data;
+    const bins = new Map();
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] < 128) continue;
+      const r = d[i], g = d[i + 1], b = d[i + 2];
+      const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+      const lum = (mx + mn) / 2;
+      if (lum < 28 || lum > 232) continue;
+      const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+      let e = bins.get(key);
+      if (!e) { e = { n: 0, r: 0, g: 0, b: 0, sat: 0 }; bins.set(key, e); }
+      e.n++; e.r += r; e.g += g; e.b += b;
+      e.sat += mx ? (mx - mn) / mx : 0;
+    }
+    let best = null, bestScore = -1;
+    for (const e of bins.values()) {
+      const score = e.n * (0.35 + 0.65 * (e.sat / e.n));
+      if (score > bestScore) { bestScore = score; best = e; }
+    }
+    if (best) {
+      const c = (v) => Math.max(0, Math.min(255, Math.round(v / best.n))).toString(16).padStart(2, '0');
+      out = '#' + c(best.r) + c(best.g) + c(best.b);
+    }
+  } catch (e) { out = null; }   // tainted canvas etc — fall back silently
+  img._lxDom = out;
+  return out;
+}
+// Cache entries record WHETHER the tint came from the backdrop. One that fell
+// back while the art was still downloading is provisional and gets recomputed,
+// otherwise a map entered on a cold cache would keep the sky colour forever.
 const _MAP_PLATFORM_TINT_CACHE = {};
 function _mapPlatformTint(md) {
   const id = (typeof game !== 'undefined' && game.currentMap) ? game.currentMap : (md && (md.id || md.name)) || 'town';
-  if (_MAP_PLATFORM_TINT_CACHE[id]) return _MAP_PLATFORM_TINT_CACHE[id];
-  const sky = md && md.sky;
-  const base = (sky && sky.length) ? sky[0] : null;
+  const hit = _MAP_PLATFORM_TINT_CACHE[id];
+  if (hit && hit.fromBg) return hit.tint;
+  // Predominant colour of the painted backdrop first; the sky band is now the
+  // fallback rather than the source.
+  let base = null, fromBg = false;
+  try {
+    const bg = (typeof _pickBGImage === 'function') ? _pickBGImage() : null;
+    const dom = bg ? _lxDominantColor(bg) : null;
+    if (dom) { base = dom; fromBg = true; }
+  } catch (e) {}
+  if (!base) {
+    const sky = md && md.sky;
+    base = (sky && sky.length) ? sky[0] : null;
+  }
+  if (hit && !base) return hit.tint;   // nothing better available yet
   let tint;
   if (base && /^#[0-9a-fA-F]{6}$/.test(base) && typeof _mixHex === 'function') {
     // Surface: base nudged a touch brighter so it still reads lit; body:
@@ -13805,7 +13877,7 @@ function _mapPlatformTint(md) {
     // No explicit main colour → fall back to the per-biome floor theme.
     tint = (typeof _pickFloorTheme === 'function' ? (_PLATFORM_THEME_TINT[_pickFloorTheme(md)] || _PLATFORM_TINT_DEFAULT) : _PLATFORM_TINT_DEFAULT);
   }
-  _MAP_PLATFORM_TINT_CACHE[id] = tint;
+  _MAP_PLATFORM_TINT_CACHE[id] = { tint, fromBg };
   return tint;
 }
 // Draw one cute cel-shaded slab: top-rounded, lit surface cap, dark body, a
@@ -73134,7 +73206,7 @@ function openNPC(npc) {
       'on a Wednesday? <em>Speak.</em>\n\n' +
       'Sit, sit. Class doesn\'t matter, spell doesn\'t matter, the only crime in Mojiworld ' +
       'is going to your own funeral in <em>last season\'s hair.</em>';
-    // v0.29.373 — she issues the only ticket into the Wardrobe, and the price
+    // v0.29.375 — she issues the only ticket into the Wardrobe, and the price
     // she quotes is the one that gets charged (WARDROBE_FEE, billed at Apply
     // when the look actually changes).
     {
@@ -73147,7 +73219,7 @@ function openNPC(npc) {
       } });
     }
     opts.push({ t:'…last season\'s hair?', cb:() => { document.getElementById('dialog-text').textContent = '*She gasps, scandalised.* You haven\'t HEARD? The Slime Sovereign\'s court issued a fatwa on under-bangs three ages ago. THREE. AGES. AGO. And I still see travellers shuffling through the Bastion with — I cannot finish that sentence.'; } });
-    opts.push({ t:'(Tip: Q brings you straight to me)', cb:() => closeDialog() });   // v0.29.373 — Q routes here now, it no longer opens the mirror itself
+    opts.push({ t:'(Tip: Q brings you straight to me)', cb:() => closeDialog() });   // v0.29.375 — Q routes here now, it no longer opens the mirror itself
   } else if (npc.role === 'taiga') {
     // v0.25.411 — Taiga, leader of the rebel ninjutsu cell hiding in
     // the Shadow-Woven Hood. Commanding, intimidating; speaks of the
@@ -120894,7 +120966,7 @@ function buildWardrobeGrid() {
 }
 
 // =========================================================================
-// v0.29.373 — THE FASHIONISTA'S CHAIR. Per user: the wardrobe is hers alone.
+// v0.29.375 — THE FASHIONISTA'S CHAIR. Per user: the wardrobe is hers alone.
 // Q no longer opens the Wardrobe directly — it walks you to her chat — and a
 // makeover costs Mojicoins. The dialog had advertised "makeover: 1000🪙"
 // since v0.25.263 and never charged a coin; now it does.
@@ -120929,13 +121001,24 @@ function _wardrobeHotkey() {
     if (typeof closeAllModals === 'function') closeAllModals();
     if (typeof openNPC === 'function') { openNPC(npc); return; }
   }
-  // Not on this map — say where she is rather than silently doing nothing.
+  // Not on this map — say where she IS rather than silently doing nothing.
+  // Looked up from MAPS at call time so the hint can never drift out of date
+  // if she moves or a second salon opens (an early draft of this hard-coded
+  // "Town"; she actually keeps her chair in the Everdawn Megamall).
+  let where = '';
+  try {
+    where = Object.entries(MAPS)
+      .filter(([, m]) => (m.npcs || []).some(n => n && n.role === 'wardrobe'))
+      .map(([, m]) => m.name).filter(Boolean).join(' / ');
+  } catch (e) {}
   if (typeof showToast === 'function') {
-    showToast('✂ The Fashionista holds the only mirror — find her in Town (east end of the concourse).', 'rare');
+    showToast(where
+      ? `✂ The Fashionista holds the only mirror — find her in ${where}.`
+      : '✂ Only the Fashionista can restyle you — seek her out.', 'rare');
   }
 }
 function openCharStudio() {
-  // v0.29.373 — her chair, her rules. The ticket is one-shot: consumed here,
+  // v0.29.375 — her chair, her rules. The ticket is one-shot: consumed here,
   // so a stale grant can't be reused later from a keybind or a dev call.
   if (!_csAccessGranted) {
     if (typeof showToast === 'function') {
@@ -121255,7 +121338,7 @@ function applyCharStudioToPlayer() {
   // and BEFORE any player mutation (so an unaffordable makeover aborts cleanly
   // with nothing changed).
   {
-    const MAKEOVER_COST = (typeof WARDROBE_FEE === 'number') ? WARDROBE_FEE : 1000;   // v0.29.373 — one price, quoted in her dialog
+    const MAKEOVER_COST = (typeof WARDROBE_FEE === 'number') ? WARDROBE_FEE : 1000;   // v0.29.375 — one price, quoted in her dialog
     const _lc = player.lookCustom || {};
     const _np = (o) => (typeof _normalizePosture === 'function') ? _normalizePosture(o && o.posture) : ((o && o.posture) || null);
     const _lookSig = (o) => JSON.stringify([o.skinIdx, o.hairId, o.eyeId, o.mouthId, o.msxId, _np(o)]);
@@ -121272,7 +121355,7 @@ function applyCharStudioToPlayer() {
       // equipment vs the open-time baseline — an equip-only change was free before.
       (CHAR_STUDIO._origEquipJSON != null && JSON.stringify(CHAR_STUDIO.equip || {}) !== CHAR_STUDIO._origEquipJSON) ||
       _paintSig(CHAR_STUDIO.customPaint, CHAR_STUDIO.customPaintLayers) !== _paintSig(player.customPaint, player.customPaintLayers);
-    // v0.29.373 — THE FEE IS NOW BINDING. Per user "ensure the mojicoins get
+    // v0.29.375 — THE FEE IS NOW BINDING. Per user "ensure the mojicoins get
     // deducted to make edits to the character". Previously an unaffordable
     // makeover was applied FREE (the v0.26.x rule was "never abort on
     // insufficient coins"), which made the advertised 1000🪙 price optional —
@@ -121616,7 +121699,7 @@ window.addEventListener('keydown', (e) => {
   } else if (!e.repeat && typeof _isAction === 'function' && _isAction(e.key.toLowerCase(), 'wardrobe')) {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
     e.preventDefault();
-    // v0.29.373 — Q no longer opens the Wardrobe. It takes you to the
+    // v0.29.375 — Q no longer opens the Wardrobe. It takes you to the
     // Fashionista, who is now the only way in. (Closing with Q still works,
     // handled inside _wardrobeHotkey.)
     if (typeof _wardrobeHotkey === 'function') _wardrobeHotkey();
