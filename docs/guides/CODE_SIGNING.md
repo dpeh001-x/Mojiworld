@@ -1,11 +1,21 @@
 # Code signing Mojiworld.exe — setup guide
 
+> **STATUS: OPTIONAL — post-launch only (decided 2026-08-01).** Steam does not
+> require code signing and the build review does not check for it. Mojiworld
+> ships unsigned; the CI signing step below stays dormant until the `AZURE_*`
+> secrets exist. Buy the cert only if real SAC support tickets appear after
+> launch — enabling it then is six secrets + one build re-run, and the signed
+> depot ships as a routine update. See "Shipping unsigned" at the bottom for
+> the QA and player-support workarounds used in the meantime.
+
 **Why this exists:** Windows 11 machines with **Smart App Control (SAC)** enforced
 block unsigned executables with *no* user override — verified 2026-07-27 on this
 very machine, which refused the unsigned `Mojiworld.exe`. Self-signed certs do
 not pass. A certificate from a trusted CA does. Steam itself does not require
-signing, but your players' SAC machines do, and a signature also starts your
-SmartScreen reputation clock.
+signing, but SAC-enforced players' machines block unsigned exes — a narrow
+slice: SAC only survives on near-factory Windows 11 installs and permanently
+disables itself once the user installs much unsigned software, and the Steam
+Deck / Linux depot has no SAC at all.
 
 The CI signing step is **already wired** into `.github/workflows/steam-build.yml`.
 It activates automatically once six GitHub secrets exist; until then, builds ship
@@ -91,3 +101,38 @@ no-cert fallback.
 - macOS notarization (separate Apple process — only relevant if a mac build ships).
 - SmartScreen "unrecognized app" on *non-SAC* machines during the first days —
   reputation accrues; Steam players never see it since Steam launches the exe.
+
+---
+
+## Shipping unsigned (the current plan) — workarounds
+
+**Dev QA on this SAC-enforced machine.** The depot `Mojiworld.exe` will not
+launch here. Test instead via:
+
+- **Gameplay QA:** the browser build (`Mojiworld.cmd` → local server). The
+  depot boot test (`scripts/steam_depot_boot_test.mjs`) proves the packaged
+  content is byte-for-byte what the browser serves, so gameplay parity holds.
+- **Wrapper QA** (overlay, Steam Cloud, Steam Input, quit flow): the
+  **Linux/Deck depot** on real Deck hardware (no SAC on Linux), or any second
+  Windows PC — practically all non-factory-fresh machines have SAC off.
+  The integration suite (`scripts/steam_integration_test.mjs`, 49 checks)
+  covers the same surfaces headlessly.
+- Turning SAC off on this machine would also work but is **permanent** (it
+  cannot be re-enabled without reinstalling Windows) — the owner's call, not
+  a step this guide recommends.
+
+**Player support note** (paste into the Steam discussions/support page if a
+SAC report ever comes in — this is expected to be rare):
+
+> If Windows says the game "was blocked because it isn't signed" or Smart App
+> Control prevented it from running: Smart App Control is a Windows 11 mode
+> active on some new PCs that blocks apps without a paid certificate,
+> including many indie games. You can allow the game by turning it off in
+> **Windows Security → App & browser control → Smart App Control settings →
+> Off** (Windows makes this permanent by design). Alternatively play on Steam
+> Deck/Linux, or wait for a signed build if enough players report this.
+
+**Trigger for revisiting:** buy the cert (Option A above) when SAC tickets
+actually appear, or before any distribution OUTSIDE Steam (itch/standalone
+downloads hit SmartScreen's mark-of-the-web, where a signature matters much
+more).

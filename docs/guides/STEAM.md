@@ -111,16 +111,21 @@ Then publish the build to a branch on **SteamPipe → Builds**, set it live on
 > App Control enforced block unsigned exes with **no** "run anyway" and no
 > per-app allowlist — the v0.29.266 Defender hardening doesn't help. Local
 > workaround: `Mojiworld.cmd` at repo root (batch → signed `cmd.exe`/
-> `node.exe`, so SAC allows it). Durable fix for the Steam depot: code-sign
-> the Electron build with a trusted-CA cert (e.g. Azure Trusted Signing)
-> before launch — self-signed certs do NOT pass SAC.
+> `node.exe`, so SAC allows it). The durable fix would be code-signing the
+> Electron build with a trusted-CA cert — self-signed certs do NOT pass SAC.
 >
-> **Update (2026-08-01):** the signing step is now WIRED into
-> `steam-build.yml` — it activates automatically once the six `AZURE_*`
-> GitHub secrets exist, and a build-failing signature verification proves it
-> worked. The only human steps left are the cert purchase + identity
-> validation + pasting the secrets: full walkthrough in
-> [`CODE_SIGNING.md`](CODE_SIGNING.md).
+> **DECISION (2026-08-01, per user): code signing is OPTIONAL and
+> post-launch — NOT a launch blocker.** Steam does not require signing and
+> Valve's build review does not check for it. The exposure is narrow: SAC
+> is only enforced on near-factory Windows 11 installs (it permanently
+> disables itself once a user installs much unsigned software, which
+> describes nearly every gaming PC), and the Steam Deck / Linux depot has
+> no SAC at all. Ship unsigned; if SAC tickets ever materialise, the
+> signing step is already WIRED into `steam-build.yml` (dormant until the
+> six `AZURE_*` secrets exist, with a build-failing signature verification)
+> — enabling it later is pasting six secrets and re-running the build, and
+> the updated depot ships as a routine Steam update with no re-review.
+> Walkthrough + no-cert QA/support workarounds: [`CODE_SIGNING.md`](CODE_SIGNING.md).
 
 ---
 
