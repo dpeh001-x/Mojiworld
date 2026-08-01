@@ -148,6 +148,41 @@
   <b>Heads-up.</b> An earlier implementation of these phases targeted <code>v0.5.1</code> and was preserved locally at tag <code>phase-1-2-3-on-v0.5.1</code>. This is the rebuild against the current <code>v0.9.8</code> codebase, which had moved substantially (new bosses like Gravitos, minimap/taxi, chibi character rewrite).
 </div>
 
+<h2>v0.29.393 <span class="tag"><span class="pill bug">bug</span> Gravitos phase 3 stops stuttering, and phase 2 stops fighting like phase 1</span></h2>
+<p>Per user &mdash; <em>&ldquo;Gravitos3 was a very choppy battle, and gravitos2 is not lethal enough&rdquo;.</em> Two unrelated defects, one per complaint.</p>
+
+<h3>Why phase 3 stuttered rather than simply running slow</h3>
+<p>The engine has two automatic FX-degradation tiers, and <b>both of them count entities</b>: the second tier engages at <code>bossCount &gt;= 2</code> or <code>mobCount &gt; 22</code>. Gravitos phase 3 is the heaviest encounter in the game and satisfies <em>neither</em> &mdash; it is <b>one</b> boss in an otherwise empty arena that keeps roughly <b>40 hazards</b> alive at once (24 void-ring shards + 7 chase comets + 5 laser bolts + 4 collapse zones, over a decaying floor). With <code>bossCount</code> at 1 and <code>mobCount</code> at 1, the deepest tier was left entirely to the <em>reactive</em> frame-time path, which needs <b>six consecutive slow frames</b> to engage and then releases 8&nbsp;s later.</p>
+<div class="callout">
+  <b>That release timer is the whole bug.</b> The reactive path doesn&rsquo;t settle &mdash; it hitches, degrades, recovers, and hitches again on a loop. A steadily degraded frame would have read as <em>smooth</em>; the oscillation between two quality levels is what actually reads as &ldquo;choppy&rdquo;. So the fix is not to make the tier harsher, it is to make it engage <em>before</em> the first spike instead of after it.
+</div>
+<p><code>_perfVeryLowFx()</code> gains a third trigger: <b>a boss is alive and &ge;40 projectiles are in flight.</b> It counts every projectile, the player&rsquo;s included, because this gates <em>render</em> cost and a 40-bullet frame costs the same to draw whoever fired it &mdash; the boss guard is what keeps normal play from tripping it. Gameplay is untouched; this tier only gates eye-candy.</p>
+<p><b>Separately</b>, the <em>freeze</em> on the phase swap itself was a different defect with a different cause, fixed in v0.29.388 (a full-resolution <code>getImageData</code> readback blocking 1,036&nbsp;ms while scanning Gravitos&rsquo;s 3000&times;2200 art). That one was a one-time stall at the transition; this one is sustained load during the phase.</p>
+
+<h3>Why phase 2 hit hard but rarely</h3>
+<p>The damage <b>band</b> was already correct &mdash; verified live at <code>&times;1 / &times;8.5 / &times;17</code> across the three phases, with phase 2 landing at exactly half of phase 3. The per-hit numbers were never the problem.</p>
+<p>The problem was that nearly every attack <b>pattern</b> was written as a binary <code>phase === 3 ? big : small</code>. There was no phase-2 branch at all, so <b>phase 2 was firing at phase-1 density, cadence and speed</b> &mdash; a boss that hits like a truck and then waits 20 seconds to do it again. Phase 2 now interpolates:</p>
+<ul>
+<li><b>Chase comets</b> 3 &rarr; <b>5</b> &rarr; 7, at speed 3.6 &rarr; <b>4.4</b> &rarr; 5.2</li>
+<li><b>Void ring</b> 16 &rarr; <b>20</b> &rarr; 24 shards, at speed 6.0 &rarr; <b>6.75</b> &rarr; 7.5</li>
+<li><b>Collapse zones</b> 2 &rarr; <b>3</b> &rarr; 4</li>
+<li><b>Collapse rain cooldown</b> 20&nbsp;s &rarr; <b>15&nbsp;s</b> &rarr; 11&nbsp;s</li>
+<li><b>Laser</b> charge 500 &rarr; <b>420</b> &rarr; 350&nbsp;ms, bolt speed 11 &rarr; <b>12.5</b> &rarr; 14, sweep tail 700 &rarr; <b>900</b> &rarr; 1100&nbsp;ms</li>
+<li><b>Zip dive</b> window 720 &rarr; <b>620</b> &rarr; 520&nbsp;ms, accel 1.4 &rarr; <b>1.7</b> &rarr; 2.0, speed cap 17 &rarr; <b>19.5</b> &rarr; 22</li>
+</ul>
+<p>Two sites were left flat on purpose. <b>Soul-drain cooldown</b> already runs <em>faster</em> in phases 1&ndash;2 (12&nbsp;s) than in phase 3 (14&nbsp;s), which leans on the ring instead &mdash; phase 2 was not inheriting a weaker value there. And the <b>decay floor</b> spans only 4&rarr;5 columns, so there is no distinct middle value and a 5 in phase 2 would erase the phase-3 step entirely.</p>
+<p><b>Verified:</b> <code>scripts/gravitos_phase_test.mjs</code> (28 checks) asserts every graded triple is strictly monotonic and that no Gravitos pattern ternary is left inheriting phase 1; <code>scripts/gravitos_perf_runtime_test.mjs</code> (12 checks, booted client) confirms the new tier engages at 40 hazards, stays off at 39, stays off with 60 projectiles and no boss, and that both pre-existing triggers still fire. Regression: 32/32 smoke, 53/53 scaled-mode correlation, all inline scripts parse clean.</p>
+
+<h2>v0.29.393 <span class="tag"><span class="pill polish">polish</span> Floors take the ground&rsquo;s colour, not the sky&rsquo;s &mdash; blended floors down from 12 maps to 1</span></h2>
+<p>Per user &mdash; <em>&ldquo;for the floor and platform colour, choose the main colour that is not the sky&rdquo;.</em> Floors were already meant to be tinted from the painted backdrop rather than <code>sky[0]</code>, but the sampler took the <b>most common colour in the whole image</b> &mdash; and in a landscape the sky is simply the largest region. So &ldquo;dominant&rdquo; kept resolving back to the sky and floors melted into the horizon.</p>
+<ul>
+  <li><b>Two filters, covering for each other.</b> <em>Spatial</em>: only sample below 42% of the backdrop&rsquo;s height, since backdrops are painted sky-on-top. <em>Chromatic</em>: reject any pixel close to one of the map&rsquo;s own declared sky gradient stops &mdash; which catches sky that reaches below the cut, like a low horizon or water mirroring it.</li>
+  <li><b>No more falling back to the sky.</b> If the filters leave too little to judge, the floor now takes the authored per-biome theme instead of the unfiltered sample &mdash; because an unfiltered sample on a sky-heavy backdrop <em>is</em> the sky, which is the thing being removed. Only backdrop-less arenas (sanctum, zodiac halls, the carriage) still derive from the sky, and they now take the gradient&rsquo;s <em>last</em> stop &mdash; the horizon end &mdash; rather than <code>sky[0]</code>, the most sky-like stop there is.</li>
+</ul>
+<div class="callout">
+  <b>Measured across all 107 maps with a declared sky.</b> Floors sitting within 60 RGB of their own sky: <b>12 before &rarr; 1 after</b>. The one left is <code>duneSands</code>, where the sand genuinely is the same pale gold as the desert sky &mdash; that reads as correct rather than broken. Worth noting the metric&rsquo;s limit: RGB distance conflates &ldquo;similar hue&rdquo; with &ldquo;both dark&rdquo;, so it overstates the problem on night maps where a near-black floor and a near-black sky score as close but look nothing alike.
+</div>
+
 <h2>v0.29.389 <span class="tag"><span class="pill feat">feat</span> <kbd>Q</kbd> is the Quest Journal, <kbd>E</kbd> is the weapon editor &mdash; and the eraser learns opacity</span></h2>
 <p>Per user. <kbd>Q</kbd> now opens the Quest Journal (<kbd>J</kbd> stays as an alias). <kbd>E</kbd> brings back the <b>developer weapon editor</b> &mdash; the gear align / erase / export panel had been orphaned with no key bound to it at all. The walk-to-Fashionista hotkey ships unbound (rebindable in the <kbd>K</kbd> menu, whose rows were updated to match); walking up to her with <kbd>N</kbd> is unchanged.</p>
 <ul>
