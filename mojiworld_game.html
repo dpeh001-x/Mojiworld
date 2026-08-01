@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.367';
+const GAME_VERSION = 'v0.29.368';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16923,6 +16923,41 @@ const BOON_SYNERGIES = [
     pair: ['chain', 'freeze'], icon: '⚡❄️',
     desc: 'Chain arcs also carry the freeze roll to whatever they strike.',
   },
+  // === v0.29.368 — DUO BOONS for the action six + Tier-1 ten (per user
+  // "create new boon combos with the new implemented boons"; the first four
+  // were planned in docs/design/boon_ideas_v2.md when both halves shipped).
+  // Each entry may carry `art` — a Sprites/boons/<art>.png emblem the panel
+  // prefers over the two pair icons (falls back automatically if missing).
+  {
+    key: 'supernova', name: 'Supernova',
+    pair: ['novastep', 'flamedash'], icon: '💥🔥', art: 'syn_supernova',
+    desc: 'Nova Step\'s blast ignites a ring of Flame Dash fire at its edge.',
+  },
+  {
+    key: 'winterGarden', name: 'Winter Garden',
+    pair: ['bloom', 'freeze'], icon: '🌸❄️', art: 'syn_wintergarden',
+    desc: 'Death Bloom detonations also freeze the survivors they wound.',
+  },
+  {
+    key: 'quantumDouble', name: 'Quantum Double',
+    pair: ['blink', 'echo'], icon: '🌀👻', art: 'syn_quantumdouble',
+    desc: 'For 2s after a Hyper Teleport, Phantom Echo repeats at FULL damage.',
+  },
+  {
+    key: 'guillotine', name: 'Guillotine',
+    pair: ['execute', 'crescendo'], icon: '🪓🎵', art: 'syn_guillotine',
+    desc: 'The 4th-beat crescendo strike executes at 1.5× the normal threshold.',
+  },
+  {
+    key: 'adrenalineSurge', name: 'Adrenaline Surge',
+    pair: ['skin', 'rampage'], icon: '🔷🔺', art: 'syn_adrenaline',
+    desc: 'A Second Skin negate instantly grants maximum Rampage fury stacks.',
+  },
+  {
+    key: 'phantomWaltz', name: 'Phantom Waltz',
+    pair: ['mirror', 'waltz'], icon: '🪞🕰️', art: 'syn_phantomwaltz',
+    desc: 'Your Mirror Step decoy emits its own Bullet Waltz slow field.',
+  },
 ];
 // Per-id index — boon id → list of synergy keys it participates in.
 // Builds once at module load. Used to short-circuit detection.
@@ -17002,12 +17037,19 @@ function _synergyPanelHtml() {
     // via boonIconHtml) instead of the combo's emoji string. Each boon falls back to
     // its own emoji if the sprite is missing/undecoded. Falls back to the legacy
     // emoji split if a pair entry has no matching POWERUPS def.
-    const _icons = (s.pair && s.pair.length && typeof POWERUPS !== 'undefined')
+    // v0.29.368 — duo boons may carry a dedicated fusion EMBLEM (s.art →
+    // Sprites/boons/<art>.png). Preferred over the two component icons when
+    // present; onerror swaps in the pair-icon fallback, so a missing emblem
+    // file degrades to exactly the old rendering.
+    const _pairIcons = (s.pair && s.pair.length && typeof POWERUPS !== 'undefined')
       ? s.pair.map(bk => {
           const _def = POWERUPS.find(p => p.id === bk);
           return _def ? boonIconHtml(_def, 18) : '';
         }).join(' ')
       : Array.from(s.icon || '').map(ch => `<span>${ch}</span>`).join(' ');
+    const _icons = s.art
+      ? `<img src="Sprites/boons/${s.art}.png" width="22" height="22" style="display:inline-block;vertical-align:middle;image-rendering:auto;" alt="" onerror="this.outerHTML=${JSON.stringify(_pairIcons).replace(/"/g, '&quot;')}">`
+      : _pairIcons;
     pills += `<div title="${_title}" style="display:flex; align-items:center; gap:6px; background:linear-gradient(180deg,rgba(200,168,255,0.16),rgba(200,168,255,0.05)); border:1px solid rgba(200,168,255,0.4); border-radius:12px; padding:4px 10px;"><span style="display:inline-flex; align-items:center; gap:3px;">${_icons}</span><span style="font-size:11px; font-weight:700; color:#e8def8;">${s.name}</span></div>`;
   }
   // v0.26.x — Per user, the header bolt is also a boon sprite now (the lightning
@@ -33001,6 +33043,21 @@ function _diffDmg(d, srcLv, capPct) { try { if (typeof player !== 'undefined' &&
       }
       game.damageNumbers.push({ x: player.x + player.w / 2 - 20, y: player.y - 10, vy: -2,
         text: 'NEGATED', life: 30, color: '#7ae0d8', size: 13 });
+      // v0.29.368 — SYNERGY: Adrenaline Surge (skin + rampage). The negated
+      // hit floods the engine: instant MAX fury stacks, fresh 5s window.
+      // Gated on the Second Skin cooldown by construction — it can only
+      // fire when a charge was actually consumed, so it can't be farmed
+      // faster than the skinCd roll allows.
+      if (player._activeSynergies && player._activeSynergies.adrenalineSurge &&
+          player.mods.rampStacks > 0) {
+        player._rampN = Math.round(player.mods.rampStacks);
+        player._rampUntil = game.time + 300;
+        if (typeof _lxVfxReady === 'function' && typeof LX_FX !== 'undefined' && _lxVfxReady(LX_FX.rampage_aura)) {
+          try { spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2 - 8, 'rampage_aura', { size: 130, life: 22 }); } catch (e) {}
+        }
+        game.damageNumbers.push({ x: player.x + player.w / 2 - 14, y: player.y - 26, vy: -1.8,
+          text: '🔺MAX', life: 26, color: '#ff8a4a', size: 13 });
+      }
       return 0;
     }
     // v0.29.366 — stale-stamp wipe (audit finding). Every hit's banded clamp
@@ -37107,6 +37164,11 @@ function _coopTickMonsters() {
     //   aa — attack-anim ms REMAINING (guest rebuilds the deadline on its own
     //        clock; no cross-client clock sync needed)
     //   ps — patternState  · sp — phase sprite  · dp — dream fade  · p — phase
+    // v0.29.368 — a: the host's ROLLED atk. Mirror creation re-rolls the
+    // v0.29.265 per-spawn variance locally, and _coopFollowerContactTick
+    // reads m.atk — so guest contact damage silently diverged from what the
+    // host's actual monster deals. One number closes it.
+    _e.a = Math.round(m.atk || 0);
     if (m.atkAnimUntil && m.atkAnimUntil > now) _e.aa = Math.min(2000, Math.round(m.atkAnimUntil - now));
     if (m.patternState && m.patternState !== 'idle') _e.ps = String(m.patternState).slice(0, 20);
     if (m._phaseSprite) _e.sp = String(m._phaseSprite).slice(0, 20);
@@ -37888,6 +37950,11 @@ function _coopApplyMonsters(msg) {
     m.facing = e.f === -1 ? -1 : 1;
     if (Number.isFinite(+e.m)) m.maxHp = +e.m;
     if (Number.isFinite(+e.h)) m.currentHp = +e.h;
+    // v0.29.368 — adopt the host's rolled atk so guest contact damage matches
+    // what the host's actual monster deals (mirror creation re-rolled the
+    // per-spawn variance locally). Clamped: the host-only sender gate already
+    // rejects forged frames, but a corrupt field must not become a one-shot.
+    if (Number.isFinite(+e.a) && +e.a > 0) m.atk = Math.min(+e.a, 1e7);
     // v0.29.367 — VISUAL-STATE MIRROR (see _coopTickMonsters). What the host
     // sees is what the guest sees:
     //   • attack anim: `aa` is ms REMAINING — rebuild the deadline on OUR
@@ -44658,6 +44725,11 @@ function _dashBoonBegin(dir) {
     distMul += M.dashBlink;
     player.invulnerable = Math.max(player.invulnerable || 0, 320);
     player._blinkPhaseUntil = (game.time | 0) + 20;
+    // v0.29.368 — SYNERGY: Quantum Double (blink + echo). Opens the 2s
+    // window in which Phantom Echo repeats at FULL damage (hitMonster).
+    if (player._activeSynergies && player._activeSynergies.quantumDouble) {
+      player._quantumEchoUntil = (game.time | 0) + 120;
+    }
   }
   // ── FLAME DASH ──────────────────────────────────────────────────────
   // Arm the trail. Segments are dropped by _updateDashTrail while the dash
@@ -44762,6 +44834,19 @@ function _dashNovaBurst() {
     hitMonster(m, dmg, false, 'nova');
     m.vx = (m.vx || 0) + Math.sign(dx || 1) * 5;
   }
+  // v0.29.368 — SYNERGY: Supernova (novastep + flamedash). The blast ignites
+  // a ring of Flame Dash fire at its edge — same pool, same 60-patch cap,
+  // same per-enemy re-tick throttle, so the synergy inherits every bound the
+  // trail already has. Both boons are equipped by definition, so dashFlame
+  // is rolled and the patches tick at the player's own value.
+  if (player._activeSynergies && player._activeSynergies.supernova) {
+    if (!game.flameTrail) game.flameTrail = [];
+    for (let i = 0; i < 6 && game.flameTrail.length < 60; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      game.flameTrail.push({ x: cx + Math.cos(a) * R * 0.85, y: cy + Math.sin(a) * R * 0.45 + 10,
+                             r: 34, life: 150, max: 150, hitAt: {} });
+    }
+  }
   // v0.29.347 — authored shockwave burst (Sprites/fx/nova_ring.webp). Layered
   // on top of the explosion + particles rather than replacing them: the ring
   // sprite carries the shape, the particles carry the motion.
@@ -44783,11 +44868,25 @@ function _dashNovaBurst() {
 // slowed too — it's a positional tool, not damage, so the freeze-immunity
 // reasoning (v0.26.458) doesn't apply.
 function _waltzMulAt(cx, cy) {
-  if (!player || !((player._waltzUntil | 0) > (game.time | 0))) return 1;
+  if (!player) return 1;
   const s = (player.mods && player.mods.waltzSlow) || 0;
   if (!(s > 0)) return 1;
-  const dx = cx - (player.x + player.w / 2), dy = cy - (player.y + player.h / 2);
-  return (dx * dx + dy * dy <= 260 * 260) ? (1 - s) : 1;
+  // Player-centred field, live for the post-dash window.
+  if ((player._waltzUntil | 0) > (game.time | 0)) {
+    const dx = cx - (player.x + player.w / 2), dy = cy - (player.y + player.h / 2);
+    if (dx * dx + dy * dy <= 260 * 260) return 1 - s;
+  }
+  // v0.29.368 — SYNERGY: Phantom Waltz (mirror + waltz). The Mirror Step
+  // decoy emits its own slow field for its whole taunt lifetime — enemies
+  // lured in arrive slowed. Same radius, same roll; the two fields don't
+  // stack (either one returns the same 1 - s).
+  const D = game._mirrorDecoy;
+  if (D && (D.until | 0) > (game.time | 0) &&
+      player._activeSynergies && player._activeSynergies.phantomWaltz) {
+    const dx = cx - (D.x + D.w / 2), dy = cy - (D.y + D.h / 2);
+    if (dx * dx + dy * dy <= 260 * 260) return 1 - s;
+  }
+  return 1;
 }
 
 function quickDash(dir) {
@@ -67170,6 +67269,7 @@ function hitMonster(m, dmg, isCrit, skill) {
       player._crescendoN = ((player._crescendoN | 0) + 1);
       if (player._crescendoN >= 4) {
         player._crescendoN = 0;
+        player._crescendoBeatHit = m;   // v0.29.368 — Guillotine reads this (same hit, same target)
         if (!isCrit) { dmg = Math.floor(dmg * ((typeof getCritDmg === 'function') ? getCritDmg() : 1.5)); isCrit = true; }
         dmg = Math.floor(dmg * (1 + player.mods.crescendoCrit));
         m.vx = (m.vx || 0) + Math.sign((m.x + m.w / 2) - (player.x + player.w / 2) || 1) * 7;
@@ -67183,9 +67283,18 @@ function hitMonster(m, dmg, isCrit, skill) {
     // far past any DEF mitigation floor so the normal kill pipeline (credit,
     // EXP, drops) runs unchanged. _cullNoOverflow stops the Overflow Valve
     // from converting the cull's artificial overkill into a free nuke.
-    if (_basicSkill && !_lxBasicMiss && player.mods && player.mods.executeCull > 0 &&
+    // v0.29.368 — SYNERGY: Guillotine (execute + crescendo). On the 4th-beat
+    // strike (the crescendo block above just stamped THIS hit, THIS target),
+    // the execute threshold is 1.5× — the crescendo falls like a blade. The
+    // stamp is consumed below so a later plain hit can't reuse it.
+    const _guillotine = (player._activeSynergies && player._activeSynergies.guillotine &&
+                         player._crescendoBeatHit === m);
+    const _cullThresh = (player.mods && player.mods.executeCull > 0)
+      ? player.mods.executeCull * (_guillotine ? 1.5 : 1) : 0;
+    if (player._crescendoBeatHit === m) player._crescendoBeatHit = null;
+    if (_basicSkill && !_lxBasicMiss && _cullThresh > 0 &&
         !m.isBoss && !m.boss && !m.isMiniBoss && !m.isElite && m.maxHp > 0 &&
-        m.currentHp > 0 && (m.currentHp / m.maxHp) <= player.mods.executeCull) {
+        m.currentHp > 0 && (m.currentHp / m.maxHp) <= _cullThresh) {
       dmg = Math.max(dmg, Math.ceil(m.maxHp * 20));
       m._cullNoOverflow = true;
       if (typeof _lxVfxReady === 'function' && typeof LX_FX !== 'undefined' && _lxVfxReady(LX_FX.execute_mark)) {
@@ -67202,7 +67311,12 @@ function hitMonster(m, dmg, isCrit, skill) {
     // and spawn an echo of the echo forever.
     if (_basicSkill && !_lxBasicMiss && !player._echoing &&
         player.mods && player.mods.echoStrike > 0 && dmg > 0) {
-      const _eDmg = Math.max(1, Math.floor(dmg * player.mods.echoStrike));
+      // v0.29.368 — SYNERGY: Quantum Double (blink + echo). Inside the 2s
+      // post-blink window the echo repeats at FULL damage instead of the
+      // 25-55% roll — blinking through a pack effectively double-hits it.
+      const _qd = (player._activeSynergies && player._activeSynergies.quantumDouble &&
+                   (player._quantumEchoUntil | 0) > (game.time | 0));
+      const _eDmg = Math.max(1, Math.floor(dmg * (_qd ? 1 : player.mods.echoStrike)));
       const _target = m;
       setTimeout(() => {
         try {
@@ -68694,6 +68808,14 @@ function killMonster(m) {
         const dx = (o.x + o.w / 2) - bx, dy = (o.y + o.h / 2) - by;
         if (dx * dx + dy * dy > R * R) continue;
         hitMonster(o, bdmg, false, 'bloom');
+        // v0.29.368 — SYNERGY: Winter Garden (bloom + freeze). Survivors
+        // wounded by the detonation are frozen. Non-boss only — the same
+        // freeze-immunity rule (v0.26.458) every other freeze source obeys —
+        // and refresh-to-greatest so chained blooms can't stack-lock.
+        if (player._activeSynergies && player._activeSynergies.winterGarden &&
+            o.currentHp > 0 && !o.isBoss && !o.boss) {
+          o.freezeTimer = Math.max(o.freezeTimer || 0, 1400);
+        }
       }
       // v0.29.347 — authored petal-burst sprite over the particle spray.
       if (typeof _lxVfxReady === 'function' && typeof LX_FX !== 'undefined' && _lxVfxReady(LX_FX.bloom_burst)) {
