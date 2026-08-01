@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.365';
+const GAME_VERSION = 'v0.29.367';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -33003,7 +33003,7 @@ function _diffDmg(d, srcLv, capPct) { try { if (typeof player !== 'undefined' &&
         text: 'NEGATED', life: 30, color: '#7ae0d8', size: 13 });
       return 0;
     }
-    // v0.29.364 — stale-stamp wipe (audit finding). Every hit's banded clamp
+    // v0.29.366 — stale-stamp wipe (audit finding). Every hit's banded clamp
     // runs AFTER its own _diffDmg call, so a stamp still live when a
     // NON-negating _diffDmg runs can only belong to an earlier, already-
     // resolved hit this frame. Wiping it here means _gravBandClamp can only
@@ -33420,11 +33420,14 @@ function _gravBandClamp(mitigated, band) {
   // sites call _diffDmg first (which may consume the negate charge and stamp
   // this frame) and then REPLACE its result with the clamp — so without this
   // check the charge would burn while the banded hit landed anyway.
-  // v0.29.364 — stamp CONSUMED on read (audit finding). Un-consumed it stayed
+  // v0.29.366 — stamp CONSUMED on read (audit finding). Un-consumed it stayed
   // live for the whole frame, so a banded hit resolving after a negated
   // normal hit in the same frame was zeroed for free. Paired with the
   // stale-stamp wipe in _diffDmg, which closes the other half of the window.
-  if (typeof game !== 'undefined' && game && game._skinNegateAt === game.time && game.time > 0) {
+  // (The v0.29.362 `game.time > 0` guard is gone — it protected nothing,
+  // since an unstamped `_skinNegateAt` is undefined or -1 and can never
+  // equal game.time, and it wrongly refused a legitimate frame-0 negate.)
+  if (typeof game !== 'undefined' && game && game._skinNegateAt === game.time) {
     game._skinNegateAt = -1;
     return 0;
   }
@@ -37010,9 +37013,16 @@ function mpDisconnect() {
 // behaviour is identical to solo play (each client simulates locally).
 // This is the "fight the same monsters together" layer over the presence relay.
 // =====================================================================
-const COOP_MON_TICK_MS = 100;   // host monster-state broadcast cadence (~10 Hz)
+// v0.29.367 — 100/90 ms → 50 ms (~20 Hz), per user "co-op in real time as
+// much as possible". The guest-side dead-reckoner (v0.29.10) already renders
+// 60 fps between snapshots; halving the snapshot gap halves how far a mirror
+// can drift before correction, so direction changes and projectile spawns
+// land visibly tighter. Payload per tick is unchanged (same fields, same
+// caps) — a busy 20-monster map costs ~30 KB/s host-upstream at 20 Hz, and
+// the CAP bounds the worst case exactly as before.
+const COOP_MON_TICK_MS = 50;    // host monster-state broadcast cadence (~20 Hz)
 const COOP_MON_CAP     = 80;    // max monsters synced per frame (payload bound)
-const COOP_PROJ_TICK_MS = 90;   // host enemy-projectile broadcast cadence
+const COOP_PROJ_TICK_MS = 50;   // host enemy-projectile broadcast cadence (~20 Hz; hazards ride this too)
 const COOP_PROJ_CAP     = 60;   // max enemy projectiles synced per frame
 // v0.27.1 — kill-frame idempotency. A relay may redeliver a 'kill' frame (at-least-
 // once echo, reconnect replay, or a double host broadcast); _coopApplyKill awards XP
@@ -37081,13 +37091,28 @@ function _coopTickMonsters() {
     // summons pushed via game.monsters.push instead of spawnMonster, e.g. Octobaby
     // legs) so they sync + are targetable/mirrored on guests, not invisible.
     if (m.uid == null) m.uid = (game._monUid = (game._monUid || 0) + 1);
-    list.push({
+    const _e = {
       u: m.uid, x: Math.round(m.x), y: Math.round(m.y),
       vx: +(+m.vx || 0).toFixed(1), vy: +(+m.vy || 0).toFixed(1),
       f: m.facing === -1 ? -1 : 1, h: Math.round(m.currentHp),
       m: Math.round(m.maxHp || m.currentHp), t: m.type,
       b: m.isBoss ? 1 : (m.isMiniBoss ? 2 : (m.isElite ? 3 : 0)),   // v0.27.2 — 3 = elite (folds elite variant into the flag, zero extra bytes)
-    });
+    };
+    // v0.29.367 — VISUAL-STATE SYNC. Position alone left guests watching
+    // mannequins: attack animations never played (atkAnimUntil is a local
+    // performance.now() deadline), bosses never changed form (_phaseSprite),
+    // the Gravitos star-form and every boss attack pose key off patternState,
+    // and the burrow/lie/dream fade rides _dreamPhase. All conditional, so an
+    // idle mob's frame costs exactly what it did before:
+    //   aa — attack-anim ms REMAINING (guest rebuilds the deadline on its own
+    //        clock; no cross-client clock sync needed)
+    //   ps — patternState  · sp — phase sprite  · dp — dream fade  · p — phase
+    if (m.atkAnimUntil && m.atkAnimUntil > now) _e.aa = Math.min(2000, Math.round(m.atkAnimUntil - now));
+    if (m.patternState && m.patternState !== 'idle') _e.ps = String(m.patternState).slice(0, 20);
+    if (m._phaseSprite) _e.sp = String(m._phaseSprite).slice(0, 20);
+    if (m._dreamPhase) _e.dp = 1;
+    if (m.phase) _e.p = m.phase | 0;
+    list.push(_e);
   }
   try { net.ws.send(JSON.stringify({ t: 'mon', map: game.currentMap, list })); } catch (e) {}
 }
@@ -37863,6 +37888,29 @@ function _coopApplyMonsters(msg) {
     m.facing = e.f === -1 ? -1 : 1;
     if (Number.isFinite(+e.m)) m.maxHp = +e.m;
     if (Number.isFinite(+e.h)) m.currentHp = +e.h;
+    // v0.29.367 — VISUAL-STATE MIRROR (see _coopTickMonsters). What the host
+    // sees is what the guest sees:
+    //   • attack anim: `aa` is ms REMAINING — rebuild the deadline on OUR
+    //     performance.now(), so no cross-client clock sync is ever needed.
+    //     max() keeps a locally-triggered window (guest melee proximity) alive.
+    //   • patternState: drives boss attack poses + the Gravitos star-form key.
+    //     Mirrors run no AI, so on a guest this field is render-only. Cleared
+    //     back to 'idle' when absent — states end on the guest when they end
+    //     on the host.
+    //   • _phaseSprite: boss forms are one-way (gravitos2→3 never reverts), so
+    //     set-when-present and never cleared — a dropped frame can't visually
+    //     un-evolve the boss.
+    //   • _dreamPhase / phase: the fade and the phase number, verbatim.
+    // Strings are length-capped; they feed object-key LOOKUPS only, and the
+    // host-only sender gate above already rejects forged frames.
+    if (e.aa) {
+      const _nowV = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      m.atkAnimUntil = Math.max(m.atkAnimUntil || 0, _nowV + Math.min(2000, +e.aa || 0));
+    }
+    m.patternState = e.ps ? String(e.ps).slice(0, 20) : 'idle';
+    if (e.sp) m._phaseSprite = String(e.sp).slice(0, 20);
+    m._dreamPhase = !!e.dp;
+    if (e.p != null) m.phase = e.p | 0;
   }
   // Drop mirrors the host no longer reports (killed / despawned upstream).
   for (let i = game.monsters.length - 1; i >= 0; i--) {
@@ -44973,7 +45021,7 @@ function startBlock() {
 
 function triggerParry(source) {
   const P = player._blockProfile || { color:'#ffdd44', accent:'#ffdd44' };
-  _riposteProc();   // v0.29.364 — perfect parries detonate the Riposte Nova too
+  _riposteProc();   // v0.29.366 — perfect parries detonate the Riposte Nova too
   // Fully negate damage, brief i-frames, stun attacker, refund some MP
   player.invulnerable = Math.max(player.invulnerable, 350);
   player.mp = Math.min(getMaxMp(), player.mp + 15);
@@ -45034,7 +45082,7 @@ function triggerParry(source) {
 }
 
 // v0.29.362 — RIPOSTE NOVA (Tier-1). A defended hit detonates a shockwave.
-// v0.29.364 — extracted from triggerBlock so PERFECT PARRIES proc it too
+// v0.29.366 — extracted from triggerBlock so PERFECT PARRIES proc it too
 // (audit finding): the boon's promise is "blocking a hit", and a parry is
 // the best block in the game — it firing on the sloppy version but not the
 // precise one was exactly backwards. Both call sites share the 30-frame
@@ -45061,7 +45109,7 @@ function _riposteProc() {
 
 function triggerBlock() {
   const P = player._blockProfile || { color:'#88ccff' };
-  _riposteProc();   // v0.29.364 — see _riposteProc
+  _riposteProc();   // v0.29.366 — see _riposteProc
   flash(0.12);
   game.damageNumbers.push({
     x: player.x + player.w/2 - 16, y: player.y - 6, vy: -2,
@@ -67114,7 +67162,7 @@ function hitMonster(m, dmg, isCrit, skill) {
     // beat isn't double-credited — the getCritDmg() promotion only fires
     // when the hit wasn't already critical. The roll is flat bonus damage
     // on top, and the knockback is real (m.vx), not cosmetic.
-    // v0.29.364 — !player._echoing (audit finding): Phantom Echo's delayed
+    // v0.29.366 — !player._echoing (audit finding): Phantom Echo's delayed
     // hit re-enters here tagged 'melee', so it advanced the beat and could
     // consume the guaranteed crit on a 25-55% echo — the crescendo landing
     // on the quietest note. The beat now counts only the player's own swings.
@@ -98982,6 +99030,14 @@ function drawMonster(m) {
   const _bossWalking = !_bossAttacking && _bossMoving(m);
   const _bossWalkImg = _bossWalking ? _bossWalkFrame(_spriteKey) : null;
   const _bossIdleImg = (!_bossAttacking && !_bossWalking) ? _bossIdleFrame(_spriteKey) : null;
+  // v0.29.367 — the _dreamPhase "alpha-fade" flag was WRITE-ONLY: six sites
+  // set it (Scorpio's burrow, Gemini's Lie, the Pisces dream) with comments
+  // promising the sprite-render would dim — but no renderer ever read it, so
+  // the fade never happened for anyone, solo or co-op. Implemented here,
+  // wrapped around every sprite path (boss frames, zodiac, sprite mobs,
+  // procedural fallbacks) so all of them fade the same way.
+  const _dpPrevA = ctx.globalAlpha;
+  if (m._dreamPhase) ctx.globalAlpha = _dpPrevA * 0.35;
   if (_bossAttackImg) {
     _drawBossSprite(_bossAttackImg, m, sx, sy, true, true);
   } else if (_bossWalkImg) {
@@ -99036,6 +99092,7 @@ function drawMonster(m) {
   // procedural blob forever (co-op "monsters loaded without sprites" report).
   else if (FISH_MOB_TYPES.has(m.type)) { _lxNudgeMonsterSprite(m.type); drawFishMob(m, sx, sy); }
   else { _lxNudgeMonsterSprite(m.type); drawCuteMob(m, sx, sy); }
+  ctx.globalAlpha = _dpPrevA;   // v0.29.367 — close the _dreamPhase dim
 
   // v0.26.x — PUNISH WINDOW overlay: golden additive glow + pulsing "!" so the
   // staggered (vulnerable) boss reads at a glance. Centralised here so every
