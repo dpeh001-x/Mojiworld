@@ -464,6 +464,23 @@ window.LX_ANIM_CALIB = {
       "dx": 0,
       "dy": 0
     }
+  },
+  "zodiac_capricorn": {
+    "idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.0341
+    },
+    "walk": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.0341
+    },
+    "attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.0341
+    }
   }
 };
 window.LX_ATK_HITBOX = {
