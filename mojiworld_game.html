@@ -4902,10 +4902,11 @@
   #world-affix-pin {
     position: absolute;
     top: 64px;
-    right: 12px;
+    right: 10px;   /* v0.29.395 — same 10px right rail as Multi / version / saved */
     left: auto;
     z-index: var(--moji-z-hud, 30);
-    pointer-events: none;
+    pointer-events: auto;   /* v0.29.395 — draggable now */
+    cursor: grab;
     display: flex;
     align-items: center;
     gap: 5px;
@@ -9151,7 +9152,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.396';
+const GAME_VERSION = 'v0.29.397';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -46272,6 +46273,74 @@ function _affixBuffText(a) {
   if (a.elite > 0) bits.push('+' + Math.round(a.elite * 100) + '% elite');
   return bits.join(' · ');
 }
+// =========================================================================
+// v0.29.395 — DRAGGABLE HUD CHIPS (per user "make them moveable by dragging").
+// The four top-right chips can be dragged anywhere; positions persist per
+// browser in localStorage and are re-applied at boot. A 4px movement
+// threshold keeps ordinary clicks working (the Multi button still opens the
+// multiplayer panel; a real drag suppresses the click that would follow).
+// Double-click any chip to send it back to its CSS default. On mobile the
+// layout overrides use !important and win over inline styles, so drags are
+// effectively desktop-only — by design, the phone layout is hand-tuned.
+// =========================================================================
+const _LX_HUD_POS_KEY = 'lx_hud_pos_v1';
+function _lxHudPosLoad() { try { return JSON.parse(localStorage.getItem(_LX_HUD_POS_KEY) || '{}'); } catch (e) { return {}; } }
+function _lxHudPosSave(map) { try { localStorage.setItem(_LX_HUD_POS_KEY, JSON.stringify(map)); } catch (e) {} }
+function _lxMakeHudDraggable(id) {
+  const el = document.getElementById(id);
+  if (!el || el._lxDragWired) return;
+  el._lxDragWired = true;
+  const saved = _lxHudPosLoad()[id];
+  if (saved && typeof saved.l === 'number' && typeof saved.t === 'number') {
+    el.style.left = saved.l + 'px'; el.style.top = saved.t + 'px'; el.style.right = 'auto';
+  }
+  el.style.touchAction = 'none';
+  el.style.userSelect = 'none';
+  let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false, moved = false, scale = 1;
+  el.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0) return;
+    const par = el.offsetParent || document.body;
+    const pr = par.getBoundingClientRect();
+    scale = (par.offsetWidth ? pr.width / par.offsetWidth : 1) || 1;   // game-wrapper CSS scale
+    sx = ev.clientX; sy = ev.clientY; ox = el.offsetLeft; oy = el.offsetTop;
+    dragging = true; moved = false;
+    try { el.setPointerCapture(ev.pointerId); } catch (e) {}
+  });
+  el.addEventListener('pointermove', (ev) => {
+    if (!dragging) return;
+    const dx = (ev.clientX - sx) / scale, dy = (ev.clientY - sy) / scale;
+    if (!moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;   // click protection
+    moved = true;
+    const par = el.offsetParent || document.body;
+    const maxL = Math.max(0, (par.offsetWidth || 4000) - el.offsetWidth);
+    const maxT = Math.max(0, (par.offsetHeight || 3000) - el.offsetHeight);
+    el.style.left = Math.round(Math.max(0, Math.min(maxL, ox + dx))) + 'px';
+    el.style.top  = Math.round(Math.max(0, Math.min(maxT, oy + dy))) + 'px';
+    el.style.right = 'auto';
+  });
+  el.addEventListener('pointerup', () => {
+    if (!dragging) return;
+    dragging = false;
+    if (moved) {
+      const map = _lxHudPosLoad();
+      map[id] = { l: el.offsetLeft, t: el.offsetTop };
+      _lxHudPosSave(map);
+      el._lxJustDragged = true;
+      setTimeout(() => { el._lxJustDragged = false; }, 0);
+    }
+  });
+  // a drag must not fire the chip's click action on release
+  el.addEventListener('click', (ev) => {
+    if (el._lxJustDragged) { ev.stopImmediatePropagation(); ev.preventDefault(); }
+  }, true);
+  el.addEventListener('dblclick', (ev) => {
+    const map = _lxHudPosLoad(); delete map[id]; _lxHudPosSave(map);
+    el.style.left = ''; el.style.top = ''; el.style.right = '';
+    ev.preventDefault();
+    if (typeof showToast === 'function') { try { showToast('HUD chip reset to default spot', 'common'); } catch (e) {} }
+  });
+}
+['mp-btn', 'version-tag', 'save-indicator', 'world-affix-pin'].forEach(_lxMakeHudDraggable);
 function _renderAffixPin() {
   const el = document.getElementById('world-affix-pin');
   if (!el) return;
@@ -46284,8 +46353,10 @@ function _renderAffixPin() {
     + `<span class="afx-buff">${_affixBuffText(a)}</span>`;
   // v0.29.381 — the pin lives top-RIGHT now (CSS); the old stack-below-the-
   // expedition-pin logic was for the shared top-left slot and would drag it
-  // back down-left, so it is gone. Clear any top a pre-move session stamped.
-  el.style.top = '';
+  // back down-left, so it is gone. Clear any top a pre-move session stamped —
+  // v0.29.395: unless the player DRAGGED the pin somewhere (saved position),
+  // which must survive re-renders.
+  if (!(typeof _lxHudPosLoad === 'function' && _lxHudPosLoad()['world-affix-pin'])) el.style.top = '';
   el.style.display = 'flex';
 }
 function _lxMulberry32(a) {
@@ -86053,6 +86124,15 @@ function drawBossDecor() {
   // (Sprites/objects/column_pillar.png) - the flame is baked into the art, so no
   // separate torch is drawn. Two pillars flank each arena; image-only (nothing
   // draws until the sprite loads - no procedural fallback).
+  // v0.29.396 — ZODIAC-ONLY (per user: "instead of all bosses make the
+  // structure in the picture only present in maps for zodiac bosses"). The
+  // rune column used to draw on every isBossArena map, so a pirate deck, a
+  // reef, a crypt and a mecha hangar all grew the same Norse-rune stonework.
+  // Gated here rather than at the four call sites so every draw path (the
+  // three backdrop branches + the painted-map overlay) picks it up from one
+  // place. Zodiac domains are generated with isZodiac, which is the only flag
+  // that distinguishes them from the rest of the boss arenas.
+  if (!game.mapData || !game.mapData.isZodiac) return;
   const img = (typeof LX_OBJECTS !== 'undefined') ? LX_OBJECTS['column_pillar'] : null;
   if (!img || !img.complete || !img.naturalWidth) return;
   const ww = (game.mapData && game.mapData.worldWidth) || 2000;
