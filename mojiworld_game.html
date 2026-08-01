@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.363';
+const GAME_VERSION = 'v0.29.364';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -33413,7 +33413,14 @@ function _gravBandClamp(mitigated, band) {
   // sites call _diffDmg first (which may consume the negate charge and stamp
   // this frame) and then REPLACE its result with the clamp — so without this
   // check the charge would burn while the banded hit landed anyway.
-  if (typeof game !== 'undefined' && game && game._skinNegateAt === game.time && game.time > 0) return 0;
+  // v0.29.364 — stamp CONSUMED on read (audit finding). Un-consumed it stayed
+  // live for the whole frame, so a banded hit resolving after a negated
+  // normal hit in the same frame was zeroed for free. Paired with the
+  // stale-stamp wipe in _diffDmg, which closes the other half of the window.
+  if (typeof game !== 'undefined' && game && game._skinNegateAt === game.time && game.time > 0) {
+    game._skinNegateAt = -1;
+    return 0;
+  }
   // v0.29.262 — the clamp anchor is band.ref (a raw level-indexed HP number)
   // when present; legacy %-of-maxHP behaviour only as fallback for band
   // objects without a ref. Floors are gone from all first-party bands, so
@@ -71918,6 +71925,11 @@ function _afterImageCap() {
   return Math.max(6, Math.floor(MAX_AFTERIMAGES * (_perfLowFx() ? 0.55 : 1)));
 }
 
+// v0.29.x perf — hazard types the cap must NEVER drop: arena mechanics that
+// exist in small authored numbers (a singularity, the Spire's 8 static void
+// tears, a heal field...). Everything else is short-lived telegraph clutter —
+// in a pathological pileup the oldest of those are the right things to shed.
+const _HAZ_PROTECTED = new Set(['gravitos_singularity', 'void_tear', 'aurora_field', 'soul_vortex', 'sovereign_drain_pillar', 'blackhole']);
 function _trimVisualQueues() {
   const pc = _particleCap();
   const dc = _damageNumberCap();
@@ -71930,6 +71942,18 @@ function _trimVisualQueues() {
   // ceiling. Drop the oldest beyond 40 (animations are short; 40 is generous).
   if (game.fxInstances && game.fxInstances.length > 40) {
     game.fxInstances.splice(0, game.fxInstances.length - 40);
+  }
+  // v0.29.x perf — game.hazards was the ONLY visual queue with no cap (34 push
+  // sites, lives up to 60000 frames). Shed oldest UNPROTECTED entries beyond
+  // the cap; if everything left is protected the queue simply stays over cap,
+  // which is no worse than the old behaviour.
+  const _hzCap = (typeof _IS_MOBILE_AT_LOAD !== 'undefined' && _IS_MOBILE_AT_LOAD) ? 28 : 48;
+  if (game.hazards && game.hazards.length > _hzCap) {
+    for (let _hi = 0; _hi < game.hazards.length && game.hazards.length > _hzCap; ) {
+      const _hz = game.hazards[_hi];
+      if (_hz && _HAZ_PROTECTED.has(_hz.type)) _hi++;
+      else game.hazards.splice(_hi, 1);
+    }
   }
   // v0.26.1021 — death-fade monster list (drained only by age) had no count
   // cap; a 30+ kill AoE burst pinned that many full monster objects, redrawn
@@ -105890,6 +105914,21 @@ function drawHazards() {
   if (!game.hazards || game.hazards.length === 0) return;   // v0.25.451: empty-list early-out
   for (const h of game.hazards) {
     const sx = h.cx - game.camera.x;
+    // v0.29.x perf — horizontal frustum cull. All types draw anchored to their
+    // world x (verified branch by branch); painting ones far off-camera was
+    // pure waste — the Spire alone keeps 8 static void tears alive for ~16
+    // minutes across a tall map. Exempt: gravitos_singularity (paints the
+    // whole arena) and mob_frostbeam (a beam can cross the screen from an
+    // off-screen caster). The margin uses the hazard's own width/radius with
+    // a generous floor, so wide fields keep drawing while nearby.
+    if (h.type !== 'gravitos_singularity' && h.type !== 'mob_frostbeam') {
+      const _hcx = (h.cx != null) ? h.cx : (h.x != null ? h.x + (h.w || 0) / 2 : null);
+      if (_hcx != null) {
+        const _hhw = Math.max(h.w || 0, h.radius || 0, 240) + 360;
+        const _hsx = _hcx - game.camera.x;
+        if (_hsx + _hhw < 0 || _hsx - _hhw > W) continue;
+      }
+    }
     // v0.25.647 — gloop_puddle render: wobbly blue jelly ellipse with a
     // bright sheen highlight and a fading rim. Tied to King Gloopaloo's
     // Brimming Leak signature.
@@ -108534,7 +108573,13 @@ function loop(time) {
         game._pausedSinceMs = _nowMs;
       }
     }
-    updateUI();
+    // v0.29.x perf — same ~30 Hz gate as the render path's HUD tick; this
+    // ran unthrottled at display rate behind a 70-94% opaque modal. Direct
+    // event-driven updateUI() calls (buy, equip, level) remain instant.
+    if (!game._hudNextMs || time >= game._hudNextMs) {
+      game._hudNextMs = time + 33;
+      updateUI();
+    }
     _trimVisualQueues();
     requestAnimationFrame(loop);
     return;
