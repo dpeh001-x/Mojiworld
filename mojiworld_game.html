@@ -9152,7 +9152,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.400';
+const GAME_VERSION = 'v0.29.401';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -68609,12 +68609,24 @@ function hitMonster(m, dmg, isCrit, skill) {
   // has a special hit sprite"). Landed, directly-cast NON-basic skills only —
   // basics keep the plain particle burst so the sprite stays a skill reward.
   // Coalesced to one spawn per frame (AoE skills land 12+ hits/tick; a
-  // sprite burst per hit would bury the screen) and skipped on lowFx,
-  // mirroring the hit-audio coalescing above. Crits draw bigger + longer.
+  // sprite burst per hit would bury the screen). Crits draw bigger + longer.
+  // v0.29.401 — VISIBILITY (per user: the class hit sprites "do not seem to be
+  // implemented when character hits monsters"). They were implemented, but
+  // gated behind `!_lowFxImpact` — and _perfLowFx() engages whenever ANY boss
+  // is alive or more than 14 mobs are on screen. That suppressed the sprite
+  // through every single boss fight and every dense pull, i.e. precisely the
+  // fights the player is watching closely, leaving only sub-15-mob trash with
+  // no boss present. The guard was copied from the hit-AUDIO coalescing, but
+  // it does not carry over: audio fires per hit, whereas this is already
+  // clamped to ONE sprite per frame by the _lastClassHitFxFrame check below,
+  // so its cost is a single blit per frame no matter how many hits land.
+  // Now only the deepest tier suppresses it — which, since v0.29.391, is also
+  // what a genuine bullet-hell boss phase engages.
+  const _veryLowFxImpact = (typeof _perfVeryLowFx === 'function' && _perfVeryLowFx());
   if (typeof player !== 'undefined' && player && skill
       && !(skill === 'bolt' || skill === 'slash' || skill === 'arrow' || skill === 'dagger' || skill === 'basic' || skill === 'melee')
       && !MISS_EXEMPT_SKILLS.has(skill)
-      && !_lowFxImpact
+      && !_veryLowFxImpact
       && game._lastClassHitFxFrame !== game.time
       && typeof spawnSpriteBurst === 'function') {
     const _hitKey = ({ warrior: 'hit_warrior', rogue: 'hit_rogue', mage: 'hit_mage', archer: 'hit_archer' })[player.cls];
@@ -97043,6 +97055,13 @@ function _drawMobChat(m) {
 // set of values (20-120 ish), we pre-render each unique aura once to
 // an off-screen canvas and blit via drawImage forever after. Pulse is
 // done with globalAlpha at draw time, no per-frame gradient cost.
+// v0.29.401 — per user "remove the yellow gradient". Master switch for the two
+// gold monster halos below (_getEliteAuraCanvas / _getMiniBossAuraCanvas). Set
+// false, so neither is blitted; the builders are left intact so flipping this
+// back to true fully restores the old look with no other edit. Elite/Elder
+// monsters are still marked by their name prefix, nameplate tint, sigils and
+// embers — only the big radial wash is gone.
+const LX_MOB_AURA = false;
 const _auraCache = new Map();
 function _getEliteAuraCanvas(w, h) {
   const key = 'e_' + w + 'x' + h;
@@ -99687,14 +99706,20 @@ function drawMonster(m) {
     if (!_veryLow) {
     if (game._epT !== game.time) { game._epT = game.time; game._epA = ((92 + Math.sin(game.time * 0.12) * 8) | 0) / 100; }   // v0.26.x perf
     const pulseA = game._epA;
-    const aura = _getEliteAuraCanvas(m.w, m.h);
-    const _prevA = ctx.globalAlpha;
-    ctx.globalAlpha = pulseA;
-    // v0.25.762 — Pad is no longer hardcoded; the cached canvas exposes
-    // it as ._pad so the draw offset matches whatever size the canvas
-    // was built with.
-    ctx.drawImage(aura, sx - aura._pad, sy - aura._pad);
-    ctx.globalAlpha = _prevA;
+    // v0.29.401 — per user "remove the yellow gradient": the gold halo blit is
+    // off. Flip LX_MOB_AURA back to true to restore both this and the mini-boss
+    // one below. Everything else that marks an Elite is untouched — the "Elite "
+    // name prefix, the tinted nameplate and the rising embers still read.
+    if (LX_MOB_AURA) {
+      const aura = _getEliteAuraCanvas(m.w, m.h);
+      const _prevA = ctx.globalAlpha;
+      ctx.globalAlpha = pulseA;
+      // v0.25.762 — Pad is no longer hardcoded; the cached canvas exposes
+      // it as ._pad so the draw offset matches whatever size the canvas
+      // was built with.
+      ctx.drawImage(aura, sx - aura._pad, sy - aura._pad);
+      ctx.globalAlpha = _prevA;
+    }
     // v0.26.246 — Ember trail gated behind _perfLowFx. In a heavy scene
     // (5+ elites + bosses + 18+ mobs), the particle pool is already
     // pressing its cap from combat hits; cutting cosmetic embers when
@@ -99729,12 +99754,17 @@ function drawMonster(m) {
     const _vlMini = (typeof _perfVeryLowFx === 'function') && _perfVeryLowFx();
     if (!_vlMini) {
     const pulseA = ((90 + Math.sin(game.time * 0.1) * 10) | 0) / 100;
-    const aura = _getMiniBossAuraCanvas(m.w, m.h);
-    const _prevAmb = ctx.globalAlpha;
-    ctx.globalAlpha = pulseA;
-    // v0.25.762 — Use the canvas's adaptive ._pad (was hardcoded 40).
-    ctx.drawImage(aura, sx - aura._pad, sy - aura._pad);
-    ctx.globalAlpha = _prevAmb;
+    // v0.29.401 — per user "remove the yellow gradient". Same flag as the elite
+    // halo above. The "Elder " prefix, the orange nameplate, the rotating
+    // sigils and the ember trail still mark a mini-boss.
+    if (LX_MOB_AURA) {
+      const aura = _getMiniBossAuraCanvas(m.w, m.h);
+      const _prevAmb = ctx.globalAlpha;
+      ctx.globalAlpha = pulseA;
+      // v0.25.762 — Use the canvas's adaptive ._pad (was hardcoded 40).
+      ctx.drawImage(aura, sx - aura._pad, sy - aura._pad);
+      ctx.globalAlpha = _prevAmb;
+    }
     // Rotating sigils — v0.26.245 batched single-path
     ctx.fillStyle = 'rgba(255,220,120,0.85)';
     ctx.beginPath();
