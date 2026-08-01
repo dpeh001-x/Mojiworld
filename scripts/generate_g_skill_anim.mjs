@@ -41,7 +41,12 @@ const FX = {
   crusader_aegis:       { file: 'crusader_aegis.png',       prompt: 'a holy golden shield aegis (Crusader) — radiant divine light pulses across the barrier, blessed sparkles orbit, a warm halo breathes.' },
   dragoon_skylance:     { file: 'dragoon_skylance.png',     prompt: 'a piercing sky-lance spear strike (Dragoon) — brilliant blue energy crackles along the spear, motion streaks pulse, sparks flicker at the tip.' },
   shadowlord_clones:    { file: 'shadowlord_clones.png',    prompt: 'three violet shadow-clone silhouettes (Shadowlord) — dark phantom energy wisps and flickers around them, spectral after-images shimmer in place.' },
-  shinobi_seal:         { file: 'shinobi_seal.png',         prompt: 'a glowing paper talisman elemental seal (Shinobi) — runic symbols pulse and flicker through colours, the seal ring rotates its glow, energy crackling.' },
+  // v0.29.392 — DARK AURA (per user "make it have a dark aura that does not
+  // touch the edges"). The aura is described as INSET on purpose — a shadow
+  // that grows outward is exactly the thing that clips at the frame border, so
+  // the containment is stated as part of the effect, not just as a negation.
+  // Frames are additionally hard-guaranteed by scripts/fx_anim_inset.mjs.
+  shinobi_seal:         { file: 'shinobi_seal.png',         prompt: 'a glowing paper talisman elemental seal (Shinobi) wreathed in a DARK AURA — a smoky black-violet shadow halo breathing around the talisman, dark tendrils curling inward toward the seal, the runic symbols pulsing brighter against the darkness, energy crackling. The dark aura stays TIGHT around the effect and fades out completely well before the frame border, leaving clear empty transparent margins on all four sides — the shadow must never reach or touch the edge of the frame.' },
   nightreaper_eclipse:  { file: 'nightreaper_eclipse.png',  prompt: 'a dark eclipse death-mark sigil (Nightreaper) — a black sun corona flickers, violet death energy gathers and pulses inward, eerie glow breathing.' },
   phantom_voidrift:     { file: 'phantom_voidrift.png',     prompt: 'a violet void-rift portal with crossed daggers (Phantom) — the rift swirls and warps, spectral hands flicker, purple void energy crackles around the rim.' },
   sage_meteorshower:    { file: 'sage_meteorshower.png',    prompt: 'a fiery meteor-shower impact (Sage) — molten fireballs glow and flicker, flame licks and embers shed, a hot impact glow pulses.' },

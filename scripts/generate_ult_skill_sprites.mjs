@@ -21,7 +21,14 @@ sharp.cache(false);
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const FX_DIR = join(repoRoot, 'Sprites', 'fx');
 const OUT_DIR = join(FX_DIR, 'anim');
-const FRAMES = 9, PAD = 0.12;
+const FRAMES = 9;
+// v0.29.392 — PAD is env-overridable (matching generate_g_skill_anim.mjs).
+// The 0.12 default is enough for effects that hold their silhouette, but a
+// dynamic one can still grow past the frame: elementalist_ult's lightning
+// bled to alpha 255 on the canvas edge at 0.12 and would have visibly clipped
+// in game. Re-run a bleeding effect with LUDO_ANIM_PAD=0.22 rather than
+// re-rolling and hoping. (Check with the edge-alpha scan in the changelog.)
+const PAD = Number(process.env.LUDO_ANIM_PAD || 0.12);
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 const arg = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
