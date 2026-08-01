@@ -19,6 +19,17 @@ const has = (f) => process.argv.slice(2).includes(f);
 const arg = (f) => { const a = process.argv.slice(2); const i = a.indexOf(f); return i >= 0 ? a[i + 1] : null; };
 
 const OUTLINE = ' Cute painterly fantasy game projectile sprite, vibrant saturated colours, a bold uniform 3 pixel black outline (#0a0612) around the whole silhouette, crisp rim-light, fully transparent background, single object centred at ~70% of a 512x512 square, no text, no UI, no background, no ground shadow. Clearly readable at very small size (renders ~30px in game).';
+// v0.29.391 — FLAT VARIANT. The OUTLINE above asks for "painterly" art with
+// "crisp rim-light", and the request below pairs it with art_style
+// 'Hand-Painted' — so a sprite meant to be SIMPLE was fighting its own style
+// suffix. Three prompt rewrites for mbark ("no swirl", "no grain", "empty
+// flat fill") all lost to it: ludo kept painting wood-grain rings because the
+// suffix kept asking for painterly rendering. Keys listed in FLAT_KEYS get
+// this suffix + art_style 'Illustration' instead, matching the flat cel path
+// scripts/gen_remake_static.mjs uses. The other ten projectiles are correct
+// as painterly and are untouched.
+const FLAT_OUTLINE = ' Minimal FLAT VECTOR game icon, one solid uniform fill colour with NO gradient and NO texture, a single bold dark outline around the silhouette, hard flat cel style like a traffic-sign pictogram — absolutely no painterly rendering, no rim-light, no glossy sheen, no grain, no swirl, no rings, no interior detail of any kind. Fully transparent background, single object centred at ~70% of a 512x512 square, no text, no UI, no background, no ground shadow. Must read as one clean silhouette at ~30px in game.';
+const FLAT_KEYS = new Set(['mbark']);
 // key (= new in-engine m.shoot id) -> prompt. Orient-mode sprites point RIGHT.
 const ITEMS = {
   mquery:       'A wobbling spectral QUESTION MARK bolt projectile — a curling indigo-violet glowing question-mark glyph made of uncertain flickering ghost-light, slightly tilted as if hesitating, tiny sweat-drop sparkle beside it. Comedic, mystical, chunky cartoon.',           // young_confused_barnaby
@@ -33,10 +44,15 @@ const ITEMS = {
   // two colours, no accessories.
   // v2 — "BARK" alone made ludo draw a whole TREE STUMP (detailed, the exact
   // opposite of "simple"). v3 — "wood chip / splinter of a plank" then drew a
-  // FAN OF FOUR PLANKS ("one solid object" ignored twice). The count finally
-  // stuck by anchoring on a shape that has no plural association: a guitar
-  // pick. Keep that anchor if this is ever re-rolled.
-  mbark:        'EXACTLY ONE wooden guitar-pick shape — a single rounded-triangle piece of smooth brown wood, flat and plain, warm brown fill with one simple darker brown border edge. The whole image contains only this one small rounded triangle, nothing else. NOT a stump, NOT logs, NOT planks, NOT multiple pieces, no wood grain lines, no leaves. Minimal, chunky, cartoon.',   // stump
+  // FAN OF FOUR PLANKS ("one solid object" ignored twice). v4 — the guitar-pick
+  // anchor fixed the count but ludo still painted a decorative ring-swirl
+  // inside ("no wood grain lines" ignored); per user the sprite must be
+  // genuinely SIMPLE, so v5 demands an EMPTY flat fill in flat-vector terms.
+  // Keep the pick anchor if this is ever re-rolled — it is what holds the
+  // count at one.
+  // v6 — even with every negation, the word "wooden" kept summoning a grain
+  // swirl. Wood vocabulary removed entirely: it is just a brown shape now.
+  mbark:        'A THICK DARK-BROWN OUTLINE surrounding EXACTLY ONE flat guitar-pick shape — the heavy dark border is the most important feature and must be clearly visible all the way around the silhouette. Inside that border: one single rounded triangle of flat uniform caramel-brown, with a completely EMPTY interior — no pattern, no swirl, no circles, no texture, no gradient, no highlight. Bold outlined sticker-style icon. Only this one shape in the whole image, nothing else.',   // stump
   mrivet:       'A white-hot MOLTEN RIVET projectile — a short thick iron rivet glowing orange-white at its center with heat shimmer, tiny sparks spitting off it, dark forged-metal ends. Industrial, hot, chunky cartoon.',                                                          // forgewight
   mcoffinshard: 'A haunted COFFIN SPLINTER projectile pointing right — a sharp shard of aged dark coffin wood wreathed in ghostly green flame, a tiny bent grave-nail embedded in it, eerie ember flecks. Spooky, chunky, cartoon.',                                                  // tombWraith
   mstormorb:    'A crackling STORM ORB projectile — a sphere of dark thundercloud with miniature lightning bolts arcing around its equator like a ring, electric blue-white glow, tiny rain flecks. Stormy, energetic, chunky cartoon.',                                              // towerStormcaller
@@ -71,7 +87,9 @@ async function genOne(k) {
     try {
       const res = await fetchTimed(`${BASE}/assets/image`, {
         method: 'POST', headers: { 'Authorization': `ApiKey ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_type: 'sprite-vfx', prompt: ITEMS[k] + OUTLINE, art_style: 'Hand-Painted', perspective: 'Side-Scroll', aspect_ratio: 'ar_1_1', n: 1, augment_prompt: false }),
+        // v0.29.391 — FLAT_KEYS route through the flat suffix + 'Illustration'
+        // style; everything else keeps the original painterly pairing.
+        body: JSON.stringify({ image_type: 'sprite-vfx', prompt: ITEMS[k] + (FLAT_KEYS.has(k) ? FLAT_OUTLINE : OUTLINE), art_style: FLAT_KEYS.has(k) ? 'Illustration' : 'Hand-Painted', perspective: 'Side-Scroll', aspect_ratio: 'ar_1_1', n: 1, augment_prompt: false }),
       });
       if (!res.ok) throw new Error(`Ludo ${res.status}: ${(await res.text()).slice(0, 140)}`);
       const data = await res.json();
