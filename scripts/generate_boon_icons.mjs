@@ -87,6 +87,17 @@ const BOON = {
   goldblood: 'a large faceted golden droplet splashing down into a burst of small gold coins, a deep red gleam at the droplet core, rich metallic cel shading with bright coin glints',
   overflow:  'an industrial brass pressure-valve wheel bursting open, a crackling crimson energy arc jetting out sideways under pressure, steam wisps and rivets, warm metal tones with hard shadows',
   doppel:    'two overlapping violet arcane spell circles casting the same bright spark, the front circle sharp and luminous, the back circle a fading ghost copy slightly offset, mystic runes around both rims',
+  // v0.29.369 — DUO-BOON FUSION EMBLEMS (BOON_SYNERGIES `art` field). One
+  // merged emblem per combo — the panel prefers these over the two component
+  // icons and falls back automatically if the file is missing. Each subject
+  // deliberately FUSES its two parents into one object rather than placing
+  // them side by side.
+  syn_supernova:     'a blazing orange shockwave ring erupting into tall flames around its entire rim, a white-hot core at the centre, fire and blast fused into one explosive emblem',
+  syn_wintergarden:  'a pink sakura blossom sealed inside a sharp blue ice crystal, frost spreading from the frozen petals, delicate flower and hard ice fused in one emblem',
+  syn_quantumdouble: 'a swirling cyan teleport vortex with a ghostly violet crescent slash emerging from its centre, the slash trailing a fading duplicate of itself, portal and phantom fused',
+  syn_guillotine:    'a heavy dark executioner blade falling through a golden music note that shatters into sharp sparks on the edge, the blade wreathed in thin crimson energy',
+  syn_adrenaline:    'a teal hexagonal barrier panel cracking open with fierce red-orange fury flames bursting through the fracture, three white chevron arrows rising in the fire',
+  syn_phantomwaltz:  'an ornate cracked mirror with glowing cyan clock rings rippling out of the glass, a ghostly wisp dancing between the time rings, mirror and clock fused',
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };

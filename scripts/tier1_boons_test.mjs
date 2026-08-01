@@ -86,5 +86,25 @@ if (skinEntry) {
   check(`cooldown band is ${lo}..${hi}s (want 8..14)`, lo === 8 && hi === 14);
 }
 
+// v0.29.369 — duo-boon combos (BOON_SYNERGIES entries for the new roster).
+console.log('\n== duo-boon combos ==');
+const COMBOS = {
+  supernova:       { pair: ['novastep', 'flamedash'], art: 'syn_supernova' },
+  winterGarden:    { pair: ['bloom', 'freeze'],       art: 'syn_wintergarden' },
+  quantumDouble:   { pair: ['blink', 'echo'],         art: 'syn_quantumdouble' },
+  guillotine:      { pair: ['execute', 'crescendo'],  art: 'syn_guillotine' },
+  adrenalineSurge: { pair: ['skin', 'rampage'],       art: 'syn_adrenaline' },
+  phantomWaltz:    { pair: ['mirror', 'waltz'],       art: 'syn_phantomwaltz' },
+};
+for (const [key, c] of Object.entries(COMBOS)) {
+  const re = new RegExp(`key: '${key}'[\\s\\S]{0,200}pair: \\['${c.pair[0]}', '${c.pair[1]}'\\][\\s\\S]{0,120}art: '${c.art}'`);
+  check(`${key}: entry with pair + art`, re.test(src));
+  const p = path.join(ROOT, 'Sprites', 'boons', c.art + '.png');
+  check(`  Sprites/boons/${c.art}.png`, fs.existsSync(p) && fs.statSync(p).size > 5000);
+  check(`  hook anchor _activeSynergies.${key}`, src.includes(`_activeSynergies.${key}`));
+}
+check('frost_bloom registered in LX_FX', /frost_bloom:\s*'frost_bloom\.webp'/.test(src));
+check('Sprites/fx/frost_bloom.webp', fs.existsSync(path.join(ROOT, 'Sprites', 'fx', 'frost_bloom.webp')));
+
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'} — ${pass}/${pass + fail} checks\n`);
 process.exit(fail ? 1 : 0);

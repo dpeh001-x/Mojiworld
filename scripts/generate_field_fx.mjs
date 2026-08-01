@@ -161,6 +161,13 @@ const FX = {
     // the character silhouette reads through it.
     prompt: 'A rising aura of fierce red-orange fury flames forming an open arch shape, layered flame tongues climbing up both sides and meeting in streaming embers at the top, the lower middle open and empty, three faint white chevron arrows ascending in the flames, aggressive power-up energy,',
   },
+  // v0.29.369 — Winter Garden synergy (bloom + freeze): frost-petal burst
+  // layered over the standard bloom detonation when the synergy freezes
+  // survivors. Same 1:1 burst spec as bloom_burst.
+  frost_bloom: {
+    dir: 'fx', ar: 'ar_1_1', cw: 768, ch: 768, fill: 0.94,
+    prompt: 'A radial burst of frozen flower petals shattering outward from an icy blue-white flash at the centre, individual pink petals encased in sharp blue ice shards tumbling in every direction, frost mist and small snowflake sparkles between them, cold winter palette, individual petals only, no whole flowers, no stems, no branches,',
+  },
   overflow_arc: {
     dir: 'fx', ar: 'ar_16_9', cw: 1024, ch: 512, fill: 0.94,
     // Spawned between the killed enemy and the overflow target (keepAspect,
