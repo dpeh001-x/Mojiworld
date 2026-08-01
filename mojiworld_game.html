@@ -112017,24 +112017,30 @@ try { window.LXAuth = LXAuth; } catch (e) {}
   // (high priority — it IS the first thing on screen behind the spawn town).
   _lxAsyncPool(2, _startBgPaths, p => loadOne(p, true).then(() => { startBgLoaded++; update(); }))
     .then(() => maybeReveal());
+  // v0.29.323b — DEFERRED starts ONLY once the gate has opened. Starting it
+  // in parallel (the original design) meant its ~200 files shared bandwidth
+  // with the 42 gated ones — measured under a 12 Mbps throttle, the reveal
+  // still took 103 s because the door's own assets were starved by art the
+  // player would not see for an hour. Held back, the same link reveals in
+  // seconds and DEFERRED fills in behind the world (the auth-form dwell time
+  // plus the v0.27.6 world streamer cover the pop-in window as before).
+  let deferredStarted = false;
   const startDeferred = () => {
+    if (deferredStarted) return;
+    deferredStarted = true;
     _lxAsyncPool(6, DEFERRED, p => loadOne(p, false).then(() => {   // v0.26.962 — pooled x6
       defLoaded++;
-      update();
-      // v0.29.323 — DEFERRED no longer calls maybeReveal: it cannot change
-      // the gate's answer and this loop used to be the reason the gate
-      // waited on it (every completion re-checked the full-set condition).
     }));
   };
-  startDeferred();
   function maybeReveal() {
     // v0.29.323 — FIRST-PAINT gate (was: the full asset set, v0.25.469).
-    // BAZAAR + CRITICAL + the start map's background. DEFERRED keeps
-    // streaming behind the world.
+    // BAZAAR + CRITICAL + the start map's background. DEFERRED streams
+    // behind the world once the door is open.
     if (gatedLoaded() < gatedCount()) return;
     if (revealed) return;
     revealed = true;
     hide();
+    startDeferred();
   }
   function hide() {
     // v0.25.455 — Auth gate. Assets are loaded; surface the login form
@@ -112486,7 +112492,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
   // pathological hung CDN. If this trips, any unloaded sprite renders
   // its procedural fallback (drawCuteMob, vector-hero, etc.) instead
   // of nothing — the world is always playable.
-  setTimeout(() => { if (overlay && !revealed && !overlay.classList.contains('fade')) { revealed = true; hide(); } }, 60000);   // v0.27.8 (routine hunt) — !revealed guard: the world can be fully loaded (revealed=true) while the player still types at the name entry (overlay un-faded); without the check this re-ran hide() — the whole decode gate + auth-gate re-show — mid-keystroke at T+60s. Only fire for a genuinely stuck load.
+  setTimeout(() => { if (overlay && !revealed && !overlay.classList.contains('fade')) { revealed = true; hide(); startDeferred(); } }, 60000);   // v0.27.8 (routine hunt) — !revealed guard: the world can be fully loaded (revealed=true) while the player still types at the name entry (overlay un-faded); without the check this re-ran hide() — the whole decode gate + auth-gate re-show — mid-keystroke at T+60s. Only fire for a genuinely stuck load. v0.29.323b — also kick the DEFERRED stream (it now starts at reveal; a forced reveal must start it too or it never runs).
 })();
 // v0.25.233 — Mojiworld main BGM (loops indefinitely).
 const _bgmEl = (() => {
