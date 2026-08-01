@@ -9151,7 +9151,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.395';
+const GAME_VERSION = 'v0.29.396';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -12528,7 +12528,7 @@ function _lxGaBuild() {
   root.appendChild(r1);
   const r2 = document.createElement('div'); r2.style.cssText = 'display:flex;gap:4px;margin:4px 0 0;';
   u.editBtn = btn('Edit', () => _lxGaToggleEdit()); r2.appendChild(u.editBtn);
-  r2.appendChild(btn('Erase', () => _lxGaOpenErase()));
+  r2.appendChild(btn('Edit', () => _lxGaOpenErase()));   // v0.29.396 — erase + paint + outline all live behind this button now
   r2.appendChild(btn('Reset', () => _lxGaSet(Object.assign({}, _LX_EQ_ATTACH_DEFAULT))));
   root.appendChild(r2);
   const r3 = document.createElement('div'); r3.style.cssText = 'display:flex;gap:4px;margin:4px 0 0;';
@@ -13386,7 +13386,9 @@ function _lxGaOpenErase() {
   modal.style.cssText = 'position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;';
   const panel = document.createElement('div');
   panel.style.cssText = 'background:#14111f;border:1px solid #4a4360;border-radius:10px;padding:12px;color:#e8e4f4;font:12px system-ui;display:flex;flex-direction:column;gap:8px;max-width:90vw;';
-  panel.innerHTML = '<b style="color:#ffd066;">Erase · ' + name + '</b><div style="color:#9790b4;font-size:11px;">Drag to erase pixels. Undo if you slip. Save bakes the cleaned art.</div>';
+  // v0.29.396 — retitled: this is no longer erase-only (paint + outline live
+  // here now), and the description names all three so the tools are findable.
+  panel.innerHTML = '<b style="color:#ffd066;">Edit · ' + name + '</b><div style="color:#9790b4;font-size:11px;">Drag to erase or paint. Pick a colour for the brush, or add a black outline. Undo if you slip — Save bakes the result.</div>';
   const DSP = 440;
   const disp = document.createElement('canvas'); disp.width = DSP; disp.height = DSP;
   // v0.26.x — Explicit display size + flex:none. Without these the canvas had no
@@ -13397,15 +13399,88 @@ function _lxGaOpenErase() {
   const redraw = () => { dctx.clearRect(0, 0, DSP, DSP); dctx.drawImage(work, 0, 0, NW, NH, 0, 0, DSP, DSP); };
   redraw();
   let brush = 40, eop = 100, painting = false;   // v0.29.387 — eop: eraser opacity %
+  // v0.29.396 — per user: a paintbrush with an editable colour, alongside the
+  // eraser. One canvas, one brush size, one opacity — only the composite op and
+  // the colour change between modes, so muscle memory carries across.
+  let mode = 'erase', paintColor = '#ffd066';
   const toWork = (ev) => { const r = disp.getBoundingClientRect(); return { x: (ev.clientX - r.left) * (NW / r.width), y: (ev.clientY - r.top) * (NH / r.height) }; };
   // v0.29.387 — the eraser honours an opacity: at 100 it punches pixels out
   // fully (old behaviour); lower values thin the alpha per pass, so repeated
   // strokes fade an area gradually instead of hard-deleting it.
-  const stroke = (ev) => { const p = toWork(ev); wctx.save(); wctx.globalCompositeOperation = 'destination-out'; wctx.globalAlpha = Math.max(0.05, Math.min(1, eop / 100)); wctx.beginPath(); wctx.arc(p.x, p.y, brush, 0, Math.PI * 2); wctx.fill(); wctx.restore(); redraw(); };
+  // v0.29.396 — paint mode uses the same disc with source-over + the picked
+  // colour, so the opacity slider doubles as paint strength.
+  const stroke = (ev) => {
+    const p = toWork(ev); wctx.save();
+    wctx.globalAlpha = Math.max(0.05, Math.min(1, eop / 100));
+    if (mode === 'paint') { wctx.globalCompositeOperation = 'source-over'; wctx.fillStyle = paintColor; }
+    else { wctx.globalCompositeOperation = 'destination-out'; }
+    wctx.beginPath(); wctx.arc(p.x, p.y, brush, 0, Math.PI * 2); wctx.fill(); wctx.restore(); redraw();
+  };
+  // v0.29.396 — 2px BLACK OUTLINE, per user. "2px" means 2px AS DRAWN ON THE
+  // CHARACTER, not 2px of source art: these sprites are 768px square but render
+  // into the ~60px _LX_EQ_DEST box, so a literal 2-source-px ring would be a
+  // sixth of an on-screen pixel — invisible. The source radius is therefore
+  // derived from the sprite's own natural width and the item's attach scale, so
+  // a scaled-up weapon gets a proportionally thinner ring and every piece ends
+  // up with the SAME apparent thickness on the hero.
+  // Method: stamp the silhouette in a ring of offsets, clip to that union with
+  // source-in to make it solid black, then lay the original art back on top.
+  const applyOutline = (screenPx) => {
+    undo.push(wctx.getImageData(0, 0, NW, NH)); if (undo.length > 20) undo.shift();
+    const att = (typeof _lxGaAtt === 'function') ? _lxGaAtt() : { scale: 1 };
+    const drawnW = Math.max(1, (_LX_EQ_DEST.w * (att.scale || 1) * (att.scaleX != null ? att.scaleX : 1)));
+    const R = Math.max(1, Math.round(screenPx * (NW / drawnW)));
+    const tmp = document.createElement('canvas'); tmp.width = NW; tmp.height = NH;
+    const tctx = tmp.getContext('2d');
+    const STEPS = 32;   // enough stamps that the ring reads as a circle, not a star
+    for (let i = 0; i < STEPS; i++) {
+      const a = (i / STEPS) * Math.PI * 2;
+      tctx.drawImage(work, Math.round(Math.cos(a) * R), Math.round(Math.sin(a) * R));
+    }
+    tctx.globalCompositeOperation = 'source-in';
+    tctx.fillStyle = '#000000'; tctx.fillRect(0, 0, NW, NH);
+    tctx.globalCompositeOperation = 'source-over';
+    tctx.drawImage(work, 0, 0);
+    wctx.clearRect(0, 0, NW, NH); wctx.drawImage(tmp, 0, 0);
+    redraw();
+  };
   disp.addEventListener('pointerdown', (ev) => { undo.push(wctx.getImageData(0, 0, NW, NH)); if (undo.length > 20) undo.shift(); painting = true; stroke(ev); disp.setPointerCapture(ev.pointerId); });
   disp.addEventListener('pointermove', (ev) => { if (painting) stroke(ev); });
   disp.addEventListener('pointerup', () => { painting = false; });
   panel.appendChild(disp);
+  // v0.29.396 — TOOL ROW: eraser / paintbrush + colour, and the outline action.
+  // Built before the brush row because `ctrls` below assigns innerHTML, which
+  // would wipe anything appended to it first.
+  const mkTool = (label, cb, col) => { const b = document.createElement('button'); b.textContent = label; b.style.cssText = 'padding:6px 10px;background:' + (col || '#241d36') + ';color:#e8e4f4;border:1px solid #4a4360;border-radius:6px;cursor:pointer;'; b.onclick = cb; return b; };
+  const tools = document.createElement('div'); tools.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;';
+  const bErase = mkTool('🧽 Erase', () => setMode('erase'));
+  const bPaint = mkTool('🖌 Paint', () => setMode('paint'));
+  const colIn = document.createElement('input'); colIn.type = 'color'; colIn.value = paintColor;
+  colIn.title = 'Brush colour';
+  colIn.style.cssText = 'width:38px;height:30px;padding:0;background:#241d36;border:1px solid #4a4360;border-radius:6px;cursor:pointer;';
+  // Picking a colour implies you want to paint with it — switch mode so the
+  // next stroke does what the swatch says.
+  colIn.oninput = () => { paintColor = colIn.value; setMode('paint'); };
+  function setMode(m) {
+    mode = m;
+    bErase.style.background = m === 'erase' ? '#4a3a6a' : '#241d36';
+    bPaint.style.background = m === 'paint' ? '#4a3a6a' : '#241d36';
+    disp.style.cursor = m === 'paint' ? 'cell' : 'crosshair';
+  }
+  tools.appendChild(bErase); tools.appendChild(bPaint); tools.appendChild(colIn);
+  const oLab = document.createElement('span'); oLab.textContent = 'Outline';
+  oLab.style.cssText = 'margin-left:6px;color:#9790b4;';
+  const oIn = document.createElement('input'); oIn.type = 'number'; oIn.min = 1; oIn.max = 6; oIn.step = 1; oIn.value = 2;
+  oIn.title = 'Outline thickness in on-screen pixels';
+  oIn.style.cssText = 'width:46px;padding:5px 6px;background:#241d36;color:#e8e4f4;border:1px solid #4a4360;border-radius:6px;';
+  tools.appendChild(oLab); tools.appendChild(oIn);
+  tools.appendChild(mkTool('⬛ Add outline', () => {
+    const px = Math.max(1, Math.min(6, +oIn.value || 2));
+    applyOutline(px);
+    if (typeof showToast === 'function') showToast('Outline ' + px + 'px added — Undo if it is too heavy.', 'rare');
+  }));
+  panel.appendChild(tools);
+  setMode('erase');
   const ctrls = document.createElement('div'); ctrls.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;';
   const bsl = document.createElement('input'); bsl.type = 'range'; bsl.min = 6; bsl.max = 120; bsl.value = brush; bsl.style.flex = '1'; bsl.oninput = () => brush = +bsl.value;
   ctrls.innerHTML = '<span>Brush</span>'; ctrls.appendChild(bsl);
@@ -13417,7 +13492,9 @@ function _lxGaOpenErase() {
   ctrls.appendChild(eLab); ctrls.appendChild(esl);
   const mkb = (label, cb, col) => { const b = document.createElement('button'); b.textContent = label; b.style.cssText = 'padding:6px 10px;background:' + (col || '#241d36') + ';color:#e8e4f4;border:1px solid #4a4360;border-radius:6px;cursor:pointer;'; b.onclick = cb; return b; };
   ctrls.appendChild(mkb('Undo', () => { const d = undo.pop(); if (d) { wctx.putImageData(d, 0, 0); redraw(); } }));
-  ctrls.appendChild(mkb('Clear erase', () => { _lxEqSetErase(sid, null); document.body.removeChild(modal); if (typeof showToast === 'function') showToast('Erase cleared for ' + name, 'rare'); }));
+  // v0.29.396 — "Clear edits", not "Clear erase": this reverts paint and
+  // outline too, since they all live in the same saved bitmap.
+  ctrls.appendChild(mkb('Clear edits', () => { _lxEqSetErase(sid, null); document.body.removeChild(modal); if (typeof showToast === 'function') showToast('Edits cleared for ' + name, 'rare'); }));
   ctrls.appendChild(mkb('Cancel', () => document.body.removeChild(modal)));
   ctrls.appendChild(mkb('Save', () => { try { _lxEqSetErase(sid, work.toDataURL('image/webp', 0.92)); } catch (e) {} document.body.removeChild(modal); if (typeof showToast === 'function') showToast('Saved cleaned ' + name, 'success'); }, '#2f5a36'));
   panel.appendChild(ctrls); modal.appendChild(panel); document.body.appendChild(modal);
@@ -92463,7 +92540,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   const applyMageWandCounter = () => {
     if (_mageWandCounter) ctx.rotate(_mageWandCounter);
   };
-  // v0.29.395 — Archer bow decoupling (per user "for archer shoot animation
+  // v0.29.396 — Archer bow decoupling (per user "for archer shoot animation
   // weapon should rotate much less"). The bow hangs off handL, which inherits
   // armL, and the front arm sweeps ~88 deg across a shot (-0.30 -> -1.54 ->
   // back to 0). _heroVecArcherBowLocalRotation already cancels that so the bow
@@ -92659,14 +92736,14 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
       drawBone('handL', () => {
         applyWeaponCarryRotation();
         applyMageWandCounter();
-        applyArcherBowCounter();   // v0.29.395 — same value as before, now shared
+        applyArcherBowCounter();   // v0.29.396 — same value as before, now shared
         stackWeaponFn(ctx, OUT);
       }, { deform: false, weaponLock: true });   // v0.29.243 — weapon holds one size
     }
     if (!hideCleanGroundSmashWeapon && _drawsLayer('weapon')) drawBone('handL', () => {
       applyWeaponCarryRotation();
       applyMageWandCounter();
-      applyArcherBowCounter();   // v0.29.395 — equipped bows stop swinging with the arm
+      applyArcherBowCounter();   // v0.29.396 — equipped bows stop swinging with the arm
       _drawEquipmentLayer('weapon', ctx, { onlyLayer: onlyPaintLayer, pinBone: 'handL' });
     }, { deform: false, weaponLock: true });   // v0.29.243 — weapon holds one size
     // v0.25.574 — gate now allows the WEAPON paint layer to render when
@@ -92683,7 +92760,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     if (!hideCleanGroundSmashWeapon && (!onlyPaintLayer || onlyPaintLayer === 'weapon')) drawBone('handL', () => {
       applyWeaponCarryRotation();
       applyMageWandCounter();
-      applyArcherBowCounter();   // v0.29.395 — paint layer tracks the art it sits on
+      applyArcherBowCounter();   // v0.29.396 — paint layer tracks the art it sits on
       _drawCustomPaintLayerPinned('weapon', 'handL', ctx);
     }, { deform: false, weaponLock: true });   // v0.29.243 — weapon holds one size
   }
