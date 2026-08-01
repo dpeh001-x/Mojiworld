@@ -26,7 +26,17 @@ const ITEMS = {
   mspine:       'A venomous NEEDLE DART projectile pointing right -- one long thin tapered spike like a sea-urchin needle, banded teal and cream along its length, razor point with a tiny green venom droplet, two small comic speed-streaks behind it. A single inanimate needle object only. Simple, chunky, cartoon.',
   mgaleblade:   'A WIND SICKLE crescent projectile pointing right — a curved blade of compressed cyan-white wind with swirling air-current lines inside it and small trailing speed wisps, semi-translucent edges glowing. Sharp, elegant, cartoon.',                                 // razorgale
   mcryshard:    'A NECRO-CRYSTAL SHARD projectile pointing right — a jagged violet-magenta crystal spike with a darker amethyst core, eerie inner glow, two tiny orbiting crystal flecks. Arcane, sharp, chunky cartoon.',                                                            // shardlich
-  mbark:        'A jagged BARK CHUNK projectile — a torn slab of mossy brown tree bark with rough wood-grain texture, one small green sprout leaf still attached, splinter flecks trailing. Earthy, chunky, cartoon.',                                                                 // stump
+  // v0.29.383 — SIMPLIFIED per user "regenerate stumpy projectile sprites to
+  // something simple". The old prompt (torn slab + wood-grain texture + sprout
+  // leaf + trailing flecks) packed four ideas into a sprite that renders ~30px
+  // and tumbles at spinRate 0.14 — it read as a brown smudge. One bold shape,
+  // two colours, no accessories.
+  // v2 — "BARK" alone made ludo draw a whole TREE STUMP (detailed, the exact
+  // opposite of "simple"). v3 — "wood chip / splinter of a plank" then drew a
+  // FAN OF FOUR PLANKS ("one solid object" ignored twice). The count finally
+  // stuck by anchoring on a shape that has no plural association: a guitar
+  // pick. Keep that anchor if this is ever re-rolled.
+  mbark:        'EXACTLY ONE wooden guitar-pick shape — a single rounded-triangle piece of smooth brown wood, flat and plain, warm brown fill with one simple darker brown border edge. The whole image contains only this one small rounded triangle, nothing else. NOT a stump, NOT logs, NOT planks, NOT multiple pieces, no wood grain lines, no leaves. Minimal, chunky, cartoon.',   // stump
   mrivet:       'A white-hot MOLTEN RIVET projectile — a short thick iron rivet glowing orange-white at its center with heat shimmer, tiny sparks spitting off it, dark forged-metal ends. Industrial, hot, chunky cartoon.',                                                          // forgewight
   mcoffinshard: 'A haunted COFFIN SPLINTER projectile pointing right — a sharp shard of aged dark coffin wood wreathed in ghostly green flame, a tiny bent grave-nail embedded in it, eerie ember flecks. Spooky, chunky, cartoon.',                                                  // tombWraith
   mstormorb:    'A crackling STORM ORB projectile — a sphere of dark thundercloud with miniature lightning bolts arcing around its equator like a ring, electric blue-white glow, tiny rain flecks. Stormy, energetic, chunky cartoon.',                                              // towerStormcaller
