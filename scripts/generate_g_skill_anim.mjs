@@ -46,7 +46,14 @@ const FX = {
   // that grows outward is exactly the thing that clips at the frame border, so
   // the containment is stated as part of the effect, not just as a negation.
   // Frames are additionally hard-guaranteed by scripts/fx_anim_inset.mjs.
-  shinobi_seal:         { file: 'shinobi_seal.png',         prompt: 'a glowing paper talisman elemental seal (Shinobi) wreathed in a DARK AURA — a smoky black-violet shadow halo breathing around the talisman, dark tendrils curling inward toward the seal, the runic symbols pulsing brighter against the darkness, energy crackling. The dark aura stays TIGHT around the effect and fades out completely well before the frame border, leaving clear empty transparent margins on all four sides — the shadow must never reach or touch the edge of the frame.' },
+  // v0.29.398 — the v0.29.392 aura prompt let the smoke sprawl to the model's
+  // own canvas edge, which bakes a straight clip line into the pixels (a 318px
+  // hard horizontal cut). Insetting can only move that cut inward, so the fix
+  // is to keep the smoke SMALL from the start: the aura is now specified as a
+  // tight hugging rim that fades within a short distance, with the sprawl
+  // named as the thing to avoid. Generate with LUDO_ANIM_PAD≈0.45 and finish
+  // with scripts/fx_anim_inset.mjs --feather.
+  shinobi_seal:         { file: 'shinobi_seal.png',         prompt: 'a glowing paper talisman elemental seal (Shinobi) with a TIGHT dark aura — a thin close-hugging rim of black-violet shadow clinging to the silhouette of the effect and fading softly to nothing within a short distance of it, plus a subtle inner darkening so the runes pulse brighter against the gloom. The shadow is COMPACT and CONTAINED: it must NOT billow, NOT sprawl outward, NOT form long smoke trails, and must stay far away from every side of the frame, surrounded by large empty transparent margins. Only the light and the runes animate; the dark rim just breathes gently in place.' },
   nightreaper_eclipse:  { file: 'nightreaper_eclipse.png',  prompt: 'a dark eclipse death-mark sigil (Nightreaper) — a black sun corona flickers, violet death energy gathers and pulses inward, eerie glow breathing.' },
   phantom_voidrift:     { file: 'phantom_voidrift.png',     prompt: 'a violet void-rift portal with crossed daggers (Phantom) — the rift swirls and warps, spectral hands flicker, purple void energy crackles around the rim.' },
   sage_meteorshower:    { file: 'sage_meteorshower.png',    prompt: 'a fiery meteor-shower impact (Sage) — molten fireballs glow and flicker, flame licks and embers shed, a hot impact glow pulses.' },

@@ -62,7 +62,13 @@ const ULT = {
   marksman_ult:     { p: 'a precision focus-reticle of glowing crosshairs locking onto multiple target-marks, a charged piercing energy-round glinting at center, a sharp lens-flare glint, taut aiming-light threads, cold blue precision glow.', m: 'a precision focus-reticle — the crosshairs tighten and pulse, the charged round glints, aiming-threads flicker.' },
   ballista_ult:     { p: 'a massive mounted siege-ballista war engine drawn taut, a heavy explosive bolt charged with fiery energy on the rail, gears and bracing, impact sparks and a charging anchor-shot glow, imposing fortress-weapon presence.', m: 'a charged siege-ballista bolt — the bolt vibrates with energy, motion streaks pulse, impact sparks flicker.' },
   beastmaster_ult:  { p: 'a colossal spirit apex dire-wolf of amber spirit-energy rearing with bared fangs, a feral rally-roar shockwave and claw-mark energy, wild amber sparks and primal runes, a bonded-rider aura.', m: 'a colossal spirit dire-wolf — the amber spirit-energy flickers and pulses, claw-mark energy crackles in place.' },
-  skyhunter_ult:    { p: 'a swirling cyan wind-tempest cyclone with a calm glowing eye, a storm of wind-charged arrows orbiting and streaking outward, gusty spiral streaks, feathers and motes caught in the vortex, gale energy.', m: 'a cyan wind-tempest cyclone — the storm swirls, wind-charged arrows glint and streak, gusty energy crackles.' },
+  // v0.29.398 — per user: crisper 2D-sidescroller cel style, greener palette,
+  // smoother loop. The shared PREFIX asks for "soft painterly cel-shaded" and
+  // governs all 17 ults, so the harder cel treatment is stated HERE rather
+  // than changing every other ultimate. Motion prompt asks for one slow
+  // continuous rotation (the previous "swirls / glints / crackles" gave three
+  // competing motions, which is what made the 9-frame loop read as jumpy).
+  skyhunter_ult:    { p: 'a swirling EMERALD-GREEN wind-tempest cyclone with a calm glowing eye, a storm of wind-charged arrows orbiting and streaking outward, gusty spiral streaks, leaves and feathers caught in the vortex, gale energy. Palette is jade / emerald / verdant green with pale mint highlights — green dominant, only a faint teal accent, NOT blue and NOT cyan. Crisp 2D SIDE-SCROLLER RPG cel-shading: flat hard-edged colour bands with clean shade steps and bold dark outlines, NOT soft, NOT airbrushed, NOT painterly, no blurry gradients.', m: 'an emerald wind cyclone rotating slowly and smoothly — ONE single continuous steady swirl in the same direction at an even unchanging speed, the arrows and leaves drifting gently around with it. Keep every frame close to the one before it: small even increments, no sudden jumps, no flicker, no direction changes, no bursts.' },
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };

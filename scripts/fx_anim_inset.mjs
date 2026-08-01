@@ -24,8 +24,20 @@ const ANIM = path.join(ROOT, 'Sprites', 'fx', 'anim');
 const argv = process.argv.slice(2);
 const arg = (f, d) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : d; };
 const MARGIN = Number(arg('--margin', 0.90));      // content occupies at most this fraction
+// v0.29.398 — --feather <frac>: ramp alpha to zero across the outer <frac> of
+// the canvas. Insetting alone is NOT enough when the model already drew to its
+// own canvas edge: the hard clip line is baked into the pixels, so scaling just
+// moves a straight cut inward, which reads as a squarish chop (exactly what
+// shinobi_seal's dark aura did — a 318px hard horizontal edge at y=616).
+// Feathering turns any such cut into a fade.
+const FEATHER = Number(arg('--feather', 0));
 const CHECK = argv.includes('--check');
-const keys = argv.filter(a => !a.startsWith('--') && a !== String(MARGIN));
+// Skip flag VALUES by index, not by string-compare: `--margin 0.90` stringifies
+// to "0.9", so comparing values treated the literal "0.90" as a sprite key and
+// the run aborted with "missing frame 0" after doing its work.
+const valueIdx = new Set();
+for (const f of ['--margin', '--feather']) { const i = argv.indexOf(f); if (i >= 0) valueIdx.add(i + 1); }
+const keys = argv.filter((a, i) => !a.startsWith('--') && !valueIdx.has(i));
 
 const ALPHA_MIN = 8;   // treat below this as empty
 
@@ -89,15 +101,39 @@ for (const key of keys) {
     if (before > 25) failed++;
     continue;
   }
-  if (scale >= 0.999) { console.log(`${key.padEnd(20)} already clear (edge=${before}) — untouched`); continue; }
+  if (scale >= 0.999 && !FEATHER) { console.log(`${key.padEnd(20)} already clear (edge=${before}) — untouched`); continue; }
 
   const iw = Math.max(1, Math.round(W * scale)), ih = Math.max(1, Math.round(H * scale));
   for (const f of files) {
     const src = fs.readFileSync(f);
-    const inner = await sharp(src).resize(iw, ih, { fit: 'fill' }).png().toBuffer();
-    const out = await sharp({ create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
-      .composite([{ input: inner, gravity: 'center' }]).webp({ quality: 90 }).toBuffer();
-    fs.writeFileSync(f, out);
+    let buf;
+    if (scale < 0.999) {
+      const inner = await sharp(src).resize(iw, ih, { fit: 'fill' }).png().toBuffer();
+      buf = await sharp({ create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+        .composite([{ input: inner, gravity: 'center' }]).png().toBuffer();
+    } else {
+      buf = await sharp(src).png().toBuffer();
+    }
+    if (FEATHER > 0) {
+      // Multiply alpha by a per-axis ramp over the outer FEATHER fraction, so
+      // a straight cut near the border fades out instead of ending flat.
+      const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      const w = info.width, h = info.height, c = info.channels;
+      const fx = Math.max(1, Math.round(w * FEATHER)), fy = Math.max(1, Math.round(h * FEATHER));
+      const ramp = (d, n) => Math.max(0, Math.min(1, d / n));
+      for (let y = 0; y < h; y++) {
+        const ky = Math.min(ramp(y, fy), ramp(h - 1 - y, fy));
+        for (let x = 0; x < w; x++) {
+          const kx = Math.min(ramp(x, fx), ramp(w - 1 - x, fx));
+          const k = Math.min(kx, ky);
+          if (k >= 1) continue;
+          const i = (y * w + x) * c + 3;
+          data[i] = Math.round(data[i] * k);
+        }
+      }
+      buf = await sharp(data, { raw: { width: w, height: h, channels: c } }).png().toBuffer();
+    }
+    fs.writeFileSync(f, await sharp(buf).webp({ quality: 90 }).toBuffer());
   }
   const after = Math.max(...await Promise.all(files.map(async f => edgeMax(await frameInfo(f)))));
   console.log(`${key.padEnd(20)} edge ${before} -> ${after}  (scaled ${scale.toFixed(3)}, uniform across 9 frames)`);
