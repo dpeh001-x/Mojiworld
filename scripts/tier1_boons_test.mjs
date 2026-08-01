@@ -120,6 +120,10 @@ check('blink i-frame grant found', !!blinkGrant);
 if (blinkGrant) check(`blink i-frames ${blinkGrant[1]}ms < 240ms dash gate`, Number(blinkGrant[1]) < 240);
 check('waltz halves boss slow', /_waltzMulAt\(cx, cy, isBoss\)[\s\S]{0,700}if \(isBoss\) s \*= 0\.5;/.test(src));
 check('monster call site passes boss flag', /_waltzMulAt\(m\.x \+ m\.w \/ 2, m\.y \+ m\.h \/ 2, !!\(m\.isBoss \|\| m\.boss\)\)/.test(src));
+// v0.29.371 (audit 2): the flame trail must throttle ticks PER ENEMY across
+// all patches — the per-patch map alone measured 12.6× basic DPS, because
+// every dash frame spawns a fresh patch with a fresh map.
+check('flame trail has global per-enemy throttle', /_flameTickAt \| 0\)\) < 20\) continue;\s*\n\s*m\._flameTickAt = now;/.test(src));
 
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'} — ${pass}/${pass + fail} checks\n`);
 process.exit(fail ? 1 : 0);
