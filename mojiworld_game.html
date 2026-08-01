@@ -9152,7 +9152,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.399';
+const GAME_VERSION = 'v0.29.400';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -46273,74 +46273,10 @@ function _affixBuffText(a) {
   if (a.elite > 0) bits.push('+' + Math.round(a.elite * 100) + '% elite');
   return bits.join(' · ');
 }
-// =========================================================================
-// v0.29.395 — DRAGGABLE HUD CHIPS (per user "make them moveable by dragging").
-// The four top-right chips can be dragged anywhere; positions persist per
-// browser in localStorage and are re-applied at boot. A 4px movement
-// threshold keeps ordinary clicks working (the Multi button still opens the
-// multiplayer panel; a real drag suppresses the click that would follow).
-// Double-click any chip to send it back to its CSS default. On mobile the
-// layout overrides use !important and win over inline styles, so drags are
-// effectively desktop-only — by design, the phone layout is hand-tuned.
-// =========================================================================
-const _LX_HUD_POS_KEY = 'lx_hud_pos_v1';
-function _lxHudPosLoad() { try { return JSON.parse(localStorage.getItem(_LX_HUD_POS_KEY) || '{}'); } catch (e) { return {}; } }
-function _lxHudPosSave(map) { try { localStorage.setItem(_LX_HUD_POS_KEY, JSON.stringify(map)); } catch (e) {} }
-function _lxMakeHudDraggable(id) {
-  const el = document.getElementById(id);
-  if (!el || el._lxDragWired) return;
-  el._lxDragWired = true;
-  const saved = _lxHudPosLoad()[id];
-  if (saved && typeof saved.l === 'number' && typeof saved.t === 'number') {
-    el.style.left = saved.l + 'px'; el.style.top = saved.t + 'px'; el.style.right = 'auto';
-  }
-  el.style.touchAction = 'none';
-  el.style.userSelect = 'none';
-  let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false, moved = false, scale = 1;
-  el.addEventListener('pointerdown', (ev) => {
-    if (ev.button !== 0) return;
-    const par = el.offsetParent || document.body;
-    const pr = par.getBoundingClientRect();
-    scale = (par.offsetWidth ? pr.width / par.offsetWidth : 1) || 1;   // game-wrapper CSS scale
-    sx = ev.clientX; sy = ev.clientY; ox = el.offsetLeft; oy = el.offsetTop;
-    dragging = true; moved = false;
-    try { el.setPointerCapture(ev.pointerId); } catch (e) {}
-  });
-  el.addEventListener('pointermove', (ev) => {
-    if (!dragging) return;
-    const dx = (ev.clientX - sx) / scale, dy = (ev.clientY - sy) / scale;
-    if (!moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;   // click protection
-    moved = true;
-    const par = el.offsetParent || document.body;
-    const maxL = Math.max(0, (par.offsetWidth || 4000) - el.offsetWidth);
-    const maxT = Math.max(0, (par.offsetHeight || 3000) - el.offsetHeight);
-    el.style.left = Math.round(Math.max(0, Math.min(maxL, ox + dx))) + 'px';
-    el.style.top  = Math.round(Math.max(0, Math.min(maxT, oy + dy))) + 'px';
-    el.style.right = 'auto';
-  });
-  el.addEventListener('pointerup', () => {
-    if (!dragging) return;
-    dragging = false;
-    if (moved) {
-      const map = _lxHudPosLoad();
-      map[id] = { l: el.offsetLeft, t: el.offsetTop };
-      _lxHudPosSave(map);
-      el._lxJustDragged = true;
-      setTimeout(() => { el._lxJustDragged = false; }, 0);
-    }
-  });
-  // a drag must not fire the chip's click action on release
-  el.addEventListener('click', (ev) => {
-    if (el._lxJustDragged) { ev.stopImmediatePropagation(); ev.preventDefault(); }
-  }, true);
-  el.addEventListener('dblclick', (ev) => {
-    const map = _lxHudPosLoad(); delete map[id]; _lxHudPosSave(map);
-    el.style.left = ''; el.style.top = ''; el.style.right = '';
-    ev.preventDefault();
-    if (typeof showToast === 'function') { try { showToast('HUD chip reset to default spot', 'common'); } catch (e) {} }
-  });
-}
-['mp-btn', 'version-tag', 'save-indicator', 'world-affix-pin'].forEach(_lxMakeHudDraggable);
+// v0.29.400 — the v0.29.397 chip-drag module that lived here is retired:
+// ALL HUD dragging now goes through the single v0.26.493 hud-drag module
+// at the end of the file (storage mojiHudPos:<id>; the old lx_hud_pos_v1
+// entries are migrated there on first boot).
 function _renderAffixPin() {
   const el = document.getElementById('world-affix-pin');
   if (!el) return;
@@ -46356,7 +46292,9 @@ function _renderAffixPin() {
   // back down-left, so it is gone. Clear any top a pre-move session stamped —
   // v0.29.395: unless the player DRAGGED the pin somewhere (saved position),
   // which must survive re-renders.
-  if (!(typeof _lxHudPosLoad === 'function' && _lxHudPosLoad()['world-affix-pin'])) el.style.top = '';
+  let _pinDragged = false;
+  try { _pinDragged = !!localStorage.getItem('mojiHudPos:world-affix-pin'); } catch (e) {}
+  if (!_pinDragged) el.style.top = '';   // dragged position (unified hud-drag store) must survive re-renders
   el.style.display = 'flex';
 }
 function _lxMulberry32(a) {
@@ -50070,7 +50008,15 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // of them = a wall of elders). Gate the promotion at 15% (per user) so only a
   // small fraction spawn as Elder — the rest keep their base type (no crash;
   // just a normal mob).
-  if (t && t.traits && t.traits.miniElite && Math.random() < 0.15) { isMiniBoss = true; _miniElitePromoted = true; }
+  // v0.29.399 — `!isBoss` guard added. This promotion never checked it, and two
+  // types are declared BOTH `boss:true` and `traits.miniElite` — towerArbiter
+  // and towerSovereign. 15% of their spawns became isMiniBoss, which is why a
+  // few bosses wore the gold→violet mini-boss halo (`if (m.isMiniBoss)` in the
+  // draw path is not boss-gated) and were named "Elder Tower Arbiter". Stats
+  // were never affected: every hp/atk/exp/size multiplier is already written
+  // `isBoss ? 1 : (isMiniBoss ? … )`, so the boss branch won. Purely cosmetic,
+  // but it read as a mechanic that does not exist.
+  if (!isBoss && t && t.traits && t.traits.miniElite && Math.random() < 0.15) { isMiniBoss = true; _miniElitePromoted = true; }
   // Elite roll (not for bosses / miniboss)
   // v0.26.x — Per user "reduce the occurrence of elite / elder". 0.13 → 0.07 → 0.03.
   const _eliteChance = (typeof game !== 'undefined' && game && game._mapCursed) ? 0.18 : 0.03;   // v0.29.60 — nightmare-touched maps spike elite density (6×)
@@ -62686,7 +62632,35 @@ function updateMonsters(dt) {
       }
       if (m.y < 10) { m.y = 10; m.vy = Math.max(0, m.vy); }
       const _whF = game.mapData.worldHeight || H;
-      if (m.y + m.h > _whF - 24) { m.y = _whF - 24 - m.h; m.vy = Math.min(0, m.vy); }
+      // v0.29.397 — FLIERS STOP AT THE FLOOR, NOT THE WORLD BOTTOM.
+      // Per user: "in B1 and B2 the spireling monsters get stuck below the
+      // floor". Fliers were clamped to worldHeight-24, which is NOT where the
+      // visible ground is — every map leaves a margin under it, so a flier
+      // could always sink through the floor it was drawn standing on. On the
+      // tower floors the ground sits at h-80, so Spirelings settled 56-76 px
+      // under it; measured across all 109 maps the gap ranges 56 px (most
+      // overworld maps) to 306 px (the vertical towers).
+      //
+      // The clamp now reads the GROUND SLAB under the flier. Per-x, not a
+      // single number: duneSands / lavaCavern / sauroSlope undulate across 6-9
+      // ground heights, and coralReef / kelpForest / bubbleGrotto declare
+      // ground at BOTH the water surface (y≈80) and the seabed (y≈2080) — a
+      // "highest ground" rule would pin their fliers to the surface and make
+      // the whole dive column unreachable. Taking the DEEPEST slab spanning the
+      // flier keeps the full column swimmable while still ending at real floor.
+      let _gSlabs = game.mapData._lxGroundSlabs;
+      if (!_gSlabs) {
+        _gSlabs = (game.mapData.platforms || []).filter(p => p.type === 'ground');
+        game.mapData._lxGroundSlabs = _gSlabs;
+      }
+      const _mcx = m.x + m.w / 2;
+      let _floorY = null;
+      for (let gi = 0; gi < _gSlabs.length; gi++) {
+        const g = _gSlabs[gi];
+        if (_mcx >= g.x && _mcx <= g.x + g.w && (_floorY == null || g.y > _floorY)) _floorY = g.y;
+      }
+      const _flyLimit = (_floorY != null) ? _floorY : (_whF - 24);
+      if (m.y + m.h > _flyLimit) { m.y = _flyLimit - m.h; m.vy = Math.min(0, m.vy); }
       m.onGround = false;
     } else if (!m._noGravity) {
       // v0.26.x — Bosses can't be knocked UPWARD by being hit. Upward velocity
@@ -122536,7 +122510,11 @@ window.addEventListener('keydown', (e) => {
    960x560 space (offsetLeft/Top), so they survive any fullscreen scale. */
 (function () {
   'use strict';
-  var IDS = ['quest-tracker', 'minimap', 'taxi-btn', 'hotkey-hint'];
+  // v0.29.400 — full HUD coverage (per user): panels + bars + the top-right
+  // chips the retired v0.29.397 module handled. All share this one system.
+  var IDS = ['quest-tracker', 'minimap', 'taxi-btn', 'hotkey-hint',
+             'stats', 'skill-bar', 'buff-row', 'mastery-bar',
+             'mp-btn', 'version-tag', 'save-indicator', 'world-affix-pin'];
   var KEY = 'mojiHudPos:';      // + id -> JSON {left, top}
   var THRESH = 4;               // screen px before a press counts as a drag
 
@@ -122550,6 +122528,7 @@ window.addEventListener('keydown', (e) => {
     top  = Math.min(Math.max(0, top),  maxT);
     el.style.left = left + 'px'; el.style.top = top + 'px';
     el.style.right = 'auto';     el.style.bottom = 'auto';
+    el.style.transform = 'none';   // v0.29.400 — kill centering transforms (skill-bar) once pinned
     return { left: left, top: top };
   }
 
@@ -122570,7 +122549,11 @@ window.addEventListener('keydown', (e) => {
       var rect = el.getBoundingClientRect();
       scale = el.offsetWidth ? rect.width / el.offsetWidth : 1;
       if (!scale || !isFinite(scale)) scale = 1;
-      baseL = el.offsetLeft; baseT = el.offsetTop;
+      // v0.29.400 — base from the RENDERED position in wrapper space (equals
+      // offsetLeft/Top for plain elements, correct for transform-centred ones
+      // like the skill bar).
+      var wr = wrapOf(el).getBoundingClientRect();
+      baseL = (rect.left - wr.left) / scale; baseT = (rect.top - wr.top) / scale;
       startX = e.clientX; startY = e.clientY;
       dragging = true; moved = false; pid = e.pointerId;
     });
@@ -122606,8 +122589,28 @@ window.addEventListener('keydown', (e) => {
     }
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
+    // v0.29.400 — double-click returns this element to its CSS default.
+    el.addEventListener('dblclick', function (ev) {
+      try { localStorage.removeItem(KEY + el.id); } catch (err) {}
+      el.style.left = el.style.top = el.style.right = el.style.bottom = el.style.transform = '';
+      ev.preventDefault();
+      if (typeof showToast === 'function') { try { showToast('HUD element reset to its default spot', 'common'); } catch (err) {} }
+    });
   }
   function init() {
+    // v0.29.400 — one-time migration from the retired v0.29.397 chip store.
+    try {
+      var legacy = JSON.parse(localStorage.getItem('lx_hud_pos_v1') || 'null');
+      if (legacy) {
+        for (var lid in legacy) {
+          var lp = legacy[lid];
+          if (lp && typeof lp.l === 'number' && typeof lp.t === 'number' && !localStorage.getItem(KEY + lid)) {
+            save(lid, { left: lp.l, top: lp.t });
+          }
+        }
+        localStorage.removeItem('lx_hud_pos_v1');
+      }
+    } catch (e) {}
     IDS.forEach(function (id) {
       var el = document.getElementById(id);
       if (!el || el._hudDraggable) return;
