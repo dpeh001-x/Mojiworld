@@ -82,8 +82,43 @@ const r2 = await page.evaluate(() => ({
   })(),
 }));
 
+// F (v0.29.356) — co-op guest parity, driven through the real _coopApplyKill
+// handler: near+real earns streak credit, far/mirage/replayed frames earn
+// nothing, and the mirage gate also stops guest hunt-quest ticks (the host
+// stopped crediting those in v0.29.321; the guest mirror had kept them).
+const r3 = await page.evaluate(() => {
+  const r = {};
+  const ww = game.mapData.worldWidth;
+  net.isHost = false; net.hostId = 7;
+  player._ksTier = 0; game.mapKillStreak = 0;
+  const px = player.x + player.w / 2, py = player.y + player.h / 2;
+  let uid = 900000;
+  const kill = (over) => _coopApplyKill(Object.assign({
+    t: 'kill', id: 7, u: ++uid, e: 1000, c: 10,
+    x: Math.round(px), y: Math.round(py), map: game.currentMap, tp: 'slime', b: 0, il: 0,
+  }, over || {}));
+  let picks = 0;
+  const realTrack = window.trackPickup;
+  window.trackPickup = function (...a) { picks++; return realTrack ? realTrack.apply(this, a) : undefined; };
+  kill();
+  r.near = (game.mapKillStreak | 0) === 1;
+  kill({ x: Math.round(px + 2000) });
+  r.far = (game.mapKillStreak | 0) === 1;
+  picks = 0; kill({ il: 1 });
+  r.mirage = (game.mapKillStreak | 0) === 1 && picks === 0;
+  _coopApplyKill({ t: 'kill', id: 7, u: uid, e: 1000, c: 10, x: Math.round(px), y: Math.round(py), map: game.currentMap, tp: 'slime', b: 0, il: 0 });
+  r.dup = (game.mapKillStreak | 0) === 1;
+  window.trackPickup = realTrack;
+  net.hostId = null; player._ksTier = 0; game.mapKillStreak = 0;
+  return r;
+});
+
 const results = [];
 const ok = (n, c, e) => results.push({ n, pass: !!c, e });
+ok('co-op guest near a real host kill earns streak credit', r3.near);
+ok('co-op guest far from the kill earns nothing', r3.far);
+ok('mirage broadcast earns no streak and no guest quest tick', r3.mirage);
+ok('replayed kill frame earns nothing', r3.dup);
 ok('multi-threshold kill grants all tiers at once, no throw', r1.burst_threw === null && r1.burst_tier === 7, `tier ${r1.burst_tier}, ${r1.burst_threw || 'clean'}`);
 ok('burst lands the full +25% ATK', r1.burst_atk === 0.25, `${r1.burst_atk}`);
 ok('triggerDeath (the real path) wipes boons', r1.death_threw === null && r1.death_tierAfter === 0 && r1.death_streakAfter === 0, `tier ${r1.death_tierBefore} -> ${r1.death_tierAfter}${r1.death_threw ? ', threw ' + r1.death_threw : ''}`);
