@@ -9458,7 +9458,22 @@ function _perfVeryLowFx() {
     _perfLowFx();   // populate cache
   }
   const cache = game._lowFxCache || {};
-  const auto = (cache.bossCount >= 2) || ((cache.mobCount | 0) > 22);
+  // v0.29.384 — HAZARD PRESSURE (per user: "gravitos3 was a very choppy
+  // battle"). Both auto-triggers above count ENTITIES, so the single heaviest
+  // encounter in the game never fired either one: Gravitos phase 3 is ONE boss
+  // in an otherwise empty arena, but it keeps ~40 hazards live at once —
+  // 24 void-ring shards + 7 chase comets + 5 laser bolts + 4 collapse zones +
+  // the decay floor. bossCount is 1 and mobCount is 1, so the second FX tier
+  // was left entirely to the reactive frame-time path in _perfTick, which only
+  // engages after SIX slow frames and releases 8 s later — i.e. it hitches,
+  // degrades, recovers, and hitches again. That oscillation is what "choppy"
+  // actually is; a steady degraded frame would have read as smooth.
+  // Now a boss fight also escalates on live projectile count, so a bullet-hell
+  // phase drops to the cheap FX path BEFORE the first spike instead of after.
+  // Gameplay is untouched — _perfVeryLowFx only gates eye-candy.
+  const _hazards = (game.projectiles && game.projectiles.length) | 0;
+  const auto = (cache.bossCount >= 2) || ((cache.mobCount | 0) > 22)
+            || ((cache.bossCount | 0) >= 1 && _hazards >= 40);
   cache.veryValue = auto;
   return auto;
 }
@@ -15636,6 +15651,17 @@ for (const k in KEY_TO_SLOT) SLOT_TO_KEY[KEY_TO_SLOT[k]] = k.toUpperCase();
 function applyKeybinds() {
   /* legacy 'inventory' action removed - a saved bind for it poisoned the B skill slot via _isStaleDefault */
   if (typeof player !== 'undefined' && player && player.actionBinds && player.actionBinds.inventory !== undefined) delete player.actionBinds.inventory;
+  // v0.29.389 — Q/E swap migration. Old sessions pinned the PRE-swap defaults
+  // into actionBinds (questJournal:'e', wardrobe:'q'); after the swap those
+  // pins make _resolveActionKey neutralise BOTH keys (physical e resolves to
+  // 'q' and matches nothing; physical q resolves to ''). If the stored bind
+  // equals the old default — the player never actually customised it — drop
+  // it so the new defaults (Q=quests, E=weapon editor) apply. Any other
+  // stored value is a genuine custom bind and is preserved.
+  if (typeof player !== 'undefined' && player && player.actionBinds) {
+    if (player.actionBinds.questJournal === 'e') delete player.actionBinds.questJournal;
+    if (player.actionBinds.wardrobe === 'q') delete player.actionBinds.wardrobe;
+  }
   // Wipe + rebuild from player.keybinds (or defaults).
   for (const k in KEY_TO_SLOT) delete KEY_TO_SLOT[k];
   // Use a try/catch around the player TDZ check — if player isn't yet
