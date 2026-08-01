@@ -16,17 +16,25 @@ if not exist mojiworld_game.html (
   exit /b 1
 )
 
+rem Portable-zip builds ship the official OpenJS-signed node.exe in .\node\ so
+rem players need NOTHING installed (and SAC/SmartScreen see only signed
+rem binaries). Prefer it; fall back to a PATH node; else the hosted build.
+set "NODE_BIN=node"
+if exist "%~dp0node\node.exe" set "NODE_BIN=%~dp0node\node.exe"
+
 netstat -an | findstr /c:":%PORT% " | findstr LISTENING >nul 2>nul
 if not errorlevel 1 goto open
 
-where node >nul 2>nul
-if errorlevel 1 (
-  echo Node.js was not found - opening the hosted build instead.
-  start "" "https://raw.githack.com/dpeh001-x/Mojiworld/main/mojiworld_game.html"
-  exit /b 0
+if "%NODE_BIN%"=="node" (
+  where node >nul 2>nul
+  if errorlevel 1 (
+    echo Node.js was not found - opening the hosted build instead.
+    start "" "https://raw.githack.com/dpeh001-x/Mojiworld/main/mojiworld_game.html"
+    exit /b 0
+  )
 )
 
-start "Mojiworld server" /min node serve.js %PORT%
+start "Mojiworld server" /min "%NODE_BIN%" serve.js %PORT%
 
 rem wait up to ~8s for the server to come up (each ping -n 2 sleeps ~1s)
 for /l %%i in (1,1,8) do (

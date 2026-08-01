@@ -16,6 +16,22 @@ Reviewers can bookmark the stable preview build (whatever is currently under rev
 
 **▶ https://raw.githack.com/dpeh001-x/Mojiworld/preview/mojiworld_game.html**
 
+### 📦 Download — portable zip (Windows, nothing to install)
+
+For players who want the game on disk: grab
+**`Mojiworld-vX.Y.Z-windows-portable.zip`** from
+[**Releases**](https://github.com/dpeh001-x/Mojiworld/releases), unzip the
+whole folder anywhere, and double-click **`Mojiworld.cmd`**. The browser opens
+the game — that is the entire install. No Node, no runtime, no admin: the zip
+bundles the official signed Node.js runtime, so the launch chain is
+signed end to end and plays offline after unzipping (`PLAY_ME_FIRST.txt`
+inside has the details).
+
+Maintainers: the zip is built by the **“Build portable zip”** GitHub Action —
+run it from the Actions tab for an artifact, or push a `portable-v*` tag to
+publish it as a Release automatically (locally:
+`node scripts/build_portable_zip.mjs --zip`).
+
 ### Optional visual modes (URL params)
 
 | Param | Effect |

@@ -1,0 +1,67 @@
+# Builds the player-facing portable zip: unzip → double-click Mojiworld.cmd
+# → play. Bundles the official OpenJS-SIGNED node.exe so players install
+# nothing and the launch chain is signed end to end (no code-signing cert
+# needed — see docs/guides/CODE_SIGNING.md "Shipping unsigned").
+#
+# Run it from the Actions tab (workflow_dispatch), or push a `portable-v*`
+# tag to also attach the zip to a GitHub Release for a public download link.
+name: Build portable zip (Mojiworld.cmd)
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['portable-v*']
+
+jobs:
+  portable:
+    runs-on: windows-latest
+    defaults: { run: { shell: bash } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      # Bundle a PINNED node.exe (not the runner's) so the shipped runtime is
+      # deterministic. Integrity: verified against the same release's official
+      # SHASUMS256.txt. v22 = LTS; bump deliberately, never floating.
+      - name: Fetch bundled node.exe (pinned + checksum)
+        run: |
+          NODE_VER=v22.11.0
+          curl -fsSLo node.exe "https://nodejs.org/dist/${NODE_VER}/win-x64/node.exe"
+          curl -fsSLo SHASUMS256.txt "https://nodejs.org/dist/${NODE_VER}/SHASUMS256.txt"
+          EXPECTED=$(grep ' win-x64/node.exe$' SHASUMS256.txt | awk '{print $1}')
+          ACTUAL=$(sha256sum node.exe | awk '{print $1}')
+          echo "expected: $EXPECTED"
+          echo "actual:   $ACTUAL"
+          test -n "$EXPECTED" && test "$EXPECTED" = "$ACTUAL" || { echo "::error::node.exe checksum mismatch"; exit 1; }
+      - name: Stage + zip
+        run: node scripts/build_portable_zip.mjs --zip --node "$(pwd)/node.exe"
+      - name: Smoke-test the staged build
+        run: |
+          cd scripts/_tmp_portable/Mojiworld
+          ./node/node.exe serve.js 8909 &
+          sleep 3
+          for u in mojiworld_game.html data/anim_calib.js Sprites/ui/block_shield.png steam/higgsfield/cinematics/clip_prologue_pov.mp4; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:8909/$u")
+            echo "$code  $u"
+            test "$code" = "200" || { echo "::error::staged build failed to serve $u"; exit 1; }
+          done
+      - name: Locate zip
+        id: zip
+        run: |
+          Z=$(ls scripts/_tmp_portable/Mojiworld-v*-windows-portable.zip)
+          echo "path=$Z" >> "$GITHUB_OUTPUT"
+          ls -lh "$Z"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mojiworld-windows-portable
+          path: ${{ steps.zip.outputs.path }}
+          compression-level: 0        # already a zip — recompressing wastes minutes
+          if-no-files-found: error
+      # On a portable-v* tag: publish a Release so players get a stable
+      # download URL (Actions artifacts expire and need a GitHub login).
+      - name: Attach to GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/portable-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.zip.outputs.path }}
+          generate_release_notes: true
