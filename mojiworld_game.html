@@ -2838,7 +2838,8 @@
     pointer-events: none;
     z-index: 0;
     opacity: 0.30;
-    /* The mask is set inline (per-boss sprite URL) by _openConfirmDialog. */
+    /* --boss-shade is set inline (per-boss sprite URL) by _openConfirmDialog. */
+    -webkit-mask-image: var(--boss-shade); mask-image: var(--boss-shade);
     -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
     -webkit-mask-position: bottom right; mask-position: bottom right;
     -webkit-mask-size: contain; mask-size: contain;
@@ -72754,13 +72755,17 @@ function tryPortal() {
       if (destMap.isBossArena && !game.dying && typeof _openConfirmDialog === 'function') {
         const _bossMapName = destMap.name || po.dest;
         const _lvLine = destMap.levelReq ? `\n\nRecommended level: ${destMap.levelReq}+.` : '';
+        // v0.29.380 — pass the destination's boss sprite so the dialog can
+        // paint it as a silhouette behind the text (see .boss-arena CSS).
+        const _bossShade = (typeof _arenaBossSpriteUrl === 'function') ? _arenaBossSpriteUrl(destMap) : null;
         _openConfirmDialog(
           '⚠ Boss Arena Ahead',
           `Step into ${_bossMapName}? A boss awaits — make sure you are prepared.${_lvLine}`,
           'Enter the arena',
           () => { closeDialog(); loadMap(po.dest, entryX, entryY); },
           'Not yet',
-          closeDialog
+          closeDialog,
+          _bossShade ? { bossSprite: _bossShade } : null
         );
         return true;
       }
@@ -74708,9 +74713,52 @@ function _classifyDialogOption(label) {
 // + options) without needing a fake NPC. Pauses the game and surfaces the
 // title in the npc-name slot. Both buttons get explicit text via opts so
 // callers can theme the wording (e.g. "Enter the arena" / "Not yet").
-function _openConfirmDialog(title, body, yesText, yesCb, noText, noCb) {
+// v0.29.380 — Resolve the boss a map will pit you against, for the arena
+// dialog's silhouette. Reads the same fields the spawner uses: an explicit
+// `bossType`, else the first `boss:true` entry in `spawns`. Returns the
+// sprite URL (from the already-loaded BOSS/MONSTER registries, so nothing
+// new is fetched) or null when the boss is procedural-only / not yet
+// decoded — the dialog then simply renders without a shade.
+function _arenaBossSpriteUrl(md) {
+  try {
+    if (!md) return null;
+    let key = md.bossType;
+    if (!key && Array.isArray(md.spawns)) {
+      const s = md.spawns.find(sp => sp && sp.boss && sp.type);
+      if (s) key = s.type;
+    }
+    // 'zodiac_' is a template prefix, not a real type — resolve via the
+    // arena's own sign when one is set, else give up quietly.
+    if (key === 'zodiac_' || (key && key.endsWith('_'))) key = md.zodiacSign ? ('zodiac_' + md.zodiacSign) : null;
+    if (!key) return null;
+    // Read the registered URL directly rather than going through
+    // _monsterDexSprite, which gates on `complete && naturalWidth > 0`.
+    // Boss art decodes lazily, so a player reaching an arena portal before
+    // it lands would otherwise get no shade at all — and a CSS mask only
+    // needs the URL (the browser fetches/caches it independently).
+    const _src = (o, k) => (o && o[k] && o[k].src) ? o[k].src : null;
+    if (key.indexOf('zodiac_') === 0 && typeof ZODIAC_SPRITES !== 'undefined') {
+      const z = _src(ZODIAC_SPRITES, key.slice(7));
+      if (z) return z;
+    }
+    return (typeof BOSS_SPRITES !== 'undefined' && _src(BOSS_SPRITES, key))
+        || (typeof MONSTER_SPRITES !== 'undefined' && _src(MONSTER_SPRITES, key))
+        || null;
+  } catch (e) { return null; }
+}
+
+function _openConfirmDialog(title, body, yesText, yesCb, noText, noCb, opts) {
   const dlg = document.getElementById('dialog');
   if (!dlg) { if (typeof yesCb === 'function') yesCb(); return; }
+  // v0.29.380 — boss-arena silhouette. The sprite is applied as a CSS MASK
+  // so the shade is drawn in the panel's own gradient, not the boss's
+  // colours (see the .boss-arena rules). Cleared in closeDialog.
+  dlg.classList.remove('boss-arena');
+  dlg.style.removeProperty('--boss-shade');
+  if (opts && opts.bossSprite) {
+    dlg.classList.add('boss-arena');
+    dlg.style.setProperty('--boss-shade', 'url("' + opts.bossSprite.replace(/"/g, '\\"') + '")');
+  }
   const nameEl = document.getElementById('dialog-name');
   const subEl  = document.getElementById('dialog-subtitle');
   const textEl = document.getElementById('dialog-text');
@@ -74747,6 +74795,12 @@ function _openConfirmDialog(title, body, yesText, yesCb, noText, noCb) {
   game.paused = true;
 }
 function closeDialog() {
+  // v0.29.380 — drop the boss-arena silhouette so the next NPC chat opens
+  // clean (the class + mask var are per-dialog, not per-session).
+  try {
+    const _d = document.getElementById('dialog');
+    if (_d) { _d.classList.remove('boss-arena'); _d.style.removeProperty('--boss-shade'); }
+  } catch (e) {}
   // v0.26.x audit -- a shackle QTE landing on the modal-open frame must not
   // survive the close as an orphaned card / stuck stun.
   if (typeof _QTE !== 'undefined' && _QTE.active && typeof _qteEnd === 'function') { _qteEnd(false); if (typeof _qteHide === 'function') _qteHide(0); }
