@@ -34,6 +34,34 @@ jobs:
           cat steam_appid.txt
       - name: Build (win-unpacked)
         run: npm run dist:steamwin
+      # ----- Code signing (Azure Trusted Signing) -------------------------
+      # Runs ONLY when the AZURE_* secrets are configured (Settings > Secrets
+      # and variables > Actions > Secrets) — until then the depot ships
+      # unsigned exactly as before, so this step never blocks a build.
+      # Why: Smart-App-Control machines block unsigned exes with no user
+      # override (docs/guides/CODE_SIGNING.md has the full setup walkthrough).
+      - name: Sign Mojiworld.exe (Azure Trusted Signing)
+        if: ${{ secrets.AZURE_TENANT_ID != '' }}
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TS_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TS_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TS_PROFILE }}
+          files-folder: ${{ github.workspace }}/steam/release/win-unpacked
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Verify signature
+        if: ${{ secrets.AZURE_TENANT_ID != '' }}
+        shell: pwsh
+        run: |
+          $sig = Get-AuthenticodeSignature "release/win-unpacked/Mojiworld.exe"
+          $sig | Format-List Status, StatusMessage
+          if ($sig.Status -ne 'Valid') { Write-Error "signature invalid: $($sig.Status)"; exit 1 }
       - name: Verify Mojiworld.exe
         run: |
           test -f "release/win-unpacked/Mojiworld.exe" || { echo "::error::Mojiworld.exe missing"; ls -la release/win-unpacked || true; exit 1; }

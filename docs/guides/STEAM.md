@@ -114,6 +114,13 @@ Then publish the build to a branch on **SteamPipe → Builds**, set it live on
 > `node.exe`, so SAC allows it). Durable fix for the Steam depot: code-sign
 > the Electron build with a trusted-CA cert (e.g. Azure Trusted Signing)
 > before launch — self-signed certs do NOT pass SAC.
+>
+> **Update (2026-08-01):** the signing step is now WIRED into
+> `steam-build.yml` — it activates automatically once the six `AZURE_*`
+> GitHub secrets exist, and a build-failing signature verification proves it
+> worked. The only human steps left are the cert purchase + identity
+> validation + pasting the secrets: full walkthrough in
+> [`CODE_SIGNING.md`](CODE_SIGNING.md).
 
 ---
 
