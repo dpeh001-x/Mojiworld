@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.359';
+const GAME_VERSION = 'v0.29.360';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -49934,7 +49934,14 @@ function checkPlatformCollision(entity) {
   const prevOnGround = entity.onGround;
   const prevVy = entity.vy;
   entity.onGround = false;
+  // v0.29.x perf — both branches start with exactly this X-overlap test, so
+  // one shared early-out skips ~95% of the ~1750 entity×platform pairs per
+  // frame nearly free. The slam flag is loop-invariant (only the player
+  // carries dragoonSlam); prevBottom is NOT hoisted — entity.y/vy mutate when
+  // a platform snaps the entity, and later platforms must see the update.
+  const _slamPierceHoist = (entity === player && entity.dragoonSlam);
   for (const p of game.mapData.platforms) {
+    if (entity.x + entity.w <= p.x || entity.x >= p.x + p.w) continue;
     if (p.type === 'ground') {
       if (entity.x + entity.w > p.x && entity.x < p.x + p.w &&
           entity.y + entity.h > p.y && entity.y + entity.h < p.y + p.h + 20 &&
@@ -49949,7 +49956,7 @@ function checkPlatformCollision(entity) {
       // elevated platform and only resolves on the ground floor (the
       // 'ground' branch above still catches the player). Mobs / other
       // entities are unaffected — only the player carries dragoonSlam.
-      const _slamPiercePlatform = (entity === player && entity.dragoonSlam);
+      const _slamPiercePlatform = _slamPierceHoist;
       const prevBottom = entity.y + entity.h - entity.vy;
       if (entity.x + entity.w > p.x && entity.x < p.x + p.w &&
           entity.y + entity.h >= p.y && prevBottom <= p.y + 2 &&
@@ -52272,7 +52279,7 @@ function updatePlayer(dt) {
     d.life -= dt;
     const dx = _dropPcx - d.x;
     const dy = _dropPcy - d.y;
-    const dist = Math.sqrt(dx*dx + dy*dy);
+    const d2 = dx*dx + dy*dy;   // v0.29.x perf — sqrt deferred to the magnet branch
     // v0.25.793 — Wider magnet radius for mojicoins + potions (140 vs the
     // baseline 80) so consumables auto-collect from a comfortable
     // distance, preserving the "loot moment" for gear drops which stay
@@ -52293,13 +52300,13 @@ function updatePlayer(dt) {
     // player picks them up by physically walking over them. Mojicoin /
     // potion drops are NEVER tagged with noMagnet, so currency + consumables
     // continue to auto-collect from the wider 140 px radius unchanged.
-    if (!d.noMagnet && dist < _magnetR) { d.x += dx / dist * 4; d.y += dy / dist * 4; }
+    if (!d.noMagnet && d2 < _magnetR * _magnetR) { const dist = Math.sqrt(d2); d.x += dx / dist * 4; d.y += dy / dist * 4; }
     // v0.26.678 — Walk-over (noMagnet) drops — boss/zodiac equipment — use a more
     // forgiving pickup footprint (55px vs 25px) so they grab as you run past
     // without auto-magnetising. Magnet drops keep the tight 25px gate since the
     // pull above already drags them to ~0 distance before pickup.
     const _pickR = d.noMagnet ? 55 : 25;
-    if (dist < _pickR) {
+    if (d2 < _pickR * _pickR) {
       if (d.type === 'mojicoin') {
         const amt = Math.floor(d.value * (1 + player.mods.greed + getEquipBonus('greed')));
         // v0.26.056 — global currency scalar via _grantMojicoins. Greed mods +
@@ -54723,6 +54730,12 @@ function _spawnRainbowStairs() {
   }
 }
 const _IMPACT_GRAD_CACHE = new Map();   // v0.29.x perf — see drawSmoothFx 'impact'
+// v0.29.x perf — ONE pixel-fill helper instead of 16 byte-identical closures
+// allocated per draw call (one per visible monster per frame in the per-mob
+// helpers, plus drawNPCs / drawCuteCharacter / drawCuteHat). Captures only the
+// module-scope ctx, so hoisting is pure de-duplication.
+const _pxFill = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x | 0, y | 0, w, h); };
+let _zodiacLabelW = 0;   // v0.29.x perf — memoized ZODIAC SANCTUM banner width
 function updateSmoothFx(dt) {
   if (!game.smoothFx) return;
   // v0.26.946 perf — write-index compaction (each splice was an O(n) shift;
@@ -86813,13 +86826,17 @@ function drawWorldProps() {
     // so a 768 px banner reads larger than a 320 px lantern. The per-
     // prop `prop.scale` override still multiplies on top — designers
     // can still pin a specific prop to a non-default size if needed.
-    const PROP_SIZE_REF = 512;
-    const srcW = img.naturalWidth, srcH = img.naturalHeight;
-    const propMaxDim = Math.max(srcW, srcH);
-    const propSizeFactor = Math.max(0.7, Math.min(1.4, propMaxDim / PROP_SIZE_REF));
-    const h = PROP_DEFAULT_H * sc * propSizeFactor;
+    // v0.29.x perf — geometry is a pure function of the decoded source size;
+    // memoize {f, ar} on the image (loop guard above ensures it is decoded).
+    // sc stays outside the memo so R-key prop-editor scale edits apply live.
+    let _pg = img._lxPropGeom;
+    if (!_pg) {
+      const srcW = img.naturalWidth, srcH = img.naturalHeight;
+      _pg = img._lxPropGeom = { f: Math.max(0.7, Math.min(1.4, Math.max(srcW, srcH) / 512)), ar: srcW / srcH };
+    }
+    const h = PROP_DEFAULT_H * sc * _pg.f;
     // Preserve aspect ratio from the source PNG.
-    const w = h * (srcW / srcH);
+    const w = h * _pg.ar;
     const sx = (prop.x - w / 2) - camX;
     if (sx + w < -20 || sx > W + 20) continue;       // off-camera cull
     // v0.25.506 — Y-axis cull. Tall maps (Frozen Peak) used to iterate
@@ -88355,7 +88372,7 @@ function drawMemoryEchoes() {
 }
 
 function drawNPCs() {
-  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x | 0, y | 0, w, h); };
+  const px = _pxFill;   // v0.29.x perf — shared helper, was a per-call closure
   for (const npc of game.npcs) {
     // v0.26.x — per-frame idle wander (Guguma only; no-op for every other NPC).
     // Runs before cx so the render uses the freshly-stepped position.
@@ -88650,7 +88667,7 @@ function drawNPCs() {
     // Name tag (drawn outside the chibi scale so text stays crisp)
     ctx.font = 'bold 11px sans-serif';
     ctx.textAlign = 'center';
-    const w = ctx.measureText(npc.name).width + 10;
+    const w = npc._nameTagW || (npc._nameTagW = ctx.measureText(npc.name).width + 10);   // v0.29.x perf — name + font are static
     ctx.fillStyle = 'rgba(20,10,30,0.8)';
     ctx.fillRect(cx - w/2, labelHeadY - 24, w, 15);
     ctx.strokeStyle = '#886bb8';
@@ -88812,7 +88829,7 @@ function drawNPCs() {
         ctx.textAlign = 'center';
         ctx.font = 'bold 10px sans-serif';
         const label = 'ZODIAC SANCTUM';
-        const tw = ctx.measureText(label).width + 14;
+        const tw = _zodiacLabelW || (_zodiacLabelW = ctx.measureText(label).width + 14);   // v0.29.x perf — constant string
         ctx.fillStyle = 'rgba(30,15,55,0.78)';
         ctx.fillRect(cx - tw/2, cy + 22, tw, 14);
         ctx.strokeStyle = '#aa77ff';
@@ -93002,7 +93019,7 @@ function drawCuteCharacter(sx, sy) {
   const cc = CUTE_CLASS_COLORS[cls] || CUTE_CLASS_COLORS.warrior;
   const f = player.facing;
   const cx = sx + player.w/2;
-  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x|0, y|0, w, h); };
+  const px = _pxFill;   // v0.29.x perf — shared helper, was a per-call closure
 
   // === SWING STATE — v0.25.107 anticipation + follow-through ===
   // Body lean now has THREE distinct phases instead of one bell curve:
@@ -94467,7 +94484,7 @@ function _drawCuteBow(P, f, drawArrow) {
 }
 
 function drawCuteHat(sx, sy, cls, cc) {
-  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x|0, y|0, w, h); };
+  const px = _pxFill;   // v0.29.x perf — shared helper, was a per-call closure
   // v0.25.30 — illustrative polish helper. Same anime-style sheen as
   // the head/torso polish in v0.25.29.
   const SHEEN  = 'rgba(255,255,255,0.55)';
@@ -99487,7 +99504,7 @@ function drawFishMob(m, sx, sy) {
 }
 
 function drawSnail(m, sx, sy) {
-  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x | 0, y | 0, w, h); };
+  const px = _pxFill;   // v0.29.x perf — shared helper, was a per-call closure
   const f = m.facing;
   const bob = Math.floor(Math.sin(m.animTimer * 0.02) * 1);
   // Body (slug)
@@ -99551,7 +99568,7 @@ function drawSnail(m, sx, sy) {
 }
 
 function drawSlime(m, sx, sy) {
-  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x | 0, y | 0, w, h); };
+  const px = _pxFill;   // v0.29.x perf — shared helper, was a per-call closure
   const bounce = Math.sin(m.animTimer * 0.02) * 2;
   const squish = Math.cos(m.animTimer * 0.02) * 1.5;
   const cx = sx + m.w/2, cy = sy + m.h - 10 + bounce;
@@ -99612,7 +99629,7 @@ function drawSlime(m, sx, sy) {
 }
 
 function drawMushroom(m, sx, sy) {
-  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x | 0, y | 0, w, h); };
+  const px = _pxFill;   // v0.29.x perf — shared helper, was a per-call closure
   const f = m.facing;
   const bob = Math.floor(Math.sin(m.animTimer * 0.015) * 1);
   const cx = sx + m.w/2;
@@ -99692,7 +99709,7 @@ function drawMushroom(m, sx, sy) {
 }
 
 function drawHorny(m, sx, sy) {
-  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x | 0, y | 0, w, h); };
+  const px = _pxFill;   // v0.29.x perf — shared helper, was a per-call closure
   const f = m.facing;
   const bob = Math.floor(Math.sin(m.animTimer * 0.018) * 1);
   const cx = sx + m.w/2;
@@ -99807,7 +99824,7 @@ function drawHorny(m, sx, sy) {
 }
 
 function drawStump(m, sx, sy) {
-  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x | 0, y | 0, w, h); };
+  const px = _pxFill;   // v0.29.x perf — shared helper, was a per-call closure
   const f = m.facing;
   const cx = sx + m.w/2;
   // Body outline
@@ -99893,7 +99910,7 @@ function drawStump(m, sx, sy) {
 }
 
 function drawZombie(m, sx, sy) {
-  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x | 0, y | 0, w, h); };
+  const px = _pxFill;   // v0.29.x perf — shared helper, was a per-call closure
   const f = m.facing;
   const bob = Math.floor(Math.sin(m.animTimer * 0.014) * 1);
   const cx = sx + m.w/2;
@@ -99977,7 +99994,7 @@ function drawZombie(m, sx, sy) {
 
 // ===== Dune Scuttler (scorpion) — low flat body, claws, curled tail =====
 function drawScorpion(m, sx, sy) {
-  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x|0, y|0, w, h); };
+  const px = _pxFill;   // v0.29.x perf — shared helper, was a per-call closure
   const f = m.facing;
   const bob = Math.floor(Math.sin(m.animTimer * 0.03) * 1);
   const cx = sx + m.w/2, bbY = sy + m.h - 8 + bob;
@@ -100045,7 +100062,7 @@ function drawScorpion(m, sx, sy) {
 
 // ===== Duneborn Mummy — tall bandage-wrapped humanoid =====
 function drawMummy(m, sx, sy) {
-  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x|0, y|0, w, h); };
+  const px = _pxFill;   // v0.29.x perf — shared helper, was a per-call closure
   const f = m.facing;
   const bob = Math.floor(Math.sin(m.animTimer * 0.012) * 1);
   const cx = sx + m.w/2;
@@ -100094,7 +100111,7 @@ function drawMummy(m, sx, sy) {
 
 // ===== Bone Archer (skeleton) — ribcage, pelvic bones, bow silhouette =====
 function drawSkeletonMob(m, sx, sy) {
-  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x|0, y|0, w, h); };
+  const px = _pxFill;   // v0.29.x perf — shared helper, was a per-call closure
   const f = m.facing;
   const bob = Math.floor(Math.sin(m.animTimer * 0.014) * 1);
   const cx = sx + m.w/2;
@@ -100154,7 +100171,7 @@ function drawSkeletonMob(m, sx, sy) {
 
 // ===== Pale Wraith — hovering hooded cloak, glowing eyes =====
 function drawWraith(m, sx, sy) {
-  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x|0, y|0, w, h); };
+  const px = _pxFill;   // v0.29.x perf — shared helper, was a per-call closure
   const f = m.facing;
   const hover = Math.sin(m.animTimer * 0.025) * 4;
   const cx = sx + m.w/2;
@@ -100230,7 +100247,7 @@ function drawWraith(m, sx, sy) {
 }
 
 function drawKingSlime(m, sx, sy) {
-  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x | 0, y | 0, w, h); };
+  const px = _pxFill;   // v0.29.x perf — shared helper, was a per-call closure
   const bounce = Math.floor(Math.sin(m.animTimer * 0.015) * 3);
   const f = m.facing;
   const cx = sx + m.w/2, cy = sy + m.h - 15 + bounce;
@@ -104532,7 +104549,7 @@ const ZODIAC_AI = {
 };
 
 function drawAetherion(m, sx, sy) {
-  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x | 0, y | 0, w, h); };
+  const px = _pxFill;   // v0.29.x perf — shared helper, was a per-call closure
   const cx = sx + m.w/2, cy = sy + m.h/2;
   const t = game.time;
   const phase = m.phase || 1;
@@ -104678,7 +104695,7 @@ function drawAetherion(m, sx, sy) {
 }
 
 function drawMooma(m, sx, sy) {
-  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x | 0, y | 0, w, h); };
+  const px = _pxFill;   // v0.29.x perf — shared helper, was a per-call closure
   const f = m.facing;
   const bob = Math.floor(Math.sin(m.animTimer * 0.012) * 2);
   const cx = sx + m.w/2;
