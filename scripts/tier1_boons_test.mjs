@@ -106,5 +106,20 @@ for (const [key, c] of Object.entries(COMBOS)) {
 check('frost_bloom registered in LX_FX', /frost_bloom:\s*'frost_bloom\.webp'/.test(src));
 check('Sprites/fx/frost_bloom.webp', fs.existsSync(path.join(ROOT, 'Sprites', 'fx', 'frost_bloom.webp')));
 
+// v0.29.370 — balance invariants (audit). These pin the two exploit classes
+// the engine already patched once and a boon must never reopen:
+//   • v0.26.399: dash i-frames must stay SHORTER than the 240ms re-fire gate
+//     (and the rogue's 280ms dodge CD, v0.26.966) — else dash-spam holds
+//     permanent invincibility. Hyper Teleport shipped at 320ms and did
+//     exactly that until this audit.
+//   • Bullet Waltz must halve its slow for bosses — full-value permanent
+//     slow turns every melee boss into a kite dummy.
+console.log('\n== balance invariants ==');
+const blinkGrant = src.match(/dashBlink > 0[\s\S]{0,900}?player\.invulnerable = Math\.max\(player\.invulnerable \|\| 0, (\d+)\)/);
+check('blink i-frame grant found', !!blinkGrant);
+if (blinkGrant) check(`blink i-frames ${blinkGrant[1]}ms < 240ms dash gate`, Number(blinkGrant[1]) < 240);
+check('waltz halves boss slow', /_waltzMulAt\(cx, cy, isBoss\)[\s\S]{0,700}if \(isBoss\) s \*= 0\.5;/.test(src));
+check('monster call site passes boss flag', /_waltzMulAt\(m\.x \+ m\.w \/ 2, m\.y \+ m\.h \/ 2, !!\(m\.isBoss \|\| m\.boss\)\)/.test(src));
+
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'} — ${pass}/${pass + fail} checks\n`);
 process.exit(fail ? 1 : 0);

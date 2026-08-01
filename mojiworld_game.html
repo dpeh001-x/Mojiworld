@@ -9058,7 +9058,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.369';
+const GAME_VERSION = 'v0.29.370';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -44724,7 +44724,15 @@ function _dashBoonBegin(dir) {
   // the physics broadphase.
   if (M.dashBlink > 0) {
     distMul += M.dashBlink;
-    player.invulnerable = Math.max(player.invulnerable || 0, 320);
+    // v0.29.370 — BALANCE (audit): 320ms → 200ms. At 320ms the phase window
+    // exceeded BOTH dash cycles — the 240ms double-tap re-fire gate
+    // (v0.26.399 exists precisely to keep i-frames shorter than that) and
+    // the rogue's 280ms Shift-dodge CD (whose i-frames v0.26.966 removed
+    // outright for the same reason) — so dash-spam held PERMANENT
+    // invincibility off one boon slot. 200ms still covers the dash
+    // traversal ("phases through foes" holds mid-dash) but leaves a
+    // mandatory vulnerable gap in every spam cycle.
+    player.invulnerable = Math.max(player.invulnerable || 0, 200);
     player._blinkPhaseUntil = (game.time | 0) + 20;
     // v0.29.369 — SYNERGY: Quantum Double (blink + echo). Opens the 2s
     // window in which Phantom Echo repeats at FULL damage (hitMonster).
@@ -44871,10 +44879,16 @@ function _dashNovaBurst() {
 // while the post-dash window stamped by _dashBoonBegin is live. Bosses are
 // slowed too — it's a positional tool, not damage, so the freeze-immunity
 // reasoning (v0.26.458) doesn't apply.
-function _waltzMulAt(cx, cy) {
+function _waltzMulAt(cx, cy, isBoss) {
   if (!player) return 1;
-  const s = (player.mods && player.mods.waltzSlow) || 0;
+  let s = (player.mods && player.mods.waltzSlow) || 0;
   if (!(s > 0)) return 1;
+  // v0.29.370 — BALANCE (audit): bosses take HALF the slow. The field is
+  // refreshable every dash, so its uptime is effectively permanent for a
+  // player who keeps moving — a full 70% roll turned every melee boss into
+  // a kite dummy. Half effect follows the engine's boss-CC philosophy
+  // (freeze: outright immune, v0.26.458) while keeping the boon felt.
+  if (isBoss) s *= 0.5;
   // Player-centred field, live for the post-dash window.
   if ((player._waltzUntil | 0) > (game.time | 0)) {
     const dx = cx - (player.x + player.w / 2), dy = cy - (player.y + player.h / 2);
@@ -61849,7 +61863,7 @@ function updateMonsters(dt) {
       // multiplier the tower modifiers use, so every downstream vx clamp
       // (ground chase, walk fallback, flier _maxV) inherits the slow with
       // no extra branches.
-      const _tSpd = towerSpeedMul() * ((typeof _waltzMulAt === 'function') ? _waltzMulAt(m.x + m.w / 2, m.y + m.h / 2) : 1);
+      const _tSpd = towerSpeedMul() * ((typeof _waltzMulAt === 'function') ? _waltzMulAt(m.x + m.w / 2, m.y + m.h / 2, !!(m.isBoss || m.boss)) : 1);   // v0.29.370 — bosses take half the waltz slow
       if (m.aggroTarget && distToPlayer < 500 && yDiff < 200) {
         // v0.25.112 — per-monster aggro offset. Without this, every
         // aggroing mob aims at the same pixel (player centre) and the
