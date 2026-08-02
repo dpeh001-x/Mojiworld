@@ -9152,7 +9152,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.406';
+const GAME_VERSION = 'v0.29.405';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -73191,6 +73191,89 @@ function _playNpcTalkSfx(npc) {
     if (p && p.catch) p.catch(() => {});
   } catch (_) {}
 }
+// v0.29.402 — PER-SHOPKEEPER VOICES. Per user: "the blacksmith is not Brok,
+// but the chat dialogue mentions Brok… make sure that all blacksmiths have
+// unique chats with their actual name, same goes for potion sellers."
+//
+// Both shop branches below were written for the Everdawn pair (Brok, Nurse
+// Joyce) and then reused verbatim by every other shopkeeper — so Oakhart in
+// Verdant Haven greeted you as Brok, and Petunia recited Joyce's fang-tested
+// patter. Three smiths (role 'weapon': Brok, Barnaby, Oakhart) and two potion
+// sellers (role 'potion': Nurse Joyce, Petunia) shared two scripts.
+//
+// Keyed by npc.name. A missing key falls through to `_default`, whose lines
+// take the name as an argument — so a new shopkeeper reads correctly on the
+// day they are placed, and only sounds generic until given an entry here.
+const LX_SHOP_VOICE = {
+  // ── SMITHS (role 'weapon') ──────────────────────────────────────────────
+  Brok: {
+    intro: '*Brok looks up from the anvil, soot on his nose, hammer in his hand.*\n\n' +
+           'Hmph. Another swordsmith\'s nightmare walks in. Sit.\n\n' +
+           'Three things happen at this forge, pick one:',
+    shop:    '*Brok jerks a thumb at the racks.*',
+    improve: '*Brok pats the anvil.*',
+    craft:   '*Brok drags out the crafting bench.*',
+  },
+  Barnaby: {
+    intro: '*Barnaby sets down a frost-rimed gauntlet and breathes on his knuckles.*\n\n' +
+           'Mind the door — the cold gets in and it does not leave politely.\n\n' +
+           'The mansion keeps a forge because steel here turns brittle if nobody argues with it. ' +
+           'I argue with it. Daily. What do you need?',
+    shop:    '*He sweeps frost off a display case with his sleeve.*',
+    improve: '*He turns your gear over twice, checking it against the cold.*',
+    craft:   '*He unrolls a felt mat, the kind you use when the bench is too cold to touch.*',
+  },
+  Oakhart: {
+    intro: '*Oakhart sets his hammer across the anvil and lets the ringing die out before he speaks.*\n\n' +
+           'You came up through the Reaches, so you already know the rule — nothing here is finished, ' +
+           'it is only grown far enough along.\n\n' +
+           'Same with steel. Tell me what yours needs.',
+    shop:    '*He gestures at racks braced with living green wood, still faintly budding.*',
+    improve: '*He rests your gear on the anvil the way you would set down something asleep.*',
+    craft:   '*He clears the bench of seed trays to make room.*',
+  },
+  // ── POTION SELLERS (role 'potion') ──────────────────────────────────────
+  'Nurse Joyce': {
+    intro: '*Nurse Joyce caps a bottle with her thumb and slides the tray towards you.*\n\n' +
+           'Welcome to the apothecary, traveller! 🧪 Red for HP, blue for MP, and <em>please</em> do not mix them — ' +
+           'the last person who did turned a colour I am not legally allowed to describe.\n\n' +
+           'Everything is shelf-stable, fang-tested, and only slightly haunted.',
+    askT: '…fang-tested?',
+    askA: 'Mostly mine. The bottles bite back sometimes — it means the brew is lively. Drink it anyway.',
+  },
+  Petunia: {
+    intro: '*Petunia wipes soil off her hands and looks you over like a plant that has been under-watered.*\n\n' +
+           'Oh good, someone with scratches. 🌿 Sit on the crate, mind the roots, they move.\n\n' +
+           'Everything on this shelf came out of the beds behind the haven this week — reds off the bleedheart vine, ' +
+           'blues off the moonpetal. No powders, no imports, nothing that has been sitting in a caravan since spring.\n\n' +
+           'It tastes like a garden. That is not an apology.',
+    askT: 'The roots move?',
+    askA: 'Only towards people who are bleeding. It is a kindness, mostly. Do not let them tuck you in.',
+  },
+  // ── FALLBACKS ───────────────────────────────────────────────────────────
+  _default: {
+    weapon: (n) => ({
+      intro: `*${n} sets the hammer down and looks you over.*\n\n` +
+             'Steel is steel and it does not care who carries it. Say what you came for:',
+      shop:    `*${n} nods at the racks.*`,
+      improve: `*${n} clears a space on the anvil.*`,
+      craft:   `*${n} pulls the crafting bench over.*`,
+    }),
+    potion: (n) => ({
+      intro: `*${n} straightens a row of bottles.*\n\nRed mends, blue restores. Ask if you want the long version.`,
+      askT: 'The long version?',
+      askA: 'Boil, strain, wait, apologise to the pot. That is the whole of it.',
+    }),
+  },
+};
+// Resolve a shopkeeper's voice by name, falling back to the role default.
+function _lxVoice(npc, role) {
+  const v = npc && npc.name && LX_SHOP_VOICE[npc.name];
+  if (v) return v;
+  const mk = LX_SHOP_VOICE._default[role];
+  return mk ? mk((npc && npc.name) || 'The shopkeeper') : {};
+}
+
 function openNPC(npc) {
   if (typeof _playUiSfx === 'function') _playUiSfx('dialog_blip');   // v0.26.x — SFX-review gap fill
   _playNpcTalkSfx(npc);                                              // v0.27.23 — per-NPC talk voice
@@ -73230,15 +73313,14 @@ function openNPC(npc) {
   if (typeof _questTalkTo === 'function') { try { _questTalkTo(npc.name); } catch (e) {} }
   let text = '', opts = [];
   if (npc.role === 'potion') {
-    // v0.25.807 — Nurse Joyce given proper character voice. Cheerful
-    // apothecary-flavoured shop dialogue with a wink at every label.
-    text =
-      'Welcome to the apothecary, traveller! 🧪 Red for HP, blue for MP, ' +
-      'and <em>please</em> do not mix them — the last person who did turned ' +
-      'a colour I am not legally allowed to describe.\n\nEverything is shelf-' +
-      'stable, fang-tested, and only slightly haunted.';
+    // v0.25.807 — Nurse Joyce given proper character voice.
+    // v0.29.402 — her script is no longer everyone's. Petunia in Verdant Haven
+    // used to recite Joyce's fang-tested patter word for word; each seller now
+    // has her own entry in LX_SHOP_VOICE, and the follow-up question is hers too.
+    const _pv = _lxVoice(npc, 'potion');
+    text = _pv.intro;
     opts.push({ t:'Buy Potions', cb:() => { closeDialog(); openShop('potion'); } });
-    opts.push({ t:'…fang-tested?', cb:() => { document.getElementById('dialog-text').textContent = 'Mostly mine. The bottles bite back if the seal is loose. Builds character, builds tolerance — same brewery, same week. Try the medium reds, they have personality.'; } });
+    opts.push({ t: _pv.askT, cb:() => { document.getElementById('dialog-text').textContent = _pv.askA; } });
   } else if (npc.role === 'weapon') {
     // v0.25.807 — Brok given character voice. Gruff blacksmith with dry
     // humour. Concise — he doesn't waste words, only hammers.
@@ -73247,10 +73329,15 @@ function openNPC(npc) {
     // a short explainer of what every function does + the actions, with a Back
     // row. Re-render uses the Amnesiac's openNPC(npc) pattern via game._brokMenu
     // (reset on closeDialog so the next visit always starts at the top level).
+    // v0.29.402 — this whole branch was written as Brok and then handed to every
+    // smith, so Oakhart and Barnaby both greeted you as him. Voice now resolves
+    // by name. (`game._brokMenu` keeps its name: it is internal sub-menu state,
+    // never shown, and renaming it would collide with a parallel session.)
+    const _wv = _lxVoice(npc, 'weapon');
     const _bm = game._brokMenu || null;
     if (_bm === 'shop') {
       text =
-        '*Brok jerks a thumb at the racks.*\n\n' +
+        _wv.shop + '\n\n' +
         'SHOP — coin in, steel out. Simple.\n\n' +
         '\u2022 BUY GEAR — weapons and armor for your level.\n' +
         '\u2022 SELL ITEMS — turn outgrown gear into Mojicoins.';
@@ -73259,7 +73346,7 @@ function openNPC(npc) {
       opts.push({ t:'◀ Back', cb:() => { game._brokMenu = null; openNPC(npc); } });
     } else if (_bm === 'improve') {
       text =
-        '*Brok pats the anvil.*\n\n' +
+        _wv.improve + '\n\n' +
         'IMPROVE — make what you already own hit harder.\n\n' +
         '\u2022 ENHANCE — star-upgrade gear \u2605 0\u2192 \u2605 10. Each star = +10% to ALL its stats.\n' +
         '\u2022 REFORGE — reroll one equipped item\'s bonus affixes. Costs 100\u25c8, needs Lv 50.';
@@ -73268,7 +73355,7 @@ function openNPC(npc) {
       opts.push({ t:'◀ Back', cb:() => { game._brokMenu = null; openNPC(npc); } });
     } else if (_bm === 'craft') {
       text =
-        '*Brok drags out the crafting bench.*\n\n' +
+        _wv.craft + '\n\n' +
         'CRAFT — Setshards (\u25c8) become set legendaries.\n\n' +
         '\u2022 CRAFT SET PIECE — forge ANY set item for 10\u25c8 + 3,000 coins. Disassemble spare set drops for +4\u25c8 each.\n' +
         '\u2022 RECIPE SCROLLS — they live in yer bag (B \u2192 Use tab). Click one to craft its set piece; costs three DIFFERENT Zodiac Sigils. The zodiac each drop one when slain.';
@@ -73278,17 +73365,18 @@ function openNPC(npc) {
       // v0.29.60 — Brok remembers the Hourglass verdict (the q_hourglass_5
       // choice). One line ahead of his usual gruffness, different per pick —
       // the Witcher trick: your decision quietly follows you around.
-      const _hgV = (player._storyChoices || {}).hourglass;
+      // v0.29.402 — gated to Brok. The Hourglass is HIS questline (he gives
+      // q_hourglass_1), and the lines are in his register — "ye", "lyin'",
+      // the ledger on his wall. Oakhart and Barnaby were reciting them.
+      const _hgV = (npc.name === 'Brok') ? (player._storyChoices || {}).hourglass : null;
       const _hgLine = _hgV === 'shattered'
         ? '*He taps the anvil twice, listening.* Every clock in the quarter ticks a half-beat quick since ye let that Hourglass go. Bold call. The iron likes it.\n\n'
         : (_hgV === 'resealed'
           ? '*He nods at the ledger on the wall.* Tide charts stopped lyin\' since ye sealed that Hourglass. The Keepers still send me pearls over it. Steady call. The iron respects it.\n\n'
           : '');
       text =
-        '*Brok looks up from the anvil, soot on his nose, hammer in his hand.*\n\n' +
         _hgLine +
-        'Hmph. Another swordsmith\'s nightmare walks in. Sit.\n\n' +
-        'Three things happen at this forge, pick one:\n' +
+        _wv.intro + '\n' +
         '\u2022 SHOP — buy new gear, sell old gear.\n' +
         '\u2022 IMPROVE — enhance, reforge or transfer the gear you own.\n' +
         '\u2022 CRAFT — turn Setshards into set legendaries.';
@@ -107323,19 +107411,10 @@ function drawHazards() {
       ctx.save();
       ctx.globalAlpha = 0.85 * fade;
       ctx.translate(sx, cy);
+      ctx.rotate((game.time || 0) * 0.04);
       const size = h.radius * 1.4;
       if (_lxVfxReady(_lxVfxFrame('gravityWell'))) {
-        // v0.29.406 — per user, the well read as a disc pasted over the scene.
-        // The art is a TOP-DOWN vortex, flattened to 36% height so it lies on
-        // the ground. The spin used to be `ctx.rotate()` in SCREEN space with
-        // an already-flattened rect drawn under it, which tumbles the ellipse
-        // like a spun coin — at 45 degrees its major axis runs diagonally
-        // across the scene, and it stops matching the outer dimming ring
-        // below (a fixed horizontal ellipse). Flatten FIRST, then rotate, so
-        // the swirl spins in its own plane and the silhouette stays flat.
-        ctx.scale(1, 0.36);
-        ctx.rotate((game.time || 0) * 0.04);
-        ctx.drawImage(_lxVfxFrame('gravityWell'), -size / 2, -size / 2, size, size);
+        ctx.drawImage(_lxVfxFrame('gravityWell'), -size / 2, -size * 0.18, size, size * 0.36);
       } else {
         ctx.fillStyle = `rgba(168,102,221,${0.55 * fade})`;
         ctx.beginPath();
