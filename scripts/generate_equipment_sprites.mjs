@@ -2,7 +2,7 @@
 // Equipment sprite generation runner — v0.25.812
 // =============================================================================
 // Drives all 121 equipment prompts from Equipment_Sprite_Prompts.docx (sourced
-// from tools/_equip_rows.json + the exact buildPrompt() that authored the docx)
+// from tools/_archive/_equip_rows.json + the exact buildPrompt() that authored the docx)
 // through the Ludo image API. Modes:
 //
 //   node scripts/generate_equipment_sprites.mjs                 # dry-run print

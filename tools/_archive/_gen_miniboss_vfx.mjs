@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Mini-boss VFX (ludo.ai): 2 unique projectiles (Sprites/projectiles/, 768²)
 // + 2 columnStrike pillars (Sprites/fx/, 256x1024). Resumable; --force overwrites.
-//   node tools/_gen_miniboss_vfx.mjs --generate
+//   node tools/_archive/_gen_miniboss_vfx.mjs --generate
 import sharp from 'sharp';
 import { writeFile, mkdir, access } from 'node:fs/promises';
 import { dirname, join } from 'node:path';

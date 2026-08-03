@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Mini-boss damage/death SFX (ludo /audio/sound-effect) → the game's zero-code
 // per-monster override slots: audio/monster/mob_<type>_<hit|die>.mp3.
-//   node tools/_gen_miniboss_sfx.mjs --generate
+//   node tools/_archive/_gen_miniboss_sfx.mjs --generate
 import { writeFile, mkdir, access } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
