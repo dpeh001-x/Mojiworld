@@ -37,6 +37,7 @@ const VFX = {
   poison_cloud:    { file: 'poison_cloud.webp',    prompt: 'a floating toxic-green poison gas cloud — the cloud gently billows and roils, glossy green bubbles swell and pop, wisps of vapour curl and rise, and a sickly green glow pulses.' },
   quake_ring:      { file: 'quake_ring.webp',      prompt: 'a billowing dust-and-smoke earthquake burst — the tan and grey dust clouds churn and roll, small pebbles jitter and shake, and faint dust motes drift outward (in-place churn, no expansion).' },
   shock_ring:      { file: 'shock_ring.webp',      prompt: 'a translucent shockwave ring — energy pulses and ripples around the ring, a faint air-distortion shimmer flickers across it, and light crackles along its rim (in-place pulse, no expansion).' },
+  cloudburst:      { file: 'cloudburst.webp',      prompt: 'a small cartoon storm raincloud seen from the side — the cloud puff gently billows and swells as if breathing, the raindrops beneath it streak downward and fresh droplets keep falling in a continuous seamless loop, and a faint cyan spark flickers inside the cloud body.' },
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };

@@ -47,6 +47,11 @@ const VFX = {
   // v0.26.897 — lava pair folded in from gen_lava.mjs so one script owns Sprites/vfx/
   lava_drop:        'a CUTE falling MOLTEN LAVA droplet drawn like a die-cut cartoon sticker: one plump squishy teardrop blob of bright orange-gold magma with a white-hot core and big glossy highlights, two chubby little splatter beads above it, dripping downward. CRITICAL: EVERY blob is fully enclosed by a UNIFORM, THICK, PURE-BLACK ~3px CONTOUR OUTLINE on its outer edge — a bold black cartoon line all the way around each shape, exactly like the quake-ring pebbles. Playful kawaii energy, round squishy shapes — still clearly hot, NO face.',
   lava_pool:        'a bubbling MOLTEN LAVA pool seen TOP-DOWN: a circular flat disc of bright orange-gold magma with a white-hot swirling centre, thin darker crust flecks at the rim, small rising glossy lava bubbles, glowing hot.',
+  // v0.29.407 — Skywisp / Cloudbun signature. Deliberately a SIDE view, unlike
+  // the top-down ground discs above: this hazard hangs in the AIR over the
+  // player, so a top-down projection would have to be squashed and would read
+  // as a sticker (exactly the gravity-well failure it replaces).
+  cloudburst:       'a CUTE little STORM CLOUD seen from the SIDE and raining, drawn like a die-cut cartoon sticker. TOP: one plump rounded squishy cloud puff, white and pale sky-blue with a soft grey shaded underside and glossy highlights. BELOW IT: a short curtain of chubby teardrop RAIN droplets and a few thin pale-cyan rain streaks falling straight DOWN, plus two tiny bright cyan lightning sparkles. CRITICAL: EVERY puff and every droplet is fully enclosed by a UNIFORM, THICK, PURE-BLACK ~3px CONTOUR OUTLINE on its outer edge. Portrait composition: cloud occupying the upper third, rain falling beneath it. Playful kawaii energy, rounded squishy shapes, NO face, no eyes.',
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
