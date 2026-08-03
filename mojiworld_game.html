@@ -45044,7 +45044,12 @@ function offerPrestige() {
                `• +1% crit chance  (-> +${(p.critBonus || 0) + 1}%, uncapped)\n` +
                `• +12 max HP  (-> +${(p.hpBonus || 0) + 12}, uncapped)\n` +
                `• +1 starting attribute point  (-> +${p.bonusAP + 1})\n\n` +
-               `Ascension #${nextCount}. Your inventory, equipment, and bosses reset.`;
+               // v0.29.410 — copy follows the reset below. Gear and money are
+               // kept now, so promising they reset would be a lie the player
+               // only discovers after an irreversible confirm.
+               `You KEEP your inventory, equipment, consumables and mojicoins (wallet + Mojibank).\n` +
+               `Reset: level, stats, job/master, talents, skill tree, boons, skill ranks, active quests, boss clears and setshards.\n\n` +
+               `Ascension #${nextCount}.`;
   // v0.25.244 (X4) — in-game styled prestige confirm.
   uiConfirm({
     title: '✨ ASCEND?',
@@ -45074,17 +45079,38 @@ function offerPrestige() {
     player.milestonesUnlocked = {};
     player.treeUnlocked = {}; player.tree = {};
     player.job = null; player.master = null; player.talents = {};   // v0.26.889
-    player.inventory = [];
-    // v0.25.309 — Prestige reset must keep the visual-equipment slots
-    // (added v0.25.303). Without them the wardrobe Apply path silently
-    // drops picks until the player reloads.
-    player.equipped = {
-      weapon:null, armor:null, accessory:null,
-      body_top:null, body_bottom:null, cape:null,
-      gloves:null, boots:null, helmet:null,
-    };
-    player.mojicoins = 200;
-    player.consumables = { hp_s: 5, mp_s: 3 };
+    // v0.29.410 — Per user: "on ascension the player gets to keep all items
+    // and mojicoins." Inventory, equipped gear, consumables and the wallet
+    // used to be wiped here (inventory -> [], every slot -> null, coins -> 200,
+    // consumables -> 5 HP / 3 MP potions). They are now all carried over.
+    // What still resets is progression, which is the point of ascending:
+    // level, stats, the invested-stat ledger, job/master/talents, tree,
+    // milestones, boons, skill ranks, quests and boss clears.
+    //
+    // Note the wallet was the only coin store being cleared — `bankBalance`
+    // already survived prestige, so pre-ascension banking was a way to keep
+    // your money. Both stores now behave the same way, which removes that
+    // asymmetry rather than widening it.
+    if (!Array.isArray(player.inventory)) player.inventory = [];
+    // v0.25.309 — the visual-equipment slots (added v0.25.303) must all be
+    // PRESENT, or the wardrobe Apply path silently drops picks until the
+    // player reloads. That used to be guaranteed by rebuilding the object
+    // wholesale; now that gear is kept, normalise in place instead so a save
+    // written before those slots existed still gets the full key set.
+    if (!player.equipped || typeof player.equipped !== 'object') player.equipped = {};
+    for (const _s of ['weapon','armor','accessory','body_top','body_bottom','cape','gloves','boots','helmet']) {
+      if (player.equipped[_s] === undefined) player.equipped[_s] = null;
+    }
+    // Gear survives, so the derived caches must be rebuilt against the freshly
+    // reset base stats rather than trusting values computed pre-ascension.
+    if (typeof invalidateEquipBonusCache === 'function') invalidateEquipBonusCache();
+    else player._equipBonusCache = null;
+    if (typeof _refreshEqEmptyFlag === 'function') _refreshEqEmptyFlag();
+    if (typeof refreshGearCache === 'function') refreshGearCache();
+    // Wallet is kept. Only repair it if the save carried a broken value —
+    // a fresh character's 200 remains the floor for that case, not a reset.
+    if (typeof player.mojicoins !== 'number' || !isFinite(player.mojicoins) || player.mojicoins < 0) player.mojicoins = 200;
+    if (!player.consumables || typeof player.consumables !== 'object') player.consumables = { hp_s: 5, mp_s: 3 };
     // v0.25.250 — setshards reset on prestige (fresh crafting economy each ascension).
     player.setshards = 0;
     // v0.25.594 — bug fix. Prestige reset previously kept `player.boons`,
