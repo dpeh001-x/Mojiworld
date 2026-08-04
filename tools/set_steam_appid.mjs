@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Stamp the real Steam App ID everywhere it has to match.
 // =============================================================================
-// The App ID appears in five places that must agree, and getting one wrong
+// The App ID appears in six places that must agree, and getting one wrong
 // fails late and confusingly (a build uploads to the wrong depot; the wrapper
 // initialises against Spacewar and every achievement silently no-ops). The
 // pre-launch checklist calls this out: "480 means you shipped the Spacewar
-// placeholder". This stamps all five from one number.
+// placeholder". This stamps all six from one number.
 //
 //   node tools/set_steam_appid.mjs            # show current state
 //   node tools/set_steam_appid.mjs 3210987    # stamp it
@@ -16,12 +16,18 @@
 // depot_*.vdf files by hand afterwards — this prints what it wrote so you can
 // check against that page.
 // =============================================================================
-import { readFile, writeFile, rename } from 'node:fs/promises';
+import { readFile, writeFile, rename, readdir } from 'node:fs/promises';
 
 const APPID_TXT = 'steam/steam_appid.txt';
 const APP_BUILD = 'steam/steam_upload/app_build.vdf';
 const DEPOT_WIN = 'steam/steam_upload/depot_windows.vdf';
 const DEPOT_LIN = 'steam/steam_upload/depot_linux.vdf';
+// v0.29.x — the SIXTH place the App ID lives, and the easiest to miss because it
+// is encoded in a FILENAME rather than in file contents. Steam Input looks up
+// controller_config/game_actions_<appid>.vdf by App ID, so a stale name means the
+// Game Actions File is silently never found and every controller binding is dead.
+// It sat at game_actions_480.vdf long after the real App ID was stamped.
+const CTRL_DIR = 'steam/controller_config';
 
 const arg = process.argv[2];
 const reset = arg === '--reset';
@@ -89,11 +95,30 @@ for (const [path, id] of [[DEPOT_WIN, winId], [DEPOT_LIN, linId]]) {
   await put(path, raw.replace(/("DepotID"\s*")\d+(")/, `$1${id}$2`), [`"${id}"`]);
 }
 
+// controller_config/game_actions_<appid>.vdf — rename, not a content edit.
+let ctrlFrom = null, ctrlTo = null;
+try {
+  const files = await readdir(CTRL_DIR);
+  const cur = files.find(f => /^game_actions_\d+\.vdf$/.test(f));
+  if (cur) {
+    const want = `game_actions_${appId}.vdf`;
+    if (cur !== want) {
+      await rename(`${CTRL_DIR}/${cur}`, `${CTRL_DIR}/${want}`);
+      ctrlFrom = cur; ctrlTo = want;
+    } else { ctrlFrom = cur; ctrlTo = cur; }
+  }
+} catch (e) { /* no controller_config — Steam Input simply not wired */ }
+
 console.log(reset ? 'Reset to placeholders.\n' : 'Stamped.\n');
 console.log(`  steam_appid.txt        ${cur} -> ${appId}`);
 console.log(`  app_build.vdf AppID    ${oldApp} -> ${buildId}`);
 console.log(`  windows depot          ${oldDepots.find(d => d[2].includes('windows'))[1]} -> ${winId}`);
 console.log(`  linux depot            ${oldDepots.find(d => d[2].includes('linux'))[1]} -> ${linId}`);
+if (ctrlFrom) {
+  console.log(`  game actions file      ${ctrlFrom}${ctrlTo !== ctrlFrom ? ' -> ' + ctrlTo : '  (already correct)'}`);
+} else {
+  console.log('  game actions file      (none found in steam/controller_config)');
+}
 if (!reset) {
   console.log('\nCheck those depot IDs against Steamworks > App Admin > Depots, then rebuild');
   console.log('so steam_appid.txt is baked into the packaged app.');

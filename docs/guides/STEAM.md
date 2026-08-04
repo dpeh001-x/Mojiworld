@@ -321,7 +321,10 @@ which is **absent entirely on the web build** — so every Steam feature in
 - `steam/launch_args.js` — plain-Node parsing of `--moji-join=` / `+connect_lobby` argv (unit-testable, no Electron deps).
 - `steam/preload.js` — exposes `window.SteamAPI` (cloud/achievement/lobby async over IPC; input snapshot sync; buffers a `moji-join` that lands before the game registers `onJoin`).
 - `steam/steam_appid.txt` — App ID the wrapper passes to `steamworks.init()` (**480 = Spacewar placeholder; the steam-build workflow overwrites it with `vars.STEAM_APP_ID` for shipped builds**).
-- `steam/controller_config/game_actions_480.vdf` — Steam Input Game Actions File (rename to your App ID).
+- `steam/controller_config/game_actions_4842650.vdf` — Steam Input Game Actions File.
+  The filename encodes the App ID and Steam Input looks it up that way, so a stale
+  name means the config is silently never found. `set_steam_appid.mjs` renames it
+  for you; it is the sixth (and easiest to miss) place the App ID lives.
 
 ### Setup
 1. `cd steam && npm install` — pulls `steamworks.js` (prebuilt native binaries).
