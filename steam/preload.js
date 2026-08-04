@@ -98,12 +98,19 @@ try {
   try { window.MOJI_RELAY_URL = relay; if (launchJoin) window.MOJI_JOIN = launchJoin; if (steamAvailable) window.SteamAPI = SteamAPI; } catch (_) {}
 }
 
-// Steam Deck: auto-pop the floating gamepad keyboard whenever a typeable field
-// takes focus (hero name, party code, chat). Runs entirely in the preload's
-// isolated world — the game needs no changes and the web build never sees this.
-// The keyboard is positioned from the field's on-screen rect so it docks clear
-// of what the player is typing into.
-if (steamAvailable && onDeck) {
+// Auto-pop Steam's floating gamepad keyboard whenever a typeable field takes
+// focus (hero name, party code, chat). Runs entirely in the preload's isolated
+// world — the game needs no changes and the web build never sees this. The
+// keyboard is positioned from the field's on-screen rect so it docks clear of
+// what the player is typing into.
+//
+// v0.29.x — was gated on `onDeck` (the --moji-deck=1 launch arg), so it fired
+// ONLY on Steam Deck. A desktop player in Big Picture with just a controller
+// got no keyboard on the hero-name field and could not finish character
+// creation — the second thing making "Full Controller Support" untrue.
+// ShowFloatingGamepadTextInput is itself a no-op when the Steam overlay is not
+// in a gamepad context, so dropping the gate costs nothing off-Deck and off-BPM.
+if (steamAvailable) {
   window.addEventListener('focusin', (ev) => {
     try {
       const el = ev.target;
