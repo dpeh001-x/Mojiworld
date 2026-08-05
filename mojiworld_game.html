@@ -9164,7 +9164,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.413';
+const GAME_VERSION = 'v0.29.415';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -88675,6 +88675,77 @@ function updateMapEvents(dt) {
   }
 }
 
+// =========================================================================
+// v0.29.415 — AMBIENT V2. Three additions, engineered to cost ~nothing:
+//   1. FALLBACK BIOMES — ~180 of 234 maps had no ambient entry (the hand
+//      chain below only knows ~50 ids). A keyword classifier assigns a
+//      subtle preset, resolved ONCE per map and cached — per frame it is
+//      a single object lookup, and only on maps the chain missed.
+//   2. DAY / NIGHT — real-clock grade recomputed every 2 s (cached style
+//      string), drawn as ONE fillRect, and skipped entirely by day. At
+//      night, leaf/petal maps trade their petals for fireflies.
+//   3. BIRDS — max 3, day-only on verdant maps, 3 fillRects each; they
+//      scatter when the player closes in.
+// LX_AMBIENT_V2 = false turns every new path off at runtime (A/B lever).
+let LX_AMBIENT_V2 = true;
+const _AMB_FB_CACHE = {};
+const _AMB_FB_PRESETS = [
+  [/forest|grove|wood|glade|thicket|jade|moss|verd/i,            { sc:0.18, col:'#9ccc70', vx:-0.3,  vy:0.40,  type:'leaf'   }],
+  [/snow|frost|ice|glacial|boreal|winter|peak/i,                 { sc:0.30, col:'#f0f6ff', vx:-0.3,  vy:0.50,  type:'snow'   }],
+  [/lava|magma|ember|forge|volcan|molten|cinder|scorch/i,        { sc:0.25, col:'#ff7733', vx:-0.1,  vy:-0.40, type:'ember'  }],
+  [/sea|reef|tide|ocean|coral|kelp|abyss|lagoon|grotto|aqua/i,   { sc:0.18, col:'#9bd4ff', vx:0,     vy:-0.40, type:'bubble' }],
+  [/sky|cloud|celest|star|astral|nimbus|aeri/i,                  { sc:0.20, col:'#e8f0ff', vx:-0.1,  vy:-0.02, type:'glint'  }],
+  [/cave|crypt|hollow|mine|cavern|sepulch|tomb|dungeon|depth/i,  { sc:0.15, col:'#8fa8cc', vx:-0.15, vy:-0.10, type:'wisp'   }],
+  [/desert|dune|sand|mesa|badland/i,                             { sc:0.20, col:'#e0c088', vx:-0.8,  vy:0.25,  type:'sand'   }],
+  [/candy|sugar|blossom|meadow|plain|field|garden|flower|spring/i,{ sc:0.18, col:'#ffb0d8', vx:-0.3,  vy:0.30,  type:'petal'  }],
+];
+function _ambFallbackFor(id) {
+  if (id in _AMB_FB_CACHE) return _AMB_FB_CACHE[id];
+  let out = null;
+  const m = (typeof MAPS === 'object') ? MAPS[id] : null;
+  if (m && !m.isVoid && !m.isBossArena &&
+      id.indexOf('tower_b') !== 0 && id.indexOf('clockwork') !== 0) {
+    const key = id + ' ' + (m.bg || '') + ' ' + (m.name || '');
+    for (const pair of _AMB_FB_PRESETS) { if (pair[0].test(key)) { out = pair[1]; break; } }
+    // universal default: barely-there warm dust motes
+    if (!out) out = { sc: 0.10, col: '#e8e4da', vx: -0.2, vy: 0.15, type: 'spore' };
+  }
+  _AMB_FB_CACHE[id] = out;
+  return out;
+}
+// Real-clock day phase, cached 2 s. game._forcePhase (an HOUR, e.g. 23) is a
+// dev/test override. alpha is 0 for all daytime hours, so the tint draw
+// short-circuits to nothing most of the day.
+let _LX_DAYPH = { t: 0, phase: 'day', alpha: 0, style: '' };
+function _lxDayPhase() {
+  const now = Date.now();
+  if (now - _LX_DAYPH.t < 2000) return _LX_DAYPH;
+  const d = new Date();
+  let h = d.getHours() + d.getMinutes() / 60;
+  if (typeof game !== 'undefined' && game && game._forcePhase != null) h = game._forcePhase;
+  let phase = 'day', alpha = 0, tint = '26,34,88';
+  const tri = (a, b, x) => Math.max(0, 1 - Math.abs(x - (a + b) / 2) / ((b - a) / 2));
+  if (h >= 19.5 || h < 5.5) {
+    phase = 'night';
+    const hh = (h < 5.5) ? h + 24 : h;                       // 19.5 .. 29.5
+    alpha = 0.18 * Math.min(1, hh - 19.5, 29.5 - hh);        // 1 h ramps at both ends
+  } else if (h >= 5.5 && h < 8)  { phase = 'dawn'; tint = '255,176,120'; alpha = 0.08 * tri(5.5, 8, h); }
+  else if (h >= 17 && h < 19.5)  { phase = 'dusk'; tint = '255,138,92';  alpha = 0.12 * tri(17, 19.5, h); }
+  alpha = Math.round(alpha * 100) / 100;
+  _LX_DAYPH = { t: now, phase, alpha, style: alpha ? 'rgba(' + tint + ',' + alpha + ')' : '' };
+  return _LX_DAYPH;
+}
+function _drawDayNightTint() {
+  if (!LX_AMBIENT_V2) return;
+  const ph = _lxDayPhase();
+  if (!ph.alpha) return;                                     // whole feature is free by day
+  const m = game.mapData, id = game.currentMap || '';
+  if (!m || m.isVoid || m.isBossArena) return;
+  if (id.indexOf('tower_b') === 0 || id.indexOf('clockwork') === 0) return;
+  ctx.fillStyle = ph.style;                                  // prebuilt string, no per-frame concat
+  ctx.fillRect(-30, -30, W + 60, H + 60);
+}
+
 function updateAmbient() {
   const W2 = game.mapData.worldWidth;
   const id = game.currentMap;
@@ -88780,6 +88851,25 @@ function updateAmbient() {
   else if (id === 'hiddenPagoda')     { spawnChance = 0.28; col = '#dcb888'; vy = 0.32; type = 'leaf'; }
   else if (id === 'azureAcademia' || id === 'azureAbode') {
                                      spawnChance = 0.22; col = '#bcd8f4'; vy = 0.25; type = 'petal'; }
+  // v0.29.415 — AMBIENT V2 hooks: fallback for uncovered maps, the night
+  // firefly swap, and the occasional daytime bird. All O(1) per frame
+  // (fallback is cached per map; the bird branch runs on a 1.2% roll).
+  const _ph = LX_AMBIENT_V2 ? _lxDayPhase() : null;
+  if (_ph && spawnChance === 0) {
+    const fb = _ambFallbackFor(id);
+    if (fb) { spawnChance = fb.sc; col = fb.col; vx = fb.vx; vy = fb.vy; type = fb.type; }
+  }
+  if (_ph && _ph.phase === 'night' &&
+      (type === 'leaf' || type === 'petal' || type === 'petal_drift')) {
+    type = 'firefly'; col = '#ffee88'; vy = -0.12; spawnChance *= 0.6;
+  }
+  if (_ph && _ph.phase === 'day' && spawnChance > 0 && Math.random() < 0.012 &&
+      (type === 'leaf' || type === 'petal' || type === 'petal_drift')) {
+    let _bn = 0;
+    for (const q of game.ambient) if (q.type === 'bird') _bn++;
+    if (_bn < 3) { type = 'bird'; col = '#4a4038'; vy = 0;
+      vx = (Math.random() < 0.5 ? -1 : 1) * (0.7 + Math.random() * 0.5); }
+  }
   if (Math.random() < spawnChance * (lowFx ? 0.35 : 1) &&
       game.ambient.length < ambientCap) {
     // v0.25.640 — Bees spawn at random Y across the visible canvas slice.
@@ -88797,6 +88887,7 @@ function updateAmbient() {
       // v0.26.240 — firefly_dense joins the "rises from below" group;
       // petal_drift falls from the top like normal petal.
       if (type === 'glint') startY = 60 + Math.random() * 420;
+      else if (type === 'bird') startY = 30 + Math.random() * 170;   // v0.29.415 — upper sky band
       else startY = (type === 'ash' || type === 'ember' || type === 'firefly' || type === 'firefly_dense' || type === 'wisp' || type === 'bubble') ? 540 : -10;
     }
     game.ambient.push({
@@ -88885,6 +88976,19 @@ function updateAmbient() {
         // Pulse handles the twinkle render-side; motion is decorative slow.
         p.x += p.vx * 0.3 + Math.sin(p.sway * 0.4) * 0.15;
         p.y += p.vy * 0.3;
+      } else if (p.type === 'bird') {
+        // v0.29.415 — glide + wing-beat bob; scatter (dart away and climb)
+        // when the player closes within ~80 screen px. At most 3 birds
+        // exist, so this branch is capped at 3 iterations per frame.
+        p.x += p.vx * 1.4;
+        p.y += Math.sin(p.pulse * 0.35) * 0.45;
+        if (typeof player !== 'undefined' && player) {
+          const bsx = p.x - _camX * 0.85, psx = (player.x + 20) - _camX;
+          if (Math.abs(bsx - psx) < 80) {
+            p.vx = (bsx >= psx ? 1 : -1) * (2.2 + Math.random() * 0.4);
+            p.y -= 1.5;
+          }
+        }
       } else if (p.type === 'bee') {
         // v0.25.640 — Bees: stronger horizontal drift + lazy vertical bob.
         // Use sway/pulse with different multipliers so each bee feels
@@ -88914,7 +89018,7 @@ function updateAmbient() {
       // visible canvas Y. drawAmbient renders before the camera-Y translate,
       // so ambient Y is effectively canvas-Y; bees drifting past H are
       // off-screen and should die.
-      const beeDespawn = p.type === 'bee' && (
+      const beeDespawn = (p.type === 'bee' || p.type === 'bird') && (   // v0.29.415 — birds share bee bounds
         p.x < -40 || p.x > _ww + 40 ||
         p.y < -40 || p.y > H + 40
       );
@@ -88947,7 +89051,12 @@ function drawAmbient() {
   // Net: ~80 composite swaps + 80 save/restores → 1 of each.
   // Same matching pattern already used by drawParticles (36796).
   // PASS 1 — glow halos under a single 'lighter' composite block.
-  if (!lowFx) {
+  // v0.29.415 — gated on an early-exit glow scan (see note above the pass).
+  let _hasGlow = false;
+  for (const p of game.ambient) {
+    if (p.type === 'ember' || p.type === 'firefly' || p.type === 'wisp' || p.type === 'firefly_dense') { _hasGlow = true; break; }
+  }
+  if (!lowFx && _hasGlow) {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     for (const p of game.ambient) {
@@ -89086,6 +89195,14 @@ function drawAmbient() {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(sx, p.y, 1, 1);                  // hot core on bright frames
       }
+    } else if (p.type === 'bird') {
+      // v0.29.415 — distant bird: 2 px body + mirrored wing strokes whose
+      // Y offsets flap in opposition via pulse. 3 fillRects, no transforms.
+      const wy = Math.sin(p.pulse * 1.2) * 2;
+      const bx = sx | 0, by = p.y | 0;
+      ctx.fillRect(bx - 1, by, 3, 2);
+      ctx.fillRect(bx - 5, by - wy, 4, 1);
+      ctx.fillRect(bx + 2, by + wy, 4, 1);
     } else if (p.type === 'bee') {
       // v0.25.640 — Honeycomb Hollow ambient bees. 5×3 yellow body with
       // a 1 px dark stripe down the middle, plus tiny grey wing flecks
@@ -110068,6 +110185,7 @@ function loop(time) {
   drawCalibrationGrid();   // v0.25.749 — debug grid for size-comparison across maps
   drawDamageNumbers();
   drawIceCheer();   // v0.25.458 — Icy Tower combo overlay
+  _drawDayNightTint();   // v0.29.415 — dawn/dusk/night grade: one rect, free by day
 
   ctx.restore();
 
