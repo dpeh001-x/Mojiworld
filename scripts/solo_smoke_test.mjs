@@ -64,20 +64,37 @@ try {
   // Clear the negating traits on the target first: what is under test here is
   // that the solo damage path runs at all rather than being forwarded to the
   // co-op host, not whether parry/dodge work (monster_traits_test covers those).
+  // hitMonster also rolls to MISS before it writes HP, and the accuracy gate is
+  // a level-gap curve that bottoms out at a 10% floor +16 levels above the
+  // player. This harness names a fresh Lv1 hero and drops it on a Lv67-69 map,
+  // so a single swing landed ~10% of the time — the assertion was flaky long
+  // before it was ever wrong. Remove the RNG at its source rather than bypass
+  // the path: match the player's level to the target (90% level-gap roll), zero
+  // the separate evasion roll, and retry. The real DEF/multiplier pipeline still
+  // runs, which is what the check is actually for. (player._oneShot would skip
+  // the miss too, but it rewrites dmg to 999999 and would stop testing that.)
   const dmg = await ev(() => {
     const m = game.monsters[0]; if (!m) return null;
     if (m.traits) { delete m.traits.parryChance; delete m.traits.phantomDodge; }
+    m.evasion = 0;
+    try { player.level = Math.max(player.level || 1, _mobLevel(m)); } catch (e) {}
     const hp0 = m.currentHp; m.def = m.def || 0;
-    hitMonster(m, 500, false, 'slash');
+    for (let i = 0; i < 20 && m.currentHp === hp0; i++) hitMonster(m, 500, false, 'slash');
     return { hp0, hp1: m.currentHp, dropped: hp0 - m.currentHp, type: m.type };
   });
   ok('solo hitMonster damages a monster', dmg && dmg.dropped > 0, dmg);
 
   // Kill grants XP (real killMonster pipeline).
+  // Same miss gate applies here — this picks a DIFFERENT monster, so neutralise
+  // it on that one too rather than relying on the check above having done it.
   const kill = await ev(() => {
     const m = game.monsters.find(x => x && x.currentHp > 0); if (!m) return null;
+    if (m.traits) { delete m.traits.parryChance; delete m.traits.phantomDodge; }
+    m.evasion = 0;
+    try { player.level = Math.max(player.level || 1, _mobLevel(m)); } catch (e) {}
     const xp0 = player.exp || 0;
-    m.currentHp = 1; hitMonster(m, 999999, false, 'slash');
+    m.currentHp = 1;
+    for (let i = 0; i < 20 && game.monsters.includes(m) && m.currentHp > 0; i++) hitMonster(m, 999999, false, 'slash');
     return { xp0, xp1: player.exp || 0, gained: (player.exp || 0) - xp0, stillAlive: game.monsters.includes(m) && m.currentHp > 0 };
   });
   ok('solo kill grants XP + removes monster', kill && kill.gained > 0 && !kill.stillAlive, kill);

@@ -31,6 +31,10 @@ const ONLY = (() => { const i = argv.indexOf('--only'); return i >= 0 ? argv[i +
 const TIMEOUT_S = (() => { const i = argv.indexOf('--timeout'); return i >= 0 ? +argv[i + 1] : 120; })();
 
 const NET = /^(coop_|_mp_|_relay_)|_live_|loadtest/;
+// run_all_tests itself matches the `_test` selector — without this it spawns a
+// nested full run (and a second set of servers on the same ports), which both
+// times out and corrupts the outer run's results through contention.
+const SELF = path.basename(fileURLToPath(import.meta.url));
 const SKIP = /^(_tmp_|_check_scripts|_seed_push)/;
 
 // --- environment the playwright suites need -------------------------------
@@ -51,28 +55,36 @@ const EXE = CANDIDATE_EXES.find((p) => { try { return fs.existsSync(p); } catch 
 if (!EXE) console.warn('WARNING: no chromium found — browser suites will fail. Set PW_EXE.');
 else console.log(`browser: ${EXE}`);
 
+// Three port conventions coexist in the suite: 72 files hardcode :8080, 8
+// hardcode :8765, one :8090, and 18 read `process.argv[2] || '<one-off>'` where
+// every one-off is a different port in the 877x-880x range. Rather than rewrite
+// 100 files, serve the hardcoded ports and pass the primary port as argv[2] —
+// all 18 argv readers use it solely as a port, so that covers the whole tail.
 const GAME_PORT = +(process.env.GAME_PORT || 8080);
-let server = null;
-const startServer = () => new Promise((res) => {
-  server = spawn(process.execPath, ['serve.js', String(GAME_PORT)], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+const EXTRA_PORTS = [8765, 8090];
+const servers = [];
+const startOne = (port) => new Promise((res) => {
+  const s = spawn(process.execPath, ['serve.js', String(port)], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+  servers.push(s);
   let done = false;
   const ready = () => { if (!done) { done = true; res(); } };
-  server.stdout.on('data', (d) => { if (/serving at/i.test(String(d))) ready(); });
-  server.on('error', ready);
-  setTimeout(ready, 2500);   // serve.js is silent on some paths; don't hang the run
+  s.stdout.on('data', (d) => { if (/serving at/i.test(String(d))) ready(); });
+  s.on('error', ready);
+  setTimeout(ready, 2500);   // serve.js can be silent; never hang the run
 });
+const startServer = () => Promise.all([GAME_PORT, ...EXTRA_PORTS].map(startOne));
 
 const files = fs.readdirSync(SCRIPTS)
   .filter((f) => f.endsWith('.mjs'))
   .filter((f) => /(_test|_audit|^verify_)/.test(f.replace(/\.mjs$/, '')))
-  .filter((f) => !SKIP.test(f))
+  .filter((f) => !SKIP.test(f) && f !== SELF)
   .filter((f) => (ONLY ? f.includes(ONLY) : true))
   .filter((f) => (WITH_NET ? true : !NET.test(f)))
   .sort();
 
 const run = (file) => new Promise((res) => {
   const t0 = Date.now();
-  const p = spawn(process.execPath, [path.join('scripts', file)], {
+  const p = spawn(process.execPath, [path.join('scripts', file), String(GAME_PORT)], {
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
     // PW_EXE and MOJI_PW_EXE are both in use across the suite; set both so a
@@ -97,8 +109,8 @@ const run = (file) => new Promise((res) => {
 
 console.log(`running ${files.length} suites (timeout ${TIMEOUT_S}s${WITH_NET ? ', incl. network' : ', network excluded'})`);
 await startServer();
-console.log(`static server on :${GAME_PORT}\n`);
-const stopServer = () => { try { if (server && !server.killed) server.kill('SIGKILL'); } catch (e) {} };
+console.log(`static servers on :${[GAME_PORT, ...EXTRA_PORTS].join(' :')}\n`);
+const stopServer = () => { for (const s of servers) { try { if (!s.killed) s.kill('SIGKILL'); } catch (e) {} } };
 process.on('exit', stopServer);
 process.on('SIGINT', () => { stopServer(); process.exit(130); });
 
