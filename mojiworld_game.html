@@ -9152,7 +9152,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.412';
+const GAME_VERSION = 'v0.29.413';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -22134,6 +22134,13 @@ const MAPS = {
     // matches the mob: a Lv 22+ player walking in fights a Lv 24 farm.
     levelReq: 22,
     isIcy: true,                // shared slippery-floor physics with Frozen Peak
+    // v0.29.413 — per user "reduce the acceleration and max speed in that
+    // map". Full Frozen Peak momentum (cap 18) crossed this 1800 px farm
+    // room in ~1.5 s and overshot every shelf. Cap 12 + 30% lower accel
+    // keeps the slide feel (friction untouched) but tames the rocket.
+    // NOT icyIntensity: lowering that raises ground accel toward normal.
+    iceMaxVx: 12,
+    iceAccelMul: 0.7,
     mobStatMul: 1.0,            // baseline; raise if the farm becomes trivial
     platforms: [
       { x:0,    y:480, w:1800, h:60,  type:'ground' },
@@ -51568,7 +51575,26 @@ function updatePlayer(dt) {
           ? _lerp(0.78,  0.96,  _icyT)
           : _lerp(0.92,  0.985, _icyT))
       : (player.onGround ? 0.78 : 0.92);
-    const ICE_MAX_VX = 18;          // hard ceiling on icy map momentum
+    // v0.29.413 — per-map ice tuning (per user: "For frosbite hollow reduce
+    // the acceleration and max speed in that map"). `icyIntensity` cannot do
+    // this: LOWERING it moves values toward normal ground, which RAISES
+    // ground accel (lerp 1.1→0.30) and kills the slide — the opposite ask.
+    // Two direct knobs instead, defaulting to the historical constants so
+    // every other icy map is untouched:
+    //   iceMaxVx   — hard ceiling on chained momentum (default 18). Clamped
+    //                to [6, 18]; below moveSpeed the cap formula's
+    //                Math.max(moveSpeed, …) keeps base walking intact.
+    //   iceAccelMul — multiplies ground AND air accel on the icy branch
+    //                (default 1, clamped [0.3, 1]).
+    // Frostbite Hollow (a 1800 px farm room) sets 12 / 0.7 — full-momentum
+    // Frozen Peak physics let a player cross it in ~1.5 s and overshoot
+    // every shelf; the slide FEEL stays (friction untouched).
+    const ICE_MAX_VX = (game.mapData && typeof game.mapData.iceMaxVx === 'number')
+      ? Math.max(6, Math.min(18, game.mapData.iceMaxVx))
+      : 18;
+    const _iceAccelMul = (isIcy && game.mapData && typeof game.mapData.iceAccelMul === 'number')
+      ? Math.max(0.3, Math.min(1, game.mapData.iceAccelMul))
+      : 1;
     // v0.25.850 — `sandSpeedMul` map override. Default 0.75 (25 % slower).
     // Dune Sands now sets 0.55 (45 % slower) per user "make the movement
     // speed slow with uneven slopy ground". Tighter clamp [0.3, 1.0] so
@@ -51588,7 +51614,7 @@ function updatePlayer(dt) {
       // earlier momentum, but bounded by the hard ICE_MAX_VX so the
       // player always feels in control.
       const counterBoost = (isIcy && !player.onGround && player.vx > 1.5) ? 1.6 : 1;
-      const a = accel * counterBoost;
+      const a = accel * counterBoost * _iceAccelMul;
       const cap = isIcy
         ? Math.min(ICE_MAX_VX, Math.max(moveSpeed, Math.abs(player.vx) + a))
         : isSandy ? moveSpeed * SAND_SPEED_MUL
@@ -51598,7 +51624,7 @@ function updatePlayer(dt) {
       player.state = player.onGround ? 'walk' : player.state;
     } else if (k['arrowright']) {
       const counterBoost = (isIcy && !player.onGround && player.vx < -1.5) ? 1.6 : 1;
-      const a = accel * counterBoost;
+      const a = accel * counterBoost * _iceAccelMul;
       const cap = isIcy
         ? Math.min(ICE_MAX_VX, Math.max(moveSpeed, Math.abs(player.vx) + a))
         : isSandy ? moveSpeed * SAND_SPEED_MUL
