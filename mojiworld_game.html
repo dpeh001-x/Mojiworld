@@ -38062,6 +38062,20 @@ function _coopTryDowned() {
   player.vx = 0; player.hitStun = 0;
   // clear DoT/CC so the window is the timer, not a poison tick
   player.burnTimer = 0; player.burnDmg = 0; player._burnTickAcc = 0; player._poisonTimer = 0; player._poisonDmg = 0; player._poisonTickAcc = 0; player._electrocuteTimer = 0; player._electrocuteDmg = 0; player._electrocuteTickAcc = 0; player.frozenTimer = 0; player.stunTimer = 0; player.freezeTimer = 0;
+  // v0.29.x — clear a live Shackle QTE too (per user: "when i am shackled and
+  // down i get stuck"). Same structural trap the DEATH path already guards
+  // against: updatePlayer's downed gate is its FOURTH line and returns long
+  // before the shackle block, so _qteFrame stops firing — the QTE cannot tick
+  // down, cannot read arrow keys, and cannot self-clear. The player then
+  // revived with _QTE.active still true and an orphaned SHACKLED card, locked
+  // in a chain-stun with no way out. The downed beat only reached solo in
+  // v0.27.10, after the death-path fix, so it never inherited that guard.
+  // Cleared here alongside the other CC, for the same reason those are: the
+  // window should be the downed timer, not a stacked status effect.
+  if (typeof _QTE !== 'undefined' && _QTE.active) {
+    try { if (typeof _qteEnd === 'function') _qteEnd(false); } catch (e) {}
+    try { if (typeof _qteHide === 'function') _qteHide(0); } catch (e) {}
+  }
   // rev flag tells partners whether channeling can still bring this player back
   // (0 = revive already spent this map → don't waste a channel).
   if (net && net.connected && net.ws) { try { net.ws.send(JSON.stringify({ t: 'down', map: game.currentMap, x: Math.round(player.x), y: Math.round(player.y), rev: player._downRevivable ? 1 : 0 })); } catch (e) {} }
@@ -63441,9 +63455,18 @@ function mirrorSelfAI(m, dt, distToPlayer) {
   // last 30 % away leisurely; they need to finish before the heal lands
   // OR push through after. Combined with Rage (which fires at 40 %),
   // this creates a clear back-half difficulty spike.
+  // v0.29.x — heal cut 25% -> 10% of maxHp (per user: "it seems that the mirror
+  // self keeps regenerating as well, lower the regeneration its hard to defeat
+  // it"). It only ever fired ONCE per fight — _healed is set here and reset
+  // nowhere in the file — so what reads as "keeps regenerating" is the SIZE of
+  // that single heal: at 25% the reflection jumped from the 30% threshold back
+  // to 55%, undoing roughly the last quarter of the fight in one beat, which
+  // looks like a refilling bar. At 10% it still lands as a comeback moment
+  // (30% -> 40%) without erasing the player's progress. Kept rather than
+  // removed: the urgency it creates is the point of the mechanic.
   if (!m._healed && m.currentHp <= m.maxHp * 0.3 && m.currentHp > 0) {
     m._healed = true;
-    const _healAmt = Math.floor(m.maxHp * 0.25);
+    const _healAmt = Math.floor(m.maxHp * 0.10);
     m.currentHp = Math.min(m.maxHp, m.currentHp + _healAmt);
     if (typeof showToast === 'function') showToast('🪞 Mirror Heal — the reflection mends!', 'legendary');
     game.damageNumbers.push({
@@ -101916,15 +101939,30 @@ function _drawMirrorSelf(m, sx, sy) {
     if (_mMsx && typeof _msxReady === 'function' && _msxReady(_mMsx) && typeof _drawMsxHero === 'function') _drawMsxHero(sx, sy);
     else if (typeof _drawVectorHero === 'function') _drawVectorHero(sx, sy);
     else drawCuteCharacter(sx, sy);
+    // v0.29.x — the rage telegraph is an ANGRY ICON, not a red wash (per user:
+    // "why does mirror my mirror self have a red box, remove it, instead put an
+    // angry icon if health is low").
+    //
+    // The old wash drew a fillRect under 'source-atop' on the assumption that
+    // it would clip to the reflection's silhouette. That only holds when you
+    // composite onto a TRANSPARENT offscreen canvas holding just the sprite —
+    // here it draws straight onto the main canvas, where the map background is
+    // already opaque, so every pixel in the rect qualifies and the player sees
+    // a solid red BOX sitting over the mirror. That is the artefact reported.
+    //
+    // An icon above the head reads the state more clearly than a tint anyway,
+    // and cannot bleed into the scene however the canvas is composited.
     if (_raging) {
-      // Rage telegraph — red wash via source-atop so the tint follows the
-      // silhouette without bleeding past drawn pixels.
-      ctx.globalCompositeOperation = 'source-atop';
-      ctx.fillStyle = 'rgba(220, 40, 80, 0.35)';
-      const _tintW = (m.w + 24);
-      const _tintH = (m.h + 12);
-      ctx.fillRect(sx - 12, sy - _tintH + 8, _tintW, _tintH);
-      ctx.globalCompositeOperation = 'source-over';
+      ctx.save();
+      const _icx = sx + m.w / 2;
+      const _icy = sy - 26 + Math.sin((game.time | 0) * 0.18) * 2;   // gentle bob
+      ctx.font = '20px system-ui, "Segoe UI Emoji", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(220,40,80,0.9)';
+      ctx.shadowBlur = 10;
+      ctx.fillText('😠', _icx, _icy);
+      ctx.restore();
     }
     if (typeof _chibiRestore === 'function') _chibiRestore();
     ctx.restore();
