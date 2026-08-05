@@ -1418,6 +1418,18 @@
     50%      { filter: brightness(1.45); box-shadow: 0 0 8px rgba(255, 70, 70, 0.55); }
   }
   .hp-fill.hp-critical { animation: mojiHpCritPulse 0.85s ease-in-out infinite; }
+  /* v0.29.414 — Chip-damage ghost layer (AAA bar feel). Sits UNDER the red
+     HP fill at the pre-hit width; the fill itself snaps down the frame
+     damage lands, so the pale amber gap that remains IS the hit you just
+     took. It holds ~360ms, then drains toward the real value (JS-driven
+     in updateUI — width transitions stay off here because the drain is
+     written per-frame). Heals lift it instantly; it only trails downward.
+     DOM order puts it before .bar-fill, so the fill always paints over it. */
+  .bar-ghost {
+    position: absolute; left: 0; top: 0; height: 100%;
+    background: linear-gradient(180deg, rgba(255,216,150,0.88) 0%, rgba(206,138,80,0.82) 100%);
+    pointer-events: none;
+  }
   /* v0.26.054 — Skill ready-flash. JS adds the class for one frame at
      the cooling→not-cooling transition; the animation's 420 ms ease-out
      does the rest. Uses brightness + outward box-shadow halo so the
@@ -7435,7 +7447,7 @@
         </div>
       </div>
       <div class="stats-divider"></div>
-      <div class="bar" title="Health Points (HP) — your life pool. Reaches 0 = death (respawn at the Void — costs 35% of your TOTAL mojicoins — wallet AND Mojibank balance — capped at 100k, plus 5% of current EXP; the bank is no longer a shelter, it is billed after your wallet runs out; levels and items are kept). Grows with each level-up (per-class HP gain) plus +10 per VIT point invested in the Level Up panel. Restored by potions (PgUp), heal skills, and resting at hubs."><div class="bar-fill hp-fill" id="hp-bar" style="width:100%"></div><div class="bar-text" id="hp-text">195 / 195</div></div>
+      <div class="bar" title="Health Points (HP) — your life pool. Reaches 0 = death (respawn at the Void — costs 35% of your TOTAL mojicoins — wallet AND Mojibank balance — capped at 100k, plus 5% of current EXP; the bank is no longer a shelter, it is billed after your wallet runs out; levels and items are kept). Grows with each level-up (per-class HP gain) plus +10 per VIT point invested in the Level Up panel. Restored by potions (PgUp), heal skills, and resting at hubs."><div class="bar-ghost" id="hp-ghost" style="width:100%"></div><div class="bar-fill hp-fill" id="hp-bar" style="width:100%"></div><div class="bar-text" id="hp-text">195 / 195</div></div>
       <div class="bar" title="Mana Points (MP) — fuel for skill casts. Most skills (X, S, C, D, F, V, G slots) consume MP; basic attack (Z) and block (A) do not. Grows with each level-up (per-class MP gain). Regenerates passively + faster at hubs. Refilled by potions (T)."><div class="bar-fill mp-fill" id="mp-bar" style="width:100%"></div><div class="bar-text" id="mp-text">50 / 50</div></div>
       <div class="bar" title="Experience (EXP) — fill the bar to level up. Awarded from monster kills, quest rewards, and milestones. Each level grants +3 SP base, +0-1 bonus SP from the innate-growth dice roll (binomial(1, 0.5) — see U panel for your CDF), and per-class HP/MP/ATK/DEF gains."><div class="bar-fill exp-fill" id="exp-bar" style="width:0%"></div><div class="bar-text" id="exp-text">0 / 30 (0%)</div></div>
       <!-- v0.25.730 — Combat-stats footer row.
@@ -32344,6 +32356,27 @@ function _consumeEmbers() {
   if (typeof showToast === 'function' && s >= 3) showToast('🔥 Embers unleashed ×' + s + ' (+' + (s * 12) + '% Fireball)', 'epic');
   return 1 + 0.12 * s;
 }
+// v0.29.x — SELF-EXPLANATORY EMBER PIPS (per user: "make it self explanatory,
+// and only have it when fireball skill is unlocked"). Two problems with the
+// original row of bare 🔥 emoji: it never said what the stacks were FOR — no
+// label, no counter, no payoff figure, so a player had five unexplained flames
+// at the bottom of the screen — and it rendered for any mage from Lv 1, even
+// though Fireball (slot 's') does not unlock until Lv 5, so for four levels the
+// meter charged toward a skill the player did not have.
+//
+// Now it shows the actual payoff ("×3 → Fireball +36%") and only appears once
+// Fireball is genuinely castable.
+function _emberFireballReady() {
+  if (!player || player.cls !== 'mage') return false;
+  // Fireball is the mage's slot-'s' skill; slots are level-gated by
+  // SLOT_LEVEL_REQ, the same gate the skill deck greys out with .locked.
+  try {
+    const best = (typeof skillBySlot === 'function') ? skillBySlot('s') : null;
+    if (!best || best.id !== 'fireball') return false;
+    const req = (typeof slotLevelReq === 'function') ? slotLevelReq('s') : 5;
+    return (player.level | 0) >= req;
+  } catch (e) { return false; }
+}
 function _renderEmberPips() {
   let el = document.getElementById('ember-pips');
   if (!el) {
@@ -32351,14 +32384,17 @@ function _renderEmberPips() {
     if (!wrap) return;
     el = document.createElement('div');
     el.id = 'ember-pips';
-    el.style.cssText = 'position:absolute; left:50%; bottom:76px; transform:translateX(-50%); display:flex; gap:4px; pointer-events:none; z-index:60; filter:drop-shadow(0 0 6px rgba(255,140,40,0.7));';
+    el.style.cssText = 'position:absolute; left:50%; bottom:76px; transform:translateX(-50%); display:flex; align-items:center; gap:5px; pointer-events:none; z-index:60; filter:drop-shadow(0 0 6px rgba(255,140,40,0.7)); font:800 10px Inter, system-ui, sans-serif; white-space:nowrap;';
     wrap.appendChild(el);
   }
   const s = (player && player._emberStacks) || 0;
-  if (!s || !player || player.cls !== 'mage') { el.style.display = 'none'; el.innerHTML = ''; return; }
+  if (!s || !_emberFireballReady()) { el.style.display = 'none'; el.innerHTML = ''; return; }
   el.style.display = 'flex';
   let html = '';
   for (let i = 0; i < 5; i++) html += '<span style="font-size:13px; opacity:' + (i < s ? 1 : 0.25) + ';">🔥</span>';
+  // The payoff, spelled out: +12% Fireball damage per banked ember.
+  html += '<span style="color:#ffc46b; text-shadow:0 1px 2px rgba(0,0,0,0.85); letter-spacing:0.3px;">' +
+          '×' + s + ' → Fireball +' + (s * 12) + '%</span>';
   el.innerHTML = html;
 }
 // v0.26.891 — PRISM PIPS. The priest's _prismCharges (Holy Light builds, max 5;
@@ -100380,6 +100416,27 @@ function drawMonster(m) {
     ctx.fillRect(sx + 2, sy - 8, m.w - 4, 4);
     ctx.fillStyle = m._hpBarColor;
     ctx.fillRect(sx + 3, sy - 7, (m.w - 6) * hpPct, 2);
+    // v0.29.414 — Chip-damage ghost segment (mirrors the player HUD ghost).
+    // A pale sliver holds at the pre-hit fraction for ~20 frames, then drains
+    // toward the real value — so a big hit reads as a CHUNK on the mob's bar
+    // instead of an instant, unreadable shrink. Bosses share this draw path,
+    // which is where the effect earns its keep. Cost when idle: two compares
+    // (ghost converges onto hpPct and the draw is skipped); cost during a
+    // drain: one fillStyle + one fillRect on already-damaged mobs only.
+    // game.time is the frame counter, so hitstop freezes the chip mid-air —
+    // the pale chunk is exactly what you see during the freeze.
+    let _hpG = m._hpGhost;
+    if (_hpG === undefined || _hpG < hpPct) _hpG = hpPct;
+    if (m.currentHp < (m._hpGhostHp ?? m.currentHp)) m._hpGhostAt = game.time;
+    m._hpGhostHp = m.currentHp;
+    if (_hpG > hpPct && game.time - (m._hpGhostAt || 0) > 20) {
+      _hpG = Math.max(hpPct, _hpG - Math.max(0.004, (_hpG - hpPct) * 0.09));
+    }
+    m._hpGhost = _hpG;
+    if (_hpG > hpPct + 0.003) {
+      ctx.fillStyle = 'rgba(255,224,160,0.9)';
+      ctx.fillRect(sx + 3 + (m.w - 6) * hpPct, sy - 7, (m.w - 6) * (_hpG - hpPct), 2);
+    }
   }
 
   // v0.25.872 — Status icon row above the HP bar (GAMEPLAY_AUDIT §2.2).
@@ -108998,6 +109055,7 @@ const _uiLast = {};
 function _uiGetRefs() {
   if (_uiDom.ready) return _uiDom;
   const ids = ['level','skill-points','class','hp-bar','mp-bar','exp-bar',
+    'hp-ghost',   // v0.29.414 — chip-damage ghost layer under the HP fill
     'hp-text','mp-text','exp-text','mojicoins','atk','def','crit','kills',
     // v0.25.510 — new HUD spans for attack-range + ACC + level-gap hit %
     'atk-range','acc','acc-vs-5',
@@ -109207,9 +109265,45 @@ function updateUI() {
   const _xpPct = Math.max(0, Math.min(100, (player.exp / _safeExpToNext) * 100));
   // v0.26.x perf — skip the string build AND style write when the pct hasn't
   // moved >=0.05 (3 allocs + 3 CSSOM writes/frame at idle, invisible on a bar).
-  if (!(Math.abs((game._uiHpPct ?? -9) - _hpPct) < 0.05)) { game._uiHpPct = _hpPct; _uiSetStyle(d['hp-bar'], 'width', _hpPct.toFixed(1) + '%'); }
-  if (!(Math.abs((game._uiMpPct ?? -9) - _mpPct) < 0.05)) { game._uiMpPct = _mpPct; _uiSetStyle(d['mp-bar'], 'width', _mpPct.toFixed(1) + '%'); }
-  if (!(Math.abs((game._uiXpPct ?? -9) - _xpPct) < 0.05)) { game._uiXpPct = _xpPct; _uiSetStyle(d['exp-bar'], 'width', _xpPct.toFixed(1) + '%'); }
+  // v0.29.414 — AAA bar feel: DROPS snap the same frame (damage, casts, the
+  // EXP wrap on level-up), GAINS keep the 220ms CSS ease. The old behaviour
+  // eased BOTH directions, so damage arrived 220ms late on the HUD — exactly
+  // the beat where responsiveness matters most. The snap suppresses the width
+  // transition for that one write (combo-meter reflow trick); drops are
+  // sparse events, so the forced reflow is per-hit, not per-frame.
+  const _barWrite = (el, oldPct, newPct) => {
+    if (!el) return;
+    if (newPct < oldPct - 0.05) {
+      el.style.transition = 'none';
+      _uiSetStyle(el, 'width', newPct.toFixed(1) + '%');   // through the dedup cache so it stays coherent
+      void el.offsetWidth;
+      el.style.transition = '';
+    } else {
+      _uiSetStyle(el, 'width', newPct.toFixed(1) + '%');
+    }
+  };
+  if (!(Math.abs((game._uiHpPct ?? -9) - _hpPct) < 0.05)) { const _o = game._uiHpPct ?? _hpPct; game._uiHpPct = _hpPct; _barWrite(d['hp-bar'], _o, _hpPct); }
+  if (!(Math.abs((game._uiMpPct ?? -9) - _mpPct) < 0.05)) { const _o = game._uiMpPct ?? _mpPct; game._uiMpPct = _mpPct; _barWrite(d['mp-bar'], _o, _mpPct); }
+  if (!(Math.abs((game._uiXpPct ?? -9) - _xpPct) < 0.05)) { const _o = game._uiXpPct ?? _xpPct; game._uiXpPct = _xpPct; _barWrite(d['exp-bar'], _o, _xpPct); }
+  // v0.29.414 — Chip-damage ghost drain. The pale layer under the HP fill
+  // holds at the pre-hit width for ~22 frames (~360ms — long enough to READ
+  // the chunk, short enough not to lie about current HP), then closes the
+  // gap at 8%/frame with a 0.25%-pt floor so big chunks drain visibly and
+  // slivers don't linger. A fresh hit during the drain resets the hold
+  // (game.time is the frame counter, so hitstop and pause freeze the drain
+  // with everything else). Heals lift the ghost instantly — it must only
+  // ever trail BELOW-going changes, never mask an upward one.
+  {
+    let _g = game._uiHpGhost;
+    if (_g === undefined || _g < _hpPct) _g = _hpPct;
+    if (player.hp < (game._uiHpGhostHp ?? player.hp)) game._uiHpGhostAt = game.time;
+    game._uiHpGhostHp = player.hp;
+    if (_g > _hpPct && game.time - (game._uiHpGhostAt || 0) > 22) {
+      _g = Math.max(_hpPct, _g - Math.max(0.25, (_g - _hpPct) * 0.08));
+    }
+    game._uiHpGhost = _g;
+    if (!(Math.abs((game._uiHpGhostW ?? -9) - _g) < 0.05)) { game._uiHpGhostW = _g; _uiSetStyle(d['hp-ghost'], 'width', _g.toFixed(1) + '%'); }
+  }
   // v0.26.054 — HP-critical pulse class toggle. Adds .hp-critical when
   // the player is in danger (<25% HP and alive) so the bar's CSS pulse
   // animation fires; removes the class above 28% with a 3-pt hysteresis
