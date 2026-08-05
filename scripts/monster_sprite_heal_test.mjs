@@ -9,7 +9,7 @@
 //      refetches from the fallback path and the registry heals mid-session.
 //   3. The nudge is rate-limited and a no-op for unregistered types.
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'http://localhost:8080/mojiworld_game.html';
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));

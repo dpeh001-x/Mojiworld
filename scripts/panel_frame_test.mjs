@@ -5,7 +5,7 @@
 //   node scripts/panel_frame_test.mjs
 import { chromium } from 'playwright-core';
 const URL = process.env.MOJI_URL || 'http://localhost:8080/mojiworld_game.html';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const results = [];
 const ok = (n, c, x) => { results.push({ n, pass: !!c, x }); console.log((c ? 'PASS ' : 'FAIL ') + n + (x ? ' — ' + JSON.stringify(x) : '')); };
 const browser = await chromium.launch({ executablePath: EXE, args: ['--no-sandbox', '--disable-gpu', '--mute-audio'] });

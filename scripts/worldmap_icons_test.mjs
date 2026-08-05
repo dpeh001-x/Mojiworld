@@ -1,6 +1,6 @@
 import { chromium } from 'playwright-core';
 const URL = 'http://localhost:8080/mojiworld_game.html';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const browser = await chromium.launch({ executablePath: EXE, args: ['--no-sandbox'] });
 const page = await (await browser.newContext()).newPage();
 const errs = []; page.on('pageerror', e => errs.push(String(e)));

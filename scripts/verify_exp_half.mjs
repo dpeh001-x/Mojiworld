@@ -2,7 +2,7 @@
 // Kills a live monster with a clean Lv45 save (no xp gear, no prestige,
 // no combo, solo) and asserts the exact award = floor(m.exp * 1.35 * EVENT * 1).
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'http://localhost:8765/mojiworld_game.html';
 const R = []; const ok = (n, c, x) => { R.push(!!c); console.log((c ? 'PASS ' : 'FAIL ') + n + (x !== undefined ? ' — ' + x : '')); };
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--disable-gpu', '--mute-audio'] });

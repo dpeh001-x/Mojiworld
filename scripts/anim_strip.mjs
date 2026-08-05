@@ -6,7 +6,7 @@
 //   node scripts/anim_strip.mjs <type> <out.png>
 // Needs the local server: PORT=8080 node mp/server.mjs
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--disable-gpu', '--mute-audio'] });
 const ctx = await b.newContext({ serviceWorkers: 'block', viewport: { width: 1440, height: 900 } });
 const p = await ctx.newPage();

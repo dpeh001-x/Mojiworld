@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'http://localhost:8080/mojiworld_game.html';
 const CF_WS = process.env.CF_WS || 'wss://mojiworld-mp.dpeh001.workers.dev';
 const STRIP_PORT = 8081;

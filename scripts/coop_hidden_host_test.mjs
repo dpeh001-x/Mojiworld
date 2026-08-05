@@ -9,7 +9,7 @@
 //   • a hidden GUEST likewise stays alive (its pump keeps _mpTick running)
 import { chromium } from 'playwright-core';
 
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'http://localhost:8080/mojiworld_game.html';
 const WS  = 'ws://localhost:8080';
 const ROOM = 'hid' + Math.floor(Math.random() * 1e9);

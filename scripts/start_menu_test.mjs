@@ -3,7 +3,7 @@
 // (party code), Settings (hoisted above the gate), Save Backups (slot modal).
 // Run serve.js (localhost:8765) first, then: node scripts/start_menu_test.mjs
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = process.env.MOJI_URL || 'http://localhost:8765/mojiworld_game.html';
 const results = [];
 const ok = (n, c, extra) => { results.push({ n, pass: !!c, extra }); console.log((c ? 'PASS ' : 'FAIL ') + n + (extra ? ' — ' + extra : '')); };

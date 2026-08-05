@@ -1,7 +1,7 @@
 // Probe: load the game headless, report boot state + how to reach gameplay.
 import { chromium } from 'playwright-core';
 
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'http://localhost:8080/mojiworld_game.html';
 
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox','--disable-gpu','--mute-audio'] });

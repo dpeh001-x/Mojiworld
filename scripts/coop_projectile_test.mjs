@@ -1,7 +1,7 @@
 // Live 2-client test: enemy-projectile sync -> co-op followers take RANGED damage
 // from shared monsters (closes the facetank-boss gap).
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'http://localhost:8080/mojiworld_game.html', WS = 'ws://localhost:8080', MAP = 'glasswindSteppe';
 const ROOM = 'proj' + (process.env.RUN_TAG || Math.floor(Math.random() * 1e6));
 const results = [];

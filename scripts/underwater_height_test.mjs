@@ -2,7 +2,7 @@
 // camera follows the player down, world bottom is reachable/framed, and the
 // background paints the whole viewport at depth (no void band).
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'http://localhost:8080/mojiworld_game.html';
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 

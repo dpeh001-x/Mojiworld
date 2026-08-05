@@ -3,7 +3,7 @@
 // drag-to-move, property edits, export format (matches the game's _lxSeFmt),
 // and import. Data is baked from the live game (scripts/extract_map_data.mjs).
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'file:///home/user/Mojiworld/tools/map_editor.html';
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 

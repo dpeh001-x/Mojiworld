@@ -3,7 +3,7 @@
 // the host's 'bosshit' broadcast. Covers %-maxHp nukes (fr) + raw atk hits (d),
 // radius dodge, and arena-wide (radius 0) nukes.
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'http://localhost:8080/mojiworld_game.html', WS = 'ws://localhost:8080', MAP = 'glasswindSteppe';
 const ROOM = 'bhit' + (process.env.RUN_TAG || Math.floor(Math.random() * 1e6));
 const results = [];

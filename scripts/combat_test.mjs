@@ -2,7 +2,7 @@
 // assert correctness (basic attack, skill cast + MP/cooldown, crit bonus, DoT
 // ticks, kill rewards, DoT death -> cheat-death revive, boss stun-resistance).
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'http://localhost:8080/mojiworld_game.html', MAP = 'glasswindSteppe';
 const results = [];
 const ok = (n, c, extra) => results.push({ n, pass: !!c, extra });

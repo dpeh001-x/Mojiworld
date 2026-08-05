@@ -1,6 +1,6 @@
 // Edge-feather certification (v0.29.x "soften the harsh square sprite cut").
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--disable-gpu', '--mute-audio'] });
 try {

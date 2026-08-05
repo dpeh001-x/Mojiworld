@@ -4,7 +4,7 @@
 // portal is REACHABLE only if some platform/ground top is within that window
 // horizontally and vertically.
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'http://localhost:8765/mojiworld_game.html';
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--disable-gpu', '--mute-audio'] });
 const page = await (await b.newContext()).newPage();

@@ -1,5 +1,5 @@
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'file:///home/user/Mojiworld/tools/map_editor.html';
 const OUT = '/tmp/claude-0/-home-user-Mojiworld/1652515c-62db-56d2-8863-1459f775405a/scratchpad';
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--disable-gpu'] });

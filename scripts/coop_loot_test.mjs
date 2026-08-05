@@ -2,7 +2,7 @@
 // host's item drops + boon orbs from shared monster kills (previously ALL drop creation
 // was host-only, so guests saw zero loot). Coins are NOT synced here (paid via 'kill').
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'http://localhost:8080/mojiworld_game.html', WS = 'ws://localhost:8080', MAP = 'glasswindSteppe';
 const ROOM = 'loot' + (process.env.RUN_TAG || Math.floor(Math.random() * 1e6));
 const results = [];

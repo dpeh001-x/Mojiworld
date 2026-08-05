@@ -1,7 +1,7 @@
 // Live 2-client test: enemy HAZARD (meteor telegraph) sync -> follower sees the
 // reticle and takes the meteor strike via the host's detonation event.
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'http://localhost:8080/mojiworld_game.html', WS = 'ws://localhost:8080', MAP = 'glasswindSteppe';
 const ROOM = 'haz' + (process.env.RUN_TAG || Math.floor(Math.random() * 1e6));
 const results = [];

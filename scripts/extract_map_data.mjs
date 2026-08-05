@@ -4,7 +4,7 @@
 // Writes scripts/map_data.json (consumed by the embed step below).
 import { chromium } from 'playwright-core';
 import { writeFileSync } from 'fs';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'file:///home/user/Mojiworld/mojiworld_game.html';
 
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--disable-gpu', '--mute-audio'] });

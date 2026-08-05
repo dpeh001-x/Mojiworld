@@ -2,7 +2,7 @@
 // Boots the real game, names a hero via the UI, enters a map, and verifies solo
 // monsters spawn, combat + XP + contact damage work, and the co-op layer is inert.
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'http://localhost:8080/mojiworld_game.html';
 const MAP = 'glasswindSteppe';
 const results = [];
@@ -58,11 +58,18 @@ try {
   ok('all solo monsters valid (uid + hp)', mon.haveUid && mon.haveHp, mon);
 
   // Combat: hitMonster runs the REAL solo path (not forwarded), DEF-applied damage.
+  // The evasive traits added in v0.29.320 roll INSIDE hitMonster and return
+  // before any damage lands — and this map's roster includes glasswindHare
+  // (phantomDodge: 0.20), so a single hit failed this assertion 20% of the time.
+  // Clear the negating traits on the target first: what is under test here is
+  // that the solo damage path runs at all rather than being forwarded to the
+  // co-op host, not whether parry/dodge work (monster_traits_test covers those).
   const dmg = await ev(() => {
     const m = game.monsters[0]; if (!m) return null;
+    if (m.traits) { delete m.traits.parryChance; delete m.traits.phantomDodge; }
     const hp0 = m.currentHp; m.def = m.def || 0;
     hitMonster(m, 500, false, 'slash');
-    return { hp0, hp1: m.currentHp, dropped: hp0 - m.currentHp };
+    return { hp0, hp1: m.currentHp, dropped: hp0 - m.currentHp, type: m.type };
   });
   ok('solo hitMonster damages a monster', dmg && dmg.dropped > 0, dmg);
 

@@ -3,7 +3,7 @@
 // background so nothing pops in mid-game. Also: entering a map prefetches its portal
 // neighbors. Drives the REAL entry flow (name → reveal → streamer kick).
 import { chromium } from 'playwright-core';
-const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'http://localhost:8080/mojiworld_game.html';
 const results = [];
 const ok = (n, c, extra) => results.push({ n, pass: !!c, extra });
