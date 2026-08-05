@@ -9173,7 +9173,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.418';
+const GAME_VERSION = 'v0.29.419';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -44866,8 +44866,12 @@ function checkDaily() {
     flash(0.2); audio.play('levelup');
     // Track per-day sets for visit/talk so repeats don't count
     game.dailyState = { day, streak, challenge: c.id, progress: 0, claimed: false, seenMaps: [], seenNpcs: [] };
+    // v0.29.419 — a new day means a new mutator roll: clear the boot-once
+    // announce latch so the fresh pair is toasted immediately.
+    game._mutAnnounced = false;
     saveState();
   }
+  if (typeof announceMutators === 'function') announceMutators();
   tickDaily('level', player.level);
 }
 function tickDaily(kind, n) {
@@ -44901,6 +44905,79 @@ function tickDaily(kind, n) {
     flash(0.35); audio.play('levelup');
     saveState();
   }
+}
+
+// =========================================================================
+// v0.29.419 — DAILY WORLD MUTATORS (replayability: every day plays different)
+// =========================================================================
+// Each UTC day rolls TWO world mutators, deterministically from dailyIndex()
+// (same clock-rollback-guarded day counter the dailies use, so the roll is
+// identical across devices and cannot be rerolled by clock fiddling). Harder
+// mutators carry `weight`; the day's total weight pays a compensating
+// +12%/point Mojicoin AND EXP bonus on every kill — hard days are the
+// lucrative days, easy days are the breather. Complements the opt-in Edicts
+// heat system (v0.29.66): Edicts are player-chosen and permanent, mutators
+// are world-chosen and daily.
+//
+// Effect channels bake at SPAWN into the one multiplier stack every monster
+// already flows through (hpMult / atkMult / expMult / mesMult / speed), so
+// there is zero per-frame cost. Bosses are exempt from the hostile channels
+// (mobHp/mobAtk/mobSpeed — encounters stay curated; the opt-in Edicts remain
+// the way to make bosses harder) but reward channels apply everywhere.
+// `game._mutForce = ['id', ...]` overrides the roll for QA / tests.
+const DAILY_MUTATORS = [
+  { id:'surge',    name:'Monster Surge', icon:'🩸', desc:'Monsters +20% HP',              mobHp:1.20,                 weight:1 },
+  { id:'ferocity', name:'Ferocity',      icon:'🗡️', desc:'Monsters +20% ATK',             mobAtk:1.20,                weight:2 },
+  { id:'haste',    name:'Quickening',    icon:'💨', desc:'Monsters +20% move speed',      mobSpeed:1.20,              weight:2 },
+  { id:'brittle',  name:'Brittle World', icon:'🥀', desc:'Monsters −25% HP',              mobHp:0.75,                 weight:0 },
+  { id:'goldrush', name:'Gold Rush',     icon:'💰', desc:'+40% Mojicoins from kills',     coin:1.40,                  weight:0 },
+  { id:'wisdom',   name:'Day of Wisdom', icon:'📚', desc:'+30% EXP from kills',           exp:1.30,                   weight:0 },
+  { id:'titans',   name:'Titan Blood',   icon:'🗿', desc:'Monsters +35% HP · +25% coins', mobHp:1.35, coin:1.25,     weight:1 },
+  { id:'skittish', name:'Skittish Prey', icon:'🐇', desc:'Monsters +15% speed · +20% EXP', mobSpeed:1.15, exp:1.20,  weight:1 },
+];
+// mulberry32 — tiny seeded PRNG; the roll must be reproducible from the day
+// number alone (Math.random would give every device a different world).
+function _mutRng(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+let _mutCache = { day: -1, list: [] };
+function activeMutators() {
+  if (typeof game !== 'undefined' && game && Array.isArray(game._mutForce))
+    return DAILY_MUTATORS.filter(m => game._mutForce.includes(m.id));
+  const day = dailyIndex();
+  if (_mutCache.day === day) return _mutCache.list;
+  const r = _mutRng((day * 2654435761) >>> 0);
+  const i1 = Math.floor(r() * DAILY_MUTATORS.length);
+  let i2 = Math.floor(r() * (DAILY_MUTATORS.length - 1));
+  if (i2 >= i1) i2++;                       // second pick always distinct
+  _mutCache = { day, list: [DAILY_MUTATORS[i1], DAILY_MUTATORS[i2]] };
+  return _mutCache.list;
+}
+function _mutMul(field) {
+  let v = 1;
+  for (const m of activeMutators()) if (typeof m[field] === 'number') v *= m[field];
+  return v;
+}
+function _mutWeight() { let w = 0; for (const m of activeMutators()) w += (m.weight || 0); return w; }
+function _mutBonusMul() { return 1 + 0.12 * _mutWeight(); }
+function _mutLabel() { return activeMutators().map(m => m.icon + ' ' + m.name).join('  ·  '); }
+function announceMutators() {
+  // Once per boot (not persisted): the daily roll toast. Skipped until a
+  // class exists so the title screen stays clean.
+  if (typeof game === 'undefined' || !game || game._mutAnnounced || !player.cls) return;
+  game._mutAnnounced = true;
+  const list = activeMutators();
+  if (!list.length) return;
+  const bonus = Math.round((_mutBonusMul() - 1) * 100);
+  showToast('🎲 Today’s world: ' + _mutLabel() +
+    (bonus > 0 ? '  —  +' + bonus + '% coins & EXP from kills' : ''), 'epic');
+  for (const m of list) showToast(m.icon + ' ' + m.name + ' — ' + m.desc, 'rare');
 }
 
 // =========================================================================
@@ -50267,8 +50344,17 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   const _varHp  = isBoss ? 1 : (0.90 + Math.random() * 0.20);
   const _varAtk = isBoss ? 1 : (0.90 + Math.random() * 0.20);
   const _varDef = isBoss ? 1 : (0.92 + Math.random() * 0.16);
-  const hpMult  = (isBoss ? 1 : (isMiniBoss ? 5   : isElite ? 3   : 1)) * towerHp  * _distMul * _hpKnob * _mapMul * UNIVERSAL_HP_MUL * (isBoss ? 1 : MONSTER_STAT_MUL) * _hpAtkLvExp * _hpAtkLinLv * _edHp;   // v0.26.398 — bosses exempt from MONSTER_STAT_MUL (was double-dipped onto bosses → ~17.5% of authored HP; now authored × UNIVERSAL_HP_MUL only)
-  const atkMult = (isBoss ? 1 : (isMiniBoss ? 2   : isElite ? 1.5 : 1)) * towerAtk * _distMul * _mapMul * MONSTER_STAT_MUL * _hpAtkLvExp * _hpAtkLinLv * _atkHiLvSoften * _edAtk;   // v0.26.400 — boss ATK exemption REVERTED (HP-only split). v0.26.398 had exempted boss ATK too → ~2.86× hits that outpaced player HP buffs; bosses keep the HP exemption (tankier) but ATK returns to the calibrated ~0.35× value.
+  // v0.29.419 — Daily World Mutator channels. Hostile channels (hp/atk/speed)
+  // exempt bosses — encounters stay curated, and the opt-in Edicts remain the
+  // sanctioned way to harden bosses. Reward channels (exp/coin, including the
+  // weight-scaled contract bonus) apply to every kill, bosses included.
+  const _mutHp    = isBoss ? 1 : _mutMul('mobHp');
+  const _mutAtk   = isBoss ? 1 : _mutMul('mobAtk');
+  const _mutSpd   = isBoss ? 1 : _mutMul('mobSpeed');
+  const _mutExp   = _mutMul('exp')  * _mutBonusMul();
+  const _mutCoin  = _mutMul('coin') * _mutBonusMul();
+  const hpMult  = (isBoss ? 1 : (isMiniBoss ? 5   : isElite ? 3   : 1)) * towerHp  * _distMul * _hpKnob * _mapMul * UNIVERSAL_HP_MUL * (isBoss ? 1 : MONSTER_STAT_MUL) * _hpAtkLvExp * _hpAtkLinLv * _edHp * _mutHp;   // v0.26.398 — bosses exempt from MONSTER_STAT_MUL (was double-dipped onto bosses → ~17.5% of authored HP; now authored × UNIVERSAL_HP_MUL only)
+  const atkMult = (isBoss ? 1 : (isMiniBoss ? 2   : isElite ? 1.5 : 1)) * towerAtk * _distMul * _mapMul * MONSTER_STAT_MUL * _hpAtkLvExp * _hpAtkLinLv * _atkHiLvSoften * _edAtk * _mutAtk;   // v0.26.400 — boss ATK exemption REVERTED (HP-only split). v0.26.398 had exempted boss ATK too → ~2.86× hits that outpaced player HP buffs; bosses keep the HP exemption (tankier) but ATK returns to the calibrated ~0.35× value.
   // v0.26.134 — Per user "reduce all monster EXP gained by half". Global
   // ×0.5 on the final EXP multiplier — applies to normal mobs, elites,
   // mini-bosses, and bosses uniformly.
@@ -50281,8 +50367,8 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // genuine timed mini-bosses still pay the full 5× / 4×.
   const _mbExpMul = _miniElitePromoted ? 1.4 : 5;
   const _mbMesMul = _miniElitePromoted ? 1.4 : 4;
-  const expMult = (isBoss ? 1 : (isMiniBoss ? _mbExpMul : isElite ? 2.2 : 1)) * _distMul * _mapMul * 0.1;
-  const mesMult = (isBoss ? 1 : (isMiniBoss ? _mbMesMul : isElite ? 2.5 : 1)) * _distMul * _mapMul;
+  const expMult = (isBoss ? 1 : (isMiniBoss ? _mbExpMul : isElite ? 2.2 : 1)) * _distMul * _mapMul * 0.1 * _mutExp;
+  const mesMult = (isBoss ? 1 : (isMiniBoss ? _mbMesMul : isElite ? 2.5 : 1)) * _distMul * _mapMul * _mutCoin;
   // v0.25.57 — monsters now vary in size + scale up with player level.
   // v0.26.133 / v0.26.152 — coefficient progressively minimized.
   // v0.26.314 — Per user "Normal monsters not in the PQ or expedition
@@ -50340,6 +50426,10 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     uid: (game._monUid = (game._monUid || 0) + 1),   // v0.27.0 — stable network id for co-op host-authoritative sync (object identity doesn't survive JSON)
     name: prefix + t.name,
     atk:   Math.floor(t.atk   * atkMult * _varAtk),   // v0.29.265 — per-spawn roll
+    // v0.29.419 — daily-mutator speed channel; overrides the `...t` spread.
+    // Rounded to 2dp so AI speed comparisons stay stable; 0-speed sentries
+    // (× anything = 0) keep their platform-locked behaviour.
+    speed: Math.round(((t.speed || 0) * _mutSpd) * 100) / 100,
     // v0.26.109 — overrides the `def` field that `...t` would otherwise
     // spread in at full value; brings DEF in line with HP/ATK's 3/4 cut.
     // v0.26.144 — Per user "bump up the monsters defence more, make it
