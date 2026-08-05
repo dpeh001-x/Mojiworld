@@ -1430,6 +1430,15 @@
     background: linear-gradient(180deg, rgba(255,216,150,0.88) 0%, rgba(206,138,80,0.82) 100%);
     pointer-events: none;
   }
+  /* v0.29.418 — coin counter pop. JS restarts it on the first frame of a
+     gain (reflow-retrigger, same as the combo meter); the roll animation
+     itself is the JS counter, this is just the punctuation on top. */
+  @keyframes mojiCoinPop {
+    0%   { transform: scale(1);    filter: brightness(1); }
+    35%  { transform: scale(1.32); filter: brightness(1.65); }
+    100% { transform: scale(1);    filter: brightness(1); }
+  }
+  #hud-mojicoins.coin-pop { display: inline-block; animation: mojiCoinPop 300ms cubic-bezier(.2,.9,.3,1.4); }
   /* v0.26.054 — Skill ready-flash. JS adds the class for one frame at
      the cooling→not-cooling transition; the animation's 420 ms ease-out
      does the rest. Uses brightness + outward box-shadow halo so the
@@ -9164,7 +9173,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.416';
+const GAME_VERSION = 'v0.29.418';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -53173,7 +53182,18 @@ function updatePlayer(dt) {
     // player picks them up by physically walking over them. Mojicoin /
     // potion drops are NEVER tagged with noMagnet, so currency + consumables
     // continue to auto-collect from the wider 140 px radius unchanged.
-    if (!d.noMagnet && d2 < _magnetR * _magnetR) { const dist = Math.sqrt(d2); d.x += dx / dist * 4; d.y += dy / dist * 4; }
+    // v0.29.418 — vacuum tween (per user "coin-pickup magnetism tweening").
+    // Was a flat 4 px/frame crawl the whole way in. Now each drop carries its
+    // own speed that ramps exponentially (×1.12 + 0.2/frame, capped at 11) —
+    // the drop starts drifting, then visibly accelerates into the player.
+    // min(speed, dist) kills overshoot jitter at the center; leaving the
+    // radius resets the ramp so re-entry starts soft again.
+    if (!d.noMagnet && d2 < _magnetR * _magnetR) {
+      const dist = Math.sqrt(d2) || 1;
+      d._mv = Math.min(11, (d._mv || 1.6) * 1.12 + 0.2);
+      const sp = Math.min(d._mv, dist);
+      d.x += dx / dist * sp; d.y += dy / dist * sp;
+    } else if (d._mv) d._mv = 0;
     // v0.26.678 — Walk-over (noMagnet) drops — boss/zodiac equipment — use a more
     // forgiving pickup footprint (55px vs 25px) so they grab as you run past
     // without auto-magnetising. Magnet drops keep the tight 25px gate since the
@@ -70110,6 +70130,14 @@ function killMonster(m) {
     // First-time zodiac kill → epic badge-earned flourish
     const wasNew = m.zodiacBoss && !zodiacDefeated(m.zodiacSign);
     trackPickup('boss', { id: m.type });
+    // v0.29.418 — kill-confirm micro-slow-mo (bosses ONLY, per user). ~0.9s
+    // at 1/3 speed plus a soft flash: the takedown gets a beat to land
+    // before the loot shower. The loop's _smHold gate does the slowing;
+    // this just arms the counter. Multi-phase bosses (Gravitos) route their
+    // NON-final phase-downs through the phase machine and return before
+    // reaching this line, so only the true final kill earns the slow-mo.
+    game._slowmoFrames = 54;
+    if (typeof flash === 'function') flash(0.25);
     if (wasNew) {
       const z = ZODIAC_SIGNS.find(s => s.id === m.zodiacSign);
       showToast(`🏅 ${z.glyph} BADGE EARNED — ${z.name}`, 'legendary');
@@ -75201,6 +75229,31 @@ function _runDialogTypewriter(text) {
   el.appendChild(caret);
   if (dlg) dlg.classList.add('typing');
   const SPEED_MS = 14;  // per-character cadence — ~70 chars/sec
+  // v0.29.418 — NPC voice blips (Celeste / Animal Crossing style). A tiny
+  // 45ms triangle chirp every other visible character, pitch-jittered so it
+  // reads as speech-mumble rather than a metronome; vowels sit ~90Hz higher
+  // for a hint of cadence. Synthesized on the game's existing AudioContext —
+  // no asset, no fetch. Silent whenever: audio is muted, the ctx hasn't been
+  // user-unlocked yet, or reduced-motion users got the instant-text path
+  // (this fn is never called there, so blips can't fire). Volume 0.04 —
+  // felt more than heard, and the skip-click flushes text WITHOUT blips
+  // because _twSkip drains steps with _twMute latched.
+  const _twBlip = (chTxt) => {
+    try {
+      if (dlg && dlg._twMute) return;
+      if (typeof audio === 'undefined' || !audio || audio.muted || !audio.ctx) return;
+      if (game && game.muted) return;
+      const c = audio.ctx;
+      if (c.state !== 'running') return;
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = 'triangle';
+      o.frequency.value = 300 + Math.random() * 120 + (/[aeiouAEIOU]/.test(chTxt) ? 90 : 0);
+      g.gain.setValueAtTime(0.04, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.045);
+      o.connect(g); g.connect(c.destination);
+      o.start(); o.stop(c.currentTime + 0.05);
+    } catch (_e) {}
+  };
   const step = () => {
     if (idx >= tokens.length) {
       clearInterval(dlg._twTimer); dlg._twTimer = null;
@@ -75219,6 +75272,7 @@ function _runDialogTypewriter(text) {
       ch.className = 'tw-char';
       ch.textContent = t.text;
       el.insertBefore(ch, caret);
+      if (t.text.trim() && (idx & 1)) _twBlip(t.text);   // v0.29.418 — voice blip on every other visible char
     }
   };
   dlg._twTimer = setInterval(step, SPEED_MS);
@@ -75227,7 +75281,9 @@ function _runDialogTypewriter(text) {
   // the typewriter without poking at the closure.
   dlg._twSkip = () => {
     if (!dlg._twTimer) return;
+    dlg._twMute = true;                       // v0.29.418 — flush silently, not 200 blips at once
     while (idx < tokens.length) step();
+    dlg._twMute = false;
   };
   // Click on the dialog box skips the typewriter to the end. Note: clicks
   // on option buttons stop-propagation via the buttons themselves, so this
@@ -83946,6 +84002,11 @@ function drawBackground() {
     // entity render later in the frame, so they stay full-brightness).
     // Used to deepen the Gravitos arena (bgTint on gravitosArena).
     if (_md.bgTint) { ctx.fillStyle = _md.bgTint; ctx.fillRect(0, 0, W, H); }
+    // v0.29.x — mid-ground parallax ridges: the derived depth layers between
+    // the 0.12 backdrop and the 1.0 play field (see _lxMidgroundFor above).
+    // Drawn after the tint so they sit IN the scene, before sky-life/props so
+    // wisps and world props still read as nearer than the skyline.
+    _lxDrawMidground(_md);
     // v0.25.153 — sky-life overlay (parallax cloud wisps + distant birds)
     // moved behind the _ART_FX_ENABLED gate. User reported the always-on
     // cloud + bird passes as ugly + laggy on top of the static painted
@@ -109457,6 +109518,36 @@ function updateUI() {
   // the string building (the _uiSetText guards only deduped the DOM write —
   // the ~15 concat/toFixed allocations still ran every frame, feeding the GC
   // churn behind the periodic 12-16 ms collection pauses).
+  // v0.29.418 — HUD polish: the coin readout ROLLS to its new value (18% of
+  // the gap per frame, so any gain lands in ~10 frames) instead of
+  // teleporting, and the counter pops on the first frame of a gain. This
+  // block is the SOLE writer of both coin texts — the two writes that lived
+  // in the stat-gate below were retired, otherwise a mid-roll gate rebuild
+  // (level-up, kill) would teleport the number straight to the end value.
+  // Runs every frame by design: it self-quiesces to one subtract when idle.
+  {
+    const _ct = Math.floor(player.mojicoins || 0);
+    if (game._coinShow === undefined) {
+      // First frame (boot / reload): write immediately at the target. Without
+      // this the roll's else-branch never writes, and a save loaded with a
+      // fat wallet shows the HTML's stale placeholder until the first pickup.
+      game._coinShow = _ct;
+      _uiSetText(d['mojicoins'], _ct);
+      _uiSetText(d['hud-mojicoins'], _fmtBig(_ct));
+    }
+    const _gap = _ct - game._coinShow;
+    if (_gap !== 0) {
+      if (_gap > 0 && !game._coinRolling) {           // pop once per gain burst, not per frame
+        const _ce = d['hud-mojicoins'];
+        if (_ce) { _ce.classList.remove('coin-pop'); void _ce.offsetWidth; _ce.classList.add('coin-pop'); }
+      }
+      const _stepC = Math.sign(_gap) * Math.max(1, Math.floor(Math.abs(_gap) * 0.18));
+      game._coinShow = (Math.abs(_gap) <= Math.abs(_stepC)) ? _ct : game._coinShow + _stepC;
+      game._coinRolling = (game._coinShow !== _ct);
+      _uiSetText(d['mojicoins'], game._coinShow);
+      _uiSetText(d['hud-mojicoins'], _fmtBig(game._coinShow));
+    } else game._coinRolling = false;
+  }
   const _sc = _uiLast._stat || (_uiLast._stat = {});
   const _scName = (player.look && player.look.name) || '';
   if (_sc.hp !== player.hp || _sc.mhp !== maxHp || _sc.mp !== player.mp || _sc.mmp !== maxMp ||
@@ -109474,7 +109565,7 @@ function updateUI() {
   // v0.26.x — EXP readout shows a whole-number fill % alongside the values.
   const _xpPctTxt = player.expToNext > 0 ? Math.floor((player.exp / player.expToNext) * 100) : 0;
   _uiSetText(d['exp-text'], _fmtBig(player.exp) + ' / ' + _fmtBig(player.expToNext) + ' (' + _xpPctTxt + '%)');
-  _uiSetText(d['mojicoins'], player.mojicoins);
+  // v0.29.418 — coin text writes moved to the rolling-counter block above.
   // v0.26.x — round combat stats to whole numbers for the HUD (star/tier
   // multipliers were leaking long decimals into the DEF/ATK readouts).
   _uiSetText(d['atk'], _hAtk);
@@ -109487,7 +109578,8 @@ function updateUI() {
   // here too, plus dynamic title-tooltips on the ⚔ and 🎯 stat-items
   // for the ATK-range and accuracy-vs-+5 detail that used to render
   // inline in the right panel.
-  _uiSetText(d['hud-mojicoins'], _fmtBig(Math.floor(player.mojicoins || 0)));   // v0.26.1033 — was `| 0`: 32-bit truncation showed garbage/negative for balances >2.147B (save allows up to 1e12); _fmtBig already guards non-finite
+  // v0.29.418 — hud-mojicoins write moved to the rolling-counter block above
+  // (which kept the v0.26.1033 Math.floor + _fmtBig treatment).
   // v0.26.269 — Setshard counter refresh.
   _uiSetText(d['hud-setshards'], _fmtBig(player.setshards | 0));
   _uiSetText(d['hud-atk'],   _hAtk);
@@ -109852,8 +109944,20 @@ function loop(time) {
   }
 
   // Hit-stop: freeze gameplay briefly
-  const frozen = game.hitStop > 0;
-  if (frozen) game.hitStop -= dt;
+  // v0.29.418 — boss kill-confirm micro-slow-mo. While game._slowmoFrames > 0
+  // the sim runs on only 1 frame in 3; the other 2 take the existing hitstop
+  // path (world held, particles + camera + render still live). Net effect: a
+  // ~0.33× dramatic beat with ZERO dt arithmetic — it reuses the exact
+  // semantics hitstop already ships, so nothing desyncs. Composes with a real
+  // hitstop (freeze first, then the world crawls back up to speed). Set only
+  // in killMonster's m.isBoss branch — regular kills never trigger it.
+  let _smHold = false;
+  if ((game._slowmoFrames | 0) > 0) {
+    game._slowmoFrames--;
+    _smHold = (game._slowmoFrames % 3) !== 0;
+  }
+  const frozen = game.hitStop > 0 || _smHold;
+  if (game.hitStop > 0) game.hitStop -= dt;
 
   // v0.25.855 — Clamp player.hp ≥ 0 once per frame BEFORE the death check.
   // Audit found that simultaneous same-frame hits could leave hp at e.g.
