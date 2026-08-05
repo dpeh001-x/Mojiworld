@@ -94081,6 +94081,11 @@ function drawPlayer() {
   // v0.25.481 — quicksand sink visual offset (0–8 px down) when idling on
   // a sandy map. Render-only; the collision body stays at player.y.
   const sy = Math.round(player.y + (player._sandSink || 0));
+  // v0.29.x — the local player finally casts the same ground shadow co-op
+  // peers have had since v0.25.3 (see _lxDrawBlobShadow). Height above ground
+  // uses the TRUE player.y (not the sand-sink visual offset) so the shadow
+  // doesn't drift while idling on sand.
+  _lxDrawBlobShadow(sx + player.w / 2, sy + player.h, player.y + player.h, player.x, player.w);
   if (player.invulnerable > 0 && player.dodgeTimer <= 0 && Math.floor(player.invulnerable / 60) % 2 === 0) return;
   // v0.25.249 — set-bonus 3pc aura sits behind the character.
   drawSetAura();
@@ -100081,6 +100086,54 @@ function _nameplateSprite(label, font, color) {
   _TXT_SPRITES.set(key, s);
   return s;
 }
+// =========================================================================
+// v0.29.x — ENTITY GROUND SHADOWS (presentation pass)
+// =========================================================================
+// Co-op PEERS have had a soft blob shadow since v0.25.3 — but the local player
+// and every monster cast nothing, so entities read as pasted onto the scene
+// rather than standing in it. The blob shadow is the classic 2D groundedness
+// cue (every MapleStory entity has one), and unlike backdrop overlays it
+// cannot fight the painted art: it sits on the floor the entity stands on.
+// Airborne behaviour is what sells it: the shadow stays ON THE GROUND under
+// the entity, shrinking and fading with height — jump height becomes visible.
+//
+//   • _lxGroundBelow: topmost platform under the entity's feet (world Y),
+//     null over pits/flyers-off-map — no platform, no shadow.
+//   • Drawn in the SAME coordinate space as the entity sprite (delta from
+//     the sprite's own sy), so any camera translate applies to both.
+//   • Cost: one ellipse fill per visible entity; skipped under veryLowFx.
+//   • LX_ENTITY_SHADOWS = false is the kill switch (LX_AMBIENT_V2 pattern).
+let LX_ENTITY_SHADOWS = true;
+function _lxGroundBelow(wx, w, feetY) {
+  const md = (typeof game !== 'undefined' && game) ? game.mapData : null;
+  if (!md || !md.platforms) return null;
+  let best = null;
+  for (let i = 0; i < md.platforms.length; i++) {
+    const p = md.platforms[i];
+    if (p.y < feetY - 4) continue;                 // only at or below the feet
+    if (wx + w < p.x || wx > p.x + p.w) continue;  // horizontal overlap
+    if (best === null || p.y < best) best = p.y;
+  }
+  return best;
+}
+function _lxDrawBlobShadow(cx, syFeet, feetWorldY, wx, w) {
+  if (!LX_ENTITY_SHADOWS) return;
+  if (typeof _perfVeryLowFx === 'function' && _perfVeryLowFx()) return;
+  const gy = _lxGroundBelow(wx, w, feetWorldY);
+  if (gy === null) return;
+  const hgt = gy - feetWorldY;                     // px the entity is above ground
+  if (hgt < 0 || hgt > 240) return;                // fully faded past ~a jump arc
+  const t = Math.min(1, hgt / 200);
+  const rx = Math.max(6, w * 0.42) * (1 - 0.35 * t);
+  const a = 0.26 * (1 - 0.65 * t);
+  if (a <= 0.02) return;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,' + a.toFixed(3) + ')';
+  ctx.beginPath();
+  ctx.ellipse(cx, syFeet + hgt, rx, Math.max(2, rx * 0.24), 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
 function drawMonster(m) {
   const sx = m.x - game.camera.x;
   const sy = m.y;
@@ -100103,6 +100156,10 @@ function drawMonster(m) {
   const _camY = (game.camera && game.camera.y) || 0;
   if (sx + m.w < 0 || sx > W) return;
   if (sy + m.h < _camY - 30 || sy > _camY + H + 30) return;
+  // v0.29.x — ground shadow under every monster (see _lxDrawBlobShadow above).
+  // After the cull so off-screen mobs pay nothing; before the body so it
+  // renders underneath.
+  _lxDrawBlobShadow(sx + m.w / 2, sy + m.h, m.y + m.h, m.x, m.w);
 
   // v0.29.273 — ANIM X-SPEED tracker (see _mobWalking). EMA of the per-frame
   // X displacement so the walk anim fires on ANY real horizontal motion —
