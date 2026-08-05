@@ -9173,7 +9173,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.419';
+const GAME_VERSION = 'v0.29.418';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -44866,12 +44866,8 @@ function checkDaily() {
     flash(0.2); audio.play('levelup');
     // Track per-day sets for visit/talk so repeats don't count
     game.dailyState = { day, streak, challenge: c.id, progress: 0, claimed: false, seenMaps: [], seenNpcs: [] };
-    // v0.29.419 — a new day means a new mutator roll: clear the boot-once
-    // announce latch so the fresh pair is toasted immediately.
-    game._mutAnnounced = false;
     saveState();
   }
-  if (typeof announceMutators === 'function') announceMutators();
   tickDaily('level', player.level);
 }
 function tickDaily(kind, n) {
@@ -44905,79 +44901,6 @@ function tickDaily(kind, n) {
     flash(0.35); audio.play('levelup');
     saveState();
   }
-}
-
-// =========================================================================
-// v0.29.419 — DAILY WORLD MUTATORS (replayability: every day plays different)
-// =========================================================================
-// Each UTC day rolls TWO world mutators, deterministically from dailyIndex()
-// (same clock-rollback-guarded day counter the dailies use, so the roll is
-// identical across devices and cannot be rerolled by clock fiddling). Harder
-// mutators carry `weight`; the day's total weight pays a compensating
-// +12%/point Mojicoin AND EXP bonus on every kill — hard days are the
-// lucrative days, easy days are the breather. Complements the opt-in Edicts
-// heat system (v0.29.66): Edicts are player-chosen and permanent, mutators
-// are world-chosen and daily.
-//
-// Effect channels bake at SPAWN into the one multiplier stack every monster
-// already flows through (hpMult / atkMult / expMult / mesMult / speed), so
-// there is zero per-frame cost. Bosses are exempt from the hostile channels
-// (mobHp/mobAtk/mobSpeed — encounters stay curated; the opt-in Edicts remain
-// the way to make bosses harder) but reward channels apply everywhere.
-// `game._mutForce = ['id', ...]` overrides the roll for QA / tests.
-const DAILY_MUTATORS = [
-  { id:'surge',    name:'Monster Surge', icon:'🩸', desc:'Monsters +20% HP',              mobHp:1.20,                 weight:1 },
-  { id:'ferocity', name:'Ferocity',      icon:'🗡️', desc:'Monsters +20% ATK',             mobAtk:1.20,                weight:2 },
-  { id:'haste',    name:'Quickening',    icon:'💨', desc:'Monsters +20% move speed',      mobSpeed:1.20,              weight:2 },
-  { id:'brittle',  name:'Brittle World', icon:'🥀', desc:'Monsters −25% HP',              mobHp:0.75,                 weight:0 },
-  { id:'goldrush', name:'Gold Rush',     icon:'💰', desc:'+40% Mojicoins from kills',     coin:1.40,                  weight:0 },
-  { id:'wisdom',   name:'Day of Wisdom', icon:'📚', desc:'+30% EXP from kills',           exp:1.30,                   weight:0 },
-  { id:'titans',   name:'Titan Blood',   icon:'🗿', desc:'Monsters +35% HP · +25% coins', mobHp:1.35, coin:1.25,     weight:1 },
-  { id:'skittish', name:'Skittish Prey', icon:'🐇', desc:'Monsters +15% speed · +20% EXP', mobSpeed:1.15, exp:1.20,  weight:1 },
-];
-// mulberry32 — tiny seeded PRNG; the roll must be reproducible from the day
-// number alone (Math.random would give every device a different world).
-function _mutRng(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-let _mutCache = { day: -1, list: [] };
-function activeMutators() {
-  if (typeof game !== 'undefined' && game && Array.isArray(game._mutForce))
-    return DAILY_MUTATORS.filter(m => game._mutForce.includes(m.id));
-  const day = dailyIndex();
-  if (_mutCache.day === day) return _mutCache.list;
-  const r = _mutRng((day * 2654435761) >>> 0);
-  const i1 = Math.floor(r() * DAILY_MUTATORS.length);
-  let i2 = Math.floor(r() * (DAILY_MUTATORS.length - 1));
-  if (i2 >= i1) i2++;                       // second pick always distinct
-  _mutCache = { day, list: [DAILY_MUTATORS[i1], DAILY_MUTATORS[i2]] };
-  return _mutCache.list;
-}
-function _mutMul(field) {
-  let v = 1;
-  for (const m of activeMutators()) if (typeof m[field] === 'number') v *= m[field];
-  return v;
-}
-function _mutWeight() { let w = 0; for (const m of activeMutators()) w += (m.weight || 0); return w; }
-function _mutBonusMul() { return 1 + 0.12 * _mutWeight(); }
-function _mutLabel() { return activeMutators().map(m => m.icon + ' ' + m.name).join('  ·  '); }
-function announceMutators() {
-  // Once per boot (not persisted): the daily roll toast. Skipped until a
-  // class exists so the title screen stays clean.
-  if (typeof game === 'undefined' || !game || game._mutAnnounced || !player.cls) return;
-  game._mutAnnounced = true;
-  const list = activeMutators();
-  if (!list.length) return;
-  const bonus = Math.round((_mutBonusMul() - 1) * 100);
-  showToast('🎲 Today’s world: ' + _mutLabel() +
-    (bonus > 0 ? '  —  +' + bonus + '% coins & EXP from kills' : ''), 'epic');
-  for (const m of list) showToast(m.icon + ' ' + m.name + ' — ' + m.desc, 'rare');
 }
 
 // =========================================================================
@@ -50344,17 +50267,8 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   const _varHp  = isBoss ? 1 : (0.90 + Math.random() * 0.20);
   const _varAtk = isBoss ? 1 : (0.90 + Math.random() * 0.20);
   const _varDef = isBoss ? 1 : (0.92 + Math.random() * 0.16);
-  // v0.29.419 — Daily World Mutator channels. Hostile channels (hp/atk/speed)
-  // exempt bosses — encounters stay curated, and the opt-in Edicts remain the
-  // sanctioned way to harden bosses. Reward channels (exp/coin, including the
-  // weight-scaled contract bonus) apply to every kill, bosses included.
-  const _mutHp    = isBoss ? 1 : _mutMul('mobHp');
-  const _mutAtk   = isBoss ? 1 : _mutMul('mobAtk');
-  const _mutSpd   = isBoss ? 1 : _mutMul('mobSpeed');
-  const _mutExp   = _mutMul('exp')  * _mutBonusMul();
-  const _mutCoin  = _mutMul('coin') * _mutBonusMul();
-  const hpMult  = (isBoss ? 1 : (isMiniBoss ? 5   : isElite ? 3   : 1)) * towerHp  * _distMul * _hpKnob * _mapMul * UNIVERSAL_HP_MUL * (isBoss ? 1 : MONSTER_STAT_MUL) * _hpAtkLvExp * _hpAtkLinLv * _edHp * _mutHp;   // v0.26.398 — bosses exempt from MONSTER_STAT_MUL (was double-dipped onto bosses → ~17.5% of authored HP; now authored × UNIVERSAL_HP_MUL only)
-  const atkMult = (isBoss ? 1 : (isMiniBoss ? 2   : isElite ? 1.5 : 1)) * towerAtk * _distMul * _mapMul * MONSTER_STAT_MUL * _hpAtkLvExp * _hpAtkLinLv * _atkHiLvSoften * _edAtk * _mutAtk;   // v0.26.400 — boss ATK exemption REVERTED (HP-only split). v0.26.398 had exempted boss ATK too → ~2.86× hits that outpaced player HP buffs; bosses keep the HP exemption (tankier) but ATK returns to the calibrated ~0.35× value.
+  const hpMult  = (isBoss ? 1 : (isMiniBoss ? 5   : isElite ? 3   : 1)) * towerHp  * _distMul * _hpKnob * _mapMul * UNIVERSAL_HP_MUL * (isBoss ? 1 : MONSTER_STAT_MUL) * _hpAtkLvExp * _hpAtkLinLv * _edHp;   // v0.26.398 — bosses exempt from MONSTER_STAT_MUL (was double-dipped onto bosses → ~17.5% of authored HP; now authored × UNIVERSAL_HP_MUL only)
+  const atkMult = (isBoss ? 1 : (isMiniBoss ? 2   : isElite ? 1.5 : 1)) * towerAtk * _distMul * _mapMul * MONSTER_STAT_MUL * _hpAtkLvExp * _hpAtkLinLv * _atkHiLvSoften * _edAtk;   // v0.26.400 — boss ATK exemption REVERTED (HP-only split). v0.26.398 had exempted boss ATK too → ~2.86× hits that outpaced player HP buffs; bosses keep the HP exemption (tankier) but ATK returns to the calibrated ~0.35× value.
   // v0.26.134 — Per user "reduce all monster EXP gained by half". Global
   // ×0.5 on the final EXP multiplier — applies to normal mobs, elites,
   // mini-bosses, and bosses uniformly.
@@ -50367,8 +50281,8 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // genuine timed mini-bosses still pay the full 5× / 4×.
   const _mbExpMul = _miniElitePromoted ? 1.4 : 5;
   const _mbMesMul = _miniElitePromoted ? 1.4 : 4;
-  const expMult = (isBoss ? 1 : (isMiniBoss ? _mbExpMul : isElite ? 2.2 : 1)) * _distMul * _mapMul * 0.1 * _mutExp;
-  const mesMult = (isBoss ? 1 : (isMiniBoss ? _mbMesMul : isElite ? 2.5 : 1)) * _distMul * _mapMul * _mutCoin;
+  const expMult = (isBoss ? 1 : (isMiniBoss ? _mbExpMul : isElite ? 2.2 : 1)) * _distMul * _mapMul * 0.1;
+  const mesMult = (isBoss ? 1 : (isMiniBoss ? _mbMesMul : isElite ? 2.5 : 1)) * _distMul * _mapMul;
   // v0.25.57 — monsters now vary in size + scale up with player level.
   // v0.26.133 / v0.26.152 — coefficient progressively minimized.
   // v0.26.314 — Per user "Normal monsters not in the PQ or expedition
@@ -50426,10 +50340,6 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     uid: (game._monUid = (game._monUid || 0) + 1),   // v0.27.0 — stable network id for co-op host-authoritative sync (object identity doesn't survive JSON)
     name: prefix + t.name,
     atk:   Math.floor(t.atk   * atkMult * _varAtk),   // v0.29.265 — per-spawn roll
-    // v0.29.419 — daily-mutator speed channel; overrides the `...t` spread.
-    // Rounded to 2dp so AI speed comparisons stay stable; 0-speed sentries
-    // (× anything = 0) keep their platform-locked behaviour.
-    speed: Math.round(((t.speed || 0) * _mutSpd) * 100) / 100,
     // v0.26.109 — overrides the `def` field that `...t` would otherwise
     // spread in at full value; brings DEF in line with HP/ATK's 3/4 cut.
     // v0.26.144 — Per user "bump up the monsters defence more, make it
@@ -98543,7 +98453,15 @@ function _loadBossFrames(map, subdir, types) {
 }
 // Ping-pong over the contiguous run of DECODED frames from index 0
 // (0,1,..,n-1,n-2,..,1) so the loop is seamless for any frame count.
-function _bossPingPongFrame(frames, frameMs, maxLong) {
+// v0.29.418 — optional offsetMs (per-entity anim phase). The raw global clock
+// meant two things: every state change snapped to whatever frame the wall
+// clock happened to land on (an attack windup almost never played from its
+// first frame — walk-to-attack popped mid-swing), and every mob of every type
+// animated in perfect lockstep (eight slimes bobbing in unison). Callers that
+// track a phase pass offsetMs = seed − stateStart, so each state begins at
+// frame 0 the moment it is entered and idle herds spread out. Omitted → old
+// behaviour, so the dozens of legacy call sites are untouched.
+function _bossPingPongFrame(frames, frameMs, maxLong, offsetMs) {
   if (frames && typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, maxLong || 720);   // v0.29.284 — base 720 logical = measured max boss draw (incl. star-form calib scale)
   if (!frames) return null;
   let n = frames._readyN || 0;   // v0.26.x perf — monotonic decoded-count cache
@@ -98553,12 +98471,12 @@ function _bossPingPongFrame(frames, frameMs, maxLong) {
   if (n === 1) return frames[0];
   const seqLen = 2 * n - 2;
   const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-  const i = Math.floor(now / frameMs) % seqLen;
+  const i = Math.floor(Math.max(0, now + (offsetMs || 0)) / frameMs) % seqLen;
   return frames[i < n ? i : seqLen - i];
 }
 // Straight forward loop (0,1,..,n-1,0,...) — for cycles authored to loop
 // seamlessly (e.g. walk), where ping-pong would play the motion in reverse.
-function _bossLoopFrame(frames, frameMs, maxLong) {
+function _bossLoopFrame(frames, frameMs, maxLong, offsetMs) {   // v0.29.418 — offsetMs: see _bossPingPongFrame
   if (!frames) return null;
   if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, maxLong || 720);   // v0.29.284 — base 720 logical = measured max boss draw (incl. star-form calib scale)
   let n = frames._readyN || 0;   // v0.26.x perf — monotonic decoded-count cache
@@ -98567,12 +98485,16 @@ function _bossLoopFrame(frames, frameMs, maxLong) {
   if (n === 0) return null;
   if (n === 1) return frames[0];
   const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-  return frames[Math.floor(now / frameMs) % n];
+  return frames[Math.floor(Math.max(0, now + (offsetMs || 0)) / frameMs) % n];
 }
 const BOSS_ATTACK_FRAMES = Object.create(null);
 _loadBossFrames(BOSS_ATTACK_FRAMES, 'attack');
 const _BOSS_ATK_FRAME_MS = 48;   // v0.26.645 — shorter inter-frame gap for a smoother/faster attack loop (~0.43s/9-frame cycle, was 70ms/0.63s)
-function _bossAttackFrame(key) { return _bossLoopFrame(BOSS_ATTACK_FRAMES[key], _BOSS_ATK_FRAME_MS); }
+// v0.29.418 — optional `m`: with the boss in hand, its state cycle is phased
+// per entity (attack plays from frame 0 on entry, idle/walk desynced) via
+// _mobAnimPhase. Without it (readiness probes, legacy sites) behaviour is
+// unchanged — global wall clock.
+function _bossAttackFrame(key, m) { return _bossLoopFrame(BOSS_ATTACK_FRAMES[key], _BOSS_ATK_FRAME_MS, undefined, m ? _mobAnimPhase(m, 'attack', false) : 0); }
 // v0.29.x — Gravitos form-1 GRAVITY CRUSH punch. Plays the 9-frame punch ONCE
 // across the pattern's 1500 ms window, driven by m.patternTimer instead of the
 // generic 48 ms wall-clock loop (which would replay the punch ~3.5×): windup
@@ -98605,22 +98527,47 @@ function _gravitosPunchFrame(m) {
 const BOSS_IDLE_FRAMES = Object.create(null);
 _loadBossFrames(BOSS_IDLE_FRAMES, 'idle');
 const _BOSS_IDLE_FRAME_MS = 130;   // slower than attack — relaxed breathing (~2s cycle at 9 frames)
-function _bossIdleFrame(key) { return _bossPingPongFrame(BOSS_IDLE_FRAMES[key], _BOSS_IDLE_FRAME_MS); }
+function _bossIdleFrame(key, m) { return _bossPingPongFrame(BOSS_IDLE_FRAMES[key], _BOSS_IDLE_FRAME_MS, undefined, m ? _mobAnimPhase(m, 'idle', true) : 0); }   // v0.29.418 — optional m: per-entity phase
 // v0.26.322 — walk cycle, played while the boss is moving horizontally (and not
 // attacking). Falls back to idle, then the static sprite, when absent.
 const BOSS_WALK_FRAMES = Object.create(null);
 _loadBossFrames(BOSS_WALK_FRAMES, 'walk');
 const _BOSS_WALK_FRAME_MS = 80;    // brisker than idle
-function _bossWalkFrame(key) { return _bossLoopFrame(BOSS_WALK_FRAMES[key], _BOSS_WALK_FRAME_MS); }
+function _bossWalkFrame(key, m) { return _bossLoopFrame(BOSS_WALK_FRAMES[key], _BOSS_WALK_FRAME_MS, undefined, m ? _mobAnimPhase(m, 'walk', true) : 0); }   // v0.29.418 — optional m: per-entity phase
 // v0.29.273 — WALKING SIGNAL: vx OR actual per-frame X displacement. The old
 // vx-only gate (>0.6) made slow walkers glide in idle pose (snail speed 0.4
 // peaks at vx 0.54 — it NEVER walked), and bosses that reposition by writing
 // m.x directly (charges, strafes) glided too. drawMonster maintains
 // m._animXV — an EMA of |Δx| per rendered frame, teleport-clamped — so any
 // real horizontal motion drives the walk loop regardless of how it happened.
+// v0.29.418 — HYSTERESIS. The single threshold flickered: a wandering mob's
+// vx repeatedly crosses 0.6 as its AI accelerates/decelerates, so it flipped
+// walk↔idle several times a second — and with wall-clock frame indexing each
+// flip snapped the animation to an arbitrary frame. Enter walk at the old
+// threshold; LEAVE only once clearly below it (vx < 0.35 and _animXV < 0.15).
+// A mob hovering in the band between the two now holds its current state.
 function _mobWalking(m) {
   if (!m) return false;
-  return Math.abs(m.vx || 0) > 0.6 || (m._animXV || 0) > 0.25;
+  const vx = Math.abs(m.vx || 0), xv = m._animXV || 0;
+  if (m._walkLatch) {
+    if (vx < 0.35 && xv < 0.15) m._walkLatch = false;
+  } else {
+    if (vx > 0.6 || xv > 0.25) m._walkLatch = true;
+  }
+  return m._walkLatch;
+}
+// v0.29.418 — per-entity animation phase. Tracks the current anim state on the
+// monster; on ANY state change, restamps the epoch so the new state's cycle
+// begins at frame 0 (an attack windup now actually winds up; a walk starts on
+// its first stride). `desync` adds a stable per-mob seed — used for idle/walk
+// so a pack spreads across the cycle instead of bobbing in lockstep; attack
+// omits it so frame 0 lands exactly on entry. Returns the offsetMs for
+// _bossLoopFrame/_bossPingPongFrame.
+function _mobAnimPhase(m, state, desync) {
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  if (m._animSt !== state) { m._animSt = state; m._animStAt = now; }
+  if (m._animSeed === undefined) m._animSeed = (Math.random() * 2048) | 0;
+  return (desync ? m._animSeed : 0) - m._animStAt;
 }
 // A boss counts as "walking" when its horizontal motion clears the threshold.
 function _bossMoving(m) { return _mobWalking(m); }
@@ -99792,8 +99739,17 @@ function _monsterStateFrame(m) {
   // never fired. Fixed to player.hp so every mob now telegraphs an attack swing
   // as the player closes in (like the Lantern Wisp's pulse).
   if (!attacking && typeof player !== 'undefined' && player && player.hp > 0) {
-    attacking = Math.abs((m.x + m.w / 2) - (player.x + player.w / 2)) < m.w * 1.2 &&
-                Math.abs((m.y + m.h / 2) - (player.y + player.h / 2)) < m.h;
+    // v0.29.418 — hysteresis + minimum hold on the proximity trigger. The
+    // single 1.2×w radius flickered attack↔walk every frame while the player
+    // danced on the boundary, and each flip snapped the animation mid-cycle.
+    // Enter at 1.2×w as before; once entered, hold the attack state for at
+    // least one full 9-frame cycle (9 × 48 ms) and release only past 1.5×w.
+    const _pdx = Math.abs((m.x + m.w / 2) - (player.x + player.w / 2));
+    const _pdy = Math.abs((m.y + m.h / 2) - (player.y + player.h / 2));
+    const _inR = m._proxAtk ? (_pdx < m.w * 1.5 && _pdy < m.h * 1.25) : (_pdx < m.w * 1.2 && _pdy < m.h);
+    if (_inR && !m._proxAtk) m._proxAtkMinUntil = now + _BOSS_ATK_FRAME_MS * 9;
+    m._proxAtk = _inR || now < (m._proxAtkMinUntil || 0);
+    attacking = m._proxAtk;
   }
   // v0.26.351 — record the current frame state so the renderer can apply the
   // per-type attack-frame box scale (padded swing/smash frames) to the attack
@@ -99808,9 +99764,12 @@ function _monsterStateFrame(m) {
   // across dense maps is 425 logical (Astrofox), including the _ATK_FRAME_SCALE
   // padding blow-up and the LX_MOB_SCALE_DATA per-type multipliers. Same
   // DPR-aware rule as everything else, so it is still a pure down-scale.
-  if (attacking) return _bossLoopFrame(set.attack, _BOSS_ATK_FRAME_MS, 480);
-  if (_mobWalking(m)) return _bossLoopFrame(set.walk, _BOSS_WALK_FRAME_MS, 480);   // v0.29.273 — displacement-aware (slow mobs glided)
-  return _bossPingPongFrame(set.idle, _BOSS_IDLE_FRAME_MS, 480);
+  // v0.29.418 — each state gets a per-mob phase: attack starts at frame 0 on
+  // entry (the windup finally plays), walk starts on its first stride, and
+  // idle/walk carry a per-mob seed so a pack doesn't animate in lockstep.
+  if (attacking) return _bossLoopFrame(set.attack, _BOSS_ATK_FRAME_MS, 480, _mobAnimPhase(m, 'attack', false));
+  if (_mobWalking(m)) return _bossLoopFrame(set.walk, _BOSS_WALK_FRAME_MS, 480, _mobAnimPhase(m, 'walk', true));   // v0.29.273 — displacement-aware (slow mobs glided)
+  return _bossPingPongFrame(set.idle, _BOSS_IDLE_FRAME_MS, 480, _mobAnimPhase(m, 'idle', true));
 }
 // v0.26.351 — Per-type draw-box multiplier for padded weapon-swing attack
 // frames (fatDragon, smithgolem, tombKeeper, forgewight). Each attack frame
@@ -100458,15 +100417,18 @@ function drawMonster(m) {
   const _spriteKey = m._gravStarKey || m._phaseSprite || m.type;
   // v0.26.310 — prefer the 4-frame attack animation when its frames have
   // decoded; otherwise the single static attack pose, then idle.
+  // v0.29.418 — pass m so the boss's cycle is phased per entity: an attack
+  // plays from its first frame the moment it starts (the windup telegraph the
+  // player is supposed to read), instead of joining the global clock mid-swing.
   const _bossAttackImg = _bossAttacking
     ? ((_spriteKey === 'gravitospunch' && _gravitosPunchFrame(m))
-       || _bossAttackFrame(_spriteKey) || BOSS_ATTACK_SPRITES[_spriteKey])
+       || _bossAttackFrame(_spriteKey, m) || BOSS_ATTACK_SPRITES[_spriteKey])
     : null;
   // v0.26.314/322 — when not attacking: walk loop while moving, else idle loop,
   // else the static sprite.
   const _bossWalking = !_bossAttacking && _bossMoving(m);
-  const _bossWalkImg = _bossWalking ? _bossWalkFrame(_spriteKey) : null;
-  const _bossIdleImg = (!_bossAttacking && !_bossWalking) ? _bossIdleFrame(_spriteKey) : null;
+  const _bossWalkImg = _bossWalking ? _bossWalkFrame(_spriteKey, m) : null;
+  const _bossIdleImg = (!_bossAttacking && !_bossWalking) ? _bossIdleFrame(_spriteKey, m) : null;
   // v0.29.367 — the _dreamPhase "alpha-fade" flag was WRITE-ONLY: six sites
   // set it (Scorpio's burrow, Gemini's Lie, the Pisces dream) with comments
   // promising the sprite-render would dim — but no renderer ever read it, so
