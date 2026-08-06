@@ -62806,6 +62806,20 @@ function updateMonsters(dt) {
       }
     }
 
+    // v0.29.419 — PLANT WHILE CASTING (per user "monsters should avoid walking
+    // when casting an attack"). bigMelee already rooted itself with m.vx = 0
+    // during its telegraph, but the RANGED windup did not: a mob that started
+    // a 240 ms shot windup kept striding toward the player through the whole
+    // charge, so the wind-up pose slid across the ground and the telegraph
+    // read as ambient motion rather than "it is about to fire".
+    //
+    // Applied here, once, immediately before the physics integration below —
+    // so it covers the flying and grounded branches together and cannot be
+    // undone by an AI block that runs earlier. vx only: gravity, knockback,
+    // and any authored vertical leap are untouched, and a mob shoved
+    // mid-cast still slides from the hit (that impact should read).
+    if (typeof _mobCasting === 'function' && _mobCasting(m)) m.vx = 0;
+
     // Physics (gravity scales with map)
     // v0.25.46 — gate the whole physics block on m._noGravity so bosses
     // with phased "out of bounds" attacks (Scorpio's burrow) can drive
@@ -98590,6 +98604,30 @@ function _mobAnimPhase(m, state, desync) {
   if (m._animSeed === undefined) m._animSeed = (Math.random() * 2048) | 0;
   return (desync ? m._animSeed : 0) - m._animStAt;
 }
+// v0.29.419 — CASTING: is this mob mid-cast, i.e. committed to an attack it is
+// actively charging? Only the two deliberate windups qualify:
+//   • m._shootWindup   — the ranged charge before the projectile releases
+//   • m._bigMeleeFiring — the heavy-swing telegraph + strike
+//
+// NOT m.atkAnimUntil. That field is the attack-ANIMATION window, and it is also
+// stamped by incidental events: 650 ms on every contact hit (v0.29.273, so
+// touch damage animates) and 420 ms on a parry. Rooting on it would freeze a
+// mob for two thirds of a second every time it brushed the player — mobs would
+// stutter to a halt all through melee, which is a combat change nobody asked
+// for. So: casting roots, animating does not.
+function _mobCasting(m) {
+  if (!m) return false;
+  return !!(m._shootWindup > 0 || m._bigMeleeFiring);
+}
+// True when the mob should be DRAWN attacking: any cast, plus the authored
+// attack-animation window (contact hits, parries, skill pulses). Distinct from
+// _mobCasting on purpose — see above.
+function _mobAttackAnim(m) {
+  if (!m) return false;
+  if (_mobCasting(m)) return true;
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  return !!(m.atkAnimUntil && now < m.atkAnimUntil);
+}
 // A boss counts as "walking" when its horizontal motion clears the threshold.
 function _bossMoving(m) { return _mobWalking(m); }
 // v0.26.x -- Per-arena art warm-up. The boot decode gate (v0.26.880) only
@@ -99753,13 +99791,21 @@ function _monsterFramesFor(type) {
 function _monsterStateFrame(m) {
   const set = _monsterFramesFor(m.type);
   const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-  let attacking = m.atkAnimUntil && now < m.atkAnimUntil;
+  // v0.29.419 — a real attack always wins: a cast (which the physics plant has
+  // also rooted, so the swing cannot slide) or the authored attack-animation
+  // window that contact hits and parries stamp.
+  let attacking = _mobAttackAnim(m);
   // v0.26.x — Per user: monsters play their attack animation when the player is
   // NEAR (within ~1.2x their width). This block always existed but was dead —
   // it gated on `player.currentHp` (undefined; the player uses player.hp), so it
   // never fired. Fixed to player.hp so every mob now telegraphs an attack swing
   // as the player closes in (like the Lantern Wisp's pulse).
-  if (!attacking && typeof player !== 'undefined' && player && player.hp > 0) {
+  // v0.29.419 — the proximity pose no longer applies while the mob is MOVING
+  // (per user "when moving the walking sprites should play"). It means only
+  // "the player is standing close", not "I am attacking" — so a mob chasing
+  // the player at close range used to slide along frozen mid-swing, never
+  // showing its walk cycle. Standing next to the player still menaces.
+  if (!attacking && !_mobWalking(m) && typeof player !== 'undefined' && player && player.hp > 0) {
     // v0.29.418 — hysteresis + minimum hold on the proximity trigger. The
     // single 1.2×w radius flickered attack↔walk every frame while the player
     // danced on the boundary, and each flip snapped the animation mid-cycle.
