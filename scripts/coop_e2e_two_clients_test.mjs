@@ -4,9 +4,17 @@
 // exercises the ?join= invite link and the no-hero-yet pending join.
 //
 //   node serve.js 8813 && node scripts/coop_e2e_two_clients_test.mjs 8813
+//
+// Pass a second arg to test a DIFFERENT page — e.g. a copy of the pushed tree's
+// game file. v0.29.423 shipped two functions defined-but-never-called because
+// the E2E was only ever run against the worktree, never against what was
+// actually committed; verifying the shipped bytes is the point of this arg.
+//   git show origin/main:mojiworld_game.html > _tmp_pushed.html
+//   node scripts/coop_e2e_two_clients_test.mjs 8813 _tmp_pushed.html
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
 const PORT = process.argv[2] || '8813';
+const PAGE = process.argv[3] || 'mojiworld_game.html';
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
@@ -17,7 +25,7 @@ const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['-
 async function boot(label, query) {
   const page = await (await b.newContext({ serviceWorkers: 'block' })).newPage();
   page.on('pageerror', e => console.log(`  [${label}] pageerror`, String(e).slice(0, 120)));
-  await page.goto(`http://localhost:${PORT}/mojiworld_game.html${query || ''}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+  await page.goto(`http://localhost:${PORT}/${PAGE}${query || ''}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => { try { return typeof eval('mpConnect') === 'function' && !!eval('player'); } catch { return false; } }, null, { timeout: 180000 });
   return page;
 }
