@@ -12630,11 +12630,23 @@ function _lxEquipSprite(cat, name) {
     // peer cycling ids created ~10 permanently-retained Image objects and ~10
     // outbound 404s per second. FIFO rather than a catalog whitelist so
     // legitimately modded / newly-added art still loads.
+    // v0.29.470 — LRU, not FIFO. The local player's gear is inserted on frame
+    // 1, so under a FIFO it was always the OLDEST — a peer flooding sprite ids
+    // walked the eviction pointer straight through the victim's own equipment,
+    // making it blank and re-fetch on a loop. Exactly backwards. The hit path
+    // below re-inserts, so anything drawn recently is young.
     const _ks = Object.keys(c);
     if (_ks.length >= _LX_EQUIP_CACHE_MAX) delete c[_ks[0]];
     const img = new Image(); img.decoding = 'async'; img.onerror = () => {};
     img.src = 'Sprites/equipment/' + cat + '/' + name + '.webp';
     c[name] = img;
+  }
+  else {
+    // v0.29.470 — touch on hit: delete + re-set moves this key to the end of
+    // the insertion order, which is what makes the eviction above LRU.
+    const _hit = c[name];
+    delete c[name];
+    c[name] = _hit;
   }
   return c[name];
 }
@@ -13722,7 +13734,7 @@ const HERO_WORLD_DISPLAY_SCALE = 0.85;
 // megabytes per second of permanently-retained canvas. Same discipline as
 // _MOB_SPRITE_CACHE and _beamTintCache. Map iterates in insertion order, so
 // the first key is the oldest.
-const _LX_TINTED_EQ_MAX = 48;
+const _LX_TINTED_EQ_MAX = 96;   // v0.29.470 — 48 was under the ~6-peer working set
 const _LX_TINTED_EQ_CACHE = new Map();
 function _lxGetTintedEqSprite(spriteImg, tint) {
   if (!spriteImg || !tint) return spriteImg;
@@ -13732,7 +13744,16 @@ function _lxGetTintedEqSprite(spriteImg, tint) {
   // variant naturally.
   const key = (spriteImg.src || '?') + '|' + tint + '|' + spriteImg.naturalWidth + 'x' + spriteImg.naturalHeight;
   let baked = _LX_TINTED_EQ_CACHE.get(key);
-  if (baked) return baked;
+  if (baked) {
+    // v0.29.470 — touch on hit so the cap is LRU rather than FIFO. With ~6
+    // peers the working set (peers x slots x tint) exceeds the cap, and a FIFO
+    // then evicts entries requested again the same frame — re-baking an
+    // 800x800 canvas dozens of times per frame, worse than the unbounded cache
+    // it replaced. Map re-insert moves the key to the end.
+    _LX_TINTED_EQ_CACHE.delete(key);
+    _LX_TINTED_EQ_CACHE.set(key, baked);
+    return baked;
+  }
   baked = _lxBakeTintedHead(spriteImg, tint);
   while (_LX_TINTED_EQ_CACHE.size >= _LX_TINTED_EQ_MAX) {
     const _oldest = _LX_TINTED_EQ_CACHE.keys().next().value;
@@ -28913,8 +28934,14 @@ function getEquipBonus(key) {
     // carrying "equipped": null threw right through the load. _equipBonusCache
     // is never persisted, so the rebuild below always runs on that first read.
     // Repaired in place rather than just skipped: every other consumer expects
-    // the object to exist.
-    if (!player.equipped || typeof player.equipped !== 'object') player.equipped = {};
+    // v0.29.470 — seed the three core slots. Repairing to a bare {} was truthy,
+    // so loadState's own `if (!player.equipped) player.equipped = {weapon:null,
+    // armor:null, accessory:null}` was then guarded away and those three keys
+    // ended up ABSENT rather than null — a different shape from every other
+    // load path, which matters to any `in`/hasOwnProperty check.
+    if (!player.equipped || typeof player.equipped !== 'object') {
+      player.equipped = { weapon: null, armor: null, accessory: null };
+    }
     // Lazy-build on first read after invalidation.
     for (const slot of ['weapon','armor','accessory']) {
       const it = player.equipped[slot];
@@ -31079,7 +31106,17 @@ function _lxGfxSwitchChanged() {
   // The old check read LX_GFX_PRESETS[sel.value]; once that was 'custom' the
   // lookup was undefined, the early return could never fire, and the dropdown
   // was stuck on Custom forever even after the switches returned to a preset.
-  for (const name of ['high', 'medium', 'low']) {
+  // v0.29.470 — 'high' and 'medium' carry IDENTICAL switch sets (they differ
+  // only in tierLow, which is not a switch), so a first-match scan of a fixed
+  // list always answered 'high'. A Medium player who toggled any switch off
+  // and back on was silently promoted to High and dropped off the low-FX tier
+  // they chose — persisted via gfxBase, so it survived reload. Ties must
+  // resolve to the preset the player is ALREADY on; only then fall back.
+  const _order = [];
+  for (const n of [sel.value, (typeof _lxGfxBase !== 'undefined' ? _lxGfxBase : null), 'high', 'medium', 'low']) {
+    if (n && LX_GFX_PRESETS[n] && _order.indexOf(n) < 0) _order.push(n);
+  }
+  for (const name of _order) {
     const q = LX_GFX_PRESETS[name];
     if (q.weather === cur.weather && q.ambient === cur.ambient &&
         q.shadows === cur.shadows && q.dmgnum === cur.dmgnum) {
@@ -35363,7 +35400,24 @@ let _lxPadPresent = false;
 let _lxPadBlurHeld = false;   // v0.29.261 — edge state for the text-field B/Start blur hatch
 try {
   window.addEventListener('gamepadconnected', () => { _lxPadPresent = true; });
-  window.addEventListener('gamepaddisconnected', () => {
+  // v0.29.470 — release everything the pad was holding. The poll's ONLY keyup
+// sweep lives past the "no pad present" early-return, so a disconnect while a
+// stick or button was held left game.keys latched with no code path able to
+// clear it: the hero runs into a wall forever. On a controller-only Steam Deck
+// there is no keyboard press and no window blur to recover it — a soft-lock on
+// exactly the platform the Full Controller Support claim targets.
+function _lxPadFlushHeld() {
+  try {
+    if (typeof _lxPadPrev === 'undefined' || !_lxPadPrev) return;
+    for (const k in _lxPadPrev) {
+      if (!_lxPadPrev[k]) continue;
+      _lxPadPrev[k] = false;
+      try { _lxPadDispatch(k, false); } catch (e) {}
+    }
+  } catch (e) {}
+}
+window.addEventListener('gamepaddisconnected', () => {
+  _lxPadFlushHeld();
     try { const ps = navigator.getGamepads ? navigator.getGamepads() : []; _lxPadPresent = Array.prototype.some.call(ps, (g) => g && g.connected); }
     catch (e) { _lxPadPresent = false; }
   });
@@ -52140,8 +52194,13 @@ function updatePlayer(dt) {
     // freeze gate below already does. This gate sits ABOVE it and returned
     // without calling _qteFrame, so a boss that shackles AND hard-stuns (1800ms
     // stun vs a 3000ms shackle) ate most of the escape window: presses were
-    // discarded, the bar did not move, and the QTE expired as a FAIL.
-    if (typeof _QTE !== 'undefined' && _QTE.active) _qteFrame(dt, true);
+    // v0.29.470 — accept input during hit-stun (second arg false). v0.29.463
+    // passed timerOnly:true, copying the freeze gate — but _qteFrame returns
+    // BEFORE its arrow-key loop when timerOnly is set, so the shackle clock
+    // drained while presses were still thrown away. That made the QTE fail
+    // FASTER than the stall it replaced. Freeze deliberately withholds input;
+    // a stagger must not — being hit should never stop you struggling.
+    if (typeof _QTE !== 'undefined' && _QTE.active) _qteFrame(dt, false);
     return;
   }
 
@@ -64122,7 +64181,14 @@ function updateMonsters(dt) {
           const _q = _aggroPeers.find((qq) => qq.id === _chosen);
           if (_q) {
             _bSwap = { x: player.x, y: player.y, vx: player.vx, vy: player.vy, facing: player.facing,
-                       hp: player.hp, invulnerable: player.invulnerable, hitStun: player.hitStun,
+                       hp: player.hp,
+            mp: player.mp,   // v0.29.470 — bossAI writes player.mp DIRECTLY
+                             // (King Krook's earthquake zeroes it; Aetherion's
+                             // Astral Judgement takes 99%). Without mp in the
+                             // snapshot, an attack aimed at your PARTNER — or,
+                             // via the MojiMon taunt, at your COMPANION —
+                             // silently drained YOURS instead.
+            invulnerable: player.invulnerable, hitStun: player.hitStun,
                        frozenTimer: player.frozenTimer, freezeTimer: player.freezeTimer,
                        _slowTimer: player._slowTimer, burnTimer: player.burnTimer,
                        _poisonTimer: player._poisonTimer, _electrocuteTimer: player._electrocuteTimer };
@@ -64156,7 +64222,14 @@ function updateMonsters(dt) {
           const _dPl = Math.hypot(player.x + player.w / 2 - _bmx2, player.y + player.h / 2 - _bmy2);
           if (_dMon + 60 < _dPl && _dMon < 900) {
             _bSwap = { x: player.x, y: player.y, vx: player.vx, vy: player.vy, facing: player.facing,
-                       hp: player.hp, invulnerable: player.invulnerable, hitStun: player.hitStun,
+                       hp: player.hp,
+            mp: player.mp,   // v0.29.470 — bossAI writes player.mp DIRECTLY
+                             // (King Krook's earthquake zeroes it; Aetherion's
+                             // Astral Judgement takes 99%). Without mp in the
+                             // snapshot, an attack aimed at your PARTNER — or,
+                             // via the MojiMon taunt, at your COMPANION —
+                             // silently drained YOURS instead.
+            invulnerable: player.invulnerable, hitStun: player.hitStun,
                        frozenTimer: player.frozenTimer, freezeTimer: player.freezeTimer,
                        _slowTimer: player._slowTimer, burnTimer: player.burnTimer,
                        _poisonTimer: player._poisonTimer, _electrocuteTimer: player._electrocuteTimer };
