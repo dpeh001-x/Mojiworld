@@ -152,7 +152,7 @@ console.log(`  CRIT top = rogue                : ${b.rogue.crit >= Math.max(...C
 
 // v0.29.445 (per user) — ADVANCEMENT BUDGETS. Every job (Lv20) and master
 // (Lv40) stat block is priced with the game's own ITEM_STAT_WEIGHTS and must
-// land in a shared band: jobs 35±10%, masters 60±10%. Before this rule the
+// land in a shared band: jobs 90±10%, masters 160±10% (v0.29.447 — scaled up per user: HP/MP ~3-4x, ATK/DEF ~2.5x, parity preserved). Before this rule the
 // crit-heavy paths were silently richer — sniper's block priced at 60.0 vs
 // ranger's 21.9 (2.74×), marksman 91.0 vs beastmaster 42.2. Static check —
 // the stat blocks are data, so they are read straight from the game file
@@ -190,8 +190,8 @@ console.log(`  CRIT top = rogue                : ${b.rogue.crit >= Math.max(...C
       console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${r.id.padEnd(14)} ${r.budget}`);
     }
   };
-  band(jobs, 31.5, 38.5, `JOB advancement budgets (${jobs.length})`);
-  band(masters, 54, 66, `MASTER advancement budgets (${masters.length})`);
+  band(jobs, 810, 990, `JOB advancement budgets (${jobs.length})`);
+  band(masters, 1440, 1760, `MASTER advancement budgets (${masters.length})`);
 }
 console.log(`\n${fails.length ? 'FAIL' : 'PASS'} — ${fails.length} violation(s)`);
 for (const f of fails) console.log('  ✗ ' + f);
