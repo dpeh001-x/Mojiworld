@@ -34827,6 +34827,7 @@ const PLAYER_SAVE_FIELDS = [
   // a build. Persisting the tracker fixes the radar + pill displays
   // while keeping the stats themselves unchanged.
   '_levelUpSpent',
+  '_trainerSpent',   // v0.29.471 — trainer refund ledger; useless if not saved
   // v0.25.794 — Boss intro "seen" flags, per save. Object of bossType →
   // true, written inside _playBossIntro the first time each boss
   // cinematic plays. Persisted so re-loads don't replay intros
@@ -38427,10 +38428,36 @@ function _coopActive() {
 }
 // Host election: lowest id among {me + peers}. Deterministic across clients,
 // and self-heals when the host leaves (next-lowest id takes over).
+// v0.29.471 — see _coopRecomputeHost. Deliberately the same 5s the follow
+// path uses (_coopHostMap), so the two decisions cannot disagree.
+const _LX_HOST_STALE_MS = 5000;
+// v0.29.471 — re-elect on the heartbeat too. The four original call sites are
+// all ROSTER events (welcome/joined/left/prune); a host going silent is none of
+// those, so nothing re-ran the election until the 30s prune fired.
+function _coopReelectTick() {
+  try {
+    if (typeof _coopActive === 'function' && !_coopActive()) return;
+    const was = net.hostId;
+    _coopRecomputeHost();
+    if (net.hostId !== was && typeof _mpRenderPlayerList === 'function') _mpRenderPlayerList();
+  } catch (e) {}
+}
 function _coopRecomputeHost() {
   if (!_coopActive() || net.myId == null) { net.isHost = true; net.hostId = net.myId; return; }
   let lowest = +net.myId, hostId = +net.myId;
-  for (const id in net.peers) { const n = +id; if (Number.isFinite(n) && n < lowest) { lowest = n; hostId = n; } }
+  // v0.29.471 — a peer silent longer than this cannot be host. Matches the
+  // cutoff _coopHostMap already applies before it stops following a host, so
+  // "we stopped following you" and "you are no longer host" now agree instead
+  // of disagreeing for 25 seconds.
+  const _now = Date.now();
+  for (const id in net.peers) {
+    const n = +id;
+    if (!Number.isFinite(n) || n >= lowest) continue;
+    const _p = net.peers[id];
+    const _last = _p && +_p._last;
+    if (Number.isFinite(_last) && (_now - _last) > _LX_HOST_STALE_MS) continue;   // ghost — skip
+    lowest = n; hostId = n;
+  }
   net.hostId = hostId;
   net.isHost = (hostId === +net.myId);
 }
@@ -39070,6 +39097,18 @@ function _coopPartyHeal(hpPct, mpPct, label) {
   } catch (e) {}
 }
 function _coopApplyPartyHeal(msg) {
+  // v0.29.471 — party heal was completely ungated: any peer could restore the
+  // whole map to full HP AND MP on every frame it sent, making the party
+  // unkillable and voiding the entire attrition economy. The sender must now
+  // be a peer we can actually see, on our map, alive, and is capped at 2
+  // heals/second on OUR clock regardless of what their client does.
+  try {
+    const _p = net.peers && net.peers[msg && msg.id];
+    if (!_p) return;                                        // unknown sender
+    if (_p.map !== game.currentMap) return;                 // not on our map
+    if (+_p.hp <= 0) return;                                // dead peers cannot heal
+    if (!_mpRateOk(msg.id, 'phl', 2)) return;               // receiver-side cap
+  } catch (e) { return; }
   if (!msg || msg.hm !== game.currentMap) return;
   if (!player || player.hp <= 0) return;   // downed partners go through the revive channel, not heals
   const hpPct = Math.min(1, Math.max(0, +msg.hp || 0));
@@ -39465,6 +39504,21 @@ function _coopFollowerContactTick() {
   }
 }
 
+// v0.29.471 — RECEIVER-SIDE rate limit. Every throttle in this system was on
+// the sending client (_lastPhealAt, _lastPbufAt, the ping cooldown), which a
+// modified client just removes. This one runs on the victim's machine, keyed
+// per sender AND per message kind, so one abusive peer cannot starve the rest.
+const _MP_BUCKETS = Object.create(null);
+function _mpRateOk(id, kind, perSec) {
+  const k = String(id) + '|' + kind;
+  const now = Date.now();
+  let b = _MP_BUCKETS[k];
+  if (!b) { b = _MP_BUCKETS[k] = { n: 0, t: now }; }
+  if (now - b.t >= 1000) { b.n = 0; b.t = now; }
+  if (b.n >= perSec) return false;
+  b.n++;
+  return true;
+}
 function _mpHandle(msg) {
   if (!msg || typeof msg !== 'object') return;   // v0.27.0 — a malformed/JSON-null relay frame must not throw on switch(msg.t)
   switch (msg.t) {
@@ -39495,7 +39549,7 @@ function _mpHandle(msg) {
       // is echoed straight back addressed to its sender; receiving our own
       // echo (`rte` + `to` = my id) yields the full two-leg round trip, kept
       // as a rolling average on the peer and shown in the party frames.
-      if (msg && msg.rt != null && msg.id !== net.myId && net.ws && net.ws.readyState === 1) {
+      if (msg && msg.rt != null && _mpRateOk(msg.id, 'rt', 4) && msg.id !== net.myId && net.ws && net.ws.readyState === 1) {
         try { net.ws.send(JSON.stringify({ t: 'ping', rte: +msg.rt, to: msg.id })); } catch (e) {}
       }
       if (msg && msg.rte != null && +msg.to === +net.myId && msg.id !== net.myId) {
@@ -39519,7 +39573,19 @@ function _mpHandle(msg) {
       if (msg && msg.map === game.currentMap) _coopAddPing(+msg.x || 0, +msg.y || 0, (net.peers[msg.id] && net.peers[msg.id].name) || 'Partner', false);
       return;
     }
-    case 'dmg':  if (net.isHost) _coopHostApplyDamage(msg.u, +msg.d || 0, !!msg.c, msg.k); return;   // remote damage -> host applies
+    // v0.29.471 — damage frames were accepted from any peer, on any map, at
+    // the relay's full 40/s, with only a PER-PACKET cap. A peer could
+    // enumerate the small sequential monster uids and delete any boss on a map
+    // it was not even on, in a handful of frames, and collect the kill credit.
+    // Require the sender to be a peer we can see, on our map, and cap the rate
+    // on OUR clock (the existing throttles were all sender-side).
+    case 'dmg': {
+      if (!net.isHost) return;
+      const _dp = net.peers && net.peers[msg && msg.id];
+      if (!_dp || _dp.map !== game.currentMap) return;
+      if (!_mpRateOk(msg.id, 'dmg', 20)) return;
+      _coopHostApplyDamage(msg.u, +msg.d || 0, !!msg.c, msg.k); return;
+    }   // remote damage -> host applies
     case 'kill': _coopApplyKill(msg); return;       // host kill -> peers award XP/coins
     case 'welcome':
       net.myId = msg.id;
@@ -45800,7 +45866,11 @@ function _amnesiacReset() {
 // Mojicoins. Distinct from respec() (which only clears milestone perks).
 function resetStats() {
   const spent = player._levelUpSpent || {};
-  const totalRanks = (typeof LEVELUP_OPTIONS !== 'undefined' ? LEVELUP_OPTIONS : []).reduce((a, o) => a + (spent[o.id] || 0), 0);
+  // v0.29.471 — trainer purchases count toward "is there anything to reset",
+  // otherwise a trainer-only build is told it has nothing invested.
+  const _tr = player._trainerSpent || { atk: 0, def: 0, hp: 0 };
+  const _trTotal = (_tr.atk | 0) + (_tr.def | 0) + (_tr.hp | 0);
+  const totalRanks = _trTotal + (typeof LEVELUP_OPTIONS !== 'undefined' ? LEVELUP_OPTIONS : []).reduce((a, o) => a + (spent[o.id] || 0), 0);
   if (totalRanks <= 0) { if (typeof showToast === 'function') showToast('No invested stats to reset.', 'common'); return; }
   // v0.29.311 — priced off wallet + bank, and collected from both. Banking
   // the stash before hitting Reset Stats used to make the refund free.
@@ -45822,6 +45892,17 @@ function resetStats() {
         case 'speed': player.baseSpeed = (player.baseSpeed || 0) - 0.5 * sN; break;
         case 'jump':  player.baseJump = (player.baseJump || 0) - 0.5 * sN; break;
       }
+    }
+    // v0.29.471 — reverse the trainer purchases at their own scale and refund
+    // their real SP cost (ATK 1/pt, DEF 2/pt, HP 1/pt — see the handlers).
+    {
+      const t = player._trainerSpent || { atk: 0, def: 0, hp: 0 };
+      const _a = t.atk | 0, _d = t.def | 0, _h = t.hp | 0;
+      if (_a) player.baseAtk = (player.baseAtk || 0) - _a;
+      if (_d) player.baseDef = (player.baseDef || 0) - _d;
+      if (_h) player.maxHp = Math.max(1, (player.maxHp || 0) - 10 * _h);
+      player.skillPoints = (player.skillPoints || 0) + _a * 1 + _d * 2 + _h * 1;
+      player._trainerSpent = { atk: 0, def: 0, hp: 0 };
     }
     player._levelUpSpent = {};
     player.skillPoints = (player.skillPoints || 0) + refund;
@@ -45873,11 +45954,13 @@ function offerPrestige() {
                `• +1% crit chance  (-> +${(p.critBonus || 0) + 1}%, uncapped)\n` +
                `• +12 max HP  (-> +${(p.hpBonus || 0) + 12}, uncapped)\n` +
                `• +1 starting attribute point  (-> +${p.bonusAP + 1})\n\n` +
-               // v0.29.406 — copy follows the reset below. Gear and money are
-               // kept now, so promising they reset would be a lie the player
-               // only discovers after an irreversible confirm.
-               `You KEEP your inventory, equipment, consumables and mojicoins (wallet + Mojibank).\n` +
-               `Reset: level, stats, job/master, talents, skill tree, boons, skill ranks, active quests, boss clears and setshards.\n\n` +
+               // v0.29.460 — per user: "Only equipments are retained on
+               // ascension, every other thing is reset." This REVERSES the
+               // v0.29.406 keep-everything (which was also per user). As
+               // before, the copy must match the reset below exactly — an
+               // irreversible confirm must not lie in either direction.
+               `You KEEP your equipment only — equipped gear and the gear in your inventory.\n` +
+               `EVERYTHING else resets: level, stats, job/master, talents, skill tree, boons, skill ranks, quests, boss clears, setshards, mojicoins (wallet + bank), consumables, non-gear items (including <b>Zodiac Sigils and recipe scrolls</b>), and your MojiMon roster + species kill counts.\n\n` +
                `Ascension #${nextCount}.`;
   // v0.25.244 (X4) — in-game styled prestige confirm.
   uiConfirm({
@@ -45903,6 +45986,7 @@ function offerPrestige() {
     // Stats reverses deltas that were already wiped above (maxHp -> 1, baseAtk
     // negative) and refunds free skill points for ranks that no longer exist.
     player._levelUpSpent = {};
+    player._trainerSpent = {};   // v0.29.471 — same reason as _levelUpSpent
     player.skillPoints = p.bonusAP;
     // v0.25.738 — Attribute pool removed; no `player.attrs` reset needed.
     player.milestonesUnlocked = {};
@@ -78785,7 +78869,13 @@ function _craftFromScroll(scroll, slot) {
   for (const cat of cats) {
     if (!ITEM_POOL[cat]) continue;
     const found = ITEM_POOL[cat].find(it => it.setId === scroll.setId);
-    if (found) return { ...found, stars: 0, slot: _catToSlot(cat) };
+    // v0.29.471 — a scroll costs THREE zodiac boss kills (one distinct sigil
+    // each) plus the scroll itself, and ascension now wipes both — so it has to
+    // pay for itself every cycle. It used to hand back a bare 0-star piece,
+    // i.e. the same thing a shop sells. Now it arrives pre-enhanced: 5 stars is
+    // ~5,550 coins of STAR_COSTS (1.47x stat multiplier at STAR_GROWTH 1.08)
+    // AND skips the downgrade-on-fail risk that makes high stars painful.
+    if (found) return { ...found, stars: 5, slot: _catToSlot(cat) };
   }
   return null;
 }
@@ -82484,16 +82574,26 @@ function openSkillsModal() {
     document.getElementById('tr-atk').onclick = () => {
       if (player.skillPoints < 1) return;
       player.skillPoints -= 1; player.baseAtk += 1;
+      // v0.29.471 — record it. resetStats refunds from a ledger only, so
+      // trainer points were spent PERMANENTLY: unrefundable, and if the
+      // trainer was the only thing used, Reset Stats refused outright
+      // ("No invested stats to reset") while the points stayed gone.
+      player._trainerSpent = player._trainerSpent || { atk: 0, def: 0, hp: 0 };
+      player._trainerSpent.atk = (player._trainerSpent.atk | 0) + 1;
       showToast('+1 ATK', 'rare'); openSkillsModal();
     };
     document.getElementById('tr-def').onclick = () => {
       if (player.skillPoints < 2) return;
       player.skillPoints -= 2; player.baseDef += 1;
+      player._trainerSpent = player._trainerSpent || { atk: 0, def: 0, hp: 0 };
+      player._trainerSpent.def = (player._trainerSpent.def | 0) + 1;   // v0.29.471
       showToast('+1 DEF', 'rare'); openSkillsModal();
     };
     document.getElementById('tr-maxhp').onclick = () => {
       if (player.skillPoints < 1) return;
       player.skillPoints -= 1; player.maxHp += 10; player.hp = getMaxHp();
+      player._trainerSpent = player._trainerSpent || { atk: 0, def: 0, hp: 0 };
+      player._trainerSpent.hp = (player._trainerSpent.hp | 0) + 1;     // v0.29.471
       showToast('+10 HP', 'rare'); openSkillsModal();
     };
   }, 0);
