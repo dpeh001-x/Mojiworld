@@ -9294,7 +9294,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.433';
+const GAME_VERSION = 'v0.29.434';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -34736,6 +34736,7 @@ const PLAYER_SAVE_FIELDS = [
   // another free tier-2 on-class rare. Repeatable once per reload = unlimited
   // free-weapon farm. Persisting the flag makes the grant truly once-per-character.
   '_starterWeaponGiven',
+  'mojimon',   // v0.29.434 — MojiMon roster + upgrades + active-out + Date.now()-anchored cooldown
   '_tutorialSeen'   // v0.26.x — per-SAVE tutorial gate (replaces the global localStorage key)
 ];
 const GAME_SAVE_FIELDS = [
@@ -36965,6 +36966,7 @@ function loadState() {
     // deliberately don't restore the old wolves: they're transient
     // summons with a 100 s lifetime, so a fresh array is correct.
     if (!Array.isArray(player.pack)) player.pack = [];
+    if (typeof _mojimonEnsure === 'function') _mojimonEnsure();   // v0.29.434 — shape-repair the persisted roster
     player.pet = null; player.ultPet = null;   // v0.26.1025 — transient summons aren't restored (match _clones/_ballista/pack); a persisted pet resurfaced on stale coords
     // v0.25.531 — clear transient L10 buff state on load (not persisted in
     // PLAYER_SAVE_FIELDS; resetting these prevents leftover flags from
@@ -49703,6 +49705,11 @@ function loadMap(id, entryX, entryY) {
   game.ambient = [];
   game.smoothFx = [];
   game.minions = [];
+  // v0.29.434 — the active MojiMon survives map travel: re-field it at its
+  // carried HP fraction, cooldown-free (travel is not a resummon).
+  if (player.mojimon && player.mojimon.out && typeof _mojimonSummon === 'function') {
+    _mojimonSummon(player.mojimon.out.type, { free: true, quiet: true, hpFrac: player.mojimon.out.hpFrac });
+  }
   game._fadingMonsters = [];   // v0.26.105 — see MONSTER FADE-OUT module
   // v0.25.773 — Clear the bossDefeated flag for THIS map so the boss
   // respawns on every visit. Previously the flag was set forever once
@@ -54169,6 +54176,7 @@ function triggerDeath() {
   // AI (and landing credited kills) on whatever killed you during the multi-second
   // death overlay. Clear them with the rest of the summons.
   game.minions = [];
+  if (player.mojimon) player.mojimon.out = null;   // v0.29.434 — death dismisses the mon (no cooldown refund)
   // Class identity: cancel any pending charge / root / momentum state so
   // a half-charged swing or stale root doesn't carry through respawn.
   player._warCharge = null;
@@ -54477,6 +54485,7 @@ function respawnAtTown() {
   player.pet = null;
   player.ultPet = null;
   player.pack = [];
+  if (player.mojimon) player.mojimon.out = null;   // v0.29.434 — world reset / class change dismisses the mon
   player._momentum = 0;
   player._steady = 0;
   player._mageLastCastT = 0;
@@ -55665,6 +55674,307 @@ function _allyPlatformStep(ally, target) {
 }
 
 // =========================================================================
+// =========================================================================
+// v0.29.434 — MOJIMON. Capture a wild species your character has mastered
+// (10,000+ recorded kills of it in the bestiary), then field it as an
+// autonomous battle companion. Design decisions, so future edits don't
+// unknowingly reverse them:
+//   • CAPTURE reuses the Boss Shackle QTE plumbing — but inverted. The boss
+//     version is the boss shackling the PLAYER; here the same arrow-sequence
+//     card is the binding ritual: weaken an eligible wild monster below 30%
+//     HP, stand close, and the ritual starts. Complete the sequence and the
+//     monster is bound; fail and it stays wild (60s before the next attempt).
+//   • The companion is a game.minions entry (mojimon:true), so it inherits
+//     the whole ally stack for free: seek/roam AI, platform climbing,
+//     contact melee, monster aggro, contact damage taken.
+//   • STATS are player-derived, per the design: HP = getMaxHp() × 10,
+//     ATK = getAtk() (the character's own base damage), both scaled by the
+//     per-species upgrade allocation. The species contributes its BODY
+//     (hitbox), its SPRITE, and its ranged-attack cadence — not its numbers.
+//   • SUMMON cooldown is 5 minutes, Date.now()-anchored (game.time resets on
+//     reload, so frame-anchored cooldowns are forbidden in persisted state —
+//     see the v0.26.1030 note above PLAYER_SAVE_FIELDS).
+//   • The active mon SURVIVES map changes: initMap clears game.minions, so a
+//     respawn hook re-fields it at the carried HP fraction. Player death
+//     dismisses it (no cooldown refund).
+const MOJIMON_KILLS_REQ = 10000;
+const MOJIMON_CD_MS = 300000;          // 5 minutes
+const MOJIMON_UPG = { hp: 0.08, atk: 0.05, def: 0.03 };   // per-point: +8% HP, +5% ATK, +3% damage reduction
+const MOJIMON_DEF_CAP = 0.60;          // DR ceiling — a mon must never be unkillable
+function _mojimonEnsure() {
+  if (!player.mojimon || typeof player.mojimon !== 'object') player.mojimon = {};
+  const mm = player.mojimon;
+  if (!mm.roster || typeof mm.roster !== 'object') mm.roster = {};
+  if (typeof mm.cdUntil !== 'number' || !isFinite(mm.cdUntil)) mm.cdUntil = 0;
+  if (mm.out !== null && (typeof mm.out !== 'object' || !mm.out || !mm.out.type)) mm.out = null;
+  return mm;
+}
+// Upgrade points per species: 1 per 5 character levels. Level-derived rather
+// than a currency, per the design — respec is free (points are never consumed,
+// only allocated), so experimenting costs nothing.
+function _mojimonPoints() { return Math.floor((player.level || 1) / 5); }
+function _mojimonSpent(rec) {
+  const u = (rec && rec.upg) || {};
+  return (u.hp | 0) + (u.atk | 0) + (u.def | 0);
+}
+function _mojimonStatsFor(type) {
+  const mm = _mojimonEnsure();
+  const u = (mm.roster[type] && mm.roster[type].upg) || { hp: 0, atk: 0, def: 0 };
+  return {
+    maxHp: Math.max(100, Math.floor(getMaxHp() * 10 * (1 + (u.hp | 0) * MOJIMON_UPG.hp))),
+    atk:   Math.max(8, Math.floor(getAtk() * (1 + (u.atk | 0) * MOJIMON_UPG.atk))),
+    defRed: Math.min(MOJIMON_DEF_CAP, (u.def | 0) * MOJIMON_UPG.def),
+  };
+}
+function _mojimonCapture(m) {
+  const mm = _mojimonEnsure();
+  if (!m || !m.type || mm.roster[m.type]) return;
+  mm.roster[m.type] = { upg: { hp: 0, atk: 0, def: 0 }, at: Date.now() };
+  // Remove the bound monster from the world WITHOUT the kill pipeline — a
+  // capture pays no EXP/coins/loot (it pays a companion), and killMonster
+  // would also bump the bestiary count it was captured against.
+  const idx = game.monsters.indexOf(m);
+  if (idx >= 0) game.monsters.splice(idx, 1);
+  if (typeof spawnSpriteBurst === 'function') spawnSpriteBurst(m.x + m.w / 2, m.y + m.h / 2, 'qte_break', { size: 220, life: 40 });
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    game.particles.push({ x: m.x + m.w / 2, y: m.y + m.h / 2, vx: Math.cos(a) * 4, vy: Math.sin(a) * 4 - 1, life: 40, color: i % 2 ? '#8fd4ff' : '#ffffff', size: 3 });
+  }
+  const nm = (monsterTypes[m.type] && monsterTypes[m.type].name) || m.type;
+  if (typeof showToast === 'function') showToast('⛓ BOUND: ' + nm + ' joins you as a MojiMon! (U panel → MojiMon)', 'legendary');
+  try { audio.play('levelup'); } catch (_e) {}
+  if (typeof _lxPadRumble === 'function') _lxPadRumble('levelup');
+  if (typeof saveState === 'function') saveState();
+}
+function _mojimonSummon(type, opts) {
+  opts = opts || {};
+  const mm = _mojimonEnsure();
+  const rec = mm.roster[type];
+  const t = (typeof monsterTypes === 'object') ? monsterTypes[type] : null;
+  if (!rec || !t) return false;
+  if (!opts.free) {
+    const left = mm.cdUntil - Date.now();
+    if (left > 0) {
+      if (typeof showToast === 'function') showToast('⛓ MojiMon resting — ready in ' + Math.ceil(left / 60000) + 'm', 'rare');
+      return false;
+    }
+  }
+  // Only one mon fielded at a time: replacing is a dismiss, not a stack.
+  if (mm.out) _mojimonDismiss(true);
+  const st = _mojimonStatsFor(type);
+  const hpFrac = (opts.hpFrac != null) ? Math.max(0.01, Math.min(1, opts.hpFrac)) : 1;
+  if (!game.minions) game.minions = [];
+  game.minions.push({
+    x: player.x - player.facing * 46, y: player.y - 8,
+    w: Math.max(24, Math.min(90, (t.w | 0) || 40)), h: Math.max(24, Math.min(90, (t.h | 0) || 40)),
+    type, mojimon: true,
+    life: 1e12, maxLife: 1e12,           // no expiry — it lives until defeated or dismissed
+    vx: 0, vy: 0, facing: player.facing,
+    atk: st.atk, cd: 0,
+    maxHp: st.maxHp, currentHp: Math.max(1, Math.floor(st.maxHp * hpFrac)),
+    dmgCD: 0, spawn: 18,
+    defRed: st.defRed,
+    shootSkill: t.shoot || null,
+    shootCd: t.shoot ? Math.max(900, (t.shootCd | 0) || 2200) : null,
+    shootTimer: 1200,
+    volley: Math.max(1, (t.traits && t.traits.volleyShot) | 0 || 1),
+  });
+  mm.out = { type, hpFrac };
+  if (!opts.free) mm.cdUntil = Date.now() + MOJIMON_CD_MS;
+  if (!opts.quiet) {
+    const nm = t.name || type;
+    if (typeof showToast === 'function') showToast('⛓ ' + nm + ' fights beside you!', 'epic');
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      game.particles.push({ x: player.x, y: player.y, vx: Math.cos(a) * 3, vy: Math.sin(a) * 3 - 1, life: 30, color: '#8fd4ff', size: 3 });
+    }
+  }
+  if (typeof saveState === 'function') saveState();
+  return true;
+}
+function _mojimonDismiss(silent) {
+  const mm = _mojimonEnsure();
+  mm.out = null;                          // clear FIRST so the defeat detector stays quiet
+  if (game.minions) {
+    for (let i = game.minions.length - 1; i >= 0; i--) {
+      if (game.minions[i].mojimon) game.minions.splice(i, 1);
+    }
+  }
+  if (!silent && typeof showToast === 'function') showToast('⛓ MojiMon dismissed (cooldown continues)', 'rare');
+  if (typeof saveState === 'function') saveState();
+}
+// Player-initiated binding ritual, checked per non-boss monster per frame
+// from the same dispatcher slot as the boss shackle. Gates are ordered
+// cheapest-first; the whole thing is two compares for an ineligible mob.
+function _mojimonQteTry(m, dt) {
+  if ((game._mojimonQteCdT || 0) > game.time) return;
+  if (typeof _QTE === 'undefined' || _QTE.active) return;
+  if (m.currentHp <= 0 || m._dying || m.isMiniBoss || m.isElite) return;
+  if (m.currentHp > m.maxHp * 0.30) return;                       // must be weakened
+  if ((game.bestiary[m.type] | 0) < MOJIMON_KILLS_REQ) return;    // species mastery gate
+  const mm = _mojimonEnsure();
+  if (mm.roster[m.type]) return;                                  // one binding per species
+  if (player.hp <= 0 || (player.invulnerable | 0) > 0) return;
+  const dx = (m.x + m.w / 2) - (player.x + player.w / 2);
+  const dy = (m.y + m.h / 2) - (player.y + player.h / 2);
+  if (dx * dx + dy * dy > 300 * 300) return;
+  game._mojimonQteCdT = game.time + 3600;                         // one attempt per ~60s, hit or miss
+  _qteShackleStart(m);
+  if (_QTE.active) {
+    _QTE.mojimon = m;
+    if (_QTE.headEl) _QTE.headEl.innerHTML =
+      '⛓ BIND THE ' + (((monsterTypes[m.type] || {}).name) || m.type).toUpperCase() +
+      '<span style="display:block; font-size:11px; opacity:0.8; font-weight:600;">complete the sequence to capture it</span>';
+  }
+}
+// Companion renderer — the species' own dex sprite on the minion chassis,
+// with the wolf-style ally HP bar. Called from drawMinions' per-entity loop.
+function _mojimonDraw(mn, sx, sy) {
+  const t = (typeof monsterTypes === 'object') ? monsterTypes[mn.type] : null;
+  const spr = (typeof _monsterDexSprite === 'function') ? _monsterDexSprite(mn.type, t || {}) : null;
+  const footY = sy + mn.h;
+  ctx.save();
+  if (mn.spawn > 0) ctx.globalAlpha = Math.max(0.25, 1 - mn.spawn / 18);
+  if (spr) {
+    const aw = spr.naturalWidth || 1, ah = spr.naturalHeight || 1;
+    const dh = Math.max(36, Math.min(110, mn.h * 1.15));
+    const dw = dh * aw / ah;
+    ctx.translate(sx + mn.w / 2, footY);
+    if ((mn.facing | 0) < 0) ctx.scale(-1, 1);
+    ctx.drawImage(spr, -dw / 2, -dh, dw, dh);
+  } else {
+    ctx.fillStyle = (t && t.color) || '#8fd4ff';
+    ctx.fillRect(sx, sy, mn.w, mn.h);
+  }
+  ctx.restore();
+  // Ally HP bar (mirrors the wolf-pet bar thresholds) + a chain pip so an
+  // ally-coloured monster sprite is never mistaken for a hostile.
+  const bw = Math.max(36, mn.w);
+  const bx = sx + mn.w / 2 - bw / 2, by = sy - 10;
+  const pct = mn.maxHp > 0 ? Math.max(0, Math.min(1, mn.currentHp / mn.maxHp)) : 1;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(bx - 1, by - 1, bw + 2, 5);
+  ctx.fillStyle = pct > 0.5 ? '#66dd66' : (pct > 0.25 ? '#ddcc44' : '#dd4444');
+  ctx.fillRect(bx, by, bw * pct, 3);
+  ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillStyle = '#8fd4ff';
+  ctx.fillText('⛓', sx + mn.w / 2, by - 4);
+}
+// U-panel tab renderer. Rebuilt on every interaction (roster is tiny); the
+// cooldown countdown ticks via a self-terminating interval that dies with
+// its DOM node, so no cleanup wiring is needed on tab switch / close.
+function renderMojiMonPanel() {
+  const host = document.getElementById('u-pane-mojimon');
+  if (!host) return;
+  const mm = _mojimonEnsure();
+  const esc = (x) => (typeof _mjxEsc === 'function') ? _mjxEsc(String(x)) : String(x);
+  const pts = _mojimonPoints();
+  const cdLeft = Math.max(0, mm.cdUntil - Date.now());
+  const fmtCd = (ms) => { const t = Math.ceil(ms / 1000); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
+  const rosterKeys = Object.keys(mm.roster);
+  let html = '<div style="display:flex; gap:10px; align-items:stretch; margin-bottom:10px;">' +
+    '<div style="flex:1; background:rgba(60,40,110,0.25); border:1px solid rgba(150,120,220,0.35); border-radius:10px; padding:10px;">' +
+    '<div style="font-size:13px; font-weight:800; color:#c9b8ff; margin-bottom:4px;">⛓ MOJIMON</div>' +
+    '<div style="font-size:11px; color:#9b93b8; line-height:1.5;">Master a species (<b style="color:#ffd166;">' + MOJIMON_KILLS_REQ.toLocaleString() + '</b> kills), weaken a wild one below <b>30% HP</b>, stand close, and complete the binding sequence. A bound MojiMon fights beside you with <b>10× your max HP</b> and <b>your attack power</b>, using its own species\u2019 attack pattern.</div></div>' +
+    '<div style="width:240px; background:rgba(20,14,40,0.5); border:1px solid rgba(150,120,220,0.35); border-radius:10px; padding:10px;">' +
+    '<div style="font-size:11px; color:#9b93b8;">Summon cooldown</div>' +
+    '<div id="mojimon-cd" style="font-size:20px; font-weight:800; color:' + (cdLeft > 0 ? '#ffb866' : '#7fe0a0') + ';" data-until="' + mm.cdUntil + '">' + (cdLeft > 0 ? fmtCd(cdLeft) : 'READY') + '</div>' +
+    '<div style="font-size:11px; color:#9b93b8; margin-top:4px;">Upgrade points: <b style="color:#ffd166;">' + pts + '</b> <span style="opacity:0.7;">(1 per 5 levels, per mon, free respec)</span></div>' +
+    (mm.out ? '<button type="button" onclick="_mojimonUi.dismiss()" style="margin-top:6px; width:100%; padding:5px; border-radius:8px; border:1px solid #a05a5a; background:rgba(160,60,60,0.25); color:#ffb0a0; cursor:pointer; font-size:11px;">Dismiss ' + esc(((monsterTypes[mm.out.type] || {}).name) || mm.out.type) + '</button>' : '') +
+    '</div></div>';
+  if (!rosterKeys.length) {
+    html += '<div style="text-align:center; padding:18px; color:#8a82a4; font-size:12px;">No MojiMon bound yet.</div>';
+  } else {
+    html += '<div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:10px; margin-bottom:12px;">';
+    for (const k of rosterKeys) {
+      const t = monsterTypes[k] || {};
+      const rec = mm.roster[k];
+      const st = _mojimonStatsFor(k);
+      const spr = (typeof _monsterDexSprite === 'function') ? _monsterDexSprite(k, t) : null;
+      const free = pts - _mojimonSpent(rec);
+      const isOut = mm.out && mm.out.type === k;
+      const row = (stat, label, valTxt) =>
+        '<div style="display:flex; align-items:center; gap:6px; font-size:11px; margin-top:3px;">' +
+        '<span style="width:34px; color:#9b93b8;">' + label + '</span>' +
+        '<button type="button" onclick="_mojimonUi.upg(\'' + k + '\',\'' + stat + '\',-1)" style="width:20px; border-radius:5px; border:1px solid #5a4a7a; background:rgba(255,255,255,0.06); color:#cfc8e4; cursor:pointer;">−</button>' +
+        '<b style="width:18px; text-align:center; color:#ffd166;">' + (rec.upg[stat] | 0) + '</b>' +
+        '<button type="button" onclick="_mojimonUi.upg(\'' + k + '\',\'' + stat + '\',1)" style="width:20px; border-radius:5px; border:1px solid #5a4a7a; background:rgba(255,255,255,0.06); color:#cfc8e4; cursor:pointer;">+</button>' +
+        '<span style="color:#7fd4ff;">' + valTxt + '</span></div>';
+      html += '<div style="background:rgba(255,255,255,0.04); border:1px solid ' + (isOut ? 'rgba(127,224,160,0.6)' : 'rgba(150,120,220,0.3)') + '; border-radius:10px; padding:9px;">' +
+        '<div style="display:flex; gap:8px; align-items:center;">' +
+        (spr ? '<img src="' + spr.src + '" style="width:44px; height:44px; object-fit:contain;">' : '<div style="width:44px; height:44px; border-radius:50%; background:radial-gradient(circle at 35% 30%, ' + (t.shell || '#888') + ', ' + (t.color || '#666') + ');"></div>') +
+        '<div style="flex:1;"><div style="font-weight:800; font-size:13px; color:#e8e2f8;">' + esc(t.name || k) + (isOut ? ' <span style="font-size:10px; color:#7fe0a0;">● FIELDED</span>' : '') + '</div>' +
+        '<div style="font-size:10px; color:#8a82a4;">HP ' + st.maxHp.toLocaleString() + ' · ATK ' + st.atk.toLocaleString() + ' · DR ' + Math.round(st.defRed * 100) + '%</div></div>' +
+        (isOut ? '' : '<button type="button" onclick="_mojimonUi.summon(\'' + k + '\')" ' + (cdLeft > 0 ? 'disabled style="opacity:0.45; cursor:default;' : 'style="cursor:pointer;') + ' padding:5px 10px; border-radius:8px; border:1px solid #4a7a5a; background:rgba(60,160,90,0.25); color:#a0ffc0; font-size:11px; font-weight:700;">Summon</button>') +
+        '</div>' +
+        '<div style="margin-top:5px; border-top:1px solid rgba(255,255,255,0.08); padding-top:4px;">' +
+        '<div style="font-size:10px; color:#9b93b8;">Allocate points (' + free + ' free):</div>' +
+        row('hp', 'HP', '+' + Math.round((rec.upg.hp | 0) * MOJIMON_UPG.hp * 100) + '%') +
+        row('atk', 'ATK', '+' + Math.round((rec.upg.atk | 0) * MOJIMON_UPG.atk * 100) + '%') +
+        row('def', 'DEF', Math.round(Math.min(MOJIMON_DEF_CAP, (rec.upg.def | 0) * MOJIMON_UPG.def) * 100) + '% DR') +
+        '</div></div>';
+    }
+    html += '</div>';
+  }
+  // Progress toward the next binding — top uncaptured species by kills.
+  const prog = [];
+  for (const k in game.bestiary) {
+    if (k.charAt(0) === '_' || mm.roster[k] || !monsterTypes[k]) continue;
+    const n = game.bestiary[k] | 0;
+    if (n > 0) prog.push([k, n]);
+  }
+  prog.sort((a, b) => b[1] - a[1]);
+  if (prog.length) {
+    html += '<div style="font-size:12px; font-weight:800; color:#c9b8ff; margin:4px 0 6px;">HUNT PROGRESS</div>';
+    for (const [k, n] of prog.slice(0, 8)) {
+      const t = monsterTypes[k];
+      const pc = Math.min(1, n / MOJIMON_KILLS_REQ);
+      html += '<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px; font-size:11px;">' +
+        '<span style="width:110px; color:' + (pc >= 1 ? '#7fe0a0' : '#cfc8e4') + '; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + esc(t.name || k) + (pc >= 1 ? ' ⛓' : '') + '</span>' +
+        '<div style="flex:1; height:8px; background:rgba(0,0,0,0.45); border-radius:4px; overflow:hidden;"><div style="width:' + (pc * 100).toFixed(1) + '%; height:100%; background:' + (pc >= 1 ? 'linear-gradient(90deg,#3a9a5a,#7fe0a0)' : 'linear-gradient(90deg,#5a4a9a,#8f7fd4)') + ';"></div></div>' +
+        '<span style="width:92px; text-align:right; color:#8a82a4;">' + n.toLocaleString() + ' / ' + MOJIMON_KILLS_REQ.toLocaleString() + '</span></div>';
+    }
+    if (prog.length && prog[0][1] >= MOJIMON_KILLS_REQ) {
+      html += '<div style="font-size:10px; color:#7fe0a0; margin-top:4px;">✔ Eligible species found — weaken one below 30% HP and get close!</div>';
+    }
+  }
+  host.innerHTML = html;
+  // Countdown ticker: lives exactly as long as its span does.
+  if (cdLeft > 0 && !game._mojimonCdTick) {
+    game._mojimonCdTick = setInterval(() => {
+      const el = document.getElementById('mojimon-cd');
+      if (!el) { clearInterval(game._mojimonCdTick); game._mojimonCdTick = null; return; }
+      const left = Math.max(0, Number(el.dataset.until) - Date.now());
+      el.textContent = left > 0 ? fmtCd(left) : 'READY';
+      if (left <= 0) { el.style.color = '#7fe0a0'; clearInterval(game._mojimonCdTick); game._mojimonCdTick = null; renderMojiMonPanel(); }
+    }, 1000);
+  }
+}
+window._mojimonUi = {
+  upg(type, stat, delta) {
+    const mm = _mojimonEnsure();
+    const rec = mm.roster[type];
+    if (!rec) return;
+    const cur = rec.upg[stat] | 0;
+    if (delta > 0 && _mojimonSpent(rec) >= _mojimonPoints()) { if (typeof showToast === 'function') showToast('No free points — level up for more (1 per 5 levels)', 'rare'); return; }
+    rec.upg[stat] = Math.max(0, cur + delta);
+    // A fielded mon re-derives its stats immediately, preserving HP fraction —
+    // an upgrade mid-fight must never top the mon back up to full for free.
+    if (mm.out && mm.out.type === type && game.minions) {
+      for (const mn of game.minions) {
+        if (!mn.mojimon) continue;
+        const frac = mn.maxHp > 0 ? mn.currentHp / mn.maxHp : 1;
+        const st = _mojimonStatsFor(type);
+        mn.maxHp = st.maxHp; mn.currentHp = Math.max(1, Math.floor(st.maxHp * frac));
+        mn.atk = st.atk; mn.defRed = st.defRed;
+      }
+    }
+    if (typeof saveState === 'function') saveState();
+    renderMojiMonPanel();
+  },
+  summon(type) { _mojimonSummon(type); renderMojiMonPanel(); },
+  dismiss() { _mojimonDismiss(); renderMojiMonPanel(); },
+};
 // WARLOCK UNDEAD MINIONS — raised allies from soulSiphon / darkPulse
 // =========================================================================
 function raiseMinion(x, y, type, life) {
@@ -55788,7 +56098,9 @@ function updateMinions(dt) {
     // v0.26.x - apply accumulated monster contact damage; the minion now dies
     // (puff) when its HP runs out, not only on the life timer.
     if (_mnTakeHit && _mnIncoming > 0) {
-      mn.currentHp -= _mnIncoming;
+      // v0.29.434 — MojiMon DEF upgrades are damage reduction on this, the
+      // only channel through which allies take damage.
+      mn.currentHp -= (mn.mojimon && mn.defRed) ? Math.max(1, Math.floor(_mnIncoming * (1 - mn.defRed))) : _mnIncoming;
       mn.dmgCD = 1000;
       for (let j = 0; j < 6; j++) {
         game.particles.push({ x: _mnCx, y: _mnCy, vx: (Math.random()-0.5)*3, vy: -Math.random()*2, life: 18, color: "#ff5577", size: 2 });
@@ -55810,6 +56122,48 @@ function updateMinions(dt) {
         mn.cd = 400;
         spawnSmoothImpact(_tcx, _tcy, '#9944cc');
       }
+    }
+    // v0.29.434 — MOJIMON ranged attack: the species' own cadence (shootCd,
+    // volleyShot fan) retargeted at monsters, but the DAMAGE is the mon's
+    // player-derived atk — the species contributes the pattern, not the
+    // numbers. Resolved as an instant hit + streak FX rather than a real
+    // projectile: mob projectiles are owner:'enemy' (they damage the PLAYER)
+    // and the pipelines are not safely swappable.
+    if (mn.mojimon) {
+      if (mn.shootSkill) {
+        mn.shootTimer = (mn.shootTimer == null ? 1200 : mn.shootTimer) - dt;
+        if (mn.shootTimer <= 0) {
+          let _hits = 0;
+          for (const _t2 of game._mnLive) {
+            const _ddx = (_t2.x + _t2.w / 2) - _mnCx, _ddy = (_t2.y + _t2.h / 2) - _mnCy;
+            if (_ddx * _ddx + _ddy * _ddy < 420 * 420 && Math.abs(_ddy) < 260) {
+              hitMonster(_t2, mn.atk, false, 'mojimon');
+              spawnSmoothImpact(_t2.x + _t2.w / 2, _t2.y + _t2.h / 2, '#7fd4ff');
+              for (let _p = 0; _p < 5; _p++) {
+                const _fr = _p / 5;
+                game.particles.push({ x: _mnCx + _ddx * _fr, y: _mnCy + _ddy * _fr, vx: (Math.random() - 0.5), vy: (Math.random() - 0.5), life: 14, color: '#7fd4ff', size: 2 });
+              }
+              mn.facing = Math.sign(_ddx) || mn.facing;
+              if (++_hits >= (mn.volley || 1)) break;
+            }
+          }
+          mn.shootTimer = _hits ? mn.shootCd : 400;   // quick re-check when nothing was in range
+        }
+      }
+      if (player.mojimon && player.mojimon.out) player.mojimon.out.hpFrac = mn.maxHp > 0 ? mn.currentHp / mn.maxHp : 1;
+    }
+  }
+  // v0.29.434 — MojiMon defeat watch. The mon dies through the generic minion
+  // death splice above; detecting 'out is set but no mojimon minion exists'
+  // here avoids touching that splice at all. Map changes cannot false-fire:
+  // initMap clears game.minions and IMMEDIATELY re-fields the mon in the
+  // same synchronous pass, so this check never observes the gap.
+  if (player.mojimon && player.mojimon.out) {
+    let _mmAlive = false;
+    for (const _mn of game.minions) if (_mn.mojimon) { _mmAlive = true; break; }
+    if (!_mmAlive) {
+      player.mojimon.out = null;
+      if (typeof showToast === 'function') showToast('⛓ Your MojiMon was defeated!', 'rare');
     }
   }
 }
@@ -55851,6 +56205,9 @@ function drawMinions() {
     const sy = mn.y | 0;
     if (sx + mn.w < 0 || sx > W) continue;
     if (sy + mn.h < camY || sy > camY + H) continue;
+    // v0.29.434 — MojiMon draws with its species sprite + ally bar, not the
+    // skeleton/zombie art. Handled before the summon-sprite path entirely.
+    if (mn.mojimon) { _mojimonDraw(mn, sx, sy); continue; }
     const alpha = mn.life < 1200 ? Math.max(0, mn.life / 1200) : 1;
     ctx.globalAlpha = alpha;
     // Rise animation — slide up from under
@@ -62903,6 +63260,7 @@ function updateMonsters(dt) {
     m.animTimer += dt;
     // v0.26.x — Boss Shackle QTE cast (telegraphed chain-stun on the player).
     if ((m.boss || m.isBoss || m.superBoss) && typeof _qteShackleTry === 'function') _qteShackleTry(m, dt);
+      else if (typeof _mojimonQteTry === 'function') _mojimonQteTry(m, dt);   // v0.29.434 — MojiMon binding ritual (non-boss)
 
     // v0.26.x — Octobaby tentacle AI (anchor + status attacks). The octoLeg*
     // entities are tentacles bolted to the head, NOT free bodies. Their AI
@@ -79812,6 +80170,7 @@ function openLevelUpPanel() {
       <button type="button" class="inv-tab" data-utab="boons"><span class="u-tab-ico">◈</span>Boons</button>
       <button type="button" class="inv-tab" data-utab="skills"><span class="u-tab-ico"><img src="Sprites/ui/tab_skills.webp" alt="" style="width:18px; height:18px; object-fit:contain; vertical-align:middle;"></span>Skills</button>
       <button type="button" class="inv-tab" data-utab="items"><span class="u-tab-ico">🎒</span>Items</button>
+      <button type="button" class="inv-tab" data-utab="mojimon"><span class="u-tab-ico">⛓</span>MojiMon</button>
     </div>
     <div id="u-pane-lp" style="display:${game._uTab==='lp'?'block':'none'}">
       <!-- v0.25.539 — Top strip: SP pool (left, prominent) + current stats (right).
@@ -79854,6 +80213,7 @@ function openLevelUpPanel() {
       <div id="lp-boons"></div>
     </div>
     <div id="u-pane-skills" style="display:${game._uTab==='skills'?'block':'none'}"></div>
+    <div id="u-pane-mojimon" style="display:${game._uTab==='mojimon'?'block':'none'}"></div>
     <div id="u-pane-items" style="display:${game._uTab==='items'?'block':'none'}">
       <div class="equip-slots">
         <div class="equip-slot" id="u-eq-weapon">⚔️<div class="label">Weapon</div></div>
@@ -79905,6 +80265,8 @@ function openLevelUpPanel() {
     document.getElementById('u-pane-lp').style.display     = game._uTab === 'lp'     ? 'block' : 'none';
     document.getElementById('u-pane-boons').style.display  = game._uTab === 'boons'  ? 'block' : 'none';
     document.getElementById('u-pane-skills').style.display = game._uTab === 'skills' ? 'block' : 'none';
+    const _mmPane = document.getElementById('u-pane-mojimon');
+    if (_mmPane) _mmPane.style.display = game._uTab === 'mojimon' ? 'block' : 'none';
     const itemsPane = document.getElementById('u-pane-items');
     if (itemsPane) itemsPane.style.display = game._uTab === 'items' ? 'block' : 'none';
     tabs.forEach(b => b.classList.toggle('active', b.dataset.utab === game._uTab));
@@ -79912,6 +80274,7 @@ function openLevelUpPanel() {
     else if (game._uTab === 'boons')  renderBoonPanel();
     else if (game._uTab === 'skills') renderSkillsReference(document.getElementById('u-pane-skills'));
     else if (game._uTab === 'items')  renderInventory('u-');  // v0.25.126
+    else if (game._uTab === 'mojimon') renderMojiMonPanel();  // v0.29.434
     document.getElementById('attributes-modal').dataset.variant = 'lp';
   };
   tabs.forEach(btn => {
@@ -82143,6 +82506,16 @@ function _qteEnd(success, cured) {
   if (!_QTE.active) return;
   _QTE.active = false;
   player.stunTimer = 0;
+  // v0.29.434 — MojiMon binding: when this QTE was a binding ritual, a
+  // completed sequence CAPTURES the target. Consumed before the success FX
+  // so the break-burst below doubles as the binding flourish. Cleared on
+  // every exit path — a stale target must never leak into the next (boss)
+  // shackle and capture something it should not.
+  const _mmTarget = _QTE.mojimon || null;
+  _QTE.mojimon = null;
+  if (_mmTarget && success && _mmTarget.currentHp > 0 && typeof _mojimonCapture === 'function') {
+    _mojimonCapture(_mmTarget);
+  }
   if (success) {
     const th = _QTE.theme || _QTE_THEMES.chains;
     const perfect = !(_QTE.mistakes > 0);
