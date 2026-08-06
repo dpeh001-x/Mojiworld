@@ -128,44 +128,11 @@ const ITEMS = {
       'forward speed. Clean readable silhouette, shapes clearly separated, NOT ' +
       'a cluttered overlapping mess. Effect only — no character, no weapon.',
   },
-  // v0.29.x — per user "make the mojimon icon on the tabs cuter". The old icon
-  // was a dark navy spiky creature on a dark purple badge: measured contrast
-  // between subject and badge was 29, against 90-92 for tab_boons/tab_skills,
-  // and it was the only tab icon DARKER than its own badge (lum 55 vs 84). At
-  // the 18x18 it actually renders at, that reads as a spiky blob with two
-  // glowing eyes — spooky, not cute. So: pale creature, big friendly eyes,
-  // rounded everything, and the same purple badge the siblings use.
-  tab_mojimon: {
-    dest: join(repoRoot, 'Sprites', 'ui', 'tab_mojimon.webp'),
-    fmt: 'webp', art_style: 'Illustration',
-    prefix: 'Clean simple 2D cute UI ICON, MapleStory / cute mascot style. 768x768 square canvas. ' +
-      'ABSOLUTELY NO TEXT of any kind. FLAT CEL-SHADED: 2-3 HARD flat-colour shade steps, crisp ' +
-      'edges, NO soft gradients, NO airbrushed shading, NO painterly rendering, NOT pixel-art. ' +
-      'Bold clean dark outline. VERY LOW detail and BIG simple shapes — this is displayed at only ' +
-      '18x18 pixels, so it must read instantly when tiny: no thin lines, no small features, no ' +
-      'fine texture, strong contrast between the subject and the background. ',
-    prompt:
-      'A cute little MOJIMON companion creature FACE, seen from the FRONT and ' +
-      'looking STRAIGHT AT THE VIEWER, centred on a solid flat DEEP PURPLE ' +
-      'CIRCLE badge (dark violet, about #4A1986). The badge is ONE COMPLETE ' +
-      'UNBROKEN CIRCLE, perfectly centred and filling the whole square frame ' +
-      '— not a half-disc, not cropped, not cut off at any side. ' +
-      'MOST IMPORTANT FEATURE, draw this first: TWO ENORMOUS ROUND BLACK EYES ' +
-      'side by side on the front of the face, spaced well apart, each with a ' +
-      'big white sparkle. The FACE must be fully visible and facing forward — ' +
-      'this is NOT the back of a head, NOT a rear view, NOT turned away, and ' +
-      'it must NOT be a blank faceless head. ' +
-      'The creature is a round fluffy cat-like critter with two soft ROUNDED ' +
-      'ears (gently pointed, NOT sharp spikes). Its fur is PALE CREAM-WHITE ' +
-      'with soft mint tips so it stands out brightly against the dark purple. ' +
-      'It has TWO ENORMOUS round BLACK eyes — huge, bold and unmistakable, ' +
-      'each about a quarter of the face wide — with big white sparkle ' +
-      'catch-lights, plus a small dark curved happy smile and two soft pink ' +
-      'rosy cheek blushes. The eyes and smile must be BIG and DARK enough to ' +
-      'be obvious when the whole icon is shrunk to 18 pixels. Adorable, ' +
-      'cheerful, welcoming. NO spikes, NO fangs, NO glowing eyes, nothing ' +
-      'creepy or menacing.',
-  },
+  // NOTE: the MojiMon tab icon is NOT generated here. Many text-to-image
+  // rolls produced faceless heads and half-discs, so it is now composited from
+  // the real petalfly sprite by tools/make_tab_icon.mjs:
+  //   node tools/make_tab_icon.mjs Sprites/monsters/petalfly.webp \
+  //        Sprites/ui/tab_mojimon.webp --scale 0.72 --eyeY 0.46
   // v0.29.442 — per user "the new mage energy bolt projectile". Replaces the
   // blue water-swirl look of p_mage_orb (it read as a wave vortex, not magic).
   // COMPOSITION CONSTRAINT: drawProjectiles spins this sprite at 0.35
