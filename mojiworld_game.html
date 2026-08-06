@@ -3025,7 +3025,36 @@
     pointer-events: none;
   }
   #dialog .dialog-header-text { flex: 1; min-width: 0; }
+  /* v0.29.427 — portrait reaction. JS adds .npc-react for one frame when the
+     typewriter reveals a ! or ?; the keyframes do the rest. `position` is set
+     on the portrait so the floating mark can anchor to it. Reduced-motion
+     users get the mark but no bounce — the information survives, the movement
+     does not. */
+  @keyframes mojiNpcReact {
+    0%   { transform: translateY(0)    scale(1); }
+    30%  { transform: translateY(-5px) scale(1.09); }
+    55%  { transform: translateY(1px)  scale(0.98); }
+    100% { transform: translateY(0)    scale(1); }
+  }
+  @keyframes mojiNpcMark {
+    0%   { opacity: 0; transform: translateY(2px)   scale(0.6); }
+    25%  { opacity: 1; transform: translateY(-9px)  scale(1.15); }
+    75%  { opacity: 1; transform: translateY(-12px) scale(1); }
+    100% { opacity: 0; transform: translateY(-18px) scale(0.95); }
+  }
+  #dialog .npc-portrait.npc-react { animation: mojiNpcReact 420ms cubic-bezier(.25,.9,.3,1.3); }
+  #dialog .npc-portrait .npc-react-mark {
+    position: absolute; top: -6px; right: -4px;
+    font-size: 17px; line-height: 1; pointer-events: none;
+    filter: drop-shadow(0 0 5px rgba(255,210,100,0.9));
+    animation: mojiNpcMark 900ms ease-out forwards;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #dialog .npc-portrait.npc-react { animation: none; }
+    #dialog .npc-portrait .npc-react-mark { animation: none; opacity: 1; transform: translateY(-10px); }
+  }
   #dialog .npc-portrait {
+    position: relative;   /* v0.29.427 — anchor for .npc-react-mark */
     /* v0.25.831 — Bumped from 56 → 64 px so the zoomed-out full-body
        sprite has more room to read (head + body fit naturally without
        feeling shrunken). Border + glow scaled to match. */
@@ -9186,7 +9215,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.425';
+const GAME_VERSION = 'v0.29.427';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -34720,13 +34749,7 @@ function _lxSteamTryAutoJoin(joinStr) {
     // menu flow defers on). The code is already prefilled + saved above —
     // tell the player and let hero creation finish the join.
     if (typeof player === 'undefined' || !player || !player.cls) {
-      // v0.29.423 — this used to end the join here: the code was saved, but the
-      // player had to know to reopen 🌐 Multi afterwards. A first-time player
-      // clicking an invite link is the MOST likely person to be on this branch,
-      // so it was the worst possible place to stop. Park it and finish the join
-      // as soon as the hero exists.
-      _lxArmPendingJoin(relay, code);
-      if (typeof showToast === 'function') showToast('Party ' + code + ' — create your hero and we\'ll join automatically.', 'rare');
+      if (typeof showToast === 'function') showToast('Party code ' + code + ' saved — create your hero, then hit 🌐 Multi.', 'rare');
       return;
     }
     const name = (typeof _mpLocalName === 'function') ? _mpLocalName() : ((player && player.look && player.look.name) || 'Hero');
@@ -51164,6 +51187,8 @@ function checkPlatformCollision(entity) {
     // highest-frequency tactile beat in a platformer). prevVy > 5 gate above
     // already skips micro-steps; per-id cooldown stops chain-landing spam.
     if (typeof _playUiSfx === 'function') _playUiSfx('land');
+    // v0.29.427 — surface layer UNDER the generic thump, scaled by impact.
+    if (typeof _lxSurfaceStep === 'function') _lxSurfaceStep(Math.min(1, prevVy / 12));
   }
 }
 
@@ -51453,6 +51478,23 @@ function _playerGravityStep() {
   }
 }
 function updatePlayer(dt) {
+  // v0.29.427 — WALKING footsteps. Landing already had a sound; actually
+  // moving across the ground did not, which is the higher-frequency beat.
+  // Cadence is distance-based, not time-based, so steps stay locked to the
+  // stride at any speed (a time-based tick machine-guns during a dash and
+  // drifts out of sync while slowed). One step every ~34 px of ground
+  // travel; only while grounded and actually moving.
+  if (player.onGround && Math.abs(player.vx) > 0.6) {
+    player._stepAccum = (player._stepAccum || 0) + Math.abs(player.vx);
+    if (player._stepAccum >= 34) {
+      player._stepAccum = 0;
+      if (typeof _lxSurfaceStep === 'function') _lxSurfaceStep(0.5);
+    }
+  } else if (player._stepAccum) {
+    // Reset on stop/airborne so the next stride starts on a clean footfall
+    // rather than firing instantly from a stale accumulator.
+    player._stepAccum = 0;
+  }
   // v0.27.9 — CO-OP DOWNED early gate: while down you're frozen in place,
   // unhittable, and counting down to bleed-out; a partner beside you revives.
   // Solo play never enters this state (_coopTryDowned requires a live peer).
@@ -75577,6 +75619,24 @@ function _runDialogTypewriter(text) {
   el.appendChild(caret);
   if (dlg) dlg.classList.add('typing');
   const SPEED_MS = 14;  // per-character cadence — ~70 chars/sec
+  // v0.29.427 — bounce the portrait and float a mark above it. Throttled to
+  // one reaction per 600ms so a line ending in "!!!" reads as a single
+  // emphatic beat rather than a strobing portrait. Glyph self-removes.
+  const _twReact = (mark) => {
+    try {
+      const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      if (dlg._twReactAt && now - dlg._twReactAt < 600) return;
+      dlg._twReactAt = now;
+      const port = document.getElementById('dialog-portrait');
+      if (!port) return;
+      port.classList.remove('npc-react'); void port.offsetWidth; port.classList.add('npc-react');
+      const pip = document.createElement('span');
+      pip.className = 'npc-react-mark';
+      pip.textContent = (mark === '?') ? '❓' : '❗';
+      port.appendChild(pip);
+      setTimeout(() => { if (pip.parentNode) pip.parentNode.removeChild(pip); }, 900);
+    } catch (_e) {}
+  };
   // v0.29.418 — NPC voice blips (Celeste / Animal Crossing style). A tiny
   // 45ms triangle chirp every other visible character, pitch-jittered so it
   // reads as speech-mumble rather than a metronome; vowels sit ~90Hz higher
@@ -75621,6 +75681,13 @@ function _runDialogTypewriter(text) {
       ch.textContent = t.text;
       el.insertBefore(ch, caret);
       if (t.text.trim() && (idx & 1)) _twBlip(t.text);   // v0.29.418 — voice blip on every other visible char
+      // v0.29.427 — PORTRAIT REACTS. The NPC art is one static sprite per
+      // character (there are no expression sheets to swap), so emotion is
+      // carried by MOTION plus a floating glyph: the portrait bounces and a
+      // mark pops when the line reveals that punctuation. It fires on the
+      // reveal, so the reaction lands exactly as the player reads the beat —
+      // which is the thing Pokémon's motionless dialogue never does.
+      if (!dlg._twMute && (t.text === '!' || t.text === '?')) _twReact(t.text);
     }
   };
   dlg._twTimer = setInterval(step, SPEED_MS);
@@ -89132,6 +89199,72 @@ function _ambFallbackFor(id) {
 // Real-clock day phase, cached 2 s. game._forcePhase (an HOUR, e.g. 23) is a
 // dev/test override. alpha is 0 for all daytime hours, so the tint draw
 // short-circuits to nothing most of the day.
+// =========================================================================
+// v0.29.427 — SURFACE-AWARE FOOTSTEPS. A classic AAA tell: the ground sounds
+// like what it is. There is exactly one land.mp3 in the asset pack and no
+// per-surface variants, so rather than reference files that do not exist,
+// the surface layer is SYNTHESIZED on the AudioContext the voice blips
+// already use — a short filtered noise burst whose colour is the surface.
+// No asset, no fetch, and it layers under the existing land.mp3 rather than
+// replacing it, so the change is additive on every map.
+const _LX_SURF_TABLE = [
+  [/snow|frost|ice|glacial|boreal|winter|peak|tundra/i,            'snow'],
+  [/sea|reef|tide|ocean|coral|kelp|lagoon|marsh|swamp|bog/i,        'water'],
+  [/lava|magma|forge|volcan|molten|cinder|foundry|mine|smith/i,     'metal'],
+  [/crypt|tomb|sepulch|cave|cavern|bluff|granite|stone|hall|spire|tower|clockwork/i, 'stone'],
+  [/desert|dune|sand|mesa|badland/i,                               'sand'],
+  [/forest|grove|wood|glade|meadow|plain|garden|flower|moss|verd/i, 'grass'],
+];
+// [centre Hz, Q, decay s, gain] — grass is soft and dull, stone is a bright
+// short click, snow is the dullest, metal rings, water is a wide low splash.
+const _LX_SURF_TONE = {
+  grass: [420, 1.1, 0.055, 0.030],
+  stone: [1500, 3.0, 0.045, 0.038],
+  snow:  [260, 0.8, 0.075, 0.026],
+  water: [700, 0.7, 0.090, 0.040],
+  metal: [2100, 6.0, 0.110, 0.030],
+  sand:  [340, 0.9, 0.060, 0.028],
+};
+const _LX_SURF_CACHE = Object.create(null);
+function _lxSurfaceFor(id) {
+  if (!id) return 'grass';
+  const hit = _LX_SURF_CACHE[id];
+  if (hit) return hit;
+  const m = (typeof MAPS === 'object') ? MAPS[id] : null;
+  const hay = id + ' ' + ((m && m.bg) || '') + ' ' + ((m && m.name) || '');
+  let out = 'grass';
+  for (const pair of _LX_SURF_TABLE) { if (pair[0].test(hay)) { out = pair[1]; break; } }
+  return (_LX_SURF_CACHE[id] = out);
+}
+// One shared noise buffer, built once — regenerating white noise per step
+// would be the expensive part of this, not the playback.
+let _lxNoiseBuf = null;
+function _lxSurfaceStep(strength) {
+  try {
+    if (typeof audio === 'undefined' || !audio || audio.muted || !audio.ctx) return;
+    if (game && game.muted) return;
+    const c = audio.ctx;
+    if (c.state !== 'running') return;
+    if (!_lxNoiseBuf) {
+      _lxNoiseBuf = c.createBuffer(1, (c.sampleRate * 0.15) | 0, c.sampleRate);
+      const d = _lxNoiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const tone = _LX_SURF_TONE[_lxSurfaceFor(game && game.currentMap)] || _LX_SURF_TONE.grass;
+    const src = c.createBufferSource(); src.buffer = _lxNoiseBuf;
+    const flt = c.createBiquadFilter();
+    flt.type = 'bandpass';
+    // +/-12% pitch jitter so repeated steps never sound like a loop.
+    flt.frequency.value = tone[0] * (0.88 + Math.random() * 0.24);
+    flt.Q.value = tone[1];
+    const g = c.createGain();
+    const vol = tone[3] * Math.max(0.35, Math.min(1, strength || 1));
+    g.gain.setValueAtTime(vol, c.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0005, c.currentTime + tone[2]);
+    src.connect(flt); flt.connect(g); g.connect(c.destination);
+    src.start(); src.stop(c.currentTime + tone[2] + 0.02);
+  } catch (_e) {}
+}
 // =========================================================================
 // v0.29.423 — WEATHER. Sits alongside day/night and the ambient layer so all
 // three atmosphere systems live together.
@@ -112702,7 +112835,6 @@ try { if (typeof _lxSteamSyncAchievements === 'function') setTimeout(_lxSteamSyn
 // v0.28.1 — Steam: auto-join a friend's party if launched via "Join Game"
 // (window.MOJI_JOIN), and start the rich-presence + stats heartbeat (self-
 // throttled; all no-ops without Steam).
-try { if (typeof _lxWebTryAutoJoin === 'function') setTimeout(() => _lxWebTryAutoJoin(), 2500); } catch (e) {}
 try { if (typeof _lxSteamTryAutoJoin === 'function') setTimeout(() => _lxSteamTryAutoJoin(), 2500); } catch (e) {}
 try { if (window.SteamAPI && window.SteamAPI.onJoin) window.SteamAPI.onJoin((s) => { try { _lxSteamTryAutoJoin(s); } catch (e) {} }); } catch (e) {}
 // v0.29.269 — overlay open/close pauses a solo game (see _lxSteamOverlayPause).
