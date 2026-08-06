@@ -7,6 +7,11 @@
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
 const PORT = process.argv[2] || '8819';
+// Second arg picks the page, so this can audit a copy of the PUSHED tree
+// rather than the working copy:
+//   git show origin/main:mojiworld_game.html > _tmp_pushed.html
+//   node scripts/additions_audit_test.mjs 8819 _tmp_pushed.html
+const PAGE = process.argv[3] || 'mojiworld_game.html';
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
@@ -14,7 +19,7 @@ const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox','--disable-gpu','--mute-audio'] });
 const page = await (await b.newContext({ serviceWorkers: 'block' })).newPage();
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 200)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.goto(`http://localhost:${PORT}/${PAGE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => { try { return typeof eval('LX_GFX') === 'object' && typeof eval('_mpBanner') === 'function' && typeof eval('_lxDrawBlobShadow') === 'function'; } catch { return false; } }, null, { timeout: 180000 });
 
 // === 1. Custom preset must not silently drop the perf tier ==================
@@ -193,7 +198,7 @@ await page.evaluate(() => {
   eval('_lxGfxSwitchChanged')(); eval('applySettingsLive')();
 });
 const page2 = await (await b.contexts()[0]).newPage();
-await page2.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page2.goto(`http://localhost:${PORT}/${PAGE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page2.waitForFunction(() => { try { return typeof eval('applySettingsLive') === 'function' && typeof eval('LX_PERF') === 'object'; } catch { return false; } }, null, { timeout: 180000 });
 const afterReload = await page2.evaluate(async () => {
   await new Promise(r => setTimeout(r, 400));      // let the 100ms boot apply run
@@ -212,3 +217,4 @@ let pass = 0, fail = 0;
 for (const x of results) { (x.pass ? pass++ : fail++); console.log((x.pass ? 'PASS  ' : 'FAIL  ') + x.n + (x.x != null ? '  ' + JSON.stringify(x.x) : '')); }
 console.log(`\n${pass}/${pass + fail} audit checks passed`);
 process.exit(fail ? 1 : 0);
+
