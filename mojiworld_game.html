@@ -9186,7 +9186,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.424';
+const GAME_VERSION = 'v0.29.425';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -68817,6 +68817,16 @@ function hitMonster(m, dmg, isCrit, skill) {
   let finalDmg = Math.max(1, skill === 'thorns' ? dmg : Math.floor(dmg * game.comboMult));
   // Tower: Glass Hero mod gives +50% player damage
   if (skill !== 'thorns' && game.tower) finalDmg = Math.floor(finalDmg * towerPlayerDmgMul());
+  // v0.29.423 — WEATHER AFFECTS COMBAT. Pokémon treats weather as a battle
+  // mechanic on a static screen; here it is a living overworld layer AND a
+  // damage modifier, which is the part that makes it a system rather than a
+  // filter. Deliberately gentle (±25%) and only on elemental skills, so it
+  // rewards reading the sky without invalidating a build. Basic attacks are
+  // never touched — a player must always have a reliable option.
+  if (skill && typeof _lxWeatherDmgMul === 'function') {
+    const _wm = _lxWeatherDmgMul(skill);
+    if (_wm !== 1) finalDmg = Math.max(1, Math.floor(finalDmg * _wm));
+  }
   // Mob DEF — v0.26.144 PERCENTAGE damage reduction (was flat subtract).
   // Standard armor-curve: damage taken = K / (DEF + K). DEF becomes a
   // meaningful gate at every hit size (not negligible against big hits).
@@ -89116,6 +89126,145 @@ function _ambFallbackFor(id) {
 // Real-clock day phase, cached 2 s. game._forcePhase (an HOUR, e.g. 23) is a
 // dev/test override. alpha is 0 for all daytime hours, so the tint draw
 // short-circuits to nothing most of the day.
+// =========================================================================
+// v0.29.423 — WEATHER. Sits alongside day/night and the ambient layer so all
+// three atmosphere systems live together.
+//
+// The roll is DETERMINISTIC per (day, map): same dailyIndex() the mutators
+// use, hashed with the map id. So weather is stable while you play a map,
+// identical across devices, cannot be re-rolled by re-entering, and changes
+// on its own each day. Biome decides WHICH weathers are possible — it never
+// snows in a lava foundry — and every biome keeps a large "clear" slice, so
+// weather stays an event rather than wallpaper.
+//
+// Cost control: particles live in ONE pre-sized pool that is never
+// reallocated, wrap instead of respawn, and draw in a single batched pass.
+// Indoor / arena / void maps resolve to clear and skip the pass entirely.
+const _LX_WX_CACHE = Object.create(null);
+const _LX_WX_TABLE = [
+  [/snow|frost|ice|glacial|boreal|winter|peak|tundra/i,          ['snow', 'snow', 'fog', 'clear']],
+  [/lava|magma|ember|forge|volcan|molten|cinder|scorch/i,         ['dust', 'clear', 'clear']],
+  [/desert|dune|sand|mesa|badland/i,                              ['dust', 'dust', 'clear']],
+  [/sea|reef|tide|ocean|coral|kelp|lagoon|harbor|harbour/i,        ['rain', 'rain', 'fog', 'clear']],
+  [/crypt|tomb|sepulch|hollow|grave|shadow|nightmare/i,            ['fog', 'fog', 'clear']],
+  [/forest|grove|wood|glade|thicket|jade|moss|verd|meadow|plain|garden|flower|spring/i,
+                                                                   ['rain', 'fog', 'clear', 'clear']],
+];
+function _lxWeatherFor(id) {
+  if (!id) return 'clear';
+  const day = (typeof dailyIndex === 'function') ? dailyIndex() : 0;
+  const key = day + '|' + id;
+  const hit = _LX_WX_CACHE[key];
+  if (hit !== undefined) return hit;
+  let out = 'clear';
+  const m = (typeof MAPS === 'object') ? MAPS[id] : null;
+  // Indoor, arena and void maps have no sky to put weather in.
+  if (m && !m.isVoid && !m.isBossArena && id.indexOf('tower_b') !== 0) {
+    const hay = id + ' ' + (m.bg || '') + ' ' + (m.name || '');
+    let h = 0;
+    for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
+    h = (h % 1000 + 1000) % 1000;
+    for (const pair of _LX_WX_TABLE) {
+      if (pair[0].test(hay)) { out = pair[1][h % pair[1].length]; break; }
+    }
+  }
+  return (_LX_WX_CACHE[key] = out);
+}
+// Live weather for the current map, re-resolved only when the map changes.
+let _LX_WX = { map: null, kind: 'clear' };
+function _lxWeather() {
+  const cm = game && game.currentMap;
+  if (_LX_WX.map !== cm) _LX_WX = { map: cm, kind: _lxWeatherFor(cm) };
+  return _LX_WX.kind;
+}
+// Fixed pool — allocated once, entries recycled by wrapping.
+const _LX_WX_N = 90;
+let _lxWxPool = null;
+function _lxWxTick() {
+  const kind = _lxWeather();
+  if (kind === 'clear') return;
+  if (!_lxWxPool) {
+    _lxWxPool = new Array(_LX_WX_N);
+    for (let i = 0; i < _LX_WX_N; i++) _lxWxPool[i] = { x: Math.random() * W, y: Math.random() * H, s: 0 };
+  }
+  const fast = (kind === 'rain');
+  for (let i = 0; i < _LX_WX_N; i++) {
+    const p = _lxWxPool[i];
+    if (!p.s) p.s = 0.6 + Math.random() * 0.8;
+    if (kind === 'rain')      { p.y += 13 * p.s; p.x += 2.2 * p.s; }
+    else if (kind === 'snow') { p.y += 1.5 * p.s; p.x += Math.sin((game.time + i * 12) * 0.02) * 0.9; }
+    else if (kind === 'dust') { p.x -= 3.2 * p.s; p.y += Math.sin((game.time + i * 20) * 0.015) * 0.5; }
+    else                      { p.x += 0.35 * p.s; }   // fog drifts
+    // Wrap rather than respawn — no allocation, no spawn bookkeeping.
+    if (p.y > H + 8) { p.y = -8; p.x = Math.random() * W; }
+    if (p.x > W + 8) p.x = -8;
+    if (p.x < -8) p.x = W + 8;
+  }
+}
+// Weather → elemental damage. Keyed on the `skill` string hitMonster already
+// carries, so no new tagging system is needed. Unlisted skills (and every
+// basic attack, which passes no elemental tag) return 1.0 untouched.
+const _LX_WX_DMG = {
+  rain: { lightning: 1.25, water: 1.25, tidal: 1.25, fire: 0.8, ember: 0.8, flame: 0.8 },
+  snow: { ice: 1.25, frost: 1.25, fire: 0.85, flame: 0.85 },
+  dust: { fire: 1.2, ember: 1.2, flame: 1.2, lightning: 0.85 },
+  fog:  { shadow: 1.2, void: 1.2, dark: 1.2, holy: 0.85, light: 0.85 },
+};
+function _lxWeatherDmgMul(skill) {
+  const tbl = _LX_WX_DMG[_lxWeather()];
+  if (!tbl) return 1;
+  return tbl[skill] || 1;
+}
+// One batched pass: a single tint fillRect, then all particles under one
+// fillStyle (rain/snow/dust) or one radial wash (fog). Drawn in SCREEN space
+// — weather is between the camera and the world, so it must not scroll.
+function drawWeather() {
+  const kind = _lxWeather();
+  if (kind === 'clear' || !_lxWxPool) return;
+  if (typeof _perfLowFx === 'function' && _perfLowFx() && kind === 'fog') return;
+  ctx.save();
+  if (kind === 'rain') {
+    ctx.fillStyle = 'rgba(40,60,95,0.10)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(180,205,255,0.34)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i < _LX_WX_N; i++) {
+      const p = _lxWxPool[i];
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x - 2.2 * p.s, p.y - 11 * p.s);
+    }
+    ctx.stroke();
+  } else if (kind === 'snow') {
+    ctx.fillStyle = 'rgba(150,175,210,0.08)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(255,255,255,0.72)';
+    for (let i = 0; i < _LX_WX_N; i++) {
+      const p = _lxWxPool[i];
+      const r = 1.2 + p.s;
+      ctx.fillRect(p.x, p.y, r, r);
+    }
+  } else if (kind === 'dust') {
+    ctx.fillStyle = 'rgba(150,110,60,0.10)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(226,196,140,0.42)';
+    for (let i = 0; i < _LX_WX_N; i++) {
+      const p = _lxWxPool[i];
+      ctx.fillRect(p.x, p.y, 2 + p.s, 1.4);
+    }
+  } else if (kind === 'fog') {
+    ctx.fillStyle = 'rgba(190,196,210,0.13)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 0.10;
+    ctx.fillStyle = '#cfd6e6';
+    // Half the pool, drawn as soft banks — fog reads as volume, not specks.
+    for (let i = 0; i < _LX_WX_N; i += 2) {
+      const p = _lxWxPool[i];
+      ctx.fillRect(p.x - 40, p.y, 90 + p.s * 40, 16);
+    }
+  }
+  ctx.restore();
+}
 let _LX_DAYPH = { t: 0, phase: 'day', alpha: 0, style: '' };
 function _lxDayPhase() {
   const now = Date.now();
@@ -110706,6 +110855,7 @@ function loop(time) {
     updateSmoothFx(dt);
     updatePowerupOrbs(dt);
     updateAmbient();
+    if (typeof _lxWxTick === 'function') _lxWxTick();   // v0.29.423 — weather advances on both sim paths, like ambient
     updateMapEvents(dt);
     updateTower(dt);
     if (typeof updateCarriage === 'function') updateCarriage(dt);
@@ -110729,6 +110879,7 @@ function loop(time) {
     updateFxInstances(dt);
     updateSmoothFx(dt);
     updateAmbient();
+    if (typeof _lxWxTick === 'function') _lxWxTick();   // v0.29.423 — weather advances on both sim paths, like ambient
     // v0.29.x — CO-OP: keep the shared enemy world alive while this player is
     // PAUSED in a menu (the else branch means game.paused OR dead/frozen; the
     // world step self-guards on !game.dying && hp>0). Monsters keep moving and
@@ -110880,6 +111031,10 @@ function loop(time) {
   ctx.clearRect(-30, -30, W + 60, H + 60);
   drawBackground();
   drawAmbient();
+  // v0.29.423 — weather draws AFTER ambient so rain/snow/fog sit in front of
+  // fireflies and petals, and in screen space so it does not scroll with the
+  // world. Self-skips entirely on clear maps.
+  if (typeof drawWeather === 'function') drawWeather();
   // v0.25.470 — Vertical-tower scroll. Translates the world Y so the
   // camera's vertical follow on isVerticalTower maps actually shows
   // the right slice of the tall map. drawBackground + drawAmbient
