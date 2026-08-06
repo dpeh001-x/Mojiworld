@@ -30906,6 +30906,7 @@ const LX_SETTINGS_DEFAULTS = {
   // the preset so every existing localStorage('LX_LOW_FX') reader still works
   // and an older build reading a newer save still behaves sanely.
   gfx: 'high',
+  gfxBase: 'high',    // v0.29.432 — tier source when gfx === 'custom'
   fxWeather: true,     // rain / snow / dust / fog particle pass (VISUAL only)
   fxAmbient: true,     // birds, fireflies, drifting motes, day/night grade
   fxShadows: true,     // ground blob shadows under the player + monsters
@@ -30946,6 +30947,11 @@ function _lxSaveSettings(s) {
 // Picking a preset stamps its switches onto the UI; touching a switch flips the
 // dropdown to Custom. Without this pair the two controls drift apart and the
 // panel lies about what is actually on.
+// v0.29.432 — the named preset a Custom set-up was derived from. Custom takes
+// its TIERS from this, because LX_GFX_PRESETS.custom does not exist and
+// treating it as "no preset" silently un-optimised the player: pick Low for
+// performance, switch damage numbers off, and veryLowFx quietly turned off too.
+let _lxGfxBase = 'high';
 function _lxGfxApplyPresetToUi(name) {
   const p = LX_GFX_PRESETS[name];
   if (!p) return;                                   // 'custom' — leave switches alone
@@ -30956,7 +30962,9 @@ function _lxGfxApplyPresetToUi(name) {
 }
 function _lxGfxPresetChanged() {
   const sel = document.getElementById('set-gfx');
-  if (sel) _lxGfxApplyPresetToUi(sel.value);
+  if (!sel) return;
+  if (LX_GFX_PRESETS[sel.value]) _lxGfxBase = sel.value;   // remember the tier source
+  _lxGfxApplyPresetToUi(sel.value);
 }
 function _lxGfxSwitchChanged() {
   const sel = document.getElementById('set-gfx');
@@ -30972,6 +30980,7 @@ function _lxGfxSwitchChanged() {
 function openSettingsModal() {
   const s = _lxGetSettings();
   {
+    _lxGfxBase = s.gfxBase || ((s.gfx && s.gfx !== 'custom') ? s.gfx : 'high');
     const sel = document.getElementById('set-gfx');
     if (sel) sel.value = _lxGfxIsCustom(s) ? 'custom' : (s.gfx || 'high');
     const set = (id, on) => { const e = document.getElementById(id); if (e) e.classList.toggle('on', !!on); };
@@ -31284,6 +31293,7 @@ function applySettingsLive() {
     fxAmbient: (() => { const e = document.getElementById('set-fx-ambient'); return e ? e.classList.contains('on') : true; })(),
     fxShadows: (() => { const e = document.getElementById('set-fx-shadows'); return e ? e.classList.contains('on') : true; })(),
     fxDmgNum:  (() => { const e = document.getElementById('set-fx-dmgnum');  return e ? e.classList.contains('on') : true; })(),
+    gfxBase: (typeof _lxGfxBase !== 'undefined') ? _lxGfxBase : 'high',
   };
   // The hidden legacy toggle mirrors the preset's tier so every existing
   // localStorage('LX_LOW_FX') reader keeps seeing a consistent value.
@@ -31343,7 +31353,9 @@ function _applySettings(s) {
   // v0.29.428 — the preset drives both engine tiers; the switches drive their
   // own systems. 'custom' keeps whatever tier the legacy lowfx flag holds.
   {
-    const p = LX_GFX_PRESETS[s.gfx];
+    // v0.29.432 — fall back to the base preset for 'custom' so the tiers the
+    // player chose survive an individual-effect tweak (and a reload).
+    const p = LX_GFX_PRESETS[s.gfx] || LX_GFX_PRESETS[s.gfxBase] || LX_GFX_PRESETS.high;
     LX_GFX.quality = s.gfx || 'high';
     LX_GFX.weather = s.fxWeather !== false;
     LX_GFX.ambient = s.fxAmbient !== false;
@@ -34933,6 +34945,7 @@ function _lxArmPendingJoin(relay, code) {
 // an empty relay half falls through to MP_DEFAULT_URL.
 function _lxWebTryAutoJoin() {
   try {
+    if (_lxSteamJoinDone) return;        // v0.29.432 — a boot join already ran
     const m = /[?&]join=([A-Za-z0-9]{1,12})/.exec(location.search || '');
     if (!m) return;
     _lxSteamTryAutoJoin('~' + m[1]);
@@ -37533,6 +37546,10 @@ function _coopNearKill(kx, ky) {
 // lazily in JS so it carries no HTML/CSS of its own.
 // =========================================================================
 let _mpBannerEl = null, _mpBannerHideT = 0;
+// v0.29.432 — set when the PLAYER dismisses a banner. Auto-reconnect retries
+// forever, so without this a dismissed outage banner returned every backoff
+// tick. Cleared by a successful connect or a fresh user-initiated join.
+let _mpBannerMuted = false;
 function _mpBannerNode() {
   if (_mpBannerEl && _mpBannerEl.isConnected) return _mpBannerEl;
   const d = document.createElement('div');
@@ -37555,6 +37572,9 @@ function _mpBannerBtn(label, css) {
 }
 // tone: 'work' (in progress) | 'good' (connected) | 'bad' (failed)
 function _mpBanner(text, tone, opts) {
+  // A dismissed outage stays dismissed until something good happens.
+  if (_mpBannerMuted && tone !== 'good') return;
+  if (tone === 'good') _mpBannerMuted = false;   // the outage is over — speak freely again
   let d; try { d = _mpBannerNode(); } catch (e) { return; }
   const o = opts || {};
   d.style.borderColor = tone === 'good' ? '#3f9c6c' : tone === 'bad' ? '#a44' : '#7a5cc0';
@@ -37574,20 +37594,21 @@ function _mpBanner(text, tone, opts) {
   }
   if (o.retry) {
     const b = _mpBannerBtn('Retry', 'background:linear-gradient(180deg,#3a2a7a,#2a1a5a); color:#ffee88; border:1px solid #ffdd44;');
-    b.onclick = () => { _mpBannerDismiss(); try { o.retry(); } catch (e) {} };
+    b.onclick = () => { _mpBannerDismiss(); _mpBannerMuted = false; try { o.retry(); } catch (e) {} };
     d.appendChild(b);
   }
   if (o.dismiss !== false) {
     const x = _mpBannerBtn('x', 'background:transparent; color:#b9a8d8; border:1px solid #5a4a80;');
     x.title = 'Dismiss';
-    x.onclick = _mpBannerDismiss;
+    x.onclick = () => _mpBannerDismiss(true);
     d.appendChild(x);
   }
   d.style.display = 'block';
   if (_mpBannerHideT) { clearTimeout(_mpBannerHideT); _mpBannerHideT = 0; }
   if (o.autoHide) _mpBannerHideT = setTimeout(_mpBannerDismiss, o.autoHide);
 }
-function _mpBannerDismiss() {
+function _mpBannerDismiss(byUser) {
+  if (byUser === true) _mpBannerMuted = true;   // auto-hide must NOT mute
   if (_mpBannerHideT) { clearTimeout(_mpBannerHideT); _mpBannerHideT = 0; }
   if (_mpBannerEl) _mpBannerEl.style.display = 'none';
 }
@@ -38015,6 +38036,7 @@ function mpConnect(url, name, room) {
   // v0.29.423 — mirror the attempt outside the modal. An auto-reconnect
   // shouldn't nag, so only a fresh run announces itself.
   if (!(net._reconnectTries > 0)) {
+    _mpBannerMuted = false;   // fresh, user-initiated join — speak up again
     _mpBanner('Joining party ' + baseRoom.toUpperCase() + '...', 'work', { dismiss: false });
   }
   let ws;
@@ -113174,7 +113196,8 @@ try { if (typeof _lxSteamSyncAchievements === 'function') setTimeout(_lxSteamSyn
 // v0.28.1 — Steam: auto-join a friend's party if launched via "Join Game"
 // (window.MOJI_JOIN), and start the rich-presence + stats heartbeat (self-
 // throttled; all no-ops without Steam).
-try { if (typeof _lxSteamTryAutoJoin === 'function') setTimeout(() => _lxSteamTryAutoJoin(), 2500); } catch (e) {}
+try { if (typeof _lxWebTryAutoJoin === 'function') setTimeout(() => _lxWebTryAutoJoin(), 2500); } catch (e) {}
+try { if (typeof _lxSteamTryAutoJoin === 'function') setTimeout(() => { if (!_lxSteamJoinDone) _lxSteamTryAutoJoin(); }, 2500); } catch (e) {}
 try { if (window.SteamAPI && window.SteamAPI.onJoin) window.SteamAPI.onJoin((s) => { try { _lxSteamTryAutoJoin(s); } catch (e) {} }); } catch (e) {}
 // v0.29.269 — overlay open/close pauses a solo game (see _lxSteamOverlayPause).
 try { if (window.SteamAPI && window.SteamAPI.onOverlay) window.SteamAPI.onOverlay((a) => { try { _lxSteamOverlayPause(a); } catch (e) {} }); } catch (e) {}
