@@ -56188,7 +56188,19 @@ function _mojimonDraw(mn, sx, sy) {
   if (mn.spawn > 0) ctx.globalAlpha = Math.max(0.25, 1 - mn.spawn / 18);
   if (spr) {
     const aw = spr.naturalWidth || 1, ah = spr.naturalHeight || 1;
-    let dh = Math.max(36, Math.min(200, mn.h * 1.1));   // v0.29.453 — draw at true species scale (cap was 110)
+    // v0.29.459 — SAME SIZE AS THE WILD SPECIES (per user). drawMonster
+    // renders a wild mob at m.h * 1.5 * sizeFactor * _lxMobScale(type); this
+    // path drew mn.h * 1.1 — the companion stood ~27% shorter than the exact
+    // creature the player just bound, and ignored the Monster-Plant per-type
+    // size calibration. Mirror the wild formula piece by piece (sizeFactor
+    // clamp 0.85–1.20 vs MONSTER_SIZE_REF=768, _lxOrigLong-aware). The fence
+    // is 280 (mn.h caps at 140 -> 140*1.5*1.2 = 252 worst case), replacing
+    // the old 200 cap that would have squashed large species.
+    const _srcLong = (spr && spr._lxOrigLong) || Math.max(aw, ah);
+    const _sf = Math.max(0.85, Math.min(1.20, _srcLong / 768));
+    const _ms = (typeof _lxMobScale === 'function') ? (_lxMobScale(mn.type) || 1) : 1;
+    let dh = Math.max(36, Math.min(280, mn.h * 1.5 * _sf * _ms));
+    mn._visW = dh * aw / ah; mn._visH = dh;   // stamped like the wild path, so size is testable
     // v0.29.454 — padded weapon-swing attack frames (fatDragon, forgewight…)
     // hold the body inside a transparent-padded canvas; wild monsters scale
     // the draw box back up via _ATK_FRAME_SCALE so the body keeps its idle
@@ -63908,7 +63920,16 @@ function updateMonsters(dt) {
     // player dashed AWAY from the pack — the taunt promise. Expiry is
     // handled in _updateDashTrail; the null check here sees it vanish.
     const _hasDecoy = !!(game._mirrorDecoy && (game._mirrorDecoy.until | 0) > (game.time | 0));
-    if (!m.isBoss && (_hasPet || _hasPack || _hasUlt || _hasMinions || _aggroPeers || _hasDecoy)) {
+    // v0.29.459 — BOSSES SEE THE COMPANION (per user "ensure the enemies do
+    // attack it"). The !m.isBoss gate meant a boss could never aggro anything
+    // but the player — it would walk past the 10×-HP tank that exists to tank
+    // it. Scope: bosses consider ONLY the MojiMon (not decoys/pets/packs), so
+    // regular summoner-class boss fights keep their existing balance; the
+    // 60px player bias still applies, so the boss only peels when the mon is
+    // meaningfully closer.
+    const _hasMojiTank = !!(m.isBoss && game.minions && game.minions.length &&
+                            game.minions.some(_mn => _mn && _mn.mojimon && (_mn.spawn || 0) <= 0 && _mn.currentHp > 0));
+    if ((!m.isBoss && (_hasPet || _hasPack || _hasUlt || _hasMinions || _aggroPeers || _hasDecoy)) || _hasMojiTank) {
       const _mcx = m.x + m.w/2, _mcy = m.y + m.h/2;
       // Player score: squared distance with a 60 px subtracted-distance
       // bias = (sqrt(d²) − 60). To compare without sqrt we compute the
@@ -63947,8 +63968,9 @@ function updateMonsters(dt) {
           if (w && w.hp > 0) _consider(w.x + 20, w.y + 18, w);
         }
       }
-      if (_hasMinions) {
+      if (_hasMinions || _hasMojiTank) {
         for (const mn of game.minions) {
+          if (m.isBoss && !mn.mojimon) continue;   // v0.29.459 — bosses peel only for the MojiMon
           if (mn && (mn.spawn || 0) <= 0 && (mn.currentHp == null || mn.currentHp > 0)) {
             _consider(mn.x + mn.w/2, mn.y + mn.h/2, mn);
           }
@@ -64022,6 +64044,45 @@ function updateMonsters(dt) {
             // Tap boss direct-hit broadcasts fired during this tick so the
             // HOST can be hit positionally at their REAL location.
             _bTapHits = [];
+            game._bossHitTap = (cx, cy, r, d, fr, sl, c) => { _bTapHits.push({ cx, cy, r, d, fr, sl, c }); };
+          }
+        }
+      }
+      // v0.29.459 — MOJIMON TAUNT (per user "ensure the enemies do attack
+      // it"). Same swap-restore the co-op peer aggro above uses, because
+      // bossAI reads the global `player` directly. When the fielded MojiMon
+      // is MEANINGFULLY closer to the boss than the player (60px bias, same
+      // as the ally-target pool) and within 900px, the boss's AI tick aims
+      // at the companion: movement, telegraphs and projectiles target it.
+      // Direct player.hp writes during the swapped tick are discarded on
+      // restore (hp is in the swap set); the companion takes its real damage
+      // through the existing contact-overlap channel in updateMinions.
+      // Co-op partner swap wins if both apply — partners are players.
+      if (!_bSwap && game.minions && game.minions.length) {
+        let _mmBossTank = null;
+        for (const _mn of game.minions) {
+          if (_mn && _mn.mojimon && (_mn.spawn || 0) <= 0 && _mn.currentHp > 0) { _mmBossTank = _mn; break; }
+        }
+        if (_mmBossTank) {
+          const _bmx2 = m.x + m.w / 2, _bmy2 = m.y + m.h / 2;
+          const _dMon = Math.hypot(_mmBossTank.x + _mmBossTank.w / 2 - _bmx2, _mmBossTank.y + _mmBossTank.h / 2 - _bmy2);
+          const _dPl = Math.hypot(player.x + player.w / 2 - _bmx2, player.y + player.h / 2 - _bmy2);
+          if (_dMon + 60 < _dPl && _dMon < 900) {
+            _bSwap = { x: player.x, y: player.y, vx: player.vx, vy: player.vy, facing: player.facing,
+                       hp: player.hp, invulnerable: player.invulnerable, hitStun: player.hitStun,
+                       frozenTimer: player.frozenTimer, freezeTimer: player.freezeTimer,
+                       _slowTimer: player._slowTimer, burnTimer: player.burnTimer,
+                       _poisonTimer: player._poisonTimer, _electrocuteTimer: player._electrocuteTimer };
+            player.x = _mmBossTank.x + _mmBossTank.w / 2 - player.w / 2;
+            player.y = _mmBossTank.y + _mmBossTank.h - player.h;
+            player.vx = 0; player.vy = 0;
+            _bDist = Math.abs((_mmBossTank.x + _mmBossTank.w / 2) - _bmx2);
+            m.aggroTarget = _mmBossTank;   // visible to the generic chase + tests
+            // Same protection the co-op swap has: boss strikes that carry a
+            // position are re-applied at the player's REAL location by the
+            // finally block below, so hugging the boss while the mon tanks
+            // is not free invulnerability.
+            _bTapHits = [];   // v0.29.459 — taunt swap uses the same positional re-apply as co-op
             game._bossHitTap = (cx, cy, r, d, fr, sl, c) => { _bTapHits.push({ cx, cy, r, d, fr, sl, c }); };
           }
         }
