@@ -9294,7 +9294,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.462';
+const GAME_VERSION = 'v0.29.456';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -27907,7 +27907,14 @@ MAPS.gloomsporeVerge.portals.push ({ x: 80,   dest: 'thornspireThicket', name: '
 MAPS.hollowSepulchre.portals.push ({ x: 3700, dest: 'ossuarySprawl', name: '🦴 Ossuary Sprawl (Lv 67)' });
 MAPS.ossuarySprawl.portals.push   ({ x: 80,   dest: 'hollowSepulchre', name: '◀ Hollow Sepulchre' });
 MAPS.gloomsporeVerge.wmX = 1180; MAPS.gloomsporeVerge.wmY = 166;
-MAPS.ossuarySprawl.wmX   = 524;  MAPS.ossuarySprawl.wmY   = 146;
+// v0.29.462 — was (524,146), which sat just 17px from hollowSepulchre's final
+// (512,134): the two node discs drew on top of each other on the world map.
+// Separated horizontally (~50px apart) rather than vertically, because the
+// space below is where wayfarersLantern1 (565,203) lives — a vertical spread
+// would have traded one collision for another. This is the LAST write for
+// ossuarySprawl; hollowSepulchre's last write is the W() batch further down,
+// which is where its half of the fix lives.
+MAPS.ossuarySprawl.wmX   = 546;  MAPS.ossuarySprawl.wmY   = 132;
 // ===== VERDANT HAVEN (v0.26.x) ============================================
 // Per user "create an additional map for verdant hollow which acts as a
 // safehub town and place all NPCs from verdant hollow in that map with no
@@ -28370,7 +28377,7 @@ MAPS.zodiacHall.wmX = 634; MAPS.zodiacHall.wmY = 123;
   W('boneGraveyard3',1154,136); W('boss',994,636); W('bubbleGrotto',1061,535); W('celestialSpire',814,169); W('confusedVigil',596,561);
   W('coralReef',1029,264); W('cryptHollow',880,210); W('distortedThreshold',490,470); W('emeraldVillage',691,641); W('forest',792,432);
   W('fracturedReflection',480,557); W('frostbiteHollow',906,374); W('frozenPeak',824,274); W('glasswindHamlet',402,76); W('graniteBluffs',158,397);
-  W('gravitosArena',637,40); W('hiddenPagoda',596,492); W('hollowSepulchre',512,134); W('honeycombHollow',240,373); W('interdimensionalAscension',643,164);
+  W('gravitosArena',637,40); W('hiddenPagoda',596,492); W('hollowSepulchre',496,124); W('honeycombHollow',240,373); W('interdimensionalAscension',643,164);
   W('kelpForest',1098,386); W('magmaFoundry',290,249); W('mushroom',818,499); W('octopusGrotto',1128,623); W('pearlBathhouse',988,343);
   W('reachOfVermillion',826,643); W('sanctum',716,124); W('shadowWovenHood',689,537); W('skyGarden',1022,443); W('stardustAtrium',732,236);
   W('sundered_forge',538,641); W('sunsetBeach',428,387); W('tidalLagoon',374,481); W('tidepoolShoals',943,277); W('tower_b9',411,177);
@@ -74650,80 +74657,6 @@ function _defaultPortalY() {
   const g = (game.mapData && game.mapData.platforms || []).find(p => p.type === 'ground');
   return g ? g.y : 480;
 }
-// =========================================================================
-// OVERLEVELLED-ZONE WARNING — v0.29.462
-//
-// v0.25.444 removed every cross-portal level suggestion because the toast
-// fired on ordinary crossings and became noise. v0.29.87 restored a warning
-// for BOSS ARENAS only. That left the case the player actually dies to: a
-// regular field map whose mobs are far above them. Walking a Lv 12 character
-// into a Lv 45 zone is a one-shot, and nothing said so.
-//
-// This warns only on a REAL gap (>10 levels) so it stays rare enough to mean
-// something, and it never blocks — regular portals are deliberately ungated
-// (v0.25.444 policy), so this is information, not a wall.
-// =========================================================================
-const LX_DANGER_LEVEL_GAP = 10;
-// Predict a destination's mob level BEFORE loading it. Mirrors _mobLevel's
-// resolution order for a map that is not the active one: the highest natural
-// level among its spawn types, else the map's own recommended level.
-function _lxDestMobLevel(dest) {
-  if (!dest) return 0;
-  let best = 0;
-  try {
-    if (Array.isArray(dest.spawns) && typeof MOB_NATURAL_LEVEL !== 'undefined') {
-      for (const sp of dest.spawns) {
-        const lv = sp && sp.type && MOB_NATURAL_LEVEL[sp.type];
-        if (lv > best) best = lv;
-      }
-    }
-  } catch (e) {}
-  if (!best) best = (dest.levelReq | 0) || 0;
-  return best | 0;
-}
-let _lxDangerEl = null, _lxDangerT = 0;
-function _lxDangerBanner(destName, mobLv, myLv) {
-  let d = _lxDangerEl;
-  if (!d || !d.isConnected) {
-    d = document.createElement('div');
-    d.id = 'lx-danger-banner';
-    d.style.cssText = 'position:fixed; left:50%; top:16%; transform:translate(-50%,0);' +
-      'z-index:10060; display:none; pointer-events:none; text-align:center;' +
-      'min-width:min(90vw,420px); max-width:min(94vw,640px); padding:14px 26px;' +
-      'background:linear-gradient(180deg, rgba(96,10,18,0.96) 0%, rgba(48,6,14,0.97) 100%);' +
-      'border:2px solid #ff4d4d; border-radius:12px;' +
-      'box-shadow:0 0 0 1px rgba(0,0,0,0.6), 0 10px 40px rgba(255,40,40,0.45), inset 0 0 30px rgba(255,60,60,0.18);' +
-      'font-family:system-ui,"Segoe UI",sans-serif; color:#ffdede;';
-    (document.body || document.documentElement).appendChild(d);
-    _lxDangerEl = d;
-  }
-  const gap = Math.max(0, (mobLv | 0) - (myLv | 0));
-  d.innerHTML = '';
-  const mk = (tag, css, txt) => { const e = document.createElement(tag); e.style.cssText = css; e.textContent = txt; return e; };
-  d.appendChild(mk('div', 'font:900 20px/1.15 system-ui,sans-serif; letter-spacing:2px; color:#ff5f5f;' +
-    'text-shadow:0 0 12px rgba(255,60,60,0.9), 0 2px 0 rgba(0,0,0,0.5);', '\u26A0 DANGER \u26A0'));
-  d.appendChild(mk('div', 'font:800 15px/1.35 system-ui,sans-serif; margin-top:6px; color:#ffe8e8;',
-    String(destName || 'This area') + ' \u2014 monsters here are Lv ' + (mobLv | 0)));
-  d.appendChild(mk('div', 'font:700 13px/1.4 system-ui,sans-serif; margin-top:4px; color:#ff9a9a;',
-    'You are Lv ' + (myLv | 0) + ' \u2014 that is ' + gap + ' levels below them.'));
-  d.appendChild(mk('div', 'font:600 11px/1.4 system-ui,sans-serif; margin-top:7px; color:#d8a8a8;',
-    'You can still enter, but expect to be one-shot.'));
-  d.style.display = 'block';
-  // Motion is opt-out (Settings > Reduce Motion), like every other shake.
-  const reduce = !!(typeof game !== 'undefined' && game && game._reduceMotion);
-  d.style.animation = 'none';
-  if (!reduce) {
-    try {
-      d.animate([
-        { transform: 'translate(-50%,0) scale(0.86)', opacity: 0 },
-        { transform: 'translate(-50%,0) scale(1.04)', opacity: 1, offset: 0.35 },
-        { transform: 'translate(-50%,0) scale(1)',    opacity: 1 },
-      ], { duration: 320, easing: 'cubic-bezier(.2,.9,.3,1)' });
-    } catch (e) {}
-  }
-  if (_lxDangerT) clearTimeout(_lxDangerT);
-  _lxDangerT = setTimeout(() => { if (_lxDangerEl) _lxDangerEl.style.display = 'none'; }, 6000);
-}
 function tryPortal() {
   for (const po of game.portals) {
     // v0.25.470 — portals can carry an explicit `y` for tall maps (vertical
@@ -74799,28 +74732,6 @@ function tryPortal() {
           if (!game._bossWarned[po.dest]) {
             game._bossWarned[po.dest] = true;
             showToast(`⚠ ${dest.name || 'This boss'} — Lv ${_recLv}+ recommended (you're Lv ${player.level || 1}). You can still enter.`, 'legendary');
-          }
-        }
-      }
-      // v0.29.462 — OVERLEVELLED ZONE. Non-boss destinations get no warning at
-      // all today (boss arenas are handled just above). Fire the red banner
-      // when the destination's mobs outlevel the player by more than
-      // LX_DANGER_LEVEL_GAP. Once per destination per session, matching the
-      // _bossWarned precedent — the v0.25.444 removal was caused by warning on
-      // EVERY crossing, and a warning that fires constantly stops being read.
-      if (dest && !dest.isBossArena) {
-        const _dLv = _lxDestMobLevel(dest);
-        const _pLv = (player.level | 0) || 1;
-        if (_dLv && _dLv - _pLv > LX_DANGER_LEVEL_GAP) {
-          game._lxDangerWarned = game._lxDangerWarned || {};
-          if (!game._lxDangerWarned[po.dest]) {
-            game._lxDangerWarned[po.dest] = true;
-            _lxDangerBanner(dest.name || po.dest, _dLv, _pLv);
-            if (typeof showToast === 'function') {
-              showToast('\u26A0 ' + (dest.name || po.dest) + ' \u2014 Lv ' + _dLv + ' monsters vs your Lv ' + _pLv, 'danger');
-            }
-            if (typeof addShake === 'function') addShake(6);
-            if (typeof _lxPadRumble === 'function') _lxPadRumble('hit');
           }
         }
       }
@@ -80877,7 +80788,7 @@ function openLevelUpPanel() {
       <button type="button" class="inv-tab" data-utab="boons"><span class="u-tab-ico">◈</span>Boons</button>
       <button type="button" class="inv-tab" data-utab="skills"><span class="u-tab-ico"><img src="Sprites/ui/tab_skills.webp" alt="" style="width:18px; height:18px; object-fit:contain; vertical-align:middle;"></span>Skills</button>
       <button type="button" class="inv-tab" data-utab="items"><span class="u-tab-ico">🎒</span>Items</button>
-      <button type="button" class="inv-tab" data-utab="mojimon"><span class="u-tab-ico"><img src="Sprites/ui/tab_mojimon.webp" alt="" style="width:18px; height:18px; object-fit:contain; vertical-align:middle;"></span>MojiMon</button>
+      <button type="button" class="inv-tab" data-utab="mojimon"><span class="u-tab-ico">⛓</span>MojiMon</button>
     </div>
     <div id="u-pane-lp" style="display:${game._uTab==='lp'?'block':'none'}">
       <!-- v0.25.539 — Top strip: SP pool (left, prominent) + current stats (right).
