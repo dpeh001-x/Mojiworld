@@ -55745,12 +55745,42 @@ const MOJIMON_KILLS_REQ = 10000;
 const MOJIMON_CD_MS = 300000;          // 5 minutes
 const MOJIMON_UPG = { hp: 0.08, atk: 0.05, def: 0.03 };   // per-point: +8% HP, +5% ATK, +3% damage reduction
 const MOJIMON_DEF_CAP = 0.60;          // DR ceiling — a mon must never be unkillable
+const MOJIMON_UPG_STATS = ['hp', 'atk', 'def'];   // v0.29.446 — the only allocatable keys
 function _mojimonEnsure() {
   if (!player.mojimon || typeof player.mojimon !== 'object') player.mojimon = {};
   const mm = player.mojimon;
   if (!mm.roster || typeof mm.roster !== 'object') mm.roster = {};
   if (typeof mm.cdUntil !== 'number' || !isFinite(mm.cdUntil)) mm.cdUntil = 0;
   if (mm.out !== null && (typeof mm.out !== 'object' || !mm.out || !mm.out.type)) mm.out = null;
+  // v0.29.446 — SELF-HEALING ALLOCATION CLAMP. Upgrade points are derived from
+  // character level (1 per 5), but PRESTIGE resets level to 1 while leaving the
+  // roster untouched — so a prestiged player kept a companion upgraded with
+  // points they no longer had (measured: 16 spent against an entitlement of 0,
+  // i.e. +80% HP / +30% ATK carried through a reset that is supposed to strip
+  // progression). Worse, the "free respec" then became a one-way trap: the
+  // allocator refuses to ADD while spent >= points, so removing a point could
+  // never be undone.
+  //
+  // Clamping here rather than inside offerPrestige() means ANY path that drops
+  // the entitlement self-heals — prestige today, a hand-edited save, or
+  // whatever changes the level curve next. Excess is trimmed from the
+  // largest pile first so a lopsided build degrades evenly rather than
+  // zeroing one stat while another survives intact.
+  const _pts = _mojimonPoints();
+  for (const k in mm.roster) {
+    const rec = mm.roster[k];
+    if (!rec) continue;
+    if (!rec.upg || typeof rec.upg !== 'object') rec.upg = { hp: 0, atk: 0, def: 0 };
+    for (const s of MOJIMON_UPG_STATS) rec.upg[s] = Math.max(0, rec.upg[s] | 0);
+    // drop any key that is not allocatable (a stale/hand-written save field)
+    for (const s of Object.keys(rec.upg)) if (!MOJIMON_UPG_STATS.includes(s)) delete rec.upg[s];
+    let over = _mojimonSpent(rec) - _pts;
+    while (over > 0) {
+      const biggest = MOJIMON_UPG_STATS.reduce((a, b) => ((rec.upg[b] | 0) > (rec.upg[a] | 0) ? b : a));
+      if ((rec.upg[biggest] | 0) <= 0) break;      // nothing left to trim
+      rec.upg[biggest]--; over--;
+    }
+  }
   return mm;
 }
 // Upgrade points per species: 1 per 5 character levels. Level-derived rather
@@ -56062,9 +56092,20 @@ window._mojimonUi = {
     const mm = _mojimonEnsure();
     const rec = mm.roster[type];
     if (!rec) return;
+    // v0.29.446 — validate the stat key. It was written straight through, so
+    // any caller could create `upg.evasion` — dead weight that _mojimonStatsFor
+    // never reads but that persisted into the save forever.
+    if (!MOJIMON_UPG_STATS.includes(stat)) return;
     const cur = rec.upg[stat] | 0;
-    if (delta > 0 && _mojimonSpent(rec) >= _mojimonPoints()) { if (typeof showToast === 'function') showToast('No free points — level up for more (1 per 5 levels)', 'rare'); return; }
-    rec.upg[stat] = Math.max(0, cur + delta);
+    const free = _mojimonPoints() - _mojimonSpent(rec);
+    if (delta > 0 && free <= 0) { if (typeof showToast === 'function') showToast('No free points — level up for more (1 per 5 levels)', 'rare'); return; }
+    // v0.29.446 — CLAMP THE STEP, don't just gate on "any point free". The old
+    // check ran BEFORE adding, so a single call with delta > 1 sailed past it:
+    // with 10 points and 0 spent, one delta=999 call allocated all 999. The UI
+    // only ever sends +/-1, so this was not reachable by clicking — but the
+    // handler is on `window`, so the dev console and any future caller could.
+    const step = delta > 0 ? Math.min(delta, free) : delta;
+    rec.upg[stat] = Math.max(0, cur + step);
     // A fielded mon re-derives its stats immediately, preserving HP fraction —
     // an upgrade mid-fight must never top the mon back up to full for free.
     if (mm.out && mm.out.type === type && game.minions) {
