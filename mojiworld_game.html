@@ -12618,10 +12618,19 @@ const LX_EQUIP_FILES = {
   ],
 };
 const _LX_EQUIP_CACHE = { weapons: Object.create(null), armors: Object.create(null) };
+const _LX_EQUIP_CACHE_MAX = 160;   // v0.29.469 — comfortably above the real catalog
 function _lxEquipSprite(cat, name) {
   const c = _LX_EQUIP_CACHE[cat];
   if (!c || !name) return null;
   if (c[name] === undefined) {
+    // v0.29.469 — `name` reaches here straight from a co-op peer's sprite id
+    // (format-checked, never membership-checked), and a failed load is cached
+    // as an Image too, so 404s are retained exactly like hits. Without a cap a
+    // peer cycling ids created ~10 permanently-retained Image objects and ~10
+    // outbound 404s per second. FIFO rather than a catalog whitelist so
+    // legitimately modded / newly-added art still loads.
+    const _ks = Object.keys(c);
+    if (_ks.length >= _LX_EQUIP_CACHE_MAX) delete c[_ks[0]];
     const img = new Image(); img.decoding = 'async'; img.onerror = () => {};
     img.src = 'Sprites/equipment/' + cat + '/' + name + '.webp';
     c[name] = img;
@@ -13703,6 +13712,16 @@ const HERO_WORLD_DISPLAY_SCALE = 0.85;
 // (sprite, tint) tuple — each 800×800 baked canvas is ~50–200 KB; 20
 // distinct active tinted variants ≈ <4 MB. Recipe outsourced to the
 // existing _lxBakeTintedHead since the steps are identical.
+// v0.29.469 — FIFO cap. The key embeds a TINT that arrives straight off the
+// co-op wire (the peer-outfit sanitiser validates the #rrggbb FORMAT but not
+// membership of any palette), and every miss bakes a canvas sized from the
+// source sprite — 800x800 is 2.56 MB of backing store, not the "~50-200 KB"
+// the note above estimates (that is compressed PNG size; canvas memory is
+// always w*h*4). A peer varying its tint per state broadcast therefore added
+// megabytes per second of permanently-retained canvas. Same discipline as
+// _MOB_SPRITE_CACHE and _beamTintCache. Map iterates in insertion order, so
+// the first key is the oldest.
+const _LX_TINTED_EQ_MAX = 48;
 const _LX_TINTED_EQ_CACHE = new Map();
 function _lxGetTintedEqSprite(spriteImg, tint) {
   if (!spriteImg || !tint) return spriteImg;
@@ -13714,6 +13733,11 @@ function _lxGetTintedEqSprite(spriteImg, tint) {
   let baked = _LX_TINTED_EQ_CACHE.get(key);
   if (baked) return baked;
   baked = _lxBakeTintedHead(spriteImg, tint);
+  while (_LX_TINTED_EQ_CACHE.size >= _LX_TINTED_EQ_MAX) {
+    const _oldest = _LX_TINTED_EQ_CACHE.keys().next().value;
+    if (_oldest === undefined) break;
+    _LX_TINTED_EQ_CACHE.delete(_oldest);
+  }
   _LX_TINTED_EQ_CACHE.set(key, baked);
   return baked;
 }
@@ -28883,6 +28907,13 @@ function getEquipBonus(key) {
   let cache = player._equipBonusCache;
   if (!cache) {
     cache = {};
+    // v0.29.469 — player.equipped can be null here. loadState calls getMaxHp()
+    // 23 lines BEFORE its own `if (!player.equipped)` defaulter, so a save
+    // carrying "equipped": null threw right through the load. _equipBonusCache
+    // is never persisted, so the rebuild below always runs on that first read.
+    // Repaired in place rather than just skipped: every other consumer expects
+    // the object to exist.
+    if (!player.equipped || typeof player.equipped !== 'object') player.equipped = {};
     // Lazy-build on first read after invalidation.
     for (const slot of ['weapon','armor','accessory']) {
       const it = player.equipped[slot];
@@ -37121,7 +37152,26 @@ function loadState() {
     // for the first kill / accept event.
     try { if (typeof renderQuestTracker === 'function') renderQuestTracker(); } catch(e) {}
     return true;
-  } catch (e) { return false; }
+  } catch (e) {
+    // v0.29.469 — a save EXISTED but could not be read. Returning a bare false
+    // makes boot treat this as a brand-new player (see the `if (!loadState())`
+    // branch), and the next autosave then overwrites the character for good.
+    // Preserve the original bytes under a recovery key and say so loudly. The
+    // copy is written BEFORE anything else can touch SAVE_KEY, so the character
+    // survives even if the session goes on to save over the original.
+    try {
+      const _raw = localStorage.getItem(SAVE_KEY);
+      if (_raw) {
+        if (!localStorage.getItem(SAVE_KEY + '_recover')) localStorage.setItem(SAVE_KEY + '_recover', _raw);
+        if (typeof game !== 'undefined' && game) game._saveLoadFailed = true;
+        try { console.error('[mojiworld] save failed to load; original preserved at "' + SAVE_KEY + '_recover"', e); } catch (_) {}
+        setTimeout(() => {
+          try { showToast('\u26A0 Your save could not be read \u2014 a copy was preserved. Do not start a new game.', 'danger'); } catch (_) {}
+        }, 3000);
+      }
+    } catch (_) {}
+    return false;
+  }
 }
 function clearSave() {
   try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
