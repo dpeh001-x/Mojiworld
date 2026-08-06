@@ -34995,6 +34995,19 @@ async function _lxSteamCloudSync() {
   const cloudT = (cloudSave && cloudSave.t) || 0;
   if (localSave && cloudT === localT) return;                                    // identical -> nothing to do
   if (localLevel <= 1 || cloudLevel > localLevel || cloudT > localT) {           // cloud is fresher / more advanced -> adopt it
+    // v0.29.475 — block the beforeunload flush, exactly as the import,
+    // backup-restore and reset paths already do. Without it the handler saw a
+    // live character and no guard, so it serialised the STILL-LOADED local
+    // state over the cloud blob just adopted, then mirrored that to Steam
+    // Cloud — turning "your Lv40 save synced from your other PC" into "both
+    // copies are the Lv30 one", with no backup taken first.
+    try {
+      if (typeof game !== 'undefined' && game) {
+        game._resetting = true;
+        if (game._saveTimer) { clearTimeout(game._saveTimer); game._saveTimer = null; }
+        game._saveDirty = false;
+      }
+    } catch (e) {}
     try { localStorage.setItem(SAVE_KEY, cloudRaw); } catch (e) {}
     return 'reloading';
   }
@@ -40341,8 +40354,14 @@ function _mpDrawPeers() {
       const age = now - pg.born;
       if (age > 4000) { net._pings.splice(i, 1); continue; }
       const px = pg.x - game.camera.x;
-      const py = pg.y - ((game.camera && game.camera.y) || 0);
-      if (px < -80 || px > W + 80 || py < -80 || py > H + 80) continue;
+      // v0.29.475 — same double-camera bug as the peer body, twelve lines
+      // above, and missed when that was fixed. This loop is inside the camera
+      // translate, so subtracting camera.y again put the marker off-screen:
+      // pressing T to ping produced NOTHING on any vertical map, which is
+      // exactly the "I can't find my partner" case the ping exists for.
+      const _gCamY = (game.camera && game.camera.y) || 0;
+      const py = pg.y;
+      if (px < -80 || px > W + 80 || py < _gCamY - 80 || py > _gCamY + H + 80) continue;
       const col = pg.mine ? '#e8e2ff' : '#ffd166';
       const fade = age > 3200 ? 1 - (age - 3200) / 800 : 1;
       ctx.save();
@@ -40441,6 +40460,22 @@ function scheduleSkillTimer(fn, ms) {
   if (!player._pendingTimeouts) player._pendingTimeouts = [];
   player._pendingTimeouts.push(id);
   return id;
+}
+// v0.29.475 — see the call in loadMap. An ultimate whose window is open has
+// its cooldown parked at a 250ms re-cast gate; if the timer that restores the
+// real value is cancelled, the cooldown must be restored here instead or the
+// ultimate becomes free.
+function _lxRestoreUltCd() {
+  try {
+    if (!player || !player.skillCooldowns || typeof SKILLS === 'undefined') return;
+    const open = [];
+    if (player._warlordEnrageUntil) open.push('warlord_ult');
+    if (player._sageUntil || (player._sageShots | 0) > 0) open.push('sage_ult');
+    for (const id of open) {
+      const def = SKILLS[id];
+      if (def && def.cd) player.skillCooldowns[id] = def.cd;
+    }
+  } catch (e) {}
 }
 function cancelPendingSkillTimers() {
   const arr = player._pendingTimeouts;
@@ -50145,6 +50180,12 @@ function loadMap(id, entryX, entryY) {
     player.dodgeTimer = 0;   // v0.26.1023 — a portal entered mid-roll no longer slides on arrival
     // v0.26.1024 — a portal mid-ult cancels the ONLY cd-restore timer; end the
     // open window so the next B press re-casts under normal cooldown gating.
+    // v0.29.475 — restore the REAL cooldown before clearing the window flags.
+    // Cancelling the restore timer without this left the cd at its 250ms
+    // spam gate, so a portal hop mid-ultimate handed back a free full-power
+    // re-cast, forever. Only touched when a window was actually open, so a
+    // normally-ticking cooldown is never penalised by walking through a door.
+    _lxRestoreUltCd();
     player._warlordEnrageUntil = 0; player._sageUntil = 0; player._sageShots = 0;
     player.doubleJumpUsed = false;
     if (typeof cancelPendingSkillTimers === 'function') cancelPendingSkillTimers();
@@ -57411,8 +57452,14 @@ function drawSmoothFx() {
       const age = fx.maxLife - fx.life;
       if (age < (fx.delay || 0)) continue;        // staggered appearance
       const _camY = (game.camera && game.camera.y) || 0;
-      const syy = fx.y;   // v0.29.474 — raw world Y, matching every other branch in this loop; subtracting _camY applied the camera twice and hid the trail for the whole icy-tower climb
-      if (syy < -60 || syy > H + 60) continue;
+      const syy = fx.y;   // v0.29.474 — raw world Y, matching every other branch in this loop
+      // v0.29.475 — cull in the SAME space the draw uses. v0.29.474 converted
+      // the draw to world Y but left this comparison against screen bounds, so
+      // once the tower camera passed ~60px EVERY step failed the test and the
+      // trail stopped rendering entirely — a worse bug than the misplacement
+      // it replaced. Half-fixing a coordinate change is worse than not
+      // touching it.
+      if (syy < _camY - 60 || syy > _camY + H + 60) continue;
       ctx.save();
       ctx.globalAlpha = Math.min(0.85, alpha);
       ctx.fillStyle = 'hsl(' + fx.hue + ', 95%, 62%)';
@@ -64321,6 +64368,11 @@ function updateMonsters(dt) {
                              // via the MojiMon taunt, at your COMPANION —
                              // silently drained YOURS instead.
             invulnerable: player.invulnerable, hitStun: player.hitStun,
+            // v0.29.475 — bossAI writes lastHitTime at six sites (Gloopaloo,
+            // Aetherion, Gravitos, Mooma, Octobaby). Left out of the snapshot,
+            // a hit aimed at your COMPANION suppressed YOUR out-of-combat regen
+            // for 3s and decayed an Aries rage stack, from damage you never took.
+            lastHitTime: player.lastHitTime,
                        frozenTimer: player.frozenTimer, freezeTimer: player.freezeTimer,
                        _slowTimer: player._slowTimer, burnTimer: player.burnTimer,
                        _poisonTimer: player._poisonTimer, _electrocuteTimer: player._electrocuteTimer };
@@ -64367,6 +64419,11 @@ function updateMonsters(dt) {
                              // via the MojiMon taunt, at your COMPANION —
                              // silently drained YOURS instead.
             invulnerable: player.invulnerable, hitStun: player.hitStun,
+            // v0.29.475 — bossAI writes lastHitTime at six sites (Gloopaloo,
+            // Aetherion, Gravitos, Mooma, Octobaby). Left out of the snapshot,
+            // a hit aimed at your COMPANION suppressed YOUR out-of-combat regen
+            // for 3s and decayed an Aries rage stack, from damage you never took.
+            lastHitTime: player.lastHitTime,
                        frozenTimer: player.frozenTimer, freezeTimer: player.freezeTimer,
                        _slowTimer: player._slowTimer, burnTimer: player.burnTimer,
                        _poisonTimer: player._poisonTimer, _electrocuteTimer: player._electrocuteTimer };
@@ -102684,7 +102741,13 @@ function drawMonster(m) {
   // instead of sliding off. _visW/_visH are stashed by the draw itself, so
   // they are undefined on the very first frame — fall back to a generous
   // multiple rather than the hitbox.
-  const _cvW = m._visW || (m.w * 2.4), _cvH = m._visH || (m.h * 2.4);
+  // v0.29.475 — 2.4 was under the real ceiling: _bossDrawMul defaults to 2.0
+  // and sizeFactor clamps to 1.6, so a boss can render at 3.2x its hitbox (and
+  // a wide sprite's width exceeds that again). The fallback only applies on the
+  // first frame a monster is considered — before the draw stamps _visW/_visH —
+  // and to mobs rendered through the emoji fallback path, which never stamp at
+  // all. Over-drawing slightly at the edge is cheap; culling a visible boss is not.
+  const _cvW = m._visW || (m.w * 3.4), _cvH = m._visH || (m.h * 3.4);
   const _cCx = sx + m.w / 2, _cFootY = sy + m.h;
   if (_cCx + _cvW / 2 < 0 || _cCx - _cvW / 2 > W) return;
   if (_cFootY < _camY - 30 || _cFootY - _cvH > _camY + H + 30) return;
@@ -115128,6 +115191,19 @@ async function _lxCloudSyncOnLogin(session) {
           name: meta.name, level: meta.level, cls: meta.cls, map: meta.map, data: localRaw });
         while (arr.length > ((typeof BACKUP_MAX !== 'undefined') ? BACKUP_MAX : 8)) arr.pop();
         _lxStoreBackups(arr);
+      }
+    } catch (e) {}
+    // v0.29.475 — block the beforeunload flush, exactly as the import,
+    // backup-restore and reset paths already do. Without it the handler saw a
+    // live character and no guard, so it serialised the STILL-LOADED local
+    // state over the cloud blob just adopted, then mirrored that to Steam
+    // Cloud — turning "your Lv40 save synced from your other PC" into "both
+    // copies are the Lv30 one", with no backup taken first.
+    try {
+      if (typeof game !== 'undefined' && game) {
+        game._resetting = true;
+        if (game._saveTimer) { clearTimeout(game._saveTimer); game._saveTimer = null; }
+        game._saveDirty = false;
       }
     } catch (e) {}
     try { localStorage.setItem(SAVE_KEY, JSON.stringify(cloud)); } catch (e) {}
