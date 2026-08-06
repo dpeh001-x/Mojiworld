@@ -9294,7 +9294,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.434';
+const GAME_VERSION = 'v0.29.435';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -54176,7 +54176,11 @@ function triggerDeath() {
   // AI (and landing credited kills) on whatever killed you during the multi-second
   // death overlay. Clear them with the rest of the summons.
   game.minions = [];
-  if (player.mojimon) player.mojimon.out = null;   // v0.29.434 — death dismisses the mon (no cooldown refund)
+  // v0.29.435 — per user: the MojiMon must never disappear except at 0 HP.
+  // Death CLEARS the minion (nothing may fight during the overlay) but the
+  // fielded state survives — the respawn map load re-fields it at its
+  // carried HP fraction. The defeat watch is hp-gated so this cleanup is
+  // never misread as a combat death.
   // Class identity: cancel any pending charge / root / momentum state so
   // a half-charged swing or stale root doesn't carry through respawn.
   player._warCharge = null;
@@ -54485,7 +54489,8 @@ function respawnAtTown() {
   player.pet = null;
   player.ultPet = null;
   player.pack = [];
-  if (player.mojimon) player.mojimon.out = null;   // v0.29.434 — world reset / class change dismisses the mon
+  // v0.29.435 — world reset / class change no longer dismisses the mon; it
+  // re-fields on the next map load with stats (and class tint) re-derived.
   player._momentum = 0;
   player._steady = 0;
   player._mageLastCastT = 0;
@@ -55744,6 +55749,22 @@ function _mojimonCapture(m) {
   if (typeof showToast === 'function') showToast('⛓ BOUND: ' + nm + ' joins you as a MojiMon! (U panel → MojiMon)', 'legendary');
   try { audio.play('levelup'); } catch (_e) {}
   if (typeof _lxPadRumble === 'function') _lxPadRumble('levelup');
+  // v0.29.435 — first-capture mini-tutorial (per user). Fired once ever,
+  // 1.1s after the bind so the burst + toast land first. The decline
+  // button is put to work: it opens the MojiMon tab directly.
+  if (Object.keys(mm.roster).length === 1 && !mm.tutSeen) {
+    mm.tutSeen = true;
+    setTimeout(async () => {
+      if (typeof uiConfirm !== 'function') return;
+      const ok = await uiConfirm({
+        title: '⛓ YOUR FIRST MOJIMON!',
+        body: 'You mastered a species (10,000 kills) and BOUND one. Here is how your new companion works:\n\n• It fights on its own — seeks enemies, climbs platforms, uses its species\u2019 attack pattern.\n• Its power is YOURS: 10\u00d7 your max HP, your attack damage. It grows when you do.\n• Monsters will target it — it tanks hits, and it only disappears when ITS HP hits 0.\n• It travels with you through portals, and even survives your death.\n• Summoning costs a 5-minute cooldown. Dismissing does not refund it.\n• U panel \u2192 MojiMon tab: summon, dismiss, and spend upgrade points on HP / ATK / DEF (1 point per 5 levels, free respec).',
+        yesLabel: 'Got it!',
+        noLabel: '⛓ Open MojiMon tab',
+      });
+      if (!ok && typeof _lxOpenUPanelTab === 'function') _lxOpenUPanelTab('mojimon');
+    }, 1100);
+  }
   if (typeof saveState === 'function') saveState();
 }
 function _mojimonSummon(type, opts) {
@@ -55829,6 +55850,36 @@ function _mojimonQteTry(m, dt) {
 }
 // Companion renderer — the species' own dex sprite on the minion chassis,
 // with the wolf-style ally HP bar. Called from drawMinions' per-entity loop.
+// v0.29.435 — class-identity tint (per user: "thief purple, warrior [red]").
+// The game's own CLASSES palette is the source — rogue #a6f purple, warrior
+// #e55 red, mage #6bf blue, archer #6c6 green — so the mon always matches
+// its owner's established colour identity. The tint is baked once per
+// (species, class) into an offscreen canvas: a per-frame ctx.filter here
+// would be a CPU filter pass on every draw of every fielded mon.
+const _MOJIMON_TINT_CACHE = Object.create(null);
+function _mojimonClassColor() {
+  return (typeof CLASSES === 'object' && player.cls && CLASSES[player.cls] && CLASSES[player.cls].color) || '#8fd4ff';
+}
+function _mojimonRgba(hex, a) {
+  let h = String(hex).replace('#', '');
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  const n = parseInt(h, 16) || 0x8fd4ff;
+  return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+}
+function _mojimonTinted(spr, type) {
+  const key = type + '|' + (player.cls || '?');
+  const hit = _MOJIMON_TINT_CACHE[key];
+  if (hit) return hit;
+  if (!spr.complete || !(spr.naturalWidth > 0)) return spr;   // not decoded — tint on a later frame, do not cache
+  const cv = document.createElement('canvas');
+  cv.width = spr.naturalWidth; cv.height = spr.naturalHeight;
+  const c = cv.getContext('2d');
+  c.drawImage(spr, 0, 0);
+  c.globalCompositeOperation = 'source-atop';   // tint only where the sprite has pixels
+  c.fillStyle = _mojimonRgba(_mojimonClassColor(), 0.22);
+  c.fillRect(0, 0, cv.width, cv.height);
+  return (_MOJIMON_TINT_CACHE[key] = cv);
+}
 function _mojimonDraw(mn, sx, sy) {
   const t = (typeof monsterTypes === 'object') ? monsterTypes[mn.type] : null;
   const spr = (typeof _monsterDexSprite === 'function') ? _monsterDexSprite(mn.type, t || {}) : null;
@@ -55840,8 +55891,12 @@ function _mojimonDraw(mn, sx, sy) {
     const dh = Math.max(36, Math.min(110, mn.h * 1.15));
     const dw = dh * aw / ah;
     ctx.translate(sx + mn.w / 2, footY);
+    // v0.29.435 — soft class-coloured under-glow behind the body, then the
+    // class-tinted sprite. Together they read as "mine" at a glance.
+    ctx.fillStyle = _mojimonRgba(_mojimonClassColor(), 0.14);
+    ctx.beginPath(); ctx.ellipse(0, -dh * 0.45, dw * 0.62, dh * 0.55, 0, 0, Math.PI * 2); ctx.fill();
     if ((mn.facing | 0) < 0) ctx.scale(-1, 1);
-    ctx.drawImage(spr, -dw / 2, -dh, dw, dh);
+    ctx.drawImage(_mojimonTinted(spr, mn.type), -dw / 2, -dh, dw, dh);
   } else {
     ctx.fillStyle = (t && t.color) || '#8fd4ff';
     ctx.fillRect(sx, sy, mn.w, mn.h);
@@ -56117,8 +56172,16 @@ function updateMinions(dt) {
     if (mn.cd <= 0 && tgt) {
       const _tcx = tgt.x + tgt.w/2, _tcy = tgt.y + tgt.h/2;
       const _ddx = _tcx - (mn.x + mn.w/2), _ddy = _tcy - (mn.y + mn.h/2);
-      if (_ddx*_ddx + _ddy*_ddy < 900) {     // 30² = 900
-        hitMonster(tgt, mn.atk, false, 'minion');
+      // v0.29.435 — MojiMon melee reach scales with the bodies involved;
+      // skeletons/zombies keep the original 30px.
+      const _mr = mn.mojimon ? Math.max(30, (mn.w + tgt.w) * 0.45) : 30;
+      if (_ddx*_ddx + _ddy*_ddy < _mr * _mr) {
+        // v0.29.435 — a MojiMon's melee carries its own skill tag so the
+        // hitMonster retaliation exemption applies to BOTH its attack
+        // channels; tagging only the ranged shot left every melee tick
+        // re-taunting the victim onto the player (measured: 26 of 60
+        // aggro samples flipped to the player before this line changed).
+        hitMonster(tgt, mn.atk, false, mn.mojimon ? 'mojimon' : 'minion');
         mn.cd = 400;
         spawnSmoothImpact(_tcx, _tcy, '#9944cc');
       }
@@ -56130,6 +56193,14 @@ function updateMinions(dt) {
     // projectile: mob projectiles are owner:'enemy' (they damage the PLAYER)
     // and the pipelines are not safely swappable.
     if (mn.mojimon) {
+      // v0.29.435 — keep-up: beyond ~a screen of separation (portals within
+      // a map, long falls, launch pads) it blinks to your side rather than
+      // pathing across half the world. Companion first, wanderer second.
+      if (Math.abs(player.x - mn.x) > 1000 || Math.abs(player.y - mn.y) > 700) {
+        mn.x = player.x - player.facing * 46; mn.y = player.y - 8;
+        mn.vx = 0; mn.vy = 0;
+        for (let _p = 0; _p < 8; _p++) game.particles.push({ x: mn.x + mn.w / 2, y: mn.y + mn.h / 2, vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3, life: 20, color: '#8fd4ff', size: 2 });
+      }
       if (mn.shootSkill) {
         mn.shootTimer = (mn.shootTimer == null ? 1200 : mn.shootTimer) - dt;
         if (mn.shootTimer <= 0) {
@@ -56158,7 +56229,11 @@ function updateMinions(dt) {
   // here avoids touching that splice at all. Map changes cannot false-fire:
   // initMap clears game.minions and IMMEDIATELY re-fields the mon in the
   // same synchronous pass, so this check never observes the gap.
-  if (player.mojimon && player.mojimon.out) {
+  // v0.29.435 — hp-gated: while the player is dead the minion array is
+  // emptied by cleanup, not combat; without this gate the death overlay
+  // would toast a false "defeated!" and destroy the fielded state the
+  // respawn is about to restore.
+  if (player.hp > 0 && player.mojimon && player.mojimon.out) {
     let _mmAlive = false;
     for (const _mn of game.minions) if (_mn.mojimon) { _mmAlive = true; break; }
     if (!_mmAlive) {
@@ -69711,7 +69786,14 @@ function hitMonster(m, dmg, isCrit, skill) {
     m.scaleX = isCrit ? 1.42 : 1.14;
     m.scaleY = isCrit ? 0.62 : 0.82;
   }
-  if (skill !== 'thorns') m.aggroTarget = player;
+  // v0.29.435 — 'mojimon' exempted alongside 'thorns': this line taunts the
+  // victim onto the PLAYER, which for a MojiMon hit is exactly backwards —
+  // the companion is supposed to TANK. With the exemption, the per-frame
+  // ally-pool re-resolve keeps victims on the mon when it is the closest
+  // target (measured: pool picks the mon; this line was overwriting it on
+  // every hit the mon landed). 'minion' (warlock undead) keeps the old
+  // behaviour deliberately — rebalancing that kit is not this feature's job.
+  if (skill !== 'thorns' && skill !== 'mojimon') m.aggroTarget = player;
 
   // Feel
   if (skill !== 'thorns') {
