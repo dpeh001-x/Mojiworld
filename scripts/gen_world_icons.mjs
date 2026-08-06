@@ -96,6 +96,12 @@ const REGIONS = {
   witheringTide:     'a cute rusted ship anchor with a small teal wave curling behind it',
   hollowSepulchre:   'a cute pale stone funerary urn with a soft blue wisp rising',
   hollowSepulchre2:  'a cute friendly round white skull with a tiny lit candle on top',
+  // Ossuary Sprawl (Lv 67) — a bone-stack sprawl ruled by the Ossuary Tyrant,
+  // who "raises pillars of the departed". Deliberately a STACK of bones rather
+  // than a single skull or coffin: its neighbours on the W-map are already an
+  // urn (hollowSepulchre), a lone skull (hollowSepulchre2) and a coffin
+  // (boneGraveyard), and at 36px those read alike.
+  ossuarySprawl:     'a cute tidy stack of pale rounded bones piled into a small cairn, with two crossed bones resting on top',
   wayfarersLantern1: 'a cute brass oil lamp with a warm glowing flame',
   boneGraveyard:     'a cute mossy wooden coffin with little flowers growing on it',
   boneGraveyard2:    'a cute round spiderweb with a tiny friendly spider',
