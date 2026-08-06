@@ -29,7 +29,6 @@ sharp.cache(false);
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const FX = join(root, 'Sprites', 'fx');
-const OUT = join(FX, 'anim');
 const OUTN = 9;
 const argv = process.argv.slice(2);
 const arg = (f, d) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : d; };
@@ -43,7 +42,14 @@ const SRC = Number(arg('--src', 16));
 if (SRC !== 9 && SRC !== 16) { console.error('--src must be 9 or 16 (the API rejects other counts)'); process.exit(1); }
 const BLEND = !argv.includes('--no-blend');
 const PAD = Number(process.env.LUDO_ANIM_PAD || 0.12);
-if (!key || !MOTION) { console.error('usage: gen_smooth_fx_anim.mjs <key> --motion "..." [--src 20]'); process.exit(1); }
+// v0.29.442 — the pipeline also serves projectile loops (the mage bolt's
+// frames live at Sprites/projectiles/anim/bolt_*, not under fx/). --basefile
+// points at any base image; --outdir redirects where frames land. Both are
+// repo-relative. Defaults preserve the original fx/ behaviour exactly.
+const BASEFILE = arg('--basefile', null);
+const OUTDIR_REL = arg('--outdir', null);
+const OUT = OUTDIR_REL ? join(root, OUTDIR_REL) : join(FX, 'anim');
+if (!key || !MOTION) { console.error('usage: gen_smooth_fx_anim.mjs <key> --motion "..." [--src 9|16] [--basefile rel] [--outdir rel]'); process.exit(1); }
 
 const apiKey = process.env.LUDO_API_KEY;
 if (!apiKey) { console.error('LUDO_API_KEY required.'); process.exit(1); }
@@ -51,11 +57,17 @@ const API = process.env.LUDO_API_BASE || 'https://api.ludo.ai/api';
 
 // ---- base art (png or webp on disk) ---------------------------------------
 let basePath = null;
-for (const ext of ['png', 'webp']) {
-  const p = join(FX, `${key}.${ext}`);
-  try { await access(p); basePath = p; break; } catch {}
+if (BASEFILE) {
+  const p = join(root, BASEFILE);
+  try { await access(p); basePath = p; } catch {}
+  if (!basePath) { console.error(`no base art at ${BASEFILE}`); process.exit(1); }
+} else {
+  for (const ext of ['png', 'webp']) {
+    const p = join(FX, `${key}.${ext}`);
+    try { await access(p); basePath = p; break; } catch {}
+  }
+  if (!basePath) { console.error(`no base art at Sprites/fx/${key}.(png|webp)`); process.exit(1); }
 }
-if (!basePath) { console.error(`no base art at Sprites/fx/${key}.(png|webp)`); process.exit(1); }
 const baseRaw = await readFile(basePath);
 const bm = await sharp(baseRaw).metadata();
 const px = Math.round(bm.width * PAD), py = Math.round(bm.height * PAD);
@@ -180,4 +192,4 @@ await mkdir(OUT, { recursive: true });
 for (let j = 0; j < OUTN; j++) {
   await writeFile(join(OUT, `${key}_${j}.webp`), await sharp(outBufs[j]).webp({ quality: 92 }).toBuffer());
 }
-console.log(`  wrote ${OUTN} frames -> Sprites/fx/anim/${key}_0..8.webp`);
+console.log(`  wrote ${OUTN} frames -> ${OUTDIR_REL || 'Sprites/fx/anim'}/${key}_0..8.webp`);
