@@ -9294,7 +9294,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.436';
+const GAME_VERSION = 'v0.29.437';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16637,15 +16637,24 @@ function itemScore(it) {
   // starMult*tierMul, over-weighting those counts and firing false upgrade arrows /
   // bad auto-equips. Split them out: scalable stats keep the deliberate whole-score
   // star*tier (documented above); no-scale counts are added flat afterward.
-  let v = 0, vFlat = 0;
+  // v0.29.430 — the tier multiplier is now split the same way getEquipBonus
+  // splits it. Blanket-applying the FLAT curve to the whole scalable sum was a
+  // tolerable approximation while pct stats got 1.00 and flat got at most 2.00;
+  // with flat at 5.00 and pct at 1.25 the same shortcut would score a %-heavy
+  // T10 as if its percentages were multiplied by 5, and auto-equip would chase
+  // items the engine never actually pays out on. Star still applies to the whole
+  // scalable sum, exactly as before — only the tier half is split.
+  const tierPctMul = (typeof _tierPctMul === 'function') ? _tierPctMul(it.tier) : 1;
+  let vFlatStat = 0, vPctStat = 0, vNoScale = 0;
   for (const k in ITEM_STAT_WEIGHTS) {
     const _w = (it[k] || 0) * ITEM_STAT_WEIGHTS[k];
     if (!_w) continue;
-    if ((typeof _AFFIX_NO_SCALE !== 'undefined') && _AFFIX_NO_SCALE.has(k)) vFlat += _w;
-    else v += _w;
+    if ((typeof _AFFIX_NO_SCALE !== 'undefined') && _AFFIX_NO_SCALE.has(k)) vNoScale += _w;
+    else if ((typeof _TIER_FLAT_STATS !== 'undefined') && _TIER_FLAT_STATS.has(k)) vFlatStat += _w;
+    else vPctStat += _w;
   }
   const _clsAff = (it.cls && it.cls !== 'any') ? (it.cls === player.cls ? 1.20 : 0.75) : 1;   // v0.26.1030 — match getEquipBonus so off-class drops aren't mis-scored as upgrades
-  return (v * starMult(it) * tierMul + vFlat) * rarityW * _clsAff;
+  return ((vFlatStat * tierMul + vPctStat * tierPctMul) * starMult(it) + vNoScale) * rarityW * _clsAff;
 }
 
 // Pretty labels for gear-change toast
@@ -28797,12 +28806,37 @@ function invalidateEquipBonusCache() {
 // Composes multiplicatively with star enhancement (★10 = 2.16×) so a
 // fully-enhanced T10 reaches roughly 4.3× a fully-enhanced T5 — the
 // kind of "endgame chunk" exponential curve the user asked for.
-const _TIER_MUL = [1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.12, 1.28, 1.48, 1.72, 2.00];
+// v0.29.430 (per user) — FLAT-STAT tier curve widened from 1.00-2.00 to
+// 1.00-5.00. The whole band moves, not just the top: T1-T5 was 1.00× (a pure
+// baseline that made tier meaningless below T6) and is now 2.00×, so every
+// piece of gear in the game doubles its flat contribution, and T10 goes 2.00 →
+// 5.00 (2.5× its old value, 2.5× a T5 rather than the old 2×).
+//   T1-T5 → 2.00×      T8  → 3.50×
+//   T6    → 2.50×      T9  → 4.00×
+//   T7    → 3.00×      T10 → 5.00×
+// Index 0 stays 1.00 and is unreachable (_tierMul coerces a 0/undefined tier
+// to 1). Still composes multiplicatively with star enhancement (★10 = 2.16×),
+// so a fully-enhanced T10 now reaches ~10.8× base flat stats.
+const _TIER_MUL = [1.00, 2.00, 2.00, 2.00, 2.00, 2.00, 2.50, 3.00, 3.50, 4.00, 5.00];
 function _tierMul(tier) {
   const t = (tier | 0) || 1;
   return _TIER_MUL[Math.min(t, _TIER_MUL.length - 1)] || 1;
 }
-// Flat-value stat keys — the only ones that get the tier multiplier.
+// v0.29.430 (per user) — PERCENTAGE stats now scale with tier too, but only
+// "marginally": they multiply stats that are already being inflated by the flat
+// curve above, so matching that curve would compound into the same runaway the
+// v0.29.410 star-softening was written to prevent. +5% per tier above the T1-T5
+// band, topping out at +25% on T10 — enough that tier is felt on a %-heavy
+// piece, small enough that it stays a modifier rather than a second flat curve.
+const _TIER_PCT_MUL = [1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.05, 1.10, 1.15, 1.20, 1.25];
+function _tierPctMul(tier) {
+  const t = (tier | 0) || 1;
+  return _TIER_PCT_MUL[Math.min(t, _TIER_PCT_MUL.length - 1)] || 1;
+}
+// Flat-value stat keys — the ones that get the FULL tier multiplier above.
+// 'accuracy' is kept: the user's list (atk/def/hp/mp/crit) named the headline
+// stats, and accuracy is flat in exactly the same sense — dropping it here
+// would be a silent nerf nobody asked for.
 const _TIER_FLAT_STATS = new Set([
   'atk', 'def', 'hp', 'mp', 'crit', 'accuracy',
 ]);
@@ -28825,6 +28859,7 @@ function getEquipBonus(key) {
       const mul = starMult(it);
       // v0.26.273 — Tier multiplier on flat stats only.
       const tMul = _tierMul(it.tier);
+      const tPctMul = _tierPctMul(it.tier);   // v0.29.430 — marginal tier curve for % stats
       // v0.26.x — Class-affinity multiplier on equipment stats (per user):
       // gear matching the character's class is +20% effective; gear locked to a
       // DIFFERENT class is −25%; class-neutral ('any'/unset) gear is unaffected.
@@ -28848,9 +28883,13 @@ function getEquipBonus(key) {
           // they must race enemy HP inflation; a percentage already rides the
           // stats that do. Covers innate AND affix-carried values, since
           // affix rolls are merged into the item before this multiplier.
-          const _pctSoft = (typeof _AFFIX_PCT_STATS !== 'undefined' &&
-            (_AFFIX_PCT_STATS.has(k) || k === 'hpPct' || k === 'speed'))
-            ? 1 + (mul - 1) * 0.35 : mul;
+          // v0.29.430 — the pct family now also takes a tier multiplier, but the
+          // MARGINAL one (_TIER_PCT_MUL, +5%/tier) rather than the flat curve.
+          // Keys that are neither flat nor pct still pass through at plain star
+          // scaling — they are not a magnitude family we want tier touching.
+          const _isPct = (typeof _AFFIX_PCT_STATS !== 'undefined' &&
+            (_AFFIX_PCT_STATS.has(k) || k === 'hpPct' || k === 'speed'));
+          const _pctSoft = _isPct ? (1 + (mul - 1) * 0.35) * tPctMul : mul;
           const _effMul = _noScale ? 1 : (_TIER_FLAT_STATS.has(k) ? mul * tMul : _pctSoft);
           let _contrib = it[k] * _effMul * (_noScale ? 1 : _clsAff);
           // v0.26.287 — Cap any single item's effective crit contribution
@@ -77130,45 +77169,46 @@ function makeShopRow(icon, name, desc, price, cb, rarity, btnText, item) {
 }
 
 function itemStatString(it, multiline) {
-  // v0.26.273 — Display tier-scaled flat values so what the tooltip
-  // shows matches what getEquipBonus aggregates on equip. Percentage
-  // stats (atkPct / critDmg / lifesteal etc.) are NOT tier-scaled —
-  // they pass through unchanged. Star enhancement is shown separately
-  // via the star badge / preview; this function only handles tier.
+  // v0.26.273 — Display tier-scaled flat values so what the tooltip shows
+  // matches what getEquipBonus aggregates on equip. Star enhancement is shown
+  // separately via the star badge / preview; this function only handles tier.
+  // v0.29.430 — percentage stats ARE tier-scaled now (the marginal +5%/tier
+  // curve), so they take _tPctMul here for the same shows-what-you-get reason.
   const _tMul = (typeof _tierMul === 'function') ? _tierMul(it.tier) : 1;
+  const _tPctMul = (typeof _tierPctMul === 'function') ? _tierPctMul(it.tier) : 1;
   const _fmt = (v) => v < 10 ? v.toFixed(1).replace(/\.0$/, '') : Math.round(v);
   const parts = [];
   if (it.atk)          parts.push(`+${_fmt(it.atk * _tMul)} ATK${_tMul !== 1 ? ' <span style="opacity:0.6; font-size:10px;">(T'+(it.tier||1)+' ×'+_tMul.toFixed(2)+')</span>' : ''}`);
-  if (it.atkPct)       parts.push(`+${Math.round(it.atkPct*100)}% ATK`);
+  if (it.atkPct)       parts.push(`+${Math.round(it.atkPct*_tPctMul*100)}% ATK`);
   if (it.def)          parts.push(`+${_fmt(it.def * _tMul)} DEF${_tMul !== 1 ? ' <span style="opacity:0.6; font-size:10px;">(T'+(it.tier||1)+')</span>' : ''}`);
   if (it.hp)           parts.push(`+${_fmt(it.hp * _tMul)} HP`);
-  if (it.hpPct)        parts.push(`+${Math.round(it.hpPct*100)}% HP`);   // v0.26.398 — was live (getMaxHp) but never shown
+  if (it.hpPct)        parts.push(`+${Math.round(it.hpPct*_tPctMul*100)}% HP`);   // v0.26.398 — was live (getMaxHp) but never shown
   if (it.mp)           parts.push(`+${_fmt(it.mp * _tMul)} MP`);
   if (it.crit)         parts.push(`+${_fmt(it.crit * _tMul)}% Crit`);
-  if (it.critDmg)      parts.push(`+${Math.round(it.critDmg*100)}% Crit DMG`);
-  if (it.speed)        parts.push(`+${it.speed.toFixed ? it.speed.toFixed(1) : it.speed} Spd`);
+  if (it.critDmg)      parts.push(`+${Math.round(it.critDmg*_tPctMul*100)}% Crit DMG`);
+  if (it.speed)        parts.push(`+${(it.speed*_tPctMul).toFixed ? (it.speed*_tPctMul).toFixed(1) : it.speed} Spd`);
   if (it.jump)         parts.push(`+${it.jump.toFixed ? it.jump.toFixed(1) : it.jump} Jump`);
-  if (it.lifesteal)    parts.push(`🩸 ${Math.round(it.lifesteal*100)}% Lifesteal`);
-  if (it.thorns)       parts.push(`🌵 ${Math.round(it.thorns*100)}% Thorns`);
-  if (it.greed)        parts.push(`🪙 +${Math.round(it.greed*100)}% Mojicoin`);
-  if (it.xpBoost)      parts.push(`📘 +${Math.round(it.xpBoost*100)}% EXP`);
+  if (it.lifesteal)    parts.push(`🩸 ${Math.round(it.lifesteal*_tPctMul*100)}% Lifesteal`);
+  if (it.thorns)       parts.push(`🌵 ${Math.round(it.thorns*_tPctMul*100)}% Thorns`);
+  if (it.greed)        parts.push(`🪙 +${Math.round(it.greed*_tPctMul*100)}% Mojicoin`);
+  if (it.xpBoost)      parts.push(`📘 +${Math.round(it.xpBoost*_tPctMul*100)}% EXP`);
   if (it.burn)         parts.push(`🔥 Burning hits`);
-  if (it.freezeChance) parts.push(`❄️ ${Math.round(it.freezeChance*100)}% Freeze`);
+  if (it.freezeChance) parts.push(`❄️ ${Math.round(it.freezeChance*_tPctMul*100)}% Freeze`);
   if (it.multishot)    parts.push(`🎯 +${it.multishot} Shot`);
   if (it.hpRegen)      parts.push(`💚 ${it.hpRegen} HP/sec`);
-  if (it.chainChance)  parts.push(`⚡ ${Math.round(it.chainChance*100)}% Chain`);
-  if (it.voidChance)   parts.push(`🌑 ${Math.round(it.voidChance*100)}% Void`);
-  if (it.dodgeChance)  parts.push(`💨 ${Math.round(it.dodgeChance*100)}% Dodge`);
+  if (it.chainChance)  parts.push(`⚡ ${Math.round(it.chainChance*_tPctMul*100)}% Chain`);
+  if (it.voidChance)   parts.push(`🌑 ${Math.round(it.voidChance*_tPctMul*100)}% Void`);
+  if (it.dodgeChance)  parts.push(`💨 ${Math.round(it.dodgeChance*_tPctMul*100)}% Dodge`);
   // v0.26.255 — Status resistance affixes (v0.26.250). Pretty-print the
   // 0..1 fraction as an integer % with a thematic glyph. Order matches
   // the conventional status display: burn → poison → electric → freeze →
   // slow. Each affix can roll independently (multiple resist suffixes
   // can stack via different gear pieces), so each gets its own line.
-  if (it.burnResist)     parts.push(`🛡 +${Math.round(it.burnResist*100)}% Burn Resist`);
-  if (it.poisonResist)   parts.push(`🛡 +${Math.round(it.poisonResist*100)}% Poison Resist`);
-  if (it.electricResist) parts.push(`🛡 +${Math.round(it.electricResist*100)}% Electric Resist`);
-  if (it.freezeResist)   parts.push(`🛡 +${Math.round(it.freezeResist*100)}% Freeze Resist`);
-  if (it.slowResist)     parts.push(`🛡 +${Math.round(it.slowResist*100)}% Slow Resist`);
+  if (it.burnResist)     parts.push(`🛡 +${Math.round(it.burnResist*_tPctMul*100)}% Burn Resist`);
+  if (it.poisonResist)   parts.push(`🛡 +${Math.round(it.poisonResist*_tPctMul*100)}% Poison Resist`);
+  if (it.electricResist) parts.push(`🛡 +${Math.round(it.electricResist*_tPctMul*100)}% Electric Resist`);
+  if (it.freezeResist)   parts.push(`🛡 +${Math.round(it.freezeResist*_tPctMul*100)}% Freeze Resist`);
+  if (it.slowResist)     parts.push(`🛡 +${Math.round(it.slowResist*_tPctMul*100)}% Slow Resist`);
   return parts.join(multiline ? '<br>' : ' · ');
 }
 
@@ -77201,9 +77241,10 @@ function _tierBadgeHtml(it) {
   else if (t === 9) cls = 'tier-gold';
   else if (t === 8) cls = 'tier-silver';
   else              cls = '';   // T6-T7 → bronze default
-  // Multiplier value matches the _TIER_MUL table at the v0.26.273 site.
-  const _muls = [1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.12, 1.28, 1.48, 1.72, 2.00];
-  const _mul = _muls[Math.min(t, _muls.length - 1)] || 1.00;
+  // v0.29.430 — was a hand-copied duplicate of _TIER_MUL, which silently went
+  // stale the moment that table changed (the badge would have kept advertising
+  // the old 1.00-2.00 curve). Read the real function instead.
+  const _mul = (typeof _tierMul === 'function') ? _tierMul(t) : 1.00;
   return `<span class="item-tier-badge ${cls}" aria-label="Tier ${t} gear (×${_mul.toFixed(2)} flat stats)" title="Tier ${t} · ×${_mul.toFixed(2)} flat stats">T${t}</span>`;
 }
 
