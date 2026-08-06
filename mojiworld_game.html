@@ -9294,7 +9294,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.465';
+const GAME_VERSION = 'v0.29.466';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -62902,18 +62902,28 @@ function updateMonsters(dt) {
       // attack always resolves into a shot — the player can read it and dodge.
       // Mobs WITHOUT attack art skip the telegraph and fire instantly, exactly
       // as before, so they don't gain a purposeless hitch.
+      // v0.29.4xx — BOSS RECOVERY BEAT (per user "movement and attack
+      // separate and deliberate"): after a boss releases a shot it stays
+      // rooted for a beat (_mobCasting reads this) instead of striding off
+      // on the release frame. Ticks here so it shares the shoot machine's dt.
+      if (m._postShotHold > 0) m._postShotHold -= dt;
       if (m._shootWindup > 0) {
         m._shootWindup -= dt;
         if (m._shootWindup <= 0) {
           m._shootWindup = 0;
           _fireShot();
           m.shootTimer = m.shootCd + Math.random() * 1200;
+          if (m.boss || m.isBoss) m._postShotHold = 320;
         }
-      } else if (_shootOnScreen && m.shootTimer <= 0 && !(m._dirOpenT > 0) && dxs < _shootMaxX && dxs > _shootMinX && dys < _shootMaxY && m.aggroTarget) {   // v0.29.263 — winded bosses hold their shots
-        if (_mobAttackReady(m.type)) {
+      } else if (_shootOnScreen && m.shootTimer <= 0 && !(m._dirOpenT > 0) && !((m.boss || m.isBoss) && (m._dashing || m._dashT > 0)) && dxs < _shootMaxX && dxs > _shootMinX && dys < _shootMaxY && m.aggroTarget) {   // v0.29.263 — winded bosses hold their shots
+        // v0.29.4xx — a BOSS never snap-fires mid-stride: it always takes the
+        // telegraph path (with or without attack art) and charges for 520 ms,
+        // planted by _mobCasting. Deliberate: stop -> charge -> fire -> beat.
+        if (_mobAttackReady(m.type) || m.boss || m.isBoss) {
           // Telegraph: hold the attack pose, then fire at the strike point.
           // Per-mob override via m.shootWindupMs; ~240 ms ≈ 3-4 attack frames.
-          const _wu = (m.shootWindupMs != null) ? m.shootWindupMs : 240;
+          const _wu = (m.shootWindupMs != null) ? m.shootWindupMs
+                    : (m.boss || m.isBoss) ? 520 : 240;
           m._shootWindup = _wu;
           const _nowWu = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
           m.atkAnimUntil = _nowWu + _wu + 140;             // hold the pose a touch past release
@@ -100748,7 +100758,10 @@ function _mobAnimPhase(m, state, desync) {
 // for. So: casting roots, animating does not.
 function _mobCasting(m) {
   if (!m) return false;
-  return !!(m._shootWindup > 0 || m._bigMeleeFiring);
+  // v0.29.4xx — _postShotHold: the boss recovery beat after a released shot
+  // (see the shoot machine). Rooted the same way the windup is, so a boss
+  // attack reads stop -> charge -> fire -> beat -> move, never a drive-by.
+  return !!(m._shootWindup > 0 || m._bigMeleeFiring || m._postShotHold > 0);
 }
 // True when the mob should be DRAWN attacking: any cast, plus the authored
 // attack-animation window (contact hits, parries, skill pulses). Distinct from
