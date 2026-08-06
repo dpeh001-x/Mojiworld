@@ -9294,7 +9294,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.429';
+const GAME_VERSION = 'v0.29.439';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -19917,14 +19917,6 @@ const _CLASS_QUESTLINE = (() => {
           // v0.25.588 — gear roll on completion
           gearChance: gearRate,
           gearTier:   gearTier,
-          // v0.29.429 — supply bundle, weighted to the early line where the
-          // player is poorest and dies most. Sizes step up with the bracket
-          // so a Lv 40 reward is not 6 small reds; the COUNT stays modest
-          // because by then coins buy potions freely.
-          potions: lvl <= 15 ? { hp_s: 6, mp_s: 4 }
-                 : lvl <= 25 ? { hp_m: 3, mp_s: 4 }
-                 : lvl <= 40 ? { hp_m: 4, mp_m: 2 }
-                 :             { hp_l: 3, mp_l: 2 },
         },
       };
     }
@@ -28776,7 +28768,7 @@ const player = {
 };
 
 // Starting potions
-player.consumables = { hp_s: 10, mp_s: 6 };
+player.consumables = { hp_s: 5, mp_s: 3 };
 
 // =========================================================================
 // DERIVED STATS
@@ -45785,7 +45777,7 @@ function offerPrestige() {
     // Wallet is kept. Only repair it if the save carried a broken value —
     // a fresh character's 200 remains the floor for that case, not a reset.
     if (typeof player.mojicoins !== 'number' || !isFinite(player.mojicoins) || player.mojicoins < 0) player.mojicoins = 200;
-    if (!player.consumables || typeof player.consumables !== 'object') player.consumables = { hp_s: 10, mp_s: 6 };
+    if (!player.consumables || typeof player.consumables !== 'object') player.consumables = { hp_s: 5, mp_s: 3 };
     // v0.25.250 — setshards reset on prestige (fresh crafting economy each ascension).
     player.setshards = 0;
     // v0.25.594 — bug fix. Prestige reset previously kept `player.boons`,
@@ -50155,10 +50147,6 @@ function loadMap(id, entryX, entryY) {
       }
     }
     if (typeof _renderAffixPin === 'function') _renderAffixPin();
-    // v0.29.429 — restock reminder on walking into town (see _lxPotionNag).
-    if (game.mapData && game.mapData.isTown) {
-      setTimeout(() => { try { if (typeof _lxPotionNag === 'function') _lxPotionNag(true); } catch (e) {} }, 1400);
-    }
   } catch (e) { game._mapAffix = null; }
   game._mapCursed = false;
   const _curseEligible = !game.mapData.isTown && !game.mapData.isBossArena
@@ -51828,18 +51816,9 @@ function updatePlayer(dt) {
   // subsequent frame even when the tip has already been shown. Helps new
   // players discover the R hotkey to drink a potion when it matters most.
   if (!game._lowHpHintShown && player.hp > 0 && player.hp < (typeof getMaxHp === 'function' ? getMaxHp() : 100) * 0.25) {
-    // v0.29.429 — only teach the drink hotkey to someone who can actually
-    // drink. This tip is one-shot (localStorage), so showing it to an empty
-    // bag burned it forever on advice the player could not follow; that case
-    // now belongs to _lxPotionNag, which tells them where to BUY instead.
-    const _heals = (typeof _lxHealPotionCount === 'function') ? _lxHealPotionCount() : 1;
-    if (_heals > 0) {
-      game._lowHpHintShown = true;
-      if (typeof _firstTimeTip === 'function') {
-        if (_firstTimeTip('lowhp_potion', '⚠ HP low — press R to drink an HP potion', 'rare')) {
-          game._lowHpTipAt = Date.now();   // let the restock prompt yield this beat
-        }
-      }
+    game._lowHpHintShown = true;
+    if (typeof _firstTimeTip === 'function') {
+      _firstTimeTip('lowhp_potion', '⚠ HP low — press R to drink an HP potion (if you have one in your bag)!', 'rare');
     }
   }
   // v0.25.796 — Player voice (hit grunt). Frame-coalesced HP-drop detector
@@ -56646,6 +56625,9 @@ function spawnSpriteBurst(x, y, spriteKey, opts) {
     // proportion) instead of forcing it into a square `size×size` box — which
     // squashes non-square art (e.g. the landscape shinobi_seal talisman).
     keepAspect: !!opts.keepAspect,
+    // v0.29.439 — flat opacity multiplier over the burst's whole life (see the
+    // draw branch). null/undefined leaves existing bursts at full strength.
+    opacity: (opts.opacity == null) ? null : Math.max(0, Math.min(1, opts.opacity)),
     flipX: !!opts.flipX,
     flipY: !!opts.flipY,
     // v0.25.996 — Per-axis scale transitions. When all four start/end
@@ -56968,7 +56950,12 @@ function drawSmoothFx() {
       // v0.26.x — optional extra lifetime fade (fadeOut): dims the sprite
       // steadily from spawn→death on top of the base tail-fade. Default
       // fadeOut=0 leaves `alpha` untouched for every other burst.
-      ctx.globalAlpha = fx.fadeOut ? alpha * Math.max(0, 1 - t * fx.fadeOut) : alpha;
+      // v0.29.439 — `opacity`: a flat multiplier over the burst's whole life, on
+      // top of the base tail-fade and the optional fadeOut ramp. Used by the
+      // class hit sparks (85%) so an impact sits ON the monster instead of
+      // masking it. null/absent -> 1, so every other burst is untouched.
+      const _opa = (fx.opacity == null) ? 1 : fx.opacity;
+      ctx.globalAlpha = (fx.fadeOut ? alpha * Math.max(0, 1 - t * fx.fadeOut) : alpha) * _opa;
       ctx.translate(sx, fx.y);
       const rot = (fx.angle || 0) + (fx.spin || 0) * t;
       if (rot) ctx.rotate(rot);
@@ -69979,12 +69966,37 @@ function hitMonster(m, dmg, isCrit, skill) {
       let _hv = 0;
       for (let _hi = 0; _hi < skill.length; _hi++) _hv = (_hv * 31 + skill.charCodeAt(_hi)) | 0;
       const _hVar = ((_hv % 3) + 3) % 3;
-      // v0.29.279 — per user: sparks render at 50% of the original size
-      // (96/72 → 48/36) so the impact reads as punctuation, not a screen fill.
-      spawnSpriteBurst(m.x + m.w / 2, m.y + m.h / 2, _hVar === 0 ? _hitKey : _hitKey + '_' + (_hVar + 1), {
+      // v0.29.279 — sparks at 50% of the original size (96/72 → 48/36).
+      // v0.29.439 — per user: land on the EDGE, scale with the damage dealt,
+      // 85% opacity, bigger than before but not by much.
+      //
+      // EDGE, not centre. The spark used to spawn at the monster's midpoint,
+      // so on anything large it appeared buried inside the body with the art
+      // reading as a decal rather than a strike. It now lands on the rim
+      // facing the player — the side the blow actually came from — pulled 8%
+      // inside the radius so it still overlaps the silhouette and never floats
+      // free in the air. Falls back to the old centre for a self-hit / no
+      // player, so nothing can divide by zero.
+      let _hx = m.x + m.w / 2, _hy = m.y + m.h / 2;
+      if (typeof player !== 'undefined' && player) {
+        const _vx = (player.x + player.w / 2) - _hx, _vy = (player.y + player.h / 2) - _hy;
+        const _vl = Math.hypot(_vx, _vy);
+        if (_vl > 1) { _hx += (_vx / _vl) * (m.w / 2) * 0.92; _hy += (_vy / _vl) * (m.h / 2) * 0.92; }
+      }
+      // SIZE FROM DAMAGE. Reuses the same yardstick the damage-tier colours
+      // use below — finalDmg as a multiple of player ATK — so the spark and
+      // the number escalate together instead of on two unrelated scales.
+      // 0.5x ATK or less -> 44 px, ramping to 68 px at 3.5x and clamped there;
+      // crits take +20%. Previously a flat 36 (48 on crit) regardless of
+      // whether the hit was a chip tick or an execute.
+      const _hATK = Math.max(1, (player && player.atk) || 1);
+      const _hRatio = Math.max(0, Math.min(1, ((finalDmg / _hATK) - 0.5) / 3.0));
+      const _hSize = (44 + _hRatio * 24) * (isCrit ? 1.2 : 1);
+      spawnSpriteBurst(_hx, _hy, _hVar === 0 ? _hitKey : _hitKey + '_' + (_hVar + 1), {
         life: isCrit ? 16 : 12,
-        size: isCrit ? 48 : 36,
+        size: Math.round(_hSize),
         angle: (Math.random() - 0.5) * 1.2,
+        opacity: 0.85,
       });
     }
   }
@@ -83727,41 +83739,6 @@ function showKillToast(expGain, mojicoinGain) {
   host.appendChild(t);
   setTimeout(() => { if (t && t.parentNode) t.parentNode.removeChild(t); }, 3200);
 }
-// =========================================================================
-// v0.29.429 — POTION RESTOCK PROMPT. Counts only HEALING potions: those are
-// the ones whose absence kills you. Two callers — the low-HP danger channel
-// (urgent, in the field) and town arrival (calm, next to the shop) — share
-// one throttle so they can never double-toast.
-// =========================================================================
-const _POTION_LOW_AT = 3;          // "low" = fewer than this many heals held
-const _POTION_NAG_MS = 90000;      // at most one prompt per 90 s
-function _lxHealPotionCount() {
-  if (typeof player === 'undefined' || !player || !player.consumables) return 0;
-  const c = player.consumables;
-  return (c.hp_s | 0) + (c.hp_m | 0) + (c.hp_l | 0) + (c.full | 0);
-}
-function _lxPotionNag(fromTown) {
-  if (typeof player === 'undefined' || !player || !player.cls) return;   // not in a run yet
-  if (typeof game === 'undefined' || !game) return;
-  if (game.dying || game.paused || (player.hp | 0) <= 0) return;
-  if (window._prologueActive) return;                 // the opening set-piece owns the screen
-  const n = _lxHealPotionCount();
-  if (n >= _POTION_LOW_AT) return;
-  const now = Date.now();
-  if (game._potionNagAt && (now - game._potionNagAt) < _POTION_NAG_MS) return;
-  // v0.29.429 — never stack on the one-shot drink tip; it fires at the same
-  // threshold and two toasts in one beat read as noise.
-  if (game._lowHpTipAt && (now - game._lowHpTipAt) < 4000) return;
-  game._potionNagAt = now;
-  // In town the shop is a few steps away; in the field the Postal Wisp (P)
-  // delivers anywhere, so point at whichever is actually reachable.
-  const where = fromTown ? 'visit the potion shop' : 'press P for delivery';
-  const msg = (n === 0)
-    ? '\uD83E\uDDEA Out of healing potions \u2014 ' + where
-    : '\uD83E\uDDEA Only ' + n + ' healing potion' + (n === 1 ? '' : 's') + ' left \u2014 ' + where;
-  if (typeof showToast === 'function') showToast(msg, n === 0 ? 'danger' : 'warn');
-}
-
 function showToast(txt, rarity) {
   const t = document.createElement('div');
   t.className = 'toast';
@@ -111727,12 +111704,6 @@ function loop(time) {
       // a red vignette pulses (drawn in the overlay pass) and a synthesized
       // heartbeat thumps every ~900 ms. Both stop above the 35% hysteresis.
       game._lowHpActive = (_ratio > 0 && _ratio < 0.25);
-      // v0.29.429 — potion restock prompt. Dying with a full purse and an
-      // empty belt is a UI failure, not a skill one: the shop is a menu the
-      // player has to remember to open. Fired from here so it lands at the
-      // moment it matters (hurt AND unable to heal) rather than as ambient
-      // nagging. _lxPotionNag owns its own throttle + stock threshold.
-      if (game._lowHpActive && typeof _lxPotionNag === 'function') _lxPotionNag();
       if (game._lowHpActive && !game.paused && !game.dying) {
         if (!game._lastHeartbeat || time - game._lastHeartbeat > 900) {
           game._lastHeartbeat = time;
