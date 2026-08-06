@@ -98,6 +98,55 @@ const ITEMS = {
       'hollow centre, faint additive glow. Ominous, magical, ghostly. A clean ' +
       'circular RING (mostly empty in the middle, not a solid orb).',
   },
+  // v0.29.437 — per user, remake three FX that had drifted off-style.
+  // `rush` is the warrior's E dash ("Dash forward, pierce enemies"), blitted by
+  // spawnSpriteBurst at the player and mirrored to facing, so it is authored
+  // pointing RIGHT like every other directional FX here. The old art had muddy
+  // overlapping chevrons and olive-brown edging instead of the house black line.
+  rush: {
+    dest: join(repoRoot, 'Sprites', 'fx', 'rush.webp'),
+    fmt: 'webp',
+    prompt:
+      'A FORWARD-CHARGE DASH speed burst travelling toward the RIGHT. Three or ' +
+      'four bold chevron arrowheads stacked in a row pointing RIGHT, coloured ' +
+      'hot crimson-red fading to bright orange, getting brighter toward the ' +
+      'front. Sharp white-hot speed streaks trail BEHIND them to the LEFT, and ' +
+      'a brilliant white impact star-flash bursts at the leading right tip. ' +
+      // v0.29.437b — per user "there seems to be the cut off at left edge".
+      // The canvas edges measured clean (69px margin), so it was not clipping:
+      // the trailing streaks were DRAWN ending in a flat vertical cut, which
+      // reads as a slice. They have to taper to points instead.
+      'CRITICAL: every trailing speed streak TAPERS SMOOTHLY TO A FINE SHARP ' +
+      'POINT at its left end, fading out naturally — absolutely NO flat ends, ' +
+      'NO blunt square ends, NO abrupt straight vertical cut across the tails, ' +
+      'nothing looking sliced off or cropped. The whole effect sits fully ' +
+      'inside the frame with a generous empty transparent margin on all four ' +
+      'sides, nothing touching or running off any edge. ' +
+      'CRITICAL: every chevron and streak is wrapped in a THICK even solid ' +
+      'BLACK outline — no brown, no olive, no muddy edging. Crisp flat ' +
+      'cel-shading with clean hard colour steps, strong sense of explosive ' +
+      'forward speed. Clean readable silhouette, shapes clearly separated, NOT ' +
+      'a cluttered overlapping mess. Effect only — no character, no weapon.',
+  },
+  // The grail FX was drawn as a winged CROSS with olive-green and lavender
+  // wings — it never showed a grail at all, though the skill is "Judgment of
+  // the Holy Grail" (ascend, then rain 7 holy pillars). This puts the chalice
+  // back as the hero element and locks the palette to gold/white.
+  archbishop_grail: {
+    dest: join(repoRoot, 'Sprites', 'fx', 'archbishop_grail.png'),
+    fmt: 'png',
+    prompt:
+      'A radiant HOLY GRAIL — a golden ceremonial CHALICE / goblet as the clear ' +
+      'central hero shape, overflowing with brilliant white-gold blessed light ' +
+      'that spills over the rim and pours downward. A luminous halo ring glows ' +
+      'behind the cup, slender beams of divine judgment-light descend around ' +
+      'it, and choral sparkles and soft white feathers drift in the glow. ' +
+      'PALETTE IS STRICTLY GOLD, AMBER AND WHITE — absolutely NO green, NO ' +
+      'olive, NO purple, NO lavender, NO blue. The CHALICE must be clearly ' +
+      'readable as a cup — this is NOT a cross, NOT a sword, NOT a shield, NOT ' +
+      'a pair of wings. Bold clean dark outline, crisp cel-shading, holy and ' +
+      'majestic. Effect only — no character, no hands.',
+  },
   // v0.26.650 — wolf-trio restyle. v2 per user: SIMPLER flat 2D MapleStory look
   // (art_style 'Illustration' + FLAT_PREFIX) — the painterly v1 was too detailed
   // and too chibi. Now: hard flat cel-shade steps (no gradients/gloss), minimal
