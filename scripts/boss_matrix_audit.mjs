@@ -116,10 +116,26 @@ const rows = await page.evaluate(async ({ SWINGS }) => {
       }
       const per = total / SWINGS;
       r.swings = per > 0 ? Math.ceil(bossHp / per) : Infinity;
+      // Incoming CONTACT mirrors the real path: raw atk × the boss touch mul
+      // (2.5 floor, v0.29.451) × level-gap, through _diffDmg, then the
+      // final-loss band clamp (_bossHitBand floors/caps) exactly as the
+      // contact handler applies it. The first version of this audit skipped
+      // the clamp entirely and both over- and under-stated boss touch.
       const gapMul = (typeof _lvGapDmgMul === 'function') ? _lvGapDmgMul(m) : 1;
-      let hitIn = (m.atk || 0) * gapMul;
+      let hitIn = (m.atk || 0) * 2.5 * gapMul;
       try { hitIn = _diffDmg(hitIn, bossLv); } catch (e) {}
+      try {
+        const bb = (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'touch') : null;
+        if (bb && bb.ref) hitIn = Math.min(bb.cap * bb.ref, Math.max((bb.floor || 0) * bb.ref, hitIn));
+      } catch (e) {}
       r.hitsToDie = hitIn > 0 ? Math.ceil(hp / hitIn) : Infinity;
+      // the occasional heavy: % spike every boss now rolls (zodiac per-sign)
+      const heavyPct = m.zodiacBoss ? (m.heavyHitPct || 0.50) : 0.40;
+      try {
+        const ref = (typeof _refLoAtLv === 'function') ? _refLoAtLv(bossLv) : hp;
+        r.heavyHit = Math.round(heavyPct * ref);
+        r.heavyPctOfHp = +(r.heavyHit / hp).toFixed(2);
+      } catch (e) {}
       game.monsters.length = 0;
     }
   }
