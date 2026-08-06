@@ -151,12 +151,12 @@ Branches, forks, and pull requests welcome. Every edit to `mojiworld_game.html` 
 
 ## 📝 License & Copyright
 
-**© 2026 Moji-world · DADPEH. All rights reserved.**
+**© 2026 Moji-studios · DADPEH. All rights reserved.**
 
 Mojiworld — The Everdawn Cycle and all associated content (source code, game
 design, artwork, sprites, animations, audio, music, cinematics, text, lore,
 characters, names, maps, and marketing assets) are the property of
-**Moji-world** and **DADPEH**. The Work is proprietary — see the [LICENSE](LICENSE)
+**Moji-studios** and **DADPEH**. The Work is proprietary — see the [LICENSE](LICENSE)
 file. Playing the game through its official distributions is permitted; all
 other rights are reserved. No part may be copied, redistributed, sold, or used
 to create derivative works without prior written permission.

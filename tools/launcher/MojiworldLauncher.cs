@@ -22,9 +22,9 @@ using System.Windows.Forms;
 // the exe's Details tab.
 [assembly: AssemblyTitle("Mojiworld Launcher")]
 [assembly: AssemblyDescription("Starts the local Mojiworld server and opens the game in your browser")]
-[assembly: AssemblyCompany("Moji-world & DADPEH")]
+[assembly: AssemblyCompany("Moji-studios & DADPEH")]
 [assembly: AssemblyProduct("Mojiworld")]
-[assembly: AssemblyCopyright("(c) Moji-world & DADPEH")]
+[assembly: AssemblyCopyright("(c) Moji-studios & DADPEH")]
 [assembly: AssemblyVersion("0.29.266.0")]
 [assembly: AssemblyFileVersion("0.29.266.0")]
 
