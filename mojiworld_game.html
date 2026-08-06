@@ -9294,7 +9294,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.452';
+const GAME_VERSION = 'v0.29.453';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -29874,6 +29874,7 @@ window.addEventListener('keydown', e => {
   // bindings so arrows pan instead of walking and Enter saves instead of
   // opening chat. O toggles from either state.
   if (k === 'o') { if (typeof togglePhotoMode === 'function') togglePhotoMode(); e.preventDefault(); return; }
+  if (k === 'h') { if (typeof _mojimonQuickSummon === 'function') _mojimonQuickSummon(); return; }   // v0.29.453 — quick-summon the assigned MojiMon
   if (game._photoMode && typeof _lxPhotoKey === 'function' && _lxPhotoKey(k)) { e.preventDefault(); return; }
   if (k === 'p') {
     if (typeof openPostalWisp === 'function') openPostalWisp();
@@ -55804,6 +55805,7 @@ function _mojimonCapture(m) {
   const mm = _mojimonEnsure();
   if (!m || !m.type || mm.roster[m.type]) return;
   mm.roster[m.type] = { upg: { hp: 0, atk: 0, def: 0 }, at: Date.now() };
+  if (!mm.assigned) mm.assigned = m.type;   // v0.29.453 — first capture auto-assigns the H hotkey
   // Remove the bound monster from the world WITHOUT the kill pipeline — a
   // capture pays no EXP/coins/loot (it pays a companion), and killMonster
   // would also bump the bestiary count it was captured against.
@@ -55988,14 +55990,20 @@ function _mojimonSummon(type, opts) {
       return false;
     }
   }
-  // Only one mon fielded at a time: replacing is a dismiss, not a stack.
-  if (mm.out) _mojimonDismiss(true);
+  // v0.29.453 — only one mon fielded at a time, guaranteed by an
+  // UNCONDITIONAL sweep rather than the old `if (mm.out)` dismiss: that
+  // guard was state-dependent, and any out/minions desync would have
+  // stacked a second mon. The sweep is a no-op when nothing is fielded.
+  _mojimonDismiss(true);
   const st = _mojimonStatsFor(type);
   const hpFrac = (opts.hpFrac != null) ? Math.max(0.01, Math.min(1, opts.hpFrac)) : 1;
   if (!game.minions) game.minions = [];
   game.minions.push({
     x: player.x - player.facing * 46, y: player.y - 8,
-    w: Math.max(24, Math.min(90, (t.w | 0) || 40)), h: Math.max(24, Math.min(90, (t.h | 0) || 40)),
+    // v0.29.453 — the mon is the SIZE of the actual species (caps were
+    // 90px, squashing anything bigger). Bosses cannot be captured, so the
+    // realistic set fits; 140 only fences hypothetical future giants.
+    w: Math.max(24, Math.min(140, (t.w | 0) || 40)), h: Math.max(24, Math.min(140, (t.h | 0) || 40)),
     type, mojimon: true,
     life: 1e12, maxLife: 1e12,           // no expiry — it lives until defeated or dismissed
     vx: 0, vy: 0, facing: player.facing,
@@ -56027,6 +56035,20 @@ function _mojimonSummon(type, opts) {
   }
   if (typeof saveState === 'function') saveState();
   return true;
+}
+// v0.29.453 — H hotkey: summon the ASSIGNED mon without opening the panel.
+// Falls back to the only/first bound species when nothing is assigned, so
+// the hotkey works the moment the first capture lands.
+function _mojimonQuickSummon() {
+  if (game._photoMode) return;
+  const mm = _mojimonEnsure();
+  const type = (mm.assigned && mm.roster[mm.assigned]) ? mm.assigned : Object.keys(mm.roster)[0];
+  if (!type) { if (typeof showToast === 'function') showToast('⛓ No MojiMon bound yet — master a species first (10,000 kills)', 'rare'); return; }
+  if (mm.out) {
+    if (typeof showToast === 'function') showToast('⛓ ' + (((monsterTypes[mm.out.type] || {}).name) || mm.out.type) + ' is already fielded', 'rare');
+    return;
+  }
+  _mojimonSummon(type);
 }
 function _mojimonDismiss(silent) {
   const mm = _mojimonEnsure();
@@ -56093,7 +56115,7 @@ function _mojimonTinted(spr, type) {
   const c = cv.getContext('2d');
   c.drawImage(spr, 0, 0);
   c.globalCompositeOperation = 'source-atop';   // tint only where the sprite has pixels
-  c.fillStyle = _mojimonRgba(_mojimonClassColor(), 0.22);
+  c.fillStyle = _mojimonRgba(_mojimonClassColor(), 0.38);   // v0.29.453 — stronger, per user
   c.fillRect(0, 0, cv.width, cv.height);
   return (_MOJIMON_TINT_CACHE[key] = cv);
 }
@@ -56105,7 +56127,7 @@ function _mojimonDraw(mn, sx, sy) {
   if (mn.spawn > 0) ctx.globalAlpha = Math.max(0.25, 1 - mn.spawn / 18);
   if (spr) {
     const aw = spr.naturalWidth || 1, ah = spr.naturalHeight || 1;
-    const dh = Math.max(36, Math.min(110, mn.h * 1.15));
+    const dh = Math.max(36, Math.min(200, mn.h * 1.1));   // v0.29.453 — draw at true species scale (cap was 110)
     const dw = dh * aw / ah;
     ctx.translate(sx + mn.w / 2, footY);
     // v0.29.448 — idle bob (±1.5px sine) + melee lunge (a 4px dart toward
@@ -56121,7 +56143,7 @@ function _mojimonDraw(mn, sx, sy) {
     ctx.translate(_dxA, Math.sin((game.time + mn._bobSeed) * 0.05) * 1.5);
     // v0.29.435 — soft class-coloured under-glow behind the body, then the
     // class-tinted sprite. Together they read as "mine" at a glance.
-    ctx.fillStyle = _mojimonRgba(_mojimonClassColor(), 0.14);
+    ctx.fillStyle = _mojimonRgba(_mojimonClassColor(), 0.20);   // v0.29.453 — glow up with the tint
     ctx.beginPath(); ctx.ellipse(0, -dh * 0.45, dw * 0.62, dh * 0.55, 0, 0, Math.PI * 2); ctx.fill();
     if ((mn.facing | 0) < 0) ctx.scale(-1, 1);
     ctx.drawImage(_mojimonTinted(spr, mn.type), -dw / 2, -dh, dw, dh);
@@ -56152,9 +56174,15 @@ function _mojimonDraw(mn, sx, sy) {
   ctx.fillStyle = _fc;
   ctx.fillRect(bx, by, bw * pct, 3);
   if (_g > pct + 0.004) { ctx.fillStyle = 'rgba(255,224,160,0.9)'; ctx.fillRect(bx + bw * pct, by, bw * (_g - pct), 3); }
-  ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
-  ctx.fillStyle = '#8fd4ff';
-  ctx.fillText('⛓', sx + mn.w / 2, by - 4);
+  // v0.29.453 — the bound-mark is now unmissable: bold, bobbing, glowing
+  // in the owner class colour. shadowBlur is scoped by save/restore so the
+  // glow cannot leak into whatever draws next.
+  ctx.save();
+  ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
+  ctx.shadowColor = _mojimonRgba(_mojimonClassColor(), 0.95); ctx.shadowBlur = 7;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('⛓', sx + mn.w / 2, by - 7 + Math.sin(game.time * 0.08) * 2);
+  ctx.restore();
 }
 // U-panel tab renderer. Rebuilt on every interaction (roster is tiny); the
 // cooldown countdown ticks via a self-terminating interval that dies with
@@ -56177,7 +56205,7 @@ function renderMojiMonPanel() {
     '<div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">' +
     '<img src="Sprites/ui/mojimon_logo.png" alt="" style="width:56px; height:56px; object-fit:contain; filter:drop-shadow(0 0 8px rgba(160,120,255,0.6));" onerror="this.style.display=' + String.fromCharCode(39) + 'none' + String.fromCharCode(39) + '">' +
     '<div><div style="font-size:20px; font-weight:900; letter-spacing:1px; background:linear-gradient(90deg,#c9b8ff,#7fd4ff); -webkit-background-clip:text; background-clip:text; color:transparent;">MOJIMON</div>' +
-    '<div style="font-size:10px; color:#9b93b8; letter-spacing:2px;">BIND · FIELD · UPGRADE</div></div></div>' +
+    '<div style="font-size:10px; color:#9b93b8; letter-spacing:2px;">BIND · FIELD · UPGRADE · <b style="color:#ffd166;">H</b> QUICK-SUMMON</div></div></div>' +
     '<div style="display:flex; gap:10px; align-items:stretch; margin-bottom:10px;">' +
     '<div style="flex:1; background:rgba(60,40,110,0.25); border:1px solid rgba(150,120,220,0.35); border-radius:10px; padding:10px;">' +
     '<div style="font-size:13px; font-weight:800; color:#c9b8ff; margin-bottom:4px;">⛓ MOJIMON</div>' +
@@ -56213,6 +56241,7 @@ function renderMojiMonPanel() {
         '<div style="font-size:10px; color:#8a82a4;">HP ' + st.maxHp.toLocaleString() + ' · ATK ' + st.atk.toLocaleString() + ' · DR ' + Math.round(st.defRed * 100) + '%</div>' +
         (isOut && mm.out && mm.out.hpFrac != null ? '<div style="margin-top:3px; height:6px; background:rgba(0,0,0,0.5); border-radius:3px; overflow:hidden;"><div style="width:' + Math.round(Math.max(0, Math.min(1, mm.out.hpFrac)) * 100) + '%; height:100%; background:linear-gradient(90deg,#3a9a5a,#7fe0a0);"></div></div>' : '') +
         '</div>' +
+        '<button type="button" title="Assign to the H quick-summon hotkey" onclick="_mojimonUi.assign(\'' + k + '\')" style="padding:5px 7px; border-radius:8px; border:1px solid #7a6a3a; background:rgba(160,130,40,0.18); color:' + (mm.assigned === k ? '#ffd166' : '#8a82a4') + '; cursor:pointer; font-size:12px;">' + (mm.assigned === k ? '★H' : '☆') + '</button>' +
         (isOut ? '' : '<button type="button" onclick="_mojimonUi.summon(\'' + k + '\')" ' + (cdLeft > 0 ? 'disabled style="opacity:0.45; cursor:default;' : 'style="cursor:pointer;') + ' padding:5px 10px; border-radius:8px; border:1px solid #4a7a5a; background:rgba(60,160,90,0.25); color:#a0ffc0; font-size:11px; font-weight:700;">Summon</button>') +
         '</div>' +
         '<div style="margin-top:5px; border-top:1px solid rgba(255,255,255,0.08); padding-top:4px;">' +
@@ -56289,6 +56318,14 @@ window._mojimonUi = {
         mn.atk = st.atk; mn.defRed = st.defRed;
       }
     }
+    if (typeof saveState === 'function') saveState();
+    renderMojiMonPanel();
+  },
+  assign(type) {
+    const mm = _mojimonEnsure();
+    if (!mm.roster[type]) return;
+    mm.assigned = type;
+    if (typeof showToast === 'function') showToast('⛓ ' + (((monsterTypes[type] || {}).name) || type) + ' assigned to H', 'epic');
     if (typeof saveState === 'function') saveState();
     renderMojiMonPanel();
   },
