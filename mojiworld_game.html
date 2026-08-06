@@ -3025,6 +3025,36 @@
     pointer-events: none;
   }
   #dialog .dialog-header-text { flex: 1; min-width: 0; }
+  /* v0.29.430 — PHOTO MODE. One rule hides every piece of chrome; the class
+     lives on <body> so anything added to the HUD later is covered by default
+     rather than needing to be remembered. #photo-bar is exempt (it IS the
+     photo UI) and so is the canvas. */
+  body.photo-mode #stats,
+  body.photo-mode #mobile-ctrl,
+  body.photo-mode #combo-meter,
+  body.photo-mode #buff-row,
+  body.photo-mode #daily-banner,
+  body.photo-mode #minimap,
+  body.photo-mode #toast-host,
+  body.photo-mode #skillbar,
+  body.photo-mode .hud-float { display: none !important; }
+  #photo-bar {
+    position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    z-index: 100060; display: none; align-items: center; gap: 8px;
+    padding: 7px 14px; border-radius: 999px;
+    background: rgba(10,7,20,0.82); border: 1px solid rgba(212,175,90,0.45);
+    box-shadow: 0 4px 18px rgba(0,0,0,0.6);
+    font-size: 11px; color: #cfc8e4; white-space: nowrap;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  }
+  #photo-bar .pb-title { color: #ffd166; font-weight: 800; letter-spacing: 0.5px; margin-right: 4px; }
+  #photo-bar .pb-key {
+    display: inline-block; padding: 1px 6px; border-radius: 5px;
+    background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.18);
+    font-weight: 700; color: #fff;
+  }
+  #photo-bar .pb-lbl { color: #9b93b8; margin-right: 6px; }
+  #photo-bar .pb-lbl b { color: #ffd166; }
   /* v0.29.427 — portrait reaction. JS adds .npc-react for one frame when the
      typewriter reveals a ! or ?; the keyframes do the rest. `position` is set
      on the portrait so the floating mark can anchor to it. Reduced-motion
@@ -7477,6 +7507,16 @@
        bootstrap + scene code stripped in the same version. -->
 
   <div id="top-ui">
+    <!-- v0.29.430 — photo-mode control bar. Hidden until Photo Mode (O) is
+         entered; it is deliberately the ONLY chrome left visible then, and it
+         sits outside #stats so the HUD-hiding rule cannot take it with it. -->
+    <div id="photo-bar" style="display:none;">
+      <span class="pb-title">📷 PHOTO MODE</span>
+      <span class="pb-key">↑↓←→</span><span class="pb-lbl">pan</span>
+      <span class="pb-key">G</span><span class="pb-lbl">grade: <b id="photo-grade">None</b></span>
+      <span class="pb-key">Enter</span><span class="pb-lbl">save PNG</span>
+      <span class="pb-key">O</span><span class="pb-lbl">exit</span>
+    </div>
     <div id="stats" data-cls="warrior">
       <!-- v0.25.735 — Character name header.
            v0.25.739 — Compacted: name 15 → 13 px, margin 3 → 2; header
@@ -9215,7 +9255,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.427';
+const GAME_VERSION = 'v0.29.430';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -29703,6 +29743,11 @@ window.addEventListener('keydown', e => {
     if (typeof toggleWorldMap === 'function') toggleWorldMap();
   }
   // v0.26.448 - P opens the Postal Wisp (mail-order potions + daily parcel) from anywhere.
+  // v0.29.430 — photo mode. Its own keys are consumed BEFORE the normal
+  // bindings so arrows pan instead of walking and Enter saves instead of
+  // opening chat. O toggles from either state.
+  if (k === 'o') { if (typeof togglePhotoMode === 'function') togglePhotoMode(); e.preventDefault(); return; }
+  if (game._photoMode && typeof _lxPhotoKey === 'function' && _lxPhotoKey(k)) { e.preventDefault(); return; }
   if (k === 'p') {
     if (typeof openPostalWisp === 'function') openPostalWisp();
   }
@@ -89211,6 +89256,107 @@ function _ambFallbackFor(id) {
 // dev/test override. alpha is 0 for all daytime hours, so the tint draw
 // short-circuits to nothing most of the day.
 // =========================================================================
+// v0.29.430 — PHOTO MODE (O). Freeze the world, hide the HUD, pan the camera
+// freely, pick a grade, save a PNG. This is the feature that produces the
+// screenshots a store page is sold on, and it is cheap here in a way it never
+// is in 3D: the scene is already one canvas, so "hide the UI and take a
+// picture" is genuinely just that.
+//
+// The sim freezes via the same `game.paused` flag menus already use, so no new
+// pause path is introduced — but render keeps running, which is what lets the
+// player pan and re-grade while looking at a live frame.
+const _LX_PHOTO_GRADES = [
+  { id: 'none',  name: 'None',    css: '' },
+  { id: 'vivid', name: 'Vivid',   css: 'saturate(1.45) contrast(1.12)' },
+  { id: 'noir',  name: 'Noir',    css: 'grayscale(1) contrast(1.3)' },
+  { id: 'warm',  name: 'Golden',  css: 'sepia(0.35) saturate(1.3) brightness(1.06)' },
+  { id: 'cool',  name: 'Moonlit', css: 'hue-rotate(-18deg) saturate(1.2) brightness(0.95)' },
+  { id: 'dream', name: 'Dream',   css: 'saturate(1.3) contrast(0.92) brightness(1.1)' },
+];
+function _lxPhotoGrade() { return _LX_PHOTO_GRADES[(game._photoGrade | 0) % _LX_PHOTO_GRADES.length]; }
+function togglePhotoMode(on) {
+  const want = (on === undefined) ? !game._photoMode : !!on;
+  if (want === !!game._photoMode) return;
+  game._photoMode = want;
+  const cv = ((typeof ctx !== 'undefined' && ctx.canvas) ? ctx.canvas : document.querySelector('canvas'));
+  if (want) {
+    game._photoPan = { x: 0, y: 0 };
+    if (game._photoGrade === undefined) game._photoGrade = 0;
+    if (cv) cv.style.filter = _lxPhotoGrade().css;
+  } else {
+    game._photoPan = { x: 0, y: 0 };
+    if (cv) cv.style.filter = '';
+  }
+  document.body.classList.toggle('photo-mode', want);
+  const bar = document.getElementById('photo-bar');
+  if (bar) bar.style.display = want ? 'flex' : 'none';
+  const gl = document.getElementById('photo-grade');
+  if (gl) gl.textContent = _lxPhotoGrade().name;
+  if (want && typeof showToast === 'function') showToast('📷 Photo Mode — arrows pan · G grade · Enter save · O exit', 'epic');
+}
+// Save the canvas as a PNG. The grade is a CSS filter on the canvas ELEMENT,
+// which a raw canvas read does NOT capture — so it is re-applied to an
+// offscreen copy before export. What you see is what you get.
+function _lxPhotoSave() {
+  try {
+    const cv = ((typeof ctx !== 'undefined' && ctx.canvas) ? ctx.canvas : document.querySelector('canvas'));
+    if (!cv) return;
+    // Encoding a full-size PNG measured ~1.1s. Without a visible state the
+    // player gets no response at all and mashes Enter, queueing N encodes.
+    if (game._photoSaving) return;
+    game._photoSaving = true;
+    const _pbl = document.getElementById('photo-grade');
+    const _pbTxt = _pbl ? _pbl.textContent : '';
+    if (_pbl) _pbl.textContent = 'saving…';
+    const g = _lxPhotoGrade();
+    let out = cv;
+    if (g.css) {
+      const off = document.createElement('canvas');
+      off.width = cv.width; off.height = cv.height;
+      const oc = off.getContext('2d');
+      oc.filter = g.css;
+      oc.drawImage(cv, 0, 0);
+      out = off;
+    }
+    out.toBlob((blob) => {
+      if (!blob) { game._photoSaving = false; if (_pbl) _pbl.textContent = _pbTxt; return; }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'mojiworld-' + (game.currentMap || 'shot') + '-' + (game.time | 0) + '.png';
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+      game._photoSaving = false;
+      if (_pbl) _pbl.textContent = _pbTxt;
+      if (typeof showToast === 'function') showToast('📸 Screenshot saved', 'success');
+    }, 'image/png');
+  } catch (_e) {
+    // toBlob throws on a tainted canvas (file:// with remote art). Say so
+    // rather than failing silently — otherwise the button reads as broken.
+    game._photoSaving = false;
+    if (typeof showToast === 'function') showToast('Screenshot blocked (canvas is tainted)', 'rare');
+  }
+}
+// Pan + grade + save, routed from the main keydown path.
+function _lxPhotoKey(k) {
+  if (!game._photoMode) return false;
+  const P = game._photoPan || (game._photoPan = { x: 0, y: 0 });
+  const STEP = 48;
+  if (k === 'arrowleft')  { P.x -= STEP; return true; }
+  if (k === 'arrowright') { P.x += STEP; return true; }
+  if (k === 'arrowup')    { P.y -= STEP; return true; }
+  if (k === 'arrowdown')  { P.y += STEP; return true; }
+  if (k === 'g') {
+    game._photoGrade = ((game._photoGrade | 0) + 1) % _LX_PHOTO_GRADES.length;
+    const el = document.getElementById('photo-grade');
+    if (el) el.textContent = _lxPhotoGrade().name;
+    const cv = ((typeof ctx !== 'undefined' && ctx.canvas) ? ctx.canvas : document.querySelector('canvas'));
+    if (cv) cv.style.filter = _lxPhotoGrade().css;
+    return true;
+  }
+  if (k === 'enter') { _lxPhotoSave(); return true; }
+  return false;
+}
+// =========================================================================
 // v0.29.427 — SURFACE-AWARE FOOTSTEPS. A classic AAA tell: the ground sounds
 // like what it is. There is exactly one land.mp3 in the asset pack and no
 // per-surface variants, so rather than reference files that do not exist,
@@ -110884,7 +111030,12 @@ function loop(time) {
     game._slowmoFrames--;
     _smHold = (game._slowmoFrames % 3) !== 0;
   }
-  const frozen = game.hitStop > 0 || _smHold;
+  // v0.29.430 — photo mode freezes the sim through the SAME channel as
+  // hit-stop rather than through game.paused: paused takes a lighter render
+  // path that skips the camera transform entirely, so a paused photo mode
+  // could never pan. This way the world holds still while the full render
+  // (and therefore the pan + grade) keeps running.
+  const frozen = game.hitStop > 0 || _smHold || !!game._photoMode;
   if (game.hitStop > 0) game.hitStop -= dt;
 
   // v0.25.855 — Clamp player.hp ≥ 0 once per frame BEFORE the death check.
@@ -111171,6 +111322,10 @@ function loop(time) {
     game._zoom += (1 - game._zoom) * 0.12;
     if (Math.abs(game._zoom - 1) < 0.0008) game._zoom = 1;
   }
+  // v0.29.430 — photo-mode free pan rides the same screen-space transform
+  // as the zoom, so it composes with it and needs no camera-clamp changes.
+  const _pp = game._photoMode && game._photoPan;
+  if (_pp && (_pp.x || _pp.y)) ctx.translate(-_pp.x, -_pp.y);
   const _zm = game._zoom;
   if (_zm !== 1) {
     ctx.translate(W / 2, H / 2);
