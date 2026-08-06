@@ -66,7 +66,13 @@ const data = await page.evaluate(() => {
     while (player.level < lvl && g++ < 400) { player.exp = 1e12; _maybeLevelUp(); }
     player.exp = 0; player._equipBonusCache = null;
   };
-  const read = () => ({ atk: Math.round(getAtk()), hp: Math.round(getMaxHp()), spd: +getSpeed().toFixed(2), def: Math.round((typeof getDef === 'function') ? getDef() : 0) });
+  const read = () => ({
+    atk: Math.round(getAtk()), hp: Math.round(getMaxHp()), spd: +getSpeed().toFixed(2),
+    def: Math.round((typeof getDef === 'function') ? getDef() : 0),
+    mp: Math.round((typeof getMaxMp === 'function') ? getMaxMp() : (player.maxMp || 0)),
+    crit: Math.round((typeof getCrit === 'function') ? getCrit() : (player.baseCrit || 0)),
+    jump: +(((typeof getJump === 'function') ? getJump() : (player.baseJump || 0))).toFixed(1),
+  });
   const out = { naked50: {}, naked100: {}, bis100: {} };
   for (const cls of CLASSES_UT) {
     build(cls, 50);  out.naked50[cls] = read();
@@ -90,16 +96,18 @@ const spread = (set, key) => {
 };
 const show = (label, set) => {
   console.log(`\n${label}`);
-  console.log('  class      ATK        HP     SPD    DEF');
+  console.log('  class      ATK        HP     SPD    DEF     MP   CRIT   JUMP');
   for (const c of CL) {
     const r = set[c];
-    console.log(`  ${c.padEnd(9)}${String(r.atk).padStart(7)}${String(r.hp).padStart(10)}${String(r.spd).padStart(8)}${String(r.def).padStart(7)}`);
+    console.log(`  ${c.padEnd(9)}${String(r.atk).padStart(7)}${String(r.hp).padStart(10)}${String(r.spd).padStart(8)}${String(r.def).padStart(7)}${String(r.mp).padStart(7)}${String(r.crit).padStart(7)}${String(r.jump).padStart(7)}`);
   }
-  for (const k of ['hp', 'atk']) {
+  // v0.29.443 (per user) — the ≤3× rule now covers the whole sheet: DEF, MP,
+  // CRIT and JUMP join HP and ATK. Speed is governed by its own fixed anchors.
+  for (const k of ['hp', 'atk', 'def', 'mp', 'crit', 'jump']) {
     const s = spread(set, k);
     const ok = s.ratio <= 3.0;
     if (!ok) fails.push(`${label}: ${k.toUpperCase()} spread ${s.ratio.toFixed(2)}× > 3×`);
-    console.log(`  ${k.toUpperCase()} spread ${s.ratio.toFixed(2)}× ${ok ? 'OK (≤3×)' : '*** FAIL (>3×) ***'}`);
+    console.log(`  ${k.toUpperCase().padEnd(4)} spread ${s.ratio.toFixed(2)}× ${ok ? 'OK' : '*** FAIL (>3×) ***'}`);
   }
 };
 
@@ -130,6 +138,17 @@ console.log(`  rogue/archer HP above mage       : ${b.rogue.hp > b.mage.hp && b.
 if (b.warrior.spd < 2.3 || b.warrior.spd > 2.7) fails.push(`warrior speed ${b.warrior.spd} outside the 2.5±0.2 anchor`);
 if (b.mage.spd < 3.3 || b.mage.spd > 3.7) fails.push(`mage speed ${b.mage.spd} outside the 3.5±0.2 anchor`);
 console.log(`  speed anchors (war 2.5, mage 3.5): ${b.warrior.spd} / ${b.mage.spd}`);
+// v0.29.443 (per user) — identity assertions on the wider sheet: the tank owns
+// DEF and pays for it (already: slowest + average ATK); the glass cannon is the
+// least armored; MP belongs to the mage; the acrobat jumps highest.
+if (b.warrior.def < Math.max(...CL.map((c) => b[c].def))) fails.push('warrior must have the highest DEF (tank)');
+if (b.mage.def > Math.min(...CL.map((c) => b[c].def))) fails.push('mage must have the lowest DEF (glass cannon)');
+if (b.mage.mp < Math.max(...CL.map((c) => b[c].mp))) fails.push('mage must have the highest MP');
+if (b.rogue.jump < Math.max(...CL.map((c) => b[c].jump))) fails.push('rogue must have the highest JUMP (acrobat)');
+if (b.rogue.crit < Math.max(...CL.map((c) => b[c].crit))) fails.push('rogue must have the highest CRIT');
+console.log(`  DEF top/low = warrior/mage      : ${b.warrior.def >= Math.max(...CL.map((c) => b[c].def)) && b.mage.def <= Math.min(...CL.map((c) => b[c].def)) ? 'yes' : '*** FAIL ***'}`);
+console.log(`  MP top = mage, JUMP top = rogue : ${b.mage.mp >= Math.max(...CL.map((c) => b[c].mp)) ? 'yes' : 'FAIL'} / ${b.rogue.jump >= Math.max(...CL.map((c) => b[c].jump)) ? 'yes' : 'FAIL'}`);
+console.log(`  CRIT top = rogue                : ${b.rogue.crit >= Math.max(...CL.map((c) => b[c].crit)) ? 'yes' : '*** FAIL ***'}`);
 
 console.log(`\n${fails.length ? 'FAIL' : 'PASS'} — ${fails.length} violation(s)`);
 for (const f of fails) console.log('  ✗ ' + f);
