@@ -9294,7 +9294,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.447';
+const GAME_VERSION = 'v0.29.452';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -55810,6 +55810,10 @@ function _mojimonCapture(m) {
   const idx = game.monsters.indexOf(m);
   if (idx >= 0) game.monsters.splice(idx, 1);
   if (typeof spawnSpriteBurst === 'function') spawnSpriteBurst(m.x + m.w / 2, m.y + m.h / 2, 'qte_break', { size: 220, life: 40 });
+  // v0.29.448 — the bind gets the boss-kill treatment: a half-second at
+  // 1/3 speed plus a camera lean, riding the v0.29.418/422 systems.
+  game._slowmoFrames = Math.max(game._slowmoFrames | 0, 30);
+  if (typeof addZoomPunch === 'function') addZoomPunch(0.05);
   for (let i = 0; i < 16; i++) {
     const a = (i / 16) * Math.PI * 2;
     game.particles.push({ x: m.x + m.w / 2, y: m.y + m.h / 2, vx: Math.cos(a) * 4, vy: Math.sin(a) * 4 - 1, life: 40, color: i % 2 ? '#8fd4ff' : '#ffffff', size: 3 });
@@ -55874,6 +55878,13 @@ function _mojimonSummon(type, opts) {
   if (!opts.quiet) {
     const nm = t.name || type;
     if (typeof showToast === 'function') showToast('⛓ ' + nm + ' fights beside you!', 'epic');
+    // v0.29.448 — summon ceremony: the chain sigil the QTE already ships,
+    // a small camera lean, the chain SFX and a rumble. All existing assets
+    // and systems — the ceremony costs one sprite burst.
+    if (typeof spawnSpriteBurst === 'function') spawnSpriteBurst(player.x - player.facing * 46 + 20, player.y + 10, 'qte_chains', { size: 190, life: 44 });
+    if (typeof addZoomPunch === 'function') addZoomPunch(0.03);
+    if (typeof _playUiSfx === 'function') _playUiSfx('qte_capture');
+    if (typeof _lxPadRumble === 'function') _lxPadRumble('levelup');
     for (let i = 0; i < 12; i++) {
       const a = (i / 12) * Math.PI * 2;
       game.particles.push({ x: player.x, y: player.y, vx: Math.cos(a) * 3, vy: Math.sin(a) * 3 - 1, life: 30, color: '#8fd4ff', size: 3 });
@@ -55962,6 +55973,17 @@ function _mojimonDraw(mn, sx, sy) {
     const dh = Math.max(36, Math.min(110, mn.h * 1.15));
     const dw = dh * aw / ah;
     ctx.translate(sx + mn.w / 2, footY);
+    // v0.29.448 — idle bob (±1.5px sine) + melee lunge (a 4px dart toward
+    // the target for ~8 frames after a hit). Together they make the sprite
+    // read as a creature rather than a decal; both live inside this
+    // translate so the HP bar and hitbox stay planted.
+    let _dxA = 0;
+    if (mn._lungeT && game.time - mn._lungeT < 8) _dxA = (mn.facing | 0) * 4 * (1 - (game.time - mn._lungeT) / 8);
+    // v0.29.450 (review) — bob phase is seeded ONCE from spawn position:
+    // using live mn.x coupled bob speed to walk direction (a mon walking
+    // left at 1px/frame had a frozen bob, walking right bobbed double-time).
+    if (mn._bobSeed == null) mn._bobSeed = (mn.x | 0);
+    ctx.translate(_dxA, Math.sin((game.time + mn._bobSeed) * 0.05) * 1.5);
     // v0.29.435 — soft class-coloured under-glow behind the body, then the
     // class-tinted sprite. Together they read as "mine" at a glance.
     ctx.fillStyle = _mojimonRgba(_mojimonClassColor(), 0.14);
@@ -55978,10 +56000,23 @@ function _mojimonDraw(mn, sx, sy) {
   const bw = Math.max(36, mn.w);
   const bx = sx + mn.w / 2 - bw / 2, by = sy - 10;
   const pct = mn.maxHp > 0 ? Math.max(0, Math.min(1, mn.currentHp / mn.maxHp)) : 1;
+  // v0.29.448 — the ally bar speaks the same chip-damage grammar as every
+  // other bar since v0.29.414: hold ~20 frames, then drain toward truth.
+  let _g = mn._hpG;
+  if (_g === undefined) { _g = pct; mn._hpGAt = game.time; }
+  if (_g < pct) _g = pct;                                    // heals lift instantly
+  if (pct < (mn._hpGPrev != null ? mn._hpGPrev : pct)) mn._hpGAt = game.time;
+  mn._hpGPrev = pct;
+  if (_g > pct && game.time - (mn._hpGAt || 0) > 20) _g = Math.max(pct, _g - Math.max(0.004, (_g - pct) * 0.09));
+  mn._hpG = _g;
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
   ctx.fillRect(bx - 1, by - 1, bw + 2, 5);
-  ctx.fillStyle = pct > 0.5 ? '#66dd66' : (pct > 0.25 ? '#ddcc44' : '#dd4444');
+  // low HP: the fill pulses — the same danger read the player HUD uses.
+  let _fc = pct > 0.5 ? '#66dd66' : (pct > 0.25 ? '#ddcc44' : '#dd4444');
+  if (pct <= 0.25 && ((game.time / 14) | 0) % 2) _fc = '#ff7766';
+  ctx.fillStyle = _fc;
   ctx.fillRect(bx, by, bw * pct, 3);
+  if (_g > pct + 0.004) { ctx.fillStyle = 'rgba(255,224,160,0.9)'; ctx.fillRect(bx + bw * pct, by, bw * (_g - pct), 3); }
   ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
   ctx.fillStyle = '#8fd4ff';
   ctx.fillText('⛓', sx + mn.w / 2, by - 4);
@@ -56034,13 +56069,15 @@ function renderMojiMonPanel() {
         '<span style="width:34px; color:#9b93b8;">' + label + '</span>' +
         '<button type="button" onclick="_mojimonUi.upg(\'' + k + '\',\'' + stat + '\',-1)" style="width:20px; border-radius:5px; border:1px solid #5a4a7a; background:rgba(255,255,255,0.06); color:#cfc8e4; cursor:pointer;">−</button>' +
         '<b style="width:18px; text-align:center; color:#ffd166;">' + (rec.upg[stat] | 0) + '</b>' +
-        '<button type="button" onclick="_mojimonUi.upg(\'' + k + '\',\'' + stat + '\',1)" style="width:20px; border-radius:5px; border:1px solid #5a4a7a; background:rgba(255,255,255,0.06); color:#cfc8e4; cursor:pointer;">+</button>' +
+        '<button type="button" onclick="_mojimonUi.upg(\'' + k + '\',\'' + stat + '\',1)"' + (free <= 0 ? ' disabled' : '') + ' style="width:20px; border-radius:5px; border:1px solid #5a4a7a; background:rgba(255,255,255,0.06); color:#cfc8e4; ' + (free <= 0 ? 'opacity:0.35; cursor:default;' : 'cursor:pointer;') + '">+</button>' +
         '<span style="color:#7fd4ff;">' + valTxt + '</span></div>';
       html += '<div style="background:rgba(255,255,255,0.04); border:1px solid ' + (isOut ? 'rgba(127,224,160,0.6)' : 'rgba(150,120,220,0.3)') + '; border-radius:10px; padding:9px;">' +
         '<div style="display:flex; gap:8px; align-items:center;">' +
-        (spr ? '<img src="' + spr.src + '" style="width:44px; height:44px; object-fit:contain;">' : '<div style="width:44px; height:44px; border-radius:50%; background:radial-gradient(circle at 35% 30%, ' + (t.shell || '#888') + ', ' + (t.color || '#666') + ');"></div>') +
+        (spr ? '<img src="' + spr.src + '" style="width:44px; height:44px; object-fit:contain; filter:drop-shadow(0 0 5px ' + _mojimonRgba(_mojimonClassColor(), 0.75) + ');">' : '<div style="width:44px; height:44px; border-radius:50%; background:radial-gradient(circle at 35% 30%, ' + (t.shell || '#888') + ', ' + (t.color || '#666') + ');"></div>') +
         '<div style="flex:1;"><div style="font-weight:800; font-size:13px; color:#e8e2f8;">' + esc(t.name || k) + (isOut ? ' <span style="font-size:10px; color:#7fe0a0;">● FIELDED</span>' : '') + '</div>' +
-        '<div style="font-size:10px; color:#8a82a4;">HP ' + st.maxHp.toLocaleString() + ' · ATK ' + st.atk.toLocaleString() + ' · DR ' + Math.round(st.defRed * 100) + '%</div></div>' +
+        '<div style="font-size:10px; color:#8a82a4;">HP ' + st.maxHp.toLocaleString() + ' · ATK ' + st.atk.toLocaleString() + ' · DR ' + Math.round(st.defRed * 100) + '%</div>' +
+        (isOut && mm.out && mm.out.hpFrac != null ? '<div style="margin-top:3px; height:6px; background:rgba(0,0,0,0.5); border-radius:3px; overflow:hidden;"><div style="width:' + Math.round(Math.max(0, Math.min(1, mm.out.hpFrac)) * 100) + '%; height:100%; background:linear-gradient(90deg,#3a9a5a,#7fe0a0);"></div></div>' : '') +
+        '</div>' +
         (isOut ? '' : '<button type="button" onclick="_mojimonUi.summon(\'' + k + '\')" ' + (cdLeft > 0 ? 'disabled style="opacity:0.45; cursor:default;' : 'style="cursor:pointer;') + ' padding:5px 10px; border-radius:8px; border:1px solid #4a7a5a; background:rgba(60,160,90,0.25); color:#a0ffc0; font-size:11px; font-weight:700;">Summon</button>') +
         '</div>' +
         '<div style="margin-top:5px; border-top:1px solid rgba(255,255,255,0.08); padding-top:4px;">' +
@@ -56120,7 +56157,19 @@ window._mojimonUi = {
     if (typeof saveState === 'function') saveState();
     renderMojiMonPanel();
   },
-  summon(type) { _mojimonSummon(type); renderMojiMonPanel(); },
+  summon(type) {
+    // v0.29.450 (review) — the summon ceremony played out INVISIBLY behind
+    // this paused modal: FX kept animating on the light update path and the
+    // burst had fully decayed before the player could close the panel. When
+    // the summon will actually fire, close the modal first so the sigil,
+    // zoom and rise happen on screen; a cooldown-blocked click keeps the
+    // panel open (the toast explains) and just re-renders.
+    const _mm = _mojimonEnsure();
+    const _ready = Date.now() >= (_mm.cdUntil || 0) && !!_mm.roster[type];
+    if (_ready && typeof closeAllModals === 'function') closeAllModals();
+    _mojimonSummon(type);
+    if (!_ready) renderMojiMonPanel();
+  },
   dismiss() { _mojimonDismiss(); renderMojiMonPanel(); },
 };
 // WARLOCK UNDEAD MINIONS — raised allies from soulSiphon / darkPulse
@@ -56275,6 +56324,7 @@ function updateMinions(dt) {
         // re-taunting the victim onto the player (measured: 26 of 60
         // aggro samples flipped to the player before this line changed).
         hitMonster(tgt, mn.atk, false, mn.mojimon ? 'mojimon' : 'minion');
+        if (mn.mojimon) mn._lungeT = game.time;   // v0.29.448 — melee lunge stamp
         mn.cd = 400;
         spawnSmoothImpact(_tcx, _tcy, '#9944cc');
       }
@@ -56286,6 +56336,12 @@ function updateMinions(dt) {
     // projectile: mob projectiles are owner:'enemy' (they damage the PLAYER)
     // and the pipelines are not safely swappable.
     if (mn.mojimon) {
+      // v0.29.450 — death hardening: the generic minion death check lives
+      // inside the contact-damage branch, so HP zeroed by any OTHER means
+      // (future damage sources, debug pokes) left a 0-HP mon walking
+      // around. The loop is reverse-indexed, so splicing here is safe —
+      // the defeat watch below then fires the shatter FX.
+      if (mn.currentHp <= 0) { game.minions.splice(i, 1); continue; }
       // v0.29.435 — keep-up: beyond ~a screen of separation (portals within
       // a map, long falls, launch pads) it blinks to your side rather than
       // pathing across half the world. Companion first, wanderer second.
@@ -56314,7 +56370,12 @@ function updateMinions(dt) {
           mn.shootTimer = _hits ? mn.shootCd : 400;   // quick re-check when nothing was in range
         }
       }
-      if (player.mojimon && player.mojimon.out) player.mojimon.out.hpFrac = mn.maxHp > 0 ? mn.currentHp / mn.maxHp : 1;
+      if (player.mojimon && player.mojimon.out) {
+        player.mojimon.out.hpFrac = mn.maxHp > 0 ? mn.currentHp / mn.maxHp : 1;
+        // v0.29.448 — last-known position, so the defeat FX below can fire
+        // at the death spot after the generic splice has removed the body.
+        player.mojimon.out.x = mn.x + mn.w / 2; player.mojimon.out.y = mn.y + mn.h / 2;
+      }
     }
   }
   // v0.29.434 — MojiMon defeat watch. The mon dies through the generic minion
@@ -56330,8 +56391,33 @@ function updateMinions(dt) {
     let _mmAlive = false;
     for (const _mn of game.minions) if (_mn.mojimon) { _mmAlive = true; break; }
     if (!_mmAlive) {
+      // v0.29.448 — a defeat is a MOMENT, not a toast: chain-shatter sigil
+      // and a class-colour burst at the spot it fell, plus the wrong-key
+      // chain SFX (a break, not a victory).
+      const _ox = player.mojimon.out.x, _oy = player.mojimon.out.y;
+      if (_ox != null && typeof spawnSpriteBurst === 'function') spawnSpriteBurst(_ox, _oy, 'qte_break', { size: 180, life: 36 });
+      if (_ox != null) {
+        const _cc = (typeof _mojimonClassColor === 'function') ? _mojimonClassColor() : '#8fd4ff';
+        for (let _i = 0; _i < 12; _i++) {
+          const _a = (_i / 12) * Math.PI * 2;
+          game.particles.push({ x: _ox, y: _oy, vx: Math.cos(_a) * 3.5, vy: Math.sin(_a) * 3.5 - 1, life: 34, color: _i % 2 ? _cc : '#ffffff', size: 3 });
+        }
+      }
+      if (typeof _playUiSfx === 'function') _playUiSfx('qte_wrong');
       player.mojimon.out = null;
       if (typeof showToast === 'function') showToast('⛓ Your MojiMon was defeated!', 'rare');
+    }
+  }
+  // v0.29.448 — RESTED TOAST: fires once when the 5-minute cooldown expires
+  // with nothing fielded (a cd that expires while a mon is out is noise).
+  // The undefined→false initial transition cannot toast on boot because the
+  // gate requires the PREVIOUS state to have been hot.
+  if (player.hp > 0 && player.mojimon && player.mojimon.roster && !player.mojimon.out) {   // hp-gated like the defeat watch above (review)
+    let _hasMon = false; for (const _k in player.mojimon.roster) { _hasMon = true; break; }
+    if (_hasMon) {
+      const _hot = player.mojimon.cdUntil > Date.now();
+      if (game._mmCdHot && !_hot && typeof showToast === 'function') showToast('⛓ MojiMon rested — ready to summon! (U panel)', 'epic');
+      game._mmCdHot = _hot;
     }
   }
 }
