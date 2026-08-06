@@ -8113,6 +8113,12 @@ The sleeping world is listening.</div>
     #codex-bestiary .cdx-cell.locked:hover{ transform:none; background:rgba(255,255,255,0.03); }
     #codex-bestiary .cdx-frame{ width:64px; height:64px; border-radius:10px; border:2px solid #3a3450; background:rgba(10,6,24,0.5); display:flex; align-items:center; justify-content:center; overflow:hidden; box-shadow:inset 0 0 12px rgba(8,4,22,0.5); }
     #codex-bestiary .cdx-spr{ width:100%; height:100%; object-fit:contain; }
+    /* v0.29.422 — shiny trophy marks. The wrapper carries the same hue filter
+       the live shiny renders with; the pip is anchored to .cdx-frame, which is
+       why the frame gains position:relative below. */
+    #codex-bestiary .cdx-frame{ position:relative; }
+    #codex-bestiary .cdx-shiny-wrap{ width:100%; height:100%; display:flex; align-items:center; justify-content:center; }
+    #codex-bestiary .cdx-shiny-pip{ position:absolute; top:1px; right:2px; font-size:11px; line-height:1; text-shadow:0 0 5px #ffe680; pointer-events:none; }
     #codex-bestiary .cdx-dot{ width:42px; height:42px; border-radius:50%; box-shadow:0 0 0 2px rgba(0,0,0,0.4) inset; }
     #codex-bestiary .cdx-silh{ font-size:30px; color:#5a546e; font-weight:800; }
     #codex-bestiary .cdx-num{ font-size:9px; color:#8a82a4; letter-spacing:0.5px; }
@@ -9173,7 +9179,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.418';
+const GAME_VERSION = 'v0.29.422';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -34087,6 +34093,29 @@ function _gravBandClamp(mitigated, band) {
 // values land at 60-120 ms) are unaffected because the cap only clamps
 // the peak.
 function addHitStop(ms) { game.hitStop = Math.min(150, Math.max(game.hitStop, ms)); }
+// v0.29.422 — camera impact punch. `amt` is a fraction (0.02 = 2% in). Takes
+// the MAX of the current punch rather than adding, so a burst of crits in one
+// frame reads as one strong punch instead of stacking into a telescope. Capped
+// at 6%: past that the crop starts hiding UI-adjacent action, and playtesting
+// a zoom this frequent rewards subtlety over spectacle. Reduced-motion users
+// opt out entirely — this is exactly the kind of involuntary camera move that
+// triggers motion sickness.
+function addZoomPunch(amt) {
+  if (_lxReduceMotion()) return;
+  game._zoom = Math.min(1.06, Math.max(game._zoom || 1, 1 + amt));
+}
+// Cached prefers-reduced-motion read. The CSS blocks honour the query via
+// @media, but there was no JS-side answer — so a JS-driven camera move (the
+// one thing CSS cannot reach) had no way to opt out. Evaluated once: the
+// matchMedia object is live, but re-querying per hit is needless work.
+let _lxRM = null;
+function _lxReduceMotion() {
+  if (_lxRM === null) {
+    try { _lxRM = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+    catch (_e) { _lxRM = false; }
+  }
+  return _lxRM;
+}
 function flash(a) {
   // v0.26.x audit FIX — Reduce Motion now also dampens full-screen flashes (a
   // photosensitivity concern), not just screen shake. Cap the intensity rather
@@ -34462,6 +34491,11 @@ const GAME_SAVE_FIELDS = [
   'mapHistory',
   'dailyState','prestige','comboRecord','muted',
   'bestiary','towerBestFloor','mojidexSeen',
+  // v0.29.422 — shiny sightings, keyed by monster type. Separate from
+  // mojidexSeen so the Mojidex can show "seen / seen shiny" as two distinct
+  // states. A shiny is a bragging right; losing the record on reload would
+  // make the whole 1/512 chase pointless, so it is persisted from day one.
+  'mojidexShiny',
   // v0.25.686 — visitedMaps was being WRITTEN at L17940 + L33334 (every
   // map enter / world-map render) but NOT persisted. Silently lost every
   // reload. Fix: include it in the save whitelist. The object is a small
@@ -44661,6 +44695,12 @@ function _codexRenderBestiary() {
       inner = spr
         ? `<img class="cdx-spr" src="${spr.src}" alt="${nm}">`
         : `<div class="cdx-dot" style="background:radial-gradient(circle at 35% 30%, ${t.shell || '#888'}, ${t.color || '#666'});"></div>`;
+      // v0.29.422 — shiny badge. A species you have seen shiny gets a ✨ pip
+      // and its dex sprite rendered in the SAME hue the live shiny uses, so
+      // the Mojidex doubles as the trophy cabinet for the 1/512 chase.
+      if (game.mojidexShiny && game.mojidexShiny[k]) {
+        inner = `<div class="cdx-shiny-wrap" style="filter:${_shinyFilterFor(k)};">${inner}</div><span class="cdx-shiny-pip">✨</span>`;
+      }
     }
     cells.push(
       `<div class="cdx-cell${seen ? '' : ' locked'}" title="${seen ? nm : 'Undiscovered'}"${seen ? ` onclick="_codexOpenDossier('${k}')"` : ''}>` +
@@ -50193,6 +50233,17 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // v0.26.x — Per user "reduce the occurrence of elite / elder". 0.13 → 0.07 → 0.03.
   const _eliteChance = (typeof game !== 'undefined' && game && game._mapCursed) ? 0.18 : 0.03;   // v0.29.60 — nightmare-touched maps spike elite density (6×)
   const isElite = !isBoss && !isMiniBoss && ((typeof net === 'object' && net && net._coopForceElite) || Math.random() < _eliteChance);   // v0.27.2 co-op — honor a forced-elite mirror spawn (b===3) so a guest's mirror matches the host's elite variant
+  // v0.29.422 — SHINY VARIANTS. 1/512 (Pokémon's classic post-Gen-6 odds) on
+  // any non-boss spawn: a palette-shifted twin with its own sparkle, chime and
+  // Bestiary slot. The hue is derived from the monster TYPE, not the roll, so
+  // a given species' shiny always looks the same — that consistency is what
+  // makes a shiny recognisable and worth screenshotting. Bosses are excluded:
+  // they are authored, one-off encounters, and a recoloured Gravitos would
+  // read as a bug rather than a prize.
+  // The roll is deliberately AFTER the elite roll so the two are independent —
+  // a shiny elite is a legitimate (and very rare) double.
+  const _shinyForced = (typeof net === 'object' && net && net._coopForceShiny);
+  const isShiny = !isBoss && (_shinyForced || Math.random() < (1 / 512));
   // Tower escalation multipliers compound on top of regular tiering
   const towerHp  = game.tower ? (game._towerHpMul  || 1) : 1;
   const towerAtk = game.tower ? (game._towerAtkMul || 1) : 1;
@@ -50384,6 +50435,7 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     isBoss: !!isBoss,
     isMiniBoss: !!isMiniBoss,
     isElite,
+    isShiny,   // v0.29.422 — palette-shifted rare variant (see the roll above)
     attackTimer: 0, attackCooldown: 0,
     patternTimer: 0, patternState: 'idle',
   });
@@ -50402,6 +50454,31 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // hand-tuning each entry. The existing 25%-HP enrage at L34589 still
   // layers another ×0.75 on top, so a low-HP boss ends up at 0.7 × 0.75
   // ≈ 0.525× of the baseline — meaningful but not frame-spam.
+  // v0.29.422 — SHINY ANNOUNCE. A shiny you don't notice is a shiny that never
+  // happened, so the spawn gets a ring of star particles and a chime. Fired at
+  // spawn rather than on first sight because the spawn IS the moment — mobs
+  // spawn near the player in this engine, not streamed in from off-screen.
+  // Toast is 'legendary' so it uses the same gold treatment as a boon drop.
+  if (isShiny) {
+    const _sh = game.monsters[game.monsters.length - 1];
+    if (_sh) {
+      for (let i = 0; i < 14; i++) {
+        const a = (i / 14) * Math.PI * 2;
+        if (typeof _budgetedParticlePush === 'function') {
+          if (!_budgetedParticlePush({
+            x: _sh.x + _sh.w / 2, y: _sh.y + _sh.h / 2,
+            vx: Math.cos(a) * 3.2, vy: Math.sin(a) * 3.2 - 1,
+            life: 46, color: i % 2 ? '#ffffff' : '#ffe680', size: 3,
+          })) break;
+        }
+      }
+      if (!game.mojidexShiny) game.mojidexShiny = {};
+      game.mojidexShiny[type] = true;
+      if (typeof showToast === 'function') showToast('✨ SHINY ' + (_sh.name || 'monster') + ' appeared!', 'legendary');
+      if (typeof audio !== 'undefined' && audio && audio.play) audio.play('levelup');
+      if (typeof _lxPadRumble === 'function') _lxPadRumble('levelup');   // celebratory roll — the existing kind that fits a prize
+    }
+  }
   if (isBoss) {
     const _spawned = game.monsters[game.monsters.length - 1];
     if (_spawned && _spawned.shootCd) {
@@ -68673,6 +68750,12 @@ function hitMonster(m, dmg, isCrit, skill) {
     const _frac = finalDmg / Math.max(1, m.maxHp || m.currentHp + finalDmg);
     if (_frac >= 0.25 || (isCrit && _frac >= 0.15)) {
       if (typeof addHitStop === 'function') addHitStop(Math.min(90, 35 + _frac * 110));
+      // v0.29.422 — the same "this hit was heavy" gate now also leans the
+      // camera in a touch. Deliberately on THIS gate rather than on every
+      // crit: an AoE crit build crits constantly, and a punch per crit would
+      // be a permanent telescope. addZoomPunch takes a max, so simultaneous
+      // hits still read as one punch.
+      if (typeof addZoomPunch === 'function') addZoomPunch(Math.min(0.025, 0.01 + _frac * 0.03));
     }
   } catch (_e) {}
   // v0.26.261 — Stamp m._killedByCrit when the killing blow is a crit.
@@ -68695,6 +68778,11 @@ function hitMonster(m, dmg, isCrit, skill) {
   if (m.currentHp <= 0 && skill !== 'thorns') {
     const _rank = m.isBoss ? 2 : (m.isMiniBoss || (m.traits && m.traits.miniElite)) ? 1 : 0;
     addHitStop(_rank === 2 ? 140 : _rank === 1 ? 110 : 70);
+    // v0.29.422 — finisher camera punch, scaled by the same rank the rest of
+    // this block uses. A trash-mob kill gets a barely-there 1.5%; a boss gets
+    // 5% and lands on top of the v0.29.418 slow-mo, so the world crawls AND
+    // leans in on the killing blow.
+    if (typeof addZoomPunch === 'function') addZoomPunch(_rank === 2 ? 0.05 : _rank === 1 ? 0.03 : 0.015);
     if (_rank === 2) { if (typeof addShake === 'function') addShake(10); flash(0.4); }
     else if (_rank === 1) { if (typeof addShake === 'function') addShake(5); flash(0.22); }
     const _fLow = (typeof _perfLowFx === 'function' && _perfLowFx());
@@ -84036,7 +84124,14 @@ function drawBackground() {
     // the 0.12 backdrop and the 1.0 play field (see _lxMidgroundFor above).
     // Drawn after the tint so they sit IN the scene, before sky-life/props so
     // wisps and world props still read as nearer than the skyline.
-    _lxDrawMidground(_md);
+    // v0.29.422 — HOTFIX, not my feature: this call shipped to main without
+    // its definition, so drawBackground threw on EVERY frame. The loop's
+    // try/catch re-queued rAF (hence no visible freeze) but the whole draw
+    // pass after this point was skipped and the console filled at 60 Hz.
+    // Guarded with the same `typeof` idiom used throughout this file, so the
+    // midground simply starts working the moment its definition lands —
+    // deliberately not implementing it here, that is the other session's.
+    if (typeof _lxDrawMidground === 'function') _lxDrawMidground(_md);
     // v0.25.153 — sky-life overlay (parallax cloud wisps + distant birds)
     // moved behind the _ART_FX_ENABLED gate. User reported the always-on
     // cloud + bird passes as ugly + laggy on top of the static painted
@@ -89352,6 +89447,28 @@ function drawAfterImages() {
 // the portal's screen position. Bake to a 160×160 ellipse once at first
 // use; drawPortals blits it under each portal with composite='lighter'.
 let _portalHaloCanvas = null;
+// v0.29.422 — SHINY palette. Hue is a hash of the monster type string, so the
+// same species always shines the same colour (recognisable, screenshot-worthy)
+// while different species differ. The 137.5° step is the golden angle — it
+// spreads successive hashes as far apart on the colour wheel as possible, so
+// neighbouring type names don't land on near-identical hues. Saturation and
+// brightness are lifted a little so a shiny reads as "special" even when its
+// hue lands near the original. Strings are cached: the filter string is built
+// once per type, not per draw.
+const _SHINY_FILTER_CACHE = Object.create(null);
+function _shinyFilterFor(type) {
+  const k = type || '?';
+  const hit = _SHINY_FILTER_CACHE[k];
+  if (hit) return hit;
+  let h = 0;
+  for (let i = 0; i < k.length; i++) h = (h * 31 + k.charCodeAt(i)) | 0;
+  // 24 buckets, not 16: at 16 the first six species already collided twice.
+  // 24 golden-angle steps stay visually distinct while cutting collisions.
+  // Some collisions are inevitable across 113 species and are fine — two
+  // species sharing a shiny palette is normal (Pokémon does it too).
+  const deg = Math.round((((h % 24) + 24) % 24) * 137.5) % 360;
+  return (_SHINY_FILTER_CACHE[k] = 'hue-rotate(' + deg + 'deg) saturate(1.7) brightness(1.12)');
+}
 // v0.26.x perf — boss-portal FILTERED bakes. ctx.filter (sepia/hue-rotate) on a
 // drawImage forces a slow CPU filter pass PER PORTAL PER FRAME; bake the
 // filtered halo + filtered portal sprite once and blit plain thereafter.
@@ -99918,6 +100035,16 @@ function _drawMonsterSprite(m, sx, sy) {
     if (_ac.s !== 1 || _ac.dx || _ac.dy) { ctx.translate(_ac.dx * targetH, _ac.dy * targetH); ctx.scale(_ac.s, _ac.s); }
   }
   _lxUseEntityImageQuality(ctx);
+  // v0.29.422 — SHINY palette shift. Set on the shared canvas state here so
+  // every draw branch below (anim sheet / state frame / baked cache / raw)
+  // inherits it without four separate patches; the enclosing ctx.restore()
+  // clears it. This uses ctx.filter rather than the baked-canvas pattern the
+  // boss portals use, and that is a deliberate difference of SCALE: portals
+  // are large and redraw every frame, while shinies are 1-in-512 — at most
+  // one or two ~60 px sprites on screen, where a filter pass is noise. The
+  // hue comes from a hash of the monster TYPE, so a species' shiny always
+  // looks the same and stays recognisable between sightings.
+  if (m.isShiny) ctx.filter = _shinyFilterFor(m.type);
   // Compute Y so the character's bbox-bottom lands on the foot line, with a
   // tiny ground bleed for ground mobs and a 18% lift for floating ones.
   const meta = MONSTER_SPRITE_META[m.type];
@@ -110400,6 +110527,24 @@ function loop(time) {
   // resamples EVERY sprite through bilinear filtering for the entire shake
   // (soft/blurry frames). Integer shake keeps the impact feel, stays crisp.
   ctx.translate(Math.round(game.shakeX), Math.round(game.shakeY));
+  // v0.29.422 — IMPACT ZOOM. A crit or a boss finisher punches the camera in
+  // by a couple of percent and eases back out. Scaling about the SCREEN CENTRE
+  // (not the player) is deliberate: the camera already keeps the player near
+  // centre, and a centre-anchored zoom can only ever CROP inward — it can
+  // never pull world edges into view, which a player-anchored zoom would do
+  // at map boundaries. Decay is per-frame toward 1.0; the whole thing is a
+  // no-op (and skips both transform calls) at rest.
+  if (game._zoom === undefined) game._zoom = 1;
+  if (game._zoom !== 1) {
+    game._zoom += (1 - game._zoom) * 0.12;
+    if (Math.abs(game._zoom - 1) < 0.0008) game._zoom = 1;
+  }
+  const _zm = game._zoom;
+  if (_zm !== 1) {
+    ctx.translate(W / 2, H / 2);
+    ctx.scale(_zm, _zm);
+    ctx.translate(-W / 2, -H / 2);
+  }
 
   ctx.clearRect(-30, -30, W + 60, H + 60);
   drawBackground();
