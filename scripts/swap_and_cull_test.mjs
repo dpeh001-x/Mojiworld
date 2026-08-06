@@ -43,6 +43,44 @@ const peer = await page.evaluate(() => {
     stairRaw: /const syy = fx\.y;/.test(s),
   };
 });
+// RUNTIME proof, not just a source match: render a peer with the camera
+// scrolled 2000px down (a tower map) and count draw calls. The source check
+// alone would pass on a build where the convention was right but the cull was
+// still wrong, so this drives the real function.
+const vis = await page.evaluate(() => {
+  const g = eval('game'), CTX = eval('ctx'), N = eval('net');
+  const VH = eval('H');                       // not `H` — TDZ shadowing
+  const saved = { peers: N.peers, camY: g.camera.y, camX: g.camera.x,
+                  myId: N.myId, ws: N.ws, connected: N.connected };
+  // _mpDrawPeers bails unless co-op looks active; without this the FLAT
+  // baseline reads 0 too and the probe "proves" a working fix broken.
+  N.myId = 1; N.connected = true; N.ws = { readyState: 1, send() {} };
+  const p0 = eval('player'); if (!p0.cls) p0.cls = 'warrior';
+  let drew = 0;
+  const o = { di: CTX.drawImage, fr: CTX.fillRect, f: CTX.fill, ft: CTX.fillText, arc: CTX.arc };
+  const spy = function () { drew++; };
+  const run = (camY, peerWorldY) => {
+    g.camera.y = camY; g.camera.x = 0;
+    N.peers = { 7: { id: 7, name: 'Vert', map: g.currentMap, x: 400, y: peerWorldY,
+                     _rx: 400, _ry: peerWorldY, hp: 100, maxHp: 100, cls: 'warrior',
+                     _last: performance.now(), level: 10, facing: 1 } };
+    drew = 0;
+    CTX.drawImage = spy; CTX.fillRect = spy; CTX.fill = spy; CTX.fillText = spy; CTX.arc = spy;
+    try { eval('_mpDrawPeers')(); } catch (e) {}
+    CTX.drawImage = o.di; CTX.fillRect = o.fr; CTX.fill = o.f; CTX.fillText = o.ft; CTX.arc = o.arc;
+    return drew;
+  };
+  const vertical = run(2000, 2000 + VH / 2);   // tower map, peer mid-viewport
+  const offTop = run(2000, 200);               // genuinely above the viewport
+  const flat = run(0, VH / 2);                 // baseline
+  g.camera.y = saved.camY; g.camera.x = saved.camX; N.peers = saved.peers;
+  N.myId = saved.myId; N.ws = saved.ws; N.connected = saved.connected;
+  return { vertical, offTop, flat };
+});
+ok('a peer RENDERS on a vertical map (camera.y 2000) — the actual bug', vis.vertical > 0, vis);
+ok('and still renders on a flat map', vis.flat > 0, vis);
+ok('and is still culled when genuinely off-screen', vis.offTop === 0, vis);
+
 ok('peers are drawn in raw world Y', peer.rawWorldY);
 ok('the double camera.y subtraction is gone', peer.doubleGone);
 ok('the peer cull compares in the same space it draws in', peer.cullIsCameraRelative);
