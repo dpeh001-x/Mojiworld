@@ -9179,7 +9179,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.422';
+const GAME_VERSION = 'v0.29.423';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -89255,28 +89255,39 @@ function drawAmbient() {
       if (sx < -20 || sx > W + 20) continue;
       ctx.globalAlpha = Math.min(1, p.life / 100);
       if (p.type === 'ember') {
-        ctx.fillStyle = 'rgba(255,128,40,0.35)';
-        ctx.fillRect(sx - 2, p.y - 2, 5, 5);
+        // v0.29.417 — round halo stamps replace the square glows (see the
+        // FX STAMP FACTORY note). Alpha multiplied, not set: pass 1 already
+        // stamped the life fade into globalAlpha, and the next particle
+        // re-sets it, so no restore is needed.
+        if (LX_FX_SOFT) { ctx.globalAlpha *= 0.55; ctx.drawImage(_fxStamp('glow', '#ff8028', 12), sx - 6, p.y - 6, 12, 12); }
+        else { ctx.fillStyle = 'rgba(255,128,40,0.35)'; ctx.fillRect(sx - 2, p.y - 2, 5, 5); }
       } else if (p.type === 'firefly') {
         const pul = 0.5 + Math.sin(p.pulse) * 0.5;
-        ctx.fillStyle = 'rgba(255,238,136,0.35)';
         const r = 2 + pul * 3;
-        ctx.fillRect(sx - r, p.y - r, r * 2, r * 2);
+        if (LX_FX_SOFT) { ctx.globalAlpha *= 0.55; const _d = 2 * Math.round(r); ctx.drawImage(_fxStamp('glow', '#ffee88', _d), sx - r, p.y - r, r * 2, r * 2); }
+        else { ctx.fillStyle = 'rgba(255,238,136,0.35)'; ctx.fillRect(sx - r, p.y - r, r * 2, r * 2); }
       } else if (p.type === 'firefly_dense') {
         // v0.26.240 — Same shape as firefly but brighter (0.50 alpha vs 0.35),
         // wider radius (3 + pul * 5 vs 2 + pul * 3), and a hot inner ring on
         // bright frames. Sells "ancient ruins overgrown with thick fireflies".
         const pul = 0.55 + Math.sin(p.pulse * 1.3) * 0.45;
-        ctx.fillStyle = 'rgba(255,238,160,0.50)';
         const r = 3 + pul * 5;
-        ctx.fillRect(sx - r, p.y - r, r * 2, r * 2);
-        if (pul > 0.85) {
-          ctx.fillStyle = 'rgba(255,250,200,0.55)';
-          ctx.fillRect(sx - 2, p.y - 2, 5, 5);
+        if (LX_FX_SOFT) {
+          ctx.globalAlpha *= 0.70;
+          const _d = 2 * Math.round(r);
+          ctx.drawImage(_fxStamp('glow', '#ffeea0', _d), sx - r, p.y - r, r * 2, r * 2);
+          if (pul > 0.85) ctx.drawImage(_fxStamp('dot', '#fffac8', 5), sx - 2.5, p.y - 2.5, 5, 5);
+        } else {
+          ctx.fillStyle = 'rgba(255,238,160,0.50)';
+          ctx.fillRect(sx - r, p.y - r, r * 2, r * 2);
+          if (pul > 0.85) {
+            ctx.fillStyle = 'rgba(255,250,200,0.55)';
+            ctx.fillRect(sx - 2, p.y - 2, 5, 5);
+          }
         }
       } else /* wisp */ {
-        ctx.fillStyle = p.color + '55';
-        ctx.fillRect(sx - 4, p.y - 4, 9, 9);
+        if (LX_FX_SOFT) { ctx.globalAlpha *= 0.50; ctx.drawImage(_fxStamp('glow', p.color, 12), sx - 6, p.y - 6, 12, 12); }
+        else { ctx.fillStyle = p.color + '55'; ctx.fillRect(sx - 4, p.y - 4, 9, 9); }
       }
     }
     ctx.restore();
@@ -89344,13 +89355,17 @@ function drawAmbient() {
       ctx.fillRect(sx, p.y, 2, 2);
     } else if (p.type === 'firefly_dense') {
       // v0.26.240 — Crisp core for firefly_dense (halo lives in pass 1).
-      // 3 × 3 core instead of 2 × 2 to read denser at distance.
-      ctx.fillRect(sx, p.y, 3, 3);
+      // v0.29.417 — 3 px reads as a square at DPR; round dot instead.
+      if (LX_FX_SOFT) ctx.drawImage(_fxStamp('dot', p.color, 4), sx - 2, p.y - 2, 4, 4);
+      else ctx.fillRect(sx, p.y, 3, 3);
     } else if (p.type === 'wisp') {
       // Crisp wisp core (halo lives in pass 1).
       const pul = 0.6 + Math.sin(p.pulse * 0.5) * 0.4;
       ctx.fillRect(sx, p.y, 2, 2);
-      if (pul > 0.8) ctx.fillRect(sx - 1, p.y - 1, 4, 4);
+      if (pul > 0.8) {
+        if (LX_FX_SOFT) ctx.drawImage(_fxStamp('dot', p.color, 5), sx - 2.5, p.y - 2.5, 5, 5);   // v0.29.417
+        else ctx.fillRect(sx - 1, p.y - 1, 4, 4);
+      }
     } else if (p.type === 'sand') {
       // Wind-blown sand — tiny drifting dots
       ctx.fillRect(sx, p.y, 1, 1);
@@ -100748,14 +100763,43 @@ function drawMonster(m) {
     const _midY = (m.y + m.h) - _vh / 2;        // visual centre (foot-anchored)
     const _topY = (m.y + m.h) - _vh;
     const _pulse = 0.5 + 0.5 * Math.sin((game.time || 0) * 0.4);
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = 0.16 + 0.14 * _pulse;
-    ctx.fillStyle = '#ffcc33';
-    ctx.beginPath();
-    ctx.ellipse(_cx, _midY, _vw * 0.60, _vh * 0.58, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    if (LX_FX_SOFT) {
+      // v0.29.422 — this used to be a HARD-EDGED filled ellipse: a flat
+      // yellow disc laid over the boss, which both hid the art and read as
+      // a placeholder shape rather than an effect. Now it is the feathered
+      // 'rim' stamp — clear through the middle so the boss stays legible,
+      // swelling to a peak at the silhouette edge, feathering out to
+      // nothing. Same single drawImage cost as the fill it replaced.
+      const _d = Math.ceil(Math.max(_vw, _vh) * 1.35 / 16) * 16;   // bucketed stamp size
+      const _rim = _fxStamp('rim', '#ffcc33', _d);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.45 + 0.35 * _pulse;
+      ctx.drawImage(_rim, _cx - _vw * 0.78, _midY - _vh * 0.75, _vw * 1.56, _vh * 1.50);
+      // Ground pool — the SAME feathered stamp squashed flat. A stroked
+      // ellipse here would reintroduce exactly the hard edge just removed.
+      ctx.globalAlpha = 0.34 + 0.26 * _pulse;
+      const _gw = _vw * 1.5 + 6 * _pulse;
+      ctx.drawImage(_rim, _cx - _gw / 2, (m.y + m.h) - _gw * 0.11, _gw, _gw * 0.22);
+      ctx.restore();
+      if ((game.time % 6) === 0 && typeof _budgetedParticlePush === 'function') {
+        _budgetedParticlePush({
+          x: m.x + m.w * (0.15 + Math.random() * 0.7),
+          y: _midY + _vh * (Math.random() * 0.4),
+          vx: (Math.random() - 0.5) * 0.5, vy: -0.8 - Math.random() * 0.7,
+          life: 26, color: '#ffdf6e', size: 2.6, gravity: 0,
+        });
+      }
+    } else {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.16 + 0.14 * _pulse;
+      ctx.fillStyle = '#ffcc33';
+      ctx.beginPath();
+      ctx.ellipse(_cx, _midY, _vw * 0.60, _vh * 0.58, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
     ctx.save();
     ctx.globalAlpha = 0.85 + 0.15 * _pulse;
     // v0.26.x perf — cached stroked-glyph blit (was font parse + stroke + fill per frame)
@@ -108586,6 +108630,64 @@ function drawDrops() {
   }
 }
 
+// =========================================================================
+// v0.29.417 — FX STAMP FACTORY. Square fillRect glows read as programmer
+// art; per-frame createRadialGradient is too expensive to fix them inline.
+// Middle path: each (kind, color, size) shape is rendered ONCE to a tiny
+// offscreen canvas and blitted with drawImage — same per-frame cost as the
+// fillRect it replaces. Built at 2x so DPR scaling stays crisp.
+//   'glow' — soft round halo, hot centre (particle/ambient halos)
+//   'dot'  — spark core with a white-hot centre (combat particle bodies)
+//   'rim'  — FEATHERED aura: clear in the middle, swelling to a peak near
+//            the silhouette edge, then fading out. No hard edge anywhere.
+// LX_FX_SOFT = false restores every legacy square path (A/B + escape hatch).
+let LX_FX_SOFT = true;
+const _FX_STAMPS = new Map();
+function _fxRgb(hex) {
+  if (typeof hex !== 'string' || hex[0] !== '#') return '255,255,255';
+  const h = (hex.length === 4)
+    ? '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3]
+    : hex;
+  return parseInt(h.slice(1, 3), 16) + ',' +
+         parseInt(h.slice(3, 5), 16) + ',' +
+         parseInt(h.slice(5, 7), 16);
+}
+function _fxStamp(kind, color, d) {
+  const key = kind + '|' + color + '|' + d;
+  let c = _FX_STAMPS.get(key);
+  if (c) return c;
+  if (_FX_STAMPS.size > 512) _FX_STAMPS.clear();   // palette drift backstop
+  c = document.createElement('canvas');
+  const px = Math.max(8, Math.ceil(d) * 2);
+  c.width = px; c.height = px;
+  const g = c.getContext('2d');
+  const h = px / 2;
+  const rg = g.createRadialGradient(h, h, 0, h, h, h);
+  if (kind === 'glow') {
+    rg.addColorStop(0, color); rg.addColorStop(0.40, color);
+    rg.addColorStop(1, 'rgba(0,0,0,0)');
+  } else if (kind === 'rim') {
+    // Six stops, none of them a step: the band ramps up from nothing at the
+    // centre, peaks just inside the outer edge, then feathers out again. A
+    // two-stop ring (transparent -> solid) reads as a drawn circle; this
+    // reads as light coming off the boss.
+    const q = _fxRgb(color);
+    rg.addColorStop(0.00, 'rgba(' + q + ',0)');
+    rg.addColorStop(0.34, 'rgba(' + q + ',0.05)');
+    rg.addColorStop(0.60, 'rgba(' + q + ',0.26)');
+    rg.addColorStop(0.79, 'rgba(' + q + ',0.62)');
+    rg.addColorStop(0.90, 'rgba(' + q + ',0.30)');
+    rg.addColorStop(1.00, 'rgba(' + q + ',0)');
+  } else {
+    rg.addColorStop(0, '#ffffff'); rg.addColorStop(0.30, color);
+    rg.addColorStop(0.72, color); rg.addColorStop(1, 'rgba(0,0,0,0)');
+  }
+  g.fillStyle = rg;
+  g.fillRect(0, 0, px, px);
+  _FX_STAMPS.set(key, c);
+  return c;
+}
+
 // Detect bright colors (high luma or saturated) — those get auto-glow halos
 function _isBrightHex(hex) {
   if (!hex || hex[0] !== '#' || hex.length < 7) return false;
@@ -108695,10 +108797,17 @@ function drawParticles() {
       const sx = p.x - camX;
       if (sx < -10 || sx > W + 10 || p.y < camY - 10 || p.y > camY + H + 10) continue;
       const alpha = p.life < 20 ? (p.life / 20) : 1;
-      ctx.globalAlpha = alpha * 0.35;
-      ctx.fillStyle = p.color;
       const r = p.size + 3;
-      ctx.fillRect(sx - r, p.y - r, r * 2, r * 2);
+      if (LX_FX_SOFT) {
+        // v0.29.417 — round halo stamp (pinned: color+size are fixed per particle)
+        if (!p._sg) p._sg = _fxStamp('glow', p.color, Math.round(r * 2));
+        ctx.globalAlpha = alpha * 0.5;
+        ctx.drawImage(p._sg, sx - r, p.y - r, r * 2, r * 2);
+      } else {
+        ctx.globalAlpha = alpha * 0.35;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(sx - r, p.y - r, r * 2, r * 2);
+      }
     }
     ctx.restore();
   }
@@ -108755,8 +108864,16 @@ function drawParticles() {
     } else {
       const alpha = p.life < 20 ? p.life / 20 : 1;
       if (alpha !== lastAlpha) { ctx.globalAlpha = alpha; lastAlpha = alpha; }
-      if (p.color !== lastColor) { ctx.fillStyle = p.color; lastColor = p.color; }
-      ctx.fillRect(sx - p.size/2, p.y - p.size/2, p.size, p.size);
+      if (LX_FX_SOFT && p.size >= 2.5) {
+        // v0.29.417 — white-hot round spark. Tiny (<2.5 px) trail pixels keep
+        // the cheap fillRect: roundness is invisible at that scale.
+        if (!p._st) p._st = _fxStamp('dot', p.color, Math.round(p.size * 2) / 2 + 1);
+        const _d = p.size + 1;
+        ctx.drawImage(p._st, sx - _d / 2, p.y - _d / 2, _d, _d);
+      } else {
+        if (p.color !== lastColor) { ctx.fillStyle = p.color; lastColor = p.color; }
+        ctx.fillRect(sx - p.size/2, p.y - p.size/2, p.size, p.size);
+      }
     }
   }
   if (lastAlpha !== 1) ctx.globalAlpha = 1;
