@@ -38181,6 +38181,7 @@ function _mpStartKeepalive() {
       if (typeof _coopTickHazards     === 'function') _coopTickHazards();
       if (typeof _coopTickDrops       === 'function') _coopTickDrops();
     } catch (e) { /* a tick hiccup must never kill the interval */ }
+    try { if (typeof _coopReelectTick === 'function') _coopReelectTick(); } catch (e) {}
   }, MP_LIFELINE_MS);
 }
 function _mpStopKeepalive() {
@@ -38449,7 +38450,11 @@ function _coopRecomputeHost() {
   // cutoff _coopHostMap already applies before it stops following a host, so
   // "we stopped following you" and "you are no longer host" now agree instead
   // of disagreeing for 25 seconds.
-  const _now = Date.now();
+  // v0.29.472 — performance.now(), matching how _last is stamped at the
+  // 'state' handler. Comparing a performance.now() stamp against Date.now()
+  // made every peer look ~1.75e12 ms stale, so the loop skipped all of them
+  // and EVERY client elected itself host.
+  const _now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   for (const id in net.peers) {
     const n = +id;
     if (!Number.isFinite(n) || n >= lowest) continue;
@@ -39107,7 +39112,7 @@ function _coopApplyPartyHeal(msg) {
     if (!_p) return;                                        // unknown sender
     if (_p.map !== game.currentMap) return;                 // not on our map
     if (+_p.hp <= 0) return;                                // dead peers cannot heal
-    if (!_mpRateOk(msg.id, 'phl', 2)) return;               // receiver-side cap
+    if (!_mpRateOk(msg.id, 'phl', 8)) return;               // v0.29.472 — 2/s was BELOW the sender's own 150ms (6.6/s) guard, so a priest chaining heal skills lost casts 3 and 4 with no feedback either side
   } catch (e) { return; }
   if (!msg || msg.hm !== game.currentMap) return;
   if (!player || player.hp <= 0) return;   // downed partners go through the revive channel, not heals
@@ -39188,6 +39193,17 @@ function _coopPartyBuff(key, ms, label) {
   } catch (e) {}
 }
 function _coopApplyPartyBuff(msg) {
+  // v0.29.472 — same gate as the heal path. These two ride the same 'ping'
+  // carrier, so gating only the heal left any peer, on any map, able to push
+  // whitelisted buffs to the whole party at the relay's full rate. The
+  // whitelist bounds which buffs, not whether the sender is legitimate.
+  try {
+    const _bp = net.peers && net.peers[msg && msg.id];
+    if (!_bp) return;
+    if (_bp.map !== game.currentMap) return;
+    if (+_bp.hp <= 0) return;
+    if (!_mpRateOk(msg.id, 'pbf', 8)) return;
+  } catch (e) { return; }
   if (!msg || msg.hm !== game.currentMap) return;
   if (!player || player.hp <= 0) return;            // downed partners use the revive channel
   if (!player.buffs) return;
@@ -39509,6 +39525,7 @@ function _coopFollowerContactTick() {
 // modified client just removes. This one runs on the victim's machine, keyed
 // per sender AND per message kind, so one abusive peer cannot starve the rest.
 const _MP_BUCKETS = Object.create(null);
+let _MP_BUCKET_OPS = 0;   // v0.29.472 — amortised prune counter
 function _mpRateOk(id, kind, perSec) {
   const k = String(id) + '|' + kind;
   const now = Date.now();
@@ -39517,6 +39534,15 @@ function _mpRateOk(id, kind, perSec) {
   if (now - b.t >= 1000) { b.n = 0; b.t = now; }
   if (b.n >= perSec) return false;
   b.n++;
+  // v0.29.472 — prune. Ids are relay-assigned and monotonic, so a long session
+  // with churn accumulated entries for every peer that ever joined, and unlike
+  // net.peers these survived the 30s peer prune. Cheap sweep, amortised.
+  if (++_MP_BUCKET_OPS > 512) {
+    _MP_BUCKET_OPS = 0;
+    for (const key in _MP_BUCKETS) {
+      if (now - _MP_BUCKETS[key].t > 60000) delete _MP_BUCKETS[key];
+    }
+  }
   return true;
 }
 function _mpHandle(msg) {
@@ -39583,7 +39609,7 @@ function _mpHandle(msg) {
       if (!net.isHost) return;
       const _dp = net.peers && net.peers[msg && msg.id];
       if (!_dp || _dp.map !== game.currentMap) return;
-      if (!_mpRateOk(msg.id, 'dmg', 20)) return;
+      if (!_mpRateOk(msg.id, 'dmg', 80)) return;   // v0.29.472 — 20 was below real AoE play
       _coopHostApplyDamage(msg.u, +msg.d || 0, !!msg.c, msg.k); return;
     }   // remote damage -> host applies
     case 'kill': _coopApplyKill(msg); return;       // host kill -> peers award XP/coins
