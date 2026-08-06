@@ -121,6 +121,15 @@ if (wAtkTop) fails.push('warrior has the TOP endgame ATK — must be average');
 if (wAtkDev > 0.30) fails.push(`warrior ATK is ${(wAtkDev * 100).toFixed(0)}% from the mean (limit 30%)`);
 if (b.mage.atk < Math.max(...CL.map((c) => b[c].atk))) console.log(`  mage ATK is the highest          : no (informational — glass cannon identity)`);
 else console.log(`  mage ATK is the highest          : yes — pays with the lowest HP band`);
+// v0.29.440 (per user) — rogue and archer must carry MORE HP than mage (the
+// glass cannon is the squishiest, full stop), and the speed anchors are fixed:
+// warrior ~2.5 (was 1.56 — sluggish past the point of fun), mage ~3.5.
+if (b.rogue.hp <= b.mage.hp) fails.push(`rogue HP (${b.rogue.hp}) must exceed mage HP (${b.mage.hp})`);
+if (b.archer.hp <= b.mage.hp) fails.push(`archer HP (${b.archer.hp}) must exceed mage HP (${b.mage.hp})`);
+console.log(`  rogue/archer HP above mage       : ${b.rogue.hp > b.mage.hp && b.archer.hp > b.mage.hp ? 'yes' : '*** FAIL ***'} (${b.rogue.hp} / ${b.archer.hp} vs ${b.mage.hp})`);
+if (b.warrior.spd < 2.3 || b.warrior.spd > 2.7) fails.push(`warrior speed ${b.warrior.spd} outside the 2.5±0.2 anchor`);
+if (b.mage.spd < 3.3 || b.mage.spd > 3.7) fails.push(`mage speed ${b.mage.spd} outside the 3.5±0.2 anchor`);
+console.log(`  speed anchors (war 2.5, mage 3.5): ${b.warrior.spd} / ${b.mage.spd}`);
 
 console.log(`\n${fails.length ? 'FAIL' : 'PASS'} — ${fails.length} violation(s)`);
 for (const f of fails) console.log('  ✗ ' + f);
