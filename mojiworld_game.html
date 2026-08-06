@@ -56125,18 +56125,78 @@ function _mojimonTinted(spr, type) {
   c.fillRect(0, 0, cv.width, cv.height);
   return (_MOJIMON_TINT_CACHE[key] = cv);
 }
+// v0.29.454 — per-FRAME class tint. The old _mojimonTinted cache keys on
+// type|class, which is right for the single static dex sprite but wrong for
+// animation frames: 27 frames per species, and _lxShrinkFrames SWAPS frame
+// objects for baked canvases mid-session, so a string key would pin stale
+// bakes forever. A WeakMap keyed on the frame object itself follows the swaps
+// and lets replaced frames be collected.
+const _MOJIMON_FRAME_TINT = (typeof WeakMap !== 'undefined') ? new WeakMap() : null;
+function _mojimonTintedFrame(frame, type) {
+  if (!frame || !frame.complete || !(frame.naturalWidth > 0)) return frame;
+  const cls = player.cls || '?';
+  if (_MOJIMON_FRAME_TINT) {
+    const hit = _MOJIMON_FRAME_TINT.get(frame);
+    if (hit && hit.cls === cls) return hit.cv;
+  }
+  const cv = document.createElement('canvas');
+  cv.width = frame.naturalWidth; cv.height = frame.naturalHeight;
+  const c = cv.getContext('2d');
+  c.drawImage(frame, 0, 0);
+  c.globalCompositeOperation = 'source-atop';
+  c.fillStyle = _mojimonRgba(_mojimonClassColor(), 0.38);   // same strength as the static tint
+  c.fillRect(0, 0, cv.width, cv.height);
+  if (_MOJIMON_FRAME_TINT) _MOJIMON_FRAME_TINT.set(frame, { cls, cv });
+  return cv;
+}
 function _mojimonDraw(mn, sx, sy) {
   const t = (typeof monsterTypes === 'object') ? monsterTypes[mn.type] : null;
-  const spr = (typeof _monsterDexSprite === 'function') ? _monsterDexSprite(mn.type, t || {}) : null;
+  // v0.29.454 — LIVE SPECIES ANIMATION (per user "the bind monster plays the
+  // same animation like the monster: attack, idle, walking"). Same frame sets
+  // a wild one uses (Sprites/monsters/{idle,walk,attack}/<type>_*.webp), same
+  // per-entity phasing (v0.29.418: attack starts at frame 0, idle/walk carry
+  // a desync seed). Deliberately NOT _monsterStateFrame: its proximity
+  // trigger poses ATTACK whenever the *player* stands within 1.2×w — and a
+  // companion lives at the player's side, so it would never leave the attack
+  // pose. Companion states instead:
+  //   attack — mn.atkAnimUntil, stamped only when it actually strikes
+  //   walk   — real displacement (EMA of |Δx|, the v0.29.273 signal, so the
+  //            follow-lerp reads as walking even when vx is not the mover)
+  //   idle   — otherwise
+  let frame = null, _isAtkFrame = false;
+  if (typeof _monsterFramesFor === 'function' && typeof _bossLoopFrame === 'function' && typeof _mobAnimPhase === 'function') {
+    if (mn._animPX == null) mn._animPX = mn.x;
+    const _dxm = Math.min(12, Math.abs(mn.x - mn._animPX));   // teleport-clamped, like drawMonster
+    mn._animPX = mn.x;
+    mn._animXV = (mn._animXV || 0) * 0.8 + _dxm * 0.2;
+    const set = _monsterFramesFor(mn.type);
+    const _nowA = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    if (mn.atkAnimUntil && _nowA < mn.atkAnimUntil) {
+      frame = _bossLoopFrame(set.attack, _BOSS_ATK_FRAME_MS, 480, _mobAnimPhase(mn, 'attack', false));
+      _isAtkFrame = !!frame;
+    } else if (_mobWalking(mn)) {
+      frame = _bossLoopFrame(set.walk, _BOSS_WALK_FRAME_MS, 480, _mobAnimPhase(mn, 'walk', true));
+    } else {
+      frame = _bossPingPongFrame(set.idle, _BOSS_IDLE_FRAME_MS, 480, _mobAnimPhase(mn, 'idle', true));
+    }
+  }
+  // Undecoded frames fall back to the static dex sprite, exactly like the
+  // wild-monster path falls back to its static art.
+  const spr = frame || ((typeof _monsterDexSprite === 'function') ? _monsterDexSprite(mn.type, t || {}) : null);
   const footY = sy + mn.h;
   ctx.save();
   if (mn.spawn > 0) ctx.globalAlpha = Math.max(0.25, 1 - mn.spawn / 18);
   if (spr) {
     const aw = spr.naturalWidth || 1, ah = spr.naturalHeight || 1;
-    const dh = Math.max(36, Math.min(200, mn.h * 1.1));   // v0.29.453 — draw at true species scale (cap was 110)
+    let dh = Math.max(36, Math.min(200, mn.h * 1.1));   // v0.29.453 — draw at true species scale (cap was 110)
+    // v0.29.454 — padded weapon-swing attack frames (fatDragon, forgewight…)
+    // hold the body inside a transparent-padded canvas; wild monsters scale
+    // the draw box back up via _ATK_FRAME_SCALE so the body keeps its idle
+    // size. The companion plays the same frames, so it needs the same scale.
+    if (_isAtkFrame && typeof _ATK_FRAME_SCALE === 'object' && _ATK_FRAME_SCALE[mn.type]) dh *= _ATK_FRAME_SCALE[mn.type];
     const dw = dh * aw / ah;
     ctx.translate(sx + mn.w / 2, footY);
-    // v0.29.448 — idle bob (±1.5px sine) + melee lunge (a 4px dart toward
+    // v0.29.450 — idle bob (±1.5px sine) + melee lunge (a 4px dart toward
     // the target for ~8 frames after a hit). Together they make the sprite
     // read as a creature rather than a decal; both live inside this
     // translate so the HP bar and hitbox stay planted.
@@ -56152,7 +56212,11 @@ function _mojimonDraw(mn, sx, sy) {
     ctx.fillStyle = _mojimonRgba(_mojimonClassColor(), 0.20);   // v0.29.453 — glow up with the tint
     ctx.beginPath(); ctx.ellipse(0, -dh * 0.45, dw * 0.62, dh * 0.55, 0, 0, Math.PI * 2); ctx.fill();
     if ((mn.facing | 0) < 0) ctx.scale(-1, 1);
-    ctx.drawImage(_mojimonTinted(spr, mn.type), -dw / 2, -dh, dw, dh);
+    // v0.29.454 — anim frames tint through the per-frame WeakMap cache;
+    // the static dex fallback keeps its warm type|class cache. Routing a
+    // frame through _mojimonTinted would pin whatever frame came first into
+    // that string cache and freeze the animation at one tinted pose.
+    ctx.drawImage(frame ? _mojimonTintedFrame(spr, mn.type) : _mojimonTinted(spr, mn.type), -dw / 2, -dh, dw, dh);
   } else {
     ctx.fillStyle = (t && t.color) || '#8fd4ff';
     ctx.fillRect(sx, sy, mn.w, mn.h);
@@ -56163,7 +56227,7 @@ function _mojimonDraw(mn, sx, sy) {
   const bw = Math.max(36, mn.w);
   const bx = sx + mn.w / 2 - bw / 2, by = sy - 10;
   const pct = mn.maxHp > 0 ? Math.max(0, Math.min(1, mn.currentHp / mn.maxHp)) : 1;
-  // v0.29.448 — the ally bar speaks the same chip-damage grammar as every
+  // v0.29.450 — the ally bar speaks the same chip-damage grammar as every
   // other bar since v0.29.414: hold ~20 frames, then drain toward truth.
   let _g = mn._hpG;
   if (_g === undefined) { _g = pct; mn._hpGAt = game.time; }
@@ -56502,7 +56566,10 @@ function updateMinions(dt) {
         // re-taunting the victim onto the player (measured: 26 of 60
         // aggro samples flipped to the player before this line changed).
         hitMonster(tgt, mn.atk, false, mn.mojimon ? 'mojimon' : 'minion');
-        if (mn.mojimon) mn._lungeT = game.time;   // v0.29.448 — melee lunge stamp
+        if (mn.mojimon) mn._lungeT = game.time;   // v0.29.450 — melee lunge stamp
+        // v0.29.454 — drive the species ATTACK animation exactly like a wild
+        // monster's contact hit does (520ms ≈ one 9-frame loop at 48ms/frame).
+        if (mn.mojimon) mn.atkAnimUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + 520;
         mn.cd = 400;
         spawnSmoothImpact(_tcx, _tcy, '#9944cc');
       }
@@ -56536,6 +56603,8 @@ function updateMinions(dt) {
             const _ddx = (_t2.x + _t2.w / 2) - _mnCx, _ddy = (_t2.y + _t2.h / 2) - _mnCy;
             if (_ddx * _ddx + _ddy * _ddy < 420 * 420 && Math.abs(_ddy) < 260) {
               hitMonster(_t2, mn.atk, false, 'mojimon');
+              // v0.29.454 — the ranged volley plays the attack loop too
+              mn.atkAnimUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + 520;
               spawnSmoothImpact(_t2.x + _t2.w / 2, _t2.y + _t2.h / 2, '#7fd4ff');
               for (let _p = 0; _p < 5; _p++) {
                 const _fr = _p / 5;
