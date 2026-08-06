@@ -9294,7 +9294,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.444';
+const GAME_VERSION = 'v0.29.445';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -55725,8 +55725,8 @@ function _allyPlatformStep(ally, target) {
 // unknowingly reverse them:
 //   • CAPTURE reuses the Boss Shackle QTE plumbing — but inverted. The boss
 //     version is the boss shackling the PLAYER; here the same arrow-sequence
-//     card is the binding ritual: weaken an eligible wild monster below 30%
-//     HP, stand close, and the ritual starts. Complete the sequence and the
+//     card is the binding ritual: get CLOSE to an eligible wild monster and
+//     the ritual starts (no weakening needed). Complete the sequence and the
 //     monster is bound; fail and it stays wild (60s before the next attempt).
 //   • The companion is a game.minions entry (mojimon:true), so it inherits
 //     the whole ally stack for free: seek/roam AI, platform climbing,
@@ -55870,7 +55870,9 @@ function _mojimonQteTry(m, dt) {
   if ((game._mojimonQteCdT || 0) > game.time) return;
   if (typeof _QTE === 'undefined' || _QTE.active) return;
   if (m.currentHp <= 0 || m._dying || m.isMiniBoss || m.isElite) return;
-  if (m.currentHp > m.maxHp * 0.30) return;                       // must be weakened
+  // v0.29.445 — the 30%-HP weaken gate is REMOVED per user: proximity to an
+  // eligible wild one is enough. The 60s retry cooldown below is what keeps
+  // the auto-fire from spamming, not the HP gate.
   if ((game.bestiary[m.type] | 0) < MOJIMON_KILLS_REQ) return;    // species mastery gate
   const mm = _mojimonEnsure();
   if (mm.roster[m.type]) return;                                  // one binding per species
@@ -55966,10 +55968,20 @@ function renderMojiMonPanel() {
   const cdLeft = Math.max(0, mm.cdUntil - Date.now());
   const fmtCd = (ms) => { const t = Math.ceil(ms / 1000); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
   const rosterKeys = Object.keys(mm.roster);
-  let html = '<div style="display:flex; gap:10px; align-items:stretch; margin-bottom:10px;">' +
+  // v0.29.445 — themed shell: ludo.ai backdrop behind everything, logo in a
+  // banner row. The dark gradient ABOVE the art keeps text at readable
+  // contrast no matter what the art does; art failing to load leaves the
+  // gradient alone, so the panel never breaks on a missing file.
+  let html = '<div style="position:relative; border-radius:12px; overflow:hidden; padding:12px; ' +
+    'background:linear-gradient(rgba(16,10,32,0.86), rgba(16,10,32,0.93)), url(' + String.fromCharCode(39) + 'Sprites/ui/mojimon_bg.webp' + String.fromCharCode(39) + ') center/cover;">' +
+    '<div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">' +
+    '<img src="Sprites/ui/mojimon_logo.png" alt="" style="width:56px; height:56px; object-fit:contain; filter:drop-shadow(0 0 8px rgba(160,120,255,0.6));" onerror="this.style.display=' + String.fromCharCode(39) + 'none' + String.fromCharCode(39) + '">' +
+    '<div><div style="font-size:20px; font-weight:900; letter-spacing:1px; background:linear-gradient(90deg,#c9b8ff,#7fd4ff); -webkit-background-clip:text; background-clip:text; color:transparent;">MOJIMON</div>' +
+    '<div style="font-size:10px; color:#9b93b8; letter-spacing:2px;">BIND · FIELD · UPGRADE</div></div></div>' +
+    '<div style="display:flex; gap:10px; align-items:stretch; margin-bottom:10px;">' +
     '<div style="flex:1; background:rgba(60,40,110,0.25); border:1px solid rgba(150,120,220,0.35); border-radius:10px; padding:10px;">' +
     '<div style="font-size:13px; font-weight:800; color:#c9b8ff; margin-bottom:4px;">⛓ MOJIMON</div>' +
-    '<div style="font-size:11px; color:#9b93b8; line-height:1.5;">Master a species (<b style="color:#ffd166;">' + MOJIMON_KILLS_REQ.toLocaleString() + '</b> kills), weaken a wild one below <b>30% HP</b>, stand close, and complete the binding sequence. A bound MojiMon fights beside you with <b>10× your max HP</b> and <b>your attack power</b>, using its own species\u2019 attack pattern.</div></div>' +
+    '<div style="font-size:11px; color:#9b93b8; line-height:1.5;">Master a species (<b style="color:#ffd166;">' + MOJIMON_KILLS_REQ.toLocaleString() + '</b> kills), then simply get close to a wild one and complete the binding sequence. A bound MojiMon fights beside you with <b>10× your max HP</b> and <b>your attack power</b>, using its own species\u2019 attack pattern.</div></div>' +
     '<div style="width:240px; background:rgba(20,14,40,0.5); border:1px solid rgba(150,120,220,0.35); border-radius:10px; padding:10px;">' +
     '<div style="font-size:11px; color:#9b93b8;">Summon cooldown</div>' +
     '<div id="mojimon-cd" style="font-size:20px; font-weight:800; color:' + (cdLeft > 0 ? '#ffb866' : '#7fe0a0') + ';" data-until="' + mm.cdUntil + '">' + (cdLeft > 0 ? fmtCd(cdLeft) : 'READY') + '</div>' +
@@ -56029,9 +56041,10 @@ function renderMojiMonPanel() {
         '<span style="width:92px; text-align:right; color:#8a82a4;">' + n.toLocaleString() + ' / ' + MOJIMON_KILLS_REQ.toLocaleString() + '</span></div>';
     }
     if (prog.length && prog[0][1] >= MOJIMON_KILLS_REQ) {
-      html += '<div style="font-size:10px; color:#7fe0a0; margin-top:4px;">✔ Eligible species found — weaken one below 30% HP and get close!</div>';
+      html += '<div style="font-size:10px; color:#7fe0a0; margin-top:4px;">✔ Eligible species found — get close to a wild one to bind it!</div>';
     }
   }
+  html += '</div>';   // close the themed shell
   host.innerHTML = html;
   // Countdown ticker: lives exactly as long as its span does.
   if (cdLeft > 0 && !game._mojimonCdTick) {
@@ -78490,6 +78503,18 @@ function trackPickup(source, info) {
   if (!player.cosmetics) player.cosmetics = { hair:{}, cape:{}, weapon:{} };
   if (source === 'kill' && info && info.type) {
     game.bestiary[info.type] = (game.bestiary[info.type] || 0) + 1;
+    // v0.29.445 — SPECIES MASTERY moment (per user). Exactly-equals, not >=:
+    // this fires once, on the kill that crosses the line, and never again.
+    // Suppressed for already-bound species (Forget + re-grind would re-toast).
+    if ((game.bestiary[info.type] | 0) === (typeof MOJIMON_KILLS_REQ !== 'undefined' ? MOJIMON_KILLS_REQ : 10000) &&
+        typeof monsterTypes === 'object' && monsterTypes[info.type] &&
+        !(player.mojimon && player.mojimon.roster && player.mojimon.roster[info.type])) {
+      const _mmNm = monsterTypes[info.type].name || info.type;
+      if (typeof showToast === 'function') showToast('🏆 SPECIES MASTERED — 10,000 ' + _mmNm + ' kills! Get close to a wild one to BIND it as a MojiMon ⛓', 'legendary');
+      if (typeof flash === 'function') flash(0.35);
+      try { audio.play('levelup'); } catch (_e) {}
+      if (typeof _lxPadRumble === 'function') _lxPadRumble('levelup');
+    }
   } else if (source === 'chest' && info && info.tier) {
     game.bestiary['_chest_' + info.tier] = (game.bestiary['_chest_' + info.tier] || 0) + 1;
   } else if (source === 'boss' && info && info.id) {
@@ -81102,7 +81127,7 @@ function renderDev() {
   // 10000th kill". Deliberately 9,999 and not 10,000: the point is watching
   // the ELIGIBILITY FLIP happen on a real kill, not skipping past it. The
   // spawn button completes the test loop (kill #10,000 → spawn another →
-  // weaken below 30% → the binding QTE fires), and Forget re-arms a species
+  // get close → the binding QTE fires), and Forget re-arms a species
   // so capture can be tested repeatedly.
   const mmSec = makeSection('⛓ MojiMon Lab', '#8fd4ff');
   const mmSel = document.createElement('select');
@@ -81154,7 +81179,7 @@ function renderDev() {
   mmSec.appendChild(mmRow);
   const mmNote = document.createElement('div');
   mmNote.style.cssText = 'color:#bbb; font-size:11px; margin-top:6px; line-height:1.4;';
-  mmNote.textContent = 'Test loop: 9,999 kills → spawn one and kill it (#10,000 flips eligibility) → spawn another, weaken below 30% HP, stand close → the binding QTE fires.';
+  mmNote.textContent = 'Test loop: 9,999 kills → spawn one and kill it (#10,000 flips eligibility + fires the mastery toast) → spawn another and get close → the binding QTE fires.';
   mmSec.appendChild(mmNote);
   grid.appendChild(mmSec);
 }
