@@ -15714,7 +15714,12 @@ function _msApplyOnHit(m, finalDmg, isCrit, skill, guestSafe) {
       const landed = Math.min(finalDmg, m.currentHp);
       const heal = Math.max(1, Math.floor(landed * b.lifesteal));
       const before = player.hp;
-      player.hp = Math.min(player.maxHp, player.hp + heal);
+      // v0.29.463 — was Math.min(player.maxHp, ...). player.maxHp is the RAW
+      // base pool; getMaxHp() applies the class multiplier (1.12-1.30), the
+      // x1.5, mods, gear and prestige HP. Clamping a heal to the base pool
+      // TRUNCATED the player downward: at 631/672 hp a lifesteal tick set hp
+      // to 400. Every other heal site in this file already uses getMaxHp().
+      player.hp = Math.min((typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp, player.hp + heal);
       const got = player.hp - before;
       if (got > 0 && game.damageNumbers) {
         game.damageNumbers.push({ x: player.x + 10, y: player.y - 10, vy: -1.5,
@@ -31038,9 +31043,19 @@ function _lxGfxSwitchChanged() {
   const on = (id) => { const e = document.getElementById(id); return !!(e && e.classList.contains('on')); };
   const cur = { weather: on('set-fx-weather'), ambient: on('set-fx-ambient'),
                 shadows: on('set-fx-shadows'), dmgnum: on('set-fx-dmgnum') };
-  const p = LX_GFX_PRESETS[sel.value];
-  if (p && p.weather === cur.weather && p.ambient === cur.ambient &&
-      p.shadows === cur.shadows && p.dmgnum === cur.dmgnum) return;
+  // v0.29.463 — match against EVERY named preset, not just the current value.
+  // The old check read LX_GFX_PRESETS[sel.value]; once that was 'custom' the
+  // lookup was undefined, the early return could never fire, and the dropdown
+  // was stuck on Custom forever even after the switches returned to a preset.
+  for (const name of ['high', 'medium', 'low']) {
+    const q = LX_GFX_PRESETS[name];
+    if (q.weather === cur.weather && q.ambient === cur.ambient &&
+        q.shadows === cur.shadows && q.dmgnum === cur.dmgnum) {
+      if (sel.value !== name) sel.value = name;
+      if (typeof _lxGfxBase !== 'undefined') _lxGfxBase = name;
+      return;
+    }
+  }
   sel.value = 'custom';
 }
 function openSettingsModal() {
@@ -52070,6 +52085,12 @@ function updatePlayer(dt) {
         life: 18, color: '#ffdd88', size: 2
       });
     }
+    // v0.29.463 — keep the shackle QTE ticking through hit-stun, exactly as the
+    // freeze gate below already does. This gate sits ABOVE it and returned
+    // without calling _qteFrame, so a boss that shackles AND hard-stuns (1800ms
+    // stun vs a 3000ms shackle) ate most of the escape window: presses were
+    // discarded, the bar did not move, and the QTE expired as a FAIL.
+    if (typeof _QTE !== 'undefined' && _QTE.active) _qteFrame(dt, true);
     return;
   }
 
@@ -64016,6 +64037,7 @@ function updateMonsters(dt) {
       //   • Target choice: nearest of {host, alive same-map partners} with
       //     25% hysteresis so the boss commits instead of ping-ponging.
       let _bSwap = null, _bTapHits = null, _bDist = distToPlayer;
+      let _mmPrevAggro = null;   // v0.29.463 — taunt swap restores aggro too
       if (_aggroPeers && _aggroPeers.length) {
         const _bmx = m.x + m.w / 2, _bmy = m.y + m.h / 2;
         const _dHost = Math.hypot(player.x + player.w / 2 - _bmx, player.y + player.h / 2 - _bmy);
@@ -64052,9 +64074,55 @@ function updateMonsters(dt) {
           }
         }
       }
+      // v0.29.459 — MOJIMON TAUNT (per user "ensure the enemies do attack
+      // it"). Same swap-restore the co-op peer aggro above uses, because
+      // bossAI reads the global `player` directly. When the fielded MojiMon
+      // is MEANINGFULLY closer to the boss than the player (60px bias, same
+      // as the ally-target pool) and within 900px, the boss's AI tick aims
+      // at the companion: movement, telegraphs and projectiles target it.
+      // Direct player.hp writes during the swapped tick are discarded on
+      // restore (hp is in the swap set); the companion takes its real damage
+      // through the existing contact-overlap channel in updateMinions.
+      // Co-op partner swap wins if both apply — partners are players.
+      if (!_bSwap && game.minions && game.minions.length) {
+        let _mmBossTank = null;
+        for (const _mn of game.minions) {
+          if (_mn && _mn.mojimon && (_mn.spawn || 0) <= 0 && _mn.currentHp > 0) { _mmBossTank = _mn; break; }
+        }
+        if (_mmBossTank) {
+          const _bmx2 = m.x + m.w / 2, _bmy2 = m.y + m.h / 2;
+          const _dMon = Math.hypot(_mmBossTank.x + _mmBossTank.w / 2 - _bmx2, _mmBossTank.y + _mmBossTank.h / 2 - _bmy2);
+          const _dPl = Math.hypot(player.x + player.w / 2 - _bmx2, player.y + player.h / 2 - _bmy2);
+          if (_dMon + 60 < _dPl && _dMon < 900) {
+            _bSwap = { x: player.x, y: player.y, vx: player.vx, vy: player.vy, facing: player.facing,
+                       hp: player.hp, invulnerable: player.invulnerable, hitStun: player.hitStun,
+                       frozenTimer: player.frozenTimer, freezeTimer: player.freezeTimer,
+                       _slowTimer: player._slowTimer, burnTimer: player.burnTimer,
+                       _poisonTimer: player._poisonTimer, _electrocuteTimer: player._electrocuteTimer };
+            player.x = _mmBossTank.x + _mmBossTank.w / 2 - player.w / 2;
+            player.y = _mmBossTank.y + _mmBossTank.h - player.h;
+            player.vx = 0; player.vy = 0;
+            _bDist = Math.abs((_mmBossTank.x + _mmBossTank.w / 2) - _bmx2);
+            // v0.29.463 — remember and restore. Leaving this set held a hard
+            // reference to a minion that _mojimonDismiss had already spliced
+            // out (never GC'd for the life of the map), and permanently
+            // unlocked the boss's ranged dispatch, which only gates on
+            // aggroTarget being truthy.
+            _mmPrevAggro = { had: true, val: m.aggroTarget };
+            m.aggroTarget = _mmBossTank;   // visible to the generic chase + tests
+            // Same protection the co-op swap has: boss strikes that carry a
+            // position are re-applied at the player's REAL location by the
+            // finally block below, so hugging the boss while the mon tanks
+            // is not free invulnerability.
+            _bTapHits = [];   // v0.29.459 — taunt swap uses the same positional re-apply as co-op
+            game._bossHitTap = (cx, cy, r, d, fr, sl, c) => { _bTapHits.push({ cx, cy, r, d, fr, sl, c }); };
+          }
+        }
+      }
       try {
         bossAI(m, dt, _bDist);
       } finally {
+        if (_mmPrevAggro && _mmPrevAggro.had) { m.aggroTarget = _mmPrevAggro.val; _mmPrevAggro = null; }
         if (_bSwap) {
           for (const _k in _bSwap) player[_k] = _bSwap[_k];
           game._bossHitTap = null;
@@ -69536,7 +69604,7 @@ function hitMonster(m, dmg, isCrit, skill) {
   // attack path shares one roll.
   const _lxEffEva = (m._dirGhostT > 0) ? Math.floor((m.evasion || 0) * 2.5) + 60 : (m.evasion || 0);
   const _lxBasicMiss = (!MISS_EXEMPT_SKILLS.has(skill) && typeof player !== 'undefined' && player && !player._oneShot)
-    ? ((!m.boss && !_rollHitVsLevelGap(m.level || 1)) || (_lxEffEva > 0 && !_rollAccuracyHit(getAccuracy(), _lxEffEva, m.boss ? 0.45 : 0.15)))
+    ? ((!m.boss && !_rollHitVsLevelGap(_mobLevel(m))) || (_lxEffEva > 0 && !_rollAccuracyHit(getAccuracy(), _lxEffEva, m.boss ? 0.45 : 0.15)))
     : false;
   // v0.29.298 — SYNERGY: Shatter Point (freeze + critd). A hit on a FROZEN
   // target is always a critical. Resolved here, before the damage stack reads
@@ -102257,7 +102325,12 @@ function _lxGroundBelow(wx, w, feetY) {
 }
 function _lxDrawBlobShadow(cx, syFeet, feetWorldY, wx, w) {
   if (!LX_ENTITY_SHADOWS) return;
-  if (typeof _perfVeryLowFx === 'function' && _perfVeryLowFx()) return;
+  // v0.29.463 — an EXPLICIT switch beats the tier. Low pins veryLowFx, so
+  // re-enabling Ground Shadows on Low did nothing while the toggle still read
+  // "on" — a settings control that lies. Named presets still defer to the perf
+  // tier; 'custom' means the player set the switches by hand, so honour them.
+  const _gfxCustom = (typeof LX_GFX !== 'undefined' && LX_GFX.quality === 'custom');
+  if (!_gfxCustom && typeof _perfVeryLowFx === 'function' && _perfVeryLowFx()) return;
   const gy = _lxGroundBelow(wx, w, feetWorldY);
   if (gy === null) return;
   const hgt = gy - feetWorldY;                     // px the entity is above ground
