@@ -150,6 +150,49 @@ console.log(`  DEF top/low = warrior/mage      : ${b.warrior.def >= Math.max(...
 console.log(`  MP top = mage, JUMP top = rogue : ${b.mage.mp >= Math.max(...CL.map((c) => b[c].mp)) ? 'yes' : 'FAIL'} / ${b.rogue.jump >= Math.max(...CL.map((c) => b[c].jump)) ? 'yes' : 'FAIL'}`);
 console.log(`  CRIT top = rogue                : ${b.rogue.crit >= Math.max(...CL.map((c) => b[c].crit)) ? 'yes' : '*** FAIL ***'}`);
 
+// v0.29.445 (per user) — ADVANCEMENT BUDGETS. Every job (Lv20) and master
+// (Lv40) stat block is priced with the game's own ITEM_STAT_WEIGHTS and must
+// land in a shared band: jobs 35±10%, masters 60±10%. Before this rule the
+// crit-heavy paths were silently richer — sniper's block priced at 60.0 vs
+// ranger's 21.9 (2.74×), marksman 91.0 vs beastmaster 42.2. Static check —
+// the stat blocks are data, so they are read straight from the game file
+// (same verbatim-extraction discipline as tier_mul_test).
+{
+  const fsMod = await import('node:fs');
+  const pathMod = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const ROOT = pathMod.resolve(pathMod.dirname(fileURLToPath(import.meta.url)), '..');
+  const src = fsMod.readFileSync(pathMod.join(ROOT, 'mojiworld_game.html'), 'utf8');
+  const W = { atk: 3, def: 2, hp: 0.3, mp: 0.2, crit: 2.5, speed: 8, jump: 4 };
+  const wm = src.match(/const ITEM_STAT_WEIGHTS = \{([\s\S]*?)\};/);
+  if (wm) for (const k of Object.keys(W)) {
+    const vm = wm[1].match(new RegExp(`\\b${k}:\\s*([\\d.]+)`));
+    if (vm) W[k] = parseFloat(vm[1]);   // stay synced with the live weights
+  }
+  const price = (block) => {
+    let t = 0;
+    for (const [, k, v] of block.matchAll(/(\w+):\s*(-?[\d.]+)/g)) t += (W[k] || 0) * parseFloat(v);
+    return +t.toFixed(1);
+  };
+  const grab = (re) => [...src.matchAll(re)].map((m) => ({ id: m[1], budget: price(m[2]) }));
+  const jobs = grab(/^\s{2}(\w+): +\{ name:'[^']+', cls:'(?:warrior|mage|archer|rogue)'[\s\S]{0,2000}?stats:\{([^}]+)\}/gm);
+  if (jobs.length !== 9) fails.push(`job scan found ${jobs.length} entries, expected 9 — the regex is missing blocks, fix it before trusting this section`);
+  const masters = (() => {
+    const at = src.indexOf('const MASTERS = {');
+    const seg = src.slice(at, src.indexOf('\n};', at));
+    return [...seg.matchAll(/^\s{2}(\w+):[\s\S]{0,900}?stats:\{([^}]+)\}/gm)].map((m) => ({ id: m[1], budget: price(m[2]) }));
+  })();
+  const band = (rows, lo, hi, label) => {
+    console.log(`\n${label} (budget band ${lo}–${hi})`);
+    for (const r of rows.sort((a, b) => a.budget - b.budget)) {
+      const ok = r.budget >= lo && r.budget <= hi;
+      if (!ok) fails.push(`${label}: ${r.id} budget ${r.budget} outside ${lo}–${hi}`);
+      console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${r.id.padEnd(14)} ${r.budget}`);
+    }
+  };
+  band(jobs, 31.5, 38.5, `JOB advancement budgets (${jobs.length})`);
+  band(masters, 54, 66, `MASTER advancement budgets (${masters.length})`);
+}
 console.log(`\n${fails.length ? 'FAIL' : 'PASS'} — ${fails.length} violation(s)`);
 for (const f of fails) console.log('  ✗ ' + f);
 await browser.close();
