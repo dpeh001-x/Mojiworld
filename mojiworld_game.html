@@ -40201,8 +40201,16 @@ function _mpDrawPeers() {
     const _face = (p.facing === -1) ? -1 : 1;
     const _bob = (!_dead && p.anim === 'run') ? Math.round(Math.sin((game.time + (+id || 0) * 7) * 0.3) * 2) : 0;
     const sx = p._rx - game.camera.x;
-    const sy = p._ry - ((game.camera && game.camera.y) || 0) + _bob;
-    if (sx < -40 || sx > W + 40 || sy < -60 || sy > H + 60) continue;
+    // v0.29.474 — raw world Y. _mpDrawPeers runs INSIDE the camera translate,
+    // like drawMonster/drawPlayer/drawMinions, all of which use raw world Y.
+    // Subtracting camera.y here applied it twice, so on any vertical map
+    // (Frozen Peak, Abyssal Trench, Icy Tower) a partner was drawn thousands
+    // of pixels off-screen — along with their nameplate, DOWN tag and revive
+    // ring, so a downed partner could not be found. The cull now compares in
+    // the same world space it culls monsters in.
+    const sy = p._ry + _bob;
+    const _pCamY = (game.camera && game.camera.y) || 0;
+    if (sx < -40 || sx > W + 40 || sy < _pCamY - 60 || sy > _pCamY + H + 60) continue;
     // v0.29.9 — FULL AVATAR FIRST. Alive peers render with the real
     // character pipeline — same body / hair / eyes / mouth sprites +
     // equipment art the local player uses (v0.29.12: _drawVectorHero,
@@ -57403,7 +57411,7 @@ function drawSmoothFx() {
       const age = fx.maxLife - fx.life;
       if (age < (fx.delay || 0)) continue;        // staggered appearance
       const _camY = (game.camera && game.camera.y) || 0;
-      const syy = fx.y - _camY;
+      const syy = fx.y;   // v0.29.474 — raw world Y, matching every other branch in this loop; subtracting _camY applied the camera twice and hid the trail for the whole icy-tower climb
       if (syy < -60 || syy > H + 60) continue;
       ctx.save();
       ctx.globalAlpha = Math.min(0.85, alpha);
@@ -64300,6 +64308,11 @@ function updateMonsters(dt) {
           const _q = _aggroPeers.find((qq) => qq.id === _chosen);
           if (_q) {
             _bSwap = { x: player.x, y: player.y, vx: player.vx, vy: player.vy, facing: player.facing,
+            // v0.29.474 — Gravitos' Hyperspace Warp writes these three and they
+            // were NOT in the snapshot, so a warp aimed at the companion (or a
+            // co-op partner) left the LOCAL player flagged airborne with zero
+            // coyote time — a dropped jump — and a stale _iceJumpStartY.
+            onGround: player.onGround, coyoteTime: player.coyoteTime, _iceJumpStartY: player._iceJumpStartY,
                        hp: player.hp,
             mp: player.mp,   // v0.29.470 — bossAI writes player.mp DIRECTLY
                              // (King Krook's earthquake zeroes it; Aetherion's
@@ -64335,12 +64348,17 @@ function updateMonsters(dt) {
         for (const _mn of game.minions) {
           if (_mn && _mn.mojimon && (_mn.spawn || 0) <= 0 && _mn.currentHp > 0) { _mmBossTank = _mn; break; }
         }
-        if (_mmBossTank) {
+      if (_mmBossTank) {
           const _bmx2 = m.x + m.w / 2, _bmy2 = m.y + m.h / 2;
           const _dMon = Math.hypot(_mmBossTank.x + _mmBossTank.w / 2 - _bmx2, _mmBossTank.y + _mmBossTank.h / 2 - _bmy2);
           const _dPl = Math.hypot(player.x + player.w / 2 - _bmx2, player.y + player.h / 2 - _bmy2);
           if (_dMon + 60 < _dPl && _dMon < 900) {
             _bSwap = { x: player.x, y: player.y, vx: player.vx, vy: player.vy, facing: player.facing,
+            // v0.29.474 — Gravitos' Hyperspace Warp writes these three and they
+            // were NOT in the snapshot, so a warp aimed at the companion (or a
+            // co-op partner) left the LOCAL player flagged airborne with zero
+            // coyote time — a dropped jump — and a stale _iceJumpStartY.
+            onGround: player.onGround, coyoteTime: player.coyoteTime, _iceJumpStartY: player._iceJumpStartY,
                        hp: player.hp,
             mp: player.mp,   // v0.29.470 — bossAI writes player.mp DIRECTLY
                              // (King Krook's earthquake zeroes it; Aetherion's
@@ -102659,8 +102677,17 @@ function drawMonster(m) {
   // that were *in* the viewport but culled by this bug. Account
   // for camera.y so the cull window matches the actual viewport.
   const _camY = (game.camera && game.camera.y) || 0;
-  if (sx + m.w < 0 || sx > W) return;
-  if (sy + m.h < _camY - 30 || sy > _camY + H + 30) return;
+  // v0.29.474 — cull on the VISUAL box, not the hitbox. Sprites are drawn
+  // foot-anchored and CENTRED, at up to ~2x the hitbox for mobs and more for
+  // bosses (_bossDrawMul defaults to 2.0), so King Krook was being culled with
+  // ~69px still on screen: bosses blinked out as a whole sprite at the edges
+  // instead of sliding off. _visW/_visH are stashed by the draw itself, so
+  // they are undefined on the very first frame — fall back to a generous
+  // multiple rather than the hitbox.
+  const _cvW = m._visW || (m.w * 2.4), _cvH = m._visH || (m.h * 2.4);
+  const _cCx = sx + m.w / 2, _cFootY = sy + m.h;
+  if (_cCx + _cvW / 2 < 0 || _cCx - _cvW / 2 > W) return;
+  if (_cFootY < _camY - 30 || _cFootY - _cvH > _camY + H + 30) return;
   // v0.29.x — ground shadow under every monster (see _lxDrawBlobShadow above).
   // After the cull so off-screen mobs pay nothing; before the body so it
   // renders underneath.
