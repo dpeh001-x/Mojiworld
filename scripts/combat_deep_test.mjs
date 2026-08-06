@@ -43,10 +43,10 @@ const R = await page.evaluate(async () => {
   // the gap so the trait rolls are what get measured.
   player.cls = 'warrior'; player.level = 99; player.maxHp = 5000; player.hp = 5000;
   player.mp = 999; player.maxMp = 999;
-  // The hit-rate curve TOPS OUT at 90% even at equal-or-lower mob level — a
-  // designed 10% baseline miss (discovered when 7 of 25 "phantom dodges"
-  // turned out to be plain misses that neither damaged nor teleported).
-  // +10 ACC reaches the 100 cap so trait tests measure traits, not the floor.
+  // v0.29.473 — the 90% same-level hit cap this suite originally discovered
+  // (7 of 25 "phantom dodges" were plain baseline misses) was retuned to 100
+  // at gap <= 0 per user. baseAcc stays as a guard: if the floor ever comes
+  // back, trait tests still measure traits rather than the floor.
   player.baseAcc = 10;
   loadMap('forest'); game.paused = false;
   const clear = () => { game.monsters.length = 0; game.projectiles.length = 0; game.hazards.length = 0; };
