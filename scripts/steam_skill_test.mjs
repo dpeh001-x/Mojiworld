@@ -7,7 +7,9 @@ const res = [];
 const ok = (n, c, extra = '') => res.push({ n, pass: !!c, extra });
 
 // frontmatter
-ok('has name frontmatter', /^---[\s\S]*?\nname: steam-update\n/.test(skill));
+// \r?\n — the repo checks out CRLF on Windows, so requiring a bare \n after the
+// value failed on a file whose frontmatter was perfectly valid.
+ok('has name frontmatter', /^---[\s\S]*?\r?\nname: steam-update\r?\n/.test(skill));
 ok('has description frontmatter', /\ndescription: .{40,}/.test(skill));
 
 // every repo path the skill names must exist

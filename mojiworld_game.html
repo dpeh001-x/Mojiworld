@@ -2043,9 +2043,16 @@
     transform: scale(1.06) rotate(45deg);
   }
   #settings-btn:active { transform: scale(0.96) rotate(45deg); }
+  /* v0.29.422 — z was 200, BELOW #loading-overlay's 9999. Settings is reachable
+     from the title menu (it lives inside that overlay), so opening it there drew
+     the panel BEHIND the title: elementFromPoint at the centre of
+     settings-modal-bg returned 'menu-newgame'. On a Deck that is the whole
+     Settings screen — and its "Quit to Desktop" row — sitting under the main
+     menu. 10050 clears the title overlay and 10002, and stays well under the
+     99999+ band used by toasts / cutscene overlays, which must still cover it. */
   #settings-modal-bg {
     position: fixed; inset: 0; background: rgba(8,4,16,0.72);
-    z-index: 200; display: none; align-items: center; justify-content: center;
+    z-index: 10050; display: none; align-items: center; justify-content: center;
     backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
   }
   #settings-modal-bg.on { display: flex; }
@@ -9179,7 +9186,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.423';
+const GAME_VERSION = 'v0.29.424';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -34822,14 +34829,38 @@ const _LX_PAD_MODAL_IDS = ['lo-auth', 'settings-modal-bg', 'confirm-modal', 'cla
   'worldmap-modal', 'shop-modal', 'craft-modal', 'enhance-modal', 'recipe-scrolls-modal', 'taxi-modal',
   'multiplayer-modal', 'help-modal', 'lore-modal', 'mojidex-modal', 'tutorial-modal', 'powerup-modal',
   'sage-blessing-modal', 'keybind-modal', 'dev-modal'];
+// v0.29.422 — TOPMOST WINS, not first-listed. Several of these overlays are
+// live at once (at the title, 'lo-auth' and 'class-select-modal' are both
+// displayed), so "first id in an arbitrary array" was standing in for "the one
+// the player is actually looking at" — and it got that wrong the moment a panel
+// opened over the title menu. Reordering the array only moves which screen
+// breaks, and z-index cannot decide it either: lo-auth is a static child of
+// #loading-overlay (z 9999) and reads as z:auto against settings' own value.
+//
+// So ask the browser. elementFromPoint at each candidate's centre reports what
+// actually paints there, which is exactly the thing the pad should drive. List
+// order survives as the tie-break (two overlays can both be "topmost" when they
+// do not overlap) and as the fallback when nothing claims its own centre.
 function _lxPadModalRoot() {
-  for (const id of _LX_PAD_MODAL_IDS) {
-    const el = document.getElementById(id);
+  const cands = [];
+  for (let i = 0; i < _LX_PAD_MODAL_IDS.length; i++) {
+    const el = document.getElementById(_LX_PAD_MODAL_IDS[i]);
     if (!el) continue;
     const r = el.getBoundingClientRect();
-    if (r.width > 4 && r.height > 4 && getComputedStyle(el).visibility !== 'hidden') return el;
+    if (r.width <= 4 || r.height <= 4) continue;
+    if (getComputedStyle(el).visibility === 'hidden') continue;
+    cands.push({ el, i, r });
   }
-  return null;
+  if (cands.length < 2) return cands.length ? cands[0].el : null;
+  let best = null;
+  for (const c of cands) {
+    const cx = Math.max(0, Math.min(window.innerWidth - 1, c.r.left + c.r.width / 2));
+    const cy = Math.max(0, Math.min(window.innerHeight - 1, c.r.top + c.r.height / 2));
+    let hit = null;
+    try { hit = document.elementFromPoint(cx, cy); } catch (e) {}
+    if (hit && (hit === c.el || c.el.contains(hit)) && (!best || c.i < best.i)) best = c;
+  }
+  return (best || cands[0]).el;
 }
 let _lxPadNavPrev = {};
 let _lxPadNavCssDone = false;
@@ -34878,8 +34909,15 @@ function _lxPadMenuNav(root, pad) {
   root._padIdx = idx;
   const el = cur();
   try {
-    const old = root.querySelector('.pad-focus');
-    if (old && old !== el) old.classList.remove('pad-focus');
+    // v0.29.422 — clear the ring DOCUMENT-WIDE, not just inside `root`. The old
+    // root.querySelector only ever cleaned the panel it was already driving, so
+    // the moment the root CHANGED (open Settings over the main menu) the
+    // previous panel kept its ring: two focus rings on screen at once, and the
+    // stale one sits earlier in the document, so anything reading
+    // document.querySelector('.pad-focus') — including the player's eye — reads
+    // the dead one. Reproduced with a synthetic pad: ring on 'menu-coop', open
+    // Settings, and 40 D-pad presses later there were still 2 rings.
+    document.querySelectorAll('.pad-focus').forEach((n) => { if (n !== el) n.classList.remove('pad-focus'); });
     el.classList.add('pad-focus');
     if (moved || lateral) { el.scrollIntoView({ block: 'nearest' }); try { el.focus({ preventScroll: true }); } catch (e) {} }
   } catch (e) {}
