@@ -128,29 +128,6 @@ const ITEMS = {
       'forward speed. Clean readable silhouette, shapes clearly separated, NOT ' +
       'a cluttered overlapping mess. Effect only — no character, no weapon.',
   },
-  // NOTE: the MojiMon tab icon is NOT generated here. Many text-to-image
-  // rolls produced faceless heads and half-discs, so it is now composited from
-  // the real petalfly sprite by tools/make_tab_icon.mjs:
-  //   node tools/make_tab_icon.mjs Sprites/monsters/petalfly.webp \
-  //        Sprites/ui/tab_mojimon.webp --scale 0.72 --eyeY 0.46
-  // v0.29.442 — per user "the new mage energy bolt projectile". Replaces the
-  // blue water-swirl look of p_mage_orb (it read as a wave vortex, not magic).
-  // COMPOSITION CONSTRAINT: drawProjectiles spins this sprite at 0.35
-  // rad/frame (~3.3 rev/s), so the art must be ROUND and read correctly at
-  // every rotation — no directional comet tail, no up/down. The 9-frame
-  // bolt_* anim also layers on top, so the still is the cold-start fallback.
-  p_mage_orb: {
-    dest: join(repoRoot, 'Sprites', 'projectiles', 'p_mage_orb.webp'),
-    fmt: 'webp',
-    prompt:
-      'A crackling ARCANE ENERGY BOLT orb — a perfectly ROUND ball of magical ' +
-      'plasma. Brilliant white-hot core, wrapped in swirling VIOLET and ' +
-      'electric-BLUE arcane energy, with several jagged cyan lightning arcs ' +
-      'crackling across the surface and two or three tiny sparks jumping off ' +
-      'it. The silhouette is a clean CIRCLE that reads identically from every ' +
-      'rotation — no tail, no directional streaks, no top or bottom. Bold ' +
-      'dark-indigo outline, crisp cel-shading, vivid and magical.',
-  },
   // The grail FX was drawn as a winged CROSS with olive-green and lavender
   // wings — it never showed a grail at all, though the skill is "Judgment of
   // the Holy Grail" (ascend, then rain 7 holy pillars). This puts the chalice
