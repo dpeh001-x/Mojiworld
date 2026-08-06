@@ -8899,8 +8899,47 @@ The sleeping world is listening.</div>
         <div class="toggle" id="set-mute" onclick="this.classList.toggle('on'); applySettingsLive();"></div>
       </div>
     </div>
+    <!-- v0.29.428 — GRAPHICS. Preset first, then the individual heavy effects
+         so a player can keep the look they want and drop only what costs them
+         frames. set-lowfx is kept as a hidden mirror of the preset so older
+         code paths and saves that read it keep working. -->
     <div class="settings-row">
-      <label title="Reduce visual effects (particles, shadowBlur, sparkles) for better framerate on slower devices.">Low FX Mode</label>
+      <label title="Overall visual quality. High = every effect on. Medium = drops decorative particles, blurs and aura overlays. Low = also culls cast flashes and turns off weather, ambient life and shadows. Changing an individual effect below switches this to Custom.">Graphics Quality</label>
+      <div class="ctrl" style="justify-content:flex-end;">
+        <select id="set-gfx" onchange="_lxGfxPresetChanged(); applySettingsLive();" style="background:rgba(0,0,0,0.45); color:#ffe08a; border:1px solid #886bb8; border-radius:4px; padding:4px 8px; font-size:12px;">
+          <option value="high">High &mdash; everything on</option>
+          <option value="medium">Medium &mdash; fewer particles</option>
+          <option value="low">Low &mdash; best framerate</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+    </div>
+    <div class="settings-row">
+      <label title="Rain, snow, dust and fog. Turning this off only hides the particles — weather still applies its elemental damage bonuses, so combat is unchanged.">&nbsp;&nbsp;&#8226; Weather Effects</label>
+      <div class="ctrl" style="justify-content:flex-end;">
+        <div class="toggle" id="set-fx-weather" onclick="this.classList.toggle('on'); _lxGfxSwitchChanged(); applySettingsLive();"></div>
+      </div>
+    </div>
+    <div class="settings-row">
+      <label title="Birds, fireflies, drifting motes and the day/night colour grade.">&nbsp;&nbsp;&#8226; Ambient Life &amp; Day/Night</label>
+      <div class="ctrl" style="justify-content:flex-end;">
+        <div class="toggle" id="set-fx-ambient" onclick="this.classList.toggle('on'); _lxGfxSwitchChanged(); applySettingsLive();"></div>
+      </div>
+    </div>
+    <div class="settings-row">
+      <label title="Soft ground shadows under your hero and every monster. Cheap, but one extra fill per visible entity.">&nbsp;&nbsp;&#8226; Ground Shadows</label>
+      <div class="ctrl" style="justify-content:flex-end;">
+        <div class="toggle" id="set-fx-shadows" onclick="this.classList.toggle('on'); _lxGfxSwitchChanged(); applySettingsLive();"></div>
+      </div>
+    </div>
+    <div class="settings-row">
+      <label title="Floating damage numbers. Turning them off helps most in dense fights, where they are the bulk of the on-screen text.">&nbsp;&nbsp;&#8226; Damage Numbers</label>
+      <div class="ctrl" style="justify-content:flex-end;">
+        <div class="toggle" id="set-fx-dmgnum" onclick="this.classList.toggle('on'); _lxGfxSwitchChanged(); applySettingsLive();"></div>
+      </div>
+    </div>
+    <div class="settings-row" style="display:none;">
+      <label>Low FX Mode</label>
       <div class="ctrl" style="justify-content:flex-end;">
         <div class="toggle" id="set-lowfx" onclick="this.classList.toggle('on'); applySettingsLive();"></div>
       </div>
@@ -9453,6 +9492,55 @@ const LX_PERF = {
   veryLowFxUntil: 0,
   _announcedVeryLowFx: false,
 };
+
+// =========================================================================
+// GRAPHICS QUALITY — v0.29.431
+//
+// Until now the only user-facing performance control was one binary "Low FX
+// Mode" toggle, which set LX_PERF.lowFx. The engine already had TWO reduction
+// tiers (lowFx, veryLowFx) plus several independently-gateable effect systems,
+// and none of that was reachable from Settings — the second tier could only be
+// entered by the frame-time monitor, i.e. only AFTER the player had already
+// dropped frames. A player on weak hardware could not pre-emptively turn the
+// heavy things off; they had to lag first and wait for the monitor to react.
+//
+// Now: a High/Medium/Low preset that maps onto those existing tiers, plus
+// per-effect switches for the systems that cost the most full-screen work.
+// The preset sets the switches; changing a switch afterwards is respected and
+// flips the preset to Custom, so the two never silently disagree.
+//
+// IMPORTANT: the weather switch gates RENDERING ONLY. _lxWeather() still
+// returns the real weather so _lxWeatherDmgMul keeps applying — weather is a
+// combat mechanic since v0.29.425, and a graphics option must never quietly
+// change damage numbers.
+// =========================================================================
+const LX_GFX_PRESETS = {
+  high:   { tierLow: false, tierVeryLow: false, weather: true,  ambient: true,  shadows: true,  dmgnum: true },
+  medium: { tierLow: true,  tierVeryLow: false, weather: true,  ambient: true,  shadows: true,  dmgnum: true },
+  low:    { tierLow: true,  tierVeryLow: true,  weather: false, ambient: false, shadows: false, dmgnum: true },
+};
+const LX_GFX = (() => {
+  const d = { quality: 'high', weather: true, ambient: true, shadows: true, dmgnum: true };
+  // Read the saved settings directly — _lxGetSettings() is declared far below
+  // and would be in its temporal dead zone here.
+  try {
+    const raw = localStorage.getItem('LX_SETTINGS');
+    if (!raw) return d;
+    const p = JSON.parse(raw) || {};
+    if (p.gfx) d.quality = p.gfx;
+    if (p.fxWeather === false) d.weather = false;
+    if (p.fxAmbient === false) d.ambient = false;
+    if (p.fxShadows === false) d.shadows = false;
+    if (p.fxDmgNum  === false) d.dmgnum  = false;
+  } catch (e) {}
+  return d;
+})();
+// True when the individual switches no longer match the named preset.
+function _lxGfxIsCustom(s) {
+  const p = LX_GFX_PRESETS[s && s.gfx] || LX_GFX_PRESETS.high;
+  return !!(s.fxWeather !== p.weather || s.fxAmbient !== p.ambient ||
+            s.fxShadows !== p.shadows || s.fxDmgNum !== p.dmgnum);
+}
 
 function _perfTick(dt, time) {
   const frame = Math.min(80, Math.max(0, dt || 16.7));
@@ -30813,6 +30901,15 @@ const LX_SETTINGS_DEFAULTS = {
   shakePct: 100,     // screen-shake intensity % (0 - 100)
   flashPct: 100,     // full-screen flash intensity % (0 - 100, incl. black flashes)
   cbRarity: false,   // v0.29.127 — colorblind-safe loot-rarity palette
+  // v0.29.431 — GRAPHICS QUALITY. 'high' | 'medium' | 'low'. Supersedes the
+  // binary `lowfx` flag, which is kept in the store and written in step with
+  // the preset so every existing localStorage('LX_LOW_FX') reader still works
+  // and an older build reading a newer save still behaves sanely.
+  gfx: 'high',
+  fxWeather: true,     // rain / snow / dust / fog particle pass (VISUAL only)
+  fxAmbient: true,     // birds, fireflies, drifting motes, day/night grade
+  fxShadows: true,     // ground blob shadows under the player + monsters
+  fxDmgNum: true,      // floating damage numbers
 };
 // v0.29.127 — COLORBLIND-SAFE RARITY PALETTE (JS side; CSS overrides live on
 // body.cb-rarity). Okabe-Ito-based hues that stay distinct under deuteranopia,
@@ -30846,8 +30943,43 @@ function _lxGetSettings() {
 function _lxSaveSettings(s) {
   try { localStorage.setItem('LX_SETTINGS', JSON.stringify(s)); } catch (e) {}
 }
+// Picking a preset stamps its switches onto the UI; touching a switch flips the
+// dropdown to Custom. Without this pair the two controls drift apart and the
+// panel lies about what is actually on.
+function _lxGfxApplyPresetToUi(name) {
+  const p = LX_GFX_PRESETS[name];
+  if (!p) return;                                   // 'custom' — leave switches alone
+  const set = (id, on) => { const e = document.getElementById(id); if (e) e.classList.toggle('on', !!on); };
+  set('set-fx-weather', p.weather); set('set-fx-ambient', p.ambient);
+  set('set-fx-shadows', p.shadows); set('set-fx-dmgnum', p.dmgnum);
+  set('set-lowfx', p.tierLow);
+}
+function _lxGfxPresetChanged() {
+  const sel = document.getElementById('set-gfx');
+  if (sel) _lxGfxApplyPresetToUi(sel.value);
+}
+function _lxGfxSwitchChanged() {
+  const sel = document.getElementById('set-gfx');
+  if (!sel) return;
+  const on = (id) => { const e = document.getElementById(id); return !!(e && e.classList.contains('on')); };
+  const cur = { weather: on('set-fx-weather'), ambient: on('set-fx-ambient'),
+                shadows: on('set-fx-shadows'), dmgnum: on('set-fx-dmgnum') };
+  const p = LX_GFX_PRESETS[sel.value];
+  if (p && p.weather === cur.weather && p.ambient === cur.ambient &&
+      p.shadows === cur.shadows && p.dmgnum === cur.dmgnum) return;
+  sel.value = 'custom';
+}
 function openSettingsModal() {
   const s = _lxGetSettings();
+  {
+    const sel = document.getElementById('set-gfx');
+    if (sel) sel.value = _lxGfxIsCustom(s) ? 'custom' : (s.gfx || 'high');
+    const set = (id, on) => { const e = document.getElementById(id); if (e) e.classList.toggle('on', !!on); };
+    set('set-fx-weather', s.fxWeather !== false);
+    set('set-fx-ambient', s.fxAmbient !== false);
+    set('set-fx-shadows', s.fxShadows !== false);
+    set('set-fx-dmgnum',  s.fxDmgNum  !== false);
+  }
   document.getElementById('set-scale').value     = s.scale;
   document.getElementById('set-scale-val').textContent = s.scale.toFixed(2) + '×';
   document.getElementById('set-bgm').value       = s.bgm;
@@ -31147,7 +31279,20 @@ function applySettingsLive() {
     shakePct: document.getElementById('set-shake') ? parseInt(document.getElementById('set-shake').value, 10) : 100,
     flashPct: document.getElementById('set-flash') ? parseInt(document.getElementById('set-flash').value, 10) : 100,
     cbRarity: document.getElementById('set-cbrarity') ? document.getElementById('set-cbrarity').classList.contains('on') : false,
+    gfx: (() => { const e = document.getElementById('set-gfx'); return e ? e.value : 'high'; })(),
+    fxWeather: (() => { const e = document.getElementById('set-fx-weather'); return e ? e.classList.contains('on') : true; })(),
+    fxAmbient: (() => { const e = document.getElementById('set-fx-ambient'); return e ? e.classList.contains('on') : true; })(),
+    fxShadows: (() => { const e = document.getElementById('set-fx-shadows'); return e ? e.classList.contains('on') : true; })(),
+    fxDmgNum:  (() => { const e = document.getElementById('set-fx-dmgnum');  return e ? e.classList.contains('on') : true; })(),
   };
+  // The hidden legacy toggle mirrors the preset's tier so every existing
+  // localStorage('LX_LOW_FX') reader keeps seeing a consistent value.
+  {
+    const p = LX_GFX_PRESETS[s.gfx];
+    if (p) s.lowfx = p.tierLow;
+    const el = document.getElementById('set-lowfx');
+    if (el) el.classList.toggle('on', !!s.lowfx);
+  }
   if (isNaN(s.sfx)) s.sfx = 70;     // safety: missing slider value → default
   if (isNaN(s.shakePct)) s.shakePct = 100;
   if (isNaN(s.flashPct)) s.flashPct = 100;
@@ -31195,6 +31340,29 @@ function _applySettings(s) {
   // AND the runtime flag so the toggle takes effect on the next
   // frame. Also re-seed LX_PERF.lowFx from the localStorage key on
   // boot (see _perfBoot below) so a persisted toggle survives reload.
+  // v0.29.428 — the preset drives both engine tiers; the switches drive their
+  // own systems. 'custom' keeps whatever tier the legacy lowfx flag holds.
+  {
+    const p = LX_GFX_PRESETS[s.gfx];
+    LX_GFX.quality = s.gfx || 'high';
+    LX_GFX.weather = s.fxWeather !== false;
+    LX_GFX.ambient = s.fxAmbient !== false;
+    LX_GFX.shadows = s.fxShadows !== false;
+    LX_GFX.dmgnum  = s.fxDmgNum  !== false;
+    if (p) s.lowfx = p.tierLow;
+    // Hold tier two on for 'low' the way the manual lowFx toggle holds tier
+    // one, so the frame-time monitor cannot release the player's choice.
+    if (typeof LX_PERF !== 'undefined' && LX_PERF) {
+      const wantVery = !!(p && p.tierVeryLow);
+      LX_PERF.veryLowFx = wantVery;
+      LX_PERF.veryLowFxUntil = wantVery
+        ? ((typeof performance !== 'undefined' && performance.now) ? performance.now() + 1e9 : Date.now() + 1e9)
+        : 0;
+      if (!wantVery) LX_PERF._announcedVeryLowFx = false;
+    }
+    try { if (typeof LX_ENTITY_SHADOWS !== 'undefined') LX_ENTITY_SHADOWS = LX_GFX.shadows; } catch (e) {}
+    try { if (typeof LX_AMBIENT_V2 !== 'undefined') LX_AMBIENT_V2 = LX_GFX.ambient; } catch (e) {}
+  }
   if (s.lowfx) {
     localStorage.setItem('LX_LOW_FX', '1');
     if (typeof LX_PERF !== 'undefined' && LX_PERF) {
@@ -89226,7 +89394,7 @@ function updateMapEvents(dt) {
 //   3. BIRDS — max 3, day-only on verdant maps, 3 fillRects each; they
 //      scatter when the player closes in.
 // LX_AMBIENT_V2 = false turns every new path off at runtime (A/B lever).
-let LX_AMBIENT_V2 = true;
+let LX_AMBIENT_V2 = (typeof LX_GFX === 'undefined') || LX_GFX.ambient !== false;   // v0.29.431 — Settings > Graphics
 const _AMB_FB_CACHE = {};
 const _AMB_FB_PRESETS = [
   [/forest|grove|wood|glade|thicket|jade|moss|verd/i,            { sc:0.18, col:'#9ccc70', vx:-0.3,  vy:0.40,  type:'leaf'   }],
@@ -89477,6 +89645,9 @@ function _lxWeather() {
 const _LX_WX_N = 90;
 let _lxWxPool = null;
 function _lxWxTick() {
+  // v0.29.428 — gates the PARTICLE SIM only; _lxWeather / _lxWeatherDmgMul are
+  // deliberately untouched so hiding the visuals never changes damage.
+  if (typeof LX_GFX !== 'undefined' && !LX_GFX.weather) return;
   const kind = _lxWeather();
   if (kind === 'clear') return;
   if (!_lxWxPool) {
@@ -89515,6 +89686,7 @@ function _lxWeatherDmgMul(skill) {
 // fillStyle (rain/snow/dust) or one radial wash (fog). Drawn in SCREEN space
 // — weather is between the camera and the world, so it must not scroll.
 function drawWeather() {
+  if (typeof LX_GFX !== 'undefined' && !LX_GFX.weather) return;   // v0.29.431
   const kind = _lxWeather();
   if (kind === 'clear' || !_lxWxPool) return;
   if (typeof _perfLowFx === 'function' && _perfLowFx() && kind === 'fog') return;
@@ -100966,7 +101138,7 @@ function _nameplateSprite(label, font, color) {
 //     the sprite's own sy), so any camera translate applies to both.
 //   • Cost: one ellipse fill per visible entity; skipped under veryLowFx.
 //   • LX_ENTITY_SHADOWS = false is the kill switch (LX_AMBIENT_V2 pattern).
-let LX_ENTITY_SHADOWS = true;
+let LX_ENTITY_SHADOWS = (typeof LX_GFX === 'undefined') || LX_GFX.shadows !== false;   // v0.29.431 — Settings > Graphics
 function _lxGroundBelow(wx, w, feetY) {
   const md = (typeof game !== 'undefined' && game) ? game.mapData : null;
   if (!md || !md.platforms) return null;
@@ -109773,6 +109945,7 @@ const _dnCritGrad = new Map();
 // measured). Colours come from a tiny fixed palette so the cache stays small.
 const _dnBigGrad = new Map();
 function drawDamageNumbers() {
+  if (typeof LX_GFX !== 'undefined' && !LX_GFX.dmgnum) return;    // v0.29.431
   // v0.25.19 — Phase 4b gate. LXDamageNumberScene on the UI canvas owns
   // the render when flag is on. Vanilla skips entirely.
   if (_phaserHandlingDamageNumbers()) return;
