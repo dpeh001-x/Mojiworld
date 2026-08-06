@@ -110,13 +110,29 @@ jobs:
           # Inject the live multiplayer endpoint so the in-game Multi panel
           # defaults to the production wss:// server instead of localhost.
           # Browsers block ws:// from an https page, so this MUST be a wss:// URL.
+          # v0.29.423 — the game's built-in fallback is now the live relay
+          # (MP_FALLBACK_URL), not ws://localhost:8080, so co-op works on a
+          # plain deploy with no Actions variable set. This step is now an
+          # OVERRIDE for pointing a deploy at a different relay, and it
+          # rewrites the fallback literal — keep the two in sync.
+          DEFAULT_RELAY="wss://mojiworld-mp.onrender.com"
           if [ -n "${MP_WSS_URL}" ]; then
             for f in _site/index.html _site/mojiworld_game.html; do
-              sed -i "s#ws://localhost:8080#${MP_WSS_URL}#g" "$f"
+              sed -i "s#${DEFAULT_RELAY}#${MP_WSS_URL}#g; s#ws://localhost:8080#${MP_WSS_URL}#g" "$f"
             done
             echo "Injected MP endpoint: ${MP_WSS_URL}"
           else
-            echo "::warning::MP_WSS_URL not set — Multi panel will default to ws://localhost:8080 (local only). Set an Actions variable MP_WSS_URL to enable live multiplayer."
+            echo "MP_WSS_URL not set — using the built-in relay ${DEFAULT_RELAY}."
+          fi
+          # Fail loudly if the shipped build's relay DEFAULT is not wss://.
+          # Browsers block ws:// from an https page, so a ws:// default silently
+          # disables co-op for every player on the deploy. Matches only the
+          # MP_FALLBACK_URL assignment — 'ws://localhost:8080' legitimately
+          # remains as the ⚙ Advanced input placeholder and in the LAN help text.
+          if ! grep -qE "const MP_FALLBACK_URL = 'wss://" _site/mojiworld_game.html; then
+            echo "::error::MP_FALLBACK_URL is not a wss:// URL — co-op would be dead on the https deploy."
+            grep -n "const MP_FALLBACK_URL" _site/mojiworld_game.html || true
+            exit 1
           fi
 
           echo "Artifact file count: $(find _site -type f | wc -l)"
