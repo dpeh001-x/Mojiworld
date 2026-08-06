@@ -55828,6 +55828,18 @@ function _mojimonCapture(m) {
   if (Object.keys(mm.roster).length === 1 && !mm.tutSeen) {
     mm.tutSeen = true;
     setTimeout(async () => {
+      // v0.29.452 — dedicated celebration card. This is the payoff for 10,000
+      // kills of one species, and it was being delivered through the GENERIC
+      // #confirm-modal — a text-only yes/no box (its own comment says so) —
+      // as an unstyled wall of six bullets. It also never showed WHICH
+      // creature you had just bound, which is the one thing the player
+      // actually earned. Falls back to the old uiConfirm path if the
+      // celebration builder is unavailable.
+      if (typeof _mojimonFirstBindModal === 'function') {
+        const opened = await _mojimonFirstBindModal(m.type);
+        if (opened && typeof _lxOpenUPanelTab === 'function') _lxOpenUPanelTab('mojimon');
+        return;
+      }
       if (typeof uiConfirm !== 'function') return;
       const ok = await uiConfirm({
         title: '⛓ YOUR FIRST MOJIMON!',
@@ -55839,6 +55851,129 @@ function _mojimonCapture(m) {
     }, 1100);
   }
   if (typeof saveState === 'function') saveState();
+}
+// v0.29.452 — FIRST-BIND CELEBRATION CARD.
+// Built inline and self-contained, the same way _expeditionSeedPrompt does it,
+// rather than reusing #confirm-modal (text-only by its own comment). Resolves
+// TRUE if the player chose to open the MojiMon tab, FALSE for "Got it".
+//
+// Three things the old text-wall could not do:
+//   • show the creature you actually bound (its own sprite, in a medallion)
+//   • rank the information — the headline is the companion, not a bullet list
+//   • feel earned: rays, laurel ribbon, gold, a staged reveal
+// Art: Sprites/ui/mojimon_rays.webp + mojimon_ribbon.webp (generated for this),
+// with the existing mojimon_logo.png kept as the identity anchor.
+function _mojimonFirstBindModal(type) {
+  return new Promise((resolve) => {
+    const nm = (monsterTypes[type] && monsterTypes[type].name) || type || 'Companion';
+    const wrap = document.createElement('div');
+    wrap.id = 'mojimon-firstbind';
+    wrap.style.cssText = 'position:fixed; inset:0; background:radial-gradient(ellipse at center, rgba(38,18,66,.90) 0%, rgba(8,4,16,.96) 70%); z-index:100060; display:flex; align-items:center; justify-content:center; padding:16px; opacity:0; transition:opacity .28s ease;';
+
+    const card = document.createElement('div');
+    card.style.cssText = 'position:relative; width:min(620px,96vw); max-height:94vh; overflow:auto; text-align:center; padding:0 26px 22px; border-radius:20px; background:linear-gradient(180deg,#241338 0%,#1a0d2c 60%,#150a24 100%); border:2px solid #c9a227; box-shadow:0 0 0 1px rgba(255,216,112,.25), 0 24px 70px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.10); font-family:Inter,system-ui,sans-serif; transform:translateY(14px) scale(.96); transition:transform .34s cubic-bezier(.22,1.4,.36,1);';
+
+    // ── hero: rays + medallion + the bound creature ────────────────────────
+    const hero = document.createElement('div');
+    // The rays are 440px inside a 224px band, so they necessarily overflow.
+    // A radial mask fades them out toward the edges instead of letting the
+    // container hard-clip them into flat-topped stubs.
+    hero.style.cssText = 'position:relative; height:224px; margin:0 -26px 4px; display:flex; align-items:center; justify-content:center; overflow:hidden; border-radius:18px 18px 0 0; -webkit-mask-image:radial-gradient(ellipse 62% 74% at 50% 48%, #000 55%, transparent 100%); mask-image:radial-gradient(ellipse 62% 74% at 50% 48%, #000 55%, transparent 100%);';
+    hero.innerHTML =
+      '<img src="Sprites/ui/mojimon_rays.webp" alt="" style="position:absolute; width:440px; height:440px; opacity:.5; animation:mmSpin 26s linear infinite; pointer-events:none;">' +
+      '<img src="Sprites/ui/mojimon_logo.png" alt="" style="position:absolute; width:200px; height:200px; filter:drop-shadow(0 0 26px rgba(180,120,255,.6));">';
+    // the species portrait sits inside the medallion's glass
+    const face = document.createElement('img');
+    face.alt = nm;
+    face.style.cssText = 'position:absolute; width:84px; height:84px; object-fit:contain; margin-top:-7px; image-rendering:auto; filter:drop-shadow(0 3px 7px rgba(0,0,0,.65));';
+    try {
+      const spr = (typeof MONSTER_SPRITES !== 'undefined') && MONSTER_SPRITES[type];
+      if (spr && spr.src) face.src = spr.src;
+      else face.style.display = 'none';
+    } catch (_) { face.style.display = 'none'; }
+    hero.appendChild(face);
+
+    // ── ribbon + names ─────────────────────────────────────────────────────
+    const ribbon = document.createElement('div');
+    ribbon.style.cssText = 'position:relative; margin:-14px auto 2px; width:min(430px,92%); height:104px; display:flex; align-items:center; justify-content:center;';
+    ribbon.innerHTML =
+      '<img src="Sprites/ui/mojimon_ribbon.webp" alt="" style="position:absolute; inset:0; width:100%; height:100%; object-fit:contain;">' +
+      '<div style="position:relative; font-size:19px; font-weight:900; letter-spacing:2.5px; color:#fff6d5; text-shadow:0 2px 4px rgba(0,0,0,.75); margin-top:-6px;">FIRST BIND</div>';
+
+    const nameEl = document.createElement('div');
+    nameEl.style.cssText = 'font-size:23px; font-weight:900; letter-spacing:.5px; color:#ffd870; text-shadow:0 0 18px rgba(255,200,90,.45); margin:2px 0 2px;';
+    nameEl.textContent = nm;
+    const sub = document.createElement('div');
+    sub.style.cssText = 'font-size:12.5px; color:#c8b6e8; margin-bottom:14px;';
+    sub.textContent = '10,000 kills mastered · now fights at your side';
+
+    // ── facts: a compact icon grid, not a bullet wall ──────────────────────
+    const FACTS = [
+      ['⚔', 'Fights on its own', 'Seeks enemies, climbs, uses its species’ attack pattern.'],
+      ['💪', 'Its power is yours', '10× your max HP and your attack damage. It grows as you do.'],
+      ['🛡', 'It draws the hits', 'Monsters target it. It only leaves when ITS HP hits 0.'],
+      ['🚪', 'It stays with you', 'Travels through portals — and survives your death.'],
+      ['⏳', '5-minute cooldown', 'Summoning costs it. Dismissing does not refund it.'],
+      ['✦', 'Upgrade it', 'U panel → MojiMon: HP / ATK / DEF, 1 point per 5 levels, free respec.'],
+    ];
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:grid; grid-template-columns:1fr 1fr; gap:8px; text-align:left; margin:0 2px 18px;';
+    for (const [ico, head, txt] of FACTS) {
+      const cell = document.createElement('div');
+      cell.style.cssText = 'display:flex; gap:9px; padding:9px 10px; border-radius:10px; background:rgba(255,255,255,.045); border:1px solid rgba(201,162,39,.22);';
+      cell.innerHTML =
+        '<div style="font-size:16px; line-height:1.15; flex:none;">' + ico + '</div>' +
+        '<div><div style="font-size:12.5px; font-weight:800; color:#ffd870; margin-bottom:2px;">' + head + '</div>' +
+        '<div style="font-size:11.5px; line-height:1.42; color:#c3b2de;">' + txt + '</div></div>';
+      grid.appendChild(cell);
+    }
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; gap:10px; justify-content:center; flex-wrap:wrap;';
+    const mk = (label, primary) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.style.cssText = 'cursor:pointer; font-family:inherit; font-size:13.5px; font-weight:800; letter-spacing:.4px; padding:11px 22px; border-radius:11px; transition:transform .12s ease, filter .12s ease; ' +
+        (primary
+          ? 'color:#2a1c05; background:linear-gradient(180deg,#ffdc78,#e0a92e); border:2px solid #ffe9a8; box-shadow:0 5px 16px rgba(224,169,46,.4);'
+          : 'color:#e9dcff; background:linear-gradient(180deg,#3d2a5e,#2b1c45); border:2px solid #7a5fb0;');
+      b.onmouseenter = () => { b.style.transform = 'translateY(-1px)'; b.style.filter = 'brightness(1.08)'; };
+      b.onmouseleave = () => { b.style.transform = ''; b.style.filter = ''; };
+      return b;
+    };
+    const openBtn = mk('⛓ Open MojiMon tab', false);
+    const gotBtn = mk('Got it!', true);
+    row.append(openBtn, gotBtn);
+
+    card.append(hero, ribbon, nameEl, sub, grid, row);
+    wrap.appendChild(card);
+
+    // one-shot keyframes for the ray spin (idempotent)
+    if (!document.getElementById('mm-firstbind-kf')) {
+      const st = document.createElement('style');
+      st.id = 'mm-firstbind-kf';
+      st.textContent = '@keyframes mmSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}';
+      document.head.appendChild(st);
+    }
+    document.body.appendChild(wrap);
+    requestAnimationFrame(() => { wrap.style.opacity = '1'; card.style.transform = 'translateY(0) scale(1)'; });
+
+    let done = false;
+    const close = (openTab) => {
+      if (done) return; done = true;
+      wrap.style.opacity = '0';
+      try { window.removeEventListener('keydown', onKey, true); } catch (_) {}
+      setTimeout(() => { try { wrap.remove(); } catch (_) {} resolve(!!openTab); }, 220);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); close(false); }
+    };
+    gotBtn.onclick = () => close(false);
+    openBtn.onclick = () => close(true);
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(false); });
+    window.addEventListener('keydown', onKey, true);
+    try { audio.play('levelup'); } catch (_) {}
+  });
 }
 function _mojimonSummon(type, opts) {
   opts = opts || {};
