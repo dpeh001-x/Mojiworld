@@ -45718,11 +45718,13 @@ function offerPrestige() {
                `• +1% crit chance  (-> +${(p.critBonus || 0) + 1}%, uncapped)\n` +
                `• +12 max HP  (-> +${(p.hpBonus || 0) + 12}, uncapped)\n` +
                `• +1 starting attribute point  (-> +${p.bonusAP + 1})\n\n` +
-               // v0.29.406 — copy follows the reset below. Gear and money are
-               // kept now, so promising they reset would be a lie the player
-               // only discovers after an irreversible confirm.
-               `You KEEP your inventory, equipment, consumables and mojicoins (wallet + Mojibank).\n` +
-               `Reset: level, stats, job/master, talents, skill tree, boons, skill ranks, active quests, boss clears and setshards.\n\n` +
+               // v0.29.460 — per user: "Only equipments are retained on
+               // ascension, every other thing is reset." This REVERSES the
+               // v0.29.406 keep-everything (which was also per user). As
+               // before, the copy must match the reset below exactly — an
+               // irreversible confirm must not lie in either direction.
+               `You KEEP your equipment only — equipped gear and the gear in your inventory.\n` +
+               `EVERYTHING else resets: level, stats, job/master, talents, skill tree, boons, skill ranks, quests, boss clears, setshards, mojicoins (wallet + bank), consumables, non-gear items, and your MojiMon roster + species kill counts.\n\n` +
                `Ascension #${nextCount}.`;
   // v0.25.244 (X4) — in-game styled prestige confirm.
   uiConfirm({
@@ -45821,6 +45823,23 @@ function offerPrestige() {
         player.quests.progress = {};
       }
     }
+    // v0.29.460 — ONLY EQUIPMENT SURVIVES (per user, reversing v0.29.406's
+    // keep-everything which was also per user). Kept: equipped slots +
+    // equipment-type items in the inventory (same predicate the equip UI
+    // uses, including the legacy 'accessorie' spelling). Reset: every other
+    // item, the wallet AND the bank (the bank surviving was the old exploit
+    // route), consumables to the fresh-character kit, the MojiMon roster
+    // (bound species, upgrades, cooldown, fielded mon) and the per-species
+    // kill counts that gate mastery (game.bestiary) — so each ascension's
+    // 10,000-kill mastery grind starts over, per user.
+    player.inventory = (Array.isArray(player.inventory) ? player.inventory : []).filter((it) =>
+      it && (it.slot === 'weapon' || it.slot === 'armor' || it.slot === 'accessory' || it.slot === 'accessorie'));
+    player.mojicoins = 200;
+    player.bankBalance = 0;
+    player.consumables = { hp_s: 10, mp_s: 6 };
+    try { if (typeof _mojimonDismiss === 'function') _mojimonDismiss(true); } catch (e) {}
+    player.mojimon = {};
+    game.bestiary = {};
     player.hp = getMaxHp(); player.mp = getMaxMp();
     showToast(`✨ ASCENSION ${p.count} — you begin anew`, 'legendary');
     flash(0.7); addShake(16); audio.play('levelup');
@@ -55752,6 +55771,17 @@ const MOJIMON_KILLS_REQ = 10000;
 const MOJIMON_CD_MS = 300000;          // 5 minutes
 const MOJIMON_UPG = { hp: 0.08, atk: 0.05, def: 0.03 };   // per-point: +8% HP, +5% ATK, +3% damage reduction
 const MOJIMON_DEF_CAP = 0.60;          // DR ceiling — a mon must never be unkillable
+// v0.29.460 — BALANCE (per user "it should not be overpowered"). The mon shipped
+// with 10× the player's max HP and 100% of their ATK, permanently, on a
+// cooldown that only matters when it dies: a free second player's worth of
+// DPS. Now it is a TANK with real but secondary damage:
+//   HP  6× player max (upgrades to ~13× at the point cap)
+//   ATK 50% of player (upgrades to ~87% at the point cap)
+// Points beyond 15 in one stat stop counting — level 200 would otherwise bank
+// 40 points and push ATK past the player's own.
+const MOJIMON_HP_MULT = 6;
+const MOJIMON_ATK_MULT = 0.5;
+const MOJIMON_UPG_PT_CAP = 15;
 const MOJIMON_UPG_STATS = ['hp', 'atk', 'def'];   // v0.29.446 — the only allocatable keys
 function _mojimonEnsure() {
   if (!player.mojimon || typeof player.mojimon !== 'object') player.mojimon = {};
@@ -55801,10 +55831,11 @@ function _mojimonSpent(rec) {
 function _mojimonStatsFor(type) {
   const mm = _mojimonEnsure();
   const u = (mm.roster[type] && mm.roster[type].upg) || { hp: 0, atk: 0, def: 0 };
+  const _cp = (v) => Math.min(MOJIMON_UPG_PT_CAP, v | 0);   // v0.29.460 — effective cap
   return {
-    maxHp: Math.max(100, Math.floor(getMaxHp() * 10 * (1 + (u.hp | 0) * MOJIMON_UPG.hp))),
-    atk:   Math.max(8, Math.floor(getAtk() * (1 + (u.atk | 0) * MOJIMON_UPG.atk))),
-    defRed: Math.min(MOJIMON_DEF_CAP, (u.def | 0) * MOJIMON_UPG.def),
+    maxHp: Math.max(100, Math.floor(getMaxHp() * MOJIMON_HP_MULT * (1 + _cp(u.hp) * MOJIMON_UPG.hp))),
+    atk:   Math.max(8, Math.floor(getAtk() * MOJIMON_ATK_MULT * (1 + _cp(u.atk) * MOJIMON_UPG.atk))),
+    defRed: Math.min(MOJIMON_DEF_CAP, _cp(u.def) * MOJIMON_UPG.def),
   };
 }
 function _mojimonCapture(m) {
@@ -55851,7 +55882,7 @@ function _mojimonCapture(m) {
       if (typeof uiConfirm !== 'function') return;
       const ok = await uiConfirm({
         title: '⛓ YOUR FIRST MOJIMON!',
-        body: 'You mastered a species (10,000 kills) and BOUND one. Here is how your new companion works:\n\n• It fights on its own — seeks enemies, climbs platforms, uses its species\u2019 attack pattern.\n• Its power is YOURS: 10\u00d7 your max HP, your attack damage. It grows when you do.\n• Monsters will target it — it tanks hits, and it only disappears when ITS HP hits 0.\n• It travels with you through portals, and even survives your death.\n• Summoning costs a 5-minute cooldown. Dismissing does not refund it.\n• U panel \u2192 MojiMon tab: summon, dismiss, and spend upgrade points on HP / ATK / DEF (1 point per 5 levels, free respec).',
+        body: 'You mastered a species (10,000 kills) and BOUND one. Here is how your new companion works:\n\n• It fights on its own — seeks enemies, climbs platforms, uses its species\u2019 attack pattern.\n• Its power is YOURS: 6\u00d7 your max HP, half your attack damage. It grows when you do.\n• Monsters will target it — it tanks hits, and it only disappears when ITS HP hits 0.\n• It travels with you through portals, and even survives your death.\n• Summoning costs a 5-minute cooldown. Dismissing does not refund it.\n• U panel \u2192 MojiMon tab: summon, dismiss, and spend upgrade points on HP / ATK / DEF (1 point per 5 levels, free respec).',
         yesLabel: 'Got it!',
         noLabel: '⛓ Open MojiMon tab',
       });
@@ -55918,7 +55949,7 @@ function _mojimonFirstBindModal(type) {
     // ── facts: a compact icon grid, not a bullet wall ──────────────────────
     const FACTS = [
       ['⚔', 'Fights on its own', 'Seeks enemies, climbs, uses its species’ attack pattern.'],
-      ['💪', 'Its power is yours', '10× your max HP and your attack damage. It grows as you do.'],
+      ['💪', 'Its power is yours', '6× your max HP and half your attack damage — a tank that grows as you do.'],
       ['🛡', 'It draws the hits', 'Monsters target it. It only leaves when ITS HP hits 0.'],
       ['🚪', 'It stays with you', 'Travels through portals — and survives your death.'],
       ['⏳', '5-minute cooldown', 'Summoning costs it. Dismissing does not refund it.'],
@@ -56297,7 +56328,7 @@ function renderMojiMonPanel() {
     '<div style="display:flex; gap:10px; align-items:stretch; margin-bottom:10px;">' +
     '<div style="flex:1; background:rgba(60,40,110,0.25); border:1px solid rgba(150,120,220,0.35); border-radius:10px; padding:10px;">' +
     '<div style="font-size:13px; font-weight:800; color:#c9b8ff; margin-bottom:4px;">⛓ MOJIMON</div>' +
-    '<div style="font-size:11px; color:#9b93b8; line-height:1.5;">Master a species (<b style="color:#ffd166;">' + MOJIMON_KILLS_REQ.toLocaleString() + '</b> kills), then simply get close to a wild one and complete the binding sequence. A bound MojiMon fights beside you with <b>10× your max HP</b> and <b>your attack power</b>, using its own species\u2019 attack pattern.</div></div>' +
+    '<div style="font-size:11px; color:#9b93b8; line-height:1.5;">Master a species (<b style="color:#ffd166;">' + MOJIMON_KILLS_REQ.toLocaleString() + '</b> kills), then simply get close to a wild one and complete the binding sequence. A bound MojiMon fights beside you as a tank: <b>6&times; your max HP</b> and <b>half your attack power</b>, using its own species\u2019 attack pattern.</div></div>' +
     '<div style="width:240px; background:rgba(20,14,40,0.5); border:1px solid rgba(150,120,220,0.35); border-radius:10px; padding:10px;">' +
     '<div style="font-size:11px; color:#9b93b8;">Summon cooldown</div>' +
     '<div id="mojimon-cd" style="font-size:20px; font-weight:800; color:' + (cdLeft > 0 ? '#ffb866' : '#7fe0a0') + ';" data-until="' + mm.cdUntil + '">' + (cdLeft > 0 ? fmtCd(cdLeft) : 'READY') + '</div>' +
@@ -56394,7 +56425,10 @@ window._mojimonUi = {
     // only ever sends +/-1, so this was not reachable by clicking — but the
     // handler is on `window`, so the dev console and any future caller could.
     const step = delta > 0 ? Math.min(delta, free) : delta;
-    rec.upg[stat] = Math.max(0, cur + step);
+    // v0.29.460 — points past the per-stat cap add nothing (see
+    // _mojimonStatsFor), so refuse them here instead of silently wasting them.
+    rec.upg[stat] = Math.max(0, Math.min(MOJIMON_UPG_PT_CAP, cur + step));
+    if (delta > 0 && cur >= MOJIMON_UPG_PT_CAP && typeof showToast === 'function') showToast('Stat maxed (' + MOJIMON_UPG_PT_CAP + ' pts) — invest elsewhere', 'rare');
     // A fielded mon re-derives its stats immediately, preserving HP fraction —
     // an upgrade mid-fight must never top the mon back up to full for free.
     if (mm.out && mm.out.type === type && game.minions) {
