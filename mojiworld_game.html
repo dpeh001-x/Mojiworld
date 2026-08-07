@@ -44886,6 +44886,21 @@ function _renderWorldMapDiagram(host, opts) {
       hopRing.setAttribute('pointer-events', 'none');
       g.appendChild(hopRing);
     }
+    // v0.29.480 — explicit hit target, sized to what the node LOOKS like.
+    // Everything painted above the disc — the 40x40 icon art (corners 28.3
+    // from centre), the r=26 hover halo, the rings, the level pill, the label
+    // — carries pointer-events:none, so the only clickable thing was the r=21
+    // disc while the node reads as ~r=28. The outer ring of the art was dead,
+    // and the halo that lights up under the cursor was not clickable at all.
+    // Transparent fill still hit-tests with pointer-events:'all'. Appended
+    // FIRST so it paints underneath and changes nothing visually. r=27 covers
+    // the icon corners and the hover halo without reaching neighbours.
+    const _hit = document.createElementNS(SVG_NS, 'circle');
+    _hit.setAttribute('class', 'wm-hit');
+    _hit.setAttribute('r', 27);
+    _hit.setAttribute('fill', 'transparent');
+    _hit.setAttribute('pointer-events', 'all');
+    g.appendChild(_hit);
     const _hoverHalo = document.createElementNS(SVG_NS, 'circle');
     _hoverHalo.setAttribute('class', 'wm-hoverhalo');
     _hoverHalo.setAttribute('r', 26);
@@ -45212,8 +45227,13 @@ function _renderWorldMapDiagram(host, opts) {
       if (!_pan) return;
       const { sc } = _scrn();
       const dx = ev.clientX - _pan.sx, dy = ev.clientY - _pan.sy;
-      _panMoved = Math.max(_panMoved, Math.abs(dx) + Math.abs(dy));
-      if (_panMoved < 5) return;
+      // v0.29.480 — Euclidean, not Manhattan, and a roomier threshold. The old
+      // |dx|+|dy| >= 5 scored a 3x3px twitch as 6 and the capture-phase guard
+      // below cancelled the click; the real distance is only 4.2px. Any
+      // slightly shaky click was silently swallowed. 8px true distance still
+      // stops a genuine drag from teleporting you.
+      _panMoved = Math.max(_panMoved, Math.hypot(dx, dy));
+      if (_panMoved < 8) return;
       vb.x = _pan.vx - dx / sc;
       vb.y = _pan.vy - dy / sc;
       _clampVB(); _queueVB();
@@ -45223,7 +45243,7 @@ function _renderWorldMapDiagram(host, opts) {
     svg.addEventListener('pointerleave', _endPan);
     // a real drag must not fire the node click it ends on
     svg.addEventListener('click', (ev) => {
-      if (_panMoved >= 5) { ev.stopPropagation(); ev.preventDefault(); _panMoved = 0; }
+      if (_panMoved >= 8) { ev.stopPropagation(); ev.preventDefault(); _panMoved = 0; }
     }, true);
     svg.addEventListener('dblclick', (ev) => {
       if (ev.target && ev.target.closest && ev.target.closest('.wm-node')) return;
