@@ -161,7 +161,7 @@ const ELEMENT_FLAVOR = [
   [/coral|tide|pearl|sea|brine|ocean|wave/i, 'with a watery splash undertone'],
 ];
 const SIZE_FLAVOR = [
-  [/king|boss|mom|titan|kraken|rexy|tigreal|ele\b|fat|archon|seraph/i, 'deep, large and weighty'],
+  [/king|boss|mom|titan|kraken|legosaurus|tigreal|ele\b|fat|archon|seraph/i, 'deep, large and weighty'],
   [/baby|pup|kin|ling|fly|bun|sprite|cherub|snail|mochi/i, 'small, light and high-pitched'],
 ];
 

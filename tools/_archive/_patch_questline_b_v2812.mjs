@@ -33,9 +33,9 @@ const LONG_DAWN = `
   q_long_dawn_2: {
     name: 'The Long Dawn II — The Three Tyrants', icon: '\u{1F451}', levelReq: 82, prereq: 'q_long_dawn_1',
     story: true,                                   // Everdawn Cycle arc (grants frag_vigil)
-    kind: 'boss', target: 'blockRexy', count: 3,
-    objectives: [ { target: 'blockRexy', count: 1 }, { target: 'koopaKing', count: 1 }, { target: 'octobaby', count: 1 } ],
-    desc: 'Three tyrants felt the sky open and pulled their loops tighter: Rexy, the Warped Tyrant of Blockland; King Koopaloo, the Ember Tyrant on his half-melted throne; and Octobaby, the Eight-Mood Tyrant sulking in the grotto. Each was offered the same morning as everyone else — each chose the nightmare it already knew. Walk the old roads a final time and end all three refusals for good. (If a throne room stands empty, the loop takes about ten minutes to re-knot — the world holds its breath, then tries the nightmare again.) When the last tyrant lets go, the hour they were hoarding falls loose: the Unrefused Hour, the sixth Dawn Fragment. Only then will the Singularity hear you.',
+    kind: 'boss', target: 'legosaurus', count: 3,
+    objectives: [ { target: 'legosaurus', count: 1 }, { target: 'koopaKing', count: 1 }, { target: 'octobaby', count: 1 } ],
+    desc: 'Three tyrants felt the sky open and pulled their loops tighter: Legosaurus, the Warped Tyrant of Blockland; King Koopaloo, the Ember Tyrant on his half-melted throne; and Octobaby, the Eight-Mood Tyrant sulking in the grotto. Each was offered the same morning as everyone else — each chose the nightmare it already knew. Walk the old roads a final time and end all three refusals for good. (If a throne room stands empty, the loop takes about ten minutes to re-knot — the world holds its breath, then tries the nightmare again.) When the last tyrant lets go, the hour they were hoarding falls loose: the Unrefused Hour, the sixth Dawn Fragment. Only then will the Singularity hear you.',
     rewards: { mojicoins: 23500, exp: 12000, gearChance: 1.0, gearSlot: 'accessory', gearTier: 5, dawnFragment: 'frag_vigil', potions: { hp_l: 6, full: 2 } },
   },
 };`;

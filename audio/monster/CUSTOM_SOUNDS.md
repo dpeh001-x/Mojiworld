@@ -74,7 +74,7 @@ Use these exact ids in the filename (`mob_<id>_die.mp3`):
 
 **Celestial / cosmic:** cherub, seraph, archon, nimbusFox, cosmicMochi
 
-**Block-land:** blockPopo, blockHupo, blockEle, blockRhirhi, blockGary, blockTigreal, blockRexy
+**Block-land:** blockPopo, blockHupo, blockEle, blockRhirhi, blockGary, blockTigreal, legosaurus
 
 **Mechanical (Ticket Rush):** ticketMech, conductorMech, expressTicketMech
 
