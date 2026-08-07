@@ -15452,7 +15452,7 @@ const SKILLS = {
   // kit ≈98→≈140 DPS-units) — damage numbers untouched.
   fireball:     { name:'Fireball',       icon:'🔥', cls:'mage', slot:'s', mp:14, cd:2400, desc:'Explodes on impact (180 px AoE). 2.4s recast.' },
   iceSpike:     { name:'Ice Spike',      icon:'❄️', cls:'mage', slot:'a', mp:12, cd:4500, desc:'3 piercing spikes; 50% chance to freeze on hit.' },
-  blink:        { name:'Dimensional Warp', icon:'🌀', cls:'mage', slot:'e', mp:14, cd:2400, desc:'Phase across a dimension. Damages every monster in the path traversed (+100×50 px AoE around it). Hold ↑ while casting (or double-tap ↑) to warp skyward.' },
+  blink:        { name:'Dimensional Warp', icon:'🌀', cls:'mage', slot:'e', mp:14, cd:2400, desc:'Phase across a dimension. Damages every monster in the path traversed (+100×50 px AoE around it).' },
   arcaneBurst:  { name:'Arcane Burst',   icon:'💥', cls:'mage', slot:'w', mp:22, cd:7000, desc:'Massive 320-px AoE explosion centred on you.' },
   // Archmage
   meteor:       { name:'Meteor',         icon:'☄️', cls:'mage', job:'archmage', slot:'q', mp:35, cd:10000, desc:'Call a meteor from above.' },
@@ -30962,23 +30962,9 @@ window.addEventListener('keydown', e => {
     const now = performance.now();
     if (player.lastTapKey === k && (now - player.lastTapTime) < 280 && player.quickDashTimer <= 0 && player.rushTimer <= 0) {
       if (k === 'arrowup') {
-        // v0.29.543 (per user) — the standalone G-cooldown warp (v0.29.504)
-        // read as "casts once": 15-45s master cooldowns with only a fail
-        // buzzer, and silence before a master. Back to the v0.29.499 shape:
-        // route through castSkill('blink') so the warp costs blink MP and
-        // shares blink's own C-key cooldown — recastable every ~2.4s. The
-        // intent flag is set/cleared synchronously so a later keyed cast
-        // can never inherit the vertical mode.
-        // isReady gate mirrors every keyed cast site — castSkill itself does
-        // NOT check cooldown, so the bare call v0.29.499 shipped let the
-        // double-tap bypass it. Not-ready plays the standard fail buzzer.
-        if (typeof isReady !== 'function' || isReady('blink')) {
-          player._blinkUpIntent = true;
-          try { castSkill('blink'); } catch (e) {}
-          player._blinkUpIntent = false;
-        } else {
-          try { audio.play('fail'); } catch (e) {}
-        }
+        // v0.29.504 — standalone mobility warp: 180px up, no damage, G-skill
+        // cooldown, blink MP cost. See _mageUpWarp.
+        try { _mageUpWarp(); } catch (e) {}
       } else {
         quickDash(k === 'arrowleft' ? -1 : 1);
       }
@@ -34164,8 +34150,15 @@ function applyMaster(masterId) {
   if (m.stats.mp && typeof getMaxMp === 'function') player.mp = getMaxMp();
   if (typeof renderSkillBar === 'function') renderSkillBar();
   showToast(`Mastered ${m.name}!`, 'legendary');
-  // v0.29.543 — the v0.29.505 "Upward Warp unlocked" master toast is gone:
-  // the warp is no longer master-gated. It unlocks with blink itself.
+  // v0.29.505 (per user) — the instant the G skill is learnt, tell the mage
+  // line their new mobility exists. Once per character; staggered behind the
+  // mastery toast so the two reads don't collide.
+  if (player.cls === 'mage' && !player._upWarpNoticeShown) {
+    player._upWarpNoticeShown = true;
+    setTimeout(() => {
+      try { showToast('🌀 Upward Warp unlocked — double-tap ↑ to phase skyward!', 'epic'); } catch (e) {}
+    }, 1600);
+  }
   flash(0.7); addShake(8);
   for (let i = 0; i < 3; i++) {
     const a = (i / 3) * Math.PI * 2;
@@ -56522,9 +56515,37 @@ function _basicAttackGateMs() {
 //   cooldown = the player's G-key skill (master signature, slot 'x'),
 //   read live via skillsForClass; 15 s fallback before a master exists.
 // Own cooldown track — independent of the E-blink cooldown.
-// v0.29.543 — _mageUpWarp deleted. The vertical warp is a mode of the
-// blink skill again (C+↑ or double-tap ↑), on blink's own cooldown; a
-// separate G-anchored cooldown track no longer exists.
+function _mageUpWarp() {
+  if (!player || player.cls !== 'mage' || player.hp <= 0) return;
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const _fail = () => { try { if (audio && audio.play) audio.play('fail'); } catch (e) {} };
+  // v0.29.505 (per user) — LOCKED until the G skill is learnt. The warp's
+  // cooldown IS the master-signature skill's, so before a master exists there
+  // is nothing to anchor it to. The gate runs FIRST and returns SILENTLY —
+  // no buzzer, no MP touched — so the gesture gives nothing away before its
+  // one-time unlock announcement in applyMaster.
+  let _cd = 0;
+  try {
+    const kit = skillsForClass(player.cls, player.job, player.master);
+    for (const id in kit) if (kit[id].slot === 'x' && kit[id].cd) { _cd = kit[id].cd; break; }
+  } catch (e) {}
+  if (!_cd) return;   // no G skill learnt — upward warp not yet available
+  if ((player._upWarpCdUntil || 0) > now) { _fail(); return; }
+  // Mirror castSkill's cost pipeline exactly (mage ×0.80 discount, Overload
+  // milestone ×1.5) so the gesture costs the same MP as a keyed warp.
+  let _cost = (typeof SKILLS === 'object' && SKILLS.blink && SKILLS.blink.mp) || 14;
+  _cost = Math.ceil(_cost * 0.80);
+  if (typeof hasMilestone === 'function' && hasMilestone('overload')) _cost = Math.ceil(_cost * 1.5);
+  if (player.mp < _cost) { _fail(); return; }
+  player.mp -= _cost;
+  spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'blink', { size: 140, life: 22 });
+  for (let i = 0; i < 15; i++) { if (!_budgetedParticlePush({ x: player.x + player.w / 2, y: player.y + player.h / 2, vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, life: 25, color: '#aa88ff', size: 3 })) break; }
+  player.y = Math.max(0, player.y - 180);
+  player.vy = 0;
+  player.onGround = false;
+  for (let i = 0; i < 15; i++) { if (!_budgetedParticlePush({ x: player.x + player.w / 2, y: player.y + player.h / 2, vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, life: 25, color: '#aa88ff', size: 3 })) break; }
+  player._upWarpCdUntil = now + _cd;
+}
 function castSkill(id) {
   const s = SKILLS[id];
   if (!s) return;
@@ -60636,18 +60657,12 @@ const SKILL_FNS = {
     // Lv10 distMul and the Hyper Teleport boon compose onto both axes.
     const _blinkBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('blink') : null;
     const _blinkDist = 225 * ((_blinkBonus && _blinkBonus.distMul) || 1);
-    // v0.29.543 (per user) — vertical mode is back inside the skill (the
-    // v0.29.504 standalone warp is deleted). Two ways in: the double-tap-↑
-    // intent flag, or holding ↑ while the C key casts — "press C and up at
-    // the same time". Cost and cooldown are simply blink's own.
-    const _blinkUp = !!player._blinkUpIntent || !!game.keys['arrowup'];
-    const tx = _blinkUp ? player.x
-      : Math.min(game.mapData.worldWidth - player.w, Math.max(0, player.x + player.facing * _blinkDist));
-    const ty = _blinkUp ? Math.max(0, player.y - _blinkDist) : player.y;
+    // v0.29.504 — horizontal-only again: the vertical warp is the standalone
+    // double-tap-↑ _mageUpWarp (180px, no damage, G-skill cooldown).
+    const tx = Math.min(game.mapData.worldWidth - player.w, Math.max(0, player.x + player.facing * _blinkDist));
     // Departure puff
     for (let i=0;i<15;i++) { if (!_budgetedParticlePush({x:player.x+player.w/2,y:player.y+player.h/2,vx:(Math.random()-0.5)*4,vy:(Math.random()-0.5)*4,life:25,color:'#aa88ff',size:3})) break; }
     player.x = tx;
-    if (_blinkUp) { player.y = ty; player.vy = 0; player.onGround = false; }
     // Arrival puff
     for (let i=0;i<15;i++) { if (!_budgetedParticlePush({x:player.x+player.w/2,y:player.y+player.h/2,vx:(Math.random()-0.5)*4,vy:(Math.random()-0.5)*4,life:25,color:'#aa88ff',size:3})) break; }
     player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
@@ -60662,12 +60677,10 @@ const SKILL_FNS = {
     // v0.29.497 — the swept-path AoE follows the warp axis: horizontal warps
     // keep the original 100×50 band; vertical warps rotate it (50 px pad
     // along the travel axis, 25 px across).
-    // v0.29.543 — restored v0.29.497 axis-aware sweep: vertical warps
-    // rotate the 100×50 band (50px pad along travel, 25px across).
-    const lo  = _blinkUp ? (player.x + player.w/2) - 25 : Math.min(startX, tx) - 50;
-    const hi  = _blinkUp ? (player.x + player.w/2) + 25 : Math.max(startX, tx) + (player.w) + 50;
-    const top = _blinkUp ? Math.min(startY, ty) - 50 : (player.y + player.h/2) - 25;
-    const bot = _blinkUp ? Math.max(startY, ty) + player.h + 50 : (player.y + player.h/2) + 25;
+    const lo  = Math.min(startX, tx) - 50;
+    const hi  = Math.max(startX, tx) + (player.w) + 50;
+    const top = (player.y + player.h/2) - 25;
+    const bot = (player.y + player.h/2) + 25;
     // v0.25.658 — P1 REBALANCE. 1.5× was 40% under C-tier target.
     // Bumped to 2.2× — within C-tier budget for a mobility-with-damage skill.
     const _dmg = Math.max(1, Math.floor(getAtk() * 2.2));
@@ -60681,10 +60694,10 @@ const SKILL_FNS = {
       _hits++;
     }
     // Streak of arcane motes along the swept path so the AoE reads visually.
-    const _step = _blinkUp ? (ty - startY) / 15 : (tx - startX) / 15;
+    const _step = (tx - startX) / 15;
     for (let i = 0; i < 3; i++) {
-      const px = _blinkUp ? player.x + player.w / 2 + (Math.random() - 0.5) * 18 : startX + _step * i + player.w / 2;
-      const py = _blinkUp ? startY + _step * i + player.h / 2 : player.y + player.h / 2 + (Math.random() - 0.5) * 18;
+      const px = startX + _step * i + player.w / 2;
+      const py = player.y + player.h / 2 + (Math.random() - 0.5) * 18;
       if (!_budgetedParticlePush({
         x: px, y: py,
         vx: (Math.random() - 0.5) * 1.6,
@@ -83455,14 +83468,15 @@ function renderDev() {
   //     freshly-bumped baselines can be exercised in the skill tree
   //     without extra clicks.
   // Idempotent — re-clicking just re-applies the same values.
-  combSec.appendChild(btn('🏆 MAX STATS (4999 + 50k HP/MP)', () => {   // v0.26.906 — 999 → 4999 per user
-    player.baseAtk   = 4999;
-    player.baseDef   = 4999;
-    player.baseAcc   = 4999;
-    player.baseCrit  = 4999;
+  combSec.appendChild(btn('🏆 MAX STATS (god-mode)', () => {   // v0.26.906 — 999 → 4999 per user; v0.29.543 — derived, see _lxDevGodStats
+    const _god = _lxDevGodStats();
+    player.baseAtk   = _god.atk;
+    player.baseDef   = _god.def;
+    player.baseAcc   = _god.acc;
+    player.baseCrit  = _god.crit;
     // v0.26.028 — Speed capped at 10 (not 999) to prevent wall-clip
     // glitch — 999 outran the collision granularity.
-    player.baseSpeed = 10;
+    player.baseSpeed = _god.speed;
     // v0.26.031 — Per user "there is a glitch that the max stats
     // button alters my jump height, please do not alter my jump
     // height". The v0.26.021 button set baseJump = 999 alongside
@@ -83473,18 +83487,18 @@ function renderDev() {
     // at whatever the player earned via natural progression / SP
     // investment / gear. The dev cheat's purpose is to test high-
     // damage combat encounters, not to alter movement physics.
-    player.maxHp = 50000;
-    player.maxMp = 50000;
-    player.hp    = 50000;
-    player.mp    = 50000;
+    player.maxHp = _god.maxHp;
+    player.maxMp = _god.maxMp;
+    player.hp    = _god.maxHp;
+    player.mp    = _god.maxMp;
     const SP_CAP = 1000;
     player.skillPoints     = SP_CAP;
     player.skillRankPoints = SP_CAP;
     if (typeof updateUI === 'function') updateUI();
-    if (typeof showToast === 'function') showToast('🏆 MAX STATS — 4999 across the board (speed +10), 50k HP/MP', 'legendary');
+    if (typeof showToast === 'function') showToast('🏆 GOD MODE — ATK ' + _god.atk.toLocaleString() + ' · DEF ' + _god.def.toLocaleString() + ' · HP ' + _god.maxHp.toLocaleString(), 'legendary');
     if (typeof flash === 'function') flash(0.35);
     if (typeof addShake === 'function') addShake(6);
-    devLog('Max stats applied: ATK/DEF/ACC/CRIT=4999, SPD=10, HP/MP=50000, SP=1000 (jump preserved)');
+    devLog('God-mode applied (' + _LX_GODMODE_MUL + 'x the achievable ceiling): ATK=' + _god.atk + ', DEF=' + _god.def + ', ACC=' + _god.acc + ', CRIT=' + _god.crit + ', SPD=' + _god.speed + ', HP=' + _god.maxHp + ', MP=' + _god.maxMp + ', SP=1000 (jump preserved)');
   }, '#b8862c'));
 
   // v0.29.541 — the realistic sibling of the button above: the stats a level
@@ -83834,6 +83848,34 @@ function devTeleport(mapId) {
 // for that character — not an estimate. scripts/endgame_profile_test.mjs
 // rebuilds it live and fails if this table drifts from the real values, so a
 // balance change cannot leave it quietly stale.
+// v0.29.543 — DEV GOD-MODE, derived from the achievable ceiling rather than
+// guessed. The old button set a flat 4999, which v0.29.541's measurement showed
+// is ~7x BELOW what a level-100 player reaches (archer 51,867 ATK) — so the
+// "max stats" cheat handed the dev a WEAKER character than a real endgame save,
+// and combat tuning done with it was quietly under-powered.
+//
+// Taking the per-stat maximum across _LX_ENDGAME_PROFILES and multiplying keeps
+// this comfortably above the ceiling for free: if a balance pass moves the
+// endgame table (and endgame_profile_test.mjs fails until it is updated), this
+// rises with it instead of silently falling behind again.
+const _LX_GODMODE_MUL = 10;
+function _lxDevGodStats() {
+  let atk = 0, def = 0, hp = 0, mp = 0, acc = 0;
+  try {
+    for (const p of Object.values(_LX_ENDGAME_PROFILES)) {
+      atk = Math.max(atk, p.atk); def = Math.max(def, p.def);
+      hp = Math.max(hp, p.maxHp); mp = Math.max(mp, p.maxMp); acc = Math.max(acc, p.acc);
+    }
+  } catch (e) { atk = 51867; def = 6745; hp = 38830; mp = 7105; acc = 355; }
+  const M = _LX_GODMODE_MUL;
+  return {
+    atk: atk * M, def: def * M, maxHp: hp * M, maxMp: mp * M, acc: acc * M,
+    crit: 100,                                              // a percentage — 100 is the ceiling, not 4999
+    // v0.26.028 — speed stays at the hard cap: 999 outran collision granularity
+    // and clipped the player through walls.
+    speed: (typeof PLAYER_SPEED_HARD_CAP === 'number') ? PLAYER_SPEED_HARD_CAP : 10,
+  };
+}
 const _LX_ENDGAME_LEVEL = 100;
 const _LX_ENDGAME_PROFILES = {
   warrior: { atk: 32123, def: 6745, maxHp: 38830, maxMp: 4434, crit: 65, speed: 6.94, acc: 355 },
