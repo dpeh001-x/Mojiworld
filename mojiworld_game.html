@@ -9345,7 +9345,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.486';
+const GAME_VERSION = 'v0.29.487';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -12527,6 +12527,67 @@ function _lxMobSetYOff(type, px) {
   else if (_lxMobYOffBaked()[type]) m[type] = 0;
   else delete m[type];
   try { localStorage.setItem('lx_mob_yoff', JSON.stringify(m)); } catch (_) {}
+}
+// v0.29.487 — SINGLE SOURCE OF TRUTH for where a monster sprite's feet land.
+// Per user: "for the mojimon summoned monster, the Y coordinate is a bit off
+// from that of the one in the monster database, ensure that it matches."
+//
+// Root cause: the wild draw anchors the sprite's OPAQUE BBOX bottom to the foot
+// line (sprite art carries transparent padding below the creature), then adds
+// ground-bury / floating-bleed / per-type nudges / a bury clamp / the R-key
+// Monster Plant offset. The companion anchored the raw IMAGE bottom and added
+// only the last of those, so it floated by the padding height — measured across
+// 110 species at up to 21.5 px (razorgale), mean 5.6 px.
+//
+// Extracted rather than copied: duplicating the ladder is exactly how the two
+// paths drifted apart, and every per-type nudge below would have to be added
+// twice forever. Both callers now pass their own (srcH, targetH) and get the
+// identical number. scripts/mojimon_plant_test.mjs asserts parity per species.
+//
+// srcH  — height of the REFERENCE (static) sprite, matching drawMonster's
+//         refImg; bboxBottomY is measured against that image, so passing an
+//         animation frame's height here would mis-scale the anchor.
+// targetH — the rendered BODY height, before any _ATK_FRAME_SCALE blow-up
+//         (callers scale the returned dy by that factor, as drawMonster does).
+function _lxMobPlantDy(type, isFloating, srcH, targetH) {
+  const meta = (typeof MONSTER_SPRITE_META === 'object') ? MONSTER_SPRITE_META[type] : null;
+  // Fallback srcH x 0.92 when bbox detection returns null — assumes the ~8%
+  // bottom padding typical of the generated transparent sprites.
+  const bboxBottomY = (meta && meta.bboxBottomY != null) ? meta.bboxBottomY : Math.floor((srcH || 1) * 0.92);
+  let dy = -((bboxBottomY + 1) / (srcH || 1)) * targetH;
+  if (isFloating) dy -= targetH * FLOATING_GROUND_BLEED;
+  else dy += targetH * GROUND_BURY_FRAC;
+  // per-type "push down" nudge (e.g. slime). Ground mobs only; the bury clamp
+  // below still caps total over-sink at _BURY_MAX_PX.
+  if (!isFloating && typeof _MOB_SPRITE_FOOT_NUDGE === 'object' && _MOB_SPRITE_FOOT_NUDGE[type]) {
+    dy += targetH * _MOB_SPRITE_FOOT_NUDGE[type];
+  }
+  if (!isFloating && (type === 'boneGolem' || type === 'seastar')) dy += 5;
+  if (!isFloating && type === 'seastar') dy += 5;
+  if (!isFloating && type === 'boneGolem') dy += 5;
+  // Defensive clamp: the rendered sprite bottom must NEVER extend more than
+  // _BURY_MAX_PX below the foot line. Head floats a touch high rather than legs
+  // sinking into the platform — sinking reads as a bug, floating reads as a
+  // tall mob. No effect on fliers (they are meant to hover).
+  if (!isFloating) {
+    const _BURY_MAX_PX = 6;
+    if (dy + targetH > _BURY_MAX_PX) dy = _BURY_MAX_PX - targetH;
+  }
+  // Post-clamp plants (per user, historically). These land AFTER the clamp on
+  // purpose: pre-clamp nudges for these types were eaten by it.
+  if (!isFloating && type === 'boneGolem') dy += 10;
+  if (!isFloating && type === 'grumpsquid') dy += 4;
+  if (!isFloating && type === 'echoKnight') dy += 7;
+  if (!isFloating && type === 'future_lyra') dy += 9;
+  if (!isFloating && type === 'seastar') dy += 6;
+  // R-key "Monster Plant" editor — additive per-type nudge (baked
+  // data/mob_offsets.js + live localStorage). POSITIVE = push DOWN.
+  dy += (typeof _lxMobYOff === 'function') ? _lxMobYOff(type) : 0;
+  return dy;
+}
+function _lxMobIsFloating(m) {
+  return (m && m.flies === true) ||
+         !!(m && m.zodiacSign && typeof FLOATING_ZODIAC !== 'undefined' && FLOATING_ZODIAC.has(m.zodiacSign));
 }
 // ===== Monster sprite SCALE (visual size multiplier) =======================
 // Same baking pattern as the Y-offset above, but a separate table
@@ -57135,8 +57196,16 @@ function _mojimonDraw(mn, sx, sy) {
     // that string cache and freeze the animation at one tinted pose.
     // v0.29.480 — per-type Y nudge from the R-key Monster Plant editor, the
     // same additive offset drawMonster folds into its dyOffset.
-    const _mYOff = (typeof _lxMobYOff === 'function') ? (_lxMobYOff(mn.type) || 0) : 0;
-    ctx.drawImage(frame ? _mojimonTintedFrame(spr, mn.type) : _mojimonTinted(spr, mn.type), -dw / 2, -dh + _mYOff, dw, dh);
+    // v0.29.487 — plant through the SHARED ladder (_lxMobPlantDy) instead of
+    // anchoring the raw image bottom. The old `-dh + yoff` ignored the
+    // transparent padding under the art, so the companion hovered above where
+    // the wild species stands — up to 21.5 px on razorgale. srcH comes from the
+    // STATIC reference sprite (bboxBottomY is measured against it), and the dy
+    // is computed on the BODY height then scaled by the padded-attack-frame
+    // factor, exactly as drawMonster does for its attack branch.
+    const _srcH = (_refImg && (_refImg.naturalHeight || _refImg.height)) || ah;
+    const _plantDy = _lxMobPlantDy(mn.type, _lxMobIsFloating(t || {}), _srcH, _bodyH) * (dh / _bodyH);
+    ctx.drawImage(frame ? _mojimonTintedFrame(spr, mn.type) : _mojimonTinted(spr, mn.type), -dw / 2, _plantDy, dw, dh);
   } else {
     ctx.fillStyle = (t && t.color) || '#8fd4ff';
     ctx.fillRect(sx, sy, mn.w, mn.h);
@@ -103233,56 +103302,11 @@ function _drawMonsterSprite(m, sx, sy) {
   // shardlich, etc.) now touch the platform like every other ground mob.
   // FLOATING_ZODIAC kept as a special-case escape hatch for boss-only
   // zodiac sub-mobs.
-  const isFloating = (m.flies === true) || (m.zodiacSign && typeof FLOATING_ZODIAC !== 'undefined' && FLOATING_ZODIAC.has(m.zodiacSign));
-  let dyOffset = -((bboxBottomY + 1) / srcH) * targetH;
-  if (isFloating) dyOffset -= targetH * FLOATING_GROUND_BLEED;
-  else dyOffset += targetH * GROUND_BURY_FRAC;
-  // v0.26.475 — per-type "push down" nudge (e.g. slime). Ground mobs only;
-  // the bury clamp below still caps total over-sink at _BURY_MAX_PX.
-  if (!isFloating && _MOB_SPRITE_FOOT_NUDGE[m.type]) {
-    dyOffset += targetH * _MOB_SPRITE_FOOT_NUDGE[m.type];
-  }
-  if (!isFloating && (m.type === 'boneGolem' || m.type === 'seastar')) dyOffset += 5;
-  if (!isFloating && m.type === 'seastar') dyOffset += 5;
-  if (!isFloating && m.type === 'boneGolem') dyOffset += 5;
-  // v0.26.205 — Defensive clamp: the rendered sprite bottom must NEVER
-  // extend more than _BURY_MAX_PX below the foot line. If bbox detection
-  // misfires (returns a low value due to halo / soft-shadow pixels in
-  // the source PNG), or the GROUND_BURY_FRAC × targetH product creeps
-  // up at larger silhouettes (post-v0.26.186+ bumps), the sprite can
-  // visibly sink into the platform. Clamp prevents that by pushing
-  // dyOffset upward so the image bottom lands at most _BURY_MAX_PX
-  // below footY. The image TOP moves up by the same delta — head
-  // floats a touch higher rather than legs sinking into the floor,
-  // which is the cosmetic preference (sinking reads as a bug; floating
-  // reads as the mob being taller than expected). No effect on fliers
-  // (they're meant to hover).
-  if (!isFloating) {
-    const _BURY_MAX_PX = 6;
-    const _imageBottomBelow = dyOffset + targetH;
-    if (_imageBottomBelow > _BURY_MAX_PX) {
-      dyOffset = _BURY_MAX_PX - targetH;
-    }
-  }
-  // v0.26.x — Bone Golem reads as floating ~10px high. Earlier pre-clamp nudges
-  // (above) never stuck because the 6px bury clamp ate them. Apply the 10px
-  // downward shift AFTER the clamp so it's a true, un-capped plant. Per user.
-  if (!isFloating && m.type === 'boneGolem') dyOffset += 10;
-  // v0.26.x — Sourpus (grumpsquid) plant tweak: down 4px, post-clamp. Per user.
-  if (!isFloating && m.type === 'grumpsquid') dyOffset += 4;
-  // v0.26.x — Echo Knight plant tweak: down 7px, post-clamp. Per user.
-  if (!isFloating && m.type === 'echoKnight') dyOffset += 7;
-  // v0.26.x — Future Lyra: push the sprite (incl. animation frames) down, post-clamp. Per user (6px → 9px, +3px more).
-  if (!isFloating && m.type === 'future_lyra') dyOffset += 9;
-  // v0.26.x — Tankstar (seastar): push down 6px, post-clamp, per user. The
-  // pre-clamp seastar nudges above were eaten by the bury clamp; this lands
-  // after it so the drop actually sticks (applies to every frame).
-  if (!isFloating && m.type === 'seastar') dyOffset += 6;
-  // R-key "Monster Plant" editor — additive per-type Y nudge (baked
-  // mob_offsets.js + live localStorage). POSITIVE = push DOWN toward the floor.
-  // Applies to every draw branch below (anim / state-frame / cached / raw) and
-  // to both ground and flying mobs, so any "floating" mob can be planted.
-  dyOffset += _lxMobYOff(m.type);
+  const isFloating = _lxMobIsFloating(m);
+  // v0.29.487 — the plant ladder now lives in _lxMobPlantDy so the MojiMon
+  // companion lands on the identical Y. Behaviour here is unchanged; parity is
+  // asserted per species by scripts/mojimon_plant_test.mjs.
+  let dyOffset = _lxMobPlantDy(m.type, isFloating, srcH, targetH);
   if (anim && anim.image) {
     // Pick the current frame from game.time. game.time advances ~1/frame at 60Hz,
     // so framesPerStep = 60 / fps. Different monsters get a small phase offset
