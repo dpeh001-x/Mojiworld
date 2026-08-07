@@ -120,100 +120,34 @@
   <p class="lede">A phased rework layered on top of <code>v0.9.8</code>: save persistence, Web Audio SFX, achievements, daily challenges, respec, prestige, combo milestones, and a moment-to-moment juice pass. Every change lives in <code>mojiworld_game.html</code>. No new assets, no build step.</p>
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
-<h2>v0.29.512 — skill icons load again (the bar was asking for the wrong file type)</h2>
-<p>
-  <span class="pill bug">bug</span>
-  Reported by user with a screenshot of a hotbar showing an emoji in every
-  slot. The skill bar probed <code>Sprites/skills/&lt;id&gt;.png</code>, but
-  that folder holds <b>72 <code>.webp</code> files and not a single
-  <code>.png</code></b>. Every probe 404'd, so every skill in the game fell
-  through to its emoji fallback.
-</p>
-<p>
-  Three call sites carried the wrong extension: the probe, the URL it hands
-  back on success, and the warm-up preloader. All three now ask for
-  <code>.webp</code>.
-</p>
-<h3>Why it went unnoticed</h3>
-<p>
-  The failure path is deliberately silent — <code>onerror</code> discards the
-  error, which is correct for the many skills that have no authored art yet.
-  But that also makes a wholesale extension mismatch indistinguishable from
-  "this one has no sprite", so a completely broken bar looked like a design
-  choice. The mobile control deck and the skill-tree rows both hardcode
-  <code>.webp</code> and were never affected, which is why only the desktop bar
-  looked wrong.
-</p>
-<p class="note">
-  Covered by <code>scripts/skill_icon_test.mjs</code> (8 checks), written
-  against the broken build first so it was seen to fail for the right reason:
-  9 slots, 0 sprites, and 404s for <code>slash.png</code> /
-  <code>powerStrike.png</code>. It asserts that <b>no</b> <code>.png</code>
-  skill request is made, so reverting any one of the three call sites fails the
-  test instead of quietly dropping a few slots back to emoji.
-</p>
+<h2>v0.29.514 <span class="tag"><span class="pill polish">polish</span> Sprites are lossless WebP &mdash; 599 converted, 168 archive PNGs dropped</span></h2>
+<p>The art pipeline was already ~88% WebP (5,876 WebP to 769 PNG in <code>Sprites/</code>). This finishes the migration. <b><code>Sprites/</code> went from 701.7&nbsp;MB to 641.0&nbsp;MB</b> even while a parallel session was adding new art &mdash; the conversion itself saved <b>74.7&nbsp;MB</b> (169.3&nbsp;&rarr;&nbsp;94.5&nbsp;MB across 599 files) and the archive sweep removed another <b>24.3&nbsp;MB</b>. Only 7 PNGs remain, down from 738.</p>
+<h3>Lossless, and proven so</h3>
+<p>Every file was decoded to raw RGBA before and after and compared pixel by pixel: identical dimensions, bit-identical alpha channel, bit-identical RGB on every pixel with alpha&nbsp;&gt;&nbsp;0. Nothing was resampled or requantised. A first pass compared the RGB <em>underneath</em> fully-transparent pixels too and reported 562 &ldquo;mismatches&rdquo; &mdash; those bytes are invisible and WebP is free to normalise them, so the check was tightened to the visually-correct definition rather than quietly loosened. Second run: <b>599 converted, 0 mismatches</b>.</p>
+<h3>Four ways a sprite path gets built</h3>
+<p>A blind find-and-replace would have broken this. Paths are assembled as literal strings, as data-table filenames, by concatenation (<code>'Sprites/boons/' + id + '.png'</code>), and by template literal (<code>Sprites/skills/${skillId}.png</code>). The template-literal form was missed by the first sweep and caught by in-browser 404s. Literals were rewritten only where the <code>.webp</code> exists <em>and</em> the <code>.png</code> is gone, so a miss can never point at nothing. Two directories were mixed png/webp with code hardcoding <code>.png</code>, which is only safe because the conversion made each one uniformly WebP.</p>
+<p>One sprite escaped every regex: <code>Master Shen.png</code>. The character classes did not allow a <b>space</b>, so it was skipped in both the NPC registry and the asset manifest. The loader&rsquo;s <code>.webp</code>&harr;<code>.png</code> fallback masked it in play &mdash; 404, retry, render &mdash; so it cost a wasted round-trip per load and would have 404&rsquo;d on every service-worker cache warm. Found by checking all 6,844 manifest entries against disk: exactly one missing, now zero.</p>
+<h3>What was spared</h3>
+<p>All 168 deleted files lived in archive directories (<code>_boxed_backup</code>, <code>_sticker_backup</code>, <code>_bult_backup</code>, <code>_raw_candidates</code>, <code>_backup_*</code>, <code>refs</code>). Two candidates were kept after a whole-repo sweep: <code>_backup/p_comet_pink_pre_blue.png</code> is <em>read</em> by <code>scripts/gen_gravitos_meteor_blue.mjs</code> to regenerate meteor art, and the two orphans listed in <code>assets_manifest.json</code> were pruned from it rather than left to 404. <code>Sprites/objects/</code> keeps a <code>.png</code> fallback in its loader, mirroring the LX_FX and cast loaders (v0.25.558), so freshly authored PNG props still load without editing code.</p>
+<p>Verified in-browser: 220 sprite requests, <b>zero</b> <code>.png</code> requests, zero failures. The 404s still visible in the console are a pre-existing multi-format audio probe (<code>Moji is loading.{m4a,wav,ogg}</code> alongside the <code>.mp3</code> that exists) and predate this work.</p>
 
-
-<h2>v0.29.511 <span class="tag"><span class="pill bug">bug</span> One shadow per monster &mdash; the duplicate ellipse is gone</span></h2>
-<p>Per user &mdash; <em>&ldquo;there should only be one shadow ellipse, it should not be duplicated&rdquo;.</em> Every monster was drawing <b>two</b> stacked ground ellipses: the legacy v0.25.434 block inside <code>drawMonster</code>, and <code>_lxDrawBlobShadow</code> called at the top of the same function. They overlapped, so the intersection darkened twice and the pool carried a visible double edge. The legacy block is removed; one ellipse now, verified per species.</p>
-<p><b>Why the blob shadow is the one that survives</b>, on three counts:</p>
+<h2>v0.29.513 <span class="tag"><span class="pill feat">feat</span> Legosaurus&rsquo;s den goes flat &mdash; a pure ground duel</span></h2>
+<p>Three changes to the Block-land Apex fight, per user:</p>
 <ul>
-  <li>It is the <b>shared</b> implementation &mdash; <code>drawPlayer</code> calls it too, so keeping the other would have left the hero and the monsters on different shadow systems.</li>
-  <li>The legacy block honoured <b>neither <code>LX_ENTITY_SHADOWS</code> nor the perf tier</b>, so switching Ground Shadows OFF in Settings &gt; Graphics still drew it. That is a settings control that lies, and it is the real reason a shadow persisted after the toggle.</li>
-  <li>Its vertical radius was a flat <b>2.5&nbsp;px at every size</b>, so a 108-px-wide Block Ele got the same sliver as a slime, while the blob shadow scales with the creature.</li>
+  <li><b>All six floating platforms removed.</b> The dodge ledges from v0.26.423 are gone; the den is now one open 2000-wide floor. Vertical escapes go through the launch pads instead.</li>
+  <li><b>The escape pads now fire the full Block-land hyper-launch.</b> The pad gate had deliberately excluded the den (<code>bg !== 'blocklandLegosaurus'</code>) so its pads kept a tame authored <code>vy:-34</code> vault to the &mdash; now removed &mdash; ledges. The exclusion is gone: the den&rsquo;s pads fire the same directional <code>vy:-105</code> launch as every other Block-land map, apex at the top of the screen.</li>
+  <li><b>Legosaurus stays on the ground.</b> <code>jump: 9 &rarr; 2</code> &mdash; a 224&times;238 tyrant bounding around read wrong, and with the ledges gone there is nothing to jump to. He keeps a minimal shuffle-hop, no real air time.</li>
 </ul>
-<p><b>What the legacy block did that is now handled better:</b> it skipped fliers and pinned to the last grounded foot line via <code>m._shadowGY</code>. The blob shadow covers both properly &mdash; it projects onto the platform found beneath the entity and shrinks/fades with height, so fliers cast a ground shadow and jumps still read. <code>m._shadowGY</code> had no other reader and is gone with it.</p>
-<div class="callout">
-  <b>Measured, one ellipse each</b> (<code>scripts/shadow_squash_test.mjs</code> counts the real <code>ctx.ellipse</code> calls during <code>drawMonster</code>): slime, mushroom, Bone Golem, Block Ele and Fat Lizard all now draw exactly <b>1</b>, all at ratio 0.13 &mdash; 12/12 pass. <b>Separately noted:</b> a pre-existing uncaught <code>TypeError: Cannot set properties of null (setting 'textContent')</code> fires on every load from the background cache-warm routine's <code>&lt;img&gt; onerror</code> handler. It reproduces identically on the build before this change &mdash; confirmed by loading both untouched &mdash; so it is not from this work; the suite filters that one message by name and still fails on any new error.
-</div>
-<h2>v0.29.510 — ascension keeps your equipment and nothing else</h2>
-<p>
-  <span class="pill bug">bug</span>
-  Per user: <em>"Equipment-only ascension. so everything resets except
-  equips."</em> This behaviour shipped once and had since been reverted — and
-  the reversion left the game <b>lying at the point of no return</b>. The
-  ASCEND confirmation still promised that the wallet, bank, consumables,
-  non-gear items, MojiMon roster and species kill counts would all reset, while
-  the code quietly carried every one of them through.
-</p>
-<h3>What resets now</h3>
-<p>
-  The wallet drops to the starting 200 and <b>the bank empties with it</b>.
-  Clearing only the wallet is what made pre-ascension banking a way to walk a
-  fortune through a reset meant to strip everything but gear. Consumables
-  return to the fresh kit, species kill counts clear, and the MojiMon roster,
-  assignment and cooldown clear with them — those counts gate capture at 10,000
-  per species, so keeping them would have handed an ascended character instant
-  re-binds on everything already mastered.
-</p>
-<h3>What survives</h3>
-<p>
-  Equipped gear, and inventory items that could be equipped —
-  <code>weapon</code>, <code>armor</code>, <code>accessory</code>, and the
-  legacy <code>accessorie</code> misspelling that still sits in older saves and
-  would otherwise have destroyed real gear. Materials, consumable stacks,
-  recipe scrolls and anything with no slot are cleared.
-</p>
-<p class="note">
-  Achievements are not revoked: they latch into <code>game.achievements</code>
-  the moment they are earned and are never re-tested against the kill counts.
-  Mojidex discovery survives too — it has its own
-  <code>game.mojidexSeen</code> record. Covered by
-  <code>scripts/mojimon_balance_ascension_test.mjs</code>, whose nine ascension
-  checks all pass again.
-</p>
 
+<h2>v0.29.511 <span class="tag"><span class="pill polish">polish</span> Every monster&rsquo;s heavy swing arcs in its own colour</span></h2>
+<p>Per user &mdash; <em>&ldquo;tint heavyswing to the exact main colour of the individual monster that is using it&rdquo;.</em> The <code>bigMelee</code> swing crescent (<code>Sprites/fx/fx_heavyswing.webp</code>) is authored teal, so all <b>26</b> monsters carrying <code>bigMelee:{kind:'swing'}</code> swung the same turquoise arc &mdash; from Pincer to the Sovereign of the Spire.</p>
+<ul>
+  <li><b>The swing now carries its swinger&rsquo;s colour.</b> The projectile spawned <code>color:'#ffaa55'</code> flat; it now takes <code>m.color</code> &mdash; the <code>color</code> field of the monster&rsquo;s type def, already on the instance via <code>spawnMonster</code>&rsquo;s <code>type, ...t</code>. That drives both the danger-zone ellipse and the crescent, so the two finally agree.</li>
+  <li><b>Tinted by hue, not by fill.</b> <code>_lxTintedFx()</code> recolours through the HSL <code>'color'</code> blend, which takes hue and saturation from the tint but <b>luminosity from the sprite</b>. The white-hot core stays white, the sparkle specks stay white, the dark rim stays dark &mdash; only the teal body shifts. A <code>source-in</code> fill would have flattened all three into one silhouette.</li>
+  <li><b>Bounded cost.</b> Tinted canvases are cached per (sprite, colour) at 512px and capped at 12 entries, evicted oldest-first. Holding all 26 at the source 768px would have pinned ~60&nbsp;MB.</li>
+  <li>Monsters whose main colour is desaturated swing desaturated &mdash; Smithgolem&rsquo;s <code>#888888</code> gives a grey arc. That is the literal reading of &ldquo;exact main colour&rdquo;.</li>
+</ul>
 
-<h2>v0.29.509 <span class="tag"><span class="pill bug">bug</span> The smith golem stopped levitating when it swings</span></h2>
-<p>Per user &mdash; <em>&ldquo;when smith golem attacks the sprites seem to make it look like it levitates midair&rdquo;.</em> It did, by <b>21&nbsp;px</b> &mdash; and it also <em>sank</em> 22.8&nbsp;px over the course of the swing, so it drifted downward as it hit.</p>
-<h3>Why a padded swing frame floats</h3>
-<p>Types in <code>_ATK_FRAME_SCALE</code> author their attack frames inside a padded canvas so the weapon arc is never clipped, and the draw box is scaled back up (smith golem <b>&times;1.881</b>) so the body keeps its idle size. But the <em>vertical</em> anchor came from the STATIC sprite&rsquo;s content bottom &mdash; correct for idle and walk, which are authored flush to the canvas floor, and wrong for a swing frame whose body sits higher inside its own canvas. Worse, the code scaled that offset by <code>_atkScale</code> too, which multiplies the error rather than correcting it.</p>
-<p>Measured on the golem&rsquo;s art: idle frames end at <b>botFrac 0.999</b> (a 1&nbsp;px gap under the feet), attack frames average <b>0.921</b> &mdash; and slide from <b>0.881 on frame 0 to 0.998 on frame 7</b>, a 76&nbsp;px void under the feet closing to 1&nbsp;px. That is the levitate-then-sink exactly.</p>
-<p><b>The fix:</b> plant each attack frame on <em>its own</em> content bottom, using the same cached <code>_spriteContentBox</code> scan the summon renderer has used since v0.26.686. One scan per image, cached on the image (including the null result), so it costs nothing per frame.</p>
-<div class="callout">
-  <b>It was not just the golem, and the first estimate was wrong.</b> A static analysis of the sprite files predicted only smith golem and Path&rsquo;s Bane were meaningfully off. Measuring the <em>rendered</em> result &mdash; <code>scripts/attack_frame_plant_test.mjs</code> intercepts <code>_lxDrawSoft</code> and reads the real blit rect, so the number under test is what reaches the canvas &mdash; showed <b>all seven</b> padded types were mis-anchored: smith golem 21.0&nbsp;px, Path&rsquo;s Bane 23.2, Echo Knight 14.5 (sunk, not floating), Conductor Mech 5.9, fatDragon 5.0, forgewight 4.3, Tomb Keeper 2.6. The file-level prediction modelled only the content-bottom gap; the live measurement caught that scaling <code>dyOffset</code> is wrong even when a frame IS flush. After the fix every type lands within <b>1.2&nbsp;px</b> of its idle foot line with at most 0.7&nbsp;px of drift across the swing.
-  <br><br><b>The test needs <code>--allow-file-access-from-files</code>, and that is load-bearing.</b> A plain <code>file://</code> page taints the canvas as soon as a <code>file://</code> image is drawn into it, so <code>_spriteContentBox</code> returns null, the code takes its fallback path, and the test would have measured the <em>unfixed</em> behaviour while reporting on the fixed one. The flag makes the page behave like the served build. That fallback is deliberate and unchanged: where readback is blocked, the old anchor still applies rather than the sprite vanishing.
-</div>
 <h2>v0.29.508 <span class="tag"><span class="pill bug">bug</span> Floors and platforms stop being lime green on maps that are not green</h2>
 <p>Per user, from a Magma Foundry screenshot: &ldquo;some maps like magma foundry floor and platform clearly do not match the main colour of the background&rdquo;. A sweep of <b>all 109 maps</b> found <b>19</b> where the slabs were not keyed to the map at all &mdash; <b>18 of them painting grass-green <code>#7ec850</code></b> over lava, clockwork, void and steppe. Three independent causes, all fixed.</p>
 <div class="callout">
