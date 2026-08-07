@@ -49863,6 +49863,14 @@ function loadMap(id, entryX, entryY) {
   player.frozenTimer = 0;
   player._slowTimer = 0;
   player.coyoteTime = 0;
+  // v0.29.477 — dragoonSlam makes every one-way platform non-solid for the
+  // player, and it is cleared ONLY on landing — by a line that sits below the
+  // hit-stun/freeze/shackle early-returns. A Dragoon hit mid-dive could carry
+  // the flag through a portal and arrive falling through every platform on the
+  // new map until they hit solid ground. dropTimer is bounded but reset here
+  // too, for the same clean-slate reason as the timers above.
+  player.dragoonSlam = 0;   // v0.29.477
+  player.dropTimer = 0;
   // Clear input state. If a key was still physically down when the portal
   // fired, its keyup often never reaches the window after the map swap —
   // leaving `game.keys['arrowup']` etc. stuck true, which turns into ghost
@@ -57841,6 +57849,30 @@ function getArcherAim() {
   return { cosA: 1, sinA: 0 };
 }
 
+// v0.29.477 — Sky Lance apex helper. See dragoon_skylance.
+function _lxSkyLanceApexY() {
+  const camY = (game.camera && game.camera.y) || 0;
+  const camX = (game.camera && game.camera.x) || 0;
+  const vw = (typeof W === 'number') ? W : 960;
+  const vh = (typeof H === 'number') ? H : 560;
+  const ph = player.h || 44;
+  const pcx = player.x + player.w / 2;
+  const visTop = camY + 12;                      // never above the visible edge
+  let overhead = null, anyVisible = null;
+  for (const p of ((game.mapData && game.mapData.platforms) || [])) {
+    if (!p || typeof p.y !== 'number') continue;
+    if (p.y >= player.y) continue;                          // must be ABOVE us
+    if (p.y < camY || p.y > camY + vh) continue;            // must be on screen
+    if (p.x + p.w < camX || p.x > camX + vw) continue;      // horizontally on screen
+    if (anyVisible === null || p.y < anyVisible.y) anyVisible = p;
+    if (pcx >= p.x && pcx <= p.x + p.w) {
+      if (overhead === null || p.y < overhead.y) overhead = p;
+    }
+  }
+  const pick = overhead || anyVisible;
+  if (pick) return Math.max(visTop, pick.y - ph);
+  return Math.max(visTop, player.y - 200);       // nothing above on screen
+}
 const SKILL_FNS = {
   // Warrior
   slash: () => {
@@ -60449,9 +60481,19 @@ const SKILL_FNS = {
     }
   },
 
+  // v0.29.477 — Sky Lance apex. Per user: it should rise to the top platform
+  // of what is CURRENTLY VISIBLE. The old lift was `Math.max(20, player.y -
+  // 200)` — a blind 200px hop whose clamp was y=20, the top of the WORLD, not
+  // of the screen. On a vertical tower (worldHeight 14400) that could fling the
+  // Dragoon thousands of pixels above the camera: the player vanished, the dive
+  // came from off-screen, and on a short map the 200px hop often cleared no
+  // platform at all. Now: the highest platform inside the viewport that is
+  // above the player, preferring one the player could actually stand on
+  // (its span covers their centre), falling back to any visible one, and
+  // finally to the old hop. Never rises past the visible top edge.
   dragoon_skylance: () => {
     // Lift skyward, then slam
-    player.y = Math.max(20, player.y - 200);
+    player.y = _lxSkyLanceApexY();   // v0.29.477 — top VISIBLE platform, not a blind 200px hop
     player.vy = 0;
     player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
     player.dragoonSlam = 1;
@@ -60465,7 +60507,7 @@ const SKILL_FNS = {
         scheduleSkillTimer(() => {
           if (player.hp <= 0 || game.paused) return;
           // Chain a second leap-and-slam.
-          player.y = Math.max(20, player.y - 200);
+          player.y = _lxSkyLanceApexY();   // v0.29.477 — top VISIBLE platform, not a blind 200px hop
           player.vy = 0;
           player.dragoonSlam = 1;
           player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
@@ -60497,7 +60539,7 @@ const SKILL_FNS = {
         player.x = nearest.x + nearest.w / 2 - player.w / 2;
         player.facing = (nearest.x > _pcx) ? 1 : -1;
       }
-      player.y = Math.max(20, player.y - 200);
+      player.y = _lxSkyLanceApexY();   // v0.29.477 — top VISIBLE platform, not a blind 200px hop
       player.vy = 0;
       player.dragoonSlam = 1;
       player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
