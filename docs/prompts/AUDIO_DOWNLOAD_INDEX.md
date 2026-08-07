@@ -61,7 +61,7 @@ The cards on the page appear in reverse-submission order — **newest first**. V
 | `boss_gloopaloo.mp3` | Slime king boss roar, deep gurgling wet bubble growl… |
 | `boss_shroomaloo.mp3` | Mushroom queen boss roar, eerie wet fungal sporing breath… |
 | `boss_octobaby.mp3` | Octopus boss roar, wet tentacle slap with shrill childlike shriek… |
-| `boss_krook.mp3` | Turtle king boss roar, heavy shell scrape into deep monarch bellow… |
+| `boss_koopaloo.mp3` | Turtle king boss roar, heavy shell scrape into deep monarch bellow… |
 | `boss_aetherion.mp3` | Celestial shardfather boss intro, crystalline shimmer… |
 | `boss_gravitos.mp3` | Gravity god boss intro, deep gravitational hum collapsing… |
 

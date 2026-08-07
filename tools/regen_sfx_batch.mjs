@@ -39,7 +39,7 @@ const ITEMS = {
   land:                { file: 'audio/ui/land.mp3',                   ep: 'sfx', sec: 0.3,  d: 'a soft quick footfall landing thump on grass, subtle and muffled, pleasant when repeated, extremely short' },
   // ---- boss intro VOICES (played once on first arena entry, _bossIntrosSeen).
   // NOT music: short in-character vocalizations via /audio/sound-effect.
-  boss_krook:       { file: 'audio/boss/boss_krook.mp3',        ep: 'sfx', sec: 1.8, d: 'a huge krook dragon-turtle king boss intro voice: deep bellowing reptilian roar with a fiery snarl and a short smoky huff, menacing cartoon villain, short' },
+  boss_koopaloo:       { file: 'audio/boss/boss_koopaloo.mp3',        ep: 'sfx', sec: 1.8, d: 'a huge koopa dragon-turtle king boss intro voice: deep bellowing reptilian roar with a fiery snarl and a short smoky huff, menacing cartoon villain, short' },
   boss_mirrorSelf:     { file: 'audio/boss/boss_mirrorSelf.mp3',      ep: 'sfx', sec: 1.8, d: 'an eerie mirror doppelganger boss intro voice: a distorted echoing human laugh that sounds reversed and wrong, ghostly uncanny double-voice, short' },
   boss_shroomaloo:     { file: 'audio/boss/boss_shroomaloo.mp3',      ep: 'sfx', sec: 1.8, d: 'a giant mushroom queen boss intro voice: a haughty whimsical feminine giggle bubbling into a spore-puff hiss, regal and mischievous, cartoon, short' },
   boss_young_confused_barnaby: { file: 'audio/boss/boss_young_confused_barnaby.mp3', ep: 'sfx', sec: 1.8, d: 'a confused young sentinel boss intro voice: a bewildered anguished battle cry that wavers mid-shout as if unsure, tragic and slightly comic, short' },

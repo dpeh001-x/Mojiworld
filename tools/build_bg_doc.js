@@ -47,7 +47,7 @@ const generic = [
   [{ t: "Gelwater Grotto", bold: true }, { t: "bg_v3_dungeon.png", mono: true }],
   [{ t: "Octopus Grotto", bold: true }, { t: "bg_v3_dungeon.png", mono: true }],
   [{ t: "Lava Cavern", bold: true }, { t: "bg_v3_dungeon.png", mono: true }],
-  [{ t: "Krook Throne", bold: true }, { t: "bg_v3_dungeon.png", mono: true }],
+  [{ t: "Koopa Throne", bold: true }, { t: "bg_v3_dungeon.png", mono: true }],
   [{ t: "Abyssal Trench", bold: true }, { t: "bg_v3_dungeon.png", mono: true }],
   [{ t: "Coral Reef Depths", bold: true }, { t: "bg_v3_misty.png", mono: true }],
   [{ t: "Sunken Kelp Forest", bold: true }, { t: "bg_v3_misty.png", mono: true }],

@@ -83,9 +83,9 @@ const biomes = [
     ['cosmic_orbital_ring', 'thin gold ring suspended midair'],
     ['sanctum_pillar_broken', 'shattered marble column'],
   ]},
-  { title: 'Mario-kingdom (Sauro Slope, Krook Throne — Lv 50–65)', rows: [
-    ['krook_throne_chair', 'spiked-shell throne (boss arena hero piece)'],
-    ['krook_torch_brazier', 'iron brazier with green flame'],
+  { title: 'Mario-kingdom (Sauro Slope, Koopa Throne — Lv 50–65)', rows: [
+    ['koopa_throne_chair', 'spiked-shell throne (boss arena hero piece)'],
+    ['koopa_torch_brazier', 'iron brazier with green flame'],
     ['sauro_question_block', 'classic yellow ? block on a post'],
     ['sauro_warp_pipe_green', 'green pipe segment, ground-anchored'],
   ]},
@@ -338,7 +338,7 @@ const pri = [
   'Underwater zones (8 sprites) — five maps share the palette',
   'Forge / Lava (6 sprites) — two maps share, can reuse',
   'Cosmic / Sanctum (4 sprites) — endgame ambience',
-  'Boss arena hero pieces (Arbiter scales, Sovereign throne, Krook throne) — single-use but high-impact',
+  'Boss arena hero pieces (Arbiter scales, Sovereign throne, Koopa throne) — single-use but high-impact',
 ];
 for (const p of pri) {
   body.push(new Paragraph({ numbering:{ reference:'pri', level:0 }, children:[new TextRun({ text:p, size:20 })] }));
