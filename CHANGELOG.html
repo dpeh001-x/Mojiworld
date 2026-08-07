@@ -120,6 +120,59 @@
   <p class="lede">A phased rework layered on top of <code>v0.9.8</code>: save persistence, Web Audio SFX, achievements, daily challenges, respec, prestige, combo milestones, and a moment-to-moment juice pass. Every change lives in <code>mojiworld_game.html</code>. No new assets, no build step.</p>
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
+<h2>v0.29.508 <span class="tag"><span class="pill bug">bug</span> Floors and platforms stop being lime green on maps that are not green</h2>
+<p>Per user, from a Magma Foundry screenshot: &ldquo;some maps like magma foundry floor and platform clearly do not match the main colour of the background&rdquo;. A sweep of <b>all 109 maps</b> found <b>19</b> where the slabs were not keyed to the map at all &mdash; <b>18 of them painting grass-green <code>#7ec850</code></b> over lava, clockwork, void and steppe. Three independent causes, all fixed.</p>
+<div class="callout">
+  <b>1. The chromatic filter ate monochrome maps (16 maps).</b> <code>_lxDominantColor</code> samples the backdrop through two filters: <em>spatial</em> (below 42% height, because backdrops are painted sky-on-top) and <em>chromatic</em> (reject pixels near the map&rsquo;s own declared <code>sky</code> stops). That second filter assumes ground and sky are different hues. Magma Foundry&rsquo;s ground is red under a red sky; the Glasswind steppes are pale blue under pale blue. Their terrain got rejected as &ldquo;that is the sky&rdquo;, the 4%&nbsp;sample floor tripped, the sampler returned <code>null</code>, and the caller fell back to the per-biome theme &mdash; which for any map outside <code>_pickFloorTheme</code>&rsquo;s short list is <code>'grass'</code>. Hence lime green on lava.
+  <br><br>An unfiltered bin already existed but was deliberately discarded (<code>void any</code>), and rightly so: it spanned the <em>whole</em> image, so on a landscape map it simply <em>was</em> the sky &mdash; the exact bug v0.29.393 removed. It is now replaced by a <b>spatial-only</b> bin: same lower band, no hue rejection. Still ground by construction, so this is not a return to that bug; it just accepts that some maps have ground the same colour as their sky, which is a fact about the art rather than an error. Order is <code>ground &rarr; lower &rarr; null</code>.
+  <br><br><b>2. The tint sampled other maps&rsquo; paintings (2 maps).</b> <code>void</code> and <code>boss_rush</code> declare <code>bg:'voidBlack'</code> &mdash; an unrecognised key on purpose, so the renderer paints their black sky gradient instead of a bitmap. But the tint path called <code>_pickBGImage()</code>, whose job is to always return <em>something</em> to paint, and it fell through to a hash-picked backdrop from another map: the Everdawn Megamall for <code>void</code>, the Valley for <code>boss_rush</code>. A new <code>_lxOwnBackdrop(md)</code> reads <code>BG_IMAGES[md.bg]</code> directly. For every map whose <code>bg</code> is a real loaded image this is the identical image <code>_pickBGImage</code> would have returned, so nothing else moves.
+  <br><br><b>3. The void maps never reached the resolver at all.</b> <code>drawPlatforms</code> gates on <code>!isVoid</code>, so those same two maps skipped <code>_mapPlatformTint</code> entirely and took <code>_pickFloorTheme</code> &rarr; <code>'grass'</code>. That gate is sound and is kept: these maps really are near-black, and &ldquo;match the backdrop&rdquo; taken literally paints a near-black slab with a black outline onto black, i.e. an invisible platform. They now take <code>_PLATFORM_TINT_DEFAULT</code> instead &mdash; the neutral violet that exists precisely as the &ldquo;this map has no colour of its own&rdquo; tone. It reads against black and, unlike grass, claims no biome.
+</div>
+<p><b>Verified by measurement, not by reading the formula.</b> The old algorithm was replayed inside the booted client alongside the new one across every map: <b>90 unchanged byte-for-byte, 17 rescued from <code>null</code>, 0 regressions</b> &mdash; the strict path is untouched, so this only ever adds a result where there was none. Sweeping all 109 maps through <em>the real <code>drawPlatforms</code> gate</em> (not the resolver directly &mdash; doing that is what hid cause&nbsp;3 on the first pass) now gives <b>107 matched to their own backdrop</b> within an RGB distance of 90, <b>2 void maps on the neutral tone, and zero green</b>. Magma Foundry goes from <code>#7ec850</code> lime to <code>#874244</code> dusty red.</p>
+<h2>v0.29.507 — a summoned MojiMon now has exactly the player's HP</h2>
+<p>
+  <span class="pill bug">bug</span>
+  Per user: <em>"Summoned Mojimon should have the same HP as the current
+  player."</em> It had <b>ten times</b> the player's maximum HP, which made the
+  companion the sturdiest thing on any screen — it routinely outlived the
+  character it was escorting by an order of magnitude, and a fight the player
+  lost was one the MojiMon simply walked away from.
+</p>
+<p>
+  The pool is now <code>getMaxHp()</code> exactly. Upgrade points still scale
+  from that base, so a fully-invested companion can still be tougher than a
+  bare one — it just starts level with you instead of ten deep.
+</p>
+<h3>Parity holds while it is fielded</h3>
+<p>
+  Companion stats were only ever computed at the moment of summoning, so a
+  level-up, a gear swap or a boon left the two out of step until something
+  re-summoned it. The pool now follows the player's max HP for as long as the
+  mon is out, recomputed only when that number actually moves.
+</p>
+<p class="note">
+  Carrying <b>absolute</b> HP across that rescale rather than the damage
+  fraction matters more than it sounds: scaling by fraction looks fairer, but
+  raising the pool from 1,000 to 2,000 would lift a half-dead companion from
+  500 to 1,000 real HP — a free heal any player could farm by toggling a +HP
+  item on and off. Covered by <code>scripts/mojimon_hp_parity_test.mjs</code>
+  (9 checks).
+</p>
+
+
+<h2>v0.29.506 <span class="tag"><span class="pill polish">polish</span> Ground shadows squashed flat &mdash; they read as cast on the floor, not as a ball under it</span></h2>
+<p>Per user &mdash; <em>&ldquo;shadow eclipse of the monsters should be more vertically squashed&rdquo;.</em> The blob shadow's vertical radius was <b>24%</b> of its horizontal one; it is now <b>13%</b>, exposed as a named <code>LX_SHADOW_RY_RATIO</code> so it is one number to retune.</p>
+<p><b>Measured, per species</b> (<code>scripts/shadow_squash_test.mjs</code> intercepts the real <code>ctx.ellipse</code> calls during <code>drawMonster</code>, so these are the ellipses actually drawn):</p>
+<table>
+  <tr><th>mob</th><th>box width</th><th>shadow before</th><th>shadow after</th></tr>
+  <tr><td>Block Ele</td><td>108&nbsp;px</td><td>43.5 &times; <b>10.5</b></td><td>43.5 &times; <b>5.7</b></td></tr>
+  <tr><td>Bone Golem</td><td>85&nbsp;px</td><td>34.1 &times; <b>7.3</b></td><td>34.1 &times; <b>4.4</b></td></tr>
+  <tr><td>Fat Lizard</td><td>59&nbsp;px</td><td>21.7 &times; <b>4.9</b></td><td>21.7 &times; <b>2.8</b></td></tr>
+</table>
+<p>The effect was loudest on big monsters, which is where it was reported: at 24% a 108-px-wide creature cast a 43&times;10 pool that read as a sphere sitting under it rather than a shadow lying along the ground.</p>
+<div class="callout">
+  <b>Two things worth knowing.</b> Monsters actually carry <b>two</b> stacked shadow ellipses &mdash; an older one in <code>drawMonster</code> with a fixed 2.5&nbsp;px vertical radius, and <code>_lxDrawBlobShadow</code>, whose radius is a fraction of its width. Only the second was round, and only the second changed; the measurement reports the taller of the two, which is why small mobs like the slime still show 2.5&nbsp;px (the old ellipse now dominates them). <b>The player's shadow flattens too</b>, deliberately: <code>drawPlayer</code> and <code>drawMonster</code> are the helper's only two callers, and a scene where the hero casts a rounder shadow than every monster would read as a bug rather than a distinction. A 1.5&nbsp;px vertical floor keeps small shadows from disappearing, so narrow entities sit just above the ratio by design &mdash; the test accepts the ratio OR the floor, and 7/7 pass.
+</div>
 
 <h2>v0.29.505 <span class="tag"><span class="pill polish">polish</span> Upward Warp is earned, not given &mdash; locked until the G skill, announced the moment it unlocks</span></h2>
 <p>Per user &mdash; the double-tap-&uarr; warp is no longer available from level 1. It unlocks <b>only when the G skill is learnt</b> (the master-signature skill, granted by the Lv40 master advancement) &mdash; fitting, since the warp&rsquo;s cooldown <em>is</em> that skill&rsquo;s cooldown. Before then the gesture does nothing at all: the gate runs first and returns silently &mdash; no fail buzzer, no MP touched &mdash; so nothing leaks the move&rsquo;s existence early.</p>
