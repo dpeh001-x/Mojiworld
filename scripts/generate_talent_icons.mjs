@@ -35,17 +35,34 @@ const PREFIX = 'A single physical die-cut VINYL STICKER, floating alone on a FUL
 // the icon teaches what the pick does at a glance.
 const TALENT = {
   // berserker
-  bloodrush:  'a heavy notched war-axe head with thick crimson blood running down the blade and curling back upward into it as glowing red life-motes, drain theme',
+  // v0.29.x — this came back a CLEAN grey axe THREE times, including once with
+  // the blood moved to the front of the sentence and capitalised. The tell is
+  // vampedge: same lifesteal effect, renders its drain perfectly, and its
+  // prompt never says "blood" — it says "red life-motes". The endpoint appears
+  // to sanitise gore wording and hand back the un-bloodied subject. So the
+  // drain is now described in energy vocabulary that is known to work here,
+  // which reads as lifesteal anyway and survives the filter.
+  bloodrush:  'a heavy notched war-axe with glowing crimson red life-energy streaming down its blade in thick luminous rivulets and spiralling back up the shaft as bright red life-motes being absorbed inward, the whole axe lit by an intense red drain glow',
   rampage:    'a clenched armoured fist punching forward at a three-quarter angle, thick red-orange fury aura and jagged anger marks bursting off the knuckles',
   warbreaker: 'two crossed battle-axes with a bright white shockwave crack splitting the air between them, chips of shattered steel flying outward',
   // knight
   bulwark:    'a tall heavy tower shield seen head-on with a reinforced steel boss and a rivet border, a hard blue-white guard glow tracing its outline',
   crusade:    'a knight longsword pointing up wreathed in radiant golden holy light, a soft cross-shaped flare behind the crossguard, warm divine rays',
-  lifewall:   'a glossy red heart encased behind a translucent blue-white barrier shield, the heart glowing strongly through the protective wall',
+  // v0.29.x — "barrier shield" / "protective wall" kept producing a heart on a
+  // flat rounded-square TILE, which the PREFIX explicitly forbids. Naming a
+  // concrete heater-shield silhouette gives the model a shape to draw instead
+  // of a pane, and the forbidden words are gone from the subject line.
+  lifewall:   'a glossy red heart mounted on the front of a pointed medieval heater shield with a steel rim and rivets, the shield tapering to a point at the bottom, heart glowing warmly against the metal',
   // ninja
   shadowfeet: 'a black split-toe ninja tabi boot mid-stride at a dynamic angle, a swirling purple-grey smoke trail streaming off the heel, speed streaks',
-  keenedge:   'a single gleaming kunai blade at a sharp diagonal with a brilliant white crit-glint flashing along its cutting edge',
-  exploit:    'a black shuriken struck deep into the red bullseye of a wooden target, a bright impact flash and splinters at the point of entry',
+  // v0.29.x — "kunai" produced a grey faceted GEM twice, which is a fair reading
+  // (a kunai really is a diamond-shaped blade) but reads as a crystal, not a
+  // weapon. Naming the handle, wrap and ring pommel forces a recognisable knife.
+  keenedge:   'a ninja dagger held at a sharp diagonal, dark cloth-wrapped handle with a steel ring pommel at its base and a narrow polished steel blade, a brilliant white crit-glint flashing along the cutting edge, clearly a bladed weapon and NOT a gem or crystal',
+  // v0.29.x — the "wooden target" put the shuriken on a round red BOARD, i.e.
+  // the circular badge the PREFIX forbids. The target is dropped entirely; the
+  // weak-point read now comes from the crack and the glint, not from a backing.
+  exploit:    'a single black four-pointed shuriken at a dynamic angle with a bright yellow-white weak-point glint flashing at its centre and jagged impact cracks radiating outward from behind it, no target board and no backing disc of any kind',
   // assassin
   cutthroat:  'a curved assassin dagger held at a steep angle, a razor crit-gleam running the blade and a single crimson droplet at its tip',
   vampedge:   'a slim dagger with dark leathery bat wings unfurling from its guard, red life-motes spiralling up the blade toward the wings',

@@ -11,6 +11,7 @@ const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 
 const onDisk = new Set(readdirSync('Sprites/talents').filter(f => f.endsWith('.webp')).map(f => f.slice(0, -5)));
+const bgOnDisk = new Set(readdirSync('Sprites/talents/bg').filter(f => f.endsWith('.webp')).map(f => f.slice(0, -5)));
 
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox','--disable-gpu','--mute-audio'] });
 const page = await (await b.newContext({ serviceWorkers: 'block' })).newPage();
@@ -48,10 +49,18 @@ const r = await page.evaluate(async () => {
     await Promise.all([...opts.querySelectorAll('img')].map(i => i.decode().catch(() => null)));
     modal = cards.map(c => {
       const im = c.querySelector('img');
+      const bg = c.style.backgroundImage || '';
       return {
         name: (c.textContent.match(/Bulwark|Crusade|Lifewall/) || [])[0] || null,
         hasImg: !!im, src: im && im.getAttribute('src'),
         imgDecoded: !!(im && im.naturalWidth > 0),
+        bgUrl: (bg.match(/Sprites\/talents\/bg\/([\w-]+)\.webp/) || [])[1] || null,
+        // the flat gradient must remain as the last layer so a missing plate
+        // degrades to the original card instead of leaving a hole
+        // the browser normalises #2a1f48 to rgb(42, 31, 72) when reading back
+        // style.backgroundImage, so match either form
+        bgHasFallback: /#2a1f48/i.test(bg) || /rgb\(\s*42,\s*31,\s*72\s*\)/.test(bg),
+        bgHasScrim: /rgba\(26,\s*17,\s*52/.test(bg),
         // the emoji sibling must exist but stay hidden while the art works
         glyphHidden: (() => { const s = im && im.nextElementSibling; return !!s && s.style.display === 'none'; })(),
       };
@@ -87,6 +96,20 @@ ok('the emoji sibling stays hidden while the art works',
    Array.isArray(r.modal) && r.modal.every(c => c.glyphHidden), r.modal);
 ok('FALLBACK: a talent with no art still shows its emoji',
    r.fallback.imgHidden === true && r.fallback.glyphShown === true, r.fallback);
+// --- card backgrounds -------------------------------------------------------
+ok('every talent has its own card background on disk',
+   r.ids.every(id => bgOnDisk.has(id)), { missing: r.ids.filter(id => !bgOnDisk.has(id)), have: bgOnDisk.size });
+ok('BACKGROUNDS: each card gets its OWN plate, not a shared one',
+   Array.isArray(r.modal) && new Set(r.modal.map(c => c.bgUrl)).size === r.modal.length
+     && r.modal.every(c => c.bgUrl), r.modal && r.modal.map(c => c.bgUrl));
+ok('the plate matches the talent on the card',
+   Array.isArray(r.modal) && r.modal.every(c => c.name && c.bgUrl === c.name.toLowerCase()),
+   r.modal && r.modal.map(c => ({ name: c.name, bg: c.bgUrl })));
+ok('a scrim is layered over the art so the text stays readable',
+   Array.isArray(r.modal) && r.modal.every(c => c.bgHasScrim), r.modal && r.modal.map(c => c.bgHasScrim));
+ok('the flat gradient survives underneath, so a missing plate is not a hole',
+   Array.isArray(r.modal) && r.modal.every(c => c.bgHasFallback), r.modal && r.modal.map(c => c.bgHasFallback));
+
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 await b.close();
