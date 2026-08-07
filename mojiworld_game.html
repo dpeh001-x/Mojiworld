@@ -13393,6 +13393,331 @@ function _lxSeToggle() {
     _LX_SE.sel = null; _LX_SE.drag = null;
   }
 }
+/* ===== Ctrl-tap "Prop Editor" — live MAP_PROPS add / remove / position =====
+   v0.29.483 per user: "fully functional live prop editor of the map — add,
+   remove and position for a list of props, live in game, for developers,
+   using the Ctrl key". Dev-gated like every other dev tool (backtick + dev
+   key, or ?dev=1). A BARE Ctrl tap toggles it: press and release Ctrl with
+   nothing else chorded in between — Ctrl+C, Ctrl+Z, Ctrl+click and
+   Ctrl+scroll never open it. Prop-focused on purpose; the (locked) R-key
+   Stage Editor remains the NPC/portal tool. Edits write MAP_PROPS[map]
+   directly — drawWorldProps reads that every frame, so changes are live —
+   and Export copies a MAP_PROPS.<map> block in the Stage Editor's bake
+   format, ready to paste into the source. */
+const _LX_PE = { open:false, root:null, ui:null, sel:-1, place:null, drag:null, undo:[], _arm:false, _map:null };
+function _lxPeDevOk() {
+  try { return localStorage.getItem('LX_DEV') === '1' || /[?&]dev=1/.test(location.search); }
+  catch (e) { return false; }
+}
+function _lxPeList() {
+  if (typeof MAP_PROPS === 'undefined') return null;
+  if (!MAP_PROPS[game.currentMap]) MAP_PROPS[game.currentMap] = [];
+  return MAP_PROPS[game.currentMap];
+}
+function _lxPeSel() { const l = _lxPeList(); return (l && _LX_PE.sel >= 0 && _LX_PE.sel < l.length) ? l[_LX_PE.sel] : null; }
+function _lxPeMark() {
+  const l = _lxPeList(); if (!l) return;
+  _LX_PE.undo.push(JSON.stringify(l));
+  if (_LX_PE.undo.length > 30) _LX_PE.undo.shift();
+}
+function _lxPeUndo() {
+  const l = _lxPeList(); if (!l || !_LX_PE.undo.length) return;
+  const snap = JSON.parse(_LX_PE.undo.pop());
+  l.length = 0; for (const p of snap) l.push(p);
+  if (_LX_PE.sel >= l.length) _LX_PE.sel = l.length - 1;
+  _lxPeSync();
+}
+function _lxPeKeys() {
+  const keys = (typeof LX_OBJECTS_FILES !== 'undefined' ? LX_OBJECTS_FILES.slice() : [])
+    .concat(typeof LX_OBJECTS_FILES_EXPLICIT !== 'undefined' ? Object.keys(LX_OBJECTS_FILES_EXPLICIT) : []);
+  return [...new Set(keys)].sort();
+}
+// nearest platform top at this x, in either direction (the Stage Editor's
+// snap rule — below-only made snapping UP onto a ledge impossible)
+function _lxPeGroundY(x, nearY) {
+  const plats = (game.mapData && game.mapData.platforms) || [];
+  let best = null, bestD = Infinity;
+  for (const p of plats) {
+    if (x < p.x || x > p.x + p.w) continue;
+    const d = Math.abs(p.y - nearY);
+    if (d < bestD) { bestD = d; best = p; }
+  }
+  return best ? best.y : null;
+}
+function _lxPeAdd(key, x, y) {
+  const l = _lxPeList(); if (!l || !key) return;
+  _lxPeMark();
+  const gy = _lxPeGroundY(x, y);
+  l.push({ key, x: Math.round(x), y: Math.round(gy != null ? gy : y) });
+  _LX_PE.sel = l.length - 1;
+  _lxPeSync();
+}
+function _lxPeAddAtPlayer() {
+  if (typeof player === 'undefined') return;
+  const key = _LX_PE.ui && _LX_PE.ui.roster.value;
+  if (!key) { if (typeof showToast === 'function') showToast('Pick a prop first', 'rare'); return; }
+  const pcx = player.x + player.w / 2 + 60 * ((player.facing | 0) || 1);
+  _lxPeAdd(key, pcx, player.y + player.h);
+}
+function _lxPeRemove() {
+  const l = _lxPeList(); if (!l || !_lxPeSel()) return;
+  _lxPeMark();
+  l.splice(_LX_PE.sel, 1);
+  _LX_PE.sel = Math.min(_LX_PE.sel, l.length - 1);
+  _lxPeSync();
+}
+function _lxPeNudge(dx, dy) { const p = _lxPeSel(); if (!p) return; p.x += dx; p.y += dy; _lxPeSync(); }
+function _lxPeScale(d) {
+  const p = _lxPeSel(); if (!p) return;
+  p.scale = Math.round(Math.max(0.2, Math.min(5, (p.scale || 1) + d)) * 100) / 100;
+  if (p.scale === 1) delete p.scale;   // default scale stays out of the bake
+  _lxPeSync();
+}
+function _lxPeAnchorToggle() {
+  const p = _lxPeSel(); if (!p) return;
+  if (p.anchor === 'hang') delete p.anchor; else p.anchor = 'hang';
+  _lxPeSync();
+}
+function _lxPeSnap() {
+  const p = _lxPeSel(); if (!p) return;
+  const gy = _lxPeGroundY(p.x, p.y);
+  if (gy != null) { p.y = gy; _lxPeSync(); }
+}
+// draw-accurate box: same f-factor + aspect drawWorldProps derives, so the
+// hit area matches the pixels on screen (the Stage Editor's fixed 80px box
+// missed wide stalls and overshot small lanterns)
+function _lxPeGeom(p) {
+  const img = (typeof LX_OBJECTS !== 'undefined') && LX_OBJECTS[p.key];
+  const g = img && img._lxPropGeom;
+  const h = (typeof PROP_DEFAULT_H !== 'undefined' ? PROP_DEFAULT_H : 80) * (p.scale || 1) * (g ? g.f : 1);
+  return { h, w: h * (g ? g.ar : 1) };
+}
+function _lxPeHit(w) {
+  const l = _lxPeList(); if (!l) return -1;
+  for (let i = l.length - 1; i >= 0; i--) {           // topmost-drawn wins
+    const p = l[i], g = _lxPeGeom(p);
+    const hw = Math.max(20, g.w / 2);
+    const top = p.anchor === 'hang' ? 0 : -g.h, bot = p.anchor === 'hang' ? g.h : 10;
+    if (Math.abs(w.x - p.x) <= hw && w.y >= p.y + top && w.y <= p.y + bot) return i;
+  }
+  return -1;
+}
+function _lxPeDown(e) {
+  if (!_LX_PE.open || e.button !== 0) return;
+  if (_LX_PE.root && _LX_PE.root.contains(e.target)) return;   // panel clicks stay normal
+  const w = _lxSeWorld(e);
+  if (_LX_PE.place) {                                  // armed: this click places
+    _lxPeAdd(_LX_PE.place, w.x, w.y);
+    if (!e.shiftKey) _LX_PE.place = null;              // Shift-click keeps placing
+    _lxPeSync();
+  } else {
+    const hit = _lxPeHit(w);
+    if (hit >= 0) {
+      _LX_PE.sel = hit;
+      const p = _lxPeList()[hit];
+      _lxPeMark();                                     // popped again if this turns out to be a click, not a drag
+      _LX_PE.drag = { dx: w.x - p.x, dy: w.y - p.y, moved: false };
+    }
+    _lxPeSync();
+  }
+  // swallow every canvas click while editing — a select must not also swing
+  // the player's weapon
+  e.preventDefault(); e.stopPropagation();
+}
+function _lxPeMove(e) {
+  if (!_LX_PE.open || !_LX_PE.drag) return;
+  const p = _lxPeSel(); if (!p) return;
+  const w = _lxSeWorld(e);
+  p.x = Math.round(w.x - _LX_PE.drag.dx); p.y = Math.round(w.y - _LX_PE.drag.dy);
+  _LX_PE.drag.moved = true;
+  _lxPeSync();
+}
+function _lxPeUp() {
+  if (!_LX_PE.open) return;
+  if (_LX_PE.drag && !_LX_PE.drag.moved) _LX_PE.undo.pop();   // plain select: no state change to undo
+  _LX_PE.drag = null;
+}
+function _lxPeKey(e) {
+  if (!_LX_PE.open) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+  const step = e.shiftKey ? 10 : 1;
+  if (e.key === 'ArrowLeft')       _lxPeNudge(-step, 0);
+  else if (e.key === 'ArrowRight') _lxPeNudge(step, 0);
+  else if (e.key === 'ArrowUp')    _lxPeNudge(0, -step);
+  else if (e.key === 'ArrowDown')  _lxPeNudge(0, step);
+  else if (e.key === 'Delete' || e.key === 'Backspace') _lxPeRemove();
+  else if (e.key === 'Escape') { if (_LX_PE.place) { _LX_PE.place = null; _lxPeSync(); } else _lxPeToggle(); }
+  else if ((e.key === 'z' || e.key === 'Z') && e.ctrlKey) _lxPeUndo();
+  else return;                                         // anything else flows to the game (WASD walking stays live)
+  e.preventDefault(); e.stopPropagation();
+}
+function _lxPeBuild() {
+  const root = document.createElement('div');
+  root.id = 'lx-prop-editor';
+  root.style.cssText = 'position:fixed;top:12px;right:12px;width:280px;z-index:100000;background:#10141f;border:1px solid #43505f;border-radius:10px;padding:10px;font:12px Inter,system-ui,sans-serif;color:#e4ecf4;box-shadow:0 14px 40px rgba(0,0,0,0.6);display:none;';
+  const u = _LX_PE.ui = {};
+  const btn = (label, cb, flex) => { const b = document.createElement('button'); b.textContent = label; b.style.cssText = 'flex:' + (flex || 1) + ';padding:5px 4px;background:#1d2536;color:#e4ecf4;border:1px solid #43505f;border-radius:6px;cursor:pointer;font-size:11px;'; b.onclick = cb; return b; };
+  const hdr = document.createElement('div'); hdr.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:6px;';
+  hdr.innerHTML = '<b style="color:#ffd166;">\u{1F4E6} Prop Editor (Ctrl)</b>';
+  hdr.appendChild(btn('✕', () => _lxPeToggle(), '0 0 26px')); root.appendChild(hdr);
+  const tip = document.createElement('div'); tip.style.cssText = 'color:#90a4b4;font-size:10.5px;margin-bottom:6px;line-height:1.35;';
+  tip.textContent = 'Click a placed prop to select, drag to move. Arrows nudge (Shift ×10), Del removes, Ctrl+Z undoes. ＋ at click arms the next canvas click; Shift-click keeps placing.';
+  root.appendChild(tip);
+  u.map = document.createElement('div'); u.map.style.cssText = 'color:#7fb3ff;font-size:10.5px;margin-bottom:4px;'; root.appendChild(u.map);
+  u.filter = document.createElement('input');
+  u.filter.placeholder = 'filter props…';
+  u.filter.style.cssText = 'width:100%;box-sizing:border-box;background:#1d2536;color:#e4ecf4;border:1px solid #43505f;border-radius:6px;padding:4px 6px;margin-bottom:4px;font-size:11px;';
+  u.filter.oninput = () => _lxPeFillRoster();
+  root.appendChild(u.filter);
+  const rosterRow = document.createElement('div'); rosterRow.style.cssText = 'display:flex;gap:4px;margin-bottom:4px;';
+  u.roster = document.createElement('select'); u.roster.size = 7;
+  u.roster.style.cssText = 'flex:1;background:#1d2536;color:#e4ecf4;border:1px solid #43505f;border-radius:6px;padding:3px;font-size:11px;';
+  u.roster.onchange = () => _lxPePreview();
+  rosterRow.appendChild(u.roster);
+  u.thumb = document.createElement('div');
+  u.thumb.style.cssText = 'flex:0 0 84px;height:118px;background:#0a0e16;border:1px solid #2a3444;border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden;';
+  rosterRow.appendChild(u.thumb);
+  root.appendChild(rosterRow);
+  const rAdd = document.createElement('div'); rAdd.style.cssText = 'display:flex;gap:4px;margin-bottom:6px;';
+  rAdd.appendChild(btn('＋ at player', _lxPeAddAtPlayer));
+  u.armBtn = btn('＋ at click', () => { _LX_PE.place = u.roster.value || null; _lxPeSync(); });
+  rAdd.appendChild(u.armBtn);
+  root.appendChild(rAdd);
+  u.list = document.createElement('select'); u.list.size = 6;
+  u.list.style.cssText = 'width:100%;background:#1d2536;color:#e4ecf4;border:1px solid #43505f;border-radius:6px;padding:3px;margin-bottom:4px;font-size:11px;';
+  u.list.onchange = () => { _LX_PE.sel = u.list.selectedIndex; _lxPeSync(false); };
+  root.appendChild(u.list);
+  u.selInfo = document.createElement('div'); u.selInfo.style.cssText = 'color:#c8e0ea;font-size:10.5px;margin-bottom:4px;min-height:14px;'; root.appendChild(u.selInfo);
+  const r1 = document.createElement('div'); r1.style.cssText = 'display:flex;gap:4px;margin-bottom:4px;';
+  r1.appendChild(btn('⤓ Snap', _lxPeSnap)); r1.appendChild(btn('⚓ Hang', _lxPeAnchorToggle));
+  r1.appendChild(btn('− size', () => _lxPeScale(-0.1))); r1.appendChild(btn('+ size', () => _lxPeScale(0.1)));
+  root.appendChild(r1);
+  const r2 = document.createElement('div'); r2.style.cssText = 'display:flex;gap:4px;margin-bottom:4px;';
+  r2.appendChild(btn('↶ Undo', _lxPeUndo)); r2.appendChild(btn('\u{1F5D1} Remove', _lxPeRemove)); r2.appendChild(btn('⬇ Export', _lxPeExport));
+  root.appendChild(r2);
+  u.out = document.createElement('pre'); u.out.style.cssText = 'margin:4px 0 0;padding:6px;background:#0a0e16;border-radius:6px;font-size:9.5px;white-space:pre-wrap;word-break:break-all;color:#88dd88;max-height:150px;overflow-y:auto;'; root.appendChild(u.out);
+  document.body.appendChild(root); _LX_PE.root = root;
+  _lxPeFillRoster();
+}
+function _lxPeFillRoster() {
+  const u = _LX_PE.ui; if (!u) return;
+  const q = (u.filter.value || '').toLowerCase();
+  const cur = u.roster.value;
+  u.roster.innerHTML = '';
+  for (const k of _lxPeKeys()) {
+    if (q && k.indexOf(q) < 0) continue;
+    const o = document.createElement('option'); o.value = k; o.textContent = k; u.roster.appendChild(o);
+  }
+  if (cur) u.roster.value = cur;
+  if (!u.roster.value && u.roster.options.length) u.roster.selectedIndex = 0;
+  _lxPePreview();
+}
+function _lxPePreview() {
+  const u = _LX_PE.ui; if (!u) return;
+  u.thumb.innerHTML = '';
+  const img = typeof LX_OBJECTS !== 'undefined' && LX_OBJECTS[u.roster.value];
+  if (img && img.src) {
+    const t = document.createElement('img'); t.src = img.src;
+    t.style.cssText = 'max-width:78px;max-height:112px;object-fit:contain;';
+    u.thumb.appendChild(t);
+  }
+}
+function _lxPeExport() {
+  const l = _lxPeList() || [];
+  const txt = '// MAP_PROPS.' + game.currentMap + ' — hardbake from the Ctrl Prop Editor\n' +
+    game.currentMap + ': [\n' + l.map(pr => '  ' + _lxSeFmt(pr) + ',').join('\n') + '\n],';
+  if (_LX_PE.ui) _LX_PE.ui.out.textContent = txt;
+  try { navigator.clipboard.writeText(txt); if (typeof showToast === 'function') showToast('Prop layout copied \u{1F4CB}', 'epic'); } catch (e) {}
+}
+function _lxPeSync(rebuildList) {
+  const u = _LX_PE.ui; if (!u) return;
+  const l = _lxPeList() || [];
+  u.map.textContent = 'map: ' + game.currentMap + '  ·  ' + l.length + ' prop' + (l.length === 1 ? '' : 's');
+  if (rebuildList !== false) {
+    u.list.innerHTML = '';
+    l.forEach((p, i) => {
+      const o = document.createElement('option');
+      o.textContent = (i === _LX_PE.sel ? '▶ ' : '') + p.key + '  (' + p.x + ',' + p.y + ')' + (p.scale ? ' ×' + p.scale : '') + (p.anchor === 'hang' ? ' ⚓' : '');
+      u.list.appendChild(o);
+    });
+    u.list.selectedIndex = _LX_PE.sel;
+  }
+  const p = _lxPeSel();
+  u.selInfo.textContent = p ? ('▶ ' + p.key + '  x:' + p.x + '  y:' + p.y + '  scale:' + (p.scale || 1) + '  anchor:' + (p.anchor || 'feet'))
+    : (_LX_PE.place ? '\u{1F3AF} placing "' + _LX_PE.place + '" — click the map (Esc cancels)' : 'nothing selected');
+  u.armBtn.style.background = _LX_PE.place ? '#3d2a10' : '#1d2536';
+  u.armBtn.style.borderColor = _LX_PE.place ? '#ffb020' : '#43505f';
+}
+function _lxPeToggle() {
+  if (!_LX_PE.root) _lxPeBuild();
+  _LX_PE.open = !_LX_PE.open;
+  _LX_PE.root.style.display = _LX_PE.open ? 'block' : 'none';
+  if (_LX_PE.open) {
+    window.addEventListener('pointerdown', _lxPeDown, true);
+    window.addEventListener('pointermove', _lxPeMove, true);
+    window.addEventListener('pointerup', _lxPeUp, true);
+    window.addEventListener('keydown', _lxPeKey, true);
+    _LX_PE._map = game.currentMap;
+    _lxPeSync();
+    if (typeof showToast === 'function') showToast('Prop Editor — tap Ctrl to close', 'rare');
+  } else {
+    window.removeEventListener('pointerdown', _lxPeDown, true);
+    window.removeEventListener('pointermove', _lxPeMove, true);
+    window.removeEventListener('pointerup', _lxPeUp, true);
+    window.removeEventListener('keydown', _lxPeKey, true);
+    _LX_PE.sel = -1; _LX_PE.drag = null; _LX_PE.place = null;
+  }
+}
+// selection boxes, drawn in the late debug-overlay slot (over actors). Uses
+// the same coordinate convention as drawWorldProps: x is camera-subtracted
+// manually, y is raw world (vertical scroll rides the active ctx transform).
+function _lxPeDrawOverlay() {
+  if (!_LX_PE.open) return;
+  if (_LX_PE._map !== game.currentMap) {               // map changed under the editor
+    _LX_PE._map = game.currentMap;
+    _LX_PE.sel = -1; _LX_PE.drag = null; _LX_PE.undo.length = 0;   // undo snapshots belong to the old map
+    _lxPeSync();
+  }
+  const camX = (game.camera && game.camera.x) || 0;
+  const l = _lxPeList() || [];
+  ctx.save();
+  for (let i = 0; i < l.length; i++) {
+    const p = l[i], g = _lxPeGeom(p);
+    const x = p.x - camX;
+    const top = p.anchor === 'hang' ? p.y : p.y - g.h;
+    const isSel = i === _LX_PE.sel;
+    ctx.strokeStyle = isSel ? '#ffd166' : 'rgba(127,179,255,0.35)';
+    ctx.lineWidth = isSel ? 2 : 1;
+    ctx.setLineDash(isSel ? [] : [4, 4]);
+    ctx.strokeRect(x - g.w / 2, top, g.w, g.h);
+    if (isSel) {                                        // anchor-point cross at (x, y)
+      ctx.beginPath();
+      ctx.moveTo(x - 8, p.y); ctx.lineTo(x + 8, p.y);
+      ctx.moveTo(x, p.y - 8); ctx.lineTo(x, p.y + 8);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+// Bare-Ctrl tap toggle. Arms on Control keydown; ANY other key, click or
+// wheel while Ctrl is held cancels the tap — so Ctrl+C, Ctrl+Z, Ctrl+click
+// and Ctrl+scroll behave exactly as before and never open the editor. The
+// dev gate is checked at fire time so unlocking mid-session works.
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Control') { if (!e.repeat) _LX_PE._arm = true; }
+  else _LX_PE._arm = false;
+}, true);
+window.addEventListener('keyup', (e) => {
+  if (e.key !== 'Control') return;
+  if (_LX_PE._arm && _lxPeDevOk()) {
+    const t = document.activeElement;                   // typing in the filter box must not close the panel
+    if (!(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA'))) _lxPeToggle();
+  }
+  _LX_PE._arm = false;
+}, true);
+window.addEventListener('pointerdown', () => { _LX_PE._arm = false; }, true);
+window.addEventListener('wheel', () => { _LX_PE._arm = false; }, true);
 /* ===== Key-4 "NPC Plant" dev overlay — mirror of the key-3 Monster Plant === */
 const _LX_NP = { open: false, name: null, root: null, ui: null, _tick: null };
 function _lxNpTypes() {
@@ -34272,56 +34597,9 @@ function _classHpRef() {
     return (c && _CLASS_HP_REF[c]) || 1;
   } catch (_) { return 1; }
 }
-// v0.29.483 — LEVEL-DERIVED GEAR ALLOWANCE (per user "make higher level monsters
-// more threatening than the lower ones on a natural progression curve").
-// _refHpAtLv is meant to model an at-level GEARED character's HP, but the
-// allowance above was a FLAT 1.5 while real shop gear multiplies HP ~1.8x at
-// Lv 20 and ~10x at Lv 90. The anchor therefore drifted from ~1.8x under a
-// real character's bar at Lv 20 to ~12x under it at Lv 90 — monster damage
-// grows linearly in level while player power grows with the tier ladder, so
-// higher-level monsters got RELATIVELY weaker the further you progressed.
-// That is the root cause; see scripts/survivability_vs_spec.mjs for the
-// measurement and scripts/solve_dmg_band.mjs for why re-solving the damage
-// band alone is the wrong fix (it needs x7 at Lv 80 and collapses the
-// warrior's tank identity to 0.83x of the cluster).
-//
-// Values are MEASURED, not guessed: scripts/gen_gear_allowance.mjs equips the
-// loadout the shop would actually sell at each level, across all four classes,
-// and reports gearedHP / ((104 + 23.6L) * _classHpRef()). Sampled on the same
-// level grid as _DMG_BAND_TABLE so the two interpolate on one shared set of
-// breakpoints. RE-RUN IT whenever gear or the tier ladder is retuned —
-// scripts/gear_allowance_test.mjs fails the build if this table drifts, which
-// is the guard that was missing when the flat 1.5 silently went stale.
-//
-// The Lv-100 row is measured at Lv 99 (devSetLevel caps there) against the
-// Lv-99 base; it shares the Lv-99 stat block and T10 gear, so the residual is
-// under 1%. The dip from Lv 90 -> 100 is real: base HP keeps growing while
-// gear stops at T10.
-//
-// NOTE for the follow-up band re-solve: the per-class spread is wide (Lv 90 =
-// warrior 11.6 vs mage 18.1). This table is the 4-class MEAN, which is exact
-// while the neutrality factor below cancels it, but _CLASS_HP_REF itself needs
-// re-deriving at the same time — it was calibrated on NAKED HP ratios (warrior
-// 1.90 / mage 0.62 = 3.06x) whereas geared HP differs by only ~1.96x, which is
-// why the warrior currently measures as the LEAST survivable class rather than
-// the most.
-const _GEAR_ALLOWANCE_TABLE = [
-  [1, 2.996], [5, 2.41], [10, 3.509], [15, 3.022], [20, 2.736], [30, 2.841],
-  [40, 2.566], [50, 4.17], [60, 5.351], [70, 6.735], [80, 10.748], [90, 14.882],
-  [100, 13.735],
-];
-function _refGearAllowance(lv) {
-  const L = Math.max(1, Math.min(100, lv | 0));
-  const T = _GEAR_ALLOWANCE_TABLE;
-  for (let i = 0; i < T.length - 1; i++) {
-    const a = T[i], b = T[i + 1];
-    if (L >= a[0] && L <= b[0]) return a[1] + (b[1] - a[1]) * ((L - a[0]) / (b[0] - a[0]));
-  }
-  return T[T.length - 1][1];
-}
 function _refHpAtLv(lv) {
   const L = Math.max(1, lv | 0);
-  return Math.round((104 + 23.6 * L) * _refGearAllowance(L) * _classHpRef());
+  return Math.round((104 + 23.6 * L) * _REF_GEAR_ALLOWANCE * _classHpRef());
 }
 function _refLoAtLv(lv) {
   const L = Math.max(1, lv | 0);
@@ -34377,16 +34655,6 @@ function _dmgBandPct(lv) {
       break;
     }
   }
-  // v0.29.483 — NEUTRALITY FACTOR. _refHpAtLv now returns the TRUE geared anchor
-  // instead of the flat-1.5 one, which would multiply damage by up to ~10x at
-  // Lv 90 on its own. This cancels that exactly, so this commit is a pure
-  // structural refactor with ZERO gameplay change (asserted by
-  // scripts/gear_allowance_test.mjs). Shaping the difficulty curve is the
-  // NEXT step: re-solve _DMG_BAND_TABLE against the corrected anchor and
-  // DELETE this line — the table then carries the ramp alone, in honest
-  // "fraction of an at-level geared bar" units, and needs gentle values
-  // instead of the x7 the old drifted anchor demanded.
-  p *= _REF_GEAR_ALLOWANCE / _refGearAllowance(L);
   const t = p * _BAND_TOUCH_RATIO;
   return { pFloor: p, pCap: p * _BAND_CAP_RATIO, tFloor: t, tCap: t * _BAND_CAP_RATIO };
 }
@@ -113502,6 +113770,7 @@ function loop(time) {
   drawSmoothFx();
   drawWorldArtOverlay();
   drawCalibrationGrid();   // v0.25.749 — debug grid for size-comparison across maps
+  if (typeof _lxPeDrawOverlay === 'function') _lxPeDrawOverlay();   // v0.29.483 — Ctrl Prop Editor selection boxes
   drawDamageNumbers();
   drawIceCheer();   // v0.25.458 — Icy Tower combo overlay
   _drawDayNightTint();   // v0.29.415 — dawn/dusk/night grade: one rect, free by day
