@@ -9360,7 +9360,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.508';
+const GAME_VERSION = 'v0.29.509';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -103734,7 +103734,26 @@ function _drawMonsterSprite(m, sx, sy) {
     const _frameW = _lxWholeSize(targetH * (_fsW / _fsH));
     const _atkScale = (m._frameIsAttack && _ATK_FRAME_SCALE[m.type]) || 1;
     if (_atkScale !== 1) {
-      const _bW = Math.round(_frameW * _atkScale), _bH = Math.round(targetH * _atkScale), _bDy = dyOffset * _atkScale;   // v0.26.x perf — integer blit dims
+      const _bW = Math.round(_frameW * _atkScale), _bH = Math.round(targetH * _atkScale);   // v0.26.x perf — integer blit dims
+      let _bDy = dyOffset * _atkScale;
+      // v0.29.509 — PLANT THE ATTACK FRAME BY ITS OWN FEET. `dyOffset` anchors
+      // the box using the STATIC sprite's content bottom, which is right for
+      // idle/walk (authored flush to the canvas floor) but wrong for a padded
+      // swing frame, whose body sits higher inside its canvas. Scaling that
+      // offset by _atkScale then multiplies the error, so the mob rose off the
+      // ground for the whole swing — per user, the smith golem "levitates
+      // midair" when it attacks. Measured on the rendered blit: it sat 21px
+      // above its idle foot line and sank 22.8px across the 9 frames (its
+      // attack frames run botFrac 0.881 -> 0.998 against idle 0.999). All
+      // seven padded types were off, 2.6px to 23.2px; anchoring each frame on
+      // its own content bottom brings every one inside 1.2px.
+      // Falls back to the old offset when the box is unavailable (a tainted
+      // canvas under file:// blocks the readback) — degraded, never broken.
+      const _fBox = (typeof _spriteContentBox === 'function') ? _spriteContentBox(_stateImg) : null;
+      if (_fBox && _fBox.bottom > _fBox.top && _fsH) {
+        const _footLocal = dyOffset + targetH * ((bboxBottomY + 1) / (srcH || 1));   // where idle/walk plant their feet
+        _bDy = _footLocal - _bH * ((_fBox.bottom + 1) / _fsH);
+      }
       _lxDrawSoft(ctx, _stateImg, _lxWholePx(-_bW / 2), _lxWholePx(_bDy), _bW, _bH);   // v0.29.x — edge feather
     } else {
       _lxDrawSoft(ctx, _stateImg, _lxWholePx(-_frameW / 2), _lxWholePx(dyOffset), _frameW, targetH);   // v0.29.x — edge feather
