@@ -31,7 +31,7 @@ these can be dropped in one at a time.
 | --- | --- | --- |
 | Path's Bane | `fx_col_pathsbane.png` | necrotic withered green `#88aa66` |
 | Archon | `fx_col_archon.png` | holy gold `#ffeeaa` |
-| Legosaurus (boss) | `fx_col_legosaurus.png` | brick-fire orange `#ff8844` |
+| Rexy (boss) | `fx_col_blockrexy.png` | brick-fire orange `#ff8844` |
 | Tomb Wraith | `fx_col_tombwraith.png` | spectral toxic-green `#aaff77` |
 | Tomb Hexer | `fx_col_tombhexer.png` | arcane violet `#c88aff` |
 | Zodiac | `fx_col_zodiac.png` | cosmic (tinted per-sign in engine) |
@@ -59,7 +59,7 @@ stacked vertically. Warm, blinding, celestial. Top and bottom fade to
 transparent. Reads as an angelic judgment beam. No background.
 ```
 
-## 3 — Legosaurus, the Warped Tyrant (`fx_col_legosaurus.png`)
+## 3 — Rexy, the Warped Tyrant (`fx_col_blockrexy.png`)
 ```
 Vertical 256x1024 painterly pixel-art VFX column on transparent background.
 A roaring pillar of fiery molten brick and lava (#ff8844) — chunks of glowing

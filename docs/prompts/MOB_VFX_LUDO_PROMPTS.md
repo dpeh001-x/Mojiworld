@@ -53,7 +53,7 @@ Format: **caster** · skill · `file` (LX_VFX key).
 > bolt inside a glowing yellow energy column with crackling forked arcs and
 > bright sparks, tall and narrow.
 
-**Legosaurus / quake casters** · Quake · `quake_ring.webp` (`quakeRing`)
+**Rexy / quake casters** · Quake · `quake_ring.webp` (`quakeRing`)
 > An expanding GROUND-QUAKE shockwave seen TOP-DOWN: concentric cracked-earth
 > rings with rising dust and tumbling rubble, a warm orange-tan seismic glow,
 > mostly EMPTY in the centre (a ring, not a disc).
