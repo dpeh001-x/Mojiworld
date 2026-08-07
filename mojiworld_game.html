@@ -9377,7 +9377,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.521';
+const GAME_VERSION = 'v0.29.522';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -33278,6 +33278,18 @@ function applyClass(clsId) {
 // fx keys: atkPct defPct maxHpPct maxMpPct critPct(flat) speedPct
 //          skillDmg(non-basic) basicLifesteal critMp potionBoost
 // =========================================================================
+// v0.29.NEW — per user: talent picks get custom ludo.ai art instead of emoji.
+// Files are Sprites/talents/<talent id>.webp (see scripts/generate_talent_icons.mjs).
+// The emoji stays on every talent as the onerror fallback — the JOB_TALENTS
+// `icon` field is still the single source for text contexts (toasts, the
+// confirm dialog, the job summary line), where an <img> makes no sense.
+function _talentIconHtml(id, glyph, px) {
+  px = px || 36;
+  return '<img src="Sprites/talents/' + id + '.webp" alt="" ' +
+    'style="width:' + px + 'px; height:' + px + 'px; object-fit:contain; display:inline-block; vertical-align:middle;" ' +
+    'onerror="this.style.display=\'none\'; var s = this.nextElementSibling; if (s) s.style.display = \'inline-block\';">' +
+    '<span style="display:none; font-size:' + px + 'px; line-height:1;">' + (glyph == null ? '' : glyph) + '</span>';
+}
 const JOB_TALENTS = {
   berserker: [
     { id:'bloodrush',  name:'Bloodrush',  icon:'🩸', desc:'Basic attacks heal 5% of damage dealt.', fx:{ basicLifesteal:0.05 } },
@@ -33374,7 +33386,7 @@ function openTalentPick() {
     const card = document.createElement('div');
     card.className = 'class-card';
     card.style.cssText = 'flex:1; cursor:pointer; text-align:center; padding:16px 10px;';
-    card.innerHTML = '<div style="font-size:36px;">' + p.icon + '</div>' +
+    card.innerHTML = '<div style="font-size:36px; line-height:1;">' + _talentIconHtml(p.id, p.icon, 52) + '</div>' +
       '<div style="font-weight:800; margin:7px 0 4px; color:#ffe089;">' + p.name + '</div>' +
       '<div style="font-size:11.5px; color:#cfd4dc; line-height:1.45;">' + p.desc + '</div>' +
       '<div style="margin-top:9px; font-size:10px; color:#ffb86b; font-weight:700;">⚠ PERMANENT — choose ONE of these three</div>';
@@ -33444,7 +33456,7 @@ function _talentCardHtml() {
       return '<div style="margin-top:6px; padding:7px 10px 8px; border-radius:10px; background:rgba(120,80,200,0.08); border:1px solid rgba(190,140,255,0.25);">' +
         '<div style="font:700 9px Inter, system-ui, sans-serif; letter-spacing:1.8px; color:#c8a8ff; text-transform:uppercase; margin-bottom:5px;">✦ Job Talent — ' + ((JOBS[jobId] && JOBS[jobId].name) || jobId) + ' · ⚠ permanent</div>' +
         '<div style="display:flex; gap:8px; align-items:center; padding:7px 10px; border-radius:8px; background:rgba(255,209,102,0.12); border:1px solid rgba(255,224,137,0.7);">' +
-          '<div style="font-size:22px;">' + cp.icon + '</div>' +
+          '<div style="font-size:22px; line-height:1;">' + _talentIconHtml(cp.id, cp.icon, 26) + '</div>' +
           '<div style="min-width:0;"><div style="font-size:11.5px; font-weight:800; color:#ffe089;">' + cp.name + ' ✓</div>' +
           '<div style="font-size:10px; color:#cfd4dc; line-height:1.35;">' + cp.desc + '</div></div>' +
         '</div>' +
@@ -33457,7 +33469,7 @@ function _talentCardHtml() {
   const cards = picks.map(p => {
     const isC = chosen === p.id, dim = chosen && !isC;
     return '<div data-talent="' + p.id + '" style="flex:1; min-width:0; padding:7px 8px; border-radius:8px; text-align:center; cursor:' + (chosen ? 'default' : 'pointer') + '; background:' + (isC ? 'rgba(255,209,102,0.14)' : 'rgba(255,255,255,0.04)') + '; border:1px solid ' + (isC ? 'rgba(255,224,137,0.8)' : 'rgba(255,255,255,0.12)') + '; opacity:' + (dim ? 0.45 : 1) + ';">' +
-      '<div style="font-size:20px;">' + p.icon + '</div>' +
+      '<div style="font-size:20px; line-height:1;">' + _talentIconHtml(p.id, p.icon, 24) + '</div>' +
       '<div style="font-size:10.5px; font-weight:800; color:' + (isC ? '#ffe089' : '#dfe4ec') + ';">' + p.name + (isC ? ' ✓' : '') + '</div>' +
       '<div style="font-size:9.5px; color:#aab2c0; line-height:1.35;">' + p.desc + '</div></div>';
   }).join('');
@@ -57358,6 +57370,54 @@ function _mojimonRgba(hex, a) {
   const n = parseInt(h, 16) || 0x8fd4ff;
   return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
 }
+// v0.29.522 — Per user "make sure the black colour remain as pure black".
+// The tint was a flat `source-atop` wash at 0.38, which lifts EVERY opaque
+// pixel toward the class colour — including the art's black linework. A
+// rogue's mon was outlined in (65,39,97) dark purple instead of black, so the
+// species lost the crisp silhouette that reads it apart from the background.
+//
+// The wash is now applied per pixel so black can be exempted. Two details:
+//   • The exemption is a THRESHOLD, not an equality test. Sprites/monsters is
+//     lossy WebP (v0.29.286), so authored #000 survives as 2-7 per channel —
+//     measured across 10 species, an exact-black test would have missed most
+//     of the outline (ticketMech: 1.8% exactly black, 12.8% at <=4). Anything
+//     <=8 is visually black already; it is snapped to exact 0 and skips the
+//     wash. Above that the tint applies unchanged.
+//   • The arithmetic reproduces source-atop exactly (out = A*tint + (1-A)*src
+//     with alpha untouched), so every non-black pixel renders bit-identical to
+//     before — this is not a re-tune of the tint, only an exemption.
+// getImageData taints on a file:// origin, so the old flat wash stays as the
+// fallback: worse-looking, never broken.
+const _MOJIMON_TINT_A = 0.38;      // v0.29.453 — tint strength, per user
+const _MOJIMON_BLACK_MAX = 8;      // channel ceiling for "this pixel is outline black"
+function _mojimonWash(c, w, h) {
+  const col = _mojimonClassColor();
+  try {
+    const img = c.getImageData(0, 0, w, h);
+    const d = img.data;
+    let hx = String(col).replace('#', '');
+    if (hx.length === 3) hx = hx[0] + hx[0] + hx[1] + hx[1] + hx[2] + hx[2];
+    const n = parseInt(hx, 16);
+    const tr = (n >> 16) & 255, tg = (n >> 8) & 255, tb = n & 255;
+    const A = _MOJIMON_TINT_A, IA = 1 - A, K = _MOJIMON_BLACK_MAX;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] === 0) continue;                                  // fully transparent — nothing to wash
+      if (d[i] <= K && d[i + 1] <= K && d[i + 2] <= K) {             // outline black — snap to pure, skip the tint
+        d[i] = 0; d[i + 1] = 0; d[i + 2] = 0;
+        continue;
+      }
+      d[i]     = d[i]     * IA + tr * A;
+      d[i + 1] = d[i + 1] * IA + tg * A;
+      d[i + 2] = d[i + 2] * IA + tb * A;
+    }
+    c.putImageData(img, 0, 0);
+    return;
+  } catch (e) { /* tainted canvas (file://) — flat wash below */ }
+  c.globalCompositeOperation = 'source-atop';   // tint only where the sprite has pixels
+  c.fillStyle = _mojimonRgba(col, _MOJIMON_TINT_A);
+  c.fillRect(0, 0, w, h);
+  c.globalCompositeOperation = 'source-over';
+}
 function _mojimonTinted(spr, type) {
   const key = type + '|' + (player.cls || '?');
   const hit = _MOJIMON_TINT_CACHE[key];
@@ -57367,9 +57427,7 @@ function _mojimonTinted(spr, type) {
   cv.width = spr.naturalWidth; cv.height = spr.naturalHeight;
   const c = cv.getContext('2d');
   c.drawImage(spr, 0, 0);
-  c.globalCompositeOperation = 'source-atop';   // tint only where the sprite has pixels
-  c.fillStyle = _mojimonRgba(_mojimonClassColor(), 0.38);   // v0.29.453 — stronger, per user
-  c.fillRect(0, 0, cv.width, cv.height);
+  _mojimonWash(c, cv.width, cv.height);
   return (_MOJIMON_TINT_CACHE[key] = cv);
 }
 // v0.29.454 — per-FRAME class tint. The old _mojimonTinted cache keys on
@@ -57390,9 +57448,7 @@ function _mojimonTintedFrame(frame, type) {
   cv.width = frame.naturalWidth; cv.height = frame.naturalHeight;
   const c = cv.getContext('2d');
   c.drawImage(frame, 0, 0);
-  c.globalCompositeOperation = 'source-atop';
-  c.fillStyle = _mojimonRgba(_mojimonClassColor(), 0.38);   // same strength as the static tint
-  c.fillRect(0, 0, cv.width, cv.height);
+  _mojimonWash(c, cv.width, cv.height);   // v0.29.522 — same wash as the static tint, black exempted
   if (_MOJIMON_FRAME_TINT) _MOJIMON_FRAME_TINT.set(frame, { cls, cv });
   return cv;
 }
@@ -82563,7 +82619,7 @@ function renderBoonPanel() {
     if (typeof JOB_TALENTS !== 'undefined' && player) {
       if (player.job && player.talents && player.talents[player.job]) {
         const _tp = (JOB_TALENTS[player.job] || []).find(t => t.id === player.talents[player.job]);
-        if (_tp) _talentLine = '<div style="margin:0 0 8px; padding:7px 10px; border-radius:8px; background:rgba(255,209,102,0.10); border:1px solid rgba(255,224,137,0.55); display:flex; gap:8px; align-items:center;"><span style="font-size:18px;">' + _tp.icon + '</span><span style="min-width:0;"><b style="color:#ffe089; font-size:12px;">✦ Talent: ' + _tp.name + '</b> <span style="font-size:10px; color:#cfa84a;">· ⚠ permanent</span><br><span style="font-size:10.5px; color:#d8d0e8;">' + _tp.desc + '</span></span></div>';
+        if (_tp) _talentLine = '<div style="margin:0 0 8px; padding:7px 10px; border-radius:8px; background:rgba(255,209,102,0.10); border:1px solid rgba(255,224,137,0.55); display:flex; gap:8px; align-items:center;"><span style="font-size:18px; line-height:1;">' + _talentIconHtml(_tp.id, _tp.icon, 20) + '</span><span style="min-width:0;"><b style="color:#ffe089; font-size:12px;">✦ Talent: ' + _tp.name + '</b> <span style="font-size:10px; color:#cfa84a;">· ⚠ permanent</span><br><span style="font-size:10.5px; color:#d8d0e8;">' + _tp.desc + '</span></span></div>';
       } else if (player.job && JOB_TALENTS[player.job]) {
         _talentLine = '<div style="margin:0 0 8px; padding:6px 10px; border-radius:8px; background:rgba(120,80,200,0.08); border:1px dashed rgba(190,140,255,0.35); font-size:10.5px; color:#b0a4d0;">✦ Talent: not chosen yet — pick it in the <b>Stats</b> tab (one of three options · permanent).</div>';
       } else {
