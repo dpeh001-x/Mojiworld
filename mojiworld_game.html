@@ -9360,7 +9360,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.506';
+const GAME_VERSION = 'v0.29.507';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -56888,7 +56888,15 @@ function _mojimonStatsFor(type) {
   const mm = _mojimonEnsure();
   const u = (mm.roster[type] && mm.roster[type].upg) || { hp: 0, atk: 0, def: 0 };
   return {
-    maxHp: Math.max(100, Math.floor(getMaxHp() * 10 * (1 + (u.hp | 0) * MOJIMON_UPG.hp))),
+    // v0.29.507 — per user: the mon's pool IS the player's pool. It was ten
+    // times the player's max HP, which made the companion the tankiest thing
+    // on any screen — it outlived the player it was escorting by an order of
+    // magnitude. Upgrade points still scale from that base. The floor drops
+    // 100 -> 1 because at x10 a 100 floor could never bind (it needed a player
+    // under 10 max HP); at parity it would have bound for any player under
+    // 100 and quietly handed the mon MORE HP than the player, which is the
+    // one outcome this change exists to prevent.
+    maxHp: Math.max(1, Math.floor(getMaxHp() * (1 + (u.hp | 0) * MOJIMON_UPG.hp))),
     atk:   Math.max(8, Math.floor(getAtk() * (1 + (u.atk | 0) * MOJIMON_UPG.atk))),
     defRed: Math.min(MOJIMON_DEF_CAP, (u.def | 0) * MOJIMON_UPG.def),
   };
@@ -57755,6 +57763,27 @@ function updateMinions(dt) {
         }
       }
       if (player.mojimon && player.mojimon.out) {
+        // v0.29.507 — parity has to hold while the mon is out, not just at the
+        // moment it was summoned. A level-up, gear swap or boon moves the
+        // player's max HP, and the mon used to keep its old pool until a map
+        // change re-summoned it. Recomputing only when getMaxHp() actually
+        // moves keeps this off the hot path.
+        //
+        // Absolute HP is carried across, NOT the damage fraction. Scaling by
+        // fraction looks fairer but quietly heals: raise the pool 1000 -> 2000
+        // and a half-dead mon jumps from 500 to 1000 actual HP, which any
+        // player can farm by swapping a +HP item on and off. Clamping also
+        // covers the shrink direction, where currentHp would otherwise sit
+        // above the new maximum.
+        const _pMax = (typeof getMaxHp === 'function') ? getMaxHp() : 0;
+        if (_pMax > 0 && mn._mmSyncHp !== _pMax) {
+          mn._mmSyncHp = _pMax;
+          const _want = _mojimonStatsFor(mn.type).maxHp;
+          if (_want > 0 && _want !== mn.maxHp) {
+            mn.maxHp = _want;
+            mn.currentHp = Math.max(1, Math.min(_want, mn.currentHp));
+          }
+        }
         player.mojimon.out.hpFrac = mn.maxHp > 0 ? mn.currentHp / mn.maxHp : 1;
         // v0.29.448 — last-known position, so the defeat FX below can fire
         // at the death spot after the generic splice has removed the body.
