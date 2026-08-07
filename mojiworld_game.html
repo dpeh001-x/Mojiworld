@@ -9385,7 +9385,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.529';
+const GAME_VERSION = 'v0.29.530';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -58401,6 +58401,27 @@ function spawnSmoothSlash(x, y, angle, length, color, opts) {
     // fades from fx.color into this along the blade. White reads "hot" for
     // most palettes; dark/void slashes can pass their own.
     edgeCol: opts.edgeCol || '#ffffff',
+    // v0.29.530 â€” per-swing shaping. bodyAlpha thins the fill (translucent arcs),
+    // reveal is how far behind the leading edge the tail lags (bigger = a
+    // FULLER visible crescent), clean drops the glint + speedlines.
+    bodyAlpha: (opts.bodyAlpha != null) ? opts.bodyAlpha : null,
+    reveal: (opts.reveal != null) ? opts.reveal : null,
+    clean: !!opts.clean,
+  });
+}
+// v0.29.530 â€” STAB IMPACT (per user "for rogue it should be a stab impact
+// design"). A thrust reads as a LANCE â€” a tapered blade streak racing
+// forward from the dagger point â€” capped by a four-point impact star that
+// pops at the tip. Same house treatment as the crescent: dark rim,
+// colour-to-hot-edge gradient body, additive glow only.
+function spawnStabImpact(x, y, dir, length, color, opts) {
+  opts = opts || {};
+  if (!game.smoothFx) game.smoothFx = [];
+  game.smoothFx.push({
+    type: 'stab', x, y, dir: (dir < 0 ? -1 : 1), length, color,
+    life: opts.life || 14, maxLife: opts.life || 14,
+    thickness: opts.thickness || 9,
+    edgeCol: opts.edgeCol || '#ffffff',
   });
 }
 function spawnSmoothExplosion(x, y, radius, coreCol, edgeCol, opts) {
@@ -58631,9 +58652,13 @@ function drawSmoothFx() {
       // leading edge covers the whole spread in ~the first 60% of life; the
       // trailing edge follows it, so late frames are a thinning tail.
       const leadA = -halfS + fx.spread * Math.min(1, ease * 1.25);
-      const trailA = -halfS + fx.spread * Math.max(0, ease * 1.25 - 0.62);
+      const trailA = -halfS + fx.spread * Math.max(0, ease * 1.25 - ((fx.reveal != null) ? fx.reveal : 0.62));
       if (leadA - trailA > 0.03) {
         const thick = fx.thickness * 1.9;
+        // v0.29.530 â€” translucency scales the WHOLE stack (rim + body + glow),
+        // so a thinned arc doesn't keep a full-strength outline.
+        const _ba = (fx.bodyAlpha != null) ? fx.bodyAlpha : 0.92;
+        const _bk = _ba / 0.92;
         ctx.save();
         ctx.translate(sx, fx.y);
         ctx.rotate(fx.angle);
@@ -58656,7 +58681,7 @@ function drawSmoothFx() {
         }
         ctx.closePath();
         // dark rim first — the contrast spine that survives bright skies
-        ctx.globalAlpha = alpha * 0.5;
+        ctx.globalAlpha = alpha * 0.5 * _bk;
         ctx.strokeStyle = 'rgba(22,12,42,0.9)';
         ctx.lineWidth = 3;
         ctx.stroke();
@@ -58665,30 +58690,94 @@ function drawSmoothFx() {
         g.addColorStop(0, fx.color);
         g.addColorStop(0.55, fx.color);
         g.addColorStop(1, fx.edgeCol || '#ffffff');
-        ctx.globalAlpha = alpha * 0.92;
+        ctx.globalAlpha = alpha * _ba;
         ctx.fillStyle = g;
         ctx.fill();
         // additive glow — the only 'lighter' pass, so the body never washes out
         ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = alpha * 0.28;
+        ctx.globalAlpha = alpha * 0.28 * _bk;
         ctx.fillStyle = fx.color;
         ctx.fill();
-        // glint racing at the blade tip
-        ctx.globalAlpha = alpha * 0.85 * (1 - t);
-        ctx.fillStyle = fx.edgeCol || '#ffffff';
-        ctx.beginPath();
-        ctx.arc(Math.cos(leadA) * r, Math.sin(leadA) * r, Math.max(2, thick * 0.28), 0, Math.PI * 2);
-        ctx.fill();
-        // two whisper-thin speedlines trailing the cut
-        ctx.globalAlpha = alpha * 0.22;
-        ctx.strokeStyle = fx.color;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(0, 0, r * 0.9, trailA - 0.22, trailA + 0.12); ctx.stroke();
-        ctx.globalAlpha = alpha * 0.12;
-        ctx.beginPath(); ctx.arc(0, 0, r * 1.06, trailA - 0.3, trailA + 0.06); ctx.stroke();
+        if (!fx.clean) {   // v0.29.530 â€” a "clean" arc is just the blade, no garnish
+          // glint racing at the blade tip
+          ctx.globalAlpha = alpha * 0.85 * (1 - t);
+          ctx.fillStyle = fx.edgeCol || '#ffffff';
+          ctx.beginPath();
+          ctx.arc(Math.cos(leadA) * r, Math.sin(leadA) * r, Math.max(2, thick * 0.28), 0, Math.PI * 2);
+          ctx.fill();
+          // two whisper-thin speedlines trailing the cut
+          ctx.globalAlpha = alpha * 0.22;
+          ctx.strokeStyle = fx.color;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(0, 0, r * 0.9, trailA - 0.22, trailA + 0.12); ctx.stroke();
+          ctx.globalAlpha = alpha * 0.12;
+          ctx.beginPath(); ctx.arc(0, 0, r * 1.06, trailA - 0.3, trailA + 0.06); ctx.stroke();
+        }
         ctx.restore();
         ctx.globalCompositeOperation = 'source-over';
       }
+    } else if (fx.type === 'stab') {
+      // v0.29.530 â€” rogue basic: thrust lance + tip impact star (see spawnStabImpact)
+      const t = 1 - fx.life / fx.maxLife;
+      const ease = 1 - Math.pow(1 - t, 2.6);
+      const len = fx.length * (0.5 + 0.5 * ease);
+      const th = fx.thickness;
+      ctx.save();
+      ctx.translate(sx, fx.y);
+      if (fx.dir < 0) ctx.scale(-1, 1);
+      // lance: tapered blade streak, belly ~30% out, razor tip
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(len * 0.30, -th, len * 0.58, -th * 0.5);
+      ctx.quadraticCurveTo(len * 0.86, -th * 0.18, len, 0);
+      ctx.quadraticCurveTo(len * 0.86, th * 0.18, len * 0.58, th * 0.5);
+      ctx.quadraticCurveTo(len * 0.30, th, 0, 0);
+      ctx.closePath();
+      ctx.globalAlpha = alpha * 0.5;
+      ctx.strokeStyle = 'rgba(22,12,42,0.9)';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      const lg = ctx.createLinearGradient(0, 0, len, 0);
+      lg.addColorStop(0, fx.color);
+      lg.addColorStop(0.6, fx.color);
+      lg.addColorStop(1, fx.edgeCol || '#ffffff');
+      ctx.globalAlpha = alpha * 0.9;
+      ctx.fillStyle = lg;
+      ctx.fill();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = alpha * 0.3;
+      ctx.fillStyle = fx.color;
+      ctx.fill();
+      // thrust speedlines raking in behind the blade
+      ctx.globalAlpha = alpha * 0.3;
+      ctx.strokeStyle = fx.color;
+      ctx.lineWidth = 1.5;
+      for (const oy of [-th * 0.85, th * 0.85]) {
+        ctx.beginPath(); ctx.moveTo(-len * 0.22, oy); ctx.lineTo(len * 0.4, oy * 0.55); ctx.stroke();
+      }
+      // impact star pops at the tip once the thrust lands
+      if (t > 0.3) {
+        const pop = Math.min(1, (t - 0.3) / 0.25);
+        const os = 1 + 0.5 * Math.sin(Math.min(1, pop) * Math.PI);   // overshoot
+        const s = th * 1.7 * os;
+        ctx.translate(len, 0);
+        for (const rot of [0, Math.PI / 2]) {
+          ctx.save(); ctx.rotate(rot + Math.PI / 4);
+          ctx.globalAlpha = alpha * 0.85 * (1 - t);
+          ctx.fillStyle = fx.color;
+          ctx.beginPath();
+          ctx.moveTo(0, -s); ctx.lineTo(s * 0.24, 0); ctx.lineTo(0, s); ctx.lineTo(-s * 0.24, 0);
+          ctx.closePath(); ctx.fill();
+          ctx.globalAlpha = alpha * 0.9 * (1 - t);
+          ctx.fillStyle = fx.edgeCol || '#ffffff';
+          ctx.beginPath();
+          ctx.moveTo(0, -s * 0.55); ctx.lineTo(s * 0.13, 0); ctx.lineTo(0, s * 0.55); ctx.lineTo(-s * 0.13, 0);
+          ctx.closePath(); ctx.fill();
+          ctx.restore();
+        }
+      }
+      ctx.restore();
+      ctx.globalCompositeOperation = 'source-over';
     } else if (fx.type === 'explosion') {
       const r = fx.radius;
       if (r < 1) continue;
@@ -59013,7 +59102,8 @@ const SKILL_FNS = {
     // the hit band 10 px above AND below the player's box (performMelee's
     // vertical reach option), so slightly-airborne / low-slung mobs no
     // longer slip under or over the swing. Damage unchanged.
-    performMelee(255, 1.10, { color:'#ffcf5e', kb:5, burst:14, basic:true, tall: 10 });   // v0.29.527 — gold body (NOT a bucket colour: sprites stay off the basic per v0.25.227)
+    performMelee(255, 1.10, { color:'#ff4d4d', kb:5, burst:14, basic:true, tall: 10,
+      slashOpts: { bodyAlpha: 0.55, reveal: 0.95, spread: Math.PI * 1.02, thickness: 13, life: 18, edgeCol: '#ffd9cf', clean: true } });   // v0.29.527 — gold body (NOT a bucket colour: sprites stay off the basic per v0.25.227)
     const cx = player.x + player.w/2, cy = player.y + player.h/2;
     // v0.25.227 — sprite removed per user request. The Z basic attack
     // now reads as the procedural pixelBurst flourish only; the
@@ -59500,7 +59590,9 @@ const SKILL_FNS = {
     // v0.26.410 — playtest found rogue was the weakest overall package (lowest
     // basic DPS + 3rd-lowest EHP); nudged 0.45→0.55 to restore a viable basic
     // floor without re-opening the old 2.5× dominance (backstab stays the burst).
-    const hits = performMelee(160, 0.68, { color:'#c07bff', burst:6, basic:true });   // v0.29.527 — deeper violet body; edge stays white-hot (non-bucket: no sprite reroute)
+    const hits = performMelee(160, 0.68, { color:'#c07bff', burst:6, basic:true, noSlash: true });
+    spawnStabImpact(player.x + player.w/2 + player.facing * 26, player.y + player.h * 0.30,
+      player.facing, 150, '#c07bff', { thickness: 9, life: 14 });   // h*0.30: the sprite is ~1.5x the hitbox, so hitbox-mid reads at the knees — this is the visual chest line   // v0.29.527 — deeper violet body; edge stays white-hot (non-bucket: no sprite reroute)
     if (hits) {
       // Brief afterimage
       game.afterImages.push({
@@ -63389,13 +63481,15 @@ function performMelee(range, dmgPct, opts = {}) {
   }
   // Always draw a slash arc for the swing itself — modern energy crescent
   const slashAng = player.facing > 0 ? 0 : Math.PI;
-  spawnSmoothSlash(
+  // v0.29.530 â€” noSlash lets a skill own its swing visual (the rogue stab draws a
+  // thrust lance instead); slashOpts forwards per-class shaping to the arc.
+  if (!opts.noSlash) spawnSmoothSlash(
     player.x + player.w/2 + player.facing * range * 0.35,
     player.y + player.h/2,
     slashAng,
     range * 0.55,
     opts.color || '#ffffff',
-    { thickness: 5 + Math.min(6, dmgPct * 2), spread: Math.PI * 0.85, life: 16 }
+    Object.assign({ thickness: 5 + Math.min(6, dmgPct * 2), spread: Math.PI * 0.85, life: 16 }, opts.slashOpts || {})
   );
   const burst = opts.burst || 6;
   for (let i = 0; i < burst; i++) {
