@@ -1,4 +1,4 @@
-// CTRL PROP EDITOR (v0.29.484) — drives the live MAP_PROPS editor end to end.
+// CTRL PROP EDITOR (v0.29.483) — drives the live MAP_PROPS editor end to end.
 //
 // Two pages on purpose: one WITHOUT the dev flag (the gate must hold — players
 // tapping Ctrl see nothing) and one with ?dev=1 exercising the whole surface:
