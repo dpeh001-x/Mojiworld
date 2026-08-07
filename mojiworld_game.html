@@ -9377,7 +9377,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.513';
+const GAME_VERSION = 'v0.29.521';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10769,6 +10769,13 @@ const _SUMMON_ANIM_MS_OVERRIDE = { eagle: 70 };
 // underneath — this just scales the final draw box and lowers the anchor.
 const _SUMMON_SIZE_MUL = 1.5;
 const _SUMMON_PUSH_DOWN = 10;
+// v0.29.521 — Per user "push them vertically upwards by 5 px", for the undead
+// raised by Dark Pulse (and the single thrall Soul Siphon raises — same
+// raiseMinion path, same skeleton/zombie art, so they stay consistent).
+// Kept SEPARATE from _SUMMON_PUSH_DOWN above: that constant is shared with the
+// wolf pet, the sword summon and the shadow clones, and nudging it would move
+// all four. This one only reaches drawMinions.
+const _MINION_LIFT = 5;
 function _summonAnimFrame(key, state) {
   if (!key || !state) return null;
   const tag = key + '_' + state;
@@ -58081,7 +58088,7 @@ function drawMinions() {
       // (_lxWholePx discipline): unrounded coords made summons the one
       // entity class that could land on sub-pixels and shimmer.
       const _drawX = Math.round(sx + mn.w / 2 - _targetW / 2);
-      const _drawY = Math.round(yOff + mn.h - _targetH * _botFrac + 6 + _SUMMON_PUSH_DOWN);   // content bottom on the foot line (+6px floor nudge, +global push-down)
+      const _drawY = Math.round(yOff + mn.h - _targetH * _botFrac + 6 + _SUMMON_PUSH_DOWN - _MINION_LIFT);   // content bottom on the foot line (+6px floor nudge, +global push-down, -5px minion lift)
       // v0.26.x — Per user: flip the sprite to face the move/walk direction
       // (undead summons are authored facing right; mirror when heading left).
       ctx.save();
@@ -62982,11 +62989,24 @@ const SKILL_FNS = {
     // bar up instead of being cost-neutral. Now the window is free (net 0), not
     // free-plus-profit. Worst case (Overload milestone) is a small drain, never a gain.
     player.mp = Math.min(getMaxMp(), player.mp + Math.ceil((SKILLS.sage_ult.mp || 92) * 0.80));
+    // v0.29.520 — the cooldown castSkill just committed (line ~56507) is
+    // s.cd * cdMul: mage 0.90×, JOB_CD_MUL and every CDR source. Writing the
+    // raw SKILLS.sage_ult.cd below threw all of that away, so this ultimate
+    // alone ignored cooldown reduction. Capture the real value instead.
+    const _sageFullCd = player.skillCooldowns.sage_ult || SKILLS.sage_ult.cd;
     if (!_active) {
       player._sageUntil = _now + 8000; player._sageShots = 0;
       spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'sage_ult', { size: 240, life: 80 });
       showToast('METEOR SIGIL — tap B (x10)', 'legendary'); flash(0.5);
-      scheduleSkillTimer(() => { player.skillCooldowns.sage_ult = SKILLS.sage_ult.cd; player._sageUntil = 0; }, 8000);
+      // v0.29.520 — bail if the 10-shot cap already closed the window. This
+      // timer used to re-stamp a full cooldown on top of one that was already
+      // ticking down, so emptying the ult FAST made you wait longer than
+      // emptying it slowly (fire 10 by t≈2s → ready at t+62s from 8s, not 2s).
+      scheduleSkillTimer(() => {
+        if (!player._sageUntil) return;
+        player.skillCooldowns.sage_ult = _sageFullCd;
+        player._sageUntil = 0; player._sageShots = 0;
+      }, 8000);
     }
     player._sageShots = (player._sageShots || 0) + 1;
     const cx = player.x + player.w / 2, cy = player.y + player.h / 2, dir = player.facing || 1;
@@ -62995,7 +63015,15 @@ const SKILL_FNS = {
     const vx = t ? ((Math.sign((t.x + t.w / 2) - cx)) || dir) * 9 : dir * 9;
     game.projectiles.push({ x: cx, y: cy, vx, vy: -3, w: 40, h: 40, life: 150, damage: getAtk() * 3.2 + 20, owner: 'player', skill: 'fire', bspr: 'bult_sage', sprScale: 4.5, spin: 0.55, homing: t, color: '#ff8822', noGravity: true, explode: 56 });
     flash(0.15); addShake(3);
-    player.skillCooldowns.sage_ult = (player._sageShots >= 10) ? SKILLS.sage_ult.cd : 220;
+    // v0.29.520 — closing the window here is what makes the pending 8s timer
+    // (and _lxRestoreUltCd's `_sageUntil || _sageShots > 0` arm) no-op instead
+    // of restarting a cooldown that is already counting down.
+    if (player._sageShots >= 10) {
+      player.skillCooldowns.sage_ult = _sageFullCd;
+      player._sageUntil = 0; player._sageShots = 0;
+    } else {
+      player.skillCooldowns.sage_ult = 220;
+    }
   },
   elementalist_ult: () => {
     // v0.26.x — sequential element novas (Fire / Ice-freeze / Lightning) → Convergence beam.
