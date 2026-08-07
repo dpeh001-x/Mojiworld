@@ -123,7 +123,7 @@ Drop into `audio/boss/`. Plays alongside the cinematic boss intro overlay (alrea
 | `boss_gloopaloo.mp3` | Slime king boss roar, deep gurgling wet bubble growl rising to a sovereign bellow, fantasy RPG boss intro, no music, one-shot |
 | `boss_shroomaloo.mp3` | Mushroom queen boss roar, eerie wet fungal sporing breath rising to a haunting wail, fantasy RPG boss intro, no music, one-shot |
 | `boss_octobaby.mp3` | Octopus boss roar, wet tentacle slap with shrill childlike shriek, eight-moods chaotic stinger, fantasy RPG boss intro, no music, one-shot |
-| `boss_koopaloo.mp3` | Turtle king boss roar, heavy shell scrape into deep monarch bellow, spiked-throne menace, fantasy RPG boss intro, no music, one-shot |
+| `boss_krook.mp3` | Turtle king boss roar, heavy shell scrape into deep monarch bellow, spiked-throne menace, fantasy RPG boss intro, no music, one-shot |
 | `boss_aetherion.mp3` | Celestial shardfather boss intro, crystalline shimmer rising into a vast cosmic chord and a low godlike growl, fantasy RPG boss intro, no music vocals, one-shot |
 | `boss_gravitos.mp3` | Gravity god boss intro, deep gravitational hum collapsing into a vast titanic groan, weight-bearer menace, fantasy RPG final boss intro, no music vocals, one-shot |
 
