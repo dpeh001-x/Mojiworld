@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Falling molten-lava hazard sprites for the Koopa Throne arena — ludo.ai text->sprite.
+// Falling molten-lava hazard sprites for the Krook Throne arena — ludo.ai text->sprite.
 // Output -> Sprites/vfx/<file>.webp, loaded by LX_VFX; the hazard renderer blits when
 // ready and falls back to a code-drawn molten look otherwise.
 //   node scripts/gen_lava.mjs                 # dry-run list

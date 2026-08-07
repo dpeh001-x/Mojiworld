@@ -40,7 +40,7 @@ MAPS.fieryHideout = {
   portals: [],
   spawns: [],
 };
-// Mid-slope doorway (slope exits at x:100 lavaCavern / x:2300 koopaThrone are taken)
+// Mid-slope doorway (slope exits at x:100 lavaCavern / x:2300 krookThrone are taken)
 MAPS.sauroSlope.portals.push  ({ x: 1200, dest: 'fieryHideout', name: '🔥 The Fiery Hideout (rest stop)' });
 MAPS.fieryHideout.portals.push({ x: 80,   dest: 'sauroSlope',   name: '◀ Sauro Slope' });
 // W-map pin — beside Sauro Slope's final pin (173,116)
@@ -51,8 +51,8 @@ const reps = [
   { old: `  sauroSlope:      'audio/ambient/lava.mp3',`,
     neu: `  sauroSlope:      'audio/ambient/lava.mp3',
   fieryHideout:    'audio/ambient/lava.mp3',   // v0.26.835 — shares the slope's lava ambience` },
-  { old: `  sauroSlope:'🦎', koopaThrone:'🐢',`,
-    neu: `  sauroSlope:'🦎', koopaThrone:'🐢', fieryHideout:'🔥',` },
+  { old: `  sauroSlope:'🦎', krookThrone:'🐢',`,
+    neu: `  sauroSlope:'🦎', krookThrone:'🐢', fieryHideout:'🔥',` },
 ];
 
 let n = 0;
