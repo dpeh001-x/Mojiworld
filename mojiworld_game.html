@@ -9385,7 +9385,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.535';
+const GAME_VERSION = 'v0.29.536';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -52139,6 +52139,42 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     attackTimer: 0, attackCooldown: 0,
     patternTimer: 0, patternState: 'idle',
   });
+  // v0.29.536 — BOSS LEVEL FLOOR (per user, after a Lv-86 character one-shot
+  // King Gloopaloo). Bosses are exempt from every level curve above (all the
+  // isBoss?1 knobs), so an authored Lv-10 boss keeps its Lv-10 pool forever
+  // while the player grows without bound. When the player OUTLEVELS a boss,
+  // its HP now scales up toward relevance.
+  //
+  // The floor is deliberately SOFT below Lv 40 (per user: the first boss
+  // "should be Easy"): half the growth rate and half the ceiling, so early
+  // bosses become victory laps rather than walls — a Lv-86 player meets a
+  // ~4.8x Gloopaloo (~860k HP), seconds of endgame damage, not one hit and
+  // not a real fight. At-level players are untouched (gap 0 = 1x), and the
+  // curve only ever ADDS relative to the authored fight.
+  //
+  // ATK gets a quarter of the growth — the floor exists to stop one-shot
+  // KILLS of the boss, not to make an outleveled boss dangerous again.
+  // EXP and coins scale by the SAME factor as HP: a floored boss paying its
+  // base reward would be strictly worse to fight than before, and paying a
+  // level-matched reward for an eased fight is the farming exploit the
+  // Conductor block closes. clockworkExpress is excluded because the PQ
+  // finale boss has its own full level-match scaler (search _pqBoss), which
+  // would double-dip on top of this one.
+  if (isBoss && game.currentMap !== 'clockworkExpress') {
+    const _bm = game.monsters[game.monsters.length - 1];
+    const _bLv = t.level || 1;
+    const _bGap = Math.max(0, (((typeof player !== 'undefined' && player) ? player.level : 1) || 1) - _bLv);
+    if (_bGap > 0) {
+      const _ease = _bLv < 40 ? 0.5 : 1;
+      const _fl = Math.min(_bLv < 40 ? 6 : 12, 1 + _bGap * 0.10 * _ease);
+      _bm.maxHp = Math.floor(_bm.maxHp * _fl);
+      _bm.currentHp = _bm.maxHp;
+      _bm.atk = Math.floor(_bm.atk * (1 + (_fl - 1) * 0.25));
+      _bm.exp = Math.floor(_bm.exp * _fl);
+      _bm.mojicoins = Math.floor(_bm.mojicoins * _fl);
+      _bm._lvFloorMul = _fl;   // surfaced for tests / the bestiary tooltip
+    }
+  }
   // v0.29.310 — ELITE AFFIXES. Elite/Elder previously only scaled numbers, so
   // every elite of a given type played identically. Roll one affix per elite
   // spawn: same art, same monster, different problem to solve. Applied to the
