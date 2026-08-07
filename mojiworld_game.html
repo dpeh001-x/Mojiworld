@@ -9377,7 +9377,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.522';
+const GAME_VERSION = 'v0.29.523';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -57376,39 +57376,75 @@ function _mojimonRgba(hex, a) {
 // rogue's mon was outlined in (65,39,97) dark purple instead of black, so the
 // species lost the crisp silhouette that reads it apart from the background.
 //
-// The wash is now applied per pixel so black can be exempted. Two details:
-//   • The exemption is a THRESHOLD, not an equality test. Sprites/monsters is
-//     lossy WebP (v0.29.286), so authored #000 survives as 2-7 per channel —
-//     measured across 10 species, an exact-black test would have missed most
-//     of the outline (ticketMech: 1.8% exactly black, 12.8% at <=4). Anything
-//     <=8 is visually black already; it is snapped to exact 0 and skips the
-//     wash. Above that the tint applies unchanged.
-//   • The arithmetic reproduces source-atop exactly (out = A*tint + (1-A)*src
-//     with alpha untouched), so every non-black pixel renders bit-identical to
-//     before — this is not a re-tune of the tint, only an exemption.
-// getImageData taints on a file:// origin, so the old flat wash stays as the
-// fallback: worse-looking, never broken.
-const _MOJIMON_TINT_A = 0.38;      // v0.29.453 — tint strength, per user
+// The wash is applied per pixel so black can be exempted. The exemption is a
+// THRESHOLD, not an equality test: Sprites/monsters is lossy WebP (v0.29.286),
+// so authored #000 survives as 2-7 per channel — measured across 10 species,
+// an exact-black test would have missed most of the outline (ticketMech: 1.8%
+// exactly black, 12.8% at <=4). Anything <=8 is visually black already; it is
+// snapped to exact 0 and skips the tint entirely.
+//
+// v0.29.523 — Per user "make the tints itself far more prominent for each
+// distinct class". The obvious move — raise the 0.38 alpha — is the wrong one:
+// an alpha wash pulls every pixel toward ONE flat colour, so cranking it
+// collapses the sprite's own light and shade into a milky slab. It gets more
+// coloured and less readable at the same time.
+//
+// Instead the recolour is now a LUMINOSITY-PRESERVING hue replacement (the
+// canonical HSL 'color' blend, done by hand because we also need the black
+// exemption above). Per pixel: take the class colour, then push it to the
+// luminance the source pixel already had. The result commits fully to the
+// class hue — #e55 warrior red, #a6f rogue purple, #6bf mage blue, #6c6 archer
+// green are unmistakable at a glance — while every highlight, midtone and
+// shadow keeps its exact relative brightness, so the species' modelling and
+// linework survive intact. Highlights stay bright, shadows stay deep.
+//
+// _MOJIMON_TINT_S is the dial: 1 = pure class hue, 0 = untinted. 0.88 leaves a
+// trace of the species' own colour so two mons of the same class still differ
+// slightly, without weakening the class read.
+// getImageData taints on a file:// origin, so a flat wash stays as the
+// fallback — weaker there, but never broken.
+const _MOJIMON_TINT_S = 0.88;      // v0.29.523 — hue-replacement strength (was a 0.38 alpha wash)
+const _MOJIMON_TINT_A = 0.62;      // fallback-only alpha, file:// tainted-canvas path
 const _MOJIMON_BLACK_MAX = 8;      // channel ceiling for "this pixel is outline black"
+// Rec.709 luma — matches how the eye weights the channels, so a green class
+// tint does not read brighter than a blue one at the same nominal strength.
+function _lum709(r, g, b) { return 0.2126 * r + 0.7152 * g + 0.0722 * b; }
+// Shift (r,g,b) to luminance L, then clip back into gamut the way the HSL
+// blend modes specify — scale the colour toward its own luma rather than
+// clamping per channel, which would skew the hue on bright or dark pixels.
+function _setLum(r, g, b, L) {
+  const d = L - _lum709(r, g, b);
+  let R = r + d, G = g + d, B = b + d;
+  const l = _lum709(R, G, B);
+  const mn = Math.min(R, G, B), mx = Math.max(R, G, B);
+  if (mn < 0 && l !== mn) { const k = l / (l - mn); R = l + (R - l) * k; G = l + (G - l) * k; B = l + (B - l) * k; }
+  if (mx > 255 && mx !== l) { const k = (255 - l) / (mx - l); R = l + (R - l) * k; G = l + (G - l) * k; B = l + (B - l) * k; }
+  return [R, G, B];
+}
 function _mojimonWash(c, w, h) {
   const col = _mojimonClassColor();
+  let hx = String(col).replace('#', '');
+  if (hx.length === 3) hx = hx[0] + hx[0] + hx[1] + hx[1] + hx[2] + hx[2];
+  const n = parseInt(hx, 16);
+  const tr = (n >> 16) & 255, tg = (n >> 8) & 255, tb = n & 255;
   try {
     const img = c.getImageData(0, 0, w, h);
     const d = img.data;
-    let hx = String(col).replace('#', '');
-    if (hx.length === 3) hx = hx[0] + hx[0] + hx[1] + hx[1] + hx[2] + hx[2];
-    const n = parseInt(hx, 16);
-    const tr = (n >> 16) & 255, tg = (n >> 8) & 255, tb = n & 255;
-    const A = _MOJIMON_TINT_A, IA = 1 - A, K = _MOJIMON_BLACK_MAX;
+    const S = _MOJIMON_TINT_S, IS = 1 - S, K = _MOJIMON_BLACK_MAX;
+    // The class colour's own luma is constant across the sprite; the per-pixel
+    // work is one _setLum, so a 768² bake is a few ms and happens once per
+    // (species, class) into the caches above — never per frame.
     for (let i = 0; i < d.length; i += 4) {
       if (d[i + 3] === 0) continue;                                  // fully transparent — nothing to wash
-      if (d[i] <= K && d[i + 1] <= K && d[i + 2] <= K) {             // outline black — snap to pure, skip the tint
+      const r = d[i], g = d[i + 1], b = d[i + 2];
+      if (r <= K && g <= K && b <= K) {                              // outline black — snap to pure, skip the tint
         d[i] = 0; d[i + 1] = 0; d[i + 2] = 0;
         continue;
       }
-      d[i]     = d[i]     * IA + tr * A;
-      d[i + 1] = d[i + 1] * IA + tg * A;
-      d[i + 2] = d[i + 2] * IA + tb * A;
+      const t = _setLum(tr, tg, tb, _lum709(r, g, b));
+      d[i]     = r * IS + t[0] * S;
+      d[i + 1] = g * IS + t[1] * S;
+      d[i + 2] = b * IS + t[2] * S;
     }
     c.putImageData(img, 0, 0);
     return;
