@@ -9385,7 +9385,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.543';
+const GAME_VERSION = 'v0.29.544';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -15452,7 +15452,7 @@ const SKILLS = {
   // kit ≈98→≈140 DPS-units) — damage numbers untouched.
   fireball:     { name:'Fireball',       icon:'🔥', cls:'mage', slot:'s', mp:14, cd:2400, desc:'Explodes on impact (180 px AoE). 2.4s recast.' },
   iceSpike:     { name:'Ice Spike',      icon:'❄️', cls:'mage', slot:'a', mp:12, cd:4500, desc:'3 piercing spikes; 50% chance to freeze on hit.' },
-  blink:        { name:'Dimensional Warp', icon:'🌀', cls:'mage', slot:'e', mp:14, cd:2400, desc:'Phase across a dimension. Damages every monster in the path traversed (+100×50 px AoE around it).' },
+  blink:        { name:'Dimensional Warp', icon:'🌀', cls:'mage', slot:'e', mp:14, cd:2400, desc:'Phase across a dimension. Damages every monster in the path traversed (+100×50 px AoE around it). Hold ↑ while casting (or double-tap ↑) to warp skyward.' },
   arcaneBurst:  { name:'Arcane Burst',   icon:'💥', cls:'mage', slot:'w', mp:22, cd:7000, desc:'Massive 320-px AoE explosion centred on you.' },
   // Archmage
   meteor:       { name:'Meteor',         icon:'☄️', cls:'mage', job:'archmage', slot:'q', mp:35, cd:10000, desc:'Call a meteor from above.' },
@@ -30962,9 +30962,23 @@ window.addEventListener('keydown', e => {
     const now = performance.now();
     if (player.lastTapKey === k && (now - player.lastTapTime) < 280 && player.quickDashTimer <= 0 && player.rushTimer <= 0) {
       if (k === 'arrowup') {
-        // v0.29.504 — standalone mobility warp: 180px up, no damage, G-skill
-        // cooldown, blink MP cost. See _mageUpWarp.
-        try { _mageUpWarp(); } catch (e) {}
+        // v0.29.543 (per user) — the standalone G-cooldown warp (v0.29.504)
+        // read as "casts once": 15-45s master cooldowns with only a fail
+        // buzzer, and silence before a master. Back to the v0.29.499 shape:
+        // route through castSkill('blink') so the warp costs blink MP and
+        // shares blink's own C-key cooldown — recastable every ~2.4s. The
+        // intent flag is set/cleared synchronously so a later keyed cast
+        // can never inherit the vertical mode.
+        // isReady gate mirrors every keyed cast site — castSkill itself does
+        // NOT check cooldown, so the bare call v0.29.499 shipped let the
+        // double-tap bypass it. Not-ready plays the standard fail buzzer.
+        if (typeof isReady !== 'function' || isReady('blink')) {
+          player._blinkUpIntent = true;
+          try { castSkill('blink'); } catch (e) {}
+          player._blinkUpIntent = false;
+        } else {
+          try { audio.play('fail'); } catch (e) {}
+        }
       } else {
         quickDash(k === 'arrowleft' ? -1 : 1);
       }
@@ -34150,15 +34164,8 @@ function applyMaster(masterId) {
   if (m.stats.mp && typeof getMaxMp === 'function') player.mp = getMaxMp();
   if (typeof renderSkillBar === 'function') renderSkillBar();
   showToast(`Mastered ${m.name}!`, 'legendary');
-  // v0.29.505 (per user) — the instant the G skill is learnt, tell the mage
-  // line their new mobility exists. Once per character; staggered behind the
-  // mastery toast so the two reads don't collide.
-  if (player.cls === 'mage' && !player._upWarpNoticeShown) {
-    player._upWarpNoticeShown = true;
-    setTimeout(() => {
-      try { showToast('🌀 Upward Warp unlocked — double-tap ↑ to phase skyward!', 'epic'); } catch (e) {}
-    }, 1600);
-  }
+  // v0.29.543 — the v0.29.505 "Upward Warp unlocked" master toast is gone:
+  // the warp is no longer master-gated. It unlocks with blink itself.
   flash(0.7); addShake(8);
   for (let i = 0; i < 3; i++) {
     const a = (i / 3) * Math.PI * 2;
@@ -56515,37 +56522,9 @@ function _basicAttackGateMs() {
 //   cooldown = the player's G-key skill (master signature, slot 'x'),
 //   read live via skillsForClass; 15 s fallback before a master exists.
 // Own cooldown track — independent of the E-blink cooldown.
-function _mageUpWarp() {
-  if (!player || player.cls !== 'mage' || player.hp <= 0) return;
-  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-  const _fail = () => { try { if (audio && audio.play) audio.play('fail'); } catch (e) {} };
-  // v0.29.505 (per user) — LOCKED until the G skill is learnt. The warp's
-  // cooldown IS the master-signature skill's, so before a master exists there
-  // is nothing to anchor it to. The gate runs FIRST and returns SILENTLY —
-  // no buzzer, no MP touched — so the gesture gives nothing away before its
-  // one-time unlock announcement in applyMaster.
-  let _cd = 0;
-  try {
-    const kit = skillsForClass(player.cls, player.job, player.master);
-    for (const id in kit) if (kit[id].slot === 'x' && kit[id].cd) { _cd = kit[id].cd; break; }
-  } catch (e) {}
-  if (!_cd) return;   // no G skill learnt — upward warp not yet available
-  if ((player._upWarpCdUntil || 0) > now) { _fail(); return; }
-  // Mirror castSkill's cost pipeline exactly (mage ×0.80 discount, Overload
-  // milestone ×1.5) so the gesture costs the same MP as a keyed warp.
-  let _cost = (typeof SKILLS === 'object' && SKILLS.blink && SKILLS.blink.mp) || 14;
-  _cost = Math.ceil(_cost * 0.80);
-  if (typeof hasMilestone === 'function' && hasMilestone('overload')) _cost = Math.ceil(_cost * 1.5);
-  if (player.mp < _cost) { _fail(); return; }
-  player.mp -= _cost;
-  spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'blink', { size: 140, life: 22 });
-  for (let i = 0; i < 15; i++) { if (!_budgetedParticlePush({ x: player.x + player.w / 2, y: player.y + player.h / 2, vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, life: 25, color: '#aa88ff', size: 3 })) break; }
-  player.y = Math.max(0, player.y - 180);
-  player.vy = 0;
-  player.onGround = false;
-  for (let i = 0; i < 15; i++) { if (!_budgetedParticlePush({ x: player.x + player.w / 2, y: player.y + player.h / 2, vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, life: 25, color: '#aa88ff', size: 3 })) break; }
-  player._upWarpCdUntil = now + _cd;
-}
+// v0.29.543 — _mageUpWarp deleted. The vertical warp is a mode of the
+// blink skill again (C+↑ or double-tap ↑), on blink's own cooldown; a
+// separate G-anchored cooldown track no longer exists.
 function castSkill(id) {
   const s = SKILLS[id];
   if (!s) return;
@@ -60657,12 +60636,18 @@ const SKILL_FNS = {
     // Lv10 distMul and the Hyper Teleport boon compose onto both axes.
     const _blinkBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('blink') : null;
     const _blinkDist = 225 * ((_blinkBonus && _blinkBonus.distMul) || 1);
-    // v0.29.504 — horizontal-only again: the vertical warp is the standalone
-    // double-tap-↑ _mageUpWarp (180px, no damage, G-skill cooldown).
-    const tx = Math.min(game.mapData.worldWidth - player.w, Math.max(0, player.x + player.facing * _blinkDist));
+    // v0.29.543 (per user) — vertical mode is back inside the skill (the
+    // v0.29.504 standalone warp is deleted). Two ways in: the double-tap-↑
+    // intent flag, or holding ↑ while the C key casts — "press C and up at
+    // the same time". Cost and cooldown are simply blink's own.
+    const _blinkUp = !!player._blinkUpIntent || !!game.keys['arrowup'];
+    const tx = _blinkUp ? player.x
+      : Math.min(game.mapData.worldWidth - player.w, Math.max(0, player.x + player.facing * _blinkDist));
+    const ty = _blinkUp ? Math.max(0, player.y - _blinkDist) : player.y;
     // Departure puff
     for (let i=0;i<15;i++) { if (!_budgetedParticlePush({x:player.x+player.w/2,y:player.y+player.h/2,vx:(Math.random()-0.5)*4,vy:(Math.random()-0.5)*4,life:25,color:'#aa88ff',size:3})) break; }
     player.x = tx;
+    if (_blinkUp) { player.y = ty; player.vy = 0; player.onGround = false; }
     // Arrival puff
     for (let i=0;i<15;i++) { if (!_budgetedParticlePush({x:player.x+player.w/2,y:player.y+player.h/2,vx:(Math.random()-0.5)*4,vy:(Math.random()-0.5)*4,life:25,color:'#aa88ff',size:3})) break; }
     player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
@@ -60677,10 +60662,12 @@ const SKILL_FNS = {
     // v0.29.497 — the swept-path AoE follows the warp axis: horizontal warps
     // keep the original 100×50 band; vertical warps rotate it (50 px pad
     // along the travel axis, 25 px across).
-    const lo  = Math.min(startX, tx) - 50;
-    const hi  = Math.max(startX, tx) + (player.w) + 50;
-    const top = (player.y + player.h/2) - 25;
-    const bot = (player.y + player.h/2) + 25;
+    // v0.29.543 — restored v0.29.497 axis-aware sweep: vertical warps
+    // rotate the 100×50 band (50px pad along travel, 25px across).
+    const lo  = _blinkUp ? (player.x + player.w/2) - 25 : Math.min(startX, tx) - 50;
+    const hi  = _blinkUp ? (player.x + player.w/2) + 25 : Math.max(startX, tx) + (player.w) + 50;
+    const top = _blinkUp ? Math.min(startY, ty) - 50 : (player.y + player.h/2) - 25;
+    const bot = _blinkUp ? Math.max(startY, ty) + player.h + 50 : (player.y + player.h/2) + 25;
     // v0.25.658 — P1 REBALANCE. 1.5× was 40% under C-tier target.
     // Bumped to 2.2× — within C-tier budget for a mobility-with-damage skill.
     const _dmg = Math.max(1, Math.floor(getAtk() * 2.2));
@@ -60694,10 +60681,10 @@ const SKILL_FNS = {
       _hits++;
     }
     // Streak of arcane motes along the swept path so the AoE reads visually.
-    const _step = (tx - startX) / 15;
+    const _step = _blinkUp ? (ty - startY) / 15 : (tx - startX) / 15;
     for (let i = 0; i < 3; i++) {
-      const px = startX + _step * i + player.w / 2;
-      const py = player.y + player.h / 2 + (Math.random() - 0.5) * 18;
+      const px = _blinkUp ? player.x + player.w / 2 + (Math.random() - 0.5) * 18 : startX + _step * i + player.w / 2;
+      const py = _blinkUp ? startY + _step * i + player.h / 2 : player.y + player.h / 2 + (Math.random() - 0.5) * 18;
       if (!_budgetedParticlePush({
         x: px, y: py,
         vx: (Math.random() - 0.5) * 1.6,
