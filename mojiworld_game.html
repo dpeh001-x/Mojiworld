@@ -9319,7 +9319,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.477';
+const GAME_VERSION = 'v0.29.478';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -29318,6 +29318,15 @@ function openEdictsPanel() {
   ov.onclick = (ev) => { if (ev.target === ov) close(); };
   render();
 }
+
+// v0.29.477 (perf-pass) — frame-keyed getMaxMp cache for getAtk's three
+// synergy branches (battleMage / manaforged / overflow pct). Same idiom and
+// staleness tolerance as the game._crT crit frame-cache in updateProjectiles.
+function _mpMaxFrame() {
+  if (typeof game === 'undefined' || !game) return Math.max(1, getMaxMp());
+  if (game._mpMxT !== game.time) { game._mpMxT = game.time; game._mpMxV = Math.max(1, getMaxMp()); }
+  return game._mpMxV;
+}
 function getAtk()  {
   // v0.25.738 — STR / INT primary-attribute bonus removed. ATK now
   // grows from baseAtk (per-level class gains) + mods.atk (boons) +
@@ -29341,7 +29350,7 @@ function getAtk()  {
   // scaled by current MP%. Encourages mage-line characters to stay
   // topped up before unloading big skill bursts.
   if (player._activeSynergies && player._activeSynergies.battleMage) {
-    const _maxMp = Math.max(1, getMaxMp());
+    const _maxMp = _mpMaxFrame();
     const _mpFrac = Math.max(0, Math.min(1, player.mp / _maxMp));
     pct += 0.15 * _mpFrac;
   }
@@ -29366,7 +29375,7 @@ function getAtk()  {
     if (_syn.lastStand   && _hpFrac < 0.30) pct += 0.18;
     if (_syn.skyfury     && !player.onGround) pct += 0.12;
     if (_syn.steadyAim   && player.onGround && !_moving) pct += 0.09;
-    if (_syn.manaforged) { const _mf = player.mp / Math.max(1, getMaxMp()); if (_mf > 0.6) pct += 0.10; }
+    if (_syn.manaforged) { const _mf = player.mp / _mpMaxFrame(); if (_mf > 0.6) pct += 0.10; }
     if (_syn.swiftStrikes && _moving) pct += 0.08;
   }
   // v0.26.889 — job talent: flat ATK%
@@ -29381,7 +29390,7 @@ function getAtk()  {
   if (treeHas('w_berserk') && _hpFrac < 0.30) pct += 0.35;
   // Skill tree: Arcane Surge — +1% per % MP (up to +100%)
   if (treeHas('m_surge')) {
-    pct += (player.mp / Math.max(1, getMaxMp()));
+    pct += (player.mp / _mpMaxFrame());
   }
   // v0.29.352 — Slaughter Ladder kill-streak boon (up to +25% at GODSLAYER
   // since the v0.29.353 rebase). Added before the cap so the ceiling bounds
@@ -32671,12 +32680,23 @@ const JOB_TALENTS = {
     { id:'huntsmark', name:"Hunter's Mark", icon:'🪶', desc:'+13% skill damage.',   fx:{ skillDmg:0.13 } },
   ],
 };
+// v0.29.477 (perf-pass) — memoized on (job, chosen talent id). This ran a
+// fresh-closure Array.find on EVERY stat read, and the stat getters fire from
+// loop(), updatePlayer (~5×/frame), the 30 Hz HUD tick, and every hit
+// resolution — thousands of times per second in a marathon boss fight, for
+// inputs that only change on job/talent/save events. Returns the same p.fx
+// reference the un-memoized version did.
+let _talentFxJob = null, _talentFxPid = null, _talentFxVal = null;
 function talentFx() {
   if (!player || !player.job || !player.talents) return null;
-  const picks = JOB_TALENTS[player.job], pid = player.talents[player.job];
-  if (!picks || !pid) return null;
+  const pid = player.talents[player.job];
+  if (!pid) return null;
+  if (player.job === _talentFxJob && pid === _talentFxPid) return _talentFxVal;
+  const picks = JOB_TALENTS[player.job];
+  if (!picks) return null;
   const p = picks.find(t => t.id === pid);
-  return p ? p.fx : null;
+  _talentFxJob = player.job; _talentFxPid = pid; _talentFxVal = p ? p.fx : null;
+  return _talentFxVal;
 }
 function chooseTalent(jobId, perkId) {
   const picks = JOB_TALENTS[jobId];
@@ -62530,6 +62550,35 @@ function performMeteor() {
 // =========================================================================
 // MONSTER AI
 // =========================================================================
+// v0.29.477 (perf-pass) — hoisted verbatim from the per-mob loop in
+// updateMonsters, where it was allocated as a fresh closure every frame for
+// every live ranged mob (before the windup/shootTimer gates, so the alloc
+// happened whether or not the mob fired — main loop AND co-op world step).
+// The body captured nothing but `m`.
+function _fireShotFor(m) {
+  // v0.25.53 — empowered cookie fires a 3-shot mspore spread.
+  if (m._empoweredSpread) {
+    fireMonsterProjectile(m, -0.40);
+    fireMonsterProjectile(m,  0.00);
+    fireMonsterProjectile(m,  0.40);
+  } else if (m.traits && m.traits.volleyShot && m.traits.volleyShot > 1) {
+    // v0.25.991 — `volleyShot` trait fires an N-arrow spread on
+    // every shoot tick (e.g. spectreCannoneer's triple shadow
+    // volley, vigil_vermillion's three-arrow burst). Spread fans
+    // ±0.18 rad per outer shot, centered on the standard aim,
+    // so a 3-shot reads as a clean fan and a 5-shot reads as a
+    // wider barrage. Trait was declared on existing mob defs
+    // since v0.25.x but never wired into the engine — fixed here.
+    const _n = m.traits.volleyShot | 0;
+    const _step = 0.18;                              // radian-ish offset per outer shot
+    const _half = (_n - 1) / 2;
+    for (let _vi = 0; _vi < _n; _vi++) {
+      fireMonsterProjectile(m, (_vi - _half) * _step);
+    }
+  } else {
+    fireMonsterProjectile(m);
+  }
+}
 function fireMonsterProjectile(m, angleOffset) {
   // v0.25.53 — optional angleOffset (radians) lets empowered cookies
   // fire a 3-shot mspore spread without duplicating this whole function.
@@ -63312,7 +63361,7 @@ function updateMonsters(dt) {
         m._shootWindup -= dt;
         if (m._shootWindup <= 0) {
           m._shootWindup = 0;
-          _fireShot();
+          _fireShotFor(m);
           m.shootTimer = m.shootCd + Math.random() * 1200;
           if (m.boss || m.isBoss) m._postShotHold = 320;
         }
@@ -63330,7 +63379,7 @@ function updateMonsters(dt) {
           m.atkAnimUntil = _nowWu + _wu + 140;             // hold the pose a touch past release
           m.shootTimer = 999999;                           // suspend re-trigger; release resets it
         } else {
-          _fireShot();
+          _fireShotFor(m);
           m.shootTimer = m.shootCd + Math.random() * 1200;
         }
       }
@@ -73548,9 +73597,16 @@ function updateProjectiles(dt) {
       // updateProjectiles). Saves the per-projectile dead-mob skip cost.
       const hitIds = p._hitIds = p._hitIds || new Set();
       for (const m of _liveMobs) {
-        if (hitIds.has(m)) continue;
+        // v0.29.477 (perf-pass) — geometric reject FIRST. This loop runs for
+        // every (player projectile × live mob) pair every frame; at 40×40
+        // that was ~1,600 object-keyed Set lookups/frame spent on pairs the
+        // aabb was about to reject anyway. All three checks are side-effect-
+        // free predicates (the _atkMonBoxCached memo write is idempotent and
+        // frame-keyed), so the reorder is behavior-identical.
         if (m.currentHp <= 0 || m._dying) continue;   // v0.26.1027 — _liveMobs is a once-built snapshot; skip an intra-frame corpse so a non-piercing shot isn't consumed by it
-        if (aabb(p, _atkMonBoxCached(m))) {
+        if (!aabb(p, _atkMonBoxCached(m))) continue;
+        if (hitIds.has(m)) continue;
+        {
           // Apply job enhancement baked into projectile when fired
           const pEnh = p._enh;
           if (game._crT !== game.time) { game._crT = game.time; game._crV = getCrit(); game._crD = getCritDmg(); }   // v0.26.x perf — frame cache
@@ -111238,7 +111294,16 @@ function _fxStamp(kind, color, d) {
   const key = kind + '|' + color + '|' + d;
   let c = _FX_STAMPS.get(key);
   if (c) return c;
-  if (_FX_STAMPS.size > 512) _FX_STAMPS.clear();   // palette drift backstop
+  // v0.29.477 (perf-pass) — was a wholesale .clear() at 512: the key space
+  // (kind × color × half-px size) genuinely reaches 512 in long sessions, and
+  // a clear() lands MID-RENDER — repaid as hundreds of createElement('canvas')
+  // + gradient re-bakes over the following frames, a visible hitch generator
+  // in long boss fights. Evict the 64 oldest instead (Maps iterate in
+  // insertion order — same discipline as _BEAM_GRAD_CACHE / _IMPACT_GRAD_CACHE).
+  if (_FX_STAMPS.size > 512) {
+    let _evict = 64;
+    for (const k of _FX_STAMPS.keys()) { _FX_STAMPS.delete(k); if (--_evict <= 0) break; }
+  }
   c = document.createElement('canvas');
   const px = Math.max(8, Math.ceil(d) * 2);
   c.width = px; c.height = px;
