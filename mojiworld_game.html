@@ -9360,7 +9360,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.497';
+const GAME_VERSION = 'v0.29.498';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -60061,13 +60061,22 @@ const SKILL_FNS = {
     spawnSpriteBurst(player.x + player.w/2, player.y + player.h/2, 'blink',
       { size: 140, life: 22, flipX: (player.facing < 0) });
     const startX = player.x;
-    // v0.25.530 — Level-10 bonus: warp distance × 1.10 (180 → 198 px).
+    const startY = player.y;
+    // v0.25.530 — Level-10 bonus: warp distance × 1.10.
+    // v0.29.497 (per user) — base warp 180 → 225 px (×1.25), and holding UP
+    // warps VERTICALLY instead: same distance straight up (clamped at the
+    // world ceiling), vy zeroed on arrival so gravity restarts clean. The
+    // Lv10 distMul and the Hyper Teleport boon compose onto both axes.
     const _blinkBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('blink') : null;
-    const _blinkDist = 180 * ((_blinkBonus && _blinkBonus.distMul) || 1);
-    const tx = Math.min(game.mapData.worldWidth - player.w, Math.max(0, player.x + player.facing * _blinkDist));
+    const _blinkDist = 225 * ((_blinkBonus && _blinkBonus.distMul) || 1);
+    const _blinkUp = !!(game.keys && game.keys['arrowup']);
+    const tx = _blinkUp ? player.x
+      : Math.min(game.mapData.worldWidth - player.w, Math.max(0, player.x + player.facing * _blinkDist));
+    const ty = _blinkUp ? Math.max(0, player.y - _blinkDist) : player.y;
     // Departure puff
     for (let i=0;i<15;i++) { if (!_budgetedParticlePush({x:player.x+player.w/2,y:player.y+player.h/2,vx:(Math.random()-0.5)*4,vy:(Math.random()-0.5)*4,life:25,color:'#aa88ff',size:3})) break; }
     player.x = tx;
+    if (_blinkUp) { player.y = ty; player.vy = 0; player.onGround = false; }
     // Arrival puff
     for (let i=0;i<15;i++) { if (!_budgetedParticlePush({x:player.x+player.w/2,y:player.y+player.h/2,vx:(Math.random()-0.5)*4,vy:(Math.random()-0.5)*4,life:25,color:'#aa88ff',size:3})) break; }
     player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
@@ -60079,10 +60088,13 @@ const SKILL_FNS = {
     // getAtk() × 1.5 damage tagged 'dimensional_warp' (rank-able via
     // the existing 'blink' SKILL_DEFS id since the underlying SKILLS
     // key is unchanged).
-    const lo  = Math.min(startX, tx) - 50;
-    const hi  = Math.max(startX, tx) + (player.w) + 50;
-    const top = (player.y + player.h/2) - 25;
-    const bot = (player.y + player.h/2) + 25;
+    // v0.29.497 — the swept-path AoE follows the warp axis: horizontal warps
+    // keep the original 100×50 band; vertical warps rotate it (50 px pad
+    // along the travel axis, 25 px across).
+    const lo  = _blinkUp ? (player.x + player.w/2) - 25 : Math.min(startX, tx) - 50;
+    const hi  = _blinkUp ? (player.x + player.w/2) + 25 : Math.max(startX, tx) + (player.w) + 50;
+    const top = _blinkUp ? Math.min(startY, ty) - 50 : (player.y + player.h/2) - 25;
+    const bot = _blinkUp ? Math.max(startY, ty) + player.h + 50 : (player.y + player.h/2) + 25;
     // v0.25.658 — P1 REBALANCE. 1.5× was 40% under C-tier target.
     // Bumped to 2.2× — within C-tier budget for a mobility-with-damage skill.
     const _dmg = Math.max(1, Math.floor(getAtk() * 2.2));
@@ -98054,6 +98066,28 @@ function drawCuteCharacter(sx, sy) {
   const _poseBody = _poseRad('body');
   const _poseArmBack  = _poseRad('armBack');
   const _poseArmFront = _poseRad('armFront');
+  // v0.29.493 (per user) — READY-TO-FIGHT STANCE. When combat is live (the
+  // player took a hit recently, or any live monster within ~600px is aggroed
+  // onto them), a fighting stance blends over the custom posture: front arm
+  // raised to guard, back arm cocked, slight forward lean, chin tucked.
+  // Eased at 8%/frame so entering/leaving combat flows instead of popping;
+  // ADDITIVE on top of lookCustom.posture so player customisation survives.
+  // The aggro sweep runs 1 frame in 10 and caches — ≤36 iterations, cheap.
+  let _cwT = 0;
+  if (typeof player !== 'undefined' && player && typeof game !== 'undefined') {
+    const _hitRecent = ((game.time | 0) - (player._monsterHitAt | 0)) < 240;
+    if ((game.time | 0) % 10 === 0) {
+      player._aggroNear = !!(game.monsters && game.monsters.some((m) => m && m.currentHp > 0 &&
+        m.aggroTarget === player && Math.abs(m.x - player.x) < 600 && Math.abs(m.y - player.y) < 400));
+    }
+    _cwT = (_hitRecent || player._aggroNear) ? 1 : 0;
+    player._combatPoseW = (player._combatPoseW || 0) + (_cwT - (player._combatPoseW || 0)) * 0.08;
+  }
+  const _cwPose = (typeof player !== 'undefined' && player && player._combatPoseW) || 0;
+  const _stArmFront = 0.55 * _cwPose;   // ~31° guard raise on the weapon arm
+  const _stArmBack  = -0.24 * _cwPose;  // ~14° cock on the back arm
+  const _stBody     = 0.06 * _cwPose;   // ~3.5° forward lean
+  const _stHead     = -0.035 * _cwPose; // chin tuck
   const _poseHandBack  = _poseRad('handBack');
   const _poseHandFront = _poseRad('handFront');
   const _poseLegL  = _poseRad('legL');
@@ -98072,7 +98106,7 @@ function drawCuteCharacter(sx, sy) {
     const _bdy = _poseDy('body');
     if (_bdx || _bdy || _poseBody) {
       ctx.translate(_bodyHipX + _bdx, _bodyHipY + _bdy);
-      ctx.rotate(_poseBody);
+      ctx.rotate(_poseBody + _stBody);
       ctx.translate(-_bodyHipX, -_bodyHipY);
     }
   }
@@ -98319,7 +98353,7 @@ function drawCuteCharacter(sx, sy) {
     const _shBx = backX + 1, _shBy = topY + 2;
     const _dxAB = _poseDx('armBack'), _dyAB = _poseDy('armBack');
     if (_poseArmBack || _dxAB || _dyAB) {
-      ctx.translate(_shBx + _dxAB, _shBy + _dyAB); ctx.rotate(_poseArmBack); ctx.translate(-_shBx, -_shBy);
+      ctx.translate(_shBx + _dxAB, _shBy + _dyAB); ctx.rotate(_poseArmBack + _stArmBack); ctx.translate(-_shBx, -_shBy);
     }
   }
   px(backX, topY + 2, 2, 8, cc.body);
@@ -98346,7 +98380,7 @@ function drawCuteCharacter(sx, sy) {
     const _shFx = frontX + 1, _shFy = topY + 2;
     const _dxAF = _poseDx('armFront'), _dyAF = _poseDy('armFront');
     if (_poseArmFront || _dxAF || _dyAF) {
-      ctx.translate(_shFx + _dxAF, _shFy + _dyAF); ctx.rotate(_poseArmFront); ctx.translate(-_shFx, -_shFy);
+      ctx.translate(_shFx + _dxAF, _shFy + _dyAF); ctx.rotate(_poseArmFront + _stArmFront); ctx.translate(-_shFx, -_shFy);
     }
   }
   px(frontX, topY + 2, 2, 3, cc.body2);                      // shoulder hi-cap
@@ -98398,7 +98432,7 @@ function drawCuteCharacter(sx, sy) {
     const _hCx = cx, _hCy = sy + 12 + hb;
     const _dxH = _poseDx('head'), _dyH = _poseDy('head');
     ctx.translate(_hCx + _dxH, _hCy + _dyH);
-    ctx.rotate(headTilt + _poseHead);
+    ctx.rotate(headTilt + _poseHead + _stHead);
     ctx.translate(-_hCx, -_hCy);
   }
 
