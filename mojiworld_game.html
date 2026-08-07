@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.554';
+const GAME_VERSION = 'v0.29.555';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -68788,7 +68788,7 @@ function bossAI(m, dt, distToPlayer) {
     //     event, no death. Designed as constant heal pressure: the
     //     player must keep a sustain skill or potions ready.
     //   • SINGULARITY COLLAPSE — avoidable instant-death, 30 s cycle.
-    //     3.5 s telegraph drops 3 small safe-zone rects across the
+    //     5.5 s telegraph (v0.29.555, was 3.5 s) drops 3 safe-zone rects across the
     //     arena. On resolve, anything outside a safe zone is set to
     //     0 HP. Player gets a 600 ms invuln after to avoid chain-kill
     //     from any other tick.
@@ -69299,7 +69299,12 @@ function bossAI(m, dt, distToPlayer) {
           x: 0, y: 0,
           w: ww, h: H,
           cx: m.x + m.w / 2, cy: m.y + m.h / 2,
-          life: 210, maxLife: 210,         // 3.5 s @ 60 fps
+          // v0.29.555 (per user) — "give more time for players to seek
+          // shelter". 210 -> 330 frames, i.e. 3.5 s -> 5.5 s. The safe zones
+          // are only 100x70 in a 2200-wide arena and one of the three sits on
+          // a mid-air platform, so the old window left almost no room for
+          // reaction time on top of the travel and the climb.
+          life: 330, maxLife: 330,         // 5.5 s @ 60 fps
           atk: 99999,
           safeZones: zones,
         });
@@ -69307,11 +69312,28 @@ function bossAI(m, dt, distToPlayer) {
         if (audio && audio.play) audio.play('crit');
         flash(0.65); addShake(20); addHitStop(120);
       }
-      if (m.patternTimer > 4200) {
-        // v0.25.531 — Defense-in-depth: scrub any leftover singularity
-        // hazard before exiting. The hazard normally splices itself on
-        // h.life === 0 (3.5 s in), but if pattern reset races a stale
-        // hazard the next cast could double-spawn.
+      // v0.29.555 — this gate used to be a flat `patternTimer > 4200`, and
+      // it ALWAYS beat the telegraph it was meant to clean up after.
+      // patternTimer is not real time: bossAI multiplies dt by 1.30 at entry,
+      // forms 2/3 add _gravCadenceMul (1.20 / 1.45) and phase 2 adds 0.18.
+      // Measured per-frame in a booted client: 21.67 ms base (1.30x), 26.00 ms
+      // form 2 (1.56x), 35.32 ms form 3 + phase 2 (2.12x) — so 4200 was reached
+      // after only 3231 / 2692 / 1982 ms of REAL time. The hazard needs a real
+      // 3500 ms to tick 210 frames to zero, and the scrub below then deleted it.
+      // The Singularity Collapse could not kill anyone, in any phase, ever.
+      //
+      // Waiting for the hazard to be GONE is correct at every cadence, because
+      // it splices itself the frame it resolves — no threshold to keep in sync
+      // with the telegraph length, and lengthening the window above can never
+      // reintroduce the race. The numeric bound is now only a stuck-state
+      // backstop (a foreign scrub eating the hazard, a wedged life counter),
+      // sized well past the 5.5 s window even at the slowest 1.30x cadence.
+      const _sgLive = game.hazards.some(h => h && h.type === 'gravitos_singularity');
+      if ((m._sgSpawned && !_sgLive) || m.patternTimer > 20000) {
+        // v0.25.531 — Defense-in-depth: scrub any leftover singularity hazard
+        // before exiting, so a pattern reset racing a stale hazard cannot let
+        // the next cast double-spawn. Normally a no-op now: the hazard has
+        // already spliced itself, which is what got us here.
         for (let _hi = game.hazards.length - 1; _hi >= 0; _hi--) {
           if (game.hazards[_hi] && game.hazards[_hi].type === 'gravitos_singularity') {
             game.hazards.splice(_hi, 1);
