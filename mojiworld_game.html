@@ -9385,7 +9385,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.537';
+const GAME_VERSION = 'v0.29.538';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -52160,9 +52160,38 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // Conductor block closes. clockworkExpress is excluded because the PQ
   // finale boss has its own full level-match scaler (search _pqBoss), which
   // would double-dip on top of this one.
-  if (isBoss && game.currentMap !== 'clockworkExpress') {
+  if (isBoss && game.currentMap !== 'clockworkExpress' && !game.tower && type !== 'mirrorSelf') {
     const _bm = game.monsters[game.monsters.length - 1];
-    const _bLv = t.level || 1;
+    // v0.29.538 — resolve like the v0.29.224 parity block does. `t.level || 1`
+    // read the level-less tower bosses as Lv 1, so the floor stacked onto
+    // content that already scales per-floor (also now excluded above).
+    const _bLv = t.level ||
+      ((typeof MOB_NATURAL_LEVEL !== 'undefined' && MOB_NATURAL_LEVEL[type]) || 0) ||
+      ((game.mapData && game.mapData.levelReq) || 1);
+    // v0.29.538 — EARLY-BOSS EASE (per user: at-level Gloopaloo and the other
+    // low bosses were "very hard to tackle"). A first boss meets a first
+    // character: little gear, no job, single-digit DPS — yet Gloopaloo fielded
+    // 178,500 HP against them. Sub-40 bosses now spawn with a graded cut,
+    // deepest at Lv 10 and gone by Lv 40:
+    //     Lv 10 -> HP x0.35, ATK x0.80   (Gloopaloo: 178,500 -> 62,475)
+    //     Lv 16 -> HP x0.48, ATK x0.84   (Mooma:     200,812 -> 96,390)
+    //     Lv 30 -> HP x0.78, ATK x0.93
+    //     Lv 40+ untouched.
+    // Requires an AUTHORED t.level — a boss whose level was merely inferred
+    // (tower, future specials) is content that tunes itself elsewhere.
+    // Rewards stay authored: this restores the intended difficulty of a
+    // progression fight, and its EXP/coins are that progression's pay.
+    // Runs BEFORE the floor below, so an overleveled visit floors up from the
+    // eased base — the two answer the same question ("what should this boss
+    // be against THIS player?") from opposite directions.
+    if (t.level && _bLv < 40) {
+      const _et = Math.max(0, Math.min(1, (_bLv - 10) / 30));
+      const _eHp = 0.35 + 0.65 * _et;
+      _bm.maxHp = Math.max(1, Math.floor(_bm.maxHp * _eHp));
+      _bm.currentHp = _bm.maxHp;
+      _bm.atk = Math.max(1, Math.floor(_bm.atk * (0.80 + 0.20 * _et)));
+      _bm._lvEaseMul = _eHp;
+    }
     const _bGap = Math.max(0, (((typeof player !== 'undefined' && player) ? player.level : 1) || 1) - _bLv);
     if (_bGap > 0) {
       const _ease = _bLv < 40 ? 0.5 : 1;
