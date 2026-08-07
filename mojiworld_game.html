@@ -9385,7 +9385,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.549';
+const GAME_VERSION = 'v0.29.550';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -69162,7 +69162,14 @@ function bossAI(m, dt, distToPlayer) {
       if (m.patternTimer >= 1500 && !m._drainFired) {
         m._drainFired = true;
         // Apply unavoidable drain. Clamp to 1 (don't reduce below 1).
-        if (player.hp > 1) {
+        // v0.29.550 — honour godmode. The drain is a CLAMP, not damage, so it
+        // sailed past every `hp -= player._god ? 0 : dmg` guard — during the
+        // prologue memory it set HP→1 and MP→1 straight through godmode, and
+        // since the prologue tick re-pins HP but (before this fix) not MP,
+        // the player spent the rest of the tutorial fight at MP 1, unable to
+        // cast — the "low MP and HP moments" reported. The telegraph and
+        // toast still play; only the clamp respects _god.
+        if (!player._god && player.hp > 1) {
           player.hp = 1;
           player.lastHitTime = game.time;
           player._lastDamageSource = 'Gravitos\' Soul Drain';
@@ -69171,7 +69178,7 @@ function bossAI(m, dt, distToPlayer) {
             text: 'HP→1', life: 56, color: '#cc66ff', size: 18,
           });
         }
-        if (player.mp > 1) {
+        if (!player._god && player.mp > 1) {   // v0.29.550 — same godmode guard as the HP clamp above
           player.mp = 1;
           game.damageNumbers.push({
             x: player.x + 14, y: player.y - 26, vy: -2,
@@ -115763,6 +115770,20 @@ function _prologueDaggerCutscene(onDone) {
 }
 function _startPrologue() {
   window._prologueActive = true;
+  // v0.29.550 (per user: "there is a lag from the 1st daggers video to the
+  // intro video") — the Gravitos entrance clip used to start FETCHING only
+  // when its overlay opened, so the screen sat black while it buffered.
+  // Preload it now, during the dagger clip + stanzas (~20-40s of cover), and
+  // hand the buffered element itself to _gravitosEntryCutscene, which plays
+  // it frame-one. Fail-open: if the preload errors the cutscene just builds
+  // its own <video> exactly as before.
+  try {
+    const _pv = document.createElement('video');
+    _pv.preload = 'auto'; _pv.playsInline = true;
+    _pv.src = 'steam/higgsfield/cinematics/clip_gravitos_entry.mp4';
+    _pv.load();
+    window._prologueEntryPreload = _pv;
+  } catch (e) { window._prologueEntryPreload = null; }
   // v0.26.x audit FIX (soft-lock) — absolute safety cap. The cinematic runs
   // ~30 s; if anything stalls the tick loop or the finish path, force-finish
   // at 50 s so the keyboard lockdown can never persist and freeze the player
@@ -115894,9 +115915,20 @@ function _prologueApexSegment() {
       // (`hp -= player._god ? 0 : dmg` — contact, projectiles, DoT, freeze/CC,
       // boss one-shots). _prologueTick re-asserts it and clears it when the 15s
       // window expires; after that main's mortal rules apply (a down ends the memory).
-      window._prologueGodUntil = Date.now() + 15000;
+      window._prologueGodUntil = Date.now() + 45000;
       window._prologuePrevGod = !!player._god;
       player._god = true;
+      // v0.29.550 — warm the END-OF-MEMORY clips while the player fights, so
+      // the punch → Void chain starts frame-one instead of cold-fetching each
+      // clip behind a black overlay. preload='auto' only: the elements are
+      // never attached; the browser just fills its cache.
+      try {
+        for (const _src of ['steam/higgsfield/cinematics/clip_prologue_punch.mp4',
+                            'steam/higgsfield/cinematics/prologue_void_transcend.mp4']) {
+          const _wv = document.createElement('video');
+          _wv.preload = 'auto'; _wv.muted = true; _wv.src = _src; _wv.load();
+        }
+      } catch (e) {}
       setTimeout(_prologueHardenBoss, 200);
       _prologueHud(true);
       window._prologueLeftMs = 30000;
@@ -115955,7 +115987,10 @@ function _prologueTick() {
   // tick during the window and pin HP full; clear it when the window expires so
   // main's v0.29.71 mortal rules take over (a down then ends the memory).
   const _godLeftMs = (window._prologueGodUntil || 0) - now;
-  if (_godLeftMs > 0) { player._god = true; try { player.hp = getMaxHp(); } catch (e) {} }
+  // v0.29.550 — pin MP alongside HP. Soul Drain used to clamp MP to 1 and
+  // nothing restored it, so the player finished the tutorial unable to cast;
+  // pinning both keeps every skill available for the whole memory.
+  if (_godLeftMs > 0) { player._god = true; try { player.hp = getMaxHp(); player.mp = getMaxMp(); } catch (e) {} }
   else if (window._prologueGodUntil && !window._prologuePrevGod) { player._god = false; }
   // v0.29.x — scripted phase escalation + boss "will" bar. The memory runs 30s;
   // advance P1→P2→P3 on a timer (read by the Gravitos AI) so the signature
@@ -116129,7 +116164,23 @@ function _gravitosEntryCutscene(onDone) {
     }
   }
   document.body.appendChild(ov);
-  const vid = ov.querySelector('#grav-entry-vid');
+  let vid = ov.querySelector('#grav-entry-vid');
+  // v0.29.550 — adopt the element preloaded at _startPrologue: it has been
+  // buffering since the dagger clip, so playback starts frame-one instead of
+  // showing black while a cold fetch fills the pipe (the reported lag between
+  // the daggers video and this intro). The markup <video> above stays as the
+  // fallback when the preload is missing or errored out.
+  try {
+    const _pre = window._prologueEntryPreload;
+    if (_pre && !_pre.error && vid) {
+      _pre.id = 'grav-entry-vid';
+      _pre.autoplay = true;
+      _pre.style.cssText = vid.style.cssText;
+      vid.replaceWith(_pre);
+      vid = _pre;
+      window._prologueEntryPreload = null;   // consumed — the strip's teardown must not re-touch it
+    }
+  } catch (e) {}
   if (vid) {
     vid.onended = finish;
     vid.onerror = finish;
