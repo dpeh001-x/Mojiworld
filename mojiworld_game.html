@@ -9319,7 +9319,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.475';
+const GAME_VERSION = 'v0.29.476';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -49442,8 +49442,18 @@ function loadMap(id, entryX, entryY) {
     if (typeof _warmMapArt === 'function') {
       let _fadeDone = false;
       const _fadeGo = () => { if (!_fadeDone) { _fadeDone = true; _fadeRelease(); } };
+      // v0.29.457 — the 1400 ms cap was sized for field maps; a boss arena's
+      // five-form frame sets need 2-4 s to decode+bake, and whatever missed
+      // the window used to decode MID-FIGHT (measured: 74 frame spikes >33 ms,
+      // max 829 ms, all inside the fight's first ~5 s — and the same class of
+      // hitch again at every Gravitos phase swap, since forms 2/3 stream in
+      // under combat). Boss arenas now hold the fade up to 4200 ms — entry
+      // takes a beat longer behind the intro beat, and the fight opens clean.
+      const _mapDefW = (typeof MAPS === 'object' && MAPS[id]) || null;
+      const _isBossMap = !!(_mapDefW && (_mapDefW.isBossArena || _mapDefW.bossType ||
+        (_mapDefW.spawns || []).some((sp) => sp && sp.boss) || (_mapDefW.bossSequence || []).length));
       try { _warmMapArt(id).then(_fadeGo, _fadeGo); } catch (e) { _fadeGo(); }
-      setTimeout(_fadeGo, 1400);
+      setTimeout(_fadeGo, _isBossMap ? 4200 : 1400);
     } else _fadeRelease();
   }
   // v0.25.566 — guard against unknown / removed map keys. Was throwing a
@@ -101415,7 +101425,32 @@ function _warmMapArt(id) {
       if (active === 0 && next >= slots.length) done(slots.length);
     };
     if (!slots.length) done(0); else pump();
-  }));
+  })).then((n) => {
+    // v0.29.457 — PRE-DERIVE the boss sizing scans while the fade still holds.
+    // The size normaliser (_deriveBossRefHeight / _spriteContentBox) used to
+    // run lazily on the FIRST DRAW of each state — a full 9-frame getImageData
+    // sweep per set, measured ~13 ms/frame even with the v0.29.388 scan cap,
+    // landing as visible hitches in the opening seconds of every boss fight
+    // (frame-time profile: 74 spikes >33 ms in the first ~5 s, near-zero
+    // after). The frames are already decoded + baked at this point, so the
+    // scans here cost the same total ms but land under the fade where nothing
+    // is animating. Zodiac signs pre-derive through their sign key.
+    try {
+      for (const sp of _types) {
+        if (!sp.type) continue;
+        if (sp.type.indexOf('zodiac_') === 0) {
+          try { _deriveBossRefHeight(sp.type.slice(7), sp.type.slice(7)); } catch (e) {}
+          continue;
+        }
+        for (const k of Object.keys(BOSS_SPRITES || {})) {
+          if (k !== sp.type && k.indexOf(sp.type) !== 0) continue;
+          try { _deriveBossRefHeight(k, null); } catch (e) {}
+          try { if (typeof _deriveBossRefBodyH === 'function') _deriveBossRefBodyH(k, null); } catch (e) {}
+        }
+      }
+    } catch (e) {}
+    return n;
+  });
 }
 
 // === ZODIAC BOSS SPRITES (v0.25.92) === one per zodiac sign, keyed by m.zodiacSign.
