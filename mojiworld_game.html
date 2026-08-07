@@ -9385,7 +9385,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.546';
+const GAME_VERSION = 'v0.29.547';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -35374,13 +35374,25 @@ function blackHold(f) { game.blackHoldFrames = Math.max(game.blackHoldFrames || 
 // quest rewards. The login toast below the boot welcome announces it.
 // TO REVERT THE EVENT: set LX_EVENT_EXP_MULT = 1 — the multiplier and the
 // announcement toast both go quiet automatically; nothing else to touch.
-// v0.29.5xx — EVENT ENDED (per user "Remove the current 10x exp event").
-// Set to 1 exactly as the revert note above prescribes: the multiplier stops
-// applying and the announcement toast goes quiet on its own. The PERMANENT
-// x10 monster and quest knobs below are NOT part of this event and stay.
-// The Lv 1-5 boost that used to ride on this knob is now independent of it
-// (see _lxEarlyExpMul), so the opening hour does not collapse with the event.
-const LX_EVENT_EXP_MULT = 1;
+// v0.29.5xx — CONSOLIDATED (per user "clean up all the multipliers, make it
+// well consolidated"). Every global EXP knob lives in THIS table and nowhere
+// else. The legacy const names below it are plain reads of the table, kept so
+// no award site or tool dangles; edit the TABLE, not the aliases.
+//
+// How the pieces combine (see _lxEarlyExpMul):
+//   per-kill EXP  = base x 0.1 tier x LX_EXP.monster x max(band(level), event)
+//   quest EXP     = authored x LX_EXP.quest x max(band(level), event) (+floor)
+// The event is a FLAT bonus for everyone; the newbie band outranks it below
+// Lv ~9.5, so the two never stack multiplicatively.
+const LX_EXP = {
+  event:   5,    // limited-time event: x5 on ALL EXP. Set to 1 to end it; the
+                 // login banner and every award site follow automatically.
+  monster: 10,   // permanent baseline for monster-kill EXP (solo + assist + co-op)
+  quest:   10,   // permanent baseline for quest-reward EXP
+  earlyL1: 70,   // newbie band: x70 at Lv 1...
+  earlyL5: 62,   // ...easing to x62 at Lv 5, then to x1 by Lv 10
+};
+const LX_EVENT_EXP_MULT = LX_EXP.event;     // alias — value lives in LX_EXP
 // v0.26.x — PERMANENT ×2 monster EXP (per user "Make a permanent x2 exp
 // for all monsters"). Applies to monster-kill EXP (main + assist paths)
 // only — quest rewards are untouched. NOT part of the event above: when
@@ -35392,10 +35404,10 @@ const LX_EVENT_EXP_MULT = 1;
 // times": 1 → 10. Monster-only scope unchanged; the quest side is 10× via
 // LX_QUEST_EXP_MULT below. This is independent of the opening event knob
 // (LX_EVENT_EXP_MULT) — when the event reverts to 1, this ×10 stays.
-const LX_MONSTER_EXP_MULT = 10;
+const LX_MONSTER_EXP_MULT = LX_EXP.monster;   // alias — value lives in LX_EXP
 // v0.29.x — quest EXP knob, mirrors the monster knob. Applied once at the
 // quest-completion grant in _completeQuest. Scope: quest reward EXP only.
-const LX_QUEST_EXP_MULT = 10;
+const LX_QUEST_EXP_MULT = LX_EXP.quest;       // alias — value lives in LX_EXP
 // =========================================================================
 // v0.29.296 — EARLY-GAME EXP RAMP-DOWN (per user "reduce the 10x exp gain
 // gradually to normal after level 10 is obtained").
@@ -35432,19 +35444,22 @@ const LX_QUEST_EXP_MULT = 10;
 // and L=10 evaluate identically from either side), so there is no cliff.
 // The event term is retained as a factor so that re-enabling the event later
 // simply scales this curve again, exactly as before.
-const LX_EARLY_EXP_L1   = 70;   // multiplier at Lv 1
-const LX_EARLY_EXP_L5   = 62;    // multiplier at Lv 5 (the band's floor)
-const LX_EARLY_EXP_END  = 30;   // level at which any event bonus has fully decayed
+// v0.29.5xx — THE one curve, consolidated. Returns the level-scaled global
+// multiplier every EXP award applies (on top of the monster/quest baseline):
+//   max( newbie band , LX_EXP.event )
+// max, not product: under the old product shape a x5 event would have turned
+// the Lv-1 band into x350 (2-kill levels); under max the band carries Lv 1-9
+// exactly as tuned and the event lifts everything the band has released —
+// flat x5 from ~Lv 9.5 up. Continuous everywhere: the band eases 70..62..1
+// and the switch to the event value happens where the two curves cross.
+// Ending the event (LX_EXP.event = 1) restores plain band -> x1 by Lv 10.
 function _lxEarlyExpMul(lv) {
   const L = Math.max(1, lv | 0);
-  const evt = (typeof LX_EVENT_EXP_MULT === 'number' && LX_EVENT_EXP_MULT > 0) ? LX_EVENT_EXP_MULT : 1;
-  // Lv 1-5 — the easy band.
-  if (L <= 5) return evt * (LX_EARLY_EXP_L1 - (LX_EARLY_EXP_L1 - LX_EARLY_EXP_L5) * (L - 1) / 4);
-  // Lv 5-10 — ease from the band down to normal.
-  if (L <= 10) return evt * (LX_EARLY_EXP_L5 - (LX_EARLY_EXP_L5 - 1) * (L - 5) / 5);
-  // Above 10 only an ACTIVE event still decays; with the event off this is 1.
-  if (L < LX_EARLY_EXP_END) return 1 + (evt - 1) * (LX_EARLY_EXP_END - L) / (LX_EARLY_EXP_END - 10);
-  return 1;
+  const evt = (LX_EXP.event > 0) ? LX_EXP.event : 1;
+  let band = 1;
+  if (L <= 5) band = LX_EXP.earlyL1 - (LX_EXP.earlyL1 - LX_EXP.earlyL5) * (L - 1) / 4;
+  else if (L <= 10) band = LX_EXP.earlyL5 - (LX_EXP.earlyL5 - 1) * (L - 5) / 5;
+  return Math.max(band, evt);
 }
 // v0.29.298 — QUESTS DO NOT TAPER (per user "quests should be more of a focus
 // when player reaches level 10 and above ... at the start the main focus is to
@@ -35457,11 +35472,10 @@ function _lxEarlyExpMul(lv) {
 // ×10 down to ×1 over Lv 10→30 while a quest keeps paying full freight, so by
 // the time the story opens up, questing IS the efficient path without any
 // number needing to be pumped.
-function _lxQuestExpMul(lv) {
-  const L = Math.max(1, lv | 0);
-  if (L <= 10) return _lxEarlyExpMul(L);
-  return (typeof LX_EVENT_EXP_MULT === 'number' && LX_EVENT_EXP_MULT > 0) ? LX_EVENT_EXP_MULT : 1;
-}
+// v0.29.5xx — collapsed into _lxEarlyExpMul: its old contract ("share the
+// early curve to Lv 10, then HOLD at the event value") is literally what
+// max(band, event) evaluates to at every level. One curve, zero drift.
+function _lxQuestExpMul(lv) { return _lxEarlyExpMul(lv); }
 // v0.29.301 — MID/LATE QUEST WEIGHTING (per user "make quests more reward
 // especially after lvl 30, push the quests more towards mid to upper levels,
 // make the quests fulfillments more demanding as well").
@@ -40293,8 +40307,10 @@ function _coopApplyKill(msg) {
     // v0.29.5xx — was a hardcoded x3 with a hard cliff at Lv 5: the exact
     // pre-v0.29.296 shape the shared ramp replaced. A co-op peer's EXP has
     // therefore been ignoring the early curve entirely. Use the one source.
+    // v0.29.5xx — early() CARRIES the event since the consolidation (it
+    // returns max(band, event)), so the separate evt factor this line used
+    // to multiply in would have DOUBLE-counted every active event. Removed.
     const early = (typeof _lxEarlyExpMul === 'function') ? _lxEarlyExpMul(player.level || 1) : 1;
-    const evt = (typeof LX_EVENT_EXP_MULT === 'number') ? LX_EVENT_EXP_MULT : 1;
     const mon = (typeof LX_MONSTER_EXP_MULT === 'number') ? LX_MONSTER_EXP_MULT : 1;
     // Honor the Party-Quest anti-farm damper for THIS peer's own quest state, so
     // co-op doesn't re-open a farm the host pipeline already nerfed.
@@ -40304,7 +40320,7 @@ function _coopApplyKill(msg) {
     // gets, when THIS peer is within 400px of the kill (msg.x/y). A same-map
     // ally farther away still receives the base share.
     const coop = (typeof _coopNearKill === 'function' && _coopNearKill(msg.x, msg.y)) ? 2 : 1;
-    exp = Math.floor(exp * boost * early * evt * mon * 1.35 * _pqMul * coop);
+    exp = Math.floor(exp * boost * early * mon * 1.35 * _pqMul * coop);
     player.exp = (player.exp || 0) + exp;
     if (typeof _maybeLevelUp === 'function') { try { _maybeLevelUp(); } catch (e) {} }
   }
