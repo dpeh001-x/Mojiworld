@@ -30838,9 +30838,9 @@ window.addEventListener('keydown', e => {
     const now = performance.now();
     if (player.lastTapKey === k && (now - player.lastTapTime) < 280 && player.quickDashTimer <= 0 && player.rushTimer <= 0) {
       if (k === 'arrowup') {
-        player._blinkUpIntent = true;
-        try { castSkill('blink'); } catch (e) {}
-        player._blinkUpIntent = false;
+        // v0.29.504 — standalone mobility warp: 180px up, no damage, G-skill
+        // cooldown, blink MP cost. See _mageUpWarp.
+        try { _mageUpWarp(); } catch (e) {}
       } else {
         quickDash(k === 'arrowleft' ? -1 : 1);
       }
@@ -56263,6 +56263,34 @@ function _basicAttackGateMs() {
   return Math.round(base * ATTACK_PACE_MUL);
 }
 
+// v0.29.504 (per user) — MAGE UP-WARP, standalone. Double-tap-↑ vertical
+// warp detached from castSkill('blink'): a pure MOBILITY move —
+//   180 px straight up (not the 225 horizontal), NO damage,
+//   MP cost = Dimensional Warp's (SKILLS.blink.mp, read live),
+//   cooldown = the player's G-key skill (master signature, slot 'x'),
+//   read live via skillsForClass; 15 s fallback before a master exists.
+// Own cooldown track — independent of the E-blink cooldown.
+function _mageUpWarp() {
+  if (!player || player.cls !== 'mage' || player.hp <= 0) return;
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const _fail = () => { try { if (audio && audio.play) audio.play('fail'); } catch (e) {} };
+  if ((player._upWarpCdUntil || 0) > now) { _fail(); return; }
+  const _cost = (typeof SKILLS === 'object' && SKILLS.blink && SKILLS.blink.mp) || 14;
+  if (player.mp < _cost) { _fail(); return; }
+  let _cd = 15000;
+  try {
+    const kit = skillsForClass(player.cls, player.job, player.master);
+    for (const id in kit) if (kit[id].slot === 'x' && kit[id].cd) { _cd = kit[id].cd; break; }
+  } catch (e) {}
+  player.mp -= _cost;
+  spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'blink', { size: 140, life: 22 });
+  for (let i = 0; i < 15; i++) { if (!_budgetedParticlePush({ x: player.x + player.w / 2, y: player.y + player.h / 2, vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, life: 25, color: '#aa88ff', size: 3 })) break; }
+  player.y = Math.max(0, player.y - 180);
+  player.vy = 0;
+  player.onGround = false;
+  for (let i = 0; i < 15; i++) { if (!_budgetedParticlePush({ x: player.x + player.w / 2, y: player.y + player.h / 2, vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, life: 25, color: '#aa88ff', size: 3 })) break; }
+  player._upWarpCdUntil = now + _cd;
+}
 function castSkill(id) {
   const s = SKILLS[id];
   if (!s) return;
@@ -60089,14 +60117,12 @@ const SKILL_FNS = {
     // Lv10 distMul and the Hyper Teleport boon compose onto both axes.
     const _blinkBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('blink') : null;
     const _blinkDist = 225 * ((_blinkBonus && _blinkBonus.distMul) || 1);
-    const _blinkUp = !!player._blinkUpIntent;   // v0.29.499 — set only by the double-tap-up path
-    const tx = _blinkUp ? player.x
-      : Math.min(game.mapData.worldWidth - player.w, Math.max(0, player.x + player.facing * _blinkDist));
-    const ty = _blinkUp ? Math.max(0, player.y - _blinkDist) : player.y;
+    // v0.29.504 — horizontal-only again: the vertical warp is the standalone
+    // double-tap-↑ _mageUpWarp (180px, no damage, G-skill cooldown).
+    const tx = Math.min(game.mapData.worldWidth - player.w, Math.max(0, player.x + player.facing * _blinkDist));
     // Departure puff
     for (let i=0;i<15;i++) { if (!_budgetedParticlePush({x:player.x+player.w/2,y:player.y+player.h/2,vx:(Math.random()-0.5)*4,vy:(Math.random()-0.5)*4,life:25,color:'#aa88ff',size:3})) break; }
     player.x = tx;
-    if (_blinkUp) { player.y = ty; player.vy = 0; player.onGround = false; }
     // Arrival puff
     for (let i=0;i<15;i++) { if (!_budgetedParticlePush({x:player.x+player.w/2,y:player.y+player.h/2,vx:(Math.random()-0.5)*4,vy:(Math.random()-0.5)*4,life:25,color:'#aa88ff',size:3})) break; }
     player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
@@ -60111,10 +60137,10 @@ const SKILL_FNS = {
     // v0.29.497 — the swept-path AoE follows the warp axis: horizontal warps
     // keep the original 100×50 band; vertical warps rotate it (50 px pad
     // along the travel axis, 25 px across).
-    const lo  = _blinkUp ? (player.x + player.w/2) - 25 : Math.min(startX, tx) - 50;
-    const hi  = _blinkUp ? (player.x + player.w/2) + 25 : Math.max(startX, tx) + (player.w) + 50;
-    const top = _blinkUp ? Math.min(startY, ty) - 50 : (player.y + player.h/2) - 25;
-    const bot = _blinkUp ? Math.max(startY, ty) + player.h + 50 : (player.y + player.h/2) + 25;
+    const lo  = Math.min(startX, tx) - 50;
+    const hi  = Math.max(startX, tx) + (player.w) + 50;
+    const top = (player.y + player.h/2) - 25;
+    const bot = (player.y + player.h/2) + 25;
     // v0.25.658 — P1 REBALANCE. 1.5× was 40% under C-tier target.
     // Bumped to 2.2× — within C-tier budget for a mobility-with-damage skill.
     const _dmg = Math.max(1, Math.floor(getAtk() * 2.2));
