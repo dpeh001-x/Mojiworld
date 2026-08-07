@@ -9385,7 +9385,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.534';
+const GAME_VERSION = 'v0.29.535';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -103526,7 +103526,11 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
   const _feKey = m._gravStarKey || m._phaseSprite || (m.zodiacSign ? ('zodiac_' + m.zodiacSign) : m.type);
   // v0.29.281 — every boss opts into the DEEP feather (~1.5× fade depth, see
   // _lxDrawSoft); star forms additionally keep their forced full-span feather.
-  const _softOpts = { deep: true, force: (typeof _LX_FORCE_FEATHER !== 'undefined' && _LX_FORCE_FEATHER.has(_feKey)) };
+  const _softOpts = { deep: true,
+    force: (typeof _LX_FORCE_FEATHER !== 'undefined' && _LX_FORCE_FEATHER.has(_feKey)),
+    // v0.29.5xx — King Gloopaloo and Krook are cut flat across the bottom on
+    // every attack frame; _feKey is already the resolved sprite identity.
+    softBottom: (typeof _LX_FEATHER_BOTTOM !== 'undefined' && _LX_FEATHER_BOTTOM.has(_feKey)) };
   if (_cachedBossSprite) {
     _lxDrawSoft(ctx, _cachedBossSprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), undefined, undefined, _softOpts);   // v0.29.x — edge feather (clipped-art softening)
   } else {
@@ -103828,10 +103832,19 @@ function _lxEdgesTouched(img) {
     const scan = (get) => {
       let n = 0, first = -1, last = -1;
       for (let i = 0; i < S; i++) if (get(i) > 24) { n++; if (first < 0) first = i; last = i; }
-      return n > 3 ? { f: n / S, a: first / S, b: (last + 1) / S } : null;   // >~6% opaque = genuinely clipped
+      // v0.29.5xx — threshold 3 -> 1. A 2px nick on a 48px probe is a real,
+      // visible straight cut, and 212 roster sprites sat in that dead band
+      // with no softening at all. The feather depth already scales with
+      // severity, so a nick this small resolves to a ~3px fade.
+      return n > 1 ? { f: n / S, a: first / S, b: (last + 1) / S } : null;
     };
     const L = scan(i => a(0, i)), R = scan(i => a(S - 1, i)), T = scan(i => a(i, 0));
-    res = (L || R || T) ? { l: L, r: R, t: T } : null;
+    // v0.29.5xx — the BOTTOM edge is measured now as well. It is still never
+    // feathered by default (a standing mob's feet meet the frame edge and
+    // must stay crisp) — only sprites that opt in via _LX_FEATHER_BOTTOM use
+    // it. Measuring it always keeps the probe single-pass and the memo whole.
+    const B = scan(i => a(i, S - 1));
+    res = (L || R || T || B) ? { l: L, r: R, t: T, b: B } : null;
   } catch (e) { res = null; }
   img._lxEdges = res;
   return res;
@@ -103849,6 +103862,14 @@ function _lxEdgesTouched(img) {
 // resolves its sprite key (incl. _gravStarKey) and passes {force:true}.
 // Add future glow-heavy boss skins here.
 const _LX_FORCE_FEATHER = new Set(['gravitos2star', 'gravitos3star']);
+// v0.29.5xx — BOTTOM-EDGE FEATHER opt-in (per user, King Gloopaloo). Bottom
+// bleed is normal and correct for the ~2,350 roster sprites whose feet meet
+// the frame edge; fading those would dissolve the feet. These keys are the
+// exception: measured with sharp against the game's own probe, their art is
+// cut flat across the bottom (king: 11-12 of 48 border px on every attack
+// frame) while the body still reads as floating/rounded, so the cut shows as
+// a hard slice. Add a key here only after measuring it the same way.
+const _LX_FEATHER_BOTTOM = new Set(['king', 'kingKrook']);
 const _LX_FORCED_EDGES = { l: { f: 0.35, a: 0, b: 1 }, r: { f: 0.35, a: 0, b: 1 }, t: { f: 0.35, a: 0, b: 1 } };
 function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
   if (dw == null) { dw = img.width; dh = img.height; }
@@ -103863,7 +103884,10 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
   // at the TOP by design (it attaches to the platform above), so fading it would
   // detach it visually — same rationale as the permanent bottom-edge exclusion.
   const _noTop = !!(opts && opts.noTop);
-  if (!e || dw < 14 || dh < 14 || (_noTop && !e.l && !e.r)) { c.drawImage(img, dx, dy, dw, dh); return; }
+  const _softBottom = !!(opts && opts.softBottom);   // v0.29.5xx
+  // Nothing to do when the only detected edge is one this call will not fade.
+  const _usable = e && ((e.l || e.r) || (e.t && !_noTop) || (e.b && _softBottom));
+  if (!_usable || dw < 14 || dh < 14) { c.drawImage(img, dx, dy, dw, dh); return; }
   // v0.29.294 — FEATHERED-RESULT CACHE. Profiling a busy map put _lxDrawSoft at
   // 0.19 ms/frame for only ~5 sprites (~0.04 ms each) while ALL drawImage in the
   // frame totalled 0.025 ms — i.e. the cost was re-running the composite
@@ -103873,7 +103897,7 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
   // frame (hit-squash is a ctx transform, not a size change), so one cached
   // canvas per image collapses the steady state to a single drawImage.
   // Pixel output is byte-identical — it is literally the same composite, reused.
-  const _fkey = Math.ceil(dw) + 'x' + Math.ceil(dh) + (_noTop ? 'T' : '') + ((opts && opts.deep) ? 'D' : '') + ((opts && opts.force) ? 'F' : '');
+  const _fkey = Math.ceil(dw) + 'x' + Math.ceil(dh) + (_noTop ? 'T' : '') + ((opts && opts.deep) ? 'D' : '') + ((opts && opts.force) ? 'F' : '') + (_softBottom ? 'B' : '');
   // v0.29.x perf — 4-entry FIFO Map (was a single {k,cv} slot). Two same-type
   // mobs at different spawn sizes ping-ponged the slot, rebuilding the
   // composite (canvas + up to 3 gradient fills) every single frame.
@@ -103908,6 +103932,8 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
     if (e.l) { const F = depth(e.l.f), [y0, hh] = span(e.l, H2); const gr = g.createLinearGradient(0, 0, F, 0); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, y0, F, hh); }
     if (e.r) { const F = depth(e.r.f), [y0, hh] = span(e.r, H2); const gr = g.createLinearGradient(W2, 0, W2 - F, 0); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(W2 - F, y0, F, hh); }
     if (e.t && !_noTop) { const F = depth(e.t.f), [x0, ww] = span(e.t, W2); const gr = g.createLinearGradient(0, 0, 0, F); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x0, 0, ww, F); }
+    // v0.29.5xx — bottom, opt-in only (see _LX_FEATHER_BOTTOM).
+    if (e.b && _softBottom) { const F = depth(e.b.f), [x0, ww] = span(e.b, W2); const gr = g.createLinearGradient(0, H2, 0, H2 - F); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x0, H2 - F, ww, F); }
     g.globalCompositeOperation = 'source-over';
     let _fm = img._lxFeatherC;
     if (!_fm || !_fm.set) _fm = img._lxFeatherC = new Map();
