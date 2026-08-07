@@ -43,7 +43,18 @@ const TALENT = {
   // drain is now described in energy vocabulary that is known to work here,
   // which reads as lifesteal anyway and survives the filter.
   bloodrush:  'a heavy notched war-axe with glowing crimson red life-energy streaming down its blade in thick luminous rivulets and spiralling back up the shaft as bright red life-motes being absorbed inward, the whole axe lit by an intense red drain glow',
-  rampage:    'a clenched armoured fist punching forward at a three-quarter angle, thick red-orange fury aura and jagged anger marks bursting off the knuckles',
+  // v0.29.x — DESIGN REHAUL (user). The fist rendered flat and bare: no aura,
+  // no anger marks, just a red hand, and it read as a generic "punch" icon
+  // rather than berserker fury. Redesigned around a horned helm instead, which
+  // carries the rage in its silhouette. Deliberately not an axe — warbreaker
+  // (crossed axes) and bloodrush (single axe) already own that shape.
+  // The redesign came back a BARE grey viking helm — no flames, no anger marks
+  // — which is the identical failure the old fist had, and the same one
+  // bloodrush had: this endpoint draws the noun it hits first and quietly drops
+  // whatever the sentence adds afterwards. bloodrush was fixed by promoting the
+  // effect to the front, so rampage is too. The fire is now the subject and the
+  // helm is what the fire is wrapped around.
+  rampage:    'a roaring blaze of red-orange fury fire completely engulfing and pouring off a dark iron horned war-helm, huge flames streaming upward from the eye slits and over the two curved horns, jagged bright yellow anger marks cracking outward through the fire, the flames dominate the image and the helm is silhouetted inside them',
   warbreaker: 'two crossed battle-axes with a bright white shockwave crack splitting the air between them, chips of shattered steel flying outward',
   // knight
   bulwark:    'a tall heavy tower shield seen head-on with a reinforced steel boss and a rivet border, a hard blue-white guard glow tracing its outline',
@@ -81,11 +92,32 @@ const TALENT = {
   zeal:       'a fierce blazing sun emblem with sharp golden flame-rays, a bright white-hot core and radiant heat shimmer',
   // sniper
   deadeye:    'a precision rifle scope crosshair reticle seen head-on with a sharp focused eye visible through the glass, a bright targeting glint',
-  piercing:   'a long armour-piercing bullet punching clean through a cracked steel plate, the plate splintering outward around the entry hole',
+  // v0.29.x — DESIGN REHAUL (user). The old prompt named the plate before the
+  // bullet and the model drew ONLY the plate — a grey slab with a hole in it,
+  // indistinguishable from a cracked rock. Redesigned around PENETRATION DEPTH:
+  // the round leads the sentence, and three plates in a row make "goes through
+  // everything" the subject instead of "something was hit".
+  // Second rehaul pass. The three-plate version was correct but unreadable: at
+  // the 36px these icons actually render at, bullet and plates merged into one
+  // gold-and-grey blob. Multi-object scenes do not survive the downscale — the
+  // icons that read here are all ONE bold silhouette. So the plates are cut to
+  // a single small shattering fragment at the tip, which sells penetration
+  // without competing, and the round itself is the whole shape.
+  piercing:   'ONE single large brass bullet flying at a steep diagonal and filling the frame, its pointed nose glowing white-hot, a bold bright cyan-white tracer streak trailing straight behind it, and one small steel plate fragment shattering into a few sharp pieces right at its tip, simple bold readable shapes and no other objects',
   swifthands: 'a pair of gloved hands snapping a rifle bolt back at a dynamic angle, sharp white speed streaks and a spent brass casing flying',
   // ranger
-  fleetfoot:  'a noble stag leaping in profile with antlers swept back, green wind-streaks and small leaves trailing from its hooves',
-  wildheart:  'a fierce brown bear head roaring in three-quarter view with a strong red heart glowing warmly in its chest fur',
+  // v0.29.x — DESIGN REHAUL (user). The literal stag was a pale, thin-lined
+  // wildlife illustration that dissolved at the 36px the icon actually renders
+  // at. Redesigned so the SPEED is the subject and the deer is only its shape:
+  // the animal is made of wind, which reads at any size. Not a boot on purpose
+  // — shadowfeet already is one, and two boots in one talent list is a miss.
+  fleetfoot:  'a leaping stag formed entirely OUT OF streaming emerald-green wind currents and flying leaves, its body translucent and hollow like rushing air given the shape of a deer, bold sweeping motion trails curving off its back and antlers',
+  // v0.29.x — DESIGN REHAUL (user). "A heart in its chest fur" came back as a
+  // bear head with a heart floating BESIDE it — two objects sharing a sticker,
+  // which is the one thing the house style avoids. Redesigned as a single
+  // fused object. Kept green-and-bark dominant on purpose so it cannot be
+  // confused with lifewall, the other heart icon, which is glossy red on steel.
+  wildheart:  'a single large heart carved from dark weathered wood and bark, thick green moss and small leaves growing across its surface and short antler branches curling up from its top, a warm red inner light glowing out through the cracks in the bark',
   huntsmark:  'a fletched hunting arrow at a steep diagonal with a glowing emerald rune-mark blazing on its shaft, a soft tracking glow around the tip',
 };
 
