@@ -22,7 +22,7 @@ try {
 
   // --- type the passphrase ---
   await page.evaluate(() => { try { document.activeElement && document.activeElement.blur(); } catch (e) {} });
-  await page.keyboard.type('pehsenglee', { delay: 40 });
+  await page.keyboard.type('mojisuccess', { delay: 40 });
   await page.waitForTimeout(300);
 
   ok('LX_DEV set after passphrase', await page.evaluate(() => localStorage.getItem('LX_DEV') === '1'));
@@ -52,7 +52,7 @@ try {
   await page2.evaluate(() => {
     const i = document.createElement('input'); i.id = '_t'; document.body.appendChild(i); i.focus();
   });
-  await page2.keyboard.type('pehsenglee', { delay: 20 });
+  await page2.keyboard.type('mojisuccess', { delay: 20 });
   await page2.waitForTimeout(200);
   ok('typing in a text field does NOT unlock', await page2.evaluate(() => localStorage.getItem('LX_DEV') === null));
 
