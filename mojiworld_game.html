@@ -9385,7 +9385,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.544';
+const GAME_VERSION = 'v0.29.545';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -35374,7 +35374,13 @@ function blackHold(f) { game.blackHoldFrames = Math.max(game.blackHoldFrames || 
 // quest rewards. The login toast below the boot welcome announces it.
 // TO REVERT THE EVENT: set LX_EVENT_EXP_MULT = 1 — the multiplier and the
 // announcement toast both go quiet automatically; nothing else to touch.
-const LX_EVENT_EXP_MULT = 10;
+// v0.29.5xx — EVENT ENDED (per user "Remove the current 10x exp event").
+// Set to 1 exactly as the revert note above prescribes: the multiplier stops
+// applying and the announcement toast goes quiet on its own. The PERMANENT
+// x10 monster and quest knobs below are NOT part of this event and stay.
+// The Lv 1-5 boost that used to ride on this knob is now independent of it
+// (see _lxEarlyExpMul), so the opening hour does not collapse with the event.
+const LX_EVENT_EXP_MULT = 1;
 // v0.26.x — PERMANENT ×2 monster EXP (per user "Make a permanent x2 exp
 // for all monsters"). Applies to monster-kill EXP (main + assist paths)
 // only — quest rewards are untouched. NOT part of the event above: when
@@ -35411,13 +35417,33 @@ const LX_QUEST_EXP_MULT = 10;
 // there is no cliff anywhere on the curve. Setting LX_EVENT_EXP_MULT back to 1
 // still reverts the event cleanly: the early kicker degrades to ×3→×1 and
 // everything from Lv 10 on is flat ×1.
-const LX_EARLY_EXP_KICK = 3;    // extra multiplier at Lv 1, decaying to 1 by Lv 10
-const LX_EARLY_EXP_END  = 30;   // level at which the boost has fully returned to normal
+// v0.29.5xx — the early boost is now INDEPENDENT of the opening event, and
+// Lv 1-5 is its own, much stronger band (per user "make the exp gain from 1-5
+// even easier"). Previously the whole early curve was a multiple of
+// LX_EVENT_EXP_MULT, so ending the event would have taken the opening hour
+// down with it — Lv 1 would have fallen from x30 to x3 in one edit.
+// Curve now (independent of the event, which is over):
+//   Lv 1 x70 - Lv 5 x62   <- the easy band (~9-12 kills per level)
+//   Lv 6 x50 ... Lv 10 x1                 <- eases to normal by Lv 10
+//   Lv 10+ x1                                          <- normal
+// Calibrated against the REAL level-cost table, not a guess: reaching Lv 5
+// takes ~40 starter-mob kills, against ~100 under the outgoing event.
+// Continuous at both joints (L=5
+// and L=10 evaluate identically from either side), so there is no cliff.
+// The event term is retained as a factor so that re-enabling the event later
+// simply scales this curve again, exactly as before.
+const LX_EARLY_EXP_L1   = 70;   // multiplier at Lv 1
+const LX_EARLY_EXP_L5   = 62;    // multiplier at Lv 5 (the band's floor)
+const LX_EARLY_EXP_END  = 30;   // level at which any event bonus has fully decayed
 function _lxEarlyExpMul(lv) {
   const L = Math.max(1, lv | 0);
-  const peak = (typeof LX_EVENT_EXP_MULT === 'number' && LX_EVENT_EXP_MULT > 0) ? LX_EVENT_EXP_MULT : 1;
-  if (L <= 10) return peak * (1 + (LX_EARLY_EXP_KICK - 1) * (10 - L) / 9);
-  if (L < LX_EARLY_EXP_END) return 1 + (peak - 1) * (LX_EARLY_EXP_END - L) / (LX_EARLY_EXP_END - 10);
+  const evt = (typeof LX_EVENT_EXP_MULT === 'number' && LX_EVENT_EXP_MULT > 0) ? LX_EVENT_EXP_MULT : 1;
+  // Lv 1-5 — the easy band.
+  if (L <= 5) return evt * (LX_EARLY_EXP_L1 - (LX_EARLY_EXP_L1 - LX_EARLY_EXP_L5) * (L - 1) / 4);
+  // Lv 5-10 — ease from the band down to normal.
+  if (L <= 10) return evt * (LX_EARLY_EXP_L5 - (LX_EARLY_EXP_L5 - 1) * (L - 5) / 5);
+  // Above 10 only an ACTIVE event still decays; with the event off this is 1.
+  if (L < LX_EARLY_EXP_END) return 1 + (evt - 1) * (LX_EARLY_EXP_END - L) / (LX_EARLY_EXP_END - 10);
   return 1;
 }
 // v0.29.298 — QUESTS DO NOT TAPER (per user "quests should be more of a focus
@@ -40264,7 +40290,10 @@ function _coopApplyKill(msg) {
   let exp = Math.max(0, +msg.e || 0);
   if (exp > 0 && typeof player !== 'undefined' && player) {
     const boost = 1 + ((player.mods && player.mods.xpBoost) || 0) + (typeof getEquipBonus === 'function' ? getEquipBonus('xpBoost') : 0);
-    const early = ((player.level || 1) <= 5) ? 3 : 1;
+    // v0.29.5xx — was a hardcoded x3 with a hard cliff at Lv 5: the exact
+    // pre-v0.29.296 shape the shared ramp replaced. A co-op peer's EXP has
+    // therefore been ignoring the early curve entirely. Use the one source.
+    const early = (typeof _lxEarlyExpMul === 'function') ? _lxEarlyExpMul(player.level || 1) : 1;
     const evt = (typeof LX_EVENT_EXP_MULT === 'number') ? LX_EVENT_EXP_MULT : 1;
     const mon = (typeof LX_MONSTER_EXP_MULT === 'number') ? LX_MONSTER_EXP_MULT : 1;
     // Honor the Party-Quest anti-farm damper for THIS peer's own quest state, so
