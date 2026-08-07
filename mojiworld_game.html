@@ -9345,7 +9345,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.488';
+const GAME_VERSION = 'v0.29.489';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -13547,6 +13547,33 @@ function _lxPeSnap() {
   const gy = _lxPeGroundY(p.x, p.y);
   if (gy != null) { p.y = gy; _lxPeSync(); }
 }
+// v0.29.489 — move the SELECTED prop to the player ("shift existing props to
+// player coordinates", per user). Mirrors the Stage Editor's ground-truth
+// rule: when standing, the player's feet ARE the surface top (collision sets
+// player.y = platform.y - player.h exactly); airborne falls back to the
+// nearest platform under the player's x. 40px on the facing side so the prop
+// doesn't land inside the character art, clamped into the owning platform.
+function _lxPeToPlayer() {
+  const p = _lxPeSel(); if (!p || typeof player === 'undefined') return;
+  _lxPeMark();
+  const pcx = player.x + player.w / 2;
+  let topY = player.y + player.h;
+  const plats = (game.mapData && game.mapData.platforms) || [];
+  if (!player.onGround) {
+    let best = null, bestD = Infinity;
+    for (const pl of plats) {
+      if (pcx < pl.x - 4 || pcx > pl.x + pl.w + 4) continue;
+      const d = Math.abs(pl.y - topY);
+      if (d < bestD) { bestD = d; best = pl; }
+    }
+    if (best) topY = best.y;
+  }
+  let x = pcx + 40 * ((player.facing | 0) || 1);
+  const owner = plats.find((pl) => pl.y === topY && pcx >= pl.x - 4 && pcx <= pl.x + pl.w + 4);
+  if (owner) x = Math.max(owner.x + 10, Math.min(owner.x + owner.w - 10, x));
+  p.x = Math.round(x); p.y = Math.round(topY);
+  _lxPeSync();
+}
 // draw-accurate box: same f-factor + aspect drawWorldProps derives, so the
 // hit area matches the pixels on screen (the Stage Editor's fixed 80px box
 // missed wide stalls and overshot small lanterns)
@@ -13616,6 +13643,26 @@ function _lxPeKey(e) {
   else return;                                         // anything else flows to the game (WASD walking stays live)
   e.preventDefault(); e.stopPropagation();
 }
+// v0.29.489 — wheel-resize ("all prop resize", per user): scrolling over the
+// canvas rescales the SELECTED prop 0.05 per notch, Shift 0.15, same
+// [0.2, 5] clamp as the buttons. One undo mark per burst (>700ms gap starts
+// a new gesture) so Ctrl+Z reverts the whole resize, not one notch of it.
+// Registered only while the editor is open, {passive:false} because window
+// wheel listeners are passive by default and this one must preventDefault.
+let _lxPeWheelAt = 0;
+function _lxPeWheel(e) {
+  if (!_LX_PE.open) return;
+  if (_LX_PE.root && _LX_PE.root.contains(e.target)) return;   // panel scroll stays normal
+  const p = _lxPeSel(); if (!p || !e.deltaY) return;
+  const now = Date.now();
+  if (now - _lxPeWheelAt > 700) _lxPeMark();
+  _lxPeWheelAt = now;
+  const step = (e.shiftKey ? 0.15 : 0.05) * (e.deltaY < 0 ? 1 : -1);
+  p.scale = Math.round(Math.max(0.2, Math.min(5, (p.scale || 1) + step)) * 100) / 100;
+  if (p.scale === 1) delete p.scale;
+  _lxPeSync();
+  e.preventDefault(); e.stopPropagation();
+}
 function _lxPeBuild() {
   const root = document.createElement('div');
   root.id = 'lx-prop-editor';
@@ -13626,7 +13673,7 @@ function _lxPeBuild() {
   hdr.innerHTML = '<b style="color:#ffd166;">\u{1F4E6} Prop Editor (Ctrl)</b>';
   hdr.appendChild(btn('✕', () => _lxPeToggle(), '0 0 26px')); root.appendChild(hdr);
   const tip = document.createElement('div'); tip.style.cssText = 'color:#90a4b4;font-size:10.5px;margin-bottom:6px;line-height:1.35;';
-  tip.textContent = 'Click a placed prop to select, drag to move. Arrows nudge (Shift ×10), Del removes, Ctrl+Z undoes. ＋ at click arms the next canvas click; Shift-click keeps placing.';
+  tip.textContent = 'Click a placed prop to select, drag to move; scroll to resize it (Shift = coarse). Arrows nudge (Shift ×10), Del removes, Ctrl+Z undoes. ＋ at click arms the next canvas click; Shift-click keeps placing.';
   root.appendChild(tip);
   u.map = document.createElement('div'); u.map.style.cssText = 'color:#7fb3ff;font-size:10.5px;margin-bottom:4px;'; root.appendChild(u.map);
   u.filter = document.createElement('input');
@@ -13657,6 +13704,9 @@ function _lxPeBuild() {
   r1.appendChild(btn('⤓ Snap', _lxPeSnap)); r1.appendChild(btn('⚓ Hang', _lxPeAnchorToggle));
   r1.appendChild(btn('− size', () => _lxPeScale(-0.1))); r1.appendChild(btn('+ size', () => _lxPeScale(0.1)));
   root.appendChild(r1);
+  const rMv = document.createElement('div'); rMv.style.cssText = 'display:flex;gap:4px;margin-bottom:4px;';
+  rMv.appendChild(btn('\u{1F6B6} Move selected prop to player', _lxPeToPlayer));   // v0.29.489
+  root.appendChild(rMv);
   const r2 = document.createElement('div'); r2.style.cssText = 'display:flex;gap:4px;margin-bottom:4px;';
   r2.appendChild(btn('↶ Undo', _lxPeUndo)); r2.appendChild(btn('\u{1F5D1} Remove', _lxPeRemove)); r2.appendChild(btn('⬇ Export', _lxPeExport));
   root.appendChild(r2);
@@ -13722,6 +13772,7 @@ function _lxPeToggle() {
     window.addEventListener('pointermove', _lxPeMove, true);
     window.addEventListener('pointerup', _lxPeUp, true);
     window.addEventListener('keydown', _lxPeKey, true);
+    window.addEventListener('wheel', _lxPeWheel, { capture: true, passive: false });   // v0.29.489 — wheel-resize
     _LX_PE._map = game.currentMap;
     _lxPeSync();
     if (typeof showToast === 'function') showToast('Prop Editor — tap Ctrl to close', 'rare');
@@ -13730,6 +13781,7 @@ function _lxPeToggle() {
     window.removeEventListener('pointermove', _lxPeMove, true);
     window.removeEventListener('pointerup', _lxPeUp, true);
     window.removeEventListener('keydown', _lxPeKey, true);
+    window.removeEventListener('wheel', _lxPeWheel, true);   // v0.29.489 — capture flag matches the add
     _LX_PE.sel = -1; _LX_PE.drag = null; _LX_PE.place = null;
   }
 }

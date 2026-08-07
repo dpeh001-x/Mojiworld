@@ -1,4 +1,4 @@
-// CTRL PROP EDITOR (v0.29.483) — drives the live MAP_PROPS editor end to end.
+// CTRL PROP EDITOR (v0.29.484) — drives the live MAP_PROPS editor end to end.
 //
 // Two pages on purpose: one WITHOUT the dev flag (the gate must hold — players
 // tapping Ctrl see nothing) and one with ?dev=1 exercising the whole surface:
@@ -140,16 +140,62 @@ console.log('\nexport:');
 const r10 = await page.evaluate(() => { _lxPeExport(); return _LX_PE.ui.out.textContent; });
 check(r10.includes('MAP_PROPS.') && r10.includes('barrel_stack'), 'export emits the MAP_PROPS block with the added prop');
 
+console.log('\nexisting/baked props (v0.29.488 — wheel resize + move-to-player):');
+// switch to a map with BAKED props: everything above exercised props this test
+// created; "shift EXISTING props to player coordinates" has to be proven on
+// entries that shipped in the map data.
+const r12 = await page.evaluate(() => {
+  loadMap('town'); game.paused = false;
+  if (typeof _lxPeDrawOverlay === 'function') _lxPeDrawOverlay();   // runs the editor's map-change resync
+  const l = _lxPeList();
+  return { n: l.length, first: l[0] && l[0].key, selReset: _LX_PE.sel === -1 };
+});
+check(r12.n > 0, 'the town map exposes its baked props in the editor', JSON.stringify(r12));
+check(r12.selReset, 'map change clears the stale selection');
+
+const r13 = await page.evaluate(() => {
+  _LX_PE.sel = 0; _lxPeSync();
+  const p = _lxPeList()[0];
+  const s0 = p.scale || 1;
+  const cv = document.getElementById('game'), r = cv.getBoundingClientRect();
+  const wheel = (dy, shift) => cv.dispatchEvent(new WheelEvent('wheel', { deltaY: dy, shiftKey: !!shift, clientX: r.left + 200, clientY: r.top + 200, bubbles: true, cancelable: true }));
+  wheel(-100); wheel(-100);                       // two fine notches up
+  const up = p.scale || 1;
+  wheel(100, true);                               // one coarse notch down
+  const down = p.scale || 1;
+  return { s0, up, down };
+});
+check(Math.abs(r13.up - r13.s0 - 0.10) < 0.001, 'two wheel notches grow scale by 0.10', JSON.stringify(r13));
+check(Math.abs(r13.down - r13.up + 0.15) < 0.001, 'a Shift notch steps 0.15');
+
+const r14 = await page.evaluate(() => {
+  const p = _lxPeList()[0];
+  const from = { x: p.x, y: p.y };
+  _lxPeToPlayer();
+  const pcx = player.x + player.w / 2;
+  const gy = _lxPeGroundY(p.x, p.y);
+  return { from, x: p.x, y: p.y, pcx: Math.round(pcx), grounded: gy === p.y, moved: p.x !== from.x || p.y !== from.y };
+});
+check(r14.moved, 'move-to-player relocates an EXISTING baked prop', JSON.stringify(r14));
+check(Math.abs(r14.x - r14.pcx) <= 60, 'it lands beside the player (40px facing side, clamped)', `x ${r14.x} vs player centre ${r14.pcx}`);
+check(r14.grounded, 'it stands on a real platform top');
+await page.keyboard.down('Control'); await page.keyboard.press('KeyZ'); await page.keyboard.up('Control');
+const r15 = await page.evaluate(() => { const p = _lxPeList()[0]; return { x: p.x, y: p.y }; });
+check(r15.x === r14.from.x && r15.y === r14.from.y, 'Ctrl+Z puts the baked prop back where it was', JSON.stringify(r15));
+
 console.log('\nteardown:');
 await tap(page);
 const r11 = await page.evaluate(() => {
   const n0 = _lxPeList().length;
   const cv = document.getElementById('game'), r = cv.getBoundingClientRect();
   cv.dispatchEvent(new PointerEvent('pointerdown', { clientX: r.left + 50, clientY: r.top + 50, bubbles: true, button: 0 }));
-  return { closed: !_LX_PE.open, inert: _lxPeList().length === n0 && !_LX_PE.drag };
+  const p0 = _lxPeList()[0], sc0 = p0 && (p0.scale || 1);
+  cv.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, clientX: r.left + 200, clientY: r.top + 200, bubbles: true, cancelable: true }));
+  return { closed: !_LX_PE.open, inert: _lxPeList().length === n0 && !_LX_PE.drag, wheelInert: !p0 || (p0.scale || 1) === sc0 };
 });
 check(r11.closed, 'closed via a final tap');
 check(r11.inert, 'canvas clicks are inert after close');
+check(r11.wheelInert, 'wheel no longer resizes after close');
 console.log(errs.length ? '\npage errors: ' + errs.slice(0, 3).join(' | ') : '\nno page errors');
 await browser.close();
 process.exit(bad || errs.length ? 1 : 0);
