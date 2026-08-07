@@ -241,7 +241,13 @@ Root files (17), and why each one has to be there:
 
 Buckets:
 
-- `data/` — runtime tables loaded by the game and animator: `anim_calib.js`, `anim_calib_manifest.js`, `gear_calibration.js`, `gear_erase.js`, `mob_offsets.js`, `npc_offsets.js`, `monster_hitboxes.js`, `sfx_manifest.js`, `assets_manifest.json`. Referenced as `data/<file>` from `mojiworld_game.html`, `monster_animator.html` and `steam/package.json`'s `extraResources` filter — **update all three when adding one.**
+- `data/` — runtime tables loaded by the game and animator: `anim_calib.js`, `anim_calib_manifest.js`, `boss_sprite_index.js`, `gear_calibration.js`, `gear_erase.js`, `mob_offsets.js`, `npc_offsets.js`, `monster_hitboxes.js`, `sfx_manifest.js`, `assets_manifest.json`. Referenced as `data/<file>` from `mojiworld_game.html`, `monster_animator.html` and `steam/package.json`'s `extraResources` filter — **update all three when adding one.**
+  `boss_sprite_index.js` is GENERATED — after dropping new boss/zodiac art run
+  `node scripts/gen_boss_sprite_index.mjs`, and `--check` on the same script
+  exits 1 when the baked file has drifted from disk. It records which optional
+  sprites exist so the loaders stop probing for art that was never authored;
+  if it is stale the loaders under-request (missing art), so treat the drift
+  check as part of any art drop.
 - `tools/` — dev tools: the six standalone pages (`sprite_maker`, `sprite_preview`, `map_editor`, `map_placement_tool`, `monster_sound_review`, `zodiac_vfx_review`) plus calibration/asset utilities and `tools/launcher/` (the csc source for `Mojiworld.exe`). A tool page that reads repo-root art needs `<base href="../">` in its `<head>` — that is how `zodiac_vfx_review` keeps its 430 `Sprites/` URLs working from a subdirectory.
 - `tools/_archive/` — 104 one-off scripts (`_patch_*`, `_chlog_*`, `_b60_*`, `_bake_*`, `_gen_*`, `_forge_ui_*`, `_dev_*`) archived 2026-08-03. Each ran once; none is wired into the game, the build or any test. They were 68% of `tools/`, so finding a real tool meant reading past them. Most `_patch_*` files are already unrunnable — they hardcode `C:/Users/Xenon/Desktop/Mojiworld/…`, a machine this repo has not lived on. **Do not add new one-offs to `tools/` root** — either write them under `tools/_archive/` or use `scripts/_tmp_*` (gitignored). See `tools/_archive/README.md`.
 - `scripts/` — build, bake and test utilities. `_tmp_*` is gitignored scratch.
