@@ -80034,14 +80034,28 @@ function renderAttributes() {
 // Snapshot the authored markup once, and re-stamp it whenever a sibling panel
 // has taken the container over.
 let _attrSkeleton = null;
+// v0.29.475 — Capture the authored markup BEFORE any panel overwrites it.
+// The v0.29.372 fix below snapshotted lazily, on the first openAttributes()
+// call, and only if #attr-derived was still present. That holds only when the
+// Character Sheet is the FIRST panel ever opened. Open the U panel first —
+// which is what nearly everyone does, U being a HUD keybind while the sheet is
+// buried — and the authored markup is already gone, so neither branch can
+// fire: the snapshot stays null forever and openAttributes silently
+// re-displays the U panel's DOM instead. No throw, no console error, and no
+// way back short of a reload. Every writer of this container now calls this
+// first, so whichever one runs first preserves the skeleton for the others.
+function _attrCaptureSkeleton() {
+  if (_attrSkeleton != null) return;
+  const body = document.querySelector('#attributes-modal .modal');
+  if (body && document.getElementById('attr-derived')) _attrSkeleton = body.innerHTML;
+}
 function openAttributes() {
   if (typeof _tutPing === 'function') _tutPing('panel');
   const modal = document.getElementById('attributes-modal');
   const body = modal && modal.querySelector('.modal');
   if (body) {
-    if (_attrSkeleton == null && document.getElementById('attr-derived')) {
-      _attrSkeleton = body.innerHTML;                      // first open: authored markup is intact
-    } else if (_attrSkeleton != null && !document.getElementById('attr-derived')) {
+    _attrCaptureSkeleton();
+    if (_attrSkeleton != null && !document.getElementById('attr-derived')) {
       body.innerHTML = _attrSkeleton;                      // a sibling panel took the container
       body.style.maxHeight = ''; body.style.overflowY = ''; body.style.minWidth = ''; body.style.maxWidth = '';
     }
@@ -80857,9 +80871,23 @@ function openLevelUpPanel() {
     _removeFirstLvlupChip(true);
   }
   if (!player._levelUpSpent) player._levelUpSpent = {};
-  if (!game._uTab) game._uTab = 'lp';
+  // v0.29.475 — normalise the tab HERE, not in swapPane. `game._uTab` comes
+  // out of the save, and the markup below reads it directly to pick each
+  // pane's initial display, so swapPane's legacy 'ranks' reroute ran too late
+  // to help the template. An unrecognised value (a tab a newer build had, a
+  // hand-edited save, a typo'd caller) matched no pane and no render branch:
+  // the panel opened blank, with no tab highlighted and nothing to click back
+  // to. Falling back to 'lp' means the worst case is the wrong tab, not an
+  // empty character sheet.
+  const _U_TABS = ['lp', 'boons', 'skills', 'items', 'mojimon'];
+  if (game._uTab === 'ranks') game._uTab = 'skills';        // v0.25.110 legacy alias
+  if (!game._uTab || _U_TABS.indexOf(game._uTab) < 0) game._uTab = 'lp';
   const modal = document.getElementById('attributes-modal');
   const body = modal.querySelector('.modal');
+  // v0.29.475 — snapshot the Character Sheet's authored markup before the
+  // innerHTML write below destroys it. See _attrCaptureSkeleton: without this,
+  // opening U before ever opening the sheet breaks the sheet for the session.
+  if (typeof _attrCaptureSkeleton === 'function') _attrCaptureSkeleton();
   body.style.maxHeight = '88vh';
   body.style.overflowY = 'auto';
   // v0.27.26 — Per user "make it sleek and reduce scrolling": widen the
