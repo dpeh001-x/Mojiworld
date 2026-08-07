@@ -7656,25 +7656,40 @@ Current ACC: 0
         rgba(255,232,170,0.26), rgba(255,232,170,0.09) 46%, transparent 72%);
       z-index:-1; }
     #area-title .at-icon { font-size:30px; line-height:1; margin-bottom:9px;
-      filter:drop-shadow(0 2px 5px rgba(18,10,36,0.55))
+      filter:drop-shadow(0 2px 4px rgba(12,7,26,0.85))
              drop-shadow(0 0 14px rgba(255,222,145,0.55)); }
+    /* v0.29.491 — the region sprite, when the map has one. Sized a touch above
+       the emoji it replaces so the art reads at a glance. */
+    #area-title .at-icon img { width:56px; height:56px; object-fit:contain;
+      display:block; margin:0 auto; }
     #area-title .at-name { font-family:'Cinzel','Trajan Pro','Cormorant Garamond',
         'Palatino Linotype','Book Antiqua',Georgia,serif;
-      font-weight:700; font-size:38px; letter-spacing:0.16em;
+      /* v0.29.491 — thicker (per user). font-weight alone is weak here: the
+         Cinzel stack often ships only 400/700, so the browser has nothing
+         heavier to pick. The hairline stroke is what actually adds weight, and
+         it is tinted to the gradient's mid-gold so it reads as part of the
+         letterform rather than an outline. */
+      font-weight:800; font-size:38px; letter-spacing:0.16em;
+      -webkit-text-stroke:0.7px rgba(255,231,166,0.62);
       background:linear-gradient(105deg,
         #d9c491 0%, #f7ecca 20%, #ffe9a8 36%, #fffdf2 50%,
         #ffe9a8 64%, #f7ecca 80%, #d9c491 100%);
       background-size:220% 100%; background-position:120% 0;
       -webkit-background-clip:text; background-clip:text; color:transparent;
-      filter:drop-shadow(0 2px 5px rgba(18,10,36,0.62))
-             drop-shadow(0 0 12px rgba(255,226,150,0.50))
-             drop-shadow(0 0 32px rgba(255,208,120,0.32)); }
+      /* v0.29.491 — more opaque (per user). A tight near-black seat is added
+         under the existing stack so the lettering keeps its edge over bright
+         backdrops like Emerald Thicket's pastel canopy, where 0.62 washed out. */
+      filter:drop-shadow(0 1px 2px rgba(12,7,26,0.88))
+             drop-shadow(0 3px 7px rgba(16,9,32,0.80))
+             drop-shadow(0 0 12px rgba(255,226,150,0.58))
+             drop-shadow(0 0 32px rgba(255,208,120,0.38)); }
     #area-title.at-show .at-name { animation:at-sheen 2600ms ease forwards; }
     @keyframes at-sheen {
       0% { background-position:130% 0; } 100% { background-position:-30% 0; } }
     #area-title .at-sub { margin-top:7px; font-size:12px; letter-spacing:0.34em;
       text-transform:uppercase; color:rgba(255,232,175,0.92);
-      text-shadow:0 1px 5px rgba(0,0,0,0.65), 0 0 12px rgba(255,220,140,0.35); }
+      text-shadow:0 1px 2px rgba(0,0,0,0.86), 0 1px 6px rgba(0,0,0,0.70),
+                  0 0 12px rgba(255,220,140,0.35); }   /* v0.29.491 — deeper seat */
     #area-title .at-rule { width:200px; height:1px; margin:11px auto 0;
       background:linear-gradient(90deg, transparent, rgba(255,228,155,0.95), transparent);
       box-shadow:0 0 9px rgba(255,220,140,0.55); }
@@ -9345,7 +9360,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.491';
+const GAME_VERSION = 'v0.29.488';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10745,11 +10760,13 @@ function _summonAnimFrame(key, state) {
 // the summon floats. Returns 1 for the unpadded static sprite (no change).
 const _summonCBot = new WeakMap();
 function _summonContentBottomFrac(img) {
-  if (!img || !img.naturalWidth) return 1;
+  // v0.29.487 — canvas-aware (see _lxBoxSourceOf): baked frames have width,
+  // not naturalWidth, and were silently anchored at frac 1.
+  if (!img || !(img.naturalWidth || img.width)) return 1;
   if (_summonCBot.has(img)) return _summonCBot.get(img);
   let frac = 1;
   try {
-    const W = img.naturalWidth, H = img.naturalHeight;
+    const W = img.naturalWidth || img.width, H = img.naturalHeight || img.height;
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
     const c = cv.getContext('2d'); c.drawImage(img, 0, 0);
     const d = c.getImageData(0, 0, W, H).data;
@@ -10783,6 +10800,33 @@ function _minionRefH(type) {
   hs.sort((a, b) => a - b);
   const med = hs[hs.length >> 1];            // median = robust to an outlier frame
   _minionRefContentH.set(type, med);
+  return med;
+}
+// v0.29.487 — SCALE-INVARIANT ref: content FRACTION of the frame's own height,
+// not pixels. The pixel ref (above) is derived from whatever raster the walk
+// frames happen to be when 5+ decode — raw 760px images. But _lxShrinkFrames
+// bakes frames to ~507px canvases over the following frames, and dividing a
+// baked frame's height by an IMAGE-space ref shrank the body ~33% the moment a
+// frame was baked (then per-frame, per-state — the lich-summon size pop).
+// A fraction survives any raster change by construction. Derived from the same
+// walk median; falls back through the pixel path when frames aren't ready.
+const _minionRefFracCache = new Map();
+function _minionRefFrac(type) {
+  if (!type) return null;
+  if (_minionRefFracCache.has(type)) return _minionRefFracCache.get(type);
+  const arr = (typeof SUMMON_ANIM_FRAMES !== 'undefined') ? SUMMON_ANIM_FRAMES[type + '_walk'] : null;
+  if (!arr) return null;
+  const fr = [];
+  for (const im of arr) {
+    if (!_lxSummonReady(im)) continue;
+    const b = (typeof _spriteContentBox === 'function') ? _spriteContentBox(im) : null;
+    const h = im.naturalHeight || im.height;
+    if (b && b.bottom > b.top && h > 0) fr.push((b.bottom - b.top + 1) / h);
+  }
+  if (fr.length < 5) return null;
+  fr.sort((a, b) => a - b);
+  const med = fr[fr.length >> 1];
+  _minionRefFracCache.set(type, med);
   return med;
 }
 // =========================================================================
@@ -12529,7 +12573,7 @@ function _lxMobSetYOff(type, px) {
   else delete m[type];
   try { localStorage.setItem('lx_mob_yoff', JSON.stringify(m)); } catch (_) {}
 }
-// v0.29.487 — SINGLE SOURCE OF TRUTH for where a monster sprite's feet land.
+// v0.29.485 — SINGLE SOURCE OF TRUTH for where a monster sprite's feet land.
 // Per user: "for the mojimon summoned monster, the Y coordinate is a bit off
 // from that of the one in the monster database, ensure that it matches."
 //
@@ -13547,7 +13591,7 @@ function _lxPeSnap() {
   const gy = _lxPeGroundY(p.x, p.y);
   if (gy != null) { p.y = gy; _lxPeSync(); }
 }
-// v0.29.489 — move the SELECTED prop to the player ("shift existing props to
+// v0.29.488 — move the SELECTED prop to the player ("shift existing props to
 // player coordinates", per user). Mirrors the Stage Editor's ground-truth
 // rule: when standing, the player's feet ARE the surface top (collision sets
 // player.y = platform.y - player.h exactly); airborne falls back to the
@@ -13643,7 +13687,7 @@ function _lxPeKey(e) {
   else return;                                         // anything else flows to the game (WASD walking stays live)
   e.preventDefault(); e.stopPropagation();
 }
-// v0.29.489 — wheel-resize ("all prop resize", per user): scrolling over the
+// v0.29.488 — wheel-resize ("all prop resize", per user): scrolling over the
 // canvas rescales the SELECTED prop 0.05 per notch, Shift 0.15, same
 // [0.2, 5] clamp as the buttons. One undo mark per burst (>700ms gap starts
 // a new gesture) so Ctrl+Z reverts the whole resize, not one notch of it.
@@ -13705,7 +13749,7 @@ function _lxPeBuild() {
   r1.appendChild(btn('− size', () => _lxPeScale(-0.1))); r1.appendChild(btn('+ size', () => _lxPeScale(0.1)));
   root.appendChild(r1);
   const rMv = document.createElement('div'); rMv.style.cssText = 'display:flex;gap:4px;margin-bottom:4px;';
-  rMv.appendChild(btn('\u{1F6B6} Move selected prop to player', _lxPeToPlayer));   // v0.29.489
+  rMv.appendChild(btn('\u{1F6B6} Move selected prop to player', _lxPeToPlayer));   // v0.29.488
   root.appendChild(rMv);
   const r2 = document.createElement('div'); r2.style.cssText = 'display:flex;gap:4px;margin-bottom:4px;';
   r2.appendChild(btn('↶ Undo', _lxPeUndo)); r2.appendChild(btn('\u{1F5D1} Remove', _lxPeRemove)); r2.appendChild(btn('⬇ Export', _lxPeExport));
@@ -13772,7 +13816,7 @@ function _lxPeToggle() {
     window.addEventListener('pointermove', _lxPeMove, true);
     window.addEventListener('pointerup', _lxPeUp, true);
     window.addEventListener('keydown', _lxPeKey, true);
-    window.addEventListener('wheel', _lxPeWheel, { capture: true, passive: false });   // v0.29.489 — wheel-resize
+    window.addEventListener('wheel', _lxPeWheel, { capture: true, passive: false });   // v0.29.488 — wheel-resize
     _LX_PE._map = game.currentMap;
     _lxPeSync();
     if (typeof showToast === 'function') showToast('Prop Editor — tap Ctrl to close', 'rare');
@@ -13781,7 +13825,7 @@ function _lxPeToggle() {
     window.removeEventListener('pointermove', _lxPeMove, true);
     window.removeEventListener('pointerup', _lxPeUp, true);
     window.removeEventListener('keydown', _lxPeKey, true);
-    window.removeEventListener('wheel', _lxPeWheel, true);   // v0.29.489 — capture flag matches the add
+    window.removeEventListener('wheel', _lxPeWheel, true);   // v0.29.488 — capture flag matches the add
     _LX_PE.sel = -1; _LX_PE.drag = null; _LX_PE.place = null;
   }
 }
@@ -45007,21 +45051,6 @@ function _renderWorldMapDiagram(host, opts) {
       hopRing.setAttribute('pointer-events', 'none');
       g.appendChild(hopRing);
     }
-    // v0.29.480 — explicit hit target, sized to what the node LOOKS like.
-    // Everything painted above the disc — the 40x40 icon art (corners 28.3
-    // from centre), the r=26 hover halo, the rings, the level pill, the label
-    // — carries pointer-events:none, so the only clickable thing was the r=21
-    // disc while the node reads as ~r=28. The outer ring of the art was dead,
-    // and the halo that lights up under the cursor was not clickable at all.
-    // Transparent fill still hit-tests with pointer-events:'all'. Appended
-    // FIRST so it paints underneath and changes nothing visually. r=27 covers
-    // the icon corners and the hover halo without reaching neighbours.
-    const _hit = document.createElementNS(SVG_NS, 'circle');
-    _hit.setAttribute('class', 'wm-hit');
-    _hit.setAttribute('r', 27);
-    _hit.setAttribute('fill', 'transparent');
-    _hit.setAttribute('pointer-events', 'all');
-    g.appendChild(_hit);
     const _hoverHalo = document.createElementNS(SVG_NS, 'circle');
     _hoverHalo.setAttribute('class', 'wm-hoverhalo');
     _hoverHalo.setAttribute('r', 26);
@@ -45348,13 +45377,8 @@ function _renderWorldMapDiagram(host, opts) {
       if (!_pan) return;
       const { sc } = _scrn();
       const dx = ev.clientX - _pan.sx, dy = ev.clientY - _pan.sy;
-      // v0.29.480 — Euclidean, not Manhattan, and a roomier threshold. The old
-      // |dx|+|dy| >= 5 scored a 3x3px twitch as 6 and the capture-phase guard
-      // below cancelled the click; the real distance is only 4.2px. Any
-      // slightly shaky click was silently swallowed. 8px true distance still
-      // stops a genuine drag from teleporting you.
-      _panMoved = Math.max(_panMoved, Math.hypot(dx, dy));
-      if (_panMoved < 8) return;
+      _panMoved = Math.max(_panMoved, Math.abs(dx) + Math.abs(dy));
+      if (_panMoved < 5) return;
       vb.x = _pan.vx - dx / sc;
       vb.y = _pan.vy - dy / sc;
       _clampVB(); _queueVB();
@@ -45364,7 +45388,7 @@ function _renderWorldMapDiagram(host, opts) {
     svg.addEventListener('pointerleave', _endPan);
     // a real drag must not fire the node click it ends on
     svg.addEventListener('click', (ev) => {
-      if (_panMoved >= 8) { ev.stopPropagation(); ev.preventDefault(); _panMoved = 0; }
+      if (_panMoved >= 5) { ev.stopPropagation(); ev.preventDefault(); _panMoved = 0; }
     }, true);
     svg.addEventListener('dblclick', (ev) => {
       if (ev.target && ev.target.closest && ev.target.closest('.wm-node')) return;
@@ -57253,7 +57277,7 @@ function _mojimonDraw(mn, sx, sy) {
     // that string cache and freeze the animation at one tinted pose.
     // v0.29.480 — per-type Y nudge from the R-key Monster Plant editor, the
     // same additive offset drawMonster folds into its dyOffset.
-    // v0.29.487 — plant through the SHARED ladder (_lxMobPlantDy) instead of
+    // v0.29.485 — plant through the SHARED ladder (_lxMobPlantDy) instead of
     // anchoring the raw image bottom. The old `-dh + yoff` ignored the
     // transparent padding under the art, so the companion hovered above where
     // the wild species stands — up to 21.5 px on razorgale. srcH comes from the
@@ -57802,7 +57826,11 @@ function drawMinions() {
       if (_box && _box.bottom > _box.top) {
         let _contentH = _box.bottom - _box.top + 1;
         if (_rState) {   // animated walk/attack frame — clamp to the walk baseline
-          const _ref = (typeof _minionRefH === 'function') ? _minionRefH(mn.type) : null;
+          // v0.29.487 — fraction × THIS frame's height (scale-invariant; the old
+          // pixel ref went stale the moment _lxShrinkFrames baked the raster).
+          const _refF = (typeof _minionRefFrac === 'function') ? _minionRefFrac(mn.type) : null;
+          const _ref = _refF ? Math.round(_refF * _srcH)
+                             : ((typeof _minionRefH === 'function') ? _minionRefH(mn.type) : null);
           if (_ref) _contentH = _ref;   // v0.26.x — LOCK to walk baseline so the body size is CONSTANT across all animated frames (was min(): shorter frames scaled UP). Taller poses extend above the box; feet planted via _botFrac.
         }
         _targetH = Math.round(64 * _SUMMON_SIZE_MUL * _srcH / _contentH);     // body ≈ 64px × global summon scale; tall poses extend above
@@ -59926,7 +59954,7 @@ const SKILL_FNS = {
   // Mage
   magicBolt: () => {
     // v0.25.546 — Hook the new magic_bolt VFX sprite at the muzzle.
-    // v0.29.490 — art replaced (per user) and `size` re-fitted to its canvas.
+    // v0.29.488 — art replaced (per user) and `size` re-fitted to its canvas.
     // spawnSpriteBurst maps the WHOLE source canvas into a square size×size box
     // (keepAspect defaults false), so on-screen extent = size × (content/canvas)
     // and a canvas change silently rescales the effect. Measured:
@@ -59937,9 +59965,7 @@ const SKILL_FNS = {
     // (81.1 px, matching 81.3), and the flash reads a little taller than before
     // because the new art genuinely is square (content aspect 0.996 vs 1.258)
     // rather than the wide bolt the old sheet held. Use 76 instead to preserve
-    // AREA, or 90 to deliberately let it grow. The `angle` flip below is now
-    // visually inert (the new sigil is symmetric) but harmless — kept in case
-    // the art becomes directional again.
+    // AREA, or 90 to deliberately let it grow.
     spawnSpriteBurst(player.x + player.w/2 + player.facing * 24, player.y + 26, 'magic_bolt',
       { size: 83, life: 14, angle: player.facing > 0 ? 0 : Math.PI });
     spawnFx('mage','lightning', player.x + player.w/2 + player.facing * 30, player.y + 26, player.facing, { scale: 0.3, frameMs: 38 });
@@ -85579,8 +85605,28 @@ function _lxAreaTitle(id) {
     if (!el) return;
     // v0.29.4xx — the map's icon, centred above the name (per user). Same
     // resolver as Guguma's warp chips, so every map has one.
+    // v0.29.491 — per user: use the SAME custom icon the world-map (W) node
+    // shows, not the emoji. Identical resolver and path to the W diagram, so
+    // the two can never drift. Falls back to the warp emoji for maps with no
+    // region sprite, and again on a load error so a missing file never leaves
+    // an empty gap above the name.
     const _ic = el.querySelector('.at-icon');
-    if (_ic) _ic.textContent = (typeof _mapWarpIcon === 'function') ? _mapWarpIcon(id) : '';
+    if (_ic) {
+      const _emoji = (typeof _mapWarpIcon === 'function') ? _mapWarpIcon(id) : '';
+      const _hasRegion = (typeof WM_REGION_ICON_IDS !== 'undefined') && WM_REGION_ICON_IDS.has(id);
+      if (_hasRegion) {
+        _ic.textContent = '';
+        const _im = document.createElement('img');
+        _im.alt = '';
+        _im.src = 'Sprites/world/regions/' + id + '.webp';
+        _im.addEventListener('error', () => {
+          try { _im.remove(); _ic.textContent = _emoji; } catch (e) {}
+        }, { once: true });
+        _ic.appendChild(_im);
+      } else {
+        _ic.textContent = _emoji;
+      }
+    }
     el.querySelector('.at-name').textContent = md.name;
     const lv = +md.levelReq || 0;
     el.querySelector('.at-sub').textContent = lv > 1 ? 'Recommended Lv ' + lv : '';
@@ -90842,14 +90888,18 @@ const MAP_PROPS = {
   // brazier sat at x:340 (Δ40). Pushed brazier west so Coach has clear
   // training space. Barnaby + anvil intentionally co-located.
   bastion: [   // v0.26.x — key-5 Stage Editor bake (anvil dropped; Barnaby moved away)
+    // v0.29.484 — Ctrl Prop Editor hardbake (user). Both braziers are gone,
+    // the west banner switches to a hung drape (x:787→810, y:386→240, up-
+    // scaled 1.55→1.75, anchor:'hang' so its TOP pins to y:240 and the cloth
+    // falls below), and a third lion takes the east approach at x:1878.
+    // Three lions now walk the courtyard west→east: 480, 1080, 1878.
     {key:'bastion_banner', x:2064, y:324, scale:1.55},
-    {key:'bastion_banner', x:787, y:386, scale:1.55},
+    {key:'bastion_banner', x:810, y:240, scale:1.75, anchor:'hang'},
     {key:'bastion_lion_statue', x:480, y:372, scale:0.85},
     {key:'bastion_lion_statue', x:1080, y:372, scale:0.85},
-    {key:'bastion_brazier', x:130, y:486, scale:0.95},
-    {key:'bastion_brazier', x:1140, y:486, scale:0.95},
     {key:'bastion_watchtower_flag', x:240, y:160, scale:1.1},
     {key:'bastion_watchtower_flag', x:1320, y:160, scale:1.1},
+    {key:'bastion_lion_statue', x:1878, y:320},
   ],
   // ── The Bastion (Throne Room) ──
   bastionThrone: [],
@@ -102317,9 +102367,18 @@ const _LX_BOX_SCAN_MAX_H = 1100;
 function _lxBoxSourceOf(img) {
   const src = img && img._lxSrc;
   let sImg, sW, sH, scale;
-  if (src && src.naturalWidth > 0 && img.naturalHeight > 0) {
+  // v0.29.487 — CANVAS-AWARE. Baked frames (the _lxShrinkFrames output) are
+  // <canvas> elements: they carry _lxSrc but have NO naturalHeight, so the
+  // old guard fell through to the else, read naturalWidth (undefined) and
+  // every caller got null — meaning a frame silently LOST its content box the
+  // moment it was baked. drawMinions then dropped from the content-norm path
+  // (~95px body) to the fixed-72px fallback per-frame: the lich-summon size
+  // pop between idle/walk/attack, and the same latent hazard for every boss
+  // measured after its ref cache went cold. height||naturalHeight covers both.
+  const _imgH = (img && (img.naturalHeight || img.height)) || 0;
+  if (src && src.naturalWidth > 0 && _imgH > 0) {
     sImg = src; sW = src.naturalWidth; sH = src.naturalHeight;
-    scale = img.naturalHeight / src.naturalHeight;   // original -> drawn raster
+    scale = _imgH / src.naturalHeight;   // original -> drawn raster
   } else {
     sImg = img; sW = img.naturalWidth; sH = img.naturalHeight; scale = 1;
   }
@@ -103382,7 +103441,7 @@ function _drawMonsterSprite(m, sx, sy) {
   // FLOATING_ZODIAC kept as a special-case escape hatch for boss-only
   // zodiac sub-mobs.
   const isFloating = _lxMobIsFloating(m);
-  // v0.29.487 — the plant ladder now lives in _lxMobPlantDy so the MojiMon
+  // v0.29.485 — the plant ladder now lives in _lxMobPlantDy so the MojiMon
   // companion lands on the identical Y. Behaviour here is unchanged; parity is
   // asserted per species by scripts/mojimon_plant_test.mjs.
   let dyOffset = _lxMobPlantDy(m.type, isFloating, srcH, targetH);
