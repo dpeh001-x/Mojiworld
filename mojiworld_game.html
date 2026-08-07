@@ -9360,7 +9360,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.513';
+const GAME_VERSION = 'v0.29.515';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -46805,7 +46805,7 @@ function offerPrestige() {
     player.milestonesUnlocked = {};
     player.treeUnlocked = {}; player.tree = {};
     player.job = null; player.master = null; player.talents = {};   // v0.26.889
-    // v0.29.NEW — EQUIPMENT-ONLY ASCENSION (per user: "everything resets
+    // v0.29.515 — EQUIPMENT-ONLY ASCENSION (per user: "everything resets
     // except equips"). v0.29.406 had made ascension keep all items and coins;
     // that reverted the intended behaviour AND left the confirm dialog above
     // lying — it promises the wallet, bank, consumables, non-gear items,
@@ -46835,20 +46835,20 @@ function offerPrestige() {
     else player._equipBonusCache = null;
     if (typeof _refreshEqEmptyFlag === 'function') _refreshEqEmptyFlag();
     if (typeof refreshGearCache === 'function') refreshGearCache();
-    // v0.29.NEW — the wallet AND the bank. Clearing only the wallet is what
+    // v0.29.515 — the wallet AND the bank. Clearing only the wallet is what
     // made pre-ascension banking a way to carry your fortune through a reset
     // that is supposed to strip everything but gear, so both stores go.
     player.mojicoins = 200;
     player.bankBalance = 0;
     player.consumables = { hp_s: 10, mp_s: 6 };
-    // v0.29.NEW — species kill counts. These gate MojiMon capture at 10,000
+    // v0.29.515 — species kill counts. These gate MojiMon capture at 10,000
     // per species, so leaving them would hand an ascended character instant
     // re-binds on every species already mastered. Safe to clear outright:
     // achievements latch into game.achievements once earned and are never
     // re-tested against this, and Mojidex discovery has its own
     // game.mojidexSeen, so neither is revoked by the wipe.
     game.bestiary = {};
-    // v0.29.NEW — and the roster the kill counts bought.
+    // v0.29.515 — and the roster the kill counts bought.
     player.mojimon = { roster: {}, assigned: null, cdUntil: 0, out: null };
     // v0.25.250 — setshards reset on prestige (fresh crafting economy each ascension).
     player.setshards = 0;
@@ -49885,7 +49885,7 @@ function _lxPreloadMapAssets(id, onProgress, prio) {
         const ico = el.getAttribute('data-sk-ico');
         if (!ico) return;
         const img = new Image(); img.decoding = 'async'; img.onerror = () => {};
-        img.src = 'Sprites/skills/' + ico + '.webp';   // v0.29.NEW — same .png/.webp mismatch; this preload warmed nothing
+        img.src = 'Sprites/skills/' + ico + '.webp';   // v0.29.515 — same .png/.webp mismatch; this preload warmed nothing
         track(img);
       });
     } catch (e) {}
@@ -56943,6 +56943,16 @@ const MOJIMON_KILLS_REQ = 10000;
 const MOJIMON_CD_MS = 300000;          // 5 minutes
 const MOJIMON_UPG = { hp: 0.08, atk: 0.05, def: 0.03 };   // per-point: +8% HP, +5% ATK, +3% damage reduction
 const MOJIMON_DEF_CAP = 0.60;          // DR ceiling — a mon must never be unkillable
+// v0.29.515 — per-stat effective upgrade cap, restored. _mojimonPoints() is
+// floor(level/5) and is NOT bounded, so by level 100 a player can sink 20
+// points into a single stat; unclamped that is +100% ATK and a flat 60% DR,
+// i.e. the mon arrives at the hard ceiling by simply levelling. Points beyond
+// this still allocate (and still respec freely) — they just stop scaling.
+const MOJIMON_UPG_PT_CAP = 15;
+// v0.29.515 — the companion hits for HALF what its owner does. Restored
+// alongside the cap: without it a fielded mon out-damages the player outright
+// at 20 points, which is the "overpowered" case this pair exists to prevent.
+const MOJIMON_ATK_MULT = 0.5;
 const MOJIMON_UPG_STATS = ['hp', 'atk', 'def'];   // v0.29.446 — the only allocatable keys
 function _mojimonEnsure() {
   if (!player.mojimon || typeof player.mojimon !== 'object') player.mojimon = {};
@@ -56989,6 +56999,9 @@ function _mojimonSpent(rec) {
   const u = (rec && rec.upg) || {};
   return (u.hp | 0) + (u.atk | 0) + (u.def | 0);
 }
+// v0.29.515 — one clamp for all three lanes. `| 0` first so a NaN or a string
+// out of an old save reads as 0 rather than poisoning the multiplier.
+function _mmUpgPts(v) { return Math.max(0, Math.min(MOJIMON_UPG_PT_CAP, v | 0)); }
 function _mojimonStatsFor(type) {
   const mm = _mojimonEnsure();
   const u = (mm.roster[type] && mm.roster[type].upg) || { hp: 0, atk: 0, def: 0 };
@@ -57001,9 +57014,11 @@ function _mojimonStatsFor(type) {
     // under 10 max HP); at parity it would have bound for any player under
     // 100 and quietly handed the mon MORE HP than the player, which is the
     // one outcome this change exists to prevent.
-    maxHp: Math.max(1, Math.floor(getMaxHp() * (1 + (u.hp | 0) * MOJIMON_UPG.hp))),
-    atk:   Math.max(8, Math.floor(getAtk() * (1 + (u.atk | 0) * MOJIMON_UPG.atk))),
-    defRed: Math.min(MOJIMON_DEF_CAP, (u.def | 0) * MOJIMON_UPG.def),
+    // v0.29.515 — every stat reads its points through the same clamp, so no
+    // single lane can be pushed past its intended ceiling by levelling alone.
+    maxHp: Math.max(1, Math.floor(getMaxHp() * (1 + _mmUpgPts(u.hp) * MOJIMON_UPG.hp))),
+    atk:   Math.max(8, Math.floor(getAtk() * MOJIMON_ATK_MULT * (1 + _mmUpgPts(u.atk) * MOJIMON_UPG.atk))),
+    defRed: Math.min(MOJIMON_DEF_CAP, _mmUpgPts(u.def) * MOJIMON_UPG.def),
   };
 }
 function _mojimonCapture(m) {
@@ -113167,7 +113182,7 @@ function _skillIconUrl(id) {
     const im = new Image();
     im.onload = () => { _skillIconStatus[id] = 'ok'; };
     im.onerror = () => { _skillIconStatus[id] = 'fail'; };
-    // v0.29.NEW — .webp, not .png. Sprites/skills holds 72 .webp files and
+    // v0.29.515 — .webp, not .png. Sprites/skills holds 72 .webp files and
     // zero .png, so this probe failed for every skill and the bar silently
     // served emoji forever. Silently is the operative word: onerror discards
     // the failure, which is correct for skills that genuinely have no art but
