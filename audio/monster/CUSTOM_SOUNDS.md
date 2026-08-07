@@ -74,13 +74,13 @@ Use these exact ids in the filename (`mob_<id>_die.mp3`):
 
 **Celestial / cosmic:** cherub, seraph, archon, nimbusFox, cosmicMochi
 
-**Block-land:** blockPopo, blockHupo, blockEle, blockRhirhi, blockGary, blockTigreal, legosaurus
+**Block-land:** blockPopo, blockHupo, blockEle, blockRhirhi, blockGary, blockTigreal, blockRexy
 
 **Mechanical (Ticket Rush):** ticketMech, conductorMech, expressTicketMech
 
 **Octopus boss legs:** octoLegPoison, octoLegFreeze, octoLegSkillLock, octoLegStun
 
-**Bosses / named:** king, mushmom, aetherion, gravitos, octobaby, kingKrook, mirrorSelf, fatLizard, fatDragon, sundered_smith, goblinScout, goblinMauler, mayo
+**Bosses / named:** king, mushmom, aetherion, gravitos, octobaby, koopaKing, mirrorSelf, fatLizard, fatDragon, sundered_smith, goblinScout, goblinMauler, mayo
 
 **Story / inner-dimension:** deranged_kuro, future_lyra, potato_uncle, willeo, young_bloodthirsty_vermillion, vigil_vermillion, young_confused_barnaby
 

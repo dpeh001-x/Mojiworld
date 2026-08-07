@@ -1,7 +1,7 @@
 // Gravitos blue-meteor certification. All three of Gravitos's meteor-column
 // attacks (Gravity Crush, Crush Tendrils, Decay Floor) must tag their
 // meteor_warn hazards with _gravBlue so the renderer picks p_meteor_blue +
-// meteor_marker_blue. Non-Gravitos meteors (mage skill, zodiac, krook) stay red.
+// meteor_marker_blue. Non-Gravitos meteors (mage skill, zodiac, koopa) stay red.
 import { chromium } from 'playwright-core';
 const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const URL = 'http://localhost:8080/mojiworld_game.html';

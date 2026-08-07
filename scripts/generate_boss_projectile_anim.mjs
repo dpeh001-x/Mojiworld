@@ -75,9 +75,9 @@ const PROJ = {
   markedShot:   { file: 'p_markedshot.png',   prompt: 'a blazing marked arrow-star (Sagittarius) pointing right — the orange flame trail flickers and licks, the golden target-star reticle pulses and rotates, hot sparks shed.' },
   // v0.26.517 — Mooma boss spore-pod (her signature projectile).
   spore:        { file: 'p_spore.png',         prompt: 'a cute kawaii pink mushroom spore-pod (Mooma) — its chubby round body gently squishes and breathes, the domed cap bobs and wobbles softly, its rosy cheeks and happy face stay adorable, a soft pink glow pulses brighter and dimmer, and a few sparkly heart-shaped spore motes puff and drift off it cheerfully.' },
-  // v0.26.518 — King Krook firebomb. Base is m_firebomb.webp; output frames
+  // v0.26.518 — King Koopaloo firebomb. Base is m_firebomb.webp; output frames
   // land at anim/firebomb_*.webp (key-named) to match the engine skill 'firebomb'.
-  firebomb:     { file: 'm_firebomb.webp',      prompt: 'an explosive fire-bomb (King Krook) — the molten orange-red core pulses and flares brighter and dimmer, flame licks flicker around the casing, hot embers and sparks shed and a heat-haze shimmers off it.' },
+  firebomb:     { file: 'm_firebomb.webp',      prompt: 'an explosive fire-bomb (King Koopaloo) — the molten orange-red core pulses and flares brighter and dimmer, flame licks flicker around the casing, hot embers and sparks shed and a heat-haze shimmers off it.' },
   // v0.26.x — Octobaby homing missiles (keys are camelCase to match the engine
   // skill ids octoHead / octoLeg, so frames land at anim/octoHead_*.webp etc.).
   octoHead:     { file: 'p_octohead.png',       prompt: 'an angry octopus-head homing missile (Octobaby) pointing right with a pink jet-trail behind it — the big glaring eye narrows, glances and occasionally blinks, the short curling tentacle wisps wriggle and writhe, the magenta-pink energy jet-trail flickers and pulses, a faint violet glow breathes around the head.' },

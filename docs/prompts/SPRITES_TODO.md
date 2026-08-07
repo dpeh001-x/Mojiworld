@@ -1,6 +1,6 @@
 # Sprites still to generate (snapshot v0.25.498)
 
-> **v0.25.498 update:** 8 sprites previously listed here have shipped — `fatLizard`, `fatDragon`, `octoLegPoison/Freeze/SkillLock/Stun` (monsters), `octobaby` + `kingKrook` (bosses). Loader now accepts `.webp` OR `.png` so the dropped `.png` files load directly without re-encoding. Boss attack-pose sprites for `octobaby` + `kingKrook` are still pending (the renderer falls back to the neutral pose during attack windows until they land).
+> **v0.25.498 update:** 8 sprites previously listed here have shipped — `fatLizard`, `fatDragon`, `octoLegPoison/Freeze/SkillLock/Stun` (monsters), `octobaby` + `koopaKing` (bosses). Loader now accepts `.webp` OR `.png` so the dropped `.png` files load directly without re-encoding. Boss attack-pose sprites for `octobaby` + `koopaKing` are still pending (the renderer falls back to the neutral pose during attack windows until they land).
 
 
 
@@ -53,10 +53,10 @@ Same master style line as monsters; bosses go bigger — **boss-fight intro cuts
 ### `Sprites/bosses/attack/octobaby.webp` — Octobaby attack pose
 > Same character mid-roar — shades knocked slightly askew so one glowing magenta eye burns through the side gap, mouth open showing a small fanged maw, tentacles flexed outward in star pattern, four-coloured status orbs charging at each tentacle tip, full storm-aura behind.
 
-### `Sprites/bosses/kingKrook.webp` — King Krook, the Ember Tyrant
+### `Sprites/bosses/koopaKing.webp` — King Koopaloo, the Ember Tyrant
 > A chunky Bowser-inspired cartoon turtle-dragon king with full boss presence. Massive spiked orange shell with three white-tipped pyramid spikes along the top and a darker burnt-orange inner rim, edges scorched. Tan-yellow belly plate. Chunky green-skinned legs ending in three sharp white claws each, powerful clawed arms. Huge horned head with two forward-curving white horns, a fiery crimson mohawk hair tuft erupting upward in flickering flame-shapes, furrowed brow, big white eyes with intense red pupils and a hot lens-flare on each, wide menacing fanged grin showing two protruding lower-jaw fangs. Royal-villain stance — one fist raised with a small fireball cradled in the palm, the other planted on the hip. Storm-cloud heat aura behind the silhouette, ember sparks orbiting the head. Deep moss-green + burnt-orange palette with crimson, gold, and a single magenta rim-glint for boss-tier polish.
 
-### `Sprites/bosses/attack/kingKrook.webp` — King Krook attack pose
+### `Sprites/bosses/attack/koopaKing.webp` — Koopa King attack pose
 > Same character mid-roar — mouth wide open belching a wide diagonal fireball geyser, eyes glowing pure red, both claws raised, mohawk flames stretched tall, full-body shockwave ember halo.
 
 ---
@@ -92,7 +92,7 @@ Per-skill prompts live in **`SPRITE_DROPIN_PROMPTS.md` §v0.25.488** (lines 144�
 | --- | --- | --- |
 | Monsters | **1** (seahorse) | 42 / 43 |
 | Bosses | **0** | 6 / 6 |
-| Boss attack poses | **2** (octobaby, kingKrook) | 4 / 6 |
+| Boss attack poses | **2** (octobaby, koopaKing) | 4 / 6 |
 | Skill VFX | **52** | 0 / 52 |
 | **Total** | **55** | — |
 

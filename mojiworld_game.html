@@ -9360,7 +9360,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.504';
+const GAME_VERSION = 'v0.29.505';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -33996,6 +33996,15 @@ function applyMaster(masterId) {
   if (m.stats.mp && typeof getMaxMp === 'function') player.mp = getMaxMp();
   if (typeof renderSkillBar === 'function') renderSkillBar();
   showToast(`Mastered ${m.name}!`, 'legendary');
+  // v0.29.505 (per user) — the instant the G skill is learnt, tell the mage
+  // line their new mobility exists. Once per character; staggered behind the
+  // mastery toast so the two reads don't collide.
+  if (player.cls === 'mage' && !player._upWarpNoticeShown) {
+    player._upWarpNoticeShown = true;
+    setTimeout(() => {
+      try { showToast('🌀 Upward Warp unlocked — double-tap ↑ to phase skyward!', 'epic'); } catch (e) {}
+    }, 1600);
+  }
   flash(0.7); addShake(8);
   for (let i = 0; i < 3; i++) {
     const a = (i / 3) * Math.PI * 2;
@@ -56274,6 +56283,17 @@ function _mageUpWarp() {
   if (!player || player.cls !== 'mage' || player.hp <= 0) return;
   const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const _fail = () => { try { if (audio && audio.play) audio.play('fail'); } catch (e) {} };
+  // v0.29.505 (per user) — LOCKED until the G skill is learnt. The warp's
+  // cooldown IS the master-signature skill's, so before a master exists there
+  // is nothing to anchor it to. The gate runs FIRST and returns SILENTLY —
+  // no buzzer, no MP touched — so the gesture gives nothing away before its
+  // one-time unlock announcement in applyMaster.
+  let _cd = 0;
+  try {
+    const kit = skillsForClass(player.cls, player.job, player.master);
+    for (const id in kit) if (kit[id].slot === 'x' && kit[id].cd) { _cd = kit[id].cd; break; }
+  } catch (e) {}
+  if (!_cd) return;   // no G skill learnt — upward warp not yet available
   if ((player._upWarpCdUntil || 0) > now) { _fail(); return; }
   // Mirror castSkill's cost pipeline exactly (mage ×0.80 discount, Overload
   // milestone ×1.5) so the gesture costs the same MP as a keyed warp.
@@ -56281,11 +56301,6 @@ function _mageUpWarp() {
   _cost = Math.ceil(_cost * 0.80);
   if (typeof hasMilestone === 'function' && hasMilestone('overload')) _cost = Math.ceil(_cost * 1.5);
   if (player.mp < _cost) { _fail(); return; }
-  let _cd = 15000;
-  try {
-    const kit = skillsForClass(player.cls, player.job, player.master);
-    for (const id in kit) if (kit[id].slot === 'x' && kit[id].cd) { _cd = kit[id].cd; break; }
-  } catch (e) {}
   player.mp -= _cost;
   spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'blink', { size: 140, life: 22 });
   for (let i = 0; i < 15; i++) { if (!_budgetedParticlePush({ x: player.x + player.w / 2, y: player.y + player.h / 2, vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, life: 25, color: '#aa88ff', size: 3 })) break; }
@@ -103762,7 +103777,17 @@ function _nameplateSprite(label, font, color) {
 //     the sprite's own sy), so any camera translate applies to both.
 //   • Cost: one ellipse fill per visible entity; skipped under veryLowFx.
 //   • LX_ENTITY_SHADOWS = false is the kill switch (LX_AMBIENT_V2 pattern).
-let LX_ENTITY_SHADOWS = (typeof LX_GFX === 'undefined') || LX_GFX.shadows !== false;   // v0.29.431 — Settings > Graphics
+// v0.29.505 â€” per user "shadow eclipse of the monsters should be more vertically
+// squashed". This is the ellipse's vertical radius as a fraction of its
+// horizontal one. It was 0.24, which on a large mob drew a distinctly ROUND
+// pool â€” blockEle measured 43.7 x 10.5 px â€” reading as a ball under the feet
+// rather than a shadow cast along the ground. 0.13 flattens it to a
+// proper ground ellipse. One named constant because the same helper draws the
+// PLAYER's shadow too (drawPlayer + drawMonster are its only callers): a
+// scene where the hero's shadow is rounder than every monster's would read as
+// a bug, so both flatten together and stay in one visual language.
+const LX_SHADOW_RY_RATIO = 0.13;
+  let LX_ENTITY_SHADOWS = (typeof LX_GFX === 'undefined') || LX_GFX.shadows !== false;   // v0.29.431 — Settings > Graphics
 function _lxGroundBelow(wx, w, feetY) {
   const md = (typeof game !== 'undefined' && game) ? game.mapData : null;
   if (!md || !md.platforms) return null;
@@ -103794,7 +103819,7 @@ function _lxDrawBlobShadow(cx, syFeet, feetWorldY, wx, w) {
   ctx.save();
   ctx.fillStyle = 'rgba(0,0,0,' + a.toFixed(3) + ')';
   ctx.beginPath();
-  ctx.ellipse(cx, syFeet + hgt, rx, Math.max(2, rx * 0.24), 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, syFeet + hgt, rx, Math.max(1.5, rx * LX_SHADOW_RY_RATIO), 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
