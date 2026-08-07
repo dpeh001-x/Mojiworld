@@ -1,19 +1,19 @@
 #!/usr/bin/env node
-// HUD stat icons — the three lanes the generated set was missing.
+// HUD stat icons â€” the three lanes the generated set was missing.
 // =============================================================================
 // Sprites/ui/hud/ already carries 16 custom icons (atk, def, acc, crit, jump,
-// dodge, …) but never had HP, MP or SPEED — so the Level-Up cards and the stat
+// dodge, â€¦) but never had HP, MP or SPEED â€” so the Level-Up cards and the stat
 // summary still fell back to emoji, and ACC/Jump rendered as bullet dots.
 // These three complete the set so every stat lane can use one visual language.
 //
 // Same recipe as scripts/generate_ui_icons.mjs (short subject-first prompt +
-// shared style tail — long "cute RPG" prefixes make the sprite model return
+// shared style tail â€” long "cute RPG" prefixes make the sprite model return
 // chibi characters), same 128x128 webp output the other 16 use.
 //
 //   node scripts/gen_hud_stat_icons.mjs                 # dry-run
 //   node scripts/gen_hud_stat_icons.mjs --generate      # writes (skips existing)
 //   flags: --force --only hp,mp --outdir <dir>
-// Needs LUDO_API_KEY (read from the environment — never committed).
+// Needs LUDO_API_KEY (read from the environment â€” never committed).
 // =============================================================================
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
@@ -30,7 +30,7 @@ const arg = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : nu
 const OUT_DIR = arg('--outdir') || join(repoRoot, 'Sprites', 'ui', 'hud');
 const SIZE = 128;
 
-// VERBATIM from generate_ui_icons.mjs — this tail is what keeps the 16
+// VERBATIM from generate_ui_icons.mjs â€” this tail is what keeps the 16
 // existing icons a matched set; do not reword it for these three.
 const SUFFIX = ' game UI icon for a 2D side-scroller, cel-shaded anime style with bold dark outlines, glossy highlights, vibrant saturated colors, single object icon only, centered, no character, no person, no creature, no hands, no text, fully inside the frame with empty margin on all sides, transparent background';
 
@@ -39,6 +39,7 @@ const ICON = {
   hp:    'A glossy bright red heart',
   mp:    'A glossy deep blue teardrop of mana',
   speed: 'A bright yellow lightning bolt',
+  sp:    'A glossy golden five-pointed star',
 };
 
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
