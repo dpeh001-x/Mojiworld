@@ -9345,7 +9345,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.485';
+const GAME_VERSION = 'v0.29.486';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -12669,12 +12669,15 @@ const LX_EQUIP_FILES = {
     'warlord_cuirass', 'worldbreaker_bulwark', 'wraith_shroud',
   ],
 };
-const _LX_EQUIP_CACHE = { weapons: Object.create(null), armors: Object.create(null) };
+// v0.29.486 (perf-pass) — objects -> Maps: the LRU touch (delete+re-add per
+// HIT, 4+ passes/frame) forced V8 dictionary mode; eviction allocated a full
+// Object.keys array. Map keeps insertion order -> LRU semantics identical.
+const _LX_EQUIP_CACHE = { weapons: new Map(), armors: new Map() };
 const _LX_EQUIP_CACHE_MAX = 160;   // v0.29.469 — comfortably above the real catalog
 function _lxEquipSprite(cat, name) {
   const c = _LX_EQUIP_CACHE[cat];
   if (!c || !name) return null;
-  if (c[name] === undefined) {
+  if (!c.has(name)) {
     // v0.29.469 — `name` reaches here straight from a co-op peer's sprite id
     // (format-checked, never membership-checked), and a failed load is cached
     // as an Image too, so 404s are retained exactly like hits. Without a cap a
@@ -12686,20 +12689,19 @@ function _lxEquipSprite(cat, name) {
     // walked the eviction pointer straight through the victim's own equipment,
     // making it blank and re-fetch on a loop. Exactly backwards. The hit path
     // below re-inserts, so anything drawn recently is young.
-    const _ks = Object.keys(c);
-    if (_ks.length >= _LX_EQUIP_CACHE_MAX) delete c[_ks[0]];
+    if (c.size >= _LX_EQUIP_CACHE_MAX) c.delete(c.keys().next().value);
     const img = new Image(); img.decoding = 'async'; img.onerror = () => {};
     img.src = 'Sprites/equipment/' + cat + '/' + name + '.webp';
-    c[name] = img;
+    c.set(name, img);
   }
   else {
     // v0.29.470 — touch on hit: delete + re-set moves this key to the end of
     // the insertion order, which is what makes the eviction above LRU.
-    const _hit = c[name];
-    delete c[name];
-    c[name] = _hit;
+    const _hit = c.get(name);
+    c.delete(name);
+    c.set(name, _hit);
   }
-  return c[name];
+  return c.get(name);
 }
 // ===== T-key "Gear Align" dev overlay (v0.26.x) ============================
 // Browse Sprites/equipment/{weapons,armors}, preview the picked sprite on the
@@ -31446,12 +31448,17 @@ const _LX_CB_RARITY = { common: '#cfd3d8', rare: '#56b4e9', epic: '#cc79a7', leg
 function _lxRarityColor(rarity, standard) {
   return (typeof game !== 'undefined' && game && game._cbRarity && _LX_CB_RARITY[rarity]) || standard;
 }
+// v0.29.486 (perf-pass) — raw-string memo. Two PER-FRAME callers (grid via
+// loop, _computeChibiWeight via drawPlayer) paid storage read + JSON.parse +
+// discarded objects every frame. Parse reused while raw is unchanged; the
+// return stays a fresh spread (defaults are scalar-only — verified).
+let _LX_SET_RAW = null, _LX_SET_PARSED = null;
 function _lxGetSettings() {
   try {
     const raw = localStorage.getItem('LX_SETTINGS');
     if (!raw) return { ...LX_SETTINGS_DEFAULTS };
-    const parsed = JSON.parse(raw);
-    const out = { ...LX_SETTINGS_DEFAULTS, ...parsed };
+    if (raw !== _LX_SET_RAW) { _LX_SET_PARSED = JSON.parse(raw); _LX_SET_RAW = raw; }
+    const out = { ...LX_SETTINGS_DEFAULTS, ..._LX_SET_PARSED };
     // v0.26.1033 — a corrupt/tampered store could override a numeric setting with
     // a non-number; openSettingsModal then called s.scale.toFixed(2) -> throw ->
     // the whole Settings panel wouldn't open. Coerce the numeric fields back to a
@@ -64745,6 +64752,33 @@ function updateMonsters(dt) {
       if (!(m.isBoss || m.boss)) continue;
     }
     if (m.freezeTimer > 0 && (m.isBoss || m.boss)) m.freezeTimer -= dt;   // v0.26.1019 — decay the phantom timer for freeze-immune bosses
+    // v0.29.486 (per user) — EMPOWERED-SWING ARMING + TELEGRAPH. Replaces the
+    // per-contact Math.random() heavy rolls (zodiac 20-40%, generic 15%) with
+    // a readable cycle: arm on a fixed cadence, pulse a ⚡ cue every ~0.75s
+    // while armed, next contact resolves as the heavy (consumed at the
+    // contact handler, which schedules the next arm). Cadences preserve the
+    // old long-run frequency: zodiac 360f scaled by the sign's old proc
+    // chance (clamped 180-480f); other bosses 540f (~ the old 15%). Gravitos
+    // and the Arbiter keep their own authored systems and never arm.
+    if ((m.isBoss || m.boss || m.zodiacBoss) && m.type !== 'gravitos' && m.type !== 'towerArbiter' && !m._octoParent) {
+      if (m._heavyReadyAt === undefined) {
+        const _chance = (m.zodiacBoss && typeof m.heavyHitChance === 'number') ? m.heavyHitChance : (m.zodiacBoss ? 0.20 : 0);
+        m._heavyCadence = m.zodiacBoss ? Math.max(180, Math.min(480, Math.round(360 * 0.20 / Math.max(0.05, _chance)))) : 540;
+        m._heavyReadyAt = (game.time | 0) + m._heavyCadence;
+      }
+      if (!m._heavyArmed && (game.time | 0) >= m._heavyReadyAt) {
+        m._heavyArmed = true;
+        m._heavyCueAt = 0;
+        game.damageNumbers.push({ x: m.x + m.w / 2 - 34, y: m.y - 22, vy: -1.2,
+          text: '⚡ EMPOWERED', life: 45, color: '#ffd24a', size: 14 });
+        if (typeof addShake === 'function') addShake(3);
+      }
+      if (m._heavyArmed && ((game.time | 0) - (m._heavyCueAt | 0)) > 45) {
+        m._heavyCueAt = (game.time | 0);
+        game.damageNumbers.push({ x: m.x + m.w / 2 - 8, y: m.y - 10, vy: -0.8,
+          text: '⚡', life: 28, color: '#ffd24a', size: 16 });
+      }
+    }
     if (m.freezeTimer > 0 && !(m.isBoss || m.boss)) {   // v0.26.458 - bosses freeze-IMMUNE (no AI-skip); v0.26.x audit FIX — was `!m.boss`, but spawned bosses carry `isBoss` (m.boss is always falsy on live instances), so this guard never protected them and the Grand-Hex / freeze-lock exploit on apex bosses like Gravitos was still open. Now checks isBoss.
       m.freezeTimer -= dt;
       m.vx *= 0.85;
@@ -65589,9 +65623,11 @@ function updateMonsters(dt) {
       // signs (Cancer / Leo / Capricorn / Aquarius / Pisces) deal 55-70 %
       // maxHP at 30-40 % proc rate. Other signs fall through to the
       // v0.25.822 defaults (20 % / 50 %).
+      // v0.29.486 (per user) — NO RANDOM SPIKES: the per-contact roll became an
+      // ARMED STATE (see updateMonsters). Armed contact = the heavy; consuming
+      // reschedules the next arm. Same clamp math, zero dice.
       let _zodiacHeavyMelee = false;
-      const _zHeavyChance = (m.zodiacBoss && typeof m.heavyHitChance === 'number') ? m.heavyHitChance : 0.20;
-      if (m.zodiacBoss && Math.random() < _zHeavyChance) _zodiacHeavyMelee = true;
+      if (m.zodiacBoss && m._heavyArmed) { _zodiacHeavyMelee = true; m._heavyArmed = false; m._heavyReadyAt = (game.time | 0) + (m._heavyCadence | 0 || 360); }
       // v0.25.687 — Octobaby tentacles ("legs") hit HARDER than a normal mob
       // on touch. Each leg is an extension of the boss, so contact damage
       // gets a 1.4× multiplier (vs 0.6× normal-mob default) — ~2.3× the
@@ -65745,9 +65781,12 @@ function updateMonsters(dt) {
       // idiom, so DEF still shows and it can never one-shot outright).
       // Gravitos is excluded: his touch already routes through his own
       // phase-banded clamp, and his bands are user-calibrated + test-locked.
+      // v0.29.486 (per user) — de-randomised like the zodiac branch: armed on a
+      // ~9s cadence in updateMonsters, consumed by the next contact.
       if (!_zHeavyPctHit && (m.isBoss || m.boss) && !m.zodiacBoss && m.type !== 'gravitos' &&
-          m.type !== 'towerArbiter' && Math.random() < 0.15) {
+          m.type !== 'towerArbiter' && m._heavyArmed) {
         _zHeavyPctHit = 0.40;
+        m._heavyArmed = false; m._heavyReadyAt = (game.time | 0) + (m._heavyCadence | 0 || 540);
       }
       // v0.26.330 — Gravitos touch used to hard-floor at 34% maxHp HERE,
       // i.e. BEFORE _diffDmg's Lv-80+ ×6 punish — which multiplied every
@@ -97440,6 +97479,12 @@ function drawPlayer() {
 // if no statuses are active.
 function _drawPlayerStatusIcons(sx, sy) {
   if (!player || player.hp <= 0) return;
+  // v0.29.486 (perf-pass) — flag pre-check before allocating (mirrors the
+  // v0.26.244 monster-side fix): a healthy player paid an array per frame.
+  if (!((player.burnTimer | 0) > 0 || (player.frozenTimer | 0) > 0 || (player.freezeTimer | 0) > 0 ||
+        (player._poisonTimer | 0) > 0 || (player._slowTimer | 0) > 0 || (player._iceFloor | 0) > 0 ||
+        (player._electrocuteTimer | 0) > 0 || (player.invulnerable | 0) > 150 ||
+        ((player.hitStun | 0) > 100 && player._lastDamageSource === 'a pothole'))) return;
   const icons = [];
   if ((player.burnTimer    | 0) > 0) icons.push({ emoji:'🔥', tint:'#ff8844' });
   if ((player.frozenTimer  | 0) > 0) icons.push({ emoji:'❄️', tint:'#88ddff' });
