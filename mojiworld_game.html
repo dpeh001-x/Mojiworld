@@ -9385,7 +9385,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.526';
+const GAME_VERSION = 'v0.29.527';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -58379,6 +58379,10 @@ function spawnSmoothSlash(x, y, angle, length, color, opts) {
     life: opts.life || 18, maxLife: opts.life || 18,
     thickness: opts.thickness || 6,
     spread: opts.spread || Math.PI * 0.9,
+    // v0.29.527 — bright tint of the crescent's outer (cutting) edge; the body
+    // fades from fx.color into this along the blade. White reads "hot" for
+    // most palettes; dark/void slashes can pass their own.
+    edgeCol: opts.edgeCol || '#ffffff',
   });
 }
 function spawnSmoothExplosion(x, y, radius, coreCol, edgeCol, opts) {
@@ -58586,38 +58590,87 @@ function drawSmoothFx() {
         ctx.restore();
         continue;
       }
-      // Stacked arcs for a clean energy crescent.
-      // v0.25.60 — wrapped in save/restore. The previous code used
-      // ctx.setTransform(1,0,0,1,0,0) to "undo" the per-fx translate +
-      // rotate, which also nuked the outer HiDPI / camera transform
-      // saved by drawSmoothFx's outer ctx.save(). When 2+ slashes were
-      // alive in the same frame, every slash AFTER the first one
-      // rendered at half the size at the top-left corner — the
-      // "duplicate slash at the top diagonal of the screen" the user
-      // reported on warrior_x (Blade of Calamity, 5 staggered slashes).
+      // v0.29.527 — CRESCENT REDESIGN (per user "improve on the design of ALL the
+      // classes basic attack slash arc"). The old draw was three stroked arcs
+      // of UNIFORM width in 'lighter' — on bright maps the additive white
+      // washed out into the fat featureless band the user screenshotted, with
+      // blunt square arc-ends and no sense of motion. Replaced with:
+      //   • a TAPERED crescent (filled path, razor tips, thick belly) instead
+      //     of uniform-width strokes — the classic blade-arc silhouette;
+      //   • a SWEEP: the crescent is revealed leading-edge-first and the tail
+      //     thins out behind it, so it reads as a swing, not a stamped ring;
+      //   • a thin dark rim (source-over) so it stays crisp on BRIGHT
+      //     backgrounds — the same thick-outline language as the game's art;
+      //     the additive pass is now only the glow, not the body;
+      //   • a radial gradient body: fx.color at the wrist fading to
+      //     fx.edgeCol (white-hot by default) along the cutting edge, plus a
+      //     glint dot racing at the blade tip.
+      // v0.25.60's save/restore lesson kept: never setTransform-reset here.
       const t = 1 - fx.life / fx.maxLife;
-      const grow = 0.6 + t * 0.4;
-      const r = fx.length * grow;
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.translate(sx, fx.y);
-      ctx.rotate(fx.angle);
-      // Outer glow
-      ctx.strokeStyle = fx.color;
-      ctx.globalAlpha = alpha * 0.3;
-      ctx.lineWidth = fx.thickness * 2.5;
-      ctx.beginPath(); ctx.arc(0, 0, r, -fx.spread/2, fx.spread/2); ctx.stroke();
-      // Mid
-      ctx.globalAlpha = alpha * 0.6;
-      ctx.lineWidth = fx.thickness * 1.4;
-      ctx.beginPath(); ctx.arc(0, 0, r, -fx.spread/2 + 0.05, fx.spread/2 - 0.05); ctx.stroke();
-      // Core (white-hot)
-      ctx.strokeStyle = '#ffffff';
-      ctx.globalAlpha = alpha * 0.9;
-      ctx.lineWidth = Math.max(2, fx.thickness * 0.5);
-      ctx.beginPath(); ctx.arc(0, 0, r, -fx.spread/2 + 0.15, fx.spread/2 - 0.15); ctx.stroke();
-      ctx.restore();
-      ctx.globalCompositeOperation = 'source-over';
+      const ease = 1 - Math.pow(1 - t, 2.4);
+      const r = fx.length * (0.62 + ease * 0.38);
+      const halfS = fx.spread / 2;
+      // leading edge covers the whole spread in ~the first 60% of life; the
+      // trailing edge follows it, so late frames are a thinning tail.
+      const leadA = -halfS + fx.spread * Math.min(1, ease * 1.25);
+      const trailA = -halfS + fx.spread * Math.max(0, ease * 1.25 - 0.62);
+      if (leadA - trailA > 0.03) {
+        const thick = fx.thickness * 1.9;
+        ctx.save();
+        ctx.translate(sx, fx.y);
+        ctx.rotate(fx.angle);
+        const N = 14;
+        ctx.beginPath();
+        for (let i = 0; i <= N; i++) {
+          const u = i / N;
+          const a = trailA + (leadA - trailA) * u;
+          const wdt = thick * Math.pow(Math.sin(Math.PI * u), 0.8);   // razor tips
+          const rr = r + wdt * 0.55;
+          if (i === 0) ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
+          else ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+        }
+        for (let i = N; i >= 0; i--) {
+          const u = i / N;
+          const a = trailA + (leadA - trailA) * u;
+          const wdt = thick * Math.pow(Math.sin(Math.PI * u), 0.8);
+          const rr = r - wdt * 0.45;
+          ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+        }
+        ctx.closePath();
+        // dark rim first — the contrast spine that survives bright skies
+        ctx.globalAlpha = alpha * 0.5;
+        ctx.strokeStyle = 'rgba(22,12,42,0.9)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        // body: wrist colour -> hot cutting edge
+        const g = ctx.createRadialGradient(0, 0, Math.max(1, r - thick), 0, 0, r + thick);
+        g.addColorStop(0, fx.color);
+        g.addColorStop(0.55, fx.color);
+        g.addColorStop(1, fx.edgeCol || '#ffffff');
+        ctx.globalAlpha = alpha * 0.92;
+        ctx.fillStyle = g;
+        ctx.fill();
+        // additive glow — the only 'lighter' pass, so the body never washes out
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = alpha * 0.28;
+        ctx.fillStyle = fx.color;
+        ctx.fill();
+        // glint racing at the blade tip
+        ctx.globalAlpha = alpha * 0.85 * (1 - t);
+        ctx.fillStyle = fx.edgeCol || '#ffffff';
+        ctx.beginPath();
+        ctx.arc(Math.cos(leadA) * r, Math.sin(leadA) * r, Math.max(2, thick * 0.28), 0, Math.PI * 2);
+        ctx.fill();
+        // two whisper-thin speedlines trailing the cut
+        ctx.globalAlpha = alpha * 0.22;
+        ctx.strokeStyle = fx.color;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(0, 0, r * 0.9, trailA - 0.22, trailA + 0.12); ctx.stroke();
+        ctx.globalAlpha = alpha * 0.12;
+        ctx.beginPath(); ctx.arc(0, 0, r * 1.06, trailA - 0.3, trailA + 0.06); ctx.stroke();
+        ctx.restore();
+        ctx.globalCompositeOperation = 'source-over';
+      }
     } else if (fx.type === 'explosion') {
       const r = fx.radius;
       if (r < 1) continue;
@@ -58942,7 +58995,7 @@ const SKILL_FNS = {
     // the hit band 10 px above AND below the player's box (performMelee's
     // vertical reach option), so slightly-airborne / low-slung mobs no
     // longer slip under or over the swing. Damage unchanged.
-    performMelee(255, 1.10, { color:'#fff', kb:5, burst:14, basic:true, tall: 10 });
+    performMelee(255, 1.10, { color:'#ffcf5e', kb:5, burst:14, basic:true, tall: 10 });   // v0.29.527 — gold body (NOT a bucket colour: sprites stay off the basic per v0.25.227)
     const cx = player.x + player.w/2, cy = player.y + player.h/2;
     // v0.25.227 — sprite removed per user request. The Z basic attack
     // now reads as the procedural pixelBurst flourish only; the
@@ -59429,7 +59482,7 @@ const SKILL_FNS = {
     // v0.26.410 — playtest found rogue was the weakest overall package (lowest
     // basic DPS + 3rd-lowest EHP); nudged 0.45→0.55 to restore a viable basic
     // floor without re-opening the old 2.5× dominance (backstab stays the burst).
-    const hits = performMelee(160, 0.68, { color:'#ff99ff', burst:6, basic:true });
+    const hits = performMelee(160, 0.68, { color:'#c07bff', burst:6, basic:true });   // v0.29.527 — deeper violet body; edge stays white-hot (non-bucket: no sprite reroute)
     if (hits) {
       // Brief afterimage
       game.afterImages.push({
