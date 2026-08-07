@@ -9385,7 +9385,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.550';
+const GAME_VERSION = 'v0.29.551';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -104081,8 +104081,40 @@ const _LX_FORCE_FEATHER = new Set(['gravitos2star', 'gravitos3star']);
 // frame) while the body still reads as floating/rounded, so the cut shows as
 // a hard slice. Add a key here only after measuring it the same way.
 const _LX_FEATHER_BOTTOM = new Set(['king', 'kingKrook']);
+// v0.29.5xx — TINT BAKE (lag investigation). ctx.filter on the live canvas
+// forces a compositor stall per filtered drawImage; the same filter applied
+// ONCE to an offscreen copy costs that stall exactly once per (image, filter)
+// and the result is cached on the image. drawMonster sets _lxMobTintFilter
+// instead of ctx.filter for the flash/freeze/death tints, and _lxDrawSoft —
+// the single choke point every regular mob blit passes through — swaps in
+// the baked copy. Cleared in drawMonster's restore, so nothing else is hit.
+let _lxMobTintFilter = null;
+function _lxTintBake(img, filterStr) {
+  if (!img || !filterStr) return null;
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  if (!(w > 0 && h > 0)) return null;
+  if (img.complete === false) return null;
+  let bakes = img._lxTintBakes;
+  if (!bakes) bakes = img._lxTintBakes = {};
+  let cv = bakes[filterStr];
+  if (cv !== undefined) return cv;
+  try {
+    cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const g = cv.getContext('2d');
+    g.filter = filterStr;
+    g.drawImage(img, 0, 0);
+    cv._lxNoShrink = true;
+  } catch (e) { cv = null; }
+  bakes[filterStr] = cv;
+  return cv;
+}
 const _LX_FORCED_EDGES = { l: { f: 0.35, a: 0, b: 1 }, r: { f: 0.35, a: 0, b: 1 }, t: { f: 0.35, a: 0, b: 1 } };
 function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
+  if (_lxMobTintFilter && img) {           // v0.29.5xx — baked tint swap
+    const _tb = _lxTintBake(img, _lxMobTintFilter);
+    if (_tb) img = _tb;
+  }
   if (dw == null) { dw = img.width; dh = img.height; }
   let e = _lxEdgesTouched(img);
   // force: fill in any edge the probe missed (partial detections keep their
@@ -104108,14 +104140,22 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
   // frame (hit-squash is a ctx transform, not a size change), so one cached
   // canvas per image collapses the steady state to a single drawImage.
   // Pixel output is byte-identical — it is literally the same composite, reused.
-  const _fkey = Math.ceil(dw) + 'x' + Math.ceil(dh) + (_noTop ? 'T' : '') + ((opts && opts.deep) ? 'D' : '') + ((opts && opts.force) ? 'F' : '') + (_softBottom ? 'B' : '');
+  // v0.29.5xx — lag fix: the cache key was the EXACT ceil'd draw size, but
+  // normal mobs spawn at ±5% random size — five same-type mobs at five sizes
+  // cycling 9 anim frames thrashed the FIFO and rebuilt the composite
+  // (canvas alloc + gradient fills) nearly every frame. The composite is now
+  // BUILT at a 10px-bucketed size and drawn scaled to the requested size —
+  // which the draw call below always did anyway, so the only change is that
+  // the whole size-variance band shares one entry.
+  const _bw = Math.max(14, Math.round(dw / 10) * 10), _bh = Math.max(14, Math.round(dh / 10) * 10);
+  const _fkey = _bw + 'x' + _bh + (_noTop ? 'T' : '') + ((opts && opts.deep) ? 'D' : '') + ((opts && opts.force) ? 'F' : '') + (_softBottom ? 'B' : '');
   // v0.29.x perf — 4-entry FIFO Map (was a single {k,cv} slot). Two same-type
   // mobs at different spawn sizes ping-ponged the slot, rebuilding the
   // composite (canvas + up to 3 gradient fills) every single frame.
   const _fc = img._lxFeatherC;
   if (_fc && _fc.get) { const _hit = _fc.get(_fkey); if (_hit) { c.drawImage(_hit, dx, dy, dw, dh); return; } }
   try {
-    const W2 = Math.ceil(dw), H2 = Math.ceil(dh);
+    const W2 = _bw, H2 = _bh;   // v0.29.5xx — build at the bucketed size (see _fkey)
     // Build into a per-image canvas sized exactly to this draw, so it can be
     // kept; the old shared scratch was grow-only and could not be cached.
     const _own = document.createElement('canvas');
@@ -104148,7 +104188,7 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
     g.globalCompositeOperation = 'source-over';
     let _fm = img._lxFeatherC;
     if (!_fm || !_fm.set) _fm = img._lxFeatherC = new Map();
-    if (_fm.size >= 4) _fm.delete(_fm.keys().next().value);   // FIFO, 4 sizes per image is plenty
+    if (_fm.size >= 8) _fm.delete(_fm.keys().next().value);   // v0.29.5xx — FIFO 4 -> 8: bucketing collapses most churn; 8 absorbs the rest
     _fm.set(_fkey, _own);
     c.drawImage(_own, 0, 0, W2, H2, dx, dy, dw, dh);
   } catch (err) {
@@ -104934,18 +104974,26 @@ function drawMonster(m) {
   const _didFilterSave = flashOn || freezeOn || m._dying;
   if (_didFilterSave) {
     ctx.save();
+    // v0.29.5xx — lag fix: the tint is resolved to a filter STRING and (for
+    // mobs whose blits funnel through _lxDrawSoft) applied via a one-time
+    // offscreen bake instead of ctx.filter on the live canvas — which stalled
+    // the compositor once per flashing mob per frame; an AOE on a pack paid
+    // it 20x per frame. Sheet-anim mobs draw raw and keep the legacy filter.
+    let _mobTint;
     if (m._dying) {
-      ctx.filter = 'grayscale(1)';
+      _mobTint = 'grayscale(1)';
     } else if (flashOn && freezeOn) {
       // v0.26.x — Per user "make the hue change more subtle": freeze hue-rotate
       // softened 170deg → 60deg (a gentle cool tint instead of a near-
       // complementary colour swing), saturate eased 1.4 → 1.15.
-      ctx.filter = 'brightness(2.0) hue-rotate(60deg) saturate(1.15)';
+      _mobTint = 'brightness(2.0) hue-rotate(60deg) saturate(1.15)';
     } else if (flashOn) {
-      ctx.filter = 'brightness(2.5)';
+      _mobTint = 'brightness(2.5)';
     } else {
-      ctx.filter = 'brightness(0.9) hue-rotate(60deg) saturate(1.1)';
+      _mobTint = 'brightness(0.9) hue-rotate(60deg) saturate(1.1)';
     }
+    if (MONSTER_ANIMS[m.type]) ctx.filter = _mobTint;   // sheet path: raw drawImage, keep filter
+    else _lxMobTintFilter = _mobTint;                   // sprite path: baked swap in _lxDrawSoft
   }
 
   // v0.25.92 — bosses + zodiac now check ludo.ai sprite cache first; fall
@@ -105161,8 +105209,8 @@ function drawMonster(m) {
       // v0.26.x audit FIX — was `if (flashOn)`, so on a burning mob that is
       // ALSO dying (grayscale) or frozen (cool tint) — but not flashing — the
       // orange flame spark drew through that filter and came out desaturated.
-      // Clear the filter whenever the save block set one (_didFilterSave).
-      if (_didFilterSave) ctx.filter = 'none';
+      // Clear the tint whenever the save block set one (_didFilterSave).
+      if (_didFilterSave) { ctx.filter = 'none'; _lxMobTintFilter = null; }
       ctx.fillStyle = _BURN_FLAME_COLORS[(game.time | 0) & 3];
       const fx = sx + Math.random() * m.w;
       const fy = sy + Math.random() * m.h;
@@ -105173,7 +105221,7 @@ function drawMonster(m) {
   }
 
   // v0.26.219 — Gated restore — only fires if we entered the save block.
-  if (_didFilterSave) ctx.restore();
+  if (_didFilterSave) { ctx.restore(); _lxMobTintFilter = null; }
 
   // v0.25.177 — Cast-aura overlay. fireMonsterProjectile stamps
   // m._castFlashT (game.time when fired) + m._castFlashSkill (which
