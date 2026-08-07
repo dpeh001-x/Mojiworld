@@ -9345,7 +9345,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.484';
+const GAME_VERSION = 'v0.29.485';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -56859,7 +56859,12 @@ function _mojimonSummon(type, opts) {
     // v0.29.453 — the mon is the SIZE of the actual species (caps were
     // 90px, squashing anything bigger). Bosses cannot be captured, so the
     // realistic set fits; 140 only fences hypothetical future giants.
-    w: Math.max(24, Math.min(140, (t.w | 0) || 40)), h: Math.max(24, Math.min(140, (t.h | 0) || 40)),
+    // v0.29.480 — TRUE species hitbox (per user "the same size as the actual
+    // monster"). The old Math.min(140, …) clamp squashed 5 capturable species
+    // — brinekraken 175x150, glasswindHare 170x150, elderbark / blightElder /
+    // pathsBane 130x150 — so the companion was a different shape from the
+    // creature just bound. Only the 24px floor remains, for missing data.
+    w: Math.max(24, (t.w | 0) || 40), h: Math.max(24, (t.h | 0) || 40),
     type, mojimon: true,
     life: 1e12, maxLife: 1e12,           // no expiry — it lives until defeated or dismissed
     vx: 0, vy: 0, facing: player.facing,
@@ -57038,7 +57043,25 @@ function _mojimonDraw(mn, sx, sy) {
   if (mn.spawn > 0) ctx.globalAlpha = Math.max(0.25, 1 - mn.spawn / 18);
   if (spr) {
     const aw = spr.naturalWidth || 1, ah = spr.naturalHeight || 1;
-    let dh = Math.max(36, Math.min(200, mn.h * 1.1));   // v0.29.453 — draw at true species scale (cap was 110)
+    // v0.29.480 — size factor comes from the STATIC sprite, exactly like
+    // drawMonster's refImg. Reading it off the live animation frame pinned
+    // the factor to its 0.85 floor (frames are _lxShrinkFrames-shrunk and
+    // report a smaller _lxOrigLong), rendering the companion 3.4% short of
+    // the wild species — measured 63.75 vs 66 on mushroom.
+    const _refImg = ((typeof MONSTER_SPRITES === 'object' && MONSTER_SPRITES[mn.type]) || spr);
+    const _srcLong = (_refImg && _refImg._lxOrigLong) ||
+      Math.max((_refImg && (_refImg.naturalWidth || _refImg.width)) || aw,
+               (_refImg && (_refImg.naturalHeight || _refImg.height)) || ah);
+    const _sf = Math.max(0.85, Math.min(1.20, _srcLong / 768));
+    const _ms = (typeof _lxMobScale === 'function') ? (_lxMobScale(mn.type) || 1) : 1;
+    // v0.29.480 — the 280 fence existed only because mn.h was clamped to 140.
+    // drawMonster applies no upper fence, so matching the wild species means
+    // dropping it too; the 36px floor stays for undecoded/degenerate art.
+    // _lxWholeSize matches drawMonster's rounding, so the two paths land on
+    // the identical integer rather than drifting a fraction of a pixel apart.
+    let dh = Math.max(36, (typeof _lxWholeSize === 'function' ? _lxWholeSize(mn.h * 1.5 * _sf * _ms) : mn.h * 1.5 * _sf * _ms));
+    mn._visW = (typeof _lxWholeSize === 'function' ? _lxWholeSize(dh * aw / ah) : dh * aw / ah);
+    mn._visH = dh;   // stamped like the wild path, so size is testable
     // v0.29.454 — padded weapon-swing attack frames (fatDragon, forgewight…)
     // hold the body inside a transparent-padded canvas; wild monsters scale
     // the draw box back up via _ATK_FRAME_SCALE so the body keeps its idle
@@ -57065,14 +57088,28 @@ function _mojimonDraw(mn, sx, sy) {
     ctx.translate(_dxA, Math.sin((game.time + mn._bobSeed) * 0.05) * 1.5);
     // v0.29.435 — soft class-coloured under-glow behind the body, then the
     // class-tinted sprite. Together they read as "mine" at a glance.
-    ctx.fillStyle = _mojimonRgba(_mojimonClassColor(), 0.20);   // v0.29.453 — glow up with the tint
-    ctx.beginPath(); ctx.ellipse(0, -_bodyH * 0.45, _bodyW * 0.62, _bodyH * 0.55, 0, 0, Math.PI * 2); ctx.fill();   // v0.29.455 — body-sized, not frame-sized
-    if ((mn.facing | 0) < 0) ctx.scale(-1, 1);
+    // v0.29.480 — the class-coloured under-glow ellipse is REMOVED per user
+    // ("a blue circle around it which I do not want, i just want the monster
+    // tinted"). The tint itself stays; only the halo is gone.
+    // v0.29.480 — transform order now mirrors drawMonster EXACTLY so the
+    // companion inherits the same coordinate and scale edits the wild
+    // species carries: facing XORed with the per-type forced flip, then the
+    // per-(type,state) animation calibration. Size already matched
+    // (v0.29.459); this is the calibration half that was still missing.
+    if (((mn.facing | 0) < 0) !== (typeof _MOB_SPRITE_XFLIP !== 'undefined' && _MOB_SPRITE_XFLIP.has(mn.type))) ctx.scale(-1, 1);
+    if (typeof _lxAnimCalib === 'function') {
+      const _cst = _isAtkFrame ? 'attack' : ((typeof _mobWalking === 'function' && _mobWalking(mn)) ? 'walk' : 'idle');
+      const _ac = _lxAnimCalib(mn.type, _cst);
+      if (_ac && (_ac.s !== 1 || _ac.dx || _ac.dy)) { ctx.translate(_ac.dx * dh, _ac.dy * dh); ctx.scale(_ac.s, _ac.s); }
+    }
     // v0.29.454 — anim frames tint through the per-frame WeakMap cache;
     // the static dex fallback keeps its warm type|class cache. Routing a
     // frame through _mojimonTinted would pin whatever frame came first into
     // that string cache and freeze the animation at one tinted pose.
-    ctx.drawImage(frame ? _mojimonTintedFrame(spr, mn.type) : _mojimonTinted(spr, mn.type), -dw / 2, -dh, dw, dh);
+    // v0.29.480 — per-type Y nudge from the R-key Monster Plant editor, the
+    // same additive offset drawMonster folds into its dyOffset.
+    const _mYOff = (typeof _lxMobYOff === 'function') ? (_lxMobYOff(mn.type) || 0) : 0;
+    ctx.drawImage(frame ? _mojimonTintedFrame(spr, mn.type) : _mojimonTinted(spr, mn.type), -dw / 2, -dh + _mYOff, dw, dh);
   } else {
     ctx.fillStyle = (t && t.color) || '#8fd4ff';
     ctx.fillRect(sx, sy, mn.w, mn.h);
