@@ -9345,7 +9345,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.482';
+const GAME_VERSION = 'v0.29.483';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -34272,9 +34272,56 @@ function _classHpRef() {
     return (c && _CLASS_HP_REF[c]) || 1;
   } catch (_) { return 1; }
 }
+// v0.29.483 — LEVEL-DERIVED GEAR ALLOWANCE (per user "make higher level monsters
+// more threatening than the lower ones on a natural progression curve").
+// _refHpAtLv is meant to model an at-level GEARED character's HP, but the
+// allowance above was a FLAT 1.5 while real shop gear multiplies HP ~1.8x at
+// Lv 20 and ~10x at Lv 90. The anchor therefore drifted from ~1.8x under a
+// real character's bar at Lv 20 to ~12x under it at Lv 90 — monster damage
+// grows linearly in level while player power grows with the tier ladder, so
+// higher-level monsters got RELATIVELY weaker the further you progressed.
+// That is the root cause; see scripts/survivability_vs_spec.mjs for the
+// measurement and scripts/solve_dmg_band.mjs for why re-solving the damage
+// band alone is the wrong fix (it needs x7 at Lv 80 and collapses the
+// warrior's tank identity to 0.83x of the cluster).
+//
+// Values are MEASURED, not guessed: scripts/gen_gear_allowance.mjs equips the
+// loadout the shop would actually sell at each level, across all four classes,
+// and reports gearedHP / ((104 + 23.6L) * _classHpRef()). Sampled on the same
+// level grid as _DMG_BAND_TABLE so the two interpolate on one shared set of
+// breakpoints. RE-RUN IT whenever gear or the tier ladder is retuned —
+// scripts/gear_allowance_test.mjs fails the build if this table drifts, which
+// is the guard that was missing when the flat 1.5 silently went stale.
+//
+// The Lv-100 row is measured at Lv 99 (devSetLevel caps there) against the
+// Lv-99 base; it shares the Lv-99 stat block and T10 gear, so the residual is
+// under 1%. The dip from Lv 90 -> 100 is real: base HP keeps growing while
+// gear stops at T10.
+//
+// NOTE for the follow-up band re-solve: the per-class spread is wide (Lv 90 =
+// warrior 11.6 vs mage 18.1). This table is the 4-class MEAN, which is exact
+// while the neutrality factor below cancels it, but _CLASS_HP_REF itself needs
+// re-deriving at the same time — it was calibrated on NAKED HP ratios (warrior
+// 1.90 / mage 0.62 = 3.06x) whereas geared HP differs by only ~1.96x, which is
+// why the warrior currently measures as the LEAST survivable class rather than
+// the most.
+const _GEAR_ALLOWANCE_TABLE = [
+  [1, 2.996], [5, 2.41], [10, 3.509], [15, 3.022], [20, 2.736], [30, 2.841],
+  [40, 2.566], [50, 4.17], [60, 5.351], [70, 6.735], [80, 10.748], [90, 14.882],
+  [100, 13.735],
+];
+function _refGearAllowance(lv) {
+  const L = Math.max(1, Math.min(100, lv | 0));
+  const T = _GEAR_ALLOWANCE_TABLE;
+  for (let i = 0; i < T.length - 1; i++) {
+    const a = T[i], b = T[i + 1];
+    if (L >= a[0] && L <= b[0]) return a[1] + (b[1] - a[1]) * ((L - a[0]) / (b[0] - a[0]));
+  }
+  return T[T.length - 1][1];
+}
 function _refHpAtLv(lv) {
   const L = Math.max(1, lv | 0);
-  return Math.round((104 + 23.6 * L) * _REF_GEAR_ALLOWANCE * _classHpRef());
+  return Math.round((104 + 23.6 * L) * _refGearAllowance(L) * _classHpRef());
 }
 function _refLoAtLv(lv) {
   const L = Math.max(1, lv | 0);
@@ -34330,6 +34377,16 @@ function _dmgBandPct(lv) {
       break;
     }
   }
+  // v0.29.483 — NEUTRALITY FACTOR. _refHpAtLv now returns the TRUE geared anchor
+  // instead of the flat-1.5 one, which would multiply damage by up to ~10x at
+  // Lv 90 on its own. This cancels that exactly, so this commit is a pure
+  // structural refactor with ZERO gameplay change (asserted by
+  // scripts/gear_allowance_test.mjs). Shaping the difficulty curve is the
+  // NEXT step: re-solve _DMG_BAND_TABLE against the corrected anchor and
+  // DELETE this line — the table then carries the ramp alone, in honest
+  // "fraction of an at-level geared bar" units, and needs gentle values
+  // instead of the x7 the old drifted anchor demanded.
+  p *= _REF_GEAR_ALLOWANCE / _refGearAllowance(L);
   const t = p * _BAND_TOUCH_RATIO;
   return { pFloor: p, pCap: p * _BAND_CAP_RATIO, tFloor: t, tCap: t * _BAND_CAP_RATIO };
 }
