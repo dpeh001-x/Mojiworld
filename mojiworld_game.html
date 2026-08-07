@@ -7641,6 +7641,31 @@ Current ACC: 0
        game-wrapper, covers the canvas during loadMap(). Toggled via
        .on class. -->
   <div id="map-fade-overlay" class=""></div>
+  <!-- v0.29.4xx — AREA TITLE CARD: the map's name, announced on entry. -->
+  <style id="area-title-css">
+    #area-title { position:absolute; left:0; right:0; top:16%; text-align:center;
+      pointer-events:none; z-index:9000; opacity:0; }
+    #area-title .at-name { font-family:'Cinzel','Georgia',serif; font-weight:700;
+      font-size:34px; letter-spacing:0.14em; color:#f5ecd8;
+      text-shadow:0 2px 10px rgba(0,0,0,0.65), 0 0 26px rgba(255,220,140,0.25); }
+    #area-title .at-sub { margin-top:6px; font-size:12px; letter-spacing:0.30em;
+      text-transform:uppercase; color:rgba(255,225,160,0.85);
+      text-shadow:0 1px 6px rgba(0,0,0,0.6); }
+    #area-title .at-rule { width:150px; height:1px; margin:10px auto 0;
+      background:linear-gradient(90deg, transparent, rgba(255,220,140,0.8), transparent); }
+    #area-title.at-show { animation:at-inout 2600ms ease forwards; }
+    @keyframes at-inout {
+      0%   { opacity:0; transform:translateY(10px); }
+      14%  { opacity:1; transform:translateY(0); }
+      78%  { opacity:1; transform:translateY(0); }
+      100% { opacity:0; transform:translateY(-6px); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #area-title.at-show { animation:at-fade 2600ms ease forwards; }
+      @keyframes at-fade { 0%{opacity:0} 14%{opacity:1} 78%{opacity:1} 100%{opacity:0} }
+    }
+  </style>
+  <div id="area-title"><div class="at-name"></div><div class="at-rule"></div><div class="at-sub"></div></div>
   <!-- v0.25.794 — Cinematic boss intro overlay. Plays on first
        encounter with each boss (tracked per save). Shows: glyph,
        boss name, title, lore line. Pauses game for ~3.2 s. -->
@@ -9294,7 +9319,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.473';
+const GAME_VERSION = 'v0.29.474';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -50463,6 +50488,7 @@ function loadMap(id, entryX, entryY) {
   // same world state today. Announced once per map per day; the pin stays up
   // for as long as the player is here.
   try {
+    if (typeof _lxAreaTitle === 'function') _lxAreaTitle(id);   // v0.29.4xx — announce the area
     game._mapAffix = _worldAffixFor(id);
     if (game._mapAffix && game._mapAffix.id !== 'none') {
       if (!game._affixSeen) game._affixSeen = {};
@@ -52110,6 +52136,19 @@ function updatePlayer(dt) {
     if (player._stepAccum >= 34) {
       player._stepAccum = 0;
       if (typeof _lxSurfaceStep === 'function') _lxSurfaceStep(0.5);
+      // v0.29.4xx — STRIDE DUST: the visual half of the footstep. One
+      // budgeted mote per step, kicked backward from the trailing foot —
+      // same accumulator as the sound, so sight and sound share the beat.
+      if (!_perfLowFx() && typeof _budgetedParticlePush === 'function') {
+        _budgetedParticlePush({
+          x: player.x + player.w / 2 - Math.sign(player.vx) * 8 + (Math.random() - 0.5) * 4,
+          y: player.y + player.h - 2,
+          vx: -Math.sign(player.vx) * (0.4 + Math.random() * 0.6),
+          vy: -0.5 - Math.random() * 0.7,
+          life: 14 + (Math.random() * 6 | 0), gravity: 0.04,
+          color: Math.random() < 0.34 ? '#efe8da' : '#cfc4ae', size: 2,
+        });
+      }
     }
   } else if (player._stepAccum) {
     // Reset on stop/airborne so the next stride starts on a clean footfall
@@ -84758,6 +84797,31 @@ function showKillToast(expGain, mojicoinGain) {
   host.appendChild(t);
   setTimeout(() => { if (t && t.parentNode) t.parentNode.removeChild(t); }, 3200);
 }
+// =========================================================================
+// v0.29.4xx — AREA TITLE CARD. Announce the map's name on entry: fade in
+// over the top third, hold, fade out (2.6 s total, CSS-driven — zero frame
+// cost). Skipped for: the same map twice in a row (portal ping-pong),
+// boss arenas (the boss intro owns that moment), the void, and the
+// prologue. Sub-line carries the recommended level when the map has one.
+let LX_AREA_TITLE = true;
+function _lxAreaTitle(id) {
+  try {
+    if (!LX_AREA_TITLE || window._prologueActive) return;
+    const md = (typeof MAPS === 'object') ? MAPS[id] : null;
+    if (!md || !md.name || md.isVoid || md.isBossArena) return;
+    if (game._lastAreaCard === id) return;
+    game._lastAreaCard = id;
+    const el = document.getElementById('area-title');
+    if (!el) return;
+    el.querySelector('.at-name').textContent = md.name;
+    const lv = +md.levelReq || 0;
+    el.querySelector('.at-sub').textContent = lv > 1 ? 'Recommended Lv ' + lv : '';
+    el.classList.remove('at-show');
+    void el.offsetWidth;                       // restart the CSS animation
+    el.classList.add('at-show');
+  } catch (e) {}
+}
+
 function showToast(txt, rarity) {
   const t = document.createElement('div');
   t.className = 'toast';
