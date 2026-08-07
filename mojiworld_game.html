@@ -9360,7 +9360,7 @@ The sleeping world is listening.</div>
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.507';
+const GAME_VERSION = 'v0.29.508';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -14834,7 +14834,7 @@ function _lxDominantColor(img, skyStops) {
     // Two passes over the same pixels: `ground` applies both filters, `any`
     // applies neither. If the filtered pass finds too little to be meaningful
     // we use the unfiltered one.
-    const ground = new Map(), any = new Map();
+    const ground = new Map(), lower = new Map();
     const yCut = Math.floor(S * _LX_SKY_CUT);
     const add = (bins, key, r, g, b, sat) => {
       let e = bins.get(key);
@@ -14849,20 +14849,38 @@ function _lxDominantColor(img, skyStops) {
       if (lum < 28 || lum > 232) continue;
       const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
       const sat = mx ? (mx - mn) / mx : 0;
-      add(any, key, r, g, b, sat);
       const py = ((i / 4) / S) | 0;
-      if (py >= yCut && !isSky(r, g, b)) add(ground, key, r, g, b, sat);
+      if (py >= yCut) {
+        add(lower, key, r, g, b, sat);
+        if (!isSky(r, g, b)) add(ground, key, r, g, b, sat);
+      }
     }
-    let total = 0;
+    // v0.29.508 — Per user: "some maps' floor and platform clearly do not
+    // match the main colour of the background". Two-stage fallback.
+    //
+    // `ground` is the strict read: below the sky cut AND not near a declared
+    // sky stop. It is right whenever ground and sky are different hues. But a
+    // MONOCHROME map — magma foundry's red terrain under a red sky, the
+    // glasswind steppes' pale blue under pale blue — has its terrain rejected
+    // as "that is the sky", `ground` starves, and the old code returned null.
+    // The caller then took the per-biome theme, which for any map outside
+    // _pickFloorTheme's short list is 'grass': a lime-green slab on a lava
+    // map. That was the single biggest source of mismatched floors (16 maps).
+    //
+    // So when the chromatic filter starves the sample, drop it and keep the
+    // SPATIAL one: `lower` is the same lower band with no hue rejection. It is
+    // still ground-by-construction, so this is not a return to the old
+    // "dominant colour = the sky" bug — the whole-image bin that caused that
+    // is gone entirely. It just accepts that some maps have ground the same
+    // colour as their sky, which is a fact about the art, not an error.
+    const MIN = S * S * 0.04;
+    let total = 0, lowerTotal = 0;
     for (const e of ground.values()) total += e.n;
-    // Need a real sample to trust it: at least 4% of the thumbnail survived.
-    // If not, return NULL rather than the unfiltered sample — an unfiltered
-    // sample on a sky-dominated backdrop is precisely the sky, which is what
-    // we were asked to stop using. The caller falls through to the authored
-    // per-biome floor theme instead, which is never a sky colour.
-    if (total < S * S * 0.04) { img[_key] = null; return null; }
-    const bins = ground;
-    void any;
+    for (const e of lower.values()) lowerTotal += e.n;
+    const bins = total >= MIN ? ground : (lowerTotal >= MIN ? lower : null);
+    // Genuinely nothing to judge (a fully transparent or blown-out backdrop):
+    // still return null so the caller can use the authored biome theme.
+    if (!bins) { img[_key] = null; return null; }
     let best = null, bestScore = -1;
     for (const e of bins.values()) {
       const score = e.n * (0.35 + 0.65 * (e.sat / e.n));
@@ -14879,6 +14897,14 @@ function _lxDominantColor(img, skyStops) {
 // Cache entries record WHETHER the tint came from the backdrop. One that fell
 // back while the art was still downloading is provisional and gets recomputed,
 // otherwise a map entered on a cold cache would keep the sky colour forever.
+// The map's own authored backdrop, or null. Deliberately NOT _pickBGImage():
+// that one substitutes another map's art when md.bg is unrecognised, which is
+// right for painting a backdrop and wrong for deciding this map's floor hue.
+function _lxOwnBackdrop(md) {
+  if (!md || !md.bg || typeof BG_IMAGES === 'undefined') return null;
+  const img = BG_IMAGES[md.bg];
+  return (img && img._loaded) ? img : null;
+}
 const _MAP_PLATFORM_TINT_CACHE = {};
 function _mapPlatformTint(md) {
   const id = (typeof game !== 'undefined' && game.currentMap) ? game.currentMap : (md && (md.id || md.name)) || 'town';
@@ -14889,7 +14915,7 @@ function _mapPlatformTint(md) {
   let base = null, fromBg = false;
   const sky = (md && md.sky) || null;
   try {
-    const bg = (typeof _pickBGImage === 'function') ? _pickBGImage() : null;
+    const bg = _lxOwnBackdrop(md);
     // v0.29.393 — hand the sky stops to the sampler so it can reject them.
     const dom = bg ? _lxDominantColor(bg, sky) : null;
     if (dom) { base = dom; fromBg = true; }
@@ -14898,7 +14924,7 @@ function _mapPlatformTint(md) {
   // authored biome floor theme, never its sky. Only backdrop-less arenas
   // (sanctum / zodiac / carriage, which paint their own art) fall through to the
   // sky branch below, where the last gradient stop is the least sky-like part.
-  const _hasBg = !!(md && md.bg);
+  const _hasBg = !!_lxOwnBackdrop(md);
   if (!base && _hasBg) {
     const tint = (typeof _pickFloorTheme === 'function'
       ? (_PLATFORM_THEME_TINT[_pickFloorTheme(md)] || _PLATFORM_TINT_DEFAULT)
@@ -91529,9 +91555,7 @@ function drawPlatforms() {
   // the biome floor theme inside _mapPlatformTint.
   const _pt = (game.mapData && !game.mapData.isVoid && typeof _mapPlatformTint === 'function')
     ? _mapPlatformTint(game.mapData)
-    : (typeof _pickFloorTheme === 'function'
-      ? (_PLATFORM_THEME_TINT[_pickFloorTheme(game.mapData)] || _PLATFORM_TINT_DEFAULT)
-      : _PLATFORM_TINT_DEFAULT);
+    : _PLATFORM_TINT_DEFAULT;
   for (const p of game.mapData.platforms) {
     const sx = p.x - game.camera.x;
     if (sx + p.w < 0 || sx > W) continue;
