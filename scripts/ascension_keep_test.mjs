@@ -41,15 +41,22 @@ const RESET = src.slice(a, b);
 // the repairs assign the same literals, so a looser pattern flags itself.
 ok('source: no unconditional inventory wipe', !/^\s*player\.inventory = \[\];/m.test(RESET));
 ok('source: no equipped wholesale rebuild', !/player\.equipped = \{\s*\n\s*weapon:null/.test(RESET));
-ok('source: no unconditional wallet reset', !/^\s*player\.mojicoins = 200;/m.test(RESET));
+// v0.29.510 flipped this contract: ascension now keeps EQUIPMENT ONLY. The
+// wallet AND the bank are cleared together — banking a fortune before
+// ascending was the loophole that made the wallet-only reset meaningless.
+ok('source: wallet IS reset (v0.29.510 intent)', /^\s*player\.mojicoins = 200;/m.test(RESET));
+ok('source: bank cleared with it (no banking loophole)', /^\s*player\.bankBalance = 0;/m.test(RESET));
 ok('source: no unconditional consumables reset', !/^\s*player\.consumables = \{ hp_s: 5, mp_s: 3 \};/m.test(RESET));
 // ...and the repairs must genuinely be conditional, not just reformatted.
-ok('source: inventory repair is guarded', /if \(!Array\.isArray\(player\.inventory\)\) player\.inventory = \[\];/.test(RESET));
-ok('source: wallet repair is guarded', /!isFinite\(player\.mojicoins\)[\s\S]{0,60}player\.mojicoins = 200;/.test(RESET));
+// The inventory is FILTERED to equippable gear, not wiped and not kept whole.
+// 'accessorie' is the legacy misspelling still present in old saves — dropping
+// it from the keep-list would silently destroy real gear.
+ok('source: inventory filtered to gear slots', /player\.inventory = \(Array\.isArray\(player\.inventory\) \? player\.inventory : \[\]\)[\s\S]{0,80}\.filter\(/.test(RESET));
+ok('source: legacy accessorie spelling kept in the gear list', /_ASC_GEAR = \[[^\]]*'accessorie'/.test(RESET));
 ok('source: setshards still reset', /player\.setshards = 0;/.test(RESET));
 // The confirm copy is irreversible-action UI; it must not promise the old behaviour.
 ok('copy: no longer claims gear resets', !src.includes('Your inventory, equipment, and bosses reset.'));
-ok('copy: states items are kept', src.includes('You KEEP your inventory, equipment, consumables and mojicoins'));
+ok('copy: states EQUIPMENT ONLY is kept', src.includes('You KEEP your equipment only'));
 
 // ---------------------------------------------------------------- harness
 const SLOTS = ['weapon','armor','accessory','body_top','body_bottom','cape','gloves','boots','helmet'];
@@ -79,6 +86,10 @@ function fullPlayer(over = {}) {
     { name: 'Dawnbreaker', slot: 'weapon', atk: 420, rarity: 'legendary' },
     { name: 'Aegis of Everdawn', slot: 'armor', def: 310, rarity: 'epic' },
     { name: 'Ring of Nine Suns', slot: 'accessory', atk: 55, rarity: 'legendary' },
+    // non-gear: must NOT survive ascension (v0.29.510). Without these the
+    // filter is never exercised and the test passes on gear-only fixtures.
+    { name: 'Emberwood Log', slot: undefined, qty: 40 },
+    { name: 'Zodiac Sigil: Leo', slot: 'sigil' },
   ];
   return Object.assign({
     cls: 'warrior', level: 50, exp: 9999, expToNext: 1,
@@ -106,19 +117,20 @@ function fullPlayer(over = {}) {
 const freshGame = () => ({ prestige: { count: 3, xpMult: 1.9, dmgMult: 1.9, bonusAP: 3, critBonus: 3, hpBonus: 36 },
                            bossDefeated: { gravitos: true } });
 
-// ------------------------------------------------------- KEEP: items + money
+// --------------------------------------------- KEEP: gear only (v0.29.510)
 {
   const before = fullPlayer();
   const invRef = before.inventory, eqRef = Object.assign({}, before.equipped);
   const { player } = run(before, freshGame());
 
-  eq('inventory kept (contents)', player.inventory.map(i => i.name),
+  eq('inventory keeps gear only', player.inventory.map(i => i.name),
      ['Dawnbreaker', 'Aegis of Everdawn', 'Ring of Nine Suns']);
-  ok('inventory kept (same array identity)', player.inventory === invRef);
+  ok('non-gear dropped (log + sigil)', !player.inventory.some(i => /Emberwood|Sigil/.test(i.name)));
+  ok('inventory is a fresh filtered array', player.inventory !== invRef);
   for (const s of SLOTS) ok(`equipped kept: ${s}`, player.equipped[s] === eqRef[s]);
-  eq('wallet kept', player.mojicoins, 1_250_000);
-  eq('bank kept', player.bankBalance, 8_400_000);
-  eq('consumables kept', player.consumables, { hp_s: 99, mp_s: 74, hp_l: 12 });
+  eq('wallet reset', player.mojicoins, 200);
+  eq('bank cleared (no carry-through)', player.bankBalance, 0);
+  eq('consumables reset', player.consumables, { hp_s: 10, mp_s: 6 });
 
   // derived caches must be rebuilt, since gear now outlives the stat reset
   ok('equip-bonus cache invalidated', player._cacheInvalidated === true);
@@ -176,7 +188,9 @@ const freshGame = () => ({ prestige: { count: 3, xpMult: 1.9, dmgMult: 1.9, bonu
 }
 {
   const { player } = run(fullPlayer({ mojicoins: 0 }), freshGame());
-  eq('zero wallet is legitimate, not repaired', player.mojicoins, 0);
+  // v0.29.510 — no longer a 'repair': the wallet is reset unconditionally,
+  // so a 0 wallet and a 1.25M wallet both land on the same starting 200.
+  eq('zero wallet also resets to 200', player.mojicoins, 200);
 }
 {
   const { player } = run(fullPlayer({ inventory: null }), freshGame());
@@ -197,7 +211,8 @@ const freshGame = () => ({ prestige: { count: 3, xpMult: 1.9, dmgMult: 1.9, bonu
 }
 {
   const { player } = run(fullPlayer({ consumables: null }), freshGame());
-  eq('broken consumables repaired', player.consumables, { hp_s: 5, mp_s: 3 });
+  // v0.29.510 raised the post-ascension starter kit 5/3 -> 10/6.
+  eq('consumables reset to the starter kit', player.consumables, { hp_s: 10, mp_s: 6 });
 }
 {
   // A kept item must not be mutated by the reset.

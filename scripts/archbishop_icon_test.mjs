@@ -1,5 +1,5 @@
 // Verify the two Archbishop skill icons load through the game's own icon path.
-// The skill bar resolves Sprites/skills/<id>.png and silently falls back to the
+// The skill bar resolves Sprites/skills/<id>.webp and silently falls back to the
 // emoji when the file 404s or fails to decode — so a broken icon looks like a
 // design choice rather than an error. This asserts the real load succeeded.
 import { createRequire } from 'node:module';
@@ -37,12 +37,12 @@ const R = await page.evaluate(async () => {
     const im = new Image();
     im.onload = () => resolve({ ok: true, w: im.naturalWidth, h: im.naturalHeight });
     im.onerror = () => resolve({ ok: false });
-    im.src = 'Sprites/skills/' + id + '.png';
+    im.src = 'Sprites/skills/' + id + '.webp';
   });
   for (const id of IDS) {
     const r = await load(id);
-    ok(`${id}.png loads`, r.ok, r.ok ? `${r.w}x${r.h}` : 'failed to load — bar would fall back to the emoji');
-    ok(`${id}.png is 256x256`, r.ok && r.w === 256 && r.h === 256, r.ok ? `${r.w}x${r.h}` : '');
+    ok(`${id}.webp loads`, r.ok, r.ok ? `${r.w}x${r.h}` : 'failed to load — bar would fall back to the emoji');
+    ok(`${id}.webp is 256x256`, r.ok && r.w === 256 && r.h === 256, r.ok ? `${r.w}x${r.h}` : '');
   }
   // the resolver itself must report success, not just the raw <img>
   if (typeof _skillIconUrl === 'function') {

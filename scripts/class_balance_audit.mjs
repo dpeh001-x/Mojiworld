@@ -136,8 +136,17 @@ if (b.rogue.hp <= b.mage.hp) fails.push(`rogue HP (${b.rogue.hp}) must exceed ma
 if (b.archer.hp <= b.mage.hp) fails.push(`archer HP (${b.archer.hp}) must exceed mage HP (${b.mage.hp})`);
 console.log(`  rogue/archer HP above mage       : ${b.rogue.hp > b.mage.hp && b.archer.hp > b.mage.hp ? 'yes' : '*** FAIL ***'} (${b.rogue.hp} / ${b.archer.hp} vs ${b.mage.hp})`);
 if (b.warrior.spd < 2.3 || b.warrior.spd > 2.7) fails.push(`warrior speed ${b.warrior.spd} outside the 2.5±0.2 anchor`);
-if (b.mage.spd < 3.3 || b.mage.spd > 3.7) fails.push(`mage speed ${b.mage.spd} outside the 3.5±0.2 anchor`);
-console.log(`  speed anchors (war 2.5, mage 3.5): ${b.warrior.spd} / ${b.mage.spd}`);
+// v0.29.479 SUPERSEDED the fixed 3.5 mage anchor: per user, "for mage class
+// start with the same speed level as Archer". Asserting the RELATIONSHIP
+// rather than a literal keeps this rule true if either class is retuned —
+// the hardcoded 3.5 went stale the moment that instruction landed.
+// ...and compare the NAKED pace, not the geared one: "starts at archer pace"
+// is about the opening speed. Geared, both classes ride the same hard cap
+// (7.5), so a BIS comparison would pass trivially while the actual starting
+// pace drifted — the first version of this rule made exactly that mistake.
+const nk = data.naked100;
+if (Math.abs(nk.mage.spd - nk.archer.spd) > 0.05) fails.push(`mage naked speed ${nk.mage.spd} should match archer pace ${nk.archer.spd} (v0.29.479)`);
+console.log(`  speed: warrior ${b.warrior.spd} (2.5 anchor) · naked mage ${nk.mage.spd} = naked archer ${nk.archer.spd}`);
 // v0.29.443 (per user) — identity assertions on the wider sheet: the tank owns
 // DEF and pays for it (already: slowest + average ATK); the glass cannon is the
 // least armored; MP belongs to the mage; the acrobat jumps highest.
