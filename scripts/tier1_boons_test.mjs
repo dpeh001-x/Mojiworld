@@ -8,7 +8,7 @@
 // can't boot). What CAN silently rot without a booted client is the
 // three-way contract this file pins:
 //   1. every Tier-1 POWERUPS entry exists, is `unique`, and its id matches
-//      a real icon at Sprites/boons/<id>.png (v0.29.355 bound them);
+//      a real icon at Sprites/boons/<id>.webp (v0.29.355 bound them);
 //   2. every stat the entries write is declared in the player.mods literal
 //      (the `for k in M` reset can only zero keys that exist);
 //   3. every FX key the render sites spawn is registered in LX_FX and its
@@ -49,8 +49,8 @@ for (const [id, meta] of Object.entries(TIER1)) {
 
 console.log('\n== icons on disk (ids bound in v0.29.355) ==');
 for (const id of Object.keys(TIER1)) {
-  const p = path.join(ROOT, 'Sprites', 'boons', id + '.png');
-  check(`Sprites/boons/${id}.png`, fs.existsSync(p) && fs.statSync(p).size > 5000);
+  const p = path.join(ROOT, 'Sprites', 'boons', id + '.webp');
+  check(`Sprites/boons/${id}.webp`, fs.existsSync(p) && fs.statSync(p).size > 5000);
 }
 
 console.log('\n== mods literal declares every stat ==');
@@ -99,8 +99,8 @@ const COMBOS = {
 for (const [key, c] of Object.entries(COMBOS)) {
   const re = new RegExp(`key: '${key}'[\\s\\S]{0,200}pair: \\['${c.pair[0]}', '${c.pair[1]}'\\][\\s\\S]{0,120}art: '${c.art}'`);
   check(`${key}: entry with pair + art`, re.test(src));
-  const p = path.join(ROOT, 'Sprites', 'boons', c.art + '.png');
-  check(`  Sprites/boons/${c.art}.png`, fs.existsSync(p) && fs.statSync(p).size > 5000);
+  const p = path.join(ROOT, 'Sprites', 'boons', c.art + '.webp');
+  check(`  Sprites/boons/${c.art}.webp`, fs.existsSync(p) && fs.statSync(p).size > 5000);
   check(`  hook anchor _activeSynergies.${key}`, src.includes(`_activeSynergies.${key}`));
 }
 check('frost_bloom registered in LX_FX', /frost_bloom:\s*'frost_bloom\.webp'/.test(src));
