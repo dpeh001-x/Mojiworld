@@ -102810,7 +102810,7 @@ const _BOSS_ATK_NOSHRINK = new Set(['sundered_smith', 'gravitos2star', 'gravitos
 // STATIC-sprite path too (not just animation frames), so a stale-cached
 // static from a different art generation (old fill 0.667 vs new 0.585 after
 // the v0.29.100 regen) can't draw the figure 12-14% off next to the frames.
-const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star', 'gravitospunch']);
+const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star', 'gravitospunch', 'gravitossoul']);
 // v0.26.x — Per-type ATTACK-frame size MULTIPLIER, applied on top of the
 // content-normalised size in _drawBossSprite (so the attack pose reads bigger
 // than idle/walk while staying foot-anchored). Distinct from _BOSS_ATK_UNIFORM
@@ -102848,6 +102848,12 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
   // here so the frames + static pose load; idle/walk sets don't exist (the key
   // is only ever active mid-attack).
   'gravitospunch',
+  // v0.29.NEW — Gravitos form-1 SOUL DRAIN cast set (ludo.ai, from the current
+  // form-1 sprite on its exact 1656x1505 canvas). 9 frames at
+  // Sprites/bosses/attack/gravitossoul_0..8.webp, played ONCE across the
+  // pattern's 1900 ms window via _gravitosSoulFrame — the drain finally has a
+  // body performance instead of leaning entirely on the soul-ring burst.
+  'gravitossoul',
   // v0.25.812 — Sundered Smith Lv 45 mini-boss (added in v0.25.809).
   // Authored sprite landed in Sprites/bosses/sundered_smith.webp.
   'sundered_smith',
@@ -103021,6 +103027,23 @@ function _gravitosPunchFrame(m) {
   if (n === 0) return null;
   const _dur = _GRAV_PUNCH_PATTERNS[m.patternState] || 1500;
   const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / _dur));
+  return frames[Math.min(n - 1, Math.floor(t * n))];
+}
+
+// v0.29.NEW — SOUL DRAIN once-through. Same playback model as the punch:
+// driven by m.patternTimer across the pattern's authored 1900 ms window
+// (1500 telegraph + 400 fire/recover), so the arm-raise rides the telegraph
+// and the final converge lands on the HP->1 pulse — instead of the generic
+// 48 ms wall-clock loop replaying the cast ~4x in one window.
+function _gravitosSoulFrame(m) {
+  const frames = BOSS_ATTACK_FRAMES['gravitossoul'];
+  if (!frames) return null;
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);
+  let n = frames._readyN || 0;
+  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
+  frames._readyN = n;
+  if (n === 0) return null;
+  const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / 1900));
   return frames[Math.min(n - 1, Math.floor(t * n))];
 }
 
@@ -105137,6 +105160,12 @@ function drawMonster(m) {
   if (m.type === 'gravitos' && !m._phaseSprite && _GRAV_PUNCH_PATTERNS[m.patternState] && _gravitosPunchFrame(m)) {
     m._gravStarKey = 'gravitospunch';
   }
+  // v0.29.NEW — form-1 SOUL DRAIN set, same override mechanism. Falls through
+  // to the regular attack set until the frames decode. Forms 2/3 keep their
+  // star-set treatment — this art is form-1's silhouette.
+  if (m.type === 'gravitos' && !m._phaseSprite && m.patternState === 'soulDrain' && _gravitosSoulFrame(m)) {
+    m._gravStarKey = 'gravitossoul';
+  }
   const _spriteKey = m._gravStarKey || m._phaseSprite || m.type;
   // v0.26.310 — prefer the 4-frame attack animation when its frames have
   // decoded; otherwise the single static attack pose, then idle.
@@ -105145,6 +105174,7 @@ function drawMonster(m) {
   // player is supposed to read), instead of joining the global clock mid-swing.
   const _bossAttackImg = _bossAttacking
     ? ((_spriteKey === 'gravitospunch' && _gravitosPunchFrame(m))
+       || (_spriteKey === 'gravitossoul' && _gravitosSoulFrame(m))
        || _bossAttackFrame(_spriteKey, m) || BOSS_ATTACK_SPRITES[_spriteKey])
     : null;
   // v0.26.314/322 — when not attacking: walk loop while moving, else idle loop,
