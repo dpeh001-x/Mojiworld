@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.566';
+const GAME_VERSION = 'v0.29.567';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -102957,7 +102957,7 @@ const _BOSS_ATK_NOSHRINK = new Set(['sundered_smith', 'gravitos2star', 'gravitos
 // STATIC-sprite path too (not just animation frames), so a stale-cached
 // static from a different art generation (old fill 0.667 vs new 0.585 after
 // the v0.29.100 regen) can't draw the figure 12-14% off next to the frames.
-const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star', 'gravitospunch']);
+const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star', 'gravitospunch', 'gravitossoul']);   // v0.29.567 — soul set sizes like its siblings
 // v0.26.x — Per-type ATTACK-frame size MULTIPLIER, applied on top of the
 // content-normalised size in _drawBossSprite (so the attack pose reads bigger
 // than idle/walk while staying foot-anchored). Distinct from _BOSS_ATK_UNIFORM
@@ -102995,7 +102995,7 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
   // here so the frames + static pose load; idle/walk sets don't exist (the key
   // is only ever active mid-attack).
   'gravitospunch',
-  // v0.29.560 — Gravitos SOUL set (Sprites/bosses/attack/gravitossoul_0..8).
+  // v0.29.567 — Gravitos SOUL set (Sprites/bosses/attack/gravitossoul_0..8).
   // The art shipped but nothing referenced it, so it never loaded and never
   // drew. Registered here and driven by _gravitosSoulFrame for the CASTER
   // specials — Soul Drain plus form-1's Singularity Collapse and Collapse
@@ -103176,6 +103176,45 @@ function _gravitosPunchFrame(m) {
   const _dur = _GRAV_PUNCH_PATTERNS[m.patternState] || 1500;
   const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / _dur));
   return frames[Math.min(n - 1, Math.floor(t * n))];
+}
+
+// v0.29.567 (per user "wire gravitossoul to more of gravitos special attacks")
+// — the CASTER counterpart to the punch set above. gravitossoul_0..8 shipped
+// unreferenced: nothing loaded it and nothing drew it.
+//
+// It covers the three specials Gravitos performs standing still and channelling,
+// which is exactly what the art shows:
+//   • soulDrain      — the signature HP/MP pulse, on EVERY form. Its window is
+//                      1900 ms end to end, so the 9 frames play once cleanly.
+//   • singularity    — form 1 ONLY. Forms 2/3 already swap to the authored
+//   • collapseRain     gravitos2star / gravitos3star sets; form 1 had no
+//                      dedicated art at all and fell back to the generic
+//                      attack pose. The star sets keep precedence below.
+//
+// The cast windows differ wildly — Singularity can run 20 s waiting on its safe
+// zones — so the playback duration is the TELEGRAPH, not the whole state, and
+// the last frame HOLDS for the remainder. Stretching 9 frames over 20 s would
+// be a slow-motion crawl; holding reads as a sustained channel.
+const _GRAV_SOUL_PATTERNS = { soulDrain: 1900, singularity: 3500, collapseRain: 4000 };
+function _gravitosSoulFrame(m) {
+  const frames = BOSS_ATTACK_FRAMES['gravitossoul'];
+  if (!frames) return null;
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);   // same base as every other boss set
+  let n = frames._readyN || 0;
+  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
+  frames._readyN = n;
+  if (n === 0) return null;                       // undecoded — caller falls back
+  const _dur = _GRAV_SOUL_PATTERNS[m.patternState] || 1900;
+  const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / _dur));
+  return frames[Math.min(n - 1, Math.floor(t * n))];
+}
+// True when THIS mob, in THIS pattern, should use the soul set. Kept beside the
+// frame picker so the two can't drift apart: soulDrain on any form, the two
+// collapse casts on form 1 only (no _phaseSprite === the form-1 art).
+function _gravitosUsesSoul(m) {
+  if (m.type !== 'gravitos' || !_GRAV_SOUL_PATTERNS[m.patternState]) return false;
+  if (m.patternState === 'soulDrain') return true;
+  return !m._phaseSprite;
 }
 
 // === BOSS IDLE ANIMATION (v0.26.314) === optional 4-frame gentle idle loop per
@@ -105291,6 +105330,14 @@ function drawMonster(m) {
   if (m.type === 'gravitos' && !m._phaseSprite && _GRAV_PUNCH_PATTERNS[m.patternState] && _gravitosPunchFrame(m)) {
     m._gravStarKey = 'gravitospunch';
   }
+  // v0.29.567 — SOUL set for the channelled casts (see _gravitosUsesSoul).
+  // Placed AFTER the star block deliberately and guarded on `!m._gravStarKey`,
+  // so a form-2/3 Singularity keeps its authored gravitos2star/3star art and
+  // the soul set only fills the gaps: Soul Drain on every form, and form-1's
+  // Singularity / Collapse Rain, which previously drew the generic attack pose.
+  if (!m._gravStarKey && _gravitosUsesSoul(m) && _gravitosSoulFrame(m)) {
+    m._gravStarKey = 'gravitossoul';
+  }
   const _spriteKey = m._gravStarKey || m._phaseSprite || m.type;
   // v0.26.310 — prefer the 4-frame attack animation when its frames have
   // decoded; otherwise the single static attack pose, then idle.
@@ -105299,6 +105346,7 @@ function drawMonster(m) {
   // player is supposed to read), instead of joining the global clock mid-swing.
   const _bossAttackImg = _bossAttacking
     ? ((_spriteKey === 'gravitospunch' && _gravitosPunchFrame(m))
+       || (_spriteKey === 'gravitossoul' && _gravitosSoulFrame(m))   // v0.29.567 — once-through, then holds
        || _bossAttackFrame(_spriteKey, m) || BOSS_ATTACK_SPRITES[_spriteKey])
     : null;
   // v0.26.314/322 — when not attacking: walk loop while moving, else idle loop,
