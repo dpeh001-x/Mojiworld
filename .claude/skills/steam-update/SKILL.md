@@ -109,7 +109,7 @@ Uploading is outward-facing and irreversible-ish. **Show the user the version,
 commit and depot IDs, and get an explicit yes before running it.**
 
 ```bash
-steamcmd +login <builder_account> +run_app_build "C:\Users\dpeh0\Mojiworld\steam\steam_upload\app_build.vdf" +quit
+_steamcmd\steamcmd.exe +login <builder_account> +run_app_build "C:\Users\dpeh0\Mojiworld\steam\steam_upload\app_build.vdf" +quit
 ```
 
 **The user runs the login themselves.** Never ask for, type, or handle their

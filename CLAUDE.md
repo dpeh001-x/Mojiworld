@@ -262,3 +262,12 @@ Buckets:
 - `Sprites/`, `audio/`, `backgrounds/`, `assets/` — art. Streamed from jsDelivr on the Pages deploy, so their root-relative paths are load-bearing; do not move them.
 - `steam/` — Electron desktop build, `steam/assets/` (store art), `steam/higgsfield/cinematics/` (**runtime**: the game `<video>`-plays 15 of these).
 - `mp/`, `mp-cf/`, `server/` — three independently deployable relay services, each with its own lockfile and deploy target (Render blueprint / Cloudflare Worker / container). They look redundant but are not; merging them breaks live deploys.
+- `_steamcmd/` — the SteamCMD client and every runtime tree it unpacks
+  (`config/`, `logs/`, `userdata/`, `siteserverui/`, `appcache/`, `bin/`,
+  `package/`, `public/`, `steamapps/`, plus ~16 loose DLLs). Gitignored,
+  never committed. It used to self-unpack into the REPO ROOT — 16 loose files
+  and 9 directories that buried the 17 real root entries. Moved wholesale
+  2026-08-10; the client is self-contained so it still runs from here, and
+  the upload command in `.claude/skills/steam-update/SKILL.md` points at
+  `_steamcmd\steamcmd.exe`. **Do not run `steamcmd.exe` from the repo root** —
+  it re-scatters the whole tree. `config/` holds the builder login token.
