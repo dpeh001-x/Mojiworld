@@ -13,6 +13,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "gravitos2": 9,
    "gravitos3star": 9,
    "gravitos3": 9,
+   "gravitoslaser": 9,
    "gravitospunch": 9,
    "gravitossoul": 9,
    "gravitos": 9,
