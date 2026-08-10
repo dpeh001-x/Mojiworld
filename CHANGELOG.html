@@ -121,6 +121,17 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.563 <span class="tag"><span class="pill bug">bug</span> Co-op guests could never progress a kill quest</span></h2>
+<p>Per user &mdash; <em>&ldquo;ensure all these rewards and shared server experiences are debugged&rdquo;.</em> Continuing the co-op reward audit past EXP and mojicoins into <b>progression</b>, and it surfaced a bigger one.</p>
+<p><b><code>tickQuestKill()</code> &mdash; the only function that advances a &ldquo;kill N of X&rdquo; objective &mdash; was called from exactly one place: <code>killMonster()</code>, the HOST&rsquo;s local kill path.</b> The guest&rsquo;s <code>_coopApplyKill</code> awards EXP, mojicoins, bestiary credit, boss credit and Slaughter-Ladder streak &mdash; but never called it. And because every monster on a shared map is host-authoritative (guests send damage; only the host runs <code>killMonster</code>), <b>a guest could not progress a single kill quest for as long as they were in a party.</b></p>
+<div class="callout">
+  <b>Diagnosed by isolation, not inspection.</b> 37 host kills of the quest&rsquo;s exact target species left the objective sitting at <b>0/10</b> &mdash; while <code>game.bestiary</code> counted all 198 kills, proving the frames were arriving and being processed and narrowing it to one missing call. Calling <code>tickQuestKill('snail')</code> by hand then advanced it to 1 instantly, which cleared the quest system itself of suspicion.
+  <br><br>
+  <b>After the fix:</b> 11 real host kills &rarr; progress <b>11</b>, exactly 1:1. In the same run 11 <em>mirage</em> kills (<code>il:1</code>) were correctly ignored rather than double-counting to 22, so the illusion guard the host applies is honoured on the guest too.
+</div>
+<p>The guards mirror the host&rsquo;s line exactly: mirages skipped, expedition runs skipped, and the party-quest direct-tick flag respected when the guest holds the mirror &mdash; so this closes the gap without opening a double-credit path.</p>
+
+
 <h2>v0.29.560 <span class="tag"><span class="pill bug">bug</span> Save loading closes a prototype-pollution hole</span></h2>
 <p>Per user &mdash; <em>&ldquo;ensure that the file save function is all secure&rdquo;.</em> A review of the whole save chain (export &rarr; sign &rarr; import &rarr; verify &rarr; load &rarr; backup &rarr; cloud merge) found the path in good shape, with one real gap.</p>
 <p><b>The finding.</b> <code>JSON.parse('{"__proto__":{&hellip;}}')</code> does <em>not</em> change the parsed object&rsquo;s prototype &mdash; it creates an ordinary own property named <code>__proto__</code>. That is why a hostile save looks inert and survives a <code>JSON.stringify</code> round-trip into storage untouched. The damage lands one line later: <code>loadState</code> does <code>Object.assign(player, s.player)</code>, and <code>Object.assign</code> copies via <code>[[Set]]</code> &mdash; for that key it invokes the inherited setter and <b>replaces the target&rsquo;s prototype with attacker-supplied data</b>. Reproduced in-engine: the prototype was swapped, the injected keys became visible on <code>player</code>, and <code>constructor</code> was clobbered to a string &mdash; persisting across every reload.</p>
