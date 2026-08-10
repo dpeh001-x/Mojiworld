@@ -120,6 +120,21 @@
   <p class="lede">A phased rework layered on top of <code>v0.9.8</code>: save persistence, Web Audio SFX, achievements, daily challenges, respec, prestige, combo milestones, and a moment-to-moment juice pass. Every change lives in <code>mojiworld_game.html</code>. No new assets, no build step.</p>
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
+
+<h2>v0.29.573 <span class="tag"><span class="pill bug">bug</span> The Gravitos intro stops freezing halfway &mdash; the arena bake no longer runs underneath the clip</span></h2>
+<p>Per user &mdash; <em>&ldquo;there is still a big pause during the gravitos initiation video, possibly due to lag&rdquo;.</em> Measured rather than guessed: <code>_warmMapArt('gravitosArena')</code> bakes <b>340 sprite slots</b> and takes <b>~14&ndash;17 seconds</b>.</p>
+<h3>Three timings that never agreed</h3>
+<p><code>loadMap</code> holds its fade for a boss arena at most <b>4,200&nbsp;ms</b>. The prologue then opens the entrance clip <b>500&nbsp;ms</b> after calling <code>loadMap</code>. The bake takes <b>~15,000&nbsp;ms</b>. So the fade released, the clip started, and the bake carried on underneath it. That overlap is arithmetic, not inference &mdash; and it is the pause.</p>
+<p>v0.29.550&rsquo;s preload only ever warmed the <em>network fetch and decode</em> (measured 109&nbsp;ms). The canvas <em>bake</em>, which is the whole cost, still ran from <code>loadMap</code>.</p>
+<h3>What changed</h3>
+<ul>
+  <li><b>The bake moved to the stanzas</b>, chained after the existing preload, where the player is reading and a cover already exists. <code>loadMap</code>&rsquo;s later call then costs nothing: it only queues slots still holding an <code>HTMLImageElement</code>, and a baked slot holds a canvas &mdash; the second pass measures <b>0&nbsp;ms / 0 baked</b>, which is exactly what makes moving it safe.</li>
+  <li><b>The clip never opens over a live bake.</b> The blind 500&nbsp;ms beat is now a wait on the warm-up promise, capped at 6&nbsp;s so a stalled warm-up can never soft-lock the prologue.</li>
+</ul>
+<div class="callout">
+  <b>What this does NOT do, stated plainly.</b> The total bake cost is unchanged &mdash; it is moved, not reduced. Two attempts to break up the long main-thread task were built and measured (chunking the bake pump; then chunking the synchronous post-bake <code>_deriveBossRefHeight</code> pass, which is a 9-frame <code>getImageData</code> sweep per boss key). <b>Neither made a measurable difference</b> &mdash; 13.3&nbsp;s &rarr; 14.7&nbsp;s &rarr; 15.6&nbsp;s, i.e. noise &mdash; so both were <b>dropped rather than shipped</b>: unproven churn in a hot path is worse than none. The remaining long task is real and worth attacking properly; the likely lever is that pre-derive sweep, and it now runs where nothing is animating.
+  <br><br><b>Some of this was self-inflicted:</b> v0.29.567 and v0.29.571 wired two more Gravitos frame sets (<code>gravitossoul</code>, <code>gravitoslaser</code> &mdash; 18 frames at 1656&times;1505) into the arena&rsquo;s bake and pre-derive lists. The stall predates them; they made it worse.
+</div>
 <h2>v0.29.572 — Laser Sweep's wiring restored (third loss), and a guard so the next one fails loudly</h2>
 <p>
   <span class="pill bug">bug</span>

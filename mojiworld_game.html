@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.572';
+const GAME_VERSION = 'v0.29.573';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -33309,12 +33309,23 @@ function applyClass(clsId) {
         // the text; _startPrologue awaits _prologueArenaReady only at the
         // stanzas→arena handoff (usually already resolved by then).
         try {
+          // v0.29.573 — the preload below warms the NETWORK FETCH + DECODE, but the
+          // expensive part is the canvas BAKE in _warmMapArt (340 slots,
+          // measured 16.9 s), and that only ran from loadMap — 500 ms before
+          // the entrance clip. Chained here so it happens under the stanzas,
+          // where the player is reading and a cover already exists. loadMap's
+          // own call then costs nothing: _warmMapArt only queues slots that
+          // are still HTMLImageElement, and a baked slot holds a canvas, so
+          // the second pass measured 0 ms / 0 baked.
           window._prologueArenaReady = Promise.race([
             Promise.allSettled([
               (typeof _lxPreloadMapAssets === 'function') ? _lxPreloadMapAssets('gravitosArena', null, 'high') : null,
               (typeof _warmDecodeRegistries === 'function') ? _warmDecodeRegistries(true) : null,
-            ]),
-            new Promise((r) => setTimeout(r, 15000)),
+            ]).then(() => {
+              try { return (typeof _warmMapArt === 'function') ? _warmMapArt('gravitosArena') : null; }
+              catch (e) { return null; }
+            }),
+            new Promise((r) => setTimeout(r, 26000)),   // cap raised: the bake needs room, and the handoff covers it
           ]);
         } catch (e) { window._prologueArenaReady = null; }
         try { if (typeof _startPrologue === 'function') _startPrologue(); } catch (e) {}
@@ -116501,10 +116512,23 @@ function _prologueApexSegment() {
       window._prologueLastTick = Date.now();
       window._prologueTimer = setInterval(_prologueTick, 250);
     };
-    setTimeout(() => {
+    // v0.29.573 — belt and braces: even with the bake moved to the stanzas, never
+    // open the clip while one is still in flight. The blind 500 ms beat was
+    // what let a 16 s bake run underneath the video; this waits for whatever
+    // is outstanding (capped, so a stalled warm-up can never soft-lock the
+    // prologue) and only then plays.
+    const _playEntry = () => {
       if (!window._prologueActive) return;
       if (typeof _gravitosEntryCutscene === 'function') _gravitosEntryCutscene(_armPrologueFight);
       else _armPrologueFight();
+    };
+    let _entryWent = false;
+    const _entryGo = () => { if (!_entryWent) { _entryWent = true; _playEntry(); } };
+    setTimeout(() => {
+      if (!window._prologueActive) return;
+      const _warm = window._prologueArenaReady || Promise.resolve();
+      _warm.then(_entryGo, _entryGo);
+      setTimeout(_entryGo, 6000);   // absolute cap — the clip always plays
     }, 500);   // small beat so the arena + boss exist behind the overlay first
   } catch (e) {
     try { _prologueFinish(true); } catch (_) {}
