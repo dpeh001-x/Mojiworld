@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.570';
+const GAME_VERSION = 'v0.29.571';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -51030,6 +51030,38 @@ function loadMap(id, entryX, entryY) {
         if (!_spoke && (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen())) game.paused = false;
       }, 300);
     };
+    // v0.29.571 (per user: the intro video freezes halfway) — PREFETCH.
+    // v0.29.550 solved this lag for the PROLOGUE by preloading the entry clip
+    // in _startPrologue, but that is the opening flashforward; this is the
+    // first real walk into the arena, a separate entry point that never
+    // preloaded. The 4.17 MB / 8.06 s clip began a COLD fetch the moment its
+    // overlay opened and stalled partway. Start it now so the 6.08 s dagger
+    // clip covers the fetch — same trick as v0.29.550, now on both paths.
+    // Fail-open: any error just leaves the cutscene building its own <video>.
+    if (!window._prologueEntryPreload) {
+      try {
+        const _ev = document.createElement('video');
+        _ev.preload = 'auto'; _ev.playsInline = true;
+        _ev.src = 'steam/higgsfield/cinematics/clip_gravitos_entry.mp4';
+        _ev.load();
+        window._prologueEntryPreload = _ev;
+      } catch (e) { window._prologueEntryPreload = null; }
+    }
+    // v0.29.571 — absolute soft-lock cap. This chain pauses the game up
+    // front and only unpauses at the end, so a cutscene that never calls back
+    // froze the player out entirely. _startPrologue has carried a cap like
+    // this since v0.29.71; this path had none. 40 s clears the real sequence
+    // (6 s dagger + 8 s entry + the gate beat) several times over, so it only
+    // ever fires on a genuine wedge.
+    setTimeout(() => {
+      if (!game._gravitosCinePlaying) return;
+      game._gravitosCinePlaying = false;
+      for (const _id of ['gravitos-entry-cine', 'prologue-dagger-cine']) {
+        const _o = document.getElementById(_id);
+        if (_o && _o.parentNode) _o.parentNode.removeChild(_o);
+      }
+      if (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen()) game.paused = false;
+    }, 40000);
     const _playEntry = () => _gravitosEntryCutscene(_afterEntry);
     if (typeof _prologueDaggerCutscene === 'function') _prologueDaggerCutscene(_playEntry);
     else _playEntry();
@@ -116659,9 +116691,11 @@ function _gravitosEntryCutscene(onDone) {
   let timer = 0;   // hoisted above finish(): a sync play() throw calls finish() before the bottom declaration (TDZ) and would strand the duck
   _vidDuckBgm();
   const _unduck = () => { if (_ducked) { _ducked = false; try { _vidUnduckBgm(); } catch (e) {} } };
+  let _watch = 0;   // v0.29.571 — stall watchdog handle; cleared in finish()
   const finish = () => {
     if (done) return; done = true;
     if (timer) { clearTimeout(timer); timer = null; }
+    if (_watch) { clearInterval(_watch); _watch = 0; }
     window.removeEventListener('keydown', onKey, true);
     if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
     _unduck();
@@ -116720,8 +116754,29 @@ function _gravitosEntryCutscene(onDone) {
   const sk = ov.querySelector('#grav-entry-skip');
   if (sk) sk.onclick = (e) => { e.stopPropagation(); finish(); };
   window.addEventListener('keydown', onKey, true);
-  // Safety net: the clip is 8s; 11s covers buffering with margin.
-  timer = setTimeout(finish, 11000);
+  // v0.29.571 (per user: the intro freezes halfway) — the old net was a
+  // flat `setTimeout(finish, 11000)` sized as "8 s clip + 3 s buffering", and
+  // it failed in both directions. Stall at 4 s and the player watched a frozen
+  // frame for the remaining 7 s with the game paused behind it; merely START
+  // more than 3 s late and the clip was chopped before its ending.
+  //
+  // Watch actual progress instead. currentTime advancing means the clip is
+  // fine however slow it was to begin, so it is never cut mid-play; currentTime
+  // frozen means the player is staring at a still, so release them straight
+  // away rather than making them wait out a fixed clock. The pre-playback
+  // grace is longer because a cold fetch legitimately sits at 0 for a moment.
+  let _lastT = -1, _lastMove = Date.now(), _rolling = false;
+  _watch = setInterval(() => {
+    if (done) { clearInterval(_watch); _watch = 0; return; }
+    const _t = vid ? (vid.currentTime || 0) : 0;
+    const _now = Date.now();
+    if (_t > _lastT + 0.01) { _lastT = _t; _lastMove = _now; if (_t > 0) _rolling = true; }
+    if ((_now - _lastMove) > (_rolling ? 2500 : 7000)) finish();
+  }, 250);
+  // Absolute backstop only — the watchdog above is what normally ends a bad
+  // clip. Raised 11 s -> 20 s so it can no longer truncate a healthy 8 s clip
+  // that simply started late.
+  timer = setTimeout(finish, 20000);
 }
 // v0.29.93 — GRAVITOS DEFEAT CUTSCENE. Fires the moment the 3rd (Ascendant)
 // form is defeated at the Singularity, just before the epilogue. Two layers,
