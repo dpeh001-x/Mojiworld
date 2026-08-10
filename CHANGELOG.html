@@ -121,6 +121,27 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.565 <span class="tag"><span class="pill polish">polish</span> Five bosses stop paying a warm-up tax nobody was collecting</span></h2>
+<p>Per user &mdash; <em>&ldquo;focus on smoothening the fights and reducing lag for the game even more&rdquo;.</em> The honest headline first: <b>steady-state combat needed no optimisation at all.</b> Profiling a real fight &mdash; 13 live monsters with Gravitos among them, 149 particles, continuous casting &mdash; measured <b>avg 4.3&thinsp;ms, p95 7.3&thinsp;ms, and zero frames over the 16.7&thinsp;ms budget</b>, with no <code>getImageData</code> calls once warm. So rather than shave fractions off frames that already had ~230&thinsp;fps of headroom, this goes after where the time actually is: <b>front-loaded art warm-up</b>, which accounts for every remaining stall.</p>
+<p>Five boss forms were still shipping far above the DPR-2 bake target of 1656&thinsp;px, so every frame got decoded and alpha-scanned at a resolution the engine <em>immediately discarded</em>. Each form was scaled uniformly (lanczos3, webp&nbsp;q95, alphaQuality&nbsp;100):</p>
+<table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0">
+<tr style="text-align:left;opacity:.75"><th>Form</th><th>Before</th><th>After</th><th>Pixels</th></tr>
+<tr><td>aetherion</td><td>2500&times;2000</td><td><b>1656&times;1325</b></td><td>2.28&times; fewer</td></tr>
+<tr><td>aetherion2</td><td>2200&times;1600</td><td><b>1656&times;1204</b></td><td>1.77&times;</td></tr>
+<tr><td>towerSovereign</td><td>2000&times;1587</td><td><b>1656&times;1314</b></td><td>1.46&times;</td></tr>
+<tr><td>king</td><td>1800&times;1400</td><td><b>1656&times;1288</b></td><td>1.18&times;</td></tr>
+<tr><td>sundered_smith</td><td>1800&times;1200</td><td><b>1656&times;1104</b></td><td>1.18&times;</td></tr>
+</table>
+<div class="callout">
+  <b>Measured A/B, both versions in one browser on a cold cache</b> so the scan code and the hardware are identical: <b>3481&thinsp;ms &rarr; 2393&thinsp;ms</b> across the five forms&rsquo; 9 attack frames &mdash; <b>1.45&times; faster, 1.09 seconds of boot stall removed.</b> On disk, 22.6&thinsp;MB &rarr; 15.6&thinsp;MB.
+  <br><br>
+  <b>The correctness question that matters for a shrink is size drift.</b> Bosses are sized from each frame&rsquo;s <em>content fraction</em>, which is scale-invariant &mdash; so a uniform rescale must not move it. Worst measured drift across all five forms: <b>0.096%</b>, sub-pixel at any real draw size. All 142 files verified per-form uniform with alpha intact.
+</div>
+<p>Shipped alongside it, an earlier win from the same investigation: <code>willReadFrequently</code> on the nine canvases the sprite scanners actually read back &mdash; they were living on the GPU, so every <code>getImageData</code> forced a sync and a transfer. Worth ~16% on its own (gravitos 481&rarr;400&thinsp;ms, aetherion 829&rarr;746&thinsp;ms, kingKrook 505&rarr;401&thinsp;ms). The hint was applied <em>only</em> to those nine; the other 54 canvases are draw targets, where it would make things slower.</p>
+<p><b>One boss was deliberately refused.</b> <code>kingKrook</code>&rsquo;s canvases differ per state (idle 1800&times;1400, walk 990&times;770, attack 940&times;731), so a single uniform scale would drift the character <em>between</em> states &mdash; the same defect class as the lich-summon sizing bug. Its content fractions do vary by 14.8%, but that is the taller weapon-raised attack pose, which the NOSHRINK clamp already absorbs, so it is not a live bug &mdash; it just blocks uniform shrinking until the states are rebased onto one canvas.</p>
+<p>Regressions all green: <code>boss_fight_audit</code> PASS (25 bosses, 0 page errors), <code>gravitos_phase_test</code> 28/28, <code>combat_test</code> 10/10, <code>solo_smoke_test</code> 14/14.</p>
+
+
 <h2>v0.29.564 <span class="tag"><span class="pill bug">bug</span> Train PQ credited the wrong quests for co-op guests &mdash; a regression in v0.29.563</span></h2>
 <p>Per user &mdash; <em>&ldquo;ensure that coop play works well for train PQ and expedition&rdquo;.</em> Checking that request found a regression <b>introduced by my own v0.29.563</b>, and it was worse than a simple miss.</p>
 <p>v0.29.563 gave guests kill-quest progress by calling <code>tickQuestKill()</code>. That is right for ordinary hunts but wrong for the three Clockwork train quests: all three are <code>kind:'kill' target:'ticketMech'</code>, and <b><code>tickQuestKill</code> has no map gate</b>. That is precisely why v0.26.343 gave the <em>host</em> a separate map-gated direct-tick path guarded by <code>m._pqDirectTicked</code> &mdash; but that flag is host-side state that never rides the network payload, so the guard I wrote could never fire on a guest.</p>
