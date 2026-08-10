@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.567';
+const GAME_VERSION = 'v0.29.568';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11119,6 +11119,7 @@ const LX_FX = (() => {
     gravitos_blackhole: 'gravitos_blackhole.webp', // Gravitos blackhole pattern
     gravitos_singularity_zone: 'gravitos_singularity_zone.webp', // safe-zone marker
     gravitos_soulring:  'gravitos_soulring.webp',  // Soul Drain telegraph ring
+    gravitos_laserring: 'gravitos_laserring.webp', // v0.29.568 — Laser Sweep charge ring
     gravitos_tendril:   'gravitos_tendril.webp',   // crushTendrils descending tendril
     // v0.26.521 — Lv-50 B-slot ULTIMATE cast VFX (one per master, id
     // `<master>_ult`). Static base art generated to Sprites/fx/<key>.png; the
@@ -69568,6 +69569,16 @@ function bossAI(m, dt, distToPlayer) {
     } else if (m.patternState === 'laser') {
       // LASER SWEEP — charge, paint a warning beam, then fire tracking lasers
       const chargeTime = phase === 3 ? 350 : phase === 2 ? 420 : 500;  // v0.29.391 — P2 telegraph shortens
+      // v0.29.568 — LASER SWEEP charge ring: a runic targeting circle winding
+      // up on the boss, resolving as the volley launches. The caster frames are
+      // pinned to the boss's canvas and scale, so the spectacle lives here.
+      if (!m._laserRingUp) {
+        m._laserRingUp = true;
+        if (typeof spawnSpriteBurst === 'function') {
+          spawnSpriteBurst(m.x + m.w / 2, m.y + m.h / 2, 'gravitos_laserring',
+            { size: Math.max(420, m.w * 3.2), life: Math.round(chargeTime / 16), spin: Math.PI * 0.6 });
+        }
+      }
       if (m.patternTimer < chargeTime) {
         // Charge-up particles swirling into the eye
         if (game.time % 4 === 0) {
@@ -69605,10 +69616,17 @@ function bossAI(m, dt, distToPlayer) {
             addShake(5); flash(0.15);
           }, i * 180);
         }
+        // v0.29.568 — release pulse: tighter counter-spun ring on launch.
+        if (typeof spawnSpriteBurst === 'function') {
+          spawnSpriteBurst(m.x + m.w / 2, m.y + m.h / 2, 'gravitos_laserring',
+            { size: Math.max(260, m.w * 2.0), life: 22, spin: -Math.PI * 1.4 });
+        }
+        if (typeof addShake === 'function') addShake(8);
+        if (typeof flash === 'function') flash(0.22);
         showToast('✦ LASER SWEEP', phase === 3 ? 'legendary' : 'epic');
       }
       const laserDur = chargeTime + (phase === 3 ? 1100 : phase === 2 ? 900 : 700);  // v0.29.391
-      if (m.patternTimer > laserDur) { m.patternState = 'idle'; m.patternTimer = 0; m._laserFired = false; }
+      if (m.patternTimer > laserDur) { m.patternState = 'idle'; m.patternTimer = 0; m._laserFired = false; m._laserRingUp = false; }
     } else if (m.patternState === 'zip') {
       // ZIP — teleport across the map then dive at the player
       if (m.patternTimer < 220 && !m._zipPrep) {
@@ -102957,7 +102975,7 @@ const _BOSS_ATK_NOSHRINK = new Set(['sundered_smith', 'gravitos2star', 'gravitos
 // STATIC-sprite path too (not just animation frames), so a stale-cached
 // static from a different art generation (old fill 0.667 vs new 0.585 after
 // the v0.29.100 regen) can't draw the figure 12-14% off next to the frames.
-const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star', 'gravitospunch', 'gravitossoul']);   // v0.29.567 — soul set sizes like its siblings
+const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star', 'gravitospunch', 'gravitossoul', 'gravitoslaser']);   // v0.29.567 — soul set sizes like its siblings
 // v0.26.x — Per-type ATTACK-frame size MULTIPLIER, applied on top of the
 // content-normalised size in _drawBossSprite (so the attack pose reads bigger
 // than idle/walk while staying foot-anchored). Distinct from _BOSS_ATK_UNIFORM
@@ -103002,6 +103020,9 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
   // Rain, which had no dedicated art of their own (forms 2/3 keep their
   // gravitos2star / gravitos3star sets).
   'gravitossoul',
+  // v0.29.568 — Gravitos form-1 LASER SWEEP caster set. The bolts are game
+  // projectiles (skill 'gravbolt'), so this set is purely the caster's stance.
+  'gravitoslaser',
   // v0.25.812 — Sundered Smith Lv 45 mini-boss (added in v0.25.809).
   // Authored sprite landed in Sprites/bosses/sundered_smith.webp.
   'sundered_smith',
@@ -103215,6 +103236,24 @@ function _gravitosUsesSoul(m) {
   if (m.type !== 'gravitos' || !_GRAV_SOUL_PATTERNS[m.patternState]) return false;
   if (m.patternState === 'soulDrain') return true;
   return !m._phaseSprite;
+}
+
+// v0.29.568 — LASER SWEEP once-through. The pattern's length varies by phase
+// (chargeTime 500/420/350 + tail 700/900/1100), so playback scales to the
+// CURRENT phase; a fixed duration would desync the release from the bolts in
+// two of the three phases.
+const _GRAV_LASER_DUR = { 1: 1200, 2: 1320, 3: 1450 };
+function _gravitosLaserFrame(m) {
+  const frames = BOSS_ATTACK_FRAMES['gravitoslaser'];
+  if (!frames) return null;
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);
+  let n = frames._readyN || 0;
+  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
+  frames._readyN = n;
+  if (n === 0) return null;
+  const _ph = (m.phase | 0) || (m._phaseSprite === 'gravitos3' ? 3 : m._phaseSprite === 'gravitos2' ? 2 : 1);
+  const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / (_GRAV_LASER_DUR[_ph] || 1200)));
+  return frames[Math.min(n - 1, Math.floor(t * n))];
 }
 
 // === BOSS IDLE ANIMATION (v0.26.314) === optional 4-frame gentle idle loop per
@@ -105338,6 +105377,11 @@ function drawMonster(m) {
   if (!m._gravStarKey && _gravitosUsesSoul(m) && _gravitosSoulFrame(m)) {
     m._gravStarKey = 'gravitossoul';
   }
+  // v0.29.568 — form-1 LASER SWEEP set.
+  if (m.type === 'gravitos' && !m._gravStarKey && !m._phaseSprite &&
+      m.patternState === 'laser' && _gravitosLaserFrame(m)) {
+    m._gravStarKey = 'gravitoslaser';
+  }
   const _spriteKey = m._gravStarKey || m._phaseSprite || m.type;
   // v0.26.310 — prefer the 4-frame attack animation when its frames have
   // decoded; otherwise the single static attack pose, then idle.
@@ -105346,6 +105390,7 @@ function drawMonster(m) {
   // player is supposed to read), instead of joining the global clock mid-swing.
   const _bossAttackImg = _bossAttacking
     ? ((_spriteKey === 'gravitospunch' && _gravitosPunchFrame(m))
+       || (_spriteKey === 'gravitoslaser' && _gravitosLaserFrame(m))
        || (_spriteKey === 'gravitossoul' && _gravitosSoulFrame(m))   // v0.29.567 — once-through, then holds
        || _bossAttackFrame(_spriteKey, m) || BOSS_ATTACK_SPRITES[_spriteKey])
     : null;

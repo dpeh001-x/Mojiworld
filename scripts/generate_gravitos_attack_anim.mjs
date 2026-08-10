@@ -54,6 +54,13 @@ const CONTAIN =
   'part at any edge. ONE single connected body; do not duplicate or detach ' +
   'limbs.' + FACING;
 
+// Per user: both sets read as a standing pose with a glow — they "need more
+// action". The punch set is the proof that action is achievable inside the
+// framing rules: it grows 41% -> 59% WIDE mid-swing and still passes, because
+// the growth is a limb extending, not a camera moving. So these prompts push
+// big limb/torso movement while the camera language stays absolute, and the
+// height tolerance is raised per-attack to admit a real pose without loosening
+// the zoom or edge guards (those catch the failure that actually matters).
 const ATTACKS = {
   // LASER SWEEP. The bolts themselves are game projectiles (skill 'gravbolt'),
   // so the sprite must NOT draw a beam — it only plays the caster. That is also
@@ -71,30 +78,54 @@ const ATTACKS = {
   // So the effects come back in force, described as ORBITING and CLINGING
   // rather than radiating, and the shroud for this attack is widened so the
   // energy has room to bloom instead of being shaved to the silhouette.
-  laser:
-    'the full-body dark cosmic robot warrior performs a wide-stance FIRING ' +
-    'POSE, shown head to toe. He plants both feet wide apart, coils back with ' +
-    'his whole torso, then drives forward and flings both arms back from the ' +
-    'recoil, chest out, legs braced. ' +
-    'DRAMATIC ENERGY EFFECTS cling to and orbit his body: brilliant ' +
-    'magenta-pink and violet electricity arcs crackling along his armour ' +
-    'plates and between his shoulders, jagged lightning filaments wrapping his ' +
-    'arms and legs, glowing cyan seams blazing white-hot, a swirling ring of ' +
-    'bright pink energy motes and sparks circling close around his torso, ' +
-    'thin spiral wisps drawn in tight against his silhouette, and hot embers ' +
-    'shedding off his shoulders. The effects intensify frame by frame to a ' +
-    'blazing peak as he fires. ' +
-    'All of this energy stays WRAPPED AROUND HIM like a storm clinging to his ' +
-    'body — it orbits and hugs his outline, it does NOT radiate outward across ' +
-    'the picture. Do NOT draw any beam, ray, laser line, bolt or projectile ' +
-    'leaving his body, and no expanding shockwave or explosion.' + CONTAIN,
+  laser: { key: 'gravitoslaser', tol: 0.25, pad: 0.22, prompt:
+    'the full-body dark cosmic robot warrior fires a shoulder-mounted weapon, ' +
+    'shown head to toe. ONLY HIS ARMS, LEGS AND TORSO MOVE — he pulls both ' +
+    'fists back beside his ribs and turns one shoulder forward, then punches ' +
+    'both arms straight out wide to either side and plants one foot forward, ' +
+    'shoulders squaring off, head level. Big clear limb movement between ' +
+    'frames; his feet stay on the ground line and his head stays at the same ' +
+    'height in every frame. ' +
+    'ENERGY EFFECTS cling to and orbit him: magenta-pink and violet ' +
+    'electricity crackling along his armour plates, jagged filaments wrapping ' +
+    'his arms, cyan seams blazing white-hot, sparks and embers shedding off ' +
+    'his shoulders, building to a blazing peak. All of it WRAPS AROUND HIM ' +
+    'and hugs his outline — it does NOT radiate outward across the picture. ' +
+    'Do NOT draw any beam, ray, laser line, bolt or projectile leaving his ' +
+    'body, and no expanding shockwave or explosion.' + CONTAIN },
+  // Regenerates the GENERIC attack set (Sprites/bosses/attack/gravitos_*), the
+  // one drawn for every pattern without dedicated art — which is most of his
+  // kit, so its stiffness is the most-seen animation on the boss.
+  attack: { key: 'gravitos', tol: 0.25, pad: 0.30, prompt:
+    'the full-body dark cosmic robot warrior throws a HEAVY TWO-FISTED SMASH, ' +
+    'shown head to toe, with BIG dynamic movement between frames. He rears ' +
+    'back and raises both fists high with his torso twisting, then drives them ' +
+    'down and forward in a powerful overhead-to-chest smash, dropping into a ' +
+    'wide braced stance with one leg forward and shoulders low. His silhouette ' +
+    'changes dramatically frame to frame: tall and wound up, then broad and ' +
+    'committed. ' +
+    'Energy clings to him as he swings: cyan and violet power surging along ' +
+    'his armour seams, sparks trailing off his fists, a tight impact flare at ' +
+    'his hands on the strike. All effects HUG his body and follow his limbs — ' +
+    'they do NOT radiate outward across the picture, and there is no ' +
+    'expanding shockwave, no explosion and no projectile.' + CONTAIN },
 };
 
 const attack = arg('--attack') || 'laser';
 if (!ATTACKS[attack]) { console.error(`unknown --attack ${attack}. known: ${Object.keys(ATTACKS).join(', ')}`); process.exit(1); }
-const KEY = `gravitos${attack}`;                       // -> gravitoslaser_0..8.webp
+const KEY = ATTACKS[attack].key || `gravitos${attack}`;
+const TOL = ATTACKS[attack].tol || 0.14;
 const RAW = join(repoRoot, 'scripts', `_tmp_${KEY}_raw`);
-const STATIC_OUT = join(repoRoot, 'Sprites', 'bosses', `${KEY}.webp`);
+// A key that IS an existing boss sprite (gravitos) must never have its static
+// written to Sprites/bosses/<key>.webp — that file is the boss's base sprite
+// and this script's own input. Its attack static belongs in attack/.
+const BASE_TYPES = new Set(['gravitos', 'gravitos2', 'gravitos3']);
+const STATIC_OUT = BASE_TYPES.has(KEY)
+  ? join(OUT_DIR, `${KEY}.webp`)
+  : join(repoRoot, 'Sprites', 'bosses', `${KEY}.webp`);
+// Belt and braces: refuse to run at all if the resolved static would clobber
+// the input sprite.
+if (STATIC_OUT === BASE) { console.error('refusing: static output would overwrite the base sprite'); process.exit(1); }
 
 if (!has('--generate') && !has('--salvage-only')) {
   console.log(`# ${attack} -> Sprites/bosses/attack/${KEY}_0..8.webp + ${KEY}.webp static`);
@@ -145,7 +176,7 @@ function gate(stats, baseM, label, badOut) {
     // CHARACTER SIZE vs the BASE SPRITE — this is the "same character size"
     // guarantee. Height is the stable axis: an attack may fling arms wide
     // (width grows) but a body that gets taller is the sprite rescaling.
-    if (Math.abs(s.bh - baseM.bh) / baseM.bh > 0.14) flag.push('SIZE-DRIFT');
+    if (Math.abs(s.bh - baseM.bh) / baseM.bh > TOL) flag.push('SIZE-DRIFT');
     if (flag.length) { bad++; if (badOut) badOut.add(s.i); }
     console.log(`  ${label} ${s.i}: core ${Math.round(s.bw * 100)}%x${Math.round(s.bh * 100)}% (base ${Math.round(baseM.bh * 100)}%) cx ${s.cx.toFixed(3)}  ${flag.join(' ') || 'ok'}`);
   }
@@ -163,7 +194,7 @@ function gate(stats, baseM, label, badOut) {
 // silhouette; an FX-heavy attack needs room to bloom, so `blur` widens the
 // falloff and `gain` flattens it into a plateau before it fades. Wide enough
 // for a storm around the body, still far short of the frame edges.
-const SHROUD = { laser: { blur: 0.075, gain: 6 }, _default: { blur: 0.04, gain: 4 } };
+const SHROUD = { laser: { blur: 0.075, gain: 6 }, attack: { blur: 0.075, gain: 6 }, _default: { blur: 0.04, gain: 4 } };
 async function shroudMask(frames, cleanIdx, W, H) {
   const cfg = SHROUD[attack] || SHROUD._default;
   const px = W * H, union = Buffer.alloc(px);
@@ -189,7 +220,23 @@ async function shroudMask(frames, cleanIdx, W, H) {
   return mask;
 }
 
+// Armour bbox in PIXELS (dark opaque pixels — bright FX excluded), used by the
+// padded-space scale normalizer.
+async function armourBox(buf) {
+  const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  let minX = info.width, maxX = -1, minY = info.height, maxY = -1;
+  for (let i = 0; i < info.width * info.height; i++) {
+    const lum = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
+    if (data[i * 4 + 3] > 200 && lum < 130) {
+      const x = i % info.width, y = (i / info.width) | 0;
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    }
+  }
+  return { minX, maxX, minY, maxY, h: maxY - minY + 1 };
+}
 const baseMeta = await sharp(BASE).metadata();
+const baseA_px = await armourBox(await readFile(BASE));
 const baseM = await coreMetrics(await readFile(BASE), true);          // armour only
 const baseA = await coreMetrics(await readFile(BASE));                // full alpha
 console.log(`base: ${baseMeta.width}x${baseMeta.height}, core ${Math.round(baseM.bw * 100)}%x${Math.round(baseM.bh * 100)}% cx ${baseM.cx.toFixed(3)}`);
@@ -204,19 +251,20 @@ if (has('--salvage-only')) {
   const key = process.env.LUDO_API_KEY;
   if (!key) { console.error('LUDO_API_KEY required.'); process.exit(1); }
   const API = process.env.LUDO_API_BASE || 'https://api.ludo.ai/api';
-  const PAD = 0.12;
+  // action-heavy sets get more room for flung limbs; cropped back off below
+  const PAD = ATTACKS[attack].pad || 0.12;
   const _padX = Math.round(baseMeta.width * PAD), _padY = Math.round(baseMeta.height * PAD);
   const padded = await sharp(await readFile(BASE))
     .extend({ top: _padY, bottom: _padY, left: _padX, right: _padX, background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
   const padMeta = await sharp(padded).metadata();
   const small = await sharp(padded).resize(940, 940, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
 
-  console.log(`animating ${attack} (eagle, ${FRAMES} frames, frame_size -9, pad 12%)...`);
+  console.log(`animating ${attack} (eagle, ${FRAMES} frames, frame_size -9, pad ${Math.round(PAD * 100)}%)...`);
   const res = await fetch(`${API}/assets/sprite/animate`, {
     method: 'POST', headers: { Authorization: `ApiKey ${key}`, 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(300000),
     body: JSON.stringify({ initial_image: 'data:image/png;base64,' + small.toString('base64'),
-      motion_prompt: ATTACKS[attack], frames: FRAMES, frame_size: -9, model: 'eagle',
+      motion_prompt: ATTACKS[attack].prompt, frames: FRAMES, frame_size: -9, model: 'eagle',
       individual_frames: true, loop: false, image_type: 'sprite' }),
   });
   if (!res.ok) throw new Error(`animate ${res.status}: ${(await res.text()).slice(0, 180)}`);
@@ -233,10 +281,51 @@ if (has('--salvage-only')) {
         cells.push(await sharp(sheet).extract({ left: c * cw, top: r * chh, width: cw, height: chh }).png().toBuffer());
   } else { for (const u of (data.individual_frame_urls || []).slice(0, FRAMES)) cells.push(await grab(u)); }
   if (cells.length < FRAMES) throw new Error(`got ${cells.length} frames`);
-  // Fill-resize to the PADDED canvas, then crop the pad off -> canvas-exact.
-  for (const c of cells) {
-    finals.push(await sharp(await sharp(c).resize(padMeta.width, padMeta.height, { fit: 'fill' }).png().toBuffer())
-      .extract({ left: _padX, top: _padY, width: baseMeta.width, height: baseMeta.height }).png().toBuffer());
+  // Normalize scale IN PADDED SPACE, then crop (see _tmp_pipefix note: a crop
+  // before scale-check amputated zoomed frames' legs and the foot-line anchor
+  // then disguised it). Armour touching any padded edge = the model truncated
+  // the body itself; nothing downstream can repair that, so the frame is
+  // dropped here and the ping-pong builder works with what survives.
+  const baseFootY = _padY + baseA_px.maxY;          // foot line, padded space
+  const baseCX = _padX + (baseA_px.minX + baseA_px.maxX) / 2;
+  for (let ci = 0; ci < cells.length; ci++) {
+    const onPad = await sharp(cells[ci]).resize(padMeta.width, padMeta.height, { fit: 'fill' }).png().toBuffer();
+    const a = await armourBox(onPad);
+    const edge = a.minX <= 4 || a.minY <= 4 || a.maxX >= padMeta.width - 5 || a.maxY >= padMeta.height - 5;
+    if (edge || a.h <= 0) {
+      console.log(`  cell ${ci}: armour truncated at the padded edge — dropped`);
+      finals.push(null);
+      continue;
+    }
+    const k = baseA_px.h / a.h;
+    const nw = Math.max(1, Math.round(padMeta.width * k)), nh = Math.max(1, Math.round(padMeta.height * k));
+    const scaled = await sharp(onPad).resize(nw, nh, { fit: 'fill' }).png().toBuffer();
+    const left = Math.round(baseCX - ((a.minX + a.maxX) / 2) * k);
+    const top = Math.round((baseFootY + 1) - (a.maxY + 1) * k);
+    finals.push(await sharp({ create: { width: padMeta.width, height: padMeta.height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .composite([{ input: scaled, left, top }]).png().toBuffer()
+      .then(b2 => sharp(b2).extract({ left: _padX, top: _padY, width: baseMeta.width, height: baseMeta.height }).png().toBuffer()));
+    console.log(`  cell ${ci}: armour ${Math.round(a.h)}px -> scaled x${k.toFixed(3)}, feet on the base foot line`);
+  }
+  const _distinct = finals.filter(Boolean).length;
+  if (_distinct < 4) {
+    console.error(`only ${_distinct}/9 cells survived the truncation check — a mirrored sequence needs at least 4 distinct poses. Re-roll.`);
+    process.exit(2);
+  }
+  // When cells dropped, rebuild as a MIRROR of the surviving leading run:
+  // wind-up to the last good pose, hold it briefly, recover back down. Every
+  // frame differs from its neighbour except the short peak hold — unlike the
+  // old nearest-neighbour backfill, which once emitted six copies of one frame
+  // and shipped a freeze as an "animation".
+  if (finals.some(f => !f)) {
+    const run = [];
+    for (let ci = 0; ci < finals.length; ci++) { if (!finals[ci]) break; run.push(ci); }
+    console.log(`  rebuilding as mirror of leading run [${run.join(',')}]`);
+    const peak = run[run.length - 1];
+    const order = [...run];
+    while (order.length < FRAMES - (run.length - 1)) order.push(peak);
+    order.push(...run.slice(0, -1).reverse());
+    finals = order.slice(0, FRAMES).map(i => finals[i]);
   }
   await mkdir(RAW, { recursive: true });
   for (let i = 0; i < FRAMES; i++) await writeFile(join(RAW, `raw_${i}.png`), finals[i]);
@@ -250,7 +339,7 @@ const rawBad = new Set();
 let bad = gate(stats, baseM, 'raw', rawBad);
 
 if (bad) {
-  const clean = stats.filter(s => Math.abs(s.bh - baseM.bh) / baseM.bh <= 0.14).map(s => s.i);
+  const clean = stats.filter(s => Math.abs(s.bh - baseM.bh) / baseM.bh <= TOL).map(s => s.i);
   console.log(`\n${bad} frame(s) off — salvaging (shroud: base sprite + punch set + clean frames [${clean.join(', ') || 'none'}])`);
   const mask = await shroudMask(finals, clean, baseMeta.width, baseMeta.height);
   const px = baseMeta.width * baseMeta.height;
