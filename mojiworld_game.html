@@ -51030,38 +51030,6 @@ function loadMap(id, entryX, entryY) {
         if (!_spoke && (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen())) game.paused = false;
       }, 300);
     };
-    // v0.29.571 (per user: the intro video freezes halfway) — PREFETCH.
-    // v0.29.550 solved this lag for the PROLOGUE by preloading the entry clip
-    // in _startPrologue, but that is the opening flashforward; this is the
-    // first real walk into the arena, a separate entry point that never
-    // preloaded. The 4.17 MB / 8.06 s clip began a COLD fetch the moment its
-    // overlay opened and stalled partway. Start it now so the 6.08 s dagger
-    // clip covers the fetch — same trick as v0.29.550, now on both paths.
-    // Fail-open: any error just leaves the cutscene building its own <video>.
-    if (!window._prologueEntryPreload) {
-      try {
-        const _ev = document.createElement('video');
-        _ev.preload = 'auto'; _ev.playsInline = true;
-        _ev.src = 'steam/higgsfield/cinematics/clip_gravitos_entry.mp4';
-        _ev.load();
-        window._prologueEntryPreload = _ev;
-      } catch (e) { window._prologueEntryPreload = null; }
-    }
-    // v0.29.571 — absolute soft-lock cap. This chain pauses the game up
-    // front and only unpauses at the end, so a cutscene that never calls back
-    // froze the player out entirely. _startPrologue has carried a cap like
-    // this since v0.29.71; this path had none. 40 s clears the real sequence
-    // (6 s dagger + 8 s entry + the gate beat) several times over, so it only
-    // ever fires on a genuine wedge.
-    setTimeout(() => {
-      if (!game._gravitosCinePlaying) return;
-      game._gravitosCinePlaying = false;
-      for (const _id of ['gravitos-entry-cine', 'prologue-dagger-cine']) {
-        const _o = document.getElementById(_id);
-        if (_o && _o.parentNode) _o.parentNode.removeChild(_o);
-      }
-      if (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen()) game.paused = false;
-    }, 40000);
     const _playEntry = () => _gravitosEntryCutscene(_afterEntry);
     if (typeof _prologueDaggerCutscene === 'function') _prologueDaggerCutscene(_playEntry);
     else _playEntry();
@@ -103144,7 +103112,7 @@ const _BOSS_ATK_NOSHRINK = new Set(['sundered_smith', 'gravitos2star', 'gravitos
 // STATIC-sprite path too (not just animation frames), so a stale-cached
 // static from a different art generation (old fill 0.667 vs new 0.585 after
 // the v0.29.100 regen) can't draw the figure 12-14% off next to the frames.
-const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star', 'gravitospunch', 'gravitossoul']);   // v0.29.560 — soul set sizes like its siblings
+const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star', 'gravitospunch', 'gravitossoul', 'gravitoslaser']);   // v0.29.560 — soul set sizes like its siblings
 // v0.26.x — Per-type ATTACK-frame size MULTIPLIER, applied on top of the
 // content-normalised size in _drawBossSprite (so the attack pose reads bigger
 // than idle/walk while staying foot-anchored). Distinct from _BOSS_ATK_UNIFORM
@@ -103189,6 +103157,9 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
   // Rain, which had no dedicated art of their own (forms 2/3 keep their
   // gravitos2star / gravitos3star sets).
   'gravitossoul',
+  // v0.29.570 — Gravitos form-1 LASER SWEEP caster set. The bolts are game
+  // projectiles (skill 'gravbolt'), so this set is purely the caster's stance.
+  'gravitoslaser',
   // v0.25.812 — Sundered Smith Lv 45 mini-boss (added in v0.25.809).
   // Authored sprite landed in Sprites/bosses/sundered_smith.webp.
   'sundered_smith',
@@ -103402,6 +103373,24 @@ function _gravitosUsesSoul(m) {
   if (m.type !== 'gravitos' || !_GRAV_SOUL_PATTERNS[m.patternState]) return false;
   if (m.patternState === 'soulDrain') return true;
   return !m._phaseSprite;
+}
+
+// v0.29.570 — LASER SWEEP once-through. The pattern's length varies by phase
+// (chargeTime 500/420/350 + tail 700/900/1100), so playback scales to the
+// CURRENT phase; a fixed duration would desync the release from the bolts in
+// two of the three phases.
+const _GRAV_LASER_DUR = { 1: 1200, 2: 1320, 3: 1450 };
+function _gravitosLaserFrame(m) {
+  const frames = BOSS_ATTACK_FRAMES['gravitoslaser'];
+  if (!frames) return null;
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);
+  let n = frames._readyN || 0;
+  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
+  frames._readyN = n;
+  if (n === 0) return null;
+  const _ph = (m.phase | 0) || (m._phaseSprite === 'gravitos3' ? 3 : m._phaseSprite === 'gravitos2' ? 2 : 1);
+  const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / (_GRAV_LASER_DUR[_ph] || 1200)));
+  return frames[Math.min(n - 1, Math.floor(t * n))];
 }
 
 // === BOSS IDLE ANIMATION (v0.26.314) === optional 4-frame gentle idle loop per
@@ -105525,6 +105514,11 @@ function drawMonster(m) {
   if (!m._gravStarKey && _gravitosUsesSoul(m) && _gravitosSoulFrame(m)) {
     m._gravStarKey = 'gravitossoul';
   }
+  // v0.29.570 — form-1 LASER SWEEP set.
+  if (m.type === 'gravitos' && !m._gravStarKey && !m._phaseSprite &&
+      m.patternState === 'laser' && _gravitosLaserFrame(m)) {
+    m._gravStarKey = 'gravitoslaser';
+  }
   const _spriteKey = m._gravStarKey || m._phaseSprite || m.type;
   // v0.26.310 — prefer the 4-frame attack animation when its frames have
   // decoded; otherwise the single static attack pose, then idle.
@@ -105533,6 +105527,7 @@ function drawMonster(m) {
   // player is supposed to read), instead of joining the global clock mid-swing.
   const _bossAttackImg = _bossAttacking
     ? ((_spriteKey === 'gravitospunch' && _gravitosPunchFrame(m))
+       || (_spriteKey === 'gravitoslaser' && _gravitosLaserFrame(m))
        || (_spriteKey === 'gravitossoul' && _gravitosSoulFrame(m))   // v0.29.560 — once-through, then holds
        || _bossAttackFrame(_spriteKey, m) || BOSS_ATTACK_SPRITES[_spriteKey])
     : null;
@@ -116691,11 +116686,9 @@ function _gravitosEntryCutscene(onDone) {
   let timer = 0;   // hoisted above finish(): a sync play() throw calls finish() before the bottom declaration (TDZ) and would strand the duck
   _vidDuckBgm();
   const _unduck = () => { if (_ducked) { _ducked = false; try { _vidUnduckBgm(); } catch (e) {} } };
-  let _watch = 0;   // v0.29.571 — stall watchdog handle; cleared in finish()
   const finish = () => {
     if (done) return; done = true;
     if (timer) { clearTimeout(timer); timer = null; }
-    if (_watch) { clearInterval(_watch); _watch = 0; }
     window.removeEventListener('keydown', onKey, true);
     if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
     _unduck();
@@ -116754,29 +116747,8 @@ function _gravitosEntryCutscene(onDone) {
   const sk = ov.querySelector('#grav-entry-skip');
   if (sk) sk.onclick = (e) => { e.stopPropagation(); finish(); };
   window.addEventListener('keydown', onKey, true);
-  // v0.29.571 (per user: the intro freezes halfway) — the old net was a
-  // flat `setTimeout(finish, 11000)` sized as "8 s clip + 3 s buffering", and
-  // it failed in both directions. Stall at 4 s and the player watched a frozen
-  // frame for the remaining 7 s with the game paused behind it; merely START
-  // more than 3 s late and the clip was chopped before its ending.
-  //
-  // Watch actual progress instead. currentTime advancing means the clip is
-  // fine however slow it was to begin, so it is never cut mid-play; currentTime
-  // frozen means the player is staring at a still, so release them straight
-  // away rather than making them wait out a fixed clock. The pre-playback
-  // grace is longer because a cold fetch legitimately sits at 0 for a moment.
-  let _lastT = -1, _lastMove = Date.now(), _rolling = false;
-  _watch = setInterval(() => {
-    if (done) { clearInterval(_watch); _watch = 0; return; }
-    const _t = vid ? (vid.currentTime || 0) : 0;
-    const _now = Date.now();
-    if (_t > _lastT + 0.01) { _lastT = _t; _lastMove = _now; if (_t > 0) _rolling = true; }
-    if ((_now - _lastMove) > (_rolling ? 2500 : 7000)) finish();
-  }, 250);
-  // Absolute backstop only — the watchdog above is what normally ends a bad
-  // clip. Raised 11 s -> 20 s so it can no longer truncate a healthy 8 s clip
-  // that simply started late.
-  timer = setTimeout(finish, 20000);
+  // Safety net: the clip is 8s; 11s covers buffering with margin.
+  timer = setTimeout(finish, 11000);
 }
 // v0.29.93 — GRAVITOS DEFEAT CUTSCENE. Fires the moment the 3rd (Ascendant)
 // form is defeated at the Singularity, just before the epilogue. Two layers,

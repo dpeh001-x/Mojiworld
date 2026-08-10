@@ -39,6 +39,18 @@ const out = await page.evaluate(async () => {
     res.set = { total: frames.length, decoded: frames.filter((f) => f && f.complete && f.naturalWidth > 0).length,
       w: frames[0] && frames[0].naturalWidth, h: frames[0] && frames[0].naturalHeight };
   }
+  // the LASER set, same treatment — both must be wired, per user
+  const lframes = BOSS_ATTACK_FRAMES.gravitoslaser;
+  res.laserRegistered = !!lframes;
+  if (lframes) {
+    const t1 = Date.now();
+    while (Date.now() - t1 < 30000) {
+      if (lframes.every((f) => f && f.complete && f.naturalWidth > 0)) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    res.laserSet = { total: lframes.length, decoded: lframes.filter((f) => f && f.complete && f.naturalWidth > 0).length,
+      w: lframes[0] && lframes[0].naturalWidth, h: lframes[0] && lframes[0].naturalHeight };
+  }
   const groundY = ((game.mapData.platforms || []).find((p) => p.type === 'ground') || { y: 480 }).y;
   const t = monsterTypes.gravitos;
   const blits = [];
@@ -54,7 +66,8 @@ const out = await page.evaluate(async () => {
     try { drawMonster(m); } catch (e) { return { err: String(e.message).slice(0, 80) }; }
     ctx.restore();
     const drewSoul = blits.some((im) => im && (frames || []).indexOf(im) >= 0);
-    return { key: m._gravStarKey, drewSoul };
+    const drewLaser = blits.some((im) => im && (lframes || []).indexOf(im) >= 0);
+    return { key: m._gravStarKey, drewSoul, drewLaser };
   };
   res.cases = {
     'soulDrain form1': pick('soulDrain', null),
@@ -65,6 +78,9 @@ const out = await page.evaluate(async () => {
     'singularity form3': pick('singularity', 'gravitos3'),
     'collapseRain form1': pick('collapseRain', null),
     'collapseRain form2': pick('collapseRain', 'gravitos2'),
+    'laser form1': pick('laser', null),
+    'laser form2': pick('laser', 'gravitos2'),
+    'laser form3': pick('laser', 'gravitos3'),
     'crush form1 (punch, unchanged)': pick('crush', null),
     'idle form1 (no override)': pick('idle', null),
   };
@@ -85,6 +101,9 @@ let bad = 0;
 const ck = (c, n, x) => { console.log(`  ${c ? 'PASS' : 'FAIL'}  ${n}${!c && x !== undefined ? ' — ' + JSON.stringify(x) : ''}`); if (!c) bad++; };
 console.log('the set loads at all:');
 ck(out.registered, 'gravitossoul is registered in BOSS_SPRITE_TYPES');
+ck(out.laserRegistered, 'gravitoslaser is registered in BOSS_SPRITE_TYPES');
+if (out.laserSet) ck(out.laserSet.decoded === out.laserSet.total && out.laserSet.total >= 9,
+  `all ${out.laserSet.total} laser frames decode at ${out.laserSet.w}x${out.laserSet.h}`, out.laserSet);
 if (out.set) ck(out.set.decoded === out.set.total && out.set.total >= 9,
   `all ${out.set.total} frames decode at ${out.set.w}x${out.set.h}`, out.set);
 
@@ -93,6 +112,10 @@ const EXPECT = {
   'soulDrain form1': 'gravitossoul', 'soulDrain form2': 'gravitossoul', 'soulDrain form3': 'gravitossoul',
   'singularity form1': 'gravitossoul', 'singularity form2': 'gravitos2star', 'singularity form3': 'gravitos3star',
   'collapseRain form1': 'gravitossoul', 'collapseRain form2': 'gravitos2star',
+  // Laser Sweep is FORM 1 ONLY, per user. Forms 2/3 deliberately fall through
+  // to their phase art — an earlier draft of this test expected all three and
+  // failed correct code.
+  'laser form1': 'gravitoslaser', 'laser form2': null, 'laser form3': null,
   'crush form1 (punch, unchanged)': 'gravitospunch', 'idle form1 (no override)': null,
 };
 for (const [label, want] of Object.entries(EXPECT)) {
@@ -102,6 +125,8 @@ for (const [label, want] of Object.entries(EXPECT)) {
 }
 const soulCases = ['soulDrain form1', 'singularity form1', 'collapseRain form1'];
 ck(soulCases.every((k) => out.cases[k] && out.cases[k].drewSoul), 'a soul frame actually reaches the canvas on those casts');
+ck(out.cases['laser form1'] && out.cases['laser form1'].drewLaser, 'a laser frame actually reaches the canvas on the form-1 sweep');
+ck(['laser form2','laser form3'].every((k) => out.cases[k] && !out.cases[k].drewLaser), 'forms 2/3 do NOT take the laser set (form-1 only, by design)');
 
 console.log('\nonce-through then hold (soulDrain, 1900ms window):');
 const p = out.progression || [];
