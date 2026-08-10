@@ -61,7 +61,10 @@ const out = await page.evaluate(() => {
     quietField:     trial(0, 2, 'groundSlam', false),
     // Deepest tier must STILL suppress it.
     veryLowFx:      trial(1, 0, 'groundSlam', true),
-    // Basic attacks must still not emit the spark.
+    // v0.29.491 INVERTED this: basics were the majority of hits a player
+    // lands and the gate excluded them, so most players never saw the
+    // starbursts at all. Basics now spark too, at 0.78x size / 10-frame
+    // life so a skill impact still reads bigger.
     basicAttack:    trial(0, 2, 'slash', false),
     // Once per frame only, even across many hits in the same frame.
   };
@@ -106,7 +109,7 @@ ok('BOSS FIGHT now shows the class hit spark (this was the reported bug)',
 ok('DENSE PULL (>14 mobs) now shows it too', isHit(out.densePull), out.densePull);
 ok('quiet field still shows it (no regression)', isHit(out.quietField), out.quietField);
 ok('the deepest FX tier STILL suppresses it', Array.isArray(out.veryLowFx) && out.veryLowFx.length === 0, out.veryLowFx);
-ok('basic attacks still emit no class spark', Array.isArray(out.basicAttack) && out.basicAttack.length === 0, out.basicAttack);
+ok('basic attacks ALSO spark now (v0.29.491)', isHit(out.basicAttack), out.basicAttack);
 ok('still coalesced to ONE spark per frame across 30 hits', out.sameFrameSparks === 1, { sparks: out.sameFrameSparks });
 for (const c of ['warrior', 'rogue', 'mage', 'archer'])
   ok(`${c} emits its own hit key`, isHit(out.perClass[c]) && out.perClass[c][0].indexOf('hit_' + c) === 0, out.perClass[c]);
