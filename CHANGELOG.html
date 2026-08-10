@@ -121,6 +121,24 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.564 <span class="tag"><span class="pill bug">bug</span> Train PQ credited the wrong quests for co-op guests &mdash; a regression in v0.29.563</span></h2>
+<p>Per user &mdash; <em>&ldquo;ensure that coop play works well for train PQ and expedition&rdquo;.</em> Checking that request found a regression <b>introduced by my own v0.29.563</b>, and it was worse than a simple miss.</p>
+<p>v0.29.563 gave guests kill-quest progress by calling <code>tickQuestKill()</code>. That is right for ordinary hunts but wrong for the three Clockwork train quests: all three are <code>kind:'kill' target:'ticketMech'</code>, and <b><code>tickQuestKill</code> has no map gate</b>. That is precisely why v0.26.343 gave the <em>host</em> a separate map-gated direct-tick path guarded by <code>m._pqDirectTicked</code> &mdash; but that flag is host-side state that never rides the network payload, so the guard I wrote could never fire on a guest.</p>
+<div class="callout">
+  <b>Measured on the Stage-3 Carriage map</b> (<code>tower</code>), 38 ticket-mech kills, before the fix:
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0">
+  <tr style="text-align:left;opacity:.75"><th>Quest</th><th>Expected</th><th>Actual</th></tr>
+  <tr><td><code>q_pq_carriage</code> (the active stage)</td><td>38</td><td><b>0</b></td></tr>
+  <tr><td><code>q_clockwork_underpass</code></td><td>0</td><td><b>38</b></td></tr>
+  <tr><td><code>q_clockwork_express</code></td><td>0</td><td><b>38</b></td></tr>
+  </table>
+  It credited the two <em>wrong</em> quests and missed the right one entirely.
+</div>
+<p><b>The fix is one shared function, not a second copy.</b> The host&rsquo;s map-gated tick and its ticket-family test were extracted into <code>_lxPqDirectTick()</code> / <code>_lxPqTicketFamily()</code>, and both the host and the guest now call them &mdash; the quest&rarr;map table exists exactly <b>once</b> in the file, so the two paths cannot drift apart again. Host behaviour is unchanged.</p>
+<p><b>Verified after the fix</b> &mdash; 11 ticket-mech kills on <code>tower</code>: Carriage <b>11</b>, Underpass <b>0</b>, Express <b>0</b>. Ordinary hunt quests still advance through the generic path (11 snail kills &rarr; 11).</p>
+<p><b>Expedition, checked in the same run:</b> with a guest inside an expedition while the host kills, mojicoins are <b>blocked</b> (delta 0), and <b>both</b> PQ and hunt quest progress stay frozen &mdash; matching the host&rsquo;s own expedition rules exactly. EXP is still awarded, which is the intended expedition behaviour.</p>
+
+
 <h2>v0.29.563 <span class="tag"><span class="pill bug">bug</span> Co-op guests could never progress a kill quest</span></h2>
 <p>Per user &mdash; <em>&ldquo;ensure all these rewards and shared server experiences are debugged&rdquo;.</em> Continuing the co-op reward audit past EXP and mojicoins into <b>progression</b>, and it surfaced a bigger one.</p>
 <p><b><code>tickQuestKill()</code> &mdash; the only function that advances a &ldquo;kill N of X&rdquo; objective &mdash; was called from exactly one place: <code>killMonster()</code>, the HOST&rsquo;s local kill path.</b> The guest&rsquo;s <code>_coopApplyKill</code> awards EXP, mojicoins, bestiary credit, boss credit and Slaughter-Ladder streak &mdash; but never called it. And because every monster on a shared map is host-authoritative (guests send damage; only the host runs <code>killMonster</code>), <b>a guest could not progress a single kill quest for as long as they were in a party.</b></p>

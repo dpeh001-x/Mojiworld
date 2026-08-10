@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.563';
+const GAME_VERSION = 'v0.29.564';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -40346,6 +40346,55 @@ function _coopBroadcastKill(m, exp, coins) {
   // a mirage pop, exactly like the host's own _isIllusionKill gate.
   try { net.ws.send(JSON.stringify({ t: 'kill', u: m.uid, e: Math.round(exp) || 0, c: Math.round(coins) || 0, x: Math.round(m.x), y: Math.round(m.y), map: game.currentMap, tp: m.type, b: m.isBoss ? 1 : 0, il: m._isMirage ? 1 : 0 })); } catch (e) {}
 }
+// v0.29.5xx — SHARED TRAIN-PQ TICK (per user "ensure coop works well for
+// train PQ"). The three Clockwork quests are all kind:'kill'
+// target:'ticketMech' and tickQuestKill does NOT gate on map, so one kill
+// would credit every one of them that is active. v0.26.343 solved that for
+// the host with this map-gated direct increment; it now lives in ONE place
+// so the host and a co-op guest cannot drift apart. Returns true when it
+// ticked — the caller's signal to SKIP the generic tickQuestKill.
+function _lxPqTicketFamily(type, name) {
+  const t = String(type || '');
+  if (t === 'ticketMech' || t === 'conductorMech' || t === 'expressTicketMech') return true;
+  const n = String(name || '').toLowerCase();
+  return n.indexOf('ticket mech') >= 0 || n.indexOf('conductor mech') >= 0;
+}
+function _lxPqDirectTick() {
+  if (game.expedition && game.expedition.active) return false;
+  if (!player || !player.quests || !player.quests.active) return false;
+  const _QID_MAP = {
+    q_clockwork_underpass: 'clockworkUnderpassLobby',
+    q_pq_carriage:         'tower',
+    q_clockwork_express:   'clockworkExpress',
+  };
+  const _curMap = game.currentMap;
+  const _qids = ['q_clockwork_underpass', 'q_pq_carriage', 'q_clockwork_express'];
+  for (const _qid of _qids) {
+    const _a = player.quests.active[_qid];
+    if (!_a) continue;
+    if (_QID_MAP[_qid] && _QID_MAP[_qid] !== _curMap) continue;
+    _a.progress = (_a.progress || 0) + 1;
+    const _q = QUESTS && QUESTS[_qid];
+    const _target = (_a.targetCount != null) ? _a.targetCount : ((_q && _q.count) || 1);
+    if (_qid === 'q_clockwork_underpass' && _a.progress === 150 && typeof showToast === 'function') {
+      showToast('🧩 STAGE 1 cleared! STAGE 2 — Clockwork Spire awaits.', 'legendary');
+      if (typeof flash === 'function') flash(0.35);
+      if (typeof addShake === 'function') addShake(8);
+    }
+    if (_qid === 'q_pq_carriage' && _a.progress === 8 && typeof showToast === 'function') {
+      showToast('🎩 STAGE 3 cleared! STAGE 4 — Talk to Milo for the Master Conductor duel.', 'legendary');
+      if (typeof flash === 'function') flash(0.35);
+      if (typeof addShake === 'function') addShake(8);
+    }
+    if (_a.progress >= _target && typeof _completeQuest === 'function') {
+      _completeQuest(_qid);
+    }
+  }
+  if (typeof renderQuestTracker === 'function') renderQuestTracker();
+  if (typeof _renderPqObjectivePin === 'function') _renderPqObjectivePin();
+  if (typeof saveState === 'function') saveState();
+  return true;
+}
 // NON-HOST: award XP/coins from a host kill (same map only) + progression + pop.
 function _coopApplyKill(msg) {
   if (net.isHost || !msg || msg.map !== game.currentMap) return;
@@ -40426,10 +40475,18 @@ function _coopApplyKill(msg) {
   // objective at 0/10 while bestiary credit counted all of them. Guards mirror
   // the host's line: skip mirages (msg.il), skip expedition runs, and respect
   // the party-quest direct-tick flag when we hold the mirror.
-  if (msg.tp && !msg.il && typeof tickQuestKill === 'function'
-      && !(game.expedition && game.expedition.active)
-      && !(m && m._pqDirectTicked)) {
-    try { tickQuestKill(msg.tp, !!msg.b); } catch (e) {}
+  if (msg.tp && !msg.il && !(game.expedition && game.expedition.active)) {
+    // v0.29.5xx — TRAIN-PQ CORRECTNESS. The ticket family must NOT go through
+    // tickQuestKill: all three Clockwork quests share target 'ticketMech' and
+    // that function has no map gate, so one kill credited every active one
+    // (measured on 'tower': the two wrong quests gained 38 each, the right one
+    // gained 0). Route it through the same map-gated tick the host uses.
+    // m._pqDirectTicked cannot be consulted here — it is host-side state that
+    // never rides the payload, which is what made the v0.29.563 guard a no-op.
+    try {
+      if (_lxPqTicketFamily(msg.tp, msg.nm)) _lxPqDirectTick();
+      else if (typeof tickQuestKill === 'function') tickQuestKill(msg.tp, !!msg.b);
+    } catch (e) {}
   }
   // v0.29.356 — Slaughter Ladder co-op parity. A guest who is IN the fight
   // earns streak credit for the host's kill, using the same 400 px wedge as
@@ -73710,56 +73767,13 @@ function killMonster(m) {
   // on the player.quests.active entry. Marked via `m._pqDirectTicked`
   // so we don't double-tick (the standard `tickQuestKill` below
   // checks the same flag and skips ticket-family if already ticked).
-  const _isTicketFamily = !!(m && (
-    m.type === 'ticketMech' || m.type === 'conductorMech' || m.type === 'expressTicketMech' ||
-    (m.name && (m.name.toLowerCase().indexOf('ticket mech') >= 0 || m.name.toLowerCase().indexOf('conductor mech') >= 0))
-  ));
+    // v0.29.5xx — family test + tick body moved to the shared helpers
+  // (_lxPqTicketFamily / _lxPqDirectTick) so a co-op guest runs the SAME
+  // map-gated logic. Host behaviour is unchanged.
+  const _isTicketFamily = !!(m && _lxPqTicketFamily(m.type, m.name));
   const _inExp = !!(game.expedition && game.expedition.active);
-  // DIRECT TICK PATH — fires for every ticket-family kill outside expedition.
-  if (_isTicketFamily && !_inExp && player && player.quests && player.quests.active) {
-    // v0.26.343 — AUDIT FIX (PQ #4, cross-quest over-count). Pre-fix
-    // this looped all three ticket-kill quests and incremented EVERY
-    // active one for a single kill. If the optional Endless Express
-    // (q_clockwork_express) was active alongside a main-chain stage,
-    // one ticketMech death ticked BOTH counters. Gate each quest to
-    // the map it actually takes place on so a kill only advances the
-    // quest the player is currently grinding:
-    //   q_clockwork_underpass → clockworkUnderpassLobby (Stage 1)
-    //   q_pq_carriage         → tower (Stage 3 Carriage)
-    //   q_clockwork_express   → clockworkExpress (optional Express)
-    const _QID_MAP = {
-      q_clockwork_underpass: 'clockworkUnderpassLobby',
-      q_pq_carriage:         'tower',
-      q_clockwork_express:   'clockworkExpress',
-    };
-    const _curMap = game.currentMap;
-    const _qids = ['q_clockwork_underpass', 'q_pq_carriage', 'q_clockwork_express'];
-    for (const _qid of _qids) {
-      const _a = player.quests.active[_qid];
-      if (!_a) continue;
-      // Only tick the quest whose map the player is standing on.
-      if (_QID_MAP[_qid] && _QID_MAP[_qid] !== _curMap) continue;
-      _a.progress = (_a.progress || 0) + 1;
-      const _q = QUESTS && QUESTS[_qid];
-      const _target = (_a.targetCount != null) ? _a.targetCount : ((_q && _q.count) || 1);
-      if (_qid === 'q_clockwork_underpass' && _a.progress === 150 && typeof showToast === 'function') {
-        showToast('🧩 STAGE 1 cleared! STAGE 2 — Clockwork Spire awaits.', 'legendary');
-        if (typeof flash === 'function') flash(0.35);
-        if (typeof addShake === 'function') addShake(8);
-      }
-      if (_qid === 'q_pq_carriage' && _a.progress === 8 && typeof showToast === 'function') {
-        showToast('🎩 STAGE 3 cleared! STAGE 4 — Talk to Milo for the Master Conductor duel.', 'legendary');
-        if (typeof flash === 'function') flash(0.35);
-        if (typeof addShake === 'function') addShake(8);
-      }
-      if (_a.progress >= _target && typeof _completeQuest === 'function') {
-        _completeQuest(_qid);
-      }
-    }
-    if (typeof renderQuestTracker === 'function') renderQuestTracker();
-    if (typeof _renderPqObjectivePin === 'function') _renderPqObjectivePin();
-    if (typeof saveState === 'function') saveState();
-    m._pqDirectTicked = true;
+  if (_isTicketFamily && !_inExp) {
+    if (_lxPqDirectTick()) m._pqDirectTicked = true;
   }
   // STANDARD TICK PATH — skipped for ticket-family kills (already direct-
   // ticked above) to prevent double-counting. All other mob types
