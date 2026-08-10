@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.573';
+const GAME_VERSION = 'v0.29.574';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16664,7 +16664,6 @@ const ACTION_KEY_DEFAULT = Object.freeze({
   // hotkey ships unbound; the K menu row remains so players can bind one.
   // Walking up to her (N / interact) is unaffected.
   wardrobe:     '',
-  gearEditor:   'e',          // v0.29.387 — dev weapon editor (was orphaned; per user "put back")
   // v0.27.20 — resetSave + changeClass action binds REMOVED: both were dead
   // (the dev save-reset hardcodes 't' behind LX_DEV_TOOLS; changeClass was
   // never dispatched anywhere) and their K-modal rows advertised keys that
@@ -30663,11 +30662,6 @@ window.addEventListener('keydown', e => {
   if (_isAction(k, 'questJournal') || k === 'j') {
     if (typeof toggleQuestJournal === 'function') toggleQuestJournal();
   }
-  // v0.29.387 — E toggles the developer weapon editor (gear align + erase).
-  // _lxGearAlignToggle had no caller since its old binding was removed.
-  if (_isAction(k, 'gearEditor')) {
-    if (typeof _lxGearAlignToggle === 'function') _lxGearAlignToggle();
-  }
   // v0.25.95 — W opens the World Map (overview of every reachable map,
   // grouped by recommended level, with the current location highlighted).
   // KEY_TO_SLOT uses z/x/s/c/d/f/v/g for skill slots — the literal W
@@ -41820,9 +41814,9 @@ function _openStoryChapter() {
     setTimeout(() => {
       try {
         if (pick && QUESTS[pick]) {
-          showToast(`🗺 Take up: ${QUESTS[pick].name} — open the Quest Journal (${(player.keybinds && player.keybinds.questJournal) || 'E'})`, 'epic');
+          showToast(`🗺 Take up: ${QUESTS[pick].name} — open the Quest Journal (${_questKeyLabel()})`, 'epic');
         } else {
-          showToast(`🗺 Talk to the townsfolk and open your Quest Journal (${(player.keybinds && player.keybinds.questJournal) || 'E'})`, 'epic');
+          showToast(`🗺 Talk to the townsfolk and open your Quest Journal (${_questKeyLabel()})`, 'epic');
         }
       } catch (e) {}
     }, 1600);
@@ -42410,7 +42404,7 @@ function renderQuestTracker() {
     return `<div class="qt-row" style="border-left:2px solid #ff9e5e; padding-left:5px;">
       <span class="qt-icon">🌅</span>
       <span class="qt-name" style="color:#ffd0a0;">Next: ${nq.name}</span>
-      <span class="qt-prog" style="color:#c9b8d8;">${locked ? 'Lv ' + (nq.levelReq || 1) : 'press E'}</span>
+      <span class="qt-prog" style="color:#c9b8d8;">${locked ? 'Lv ' + (nq.levelReq || 1) : 'press ' + _questKeyLabel()}</span>
     </div>`;
   })() : '';
   if (!ids.length && !_nbRow) {
@@ -43484,7 +43478,7 @@ function _buildKeybindModal() {
           <span style="color:#a366ff;">🥷 Taiga</span> (Rogue) ·
           <span style="color:#ff6688;">🏹 Lady Hong</span> (Archer) ·
           <span style="color:#66aaff;">🔮 Hera</span> (Mage) ·
-          <span style="color:#ffaa44;">⚔️ Will</span> (Warrior). Press <kbd>E</kbd> any time to open the journal.
+          <span style="color:#ffaa44;">⚔️ Will</span> (Warrior). Press <kbd>Q</kbd> any time to open the journal.
         </div>
       </div>
       </div><!-- /kbm-tab-controls -->
@@ -43715,7 +43709,6 @@ function renderKbmReference() {
       <div class="kb"><span>World Map</span><span>${actionChip('worldMap')}</span></div>
       <div class="kb"><span>Potions (HP · MP · Cure)</span><span><kbd data-kbmgoto="potions" style="cursor:pointer; background:rgba(255,120,120,0.15); border-color:rgba(255,150,150,0.45); color:#ffc4c4;">🧪 tab</kbd></span></div>
       <div class="kb"><span>Go to the Fashionista (unbound — click to set)</span><span>${actionChip('wardrobe')}</span></div>
-      <div class="kb"><span>Weapon Editor (dev)</span><span>${actionChip('gearEditor')}</span></div>
       <div class="kb"><span>Toggle Mute</span><span>${actionChip('mute')}</span></div>
       <div class="kb"><span>Emotes (😊 😂 😲 ❤ 👍 😢 😡 ⚔️ 💤 👋)</span><span>${lockedChip('1')}–${lockedChip('0')}</span></div>
       <div class="kb"><span>Chat (online &amp; offline)</span><span>${lockedChip('Enter')}</span></div>
@@ -43964,7 +43957,7 @@ function _kbActionByKey() {
     dodge:'Dodge', block:'Block', talkNpc:'Talk', questJournal:'Quest', codex:'Codex',
     mojidex:'Beast', characterK:'Keys', attributesU:'Stats', worldMap:'Map',
     mute:'Mute', hpPotion:'HP', mpPotion:'MP'
-  };  // NOTE: 'wardrobe' (Q) deliberately excluded.
+  };  // NOTE: 'wardrobe' deliberately excluded (it ships unbound — walk to the Fashionista).
   for (const a in L) {
     const k = (ab[a] != null ? ab[a] : ACTION_KEY_DEFAULT[a]);
     if (k != null && !(k in map)) map[k] = L[a];
@@ -87000,6 +86993,18 @@ function uiConfirm(opts) {
 // only resident who is openly delighted that the Outsider has arrived.
 // Lines are italic-set in the chip and roll on a fade-in slide whenever
 // the step changes.
+// v0.29.574 — the label every "open your Quest Journal" mention uses. Reads
+// player.actionBinds (the store the key handler actually dispatches on) and
+// falls back to the shipped default, so a rebind shows the player's own key
+// rather than a hardcoded letter. Two toasts previously read player.keybinds,
+// which has never existed, and so always printed the pre-v0.29.387 'E'.
+function _questKeyLabel() {
+  try {
+    const ab = (typeof player !== 'undefined' && player && player.actionBinds) || null;
+    const k = (ab && ab.questJournal) || (typeof ACTION_KEY_DEFAULT === 'object' ? ACTION_KEY_DEFAULT.questJournal : 'q');
+    return String(k || 'q').toUpperCase();
+  } catch (e) { return 'Q'; }
+}
 const TUTORIAL_STEPS = [
   {
     icon: '👋',
@@ -87033,13 +87038,14 @@ const TUTORIAL_STEPS = [
     title: 'Your Menus & Panels',
     detect: 'panel',
     tryIt: 'Open your character panel — press <kbd>U</kbd>',
-    gugumaLine: 'Tweet! Three doors to memorise: U is your build, Y is the Codex, E is your quests. The rest open when you poke them.',
+    gugumaLine: 'Tweet! Three doors to memorise: U is your build, Y is the Codex, Q is your quests. The rest open when you poke them.',
     body: 'Most of Moji lives behind a key — tap to open, tap again to close:' +
           '<ul style="margin:8px 0 0; padding-left:20px; line-height:1.7;">' +
           '<li><kbd>U</kbd> <b>Character panel</b> — spend level-up attribute points, rank up skills, equip boons, and check your worn gear.</li>' +
           '<li><kbd>Y</kbd> <b>Codex of Mojiworld</b> — the bestiary of every creature you\'ve met, plus world lore and achievements.</li>' +
-          '<li><kbd>E</kbd> <b>Quest Journal</b> — track your active quests and the Everdawn saga (your Dawn Fragment progress).</li>' +
-          '<li><kbd>W</kbd> world map &middot; <kbd>N</kbd> talk to NPCs &middot; <kbd>K</kbd> rebind any key. Your <b>bag</b> lives in the <kbd>U</kbd> panel\'s <b>Items</b> tab.</li>' +
+          '<li><kbd>Q</kbd> <b>Quest Journal</b> — track your active quests and the Everdawn saga (your Dawn Fragment progress). <kbd>J</kbd> opens it too.</li>' +
+          '<li><kbd>L</kbd> <b>Mojidex</b> — the creatures you have met, and how close each one is to becoming a companion.</li>' +
+          '<li><kbd>W</kbd> world map &middot; <kbd>N</kbd> talk to NPCs &middot; <kbd>H</kbd> summon your MojiMon &middot; <kbd>K</kbd> rebind any key. Your <b>bag</b> lives in the <kbd>U</kbd> panel\'s <b>Items</b> tab.</li>' +
           '</ul>',
   },
   // v0.26.x — RESEQUENCED: the two hands-on steps (weapon + potions) moved up
@@ -87122,6 +87128,7 @@ const TUTORIAL_STEPS = [
           '<li><b>Brok the Blacksmith</b> — enhance &amp; forge your gear (Everdawn Megamall).</li>' +
           '<li><b>Boons</b> — boss-dropped passives you slot in the <kbd>U</kbd> panel.</li>' +
           '<li><b>Town &amp; Megamall</b> — shops, quests, and NPCs worth talking to.</li>' +
+          '<li><b>MojiMon</b> — defeat <b>10,000</b> of one species and you can <em>bind</em> it as a companion that fights beside you. Summon with <kbd>H</kbd>; upgrade it in the <kbd>U</kbd> panel\'s <b>MojiMon</b> tab. One at a time, and it rests ~5 minutes between summons.</li>' +
           '</ul>',
   },
   // v0.26.x — RESEQUENCED to close the tour: the forward-looking advancement
