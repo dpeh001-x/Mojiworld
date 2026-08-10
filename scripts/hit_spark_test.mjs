@@ -33,10 +33,19 @@ const out = await page.evaluate(() => {
     m.w = 120; m.h = 120; m.x = 600; m.y = 300;         // big target so edge vs centre is unambiguous
     m.currentHp = 1e9; m.maxHp = 1e9;
     player.hp = 100; player.atk = 100; player.cls = 'mage';
+    // Level-gap accuracy gate: at the harness's boot level this mob is hit
+    // ~76% of the time, so a two-sample test (left + right) flaked ~40% of
+    // runs with no spark to inspect. Parity level + no evasion removes both
+    // dice; the spark path itself is unchanged.
+    try { player.level = Math.max(player.level || 1, _mobLevel(m)); } catch (e) {}
+    m.evasion = 0;
     player.x = playerSide === 'left' ? 300 : 900; player.y = 330; player.w = 40; player.h = 60;
     game._lastClassHitFxFrame = -1;                      // clear the one-per-frame coalesce
     caught.length = 0;
-    hitMonster(m, dmg, crit, 'fireball');                // a non-basic skill -> spark path
+    for (let i = 0; i < 20 && !caught.length; i++) {
+      game._lastClassHitFxFrame = -1;                     // re-clear the per-frame coalesce
+      hitMonster(m, dmg, crit, 'fireball');               // a non-basic skill -> spark path
+    }
     const c = caught[caught.length - 1] || null;
     return c ? { ...c, mcx: m.x + m.w / 2, mcy: m.y + m.h / 2, mw: m.w, mh: m.h } : null;
   };

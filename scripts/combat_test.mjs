@@ -29,8 +29,15 @@ try {
   const melee = await ev(() => {
     const m = game.monsters.find(x => x && x.currentHp > 0); if (!m) return null;
     m.x = player.x + 30; m.y = player.y; player.facing = 1; m.evasion = 0;   // deterministic: no dodge roll
+    // hitMonster ALSO rolls the level-gap accuracy gate, which m.evasion = 0
+    // does not touch — measured 76% hit at Lv1 vs a Lv4 slime. Matching the
+    // player's level to the target takes that term to its 90% ceiling, and
+    // the retry loop takes the residual flake to ~0. The real damage
+    // pipeline still runs; only the dice are removed.
+    try { player.level = Math.max(player.level || 1, _mobLevel(m)); } catch (e) {}
+    if (m.traits) { delete m.traits.parryChance; delete m.traits.phantomDodge; }
     const hp0 = m.currentHp;
-    performMelee(120, 1.0, {});
+    for (let i = 0; i < 20 && m.currentHp === hp0; i++) performMelee(120, 1.0, {});
     return { hp0, hp1: m.currentHp, dropped: hp0 - m.currentHp };
   });
   ok('basic melee damages a nearby monster', melee && melee.dropped > 0, melee);
