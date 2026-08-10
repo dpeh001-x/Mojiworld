@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.564';
+const GAME_VERSION = 'v0.29.566';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -20855,8 +20855,15 @@ function _lvGapDmgMul(m) {
   const gap = ml - (player.level || 1);
   if (gap <= 0) return 1;
   const isBoss = !!(m.isBoss || m.boss || m.zodiacBoss);
-  const per = isBoss ? 0.22 : 0.06;   // per level the monster outlevels you
-  const cap = isBoss ? 60   : 4;      // ceiling (boss reaches one-shot territory)
+  // v0.29.566 — RETUNED. Was 0.22/level capped at 60x for bosses, which made a
+  // boss only 5 levels above you a literal one-shot on an era-geared WARRIOR
+  // (the tankiest class) from L20 through L40 — measured, not estimated. A 60x
+  // ceiling removes counterplay entirely: no amount of DEF, HP or skill matters
+  // once the multiplier lands, because it is applied AFTER mitigation. The gap
+  // should punish under-levelling, not delete the fight. Bosses still ramp
+  // faster than mobs and still hit harder than an at-level fight.
+  const per = isBoss ? 0.10 : 0.06;   // per level the monster outlevels you
+  const cap = isBoss ? 3.0  : 2.5;    // ceiling — dangerous, still survivable
   return Math.min(cap, 1 + gap * per);
 }
 
@@ -20960,7 +20967,7 @@ const MONSTER_SKILL_FNS = {
       const d2 = (mcx-pcx)*(mcx-pcx) + (mcy-pcy)*(mcy-pcy);
       if (d2 < radius * radius) {
         const _def = (typeof getDef === "function") ? getDef() : 0;
-        let final = Math.max(1, dmg - Math.floor(_def * 0.4));
+        let final = Math.max(1, Math.floor(dmg * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
         if (player.blockTimer > 0) { final = Math.max(1, Math.floor(final * 0.3)); if (typeof triggerBlock === "function") triggerBlock(); }
         if (player.cls === "warrior") final = Math.max(1, Math.floor(final * (_warriorDr() - 0.08)));
         if (player._aegis) final = Math.max(1, Math.floor(final * 0.5));
@@ -30276,7 +30283,20 @@ function getEvasion() {
       && ((typeof game !== 'undefined' ? (game.time | 0) : 0) < player._dashEvadeUntil)) {
     return 0.5;
   }
-  return Math.min(0.5, getEquipBonus('dodgeChance') || 0);
+  // v0.29.566 — CLASS EVASION BASE. Before this, evasion came ONLY from gear
+  // dodgeChance, so a fresh character of every class sat at a flat 0% for the
+  // whole game even though the roll is fully plumbed (contact, projectile and
+  // co-op mirror paths all roll it and print DODGE). Rogue leads by design: it
+  // already owns crit and accuracy, and dodge is the survivability lever it was
+  // missing. Warrior is deliberately LAST — it tanks through the highest HP and
+  // DEF in the game, and giving it dodge on top is what made it dominate both
+  // axes at low level. Gear dodgeChance still adds on top; the 50% cap is
+  // unchanged, so the Smoke Dash evade window is still the ceiling.
+  const _clsEva = player.cls === 'rogue'   ? 0.20
+                : player.cls === 'archer'  ? 0.12
+                : player.cls === 'mage'    ? 0.07
+                : player.cls === 'warrior' ? 0.05 : 0;
+  return Math.min(0.5, _clsEva + (getEquipBonus('dodgeChance') || 0));
 }
 // v0.25.738 — Accuracy. AGI contribution removed. Now built from
 // class base (archer 130 > rogue 110 > warrior 100 > mage 90), mods,
@@ -39617,7 +39637,7 @@ function _coopApplyHazHit(msg) {
   const falloff = dx < _inner ? 1 : 1 - Math.min(1, (dx - _inner) / Math.max(1, radius - _inner)) * 0.5;
   let dmg = Math.max(1, Math.floor((+msg.d || 30) * falloff));
   const _def = (typeof getDef === 'function') ? getDef() : 0;
-  dmg = Math.max(1, dmg - Math.floor(_def * 0.4));
+  dmg = Math.max(1, Math.floor(dmg * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
   if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
   if (player.cls === 'warrior' && typeof _warriorDr === 'function') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));
   if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
@@ -39670,7 +39690,7 @@ function _coopApplyBossHit(msg) {
   if (dmg <= 0) return;
   if (!isFrac) {   // raw atk-based hits are DEF-reducible (like contact/hazhit); %-nukes are not
     const _def = (typeof getDef === 'function') ? getDef() : 0;
-    dmg = Math.max(1, dmg - Math.floor(_def * 0.4));
+    dmg = Math.max(1, Math.floor(dmg * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
   }
   // Active defensive tools always honored, in co-op as in solo.
   if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
@@ -39707,7 +39727,7 @@ function _coopSelfBossHit(cx, cy, radius, dmgRaw, dmgFrac, label, color) {
   if (dmg <= 0) return;
   if (!isFrac) {
     const _def = (typeof getDef === 'function') ? getDef() : 0;
-    dmg = Math.max(1, dmg - Math.floor(_def * 0.4));
+    dmg = Math.max(1, Math.floor(dmg * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
   }
   if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
   if (player.cls === 'warrior' && typeof _warriorDr === 'function') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));
@@ -66741,7 +66761,7 @@ function updateMonsters(dt) {
       // v0.29.265 — DEF pierce: high-level / out-leveling attackers shave
       // both the flat subtraction and (below) the absorb curve.
       const _pierce = (typeof _defPierceMul === 'function') ? _defPierceMul(m) : 1;
-      let dmg = Math.max(1, _atkBase - Math.floor(getDef() * 0.5 * _pierce) + Math.floor(Math.random() * 4));
+      let dmg = Math.max(1, _atkBase + Math.floor(Math.random() * 4));   /* v0.29.566 — flat DEF term dropped; _defAbsorbMul(_pierce) below is the armour model */
       // Block reduces damage by 70% (outside parry window)
       if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); triggerBlock(); }
       if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR (0.90 at L≤50 → 0.60 at L100) */
@@ -68767,7 +68787,7 @@ function bossAI(m, dt, distToPlayer) {
           // damage; the asymptotic absorb cap from v0.25.692 still
           // applies upstream so high-DEF players aren't immune).
           const _def = (typeof getDef === 'function') ? getDef() : 0;
-          hpDmg = Math.max(1, hpDmg - Math.floor(_def * 0.4));
+          hpDmg = Math.max(1, Math.floor(hpDmg * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
           if (player.blockTimer > 0) {
             hpDmg = Math.max(1, Math.floor(hpDmg * 0.3));
             if (typeof triggerBlock === 'function') triggerBlock();
@@ -69640,7 +69660,7 @@ function bossAI(m, dt, distToPlayer) {
           // and clamps the FINAL loss into the phase 'skill' band instead of
           // eating the ×6 punish (which made the dive an unavoidable OHKO).
           const _zipPierce = (typeof _defPierceMul === 'function') ? _defPierceMul(m) : 1;   // v0.29.265
-          const dmg = Math.max(1, Math.floor(Math.max(1, m.atk * 1.3 - getDef() * 0.4 * _zipPierce) * _defAbsorbMul(_zipPierce)));
+          const dmg = Math.max(1, Math.floor(Math.max(1, m.atk * 1.3) * _defAbsorbMul(_zipPierce)));
           const _zipLost = player._god ? 0 : _gravBandClamp(dmg, _gravHeavyBand(phase, 'skill'));
           player.hp -= _zipLost;
           if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, m.w/2 + 40, dmg, 0, (m.name || m.type || 'a boss') + "'s charge", '#ff4466');
@@ -69719,7 +69739,7 @@ function bossAI(m, dt, distToPlayer) {
             // v0.29.x — slam runs the absorb curve + phase 'skill' band clamp
             // (was flat-def then ×6 punish → unavoidable OHKO at Lv 80+).
             const _slamPierce = (typeof _defPierceMul === 'function') ? _defPierceMul(m) : 1;   // v0.29.265
-            const dmg = Math.max(1, Math.floor(Math.max(1, m.atk * 2.2 - getDef() * 0.4 * _slamPierce) * _defAbsorbMul(_slamPierce)));  // v0.25.716 — was 1.3 (+69 %)
+            const dmg = Math.max(1, Math.floor(Math.max(1, m.atk * 2.2) * _defAbsorbMul(_slamPierce)));  // v0.25.716 — was 1.3 (+69 %)
             const _slamLost = player._god ? 0 : _gravBandClamp(dmg, _gravHeavyBand(phase, 'skill'));
             player.hp -= _slamLost;
             if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(cx, 0, 180, dmg, 0, (m.name || m.type || 'a boss') + "'s slam", '#ff4444');
@@ -73581,7 +73601,7 @@ function killMonster(m) {
       const d2 = (mcx-pcx)*(mcx-pcx) + (mcy-pcy)*(mcy-pcy);
       if (d2 < radius * radius) {
         const _def = (typeof getDef === 'function') ? getDef() : 0;
-        let final = Math.max(1, dmg - Math.floor(_def * 0.4));
+        let final = Math.max(1, Math.floor(dmg * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
         if (player.blockTimer > 0) { final = Math.max(1, Math.floor(final * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
         if (player.cls === 'warrior') final = Math.max(1, Math.floor(final * (_warriorDr() - 0.08)));  /* v0.25.856 Lv-scaled, hp-direct path */
         if (player._aegis) final = Math.max(1, Math.floor(final * 0.5));
@@ -75394,8 +75414,7 @@ function updateProjectiles(dt) {
         // spawn from _defPierceMul of the firing mob): shaves the flat
         // subtraction here and the absorb curve below.
         const _pjPierce = (typeof p._defPierce === 'number') ? p._defPierce : 1;
-        const defUsed = p._ignoreDef ? 0 : Math.floor(getDef() * 0.5 * _pjPierce);  // v0.25.738 — magic/physical defense unified
-        let dmg = Math.max(1, Math.floor(p.damage) - defUsed);
+        let dmg = Math.max(1, Math.floor(p.damage));   /* v0.29.566 — flat DEF term retired; _defAbsorbMul(_pjPierce) below is the armour model */
         // Block reduces projectile damage by 70%
         if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); triggerBlock(); }
         if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR (0.90 at L≤50 → 0.60 at L100) */
@@ -75406,7 +75425,9 @@ function updateProjectiles(dt) {
       if (_hsMul < 1) dmg = Math.max(1, Math.floor(dmg * _hsMul));
       // v0.25.692 — DEF significance booster (projectile path).
       // v0.29.265 — pierce-aware (p._defPierce from the firing mob).
-      dmg = Math.max(1, Math.floor(dmg * _defAbsorbMul(_pjPierce)));
+      // v0.29.566 — _ignoreDef moved here from the retired flat subtraction:
+      // an armour-piercing projectile must bypass the absorb curve too.
+      if (!p._ignoreDef) dmg = Math.max(1, Math.floor(dmg * _defAbsorbMul(_pjPierce)));
         // v0.25.822 — ZODIAC EMPOWERED PROJECTILE. 20 % chance per zodiac
         // projectile to amplify the impact to at least 50 % of player
         // max-HP, applied AFTER defensive reductions (same logic as the
@@ -75770,7 +75791,7 @@ function updateProjectiles(dt) {
       const inHzn = Math.abs((player.x + player.w/2) - h.cx) < h.w / 2;
       const onFloor = (player.y + player.h) > h.y && (player.y + player.h) < h.y + h.h + 30;
       if (inHzn && onFloor && player.hp > 0 && player.invulnerable <= 0) {
-        let dmg = Math.max(1, Math.floor(h.damage - getDef() * 0.5));
+        let dmg = Math.max(1, Math.floor(h.damage * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
         dmg = _applyHazardDR(dmg);   // v0.25.649 — block/warrior/Aegis
         player.hp -= (player._god ? 0 : _diffDmg(dmg));
         player.invulnerable = 500;
@@ -75809,7 +75830,7 @@ function updateProjectiles(dt) {
       const inX = Math.abs((player.x + player.w/2) - h.cx) < h.w / 2;
       const onFloor = (player.y + player.h) > h.y && (player.y + player.h) < h.y + h.h + 24;
       if (inX && onFloor && player.hp > 0 && (h.tick % 48 === 0)) {
-        let dmg = Math.max(1, Math.floor(h.damage * 2 - getDef() * 0.4));
+        let dmg = Math.max(1, Math.floor(h.damage * 2 * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
         dmg = _applyHazardDR(dmg);   // v0.25.649 — block/warrior/Aegis
         if (player.invulnerable <= 0) {
           player.hp -= (player._god ? 0 : _diffDmg(dmg));
@@ -75849,7 +75870,7 @@ function updateProjectiles(dt) {
       const d = Math.hypot(px - h.cx, py - h.cy);
       // Player crossed by the leading edge this frame?
       if (!h.hitOnce && d <= r && d >= prevR - 6 && player.hp > 0 && player.invulnerable <= 0) {
-        let dmg = Math.max(1, Math.floor(h.damage - getDef() * 0.5));
+        let dmg = Math.max(1, Math.floor(h.damage * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
         dmg = _applyHazardDR(dmg);   // v0.25.649 — block/warrior/Aegis
         player.hp -= (player._god ? 0 : _diffDmg(dmg));
         player.invulnerable = 400;
@@ -75880,7 +75901,7 @@ function updateProjectiles(dt) {
         h.struck = true;
         const inCol = Math.abs((player.x + player.w / 2) - h.cx) < h.w / 2 + 8;
         if (inCol && player.hp > 0 && player.invulnerable <= 0) {
-          let dmg = Math.max(1, Math.floor(h.damage - getDef() * 0.5));
+          let dmg = Math.max(1, Math.floor(h.damage * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
           dmg = _applyHazardDR(dmg);   // v0.25.649 — block/warrior/Aegis
           player.hp -= (player._god ? 0 : _diffDmg(dmg));
           player.invulnerable = 600;
@@ -75917,7 +75938,7 @@ function updateProjectiles(dt) {
         const inX = (player.x + player.w) > h.x && player.x < (h.x + h.w);
         const inY = (player.y + player.h) > h.y && player.y < (h.y + h.h);
         if (!h.struck && inX && inY && player.hp > 0 && player.invulnerable <= 0) {
-          let dmg = Math.max(1, Math.floor(h.damage - getDef() * 0.5));
+          let dmg = Math.max(1, Math.floor(h.damage * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
           dmg = _applyHazardDR(dmg);   // v0.25.649 — block/warrior/Aegis
           player.hp -= (player._god ? 0 : _diffDmg(dmg));
           player.invulnerable = 380;
@@ -75965,7 +75986,7 @@ function updateProjectiles(dt) {
         h._rainTickCD -= 1;
         if (h._rainTickCD <= 0 && player.hp > 0 && player.invulnerable <= 0) {
           h._rainTickCD = 30;
-          let dmg = Math.max(1, Math.floor(h.damage - getDef() * 0.4));
+          let dmg = Math.max(1, Math.floor(h.damage * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
           dmg = _applyHazardDR(dmg);   // v0.25.649 — block/warrior/Aegis
           player.hp -= (player._god ? 0 : _diffDmg(dmg));
           player.invulnerable = 200;
@@ -76313,7 +76334,7 @@ function updateProjectiles(dt) {
           let dmg = Math.max(1, Math.floor((h.damage || 30) * falloff));
           // DEF mitigation
           const _def = (typeof getDef === 'function') ? getDef() : 0;
-          dmg = Math.max(1, dmg - Math.floor(_def * 0.4));
+          dmg = Math.max(1, Math.floor(dmg * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
           // Block window
           if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
           // Warrior class DR
@@ -102974,6 +102995,13 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
   // here so the frames + static pose load; idle/walk sets don't exist (the key
   // is only ever active mid-attack).
   'gravitospunch',
+  // v0.29.560 — Gravitos SOUL set (Sprites/bosses/attack/gravitossoul_0..8).
+  // The art shipped but nothing referenced it, so it never loaded and never
+  // drew. Registered here and driven by _gravitosSoulFrame for the CASTER
+  // specials — Soul Drain plus form-1's Singularity Collapse and Collapse
+  // Rain, which had no dedicated art of their own (forms 2/3 keep their
+  // gravitos2star / gravitos3star sets).
+  'gravitossoul',
   // v0.25.812 — Sundered Smith Lv 45 mini-boss (added in v0.25.809).
   // Authored sprite landed in Sprites/bosses/sundered_smith.webp.
   'sundered_smith',
