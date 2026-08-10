@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.559';
+const GAME_VERSION = 'v0.29.560';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -35596,6 +35596,40 @@ function _lxHuntRewardScale(q, target) {
 }
 const SAVE_KEY = 'levelx_save_v1';
 const SAVE_VERSION = 1;
+// =========================================================================
+// v0.29.560 — SECURITY: prototype-pollution guard for save deserialization.
+// =========================================================================
+// JSON.parse('{"__proto__":{…}}') does NOT change the parsed object's own
+// prototype — it creates an ordinary OWN property named `__proto__`, which is
+// why the hostile save looks inert under inspection and survives a
+// JSON.stringify round-trip into localStorage untouched.
+//
+// The damage lands one line later. loadState does `Object.assign(player,
+// s.player)`, and Object.assign copies via [[Set]] — for the key `__proto__`
+// that invokes the inherited setter and REPLACES the target's prototype with
+// attacker-supplied data. Verified in-engine against the real save shape:
+// after the assign the target's prototype was swapped, it inherited the
+// injected keys, and `constructor` had been clobbered to a string.
+//
+// Blast radius is the assigned target (player / game), NOT global
+// Object.prototype — so this is hardening, not an emergency. But the save
+// path already defends hard against edited imports (HMAC signature, numeric
+// clamping, equipped-item non-finite scrubbing), and this was the one hole
+// left in exactly that threat model: an imported save could install inherited
+// properties and a poisoned `constructor` on the live player object, and
+// persist them across every subsequent reload.
+//
+// A JSON.parse reviver is the fix rather than a post-hoc scrub: it drops the
+// key at EVERY depth as the tree is built, so nested `player.quests.active.*`
+// and `player.equipped.<slot>` objects are covered by the same one-liner.
+// Returning undefined from a reviver removes the property outright.
+// `prototype` and `constructor` ride along — no legitimate save field uses
+// either name, and clobbering `constructor` breaks any `x.constructor` check
+// downstream.
+const _LX_PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+function _lxSafeJsonParse(raw) {
+  return JSON.parse(raw, function (k, v) { return _LX_PROTO_KEYS.has(k) ? undefined : v; });
+}
 const PLAYER_SAVE_FIELDS = [
   'cls','job','master','level','exp','expToNext',
   'hp','maxHp','mp','maxMp','mojicoins','baseAtk','baseDef','baseAcc',
@@ -35845,8 +35879,8 @@ async function _lxSteamCloudSync() {
   let cloudRaw = null;
   try { cloudRaw = await window.SteamAPI.cloud.read(SAVE_KEY); } catch (e) { return; }
   let localRaw = null, localSave = null, cloudSave = null;
-  try { localRaw = localStorage.getItem(SAVE_KEY); localSave = localRaw ? JSON.parse(localRaw) : null; } catch (e) {}
-  try { cloudSave = cloudRaw ? JSON.parse(cloudRaw) : null; } catch (e) { cloudSave = null; }
+  try { localRaw = localStorage.getItem(SAVE_KEY); localSave = localRaw ? _lxSafeJsonParse(localRaw) : null;   /* v0.29.560 proto-safe */ } catch (e) {}
+  try { cloudSave = cloudRaw ? _lxSafeJsonParse(cloudRaw) : null;   /* v0.29.560 proto-safe: untrusted cloud blob */ } catch (e) { cloudSave = null; }
   if (!cloudSave) { if (localRaw) _lxSteamCloudPush(localRaw, true); return; }   // first launch on this machine -> migrate local up
   const localLevel = (localSave && localSave.player && localSave.player.level) || 0;
   const cloudLevel = (cloudSave && cloudSave.player && cloudSave.player.level) || 0;
@@ -37479,7 +37513,7 @@ function importSave(input) {
         var save = null;
         var _secVerdict = null;   // null = unsigned/plain, 'ok' = signature valid, 'bad' = tampered/corrupt
         try {
-          var parsed = JSON.parse(raw);
+          var parsed = _lxSafeJsonParse(raw);   // v0.29.560 — proto-safe: untrusted file
           if (parsed && parsed._lxSave === 2 && typeof parsed.data === 'string') {
             // Secure (signed) save — verify the HMAC before trusting it.
             save = parsed.data;
@@ -37496,7 +37530,7 @@ function importSave(input) {
         // loadState() rejects anything without player.cls or with a version
         // mismatch, so writing junk here would silently wipe progress on the
         // reload. Surface the specific reason instead.
-        var inner = JSON.parse(save);
+        var inner = _lxSafeJsonParse(save);   // v0.29.560 — proto-safe: untrusted file
         if (!inner || typeof inner !== 'object' || !inner.player || !inner.player.cls) {
           if (typeof showToast === 'function') showToast('Import failed — not a Mojiworld save file.', 'danger');
           input.value = ''; return;
@@ -37625,7 +37659,10 @@ function _sanitizePlayerSaveNumerics(p) {
 function loadState() {
   try {
     const raw = localStorage.getItem(SAVE_KEY); if (!raw) return false;
-    const s = JSON.parse(raw);
+    // v0.29.560 — SECURITY: proto-safe parse. This is THE sink — `s.player`
+    // and `s.game` go straight into Object.assign below, which is what turns
+    // an own `__proto__` key into a real prototype swap. See _lxSafeJsonParse.
+    const s = _lxSafeJsonParse(raw);
     // v0.25.773 — Surface save-version mismatch instead of silently wiping.
     // Previously any future SAVE_VERSION bump would just `return false`,
     // discarding the save with no feedback. Now: log a console warning AND
@@ -38152,7 +38189,7 @@ function clearSave() {
 const BACKUP_KEY = 'lx_save_backups_v1';
 const BACKUP_MAX = 5;
 function _lxGetBackups() {
-  try { const a = JSON.parse(localStorage.getItem(BACKUP_KEY)); return Array.isArray(a) ? a : []; }
+  try { const a = _lxSafeJsonParse(localStorage.getItem(BACKUP_KEY));   /* v0.29.560 proto-safe */ return Array.isArray(a) ? a : []; }
   catch (e) { return []; }
 }
 function _lxStoreBackups(arr) {
@@ -102819,7 +102856,7 @@ const _BOSS_ATK_NOSHRINK = new Set(['sundered_smith', 'gravitos2star', 'gravitos
 // STATIC-sprite path too (not just animation frames), so a stale-cached
 // static from a different art generation (old fill 0.667 vs new 0.585 after
 // the v0.29.100 regen) can't draw the figure 12-14% off next to the frames.
-const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star', 'gravitospunch', 'gravitossoul']);
+const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star', 'gravitospunch']);
 // v0.26.x — Per-type ATTACK-frame size MULTIPLIER, applied on top of the
 // content-normalised size in _drawBossSprite (so the attack pose reads bigger
 // than idle/walk while staying foot-anchored). Distinct from _BOSS_ATK_UNIFORM
@@ -102857,12 +102894,6 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
   // here so the frames + static pose load; idle/walk sets don't exist (the key
   // is only ever active mid-attack).
   'gravitospunch',
-  // v0.29.558 — Gravitos form-1 SOUL DRAIN cast set (ludo.ai, from the current
-  // form-1 sprite on its exact 1656x1505 canvas). 9 frames at
-  // Sprites/bosses/attack/gravitossoul_0..8.webp, played ONCE across the
-  // pattern's 1900 ms window via _gravitosSoulFrame — the drain finally has a
-  // body performance instead of leaning entirely on the soul-ring burst.
-  'gravitossoul',
   // v0.25.812 — Sundered Smith Lv 45 mini-boss (added in v0.25.809).
   // Authored sprite landed in Sprites/bosses/sundered_smith.webp.
   'sundered_smith',
@@ -103036,23 +103067,6 @@ function _gravitosPunchFrame(m) {
   if (n === 0) return null;
   const _dur = _GRAV_PUNCH_PATTERNS[m.patternState] || 1500;
   const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / _dur));
-  return frames[Math.min(n - 1, Math.floor(t * n))];
-}
-
-// v0.29.558 — SOUL DRAIN once-through. Same playback model as the punch:
-// driven by m.patternTimer across the pattern's authored 1900 ms window
-// (1500 telegraph + 400 fire/recover), so the arm-raise rides the telegraph
-// and the final converge lands on the HP->1 pulse — instead of the generic
-// 48 ms wall-clock loop replaying the cast ~4x in one window.
-function _gravitosSoulFrame(m) {
-  const frames = BOSS_ATTACK_FRAMES['gravitossoul'];
-  if (!frames) return null;
-  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);
-  let n = frames._readyN || 0;
-  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
-  frames._readyN = n;
-  if (n === 0) return null;
-  const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / 1900));
   return frames[Math.min(n - 1, Math.floor(t * n))];
 }
 
@@ -105169,12 +105183,6 @@ function drawMonster(m) {
   if (m.type === 'gravitos' && !m._phaseSprite && _GRAV_PUNCH_PATTERNS[m.patternState] && _gravitosPunchFrame(m)) {
     m._gravStarKey = 'gravitospunch';
   }
-  // v0.29.558 — form-1 SOUL DRAIN set, same override mechanism. Falls through
-  // to the regular attack set until the frames decode. Forms 2/3 keep their
-  // star-set treatment — this art is form-1's silhouette.
-  if (m.type === 'gravitos' && !m._phaseSprite && m.patternState === 'soulDrain' && _gravitosSoulFrame(m)) {
-    m._gravStarKey = 'gravitossoul';
-  }
   const _spriteKey = m._gravStarKey || m._phaseSprite || m.type;
   // v0.26.310 — prefer the 4-frame attack animation when its frames have
   // decoded; otherwise the single static attack pose, then idle.
@@ -105183,7 +105191,6 @@ function drawMonster(m) {
   // player is supposed to read), instead of joining the global clock mid-swing.
   const _bossAttackImg = _bossAttacking
     ? ((_spriteKey === 'gravitospunch' && _gravitosPunchFrame(m))
-       || (_spriteKey === 'gravitossoul' && _gravitosSoulFrame(m))
        || _bossAttackFrame(_spriteKey, m) || BOSS_ATTACK_SPRITES[_spriteKey])
     : null;
   // v0.26.314/322 — when not attacking: walk loop while moving, else idle loop,
@@ -117378,7 +117385,7 @@ async function _lxCloudSyncOnLogin(session) {
     cloud = j.save;                       // may be null
   } catch (e) { return; }                 // offline -> keep local
   let localRaw = null, localSave = null;
-  try { localRaw = localStorage.getItem(SAVE_KEY); localSave = localRaw ? JSON.parse(localRaw) : null; } catch (e) {}
+  try { localRaw = localStorage.getItem(SAVE_KEY); localSave = localRaw ? _lxSafeJsonParse(localRaw) : null;   /* v0.29.560 proto-safe */ } catch (e) {}
   const pushLocal = () => { try { if (localRaw) fetch(_LX_API_BASE + '/api/save', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + session.token }, body: localRaw }).catch(() => {}); } catch (e) {} };
   if (!cloud) { pushLocal(); return; }    // first cloud login -> migrate local up
   const localLevel = (localSave && localSave.player && localSave.player.level) || 0;
