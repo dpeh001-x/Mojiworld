@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.568';
+const GAME_VERSION = 'v0.29.569';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11119,7 +11119,6 @@ const LX_FX = (() => {
     gravitos_blackhole: 'gravitos_blackhole.webp', // Gravitos blackhole pattern
     gravitos_singularity_zone: 'gravitos_singularity_zone.webp', // safe-zone marker
     gravitos_soulring:  'gravitos_soulring.webp',  // Soul Drain telegraph ring
-    gravitos_laserring: 'gravitos_laserring.webp', // v0.29.568 — Laser Sweep charge ring
     gravitos_tendril:   'gravitos_tendril.webp',   // crushTendrils descending tendril
     // v0.26.521 — Lv-50 B-slot ULTIMATE cast VFX (one per master, id
     // `<master>_ult`). Static base art generated to Sprites/fx/<key>.png; the
@@ -35147,6 +35146,15 @@ function _medAtkAtLv(lv) {
 //     2-level grace, capped at 60% — an out-leveled zone's mobs go through
 //     gear that would trivialize them at-level.
 // Applied to BOTH the flat DEF subtraction and the _defAbsorbMul % curve.
+// v0.29.569 — boss contact damage by level. Solved against measured player
+// EHP: 110 at Lv10, ~1.4k at Lv50, ~6.5k at Lv70, ~51k at Lv100.
+function _bossAtkForLevel(lv) {
+  // v0.29.569 — re-solved against the measured matrix. The first fit (110 x
+  // 1.0703^(lv-10)) was too steep at both ends: low-level bosses came out at 9
+  // hits-to-die where ~5 was wanted, and Lv90-100 came out at 1 where 2-3 was
+  // wanted. Flatter growth anchored higher hits both bands.
+  return Math.max(1, Math.round(198 * Math.pow(1.0528, Math.max(1, lv | 0) - 10)));
+}
 function _defPierceMul(m) {
   const ml = (m && typeof m === 'object')
     ? ((typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1))
@@ -35155,7 +35163,11 @@ function _defPierceMul(m) {
   const base = Math.max(0, Math.min(0.15, (ml - 50) * 0.003));
   const gap = ml - pl;
   const gapP = gap > 2 ? Math.min(0.60, (gap - 2) * 0.06) : 0;
-  return 1 - Math.min(0.75, base + gapP);
+  // v0.29.569 — BOSS ARMOUR CUT. Bosses bypass 45% of the absorb curve so a
+  // max HP/DEF build lands at 4-5 hits to die instead of 6.6-8.1 while an
+  // average build sits at 2-3. Regular mobs are unaffected.
+  const _bossCut = (m && typeof m === 'object' && (m.isBoss || m.boss || m.zodiacBoss)) ? 0.55 : 1;
+  return (1 - Math.min(0.75, base + gapP)) * _bossCut;
 }
 // v0.29.331 — GRAVITOS CEILING RAISED + PHASE RAMP STEEPENED (per user
 // "increase the hardest hit to 4000 max" + "make Gravitos2 stronger, and
@@ -52346,7 +52358,10 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     type, ...t,
     uid: (game._monUid = (game._monUid || 0) + 1),   // v0.27.0 — stable network id for co-op host-authoritative sync (object identity doesn't survive JSON)
     name: prefix + t.name,
-    atk:   Math.floor(t.atk   * atkMult * _varAtk),   // v0.29.265 — per-spawn roll
+    // v0.29.569 — bosses take their contact damage from the level curve; every
+    // other tier keeps the authored value x the spawn multipliers.
+    atk:   isBoss ? Math.floor(_bossAtkForLevel((t.level || 1)) * _varAtk)
+                  : Math.floor(t.atk   * atkMult * _varAtk),   // v0.29.265 — per-spawn roll
     // v0.26.109 — overrides the `def` field that `...t` would otherwise
     // spread in at full value; brings DEF in line with HP/ATK's 3/4 cut.
     // v0.26.144 — Per user "bump up the monsters defence more, make it
@@ -52511,7 +52526,13 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
       const _bCurve = Math.min(14,
         Math.pow(1.015, Math.max(0, _bLv - 1)) * (1 + 0.10 * _bLv) *
         (1 - Math.min(0.50, Math.max(0, _bLv - 50) * 0.025)));
-      _spawned.atk = Math.max(1, Math.floor(_spawned.atk * _bCurve));
+      // v0.29.569 — NO LONGER APPLIED TO ATK. This curve existed to drag the
+      // authored boss atk up with level; boss contact damage now comes from
+      // _bossAtkForLevel() at construction, so multiplying again stacked two
+      // level curves and made every Lv47-65 boss a one-shot (measured: barnaby
+      // 10,752 atk against a 3,270 HP average build). Left computed above
+      // because the surrounding block still reads _bCurve for logging//tuning.
+      void _bCurve;
     }
   }
   // v0.25.990 — Endless Express spawn-time override. Maps flagged with
@@ -69569,16 +69590,6 @@ function bossAI(m, dt, distToPlayer) {
     } else if (m.patternState === 'laser') {
       // LASER SWEEP — charge, paint a warning beam, then fire tracking lasers
       const chargeTime = phase === 3 ? 350 : phase === 2 ? 420 : 500;  // v0.29.391 — P2 telegraph shortens
-      // v0.29.568 — LASER SWEEP charge ring: a runic targeting circle winding
-      // up on the boss, resolving as the volley launches. The caster frames are
-      // pinned to the boss's canvas and scale, so the spectacle lives here.
-      if (!m._laserRingUp) {
-        m._laserRingUp = true;
-        if (typeof spawnSpriteBurst === 'function') {
-          spawnSpriteBurst(m.x + m.w / 2, m.y + m.h / 2, 'gravitos_laserring',
-            { size: Math.max(420, m.w * 3.2), life: Math.round(chargeTime / 16), spin: Math.PI * 0.6 });
-        }
-      }
       if (m.patternTimer < chargeTime) {
         // Charge-up particles swirling into the eye
         if (game.time % 4 === 0) {
@@ -69616,17 +69627,10 @@ function bossAI(m, dt, distToPlayer) {
             addShake(5); flash(0.15);
           }, i * 180);
         }
-        // v0.29.568 — release pulse: tighter counter-spun ring on launch.
-        if (typeof spawnSpriteBurst === 'function') {
-          spawnSpriteBurst(m.x + m.w / 2, m.y + m.h / 2, 'gravitos_laserring',
-            { size: Math.max(260, m.w * 2.0), life: 22, spin: -Math.PI * 1.4 });
-        }
-        if (typeof addShake === 'function') addShake(8);
-        if (typeof flash === 'function') flash(0.22);
         showToast('✦ LASER SWEEP', phase === 3 ? 'legendary' : 'epic');
       }
       const laserDur = chargeTime + (phase === 3 ? 1100 : phase === 2 ? 900 : 700);  // v0.29.391
-      if (m.patternTimer > laserDur) { m.patternState = 'idle'; m.patternTimer = 0; m._laserFired = false; m._laserRingUp = false; }
+      if (m.patternTimer > laserDur) { m.patternState = 'idle'; m.patternTimer = 0; m._laserFired = false; }
     } else if (m.patternState === 'zip') {
       // ZIP — teleport across the map then dive at the player
       if (m.patternTimer < 220 && !m._zipPrep) {
@@ -102975,7 +102979,7 @@ const _BOSS_ATK_NOSHRINK = new Set(['sundered_smith', 'gravitos2star', 'gravitos
 // STATIC-sprite path too (not just animation frames), so a stale-cached
 // static from a different art generation (old fill 0.667 vs new 0.585 after
 // the v0.29.100 regen) can't draw the figure 12-14% off next to the frames.
-const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star', 'gravitospunch', 'gravitossoul', 'gravitoslaser']);   // v0.29.567 — soul set sizes like its siblings
+const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star', 'gravitospunch', 'gravitossoul']);   // v0.29.560 — soul set sizes like its siblings
 // v0.26.x — Per-type ATTACK-frame size MULTIPLIER, applied on top of the
 // content-normalised size in _drawBossSprite (so the attack pose reads bigger
 // than idle/walk while staying foot-anchored). Distinct from _BOSS_ATK_UNIFORM
@@ -103013,16 +103017,13 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
   // here so the frames + static pose load; idle/walk sets don't exist (the key
   // is only ever active mid-attack).
   'gravitospunch',
-  // v0.29.567 — Gravitos SOUL set (Sprites/bosses/attack/gravitossoul_0..8).
+  // v0.29.560 — Gravitos SOUL set (Sprites/bosses/attack/gravitossoul_0..8).
   // The art shipped but nothing referenced it, so it never loaded and never
   // drew. Registered here and driven by _gravitosSoulFrame for the CASTER
   // specials — Soul Drain plus form-1's Singularity Collapse and Collapse
   // Rain, which had no dedicated art of their own (forms 2/3 keep their
   // gravitos2star / gravitos3star sets).
   'gravitossoul',
-  // v0.29.568 — Gravitos form-1 LASER SWEEP caster set. The bolts are game
-  // projectiles (skill 'gravbolt'), so this set is purely the caster's stance.
-  'gravitoslaser',
   // v0.25.812 — Sundered Smith Lv 45 mini-boss (added in v0.25.809).
   // Authored sprite landed in Sprites/bosses/sundered_smith.webp.
   'sundered_smith',
@@ -103199,7 +103200,7 @@ function _gravitosPunchFrame(m) {
   return frames[Math.min(n - 1, Math.floor(t * n))];
 }
 
-// v0.29.567 (per user "wire gravitossoul to more of gravitos special attacks")
+// v0.29.560 (per user "wire gravitossoul to more of gravitos special attacks")
 // — the CASTER counterpart to the punch set above. gravitossoul_0..8 shipped
 // unreferenced: nothing loaded it and nothing drew it.
 //
@@ -103236,24 +103237,6 @@ function _gravitosUsesSoul(m) {
   if (m.type !== 'gravitos' || !_GRAV_SOUL_PATTERNS[m.patternState]) return false;
   if (m.patternState === 'soulDrain') return true;
   return !m._phaseSprite;
-}
-
-// v0.29.568 — LASER SWEEP once-through. The pattern's length varies by phase
-// (chargeTime 500/420/350 + tail 700/900/1100), so playback scales to the
-// CURRENT phase; a fixed duration would desync the release from the bolts in
-// two of the three phases.
-const _GRAV_LASER_DUR = { 1: 1200, 2: 1320, 3: 1450 };
-function _gravitosLaserFrame(m) {
-  const frames = BOSS_ATTACK_FRAMES['gravitoslaser'];
-  if (!frames) return null;
-  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);
-  let n = frames._readyN || 0;
-  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
-  frames._readyN = n;
-  if (n === 0) return null;
-  const _ph = (m.phase | 0) || (m._phaseSprite === 'gravitos3' ? 3 : m._phaseSprite === 'gravitos2' ? 2 : 1);
-  const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / (_GRAV_LASER_DUR[_ph] || 1200)));
-  return frames[Math.min(n - 1, Math.floor(t * n))];
 }
 
 // === BOSS IDLE ANIMATION (v0.26.314) === optional 4-frame gentle idle loop per
@@ -105369,18 +105352,13 @@ function drawMonster(m) {
   if (m.type === 'gravitos' && !m._phaseSprite && _GRAV_PUNCH_PATTERNS[m.patternState] && _gravitosPunchFrame(m)) {
     m._gravStarKey = 'gravitospunch';
   }
-  // v0.29.567 — SOUL set for the channelled casts (see _gravitosUsesSoul).
+  // v0.29.560 — SOUL set for the channelled casts (see _gravitosUsesSoul).
   // Placed AFTER the star block deliberately and guarded on `!m._gravStarKey`,
   // so a form-2/3 Singularity keeps its authored gravitos2star/3star art and
   // the soul set only fills the gaps: Soul Drain on every form, and form-1's
   // Singularity / Collapse Rain, which previously drew the generic attack pose.
   if (!m._gravStarKey && _gravitosUsesSoul(m) && _gravitosSoulFrame(m)) {
     m._gravStarKey = 'gravitossoul';
-  }
-  // v0.29.568 — form-1 LASER SWEEP set.
-  if (m.type === 'gravitos' && !m._gravStarKey && !m._phaseSprite &&
-      m.patternState === 'laser' && _gravitosLaserFrame(m)) {
-    m._gravStarKey = 'gravitoslaser';
   }
   const _spriteKey = m._gravStarKey || m._phaseSprite || m.type;
   // v0.26.310 — prefer the 4-frame attack animation when its frames have
@@ -105390,8 +105368,7 @@ function drawMonster(m) {
   // player is supposed to read), instead of joining the global clock mid-swing.
   const _bossAttackImg = _bossAttacking
     ? ((_spriteKey === 'gravitospunch' && _gravitosPunchFrame(m))
-       || (_spriteKey === 'gravitoslaser' && _gravitosLaserFrame(m))
-       || (_spriteKey === 'gravitossoul' && _gravitosSoulFrame(m))   // v0.29.567 — once-through, then holds
+       || (_spriteKey === 'gravitossoul' && _gravitosSoulFrame(m))   // v0.29.560 — once-through, then holds
        || _bossAttackFrame(_spriteKey, m) || BOSS_ATTACK_SPRITES[_spriteKey])
     : null;
   // v0.26.314/322 — when not attacking: walk loop while moving, else idle loop,
