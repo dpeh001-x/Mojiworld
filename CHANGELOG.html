@@ -132,6 +132,24 @@
 <p>The guards mirror the host&rsquo;s line exactly: mirages skipped, expedition runs skipped, and the party-quest direct-tick flag respected when the guest holds the mirror &mdash; so this closes the gap without opening a double-credit path.</p>
 
 
+<h2>v0.29.562 <span class="tag"><span class="pill bug">bug</span> Co-op guests were being short-changed on EXP and mojicoins</span></h2>
+<p>Per user &mdash; <em>&ldquo;make sure multiplayer coop grants the right exp and rewards and mojicoins&rdquo;.</em> Diffing the guest&rsquo;s award stack in <code>_coopApplyKill</code> against the host&rsquo;s own kill pipeline found the guest silently missing several multipliers &mdash; and every one of them is the <b>guest&rsquo;s own property</b>, not the host&rsquo;s.</p>
+<p>The design itself is right: the host broadcasts the monster&rsquo;s <b>base</b> EXP and coins, and each client scales them locally. But the guest&rsquo;s scaling was incomplete.</p>
+<ul>
+  <li><b>EXP</b> was missing <b>prestige</b>, <b>difficulty tier</b>, <b>world affix</b> and the <b>Slaughter-Ladder boon</b>.</li>
+  <li><b>Coins</b> were missing <b>greed</b>, <b>difficulty</b> and <b>world affix</b>. Greed had a specific cause: the host spawns coins as physical pickups and applies greed at the <em>magnetize</em> site, but a guest is granted coins directly and so never passed through it &mdash; greed gear paid a guest <b>nothing at all</b> in co-op.</li>
+</ul>
+<div class="callout">
+  <b>Measured live, guest vs. the same kill.</b> A Nightmare-tier guest with prestige&nbsp;&times;2 and +50% greed, on a base-100 kill:
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0">
+  <tr style="text-align:left;opacity:.75"><th></th><th>Before</th><th>After</th><th>Was losing</th></tr>
+  <tr><td>EXP per kill</td><td>6,750</td><td><b>21,600</b></td><td><b>69%</b></td></tr>
+  <tr><td>Mojicoins per kill</td><td>50</td><td><b>131</b></td><td><b>62%</b></td></tr>
+  </table>
+  Both figures match the independently predicted values <em>exactly</em>. And the essential regression check: a guest with <b>no</b> bonuses receives 6,750 / 50 &mdash; byte-identical to before &mdash; so this restores what was owed without inflating anyone.
+</div>
+<p><b>Deliberately left out</b>, because they depend on host-side kill circumstance a guest cannot observe and inventing them would over-pay: the host&rsquo;s <b>combo</b> terms (that combo belongs to the host&rsquo;s kill chain, not the guest&rsquo;s), and <b>treasureCrits / goldBlood</b> coin bonuses (both gate on <code>m._killedByCrit</code>).</p>
+
 <h2>v0.29.560 <span class="tag"><span class="pill bug">bug</span> Save loading closes a prototype-pollution hole</span></h2>
 <p>Per user &mdash; <em>&ldquo;ensure that the file save function is all secure&rdquo;.</em> A review of the whole save chain (export &rarr; sign &rarr; import &rarr; verify &rarr; load &rarr; backup &rarr; cloud merge) found the path in good shape, with one real gap.</p>
 <p><b>The finding.</b> <code>JSON.parse('{"__proto__":{&hellip;}}')</code> does <em>not</em> change the parsed object&rsquo;s prototype &mdash; it creates an ordinary own property named <code>__proto__</code>. That is why a hostile save looks inert and survives a <code>JSON.stringify</code> round-trip into storage untouched. The damage lands one line later: <code>loadState</code> does <code>Object.assign(player, s.player)</code>, and <code>Object.assign</code> copies via <code>[[Set]]</code> &mdash; for that key it invokes the inherited setter and <b>replaces the target&rsquo;s prototype with attacker-supplied data</b>. Reproduced in-engine: the prototype was swapped, the injected keys became visible on <code>player</code>, and <code>constructor</code> was clobbered to a string &mdash; persisting across every reload.</p>
