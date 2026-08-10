@@ -75,9 +75,16 @@ const r = await page.evaluate(async () => {
   m._gravPhase = 1;
 
   const overrideFires = (m.type === 'gravitos' && !m._phaseSprite && m.patternState === 'laser' && !!eval('_gravitosLaserFrame')(m));
-  m._phaseSprite = 'gravitos2';
-  const form2Excluded = !(m.type === 'gravitos' && !m._phaseSprite && m.patternState === 'laser');
-  m._phaseSprite = null;
+  // Read the REAL override for each form. The previous version of this check
+  // re-derived the condition inline, so it kept passing after the behaviour
+  // changed — it was asserting a copy of the rule, not the rule.
+  const perForm = {};
+  for (const [label, sprite] of [['form1', null], ['form2', 'gravitos2'], ['form3', 'gravitos3']]) {
+    m._phaseSprite = sprite; m._gravStarKey = null; m.patternState = 'laser'; m.patternTimer = 600;
+    perForm[label] = !!_gravitosLaserFrame(m) &&
+      (m.type === 'gravitos' && !m._gravStarKey && !m._phaseSprite && m.patternState === 'laser');
+  }
+  m._phaseSprite = null; m._gravStarKey = null;
 
   // --- FX overlay: the spectacle the caster set deliberately does not carry --
   // Driven LAST: bossAI mutates patternState (it exits the pattern and re-picks
@@ -102,7 +109,7 @@ const r = await page.evaluate(async () => {
   } catch (e) { bursts = 'THREW: ' + String(e).slice(0, 110); }
   window.spawnSpriteBurst = realSpawn;
 
-  return { decoded, p1, p3, overrideFires, form2Excluded, fxLoaded, bursts,
+  return { decoded, p1, p3, overrideFires, perForm, fxLoaded, bursts,
            fxDims: fxImg ? fxImg.naturalWidth + 'x' + fxImg.naturalHeight : null,
            dims: F && F[0] ? F[0].naturalWidth + 'x' + F[0].naturalHeight : null };
 });
@@ -117,7 +124,8 @@ ok('SMOOTH: every frame visited in phase 1', new Set(p1).size === 9, { visited: 
 ok('PHASE-SCALED: phase 3 also completes across its longer 1450 ms window',
    p3[0] === 0 && p3[p3.length - 1] === 8 && p3.every((v, i) => i === 0 || v >= p3[i - 1]), { p3 });
 ok('the draw override selects the set during laser', r.overrideFires === true, {});
-ok('forms 2/3 keep their own treatment', r.form2Excluded === true, {});
+ok('form-1 ONLY, by design — the art is form-1\'s silhouette (forms 2/3 keep the generic set)',
+   r.perForm.form1 === true && r.perForm.form2 === false && r.perForm.form3 === false, r.perForm);
 // --- the FX overlay ---------------------------------------------------------
 ok('FX: the charge-ring sprite loads', r.fxLoaded === true, { dims: r.fxDims });
 ok('FX: the real pattern spawns BOTH rings — charge wind-up and release pulse',
