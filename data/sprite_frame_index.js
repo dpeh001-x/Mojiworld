@@ -31,9 +31,7 @@ window.LX_SPRITE_FRAME_INDEX = {
   "bosses/idle": {
    "aetherion2": 9,
    "aetherion": 9,
-   "gravitos2star": 9,
    "gravitos2": 9,
-   "gravitos3star": 9,
    "gravitos3": 9,
    "gravitos": 9,
    "kingKrook": 9,
@@ -50,9 +48,7 @@ window.LX_SPRITE_FRAME_INDEX = {
   "bosses/walk": {
    "aetherion2": 9,
    "aetherion": 9,
-   "gravitos2star": 9,
    "gravitos2": 9,
-   "gravitos3star": 9,
    "gravitos3": 9,
    "gravitos": 9,
    "kingKrook": 9,
