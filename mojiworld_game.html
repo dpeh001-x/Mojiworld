@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.600';
+const GAME_VERSION = 'v0.29.601';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -19805,7 +19805,7 @@ const monsterTypes = {
   // shootCd 2200 → 1300 (almost double rate of fire). `activeBoss`
   // trait flips the AI jump-roll from 2% / frame to 9% / frame so he
   // hop-strides instead of pacing.
-  young_confused_barnaby:         { name:'Young Confused Barnaby, the Lost Sentinel', w:120, h:140, color:'#d8c878', shell:'#6a4a18', hp:1065915, atk:281, def:76, evasion:126, exp:17454, mojicoins:6241, speed:2.1, jump:8, boss:true, level: 47, shoot:'mquery', shootCd:1300, signature:'A young Barnaby who never picked which wall to defend. Lashes out in two directions at once.', traits:{ activeBoss:true } },
+  young_confused_barnaby:         { name:'Young Confused Barnaby, the Lost Sentinel', w:120, h:140, color:'#d8c878', shell:'#6a4a18', hp:1598872, atk:225, def:76, evasion:126, exp:17454, mojicoins:6241, speed:2.1, jump:8, boss:true, level: 40, shoot:'mquery', shootCd:1300, signature:'A young Barnaby who never picked which wall to defend. Lashes out in two directions at once.', traits:{ activeBoss:true } },
   octoLegPoison:    { name:'Venom Tentacle',     w:80, h:60, color:'#cc66ee', shell:'#5a2078', hp:50000,  atk:120, def:20, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
   octoLegFreeze:    { name:'Frostbite Tentacle', w:80, h:60, color:'#88ccff', shell:'#3a5a88', hp:50000,  atk:120, def:20, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
   octoLegSkillLock: { name:'Silence Tentacle',   w:80, h:60, color:'#ffaa44', shell:'#aa6622', hp:50000,  atk:120, def:20, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
@@ -69853,6 +69853,104 @@ function bossAI(m, dt, distToPlayer) {
         m._quakeFired = false;
         m.patternState = 'idle';
         m.patternTimer = 0;
+      }
+    }
+  } else if (m.type === 'young_confused_barnaby') {
+    // ==== BARNABY — THE BOXER (v0.29.601, per user) ====
+    // "slightly sticky with fast movements, dash in, fade out boxer style".
+    //
+    // Four states on a loop. This branch OWNS his horizontal movement — that
+    // is why it lives here and not in _bossSpecialAttacks (which runs from
+    // updateMonsters before bossAI, so its m.vx is overwritten by the generic
+    // chase the same frame). His fire pillars stay in that helper, untouched.
+    //
+    //   stalk   footwork — holds a working range and never stands still
+    //   wind    the tell — a short plant before he commits
+    //   dashIn  the entry — a hard lunge to punching distance
+    //   jab     the combination — 2-3 short hooks
+    //   fade    the slip — straight back out at speed
+    //
+    // dt here is bossAI's, already x1.30, so these read longer than they play.
+    const _bxRange = 200;
+    const _pcx = (player.x || 0) + (player.w || 28) / 2;
+    const _mcx = m.x + m.w / 2;
+    const _dx  = _pcx - _mcx;
+    const _adx = Math.abs(_dx);
+    const _toP = _dx >= 0 ? 1 : -1;
+    const _spd = (m.speed || 2.1);
+    if (!m._bxState) { m._bxState = 'stalk'; m._bxT = 900; m._bxJabs = 0; }
+    m._bxT -= dt;
+    m.facing = _toP;                    // a boxer never turns his back
+
+    if (m._bxState === 'stalk') {
+      // FOOTWORK. Sticky spacing: close hard when out of range, step off when
+      // crowded, and bob constantly so he never reads as parked.
+      m.patternState = 'chase';
+      const _err = _adx - _bxRange;
+      const _bob = Math.sin((game.time || 0) * 0.26) * _spd * 0.55;
+      if (_err > 40)       m.vx = _toP * _spd * 2.3 + _bob;
+      else if (_err < -55) m.vx = -_toP * _spd * 2.0 + _bob;
+      else                 m.vx = _bob * 1.6;
+      if (m._bxT <= 0) { m._bxState = 'wind'; m._bxT = 260; }
+    } else if (m._bxState === 'wind') {
+      // THE TELL. Committed state, so ending it earns the player a punish
+      // window through the existing boss-stagger system.
+      m.patternState = 'wind';
+      m.vx *= 0.55;
+      if (typeof _budgetedParticlePush === 'function' && ((game.time | 0) % 2 === 0)) {
+        _budgetedParticlePush({ x: _mcx + (Math.random() - 0.5) * m.w * 0.6, y: m.y + m.h - 6,
+          vx: -_toP * (0.4 + Math.random()), vy: -0.4 - Math.random(),
+          life: 13, color: '#ffe9a8', size: 2 });
+      }
+      if (m._bxT <= 0) {
+        // v0.29.x — 420ms not 190: at 15px/frame the short dash closed only
+        // ~130px, so from the working range he could still be 200px out when
+        // it timed out and threw a 68px hook into empty air. The distance
+        // exit below is the intended end; this is just its ceiling.
+        m._bxState = 'dashIn'; m._bxT = 420;
+        m._bxJabs = 2 + (Math.random() < 0.5 ? 1 : 0);
+        m._dashCharging = 280;          // generic dash-streak VFX, no render changes
+      }
+    } else if (m._bxState === 'dashIn') {
+      // THE ENTRY.
+      m.patternState = 'dashIn';
+      m.vx = _toP * _spd * 7.2;
+      if (m._bxT <= 0 || _adx < 96) { m._bxState = 'jab'; m._bxT = 0; }
+    } else if (m._bxState === 'jab') {
+      // THE COMBINATION. Short hooks at fist height, ~150 ms apart.
+      m.patternState = 'jab';
+      m.vx *= 0.5;
+      if (m._bxT <= 0) {
+        if (m._bxJabs > 0 && Array.isArray(game.projectiles)) {
+          m._bxJabs--;
+          game.projectiles.push({
+            x: _mcx + _toP * (m.w * 0.42) - 34,
+            y: m.y + m.h * 0.34,
+            vx: _toP * 1.1, vy: 0,
+            w: 68, h: 58, life: 9,
+            damage: (m.atk || 225) * 0.9,
+            owner: 'enemy', skill: 'barnJab', color: '#ffdd88',
+            noGravity: true,
+          });
+          if (typeof addShake === 'function') addShake(3);
+          if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('hit'); } catch (e) {} }
+          m._bxT = 150;
+        } else {
+          m._bxState = 'fade'; m._bxT = 420; m._dashCharging = 280;
+        }
+      }
+    } else {
+      // THE SLIP. Straight back out. Raised evasion for the window sells it
+      // without granting true immunity — a player who reads the retreat can
+      // still punish him.
+      m.patternState = 'reposition';
+      m.vx = -_toP * _spd * 5.4;
+      if (m._bxEvaBase == null) m._bxEvaBase = m.evasion || 0;
+      m.evasion = m._bxEvaBase + 90;
+      if (m._bxT <= 0) {
+        m.evasion = m._bxEvaBase;
+        m._bxState = 'stalk';
+        m._bxT = 620 + Math.random() * 520;
       }
     }
   } else if (m.type === 'aetherion') {
