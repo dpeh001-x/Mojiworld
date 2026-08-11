@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.578';
+const GAME_VERSION = 'v0.29.579';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -25249,8 +25249,26 @@ const MAPS = {
     // The lagoon now reads as a wide, open shoreline with monsters
     // patrolling a single ground band — tidings & frogs hop along
     // the wet sand rather than nesting on rock outcrops.
+    // v0.29.579 — BUG5 (user, with a screenshot): "monsters all spawn in the
+    // same platform, making it easy to rope in and kill". Reproduced: 9 of the
+    // 15 mobs sat on ONE 156-wide ledge in a 2500-wide map.
+    //
+    // The ledge was not authored — v0.25.478 (above) left this map ground-only,
+    // so the ONLY elevated surface on any given load was the random "surprise
+    // platform" _variedMapData drops on 50% of loads (120-200 px wide, one per
+    // map). Every mob that could reach it congregated there, which is exactly
+    // the rope-and-kill funnel reported.
+    //
+    // Fix per user ("create another long platform for monster to spawn
+    // throughout the length"): two long sandbars now span the lagoon, so the
+    // platform-spawn pass has real length to distribute along instead of one
+    // 156-px perch. Split with a channel at x:1160-1340 so it still reads as a
+    // tidal shoreline rather than one continuous shelf, and set 80 px above the
+    // ground line to stay inside the default jump step.
     platforms: [
       {x:0,y:480,w:2500,h:60,type:'ground'},
+      {x:220,  y:400, w:940, h:14, type:'platform'},   // west sandbar
+      {x:1340, y:400, w:940, h:14, type:'platform'},   // east sandbar
     ],
     portals: [],
     // v0.25.820 — Beginner-map spread fix. Removed frog (Lv 14) and
@@ -33956,12 +33974,26 @@ function _csCustomDropdown(selectId) {
       const mr = modal.getBoundingClientRect();
       const scale = (mr.height / modal.clientHeight) || 1;
       const tr = trig.getBoundingClientRect();
-      const roomBelowCss = (mr.bottom - tr.bottom) / scale - 12;
+      // v0.29.579 (per user: "Smart" eyes could not be selected) — the
+      // bottom boundary is the PAGE-NAV BAR's top, not the modal's bottom.
+      // Room measured to mr.bottom was never actually free: .cs-page-nav
+      // (Back / LOOK-CLASS dots / Next) always sits in the last stretch of
+      // it and paints over whatever the list puts there.
+      const _nav = modal.querySelector('.cs-page-nav');
+      const _floorPx = (_nav && _nav.getBoundingClientRect().top) || mr.bottom;
+      const roomBelowCss = (Math.min(mr.bottom, _floorPx) - tr.bottom) / scale - 12;
       const roomAboveCss = (tr.top - mr.top) / scale - 12;
-      const useUp = roomBelowCss < 150 && roomAboveCss > roomBelowCss;
+      // Open on whichever side genuinely has more room once neither is
+      // comfortable, instead of only flipping under a fixed 150px test.
+      const useUp = roomAboveCss > roomBelowCss && roomBelowCss < 220;
       list.classList.toggle('cs-dd-up', useUp);
       const room = useUp ? roomAboveCss : roomBelowCss;
-      list.style.maxHeight = Math.max(120, Math.min(280, room)) + 'px';
+      // v0.29.579 — NO min floor. The old Math.max(120, ...) forced the list
+      // TALLER than the room just measured, pushing its tail under the nav bar
+      // where the final option could not be clicked — and scrolling could not
+      // rescue it, because the box itself extended under the bar. A short list
+      // that scrolls is reachable; a tall clipped one is not.
+      list.style.maxHeight = Math.max(72, Math.min(280, room)) + 'px';
     }
     const s = list.querySelector('.cs-dd-item.sel');
     if (s) s.scrollIntoView({ block: 'nearest' });
