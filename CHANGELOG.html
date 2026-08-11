@@ -121,6 +121,18 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.589 <span class="tag"><span class="pill bug">bug</span> Two ways the save loader silently wiped SP/AP &mdash; both closed</span></h2>
+<p>Per user: <em>&ldquo;ensure that AP and SP never resets / wipes except when specifically clicking on the reset button only&rdquo;</em>. Audited statically (every writer) and at runtime (a property watcher capturing a stack trace on any decrease, driven through the whole game).</p>
+<p><b>Every gameplay path was already clean.</b> Job advancement, master advancement, talent pick, <code>resetJobAndMaster</code>, level-up, map loads, save/load round-trip, class swap and death &mdash; <b>zero unexplained decreases</b>. Class swap even correctly <em>refunded</em> +2 rank points.</p>
+<p><b>The loader was not.</b> <code>_SAVE_NUMERIC_GUARDS</code> declared both pools as <code>[field, default 0, min 0, max 1000]</code>, which produced two silent wipes that no button triggered:</p>
+<ul>
+  <li><b>An absent key was materialised as 0.</b> The sanitiser runs on the parsed save and <code>loadState</code> then <code>Object.assign</code>s it over the live player. For most fields defaulting is right; for a point pool it is destructive. A save merely <em>lacking</em> the key (older schema, partial write, a value that was undefined at save time) had a literal <code>0</code> written in, which was then copied over the character's real total. Verified: an object with no <code>skillPoints</code> key came out of the sanitiser owning <code>skillPoints === 0</code>, and a load wiped 40&nbsp;SP / 7&nbsp;AP.</li>
+  <li><b>A hard cap of 1000 clamped large pools down.</b> Verified: <b>2500 SP &rarr; 1000</b> and <b>1800 rank points &rarr; 1000</b> &mdash; 1500 and 800 destroyed with no message. At +3&nbsp;SP per level plus quest and dev grants, 1000 is reachable in a long run.</li>
+</ul>
+<p><b>Fixes.</b> An absent progression pool is now left absent, so <code>Object.assign</code> is a no-op for it and the character keeps what it had (a genuinely new character still starts at 0 from the player factory). Caps raised 1000&nbsp;&rarr;&nbsp;1e9. Genuinely corrupt values (<code>NaN</code>, negative) are still repaired to 0 as before.</p>
+<p><b>Verified five ways:</b> absent key stays absent; 2500/1800 pass through unclamped; <code>NaN</code>/&minus;5 still repair to 0; a load from a save missing both keys keeps 40&nbsp;SP / 7&nbsp;AP; and a normal round-trip is exact (1234&nbsp;SP / 88&nbsp;AP).</p>
+<p>Together with the v0.29.584 save gate and the v0.29.587 advancement invariant, the pools now only ever fall through deliberate spending (skill tree, stat investment) or ascension.</p>
+
 <h2>v0.29.592 <span class="tag"><span class="pill polish">polish</span> The Mirror Self eases off — slower on its feet, softer on contact</span></h2>
 <p>Per user &mdash; <em>&ldquo;For mirror image bosses, try to reduce the speed of the movement slightly&rdquo;</em> and <em>&ldquo;also reduce the touch damage slightly&rdquo;.</em> <code>mirrorSelf</code> (the Lv-20 advancement trial) is the only boss carrying <code>isMirror</code>, so both changes are scoped to it.</p>
 <p><b>Movement 3.5 &rarr; 3.0 (&minus;14%).</b> Context for &ldquo;slightly&rdquo;: it was by far the fastest boss in the game &mdash; Gravitos runs 1.4, Octobaby 0.4 &mdash; and the base value is multiplied hard downstream, since its AI caps horizontal speed at <code>speed &times; 1.7</code> with an enrage phase adding another &times;1.2. The chase cap drops from 5.95 to <b>5.1</b> px/frame.</p>

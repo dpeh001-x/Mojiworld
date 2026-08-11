@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.592';
+const GAME_VERSION = 'v0.29.589';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -13946,134 +13946,6 @@ function _lxPeToggle() {
 // selection boxes, drawn in the late debug-overlay slot (over actors). Uses
 // the same coordinate convention as drawWorldProps: x is camera-subtracted
 // manually, y is raw world (vertical scroll rides the active ctx transform).
-// =========================================================================
-// QUEST COMPASS — the "navigate" half of the navigator.
-// Reads game.qnav (set by the 🧭 Track button) and draws, every frame:
-//   • a pin bobbing over the destination when it is on this map and on screen
-//   • an edge chevron pointing the way when it is off screen
-//   • a banner naming the destination and the next hop when it is another map
-// Destination resolution is cached for 300ms — _qnavDest walks candidate
-// lists, and this runs in the render loop.
-// =========================================================================
-const _LX_QC = { at: 0, qid: null, map: null, d: null, bob: 0 };
-
-function _qnavLiveDest() {
-  const qid = (typeof game !== 'undefined') ? game.qnav : null;
-  if (!qid) return null;
-  const now = (typeof game !== 'undefined' && game.time) || 0;
-  if (_LX_QC.qid === qid && _LX_QC.map === game.currentMap && (now - _LX_QC.at) < 300) return _LX_QC.d;
-  let d = null;
-  try { d = _qnavDest(qid); } catch (_e) { d = null; }
-  _LX_QC.at = now; _LX_QC.qid = qid; _LX_QC.map = game.currentMap; _LX_QC.d = d;
-  return d;
-}
-
-function _qnavDrawCompass() {
-  if (typeof game === 'undefined' || !game.qnav) return;
-  const d = _qnavLiveDest();
-  if (!d) return;
-  const here = game.currentMap;
-  const camX = (game.camera && game.camera.x) || 0;
-  const mapName = (MAPS[d.map] && MAPS[d.map].name) || d.map;
-  const mob = (typeof monsterTypes !== 'undefined' && monsterTypes[d.who] && monsterTypes[d.who].name) || d.who;
-
-  // Where on THIS map should the arrow point?
-  //   same map, npc   -> the NPC's own x
-  //   same map, hunt  -> the nearest live monster of that type, if any
-  //   another map     -> the next portal on the route, which is the only
-  //                      thing on this map that gets you closer
-  let tx = null, sub = '', title = '';
-  if (d.map === here) {
-    if (d.kind === 'npc' && Number.isFinite(d.x)) { tx = d.x; title = d.who; sub = 'here on this map'; }
-    else {
-      let best = null, bd = Infinity;
-      for (const m of ((typeof monsters !== 'undefined' && monsters) || [])) {
-        if (!m || m.dead || m.type !== d.who) continue;
-        const dist = Math.abs((m.x || 0) - (player.x || 0));
-        if (dist < bd) { bd = dist; best = m; }
-      }
-      title = mob;
-      if (best) { tx = best.x; sub = 'nearest target'; }
-      else { sub = 'they spawn on this map'; }
-    }
-  } else {
-    const r = _qnavRoute(here, d.map);
-    if (r && r.next && r.next.portal && Number.isFinite(r.next.portal.x)) {
-      tx = r.next.portal.x;
-      const pn = (r.next.portal.name || (MAPS[r.next.portal.dest] && MAPS[r.next.portal.dest].name) || r.next.portal.dest);
-      title = `${d.kind === 'npc' ? d.who : mob} — ${mapName}`;
-      sub = `${r.dist} map${r.dist === 1 ? '' : 's'} away · next: ${pn}`;
-    } else {
-      title = `${d.kind === 'npc' ? d.who : mob} — ${mapName}`;
-      sub = 'no walking route — try the taxi';
-    }
-  }
-
-  ctx.save();
-  ctx.textBaseline = 'middle';
-  _LX_QC.bob = (_LX_QC.bob + 0.06) % (Math.PI * 2);
-  const bob = Math.sin(_LX_QC.bob) * 3;
-
-  if (tx != null) {
-    const sx = tx - camX;
-    const py = (player && Number.isFinite(player.y)) ? (player.y - 90) : (H * 0.45);
-    if (sx > 20 && sx < W - 20) {
-      // on screen — drop a pin on it
-      ctx.font = '22px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('📍', sx, py + bob);
-    } else {
-      // off screen — chevron at the edge, at the player's eye line
-      const right = sx >= W - 20;
-      const ex = right ? W - 26 : 26;
-      const ey = Math.max(60, Math.min(H - 60, py));
-      ctx.globalAlpha = 0.9;
-      ctx.fillStyle = '#ffd84a';
-      ctx.beginPath();
-      const dir = right ? 1 : -1;
-      const nudge = dir * (3 + bob);
-      ctx.moveTo(ex + dir * 13 + nudge, ey);
-      ctx.lineTo(ex - dir * 9 + nudge, ey - 12);
-      ctx.lineTo(ex - dir * 9 + nudge, ey + 12);
-      ctx.closePath();
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      // distance in whole map units, so "how much further" is legible
-      const far = Math.round(Math.abs(tx - (player.x || 0)));
-      ctx.font = '700 11px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillStyle = '#ffd84a';
-      ctx.fillText(String(far), ex, ey + 26);
-    }
-  }
-
-  // Banner — always, so the player can read the goal without opening the panel.
-  const label = `🧭 ${title}`;
-  ctx.font = '700 13px system-ui, sans-serif';
-  const w1 = ctx.measureText(label).width;
-  ctx.font = '11px system-ui, sans-serif';
-  const w2 = ctx.measureText(sub).width;
-  const bw = Math.min(W - 24, Math.max(w1, w2) + 24);
-  // Sits BELOW the map-name pill, which is an HTML element centred at the top
-  // of the canvas — at by:12 the two overlapped and both became unreadable.
-  const bx = (W - bw) / 2, by = 64;
-  ctx.globalAlpha = 0.86;
-  ctx.fillStyle = 'rgba(16,12,28,0.92)';
-  ctx.strokeStyle = 'rgba(255,216,74,0.55)';
-  ctx.lineWidth = 1;
-  if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by, bw, 38, 9); ctx.fill(); ctx.stroke(); }
-  else { ctx.fillRect(bx, by, bw, 38); ctx.strokeRect(bx, by, bw, 38); }
-  ctx.globalAlpha = 1;
-  ctx.textAlign = 'center';
-  ctx.font = '700 13px system-ui, sans-serif';
-  ctx.fillStyle = '#ffe9a8';
-  ctx.fillText(label, W / 2, by + 13);
-  ctx.font = '11px system-ui, sans-serif';
-  ctx.fillStyle = '#cfc8e0';
-  ctx.fillText(sub, W / 2, by + 28);
-  ctx.restore();
-}
-
 function _lxPeDrawOverlay() {
   if (!_LX_PE.open) return;
   if (_LX_PE._map !== game.currentMap) {               // map changed under the editor
@@ -36102,7 +35974,6 @@ const PLAYER_SAVE_FIELDS = [
 ];
 const GAME_SAVE_FIELDS = [
   'currentMap','bossDefeated','kills','achievements',
-  'qnav',   // v0.29.583 — quest compass target; an allowlist, so tracking resets on reload without it
   // v0.26.451 - per-map chest restock cooldown (anti re-entry farm); persisted so reload can't reset it.
   '_chestCooldown',
   '_jukeboxHeard',   // v0.29.73 — DJ Vinyl jukebox: tracks the player has heard in-world ({trackId:true})
@@ -37936,8 +37807,12 @@ const _SAVE_NUMERIC_GUARDS = [
   ['baseCrit',        5,    0,   100],
   ['baseSpeed',       0,    0,   100],
   ['baseJump',        0,    0,   100],
-  ['skillPoints',     0,    0,   1000],
-  ['skillRankPoints', 0,    0,   1000],
+  // v0.29.589 — cap raised 1000 -> 1e9. The old ceiling silently CLAMPED a
+  // legitimate pool down on load: verified 2500 SP -> 1000 and 1800 rank
+  // points -> 1000, a wipe of 1500/800 with no message. +3 SP per level plus
+  // quest and dev grants passes 1000 in a long run, so this was reachable.
+  ['skillPoints',     0,    0,   1e9],
+  ['skillRankPoints', 0,    0,   1e9],
   ['setshards',       0,    0,   1e9],
   ['bankBalance',     0,    0,   1e12],   // was unguarded — a NaN/Infinity here propagated into the wallet on "Withdraw all"
   // v0.26.x — persisted cooldown/boost timestamps: NaN/Infinity from a corrupted
@@ -37947,11 +37822,27 @@ const _SAVE_NUMERIC_GUARDS = [
   // v0.25.457 — Kaching premium currency. Same NaN/Infinity defense as
   // the other numeric fields; can never go negative or exceed 1e12.
 ];
+// v0.29.589 — pools that must never be invented or clamped down by the
+// save sanitiser. SP and AP are the same field (skillPoints); skillRankPoints
+// is the skill-rank pool.
+const _LX_POINT_POOLS = new Set(['skillPoints', 'skillRankPoints']);
 function _sanitizePlayerSaveNumerics(p) {
   if (!p) return p;
   for (const [field, dflt, lo, hi] of _SAVE_NUMERIC_GUARDS) {
     const v = p[field];
     if (typeof v !== 'number' || !isFinite(v)) {
+      // v0.29.589 — DO NOT INVENT A ZERO FOR AN ABSENT PROGRESSION POOL.
+      // loadState calls this on the parsed save and THEN Object.assigns it over
+      // the live player. For most fields defaulting an absent value is right.
+      // For the point pools it is destructive: a save that simply lacks the key
+      // (older schema, partial write, a field that was undefined at save time)
+      // had a literal 0 written in here, which Object.assign then copied over a
+      // character's real SP/AP. Verified: an object with no skillPoints key came
+      // out of this function owning skillPoints === 0.
+      // Leaving the key ABSENT makes Object.assign a no-op for it, so the
+      // character keeps whatever it already had. A genuinely new character still
+      // starts at 0 from the player factory.
+      if (_LX_POINT_POOLS.has(field) && !Object.prototype.hasOwnProperty.call(p, field)) continue;
       p[field] = dflt;
       continue;
     }
@@ -42260,17 +42151,6 @@ try { window._mpBroadcastDrop = _mpBroadcastDrop; } catch (e) {}
 // Quests are tracked via player.quests = { active, completed, unlocked }.
 // Progress is incremented for the matching `kind + target` quest, and
 // completion grants rewards instantly + saves state.
-// v0.29.583 — drop the compass target when that quest is no longer active.
-// Without this the arrow keeps pointing at a completed quest's NPC, which is
-// worse than no arrow: it is confidently wrong.
-function _qnavPrune() {
-  try {
-    const id = game && game.qnav;
-    if (!id) return;
-    if (!QUESTS[id] || (player.quests && (player.quests.completed[id] || (!player.quests.active[id] && !player.quests.unlocked[id])))) game.qnav = null;
-  } catch (_e) {}
-}
-
 function _ensureQuests() {
   if (!player.quests) player.quests = { active: {}, completed: {}, unlocked: {} };
   if (!player.quests.active)    player.quests.active    = {};
@@ -42589,7 +42469,6 @@ function tickQuestKill(monsterType, isBoss) {
   // killing a quest target with the journal visible saw a stale counter
   // until they closed + reopened the modal. Cheap — only fires if the
   // journal is actually visible and there was real progress.
-  if (typeof _qnavPrune === 'function') _qnavPrune();
   if (_anyProgress && typeof renderQuestJournal === 'function') {
     const _qm = document.getElementById('quest-modal');
     if (_qm && _qm.style.display === 'flex') {
@@ -42754,8 +42633,6 @@ function _qnavDest(qid) {
   const q = (typeof QUESTS !== 'undefined') && QUESTS[qid];
   if (!q) return null;
   const here = (typeof game !== 'undefined' && game.currentMap) || null;
-  const _act = (typeof player !== 'undefined' && player.quests && player.quests.active) ? player.quests.active[qid] : null;
-  const active = !!_act, ready = !!(_act && _act.readyToHandIn);
   // Nearest by hop count, BUT a candidate with no portal route still wins over
   // nothing. Some arenas (innerDimension, the zodiac houses) are entered by a
   // scripted warp and have no incoming portal, so BFS scores every candidate
@@ -42778,11 +42655,10 @@ function _qnavDest(qid) {
 
   const who = q.giver || q.npc;
   const spots = who && _LX_QNAV.npc[who];
-  const npcDest = () => {
-    if (!spots || !spots.length) return null;
+  if (spots && spots.length) {
     const hit = pick(spots, (s) => s.map);
-    return hit ? { kind: 'npc', who, map: hit.c.map, x: hit.c.x, y: hit.c.y, hops: hopsOf(hit.d), role: hit.c.role, ready } : null;
-  };
+    if (hit) return { kind: 'npc', who, map: hit.c.map, x: hit.c.x, y: hit.c.y, hops: hopsOf(hit.d), role: hit.c.role };
+  }
   // No placed NPC — 13 boss/visit quests, plus q_inner_dim_trial whose giver is
   // the literal placeholder "your class instructor". Fall back to where the
   // objective lives so no card is left reading "location unknown". Bosses are
@@ -42791,21 +42667,14 @@ function _qnavDest(qid) {
   // Multi-objective quests (q_long_dawn_1 wants three different bosses) name a
   // `target` that no map spawns; the objective list is the real answer, so try
   // each in order and point at the first leg the player can actually reach.
-  const huntDest = () => {
-    const cands = [q.target, ...((q.objectives || []).map((o) => o && o.target))];
-    for (const t of cands) {
-      const maps = t && _LX_QNAV.mob[t];
-      if (!maps || !maps.length) continue;
-      const hit = pick(maps, (m) => m);
-      if (hit) return { kind: 'hunt', who: t, map: hit.c, x: null, y: null, hops: hopsOf(hit.d) };
-    }
-    return null;
-  };
-  // An accepted quest that still has work to do sends you to the work, not to
-  // whoever handed it out. Only a quest flagged readyToHandIn wants the walk
-  // back — and only ~20 quests are ever flagged, because the rest complete on
-  // the final kill with no return trip at all.
-  return (active && !ready) ? (huntDest() || npcDest()) : (npcDest() || huntDest());
+  const cands = [q.target, ...((q.objectives || []).map((o) => o && o.target))];
+  for (const t of cands) {
+    const maps = t && _LX_QNAV.mob[t];
+    if (!maps || !maps.length) continue;
+    const hit = pick(maps, (m) => m);
+    if (hit) return { kind: 'hunt', who: t, map: hit.c, x: null, y: null, hops: hopsOf(hit.d) };
+  }
+  return null;
 }
 
 // Human label for a destination: "Nurse Joyce — Everdawn Megamall".
@@ -46571,47 +46440,6 @@ function _nextStoryBeat() {
   return null;
 }
 
-// One "where do I finish this?" row per quest card. Inline-styled on purpose:
-// the objectives chips right above it already work that way, so this needs no
-// _QJ_STYLES edit and cannot collide with a parallel session's CSS changes.
-//
-// Shown on ACTIVE and AVAILABLE cards. The pre-existing 📍 Locate button was
-// active-only, and named the giver without ever naming a map — which is the
-// gap the user hit ("no way to find the npc"). Completed cards skip the row.
-function _qnavRowHtml(id, isDone) {
-  if (isDone) return '';
-  let d = null;
-  try { d = _qnavDest(id); } catch (_e) { return ''; }
-  if (!d) return '';
-  const mapName = (MAPS[d.map] && MAPS[d.map].name) || d.map;
-  const here = (typeof game !== 'undefined' && game.currentMap) || null;
-  const mob = (typeof monsterTypes !== 'undefined' && monsterTypes[d.who] && monsterTypes[d.who].name) || d.who;
-  const who = d.kind === 'npc' ? d.who : mob;
-  const verb = d.kind === 'npc' ? (d.ready ? 'Turn in to' : 'Accept from') : 'Hunt';
-
-  // hops === null means the BFS found no portal chain (warp-only arenas).
-  // Say so rather than implying a walk exists.
-  let hop;
-  if (d.map === here) hop = '<span style="color:#7fe08a;font-weight:700;">you are here</span>';
-  else if (d.hops == null) hop = '<span style="color:#c9a0ff;">no walking route</span>';
-  else hop = `${d.hops} map${d.hops === 1 ? '' : 's'} away`;
-
-  const tracked = (typeof game !== 'undefined' && game.qnav === id);
-  const btn = `<button type="button" data-qtrack="${id}" title="${tracked ? 'Stop tracking' : 'Show a compass arrow to this destination'}"
-    style="margin-left:auto;flex:0 0 auto;padding:2px 9px;border-radius:7px;font-size:11px;font-weight:800;cursor:pointer;
-    border:0.5px solid ${tracked ? 'rgba(255,216,74,0.9)' : 'rgba(140,170,255,0.55)'};
-    background:${tracked ? 'rgba(255,216,74,0.18)' : 'rgba(120,150,255,0.12)'};
-    color:${tracked ? '#ffd84a' : '#a8c0ff'};">${tracked ? '🧭 Tracking' : '🧭 Track'}</button>`;
-
-  return `<div style="display:flex;align-items:center;gap:6px;margin-top:5px;padding:3px 7px;border-radius:7px;
-    background:rgba(255,255,255,0.045);border-left:2px solid ${d.kind === 'npc' ? '#7fb0ff' : '#ff9a6a'};font-size:11px;color:#cfc8e0;">
-    <span style="flex:0 0 auto;">📍</span>
-    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${verb} <b style="color:#efe8ff;">${who}</b> — <b style="color:#efe8ff;">${mapName}</b></span>
-    <span style="flex:0 0 auto;opacity:0.75;">· ${hop}</span>
-    ${btn}
-  </div>`;
-}
-
 function renderQuestJournal() {
   _ensureQuests();
   const list = document.getElementById('quest-list');
@@ -46817,7 +46645,6 @@ function renderQuestJournal() {
         <div class="qj-name">${q.name}</div>
         <div class="qj-desc">${q.desc}</div>
         ${_objsHtml}
-        ${_qnavRowHtml(id, isDone)}
         <div class="qj-meta">${metaHtml}</div>
       </div>
       <div class="qj-action">${btnHtml}</div>
@@ -46920,24 +46747,6 @@ function renderQuestJournal() {
   // quest in a toast, and (if the target map is a known map id with a
   // resolvable display name) opens the world map centred on it so the
   // player can fast-travel directly.
-  // v0.29.582 — 🧭 Track toggles the on-screen compass for one quest.
-  list.querySelectorAll('[data-qtrack]').forEach(btn => {
-    btn.onclick = (ev) => {
-      ev.stopPropagation();
-      const qid = btn.dataset.qtrack;
-      if (game.qnav === qid) {
-        game.qnav = null;
-        if (typeof showToast === 'function') showToast('🧭 Tracking off', 'common');
-      } else {
-        game.qnav = qid;
-        const d = (typeof _qnavDest === 'function') ? _qnavDest(qid) : null;
-        if (typeof showToast === 'function') {
-          showToast(d ? `🧭 Tracking — ${_qnavLabel(d)}` : '🧭 Tracking', 'rare');
-        }
-      }
-      try { renderQuestJournal(); } catch (_e) {}
-    };
-  });
   list.querySelectorAll('[data-qlocate]').forEach(btn => {
     btn.onclick = () => {
       const q = QUESTS[btn.dataset.qlocate];
@@ -46963,18 +46772,6 @@ function renderQuestJournal() {
       } else {
         line = `📍 Check your objectives — ${q.name}`;
       }
-      // v0.29.582 — always lead with WHERE. The branches below name the
-      // giver and the objective but never a map, which made "Locate" unable
-      // to answer the one question it is named for.
-      try {
-        const _d = (typeof _qnavDest === 'function') ? _qnavDest(btn.dataset.qlocate) : null;
-        if (_d) {
-          const _mn = (MAPS[_d.map] && MAPS[_d.map].name) || _d.map;
-          const _hz = (_d.map === game.currentMap) ? 'you are here'
-            : (_d.hops == null ? 'no walking route' : `${_d.hops} map${_d.hops === 1 ? '' : 's'} away`);
-          line = `📍 ${_mn} (${_hz}) — ` + line.replace(/^📍 /, '');
-        }
-      } catch (_e) {}
       if (typeof showToast === 'function') showToast(line, 'rare');
       // If the target is a visitable map AND it's already been visited,
       // open the world map so the player can taxi there in one click.
@@ -66830,7 +66627,17 @@ function updateMonsters(dt) {
         // the player instead of trundling. Combined with the higher
         // m.jump value on those mobs, the effect is constant vertical
         // pressure — no safe-platform turtling.
-        const _jumpP = (m.traits && m.traits.activeBoss) ? 0.09 : 0.02;
+        // v0.29.5xx — KING GLOOPALOO BOUNDS (per user "also make him jump
+        // quite a bit"), matching the Mirror-style chase he was given in
+        // v0.29.591: a hopping blob reads as pursuing, a walking one does not.
+        // He carries no activeBoss trait — that flag brings other AI behaviour
+        // with it — so he gets his own roll instead of inheriting the boss
+        // tier. Measured baseline was 0.27 jumps/sec, i.e. he basically walked.
+        // Height is intentionally untouched: m.jump also feeds the
+        // platform-reach jump at x1.7 (already good for ~189px), and raising it
+        // risked launching a 112x98 boss clean out of the Grotto geometry.
+        const _jumpP = (m.type === 'king') ? 0.11
+                     : (m.traits && m.traits.activeBoss) ? 0.09 : 0.02;
         if (m.jump > 0 && m.onGround && Math.random() < _jumpP) m.vy = -m.jump;
       } else {
         // Out of aggro range — clear the per-monster offset so the
@@ -68663,14 +68470,8 @@ function _bossSpecialFired(m, now) {
 // after. Phase 2 swaps ONLY the opening leap for a teleport -- the sequence
 // of actual attacks (goo -> glue -> quake) is identical in both phases, so
 // escalation never re-teaches the fight.
-const _GLOOP_CYCLE_P1 = ['leap', 'gooBarrage', 'latch', 'gluespray', 'leap', 'quake'];
-const _GLOOP_CYCLE_P2 = ['teleport', 'gooBarrage', 'latch', 'gluespray', 'leap', 'quake'];
-// v0.29.591 — GEL LATCH tuning. Deliberately a SLOW, not a stun: being stuck to
-// the boss has to stay playable, and this is the game's first boss.
-const _GLOOP_LATCH_WINDUP = 450;    // telegraph before the lunge (pattern-ms)
-const _GLOOP_LATCH_LUNGE  = 700;    // how long he commits to the grab
-const _GLOOP_LATCH_HOLD   = 2400;   // max time glued before he peels off himself
-const _GLOOP_LATCH_BREAK  = 0.012;  // fraction of his maxHp that shakes him off
+const _GLOOP_CYCLE_P1 = ['leap', 'gooBarrage', 'leap', 'gluespray', 'leap', 'quake'];
+const _GLOOP_CYCLE_P2 = ['teleport', 'gooBarrage', 'leap', 'gluespray', 'leap', 'quake'];
 function _gloopCycle(m) { return m._bossPhase2 ? _GLOOP_CYCLE_P2 : _GLOOP_CYCLE_P1; }
 // Fixed recovery between beats (pattern-ms; bossAI ticks these at dt x1.30).
 const _GLOOP_GAP = 1800;
@@ -68875,19 +68676,7 @@ function bossAI(m, dt, distToPlayer) {
     // when their cooldown is ready; otherwise falls through to the
     // original leap.
     if (m.patternState === 'idle') {
-      // v0.29.591 — AGILE CHASE, the Mirror Self shape: vx accelerates toward the
-      // player and is hard-capped. The old drift was 0.05 per frame with NO
-      // cap at all, which measured as 0.896 px/frame of real closing speed
-      // once the engine's friction and his own leaps are included -- he
-      // approached, but never pressured. This lands at 1.600 px/frame.
-      // Deliberately slower than the first pass (0.22 / x2.2) per user, and
-      // still far under player run speed: he is a heavy vessel that closes,
-      // not a sprinter. Kiting stays a real answer, and the LATCH beat below
-      // is what actually punishes standing still.
-      m.vx += m.facing * 0.13;
-      const _chaseCap = (m.speed || 1.4) * 1.5;
-      if (m.vx >  _chaseCap) m.vx =  _chaseCap;
-      if (m.vx < -_chaseCap) m.vx = -_chaseCap;
+      m.vx += m.facing * 0.05;
       if (m.patternTimer > _GLOOP_GAP && m.onGround) {
         const _now = game.time | 0;
         // v0.29.586 — FIXED ROTATION. This block used to roll a random number
@@ -68906,8 +68695,6 @@ function bossAI(m, dt, distToPlayer) {
           m._lastGlueAt = _now; m.patternState = 'gluespray'; m._glueFired = 0; m._glueNextAt = 0;
         } else if (_next === 'gooBarrage') {
           m._lastGooAt = _now; m.patternState = 'gooBarrage'; m._gooFired = 0; m._gooNextAt = 0;
-        } else if (_next === 'latch') {
-          m.patternState = 'latch'; m._latched = 0; m._latchAnnounced = false; m._latchStuck = false;
         } else if (_next === 'quake') {
           m._lastQuakeAt = _now; m.patternState = 'quake'; m._quakeAnnounced = false; m._quakeFired = false;
         } else {
@@ -68917,70 +68704,6 @@ function bossAI(m, dt, distToPlayer) {
         // stays coherent; the rotation, not the clock, decides what fires.
         if (typeof _bossSpecialFired === 'function') _bossSpecialFired(m, _now);
         m.patternTimer = 0;
-      }
-    } else if (m.patternState === 'latch') {
-      // v0.29.591 — GEL LATCH. A telegraphed lunge that sticks him to the player.
-      //   wind-up  -> a collapsing ring on his body, dodgeable on sight
-      //   lunge    -> he commits; whiffing drops him into the punish window
-      //   glued    -> he rides alongside and SLOWS the player (never stuns),
-      //               refreshing the same slow his puddles already use
-      //   break    -> land ~1.2% of his maxHp and he is shaken off, which
-      //               also ends the cast into idle and so opens the punish
-      //               window through the shared stagger path.
-      const _pcx = player.x + player.w / 2, _mcx = m.x + m.w / 2;
-      if (!m._latchStuck) {
-        m.facing = _pcx > _mcx ? 1 : -1;
-        if (m.patternTimer < _GLOOP_LATCH_WINDUP) {
-          m.vx *= 0.82;
-          if (!m._latchAnnounced) {
-            m._latchAnnounced = true;
-            if (typeof showToast === 'function') showToast('\ud83e\uddca KING GLOOPALOO LUNGES \u2014 break away!', 'rare');
-          }
-          if ((game.time & 1) === 0) {
-            const _lp = m.patternTimer / _GLOOP_LATCH_WINDUP;
-            _gloopTelegraphRing(_gloopMuzzleX(m), _gloopMuzzleY(m), 96 * (1 - _lp) + 16, 10, '#66ffcc');
-          }
-        } else {
-          m.vx += m.facing * 0.85;
-          const _lCap = (m.speed || 1.4) * 4.2;
-          if (m.vx >  _lCap) m.vx =  _lCap;
-          if (m.vx < -_lCap) m.vx = -_lCap;
-          const _dxL = Math.abs(_pcx - _mcx), _dyL = Math.abs((player.y + player.h / 2) - (m.y + m.h / 2));
-          if (_dxL < (m.w * 0.5 + player.w * 0.5) && _dyL < m.h * 0.65 && player.hp > 0) {
-            m._latchStuck = true;
-            m._latched = _GLOOP_LATCH_HOLD;
-            m._latchHp0 = m.currentHp;
-            if (typeof showToast === 'function') showToast('\ud83e\uddca GLUED \u2014 hit him to shake him off!', 'epic');
-            if (typeof addShake === 'function') addShake(7);
-          } else if (m.patternTimer > _GLOOP_LATCH_WINDUP + _GLOOP_LATCH_LUNGE) {
-            m._latchAnnounced = false;
-            m.patternState = 'idle'; m.patternTimer = 0;   // whiffed -> punish window
-          }
-        }
-      } else {
-        m._latched -= dt;
-        // A SLOW, not a stun: the player keeps full control and can fight or
-        // run, they are just wading. Same channel the gel puddles use.
-        player._slowTimer = Math.max(player._slowTimer || 0, 120);
-        // Ride alongside rather than snapping on top of them.
-        const _wantX = _pcx - m.facing * (m.w * 0.45) - m.w / 2;
-        const _ww = (game.mapData && game.mapData.worldWidth) || 2200;
-        m.x = Math.max(20, Math.min(_ww - m.w - 20, m.x + (_wantX - m.x) * 0.18));
-        m.vx = 0;
-        if ((game.time & 3) === 0 && typeof _budgetedParticlePush === 'function') {
-          _budgetedParticlePush({
-            x: _mcx + (_pcx - _mcx) * Math.random(),
-            y: _gloopMuzzleY(m) + (Math.random() - 0.5) * 20,
-            vx: 0, vy: -0.4, life: 14, color: '#66ffcc', size: 2,
-          });
-        }
-        const _dealt = (m._latchHp0 || 0) - m.currentHp;
-        if (_dealt >= m.maxHp * _GLOOP_LATCH_BREAK || m._latched <= 0) {
-          const _shaken = _dealt >= m.maxHp * _GLOOP_LATCH_BREAK;
-          m._latchStuck = false; m._latched = 0; m._latchAnnounced = false;
-          m.patternState = 'idle'; m.patternTimer = 0;
-          if (_shaken && typeof showToast === 'function') showToast('\ud83e\uddca You shook him off!', 'rare');
-        }
       }
     } else if (m.patternState === 'leap') {
       // v0.25.855 — Telegraph the upcoming splash with a 12-frame
@@ -116533,7 +116256,6 @@ function loop(time) {
   drawWorldArtOverlay();
   drawCalibrationGrid();   // v0.25.749 — debug grid for size-comparison across maps
   if (typeof _lxPeDrawOverlay === 'function') _lxPeDrawOverlay();   // v0.29.484 — Ctrl Prop Editor selection boxes
-  if (typeof _qnavDrawCompass === 'function') _qnavDrawCompass();   // v0.29.583 — quest compass (game.qnav)
   drawDamageNumbers();
   drawIceCheer();   // v0.25.458 — Icy Tower combo overlay
   _drawDayNightTint();   // v0.29.415 — dawn/dusk/night grade: one rect, free by day
