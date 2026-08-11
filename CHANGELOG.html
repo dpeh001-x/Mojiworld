@@ -188,6 +188,30 @@ gap 10 -> 0.813x     gap 90 -> 0.206x</code></pre>
 <p>The falloff applies only where a <em>genuine</em> attacker level was passed &mdash; contact damage and every boss/monster special route <code>_mobLevel(m)</code> in. Call sites that pass no level fall back to <code>mapData.levelReq</code>, and that field cannot be trusted: a sweep at the end of map authoring (<code>_m.levelReq = 1</code>) forces it to <b>1</b> on every open map, so a Lv 70 zone reads as Lv 1 at runtime. Re-tuning environmental damage against a field that lies would have made endgame hazards trivial, so those paths keep their existing behaviour and a test pins that they do. Normal-mob projectiles needed no change either &mdash; their damage is banded at spawn and the landed loss is already capped at <code>p.damage &times; 1.35</code> (v0.29.262).</p>
 <p><b>Verification.</b> <code>scripts/outlevel_damage_test.mjs</code> runs <b>9</b> assertions against the live <code>_diffDmg</code> under sterile conditions (difficulty 1&times;, no curse hex, no Glass Skin edict, Second Skin disarmed so its NEGATE cannot mask a result). <b>4 of the 9 fail on the previous build</b>, including the monotonicity check and the headline comparison. <b>9/9 on the fix, zero page errors.</b></p>
 
+<h2>v0.29.625 <span class="tag"><span class="pill bug">bug</span> Dead players stop casting &mdash; skills, mobile deck and blink all gated at one choke point</span></h2>
+<p>Per user <b>BUG12</b> (Block-land Toy Outpost): <em>despite being dead, I can still use skills.</em> Reproduced immediately on v0.29.624, and it was worse than the skill bar &mdash; you could also <b>blink your own corpse around the map</b>, paying MP for the privilege.</p>
+
+<h3>Why it was reachable</h3>
+<p><code>updatePlayer()</code> early-returns on <code>player._downed</code>, and that return is what stopped the held-key skill poll. But <code>_downed</code> is the <b>co-op knockdown</b> state &mdash; ordinary death sets <code>hp &lt;= 0</code> and never sets it. So the early return never fired, the poll loop ran as normal, and every skill stayed live on a corpse.</p>
+<p>The basic attack was already gated: the edge-triggered Z keydown checks <code>player.hp &gt; 0</code> explicitly. That gate simply was never mirrored onto the other cast paths, so Z was the one input that correctly refused.</p>
+
+<h3>The fix is one guard, not five</h3>
+<p><code>castSkill()</code> is the choke point <em>every</em> cast path funnels through &mdash; the held-key poll in <code>updatePlayer</code>, the edge-triggered Z keydown, the mobile control deck, the hotkey cards, and the mage up-warp's <code>castSkill('blink')</code>. The guard goes there rather than at any one caller, so a future sixth path inherits it for free.</p>
+<p>This only restores a convention the rest of the skill code already assumed. Several <em>deferred</em> skill effects &mdash; the <code>scheduleSkillTimer</code> callbacks and the delayed-cast map check &mdash; already open with <code>if (player.hp &lt;= 0) return</code>. The tail of a cast knew not to resolve on a dead player while the head of it happily started one.</p>
+<p><code>_god</code> is exempted so dev-mode testing is unaffected, and <code>_downed</code> is folded into the same check so the co-op knockdown is enforced at the choke point instead of depending on an early return that only one of the five paths passes through.</p>
+
+<h3>Verification</h3>
+<p>Measured on the synchronous side effects of a cast &mdash; MP actually deducted and cooldown actually armed &mdash; driving the real <code>castSkill</code> and the real <code>updatePlayer</code>. An early attempt counted spawned arrows instead and had to be thrown out: at <code>hp&nbsp;0</code> the death flow respawns the player inside the same frame and clears <code>game.projectiles</code>, so the arrow count reads 0 whether the cast was blocked or not.</p>
+<pre style="background:#11161d;border:1px solid #2a3340;border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:12px;line-height:1.6"><code>                            v0.29.624        v0.29.625
+  keyboard, alive               casts            casts    <- control, unchanged
+  keyboard, dead (hp 0)         casts          blocked    <- the reported bug
+  mobile deck / direct, dead    casts          blocked
+  blink, dead            moves + pays MP       blocked
+  co-op downed                blocked          blocked    <- already worked
+  dead + dev godmode                -            casts    <- dev testing preserved</code></pre>
+<p>The alive path is the control that matters: the guard refuses only on a dead or downed player and changes nothing else about casting.</p>
+<p class="note"><b>Shipping note.</b> This guard reached <code>origin/main</code> inside commit <code>98639c94</code>, which is titled for an unrelated Honeycomb Hollow change &mdash; a parallel session staged the whole working tree and swept up this file while the fix was still uncommitted. The code is correct and verified live on that build; only the changelog entry was missing, which is what this entry supplies. It is the same <code>git add -A</code> hazard the project conventions warn about, and worth recording precisely because the resulting commit message describes none of it.</p>
+
 <h2>v0.29.624 <span class="tag"><span class="pill bug">bug</span> Dev &ldquo;Set level&rdquo; now hands you the AP a real player at that level would have</span></h2>
 <p>Per user: <em>on setting the level for the dev mode, also give the accurate APs for that level as well to simulate the actual stats of an actual player</em> &mdash; and <em>same with Ability points (AP)</em>.</p>
 <p><code>devSetLevel()</code> was a partial copy of the real <code>_maybeLevelUp()</code> stat block, and the copy had drifted. Three defects, all measured in a booted client before the fix:</p>
