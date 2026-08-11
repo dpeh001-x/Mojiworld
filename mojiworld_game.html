@@ -21547,9 +21547,57 @@ function _lvGapDefAdd(m) {
 // per-hit roll would read as random damage numbers, not as a tougher enemy.
 // Lazily seeded here rather than in spawnMonster because monsters also arrive
 // via co-op mirroring and the boss-rush re-summoner, which do not run it.
+// v0.29.x — ARMOUR ARCHETYPE (per user: "some monsters like those in blockland
+// and bone like monsters should have very high defence, while underwater
+// monsters lesser so").
+//
+// Census of the actual rosters, mean DEF against mean level:
+//     Block-land   6 types   DEF 36 @ Lv 33   -> 89% damage taken
+//     Bone/undead 14 types   DEF 56 @ Lv 58   -> 84%
+//     Underwater  18 types   DEF 19 @ Lv 33   -> 94%
+// The instinct was already right — at comparable level Block-land runs ~1.9x
+// underwater — it was just far too weak to read as armour. These multipliers
+// widen a difference that exists rather than inventing one.
+//
+// Pattern-matched with an explicit override table, NOT a hardcoded roster:
+// a bare list of 38 names silently ignores every monster added afterwards,
+// which is how a table like this rots. Overrides exist for the cases where
+// habitat and material disagree — a turtle in a tidepool carries a shell, and
+// a drowned/spectral pirate is undead first and wet second.
+const _ARMOR_OVERRIDE = {
+  tidepoolTurtle: 1.7,   // shelled, despite living underwater
+  bonebosn: 1.9,         // skeleton crew — bone first, water second
+  drownedCur: 1.5, spectreCannoneer: 1.5,
+  jellyfish: 0.45,       // the softest thing in the game
+  mayo: 1.0,             // not actually marine, just shares the map
+};
+const _ARMOR_HARD = /^block|bone|skelet|lich|tomb|grave|ossuar|crypt|sepulchre|zombie|wraith|golem/i;
+const _ARMOR_SOFT = /fish|tide|coral|pearl|jelly|sea(?!l)|kraken|angler|squid|octo|slime|goo/i;
+function _mobArmorClass(m) {
+  if (!m || !m.type) return 1;
+  const t = m.type;
+  if (_ARMOR_OVERRIDE[t] != null) return _ARMOR_OVERRIDE[t];
+  if (/^block/i.test(t)) return 2.2;    // moulded plastic and wood, uniformly solid
+  if (_ARMOR_HARD.test(t)) return 2.0;  // armoured bone
+  if (_ARMOR_SOFT.test(t)) return 0.65; // soft-bodied
+  return 1;
+}
+// Variance width follows the archetype too ("consider them in the variance as
+// well"): mass-moulded blocks are near-identical to each other, bone armour is
+// scavenged and uneven, sea life varies most of all. A single global band would
+// have made a rack of identical toy blocks vary as much as a reef.
+function _mobArmorSpread(cls) {
+  if (cls >= 2.1) return 0.08;   // block-land — stamped from the same mould
+  if (cls >= 1.4) return 0.18;   // bone — scavenged plate, uneven
+  if (cls <= 0.7) return 0.24;   // marine — soft and wildly varied
+  return 0.15;
+}
 function _mobDefVar(m) {
   if (!m) return 1;
-  if (m._defVar == null) m._defVar = 0.85 + Math.random() * 0.30;
+  if (m._defVar == null) {
+    const _sp = _mobArmorSpread(_mobArmorClass(m));
+    m._defVar = (1 - _sp) + Math.random() * (_sp * 2);
+  }
   return m._defVar;
 }
 
@@ -74270,7 +74318,11 @@ function hitMonster(m, dmg, isCrit, skill) {
   // player could already melt regardless of the level gap.
   const _gapDef = (typeof _lvGapDefAdd === 'function') ? _lvGapDefAdd(m) : 0;
   if (skill !== 'thorns' && (m.def || _gapDef)) {
-    let defVal = ((m.def || 0) + _gapDef) * ((typeof _mobDefVar === 'function') ? _mobDefVar(m) : 1);
+    const _armor = (typeof _mobArmorClass === 'function') ? _mobArmorClass(m) : 1;
+    // The archetype scales the mob's OWN armour; the level-gap term is left
+    // alone. Multiplying the gap by 2.2 as well would stack two independent
+    // gates on the same player and erase an under-levelled hit entirely.
+    let defVal = ((m.def || 0) * _armor + _gapDef) * ((typeof _mobDefVar === 'function') ? _mobDefVar(m) : 1);
     if (m.isElite)     defVal *= 1.4;
     if (m.isMiniBoss)  defVal *= 1.8;
     if (m.isBoss)      defVal *= 2.2;
