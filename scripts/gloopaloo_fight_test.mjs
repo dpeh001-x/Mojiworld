@@ -131,6 +131,85 @@ const R = await page.evaluate(async () => {
   m._punishPrev = 'gooBarrage'; m.patternState = 'idle'; _maybeStartBossStagger(m);
   ok('a committed cast DOES open a punish window', m._stagger > 0, `stagger ${m._stagger | 0}`);
 
+  // -- 6. FIXED ROTATION ---------------------------------------------------
+  // Read the picks by letting him choose from idle, recording the state he
+  // enters, then dropping him back to idle for the next beat. The stagger
+  // latches must be cleared each round or the punish window (correctly) opens
+  // on the forced cast->idle transition and freezes him before the next pick.
+  const rotation = (b, n) => {
+    const seq = [];
+    b.patternState = 'idle'; b.patternTimer = 0; b._gloopStep = 0;
+    for (let g = 0; g < n; g++) {
+      let guard = 0;
+      while (b.patternState === 'idle' && guard++ < 400) { game.time++; try { bossAI(b, 16.667, 300); } catch (e) {} }
+      seq.push(b.patternState);
+      b.patternState = 'idle'; b.patternTimer = 0; b.onGround = true; b.vy = 0; b.vx = 0;
+      b._stagger = 0; b._staggerCd = 0; b._punishPrev = 'idle';
+    }
+    return seq;
+  };
+  const P1 = ['leap','gooBarrage','leap','gluespray','leap','quake'];
+  const seqA = rotation(mkKing(800, 300), 12);
+  ok('rotation is the fixed 6-beat cycle, twice through',
+     seqA.join(',') === P1.concat(P1).join(','), seqA.join(','));
+  const seqB = rotation(mkKing(800, 300), 12);
+  ok('a second fight rolls the identical sequence', seqA.join(',') === seqB.join(','), seqB.join(','));
+  const kp2 = mkKing(800, 300); kp2._bossPhase2 = true;
+  const seqP2 = rotation(kp2, 6);
+  ok('phase 2 swaps only the opening leap for a teleport',
+     seqP2.join(',') === ['teleport','gooBarrage','leap','gluespray','leap','quake'].join(','), seqP2.join(','));
+
+  // -- 7. The barrage is a shape, not a tracker ----------------------------
+  const gooFan = (moveMidway) => {
+    const b = mkKing(800, 300);
+    game.projectiles.length = 0;
+    player.x = 400; player.y = 300;
+    b.patternState = 'gooBarrage'; b.patternTimer = 0; b._gooFired = 0; b._gooNextAt = 0; b._gooAimA = null;
+    let moved = false;
+    for (let i = 0; i < 300 && b.patternState === 'gooBarrage'; i++) {
+      game.time++; try { bossAI(b, 16.667, 300); } catch (e) {}
+      if (moveMidway && !moved && game.projectiles.length >= 3) { player.x = 150; player.y = 80; moved = true; }
+    }
+    return game.projectiles.map(p => `${p.vx.toFixed(3)},${p.vy.toFixed(3)}`);
+  };
+  const fan1 = gooFan(false), fan2 = gooFan(false), fanMoved = gooFan(true);
+  ok('barrage fires a full fan', fan1.length >= 8, `${fan1.length} shots`);
+  ok('the same cast always draws the same fan', fan1.join('|') === fan2.join('|'),
+     `${fan1.length} vs ${fan2.length} shots`);
+  ok('the barrage does not re-track a player who moves mid-cast',
+     fan1.join('|') === fanMoved.join('|'), 'aim locked on the first shot');
+  // Measure the arc RELATIVE to the first shot. A raw max-min over atan2 is
+  // meaningless when the aim straddles +/-pi (the player stands to his left
+  // here), which reads as a 6.16 rad "spread" for a perfectly tidy fan.
+  const angs = fan1.map(v => { const [x, y] = v.split(',').map(Number); return Math.atan2(y, x); });
+  const rel = angs.map(a => { let d = a - angs[0]; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; });
+  const spread = Math.max(...rel) - Math.min(...rel);
+  ok('the fan sweeps a readable arc', spread > 0.6 && spread < 1.1, `${spread.toFixed(3)} rad`);
+
+  // -- 8. The drip is a metronome -----------------------------------------
+  {
+    const b = mkKing(800, 300);
+    b.onGround = true; b._teleporting = false; b._brimLeakCD = null;
+    game.hazards.length = 0;
+    // Clear the floor after each drip: the leak is capped at 6 live puddles,
+    // so once the cap binds the spacing reflects EXPIRY, not the drip clock.
+    let ints = [], last = -1;
+    for (let i = 0; i < 400; i++) {
+      // Hold him grounded and out of a cast: a leap correctly SUSPENDS the
+      // leak (that is the mid-air-puddle fix), so a window spanning one reads
+      // as a 107-frame gap between two perfectly even 42-frame drips.
+      b.patternState = 'idle'; b.patternTimer = 0; b.onGround = true; b.vy = 0;
+      game.time++; try { bossAI(b, 16.667, 300); } catch (e) {}
+      if (puddles().length > 0) {
+        if (last >= 0) ints.push(i - last);
+        last = i;
+        game.hazards.length = 0;
+      }
+    }
+    const uniform = ints.length >= 2 && ints.every(v => Math.abs(v - ints[0]) <= 1);
+    ok('the residue drip is evenly spaced', uniform, `intervals ${ints.join(',')}`);
+  }
+
   return res;
 });
 

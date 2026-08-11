@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.584';
+const GAME_VERSION = 'v0.29.586';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -68344,6 +68344,18 @@ function _bossSpecialFired(m, now) {
 // the muzzle drifted further above his sprite at every tier until the shots
 // looked like they came from a different plane than the boss. Anchoring to a
 // FRACTION of his live body keeps the muzzle on his mouth at every size.
+
+// v0.29.586 — KING GLOOPALOO'S ROTATION. Six beats, fixed order, no RNG. The
+// leaps between casts are the player's window; the cast order never changes,
+// so the fight is learnable on the first attempt and readable on every one
+// after. Phase 2 swaps ONLY the opening leap for a teleport -- the sequence
+// of actual attacks (goo -> glue -> quake) is identical in both phases, so
+// escalation never re-teaches the fight.
+const _GLOOP_CYCLE_P1 = ['leap', 'gooBarrage', 'leap', 'gluespray', 'leap', 'quake'];
+const _GLOOP_CYCLE_P2 = ['teleport', 'gooBarrage', 'leap', 'gluespray', 'leap', 'quake'];
+function _gloopCycle(m) { return m._bossPhase2 ? _GLOOP_CYCLE_P2 : _GLOOP_CYCLE_P1; }
+// Fixed recovery between beats (pattern-ms; bossAI ticks these at dt x1.30).
+const _GLOOP_GAP = 1800;
 function _gloopMuzzleX(m) { return m.x + m.w / 2; }
 function _gloopMuzzleY(m) { return m.y + m.h * 0.45; }
 // Ring of gel droplets converging on (cx, cy) -- the shared telegraph idiom
@@ -68500,15 +68512,19 @@ function bossAI(m, dt, distToPlayer) {
     // Puddles persist ~3.5 s and apply a brief slow + tiny chip damage
     // if the player walks through. Intentionally low-threat — the fight
     // is the first boss, the mechanic is identity, not difficulty.
-    if (m._brimLeakCD == null) m._brimLeakCD = 600 + Math.random() * 400;
+    if (m._brimLeakCD == null) m._brimLeakCD = 900;   // v0.29.586 — fixed drip; was a randomised 600-1000 ms
     m._brimLeakCD -= dt;
     if (m._brimLeakCD <= 0 && m.currentHp > 0 && m.onGround && !m._teleporting) {   // v0.29.581 — was ungated: leaking mid-leap left puddles floating in the air
-      m._brimLeakCD = 750 + Math.random() * 350;
+      m._brimLeakCD = 900;   // v0.29.586 — steady, countable drip
       // Cap to 6 active puddles per boss so the floor doesn't fill up
       let activePuddles = 0;
       for (const _h of game.hazards) if (_h.type === 'gloop_puddle') activePuddles++;
       if (activePuddles < 6) {
-        const px = m.x + m.w/2 + (Math.random() - 0.5) * m.w * 0.6;
+        // v0.29.586 — deterministic placement: the puddles walk a fixed
+        // four-step pattern across his footprint instead of landing randomly,
+        // so the safe lane is the same one every cycle.
+        m._brimLeakN = ((m._brimLeakN | 0) + 1) % 4;
+        const px = m.x + m.w/2 + [-0.30, 0.15, -0.15, 0.30][m._brimLeakN] * m.w;
         const py = m.y + m.h - 2;   // v0.29.581 — on the sole line; he is grounded here by the gate above
         game.hazards.push({
           type: 'gloop_puddle',
@@ -68542,65 +68558,32 @@ function bossAI(m, dt, distToPlayer) {
     // original leap.
     if (m.patternState === 'idle') {
       m.vx += m.facing * 0.05;
-      if (m.patternTimer > 1800 && m.onGround) {
+      if (m.patternTimer > _GLOOP_GAP && m.onGround) {
         const _now = game.time | 0;
-        const _gooReady   = (_now - (m._lastGooAt   || 0)) > 720;   // v0.26.394 — frame-vs-ms: game.time is a FRAME counter; 12000 frames ≈ 200s (pattern near-dead). 720 = 12s.
-        const _quakeReady = (_now - (m._lastQuakeAt || 0)) > 900;   // v0.26.394 — 15000→900 frames (15s)
-        // v0.26.077 — Per user "make him able to teleport ... make him
-        // shoot out big glue balls as well". Two new pattern gates.
-        // Teleport CD 10 s — closes distance unexpectedly; pairs with
-        // the new 1.8× touch-damage so the player can't hug him safely.
-        // Glue Spray CD 13 s — fires 3 LARGE single-target glue balls
-        // (3× the size of the rapid-fire gooBarrage projectiles) that
-        // each stick the player on hit.
-        const _tpReady    = (_now - (m._lastTeleportAt || 0)) > 600;   // v0.26.394 — 10000→600 frames (10s)
-        const _glueReady  = (_now - (m._lastGlueAt     || 0)) > 780;   // v0.26.394 — 13000→780 frames (13s)
-        const r = Math.random();
-        // v0.29.284 — special-pressure clock (see _bossSpecialDue). Gloopaloo
-        // was the last main boss with no safety net: teleport is capped at a
-        // flat 20% band no matter what else is ready, and the `&& m.onGround`
-        // gate above can stall picks entirely through a leap chain. When the
-        // rolled 10-20 s window lapses, force the longest-waiting ready
-        // special instead of rolling for one.
-        if (_bossSpecialDue(m, _now) && (_tpReady || _glueReady || _gooReady || _quakeReady)) {
-          _bossSpecialFired(m, _now);
-          let _pick = null, _best = -1;
-          if (_tpReady    && (_now - (m._lastTeleportAt || 0)) > _best) { _best = _now - (m._lastTeleportAt || 0); _pick = 'teleport'; }
-          if (_glueReady  && (_now - (m._lastGlueAt     || 0)) > _best) { _best = _now - (m._lastGlueAt     || 0); _pick = 'gluespray'; }
-          if (_gooReady   && (_now - (m._lastGooAt      || 0)) > _best) { _best = _now - (m._lastGooAt      || 0); _pick = 'gooBarrage'; }
-          if (_quakeReady && (_now - (m._lastQuakeAt    || 0)) > _best) { _best = _now - (m._lastQuakeAt    || 0); _pick = 'quake'; }
-          if (_pick === 'teleport') { m._lastTeleportAt = _now; m.patternState = 'teleport'; m._teleportFired = false; }
-          else if (_pick === 'gluespray') { m._lastGlueAt = _now; m.patternState = 'gluespray'; m._glueFired = 0; m._glueNextAt = 0; }
-          else if (_pick === 'gooBarrage') { m._lastGooAt = _now; m.patternState = 'gooBarrage'; m._gooFired = 0; m._gooNextAt = 0; }
-          else { m._lastQuakeAt = _now; m.patternState = 'quake'; m._quakeAnnounced = false; m._quakeFired = false; }
-        } else if (_tpReady && r < 0.20) {
-          m._lastTeleportAt = _now;
-          _bossSpecialFired(m, _now);
-          m.patternState = 'teleport';
-          m._teleportFired = false;
-        } else if (_glueReady && r < 0.42) {
-          m._lastGlueAt = _now;
-          _bossSpecialFired(m, _now);
-          m.patternState = 'gluespray';
-          m._glueFired = 0;
-          m._glueNextAt = 0;
-        } else if (_gooReady && r < 0.62) {
-          m._lastGooAt = _now;
-          _bossSpecialFired(m, _now);
-          m.patternState = 'gooBarrage';
-          m._gooFired = 0;
-          m._gooNextAt = 0;
-        } else if (_quakeReady && r < 0.82) {
-          m._lastQuakeAt = _now;
-          _bossSpecialFired(m, _now);
-          m.patternState = 'quake';
-          m._quakeAnnounced = false;
-          m._quakeFired = false;
+        // v0.29.586 — FIXED ROTATION. This block used to roll a random number
+        // against four probability bands behind four independent cooldowns,
+        // with a second RNG layer (a random 10-20 s pressure window) able to
+        // override the roll outright. The same fight state produced
+        // different attacks, so there was nothing to learn and no way to
+        // pre-position. Now the next beat is simply the next entry in his
+        // cycle -- deterministic, evenly spaced, and identical every fight.
+        const _cyc = _gloopCycle(m);
+        const _next = _cyc[(m._gloopStep | 0) % _cyc.length];
+        m._gloopStep = ((m._gloopStep | 0) + 1) % _cyc.length;
+        if (_next === 'teleport') {
+          m._lastTeleportAt = _now; m.patternState = 'teleport'; m._teleportFired = false;
+        } else if (_next === 'gluespray') {
+          m._lastGlueAt = _now; m.patternState = 'gluespray'; m._glueFired = 0; m._glueNextAt = 0;
+        } else if (_next === 'gooBarrage') {
+          m._lastGooAt = _now; m.patternState = 'gooBarrage'; m._gooFired = 0; m._gooNextAt = 0;
+        } else if (_next === 'quake') {
+          m._lastQuakeAt = _now; m.patternState = 'quake'; m._quakeAnnounced = false; m._quakeFired = false;
         } else {
-          m.patternState = 'leap';
-          m.vy = -14;
-          m.vx = m.facing * 4;
+          m.patternState = 'leap'; m.vy = -14; m.vx = m.facing * 4;
         }
+        // Keep the shared special clock stamped so anything else reading it
+        // stays coherent; the rotation, not the clock, decides what fires.
+        if (typeof _bossSpecialFired === 'function') _bossSpecialFired(m, _now);
         m.patternTimer = 0;
       }
     } else if (m.patternState === 'leap') {
@@ -68677,17 +68660,21 @@ function bossAI(m, dt, distToPlayer) {
         m._gooNextAt = m.patternTimer + 110;
         const sx = _gloopMuzzleX(m);
         const sy = _gloopMuzzleY(m);   // v0.29.581 — body-relative so it tracks every size tier
-        const tx = player.x + player.w/2;
-        const ty = player.y + player.h/2;
-        const dxg = tx - sx, dyg = ty - sy;
-        const distG = Math.max(1, Math.sqrt(dxg*dxg + dyg*dyg));
+        // v0.29.586 — LOCKED AIM + FIXED SWEEP. Each shot used to re-aim at
+        // wherever the player currently was and add random jitter, so the
+        // barrage chased instead of presenting a readable shape. The angle is
+        // now taken once, on the first shot, and the barrage sweeps a fixed
+        // arc across it -- the same fan every cast, dodged by moving through
+        // the sweep rather than by out-running it.
+        if (m._gooFired <= 1) {
+          m._gooAimA = Math.atan2((player.y + player.h/2) - sy, (player.x + player.w/2) - sx);
+        }
         const speed = 7;
-        // Slight aim jitter per shot so the barrage spreads instead of
-        // a perfect arrow at the player.
-        const jitter = (Math.random() - 0.5) * 0.18;
-        const cj = Math.cos(jitter), sj = Math.sin(jitter);
-        const vxRaw = (dxg / distG) * speed;
-        const vyRaw = (dyg / distG) * speed;
+        const _gT = (_gooMax > 1) ? (m._gooFired - 1) / (_gooMax - 1) : 0.5;
+        const _gA = (m._gooAimA || 0) + (-0.42 + 0.84 * _gT);
+        const vxRaw = Math.cos(_gA) * speed;
+        const vyRaw = Math.sin(_gA) * speed;
+        const cj = 1, sj = 0;
         game.projectiles.push({
           x: sx, y: sy,
           vx: vxRaw * cj - vyRaw * sj,
@@ -68807,14 +68794,10 @@ function bossAI(m, dt, distToPlayer) {
         // → immediate pressure" combo). The barrage's own 400 ms wind-up
         // telegraph still gives the reaction window; the emerge burst +
         // dissolve toast are the early warning.
-        if (m._bossPhase2) {
-          m.patternState = 'gooBarrage';
-          m._gooFired = 0;
-          m._gooNextAt = 0;
-          m._gooAnnounced = false;
-        } else {
-          m.patternState = 'idle';
-        }
+        // v0.29.586 — the rotation already schedules gooBarrage as the beat
+        // after the phase-2 teleport; chaining it here too fired it twice and
+        // desynced the cycle the player had learned.
+        m.patternState = 'idle';
         m.patternTimer = 0;
       }
     } else if (m.patternState === 'gluespray') {
@@ -68851,11 +68834,16 @@ function bossAI(m, dt, distToPlayer) {
         m._glueNextAt = m.patternTimer + 280;
         const sx = _gloopMuzzleX(m);
         const sy = _gloopMuzzleY(m);   // v0.29.581 — body-relative so it tracks every size tier
-        const tx = player.x + player.w/2;
-        const ty = player.y + player.h/2;
-        const dxg = tx - sx, dyg = ty - sy;
-        const distG = Math.max(1, Math.sqrt(dxg*dxg + dyg*dyg));
+        // v0.29.586 — locked aim + a fixed three-way spread (left / centre /
+        // right). Previously all three re-aimed at the player's live position,
+        // which made a slow, telegraphed attack quietly homing.
+        if (m._glueFired <= 1) {
+          m._glueAimA = Math.atan2((player.y + player.h/2) - sy, (player.x + player.w/2) - sx);
+        }
         const speed = 4;       // slower than gooBarrage's 7
+        const _lA = (m._glueAimA || 0) + [-0.28, 0, 0.28][(m._glueFired - 1) % 3];
+        const dxg = Math.cos(_lA), dyg = Math.sin(_lA);
+        const distG = 1;
         game.projectiles.push({
           x: sx - 24, y: sy - 24,
           vx: (dxg / distG) * speed,

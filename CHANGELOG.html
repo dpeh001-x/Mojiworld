@@ -120,6 +120,34 @@
   <p class="lede">A phased rework layered on top of <code>v0.9.8</code>: save persistence, Web Audio SFX, achievements, daily challenges, respec, prestige, combo milestones, and a moment-to-moment juice pass. Every change lives in <code>mojiworld_game.html</code>. No new assets, no build step.</p>
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
+
+<h2>v0.29.586 <span class="tag"><span class="pill feat">feat</span> King Gloopaloo becomes a metronome &mdash; one fixed 6-beat rotation, no dice</span></h2>
+<p>Per user: <em>make gloopaloo more predictable with proper timed cadences and ensure that his fighting behaviour is unique and easy to tackle</em>. He had <b>two stacked layers of RNG</b> deciding what he did, which is why he never felt learnable.</p>
+<p>The clearest evidence is the old build driven twice through twelve beats from an identical starting state:</p>
+<pre style="background:#11161d;border:1px solid #2a3340;border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:12px;line-height:1.6"><code>run 1:  leap, leap, leap, gooBarrage, leap, quake, leap, leap, gluespray, leap, leap, teleport
+run 2:  gooBarrage, quake, leap, teleport, leap, leap, leap, leap, leap, leap, gooBarrage, leap</code></pre>
+<p>Same fight, same state, entirely different sequences &mdash; and <b>6 to 8 of every 12 beats were just leaps</b>, so most of the fight was dead air punctuated by an unpredictable spike.</p>
+<h3>What was random</h3>
+<ul>
+  <li><b>A probability roll over four bands.</b> The idle-pick block rolled a random number against <code>0.20 / 0.42 / 0.62 / 0.82</code> for teleport / glue / goo / quake, each also gated behind its own cooldown. Whatever failed every gate fell through to a leap &mdash; hence the leap floods.</li>
+  <li><b>A second layer on top.</b> A &ldquo;special-pressure clock&rdquo; rolled a <b>random 10&ndash;20&nbsp;s window</b> and, when it lapsed, overrode the roll entirely to force the longest-waiting special. That safety net existed <em>because</em> the first layer could starve &mdash; two RNG systems compensating for each other.</li>
+  <li><b>The barrage tracked you.</b> All 8&ndash;12 goo shots re-aimed at your <em>live</em> position every shot, plus random jitter. Measured arc: <b>0.141&nbsp;rad</b> &mdash; a near-perfect arrow that followed you, not a shape to move through.</li>
+  <li><b>Even the drip was random</b>, at a jittering <code>750&nbsp;+&nbsp;rand&times;350</code>&nbsp;ms with random placement. Measured intervals: <b>47, 43, 41, 40, 35, 43, 48, 51</b>.</li>
+</ul>
+<h3>The rotation</h3>
+<p>He now runs <b>one fixed 6-beat cycle</b>, in the same order, every fight:</p>
+<pre style="background:#11161d;border:1px solid #2a3340;border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:12px;line-height:1.6"><code>phase 1:  leap &rarr; GOO BARRAGE &rarr; leap &rarr; GLUE SPRAY &rarr; leap &rarr; QUAKE &rarr; (repeat)
+phase 2:  <b>teleport</b> &rarr; GOO BARRAGE &rarr; leap &rarr; GLUE SPRAY &rarr; leap &rarr; QUAKE &rarr; (repeat)</code></pre>
+<ul>
+  <li><b>Phase 2 swaps only the opening leap for a teleport.</b> The sequence of actual attacks is <em>identical</em> in both phases, so the fight escalates without re-teaching itself &mdash; you already know what follows the teleport.</li>
+  <li><b>The leaps are your window,</b> now placed deliberately between casts on a fixed <b>1800</b>&nbsp;pattern-ms recovery instead of appearing at random as filler.</li>
+  <li><b>The barrage is a shape.</b> Aim is locked on the first shot and the volley sweeps a fixed <b>0.84&nbsp;rad</b> arc across it &mdash; the same fan every cast, beaten by moving through the sweep. It no longer re-tracks a player who moves mid-cast (verified).</li>
+  <li><b>Glue spray fires a fixed three-way spread</b> (&minus;0.28 / 0 / +0.28&nbsp;rad off a locked aim) instead of three quietly-homing balls.</li>
+  <li><b>The drip is a metronome</b> at a flat <b>900&nbsp;ms</b>, walking a fixed four-step pattern across his footprint, so the safe lane is the same one every cycle. Measured: <b>42, 42, 42, 42, 42, 42, 42, 42</b> frames. It still correctly pauses while he is airborne.</li>
+  <li><b>The pressure clock is gone.</b> With a deterministic cycle nothing can starve, so the random-window override that existed to rescue the roll is dead weight &mdash; and would have re-introduced exactly the unpredictability this removes.</li>
+  <li><b>Retired the phase-2 teleport combo.</b> It chained straight into a goo barrage, which the rotation now schedules as the very next beat &mdash; it would have fired twice and desynced the cycle you had learned.</li>
+</ul>
+<p><b>Verification.</b> <code>scripts/gloopaloo_fight_test.mjs</code> grows to <b>23</b> assertions driven through the live <code>bossAI</code>, including the exact 12-beat sequence, two fresh fights producing byte-identical rotations, the phase-2 substitution, fan determinism, no mid-cast re-tracking, arc width, and drip spacing. Run against the previous build first, where <b>7 of the 23 fail</b> &mdash; every number quoted above is measured from that run. <b>23/23 on the fix, zero page errors.</b> Two failures during development were my own metrics rather than the game: a raw <code>atan2</code> max&minus;min reads a tidy fan as a 6.16&nbsp;rad spread when the aim straddles &plusmn;&pi;, and a drip window spanning a leap reads as a 107-frame gap because leaps correctly suspend the leak.</p>
 <h2>v0.29.584 <span class="tag"><span class="pill bug">bug</span> Job change no longer loses your SP and AP &mdash; a save gate was failing silently</span></h2>
 <p>Per user: <em>&ldquo;upon job changing, all my SP and AP are gone&rdquo;</em>.</p>
 <p><b>The job code was not the culprit.</b> Driving the real flow in engine &mdash; <code>applyJob</code>, <code>resetJobAndMaster</code>, <code>openTalentPick</code>, <code>chooseTalent</code>, <code>openMasterAdvancement</code>, <code>applyMaster</code>, and the talent respec &mdash; every one preserved <code>skillPoints</code> and <code>skillRankPoints</code> exactly. The loss happened at <b>persistence</b>.</p>
