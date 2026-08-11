@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.594';
+const GAME_VERSION = 'v0.29.595';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -13946,6 +13946,278 @@ function _lxPeToggle() {
 // selection boxes, drawn in the late debug-overlay slot (over actors). Uses
 // the same coordinate convention as drawWorldProps: x is camera-subtracted
 // manually, y is raw world (vertical scroll rides the active ctx transform).
+// =========================================================================
+// QUEST COMPASS — the "navigate" half of the navigator.
+// Reads game.qnav (set by the 🧭 Track button) and draws, every frame:
+//   • a pin bobbing over the destination when it is on this map and on screen
+//   • an edge chevron pointing the way when it is off screen
+//   • a banner naming the destination and the next hop when it is another map
+// Destination resolution is cached for 300ms — _qnavDest walks candidate
+// lists, and this runs in the render loop.
+// =========================================================================
+const _LX_QC = { at: 0, qid: null, map: null, d: null, bob: 0 };
+
+function _qnavLiveDest() {
+  const qid = (typeof game !== 'undefined') ? game.qnav : null;
+  if (!qid) return null;
+  const now = (typeof game !== 'undefined' && game.time) || 0;
+  if (_LX_QC.qid === qid && _LX_QC.map === game.currentMap && (now - _LX_QC.at) < 300) return _LX_QC.d;
+  let d = null;
+  try { d = _qnavDest(qid); } catch (_e) { d = null; }
+  _LX_QC.at = now; _LX_QC.qid = qid; _LX_QC.map = game.currentMap; _LX_QC.d = d;
+  return d;
+}
+
+// =========================================================================
+// THE DIRECTIONAL KEY — a small always-on guide so nobody has to go looking
+// for the Quest Journal to find out where they are supposed to be.
+// Per user: "ensure player does not get lost by providing a small directional
+// key to guide the players on where to go and find the NPC".
+//
+// Three parts, all reading the navigator resolved in v0.29.590:
+//   _qnavAutoTrack — picks a target on its own, so the guide is on by default
+//   _qnavCycle     — E steps through your other quests without opening a panel
+//   _qnavDrawKey   — the widget: one arrow, one name, one distance
+// =========================================================================
+
+// Candidate quests to guide toward, best first: active quests beat merely
+// unlocked ones, and nearer beats further.
+function _qnavGuideList() {
+  const out = [];
+  try {
+    const act = (player.quests && player.quests.active) || {};
+    const unl = (player.quests && player.quests.unlocked) || {};
+    const seen = Object.create(null);
+    for (const id of Object.keys(act)) {
+      if (!QUESTS[id] || seen[id]) continue;
+      seen[id] = 1; out.push({ id, rank: 0 });
+    }
+    for (const id of Object.keys(unl)) {
+      if (!QUESTS[id] || seen[id] || (player.quests.completed && player.quests.completed[id])) continue;
+      seen[id] = 1; out.push({ id, rank: 1 });
+    }
+    for (const e of out) {
+      const d = _qnavDest(e.id);
+      e.hops = (d && Number.isFinite(d.hops)) ? d.hops : 99;
+      e.ok = !!d;
+    }
+  } catch (_e) { return []; }
+  return out.filter((e) => e.ok).sort((a, b) => (a.rank - b.rank) || (a.hops - b.hops)).map((e) => e.id);
+}
+
+// A guide nobody switched on helps nobody. If nothing is tracked, adopt the
+// best candidate. Runs from the quest tick, which already fires on kills,
+// accepts and map loads, so it costs nothing extra.
+function _qnavAutoTrack() {
+  try {
+    if (game.qnav && QUESTS[game.qnav]) return;
+    if (game._qnavOptOut) return;          // the player turned the guide off; respect it
+    const list = _qnavGuideList();
+    if (list.length) game.qnav = list[0];
+  } catch (_e) {}
+}
+
+// E — step to the next quest. Past the end it switches the guide OFF rather
+// than wrapping forever, so there is always a way to dismiss it, and that
+// choice sticks (auto-track will not silently switch it back on).
+function _qnavCycle() {
+  try {
+    const list = _qnavGuideList();
+    if (!list.length) { if (typeof showToast === 'function') showToast('No quests to guide you to', 'common'); return; }
+    const i = list.indexOf(game.qnav);
+    if (i === list.length - 1) {
+      game.qnav = null; game._qnavOptOut = true;
+      if (typeof showToast === 'function') showToast('🧭 Guide off — press E to bring it back', 'common');
+    } else {
+      game.qnav = list[i + 1] || list[0];
+      game._qnavOptOut = false;
+      const d = _qnavDest(game.qnav);
+      if (typeof showToast === 'function') showToast(d ? `🧭 ${_qnavLabel(d)}` : '🧭 Guiding', 'rare');
+    }
+    if (typeof renderQuestJournal === 'function' && document.getElementById('quest-list')) {
+      try { renderQuestJournal(); } catch (_e2) {}
+    }
+  } catch (_e) {}
+}
+
+// Which way, on THIS map, gets the player closer? Shared with the compass:
+// the NPC's own x when they stand here, otherwise the next portal on the route.
+function _qnavHeadingX(d) {
+  if (!d) return null;
+  const here = game.currentMap;
+  if (d.map === here) {
+    if (d.kind === 'npc' && Number.isFinite(d.x)) return d.x;
+    let best = null, bd = Infinity;
+    for (const m of ((typeof monsters !== 'undefined' && monsters) || [])) {
+      if (!m || m.dead || m.type !== d.who) continue;
+      const dist = Math.abs((m.x || 0) - (player.x || 0));
+      if (dist < bd) { bd = dist; best = m; }
+    }
+    return best ? best.x : null;
+  }
+  const r = _qnavRoute(here, d.map);
+  return (r && r.next && r.next.portal && Number.isFinite(r.next.portal.x)) ? r.next.portal.x : null;
+}
+
+function _qnavDrawKey() {
+  if (typeof game === 'undefined' || !game.qnav) return;
+  const d = _qnavLiveDest();
+  if (!d) return;
+  const mob = (typeof monsterTypes !== 'undefined' && monsterTypes[d.who] && monsterTypes[d.who].name) || d.who;
+  const who = d.kind === 'npc' ? d.who : mob;
+  const tx = _qnavHeadingX(d);
+  const px = (player && player.x) || 0;
+
+  let glyph = '◆', tone = '#7fe08a', note = 'here';
+  if (tx == null) { glyph = '◆'; tone = '#c9a0ff'; note = d.map === game.currentMap ? 'on this map' : 'no route'; }
+  else {
+    const dx = tx - px;
+    if (Math.abs(dx) < 70) { glyph = '◆'; tone = '#7fe08a'; note = 'arrived'; }
+    else { glyph = dx > 0 ? '▶' : '◀'; tone = '#ffd84a'; note = String(Math.round(Math.abs(dx))); }
+  }
+
+  const BX = 14, BW = 196, BH = 40, BY = H - BH - 96;
+  ctx.save();
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = 'rgba(16,12,28,0.9)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = 1;
+  if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(BX, BY, BW, BH, 9); ctx.fill(); ctx.stroke(); }
+  else { ctx.fillRect(BX, BY, BW, BH); ctx.strokeRect(BX, BY, BW, BH); }
+  ctx.globalAlpha = 1;
+
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  ctx.font = '700 19px system-ui, sans-serif';
+  ctx.fillStyle = tone;
+  ctx.fillText(glyph, BX + 22, BY + BH / 2);
+
+  ctx.textAlign = 'left';
+  ctx.font = '700 12px system-ui, sans-serif';
+  ctx.fillStyle = '#efe8ff';
+  let name = String(who);
+  while (name.length > 3 && ctx.measureText(name).width > BW - 62) name = name.slice(0, -1);
+  if (name !== String(who)) name = name.slice(0, -1) + '…';
+  ctx.fillText(name, BX + 42, BY + 13);
+
+  ctx.font = '10px system-ui, sans-serif';
+  ctx.fillStyle = '#b9b0cc';
+  ctx.fillText(note, BX + 42, BY + 28);
+
+  // The key tells you which key it is — otherwise nobody finds the cycle.
+  ctx.textAlign = 'right';
+  ctx.font = '700 9px system-ui, sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.fillText('E', BX + BW - 10, BY + BH / 2);
+  ctx.restore();
+}
+
+function _qnavDrawCompass() {
+  if (typeof game === 'undefined' || !game.qnav) return;
+  const d = _qnavLiveDest();
+  if (!d) return;
+  const here = game.currentMap;
+  const camX = (game.camera && game.camera.x) || 0;
+  const mapName = (MAPS[d.map] && MAPS[d.map].name) || d.map;
+  const mob = (typeof monsterTypes !== 'undefined' && monsterTypes[d.who] && monsterTypes[d.who].name) || d.who;
+
+  // Where on THIS map should the arrow point?
+  //   same map, npc   -> the NPC's own x
+  //   same map, hunt  -> the nearest live monster of that type, if any
+  //   another map     -> the next portal on the route, which is the only
+  //                      thing on this map that gets you closer
+  let tx = null, sub = '', title = '';
+  if (d.map === here) {
+    if (d.kind === 'npc' && Number.isFinite(d.x)) { tx = d.x; title = d.who; sub = 'here on this map'; }
+    else {
+      let best = null, bd = Infinity;
+      for (const m of ((typeof monsters !== 'undefined' && monsters) || [])) {
+        if (!m || m.dead || m.type !== d.who) continue;
+        const dist = Math.abs((m.x || 0) - (player.x || 0));
+        if (dist < bd) { bd = dist; best = m; }
+      }
+      title = mob;
+      if (best) { tx = best.x; sub = 'nearest target'; }
+      else { sub = 'they spawn on this map'; }
+    }
+  } else {
+    const r = _qnavRoute(here, d.map);
+    if (r && r.next && r.next.portal && Number.isFinite(r.next.portal.x)) {
+      tx = r.next.portal.x;
+      const pn = (r.next.portal.name || (MAPS[r.next.portal.dest] && MAPS[r.next.portal.dest].name) || r.next.portal.dest);
+      title = `${d.kind === 'npc' ? d.who : mob} — ${mapName}`;
+      sub = `${r.dist} map${r.dist === 1 ? '' : 's'} away · next: ${pn}`;
+    } else {
+      title = `${d.kind === 'npc' ? d.who : mob} — ${mapName}`;
+      sub = 'no walking route — try the taxi';
+    }
+  }
+
+  ctx.save();
+  ctx.textBaseline = 'middle';
+  _LX_QC.bob = (_LX_QC.bob + 0.06) % (Math.PI * 2);
+  const bob = Math.sin(_LX_QC.bob) * 3;
+
+  if (tx != null) {
+    const sx = tx - camX;
+    const py = (player && Number.isFinite(player.y)) ? (player.y - 90) : (H * 0.45);
+    if (sx > 20 && sx < W - 20) {
+      // on screen — drop a pin on it
+      ctx.font = '22px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('📍', sx, py + bob);
+    } else {
+      // off screen — chevron at the edge, at the player's eye line
+      const right = sx >= W - 20;
+      const ex = right ? W - 26 : 26;
+      const ey = Math.max(60, Math.min(H - 60, py));
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = '#ffd84a';
+      ctx.beginPath();
+      const dir = right ? 1 : -1;
+      const nudge = dir * (3 + bob);
+      ctx.moveTo(ex + dir * 13 + nudge, ey);
+      ctx.lineTo(ex - dir * 9 + nudge, ey - 12);
+      ctx.lineTo(ex - dir * 9 + nudge, ey + 12);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      // distance in whole map units, so "how much further" is legible
+      const far = Math.round(Math.abs(tx - (player.x || 0)));
+      ctx.font = '700 11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffd84a';
+      ctx.fillText(String(far), ex, ey + 26);
+    }
+  }
+
+  // Banner — always, so the player can read the goal without opening the panel.
+  const label = `🧭 ${title}`;
+  ctx.font = '700 13px system-ui, sans-serif';
+  const w1 = ctx.measureText(label).width;
+  ctx.font = '11px system-ui, sans-serif';
+  const w2 = ctx.measureText(sub).width;
+  const bw = Math.min(W - 24, Math.max(w1, w2) + 24);
+  // Sits BELOW the map-name pill, which is an HTML element centred at the top
+  // of the canvas — at by:12 the two overlapped and both became unreadable.
+  const bx = (W - bw) / 2, by = 64;
+  ctx.globalAlpha = 0.86;
+  ctx.fillStyle = 'rgba(16,12,28,0.92)';
+  ctx.strokeStyle = 'rgba(255,216,74,0.55)';
+  ctx.lineWidth = 1;
+  if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by, bw, 38, 9); ctx.fill(); ctx.stroke(); }
+  else { ctx.fillRect(bx, by, bw, 38); ctx.strokeRect(bx, by, bw, 38); }
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'center';
+  ctx.font = '700 13px system-ui, sans-serif';
+  ctx.fillStyle = '#ffe9a8';
+  ctx.fillText(label, W / 2, by + 13);
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.fillStyle = '#cfc8e0';
+  ctx.fillText(sub, W / 2, by + 28);
+  ctx.restore();
+}
+
 function _lxPeDrawOverlay() {
   if (!_LX_PE.open) return;
   if (_LX_PE._map !== game.currentMap) {               // map changed under the editor
@@ -30730,6 +31002,10 @@ window.addEventListener('keydown', e => {
   // v0.25.61 — J opens the Quest Journal
   // v0.25.600 — E was the primary; v0.29.387 moves the primary to Q (via the
   // action bind so K-menu remaps still win). J stays a hard alias.
+  // v0.29.591 — E steps the quest guide to the next quest (and off at the end).
+  if (k === 'e') {
+    if (typeof _qnavCycle === 'function') _qnavCycle();
+  }
   if (_isAction(k, 'questJournal') || k === 'j') {
     if (typeof toggleQuestJournal === 'function') toggleQuestJournal();
   }
@@ -35975,6 +36251,8 @@ const PLAYER_SAVE_FIELDS = [
 ];
 const GAME_SAVE_FIELDS = [
   'currentMap','bossDefeated','kills','achievements',
+  'qnav',   // v0.29.583 — quest compass target; an allowlist, so tracking resets on reload without it
+  '_qnavOptOut',   // v0.29.591 — player pressed E past the end to dismiss the guide; must outlive a reload
   // v0.26.451 - per-map chest restock cooldown (anti re-entry farm); persisted so reload can't reset it.
   '_chestCooldown',
   '_jukeboxHeard',   // v0.29.73 — DJ Vinyl jukebox: tracks the player has heard in-world ({trackId:true})
@@ -42167,6 +42445,17 @@ try { window._mpBroadcastDrop = _mpBroadcastDrop; } catch (e) {}
 // Quests are tracked via player.quests = { active, completed, unlocked }.
 // Progress is incremented for the matching `kind + target` quest, and
 // completion grants rewards instantly + saves state.
+// v0.29.583 — drop the compass target when that quest is no longer active.
+// Without this the arrow keeps pointing at a completed quest's NPC, which is
+// worse than no arrow: it is confidently wrong.
+function _qnavPrune() {
+  try {
+    const id = game && game.qnav;
+    if (!id) return;
+    if (!QUESTS[id] || (player.quests && (player.quests.completed[id] || (!player.quests.active[id] && !player.quests.unlocked[id])))) game.qnav = null;
+  } catch (_e) {}
+}
+
 function _ensureQuests() {
   if (!player.quests) player.quests = { active: {}, completed: {}, unlocked: {} };
   if (!player.quests.active)    player.quests.active    = {};
@@ -42485,6 +42774,8 @@ function tickQuestKill(monsterType, isBoss) {
   // killing a quest target with the journal visible saw a stale counter
   // until they closed + reopened the modal. Cheap — only fires if the
   // journal is actually visible and there was real progress.
+  if (typeof _qnavPrune === 'function') _qnavPrune();
+  if (typeof _qnavAutoTrack === 'function') _qnavAutoTrack();
   if (_anyProgress && typeof renderQuestJournal === 'function') {
     const _qm = document.getElementById('quest-modal');
     if (_qm && _qm.style.display === 'flex') {
@@ -42649,6 +42940,8 @@ function _qnavDest(qid) {
   const q = (typeof QUESTS !== 'undefined') && QUESTS[qid];
   if (!q) return null;
   const here = (typeof game !== 'undefined' && game.currentMap) || null;
+  const _act = (typeof player !== 'undefined' && player.quests && player.quests.active) ? player.quests.active[qid] : null;
+  const active = !!_act, ready = !!(_act && _act.readyToHandIn);
   // Nearest by hop count, BUT a candidate with no portal route still wins over
   // nothing. Some arenas (innerDimension, the zodiac houses) are entered by a
   // scripted warp and have no incoming portal, so BFS scores every candidate
@@ -42671,10 +42964,11 @@ function _qnavDest(qid) {
 
   const who = q.giver || q.npc;
   const spots = who && _LX_QNAV.npc[who];
-  if (spots && spots.length) {
+  const npcDest = () => {
+    if (!spots || !spots.length) return null;
     const hit = pick(spots, (s) => s.map);
-    if (hit) return { kind: 'npc', who, map: hit.c.map, x: hit.c.x, y: hit.c.y, hops: hopsOf(hit.d), role: hit.c.role };
-  }
+    return hit ? { kind: 'npc', who, map: hit.c.map, x: hit.c.x, y: hit.c.y, hops: hopsOf(hit.d), role: hit.c.role, ready } : null;
+  };
   // No placed NPC — 13 boss/visit quests, plus q_inner_dim_trial whose giver is
   // the literal placeholder "your class instructor". Fall back to where the
   // objective lives so no card is left reading "location unknown". Bosses are
@@ -42683,14 +42977,21 @@ function _qnavDest(qid) {
   // Multi-objective quests (q_long_dawn_1 wants three different bosses) name a
   // `target` that no map spawns; the objective list is the real answer, so try
   // each in order and point at the first leg the player can actually reach.
-  const cands = [q.target, ...((q.objectives || []).map((o) => o && o.target))];
-  for (const t of cands) {
-    const maps = t && _LX_QNAV.mob[t];
-    if (!maps || !maps.length) continue;
-    const hit = pick(maps, (m) => m);
-    if (hit) return { kind: 'hunt', who: t, map: hit.c, x: null, y: null, hops: hopsOf(hit.d) };
-  }
-  return null;
+  const huntDest = () => {
+    const cands = [q.target, ...((q.objectives || []).map((o) => o && o.target))];
+    for (const t of cands) {
+      const maps = t && _LX_QNAV.mob[t];
+      if (!maps || !maps.length) continue;
+      const hit = pick(maps, (m) => m);
+      if (hit) return { kind: 'hunt', who: t, map: hit.c, x: null, y: null, hops: hopsOf(hit.d) };
+    }
+    return null;
+  };
+  // An accepted quest that still has work to do sends you to the work, not to
+  // whoever handed it out. Only a quest flagged readyToHandIn wants the walk
+  // back — and only ~20 quests are ever flagged, because the rest complete on
+  // the final kill with no return trip at all.
+  return (active && !ready) ? (huntDest() || npcDest()) : (npcDest() || huntDest());
 }
 
 // Human label for a destination: "Nurse Joyce — Everdawn Megamall".
@@ -46456,6 +46757,47 @@ function _nextStoryBeat() {
   return null;
 }
 
+// One "where do I finish this?" row per quest card. Inline-styled on purpose:
+// the objectives chips right above it already work that way, so this needs no
+// _QJ_STYLES edit and cannot collide with a parallel session's CSS changes.
+//
+// Shown on ACTIVE and AVAILABLE cards. The pre-existing 📍 Locate button was
+// active-only, and named the giver without ever naming a map — which is the
+// gap the user hit ("no way to find the npc"). Completed cards skip the row.
+function _qnavRowHtml(id, isDone) {
+  if (isDone) return '';
+  let d = null;
+  try { d = _qnavDest(id); } catch (_e) { return ''; }
+  if (!d) return '';
+  const mapName = (MAPS[d.map] && MAPS[d.map].name) || d.map;
+  const here = (typeof game !== 'undefined' && game.currentMap) || null;
+  const mob = (typeof monsterTypes !== 'undefined' && monsterTypes[d.who] && monsterTypes[d.who].name) || d.who;
+  const who = d.kind === 'npc' ? d.who : mob;
+  const verb = d.kind === 'npc' ? (d.ready ? 'Turn in to' : 'Accept from') : 'Hunt';
+
+  // hops === null means the BFS found no portal chain (warp-only arenas).
+  // Say so rather than implying a walk exists.
+  let hop;
+  if (d.map === here) hop = '<span style="color:#7fe08a;font-weight:700;">you are here</span>';
+  else if (d.hops == null) hop = '<span style="color:#c9a0ff;">no walking route</span>';
+  else hop = `${d.hops} map${d.hops === 1 ? '' : 's'} away`;
+
+  const tracked = (typeof game !== 'undefined' && game.qnav === id);
+  const btn = `<button type="button" data-qtrack="${id}" title="${tracked ? 'Stop tracking' : 'Show a compass arrow to this destination'}"
+    style="margin-left:auto;flex:0 0 auto;padding:2px 9px;border-radius:7px;font-size:11px;font-weight:800;cursor:pointer;
+    border:0.5px solid ${tracked ? 'rgba(255,216,74,0.9)' : 'rgba(140,170,255,0.55)'};
+    background:${tracked ? 'rgba(255,216,74,0.18)' : 'rgba(120,150,255,0.12)'};
+    color:${tracked ? '#ffd84a' : '#a8c0ff'};">${tracked ? '🧭 Tracking' : '🧭 Track'}</button>`;
+
+  return `<div style="display:flex;align-items:center;gap:6px;margin-top:5px;padding:3px 7px;border-radius:7px;
+    background:rgba(255,255,255,0.045);border-left:2px solid ${d.kind === 'npc' ? '#7fb0ff' : '#ff9a6a'};font-size:11px;color:#cfc8e0;">
+    <span style="flex:0 0 auto;">📍</span>
+    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${verb} <b style="color:#efe8ff;">${who}</b> — <b style="color:#efe8ff;">${mapName}</b></span>
+    <span style="flex:0 0 auto;opacity:0.75;">· ${hop}</span>
+    ${btn}
+  </div>`;
+}
+
 function renderQuestJournal() {
   _ensureQuests();
   const list = document.getElementById('quest-list');
@@ -46661,6 +47003,7 @@ function renderQuestJournal() {
         <div class="qj-name">${q.name}</div>
         <div class="qj-desc">${q.desc}</div>
         ${_objsHtml}
+        ${_qnavRowHtml(id, isDone)}
         <div class="qj-meta">${metaHtml}</div>
       </div>
       <div class="qj-action">${btnHtml}</div>
@@ -46763,6 +47106,24 @@ function renderQuestJournal() {
   // quest in a toast, and (if the target map is a known map id with a
   // resolvable display name) opens the world map centred on it so the
   // player can fast-travel directly.
+  // v0.29.582 — 🧭 Track toggles the on-screen compass for one quest.
+  list.querySelectorAll('[data-qtrack]').forEach(btn => {
+    btn.onclick = (ev) => {
+      ev.stopPropagation();
+      const qid = btn.dataset.qtrack;
+      if (game.qnav === qid) {
+        game.qnav = null;
+        if (typeof showToast === 'function') showToast('🧭 Tracking off', 'common');
+      } else {
+        game.qnav = qid;
+        const d = (typeof _qnavDest === 'function') ? _qnavDest(qid) : null;
+        if (typeof showToast === 'function') {
+          showToast(d ? `🧭 Tracking — ${_qnavLabel(d)}` : '🧭 Tracking', 'rare');
+        }
+      }
+      try { renderQuestJournal(); } catch (_e) {}
+    };
+  });
   list.querySelectorAll('[data-qlocate]').forEach(btn => {
     btn.onclick = () => {
       const q = QUESTS[btn.dataset.qlocate];
@@ -46788,6 +47149,18 @@ function renderQuestJournal() {
       } else {
         line = `📍 Check your objectives — ${q.name}`;
       }
+      // v0.29.582 — always lead with WHERE. The branches below name the
+      // giver and the objective but never a map, which made "Locate" unable
+      // to answer the one question it is named for.
+      try {
+        const _d = (typeof _qnavDest === 'function') ? _qnavDest(btn.dataset.qlocate) : null;
+        if (_d) {
+          const _mn = (MAPS[_d.map] && MAPS[_d.map].name) || _d.map;
+          const _hz = (_d.map === game.currentMap) ? 'you are here'
+            : (_d.hops == null ? 'no walking route' : `${_d.hops} map${_d.hops === 1 ? '' : 's'} away`);
+          line = `📍 ${_mn} (${_hz}) — ` + line.replace(/^📍 /, '');
+        }
+      } catch (_e) {}
       if (typeof showToast === 'function') showToast(line, 'rare');
       // If the target is a visitable map AND it's already been visited,
       // open the world map so the player can taxi there in one click.
@@ -116366,6 +116739,8 @@ function loop(time) {
   drawWorldArtOverlay();
   drawCalibrationGrid();   // v0.25.749 — debug grid for size-comparison across maps
   if (typeof _lxPeDrawOverlay === 'function') _lxPeDrawOverlay();   // v0.29.484 — Ctrl Prop Editor selection boxes
+  if (typeof _qnavDrawCompass === 'function') _qnavDrawCompass();
+  if (typeof _qnavDrawKey === 'function') _qnavDrawKey();   // compact directional key   // v0.29.583 — quest compass (game.qnav)
   drawDamageNumbers();
   drawIceCheer();   // v0.25.458 — Icy Tower combo overlay
   _drawDayNightTint();   // v0.29.415 — dawn/dusk/night grade: one rect, free by day
