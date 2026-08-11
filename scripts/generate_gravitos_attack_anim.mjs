@@ -372,6 +372,39 @@ async function shroudMask(frames, cleanIdx, W, H) {
 
 // Armour bbox in PIXELS (dark opaque pixels — bright FX excluded), used by the
 // padded-space scale normalizer.
+// LEG CUT — the defect the user saw, and the one every previous guard missed.
+// The model crops the figure through the thighs; the body box gets shorter; the
+// height normaliser then scales the surviving torso UP to restore the height it
+// was told to hold. So the crop MANUFACTURES the zoom, and both complaints —
+// "cut off" and "zoomed in" — are one fault. Measured on form 3's punch: legs
+// 1.81x the base width while the height metric read a perfect 1.00x, because
+// that metric was checking the normaliser's own output.
+//
+// Bottom rows of the DARK ARMOUR only:
+//   feet on a floor -> narrow      bases 0.009-0.068, accepted sets max 0.18
+//   thighs sliced   -> wide        the bad sets 0.21-0.64
+//   a bright flare  -> narrow      its bottom row is FX, not armour, so the
+//                                  shipped punch's full-frame flash still passes
+// The earlier version of this test used full alpha and required a flat top AND
+// bottom; a bottom-only cut walked straight past it.
+const CUT_BOT = 0.22;
+async function darkBottomFill(buf) {
+  const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const W = info.width, H = info.height;
+  const dark = (k) => {
+    const lum = 0.299 * data[k * 4] + 0.587 * data[k * 4 + 1] + 0.114 * data[k * 4 + 2];
+    return data[k * 4 + 3] > 200 && lum < 130;
+  };
+  let minX = W, maxX = -1, maxY = -1;
+  for (let k = 0; k < W * H; k++) if (dark(k)) {
+    const x = k % W, y = (k / W) | 0;
+    if (x < minX) minX = x; if (x > maxX) maxX = x; if (y > maxY) maxY = y;
+  }
+  if (maxY < 3 || maxX < minX) return 1;
+  const bw = maxX - minX + 1;
+  const row = (y) => { let c = 0; for (let x = minX; x <= maxX; x++) if (dark(y * W + x)) c++; return c / bw; };
+  return (row(maxY) + row(maxY - 1) + row(maxY - 2)) / 3;
+}
 async function armourBox(buf) {
   const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   let minX = info.width, maxX = -1, minY = info.height, maxY = -1;
@@ -411,6 +444,7 @@ async function slabMetrics(buf) {
 const SLAB_FILL = 0.75, SLAB_WIDE = 1.6;
 const baseMeta = await sharp(BASE).metadata();
 const baseA_px = await armourBox(await readFile(BASE));
+const baseCutBot = await darkBottomFill(await readFile(BASE));   // this form's "feet on the floor" reading
 const baseM = await coreMetrics(await readFile(BASE), true);          // armour only
 const baseA = await coreMetrics(await readFile(BASE));                // full alpha
 console.log(`base: ${baseMeta.width}x${baseMeta.height}, core ${Math.round(baseM.bw * 100)}%x${Math.round(baseM.bh * 100)}% cx ${baseM.cx.toFixed(3)}`);
@@ -484,6 +518,22 @@ if (has('--salvage-only')) {
     const edge = a.minX <= 4 || a.minY <= 4 || a.maxX >= padMeta.width - 5 || a.maxY >= padMeta.height - 5;
     if (edge || a.h <= 0) {
       console.log(`  cell ${ci}: armour truncated at the padded edge — dropped`);
+      finals.push(null);
+      continue;
+    }
+    const cutBot = await darkBottomFill(onPad);
+    if (cutBot > CUT_BOT) {
+      console.log(`  cell ${ci}: legs cut off (dark bottom row ${cutBot.toFixed(2)}, base ${baseCutBot.toFixed(2)}) — dropped`);
+      finals.push(null);
+      continue;
+    }
+    // Scale sanity, computed BEFORE any normalising. Rescaling an uncropped
+    // frame is invisible and fine, but a frame drawn at 2.5x is a close-up —
+    // different line weight, tighter framing — and reads as zoomed even after
+    // being scaled back down. Reject the extremes instead of resizing them away.
+    const kScale = baseA_px.h / a.h;
+    if (kScale < 0.45 || kScale > 1.8) {
+      console.log(`  cell ${ci}: drawn at ${(1 / kScale).toFixed(2)}x the base scale — a close-up, dropped`);
       finals.push(null);
       continue;
     }
@@ -688,7 +738,7 @@ const RUN_LIMIT = 0.75, RUN_LEN = 3;
 // every set in the game: form 3's cropped soul frames read 0.61-0.68 along the
 // TOP row, while the shipped punch's full-frame impact flash — the highest
 // legitimate value anywhere — reads 0.47. Both ends must be flat to flag.
-const CUT_TOP = 0.55, CUT_BOT = 0.40;
+const FRAME_TOP = 0.55, FRAME_BOT = 0.40;
 async function _edgeRowFill(buf) {
   const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   let minX = info.width, maxX = -1, minY = info.height, maxY = -1;
@@ -717,7 +767,11 @@ async function _darkMask(buf) {
   const cut = [];
   for (let i = 0; i < finals.length; i++) {
     const e = await _edgeRowFill(finals[i]);
-    if (e.top > CUT_TOP && e.bot > CUT_BOT) { cut.push(i); console.log(`  frame ${i}: cropped by a painted picture border (top row ${e.top.toFixed(2)}, bottom ${e.bot.toFixed(2)})`); }
+    const legCut = await darkBottomFill(finals[i]);
+    if ((e.top > FRAME_TOP && e.bot > FRAME_BOT) || legCut > CUT_BOT) {
+      cut.push(i);
+      console.log(`  frame ${i}: cropped (picture border top ${e.top.toFixed(2)}/bot ${e.bot.toFixed(2)}, dark bottom ${legCut.toFixed(2)})`);
+    }
   }
   if (cut.length) {
     const keep = [...Array(cut[0]).keys()];

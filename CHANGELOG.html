@@ -121,63 +121,6 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
-<h2>v0.29.606 <span class="tag"><span class="pill polish">polish</span> Buff pills now wear the real skill art</span></h2>
-<p>Per user &mdash; <em>&ldquo;yes wire the rendered skill-sprite art&rdquo;.</em> The pills were drawing <code>BUFF_META</code>&rsquo;s emoji glyphs (&#9876; &#129701; &#128481;), not the icons the hotkey bar uses.</p>
-<p><b>No new art pipeline was needed.</b> <code>_applySkillIcon(el, id, emoji)</code> already resolves <code>Sprites/skills/&lt;id&gt;.webp</code> and falls back to the emoji by itself. Checking the 72 files in that folder against the 12 buff keys showed <b>the key already IS the icon id</b> for eight of them (sleight, warCry, bloodlust, rampage, guardian, holyShield, eagleEye, smokeBomb); only Lich needed an override, to <code>lich_ult</code>. So the rule is simply &ldquo;key unless overridden&rdquo;.</p>
-<p><b>Three keep their glyph, correctly:</b> <code>hallowedField</code> has no sprite, and <code>comboAtk</code> / <code>comboXp</code> are combo <em>states</em> rather than skills, so there is no icon to draw. The existing fallback covers all three &mdash; no special-casing.</p>
-<p>The icon is re-applied <b>every frame</b> rather than only on pill rebuild. <code>_skillIconUrl</code> is asynchronous &mdash; it returns null until the image decodes, kicking off the load on first ask &mdash; while pills only rebuild when the <em>set</em> of buffs changes. Without the per-frame call, a first-cast pill would have been stuck on its emoji permanently. The call early-outs on <code>dataset.skIco</code>, so a steady frame still does no DOM work.</p>
-<div class="callout">
-  <b>A bug in the first cut, caught by measuring rather than eyeballing.</b> <code>_applySkillIcon</code> writes inline <code>width/height: 100%</code> for the hotkey bar, and 100% against the pill&rsquo;s <em>auto</em> height resolves to <b>zero</b> &mdash; the sprite was rendering into a 14&times;0 box, i.e. completely invisible, even though <code>backgroundImage</code> was set and looked correct. Checking the computed box is what exposed it. Now pinned to a real 14&times;14.
-  <br><br>
-  <b>Verified live:</b> sleight &rarr; <code>sleight.webp</code>, warCry &rarr; <code>warCry.webp</code>, eagleEye &rarr; <code>eagleEye.webp</code>, lich &rarr; <code>lich_ult.webp</code> (override working), hallowedField and comboAtk holding their glyphs &mdash; every box measuring 14&times;14, so pills keep identical metrics with or without art.
-</div>
-
-
-<h2>v0.29.605 <span class="tag"><span class="pill feat">feat</span> Rogue Shadowstep Chain &mdash; a third tap extends the dash, on a short leash</span></h2>
-<p>Per user: <em>make triple tap dashing for rogue available to allow the rogue to have more speedy mobility, but make sure it is not too broken</em>. The double-tap dash already exists for every class; this adds a <b>third tap of the same arrow, landing while the dash is still in flight</b>, which chains one extra dash so the rogue crosses ground in a single continuous burst instead of two gated hops.</p>
-<h3>How it plays</h3>
-<ul>
-  <li><b>&rarr; &rarr; &rarr;</b> (or <b>&larr; &larr; &larr;</b>) within the same ~280&nbsp;ms rhythm. The first two taps are the dash you already had; the third continues it without the stutter of waiting out the re-fire gate.</li>
-  <li>The chain runs a <b>200&nbsp;ms</b> window &mdash; deliberately <em>shorter</em> than the 240&nbsp;ms base dash &mdash; on a slightly higher sustain floor, so it reads as one long shadowstep rather than two hops.</li>
-</ul>
-<h3>Why it is not broken</h3>
-<p>This file already records what broke last time: <b>v0.26.399 raised the re-fire gate 180&nbsp;&rarr;&nbsp;240&nbsp;ms</b> because <em>&ldquo;a player could double-tap-dash on a 40&nbsp;ms cadence and hold permanent contact immunity with no MP/CD cost.&rdquo;</em> Dash i-frames have since been removed, so immunity is no longer the vector &mdash; what needed bounding was raw traversal. Five limits, each asserted by test:</p>
-<ul>
-  <li><b>Rogue line only.</b> Warrior and archer are verified not to chain.</li>
-  <li><b>Exactly one chain per sequence.</b> A fourth tap does nothing; verified against a sentinel value, since a re-chain would overwrite it.</li>
-  <li><b>Same direction only.</b> It extends a dash, it does not turn one around, so it is not a free reversal out of danger.</li>
-  <li><b>A 900&nbsp;ms lockout</b> before another chain may start. Normal double-tap dashing is unaffected during it.</li>
-  <li><b>No invulnerability.</b> The chain deliberately does not touch <code>player.invulnerable</code>, and a guard in the build fails if that ever changes.</li>
-</ul>
-<p><b>The number that matters:</b> measured against the engine rather than the config, the chain's sustain multiplier is <b>1.111&times;</b> (dash velocity 9.00&nbsp;&rarr;&nbsp;10.00). That is <em>lower</em> than the 1.15 configured, because <code>updatePlayer</code>'s movement clamp trims it &mdash; the same clamp documented in v0.29.344 that made a raw launch-velocity buff measure as zero extra distance. Modelling a player spamming dashes flat-out for 3&nbsp;seconds, the chain buys <b>+4%</b> total distance (1760&nbsp;&rarr;&nbsp;1830&nbsp;px). <b>The gain is burst continuity, not throughput</b>, which is exactly the shape a mobility tool should have.</p>
-<p><b>Verification.</b> <code>scripts/rogue_dash_chain_test.mjs</code> runs <b>13</b> assertions by dispatching real <code>KeyboardEvent</code>s through the game's own keydown handler, so the tap window, class gate and re-fire gate are all exercised as shipped rather than simulated. <b>5 of the 13 fail on the previous build</b>; <b>13/13 on the fix, zero page errors.</b> The bound checks (rogue-only, no-reversal, no i-frames) pass on both builds by construction &mdash; nothing chains at all before this change &mdash; and exist to catch a future regression rather than to prove today's.</p>
-
-<h2>v0.29.604 <span class="tag"><span class="pill feat">feat</span> Buffs count down in the corner &mdash; and one of them was invisible entirely</span></h2>
-<p>Per user &mdash; <em>&ldquo;ensure that when a player is buffed that it shows the buff skill icon at the top right corner and make it show a fade out timer of the timespan left for the buff&rdquo;.</em></p>
-<p>A buff row already existed &mdash; icon, label, and a 2&nbsp;px bar draining against a peak-tracked duration &mdash; so that machinery is kept, not rebuilt. Three things were missing.</p>
-<ul>
-  <li><b>One buff never showed at all.</b> A pill renders only if the buff has a <code>BUFF_META</code> entry, and <code>sleight</code> had none &mdash; so a connecting Backstab granted <b>+0.5&times; crit damage for 2.5&nbsp;s with nothing on screen</b>. Found by diffing the registry against every buff the code actually sets: 11 registered against 12 set, and this was the only real gap.</li>
-  <li><b>No time readout.</b> The bar showed a proportion but never a duration, so a 12&nbsp;s War Cry and a 2.5&nbsp;s Sleight looked identical at half-drained. Each pill now states the seconds left, in tabular figures so it does not jitter as digits change.</li>
-  <li><b>No fade.</b> The pill now eases down in opacity across its final third and the readout pulses under one second, so a buff visibly <em>runs out</em> instead of vanishing between frames.</li>
-</ul>
-<p><b>Moved into the actual corner.</b> The row sat at <code>top:230px</code> &mdash; right edge, but ~40% down a 560&nbsp;px frame. Measuring the live HUD showed only the version tag and save indicator occupy that edge, ending near y&nbsp;57, so the row moves to <b>y&nbsp;64</b>: the corner proper, clearing both chips.</p>
-<div class="callout">
-  <b>Verified across a full buff lifecycle</b> on a live 2.5&nbsp;s Sleight: readout <b>2.5s &rarr; 1.4s &rarr; 0.7s &rarr; 0.1s</b>, bar draining 98.7% &rarr; 6%, opacity easing <b>1 &rarr; 0.85 &rarr; 0.45 &rarr; 0.35</b>, pulse engaging inside the last second, and the row measured at 65&nbsp;px down / 13&nbsp;px in from the frame&rsquo;s top-right. Both new per-frame writes are change-gated exactly like the existing bar, so a steady frame still touches no DOM.
-</div>
-
-
-<h2>v0.29.603 <span class="tag"><span class="pill bug">bug</span> The Shadowlord's Bloodlust never reached the party &mdash; and an audit so it cannot happen again</span></h2>
-<p>Per user: <em>ensure that buff skills also buff players in the same room during coop multiplayer play</em>. Auditing the whole path rather than assuming it was broken: the party-buff machinery is sound and wired end to end &mdash; <code>_coopPartyBuff()</code> sends a <code>pbf</code> carrier frame, the ping dispatcher routes it, and <code>_coopApplyPartyBuff()</code> applies it behind a whitelist, a same-room check and a live-peer check. Every one of those behaviours already worked and is now pinned by tests.</p>
-<p><b>There was exactly one hole.</b> Sharing is <em>opt-in at each grant site</em> &mdash; a skill writes <code>player.buffs.X = ms</code> and must separately call <code>_coopPartyBuff(...)</code>. Checking all ten grants of a shareable buff against their broadcasts found one that forgot:</p>
-<ul>
-  <li><b>Shadow Sovereign (<code>shadowlord_ult</code>) granted itself Bloodlust and shared nothing.</b> Every other Bloodlust source &mdash; the base cast, Warlord's Banner, War of Banners and Apex Bond &mdash; broadcasts it. A Shadowlord ulting next to their party was the only one buffing themselves alone.</li>
-</ul>
-<h3>The part that stops it recurring</h3>
-<p>Opt-in sharing means the <em>next</em> buff skill will silently forget too, and nothing would complain. <code>scripts/coop_buff_share_test.mjs</code> now fails the moment that happens: it reads the source, parses the shareable whitelist, finds every grant of a whitelisted buff, and requires a broadcast beside it. Run against the previous build it reports the offender by name and line &mdash; <code>bloodlust @ L64644</code> &mdash; and on the fix it reports <b>10 grant sites, all shared</b>. It also checks that every whitelisted buff has a real declared slot, since the receiver deliberately refuses to create slots off the wire and a whitelisted-but-undeclared buff would be quietly unshareable.</p>
-<h3>What is shared, and what is deliberately not</h3>
-<p>Shared: <b>War Cry, Bloodlust, Guardian, Holy Shield, Eagle Eye</b>. Held back by earlier design, and left alone here because the reasoning holds: <code>rampage</code>, <code>sleight</code> and <code>smokeBomb</code> are states the caster's own skill code drives frame by frame, so a bare timer on a partner would show a HUD pill with no mechanic behind it; <code>lich</code> is a full-body transform tied to the caster's sprite; <code>comboAtk</code>/<code>comboXp</code> are personal combo meters; and <code>hallowedField</code> is an Arch Bishop passive that re-arms every 1.5&nbsp;s while an enemy is near.</p>
-<p><b>Verification.</b> <b>15</b> assertions across a static source audit and live send/receive checks in the loaded game: a partner's War Cry lands in the same room, a partner in another room does not buff you, non-party buffs are refused off the wire, a shorter partner buff never shortens your own while a longer one extends it, unknown names never create a slot, an unknown sender is ignored, and a multi-buff cast sends exactly one room-scoped frame carrying only the shareable keys. <b>1 of 15 fails on the previous build</b> (the audit, naming the exact site); <b>15/15 on the fix, zero page errors.</b></p>
-
 <h2>v0.29.602 <span class="tag"><span class="pill feat">feat</span> Gravitos forms 2 and 3 get their own cast animations &mdash; and stop borrowing form 1&rsquo;s body</h2>
 <p>
   Form&nbsp;1 has had three dedicated cast sets for a while &mdash; a punch, a
