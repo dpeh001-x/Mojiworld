@@ -112,6 +112,46 @@ const live = await page.evaluate(() => {
   ok('control: a combat map still populates under the same conditions',
      combat > 0, `forest spawned ${combat}`);
 
+  // ── The sanctuary guarantee (layer 2): even a DIRECT spawn is refused ────
+  const hostiles = () => (game.monsters || []).filter(m => m && !m.ally && !m.isSummon && !m._playerOwned).length;
+  loadMap('emeraldVillage');
+  const stub = spawnMonster(600, 300, 'scorpion', false);
+  ok('spawnMonster refuses a wild mob in a town', hostiles() === 0 && !!(stub && stub._suppressed),
+     `monsters ${hostiles()}, suppressed=${!!(stub && stub._suppressed)}`);
+
+  // A boss is still allowed: the Echo Keeper stands in the isTown 'void' map
+  // and summons one on request. Blocking that would break the feature.
+  loadMap('void');
+  const bossStub = spawnMonster(600, 300, 'king', true);
+  const bossIn = (game.monsters || []).filter(m => m && m.isBoss).length;
+  ok('a deliberately summoned BOSS is still allowed in a town', bossIn > 0 && !(bossStub && bossStub._suppressed),
+     `bosses ${bossIn}`);
+
+  // The sweep catches anything that bypassed spawnMonster entirely.
+  loadMap('jadeGrove');
+  game.monsters.push({ type: 'scorpion', x: 500, y: 300, w: 40, h: 30, currentHp: 100, maxHp: 100, atk: 10 });
+  const before = hostiles();
+  try { updateMonsters(16.667); } catch (e) {}
+  ok('the sweep removes a monster pushed straight into a town',
+     before === 1 && hostiles() === 0, `${before} -> ${hostiles()}`);
+
+  // ...and must not touch the player's MojiMon companion (game.minions).
+  loadMap('jadeGrove');
+  game.minions = game.minions || [];
+  game.minions.push({ type: 'slime', mojimon: true, x: 500, y: 300, w: 40, h: 30, currentHp: 50, maxHp: 50, life: 1e12 });
+  const minionsBefore = game.minions.length;
+  try { updateMonsters(16.667); } catch (e) {}
+  ok('the sweep leaves the MojiMon companion alone',
+     game.minions.length === minionsBefore, `minions ${minionsBefore} -> ${game.minions.length}`);
+
+  // A combat map must still accept a direct spawn (the sweep is town-scoped).
+  loadMap('forest');
+  const nBefore = hostiles();
+  spawnMonster(600, 300, 'scorpion', false);
+  try { updateMonsters(16.667); } catch (e) {}
+  ok('control: combat maps still accept and keep spawns', hostiles() > nBefore,
+     `${nBefore} -> ${hostiles()}`);
+
   return out;
 });
 

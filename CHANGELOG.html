@@ -120,6 +120,28 @@
   <p class="lede">A phased rework layered on top of <code>v0.9.8</code>: save persistence, Web Audio SFX, achievements, daily challenges, respec, prestige, combo milestones, and a moment-to-moment juice pass. Every change lives in <code>mojiworld_game.html</code>. No new assets, no build step.</p>
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
+
+<h2>v0.29.619 <span class="tag"><span class="pill feat">feat</span> Sanctuary rule &mdash; towns cannot contain a wild monster, by construction</span></h2>
+<p>Per user, following the <b>v0.29.617</b> fix: <em>yes make sure towns and maps that are not supposed to have monsters do NOT HAVE MONSTERS AT ALL.</em></p>
+<p>v0.29.617 removed the <em>cause</em> of the reported scorpion &mdash; Emerald Village was missing <code>isTown</code>, so it failed every <code>!isTown</code> spawn gate. This adds the <em>guarantee</em> on top, so a future map that forgets the flag, a direct <code>game.monsters.push</code>, or any spawn path nobody has audited still cannot put a hostile mob in a hub. Two layers:</p>
+<ul>
+  <li><b>Spawn-time refusal.</b> <code>spawnMonster</code> now rejects any non-boss spawn on a town map, returning the same <code>{_suppressed:true}</code> stub the co-op guest path already returns &mdash; so the ~30 call sites that set fields on the result keep working untouched.</li>
+  <li><b>A per-frame sweep.</b> Anything that got in another way is removed: a direct push (the gummy split does this), a mirror from a co-op host on an older build, or a path that does not go through <code>spawnMonster</code> at all. It is skipped entirely unless you are standing in a town, so it costs nothing elsewhere.</li>
+</ul>
+<h3>Scope was checked against the data, not assumed</h3>
+<p>A blanket purge is exactly the kind of change that quietly breaks something three systems away, so each boundary was verified:</p>
+<ul>
+  <li><b>Boss arenas are untouched.</b> <code>boss_rush</code> (Hall of Echoes) is <code>isBossArena</code> + <code>isVoid</code>, <em>not</em> <code>isTown</code> &mdash; so the rush and every add its bosses summon are outside the rule entirely.</li>
+  <li><b>Bosses are deliberately exempt.</b> <code>void</code> <em>is</em> <code>isTown</code>, and it hosts an <b>Echo Keeper</b> that summons a boss on request. That is a player action, not a wild spawn; blocking it would have broken the feature. A test asserts a summoned boss still appears in a town.</li>
+  <li><b>Your MojiMon is safe.</b> The companion lives in <code>game.minions</code>, not <code>game.monsters</code>, so the sweep cannot reach it &mdash; and it honours <code>ally</code> / <code>isSummon</code> / <code>_playerOwned</code> anyway, matching the existing kill-all filter, so future owned entities are covered too.</li>
+</ul>
+<h3>Verification</h3>
+<p><code>scripts/town_no_monsters_test.mjs</code> grows to <b>12</b> assertions. The two new guarantees fail on the previous build and pass here:</p>
+<pre style="background:#11161d;border:1px solid #2a3340;border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:12px;line-height:1.6"><code>before:  FAIL  spawnMonster refuses a wild mob in a town        monsters 1, suppressed=false
+         FAIL  the sweep removes a monster pushed straight in    1 -&gt; 1
+after:   PASS  spawnMonster refuses a wild mob in a town        (monsters 0, suppressed=true)
+         PASS  the sweep removes a monster pushed straight in   (1 -&gt; 0)</code></pre>
+<p>The three boundary controls hold on <em>both</em> builds, which is the point &mdash; they prove the rule did not overreach: a summoned boss still appears in a town (<code>bosses 1</code>), the MojiMon companion survives a sweep (<code>minions 1 -&gt; 1</code>), and combat maps still accept and keep spawns (<code>15 -&gt; 16</code>). <b>12/12 on the fix, zero page errors.</b></p>
 <h2>v0.29.618 — the last rename-sweep leftover: 705 KB off every boot</h2>
 <p>
   <span class="pill polish">polish</span>

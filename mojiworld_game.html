@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.618';
+const GAME_VERSION = 'v0.29.619';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -53447,7 +53447,27 @@ function spawnFromMap(type, boss, opts) {
 
 const MONSTER_SIZE_VARIANCE_STEPS = [0.95, 1.0, 1.05];
 
+// v0.29.619 — SANCTUARY MAPS. A hub is defined by isTown; boss arenas and the
+// tower are separate flags and are NOT affected. Bosses are exempt because the
+// Echo Keeper (an NPC standing in the isTown 'void' map) summons one on
+// request -- a deliberate act, not a wild spawn.
+function _lxIsSanctuary(mapD) {
+  const m = mapD || (typeof game !== 'undefined' && game ? game.mapData : null);
+  return !!(m && m.isTown);
+}
+// Anything the player owns stays. The MojiMon companion lives in game.minions
+// rather than game.monsters so it is already out of scope; these flags mirror
+// the existing _lxMpKillAll filter so future owned entities are safe too.
+function _lxIsWildHostile(m) {
+  if (!m) return false;
+  if (m.isBoss || m.ally || m.isSummon || m._playerOwned) return false;
+  return true;
+}
 function spawnMonster(x, y, type, isBoss, isMiniBoss) {
+  // v0.29.619 — no wild spawn may land in a town, whatever called us. Returns the
+  // same stub shape as the co-op guard below so callers that set fields on the
+  // result do not crash.
+  if (!isBoss && _lxIsSanctuary()) return { _suppressed: true, _sanctuary: true };
   // v0.27.0 co-op — a NON-HOST mirroring the host's map does not spawn its own
   // monsters (they arrive via the host's 'mon' sync). Return a harmless throwaway
   // stub (not added to game.monsters) so the many callers that set fields on the
@@ -65842,6 +65862,16 @@ function fireMonsterProjectile(m, angleOffset) {
 }
 
 function updateMonsters(dt) {
+  // v0.29.619 — SANCTUARY SWEEP. Layer 2 of the town guarantee: spawnMonster
+  // already refuses wild spawns here, so this only ever fires for something
+  // that bypassed it -- a direct game.monsters.push (the gummy split does
+  // this), a mirror from a co-op host on an older build, or a path nobody has
+  // audited. Cheap: it is skipped entirely unless we are standing in a town.
+  if (game.mapData && game.mapData.isTown && game.monsters && game.monsters.length) {
+    for (let _si = game.monsters.length - 1; _si >= 0; _si--) {
+      if (_lxIsWildHostile(game.monsters[_si])) game.monsters.splice(_si, 1);
+    }
+  }
   // v0.27.0 co-op — a NON-HOST mirroring the host's map does NOT run monster AI/
   // physics/attacks/spawning; monster positions + HP come from the host's 'mon'
   // sync. Keep only light cosmetic housekeeping (hit-flash + animation timers)
