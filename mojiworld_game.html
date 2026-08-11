@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.585';
+const GAME_VERSION = 'v0.29.584';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -36571,7 +36571,23 @@ function _flushSaveStateNow() {
   // at class select used to flush a default-warrior save, skipping creation
   // forever (the prologue-seen flag already prevents a prologue replay).
   try { const _cs = document.getElementById('class-select-modal');
-        if (_cs && _cs.style.display === 'flex') return; } catch (e) {}
+        // v0.29.584 — GATE NARROWED TO ITS ACTUAL INTENT (per user: "upon job
+        // changing, all my SP and AP are gone"). This blocked EVERY save while the
+        // modal element was displayed, whether or not the player was mid-creation,
+        // and it failed SILENTLY: no toast, no console line. The player keeps
+        // playing while nothing persists, then reverts on reload to the last save
+        // that landed — presenting exactly as "my SP and AP are gone".
+        // The reported flow reaches here with a modal up: applyJob chains
+        // openTalentPick() + openMasterAdvancement(), and chooseTalent() calls
+        // saveState() while the advancement UI is still on screen. Reproduced in
+        // engine: with the modal shown the flush wrote nothing and a reload came
+        // back with skillPoints 0 / skillRankPoints 0 (40 SP + 7 AP lost); with it
+        // hidden the identical flow round-tripped both intact.
+        // The gate's real purpose is "don't persist a default character before one
+        // is chosen" — that is exactly !player.cls. A classed character mid-
+        // advancement must always be allowed to save.
+        if (_cs && _cs.style.display === 'flex'
+            && !(typeof player !== 'undefined' && player && player.cls)) return; } catch (e) {}
   try {
     // audio.muted is the single source of truth; sync the serialization mirror here
     if (typeof audio !== 'undefined' && audio) game.muted = !!audio.muted;
@@ -37664,7 +37680,23 @@ function saveState() {
   // at class select used to flush a default-warrior save, skipping creation
   // forever (the prologue-seen flag already prevents a prologue replay).
   try { const _cs = document.getElementById('class-select-modal');
-        if (_cs && _cs.style.display === 'flex') return; } catch (e) {}
+        // v0.29.584 — GATE NARROWED TO ITS ACTUAL INTENT (per user: "upon job
+        // changing, all my SP and AP are gone"). This blocked EVERY save while the
+        // modal element was displayed, whether or not the player was mid-creation,
+        // and it failed SILENTLY: no toast, no console line. The player keeps
+        // playing while nothing persists, then reverts on reload to the last save
+        // that landed — presenting exactly as "my SP and AP are gone".
+        // The reported flow reaches here with a modal up: applyJob chains
+        // openTalentPick() + openMasterAdvancement(), and chooseTalent() calls
+        // saveState() while the advancement UI is still on screen. Reproduced in
+        // engine: with the modal shown the flush wrote nothing and a reload came
+        // back with skillPoints 0 / skillRankPoints 0 (40 SP + 7 AP lost); with it
+        // hidden the identical flow round-tripped both intact.
+        // The gate's real purpose is "don't persist a default character before one
+        // is chosen" — that is exactly !player.cls. A classed character mid-
+        // advancement must always be allowed to save.
+        if (_cs && _cs.style.display === 'flex'
+            && !(typeof player !== 'undefined' && player && player.cls)) return; } catch (e) {}
   game._saveDirty = true;
   if (game._saveTimer) return;   // already scheduled
   game._saveTimer = setTimeout(() => {
@@ -99247,11 +99279,6 @@ function drawSetAura() {
   }
 }
 
-// v0.29.585 — monotonic phase source for the i-frame blink. performance.now()
-// never stalls, so it cannot be pinned the way a gameplay counter can.
-function _lxNow() {
-  return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-}
 function drawPlayer() {
   const sx = Math.round(player.x - game.camera.x);
   // v0.25.481 — quicksand sink visual offset (0–8 px down) when idling on
@@ -99262,17 +99289,7 @@ function drawPlayer() {
   // uses the TRUE player.y (not the sand-sink visual offset) so the shadow
   // doesn't drift while idling on sand.
   _lxDrawBlobShadow(sx + player.w / 2, sy + player.h, player.y + player.h, player.x, player.w);
-  // v0.29.585 — BUG4 (tester): the character vanished entirely while DOWNED.
-  // This blink used to read the i-frame counter's VALUE, but _coopDownedTick
-  // re-pins invulnerable = 1000 every frame while down, so the parity never
-  // changed — and band 16 (1000/60) is even, i.e. "skip the draw" on every
-  // frame for the full window. A pinned counter cannot blink; it can only
-  // disappear. Phase now comes from a monotonic clock at the same ~8 Hz
-  // cadence (the counter is milliseconds, banded at 60), so a frozen or
-  // re-pinned counter flickers instead of hiding the player. Downed is
-  // exempt outright: you have to be visible for a partner to reach you.
-  if (player.invulnerable > 0 && player.dodgeTimer <= 0 && !player._downed &&
-      Math.floor(_lxNow() / 60) % 2 === 0) return;
+  if (player.invulnerable > 0 && player.dodgeTimer <= 0 && Math.floor(player.invulnerable / 60) % 2 === 0) return;
   // v0.25.249 — set-bonus 3pc aura sits behind the character.
   drawSetAura();
   // v0.25.513 — Hallowed Field on-screen indicator. While the
@@ -116175,28 +116192,6 @@ function loop(time) {
       ctx.fillStyle = _LOWHP_VIG_CACHE.g;
       ctx.fillRect(0, 0, W, H);
     } catch (_e) {}
-  }
-  // v0.29.585 — DOWNED screen tint (per user: "make it obvious that player is
-  // downed and about to die"). The whole screen washes red, and the wash both
-  // DEEPENS and beats FASTER as the bleed-out timer runs down — so "downed"
-  // and "seconds from dying" are different-looking states, not one flat colour.
-  // Reduce-motion holds it steady at the mid intensity rather than dropping the
-  // cue: the tint is information, the pulsing is decoration.
-  if (typeof player !== 'undefined' && player && player._downed) {
-    const _dTot = (typeof COOP_DOWN_MS === 'number' && COOP_DOWN_MS > 0) ? COOP_DOWN_MS : 30000;
-    const _dLeft = Math.max(0, (player._downedUntil || 0) - _lxNow());
-    const _urg = 1 - Math.max(0, Math.min(1, _dLeft / _dTot));      // 0 just downed -> 1 at death
-    const _hz = 1.1 + _urg * 2.4;                                    // heartbeat quickens
-    const _beat = game._reduceMotion ? 0.5
-      : 0.5 + 0.5 * Math.sin((_lxNow() / 1000) * _hz * Math.PI * 2);
-    const _da = (0.20 + 0.26 * _urg) + _beat * (0.05 + 0.11 * _urg);
-    const _dq = Math.round(_da * 100);
-    if (game._downTintQ !== _dq) {
-      game._downTintQ = _dq;
-      game._downTintStr = 'rgba(168,16,32,' + (_dq / 100) + ')';
-    }
-    ctx.fillStyle = game._downTintStr;
-    ctx.fillRect(0, 0, W, H);
   }
   if (game.flashOverlay > 0) {
     if (!_phaserHandlingOverlay()) {
