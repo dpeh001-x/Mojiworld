@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.612';
+const GAME_VERSION = 'v0.29.614';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -13993,6 +13993,30 @@ function _qnavLiveDest() {
   if (!qid) return null;
   const now = (typeof game !== 'undefined' && game.time) || 0;
   if (_LX_QC.qid === qid && _LX_QC.map === game.currentMap && (now - _LX_QC.at) < 300) return _LX_QC.d;
+  // v0.29.613 (per user: "when quest is done the indicator should be gone") —
+  // the staleness check has to live HERE, not only in _qnavAutoTrack.
+  // v0.29.612 taught auto-track to re-pick a finished quest, but auto-track
+  // runs from the QUEST TICK while this pin is drawn EVERY FRAME. Measured:
+  // after completing a tracked quest, _qnavLiveDest still resolved and the
+  // marker still drew until the next tick happened to fire — and the tick is
+  // driven by kills / accepts / map loads, so "until then" can be a long time
+  // standing next to an NPC you already handed in to.
+  //
+  // Every consumer of the navigator comes through this function, so refusing
+  // a dead target here clears the pin, the directional key and the journal
+  // label together, on the same frame the quest completes. game.qnav is
+  // cleared too, so the next tick re-points instead of re-validating.
+  // Placed after the memo hit above: the common path costs nothing extra.
+  {
+    const _qs = (typeof player !== 'undefined' && player && player.quests) || null;
+    const _done = !!(_qs && _qs.completed && _qs.completed[qid]);
+    const _live = !!(_qs && ((_qs.active && _qs.active[qid]) || (_qs.unlocked && _qs.unlocked[qid])));
+    if (!QUESTS[qid] || _done || !_live) {
+      game.qnav = null;
+      _LX_QC.at = now; _LX_QC.qid = null; _LX_QC.map = game.currentMap; _LX_QC.d = null;
+      return null;
+    }
+  }
   let d = null;
   try { d = _qnavDest(qid); } catch (_e) { d = null; }
   _LX_QC.at = now; _LX_QC.qid = qid; _LX_QC.map = game.currentMap; _LX_QC.d = d;
