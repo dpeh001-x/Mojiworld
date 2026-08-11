@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.626';
+const GAME_VERSION = 'v0.29.627';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -14343,6 +14343,81 @@ function _qnavDrawKey() {
     _LX_QK.name.textContent = who;
     _LX_QK.sub.textContent = ' ' + sub;
   }
+}
+
+// =========================================================================
+// STRAY MOB DETECTOR (v0.29.619) — "monster consistency in maps"
+// Per user, BUG11: a Lv 9 Shroom standing among Lv 30 block-elephants in
+// Foamblock Flats, whose spawn table declares only `blockEle`.
+//
+// This REPORTS, it does not remove. Five candidate sources were tested and
+// none reproduced it — a fresh load, a load at the reported player level, a
+// mid-chase map transition out of Fungal Hollow, quest-target injection (the
+// active quest wanted petalfly, not mushroom), and the co-op mirror (which
+// already drops snapshots whose map is not yours). Deleting mobs on a rule
+// whose failure mode is unknown risks eating legitimate scripted content —
+// boss adds, the Echo Keeper, allies, summons and co-op mirrors all live in
+// game.monsters and none of them appear in a map's `spawns`.
+//
+// So: name the stray, record how it is flagged, and let the next sighting say
+// where it came from instead of guessing again.
+// =========================================================================
+const _LX_STRAY = { at: 0, seen: Object.create(null), log: [] };
+
+function _lxMobStrayCheck() {
+  try {
+    if (typeof game === 'undefined' || !game || !game.mapData) return;
+    // Wall clock, NOT game.time — that is a tick counter (measured: 509 after
+    // nine seconds of play), so a "< 2000" throttle written against it would
+    // have kept this dormant for something like half a minute and made the
+    // detector look like it worked while reporting nothing.
+    const now = Date.now();
+    if (now - _LX_STRAY.at < 2000) return;          // every 2 s; this walks the mob list
+    _LX_STRAY.at = now;
+    const declared = Object.create(null);
+    for (const s of (game.mapData.spawns || [])) if (s && s.type) declared[s.type] = 1;
+    if (game.mapData.bossType) declared[game.mapData.bossType] = 1;
+    for (const k of (game.mapData.bossSequence || [])) if (k) declared[k] = 1;
+
+    for (const m of (game.monsters || [])) {
+      if (!m || m.dead || !m.type) continue;
+      if (declared[m.type]) continue;
+      // Everything below is a LEGITIMATE off-table mob. Enumerated explicitly
+      // so the report means "unexplained", not merely "not in the table".
+      if (m._coopMirror || m.ally || m.isSummon || m._playerOwned) continue;
+      if (m.boss || m.isBoss || m.superBoss || m.isMiniBoss) continue;
+      if (m._summonedBy || m.isEchoKeeper || m.role === 'echo') continue;
+
+      const key = game.currentMap + '/' + m.type;
+      if (_LX_STRAY.seen[key]) continue;             // once per map+type per session
+      _LX_STRAY.seen[key] = 1;
+      const rec = {
+        map: game.currentMap, type: m.type, level: m.level | 0,
+        x: Math.round(m.x || 0), y: Math.round(m.y || 0),
+        declared: Object.keys(declared),
+        flags: ['_coopMirror', 'ally', 'isSummon', '_playerOwned', 'boss', 'isBoss', 'superBoss',
+          'isMiniBoss', '_summonedBy', 'elite', 'aggro', 'uid'].filter((f) => m[f]),
+        netConnected: !!(typeof net !== 'undefined' && net && net.connected),
+        isHost: !!(typeof net !== 'undefined' && net && net.isHost),
+        t: Date.now(),
+      };
+      _LX_STRAY.log.push(rec);
+      if (_LX_STRAY.log.length > 20) _LX_STRAY.log.shift();
+      try { game._mobStrays = _LX_STRAY.log; } catch (_e) {}
+      try {
+        console.warn('[stray mob] ' + rec.type + ' Lv' + rec.level + ' in ' + rec.map
+          + ' — map declares [' + rec.declared.join(', ') + '] — flags: '
+          + (rec.flags.join(',') || 'none') + (rec.netConnected ? ' — CO-OP' : ''));
+      } catch (_e) {}
+      // Dev builds get it on screen, so a tester notices without a console.
+      try {
+        if (typeof LX_DEV_TOOLS !== 'undefined' && LX_DEV_TOOLS && typeof showToast === 'function') {
+          showToast('⚠ stray ' + ((monsterTypes[rec.type] || {}).name || rec.type) + ' Lv' + rec.level
+            + ' in ' + rec.map, 'rare');
+        }
+      } catch (_e) {}
+    }
+  } catch (_e) {}
 }
 
 function _qnavDrawCompass() {
@@ -117722,7 +117797,8 @@ function loop(time) {
   drawCalibrationGrid();   // v0.25.749 — debug grid for size-comparison across maps
   if (typeof _lxPeDrawOverlay === 'function') _lxPeDrawOverlay();   // v0.29.484 — Ctrl Prop Editor selection boxes
   if (typeof _qnavDrawCompass === 'function') _qnavDrawCompass();
-  if (typeof _qnavDrawKey === 'function') _qnavDrawKey();   // compact directional key   // v0.29.583 — quest compass (game.qnav)
+  if (typeof _qnavDrawKey === 'function') _qnavDrawKey();   // compact directional key
+  if (typeof _lxMobStrayCheck === 'function') _lxMobStrayCheck();   // v0.29.619 — BUG11 stray-mob report (self-throttled to 2s)   // v0.29.583 — quest compass (game.qnav)
   drawDamageNumbers();
   drawIceCheer();   // v0.25.458 — Icy Tower combo overlay
   _drawDayNightTint();   // v0.29.415 — dawn/dusk/night grade: one rect, free by day
