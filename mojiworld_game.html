@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.633';
+const GAME_VERSION = 'v0.29.631';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -21608,6 +21608,40 @@ function _mobDefVar(m) {
     m._defVar = (1 - _sp) + Math.random() * (_sp * 2);
   }
   return m._defVar;
+}
+
+// v0.29.x — BIG MONSTERS JUMP LOWER (per user: "for bigger sized monsters that
+// are non-bosses, make their jump height lower").
+//
+// The relationship was BACKWARDS, not merely absent. Census of the 66 non-boss
+// types that can jump, mean jump strength by body height:
+//     h  0-49   4.0        h  90-119   5.6
+//     h 50-69   4.9        h 120-159   6.7
+//     h 70-89   5.4
+// corr(height, jump) = +0.287 — the bigger the monster, the HIGHER it hopped, so
+// a 150 px hulk out-jumped a 28 px slime. That reads as weightlessness on
+// exactly the mobs that should feel heavy.
+//
+// Scaled off body height because the jump is vertical and height is what the
+// player sees leaving the ground. Nothing at or below 70 px changes (that is
+// just above the 66 px median, so the majority of the roster is untouched); the
+// reduction ramps to a 0.55 floor so even the largest mob still hops rather
+// than becoming a statue — several maps rely on mobs following the player up a
+// platform, and a mob that can NEVER leave the floor stops being a threat and
+// starts being scenery.
+//     h 100 -> x0.88     h 130 -> x0.76     h 150 -> x0.68
+//
+// BOSSES ARE EXEMPT, per the request. Their leaps are authored per fight and
+// the boss platform-chase clamp (search "unfairly skyhook") already tunes them
+// deliberately; quietly shortening those would change scripted encounters.
+const _JUMP_BASE_H = 70, _JUMP_PER_PX = 0.004, _JUMP_FLOOR = 0.55;
+function _mobJumpV(m) {
+  const j = +((m && m.jump) || 0);
+  if (!(j > 0)) return 0;
+  if (!m || m.isBoss || m.boss || m.zodiacBoss) return j;
+  const h = +m.h || _JUMP_BASE_H;
+  if (h <= _JUMP_BASE_H) return j;
+  return j * Math.max(_JUMP_FLOOR, 1 - (h - _JUMP_BASE_H) * _JUMP_PER_PX);
 }
 
 // v0.25.58 — High-tier monster skills. Tier-4+ mobs (zombie, mummy,
@@ -53447,11 +53481,8 @@ function openChest(c) {
   // which felt disproportionate to how rare Gold chests are. Rarity
   // pools and potion counts unchanged — this is a currency buff only.
   const rewards = {
-    // v0.29.631 — wood 67/33 common/rare -> 60/40; silver 25/50/25 -> 20/40/40.
-    // Gold is deliberately unchanged: its legendary share was tuned DOWN in
-    // v0.26.391 and raising it here would quietly reverse that decision.
-    wood:   { mojicoins: [60, 160],  rarity: ['common','common','common','rare','rare'],    hpPot: 2, mpPot: 1 },
-    silver: { mojicoins: [260, 500], rarity: ['common','rare','rare','epic','epic'], hpPot: 3, mpPot: 2 },
+    wood:   { mojicoins: [60, 160],  rarity: ['common','common','rare'],    hpPot: 2, mpPot: 1 },
+    silver: { mojicoins: [260, 500], rarity: ['common','rare','rare','epic'], hpPot: 3, mpPot: 2 },
     gold:   { mojicoins: [800, 1500],rarity: ['rare','rare','epic','epic','epic','legendary'], hpPot: 4, mpPot: 3 },   // v0.26.391 — legendary chance 25% → ~17% (higher-tier gear harder from chests)
   };
   const r = rewards[c.tier];
@@ -53481,13 +53512,6 @@ function openChest(c) {
   player.consumables.mp_s = (player.consumables.mp_s || 0) + r.mpPot;
   // Item
   // v0.29.60 — a Cursed Chest guarantees a legendary roll (the gamble's payoff).
-  // v0.29.631 — per user "chests ... should be lowered". Chests used to hand
-  // out equipment EVERY time; wood and silver can now come up coins-and-potions
-  // only. Gold stays guaranteed — it is the rare chest and its payoff should be
-  // certain. A cursed chest keeps its forced legendary.
-  const _LX_CHEST_GEAR_CHANCE = { wood: 0.60, silver: 0.75, gold: 1.0 };
-  const _lxChestGivesGear = !!c._cursed
-    || Math.random() < (_LX_CHEST_GEAR_CHANCE[c.tier] != null ? _LX_CHEST_GEAR_CHANCE[c.tier] : 1);
   const chosenRarity = c._cursed ? 'legendary' : r.rarity[Math.floor(Math.random() * r.rarity.length)];
   const cats = ['weapons','armors','accessories'];
   const cat = cats[Math.floor(Math.random() * cats.length)];
@@ -53535,7 +53559,7 @@ function openChest(c) {
     }
   }
   if (!pool.length) pool = ITEM_POOL[cat].filter(it => (it.tier | 0) <= _chestTierCap);   // defensive: any rarity within the cap
-  if (pool.length && _lxChestGivesGear) {
+  if (pool.length) {
     // v0.29.585 — weighted, not uniform: the cap is the ceiling a chest CAN
     // reach, not the tier it usually hands out. See _pickTierWeighted.
     const _picked = (typeof _pickTierWeighted === 'function')
@@ -67985,7 +68009,7 @@ function updateMonsters(dt) {
         // m.jump value on those mobs, the effect is constant vertical
         // pressure — no safe-platform turtling.
         const _jumpP = (m.traits && m.traits.activeBoss) ? 0.09 : 0.02;
-        if (m.jump > 0 && m.onGround && Math.random() < _jumpP) m.vy = -m.jump;
+        if (m.jump > 0 && m.onGround && Math.random() < _jumpP) m.vy = -_mobJumpV(m);
       } else {
         // Out of aggro range — clear the per-monster offset so the
         // next time this mob aggros it picks a fresh slot.
@@ -68859,7 +68883,7 @@ function mirrorSelfAI(m, dt, distToPlayer) {
   if (m.vx < -_vxCap) m.vx = -_vxCap;
   // Jump if grounded AND (player is above OR random restless jump)
   if (m.onGround && m.jump > 0) {
-    if (dy < -40 || Math.random() < 0.025) m.vy = -m.jump;
+    if (dy < -40 || Math.random() < 0.025) m.vy = -_mobJumpV(m);
   }
 
   // ── Projectile pressure ────────────────────────────────────────────
@@ -73557,7 +73581,7 @@ function bossAI(m, dt, distToPlayer) {
     // 4% per frame for active-boss-trait mobs vs the 2% non-trait
     // default seen in the regular AI at L35770).
     if (m.onGround && (m.jump | 0) > 0) {
-      if (dyA < -40 || Math.random() < 0.04) m.vy = -m.jump;
+      if (dyA < -40 || Math.random() < 0.04) m.vy = -_mobJumpV(m);
     }
     // Shoot cooldown — ticks dedicated `_activeBossShootCd` so it
     // doesn't collide with regular AI's `_shootCd` if a boss ever
@@ -76366,11 +76390,7 @@ function killMonster(m) {
   // total). Pre-luck effective rate 1.40% → 5.60%. Now that elites (3%) / elders
   // (15%) are much rarer, each is a meaningfully rewarding kill. Normal (tier 0)
   // and boss (tier 2) rates unchanged.
-  // v0.29.631 — per user "regular monster item drops should be lowered":
-  // tier-0 base 0.04 -> 0.028, i.e. 0.20% -> 0.14% pre-luck per normal kill.
-  // Elite (1.12) and boss (1.0) are untouched on purpose — the ask named
-  // regular monsters, and those two are the intended reward tiers.
-  const dropChance = (tier === 2 ? 1.0 : tier === 1 ? 1.12 : 0.028) * (1 + luck) * 0.05 * (typeof _diffDropMul === 'function' ? _diffDropMul() : 1) * (typeof _edictDropMul === 'function' ? _edictDropMul() : 1) * (typeof _affixDropMul === 'function' ? _affixDropMul() : 1);   // v0.28.7 — Hard +25% / Nightmare +50% gear-drop chance · v0.29.66 Edict Weight drop bonus · v0.29.288 world affix
+  const dropChance = (tier === 2 ? 1.0 : tier === 1 ? 1.12 : 0.04) * (1 + luck) * 0.05 * (typeof _diffDropMul === 'function' ? _diffDropMul() : 1) * (typeof _edictDropMul === 'function' ? _edictDropMul() : 1) * (typeof _affixDropMul === 'function' ? _affixDropMul() : 1);   // v0.28.7 — Hard +25% / Nightmare +50% gear-drop chance · v0.29.66 Edict Weight drop bonus · v0.29.288 world affix
   if (itemRoll < dropChance) {
     // v0.25.678 — Pass the killed mob's effective level so rarity weights
     // (and affix magnitudes downstream) grade with mob difficulty. _mobLevel
@@ -77011,16 +77031,11 @@ function rollItemDrop(tier, mobLevel, forceCat, forceTier, capTier) {
     // Elite (tier 1) and boss (tier 2) tables UNTOUCHED above — those
     // remain the canonical source of rare/epic/legendary upgrades.
     rarityWeights =
-        // v0.29.631 — per user "chances of getting better equipment should be
-        // slightly higher". Common weight comes down and rare/epic go up; the
-        // legendary column is left alone so the top end still belongs to
-        // elites and bosses. Better-than-common on a normal kill moves roughly
-        // 29% -> 37% at Lv50+, and 7% -> 9% at the bottom.
-        mobLevel >= 50 ? { common:26, rare:10, epic:4,  legendary:1 }
-      : mobLevel >= 35 ? { common:28, rare:8,  epic:3,  legendary:1 }
-      : mobLevel >= 20 ? { common:33, rare:6,  epic:2,  legendary:0 }
-      : mobLevel >= 10 ? { common:40, rare:4,  epic:0,  legendary:0 }
-      :                  { common:44, rare:3,  epic:0,  legendary:0 };
+        mobLevel >= 50 ? { common:30, rare:8,  epic:3,  legendary:1 }
+      : mobLevel >= 35 ? { common:32, rare:6,  epic:2,  legendary:1 }
+      : mobLevel >= 20 ? { common:36, rare:4,  epic:1,  legendary:0 }
+      : mobLevel >= 10 ? { common:42, rare:3,  epic:0,  legendary:0 }
+      :                  { common:46, rare:2,  epic:0,  legendary:0 };
   }
   // v0.25.248 — class-affinity weighting. Items with cls === 'any' get
   // full rarity weight; class-specific items match the player's class
@@ -122710,6 +122725,16 @@ function _playMonsterSfx(m, kind) {
 // startBgm walks every entry so the first user input unblocks all of them
 // in one go.
 const _BGM_MAP_FILES = {
+  // v0.29.631 — bgm_king.mp3 (user-supplied, tagged DADPEH). Three boss
+  // arenas that were falling through to the shared generic bgm_boss.mp3 now
+  // share this dedicated track: the Inner Dimension (Mirror Self), the
+  // Confused Vigil (Young Confused Barnaby) and Block-land Apex
+  // (Legosaurus). _bgmMapEl reuses ONE Audio element across ids pointing at
+  // the same URL, so moving between these three continues the track instead
+  // of restarting it — same sharing the 12 zodiac arenas already rely on.
+  innerDimension: 'audio/bgm_king.mp3',
+  confusedVigil:  'audio/bgm_king.mp3',
+  blockland_apex: 'audio/bgm_king.mp3',
   shadowWovenHood:    'audio/bgm_shadow_woven_hood.mp3',
   azureAbode:     'audio/bgm_azure_abode.mp3',
   bastion:        'audio/bgm_bastion.mp3',
@@ -122880,14 +122905,6 @@ const _BGM_MAP_FILES = {
   tower_b7:                'audio/Expedition.mp3',
   tower_b8:                'audio/Expedition.mp3',
   tower_b9:                'audio/Expedition.mp3',
-  // v0.29.632 — DISTORTED PORTAL chain (user-authored track, tagged DADPEH).
-  // None of the three had an entry: Threshold + Fractured Reflection fell
-  // through to the default overworld theme, and Confused Vigil (isBossArena)
-  // to the generic boss track. One shared URL across all three so the walk
-  // between them reuses the same live element and never restarts the song.
-  distortedThreshold:      'audio/bgm_distorted_portal.mp3',
-  fracturedReflection:     'audio/bgm_distorted_portal.mp3',
-  confusedVigil:           'audio/bgm_distorted_portal.mp3',
 };
 const _bgmMapEls = Object.create(null);
 // v0.25.440 — track whether the player has produced a user gesture that
