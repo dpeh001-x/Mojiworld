@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.631';
+const GAME_VERSION = 'v0.29.630';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -23650,6 +23650,7 @@ const MAPS = {
       worldHeight: FP_WORLD_H,
       levelReq: 11,
       isIcy: true,
+      airControl: 1.8,   // v0.29.594 — per user: easier mid-jump steering. Ground slide untouched.
       isVerticalTower: true,
       // v0.25.480 — gravity 20% lighter so mid-air arcs hang longer
       // and direction changes have more time to take effect.
@@ -23780,6 +23781,7 @@ const MAPS = {
       // Bumped icyIntensity 0.5 → 1.0 so the Ascension is now FULLY slippery,
       // matching Frozen Peak's signature momentum feel (was half-ice).
       icyIntensity: 1.0,
+      airControl: 1.8,   // v0.29.594 — same mid-jump authority as Frozen Peak.
       gravityMul: 0.8,
       speedReducesGravity: true,
       gravityMulMin: 0.5,
@@ -53066,63 +53068,26 @@ function loadMap(id, entryX, entryY) {
       }
     }
   }
-  // Rare "wanderer" — a single mob from a NEIGHBOURING tier, to keep maps
-  // feeling alive rather than deterministic.
+  // v0.29.632 — THE RARE "WANDERER" IS GONE. Per user: "the monsters should
+  // be fixed per map, it should not have monsters within the tiers joining,
+  // the monsters currently in it should be the only ones in the map."
   //
-  // v0.29.631 — IT USED TO IGNORE THE MAP'S TIER ENTIRELY, IN BOTH DIRECTIONS.
-  // The pick came from a flat hardcoded list of six ids spanning natural levels
-  // 4 to 44, rolled at 8% on EVERY map load of EVERY combat map. Both failure
-  // directions were reported by the user within minutes of each other:
+  // What stood here was an 8% roll, on every load of every combat map, that
+  // added one mob drawn from OUTSIDE the map's own spawn table. It was
+  // authored as atmosphere ("to keep maps feeling alive rather than
+  // deterministic") but it read to players as a bug every time it fired,
+  // because a map's roster is a promise about what you are walking into.
+  // v0.29.631 tried to save the idea by keeping the visitor within +/-8
+  // levels of the map's tier; the user's answer was that a map should have
+  // no visitors at all, which settles it. A map now spawns its authored
+  // spawns and nothing else.
   //
-  //   TOO HIGH — a Lv 44 Spook in Emerald Thicket, whose own residents are
-  //     Lv 1-4. Measured there at 1642 HP and 253 ATK, flying, with an
-  //     aim-leading ranged attack, against a Lv 9 player holding 496 max HP:
-  //     over half their health per hit from a mob a melee rogue cannot reach.
-  //     ("a random level 44 monster spawned here, that is not supposed to be
-  //     here")
-  //   TOO LOW — a Lv 15 Pincer in Stardust Atrium among its Lv 47 Astrofoxes
-  //     and Mochi Galaxies. Harmless, but it reads as a glitch and is worth
-  //     nothing to kill. ("There is a random monster in the map again")
-  //
-  // Same system behind the earlier wandering-scorpion report in Emerald
-  // Village. That was fixed by giving the village its missing isTown flag,
-  // which is why the guard below stops wanderers in TOWNS — but Emerald
-  // Thicket is a combat map, so nothing stopped it there. That fix was correct
-  // and addressed one map; this addresses the mechanism.
-  //
-  // The feature is kept whole: still off-tier, still a surprise, still the same
-  // 8% roll. It is now drawn from the world's actual roster within +/-
-  // WANDER_BAND levels of the map's own tier, and never from the map's own
-  // spawn list, so it stays a VISITOR rather than a duplicate resident.
-  //
-  // TIER IS READ FROM THE MAP'S OWN SPAWN TABLE, NOT FROM levelReq. levelReq
-  // looks like the obvious anchor and is the wrong one: it is an ENTRY GATE,
-  // not a difficulty rating, and it sits at 1 on 45 of the 66 combat maps so
-  // players can wander in early. Magma Foundry is levelReq 1 with Lv 66
-  // residents; Wayfarer's Lantern is levelReq 1 with Lv 80 ones. Anchoring on
-  // it would have clamped those maps to a Lv 9 Shroom and quietly deleted the
-  // feature across most of the game. The toughest thing already living on a
-  // map is the honest measure of its tier. levelReq is kept only as a floor,
-  // for a map whose spawn list is empty.
-  //
-  // If nothing in the roster falls inside the band, NO wanderer spawns this
-  // load. A missing surprise is strictly better than a wrong one.
-  if (!game.mapData.isTown && !game.mapData.isBossArena && !game.mapData.isTower && Math.random() < 0.08) {
-    const WANDER_BAND = 8;
-    const _natLv = (t) => ((typeof MOB_NATURAL_LEVEL !== 'undefined' && MOB_NATURAL_LEVEL[t]) || 1);
-    const _ownTypes = (game.mapData.spawns || []).filter(sp => sp && !sp.boss && sp.type).map(sp => sp.type);
-    const _own = new Set(_ownTypes);
-    const _mapTier = Math.max(
-      (game.mapData.levelReq | 0) || 1,
-      _ownTypes.length ? Math.max(..._ownTypes.map(_natLv)) : 0
-    );
-    const wanderers = _lxWandererPool()
-      .filter(t => !_own.has(t) && Math.abs(_natLv(t) - _mapTier) <= WANDER_BAND);
-    if (wanderers.length) {
-      const pick = wanderers[Math.floor(Math.random() * wanderers.length)];
-      spawnFromMap(pick, false);
-    }
-  }
+  // NOTE ON stump. Stumpy (natural Lv 32) has a bestiary entry but appears in
+  // no map's spawn table — this roll was the only thing that ever spawned it,
+  // so it is now unspawnable in normal play. That is consistent rather than
+  // accidental: LX_CODEX_UNSPAWNABLE already lists it, precisely so the codex
+  // never writes a hunt nobody can finish. To bring Stumpy back, give it a
+  // spawn entry on a Lv ~30 map and drop it from that set.
 
   // Spawn 1-3 chests in non-town maps (not every time)
   // v0.26.311 — Per user "remove chests from expeditions". Tower floors
@@ -53628,46 +53593,6 @@ function openChest(c) {
     if (typeof addShake === 'function') addShake(20);
     if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('void'); } catch (e) {} }
   }
-}
-
-// v0.29.631 — WANDERER POOL. Every mob that legitimately lives somewhere in
-// the world, keyed for the "rare wanderer" roll in loadMap (see the comment
-// there for the bug this fixes). Derived from the maps themselves rather than
-// hand-listed, so a mob added to any spawn table becomes eligible automatically
-// and one removed stops appearing — the old hand-list had drifted into holding
-// mobs that no longer fit anywhere.
-//
-// SEEDED with the six ids the hand-list used to carry. Five of them are also
-// map residents, but 'stump' (Stumpy, natural Lv 32) is NOT: it carries a
-// bestiary entry and a natural level while spawning in no map at all — see
-// LX_CODEX_UNSPAWNABLE, which excludes it from codex hunts for exactly that
-// reason. The wanderer roll is Stumpy's ONLY appearance in the game, so
-// deriving the pool purely from map tables would have quietly deleted a mob.
-//
-// Excluded: bosses, zodiac and mirror types (they own bespoke arenas, intros
-// and AI, and have no business drifting into a field map), and anything with
-// no MOB_NATURAL_LEVEL entry — the tower mobs — since without a level there is
-// no way to judge whether they belong.
-let _LX_WANDER_POOL = null;
-function _lxWandererPool() {
-  if (_LX_WANDER_POOL) return _LX_WANDER_POOL;
-  const ok = (t) => {
-    const mt = monsterTypes[t];
-    if (!mt || mt.boss || mt.isZodiac || mt.zodiacBoss || mt.isMirror) return false;
-    return (typeof MOB_NATURAL_LEVEL !== 'undefined') && MOB_NATURAL_LEVEL[t] != null;
-  };
-  const set = new Set();
-  for (const t of ['slime', 'mushroom', 'horny', 'stump', 'scorpion', 'wraith']) if (ok(t)) set.add(t);
-  for (const id in MAPS) {
-    const md = MAPS[id];
-    if (!md || !md.spawns) continue;
-    for (const sp of md.spawns) {
-      if (!sp || sp.boss || !sp.type) continue;
-      if (ok(sp.type)) set.add(sp.type);
-    }
-  }
-  _LX_WANDER_POOL = Array.from(set);
-  return _LX_WANDER_POOL;
 }
 
 function spawnFromMap(type, boss, opts) {
@@ -55427,19 +55352,33 @@ function updatePlayer(dt) {
           : 1.0)
       : 0;
     const _lerp = (a, b, t) => a + (b - a) * t;
+    // v0.29.594 — AIR-CONTROL knob (per user: "ease maneuverability in the
+    // frozen peak and interdimensional ascension... especially mid jump").
+    // Full ice gives air accel 1.10 but air friction 0.985, so momentum
+    // barely bleeds and a mid-jump correction never lands — the player
+    // commits to a trajectory at take-off and rides it. This knob raises air
+    // AUTHORITY only: air accel is multiplied, and air friction is lerped
+    // toward normal-ground 0.93 so small corrections actually register.
+    // GROUND physics are untouched, so the slide, the speed-jump chain and
+    // the Icy Tower identity all survive intact. Default 1 = historical
+    // behaviour, so every other icy map is unaffected.
+    const _airCtl = (isIcy && game.mapData && typeof game.mapData.airControl === 'number')
+      ? Math.max(1, Math.min(2.5, game.mapData.airControl))
+      : 1;
+    const _airCtlT = Math.max(0, Math.min(1, (_airCtl - 1) / 1.5));
     const accel = isSandy
       ? (player.onGround ? 0.55 : 0.55)
       : isIcy
       ? (player.onGround
           ? _lerp(1.1, 0.30, _icyT)
-          : _lerp(0.6,  1.10, _icyT))
+          : _lerp(0.6,  1.10, _icyT) * _airCtl)
       : (player.onGround ? 1.1 * _accelSpeedScale  : 0.6);
     const fric = isSandy
       ? (player.onGround ? 0.62 : 0.92)
       : isIcy
       ? (player.onGround
           ? _lerp(0.78,  0.96,  _icyT)
-          : _lerp(0.92,  0.985, _icyT))
+          : _lerp(_lerp(0.92, 0.985, _icyT), 0.93, _airCtlT))   // v0.29.594 — air drag tightens with airControl
       : (player.onGround ? 0.78 : 0.92);
     // v0.29.413 — per-map ice tuning (per user: "For frosbite hollow reduce
     // the acceleration and max speed in that map"). `icyIntensity` cannot do
@@ -55479,7 +55418,11 @@ function updatePlayer(dt) {
       // Icy Tower allows over-cap horizontal speed when chained off
       // earlier momentum, but bounded by the hard ICE_MAX_VX so the
       // player always feels in control.
-      const counterBoost = (isIcy && !player.onGround && player.vx > 1.5) ? 1.6 : 1;
+      // v0.29.594 — reversal threshold drops and the boost grows with
+      // airControl, so flipping direction mid-jump responds immediately
+      // instead of waiting for momentum to decay past 1.5.
+      const counterBoost = (isIcy && !player.onGround && player.vx > 1.5 / _airCtl)
+        ? Math.min(2.4, 1.6 * _airCtl) : 1;
       const a = accel * counterBoost * _iceAccelMul;
       const cap = isIcy
         ? Math.min(ICE_MAX_VX, Math.max(moveSpeed, Math.abs(player.vx) + a))
@@ -55489,7 +55432,8 @@ function updatePlayer(dt) {
       player.facing = -1;
       player.state = player.onGround ? 'walk' : player.state;
     } else if (k['arrowright']) {
-      const counterBoost = (isIcy && !player.onGround && player.vx < -1.5) ? 1.6 : 1;
+      const counterBoost = (isIcy && !player.onGround && player.vx < -1.5 / _airCtl)
+        ? Math.min(2.4, 1.6 * _airCtl) : 1;   // v0.29.594 — mirror of the left-input boost
       const a = accel * counterBoost * _iceAccelMul;
       const cap = isIcy
         ? Math.min(ICE_MAX_VX, Math.max(moveSpeed, Math.abs(player.vx) + a))
