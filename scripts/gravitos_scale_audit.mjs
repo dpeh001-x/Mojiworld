@@ -52,9 +52,26 @@ async function metrics(p) {
   for (let y = minY; y <= maxY && headY === maxY; y++)
     for (let x = Math.round(cx - half); x <= Math.round(cx + half); x++)
       if (dark(y * W + x)) { headY = y; break; }
+  // DETAIL. Laplacian variance over the body box. Generated frames are upscaled
+  // from whatever the model returned — the API caps its input at 1 megapixel, so
+  // padding spends that budget on empty space and the character comes back small
+  // — and an upscaled sprite keeps its pixel dimensions while losing its edges.
+  // Per user: "some of the images generated are very low resolution".
+  const lumAt = (x, y) => {
+    const k = (y * W + x) * 4;
+    if (data[k + 3] < 40) return 0;
+    return 0.299 * data[k] + 0.587 * data[k + 1] + 0.114 * data[k + 2];
+  };
+  let s1 = 0, s2 = 0, cnt = 0;
+  for (let y = Math.max(1, minY + 1); y < Math.min(H - 1, maxY); y++)
+    for (let x = Math.max(1, minX + 1); x < Math.min(W - 1, maxX); x++) {
+      const L = 4 * lumAt(x, y) - lumAt(x - 1, y) - lumAt(x + 1, y) - lumAt(x, y - 1) - lumAt(x, y + 1);
+      s1 += L; s2 += L * L; cnt++;
+    }
+  const detail = cnt ? (s2 / cnt - (s1 / cnt) ** 2) : 0;
   return {
     legW: legW / W, torsoH: (maxY - headY + 1) / H, footY: (maxY + 1) / H,
-    boxH: bh / H, boxW: (maxX - minX + 1) / W,
+    boxH: bh / H, boxW: (maxX - minX + 1) / W, detail,
     edgeL: aMinX / W, edgeR: (W - 1 - aMaxX) / W, edgeT: aMinY / H, edgeB: (H - 1 - aMaxY) / H,
     W, H,
   };
@@ -85,4 +102,18 @@ for (const key of KEYS) {
     console.log(`  ${i}  ${(m.legW * 100).toFixed(1)}%   ${rL.toFixed(2)}x     ${(m.torsoH * 100).toFixed(1)}%   ${rT.toFixed(2)}x     ${(m.footY * 100).toFixed(1)}%   ${(m.edgeL * 100).toFixed(1)}/${(m.edgeR * 100).toFixed(1)}/${(m.edgeT * 100).toFixed(1)}/${(m.edgeB * 100).toFixed(1)}  ${flags.join(' ')}`);
   }
   console.log(`  -> worst scale deviation ${worstScale.toFixed(2)}x, ${cut} frame(s) touching an edge`);
+  // Sharpness relative to the form's own base sprite, which is the ceiling: the
+  // frames are derived from it, so they cannot legitimately carry more detail
+  // (a bright FX flare can, which is why this reports rather than fails).
+  const dets = [];
+  for (let i = 0; i < 9; i++) {
+    const p = `Sprites/bosses/attack/${key}_${i}.webp`;
+    if (existsSync(p)) dets.push((await metrics(p)).detail);
+  }
+  if (dets.length) {
+    const med = dets.slice().sort((a, b) => a - b)[dets.length >> 1];
+    const rel = med / base.detail;
+    console.log(`  -> detail (median edge energy) ${med.toFixed(0)} vs base ${base.detail.toFixed(0)} = ${rel.toFixed(2)}x` +
+      (rel < 0.50 ? '   SOFT — visibly upscaled' : rel < 0.75 ? '   a little soft' : '   sharp'));
+  }
 }

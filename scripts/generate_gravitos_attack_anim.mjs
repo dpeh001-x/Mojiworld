@@ -506,7 +506,29 @@ if (has('--salvage-only')) {
   const padded = await sharp(await readFile(BASE))
     .extend({ top: _padY, bottom: _padY, left: _padX, right: _padX, background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
   const padMeta = await sharp(padded).metadata();
-  const small = await sharp(padded).resize(940, 940, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+  // RESOLUTION. Padding buys correct framing and pays for it in detail: the
+  // bigger the padded canvas, the smaller the character inside the image we
+  // send, and everything the model returns then has to be upscaled back. Per
+  // user, "some of the images generated are very low resolution".
+  // SEND_MAX is now a knob rather than a buried 940, and the true cost is
+  // printed below from the sheet the API actually returns, instead of assumed.
+  // The API rejects anything over 1 MEGAPIXEL:
+  //   "True Size requires an input first frame with less than 1MP"
+  // — which is where the old hardcoded 940 came from. 940 square is only 0.88MP
+  // and, on a non-square canvas, well under: form 3 was sending 0.80MP, wasting
+  // a fifth of the budget. Fit the largest box under the cap for THIS aspect
+  // instead, which is free linear resolution.
+  const _ar = padMeta.height / padMeta.width;
+  const _budget = 0.98e6;
+  const SEND_W = Number(arg('--send')) || Math.floor(Math.sqrt(_budget / _ar));
+  const small = await sharp(padded).resize(SEND_W, Math.round(SEND_W * _ar), { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+  const _sm = await sharp(small).metadata();
+  const _charSentPx = Math.round(baseA_px.h * (_sm.width / padMeta.width));
+  console.log(`  sending ${_sm.width}x${_sm.height} = ${(_sm.width * _sm.height / 1e6).toFixed(2)}MP of the 1.00MP cap` +
+    `  (character ~${_charSentPx}px tall, must end up ${baseA_px.h}px -> upscale x${(baseA_px.h / _charSentPx).toFixed(2)})`);
+  if (baseA_px.h / _charSentPx > 2.6) {
+    console.log('  WARNING: that upscale will look soft. Padding is spending the 1MP budget on empty space — lower --pad.');
+  }
 
   console.log(`animating ${attack} (eagle, ${REQ} frames requested -> ${FRAMES} emitted, pad ${Math.round(PAD * 100)}%)...`);
   const res = await fetch(`${API}/assets/sprite/animate`, {
@@ -532,6 +554,11 @@ if (has('--salvage-only')) {
     if (!(cw > 0 && chh > 0) || cw * data.num_cols > sm.width + 1 || chh * data.num_rows > sm.height + 1) {
       throw new Error(`bad sheet grid: ${sm.width}x${sm.height} / ${data.num_cols}x${data.num_rows}`);
     }
+    // The number that decides output quality: how far each returned cell has to
+    // be stretched to reach the padded canvas. Anything above ~1.5x is visible
+    // softness in the shipped sprite.
+    console.log(`  sheet ${sm.width}x${sm.height} = ${data.num_cols}x${data.num_rows} cells of ${cw}x${chh}` +
+      `  ->  upscale to padded canvas x${(padMeta.width / cw).toFixed(2)}`);
     for (let r = 0; r < data.num_rows && cells.length < REQ; r++)
       for (let c = 0; c < data.num_cols && cells.length < REQ; c++)
         cells.push(await sharp(sheet).extract({ left: c * cw, top: r * chh, width: cw, height: chh }).png().toBuffer());
