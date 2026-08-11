@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.597';
+const GAME_VERSION = 'v0.29.598';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -34743,13 +34743,34 @@ function openAdvancement() {
       ${enh ? `<div class="cls-perk" style="margin-top:6px;"><b style="color:#ffaa66">✦ Basic Skills</b><br><span style="font-size:11px;color:#ccc">${enh.label}</span></div>` : ''}
       <div class="cls-jobs" style="color:${j.color}">${statsLine}</div>
     `;
+    // v0.29.598 (per user: "make it less clunky, guide the player a bit
+    // more") — TWO-STEP PICK. This used to call applyJob() on the FIRST
+    // click: one stray tap permanently decided the character, with nothing
+    // said about it being permanent and no way back. Now the first click arms
+    // the card — it says what happens and asks again — and only the second
+    // commits. Clicking any other card moves the arm rather than stacking, so
+    // browsing the options never commits anything.
     card.onclick = () => {
-      applyJob(jobId);
-      document.getElementById('advancement-modal').style.display = 'none';
-      setTimeout(() => { if (typeof _playStoryBeat === 'function') _playStoryBeat('advancement_1_done'); }, 500);
-      game.paused = false;
-      // Chain straight into master advancement after job pick (any level)
-      setTimeout(() => { openMasterAdvancement(); }, 400);
+      if (card._armed) { _advCommitJob(jobId); return; }
+      // disarm every sibling so only one card is ever pending
+      opts.querySelectorAll('.class-card').forEach((el) => {
+        if (el === card) return;
+        el._armed = false;
+        el.classList.remove('cls-armed');
+        if (el._confirmEl) { el._confirmEl.remove(); el._confirmEl = null; }
+      });
+      card._armed = true;
+      card.classList.add('cls-armed');
+      const cf = document.createElement('div');
+      cf.className = 'cls-confirm';
+      cf.style.cssText = 'margin-top:8px;padding:7px 9px;border-radius:8px;font-size:12px;line-height:1.45;'
+        + 'background:rgba(0,0,0,0.34);border:1px solid ' + j.color + ';color:#ffe9b8;text-align:center;';
+      cf.innerHTML = 'This choice is <b>permanent</b>.<br><b style="color:' + j.color + '">Click again to become the ' + j.name + '</b>';
+      card.appendChild(cf);
+      card._confirmEl = cf;
+      const gl = document.getElementById('adv-guide-line');
+      if (gl) gl.textContent = 'Take your time — click a card twice to lock it in. Nothing is chosen until you do.';
+      if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('chirp'); } catch (e) {} }
     };
     opts.appendChild(card);
   }
@@ -34787,6 +34808,29 @@ function _lxApplyMasterInner(masterId) {
   }
 }
 
+// v0.29.598 — the commit half of the two-step pick, split out so the card
+// handler reads as intent rather than mechanics.
+function _advCommitJob(jobId) {
+  applyJob(jobId);
+  const m = document.getElementById('advancement-modal');
+  if (m) m.style.display = 'none';
+  setTimeout(() => { if (typeof _playStoryBeat === 'function') _playStoryBeat('advancement_1_done'); }, 500);
+  game.paused = false;
+  // v0.29.598 — do NOT chain into master advancement unless the player can
+  // actually use it. It used to fire 400 ms later at ANY level, and
+  // openMasterAdvancement's own gate then toasted a Lv 40+ quest at a player
+  // who had just hit 20 — a confusing errand thrown at someone still reading
+  // what their new job does. Below the threshold, say what comes next instead.
+  const _lv = (player && player.level) || 1;
+  if (_lv >= (typeof MASTER_ADVANCE_LEVEL !== 'undefined' ? MASTER_ADVANCE_LEVEL : 40)) {
+    setTimeout(() => { openMasterAdvancement(); }, 400);
+  } else if (typeof showToast === 'function') {
+    const _need = (typeof MASTER_ADVANCE_LEVEL !== 'undefined' ? MASTER_ADVANCE_LEVEL : 40);
+    setTimeout(() => {
+      showToast('Next: your MASTER path unlocks at Lv ' + _need + '. Keep levelling — your new skills are on the U panel.', 'epic');
+    }, 1400);
+  }
+}
 function openMasterAdvancement() {
   const job = JOBS[player.job];
   if (!job) return;
