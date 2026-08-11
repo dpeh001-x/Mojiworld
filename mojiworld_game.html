@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.608';
+const GAME_VERSION = 'v0.29.609';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -52846,11 +52846,49 @@ function loadMap(id, entryX, entryY) {
     const plats = game.mapData.platforms.filter(p => p.type === 'platform');
     // Fewer than before (was always 1-3 per visit): 45% none, else 1, occasionally 2.
     const count = (Math.random() < 0.45) ? 0 : (1 + (Math.random() < 0.30 ? 1 : 0));
+    // v0.29.609 (per user: "chest was reusable for more than once") — this
+    // loop used to place every chest at `p.x + p.w/2 - 14`, the platform's
+    // CENTRE, with nothing stopping the same platform being picked twice. When
+    // it was, both chests landed on IDENTICAL coordinates and drew exactly on
+    // top of each other: the player opened what looked like one chest, took the
+    // reward, pressed F again on the still-unopened twin underneath, and was
+    // paid a second time. Measured over 4000 simulated restocks, HALF of the
+    // two-chest loads overlapped exactly — and on a single-platform map it was
+    // guaranteed, which is the Tidal Lagoon case in the report.
+    //
+    // openChest itself is fine and is left alone: it already returns early on
+    // c.opened, verified by opening one chest four times for a single payout.
+    // The bug was never one chest paying twice; it was two chests in one place.
+    const _usedPlats = [];
+    const _placed = [];
     for (let i = 0; i < count && plats.length; i++) {
-      const p = plats[Math.floor(Math.random() * plats.length)];
+      // Prefer a platform this restock has not used yet, so two chests spread
+      // across the map rather than sharing a ledge.
+      let p = null;
+      for (let _t = 0; _t < 8; _t++) {
+        const _c = plats[Math.floor(Math.random() * plats.length)];
+        if (_usedPlats.indexOf(_c) < 0) { p = _c; break; }
+      }
+      if (!p) p = plats[Math.floor(Math.random() * plats.length)];
+      _usedPlats.push(p);
+      // Spread ALONG the platform instead of pinning to its centre, and reject
+      // a spot within 60px of one already placed — so even when a narrow map
+      // forces two chests onto the same ledge they never stack.
+      const _cw = 35;
+      const _span = Math.max(0, p.w - _cw - 20);
+      let _x = p.x + 10 + Math.random() * _span;
+      for (let _t = 0; _t < 12; _t++) {
+        // 2-D check. An exact y match is not enough: _variedMapData jitters
+        // every platform's y independently, so two ledges authored at the same
+        // height end up a few px apart and a strict equality test then waved
+        // through chests 9px from each other (measured).
+        if (!_placed.some(q => Math.abs(q.y - (p.y - 24)) < 40 && Math.abs(q.x - _x) < 60)) break;
+        _x = p.x + 10 + Math.random() * _span;
+      }
+      _placed.push({ x: _x, y: p.y - 24 });
       const tierRoll = Math.random();
       const tier = tierRoll < 0.1 ? 'gold' : tierRoll < 0.4 ? 'silver' : 'wood';
-      spawnChest(p.x + p.w/2 - 14, p.y - 24, tier);
+      spawnChest(_x, p.y - 24, tier);
     }
     game._chestCooldown[id] = _monoNow();   // stamp restock window (re-entry within 15min = no chests)
     // v0.25.261 — Boons no longer scatter on combat maps. Only sources
@@ -52866,7 +52904,20 @@ function loadMap(id, entryX, entryY) {
     const _cplats = (game.mapData.platforms || []).filter(p => p.type === 'platform');
     const _cp = _cplats.length ? _cplats[Math.floor(Math.random() * _cplats.length)]
                                : { x: (game.mapData.worldWidth || 960) / 2, y: 440, w: 120 };
-    const _cc = spawnChest(_cp.x + _cp.w / 2 - 14, _cp.y - 24, 'gold');
+    // v0.29.609 — spread + separate, matching the restock loop above. This
+    // spawner ignores the chest cooldown, so it lands alongside whatever that
+    // loop already placed; pinning it to the platform centre put it exactly on
+    // top of a normal chest, which reads as one chest that pays twice.
+    const _ccW = 35;
+    const _ccSpan = Math.max(0, (_cp.w || 120) - _ccW - 20);
+    let _ccX = _cp.x + 10 + Math.random() * _ccSpan;
+    for (let _t = 0; _t < 12; _t++) {
+      const _clash = (game.chests || []).some(q => q &&
+        Math.abs(q.y - (_cp.y - 24)) < 40 && Math.abs(q.x - _ccX) < 60);
+      if (!_clash) break;
+      _ccX = _cp.x + 10 + Math.random() * _ccSpan;
+    }
+    const _cc = spawnChest(_ccX, _cp.y - 24, 'gold');
     if (_cc) _cc._cursed = true;
     else if (game.chests && game.chests.length) game.chests[game.chests.length - 1]._cursed = true;
   }
