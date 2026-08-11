@@ -121,6 +121,25 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.628 <span class="tag"><span class="pill feat">feat</span> DEF deepens the outlevel falloff &mdash; a tank&rsquo;s floor drops from 15% to 7.5%</span></h2>
+<p>Per user, following v0.29.626: <em>with higher def the 15 % floor baseline damage can go down to 7.5%.</em></p>
+<p><b>Scaling only the floor would have shipped a no-op</b>, and that is worth saying plainly. The v0.29.626 curve is <code>1.3 / (1 + gap &times; 0.06)</code>; it does not reach 0.15 until a level gap of <b>128</b>, and <code>LX_SCALED_LEVEL_CAP</code> is <b>85</b>. The floor never binds in real play, so halving it alone would have changed nothing a player could feel.</p>
+<p>So DEF is wired to the thing that floor is the limit <em>of</em>. One DEF term drives both, so they cannot drift apart:</p>
+<pre style="background:#11161d;border:1px solid #2a3340;border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:12px;line-height:1.6"><code>t      = DEF investment, 0 (none) .. 1 (the 90% absorb cap, ~4500 DEF)
+floor  = 0.15 * (1 - 0.5t)            ->  0.15 with no DEF, 0.075 at the cap
+depth  = 1 - 0.5t * min(1, gap / 40)  ->  1.0 at gap 0, down to 0.5 at the cap</code></pre>
+<p><code>t</code> is read from the existing <code>_defAbsorbMul</code> curve rather than inventing a second DEF scale, so it already respects the 90% absorb cap and every gear/buff source that feeds <code>getDef()</code>.</p>
+<h3>Measured, against the live function</h3>
+<pre style="background:#11161d;border:1px solid #2a3340;border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:12px;line-height:1.6"><code>                       no DEF      DEF cap
+same-level  (gap 0)     1300        1300      <b>unchanged</b>
+over-level  (gap -40)   1300        1300      <b>unchanged</b>
+Lv100 vs Lv10 (gap 90)   203         102      0.502x
+extreme gap (the floor)  150          75      15% -&gt; 7.5%</code></pre>
+<h3>The part that keeps it honest</h3>
+<p><b>The gap ramp on <code>depth</code> is exactly 1.0 at gap 0</b>, so an at-or-above-level monster hits a full tank for the same 1.3&times; baseline it always did &mdash; asserted for both a same-level and an over-level attacker. DEF already mitigates raw damage before <code>_diffDmg</code> runs; letting it compound here is deliberate, but it is confined to monsters the player heavily out-levels &mdash; precisely the ones that are meant to stop being a threat. In an even fight DEF keeps its normal, single-dip value, so content at your level stays exactly as dangerous as it was.</p>
+<p><b>Verification.</b> <code>scripts/outlevel_damage_test.mjs</code> grows to <b>16</b> assertions. The two new behaviours fail on the previous build (<code>tank 203 -&gt; 203 (1.000x)</code> and <code>floor 150, expect 75</code>) and pass here, while every v0.29.626 guarantee still holds: the 1.3&times; baseline at gap 0, the untouched over-level case, monotonicity across Lv 10&ndash;200, and the untrustworthy-<code>levelReq</code> fallback path left alone. Damage is also asserted monotonic in DEF across nine investment levels, so there is no rung where buying more DEF makes you take more. <b>16/16 on the fix, zero page errors.</b></p>
+<p>One test note worth recording: the first run failed on numbers that looked like a game bug (<code>203 -&gt; 202</code>, floor <code>150 -&gt; 149</code>). It was the harness &mdash; a freshly loaded player carries some DEF, so the &ldquo;no DEF&rdquo; control sections were not actually at zero DEF once DEF entered this term. Zeroing <code>baseDef</code>, <code>mods.def</code> and the DEF-scaling buffs in the setup restored exact agreement with v0.29.626.</p>
+
 <h2>v0.29.627 <span class="tag"><span class="pill bug">bug</span> Cedric stops meowing, and Future Lyra stops dying like a man</span></h2>
 <p>Two audio fixes, both regenerated through ludo.ai. Per user &mdash; <em>&ldquo;Cedric Meows despite being a block golem&rdquo;</em> and <em>&ldquo;future lyra sounds weird on death, sounds like male&rdquo;.</em></p>
 <p><b>Cedric was never a cat.</b> <code>NPC_SPRITES</code> maps him to <code>cedric.webp</code> &mdash; &ldquo;Cedric the Confused Morphed Legoman&rdquo;, a block-headed humanoid with mismatched brick limbs. (The Stormbearer, a lightning <em>tiger</em>, is a separate NPC on its own sprite &mdash; a meow would almost suit that one.) He had no entry in the voice registry at all, so his clip came from a generic batch. He now has a proper prompt: a low hollow brick-knock mumble, with explicit negatives against feline sounds since the endpoint reaches for animal vocalisations on anything it reads as a creature.</p>
