@@ -5224,6 +5224,21 @@
     font-size: 12px;
     line-height: 1;
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+    /* v0.29.5xx — sized box so the skill sprite has somewhere to render:
+       _applySkillIcon sets width/height to 100%, which is zero on a bare
+       inline span. Emoji fallback still centres in the same 14px box, so
+       pills keep identical metrics whether or not the art exists. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    /* !important because _applySkillIcon writes inline width/height:100%
+       for the hotkey bar, and 100% against this pill's AUTO height resolves
+       to ZERO — the sprite rendered into a 14x0 box, i.e. invisible. Caught
+       by measuring the computed box rather than trusting backgroundImage. */
+    width: 14px !important;
+    height: 14px !important;
+    flex: 0 0 14px;
+    background-size: contain !important;
   }
   .moji-buff-pill .buff-label {
     flex: 1;
@@ -9407,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.605';
+const GAME_VERSION = 'v0.29.606';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -116174,7 +116189,9 @@ const BUFF_META = [
   { key: 'hallowedField', icon: '🌟', label: 'Hallowed',     dur: 1500  },
   { key: 'eagleEye',      icon: '🦅', label: 'Eagle Eye',    dur: 30000 },
   { key: 'smokeBomb',     icon: '💨', label: 'Smoke',        dur: 3000  },
-  { key: 'lich',          icon: '💀', label: 'Lich Form',    dur: 30000 },
+  // v0.29.5xx — icon id differs from the buff key: the art ships as
+  // Sprites/skills/lich_ult.webp. Every other buff uses its key directly.
+  { key: 'lich',          skill: 'lich_ult',          icon: '💀', label: 'Lich Form',    dur: 30000 },
   { key: 'comboAtk',      icon: '🔥', label: 'Combo +ATK',   dur: 8000  },
   { key: 'comboXp',       icon: '⭐', label: 'Combo XP',     dur: 10000 },
 ];
@@ -116238,7 +116255,7 @@ function _updateBuffRow() {
       pill.setAttribute('data-buff', a.meta.key);
       // v0.29.5xx — the pill now states the time LEFT, not just a proportion:
       // a 12s War Cry and a 2.5s Sleight read identically at half-drained.
-      pill.innerHTML = '<span class="buff-icon">' + a.meta.icon + '</span>'
+      pill.innerHTML = '<span class="buff-icon"></span>'
                      + '<span class="buff-label">' + a.meta.label + '</span>'
                      + '<span class="buff-left"></span>'
                      + '<span class="buff-timer"></span>';
@@ -116261,6 +116278,18 @@ function _updateBuffRow() {
     const _den = game._buffBarMax[_bk] || a.meta.dur || 1;
     const pct = Math.max(0, Math.min(100, (t / _den) * 100));
     const _pill = pills[i];
+    // v0.29.5xx — REAL SKILL ART (per user "wire the rendered skill-sprite
+    // art"). _applySkillIcon resolves Sprites/skills/<id>.webp and falls back
+    // to the emoji on its own, so buffs with no sprite (hallowedField, and the
+    // comboAtk/comboXp combo states, which are not skills) keep their glyph.
+    // Re-applied every frame on purpose: _skillIconUrl is async and returns
+    // null until the image decodes, while pills only rebuild when the SET of
+    // buffs changes — a first-cast pill would otherwise stay on its emoji for
+    // good. The call early-outs on el.dataset.skIco, so steady frames are free.
+    if (typeof _applySkillIcon === 'function') {
+      const _ico = _pill.firstElementChild;
+      if (_ico) _applySkillIcon(_ico, a.meta.skill || a.meta.key, a.meta.icon);
+    }
     const bar = _pill.lastElementChild;
     if (bar && bar._lastPct !== pct) {
       bar._lastPct = pct;
