@@ -121,6 +121,18 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.603 <span class="tag"><span class="pill bug">bug</span> The Shadowlord's Bloodlust never reached the party &mdash; and an audit so it cannot happen again</span></h2>
+<p>Per user: <em>ensure that buff skills also buff players in the same room during coop multiplayer play</em>. Auditing the whole path rather than assuming it was broken: the party-buff machinery is sound and wired end to end &mdash; <code>_coopPartyBuff()</code> sends a <code>pbf</code> carrier frame, the ping dispatcher routes it, and <code>_coopApplyPartyBuff()</code> applies it behind a whitelist, a same-room check and a live-peer check. Every one of those behaviours already worked and is now pinned by tests.</p>
+<p><b>There was exactly one hole.</b> Sharing is <em>opt-in at each grant site</em> &mdash; a skill writes <code>player.buffs.X = ms</code> and must separately call <code>_coopPartyBuff(...)</code>. Checking all ten grants of a shareable buff against their broadcasts found one that forgot:</p>
+<ul>
+  <li><b>Shadow Sovereign (<code>shadowlord_ult</code>) granted itself Bloodlust and shared nothing.</b> Every other Bloodlust source &mdash; the base cast, Warlord's Banner, War of Banners and Apex Bond &mdash; broadcasts it. A Shadowlord ulting next to their party was the only one buffing themselves alone.</li>
+</ul>
+<h3>The part that stops it recurring</h3>
+<p>Opt-in sharing means the <em>next</em> buff skill will silently forget too, and nothing would complain. <code>scripts/coop_buff_share_test.mjs</code> now fails the moment that happens: it reads the source, parses the shareable whitelist, finds every grant of a whitelisted buff, and requires a broadcast beside it. Run against the previous build it reports the offender by name and line &mdash; <code>bloodlust @ L64644</code> &mdash; and on the fix it reports <b>10 grant sites, all shared</b>. It also checks that every whitelisted buff has a real declared slot, since the receiver deliberately refuses to create slots off the wire and a whitelisted-but-undeclared buff would be quietly unshareable.</p>
+<h3>What is shared, and what is deliberately not</h3>
+<p>Shared: <b>War Cry, Bloodlust, Guardian, Holy Shield, Eagle Eye</b>. Held back by earlier design, and left alone here because the reasoning holds: <code>rampage</code>, <code>sleight</code> and <code>smokeBomb</code> are states the caster's own skill code drives frame by frame, so a bare timer on a partner would show a HUD pill with no mechanic behind it; <code>lich</code> is a full-body transform tied to the caster's sprite; <code>comboAtk</code>/<code>comboXp</code> are personal combo meters; and <code>hallowedField</code> is an Arch Bishop passive that re-arms every 1.5&nbsp;s while an enemy is near.</p>
+<p><b>Verification.</b> <b>15</b> assertions across a static source audit and live send/receive checks in the loaded game: a partner's War Cry lands in the same room, a partner in another room does not buff you, non-party buffs are refused off the wire, a shorter partner buff never shortens your own while a longer one extends it, unknown names never create a slot, an unknown sender is ignored, and a multi-buff cast sends exactly one room-scoped frame carrying only the shareable keys. <b>1 of 15 fails on the previous build</b> (the audit, naming the exact site); <b>15/15 on the fix, zero page errors.</b></p>
+
 <h2>v0.29.602 <span class="tag"><span class="pill feat">feat</span> Gravitos forms 2 and 3 get their own cast animations &mdash; and stop borrowing form 1&rsquo;s body</h2>
 <p>
   Form&nbsp;1 has had three dedicated cast sets for a while &mdash; a punch, a
