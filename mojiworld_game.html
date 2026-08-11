@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.577';
+const GAME_VERSION = 'v0.29.578';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -42378,6 +42378,127 @@ function _questGuidance(id, q, a) {
     return { icon: '→', text: _qtMapName(q.target) };
   }
   return null;
+}
+
+// =========================================================================
+// QUEST NAVIGATOR (v0.29.578) — "where do I finish this?"
+// Per user: "there's a lot of quests, but there's no way to find the npc".
+//
+// Everything here is DERIVED, not authored. A scan of the live objects
+// before any of this existed found 256 of 270 quests already naming a
+// placed NPC (`npc:` on 240, `giver:` on 20), so the navigator reads the
+// data the game already has rather than asking 270 quests to repeat it:
+//   MAPS[].npcs    — 61 placements / 43 unique names -> map + x/y
+//   MAPS[].spawns  — {type,count} -> which maps hold a quest's target
+//   MAPS[].portals — {x,dest} -> the map graph, walked by BFS for a route
+// =========================================================================
+const _LX_QNAV = { npc: null, mob: null, route: new Map() };
+
+function _qnavBuild() {
+  if (_LX_QNAV.npc) return;
+  const npc = Object.create(null), mob = Object.create(null);
+  for (const id in MAPS) {
+    const m = MAPS[id]; if (!m) continue;
+    for (const n of (m.npcs || [])) {
+      if (n && n.name) (npc[n.name] = npc[n.name] || []).push({ map: id, x: n.x | 0, y: n.y | 0, role: n.role });
+    }
+    for (const s of (m.spawns || [])) {
+      if (s && s.type && !(mob[s.type] || []).includes(id)) (mob[s.type] = mob[s.type] || []).push(id);
+    }
+  }
+  _LX_QNAV.npc = npc; _LX_QNAV.mob = mob;
+}
+
+// BFS over the portal graph. Returns {hops:[{from,portal}], next, dist} or
+// null when no portal chain connects the two maps (the Void, arenas reached
+// only by a scripted warp). Cached — portals are static after boot.
+function _qnavRoute(from, to) {
+  if (!from || !to || !MAPS[to]) return null;
+  if (from === to) return { hops: [], next: null, dist: 0 };
+  const key = from + '>' + to;
+  if (_LX_QNAV.route.has(key)) return _LX_QNAV.route.get(key);
+  const prev = Object.create(null), seen = Object.create(null);
+  seen[from] = 1;
+  const queue = [from];
+  while (queue.length) {
+    const cur = queue.shift();
+    if (cur === to) break;
+    for (const po of ((MAPS[cur] && MAPS[cur].portals) || [])) {
+      const d = po && po.dest;
+      if (!d || seen[d] || !MAPS[d]) continue;
+      seen[d] = 1; prev[d] = { from: cur, portal: po };
+      queue.push(d);
+    }
+  }
+  let out = null;
+  if (seen[to]) {
+    const hops = []; let cur = to;
+    while (cur !== from && prev[cur]) { hops.unshift(prev[cur]); cur = prev[cur].from; }
+    out = { hops, next: hops[0] || null, dist: hops.length };
+  }
+  _LX_QNAV.route.set(key, out);
+  return out;
+}
+
+// Resolve a quest id -> where the player should physically go.
+//   {kind:'npc',  who:'Nurse Joyce', map, x, y, hops}
+//   {kind:'hunt', who:'coralImp',    map, x:null,  hops}   <- no NPC on the quest
+//   null when neither resolves (nothing is displayed rather than a guess)
+// When an NPC stands in several maps the current map wins, else fewest hops.
+function _qnavDest(qid) {
+  _qnavBuild();
+  const q = (typeof QUESTS !== 'undefined') && QUESTS[qid];
+  if (!q) return null;
+  const here = (typeof game !== 'undefined' && game.currentMap) || null;
+  // Nearest by hop count, BUT a candidate with no portal route still wins over
+  // nothing. Some arenas (innerDimension, the zodiac houses) are entered by a
+  // scripted warp and have no incoming portal, so BFS scores every candidate
+  // Infinity — an earlier cut returned null there and the card read "location
+  // unknown" for a place the game knew exactly. Knowing WHERE without knowing
+  // the route is strictly more useful; `hops:null` is how the UI says so.
+  const pick = (cands, get) => {
+    let best = null, bestD = Infinity;
+    for (const c of cands) {
+      const mp = get(c);
+      if (mp === here) return { c, d: 0 };
+      const r = _qnavRoute(here, mp);
+      const d = r ? r.dist : Infinity;
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    if (best) return { c: best, d: bestD };
+    return cands.length ? { c: cands[0], d: Infinity } : null;
+  };
+  const hopsOf = (d) => (Number.isFinite(d) ? d : null);
+
+  const who = q.giver || q.npc;
+  const spots = who && _LX_QNAV.npc[who];
+  if (spots && spots.length) {
+    const hit = pick(spots, (s) => s.map);
+    if (hit) return { kind: 'npc', who, map: hit.c.map, x: hit.c.x, y: hit.c.y, hops: hopsOf(hit.d), role: hit.c.role };
+  }
+  // No placed NPC — 13 boss/visit quests, plus q_inner_dim_trial whose giver is
+  // the literal placeholder "your class instructor". Fall back to where the
+  // objective lives so no card is left reading "location unknown". Bosses are
+  // indexed the same way: an arena spawn is {type:'kingKrook', boss:true}, so
+  // `boss` is a flag and `type` still carries the name.
+  // Multi-objective quests (q_long_dawn_1 wants three different bosses) name a
+  // `target` that no map spawns; the objective list is the real answer, so try
+  // each in order and point at the first leg the player can actually reach.
+  const cands = [q.target, ...((q.objectives || []).map((o) => o && o.target))];
+  for (const t of cands) {
+    const maps = t && _LX_QNAV.mob[t];
+    if (!maps || !maps.length) continue;
+    const hit = pick(maps, (m) => m);
+    if (hit) return { kind: 'hunt', who: t, map: hit.c, x: null, y: null, hops: hopsOf(hit.d) };
+  }
+  return null;
+}
+
+// Human label for a destination: "Nurse Joyce — Everdawn Megamall".
+function _qnavLabel(d) {
+  if (!d) return '';
+  const mapName = (MAPS[d.map] && MAPS[d.map].name) || d.map;
+  return `${d.who} — ${mapName}`;
 }
 
 function renderQuestTracker() {
