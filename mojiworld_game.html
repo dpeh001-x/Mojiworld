@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.580';
+const GAME_VERSION = 'v0.29.581';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -68203,11 +68203,11 @@ const BOSS_STAGGER_MS = 1400;            // stun + vulnerable window
 const BOSS_STAGGER_BONUS = 1.6;          // damage multiplier while staggered
 const BOSS_STAGGER_COOLDOWN = 5200;      // min gap after a window before the next
 // Cheap / movement states that should NOT earn a punish window when they end.
-const _BOSS_NO_PUNISH_STATES = new Set(['idle','walk','airborne','reposition','hover','chase','move','jab','claw','volley','seek','land']);
+const _BOSS_NO_PUNISH_STATES = new Set(['idle','walk','airborne','reposition','hover','chase','move','jab','claw','volley','seek','land','leap']);
 function _bossCanPunish(m) {
   if (!m || !m.isBoss) return false;
   const t = m.type;
-  if (t === 'gravitos' || t === 'octobaby' || t === 'king') return false;
+  if (t === 'gravitos' || t === 'octobaby') return false;   // v0.29.581 — king joins the punish loop; its 'leap' is classed as movement below
   return true;
 }
 // Detect a committed-attack -> idle transition (from last frame) and open the
@@ -68249,6 +68249,31 @@ function _bossSpecialDue(m, now) {
 function _bossSpecialFired(m, now) {
   m._lastSpecialAt = now;
   m._specialDue = _bossSpecialWindow();
+}
+
+// v0.29.581 — KING GLOOPALOO geometry helpers.
+// Every one of his ranged spawns used to be pinned to a fixed `m.y + 10/14`
+// offset, i.e. the TOP of his bounding box. That reads fine at his authored
+// 112x98, but he GROWS with lost HP (size tiers up to x1.90 -> 213x186), so
+// the muzzle drifted further above his sprite at every tier until the shots
+// looked like they came from a different plane than the boss. Anchoring to a
+// FRACTION of his live body keeps the muzzle on his mouth at every size.
+function _gloopMuzzleX(m) { return m.x + m.w / 2; }
+function _gloopMuzzleY(m) { return m.y + m.h * 0.45; }
+// Ring of gel droplets converging on (cx, cy) -- the shared telegraph idiom
+// for "something lands HERE". Purely cosmetic; budgeted like all other FX.
+function _gloopTelegraphRing(cx, cy, radius, count, color) {
+  if (typeof _budgetedParticlePush !== 'function') return;
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2;
+    if (!_budgetedParticlePush({
+      x: cx + Math.cos(a) * radius,
+      y: cy + Math.sin(a) * radius * 0.45,
+      vx: -Math.cos(a) * radius * 0.045,
+      vy: -Math.sin(a) * radius * 0.02 - 0.4,
+      life: 22, color: color || '#88c8ff', size: 3,
+    })) break;
+  }
 }
 function bossAI(m, dt, distToPlayer) {
   // v0.26.032 — Per user "make bosses have shorter delay when attacking
@@ -68391,14 +68416,14 @@ function bossAI(m, dt, distToPlayer) {
     // is the first boss, the mechanic is identity, not difficulty.
     if (m._brimLeakCD == null) m._brimLeakCD = 600 + Math.random() * 400;
     m._brimLeakCD -= dt;
-    if (m._brimLeakCD <= 0 && m.currentHp > 0) {
+    if (m._brimLeakCD <= 0 && m.currentHp > 0 && m.onGround && !m._teleporting) {   // v0.29.581 — was ungated: leaking mid-leap left puddles floating in the air
       m._brimLeakCD = 750 + Math.random() * 350;
       // Cap to 6 active puddles per boss so the floor doesn't fill up
       let activePuddles = 0;
       for (const _h of game.hazards) if (_h.type === 'gloop_puddle') activePuddles++;
       if (activePuddles < 6) {
         const px = m.x + m.w/2 + (Math.random() - 0.5) * m.w * 0.6;
-        const py = m.y + m.h - 8;   // near his feet
+        const py = m.y + m.h - 2;   // v0.29.581 — on the sole line; he is grounded here by the gate above
         game.hazards.push({
           type: 'gloop_puddle',
           cx: px, cy: py,
@@ -68517,7 +68542,7 @@ function bossAI(m, dt, distToPlayer) {
         // Splash — 3 mini projectiles
         for (let i = -1; i <= 1; i++) {
           game.projectiles.push({
-            x: m.x + m.w/2, y: m.y + 10,
+            x: _gloopMuzzleX(m), y: _gloopMuzzleY(m),   // v0.29.581 — was m.y+10 (above his crown at large size tiers)
             vx: i * 3 + m.facing * 2, vy: -5,
             w: 14, h: 14, life: 80,
             damage: m.atk * 0.7, owner: 'enemy', skill: 'splash'
@@ -68537,6 +68562,10 @@ function bossAI(m, dt, distToPlayer) {
       // modest (m.atk × 0.5) so the stunlock isn't the only payload.
       m.vx *= 0.7;
       // Telegraph dust at his mouth during the 400 ms wind-up
+      if (m.patternTimer < 400 && (game.time & 1) === 0) {   // v0.29.581 — on-body charge tell
+        const _cp = m.patternTimer / 400;
+        _gloopTelegraphRing(_gloopMuzzleX(m), _gloopMuzzleY(m), 62 * (1 - _cp) + 10, 8, '#66ccff');
+      }
       if (m.patternTimer < 400 && (game.time & 3) === 0 && typeof _budgetedParticlePush === 'function') {
         for (let i = 0; i < 2; i++) {
           _budgetedParticlePush({
@@ -68560,8 +68589,8 @@ function bossAI(m, dt, distToPlayer) {
       if (m.patternTimer >= 400 && m._gooFired < _gooMax && m.patternTimer >= (m._gooNextAt || 400)) {
         m._gooFired += 1;
         m._gooNextAt = m.patternTimer + 110;
-        const sx = m.x + m.w/2;
-        const sy = m.y + 14;
+        const sx = _gloopMuzzleX(m);
+        const sy = _gloopMuzzleY(m);   // v0.29.581 — body-relative so it tracks every size tier
         const tx = player.x + player.w/2;
         const ty = player.y + player.h/2;
         const dxg = tx - sx, dyg = ty - sy;
@@ -68622,24 +68651,49 @@ function bossAI(m, dt, distToPlayer) {
             })) break;
           }
         }
-        // Hide him visually + disable collision during the warp window.
+        // v0.29.581 — `_teleporting` used to be written here and never read
+        // anywhere in the codebase, so the "hide + disable collision" this
+        // comment promised never happened. It is now a real flag: it gates
+        // the Brimming Leak (no puddles from a boss that is mid-warp) and
+        // drives the destination telegraph below.
         m._teleporting = true;
         m.invulnerable = 600;
+        // LOCK the destination now, while he is still readable on screen.
+        {
+          const _ww = (game.mapData && game.mapData.worldWidth) || 2200;
+          const _pcx = (player && player.x) ? player.x + player.w/2 : (m.x + m.w/2);
+          const _face = ((player && player.facing) || 1);
+          const _wantX = _pcx + (_face >= 0 ? -1 : 1) * 80 - m.w / 2;
+          m._tpDestX = Math.max(20, Math.min(_ww - m.w - 20, _wantX));
+          m._tpDestY = m.y;                      // he is a floor boss; keep his footing
+        }
+      }
+      // Destination telegraph: a gel pool gathers where he will surface.
+      if (m._teleporting && m._tpDestX != null && (game.time & 1) === 0) {
+        const _tcx = m._tpDestX + m.w / 2, _tcy = (m._tpDestY != null ? m._tpDestY : m.y) + m.h - 4;
+        const _prog = Math.max(0, Math.min(1, (m.patternTimer - 100) / 350));
+        _gloopTelegraphRing(_tcx, _tcy, 70 * (1 - _prog) + 14, 10, _prog > 0.6 ? '#aaeeff' : '#3a6a99');
       }
       // Reappear at t = 450.
       if (!m._teleportFired && m.patternTimer >= 450) {
         m._teleportFired = true;
+        // v0.29.581 — emerge at the LOCKED, telegraphed spot. Recomputing it
+        // here from the player's live position is what made this attack
+        // unreactable: the marker the player dodged away from was not the
+        // place he actually surfaced.
         const ww = (game.mapData && game.mapData.worldWidth) || 2200;
-        const _pcx = (player && player.x) ? player.x + player.w/2 : (m.x + m.w/2);
-        const _face = ((player && player.facing) || 1);
-        // Land on the OPPOSITE side from the player's facing so he
-        // emerges in front of them, not behind their back where they
-        // can't see him build a hit.
-        const _dirSign = _face >= 0 ? -1 : 1;
-        const _wantX = _pcx + _dirSign * 80 - m.w / 2;
-        m.x = Math.max(20, Math.min(ww - m.w - 20, _wantX));
-        // Snap to player's current Y so the emerge reads on-screen.
-        m.y = (player ? player.y : m.y);
+        if (m._tpDestX == null) {
+          const _pcx = (player && player.x) ? player.x + player.w/2 : (m.x + m.w/2);
+          const _face = ((player && player.facing) || 1);
+          m._tpDestX = Math.max(20, Math.min(ww - m.w - 20, _pcx + (_face >= 0 ? -1 : 1) * 80 - m.w / 2));
+        }
+        m.x = m._tpDestX;
+        // v0.29.581 — KEEP HIS FOOTING. This used to snap to the player's Y,
+        // which parks a ground-bound boss in mid-air any time the player is
+        // jumping or standing on a platform -- he then hangs there, leaks
+        // puddles into empty space, and falls. He is a floor boss; the
+        // platform-seek helper handles vertical pursuit separately.
+        m.y = m._tpDestY != null ? m._tpDestY : m.y;
         m.vy = 0;
         m.vx = 0;
         m._teleporting = false;
@@ -68661,6 +68715,7 @@ function bossAI(m, dt, distToPlayer) {
         m._teleportAnnounced = false;
         m._teleportVanished = false;
         m._teleportFired = false;
+        m._tpDestX = null; m._tpDestY = null;
         // v0.29.60 — PHASE 2 combo: the teleport chains STRAIGHT into a
         // goo barrage from the emerge position (classic 2D-boss "reposition
         // → immediate pressure" combo). The barrage's own 400 ms wind-up
@@ -68686,6 +68741,10 @@ function bossAI(m, dt, distToPlayer) {
       // m.atk × 0.8 — bigger than the barrage's 0.5× since each one
       // is a much harder dodge.
       m.vx *= 0.7;
+      if (m.patternTimer < 500 && (game.time & 1) === 0) {   // v0.29.581 — on-body charge tell
+        const _cp = m.patternTimer / 500;
+        _gloopTelegraphRing(_gloopMuzzleX(m), _gloopMuzzleY(m), 84 * (1 - _cp) + 12, 10, '#aaeeff');
+      }
       if (m.patternTimer < 500 && (game.time & 3) === 0 && typeof _budgetedParticlePush === 'function') {
         for (let i = 0; i < 2; i++) {
           _budgetedParticlePush({
@@ -68704,8 +68763,8 @@ function bossAI(m, dt, distToPlayer) {
       if (m.patternTimer >= 500 && m._glueFired < 3 && m.patternTimer >= (m._glueNextAt || 500)) {
         m._glueFired += 1;
         m._glueNextAt = m.patternTimer + 280;
-        const sx = m.x + m.w/2;
-        const sy = m.y + 14;
+        const sx = _gloopMuzzleX(m);
+        const sy = _gloopMuzzleY(m);   // v0.29.581 — body-relative so it tracks every size tier
         const tx = player.x + player.w/2;
         const ty = player.y + player.h/2;
         const dxg = tx - sx, dyg = ty - sy;
@@ -68735,11 +68794,31 @@ function bossAI(m, dt, distToPlayer) {
       // maxHP hit if onGround + knockback + 1.5 s stun. Jumping
       // over the connect cleanly negates the damage.
       m.vx *= 0.85;
-      if (m.patternTimer < 1200) {
+      if (m.patternTimer < 1560) {   // v0.29.581 — 1200 read as ~920 ms real after bossAI's dt x1.30
         if (!m._quakeAnnounced) {
           m._quakeAnnounced = true;
           if (typeof showToast === 'function') {
             showToast('🌋 KING GLOOPALOO SLAMS THE GROUND — JUMP!', 'legendary');
+          }
+        }
+        // v0.29.581 — ARENA-WIDE floor warning. The quake checks only
+        // `player.onGround`, so every tile of floor is lethal; telegraphing
+        // it at the king's feet alone taught the wrong shape. Cracks now race
+        // out along the ground on both sides, intensifying as the slam nears.
+        if ((game.time & 1) === 0 && typeof _budgetedParticlePush === 'function') {
+          const _qp = Math.min(1, m.patternTimer / 1560);
+          const _footY = m.y + m.h - 4;
+          for (let i = 0; i < 5; i++) {
+            const _off = (60 + i * 150) * (0.35 + 0.65 * _qp);
+            for (const _sgn of [-1, 1]) {
+              if (!_budgetedParticlePush({
+                x: m.x + m.w/2 + _sgn * _off + (Math.random() - 0.5) * 30,
+                y: _footY,
+                vx: (Math.random() - 0.5) * 1.2,
+                vy: -1.5 - Math.random() * 2.5 * _qp,
+                life: 24, color: _qp > 0.66 ? '#ffdd88' : '#88ccff', size: 2 + _qp * 2,
+              })) break;
+            }
           }
         }
         // Charging cracks beneath the king
@@ -68755,7 +68834,7 @@ function bossAI(m, dt, distToPlayer) {
           }
         }
       }
-      if (m.patternTimer >= 1200 && !m._quakeFired) {
+      if (m.patternTimer >= 1560 && !m._quakeFired) {
         m._quakeFired = true;
         if (typeof addShake === 'function') addShake(22);
         if (typeof flash === 'function') flash(0.45);
@@ -68793,7 +68872,7 @@ function bossAI(m, dt, distToPlayer) {
           }
         }
       }
-      if (m.patternTimer >= 1700) {
+      if (m.patternTimer >= 2060) {
         m._quakeAnnounced = false;
         m._quakeFired = false;
         m.patternState = 'idle';
