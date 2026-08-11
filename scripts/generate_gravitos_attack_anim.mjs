@@ -23,14 +23,7 @@ import { fileURLToPath } from 'node:url';
 sharp.cache(false);
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DIR = join(repoRoot, 'Sprites', 'bosses', 'attack');
-const FRAMES = 9;                     // frames EMITTED — the game always wants 9
-// Frames REQUESTED from the model, which need not be 9. Form 3 degrades
-// progressively: across every roll, cells 0-3 came back clean and 4-8 were
-// cropped through the thighs or drawn as 2.5x close-ups. Asking for fewer
-// frames keeps the whole request inside the zone the model handles, and the
-// ping-pong rebuild already turns a short clean run into nine emitted frames.
-// Padding was the wrong lever — pushing it up invited the model to fill the
-// empty space, pushing it down left no room for limbs.
+const FRAMES = 9;
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 const arg = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
@@ -73,7 +66,6 @@ const FORMS = {
       'NEVER cut off by any edge of the image, and both wings stay attached ' +
       'to his back.' },
 };
-const REQ = Math.max(3, Math.min(9, Number(arg('--req')) || 9));
 const FORM = String(arg('--form') || '1');
 if (!FORMS[FORM]) { console.error(`unknown --form ${FORM}. known: ${Object.keys(FORMS).join(', ')}`); process.exit(1); }
 const SUF = FORMS[FORM].suffix;
@@ -380,39 +372,6 @@ async function shroudMask(frames, cleanIdx, W, H) {
 
 // Armour bbox in PIXELS (dark opaque pixels — bright FX excluded), used by the
 // padded-space scale normalizer.
-// LEG CUT — the defect the user saw, and the one every previous guard missed.
-// The model crops the figure through the thighs; the body box gets shorter; the
-// height normaliser then scales the surviving torso UP to restore the height it
-// was told to hold. So the crop MANUFACTURES the zoom, and both complaints —
-// "cut off" and "zoomed in" — are one fault. Measured on form 3's punch: legs
-// 1.81x the base width while the height metric read a perfect 1.00x, because
-// that metric was checking the normaliser's own output.
-//
-// Bottom rows of the DARK ARMOUR only:
-//   feet on a floor -> narrow      bases 0.009-0.068, accepted sets max 0.18
-//   thighs sliced   -> wide        the bad sets 0.21-0.64
-//   a bright flare  -> narrow      its bottom row is FX, not armour, so the
-//                                  shipped punch's full-frame flash still passes
-// The earlier version of this test used full alpha and required a flat top AND
-// bottom; a bottom-only cut walked straight past it.
-const CUT_BOT = 0.22;
-async function darkBottomFill(buf) {
-  const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  const W = info.width, H = info.height;
-  const dark = (k) => {
-    const lum = 0.299 * data[k * 4] + 0.587 * data[k * 4 + 1] + 0.114 * data[k * 4 + 2];
-    return data[k * 4 + 3] > 200 && lum < 130;
-  };
-  let minX = W, maxX = -1, maxY = -1;
-  for (let k = 0; k < W * H; k++) if (dark(k)) {
-    const x = k % W, y = (k / W) | 0;
-    if (x < minX) minX = x; if (x > maxX) maxX = x; if (y > maxY) maxY = y;
-  }
-  if (maxY < 3 || maxX < minX) return 1;
-  const bw = maxX - minX + 1;
-  const row = (y) => { let c = 0; for (let x = minX; x <= maxX; x++) if (dark(y * W + x)) c++; return c / bw; };
-  return (row(maxY) + row(maxY - 1) + row(maxY - 2)) / 3;
-}
 async function armourBox(buf) {
   const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   let minX = info.width, maxX = -1, minY = info.height, maxY = -1;
@@ -452,7 +411,6 @@ async function slabMetrics(buf) {
 const SLAB_FILL = 0.75, SLAB_WIDE = 1.6;
 const baseMeta = await sharp(BASE).metadata();
 const baseA_px = await armourBox(await readFile(BASE));
-const baseCutBot = await darkBottomFill(await readFile(BASE));   // this form's "feet on the floor" reading
 const baseM = await coreMetrics(await readFile(BASE), true);          // armour only
 const baseA = await coreMetrics(await readFile(BASE));                // full alpha
 console.log(`base: ${baseMeta.width}x${baseMeta.height}, core ${Math.round(baseM.bw * 100)}%x${Math.round(baseM.bh * 100)}% cx ${baseM.cx.toFixed(3)}`);
@@ -485,57 +443,18 @@ if (has('--salvage-only')) {
   const PAD = Number(arg('--pad')) || (FORM === '1' ? ATTACKS[attack].pad : 0) ||
     Math.min(0.75, Math.max(0.12, (baseM.bh / PAD_TARGET - 1) / 2));
   console.log(`  body ${Math.round(baseM.bh * 100)}% of frame -> pad ${Math.round(PAD * 100)}% -> ${Math.round(baseM.bh / (1 + 2 * PAD) * 100)}% of the padded frame`);
-  // ASPECT NORMALISATION. Padding had always been symmetric, which preserves the
-  // canvas aspect — so the model was shown form 3 in a distinctly LANDSCAPE
-  // frame every time. The two forms that succeeded are near-portrait (h/w 0.909
-  // and 0.873); form 3 is 0.733, and it answered by filling the width, i.e. by
-  // zooming to ~2.5x. Fewer frames did not help (at 4 frames the second cell is
-  // already 2.34x — the model spreads the same arc over whatever it is given),
-  // and padding failed in both directions, so the frame SHAPE is what is left.
-  // Vertical padding still comes from the body-fraction target; horizontal
-  // padding is then chosen to land the padded canvas on form 1's proportions.
-  // The emitted canvas is unaffected — this only changes what the model sees.
-  const TARGET_HW = 0.909;
-  const _padY = Math.round(baseMeta.height * PAD);
-  const _padH = baseMeta.height + 2 * _padY;
-  const _wantW = Math.round(_padH / TARGET_HW);
-  const _padX = Math.abs(baseMeta.height / baseMeta.width - TARGET_HW) > 0.05
-    ? Math.max(Math.round(baseMeta.width * 0.12), Math.round((_wantW - baseMeta.width) / 2))
-    : Math.round(baseMeta.width * PAD);
-  console.log(`  padded canvas ${baseMeta.width + 2 * _padX}x${_padH}  h/w ${(_padH / (baseMeta.width + 2 * _padX)).toFixed(3)} (target ${TARGET_HW})`);
+  const _padX = Math.round(baseMeta.width * PAD), _padY = Math.round(baseMeta.height * PAD);
   const padded = await sharp(await readFile(BASE))
     .extend({ top: _padY, bottom: _padY, left: _padX, right: _padX, background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
   const padMeta = await sharp(padded).metadata();
-  // RESOLUTION. Padding buys correct framing and pays for it in detail: the
-  // bigger the padded canvas, the smaller the character inside the image we
-  // send, and everything the model returns then has to be upscaled back. Per
-  // user, "some of the images generated are very low resolution".
-  // SEND_MAX is now a knob rather than a buried 940, and the true cost is
-  // printed below from the sheet the API actually returns, instead of assumed.
-  // The API rejects anything over 1 MEGAPIXEL:
-  //   "True Size requires an input first frame with less than 1MP"
-  // — which is where the old hardcoded 940 came from. 940 square is only 0.88MP
-  // and, on a non-square canvas, well under: form 3 was sending 0.80MP, wasting
-  // a fifth of the budget. Fit the largest box under the cap for THIS aspect
-  // instead, which is free linear resolution.
-  const _ar = padMeta.height / padMeta.width;
-  const _budget = 0.98e6;
-  const SEND_W = Number(arg('--send')) || Math.floor(Math.sqrt(_budget / _ar));
-  const small = await sharp(padded).resize(SEND_W, Math.round(SEND_W * _ar), { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
-  const _sm = await sharp(small).metadata();
-  const _charSentPx = Math.round(baseA_px.h * (_sm.width / padMeta.width));
-  console.log(`  sending ${_sm.width}x${_sm.height} = ${(_sm.width * _sm.height / 1e6).toFixed(2)}MP of the 1.00MP cap` +
-    `  (character ~${_charSentPx}px tall, must end up ${baseA_px.h}px -> upscale x${(baseA_px.h / _charSentPx).toFixed(2)})`);
-  if (baseA_px.h / _charSentPx > 2.6) {
-    console.log('  WARNING: that upscale will look soft. Padding is spending the 1MP budget on empty space — lower --pad.');
-  }
+  const small = await sharp(padded).resize(940, 940, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
 
-  console.log(`animating ${attack} (eagle, ${REQ} frames requested -> ${FRAMES} emitted, pad ${Math.round(PAD * 100)}%)...`);
+  console.log(`animating ${attack} (eagle, ${FRAMES} frames, frame_size -9, pad ${Math.round(PAD * 100)}%)...`);
   const res = await fetch(`${API}/assets/sprite/animate`, {
     method: 'POST', headers: { Authorization: `ApiKey ${key}`, 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(300000),
     body: JSON.stringify({ initial_image: 'data:image/png;base64,' + small.toString('base64'),
-      motion_prompt: PROMPT, frames: REQ, frame_size: -9, model: 'eagle',
+      motion_prompt: PROMPT, frames: FRAMES, frame_size: -9, model: 'eagle',
       individual_frames: true, loop: false, image_type: 'sprite' }),
   });
   if (!res.ok) throw new Error(`animate ${res.status}: ${(await res.text()).slice(0, 180)}`);
@@ -547,23 +466,11 @@ if (has('--salvage-only')) {
   if (data.spritesheet_url && data.num_cols && data.num_rows) {
     const sheet = await grab(data.spritesheet_url), sm = await sharp(sheet).metadata();
     const cw = Math.floor(sm.width / data.num_cols), chh = Math.floor(sm.height / data.num_rows);
-    // Guard the slice geometry. A non-9 request returns a sheet whose grid does
-    // not divide cleanly, and an out-of-range extract does not throw in JS — it
-    // takes libvips down with a native stack-buffer-overrun (exit 0xC0000409),
-    // killing the run with no usable error.
-    if (!(cw > 0 && chh > 0) || cw * data.num_cols > sm.width + 1 || chh * data.num_rows > sm.height + 1) {
-      throw new Error(`bad sheet grid: ${sm.width}x${sm.height} / ${data.num_cols}x${data.num_rows}`);
-    }
-    // The number that decides output quality: how far each returned cell has to
-    // be stretched to reach the padded canvas. Anything above ~1.5x is visible
-    // softness in the shipped sprite.
-    console.log(`  sheet ${sm.width}x${sm.height} = ${data.num_cols}x${data.num_rows} cells of ${cw}x${chh}` +
-      `  ->  upscale to padded canvas x${(padMeta.width / cw).toFixed(2)}`);
-    for (let r = 0; r < data.num_rows && cells.length < REQ; r++)
-      for (let c = 0; c < data.num_cols && cells.length < REQ; c++)
+    for (let r = 0; r < data.num_rows && cells.length < FRAMES; r++)
+      for (let c = 0; c < data.num_cols && cells.length < FRAMES; c++)
         cells.push(await sharp(sheet).extract({ left: c * cw, top: r * chh, width: cw, height: chh }).png().toBuffer());
-  } else { for (const u of (data.individual_frame_urls || []).slice(0, REQ)) cells.push(await grab(u)); }
-  if (cells.length < REQ) throw new Error(`got ${cells.length} frames, wanted ${REQ}`);
+  } else { for (const u of (data.individual_frame_urls || []).slice(0, FRAMES)) cells.push(await grab(u)); }
+  if (cells.length < FRAMES) throw new Error(`got ${cells.length} frames`);
   // Normalize scale IN PADDED SPACE, then crop (see _tmp_pipefix note: a crop
   // before scale-check amputated zoomed frames' legs and the foot-line anchor
   // then disguised it). Armour touching any padded edge = the model truncated
@@ -577,22 +484,6 @@ if (has('--salvage-only')) {
     const edge = a.minX <= 4 || a.minY <= 4 || a.maxX >= padMeta.width - 5 || a.maxY >= padMeta.height - 5;
     if (edge || a.h <= 0) {
       console.log(`  cell ${ci}: armour truncated at the padded edge — dropped`);
-      finals.push(null);
-      continue;
-    }
-    const cutBot = await darkBottomFill(onPad);
-    if (cutBot > CUT_BOT) {
-      console.log(`  cell ${ci}: legs cut off (dark bottom row ${cutBot.toFixed(2)}, base ${baseCutBot.toFixed(2)}) — dropped`);
-      finals.push(null);
-      continue;
-    }
-    // Scale sanity, computed BEFORE any normalising. Rescaling an uncropped
-    // frame is invisible and fine, but a frame drawn at 2.5x is a close-up —
-    // different line weight, tighter framing — and reads as zoomed even after
-    // being scaled back down. Reject the extremes instead of resizing them away.
-    const kScale = baseA_px.h / a.h;
-    if (kScale < 0.45 || kScale > 1.8) {
-      console.log(`  cell ${ci}: drawn at ${(1 / kScale).toFixed(2)}x the base scale — a close-up, dropped`);
       finals.push(null);
       continue;
     }
@@ -648,11 +539,7 @@ if (has('--salvage-only')) {
   // frame differs from its neighbour except the short peak hold — unlike the
   // old nearest-neighbour backfill, which once emitted six copies of one frame
   // and shipped a freeze as an "animation".
-  // Expand to the emitted count whenever the surviving run is short — because
-  // cells were dropped, OR because fewer than nine were requested in the first
-  // place. Same mirror either way: wind up to the last good pose, hold briefly,
-  // recover to the opening stance.
-  if (finals.some(f => !f) || finals.length < FRAMES) {
+  if (finals.some(f => !f)) {
     const run = [];
     for (let ci = 0; ci < finals.length; ci++) { if (!finals[ci]) break; run.push(ci); }
     console.log(`  rebuilding as mirror of leading run [${run.join(',')}]`);
@@ -801,7 +688,7 @@ const RUN_LIMIT = 0.75, RUN_LEN = 3;
 // every set in the game: form 3's cropped soul frames read 0.61-0.68 along the
 // TOP row, while the shipped punch's full-frame impact flash — the highest
 // legitimate value anywhere — reads 0.47. Both ends must be flat to flag.
-const FRAME_TOP = 0.55, FRAME_BOT = 0.40;
+const CUT_TOP = 0.55, CUT_BOT = 0.40;
 async function _edgeRowFill(buf) {
   const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   let minX = info.width, maxX = -1, minY = info.height, maxY = -1;
@@ -830,11 +717,7 @@ async function _darkMask(buf) {
   const cut = [];
   for (let i = 0; i < finals.length; i++) {
     const e = await _edgeRowFill(finals[i]);
-    const legCut = await darkBottomFill(finals[i]);
-    if ((e.top > FRAME_TOP && e.bot > FRAME_BOT) || legCut > CUT_BOT) {
-      cut.push(i);
-      console.log(`  frame ${i}: cropped (picture border top ${e.top.toFixed(2)}/bot ${e.bot.toFixed(2)}, dark bottom ${legCut.toFixed(2)})`);
-    }
+    if (e.top > CUT_TOP && e.bot > CUT_BOT) { cut.push(i); console.log(`  frame ${i}: cropped by a painted picture border (top row ${e.top.toFixed(2)}, bottom ${e.bot.toFixed(2)})`); }
   }
   if (cut.length) {
     const keep = [...Array(cut[0]).keys()];

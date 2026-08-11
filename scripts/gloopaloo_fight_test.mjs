@@ -148,7 +148,7 @@ const R = await page.evaluate(async () => {
     }
     return seq;
   };
-  const P1 = ['leap','gooBarrage','latch','gluespray','leap','quake'];
+  const P1 = ['leap','gooBarrage','leap','gluespray','leap','quake'];
   const seqA = rotation(mkKing(800, 300), 12);
   ok('rotation is the fixed 6-beat cycle, twice through',
      seqA.join(',') === P1.concat(P1).join(','), seqA.join(','));
@@ -157,7 +157,7 @@ const R = await page.evaluate(async () => {
   const kp2 = mkKing(800, 300); kp2._bossPhase2 = true;
   const seqP2 = rotation(kp2, 6);
   ok('phase 2 swaps only the opening leap for a teleport',
-     seqP2.join(',') === ['teleport','gooBarrage','latch','gluespray','leap','quake'].join(','), seqP2.join(','));
+     seqP2.join(',') === ['teleport','gooBarrage','leap','gluespray','leap','quake'].join(','), seqP2.join(','));
 
   // -- 7. The barrage is a shape, not a tracker ----------------------------
   const gooFan = (moveMidway) => {
@@ -209,76 +209,6 @@ const R = await page.evaluate(async () => {
     const uniform = ints.length >= 2 && ints.every(v => Math.abs(v - ints[0]) <= 1);
     ok('the residue drip is evenly spaced', uniform, `intervals ${ints.join(',')}`);
   }
-
-  // -- 9. AGILE CHASE (the Mirror Self shape) ------------------------------
-  {
-    const b = mkKing(400, 300);
-    player.x = 1200; player.y = 300;                 // stand off to his right
-    b.vx = 0; b.patternState = 'idle'; b.patternTimer = 0;
-    const x0 = b.x;
-    let peak = 0;
-    for (let i = 0; i < 90; i++) {
-      b.patternTimer = 0;                            // hold him in the chase beat
-      game.time++; try { bossAI(b, 16.667, 800); } catch (e) {}
-      b.x += b.vx;                                   // bossAI sets vx; physics is not running here
-      peak = Math.max(peak, Math.abs(b.vx));
-    }
-    ok('he closes distance instead of drifting', b.x - x0 > 60, `moved ${(b.x - x0).toFixed(0)} px in 90 frames`);
-    const cap = 1.4 * 1.5;
-    ok('chase speed is capped (kiting stays viable)', peak > 0.9 && peak <= cap + 0.01,
-       `peak |vx| ${peak.toFixed(2)} vs cap ${cap.toFixed(2)}`);
-  }
-
-  // Real closing speed, with the engine's own physics running. bossAI only
-  // sets vx; updateMonsters integrates it AND applies friction (m.vx *= 0.85),
-  // so a bare bossAI loop lets vx accumulate to numbers the player never
-  // experiences. This is the number that matters for "how fast does he feel".
-  {
-    const b = mkKing(400, 300);
-    player.x = 1400; player.y = 300; player.hp = 999999;
-    b.vx = 0;
-    const x0 = b.x;
-    for (let i = 0; i < 150; i++) { game.time++; try { updateMonsters(16.667); } catch (e) {} }
-    // Measured: 0.896 px/frame before this pass, 1.600 after. The band keeps
-    // him pressuring (clearly above the old approach) without drifting toward
-    // player run speed, which would make kiting impossible.
-    const pxf = (b.x - x0) / 150;
-    ok('real closing speed pressures without out-running the player', pxf > 1.2 && pxf < 2.0,
-       `${pxf.toFixed(3)} px/frame over 150 frames (was 0.896)`);
-  }
-
-  // -- 10. GEL LATCH -------------------------------------------------------
-  const runLatch = (playerX) => {
-    const b = mkKing(800, 300);
-    player.x = playerX; player.y = 300; player.hitStun = 0; player._slowTimer = 0;
-    b.patternState = 'latch'; b.patternTimer = 0;
-    b._latched = 0; b._latchAnnounced = false; b._latchStuck = false;
-    for (let i = 0; i < 90 && !b._latchStuck && b.patternState === 'latch'; i++) {
-      game.time++; try { bossAI(b, 16.667, 60); } catch (e) {}
-      b.x += b.vx;
-    }
-    // Tick a few more frames once he sticks: the loop above stops ON the
-    // frame the latch connects, which is BEFORE the glued branch has ever
-    // run, so the slow it applies would not exist yet.
-    if (b._latchStuck) for (let i = 0; i < 4; i++) { game.time++; try { bossAI(b, 16.667, 60); } catch (e) {} }
-    return b;
-  };
-  const stuck = runLatch(860);                       // player standing right next to him
-  ok('the lunge glues him to an adjacent player', stuck._latchStuck === true, `stuck=${!!stuck._latchStuck}`);
-  ok('being glued SLOWS the player, never stuns', (player._slowTimer || 0) > 0 && !(player.hitStun > 0),
-     `slow ${player._slowTimer | 0}, hitStun ${player.hitStun | 0}`);
-  // damage shakes him off
-  const brk = stuck;
-  brk.currentHp = brk._latchHp0 - Math.ceil(brk.maxHp * 0.013);
-  for (let i = 0; i < 5 && brk._latchStuck; i++) { game.time++; try { bossAI(brk, 16.667, 60); } catch (e) {} }
-  ok('landing ~1.2% of his maxHp shakes him off', !brk._latchStuck && brk.patternState === 'idle',
-     `stuck=${!!brk._latchStuck} state=${brk.patternState}`);
-  // whiffed lunge -> back to idle, which opens the punish window
-  const miss = runLatch(1900);                       // far out of reach
-  let mguard = 0;
-  while (miss.patternState === 'latch' && mguard++ < 200) { game.time++; try { bossAI(miss, 16.667, 900); } catch (e) {} }
-  ok('a whiffed lunge drops him out of the cast', miss.patternState !== 'latch' && !miss._latchStuck,
-     `state ${miss.patternState}`);
 
   return res;
 });

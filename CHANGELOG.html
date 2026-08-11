@@ -121,6 +121,45 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.621 <span class="tag"><span class="pill bug">bug</span> Mirror Self hits half as hard &mdash; and its Strike stops being a guaranteed drop to 1&nbsp;HP</span></h2>
+<p>Per user: <em>reduce the mirror self damage dealt to players by 50%, reduce its chase speed occasionally as well.</em></p>
+<p>Every number below is measured in a booted client by driving the real <code>mirrorSelfAI</code>, <code>fireMonsterProjectile</code> and <code>updateMonsters</code> and reading the actual <code>player.hp</code> delta &mdash; not by reading formulas. That mattered, because <b>two of the three damage channels ignore the field you would obviously reach for</b>, and one of them would have eaten the entire nerf silently.</p>
+
+<h3>Where the damage actually comes from</h3>
+<p><code>monsterTypes.mirrorSelf.atk</code> is <code>110</code>. It is dead on arrival: <code>spawnMonster</code> overwrites a boss's atk with the <code>_bossAtkForLevel()</code> curve (331 at Lv&nbsp;20), and the mirror-spawn block then overwrites <em>that</em> one line later with <code>getAtk() &times; 0.8</code> &mdash; 80&nbsp;% of <em>your</em> attack. Editing the table would have moved nothing at all.</p>
+<ul>
+  <li><b>Contact</b> &mdash; <code>getAtk() &times; 0.8 &rarr; &times; 0.4</code>. Measured 234 &rarr; 117.</li>
+  <li><b>Projectiles</b> &mdash; halving atk did <em>not</em> halve the shots. Ranged damage is <code>atk &times; 1.2</code> <em>clamped into a level band</em>, and the mirror sits on that band's <b>floor</b>, so atk 142 &rarr; 71 came out the far side as the identical 178. The band is shared by every ranged mob in the game, so it is left alone and the mirror takes its own <code>&times; 0.5</code> immediately after the clamp, where the floor can no longer undo it. Measured 178 &rarr; 89.</li>
+  <li><b>Mirror Strike</b> &mdash; <code>maxHp &times; 0.80 &rarr; &times; 0.40</code>, plus the fix below.</li>
+</ul>
+
+<h3>The Strike was never really an 80&nbsp;% hit</h3>
+<p><code>_diffDmg</code> multiplies incoming damage by <code>min(6, 1.3 + (playerLv &minus; srcLv) &times; 0.08)</code> to punish farming trivial content. Mirror Self is frozen at <code>level: 20</code> in the table &mdash; but it is not trivial content at any level: its HP is <b>50&times; your max HP</b> and its ATK is a cut of your own, both re-derived from you at spawn. So the punish read a 20-level gap at Lv&nbsp;40 (&times;2.9) and a capped &times;6 from Lv&nbsp;79 on, against an attack already worth 80&nbsp;% of max HP.</p>
+<p>The result, measured across levels on the previous build: <b>from about Lv&nbsp;31 upward every single Mirror Strike overflowed 100&nbsp;% of max HP</b> and was caught by the leave-1-HP clamp. The number said 80&nbsp;%; what landed was <em>full HP &rarr; 1 HP</em>, every time.</p>
+<p>A reflection has no level gap on you by definition, so the Strike now passes <b>your</b> level as its source level. The punish drops to its 1.3 floor and the 0.40 coefficient is finally the number that reaches the player.</p>
+<p>This is why the halving is not cosmetic. Cutting the coefficient <em>alone</em> would have been invisible to anyone past roughly Lv&nbsp;55 &mdash; the punish simply re-inflated it back through the clamp:</p>
+<pre style="background:#11161d;border:1px solid #2a3340;border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:12px;line-height:1.6"><code>Mirror Strike, as a % of your max HP        before   halved only   shipped
+  player Lv 20                                60.1         30.1      30.1
+  player Lv 30                                97.1         48.6      30.1
+  player Lv 40                          100 (1 HP)         67.1      30.1
+  player Lv 55                          100 (1 HP)         85.5      30.1
+  player Lv 79+                         100 (1 HP)   100 (1 HP)      30.1</code></pre>
+<p>The co-op broadcast fraction moves with it (<code>0.80 &rarr; 0.40</code>) &mdash; partners re-resolve the Strike on their own client, so leaving it behind would have had a co-op partner still eating the old hit.</p>
+
+<h3>The chase now lets go, occasionally</h3>
+<p>The chase had no off-state: a flat <code>0.28</code>/frame acceleration toward you, held at its <code>5.1</code>&nbsp;px/frame cap for as long as the fight lasted. Measured over a 30-second sim on the previous build, the mirror was above 3&nbsp;px/frame for <b>99.4&nbsp;%</b> of it &mdash; and your own run tops out at <b>2.89</b>. Disengaging to drink, reposition or line up a charged shot was impossible by construction.</p>
+<p>Every 5.5&ndash;8.5&nbsp;s it now falters for 1.6&ndash;2.4&nbsp;s, acceleration <em>and</em> cap cut to 45&nbsp;%. Measured over the same 30-second sim: <b>3 lulls</b>, <b>19.5&nbsp;%</b> of the fight, chase speed <b>5.1 &rarr; 2.29</b>&nbsp;px/frame &mdash; comfortably under your run speed, so backing off during one actually opens ground.</p>
+<p>Deliberately <em>not</em> a stun. It keeps shooting, jumping and striking straight through the window, so the lull reads as the reflection losing its grip rather than the fight politely pausing.</p>
+
+<h3>Verification</h3>
+<p>Damage, per channel, applied end-to-end and confirmed identical at Lv&nbsp;20 / 40 / 79 &mdash; the point being that the new numbers are <em>flat</em> across levels where the old ones were not:</p>
+<pre style="background:#11161d;border:1px solid #2a3340;border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:12px;line-height:1.6"><code>                  before    after
+  contact            234      117     -50%
+  projectile         178       89     -50%
+  Mirror Strike  60-100%    30.1%     -50% at Lv 20, and no longer a 1-HP guarantee above it</code></pre>
+<p>Nothing else in the game moved. Firing every other ranged mob with its atk pinned to a fixed value, so the per-spawn roll cannot mask a drift, gives identical damage on both builds &mdash; <code>pqConductor</code> 439, <code>legosaurus</code> 3424, <code>young_confused_barnaby</code> 600, <code>sundered_smith</code> 1206 &mdash; while <code>mirrorSelf</code> goes 259 &rarr; 129. The shared projectile band, the shared <code>_diffDmg</code> punish and every other boss's contact math are untouched.</p>
+
+
 <h2>v0.29.620 <span class="tag"><span class="pill polish">polish</span> Buff skills fire the instant you press them &mdash; no more holding Eagle Eye</span></h2>
 <p>Per user &mdash; <em>&ldquo;For non-attack buff skills such as Eagle Eye, remove the ability to charge by holding key down&rdquo;.</em></p>
 <p>The warrior/archer class identity is <b>Charge &amp; Release</b>: hold a skill key ~0.75&nbsp;s, release for up to <b>+100% damage</b>. On a skill that deals no damage there is nothing for the charge to scale, so holding was <em>pure delay</em> &mdash; you pressed Eagle Eye and nothing happened until you let go.</p>

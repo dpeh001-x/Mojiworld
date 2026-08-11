@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.620';
+const GAME_VERSION = 'v0.29.621';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -53950,7 +53950,12 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
       // survives a single hit (atk × 0.8 ≈ 30-50 % maxHp depending on
       // build). The Mirror Strike telegraphed special handles the 80 %
       // big-burst attack with its own OHKO clamp.
-      _m.atk = Math.max(20, Math.floor(getAtk() * 0.8));
+      // v0.29.621 — Per user "reduce the mirror self damage dealt to players
+      // by 50%". 0.8 -> 0.4 of the player's ATK. This is the field that
+      // actually drives contact damage; monsterTypes.mirrorSelf.atk (110) and
+      // the _bossAtkForLevel(20) curve value written by spawnMonster are both
+      // dead by this point, so this is the only lever that moves it.
+      _m.atk = Math.max(20, Math.floor(getAtk() * 0.4));
     }
     // v0.25.787 — Mirror was 50 % larger than the player per user request.
     // v0.26.081 — Per user "make the mirrored self the same size as the
@@ -65672,6 +65677,13 @@ function fireMonsterProjectile(m, angleOffset) {
     const _pb = _dmgBandPct(_plv);   // v0.29.269 — level-ramped band
     dmg = Math.min(Math.floor(_pref * _pb.pCap), Math.max(Math.floor(_pref * _pb.pFloor), dmg));
   }
+  // v0.29.621 — MIRROR SELF shots take the -50% here rather than via atk.
+  // Its atk was halved at spawn for the contact path, but projectile damage
+  // is floored at `_pref * pFloor` by the band above and the mirror sits on
+  // that floor, so the atk cut came out the other side as the same number.
+  // Applied after the clamp so the floor cannot undo it, and before the
+  // level-gap mul so it scales the same way the rest of the shot does.
+  if (m && (m.isMirror || m.type === 'mirrorSelf')) dmg = Math.floor(dmg * 0.5);
   dmg = Math.max(3, Math.floor(dmg * ((typeof _lvGapDmgMul === 'function') ? _lvGapDmgMul(m) : 1)));
   // v0.26.162 — Themed-projectile fallback color table.
   const color = m.shoot === 'mspore'       ? '#ffaa44'
@@ -68548,8 +68560,26 @@ function mirrorSelfAI(m, dt, distToPlayer) {
 
   // ── Agile chase ────────────────────────────────────────────────────
   // Accelerate vx toward the player; cap at speed × 1.7 (≈ 6 px/frame).
-  m.vx += m.facing * 0.28;
-  const _vxCap = (m.speed || 3.5) * 1.7;
+  // v0.29.621 — CHASE LULL, per user "reduce its chase speed occasionally as
+  // well". The chase had no off-state: a flat 0.28/frame accel toward the
+  // player, held at the 5.1 px/frame cap for as long as the fight lasted. The
+  // player's own run tops out at 2.89, so disengaging to drink, reposition or
+  // line up a charged shot was impossible by construction — the mirror was
+  // always closing. Every 5.5-8.5 s it now falters for 1.6-2.4 s, with accel
+  // AND cap cut to 45% (2.3 px/frame, comfortably under player run speed), so
+  // backing off during a lull actually opens ground. Deliberately NOT a stun:
+  // it keeps shooting, jumping and striking through the window, so the lull
+  // reads as the reflection losing its grip rather than the fight pausing.
+  if (m._lullCd == null) m._lullCd = 4000 + Math.random() * 3000;
+  if ((m._lullT || 0) > 0) {
+    m._lullT -= dt;
+  } else {
+    m._lullCd -= dt;
+    if (m._lullCd <= 0) { m._lullT = 1600 + Math.random() * 800; m._lullCd = 5500 + Math.random() * 3000; }
+  }
+  const _lull = (m._lullT || 0) > 0 ? 0.45 : 1;
+  m.vx += m.facing * 0.28 * _lull;
+  const _vxCap = (m.speed || 3.5) * 1.7 * _lull;
   if (m.vx >  _vxCap) m.vx =  _vxCap;
   if (m.vx < -_vxCap) m.vx = -_vxCap;
   // Jump if grounded AND (player is above OR random restless jump)
@@ -68863,14 +68893,32 @@ function mirrorSelfAI(m, dt, distToPlayer) {
     const dxs = Math.abs(dx), dys = Math.abs(dy);
     if (dxs < 500 && dys < 260 && player.invulnerable <= 0 && player.hp > 0) {
       const _max = (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100);
-      let strikeDmg = Math.floor(_max * 0.80 * ((typeof _defAbsorbMul === 'function') ? _defAbsorbMul() : 1));   // v0.29.132 — DEF lessens %-hits too
+      // v0.29.621 — 0.80 -> 0.40 of max HP (user: "reduce the mirror self
+      // damage dealt to players by 50%"). Paired with the srcLv fix below —
+      // on its own this cut was invisible to any player past ~Lv 55, because
+      // the level-gap punish re-inflated it straight back through the clamp.
+      let strikeDmg = Math.floor(_max * 0.40 * ((typeof _defAbsorbMul === 'function') ? _defAbsorbMul() : 1));   // v0.29.132 — DEF lessens %-hits too
       // OHKO clamp — leave at least 1 HP.
       strikeDmg = Math.min(strikeDmg, Math.max(0, (player.hp | 0) - 1));
       if (strikeDmg > 0) {
         // v0.29.x — level-gap punish + re-assert the never-kill clamp AFTER
         // the multiplier (it used to multiply straight past "leave 1 HP").
-        if (!player._god) player.hp -= Math.min(_diffDmg(strikeDmg, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0), Math.max(0, (player.hp | 0) - 1));
-        if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, 200, 0, 0.80, 'Mirror Strike', '#ff44aa');
+        // v0.29.621 — Source level for the gap punish is the PLAYER's level,
+        // not the mirror's table level. _diffDmg multiplies incoming damage by
+        // min(6, 1.3 + (playerLv - srcLv) x 0.08) to punish farming trivial
+        // content. Mirror Self is frozen at level 20 in monsterTypes, but it is
+        // not trivial content at any level — its HP is 50x your max HP and its
+        // ATK is a cut of your own, both re-derived from you at spawn. So the
+        // punish was reading a 20-level gap at Lv 40 (x2.9) and a capped x6
+        // from Lv 79 on, against an attack already worth 80% of max HP. Measured
+        // in a booted client: from Lv ~31 upward, EVERY Mirror Strike overflowed
+        // 100% of max HP and was caught by the leave-1-HP clamp below. The
+        // headline number said 80%; what landed was "full HP -> 1 HP", always.
+        // A reflection has no level gap on you by definition, so srcLv = your
+        // level, punish = the 1.3 floor, and the 40% coefficient is finally the
+        // number that reaches the player.
+        if (!player._god) player.hp -= Math.min(_diffDmg(strikeDmg, Math.max(1, player.level | 0)), Math.max(0, (player.hp | 0) - 1));
+        if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, 200, 0, 0.40, 'Mirror Strike', '#ff44aa');   // v0.29.621 — frac tracks the 0.80 -> 0.40 cut above; partners resolve this on their own client
         player.invulnerable = 900;
         player.hitStun     = 700;
         player._lastDamageSource = 'Mirror Strike';
