@@ -121,6 +121,23 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.617 <span class="tag"><span class="pill bug">bug</span> Emerald Village was never flagged a town &mdash; the wandering scorpion explained</span></h2>
+<p>Per user: <em>random monster spawns in town maps or areas where there are supposed to not have monsters. For instance Emerald Village &mdash; random Scorpion monster in town and able to do harm. Ensure there are no monsters in towns.</em></p>
+<p><b>Root cause: one missing key.</b> Every wild-spawn path in the game is already correctly gated on <code>isTown</code> &mdash; the rare &ldquo;wanderer&rdquo; roll at map load, natural chests, the timed mini-boss, and world affixes. <code>emeraldVillage</code> declares <code>spawns: []</code> and six NPCs but <b>never sets <code>isTown: true</code></b>. Auditing all 74 maps, it is the <b>only</b> zero-spawn, non-arena, non-tower map in the game missing the flag; every sibling hub sets it &mdash; and <code>jadeGrove</code> sets it on the line directly after the same <code>isJadeGrove: true</code> decor flag that Emerald Village copies. It reads as a copy-paste omission.</p>
+<p><b>Why it produced a scorpion specifically.</b> The empty spawn table is why the village is <em>usually</em> quiet. The wanderer roll is why it occasionally is not:</p>
+<pre style="background:#11161d;border:1px solid #2a3340;border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:12px;line-height:1.6"><code>if (!isTown &amp;&amp; !isBossArena &amp;&amp; !isTower &amp;&amp; Math.random() &lt; 0.08) {
+  const wanderers = ['slime','mushroom','horny','stump',<b>'scorpion'</b>,'wraith'];</code></pre>
+<p>An <b>8% chance on every entry</b> to drop one mob from a six-strong pool that contains the exact monster reported. That also explains why it felt random and rare rather than reproducible.</p>
+<p>Because the flag drives more than spawns, the village was also being treated as a combat map for <b>natural chests, timed mini-bosses and world affixes</b>. All four now behave like every other hub.</p>
+<h3>Reproduced, then fixed</h3>
+<p>The 8%-per-load roll means a naive test passes on a broken build about 92% of the time. <code>scripts/town_no_monsters_test.mjs</code> pins <code>Math.random</code> low so the branch is taken <em>every</em> load, then walks five towns. On the previous build it reports the bug by name:</p>
+<pre style="background:#11161d;border:1px solid #2a3340;border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:12px;line-height:1.6"><code>FAIL  no hostile monsters spawn in any town, even with the wanderer roll forced
+      emeraldVillage@rand=0:1 | emeraldVillage@rand=0.05:1</code></pre>
+<p>On the fix: <b>5 towns &times; 3 rolls clean</b>. A control asserts a combat map still populates under identical conditions (<code>forest spawned 16</code>), so the town result cannot pass simply because nothing spawns anywhere.</p>
+<h3>Stopping the next one</h3>
+<p>The same test also audits the data statically, so a future hub that forgets the flag fails immediately rather than shipping: <b>every map with NPCs and no spawn table must set <code>isTown</code></b> (14 hubs checked), and the gates the flag drives &mdash; the wanderer roll and the chest eligibility check &mdash; must still reference it, so the flag cannot quietly stop meaning anything.</p>
+<p><b>Verification.</b> <b>7</b> assertions across a static map audit and a live headless run. <b>3 of 7 fail on the previous build</b>; <b>7/7 on the fix, zero page errors.</b></p>
+
 <h2>v0.29.616 <span class="tag"><span class="pill bug">bug</span> Archer arrows stop flying over Mirror Self&rsquo;s head</h2>
 <p>Per user: <em>&ldquo;archer S skill&hellip; does not hit the enemy at all&rdquo;</em> against Mirror Self. Not a damage bug &mdash; a geometry one, and the numbers are stark.</p>
 <div class="callout">
