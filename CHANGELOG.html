@@ -120,6 +120,43 @@
   <p class="lede">A phased rework layered on top of <code>v0.9.8</code>: save persistence, Web Audio SFX, achievements, daily challenges, respec, prestige, combo milestones, and a moment-to-moment juice pass. Every change lives in <code>mojiworld_game.html</code>. No new assets, no build step.</p>
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
+
+<h2>v0.29.631 <span class="tag"><span class="pill bug">bug</span> The &ldquo;rare wanderer&rdquo; now respects the map&rsquo;s tier &mdash; no more Lv&nbsp;44 Spook in the starter forest</span></h2>
+<p>Per user, twice within minutes: <em>there is a random level 44 monster spawned here, that is not supposed to be here, I thought we fixed this?</em> &mdash; then <em>there is a random monster in the map again.</em></p>
+<p>Both screenshots are the same feature misfiring in opposite directions, and it is not the bug that was fixed before.</p>
+
+<h3>What was actually there</h3>
+<p><code>loadMap</code> ends with a deliberate flourish: an 8&nbsp;% roll, on every load of every combat map, to add one off-tier mob &ldquo;to keep maps feeling alive rather than deterministic&rdquo;. The pick came from a flat hardcoded list of six ids &mdash; <code>slime, mushroom, horny, stump, scorpion, wraith</code> &mdash; spanning natural levels <b>4 to 44</b>, with no reference to the map at all. So the same roll served the Lv&nbsp;1 tutorial forest and the Lv&nbsp;80 endgame.</p>
+<ul>
+  <li><b>Too high.</b> Emerald Thicket&rsquo;s own residents are Lv&nbsp;1&ndash;4. The list&rsquo;s <code>wraith</code> is <b>Spook, natural Lv&nbsp;44</b> &mdash; measured on that map at <b>1642&nbsp;HP and 253&nbsp;ATK</b>, flying, with an aim-leading ranged attack. The player who reported it was <b>Lv&nbsp;9 with 496 max HP</b>: over half their health per hit, from a mob a melee rogue cannot reach.</li>
+  <li><b>Too low.</b> The second report is a <b>Lv&nbsp;15 Pincer</b> standing among Stardust Atrium&rsquo;s Lv&nbsp;47 Astrofoxes. Harmless, worth nothing to kill, and reads as a glitch.</li>
+</ul>
+<p>This is also the system behind the earlier wandering-scorpion report in Emerald Village. That was fixed by giving the village its missing <code>isTown</code> flag &mdash; which is why the roll already skips towns. Emerald <em>Thicket</em> is a combat map, so nothing stopped it there. The previous fix was correct and covered one map; it did not touch the mechanism, which is why the user saw it come back.</p>
+
+<h3>How often it actually happened</h3>
+<p>Not a rare corner case. Driving the real <code>loadMap</code> 200 times per map and counting every visitor that is not one of the map&rsquo;s own residents:</p>
+<pre style="background:#11161d;border:1px solid #2a3340;border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:12px;line-height:1.6"><code>200 map loads          visitors   off-tier   worst gap   what turned up
+  Emerald Thicket            13     11 (85%)        +28   Horncap Lv 26 x7, Stumpy Lv 32 x4
+  Stardust Atrium            13    13 (100%)        -43   Pincer Lv 15 x2, Jelly Lv 4 x3, ...</code></pre>
+<p>The Stardust run reproduced the user&rsquo;s second screenshot exactly &mdash; <code>scorpion:15</code>, twice. On Emerald Thicket <em>every</em> wanderer that appeared in 200 loads except two was over-tier.</p>
+
+<h3>The fix</h3>
+<p>The feature is kept whole &mdash; still off-tier, still a surprise, still the same 8&nbsp;% roll. Three changes:</p>
+<ul>
+  <li><b>Drawn from the world&rsquo;s real roster, not a hand-list.</b> A pool is built once from every non-boss mob that legitimately spawns somewhere, so a mob added to any map becomes eligible automatically. Bosses, zodiac and mirror types are excluded &mdash; they own bespoke arenas, intros and AI &mdash; as is anything with no <code>MOB_NATURAL_LEVEL</code>, since without a level there is no way to judge whether it belongs. Pool: <b>97 types, 0 bosses</b>.</li>
+  <li><b>Bounded to &plusmn;8 levels of the map&rsquo;s tier</b>, in both directions, and never drawn from the map&rsquo;s own spawn list &mdash; so it stays a <em>visitor</em> rather than a duplicate resident.</li>
+  <li><b>Tier is read from the map&rsquo;s own spawn table, not <code>levelReq</code>.</b> This one matters: <code>levelReq</code> looks like the obvious anchor and is the wrong one. It is an <em>entry gate</em>, not a difficulty rating, and it sits at <b>1 on 45 of the 66 combat maps</b> so players can wander in early &mdash; Magma Foundry is <code>levelReq&nbsp;1</code> with Lv&nbsp;66 residents, Wayfarer&rsquo;s Lantern <code>levelReq&nbsp;1</code> with Lv&nbsp;80 ones. An earlier draft of this fix used it and would have clamped those maps to a Lv&nbsp;9 Shroom, quietly deleting the feature across most of the game. The toughest thing already living on a map is the honest measure of its tier.</li>
+</ul>
+<p>One mob needed care. <code>stump</code> (Stumpy, Lv&nbsp;32) carries a bestiary entry and a natural level but <b>spawns in no map</b> &mdash; it is listed in <code>LX_CODEX_UNSPAWNABLE</code> for exactly that reason, and the wanderer roll is its <em>only</em> appearance in the game. Deriving the pool purely from map tables would have silently deleted a monster, so the six original ids are seeded into it.</p>
+
+<h3>Verification</h3>
+<p>Swept all <b>66</b> combat maps: worst over-tier gap <b>+43&nbsp;&rarr;&nbsp;+8</b>, worst under-tier <b>&minus;73&nbsp;&rarr;&nbsp;&minus;8</b>, and <b>0 maps</b> left with no eligible wanderer &mdash; the feature never silently dies anywhere. Re-running the 200-load Monte Carlo on both reported maps gives <b>0 out-of-band visitors</b> on each, and the variety improves rather than shrinks:</p>
+<pre style="background:#11161d;border:1px solid #2a3340;border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:12px;line-height:1.6"><code>  Emerald Thicket (tier 4)    Mushpup 6, Shroom 9, Tidefish 9, Sproutle 11
+  Stardust Atrium (tier 47)   Seasponge 40, Seastar 41, Bonebosn 43, Cherub 49, Archon 53, ...
+  Magma Foundry   (tier 66)   8 candidates, Lv 62-73
+  Wayfarer's Lantern (77)     11 candidates, Lv 69-80</code></pre>
+<p>Instead of the same six mobs everywhere, each map now gets a varied visitor drawn from its own neighbourhood &mdash; which is what the original comment said the feature was for.</p>
+
 <h2>v0.29.630 — the quest pin stops jumping with you</h2>
 <p>
   <span class="pill bug">bug</span>

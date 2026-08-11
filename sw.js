@@ -11,22 +11,7 @@
 // generation change, which is what finally evicts art a returning player has
 // been stuck on. Bump this whenever shipped art changes and you need every
 // existing browser to drop its copy.
-//
-// v0.29.630 — bumped again, and this is exactly the failure the note above
-// predicted. Two players on the SAME map and the SAME version saw DIFFERENT
-// backgrounds in Everdawn Central: one the new wooden-village plate, the other
-// the old pink-storefront one. Nothing was desynced — 280bae14 replaced
-// backgrounds/bg_v3_everdawn_central.webp (236 KB -> 3.5 MB, a completely
-// different painting) without bumping this key, so a returning browser kept
-// serving its cached copy.
-//
-// Stale-while-revalidate makes this quiet rather than loud: the stale art is
-// served instantly and the refresh lands in the background, so the player sees
-// the OLD plate for the whole session and a correct one next time — which reads
-// as "it's different for me" rather than "it's out of date". Any art swap that
-// REPLACES a filename (rather than adding one) needs this bump; a new filename
-// is safe because nothing is cached under it yet.
-const CACHE = 'mojiworld-assets-v4';
+const CACHE = 'mojiworld-assets-v3';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
