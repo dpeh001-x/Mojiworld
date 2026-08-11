@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.589';
+const GAME_VERSION = 'v0.29.591';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -34596,6 +34596,7 @@ function _renderLoreTab(tab) {
       <div class="ldx-bar"><span>Discovered <b class="ldx-count">${disc} / ${types.length}</b></span>`
       + `<span class="ldx-hint">click a creature for its dossier</span></div>`
       + `<div class="lore-dex">${cells || '<p>No creatures recorded yet — go explore.</p>'}</div>`;
+    _dexAutoFit(body);   // v0.29.x — measured zoom supersedes the .ldx-zoom category guess
     return;
   }
   if (tab === 'world') {
@@ -46848,6 +46849,93 @@ function _monsterDexSprite(k, t) {
   return null;
 }
 
+// v0.29.x — DEX SPRITE AUTO-FIT. Per user: "ensure that some of the monsters
+// with a lot of transparent fills in the canvas are slightly zoomed in so that
+// we focus on the main image of the monsters."
+//
+// Measured across all 130 dex sprites: 39 of them (30%) span less than 80% of
+// their cell, and the worst — aetherion — occupies just 46%, i.e. it draws at
+// under half the tile with the rest empty canvas. The pre-existing .ldx-zoom
+// rule guessed at this from the CATEGORY (boss/miniBoss/elite -> a flat 1.25x),
+// which both MISSES padded ordinary monsters (towerWisp 0.47, meloncholy 0.52,
+// thornmaw 0.56, pinechad 0.57) and UNDER-corrects the worst bosses (aetherion
+// needs 2.0x, not 1.25x). This measures the real alpha bounding box and derives
+// the zoom per sprite, so every creature is framed by its own art.
+//
+// The scan is 96x96 (a zoom factor needs no more), cached per src, and only
+// runs for creatures the player has actually discovered.
+const _DEX_FIT_TARGET = 0.92;   // fraction of the cell the creature should span
+const _DEX_FIT_FLOOR  = 0.86;   // already fills the cell — leave it alone
+const _DEX_FIT_MAX    = 2.0;    // aetherion's exact need, and the crop guard
+const _dexFitCache = new Map();
+let _dexFitCv = null;
+function _dexMeasureFit(img) {
+  const key = img && img.src;
+  if (!key) return null;
+  if (_dexFitCache.has(key)) return _dexFitCache.get(key);
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  if (!iw || !ih) return null;          // not decoded yet — do NOT cache, retry on load
+  let fit = null;
+  try {
+    const S = 96;
+    if (!_dexFitCv) { _dexFitCv = document.createElement('canvas'); _dexFitCv.width = S; _dexFitCv.height = S; }
+    const ctx = _dexFitCv.getContext('2d', { willReadFrequently: true });
+    // replicate object-fit:contain so the box comes out in CELL space, not
+    // image space — otherwise a wide sprite and a tall one at the same fill
+    // fraction would get different zooms.
+    const sc = Math.min(S / iw, S / ih), dw = iw * sc, dh = ih * sc;
+    ctx.clearRect(0, 0, S, S);
+    ctx.drawImage(img, (S - dw) / 2, (S - dh) / 2, dw, dh);
+    const d = ctx.getImageData(0, 0, S, S).data;
+    let x0 = S, y0 = S, x1 = -1, y1 = -1;
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        if (d[(y * S + x) * 4 + 3] > 24) {
+          if (x < x0) x0 = x;
+          if (x > x1) x1 = x;
+          if (y < y0) y0 = y;
+          if (y > y1) y1 = y;
+        }
+      }
+    }
+    if (x1 >= 0) {
+      const fill = Math.max((x1 - x0 + 1) / S, (y1 - y0 + 1) / S);
+      const k = fill < _DEX_FIT_FLOOR ? Math.min(_DEX_FIT_MAX, _DEX_FIT_TARGET / fill) : 1;
+      // Centre on the CONTENT, not the frame: padding is rarely symmetric, so a
+      // pure scale would push a bottom-heavy creature out of its own tile.
+      fit = { k, ox: ((x0 + x1 + 1) / 2 - S / 2) / S, oy: ((y0 + y1 + 1) / 2 - S / 2) / S };
+    }
+  } catch (e) {
+    // Tainted canvas — on the Pages deploy the art streams from jsDelivr, and a
+    // cross-origin image without CORS headers makes getImageData throw. Cache
+    // the null so we stop retrying and keep the existing CSS zoom as the
+    // fallback: degraded to today's behaviour, never broken.
+    fit = null;
+  }
+  _dexFitCache.set(key, fit);
+  return fit;
+}
+function _dexApplyFit(el) {
+  if (!el || el._dexFitDone) return;
+  const run = () => {
+    const fit = _dexMeasureFit(el);
+    if (!fit) return;
+    el._dexFitDone = true;
+    if (fit.k <= 1.01) { el.style.transform = 'none'; return; }
+    // scale about the centre, then pull the content's centre back to the middle.
+    // CSS applies the rightmost function first, so translate is in unscaled
+    // element percentages and must therefore carry the k factor itself.
+    const px = (-fit.ox * fit.k * 100).toFixed(2), py = (-fit.oy * fit.k * 100).toFixed(2);
+    el.style.transform = 'translate(' + px + '%, ' + py + '%) scale(' + fit.k.toFixed(3) + ')';
+  };
+  if (el.complete && el.naturalWidth) run();
+  else el.addEventListener('load', run, { once: true });
+}
+function _dexAutoFit(root) {
+  if (!root) return;
+  try { root.querySelectorAll('img.cdx-spr, img.ldx-spr').forEach(_dexApplyFit); } catch (e) {}
+}
+
 // v0.26.505 — Pokédex-style bestiary grid for the Codex's 1st tab. Reuses the
 // Mojidex's seen-tracking (_mjxSeen) + type list (_mjxAllTypes). Each cell shows
 // the monster's sprite (or a colour dot if it's procedural-only / a silhouette
@@ -46895,6 +46983,7 @@ function _codexRenderBestiary() {
   const cnt = document.getElementById('codex-dex-count');
   if (cnt) cnt.textContent = disc + ' / ' + types.length;
   host.innerHTML = cells.join('') || '<div style="grid-column:1/-1; padding:24px; text-align:center; color:#6a6480; font-size:12px;">No creatures recorded yet.</div>';
+  _dexAutoFit(host);   // v0.29.x — frame each creature by its own art, not its category
 }
 
 // v0.26.505 — Click a bestiary cell → open that creature's full Mojidex dossier.
@@ -66627,17 +66716,7 @@ function updateMonsters(dt) {
         // the player instead of trundling. Combined with the higher
         // m.jump value on those mobs, the effect is constant vertical
         // pressure — no safe-platform turtling.
-        // v0.29.5xx — KING GLOOPALOO BOUNDS (per user "also make him jump
-        // quite a bit"), matching the Mirror-style chase he was given in
-        // v0.29.591: a hopping blob reads as pursuing, a walking one does not.
-        // He carries no activeBoss trait — that flag brings other AI behaviour
-        // with it — so he gets his own roll instead of inheriting the boss
-        // tier. Measured baseline was 0.27 jumps/sec, i.e. he basically walked.
-        // Height is intentionally untouched: m.jump also feeds the
-        // platform-reach jump at x1.7 (already good for ~189px), and raising it
-        // risked launching a 112x98 boss clean out of the Grotto geometry.
-        const _jumpP = (m.type === 'king') ? 0.11
-                     : (m.traits && m.traits.activeBoss) ? 0.09 : 0.02;
+        const _jumpP = (m.traits && m.traits.activeBoss) ? 0.09 : 0.02;
         if (m.jump > 0 && m.onGround && Math.random() < _jumpP) m.vy = -m.jump;
       } else {
         // Out of aggro range — clear the per-monster offset so the
@@ -68470,11 +68549,22 @@ function _bossSpecialFired(m, now) {
 // after. Phase 2 swaps ONLY the opening leap for a teleport -- the sequence
 // of actual attacks (goo -> glue -> quake) is identical in both phases, so
 // escalation never re-teaches the fight.
-const _GLOOP_CYCLE_P1 = ['leap', 'gooBarrage', 'leap', 'gluespray', 'leap', 'quake'];
-const _GLOOP_CYCLE_P2 = ['teleport', 'gooBarrage', 'leap', 'gluespray', 'leap', 'quake'];
+// v0.29.5xx — KING GLOOPALOO BOUNDS (per user "also make him jump quite a
+// bit"), to match the Mirror-style chase he was given in v0.29.591: a hopping
+// blob reads as pursuing, a walking one does not. He jumps through his ATTACK
+// CYCLE — a 'leap' pattern picked round-robin, one slot per _GLOOP_GAP — so
+// the leap COUNT in these arrays is literally his jump rate. Measured 0.27
+// jumps/sec before. P1 3-of-6 -> 5-of-8 slots, P2 2-of-6 -> 4-of-8.
+// Done here rather than by shrinking _GLOOP_GAP, which would have sped up
+// every damaging attack as well; the ask was more jumping, not a harder
+// fight. The longer cycle does space his damaging patterns slightly further
+// apart, which is the intended trade.
+const _GLOOP_CYCLE_P1 = ['leap', 'gooBarrage', 'leap', 'leap', 'gluespray', 'leap', 'quake', 'leap'];
+const _GLOOP_CYCLE_P2 = ['teleport', 'gooBarrage', 'leap', 'leap', 'gluespray', 'leap', 'quake', 'leap'];
 function _gloopCycle(m) { return m._bossPhase2 ? _GLOOP_CYCLE_P2 : _GLOOP_CYCLE_P1; }
 // Fixed recovery between beats (pattern-ms; bossAI ticks these at dt x1.30).
 const _GLOOP_GAP = 1800;
+const _GLOOP_LEAP_GAP = 420;   // v0.29.5xx — leap-only gap (see the cycle note above)
 function _gloopMuzzleX(m) { return m.x + m.w / 2; }
 function _gloopMuzzleY(m) { return m.y + m.h * 0.45; }
 // Ring of gel droplets converging on (cx, cy) -- the shared telegraph idiom
@@ -68677,7 +68767,12 @@ function bossAI(m, dt, distToPlayer) {
     // original leap.
     if (m.patternState === 'idle') {
       m.vx += m.facing * 0.05;
-      if (m.patternTimer > _GLOOP_GAP && m.onGround) {
+      // v0.29.5xx — peek at the next slot: a leap only needs _GLOOP_LEAP_GAP,
+      // everything else still waits the full _GLOOP_GAP.
+      const _peekCyc = _gloopCycle(m);
+      const _peekNext = _peekCyc[(m._gloopStep | 0) % _peekCyc.length];
+      const _thisGap = (_peekNext === 'leap') ? _GLOOP_LEAP_GAP : _GLOOP_GAP;
+      if (m.patternTimer > _thisGap && m.onGround) {
         const _now = game.time | 0;
         // v0.29.586 — FIXED ROTATION. This block used to roll a random number
         // against four probability bands behind four independent cooldowns,
