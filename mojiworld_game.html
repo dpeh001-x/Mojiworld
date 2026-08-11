@@ -21507,6 +21507,52 @@ function _lvGapDmgMul(m) {
   return Math.min(cap, 1 + gap * per);
 }
 
+// v0.29.x — LEVEL-GAP DEF (per user: "make monsters with higher level have
+// higher DEF such that low level players deal less damage").
+// The defensive twin of _lvGapDmgMul above: that one makes an out-levelling
+// monster hit harder, this one makes it harder to hurt. Same shape, same
+// convention — 0 when you are at or above its level, so ordinary play is
+// untouched.
+//
+// WHY A FLAT ADD RATHER THAN A MULTIPLIER. Census of all 106 levelled non-boss
+// types: mean DEF is 2 at Lv 1-9, 19 at Lv 20-29, 30 at Lv 40-49. Against the
+// 300/(DEF+300) curve those are 99%, 94% and 91% damage taken — DEF barely
+// functions today. Multiplying 19 by three is still nothing; the gate has to
+// come from the gap itself.
+//
+// 14 DEF per level of gap, capped at 40 levels:
+//     gap  5 -> +70 DEF     a Lv 20 player on a Lv 25 mob keeps ~77% damage
+//     gap 20 -> +280 DEF    ~49% damage — clearly gated, still winnable
+//     gap 40 -> +560 DEF    ~32% damage — the floor for a 40-level reach
+//
+// BOSSES GET A THIRD OF IT. _lvGapDmgMul already ramps boss damage 0.10/level,
+// and the v0.29.566 note there records that a boss 5 levels up was a measured
+// one-shot on the tankiest class. Stacking full defensive gating on top of that
+// turns "punishing" into "unwinnable" — the gap should punish under-levelling,
+// not delete the fight, which is that note's own conclusion.
+const _GAP_DEF_PER = 14, _GAP_DEF_CAP = 40, _GAP_DEF_BOSS = 0.35;
+function _lvGapDefAdd(m) {
+  if (!m || typeof player === 'undefined' || !player) return 0;
+  const ml = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);
+  const gap = ml - (player.level || 1);
+  if (gap <= 0) return 0;
+  const isBoss = !!(m.isBoss || m.boss || m.zodiacBoss);
+  return Math.min(gap, _GAP_DEF_CAP) * _GAP_DEF_PER * (isBoss ? _GAP_DEF_BOSS : 1);
+}
+// Per-INSTANCE spread, so two mobs of the same type at the same level are not
+// identical (per user: "make it have some variation as well"). The census found
+// DEF varying between TYPES but every instance of a type sharing one number.
+// +/-15%, drawn once and remembered on the monster, so a given mob's toughness
+// is consistent across the whole fight rather than re-rolling every hit — a
+// per-hit roll would read as random damage numbers, not as a tougher enemy.
+// Lazily seeded here rather than in spawnMonster because monsters also arrive
+// via co-op mirroring and the boss-rush re-summoner, which do not run it.
+function _mobDefVar(m) {
+  if (!m) return 1;
+  if (m._defVar == null) m._defVar = 0.85 + Math.random() * 0.30;
+  return m._defVar;
+}
+
 // v0.25.58 — High-tier monster skills. Tier-4+ mobs (zombie, mummy,
 // skeleton, wraith) and the new high-level biome residents (coralImp,
 // pearlSprite, nimbusFox, cosmicMochi) each get one signature special
@@ -74216,8 +74262,15 @@ function hitMonster(m, dmg, isCrit, skill) {
   // to defVal BEFORE the curve, so elite/boss versions feel correspondingly
   // tankier. breakDef / siege (Siege Volley) still bypass DEF entirely. Min 1 so
   // even the highest-DEF foe still bleeds 1 per hit.
-  if (skill !== 'thorns' && m.def) {
-    let defVal = m.def;
+  // v0.29.x — the gap term is added to the BASE before the variant multipliers,
+  // so an elite/boss version of an out-levelling mob scales with it the same way
+  // its base DEF does. Guarded with `|| _lvGapDefAdd(m)` on the entry test so a
+  // 0-DEF mob that outlevels you still gets the gate — most low-tier types have
+  // DEF 1-4 and several have none at all, and those were the ones a low-level
+  // player could already melt regardless of the level gap.
+  const _gapDef = (typeof _lvGapDefAdd === 'function') ? _lvGapDefAdd(m) : 0;
+  if (skill !== 'thorns' && (m.def || _gapDef)) {
+    let defVal = ((m.def || 0) + _gapDef) * ((typeof _mobDefVar === 'function') ? _mobDefVar(m) : 1);
     if (m.isElite)     defVal *= 1.4;
     if (m.isMiniBoss)  defVal *= 1.8;
     if (m.isBoss)      defVal *= 2.2;
