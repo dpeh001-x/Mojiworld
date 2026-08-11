@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.590';
+const GAME_VERSION = 'v0.29.591';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -68655,8 +68655,14 @@ function _bossSpecialFired(m, now) {
 // after. Phase 2 swaps ONLY the opening leap for a teleport -- the sequence
 // of actual attacks (goo -> glue -> quake) is identical in both phases, so
 // escalation never re-teaches the fight.
-const _GLOOP_CYCLE_P1 = ['leap', 'gooBarrage', 'leap', 'gluespray', 'leap', 'quake'];
-const _GLOOP_CYCLE_P2 = ['teleport', 'gooBarrage', 'leap', 'gluespray', 'leap', 'quake'];
+const _GLOOP_CYCLE_P1 = ['leap', 'gooBarrage', 'latch', 'gluespray', 'leap', 'quake'];
+const _GLOOP_CYCLE_P2 = ['teleport', 'gooBarrage', 'latch', 'gluespray', 'leap', 'quake'];
+// v0.29.591 — GEL LATCH tuning. Deliberately a SLOW, not a stun: being stuck to
+// the boss has to stay playable, and this is the game's first boss.
+const _GLOOP_LATCH_WINDUP = 450;    // telegraph before the lunge (pattern-ms)
+const _GLOOP_LATCH_LUNGE  = 700;    // how long he commits to the grab
+const _GLOOP_LATCH_HOLD   = 2400;   // max time glued before he peels off himself
+const _GLOOP_LATCH_BREAK  = 0.012;  // fraction of his maxHp that shakes him off
 function _gloopCycle(m) { return m._bossPhase2 ? _GLOOP_CYCLE_P2 : _GLOOP_CYCLE_P1; }
 // Fixed recovery between beats (pattern-ms; bossAI ticks these at dt x1.30).
 const _GLOOP_GAP = 1800;
@@ -68861,7 +68867,19 @@ function bossAI(m, dt, distToPlayer) {
     // when their cooldown is ready; otherwise falls through to the
     // original leap.
     if (m.patternState === 'idle') {
-      m.vx += m.facing * 0.05;
+      // v0.29.591 — AGILE CHASE, the Mirror Self shape: vx accelerates toward the
+      // player and is hard-capped. The old drift was 0.05 per frame with NO
+      // cap at all, which measured as 0.896 px/frame of real closing speed
+      // once the engine's friction and his own leaps are included -- he
+      // approached, but never pressured. This lands at 1.600 px/frame.
+      // Deliberately slower than the first pass (0.22 / x2.2) per user, and
+      // still far under player run speed: he is a heavy vessel that closes,
+      // not a sprinter. Kiting stays a real answer, and the LATCH beat below
+      // is what actually punishes standing still.
+      m.vx += m.facing * 0.13;
+      const _chaseCap = (m.speed || 1.4) * 1.5;
+      if (m.vx >  _chaseCap) m.vx =  _chaseCap;
+      if (m.vx < -_chaseCap) m.vx = -_chaseCap;
       if (m.patternTimer > _GLOOP_GAP && m.onGround) {
         const _now = game.time | 0;
         // v0.29.586 — FIXED ROTATION. This block used to roll a random number
@@ -68880,6 +68898,8 @@ function bossAI(m, dt, distToPlayer) {
           m._lastGlueAt = _now; m.patternState = 'gluespray'; m._glueFired = 0; m._glueNextAt = 0;
         } else if (_next === 'gooBarrage') {
           m._lastGooAt = _now; m.patternState = 'gooBarrage'; m._gooFired = 0; m._gooNextAt = 0;
+        } else if (_next === 'latch') {
+          m.patternState = 'latch'; m._latched = 0; m._latchAnnounced = false; m._latchStuck = false;
         } else if (_next === 'quake') {
           m._lastQuakeAt = _now; m.patternState = 'quake'; m._quakeAnnounced = false; m._quakeFired = false;
         } else {
@@ -68889,6 +68909,70 @@ function bossAI(m, dt, distToPlayer) {
         // stays coherent; the rotation, not the clock, decides what fires.
         if (typeof _bossSpecialFired === 'function') _bossSpecialFired(m, _now);
         m.patternTimer = 0;
+      }
+    } else if (m.patternState === 'latch') {
+      // v0.29.591 — GEL LATCH. A telegraphed lunge that sticks him to the player.
+      //   wind-up  -> a collapsing ring on his body, dodgeable on sight
+      //   lunge    -> he commits; whiffing drops him into the punish window
+      //   glued    -> he rides alongside and SLOWS the player (never stuns),
+      //               refreshing the same slow his puddles already use
+      //   break    -> land ~1.2% of his maxHp and he is shaken off, which
+      //               also ends the cast into idle and so opens the punish
+      //               window through the shared stagger path.
+      const _pcx = player.x + player.w / 2, _mcx = m.x + m.w / 2;
+      if (!m._latchStuck) {
+        m.facing = _pcx > _mcx ? 1 : -1;
+        if (m.patternTimer < _GLOOP_LATCH_WINDUP) {
+          m.vx *= 0.82;
+          if (!m._latchAnnounced) {
+            m._latchAnnounced = true;
+            if (typeof showToast === 'function') showToast('\ud83e\uddca KING GLOOPALOO LUNGES \u2014 break away!', 'rare');
+          }
+          if ((game.time & 1) === 0) {
+            const _lp = m.patternTimer / _GLOOP_LATCH_WINDUP;
+            _gloopTelegraphRing(_gloopMuzzleX(m), _gloopMuzzleY(m), 96 * (1 - _lp) + 16, 10, '#66ffcc');
+          }
+        } else {
+          m.vx += m.facing * 0.85;
+          const _lCap = (m.speed || 1.4) * 4.2;
+          if (m.vx >  _lCap) m.vx =  _lCap;
+          if (m.vx < -_lCap) m.vx = -_lCap;
+          const _dxL = Math.abs(_pcx - _mcx), _dyL = Math.abs((player.y + player.h / 2) - (m.y + m.h / 2));
+          if (_dxL < (m.w * 0.5 + player.w * 0.5) && _dyL < m.h * 0.65 && player.hp > 0) {
+            m._latchStuck = true;
+            m._latched = _GLOOP_LATCH_HOLD;
+            m._latchHp0 = m.currentHp;
+            if (typeof showToast === 'function') showToast('\ud83e\uddca GLUED \u2014 hit him to shake him off!', 'epic');
+            if (typeof addShake === 'function') addShake(7);
+          } else if (m.patternTimer > _GLOOP_LATCH_WINDUP + _GLOOP_LATCH_LUNGE) {
+            m._latchAnnounced = false;
+            m.patternState = 'idle'; m.patternTimer = 0;   // whiffed -> punish window
+          }
+        }
+      } else {
+        m._latched -= dt;
+        // A SLOW, not a stun: the player keeps full control and can fight or
+        // run, they are just wading. Same channel the gel puddles use.
+        player._slowTimer = Math.max(player._slowTimer || 0, 120);
+        // Ride alongside rather than snapping on top of them.
+        const _wantX = _pcx - m.facing * (m.w * 0.45) - m.w / 2;
+        const _ww = (game.mapData && game.mapData.worldWidth) || 2200;
+        m.x = Math.max(20, Math.min(_ww - m.w - 20, m.x + (_wantX - m.x) * 0.18));
+        m.vx = 0;
+        if ((game.time & 3) === 0 && typeof _budgetedParticlePush === 'function') {
+          _budgetedParticlePush({
+            x: _mcx + (_pcx - _mcx) * Math.random(),
+            y: _gloopMuzzleY(m) + (Math.random() - 0.5) * 20,
+            vx: 0, vy: -0.4, life: 14, color: '#66ffcc', size: 2,
+          });
+        }
+        const _dealt = (m._latchHp0 || 0) - m.currentHp;
+        if (_dealt >= m.maxHp * _GLOOP_LATCH_BREAK || m._latched <= 0) {
+          const _shaken = _dealt >= m.maxHp * _GLOOP_LATCH_BREAK;
+          m._latchStuck = false; m._latched = 0; m._latchAnnounced = false;
+          m.patternState = 'idle'; m.patternTimer = 0;
+          if (_shaken && typeof showToast === 'function') showToast('\ud83e\uddca You shook him off!', 'rare');
+        }
       }
     } else if (m.patternState === 'leap') {
       // v0.25.855 — Telegraph the upcoming splash with a 12-frame
