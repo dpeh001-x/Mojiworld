@@ -20841,6 +20841,29 @@ function _mobLevel(m) {
   return 1;
 }
 
+// v0.29.583 — A map's REAL difficulty level, for grading loot by location.
+//
+// Do NOT use mapData.levelReq for this. The sweep at the end of map authoring
+// (search `_m.levelReq = 1`) overwrites levelReq to 1 on every open map, so a
+// Lv 70 zone reads as Lv 1 at runtime and the authored literals are inert —
+// the same trap the mob-drop path documents as bosses "swept to 1 on open maps".
+//
+// The spawn roster is the honest signal: every type carries an authored
+// MOB_NATURAL_LEVEL. Take the toughest NON-boss spawn (the boss is the map's
+// apex, not its baseline) and fall back to levelReq only for the maps the
+// sweep exempts (boss arenas, towers, the distorted/bloom chains, Sunset Coast).
+function _mapGearLevel(mapD) {
+  if (!mapD) return 1;
+  let lv = 0;
+  for (const s of (mapD.spawns || [])) {
+    if (!s || s.boss || !s.type) continue;
+    const n = (typeof MOB_NATURAL_LEVEL !== 'undefined' && MOB_NATURAL_LEVEL[s.type]) | 0;
+    if (n > lv) lv = n;
+  }
+  if (!lv && mapD.levelReq) lv = mapD.levelReq | 0;
+  return lv || 1;
+}
+
 // v0.26.x — Per user: higher-level monsters (especially bosses) must hit MUCH
 // harder on an underleveled player (a Lv-3 should be obliterated by Lv-65
 // Aetherion). The old scaling only buffed mobs when the player OUT-leveled them;
@@ -52168,9 +52191,40 @@ function openChest(c) {
   // just never the T8-10 endgame pieces.)
   // v0.29.60 — Cursed Chest = gold cap +1 (T8) — one rung of the apex
   // gate opened as the reward for taking (and surviving) the hex.
-  const _chestTierCap = c._cursed ? 8 : (c.tier === 'gold' ? 7 : c.tier === 'silver' ? 5 : 2);
+  // v0.29.583 — Per user "chests drop very high tier equipment early game in low
+  // level maps". The grade cap above is ABSOLUTE: a gold chest allowed T7 in the
+  // starter zone exactly as it does at Lv 70. Nothing in the codebase gates gear
+  // by an equip level (there is no reqLv/canEquip anywhere), so a Lv 2 player
+  // could wear a Lv 60-69 piece the moment they opened it and the entire early
+  // curve collapsed.
+  //
+  // This is the gap left by v0.26.392, which gated MOB drops by SOURCE LEVEL
+  // ("T8 needs Lv65+, T9 Lv75+, T10 Lv85+") but never touched the chest path —
+  // chests were the only loot source not graded by where they came from.
+  //
+  // Gear is authored on an every-10-levels ladder (T0 = Lv 0-9 ... T10 = Lv
+  // 90-99), so a map may hand out its own band plus one as aspirational. The
+  // grade cap still governs the ceiling, so apex T8-10 stays boss-only and
+  // high-level maps behave exactly as before — this only bites low/mid maps.
+  const _gradeCap = c._cursed ? 8 : (c.tier === 'gold' ? 7 : c.tier === 'silver' ? 5 : 2);
+  const _mapLv = (typeof _mapGearLevel === 'function') ? _mapGearLevel(game.mapData) : 1;
+  // Cursed keeps its "one rung better" identity, now relative to the map rather
+  // than absolute: cursed maps roll at 10% with NO level gate, so an absolute
+  // T8 meant a Lv 2 player could be handed endgame gear by a starter-zone hex.
+  const _chestTierCap = Math.min(_gradeCap, Math.floor(_mapLv / 10) + 1 + (c._cursed ? 1 : 0));
   let pool = ITEM_POOL[cat].filter(it => it.rarity === chosenRarity && (it.tier | 0) <= _chestTierCap);
-  if (!pool.length) pool = ITEM_POOL[cat].filter(it => (it.tier | 0) <= _chestTierCap);   // fallback: any rarity within the cap
+  if (!pool.length) {
+    // v0.29.583 — step DOWN one rarity at a time instead of jumping straight to
+    // "any rarity". Legendary spans T5-10, so under a low map cap the rolled
+    // rarity often has no item at all, and the old fallback could hand a COMMON
+    // to a gold chest's legendary roll. Degrade legendary→epic→rare→common and
+    // stop at the best rarity that actually exists within the cap.
+    const _rarityStep = ['legendary', 'epic', 'rare', 'common'];
+    for (let _i = Math.max(0, _rarityStep.indexOf(chosenRarity)); _i < _rarityStep.length && !pool.length; _i++) {
+      pool = ITEM_POOL[cat].filter(it => it.rarity === _rarityStep[_i] && (it.tier | 0) <= _chestTierCap);
+    }
+  }
+  if (!pool.length) pool = ITEM_POOL[cat].filter(it => (it.tier | 0) <= _chestTierCap);   // defensive: any rarity within the cap
   if (pool.length) {
     const it = { ...pool[Math.floor(Math.random() * pool.length)], slot: _catToSlot(cat) };
     // v0.26.x audit FIX — honor the inventory tab cap, like the ground-drop and
