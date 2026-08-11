@@ -161,7 +161,7 @@ const ELEMENT_FLAVOR = [
   [/coral|tide|pearl|sea|brine|ocean|wave/i, 'with a watery splash undertone'],
 ];
 const SIZE_FLAVOR = [
-  [/king|boss|mom|titan|kraken|rexy|tigreal|ele\b|fat|archon|seraph/i, 'deep, large and weighty'],
+  [/king|boss|mom|titan|kraken|legosaurus|tigreal|ele\b|fat|archon|seraph/i, 'deep, large and weighty'],
   [/baby|pup|kin|ling|fly|bun|sprite|cherub|snail|mochi/i, 'small, light and high-pitched'],
 ];
 
@@ -199,6 +199,20 @@ const HIT_OVERRIDE = {
 // finale bosses get authored death prompts instead of the generic family yelp.
 // Same contract as HIT_OVERRIDE: replaces family base + element/size flavor.
 const DIE_OVERRIDE = {
+  // v0.29.x — per user: "future lyra sounds weird on death, sounds like male".
+  // Root cause was classification, not the roll: familyFor('future_lyra')
+  // returns 'beast', so she was being generated from the beast profile —
+  // "a feral animal yelp ending in a growling whimper as a beast is felled".
+  // A growl reads male and animal. She is a HUMAN WOMAN (the mage Lyra's
+  // future self), so she needs an override the way every other humanoid boss
+  // has one. Explicit negatives included because the endpoint drifts toward
+  // growls for anything tagged as a monster.
+  // Kept SHORT on purpose: the first attempt stacked a long negative list on
+  // top of the boss tone-tail and the endpoint returned HTTP 500 ("try with
+  // different inputs") twice. Trimmed to the positive description plus the
+  // one negative that actually matters.
+  future_lyra: 'a young sorceress defeated — a short pained female gasp and a soft falling cry, '
+    + 'high and clear, fading into arcane chimes. Female human voice, not a growl or beast',
   pqConductor: 'a clockwork train conductor defeated — a long sad falling train-whistle, gears winding down with a final steam-burst hiss and a heavy metallic collapse',
   towerSovereign: 'the sovereign of a mystic spire defeated — a deep regal groan collapsing into shattering arcane crystal and a resonant fading power-down hum',
   zodiac_aries:       'a celestial fire-ram defeated — a final defiant bleating roar collapsing into a burst of flame that fizzles to embers',
