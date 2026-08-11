@@ -121,6 +121,42 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.624 <span class="tag"><span class="pill bug">bug</span> Dev &ldquo;Set level&rdquo; now hands you the AP a real player at that level would have</span></h2>
+<p>Per user: <em>on setting the level for the dev mode, also give the accurate APs for that level as well to simulate the actual stats of an actual player</em> &mdash; and <em>same with Ability points (AP)</em>.</p>
+<p><code>devSetLevel()</code> was a partial copy of the real <code>_maybeLevelUp()</code> stat block, and the copy had drifted. Three defects, all measured in a booted client before the fix:</p>
+
+<h3>1. An entire currency read zero</h3>
+<p>A real level-up grants <code>skillRankPoints += 1</code> every level. <code>devSetLevel</code> never granted it at all, so a dev-set character sat on <b>0 rank points at any level</b> while a naturally-levelled Lv&nbsp;60 has 40 earned over the same span. That is not a rounding error &mdash; it is a whole progression pool reading empty, which made the rank panel untestable from the console.</p>
+
+<h3>2. Levelling DOWN removed nothing</h3>
+<p>The downward branch was <code>player.level = n</code> and nothing else. HP, MP, ATK, DEF and AP all stayed at the higher level's values, so a &ldquo;Lv&nbsp;20&rdquo; dev character carried Lv-60 stats verbatim &mdash; precisely the thing the tool exists to avoid, since the point of setting a level is to see the game as a player at that level sees it.</p>
+
+<h3>3. It ratcheted, so repeated use compounded the error</h3>
+<p>Because down removed nothing and up re-added everything, every round trip permanently inflated the character. A single 60&nbsp;&rarr;&nbsp;20&nbsp;&rarr;&nbsp;60 cycle on the old build:</p>
+<pre style="background:#11161d;border:1px solid #2a3340;border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:12px;line-height:1.6"><code>              at Lv 60    after 60->20->60
+  baseAtk          202                 282
+  AP                71                 211
+  maxMp            290                 770</code></pre>
+<p>Do it a few times from the console and the &ldquo;Lv&nbsp;40&rdquo; you think you are testing at is unrecognisable. This is the defect that quietly poisons every other dev-mode measurement, which is why it is worth calling out separately from the missing AP.</p>
+
+<h3>The fix</h3>
+<p>The per-level gains move into one <code>_devLevelGains(cls)</code> table &mdash; the same numbers <code>_maybeLevelUp()</code> applies &mdash; and <code>devSetLevel</code> now both <em>adds and removes</em> through it, so the two directions cannot drift apart again. Removal floors at the class baseline rather than 0, so dropping to Lv&nbsp;1 cannot produce negative attack. <code>expToNext</code> is re-derived from <code>_lxLevelCost()</code>, which it never was &mdash; a Lv-60 character was showing the old level's 30&nbsp;XP bar.</p>
+<p>AP on the way down takes back the flat 3/level <em>plus this character's own average innate roll</em> for the levels removed, read from the <code>_innateSp</code> / <code>_innateLevels</code> ledger rather than the 0.5 theoretical mean. That is what makes a round trip land back where it started instead of drifting a few points every cycle.</p>
+
+<h3>Verification &mdash; against the real level-up path, not against the formula</h3>
+<p>Ground truth is <code>_maybeLevelUp()</code> itself, driven 40 times from Lv&nbsp;20 to Lv&nbsp;60, compared against one <code>devSetLevel(60)</code> over the same span:</p>
+<pre style="background:#11161d;border:1px solid #2a3340;border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:12px;line-height:1.6"><code>Lv 20 -> 60          real _maybeLevelUp    devSetLevel
+  d ATK                            +80           +80
+  d DEF                            +40           +40
+  d maxHP                         +880          +880
+  d maxMP                         +480          +480
+  AP (flat)                        120           120     <- 30/30 trials each
+  rank points                       40            40     <- was 0
+  expToNext                220,117,500   220,117,500     <- was a stale 30</code></pre>
+<p>The flat AP component came out at exactly <b>120</b> and rank at exactly <b>40</b> in all 30 trials on <em>both</em> paths. The innate-RNG component is random by design; over 30 trials each it converges as it should (real 20.67, dev 19.53, expected 20) with the roll fired exactly 40 times on both paths &mdash; the small separation visible at 5 trials was sample noise, which was checked rather than assumed.</p>
+<p>The numbers a player actually sees are identical too. At Lv&nbsp;45, reached by the real path and by the dev path: <code>getAtk()</code> 279, <code>getMaxHp()</code> 3,394,716, <code>getMaxMp()</code> 590, <code>getDef()</code> 412, rank 15 &mdash; byte-for-byte equal. The round trip now drifts <b>0</b> on ATK, MP and rank, and slamming Lv&nbsp;99&nbsp;&rarr;&nbsp;1 produces no negative stat.</p>
+
+
 <h2>v0.29.623 <span class="tag"><span class="pill feat">feat</span> The Taxi Uncle will run you back to your last three stops</span></h2>
 <p>Per user &mdash; <em>&ldquo;For taxi uncle make him also has guguma's function to go back to last 3 maps that the player accessed&rdquo;.</em></p>
 <p>Guguma already had precisely this service: <code>game.mapHistory</code>, filtered by <code>_isGugumaWarpable</code>, sliced to three. Rather than write a second copy, the Taxi Uncle <b>reuses the same history, the same filter and the same warp</b> &mdash; so a map that is reachable for the canary is reachable for the cab, permanently, with no second list to drift out of sync. The only thing that differed was the row&rsquo;s hardcoded caption, so the builder now takes an optional label: Guguma keeps <em>&ldquo;&#128036; Fly back to&rdquo;</em>, the Uncle gets <em>&ldquo;&#128661; Drive me back to&rdquo;</em>.</p>

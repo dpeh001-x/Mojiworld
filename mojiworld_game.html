@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.623';
+const GAME_VERSION = 'v0.29.624';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -85840,9 +85840,25 @@ function renderDev() {
   grid.appendChild(mmSec);
 }
 
+// v0.29.624 — THE PER-LEVEL GAINS, IN ONE PLACE. These are the exact numbers
+// levelUp() applies on a real level-up; devSetLevel now both adds and REMOVES
+// them through this table so the two directions cannot drift apart again.
+// Keep in sync with levelUp() if the growth curve ever changes.
+function _devLevelGains(cls) {
+  return {
+    hp:   cls === 'warrior' ? 30 : (cls === 'archer' || cls === 'rogue') ? 22 : 15,
+    mp:   cls === 'mage' ? 22 : cls === 'warlock' ? 20 : 12,
+    atk:  cls === 'warrior' ? 3 : 2,
+    def:  cls === 'warrior' ? 2 : 1,
+    sp:   3,   // "AP" in the skill tree and on the dev console's +10 AP button — same pool
+    rank: 1,   // skillRankPoints — the per-level rank pool
+  };
+}
+
 function devSetLevel(n) {
   n = Math.max(1, Math.min(99, n));
   const diff = n - player.level;
+  const _g = _devLevelGains(player.cls);
   // v0.25.665 — Accumulate innate-RNG bonus SP across the per-level loop.
   // _applyInnateLevelupRng now grants SP (1 base + 0-12 RNG = avg 7) so
   // sum the bonuses and surface one summary toast at the end. The math
@@ -85852,25 +85868,67 @@ function devSetLevel(n) {
   if (diff > 0) {
     for (let i = 0; i < diff; i++) {
       player.level++;
-      const hpGain = player.cls === 'warrior' ? 30 : player.cls === 'archer' ? 22 : player.cls === 'rogue' ? 22 : 15;
-      const mpGain = player.cls === 'mage' ? 22 : player.cls === 'warlock' ? 20 : 12;
-      player.maxHp += hpGain;
-      player.maxMp += mpGain;
-      player.baseAtk += player.cls === 'warrior' ? 3 : 2;
-      player.baseDef += player.cls === 'warrior' ? 2 : 1;
-      player.skillPoints += 3;
+      player.maxHp   += _g.hp;
+      player.maxMp   += _g.mp;
+      player.baseAtk += _g.atk;
+      player.baseDef += _g.def;
+      player.skillPoints += _g.sp;
+      // v0.29.624 — THE MISSING POOL. levelUp() grants skillRankPoints +1 every
+      // level and devSetLevel never did, so a dev-set character sat on ZERO rank
+      // points at any level while a real one at Lv 60 has 59. Measured before
+      // this fix: dev-set to Lv 60 -> rankPts 0. That is not a rounding error,
+      // it is an entire progression currency reading empty, which made the rank
+      // panel untestable from the dev console.
+      player.skillRankPoints = (player.skillRankPoints || 0) + _g.rank;
       _accumBonus += _applyInnateLevelupRng();
     }
-  } else {
+  } else if (diff < 0) {
+    // v0.29.624 — THE DOWNWARD PATH USED TO BE A NO-OP ON STATS. It assigned
+    // player.level = n and returned, removing nothing at all: HP, MP, ATK, DEF
+    // and AP all stayed at the higher level's values. Two consequences, both
+    // measured on the previous build:
+    //
+    //   1. A "Lv 20" dev character carried Lv-60 stats verbatim — exactly the
+    //      thing this tool exists to avoid, since the point of setting a level
+    //      is to see the game as a player at that level sees it.
+    //   2. It RATCHETED. 60 -> 20 -> 60 removed nothing and then re-added 40
+    //      levels of gains, so each round trip permanently inflated the
+    //      character: baseAtk 202 -> 282, AP 71 -> 211, maxMp 290 -> 770 after
+    //      a single 60/20/60 cycle. Repeat it a few times from the console and
+    //      the "level 40" you are testing at is unrecognisable.
+    //
+    // Removal is the exact inverse of the loop above, through the same table.
+    // Floors at the class baseline rather than 0 so a drop to Lv 1 cannot
+    // produce a character with negative attack.
+    const k = -diff;
+    const _cs = (typeof CLASSES !== 'undefined' && CLASSES[player.cls] && CLASSES[player.cls].stats) || null;
     player.level = n;
+    player.maxHp   = Math.max(_cs ? _cs.hp  : 1, player.maxHp   - _g.hp  * k);
+    player.maxMp   = Math.max(_cs ? _cs.mp  : 0, player.maxMp   - _g.mp  * k);
+    player.baseAtk = Math.max(_cs ? _cs.atk : 1, player.baseAtk - _g.atk * k);
+    player.baseDef = Math.max(_cs ? _cs.def : 0, player.baseDef - _g.def * k);
+    // AP: take back the flat 3/level, plus this character's OWN average innate
+    // roll for the levels being removed. Using the tracked ledger rather than
+    // the 0.5 theoretical mean is what makes a round trip land back where it
+    // started instead of drifting a few points every cycle.
+    const _innLv  = player._innateLevels | 0;
+    const _innAvg = _innLv > 0 ? (player._innateSp | 0) / _innLv : 0.5;
+    const _innBack = Math.min(player._innateSp | 0, Math.round(_innAvg * k));
+    player.skillPoints     = Math.max(0, (player.skillPoints | 0) - _g.sp * k - _innBack);
+    player.skillRankPoints = Math.max(0, (player.skillRankPoints | 0) - _g.rank * k);
+    player._innateSp     = Math.max(0, (player._innateSp | 0) - _innBack);
+    player._innateLevels = Math.max(0, _innLv - k);
   }
   player.exp = 0;
+  // v0.29.624 — expToNext was never re-derived, so the XP bar kept the OLD
+  // level's requirement after a jump (a Lv-60 character showing a 30 XP bar).
+  if (typeof _lxLevelCost === 'function') player.expToNext = _lxLevelCost(player.level);
   player.hp = getMaxHp();
   player.mp = getMaxMp();
   if (_accumBonus > 0) {
     setTimeout(() => showToast(`✨ Innate growth ×${diff}: +${_accumBonus} bonus SP`, 'legendary'), 400);
   }
-  devLog('Level set to ' + n);
+  devLog('Level set to ' + n + '  (AP ' + (player.skillPoints | 0) + ' · rank ' + (player.skillRankPoints | 0) + ' · atk ' + player.baseAtk + ' · def ' + player.baseDef + ')');
   updateUI();
 }
 
