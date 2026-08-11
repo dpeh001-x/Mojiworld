@@ -23,7 +23,14 @@ import { fileURLToPath } from 'node:url';
 sharp.cache(false);
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DIR = join(repoRoot, 'Sprites', 'bosses', 'attack');
-const FRAMES = 9;
+const FRAMES = 9;                     // frames EMITTED — the game always wants 9
+// Frames REQUESTED from the model, which need not be 9. Form 3 degrades
+// progressively: across every roll, cells 0-3 came back clean and 4-8 were
+// cropped through the thighs or drawn as 2.5x close-ups. Asking for fewer
+// frames keeps the whole request inside the zone the model handles, and the
+// ping-pong rebuild already turns a short clean run into nine emitted frames.
+// Padding was the wrong lever — pushing it up invited the model to fill the
+// empty space, pushing it down left no room for limbs.
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 const arg = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
@@ -66,6 +73,7 @@ const FORMS = {
       'NEVER cut off by any edge of the image, and both wings stay attached ' +
       'to his back.' },
 };
+const REQ = Math.max(3, Math.min(9, Number(arg('--req')) || 9));
 const FORM = String(arg('--form') || '1');
 if (!FORMS[FORM]) { console.error(`unknown --form ${FORM}. known: ${Object.keys(FORMS).join(', ')}`); process.exit(1); }
 const SUF = FORMS[FORM].suffix;
@@ -477,18 +485,35 @@ if (has('--salvage-only')) {
   const PAD = Number(arg('--pad')) || (FORM === '1' ? ATTACKS[attack].pad : 0) ||
     Math.min(0.75, Math.max(0.12, (baseM.bh / PAD_TARGET - 1) / 2));
   console.log(`  body ${Math.round(baseM.bh * 100)}% of frame -> pad ${Math.round(PAD * 100)}% -> ${Math.round(baseM.bh / (1 + 2 * PAD) * 100)}% of the padded frame`);
-  const _padX = Math.round(baseMeta.width * PAD), _padY = Math.round(baseMeta.height * PAD);
+  // ASPECT NORMALISATION. Padding had always been symmetric, which preserves the
+  // canvas aspect — so the model was shown form 3 in a distinctly LANDSCAPE
+  // frame every time. The two forms that succeeded are near-portrait (h/w 0.909
+  // and 0.873); form 3 is 0.733, and it answered by filling the width, i.e. by
+  // zooming to ~2.5x. Fewer frames did not help (at 4 frames the second cell is
+  // already 2.34x — the model spreads the same arc over whatever it is given),
+  // and padding failed in both directions, so the frame SHAPE is what is left.
+  // Vertical padding still comes from the body-fraction target; horizontal
+  // padding is then chosen to land the padded canvas on form 1's proportions.
+  // The emitted canvas is unaffected — this only changes what the model sees.
+  const TARGET_HW = 0.909;
+  const _padY = Math.round(baseMeta.height * PAD);
+  const _padH = baseMeta.height + 2 * _padY;
+  const _wantW = Math.round(_padH / TARGET_HW);
+  const _padX = Math.abs(baseMeta.height / baseMeta.width - TARGET_HW) > 0.05
+    ? Math.max(Math.round(baseMeta.width * 0.12), Math.round((_wantW - baseMeta.width) / 2))
+    : Math.round(baseMeta.width * PAD);
+  console.log(`  padded canvas ${baseMeta.width + 2 * _padX}x${_padH}  h/w ${(_padH / (baseMeta.width + 2 * _padX)).toFixed(3)} (target ${TARGET_HW})`);
   const padded = await sharp(await readFile(BASE))
     .extend({ top: _padY, bottom: _padY, left: _padX, right: _padX, background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
   const padMeta = await sharp(padded).metadata();
   const small = await sharp(padded).resize(940, 940, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
 
-  console.log(`animating ${attack} (eagle, ${FRAMES} frames, frame_size -9, pad ${Math.round(PAD * 100)}%)...`);
+  console.log(`animating ${attack} (eagle, ${REQ} frames requested -> ${FRAMES} emitted, pad ${Math.round(PAD * 100)}%)...`);
   const res = await fetch(`${API}/assets/sprite/animate`, {
     method: 'POST', headers: { Authorization: `ApiKey ${key}`, 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(300000),
     body: JSON.stringify({ initial_image: 'data:image/png;base64,' + small.toString('base64'),
-      motion_prompt: PROMPT, frames: FRAMES, frame_size: -9, model: 'eagle',
+      motion_prompt: PROMPT, frames: REQ, frame_size: -9, model: 'eagle',
       individual_frames: true, loop: false, image_type: 'sprite' }),
   });
   if (!res.ok) throw new Error(`animate ${res.status}: ${(await res.text()).slice(0, 180)}`);
@@ -500,11 +525,18 @@ if (has('--salvage-only')) {
   if (data.spritesheet_url && data.num_cols && data.num_rows) {
     const sheet = await grab(data.spritesheet_url), sm = await sharp(sheet).metadata();
     const cw = Math.floor(sm.width / data.num_cols), chh = Math.floor(sm.height / data.num_rows);
-    for (let r = 0; r < data.num_rows && cells.length < FRAMES; r++)
-      for (let c = 0; c < data.num_cols && cells.length < FRAMES; c++)
+    // Guard the slice geometry. A non-9 request returns a sheet whose grid does
+    // not divide cleanly, and an out-of-range extract does not throw in JS — it
+    // takes libvips down with a native stack-buffer-overrun (exit 0xC0000409),
+    // killing the run with no usable error.
+    if (!(cw > 0 && chh > 0) || cw * data.num_cols > sm.width + 1 || chh * data.num_rows > sm.height + 1) {
+      throw new Error(`bad sheet grid: ${sm.width}x${sm.height} / ${data.num_cols}x${data.num_rows}`);
+    }
+    for (let r = 0; r < data.num_rows && cells.length < REQ; r++)
+      for (let c = 0; c < data.num_cols && cells.length < REQ; c++)
         cells.push(await sharp(sheet).extract({ left: c * cw, top: r * chh, width: cw, height: chh }).png().toBuffer());
-  } else { for (const u of (data.individual_frame_urls || []).slice(0, FRAMES)) cells.push(await grab(u)); }
-  if (cells.length < FRAMES) throw new Error(`got ${cells.length} frames`);
+  } else { for (const u of (data.individual_frame_urls || []).slice(0, REQ)) cells.push(await grab(u)); }
+  if (cells.length < REQ) throw new Error(`got ${cells.length} frames, wanted ${REQ}`);
   // Normalize scale IN PADDED SPACE, then crop (see _tmp_pipefix note: a crop
   // before scale-check amputated zoomed frames' legs and the foot-line anchor
   // then disguised it). Armour touching any padded edge = the model truncated
@@ -589,7 +621,11 @@ if (has('--salvage-only')) {
   // frame differs from its neighbour except the short peak hold — unlike the
   // old nearest-neighbour backfill, which once emitted six copies of one frame
   // and shipped a freeze as an "animation".
-  if (finals.some(f => !f)) {
+  // Expand to the emitted count whenever the surviving run is short — because
+  // cells were dropped, OR because fewer than nine were requested in the first
+  // place. Same mirror either way: wind up to the last good pose, hold briefly,
+  // recover to the opening stance.
+  if (finals.some(f => !f) || finals.length < FRAMES) {
     const run = [];
     for (let ci = 0; ci < finals.length; ci++) { if (!finals[ci]) break; run.push(ci); }
     console.log(`  rebuilding as mirror of leading run [${run.join(',')}]`);
