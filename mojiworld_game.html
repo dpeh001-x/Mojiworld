@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.619';
+const GAME_VERSION = 'v0.29.620';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -57755,6 +57755,23 @@ function _computeClassSkillMul(skillId) {
 // ARCHER. Warriors charge freely (can still move); archers are FORCED still
 // while holding. Returns true if a charge was started and the poll loop
 // should NOT fire the skill this frame.
+// v0.29.5xx — NON-ATTACK SKILLS DO NOT CHARGE (per user "for non-attack buff
+// skills such as Eagle Eye, remove the ability to charge by holding key
+// down"). Charge & Release scales DAMAGE, so on a skill that deals none the
+// hold is pure delay — Eagle Eye did nothing until the key came back up.
+// Refusing the charge is the whole fix: the input poll skips a slot only
+// while _classChargeOwnsSlot() is true, so with no charge created the skill
+// casts on the next held frame, and tryReleaseClassCharge finds nothing.
+// Membership rule: no damage on cast => instant. Anything that hits (warCry
+// and warlord_warcry both fire a shock pulse, plus rampage / rush / the ults)
+// keeps its charge, because there the bonus still buys something.
+const _LX_NO_CHARGE_SKILLS = new Set([
+  'eagleEye',          // archer — pure +20% crit buff
+  'bloodlust',         // warrior — pure rage buff
+  'guardian',          // warrior — pure defensive buff
+  'wildBond',          // archer — pure summon
+  'beastmaster_pack',  // archer — pure summon
+]);
 function tryStartClassCharge(slotKey) {
   if (!_classIdentityActive()) return false;
   if (player.cls !== 'warrior' && player.cls !== 'archer') return false;
@@ -57769,6 +57786,7 @@ function tryStartClassCharge(slotKey) {
   if (typeof towerBasicOnly === 'function' && towerBasicOnly()) return false;
   const found = skillBySlot(slot);
   if (!found || !isReady(found.id)) return false;
+  if (_LX_NO_CHARGE_SKILLS.has(found.id)) return false;   // v0.29.5xx — casts instantly instead
   if (player.hp <= 0 || game.paused || game.dying > 0) return false;
   if (((player.frozenTimer | 0) > 0 || (typeof _QTE !== 'undefined' && _QTE.active)) && !player._god) return false;  // frozen / shackle-QTE: no voluntary action (poll-loop gate doesn't cover charge)
   if (player._warCharge) return true;  // already charging
