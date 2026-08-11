@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.599';
+const GAME_VERSION = 'v0.29.592';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -25408,7 +25408,7 @@ const MAPS = {
     worldWidth: 2200,
     // v0.25.528 — Lv 100 entry gate. Gravitos is now the endgame boss
     // and the arena gates entry accordingly.
-    levelReq: 100,
+    levelReq: 70,   // v0.29.592 — per user, was 100 (see the zodiac note above)
     isBossArena: true,
     bossType: 'gravitos',
     gravityMul: 3,                      // ← 3× gravity for player / mobs / projectiles
@@ -28153,7 +28153,16 @@ function _zodiacMap(z) {
     bg: _ZODIAC_BG_CYCLE[((z.order || 1) - 1) % _ZODIAC_BG_CYCLE.length],
     sky: z.sky,
     worldWidth: 1800,
-    levelReq: z.levelReq,
+    // v0.29.592 — Per user: every zodiac domain gates at Lv 70, not on the
+    // per-sign ladder (Taurus 72 ... Pisces 90). Overridden HERE, at map
+    // construction, rather than by editing ZODIAC_SIGNS: z.levelReq is also
+    // read for the sign's own ordering/labelling elsewhere, so rewriting the
+    // source data would move more than the door. Aries was already 70, so this
+    // only lowers the other eleven. These maps are isBossArena, which exempts
+    // them from the levelReq:1 sweep further down — the literal really is the
+    // runtime gate here, and their zodiacHall portals carry no levelGate of
+    // their own, so this is the only wall.
+    levelReq: 70,
     isBossArena: true,
     bossType: 'zodiac_' + z.id,
     isZodiac: true,
@@ -104406,7 +104415,9 @@ const _BOSS_ATK_NOSHRINK = new Set(['sundered_smith', 'gravitos2star', 'gravitos
 // STATIC-sprite path too (not just animation frames), so a stale-cached
 // static from a different art generation (old fill 0.667 vs new 0.585 after
 // the v0.29.100 regen) can't draw the figure 12-14% off next to the frames.
-const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star', 'gravitospunch', 'gravitossoul', 'gravitoslaser']);   // v0.29.560 — soul set sizes like its siblings
+const _BOSS_SIZE_STRICT = new Set(['gravitos', 'gravitos2', 'gravitos3', 'gravitos2star', 'gravitos3star', 'gravitospunch', 'gravitossoul', 'gravitoslaser',
+  // v0.29.x — the form-2/3 cast sets size like their form-1 siblings
+  'gravitos2punch', 'gravitos2soul', 'gravitos2laser', 'gravitos3punch', 'gravitos3soul', 'gravitos3laser']);   // v0.29.560 — soul set sizes like its siblings
 // v0.26.x — Per-type ATTACK-frame size MULTIPLIER, applied on top of the
 // content-normalised size in _drawBossSprite (so the attack pose reads bigger
 // than idle/walk while staying foot-anchored). Distinct from _BOSS_ATK_UNIFORM
@@ -104454,6 +104465,15 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
   // v0.29.570 — Gravitos form-1 LASER SWEEP caster set. The bolts are game
   // projectiles (skill 'gravbolt'), so this set is purely the caster's stance.
   'gravitoslaser',
+  // v0.29.x — the same three cast sets for FORMS 2 AND 3, which had none: every
+  // punch-style pattern (Gravity Crush / Body Slam / Zip — 32% of phase-2 rolls
+  // and 18% of phase-3) and Laser Sweep fell back to the generic attack pose,
+  // and Soul Drain drew FORM 1's art, un-evolving the boss mid-cast. Each set
+  // is authored on its own form's canvas. Registering them here costs nothing
+  // when the art is absent: _loadBossFrames sizes from the frame index, so an
+  // unindexed key requests zero frames rather than the old 9 x 404.
+  'gravitos2punch', 'gravitos2soul', 'gravitos2laser',
+  'gravitos3punch', 'gravitos3soul', 'gravitos3laser',
   // v0.25.812 — Sundered Smith Lv 45 mini-boss (added in v0.25.809).
   // Authored sprite landed in Sprites/bosses/sundered_smith.webp.
   'sundered_smith',
@@ -104616,9 +104636,30 @@ function _bossAttackFrame(key, m) { return _bossLoopFrame(BOSS_ATTACK_FRAMES[key
 // Gravity Crush: 'slam' (body slam) and 'zip' (the charge) read as punches
 // too. Each pattern's window differs, so the once-through playback is scaled
 // to that pattern's duration — the impact frames land on the pattern's hit.
+// v0.29.x — FORM-AWARE cast-set key. Gravitos is three bosses wearing one name:
+// each form ships its own canvas (1656x1505 / 1445 / 1214) with the body at its
+// own scale, so form 1's art cannot stand in for form 2 without the boss
+// visibly un-evolving mid-cast — which is exactly what Soul Drain did on forms
+// 2 and 3, because gravitossoul was the only soul set that existed.
+// Forms 2/3 now ship gravitos2punch / gravitos3laser / … alongside.
+//
+// Falls back to the form-1 key when a form set is absent, so this is purely
+// additive: with no form-2/3 art on disk every caller behaves as it did before.
+// Length (not decode) is the test — the array is sized from the frame index, so
+// the key resolves as soon as the art is indexed, while the pickers below still
+// return null until pixels arrive and the caller keeps its generic fallback.
+function _gravCastKey(m, base) {
+  const suf = m._phaseSprite === 'gravitos3' ? '3' : m._phaseSprite === 'gravitos2' ? '2' : '';
+  if (suf) {
+    const k = 'gravitos' + suf + base;
+    const f = BOSS_ATTACK_FRAMES[k];
+    if (f && f.length) return k;
+  }
+  return 'gravitos' + base;
+}
 const _GRAV_PUNCH_PATTERNS = { crush: 1500, slam: 1100, zip: 1400 };
 function _gravitosPunchFrame(m) {
-  const frames = BOSS_ATTACK_FRAMES['gravitospunch'];
+  const frames = BOSS_ATTACK_FRAMES[_gravCastKey(m, 'punch')];
   if (!frames) return null;
   if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);   // v0.29.284 — same base as the other boss sets
   let n = frames._readyN || 0;
@@ -104649,7 +104690,7 @@ function _gravitosPunchFrame(m) {
 // be a slow-motion crawl; holding reads as a sustained channel.
 const _GRAV_SOUL_PATTERNS = { soulDrain: 1900, singularity: 3500, collapseRain: 4000 };
 function _gravitosSoulFrame(m) {
-  const frames = BOSS_ATTACK_FRAMES['gravitossoul'];
+  const frames = BOSS_ATTACK_FRAMES[_gravCastKey(m, 'soul')];
   if (!frames) return null;
   if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);   // same base as every other boss set
   let n = frames._readyN || 0;
@@ -104675,7 +104716,7 @@ function _gravitosUsesSoul(m) {
 // two of the three phases.
 const _GRAV_LASER_DUR = { 1: 1200, 2: 1320, 3: 1450 };
 function _gravitosLaserFrame(m) {
-  const frames = BOSS_ATTACK_FRAMES['gravitoslaser'];
+  const frames = BOSS_ATTACK_FRAMES[_gravCastKey(m, 'laser')];
   if (!frames) return null;
   if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);
   let n = frames._readyN || 0;
@@ -106797,8 +106838,10 @@ function drawMonster(m) {
   // dedicated 9-frame punch set via the same override key. _gravitosPunchFrame
   // (in the attack-img pick below) plays it once across THAT pattern's window.
   // Falls through to the regular attack set until the punch frames decode.
-  if (m.type === 'gravitos' && !m._phaseSprite && _GRAV_PUNCH_PATTERNS[m.patternState] && _gravitosPunchFrame(m)) {
-    m._gravStarKey = 'gravitospunch';
+  // v0.29.x — no longer form-1 only: forms 2/3 ship their own punch art, and
+  // _gravCastKey falls back to form 1's key when they do not.
+  if (m.type === 'gravitos' && _GRAV_PUNCH_PATTERNS[m.patternState] && _gravitosPunchFrame(m)) {
+    m._gravStarKey = _gravCastKey(m, 'punch');
   }
   // v0.29.560 — SOUL set for the channelled casts (see _gravitosUsesSoul).
   // Placed AFTER the star block deliberately and guarded on `!m._gravStarKey`,
@@ -106806,12 +106849,12 @@ function drawMonster(m) {
   // the soul set only fills the gaps: Soul Drain on every form, and form-1's
   // Singularity / Collapse Rain, which previously drew the generic attack pose.
   if (!m._gravStarKey && _gravitosUsesSoul(m) && _gravitosSoulFrame(m)) {
-    m._gravStarKey = 'gravitossoul';
+    m._gravStarKey = _gravCastKey(m, 'soul');
   }
   // v0.29.570 — form-1 LASER SWEEP set.
-  if (m.type === 'gravitos' && !m._gravStarKey && !m._phaseSprite &&
+  if (m.type === 'gravitos' && !m._gravStarKey &&
       m.patternState === 'laser' && _gravitosLaserFrame(m)) {
-    m._gravStarKey = 'gravitoslaser';
+    m._gravStarKey = _gravCastKey(m, 'laser');
   }
   const _spriteKey = m._gravStarKey || m._phaseSprite || m.type;
   // v0.26.310 — prefer the 4-frame attack animation when its frames have
@@ -106820,9 +106863,12 @@ function drawMonster(m) {
   // plays from its first frame the moment it starts (the windup telegraph the
   // player is supposed to read), instead of joining the global clock mid-swing.
   const _bossAttackImg = _bossAttacking
-    ? ((_spriteKey === 'gravitospunch' && _gravitosPunchFrame(m))
-       || (_spriteKey === 'gravitoslaser' && _gravitosLaserFrame(m))
-       || (_spriteKey === 'gravitossoul' && _gravitosSoulFrame(m))   // v0.29.560 — once-through, then holds
+    // Suffix tests, not equality: the key may now be gravitos2punch /
+    // gravitos3laser / … as well as the form-1 names. 'gravitos2star' ends in
+    // 'star' and is unaffected.
+    ? ((/punch$/.test(_spriteKey) && _gravitosPunchFrame(m))
+       || (/laser$/.test(_spriteKey) && _gravitosLaserFrame(m))
+       || (/soul$/.test(_spriteKey) && _gravitosSoulFrame(m))   // v0.29.560 — once-through, then holds
        || _bossAttackFrame(_spriteKey, m) || BOSS_ATTACK_SPRITES[_spriteKey])
     : null;
   // v0.26.314/322 — when not attacking: walk loop while moving, else idle loop,
