@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.582';
+const GAME_VERSION = 'v0.29.584';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -87609,7 +87609,35 @@ function _showTutorialModal() {
   }
   _renderTutorialStep();
   modal.style.display = 'block';
+  _startTutGhostWatch();   // v0.29.584 - ghost the card whenever a panel opens over it
   // game.paused intentionally left false — the tour runs alongside live play.
+}
+// v0.29.584 - BUG3: keep the dock out of the way of the panel it just told the
+// player to open. `_anyOtherModalOpen()` is the codebase's canonical
+// "is a real surface up?" check - it already covers every overlay (including
+// dialog, jukebox, settings and story-beat cases) and already skips the
+// tut-dock itself, so reusing it means this can never drift out of sync with a
+// newly added modal the way a private id list would.
+// The watch only runs while the dock is up and is torn down with it, so there
+// is no idle polling: outside the tour this costs exactly nothing.
+let _tutGhostTimer = null;
+function _reconcileTutGhost() {
+  const modal = document.getElementById('tutorial-modal');
+  if (!modal || !modal.classList.contains('tut-dock')) return;
+  let other = false;
+  try { other = (typeof _anyOtherModalOpen === 'function') && !!_anyOtherModalOpen(); } catch (e) { other = false; }
+  modal.classList.toggle('tut-ghost', other);
+}
+function _startTutGhostWatch() {
+  if (_tutGhostTimer) return;
+  _reconcileTutGhost();                                  // no one-tick lag on open
+  _tutGhostTimer = setInterval(_reconcileTutGhost, 120); // ~8 Hz, ~25 getElementById calls a tick
+}
+function _stopTutGhostWatch() {
+  if (_tutGhostTimer) { clearInterval(_tutGhostTimer); _tutGhostTimer = null; }
+  // strip the class too: .tut-ghost lingering on a re-shown BLOCKING (non-dock)
+  // tutorial would make it transparent AND click-through - an invisible modal.
+  try { const m = document.getElementById('tutorial-modal'); if (m) m.classList.remove('tut-ghost'); } catch (e) {}
 }
 // v0.26.x — Inject the dock chrome once: a collapse/expand handle and the
 // "game is live" hint above the nav row. Idempotent; safe to call every open.
@@ -87862,6 +87890,7 @@ function _closeTutorial(markSeen) {
     modal.classList.remove('tut-dock', 'tut-collapsed');
     modal.style.display = 'none';
   }
+  _stopTutGhostWatch();   // v0.29.584 - tear down the ghost watch with the dock
   window._tutWantsMove = false;   // v0.27.5 — never leave the per-frame gate armed after close
   game.paused = false;
   if (markSeen) {
@@ -124722,6 +124751,61 @@ function startBgm() {
      While a story beat is playing (body.sb-active), hide the dock so the
      narrative reads clean; it returns the instant the beat closes. */
   body.sb-active #tutorial-modal.tut-dock { visibility: hidden !important; }
+  /* v0.29.584 - Per user (BUG3): "Tutorial describes to equip blade, but due
+     to tutorial UI, I am unable to find the blade in the menu screen."
+     The dock floats at z-index 600 so it stays readable over the live game -
+     but the steps that SEND you into a panel (Items, Skills, Quests, MojiMon)
+     then park an opaque 460px card on top of the very panel they told you to
+     read, and .tut-dock .modal is pointer-events:auto, so it also swallows
+     clicks in that rectangle. The step becomes unfollowable.
+     While any real modal is open the dock goes GHOST: the card drops to a low
+     alpha so the panel reads straight through it, and it stops eating clicks
+     entirely. The nav row and the collapse handle stay solid AND interactive,
+     so the tour can never be stranded behind the panel it opened - and
+     hovering either one restores the whole card for a re-read without closing
+     anything. Opacity is applied PER-CHILD, never on the shared .modal
+     ancestor: child opacity multiplies with its parent's, so a faded ancestor
+     could not have been overridden back to 1 by the nav row. */
+  #tutorial-modal.tut-dock.tut-ghost .modal {
+    pointer-events: none;                 /* the panel underneath becomes fully clickable */
+    background: linear-gradient(180deg, rgba(16, 12, 30, 0.20) 0%, rgba(8, 6, 18, 0.24) 100%) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+    border-color: rgba(255, 209, 102, 0.20) !important;
+    transition: background 160ms ease, border-color 160ms ease;
+  }
+  /* !important is load-bearing here, not decoration. The step content carries
+     live CSS animations (tutStepIn on the icon/title/try pill, cs-title-shimmer
+     on the banner) and animations outrank NORMAL declarations in the cascade -
+     a plain `opacity: .17` was silently ignored on every animating child and
+     only stuck on #tut-body, which is display:none on objective steps and so
+     runs no animation. Important declarations DO outrank animations. */
+  #tutorial-modal.tut-dock.tut-ghost .modal > *:not(#tut-nav-row):not(#tut-collapse) {
+    opacity: 0.17 !important;
+    transition: opacity 160ms ease;
+  }
+  #tutorial-modal.tut-dock.tut-ghost #tut-nav-row,
+  #tutorial-modal.tut-dock.tut-ghost #tut-collapse {
+    opacity: 1 !important;
+    pointer-events: auto;                 /* Skip / Back / Next / collapse stay live */
+  }
+  /* Hover the still-solid controls to bring the card back at full strength.
+     The :not() pair is repeated so this outranks the ghost rule above:
+     :not(#id) contributes ID specificity, so a bare `.modal > *` here would
+     LOSE (2 ids vs 3) and the restore would never take. :has() is Chrome 105+
+     / Electron; where it is missing this simply does not fire and the ghost
+     stays ghosted - a lost nicety, never a broken tour. */
+  #tutorial-modal.tut-dock.tut-ghost:has(#tut-nav-row:hover) .modal > *:not(#tut-nav-row):not(#tut-collapse),
+  #tutorial-modal.tut-dock.tut-ghost:has(#tut-collapse:hover) .modal > *:not(#tut-nav-row):not(#tut-collapse) {
+    opacity: 1 !important;
+  }
+  #tutorial-modal.tut-dock.tut-ghost:has(#tut-nav-row:hover) .modal,
+  #tutorial-modal.tut-dock.tut-ghost:has(#tut-collapse:hover) .modal {
+    background: linear-gradient(180deg, rgba(16, 12, 30, 0.88) 0%, rgba(8, 6, 18, 0.92) 100%) !important;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
   #tutorial-modal.tut-dock .modal {
     pointer-events: auto;          /* the card itself stays interactive */
     margin: 0 !important;
