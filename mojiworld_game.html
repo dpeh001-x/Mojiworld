@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.596';
+const GAME_VERSION = 'v0.29.590';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -60364,15 +60364,19 @@ const SKILL_FNS = {
       // the empty space the warrior just leapt away from — so only one ever
       // reached the enemies. Two forward waves spawned a constant 32 px apart
       // (a leading + trailing wave) read as a clear double shockwave.
+      // v0.29.590 — ONE shockwave, per user ("the 1st skill should only shoot
+      // 1 projectile instead of 2"). The v0.26.x note above read an earlier
+      // version of that same request as "both should travel forward" and kept
+      // the pair; the ask was the projectile COUNT. Single wave now, widened
+      // 34->44 and damage 1.4x->2.0x ATK so losing the trailing wave does not
+      // gut the skill's ranged output (it was 2 x 1.4 on a piercing line).
       const _fdir = player.facing || 1;
-      for (const dx of [16, 48]) {
-        game.projectiles.push({
-          x: cx + _fdir * dx, y: fy - 18,
-          vx: _fdir * 9, vy: 0, w: 34, h: 30, life: 34,
-          damage: getAtk() * 1.4, owner: 'player', skill: 'bloodwave',
-          color: '#ffbb66', noGravity: true, pierce: true,
-        });
-      }
+      game.projectiles.push({
+        x: cx + _fdir * 16, y: fy - 18,
+        vx: _fdir * 9, vy: 0, w: 44, h: 30, life: 34,
+        damage: getAtk() * 2.0, owner: 'player', skill: 'bloodwave',
+        color: '#ffbb66', noGravity: true, pierce: true,
+      });
     }, SOMER_MS);
     return;
   },
@@ -60388,7 +60392,14 @@ const SKILL_FNS = {
     // load-up charge set in castSkill): wind-up → leap + DOUBLE somersault →
     // crash → heavy all-around slam + triple shockwave ring. Longer but reads
     // better, per user; damage bumped + cooldown raised 1 s (SKILLS.groundSlam).
-    const GS_LOADUP = 340, GS_FLIP = 440;
+    // v0.29.590 — Per user: "make it do quicker windup somersault and also
+    // inflict damage while somersaulting". The old 340 ms load-up rooted the
+    // warrior (vx = 0) with nothing happening, and the first damage did not
+    // land until GS_LOADUP + 430 = 770 ms — the skill read as a long
+    // commitment that did nothing on the way in. Load-up 340 -> 140 ms and the
+    // flip 440 -> 380 ms, so the leap starts almost immediately and first
+    // contact is at ~250 ms instead of 770 ms.
+    const GS_LOADUP = 140, GS_FLIP = 380;
     // v0.26.x audit 2nd pass (fix): Ground Slam's i-frame is now a SINGLE gated
     // window — starts after the GS_LOADUP charge and lasts GS_FLIP+160 = 600ms
     // (covers leap+crash, ~20% uptime). The old immediate 940ms set here was a
@@ -60403,7 +60414,26 @@ const SKILL_FNS = {
       player.somersaultDuration = GS_FLIP; player.somersaultTurns = 2;
     }, GS_LOADUP);
     // Mid-flip crash impulse so the double-flip lands right on the impact.
-    scheduleSkillTimer(() => { if (player.hp > 0 && !game.paused) player.vy = 15; }, GS_LOADUP + 260);
+    scheduleSkillTimer(() => { if (player.hp > 0 && !game.paused) player.vy = 15; }, GS_LOADUP + 220);
+    // v0.29.590 — SPINNING DAMAGE. The somersault is a whirling greatsword, so
+    // it now cuts on the way through instead of being pure travel time. Four
+    // light ticks across the flip (0.7x ATK, 120 px, low knockback) — enough to
+    // catch anything the warrior leaps over and to make the approach feel
+    // connected, while the landing (3.4x) stays the payoff. Each tick is
+    // guarded so a death or pause mid-flip stops it cleanly.
+    for (let _f = 0; _f < 4; _f++) {
+      scheduleSkillTimer(() => {
+        if (player.hp <= 0 || game.paused) return;
+        performAround(120, 0.7, { color:'#ffdd88', kb:2, burst:4 });
+        const _cx = player.x + player.w/2, _cy = player.y + player.h/2;
+        for (let i = 0; i < 5; i++) {
+          const a = Math.random() * Math.PI * 2;
+          game.particles.push({ x: _cx + Math.cos(a) * 26, y: _cy + Math.sin(a) * 22,
+            vx: Math.cos(a) * 3, vy: Math.sin(a) * 2 - 1,
+            life: 14, color: '#ffdd88', size: 2 });
+        }
+      }, GS_LOADUP + 60 + _f * 80);
+    }
     const _gsLv10 = (typeof getSkillLv10 === 'function') ? getSkillLv10('groundSlam') : null;
     const _rings = 3 + ((_gsLv10 && _gsLv10.hits) ? 1 : 0);   // L10 bonus → +1 ring
     // Main impact on landing.
