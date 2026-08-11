@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.609';
+const GAME_VERSION = 'v0.29.611';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -31127,6 +31127,14 @@ window.addEventListener('keydown', e => {
   const k = resolved;
   const repeat = e.repeat;
   game.keys[k] = true;
+  // v0.29.610 — queue arrow edges for the shackle QTE. See _qteFrame: polling
+  // game.keys once per sim step loses any press that starts and ends between
+  // two steps, which is exactly what fast tapping produces.
+  if (!repeat && typeof _QTE !== 'undefined' && _QTE.active && typeof _QTE_KEYS !== 'undefined' && _QTE_KEYS.indexOf(k) >= 0) {
+    if (!_QTE.queue) _QTE.queue = [];
+    _QTE.queue.push(k);
+    if (_QTE.queue.length > 12) _QTE.queue.shift();   // a stuck queue must not grow without bound
+  }
   if (['arrowleft','arrowright','arrowup','arrowdown',' '].includes(k) || (KEY_TO_SLOT && KEY_TO_SLOT[k])) e.preventDefault();   // v0.26.x — also swallow browser default (PgUp/PgDn scroll, etc.) when the key is bound to a skill
 
   // v0.25.246 — keyboard usage signal. If the player presses an actual
@@ -69586,7 +69594,19 @@ function bossAI(m, dt, distToPlayer) {
         // so the safe lane is the same one every cycle.
         m._brimLeakN = ((m._brimLeakN | 0) + 1) % 4;
         const px = m.x + m.w/2 + [-0.30, 0.15, -0.15, 0.30][m._brimLeakN] * m.w;
-        const py = m.y + m.h - 2;   // v0.29.581 — on the sole line; he is grounded here by the gate above
+        // v0.29.608 — sit the drip on the platform BELOW it, not on the boss's
+        // sole. m.onGround reads true while he hovers (measured: sole 220,
+        // floor 380 — 162 px of air), so the v0.29.581 gate could not stop gel
+        // from hanging in space. No supporting platform under this x → no
+        // puddle at all, and retry sooner rather than losing the beat.
+        let _brimSurfY = Infinity;
+        for (const _pl of ((game.mapData && game.mapData.platforms) || [])) {
+          if (!_pl || px < _pl.x || px > _pl.x + _pl.w) continue;
+          if (_pl.y >= m.y + m.h - 6 && _pl.y < _brimSurfY) _brimSurfY = _pl.y;
+        }
+        if (_brimSurfY === Infinity) { m._brimLeakCD = 220; }
+        else {
+        const py = _brimSurfY - 2;
         game.hazards.push({
           type: 'gloop_puddle',
           cx: px, cy: py,
@@ -69604,6 +69624,7 @@ function bossAI(m, dt, distToPlayer) {
             })) break;
           }
         }
+        }   // v0.29.608 — end of the "a real platform supports this drip" guard
       }
     }
     // King Slime: big jumps + splashes.
@@ -87258,6 +87279,7 @@ function _qteHide(delayMs) {
 function _qteEnd(success, cured) {
   if (!_QTE.active) return;
   _QTE.active = false;
+  if (_QTE.queue) _QTE.queue.length = 0;   // v0.29.610 — no stale press leaks into the next shackle
   player.stunTimer = 0;
   // v0.29.434 — MojiMon binding: when this QTE was a binding ritual, a
   // completed sequence CAPTURES the target. Consumed before the success FX
@@ -87341,7 +87363,20 @@ function _qteFrame(dt, timerOnly) {
   if (_QTE.remain <= 0) { _qteEnd(false); return; }
   player.stunTimer = _QTE.remain;
   if (_QTE.fill) { const _w = Math.max(0, (_QTE.remain / _QTE.total) * 100).toFixed(1) + '%'; if (_QTE._lastW !== _w) { _QTE._lastW = _w; _QTE.fill.style.width = _w; } }
-  if (timerOnly) return;
+  if (timerOnly) { if (_QTE.queue) _QTE.queue.length = 0; return; }
+  // Queued edges first (captured in the keydown handler). Marking prev[key]
+  // here is what stops the poll below from counting the SAME press a second
+  // time when the key is still held.
+  const q = _QTE.queue;
+  if (q && q.length) {
+    for (let i = 0; i < q.length; i++) {
+      const qk = q[i];
+      _QTE.prev[qk] = true;
+      _qtePress(qk);
+      if (!_QTE.active) break;
+    }
+    q.length = 0;
+  }
   const k = game.keys || {};
   for (const key of _QTE_KEYS) {
     const down = !!k[key];
@@ -117020,6 +117055,14 @@ function loop(time) {
   // (and therefore the pan + grade) keeps running.
   const frozen = game.hitStop > 0 || _smHold || !!game._photoMode;
   if (game.hitStop > 0) game.hitStop -= dt;
+  // v0.29.610 — photo mode is not a shelter. `frozen` skips updatePlayer
+  // entirely, which parked the shackle QTE: the clock stopped and the SHACKLED
+  // card sat there until you left, so the whole effect could be waited out from
+  // inside the camera. Timer only, matching the freeze gate — the arrow keys
+  // pan the camera here, so accepting them would fight the photo controls.
+  if (game._photoMode && typeof _QTE !== 'undefined' && _QTE.active && typeof _qteFrame === 'function') {
+    try { _qteFrame(dt, true); } catch (_e) {}
+  }
 
   // v0.25.855 — Clamp player.hp ≥ 0 once per frame BEFORE the death check.
   // Audit found that simultaneous same-frame hits could leave hp at e.g.
