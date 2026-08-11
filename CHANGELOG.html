@@ -121,6 +121,19 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.580 <span class="tag"><span class="pill bug">bug</span> A single thrown frame could kill the game forever &mdash; the black-screen lock</span></h2>
+<p>Per user bug report &mdash; <em>&ldquo;After Creation of Character, the whole screen fades to black, boss can be heard attacking, but I am in a pitch black screen.&rdquo;</em> Reported on The Singularity, happened once.</p>
+<p><b>The cause is structural, and it was never specific to the prologue.</b> <code>loop()</code> had no <code>try/catch</code>, and its <code>requestAnimationFrame</code> was the <em>last statement it runs</em>. So <b>any</b> exception anywhere in a frame killed the animation chain permanently &mdash; nothing restarted it. The canvas then froze on whatever it had last painted, while audio and the co-op lifeline timer carried on from their own timers. That is exactly &ldquo;pitch black screen, boss still audible&rdquo;.</p>
+<p><b>Why black, and why right there.</b> Entering <code>gravitosArena</code> fires <code>blackHold(95)</code> &mdash; about 1.6&nbsp;s of full-screen black &mdash; and sets <code>game.paused = true</code> for the entry cinematic. The paused branch returns <em>before</em> the render, so the last painted frame is solid black. A frame throwing anywhere inside that window leaves the player staring at it forever. The post-creation prologue is the heaviest art-and-decode race in the game, which is why it reproduced there and only once.</p>
+<div class="callout">
+  <b>The fix makes the frame loop unkillable.</b> Every frame now runs through a wrapper that <b>always reschedules, even when the frame threw</b> &mdash; a crash costs one dropped frame instead of the session. The wrapper also clears any pending blackout on error, so the player is never stranded behind a black screen even if the faulty frame keeps throwing.
+  <br><br>
+  Verified by injecting a synthetic crashing frame into the exact reported state (blackout pending): the exception does not escape, the chain <b>is</b> rescheduled, the blackout is cleared, and the next real frame runs clean. Scheduling is idempotent, so the in-loop calls and the wrapper tail cannot double the frame rate &mdash; confirmed a single pending frame after three redundant schedule calls.
+</div>
+<p>The gamepad poller has its own local <code>loop</code> with its own rAF calls; the rewrite is index-scoped to the main loop and leaves those two untouched (verified).</p>
+<p><b>Honest scope note:</b> this hardens the failure <em>mode</em>. The specific line that threw during that one prologue run is not identified &mdash; a one-off race with no reproduction &mdash; so rather than guess at it, the loop now survives it. If a frame is still throwing, it now logs <code>[LoopWatchdog] frame threw</code> (first three occurrences) instead of silently bricking the session, which is what will identify the culprit if it recurs.</p>
+
+
 <h2>v0.29.579 <span class="tag"><span class="pill bug">bug</span> The last look-picker option is reachable again &mdash; &ldquo;Smart&rdquo; eyes sat under the nav bar</h2>
 <p>Per user (BUG1): <em>&ldquo;Due to layout of Char Creator, &lsquo;Smart&rsquo; Eyes is unable to be selected&rdquo;</em>.</p>
 <div class="callout">

@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.579';
+const GAME_VERSION = 'v0.29.580';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -115431,6 +115431,35 @@ function _drawOffscreenThreats() {
     drew++;
   }
 }
+// v0.29.5xx — UNKILLABLE FRAME LOOP (per user BUG2: black screen with the
+// boss still audible after character creation). loop() had no try/catch and
+// its requestAnimationFrame was its LAST statement, so a single exception
+// anywhere in a frame killed the rAF chain for good — the canvas froze on
+// its last painted frame (solid black, because the Gravitos arena entry runs
+// blackHold(95) and pauses for the cinematic) while audio and the co-op
+// lifeline timer carried on. Every frame now goes through this wrapper,
+// which reschedules even when the frame threw: a crash costs one frame
+// instead of the session. Scheduling is idempotent so the in-loop calls and
+// the wrapper tail can never double the frame rate.
+let _LX_RAF_PENDING = false;
+function _lxNextFrame() {
+  if (_LX_RAF_PENDING) return;
+  _LX_RAF_PENDING = true;
+  try { requestAnimationFrame(_lxFrame); }
+  catch (e) { _LX_RAF_PENDING = false; setTimeout(() => _lxFrame(performance.now()), 16); }
+}
+function _lxFrame(time) {
+  _LX_RAF_PENDING = false;
+  try {
+    loop(time);
+  } catch (e) {
+    // Never let a thrown frame strand the player behind a blackout.
+    try { if (typeof game !== "undefined" && game) { game.blackHoldFrames = 0; game.blackFlashOverlay = 0; } } catch (_e) {}
+    const n = (window.__lxLoopErrN = (window.__lxLoopErrN || 0) + 1);
+    if (n <= 3) { try { console.error("[LoopWatchdog] frame threw; chain kept alive:", e); } catch (_e) {} }
+  }
+  _lxNextFrame();
+}
 function loop(time) {
   // v0.26.946 — boot gate: while the opaque loading overlay is up, skip the
   // sim+render entirely (it was stealing main-thread time from the sprite
@@ -115439,7 +115468,7 @@ function loop(time) {
     const _bo = document.getElementById('loading-overlay');
     if (_bo && !_bo.classList.contains('fade')) {
       lastTime = time;
-      requestAnimationFrame(loop);
+      _lxNextFrame();
       return;
     }
     window._lxBootGateDone = true;   // overlay gone — skip the DOM query from now on
@@ -115453,7 +115482,7 @@ function loop(time) {
     const _elapsed = Math.max(0, Math.min(100, time - lastTime));
     lastTime = time;
     _lxSimAccumMs += _elapsed;
-    if (_lxSimAccumMs < _LX_SIM_STEP_MS) { requestAnimationFrame(loop); return; }
+    if (_lxSimAccumMs < _LX_SIM_STEP_MS) { _lxNextFrame(); return; }
     _lxSimAccumMs -= _LX_SIM_STEP_MS;
     // Clamp the backlog so a long stall / tab-away can't unleash a burst.
     if (_lxSimAccumMs > _LX_SIM_STEP_MS * 4) _lxSimAccumMs = _LX_SIM_STEP_MS * 4;
@@ -115815,7 +115844,7 @@ function loop(time) {
       updateUI();
     }
     _trimVisualQueues();
-    requestAnimationFrame(loop);
+    _lxNextFrame();
     return;
   }
   // Reset watchdog timer whenever the game is running normally so a
@@ -116087,14 +116116,14 @@ function loop(time) {
   // mobile + lowFx, so this is the canonical guard against burst-spike
   // queue growth (e.g. Nightreaper ricochet + AoE in one frame).
   _trimVisualQueues();
-  requestAnimationFrame(loop);
+  _lxNextFrame();
   } catch (_loopErr) {   // v0.26.1024 — a transient sim/draw throw no longer freezes the tab
     try { console.error('[loop]', _loopErr); } catch (_e) {}
     // v0.26.1033 — clear any leaked transform/alpha/composite from the throwing
     // frame so the next frame paints clean (belt-and-braces with the top-of-frame
     // reset; a throw during teardown could otherwise still leave a dirty context).
     try { ctx.setTransform(_LX_DPR, 0, 0, _LX_DPR, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; } catch (_e) {}
-    requestAnimationFrame(loop);
+    _lxNextFrame();
   }
 }
 
@@ -117755,7 +117784,7 @@ window.addEventListener('visibilitychange', () => {
     try { audio.init(); } catch (e) {}
   }
 });
-requestAnimationFrame(loop);
+_lxNextFrame();
 // v0.26.949 — Asset cache. sw.js serves sprites/audio stale-while-
 // revalidate: repeat loads come from disk cache instantly, while a
 // background refetch keeps redrawn sprites fresh for the NEXT visit.
