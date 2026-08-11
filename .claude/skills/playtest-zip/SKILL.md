@@ -36,7 +36,11 @@ The last lines print `build: vX.Y.Z from HEAD (<sha>)`. If that version is not
 the one you intend to send, stop. Parallel sessions move `HEAD` in this repo,
 so re-read it right before packaging rather than trusting an earlier reading.
 
-Package a specific commit instead of `HEAD` with `--ref <sha>`.
+Package a specific commit instead of `HEAD` with `--ref <sha>`. Either way the
+ref is resolved to a concrete SHA once, at startup — it used to be re-resolved
+per file across a ~6 minute run, so a parallel session committing midway
+produced a build assembled from two different commits and a version banner
+describing neither.
 
 ## Step 1 — Build it
 
@@ -59,17 +63,29 @@ Expect roughly **800 MB staged / 830 MB zipped**, ~7,100 files.
 ## Step 2 — Verify by booting the package, not the repo
 
 ```bash
-node scripts/verify_playtest_build.mjs _playtest 8766
+node scripts/verify_playtest_build.mjs
 ```
 
 It launches the staged build with **its own bundled node and its own
-`serve.js`**, then asserts: the packaged version equals the commit's, floor and
-platform tiles load, no 404s anywhere in boot, no page errors, the launcher and
-bundled node are present, and the README both states the packaged version and
-teaches the keys this build actually binds.
+`serve.js`**, then asserts: the page under test really is the staged build, the
+staged game file hashes to a real commit, floor and platform tiles load, no
+404s anywhere in boot, no page errors, the launcher and bundled node are
+present, and the README both states the packaged version and teaches the keys
+this build actually binds.
 
-**Expect 14/14. Do not send a zip on a red check.** A 404 here is an asset the
+**Expect 15/15. Do not send a zip on a red check.** A 404 here is an asset the
 game asks for that the allowlist does not ship — fix the list, not the test.
+
+**Let it pick the port.** Pass one (`… _playtest 8766`) only if you have a
+reason, and know that a *taken* port aborts rather than falling through. It has
+to: `serve.js` is spawned with stdio ignored, so a failed bind is reported
+nowhere, and a stale server from another session then answers every request —
+the suite grades that build instead, usually green. This is not theoretical;
+eleven ports were held by parallel sessions during one run of this work.
+
+*"the staged build is a real COMMIT"* failing means the packaged bytes match no
+commit reachable from `HEAD` — normally because a parallel session rebased the
+commit you packaged out of existence. The zip is not reproducible; re-package.
 
 ## Step 3 — Hand it over
 
