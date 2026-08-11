@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.590';
+const GAME_VERSION = 'v0.29.597';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -14040,76 +14040,232 @@ function _qnavCycle() {
   } catch (_e) {}
 }
 
-// Which way, on THIS map, gets the player closer? Shared with the compass:
-// the NPC's own x when they stand here, otherwise the next portal on the route.
-function _qnavHeadingX(d) {
+// Which way, on THIS map, gets the player closer? Returns BOTH axes.
+// v0.29.596 — was x-only, which made the distance wrong on vertical maps: a
+// target 400 px straight up read as 0 away and said "arrived". Prefers the
+// LIVE npc record (game.npcs) over the MAPS index, because runtime-added NPCs
+// (Echo Keeper, quest spawns) exist only in the live list.
+function _qnavHeading(d) {
   if (!d) return null;
   const here = game.currentMap;
   if (d.map === here) {
-    if (d.kind === 'npc' && Number.isFinite(d.x)) return d.x;
+    if (d.kind === 'npc') {
+      for (const n of ((typeof game !== 'undefined' && game.npcs) || [])) {
+        if (n && n.name === d.who && Number.isFinite(n.x)) return { x: n.x, y: Number.isFinite(n.y) ? n.y : (d.y || 0) };
+      }
+      if (Number.isFinite(d.x)) return { x: d.x, y: Number.isFinite(d.y) ? d.y : 0 };
+      return null;
+    }
     let best = null, bd = Infinity;
     for (const m of ((typeof monsters !== 'undefined' && monsters) || [])) {
       if (!m || m.dead || m.type !== d.who) continue;
       const dist = Math.abs((m.x || 0) - (player.x || 0));
       if (dist < bd) { bd = dist; best = m; }
     }
-    return best ? best.x : null;
+    return best ? { x: best.x, y: Number.isFinite(best.y) ? best.y : (player.y || 0) } : null;
   }
   const r = _qnavRoute(here, d.map);
-  return (r && r.next && r.next.portal && Number.isFinite(r.next.portal.x)) ? r.next.portal.x : null;
+  const po = r && r.next && r.next.portal;
+  return (po && Number.isFinite(po.x)) ? { x: po.x, y: Number.isFinite(po.y) ? po.y : (player.y || 0) } : null;
+}
+// Kept: the x-only form other callers and tests already use.
+function _qnavHeadingX(d) { const h = _qnavHeading(d); return h ? h.x : null; }
+
+// ---- the widget -----------------------------------------------------------
+// A DOM element, not a canvas draw. The canvas is 960x560 logical and is
+// scaled to fit the window, so anything drawn on it cannot be aligned with an
+// HTML panel like #stats without re-deriving that scale every frame — which is
+// exactly why the first version sat in a corner instead of under the HP HUD.
+// As DOM it also drags with two pointer handlers and stays crisp.
+const _LX_QK = { el: null, icon: null, arrow: null, name: null, sub: null, last: '', drag: null, placed: false };
+
+// Styles are injected from here rather than added to a <style> block in the
+// markup: this file is edited by several sessions at once and a self-contained
+// widget cannot lose its CSS to someone else's stale buffer.
+function _qnavKeyStyles() {
+  if (document.getElementById('qnav-key-css')) return;
+  const s = document.createElement('style');
+  s.id = 'qnav-key-css';
+  // Deliberately built from #stats' own recipe so the guide reads as part of
+  // the HUD rather than a debug overlay bolted on: the same gold rim at 0.40,
+  // the same radial-gold-over-dark-gradient fill, the same layered shadow with
+  // the two inset rings, the same backdrop blur, and Cinzel for the name to
+  // match .stats-name. Values are copied from that block, not eyeballed.
+  s.textContent = `
+#qnav-key{position:fixed;z-index:6;display:none;align-items:center;gap:7px;
+  padding:4px 9px 4px 7px;border-radius:9px;cursor:grab;user-select:none;touch-action:none;
+  background:
+    radial-gradient(140% 70% at 50% 0%, rgba(212,175,90,0.12) 0%, transparent 55%),
+    linear-gradient(180deg, rgba(22,14,34,0.42) 0%, rgba(10,6,18,0.52) 100%);
+  border:1px solid rgba(212,175,90,0.40);
+  box-shadow:
+    0 6px 18px rgba(0,0,0,0.55),
+    0 2px 4px rgba(0,0,0,0.35),
+    inset 0 1px 0 rgba(255,255,255,0.07),
+    inset 0 -1px 0 rgba(0,0,0,0.45),
+    inset 0 0 0 2px rgba(212,175,90,0.10),
+    inset 0 0 0 3px rgba(0,0,0,0.35);
+  -webkit-backdrop-filter:blur(10px) saturate(120%);
+  backdrop-filter:blur(10px) saturate(120%);
+  color:#f0e6cc;max-width:196px;transition:border-color .18s ease, box-shadow .18s ease;}
+#qnav-key:hover{border-color:rgba(212,175,90,0.62);}
+#qnav-key:active{cursor:grabbing;}
+/* the ludo.ai compass badge — the widget's identity, and the only art in it */
+#qnav-key .qk-i{flex:0 0 auto;width:21px;height:21px;object-fit:contain;display:block;
+  filter:drop-shadow(0 0 5px rgba(212,175,90,0.45));}
+#qnav-key .qk-i.gone{display:none;}
+/* direction lives on the sub-line beside the distance, so "▶ 14m" reads as one
+   phrase and the badge stays a clean single focal point */
+#qnav-key .qk-a{font-size:11px;line-height:1;margin-right:1px;
+  text-shadow:0 0 6px currentColor;transition:color .18s ease;}
+#qnav-key .qk-a.go{color:#e8c66a;} #qnav-key .qk-a.ok{color:#8fe3a2;} #qnav-key .qk-a.far{color:#b9a6d8;}
+#qnav-key .qk-t{min-width:0;display:flex;flex-direction:column;line-height:1.3;}
+#qnav-key .qk-t b{font-family:'Cinzel','Inter',Georgia,serif;font-weight:700;font-size:11px;
+  letter-spacing:0.4px;color:#f0e6cc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#qnav-key .qk-t i{font-style:normal;font-family:'Inter',system-ui,sans-serif;font-size:9px;
+  letter-spacing:0.3px;color:rgba(240,230,204,0.52);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#qnav-key .qk-k{flex:0 0 auto;margin-left:1px;padding:1px 5px;border-radius:5px;
+  font-family:'Inter',system-ui,sans-serif;font-size:8px;font-weight:700;letter-spacing:0.5px;
+  background:rgba(255,255,255,0.10);border:1px solid rgba(255,255,255,0.18);color:rgba(255,255,255,0.72);}
+@media (max-width:760px){#qnav-key{max-width:158px;padding:3px 7px 3px 5px;}
+  #qnav-key .qk-t b{font-size:10px;} #qnav-key .qk-k{display:none;}}
+@media (prefers-reduced-motion:reduce){#qnav-key,#qnav-key .qk-a{transition:none;}}
+`;
+  document.head.appendChild(s);
+}
+
+function _qnavKeyEnsure() {
+  if (_LX_QK.el && document.body.contains(_LX_QK.el)) return _LX_QK.el;
+  _qnavKeyStyles();
+  const el = document.createElement('div');
+  el.id = 'qnav-key';
+  el.innerHTML =
+    '<img class="qk-i" alt="" draggable="false" src="Sprites/ui/quest_compass.webp">' +
+    '<span class="qk-t"><b></b><i><span class="qk-a"></span><span class="qk-d"></span></i></span>' +
+    '<span class="qk-k">E</span>';
+  document.body.appendChild(el);
+  _LX_QK.el = el;
+  _LX_QK.icon  = el.querySelector('.qk-i');
+  _LX_QK.arrow = el.querySelector('.qk-a');
+  _LX_QK.name  = el.querySelector('.qk-t b');
+  _LX_QK.sub   = el.querySelector('.qk-d');
+  // The art is streamed from jsDelivr on the Pages deploy; if it 404s the
+  // widget must still work, so drop the badge rather than show a broken image.
+  _LX_QK.icon.addEventListener('error', () => { _LX_QK.icon.classList.add('gone'); });
+
+  // Drag. Pointer events + capture so a fast drag cannot escape the element,
+  // and stopPropagation so dragging never reaches the gameplay input handlers.
+  el.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault(); ev.stopPropagation();
+    const r = el.getBoundingClientRect();
+    _LX_QK.drag = { dx: ev.clientX - r.left, dy: ev.clientY - r.top, moved: false };
+    try { el.setPointerCapture(ev.pointerId); } catch (_e) {}
+    el.style.cursor = 'grabbing';
+  });
+  el.addEventListener('pointermove', (ev) => {
+    if (!_LX_QK.drag) return;
+    ev.preventDefault(); ev.stopPropagation();
+    _LX_QK.drag.moved = true;
+    _qnavKeyPlace(ev.clientX - _LX_QK.drag.dx, ev.clientY - _LX_QK.drag.dy, true);
+  });
+  const end = (ev) => {
+    if (!_LX_QK.drag) return;
+    ev.stopPropagation();
+    try { el.releasePointerCapture(ev.pointerId); } catch (_e) {}
+    _LX_QK.drag = null;
+    el.style.cursor = 'grab';
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+  // Fullscreen and rotation change the viewport; a position stored as a
+  // fraction has to be re-applied, and an un-dragged widget re-homed under the
+  // HUD (which itself moves).
+  window.addEventListener('resize', () => { _LX_QK.placed = false; try { _qnavKeyHome(); } catch (_e) {} });
+  return el;
+}
+
+// Clamp into the viewport so a drag can never strand it off screen, and
+// remember it as a FRACTION of the window — a pixel position saved on a
+// desktop would land off-screen on a phone.
+function _qnavKeyPlace(left, top, save) {
+  const el = _LX_QK.el; if (!el) return;
+  const w = el.offsetWidth || 150, h = el.offsetHeight || 28;
+  const L = Math.max(4, Math.min(window.innerWidth - w - 4, left));
+  const T = Math.max(4, Math.min(window.innerHeight - h - 4, top));
+  el.style.left = L + 'px';
+  el.style.top = T + 'px';
+  if (save) {
+    try { game._qnavKeyPos = { fx: L / Math.max(1, window.innerWidth), fy: T / Math.max(1, window.innerHeight) }; } catch (_e) {}
+  }
+}
+
+// Default home: directly under the HP HUD card, aligned to its left edge.
+function _qnavKeyHome() {
+  const el = _LX_QK.el; if (!el) return;
+  const saved = game && game._qnavKeyPos;
+  if (saved && Number.isFinite(saved.fx) && Number.isFinite(saved.fy)) {
+    _qnavKeyPlace(saved.fx * window.innerWidth, saved.fy * window.innerHeight, false);
+    _LX_QK.placed = true; return;
+  }
+  const hud = document.getElementById('stats');
+  if (hud) {
+    const r = hud.getBoundingClientRect();
+    if (r.width > 0) { _qnavKeyPlace(r.left, r.bottom + 8, false); _LX_QK.placed = true; return; }
+  }
+  _qnavKeyPlace(16, 300, false);   // HUD not laid out yet — retry next tick
 }
 
 function _qnavDrawKey() {
-  if (typeof game === 'undefined' || !game.qnav) return;
+  const on = (typeof game !== 'undefined') && !!game.qnav;
+  if (!on) { if (_LX_QK.el) _LX_QK.el.style.display = 'none'; return; }
   const d = _qnavLiveDest();
-  if (!d) return;
+  if (!d) { if (_LX_QK.el) _LX_QK.el.style.display = 'none'; return; }
+
+  const el = _qnavKeyEnsure();
+  el.style.display = 'flex';
+  if (!_LX_QK.placed || !el.style.left) _qnavKeyHome();
+
   const mob = (typeof monsterTypes !== 'undefined' && monsterTypes[d.who] && monsterTypes[d.who].name) || d.who;
   const who = d.kind === 'npc' ? d.who : mob;
-  const tx = _qnavHeadingX(d);
-  const px = (player && player.x) || 0;
+  const h = _qnavHeading(d);
 
-  let glyph = '◆', tone = '#7fe08a', note = 'here';
-  if (tx == null) { glyph = '◆'; tone = '#c9a0ff'; note = d.map === game.currentMap ? 'on this map' : 'no route'; }
-  else {
-    const dx = tx - px;
-    if (Math.abs(dx) < 70) { glyph = '◆'; tone = '#7fe08a'; note = 'arrived'; }
-    else { glyph = dx > 0 ? '▶' : '◀'; tone = '#ffd84a'; note = String(Math.round(Math.abs(dx))); }
+  let glyph = '◆', tone = 'ok', sub;
+  if (!h) {
+    // No heading is NOT "arrived" — the old widget showed ◆ for both, which
+    // read as "you are here" while standing maps away from the target.
+    glyph = '⌖'; tone = 'far';
+    sub = (d.map === game.currentMap) ? 'somewhere on this map' : 'no route — try the taxi';
+  } else {
+    const dx = h.x - (player.x || 0);
+    const dy = h.y - (player.y || 0);
+    const dist = Math.hypot(dx, dy);
+    if (dist < 70) { glyph = '◆'; tone = 'ok'; sub = 'arrived'; }
+    else {
+      tone = 'go';
+      // Straight up or down: `dx > 0 ? '▶' : '◀'` sent you sideways at dx≈0,
+      // which is a wrong instruction, not just an imprecise one. Only pick a
+      // horizontal arrow when there is real horizontal distance to cover.
+      if (Math.abs(dx) < 70) glyph = dy < 0 ? '▲' : '▼';
+      else glyph = dx > 0 ? '▶' : '◀';
+      // Vertical is worth flagging alongside a sideways arrow too, but only
+      // when it is a real climb rather than sprite jitter.
+      const vert = (Math.abs(dx) >= 70 && Math.abs(dy) > 90) ? (dy < 0 ? ' ↑' : ' ↓') : '';
+      sub = Math.round(dist / 10) + 'm' + vert;
+    }
   }
+  // Only append the hop count when there IS one. Appending "no route" here as
+  // well produced "no route — try the taxi · no route".
+  if (d.map !== game.currentMap && d.hops != null) sub += ' · ' + d.hops + ' map' + (d.hops === 1 ? '' : 's');
 
-  const BX = 14, BW = 196, BH = 40, BY = H - BH - 96;
-  ctx.save();
-  ctx.globalAlpha = 0.9;
-  ctx.fillStyle = 'rgba(16,12,28,0.9)';
-  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-  ctx.lineWidth = 1;
-  if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(BX, BY, BW, BH, 9); ctx.fill(); ctx.stroke(); }
-  else { ctx.fillRect(BX, BY, BW, BH); ctx.strokeRect(BX, BY, BW, BH); }
-  ctx.globalAlpha = 1;
-
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'center';
-  ctx.font = '700 19px system-ui, sans-serif';
-  ctx.fillStyle = tone;
-  ctx.fillText(glyph, BX + 22, BY + BH / 2);
-
-  ctx.textAlign = 'left';
-  ctx.font = '700 12px system-ui, sans-serif';
-  ctx.fillStyle = '#efe8ff';
-  let name = String(who);
-  while (name.length > 3 && ctx.measureText(name).width > BW - 62) name = name.slice(0, -1);
-  if (name !== String(who)) name = name.slice(0, -1) + '…';
-  ctx.fillText(name, BX + 42, BY + 13);
-
-  ctx.font = '10px system-ui, sans-serif';
-  ctx.fillStyle = '#b9b0cc';
-  ctx.fillText(note, BX + 42, BY + 28);
-
-  // The key tells you which key it is — otherwise nobody finds the cycle.
-  ctx.textAlign = 'right';
-  ctx.font = '700 9px system-ui, sans-serif';
-  ctx.fillStyle = 'rgba(255,255,255,0.4)';
-  ctx.fillText('E', BX + BW - 10, BY + BH / 2);
-  ctx.restore();
+  // Only touch the DOM when something changed — this runs every frame.
+  const sig = glyph + '|' + tone + '|' + who + '|' + sub;
+  if (sig !== _LX_QK.last) {
+    _LX_QK.last = sig;
+    _LX_QK.arrow.textContent = glyph;
+    _LX_QK.arrow.className = 'qk-a ' + tone;
+    _LX_QK.name.textContent = who;
+    _LX_QK.sub.textContent = ' ' + sub;
+  }
 }
 
 function _qnavDrawCompass() {
@@ -36252,6 +36408,7 @@ const PLAYER_SAVE_FIELDS = [
 const GAME_SAVE_FIELDS = [
   'currentMap','bossDefeated','kills','achievements',
   'qnav',   // v0.29.583 — quest compass target; an allowlist, so tracking resets on reload without it
+  '_qnavKeyPos',   // v0.29.596 — where the player dragged the guide widget (stored as viewport fractions)
   '_qnavOptOut',   // v0.29.591 — player pressed E past the end to dismiss the guide; must outlive a reload
   // v0.26.451 - per-map chest restock cooldown (anti re-entry farm); persisted so reload can't reset it.
   '_chestCooldown',

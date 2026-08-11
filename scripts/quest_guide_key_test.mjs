@@ -2,7 +2,7 @@
 // a compact widget, and E cycles then dismisses.
 //
 // Everything here goes through the REAL paths — the keyboard for E, the quest
-// tick for auto-track, and ctx call counts for the draw. A previous suite in
+// tick for auto-track, and the rendered DOM for the widget. A previous suite in
 // this feature stayed green against a build where the code had been clobbered
 // out of the file, because it called the render function directly instead.
 // Run: node scripts/quest_guide_key_test.mjs [file.html]
@@ -32,12 +32,20 @@ await page.evaluate(() => {
   player.level = 40;
   game.qnav = null; game._qnavOptOut = false;
   if (typeof tickQuestUnlocks === 'function') tickQuestUnlocks();
-  window.__tally = () => {
-    const n = { fillText: 0, fill: 0, fillRect: 0 };
-    const keep = {};
-    for (const k of Object.keys(n)) { keep[k] = ctx[k]; ctx[k] = function (...a) { n[k]++; return keep[k].apply(ctx, a); }; }
-    try { _qnavDrawKey(); } finally { for (const k of Object.keys(n)) ctx[k] = keep[k]; }
-    return n;
+  // v0.29.597 — the widget became a DOM element (the canvas is 960x560 logical
+  // and scaled, so nothing drawn on it can be aligned with the HTML HUD). Read
+  // the element rather than counting ctx calls.
+  window.__read = () => {
+    _qnavDrawKey();
+    const el = document.getElementById('qnav-key');
+    if (!el) return { shown: false, glyph: '', name: '', sub: '', key: '' };
+    return {
+      shown: getComputedStyle(el).display !== 'none',
+      glyph: (el.querySelector('.qk-a') || {}).textContent || '',
+      name: (el.querySelector('.qk-t b') || {}).textContent || '',
+      sub: (el.querySelector('.qk-t i') || {}).textContent || '',
+      key: (el.querySelector('.qk-k') || {}).textContent || '',
+    };
   };
 });
 await page.waitForTimeout(2500);
@@ -55,36 +63,24 @@ check(!!auto.qnav, 'the guide picks a target with no player action', auto);
 check(auto.listLen > 1, 'there are several candidates to cycle through', auto.listLen);
 
 // 2. It draws.
-const drew = await page.evaluate(() => {
-  const texts = [];
-  const keep = ctx.fillText;
-  ctx.fillText = function (t, ...a) { texts.push(String(t)); return keep.apply(ctx, [t, ...a]); };
-  try { _qnavDrawKey(); } finally { ctx.fillText = keep; }
-  return { texts, tally: window.__tally() };
-});
-console.log(`key draws: ${JSON.stringify(drew.texts)}`);
-check(drew.tally.fillText > 0, 'the directional key draws text', drew.tally);
-check(drew.tally.fill > 0 || drew.tally.fillRect > 0, 'the directional key draws its panel', drew.tally);
-check(drew.texts.some((t) => ['◀', '▶', '◆'].includes(t)), 'it shows a direction glyph', drew.texts);
-check(drew.texts.includes('E'), 'it advertises the E key', drew.texts);
+const drew = await page.evaluate(() => window.__read());
+console.log(`key shows: ${JSON.stringify(drew)}`);
+check(drew.shown, 'the directional key is visible', drew);
+check(!!drew.name, 'it names the destination', drew);
+check(['◀', '▶', '◆', '⌖'].includes(drew.glyph), 'it shows a direction glyph', drew.glyph);
+check(drew.key === 'E', 'it advertises the E key', drew.key);
 
 // 3. The direction must follow the player, not be a constant.
 const flip = await page.evaluate(() => {
-  const read = () => {
-    const texts = [];
-    const keep = ctx.fillText;
-    ctx.fillText = function (t, ...a) { texts.push(String(t)); return keep.apply(ctx, [t, ...a]); };
-    try { _qnavDrawKey(); } finally { ctx.fillText = keep; }
-    return texts.find((t) => ['◀', '▶', '◆'].includes(t));
-  };
   const d = _qnavDest(game.qnav);
-  const tx = _qnavHeadingX(d);
-  if (tx == null) return { skipped: true };
-  const px = player.x;
-  player.x = tx - 500; const right = read();
-  player.x = tx + 500; const left = read();
-  player.x = px;
-  return { right, left, tx };
+  const h = _qnavHeading(d);
+  if (!h) return { skipped: true };
+  const px = player.x, py = player.y;
+  player.y = h.y;                                   // isolate the horizontal axis
+  player.x = h.x - 500; const right = window.__read().glyph;
+  player.x = h.x + 500; const left = window.__read().glyph;
+  player.x = px; player.y = py;
+  return { right, left, tx: h.x };
 });
 if (flip.skipped) check(false, 'a heading exists to test direction', flip);
 else {
@@ -106,12 +102,12 @@ const dismissed = await page.evaluate(async () => {
   _qnavCycle();                                // one more step = off
   const off = { qnav: game.qnav, optOut: !!game._qnavOptOut };
   _qnavAutoTrack();                            // must NOT resurrect it
-  return { ...off, afterAuto: game.qnav, tally: window.__tally() };
+  return { ...off, afterAuto: game.qnav, shown: window.__read().shown };
 });
 check(dismissed.qnav === null, 'E past the end switches the guide off', dismissed);
 check(dismissed.optOut === true, 'and records the opt-out', dismissed);
 check(dismissed.afterAuto === null, 'auto-track respects the opt-out', dismissed);
-check(Object.values(dismissed.tally).every((v) => v === 0), 'a dismissed guide draws nothing', dismissed.tally);
+check(dismissed.shown === false, 'a dismissed guide is hidden', dismissed);
 
 // 5. E brings it back, and the opt-out survives a save.
 await page.keyboard.press('e');
