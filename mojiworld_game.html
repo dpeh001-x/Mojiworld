@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.576';
+const GAME_VERSION = 'v0.29.577';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -52518,8 +52518,17 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     // user) to reduce deadliness / OHKO pressure. Zodiac bosses + gravitos are
     // hand-tuned and pass through untouched.
     if (_spawned && !_spawned.zodiacBoss && _spawned.type !== 'gravitos') {
-      _spawned.atk      = Math.max(1, Math.floor(_spawned.atk * BOSS_DIFFICULTY_ATK_MUL));
-      _spawned.maxHp     = Math.max(1, Math.floor(_spawned.maxHp * BOSS_DIFFICULTY_HP_MUL));
+      // v0.29.577 — level-scaled instead of flat; see _bossDiffMul. The
+      // level is resolved the same way the curve block below does it, so both
+      // read the identical number for a given boss.
+      const _dLv = _spawned.level ||
+        ((typeof MOB_NATURAL_LEVEL !== 'undefined' && MOB_NATURAL_LEVEL[type]) || 0) ||
+        ((game.mapData && game.mapData.levelReq) || 1);
+      const _dm = (typeof _bossDiffMul === 'function')
+        ? _bossDiffMul(_dLv)
+        : { atk: BOSS_DIFFICULTY_ATK_MUL, hp: BOSS_DIFFICULTY_HP_MUL };
+      _spawned.atk      = Math.max(1, Math.floor(_spawned.atk * _dm.atk));
+      _spawned.maxHp     = Math.max(1, Math.floor(_spawned.maxHp * _dm.hp));
       _spawned.currentHp = _spawned.maxHp;
     }
     // v0.29.224 — BOSS LEVEL-CURVE PARITY. Normal mobs get the exponential +
@@ -71706,8 +71715,38 @@ const MONSTER_STAT_MUL     = 0.35;
 // v0.26.468 — Per user: scale DOWN non-zodiac / non-gravitos boss difficulty
 // (reduce deadliness + OHKO pressure). Applied at spawn in spawnMonster's boss
 // block. Zodiac bosses (m.zodiacBoss) and gravitos keep their hand-tuned values.
-const BOSS_DIFFICULTY_ATK_MUL = 0.70;   // −30% boss attack output
-const BOSS_DIFFICULTY_HP_MUL  = 0.85;   // −15% boss HP
+// v0.29.577 (per user: "reduce the difficulties on all bosses especially
+// those less than level 50, make it manageable but still pose as a
+// challenge"). These were FLAT, so a Lv 5 boss got exactly the same relief
+// as a Lv 90 one — which is why the early game bit hardest: the authored
+// curve (_bossAtkForLevel) is at its steepest relative to how little HP,
+// DEF and kit a sub-50 player has, and a flat −30% cannot know that.
+//
+// They are now the Lv 50+ END of a ramp. _bossDiffMul(lv) interpolates from
+// a much deeper cut at Lv 1 up to these values, so every boss gets easier
+// and the sub-50 ones get easier by a lot:
+//
+//          Lv 1     Lv 25    Lv 50+
+//    atk   x0.45    x0.53    x0.62
+//    hp    x0.60    x0.68    x0.76
+//
+// Kept deliberately short of trivial: v0.29.569 tuned the damage curve to
+// ~5 hits-to-die for an average build low down and 2-3 up high, and a boss
+// still kills in a handful of hits. This buys reaction time and a mistake
+// budget, not immunity.
+const BOSS_DIFFICULTY_ATK_MUL = 0.62;   // Lv 50+ end of the ramp (was a flat 0.70)
+const BOSS_DIFFICULTY_HP_MUL  = 0.76;   // Lv 50+ end of the ramp (was a flat 0.85)
+const BOSS_DIFFICULTY_ATK_MUL_L1 = 0.45;   // Lv 1 end — the deepest relief
+const BOSS_DIFFICULTY_HP_MUL_L1  = 0.60;
+function _bossDiffMul(lv) {
+  // t: 0 at Lv 1, 1 at Lv 50 and above. Linear between — no cliff at 50,
+  // so a Lv 49 and a Lv 51 boss of the same family stay neighbours.
+  const t = Math.max(0, Math.min(1, ((lv | 0) - 1) / 49));
+  return {
+    atk: BOSS_DIFFICULTY_ATK_MUL_L1 + (BOSS_DIFFICULTY_ATK_MUL - BOSS_DIFFICULTY_ATK_MUL_L1) * t,
+    hp:  BOSS_DIFFICULTY_HP_MUL_L1  + (BOSS_DIFFICULTY_HP_MUL  - BOSS_DIFFICULTY_HP_MUL_L1)  * t,
+  };
+}
 // v0.25.169 — global skill-cooldown multiplier. 0.75 = every skill +
 // every job's basic-attack cooldown is reduced by 25% across the
 // board. Stacks multiplicatively with class-specific cdMul (mage 0.70,
