@@ -4853,7 +4853,7 @@
      control deck. */
   #buff-row {
     position: absolute;
-    top: 230px;
+    top: 64px;   /* v0.29.5xx — was 230px; the corner, under the version + save chips */
     right: 12px;
     display: flex;
     flex-direction: column;
@@ -5229,6 +5229,22 @@
     flex: 1;
     white-space: nowrap;
   }
+  /* v0.29.5xx — seconds-remaining readout, sits between the label and the
+     drain bar. Tabular figures so the pill does not jitter as digits change. */
+  .moji-buff-pill .buff-left {
+    font-variant-numeric: tabular-nums;
+    font-size: 10px;
+    opacity: 0.85;
+    margin-left: 2px;
+    color: var(--moji-gold-soft, #ffe2a3);
+  }
+  /* Final second: a gentle pulse so the buff's last beat is unmissable. */
+  @keyframes mojiBuffExpiring {
+    0%, 100% { transform: scale(1);    }
+    50%      { transform: scale(1.06); }
+  }
+  .moji-buff-pill.buff-expiring { animation: mojiBuffExpiring 420ms ease-in-out infinite; }
+  .moji-buff-pill.buff-expiring .buff-left { opacity: 1; color: var(--moji-gold, #ffd166); }
   .moji-buff-pill .buff-timer {
     position: absolute;
     left: 0; bottom: 0;
@@ -9391,7 +9407,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.603';
+const GAME_VERSION = 'v0.29.604';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -116087,6 +116103,11 @@ function _uiSetText(el, val) {
 // sensible cap so the bar reads as "remaining time"). Order in this
 // array = display order in the HUD (most-impactful buffs first).
 const BUFF_META = [
+  // v0.29.5xx — 'sleight' was set by a connecting Backstab (+0.5x crit damage
+  // for 2.5s, read by getCritDmg) but had no entry here, so the HUD showed
+  // nothing at all for it. Registry-vs-reality diff found it as the only real
+  // gap: 11 registered against 12 buffs the code actually sets.
+  { key: 'sleight',       icon: '🗡',  label: 'Sleight',     dur: 2500  },
   { key: 'warCry',        icon: '⚔',  label: 'War Cry',     dur: 12000 },
   { key: 'bloodlust',     icon: '🩸', label: 'Bloodlust',    dur: 12000 },
   { key: 'rampage',       icon: '💢', label: 'Rampage',      dur: 3500  },
@@ -116157,8 +116178,11 @@ function _updateBuffRow() {
       const pill = document.createElement('div');
       pill.className = 'moji-buff-pill';
       pill.setAttribute('data-buff', a.meta.key);
+      // v0.29.5xx — the pill now states the time LEFT, not just a proportion:
+      // a 12s War Cry and a 2.5s Sleight read identically at half-drained.
       pill.innerHTML = '<span class="buff-icon">' + a.meta.icon + '</span>'
                      + '<span class="buff-label">' + a.meta.label + '</span>'
+                     + '<span class="buff-left"></span>'
                      + '<span class="buff-timer"></span>';
       row.appendChild(pill);
     }
@@ -116178,10 +116202,33 @@ function _updateBuffRow() {
     if (!(game._buffBarMax[_bk] > 0) || t > game._buffBarMax[_bk]) game._buffBarMax[_bk] = t;
     const _den = game._buffBarMax[_bk] || a.meta.dur || 1;
     const pct = Math.max(0, Math.min(100, (t / _den) * 100));
-    const bar = pills[i].lastElementChild;
+    const _pill = pills[i];
+    const bar = _pill.lastElementChild;
     if (bar && bar._lastPct !== pct) {
       bar._lastPct = pct;
       bar.style.width = pct.toFixed(1) + '%';
+    }
+    // v0.29.5xx — SECONDS REMAINING + EXPIRY FADE (per user "show a fade out
+    // timer of the timespan left"). Both writes are change-gated like the bar
+    // above, so a steady frame touches no DOM: the text only lands when the
+    // rendered tenth changes, the opacity only when its rounded step does.
+    const _left = _pill.querySelector('.buff-left');
+    if (_left) {
+      const _secs = t / 1000;
+      const _txt = (_secs >= 10) ? (_secs.toFixed(0) + 's') : (_secs.toFixed(1) + 's');
+      if (_left._lastTxt !== _txt) { _left._lastTxt = _txt; _left.textContent = _txt; }
+    }
+    // Fade over the final third of whatever this buff's real duration is, so
+    // short and long buffs both read as "running out" at the same visual pace.
+    const _frac = pct / 100;
+    const _op = (_frac >= 0.34) ? 1 : (0.35 + (_frac / 0.34) * 0.65);
+    const _opStep = Math.round(_op * 20) / 20;
+    if (_pill._lastOp !== _opStep) { _pill._lastOp = _opStep; _pill.style.opacity = _opStep; }
+    // Under a second, the readout pulses so the last beat is unmissable.
+    const _crit = (t <= 1000);
+    if (_pill._lastCrit !== _crit) {
+      _pill._lastCrit = _crit;
+      _pill.classList.toggle('buff-expiring', _crit);
     }
   }
   for (const _bk in game._buffBarMax) { if (_bbSeen[_bk] !== _bbToken) delete game._buffBarMax[_bk]; }
