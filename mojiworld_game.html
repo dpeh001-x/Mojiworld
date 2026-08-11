@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.624';
+const GAME_VERSION = 'v0.29.625';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -22693,8 +22693,19 @@ const MAPS = {
       // 15 × 2.5 = 37.5 → 38. Delay × 0.4 ≈ 2.5× faster (480-1040 ms vs
       // 1200-2600 ms). Spawn counts also bumped 2.5× so initial population
       // matches the new cap.
-      monsterCap: 38,
-      respawnDelayMul: 0.4,
+      // v0.29.x — BUG10 (tester): "very difficult stage ... monsters cluster and
+      // it becomes a bullet hell with you having limited mobility".
+      // Measured against every spawning map by pressure (alive cap / respawn
+      // multiplier): this map ranked 4th at 71 versus a median of 15. Its only
+      // superiors are the Sovereign boss arena, Stardust Atrium (Lv 40) and
+      // Abyssal Trench (Lv 44+) — so a Lv 15-26 map was carrying endgame spawn
+      // pressure, and doing it on a vertical tower where kiting is not an
+      // option. The v0.25.692 bump that set these (2.5x cap, 2.5x respawn) was
+      // never re-checked against the rest of the game.
+      // 38 -> 22 and 0.4 -> 0.8 lands it at pressure ~25: still the densest
+      // ordinary map and unmistakably a hive, no longer an outlier.
+      monsterCap: 22,
+      respawnDelayMul: 0.8,
       platforms,
       portals: [],
       // v0.25.692 — Spawn counts bumped 2.5× to match the new monsterCap.
@@ -22702,9 +22713,12 @@ const MAPS = {
       // queued (initial spawn limited by monsterCap=38; rest backfill as
       // mobs die at the new faster respawn cadence).
       spawns: [
-        { type: 'honeyBuzz',  count: 45 },
-        { type: 'nougatBear', count: 30 },
-        { type: 'orange',     count: 13 },
+        // Queue scaled with the cap (88 -> 51) so the backfill cadence matches;
+        // leaving 88 queued against a cap of 22 would simply respawn the same
+        // wall more slowly rather than making the map less crowded.
+        { type: 'honeyBuzz',  count: 26 },
+        { type: 'nougatBear', count: 17 },
+        { type: 'orange',     count: 8 },
       ],
     };
   })(),
@@ -58182,6 +58196,30 @@ function _basicAttackGateMs() {
 function castSkill(id) {
   const s = SKILLS[id];
   if (!s) return;
+  // v0.29.625 — DEAD PLAYERS DO NOT CAST (user BUG12: "Despite being dead, I
+  // can still use skills"). castSkill is the choke point EVERY cast path funnels
+  // through — the held-key poll in updatePlayer, the edge-triggered Z keydown,
+  // the mobile control deck, the hotkey cards, and the mage up-warp's
+  // castSkill('blink') — so the guard belongs here rather than at any one caller.
+  //
+  // Why it was reachable at all: updatePlayer() early-returns on player._downed,
+  // which is the CO-OP knockdown state, and that return is what stopped the poll
+  // loop. Ordinary death sets hp <= 0 WITHOUT setting _downed, so the early
+  // return never fired and the loop kept casting. Measured on the previous
+  // build: at hp = 0 the same skill that cast while alive still cast; a direct
+  // castSkill() from the mobile deck fired and spent MP; and blink both moved
+  // the corpse and charged for it.
+  //
+  // This only restores the convention the rest of the skill code already
+  // assumed — several deferred skill effects (the scheduleSkillTimer callbacks
+  // and the delayed-cast map check) already open with "if (player.hp <= 0)
+  // return", i.e. the tail of a cast knew not to resolve on a dead player while
+  // the head of it happily started one.
+  //
+  // _god is exempted so dev godmode testing is unaffected; _downed is included
+  // so the co-op knockdown is enforced at the same place rather than relying on
+  // a caller's early return that only one of the five paths passes through.
+  if (!player._god && (((player.hp | 0) <= 0) || player._downed)) return;
   // v0.25.852 — Tiny helper so the four early-fail returns below all
   // play the new 'fail' sfx without four duplicate lines. Debounced via
   // game._lastFailSfx so spam-pressing a locked slot doesn't machine-gun
