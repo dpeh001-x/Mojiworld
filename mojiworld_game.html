@@ -9391,7 +9391,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.586';
+const GAME_VERSION = 'v0.29.587';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -20862,6 +20862,32 @@ function _mapGearLevel(mapD) {
   }
   if (!lv && mapD.levelReq) lv = mapD.levelReq | 0;
   return lv || 1;
+}
+
+// v0.29.585 — Pick an item from a capped pool, weighted so the TOP of the cap
+// is a roll rather than a coin flip.
+//
+// Per user: high tier must stay randomised even in a high-level map, or the
+// optimal play is to hop maps opening one chest in each. The chest restock
+// cooldown is PER MAP (15 real minutes), so ~40 maps means ~40 chests with no
+// wait — and the pick inside the capped pool used to be UNIFORM, so a gold
+// chest in a Lv 70 zone hit its T7 ceiling as often as it hit T5.
+//
+// Each tier step toward the cap is half as likely as the one below it. Clamped
+// at 4 steps (16x) so a wide fallback pool cannot make the ceiling
+// unreachable — it stays possible, it just stops being farmable.
+function _pickTierWeighted(list, cap) {
+  if (!list || !list.length) return null;
+  const w = new Array(list.length);
+  let total = 0;
+  for (let i = 0; i < list.length; i++) {
+    const d = Math.max(0, (cap | 0) - (list[i].tier | 0));
+    w[i] = Math.pow(2, Math.min(4, d));
+    total += w[i];
+  }
+  let r = Math.random() * total;
+  for (let i = 0; i < list.length; i++) { r -= w[i]; if (r <= 0) return list[i]; }
+  return list[list.length - 1];
 }
 
 // v0.26.x — Per user: higher-level monsters (especially bosses) must hit MUCH
@@ -33682,7 +33708,55 @@ function _renderPrismPips() {
   for (let i = 0; i < 5; i++) html += '<span style="font-size:13px; opacity:' + (i < s ? 1 : 0.25) + ';">💠</span>';
   el.innerHTML = html;
 }
-function applyJob(jobId) {
+// v0.29.585 — ADVANCEMENT POINT-POOL INVARIANT (per user, reported twice:
+// "upon job changing, all my SP and AP are gone" / "on job advancement/change
+// the SP and AP should not reset").
+//
+// Advancement must never COST points. Reading every path — applyJob,
+// applyMaster, resetJobAndMaster, openTalentPick, chooseTalent, the talent
+// respec and the dev setters — none of them writes skillPoints, and driving
+// them in-engine preserved every pool exactly. So rather than keep guessing at
+// a trigger I could not isolate, this wraps advancement in a hard invariant:
+// the four progression pools are captured before the body runs and restored if
+// anything drained them.
+//
+// Note SP and AP are the SAME pool: the HUD labels player.skillPoints "SP",
+// the skill tree labels its node costs "AP" and spends that same field
+// (unlockTreeNode: player.skillPoints -= node.cost). So a single drain of
+// skillPoints presents to the player as BOTH "SP gone" and "AP gone", which
+// matches the report exactly.
+//
+// A restore is a real bug elsewhere, so it warns rather than passing silently.
+function _lxGuardPoints(label, fn) {
+  const before = {
+    skillPoints:     player.skillPoints | 0,
+    skillRankPoints: player.skillRankPoints | 0,
+    treeUnlocked:    Object.keys(player.treeUnlocked || {}).length,
+    skillRanks:      Object.keys(player.skillRanks || {}).length,
+  };
+  const r = fn();
+  const restored = [];
+  if ((player.skillPoints | 0) < before.skillPoints) {
+    restored.push('SP/AP ' + (player.skillPoints | 0) + '->' + before.skillPoints);
+    player.skillPoints = before.skillPoints;
+  }
+  if ((player.skillRankPoints | 0) < before.skillRankPoints) {
+    restored.push('rankPts ' + (player.skillRankPoints | 0) + '->' + before.skillRankPoints);
+    player.skillRankPoints = before.skillRankPoints;
+  }
+  if (Object.keys(player.treeUnlocked || {}).length < before.treeUnlocked) {
+    restored.push('tree nodes lost (' + before.treeUnlocked + ')');
+  }
+  if (Object.keys(player.skillRanks || {}).length < before.skillRanks) {
+    restored.push('skill ranks lost (' + before.skillRanks + ')');
+  }
+  if (restored.length) {
+    try { console.warn('[advancement] ' + label + ' drained progression pools — restored: ' + restored.join(', ')); } catch (e) {}
+    try { if (typeof showToast === 'function') showToast('Progression points preserved through advancement.', 'rare'); } catch (e) {}
+  }
+  return r;
+}
+function _lxApplyJobInner(jobId) {
   const j = JOBS[jobId];
   if (!j) return;
   player.job = jobId;
@@ -33711,6 +33785,7 @@ function applyJob(jobId) {
     setTimeout(openTalentPick, 700);
   }
 }
+function applyJob(jobId) { return _lxGuardPoints('applyJob:' + jobId, () => _lxApplyJobInner(jobId)); }
 function openClassSelect() {
   // Wire up gender toggle. The gender pick here drives the voice/grunt
   // SFX selection later in combat via _voiceGender() (L65389) → resolves
@@ -34250,7 +34325,8 @@ function openAdvancement() {
   game.paused = true;
 }
 
-function applyMaster(masterId) {
+function applyMaster(masterId) { return _lxGuardPoints('applyMaster:' + masterId, () => _lxApplyMasterInner(masterId)); }
+function _lxApplyMasterInner(masterId) {
   const m = MASTERS[masterId];
   if (!m) return;
   player.master = masterId;
@@ -52258,7 +52334,12 @@ function openChest(c) {
   }
   if (!pool.length) pool = ITEM_POOL[cat].filter(it => (it.tier | 0) <= _chestTierCap);   // defensive: any rarity within the cap
   if (pool.length) {
-    const it = { ...pool[Math.floor(Math.random() * pool.length)], slot: _catToSlot(cat) };
+    // v0.29.585 — weighted, not uniform: the cap is the ceiling a chest CAN
+    // reach, not the tier it usually hands out. See _pickTierWeighted.
+    const _picked = (typeof _pickTierWeighted === 'function')
+      ? _pickTierWeighted(pool, _chestTierCap)
+      : pool[Math.floor(Math.random() * pool.length)];
+    const it = { ..._picked, slot: _catToSlot(cat) };
     // v0.26.x audit FIX — honor the inventory tab cap, like the ground-drop and
     // quest-reward paths do (v0.25.774). Pushing past invCap put the item in the
     // array but BEYOND the UI-rendered slots — silent invisible loot. If the tab
