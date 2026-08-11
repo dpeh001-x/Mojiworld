@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.606';
+const GAME_VERSION = 'v0.29.607';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -33890,7 +33890,11 @@ function applyClass(clsId) {
               (typeof _lxPreloadMapAssets === 'function') ? _lxPreloadMapAssets('gravitosArena', null, 'high') : null,
               (typeof _warmDecodeRegistries === 'function') ? _warmDecodeRegistries(true) : null,
             ]).then(() => {
-              try { return (typeof _warmMapArt === 'function') ? _warmMapArt('gravitosArena') : null; }
+              // v0.29.601 — form-1 art only. The phase-2/3 sets are 8.9 s of
+              // the 13.5 s measured here and are not on screen until Gravitos
+              // changes form; _prologueApexSegment kicks them off behind the
+              // entrance clip.
+              try { return (typeof _warmMapArt === 'function') ? _warmMapArt('gravitosArena', { skip: /^gravitos[23]/ }) : null; }
               catch (e) { return null; }
             }),
             new Promise((r) => setTimeout(r, 26000)),   // cap raised: the bake needs room, and the handoff covers it
@@ -105077,7 +105081,12 @@ function _bossMoving(m) { return _mobWalking(m); }
 // now shares ONE sizing rule (_lxShrinkCap, DPR-derived) and ONE bake path
 // (createImageBitmap off-thread, canvas fallback), so there is no second
 // definition of "how big should this sprite be" to drift out of sync.
-function _warmMapArt(id) {
+function _warmMapArt(id, opts) {
+  // v0.29.601 — optional { skip: /re/ } on the BAKE KEY, so a caller can warm
+  // the art a scene opens with and leave the rest for a later pass. The
+  // function is already idempotent (a baked slot holds a canvas, not an
+  // HTMLImageElement), so the later pass costs only what the first one skipped.
+  const _LX_WARM_SKIP = (opts && opts.skip) || null;
   const def = (typeof MAPS === 'object' && MAPS[id]) || null;
   // v0.29.356 — was gated to isBossArena. Field maps paid the same class of
   // stall the arenas used to: each mob type's first anim draw did the network
@@ -105087,6 +105096,7 @@ function _warmMapArt(id) {
   if (!def) return Promise.resolve(0);
   const slots = [];   // {holder, key, im, bakeKey} — holder[key] is replaced by the bake
   const addImg = (holder, key, bakeKey, capBase) => {
+    if (_LX_WARM_SKIP && bakeKey && _LX_WARM_SKIP.test(bakeKey)) return;   // deferred to a later pass
     const im = holder && holder[key];
     if (im && typeof HTMLImageElement !== 'undefined' && im instanceof HTMLImageElement) slots.push({ holder, key, im, bakeKey, capBase });
   };
@@ -118027,12 +118037,32 @@ function _startPrologue() {
       if (_went) return; _went = true;
       try { if (_cover) _cover.remove(); } catch (e) {}
       if (window._prologueActive) _prologueApexSegment();
+      // v0.29.601 — the deferred phase-2/3 art, now that the player is watching
+      // the entrance clip rather than a black cover. Fire-and-forget: nothing
+      // waits on it, and the lazy shrink at the frame getters is the backstop.
+      setTimeout(() => {
+        try { if (typeof _warmMapArt === 'function') _warmMapArt('gravitosArena'); } catch (e) {}
+      }, 1200);
     };
     try {
       _cover = document.createElement('div');
       _cover.style.cssText = 'position:fixed;inset:0;z-index:1499;background:#02010a;display:flex;'
         + 'align-items:center;justify-content:center;font:700 15px monospace;color:#8b7fb8;letter-spacing:3px;';
-      _cover.textContent = 'the memory sharpens…';
+      _cover.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;gap:14px;">'
+        + '<div class="lx-mem-line">the memory sharpens…</div>'
+        + '<div class="lx-mem-track"><div class="lx-mem-fill"></div></div></div>';
+      if (!document.getElementById('lx-mem-css')) {
+        const _st = document.createElement('style');
+        _st.id = 'lx-mem-css';
+        _st.textContent = '@keyframes lxMemBreathe{0%,100%{opacity:.45}50%{opacity:1}}'
+          + '@keyframes lxMemSweep{0%{transform:translateX(-100%)}100%{transform:translateX(320%)}}'
+          + '.lx-mem-line{animation:lxMemBreathe 2.1s ease-in-out infinite;}'
+          + '.lx-mem-track{width:190px;height:2px;border-radius:2px;background:rgba(139,127,184,0.18);overflow:hidden;}'
+          + '.lx-mem-fill{width:31%;height:100%;border-radius:2px;background:linear-gradient(90deg,transparent,#8b7fb8,transparent);'
+          + 'animation:lxMemSweep 1.5s linear infinite;}'
+          + '@media (prefers-reduced-motion:reduce){.lx-mem-line{animation:none;opacity:.85}.lx-mem-fill{animation:none;width:100%}}';
+        document.head.appendChild(_st);
+      }
       document.body.appendChild(_cover);
     } catch (e) {}
     _ready.then(_go, _go);
