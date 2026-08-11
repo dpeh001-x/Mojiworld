@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.605';
+const GAME_VERSION = 'v0.29.606';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -31546,7 +31546,22 @@ window.addEventListener('keydown', e => {
     !game.paused && player.hp > 0 && player.hitStun <= 0
   ) {
     const now = performance.now();
-    if (player.lastTapKey === k && (now - player.lastTapTime) < 280 && player.quickDashTimer <= 0 && player.rushTimer <= 0) {
+    // v0.29.605 — ROGUE TRIPLE-TAP. The double-tap branch below clears
+    // lastTapKey on a successful dash, so a third tap cannot be detected from
+    // it; the dash records its own tap key/time and this branch reads those.
+    // Every clause here is a bound: rogue line only, same arrow, inside the
+    // same 280 ms rhythm, only while a dash is actually in flight, at most
+    // once per sequence, and not until the lockout since the last chain has
+    // elapsed. It grants no i-frames -- dash carries none by design.
+    if (player.cls === 'rogue' && k !== 'arrowup' &&
+        player._dashTapKey === k && (now - (player._dashTapTime || 0)) < ROGUE_CHAIN_WINDOW &&
+        player.quickDashTimer > 0 && player.rushTimer <= 0 &&
+        !player._dashChained && (now - (player._dashChainAt || 0)) > ROGUE_CHAIN_LOCKOUT) {
+      player._dashChained = 1;
+      player._dashChainAt = now;
+      player._dashTapKey = null;
+      _rogueChainDash(k === 'arrowleft' ? -1 : 1);
+    } else if (player.lastTapKey === k && (now - player.lastTapTime) < 280 && player.quickDashTimer <= 0 && player.rushTimer <= 0) {
       if (k === 'arrowup') {
         // v0.29.543 (per user) — the standalone G-cooldown warp (v0.29.504)
         // read as "casts once": 15-45s master cooldowns with only a fail
@@ -31567,6 +31582,11 @@ window.addEventListener('keydown', e => {
         }
       } else {
         quickDash(k === 'arrowleft' ? -1 : 1);
+        // v0.29.605 — remember the rhythm this dash came from; the triple-tap
+        // branch above matches against it rather than lastTapKey, which is
+        // cleared on the next line.
+        player._dashTapKey = k;
+        player._dashTapTime = now;
       }
       player.lastTapKey = null;
     } else {
@@ -48594,7 +48614,41 @@ function _waltzMulAt(cx, cy, isBoss) {
   return 1;
 }
 
+// v0.29.605 — ROGUE SHADOWSTEP CHAIN tunables. Every one of these is a bound
+// on how far the chain can be pushed; see the header of patch_dash for why.
+const ROGUE_CHAIN_MS      = 200;    // shorter than the 240 ms base dash
+const ROGUE_CHAIN_SUSTAIN = 1.15;   // sustain-floor multiplier while chaining
+const ROGUE_CHAIN_LOCKOUT = 900;    // ms before another chain may be started
+const ROGUE_CHAIN_WINDOW  = 280;    // same tap window the double-tap uses
+// One extra dash, fired from inside an in-flight dash. Deliberately NOT a call
+// to quickDash: that would re-run the boon hooks and reset the chain flags,
+// which is how "one chain" would quietly become "unlimited chains".
+function _rogueChainDash(dir) {
+  player.facing = dir;
+  if (player.vy > 1) player.vy = 0;
+  player.quickDashTimer = ROGUE_CHAIN_MS;
+  player.quickDashDir = dir;
+  player.vx = dir * 14;
+  player._dashIsChain = 1;
+  player._rogueDashPoseAt = (game.time | 0);
+  player._rogueDashPoseUntil = (game.time | 0) + 20;
+  player._rogueDashBrakeDust = 0;
+  try { if (typeof audio !== 'undefined' && audio && audio.play) audio.play('dash'); } catch (e) {}
+  if (typeof _budgetedParticlePush === 'function') {
+    for (let i = 0; i < 8; i++) {
+      if (!_budgetedParticlePush({
+        x: player.x + player.w / 2 - dir * 6,
+        y: player.y + player.h - Math.random() * player.h * 0.8,
+        vx: -dir * (1.2 + Math.random() * 2.2), vy: -0.4 - Math.random() * 1.0,
+        life: 22, color: i % 2 ? '#9fe8ff' : '#5f7fa8', size: 2,
+      })) break;
+    }
+  }
+}
 function quickDash(dir) {
+  // v0.29.605 — a fresh dash always begins an unchained sequence.
+  player._dashIsChain = 0;
+  player._dashChained = 0;
   const _boonDist = _dashBoonBegin(dir);
   player.facing = dir;
   if (player.vy > 1) player.vy = 0;
@@ -54763,7 +54817,11 @@ function updatePlayer(dt) {
       // pulls vx back to run speed on the very first frame, so every class
       // travelled the same 127 px carried entirely by this floor of 9.
       const _blinkMul = 1 + ((player.mods && player.mods.dashBlink) || 0);
-      player.vx = player.quickDashDir * Math.max(9 * _blinkMul, Math.abs(player.vx) * 0.93);
+      // v0.29.605 — the chain rides a slightly higher sustain floor for a shorter
+      // time. Distance is what the floor controls (see the v0.29.344 note
+      // above), so this is the single knob that decides how far a chain goes.
+      const _chainMul = player._dashIsChain ? ROGUE_CHAIN_SUSTAIN : 1;
+      player.vx = player.quickDashDir * Math.max(9 * _blinkMul * _chainMul, Math.abs(player.vx) * 0.93);
     }
     if (player.cls === 'rogue' && !player._rogueDashBrakeDust && player.quickDashTimer <= 70) {
       player._rogueDashBrakeDust = 1;
@@ -104837,11 +104895,6 @@ function _bossAttackFrame(key, m) { return _bossLoopFrame(BOSS_ATTACK_FRAMES[key
 // Length (not decode) is the test — the array is sized from the frame index, so
 // the key resolves as soon as the art is indexed, while the pickers below still
 // return null until pixels arrive and the caller keeps its generic fallback.
-// v0.29.x — a form NEVER borrows another form's body. If this form has no cast
-// set of its own, return null: the picker then returns null, the override never
-// fires, and the boss falls back to its OWN generic attack art. Falling back to
-// form 1's cast art instead is precisely the un-evolve bug this work fixed —
-// Soul Drain did exactly that on forms 2/3 for as long as the soul set existed.
 function _gravCastKey(m, base) {
   const suf = m._phaseSprite === 'gravitos3' ? '3' : m._phaseSprite === 'gravitos2' ? '2' : '';
   const k = 'gravitos' + suf + base;
