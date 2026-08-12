@@ -21629,12 +21629,21 @@ function _mobDefVar(m) {
 // than becoming a statue — several maps rely on mobs following the player up a
 // platform, and a mob that can NEVER leave the floor stops being a threat and
 // starts being scenery.
-//     h 100 -> x0.88     h 130 -> x0.76     h 150 -> x0.68
 //
 // BOSSES ARE EXEMPT, per the request. Their leaps are authored per fight and
 // the boss platform-chase clamp (search "unfairly skyhook") already tunes them
 // deliberately; quietly shortening those would change scripted encounters.
-const _JUMP_BASE_H = 70, _JUMP_PER_PX = 0.004, _JUMP_FLOOR = 0.55;
+// The constants were SOLVED against the roster, not chosen by feel. The first
+// pass (70 / 0.004 / 0.55) only pulled the correlation to +0.063 — size stopped
+// predicting a HIGHER jump but never began predicting a lower one, and the
+// 70-109 band still out-jumped the 110+ band, because the authored jump values
+// themselves climb with size and the multiplier has to overcome that before it
+// can reverse it. Sweeping base/slope/floor across the real 66-type roster for
+// "correlation clearly negative AND band means monotonically decreasing AND
+// nothing pinned below half its jump" gives these.
+//     corr +0.287 -> -0.195      band means 4.54 / 4.40 / 3.38
+//     h 100 -> x0.69   h 130 -> x0.50   h 150 -> x0.50 (floored)
+const _JUMP_BASE_H = 65, _JUMP_PER_PX = 0.009, _JUMP_FLOOR = 0.50;
 function _mobJumpV(m) {
   const j = +((m && m.jump) || 0);
   if (!(j > 0)) return 0;
@@ -84547,6 +84556,11 @@ function renderSkillsReference(host) {
     // The chevron is a small "+" / "−" toggle living next to the rank
     // pips so the existing "+1 rank" button is unambiguous.
     const expandToggleId = skillId ? ('cs-exp-' + skillId) : ('cs-exp-' + r.slot);
+    // v0.29.x — which detail panels are OPEN has to survive the re-render that
+    // spending a rank triggers. Kept on `game` so it also survives closing and
+    // reopening the panel, and keyed by the same id the toggle button uses.
+    if (!game._sklOpenPanels) game._sklOpenPanels = Object.create(null);
+    const _expOpen = !!game._sklOpenPanels[expandToggleId];
     const detailRows = [];
     detailRows.push(`<div><span style="color:#888;">Key/Slot:</span> <b style="color:#cce;">${(r.key || '—')}${r.slot ? ' (slot ' + r.slot + ')' : ''}</b></div>`);
     if (skillId) {
@@ -84638,7 +84652,7 @@ function renderSkillsReference(host) {
     }
     if (unlockLv > 1) detailRows.push(`<div><span style="color:#888;">Unlock:</span> <b style="color:#aaffaa;">Lv ${unlockLv}+</b></div>`);
     const detailPanel = `
-      <div id="${expandToggleId}" style="display:none; margin-top:4px; padding:6px 8px;
+      <div id="${expandToggleId}" style="display:${_expOpen ? 'block' : 'none'}; margin-top:4px; padding:6px 8px;
            background:rgba(0,0,0,0.55); border:1px dashed ${kindCol[r.kind]}88;
            border-radius:4px; font-size:10.5px; line-height:1.4; color:#ddd;">
         <div style="color:#fff; margin-bottom:4px;">${desc || '<span style="color:#888;">No description.</span>'}</div>
@@ -84659,7 +84673,9 @@ function renderSkillsReference(host) {
           <div class="skl-name">${label}</div>
           <div class="skl-tier" style="color:${tierColor};">${tierLabel}</div>
         </div>
-        <button type="button" class="skl-expand" data-expandid="${expandToggleId}" title="Show level-up perks">+</button>
+        <button type="button" class="skl-expand" data-expandid="${expandToggleId}"
+                title="${_expOpen ? 'Hide' : 'Show'} level-up perks"
+                style="${_expOpen ? 'color:#ffe89a; border-color:#ffe89a88;' : ''}">${_expOpen ? '−' : '+'}</button>
       </div>
       ${desc ? `<div class="skl-desc">${desc}</div>` : ''}
       ${costRow}
@@ -84681,6 +84697,11 @@ function renderSkillsReference(host) {
       if (!target) return;
       const open = target.style.display !== 'none';
       target.style.display = open ? 'none' : 'block';
+      // Remember it, so the next re-render (spending a rank, resetting RP)
+      // rebuilds this panel in the state the player left it in.
+      if (!game._sklOpenPanels) game._sklOpenPanels = Object.create(null);
+      if (open) delete game._sklOpenPanels[btn.dataset.expandid];
+      else game._sklOpenPanels[btn.dataset.expandid] = 1;
       btn.textContent = open ? '+' : '−';
       btn.style.color = open ? '#88aacc' : '#ffe89a';
       btn.style.borderColor = open ? '#88aacc66' : '#ffe89a88';
@@ -84698,7 +84719,14 @@ function renderSkillsReference(host) {
       player.skillRanks[id] = cur + 1;
       player.skillRankPoints -= 1;
       if (typeof audio !== 'undefined' && audio.play) audio.play('levelup');
+      // Preserve the scroll offset across the rebuild. Re-opening the panel but
+      // dumping the player at the top of the list would still lose their place,
+      // which is the same complaint in a different costume.
+      const _scroller = (host && host.scrollHeight > host.clientHeight)
+        ? host : (host && host.closest ? host.closest('.modal, .panel-body, [data-scroll]') : null);
+      const _keepTop = _scroller ? _scroller.scrollTop : 0;
       renderSkillsReference(host);
+      if (_scroller) _scroller.scrollTop = _keepTop;
     };
   });
   // v0.29.x (per user) — RESET RP. Refunds every spent rank back into the RP
