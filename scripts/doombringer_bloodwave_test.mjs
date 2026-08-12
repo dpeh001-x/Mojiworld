@@ -87,12 +87,18 @@ ok('the flip is declared facing left too (not a one-direction fix)',
    r.doomLeft && r.doomLeft.bspr === 'bult_doombringer' && r.doomLeft.flip === true, r.doomLeft);
 ok('it travels the way the player faces', r.doomRight && r.doomRight.vx > 0 && r.doomLeft && r.doomLeft.vx < 0,
    { right: r.doomRight && r.doomRight.vx, left: r.doomLeft && r.doomLeft.vx });
-ok('the box was enlarged so the blade is not a 26px smear',
-   r.doomRight && r.doomRight.w >= 60 && r.doomRight.h >= 40, { w: r.doomRight && r.doomRight.w, h: r.doomRight && r.doomRight.h });
-ok('it stays SMALLER than Calamity Incarnate (100-130px) so the ult still reads bigger',
-   r.doomRight && r.doomRight.w < 100 && r.doomRight.h < 100, { w: r.doomRight && r.doomRight.w });
-ok('a plain berserker is unchanged â€” no bspr, still 26px',
-   r.berserker && r.berserker.bspr === null && r.berserker.w === 26, r.berserker);
+ok('the wave is the enlarged size (104x74, per user "make it larger")',
+   r.doomRight && r.doomRight.w >= 100 && r.doomRight.h >= 70, { w: r.doomRight && r.doomRight.w, h: r.doomRight && r.doomRight.h });
+// Compared by AREA, not width. The ult's follow-up waves are 100x130, so a
+// width-only check would call a 104-wide wave "bigger than the ult" while it is
+// less than two-thirds the size.
+ok('the ult still reads BIGGER (its waves are 100x130 and 130x170)',
+   r.doomRight && (r.doomRight.w * r.doomRight.h) < (100 * 130),
+   { area: r.doomRight && r.doomRight.w * r.doomRight.h, ultFollowUpArea: 100 * 130 });
+ok('EVERY berserker gets the crescent, not just Doombringers (per user)',
+   r.berserker && r.berserker.bspr === 'bult_doombringer', r.berserker);
+ok('and at the same enlarged size as a Doombringer',
+   r.berserker && r.berserker.w === (r.doomRight && r.doomRight.w), { berserker: r.berserker && r.berserker.w, doombringer: r.doomRight && r.doomRight.w });
 ok('DAMAGE is untouched (this was an art change, not a buff)',
    r.doomDmg != null && r.doomDmg === r.bersDmg, { doombringer: r.doomDmg, berserker: r.bersDmg });
 ok('the sprite key resolves to the real file', r.resolved === 'p_ult_doombringer.webp', { resolved: r.resolved });
