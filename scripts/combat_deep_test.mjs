@@ -1,4 +1,4 @@
-// DEEP COMBAT DEBUG — drives the real damage pipeline end to end.
+// DEEP COMBAT DEBUG â€” drives the real damage pipeline end to end.
 // =============================================================================
 // Five sections, all through live functions (performMelee / hitMonster /
 // updateMonsters / updateProjectiles), never reimplemented math:
@@ -27,7 +27,7 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 200)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'load', timeout: 60000 });
+await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}`, { waitUntil: 'load', timeout: 60000 });
 await page.waitForTimeout(10000);
 
 const R = await page.evaluate(async () => {
@@ -38,12 +38,12 @@ const R = await page.evaluate(async () => {
     const el = document.getElementById(id); if (el) el.style.display = 'none';
   }
   // Level 99: the accuracy system gives large miss rates against
-  // higher-level mobs (by design) — at Lv 30 vs a Lv 45 hare, most "trait
+  // higher-level mobs (by design) â€” at Lv 30 vs a Lv 45 hare, most "trait
   // dodges" in the first run were actually level-gap misses. 99 neutralises
   // the gap so the trait rolls are what get measured.
   player.cls = 'warrior'; player.level = 99; player.maxHp = 5000; player.hp = 5000;
   player.mp = 999; player.maxMp = 999;
-  // v0.29.473 — the 90% same-level hit cap this suite originally discovered
+  // v0.29.473 â€” the 90% same-level hit cap this suite originally discovered
   // (7 of 25 "phantom dodges" were plain baseline misses) was retuned to 100
   // at gap <= 0 per user. baseAcc stays as a guard: if the floor ever comes
   // back, trait tests still measure traits rather than the floor.
@@ -54,7 +54,7 @@ const R = await page.evaluate(async () => {
     const m = spawnMonster(x, 300, type, false);
     m.evasion = 0; m.freezeTimer = 0; m.stunTimer = 0;
     // a Lv 99 melee one-shots low-tier mobs, which silently voids any test
-    // that wants a SECOND hit — pin the pool high unless the test says not to
+    // that wants a SECOND hit â€” pin the pool high unless the test says not to
     if (hp !== null) { m.maxHp = hp; m.currentHp = hp; }
     // settle onto the ground so melee range checks are honest
     for (let f = 0; f < 60; f++) { game.time++; updateMonsters(16.667); }
@@ -65,7 +65,7 @@ const R = await page.evaluate(async () => {
     player.vx = 0; player.vy = 0; player.facing = 1; player.invulnerable = 0;
   };
 
-  // ══ 1. DAMAGE FUNNEL ══════════════════════════════════════════════════
+  // â•â• 1. DAMAGE FUNNEL â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   clear();
   let m = fresh('slime', 400, 100000);            // big pool: melee must not pre-kill
   standBeside(m);
@@ -81,7 +81,7 @@ const R = await page.evaluate(async () => {
   ok('NaN/Infinity damage is rejected', m.currentHp === hpN && Number.isFinite(m.currentHp), m.currentHp);
 
   // overkill + single kill credit. Kill rewards are EXP directly on the
-  // player plus mojicoin DROPS into game.drops (picked up on touch) — the
+  // player plus mojicoin DROPS into game.drops (picked up on touch) â€” the
   // wallet is not credited at kill time, so drops are what get asserted.
   const exp0 = player.exp, drops0 = (game.drops || []).length;
   hitMonster(m, 1e9, false, 'melee');
@@ -105,7 +105,7 @@ const R = await page.evaluate(async () => {
   const dA = da0 - a.currentHp, dB = db0 - b.currentHp;
   ok('crit flag alone does not change damage inside the funnel', dA === dB, `${dA} vs ${dB}`);
 
-  // ══ 2. TRAITS ═════════════════════════════════════════════════════════
+  // â•â• 2. TRAITS â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // parry: over many trials some parries occur and a parried hit does 0
   clear();
   m = fresh('bonebosn', 400, 100000);
@@ -166,7 +166,7 @@ const R = await page.evaluate(async () => {
     ok('mirages never re-split', game.monsters.length === cnt, '');
   } else ok('splitsOnHit trait present on mirageStalker', false, 'no trait');
 
-  // ══ 3. STATUSES ═══════════════════════════════════════════════════════
+  // â•â• 3. STATUSES â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   clear();
   m = fresh('slime');
   m.aggroTarget = player; player.x = m.x + 400;      // give it a reason to walk
@@ -182,7 +182,7 @@ const R = await page.evaluate(async () => {
      `frozen moved ${frozenMoved.toFixed(1)}px, thawed ${thawedMoved.toFixed(1)}px`);
 
   clear();
-  m = fresh('slime', 400, 100000);       // must SURVIVE the burn window — the
+  m = fresh('slime', 400, 100000);       // must SURVIVE the burn window â€” the
   m.burnTimer = 1200; m.burnDmg = 8;     // first run's 8-HP slime died mid-burn
   const bh0 = m.currentHp;               // and dead mobs stop decrementing
   for (let f = 0; f < 130; f++) { game.time++; updateMonsters(16.667); }
@@ -190,10 +190,10 @@ const R = await page.evaluate(async () => {
   ok('burn expires and clears burnDmg', (m.burnTimer || 0) <= 0 && (m.burnDmg || 0) === 0,
      `timer ${m.burnTimer}, dmg ${m.burnDmg}`);
 
-  // ══ 4. PLAYER-SIDE ════════════════════════════════════════════════════
+  // â•â• 4. PLAYER-SIDE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // Contact damage needs updatePlayer in the loop too (the first run only
   // stepped updateMonsters and measured -0 HP), and the camera near the
-  // fight — off-screen mobs deliberately deal no contact damage (v0.25.493).
+  // fight â€” off-screen mobs deliberately deal no contact damage (v0.25.493).
   clear();
   m = fresh('slime');
   m.atk = 60; m.aggroTarget = player;
@@ -204,7 +204,7 @@ const R = await page.evaluate(async () => {
     game.time++; updateMonsters(16.667); updatePlayer(16.667);
     player.x = m.x; player.y = m.y;                  // stay overlapped
     // Contact only lands from the side the mob FACES (dodging behind a mob
-    // is a designed mechanic — bosses are exempt). Face it at the player so
+    // is a designed mechanic â€” bosses are exempt). Face it at the player so
     // the test measures contact damage, not the back-dodge rule.
     m.facing = ((player.x + player.w / 2) >= (m.x + m.w / 2)) ? 1 : -1;
   }
@@ -234,7 +234,7 @@ const R = await page.evaluate(async () => {
     const el = document.getElementById(id); if (el) el.style.display = 'none';
   }
 
-  // ══ 5. FUZZ + INVARIANT SCAN ══════════════════════════════════════════
+  // â•â• 5. FUZZ + INVARIANT SCAN â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   loadMap('forest'); game.paused = false; clear();
   player.hp = 5000; player.maxHp = 5000; player.mp = 999; player.invulnerable = 0;
   const KIT = ['rush', 'powerStrike', 'magicBolt', 'whirlwind', 'slash'];

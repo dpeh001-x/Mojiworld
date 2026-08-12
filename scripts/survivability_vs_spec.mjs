@@ -26,7 +26,7 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 200)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'load', timeout: 60000 });
+await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}`, { waitUntil: 'load', timeout: 60000 });
 await page.waitForTimeout(10000);
 
 const OUT = await page.evaluate(async () => {
@@ -36,7 +36,7 @@ const OUT = await page.evaluate(async () => {
   }
   loadMap('forest'); game.paused = false;
 
-  // ── is the _hot outlier clamp actually rare, as its comment claims? ──────
+  // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ is the _hot outlier clamp actually rare, as its comment claims? ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
   // "real mobs span ~x0.55-3.83 at Lv 20 and ~x0.77-1.26 at Lv 80, so the
   //  clamp almost never binds" (L34240 area). Measure it across the roster.
   const hotStats = [];
@@ -51,8 +51,8 @@ const OUT = await page.evaluate(async () => {
   const clampedHi = hotStats.filter(h => h.raw >= 3.0);
   const clampedLo = hotStats.filter(h => h.raw <= 0.30);
 
-  const shopTier = (lv) => lv >= 90 ? 10 : lv >= 80 ? 9 : lv >= 70 ? 8 : lv >= 60 ? 7
-                         : lv >= 50 ? 6 : lv >= 30 ? 4 : lv >= 10 ? 3 : lv >= 6 ? 2 : 1;
+  const shopTier = (lv) => lv >= 88 ? 10 : lv >= 78 ? 9 : lv >= 68 ? 8 : lv >= 55 ? 7
+                         : lv >= 40 ? 6 : lv >= 20 ? 4 : lv >= 10 ? 3 : lv >= 6 ? 2 : 1;
   const pickGear = (cat, cls, lv) => {
     const cap = shopTier(lv);
     const pool = ITEM_POOL[cat].filter(it => !it.setId && (it.tier | 0) <= cap &&
@@ -147,13 +147,16 @@ const OUT = await page.evaluate(async () => {
 });
 
 writeFileSync(path.join(ROOT, 'scripts', 'survivability_vs_spec.json'), JSON.stringify(OUT, null, 1));
-const TARGET = { 10: 8, 20: 7, 30: 6, 40: 5, 50: 4, 60: 3, 70: 2, 80: 2 };
+// v0.29.543 - the re-solved design curve (cluster hits-to-die; floor 3 not 2:
+// trash mobs must not two-shot - bosses own that tier). Warrior multiplier
+// 1.35 reflects the measured 1.15-1.45x tank margin after the class-ref fix.
+const TARGET = { 10: 10, 20: 8.5, 30: 7.2, 40: 6.2, 50: 5.4, 60: 4.7, 70: 4.1, 80: 3.6 };
 console.log(`_hot clamp: ${OUT.hot.clampedHi}/${OUT.hot.total} mobs pinned at the 3.0x ceiling, ` +
             `${OUT.hot.clampedLo} at the 0.30x floor; max raw ratio ${OUT.hot.maxRaw}`);
 console.log('  clamped-high examples:', OUT.hot.hiList.join(' '));
 console.log('\nlv  class     tier      HP     DEF     hit   hits   target   vs spec');
 for (const r of OUT.rows) {
-  const tgt = TARGET[r.lv] * (r.cls === 'warrior' ? 1.45 : 1);
+  const tgt = TARGET[r.lv] * (r.cls === 'warrior' ? 1.35 : 1);
   const ratio = (r.hits / tgt);
   console.log(`${String(r.lv).padStart(2)}  ${r.cls.padEnd(8)} T${String(r.tier).padEnd(3)} ` +
     `${String(r.hp).padStart(7)} ${String(r.def).padStart(6)} ${String(r.dmg).padStart(7)} ` +

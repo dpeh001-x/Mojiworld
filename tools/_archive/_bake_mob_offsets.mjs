@@ -26,7 +26,7 @@ const OFFSET = {
 };
 const SCALE = {
   "anglerfish": 1.42, "archon": 1.12, "bellowsbat": 1.33, "blightElder": 1.71, "blockGary": 1.06,
-  "blockPopo": 1.16, "blockRexy": 0.9, "blockRhirhi": 0.84, "blockTigreal": 0.95, "boneWraith": 1.31,
+  "blockPopo": 1.16, "legosaurus": 0.9, "blockRhirhi": 0.84, "blockTigreal": 0.95, "boneWraith": 1.31,
   "bonebosn": 0.96, "brinekraken": 0.88, "cherub": 1.41, "cloudbun": 1.07, "clownfish": 1.15,
   "conductorMech": 1.22, "coralImp": 1.56, "deranged_kuro": 1.14, "drownedCur": 1.14, "echoKnight": 1.12,
   "elderbark": 1.28, "emberling": 1.52, "expressTicketMech": 1.36, "fatLizard": 1.19, "frog": 1.2,

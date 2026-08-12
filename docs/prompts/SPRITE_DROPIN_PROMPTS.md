@@ -103,7 +103,7 @@ The 8-tentacled boss of the Octopus Grotto, now with **paint-over tentacles**. T
 
 ---
 
-# v0.25.487 — Sauro Slope + Koopa King
+# v0.25.487 — Sauro Slope + King Krook
 
 Two cute fat fire-spitting mobs + a Bowser-style Lv 30 boss.
 
@@ -111,7 +111,7 @@ Two cute fat fire-spitting mobs + a Bowser-style Lv 30 boss.
 | --- | --- | --- |
 | fatLizard | `Sprites/monsters/fatLizard.webp` | Tubsalamander |
 | fatDragon | `Sprites/monsters/fatDragon.webp` | Plumpdrake |
-| koopaKing | `Sprites/bosses/koopaKing.webp` | King Koopaloo, the Ember Tyrant |
+| kingKrook | `Sprites/bosses/kingKrook.webp` | King Krook, the Ember Tyrant |
 
 ## fatLizard (`fatLizard.webp`)
 
@@ -121,11 +121,11 @@ Two cute fat fire-spitting mobs + a Bowser-style Lv 30 boss.
 
 > Plumpdrake — a much larger spherical cartoon dragon, balloon-dragon silhouette but with attitude. Deep crimson-red scales with a darker maroon belly band and a hot magma-orange underglow leaking through a few cracked scales along the chest. Tiny vestigial wings flared out for show (clearly too small to fly), two forward-curving black horns, half-lidded eyes giving a "fight me" stare. Wide grumpy mouth slightly open with a charging fireball glowing inside (yellow core, orange mantle). Heavy heat-shimmer aura around the silhouette, ember sparks drifting upward. Volcanic red palette with charcoal-grey accents and bright amber rim-light along the top.
 
-## koopaKing (`koopaKing.webp`)
+## kingKrook (`kingKrook.webp`)
 
-> King Koopaloo, the Ember Tyrant — a chunky Bowser-inspired cartoon turtle-dragon king with full boss presence. Massive spiked orange shell with three white-tipped pyramid spikes along the top and a darker burnt-orange inner rim, edges scorched. Tan-yellow belly plate. Chunky green-skinned legs ending in three sharp white claws each, powerful clawed arms. Huge horned head with two forward-curving white horns, a fiery crimson mohawk hair tuft erupting upward in flickering flame-shapes, furrowed brow, big white eyes with intense red pupils and a hot lens-flare on each, wide menacing fanged grin showing two protruding lower-jaw fangs. Royal-villain stance — one fist raised with a small fireball cradled in the palm, the other planted on the hip. Storm-cloud heat aura behind the silhouette, ember sparks orbiting the head. Deep moss-green + burnt-orange palette with crimson, gold, and a single magenta rim-glint for boss-tier polish.
+> King Krook, the Ember Tyrant — a chunky Bowser-inspired cartoon turtle-dragon king with full boss presence. Massive spiked orange shell with three white-tipped pyramid spikes along the top and a darker burnt-orange inner rim, edges scorched. Tan-yellow belly plate. Chunky green-skinned legs ending in three sharp white claws each, powerful clawed arms. Huge horned head with two forward-curving white horns, a fiery crimson mohawk hair tuft erupting upward in flickering flame-shapes, furrowed brow, big white eyes with intense red pupils and a hot lens-flare on each, wide menacing fanged grin showing two protruding lower-jaw fangs. Royal-villain stance — one fist raised with a small fireball cradled in the palm, the other planted on the hip. Storm-cloud heat aura behind the silhouette, ember sparks orbiting the head. Deep moss-green + burnt-orange palette with crimson, gold, and a single magenta rim-glint for boss-tier polish.
 
-> **Optional attack pose** (`Sprites/bosses/attack/koopaKing.webp`): Same character mid-roar — mouth wide open belching a wide diagonal fireball geyser, eyes glowing pure red, both claws raised, mohawk flames stretched tall, full-body shockwave ember halo.
+> **Optional attack pose** (`Sprites/bosses/attack/kingKrook.webp`): Same character mid-roar — mouth wide open belching a wide diagonal fireball geyser, eyes glowing pure red, both claws raised, mohawk flames stretched tall, full-body shockwave ember halo.
 
 ---
 
@@ -572,7 +572,7 @@ once the file exists. No code changes needed.
 
 # v0.26.517 — Queen Shroomaloo boss spore (`spore`)
 
-Audit of the four playful-tyrant bosses' projectiles found three already have unique authored art (**King Gloopaloo** → `goo`, **Octobaby** → `bubble`/`pincer`/`splash`, all 9-frame animated; **King Koopaloo** → `firebomb`/`m_firebomb.webp`, velocity-rotated). The lone gap was **Queen Shroomaloo**, whose `spore` projectile had *no* sprite — it fired the procedural fallback, and is deliberately DISTINCT from the common Shroom mob's orange `mspore`.
+Audit of the four playful-tyrant bosses' projectiles found three already have unique authored art (**King Gloopaloo** → `goo`, **Octobaby** → `bubble`/`pincer`/`splash`, all 9-frame animated; **King Krook** → `firebomb`/`m_firebomb.webp`, velocity-rotated). The lone gap was **Queen Shroomaloo**, whose `spore` projectile had *no* sprite — it fired the procedural fallback, and is deliberately DISTINCT from the common Shroom mob's orange `mspore`.
 
 The engine is already wired (`LX_MOB_PROJ.spore` → `p_spore.png`, `_PROJ_SPRITE_BLIT.spore` `{mode:'spin', size:1.4}`, and `spore` added to `_PROJ_ANIM_KEYS`). It renders the procedural spore until the files below land, then swaps automatically — no code changes needed.
 
@@ -598,9 +598,9 @@ node scripts/generate_boss_projectile_anim.mjs --only spore --generate
 
 ---
 
-# v0.26.518 — King Koopaloo firebomb animation (`firebomb`)
+# v0.26.518 — King Krook firebomb animation (`firebomb`)
 
-Koopa's `firebomb` already had a unique authored sprite (`m_firebomb.webp`, velocity-rotated), but — unlike Gloopaloo's `goo` and Octobaby's `bubble`/`pincer`/`splash` — it was a single static image, not a 9-frame loop. Now wired to animate: the render branch uses `_projAnimFrame('firebomb')` when present, and `firebomb` is in `_PROJ_ANIM_KEYS`. The **base already exists**, so only the animation step is needed.
+Krook's `firebomb` already had a unique authored sprite (`m_firebomb.webp`, velocity-rotated), but — unlike Gloopaloo's `goo` and Octobaby's `bubble`/`pincer`/`splash` — it was a single static image, not a 9-frame loop. Now wired to animate: the render branch uses `_projAnimFrame('firebomb')` when present, and `firebomb` is in `_PROJ_ANIM_KEYS`. The **base already exists**, so only the animation step is needed.
 
 | Asset | Path | Status |
 | --- | --- | --- |

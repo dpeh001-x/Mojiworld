@@ -107,6 +107,10 @@ for (const c of r.chapters) {
 // Each chapter against ITS OWN target's maps. Comparing every chapter to
 // future_lyra's Lv 40 maps is the v0.29.645 bug: the Lv 20 prelude targets
 // mirrorSelf in the Inner Dimension and fails for a reason unrelated to it.
+// Each chapter against ITS OWN target's maps. The first version compared every
+// chapter to future_lyra's maps, which failed the Lv 20 prelude the moment it
+// existed - the prelude targets mirrorSelf in the Inner Dimension, not the
+// distorted chain. The assertion was measuring the wrong quest's geography.
 for (const c of r.chapters) {
   if (c.missing) continue;
   check(c.levelReq >= c.targetMapGate, `${c.qid} is not gated BELOW the maps its own target lives in`, { gate: c.levelReq, targetMapGate: c.targetMapGate, maps: c.targetMaps });

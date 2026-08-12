@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Regenerate 3 beam VFX sprites (ludo.ai text->sprite, /assets/image · image_type:sprite).
 // =============================================================================
-//   • fx_col_blockrexy   -> Sprites/fx/fx_col_blockrexy.webp     (Rexy lava column, 256x1024)
+//   • fx_col_legosaurus   -> Sprites/fx/fx_col_legosaurus.webp     (Legosaurus lava column, 256x1024)
 //   • fx_col_blightelder -> Sprites/fx/fx_col_blightelder.webp   (Blight Elder pillar, 256x1024)
 //   • p_starbeam         -> Sprites/projectiles/p_starbeam.png   (Leo star-beam lance, 768^2)
 //
@@ -43,14 +43,14 @@ const PROJ_PREFIX =
   'Centered with a clean transparent margin on all sides. ';
 
 const ITEMS = {
-  fx_col_blockrexy: {
-    dest: join(repoRoot, 'Sprites', 'fx', 'fx_col_blockrexy.webp'),
+  fx_col_legosaurus: {
+    dest: join(repoRoot, 'Sprites', 'fx', 'fx_col_legosaurus.webp'),
     fmt: 'webp', kind: 'column', prefix: COL_PREFIX,
     prompt:
       'A roaring pillar of fiery molten brick and lava, brick-fire orange (#ff8844) — ' +
       'chunks of glowing cracked toy-bricks tumbling upward inside an updraft of orange ' +
       'flame, ember sparks streaming up, a white-hot core. Aggressive, blocky, volcanic — ' +
-      "the block-king Rexy's eruption.",
+      "the block-king Legosaurus's eruption.",
   },
   fx_col_blightelder: {
     dest: join(repoRoot, 'Sprites', 'fx', 'fx_col_blightelder.webp'),

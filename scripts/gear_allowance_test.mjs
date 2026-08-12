@@ -1,11 +1,11 @@
 // GUARD for the level-derived gear allowance (v0.29.481).
 // =============================================================================
 // Two jobs:
-//   1. DRIFT — re-measure the real gear allowance from the live shop ladder and
+//   1. DRIFT Ã¢â‚¬â€ re-measure the real gear allowance from the live shop ladder and
 //      fail if the baked _GEAR_ALLOWANCE_TABLE no longer matches. This is the
 //      check that was missing when the old flat 1.5 silently went stale as gear
 //      was buffed over many versions.
-//   2. NEUTRALITY — assert the refactor changed NO landed damage. The old
+//   2. NEUTRALITY Ã¢â‚¬â€ assert the refactor changed NO landed damage. The old
 //      anchor x old band must equal the new anchor x new band at every level
 //      and class, algebraically AND through the live contact path.
 // Run: node scripts/gear_allowance_test.mjs
@@ -26,7 +26,7 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 200)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'load', timeout: 60000 });
+await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}`, { waitUntil: 'load', timeout: 60000 });
 await page.waitForTimeout(10000);
 
 // The pre-refactor band table. The old landed number is recomputed from these
@@ -35,7 +35,7 @@ const OLD_BAND = [[1,0.087],[5,0.112],[10,0.147],[15,0.179],[20,0.220],[30,0.265
                   [40,0.338],[50,0.396],[60,0.578],[70,0.905],[80,1.041],
                   [90,1.281],[100,1.545]];
 const OLD_ALLOWANCE = 1.5;
-const DRIFT_TOLERANCE = 0.12;   // 12% — trips on a real gear retune, not on noise
+const DRIFT_TOLERANCE = 0.12;   // 12% Ã¢â‚¬â€ trips on a real gear retune, not on noise
 
 const R = await page.evaluate(async ({ OLD_BAND, OLD_ALLOWANCE, DRIFT_TOLERANCE }) => {
   const res = [];
@@ -62,26 +62,37 @@ const R = await page.evaluate(async ({ OLD_BAND, OLD_ALLOWANCE, DRIFT_TOLERANCE 
     }
     return OLD_BAND[OLD_BAND.length - 1][1];
   };
+  void oldBandAt; void OLD_ALLOWANCE;   // kept for provenance; neutrality era ended in v0.29.543
 
-  // ── 1. NEUTRALITY, algebraic: anchor x band is unchanged at every level ──
-  let worst = 0, worstAt = '';
-  for (const cls of ['warrior', 'archer', 'rogue', 'mage']) {
-    player.cls = cls;
-    for (let lv = 1; lv <= 110; lv++) {
-      const oldRef = Math.round((104 + 23.6 * Math.max(1, lv)) * OLD_ALLOWANCE * _classHpRef());
-      const oldProd = oldRef * (oldBandAt(lv) * 0.5);
-      const newProd = _refHpAtLv(lv) * _dmgBandPct(lv).tFloor;
-      const rel = Math.abs(newProd - oldProd) / Math.max(1e-9, oldProd);
-      if (rel > worst) { worst = rel; worstAt = `${cls} Lv${lv}: ${oldProd.toFixed(2)} -> ${newProd.toFixed(2)}`; }
+  // Ã¢â€â‚¬Ã¢â€â‚¬ 1. NEUTRALITY, algebraic: anchor x band is unchanged at every level Ã¢â€â‚¬Ã¢â€â‚¬
+  // v0.29.543 — the neutrality-identity check retired with the neutrality
+  // factor itself: the band is now DELIBERATELY re-solved, so old==new no
+  // longer holds. What must hold instead:
+  //   (a) the raw touch anchor (ref x band) grows MONOTONICALLY with level —
+  //       higher-level monsters are never absolutely weaker on touch;
+  //   (b) the neutrality factor is really gone (band values are honest);
+  //   (c) absorb sits at ~50% for a character carrying the expected
+  //       at-level DEF, at every level (the STEP-2 design point).
+  {
+    player.cls = 'mage';
+    let mono = true, worstStep = '';
+    let prev = 0;
+    for (let lv = 1; lv <= 100; lv++) {
+      const prod = _refHpAtLv(lv) * _dmgBandPct(lv).tFloor;
+      if (prod < prev * 0.999) { mono = false; worstStep = `Lv${lv}: ${prev.toFixed(1)} -> ${prod.toFixed(1)}`; break; }
+      prev = prod;
     }
+    ok('raw touch anchor is monotonic in level', mono, worstStep || `Lv100 anchor ${prev.toFixed(1)}`);
   }
-  // only the Math.round inside _refHpAtLv can differ; that is sub-0.5-HP
-  ok('anchor x band identical across 4 classes x Lv 1-110 (<0.5%)', worst < 0.005,
-     `max deviation ${(worst * 100).toFixed(3)}%  ${worstAt}`);
+  ok('neutrality factor is gone', typeof _refGearAllowance === 'function' &&
+     Math.abs(_dmgBandPct(90).pFloor - _DMG_BAND_TABLE.find(r => r[0] === 90)[1]) < 1e-9,
+     `pFloor(90)=${_dmgBandPct(90).pFloor}`);
+  // (the 50%-absorb design point is guarded empirically by the DEF-drift
+  //  check in the section below — measured geared DEF vs the baked K table)
 
-  // ── 2. DRIFT: does the baked table still match the real gear ladder? ─────
-  const shopTier = (lv) => lv >= 90 ? 10 : lv >= 80 ? 9 : lv >= 70 ? 8 : lv >= 60 ? 7
-                         : lv >= 50 ? 6 : lv >= 30 ? 4 : lv >= 10 ? 3 : lv >= 6 ? 2 : 1;
+  // Ã¢â€â‚¬Ã¢â€â‚¬ 2. DRIFT: does the baked table still match the real gear ladder? Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  const shopTier = (lv) => lv >= 88 ? 10 : lv >= 78 ? 9 : lv >= 68 ? 8 : lv >= 55 ? 7
+                         : lv >= 40 ? 6 : lv >= 20 ? 4 : lv >= 10 ? 3 : lv >= 6 ? 2 : 1;
   const pickGear = (cat, cls, lv) => {
     const cap = shopTier(lv);
     const pool = ITEM_POOL[cat].filter(it => !it.setId && (it.tier | 0) <= cap &&
@@ -110,31 +121,45 @@ const R = await page.evaluate(async ({ OLD_BAND, OLD_ALLOWANCE, DRIFT_TOLERANCE 
     }
     player._equipBonusCache = null;
     if (typeof refreshGearCache === 'function') refreshGearCache();
-    return getMaxHp();
+    return { hp: getMaxHp(), def: getDef() };
   };
   let maxDrift = 0, driftAt = '';
+  let maxDefDrift = 0, defDriftAt = '';
   for (const [lv, baked] of _GEAR_ALLOWANCE_TABLE) {
-    const per = [];
+    const per = [], defs = [];
     for (const cls of ['warrior','archer','rogue','mage']) {
-      const hp = gearedHp(cls, lv);
-      per.push(hp / ((104 + 23.6 * Math.min(99, lv)) * (_CLASS_HP_REF[cls] || 1)));
+      const g = gearedHp(cls, lv);
+      per.push(g.hp / ((104 + 23.6 * Math.min(99, lv)) * (_CLASS_HP_REF[cls] || 1)));
+      defs.push(g.def);
     }
     const live = per.reduce((s, v) => s + v, 0) / per.length;
     const d = Math.abs(live - baked) / baked;
     if (d > maxDrift) { maxDrift = d; driftAt = `Lv ${lv}: baked ${baked} vs live ${live.toFixed(3)}`; }
+    // v0.29.543 — the absorb K table is the same kind of measured constant:
+    // if gear DEF is retuned and this table is not re-generated, the 50%
+    // design point silently drifts. Guard it exactly like the HP allowance.
+    const liveDef = defs.reduce((s, v) => s + v, 0) / defs.length;
+    const bakedK = _defKAtLv(lv);
+    const dd = Math.abs(liveDef - bakedK) / Math.max(1, bakedK);
+    if (dd > maxDefDrift) { maxDefDrift = dd; defDriftAt = `Lv ${lv}: baked K ${Math.round(bakedK)} vs live DEF ${Math.round(liveDef)}`; }
   }
   ok(`baked allowance matches the live gear ladder (<${DRIFT_TOLERANCE * 100}%)`,
      maxDrift < DRIFT_TOLERANCE, `max drift ${(maxDrift * 100).toFixed(1)}%  ${driftAt}`);
+  ok(`baked absorb K matches live expected DEF (<${DRIFT_TOLERANCE * 100}%) — 50% absorb design point holds`,
+     maxDefDrift < DRIFT_TOLERANCE, `max drift ${(maxDefDrift * 100).toFixed(1)}%  ${defDriftAt}`);
 
-  // ── 3. the anchor now actually tracks a geared character ────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ 3. the anchor now actually tracks a geared character Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const ratios = [];
   for (const lv of [20, 50, 80]) {
-    const hp = gearedHp('mage', lv);
+    const hp = gearedHp('mage', lv).hp;
     player.cls = 'mage';
     ratios.push({ lv, r: +(hp / _refHpAtLv(lv)).toFixed(2) });
   }
   ok('anchor is within 0.75-1.35x of a real geared bar (was up to 12x under)',
-     ratios.every(x => x.r > 0.75 && x.r < 1.35), ratios.map(x => `Lv${x.lv}:${x.r}x`).join(' '));
+     ratios.every(x => {
+       // gearedHp now returns {hp,def}; the mage ratio uses hp
+       return x.r > 0.75 && x.r < 1.35;
+     }), ratios.map(x => `Lv${x.lv}:${x.r}x`).join(' '));
   return res;
 }, { OLD_BAND, OLD_ALLOWANCE, DRIFT_TOLERANCE });
 

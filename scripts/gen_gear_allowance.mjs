@@ -31,7 +31,7 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 200)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'load', timeout: 60000 });
+await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}`, { waitUntil: 'load', timeout: 60000 });
 await page.waitForTimeout(10000);
 
 const OUT = await page.evaluate(() => {
@@ -40,8 +40,8 @@ const OUT = await page.evaluate(() => {
     const el = document.getElementById(id); if (el) el.style.display = 'none';
   }
   loadMap('forest'); game.paused = false;
-  const shopTier = (lv) => lv >= 90 ? 10 : lv >= 80 ? 9 : lv >= 70 ? 8 : lv >= 60 ? 7
-                         : lv >= 50 ? 6 : lv >= 30 ? 4 : lv >= 10 ? 3 : lv >= 6 ? 2 : 1;
+  const shopTier = (lv) => lv >= 88 ? 10 : lv >= 78 ? 9 : lv >= 68 ? 8 : lv >= 55 ? 7
+                         : lv >= 40 ? 6 : lv >= 20 ? 4 : lv >= 10 ? 3 : lv >= 6 ? 2 : 1;
   const pickGear = (cat, cls, lv) => {
     const cap = shopTier(lv);
     const pool = ITEM_POOL[cat].filter(it => !it.setId && (it.tier | 0) <= cap &&
@@ -70,27 +70,38 @@ const OUT = await page.evaluate(() => {
     }
     player._equipBonusCache = null;
     if (typeof refreshGearCache === 'function') refreshGearCache();
-    return getMaxHp();
+    return { hp: getMaxHp(), def: getDef() };
   };
   // the band table's own grid, so both interpolate on identical breakpoints
   const GRID = _DMG_BAND_TABLE.map(r => r[0]);
   const CLS = ['warrior', 'archer', 'rogue', 'mage'];
   const rows = [];
+  const clsHpSums = {};   // per-class geared HP summed over the grid -> _CLASS_HP_REF re-derivation
   for (const lv of GRID) {
     // devSetLevel caps at 99; Lv 100 shares the Lv 99 stat block + T10 gear,
     // so measuring at 99 and reporting it for 100 is exact, not extrapolated.
     const per = [];
     for (const cls of CLS) {
-      const hp = gearedHp(cls, lv);
+      const g = gearedHp(cls, lv);
       const base = (104 + 23.6 * Math.min(99, lv)) * (_CLASS_HP_REF[cls] || 1);
-      per.push({ cls, hp, a: hp / base });
+      per.push({ cls, hp: g.hp, def: g.def, a: g.hp / base });
     }
     const mean = per.reduce((s, p) => s + p.a, 0) / per.length;
+    const meanHp = per.reduce((s, p) => s + p.hp, 0) / per.length;
+    // per-class HP ratio vs the 4-class mean at this level (GEARED, the real thing)
+    for (const p of per) (clsHpSums[p.cls] = clsHpSums[p.cls] || []).push(p.hp / meanHp);
     rows.push({ lv, allowance: +mean.toFixed(3),
+                defMean: Math.round(per.reduce((s, p) => s + p.def, 0) / per.length),
                 spread: `${Math.min(...per.map(p=>p.a)).toFixed(2)}-${Math.max(...per.map(p=>p.a)).toFixed(2)}`,
                 per: per.map(p => `${p.cls}:${p.a.toFixed(2)}`).join(' ') });
   }
-  return { rows, band: _DMG_BAND_TABLE.map(r => [r[0], r[1]]), oldAllowance: _REF_GEAR_ALLOWANCE };
+  const clsRatio = {};
+  for (const c of CLS) {
+    const v = clsHpSums[c];
+    clsRatio[c] = +(v.reduce((s, x) => s + x, 0) / v.length).toFixed(3);
+  }
+  return { rows, band: _DMG_BAND_TABLE.map(r => [r[0], r[1]]), oldAllowance: _REF_GEAR_ALLOWANCE,
+           clsRatio };
 });
 
 writeFileSync(path.join(ROOT, 'scripts', 'gear_allowance.json'), JSON.stringify(OUT, null, 1));
@@ -104,7 +115,13 @@ console.log('const _GEAR_ALLOWANCE_TABLE = [');
 const L = OUT.rows.map(r => `[${r.lv}, ${r.allowance}]`);
 for (let i = 0; i < L.length; i += 6) console.log('  ' + L.slice(i, i + 6).join(', ') + ',');
 console.log('];');
-console.log('\ncompensated band values (old_p * 1.5 / allowance) — for step 3 reference:');
+console.log('const _DEF_K_TABLE = [');
+const D = OUT.rows.map(r => `[${r.lv}, ${r.defMean}]`);
+for (let i = 0; i < D.length; i += 6) console.log('  ' + D.slice(i, i + 6).join(', ') + ',');
+console.log('];');
+console.log('// geared per-class HP ratio vs 4-class mean (for _CLASS_HP_REF):');
+console.log(JSON.stringify(OUT.clsRatio));
+console.log('\ncompensated band values (old_p * 1.5 / allowance) Ã¢â‚¬â€ for step 3 reference:');
 console.log(OUT.band.map(([lv, p], i) => `[${lv}, ${+(p * 1.5 / OUT.rows[i].allowance).toFixed(4)}]`).join(', '));
 console.log('\npageerrors:', errs.length, errs.slice(0, 3));
 await browser.close(); server.kill();

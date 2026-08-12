@@ -26,12 +26,21 @@ await page.evaluate(() => {
   player.level = 40;
   // Use the game's own unlock path rather than writing player.quests directly —
   // a hand-populated journal would not prove the real one renders rows.
+  window._lxBootGateDone = true;
   if (typeof tickQuestUnlocks === 'function') tickQuestUnlocks();
 });
 
-// Render the panel and read what actually landed in the DOM.
+// Open the panel the way a PLAYER does. Calling renderQuestJournal() directly
+// tests the function, not the feature: an earlier version of this suite did
+// exactly that and stayed green against a build where the helper had been
+// clobbered out of the file entirely, because the direct call was the only
+// thing that ever ran.
+await page.evaluate(() => { window._lxBootGateDone = true; });   // the loop bails until the overlay fades
+await page.waitForTimeout(600);
+await page.keyboard.press('q');
+await page.waitForTimeout(700);
+
 const r1 = await page.evaluate(() => {
-  renderQuestJournal();
   const list = document.getElementById('quest-list');
   const rows = [...list.querySelectorAll('[data-qtrack]')];
   const cards = [...list.querySelectorAll('.qj-card')];
@@ -43,6 +52,15 @@ const r1 = await page.evaluate(() => {
     // every row must name a real map from MAPS
     namesMap: texts.filter((t) => Object.values(MAPS).some((m) => m.name && t.includes(m.name))).length,
     hasPin: texts.filter((t) => t.includes('📍')).length,
+    // Presence in the DOM is not the same as being on screen. Measure real
+    // geometry: a row with zero height is a row the player never sees.
+    visible: rows.filter((b) => {
+      const el = b.closest('div');
+      if (!el) return false;
+      const rc = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      return rc.width > 100 && rc.height > 10 && cs.visibility === 'visible' && cs.display !== 'none' && Number(cs.opacity) > 0.1;
+    }).length,
   };
 });
 console.log(`\ncards ${r1.cards} (done ${r1.done}) | location rows ${r1.rows}`);
@@ -55,6 +73,7 @@ check(r1.rows > 0, 'location rows render at all', r1.rows);
 check(r1.rows === r1.cards - r1.done, 'a row on every non-completed card', { rows: r1.rows, expected: r1.cards - r1.done });
 check(r1.namesMap === r1.rows, 'every row names a real map', { named: r1.namesMap, of: r1.rows });
 check(r1.hasPin === r1.rows, 'every row carries the pin glyph', r1.hasPin);
+check(r1.visible === r1.rows, 'every row is actually ON SCREEN (real geometry)', { visible: r1.visible, of: r1.rows });
 if (!r1.rows) { console.log('\nno rows — aborting before the interaction checks'); await browser.close(); process.exit(1); }
 
 // Track toggles on, repaints, and flips the label.

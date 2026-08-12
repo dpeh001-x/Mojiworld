@@ -1,4 +1,4 @@
-// SOLVER — re-derive _DMG_BAND_TABLE so hits-to-die falls MONOTONICALLY with
+// SOLVER Ã¢â‚¬â€ re-derive _DMG_BAND_TABLE so hits-to-die falls MONOTONICALLY with
 // level. Binary-searches each anchor against the LIVE mitigation chain (pierce
 // -> flat DEF -> class DR -> absorb curve -> difficulty punish) exactly as the
 // table's own comment says it was originally solved; that solve has since gone
@@ -27,11 +27,11 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 200)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'load', timeout: 60000 });
+await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}`, { waitUntil: 'load', timeout: 60000 });
 await page.waitForTimeout(10000);
 
 // Monotonic by construction: each step is ~0.9x the previous, floored at 3.0.
-// 3 rather than the authored 1.8-2.0 because these are TRASH mobs — at 2 hits a
+// 3 rather than the authored 1.8-2.0 because these are TRASH mobs Ã¢â‚¬â€ at 2 hits a
 // single mistake inside a pack is death. Bosses keep their own harder bands.
 const TARGET = [[1,12],[5,11],[10,10],[15,9.2],[20,8.5],[30,7.2],[40,6.2],
                 [50,5.4],[60,4.7],[70,4.1],[80,3.6],[90,3.2],[100,3.0]];
@@ -42,8 +42,8 @@ const OUT = await page.evaluate(async (TARGET) => {
     const el = document.getElementById(id); if (el) el.style.display = 'none';
   }
   loadMap('forest'); game.paused = false;
-  const shopTier = (lv) => lv >= 90 ? 10 : lv >= 80 ? 9 : lv >= 70 ? 8 : lv >= 60 ? 7
-                         : lv >= 50 ? 6 : lv >= 30 ? 4 : lv >= 10 ? 3 : lv >= 6 ? 2 : 1;
+  const shopTier = (lv) => lv >= 88 ? 10 : lv >= 78 ? 9 : lv >= 68 ? 8 : lv >= 55 ? 7
+                         : lv >= 40 ? 6 : lv >= 20 ? 4 : lv >= 10 ? 3 : lv >= 6 ? 2 : 1;
   const pickGear = (cat, cls, lv) => {
     const cap = shopTier(lv);
     const pool = ITEM_POOL[cat].filter(it => !it.setId && (it.tier | 0) <= cap &&

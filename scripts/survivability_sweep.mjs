@@ -1,4 +1,4 @@
-// Fine sweep of the survivability curve — every 5 levels, tankiest (warrior)
+// Fine sweep of the survivability curve Ã¢â‚¬â€ every 5 levels, tankiest (warrior)
 // and squishiest (mage), to locate the troughs the 10-level matrix implies.
 // Shares the exact harness of survivability_matrix.mjs (game's own devSetLevel,
 // the shop's tier ladder, live updateMonsters contact sampling).
@@ -20,7 +20,7 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 200)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'load', timeout: 60000 });
+await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}`, { waitUntil: 'load', timeout: 60000 });
 await page.waitForTimeout(10000);
 
 const OUT = await page.evaluate(async () => {
@@ -40,8 +40,8 @@ const OUT = await page.evaluate(async () => {
     count: lvls.length,
   };
 
-  const shopTier = (lv) => lv >= 90 ? 10 : lv >= 80 ? 9 : lv >= 70 ? 8 : lv >= 60 ? 7
-                         : lv >= 50 ? 6 : lv >= 30 ? 4 : lv >= 10 ? 3 : lv >= 6 ? 2 : 1;
+  const shopTier = (lv) => lv >= 88 ? 10 : lv >= 78 ? 9 : lv >= 68 ? 8 : lv >= 55 ? 7
+                         : lv >= 40 ? 6 : lv >= 20 ? 4 : lv >= 10 ? 3 : lv >= 6 ? 2 : 1;
   const pickGear = (cat, cls, lv) => {
     const cap = shopTier(lv);
     const pool = ITEM_POOL[cat].filter(it => !it.setId && (it.tier | 0) <= cap &&
