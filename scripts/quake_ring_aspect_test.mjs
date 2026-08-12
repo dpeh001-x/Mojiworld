@@ -93,6 +93,31 @@ const r = await page.evaluate(async () => {
     out.contentBottomY = dy + dh * 0.9987;
     out.baseOffset = out.contentBottomY - (h.y + 16);
   }
+
+  // --- PLUME ONLY: sweep the whole telegraph and record every frame used ----
+  // The 9-frame set erupts and then becomes an expanding debris ring: 0-2 are
+  // the plume, 3 adds a smoke torus, 4-8 spread the ring. Sampling one instant
+  // proves nothing here, because the old bug was that the frame came from a
+  // free-running wall clock - it could look right on any given tick.
+  const seen = [];
+  for (let life = h.maxLife; life >= 0; life -= 3) {
+    game.hazards.length = 0;
+    game.hazards.push({ ...h, life });
+    const k2 = ctx.drawImage;
+    ctx.drawImage = function (img, ...a) {
+      const u = (img && (img.currentSrc || img.src)) || '';
+      if (/quake_ring/i.test(u)) seen.push(u.split('/').pop());
+      return k2.apply(ctx, [img, ...a]);
+    };
+    try { drawHazards(); } catch (e) {}
+    ctx.drawImage = k2;
+  }
+  out.framesSeen = [...new Set(seen)].sort();
+  out.ringFrames = out.framesSeen.filter((f) => {
+    const m = f.match(/quake_ring_(\d+)\./);
+    return m && +m[1] >= 3;
+  });
+  out.samples = seen.length;
   return out;
 });
 await browser.close();
@@ -105,7 +130,11 @@ if (r.drawn) {
   console.log(`  plume base sits ${r.baseOffset.toFixed(1)}px below the ground line`);
 }
 
+console.log(`  frames used across the whole telegraph (${r.samples} samples): ${JSON.stringify(r.framesSeen)}`);
+
 check(r.nCalls >= 1, 'the plume sprite is actually drawn during the telegraph', r.nCalls);
+check(r.samples > 0, 'the sweep actually sampled draws (else the ring check is vacuous)', r.samples);
+check(r.ringFrames.length === 0, 'no debris-ring frame (3-8) is ever used — plume only', r.ringFrames);
 if (r.drawn) {
   check(Math.abs(r.distortion - 1) <= 0.02, 'the source canvas is painted undistorted (not squashed)', { srcRatio: r.srcRatio, dstRatio: r.dstRatio, distortion: r.distortion });
   check(r.baseOffset >= -8 && r.baseOffset <= 14, 'the plume base sits on the ground line, not buried below it', r.baseOffset);

@@ -9430,7 +9430,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.650';
+const GAME_VERSION = 'v0.29.651';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10291,6 +10291,29 @@ function _lxVfxFrame(camelKey) {
   }
   const f = (typeof _bossLoopFrame === 'function') ? _bossLoopFrame(arr, _VFX_FRAME_MS) : null;
   return (f && f.complete && f.naturalWidth > 0) ? f : staticImg;
+}
+// v0.29.651 — PLUME ONLY, per user "remove the addition of the rings, i want
+// just the plume". quake_ring's 9 frames are an eruption that BECOMES an
+// expanding debris ring: 0-2 are the billowing plume, frame 3 introduces a
+// smoke torus, and 4-8 spread a debris ring over a settling mound. The
+// telegraph was calling _lxVfxFrame, which cycles all nine off a free-running
+// wall clock, so it showed whichever frame the global loop happened to be on -
+// usually a ring one. Drive the plume off the telegraph's OWN progress instead
+// and cap it: the dust builds as the strike closes, and the ring is never
+// reached.
+const LX_QUAKE_PLUME_FRAMES = 3;   // frames 0..2; raise only if the art changes
+function _lxQuakePlumeFrame(t) {
+  // Priming call: _lxVfxFrame lazily builds VFX_ANIM_FRAMES.quakeRing on first
+  // use. Its RETURN is discarded on purpose - it hands back the wall-clock loop
+  // frame, which is the ring frame this function exists to avoid.
+  try { _lxVfxFrame('quakeRing'); } catch (e) {}
+  const stat = (typeof LX_VFX !== 'undefined' && LX_VFX.quakeRing) || null;
+  const arr = (typeof VFX_ANIM_FRAMES !== 'undefined' && VFX_ANIM_FRAMES.quakeRing) || null;
+  if (!arr || !arr.length) return stat;
+  const n = Math.min(LX_QUAKE_PLUME_FRAMES, arr.length);
+  const i = Math.max(0, Math.min(n - 1, Math.floor((t || 0) * n)));
+  const f = arr[i];
+  return (f && f.complete && f.naturalWidth > 0) ? f : stat;
 }
 // =========================================================================
 // LX_WORLD — world-decoration sprites (v0.25.172)
@@ -115713,10 +115736,11 @@ function drawHazards() {
       // rendered it at aspect 0.455, i.e. 60% of authored height. It is a side-on
       // dust plume, not a top-down ring, so the squash read as a flat smear rather
       // than as ground perspective.
-      if (_lxVfxReady(_lxVfxFrame('quakeRing'))) {
+      const _qrPlume = _lxQuakePlumeFrame(t);
+      if (_lxVfxReady(_qrPlume)) {
         const _d = r * 1.15;
         ctx.save(); ctx.globalAlpha = Math.min(1, a);
-        ctx.drawImage(_lxVfxFrame('quakeRing'), sx - _d / 2, (h.y + 18) - _d, _d, _d);
+        ctx.drawImage(_qrPlume, sx - _d / 2, (h.y + 18) - _d, _d, _d);
         ctx.restore();
         continue;
       }
