@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.640';
+const GAME_VERSION = 'v0.29.641';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -9907,6 +9907,10 @@ const LX_OBJECTS_FILES = [
 // v0.25.843 — `dj_jukebox` entry removed; the art moved to Sprites/npc/
 // as DJ Vinyl's NPC sprite (see NPC_SPRITE_FILES below).
 const LX_OBJECTS_FILES_EXPLICIT = {
+  // v0.29.641 — pothole cavity art (see gen_pothole_sprites.mjs). Bright raised
+  // rim around a black opening; the rim is what makes a pit read on dark ground.
+  pothole_earth: 'pothole_earth.webp',
+  pothole_crypt: 'pothole_crypt.webp',
   chest_wood:   'chest_wood.webp',
   chest_silver: 'chest_silver.webp',
   chest_gold:   'chest_gold.webp',
@@ -94740,6 +94744,13 @@ const MAP_PROPS = {
 // hole" rather than "step on a stain". A subtle dark rim outline gives
 // it the look of an actual cavity. Falls back silently if the active
 // map declares no potholes.
+// v0.29.641 — biome sprite per map. A map may override with `potholeSprite`;
+// anything unlisted falls back to the earth variant.
+const _POTHOLE_SPRITE_BY_MAP = {
+  cryptHollow:      'pothole_crypt',
+  boneGraveyard2:   'pothole_crypt',
+  hollowSepulchre2: 'pothole_crypt',
+};
 function drawPotholes() {
   const list = game.mapData && game.mapData.potholes;
   if (!list || !list.length) return;
@@ -94749,12 +94760,30 @@ function drawPotholes() {
   const _ground = (game.mapData.platforms || []).find(p => p.type === 'ground');
   const _groundTop = _ground ? _ground.y : 480;
   const _camY = (game.camera && game.camera.y) || 0;
+  // v0.29.641 — authored cavity art. The old flat ellipse stack was black at 55%
+  // alpha and 12 px tall, i.e. invisible on dark ground (per user screenshot).
+  const _spriteKey = (game.mapData && game.mapData.potholeSprite) ||
+                     _POTHOLE_SPRITE_BY_MAP[game.currentMap] || 'pothole_earth';
+  const _img = (typeof LX_OBJECTS !== 'undefined') ? LX_OBJECTS[_spriteKey] : null;
+  const _ready = !!(_img && _img.complete && _img.naturalWidth);
+  const _prevSmooth = ctx.imageSmoothingEnabled;
+  if (_ready) { ctx.imageSmoothingEnabled = true; if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high'; }
   for (const ph of list) {
     const sx = ph.x - game.camera.x;
     const phw = ph.w || 60;
     if (sx + phw < 0 || sx > W) continue;
     // Y-cull (cheap; ground is rarely off-screen but tower maps may)
     if (_groundTop + 20 < _camY - 30 || _groundTop > _camY + H + 30) continue;
+    if (_ready) {
+      // Drawn a little wider than the trip zone so the lit rim frames the
+      // hazard rather than sitting inside it, and squashed to a ground-plane
+      // ellipse. Sunk slightly so the opening straddles the ground line.
+      const dw = phw * 1.5;
+      const dh = dw * 0.52;
+      ctx.drawImage(_img, sx + phw / 2 - dw / 2, _groundTop - dh * 0.56, dw, dh);
+      continue;
+    }
+    // ---- procedural fallback (pre-decode / missing art) ----
     // Cavity shadow (dark ellipse spilling below the ground line)
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     ctx.beginPath();
@@ -94773,6 +94802,7 @@ function drawPotholes() {
     ctx.lineTo(sx + phw - 4, _groundTop + 1);
     ctx.stroke();
   }
+  if (_ready) ctx.imageSmoothingEnabled = _prevSmooth;
 }
 
 // v0.26.345 — LAUNCH-PAD renderer. Draws each map.launchPads entry as a
