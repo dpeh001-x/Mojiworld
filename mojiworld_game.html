@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.638';
+const GAME_VERSION = 'v0.29.639';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -19307,7 +19307,15 @@ const monsterTypes = {
   // v0.26.167 — Buzzbee now jabs with mstinger (was mspore — bees
   // sting, they don't spore).
   // v0.26.195 — Per user "make buzzbee size 1.2x bigger". Hitbox 34×30 → 41×36.
-  honeyBuzz:   { name:'Buzzbee',      w:41, h:36, color:'#ffd84a', shell:'#b8862a', hp:726,  atk:55, def:8,  evasion:120, exp:206, mojicoins:95, speed:1.5, jump:0, flies:true, shoot:'mstinger', shootCd:2200 , traits:{ diveBomb:true } },
+  // v0.29.639 — Honeycomb Hollow pass (per user): lower ATK, slower swarm, and
+  // a long randomised fire interval instead of a 2.2 s drumbeat.
+  //   atk    55 -> 34   (-38%)
+  //   speed  1.5 -> 0.9 (-40%, so the swarm closes at a readable pace)
+  //   fire   2200 ms -> 10000 ms base with a 20000 ms random band = 10-30 s
+  // The variance field is a new per-type knob; every other monster omits it
+  // and keeps its historical jitter. diveBomb stays - the dive is the species'
+  // identity, it just arrives slower now.
+  honeyBuzz:   { name:'Buzzbee',      w:41, h:36, color:'#ffd84a', shell:'#b8862a', hp:726,  atk:34, def:8,  evasion:120, exp:206, mojicoins:95, speed:0.9, jump:0, flies:true, shoot:'mstinger', shootCd:10000, shootCdVar:20000, traits:{ diveBomb:true } },
   // v0.26.196 — Per user "make nougat bear 2x bigger". Hitbox 42×40 → 84×80.
   nougatBear:  { name:'Nougat Bear',  w:84, h:80, color:'#e8b870', shell:'#8a5a30', hp:1135,  atk:68, def:14, evasion:75,  exp:324, mojicoins:155, speed:0.7, jump:3 , traits:{ bigMelee:{ kind:'swing', dmgMul:1.5, range:120, swingW:200, swingH:90, cdMs:5200, telegraphMs:480 } } },
   // v0.25.98 — elemental quartet for the four new themed maps. Each is
@@ -22925,8 +22933,10 @@ const MAPS = {
       // never re-checked against the rest of the game.
       // 38 -> 22 and 0.4 -> 0.8 lands it at pressure ~25: still the densest
       // ordinary map and unmistakably a hive, no longer an outlier.
-      monsterCap: 22,
-      respawnDelayMul: 0.8,
+      // v0.29.639 - per user "reduce the spawn count". Cap 22 -> 12 and the
+      // refill cadence slowed (0.8 -> 1.3), so the hive reads as a hive.
+      monsterCap: 12,
+      respawnDelayMul: 1.3,
       platforms,
       portals: [],
       // v0.25.692 — Spawn counts bumped 2.5× to match the new monsterCap.
@@ -22937,9 +22947,11 @@ const MAPS = {
         // Queue scaled with the cap (88 -> 51) so the backfill cadence matches;
         // leaving 88 queued against a cap of 22 would simply respawn the same
         // wall more slowly rather than making the map less crowded.
-        { type: 'honeyBuzz',  count: 26 },
-        { type: 'nougatBear', count: 17 },
-        { type: 'orange',     count: 8 },
+        // v0.29.639 - queue scaled with the cap (51 -> 25); leaving 51 queued
+        // against a cap of 12 would respawn the same wall, just slower.
+        { type: 'honeyBuzz',  count: 12 },
+        { type: 'nougatBear', count: 8 },
+        { type: 'orange',     count: 5 },
       ],
     };
   })(),
@@ -66652,7 +66664,8 @@ function updateMonsters(dt) {
     const _ccHalted = (m.stunTimer > 0) || (m.freezeTimer > 0 && !(m.isBoss || m.boss));
     // Monster ranged attack
     if (m.shoot && !m.isBoss && m.currentHp > 0 && !_ccHalted) {
-      if (m.shootTimer === undefined) m.shootTimer = m.shootCd + Math.random() * 1000;
+      // v0.29.639 - per-type fire variance; default preserves old behaviour.
+      if (m.shootTimer === undefined) m.shootTimer = m.shootCd + Math.random() * (m.shootCdVar || 1000);
       m.shootTimer -= dt;
       const dxs = Math.abs((player.x + player.w/2) - (m.x + m.w/2));
       const dys = Math.abs((player.y + player.h/2) - (m.y + m.h/2));
@@ -66749,7 +66762,7 @@ function updateMonsters(dt) {
         if (m._shootWindup <= 0) {
           m._shootWindup = 0;
           _fireShotFor(m);
-          m.shootTimer = m.shootCd + Math.random() * 1200;
+          m.shootTimer = m.shootCd + Math.random() * (m.shootCdVar || 1200);   // v0.29.639
           if (m.boss || m.isBoss) m._postShotHold = 320;
         }
       } else if (_shootOnScreen && m.shootTimer <= 0 && !(m._dirOpenT > 0) && !((m.boss || m.isBoss) && (m._dashing || m._dashT > 0)) && dxs < _shootMaxX && dxs > _shootMinX && dys < _shootMaxY && m.aggroTarget) {   // v0.29.263 — winded bosses hold their shots
@@ -66767,7 +66780,7 @@ function updateMonsters(dt) {
           m.shootTimer = 999999;                           // suspend re-trigger; release resets it
         } else {
           _fireShotFor(m);
-          m.shootTimer = m.shootCd + Math.random() * 1200;
+          m.shootTimer = m.shootCd + Math.random() * (m.shootCdVar || 1200);   // v0.29.639
         }
       }
     }
