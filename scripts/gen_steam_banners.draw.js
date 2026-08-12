@@ -92,6 +92,91 @@
     const baseY = H * 0.92;
     const figH = H * (W / H > 2.6 ? 0.66 : 0.60);   // wide heroes get taller figures
 
+    // ── STORE PAGE BACKGROUND ────────────────────────────────────────────
+    // Different job from a capsule. Steam centres the store page's ~940px
+    // content column over this image, so the middle ~65% is never really seen
+    // and everything behind it only has to not fight the page chrome. What the
+    // visitor actually sees is the two side margins (~250px each) and a sliver
+    // of top and bottom. So: crush the whole plate dark, push a further scrim
+    // down the centre column, and let the margins keep the only real detail.
+    // The old background did the reverse — bright key art with every character
+    // stacked in the middle, all of it hidden behind the page.
+    if (variant === 'eclipse' || variant === 'veil' || variant === 'abyss') {
+      const plate = variant === 'eclipse' ? bg.arena
+                  : variant === 'veil'    ? bg.hood
+                  :                         (bg.aetherion || bg.inner);
+      cover(ctx, plate, 0, 0, W, H, variant === 'eclipse' ? 0.30 : 0.45);
+
+      // 1. darken to a low-contrast base. Tuned by eye against the render: the
+      //    first pass multiplied by #232a44 and then flat-filled another 42%
+      //    black on top, which crushed the plate to near-solid black — the
+      //    colosseum arches vanished entirely and the result read as an empty
+      //    page with two characters glued to it rather than as artwork. The
+      //    architecture has to stay faintly legible in the margins for this to
+      //    be a background at all, so both stages are lighter now and the real
+      //    darkening work is done by the centre-column scrim in step 3.
+      ctx.save();
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.fillStyle = variant === 'veil' ? '#4a3f6b' : '#3d4675';
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+      ctx.fillStyle = 'rgba(6,8,18,0.18)';
+      ctx.fillRect(0, 0, W, H);
+
+      // 2. cool colour wash so the whole page reads as one temperature
+      const wash = ctx.createLinearGradient(0, 0, W, H);
+      wash.addColorStop(0, variant === 'veil' ? 'rgba(40,20,66,0.30)' : 'rgba(16,22,48,0.30)');
+      wash.addColorStop(1, variant === 'abyss' ? 'rgba(8,14,32,0.42)' : 'rgba(12,10,30,0.36)');
+      ctx.fillStyle = wash; ctx.fillRect(0, 0, W, H);
+
+      // 3. the content column — darken hard where the page sits, feathered so
+      //    the transition into the margins is invisible rather than a band.
+      const colW = 940, x0 = (W - colW) / 2;
+      const col = ctx.createLinearGradient(x0 - 190, 0, x0 + colW + 190, 0);
+      col.addColorStop(0.00, 'rgba(4,5,12,0)');
+      col.addColorStop(0.16, 'rgba(4,5,12,0.66)');
+      col.addColorStop(0.50, 'rgba(4,5,12,0.74)');
+      col.addColorStop(0.84, 'rgba(4,5,12,0.66)');
+      col.addColorStop(1.00, 'rgba(4,5,12,0)');
+      ctx.fillStyle = col; ctx.fillRect(0, 0, W, H);
+
+      // 4. edge falloff top/bottom + a heavy vignette so nothing draws the eye
+      const tb = ctx.createLinearGradient(0, 0, 0, H);
+      tb.addColorStop(0.00, 'rgba(4,5,12,0.72)');
+      tb.addColorStop(0.22, 'rgba(4,5,12,0.10)');
+      tb.addColorStop(0.78, 'rgba(4,5,12,0.18)');
+      tb.addColorStop(1.00, 'rgba(4,5,12,0.85)');
+      ctx.fillStyle = tb; ctx.fillRect(0, 0, W, H);
+      vignette(ctx, W, H, 0.58);
+
+      // 5. a single instructor silhouette in each margin — the only figurative
+      //    content, kept low-alpha and low in frame so it reads as atmosphere
+      //    rather than as a subject competing with the page.
+      const marg = variant === 'veil' ? ['taiga', 'hera'] : ['will', 'taiga'];
+      [[W * 0.085, false], [W * 0.915, true]].forEach((p, i) => {
+        const img = cast[marg[i]];
+        if (!img) return;
+        ctx.save();
+        ctx.globalAlpha = 0.30;
+        figure(ctx, img, p[0], H * 0.99, H * 0.62, { flip: p[1], shadow: false });
+        ctx.restore();
+      });
+
+      // 6. a faint drifting ember/mote field, brightest at the edges
+      ctx.save();
+      for (let i = 0; i < 120; i++) {
+        const rx = (i * 97.13) % 1, ry = (i * 61.79) % 1;
+        const edge = Math.max(0, 1 - Math.abs(rx - 0.5) * 2.4);   // 0 centre, 1 edges
+        const a = 0.05 + (1 - edge) * 0.16;
+        ctx.fillStyle = `rgba(${variant === 'veil' ? '196,150,255' : '160,196,255'},${a})`;
+        const r = 0.6 + ((i * 13) % 5) * 0.45;
+        ctx.beginPath(); ctx.arc(rx * W, ry * H, r, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+
+      return c.toDataURL('image/png').split(',')[1];
+    }
+
     if (variant === 'council') {
       // One hub backdrop, the four instructors assembled across it with depth:
       // the two centre figures are larger and nearer, the outer two set back.

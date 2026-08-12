@@ -37,6 +37,10 @@ const BG = {
   hood:     'backgrounds/bg_v3_shadowWovenHood.webp',
   central:  'backgrounds/bg_v3_everdawn_central.webp',
   celestial:'backgrounds/bg_v3_celestialAtrium.webp',
+  // dark plates for the page background
+  arena:    'backgrounds/bg_v3_gravitosArena.webp',
+  inner:    'backgrounds/bg_v3_innerDimension.webp',
+  aetherion:'backgrounds/bg_v3_aetherion.webp',
 };
 const MOB = {
   gravitos: 'Sprites/bosses/gravitos.webp',
@@ -56,17 +60,22 @@ const LINEUP = [
   { k: 'taiga', bg: 'hood'    },
 ];
 
+// Each size carries its own variant list — a store PAGE BACKGROUND is a
+// different job from a capsule and shares none of the same rules. Steam lays
+// the store page's ~940px content column over the middle of it, so a page
+// background must be dark, quiet through the centre, and keep whatever
+// interest it has out in the side margins. Capsule compositions do the exact
+// opposite, which is why they are not reused here.
 const SIZES = {
-  header:             { w: 920,  h: 430,  logo: true  },
-  store_capsule_main: { w: 1232, h: 706,  logo: true  },
-  library_hero:       { w: 3840, h: 1240, logo: false },
+  header:               { w: 920,  h: 430,  logo: true,  variants: ['council', 'realms', 'showdown'] },
+  store_capsule_main:   { w: 1232, h: 706,  logo: true,  variants: ['council', 'realms', 'showdown'] },
+  library_hero:         { w: 3840, h: 1240, logo: false, variants: ['council', 'realms', 'showdown'] },
+  store_page_background:{ w: 1438, h: 810,  logo: false, variants: ['eclipse', 'veil', 'abyss'] },
 };
-
-const VARIANTS = ['council', 'realms', 'showdown'];
 
 const JOBS = [];
 for (const size of Object.keys(SIZES)) {
-  for (const v of VARIANTS) {
+  for (const v of SIZES[size].variants) {
     if (FILTER && !(`${size}_${v}`).includes(FILTER)) continue;
     JOBS.push({ size, variant: v, ...SIZES[size] });
   }
