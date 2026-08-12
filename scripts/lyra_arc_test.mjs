@@ -22,7 +22,7 @@ await page.goto(URL + '?dev=1', { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => typeof QUESTS !== 'undefined' && typeof MAPS !== 'undefined' && typeof _qnavDest === 'function', { timeout: 60000 });
 
 const r = await page.evaluate(() => {
-  const ids = ['q_lyra_loan', 'q_lyra_tear'];
+  const ids = ['q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut'];
   const out = { chapters: [] };
   const npcNames = new Set();
   for (const id in MAPS) for (const n of (MAPS[id].npcs || [])) if (n && n.name) npcNames.add(n.name);
@@ -42,7 +42,9 @@ const r = await page.evaluate(() => {
       rewardCoins: (q.rewards || {}).mojicoins,
     });
   }
-  out.prereqExists = !!QUESTS[(QUESTS.q_lyra_tear || {}).prereq];
+  out.prereqExists = !!QUESTS[(QUESTS.q_lyra_tear || {}).prereq] && !!QUESTS[(QUESTS.q_lyra_cut || {}).prereq];
+  // the chain must be a LINE, not three quests that happen to exist
+  out.chain = ids.map((i) => ((QUESTS[i] || {}).prereq) || null);
   // the target's maps must be enterable at the quest's own level gate
   out.targetMapLevels = spawnMaps('future_lyra').map((m) => ({ map: m, levelReq: MAPS[m].levelReq }));
   out.totalQuests = Object.keys(QUESTS).length;
@@ -68,7 +70,7 @@ for (const c of r.chapters) {
   check((c.rewardCoins | 0) > 0, `${c.qid} pays out`, c.rewardCoins);
 }
 check(r.prereqExists, 'chapter II\'s prereq points at a real quest', r.chapters[1] && r.chapters[1].prereq);
-check(r.chapters[1] && r.chapters[1].prereq === 'q_lyra_loan', 'and specifically at chapter I', r.chapters[1] && r.chapters[1].prereq);
+check(JSON.stringify(r.chain) === JSON.stringify([null, 'q_lyra_loan', 'q_lyra_tear']), 'the three chapters form one ordered chain I -> II -> III', r.chain);
 // the gate must not exceed the maps the target lives in, or it is uncompletable
 const maxMapGate = Math.max(...r.targetMapLevels.map((m) => m.levelReq || 1));
 check(r.chapters.every((c) => c.missing || c.levelReq >= maxMapGate), 'the level gate is not BELOW the maps the target lives in', { questGates: r.chapters.map((c) => c.levelReq), maxMapGate });
