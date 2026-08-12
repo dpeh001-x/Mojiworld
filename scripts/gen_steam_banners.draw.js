@@ -219,6 +219,103 @@
     const baseY = H * 0.92;
     const figH = H * (W / H > 2.6 ? 0.66 : 0.60);   // wide heroes get taller figures
 
+    // ── HUDDLE — the vibrance, without the web ───────────────────────────
+    // "radiant" was too busy, and the busyness was all line work: a chained
+    // polyline over every sign, twelve bowed ring arcs, twelve chords crossing
+    // the middle and thirty radial rays, layered over each other. Read at page
+    // size that is not a star chart, it is a tangle.
+    //
+    // So the lines go. What is left is the part that was actually working —
+    // nebula colour, the signs at full strength, their own hues glowing — plus
+    // two changes:
+    //
+    //   HUDDLE   the twelve group into two dense clutches, one per side, sized
+    //            and stacked like a group photo rather than pinned to a wheel.
+    //            Grouping is what lets them read at a glance; spread evenly
+    //            around a ring they were twelve separate things to look at.
+    //   NO WEB   no chains, no arcs, no chords, no rays. Each creature carries
+    //            a few loose sparkles and nothing joins anything.
+    //
+    // It also fixes the wheel's one real flaw for this slot: both clutches sit
+    // in the side margins Steam leaves visible, so the content column covers
+    // empty sky instead of half the cast.
+    if (variant === 'huddle') {
+      const zod = {};
+      for (const k in (job.ZODIAC || {})) {
+        try { zod[k] = await load(job.ZODIAC[k]); } catch (e) {}
+      }
+      const order = ['leo', 'cancer', 'gemini', 'taurus', 'aries', 'pisces',
+                     'capricorn', 'sagittarius', 'scorpio', 'libra', 'virgo', 'aquarius']
+                    .filter(k => zod[k]);
+      const cx = W / 2, cy = H * 0.50;
+
+      cover(ctx, bg.aetherion || bg.celestial, 0, 0, W, H, 0.45);
+      ctx.save(); ctx.globalCompositeOperation = 'multiply';
+      ctx.fillStyle = '#3a2a5e'; ctx.fillRect(0, 0, W, H); ctx.restore();
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (const [x, y, r, col] of [
+        [W * 0.14, H * 0.34, W * 0.46, 'rgba(226,64,168,0.44)'],
+        [W * 0.88, H * 0.36, W * 0.44, 'rgba(64,196,255,0.40)'],
+        [W * 0.50, H * 0.96, W * 0.52, 'rgba(255,150,60,0.20)'],
+      ]) {
+        const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+        g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      }
+      ctx.restore();
+
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 420; i++) {
+        const rx2 = (i * 97.13) % 1, ry2 = (i * 61.79) % 1;
+        ctx.fillStyle = `rgba(235,240,255,${(0.08 + ((i * 29) % 9) / 9 * 0.34).toFixed(3)})`;
+        ctx.beginPath(); ctx.arc(rx2 * W, ry2 * H, 0.5 + ((i * 13) % 5) * 0.40, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+
+      // two clutches. offsets are hand-placed in cluster-local units (-1..1)
+      // so the group overlaps and stacks instead of sitting on a grid.
+      const SPOTS = [
+        [-0.62, -0.46, 0.80], [ 0.10, -0.62, 0.72], [ 0.70, -0.28, 0.66],
+        [-0.30,  0.06, 1.00], [ 0.46,  0.30, 0.86], [-0.66,  0.56, 0.74],
+      ];
+      const base = H * 0.30;
+      [[W * 0.165, 1], [W * 0.835, -1]].forEach((side, s) => {
+        for (let i = 0; i < 6; i++) {
+          const k = order[s * 6 + i];
+          if (!k) continue;
+          const sp = SPOTS[i];
+          const px = side[0] + sp[0] * (W * 0.105) * side[1];
+          const py = cy + sp[1] * (H * 0.30);
+          const hh = base * sp[2];
+          const col = dominantColor(zod[k]);
+          const rgb = `${col[0] | 0},${col[1] | 0},${col[2] | 0}`;
+          ctx.save(); ctx.globalCompositeOperation = 'lighter';
+          const gp = ctx.createRadialGradient(px, py, 0, px, py, hh * 0.72);
+          gp.addColorStop(0, `rgba(${rgb},0.34)`); gp.addColorStop(1, `rgba(${rgb},0)`);
+          ctx.fillStyle = gp; ctx.fillRect(px - hh, py - hh, hh * 2, hh * 2);
+          ctx.restore();
+          const img = zod[k];
+          const sc = hh / img.naturalHeight, w2 = img.naturalWidth * sc;
+          ctx.save();
+          ctx.globalAlpha = 0.90;
+          ctx.shadowColor = `rgba(${rgb},0.55)`; ctx.shadowBlur = hh * 0.16;
+          ctx.drawImage(img, px - w2 / 2, py - hh / 2, w2, hh);
+          ctx.restore();
+          // a couple of loose sparkles — accent only, nothing joined
+          const pts = starsFromSprite(img, w2, hh, 3, i + s * 7 + 2);
+          pts.slice(0, 2).forEach((p, j) =>
+            sparkle(ctx, px - w2 / 2 + p[0], py - hh / 2 + p[1], j ? 5 : 7, `rgba(${rgb},0.95)`));
+        }
+      });
+
+      const well = ctx.createRadialGradient(cx, cy, 0, cx, cy, W * 0.26);
+      well.addColorStop(0, 'rgba(6,4,20,0.50)');
+      well.addColorStop(1, 'rgba(6,4,20,0)');
+      ctx.fillStyle = well; ctx.fillRect(0, 0, W, H);
+      vignette(ctx, W, H, 0.44);
+      return c.toDataURL('image/png').split(',')[1];
+    }
+
     // ── RADIANT — the same zodiac wheel, turned up ───────────────────────
     // "constellation" is elegant but quiet: 20%-alpha ghosts on near-black,
     // one pale blue line colour for all twelve. Everything here exists to add
