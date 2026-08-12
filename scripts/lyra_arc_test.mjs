@@ -22,7 +22,6 @@ await page.goto(URL + '?dev=1', { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => typeof QUESTS !== 'undefined' && typeof MAPS !== 'undefined' && typeof _qnavDest === 'function', { timeout: 60000 });
 
 const r = await page.evaluate(() => {
-  const ids = ['q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut', 'q_lyra_kin'];
   const ids = ['q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut', 'q_lyra_kin', 'q_lyra_forge'];
   const out = { chapters: [] };
   const npcNames = new Set();
@@ -38,6 +37,7 @@ const r = await page.evaluate(() => {
       prereq: q.prereq || null,
       giverPlaced: npcNames.has(q.giver),
       targetMaps: spawnMaps(q.target),
+      targetMapGate: Math.max(0, ...spawnMaps(q.target).map((m) => MAPS[m].levelReq || 1)),
       navResolves: !!d, navKind: d && d.kind, navWho: d && d.who,
       descChars: (q.desc || '').length,
       objectives: (q.objectives || []).map((o) => ({ target: o.target, count: o.count, spawns: spawnMaps(o.target).length })),
@@ -46,7 +46,6 @@ const r = await page.evaluate(() => {
   }
   out.prereqExists = ['q_lyra_tear','q_lyra_cut','q_lyra_kin','q_lyra_forge'].every((k) => !!QUESTS[(QUESTS[k] || {}).prereq]);
   // the subtle Sovereign hint must still be present for chapter IV to pay off
-  out.sovereignHint = /sapphire signet/i.test([...document.querySelectorAll('script')].map((x) => x.textContent).join(''));
   const _src = [...document.querySelectorAll('script')].map((x) => x.textContent).join('');
   out.sovereignHint = /sapphire signet/i.test(_src);
   // chapter V's equivalent: the soot is the only evidence in the game that the
@@ -94,7 +93,6 @@ for (const c of r.chapters) {
   check((c.rewardCoins | 0) > 0, `${c.qid} pays out`, c.rewardCoins);
 }
 check(r.prereqExists, 'chapter II\'s prereq points at a real quest', r.chapters[1] && r.chapters[1].prereq);
-check(JSON.stringify(r.chain) === JSON.stringify([null, 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut']), 'the four chapters form one ordered chain I -> II -> III -> IV', r.chain);
 check(JSON.stringify(r.chain) === JSON.stringify([null, 'q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut', 'q_lyra_kin']), 'the six chapters form one ordered chain 0 -> I -> II -> III -> IV -> V', r.chain);
 // the prelude must be reachable BEFORE the Lv 40 chapters, or it is not a prelude
 const pre = r.chapters[0], first = r.chapters[1];
@@ -106,9 +104,13 @@ for (const c of r.chapters) {
     check(o.spawns > 0, `${c.qid} objective "${o.target}" spawns somewhere`, o);
   }
 }
-// the gate must not exceed the maps the target lives in, or it is uncompletable
-const maxMapGate = Math.max(...r.targetMapLevels.map((m) => m.levelReq || 1));
-check(r.chapters.every((c) => c.missing || c.levelReq >= maxMapGate), 'the level gate is not BELOW the maps the target lives in', { questGates: r.chapters.map((c) => c.levelReq), maxMapGate });
+// Each chapter against ITS OWN target's maps. Comparing every chapter to
+// future_lyra's Lv 40 maps is the v0.29.645 bug: the Lv 20 prelude targets
+// mirrorSelf in the Inner Dimension and fails for a reason unrelated to it.
+for (const c of r.chapters) {
+  if (c.missing) continue;
+  check(c.levelReq >= c.targetMapGate, `${c.qid} is not gated BELOW the maps its own target lives in`, { gate: c.levelReq, targetMapGate: c.targetMapGate, maps: c.targetMaps });
+}
 check(r.sovereignHint, 'the Sovereign still carries the sapphire signet chapter IV asks you to look for', r.sovereignHint);
 check(r.barnabySootHint, 'the distorted Barnaby still carries the forge-soot chapter V asks you to look for', r.barnabySootHint);
 check(r.smithCanonIntact, 'the Sundered Smith\'s own story is untouched (chapter V explains the road, not the man)', r.smithCanonIntact);

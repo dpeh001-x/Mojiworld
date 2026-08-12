@@ -54,6 +54,22 @@ const r = await page.evaluate(() => {
   out.target = (typeof LX_GOD_QUEST_TARGET !== 'undefined') ? LX_GOD_QUEST_TARGET : null;
   out.mul = (typeof LX_GOD_MUL !== 'undefined') ? LX_GOD_MUL : null;
   out.registry = Object.keys(QUESTS).length;
+  // REACHABILITY. q.cls gates the class-master questline, so the registry total
+  // is not what one playthrough can complete. The first version of this feature
+  // shipped a 250 target measured against the registry's 275 and was unobtainable
+  // by 56. Measure the worst case and hold the target to it.
+  const _clsCount = {};
+  let _agnostic = 0;
+  for (const id in QUESTS) {
+    const c = QUESTS[id].cls;
+    if (!c) { _agnostic++; continue; }
+    _clsCount[c] = (_clsCount[c] || 0) + 1;
+  }
+  out.agnostic = _agnostic;
+  out.byCls = _clsCount;
+  out.reachable = Object.keys(_clsCount).length
+    ? Math.min(...Object.values(_clsCount).map((n) => _agnostic + n))
+    : _agnostic;
 
   // --- 1. one short of the threshold ---------------------------------------
   out.filled249 = fill(out.target - 1);
@@ -80,6 +96,21 @@ const r = await page.evaluate(() => {
   out.authored = authored && { name: authored.name, tier: authored.tier, cls: authored.cls, atk: authored.atk };
   out.expectedMinAtk = authored ? Math.round(authored.atk * out.mul) : null;
 
+  // --- 4b. a repeated turn-in counts ONCE ---------------------------------
+  // completed is keyed by quest id, so re-completing a repeatable overwrites the
+  // timestamp instead of adding a key. Pin it: re-running _completeQuest on ten
+  // already-finished quests must not move the counter, and must not re-grant.
+  const _beforeRepeat = _lxQuestsDone();
+  const _repeatIds = Object.keys(player.quests.completed).slice(0, 10);
+  for (const _rid of _repeatIds) {
+    player.quests.completed[_rid] = Date.now();          // a second turn-in
+    try { if (typeof _completeQuest === 'function') _completeQuest(_rid); } catch (e) {}
+  }
+  out.repeatIds = _repeatIds.length;
+  out.afterRepeat = _lxQuestsDone();
+  out.repeatHeldSteady = out.afterRepeat === _beforeRepeat;
+  out.afterRepeat_gods = godsIn().length;
+
   // --- 5. idempotency ------------------------------------------------------
   checkAchievements(); checkAchievements();
   out.afterRecheck_gods = godsIn().length;
@@ -103,17 +134,23 @@ const r = await page.evaluate(() => {
 });
 await browser.close();
 
-console.log(`  target ${r.target} quests, x${r.mul}; registry has ${r.registry} quests, pool max tier ${r.maxTier}`);
+console.log(`  target ${r.target} quests, x${r.mul}; registry ${r.registry}, REACHABLE ${r.reachable} (${r.agnostic} class-agnostic + ${JSON.stringify(r.byCls)})`);
+console.log(`  pool max tier ${r.maxTier}; repeated ${r.repeatIds} turn-ins -> count ${r.afterRepeat}`);
 console.log(`  authored base: ${JSON.stringify(r.authored)}`);
 console.log(`  granted      : ${JSON.stringify(r.item)}`);
 console.log(`  burst ${r.burstParticles} particles`);
 
-check(r.target === 250, 'the threshold is 250 quests', r.target);
+check(r.target === 175, 'the threshold is 175 quests', r.target);
 check(r.mul === 1.2, 'the multiplier is 1.2', r.mul);
-check(r.filled249 === 249 && r.filled250 === 250, 'the harness really staged 249 then 250 completions', [r.filled249, r.filled250]);
-check(!r.at249_ach, 'at 249 quests Quest Master is NOT unlocked', r.at249_ach);
-check(r.at249_gods === 0, 'at 249 quests no god weapon is granted (the threshold is real)', r.at249_gods);
-check(r.at250_ach, 'at 250 quests Quest Master unlocks', r.at250_ach);
+check(r.filled249 === r.target - 1 && r.filled250 === r.target, 'the harness really staged target-1 then target completions', [r.filled249, r.filled250, r.target]);
+check(!r.at249_ach, 'one short of the target, Quest Master is NOT unlocked', r.at249_ach);
+check(r.at249_gods === 0, 'one short of the target, no god weapon is granted (the threshold is real)', r.at249_gods);
+check(r.at250_ach, 'at the target, Quest Master unlocks', r.at250_ach);
+// THE CHECK THAT WOULD HAVE CAUGHT THE 250 BUG. A threshold above what one
+// playthrough can reach is not a hard achievement, it is an unobtainable one.
+check(r.target <= r.reachable, 'the target is actually REACHABLE in one playthrough', { target: r.target, reachable: r.reachable, agnostic: r.agnostic, byCls: r.byCls });
+check(r.repeatIds >= 5 && r.repeatHeldSteady, 'a repeated turn-in counts once, not twice', { repeated: r.repeatIds, before: r.target, after: r.afterRepeat });
+check(r.afterRepeat_gods === 1, 'and repeating cannot mint a second god weapon', r.afterRepeat_gods);
 check(r.achName === 'Quest Master', 'the achievement is titled "Quest Master"', r.achName);
 check(r.at250_gods === 1, 'exactly one god-tier weapon is granted', r.at250_gods);
 check(!!r.item && r.item.rarity === 'god', 'it is labelled god tier', r.item);
