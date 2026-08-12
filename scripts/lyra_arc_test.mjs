@@ -22,7 +22,7 @@ await page.goto(URL + '?dev=1', { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => typeof QUESTS !== 'undefined' && typeof MAPS !== 'undefined' && typeof _qnavDest === 'function', { timeout: 60000 });
 
 const r = await page.evaluate(() => {
-  const ids = ['q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut', 'q_lyra_kin'];
+  const ids = ['q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut', 'q_lyra_kin'];
   const out = { chapters: [] };
   const npcNames = new Set();
   for (const id in MAPS) for (const n of (MAPS[id].npcs || [])) if (n && n.name) npcNames.add(n.name);
@@ -37,6 +37,7 @@ const r = await page.evaluate(() => {
       prereq: q.prereq || null,
       giverPlaced: npcNames.has(q.giver),
       targetMaps: spawnMaps(q.target),
+      targetMapGate: Math.max(0, ...spawnMaps(q.target).map((m) => MAPS[m].levelReq || 1)),
       navResolves: !!d, navKind: d && d.kind, navWho: d && d.who,
       descChars: (q.desc || '').length,
       objectives: (q.objectives || []).map((o) => ({ target: o.target, count: o.count, spawns: spawnMaps(o.target).length })),
@@ -45,7 +46,11 @@ const r = await page.evaluate(() => {
   }
   out.prereqExists = ['q_lyra_tear','q_lyra_cut','q_lyra_kin'].every((k) => !!QUESTS[(QUESTS[k] || {}).prereq]);
   // the subtle Sovereign hint must still be present for chapter IV to pay off
-  out.sovereignHint = /sapphire signet/i.test([...document.querySelectorAll('script')].map((x) => x.textContent).join(''));
+  const _src = [...document.querySelectorAll('script')].map((x) => x.textContent).join('');
+  out.sovereignHint = /sapphire signet/i.test(_src);
+  // the Mirror Self trial must name the aperture, or the prelude has nothing to
+  // attach to and the Lv 20 -> Lv 40 arc stops being one idea
+  out.trialNamesAperture = /APERTURE/.test((QUESTS.q_inner_dim_trial || {}).desc || '');
   // the chain must be a LINE, not three quests that happen to exist
   out.chain = ids.map((i) => ((QUESTS[i] || {}).prereq) || null);
   // the target's maps must be enterable at the quest's own level gate
@@ -73,7 +78,10 @@ for (const c of r.chapters) {
   check((c.rewardCoins | 0) > 0, `${c.qid} pays out`, c.rewardCoins);
 }
 check(r.prereqExists, 'chapter II\'s prereq points at a real quest', r.chapters[1] && r.chapters[1].prereq);
-check(JSON.stringify(r.chain) === JSON.stringify([null, 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut']), 'the four chapters form one ordered chain I -> II -> III -> IV', r.chain);
+check(JSON.stringify(r.chain) === JSON.stringify([null, 'q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut']), 'the five chapters form one ordered chain 0 -> I -> II -> III -> IV', r.chain);
+// the prelude must be reachable BEFORE the Lv 40 chapters, or it is not a prelude
+const pre = r.chapters[0], first = r.chapters[1];
+check(pre && first && pre.levelReq < first.levelReq, 'the prelude gates lower than chapter I (it is genuinely a prelude)', { prelude: pre && pre.levelReq, chapterI: first && first.levelReq });
 // every listed objective must be a mob that genuinely spawns, or the chapter is
 // uncompletable no matter how well it reads
 for (const c of r.chapters) {
@@ -81,10 +89,16 @@ for (const c of r.chapters) {
     check(o.spawns > 0, `${c.qid} objective "${o.target}" spawns somewhere`, o);
   }
 }
-// the gate must not exceed the maps the target lives in, or it is uncompletable
-const maxMapGate = Math.max(...r.targetMapLevels.map((m) => m.levelReq || 1));
-check(r.chapters.every((c) => c.missing || c.levelReq >= maxMapGate), 'the level gate is not BELOW the maps the target lives in', { questGates: r.chapters.map((c) => c.levelReq), maxMapGate });
+// Each chapter against ITS OWN target's maps. The first version compared every
+// chapter to future_lyra's maps, which failed the Lv 20 prelude the moment it
+// existed - the prelude targets mirrorSelf in the Inner Dimension, not the
+// distorted chain. The assertion was measuring the wrong quest's geography.
+for (const c of r.chapters) {
+  if (c.missing) continue;
+  check(c.levelReq >= c.targetMapGate, `${c.qid} is not gated BELOW the maps its own target lives in`, { gate: c.levelReq, targetMapGate: c.targetMapGate, maps: c.targetMaps });
+}
 check(r.sovereignHint, 'the Sovereign still carries the sapphire signet chapter IV asks you to look for', r.sovereignHint);
+check(r.trialNamesAperture, 'the Mirror Self trial names the aperture the prelude explains', r.trialNamesAperture);
 check(errs.length === 0, 'no page errors', errs);
 console.log(bad ? `\n${bad} FAILED` : `\nall green — ${r.totalQuests} quests total`);
 process.exit(bad ? 1 : 0);
