@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.635';
+const GAME_VERSION = 'v0.29.636';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -78086,22 +78086,56 @@ function updateProjectiles(dt) {
         player.hitStun = Math.max(player.hitStun || 0, h.stun);
         player.vy = Math.min(player.vy, -3.5);
         player._lastDamageSource = h._sourceLabel || 'a ground tremor';
+        // v0.29.634 — per user "hard to detect ... whether I'm taking damage".
+        // A 14px number in a boss fight is noise. Label it, enlarge it, and
+        // flash harder so the hit is unmistakable.
         game.damageNumbers.push({
           x: player.x + 14, y: player.y, vy: -2,
-          text: dmg, life: 40, color: '#ffaa44', size: 14
+          text: dmg, life: 52, color: '#ff7a2a', size: 22
         });
-        flash(0.18);
+        game.damageNumbers.push({
+          x: player.x + 14, y: player.y - 26, vy: -1.4,
+          text: 'QUAKE!', life: 46, color: '#ffd166', size: 13
+        });
+        flash(0.34);
+        if (typeof addShake === 'function') addShake(16);
       }
-      // Visual burst regardless of hit (so the telegraph pays off
-      // visually even on a successful dodge).
-            for (let j = 0; j < 14; j++) {
-        const ang = (j / 14) * Math.PI * 2;
-        game.particles.push({
-          x: h.cx + Math.cos(ang) * h.w * 0.4,
-          y: h.y + 8 + Math.sin(ang) * 4,
-          vx: Math.cos(ang) * 3, vy: -1 - Math.random() * 2,
-          life: 28, color: h.colorTele || '#ffaa44', size: 3
-        });
+      // v0.29.634 — the payoff. 14 ring particles read as a puff; a quake
+      // should look like the floor broke. Dust plume along the whole band,
+      // rock chunks thrown up, an expanding shock ring, and a shake scaled to
+      // the hazard's reach so a 560px Legosaurus slam hits harder than a 160px
+      // groundStun. Still fires on a dodge — the telegraph has to pay off
+      // either way or the mechanic looks broken when you succeed.
+      {
+        const _tone = h.colorTele || '#ffaa44';
+        const _reach = h.w;
+        const _n = Math.min(46, 16 + Math.round(_reach / 16));
+        for (let j = 0; j < _n; j++) {
+          const _fx = h.cx + (Math.random() - 0.5) * _reach;
+          game.particles.push({
+            x: _fx, y: h.y + 10 + Math.random() * 6,
+            vx: ((_fx - h.cx) / (_reach * 0.5)) * (1.5 + Math.random() * 2),
+            vy: -2 - Math.random() * 5,
+            life: 26 + Math.floor(Math.random() * 18),
+            color: Math.random() < 0.35 ? '#8a6a45' : _tone,     // dirt + heat
+            size: 2 + Math.random() * 3,
+          });
+        }
+        // rock chunks — heavier, slower, arc higher
+        for (let j = 0; j < 8; j++) {
+          game.particles.push({
+            x: h.cx + (Math.random() - 0.5) * _reach * 0.8, y: h.y + 6,
+            vx: (Math.random() - 0.5) * 5, vy: -5 - Math.random() * 4,
+            life: 40, color: '#6b5236', size: 3 + Math.random() * 3,
+          });
+        }
+        if (typeof spawnSpriteBurst === 'function') {
+          try { spawnSpriteBurst(h.cx, h.y + 6, 'quakeRing', { size: Math.min(360, _reach * 0.9), life: 34, frameGap: 5 }); } catch (_e) {}
+        }
+        if (typeof addShake === 'function') addShake(Math.min(22, 6 + _reach / 40));
+        if (typeof audio !== 'undefined' && audio && typeof audio.play === 'function') {
+          try { audio.play('quake_hit'); } catch (_e) { try { audio.play('hit_heavy'); } catch (_e2) {} }
+        }
       }
       game.hazards.splice(i, 1);
       continue;
@@ -115086,6 +115120,45 @@ function drawHazards() {
       const t = 1 - h.life / h.maxLife;        // 0 → 1 over the telegraph
       const r = h.w * 0.5 * (0.4 + t * 0.6);
       const a = 0.30 + t * 0.55;
+      // v0.29.634 — _LX_QUAKE_FLAIR. The ring alone was invisible against a
+      // busy plate with the boss standing on it, so the strike zone is now
+      // painted as a BAND with hard edges: you can see where it reaches and
+      // how long you have. Drawn under the ring so the ring still reads.
+      {
+        // sx is already this hazard's screen x (h.cx - game.camera.x). An
+        // earlier cut wrote `h.cx - camX` here — there is no local camX in
+        // drawHazards, so it threw ReferenceError and killed the whole hazard
+        // render pass the moment a quake existed.
+        const _bx = sx, _bw = h.w, _by = h.y + 4, _bh = (h.h || 30) + 22;
+        const _pulse = 0.5 + 0.5 * Math.sin(game.time * 0.5);      // urgency, not decoration
+        const _near = Math.max(0, (t - 0.55) / 0.45);              // last ~45% ramps hard
+        ctx.save();
+        // floor wash across the whole reach
+        const _g = ctx.createLinearGradient(0, _by, 0, _by + _bh);
+        _g.addColorStop(0, 'rgba(255,150,60,' + (0.10 + 0.34 * t + 0.16 * _near * _pulse).toFixed(3) + ')');
+        _g.addColorStop(1, 'rgba(255,60,20,0)');
+        ctx.fillStyle = _g;
+        ctx.fillRect(_bx - _bw / 2, _by, _bw, _bh);
+        // hard edges — the difference between "inside" and "safe"
+        ctx.strokeStyle = 'rgba(255,220,120,' + (0.45 + 0.5 * _near).toFixed(3) + ')';
+        ctx.lineWidth = 2 + 2 * _near;
+        ctx.beginPath();
+        ctx.moveTo(_bx - _bw / 2, _by); ctx.lineTo(_bx - _bw / 2, _by + _bh);
+        ctx.moveTo(_bx + _bw / 2, _by); ctx.lineTo(_bx + _bw / 2, _by + _bh);
+        ctx.stroke();
+        // dust lifting off the ground as it charges — motion sells "incoming"
+        if ((game.time | 0) % 3 === 0 && t > 0.15 && typeof _budgetedParticlePush === 'function') {
+          for (let _k = 0; _k < 2; _k++) {
+            _budgetedParticlePush({
+              x: h.cx + (Math.random() - 0.5) * _bw,
+              y: h.y + 18 + Math.random() * 8,
+              vx: (Math.random() - 0.5) * 0.8, vy: -0.8 - Math.random() * 1.6 - _near * 2,
+              life: 22, color: _near > 0.5 ? '#ffd08a' : '#c9a06a', size: 2 + Math.random() * 2,
+            });
+          }
+        }
+        ctx.restore();
+      }
       // v0.26.x — authored ring sprite (Sprites/vfx/quake_ring.webp) scaled to
       // the current telegraph radius; else the procedural rings below.
       if (_lxVfxReady(_lxVfxFrame('quakeRing'))) {
@@ -115107,11 +115180,21 @@ function drawHazards() {
       ctx.ellipse(sx, h.y + 16, r * 0.65, r * 0.18, 0, 0, Math.PI * 2);
       ctx.fill();
       // Pulsing ! marker just before the strike
-      if (h.life < 12) {
+      // v0.29.634 — was 18px in the last 12 frames (0.2 s). On a 90-frame
+      // Legosaurus telegraph that is the final fifth of the wind-up; the cue
+      // now starts at a third of the way in and scales as it closes.
+      if (h.life < h.maxLife * 0.66) {
+        const _w = 1 - (h.life / (h.maxLife * 0.66));
+        ctx.save();
+        ctx.globalAlpha = 0.55 + 0.45 * Math.abs(Math.sin(game.time * 0.45));
         ctx.fillStyle = '#ffee44';
-        ctx.font = 'bold 18px ui-monospace, Menlo, monospace';
+        ctx.strokeStyle = 'rgba(90,30,0,0.85)';
+        ctx.lineWidth = 3;
+        ctx.font = 'bold ' + (18 + Math.round(16 * _w)) + 'px ui-monospace, Menlo, monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('!', sx, h.y - 4);
+        ctx.strokeText('!', sx, h.y - 6 - 8 * _w);
+        ctx.fillText('!', sx, h.y - 6 - 8 * _w);
+        ctx.restore();
       }
       continue;
     }
