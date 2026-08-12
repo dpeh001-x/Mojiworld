@@ -150,6 +150,44 @@
     return ch[0];
   }
 
+  // Average hue of a sprite's saturated pixels. Used to colour each sign's
+  // star lines with its OWN palette — Leo's gold, Cancer's coral, Gemini's
+  // teal — so the chart is twelve different lights instead of one blue wash.
+  function dominantColor(img) {
+    const off = document.createElement('canvas');
+    off.width = 48; off.height = 48;
+    const oc = off.getContext('2d');
+    oc.drawImage(img, 0, 0, 48, 48);
+    const d = oc.getImageData(0, 0, 48, 48).data;
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] < 160) continue;
+      const mx = Math.max(d[i], d[i + 1], d[i + 2]), mn = Math.min(d[i], d[i + 1], d[i + 2]);
+      if (mx - mn < 40 || mx < 70) continue;          // skip greys and near-black linework
+      r += d[i]; g += d[i + 1]; b += d[i + 2]; n++;
+    }
+    if (!n) return [190, 215, 255];
+    r /= n; g /= n; b /= n;
+    // push it toward full saturation so it reads as light, not as paint
+    const mx = Math.max(r, g, b) || 1, k = 255 / mx;
+    return [Math.min(255, r * k), Math.min(255, g * k), Math.min(255, b * k)];
+  }
+
+  // 4-point sparkle — reads as energy where a round dot reads as a pixel
+  function sparkle(ctx, x, y, r, col) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, r * 0.28);
+    ctx.shadowColor = col; ctx.shadowBlur = r * 2.6;
+    ctx.beginPath();
+    ctx.moveTo(x - r, y); ctx.lineTo(x + r, y);
+    ctx.moveTo(x, y - r); ctx.lineTo(x, y + r);
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(x, y, Math.max(1, r * 0.30), 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
   function logoAt(ctx, logo, cx, cy, maxW, maxH) {
     const s = Math.min(maxW / logo.naturalWidth, maxH / logo.naturalHeight);
     const w = logo.naturalWidth * s, h = logo.naturalHeight * s;
@@ -180,6 +218,150 @@
     // the four instructors stand on a baseline a little above the bottom edge
     const baseY = H * 0.92;
     const figH = H * (W / H > 2.6 ? 0.66 : 0.60);   // wide heroes get taller figures
+
+    // ── RADIANT — the same zodiac wheel, turned up ───────────────────────
+    // "constellation" is elegant but quiet: 20%-alpha ghosts on near-black,
+    // one pale blue line colour for all twelve. Everything here exists to add
+    // energy without abandoning the wheel that made the composition work.
+    //
+    //   colour   a real nebula behind it (magenta -> violet -> cyan) instead of
+    //            flat navy, and the signs ride at 3x the alpha so Leo is
+    //            actually gold and Cancer is actually coral
+    //   identity each sign's star lines take ITS OWN dominant hue (see
+    //            dominantColor) — twelve different lights, not one blue wash
+    //   motion   radial rays sweeping out of the centre, comet streaks with
+    //            tapered trails, and 4-point sparkles instead of round dots
+    //
+    // It is still a background: the centre keeps a soft well so page copy has
+    // somewhere to sit, and the brightest energy is thrown outward to the rim.
+    if (variant === 'radiant') {
+      const zod = {};
+      for (const k in (job.ZODIAC || {})) {
+        try { zod[k] = await load(job.ZODIAC[k]); } catch (e) {}
+      }
+      const order = ['aries', 'taurus', 'gemini', 'cancer', 'leo', 'virgo',
+                     'libra', 'scorpio', 'sagittarius', 'capricorn', 'aquarius', 'pisces']
+                    .filter(k => zod[k]);
+      const cx = W / 2, cy = H * 0.50;
+
+      // 1. nebula base
+      cover(ctx, bg.aetherion || bg.celestial, 0, 0, W, H, 0.45);
+      ctx.save(); ctx.globalCompositeOperation = 'multiply';
+      ctx.fillStyle = '#3a2a5e'; ctx.fillRect(0, 0, W, H); ctx.restore();
+      const neb = [
+        [W * 0.16, H * 0.24, W * 0.52, 'rgba(226,64,168,0.42)'],
+        [W * 0.86, H * 0.30, W * 0.48, 'rgba(64,196,255,0.36)'],
+        [W * 0.50, H * 0.92, W * 0.56, 'rgba(255,150,60,0.26)'],
+        [W * 0.68, H * 0.10, W * 0.40, 'rgba(150,90,255,0.34)'],
+      ];
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (const [x, y, r, col] of neb) {
+        const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+        g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      }
+      ctx.restore();
+
+      // 2. radial rays out of the centre
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 30; i++) {
+        const a = (i / 30) * Math.PI * 2 + 0.22;
+        const len = W * (0.30 + ((i * 37) % 11) / 11 * 0.34);
+        const wdt = 0.008 + ((i * 17) % 7) / 7 * 0.020;
+        const g = ctx.createLinearGradient(cx, cy, cx + Math.cos(a) * len, cy + Math.sin(a) * len);
+        g.addColorStop(0, 'rgba(255,225,180,0.00)');
+        g.addColorStop(0.45, `rgba(255,220,255,${(0.05 + ((i * 13) % 5) / 5 * 0.07).toFixed(3)})`);
+        g.addColorStop(1, 'rgba(120,200,255,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, len, a - wdt, a + wdt); ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+
+      // 3. starfield
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 480; i++) {
+        const rx2 = (i * 97.13) % 1, ry2 = (i * 61.79) % 1;
+        const a = 0.10 + ((i * 29) % 9) / 9 * 0.42;
+        ctx.fillStyle = `rgba(235,240,255,${a.toFixed(3)})`;
+        ctx.beginPath(); ctx.arc(rx2 * W, ry2 * H, 0.5 + ((i * 13) % 5) * 0.44, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+
+      // 4. comet streaks
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      const comets = [[0.10, 0.14, 1], [0.78, 0.08, -1], [0.30, 0.86, 1], [0.90, 0.70, -1], [0.55, 0.20, 1]];
+      comets.forEach((cm, i) => {
+        const x = cm[0] * W, y = cm[1] * H, dir = cm[2];
+        const len = W * (0.10 + (i % 3) * 0.045), dy = len * 0.42;
+        const g = ctx.createLinearGradient(x, y, x - dir * len, y - dy);
+        g.addColorStop(0, 'rgba(255,255,255,0.85)');
+        g.addColorStop(0.35, 'rgba(180,220,255,0.28)');
+        g.addColorStop(1, 'rgba(180,220,255,0)');
+        ctx.strokeStyle = g; ctx.lineCap = 'round'; ctx.lineWidth = 2.6;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - dir * len, y - dy); ctx.stroke();
+        sparkle(ctx, x, y, 9, 'rgba(255,245,220,0.95)');
+      });
+      ctx.restore();
+
+      // 5. the wheel — full colour, own-hue star lines
+      const figH = H * 0.225, half = figH * 0.62;
+      const rx = W / 2 - half - 16;
+      const ry = Math.min(H * 0.355, H / 2 - half - 14);
+      const nodes = [], hues = [];
+      order.forEach((k, i) => {
+        const a = (-Math.PI / 2) + (i / order.length) * Math.PI * 2;
+        const px = cx + Math.cos(a) * rx, py = cy + Math.sin(a) * ry;
+        const col = dominantColor(zod[k]);
+        hues.push(col);
+        const rgb = `${col[0] | 0},${col[1] | 0},${col[2] | 0}`;
+        // glow pad behind the sign so it separates from the nebula
+        ctx.save(); ctx.globalCompositeOperation = 'lighter';
+        const gp = ctx.createRadialGradient(px, py, 0, px, py, figH * 0.78);
+        gp.addColorStop(0, `rgba(${rgb},0.30)`); gp.addColorStop(1, `rgba(${rgb},0)`);
+        ctx.fillStyle = gp; ctx.fillRect(px - figH, py - figH, figH * 2, figH * 2);
+        ctx.restore();
+        const anchor = drawConstellation(ctx, zod[k], px, py, figH, {
+          ghost: 0.62, stars: 10, seed: i + 3, lw: 1.5,
+          line: `rgba(${rgb},0.62)`, star: '#ffffff', glow: `rgba(${rgb},1)`,
+        });
+        nodes.push(anchor || [px, py]);
+      });
+
+      // 6. lacing, tinted between the two signs it joins
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.lineWidth = 1.5;
+      nodes.forEach((p, i) => {
+        const j = (i + 1) % nodes.length, q = nodes[j];
+        const a1 = hues[i], a2 = hues[j];
+        const g = ctx.createLinearGradient(p[0], p[1], q[0], q[1]);
+        g.addColorStop(0, `rgba(${a1[0] | 0},${a1[1] | 0},${a1[2] | 0},0.42)`);
+        g.addColorStop(1, `rgba(${a2[0] | 0},${a2[1] | 0},${a2[2] | 0},0.42)`);
+        ctx.strokeStyle = g;
+        const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+        ctx.beginPath(); ctx.moveTo(p[0], p[1]);
+        ctx.quadraticCurveTo(mx + (cx - mx) * 0.10, my + (cy - my) * 0.10, q[0], q[1]);
+        ctx.stroke();
+      });
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(190,215,255,0.16)';
+      ctx.beginPath();
+      for (let i = 0; i < nodes.length; i++) {
+        const q = nodes[(i + 5) % nodes.length];
+        ctx.moveTo(nodes[i][0], nodes[i][1]); ctx.lineTo(q[0], q[1]);
+      }
+      ctx.stroke();
+      ctx.restore();
+
+      // 7. a soft well in the middle so page copy still has somewhere to sit
+      const well = ctx.createRadialGradient(cx, cy, 0, cx, cy, W * 0.30);
+      well.addColorStop(0, 'rgba(6,4,20,0.60)');
+      well.addColorStop(1, 'rgba(6,4,20,0)');
+      ctx.fillStyle = well; ctx.fillRect(0, 0, W, H);
+      vignette(ctx, W, H, 0.42);
+      return c.toDataURL('image/png').split(',')[1];
+    }
 
     // ── THE EVERDAWN SKY — one woven star chart ──────────────────────────
     // The margin-figures variants below are honest but disjoint: two sprites
