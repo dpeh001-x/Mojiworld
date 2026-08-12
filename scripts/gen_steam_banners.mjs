@@ -51,6 +51,13 @@ const MOB = {
 };
 const LOGO = 'steam/assets/library_logo.png';
 
+// The zodiac bosses, in wheel order. A zodiac IS a set of constellations, so
+// this is the one cast in the game that can carry a star-chart background
+// without the conceit feeling bolted on.
+const ZODIAC = ['aries', 'taurus', 'gemini', 'cancer', 'leo', 'virgo',
+                'libra', 'scorpio', 'sagittarius', 'capricorn', 'aquarius', 'pisces']
+  .reduce((m, z) => (m[z] = `Sprites/bosses/zodiac/${z}.webp`, m), {});
+
 // Instructor order is fixed left→right so the colour run reads
 // green → silver/red → navy/gold → violet, i.e. warm centre, cool ends.
 const LINEUP = [
@@ -70,7 +77,7 @@ const SIZES = {
   header:               { w: 920,  h: 430,  logo: true,  variants: ['council', 'realms', 'showdown'] },
   store_capsule_main:   { w: 1232, h: 706,  logo: true,  variants: ['council', 'realms', 'showdown'] },
   library_hero:         { w: 3840, h: 1240, logo: false, variants: ['council', 'realms', 'showdown'] },
-  store_page_background:{ w: 1438, h: 810,  logo: false, variants: ['eclipse', 'veil', 'abyss'] },
+  store_page_background:{ w: 1438, h: 810,  logo: false, variants: ['constellation', 'eclipse', 'veil', 'abyss'] },
 };
 
 const JOBS = [];
@@ -103,7 +110,7 @@ for (const job of JOBS) {
   let b64;
   try {
     b64 = await page.evaluate(async (j) => await window.__renderBanner(j),
-      { ...job, CAST, BG, MOB, LOGO, LINEUP });
+      { ...job, CAST, BG, MOB, LOGO, LINEUP, ZODIAC });
   } catch (e) {
     console.log('FAIL', String(e).slice(0, 120));
     continue;

@@ -61,6 +61,95 @@
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   }
 
+  // ── CONSTELLATION HELPERS ────────────────────────────────────────────────
+  // Stars are sampled from the creature's OWN alpha mask, so every point sits
+  // on the animal rather than in a generic scatter around it. That is what
+  // makes the figure read as a constellation OF that monster instead of a
+  // sprite with dots sprinkled near it.
+  function starsFromSprite(img, w, h, n, seed) {
+    const off = document.createElement('canvas');
+    const sw = Math.max(24, Math.round(w)), sh = Math.max(24, Math.round(h));
+    off.width = sw; off.height = sh;
+    const oc = off.getContext('2d');
+    oc.drawImage(img, 0, 0, sw, sh);
+    const d = oc.getImageData(0, 0, sw, sh).data;
+    const solid = [];
+    for (let y = 0; y < sh; y += 2)
+      for (let x = 0; x < sw; x += 2)
+        if (d[(y * sw + x) * 4 + 3] > 140) solid.push([x, y]);
+    if (!solid.length) return [];
+    // Farthest-point sampling — picks a spread of landmarks (head, paws, tail)
+    // instead of clumping wherever the sprite happens to be densest.
+    const pts = [solid[(seed * 7919) % solid.length]];
+    while (pts.length < n) {
+      let best = null, bestD = -1;
+      for (let i = 0; i < solid.length; i += 3) {
+        const p = solid[i];
+        let dm = Infinity;
+        for (const q of pts) {
+          const dx = p[0] - q[0], dy = p[1] - q[1];
+          const dd = dx * dx + dy * dy;
+          if (dd < dm) dm = dd;
+        }
+        if (dm > bestD) { bestD = dm; best = p; }
+      }
+      if (!best) break;
+      pts.push(best);
+    }
+    return pts;
+  }
+
+  // Chain the stars nearest-neighbour so the lines trace the body rather than
+  // criss-crossing it — a real star chart's lines follow the figure.
+  function chain(pts) {
+    if (pts.length < 2) return pts;
+    const left = pts.slice(1);
+    const out = [pts[0]];
+    while (left.length) {
+      const c = out[out.length - 1];
+      let bi = 0, bd = Infinity;
+      for (let i = 0; i < left.length; i++) {
+        const dx = left[i][0] - c[0], dy = left[i][1] - c[1];
+        const dd = dx * dx + dy * dy;
+        if (dd < bd) { bd = dd; bi = i; }
+      }
+      out.push(left.splice(bi, 1)[0]);
+    }
+    return out;
+  }
+
+  function drawConstellation(ctx, img, cx, cy, h, opts) {
+    const o = opts || {};
+    const s = h / img.naturalHeight, w = img.naturalWidth * s;
+    const x0 = cx - w / 2, y0 = cy - h / 2;
+    // 1. the creature itself, a dim luminous ghost
+    ctx.save();
+    ctx.globalAlpha = o.ghost == null ? 0.20 : o.ghost;
+    ctx.globalCompositeOperation = 'screen';
+    ctx.drawImage(img, x0, y0, w, h);
+    ctx.restore();
+    // 2. star chart over it
+    const pts = starsFromSprite(img, w, h, o.stars || 8, o.seed || 1);
+    if (pts.length < 2) return null;
+    const ch = chain(pts).map(p => [x0 + p[0], y0 + p[1]]);
+    ctx.save();
+    ctx.strokeStyle = o.line || 'rgba(190,215,255,0.34)';
+    ctx.lineWidth = o.lw || 1.15;
+    ctx.beginPath();
+    ch.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+    ctx.stroke();
+    for (let i = 0; i < ch.length; i++) {
+      const p = ch[i], big = (i === 0 || i === ch.length - 1);
+      const r = big ? 2.6 : 1.7;
+      ctx.fillStyle = o.star || 'rgba(226,238,255,0.92)';
+      ctx.shadowColor = o.glow || 'rgba(150,200,255,0.95)';
+      ctx.shadowBlur = big ? 12 : 7;
+      ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+    return ch[0];
+  }
+
   function logoAt(ctx, logo, cx, cy, maxW, maxH) {
     const s = Math.min(maxW / logo.naturalWidth, maxH / logo.naturalHeight);
     const w = logo.naturalWidth * s, h = logo.naturalHeight * s;
@@ -91,6 +180,116 @@
     // the four instructors stand on a baseline a little above the bottom edge
     const baseY = H * 0.92;
     const figH = H * (W / H > 2.6 ? 0.66 : 0.60);   // wide heroes get taller figures
+
+    // ── THE EVERDAWN SKY — one woven star chart ──────────────────────────
+    // The margin-figures variants below are honest but disjoint: two sprites
+    // parked at the edges of a dark plate, with nothing tying them to each
+    // other or to the middle. This one is a single artwork instead.
+    //
+    // The twelve ZODIAC bosses are the natural cast for it — a zodiac already
+    // IS a set of constellations, so the conceit is the game's own rather than
+    // decoration bolted on. They sit on a wheel around the frame, which puts
+    // every figure in the margins Steam leaves visible and leaves the centre
+    // open for the content column FOR FREE — the composition does the job the
+    // scrim had to force in the other variants.
+    //
+    // Each creature is a dim luminous ghost with a star chart drawn over it,
+    // and the star points are sampled from its OWN alpha mask (see
+    // starsFromSprite) so they land on horns, paws and tails instead of being
+    // scattered nearby. The wheel is then laced together — ring arcs between
+    // neighbours, long chords across the middle — so the whole plate reads as
+    // one connected sky rather than twelve separate stickers.
+    if (variant === 'constellation') {
+      const zod = {};
+      for (const k in (job.ZODIAC || {})) {
+        try { zod[k] = await load(job.ZODIAC[k]); } catch (e) { /* skip a missing sign */ }
+      }
+      const order = ['aries', 'taurus', 'gemini', 'cancer', 'leo', 'virgo',
+                     'libra', 'scorpio', 'sagittarius', 'capricorn', 'aquarius', 'pisces']
+                    .filter(k => zod[k]);
+
+      // deep-space plate
+      cover(ctx, bg.aetherion || bg.inner || bg.celestial, 0, 0, W, H, 0.45);
+      ctx.save();
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.fillStyle = '#252c52'; ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+      const sky = ctx.createRadialGradient(W / 2, H * 0.5, 0, W / 2, H * 0.5, W * 0.62);
+      sky.addColorStop(0, 'rgba(10,14,34,0.55)');
+      sky.addColorStop(1, 'rgba(5,7,20,0.88)');
+      ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+
+      // starfield — denser toward the edges, so the middle stays calm
+      ctx.save();
+      for (let i = 0; i < 420; i++) {
+        const rx = (i * 97.13) % 1, ry = (i * 61.79) % 1;
+        const edge = Math.abs(rx - 0.5) * 2;
+        const a = 0.05 + edge * 0.28 * (((i * 29) % 7) / 7 + 0.35);
+        ctx.fillStyle = `rgba(210,228,255,${a.toFixed(3)})`;
+        const r = 0.5 + ((i * 13) % 5) * 0.42;
+        ctx.beginPath(); ctx.arc(rx * W, ry * H, r, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+
+      // the wheel
+      // Wheel radii are sized so no sign is clipped by the frame. The first
+      // pass used rx/ry of 0.405/0.40, which put the 12 and 6 o'clock signs
+      // half off the top and bottom edges (figure half-height 87px against a
+      // 324px radius from a 405px centre) and shaved the 3 o'clock sign on the
+      // right. Radii now leave a margin of at least half a figure on every
+      // side: a constellation cut by the canvas edge stops reading as one.
+      const figH = H * 0.205, half = figH * 0.62;
+      const cx = W / 2, cy = H * 0.50;
+      // rx is pushed to whatever the frame allows rather than a fixed fraction.
+      // Steam's ~940px content column covers x 249-1189 here, so every pixel
+      // the wheel gains outward moves the 9 and 3 o'clock signs further into
+      // the margins the visitor actually sees. A wheel still necessarily puts
+      // signs at 12 and 6 inside the covered band — that is the cost of a
+      // composition that reads as one connected sky instead of edge decoration,
+      // and it is affordable because the whole plate is dark enough (mean
+      // luminance ~12/255) that nothing shows through the page copy anyway.
+      const rx = W / 2 - half - 16;
+      const ry = Math.min(H * 0.355, H / 2 - half - 14);
+      const nodes = [];
+      order.forEach((k, i) => {
+        const a = (-Math.PI / 2) + (i / order.length) * Math.PI * 2;
+        const px = cx + Math.cos(a) * rx, py = cy + Math.sin(a) * ry;
+        const anchor = drawConstellation(ctx, zod[k], px, py, figH, {
+          ghost: 0.20, stars: 10, seed: i + 3, lw: 1.1,
+        });
+        nodes.push(anchor || [px, py]);
+      });
+
+      // lace the wheel together: ring arcs + long chords through the middle
+      ctx.save();
+      ctx.lineWidth = 0.9;
+      ctx.strokeStyle = 'rgba(150,190,255,0.16)';
+      ctx.beginPath();
+      nodes.forEach((p, i) => {
+        const q = nodes[(i + 1) % nodes.length];
+        const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+        const bow = 0.10;
+        ctx.moveTo(p[0], p[1]);
+        ctx.quadraticCurveTo(mx + (cx - mx) * bow, my + (cy - my) * bow, q[0], q[1]);
+      });
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(150,190,255,0.085)';
+      ctx.beginPath();
+      for (let i = 0; i < nodes.length; i++) {
+        const q = nodes[(i + 5) % nodes.length];     // 5-step chords cross the centre
+        ctx.moveTo(nodes[i][0], nodes[i][1]); ctx.lineTo(q[0], q[1]);
+      }
+      ctx.stroke();
+      ctx.restore();
+
+      // settle the middle just enough for page copy, without erasing the lacing
+      const mid = ctx.createRadialGradient(cx, cy, 0, cx, cy, W * 0.34);
+      mid.addColorStop(0, 'rgba(4,6,16,0.62)');
+      mid.addColorStop(1, 'rgba(4,6,16,0)');
+      ctx.fillStyle = mid; ctx.fillRect(0, 0, W, H);
+      vignette(ctx, W, H, 0.52);
+      return c.toDataURL('image/png').split(',')[1];
+    }
 
     // ── STORE PAGE BACKGROUND ────────────────────────────────────────────
     // Different job from a capsule. Steam centres the store page's ~940px
