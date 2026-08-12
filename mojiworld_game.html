@@ -19978,7 +19978,7 @@ const monsterTypes = {
   // shootCd 2200 → 1300 (almost double rate of fire). `activeBoss`
   // trait flips the AI jump-roll from 2% / frame to 9% / frame so he
   // hop-strides instead of pacing.
-  young_confused_barnaby:         { name:'Young Confused Barnaby, the Lost Sentinel', w:120, h:140, color:'#d8c878', shell:'#6a4a18', hp:1598872, atk:225, def:76, evasion:126, exp:17454, mojicoins:6241, speed:2.1, jump:8, boss:true, level: 40, shoot:'mquery', shootCd:1300, signature:'A young Barnaby who never picked which wall to defend. Lashes out in two directions at once.', traits:{ activeBoss:true } },
+  young_confused_barnaby:         { name:'Young Confused Barnaby, the Lost Sentinel', w:120, h:140, color:'#d8c878', shell:'#6a4a18', hp:1598872, atk:225, def:76, evasion:126, exp:17454, mojicoins:6241, speed:2.1, jump:8, boss:true, level: 40, shoot:'mquery', shootCd:2400, jumpCdMs:1100, signature:'A young Barnaby who never picked which wall to defend. Lashes out in two directions at once.', traits:{ activeBoss:true } },
   octoLegPoison:    { name:'Venom Tentacle',     w:80, h:60, color:'#cc66ee', shell:'#5a2078', hp:50000,  atk:120, def:20, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
   octoLegFreeze:    { name:'Frostbite Tentacle', w:80, h:60, color:'#88ccff', shell:'#3a5a88', hp:50000,  atk:120, def:20, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
   octoLegSkillLock: { name:'Silence Tentacle',   w:80, h:60, color:'#ffaa44', shell:'#aa6622', hp:50000,  atk:120, def:20, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
@@ -61422,10 +61422,21 @@ const SKILL_FNS = {
       // shockwave size larger"): 88% more area than the 76x54 first pass,
       // still 59% of Calamity Incarnate's 100x130 follow-up waves and well
       // under its 130x170 opener, so the ult keeps reading as the bigger move.
+      // v0.29.x — CENTRED ON THE PLAYER (per user: the wave should sit at the
+      // player's vertical level). p.y is the projectile's TOP edge: the draw
+      // centres on p.y + p.h/2 and the hit test spans p.y .. p.y + p.h. This
+      // spawned at y: cy, the player's CENTRE, so the wave's own centre sat
+      // h/2 BELOW the midline — 13 px at the original 26 px box, 37 px once
+      // it grew to 74. Enlarging it did not cause that, it made it visible.
+      //
+      // Height and the offset are derived from ONE constant so they cannot
+      // drift apart again the next time the wave is resized — which is
+      // exactly how this drifted in the first place.
+      const _bwW = 104, _bwH = 74;
       game.projectiles.push({
-        x: cx + dir * 20, y: cy,
+        x: cx + dir * 20, y: cy - _bwH / 2,
         vx: dir * 10, vy: 0,
-        w: 104, h: 74, life: 40,
+        w: _bwW, h: _bwH, life: 40,
         damage: getAtk() * 0.9 + 4,
         owner: 'player', skill: 'bloodwave',
         bspr: 'bult_doombringer', bsprFlipX: true,
@@ -68316,7 +68327,17 @@ function updateMonsters(dt) {
         // m.jump value on those mobs, the effect is constant vertical
         // pressure — no safe-platform turtling.
         const _jumpP = (m.traits && m.traits.activeBoss) ? 0.09 : 0.02;
-        if (m.jump > 0 && m.onGround && Math.random() < _jumpP) m.vy = -_mobJumpV(m);
+        // v0.29.645 - optional per-type jump cooldown. The activeBoss roll is
+        // 9% PER FRAME, a hop attempt every ~11 frames at 60fps, which reads as
+        // stuttering rather than aggression. A type may declare jumpCdMs to
+        // floor the gap between hops; types that omit it are unaffected.
+        const _jcd = (m.jumpCdMs | 0);
+        if (_jcd > 0) { m._jumpCdT = Math.max(0, (m._jumpCdT || 0) - dt); }
+        if (m.jump > 0 && m.onGround && !(_jcd > 0 && m._jumpCdT > 0)
+            && Math.random() < _jumpP) {
+          m.vy = -_mobJumpV(m);
+          if (_jcd > 0) m._jumpCdT = _jcd;
+        }
       } else {
         // Out of aggro range — clear the per-monster offset so the
         // next time this mob aggros it picks a fresh slot.
