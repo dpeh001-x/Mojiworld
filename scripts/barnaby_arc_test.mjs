@@ -58,11 +58,27 @@ const r = await page.evaluate(() => {
   // later trim that guts the prose fails loudly instead of leaving a chapter
   // called "Five Stories" with three.
   const five = (QUESTS.q_barnaby_five || {}).desc || '';
-  out.theoryLabels = ['THE SUBSTITUTION', 'THE UNDERSTUDY', 'THE WATCH', 'THE BROTHER'].filter((t) => five.includes(t));
-  out.unsignedFifth = /nobody will sign/i.test(five);
+  out.theoryLabels = ['HE DIED THAT NIGHT', 'HE NEVER TRAINED HERE', 'SOMEONE IS WATCHING HIM',
+                      'THERE WERE ALWAYS TWO'].filter((t) => five.includes(t));
+  out.unsignedFifth = /put their name to/i.test(five);
   // Chapter II's evidence and chapter III's contradiction must both survive.
-  out.rollDouble = /twice/i.test((QUESTS.q_barnaby_roll || {}).desc || '');
-  out.copiedOut = /copied one OUT/.test((QUESTS.q_barnaby_hands || {}).desc || '');
+  out.rollDouble = /on it twice/i.test((QUESTS.q_barnaby_roll || {}).desc || '');
+  out.copiedOut = /pushed one out/i.test((QUESTS.q_barnaby_hands || {}).desc || '');
+
+  // --- plain language, measured ------------------------------------------
+  // Per user: "make the language used a bit more plainly understood and
+  // simpler, but carry a strong sense of depth still". Depth is not testable;
+  // plainness is. Two things that actually track it: sentence length, and a
+  // list of the words this arc reached for when it was showing off.
+  const descs = ids.map((i) => (QUESTS[i] || {}).desc || '').join(' ');
+  const sentences = descs.split(/[.!?]+\s/).map((x) => x.trim()).filter((x) => x.length > 3);
+  const words = sentences.map((x) => x.split(/\s+/).length);
+  out.sentenceCount = sentences.length;
+  out.avgWords = words.length ? words.reduce((a, b) => a + b, 0) / words.length : 0;
+  out.longest = Math.max(0, ...words);
+  const JARGON = ['billet', 'clerical duplication', 'muster roll', 'quartermaster',
+                  'apprenticeship', 'counterpart page', 'gauntlets', 'recognises as his own'];
+  out.jargonHits = JARGON.filter((w) => new RegExp(w, 'i').test(descs));
   // It must sit INSIDE the Sundered Smith arc, not beside it.
   out.smithArcLink = ((QUESTS.q_barnaby_five || {}).prereq === 'q_visit_lavaCavern')
     && (QUESTS.q_barnaby_roll || {}).target === 'sundered_smith';
@@ -95,6 +111,10 @@ check(JSON.stringify(r.chain) === JSON.stringify(['q_visit_lavaCavern', 'q_barna
   'the three chapters form one ordered chain hanging off Brok\'s errand', r.chain);
 check(r.smithArcLink, 'it runs INSIDE the Sundered Smith arc (Brok\'s errand in, the Smith as chapter II\'s target)', r.smithArcLink);
 check(r.theoryLabels.length === 4 && r.unsignedFifth, 'chapter I still carries four named theories plus the unsigned fifth', { labelled: r.theoryLabels, fifth: r.unsignedFifth });
+console.log(`  plain-language: ${r.sentenceCount} sentences, avg ${r.avgWords.toFixed(1)} words, longest ${r.longest}`);
+check(r.avgWords <= 20, 'the prose averages under 20 words per sentence (plain, not clipped)', r.avgWords);
+check(r.longest <= 55, 'no runaway sentence', r.longest);
+check(r.jargonHits.length === 0, 'no jargon the plain-language pass removed has crept back', r.jargonHits);
 check(r.rollDouble, 'chapter II still puts him on the roll twice', r.rollDouble);
 check(r.copiedOut, 'chapter III still turns the realm\'s assumption around (copied one OUT)', r.copiedOut);
 check(r.sootIntact, 'the Vigil double still carries the forge soot the whole reveal rests on', r.sootIntact);
