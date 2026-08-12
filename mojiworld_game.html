@@ -9422,7 +9422,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.634';
+const GAME_VERSION = 'v0.29.635';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -29933,6 +29933,49 @@ MAPS.tidepoolShoals.portals.push ({x:100,  dest:'pearlBathhouse',  name:'◀ Pea
     if (Array.isArray(b.portals)) m.portals = b.portals;
   }
 })();
+
+// v0.29.636 — BLOCK-LAND WIDTH TRIM (per user "make the block lands slightly
+// less wide"). The six field maps ran 3600-4400 px against a ~2000-3200 norm
+// elsewhere, so crossing one was a long walk through a repeating 340 px
+// platform lattice.
+//
+// TRUNCATED, NOT SCALED. Squashing x would shorten every gap and quietly
+// retune every jump on maps whose lattice spacing, launch-pad arcs and
+// Legosaurus approach are all built around the current distances. Cutting the
+// tail leaves all of that identical and simply ends the map sooner. Roughly
+// -20% each; the Apex arena (2000, Legosaurus) is deliberately untouched.
+//
+// Anything that would be stranded past the new edge is fixed up here rather
+// than left dangling: the ground strip is clamped, platforms starting beyond
+// the edge are dropped, one straddling it is trimmed, the far portal is moved
+// to the new edge, and a launch pad past the edge would be dropped (none are).
+const _LX_BLOCKLAND_W = {
+  blockland_meadow:  2900,   // was 3600
+  blockland_grove:   3050,   // was 3800
+  blockland_dunes:   3200,   // was 4000
+  blockland_quarry:  3350,   // was 4200
+  blockland_outpost: 3500,   // was 4400
+  blockland_citadel: 3350,   // was 4200
+};
+for (const _bid in _LX_BLOCKLAND_W) {
+  const _bm = MAPS[_bid];
+  if (!_bm) continue;
+  const _nw = _LX_BLOCKLAND_W[_bid];
+  if (!(_bm.worldWidth > _nw)) continue;
+  const _ow = _bm.worldWidth;
+  _bm.worldWidth = _nw;
+  const _EDGE = 40;                       // keep a walkable lip inside the wall
+  _bm.platforms = (_bm.platforms || []).filter(p => {
+    if (p.type === 'ground') { p.w = Math.min(p.w, _nw - p.x); return p.w > 0; }
+    if (p.x >= _nw - _EDGE) return false;                 // starts past the edge
+    if (p.x + p.w > _nw - _EDGE) p.w = (_nw - _EDGE) - p.x; // straddles it
+    return p.w > 20;                                       // no slivers
+  });
+  _bm.launchPads = (_bm.launchPads || []).filter(p => p.x + (p.w || 90) <= _nw - _EDGE);
+  for (const _pt of (_bm.portals || [])) {
+    if (_pt.x > _ow / 2) _pt.x = Math.min(_pt.x, _nw - 100);   // the far exit
+  }
+}
 
 // --- POSITION DELTAS (37 maps; authoritative last-write) ---
 MAPS.azureAbode.wmX = 1011; MAPS.azureAbode.wmY = 433;
@@ -54861,6 +54904,28 @@ function _applyMobContactStatuses(m, dmg) {
 // buoyancy). Single source of truth so the CC blocks (hit-stun / freeze / QTE)
 // fall at the same rate as the normal step instead of a flat 0.5 / cap-14
 // (which made a CC'd player hang on heavy maps and sink ~5x too fast underwater).
+// v0.29.636 — LAUNCH-PAD DISC GEOMETRY, shared by the renderer and the
+// trigger so a change to one cannot silently desync the other.
+//
+// The pad sprite is drawn with its BOTTOM (the stone plinth) anchored at pad.y,
+// but the surface a player reads as standing-on-the-bumper is the blue disc
+// partway up it. Measured from launchpad_pad_side.webp (355x512): the disc's
+// top edge is at y=284, i.e. 55.5% down the art. Everything above that is the
+// decorative flame plume.
+//
+// Returns how far ABOVE pad.y the disc is drawn, in world px. The 6 px matches
+// the renderer's "bury the sprite bottom 6 px" nudge.
+const LX_PAD_ART_ASPECT = 512 / 355;   // fallback until the sprite decodes
+const LX_PAD_DISC_FRAC  = 0.555;       // measured, not eyeballed
+function _lxPadDiscRise(pad) {
+  const pw = (pad && pad.w) || 90;
+  const img = (typeof LX_OBJECTS !== 'undefined')
+    ? (LX_OBJECTS[(game.mapData && game.mapData.launchPadSprite) || 'launchpad_side'] || LX_OBJECTS['launchpad_side'])
+    : null;
+  const aspect = (img && img.naturalWidth) ? (img.naturalHeight / img.naturalWidth) : LX_PAD_ART_ASPECT;
+  return Math.max(0, (1 - LX_PAD_DISC_FRAC) * (pw * 1.42 * aspect) - 6);
+}
+
 function _playerGravityStep() {
   let gM = gravMul();
   const _md = game.mapData;
@@ -56283,6 +56348,7 @@ function updatePlayer(dt) {
 
   // v0.26.345 — LAUNCH PADS (hyper-jump). Per user "make have some launch
   // pads in the map to launch the player when jumped on in a specific
+  // See _lxPadDiscRise (defined above updatePlayer) for the disc geometry.
   // directions like a hyper jump". Each map can declare `launchPads:
   // [{x, y, w, vx, vy, color, label}]` in world coords. When the player's
   // feet land on / pass through a pad's footprint while descending (vy ≥ 0)
@@ -56306,7 +56372,30 @@ function updatePlayer(dt) {
       // Vertical: feet within a ~26 px band above the pad top, AND the
       // player is descending or grounded (so you arm it by landing on it,
       // not by passing underneath on the way up).
-      if (_pfeet < _pad.y - 4 || _pfeet > _pad.y + 26) continue;
+      // v0.29.636 — THE BAND NOW REACHES THE DISC. Reported as "bumper that is
+      // placed right below the platform is not working". The pad itself was
+      // fine: driven directly it fires vy -105 and lifts the player 435 px onto
+      // the top floor. What failed was WHERE it listens.
+      //
+      // launchpad_pad_side.webp is 355x512 and is drawn 246 px tall on a
+      // 120-wide pad, anchored so the art's BOTTOM — the stone plinth — sits at
+      // pad.y. Measuring the sprite, the blue disc a player reads as "stand
+      // here" begins 55.5% down it (y=284 of 512); everything above is a
+      // decorative flame. So on Brick Grove the disc DRAWS at y~396 while the
+      // trigger listened at [496, 526]: 246 px of visible bumper, 30 px of it
+      // live, and a ~100 px gap between the two.
+      //
+      // Brick Grove then puts a platform inside that gap — y 412 across
+      // x 1850-2026, directly over the x 1900 pad (the other pad has one at
+      // y 341). Standing there you are visually on the disc with your feet
+      // 100 px above anything that listens, which is exactly the screenshot.
+      // The pad looked broken because the part of it you were touching was
+      // decoration.
+      //
+      // The rise is derived from the same sprite metrics the renderer uses, so
+      // the two cannot drift apart again. Rising-from-below is still excluded
+      // by the vy check above, so passing up through the column is unaffected.
+      if (_pfeet < _pad.y - _lxPadDiscRise(_pad) - 4 || _pfeet > _pad.y + 26) continue;
       // v0.26.424 — AUTO hyper-jump: stepping on the pad fires it, no jump key
       // needed. Fire whenever the player is grounded on the pad OR descending
       // onto it; only skip when rising up through a mid-air pad from below.
