@@ -23,9 +23,21 @@ const SPRITES = ['pothole_earth', 'pothole_crypt'];
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra) });
 
+const sharp = require('sharp');
 for (const k of SPRITES) {
   const p = path.join(ROOT, 'Sprites', 'objects', `${k}.webp`);
   ok(`${k}.webp exists`, fs.existsSync(p), fs.existsSync(p) ? `${fs.statSync(p).size} bytes` : 'missing');
+  if (!fs.existsSync(p)) continue;
+  // The v1 art was CUT OFF: the ring ran straight off the canvas, 106/107
+  // opaque pixels sitting on the left/right border. Any opaque pixel on the
+  // border means the shape was sliced rather than framed.
+  const { data, info } = await sharp(p).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width: w, height: h, channels: ch } = info;
+  const A = (x, y) => data[(y * w + x) * ch + 3];
+  let border = 0;
+  for (let x = 0; x < w; x++) { if (A(x, 0) > 40) border++; if (A(x, h - 1) > 40) border++; }
+  for (let y = 0; y < h; y++) { if (A(0, y) > 40) border++; if (A(w - 1, y) > 40) border++; }
+  ok(`${k} is not cut off at the canvas edge`, border === 0, `${border} opaque px on the border`);
 }
 
 const PORT = 9124;

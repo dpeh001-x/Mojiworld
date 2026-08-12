@@ -121,6 +121,20 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.642 <span class="tag"><span class="pill bug">bug</span> The pothole rings were sliced off at the canvas edge &mdash; a square canvas for a wide shape</span></h2>
+<p>Per user: <em>for the crypts there are cut offs, please regenerate and implement.</em> Correct, and it was measurable on the v0.29.641 art: the crypt sprite's opaque bounding box spanned the full 256&nbsp;px width with <b>106 opaque pixels sitting ON the left border and 107 on the right</b> &mdash; the stone ring was cut flat down both sides. The earth sprite was clipped too (28&nbsp;px on the right, 8 on the bottom).</p>
+<h3>Why, and why retrying alone would not have fixed it</h3>
+<p>A pothole is a <b>wide ellipse</b>, and both sprites were generated on a <b>square canvas</b> &mdash; the shape had nowhere to put its margins. Prompting harder did not help: eight regenerations in a row came back clipped. The failure signature is what gave it away &mdash; the rejected attempts measured edge runs of <code>0 / 0 / 238 / 268</code>, i.e. <b>top and bottom perfectly clean, only the sides cut</b>, exactly what a subject squeezed horizontally looks like. Moving to a <b>16:9 canvas</b> fixed it at the source on the first earth attempt.</p>
+<h3>So it cannot silently happen again</h3>
+<ul>
+  <li><b>The generator now rejects cropped output</b> instead of saving it. It measures the longest <em>contiguous</em> run of opaque pixels along each edge and fails the attempt above 10% of an edge &mdash; contiguous rather than total, so a stray speck of debris or a soft shadow does not burn a retry. It rejected 3 bad crypt generations before accepting a clean one.</li>
+  <li><b>It then trims to the opaque bounding box and re-pads</b> to a guaranteed 7% margin per side, so framing no longer depends on the model cooperating. Both sprites now measure <b>0 opaque pixels on every border</b>, with even 18&nbsp;px side margins.</li>
+  <li><b>The test pins it.</b> A new assertion per sprite fails on any opaque pixel touching the canvas edge, so this exact defect cannot return unnoticed.</li>
+</ul>
+<h3>The renderer had to change too</h3>
+<p>The replacement art is authored wide and <em>already contains</em> the ground-plane ellipse (~220&times;113 of content inside a 256 square). The old draw applied <code>dh = dw &times; 0.52</code> on top of that, which would have flattened the new sprites to roughly half their intended height. The square canvas is now drawn square, preserving the art's own proportions, with the scale raised to <b>1.75&times;</b> the trip zone so the lit rim still frames the hazard.</p>
+<p><b>Verification.</b> <code>scripts/pothole_visibility_test.mjs</code> grows to <b>15</b> assertions &mdash; the two new ones are the cut-off checks. The visibility measurement that motivated v0.29.641 still holds after the re-art and the rescale: the thicket pit paints <b>1884</b> bright pixels on dark ground (was <b>0</b> before the feature) and the crypt pit <b>2281</b>, both retaining a dark opening. <b>15/15, zero page errors.</b></p>
+
 <h2>v0.29.641 <span class="tag"><span class="pill polish">polish</span> Potholes you can actually see &mdash; the old ones painted zero visible pixels</span></h2>
 <p>Per user, with a screenshot of Thornspire Thicket and the pit circled because it is nearly invisible: make the black circular pitholes more visible.</p>
 <p><b>They were black-on-dark, and the measurement is stark.</b> The old renderer drew a 12&nbsp;px-tall stack of flat black ellipses at 55&ndash;75% alpha plus one thin rim line. Painting it over the thicket floor tone and counting pixels: <b>0 brighter than the ground, 192 darker</b>. Against a dark forest floor, a dark smudge reads as a texture blotch, not a hazard &mdash; which is exactly what the screenshot shows.</p>

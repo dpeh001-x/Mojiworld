@@ -36,7 +36,13 @@ const COMMON =
   'stands out against dark ground. Painted game-art style, crisp readable shapes, soft cel shading. ' +
   'NO rounded-square, NO tile, NO card, NO frame, NO border, NO panel, NO background fill or gradient, ' +
   'NO scene, NO character, NO text. FULLY TRANSPARENT background (alpha only). ' +
-  'The hole fills about 92% of the image width and is centered.';
+  // v2: the first pass asked for 92% of the width and came back with the ring
+  // sliced flat against both image edges (106/107 opaque pixels sitting ON the
+  // left/right border). Ask for a much smaller subject with real empty margin;
+  // the trim-and-pad step below then enforces it regardless of what comes back.
+  'IMPORTANT FRAMING: the hole must be COMPLETE and UNCROPPED, floating in the middle of the ' +
+  'image at about 65% of the image width, with a wide band of EMPTY TRANSPARENT SPACE on all ' +
+  'four sides. Nothing may touch or run off any edge of the image.';
 
 const SPRITES = [
   {
@@ -93,7 +99,12 @@ for (const spr of SPRITES) {
         method: 'POST',
         headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(TIMEOUT),
-        body: JSON.stringify({ image_type: 'sprite', art_style: 'Anime/Manga', aspect_ratio: 'ar_1_1', n: 1, augment_prompt: false, prompt: spr.prompt }),
+        // A pothole is a WIDE ellipse. On the square canvas the first passes
+        // used, every generation came back with the ring sliced flat against
+        // the left and right edges (measured runs 0/0/238/268 — top and bottom
+        // perfectly clean, sides cut) because the shape simply had nowhere to
+        // go. A 16:9 canvas matches the subject, so the model can leave margins.
+        body: JSON.stringify({ image_type: 'sprite', art_style: 'Anime/Manga', aspect_ratio: (process.env.LX_PIT_AR || 'ar_16_9'), n: 1, augment_prompt: false, prompt: spr.prompt }),
       });
       if (!res.ok) {
         const t = await res.text();
@@ -104,12 +115,46 @@ for (const spr of SPRITES) {
       const url = Array.isArray(data) ? data[0]?.url : (data?.url || data?.images?.[0]?.url);
       if (!url) throw new Error('no url');
       const png = await fetchBuf(url);
-      await writeFile(OUT, await sharp(png)
-        .resize(SIZE, SIZE, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      // ---- reject clipped art, then trim + re-pad to a guaranteed margin ----
+      // `fit: contain` adds no margin when the subject already fills the frame,
+      // so a cropped generation would ship cropped. Measure the opaque bounding
+      // box: if the subject sits ON an edge it was cut, and the attempt is
+      // wasted rather than saved.
+      const { data: px, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      const { width: w, height: h, channels: ch } = info;
+      const A = (x, y) => px[(y * w + x) * ch + 3];
+      // Judge by the LONGEST CONTIGUOUS run of opaque pixels along an edge, not
+      // the total. A cut through the subject leaves one long flat chord; a
+      // stray speck of debris or a soft shadow leaves short runs, and rejecting
+      // those just burns credits on generations that were fine.
+      const longestRun = (get, n) => {
+        let best = 0, run = 0;
+        for (let i = 0; i < n; i++) { if (get(i) > 40) { if (++run > best) best = run; } else run = 0; }
+        return best;
+      };
+      const runs = [
+        longestRun((x) => A(x, 0), w), longestRun((x) => A(x, h - 1), w),
+        longestRun((y) => A(0, y), h), longestRun((y) => A(w - 1, y), h),
+      ];
+      const worst = Math.max(runs[0], runs[1]) / w;
+      const worstV = Math.max(runs[2], runs[3]) / h;
+      const cut = Math.max(worst, worstV);
+      if (cut > 0.10) throw new Error(`clipped: longest edge run ${(cut * 100).toFixed(0)}% of an edge (runs ${runs.join('/')} on ${w}x${h})`);
+      let x0 = w, y0 = h, x1 = -1, y1 = -1;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (A(x, y) > 40) {
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+      if (x1 < 0) throw new Error('fully transparent result');
+      const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+      const inner = Math.round(SIZE * 0.86);          // 7% clear margin per side
+      const trimmed = await sharp(png).extract({ left: x0, top: y0, width: bw, height: bh })
+        .resize(inner, inner, { fit: 'inside', background: { r: 0, g: 0, b: 0, alpha: 0 } }).toBuffer();
+      await writeFile(OUT, await sharp({ create: { width: SIZE, height: SIZE, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+        .composite([{ input: trimmed, gravity: 'center' }])
         .webp({ quality: 92, alphaQuality: 100 })
         .toBuffer());
       const meta = await sharp(OUT).metadata();
-      console.log(`OK -> ${OUT} (${meta.width}x${meta.height}, alpha=${meta.hasAlpha})`);
+      console.log(`OK -> ${OUT} (${meta.width}x${meta.height}, alpha=${meta.hasAlpha}, src bbox ${bw}x${bh}, edge-run ${(cut * 100).toFixed(0)}%)`);
       done = true;
     } catch (e) {
       last = e; console.log('FAIL: ' + e.message);
