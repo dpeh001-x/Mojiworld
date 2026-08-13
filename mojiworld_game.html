@@ -9446,7 +9446,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.673';
+const GAME_VERSION = 'v0.29.672';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -80005,6 +80005,27 @@ function updateProjectiles(dt) {
         const _vnx = _vdx / RX, _vny = _vdy / RY;
         const _vn = Math.sqrt(_vnx * _vnx + _vny * _vny);   // < 1 = inside the drawn pool
         if (_vn >= 1) continue;
+        // v0.29.672 — NO DRAIN THROUGH THE FLOOR. The ellipse extends RY=96px
+        // BELOW the pool's surface, and on multi-platform underwater maps that
+        // lower half reaches straight through the floor: a mob on a ledge
+        // UNDERNEATH sat inside the bottom rim taking drain ticks — no visible
+        // pool near it, and no pull either (the pull vector points straight up
+        // and grounded mobs only receive its horizontal part; measured: a mob
+        // 89px below centre, _vn 0.927, draining through its ceiling). A floor
+        // pool affects what stands ON it, not what is under it.
+        if (m.y > cy + 12) continue;
+        // v0.29.672 — NO DRAIN THROUGH THE FLOOR (per user: "the AOE should be
+        // expected... not glitchy in underwater maps"). The ellipse extends
+        // RY=96px BELOW the pool's surface line, and on multi-platform maps
+        // (all the underwater towers) that lower half reaches straight through
+        // the floor: a mob on a ledge UNDERNEATH the pool sat inside the
+        // bottom rim taking drain ticks — with no visible pool anywhere near
+        // it, and no pull either, since the pull vector points straight up and
+        // grounded mobs only receive its horizontal part. Measured on
+        // kelpForest: a mob 89px below centre, _vn 0.927, draining through its
+        // ceiling. A floor pool affects what stands ON it, not what is under
+        // it: any mob whose TOP edge is below the pool's surface line is out.
+        if (m.y > cy + 12) continue;
         // --- suction: position, not velocity (see note 2 above) ---
         if (!m._noGravity) {
           const _pdx = cx - (m.x + m.w/2), _pdy = cy - (m.y + m.h/2);
@@ -80012,11 +80033,25 @@ function updateProjectiles(dt) {
           let _step = LX_VORTEX_PULL_RIM + (LX_VORTEX_PULL_CORE - LX_VORTEX_PULL_RIM) * (1 - _vn);
           if (m.isBoss || m.isMiniBoss || m.boss) _step *= 0.30;   // bosses lean in, they don't get vacuumed
           _step = Math.min(_step, Math.max(0, _pd - LX_VORTEX_HOLD));   // clump at the core, don't stack on one pixel
+          // v0.29.672 — GRIP. Measured on kelpForest: a captured grounded mob
+          // flipped direction 7-9 times in 5s. Inside the 24px hold ring the
+          // pull is zero, so the mob's own AI walk (integrated moments ago in
+          // updateMonsters) moved it freely until it stepped past the ring and
+          // got yanked back — a visible vibration at the clump point. This tick
+          // runs right AFTER integration, so undoing 80% of the walk while
+          // gripped kills the wobble at its amplitude without touching shared
+          // AI code. Bosses exempt — they lean in, they keep walking.
+          if (!m.flies && !(m.isBoss || m.isMiniBoss || m.boss)) m.x -= (m.vx || 0) * 0.8;
           m.x += (_pdx / _pd) * _step;
           // Vertical drag only for things that swim or fly. A grounded mob stays
           // on its platform and slides toward the pool rather than being tugged
           // into the floor collision.
           if (m.flies) m.y += (_pdy / _pd) * _step * 0.7;
+          // v0.29.672 — FLIER FLOOR CLAMP. Fliers skip platform collision and
+          // the drag aims at the pool centre on the floor line, so a tall
+          // swimmer's feet were dragged up to 10px into the ground (154/300
+          // frames clipped, measured). Feet now rest at the pool's centreline.
+          if (m.flies && m.y + m.h > cy) m.y = cy - m.h;
           // A flier's steering lerp keeps 84% of its velocity frame to frame, so
           // unlike a grounded mob (whose vx the AI reassigns outright) it can just
           // swim out of the pool at its cap. Bleed its own speed while it is
