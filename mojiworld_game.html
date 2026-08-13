@@ -9430,7 +9430,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.665';
+const GAME_VERSION = 'v0.29.666';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -18394,8 +18394,9 @@ const POWERUPS = [
   { id:'xp', tier:'common',     name:'Quick Learner',  icon:'📘', stat:'xpBoost',   min:20, max:50, unit:'%', fmt:r=>`+${r}% EXP gain`,                scale:r=>r/100 },
   // v0.25.713 — Triple Jump boon REMOVED per user request. The `extraJumps`
   // stat system itself stays (Archer's `a_aerial` talent at L7312 still
-  // grants +1 air jump, gear affixes can roll it, the underwater map
-  // `bonusJumps:1` perks still stack on top of the vanilla 1+0 cap).
+  // grants +1 air jump, gear affixes can roll it, and underwater maps floor
+  // the mid-air budget at 5 via _lxAirJumpCap - all on top of the vanilla
+  // 1+0 cap, and all still live).
   // Without the boon entry, the boon-pick wheel after a boss kill can
   // never present this option; players default to 1 vanilla air jump
   // unless a talent or gear affix bumps it.
@@ -55544,6 +55545,26 @@ function _playerGravityStep() {
     player.vy = vyCap;
   }
 }
+// v0.29.x (per user: "for underwater maps, allow players to do multiple jumps
+// midair up to 5 times"). Swimming up a 2400 px water tower on the vanilla
+// 1-air-jump budget meant riding platforms you could barely see; the maps
+// already lighten gravity to 0.30 and hand out bonusJumps:1, which was not
+// close to enough vertical agency.
+//
+// This is a FLOOR, not a replacement: a player who has EARNED more (Archer's
+// a_aerial talent, extraJumps gear affixes) keeps what they earned rather than
+// being quietly nerfed for walking into water. The maps' existing bonusJumps:1
+// still applies everywhere it did; underwater it is simply out-voted.
+//
+// Read through one helper so the gate, the jump-dust colour ramp and anything
+// later that wants to show the budget can never disagree about the number.
+const LX_UNDERWATER_AIR_JUMPS = 5;
+function _lxAirJumpCap() {
+  const md = game.mapData;
+  const own = 1 + ((player.mods && player.mods.extraJumps) || 0) + ((md && md.bonusJumps) || 0);
+  return (md && md.isUnderwater) ? Math.max(own, LX_UNDERWATER_AIR_JUMPS) : own;
+}
+
 function updatePlayer(dt) {
   // v0.29.427 — WALKING footsteps. Landing already had a sound; actually
   // moving across the ground did not, which is the higher-frequency beat.
@@ -56311,15 +56332,15 @@ function updatePlayer(dt) {
       }
     } else if (
       !(game.mapData && game.mapData.noDoubleJump) &&
-      (player.airJumps || 0) < (1 + (player.mods.extraJumps || 0) + ((game.mapData && game.mapData.bonusJumps) || 0))
+      (player.airJumps || 0) < _lxAirJumpCap()
     ) {
       // v0.25.582 — Map-level gate. Frozen Peak (and any future
       // platforming-purist map) opts out of the air-jump branch so the
       // player has to read the speed-jump arc instead of cheesing
       // mid-air recovery.
-      // v0.25.599 — Map-level bonus. Abyssal Trench grants `bonusJumps:1`
-      // so the underwater tower has +1 air-jump on top of the player's
-      // existing budget (1 vanilla + extraJumps from gear/boons).
+      // v0.25.599 / v0.29.x - Map-level budget, see _lxAirJumpCap above. Dry
+      // land is 1 air jump plus whatever the player earned; underwater maps
+      // floor it at 5 so the water towers can actually be swum.
       player._jumpHeld = true;
       player.jumpBufferTimer = 0;
       player.airJumps = (player.airJumps || 0) + 1;
@@ -56337,7 +56358,13 @@ function updatePlayer(dt) {
       // but lets every legitimate mid-air re-press fire its own
       // clip.
       if (typeof _playUiSfx === 'function') _playUiSfx('jump');
-      const col = player.airJumps >= 2 ? '#cc88ff' : '#aaddff';
+      // v0.29.x - with up to 5 mid-air jumps underwater a single colour says
+      // nothing about what is left. Blue on the first, violet through the
+      // middle, amber on the one that spends the last of the budget.
+      const _ajCap = _lxAirJumpCap();
+      const col = player.airJumps >= _ajCap ? '#ffcc66'
+                : player.airJumps >= 2      ? '#cc88ff'
+                :                             '#aaddff';
       for (let i = 0; i < 3; i++) {
         const ang = (i / 3) * Math.PI * 2;
         game.particles.push({
