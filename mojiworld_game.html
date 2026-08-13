@@ -52971,6 +52971,7 @@ function loadMap(id, entryX, entryY) {
   // new map until they hit solid ground. dropTimer is bounded but reset here
   // too, for the same clean-slate reason as the timers above.
   player.dragoonSlam = 0;   // v0.29.477
+  player._slamPierceLeft = 0;   // v0.29.x — travels with dragoonSlam, cleared with it
   player.dropTimer = 0;
   // Clear input state. If a key was still physically down when the portal
   // fired, its keyup often never reaches the window after the map swap —
@@ -55123,12 +55124,23 @@ function checkPlatformCollision(entity) {
       // elevated platform and only resolves on the ground floor (the
       // 'ground' branch above still catches the player). Mobs / other
       // entities are unaffected — only the player carries dragoonSlam.
-      const _slamPiercePlatform = _slamPierceHoist;
+      // v0.29.x — PIERCE A BUDGET, NOT EVERYTHING (per user: "slam to through 1
+      // platform"). v0.26.149 skipped EVERY one-way platform so the dive only
+      // stopped on 'ground'; underwater the floor can be a screen and a half
+      // down, so that reads as falling out of the level. The budget is spent
+      // only when a landing WOULD have resolved, so it counts platforms
+      // actually punched through — not frames, and not platforms the player was
+      // never going to touch.
       const prevBottom = entity.y + entity.h - entity.vy;
-      if (entity.x + entity.w > p.x && entity.x < p.x + p.w &&
+      const _wouldLand = (entity.x + entity.w > p.x && entity.x < p.x + p.w &&
           entity.y + entity.h >= p.y && prevBottom <= p.y + 2 &&
-          entity.vy >= 0 && !entity.dropThrough && !_slamPiercePlatform) {
-        entity.y = p.y - entity.h; entity.vy = 0; entity.onGround = true;
+          entity.vy >= 0 && !entity.dropThrough);
+      if (_wouldLand) {
+        if (_slamPierceHoist && (entity._slamPierceLeft | 0) > 0) {
+          entity._slamPierceLeft = (entity._slamPierceLeft | 0) - 1;
+        } else {
+          entity.y = p.y - entity.h; entity.vy = 0; entity.onGround = true;
+        }
       }
     }
   }
@@ -61706,7 +61718,48 @@ function getArcherAim() {
 }
 
 // v0.29.477 — Sky Lance apex helper. See dragoon_skylance.
-function _lxSkyLanceApexY() {
+// v0.29.x — SKY LANCE APEX (per user, after an underwater bug report:
+// "I blink twice, then fall pass through platforms then slam on the floor").
+//
+// The old apex hunted for the top VISIBLE PLATFORM above the player. Open
+// water has none, so it fell to the `player.y - 200` fallback — a 200 px hop
+// that reads as a blink, and Sky Lance leaps THREE times (cast, the Lv-10
+// chain at 700 ms, the finisher at 1000 ms). Platform geometry was never what
+// the move is about; the target is.
+//
+// Now: snap to the nearest ON-SCREEN monster and rise 225 px above it, so the
+// dive starts above something worth diving at and behaves the same in a cave,
+// a tower or open water. Returns {x, y, target}; x is null when there is no
+// target, leaving the caller's horizontal position alone.
+const SKYLANCE_APEX_ABOVE = 225;
+function _lxSkyLanceApex() {
+  const camX = (game.camera && game.camera.x) || 0;
+  const camY = (game.camera && game.camera.y) || 0;
+  const vw = (typeof W === 'number') ? W : 960;
+  const vh = (typeof H === 'number') ? H : 560;
+  const visTop = camY + 12;                     // never above the visible edge
+  const pcx = player.x + player.w / 2, pcy = player.y + player.h / 2;
+  let best = null, bestSq = Infinity;
+  for (const m of (game.monsters || [])) {
+    if (!m || m.currentHp <= 0 || m._dying) continue;
+    const sx = m.x - camX;
+    if (sx + m.w < 0 || sx > vw) continue;                       // off screen L/R
+    if (m.y + m.h < camY - 30 || m.y > camY + vh + 30) continue; // off screen U/D
+    const dx = (m.x + m.w / 2) - pcx, dy = (m.y + m.h / 2) - pcy;
+    const sq = dx * dx + dy * dy;
+    if (sq < bestSq) { bestSq = sq; best = m; }
+  }
+  if (best) {
+    return { x: best.x + best.w / 2 - player.w / 2,
+             y: Math.max(visTop, best.y - SKYLANCE_APEX_ABOVE), target: best };
+  }
+  // Nothing on screen — rise the same distance from where we stand.
+  return { x: null, y: Math.max(visTop, player.y - SKYLANCE_APEX_ABOVE), target: null };
+}
+// Thin wrapper so any other call site still gets a plain Y and cannot
+// reintroduce the platform hunt.
+function _lxSkyLanceApexY() { return _lxSkyLanceApex().y; }
+function _lxSkyLanceApexY_UNUSED_platformVersion() {
   const camY = (game.camera && game.camera.y) || 0;
   const camX = (game.camera && game.camera.x) || 0;
   const vw = (typeof W === 'number') ? W : 960;
@@ -64497,11 +64550,18 @@ const SKILL_FNS = {
   // (its span covers their centre), falling back to any visible one, and
   // finally to the old hop. Never rises past the visible top edge.
   dragoon_skylance: () => {
-    // Lift skyward, then slam
-    player.y = _lxSkyLanceApexY();   // v0.29.477 — top VISIBLE platform, not a blind 200px hop
+    // Lift skyward, then slam. v0.29.x — apex is the nearest ON-SCREEN monster
+    // + 225 px, and the dive punches through ONE platform (_slamPierceLeft)
+    // rather than every platform down to the floor.
+    {
+      const _ap = _lxSkyLanceApex();
+      if (_ap.x != null) player.x = _ap.x;
+      player.y = _ap.y;
+    }
     player.vy = 0;
     player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
     player.dragoonSlam = 1;
+    player._slamPierceLeft = 1;
     // v0.25.530 — Level-10 bonus: a second sky-lance dive ~700 ms after
     // the first. Stored on player._dragoonExtraSlam so the slam-resolve
     // path can chain a follow-up plunge once the first lands.
@@ -64512,9 +64572,14 @@ const SKILL_FNS = {
         scheduleSkillTimer(() => {
           if (player.hp <= 0 || game.paused) return;
           // Chain a second leap-and-slam.
-          player.y = _lxSkyLanceApexY();   // v0.29.477 — top VISIBLE platform, not a blind 200px hop
+          {
+            const _ap = _lxSkyLanceApex();
+            if (_ap.x != null) player.x = _ap.x;
+            player.y = _ap.y;
+          }
           player.vy = 0;
           player.dragoonSlam = 1;
+          player._slamPierceLeft = 1;
           player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
           spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2 + 20, 'dragoon_skylance',
             { size: 450, life: 36, angle: -Math.PI });   // v0.26.x — further 90° CCW (now 180° total) per user
@@ -64544,9 +64609,12 @@ const SKILL_FNS = {
         player.x = nearest.x + nearest.w / 2 - player.w / 2;
         player.facing = (nearest.x > _pcx) ? 1 : -1;
       }
-      player.y = _lxSkyLanceApexY();   // v0.29.477 — top VISIBLE platform, not a blind 200px hop
+      // The finisher already picked `nearest` and moved X; this re-resolves the
+      // height against that same target.
+      player.y = _lxSkyLanceApex().y;
       player.vy = 0;
       player.dragoonSlam = 1;
+      player._slamPierceLeft = 1;
       player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
       spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2 + 20, 'dragoon_skylance',
         { size: 450, life: 40, angle: -Math.PI });   // v0.26.x — further 90° CCW (now 180° total) per user
