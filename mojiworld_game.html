@@ -9430,7 +9430,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.660';
+const GAME_VERSION = 'v0.29.662';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16171,7 +16171,7 @@ const SKILLS = {
   // Mage path
   sage_meteorshower:  { name:'Meteor Shower',      icon:'📜', cls:'mage', job:'archmage', master:'sage',         slot:'x', mp:55, cd:20000, desc:'5 meteors rain over an area.' },
   elementalist_cascade:{ name:'Prismatic Cascade', icon:'🌈', cls:'mage', job:'archmage', master:'elementalist', slot:'x', mp:50, cd:15000, desc:'Four elements in amplifying sequence.' },
-  lich_harvest:       { name:'Soul Vortex',        icon:'👹', cls:'mage', job:'warlock',  master:'lich',         slot:'x', mp:40, cd:45000, desc:'Open a 30s 320px vortex that yanks enemies in and drains MASSIVE life damage (1.8× ATK/sec over 30s).' },
+  lich_harvest:       { name:'Soul Vortex',        icon:'👹', cls:'mage', job:'warlock',  master:'lich',         slot:'x', mp:40, cd:45000, desc:'Open a 30s vortex pool that drags enemies in and drains MASSIVE life damage (1.8× ATK/sec over 30s).' },
   hexmaster_grandhex: { name:'Grand Hex',          icon:'🧿', cls:'mage', job:'warlock',  master:'hexmaster',    slot:'x', mp:35, cd:24000, desc:'Freeze non-boss enemies 1.2s, blast them with a curse burst (1.9× ATK), then a heavy poison DOT (0.75× ATK/tick).' },
   // Archer path
   marksman_oneshot:   { name:'One Shot One Kill',  icon:'🎯', cls:'archer', job:'sniper', master:'marksman',    slot:'x', mp:50, cd:22000, desc:'Guaranteed crit piercing rail. Pure damage, no random kill chance.' },
@@ -65476,7 +65476,12 @@ const SKILL_FNS = {
     const cx = player.x + player.w/2 + player.facing * 40;
     const cy = player.y + player.h - 20;
     game.hazards.push({
-      type: 'soul_vortex', cx, x: cx - 200, y: cy - 30, w: 400, h: 140,
+      // v0.29.x - the rect IS the hurtbox IS the drawn sprite. Pool centre is
+      // unchanged (cy + 40, i.e. 20 px below the caster's feet) so the art sits
+      // exactly where it always did.
+      type: 'soul_vortex', cx,
+      x: cx - LX_VORTEX_RX, y: (cy + 40) - LX_VORTEX_RY,
+      w: LX_VORTEX_RX * 2, h: LX_VORTEX_RY * 2,
       // v0.25.202 — life is in frames (h.life-=1 per frame at 60 FPS).
       // Was 30000 frames = 500 s — clearly a bug carrying over from a
       // ms-based earlier implementation. 30 s × 60 = 1800 frames now.
@@ -78007,6 +78012,25 @@ function _lxSummonProjHit(p) {
   }
   return null;
 }
+// v0.29.x - SOUL VORTEX geometry, in ONE place (per user: "hurtbox feels very
+// weird, monsters can die when its very far"). The damage/pull region and the
+// sprite the pool draws are both derived from these, because they were authored
+// independently and drifted badly: the hit test was a 320 px CIRCLE while the
+// art draws a 460x160 pool, so the skill killed things 240 px above visibly
+// empty space. RX/RY are half-extents of the drawn box; the hit region is the
+// ellipse inscribed in it. Change one number and the art follows.
+const LX_VORTEX_RX = 230;          // half-width  of the pool, px
+const LX_VORTEX_RY = 96;           // half-height of the pool, px
+const LX_VORTEX_TICK = 30;         // frames between drain ticks (damage scales with it, so DPS is fixed)
+// Escape speeds this has to beat, measured from the AI: a grounded mob walks at
+// `m.speed` (1.0-2.5 px/frame) and a flier tops out at `m.speed * 2.4` (~3.6 for
+// the underwater fish). A pull below those is not a vacuum, it is a suggestion —
+// the first pass at 2.8/0.9 lost to both, which is what "ambiguous" meant.
+const LX_VORTEX_PULL_CORE = 6.0;   // suction at the centre, px/frame
+const LX_VORTEX_PULL_RIM  = 3.4;   // suction at the rim, px/frame
+const LX_VORTEX_HOLD = 24;         // px: stop pulling this close in, so mobs clump instead of stacking
+const LX_VORTEX_FLIER_DRAG = 0.5;  // fraction of its own speed a flier keeps at the core
+
 function updateProjectiles(dt) {
   // v0.26.217 — Pre-filter live mobs once per frame for the per-projectile
   // collision loops below. Pre-fix every projectile iterated game.monsters
@@ -79586,53 +79610,94 @@ function updateProjectiles(dt) {
       if (h.life <= 0) game.hazards.splice(i, 1);
       continue;
     } else if (h.type === 'soul_vortex') {
-      // SOUL VORTEX — pull enemies in, drain their HP and return it to caster
-      // v0.25.201 — buffed: AOE 180→320 px, pull 0.5→1.2 (with floor of
-      // 0.4 even at the rim so suction reads on every frame), tick 12→8.
+      // SOUL VORTEX - pull enemies in, drain their HP and return it to caster.
+      //
+      // v0.29.x (per user: "hurtbox feels very weird, monsters can die when its
+      // very far, the suction effect also a bit ambiguous when i used in
+      // underwater maps, skill is overall clunky"). Three separate faults:
+      //
+      //  1. THE HURTBOX WAS A CIRCLE, THE ART IS A POOL. Damage used a 320 px
+      //     RADIUS around the pool centre while the sprite draws 460x160, i.e.
+      //     +/-80 px tall. Anything within 320 px ABOVE the pool - four times
+      //     its drawn height, an easy gap on a vertical or underwater map - was
+      //     inside the kill zone with nothing on screen to show for it. The
+      //     region is now the ellipse inscribed in the DRAWN box, from the same
+      //     constants the sprite uses, so the two cannot drift apart again.
+      //
+      //  2. THE SUCTION WAS WRITTEN WHERE THE AI OVERWRITES IT. The pull did
+      //     `m.vx += ...`, but this hazard tick runs inside updateProjectiles,
+      //     AFTER updateMonsters has already integrated position for the frame -
+      //     and the next frame the grounded AI opens with an outright
+      //     `m.vx = m.facing * m.speed` (see updateMonsters), discarding the
+      //     nudge before it ever moved anything. Fliers kept 84% of it through
+      //     their steering lerp, then had the total trimmed by their own _maxV
+      //     cap - which is exactly why the effect read as ambiguous underwater,
+      //     where every mob is a flier. The pull now moves POSITION directly, so
+      //     nothing downstream can quietly undo it.
+      //
+      //  3. FEEDBACK ONCE A SECOND READS AS DEAD AIR. Drain ticked every 60
+      //     frames on a shared counter, so a mob dragged in could stand in the
+      //     pool for a full second with no number over it. Now every 30 frames
+      //     at half damage: identical DPS, twice the confirmation.
       const cx = h.cx, cy = h.y + h.h/2;
       h.tick = (h.tick || 0) + 1;
-      const RADIUS = 320;
-      // v0.26.052 — Audit-pass perf fix. Was: `Math.hypot(dxp, dyp)` per
-      // monster per frame (~60 hypot calls/frame on a busy arena, ~2.1ms
-      // budget on a soul vortex frame). Now: squared-distance early-out
-      // (RADIUS² compare), then a single sqrt ONLY if the monster is
-      // actually inside the pull radius. Identical force math past the
-      // gate — sqrt produces the same `dist` the legacy code used.
-      const RADIUS_SQ = RADIUS * RADIUS;
-      const _drainTick = (h.tick % 60 === 0);
-      // v0.26.x — snapshot so a kill+splice can't skip the next target.
-      // v0.29.x perf — refill a persistent scratch instead of spreading a fresh
+      const RX = LX_VORTEX_RX, RY = LX_VORTEX_RY;
+      const _drainTick = (h.tick % LX_VORTEX_TICK === 0);
+      const _vwW = (game.mapData && game.mapData.worldWidth) || 1e9;
+      // v0.26.x - snapshot so a kill+splice can't skip the next target.
+      // v0.29.x perf - refill a persistent scratch instead of spreading a fresh
       // array copy EVERY frame the vortex is alive (a multi-second channel).
-      // Identical forward-snapshot semantics (splice-safe), zero per-frame alloc.
       const _vsc = game._vortexScratch || (game._vortexScratch = []);
       _vsc.length = 0;
       for (let _vi = 0; _vi < game.monsters.length; _vi++) _vsc[_vi] = game.monsters[_vi];
       for (let _vmi = 0; _vmi < _vsc.length; _vmi++) {
         const m = _vsc[_vmi];
         if (m.currentHp <= 0) continue;
-        const dxp = cx - (m.x + m.w/2), dyp = cy - (m.y + m.h/2);
-        const distSq = dxp * dxp + dyp * dyp;
-        if (distSq < RADIUS_SQ) {
-          const dist = Math.sqrt(distSq);
-          // Pull inward — base force scales with proximity, plus a 0.4
-          // floor at the rim so distant mobs still feel the tug.
-          const force = 0.4 + 1.2 * (1 - dist / RADIUS);
-          const _invDist = 1 / (dist || 1);
-          m.vx += dxp * _invDist * force;
-          m.vy += dyp * _invDist * force * 0.6;
-          // v0.25.557 — Tick drain rate 8 frames → 60 frames (1 s) per spec.
-          if (_drainTick) {
-            const dmg = Math.max(1, Math.floor(h.atk));
-            hitMonster(m, dmg, false, 'vortex');
-            player.hp = Math.min(getMaxHp(), player.hp + Math.floor(dmg * 0.3));
-            // Green drain thread — v0.26.052 budget-gated (was unbudgeted).
-            for (let k = 0; k < 3; k++) {
-              if (!_budgetedParticlePush({
-                x: m.x + m.w/2, y: m.y + m.h/2,
-                vx: (cx - m.x) * 0.02, vy: (cy - m.y) * 0.02 - 0.5,
-                life: 26, color: '#66ff88', size: 2
-              })) break;
-            }
+        // Distance from the pool centre to the NEAREST POINT of the monster's
+        // box, not to its centre: a 200 px-tall boss standing in the pool then
+        // reads as distance ~0 like everything else, instead of being measured
+        // from a midpoint 100 px up and falling out of the region entirely.
+        const _vdx = cx - Math.max(m.x, Math.min(cx, m.x + m.w));
+        const _vdy = cy - Math.max(m.y, Math.min(cy, m.y + m.h));
+        const _vnx = _vdx / RX, _vny = _vdy / RY;
+        const _vn = Math.sqrt(_vnx * _vnx + _vny * _vny);   // < 1 = inside the drawn pool
+        if (_vn >= 1) continue;
+        // --- suction: position, not velocity (see note 2 above) ---
+        if (!m._noGravity) {
+          const _pdx = cx - (m.x + m.w/2), _pdy = cy - (m.y + m.h/2);
+          const _pd = Math.sqrt(_pdx * _pdx + _pdy * _pdy) || 1;
+          let _step = LX_VORTEX_PULL_RIM + (LX_VORTEX_PULL_CORE - LX_VORTEX_PULL_RIM) * (1 - _vn);
+          if (m.isBoss || m.isMiniBoss || m.boss) _step *= 0.30;   // bosses lean in, they don't get vacuumed
+          _step = Math.min(_step, Math.max(0, _pd - LX_VORTEX_HOLD));   // clump at the core, don't stack on one pixel
+          m.x += (_pdx / _pd) * _step;
+          // Vertical drag only for things that swim or fly. A grounded mob stays
+          // on its platform and slides toward the pool rather than being tugged
+          // into the floor collision.
+          if (m.flies) m.y += (_pdy / _pd) * _step * 0.7;
+          // A flier's steering lerp keeps 84% of its velocity frame to frame, so
+          // unlike a grounded mob (whose vx the AI reassigns outright) it can just
+          // swim out of the pool at its cap. Bleed its own speed while it is
+          // inside — full at the rim, half at the core — so the pool HOLDS what it
+          // has caught instead of losing it to the AI's next destination.
+          if (m.flies) {
+            const _drag = LX_VORTEX_FLIER_DRAG + (1 - LX_VORTEX_FLIER_DRAG) * _vn;
+            m.vx *= _drag; m.vy *= _drag;
+          }
+          if (m.x < 0) m.x = 0;
+          if (m.x + m.w > _vwW) m.x = _vwW - m.w;
+        }
+        // --- drain ---
+        if (_drainTick) {
+          const dmg = Math.max(1, Math.floor(h.atk * (LX_VORTEX_TICK / 60)));
+          hitMonster(m, dmg, false, 'vortex');
+          player.hp = Math.min(getMaxHp(), player.hp + Math.floor(dmg * 0.3));
+          // Green drain thread - v0.26.052 budget-gated (was unbudgeted).
+          for (let k = 0; k < 3; k++) {
+            if (!_budgetedParticlePush({
+              x: m.x + m.w/2, y: m.y + m.h/2,
+              vx: (cx - m.x) * 0.02, vy: (cy - m.y) * 0.02 - 0.5,
+              life: 26, color: '#66ff88', size: 2
+            })) break;
           }
         }
       }
@@ -116436,7 +116501,9 @@ function drawHazards() {
       const _vfa = (typeof _fxAnimFrames === 'function') ? _fxAnimFrames('soul_vortex') : null;
       if (_vfa) { const _f = _vfa[Math.floor(game.time / 5) % 9]; if (_lxFxReady(_f)) _vortexSprite = _f; }
       if (_lxFxReady(_vortexSprite)) {
-        const SP_W = 460, SP_H = 160;     // covers the 400×140 hazard plus padding
+        // v0.29.x - the drawn box IS the hazard rect IS the hurtbox. Previously
+        // authored as a literal 460x160 next to a 320 px damage circle.
+        const SP_W = h.w, SP_H = h.h;
         ctx.globalAlpha = 0.85 * fade;
         ctx.drawImage(_vortexSprite, sx - SP_W/2, cy - SP_H/2, SP_W, SP_H);
         ctx.globalAlpha = 1;
@@ -116444,11 +116511,11 @@ function drawHazards() {
         // Procedural fallback (v0.25.201 art).
         ctx.fillStyle = `rgba(40,90,40,${0.55 * fade})`;
         ctx.beginPath();
-        ctx.ellipse(sx, cy, 200, 56, 0, 0, Math.PI * 2);
+        ctx.ellipse(sx, cy, LX_VORTEX_RX * 0.87, LX_VORTEX_RY * 0.58, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = `rgba(110,220,130,${0.55 * fade})`;
         ctx.beginPath();
-        ctx.ellipse(sx, cy, 170, 40, 0, 0, Math.PI * 2);
+        ctx.ellipse(sx, cy, LX_VORTEX_RX * 0.74, LX_VORTEX_RY * 0.42, 0, 0, Math.PI * 2);
         ctx.fill();
       }
       // Rotating green rings — 5 rings out from the centre. Kept on
@@ -116464,7 +116531,7 @@ function drawHazards() {
       // Rising wisp particles — wider spawn box matching AOE
       if (game.time % 3 === 0) {
         game.particles.push({
-          x: h.cx + (Math.random() - 0.5) * 320,
+          x: h.cx + (Math.random() - 0.5) * (LX_VORTEX_RX * 2),   // wisps fill the real pool width
           y: cy, vx: (Math.random() - 0.5) * 0.4, vy: -1 - Math.random(),
           life: 50, color: '#88ff99', size: 2
         });
