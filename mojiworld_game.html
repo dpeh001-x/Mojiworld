@@ -9430,7 +9430,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.659';
+const GAME_VERSION = 'v0.29.660';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16094,7 +16094,7 @@ const SKILLS = {
   // iceSpike 7000→4500, blink 3000→2400, arcaneBurst 10000→7000 (mage
   // kit ≈98→≈140 DPS-units) — damage numbers untouched.
   fireball:     { name:'Fireball',       icon:'🔥', cls:'mage', slot:'s', mp:14, cd:2400, desc:'Explodes on impact (180 px AoE). 2.4s recast.' },
-  iceSpike:     { name:'Ice Spike',      icon:'❄️', cls:'mage', slot:'a', mp:12, cd:4500, desc:'3 piercing spikes; 50% chance to freeze on hit.' },
+  iceSpike:     { name:'Ice Spike',      icon:'❄️', cls:'mage', slot:'a', mp:12, cd:4500, desc:'3 ice spikes; 50% chance to freeze on hit. Rank 10: each spike pierces 1 foe.' },
   blink:        { name:'Dimensional Warp', icon:'🌀', cls:'mage', slot:'e', mp:14, cd:2400, desc:'Phase across a dimension. Damages every monster in the path traversed (+100×50 px AoE around it). Hold ↑ while casting (or double-tap ↑) to warp skyward.' },
   arcaneBurst:  { name:'Arcane Burst',   icon:'💥', cls:'mage', slot:'w', mp:22, cd:7000, desc:'Massive 320-px AoE explosion centred on you.' },
   // Archmage
@@ -16140,7 +16140,7 @@ const SKILLS = {
   // full-draw bonuses (archer's chargedShot already carries the kit at
   // 18.1× wall damage per cast — untouched).
   multiShot:    { name:'Multi Shot',     icon:'🎋', cls:'archer', slot:'s', mp:10, cd:2600, desc:'3 arrow spread.' },
-  chargedShot:  { name:'Charged Shot',   icon:'⚡', cls:'archer', slot:'a', mp:14, cd:4000, desc:'Big charged arrow — heavy single-target burst.' },   // v0.29.x — no longer pierces, so the tooltip no longer says it does
+  chargedShot:  { name:'Charged Shot',   icon:'⚡', cls:'archer', slot:'a', mp:14, cd:4000, desc:'Big charged arrow — heavy burst; pierces 2 foes (3 at rank 10).' },   // v0.29.x — no longer pierces, so the tooltip no longer says it does
   evadeRoll:    { name:'Evade Burst',    icon:'💥', cls:'archer', slot:'e', mp:8,  cd:8000, desc:'Back flip + 2 shot + cute explosive blast that hugely knocks back nearby monsters. 50% chance to evade attacks during the roll.' },
   // v0.25.541 — Eagle Eye retuned per user spec: +20% crit (was +40),
   // 30 s buff (was 8 s), 60 s cooldown (was 14 s). Lower up-time and
@@ -16758,7 +16758,7 @@ const SKILL_LV10_BONUS = {
   smokeBomb:         { extraStars: 2 },                          // v0.25.961: +2 extra shuriken (Shin-Shuriken)
   sleight:           { cdMs: 6000 },                             // cd 10 → 6 s
   // ── MAGE ──
-  iceSpike:          { mobCap: 5, hits: 1 },                     // mob:5 / Na:2
+  iceSpike:          { mobCap: 5, hits: 1, pierceAdd: 1 },       // mob:5 / Na:2 / pierces 1 foe
   blink:             { distMul: 1.10 },                          // +10% warp dist
   arcaneBurst:       { aoeMul: 1.10 },                           // +10% AoE
   meteor:            { extraHit: 1.0 },                          // +1 attack × 1.0
@@ -16838,7 +16838,7 @@ const SKILL_LV10_BONUS = {
   // ── ARCHER ──
   arrowShot:         { window: { ms: 4000,  chain: { n: 1, frac: 0.28 } } },
   multiShot:         { window: { ms: 5000,  chain: { n: 1, frac: 0.35 } } },
-  chargedShot:       { window: { ms: 5000,  execute: { frac: 0.20, bossMul: 1.30 } } },
+  chargedShot:       { pierceAdd: 1, window: { ms: 5000,  execute: { frac: 0.20, bossMul: 1.30 } } },   // pierce budget 2 -> 3
   evadeRoll:         { window: { ms: 6000,  refundOnKill: 0.30 } },
   arrowRain:         { window: { ms: 7000,  chain: { n: 2, frac: 0.50 } } },
   wildBond:          { cdReduceMs: 18000 },                      // summon — cd IS the prize
@@ -17156,6 +17156,7 @@ function _formatMilestoneObj(b) {
   if (b.extraHit)    parts.push('+1 finisher attack at ATK × ' + b.extraHit.toFixed(1));
   if (b.wolfHits)    parts.push('+' + b.wolfHits + ' bonus bite per wolf');
   if (b.mobCap)      parts.push('mob cap → ' + b.mobCap);
+  if (b.pierceAdd)   parts.push('pierces ' + b.pierceAdd + ' more foe' + (b.pierceAdd > 1 ? 's' : ''));
   if (b.distMul)     parts.push('distance × ' + b.distMul.toFixed(2));
   if (b.aoeMul)      parts.push('AoE × ' + b.aoeMul.toFixed(2));
   if (b.healMul)     parts.push('heal × ' + b.healMul.toFixed(2));
@@ -63365,6 +63366,12 @@ const SKILL_FNS = {
     // lane count (5) at rank 5. Now rank5=4 lanes, rank10=5 lanes.
     const _isLanes = (_isBonus && _isBonus.mobCap) ? _isBonus.mobCap : 3;
     const _isSplash = (_isBonus && _isBonus.hits) ? 130 : 90;
+    // v0.29.659 (per user) - "For ice spike add the ability to pierce through
+    // monster once after 10 RP has been invested". Ranks 0-9 a spike stops on
+    // the first body it touches; at rank 10 (10 RP spent, SKILL_RANK_CAP) it
+    // passes through exactly one. pierceLeft is a BUDGET, not a flag: the hit
+    // resolver decrements it per pass-through and kills the shot at 0.
+    const _isPierce = (_isBonus && _isBonus.pierceAdd) ? (_isBonus.pierceAdd | 0) : 0;
     const _isHalf = (_isLanes - 1) / 2;
     for (let i = -_isHalf; i <= _isHalf; i++) {
       game.projectiles.push({
@@ -63378,14 +63385,16 @@ const SKILL_FNS = {
         // v0.25.557 — freeze on hit gated to 50% chance per user spec.
         // The projectile-resolve path reads `freeze` as a duration, so we
         // either set it to 1500 ms (frozen) or 0 (no freeze) per shot.
-        // v0.29.x — NO PIERCE (per user: "Mage's S shouldnt really be able to
-        // pierce through monsters, its too strong of a mobbing skill"). Key S
-        // maps to slot 'a' via KEY_TO_SLOT_DEFAULT, which is this skill.
+        // v0.29.x - NO FREE PIERCE (per user: "Mage's S shouldnt really be
+        // able to pierce through monsters, its too strong of a mobbing skill").
+        // Key S maps to slot 'a' via KEY_TO_SLOT_DEFAULT, which is this skill.
+        // v0.29.659 - one pierce is BUYABLE at rank 10 (see _isPierce above).
         // NOTE for balance: the v0.25.x note above trimmed this to 1.2x ATK
-        // *because* pierce + freeze made it over-budget. With pierce gone the
-        // multiplier is now conservative for a single-target hit; left alone
-        // deliberately, since the ask was to weaken it as a mobbing tool.
+        // *because* pierce + freeze made it over-budget. Unranked it is now a
+        // conservative single-target hit; left alone deliberately, since the
+        // ask was to weaken it as a mobbing tool.
         owner: 'player', skill: 'ice', freeze: (Math.random() < 0.5 ? 1500 : 0),
+        pierce: _isPierce > 0, pierceLeft: _isPierce,
         aoeOnHit: _isSplash,
         color: '#88ccff', _enh: player._enh,
       });
@@ -63883,6 +63892,13 @@ const SKILL_FNS = {
     const boonBonus = (player.mods && player.mods.multishot) || 0;
     const shots = 1 + boonBonus;
     const yStep = 10;   // vertical separation between paired arrows
+    // v0.29.659 (per user) - "add the ability to pierce 2 times instead of
+    // unlimited. Add the ability to pierce through once more after 10 RP has
+    // been invested". Budget of 2 pass-throughs (so it damages 3 foes), 3 at
+    // rank 10. UNLIMITED pierce was why this got cut to none at all; a capped
+    // budget keeps the satisfying line-shot without the mobbing power.
+    const _csBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('chargedShot') : null;
+    const _csPierce = 2 + ((_csBonus && _csBonus.pierceAdd) ? (_csBonus.pierceAdd | 0) : 0);
     let firstP = null;
     for (let i = 0; i < shots; i++) {
       const yOff = (i - (shots - 1) / 2) * yStep;
@@ -63893,11 +63909,11 @@ const SKILL_FNS = {
         // v0.25.658 — P1 REBALANCE. 3.5×+20 → 3.5×+12. Multiplier preserved
         // (pierce + windup justifies high burst); flat trimmed so early-game
         // archers don't get disproportionately huge numbers.
-        // v0.29.x — NO PIERCE (per user, same reasoning as Ice Spike). Key S
-        // maps to slot 'a', which is this skill. The 3.5x multiplier stays: the
-        // v0.25.658 note credits it to "pierce + windup", and the windup alone
-        // still justifies a heavy single-target burst.
+        // v0.29.659 - CAPPED PIERCE (per user: "pierce 2 times instead of
+        // unlimited"). The 3.5x multiplier stays: v0.25.658 credited it to
+        // "pierce + windup", and a 2-shot budget plus the windup still earns it.
         damage: getAtk() * 3.5 + 12, owner: 'player', skill: 'charged', color: '#ff9944',
+        pierce: true, pierceLeft: _csPierce,
         _enh: player._enh, _msHandled: true,   // v0.26.x — self-applies multishot; opt out of universal Double Shot
       };
       game.projectiles.push(p);
@@ -78303,7 +78319,12 @@ function updateProjectiles(dt) {
           if (pEnh) applyEnhOnHit(m, dmg, pEnh);
           // Sniper pierce: basic arrows go through enemies (skipped on
           // _singleTarget so basic Z stays one-shot-one-kill).
-          if (pEnh && pEnh.pierce && !p._singleTarget) p.pierce = true;
+          // v0.29.659 - a shot that declares its OWN budget keeps it. Sniper's
+          // mastery grants UNLIMITED pierce (pierce:true, no pierceLeft) to any
+          // projectile carrying _enh, which silently un-capped Charged Shot the
+          // moment an archer mastered Sniper - the exact thing the cap exists
+          // to prevent. Basic arrows declare no budget, so they are unaffected.
+          if (pEnh && pEnh.pierce && !p._singleTarget && typeof p.pierceLeft !== 'number') p.pierce = true;
           // Ranger split: arrow may split into 2 smaller shots on hit
           if (pEnh && pEnh.splitChance && Math.random() < pEnh.splitChance && !p._split && !p._singleTarget) {
             for (let i = -1; i <= 1; i += 2) {
