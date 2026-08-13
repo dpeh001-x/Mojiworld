@@ -9430,7 +9430,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.666';
+const GAME_VERSION = 'v0.29.667';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -91579,27 +91579,44 @@ function drawBackground() {
   const bgPick = _pickBGImage();
   if (bgPick) {
     const parallax = 0.12;
-    const shift = Math.floor((game.camera.x * parallax) % W);
-    /* vertical parallax on tall tower floors (B6/B9 etc.): draw the 16:9 backdrop
-       slightly over-tall and pan it with the climb so it isn't static. Gated to
-       isVerticalTower so every other map is unchanged. */
-    let _bgY = 0, _bgH = H;
+    /* v0.29.5xx — vertical parallax on tall tower maps, reworked (per user
+       "improve on the vertical parallax"). Three fixes over the v0.25.470-era
+       pass:
+         1. DIRECTION was inverted: _bgY used (1 - climb), and climb is ~1 at
+            the tower BASE (camera.y is largest there) — so the base showed
+            the art's top slice and the summit its bottom, panning the
+            mountain DOWNWARD as you climbed. Now the base frames the art's
+            base and the climb reveals its peak.
+         2. The overscan came from stretching the 16:9 art vertically
+            (W x H+18%). The zoom is now UNIFORM — both axes x1.45 — so
+            nothing distorts, and the mirror-tiling below runs on the scaled
+            width so the seam trick still holds exactly.
+         3. Travel grew 18% -> 45% of a screen (101 -> 252px): 0.5px per
+            floor was imperceptible; 1.26px/floor reads as genuine drift.
+       Non-tower maps take the identical old path: _bgW===W, _bgH===H,
+       _bgY===0, shift modulo W — byte-for-byte the same draw. */
+    let _bgY = 0, _bgH = H, _bgW = W;
     if (_md.isVerticalTower && _md.worldHeight && _md.worldHeight > H) {
-      const _over = Math.round(H * 0.18);
-      _bgH = H + _over;
+      const _VP_SCALE = 1.45;
+      _bgH = Math.round(H * _VP_SCALE);
+      _bgW = Math.round(W * _VP_SCALE);
+      const _over = _bgH - H;
       const _climb = Math.min(1, Math.max(0, (game.camera.y || 0) / (_md.worldHeight - H)));
-      _bgY = -_over * (1 - _climb);
+      _bgY = -_over * _climb;
     }
-    // First copy — drawn normally
-    ctx.drawImage(bgPick, -shift, _bgY, W, _bgH);
-    // Second copy — mirrored. Translating to (2W - shift) puts its right
-    // edge at x=(2W-shift) and after scale(-1,1) its left edge ends up at
-    // x=(W-shift), exactly where the first copy's right edge lands. Pixels
+    const shift = Math.floor((game.camera.x * parallax) % _bgW);
+    // First copy — drawn normally. Coverage for any shift in [0, _bgW): this
+    // copy spans [-shift, _bgW - shift] and the mirror spans on from there to
+    // 2*_bgW - shift, so together they always cover the whole [0, W] screen.
+    ctx.drawImage(bgPick, -shift, _bgY, _bgW, _bgH);
+    // Second copy — mirrored. Translating to (2*_bgW - shift) puts its right
+    // edge at x=(2*_bgW-shift) and after scale(-1,1) its left edge ends up at
+    // x=(_bgW-shift), exactly where the first copy's right edge lands. Pixels
     // along the seam are mirror-matched → no visible cut.
     ctx.save();
-    ctx.translate(2 * W - shift, 0);
+    ctx.translate(2 * _bgW - shift, 0);
     ctx.scale(-1, 1);
-    ctx.drawImage(bgPick, 0, _bgY, W, _bgH);
+    ctx.drawImage(bgPick, 0, _bgY, _bgW, _bgH);
     ctx.restore();
     // v0.29.86 — optional per-map darkening tint over the authored bg.
     // Drawn on top of the backdrop only (boss decor, sky-life, and every
