@@ -9458,7 +9458,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.678';
+const GAME_VERSION = 'v0.29.679';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16212,7 +16212,7 @@ const SKILLS = {
   // hooks land in a later pass).
   warlord_ult:        { name:'War of Banners',          icon:'🚩', cls:'warrior', job:'berserker', master:'warlord',     slot:'b', mp:70,  cd:62000, desc:'Enter a 10s enrage (Bloodlust + heal, shared with co-op partners on your map); re-press B for free, rapid banner strikes.' },
   doombringer_ult:    { name:'Calamity Incarnate',      icon:'🗡️', cls:'warrior', job:'berserker', master:'doombringer', slot:'b', mp:72,  cd:66000, desc:'Wield the colossal blade — a melee cleave plus three screen-crossing piercing blade-waves.' },
-  crusader_ult:       { name:'Bastion of Dawn',         icon:'🛡️', cls:'warrior', job:'knight',    master:'crusader',    slot:'b', mp:68,  cd:62000, desc:'Become a living bastion — full heal (co-op partners on your map too), take half damage, then release a holy nova.' },
+  crusader_ult:       { name:'Bastion of Dawn',         icon:'🛡️', cls:'warrior', job:'knight',    master:'crusader',    slot:'b', mp:68,  cd:62000, desc:'Judgement stacks per hit taken (max 5). Release: full party heal + 15s half-damage shield for everyone, drag foes in, and 2 homing orbs per stack burst on impact.' },
   dragoon_ult:        { name:'Skyfall Dominion',        icon:'🌩️', cls:'warrior', job:'knight',    master:'dragoon',     slot:'b', mp:62,  cd:56000, desc:'Take to the sky raining dragon-lances, then slam down to detonate every impact.' },
   shadowlord_ult:     { name:'Shadow Sovereign',        icon:'🌑', cls:'rogue',   job:'ninja',     master:'shadowlord',  slot:'b', mp:62,  cd:62000, desc:'Split into a shadow swarm whose echoed strikes collapse onto your foes.' },
   shinobi_ult:        { name:'Hundred-Hand Shadow Dance', icon:'🥷', cls:'rogue', job:'ninja',     master:'shinobi',     slot:'b', mp:60,  cd:40000, desc:'A blade dance that teleport-chains through every nearby foe in a flurry of slashes.' },
@@ -16822,8 +16822,7 @@ const SKILL_LV10_BONUS = {
                                  announce: '🏴 WAR OF BANNERS — every fall feeds the charge.' } },
   doombringer_ult:   { window: { ms: 8000,  execute: { frac: 0.22, bossMul: 1.35 },
                                  announce: '💀 CALAMITY — the wounded do not leave this field.' } },
-  crusader_ult:      { window: { ms: 8000,  lifesteal: 0.22,
-                                 announce: '🛡 BASTION OF DAWN — the light returns what it takes.' } },
+  crusader_ult:      { buffMs: 5000, orbAdd: 2 },               // shield 15s -> 20s, orbs 10 -> 12
   dragoon_ult:       { window: { ms: 8000,  chain: { n: 3, frac: 0.55 },
                                  announce: '🐉 SKYFALL — the lances find every mark.' } },
   // ── ROGUE ──
@@ -16930,7 +16929,7 @@ const SKILL_LV5_BONUS = {
   rampage:           { window: { ms: 3500, lifesteal: 0.07, refundOnKill: 0.08 } },
   warlord_ult:       { window: { ms: 5000, refundOnKill: 0.12, lifesteal: 0.05 } },
   doombringer_ult:   { window: { ms: 4500, execute: { frac: 0.11, bossMul: 1.18 } } },
-  crusader_ult:      { window: { ms: 4500, lifesteal: 0.11 } },
+  crusader_ult:      { buffMs: 3000 },                           // shield 15s -> 18s (L10: +5s, +2 orbs)
   dragoon_ult:       { window: { ms: 4500, chain: { n: 1, frac: 0.45 } } },
   // ── ROGUE ──
   stab:              { window: { ms: 2500, execute: { frac: 0.06, bossMul: 1.10 } } },
@@ -17185,6 +17184,7 @@ function _formatMilestoneObj(b) {
   if (b.wolfHits)    parts.push('+' + b.wolfHits + ' bonus bite per wolf');
   if (b.mobCap)      parts.push('mob cap → ' + b.mobCap);
   if (b.pierceAdd)   parts.push('pierces ' + b.pierceAdd + ' more foe' + (b.pierceAdd > 1 ? 's' : ''));
+  if (b.orbAdd)      parts.push('+' + b.orbAdd + ' judgement orb' + (b.orbAdd > 1 ? 's' : ''));
   if (b.distMul)     parts.push('distance × ' + b.distMul.toFixed(2));
   if (b.aoeMul)      parts.push('AoE × ' + b.aoeMul.toFixed(2));
   if (b.healMul)     parts.push('heal × ' + b.healMul.toFixed(2));
@@ -30714,7 +30714,7 @@ const player = {
   // Buffs: each is a timer (ms remaining)
   buffs: { warCry:0, bloodlust:0, guardian:0, holyShield:0, eagleEye:0, smokeBomb:0, sleight:0, rampage:0,
            comboAtk:0, comboXp:0,
-           hallowedField:0, lich:0 },   // v0.29.301 — both were created on the fly at first cast; declared here so every BUFF_META key has a real slot from boot (verified by test)
+           hallowedField:0, lich:0, aegisShield:0 },
   pet: null, // ranger companion
   jumpBufferTimer: 0,
   invulnerable:0, rushTimer:0, rushDir:1,
@@ -41933,7 +41933,7 @@ function _coopApplyPartyHeal(msg) {
 //     frame-by-frame (spin AoE, blink charges); a bare timer on a partner's
 //     client would show a HUD pill with no mechanic behind it.
 //   • `lich` — a full-body transform tied to the caster's own sprite + form.
-const _COOP_SHARABLE_BUFFS = new Set(['warCry', 'guardian', 'holyShield', 'bloodlust', 'eagleEye']);
+const _COOP_SHARABLE_BUFFS = new Set(['warCry', 'guardian', 'holyShield', 'bloodlust', 'eagleEye', 'aegisShield']);
 // Accepts either a single ('warCry', 12000, 'War Cry') or a whole set in one
 // frame ({ warCry: 12000, bloodlust: 12000 }, 'Warlord's Banner'). The set form
 // matters: skills like Warlord's Banner grant two buffs in the same cast, and
@@ -55879,6 +55879,40 @@ function _lxAirJumpCap() {
 }
 
 function updatePlayer(dt) {
+  // v0.29.x — JUDGEMENT + DAWN SHIELD tick (Bastion of Dawn remake, per
+  // user: "stacking buff per hit taken up to 5 then draws enemies near into
+  // paladin and summons 10 orbs which home onto enemies causing a small
+  // explosion, including a 15 seconds shield for the entire party").
+  //
+  // METER — every damage site in the file stamps player.lastHitTime, so
+  // watching that one field counts hits from all of them with zero per-site
+  // edits. One stack per hit, >=400ms apart (a burn tick can't fill the
+  // meter in a breath), cap 5, Crusader master only, cleared by death.
+  // SHIELD BRIDGE — 'aegisShield' is a plain sharable buff (it rides the
+  // same co-op channel as War Cry), and this bridge materialises it into
+  // player._aegis — the shipped half-damage mechanism already honoured at
+  // every damage site and already drawing the holy visuals. Extend-only:
+  // a longer Divine Aegis is never shortened, and orbs are preserved.
+  {
+    if (player.master === 'crusader' && player.hp > 0) {
+      if (player._judgeHitSeen == null) player._judgeHitSeen = player.lastHitTime || 0;
+      if ((player.lastHitTime || 0) > 0 && player.lastHitTime !== player._judgeHitSeen) {
+        player._judgeHitSeen = player.lastHitTime;
+        if (game.time - (player._judgeStackFr || -999) >= 24 && (player._judgeStacks | 0) < 5) {
+          player._judgeStacks = (player._judgeStacks | 0) + 1;
+          player._judgeStackFr = game.time;
+          if (typeof showToast === 'function') showToast('⚖ Judgement ' + ['I','II','III','IV','V'][player._judgeStacks - 1] + (player._judgeStacks >= 5 ? ' — MAX' : ''), player._judgeStacks >= 5 ? 'legendary' : 'rare');
+        }
+      }
+    } else if (player.hp <= 0 && (player._judgeStacks | 0) > 0) {
+      player._judgeStacks = 0;   // death voids the verdict
+    }
+    const _dsMs = (player.buffs && player.buffs.aegisShield) | 0;
+    if (_dsMs > 0) {
+      if (!player._aegis) player._aegis = { life: _dsMs, maxLife: Math.max(_dsMs, 1), orbs: [] };
+      else if (player._aegis.life < _dsMs) player._aegis.life = _dsMs;
+    }
+  }
   // v0.29.427 — WALKING footsteps. Landing already had a sound; actually
   // moving across the ground did not, which is the higher-frequency beat.
   // Cadence is distance-based, not time-based, so steps stay locked to the
@@ -66431,20 +66465,81 @@ const SKILL_FNS = {
     scheduleSkillTimer(() => { if (player.hp <= 0) return; wave(4.5, 100, 130, 90); }, 320);
   },
   crusader_ult: () => {
-    // v0.26.x — OHKO-IMMUNE bastion: full invulnerability negates ALL incoming
-    // damage (including one-shot mechanics) for the window, then a holy nova.
+    // v0.29.x — BASTION OF DAWN, remade around the JUDGEMENT METER (per
+    // user; AAA lineage: Diablo's Akarat meter, Overwatch's Zarya payoff,
+    // FF14's Passage of Arms party wall). Hits taken charge Judgement
+    // (0-5, tracked in updatePlayer); the cast CONSUMES it:
+    //   - full heal, self + same-map partners (the panic button stays),
+    //   - DAWN SHIELD: half damage for the whole party, 15s (+milestones)
+    //     — an 'aegisShield' buff bridged into the shipped _aegis
+    //     machinery, so all 14 damage sites and the holy visuals are
+    //     reused, and it travels over the standard co-op buff channel,
+    //   - the pull: ~0.7s of stepped suction (position, not velocity —
+    //     the Soul Vortex lesson) dragging foes within 420px toward the
+    //     paladin; bosses lean at 30%,
+    //   - JUDGEMENT ORBS: 2 per stack consumed (10 at full, +2 at rank
+    //     10), staggered homing strikes that each burst in a small 90px
+    //     explosion (aoeOnHit). No stacks banked = no orbs: the strong
+    //     half is EARNED by tanking, which is the whole design.
+    // The old fixed 8x nova + 4.5s full invulnerability are gone; the
+    // OHKO-counter identity moves into 'half damage for everyone' plus a
+    // short cast i-frame. Sprites are all pre-existing (crusader_ult
+    // burst, aegis orbs/glow, default gold orb projectiles).
+    const _stacks = Math.max(0, Math.min(5, player._judgeStacks | 0));
+    player._judgeStacks = 0;
+    player._judgeHitSeen = player.lastHitTime || 0;
+    const _bonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('crusader_ult') : null;
+    const _shieldMs = 15000 + ((_bonus && _bonus.buffMs) | 0);
+    const _orbN = _stacks * 2 + ((_stacks >= 5 && _bonus && _bonus.orbAdd) ? (_bonus.orbAdd | 0) : 0);
     spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'crusader_ult', { size: 250, life: 80, spin: 0.4 });
     player.hp = getMaxHp();
-    // v0.29.301 — Bastion of Dawn full-heals the party on this map too. The
-    // 4.5 s invulnerability deliberately does NOT travel: handing every
-    // partner OHKO-immunity would trivialise the boss mechanics it exists to
-    // counter, so partners get the heal and the caster keeps the bastion.
     if (typeof _coopPartyHeal === 'function') _coopPartyHeal(1.0, 0, 'Bastion of Dawn');
-    player.invulnerable = Math.max(player.invulnerable, 4500);  // negates one-shots for 4.5s
-    player._aegis = { life: 4500, maxLife: 4500, orbs: [] };
-    showToast('BASTION OF DAWN — invulnerable', 'legendary'); flash(0.6); audio.play('levelup');
-    for (let i = 0; i < 4; i++) scheduleSkillTimer(() => { if (player.hp <= 0) return; spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'crusader_ult', { size: 360, life: 28 }); performAround(300, 3.0, { color: '#fff1a0', kb: 8 }); flash(0.2); }, 700 + i * 850);
-    scheduleSkillTimer(() => { if (player.hp <= 0) return; spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'crusader_ult', { size: 560, life: 80 }); performAround(540, 8.0, { color: '#ffffff', kb: 14 }); flash(0.85); addShake(13); addHitStop(90); }, 4500);
+    player.buffs = player.buffs || {};
+    player.buffs.aegisShield = Math.max(player.buffs.aegisShield || 0, _shieldMs);
+    if (typeof _coopPartyBuff === 'function') _coopPartyBuff('aegisShield', _shieldMs, 'Bastion of Dawn');
+    player.invulnerable = Math.max(player.invulnerable, 1200);   // cast i-frame only — the 4.5s immunity is retired
+    showToast('BASTION OF DAWN — judgement ×' + _stacks + ' · party shielded ' + Math.round(_shieldMs / 1000) + 's', 'legendary');
+    flash(0.6); audio.play('levelup');
+    // THE PULL — 12 stepped ticks over ~0.7s. Position steps survive the
+    // AI's per-frame vx assignment (see the Soul Vortex fix); min-distance
+    // 44px so foes ring the paladin instead of stacking inside them.
+    for (let _pt = 0; _pt < 12; _pt++) scheduleSkillTimer(() => {
+      if (player.hp <= 0) return;
+      const _pcx = player.x + player.w / 2, _pcy = player.y + player.h / 2;
+      const _ms = game.monsters.slice();
+      for (const m of _ms) {
+        if (!m || m.currentHp <= 0) continue;
+        const dx = _pcx - (m.x + m.w / 2), dy = _pcy - (m.y + m.h / 2);
+        const d = Math.sqrt(dx * dx + dy * dy) || 1;
+        if (d > 420 || d <= 44) continue;
+        let step = (m.isBoss || m.isMiniBoss || m.boss) ? 2.1 : 7;
+        step = Math.min(step, d - 44);
+        m.x += (dx / d) * step;
+        if (m.flies) m.y += (dy / d) * step * 0.7;
+      }
+    }, 60 + _pt * 60);
+    // JUDGEMENT ORBS — staggered launches; each re-targets the nearest
+    // living foe at its own launch moment so kills mid-volley re-aim the
+    // rest instead of wasting them on corpses.
+    for (let _oi = 0; _oi < _orbN; _oi++) scheduleSkillTimer(() => {
+      if (player.hp <= 0) return;
+      const _pcx = player.x + player.w / 2, _pcy = player.y + player.h / 2;
+      const _alive = game.monsters.filter(m => m && m.currentHp > 0);
+      _alive.sort((a, b) => (Math.abs(a.x - _pcx) - Math.abs(b.x - _pcx)));
+      const _tg = _alive.length ? _alive[_oi % Math.min(_alive.length, 4)] : null;
+      const _ang = (_oi / 10) * Math.PI * 2;
+      game.projectiles.push({
+        x: _pcx + Math.cos(_ang) * 34, y: _pcy + Math.sin(_ang) * 26 - 20,
+        vx: Math.cos(_ang) * 9, vy: Math.sin(_ang) * 9 - 2,
+        w: 26, h: 26, life: 110,
+        damage: getAtk() * 1.6 + 8,
+        owner: 'player', skill: 'holyorb', homing: _tg,
+        aoeOnHit: 90, noGravity: true, _msHandled: true,
+        color: '#ffe9a0',
+      });
+      spawnSpriteBurst(_pcx + Math.cos(_ang) * 34, _pcy + Math.sin(_ang) * 26 - 20, 'crusader_aegis', { size: 64, life: 14 });
+    }, 200 + _oi * 90);
+    scheduleSkillTimer(() => { if (player.hp <= 0) return; flash(0.35); addShake(6); }, 200 + Math.max(1, _orbN) * 90);
   },
   dragoon_ult: () => {
     // v0.26.x — aerial leap → targeted dragon-lance rain on foes → crashing slam.
@@ -118473,6 +118568,11 @@ const BUFF_META = [
   // v0.29.5xx — icon id differs from the buff key: the art ships as
   // Sprites/skills/lich_ult.webp. Every other buff uses its key directly.
   { key: 'lich',          skill: 'lich_ult',          icon: '💀', label: 'Lich Form',    dur: 30000 },
+  // v0.29.x — Bastion of Dawn party shield. Rendered with the EXISTING
+  // crusader_ult art (same pattern as lich above); the buff itself is a
+  // carrier that _lxJudgeTick bridges into player._aegis every frame, so all
+  // 14 damage sites that honour the aegis honour this shield for free.
+  { key: 'aegisShield',   skill: 'crusader_ult',      icon: '🛡', label: 'Dawn Shield',  dur: 15000 },
   { key: 'comboAtk',      icon: '🔥', label: 'Combo +ATK',   dur: 8000  },
   { key: 'comboXp',       icon: '⭐', label: 'Combo XP',     dur: 10000 },
 ];
