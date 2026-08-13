@@ -20,22 +20,6 @@ try {
   await page.waitForFunction(() => typeof _lxPadPoll === 'function' && typeof loadMap === 'function', null, { timeout: 45000 });
   await page.waitForTimeout(2500);
   await page.evaluate(() => { try { player.cls = 'warrior'; game.paused = false; window._prologueActive = false; const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none'; loadMap('glasswindSteppe'); } catch (e) {} });
-  // This boot ENTERS THE WORLD DIRECTLY, skipping the title flow the loading
-  // pipeline expects — so when its async sprite-decode finishes (~4s after
-  // load) it calls _showAuthGate() and re-raises the TITLE MENU, inside
-  // #loading-overlay at z 9999, over the running game. The pad's topmost-wins
-  // root picker then drives the title menu instead of the panel under test:
-  // B "fails" to close Settings, and the quit-row walk cycles
-  // menu-newgame/menu-coop for 120 steps. Which checks it breaks depends on
-  // machine speed (the reveal races the suite), so it read as flaky. A real
-  // player cannot reach this state — the gate shows BEFORE play and the entry
-  // flow hides it — so clamp the overlay down for the whole run instead of
-  // trying to out-race it.
-  await page.evaluate(() => {
-    setInterval(() => {
-      try { const o = document.getElementById('loading-overlay'); if (o && o.style.display !== 'none') o.style.display = 'none'; } catch (e) {}
-    }, 100);
-  });
   await sleep(800);
 
   // Install a controllable synthetic gamepad.
