@@ -9430,7 +9430,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.656';
+const GAME_VERSION = 'v0.29.657';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -22111,6 +22111,7 @@ const MONSTER_SKILL_FNS = {
     const px = player.x + player.w / 2;
     game.hazards.push({
       type: 'mob_quake',
+      _owner: m,                       // v0.29.657 — a quake dies with its caster
       cx: px, x: px - 80, y: 460, w: 160, h: 30,
       life: 35, maxLife: 35,
       damage: Math.max(4, Math.floor(m.atk * 0.85)),
@@ -26701,7 +26702,9 @@ const MAPS = {
     // map (the bg-prefix gate no longer excludes the den); the authored
     // vx/vy below are dead values kept only as the non-Block-land fallback.
     launchPads: [
-      { x:220,  y:480, w:90, vx:3,  vy:-34, color:'#ff8866' },
+      // v0.29.657 — the x:220 entrance pad is gone (per user). The den is
+      // entered from the left, so it sat exactly where the player lands, and
+      // since v0.29.513 it fires the full Block-land hyper-launch.
       { x:1690, y:480, w:90, vx:-3, vy:-34, color:'#ff8866' },
     ],
     portals: [],
@@ -70258,6 +70261,7 @@ function _bossSpecialAttacks(m, dt) {
       const _qgy = (game.mapData && game.mapData.worldHeight ? game.mapData.worldHeight - 60 : 680);
       game.hazards.push({
         type: 'mob_quake',
+        _owner: m,                     // v0.29.657 — a quake dies with its caster
         cx: _qx, x: _qx - 280, y: _qgy - 30, w: 560, h: 50,
         life: 90, maxLife: 90,                              // 1.5 s telegraph at 60 fps
         damage: Math.max(40, Math.floor((m.atk || 320) * 1.15)),
@@ -78705,6 +78709,14 @@ function updateProjectiles(dt) {
     // Telegraphs for ~30 frames then pulses on the final tick: applies
     // damage + 700ms hitStun if the player is standing in the band at
     // ground level. Single-pulse hazard, despawns on the same tick.
+    // v0.29.657 — a quake belongs to its caster. Without this a band already in
+    // the air when the boss dies still detonates on the victory lap, which is
+    // exactly the "took massive damage after killing the boss and died" report.
+    if (h.type === 'mob_quake' && h._owner &&
+        (h._owner.currentHp <= 0 || (game.monsters && game.monsters.indexOf(h._owner) < 0))) {
+      game.hazards.splice(i, 1);
+      continue;
+    }
     if (h.type === 'mob_quake' && h.life === 0) {
       const inHzn = Math.abs((player.x + player.w/2) - h.cx) < h.w / 2;
       const onFloor = (player.y + player.h) > h.y && (player.y + player.h) < h.y + h.h + 30;
@@ -78729,6 +78741,12 @@ function updateProjectiles(dt) {
         });
         flash(0.34);
         if (typeof addShake === 'function') addShake(16);
+      } else if (inHzn && !onFloor && player.hp > 0) {
+        // v0.29.657 — in the band but off the ground: the jump beat it.
+        game.damageNumbers.push({
+          x: player.x + 10, y: player.y - 14, vy: -1.6,
+          text: 'DODGED!', life: 40, color: '#7ae0d8', size: 15,
+        });
       }
       // v0.29.634 — the payoff. 14 ring particles read as a puff; a quake
       // should look like the floor broke. Dust plume along the whole band,
