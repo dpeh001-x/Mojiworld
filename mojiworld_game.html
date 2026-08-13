@@ -9446,7 +9446,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.672';
+const GAME_VERSION = 'v0.29.674';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -41469,6 +41469,11 @@ function _coopBroadcastBossHit(cx, cy, radius, dmgRaw, dmgFrac, label, color) {
   } catch (e) {}
 }
 function _coopApplyBossHit(msg) {
+  // v0.29.674 — a PAUSED guest is out of the fight entirely. This handler runs
+  // from the network message pump, outside the world step, so the paused-
+  // player snapshot cannot unwind it — and while _diffDmg already zeroes its
+  // damage, its stun/knockback would still land. Same rule as the world step.
+  if (typeof game !== 'undefined' && game && game.paused) return;
   if (net.isHost || !msg || msg.map !== game.currentMap) return;
   if (net.hostId == null || +msg.id !== +net.hostId) return;   // host-only, fail-closed
   if (!_coopFollowingHost()) return;
@@ -118895,8 +118900,27 @@ function _lxCoopWorldStep(dt) {
     if (!(typeof _coopActive === 'function' && _coopActive())) return;
     if (!player || !player.cls || game._resetting || game.dying || player.hp <= 0) return;
     if (window._prologueActive || window._prologuePending) return;
+    // v0.29.674 — GHOST STATUE while paused (per user: "pause stops everything
+    // from the player side, while it continues for the others"). v0.29.672
+    // zeroed the damage, but the world still stunned (140 ms), knocked back
+    // (vx 1.2), queued an 8 s poison and burned 1 s of i-frames on a paused
+    // player — all measured. Snapshot every combat-mutable field, let the
+    // world simulate for the room, restore, so any interaction with the
+    // paused player is unwound the same frame. NOT applied when merely
+    // hidden: tabbing away has never been a shield.
+    const _pSnap = game.paused ? {
+      x: player.x, y: player.y, vx: player.vx, vy: player.vy, hp: player.hp,
+      hitStun: player.hitStun, invulnerable: player.invulnerable,
+      lastHitTime: player.lastHitTime, _lastDamageSource: player._lastDamageSource,
+      burnTimer: player.burnTimer, burnDmg: player.burnDmg, _burnTickAcc: player._burnTickAcc,
+      _poisonTimer: player._poisonTimer, _poisonDmg: player._poisonDmg, _poisonTickAcc: player._poisonTickAcc,
+      _slowTimer: player._slowTimer, frozenTimer: player.frozenTimer, freezeTimer: player.freezeTimer,
+      stunTimer: player.stunTimer, _skillLockTimer: player._skillLockTimer,
+      _electrocuteTimer: player._electrocuteTimer,
+    } : null;
     updateMonsters(dt);        // enemy AI/physics + monster→player contact & hazard damage
     updateProjectiles(dt);     // enemy projectiles keep flying + hitting (i-frame-respecting)
+    if (_pSnap) { for (const _k in _pSnap) player[_k] = _pSnap[_k]; }
     // Death check — MUST run here too. The normal check lives in loop(), which
     // is frozen while hidden/paused; without this, contact damage kept applying
     // past 0 (deep-negative HP) and the hp>0 guard above then silently halted
