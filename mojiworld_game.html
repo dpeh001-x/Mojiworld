@@ -9135,6 +9135,22 @@ The sleeping world is listening.</div>
          with no window chrome, so pause-menu → Settings → Quit is the pad-reachable
          exit path Deck review looks for. Save is flushed first; window.close() is a
          no-op on the web build (browsers block closing user-opened tabs). -->
+    <!-- v0.29.668 — pad-reachable fullscreen + hotkeys. The floating
+         fullscreen-btn and the K key were the only paths to these, and a
+         controller has neither a cursor nor a K. Settings is pad-navigable,
+         so rows here close both of Steam's findings. -->
+    <div class="settings-row" id="set-fullscreen-row">
+      <label title="Toggle fullscreen. Same as the ⛶ button.">⛶ Fullscreen</label>
+      <div class="ctrl" style="justify-content:flex-end;">
+        <button class="hs-btn" onclick="try{toggleFullscreenDesktop()}catch(e){}">Toggle</button>
+      </div>
+    </div>
+    <div class="settings-row" id="set-hotkeys-row">
+      <label title="View and remap every key and pad binding.">⌨ Hotkeys &amp; Skills</label>
+      <div class="ctrl" style="justify-content:flex-end;">
+        <button class="hs-btn" onclick="try{closeSettingsModal()}catch(e){}; try{toggleKeybindModal()}catch(e){}">Open</button>
+      </div>
+    </div>
     <div class="settings-row" id="set-quit-row" style="display:none;">
       <label title="Save and close Mojiworld. Progress is flushed before the window closes.">🚪 Quit</label>
       <div class="ctrl" style="justify-content:flex-end;">
@@ -9430,7 +9446,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.668';
+const GAME_VERSION = 'v0.29.669';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -37612,6 +37628,7 @@ function _lxPadResolveKey(spec) {
   return (ab && ab[spec.a]) || (typeof ACTION_KEY_DEFAULT === 'object' ? ACTION_KEY_DEFAULT[spec.a] : null) || null;
 }
 function _lxPadDispatch(key, down) {
+  if (down) { try { document.body.classList.add('pad-cursor-hide'); } catch (e) {} }
   if (!key) return;
   // A key already held from the keyboard must not be stomped by the pad edge.
   try {
@@ -37665,7 +37682,14 @@ const _LX_PAD_MODAL_IDS = ['lo-auth', 'death-overlay', 'dialog', 'settings-modal
   'inventory-modal', 'skills-modal', 'skilltree-modal', 'attributes-modal', 'codex-modal', 'quest-modal',
   'worldmap-modal', 'shop-modal', 'craft-modal', 'enhance-modal', 'recipe-scrolls-modal', 'taxi-modal',
   'multiplayer-modal', 'help-modal', 'lore-modal', 'mojidex-modal', 'tutorial-modal', 'powerup-modal',
-  'sage-blessing-modal', 'keybind-modal', 'jukebox-modal-bg', 'backup-modal-bg', 'dev-modal'];
+  'sage-blessing-modal', 'keybind-modal', 'jukebox-modal-bg', 'backup-modal-bg',
+  // v0.29.668 — Steam "Full Controller Support" review pass. The title's
+  // sub-panels replace the menu buttons IN PLACE (same overlay, new children),
+  // so they were never separate roots — but the router resolves by id, and
+  // without ids of their own a pad player who opened Name Entry or Co-op was
+  // stranded: the panel is up, the router still points at the buttons it
+  // replaced. Wardrobe is the same story from the U panel.
+  'wardrobe-picker', 'menu-name-panel', 'menu-coop-panel', 'dev-modal'];
 // v0.29.422 — TOPMOST WINS, not first-listed. Several of these overlays are
 // live at once (at the title, 'lo-auth' and 'class-select-modal' are both
 // displayed), so "first id in an arbitrary array" was standing in for "the one
@@ -37679,6 +37703,10 @@ const _LX_PAD_MODAL_IDS = ['lo-auth', 'death-overlay', 'dialog', 'settings-modal
 // order survives as the tie-break (two overlays can both be "topmost" when they
 // do not overlap) and as the fallback when nothing claims its own centre.
 function _lxPadModalRoot() {
+  // v0.29.668 — the virtual keyboard outranks every other surface while open;
+  // it exists precisely because the pad has nowhere else to type.
+  const _vk = document.getElementById('pad-vk');
+  if (_vk) return _vk;
   const cands = [];
   for (let i = 0; i < _LX_PAD_MODAL_IDS.length; i++) {
     const el = document.getElementById(_LX_PAD_MODAL_IDS[i]);
@@ -37728,7 +37756,7 @@ function _lxPadMenuNav(root, pad) {
   };
   const seen = new Set();
   const els = [];
-  for (const el of root.querySelectorAll('button, [role="button"], input, select, .toggle, .qj-btn, [data-qaccept], [data-qabandon], [onclick]')) {
+  for (const el of root.querySelectorAll('button, [role="button"], input, select, .toggle, .qj-btn, [data-qaccept], [data-qabandon], [onclick], .cs-dd-item, .class-card')) {
     if (seen.has(el) || el.disabled) continue;
     const r = el.getBoundingClientRect();
     if (r.width < 5 || r.height < 5) continue;
@@ -37763,7 +37791,13 @@ function _lxPadMenuNav(root, pad) {
     el.value = Number(el.value) + lateral * step;
     try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
   }
-  if (edge(0)) { try { el.click(); } catch (e) {} }
+  if (edge(0)) {
+    // v0.29.668 — a click cannot type. A text field under pad focus opens the
+    // virtual keyboard; everything else keeps the plain click.
+    const _typeable = el && ((el.tagName === 'INPUT' && /^(text|number|search|password|url)$/.test(el.type || 'text')) || el.tagName === 'TEXTAREA');
+    if (_typeable && typeof _lxPadVK !== 'undefined') { try { _lxPadVK.open(el); } catch (e) {} }
+    else { try { el.click(); } catch (e) {} }
+  }
   if (edge(1) || edge(9)) {
     const closer = root.querySelector('.mc-modal-close, [id$="-close"], .modal-close, .close-x');
     if (closer) { try { closer.click(); } catch (e) {} }
@@ -37799,10 +37833,114 @@ function _lxPadFlushHeld() {
 }
 window.addEventListener('gamepaddisconnected', () => {
   _lxPadFlushHeld();
+  // v0.29.668 — auto-pause on unplug (Steam review best-practice): a dead
+  // battery mid-fight should not cost the run. Escape both pauses and is
+  // ignored on surfaces that are already paused-equivalent (title, modals).
+  try { if (typeof game !== 'undefined' && game && !game.paused && typeof player !== 'undefined' && player && player.hp > 0) _lxPadDispatch('escape', true); } catch (e) {}
     try { const ps = navigator.getGamepads ? navigator.getGamepads() : []; _lxPadPresent = Array.prototype.some.call(ps, (g) => g && g.connected); }
     catch (e) { _lxPadPresent = false; }
   });
 } catch (e) {}
+// =========================================================================
+// v0.29.668 — VIRTUAL KEYBOARD (pad text entry). Steam's review: "user is
+// unable to enter any text while using only a controller. No virtual keyboard
+// appears." Opened by pressing A on any focused text field under pad nav.
+//
+// Deliberately built out of plain <button>s with onclick, because that makes
+// the whole thing drivable by the EXISTING generic menu nav — D-pad moves the
+// ring, A presses a key, and the Done key carries .mc-modal-close so B (the
+// nav's close chord) commits and closes. No second input system to maintain.
+//
+// The target field is BLURRED while the VK is up: the pad poller deliberately
+// early-outs while a typeable field holds focus (so a hardware keyboard is
+// never fought), and a focused target would freeze the very keyboard trying
+// to type into it. Text accumulates in a buffer shown in the VK's preview
+// row and is written back on Done via the native value setter + input/change
+// events, so framework listeners fire exactly as if typed.
+const _lxPadVK = {
+  target: null, buf: '', shift: false,
+  open(target) {
+    if (!target) return;
+    this.target = target; this.buf = String(target.value || ''); this.shift = false;
+    try { target.blur(); } catch (e) {}
+    this.render();
+  },
+  commit() {
+    const t = this.target;
+    if (t) {
+      try {
+        const proto = t.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const set = Object.getOwnPropertyDescriptor(proto, 'value');
+        if (set && set.set) set.set.call(t, this.buf); else t.value = this.buf;
+        t.dispatchEvent(new Event('input',  { bubbles: true }));
+        t.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch (e) { try { t.value = this.buf; } catch (e2) {} }
+    }
+    this.close();
+  },
+  close() {
+    const r = document.getElementById('pad-vk');
+    if (r) r.remove();
+    this.target = null;
+  },
+  press(k) {
+    if (k === '⌫') this.buf = this.buf.slice(0, -1);
+    else if (k === '␣') this.buf += ' ';
+    else if (k === '⇧') this.shift = !this.shift;
+    else if (k === '✓') { this.commit(); return; }
+    else if (k === '✕') { this.close(); return; }
+    else this.buf += this.shift ? k.toUpperCase() : k;
+    this.render();
+  },
+  render() {
+    let r = document.getElementById('pad-vk');
+    if (!r) {
+      r = document.createElement('div');
+      r.id = 'pad-vk';
+      r.style.cssText = 'position:fixed;left:50%;bottom:4vh;transform:translateX(-50%);z-index:100000;' +
+        'background:rgba(12,14,26,0.97);border:1px solid #4a5578;border-radius:14px;padding:12px 14px;' +
+        'box-shadow:0 12px 40px rgba(0,0,0,0.6);font-family:inherit;';
+      document.body.appendChild(r);
+    }
+    const rows = ['1234567890', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm-_.', '⇧␣⌫✕✓'];
+    const cap = (k) => this.shift && /^[a-z]$/.test(k) ? k.toUpperCase() : k;
+    let html = '<div style="color:#cdd6ff;font-size:15px;min-height:22px;padding:2px 6px 8px;border-bottom:1px solid #333c58;margin-bottom:8px;letter-spacing:1px;">'
+      + (this.buf ? this.buf.replace(/&/g, '&amp;').replace(/</g, '&lt;') : '<span style="opacity:0.4">type with the pad…</span>') + '</div>';
+    for (const row of rows) {
+      html += '<div style="display:flex;gap:5px;justify-content:center;margin-top:5px;">';
+      for (const k of row) {
+        const wide = k === '␣' ? 'min-width:120px;' : k === '✓' || k === '✕' || k === '⌫' || k === '⇧' ? 'min-width:52px;' : 'min-width:34px;';
+        const hot = k === '✓' ? 'background:#2c5a34;border-color:#59b06a;' : k === '✕' ? 'background:#5a2c2c;border-color:#b05959;' : '';
+        html += '<button ' + (k === '✓' ? 'class="mc-modal-close" ' : '') +
+          'onclick="_lxPadVK.press(\'' + k + '\')" style="' + wide + hot +
+          'padding:9px 6px;font-size:15px;color:#e8ecff;background:' + (hot ? '' : '#232a44') +
+          ';border:1px solid #3d4675;border-radius:8px;cursor:pointer;">' + cap(k) + '</button>';
+      }
+      html += '</div>';
+    }
+    html += '<div style="color:#8892b8;font-size:11px;text-align:center;margin-top:8px;">Ⓐ press · Ⓑ done · ✓ confirm · ✕ cancel</div>';
+    r.innerHTML = html;
+    r._padIdx = r._padIdx || 0;
+  },
+};
+try { window._lxPadVK = _lxPadVK; } catch (e) {}
+
+// v0.29.668 — Steam review best-practices, both cheap and both real wins:
+//   OVERLAY PAUSE — the Steam overlay steals focus, which fires blur on the
+//   window; pausing there covers the overlay, alt-tab and the Deck's home
+//   sheet in one listener. Same guard as the unplug pause.
+//   CURSOR HIDE — pad input hides the OS cursor (it otherwise sits mid-screen
+//   forever); any real mouse movement brings it straight back.
+try {
+  window.addEventListener('blur', () => {
+    try { if (typeof game !== 'undefined' && game && !game.paused && typeof player !== 'undefined' && player && player.hp > 0) _lxPadDispatch('escape', true); } catch (e) {}
+  });
+  const _padCursorCss = document.createElement('style');
+  _padCursorCss.textContent = 'body.pad-cursor-hide, body.pad-cursor-hide * { cursor: none !important; }';
+  document.head.appendChild(_padCursorCss);
+  window.addEventListener('mousemove', () => { try { document.body.classList.remove('pad-cursor-hide'); } catch (e) {} }, { passive: true });
+} catch (e) {}
+
 function _lxPadPoll() {
   try {
     if (typeof navigator === 'undefined' || !navigator.getGamepads) return;

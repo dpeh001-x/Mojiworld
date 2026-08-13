@@ -179,11 +179,54 @@ for (const r of live) {
 }
 if (liveUnverified) console.log(`\n  note: ${liveUnverified} panel(s) never opened — the harness could not satisfy their in-game\n  preconditions. They route correctly when visible (pass 1); their populated\n  content is UNTESTED, not broken.`);
 
+// ── v0.29.669 — STEAM FULL-CONTROLLER REVIEW LOCKS ───────────────────────────
+// Each check pins the exact mechanism that fixed one finding from Steam's
+// "Full Controller Support" review, so a refactor cannot silently reopen it.
+const steam = await page.evaluate(() => {
+  const out = [];
+  const ok = (n, c, extra) => out.push({ n, pass: !!c, extra: String(extra == null ? '' : extra) });
+  const m = _lxPadMenuNav.toString().match(/querySelectorAll\('([^']+)'\)/);
+  const selStr = (m && m[1]) || '';
+  // "unable to select Customization Options" — dropdown items are plain divs
+  ok('nav selector reaches .cs-dd-item (customization options)', selStr.includes('.cs-dd-item'));
+  // "unable to choose Class" — cards wire onclick as a PROPERTY, not attribute
+  ok('nav selector reaches .class-card (class choice)', selStr.includes('.class-card'));
+  // "unable to enter any text… no virtual keyboard appears"
+  let vkOk = false, vkRoot = false, committed = '';
+  try {
+    const inp = document.createElement('input'); inp.type = 'text';
+    document.body.appendChild(inp);
+    _lxPadVK.open(inp);
+    vkOk = !!document.getElementById('pad-vk');
+    vkRoot = (_lxPadModalRoot() || {}).id === 'pad-vk';
+    for (const k of ['⇧', 'd', 'e', 'c', 'k']) _lxPadVK.press(k);
+    _lxPadVK.press('✓');
+    committed = inp.value; inp.remove();
+  } catch (e) {}
+  ok('virtual keyboard opens on a text field', vkOk);
+  ok('virtual keyboard outranks every other pad root while open', vkRoot);
+  ok('virtual keyboard commits its buffer to the field', committed === 'DECK', committed);
+  ok('VK is fully gone after commit', !document.getElementById('pad-vk'));
+  // title sub-panels that used to strand the router
+  for (const id of ['wardrobe-picker', 'menu-name-panel', 'menu-coop-panel'])
+    ok('router id list covers ' + id, _LX_PAD_MODAL_IDS.includes(id));
+  // "unable to select Full screen prompt" / "unable to access Hotkeys & Skills"
+  ok('settings has a pad-reachable Fullscreen row', !!document.getElementById('set-fullscreen-row'));
+  ok('settings has a pad-reachable Hotkeys & Skills row', !!document.getElementById('set-hotkeys-row'));
+  return out;
+});
+console.log('\nSTEAM REVIEW LOCKS\n');
+let steamBad = 0;
+for (const r of steam) {
+  if (!r.pass) steamBad++;
+  console.log(`  ${r.pass ? 'ok   ' : 'FAIL '}${r.n}${r.extra ? '  (' + r.extra + ')' : ''}`);
+}
+
 // pass 1's 0-focusable entries are superseded by pass 2 for these four ids
 const deferred = new Set(live.map((r) => r.id));
 const pass1Real = rows.filter((r) => r.exists && r.blocking && !deferred.has(r.id) && (!r.routedHere || r.focusables === 0)).length;
-const total = pass1Real + liveBad;
-console.log(`\nBLOCKING failures: ${total} (routing ${pass1Real}, populated-content ${liveBad})   non-blocking: ${otherBad}`);
+const total = pass1Real + liveBad + steamBad;
+console.log(`\nBLOCKING failures: ${total} (routing ${pass1Real}, populated-content ${liveBad}, steam-locks ${steamBad})   non-blocking: ${otherBad}`);
 console.log(total ? 'FAIL — a controller-only player can soft-lock' : 'PASS — every blocking surface is pad-reachable and operable');
 await browser.close();
 process.exit(total);
