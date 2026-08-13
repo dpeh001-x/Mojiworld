@@ -9458,7 +9458,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.681';
+const GAME_VERSION = 'v0.29.682';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -66722,28 +66722,13 @@ const SKILL_FNS = {
       type: 'necro_maelstrom', follow: true,
       cx: _pcx, x: _pcx - _NM_RX, y: _pcy - _NM_RY, w: _NM_RX * 2, h: _NM_RY * 2,
       rx: _NM_RX, ry: _NM_RY, hold: 70, pullRim: 4.6, pullCore: 7.0,
-      // life is FRAMES with +60 of slack: the finale timer below runs on real
-      // milliseconds and reads the soul count off this hazard - if frame-life
-      // expired at exactly 6s the collapse would race it and read 0 souls.
-      // The finale splices the hazard itself, so the slack never plays out.
+      // life is FRAMES with +60 of slack: the storm STORMS for 360 frames and
+      // collapses when life crosses 60 (see the frame-based collapse in the
+      // hazard tick) — sim-time end to end, so pause/death/recast all behave.
       life: Math.round(_NM_MS / 1000 * 60) + 60, maxLife: Math.round(_NM_MS / 1000 * 60) + 60,
       atk: getAtk() * 3.0,   // halved per tick by the shared TICK/60 cadence -> 1.5x per drain
       tick: 0, souls: 0,
     });
-    scheduleSkillTimer(() => {
-      if (player.hp <= 0) return;
-      let _souls = 0;
-      for (let i = game.hazards.length - 1; i >= 0; i--) {
-        const hz = game.hazards[i];
-        if (hz && hz.type === 'necro_maelstrom') { _souls = hz.souls | 0; game.hazards.splice(i, 1); }
-      }
-      const _mul = Math.min(9.0, 3.5 + 0.35 * _souls);
-      spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'lich_ult', { size: 600, life: 90 });
-      performAround(560, _mul, { color: '#66ffaa', kb: 16 });
-      player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.20));
-      showToast('SOUL COLLAPSE x' + _souls + ' souls', 'legendary');
-      flash(0.85); addShake(16); addHitStop(120);
-    }, _NM_MS);
   },
   hexmaster_ult: () => {
     // v0.26.x — mass curse (freeze + weaken) → 3s doom timer → field-wide detonation.
@@ -80190,6 +80175,26 @@ function updateProjectiles(dt) {
         h.y = (player.y + player.h / 2) - (h.ry || LX_VORTEX_RY);
       }
       const cx = h.cx, cy = h.y + h.h/2;
+      // v0.29.x AUDIT FIX — the collapse is FRAME-based, not wall-clock. The
+      // first cut scheduled it with a 6s setTimeout while the storm itself
+      // lived in sim frames: pausing 3s mid-storm stole 3s of harvest (and the
+      // detonation could land WHILE paused, or at the respawn point after a
+      // death), and a cooldown-refunded recast let the stale timer splice the
+      // NEW storm early. Now the storm collapses when its own life crosses the
+      // slack line — 360 storming frames exactly — so pause freezes harvest
+      // and collapse together, death freezes the storm with the rest of the
+      // sim, and a recast's splice takes the pending collapse with it.
+      if (h.type === 'necro_maelstrom' && h.life <= 60) {
+        const _souls = h.souls | 0;
+        game.hazards.splice(i, 1);
+        const _mul = Math.min(9.0, 3.5 + 0.35 * _souls);
+        spawnSpriteBurst(cx, cy, 'lich_ult', { size: 600, life: 90 });
+        performAround(560, _mul, { color: '#66ffaa', kb: 16 });
+        player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.20));
+        showToast('SOUL COLLAPSE x' + _souls + ' souls', 'legendary');
+        flash(0.85); addShake(16); addHitStop(120);
+        continue;
+      }
       // v0.29.x - NECRO MAELSTROM rides this exact tick with its own dials:
       // it FOLLOWS the lich (h.follow re-centres it every frame), reaches a
       // little further, holds a wider ring (foes orbit the lich, not stack
@@ -80202,6 +80207,7 @@ function updateProjectiles(dt) {
       const _pullCore = h.pullCore || LX_VORTEX_PULL_CORE;
       const _hold = h.hold || LX_VORTEX_HOLD;
       const _drainTick = (h.tick % LX_VORTEX_TICK === 0);
+      if (_drainTick && h.type === 'necro_maelstrom') h._flatN = 0;   // per-tick flat-heal budget
       const _vwW = (game.mapData && game.mapData.worldWidth) || 1e9;
       // v0.26.x - snapshot so a kill+splice can't skip the next target.
       // v0.29.x perf - refill a persistent scratch instead of spreading a fresh
@@ -80278,7 +80284,15 @@ function updateProjectiles(dt) {
           // top of the shared 30%-of-drain return.
           if (h.type === 'necro_maelstrom') {
             h.souls = (h.souls | 0) + 1;
-            player.hp = Math.min(getMaxHp(), player.hp + Math.max(1, Math.floor(getMaxHp() * 0.02)));
+            // v0.29.x AUDIT FIX — the flat 2% maxHp rider scaled with PACK
+            // SIZE unbounded: ten held mobs meant 20% per tick, 40%/s, on top
+            // of the 30%-of-drain return — permanent full HP while storming.
+            // The flat rider now pays out for at most 3 souls per drain tick
+            // (6% maxHp); the 30% drain return (the pool's own rule) is
+            // untouched, so big packs still heal more, just not absurdly.
+            if ((h._flatN = (h._flatN | 0) + 1) <= 3) {
+              player.hp = Math.min(getMaxHp(), player.hp + Math.max(1, Math.floor(getMaxHp() * 0.02)));
+            }
           }
           // Green drain thread - v0.26.052 budget-gated (was unbudgeted).
           for (let k = 0; k < 3; k++) {
