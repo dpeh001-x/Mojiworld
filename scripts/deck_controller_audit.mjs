@@ -213,6 +213,21 @@ const steam = await page.evaluate(() => {
   // "unable to select Full screen prompt" / "unable to access Hotkeys & Skills"
   ok('settings has a pad-reachable Fullscreen row', !!document.getElementById('set-fullscreen-row'));
   ok('settings has a pad-reachable Hotkeys & Skills row', !!document.getElementById('set-hotkeys-row'));
+  // v0.29.670 — controller REBINDING + Start-opens-Settings
+  try {
+    ok('pad override store honoured by the effective map',
+      (_lxPadSetOverride(0, { k: 'c' }), _lxPadMapEff(0).k === 'c'));
+    ok('pad override persists to localStorage',
+      (localStorage.getItem('lx_pad_map_v1') || '').includes('"c"'));
+    ok('unbound button resolves to {none}',
+      (_lxPadSetOverride(0, { none: true }), !!_lxPadMapEff(0).none));
+    localStorage.removeItem('lx_pad_map_v1');
+    ok('reset restores the default binding',
+      (_lxPadOv = null, _lxPadMapEff(0).a === 'jump'));
+  } catch (e) { ok('pad rebinding API present', false, String(e).slice(0, 60)); }
+  ok('K modal ships the Controller rebinding tab', typeof _kbRenderPad === 'function');
+  ok('Start opens Settings when nothing else is open (quit path)',
+    _lxPadDispatch.toString().includes('openSettingsModal'));
   return out;
 });
 console.log('\nSTEAM REVIEW LOCKS\n');

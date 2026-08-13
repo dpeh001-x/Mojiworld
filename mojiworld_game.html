@@ -9446,7 +9446,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.669';
+const GAME_VERSION = 'v0.29.670';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -37629,6 +37629,20 @@ function _lxPadResolveKey(spec) {
 }
 function _lxPadDispatch(key, down) {
   if (down) { try { document.body.classList.add('pad-cursor-hide'); } catch (e) {} }
+  // v0.29.670 — Start = pause MENU, not just "close". With no surface open,
+  // Escape from the pad opens Settings (the console convention, and the home
+  // of the pad-reachable Fullscreen / Hotkeys / Quit rows). With anything
+  // open, the old close behaviour stands.
+  if (key === 'escape' && down) {
+    try {
+      if (!_lxPadModalRoot() && typeof openSettingsModal === 'function'
+          && typeof player !== 'undefined' && player && player.cls && player.hp > 0
+          && typeof game !== 'undefined' && game && !game.paused) {
+        openSettingsModal();
+        return;
+      }
+    } catch (e) {}
+  }
   if (!key) return;
   // A key already held from the keyboard must not be stomped by the pad edge.
   try {
@@ -37941,6 +37955,91 @@ try {
   window.addEventListener('mousemove', () => { try { document.body.classList.remove('pad-cursor-hide'); } catch (e) {} }, { passive: true });
 } catch (e) {}
 
+// =========================================================================
+// v0.29.670 — CONTROLLER REBINDING. Per-button overrides stored in
+// localStorage and applied over _LX_PAD_MAP at poll time; the defaults are
+// never mutated, so "Reset" is just deleting the store. The UI lives as a
+// fourth tab in the K modal, built from plain buttons so the pad's own menu
+// nav can drive its entire rebinding flow (including from the Settings row
+// that opens this modal).
+const LX_PAD_STORE = 'lx_pad_map_v1';
+let _lxPadOv = null;
+function _lxPadOverrides() {
+  if (_lxPadOv) return _lxPadOv;
+  try { _lxPadOv = JSON.parse(localStorage.getItem(LX_PAD_STORE) || '{}') || {}; }
+  catch (e) { _lxPadOv = {}; }
+  return _lxPadOv;
+}
+function _lxPadMapEff(idx) {
+  const ov = _lxPadOverrides();
+  return (ov && ov[idx]) ? ov[idx] : _LX_PAD_MAP[idx];
+}
+function _lxPadSetOverride(idx, spec) {
+  const ov = _lxPadOverrides();
+  const def = _LX_PAD_MAP[idx] || {};
+  const same = spec && ((spec.a && spec.a === def.a) || (spec.k && spec.k === def.k));
+  if (!spec || same) delete ov[idx]; else ov[idx] = spec;
+  try { localStorage.setItem(LX_PAD_STORE, JSON.stringify(ov)); } catch (e) {}
+}
+const _LX_PAD_BTN_NAMES = ['Ⓐ  A', 'Ⓑ  B', 'Ⓧ  X', 'Ⓨ  Y', 'LB', 'RB', 'LT', 'RT',
+  'Back / View', 'Start / Menu', 'L-stick click', 'R-stick click',
+  'D-pad ▲', 'D-pad ▼', 'D-pad ◀', 'D-pad ▶'];
+const _LX_PAD_ACTIONS = [
+  { l: 'Jump',            s: { a: 'jump' } },
+  { l: 'Dodge / Roll',    s: { a: 'dodge' } },
+  { l: 'Attack',          s: { k: 'z' } },
+  { l: 'Interact / Talk', s: { a: 'talkNpc' } },
+  { l: 'Skill X',         s: { k: 'x' } },
+  { l: 'Skill S',         s: { k: 's' } },
+  { l: 'Skill C',         s: { k: 'c' } },
+  { l: 'Skill D',         s: { k: 'd' } },
+  { l: 'Skill F',         s: { k: 'f' } },
+  { l: 'Skill V',         s: { k: 'v' } },
+  { l: 'Character (U)',   s: { a: 'attributesU' } },
+  { l: 'Pause / Close',   s: { k: 'escape' } },
+  { l: 'Move Up',         s: { a: 'moveUp' } },
+  { l: 'Move Down',       s: { a: 'moveDown' } },
+  { l: 'Move Left',       s: { a: 'moveLeft' } },
+  { l: 'Move Right',      s: { a: 'moveRight' } },
+  { l: '— Unbound —',     s: { none: true } },
+];
+function _lxPadSpecLabel(spec) {
+  if (!spec || spec.none) return '— Unbound —';
+  for (const a of _LX_PAD_ACTIONS) if ((a.s.a && a.s.a === spec.a) || (a.s.k && a.s.k === spec.k)) return a.l;
+  return spec.a || spec.k || '?';
+}
+let _kbPadPick = null;   // button index currently choosing an action
+function _kbRenderPad() {
+  const host = document.getElementById('kbm-tab-pad');
+  if (!host) return;
+  const row = (inner) => '<div style="display:flex;align-items:center;gap:10px;margin:4px 0;">' + inner + '</div>';
+  let html = '<div style="font:600 12px Inter,sans-serif;color:#9990b8;margin:10px 2px 8px;">Every button is rebindable. Pick a button, then pick what it does. Changes apply instantly and persist.</div>';
+  if (_kbPadPick == null) {
+    for (let i = 0; i < 16; i++) {
+      const ov = _lxPadOverrides()[i];
+      html += row(
+        '<span style="min-width:110px;color:#cdd6ff;font:600 13px Inter,sans-serif;">' + _LX_PAD_BTN_NAMES[i] + '</span>' +
+        '<button class="kbm-pad-row" data-padbtn="' + i + '" style="flex:1;text-align:left;padding:7px 12px;border-radius:8px;cursor:pointer;background:rgba(0,0,0,0.30);color:' + (ov ? '#ffd479' : '#e8ecff') + ';border:1px solid rgba(180,140,255,' + (ov ? '0.55' : '0.22') + ');font:600 13px Inter,sans-serif;">' +
+        _lxPadSpecLabel(_lxPadMapEff(i)) + (ov ? '  ·  modified' : '') + '</button>');
+    }
+    html += '<div style="margin-top:12px;"><button id="kbm-pad-reset" style="padding:8px 14px;border-radius:8px;cursor:pointer;background:rgba(140,52,52,0.35);color:#ffb4b4;border:1px solid rgba(200,90,90,0.5);font:600 12px Inter,sans-serif;">↺ Reset pad bindings</button></div>';
+  } else {
+    html += '<div style="font:700 14px Inter,sans-serif;color:#ffd479;margin:2px 2px 10px;">' + _LX_PAD_BTN_NAMES[_kbPadPick] + ' — choose an action</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;">';
+    _LX_PAD_ACTIONS.forEach((a, ai) => {
+      html += '<button class="kbm-pad-act" data-padact="' + ai + '" style="padding:9px 10px;border-radius:8px;cursor:pointer;background:rgba(0,0,0,0.30);color:#e8ecff;border:1px solid rgba(180,140,255,0.25);font:600 12px Inter,sans-serif;">' + a.l + '</button>';
+    });
+    html += '</div><div style="margin-top:10px;"><button id="kbm-pad-cancel" style="padding:8px 14px;border-radius:8px;cursor:pointer;background:rgba(0,0,0,0.30);color:#9990b8;border:1px solid rgba(180,140,255,0.22);font:600 12px Inter,sans-serif;">‹ Cancel</button></div>';
+  }
+  host.innerHTML = html;
+  host.querySelectorAll('.kbm-pad-row').forEach((b) => { b.onclick = () => { _kbPadPick = +b.dataset.padbtn; _kbRenderPad(); }; });
+  host.querySelectorAll('.kbm-pad-act').forEach((b) => { b.onclick = () => { _lxPadSetOverride(_kbPadPick, _LX_PAD_ACTIONS[+b.dataset.padact].s); _kbPadPick = null; _kbRenderPad(); }; });
+  const rst = host.querySelector('#kbm-pad-reset');
+  if (rst) rst.onclick = () => { try { localStorage.removeItem(LX_PAD_STORE); } catch (e) {} _lxPadOv = {}; _kbRenderPad(); };
+  const cnc = host.querySelector('#kbm-pad-cancel');
+  if (cnc) cnc.onclick = () => { _kbPadPick = null; _kbRenderPad(); };
+}
+try { window._lxPadMapEff = _lxPadMapEff; window._kbRenderPad = _kbRenderPad; } catch (e) {}
+
 function _lxPadPoll() {
   try {
     if (typeof navigator === 'undefined' || !navigator.getGamepads) return;
@@ -37998,9 +38097,9 @@ function _lxPadPoll() {
     _lxPadNavPrev = {};   // leaving menu mode — reset nav edge state
     // Build the pressed set (resolved physical key -> pressed).
     const pressed = {};
-    const mark = (spec, isDown) => { const k = _lxPadResolveKey(spec); if (k && isDown) pressed[k] = true; };
+    const mark = (spec, isDown) => { if (!spec || spec.none) return; const k = _lxPadResolveKey(spec); if (k && isDown) pressed[k] = true; };   // v0.29.670 — {none} = unbound
     if (pad) {
-      for (const idx in _LX_PAD_MAP) { const b = pad.buttons[idx]; if (b && (b.pressed || b.value > 0.5)) mark(_LX_PAD_MAP[idx], true); }
+      for (const idx in _LX_PAD_MAP) { const b = pad.buttons[idx]; if (b && (b.pressed || b.value > 0.5)) mark(_lxPadMapEff(idx), true); }   // v0.29.670 — user overrides
       const ax = pad.axes || [];
       if (ax[0] < -_LX_PAD_DEADZONE) mark(_LX_PAD_AXIS.lxNeg, true);
       if (ax[0] > _LX_PAD_DEADZONE) mark(_LX_PAD_AXIS.lxPos, true);
@@ -38009,7 +38108,7 @@ function _lxPadPoll() {
     }
     if (steamBtns && typeof steamBtns === 'object') {
       // { actionName: bool } from the native bridge — actionName maps 1:1 to _LX_PAD map specs by key/action.
-      for (const idx in _LX_PAD_MAP) { const spec = _LX_PAD_MAP[idx]; const nm = spec.a || spec.k; if (steamBtns[nm]) mark(spec, true); }
+      for (const idx in _LX_PAD_MAP) { const spec = _lxPadMapEff(idx); const nm = spec.a || spec.k; if (steamBtns[nm]) mark(spec, true); }   // v0.29.670 — user overrides
     }
     // Edge-detect vs last poll and dispatch keydown/keyup for changes only.
     for (const k in pressed) { _lxPadLastInput = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); break; }   // v0.29.254 — haptics gate: pad counts as "in use"
@@ -45415,6 +45514,7 @@ function _buildKeybindModal() {
         <button class="kbm-tab-btn" data-kbmtab="controls" style="flex:1; padding:8px 10px; border-radius:8px 8px 0 0; cursor:pointer; font:600 12px Inter, sans-serif; letter-spacing:0.4px; background:rgba(120,90,200,0.25); color:#fff; border:1px solid rgba(180,140,255,0.40); border-bottom:none;">⌨ Controls</button>
         <button class="kbm-tab-btn" data-kbmtab="keyboard" style="flex:1; padding:8px 10px; border-radius:8px 8px 0 0; cursor:pointer; font:600 12px Inter, sans-serif; letter-spacing:0.4px; background:rgba(0,0,0,0.30); color:#9990b8; border:1px solid rgba(180,140,255,0.18); border-bottom:none;">🎹 Keyboard</button>
         <button class="kbm-tab-btn" data-kbmtab="potions" style="flex:1; padding:8px 10px; border-radius:8px 8px 0 0; cursor:pointer; font:600 12px Inter, sans-serif; letter-spacing:0.4px; background:rgba(0,0,0,0.30); color:#9990b8; border:1px solid rgba(255,180,180,0.22); border-bottom:none;">🧪 Potions</button>
+        <button class="kbm-tab-btn" data-kbmtab="pad" style="flex:1; padding:8px 10px; border-radius:8px 8px 0 0; cursor:pointer; font:600 12px Inter, sans-serif; letter-spacing:0.4px; background:rgba(0,0,0,0.30); color:#9990b8; border:1px solid rgba(140,200,255,0.22); border-bottom:none;">🎮 Controller</button>
       </div>
       <div id="kbm-tab-controls">
       <!-- v0.25.600 — Keyboard reference. Single source of truth for
@@ -45464,6 +45564,7 @@ function _buildKeybindModal() {
            also carries a clickable KEY chip (rebind from here, not just the
            reference grid) and the label reads the LIVE bind instead of a
            hardcoded PgUp/PgDn. -->
+      <div id="kbm-tab-pad" style="display:none;"></div>
       <div id="kbm-tab-potions" style="display:none;">
       <div style="margin-top:10px; padding:12px 14px; background:rgba(0,0,0,0.30);
            border:1px solid rgba(255,180,180,0.18); border-radius:10px;">
@@ -45513,9 +45614,11 @@ function _buildKeybindModal() {
       _cureKeyPickup = false; _interactKeyPickup = false;
       _kbmApplyTab();
       renderKeybindKeyboard();
+      if (_kbmTab === 'pad' && typeof _kbRenderPad === 'function') { _kbPadPick = null; _kbRenderPad(); }   // v0.29.670
     };
   });
   _kbmApplyTab();
+  if (typeof _kbRenderPad === 'function') _kbRenderPad();   // v0.29.670 — populate the pad pane at build
   modal.querySelector('#kbm-reset').onclick = () => {
     player.keybinds = { ...KEY_TO_SLOT_DEFAULT };
     // v0.25.602 — also reset action binds (jump / dodge / menus / potions
@@ -45560,7 +45663,7 @@ function _kbDisplay(physicalKey) {
 function _kbmApplyTab() {
   const modal = document.getElementById('keybind-modal');
   if (!modal) return;
-  const panes = { controls: 'kbm-tab-controls', keyboard: 'kbm-tab-keyboard', potions: 'kbm-tab-potions' };
+  const panes = { controls: 'kbm-tab-controls', keyboard: 'kbm-tab-keyboard', potions: 'kbm-tab-potions', pad: 'kbm-tab-pad' };   // v0.29.670
   for (const tab in panes) {
     const el = document.getElementById(panes[tab]);
     if (el) el.style.display = (tab === _kbmTab) ? '' : 'none';
