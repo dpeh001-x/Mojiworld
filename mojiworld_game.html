@@ -9430,7 +9430,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.667';
+const GAME_VERSION = 'v0.29.668';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -40113,14 +40113,19 @@ const MP_ROOM_KEY   = 'levelx_mp_room';
 // window.MOJI_RELAY_URL (set by the desktop wrapper/env) overrides it at runtime.
 // v0.29.423 — the fallback was 'ws://localhost:8080', so every player who hit
 // "Play together" without opening Advanced dialled THEIR OWN machine on a port
-// nothing listens on. Co-op could not be initiated by anyone: the CI relay
-// variables (MP_WSS_URL / MOJI_RELAY_URL) were never set, so the web build kept
-// the localhost literal and the Steam build shipped relay.config.json = ""
-// (multiplayer off outright). The relay in render.yaml is live and healthy —
-// 6/6 in scripts/relay_health_check.mjs — so the default now points at it.
-// LAN parties still use the Advanced box. Keep this literal in sync with the
-// sed in .github/workflows/deploy-pages.yml.
-const MP_FALLBACK_URL = 'wss://mojiworld-mp.onrender.com';
+// nothing listens on. Co-op could not be initiated by anyone.
+// v0.29.x — STEAM REVIEW FAILURE: the default then pointed at the Render free
+// dyno, which Valve's tester could not reach ('We could not connect to any of
+// the available servers'). Measured that day: 61s to answer HTTP from cold and
+// NO WebSocket welcome within 120s — the joiner sat on the Multiplayer window
+// exactly as the review describes. The Cloudflare Worker relay (mp-cf/, same
+// host that already serves the auth/save API) answered in 1.4s with 6/6 in
+// scripts/relay_health_check.mjs, has no cold start, and relays every co-op
+// verb the game sends. It is now the shipped default on every surface: this
+// literal, steam/relay.config.json, and DEFAULT_RELAY in deploy-pages.yml —
+// keep all three in sync (the Pages sed rewrites THIS literal). The Render
+// relay still works via Advanced for anyone who typed it in.
+const MP_FALLBACK_URL = 'wss://mojiworld-mp.dpeh001.workers.dev';
 const MP_DEFAULT_URL = (typeof window !== 'undefined' && window.MOJI_RELAY_URL) || MP_FALLBACK_URL;
 // A short, shareable "party code" = the room string. Friendly, uppercase, no ws://.
 function _mpNewPartyCode() {
@@ -40794,6 +40799,19 @@ function mpConnect(url, name, room) {
     // player needs next: the code to send a friend.
     _mpBanner('In party ' + String(net.baseRoom || '').toUpperCase() + ' - share the code to invite a friend',
               'good', { autoHide: 10000, invite: true });
+    // v0.29.x — Steam review: 'After entering the Host code, the joined remain
+    // on the Multiplayer window.' On THIS build that was a dead relay, but the
+    // window also genuinely stays up over a successful join, with only the
+    // status line changing — connected and stuck read identically. A join that
+    // lands now dismisses the window and returns to play; the standard pause
+    // reconciliation keeps the sim paused if another modal is still open.
+    try {
+      const _mpModal = document.getElementById('multiplayer-modal');
+      if (_mpModal && _mpModal.style.display !== 'none') {
+        _mpModal.style.display = 'none';
+        if (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen()) game.paused = false;
+      }
+    } catch (e) {}
   };
   ws.onmessage = (ev) => {
     if (net.ws !== ws) return;   // v0.27.1 — ignore frames from a superseded socket

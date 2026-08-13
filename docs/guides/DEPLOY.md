@@ -64,8 +64,8 @@ set, the build claims no domain — safe to run anytime.)
 
 1. <https://dashboard.render.com> → **New → Blueprint** → select this repo →
    creates the `mojiworld-mp` service from `mp/`.
-2. Copy the URL; the WebSocket endpoint is `wss://mojiworld-mp.onrender.com`.
-3. Add Actions variable **`MP_WSS_URL` = `wss://mojiworld-mp.onrender.com`**.
+2. Copy the URL; the WebSocket endpoint is `wss://mojiworld-mp.dpeh001.workers.dev`.
+3. Add Actions variable **`MP_WSS_URL` = `wss://mojiworld-mp.dpeh001.workers.dev`**.
 
 (Free Render cold-starts after ~15 min idle; first connect ~30-60 s.)
 
