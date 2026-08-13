@@ -9430,7 +9430,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.657';
+const GAME_VERSION = 'v0.29.658';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -24225,8 +24225,33 @@ const MAPS = {
     // room in ~1.5 s and overshot every shelf. Cap 12 + 30% lower accel
     // keeps the slide feel (friction untouched) but tames the rocket.
     // NOT icyIntensity: lowering that raises ground accel toward normal.
-    iceMaxVx: 12,
-    iceAccelMul: 0.7,
+    // v0.29.658 — second pass, per user "its very sensitive to moving left and
+    // right, make it less extreme and with less peak speed". Measured on the
+    // v0.29.413 values in a booted client, against a room only 1800 px wide:
+    // top speed 12 px/frame (5.7x the 2.1 walk, crossing the room in 2.5 s),
+    // 284 px of glide over 1.8 s after letting go — a sixth of the map — and
+    // 0.97 s to turn around. Committing to a direction cost about a second and
+    // a sixth of the room to undo, which is the "sensitive" being reported.
+    //
+    // Values come from sweeping the three knobs, not from feel. The sweep
+    // separates them cleanly: GLIDE is set by friction and cap alone, while
+    // accel only buys responsiveness. So the obvious move — lowering accel
+    // because the floor feels twitchy — is the wrong one:
+    //
+    //   cap  accel  fric   peak   glide   turn-around
+    //    12   0.70  0.96     12   284px       0.97 s   <- before
+    //     8   0.45  0.92      8    90px       1.00 s   <- lower accel: WORSE
+    //     8   0.90  0.92      8    90px       0.50 s   <- shipped
+    //
+    // Dropping accel left the glide identical and pushed the turn-around UP,
+    // i.e. it made correcting a slide harder — the opposite of the ask. Raising
+    // it halves the turn-around at no cost in overshoot: every tap length also
+    // travels less and settles about twice as fast (6-frame flick 31px/0.88s ->
+    // 23px/0.48s, 20-frame 141px/1.37s -> 117px/0.72s), because the cap is what
+    // bounds a flick, not the accel.
+    iceMaxVx: 8,          // 5.7x walk -> 3.8x
+    iceAccelMul: 0.9,     // RAISED, not lowered — this is what makes it correctable
+    iceFriction: 0.92,    // was the full-ice 0.96; still slides, stops ~3x sooner
     mobStatMul: 1.0,            // baseline; raise if the farm becomes trivial
     platforms: [
       { x:0,    y:480, w:1800, h:60,  type:'ground' },
@@ -56012,11 +56037,26 @@ function updatePlayer(dt) {
           ? _lerp(1.1, 0.30, _icyT)
           : _lerp(0.6,  1.10, _icyT) * _airCtl)
       : (player.onGround ? 1.1 * _accelSpeedScale  : 0.6);
+    // v0.29.658 — `iceFriction` map override, per user on Frostbite Hollow:
+    // "its very sensitive to moving left and right, make it less extreme and
+    // with less peak speed". Ground friction was the one ice lever with NO
+    // per-map knob — v0.29.413 added iceMaxVx and iceAccelMul for this very map
+    // and its own note says "friction untouched", which is why it still felt
+    // twitchy after that pass. icyIntensity cannot stand in: lowering it also
+    // lerps ground accel 0.30 -> 1.1, which deletes the slide entirely.
+    //
+    // Friction is a per-frame velocity multiplier, so the carry it produces is
+    // v x f/(1-f). At the full-ice 0.96 that is ~24 frames of glide; at 0.92,
+    // ~11. Clamped to [0.78, 0.96] — 0.78 IS normal ground, so no map can use
+    // this to become stickier than dirt.
+    const _iceFric = (isIcy && game.mapData && typeof game.mapData.iceFriction === 'number')
+      ? Math.max(0.78, Math.min(0.96, game.mapData.iceFriction))
+      : null;
     const fric = isSandy
       ? (player.onGround ? 0.62 : 0.92)
       : isIcy
       ? (player.onGround
-          ? _lerp(0.78,  0.96,  _icyT)
+          ? (_iceFric != null ? _iceFric : _lerp(0.78,  0.96,  _icyT))
           : _lerp(_lerp(0.92, 0.985, _icyT), 0.93, _airCtlT))   // v0.29.594 — air drag tightens with airControl
       : (player.onGround ? 0.78 : 0.92);
     // v0.29.413 — per-map ice tuning (per user: "For frosbite hollow reduce
