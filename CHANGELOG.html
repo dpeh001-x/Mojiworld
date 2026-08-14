@@ -121,6 +121,25 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.720 <span class="tag"><span class="pill bug">bug</span> A refresh always lands on the main menu</span></h2>
+<p>Per user &mdash; <em>&ldquo;When refreshing or opening the app, do not automatically load into character, go to the main game menu instead&rdquo;.</em></p>
+<p>A plain refresh already showed the menu, so this took reproducing before it could be fixed. There is exactly one path that skips it: <code>lx_resume</code>, the <code>sessionStorage</code> handoff two flows use to reload and come <em>straight</em> back &mdash; the cloud-save pull and New Game&rsquo;s backup-and-wipe. Both write the key and call <code>location.reload()</code> on the very next line, so the intent belongs to <b>one specific page load</b>.</p>
+<p><b>The bug was when it got consumed.</b> The key was read inside <code>_showAuthGate</code>, which runs only after the decode gate &mdash; 5&ndash;30&nbsp;s into boot. <code>sessionStorage</code> outlives a manual refresh, so a reload interrupted in that window (an F5 while &ldquo;Decoding world&hellip;&rdquo; is up, a duplicated tab, a crash-restore) left the key behind &mdash; and the <em>next</em> boot, including a plain manual refresh days later in the same tab, silently skipped the menu and dropped straight into the character.</p>
+<p>The handoff is now claimed at <b>parse time</b>, on the very load the reload produced, so a pending resume dies with its own page. A stale key can no longer outlive its load, and both legitimate flows are untouched &mdash; they reload immediately, so the next parse claims the key and the gate honours it exactly as before.</p>
+<div class="callout">
+  <b>Reproduced, then verified fixed</b> &mdash; identical sequence on both builds: arm the handoff &rarr; start the load &rarr; interrupt it mid decode gate &rarr; plain manual refresh.
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0">
+  <tr style="text-align:left;opacity:.75"><th>Step</th><th>Before (v0.29.713)</th><th>After</th></tr>
+  <tr><td>Key at the interrupt (33% loaded)</td><td>still present</td><td><b>already claimed</b></td></tr>
+  <tr><td>After the refresh</td><td>overlay removed, no menu</td><td><b>menu up, Continue shown</b></td></tr>
+  <tr><td>Outcome</td><td>dove into the character</td><td><b>main menu</b></td></tr>
+  </table>
+  The legitimate cloud-pull / New Game handoff was re-tested end to end and still resumes straight into the world, menu never shown &mdash; the behaviour those flows depend on.
+</div>
+<p><b>Worth knowing:</b> a fix by freshness timestamp cannot work here. The window it would have to allow (a 30&nbsp;s decode gate) is wider than the refresh it would have to reject, so the two cases are indistinguishable by age. Consuming early separates them cleanly.</p>
+<p><b>Still true by design:</b> the saved hero is built behind the menu while you read it &mdash; that is what makes Continue instant. The menu is the gate; nothing reaches the world without going through it.</p>
+
+
 <h2>v0.29.718 <span class="tag"><span class="pill feat">feat</span> Legosaurus learns the brace-dash</h2>
 <p>Per user: <em>Legosaurus AI mechanics can be smarter, add in an attack whereby legosaurus stays still, and then does a quick dash — you can make sprites for this attack using ludo.ai.</em></p>
 <p>New boss move on a new boss-inclusive trait (<code>braceDash</code> — the existing <code>lateralDash</code> is hard-gated to non-bosses): Legosaurus plants <b>dead still for 850&nbsp;ms</b>, direction locked at the moment the brace begins &mdash; the tell is honest, so a sidestep during the windup sends the dash into empty air &mdash; then explodes <b>520&nbsp;px in 380&nbsp;ms</b> (~23&nbsp;px/frame) with a hard brake at the end and a 6.5&nbsp;s cooldown. It layers between his existing heavy swing and fire column, so the fight now has a mobility threat on top of the zoning ones.</p>

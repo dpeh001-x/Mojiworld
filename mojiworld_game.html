@@ -9593,7 +9593,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.719';
+const GAME_VERSION = 'v0.29.720';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -123739,6 +123739,33 @@ try { window.LXAuth = LXAuth; } catch (e) {}
   const DEFERRED = REQUIRED.filter(p => !BAZAAR_PATHS.has(p) && !CRITICAL_PATHS.has(p));
 
   const overlay = document.getElementById('loading-overlay');
+  // v0.29.7xx — THE MENU OWNS EVERY BOOT (per user: "when refreshing or
+  // opening the app, do not automatically load into character, go to the main
+  // game menu instead").
+  //
+  // 'lx_resume' is the handoff two flows use to reload and come straight back:
+  // the cloud-save pull and New Game's backup+wipe. Both set it and reload on
+  // the next line, so the intent belongs to ONE specific page load.
+  //
+  // It used to be read inside _showAuthGate, which runs only after the decode
+  // gate — 5-30 s into boot. sessionStorage outlives a manual refresh, so a
+  // reload interrupted in that window (an F5 while "Decoding world…" is up, a
+  // duplicated tab, a crash-restore) left the key behind for the NEXT boot,
+  // and that boot skipped the menu and dropped straight into the character.
+  //
+  // Claiming it here — at parse time, on the very load the reload produced —
+  // closes the window: a pending resume now dies with its own page, so a
+  // manual refresh can never inherit one. A freshness timestamp cannot do this
+  // job, because the window it would need to allow (a 30 s decode gate) is
+  // wider than the refresh it would need to reject.
+  const _lxPendingResume = (() => {
+    try {
+      const raw = sessionStorage.getItem('lx_resume');
+      if (!raw) return null;
+      sessionStorage.removeItem('lx_resume');   // consumed by THIS load, come what may
+      return JSON.parse(raw);
+    } catch (e) { return null; }
+  })();
   const bar = document.getElementById('loading-bar');
   const status = document.getElementById('loading-status');
   // v0.27.13 — Loading-screen music is provided by the start-page menu-BGM
@@ -124121,9 +124148,11 @@ try { window.LXAuth = LXAuth; } catch (e) {}
   let _authWired = false;
   function _showAuthGate() {
     if (!overlay) return;
-    // Seamless resume right after a cloud-save pull reload — we already authenticated
-    // this tab session, so skip the form and reveal the (now cloud-loaded) world.
-    try { const _rs = sessionStorage.getItem('lx_resume'); if (_rs) { sessionStorage.removeItem('lx_resume'); _finishHide(JSON.parse(_rs)); return; } } catch (e) {}
+    // Seamless resume right after a cloud-save pull / New Game reload — that
+    // load already authenticated, so skip the form and reveal the world.
+    // v0.29.7xx — reads the parse-time claim above, NOT sessionStorage: a key
+    // left over from an interrupted reload must not skip a later refresh's menu.
+    if (_lxPendingResume) { _finishHide(_lxPendingResume); return; }
     const stack = overlay.querySelector('.lo-stack');
     const auth  = document.getElementById('lo-auth');
     if (!stack || !auth) { _finishHide(); return; }
