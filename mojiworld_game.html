@@ -9505,7 +9505,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.689';
+const GAME_VERSION = 'v0.29.690';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -53537,7 +53537,13 @@ function loadMap(id, entryX, entryY) {
       // beat. _playStoryBeat manages its own pause/resume; if it declines
       // (already seen / overlay missing), fall back to the plain unpause.
       setTimeout(() => {
-        const _spoke = (typeof _playStoryBeat === 'function') && _playStoryBeat('gravitos_gate');
+        // v0.29.690 — the unpause is DELEGATED to the story beat, so a throw out
+        // of _playStoryBeat used to skip the fallback line entirely and
+        // strand the game paused with no visible surface. Catch -> the
+        // fallback unpause always gets its chance.
+        let _spoke = false;
+        try { _spoke = (typeof _playStoryBeat === 'function') && _playStoryBeat('gravitos_gate'); }
+        catch (_e) { _spoke = false; }
         if (!_spoke && (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen())) game.paused = false;
       }, 300);
     };
@@ -119645,9 +119651,22 @@ function loop(time) {
   if (!window._lxBootGateDone) {
     const _bo = document.getElementById('loading-overlay');
     if (_bo && !_bo.classList.contains('fade')) {
-      lastTime = time;
-      _lxNextFrame();
-      return;
+      // v0.29.690 — FAILSAFE. This gate parks the ENTIRE loop — sim, render,
+      // HUD, and the stuck-paused watchdog that would otherwise rescue a
+      // wedged state. It trusted the overlay to always earn its 'fade', and
+      // one missed fade (a raced reveal under the Gravitos entry cinematic
+      // chain, per user "I still get stuck here") froze the game forever
+      // while the DOM video played on top. 15 s is beyond any legitimate
+      // load on the slowest device; after that, open the gate and let the
+      // watchdog do its job.
+      if (!window._lxBootGateParkAt) window._lxBootGateParkAt = time;
+      if (time - window._lxBootGateParkAt < 15000) {
+        lastTime = time;
+        _lxNextFrame();
+        return;
+      }
+      try { console.warn('[BootGate] loading overlay never faded — forcing the gate open'); } catch (_e) {}
+      try { _bo.classList.add('fade'); } catch (_e) {}
     }
     window._lxBootGateDone = true;   // overlay gone — skip the DOM query from now on
   }
