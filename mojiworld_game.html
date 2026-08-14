@@ -9593,7 +9593,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.717';
+const GAME_VERSION = 'v0.29.718';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -20563,7 +20563,7 @@ const monsterTypes = {
   legosaurus:    { name:'Legosaurus, the Warped Tyrant', w:224, h:238, color:'#3f7a3a', shell:'#cc2222', hp:2987442, atk:383, def:103, evasion:126, exp:1261365, mojicoins:8218, speed:1.6, jump:2, boss:true, level: 59,
                   shoot:'mfirespit', shootCd:2000,
                   signature:'The block-king. Once a child\'s favorite toy — now a tyrant of bricks.',
-                  traits:{ activeBoss:true, revivesOnce:{ hpPct:0.30 }, bigMelee:{ kind:'swing', dmgMul:2.2, range:180, swingW:280, swingH:110, cdMs:4200, telegraphMs:550 }, columnStrike:{ dmgMul:1.8, width:110, range:560, cdMs:6000, telegraphMs:650, color:'#ff8844', sprite:'fx_col_legosaurus' } } },
+                  traits:{ activeBoss:true, revivesOnce:{ hpPct:0.30 }, bigMelee:{ kind:'swing', dmgMul:2.2, range:180, swingW:280, swingH:110, cdMs:4200, telegraphMs:550 }, columnStrike:{ dmgMul:1.8, width:110, range:560, cdMs:6000, telegraphMs:650, color:'#ff8844', sprite:'fx_col_legosaurus' }, braceDash:{ range:700, minRange:120, cdMs:6500, telegraphMs:850, dashMs:380, distance:520 } } },   // v0.29.x - brace-dash per user
   // v0.25.955 — DISTORTED PORTAL roster (Lv 35-45 alternate-dimension
   // map chain). Five normals + one chamber boss. Each entry is a
   // "distorted" reflection of an existing canonical NPC — deranged
@@ -69151,6 +69151,74 @@ function updateMonsters(dt) {
         }
       }
     }
+    // v0.29.x — Per user "add in an attack where by legosaurus stays still,
+    // and then does a quick dash". `traits.braceDash` — the boss-inclusive
+    // twin of lateralDash (which is gated !isBoss): a long DEAD-STILL brace
+    // at the mob's position with the direction locked at brace start (the
+    // tell is honest — sidestep it and the dash commits to empty air), then
+    // a fast committed horizontal dash. Runs beside bigMelee/columnStrike
+    // under the same activeBoss gate; both phases stamp atkAnimUntil every
+    // frame so the boss draw plays the dedicated 9-frame legosaurusdash set
+    // (crouch -> launch -> full sprint, ludo.ai) instead of the walk loop.
+    if (m.traits && m.traits.braceDash && (!m.isBoss || m.traits.activeBoss) && m.currentHp > 0 && !_ccHalted) {
+      const bd = m.traits.braceDash;
+      if (m._bdCd === undefined) m._bdCd = bd.cdMs * 0.5;
+      m._bdCd -= dt;
+      const _bdDx = _playerCx - (m.x + m.w/2);
+      let _bdOnScreen = true;
+      {
+        const _cx = game.camera.x, _cy = (game.camera && game.camera.y) || 0;
+        if (m.x + m.w < _cx || m.x > _cx + W || m.y + m.h < _cy || m.y > _cy + H) _bdOnScreen = false;
+      }
+      if (!m._braceDashing && m._bdCd <= 0 && Math.abs(_bdDx) < (bd.range || 700)
+          && Math.abs(_bdDx) > (bd.minRange || 120) && _bdOnScreen) {
+        m._braceDashing = true;
+        m._bdPhase = 'brace';
+        m._bdT = bd.telegraphMs || 850;
+        m._bdDir = _bdDx > 0 ? 1 : -1;   // locked NOW, not at launch
+        m.facing = m._bdDir;
+      }
+      if (m._braceDashing) {
+        const _bdNow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        m.atkAnimUntil = _bdNow + 400;   // keeps the attack set playing through both phases
+        if (m._bdPhase === 'brace') {
+          m._bdT -= dt;
+          m.vx = 0;                      // dead still — that IS the tell
+          m.facing = m._bdDir;
+          if (game.time % 3 === 0 && typeof _budgetedParticlePush === 'function') {
+            _budgetedParticlePush({
+              x: m.x + m.w/2 - m._bdDir * m.w * 0.4,
+              y: m.y + m.h - 6,
+              vx: -m._bdDir * (0.8 + Math.random() * 0.8), vy: -0.4 - Math.random() * 0.6,
+              life: 16, color: '#ffb26b', size: 2.5,
+            });
+          }
+          if (m._bdT <= 0) {
+            m._bdPhase = 'dash';
+            m._bdT = bd.dashMs || 380;
+            const _bdFrames = Math.max(1, (bd.dashMs || 380) / (1000 / 60));
+            m._bdVx = m._bdDir * ((bd.distance || 520) / _bdFrames);
+            addShake(4);
+          }
+        } else if (m._bdPhase === 'dash') {
+          m._bdT -= dt;
+          m.vx = m._bdVx;                // re-asserted every frame — the chase AI cannot override it
+          if (game.time % 2 === 0 && typeof _budgetedParticlePush === 'function') {
+            _budgetedParticlePush({
+              x: m.x + m.w/2 - m._bdDir * m.w * 0.5,
+              y: m.y + m.h * (0.3 + Math.random() * 0.5),
+              vx: -m._bdDir * 2.2, vy: (Math.random() - 0.5) * 0.6,
+              life: 12, color: '#ffe9c9', size: 2.5,
+            });
+          }
+          if (m._bdT <= 0) {
+            m._braceDashing = false;
+            m._bdCd = bd.cdMs || 6500;
+            m.vx *= 0.15;                // hard brake — no glide-out
+          }
+        }
+      }
+    }
     // v0.26.166 — Per user "make archon and path bane cast a vertical
     // column attack from time to time". `traits.columnStrike` drives a
     // long-cooldown ranged attack: locks onto player.x at telegraph
@@ -70458,6 +70526,9 @@ function updateMonsters(dt) {
     // and any authored vertical leap are untouched, and a mob shoved
     // mid-cast still slides from the hit (that impact should read).
     if (typeof _mobCasting === 'function' && _mobCasting(m)) m.vx = 0;
+    // v0.29.x — braceDash outranks the cast-plant AND the boss chase AI:
+    // dead still through the brace, the full committed vx through the dash.
+    if (m._braceDashing) m.vx = (m._bdPhase === 'dash') ? m._bdVx : 0;
 
     // Physics (gravity scales with map)
     // v0.25.46 — gate the whole physics block on m._noGravity so bosses
@@ -108155,7 +108226,7 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
   // beast. Boss is post-load-spawned in the blockland_apex arena's
   // dedicated loadMap hook (similar to the v0.26.282 tower boss
   // spawn pattern).
-  'legosaurus',
+  'legosaurus', 'legosaurusdash',   // v0.29.x - brace-dash cast set (frames-only)
 ];
 (function _loadBossSprites() {
   // v0.25.498 — `.webp`/`.png` fallback via the shared _loadEntitySprite helper above.
@@ -110567,7 +110638,14 @@ function drawMonster(m) {
       m.patternState === 'laser' && _gravitosLaserFrame(m)) {
     m._gravStarKey = _gravCastKey(m, 'laser');
   }
-  const _spriteKey = m._gravStarKey || m._phaseSprite || m.type;
+  // v0.29.x — Legosaurus's brace-dash owns a dedicated attack set; while the
+  // move runs (atkAnimUntil is stamped by the phase machine, so
+  // _bossAttacking is true) the key redirects to it. Length-guarded on the
+  // frame index so a missing art drop falls back to the generic attack pose
+  // instead of a blank boss.
+  const _spriteKey = (m._braceDashing && BOSS_ATTACK_FRAMES.legosaurusdash && BOSS_ATTACK_FRAMES.legosaurusdash.length)
+    ? 'legosaurusdash'
+    : (m._gravStarKey || m._phaseSprite || m.type);
   // v0.26.310 — prefer the 4-frame attack animation when its frames have
   // decoded; otherwise the single static attack pose, then idle.
   // v0.29.418 — pass m so the boss's cycle is phased per entity: an attack
