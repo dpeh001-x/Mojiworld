@@ -9527,7 +9527,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.708';
+const GAME_VERSION = 'v0.29.709';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -36613,7 +36613,21 @@ function _defAbsorbMul(pierceMul) {
   // v0.26.357 — absorb cap raised 80% → 90% (DEF stacking rewarded further;
   // only reachable at very high DEF, ~4500+, so it lifts the ceiling for
   // dedicated tank builds without changing the early/mid curve).
-  let absorb = Math.min(0.90, d / (d + 500));
+  // v0.29.709 — LEVEL-AWARE DEF (per user: "higher DEF should reduce damage even
+  // more on higher levels"). K fixed at 500 gave the same curve at Lv 90 as at
+  // Lv 10 while incoming ATK kept scaling, so heavy DEF investment flatlined
+  // exactly when the gear finally provides it. Two eases, both zero below
+  // their start level so the early/mid game is untouched:
+  //   K   500 -> 320 across Lv 30..90  (the same DEF absorbs more as you level)
+  //   cap 0.90 -> 0.94 across Lv 50..90 (a dedicated Lv-90 tank tops at 94% —
+  //                                      still never immune, mobs always chip)
+  // At Lv 90: DEF 1000 absorbs 75.8% (was 66.7%), DEF 2000 86.2% (was 80%),
+  // DEF 4500 93.4% (was the 90% cap). All 26 damage paths that call this
+  // curve — contact, projectiles, hazards, boss hits — inherit it at once.
+  const _lv = (typeof player !== 'undefined' && player && player.level) | 0;
+  const _K = 500 - Math.min(180, Math.max(0, _lv - 30) * 3);
+  const _cap = 0.90 + Math.min(0.04, Math.max(0, _lv - 50) * 0.001);
+  let absorb = Math.min(_cap, d / (d + _K));
   // v0.29.265 — optional DEF-pierce: a high-level / out-leveling attacker
   // passes pierceMul < 1 (see _defPierceMul) to shrink the absorb fraction.
   if (typeof pierceMul === 'number' && pierceMul < 1) absorb *= pierceMul;
@@ -70426,7 +70440,13 @@ function updateMonsters(dt) {
       // An ACTIVE block (player.blockTimer) still drops below the floor --
       // blocking/dodging is the intended counterplay, gear is not.
       if (_isNormalMob && player.blockTimer <= 0) {
-        const _contactFloor = Math.max(2, Math.floor(_atkBase * 0.40));
+        // v0.29.709 — floor 0.40 -> 0.25 (per user: "reduce the damage taken
+        // floor"). At 0.40, once the DR stack shaved past the floor, every
+        // further point of DEF did literally nothing against touch damage —
+        // the floor was the binding term for any real tank build. 0.25 keeps
+        // the v0.26.x intent (walking through a crowd is never free) while
+        // giving heavy DEF another 37% of headroom before it binds.
+        const _contactFloor = Math.max(2, Math.floor(_atkBase * 0.25));
         if (dmg < _contactFloor) dmg = _contactFloor;
       }
       // v0.25.822 — Apply the zodiac heavy-hit floor AFTER def/block/aegis
