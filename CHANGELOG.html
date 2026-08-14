@@ -121,6 +121,18 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.708 <span class="tag"><span class="pill bug">bug</span> Monster lag fixed at the root &mdash; the frame-bake pipeline was a no-op and cold probes froze frames</span></h2>
+<p>Per user: <em>the lag in the game when there are monsters can be improved thoroughly, please fix it</em>. Profiled live at 40 monsters before touching anything: <code>drawMonster</code> was <b>73% of a 16&ndash;21&nbsp;ms frame</b>, single stalls of 24&nbsp;ms, worst frame <b>311&nbsp;ms</b>. Three root causes, each measured, each fixed.</p>
+<h3>1. The bake pipeline was dead for monsters</h3>
+<p>Mob animation sets passed a flat 480-logical base to the shrink pipeline, and <code>_lxShrinkCap(480)</code> at this build&rsquo;s DPR resolves to <b>828&nbsp;px &mdash; above every monster frame on disk</b> (624&ndash;1024&nbsp;px). So <b>0 of 405 frames ever baked</b>: the game drew raw multi-hundred-px webps into 30&ndash;140&nbsp;px boxes, a decoded working set of roughly <b>800&nbsp;MB</b> that the browser&rsquo;s image cache cannot hold. The resulting eviction/re-decode churn on the render path <em>is</em> the monster lag. Frames now bake <b>per type, sized from the spawn box</b> (&times;4 headroom for padded attack frames and elites, floor 160, ceiling the old 480): a 42&nbsp;px mob bakes at ~290&nbsp;px instead of staying 768&nbsp;px raw, and the largest Astrofox-class monsters still resolve to 480 &mdash; for them nothing changes.</p>
+<h3>2. Cold edge probes froze frames</h3>
+<p>The sprite-edge probe on a raw 768&nbsp;px image costs <b>~24&nbsp;ms</b> &mdash; drawing into the software probe canvas forces a synchronous webp re-decode on the main thread. 17 cold probes burned 408&nbsp;ms across one 60-frame run; a mob&rsquo;s first attack frame meant a frozen frame. Big-source cold probes now <b>defer to idle</b> (the edge feather lands a beat later, then the memo holds), and <code>decode()</code> completion pre-warms the probe while the bitmap is hot. Measured slow probes inside the render loop: <b>73 &rarr; 0</b>.</p>
+<h3>3. Bakes wiped the caches they depended on</h3>
+<p>A finished bake replaces the image <em>object</em>; the edge memo and feather-composite cache lived on the old one, so every completed bake reopened a cold probe and a composite rebuild. Both now carry across the swap (verified on baked zombie canvases). The shrink pipeline&rsquo;s &ldquo;already scanned&rdquo; marks are also <b>cap-versioned</b> now &mdash; they were sticky booleans, so a set scanned under the old generous cap could never be re-opened by the new smaller one, which would have silently disabled fix&nbsp;1 on any set touched before it.</p>
+<h3>Measured result</h3>
+<p>Same harness, same map, same 40 monsters, steady state: <b>avg 16.1&ndash;21.5&nbsp;ms &rarr; 4.6&nbsp;ms</b> per frame, median <b>~12&ndash;16&nbsp;ms &rarr; 1.9&nbsp;ms</b>, p90 <b>4.6&nbsp;ms</b>, worst frame <b>317&nbsp;ms &rarr; 146&nbsp;ms</b> (a warm-up spike that decays as the remaining sets finish baking &mdash; 207 frames baked and climbing during the run). The remaining rare spikes are first-appearance uploads that the bake trickle eliminates as it completes.</p>
+
+
 <h2>v0.29.706 <span class="tag"><span class="pill bug">bug</span> A map now spawns its authored roster &mdash; all of it, only it, at its authored weights</span></h2>
 <p>Per user: <em>shardlich should not spawn in the ossuary sprawl, ensure random monsters do not spawn in maps they are not supposed to.</em></p>
 <p>Measured in-engine before changing anything. Three separate defects, and the reported one turned out to be the smallest.</p>
