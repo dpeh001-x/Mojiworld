@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Pause/Settings panel background — MapleStory x Persona 5 fusion (ludo.ai).
-// Output -> Sprites/ui/panel_pause.webp, drawn UNDER the settings UI the same
-// way panel_p5.webp backs the four main windows: the art ships pre-faded
-// (alpha baked to ~0.34) so live text stays readable on the dark base.
+// Pause/Settings panel background — MapleStory-cosy with a soft Persona
+// accent (ludo.ai). Output -> Sprites/ui/panel_pause.webp, drawn UNDER the
+// settings UI the way panel_p5.webp backs the four main windows: the art
+// ships PRE-FADED (alpha baked to ~0.20) so live text stays readable.
 //   node scripts/gen_pause_panel_bg.mjs            # dry-run (prints prompt)
 //   node scripts/gen_pause_panel_bg.mjs --generate # needs LUDO_API_KEY
 //   flags: --force
@@ -18,16 +18,19 @@ const argv = process.argv.slice(2);
 const has = f => argv.includes(f);
 
 const PROMPT =
-  'Painted video-game PAUSE MENU panel background artwork, a fusion of MapleStory cozy fantasy and ' +
-  'Persona 5 graphic punk. FULL-BLEED painting filling the entire square canvas edge to edge — ' +
+  // v2 (per user: "redo the background again, make it cuter, less opacity") —
+  // the jagged crimson shards leaned too hard Persona; this roll leans
+  // MapleStory-cosy with only a soft golden comic accent.
+  'Adorable cozy video-game PAUSE MENU panel background artwork, MapleStory storybook fantasy with a ' +
+  'gentle Persona-style comic accent. FULL-BLEED painting filling the entire square canvas edge to edge — ' +
   'no transparent areas, no border frame, no text, no letters, no logo, no characters, no UI widgets. ' +
-  'Deep royal violet and midnight purple night sky, soft scattered stars and tiny drifting motes. ' +
-  'Bold jagged GOLD and crimson comic-style shards exploding from the TOP-LEFT corner and BOTTOM-RIGHT ' +
-  'corner only, with black comic outlines and halftone dot texture inside the shards. A faint dreamy ' +
-  'MapleStory-style fantasy skyline silhouette (mushroom trees, floating islands) along the very bottom in ' +
-  'darker violet. The CENTER of the canvas stays clean, dark and calm — a smooth dark-violet glassy area ' +
-  'with a soft radial glow — because readable menu text will sit on top of it. Elegant, stylish, ' +
-  'high-contrast corners with a quiet center. Rich saturated purples and antique gold accents.';
+  'Dreamy deep-violet and plum night sky full of CUTE tiny things: soft twinkling star sparkles, small ' +
+  'plump pastel clouds, gentle floating glow-motes and little bokeh fairy lights. Soft rounded GOLD ' +
+  'ribbon swooshes with smooth comic outlines curling in from the TOP-LEFT and BOTTOM-RIGHT corners only ' +
+  '— rounded and friendly, NOT jagged, with a light halftone dot texture. Along the very bottom a tiny ' +
+  'darker-violet silhouette of cozy mushroom houses and floating islands. The CENTER stays clean, dark ' +
+  'and calm — smooth dark-violet with a soft radial glow — because readable menu text sits on top of it. ' +
+  'Warm, cute, inviting; pastel gold, lavender and plum palette.';
 
 const exists = async p => { try { await access(p); return true; } catch { return false; } };
 const fetchBuf = async url => { const r = await fetch(url, { signal: AbortSignal.timeout(90000) }); if (!r.ok) throw new Error('fetch ' + r.status); return Buffer.from(await r.arrayBuffer()); };
@@ -60,22 +63,23 @@ async function gen() {
       const url = Array.isArray(data) ? data[0]?.url : (data?.url || data?.images?.[0]?.url);
       if (!url) throw new Error('no url');
       const raw = await fetchBuf(url);
-      // Portrait 3:4 crop from the square (the panel is taller than wide),
-      // flattened opaque on the panel's own base violet, then the WHOLE art
-      // faded to alpha 0.34 — same pre-faded-art trick as panel_p5.webp, so
-      // the CSS just stacks it over the dark gradient and text stays legible.
       // Pass 1: opaque portrait crop at the final size (RGB, no alpha).
+      // v2 — 640x854 (was 720x960) and webp q66/effort 6 (was q84): the art
+      // sits at 20% alpha behind a blur-free gradient, so fidelity headroom is
+      // wasted bytes ("it still can be further compressed", per user).
+      const W2 = 640, H2 = 854;
       const rgb = await sharp(raw)
         .flatten({ background: { r: 18, g: 10, b: 30 } })
-        .resize(720, 960, { fit: 'cover', position: 'centre' })
+        .resize(W2, H2, { fit: 'cover', position: 'centre' })
         .removeAlpha()
         .raw()
         .toBuffer();
-      // Pass 2: join a constant alpha band (0.34 -> 87/255). sharp cannot
-      // band-expand inside one pipeline via linear(), hence the two passes.
-      const out = await sharp(rgb, { raw: { width: 720, height: 960, channels: 3 } })
-        .joinChannel(Buffer.alloc(720 * 960, 87), { raw: { width: 720, height: 960, channels: 1 } })
-        .webp({ quality: 84 })
+      // Pass 2: join a constant alpha band (0.20 -> 51/255, was 0.34) — the
+      // "less opacity" half of the ask. sharp cannot band-expand inside one
+      // pipeline via linear(), hence the two passes.
+      const out = await sharp(rgb, { raw: { width: W2, height: H2, channels: 3 } })
+        .joinChannel(Buffer.alloc(W2 * H2, 51), { raw: { width: W2, height: H2, channels: 1 } })
+        .webp({ quality: 66, effort: 6, smartSubsample: true })
         .toBuffer();
       await mkdir(DIR, { recursive: true });
       await writeFile(dest, out);
