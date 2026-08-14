@@ -9458,7 +9458,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.683';
+const GAME_VERSION = 'v0.29.684';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16188,7 +16188,7 @@ const SKILLS = {
   // ============ MASTER SIGNATURES (slot p, level 20+) ============
   // Warrior path
   warlord_warcry:     { name:'Warlord\'s Banner',  icon:'📯', cls:'warrior', job:'berserker', master:'warlord',     slot:'x', mp:30, cd:19000,  desc:'6s banner: ATK, heal, and +50% range on every skill. Rallies co-op partners on your map (War Cry + Bloodlust + heal).' },
-  doombringer_apoc:   { name:'Blade of Calamity',  icon:'⚔️', cls:'warrior', job:'berserker', master:'doombringer', slot:'x', mp:60, cd:18000, desc:'Summon a colossal sword: 10 forward cleaves, then a ground-slam finisher.' },
+  doombringer_apoc:   { name:'Blade of Calamity',  icon:'⚔️', cls:'warrior', job:'berserker', master:'doombringer', slot:'x', mp:60, cd:18000, desc:'Summon a colossal sword: 10 forward cleaves, then a ground-slam finisher. Every hit brands foes with DOOM (+2% damage taken per stack, max 10) and stokes Calamity Heat.' },
   crusader_aegis:     { name:'Divine Aegis',       icon:'✝️', cls:'warrior', job:'knight',    master:'crusader',    slot:'x', mp:45, cd:26000, desc:'Heal 60% (co-op partners on your map too) + 5 hovering holy orbs strike nearby foes · HALF damage taken for 9s.' },
   dragoon_skylance:   { name:'Sky Lance',          icon:'🐉', cls:'warrior', job:'knight',    master:'dragoon',     slot:'x', mp:35, cd:16000,  desc:'Leap up, slam down with piercing force.' },
   // Rogue path
@@ -16211,7 +16211,7 @@ const SKILLS = {
   // See ultimate_ultimate_spec.md. v1 = auto-resolved effects (interactive
   // hooks land in a later pass).
   warlord_ult:        { name:'War of Banners',          icon:'🚩', cls:'warrior', job:'berserker', master:'warlord',     slot:'b', mp:70,  cd:62000, desc:'Enter a 10s enrage (Bloodlust + heal, shared with co-op partners on your map); re-press B for free, rapid banner strikes.' },
-  doombringer_ult:    { name:'Calamity Incarnate',      icon:'🗡️', cls:'warrior', job:'berserker', master:'doombringer', slot:'b', mp:72,  cd:66000, desc:'Wield the colossal blade — a melee cleave plus three screen-crossing piercing blade-waves.' },
+  doombringer_ult:    { name:'Calamity Incarnate',      icon:'🗡️', cls:'warrior', job:'berserker', master:'doombringer', slot:'b', mp:72,  cd:66000, desc:'Wield the colossal blade — a melee cleave plus three screen-crossing piercing blade-waves. Collects every DOOM brand on screen (+1% execute threshold and +0.4s window each) and burns all Calamity Heat (+0.5% damage per point).' },
   crusader_ult:       { name:'Bastion of Dawn',         icon:'🛡️', cls:'warrior', job:'knight',    master:'crusader',    slot:'b', mp:68,  cd:62000, desc:'Judgement stacks per hit taken (max 5). Release: full party heal + 15s half-damage shield for everyone, drag foes in, and 2 homing orbs per stack burst on impact.' },
   dragoon_ult:        { name:'Skyfall Dominion',        icon:'🌩️', cls:'warrior', job:'knight',    master:'dragoon',     slot:'b', mp:62,  cd:56000, desc:'Take to the sky raining dragon-lances, then slam down to detonate every impact.' },
   shadowlord_ult:     { name:'Shadow Sovereign',        icon:'🌑', cls:'rogue',   job:'ninja',     master:'shadowlord',  slot:'b', mp:62,  cd:62000, desc:'Split into a shadow swarm whose echoed strikes collapse onto your foes.' },
@@ -17037,6 +17037,7 @@ function _msOpenWindow(id) {
     const cur = player._msWin;
     if (cur && cur.until > until && cur.until > now) return;
     player._msWin = Object.assign({}, b.window, { id, until });
+    if (typeof _doomApplyWinBonus === 'function') _doomApplyWinBonus();   // v0.29.684 — doombringer brand bonus
     if (typeof showToast === 'function' && b.window.announce) {
       showToast(b.window.announce, 'legendary');
     }
@@ -17131,6 +17132,65 @@ function _msMarkMul(m) {
   if (!m || !m._msMarkUntil) return 1;
   if ((game.time || 0) > m._msMarkUntil) { m._msMarkUntil = 0; m._msMarkMul = 1; return 1; }
   return m._msMarkMul || 1;
+}
+// ======================= DOOM BRANDS + CALAMITY HEAT =======================
+// v0.29.684 — the Doombringer master pair gets a shared mechanic (per user:
+// "DOOM Brands but omit the detonation, also add the calamity heat meter").
+//   BRANDS  — both final skills stamp DOOM on what they hit (max 10 per foe,
+//             12 s, refreshed on application). Each stack = +2% damage taken
+//             from the player, read in hitMonster beside the mark amplifier.
+//   CONSUME — Calamity Incarnate eats every brand on screen at cast: each
+//             stack (capped at 10 total) raises the L10 execute threshold by
+//             +1% and stretches the window +0.4 s -> 22%/8s up to 32%/12s.
+//   HEAT    — a 0-100 meter stoked by Blade of Calamity (+2 per cleave hit,
+//             +4 per slam hit) and spent whole by the ult: +0.5% damage per
+//             point, so a full meter is +50% on the cleave and all three
+//             blade-waves.
+// Detonation-on-death was proposed and explicitly declined — do not add it.
+// Heat and brands are transient combat state, like Crusader Judgement: they
+// reset on reload by design and are NOT in GAME_SAVE_FIELDS.
+const LX_DOOM_BRAND_MAX = 10;
+const LX_DOOM_BRAND_MS = 12000;
+const LX_DOOM_BRAND_MUL = 0.02;
+const LX_DOOM_CONSUME_CAP = 10;
+const LX_DOOM_EXEC_PER_STACK = 0.01;
+const LX_DOOM_WIN_MS_PER_STACK = 400;
+const LX_DOOM_HEAT_MAX = 100;
+const LX_DOOM_HEAT_DMG = 0.005;
+function _doomBrandAdd(m, n) {
+  if (!m || m.currentHp <= 0 || !n) return;
+  const cur = ((game.time || 0) <= (m._doomUntil || 0)) ? (m._doomStacks | 0) : 0;
+  m._doomStacks = Math.min(LX_DOOM_BRAND_MAX, cur + n);
+  m._doomUntil = (game.time || 0) + _msFrames(LX_DOOM_BRAND_MS);
+}
+function _doomBrandMul(m) {
+  if (!m || !(m._doomStacks > 0)) return 1;
+  if ((game.time || 0) > (m._doomUntil || 0)) { m._doomStacks = 0; return 1; }
+  return 1 + (m._doomStacks | 0) * LX_DOOM_BRAND_MUL;
+}
+function _doomHeatAdd(n) {
+  const before = player._calamityHeat | 0;
+  const after = Math.min(LX_DOOM_HEAT_MAX, before + n);
+  player._calamityHeat = after;
+  if (before < LX_DOOM_HEAT_MAX && after >= LX_DOOM_HEAT_MAX && typeof showToast === 'function') {
+    showToast('🔥 CALAMITY HEAT MAX — the next Incarnate hits +50% harder', 'epic');
+  }
+}
+// Applies the banked brand bonus to the doombringer window, whichever of the
+// cast hook / skill body runs second: _msOpenWindow fires from
+// setSkillCooldown and the skill body from castSkill, and their order is an
+// implementation detail. BOTH call this; the first with a live window wins.
+function _doomApplyWinBonus() {
+  const b = player._doomWinBonus;
+  const w = player._msWin;
+  if (!b || !w || w.id !== 'doombringer_ult') return;
+  player._doomWinBonus = null;
+  w.until += _msFrames(b.ms);
+  // CLONE the nested execute object. _msOpenWindow copies the table row with a
+  // SHALLOW Object.assign, so w.execute still points into SKILL_LV10_BONUS —
+  // mutating it in place would bake the boosted threshold into the table for
+  // every later cast, permanently ratcheting upward.
+  if (w.execute) w.execute = Object.assign({}, w.execute, { frac: (w.execute.frac || 0) + b.frac });
 }
 // A short arc of sparks between the origin and a chained target.
 function _lxChainSpark(cx, cy, t) {
@@ -66476,17 +66536,39 @@ const SKILL_FNS = {
     game.projectiles.push({ x: cx + dir * 24, y: cy, vx: dir * 13, vy: 0, w: 84, h: 84, life: 36, damage: getAtk() * 1.6 + 6, owner: 'player', skill: 'bloodwave', bspr: 'bult_warlord', sprScale: 1.4, color: '#ffdd55', noGravity: true, pierce: true });   // v0.26.x — much bigger banner; flag animates via ludo.ai frames (Sprites/projectiles/anim/p_ult_warlord_0..8.webp)
   },
   doombringer_ult: () => {
+    // v0.29.684 — THE VERDICT COLLECTED. Consume every DOOM brand on screen and
+    // the whole heat meter BEFORE any damage goes out; the window bonus banks
+    // in player._doomWinBonus for _doomApplyWinBonus (cast-order safe).
+    let _doomEaten = 0;
+    if (Array.isArray(game.monsters)) {
+      for (const _dm of game.monsters) {
+        if (_dm && _dm._doomStacks > 0 && (game.time || 0) <= (_dm._doomUntil || 0)) _doomEaten += _dm._doomStacks | 0;
+        if (_dm) { _dm._doomStacks = 0; _dm._doomUntil = 0; }
+      }
+    }
+    _doomEaten = Math.min(LX_DOOM_CONSUME_CAP, _doomEaten);
+    if (_doomEaten > 0) {
+      player._doomWinBonus = { frac: _doomEaten * LX_DOOM_EXEC_PER_STACK, ms: _doomEaten * LX_DOOM_WIN_MS_PER_STACK };
+    }
+    const _heat = Math.min(LX_DOOM_HEAT_MAX, player._calamityHeat | 0);
+    const _heatMul = 1 + _heat * LX_DOOM_HEAT_DMG;
+    player._calamityHeat = 0;
     // v0.26.x — directional screen-crossing blade-wave nuke (aim it; pierces all).
     spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'doombringer_ult', { size: 280, life: 80, spin: 0.3 });
-    showToast('CALAMITY INCARNATE', 'legendary'); flash(0.6); addShake(12); addHitStop(90);
+    showToast('CALAMITY INCARNATE'
+      + (_doomEaten ? ' — ' + _doomEaten + ' brand' + (_doomEaten > 1 ? 's' : '') + ' collected' : '')
+      + (_heat ? ' · heat ' + _heat + ' (+' + Math.round(_heat * LX_DOOM_HEAT_DMG * 100) + '%)' : ''), 'legendary'); flash(0.6); addShake(12); addHitStop(90);
     const dir = player.facing || 1, cx = player.x + player.w / 2, cy = player.y + player.h / 2;
-    performMelee(440, 5.0, { color: '#cc3344', kb: 14 });
+    player._doomUltMelee = true;   // performMelee is synchronous; the flag brands its hits
+    performMelee(440, 5.0 * _heatMul, { color: '#cc3344', kb: 14 });
+    player._doomUltMelee = false;
     // v0.26.x — per user: shift the blade-wave up 30px (y: cy-30) and flip the
     // sprite on the x axis (bsprFlipX).
-    const wave = (mul, w, h, life) => game.projectiles.push({ x: cx, y: cy - 30, vx: dir * 16, vy: 0, w, h, life, damage: getAtk() * mul + 30, owner: 'player', skill: 'shockwave', bspr: 'bult_doombringer', bsprFlipX: true, color: '#ff4455', noGravity: true, pierce: true });
-    wave(8.0, 130, 170, 90);
-    scheduleSkillTimer(() => { if (player.hp <= 0) return; wave(4.5, 100, 130, 90); }, 160);
-    scheduleSkillTimer(() => { if (player.hp <= 0) return; wave(4.5, 100, 130, 90); }, 320);
+    const wave = (mul, w, h, life) => game.projectiles.push({ x: cx, y: cy - 30, vx: dir * 16, vy: 0, w, h, life, damage: getAtk() * mul + 30, owner: 'player', skill: 'shockwave', doomBrand: 1, bspr: 'bult_doombringer', bsprFlipX: true, color: '#ff4455', noGravity: true, pierce: true });
+    wave(8.0 * _heatMul, 130, 170, 90);
+    scheduleSkillTimer(() => { if (player.hp <= 0) return; wave(4.5 * _heatMul, 100, 130, 90); }, 160);
+    scheduleSkillTimer(() => { if (player.hp <= 0) return; wave(4.5 * _heatMul, 100, 130, 90); }, 320);
+    _doomApplyWinBonus();   // covers the window-opened-before-impl cast order
   },
   crusader_ult: () => {
     // v0.29.x — BASTION OF DAWN, remade around the JUDGEMENT METER (per
@@ -75575,6 +75657,19 @@ function hitMonster(m, dmg, isCrit, skill) {
     const _mk = (typeof _msMarkMul === 'function') ? _msMarkMul(m) : 1;
     if (_mk !== 1) dmg = Math.floor(dmg * _mk);
   }
+  // v0.29.684 — DOOM brand amplifier + application (Doombringer master pair).
+  // Amplify FIRST with the stacks already on the foe, then stamp new brands,
+  // so a brand never boosts the very hit that applied it. Sits beside the mark
+  // amplifier and, like it, ahead of the accuracy roll: a cleave that whiffs
+  // still brands — the swing is the brand's delivery, not the damage, which
+  // keeps a 10-strike chain from branding at random.
+  {
+    const _dk = (typeof _doomBrandMul === 'function') ? _doomBrandMul(m) : 1;
+    if (_dk !== 1) dmg = Math.floor(dmg * _dk);
+    if (skill === 'apoc') { _doomBrandAdd(m, 1); _doomHeatAdd(2); }
+    else if (skill === 'apocSlam') { _doomBrandAdd(m, 2); _doomHeatAdd(4); }
+    else if (skill === 'meleeSkill' && player._doomUltMelee) _doomBrandAdd(m, 1);
+  }
   // Accuracy roll (v0.21 + v0.25.510 level-gap layer).
   // v0.29.83 — ALL directly-cast skills respect this now (per user "all
   // skills should also follow the same miss rate"); v0.29.84 — summon
@@ -78822,6 +78917,7 @@ function updateProjectiles(dt) {
             flash(0.4); addShake(8);
           }
           hitMonster(m, dmg, crit, p.skill || 'bolt');
+          if (p.doomBrand && typeof _doomBrandAdd === 'function') _doomBrandAdd(m, p.doomBrand);   // v0.29.684
           hitIds.add(m);
           // Nightreaper ricochet — bounce to the next nearest foe.
           // v0.25.247 (C3) — also exclude monsters already hit via
@@ -109805,6 +109901,17 @@ function drawMonster(m) {
     ctx.fillRect(sx + 2, sy - 8, m.w - 4, 4);
     ctx.fillStyle = m._hpBarColor;
     ctx.fillRect(sx + 3, sy - 7, (m.w - 6) * hpPct, 2);
+    // v0.29.684 — DOOM brand pips. Only branded foes pay the draw cost, and a
+    // branded foe is by definition a damaged one, so living inside the
+    // hp<maxHp block loses nothing.
+    if (m._doomStacks > 0 && (game.time || 0) <= (m._doomUntil || 0)) {
+      ctx.save();
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ff4455';
+      ctx.fillText('💀' + m._doomStacks, sx + m.w / 2, sy - 12);
+      ctx.restore();
+    }
     // v0.29.414 — Chip-damage ghost segment (mirrors the player HUD ghost).
     // A pale sliver holds at the pre-hit fraction for ~20 frames, then drains
     // toward the real value — so a big hit reads as a CHUNK on the mob's bar
