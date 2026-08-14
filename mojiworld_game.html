@@ -9527,7 +9527,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.702';
+const GAME_VERSION = 'v0.29.704';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16283,7 +16283,7 @@ const SKILLS = {
   // hooks land in a later pass).
   warlord_ult:        { name:'War of Banners',          icon:'🚩', cls:'warrior', job:'berserker', master:'warlord',     slot:'b', mp:70,  cd:62000, desc:'Enter a 10s enrage (Bloodlust + heal, shared with co-op partners on your map); re-press B for free, rapid banner strikes.' },
   doombringer_ult:    { name:'Calamity Incarnate',      icon:'🗡️', cls:'warrior', job:'berserker', master:'doombringer', slot:'b', mp:72,  cd:66000, desc:'Wield the colossal blade — a melee cleave plus three screen-crossing piercing blade-waves. Collects every DOOM brand on screen (+1% execute threshold and +0.4s window each) and burns all Calamity Heat (+0.5% damage per point).' },
-  crusader_ult:       { name:'Bastion of Dawn',         icon:'🛡️', cls:'warrior', job:'knight',    master:'crusader',    slot:'b', mp:68,  cd:62000, desc:'Judgement stacks per hit taken (max 5). Release: full party heal + 15s half-damage shield for everyone, drag foes in, and 2 homing orbs per stack burst on impact.' },
+  crusader_ult:       { name:'Bastion of Dawn',         icon:'🛡️', cls:'warrior', job:'knight',    master:'crusader',    slot:'b', mp:68,  cd:62000, desc:'Tap once to ARM (free), tap again to RELEASE — no cooldown between taps; the 62s cooldown starts at release. Judgement stacks per hit taken (max 5). Release: full party heal + 15s half-damage shield for everyone, drag foes in, and 2 homing orbs per stack burst on impact. Armed for 15s, then erupts on its own.' },
   dragoon_ult:        { name:'Skyfall Dominion',        icon:'🌩️', cls:'warrior', job:'knight',    master:'dragoon',     slot:'b', mp:62,  cd:56000, desc:'Take to the sky raining dragon-lances, then slam down to detonate every impact.' },
   shadowlord_ult:     { name:'Shadow Sovereign',        icon:'🌑', cls:'rogue',   job:'ninja',     master:'shadowlord',  slot:'b', mp:62,  cd:62000, desc:'Split into a shadow swarm whose echoed strikes collapse onto your foes.' },
   shinobi_ult:        { name:'Hundred-Hand Shadow Dance', icon:'🥷', cls:'rogue', job:'ninja',     master:'shinobi',     slot:'b', mp:60,  cd:40000, desc:'A blade dance that teleport-chains through every nearby foe in a flurry of slashes.' },
@@ -53856,6 +53856,7 @@ function loadMap(id, entryX, entryY) {
     // normally-ticking cooldown is never penalised by walking through a door.
     _lxRestoreUltCd();
     player._warlordEnrageUntil = 0; player._sageUntil = 0; player._sageShots = 0;
+    player._bastionArmedUntil = 0; player._bastionArmHeld = false;   // v0.29.697 — an armed bastion does not survive the reset
     player.doubleJumpUsed = false;
     if (typeof cancelPendingSkillTimers === 'function') cancelPendingSkillTimers();
   }
@@ -56122,6 +56123,20 @@ function updatePlayer(dt) {
   // a longer Divine Aegis is never shortened, and orbs are preserved.
   {
     if (player.master === 'crusader' && player.hp > 0) {
+      // v0.29.697 — Bastion two-tap bookkeeping. The held-edge clears only
+      // when the key bound to slot 'b' is actually up (respects remaps), and
+      // an armed bastion that reaches its 15 s window erupts on its own —
+      // done here rather than via scheduleSkillTimer because that queue is
+      // cancelled on map change, and a silent fizzle would eat the cast.
+      if (player._bastionArmHeld) {
+        const _kb = player.keybinds || KEY_TO_SLOT;
+        let _down = false;
+        for (const _k in _kb) if (_kb[_k] === 'b' && game.keys && game.keys[_k]) { _down = true; break; }
+        if (!_down) player._bastionArmHeld = false;
+      }
+      if ((player._bastionArmedUntil | 0) > 0 && game.time >= player._bastionArmedUntil) {
+        try { SKILL_FNS.crusader_ult({ auto: true }); } catch (e) { player._bastionArmedUntil = 0; }
+      }
       if (player._judgeHitSeen == null) player._judgeHitSeen = player.lastHitTime || 0;
       if ((player.lastHitTime || 0) > 0 && player.lastHitTime !== player._judgeHitSeen) {
         player._judgeHitSeen = player.lastHitTime;
@@ -60233,7 +60248,7 @@ function castSkill(id) {
       const _shinobiFrames = Math.ceil(1300 / (1000 / 60));
       if (_now + _shinobiFrames > _lockEnd) _lockEnd = _now + _shinobiFrames;
     }
-    player._castLockUntil = _lockEnd;
+    if (!_castNoOp) player._castLockUntil = _lockEnd;   // v0.29.697 — a cast that no-op'd (and refunded) must not lock the next press
   }
 }
 
@@ -66816,7 +66831,44 @@ const SKILL_FNS = {
     scheduleSkillTimer(() => { if (player.hp <= 0) return; wave(4.5 * _heatMul, 100, 130, 90); }, 320);
     _doomApplyWinBonus();   // covers the window-opened-before-impl cast order
   },
-  crusader_ult: () => {
+  crusader_ult: (_o) => {
+    // v0.29.697 — TWO-TAP (per user: "2nd tap should be 0 second cooldown to
+    // release the charged gauge"). Tap 1 ARMS the bastion; tap 2 RELEASES the
+    // whole payoff. Between the taps there is genuinely NO cooldown and no MP
+    // charge: the arm branch returns '_lxNoCast', which makes castSkill refund
+    // the cd and MP it pre-committed — so arming is free and the button is
+    // ready the same frame. The real 62 s cooldown and the 68 MP are paid at
+    // RELEASE, where the power actually leaves the gauge.
+    //
+    // THE HELD-KEY TRAP, and why the guard is an edge and not a timer: the
+    // input poll re-casts a held non-basic slot every frame, so with a 0 ms
+    // gate a single held press would arm on frame 0 and "release" on frame 1
+    // with whatever stacks happened to exist. _bastionArmHeld is set on arm
+    // and cleared by updatePlayer only once the bound key is actually UP —
+    // the release tap must be a NEW press, but there is no timed lockout of
+    // any kind, which is what "0 second cooldown" has to mean under a
+    // per-frame poll.
+    {
+      const _armedNow = (player._bastionArmedUntil | 0) > game.time;
+      // The auto path fires at the exact frame the window lapses, when
+      // _armedNow is already false — it must force the RELEASE branch, or
+      // expiry re-arms forever instead of erupting.
+      if (!_armedNow && !(_o && _o.auto)) {
+        // ── TAP 1 — ARM ──
+        player._bastionArmedUntil = game.time + 900;   // 15 s at 60fps; watcher in updatePlayer erupts it at expiry
+        player._bastionArmHeld = true;
+        spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'crusader_ult', { size: 120, life: 40, spin: 0.2 });
+        showToast('⚖ BASTION ARMED — tap again to RELEASE (judgement ×' + Math.max(0, Math.min(5, player._judgeStacks | 0)) + ')', 'epic');
+        return '_lxNoCast';   // castSkill refunds the pre-committed cd + MP: arming is free
+      }
+      if (player._bastionArmHeld && !(_o && _o.auto)) return '_lxNoCast';   // same physical press still down — not a second tap
+      // ── TAP 2 (or 15 s auto-eruption) — RELEASE ──
+      player._bastionArmedUntil = 0;
+      player._bastionArmHeld = false;
+      // The auto path bypasses castSkill, so the real cooldown is set here;
+      // for a manual release castSkill has already set the same value.
+      player.skillCooldowns.crusader_ult = SKILLS.crusader_ult.cd;
+    }
     // v0.29.x — BASTION OF DAWN, remade around the JUDGEMENT METER (per
     // user; AAA lineage: Diablo's Akarat meter, Overwatch's Zarya payoff,
     // FF14's Passage of Arms party wall). Hits taken charge Judgement
