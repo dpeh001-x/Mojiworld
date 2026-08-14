@@ -9581,7 +9581,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.714';
+const GAME_VERSION = 'v0.29.715';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -103877,6 +103877,12 @@ function drawPlayer() {
 // nameplate. Each icon also pulses (alpha 0.6→1.0 over 800 ms) so the
 // row reads as "active timers" not just decoration. Cheap: bails early
 // if no statuses are active.
+// v0.29.7xx — how far above the hitbox top (sy) the status row is pinned.
+// 70 px clears the tallest shipped hairstyle (spiky, painted top 54.9 px above
+// sy) with the glow radius, the bob and ~4 px of daylight accounted for. See
+// the derivation in _drawPlayerStatusIcons.
+const _LX_STATUS_ICON_LIFT  = 70;
+const _LX_STATUS_ICON_MIN_Y = 12;   // never ride off the top of the canvas
 function _drawPlayerStatusIcons(sx, sy) {
   if (!player || player.hp <= 0) return;
   // v0.29.486 (perf-pass) — flag pre-check before allocating (mirrors the
@@ -103904,12 +103910,31 @@ function _drawPlayerStatusIcons(sx, sy) {
   }
   if (icons.length === 0) return;
   ctx.save();
-  // Anchor above the head — sy is the sprite top; nudge up by 8 px so
-  // the icons clear hair/hats. Total row width: icons * 14 px spacing.
+  // v0.29.7xx — LIFT THE ROW CLEAR OF THE HAIR (per user: "status affliction
+  // markers should be placed vertically higher above the character's hair").
+  //
+  // The old anchor was sy - 8, and the comment claimed that cleared hair/hats.
+  // It did not: sy is the HITBOX top (28x44) and the drawn hero is much bigger
+  // than its hitbox, so 8 px above the box lands inside the fringe. Measured
+  // from the rig + the shipped art rather than eyeballed:
+  //   head bone = spine(-15) + head(-50) + attach(-1) = -66 local
+  //   hair sprite is drawn in head space at dy -52, box height 108
+  //   opaque-top scan of the 7 shipped hairstyles put the PAINTED top between
+  //   1.5% (spiky) and 13.6% (ponytail) down that box
+  //   x HERO_WORLD_DISPLAY_SCALE 0.85, feet-anchored
+  // => painted hair top lands 43.8 px (ponytail) to 54.9 px (spiky) above sy,
+  // while the icons' top pixel sat at sy-16 — 28-39 px INSIDE the hair.
+  //
+  // The lift clears the TALLEST style so no hairstyle is a special case:
+  // icon bottom (rowY + 8 glow + 1.5 bob) stays ~4 px above spiky's 54.9.
+  // Total row width: icons * 14 px spacing.
   const rowW = icons.length * 14;
   const cx   = sx + (player.w || 28) / 2;
   const rowX = cx - rowW / 2;
-  const rowY = sy - 8;
+  // Clamped so a player pinned against the top of the screen still sees the
+  // row: at 70 px of lift the icons would otherwise ride off-canvas, and a
+  // marker you cannot see is worse than one sitting close to the hair.
+  const rowY = Math.max(_LX_STATUS_ICON_MIN_Y, sy - _LX_STATUS_ICON_LIFT);
   // Subtle bob + pulse keyed off game.time so each frame's render is
   // identical for the same time (no per-icon state needed).
   const bob   = Math.sin(game.time * 0.12) * 1.5;
