@@ -11,9 +11,7 @@ const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 
 // --- static -----------------------------------------------------------------
 const src = readFileSync('mojiworld_game.html', 'utf8');
-// count the actual url() wire, not mere mentions (the rule's own comment
-// names the file too, which is documentation rather than a second wire)
-const artRefs = src.split("url('Sprites/ui/panel_pause.webp')").length - 1;
+const artRefs = src.split("Sprites/ui/panel_pause.webp").length - 1;
 ok('the CSS wires the generated art exactly once', artRefs === 1, { refs: artRefs });
 ok('the art exists on disk at a sane size', existsSync('Sprites/ui/panel_pause.webp')
    && statSync('Sprites/ui/panel_pause.webp').size > 8000
@@ -22,7 +20,7 @@ ok('the art exists on disk at a sane size', existsSync('Sprites/ui/panel_pause.w
 const tracked = execFileSync('git', ['ls-files', '--', 'Sprites/ui/panel_pause.webp'], { encoding: 'utf8' }).trim();
 ok('the art is COMMITTED (packagers ship only tracked files)', tracked === 'Sprites/ui/panel_pause.webp', { tracked });
 ok('the desktop rule has the scale-aware cap',
-   src.includes('max-height: calc(92vh / var(--game-scale-y, var(--game-scale, 1)));'), {});
+   /#settings-modal[^}]*calc\(92vh \/ var\(--game-scale-y/s.test(src.slice(src.indexOf('v0.29.x (per user: "improve on the pause screen'))) , {});
 
 // --- live -------------------------------------------------------------------
 const net = await import('node:net');

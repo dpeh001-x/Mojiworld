@@ -9505,7 +9505,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.690';
+const GAME_VERSION = 'v0.29.691';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16120,7 +16120,7 @@ const SKILLS = {
   bloodlust:    { name:'Bloodlust',      icon:'🩸', cls:'warrior', job:'berserker', slot:'q', mp:22, cd:48000, desc:'20 s rage (+ATK, lifesteal, speed) — shared with co-op partners on your map. While active, basic Z attacks launch forward shockwaves.' },
   rampage:      { name:'Rampage',        icon:'🌪️', cls:'warrior', job:'berserker', slot:'c', mp:45, cd:8000,  desc:'Ultimate: 3.5s spinning AoE (8 radial pulses).' },
   // Knight
-  guardian:     { name:'Guardian',       icon:'🛡️', cls:'warrior', job:'knight',    slot:'q', mp:18, cd:11000,  desc:'+50% DEF + 50% damage reflect for 6s. The +DEF also shields co-op partners on your map.' },
+  guardian:     { name:'Guardian',       icon:'🛡️', cls:'warrior', job:'knight',    slot:'q', mp:18, cd:11000,  desc:'+20% DEF + 20% damage reflect for 30s, +2% to both per rank. Rank 10: +30s duration and +5% DEF. The +DEF also shields co-op partners on your map.' },
   holyShield:   { name:'Holy Shield',    icon:'✨', cls:'warrior', job:'knight',    slot:'c', mp:45, cd:22000, desc:'Ultimate: 2.5s invulnerability + 5s damage reflect. Shares the shield with co-op partners on your map.' },
 
   // ============ ROGUE ============
@@ -16819,7 +16819,7 @@ const SKILL_LV10_BONUS = {
   rush:              { mobCap: 5 },                              // mob:3 → mob:5
   warCry:            { buffMs: 5000 },                           // +5 s buff dur
   bloodlust:         { buffMs: 20000 },                          // +20 s rage dur
-  guardian:          { cdMs: 45000 },                            // cd 60 → 45 s
+  guardian:          { buffMs: 30000, defBonusPct: 5 },          // v0.29.671 — +30 s duration, +5% DEF (was a stale cdMs:45000 that REPLACED the 11 s cd)
   holyShield:        { drBonus: 0.25, drMs: 10000 },             // +25% DR / 10 s
   warlord_warcry:    { extraHit: 1.5 },                          // +1 attack × 1.5
   doombringer_apoc:  { extraHit: 1.5 },                          // +1 attack × 1.5
@@ -16937,7 +16937,9 @@ const SKILL_LV5_BONUS = {
   rush:              { mobCap: 4 },                              // mob:3 → 4 (L10: 5)
   warCry:            { buffMs: 2500 },                           // +2.5 s buff (L10: +5 s)
   bloodlust:         { buffMs: 10000 },                          // +10 s rage (L10: +20 s)
-  guardian:          { cdMs: 52500 },                            // cd 60 → 52.5 s (L10: 45 s)
+  // v0.29.671 — guardian's L5 row removed: its stale cdMs:52500 REPLACED the
+  // 11 s cooldown (a 4.8× nerf for ranking up). Progression is +2%/rank now;
+  // the generic L5 fallback still grants the 5% cd shave.
   holyShield:        { drBonus: 0.12, drMs: 5000 },              // +12% DR / 5 s (L10: 25%/10 s)
   warlord_warcry:    { cdReducePct: 0.05 },                      // (L10 adds a finisher)
   doombringer_apoc:  { cdReducePct: 0.05 },                      // (L10 adds a finisher)
@@ -31607,7 +31609,9 @@ function getDef()  {
   // two are now unified per user "DEF = Magic DEF".
   let d = player.baseDef + player.mods.def + getEquipBonus('def') + ((game.dexPerm && game.dexPerm.def) || 0);   // v0.29.x — Mojidex completion perm-bonus
   if (player.buffs.warCry > 0)   d = Math.floor(d * 1.25);
-  if (player.buffs.guardian > 0) d = Math.floor(d * 1.5 + 40);
+  // v0.29.671 — Guardian DEF is percentage-only, from the cast's stamp
+  // (was a hardcoded ×1.5 + 40 that ignored rank entirely).
+  if (player.buffs.guardian > 0) d = Math.floor(d * (1 + ((player._guardianDefPct || 20) / 100)));
   // v0.29.288 — the +9999 DEF spike now matches the 2.5 s I-FRAME window, not
   // the 5 s buff. v0.26.x halved the hard invuln (5000→2500 ms) to cut Holy
   // Shield's uptime, but this spike still rode the full 5 s buff timer, so
@@ -61139,7 +61143,11 @@ function raiseMinion(x, y, type, life) {
     x: x - 12, y: y - 20, w: 24, h: 32,
     type, life: life || 10000, maxLife: life || 10000,
     vx: 0, vy: 0, facing: player.facing,
-    atk: Math.max(8, Math.floor(getAtk() * 0.65)),
+    // v0.29.690 — per user "the summons should deal more damage": 0.65x -> 1.0x
+    // ATK, floor 8 -> 14. They are temporary (8s siphon / 15s pulse), killable,
+    // and cost an ult; at 0.65x five of them read as decoration next to the
+    // player's own DPS. Wolves sit at 0.8x and are permanent, so parity was wrong.
+    atk: Math.max(14, Math.floor(getAtk() * 1.0)),
     cd: 0,
     // v0.26.x - Per user "make monsters move towards and attack the summoned
     // creatures also". Minions carry HP + a damage cooldown so monsters can
@@ -61185,9 +61193,35 @@ function updateMinions(dt) {
     if (mn.maxHp == null) { mn.maxHp = Math.max(60, Math.floor((player.maxHp || 100) * 0.30)); mn.currentHp = mn.maxHp; }
     if (mn.dmgCD == null) mn.dmgCD = 0;
     mn.dmgCD -= dt;
+    // v0.29.690 — per user "dark pulse summons disappear on moving to certain
+    // points of the map". Root cause: the keep-up blink below was gated on
+    // `mn.mojimon`, so the WARLOCK UNDEAD never got it. Measured before the
+    // fix: teleport the player 3000px (launch pad, in-map portal, long fall)
+    // and all 5 minions were still alive 2618px behind, walking at 2.2px/frame
+    // — alive in the array, permanently off-screen, i.e. "disappeared". A
+    // minion nudged into a pit fell 3246px and kept falling for its whole
+    // 15s life. Same thresholds as the MojiMon rule, which also covers the
+    // pit case (a fall clears 700px vertical almost immediately).
+    // The MojiMon path keeps its OWN copy below, deliberately untouched —
+    // it is ordered after that system's movement and recently tuned.
+    if (!mn.mojimon && (Math.abs(player.x - mn.x) > 1000 || Math.abs(player.y - mn.y) > 700)) {
+      mn.x = player.x - player.facing * 46; mn.y = player.y - 8;
+      mn.vx = 0; mn.vy = 0;
+      for (let _p = 0; _p < 8; _p++) game.particles.push({ x: mn.x + mn.w / 2, y: mn.y + mn.h / 2, vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3, life: 20, color: '#9944cc', size: 2 });
+    }
     const _mnCx = mn.x + mn.w/2, _mnCy = mn.y + mn.h/2;
     const _mnTakeHit = (mn.dmgCD <= 0);
     let tgt = null, bestSq = Infinity, _mnIncoming = 0;
+    // v0.29.690 — smarter target choice (per user "the AI for the summons is
+    // not smart enough"). Two rules replace raw nearest-to-self:
+    //   LEASH  — ignore foes far from the PLAYER. Nearest-to-self alone let a
+    //            minion commit to something across the map and walk out of
+    //            your fight (and off ledges getting there).
+    //   FOCUS  — among leashed foes, weight the score by remaining HP so they
+    //            finish the wounded instead of each picking a fresh target.
+    const _pcx = player.x + player.w/2, _pcy = player.y + player.h/2;
+    const _MN_LEASH_SQ = 700 * 700;
+    let _bestScore = Infinity;
     // v0.26.x perf — live-mob list built once per updateMinions call (was a
     // dead-check on every monster PER MINION; dead mobs are 40%+ mid-wave).
     if (game._mnLiveT !== game.time) {
@@ -61199,7 +61233,12 @@ function updateMinions(dt) {
     for (const m of game._mnLive) {
       const dx = (m.x + m.w/2) - _mnCx, dy = (m.y + m.h/2) - _mnCy;
       const sq = dx*dx + dy*dy;
-      if (sq < bestSq) { bestSq = sq; tgt = m; }
+      const _pdx = (m.x + m.w/2) - _pcx, _pdy = (m.y + m.h/2) - _pcy;
+      if (_pdx*_pdx + _pdy*_pdy <= _MN_LEASH_SQ) {
+        const _hpF = (m.maxHp > 0) ? Math.max(0, Math.min(1, m.currentHp / m.maxHp)) : 1;
+        const _score = sq * (0.55 + 0.45 * _hpF);   // wounded foes score better
+        if (_score < _bestScore) { _bestScore = _score; bestSq = sq; tgt = m; }
+      }
       // v0.26.x - monster contact damage TO the minion (mirrors the wolf-pet
       // model: sum atk of overlapping non-boss mobs, applied once per second).
       // v0.29.288 — boss/mini-boss exemption removed here too (same fix as the
@@ -61228,7 +61267,12 @@ function updateMinions(dt) {
     } else {
       const _t = game.time || 0;
       if (mn._roamTX == null || _t >= (mn._roamUntil || 0) || Math.abs(mn._roamTX - _mnCx) < 16) {
-        mn._roamTX = (player.x + player.w / 2) + (Math.random() * 2 - 1) * 420;   // wide, per-minion roam point
+        // v0.29.690 — roam radius 420 -> 200. The v0.26.x "roam further and
+        // separately" behaviour is kept (each minion still picks its OWN
+        // point and they still spread), just leashed nearer the player: a
+        // 420px random walk was the other half of the vanishing report,
+        // marching them off ledges into gaps while you fought elsewhere.
+        mn._roamTX = (player.x + player.w / 2) + (Math.random() * 2 - 1) * 200;   // per-minion roam point, player-leashed
         mn._roamUntil = _t + 120 + Math.floor(Math.random() * 180);               // hold ~2-5s before repicking
       }
       const rdx = mn._roamTX - _mnCx;
@@ -62945,14 +62989,28 @@ const SKILL_FNS = {
   },
   // Knight
   guardian: () => {
-    player.buffs.guardian = 6000;
+    // v0.29.671 — Guardian rework (per user): 30 s base, +20% DEF and 20%
+    // damage reflect, both growing +2% per rank point spent. Rank 10 adds
+    // +30 s duration and a further +5% DEF (60 s / +45% / 40% at cap).
+    // The percentages are STAMPED on the player at cast so the DEF pipeline
+    // and the reflect pipeline read exactly what this cast rolled — before
+    // this, ×1.5+40 DEF and the 0.5 reflect were hardcoded in two distant
+    // places and the skill had no rank scaling at all.
+    const _gr = (typeof getSkillRank === 'function') ? getSkillRank('guardian') : 0;
+    const _g10 = (typeof getSkillLv10 === 'function') ? getSkillLv10('guardian') : null;
+    const _gDur = 30000 + ((_gr >= 10 && _g10 && _g10.buffMs) ? _g10.buffMs : 0);
+    const _gDef = 20 + 2 * _gr + ((_gr >= 10 && _g10 && _g10.defBonusPct) ? _g10.defBonusPct : 0);
+    const _gRef = 20 + 2 * _gr;
+    player.buffs.guardian = _gDur;
+    player._guardianDefPct = _gDef;
+    player._guardianReflectPct = _gRef;
     // v0.29.301 — Knight is the party's defensive line: share the +DEF window.
     // NOTE: only the buff timer crosses the wire. `_guardianReflect` below is a
     // stamp against the caster's local `game.time`, which is meaningless on a
     // partner's client — partners get the defence, the reflect stays personal.
-    if (typeof _coopPartyBuff === 'function') _coopPartyBuff('guardian', 6000, 'Guardian');
-    player._guardianReflect = game.time + 360;   // v0.26.397 — frames: 6000→360 (~6s; read vs game.time in damage pipeline. was ~100s)
-    showToast('GUARDIAN — +50% DEF · 50% reflect', 'epic');   // v0.26.x audit FIX — was "80% DR" (the skill grants +50% DEF, not 80% damage reduction); matches the corrected tooltip
+    if (typeof _coopPartyBuff === 'function') _coopPartyBuff('guardian', _gDur, 'Guardian');
+    player._guardianReflect = game.time + Math.round(_gDur * 0.06);   // ms → frames at 60fps; read vs game.time in the damage pipeline00s)
+    showToast('GUARDIAN — +' + player._guardianDefPct + '% DEF · ' + player._guardianReflectPct + '% reflect · ' + Math.round(player.buffs.guardian / 1000) + 's', 'epic');   // v0.26.x audit FIX — was "80% DR" (the skill grants +50% DEF, not 80% damage reduction); matches the corrected tooltip
     flash(0.3);
     spawnFx('warrior','shieldBash', player.x + player.w/2, player.y + player.h/2, player.facing, { scale: 0.75, frameMs: 70 });
     // v0.25.215 — divine shield-bubble sprite at the player's chest as
@@ -62976,6 +63034,7 @@ const SKILL_FNS = {
     // frames) to deliver the advertised reflect (meaningful in the 2.5–5s window
     // after the 2.5s invuln ends).
     player._guardianReflect = game.time + 300;
+    player._guardianReflectPct = 50;   // v0.29.671 — the shared reflect stamp is now percentage-driven; Holy Shield's advertised 50% stays 50%
     // v0.26.x — balance audit: i-frame window 5000->2500ms (was 22.7% uptime
     // on the 22s cd, the longest non-ult immunity in the game). The 5s reflect
     // buff stays; only the hard invulnerability is halved.
@@ -64341,10 +64400,20 @@ const SKILL_FNS = {
     }
     player.mp = Math.min(getMaxMp(), player.mp + drained);
     player.hp = Math.min(getMaxHp(), player.hp + Math.floor(drained * 0.4));
-    // Raise 1 thrall (was up to 2)
-    if (victims.length > 0) {
-      const src = victims[0];
-      raiseMinion(src.x + src.w/2, src.y, 'skeleton', 8000);
+    // v0.29.690 — per user "soul siphon should always summon 1 random lich
+    // undead". Two defects here: the raise was GATED on a victim being in
+    // range (cast into empty air and the signature raise silently did
+    // nothing), and the type was hardcoded 'skeleton' so the zombie never
+    // appeared on this skill at all. Now: always exactly one, type rolled
+    // between the two undead the renderer supports (LX_SUMMON skeleton /
+    // zombie). Rises from the first victim when there is one, otherwise at
+    // the caster's feet.
+    {
+      const _rt = Math.random() < 0.5 ? 'skeleton' : 'zombie';
+      const _src = victims.length > 0 ? victims[0] : null;
+      const _rx = _src ? _src.x + _src.w/2 : player.x + player.w/2 + player.facing * 40;
+      const _ry = _src ? _src.y : player.y + player.h - 18;
+      raiseMinion(_rx, _ry, _rt, 8000);
     }
     showToast(`Soul Siphon`, 'epic');
     flash(0.2);   },
@@ -70259,9 +70328,10 @@ function updateMonsters(dt) {
       // attack loop exactly when a contact hit lands (same time-based field
       // every other attack path uses, so it self-clears).
       try { m.atkAnimUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + 650; } catch (_) {}
-      // Knight Guardian reflect — bounce 50% of damage back to the attacker
+      // Knight Guardian reflect — bounce the cast's rolled percentage back.
+      // v0.29.671 — was a hardcoded 50%; Holy Shield stamps its own 50 below.
       if (player._guardianReflect && game.time < player._guardianReflect && m.currentHp > 0) {
-        const reflect = Math.floor(dmg * 0.5);
+        const reflect = Math.floor(dmg * ((player._guardianReflectPct || 50) / 100));
         if (reflect > 0) {
           hitMonster(m, reflect, false, 'thorns');
           game.damageNumbers.push({
