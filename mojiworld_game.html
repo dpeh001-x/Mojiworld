@@ -9581,7 +9581,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.712';
+const GAME_VERSION = 'v0.29.713';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -14786,6 +14786,327 @@ window.addEventListener('keyup', (e) => {
 }, true);
 window.addEventListener('pointerdown', () => { _LX_PE._arm = false; }, true);
 window.addEventListener('wheel', () => { _LX_PE._arm = false; }, true);
+/* ===== Ctrl editor, extended: real-time PORTAL + PLATFORM modes ==========
+   v0.29.713 per user: "make the current ctrl key a real time portal and
+   platform editor that we have previously constructed as well". The Ctrl
+   panel gains a mode row - props / portals / platforms - folding in the
+   portal tooling of the (unbound) key-5 Stage Editor and adding live
+   platform editing. Same grammar as props everywhere: click selects, drag
+   moves, arrows nudge (Shift x10), Del removes, Ctrl+Z undoes per mode,
+   Export copies a MAPS.<map> hardbake block. Portals keep the Stage
+   Editor's live+map pairing (game.portals[i] <-> mapData.portals[i], clone
+   order preserved; runtime-only extras such as PQ returns stay untouched
+   past the paired region). Platforms edit game.mapData.platforms directly -
+   checkPlatformCollision and drawPlatforms read it every frame, so edits
+   are live under your feet. Implemented as wrappers over the prop editor's
+   bindings (function declarations are mutable; the panel builds lazily on
+   first toggle, so its buttons capture the wrapped bindings): prop mode
+   routes to the originals untouched. */
+_LX_PE.mode = 'prop';
+_LX_PE.undo2 = { portal: [], plat: [] };
+_LX_PE._mdLiveN = 0;
+function _lxPe2Arr() {
+  if (!game.mapData) return [];
+  if (_LX_PE.mode === 'portal') { if (!game.mapData.portals) game.mapData.portals = []; return game.mapData.portals; }
+  if (!game.mapData.platforms) game.mapData.platforms = []; return game.mapData.platforms;
+}
+function _lxPe2Mark() { const st = _LX_PE.undo2[_LX_PE.mode]; if (!st) return; st.push(JSON.stringify(_lxPe2Arr())); if (st.length > 30) st.shift(); }
+function _lxPe2Pos(i) {
+  const md = (game.mapData && game.mapData.portals) || [];
+  if (Array.isArray(game.portals) && i >= 0 && i < game.portals.length && i < md.length) {
+    game.portals[i].x = md[i].x; game.portals[i].y = md[i].y;
+  }
+}
+function _lxPe2Undo() {
+  const st = _LX_PE.undo2[_LX_PE.mode]; if (!st || !st.length) return;
+  const arr = _lxPe2Arr(), snap = JSON.parse(st.pop());
+  arr.length = 0; for (const o of snap) arr.push(o);
+  if (_LX_PE.mode === 'portal') {
+    // rebuild the paired region of the live array from mapData clones;
+    // extras past it (PQ returns etc.) are runtime-only and keep their spot
+    const n = Math.min(_LX_PE._mdLiveN | 0, Array.isArray(game.portals) ? game.portals.length : 0);
+    if (Array.isArray(game.portals)) game.portals.splice.apply(game.portals, [0, n].concat(arr.map(function (o) { return Object.assign({}, o); })));
+    _LX_PE._mdLiveN = arr.length;
+  }
+  if (_LX_PE.sel >= arr.length) _LX_PE.sel = arr.length - 1;
+  _lxPeSync();
+}
+function _lxPe2Hit(w) {
+  const arr = _lxPe2Arr();
+  for (let i = arr.length - 1; i >= 0; i--) {
+    const o = arr[i];
+    if (_LX_PE.mode === 'portal') {
+      if (Math.abs(w.x - o.x) <= 60 && w.y >= o.y - 140 && w.y <= o.y + 25) return i;   // the Stage Editor's portal box
+    } else {
+      if (w.x >= o.x && w.x <= o.x + o.w && w.y >= o.y - 6 && w.y <= o.y + Math.max(o.h, 14)) return i;
+    }
+  }
+  return -1;
+}
+function _lxPe2Nudge(dx, dy) {
+  const arr = _lxPe2Arr(), o = arr[_LX_PE.sel]; if (!o) return;
+  o.x += dx; o.y += dy;
+  if (_LX_PE.mode === 'portal') _lxPe2Pos(_LX_PE.sel);
+  _lxPeSync(false);
+}
+function _lxPe2AddPortal() {
+  const dest = prompt('Portal destination map id:', 'town');
+  if (!dest) return;
+  if (!MAPS[dest]) { if (typeof showToast === 'function') showToast('Unknown map id: ' + dest, 'rare'); return; }
+  _lxPe2Mark();
+  const md = _lxPe2Arr();
+  const entry = { x: Math.round(player.x + player.w / 2 + 60 * ((player.facing | 0) || 1)), y: Math.round(player.y + player.h), dest: dest, name: MAPS[dest].name || dest };
+  md.push(entry);
+  if (!Array.isArray(game.portals)) game.portals = [];
+  game.portals.splice(md.length - 1, 0, Object.assign({}, entry));   // insert at the end of the PAIRED region, before runtime extras
+  _LX_PE._mdLiveN = md.length;
+  _LX_PE.sel = md.length - 1;
+  _lxPeSync();
+}
+function _lxPe2AddPlat(x, y) {
+  _lxPe2Mark();
+  const arr = _lxPe2Arr();
+  arr.push({ x: Math.round(x), y: Math.round(y), w: 120, h: 16 });
+  _LX_PE.sel = arr.length - 1;
+  _lxPeSync();
+}
+function _lxPe2Mode(m) {
+  if (_LX_PE.mode === m) return;
+  _LX_PE.mode = m; _LX_PE.sel = -1; _LX_PE.drag = null; _LX_PE.place = null;
+  if (m === 'portal') _LX_PE._mdLiveN = ((game.mapData && game.mapData.portals) || []).length;
+  _lxPeSync();
+}
+{
+  const _pe0Down = _lxPeDown, _pe0Move = _lxPeMove, _pe0Up = _lxPeUp, _pe0Key = _lxPeKey,
+        _pe0Wheel = _lxPeWheel, _pe0Sync = _lxPeSync, _pe0Overlay = _lxPeDrawOverlay,
+        _pe0Build = _lxPeBuild, _pe0Export = _lxPeExport, _pe0Undo = _lxPeUndo,
+        _pe0Remove = _lxPeRemove, _pe0Snap = _lxPeSnap, _pe0ToPlayer = _lxPeToPlayer,
+        _pe0Toggle = _lxPeToggle;
+  _lxPeDown = function (e) {
+    if (_LX_PE.mode === 'prop') return _pe0Down(e);
+    if (!_LX_PE.open || e.button !== 0) return;
+    if (_LX_PE.root && _LX_PE.root.contains(e.target)) return;
+    const w = _lxSeWorld(e);
+    if (_LX_PE.mode === 'plat' && _LX_PE.place === '::plat') {
+      _lxPe2AddPlat(w.x - 60, w.y);
+      if (!e.shiftKey) _LX_PE.place = null;
+      _lxPeSync();
+    } else {
+      const hit = _lxPe2Hit(w);
+      if (hit >= 0) {
+        _LX_PE.sel = hit;
+        const o = _lxPe2Arr()[hit];
+        _lxPe2Mark();                                    // popped on pointer-up if this stays a click
+        _LX_PE.drag = { dx: w.x - o.x, dy: w.y - o.y, moved: false };
+      }
+      _lxPeSync();
+    }
+    e.preventDefault(); e.stopPropagation();
+  };
+  _lxPeMove = function (e) {
+    if (_LX_PE.mode === 'prop') return _pe0Move(e);
+    if (!_LX_PE.open || !_LX_PE.drag) return;
+    const arr = _lxPe2Arr(), o = arr[_LX_PE.sel]; if (!o) return;
+    const w = _lxSeWorld(e);
+    o.x = Math.round(w.x - _LX_PE.drag.dx); o.y = Math.round(w.y - _LX_PE.drag.dy);
+    if (_LX_PE.mode === 'portal') _lxPe2Pos(_LX_PE.sel);
+    _LX_PE.drag.moved = true;
+    _lxPeSync(false);
+  };
+  _lxPeUp = function () {
+    if (_LX_PE.mode === 'prop') return _pe0Up();
+    if (!_LX_PE.open) return;
+    if (_LX_PE.drag && !_LX_PE.drag.moved) { const st = _LX_PE.undo2[_LX_PE.mode]; if (st) st.pop(); }
+    _LX_PE.drag = null;
+  };
+  _lxPeKey = function (e) {
+    if (_LX_PE.mode === 'prop') return _pe0Key(e);
+    if (!_LX_PE.open) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+    const step = e.shiftKey ? 10 : 1;
+    if (e.key === 'ArrowLeft')       _lxPe2Nudge(-step, 0);
+    else if (e.key === 'ArrowRight') _lxPe2Nudge(step, 0);
+    else if (e.key === 'ArrowUp')    _lxPe2Nudge(0, -step);
+    else if (e.key === 'ArrowDown')  _lxPe2Nudge(0, step);
+    else if (e.key === 'Delete' || e.key === 'Backspace') _lxPeRemove();
+    else if (e.key === 'Escape') { if (_LX_PE.place) { _LX_PE.place = null; _lxPeSync(); } else _lxPeToggle(); }
+    else if ((e.key === 'z' || e.key === 'Z') && e.ctrlKey) _lxPe2Undo();
+    else return;
+    e.preventDefault(); e.stopPropagation();
+  };
+  _lxPeWheel = function (e) {
+    if (_LX_PE.mode === 'prop') return _pe0Wheel(e);
+    if (_LX_PE.mode !== 'plat' || !_LX_PE.open) return;          // portal mode: wheel flows to the game
+    if (_LX_PE.root && _LX_PE.root.contains(e.target)) return;
+    const o = _lxPe2Arr()[_LX_PE.sel]; if (!o || !e.deltaY) return;
+    const now = Date.now();
+    if (now - _lxPeWheelAt > 700) _lxPe2Mark();
+    _lxPeWheelAt = now;
+    const d = e.deltaY < 0 ? 1 : -1;
+    if (e.shiftKey) o.h = Math.max(8, Math.round(o.h + d * 6));
+    else o.w = Math.max(20, Math.round(o.w + d * 10));
+    _lxPeSync(false);
+    e.preventDefault(); e.stopPropagation();
+  };
+  _lxPeRemove = function () {
+    if (_LX_PE.mode === 'prop') return _pe0Remove();
+    const arr = _lxPe2Arr(); if (_LX_PE.sel < 0 || _LX_PE.sel >= arr.length) return;
+    _lxPe2Mark();
+    arr.splice(_LX_PE.sel, 1);
+    if (_LX_PE.mode === 'portal') {
+      if (Array.isArray(game.portals) && _LX_PE.sel < game.portals.length) game.portals.splice(_LX_PE.sel, 1);
+      _LX_PE._mdLiveN = arr.length;
+    }
+    _LX_PE.sel = Math.min(_LX_PE.sel, arr.length - 1);
+    _lxPeSync();
+  };
+  _lxPeUndo = function () { if (_LX_PE.mode === 'prop') return _pe0Undo(); _lxPe2Undo(); };
+  _lxPeSnap = function () {
+    if (_LX_PE.mode === 'prop') return _pe0Snap();
+    if (_LX_PE.mode !== 'portal') return;
+    const arr = _lxPe2Arr(), o = arr[_LX_PE.sel]; if (!o) return;
+    const gy = _lxPeGroundY(o.x, o.y);
+    if (gy != null) { o.y = gy; _lxPe2Pos(_LX_PE.sel); _lxPeSync(); }
+  };
+  _lxPeToPlayer = function () {
+    if (_LX_PE.mode === 'prop') return _pe0ToPlayer();
+    const arr = _lxPe2Arr(), o = arr[_LX_PE.sel]; if (!o || typeof player === 'undefined') return;
+    _lxPe2Mark();
+    const pcx = player.x + player.w / 2, feet = player.y + player.h;
+    if (_LX_PE.mode === 'portal') { o.x = Math.round(pcx + 60 * ((player.facing | 0) || 1)); o.y = Math.round(feet); _lxPe2Pos(_LX_PE.sel); }
+    else { o.x = Math.round(pcx - o.w / 2); o.y = Math.round(feet); }
+    _lxPeSync();
+  };
+  _lxPeExport = function () {
+    if (_LX_PE.mode === 'prop') return _pe0Export();
+    const arr = _lxPe2Arr();
+    const key = _LX_PE.mode === 'portal' ? 'portals' : 'platforms';
+    const txt = '// MAPS.' + game.currentMap + '.' + key + ' - hardbake from the Ctrl editor\n' +
+      key + ': [\n' + arr.map(function (o) { return '  ' + _lxSeFmt(o) + ','; }).join('\n') + '\n],';
+    if (_LX_PE.ui) _LX_PE.ui.out.textContent = txt;
+    try { navigator.clipboard.writeText(txt); if (typeof showToast === 'function') showToast(key + ' layout copied \u{1F4CB}', 'epic'); } catch (e) {}
+  };
+  _lxPeBuild = function () {
+    _pe0Build();
+    const root = _LX_PE.root, u = _LX_PE.ui; if (!root || !u || u.modeRow) return;
+    const hb = root.querySelector('b'); if (hb) hb.textContent = '\u{1F6E0} Map Editor (Ctrl)';
+    // prop-only rows, captured by content so panel reshuffles don't break this
+    u._propRows = Array.from(root.children).filter(function (r) {
+      if (r === u.filter) return true;
+      if (r.contains && (r.contains(u.roster) || r.contains(u.armBtn))) return true;
+      const tx = r.textContent || '';
+      return tx.indexOf('Snap') >= 0 && tx.indexOf('Hang') >= 0 || tx.indexOf('Move selected prop') >= 0;
+    });
+    for (const r of u._propRows) r._pe2Disp = r.style.display || '';
+    const mkBtn = function (label, cb) {
+      const b = document.createElement('button'); b.textContent = label;
+      b.style.cssText = 'flex:1;padding:5px 4px;background:#1d2536;color:#e4ecf4;border:1px solid #43505f;border-radius:6px;cursor:pointer;font-size:11px;';
+      b.onclick = cb; return b;
+    };
+    const mrow = document.createElement('div'); mrow.style.cssText = 'display:flex;gap:4px;margin-bottom:6px;';
+    u.modeBtns = {};
+    u.modeBtns.prop   = mkBtn('\u{1F4E6} Props',     function () { _lxPe2Mode('prop'); });
+    u.modeBtns.portal = mkBtn('\u{1F300} Portals',   function () { _lxPe2Mode('portal'); });
+    u.modeBtns.plat   = mkBtn('\u25A4 Platforms',    function () { _lxPe2Mode('plat'); });
+    mrow.appendChild(u.modeBtns.prop); mrow.appendChild(u.modeBtns.portal); mrow.appendChild(u.modeBtns.plat);
+    u.modeRow = mrow;
+    root.insertBefore(mrow, root.children[2] || null);
+    u.portalRow = document.createElement('div'); u.portalRow.style.cssText = 'display:none;gap:4px;margin-bottom:4px;';
+    u.portalRow.appendChild(mkBtn('\uFF0B Portal here', _lxPe2AddPortal));
+    u.portalRow.appendChild(mkBtn('\u2913 Snap', function () { _lxPeSnap(); }));
+    u.portalRow.appendChild(mkBtn('\u{1F6B6} To player', function () { _lxPeToPlayer(); }));
+    root.insertBefore(u.portalRow, u.list);
+    u.platRow1 = document.createElement('div'); u.platRow1.style.cssText = 'display:none;gap:4px;margin-bottom:4px;';
+    u.platRow1.appendChild(mkBtn('\uFF0B Platform at click', function () { _LX_PE.place = '::plat'; _lxPeSync(); }));
+    u.platRow1.appendChild(mkBtn('\uFF0B at player', function () { _lxPe2AddPlat(player.x + player.w / 2 - 60, player.y + player.h); }));
+    u.platRow1.appendChild(mkBtn('\u{1F6B6} To player', function () { _lxPeToPlayer(); }));
+    root.insertBefore(u.platRow1, u.list);
+    u.platRow2 = document.createElement('div'); u.platRow2.style.cssText = 'display:none;gap:4px;margin-bottom:4px;';
+    const szb = function (label, dw, dh) {
+      return mkBtn(label, function () {
+        const o = _lxPe2Arr()[_LX_PE.sel]; if (!o) return;
+        _lxPe2Mark();
+        if (dw) o.w = Math.max(20, Math.round(o.w + dw));
+        if (dh) o.h = Math.max(8, Math.round(o.h + dh));
+        _lxPeSync(false);
+      });
+    };
+    u.platRow2.appendChild(szb('w\u221210', -10, 0)); u.platRow2.appendChild(szb('w+10', 10, 0));
+    u.platRow2.appendChild(szb('h\u22126', 0, -6));   u.platRow2.appendChild(szb('h+6', 0, 6));
+    root.insertBefore(u.platRow2, u.list);
+  };
+  _lxPeSync = function (rebuildList) {
+    const u = _LX_PE.ui; if (!u) return;
+    if (!u.modeRow || _LX_PE.mode === 'prop') _pe0Sync(rebuildList);
+    if (!u.modeRow) return;
+    const m = _LX_PE.mode;
+    for (const k in u.modeBtns) {
+      u.modeBtns[k].style.background = k === m ? '#3d2a10' : '#1d2536';
+      u.modeBtns[k].style.borderColor = k === m ? '#ffb020' : '#43505f';
+    }
+    for (const r of u._propRows) r.style.display = m === 'prop' ? r._pe2Disp : 'none';
+    u.portalRow.style.display = m === 'portal' ? 'flex' : 'none';
+    u.platRow1.style.display = m === 'plat' ? 'flex' : 'none';
+    u.platRow2.style.display = m === 'plat' ? 'flex' : 'none';
+    if (m === 'prop') return;
+    const arr = _lxPe2Arr();
+    u.map.textContent = 'map: ' + game.currentMap + '  \u00B7  ' + arr.length + (m === 'portal' ? ' portal' : ' platform') + (arr.length === 1 ? '' : 's');
+    if (rebuildList !== false) {
+      u.list.innerHTML = '';
+      arr.forEach(function (o, i) {
+        const el = document.createElement('option');
+        el.textContent = (i === _LX_PE.sel ? '\u25B6 ' : '') + (m === 'portal'
+          ? ('\u{1F300} ' + (o.dest || '?') + '  (' + o.x + ',' + o.y + ')')
+          : ('\u25A4 ' + o.w + '\u00D7' + o.h + '  (' + o.x + ',' + o.y + ')' + (o.type ? ' ' + o.type : '')));
+        u.list.appendChild(el);
+      });
+      u.list.selectedIndex = _LX_PE.sel;
+    }
+    const o = arr[_LX_PE.sel];
+    u.selInfo.textContent = o
+      ? ('\u25B6 ' + (m === 'portal' ? ('portal \u2192 ' + o.dest) : 'platform') + '  x:' + o.x + '  y:' + o.y + (m === 'plat' ? ('  w:' + o.w + '  h:' + o.h) : ''))
+      : (_LX_PE.place === '::plat' ? '\u{1F3AF} placing a platform \u2014 click the map (Shift-click keeps placing, Esc cancels)'
+                                   : 'nothing selected \u2014 click a ' + (m === 'portal' ? 'portal' : 'platform'));
+  };
+  _lxPeDrawOverlay = function () {
+    if (!_LX_PE.open) return;
+    if (_LX_PE._map !== game.currentMap) {
+      _LX_PE._map = game.currentMap;
+      _LX_PE.sel = -1; _LX_PE.drag = null; _LX_PE.place = null;
+      _LX_PE.undo.length = 0; _LX_PE.undo2.portal.length = 0; _LX_PE.undo2.plat.length = 0;
+      _LX_PE._mdLiveN = ((game.mapData && game.mapData.portals) || []).length;
+      _lxPeSync();
+    }
+    if (_LX_PE.mode === 'prop') return _pe0Overlay();
+    const camX = (game.camera && game.camera.x) || 0;
+    const arr = _lxPe2Arr();
+    ctx.save();
+    for (let i = 0; i < arr.length; i++) {
+      const o = arr[i], isSel = i === _LX_PE.sel;
+      ctx.strokeStyle = isSel ? '#ffd166' : (_LX_PE.mode === 'portal' ? 'rgba(190,120,255,0.45)' : 'rgba(120,255,170,0.4)');
+      ctx.lineWidth = isSel ? 2 : 1;
+      ctx.setLineDash(isSel ? [] : [4, 4]);
+      if (_LX_PE.mode === 'portal') {
+        ctx.strokeRect(o.x - 60 - camX, o.y - 140, 120, 165);
+        if (isSel) {
+          ctx.beginPath();
+          ctx.moveTo(o.x - 8 - camX, o.y); ctx.lineTo(o.x + 8 - camX, o.y);
+          ctx.moveTo(o.x - camX, o.y - 8); ctx.lineTo(o.x - camX, o.y + 8);
+          ctx.stroke();
+        }
+      } else {
+        ctx.strokeRect(o.x - camX, o.y, o.w, Math.max(o.h, 4));
+      }
+    }
+    ctx.restore();
+  };
+  _lxPeToggle = function () {
+    _pe0Toggle();
+    if (_LX_PE.open) _LX_PE._mdLiveN = ((game.mapData && game.mapData.portals) || []).length;
+  };
+}
+
 /* ===== Key-4 "NPC Plant" dev overlay — mirror of the key-3 Monster Plant === */
 const _LX_NP = { open: false, name: null, root: null, ui: null, _tick: null };
 function _lxNpTypes() {
