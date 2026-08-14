@@ -128,7 +128,7 @@ Every existing map plays a piece. Here is the unified framework:
 | Boss | Their refusal |
 |---|---|
 | **King Gloopaloo, the Brimming Tyrant** (Gelwater Grotto) | "If we move, we melt. Stay still." First boss → first refusal. A vessel filled to the brim, eternally tipping but never spilling. |
-| **Queen Shroomaloo, the Cradle-Veiled** (Queen's Hollow) | A mother who would rather hold every child in suspension forever than risk one growing up. Wraps her brood in the veil that never opens. |
+| **Mooma, the Cradle-Veiled** (Queen's Hollow) | A mother who would rather hold every child in suspension forever than risk one growing up. Wraps her brood in the veil that never opens. |
 | **King Krook, the Ember Tyrant** (Krook Throne) | A tyrant who would rather rule a frozen kingdom than fall in a moving one. |
 | **Octobaby, the Eight-Mood Tyrant** (Octopus Grotto) | The deep that cannot decide. Eight moods, eight refusals, all simultaneous. |
 | **Aetherion, the Shardfather** (Sanctum) | Keeper of the Shards — fragments of unfinished time. He guards what nobody finished. |

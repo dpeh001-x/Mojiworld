@@ -46,11 +46,11 @@ const ITEMS = {
     prompt: 'A jagged ice-spire shard projectile (Capricorn) pointing up and forward — a sharp pale-cyan crystalline ice spike, glinting frost facets, cold vapour wisping off it, a bright icy gleam.' },
   markedShot:  { file: 'p_markedshot.png',   persp: 'Side-Scroll',
     prompt: 'A blazing marked arrow-star projectile (Sagittarius) pointing right — a fiery orange arrow-bolt overlaid with a glowing golden target-star reticle, a hot flame trail and sparks.' },
-  // v0.26.517 — Queen Shroomaloo's boss spore-pod (her one projectile; was the
+  // v0.26.517 — Mooma's boss spore-pod (her one projectile; was the
   // procedural fallback). DISTINCT from the common Shroom mob's `mspore` — this
   // is a queenly cradle-veil toxic pod, magenta/pink not the mob's orange.
   spore:       { file: 'p_spore.png',        persp: 'Any perspective',
-    prompt: 'A CUTE chibi spore-pod projectile (Queen Shroomaloo) — a plump round kawaii mushroom spore with a soft pastel-pink and magenta domed cap dotted with little pale cream spots, a chubby rounded glossy body, big soft highlights, rosy cheeks, a gentle dreamy pink glow, and a few sparkly heart-shaped spore motes puffing off it cheerfully. Adorable, friendly, bouncy and round.' },
+    prompt: 'A CUTE chibi spore-pod projectile (Mooma) — a plump round kawaii mushroom spore with a soft pastel-pink and magenta domed cap dotted with little pale cream spots, a chubby rounded glossy body, big soft highlights, rosy cheeks, a gentle dreamy pink glow, and a few sparkly heart-shaped spore motes puffing off it cheerfully. Adorable, friendly, bouncy and round.' },
 };
 
 let keys = Object.keys(ITEMS);

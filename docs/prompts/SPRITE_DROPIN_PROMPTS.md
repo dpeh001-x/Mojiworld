@@ -570,9 +570,9 @@ once the file exists. No code changes needed.
 
 ---
 
-# v0.26.517 — Queen Shroomaloo boss spore (`spore`)
+# v0.26.517 — Mooma boss spore (`spore`)
 
-Audit of the four playful-tyrant bosses' projectiles found three already have unique authored art (**King Gloopaloo** → `goo`, **Octobaby** → `bubble`/`pincer`/`splash`, all 9-frame animated; **King Krook** → `firebomb`/`m_firebomb.webp`, velocity-rotated). The lone gap was **Queen Shroomaloo**, whose `spore` projectile had *no* sprite — it fired the procedural fallback, and is deliberately DISTINCT from the common Shroom mob's orange `mspore`.
+Audit of the four playful-tyrant bosses' projectiles found three already have unique authored art (**King Gloopaloo** → `goo`, **Octobaby** → `bubble`/`pincer`/`splash`, all 9-frame animated; **King Krook** → `firebomb`/`m_firebomb.webp`, velocity-rotated). The lone gap was **Mooma**, whose `spore` projectile had *no* sprite — it fired the procedural fallback, and is deliberately DISTINCT from the common Shroom mob's orange `mspore`.
 
 The engine is already wired (`LX_MOB_PROJ.spore` → `p_spore.png`, `_PROJ_SPRITE_BLIT.spore` `{mode:'spin', size:1.4}`, and `spore` added to `_PROJ_ANIM_KEYS`). It renders the procedural spore until the files below land, then swaps automatically — no code changes needed.
 
@@ -592,7 +592,7 @@ node scripts/generate_boss_projectile_anim.mjs --only spore --generate
 
 **Prompt (Ludo `/assets/image`, sprite-vfx, Cel-Shaded, 1:1):**
 
-> A toxic boss spore-pod projectile (Queen Shroomaloo, the Cradle-Veiled) — a plump rounded magenta-and-pink fungal spore sac with a soft veined translucent membrane, a darker crimson crown of tiny cap-frills on top, a sickly-pink toxic inner glow and a few drifting spore motes puffing off it, roughly round and bloated. *(+ the master outline line: bold uniform 2–3 px black outline `#0a0612`, transparent background, centred, readable at 64×64.)*
+> A toxic boss spore-pod projectile (Mooma, the Cradle-Veiled) — a plump rounded magenta-and-pink fungal spore sac with a soft veined translucent membrane, a darker crimson crown of tiny cap-frills on top, a sickly-pink toxic inner glow and a few drifting spore motes puffing off it, roughly round and bloated. *(+ the master outline line: bold uniform 2–3 px black outline `#0a0612`, transparent background, centred, readable at 64×64.)*
 
 **Motion (anim frames):** membrane gently pulses/breathes, pink spore motes puff and drift, toxic inner glow throbs — effect-only, no rotate/translate (the engine's `spin` blit handles tumble).
 
