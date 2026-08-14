@@ -9458,7 +9458,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.682';
+const GAME_VERSION = 'v0.29.683';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -53443,6 +53443,14 @@ function loadMap(id, entryX, entryY) {
   }
   game.currentMap = id;
   game.mapData = _variedMapData(id);
+  // v0.29.6xx — POTHOLES CLEAR OF PORTALS (per user: "placement of this portal
+  // should not coincide with the potholes"). Runs AFTER _variedMapData because
+  // that is what decides the final portal x — Dune Sands' portals ship as
+  // x2500/100/200 in source but resolve to 402/805/2198 at runtime, so a
+  // hardcoded nudge would be tuned against numbers that never reach the player.
+  if (typeof _lxClearPotholesFromPortals === 'function') {
+    try { _lxClearPotholesFromPortals(game.mapData); } catch (e) {}
+  }
   // v0.26.x — Per user: a short "entering the Void" scene every time the Void
   // loads — big Guguma held ~1.5s, then it fades out to the black Void.
   if (id === 'void' && typeof _playVoidIntro === 'function') _playVoidIntro();
@@ -57319,7 +57327,23 @@ function updatePlayer(dt) {
       player._potholeCD[_pi] = game.time;
       // Stumble: pulse hitStun + brake horizontal momentum
       player.hitStun = Math.max(player.hitStun || 0, 700);
-      player.vx *= 0.3;
+      // v0.29.6xx — SLOW HARDER, AND SAY SO (per user "slow the player more,
+      // with a sign that mentions player is slowed down"). The old effect was
+      // a one-frame brake (vx x0.3) that momentum washed out almost instantly.
+      // Now the brake is firmer AND it applies the game's existing _slowTimer
+      // (speed x0.5 while active, see getSpeed), so the cost is felt for a
+      // beat afterwards instead of vanishing. Reusing _slowTimer means the
+      // 🐌 status icon above the player lights up for free — it is already
+      // wired in _drawPlayerStatusIcons — and the floating label below spells
+      // it out in words the first time it is not obvious.
+      player.vx *= 0.15;
+      player._slowTimer = Math.max(player._slowTimer || 0, 1800);
+      if (Array.isArray(game.damageNumbers)) {
+        game.damageNumbers.push({
+          x: player.x + player.w / 2 - 26, y: player.y - 10, vy: -1.4,
+          text: 'SLOWED!', life: 46, color: '#ffc46b', size: 12,
+        });
+      }
       player._lastDamageSource = 'a pothole';
       if (typeof addShake === 'function') addShake(3);
       // Dust + grit burst rising from the player's feet
@@ -96160,6 +96184,52 @@ const _POTHOLE_SPRITE_BY_MAP = {
   boneGraveyard2:   'pothole_crypt',
   hollowSepulchre2: 'pothole_crypt',
 };
+// v0.29.6xx — Keep potholes off portal mouths. A pothole's VISUAL footprint is
+// its trip width x1.75 (see drawPotholes), so clearance is measured against the
+// drawn cavity, not the trip box — otherwise the art still frames the portal
+// even when the hitbox technically misses. Each offender is shifted along the
+// ground to the nearest spot that clears every portal and stays in-world; if no
+// such spot exists it is dropped, which is always safe (a pothole is a hazard,
+// never a requirement). Mutates in place and is idempotent, so re-entering a
+// map cannot compound the shift.
+const _LX_PORTAL_CLEAR = 70;   // px of breathing room either side of a portal
+function _lxClearPotholesFromPortals(md) {
+  if (!md || !Array.isArray(md.potholes) || !md.potholes.length) return;
+  const portals = Array.isArray(md.portals) ? md.portals : [];
+  if (!portals.length) return;
+  const worldW = md.worldWidth || 2000;
+  const drawnSpan = (ph) => {
+    const w = ph.w || 60, dw = w * 1.75, cx = ph.x + w / 2;
+    return [cx - dw / 2, cx + dw / 2];
+  };
+  const clashes = (ph) => {
+    const [a, b] = drawnSpan(ph);
+    for (const pt of portals) {
+      const px = +pt.x;
+      if (!Number.isFinite(px)) continue;
+      if (px + _LX_PORTAL_CLEAR >= a && px - _LX_PORTAL_CLEAR <= b) return true;
+    }
+    return false;
+  };
+  const kept = [];
+  for (const ph of md.potholes) {
+    if (!ph || !Number.isFinite(+ph.x)) continue;
+    if (!clashes(ph)) { kept.push(ph); continue; }
+    // Walk outward in both directions for the nearest clear slot.
+    const w = ph.w || 60;
+    let placed = null;
+    for (let d = 20; d <= 420 && !placed; d += 20) {
+      for (const cand of [ph.x + d, ph.x - d]) {
+        if (cand < 40 || cand + w > worldW - 40) continue;
+        const probe = { x: cand, w };
+        if (!clashes(probe)) { placed = cand; break; }
+      }
+    }
+    if (placed != null) { ph.x = placed; kept.push(ph); }
+    // else: drop it — a hazard is never load-bearing.
+  }
+  md.potholes = kept;
+}
 function drawPotholes() {
   const list = game.mapData && game.mapData.potholes;
   if (!list || !list.length) return;
@@ -96174,7 +96244,14 @@ function drawPotholes() {
   const _spriteKey = (game.mapData && game.mapData.potholeSprite) ||
                      _POTHOLE_SPRITE_BY_MAP[game.currentMap] || 'pothole_earth';
   const _img = (typeof LX_OBJECTS !== 'undefined') ? LX_OBJECTS[_spriteKey] : null;
+  // v0.29.6xx — per user "the potholes should also be 50% opacity": they read
+  // as solid black scars on the sand. Half-alpha lets the ground show through
+  // so they sit IN the dune rather than punched out of it. Applied around the
+  // whole loop (sprite AND procedural fallback) and restored after, so nothing
+  // downstream inherits it.
   const _ready = !!(_img && _img.complete && _img.naturalWidth);
+  const _prevAlpha = ctx.globalAlpha;
+  ctx.globalAlpha = _prevAlpha * 0.5;
   const _prevSmooth = ctx.imageSmoothingEnabled;
   if (_ready) { ctx.imageSmoothingEnabled = true; if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high'; }
   for (const ph of list) {
@@ -96217,6 +96294,7 @@ function drawPotholes() {
     ctx.stroke();
   }
   if (_ready) ctx.imageSmoothingEnabled = _prevSmooth;
+  ctx.globalAlpha = _prevAlpha;   // v0.29.6xx — pair of the 0.5 set above
 }
 
 // v0.26.345 — LAUNCH-PAD renderer. Draws each map.launchPads entry as a
