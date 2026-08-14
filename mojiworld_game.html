@@ -9527,7 +9527,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.701';
+const GAME_VERSION = 'v0.29.702';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16238,7 +16238,7 @@ const SKILLS = {
   // evadeRoll 10000→8000 lift the kit to ≈75% before crit / first-hit /
   // full-draw bonuses (archer's chargedShot already carries the kit at
   // 18.1× wall damage per cast — untouched).
-  multiShot:    { name:'Multi Shot',     icon:'🎋', cls:'archer', slot:'s', mp:10, cd:2600, desc:'3 arrow spread.' },
+  multiShot:    { name:'Multi Shot',     icon:'🎋', cls:'archer', slot:'s', mp:10, cd:2600, desc:'3 arrow spread. Rank 10: each arrow pierces 1 foe.' },
   chargedShot:  { name:'Charged Shot',   icon:'⚡', cls:'archer', slot:'a', mp:14, cd:4000, desc:'Big charged arrow — heavy burst; pierces 2 foes (3 at rank 10).' },   // v0.29.x — no longer pierces, so the tooltip no longer says it does
   evadeRoll:    { name:'Evade Burst',    icon:'💥', cls:'archer', slot:'e', mp:8,  cd:8000, desc:'Back flip + 2 shot + cute explosive blast that hugely knocks back nearby monsters. 50% chance to evade attacks during the roll.' },
   // v0.25.541 — Eagle Eye retuned per user spec: +20% crit (was +40),
@@ -16935,7 +16935,7 @@ const SKILL_LV10_BONUS = {
                                  announce: '✝ APOTHEOSIS — judgment sustains the faithful.' } },
   // ── ARCHER ──
   arrowShot:         { window: { ms: 4000,  chain: { n: 1, frac: 0.28 } } },
-  multiShot:         { window: { ms: 5000,  chain: { n: 1, frac: 0.35 } } },
+  multiShot:         { pierceAdd: 1, window: { ms: 5000,  chain: { n: 1, frac: 0.35 } } },   // v0.29.7xx — pierce budget 0 -> 1 at rank 10 only (the LV5 entry has none)
   chargedShot:       { pierceAdd: 1, window: { ms: 5000,  execute: { frac: 0.20, bossMul: 1.30 } } },   // pierce budget 2 -> 3
   evadeRoll:         { window: { ms: 6000,  refundOnKill: 0.30 } },
   arrowRain:         { window: { ms: 7000,  chain: { n: 2, frac: 0.50 } } },
@@ -64611,6 +64611,11 @@ const SKILL_FNS = {
     // fall — reads as a proper "spread shot" again. The `gravity`
     // field is omitted so it falls back to the default 0.20 in the
     // L41938 ballistic-arc block.
+    // v0.29.7xx — pierce budget, read once per cast. 0 at ranks 0-9 (the LV5
+    // milestone authors no pierceAdd), 1 at rank 10 = SKILL_RANK_CAP, i.e.
+    // 10 RP invested. Same shape as iceSpike's rank-10 pierce.
+    const _msBonus  = (typeof getSkillLv10 === 'function') ? getSkillLv10('multiShot') : null;
+    const _msPierce = (_msBonus && _msBonus.pierceAdd) ? (_msBonus.pierceAdd | 0) : 0;
     const { cosA: msCos, sinA: msSin } = getArcherAim();
     for (let i = 0; i < count; i++) {
       const off = (i - (count - 1) / 2);
@@ -64624,6 +64629,17 @@ const SKILL_FNS = {
         // total ~4.2×+12 (was 4.5×+15) — flat trimmed so the skill doesn't
         // disproportionately favour low-ATK builds. Spread mechanic unchanged.
         damage: getAtk() * 1.4 + 4, owner: 'player', skill: 'arrow', color: '#ddaa66',
+        // v0.29.7xx (per user) — "multishot skill projectiles should not
+        // pierce, until 10 RP (max) where they should only pierce once".
+        // multiShot never set a pierce field itself; the pierce came from two
+        // OUTSIDE gates keyed on skill:'arrow' && !_singleTarget — the
+        // arrowPierce tree talent and the Sniper mastery — and neither was
+        // capped. Basic Z opts out with _singleTarget; iceSpike/chargedShot
+        // opt out by declaring a budget. multiShot did neither, so it pierced
+        // without limit. Declaring the budget fixes it at the source: the
+        // resolver treats a numeric pierceLeft as authoritative, so 0 means
+        // the arrow stops on the first body even if a gate flips p.pierce.
+        pierce: _msPierce > 0, pierceLeft: _msPierce,
         _enh: player._enh, _msHandled: true,   // v0.26.x — self-applies multishot; opt out of universal Double Shot
         // No `gravity` override — falls back to the default 0.20 for
         // skill === 'arrow' in the projectile-physics block.
@@ -67206,7 +67222,13 @@ const SKILL_FNS = {
     // v0.26.x — Eye of the Tempest's eagle had no player-indicated duration;
     // per "75% their cooldown time" → 0.75 × 56s cd = 42s (was 12s). maxLife
     // stamped so the always-on summon duration timer reads a true fraction.
-    player.ultPet = { x: player.x, y: player.y - 80, vx: 0, vy: 0, hp: 9000, maxHp: 9000, life: 42000, maxLife: 42000, cdAtk: 0, fireCd: 0, scale: 3.96, sprite: 'eagle', flying: true, shooter: true };   // v0.26.x — separate slot so it coexists with the F-skill wolf
+    // v0.29.672 — eagle drawn at 75% per user (3.96 → 2.97). `scale` is the
+    // single source for this summon: the renderer sizes it as
+    // max(32, 22 × scale) ÷ content-fraction × the global 1.5× summon mul, and
+    // the hover tick sets the hitbox to 44×30 × scale. Both fall to exactly 75%
+    // — 22×2.97 = 65.3 stays clear of the max(32,…) floor, so nothing clamps
+    // and the visual and its collision box stay in agreement.
+    player.ultPet = { x: player.x, y: player.y - 80, vx: 0, vy: 0, hp: 9000, maxHp: 9000, life: 42000, maxLife: 42000, cdAtk: 0, fireCd: 0, scale: 2.97, sprite: 'eagle', flying: true, shooter: true };   // v0.26.x — separate slot so it coexists with the F-skill wolf
     for (let i = 0; i < 14; i++) { const a = (i / 14) * Math.PI * 2; game.particles.push({ x: player.x + player.w / 2, y: player.y, vx: Math.cos(a) * 5, vy: Math.sin(a) * 4, life: 38, color: '#cfeaff', size: 3 }); }
   },
 };
