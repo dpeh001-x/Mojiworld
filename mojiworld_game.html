@@ -9572,7 +9572,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.705';
+const GAME_VERSION = 'v0.29.706';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -30145,7 +30145,7 @@ MAPS.ossuarySprawl = {
     { type: 'boneGolem',       count: 9 },
     { type: 'lichkin',         count: 8 },
     { type: 'sepulchreHound',  count: 7 },
-    { type: 'shardlich',       count: 6 },
+    { type: 'tombKeeper',      count: 6 },   // v0.29.706 — was shardlich, a Glasswind Steppe ice-caster borrowed by the v0.26.880 gap fill. Tomb Keeper is the Hollow Sepulchre's gatekeeper (nat 77) and summons sepulchre hounds, already on this roster.
     { type: 'ossuaryTyrant',   count: 1, spawnChance: 0.5 },   // v0.26.891 — rare mid-boss
   ],
 };
@@ -54217,6 +54217,18 @@ function loadMap(id, entryX, entryY) {
   // only to non-boss spawns (bosses always spawn exactly once).
   const _mapCap = Math.min(MAX_ONSCREEN_MONSTERS, _normMonsterCap(game.mapData.monsterCap || game.monsterCap || 15));   // v0.26.470 — global on-screen monster ceiling; v0.26.x — variation-compressed
   let _nonBossSpawned = 0;
+  // v0.29.706 — THE CAP NO LONGER TRUNCATES THE ROSTER. This loop used to walk
+  // the spawn entries IN ORDER and clamp each against the cap's remaining
+  // headroom, so once the early entries filled the cap every later entry
+  // spawned zero. Ossuary Sprawl queues 41 against a cap of 15: entering it
+  // produced bone wraiths and bone golems and nothing else — its lichkin,
+  // sepulchre hounds, shardlich and Ossuary Tyrant never appeared at all.
+  // Measured across the game, 14 maps starved at least one authored mob type
+  // this way, which is what made a later drip-spawned mob read as "a monster
+  // that isn't supposed to be in this map" (per user). The cap is now shared
+  // out across the whole roster: one seat per type first, then the remaining
+  // seats in proportion to each entry's authored count.
+  const _resolved = [];
   for (const s of spawns) {
     if (s.boss && game.bossDefeated[id]) continue;
     // v0.25.848 — Per-spawn `spawnChance` (0..1) for OCCASIONAL spawns.
@@ -54236,17 +54248,38 @@ function loadMap(id, entryX, entryY) {
       } else {
         count = Math.max(1, Math.round(s.count * (0.75 + Math.random() * 0.5) * _spawnMul));
       }
-      // Clamp this spawn entry against remaining headroom under the cap.
-      const _remaining = _mapCap - _nonBossSpawned;
-      if (_remaining <= 0) continue;
-      if (count > _remaining) count = _remaining;
     }
-    for (let i = 0; i < count; i++) {
+    _resolved.push({ s: s, count: count });
+  }
+  // Fit the non-boss entries under the cap by proportional share. Bosses are
+  // never scaled — they spawn exactly as authored.
+  const _nb = _resolved.filter((r) => !r.s.boss);
+  const _want = _nb.reduce((acc, r) => acc + r.count, 0);
+  if (_want > _mapCap && _nb.length) {
+    const _order = _nb.slice().sort((x, y) => y.count - x.count);   // widest weight seats first
+    const _seat = new Map();
+    let _left = _mapCap;
+    for (const r of _order) { if (_left > 0) { _seat.set(r, 1); _left--; } else _seat.set(r, 0); }
+    if (_left > 0) {
+      const _totW = _order.reduce((acc, r) => acc + Math.max(1, r.count), 0) || 1;
+      const _sh = _order.map((r) => {
+        const _exact = _left * Math.max(1, r.count) / _totW;
+        return { r: r, n: Math.floor(_exact), frac: _exact - Math.floor(_exact) };
+      });
+      let _used = _sh.reduce((acc, e) => acc + e.n, 0);
+      _sh.sort((x, y) => y.frac - x.frac);                          // largest remainder takes the leftovers
+      for (let i = 0; _used < _left && _sh.length; i++, _used++) _sh[i % _sh.length].n++;
+      for (const e of _sh) _seat.set(e.r, (_seat.get(e.r) || 0) + e.n);
+    }
+    for (const r of _nb) r.count = _seat.get(r) || 0;
+  }
+  for (const r of _resolved) {
+    for (let i = 0; i < r.count; i++) {
       // v0.25.543 — pass `platformLocked` through so sentry mobs spawn
       // anchored to a platform and can't walk/fall off it.
-      spawnFromMap(s.type, s.boss, { platformLocked: !!s.platformLocked });
+      spawnFromMap(r.s.type, r.s.boss, { platformLocked: !!r.s.platformLocked });
     }
-    if (!s.boss) _nonBossSpawned += count;
+    if (!r.s.boss) _nonBossSpawned += r.count;
   }
   // Entry safe zone — push non-boss monsters out of a ~240 px bubble around
   // the player's spawn so fresh arrivals (especially Lv 1 in Emerald Thicket)
@@ -54809,6 +54842,19 @@ function openChest(c) {
 }
 
 function spawnFromMap(type, boss, opts) {
+  // v0.29.706 — ROSTER GUARD. This is the ambient population path (map load +
+  // the respawn drip); both draw from the current map's spawn table, so it
+  // being impossible to spawn an unauthored type here was true only by
+  // construction. Per user "ensure random monsters do not spawn in maps they
+  // are not supposed to", it is now enforced rather than merely implied. Boss
+  // adds and scripted summons call spawnMonster directly and are untouched —
+  // a Tomb Keeper's hounds are its business, not the roster's. Fails open on
+  // maps with no spawn table at all.
+  const _roster = (game.mapData && Array.isArray(game.mapData.spawns)) ? game.mapData.spawns : null;
+  if (_roster && _roster.length && !_roster.some((r) => r && r.type === type)) {
+    try { console.warn('[Roster] refused an off-roster spawn: ' + type + ' in ' + game.currentMap); } catch (_e) {}
+    return;
+  }
   const m = monsterTypes[type];
   // v0.25.756 — Airborne spawn for flying mobs (e.g. razorgale). Skip the
   // platform / ground placement entirely so the mob starts mid-air; the
@@ -78607,9 +78653,23 @@ function killMonster(m) {
         const room = _cap - activeRegular;
         if (room <= 0) return;
         const bursts = Math.min(room, 1 + (Math.random() < 0.35 ? 1 : 0));
+        // v0.29.706 — WEIGHTED, AND RARE ELITES ARE NOT IN THE POOL. This picked a
+        // spawn entry uniformly at random, so it ignored `count` entirely (the
+        // live mix drifted to a flat one, nothing like the authored roster) and
+        // it re-rolled `spawnChance` elites as if they were common mobs. In a
+        // 120-round kill soak of Ossuary Sprawl the Ossuary Tyrant — authored
+        // `count:1, spawnChance:0.5`, meaning at most ONE, on half your visits —
+        // came out the most-seen monster in the map at 396 sightings. A gated
+        // elite is a once-per-visit event decided at load, so it is excluded
+        // here; everything else respawns in proportion to its authored count.
+        const _pool = mapD.spawns.filter((sp) => sp && !sp.boss && sp.spawnChance == null && sp.type);
+        if (!_pool.length) return;
+        const _poolW = _pool.reduce((acc, sp) => acc + Math.max(1, sp.count || 1), 0);
         for (let i = 0; i < bursts; i++) {
-          const sp = mapD.spawns[Math.floor(Math.random() * mapD.spawns.length)];
-          if (sp && !sp.boss) spawnFromMap(sp.type, false);
+          let _roll = Math.random() * _poolW;
+          let _sp = _pool[_pool.length - 1];
+          for (const _cand of _pool) { _roll -= Math.max(1, _cand.count || 1); if (_roll <= 0) { _sp = _cand; break; } }
+          spawnFromMap(_sp.type, false);
         }
       }
     }, (1200 + Math.random() * 1400) * _delayMul * _boostMul);
