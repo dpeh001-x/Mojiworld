@@ -9593,7 +9593,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.718';
+const GAME_VERSION = 'v0.29.719';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -14339,6 +14339,23 @@ function _qnavCycle() {
 // target 400 px straight up read as 0 away and said "arrived". Prefers the
 // LIVE npc record (game.npcs) over the MAPS index, because runtime-added NPCs
 // (Echo Keeper, quest spawns) exist only in the live list.
+// v0.29.717 — where the quest pin sits when its target declares no height of
+// its own. A portal written as {x, dest, name} — 277 of the game's 318 portal
+// entries — stands on the map's ground band, so the ground band is the honest
+// answer. Deliberately does NOT look at the player: reading player.y here is
+// the whole bug this replaces (per user, "the quest red pin should not move to
+// follow my character's Y axis"). Prefers the ground slab spanning x, then any
+// ground slab, then the engine's standard 480 ground line.
+function _qnavAnchorY(x) {
+  const plats = (game && game.mapData && game.mapData.platforms) || [];
+  let anyGround = null;
+  for (const p of plats) {
+    if (!p || p.type !== 'ground') continue;
+    if (anyGround == null) anyGround = p.y;
+    if (Number.isFinite(x) && x >= p.x && x <= p.x + p.w) return p.y;
+  }
+  return (anyGround != null) ? anyGround : 480;
+}
 function _qnavHeading(d) {
   if (!d) return null;
   const here = game.currentMap;
@@ -14356,11 +14373,13 @@ function _qnavHeading(d) {
       const dist = Math.abs((m.x || 0) - (player.x || 0));
       if (dist < bd) { bd = dist; best = m; }
     }
-    return best ? { x: best.x, y: Number.isFinite(best.y) ? best.y : (player.y || 0) } : null;
+    return best ? { x: best.x, y: Number.isFinite(best.y) ? best.y : _qnavAnchorY(best.x) } : null;   // v0.29.717 — ground, not the player
   }
   const r = _qnavRoute(here, d.map);
   const po = r && r.next && r.next.portal;
-  return (po && Number.isFinite(po.x)) ? { x: po.x, y: Number.isFinite(po.y) ? po.y : (player.y || 0) } : null;
+  // v0.29.717 — was `(player.y || 0)`, so a portal with no declared y put the pin
+  // at the PLAYER's height and it rode up and down with every jump.
+  return (po && Number.isFinite(po.x)) ? { x: po.x, y: Number.isFinite(po.y) ? po.y : _qnavAnchorY(po.x) } : null;
 }
 // Kept: the x-only form other callers and tests already use.
 function _qnavHeadingX(d) { const h = _qnavHeading(d); return h ? h.x : null; }
@@ -14694,7 +14713,9 @@ function _qnavDrawCompass() {
     const _qnavPinY = (_hh && Number.isFinite(_hh.y)) ? _hh.y : null;
     const py = (_qnavPinY != null)
       ? (_qnavPinY - camY - 34)                                     // just above the target
-      : ((player && Number.isFinite(player.y)) ? (player.y - camY - 90) : (H * 0.45));
+      // v0.29.717 — last-resort height. Was the player's own y, which made the pin
+      // track the character even when the heading had resolved nothing at all.
+      : (_qnavAnchorY(tx) - camY - 34);
     if (sx > 20 && sx < W - 20) {
       // on screen — drop a pin on it
       ctx.font = '22px system-ui, sans-serif';
