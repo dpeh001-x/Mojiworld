@@ -9458,7 +9458,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.687';
+const GAME_VERSION = 'v0.29.688';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16200,7 +16200,7 @@ const SKILLS = {
   sage_meteorshower:  { name:'Meteor Shower',      icon:'📜', cls:'mage', job:'archmage', master:'sage',         slot:'x', mp:55, cd:20000, desc:'5 meteors rain over an area.' },
   elementalist_cascade:{ name:'Prismatic Cascade', icon:'🌈', cls:'mage', job:'archmage', master:'elementalist', slot:'x', mp:50, cd:15000, desc:'Four elements in amplifying sequence.' },
   lich_harvest:       { name:'Soul Vortex',        icon:'👹', cls:'mage', job:'warlock',  master:'lich',         slot:'x', mp:40, cd:45000, desc:'Open a 30s vortex pool that drags enemies in and drains MASSIVE life damage (1.8× ATK/sec over 30s).' },
-  hexmaster_grandhex: { name:'Grand Hex',          icon:'🧿', cls:'mage', job:'warlock',  master:'hexmaster',    slot:'x', mp:35, cd:24000, desc:'Freeze non-boss enemies 1.2s, blast them with a curse burst (1.9× ATK), then a heavy poison DOT (0.75× ATK/tick).' },
+  hexmaster_grandhex: { name:'Grand Hex',          icon:'🧿', cls:'mage', job:'warlock',  master:'hexmaster',    slot:'x', mp:35, cd:24000, desc:'Hex everything inside the rune ring: 1.2s freeze (non-boss), a 1.2× ATK burst, and a stacking curse DOT (0.3× ATK/tick per stack). 5 stacks RUPTURE for 4× ATK, and a hexed foe\'s curse jumps to its nearest neighbour when it dies.' },
   // Archer path
   marksman_oneshot:   { name:'One Shot One Kill',  icon:'🎯', cls:'archer', job:'sniper', master:'marksman',    slot:'x', mp:50, cd:22000, desc:'Guaranteed crit piercing rail. Pure damage, no random kill chance.' },
   ballista_volley:    { name:'Siege Volley',       icon:'🛡️', cls:'archer', job:'sniper', master:'ballista',    slot:'x', mp:25, cd:23000, desc:'One press unleashes an 8 s piercing arrow stream. Drains MP while active — no holding needed.' },
@@ -17191,6 +17191,58 @@ function _doomApplyWinBonus() {
   // mutating it in place would bake the boosted threshold into the table for
   // every later cast, permanently ratcheting upward.
   if (w.execute) w.execute = Object.assign({}, w.execute, { frac: (w.execute.frac || 0) + b.frac });
+}
+// ============================ GRAND HEX (v0.29.688) ============================
+// Revamp per user: "the AOE appears a little buggy — revamp with cleaner
+// mechanics." What was actually wrong, in order of how buggy it looked:
+//   1. the rune drew ~500px at the cast point but the effect hit THE ENTIRE
+//      MAP — what you saw was never what it did;
+//   2. the poison rolled a 75% chance, so a quarter of targets visibly
+//      shrugged the curse off at random;
+//   3. the cast loop iterated game.monsters directly while its own burst
+//      could kill — killMonster splices mid-loop, so the next monster in the
+//      array silently skipped the hex whenever something died;
+//   4. the hexmaster's own signature line ("curses spread; 5 stacks = massive
+//      damage") described a stack mechanic that had never been built.
+// The revamp makes the drawn ring the REAL hitbox, removes every dice roll,
+// and builds the signature: stacking HEX, rupture at 5, spread on death.
+const LX_GRANDHEX_RADIUS = 520;         // the ring you see is the area you get
+const LX_GRANDHEX_STACK_MS = 10000;     // hex lifetime, refreshed per stack
+const LX_GRANDHEX_RUPTURE_AT = 5;       // the signature's "5 stacks"
+const LX_GRANDHEX_RUPTURE_MUL = 4.0;    // ...and its "massive damage"
+const LX_GRANDHEX_DOT_PER_STACK = 0.30; // ATK per poison tick per stack
+const LX_GRANDHEX_BURST_MUL = 1.2;      // instant burst (was 1.9 — stacks pay the rest)
+const LX_GRANDHEX_SPREAD_RANGE = 280;   // death-jump reach
+const LX_GRANDHEX_FREEZE_MS = 1200;     // unchanged, non-boss, now radius-only
+// Add n hex stacks. Returns the resulting count; returns LX_GRANDHEX_RUPTURE_AT
+// when the addition tipped the mob over and the rupture fired (stacks consumed).
+function _hexAdd(m, n) {
+  if (!m || m.currentHp <= 0 || !n) return 0;
+  const now = game.time || 0;
+  const curSt = (now <= (m._hexUntil || 0)) ? (m._hexStacks | 0) : 0;
+  const next = curSt + n;
+  if (next >= LX_GRANDHEX_RUPTURE_AT) {
+    m._hexStacks = 0; m._hexUntil = 0;
+    const _c = (typeof rollCrit === 'function') && rollCrit();
+    const dmg = Math.floor(getAtk() * LX_GRANDHEX_RUPTURE_MUL * (_c && typeof getCritDmg === 'function' ? getCritDmg() : 1));
+    if (game.damageNumbers) {
+      game.damageNumbers.push({ x: m.x + m.w / 2 - 22, y: m.y - 24, vy: -1.8,
+        text: 'RUPTURE', life: 46, color: '#cc66ff', size: 16 });
+    }
+    for (let i = 0; i < 10; i++) {
+      game.particles.push({ x: m.x + m.w / 2, y: m.y + m.h / 2,
+        vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5 - 1,
+        life: 26, color: i % 2 ? '#cc66ff' : '#88ff44', size: 3 });
+    }
+    if (typeof hitMonster === 'function') hitMonster(m, dmg, _c, 'grandhexRupture');
+    return LX_GRANDHEX_RUPTURE_AT;
+  }
+  m._hexStacks = next;
+  m._hexUntil = now + _msFrames(LX_GRANDHEX_STACK_MS);
+  // DOT scales with the pile. burnDmg only ticks while the poison status is
+  // live, which every hex application (cast or spread) sets alongside this.
+  m.burnDmg = Math.max(3, Math.floor(getAtk() * LX_GRANDHEX_DOT_PER_STACK * next));
+  return next;
 }
 // A short arc of sparks between the origin and a chained target.
 function _lxChainSpark(cx, cy, t) {
@@ -66042,52 +66094,41 @@ const SKILL_FNS = {
     flash(0.55);   },
 
   hexmaster_grandhex: () => {
-    // GRAND HEX — every living enemy on the map is frozen 2s and afflicted
-    // with a slow poison DOT that ticks for 8 seconds.
-    let count = 0;
-    for (const m of game.monsters) {
-      if (m.currentHp <= 0) continue;
-      // v0.26.x balance audit: freeze is now BOSS-IMMUNE and 2000->1200ms — a
-      // map-wide 2s hard-CC with no boss exception trivialised every add/pack
-      // (and chip-froze bosses). The poison DoT below is unchanged.
-      if (!m.isBoss && !m.isMiniBoss && !m.boss) m.freezeTimer = Math.max(m.freezeTimer || 0, 1200);
-      const _hexLanded = _applyMobStatus(m, 'poison', 8000, { chance: 75 });
-      // v0.25.116 — Grand Hex DOT bumped 0.08×atk → 0.20×atk per tick.
-      // Ticks every ~40 frames over the 8 s duration → ~12 ticks total.
-      // Old ceiling: ~96% of atk total. New: ~240%. Properly ult-tier.
-      if (_hexLanded) m.burnDmg = Math.max(3, Math.floor(getAtk() * 0.75));   // v0.26.455 - DOT buff (was 0.35x); v0.26.1026 — only set when the poison actually landed (a resisted roll stranded a huge burnDmg later burns inherited via Math.max)
-      // v0.26.455 - Grand Hex now lands an instant curse BURST (the master's promised
-      // 'massive damage'), not just freeze + DoT. Map-wide, on top of the poison.
-      if (typeof hitMonster === 'function') { const _c = (typeof rollCrit === 'function' && rollCrit()); const _cd = (_c && typeof getCritDmg === 'function') ? getCritDmg() : 1; hitMonster(m, Math.floor(getAtk() * 1.9 * _cd), _c, 'magic'); }   // v0.26.1033 — apply crit dmg (was flag-only)
+    // GRAND HEX (v0.29.688 revamp) — the ring IS the hitbox, everything inside is
+    // hexed deterministically, and the class signature finally exists: stacks,
+    // rupture at 5, spread on death. See the constants block for the story.
+    const px = player.x + player.w / 2, py = player.y + player.h / 2;
+    const r2 = LX_GRANDHEX_RADIUS * LX_GRANDHEX_RADIUS;
+    let count = 0, ruptures = 0;
+    // Snapshot: the burst can kill, killMonster splices, and iterating the
+    // live array made the NEXT monster skip its hex — the old loop's bug.
+    for (const m of [...game.monsters]) {
+      if (!m || m.currentHp <= 0) continue;
+      const dx = m.x + m.w / 2 - px, dy = m.y + m.h / 2 - py;
+      if (dx * dx + dy * dy > r2) continue;
+      if (!m.isBoss && !m.isMiniBoss && !m.boss) m.freezeTimer = Math.max(m.freezeTimer || 0, LX_GRANDHEX_FREEZE_MS);
+      _applyMobStatus(m, 'poison', LX_GRANDHEX_STACK_MS, { chance: 100 });   // no dice — it always lands
+      {
+        const _c = (typeof rollCrit === 'function') && rollCrit();
+        const _dmg = Math.floor(getAtk() * LX_GRANDHEX_BURST_MUL * (_c && typeof getCritDmg === 'function' ? getCritDmg() : 1));
+        if (typeof hitMonster === 'function') hitMonster(m, _dmg, _c, 'grandhex');
+      }
+      if (m.currentHp > 0 && _hexAdd(m, 1) === LX_GRANDHEX_RUPTURE_AT) ruptures++;
       count++;
-      // Poison aura rise
       for (let i = 0; i < 4; i++) {
         game.particles.push({
-          x: m.x + m.w/2 + (Math.random() - 0.5) * m.w,
+          x: m.x + m.w / 2 + (Math.random() - 0.5) * m.w,
           y: m.y + m.h, vx: (Math.random() - 0.5) * 0.6,
           vy: -0.5 - Math.random(),
           life: 30, color: i % 2 ? '#88ff44' : '#aa66cc', size: 2
         });
       }
     }
-    showToast(`GRAND HEX x${count}`, 'legendary');
-    // v0.25.238 — ultra grand hexagram-compass-rune sprite at the cast
-    // point. Slow rotation matches the hex curse spreading across the map.
-    // v0.26.000 — Per user "G sprite expands bigger". Size 320 → 500
-    // (+56%). The Grand Hex is a map-wide curse — every living enemy
-    // gets frozen + DoT — so the rune covering most of the visible
-    // arena reads more accurately as "the hex IS the map" rather than
-    // a localised cast circle. Spin preserved (Math.PI * 0.6 = ~108°
-    // sweep across the lifetime) to keep the "curse spreading"
-    // gesture intact.
-    spawnSpriteBurst(player.x + player.w/2, player.y + player.h/2, 'hexmaster_grandhex',
-      { size: 500, life: 70, spin: Math.PI * 0.6 });
-    // v0.25.999 — Per user "remove the addition smoke sprite component
-    // of hexmaster F V G sprites". Same fix as the v-skill above: the
-    // spawnSmoothExplosion call routed its purple core (#aa66cc)
-    // through the rogue palette bucket → painted smoke_puff on top of
-    // the grandhex rune. Removed entirely so only the main hexagram
-    // compass rune renders.
+    showToast('GRAND HEX ×' + count + (ruptures ? ' — ' + ruptures + ' RUPTURE' + (ruptures > 1 ? 'S' : '') : ''), 'legendary');
+    // The rune is drawn at the true diameter, so the visual and the hitbox are
+    // the same circle — the mismatch was complaint #1.
+    spawnSpriteBurst(px, py, 'hexmaster_grandhex',
+      { size: LX_GRANDHEX_RADIUS * 2, life: 70, spin: Math.PI * 0.6 });
     flash(0.55); addHitStop(120);
   },
 
@@ -77031,6 +77072,30 @@ function killMonster(m) {
   }
   const idx = game.monsters.indexOf(m);
   if (idx < 0) return;
+  // v0.29.688 — GRAND HEX: curses SPREAD. A hexed foe's stacks jump to its
+  // nearest living neighbour when it dies (and can rupture there if the pile
+  // tips over 5). This is the half of the class signature that never existed.
+  if (m._hexStacks > 0 && (game.time || 0) <= (m._hexUntil || 0) && typeof _hexAdd === 'function') {
+    let _hxBest = null, _hxBd = LX_GRANDHEX_SPREAD_RANGE * LX_GRANDHEX_SPREAD_RANGE;
+    const _hxCx = m.x + m.w / 2, _hxCy = m.y + m.h / 2;
+    for (const o of game.monsters) {
+      if (o === m || !o || o.currentHp <= 0) continue;
+      const _dx = o.x + o.w / 2 - _hxCx, _dy = o.y + o.h / 2 - _hxCy;
+      const _d = _dx * _dx + _dy * _dy;
+      if (_d < _hxBd) { _hxBd = _d; _hxBest = o; }
+    }
+    if (_hxBest) {
+      _applyMobStatus(_hxBest, 'poison', LX_GRANDHEX_STACK_MS, { chance: 100 });
+      _hexAdd(_hxBest, m._hexStacks | 0);
+      for (let i = 0; i < 6; i++) {
+        game.particles.push({ x: _hxCx, y: _hxCy,
+          vx: (_hxBest.x + _hxBest.w / 2 - _hxCx) / 22 + (Math.random() - 0.5),
+          vy: (_hxBest.y + _hxBest.h / 2 - _hxCy) / 22 - Math.random(),
+          life: 22, color: '#aa66cc', size: 2 });
+      }
+    }
+    m._hexStacks = 0; m._hexUntil = 0;
+  }
   // v0.29.344 — DEATH BLOOM (action boon). The corpse detonates, scaled off
   // the SLAIN enemy's max HP rather than your ATK, so it stays a clear-speed
   // tool that reads the same at every level instead of scaling with your gear
@@ -109940,6 +110005,17 @@ function drawMonster(m) {
       ctx.textAlign = 'center';
       ctx.fillStyle = '#ff4455';
       ctx.fillText('💀' + m._doomStacks, sx + m.w / 2, sy - 12);
+      ctx.restore();
+    } else if (m._hexStacks > 0 && (game.time || 0) <= (m._hexUntil || 0)) {
+      // v0.29.688 — GRAND HEX pips, same nameplate slot. else-if: doom and hex
+      // belong to different classes, so they never genuinely coexist in solo;
+      // if a co-op edge ever lands both, the skull wins rather than the two
+      // labels overprinting into mush.
+      ctx.save();
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#cc66ff';
+      ctx.fillText('🧿' + m._hexStacks, sx + m.w / 2, sy - 12);
       ctx.restore();
     }
     // v0.29.414 — Chip-damage ghost segment (mirrors the player HUD ghost).
