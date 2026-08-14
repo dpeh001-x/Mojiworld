@@ -18,19 +18,17 @@ const argv = process.argv.slice(2);
 const has = f => argv.includes(f);
 
 const PROMPT =
-  // v2 (per user: "redo the background again, make it cuter, less opacity") —
-  // the jagged crimson shards leaned too hard Persona; this roll leans
-  // MapleStory-cosy with only a soft golden comic accent.
-  'Adorable cozy video-game PAUSE MENU panel background artwork, MapleStory storybook fantasy with a ' +
-  'gentle Persona-style comic accent. FULL-BLEED painting filling the entire square canvas edge to edge — ' +
-  'no transparent areas, no border frame, no text, no letters, no logo, no characters, no UI widgets. ' +
-  'Dreamy deep-violet and plum night sky full of CUTE tiny things: soft twinkling star sparkles, small ' +
-  'plump pastel clouds, gentle floating glow-motes and little bokeh fairy lights. Soft rounded GOLD ' +
-  'ribbon swooshes with smooth comic outlines curling in from the TOP-LEFT and BOTTOM-RIGHT corners only ' +
-  '— rounded and friendly, NOT jagged, with a light halftone dot texture. Along the very bottom a tiny ' +
-  'darker-violet silhouette of cozy mushroom houses and floating islands. The CENTER stays clean, dark ' +
-  'and calm — smooth dark-violet with a soft radial glow — because readable menu text sits on top of it. ' +
-  'Warm, cute, inviting; pastel gold, lavender and plum palette.';
+  // v3 (per user: "can still be more artistic, redo with the persona style") —
+  // full Persona graphic-design energy, composed rather than chaotic.
+  'Striking ARTISTIC video-game PAUSE MENU background, Persona 5 inspired graphic design poster. ' +
+  'FULL-BLEED filling the entire square canvas edge to edge — no transparent areas, no border frame, ' +
+  'no text, no letters, no logo, no characters, no UI widgets. Dramatic DIAGONAL composition: bold ' +
+  'jagged crimson-and-black star-shard ribbons with thin gold trim sweeping in from the TOP-LEFT corner ' +
+  'and BOTTOM-RIGHT corner across a deep midnight-violet field. Layered halftone dot textures, fine ink ' +
+  'splatter accents, a few scattered white star sparks and one elegant thin gold arc line. Sharp clean ' +
+  'vector-comic shapes with confident black outlines, elegant asymmetry, high fashion-poster energy, ' +
+  'premium and stylish. The CENTER stays a clean smooth dark-violet panel with a soft radial glow — ' +
+  'readable menu text sits on top of it. Rich crimson, black, antique gold and deep violet palette.';
 
 const exists = async p => { try { await access(p); return true; } catch { return false; } };
 const fetchBuf = async url => { const r = await fetch(url, { signal: AbortSignal.timeout(90000) }); if (!r.ok) throw new Error('fetch ' + r.status); return Buffer.from(await r.arrayBuffer()); };
