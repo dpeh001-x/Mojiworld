@@ -9505,7 +9505,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.692';
+const GAME_VERSION = 'v0.29.693';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10849,6 +10849,7 @@ const LX_BULT_PROJ = (() => {
   const files = {
     bult_warlord:      'p_ult_warlord.webp',      // War of Banners — vermilion banner shockwave
     bult_doombringer:  'p_ult_doombringer.webp',  // Calamity Incarnate — crimson blade-wave crescent
+    bult_hexorb:       'p_ult_hexorb.webp',       // v0.29.693 Pandemic Hex — void orb, hex runes + poison wisps (ludo.ai)
     bult_dragoon:      'p_ult_dragoon.webp',       // Skyfall Dominion — descending dragon-lance
     bult_nightreaper:  'p_ult_nightreaper.webp',   // Bloodmoon Domain — blood-red soul scythe
     bult_phantom:      'p_ult_phantom.webp',       // Voidwalk — void shuriken
@@ -16268,7 +16269,7 @@ const SKILLS = {
   sage_ult:           { name:'Meteor Sigil',            icon:'☄️', cls:'mage',    job:'archmage',  master:'sage',        slot:'b', mp:92,  cd:62000, desc:'Call down a colossal comet that links impact-sigils with a fire-web.' },
   elementalist_ult:   { name:'Elemental Apotheosis',    icon:'🌀', cls:'mage',    job:'archmage',  master:'elementalist',slot:'b', mp:100, cd:66000, desc:'Ascend to elemental form and unleash a four-element Convergence blast.' },
   lich_ult:           { name:'Necrotic Ascendance',     icon:'☠️', cls:'mage',    job:'warlock',   master:'lich',        slot:'b', mp:92,  cd:72000, desc:'Become a walking soul maelstrom for 6s - drag foes in, drain them twice a second (heals you); every soul harvested feeds the final collapse (up to 9x ATK).' },
-  hexmaster_ult:      { name:'Pandemic Hex',            icon:'🦠', cls:'mage',    job:'warlock',   master:'hexmaster',   slot:'b', mp:85,  cd:65000, desc:'Unleash a contagious curse that weakens foes and erupts across the field.' },
+  hexmaster_ult:      { name:'Pandemic Hex',            icon:'🦠', cls:'mage',    job:'warlock',   master:'hexmaster',   slot:'b', mp:85,  cd:65000, desc:'Unleash a contagious curse: freeze + weaken, then a 3s doom that erupts across the field — and summon 10 dark hex orbs that hunt, burst, and afflict SUPER POISON (0.9× ATK/tick).' },
   archbishop_ult:     { name:'Apotheosis',              icon:'⚜️', cls:'mage',    job:'priest',    master:'archbishop',  slot:'b', mp:100, cd:72000, desc:'Ascend: heal, cannot die, and a pillar of judgment sweeps the field.' },
   marksman_ult:       { name:'Deadeye Protocol',        icon:'🔭', cls:'archer',  job:'sniper',    master:'marksman',    slot:'b', mp:65,  cd:58000, desc:'Fire simultaneous guaranteed-crit piercing rounds to every nearby foe.' },
   ballista_ult:       { name:'War Machine',             icon:'🏹', cls:'archer',  job:'sniper',    master:'ballista',    slot:'b', mp:70,  cd:62000, desc:'Deploy 1 stationary siege turret that auto-fires homing arrows at nearby foes for ~46 s.' },
@@ -17263,6 +17264,13 @@ const LX_GRANDHEX_DOT_PER_STACK = 0.30; // ATK per poison tick per stack
 const LX_GRANDHEX_BURST_MUL = 1.2;      // instant burst (was 1.9 — stacks pay the rest)
 const LX_GRANDHEX_SPREAD_RANGE = 280;   // death-jump reach
 const LX_GRANDHEX_FREEZE_MS = 1200;     // unchanged, non-boss, now radius-only
+// v0.29.693 — PANDEMIC HEX buff (per user: "add in a super poison element ... and
+// make it summon 10 dark orbs that dishes damage and poisons").
+const LX_PANDEMIC_ORBS = 10;            // the asked-for count, exactly
+const LX_PANDEMIC_ORB_MUL = 1.4;        // impact damage per orb (crusader's run 1.6)
+const LX_PANDEMIC_ORB_AOE = 80;         // small burst on hit, like judgement orbs
+const LX_SUPER_POISON_MUL = 0.9;        // ATK per tick — 3x a single grand-hex stack
+const LX_SUPER_POISON_MS = 12000;
 // Add n hex stacks. Returns the resulting count; returns LX_GRANDHEX_RUPTURE_AT
 // when the addition tipped the mob over and the rupture fired (stacks consumed).
 function _hexAdd(m, n) {
@@ -67014,11 +67022,36 @@ const SKILL_FNS = {
   hexmaster_ult: () => {
     // v0.26.x — mass curse (freeze + weaken) → 3s doom timer → field-wide detonation.
     spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'hexmaster_ult', { size: 290, life: 100 });
-    showToast('PANDEMIC HEX — doom in 3s', 'legendary'); flash(0.55); addShake(8);
+    showToast('PANDEMIC HEX — doom in 3s · 10 orbs loosed', 'legendary'); flash(0.55); addShake(8);
     const cx = player.x + player.w / 2, cy = player.y + player.h / 2;
     const near = () => game.monsters.filter(m => m.currentHp > 0 && Math.abs((m.x + m.w / 2) - cx) < 1000 && Math.abs((m.y + m.h / 2) - cy) < 560);
     for (const m of near()) { if (!m.boss) m.freezeTimer = Math.max(m.freezeTimer || 0, 900); }
     performAround(540, 2.2, { color: '#aa33cc', kb: 4 });
+    // v0.29.693 — TEN DARK HEX ORBS. Staggered homing strikes on the crusader
+    // judgement-orb chassis: each carries impact damage, a small burst, and
+    // SUPER POISON (applied at the projectile hit site). Homing retargets the
+    // nearest four alive, so a pack shares the swarm instead of one mob
+    // eating all ten.
+    for (let _oi = 0; _oi < LX_PANDEMIC_ORBS; _oi++) {
+      scheduleSkillTimer(() => {
+        if (player.hp <= 0) return;
+        const _pcx = player.x + player.w / 2, _pcy = player.y + player.h / 2;
+        const _alive = game.monsters.filter(m => m && m.currentHp > 0);
+        _alive.sort((a, b) => (Math.abs(a.x - _pcx) - Math.abs(b.x - _pcx)));
+        const _tg = _alive.length ? _alive[_oi % Math.min(_alive.length, 4)] : null;
+        const _ang = (_oi / LX_PANDEMIC_ORBS) * Math.PI * 2;
+        game.projectiles.push({
+          x: _pcx + Math.cos(_ang) * 36, y: _pcy + Math.sin(_ang) * 28 - 20,
+          vx: Math.cos(_ang) * 8, vy: Math.sin(_ang) * 8 - 2,
+          w: 28, h: 28, life: 120,
+          damage: getAtk() * LX_PANDEMIC_ORB_MUL + 10,
+          owner: 'player', skill: 'hexorb', homing: _tg,
+          aoeOnHit: LX_PANDEMIC_ORB_AOE, noGravity: true, _msHandled: true,
+          superPoison: 1,
+          bspr: 'bult_hexorb', color: '#aa33ff',
+        });
+      }, 250 + _oi * 100);
+    }
     for (let i = 1; i <= 3; i++) scheduleSkillTimer(() => { if (player.hp <= 0) return; spawnSpriteBurst(cx, cy, 'hexmaster_ult', { size: 520, life: 30 }); performAround(540, 1.4, { color: '#cc55ee', kb: 2 }); }, i * 750);
     scheduleSkillTimer(() => { if (player.hp <= 0) return; spawnSpriteBurst(cx, cy, 'hexmaster_ult', { size: 600, life: 90 }); performAround(560, 9.0, { color: '#dd66ff', kb: 16 }); flash(0.85); addShake(15); addHitStop(120); }, 3000);
   },
@@ -79117,7 +79150,19 @@ function updateProjectiles(dt) {
             flash(0.4); addShake(8);
           }
           hitMonster(m, dmg, crit, p.skill || 'bolt');
-          if (p.doomBrand && typeof _doomBrandAdd === 'function') _doomBrandAdd(m, p.doomBrand);   // v0.29.684
+          if (p.doomBrand && typeof _doomBrandAdd === 'function') _doomBrandAdd(m, p.doomBrand);
+          // v0.29.693 — SUPER POISON (Pandemic Hex orbs). A hotter tier of the
+          // curse DOT: always lands, 0.9x ATK per tick. Math.max so it never
+          // downgrades a grand-hex pile that happens to tick harder already.
+          if (p.superPoison && typeof _applyMobStatus === 'function' && m.currentHp > 0) {
+            _applyMobStatus(m, 'poison', LX_SUPER_POISON_MS, { chance: 100 });
+            const _spNew = Math.max(3, Math.floor(getAtk() * LX_SUPER_POISON_MUL));
+            if (_spNew > (m.burnDmg | 0) && game.damageNumbers) {
+              game.damageNumbers.push({ x: m.x + m.w / 2 - 30, y: m.y - 24, vy: -1.6,
+                text: 'SUPER POISON', life: 40, color: '#66ff44', size: 12 });
+            }
+            m.burnDmg = Math.max(m.burnDmg | 0, _spNew);
+          }   // v0.29.684
           hitIds.add(m);
           // Nightreaper ricochet — bounce to the next nearest foe.
           // v0.25.247 (C3) — also exclude monsters already hit via
