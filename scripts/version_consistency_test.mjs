@@ -56,9 +56,16 @@ ok('the animator build badge is present', !!badge, badge);
 if (wantBadge) {
   // The working tree may hold an un-committed animator edit; in that case the
   // badge should already carry the CURRENT version instead.
-  const dirty = (() => {
-    try { return execFileSync('git', ['-C', ROOT, 'status', '--porcelain', '--', 'monster_animator.html'], { encoding: 'utf8' }).trim().length > 0; }
-    catch (e) { return false; }
+  // Only the WORKING TREE can hold an un-committed animator edit. When reading
+  // from a git ref there is nothing uncommitted by definition - and consulting
+  // `git status` there produced a false failure, because line-ending
+  // normalisation makes an untouched file look modified.
+  const dirty = REF ? false : (() => {
+    try {
+      const head = execFileSync('git', ['-C', ROOT, 'show', 'HEAD:monster_animator.html'], { maxBuffer: 1 << 30 }).toString('utf8');
+      const norm = (t) => t.replace(/\r\n/g, '\n');
+      return norm(head) !== norm(anim);      // compare CONTENT, not porcelain status
+    } catch (e) { return false; }
   })();
   const want = dirty ? GV : wantBadge;
   ok('the animator badge matches the game version at its last change',
