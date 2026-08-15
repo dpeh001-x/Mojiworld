@@ -9593,7 +9593,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.728';
+const GAME_VERSION = 'v0.29.729';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -38470,8 +38470,37 @@ function _lxPadMenuNav(root, pad) {
   const isRange = (el) => el && el.tagName === 'INPUT' && el.type === 'range';
   const moved = _repeat('_v', (down(13) || sDn) ? 1 : (down(12) || sUp) ? -1 : 0);
   const lateral = _repeat('_l', down(15) ? 1 : down(14) ? -1 : 0);
-  if (moved) idx = clamp(idx + moved);
-  else if (lateral && !isRange(cur())) idx = clamp(idx + lateral);
+  // v0.29.729 — the virtual keyboard is a GRID, not a list. Flat ±1 made "down"
+  // step to the next key in the same row — i.e. right (per user: "when i
+  // press down it does not go downwards it goes to the right"). On pad-vk,
+  // up/down hop a whole row and land on the key whose horizontal centre is
+  // nearest the one being left; vertical wraps, left/right keep the flat walk.
+  let _gridHop = false;
+  if (moved && root.id === 'pad-vk') {
+    const _rows = [];
+    for (const _re of root.querySelectorAll('.vk-row')) {
+      const _rb = [];
+      for (const _b of _re.querySelectorAll('button')) if (els.indexOf(_b) >= 0) _rb.push(_b);
+      if (_rb.length) _rows.push(_rb);
+    }
+    const _curEl = els[clamp(idx)];
+    const _ri = _rows.findIndex((r) => r.indexOf(_curEl) >= 0);
+    if (_ri >= 0 && _rows.length > 1) {
+      const _cr = _curEl.getBoundingClientRect();
+      const _cx = _cr.left + _cr.width / 2;
+      const _tr = _rows[(_ri + moved + _rows.length) % _rows.length];
+      let _best = _tr[0], _bd = Infinity;
+      for (const _b of _tr) {
+        const _r2 = _b.getBoundingClientRect();
+        const _d = Math.abs(_r2.left + _r2.width / 2 - _cx);
+        if (_d < _bd) { _bd = _d; _best = _b; }
+      }
+      idx = els.indexOf(_best);
+      _gridHop = true;
+    }
+  }
+  if (moved && !_gridHop) idx = clamp(idx + moved);
+  else if (!moved && lateral && !isRange(cur())) idx = clamp(idx + lateral);
   root._padIdx = idx;
   const el = cur();
   try {
@@ -38491,6 +38520,12 @@ function _lxPadMenuNav(root, pad) {
     const step = Number(el.step) || 1;
     el.value = Number(el.value) + lateral * step;
     try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+  }
+  // v0.29.729 — console-keyboard shortcuts: Ⓧ backspace, Ⓨ space. Fixing a
+  // typo no longer means steering the ring all the way to ⌫.
+  if (root.id === 'pad-vk' && typeof _lxPadVK !== 'undefined') {
+    if (edge(2)) { try { _lxPadVK.press('⌫'); } catch (e) {} }
+    if (edge(3)) { try { _lxPadVK.press('␣'); } catch (e) {} }
   }
   if (edge(0)) {
     // v0.29.668 — a click cannot type. A text field under pad focus opens the
@@ -38609,7 +38644,7 @@ const _lxPadVK = {
     let html = '<div style="color:#cdd6ff;font-size:15px;min-height:22px;padding:2px 6px 8px;border-bottom:1px solid #333c58;margin-bottom:8px;letter-spacing:1px;">'
       + (this.buf ? this.buf.replace(/&/g, '&amp;').replace(/</g, '&lt;') : '<span style="opacity:0.4">type with the pad…</span>') + '</div>';
     for (const row of rows) {
-      html += '<div style="display:flex;gap:5px;justify-content:center;margin-top:5px;">';
+      html += '<div class="vk-row" style="display:flex;gap:5px;justify-content:center;margin-top:5px;">';   // v0.29.729 — .vk-row: the nav's grid hop resolves rows by this class
       for (const k of row) {
         const wide = k === '␣' ? 'min-width:120px;' : k === '✓' || k === '✕' || k === '⌫' || k === '⇧' ? 'min-width:52px;' : 'min-width:34px;';
         const hot = k === '✓' ? 'background:#2c5a34;border-color:#59b06a;' : k === '✕' ? 'background:#5a2c2c;border-color:#b05959;' : '';
@@ -38620,7 +38655,7 @@ const _lxPadVK = {
       }
       html += '</div>';
     }
-    html += '<div style="color:#8892b8;font-size:11px;text-align:center;margin-top:8px;">Ⓐ press · Ⓑ done · ✓ confirm · ✕ cancel</div>';
+    html += '<div style="color:#8892b8;font-size:11px;text-align:center;margin-top:8px;">Ⓐ press · Ⓧ erase · Ⓨ space · Ⓑ done</div>';
     r.innerHTML = html;
     r._padIdx = r._padIdx || 0;
   },
