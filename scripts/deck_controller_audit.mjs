@@ -31,7 +31,7 @@ const SURFACES = [
   { id: 'class-select-modal', blocking: true,  why: 'character creation' },
   { id: 'confirm-modal',      blocking: true,  why: 'yes/no confirms' },
   { id: 'sage-blessing-modal',blocking: true,  why: 'blessing pick' },
-  { id: 'story-beat-overlay', blocking: true,  why: 'story beats / prologue cards — plain stanzas advance via the A-clicks-surface branch, choice stanzas via button nav (v0.29.734+)' },
+  { id: 'story-beat-overlay', blocking: true,  emptyOk: true, why: 'story beats / prologue cards — plain stanzas advance via the A-clicks-surface branch, choice stanzas via button nav (v0.29.734+)' },
   { id: 'char-studio-overlay',blocking: false, why: 'character studio (wardrobe editor)' },
   { id: 'settings-modal-bg',  blocking: false, why: 'settings + quit' },
   { id: 'inventory-modal',    blocking: false, why: 'inventory' },
@@ -86,7 +86,7 @@ const rows = await page.evaluate((SURFACES) => {
     el.style.display = 'flex';
     el.classList.add('on', 'shown', 'open');
     let root = null;
-    try { root = _lxPadModalRoot(); } catch (e) {}
+    try { _lxPadRootAt = -1; root = _lxPadModalRoot(); } catch (e) {}   // bust the 100ms memo: this loop runs faster than the cache expires
     const focusables = [...el.querySelectorAll(SEL)].filter((n) => {
       if (n.disabled) return false;
       const r = n.getBoundingClientRect();
@@ -139,7 +139,7 @@ const live = await page.evaluate(() => {
       return r.width >= 5 && r.height >= 5;
     }).length;
   };
-  const rootOf = () => { try { const r = _lxPadModalRoot(); return r ? r.id : null; } catch (e) { return 'THREW'; } };
+  const rootOf = () => { try { _lxPadRootAt = -1; const r = _lxPadModalRoot(); return r ? r.id : null; } catch (e) { return 'THREW'; } };
   const res = [];
   const attempt = (label, id, fn) => {
     let err = null;
@@ -187,7 +187,11 @@ if (liveUnverified) console.log(`\n  note: ${liveUnverified} panel(s) never open
 const steam = await page.evaluate(() => {
   const out = [];
   const ok = (n, c, extra) => out.push({ n, pass: !!c, extra: String(extra == null ? '' : extra) });
-  const m = _lxPadMenuNav.toString().match(/querySelectorAll\('([^']+)'\)/);
+  // v0.29.804 — find the FOCUSABLE selector, not the first querySelectorAll in
+  // source: the v0.29.802 right-stick scroll block added querySelectorAll('*')
+  // above it, which made both selector locks report FAIL on a healthy build.
+  const m = [..._lxPadMenuNav.toString().matchAll(/querySelectorAll\('([^']+)'\)/g)]
+    .find((x) => x[1].includes('button'));
   const selStr = (m && m[1]) || '';
   // "unable to select Customization Options" — dropdown items are plain divs
   ok('nav selector reaches .cs-dd-item (customization options)', selStr.includes('.cs-dd-item'));
@@ -200,7 +204,7 @@ const steam = await page.evaluate(() => {
     document.body.appendChild(inp);
     _lxPadVK.open(inp);
     vkOk = !!document.getElementById('pad-vk');
-    vkRoot = (_lxPadModalRoot() || {}).id === 'pad-vk';
+    _lxPadRootAt = -1; vkRoot = (_lxPadModalRoot() || {}).id === 'pad-vk';
     for (const k of ['⇧', 'd', 'e', 'c', 'k']) _lxPadVK.press(k);
     _lxPadVK.press('✓');
     committed = inp.value; inp.remove();
@@ -241,7 +245,11 @@ for (const r of steam) {
 
 // pass 1's 0-focusable entries are superseded by pass 2 for these four ids
 const deferred = new Set(live.map((r) => r.id));
-const pass1Real = rows.filter((r) => r.exists && r.blocking && !deferred.has(r.id) && (!r.routedHere || r.focusables === 0)).length;
+// emptyOk: surfaces that legitimately hold zero controls — the nav's
+// no-focusables branch clicks the surface itself on Ⓐ, which is exactly how a
+// plain story stanza advances. Routing must still succeed for them.
+const pass1Real = rows.filter((r) => r.exists && r.blocking && !deferred.has(r.id)
+  && (!r.routedHere || (r.focusables === 0 && !r.emptyOk))).length;
 const total = pass1Real + liveBad + steamBad;
 console.log(`\nBLOCKING failures: ${total} (routing ${pass1Real}, populated-content ${liveBad}, steam-locks ${steamBad})   non-blocking: ${otherBad}`);
 console.log(total ? 'FAIL — a controller-only player can soft-lock' : 'PASS — every blocking surface is pad-reachable and operable');
