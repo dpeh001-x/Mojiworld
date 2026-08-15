@@ -9614,7 +9614,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.741';
+const GAME_VERSION = 'v0.29.742';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -12462,7 +12462,17 @@ let _lxBakeInFlight = 0;
 // widen the pipe to 6 while paused so the wave clears before the fighting
 // starts, and keep combat frames at the gentle 2.
 function _lxBakeBudget() {
-  return (typeof game !== 'undefined' && game && game.paused) ? 6 : 2;
+  if (typeof game !== 'undefined' && game) {
+    // v0.29.742 — while a dramatic blackout or the Gravitos entry cinematic owns
+    // the screen, nothing visible needs a bake — and the entry flood was
+    // starving the beat's own timers (the boss intro measured 26 s late, per
+    // user "Waiting too long here before the next thing happens"). Close the
+    // pipe; the flood runs under the boss-intro card instead, where the
+    // paused-6 lane below already absorbs it.
+    if ((game.blackHoldFrames | 0) > 0 || (game.blackFlashOverlay || 0) > 0.4 || game._gravitosCinePlaying) return 0;
+    if (game.paused) return 6;
+  }
+  return 2;
 }
 let _lxShrinkStamp = -1, _lxShrinkUsed = 0;
 function _lxBitmapToCanvas(bmp, src) {
@@ -12502,6 +12512,10 @@ function _lxAsyncBake(frames, idx, im, maxLong) {
     if (done) return; done = true;
     _lxBakeInFlight--;
     im._lxBaking = false;
+    // v0.29.742 — memo the result ON the source: the same <img> lives in several
+    // frame arrays (counted 2-3 bakes per source on the Singularity entry),
+    // and each array used to re-run the whole decode+resize for it.
+    if (cv) im._lxBakedCv = cv;
     if (cv && frames[idx] === im) { frames[idx] = cv; frames._readyN = 0; }
   };
   try {
@@ -12524,6 +12538,7 @@ function _lxShrinkSlot(holder, key, baseLogical) {
   if (!(im.complete && im.naturalWidth > 0)) return;
   const maxLong = _lxShrinkCap(baseLogical);
   if (Math.max(im.naturalWidth, im.naturalHeight) <= maxLong) { im._lxNoShrink = true; return; }
+  if (im._lxBakedCv && Math.max(im._lxBakedCv.width, im._lxBakedCv.height) <= maxLong) { holder[key] = im._lxBakedCv; return; }   // v0.29.742 — reuse a finished bake
   if (typeof createImageBitmap === 'function') {
     if (_lxBakeInFlight >= _lxBakeBudget()) return;
     _lxAsyncBake(holder, key, im, maxLong);
@@ -12560,6 +12575,12 @@ function _lxShrinkFrames(frames, baseLogical) {
       continue;
     }
     if (Math.max(im.naturalWidth, im.naturalHeight) <= maxLong) { im._lxNoShrink = true; im._lxNoShrinkCap = maxLong; continue; }
+    // v0.29.742 — another array already paid for this source's bake; reuse it
+    // when it fits this caller's cap instead of decoding the giant original
+    // again. (A smaller cap still re-bakes — right-sizing is preserved.)
+    if (im._lxBakedCv && Math.max(im._lxBakedCv.width, im._lxBakedCv.height) <= maxLong) {
+      frames[i] = im._lxBakedCv; frames._readyN = 0; continue;
+    }
     if (canAsync) {
       if (_lxBakeInFlight >= _lxBakeBudget()) { pending = true; break; }
       _lxAsyncBake(frames, i, im, maxLong);
@@ -53854,7 +53875,7 @@ function loadMap(id, entryX, entryY) {
       const _mapDefW = (typeof MAPS === 'object' && MAPS[id]) || null;
       const _isBossMap = !!(_mapDefW && (_mapDefW.isBossArena || _mapDefW.bossType ||
         (_mapDefW.spawns || []).some((sp) => sp && sp.boss) || (_mapDefW.bossSequence || []).length));
-      try { _warmMapArt(id).then(_fadeGo, _fadeGo); } catch (e) { _fadeGo(); }
+      try { _warmMapArt(id, (id === 'gravitosArena') ? { skip: /^gravitos[23]/ } : undefined).then(_fadeGo, _fadeGo); } catch (e) { _fadeGo(); }   // v0.29.742 — the prologue's own staging: warm the base phase now, let the lazy shrink trickle the 2★/3★ sets in-fight
       setTimeout(_fadeGo, _isBossMap ? 4200 : 1400);
     } else _fadeRelease();
   }
@@ -109154,6 +109175,10 @@ function _warmMapArt(id, opts) {
     const _cap = sl.capBase ? _lxShrinkCap(sl.capBase) : CAP;   // v0.29.356 — mobs bake to their own 480 base
     const w = im.naturalWidth, h = im.naturalHeight;
     if (Math.max(w, h) <= _cap) { im._lxNoShrink = true; return res(); }
+    // v0.29.742 — a finished bake (from either pipeline) is reused, not repeated:
+    // the entry counter measured every Gravitos source baked twice because the
+    // warm pump and the lazy shrink each paid for the same 6.6 MP decode.
+    if (im._lxBakedCv && Math.max(im._lxBakedCv.width, im._lxBakedCv.height) <= _cap) { swap(im._lxBakedCv); return; }
     const s = _cap / Math.max(w, h);
     const bw = Math.max(1, Math.round(w * s)), bh = Math.max(1, Math.round(h * s));
     const swap = (cv) => { if (cv && sl.holder[sl.key] === im) { sl.holder[sl.key] = cv; sl.holder._readyN = 0; } res(); };
@@ -109165,7 +109190,7 @@ function _warmMapArt(id, opts) {
           let cv = null;
           try { cv = _lxBitmapToCanvas(bmp, im); } catch (e) {}
           try { bmp.close && bmp.close(); } catch (e) {}
-          if (cv) swap(cv); else fallback();
+          if (cv) { im._lxBakedCv = cv; swap(cv); } else fallback();   // v0.29.742 — memo for the other pipeline
         })
         .catch(fallback);
     } catch (e) { fallback(); }
@@ -109173,6 +109198,11 @@ function _warmMapArt(id, opts) {
   return settle.then(() => new Promise((done) => {
     let next = 0, active = 0;
     const pump = () => {
+      // v0.29.742 — while a dramatic blackout owns the screen the pump holds:
+      // its back-to-back 6.6 MP decodes starved the Singularity entrance's
+      // own timers (the boss intro measured 26 s late). It resumes under the
+      // boss-intro card, where the game is paused and nothing competes.
+      if (typeof _lxBakeBudget === 'function' && _lxBakeBudget() === 0) { setTimeout(pump, 250); return; }
       while (active < 4 && next < slots.length) {
         const sl = slots[next++];
         active++;
