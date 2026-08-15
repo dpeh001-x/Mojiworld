@@ -3,7 +3,7 @@
 Every dial that decides how setshards (`◈`) are earned and spent. All of them
 live in **`mojiworld_game.html`** — the game is one file, so the practical way
 to find a knob is to search for the constant name, not to trust a line number.
-Line numbers below are correct as of **v0.29.791** and will drift.
+Line numbers below are correct as of **v0.29.796** and will drift.
 
 ---
 
@@ -13,20 +13,21 @@ This is the one to change for "bosses should drop more/fewer shards".
 
 | What | Where | Current |
 | --- | --- | --- |
-| Payout formula | search `const _fullShards = Math.min` (~L80216) | `min(100, max(1, floor(bossLevel * 1.0)))` |
-| Refight multiplier | search `LX_REFIGHT_SHARD_MUL` (~L38424) | `0.40` |
+| Payout formula | search `const _fullShards = Math.min` | `min(10000, max(1, floor(bossLevel * bossLevel)))` |
+| Refight multiplier | search `LX_REFIGHT_SHARD_MUL` | `0.40` |
+| Sigil trade | search `SIGIL_TRADE_SHARDS` | `200` per Zodiac Sigil |
 
 ```js
-const _fullShards = Math.min(100, Math.max(1, Math.floor(_bossLvl * 1.0)));
-//                            ^cap                              ^coefficient
+const _fullShards = Math.min(10000, Math.max(1, Math.floor(_bossLvl * _bossLvl)));
+//                            ^cap                              ^level squared
 ```
 
-- **Coefficient** — shards per boss level. `1.0` means a Lv 50 boss pays 50.
-- **Cap** — the ceiling for the highest bosses. Gravitos (Lv 100) sits exactly on it.
+- **The curve is `level²`.** A Lv 50 boss pays 2,500; doubling a boss's level quadruples its payout.
+- **Cap** — `10000` is exactly 100², the natural maximum for the level range that exists, so nothing clips. If you lower the coefficient, lower the cap with it or it stops meaning anything.
 - A first clear pays `_fullShards`; every later kill pays `_fullShards × LX_REFIGHT_SHARD_MUL`, minimum 1.
 
-What the current curve pays: Lv 10 → 10 ◈ · Lv 30 → 30 ◈ · Lv 50 → 50 ◈ · Lv 70 → 70 ◈ · Lv 100 → 100 ◈.
-A full tour of the eight unique bosses ≈ **330 ◈**.
+What the current curve pays: Lv 10 → 100 ◈ · Lv 30 → 900 ◈ · Lv 50 → 2,500 ◈ · Lv 70 → 4,900 ◈ · Lv 100 → 10,000 ◈.
+A full tour of the eight unique bosses ≈ **20,250 ◈** — about **20 crafts**.
 
 ### ⚠ Change this in TWO places
 
@@ -57,6 +58,10 @@ the shard roll and pays when it dies for real. Expected behaviour, not a bug —
 but it will skew any drop-rate test that kills each spawn only once.
 
 ---
+
+> **Recipe scrolls no longer exist** (retired v0.29.794). Zodiac Sigils are a
+> plain currency now: one trades for `SIGIL_TRADE_SHARDS` at either smith.
+> Any scroll left in a save is bought out on load at `SCROLL_BUYOUT_SHARDS`.
 
 ## 3. Other boss rewards on a refight
 
@@ -98,13 +103,16 @@ grep -n "200◈\|100◈\|300◈\|800◈" mojiworld_game.html
 
 The economy only makes sense as a ratio of faucet to sink:
 
-| | Craft cost | Boss tour | Tours per craft |
+| | Craft cost | Boss tour | Crafts per tour |
 | --- | --- | --- | --- |
 | v0.29.775 and earlier | 200 ◈ | 164 ◈ | 0.8 |
-| Current | 1000 ◈ | 330 ◈ | **3.0** |
+| v0.29.785 | 1000 ◈ | 330 ◈ | 0.33 |
+| Current (level²) | 1000 ◈ | 20,250 ◈ | **20** |
 
-If crafting feels out of reach, `CRAFT_COST_SHARDS` is the first dial; the
-Elite/Elder rates are the second, since they are the main non-boss faucet.
+The `level²` curve is the dominant term by a wide margin — a single Gravitos
+kill funds ten crafts, so `CRAFT_COST_SHARDS` and the Elite/Elder rates barely
+register against it. If shards feel too plentiful, the payout coefficient is
+the only dial that will move the needle.
 
 House rules that apply to edits here: **atomic writes only** on
 `mojiworld_game.html`, match-count guards on every replace, and stage explicit
