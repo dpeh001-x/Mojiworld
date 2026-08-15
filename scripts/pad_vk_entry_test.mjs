@@ -56,11 +56,14 @@ for (let i = 0; i < 30 && !menuUp; i++) {
 ok('boot menu reached', menuUp);
 
 // ── 1. autofocus handoff: open Name Entry with the pad "recently active" ────
-await page.evaluate(() => window.__press(0, 120));          // a pad press marks the pad active
+// Prime pad activity with D-pad down (13): it only moves menu focus. An A
+// press here once CLICKED whatever the nav had focused and tore the menu down
+// before the panel query - the test failing, not the game.
+await page.evaluate(() => window.__press(13, 120));
 await page.waitForTimeout(400);
 const s1 = await page.evaluate(async () => {
-  const btn = document.getElementById('menu-cont') || document.getElementById('menu-newgame');
-  if (!btn) return { err: 'no menu button' };
+  const btn = document.getElementById('menu-newgame') || document.getElementById('menu-cont');
+  if (!btn) return { err: 'no menu button; menu ids: ' + [...document.querySelectorAll('[id^=menu-]')].map(e => e.id).slice(0, 6).join(',') };
   btn.click();                                              // stand-in for nav's A-click on the item
   await new Promise(r => setTimeout(r, 500));               // autofocus fires at +40ms
   return {
@@ -90,9 +93,8 @@ ok('typing on the keyboard lands in the real name input',
 const s2 = await page.evaluate(async () => {
   const inp = document.getElementById('auth-user');
   if (!inp) return { err: 'no input' };
-  // focus WITHOUT recent pad activity being required: simulate staleness by
-  // rewinding the activity clock is private - instead test the hatch directly:
-  // focus the field, then press A and let the poll's focused-typeable branch run.
+  // test the hatch directly: focus the field, then press A and let the
+  // poll's focused-typeable branch run.
   inp.focus();
   await new Promise(r => setTimeout(r, 150));
   const preOpen = !!document.getElementById('pad-vk');      // may auto-open (pad still active) - close it to isolate the hatch
