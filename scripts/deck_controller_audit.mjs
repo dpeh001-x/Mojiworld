@@ -31,6 +31,8 @@ const SURFACES = [
   { id: 'class-select-modal', blocking: true,  why: 'character creation' },
   { id: 'confirm-modal',      blocking: true,  why: 'yes/no confirms' },
   { id: 'sage-blessing-modal',blocking: true,  why: 'blessing pick' },
+  { id: 'story-beat-overlay', blocking: true,  why: 'story beats / prologue cards — plain stanzas advance via the A-clicks-surface branch, choice stanzas via button nav (v0.29.734+)' },
+  { id: 'char-studio-overlay',blocking: false, why: 'character studio (wardrobe editor)' },
   { id: 'settings-modal-bg',  blocking: false, why: 'settings + quit' },
   { id: 'inventory-modal',    blocking: false, why: 'inventory' },
   { id: 'skills-modal',       blocking: false, why: 'skills' },

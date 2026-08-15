@@ -9614,7 +9614,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.736';
+const GAME_VERSION = 'v0.29.737';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -38460,7 +38460,10 @@ const _LX_PAD_MODAL_IDS = ['lo-auth', 'death-overlay', 'dialog', 'settings-modal
   // plain stanza has no focusable controls (Ⓐ falls through to the
   // click-the-surface branch in _lxPadMenuNav); a choice stanza renders real
   // buttons and gets the standard nav ring.
-  'story-beat-overlay'];
+  'story-beat-overlay',
+  // v0.29.7xx — the wardrobe's Character Studio editor (opened from the U
+  // panel): a real modal full of buttons that was never listed.
+  'char-studio-overlay'];
 // v0.29.422 — TOPMOST WINS, not first-listed. Several of these overlays are
 // live at once (at the title, 'lo-auth' and 'class-select-modal' are both
 // displayed), so "first id in an arbitrary array" was standing in for "the one
@@ -38473,6 +38476,44 @@ const _LX_PAD_MODAL_IDS = ['lo-auth', 'death-overlay', 'dialog', 'settings-modal
 // actually paints there, which is exactly the thing the pad should drive. List
 // order survives as the tie-break (two overlays can both be "topmost" when they
 // do not overlap) and as the fallback when nothing claims its own centre.
+// v0.29.7xx — surfaces the catch-all below must NEVER claim, because their
+// entire input model is raw keys on window and routing would sever exactly
+// that: boss-intro ("any key to skip", pointer-events:none anyway),
+// prologue-cine (Enter/Space advance; menu nav would ring its skip button and
+// turn Ⓐ into "skip the whole prologue"). void-intro self-clears; mobile-ctrl
+// and rotate-nag are touch chrome, not modals.
+const _LX_PAD_ROUTE_EXCLUDE = ['prologue-cine', 'boss-intro-overlay', 'void-intro-overlay', 'mobile-ctrl', 'rotate-nag'];
+let _lxPadRouteProbeAt = 0, _lxPadRouteProbeHit = null;
+// The safety net under the id list: ANY interactive overlay that covers most
+// of the screen and is not the game canvas gets routed, listed or not — so a
+// future click-only surface can never strand a controller-only player again.
+// Key-driven surfaces already work through _lxPadDispatch (keyboard-path
+// events since v0.29.734) and opt out via the exclude list above.
+function _lxPadCatchAllRoot() {
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  if (now - _lxPadRouteProbeAt < 200) return _lxPadRouteProbeHit;   // ~5 Hz: latency imperceptible, cost negligible
+  _lxPadRouteProbeAt = now;
+  _lxPadRouteProbeHit = null;
+  try {
+    const cv = document.getElementById('game');
+    const hit = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+    if (!hit || hit === cv || hit === document.body || hit === document.documentElement) return null;
+    if (cv && hit.contains(cv)) return null;             // wrapper/body chrome, not an overlay
+    // Climb to the overlay's outermost element: the last ancestor that still
+    // does NOT contain the canvas (an overlay is a sibling above the canvas,
+    // never its ancestor).
+    let root = hit;
+    while (root.parentElement && root.parentElement !== document.body &&
+           !(cv && root.parentElement.contains(cv))) root = root.parentElement;
+    if (root.id && _LX_PAD_ROUTE_EXCLUDE.indexOf(root.id) >= 0) return null;
+    const r = root.getBoundingClientRect();
+    // Must genuinely block the screen — small floaters (pins, toasts, HUD)
+    // stay with gameplay dispatch, which is itself a working pad path.
+    if (r.width * r.height < window.innerWidth * window.innerHeight * 0.5) return null;
+    _lxPadRouteProbeHit = root;
+  } catch (e) {}
+  return _lxPadRouteProbeHit;
+}
 function _lxPadModalRoot() {
   // v0.29.668 — the virtual keyboard outranks every other surface while open;
   // it exists precisely because the pad has nowhere else to type.
@@ -38487,7 +38528,7 @@ function _lxPadModalRoot() {
     if (getComputedStyle(el).visibility === 'hidden') continue;
     cands.push({ el, i, r });
   }
-  if (cands.length < 2) return cands.length ? cands[0].el : null;
+  if (cands.length < 2) return cands.length ? cands[0].el : _lxPadCatchAllRoot();   // v0.29.7xx — unlisted-blocker safety net
   let best = null;
   for (const c of cands) {
     const cx = Math.max(0, Math.min(window.innerWidth - 1, c.r.left + c.r.width / 2));
@@ -38528,7 +38569,7 @@ function _lxPadMenuNav(root, pad) {
   };
   const seen = new Set();
   const els = [];
-  for (const el of root.querySelectorAll('button, [role="button"], input, select, .toggle, .qj-btn, [data-qaccept], [data-qabandon], [onclick], .cs-dd-item, .class-card')) {
+  for (const el of root.querySelectorAll('button, [role="button"], input, select, .toggle, .qj-btn, [data-qaccept], [data-qabandon], [onclick], .cs-dd-item, .class-card, .cs-skin-swatch, .cs-dd-trigger')) {   // v0.29.7xx — swatches + dd-triggers assign onclick as a PROPERTY, invisible to [onclick]
     if (seen.has(el) || el.disabled) continue;
     const r = el.getBoundingClientRect();
     if (r.width < 5 || r.height < 5) continue;
@@ -38547,7 +38588,8 @@ function _lxPadMenuNav(root, pad) {
   const cur = () => els[clamp(idx)];
   const isRange = (el) => el && el.tagName === 'INPUT' && el.type === 'range';
   const moved = _repeat('_v', (down(13) || sDn) ? 1 : (down(12) || sUp) ? -1 : 0);
-  const lateral = _repeat('_l', down(15) ? 1 : down(14) ? -1 : 0);
+  const stickX = ax[0] || 0;   // v0.29.7xx — mirror the stick-Y treatment: D-pad-as-hat pads never fire buttons 14/15
+  const lateral = _repeat('_l', (down(15) || stickX > 0.6) ? 1 : (down(14) || stickX < -0.6) ? -1 : 0);
   // v0.29.729 — the virtual keyboard is a GRID, not a list. Flat ±1 made "down"
   // step to the next key in the same row — i.e. right (per user: "when i
   // press down it does not go downwards it goes to the right"). On pad-vk,
@@ -38903,8 +38945,22 @@ function _lxPadPoll() {
           _lxPadVkHeld = true;
           try { if (typeof _lxPadVK !== 'undefined') { _lxPadVK.open(ae); _lxPadNavPrev[0] = true; } } catch (e) {}
         } else if (!_acc) _lxPadVkHeld = false;
-      } catch (e) {}
-      return;
+        // v0.29.7xx — D-PAD LEAVES THE FIELD (per user: "the directional keys
+        // dont let me move at this portion" — the creation form autofocuses
+        // its name input, and this early-out then ate every directional press;
+        // only Ⓐ/Ⓑ/Start did anything). A directional press on a focused
+        // text field is intent to MOVE ON, not to type: blur the field and
+        // fall through so this same press drives menu nav below. Gated off
+        // while the virtual keyboard is open — its grid owns the D-pad then
+        // and manages the field's focus itself.
+        const _ax = (_p0 && _p0.axes) || [];
+        if (!document.getElementById('pad-vk') &&
+            (_bd(12) || _bd(13) || _bd(14) || _bd(15) ||
+             Math.abs(_ax[0] || 0) > 0.6 || Math.abs(_ax[1] || 0) > 0.6)) {
+          try { ae.blur(); } catch (e) {}
+          // fall through — same press moves the ring
+        } else { return; }
+      } catch (e) { return; }
     }
     const pads = navigator.getGamepads();
     let pad = null;
