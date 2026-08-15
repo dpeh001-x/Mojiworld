@@ -9649,6 +9649,7 @@ The sleeping world is listening.</div>
      per-origin localStorage; baking into this committed file makes the plant
      apply everywhere. Live localStorage edits override. Missing file = no baked
      offsets, game runs fine. -->
+<script src="data/monster_stats.js"></script>
 <script src="data/mob_offsets.js"></script>
 <script src="data/npc_offsets.js"></script>
 <!-- Per-(entity, state) animation calibration (scale + x/y offset for idle/walk/
@@ -9677,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.761';
+const GAME_VERSION = 'v0.29.762';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -31984,6 +31985,50 @@ const _coinGainMult = () => (typeof player !== 'undefined' && player && player.l
 // asked for.
 const MONSTER_COIN_MULT = 2.0;
 function _monsterCoinMult(m) { void m; return MONSTER_COIN_MULT; }
+
+// =========================================================================
+// v0.29.762 — MONSTER STATS TABLE (data/monster_stats.js) is authoritative.
+// =========================================================================
+// Per user: "Use current actual stats after modifying and remove all
+// modifiers, then I want you to create a file in which I can quickly input
+// the STATS including HP ATK DEF coin EXP of each monster's actual STATS".
+//
+// The spawn pipeline used to multiply the authored numbers by UNIVERSAL_HP_MUL
+// (0.5), MONSTER_STAT_MUL (0.35), a per-level exponent AND linear term, a
+// per-map factor, a spawn-distance factor, and exp by 0.1 — so the table in
+// the source bore no resemblance to what you fought (snail authored 40 HP,
+// spawned 7; Bone Golem authored 9,833, spawned 17,154). Every one of those
+// is bypassed for any type listed in the table: the file's number IS the
+// spawned number.
+//
+// Still applied, both editable in that same file and both deliberate:
+//   • VARIANTS — Elite / Elder multipliers (set to 1 to flatten).
+//   • LX_MONSTER_JITTER — the per-spawn +/-5% roll so a pack is not clones.
+// Edicts (opt-in difficulty toggles) keep working: they are a player choice,
+// not hidden calibration. They default OFF.
+function _lxApplyStatTable(mon, type, isBoss, isElite, isMiniBoss) {
+  const T = (typeof LX_MONSTER_STATS !== 'undefined') && LX_MONSTER_STATS && LX_MONSTER_STATS[type];
+  if (!T || !mon) return mon;
+  const V = (typeof LX_MONSTER_VARIANTS !== 'undefined' && LX_MONSTER_VARIANTS) || null;
+  const vr = isMiniBoss ? (V && V.elder) : isElite ? (V && V.elite) : null;
+  const J = (typeof LX_MONSTER_JITTER === 'number') ? LX_MONSTER_JITTER : 0;
+  const jit = () => J > 0 ? (1 + (Math.random() * 2 - 1) * J) : 1;
+  const mul = (k) => (vr && typeof vr[k] === 'number') ? vr[k] : 1;
+  const hp = Math.max(1, Math.floor(T.hp * mul('hp') * jit()));
+  mon.maxHp = hp; mon.currentHp = hp;
+  mon.atk = Math.max(0, Math.floor(T.atk * mul('atk') * jit()));
+  mon.def = Math.max(0, Math.floor(T.def * mul('def') * jit()));
+  mon.exp = Math.max(0, Math.floor(T.exp * mul('exp')));
+  mon.mojicoins = Math.max(0, Math.floor(T.coin * mul('coin')));
+  // Edicts stay live — opt-in difficulty, not hidden scaling.
+  try {
+    if (typeof _edictOn === 'function') {
+      if (_edictOn('unwakingVigil')) { mon.maxHp = Math.floor(mon.maxHp * 1.5); mon.currentHp = mon.maxHp; }
+      if (_edictOn('ironVerdict'))   mon.def = Math.floor(mon.def * 1.5);
+    }
+  } catch (e) {}
+  return mon;
+}
 // v0.26.400 — Quest income is the player's "reliable paycheck": grants made
 // with { full:true } bypass the 0.5 grind multiplier so a quest pays EXACTLY
 // the mojicoins listed in its rewards block (and the completion toast shows
@@ -56254,6 +56299,7 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     x, y: _yAdjusted, vx:0, vy:0,
     currentHp: Math.floor(t.hp * hpMult * _varHp),   // v0.29.265 — per-spawn roll (must match maxHp)
     maxHp:     Math.floor(t.hp * hpMult * _varHp),
+    // (data/monster_stats.js overwrites hp/atk/def/exp/coin below — see _lxApplyStatTable)
     facing: Math.random() < 0.5 ? -1 : 1,
     onGround: false,
     hitFlash: 0, burnTimer: 0, burnDmg: 0,
@@ -56719,6 +56765,7 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   if (_spawned && typeof _expeditionScaleMob === 'function') {
     _expeditionScaleMob(_spawned, (player && player.level) || 1);
   }
+  _lxApplyStatTable(_spawned, type, isBoss, isElite, isMiniBoss);   // v0.29.762 — the table is the final word
   return _spawned;
 }
 
