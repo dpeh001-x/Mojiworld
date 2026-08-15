@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.799';
+const GAME_VERSION = 'v0.29.800';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -38970,10 +38970,11 @@ function _lxPadCatchAllRoot() {
 function _lxPadSurfacePlayable(el) {
   try {
     if (!el || el.id !== 'tutorial-modal') return false;
-    if (!el.classList.contains('tut-dock')) return false;   // not docked = a real modal
-    if (el.classList.contains('tut-collapsed')) return true;
-    const st = (typeof TUTORIAL_STEPS !== 'undefined' && typeof _tutStep === 'number') ? TUTORIAL_STEPS[_tutStep] : null;
-    return !!(st && st.detect && !st._done);   // still owes an objective -> let them play
+    // v0.29.796 — UNCONDITIONAL. A docked tour never owns the pad, in any step
+    // state, ticked or not. The previous per-step rule moved focus on its own
+    // and left no pad route back to the game; the card is on the triggers
+    // instead, which never change hands.
+    return el.classList.contains('tut-dock');
   } catch (e) { return false; }
 }
 let _lxPadRootAt = -1, _lxPadRootCache = null;
@@ -39561,6 +39562,30 @@ function _lxPadPoll() {
         const _lt = pad.buttons[6], _rt = pad.buttons[7];
         const _ltD = !!(_lt && (_lt.pressed || _lt.value > 0.5));
         const _rtD = !!(_rt && (_rt.pressed || _rt.value > 0.5));
+        // v0.29.796 — a COLLAPSED tour still answers the triggers: RT re-opens
+        // it. Reaching a minimised card was the case that still needed a mouse,
+        // because a collapsed dock hides every control it owns.
+        const _tmDock = _tm && _tm.classList.contains('tut-dock') && _tm.style.display !== 'none';
+        if (_tmDock && _tm.classList.contains('tut-collapsed')) {
+          if (!window._lxTutTrigPrev) window._lxTutTrigPrev = { rt: false, lt: false };
+          const _wr = window._lxTutTrigPrev.rt;
+          window._lxTutTrigPrev.rt = _rtD; window._lxTutTrigPrev.lt = _ltD;
+          if (_rtD && !_wr) {
+            _tm.classList.remove('tut-collapsed');
+            const _cb4 = document.getElementById('tut-collapse');
+            if (_cb4) { _cb4.textContent = '\u25BE'; _cb4.title = 'Collapse the tour (keep playing)'; }
+            // Same explicit write as the collapse handler. Both transitions set
+            // the legend where the new state is certain, so it can never end up
+            // one state behind — which it did when this leaned on the re-render.
+            try {
+              const _lg3 = document.getElementById('tut-pad-legend');
+              if (_lg3) _lg3.textContent = '\uD83C\uDFAE RT next \u00b7 LT skip \u00b7 the stick always plays the game';
+            } catch (e) {}
+            try { window._tutLastShown = _tutStep; } catch (e) {}
+            try { if (typeof _renderTutorialStep === 'function') _renderTutorialStep(); } catch (e) {}
+          }
+          _tutTrig = true;   // the triggers belong to the tour even while it is shut
+        }
         // The edge memo is tracked on EVERY poll, open card or not. Clearing it
         // when the card is shut re-armed the edge while a trigger was still
         // physically held, so one hold advanced the tour twice (measured 4 -> 5
@@ -93565,10 +93590,46 @@ function _ensureTutChrome() {
         btn.textContent = collapsed ? '▸' : '▾';
         btn.title = collapsed ? 'Expand the tour' : 'Collapse the tour (keep playing)';
         btn.blur(); // game is live behind the dock — don't keep keyboard focus
+        // v0.29.796 — refresh the card's text for the new state. Collapsing is a
+        // class toggle, so without this the pad legend still advertised "RT next
+        // · LT skip" on a shut card instead of how to reopen it.
+        //
+        // Stamp _tutLastShown FIRST. The v0.29.779 auto-expand re-opens a
+        // collapsed card whenever the step has moved since it was last drawn —
+        // and if you collapse just after an objective ticks, that is true, so
+        // the re-render below would immediately undo the collapse. Measured:
+        // the card sprang back open and kept the expanded legend. A deliberate
+        // collapse is not a new step; only the tour advancing on its own is.
+        try { window._tutLastShown = _tutStep; } catch (e) {}
+        // Write the legend HERE rather than leaning on the re-render: this is
+        // the one place the new state is known for certain, and the collapsed
+        // card must never be the thing that fails to say how to reopen it.
+        try {
+          const _lg2 = document.getElementById('tut-pad-legend');
+          if (_lg2) _lg2.textContent = collapsed
+            ? '🎮 RT — reopen the tour · the stick still plays the game'
+            : '🎮 RT next · LT skip · the stick always plays the game';
+        } catch (e) {}
+        try { if (typeof _renderTutorialStep === 'function') _renderTutorialStep(); } catch (e) {}
       };
     }
   }
-  {   // v0.29.785 — re-stamp the hint every render so it tracks the live input
+  {   // v0.29.796 — the permanent pad legend: one line, always the same words,
+  // present expanded AND collapsed so the way back is never hidden.
+  try {
+    const _md2 = document.getElementById('tutorial-modal');
+    const _padOn = (typeof _lxPadActive === 'function') && _lxPadActive(30000);
+    if (_md2) {
+      _md2.classList.toggle('pad-on', !!_padOn);
+      const _card2 = _md2.querySelector('.modal');
+      let _lg = document.getElementById('tut-pad-legend');
+      if (!_lg && _card2) { _lg = document.createElement('div'); _lg.id = 'tut-pad-legend'; _card2.appendChild(_lg); }
+      if (_lg) _lg.textContent = _md2.classList.contains('tut-collapsed')
+        ? '🎮 RT — reopen the tour · the stick still plays the game'
+        : '🎮 RT next · LT skip · the stick always plays the game';
+    }
+  } catch (e) {}
+  // v0.29.785 — re-stamp the hint every render so it tracks the live input
     const _h = document.getElementById('tut-live-hint');
     if (_h) _h.textContent = (typeof _lxPadActive === 'function' && _lxPadActive(30000))
       ? '✋ Game is live — try each step as you read · RT next · LT skip'
@@ -132086,6 +132147,19 @@ function startBgm() {
   #tutorial-modal.tut-dock.tut-collapsed #tut-body,
   #tutorial-modal.tut-dock.tut-collapsed #tut-live-hint,
   #tutorial-modal.tut-dock.tut-collapsed #tut-nav-row { display: none !important; }
+  /* v0.29.796 — the collapsed bar keeps ONE line of text: how to get back.
+     A minimised card that says nothing is how a player ends up reaching for a
+     mouse. Shown only when a pad is in hand (see _renderTutorialStep). */
+  #tutorial-modal.tut-dock.tut-collapsed #tut-pad-legend { display: block !important; }
+  #tut-pad-legend {
+    display: none;
+    margin: 4px 0 0;
+    font: 700 9px/1.3 'Inter', system-ui, sans-serif;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: rgba(170, 245, 185, 0.62);
+  }
+  #tutorial-modal.tut-dock.pad-on #tut-pad-legend { display: block; }
   #tutorial-modal.tut-dock.tut-collapsed #tut-title { margin: 2px 0 6px !important; padding-bottom: 8px; }
 
   /* =========================================================================
