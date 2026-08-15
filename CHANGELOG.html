@@ -120,6 +120,48 @@
   <p class="lede">A phased rework layered on top of <code>v0.9.8</code>: save persistence, Web Audio SFX, achievements, daily challenges, respec, prestige, combo milestones, and a moment-to-moment juice pass. Every change lives in <code>mojiworld_game.html</code>. No new assets, no build step.</p>
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
+<h2>v0.29.735 — Combat-lag pass: nine hot-path fixes, ranked by a fan-out audit and a live CPU profile</h2>
+<p>
+  <span class="pill bug">bug</span>
+  Per user &mdash; <em>&ldquo;there is a lot of lag in the game&hellip; especially when fighting
+  monsters&rdquo;.</em> Reproduced hard before touching anything: a 29-mob fight profiled at
+  <b>p50 55ms (18fps)</b> under load, with <code>createImageBitmap</code> eating <b>19%</b> of samples and
+  raster dominating the rest.
+</p>
+<h3>What landed (all measured, all behavior-identical)</h3>
+<p>
+  <b>The raster hog:</b> <code>_lxDrawSoft</code>'s edge-clean majority path re-downscaled full-resolution
+  sources (often 768px+) to a ~90px box <em>every frame</em>, while the feathered branch next to it has had
+  a result cache since v0.29.294 &mdash; it now gets the same 10px-bucketed bake, per-image, keyed by bucket
+  so same-type mobs at &plusmn;5% spawn sizes don't thrash one slot. <b>The decode wave:</b> a spawn wave
+  used to stream hundreds of sprite-shrink bakes through a 2-slot pipe <em>during combat</em>; the area card
+  pauses the game ~3s on every map entry, so the pipe now widens to 6 while paused and the wave clears
+  before the fighting starts. <b>Allocation churn</b> (the workflow's top-ranked items): the blob-shadow
+  rgba string (one <code>toFixed</code> per entity per frame, ~1,200&ndash;1,900 allocs/sec), a fresh
+  <code>RegExp</code> per visible monster per frame, the status-icon row's array + object literals per
+  afflicted mob, the skill-icon URL string rebuilt ~400&times;/sec, the buff pill's
+  <code>querySelector</code> per HUD tick, <code>_lxDrawSoft</code>'s five-way string cache key, and Flame
+  Dash's distance math running before its own 20-frame throttle.
+</p>
+<p>
+  Interleaved A/B on the fixed harness (now shipped as <code>scripts/perf_combat_profile.mjs</code>):
+  <code>ctx.restore</code> share <b>4.7/4.0% &rarr; 1.7/1.5%</b> across rounds, p99 frame time
+  <b>79/91ms &rarr; 74/74ms</b>. Medians swing with machine load either way; the shares and the tail are the
+  stable signals. All four combat/draw suites stay green.
+</p>
+<div class="callout">
+  <b>Deferred, deliberately</b> &mdash; the audit's six medium-risk items are real but each wants its own
+  verified change: routing status tints through the tint-bake instead of live <code>ctx.filter</code>
+  (up to 12 filter passes/frame in mass-DoT fights), throttling the gamepad poller's forced-reflow scan
+  (33 <code>getBoundingClientRect</code>/frame with a controller connected), an x-bucketed platform index
+  (collision and ground-shadow are both O(platforms) per entity), pre-baking equipment sprites
+  (800px &rarr; 60&times;80 at 'high' every frame), and caching <code>drawSmoothFx</code>'s per-explosion
+  gradients. The full ranked list lives in the perf-pass output.
+  <br><br>
+  <b>Player-side relief that already exists:</b> the engine auto-drops decorative work when frames exceed
+  26ms (<code>LX_PERF.lowFx</code>), and the Settings panel's Graphics toggles shed particles and glow
+  passes &mdash; worth trying on older machines while the deferred items land.
+</div>
 
 <h2>v0.29.734 <span class="tag"><span class="pill bug">bug</span> The controller can turn story pages now</span></h2>
 <p>Per user &mdash; <em>&ldquo;my controller did not work at this point&rdquo;</em> &mdash; the prologue story card (&ldquo;Somewhere above the sky&hellip;&rdquo;), waiting on <em>click / tap / press Enter</em> while the pad did nothing.</p>
