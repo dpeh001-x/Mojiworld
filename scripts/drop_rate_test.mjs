@@ -87,12 +87,13 @@ console.log('  observed chest gear rates:', JSON.stringify(out.chestRate));
 console.log('  observed kill gear rates :', JSON.stringify(out.killRate), 'hits:', JSON.stringify(out.killHits));
 
 // Chests: each grade must land near its new target, and well under the old one.
-ok('wood chests give equipment ~22% of the time (was 40%)',
-   out.chestRate.wood >= 18 && out.chestRate.wood <= 26, `${out.chestRate.wood}%`);
-ok('silver chests give equipment ~30% of the time (was 50%)',
-   out.chestRate.silver >= 26 && out.chestRate.silver <= 34, `${out.chestRate.silver}%`);
-ok('gold chests give equipment ~55% of the time (was 80%)',
-   out.chestRate.gold >= 50 && out.chestRate.gold <= 60, `${out.chestRate.gold}%`);
+// Targets are the user's own table: wood 10%, silver 25%, gold 50%.
+ok('wood chests give equipment ~10% of the time',
+   out.chestRate.wood >= 7.5 && out.chestRate.wood <= 12.5, `${out.chestRate.wood}%`);
+ok('silver chests give equipment ~25% of the time',
+   out.chestRate.silver >= 21.5 && out.chestRate.silver <= 28.5, `${out.chestRate.silver}%`);
+ok('gold chests give equipment ~50% of the time',
+   out.chestRate.gold >= 46 && out.chestRate.gold <= 54, `${out.chestRate.gold}%`);
 ok('chest generosity still rises with grade',
    out.chestRate.wood < out.chestRate.silver && out.chestRate.silver < out.chestRate.gold);
 
@@ -100,10 +101,14 @@ ok('chest generosity still rises with grade',
 // Band chosen to DISCRIMINATE: 200k trials put the new rate at ~0.048% (+/-10%
 // at ~96 hits) and the old one at ~0.079%, so [0.030, 0.065] separates them
 // rather than passing on either build.
-ok('a normal kill drops equipment ~0.05% of the time (was 0.084%)',
-   out.killRate.normal >= 0.030 && out.killRate.normal <= 0.065, `${out.killRate.normal}%`);
-ok('an elite kill drops equipment ~0.9% of the time (was 1.5%)',
-   out.killRate.elite >= 0.6 && out.killRate.elite <= 1.2, `${out.killRate.elite}%`);
+// Targets are the user's own table: normal 0.1%, elite/elder 1.00%.
+// 200k trials put ~200 hits under the normal target (~7% relative error), so
+// [0.070, 0.135] is tight enough to discriminate against both neighbouring
+// settings the project has shipped (0.058% and 0.089%).
+ok('a normal kill drops equipment ~0.1% of the time',
+   out.killRate.normal >= 0.070 && out.killRate.normal <= 0.135, `${out.killRate.normal}%`);
+ok('an elite kill drops equipment ~1.00% of the time',
+   out.killRate.elite >= 0.85 && out.killRate.elite <= 1.18, `${out.killRate.elite}%`);
 ok('elites still out-drop normal kills by a wide margin',
    out.killRate.elite > out.killRate.normal * 5, `elite ${out.killRate.elite}% vs normal ${out.killRate.normal}%`);
 ok('a boss still keeps its guaranteed 1-2 bonus drops (out of scope, unchanged)',
