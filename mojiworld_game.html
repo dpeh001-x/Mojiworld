@@ -7871,7 +7871,7 @@ Current ACC: 0
                (50 % chance). Spent at Brok's smithy: Set Piece craft
                (200◈), Reforge Bench (100◈).
                Persists across deaths, resets on prestige. -->
-          <div class="stat-item shard-item" title="Setshards — crafting currency. Earned from boss kills (5-50 per boss, scaled by boss level) and Expedition F10 victories (50 % chance, 5-15 shards). Spent at Brok in Everdawn Central: Set Piece craft (200◈), Reforge Bench (100◈). Persists across deaths; resets on prestige."><span class="stat-icon ui-ico ico-setshards" aria-label="Setshards"></span><span class="stat-val" id="hud-setshards">0</span></div>
+          <div class="stat-item shard-item" title="Setshards — crafting currency. Mainly from bosses (10-100 per boss, scaled by boss level), Elders (50 % chance, 2-3) and Elites (25 % chance, 1-2), plus Expedition F10 victories (50 % chance, 5-15). Ordinary monsters only trickle one every ~200 kills. Spent at Brok in Everdawn Central: Set Piece craft (200◈), Reforge Bench (100◈), Respec (300◈). Persists across deaths; resets on prestige."><span class="stat-icon ui-ico ico-setshards" aria-label="Setshards"></span><span class="stat-val" id="hud-setshards">0</span></div>
           <!-- v0.26.238 — Kaching HUD chip removed. With the P2W tab gone
                (v0.26.235) and ticket items unreachable through normal play,
                the chip displayed a balance that nothing could spend. The
@@ -9695,7 +9695,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.775';
+const GAME_VERSION = 'v0.29.776';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -39761,12 +39761,13 @@ function _playBossIntro(bossType) {
     const SET_LABEL = { dawnshard:'Dawnshard', doomforged:'Doomforged', shadowweave:'Shadowweave', voidcaller:'Voidcaller', skyhunter:'Skyhunter' };
     const _sig = BOSS_SIGNATURE_SCROLL[_sigKey] || BOSS_SIGNATURE_SCROLL[bossType] || null;
     // Estimate shard drop using the same formula as killMonster
-    // (Math.min(50, Math.max(1, floor(bossLvl * 0.5)))).
+    // (v0.29.7xx: Math.min(100, Math.max(1, floor(bossLvl * 1.0))) — keep this
+    // in lockstep with the killMonster site or the preview lies to the player).
     let _bossLvl = 30;   // fallback
     if (typeof monsterTypes !== 'undefined' && monsterTypes[bossType] && monsterTypes[bossType].level) {
       _bossLvl = monsterTypes[bossType].level;
     }
-    const _shards = Math.min(50, Math.max(1, Math.floor(_bossLvl * 0.5)));
+    const _shards = Math.min(100, Math.max(1, Math.floor(_bossLvl * 1.0)));
     let _html = '';
     _html += `<div class="drop-line">📜 <span class="scroll-name">${_sig ? (SET_LABEL[_sig] + ' Recipe Scroll') : 'A random set scroll'}</span> · <b style="color:#88ff88;">20 % drop</b> ${_sig ? '<span style="opacity:0.7; font-size:11px;">(60 % chance signature, else random)</span>' : ''}</div>`;
     _html += `<div class="drop-line">◈ <span class="shard-amount">${_shards} Setshards</span> · guaranteed on first kill</div>`;
@@ -52024,16 +52025,31 @@ function _renderMasteryBar(m, kills, starUp) {
 }
 // v0.29.293 — dust trickle rate. One shard on 3% of normal kills. Kept as a
 // named constant so the economy knob is greppable and tunable in one place.
-const LX_DUST_TRICKLE_CHANCE = 0.03;
+// v0.29.7xx — SETSHARD SOURCES BY TIER (per user: "reduce the chance of
+// getting setshards from normal monsters, they should mainly be gotten from
+// bosses and elite / elder"). One flat 3% for every non-boss kill made a slime
+// and an Elder identical earners. Now the rare tiers carry the non-boss income
+// and plain normals keep only a whisper of texture:
+//   normal 0.5% -> 1    Elite 25% -> 1-2    Elder 50% -> 2-3
+// Elites are ~3% of spawns, so across 100 kills normals pay ~0.5 shards and
+// elites ~1.1 — the rare tier out-earns the whole common population, which is
+// what "mainly from elite/elder" has to mean in arithmetic.
+const LX_DUST_TRICKLE_CHANCE = 0.005;                        // plain normals — texture, not income
+const LX_SHARD_ELITE = { chance: 0.25, min: 1, max: 2 };     // Elite
+const LX_SHARD_ELDER = { chance: 0.50, min: 2, max: 3 };     // Elder (mini-boss)
 // Small floating "+1◈" mote at the kill, so the trickle is FELT rather than
 // silently accumulating in the HUD. Uses the existing damage-number channel
 // when available and degrades to nothing if that helper is absent.
-function _lxDustPing(m) {
+function _lxDustPing(m, n) {
   try {
     if (m && typeof game !== 'undefined' && game && game.damageNumbers) {
+      // v0.29.7xx — the mote reports the real amount: Elite/Elder now drop
+      // 1-3, and a "+1◈" over a 3-shard Elder kill would simply be wrong.
+      const _amt = Math.max(1, n | 0) || 1;
       game.damageNumbers.push({
         x: m.x + (m.w || 24) / 2, y: m.y, vy: -1.6,
-        text: '+1◈', life: 46, color: '#c8a2ff',
+        text: '+' + _amt + '◈', life: 46, color: '#c8a2ff',
+        size: _amt > 1 ? 13 : undefined,
       });
     }
   } catch (e) {}
@@ -79425,9 +79441,22 @@ function killMonster(m) {
     // roughly a craft per several thousand kills — texture, not an economy
     // rewrite. Bosses are excluded here (they already pay 5-50◈) and so are
     // expedition floors, which block coin/shard earning by design.
-    if (Math.random() < LX_DUST_TRICKLE_CHANCE && !(game.expedition && game.expedition.active)) {
-      player.setshards = (player.setshards | 0) + 1;
-      if (typeof _lxDustPing === 'function') _lxDustPing(m);
+    // v0.29.7xx — tier-aware (see the LX_SHARD_* table). Elder outranks Elite
+    // when a mob is somehow both; expedition floors still block earning.
+    if (!(game.expedition && game.expedition.active)) {
+      const _sTier = m.isMiniBoss ? LX_SHARD_ELDER : m.isElite ? LX_SHARD_ELITE : null;
+      let _shardsWon = 0;
+      if (_sTier) {
+        if (Math.random() < _sTier.chance) {
+          _shardsWon = _sTier.min + Math.floor(Math.random() * (_sTier.max - _sTier.min + 1));
+        }
+      } else if (Math.random() < LX_DUST_TRICKLE_CHANCE) {
+        _shardsWon = 1;
+      }
+      if (_shardsWon > 0) {
+        player.setshards = (player.setshards | 0) + _shardsWon;
+        if (typeof _lxDustPing === 'function') _lxDustPing(m, _shardsWon);
+      }
     }
   }
   // Bestiary tracking drives cosmetic unlocks
@@ -80026,7 +80055,13 @@ function killMonster(m) {
       if (!m._echoBoss && !m._expeditionBoss && !game.bossDefeated[_shardMapKey]) {   // v0.26.1030 — echo/rush + expedition bosses don't grant per-boss shards (payout is once at run end)
         const _bossLvl = (m.level && m.level > 0) ? m.level
                        : (typeof _mobLevel === 'function' ? _mobLevel(m) : 50);
-        const SHARDS = Math.min(50, Math.max(1, Math.floor(_bossLvl * 0.5)));
+        // v0.29.7xx — DOUBLED (per user "increase the setshards gained from
+        // bosses"): coefficient 0.5 -> 1.0, cap 50 -> 100. Lv 10 Mooma pays 10
+        // (was 5), Lv 50 Octobaby 50 (was 25), Lv 100 Gravitos 100 (was 50).
+        // The full 8-boss tour moves 164 -> ~330 shards: from 82% of one craft
+        // to over one and a half, keeping bosses the dominant source by far
+        // now that the normal-mob trickle is 6x thinner.
+        const SHARDS = Math.min(100, Math.max(1, Math.floor(_bossLvl * 1.0)));
         player.setshards = (player.setshards || 0) + SHARDS;
         game.bossDefeated[_shardMapKey] = true;
         const _firstWord = (m.name || 'The boss').split(/[\s,—]/)[0];
