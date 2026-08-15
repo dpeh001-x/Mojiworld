@@ -9695,7 +9695,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.771';
+const GAME_VERSION = 'v0.29.772';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -71507,6 +71507,26 @@ function updateMonsters(dt) {
       if (m.x < 0) { m.x = 0; m.facing = 1; }
       if (m.x + m.w > game.mapData.worldWidth) { m.x = game.mapData.worldWidth - m.w; m.facing = -1; }
       checkPlatformCollision(m);
+      // v0.29.772 — GRAVITOS IS FLOOR-BOUND (per user: "he should not be able to
+      // jump and he should always be situated along the floor instead of the
+      // platform or midair"). Every one of his patterns writes vertical motion
+      // — the idle bob, the blink's random Y (which alone placed him anywhere
+      // from 20 px into the floor to 160 px under it), the zip's 2D homing at
+      // the player, and the slam's rise-and-drop — and checkPlatformCollision
+      // above will rest him on any of the arena's four perches. Policing each
+      // of those separately would leave the next pattern free to break the rule
+      // again, so his position is settled ONCE here instead: this runs after
+      // the AI wrote its velocity AND after the platform step, so it is the
+      // last word. The patterns keep their horizontal behaviour intact — the
+      // slam still repositions over the player and stomps, the zip still
+      // charges — they simply cannot leave the ground.
+      // Skipped while he is dying so a death animation is never fought, and
+      // no-ops on any map where his centre is over a gap rather than snapping
+      // him somewhere arbitrary.
+      if (m.type === 'gravitos' && m.currentHp > 0 && !m._dying) {
+        const _gy = _lxGroundYUnder(m);
+        if (_gy != null) { m.y = _gy - m.h; m.vy = 0; m.onGround = true; }
+      }
       // v0.26.008 — Below-world rescue. If a mob's foot ended up below
       // every ground platform's `p.y + p.h + 20` collision tolerance
       // (knocked airborne with vy > 14, hazard launch, off-world
@@ -72063,6 +72083,30 @@ function updateMonsters(dt) {
 // retreat upward and snipe the boss from a perch. Anchored / hover /
 // teleport bosses (aetherion, gravitos, octobaby) stay on their own
 // movement systems — their entry in bossAI doesn't call this.
+// v0.29.772 — Ground-top Y under a monster's centre, or null when it stands over
+// a gap. Reuses the per-map ground-slab cache the flying branch already builds
+// (keyed to the platforms array identity, so a regenerated map invalidates it).
+// Only slabs tagged type:'ground' count — that is the whole point: the arena's
+// four perches are type:'platform' and must never qualify. Where slabs overlap
+// the centre the TOPMOST wins, since that is the surface a body would rest on.
+function _lxGroundYUnder(m) {
+  const md = (typeof game !== 'undefined' && game) ? game.mapData : null;
+  if (!md) return null;
+  const plats = md.platforms || [];
+  let slabs = md._lxGroundSlabs;
+  if (!slabs || md._lxGroundSlabsSrc !== plats) {
+    slabs = plats.filter((p) => p && p.type === 'ground');
+    md._lxGroundSlabs = slabs;
+    md._lxGroundSlabsSrc = plats;
+  }
+  const cx = m.x + m.w / 2;
+  let y = null;
+  for (let i = 0; i < slabs.length; i++) {
+    const g = slabs[i];
+    if (cx >= g.x && cx <= g.x + g.w && (y === null || g.y < y)) y = g.y;
+  }
+  return y;
+}
 function _bossSeekPlatform(m, dt) {
   m._leapCD = (m._leapCD || 0) - dt;
   if (m._leapCD > 0) return;
