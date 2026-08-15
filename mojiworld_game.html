@@ -8243,9 +8243,9 @@ The sleeping world is listening.</div>
           <div class="kb"><span>Jump (Double!)</span><span><kbd>Space</kbd></span></div>
           <div class="kb"><span>Enter Portal</span><span><kbd>↑</kbd></span></div>
           <div class="kb"><span>Drop Platform</span><span><kbd>↓</kbd></span></div>
-          <div class="kb"><span>Dodge / Avoid</span><span><kbd>Shift</kbd></span></div>
+          <div class="kb"><span>Dash</span><span><kbd>Shift</kbd> / <kbd>←←</kbd> <kbd>→→</kbd></span></div>
           <div class="kb"><span>Block / Parry</span><span><kbd>A</kbd></span></div>
-          <div class="kb"><span>Quick Dash</span><span><kbd>←←</kbd> / <kbd>→→</kbd></span></div>
+
         </div>
         <div class="help-col">
           <h3>Combat</h3>
@@ -8263,7 +8263,7 @@ The sleeping world is listening.</div>
                mirror of _LX_PAD_MAP so pad players can learn the kit from Help. -->
           <div class="kb" style="margin-top:9px;border-top:1px solid rgba(255,255,255,0.14);padding-top:9px;"><span style="color:#ffd166;font-weight:700;">🎮 CONTROLLER</span><span></span></div>
           <div class="kb"><span>Move</span><span>D-pad / Left stick</span></div>
-          <div class="kb"><span>Jump / Dodge</span><span>Ⓐ / <kbd>L3</kbd></span></div>
+          <div class="kb"><span>Jump / Dash</span><span>Ⓐ / <kbd>L3</kbd></span></div>
           <div class="kb"><span>Attack / Interact</span><span>Ⓧ / Ⓨ</span></div>
           <div class="kb"><span>Skills</span><span>Ⓑ <kbd>LB</kbd><kbd>RB</kbd><kbd>LT</kbd><kbd>RT</kbd><kbd>R3</kbd></span></div>
           <div class="kb"><span>Character / Pause</span><span><kbd>Back</kbd> / <kbd>Start</kbd></span></div>
@@ -9614,7 +9614,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.746';
+const GAME_VERSION = 'v0.29.747';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -32972,10 +32972,18 @@ window.addEventListener('keydown', e => {
   // quick-potion remains on PgDn (potionBinds). Guard !repeat so a held key
   // doesn't thrash the toggle.
   // v0.26.x - Gear Align tool moved T -> 2 (dev number-key family). T is free again.
-  // Dodge roll (Shift or V)
-  // V is now the Job Ultimate skill slot — dodge only on Shift
-  if (k === 'shift' && !(KEY_TO_SLOT && KEY_TO_SLOT['shift']) && !game.paused && player.hp > 0 && player.hitStun <= 0 && player.dodgeCD <= 0 && player.dodgeTimer <= 0) {
-    startDodge();
+  // v0.29.7xx — DODGE/ROLL REMOVED (per user: "there should not be a dodge
+  // or roll function, remove it, the game only has a dash function"). Shift
+  // (and the pad dodge action riding it — L3) now fires the SAME quickDash
+  // as the double-tap, under the same gates: the no-dash map opt-out
+  // (Frozen Peak) and not-mid-dash/rush. Direction: held arrow, else
+  // facing — the old dodge's own rule. startDodge() is now uncalled; the
+  // roll cannot be produced by any input.
+  if (k === 'shift' && !(KEY_TO_SLOT && KEY_TO_SLOT['shift']) && !game.paused && player.hp > 0 &&
+      player.hitStun <= 0 && !(game.mapData && game.mapData.noDoubleTapDash) &&
+      player.quickDashTimer <= 0 && player.rushTimer <= 0 && typeof quickDash === 'function') {
+    const _qk = game.keys;
+    quickDash(_qk['arrowleft'] ? -1 : _qk['arrowright'] ? 1 : (player.facing || 1));
   }
   // Block / parry (A) — 500ms block with a 200ms parry window; 2s cooldown
   if (k === 'a' && !game.paused && player.hp > 0 && player.hitStun <= 0 &&
@@ -38394,7 +38402,7 @@ const _LX_PAD_MAP = {
   7:  { k: 'f' },             // RT    — skill 5 (job signature)
   8:  { a: 'attributesU' },   // Back  — character panel (U)
   9:  { k: 'escape' },        // Start — pause / close
-  10: { a: 'dodge' },         // LS click — dodge / roll (moved from B)
+  10: { a: 'dodge' },         // LS click — DASH (the dodge action id fires quickDash since the roll was removed)
   11: { k: 'v' },             // RS click — skill 6 (job ultimate)
   12: { a: 'moveUp' },        // D-pad up
   13: { a: 'moveDown' },      // D-pad down
@@ -38951,7 +38959,7 @@ const _LX_PAD_BTN_NAMES = ['Ⓐ  A', 'Ⓑ  B', 'Ⓧ  X', 'Ⓨ  Y', 'LB', 'RB', '
   'D-pad ▲', 'D-pad ▼', 'D-pad ◀', 'D-pad ▶'];
 const _LX_PAD_ACTIONS = [
   { l: 'Jump',            s: { a: 'jump' } },
-  { l: 'Dodge / Roll',    s: { a: 'dodge' } },
+  { l: 'Dash',            s: { a: 'dodge' } },   // v0.29.7xx — the dodge action id now fires quickDash; roll removed
   { l: 'Attack',          s: { k: 'z' } },
   { l: 'Interact / Talk', s: { a: 'talkNpc' } },
   { l: 'Skill X',         s: { k: 'x' } },
@@ -39086,7 +39094,7 @@ function _lxPadPoll() {
     if (!pad && !steamBtns) return;
     if (pad && !_lxPadConnectedToasted) {
       _lxPadConnectedToasted = true;
-      if (typeof showToast === 'function') showToast('🎮 Controller connected — Ⓐ Jump · Ⓑ Skill · Ⓧ Attack · L3 Dodge · Start Pause', 'success');   // v0.29.255 — glyph primer so pad players learn the core layout without opening Help
+      if (typeof showToast === 'function') showToast('🎮 Controller connected — Ⓐ Jump · Ⓑ Skill · Ⓧ Attack · L3 Dash · Start Pause', 'success');   // v0.29.255 — glyph primer so pad players learn the core layout without opening Help
     }
     // v0.29.125 — modal-aware routing: while a panel is open the pad drives
     // MENU navigation, not the character. Release any held game keys first so
@@ -46788,7 +46796,7 @@ function renderKbmReference() {
       <div class="kb"><span>Jump (Double!)</span><span>${actionChip('jump')}</span></div>
       <div class="kb"><span>Enter Portal / Up</span><span>${actionChip('moveUp')}</span></div>
       <div class="kb"><span>Drop Platform / Down</span><span>${actionChip('moveDown')}</span></div>
-      <div class="kb"><span>Dodge / Avoid</span><span>${actionChip('dodge')}</span></div>
+      <div class="kb"><span>Dash</span><span>${actionChip('dodge')}</span></div>
       <div class="kb"><span>Block / Parry</span><span>${actionChip('block')}</span></div>
       <div class="kb"><span>Quick Dash</span><span><kbd style="opacity:0.85;">${_dashL}</kbd> / <kbd style="opacity:0.85;">${_dashR}</kbd></span></div>
     </div>
@@ -47058,7 +47066,7 @@ function _kbActionByKey() {
   const ab = (typeof player !== 'undefined' && player && player.actionBinds) || ACTION_KEY_DEFAULT;
   const L = {
     moveLeft:'Move L', moveRight:'Move R', jump:'Jump', moveUp:'Up', moveDown:'Down',
-    dodge:'Dodge', block:'Block', talkNpc:'Talk', questJournal:'Quest', codex:'Codex',
+    dodge:'Dash', block:'Block', talkNpc:'Talk', questJournal:'Quest', codex:'Codex',   // v0.29.7xx — dodge action = dash now
     mojidex:'Beast', characterK:'Keys', attributesU:'Stats', worldMap:'Map',
     mute:'Mute', hpPotion:'HP', mpPotion:'MP'
   };  // NOTE: 'wardrobe' deliberately excluded (it ships unbound — walk to the Fashionista).
@@ -50962,6 +50970,23 @@ function quickDash(dir) {
   player.quickDashTimer = 240;
   player.quickDashDir = dir;
   player.vx = dir * 14;
+  // v0.29.7xx — transplanted from the removed dodge so neither milestone is
+  // purchasable-but-dead: Flow State stacks on every dash now, and
+  // Dash-Cancel — literally named for this — lets the dash interrupt an
+  // attack. Exact same effects, one movement tech.
+  if (hasMilestone('flowState')) {
+    player._flowStacks = Math.min(3, (player._flowStacks || 0) + 1);
+    player._flowStackExpiry = game.time + 300;
+    game.damageNumbers.push({
+      x: player.x, y: player.y - 10, vy: -1.5,
+      text: `Flow x${player._flowStacks}`, life: 28, color: '#7adeff', size: 12
+    });
+  }
+  if (hasMilestone('dashCancel')) {
+    player.attacking = false;
+    player.attackTimer = 0;
+  }
+  player._lastQuickDashAt = game.time;   // v0.29.7xx — Brave-counter dash id
 
   // Class-specific tweaks layered on top of the default puff/afterimage.
   let trailHex = '#bbddff';
@@ -51235,8 +51260,12 @@ function _tickZodiacDodgeReward(dt) {
   if (!boss) return;
   const inDodge = player.dodgeTimer > 0;
   const inDash  = !!(player._dashEvadeUntil && ((game.time | 0) < player._dashEvadeUntil));
-  if (!inDodge && !inDash) return;
-  const dodgeId = inDodge ? ('d' + (player.lastDodgeTime || 0)) : ('e' + player._dashEvadeUntil);
+  // v0.29.7xx — the dodge is gone; the dash is the evade (see quickDash).
+  const inQDash = player.quickDashTimer > 0;
+  if (!inDodge && !inDash && !inQDash) return;
+  const dodgeId = inDodge ? ('d' + (player.lastDodgeTime || 0))
+                : inDash  ? ('e' + player._dashEvadeUntil)
+                :           ('q' + (player._lastQuickDashAt || 0));
   if (player._zdDodgeId === dodgeId) return;     // already rewarded this dodge
   const pad = 16;
   const px = player.x - pad, py = player.y - pad, pw = player.w + pad * 2, ph = player.h + pad * 2;
@@ -51303,14 +51332,20 @@ function _tickBossCourage(dt) {
     game._braveHits = (game._braveHits || 0) + 1;
     if (game._braveHits >= 4 && !game._braveHintShown && !(player._braveCount > 0)) {
       game._braveHintShown = true;
-      if (typeof showToast === 'function') showToast('Tip: DODGE (Shift) right as the boss attacks \u2014 a perfect dodge heals you and powers up your next hit!', 'rare');
+      if (typeof showToast === 'function') showToast('Tip: DASH (Shift) right through the boss attack \u2014 a perfect dash heals you and powers up your next hit!', 'rare');
     }
   }
   game._braveHpSample = hpNow;
   const inDodge = player.dodgeTimer > 0;
   const inDash  = !!(player._dashEvadeUntil && ((game.time | 0) < player._dashEvadeUntil));
-  if (!inDodge && !inDash) return;
-  const dodgeId = inDodge ? ('d' + (player.lastDodgeTime || 0)) : ('e' + player._dashEvadeUntil);
+  // v0.29.7xx — the dodge is gone; the dash is the evade. Brave now also
+  // watches the plain quickDash window so dashing through a big attack still
+  // earns the counter. Detection only — no i-frames or evasion granted.
+  const inQDash = player.quickDashTimer > 0;
+  if (!inDodge && !inDash && !inQDash) return;
+  const dodgeId = inDodge ? ('d' + (player.lastDodgeTime || 0))
+                : inDash  ? ('e' + player._dashEvadeUntil)
+                :           ('q' + (player._lastQuickDashAt || 0));
   if (player._braveDodgeId === dodgeId) return;     // one reward per dodge instance
   const pad = 16;
   const px = player.x - pad, py = player.y - pad, pw = player.w + pad * 2, ph = player.h + pad * 2;
