@@ -9738,7 +9738,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.791';
+const GAME_VERSION = 'v0.29.792';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -39543,7 +39543,31 @@ function _lxPadPoll() {
     const pressed = {};
     const mark = (spec, isDown) => { if (!spec || spec.none) return; const k = _lxPadResolveKey(spec); if (k && isDown) pressed[k] = true; };   // v0.29.670 — {none} = unbound
     if (pad) {
-      for (const idx in _LX_PAD_MAP) { const b = pad.buttons[idx]; if (b && (b.pressed || b.value > 0.5)) mark(_lxPadMapEff(idx), true); }   // v0.29.670 — user overrides
+      // v0.29.785 — tutorial trigger nav (see note above the poll).
+      let _tutTrig = false;
+      {
+        const _tm = document.getElementById('tutorial-modal');
+        const _lt = pad.buttons[6], _rt = pad.buttons[7];
+        const _ltD = !!(_lt && (_lt.pressed || _lt.value > 0.5));
+        const _rtD = !!(_rt && (_rt.pressed || _rt.value > 0.5));
+        // The edge memo is tracked on EVERY poll, open card or not. Clearing it
+        // when the card is shut re-armed the edge while a trigger was still
+        // physically held, so one hold advanced the tour twice (measured 4 -> 5
+        // -> 6 across a single 900 ms press). A release is now always required.
+        if (!window._lxTutTrigPrev) window._lxTutTrigPrev = { rt: false, lt: false };
+        const _wasRt = window._lxTutTrigPrev.rt, _wasLt = window._lxTutTrigPrev.lt;
+        window._lxTutTrigPrev.rt = _rtD; window._lxTutTrigPrev.lt = _ltD;
+        if (_tm && _tm.classList.contains('tut-dock') && !_tm.classList.contains('tut-collapsed')
+            && _tm.style.display !== 'none') {
+          _tutTrig = true;
+          if (_rtD && !_wasRt) { const b2 = document.getElementById('tut-next'); if (b2) b2.click(); }
+          if (_ltD && !_wasLt) { const b2 = document.getElementById('tut-skip'); if (b2) b2.click(); }
+        }
+      }
+      for (const idx in _LX_PAD_MAP) {
+        if (_tutTrig && (+idx === 6 || +idx === 7)) continue;   // the tour owns the triggers while its card is open
+        const b = pad.buttons[idx]; if (b && (b.pressed || b.value > 0.5)) mark(_lxPadMapEff(idx), true);
+      }   // v0.29.670 — user overrides
       const ax = pad.axes || [];
       if (ax[0] < -_LX_PAD_DEADZONE) mark(_LX_PAD_AXIS.lxNeg, true);
       if (ax[0] > _LX_PAD_DEADZONE) mark(_LX_PAD_AXIS.lxPos, true);
@@ -88689,6 +88713,9 @@ function openSkillsReference() {
 }
 
 function openLevelUpPanel() {
+  // v0.29.785 — THIS is the panel the tutorial's 'panel' step asks for; without
+  // this the objective could not be ticked by the key the card names.
+  if (typeof _tutPing === 'function') _tutPing('panel');
   // v0.29.77 — first-level-up guide hand-off: the moment the panel opens
   // (U key, chip tap, or the Amnesiac), retire the chip and stage the two
   // in-panel pointers (SP + buttons, then the Skills tab).
@@ -93141,7 +93168,7 @@ const TUTORIAL_STEPS = [
     icon: '🗡️',
     title: 'Your First Weapon',
     grantsStarterWeapon: true,
-    detect: 'panel',   // v0.27.5 — the ask is "open U → Items"; the U-panel open pings 'panel'
+    detect: 'tab_items',   // v0.29.785 — the ask IS the Items tab, so wait on the Items tab (was 'panel', which ticked on merely opening U and ignored the click the card asks for)
     tryIt: 'Open <kbd>U</kbd> → <b>Items</b> and meet your blade',
     gugumaLine: 'Cheep! A stick and some rags — every legend starts somewhere. The forges sell the real thing, once your pockets stop echoing.',
     body: 'Guguma just handed you a <b>Whittled Stick</b> and <b>Threadbare Rags</b> — humble, but yours, and they <b>auto-equip on the spot</b> if your slots were empty. ' +
@@ -93421,10 +93448,18 @@ function _ensureTutChrome() {
       };
     }
   }
+  {   // v0.29.785 — re-stamp the hint every render so it tracks the live input
+    const _h = document.getElementById('tut-live-hint');
+    if (_h) _h.textContent = (typeof _lxPadActive === 'function' && _lxPadActive(30000))
+      ? '✋ Game is live — try each step as you read · RT next · LT skip'
+      : '✋ Game is live — try each step as you read · ◀ ▶ to page';
+  }
   if (!document.getElementById('tut-live-hint')) {
     const hint = document.createElement('div');
     hint.id = 'tut-live-hint';
-    hint.textContent = '✋ Game is live — try each step as you read · ◀ ▶ to page';
+    hint.textContent = (typeof _lxPadActive === 'function' && _lxPadActive(30000))
+      ? '✋ Game is live — try each step as you read · RT next · LT skip'
+      : '✋ Game is live — try each step as you read · ◀ ▶ to page';
     const progress = document.getElementById('tut-progress');
     const row = progress ? progress.parentElement : null; // the flex nav row
     if (row) {
