@@ -9738,7 +9738,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.789';
+const GAME_VERSION = 'v0.29.790';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -63307,6 +63307,8 @@ function spawnSpriteBurst(x, y, spriteKey, opts) {
     // v0.29.439 — flat opacity multiplier over the burst's whole life (see the
     // draw branch). null/undefined leaves existing bursts at full strength.
     opacity: (opts.opacity == null) ? null : Math.max(0, Math.min(1, opts.opacity)),
+    // v0.29.790 — draw under the entity layer instead of over it. See drawSmoothFx.
+    behind: !!opts.behind,
     flipX: !!opts.flipX,
     flipY: !!opts.flipY,
     // v0.25.996 — Per-axis scale transitions. When all four start/end
@@ -63403,11 +63405,22 @@ function updateSmoothFx(dt) {
   if (w !== game.smoothFx.length) game.smoothFx.length = w;
 }
 
-function drawSmoothFx() {
+// v0.29.790 — TWO PASSES. Every smooth-fx used to draw after the monster loop, so
+// a burst centred on a boss always sat on top of him. Bursts tagged
+// `behind: true` at spawn are now skipped here and drawn by an earlier call
+// (drawSmoothFx(true), just before the monsters) so they read as an effect the
+// boss is standing IN rather than a decal pasted over his chest.
+// Safe to call twice: this function only draws — smooth-fx are aged and culled
+// in their own update pass, so no state is advanced here.
+// The extra pass costs one walk of a short array with a boolean compare as its
+// first statement; when nothing is tagged it rejects every entry immediately,
+// and the empty-array early-out above makes the common case free.
+function drawSmoothFx(_behindPass) {
   if (!game.smoothFx || !game.smoothFx.length) return;
   const camX = game.camera.x;
   ctx.save();
   for (const fx of game.smoothFx) {
+    if (!!fx.behind !== !!_behindPass) continue;
     const alpha = Math.min(1, fx.life / Math.max(6, fx.maxLife * 0.6));
     const sx = fx.x - camX;
     if (sx < -200 || sx > W + 200) continue;
@@ -75318,8 +75331,12 @@ function bossAI(m, dt, distToPlayer) {
         if (!m._slamGather) {
           m._slamGather = true;
           if (typeof spawnSpriteBurst === 'function') {
+            // v0.29.790 — behind him (per user): the well is something he is
+            // standing in, not a decal over his chest. The strike band stays
+            // in FRONT on purpose — it is a warning marker, and a warning the
+            // boss's own body can hide is worse than no warning.
             spawnSpriteBurst(m.x + m.w / 2, m.y + m.h, 'gravitos_slamring',
-              { size: 300, life: 26, spin: Math.PI * 0.9 });
+              { size: 300, life: 26, spin: Math.PI * 0.9, behind: true });
           }
         }
         if (typeof addShake === 'function' && (game.time % 6 === 0)) addShake(2);
@@ -122676,6 +122693,7 @@ function loop(time) {
   drawNPCs();
   drawMemoryEchoes();   /* v0.26.465 - memory-echo apparitions */
   drawDrops();
+  if (typeof drawSmoothFx === 'function') drawSmoothFx(true);   // v0.29.790 — behind-tagged bursts, under the entities
   for (const m of game.monsters) {
     if (m.scaleX !== undefined && m.scaleX !== 1) {
       const cx = (m.x + m.w/2) - game.camera.x;
