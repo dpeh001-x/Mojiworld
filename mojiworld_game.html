@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.803';
+const GAME_VERSION = 'v0.29.804';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -54000,6 +54000,89 @@ function _playVoidIntro() {
   }, 1000);
 }
 
+// v0.29.x — EVERDAWN WELCOME CINEMATIC (per user: "wire this in to when the
+// character first enters everdawn central from the void"). The counterpart to
+// _playVoidIntro above: that one holds Guguma as you fall INTO the Void, this
+// one is Guguma waiting for you when you climb back OUT of it — a Higgsfield
+// clip of him greeting the player as their eyes open on the town square.
+//
+// Full-screen with SOUND, unlike the story-beat clips, which are muted
+// backdrops behind stanza text. This one IS the scene: he speaks a line, so
+// muting it would throw away the point of it.
+//
+// Built lazily and torn down completely on close — no <video> exists at boot.
+// That is deliberate: iOS kills tabs that mass-decode media, which is the same
+// reason the story-beat clips are lazy (see _sbAttachClip).
+const EVERDAWN_WELCOME_CLIP = 'steam/higgsfield/cinematics/clip_everdawn_welcome.mp4';
+function _playEverdawnWelcome() {
+  try {
+    if (typeof player === 'undefined' || !player) return false;
+    if (!player._storyBeatsSeen) player._storyBeatsSeen = {};
+    if (player._storyBeatsSeen.everdawn_welcome) return false;      // once per save
+    if (game.expedition && game.expedition.active) return false;    // not mid-run
+    if (document.getElementById('everdawn-welcome-overlay')) return false;
+    // Marked seen up front, exactly as _playStoryBeat does. If the clip is
+    // missing the beat is spent — but that is a packaging bug to catch in a
+    // test (scripts/everdawn_welcome_test.mjs asserts the file ships AND is in
+    // steam/package.json), not something to paper over with a runtime retry.
+    player._storyBeatsSeen.everdawn_welcome = true;
+    if (typeof saveState === 'function') saveState();
+
+    const host = document.querySelector('.game-wrapper') || document.body;
+    const ov = document.createElement('div');
+    ov.id = 'everdawn-welcome-overlay';
+    // z 300 matches #void-intro-overlay: above the HUD, below toasts (400).
+    ov.style.cssText = 'position:absolute; inset:0; z-index:300; background:#05030a;'
+      + 'display:flex; align-items:center; justify-content:center; overflow:hidden;'
+      + 'opacity:0; transition:opacity 420ms ease; cursor:pointer;';
+    const v = document.createElement('video');
+    v.playsInline = true; v.setAttribute('playsinline', '');
+    v.preload = 'auto';
+    v.style.cssText = 'width:100%; height:100%; object-fit:cover;';
+    const skip = document.createElement('div');
+    skip.textContent = '▸ tap or press any key to skip';
+    skip.style.cssText = 'position:absolute; left:0; right:0; bottom:18px; text-align:center;'
+      + 'font-size:12px; letter-spacing:1.5px; text-transform:uppercase;'
+      + 'color:rgba(255,255,255,0.55); pointer-events:none; text-shadow:0 1px 4px #000;';
+    ov.appendChild(v); ov.appendChild(skip);
+
+    const _wasPaused = !!game.paused;
+    game.paused = true;
+    let _done = false;
+    const _close = () => {
+      if (_done) return; _done = true;
+      try { window.removeEventListener('keydown', _key, true); } catch (e) {}
+      ov.style.opacity = '0';
+      setTimeout(() => {
+        try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+        try { ov.remove(); } catch (e) {}
+        game.paused = _wasPaused;
+      }, 420);
+    };
+    const _key = (e) => { if (e && e.key === 'F12') return; _close(); };
+    ov.addEventListener('click', _close);
+    window.addEventListener('keydown', _key, true);
+    v.addEventListener('ended', _close, { once: true });
+    // A missing or undecodable file must not leave the player staring at a
+    // black rectangle with the game paused behind it.
+    v.addEventListener('error', _close, { once: true });
+
+    host.appendChild(ov);
+    v.src = EVERDAWN_WELCOME_CLIP;
+    requestAnimationFrame(() => { ov.style.opacity = '1'; });
+    const p = v.play();
+    if (p && p.catch) {
+      // Autoplay-with-sound can be refused if the browser has not seen a
+      // gesture yet. Falling back to muted keeps the scene rather than
+      // dropping it — the visuals still carry it.
+      p.catch(() => { try { v.muted = true; const q = v.play(); if (q && q.catch) q.catch(_close); } catch (e) { _close(); } });
+    }
+    // Hard backstop: never hold the game hostage if 'ended' never fires.
+    setTimeout(_close, 20000);
+    return true;
+  } catch (e) { try { game.paused = false; } catch (e2) {} return false; }
+}
+
 // v0.26.946 — Per-map sprite preloader. Fills the SAME memoized registries
 // the renderer reads (_monsterFramesFor / _npcIdleFrame), then resolves when
 // every frame has loaded + decoded (8s per image, 12s total cap), so callers
@@ -55100,6 +55183,10 @@ function loadMap(id, entryX, entryY) {
       if (typeof audio !== 'undefined' && audio && audio.play) audio.play('levelup');
     }, 1850);
   }
+  // v0.29.x — the map we are LEAVING, captured before it is overwritten:
+  // the Everdawn welcome fires on void -> town specifically, not on every
+  // arrival in town (you pass through it constantly).
+  const _lxFromMap = game.currentMap;
   game.currentMap = id;
   game.mapData = _variedMapData(id);
   // v0.29.6xx — POTHOLES CLEAR OF PORTALS (per user: "placement of this portal
@@ -55113,6 +55200,11 @@ function loadMap(id, entryX, entryY) {
   // v0.26.x — Per user: a short "entering the Void" scene every time the Void
   // loads — big Guguma held ~1.5s, then it fades out to the black Void.
   if (id === 'void' && typeof _playVoidIntro === 'function') _playVoidIntro();
+  // v0.29.x — ...and its counterpart on the way back out: the first time the
+  // player walks from the Void into Everdawn Central, Guguma welcomes them.
+  if (id === 'town' && _lxFromMap === 'void' && typeof _playEverdawnWelcome === 'function') {
+    _playEverdawnWelcome();
+  }
   // v0.25.941 — Story-beat triggers on map enter. first_gate_visit fires
   // the first time the player reaches wayfarersLantern2 (The Gate where
   // Sage Mira stands); doomed_chain_start kept open for a future v0.25.x
