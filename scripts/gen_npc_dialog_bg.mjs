@@ -9,9 +9,11 @@
 // Authored wide (16:9) because the panel is far wider than tall; a square
 // plate stretched to that shape smears the ornament.
 //
-// The art ships PRE-FADED (constant alpha 0.55, the panel_pause.webp trick),
+// The art ships PRE-FADED (constant alpha 0.32, the panel_pause.webp trick),
 // so the CSS just stacks it over the dark gradient and the cream text keeps
-// its contrast without a second overlay.
+// its contrast without a second overlay. 0.32 is deliberately low: at 0.55
+// the curtains competed with the dialogue for attention, which is backwards
+// for a panel whose whole job is to be read.
 //   node scripts/gen_npc_dialog_bg.mjs            # dry-run (prints prompt)
 //   node scripts/gen_npc_dialog_bg.mjs --generate # needs LUDO_API_KEY
 //   flags: --force
@@ -49,7 +51,7 @@ const PROMPT =
   'corners. Behind it a deep violet nebula with bright stars and golden dust. Luxurious, ' +
   'high-detail, gold-dominant.';
 
-const W = 1024, H = 576, ALPHA = 140;   // 0.55 * 255
+const W = 1024, H = 576, ALPHA = 82;   // 0.32 * 255
 const exists = async p => { try { await access(p); return true; } catch { return false; } };
 
 if (!has('--generate')) {

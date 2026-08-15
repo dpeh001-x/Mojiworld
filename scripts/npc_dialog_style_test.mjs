@@ -73,6 +73,31 @@ const r = await page.evaluate(async () => {
   // every button must use LIGHT text now (the old gold slab used espresso)
   out.allLightText = Object.values(kinds).every((el) => lum(rgbs(cs(el).color)[0]) > 0.45);
 
+  // --- the dialogue copy itself ------------------------------------------
+  // The panel used to inherit the <body> display face at 14px/500 for body
+  // copy sitting on artwork. Assert the legible stack, the larger setting,
+  // and that all three voices (speech, stage direction, emphasis) clear a
+  // strict body-text contrast bar against the panel's own darkest plate.
+  const txt = document.getElementById('dialog-text');
+  txt.innerHTML = 'plain <em>stage direction</em> and <b>emphasis</b>';
+  const tc = cs(txt);
+  out.copy = { family: tc.fontFamily, size: tc.fontSize, weight: tc.fontWeight,
+    lineHeight: tc.lineHeight, color: tc.color };
+  out.copyUsesUiFace = /Inter/i.test(tc.fontFamily);
+  // darkest stop of the panel's base plate — the worst case behind any glyph
+  const plate = [20, 10, 36];
+  const voice = (sel) => { const el = txt.querySelector(sel); return el ? rgbs(cs(el).color)[0] : null; };
+  out.voices = {
+    speech: Math.round(ratio(rgbs(tc.color)[0], plate) * 10) / 10,
+    stage: Math.round(ratio(voice('em') || rgbs(tc.color)[0], plate) * 10) / 10,
+    emphasis: Math.round(ratio(voice('b') || rgbs(tc.color)[0], plate) * 10) / 10,
+  };
+  // the three voices must be visibly DIFFERENT colours, not three creams
+  const dist = (a, c) => Math.abs(a[0] - c[0]) + Math.abs(a[1] - c[1]) + Math.abs(a[2] - c[2]);
+  out.voicesDistinct = Math.min(dist(rgbs(tc.color)[0], voice('em')), dist(rgbs(tc.color)[0], voice('b')),
+    dist(voice('em'), voice('b')));
+  txt.innerHTML = '';
+
   // --- the art itself: warm colour at both outer edges, calm middle -------
   out.edge = await new Promise((res) => {
     const im = new Image();
@@ -82,7 +107,11 @@ const r = await page.evaluate(async () => {
       const warmCol = (x) => { const d = g2.getImageData(x, 0, 1, c.height).data; let h = 0;
         for (let i = 0; i < d.length; i += 4) if (d[i] > 70 && d[i] > d[i + 2] * 1.25) h++;
         return Math.round(h / c.height * 100); };
-      res({ ok: true, w: c.width, h: c.height, left: warmCol(1), right: warmCol(c.width - 2), mid: warmCol(c.width >> 1) });
+      // the art ships pre-faded: sample its baked alpha so "dimmer" is a
+      // measured property of the file, not a claim about the CSS around it
+      const mid = g2.getImageData(c.width >> 1, c.height >> 1, 1, 1).data;
+      res({ ok: true, w: c.width, h: c.height, left: warmCol(1), right: warmCol(c.width - 2),
+        mid: warmCol(c.width >> 1), alpha: mid[3] });
     };
     im.onerror = () => res({ ok: false });
     im.src = 'Sprites/ui/npc_dialog_bg.webp?t=' + performance.now();
@@ -97,6 +126,8 @@ console.log('bg size:', r.panelSize, '| stretched:', r.stretched);
 console.log('edge   :', JSON.stringify(r.edge));
 console.log('contrast:', JSON.stringify(r.contrast));
 console.log('font   :', JSON.stringify(r.font), '| all light text:', r.allLightText);
+console.log('copy   :', JSON.stringify(r.copy));
+console.log('voices :', JSON.stringify(r.voices), '| distinctness:', r.voicesDistinct, '| art alpha:', r.edge.alpha);
 
 ok('the painted backdrop is in the panel background stack', r.artInStack === true, {});
 ok('the art layer STRETCHES to the frame (100% 100%), so its edges meet the border',
@@ -113,6 +144,18 @@ for (const k of ['plain', 'shop', 'action', 'leave']) {
 ok('every button uses light text on a dark fill (one consistent scheme)', r.allLightText === true, {});
 ok('button text is set at a readable size and weight (>= 13px, 700)',
    parseFloat(r.font.size) >= 13 && r.font.weight === '700', r.font);
+
+ok('the art ships DIMMED (baked alpha well under half, not the old 140)',
+   r.edge.alpha > 0 && r.edge.alpha <= 95, { alpha: r.edge.alpha });
+ok('dialogue copy uses the legible UI face, not the inherited display font',
+   r.copyUsesUiFace === true, { family: r.copy.family });
+ok('dialogue copy is set larger and heavier for body reading (>= 15px, >= 600)',
+   parseFloat(r.copy.size) >= 15 && parseInt(r.copy.weight, 10) >= 600, r.copy);
+ok('speech clears strict body contrast on the panel plate (>= 7:1)', r.voices.speech >= 7, r.voices);
+ok('stage directions clear AA (>= 4.5:1) — they were the dimmest voice', r.voices.stage >= 4.5, r.voices);
+ok('emphasis clears AA (>= 4.5:1)', r.voices.emphasis >= 4.5, r.voices);
+ok('the three voices are distinct colours, not three shades of cream',
+   r.voicesDistinct >= 60, { minChannelDistance: r.voicesDistinct });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 let pass = 0, fail = 0;
