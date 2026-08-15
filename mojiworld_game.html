@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.806';
+const GAME_VERSION = 'v0.29.807';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -38980,7 +38980,29 @@ function _lxPadSurfacePlayable(el) {
 let _lxPadRootAt = -1, _lxPadRootCache = null;
 function _lxPadModalRoot() {
   const _n = performance.now();
-  if (_lxPadRootAt >= 0 && _n - _lxPadRootAt < 100) return _lxPadRootCache;
+  if (_lxPadRootAt >= 0 && _n - _lxPadRootAt < 100) {
+    // v0.29.807 — VALIDATE A CACHED ROOT BEFORE TRUSTING IT. The v0.29.744 memo
+    // returned the cached answer for a flat 100ms, which meant that for up to
+    // 100ms AFTER a modal closed the pad was still routing every input into a
+    // surface that was no longer on screen — the player's stick and buttons
+    // going nowhere at exactly the moment they expected control back.
+    // Re-checking the ONE cached element costs a single rect + style read
+    // instead of the ~33-element scan plus hit-test the memo exists to avoid,
+    // so the saving is kept almost entirely while the stale-close window is
+    // closed outright.
+    // The null case (no modal open — the common one in gameplay, and the whole
+    // reason the memo pays) stays memoised: a modal that OPENS is noticed up to
+    // 100ms late, which is imperceptible and self-heals on the next scan. It is
+    // the opposite direction that stranded the player, and that is the one
+    // fixed here.
+    const _c = _lxPadRootCache;
+    if (_c === null) return null;
+    if (_c.isConnected) {
+      const _r = _c.getBoundingClientRect();
+      if (_r.width > 4 && _r.height > 4 && getComputedStyle(_c).visibility !== 'hidden') return _c;
+    }
+    // fell through: the cached surface is gone — rescan now, do not wait it out
+  }
   _lxPadRootAt = _n;
   _lxPadRootCache = _lxPadModalRootScan();
   return _lxPadRootCache;
