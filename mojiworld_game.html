@@ -9614,7 +9614,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.743';
+const GAME_VERSION = 'v0.29.744';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -15918,7 +15918,18 @@ function _drawEquipmentLayer(layer, targetCtx, opts) {
       c.scale(att.flipX ? -1 : 1, att.flipY ? -1 : 1);
       c.translate(-fcx, -fcy);
     }
-    c.drawImage(img, dx, dy, w, h);
+    // v0.29.744 perf — equipment art (often 800px) was re-downscaled at
+    // 'high' quality on EVERY frame for a ~60×80 box, per equipped layer.
+    // Route big sources through the shared async createImageBitmap bake
+    // (same pattern as the face layers); until it lands the original draws,
+    // so there is never a blank layer. 256px keeps 2× headroom over the
+    // largest attach scale; small/right-sized art keeps the direct blit.
+    let _ebSrc = img;
+    if ((img.naturalWidth || img.width || 0) >= 300 && w <= 200 && h <= 200) {
+      const _eb = (typeof _lxBakedDownscale === 'function') ? _lxBakedDownscale(img, 256) : null;
+      if (_eb) _ebSrc = _eb;
+    }
+    c.drawImage(_ebSrc, dx, dy, w, h);
     c.restore();
   }
 }
@@ -38545,7 +38556,20 @@ function _lxPadCatchAllRoot() {
   } catch (e) {}
   return _lxPadRouteProbeHit;
 }
+// v0.29.744 perf — 10 Hz memo. The scan below runs getBoundingClientRect +
+// getComputedStyle over ~33 candidate ids and an elementFromPoint hit-test,
+// and the pad poller calls it EVERY frame while a pad is connected. Modal
+// open/close reflects within 100ms — below a pad-menu reaction time — and
+// the disconnect handler drops the memo so a fresh pad never sees stale UI.
+let _lxPadRootAt = -1, _lxPadRootCache = null;
 function _lxPadModalRoot() {
+  const _n = performance.now();
+  if (_lxPadRootAt >= 0 && _n - _lxPadRootAt < 100) return _lxPadRootCache;
+  _lxPadRootAt = _n;
+  _lxPadRootCache = _lxPadModalRootScan();
+  return _lxPadRootCache;
+}
+function _lxPadModalRootScan() {
   // v0.29.668 — the virtual keyboard outranks every other surface while open;
   // it exists precisely because the pad has nowhere else to type.
   const _vk = document.getElementById('pad-vk');
@@ -38763,6 +38787,7 @@ function _lxPadFlushHeld() {
   } catch (e) {}
 }
 window.addEventListener('gamepaddisconnected', () => {
+  _lxPadRootAt = -1; _lxPadRootCache = null;   // v0.29.744 — drop the 10 Hz memo
   _lxPadFlushHeld();
   // v0.29.668 — auto-pause on unplug (Steam review best-practice): a dead
   // battery mid-fight should not cost the run. Escape both pauses and is
@@ -62830,6 +62855,8 @@ function _spawnRainbowStairs() {
     });
   }
 }
+const _MELEE_GRAD_CACHE = new Map();    // v0.29.744 perf — drawSmoothFx slash/stab body gradients
+const _EXPLO_GRAD_CACHE = new Map();    // v0.29.744 perf — drawSmoothFx unit-radius explosion gradients
 const _IMPACT_GRAD_CACHE = new Map();   // v0.29.x perf — see drawSmoothFx 'impact'
 // v0.29.x perf — ONE pixel-fill helper instead of 16 byte-identical closures
 // allocated per draw call (one per visible monster per frame in the per-mob
@@ -62971,12 +62998,25 @@ function drawSmoothFx() {
         // fill now casts a soft white shadow-blur halo — a feather that hugs
         // the silhouette — and a translucent white stroke rides the edge to
         // melt the hard vector boundary.
-        const g = ctx.createRadialGradient(0, 0, Math.max(1, r - thick), 0, 0, r + thick);
-        g.addColorStop(0, fx.color);
-        g.addColorStop(0.55, fx.color);
-        g.addColorStop(1, fx.edgeCol || '#ffffff');
+        // v0.29.744 perf — cached: this minted a fresh radial gradient per
+        // crescent per frame, exactly during melee spam. Radii are bucketed
+        // (4px / 2px) and the gradient is BUILT from the bucketed values, so
+        // a growing swing reuses ~a dozen cache entries; the falloff band is
+        // ~2×thick wide, so a ≤2px shift in it is invisible. FIFO like the
+        // sibling _IMPACT_GRAD_CACHE below.
+        const _rB = Math.max(2, ((r * 0.25) | 0) * 4), _tB = Math.max(1, ((thick * 0.5) | 0) * 2);
+        const _gk = fx.color + '|' + (fx.edgeCol || '') + '|' + _rB + '|' + _tB;
+        let g = _MELEE_GRAD_CACHE.get(_gk);
+        if (!g) {
+          g = ctx.createRadialGradient(0, 0, Math.max(1, _rB - _tB), 0, 0, _rB + _tB);
+          g.addColorStop(0, fx.color);
+          g.addColorStop(0.55, fx.color);
+          g.addColorStop(1, fx.edgeCol || '#ffffff');
+          if (_MELEE_GRAD_CACHE.size >= 48) _MELEE_GRAD_CACHE.delete(_MELEE_GRAD_CACHE.keys().next().value);
+          _MELEE_GRAD_CACHE.set(_gk, g);
+        }
         ctx.shadowColor = 'rgba(255,255,255,' + (0.18 * _bk).toFixed(3) + ')';   // v0.29.542 — 0.26→0.18   // v0.29.540 — halo 0.55→0.26 (per user "reduce the opacity on the white area")
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = (typeof _perfLowFx === 'function' && _perfLowFx()) ? 0 : 10;   // v0.29.744 — halo off on low-fx
         ctx.globalAlpha = alpha * _ba;
         ctx.fillStyle = g;
         ctx.fill();
@@ -63029,12 +63069,22 @@ function drawSmoothFx() {
       ctx.closePath();
       // v0.29.534 — dark outline removed; feathered whitish glow instead
       // (matches the crescent treatment — see that branch's comment).
-      const lg = ctx.createLinearGradient(0, 0, len, 0);
-      lg.addColorStop(0, fx.color);
-      lg.addColorStop(0.6, fx.color);
-      lg.addColorStop(1, fx.edgeCol || '#ffffff');
+      // v0.29.744 perf — cached like the crescent above; len bucketed to 8px
+      // and the gradient built AT the bucket, so the tip stop lands ≤8px
+      // early — under the white edge glow, invisible.
+      const _lB = Math.max(8, ((len * 0.125) | 0) * 8);
+      const _lk = 's|' + fx.color + '|' + (fx.edgeCol || '') + '|' + _lB;
+      let lg = _MELEE_GRAD_CACHE.get(_lk);
+      if (!lg) {
+        lg = ctx.createLinearGradient(0, 0, _lB, 0);
+        lg.addColorStop(0, fx.color);
+        lg.addColorStop(0.6, fx.color);
+        lg.addColorStop(1, fx.edgeCol || '#ffffff');
+        if (_MELEE_GRAD_CACHE.size >= 48) _MELEE_GRAD_CACHE.delete(_MELEE_GRAD_CACHE.keys().next().value);
+        _MELEE_GRAD_CACHE.set(_lk, lg);
+      }
       ctx.shadowColor = 'rgba(255,255,255,0.10)';   // v0.29.542 — 0.14→0.10   // v0.29.540 — halo halved again (0.30→0.14)
-      ctx.shadowBlur = 8;
+      ctx.shadowBlur = (typeof _perfLowFx === 'function' && _perfLowFx()) ? 0 : 8;   // v0.29.744 — halo off on low-fx
       ctx.globalAlpha = alpha * 0.58;                 // v0.29.549 — 0.9 -> 0.58
       ctx.fillStyle = lg;
       ctx.fill();
@@ -63099,17 +63149,30 @@ function drawSmoothFx() {
         continue;
       }
       ctx.globalCompositeOperation = 'lighter';
-      const grad = ctx.createRadialGradient(sx, fx.y, 0, sx, fx.y, r);
-      grad.addColorStop(0, '#ffffff');
-      // v0.26.412 — coalesce to a valid color. A bad/undefined color here
-      // throws synchronously, and an uncaught throw in the render loop kills
-      // requestAnimationFrame → the game freezes (Ground Slam repro).
-      grad.addColorStop(0.25, fx.coreCol || '#ffffff');
-      grad.addColorStop(0.7, fx.edgeCol || 'rgba(0,0,0,0)');
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      // v0.29.744 perf — one unit-radius (100) gradient per colour pair, scaled
+      // into place by transform: the stops are proportional so the output is
+      // identical, and a fading explosion no longer mints a gradient every
+      // frame. v0.26.412 note kept: colours are coalesced because a bad colour
+      // throws synchronously and an uncaught throw here kills the rAF loop.
+      const _xk = (fx.coreCol || '#ffffff') + '|' + (fx.edgeCol || '');
+      let grad = _EXPLO_GRAD_CACHE.get(_xk);
+      if (!grad) {
+        grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 100);
+        grad.addColorStop(0, '#ffffff');
+        grad.addColorStop(0.25, fx.coreCol || '#ffffff');
+        grad.addColorStop(0.7, fx.edgeCol || 'rgba(0,0,0,0)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        if (_EXPLO_GRAD_CACHE.size >= 32) _EXPLO_GRAD_CACHE.delete(_EXPLO_GRAD_CACHE.keys().next().value);
+        _EXPLO_GRAD_CACHE.set(_xk, grad);
+      }
       ctx.globalAlpha = alpha;
+      ctx.save();
+      ctx.translate(sx, fx.y);
+      const _xs = r / 100;
+      ctx.scale(_xs, _xs);
       ctx.fillStyle = grad;
-      ctx.beginPath(); ctx.arc(sx, fx.y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, 0, 100, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
       ctx.globalCompositeOperation = 'source-over';
     } else if (fx.type === 'beam') {
       ctx.save();
@@ -94779,14 +94842,17 @@ function drawCarriageInterior() {
   // Individual window panes (moving with parallax = none, they're inside)
   const winW = 120, winGap = 16;
   const winCount = Math.floor((W2 - 40) / (winW + winGap));
+  // v0.29.744 perf — one gradient for every pane: geometry (0,120 → 0,300) and
+  // stops are loop-invariant, yet a fresh gradient was minted per window per
+  // frame (winCount ≈ 10-15 on a wide carriage).
+  const paneGrad = ctx.createLinearGradient(0, winTop, 0, winBot);
+  paneGrad.addColorStop(0, '#1e1a30');
+  paneGrad.addColorStop(0.5, '#0e0818');
+  paneGrad.addColorStop(1, '#1a1428');
   for (let i = 0; i < winCount; i++) {
     const wx = leftWallX + 20 + i * (winW + winGap);
     // Pane glass (slightly bluer tunnel tint inside)
-    const paneGrad = ctx.createLinearGradient(0, winTop, 0, winBot);
-    paneGrad.addColorStop(0, '#1e1a30');
-    paneGrad.addColorStop(0.5, '#0e0818');
-    paneGrad.addColorStop(1, '#1a1428');
-    ctx.fillStyle = paneGrad;
+    ctx.fillStyle = paneGrad;   // v0.29.744 perf — hoisted above the loop
     ctx.fillRect(wx, winTop, winW, winBot - winTop);
     // Moving tunnel streak behind the glass (extra speed for motion sense)
     const streakOffset = (game.time * 5) % (winW * 2);
@@ -96086,9 +96152,14 @@ function drawSanctumCosmos() {
   }
 
   // Ground haze (purple mist near floor)
-  const hazeGrad = ctx.createLinearGradient(0, 380, 0, 480);
-  hazeGrad.addColorStop(0, 'rgba(90,40,140,0)');
-  hazeGrad.addColorStop(1, 'rgba(140,80,200,0.35)');
+  // v0.29.744 perf — constant gradient, cached across frames (window slot: same
+  // idiom as _beamGradCache; the game ctx is a singleton so reuse is safe).
+  const hazeGrad = window._lxSanctumHazeGrad || (window._lxSanctumHazeGrad = (() => {
+    const g = ctx.createLinearGradient(0, 380, 0, 480);
+    g.addColorStop(0, 'rgba(90,40,140,0)');
+    g.addColorStop(1, 'rgba(140,80,200,0.35)');
+    return g;
+  })());
   ctx.fillStyle = hazeGrad; ctx.fillRect(0, 380, W, 100);
 
   // Altar pillars (boss arena pillars with crystal caps — sanctum-themed)
@@ -110635,31 +110706,31 @@ function _drawMonsterSprite(m, sx, sy) {
   // its frames have decoded; else the pre-baked static sprite; else raw draw.
   // v0.26.x — STATUS TINT (per user): tint the sprite while a status is
   // inflicted — icy blue when frozen, fiery orange while burning, a dazed
-  // yellow wash while stunned. ctx.filter is set ONLY when a status is
-  // active (no cost for clean mobs — explicitly no tint without a status)
-  // and clears with this function's ctx.restore(). sepia()+hue-rotate()
-  // gives a uniform colourise over any sprite palette. Priority:
-  // freeze > burn > stun (freeze is the hard CC; it should dominate).
-  // v0.29.x perf — cap concurrent status-tint ctx.filter blits per frame. A
-  // ctx.filter forces an off-screen buffer + separate composite pass PER blit
-  // (the priciest per-mob GPU op), and a mass freeze / mass-burn DoT leaves
-  // 15-30 mobs afflicted for SECONDS — so 15-30 filtered blits render every
-  // frame, sustained. Beyond the cap the sprite draws untinted; the DoT/CC
-  // itself is applied in updateMonsters and is unaffected — only the cosmetic
-  // wash is dropped for the later-drawn mobs. Mirrors the hit-flash budget.
-  if (game._statusTintFrame !== game.time) { game._statusTintFrame = game.time; game._statusTintUsed = 0; }
-  const _stCap = (typeof _perfLowFx === 'function' && _perfLowFx()) ? 4 : 12;
-  let _statusTintOn = (m.freezeTimer > 0 || m.burnTimer > 0 || m.stunTimer > 0);
-  if (_statusTintOn) {
-    if (game._statusTintUsed >= _stCap) _statusTintOn = false;
-    else game._statusTintUsed++;
-  }
-  if (_statusTintOn) {
-    if (m.freezeTimer > 0)    ctx.filter = 'sepia(0.85) saturate(3.0) hue-rotate(175deg) brightness(1.10)';
-    else if (m.burnTimer > 0) ctx.filter = (m._dotKind === 'poison')
+  // yellow wash while stunned. Priority: freeze > burn > stun (freeze is
+  // the hard CC; it should dominate).
+  // v0.29.744 perf — routed through the tint BAKE (_lxMobTintFilter, consumed
+  // by _lxTintBake inside _lxDrawSoft) instead of a live ctx.filter. Every mob
+  // reaching this point is sprite-path — the sheet path returned above — and a
+  // live filter forced an offscreen composite PER blit, so mass-DoT fights
+  // spent up to 12 filtered blits per frame (and mobs past that cap silently
+  // lost their tint). The bake renders each (frame, filter) pair ONCE onto a
+  // cached canvas; after that the tint is a plain blit, so the cap is gone —
+  // every afflicted mob shows its status now. The previous global is RESTORED
+  // (not nulled) before this function's ctx.restore(): drawMonster wraps its
+  // call here with the hit-flash tint in the same global, and an active flash
+  // outranks the wash for its few frames — exactly the damage feedback a
+  // player needs on a frozen mob taking hits.
+  const _statusTintOn = (m.freezeTimer > 0 || m.burnTimer > 0 || m.stunTimer > 0);
+  const _stPrevTint = _lxMobTintFilter;
+  let _stBakedTint = false;
+  if (_statusTintOn && !_lxMobTintFilter) {
+    let _st;
+    if (m.freezeTimer > 0)    _st = 'sepia(0.85) saturate(3.0) hue-rotate(175deg) brightness(1.10)';
+    else if (m.burnTimer > 0) _st = (m._dotKind === 'poison')
       ? 'sepia(0.70) saturate(2.6) hue-rotate(60deg) brightness(1.02)'
       : 'sepia(0.75) saturate(3.2) hue-rotate(-18deg) brightness(1.05)';
-    else if (m.stunTimer > 0) ctx.filter = 'sepia(0.50) saturate(2.0) hue-rotate(15deg) brightness(1.12)';
+    else                      _st = 'sepia(0.50) saturate(2.0) hue-rotate(15deg) brightness(1.12)';
+    _lxMobTintFilter = _st; _stBakedTint = true;
   }
   const _stateImg = sprite ? _monsterStateFrame(m) : null;
   if (_stateImg) {
@@ -110718,6 +110789,7 @@ function _drawMonsterSprite(m, sx, sy) {
       _lxDrawSoft(ctx, sprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);   // v0.29.x — edge feather
     }
   }
+  if (_stBakedTint) _lxMobTintFilter = _stPrevTint;   // v0.29.744 — see status block
   ctx.restore();
 }
 
