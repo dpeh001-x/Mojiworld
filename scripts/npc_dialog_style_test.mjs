@@ -132,10 +132,38 @@ const r = await page.evaluate(async () => {
     im.src = 'Sprites/ui/npc_dialog_bg.webp?t=' + performance.now();
   });
 
-  dlg.style.display = 'none'; optDiv.innerHTML = '';
   return out;
 });
+
+// --- does the art actually SURVIVE the composite? --------------------------
+// The file can be perfect and the panel still render as flat violet: the art
+// sits under a wash and a radial edge vignette, and those darken the RIM —
+// exactly where this plate keeps its shards. Each layer looked defensible in
+// isolation; multiplied, they once cut an approved preview to a third of its
+// strength with nothing in the CSS diff looking wrong. So measure the PIXELS
+// THE PLAYER SEES, not the stylesheet.
+// Content hidden for this shot: the gold shop buttons and the gold NPC name are
+// themselves "warm", so measuring the panel with its contents in place scores
+// the UI rather than the backdrop it is asking about.
+await page.evaluate(() => { for (const el of document.getElementById('dialog').children) el.style.visibility = 'hidden'; });
+const shot = await page.locator('#dialog').screenshot();
+await page.evaluate(() => { const d = document.getElementById('dialog');
+  for (const el of d.children) el.style.visibility = '';
+  d.style.display = 'none'; document.getElementById('dialog-options').innerHTML = ''; });
 await b.close(); try { srv.kill(); } catch (e) {}
+const sharp = (await import('sharp')).default;
+const { data: px, info } = await sharp(shot).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+const strip = (x0, x1) => { let warm = 0, n = 0;
+  for (let y = 0; y < info.height; y++) for (let x = x0; x < x1; x++) {
+    const i = (y * info.width + x) * 3; n++;
+    if (px[i] > 70 && px[i] > px[i + 2] * 1.2 && px[i] > px[i + 1] * 1.05) warm++;
+  }
+  return Math.round(warm / n * 100); };
+const w6 = Math.max(8, Math.round(info.width * 0.06));
+r.rendered = { w: info.width, h: info.height,
+  left: strip(0, w6), right: strip(info.width - w6, info.width),
+  centre: strip(Math.round(info.width * 0.42), Math.round(info.width * 0.58)) };
+console.log('RENDERED panel:', JSON.stringify(r.rendered));
 
 console.log('bg size:', r.panelSize, '| stretched:', r.stretched);
 console.log('edge   :', JSON.stringify(r.edge));
@@ -165,8 +193,18 @@ for (const k of ['plain', 'shop', 'action', 'leave']) {
 ok('button text is set at a readable size and weight (>= 13px, 700)',
    parseFloat(r.font.size) >= 13 && r.font.weight === '700', r.font);
 
-ok('the plate stays a BACKDROP — mean alpha never approaches opaque',
-   r.edge.meanAlpha > 0 && r.edge.meanAlpha <= 120, { meanAlpha: r.edge.meanAlpha });
+ok('the art SURVIVES the composite — warm shards visible in the RENDERED left edge',
+   r.rendered.left >= 25, r.rendered);
+ok('...and in the rendered right edge', r.rendered.right >= 25, r.rendered);
+// Ratio, not an absolute floor on the centre: the panel is translucent
+// (backdrop-filter + 0.94 plate), so whatever is on screen behind it bleeds
+// through everywhere and would poison a fixed threshold. What the design
+// actually claims is that the edges are dramatically warmer than the middle,
+// and a ratio survives the bleed because the bleed is uniform.
+ok('...and the edges read dramatically warmer than the centre (the design is edge-framed)',
+   r.rendered.left >= r.rendered.centre * 2 && r.rendered.right >= r.rendered.centre * 2,
+   { ...r.rendered, leftRatio: +(r.rendered.left / Math.max(1, r.rendered.centre)).toFixed(1),
+     rightRatio: +(r.rendered.right / Math.max(1, r.rendered.centre)).toFixed(1) });
 ok('dialogue copy resolves to a real system UI face (no @font-face ships, so a named webfont would silently fall back)',
    r.copyUsesUiFace === true, { family: r.copy.family });
 ok('dialogue copy is set larger and heavier for body reading (>= 16px, >= 600)',
