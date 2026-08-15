@@ -9593,7 +9593,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.729';
+const GAME_VERSION = 'v0.29.730';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11161,6 +11161,10 @@ const LX_FX = (() => {
     shadowlord_clones: 'shadowlord_clones.webp',
     shinobi_seal:      'shinobi_seal.webp',
     warlord_banner:    'warlord_banner.webp',
+    // v0.29.x — the PLANTED standard (a world object that stands for the
+    // buff's duration), distinct from warlord_banner above which is the
+    // one-shot rally burst. Drawn by the warlord_banner hazard branch.
+    warlord_banner_planted: 'warlord_banner_planted.webp',
     crusader_aegis:    'crusader_aegis.webp',
     dragoon_skylance:  'dragoon_skylance.webp',
     // v0.25.215 — knight F (guardian) + beastmaster F (wild bond) + marksman G
@@ -16684,7 +16688,7 @@ const SKILLS = {
 
   // ============ MASTER SIGNATURES (slot p, level 20+) ============
   // Warrior path
-  warlord_warcry:     { name:'Warlord\'s Banner',  icon:'📯', cls:'warrior', job:'berserker', master:'warlord',     slot:'x', mp:30, cd:19000,  desc:'6s banner: ATK, heal, and +50% range on every skill. Rallies co-op partners on your map (War Cry + Bloodlust + heal).' },
+  warlord_warcry:     { name:'Warlord\'s Banner',  icon:'📯', cls:'warrior', job:'berserker', master:'warlord',     slot:'x', mp:30, cd:19000,  desc:'12s banner planted on the field: ATK, heal, and +50% range on every skill. Rallies co-op partners on your map (War Cry + Bloodlust + heal).' },
   doombringer_apoc:   { name:'Blade of Calamity',  icon:'⚔️', cls:'warrior', job:'berserker', master:'doombringer', slot:'x', mp:60, cd:18000, desc:'Summon a colossal sword: 10 forward cleaves, then a ground-slam finisher. Every hit brands foes with DOOM (+2% damage taken per stack, max 10) and stokes Calamity Heat.' },
   crusader_aegis:     { name:'Divine Aegis',       icon:'✝️', cls:'warrior', job:'knight',    master:'crusader',    slot:'x', mp:45, cd:26000, desc:'Heal 60% (co-op partners on your map too) + 5 hovering holy orbs strike nearby foes · HALF damage taken for 9s.' },
   dragoon_skylance:   { name:'Sky Lance',          icon:'🐉', cls:'warrior', job:'knight',    master:'dragoon',     slot:'x', mp:35, cd:16000,  desc:'Leap up, slam down with piercing force.' },
@@ -65712,6 +65716,30 @@ const SKILL_FNS = {
     // the rally moment. Held visible ~50 frames while the buff ramps in.
     spawnSpriteBurst(player.x + player.w / 2, player.y + player.h - 24, 'warlord_banner',
       { size: 200, life: 50 });
+    // v0.29.x (per user: "the warlord banner [should be] summoned onto the
+    // map for the duration stated") — the burst above is a ~0.8s flash, but
+    // the rally it announces runs for 12s. Plant a REAL standard in the
+    // world that stands for exactly that long: a cosmetic hazard, which is
+    // the engine's existing persistent-world-object lane (life in frames,
+    // its own draw branch, auto-removed by the generic `life <= 0` tail, and
+    // wiped with game.hazards on map change). It carries no damage — the
+    // banner is the buff's visible anchor, not a new attack.
+    {
+      const _wbLifeF = 720;   // frames — the same 720 the +50%-range stamp uses
+      // Recast replaces rather than stacks: two banners would double-draw.
+      for (let _i = game.hazards.length - 1; _i >= 0; _i--) {
+        if (game.hazards[_i] && game.hazards[_i].type === 'warlord_banner') game.hazards.splice(_i, 1);
+      }
+      const _wbW = 92, _wbH = 150;
+      const _wbCx = player.x + player.w / 2 + (player.facing > 0 ? -34 : 34);   // beside the caster, not under them
+      const _wbFootY = player.y + player.h;
+      game.hazards.push({
+        type: 'warlord_banner', cx: _wbCx,
+        x: _wbCx - _wbW / 2, y: _wbFootY - _wbH, w: _wbW, h: _wbH,
+        footY: _wbFootY,
+        life: _wbLifeF, maxLife: _wbLifeF,
+      });
+    }
     // v0.25.119 — also fire a forward fan of 3 shockwave projectiles.
     // Each pierces, travels ~270 px, and reads as a ground wave.
     // Angles: -25° / 0° / +25° relative to the facing direction.
@@ -81590,7 +81618,7 @@ function _afterImageCap() {
 // exist in small authored numbers (a singularity, the Spire's 8 static void
 // tears, a heal field...). Everything else is short-lived telegraph clutter —
 // in a pathological pileup the oldest of those are the right things to shed.
-const _HAZ_PROTECTED = new Set(['gravitos_singularity', 'void_tear', 'aurora_field', 'soul_vortex', 'necro_maelstrom', 'sovereign_drain_pillar', 'blackhole']);
+const _HAZ_PROTECTED = new Set(['gravitos_singularity', 'void_tear', 'aurora_field', 'soul_vortex', 'necro_maelstrom', 'warlord_banner', 'sovereign_drain_pillar', 'blackhole']);
 function _trimVisualQueues() {
   const pc = _particleCap();
   const dc = _damageNumberCap();
@@ -117928,6 +117956,7 @@ function drawPet() {
 
 function drawHazards() {
   if (!game.hazards || game.hazards.length === 0) return;   // v0.25.451: empty-list early-out
+  const _camYH = (game.camera && game.camera.y) || 0;   // v0.29.x — world->screen Y for the planted banner
   for (const h of game.hazards) {
     const sx = h.cx - game.camera.x;
     // v0.29.x perf — horizontal frustum cull. All types draw anchored to their
@@ -118507,6 +118536,46 @@ function drawHazards() {
           life: 30, color: '#aa44ff', size: 2
         });
       }
+    }
+    else if (h.type === 'warlord_banner') {
+      // v0.29.x — the planted standard. Anchored by its POLE BASE to the
+      // ground line it was cast on (h.footY) so it stands on the floor
+      // instead of floating; the art was trimmed to its own silhouette
+      // precisely so this anchor is honest. A slow sway + a warm ground
+      // glow sell it as planted rather than pasted, and the last ~0.5s
+      // fades out so it does not pop when the rally ends.
+      const _wbImg = LX_FX && LX_FX.warlord_banner_planted;
+      const _wbFade = Math.min(1, h.life / 30);
+      const _wbT = game.time * 0.04;
+      const _wbSway = Math.sin(_wbT) * 0.035;
+      const _wbBaseY = (h.footY != null ? h.footY : h.y + h.h) - _camYH;
+      ctx.save();
+      // warm rally glow pooled at the pole base
+      const _wbG = ctx.createRadialGradient(sx, _wbBaseY, 2, sx, _wbBaseY, h.w * 0.9);
+      _wbG.addColorStop(0, 'rgba(255,190,90,' + (0.30 * _wbFade) + ')');
+      _wbG.addColorStop(1, 'rgba(255,150,60,0)');
+      ctx.fillStyle = _wbG;
+      ctx.beginPath();
+      ctx.ellipse(sx, _wbBaseY, h.w * 0.9, h.w * 0.30, 0, 0, Math.PI * 2);
+      ctx.fill();
+      if (_lxFxReady(_wbImg)) {
+        ctx.globalAlpha = _wbFade;
+        ctx.translate(sx, _wbBaseY);
+        ctx.rotate(_wbSway);               // sways about the pole base
+        ctx.drawImage(_wbImg, -h.w / 2, -h.h, h.w, h.h);
+      } else {
+        // Procedural stand-in until the sprite decodes: pole + crimson flag.
+        ctx.globalAlpha = _wbFade;
+        ctx.translate(sx, _wbBaseY);
+        ctx.rotate(_wbSway);
+        ctx.fillStyle = '#3a2a20';
+        ctx.fillRect(-3, -h.h, 6, h.h);
+        ctx.fillStyle = '#c02028';
+        ctx.fillRect(-h.w * 0.34, -h.h + 12, h.w * 0.68, h.h * 0.5);
+        ctx.strokeStyle = '#e0b45a'; ctx.lineWidth = 3;
+        ctx.strokeRect(-h.w * 0.34, -h.h + 12, h.w * 0.68, h.h * 0.5);
+      }
+      ctx.restore();
     }
     else if (h.type === 'soul_vortex' || h.type === 'necro_maelstrom') {
       // v0.25.201 — Scaled visuals to match the buffed 320 px AOE.
