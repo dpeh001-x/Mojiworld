@@ -9695,7 +9695,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.773';
+const GAME_VERSION = 'v0.29.774';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11463,6 +11463,11 @@ const LX_FX = (() => {
     gravitos_blackhole: 'gravitos_blackhole.webp', // Gravitos blackhole pattern
     gravitos_singularity_zone: 'gravitos_singularity_zone.webp', // safe-zone marker
     gravitos_soulring:  'gravitos_soulring.webp',  // Soul Drain telegraph ring
+    // v0.29.774 — slam telegraph, replacing the airborne tell the boss lost when
+    // he was pinned to the floor. Two beats: the well he gathers at his feet,
+    // then the band that marks the column he is about to crush.
+    gravitos_slamring:  'gravitos_slamring.webp',  // slam wind-up gravity well
+    gravitos_slamzone:  'gravitos_slamzone.webp',  // slam strike-column floor band
     gravitos_laserring: 'gravitos_laserring.webp', // v0.29.572 — Laser Sweep charge ring
     gravitos_tendril:   'gravitos_tendril.webp',   // crushTendrils descending tendril
     // v0.26.521 — Lv-50 B-slot ULTIMATE cast VFX (one per master, id
@@ -75168,17 +75173,48 @@ function bossAI(m, dt, distToPlayer) {
       if (m.patternTimer > 1500) { m.patternState = 'idle'; m.patternTimer = 0; m._crushFired = false; }
     } else if (m.patternState === 'slam') {
       // Body slam — boss rises, then drops fast on player's column
+      // v0.29.774 — GROUNDED SLAM TELEGRAPH. The old tell was physical: he rose
+      // on a negative vy, hung there, then plummeted, and the impact fired off
+      // a foot-height landing test. Since v0.29.772 pinned him to the floor he
+      // never rises and that test reads TRUE on the very first frame of the
+      // window — so the attack landed roughly one frame after he
+      // repositioned, with no warning at all. Replaced with a two-beat
+      // telegraph that reads on the ground, and an explicit time gate instead
+      // of a landing test that can no longer mean anything:
+      //   0-400ms   GATHER — a gravity well winds up at his feet, with a light
+      //                      rumble. Says "something big is coming".
+      //   400ms     LOCK   — he repositions over the player and a band snaps
+      //                      onto the floor across the strike column.
+      //   400-650ms WARN   — 250ms to read the band and leave it.
+      //   650ms     IMPACT — the stomp, unchanged in damage and radius.
+      // The band is sized from the damage check below (|dx| < 180, so 360 px
+      // wide) rather than a hand-picked number, so the marker cannot drift
+      // away from the hitbox it promises.
       if (m.patternTimer < 400) {
-        m.vy = -6;                                    // lift
-      } else if (m.patternTimer < 500 && !m._slamPrep) {
+        if (!m._slamGather) {
+          m._slamGather = true;
+          if (typeof spawnSpriteBurst === 'function') {
+            spawnSpriteBurst(m.x + m.w / 2, m.y + m.h, 'gravitos_slamring',
+              { size: 300, life: 26, spin: Math.PI * 0.9 });
+          }
+        }
+        if (typeof addShake === 'function' && (game.time % 6 === 0)) addShake(2);
+      } else if (!m._slamPrep) {
         m._slamPrep = true;
         m.x = Math.max(0, Math.min(game.mapData.worldWidth - m.w, player.x + player.w/2 - m.w/2));
-      } else if (m.patternTimer < 900) {
-        m.vy = 16 * Math.sqrt(gravMul());             // plummet scaled to gravity
-        // Impact when near floor
-        if (m.y + m.h > 460 && !m._slamHit) {
+        if (typeof spawnSpriteBurst === 'function') {
+          // keepAspect anchors HEIGHT to size, so height is derived from the
+          // 360 px strike width and the art's own 512x288 proportion.
+          const _zw = 360, _zh = Math.round(_zw * 288 / 512);
+          spawnSpriteBurst(m.x + m.w / 2, m.y + m.h, 'gravitos_slamzone',
+            { size: _zh, life: 17, keepAspect: true });
+        }
+        if (typeof addShake === 'function') addShake(4);
+      } else if (m.patternTimer < 1100) {
+        if (m.patternTimer >= 650 && !m._slamHit) {
           m._slamHit = true;
           flash(0.3);
+          if (typeof addShake === 'function') addShake(10);   // v0.29.774 — the stomp lands with weight
           const cx = m.x + m.w/2;
           // v0.26.053 — Removed an inert `for (const mm of game.monsters) {
           // /* ignore */ }` loop here. It iterated every live monster on
@@ -75215,7 +75251,7 @@ function bossAI(m, dt, distToPlayer) {
           }
         }
       }
-      if (m.patternTimer > 1100) { m.patternState = 'idle'; m.patternTimer = 0; m._slamPrep = false; m._slamHit = false; }
+      if (m.patternTimer > 1100) { m.patternState = 'idle'; m.patternTimer = 0; m._slamPrep = false; m._slamHit = false; m._slamGather = false; }
     } else if (m.patternState === 'pull') {
       // Gravity well — pull player toward boss for 700ms
       if (m.patternTimer < 700) {
