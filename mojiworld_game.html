@@ -9614,7 +9614,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.747';
+const GAME_VERSION = 'v0.29.748';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -31834,10 +31834,37 @@ const MOJICOIN_GAIN_MULT = 0.5;
 // executeSellSelection grants Math.floor(price*0.4) through _grantMojicoins,
 // which re-applies MOJICOIN_GAIN_MULT — so every "sell for N" row / summary /
 // confirm must show the post-scalar value or it overstates the payout (~2×).
-// This helper mirrors _grantMojicoins(floor(price*0.4)) exactly.
+// v0.29.748 — GEAR MARKET PRICE, one source of truth for both counters.
+// Per-tier TARGET price: the tier's median item lands exactly here, so a tier
+// is retuned by editing one number. The item's own catalog value still RANKS
+// pieces inside its tier, compressed (^0.3) so the whole tier reads as one
+// price point (raw T3 spread is 2.4x, which would otherwise put generic T3s at
+// half the class ones). openShop adds only the mail-order surcharge on top.
+const _GEAR_TIER_PRICE  = { 2: 30000, 3: 200000, 4: 500000, 6: 1600000, 7: 3200000, 8: 6000000, 9: 11000000, 10: 19000000 };
+const _GEAR_TIER_MEDIAN = { 2: 1000,  3: 2700,   4: 4000,   6: 10500,   7: 16000,   8: 23500,   9: 36000,    10: 54000 };
+function _lxGearMarketPrice(it) {
+  if (!it || typeof it.price !== 'number' || !isFinite(it.price)) return 0;
+  const t = it.tier | 0;
+  const target = _GEAR_TIER_PRICE[t];
+  if (!target) return Math.max(1, Math.round(it.price * 3));   // untiered / T0-T1: catalog-based
+  const med = _GEAR_TIER_MEDIAN[t] || it.price || 1;
+  const rel = Math.pow(Math.max(0.05, it.price / med), 0.3);
+  const raw = target * rel;
+  return raw >= 10000 ? Math.round(raw / 1000) * 1000 : Math.max(1, Math.round(raw / 100) * 100);
+}
+// v0.29.748 — per user "on resale sell back the price at value of 10% of
+// original price". Sell-back is now 10% of the item's MARKET price (what the
+// forge charges for it), not 40% of the raw catalog number. Two consequences
+// worth stating: a T3 that costs 202,000 returns 20,200 rather than 560, so
+// rare drops are finally worth carrying to a shop — and buying then reselling
+// still loses 90%, so there is no laundering loop.
+// This returns the FINAL payout; the grant site passes {full:true} so
+// MOJICOIN_GAIN_MULT is not applied a second time (the old helper existed
+// purely to mirror that double-scaling, which overstated rows ~2x).
+const GEAR_SELLBACK_PCT = 0.10;
 function _sellPriceOf(it) {
-  if (!it || typeof it.price !== 'number') return 0;
-  return Math.max(0, Math.floor(Math.floor(it.price * 0.4) * MOJICOIN_GAIN_MULT));
+  if (!it || typeof it.price !== 'number' || !isFinite(it.price)) return 0;
+  return Math.max(0, Math.floor(_lxGearMarketPrice(it) * GEAR_SELLBACK_PCT));
 }
 const _coinGainMult = () => (typeof player !== 'undefined' && player && player.level <= 25 ? 0.6 : MOJICOIN_GAIN_MULT); // v0.26.x — softer mid-game coin famine
 // v0.26.437 — Per user "make loots from monsters much lesser so quests play
@@ -84846,9 +84873,9 @@ function executeSellSelection() {
     const it = player.inventory[idx];
     if (!it) continue;
     if (typeof it.price !== 'number' || !isFinite(it.price)) continue;   // v0.26.1031 — never destroy price-less items (recipe scrolls, Zodiac Sigils) for 0 coins
-    const val = Math.floor(it.price * 0.4);
+    const val = _sellPriceOf(it);   // v0.29.748 — 10% of market price, already final
     for (const s in player.equipped) { if (player.equipped[s] === it) player.equipped[s] = null; }
-    gained += _grantMojicoins(val);
+    gained += _grantMojicoins(val, { full: true });   // {full} — _sellPriceOf is the payout, not a pre-scalar figure
     count++;
     player.inventory.splice(idx, 1);
   }
@@ -85024,25 +85051,12 @@ function openShop(type, opts) {
     // T2 reachable (~30k) and makes T3 the real expedition. Within-tier spread
     // is preserved because the item's own catalog price still drives it.
     //   T2 ~18-33k | T3 ~89-215k | T4 ~350-525k | T6+ into the millions
-    // Per-tier TARGET price: the tier's median item lands exactly here. Tune a
-    // tier by editing one number.
-    const _GEAR_TIER_PRICE  = { 2: 30000, 3: 200000, 4: 500000, 6: 1600000, 7: 3200000, 8: 6000000, 9: 11000000, 10: 19000000 };
-    const _GEAR_TIER_MEDIAN = { 2: 1000,  3: 2700,   4: 4000,   6: 10500,   7: 16000,   8: 23500,   9: 36000,    10: 54000 };
+    // v0.29.748 — the ladder itself now lives at top level as
+    // _lxGearMarketPrice (see near _sellPriceOf) so the SELL desk prices from
+    // the same table. Here it only adds the mail-order surcharge.
     const _gearPx = (it) => {
-      const _t = it.tier | 0;
-      const _target = _GEAR_TIER_PRICE[_t];
-      if (!_target) return Math.max(1, Math.round(it.price * 3 * _mult));   // T0/T1 are never racked
-      const _med = _GEAR_TIER_MEDIAN[_t] || it.price || 1;
-      // The item's own catalog value still RANKS items inside the tier, but it
-      // is compressed (^0.3) so the whole tier reads as one price point. Raw
-      // catalog spread inside T3 is 2.4x (1,200 generic vs 2,900 class), which
-      // un-compressed put generic T3s at ~100k while class T3s hit 200k — the
-      // tier then reads as "about 100k" on the rack the player scrolls first.
-      // Compressed, every T3 sits in 157k-204k and the class piece is still
-      // dearest.
-      const _rel = Math.pow(Math.max(0.05, it.price / _med), 0.3);
-      const _raw = _target * _rel * _mult;
-      // Round to a readable figure so the racks show 200,000 rather than 199,800.
+      const _base = _lxGearMarketPrice(it);
+      const _raw = _base * _mult;
       return _raw >= 10000 ? Math.round(_raw / 1000) * 1000 : Math.max(1, Math.round(_raw / 100) * 100);
     };
     // (the old first-N-rows tier proxy died here — it selected by ARRAY
@@ -85120,7 +85134,7 @@ function openShop(type, opts) {
     if (!player.inventory.length) {
       // v0.25.246 (Q5) — empty-state copy now hints at the buy → equip
       // → sell loop instead of the bare "Nothing to sell."
-      list.innerHTML = '<div style="text-align:center;padding:20px;color:#888;font-style:italic;line-height:1.6">🛍️ Sell unwanted gear here for ~40% of its buy price.<br>Pick up drops or buy from Brok\'s Forge to fill your bags.</div>';
+      list.innerHTML = '<div style="text-align:center;padding:20px;color:#888;font-style:italic;line-height:1.6">🛍️ Sell unwanted gear here for 10% of its market price.<br>Pick up drops or buy from Brok\'s Forge to fill your bags.</div>';
     } else {
       // v0.25.776 — Multi-select sell UI. Replaces the previous one-row-
       // per-button flow (which re-rendered the whole shop after every
