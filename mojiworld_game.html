@@ -9738,7 +9738,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.793';
+const GAME_VERSION = 'v0.29.794';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -41274,14 +41274,12 @@ function loadState() {
       const _SL = ['weapon', 'armor', 'accessory'];
       const _SLL = { weapon:'Weapon', armor:'Armor', accessory:'Accessory' };
       if (!Array.isArray(player.inventory)) player.inventory = [];
-      for (const _s of player.recipeScrolls) {
-        if (!_s || !_s.setId) continue;
-        const _rs = _s.recipeSlot || _SL[Math.floor(Math.random() * _SL.length)];
-        player.inventory.push({
-          name: `${_SETLBL[_s.setId] || _s.setId} ${_SLL[_rs]} Recipe`,
-          icon: '📜', type: 'recipe', setId: _s.setId, recipeSlot: _rs, rarity: 'legendary',
-          desc: `Crafts a ${_SETLBL[_s.setId] || _s.setId} ${_SLL[_rs].toLowerCase()}. Spends 3 different Zodiac Sigils.`,
-        });
+      // v0.29.7xx — scrolls are retired, so the legacy array is bought out
+      // rather than re-minted into inventory items nothing can read.
+      let _legacyScrolls = 0;
+      for (const _s of player.recipeScrolls) { if (_s && _s.setId) _legacyScrolls++; }
+      if (_legacyScrolls > 0 && typeof SCROLL_BUYOUT_SHARDS === 'number') {
+        player.setshards = (player.setshards | 0) + _legacyScrolls * SCROLL_BUYOUT_SHARDS;
       }
       player.recipeScrolls = [];
     }
@@ -41289,6 +41287,8 @@ function loadState() {
     // (the pre-rename map id). Migrate to the new id so the spawn loader
     // doesn't return a "no such map" null. Bossdefeated keys + any other
     // historical references also migrated below.
+    // v0.29.7xx — and the ones already sitting in the bag (see _lxRetireRecipeScrolls).
+    try { if (typeof _lxRetireRecipeScrolls === 'function') _lxRetireRecipeScrolls(); } catch (e) {}
     if (player.currentMap === 'shadowSlums') player.currentMap = 'shadowWovenHood';
     if (game && game.currentMap === 'shadowSlums') game.currentMap = 'shadowWovenHood';
     if (game && game.bossDefeated && game.bossDefeated.shadowSlums) {
@@ -50852,7 +50852,7 @@ function offerPrestige() {
                // before, the copy must match the reset below exactly — an
                // irreversible confirm must not lie in either direction.
                `You KEEP your equipment only — equipped gear and the gear in your inventory.\n` +
-               `EVERYTHING else resets: level, stats, job/master, talents, skill tree, boons, skill ranks, quests, boss clears, setshards, mojicoins (wallet + bank), consumables, non-gear items (including <b>Zodiac Sigils and recipe scrolls</b>), and your MojiMon roster + species kill counts.\n\n` +
+               `EVERYTHING else resets: level, stats, job/master, talents, skill tree, boons, skill ranks, quests, boss clears, setshards, mojicoins (wallet + bank), consumables, non-gear items (including <b>Zodiac Sigils</b>), and your MojiMon roster + species kill counts.\n\n` +
                `Ascension #${nextCount}.`;
   // v0.25.244 (X4) — in-game styled prestige confirm.
   uiConfirm({
@@ -79880,7 +79880,12 @@ function killMonster(m) {
   // .level field, the MOB_NATURAL_LEVEL table, or the map's levelReq —
   // see L13173. Stops players from cheesing scrolls off pre-Aetherion
   // tier bosses.
-  const _scrollLvOk = (typeof _mobLevel === 'function') && _mobLevel(m) > 40;
+  // v0.29.7xx — RECIPE SCROLLS REMOVED (per user: "too complicated"). The
+  // four-step chain (scroll drop -> 3 distinct sigils -> Use tab -> set piece)
+  // is gone; zodiac sigils are now simply tradeable at Brok for
+  // SIGIL_TRADE_SHARDS each. This roll is retired rather than deleted so the
+  // level gate + signature-set logic below stays readable in history.
+  const _scrollLvOk = false;   // was: _mobLevel(m) > 40
   if (_scrollLvOk && (m.isBoss || m.isElite || m.isMiniBoss) && !(game.expedition && game.expedition.active)) {
     // v0.26.496 — Drop rate reduced slightly per user (boss 0.20→0.15,
     // miniboss 0.10→0.07, elite 0.05→0.035).
@@ -79935,7 +79940,7 @@ function killMonster(m) {
       player.inventory.push({
         name: `${_sign.name} Sigil`, icon: _sign.glyph || '✨',
         type: 'etc', zodiacSigil: _sign.id, rarity: 'epic',
-        desc: `Zodiac Sigil (${_sign.glyph || ''} ${_sign.id}). Collect 3 DIFFERENT sigils — a recipe scroll spends 3 to craft its set piece.`,
+        desc: `Zodiac Sigil (${_sign.glyph || ''} ${_sign.id}). Trade it to Brok in Everdawn Central for ${(typeof SIGIL_TRADE_SHARDS === 'number' ? SIGIL_TRADE_SHARDS : 1000)}\u25c8 setshards.`,
       });
       if (typeof showToast === 'function') showToast(`${_sign.glyph || '✨'} ${_sign.name} Sigil obtained!`, 'legendary');
     }
@@ -83398,9 +83403,11 @@ function openNPC(npc) {
       text =
         _wv.craft + '\n\n' +
         'CRAFT — Setshards (\u25c8) become set legendaries.\n\n' +
-        '\u2022 CRAFT SET PIECE — forge ANY set item for 10\u25c8 + 3,000 coins. Disassemble spare set drops for +4\u25c8 each.\n' +
-        '\u2022 RECIPE SCROLLS — they live in yer bag (B \u2192 Use tab). Click one to craft its set piece; costs three DIFFERENT Zodiac Sigils. The zodiac each drop one when slain.';
+        '\u2022 CRAFT SET PIECE — forge ANY set item for ' + CRAFT_COST_SHARDS + '\u25c8 + ' + CRAFT_COST_MOJICOINS.toLocaleString() + ' coins. Disassemble spare set drops for +' + CRAFT_DISASSEMBLE_REWARD + '\u25c8 each.\n' +
+        '\u2022 ZODIAC SIGILS — every zodiac boss drops one. Bring \'em here: ' + SIGIL_TRADE_SHARDS + '\u25c8 apiece, no questions.';
       opts.push({ t:`Craft Set Piece 🔧 (${player.setshards || 0}◈)`, cb:() => { game._brokMenu = null; closeDialog(); openCraftingModal(); } });
+      // v0.29.7xx — the sigil trade, offered right where shards are spent.
+      opts.push({ t:`Trade Zodiac Sigil ◈ (${_lxSigilCount()} held → +${SIGIL_TRADE_SHARDS}◈)`, cb:() => { closeDialog(); _lxTradeZodiacSigil(); } });
       opts.push({ t:'◀ Back', cb:() => { game._brokMenu = null; openNPC(npc); } });
     } else {
       // v0.29.60 — Brok remembers the Hourglass verdict (the q_hourglass_5
@@ -83456,8 +83463,10 @@ function openNPC(npc) {
       opts.push({ t:'Reforge (500◈, Lv 50+) ↻', cb:() => { game._brokMenu = null; closeDialog(); reforgeRandomEquipment(); } });
       opts.push({ t:'◀ Back', cb:() => { game._brokMenu = null; openNPC(npc); } });
     } else if (_fm === 'craft') {
-      text = '*Furnax feeds the furnace.*\n\nCRAFT.\n\n\u2022 CRAFT SET PIECE — any set item, 10\u25c8 + 3,000 coins. Disassembling spares yields +4\u25c8.\n\u2022 RECIPE SCROLLS — in your bag (B \u2192 Use tab); each costs three different Zodiac Sigils.';
+      text = '*Furnax feeds the furnace.*\n\nCRAFT.\n\n\u2022 CRAFT SET PIECE — any set item, ' + CRAFT_COST_SHARDS + '\u25c8 + ' + CRAFT_COST_MOJICOINS.toLocaleString() + ' coins. Disassembling spares yields +' + CRAFT_DISASSEMBLE_REWARD + '\u25c8.\n\u2022 ZODIAC SIGILS — trade one for ' + SIGIL_TRADE_SHARDS + '\u25c8.';
       opts.push({ t:`Craft Set Piece 🔧 (${player.setshards || 0}◈)`, cb:() => { game._brokMenu = null; closeDialog(); openCraftingModal(); } });
+      // v0.29.7xx — the sigil trade, offered right where shards are spent.
+      opts.push({ t:`Trade Zodiac Sigil ◈ (${_lxSigilCount()} held → +${SIGIL_TRADE_SHARDS}◈)`, cb:() => { closeDialog(); _lxTradeZodiacSigil(); } });
       opts.push({ t:'◀ Back', cb:() => { game._brokMenu = null; openNPC(npc); } });
     } else {
       opts.push({ t:'🛒 Shop — buy & sell', cb:() => { game._brokMenu = 'shop'; openNPC(npc); } });
@@ -86993,6 +87002,64 @@ async function useRecipeScrollItem(it, prefix) {
 // Lives in Brok's NPC dialog. Single fungible shard pool — all sets
 // share the same currency, so cross-class drops always have a use.
 const CRAFT_DISASSEMBLE_REWARD = 4;
+// =========================================================================
+// v0.29.7xx — ZODIAC SIGILS ARE CURRENCY (per user: "remove the concept of
+// recipe scrolls it is too complicated, instead make the zodiac sigil
+// tradeable for 1000 setshards"). One sigil, one trade, one price — replacing
+// the scroll chain (boss drop -> 3 distinct sigils -> Use tab -> set piece).
+// =========================================================================
+const SIGIL_TRADE_SHARDS = 1000;
+function _lxSigilCount() {
+  let n = 0;
+  for (const it of (player.inventory || [])) if (it && it.zodiacSigil) n++;
+  return n;
+}
+async function _lxTradeZodiacSigil() {
+  const have = _lxSigilCount();
+  if (have <= 0) {
+    if (typeof showToast === 'function') showToast('No Zodiac Sigils to trade — each zodiac boss drops one.', 'rare');
+    return;
+  }
+  const i = (player.inventory || []).findIndex(it => it && it.zodiacSigil);
+  if (i < 0) return;
+  const it = player.inventory[i];
+  const ok = (typeof uiConfirm === 'function') ? await uiConfirm({
+    title: '◈ Trade Zodiac Sigil',
+    body: 'Trade ' + (it.name || 'a Zodiac Sigil') + ' for ' + SIGIL_TRADE_SHARDS + '◈ setshards?\n\n'
+        + '• You have ' + have + ' sigil' + (have === 1 ? '' : 's') + '\n'
+        + '• The sigil is consumed.',
+    yesLabel: 'Trade (+' + SIGIL_TRADE_SHARDS + '◈)', noLabel: 'Keep it',
+  }) : true;
+  if (!ok) return;
+  const j = (player.inventory || []).findIndex(x => x && x.zodiacSigil);   // re-find after the await
+  if (j < 0) return;
+  const sold = player.inventory[j];
+  player.inventory.splice(j, 1);
+  player.setshards = (player.setshards | 0) + SIGIL_TRADE_SHARDS;
+  if (typeof showToast === 'function') showToast('◈ +' + SIGIL_TRADE_SHARDS + ' setshards for ' + (sold.name || 'the sigil') + '!', 'legendary');
+  if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('levelup'); } catch (e) {} }
+  if (typeof saveState === 'function') saveState();
+}
+// v0.29.7xx — one-time buy-out for scrolls already in a bag. Recipe scrolls no
+// longer drop and can no longer be read, so leaving them as unusable paper is
+// exactly the clutter this change removes. Converts each to 200 setshards.
+const SCROLL_BUYOUT_SHARDS = 200;
+function _lxRetireRecipeScrolls() {
+  try {
+    if (!Array.isArray(player.inventory)) return;
+    let n = 0;
+    for (let i = player.inventory.length - 1; i >= 0; i--) {
+      const it = player.inventory[i];
+      if (it && it.type === 'recipe') { player.inventory.splice(i, 1); n++; }
+    }
+    if (n > 0) {
+      player.setshards = (player.setshards | 0) + n * SCROLL_BUYOUT_SHARDS;
+      if (typeof showToast === 'function') {
+        showToast('◈ Recipe scrolls retired — ' + n + ' exchanged for ' + (n * SCROLL_BUYOUT_SHARDS) + ' setshards.', 'legendary');
+      }
+    }
+  } catch (e) {}
+}
 // v0.25.823 — Craft cost raised 10 → 200 to match the new universal
 // boss-shard economy (Gravitos drops 50, so 1 craft = 4 Gravitos kills
 // or ~50 disassembled set pieces). Reforge cost separately moved 200 →
@@ -91286,10 +91353,10 @@ function renderInventory(prefix) {
       slot.innerHTML = it.icon;
       // v0.26.496 — Recipe scrolls are usable from the Use tab: click to craft
       // their set piece (spends 3 different Zodiac Sigils — see the helper).
+      // v0.29.7xx — recipe scrolls retired; any straggler is inert paper that
+      // _lxRetireRecipeScrolls buys out on the next load.
       if (it.type === 'recipe') {
-        slot.style.cursor = 'pointer';
-        slot.title = (it.name || 'Recipe') + ' — click to craft';
-        slot.onclick = () => { if (typeof useRecipeScrollItem === 'function') useRecipeScrollItem(it, prefix); };
+        slot.title = (it.name || 'Recipe') + ' — retired; exchanged for setshards on reload';
       }
       attachTooltip(slot, it);
       grid.appendChild(slot);
