@@ -9680,7 +9680,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.766';
+const GAME_VERSION = 'v0.29.767';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -59861,6 +59861,7 @@ function triggerDeath() {
   game._eclipseAlpha = 0; game._eclipseState = null; game._eclipseCD = null;
   game.blackFlashOverlay = 0; game.blackHoldFrames = 0;   // v0.26.1024 — same class: overlay renders while dead, decay only runs alive
   game._diedInExpedition = false;   // v0.26.x audit -- never inherit a stale flag from an aborted prior death
+  player._downFallAt = 0; player._downRiseAt = 0;   // v0.29.764 — the downed pose ends with death; a respawned hero stands up instantly, no ghost get-up
   // v0.26.x glitch-fix -- death mid-Shackle-QTE: updatePlayer early-returns while
   // dying so _qteFrame never fires again to self-clear; do it here so the player
   // doesn't respawn stunned with an orphaned QTE card.
@@ -101010,6 +101011,11 @@ const HERO_FLOOR_NUDGE = 6;
 // animate the real equipped eye art instead — matches any style, no assets.
 let _heroBlinkEnd = 0, _heroBlinkNext = 0;
 function _heroBlinkFactor() {
+  // v0.29.764 — a downed hero's eyes stay CLOSED: hold the blink at its
+  // deepest squash (a regular blink bottoms out at 0.12) for the whole
+  // downed draw. The flag is set/cleared around drawPlayer's rotated
+  // region only, so peers and previews are untouched.
+  if (window._lxDownedDraw) return 0.10;
   const t = (typeof game !== 'undefined' && game.time) ? game.time : 0;
   if (!_heroBlinkNext) _heroBlinkNext = t + 120 + Math.floor(Math.random() * 180);
   if (t >= _heroBlinkNext && t >= _heroBlinkEnd) {
@@ -104858,7 +104864,7 @@ function drawPlayer() {
   // uses the TRUE player.y (not the sand-sink visual offset) so the shadow
   // doesn't drift while idling on sand.
   _lxDrawBlobShadow(sx + player.w / 2, sy + player.h, player.y + player.h, player.x, player.w);
-  if (player.invulnerable > 0 && player.dodgeTimer <= 0 && Math.floor(player.invulnerable / 60) % 2 === 0) return;
+  if (player.invulnerable > 0 && player.dodgeTimer <= 0 && !player._downed && Math.floor(player.invulnerable / 60) % 2 === 0) return;   // v0.29.764 — downed is a held pose, not a mercy blink; never flicker-vanish it
   // v0.25.249 — set-bonus 3pc aura sits behind the character.
   drawSetAura();
   // v0.25.513 — Hallowed Field on-screen indicator. While the
@@ -104891,6 +104897,42 @@ function drawPlayer() {
   _spawnPlayerTrail();
   // v0.29.127 — stamp this frame's squash/stretch weight for the LOCAL player
   // only; _chibiApply consumes it. Peer/preview draws never set it.
+  // v0.29.764 — DOWNED POSE (per user: "do not make the character disappear,
+  // create a downed animation whereby character sprite falls horizontal
+  // facedown with closed (blinked) state of eyes"). While player._downed the
+  // whole hero draw below runs inside a rotation: 0→90° over ~0.45s (small
+  // settle-bounce at the end), pivoted just above the feet so the body lies
+  // ON the ground line instead of bisecting it. The head tips toward the
+  // facing side, which for a side-view sprite is what lands it facedown.
+  // On revive the same rotation runs backwards over ~0.3s (a quick scramble
+  // up); a real death clears the stamps in triggerDeath so a respawn never
+  // replays the get-up at the graveyard. _lxDownedDraw is the closed-eyes
+  // signal for _heroBlinkFactor — scoped to THIS draw so co-op peers and
+  // creator previews sharing the pipeline keep their own eyes open.
+  {
+    let _downK = 0;
+    if (player._downed) {
+      if (!player._downFallAt) { player._downFallAt = game.time; player._downFallFace = player.facing || 1; player._downRiseAt = 0; }
+      const _fp = Math.min(1, (game.time - player._downFallAt) / 27);
+      _downK = _fp < 0.78
+        ? (_fp / 0.78) * (_fp / 0.78)                                  // accelerating fall
+        : 1 + 0.07 * Math.sin(((_fp - 0.78) / 0.22) * Math.PI);        // settle bounce
+    } else if (player._downFallAt) {
+      if (!player._downRiseAt) player._downRiseAt = game.time;
+      const _rp = (game.time - player._downRiseAt) / 18;
+      if (_rp >= 1) { player._downFallAt = 0; player._downRiseAt = 0; }
+      else _downK = 1 - _rp;
+    }
+    if (_downK > 0) {
+      const _pvx = sx + player.w / 2;
+      const _pvy = sy + player.h - player.w * 0.40;
+      ctx.save();
+      ctx.translate(_pvx, _pvy);
+      ctx.rotate((player._downFallFace || 1) * (Math.PI / 2) * _downK);
+      ctx.translate(-_pvx, -_pvy);
+      window._lxDownedDraw = true;
+    }
+  }
   window._chibiWeightPending = (typeof _computeChibiWeight === 'function') ? _computeChibiWeight() : null;
   _chibiApply(sx, sy);
   // Block / parry shield bubble — drawn under the character so it haloes behind
@@ -104956,6 +104998,9 @@ function drawPlayer() {
   // Face overlay only when neither vector nor sprite is rendering — the
   // vector path draws its own eyes / mouth.
   if (_CHAR_STYLE !== 'vector' && !player.lookCustom && !_hasCustomSprite) _drawCuteFaceOverlay(sx, sy);
+  // v0.29.764 — close the downed-pose rotation; the nameplate + status row
+  // below stay upright above the body, matching monster tag behaviour.
+  if (window._lxDownedDraw) { window._lxDownedDraw = false; ctx.restore(); }
   _drawPlayerNameTag(sx, sy);
   _drawPlayerStatusIcons(sx, sy);
   return;
