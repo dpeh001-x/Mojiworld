@@ -121,6 +121,51 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.769 — The Gravitos fight was rendering on 1656 px boss art the whole time</h2>
+<p>
+  <span class="pill bug">bug</span>
+  Per user: <em>“the initial tutorial fight is still very very very buggy”</em>, then
+  <em>“it has an incredible amount of lag when fighting gravitos”</em>.
+</p>
+<p>
+  <b>Root cause.</b> The v0.29.742 memo fast-path in the boss-frame bake pump called
+  <code>swap()</code> three lines <em>above</em> <code>swap</code>'s own <code>const</code>
+  declaration — squarely inside its temporal dead zone. So the fast path threw
+  <code>ReferenceError</code> every single time it hit, which is every already-baked source.
+  The throw escaped a Promise executor as a rejection, and the pump consumed it with a bare
+  <code>.then()</code> that never ran, so each rejection permanently leaked one of the pump's
+  four concurrent slots. <b>Four throws wedged the pump forever</b>, and four is exactly what
+  the Singularity produced.
+</p>
+<p><b>What that cost, measured on the live arena:</b></p>
+<ul>
+  <li><b>13 of the 14 Gravitos frames never shrank.</b> The fight ran on 1656 px source images
+    — 30.2 MP of boss art — rescaled to roughly 340 px on every single frame. The phase-1 set
+    alone carried <b>8.1 MP</b> with one frame baked; it now carries <b>2.5 MP</b> with all four
+    baked.</li>
+  <li><b>The boss-sizing pre-derive never ran at all.</b> It sits on the pump's completion path,
+    which a wedged pump never reaches — and that pass exists specifically to keep its
+    <code>getImageData</code> sweeps out of the fight and under the loading fade.</li>
+</ul>
+<p>
+  <b>The fix</b> is two lines: move the memo fast-path below the declarations it uses, and settle
+  the pump on rejection as well as success (<code>.catch(() =&gt; {}).then(…)</code>) so no future
+  throw can ever leak a slot again. A frame that fails to shrink is a slow frame; a wedged pump
+  is a broken fight.
+</p>
+<p>
+  <b>Measured effect</b>, two interleaved A/B runs of a 12 s Gravitos fight in steady state:
+  worst-case frame <b>130–226 ms → 69–73 ms</b>, p99 <b>52→37 ms</b> and <b>106→44 ms</b>,
+  <code>createImageBitmap</code> <b>8.5–9.3% → 1.1%</b> of samples, <code>drawImage</code>
+  <b>2.4% → 1.0%</b>. The fixed build rendered more frames than the base build in every round.
+</p>
+<p><b>Verification.</b> <code>scripts/gravitos_bake_pump_test.mjs</code> — 7 assertions read off
+  the live sprite registry after a real arena entry: no dead-zone throw, no page errors at all,
+  and every phase-1 Gravitos frame is a baked canvas rather than its raw source. The pre-fix
+  build fails 5 of them with the 4 <code>ReferenceError</code>s and 3 frames still at 1656 px.
+  (The later-phase <code>gravitos2</code>/<code>gravitos3</code> sets stay large on purpose — the
+  warm pass skips them because they are not on screen when the fight opens.)</p>
+
 <h2>v0.29.768 <span class="tag"><span class="pill polish">polish</span> Setshards get an icon that looks like setshards</span></h2>
 <p>Per user &mdash; <em>&ldquo;Should include amount of setshard here with its own generated icon&rdquo;</em> (HUD stat row).</p>
 <p><b>The count was already there</b> &mdash; it is the <b>17</b> in the report&rsquo;s own screenshot, sitting between Mojicoins and Kills. What it lacked was an icon that says so: the shipped art was a polished cyan diamond, which reads as a generic gem or a second currency, so the chip was invisible <em>as setshards</em> even while being perfectly visible as a number. That is the actual bug, and it is why the request reads as &ldquo;should include&rdquo;.</p>

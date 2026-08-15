@@ -9680,7 +9680,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.768';
+const GAME_VERSION = 'v0.29.769';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -109715,14 +109715,25 @@ function _warmMapArt(id, opts) {
     const _cap = sl.capBase ? _lxShrinkCap(sl.capBase) : CAP;   // v0.29.356 — mobs bake to their own 480 base
     const w = im.naturalWidth, h = im.naturalHeight;
     if (Math.max(w, h) <= _cap) { im._lxNoShrink = true; return res(); }
-    // v0.29.742 — a finished bake (from either pipeline) is reused, not repeated:
-    // the entry counter measured every Gravitos source baked twice because the
-    // warm pump and the lazy shrink each paid for the same 6.6 MP decode.
-    if (im._lxBakedCv && Math.max(im._lxBakedCv.width, im._lxBakedCv.height) <= _cap) { swap(im._lxBakedCv); return; }
     const s = _cap / Math.max(w, h);
     const bw = Math.max(1, Math.round(w * s)), bh = Math.max(1, Math.round(h * s));
     const swap = (cv) => { if (cv && sl.holder[sl.key] === im) { sl.holder[sl.key] = cv; sl.holder._readyN = 0; } res(); };
     const fallback = () => { try { swap(_lxBakeToLong(im, CAP)); } catch (e) { res(); } };
+    // v0.29.742 — a finished bake (from either pipeline) is reused, not repeated:
+    // the entry counter measured every Gravitos source baked twice because the
+    // warm pump and the lazy shrink each paid for the same 6.6 MP decode.
+    // v0.29.769 — MOVED below the two consts above. It used to sit before them and
+    // called swap() inside its own temporal dead zone, so the fast path threw
+    // ReferenceError EVERY time it hit — which is every already-baked source.
+    // The throw escaped the Promise executor as a rejection, and the pump below
+    // had no rejection path, so each one permanently consumed one of its four
+    // concurrent slots. Four throws = pump wedged forever. Measured on the
+    // Singularity: 13 of the 14 Gravitos frames never shrank and the fight ran
+    // on 1656 px sources (30.2 MP of boss art) rescaled to ~340 px every frame,
+    // while the boss-sizing pre-derive that follows the pump — the pass that
+    // exists specifically to keep getImageData scans out of the fight — never
+    // ran at all.
+    if (im._lxBakedCv && Math.max(im._lxBakedCv.width, im._lxBakedCv.height) <= _cap) { swap(im._lxBakedCv); return; }
     if (typeof createImageBitmap !== 'function') return fallback();
     try {
       _lxBitmapOffThread(im, bw, bh)   // v0.29.749 — blob-fed: decode leaves the main thread
@@ -109746,7 +109757,11 @@ function _warmMapArt(id, opts) {
       while (active < 4 && next < slots.length) {
         const sl = slots[next++];
         active++;
-        bakeOne(sl).then(() => { active--; pump(); });
+        // v0.29.769 — settle on BOTH outcomes. A rejected bakeOne used to skip the
+        // decrement entirely, so one throw leaked a slot and four killed the
+        // pump (see the TDZ note above). A frame that fails to shrink is a
+        // slow frame; a wedged pump is a broken fight.
+        bakeOne(sl).catch(() => {}).then(() => { active--; pump(); });
       }
       if (active === 0 && next >= slots.length) done(slots.length);
     };
