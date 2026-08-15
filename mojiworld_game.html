@@ -9593,7 +9593,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.725';
+const GAME_VERSION = 'v0.29.726';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -99162,6 +99162,43 @@ function _getBossPortalImg(img) {
   _bossPortalImg = cv;
   return cv;
 }
+// v0.29.726 — TOWN PORTALS READ GREEN (per user: "for portals leading to town
+// tint them slightly greenish to indicate to player"). Same machinery as the
+// boss-red variant directly above: one cached canvas each, baked on first use,
+// so the per-frame cost is a cache hit and nothing more.
+// Keyed off the map's own isTown flag rather than dest === 'town' — 17 maps
+// carry it (emeraldVillage, jadeGrove, reachOfVermillion, shadowWovenHood and
+// the rest), and every one of them is a safe hub the player wants to find.
+// SLIGHT, per the ask. The green pass is drawn OVER the untinted original at
+// ~50% alpha rather than replacing it: sepia(1) flattens the portal's own
+// violet, and the first cut came out a fully green portal. Blending keeps the
+// arcane character and adds a cast the eye still catches instantly.
+let _townHaloCanvas = null;
+function _getTownHaloCanvas() {
+  if (_townHaloCanvas) return _townHaloCanvas;
+  const cv = document.createElement('canvas');
+  cv.width = 160; cv.height = 160;
+  const c = cv.getContext('2d');
+  c.drawImage(_getPortalHaloCanvas(), 0, 0);
+  c.globalAlpha = 0.62;   // swept: 0.5 left green tied with blue, 0.7 added nothing
+  c.filter = 'brightness(1.05) sepia(1) saturate(2.6) hue-rotate(52deg)';
+  c.drawImage(_getPortalHaloCanvas(), 0, 0);
+  _townHaloCanvas = cv;
+  return cv;
+}
+let _townPortalImg = null;
+function _getTownPortalImg(img) {
+  if (_townPortalImg) return _townPortalImg;
+  const cv = document.createElement('canvas');
+  cv.width = img.naturalWidth || 320; cv.height = img.naturalHeight || 420;
+  const c = cv.getContext('2d');
+  c.drawImage(img, 0, 0, cv.width, cv.height);
+  c.globalAlpha = 0.62;   // partial wash: a cast, not a repaint
+  c.filter = 'brightness(0.98) sepia(1) saturate(2.2) hue-rotate(58deg)';
+  c.drawImage(img, 0, 0, cv.width, cv.height);
+  _townPortalImg = cv;
+  return cv;
+}
 function _getPortalHaloCanvas() {
   if (_portalHaloCanvas) return _portalHaloCanvas;
   const cv = document.createElement('canvas');
@@ -99214,7 +99251,10 @@ function drawPortals() {
   const ready = _lxWorldReady(img);
   for (const po of game.portals) {
     const sx = po.x - game.camera.x;
-    const _isBoss = !!(po.dest && typeof MAPS !== 'undefined' && MAPS[po.dest] && MAPS[po.dest].isBossArena);
+    const _destMap = (po.dest && typeof MAPS !== 'undefined') ? MAPS[po.dest] : null;
+    const _isBoss = !!(_destMap && _destMap.isBossArena);
+    // v0.29.726 — boss wins if a map were ever both: danger outranks comfort.
+    const _isTown = !_isBoss && !!(_destMap && _destMap.isTown);
     if (sx + 80 < 0 || sx - 80 > W) continue;
     const t = game.time * 0.05;
     const bob = Math.sin(t * 0.6) * 1.5;
@@ -99235,7 +99275,7 @@ function drawPortals() {
     if (typeof _perfLowFx !== 'function' || !_perfLowFx()) {
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      ctx.drawImage(_isBoss ? _getBossHaloCanvas() : _getPortalHaloCanvas(), -80, -80);   // v0.26.x perf — pre-filtered bake
+      ctx.drawImage(_isBoss ? _getBossHaloCanvas() : _isTown ? _getTownHaloCanvas() : _getPortalHaloCanvas(), -80, -80);   // v0.26.x perf — pre-filtered bake
       ctx.restore();
     }
     if (po.iconStar) {
@@ -99274,12 +99314,12 @@ function drawPortals() {
       // the scene rather than reading as a solid sprite.
       ctx.save();
       ctx.globalAlpha = 0.65;
-      ctx.drawImage(_isBoss ? _getBossPortalImg(img) : img, -55, -78, 110, 156);   // v0.26.x perf — pre-filtered bake
+      ctx.drawImage(_isBoss ? _getBossPortalImg(img) : _isTown ? _getTownPortalImg(img) : img, -55, -78, 110, 156);   // v0.26.x perf — pre-filtered bake
       ctx.restore();
     } else {
       // Fallback: tinted ellipse so the portal isn't invisible while
       // the sprite is still decoding (first ~50 ms after page load).
-      ctx.fillStyle = _isBoss ? 'rgba(150,20,20,0.66)' : 'rgba(120,90,200,0.6)';
+      ctx.fillStyle = _isBoss ? 'rgba(150,20,20,0.66)' : _isTown ? 'rgba(70,190,120,0.6)' : 'rgba(120,90,200,0.6)';
       ctx.beginPath();
       ctx.ellipse(0, 0, 28, 52, 0, 0, Math.PI * 2);
       ctx.fill();
