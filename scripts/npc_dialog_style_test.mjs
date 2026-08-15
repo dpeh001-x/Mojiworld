@@ -1,9 +1,15 @@
-// NPC dialog restyle: painted backdrop + chunky option buttons.
+// NPC dialog: painted backdrop + option buttons.
 //
-// Per user: "Create a better background image and UI buttons for NPCs."
-// Asserts COMPUTED styles on a rendered dialog, not CSS text — and (per the
-// banner incident) that the backdrop art actually decodes at its new size
-// rather than the old 6KB texture the gradients used to bury.
+// Per user: "Create a better background image and UI buttons for NPCs", then
+// "stretch out the width of the background such that the red portion touches
+// the edge of the border, remake the buttons to have a better colour scheme
+// and better readability of words".
+//
+// Readability is measured, not asserted: every button's text colour is scored
+// against EVERY colour stop in its own gradient using the WCAG contrast
+// formula, and the WORST stop must still clear AA. That is what makes
+// "readable" a fact rather than a preference. Edge-contact is measured too —
+// on the decoded art itself, by counting warm pixels in its outer columns.
 //   node scripts/npc_dialog_style_test.mjs [port]
 import { chromium } from 'playwright-core';
 import { existsSync, statSync } from 'node:fs';
@@ -13,8 +19,7 @@ const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 
 const ART = 'Sprites/ui/npc_dialog_bg.webp';
-ok('the backdrop art ships (new painted art, not the old 6KB texture)',
-   existsSync(ART) && statSync(ART).size > 15000 && statSync(ART).size < 300000,
+ok('the backdrop art ships', existsSync(ART) && statSync(ART).size > 15000 && statSync(ART).size < 300000,
    { bytes: existsSync(ART) ? statSync(ART).size : 0 });
 ok('...and is committed', execFileSync('git', ['ls-files', '--', ART], { encoding: 'utf8' }).trim() === ART, {});
 
@@ -34,60 +39,80 @@ await page.waitForFunction(() => !!document.getElementById('dialog'), { timeout:
 
 const r = await page.evaluate(async () => {
   const out = {};
-  // stage the dialog exactly as openNPC renders it, without needing an NPC
   const dlg = document.getElementById('dialog');
   const optDiv = document.getElementById('dialog-options');
   optDiv.innerHTML = '';
-  const mk = (t, cls) => { const b2 = document.createElement('button'); b2.textContent = t; if (cls) b2.className = cls; optDiv.appendChild(b2); return b2; };
-  const shop = mk('🛒 Shop — buy & sell', 'opt-shop');
-  const plain = mk('✦ Improve — enhance · reforge');
-  const action = mk('⚔ Spar with the smith', 'opt-action');
-  const leave = mk('Leave', 'opt-leave');
+  const mk = (t, cls) => { const x = document.createElement('button'); x.textContent = t; if (cls) x.className = cls; optDiv.appendChild(x); return x; };
+  const kinds = { plain: mk('✦ Improve — enhance · reforge'), shop: mk('🛒 Shop — buy & sell', 'opt-shop'),
+    action: mk('⚔ Spar with the smith', 'opt-action'), leave: mk('Leave', 'opt-leave') };
   dlg.style.display = 'block';
 
   const cs = (el) => getComputedStyle(el);
   out.panelBg = cs(dlg).backgroundImage;
+  out.panelSize = cs(dlg).backgroundSize;
   out.artInStack = /npc_dialog_bg\.webp/.test(out.panelBg);
-  // the mid violet wash must be light enough for the art to read (0.24, not 0.55)
-  out.lightWash = /rgba\(30, 16, 50, 0\.24\)/.test(out.panelBg);
-  // and the art itself must decode at the new authored size
-  out.art = await new Promise((res) => {
+  // the art layer must STRETCH (100% 100%), not cover-crop, so its edge
+  // artwork lands on the frame border at every panel size
+  out.stretched = /100% 100%/.test(out.panelSize);
+
+  // --- WCAG contrast, worst gradient stop per button ---------------------
+  const lum = ([R, G, B]) => { const f = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(R) + 0.7152 * f(G) + 0.0722 * f(B); };
+  const ratio = (a, b2) => { const [x, y] = [lum(a), lum(b2)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  const rgbs = (str) => (str.match(/rgba?\(([^)]+)\)/g) || []).map(m2 =>
+    m2.replace(/rgba?\(|\)/g, '').split(',').slice(0, 3).map(Number));
+  out.contrast = {};
+  for (const [k, el] of Object.entries(kinds)) {
+    const st = cs(el);
+    const fg = rgbs(st.color)[0];
+    const stops = rgbs(st.backgroundImage);
+    const worst = stops.length ? Math.min(...stops.map(s2 => ratio(fg, s2))) : 0;
+    out.contrast[k] = { worst: Math.round(worst * 10) / 10, stops: stops.length, fg: st.color };
+  }
+  out.font = { size: cs(kinds.plain).fontSize, weight: cs(kinds.plain).fontWeight };
+  // every button must use LIGHT text now (the old gold slab used espresso)
+  out.allLightText = Object.values(kinds).every((el) => lum(rgbs(cs(el).color)[0]) > 0.45);
+
+  // --- the art itself: warm colour at both outer edges, calm middle -------
+  out.edge = await new Promise((res) => {
     const im = new Image();
-    im.onload = () => res({ ok: true, w: im.naturalWidth, h: im.naturalHeight });
+    im.onload = () => {
+      const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight;
+      const g2 = c.getContext('2d'); g2.drawImage(im, 0, 0);
+      const warmCol = (x) => { const d = g2.getImageData(x, 0, 1, c.height).data; let h = 0;
+        for (let i = 0; i < d.length; i += 4) if (d[i] > 70 && d[i] > d[i + 2] * 1.25) h++;
+        return Math.round(h / c.height * 100); };
+      res({ ok: true, w: c.width, h: c.height, left: warmCol(1), right: warmCol(c.width - 2), mid: warmCol(c.width >> 1) });
+    };
     im.onerror = () => res({ ok: false });
     im.src = 'Sprites/ui/npc_dialog_bg.webp?t=' + performance.now();
   });
-
-  const btn = cs(plain), gold = cs(shop), grey = cs(leave), red = cs(action);
-  out.btn = { radius: btn.borderRadius, pad: btn.padding, weight: btn.fontWeight,
-    ledge: /0px 3px 0px/.test(btn.boxShadow), keyline: /1\.5px/.test(btn.boxShadow) };
-  out.gold = { darkText: gold.color, gradient: gold.backgroundImage.includes('255, 223, 138') || gold.backgroundImage.includes('rgb(255, 223, 138)') };
-  out.grey = { tint: grey.backgroundImage.includes('109, 98, 128') || grey.backgroundImage.includes('rgb(109, 98, 128)'), dimmed: parseFloat(grey.opacity) < 1 };
-  out.red = { tint: red.backgroundImage.includes('224, 106, 126') || red.backgroundImage.includes('rgb(224, 106, 126)') };
-  // gloss band: the 4-stop gradient has stops at 46% and 54%
-  out.glossBand = btn.backgroundImage.includes('46%') && btn.backgroundImage.includes('54%');
 
   dlg.style.display = 'none'; optDiv.innerHTML = '';
   return out;
 });
 await b.close(); try { srv.kill(); } catch (e) {}
 
-console.log('art:', JSON.stringify(r.art), '| inStack:', r.artInStack, '| lightWash:', r.lightWash);
-console.log('btn:', JSON.stringify(r.btn), '| gloss:', r.glossBand);
-console.log('gold:', JSON.stringify(r.gold), '| grey:', JSON.stringify(r.grey), '| red:', JSON.stringify(r.red));
+console.log('bg size:', r.panelSize, '| stretched:', r.stretched);
+console.log('edge   :', JSON.stringify(r.edge));
+console.log('contrast:', JSON.stringify(r.contrast));
+console.log('font   :', JSON.stringify(r.font), '| all light text:', r.allLightText);
 
 ok('the painted backdrop is in the panel background stack', r.artInStack === true, {});
-ok('the violet wash over it is light (0.24) — the art can actually be seen',
-   r.lightWash === true, { bg: (r.panelBg || '').slice(0, 120) });
-ok('the art DECODES at its authored 768px size', r.art.ok === true && r.art.w === 768 && r.art.h === 768, r.art);
-ok('buttons are the chunky build (11px radius, 700 weight)',
-   r.btn.radius === '11px' && r.btn.weight === '700', r.btn);
-ok('buttons carry the underside ledge + dark keyline ring', r.btn.ledge && r.btn.keyline, r.btn);
-ok('buttons bake a hard gloss band (46/54% gradient stops)', r.glossBand === true, {});
-ok('shop buttons: gold coinage with espresso text',
-   r.gold.gradient === true && r.gold.darkText === 'rgb(64, 38, 10)', r.gold);
-ok('Leave: dimmed slate glass', r.grey.tint === true && r.grey.dimmed === true, r.grey);
-ok('action buttons: crimson tint', r.red.tint === true, r.red);
+ok('the art layer STRETCHES to the frame (100% 100%), so its edges meet the border',
+   r.stretched === true, { size: r.panelSize });
+ok('the art decodes as a WIDE plate (authored for the panel shape, not a square crop)',
+   r.edge.ok === true && r.edge.w > r.edge.h, r.edge);
+ok('warm gold/red artwork reaches the LEFT edge of the art', r.edge.left >= 35, r.edge);
+ok('...and the RIGHT edge', r.edge.right >= 35, r.edge);
+ok('...while the centre stays calm for the dialogue text', r.edge.mid <= 12, r.edge);
+for (const k of ['plain', 'shop', 'action', 'leave']) {
+  ok(`${k} button text clears WCAG AA against its own darkest AND lightest fill (>= 4.5:1)`,
+     r.contrast[k].worst >= 4.5, r.contrast[k]);
+}
+ok('every button uses light text on a dark fill (one consistent scheme)', r.allLightText === true, {});
+ok('button text is set at a readable size and weight (>= 13px, 700)',
+   parseFloat(r.font.size) >= 13 && r.font.weight === '700', r.font);
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 let pass = 0, fail = 0;
