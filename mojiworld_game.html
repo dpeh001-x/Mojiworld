@@ -9614,7 +9614,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.738';
+const GAME_VERSION = 'v0.29.739';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -53441,6 +53441,48 @@ function _lxPreloadMapAssets(id, onProgress, prio) {
         track(img);
       });
     } catch (e) {}
+    // v0.29.735 — the REST of what the first gameplay frame provably draws.
+    // None of these were in any preload list; on a throttled boot they are
+    // exactly the art the player screenshotted as missing:
+    //   · the hero's look layers — drawPlayer draws LX_HAIR[hairId] only once
+    //     decoded (the v0.25.832 note accepts a "bald flash" window), so an
+    //     unfinished hair IS a bald hero. All four registries are small.
+    //   · the HUD class crest — #hud-class-icon is a plain DOM <img> the HUD
+    //     updater retargets to the job crest at runtime; no loader tracked it,
+    //     so it sat as a black gradient box until the CDN got around to it.
+    //   · the map's themed floor/platform tiles + its authored floor override.
+    try {
+      for (const _reg of [
+        (typeof LX_HAIR  !== 'undefined') ? LX_HAIR  : null,
+        (typeof LX_HEAD  !== 'undefined') ? LX_HEAD  : null,
+        (typeof LX_EYES  !== 'undefined') ? LX_EYES  : null,
+        (typeof LX_MOUTH !== 'undefined') ? LX_MOUTH : null,
+      ]) { if (_reg) for (const _k in _reg) track(_reg[_k]); }
+    } catch (e) {}
+    try {
+      if (typeof player !== 'undefined' && player && player.cls) {
+        const _ids = new Set([player.cls]);
+        try { if (typeof _crestIdFor === 'function') _ids.add(_crestIdFor(player.cls, player.job)); } catch (e) {}
+        for (const _ci of _ids) {
+          if (!_ci) continue;
+          const _im = new Image(); _im.decoding = 'async'; _im.onerror = () => {};
+          _im.src = 'Sprites/ui/Class/' + _ci + '.webp';
+          track(_im);
+        }
+      }
+    } catch (e) {}
+    try {
+      const _md2 = (typeof _variedMapData === 'function') ? _variedMapData(id) : null;
+      if (_md2 && typeof LX_TILES !== 'undefined') {
+        const _th = (typeof _pickFloorTheme === 'function') ? _pickFloorTheme(_md2) : null;
+        const _fk = (_th && typeof _THEME_FLOOR_KEY    !== 'undefined') ? _THEME_FLOOR_KEY[_th]    : null;
+        const _pk = (_th && typeof _THEME_PLATFORM_KEY !== 'undefined') ? _THEME_PLATFORM_KEY[_th] : null;
+        if (_fk && LX_TILES[_fk]) track(LX_TILES[_fk]);
+        if (_pk && LX_TILES[_pk]) track(LX_TILES[_pk]);
+        const _ok = (typeof MAP_FLOOR_OVERRIDES !== 'undefined') ? MAP_FLOOR_OVERRIDES[id] : null;
+        if (_ok && LX_TILES[_ok]) track(LX_TILES[_ok]);
+      }
+    } catch (e) {}
   } catch (e) {}
   const total = _imgs.length;
   let done = 0;
@@ -53460,6 +53502,12 @@ function _lxPreloadMapAssets(id, onProgress, prio) {
       img.addEventListener('error', () => { clearTimeout(t); res(); }, { once: true });
     }
   }).then(tick, tick);
+  // v0.29.735 — feed the commence gate (see _finishHide). The 25 s race
+  // below may stop COUNTING, but the browser keeps fetching regardless — the
+  // gate watches the images themselves, not this promise, so nothing that
+  // times out here is forgotten. Post-boot calls (map enters, the world
+  // streamer) skip the feed: the gate has already run its one shot.
+  try { if (!window._lxSpriteGateDone) window._lxSpriteWatch = (window._lxSpriteWatch || []).concat(_imgs); } catch (e) {}
   const all = _lxAsyncPool(6, _imgs, _loadOne);
   return Promise.race([all, new Promise((res) => setTimeout(res, 25000))]).then(() => total);
 }
@@ -121036,7 +121084,7 @@ function loop(time) {
         try { const _a = document.getElementById('lo-auth'); return !!(_a && _a.classList.contains('shown')); }
         catch (_e) { return false; }
       })();
-      if (!window._lxBootGateParkAt || _menuUp || !window._lxBootMenuSeen) window._lxBootGateParkAt = time;
+      if (!window._lxBootGateParkAt || _menuUp || !window._lxBootMenuSeen || window._lxSpriteGateHolding) window._lxBootGateParkAt = time;   // v0.29.735 — the commence gate's hold is legitimate; don't force-fade under it
       if (time - window._lxBootGateParkAt < 15000) {
         lastTime = time;
         _lxNextFrame();
@@ -124451,6 +124499,102 @@ try { window.LXAuth = LXAuth; } catch (e) {}
   function _finishHide(session) {
     try { window._lxBootMenuSeen = true; } catch (e) {}   // v0.29.721 — resume/deeplink paths skip the menu; still arm the rescue
     if (!overlay) return;
+    // v0.29.735 — COMMENCE GATE (per user: "alot of the sprites dont load
+    // well before the game starts, please ensure all sprites are working
+    // before the game commenses"). Every timer in the boot pipeline RELEASES
+    // rather than finishes on a slow link: loadOne's 8 s/image cap, the map
+    // preloader's 25 s race, the decode gate's 30 s cap, the 60 s fallback.
+    // Measured under an 8 Mbps throttle: the decode gate cleared at its cap
+    // with 34 of 312 tracked sprites still streaming, and the world revealed
+    // with a bald hero and a black HUD crest — renderers SKIP incomplete
+    // images, so missing art is silent, not broken. The overlay now holds
+    // HERE — after the click, before the fade — until every watched sprite
+    // has finished loading. An errored image is complete:true/naturalWidth:0
+    // and never holds the gate: it is not coming. Release-early happens only
+    // on a genuine stall (no completion for 15 s = dead link — a dead link
+    // must not hold the player hostage; a slow one keeps loading honestly
+    // under the loading screen it is already looking at).
+    if (!window._lxSpriteGateDone) {
+      const _pend = () => {
+        let n = 0;
+        for (const _im of (window._lxSpriteWatch || [])) if (_im && _im.src && !_im.complete) n++;
+        return n;
+      };
+      let _left = 0;
+      try { _left = _pend(); } catch (e) { _left = 0; }
+      if (_left > 0) {
+        if (window._lxSpriteGateHolding) return;   // second click while holding — the running hold finishes the job
+        window._lxSpriteGateHolding = true;
+        // Yank every pending watched image to the FRONT of the fetch queue.
+        // Measured without this: 138 pending sprites made ZERO progress in
+        // 15 s on a live throttled link, because they sat at
+        // fetchPriority 'low' behind _showAuthGate's fire-and-forget heavy
+        // decode pass (1,185 registry sprites) — starved, not stalled, and
+        // the stall watchdog cannot tell those apart. Chromium honors
+        // dynamic fetchPriority changes on queued/in-flight requests (the
+        // v0.27.11 preloader note relies on the same behaviour).
+        try {
+          for (const _im of (window._lxSpriteWatch || []))
+            if (_im && _im.src && !_im.complete && 'fetchPriority' in _im) _im.fetchPriority = 'high';
+        } catch (e) {}
+        const _total = (window._lxSpriteWatch || []).length;
+        const _st = document.getElementById('loading-status');
+        const _paint = (n) => {
+          if (!_st) return;
+          const _pct = Math.round(((_total - n) / Math.max(1, _total)) * 100);
+          _st.innerHTML = '<span class="pct">' + _pct + '%</span> · <span class="pulse">Finishing sprites… ' + (_total - n) + '/' + _total + '</span>';
+        };
+        _paint(_left);
+        // Release rules. Completion is the only real exit; the other two are
+        // bounded-hostage policy, not success:
+        //   · 45 s with zero completions — measured: six multi-MB files can
+        //     hold all six per-host sockets for tens of seconds on a slow
+        //     link, so completions legitimately PAUSE far past 15 s while
+        //     bytes still flow. 45 s outlasts a socket drain; a genuinely
+        //     dead link still gets the player in eventually.
+        //   · 120 s absolute — no loading screen holds a player two minutes,
+        //     full stop.
+        let _lastLeft = _left, _lastMove = Date.now();
+        const _t0 = Date.now();
+        let _rekicked = false;
+        const _iv = setInterval(() => {
+          let n = _total; try { n = _pend(); } catch (e) { n = 0; }
+          if (n < _lastLeft) { _lastLeft = n; _lastMove = Date.now(); }
+          _paint(n);
+          // THE RE-KICK. Measured (25 Mbps throttle, ~2,000-request boot
+          // burst): the same ~135 images sat pending through 45 s of live
+          // bandwidth — requests queued at low priority early in boot are
+          // preempted by every newer request and can starve INDEFINITELY,
+          // and a fetchPriority re-stamp cannot reach a request already in
+          // the stack. If 8 s pass with zero completions, abort and re-issue
+          // every pending load: src='' kills the starved request, re-setting
+          // it fires a fresh one that now carries the high priority stamped
+          // above. One shot — a second starvation means the link itself is
+          // the problem, and the stall/cap rules below own that.
+          if (!_rekicked && n > 0 && n === _lastLeft && Date.now() - _lastMove > 8000) {
+            _rekicked = true; _lastMove = Date.now();   // the rekick IS progress; stall counts from here
+            let _k = 0;
+            try {
+              for (const _im of (window._lxSpriteWatch || []))
+                if (_im && _im.src && !_im.complete) { const _u = _im.src; _im.src = ''; _im.src = _u; _k++; }
+            } catch (e) {}
+            try { console.log('[boot] commence gate: re-kicked ' + _k + ' starved sprite loads'); } catch (e) {}
+          }
+          const _stalled = Date.now() - _lastMove > 45000;
+          const _capped = Date.now() - _t0 > 120000;
+          if (n === 0 || _stalled || _capped) {
+            clearInterval(_iv);
+            window._lxSpriteGateDone = true;
+            window._lxSpriteGateHolding = false;
+            try { console.log('[boot] commence gate: ' + (n === 0 ? 'all ' + _total + ' sprites ready' : n + ' unfinished — released by ' + (_capped ? '120s cap' : '45s stall'))); } catch (e) {}
+            _finishHide(session);
+          }
+        }, 200);
+        return;
+      }
+      window._lxSpriteGateDone = true;
+      try { console.log('[boot] commence gate: all ' + (window._lxSpriteWatch || []).length + ' sprites ready at click'); } catch (e) {}
+    }
     // v0.26.x — perceived-responsiveness: start dissolving the overlay on the
     // very first line, BEFORE the session/toast bookkeeping below — measured
     // ~290 ms from click to fade start when the fade waited its turn.
