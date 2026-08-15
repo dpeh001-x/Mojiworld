@@ -83,7 +83,10 @@ const r = await page.evaluate(async () => {
   const tc = cs(txt);
   out.copy = { family: tc.fontFamily, size: tc.fontSize, weight: tc.fontWeight,
     lineHeight: tc.lineHeight, color: tc.color };
-  out.copyUsesUiFace = /Inter/i.test(tc.fontFamily);
+  // must lead with system-ui (or the platform face) and must NOT lead with a
+  // display face like Trebuchet, which is what <body> hands down by default
+  out.copyUsesUiFace = /^(system-ui|"?Segoe UI"?|-apple-system)/i.test(tc.fontFamily.trim())
+    && !/^"?Trebuchet/i.test(tc.fontFamily.trim());
   // darkest stop of the panel's base plate — the worst case behind any glyph
   const plate = [20, 10, 36];
   const voice = (sel) => { const el = txt.querySelector(sel); return el ? rgbs(cs(el).color)[0] : null; };
@@ -104,14 +107,26 @@ const r = await page.evaluate(async () => {
     im.onload = () => {
       const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight;
       const g2 = c.getContext('2d'); g2.drawImage(im, 0, 0);
-      const warmCol = (x) => { const d = g2.getImageData(x, 0, 1, c.height).data; let h = 0;
-        for (let i = 0; i < d.length; i += 4) if (d[i] > 70 && d[i] > d[i + 2] * 1.25) h++;
-        return Math.round(h / c.height * 100); };
-      // the art ships pre-faded: sample its baked alpha so "dimmer" is a
-      // measured property of the file, not a claim about the CSS around it
-      const mid = g2.getImageData(c.width >> 1, c.height >> 1, 1, 1).data;
-      res({ ok: true, w: c.width, h: c.height, left: warmCol(1), right: warmCol(c.width - 2),
-        mid: warmCol(c.width >> 1), alpha: mid[3] });
+      // Band sampling, not single columns: the art is a halftone DOT field,
+      // so any one column may land between dots. What matters is whether the
+      // outer strip carries visible warm ink and the middle carries none.
+      const band = (x0, x1) => {
+        const d = g2.getImageData(x0, 0, x1 - x0, c.height).data;
+        let vis = 0, warm = 0, n = 0, sumA = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          n++; sumA += d[i + 3];
+          if (d[i + 3] > 20) { vis++; if (d[i] > 70 && d[i] > d[i + 2] * 1.25) warm++; }
+        }
+        return { vis: Math.round(vis / n * 100), warm: Math.round(warm / n * 100), meanA: Math.round(sumA / n) };
+      };
+      const L = band(0, 40), R = band(c.width - 40, c.width);
+      const C = band(Math.round(c.width * 0.4), Math.round(c.width * 0.6));
+      const all = band(0, c.width);
+      // MEAN ink, not peak: the plate is a halftone field, so two dots crossing
+      // will always composite to a high single-pixel alpha. What "dim" actually
+      // means for a backdrop is how much ink covers the panel overall.
+      res({ ok: true, w: c.width, h: c.height, left: L.warm, right: R.warm,
+        midVis: C.vis, meanAlpha: all.meanA, edgeMeanAlpha: Math.max(L.meanA, R.meanA) });
     };
     im.onerror = () => res({ ok: false });
     im.src = 'Sprites/ui/npc_dialog_bg.webp?t=' + performance.now();
@@ -134,9 +149,10 @@ ok('the art layer STRETCHES to the frame (100% 100%), so its edges meet the bord
    r.stretched === true, { size: r.panelSize });
 ok('the art decodes as a WIDE plate (authored for the panel shape, not a square crop)',
    r.edge.ok === true && r.edge.w > r.edge.h, r.edge);
-ok('warm gold/red artwork reaches the LEFT edge of the art', r.edge.left >= 35, r.edge);
-ok('...and the RIGHT edge', r.edge.right >= 35, r.edge);
-ok('...while the centre stays calm for the dialogue text', r.edge.mid <= 12, r.edge);
+ok('warm gold ink reaches the LEFT edge strip of the art', r.edge.left >= 8, r.edge);
+ok('...and the RIGHT edge strip', r.edge.right >= 8, r.edge);
+ok('...while the centre is genuinely EMPTY, not merely dimmed (the panel gradient shows through)',
+   r.edge.midVis <= 5, r.edge);
 for (const k of ['plain', 'shop', 'action', 'leave']) {
   ok(`${k} button text clears WCAG AA against its own darkest AND lightest fill (>= 4.5:1)`,
      r.contrast[k].worst >= 4.5, r.contrast[k]);
@@ -145,12 +161,14 @@ ok('every button uses light text on a dark fill (one consistent scheme)', r.allL
 ok('button text is set at a readable size and weight (>= 13px, 700)',
    parseFloat(r.font.size) >= 13 && r.font.weight === '700', r.font);
 
-ok('the art ships DIMMED (baked alpha well under half, not the old 140)',
-   r.edge.alpha > 0 && r.edge.alpha <= 95, { alpha: r.edge.alpha });
-ok('dialogue copy uses the legible UI face, not the inherited display font',
+ok('the plate is DIM overall — mean ink across the whole panel stays low',
+   r.edge.meanAlpha > 0 && r.edge.meanAlpha <= 60, { meanAlpha: r.edge.meanAlpha });
+ok('...and even the busiest edge strip averages well under half opacity',
+   r.edge.edgeMeanAlpha <= 120, { edgeMeanAlpha: r.edge.edgeMeanAlpha });
+ok('dialogue copy resolves to a real system UI face (no @font-face ships, so a named webfont would silently fall back)',
    r.copyUsesUiFace === true, { family: r.copy.family });
-ok('dialogue copy is set larger and heavier for body reading (>= 15px, >= 600)',
-   parseFloat(r.copy.size) >= 15 && parseInt(r.copy.weight, 10) >= 600, r.copy);
+ok('dialogue copy is set larger and heavier for body reading (>= 16px, >= 600)',
+   parseFloat(r.copy.size) >= 16 && parseInt(r.copy.weight, 10) >= 600, r.copy);
 ok('speech clears strict body contrast on the panel plate (>= 7:1)', r.voices.speech >= 7, r.voices);
 ok('stage directions clear AA (>= 4.5:1) — they were the dimmest voice', r.voices.stage >= 4.5, r.voices);
 ok('emphasis clears AA (>= 4.5:1)', r.voices.emphasis >= 4.5, r.voices);

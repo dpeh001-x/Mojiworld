@@ -1,106 +1,107 @@
-#!/usr/bin/env node
-// NPC dialogue backdrop — Sprites/ui/npc_dialog_bg.webp (ludo.ai).
+﻿#!/usr/bin/env node
+// NPC dialogue backdrop â€” Sprites/ui/npc_dialog_bg.webp.
 //
-// Drawn UNDER the dialogue UI and STRETCHED 100% x 100% to the frame, so the
-// composition must satisfy two hard constraints:
-//   1. warm artwork ON the extreme left and right edges — the panel border
-//      cuts exactly there, and inset artwork leaves a dead violet margin;
-//   2. a calm, dark MIDDLE THIRD — that is where the dialogue text sits.
-// Authored wide (16:9) because the panel is far wider than tall; a square
-// plate stretched to that shape smears the ornament.
+// PROCEDURAL, not generated art. Per user: "background curtains remove, keep
+// with simple designs similar to earlier". The ludo.ai rolls kept producing
+// scenery â€” theatre curtains, stained-glass arches, painted nebulae â€” and
+// scenery is the wrong job for this panel: it backs every NPC in the game and
+// its only duty is to frame text. A pop-art halftone field is simple enough to
+// state in code, which buys exact control over the two things that actually
+// matter (warm dots ON the edges, nothing in the middle), determinism (same
+// bytes every run, so a rebuild is a no-op diff), and no API key. It is not
+// much smaller than the generated plates — a few thousand circles cost about
+// what a painting does — so size is not the argument here; control is.
 //
-// The art ships PRE-FADED (constant alpha 0.32, the panel_pause.webp trick),
-// so the CSS just stacks it over the dark gradient and the cream text keeps
-// its contrast without a second overlay. 0.32 is deliberately low: at 0.55
-// the curtains competed with the dialogue for attention, which is backwards
-// for a panel whose whole job is to be read.
-//   node scripts/gen_npc_dialog_bg.mjs            # dry-run (prints prompt)
-//   node scripts/gen_npc_dialog_bg.mjs --generate # needs LUDO_API_KEY
-//   flags: --force
+// Unlike the generated plates this one carries its OWN alpha rather than a
+// constant baked band: the dots are semi-opaque and the centre is genuinely
+// transparent, so the panel's dark gradient shows through cleanly behind the
+// dialogue instead of through a veil of dimmed painting.
+//   node scripts/gen_npc_dialog_bg.mjs           # writes the file
+//   node scripts/gen_npc_dialog_bg.mjs --print   # dump the SVG instead
 import sharp from 'sharp';
-import { writeFile, mkdir, access } from 'node:fs/promises';
+import { writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 sharp.cache(false);
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(repoRoot, 'Sprites', 'ui');
 const dest = join(DIR, 'npc_dialog_bg.webp');
-const argv = process.argv.slice(2);
-const has = f => argv.includes(f);
 
-// Winning variant of three measured candidates (gilded curtains beat stained
-// glass and comic shards): the curtains read as neutral staging, where the
-// stained-glass arches read as a specific PLACE — wrong for a panel that backs
-// every NPC in the game.
-const PROMPT =
-  'Wide ornate video-game DIALOGUE BOX background banner, MapleStory cozy fantasy fused with ' +
-  'Persona 5 pop-art graphic punk. ' +
-  'FULL-BLEED painting filling the entire wide canvas edge to edge — no transparent areas, no ' +
-  'border frame, no text, no letters, no logo, no characters, no UI widgets. The MIDDLE THIRD of ' +
-  'the canvas stays calm, dark and smooth — a deep glassy indigo area — because readable dialogue ' +
-  'text sits on top of it. Strong symmetric left-right composition. ' +
-  'ANTIQUE GOLD IS THE DOMINANT COLOR — far more gold than red, rich warm gold everywhere at the ' +
-  'edges, with crimson red only as a secondary accent. ' +
-  'Bold POP-ART POLKA DOTS are a major feature: large clearly-visible round Ben-Day halftone dots ' +
-  'in gold and cream, in graduated sizes, scattered generously across the edge artwork and ' +
-  'drifting inward toward the middle. Retro comic-book pop-art energy. ' +
-  'Draped GOLDEN theatre curtains with deep crimson lining, anchored hard to the EXTREME LEFT ' +
-  'EDGE and EXTREME RIGHT EDGE, bleeding off both edges and reaching every corner, edged with ' +
-  'thick ornate antique-gold filigree trim and gold tassels. Big gold polka dots scatter across ' +
-  'the curtains and out into the dark middle. Ornate gold baroque flourishes in all four ' +
-  'corners. Behind it a deep violet nebula with bright stars and golden dust. Luxurious, ' +
-  'high-detail, gold-dominant.';
+const W = 1024, H = 576;
+const REACH = 340;          // how far the dot field travels inward from each edge
+const SPACING = 38;         // Ben-Day grid pitch
+const GOLD = '#e6b545', CREAM = '#ffeab4', ROSE = '#c8506a';
 
-const W = 1024, H = 576, ALPHA = 82;   // 0.32 * 255
-const exists = async p => { try { await access(p); return true; } catch { return false; } };
+// deterministic jitter â€” same file every run, so a rebuild is a no-op diff
+let seed = 20260815;
+const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
 
-if (!has('--generate')) {
-  console.log('# npc_dialog_bg.webp -> Sprites/ui/\n');
-  console.log(PROMPT);
-  console.log('\n# Re-run with --generate (needs LUDO_API_KEY). Flag: --force');
-  process.exit(0);
-}
-const apiKey = process.env.LUDO_API_KEY;
-if (!apiKey) { console.error('LUDO_API_KEY required.'); process.exit(1); }
-const API = process.env.LUDO_API_BASE || 'https://api.ludo.ai/api';
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-async function gen() {
-  if (!has('--force') && await exists(dest)) return 'skip (exists — use --force)';
-  let lastErr;
-  for (let attempt = 1; attempt <= 4; attempt++) {
-    try {
-      const res = await fetch(`${API}/assets/image`, {
-        method: 'POST',
-        headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(Number(process.env.LUDO_REQ_TIMEOUT_MS || 150000)),
-        body: JSON.stringify({ image_type: 'sprite', art_style: 'Anime/Manga', aspect_ratio: 'ar_16_9', n: 1, augment_prompt: false, prompt: PROMPT }),
-      });
-      if (!res.ok) throw new Error(`image ${res.status}: ${(await res.text()).slice(0, 140)}`);
-      const data = await res.json();
-      const url = Array.isArray(data) ? data[0]?.url : (data?.url || data?.images?.[0]?.url);
-      if (!url) throw new Error('no url');
-      const r = await fetch(url, { signal: AbortSignal.timeout(120000) });
-      const raw = Buffer.from(await r.arrayBuffer());
-      // Pass 1: opaque wide crop on the panel's own base violet.
-      const rgb = await sharp(raw)
-        .flatten({ background: { r: 16, g: 9, b: 28 } })
-        .resize(W, H, { fit: 'cover', position: 'centre' })
-        .removeAlpha().raw().toBuffer();
-      // Pass 2: join a constant alpha band (sharp cannot band-expand in one pipeline).
-      const out = await sharp(rgb, { raw: { width: W, height: H, channels: 3 } })
-        .joinChannel(Buffer.alloc(W * H, ALPHA), { raw: { width: W, height: H, channels: 1 } })
-        .webp({ quality: 86 }).toBuffer();
-      await mkdir(DIR, { recursive: true });
-      await writeFile(dest, out);
-      // Report the two constraints so a bad roll is obvious without opening it.
-      const warmCol = (col) => { let h = 0; for (let y = 0; y < H; y++) { const i = (y * W + col) * 3;
-        if (rgb[i] > 70 && rgb[i] > rgb[i + 2] * 1.25) h++; } return Math.round(h / H * 100); };
-      console.log(`edge warmth: left ${warmCol(2)}%  right ${warmCol(W - 3)}%  centre ${warmCol(W >> 1)}%`);
-      console.log('(want: both edges >= 35%, centre <= 12% — see scripts/npc_dialog_style_test.mjs)');
-      return 'ok (' + Math.round(out.length / 1024) + ' KB)';
-    } catch (e) { lastErr = e; if (attempt < 4) await sleep(4000 * attempt); }
+const dots = [];
+for (const side of [-1, 1]) {
+  let col = 0;
+  for (let d = 6; d < REACH; d += SPACING, col++) {
+    const t = d / REACH;                       // 0 at the edge, 1 at the inner limit
+    const fall = Math.pow(1 - t, 1.7);         // dots shrink and fade inward
+    const r = 19 * fall + 1.4;
+    // Peak 0.62, not 1.0: the CSS stacks a 0.30 wash above this layer, so a
+    // dot authored opaque still lands around 0.43 in situ. Tuned against the
+    // rendered panel rather than against the file on its own.
+    const a = 0.52 * Math.pow(1 - t, 1.35);
+    if (a < 0.02) continue;
+    const x = side < 0 ? d : W - d;
+    for (let y = -SPACING; y < H + SPACING; y += SPACING) {
+      const yy = y + (col % 2 ? SPACING / 2 : 0) + (rnd() - 0.5) * 5;
+      const rr = r * (0.82 + rnd() * 0.36);
+      // a few rose dots per band keep the crimson accent alive without curtains
+      const fill = rnd() < 0.09 ? ROSE : (rnd() < 0.34 ? CREAM : GOLD);
+      dots.push(`<circle cx="${(x + (rnd() - 0.5) * 4).toFixed(1)}" cy="${yy.toFixed(1)}" r="${rr.toFixed(1)}" fill="${fill}" opacity="${a.toFixed(3)}"/>`);
+    }
   }
-  throw lastErr;
 }
-console.log(await gen(), '->', dest);
+
+// Two soft gold wedges hard against each edge â€” structure under the dots, so
+// the field reads as designed rather than as scattered confetti.
+const wedge = (side) => {
+  const x0 = side < 0 ? 0 : W;
+  const s = side;
+  return `
+    <polygon points="${x0},0 ${x0 + s * 120},0 ${x0 + s * 26},${H} ${x0},${H}" fill="url(#edge${side < 0 ? 'L' : 'R'})"/>
+    <polygon points="${x0},${H * 0.18} ${x0 + s * 186},${H * 0.52} ${x0},${H * 0.86}" fill="${GOLD}" opacity="0.07"/>`;
+};
+
+const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  <defs>
+    <linearGradient id="edgeL" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="${GOLD}" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="${GOLD}" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="edgeR" x1="1" y1="0" x2="0" y2="0">
+      <stop offset="0" stop-color="${GOLD}" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="${GOLD}" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  ${wedge(-1)}
+  ${wedge(1)}
+  ${dots.join('\n  ')}
+</svg>`;
+
+if (process.argv.includes('--print')) { console.log(svg); process.exit(0); }
+
+const out = await sharp(Buffer.from(svg)).webp({ quality: 82, alphaQuality: 100 }).toBuffer();
+await mkdir(DIR, { recursive: true });
+await writeFile(dest, out);
+
+// Report the two constraints so a bad edit is obvious without opening the file.
+const { data, info } = await sharp(out).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+const band = (x0, x1) => { let vis = 0, warm = 0, n = 0;
+  for (let y = 0; y < info.height; y++) for (let x = x0; x < x1; x++) {
+    const i = (y * info.width + x) * 4; n++;
+    if (data[i + 3] > 20) { vis++; if (data[i] > 70 && data[i] > data[i + 2] * 1.25) warm++; }
+  }
+  return { visPct: Math.round(vis / n * 100), warmPct: Math.round(warm / n * 100) }; };
+const L = band(0, 40), R = band(info.width - 40, info.width), C = band(info.width * 0.4 | 0, info.width * 0.6 | 0);
+console.log(`ok ${W}x${H}  ${Math.round(out.length / 1024)} KB -> ${dest}`);
+console.log(`left edge  warm ${L.warmPct}%  |  right edge warm ${R.warmPct}%  |  centre visible ${C.visPct}%`);
+console.log('(want: both edges warm >= 8%, centre visible <= 5% â€” see scripts/npc_dialog_style_test.mjs)');
+
+
