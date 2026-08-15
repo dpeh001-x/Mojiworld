@@ -9593,7 +9593,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.726';
+const GAME_VERSION = 'v0.29.727';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -38428,6 +38428,7 @@ function _lxPadModalRoot() {
   return (best || cands[0]).el;
 }
 let _lxPadNavPrev = {};
+let _lxPadNavFocusing = false;   // v0.29.727 — true only inside menu-nav's own scroll-focus; the focusin auto-keyboard ignores those
 let _lxPadNavCssDone = false;
 function _lxPadMenuNav(root, pad) {
   if (!_lxPadNavCssDone) {
@@ -38484,7 +38485,7 @@ function _lxPadMenuNav(root, pad) {
     // Settings, and 40 D-pad presses later there were still 2 rings.
     document.querySelectorAll('.pad-focus').forEach((n) => { if (n !== el) n.classList.remove('pad-focus'); });
     el.classList.add('pad-focus');
-    if (moved || lateral) { el.scrollIntoView({ block: 'nearest' }); try { el.focus({ preventScroll: true }); } catch (e) {} }
+    if (moved || lateral) { el.scrollIntoView({ block: 'nearest' }); _lxPadNavFocusing = true; try { el.focus({ preventScroll: true }); } catch (e) {} _lxPadNavFocusing = false; }   // v0.29.727 — nav focus is passage, not intent
   } catch (e) {}
   if (lateral && isRange(el)) {
     const step = Number(el.step) || 1;
@@ -38513,6 +38514,7 @@ function _lxPadMenuNav(root, pad) {
 // polling on separately (desktop configs need it even without a std gamepad).
 let _lxPadPresent = false;
 let _lxPadBlurHeld = false;   // v0.29.261 — edge state for the text-field B/Start blur hatch
+let _lxPadVkHeld = false;     // v0.29.727 — edge state for the text-field Ⓐ→virtual-keyboard hatch
 try {
   window.addEventListener('gamepadconnected', () => { _lxPadPresent = true; });
   // v0.29.470 — release everything the pad was holding. The poll's ONLY keyup
@@ -38624,6 +38626,29 @@ const _lxPadVK = {
   },
 };
 try { window._lxPadVK = _lxPadVK; } catch (e) {}
+// v0.29.727 — the autofocus handoff. The boot menu's Name Entry and Co-op panels
+// focus their input 40 ms after opening (v0.27.8) — a kindness for keyboard
+// players that stranded pad players (per user: "When using a controller I need
+// to have an on screen keyboard to type including here"). If a typeable field
+// receives focus while the pad is the ACTIVE input device (used within 4 s),
+// hand it straight to the virtual keyboard: the console flow, zero presses.
+// Menu-nav's own scroll-focus is excluded (_lxPadNavFocusing) so sweeping past
+// an input never pops the keyboard uninvited; a mouse/keyboard user never
+// trips this because their pad is idle.
+try {
+  document.addEventListener('focusin', (e) => {
+    try {
+      const el = e.target;
+      if (!el || _lxPadNavFocusing) return;
+      if (typeof _lxPadActive !== 'function' || !_lxPadActive(4000)) return;
+      const _t = (el.tagName === 'INPUT' && /^(text|number|search|password|url)$/.test(el.type || 'text')) || el.tagName === 'TEXTAREA';
+      if (!_t || document.getElementById('pad-vk')) return;
+      setTimeout(() => {
+        try { if (document.activeElement === el && !document.getElementById('pad-vk')) _lxPadVK.open(el); } catch (e2) {}
+      }, 0);
+    } catch (e2) {}
+  }, true);
+} catch (e) {}
 
 // v0.29.668 — Steam review best-practices, both cheap and both real wins:
 //   OVERLAY PAUSE — the Steam overlay steals focus, which fires blur on the
@@ -38755,6 +38780,16 @@ function _lxPadPoll() {
           try { ae.blur(); } catch (e) {}
           _lxPadNavPrev[1] = _bd(1); _lxPadNavPrev[9] = _bd(9);
         } else if (!_esc) _lxPadBlurHeld = false;
+        // v0.29.727 — Ⓐ summons the virtual keyboard for the focused field. Per
+        // user (name-entry screenshot): the panel autofocuses its input, this
+        // branch then ate every pad press, and the VK — one branch away in
+        // menu-nav — was unreachable. Pre-mark Ⓐ in the nav edge state so the
+        // SAME press doesn't also activate a key on the keyboard it just opened.
+        const _acc = _bd(0);
+        if (_acc && !_lxPadVkHeld) {
+          _lxPadVkHeld = true;
+          try { if (typeof _lxPadVK !== 'undefined') { _lxPadVK.open(ae); _lxPadNavPrev[0] = true; } } catch (e) {}
+        } else if (!_acc) _lxPadVkHeld = false;
       } catch (e) {}
       return;
     }
