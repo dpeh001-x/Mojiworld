@@ -9644,7 +9644,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.755';
+const GAME_VERSION = 'v0.29.756';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -32499,6 +32499,57 @@ function getLuckBonus() {
 // v0.25.738 — Stun resistance. VIT attribute contribution removed; now
 // returns 0 unless a future buff / gear affix supplies it.
 function getStunResist() { return 0; }
+// =========================================================================
+// v0.29.7xx — HEAVY STAGGER (per user: "make player stagger more significant
+// by zodiac bosses and gravitos with a slight chance to stun player for 1 s").
+// The twelve zodiac bosses and Gravitos hit like the endgame they are: their
+// contact and un-authored projectile hits lock the player out for ~2.5x the
+// generic stagger, and a slight roll turns one into a full 1 s stun.
+// Attacks with an AUTHORED stunHit (600-2000 ms boss slams) already stagger
+// harder than this and are left exactly as tuned.
+// =========================================================================
+const _LX_HEAVY_STAGGER_MUL = 2.5;    // 140 -> 350 ms contact, 200 -> 500 ms projectile
+const _LX_HEAVY_STUN_CHANCE = 0.12;   // "slight chance"
+const _LX_HEAVY_STUN_MS     = 1000;   // a full second, per the request
+function _lxIsHeavyStaggerMob(m) {
+  return !!(m && (m.zodiacBoss || m.type === 'gravitos'));
+}
+// Projectile-side source proxy — see the header note: both arena types spawn
+// only the boss (Gemini/Pisces twins are themselves zodiac bosses), so a live
+// heavy boss means every enemy shot on screen came from one.
+function _lxHeavyBossPresent() {
+  const arr = (typeof game !== 'undefined' && game && game.monsters) || [];
+  for (let i = 0; i < arr.length; i++) {
+    const m = arr[i];
+    if (m && m.currentHp > 0 && _lxIsHeavyStaggerMob(m)) return true;
+  }
+  return false;
+}
+// Returns the hitStun to apply for a hit from one of these bosses, rolling
+// the 1 s stun. Honours Unstoppable (immune -> 0) and stun resist, and
+// announces a stun so a full second of lockout never reads as a freeze bug.
+function _lxHeavyStaggerMs(baseMs) {
+  const immune = !!(typeof player !== 'undefined' && player && player.tree && player.tree.stunImmune);
+  if (immune) return 0;
+  const resist = (typeof getStunResist === 'function') ? getStunResist() : 0;
+  const scale  = Math.max(0, 1 - resist);
+  let ms = Math.floor(baseMs * _LX_HEAVY_STAGGER_MUL * scale);
+  if (Math.random() < _LX_HEAVY_STUN_CHANCE) {
+    ms = Math.max(ms, Math.floor(_LX_HEAVY_STUN_MS * scale));
+    try {
+      if (typeof player !== 'undefined' && player) player._heavyStunUntil = (game.time | 0) + 60;
+      if (game && Array.isArray(game.damageNumbers)) {
+        game.damageNumbers.push({
+          x: player.x + (player.w || 28) / 2 - 30, y: player.y - 22, vy: -1.3,
+          text: 'STUNNED!', life: 52, color: '#ffd166', size: 13,
+        });
+      }
+      if (typeof addShake === 'function') addShake(8);
+      if (typeof _lxPadRumble === 'function') _lxPadRumble('death');
+    } catch (e) {}
+  }
+  return ms;
+}
 function getCritDmg(){
   // v0.26.395 — include equipment critDmg (was a DEAD stat: T7-T10 weapons/
   // accessories roll critDmg 0.15-0.50 but getCritDmg only read player.mods.critDmg,
@@ -43493,7 +43544,11 @@ function _coopFollowerContactTick() {
     player.hp -= dmg;
     player.lastHitTime = game.time;
     player._lastDamageSource = m.label || m.type || 'an enemy';
-    player.hitStun = (player.tree && player.tree.stunImmune) ? 0 : Math.floor(140 * (1 - ((typeof getStunResist === 'function') ? getStunResist() : 0)));
+    // v0.29.7xx — same heavy stagger on the co-op mirror path, so a guest
+    // fighting a mirrored zodiac boss / Gravitos feels what the host does.
+    player.hitStun = _lxIsHeavyStaggerMob(m)
+      ? _lxHeavyStaggerMs(140)
+      : ((player.tree && player.tree.stunImmune) ? 0 : Math.floor(140 * (1 - ((typeof getStunResist === 'function') ? getStunResist() : 0))));
     player.invulnerable = 1000;
     if (typeof flash === 'function') { try { flash(0.2); } catch (e) {} }
     if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 10, y: player.y - 8, vy: -2, text: '' + dmg, life: 40, color: '#ff6666', size: 15 });
@@ -71723,7 +71778,12 @@ function updateMonsters(dt) {
       // Melee contact — very brief stagger so player doesn't get stunlocked
       // v0.26.x -- stagger 90 -> 140 ms base so getting tagged reads as a
       // mistake (paired with the contact floor + stronger knockback below).
-      player.hitStun = player.tree.stunImmune ? 0 : Math.floor(140 * (1 - getStunResist()));
+      // v0.29.7xx — zodiac bosses + Gravitos stagger 2.5x harder, with a
+      // slight chance of a full 1 s stun (see _lxHeavyStaggerMs). Every other
+      // monster keeps the 140 ms base exactly.
+      player.hitStun = _lxIsHeavyStaggerMob(m)
+        ? _lxHeavyStaggerMs(140)
+        : (player.tree.stunImmune ? 0 : Math.floor(140 * (1 - getStunResist())));
       // v0.26.069 — Per user "make the invulnerability period after
       // getting hit by monsters 2x longer". Post-melee-contact iframe
       // 500 → 1000 ms. Lets the player reposition / heal after eating a
@@ -80865,7 +80925,14 @@ function updateProjectiles(dt) {
         const stunMul = 1 - getStunResist();
         // stunHit override lets specific boss projectiles stun harder (e.g. Gravitos lasers)
         const stunBase = p.stunHit || 200;
-        player.hitStun = stunBase * stunMul;
+        // v0.29.7xx — heavy stagger for zodiac / Gravitos shots. Only the
+        // un-authored 200 ms default is raised: a projectile that declares its
+        // own stunHit (600-2000 ms boss slams) is already tuned heavier and
+        // keeps its authored value. _lxHeavyStaggerMs applies the multiplier,
+        // the stun resist and the 1 s roll in one place.
+        player.hitStun = (!p.stunHit && _lxHeavyBossPresent())
+          ? Math.max(stunBase * stunMul, _lxHeavyStaggerMs(stunBase))
+          : stunBase * stunMul;
         // v0.26.069 — Per user "make the invulnerability period after
         // getting hit by monsters 2x longer". Pre-fix iframe was
         // `Math.min(1500, stunBase + 400)` → typical 600 ms, capped at
@@ -104769,7 +104836,8 @@ function _drawPlayerStatusIcons(sx, sy) {
   if (!((player.burnTimer | 0) > 0 || (player.frozenTimer | 0) > 0 || (player.freezeTimer | 0) > 0 ||
         (player._poisonTimer | 0) > 0 || (player._slowTimer | 0) > 0 || (player._iceFloor | 0) > 0 ||
         (player._electrocuteTimer | 0) > 0 || (player.invulnerable | 0) > 150 ||
-        ((player.hitStun | 0) > 100 && player._lastDamageSource === 'a pothole'))) return;
+        ((player.hitStun | 0) > 100 && player._lastDamageSource === 'a pothole') ||
+        ((player._heavyStunUntil | 0) > (game.time | 0) && (player.hitStun | 0) > 0))) return;   // v0.29.7xx — heavy-stun marker
   const icons = [];
   if ((player.burnTimer    | 0) > 0) icons.push({ emoji:'🔥', tint:'#ff8844' });
   if ((player.frozenTimer  | 0) > 0) icons.push({ emoji:'❄️', tint:'#88ddff' });
@@ -104786,6 +104854,11 @@ function _drawPlayerStatusIcons(sx, sy) {
   if ((player.invulnerable | 0) > 150) icons.push({ emoji:'✨', tint:'#ffe9a0' });
   if ((player.hitStun      | 0) > 100 && player._lastDamageSource === 'a pothole') {
     icons.push({ emoji:'💫', tint:'#ffdd44' });
+  }
+  // v0.29.7xx — heavy-stagger / 1 s stun marker. A second of dead input with
+  // no cue reads as a freeze bug; the star sits with the other status icons.
+  else if ((player._heavyStunUntil | 0) > (game.time | 0) && (player.hitStun | 0) > 0) {
+    icons.push({ emoji:'💫', tint:'#ffd166' });
   }
   if (icons.length === 0) return;
   ctx.save();
