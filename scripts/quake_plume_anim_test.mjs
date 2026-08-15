@@ -62,6 +62,32 @@ const heights = boxes.map(b2 => b2 ? b2.y1 - b2.y0 : 0);
 ok('the plume actually GROWS across the set (it is an eruption, not nine copies)',
    heights[8] > heights[0] * 1.4, { first: heights[0], last: heights[8] });
 
+// --- the top is feathered --------------------------------------------------
+// Per user: "feather the top significantly". The art is cel-shaded, so it
+// arrives with a hard outlined cauliflower cap — right for a character sprite,
+// wrong for smoke, which should dissolve at its crown. Compare mean alpha near
+// the crown against mean alpha in the plume's body: a hard cap reads roughly
+// the same in both (~250 vs ~250), a feathered one is a fraction of it.
+const feather = [];
+for (let i = 0; i < frames.length; i++) {
+  const b2 = boxes[i]; if (!b2) { feather.push(null); continue; }
+  const { data, info } = await sharpMod(frames[i]).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const meanRows = (from, to) => {
+    let sum = 0, n = 0;
+    for (let y = Math.max(0, from); y < Math.min(info.height, to); y++)
+      for (let x = 0; x < info.width; x++) { const a = data[(y * info.width + x) * 4 + 3]; if (a > 0) { sum += a; n++; } }
+    return n ? Math.round(sum / n) : 0;
+  };
+  const h2 = b2.y1 - b2.y0 + 1;
+  feather.push({ crown: meanRows(b2.y0, b2.y0 + Math.round(h2 * 0.12)),
+                 body: meanRows(b2.y0 + Math.round(h2 * 0.55), b2.y0 + Math.round(h2 * 0.70)) });
+}
+const ratios = feather.map(f => f && f.body ? +(f.crown / f.body).toFixed(2) : null);
+ok('the crown is FEATHERED — mean alpha near the top is well under half the body',
+   feather.every(f => f && f.body > 0 && f.crown < f.body * 0.5), { ratios });
+ok('...and the fade is a gradient, not a hard clip (the crown still carries some ink)',
+   feather.every(f => f && f.crown > 3), { crowns: feather.map(f => f && f.crown) });
+
 const net = await import('node:net');
 const free = (p) => new Promise((r) => { const s = net.createServer();
   s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
