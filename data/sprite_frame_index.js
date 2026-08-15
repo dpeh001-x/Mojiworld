@@ -552,6 +552,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "lava_pool": 9,
    "lightning_pillar": 9,
    "poison_cloud": 9,
+   "quake_plume": 9,
    "quake_ring": 9,
    "shock_ring": 9
   },
