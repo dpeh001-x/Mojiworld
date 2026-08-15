@@ -38,7 +38,8 @@
 //     gets exactly the number written here.
 //
 // A per-spawn +/-5% jitter rolls on HP/ATK/DEF so a pack is not identical
-// clones. Set LX_MONSTER_JITTER to 0 for exact values.
+// clones, and a separate +/-10% roll varies the EXP and COIN payout (rolled
+// independently for each, once per kill). Set either to 0 for exact values.
 // =========================================================================
 window.LX_MONSTER_STATS = {
   // ---- Regular monsters ----
@@ -201,3 +202,7 @@ window.LX_MONSTER_VARIANTS = {
 
 // Per-spawn random jitter on HP/ATK/DEF (0.05 = +/-5%). 0 = exact values.
 window.LX_MONSTER_JITTER = 0.05;
+
+// Payout jitter on EXP and COIN (0.10 = +/-10%), rolled independently for
+// each on every kill. 0 = exact table values.
+window.LX_REWARD_JITTER = 0.10;
