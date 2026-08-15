@@ -9593,7 +9593,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.733';
+const GAME_VERSION = 'v0.29.734';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -38361,7 +38361,15 @@ function _lxPadDispatch(key, down) {
   try {
     const kc = key.length === 1 ? key.toUpperCase() : (key === ' ' ? 'Space' : key.charAt(0).toUpperCase() + key.slice(1));
     const ev = new KeyboardEvent(down ? 'keydown' : 'keyup', { key: key === 'escape' ? 'Escape' : (key === ' ' ? ' ' : key), code: kc, bubbles: true, cancelable: true });
-    window.dispatchEvent(ev);
+    // v0.29.7xx — dispatch on BODY, not window (per user: "my controller did
+    // not work at this point" — the prologue story beat). A real key press
+    // targets the focused element / body and propagates body -> document ->
+    // window; dispatching directly on window made window the ENTIRE path, so
+    // any listener bound to document — the story beat's advance handler among
+    // them — never saw pad input at all. Body restores the real path: document
+    // listeners fire, window listeners still fire via bubble, and capture/
+    // stopPropagation semantics match the keyboard exactly.
+    (document.body || window).dispatchEvent(ev);
   } catch (e) {}
 }
 // v0.29.125 — CONTROLLER MENU NAVIGATION (Steam Deck parity pass). When a
@@ -38416,7 +38424,14 @@ const _LX_PAD_MODAL_IDS = ['lo-auth', 'death-overlay', 'dialog', 'settings-modal
   // without ids of their own a pad player who opened Name Entry or Co-op was
   // stranded: the panel is up, the router still points at the buttons it
   // replaced. Wardrobe is the same story from the U panel.
-  'wardrobe-picker', 'menu-name-panel', 'menu-coop-panel', 'dev-modal'];
+  'wardrobe-picker', 'menu-name-panel', 'menu-coop-panel', 'dev-modal',
+  // v0.29.7xx — story beats (prologue cards, act arrivals, epilogues). Not
+  // being listed meant the pad kept driving the PAUSED game underneath while
+  // the beat waited for click/Enter — the reported controller dead-spot. A
+  // plain stanza has no focusable controls (Ⓐ falls through to the
+  // click-the-surface branch in _lxPadMenuNav); a choice stanza renders real
+  // buttons and gets the standard nav ring.
+  'story-beat-overlay'];
 // v0.29.422 — TOPMOST WINS, not first-listed. Several of these overlays are
 // live at once (at the title, 'lo-auth' and 'class-select-modal' are both
 // displayed), so "first id in an arbitrary array" was standing in for "the one
@@ -38490,7 +38505,14 @@ function _lxPadMenuNav(root, pad) {
     if (r.width < 5 || r.height < 5) continue;
     seen.add(el); els.push(el);
   }
-  if (!els.length) { if (edge(1) || edge(9)) _lxPadDispatch('escape', true); return; }
+  // v0.29.7xx — a surface with nothing to focus can still be click-to-advance
+  // (story-beat stanzas advance on overlay click). Ⓐ clicks the surface
+  // itself; Ⓑ/Start keep the escape path (the beat advances on Escape too).
+  if (!els.length) {
+    if (edge(0)) { try { root.click(); } catch (e) {} }
+    if (edge(1) || edge(9)) _lxPadDispatch('escape', true);
+    return;
+  }
   let idx = (root._padIdx | 0);
   const clamp = (i) => (i + els.length) % els.length;
   const cur = () => els[clamp(idx)];
