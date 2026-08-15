@@ -9593,7 +9593,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.727';
+const GAME_VERSION = 'v0.29.728';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -100376,21 +100376,49 @@ function drawAegisOrbs() {
   const camX = game.camera.x;
   // Fade out across the last 600 ms of life
   const fade = player._aegis.life < 600 ? player._aegis.life / 600 : 1;
+  // v0.29.726 — AUTHORED ORB ART (per user: "the crusader orbs sprite are not
+  // wired into the orbs of divine aegis yet"). p_ult_holyorb.webp shipped in
+  // v0.29.710 for the Judgement orbs (crusader_ult) and was registered ONLY as
+  // a projectile bspr — Divine Aegis draws its five hovering orbs here, in its
+  // own renderer, so it never saw the art and kept its three stacked circles.
+  // Same skill family, same golden-orb identity: now one sprite for both.
+  //
+  // Structure mirrors drawBallistaTurrets() directly below: prefer the sprite
+  // once it has decoded, fall back to the procedural orb until then, so a slow
+  // decode or a missing file degrades instead of blanking the skill.
+  const _orbImg = (typeof LX_BULT_PROJ !== 'undefined' && LX_BULT_PROJ.bult_holyorb
+                   && _lxPlayerProjReady(LX_BULT_PROJ.bult_holyorb)) ? LX_BULT_PROJ.bult_holyorb : null;
   ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
   for (const orb of player._aegis.orbs) {
     if (orb.x === undefined) continue;
     const sx = orb.x - camX;
     const sy = orb.y;
-    // Outer halo
-    ctx.fillStyle = `rgba(255,230,140,${0.35 * fade})`;
-    ctx.beginPath(); ctx.arc(sx, sy, 14, 0, Math.PI * 2); ctx.fill();
-    // Warm core
-    ctx.fillStyle = `rgba(255,255,220,${0.85 * fade})`;
-    ctx.beginPath(); ctx.arc(sx, sy, 7, 0, Math.PI * 2); ctx.fill();
-    // White-hot center
-    ctx.fillStyle = `rgba(255,255,255,${0.95 * fade})`;
-    ctx.beginPath(); ctx.arc(sx, sy, 3, 0, Math.PI * 2); ctx.fill();
+    // The glow stays ADDITIVE and sits under the art — it is what makes the
+    // orb read as holy light rather than a sticker. The sprite itself draws
+    // source-over: additive on full-colour art blows the sapphire core to
+    // white and the piece loses the only thing that distinguishes it.
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = `rgba(255,230,140,${(_orbImg ? 0.30 : 0.35) * fade})`;
+    ctx.beginPath(); ctx.arc(sx, sy, _orbImg ? 17 : 14, 0, Math.PI * 2); ctx.fill();
+    if (_orbImg) {
+      // 34 px matches the orbs' own 29 px strike radius, so what the player
+      // sees is what actually hits. A slow spin keyed to each orb's phase
+      // keeps five identical sprites from reading as five stamps.
+      const SZ = 34;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.save();
+      ctx.globalAlpha = fade;
+      ctx.translate(sx, sy);
+      ctx.rotate(game.time * 0.012 + (orb.phase || 0));
+      if (typeof _lxUseEntityImageQuality === 'function') _lxUseEntityImageQuality(ctx);
+      ctx.drawImage(_orbImg, -SZ / 2, -SZ / 2, SZ, SZ);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = `rgba(255,255,220,${0.85 * fade})`;
+      ctx.beginPath(); ctx.arc(sx, sy, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = `rgba(255,255,255,${0.95 * fade})`;
+      ctx.beginPath(); ctx.arc(sx, sy, 3, 0, Math.PI * 2); ctx.fill();
+    }
   }
   ctx.restore();
 }
