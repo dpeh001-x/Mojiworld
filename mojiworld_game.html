@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.805';
+const GAME_VERSION = 'v0.29.806';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -39066,13 +39066,23 @@ function _lxPadMenuNav(root, pad) {
   };
   const seen = new Set();
   const els = [];
-  for (const el of root.querySelectorAll('button, [role="button"], input, select, .toggle, .qj-btn, [data-qaccept], [data-qabandon], [onclick], .cs-dd-item, .class-card, .cs-skin-swatch, .cs-dd-trigger, .inv-slot, .equip-slot')) {   // v0.29.7xx — swatches + dd-triggers assign onclick as a PROPERTY, invisible to [onclick]. v0.29.793 — gear tiles do the same.
+  // v0.29.806 — .lu-card: the U panel's stat cards (Level Up tab). They are plain
+  // divs that take an onclick PROPERTY, so [onclick] never saw them and a pad
+  // player could reach the tab strip but not spend a single point.
+  // [data-wm-pick]: world-map nodes that can actually be travelled to (see the
+  // marker in _renderWorldMapDiagram).
+  for (const el of root.querySelectorAll('button, [role="button"], input, select, .toggle, .qj-btn, [data-qaccept], [data-qabandon], [onclick], .cs-dd-item, .class-card, .cs-skin-swatch, .cs-dd-trigger, .inv-slot, .equip-slot, .lu-card, [data-wm-pick]')) {   // v0.29.7xx — swatches + dd-triggers assign onclick as a PROPERTY, invisible to [onclick]. v0.29.793 — gear tiles do the same.
     if (seen.has(el) || el.disabled) continue;
     // v0.29.793 — a gear tile only earns the ring if it DOES something. The bag
     // pads its grid with empty .inv-slot placeholders (and an unfilled equip
     // slot is just a label), so without this the ring would stop on blanks.
     if ((el.classList.contains('inv-slot') || el.classList.contains('equip-slot'))
         && typeof el.onclick !== 'function') continue;
+    // v0.29.806 — same rule for the U panel's stat cards: the card only takes an
+    // onclick when it is affordable and under its cap, so a locked or MAXED
+    // lane has none and must not hold the ring. (Its bulk-invest button is a
+    // real <button> and is picked up separately, as it should be.)
+    if (el.classList.contains('lu-card') && typeof el.onclick !== 'function') continue;
     const r = el.getBoundingClientRect();
     if (r.width < 5 || r.height < 5) continue;
     // v0.29.7xx — visibility:hidden keeps its rect (the creation form's Back
@@ -39184,7 +39194,17 @@ function _lxPadMenuNav(root, pad) {
     // virtual keyboard; everything else keeps the plain click.
     const _typeable = el && ((el.tagName === 'INPUT' && /^(text|number|search|password|url)$/.test(el.type || 'text')) || el.tagName === 'TEXTAREA');
     if (_typeable && typeof _lxPadVK !== 'undefined') { try { _lxPadVK.open(el); } catch (e) {} }
-    else { try { el.click(); } catch (e) {} }
+    // v0.29.806 — SVGElement has no .click() method (verified in Chrome: it is
+    // undefined, not a no-op), and the world-map nodes are <g> elements whose
+    // travel handler is a real addEventListener('click'). Calling el.click()
+    // there threw into the catch and the button silently did nothing. Dispatch
+    // a bubbling MouseEvent for anything that lacks the method — same event the
+    // listener would receive from a mouse.
+    else if (typeof el.click === 'function') { try { el.click(); } catch (e) {} }
+    else {
+      try { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); }
+      catch (e) {}
+    }
   }
   if (edge(1) || edge(9)) {
     const closer = root.querySelector('.mc-modal-close, [id$="-close"], .modal-close, .close-x');
@@ -49363,6 +49383,12 @@ function _renderWorldMapDiagram(host, opts) {
       g.addEventListener('mouseenter', () => disc.setAttribute('r', 24));   // v0.26.336 was 32 (was 22)
       g.addEventListener('mouseleave', () => disc.setAttribute('r', 21));   // v0.26.336 was 28 (was 19)
       g.addEventListener('click', () => opts.onPick && opts.onPick(id, m));
+      // v0.29.806 — the pad's ring needs to know WHICH nodes can be travelled to.
+      // Only this branch (!here && acc.ok) gets a click listener, so the marker
+      // is stamped here rather than inferred from cursor styling: the two can
+      // never disagree because they are the same statement. Without it the ring
+      // would stop on all 80 nodes, ~all of them undiscovered "???" dead ends.
+      g.setAttribute('data-wm-pick', '1');
     }
     // Hover tooltip via title
     const titleEl = document.createElementNS(SVG_NS, 'title');
