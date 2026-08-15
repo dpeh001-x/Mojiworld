@@ -7903,7 +7903,7 @@ Current ACC: 0
                (50 % chance). Spent at Brok's smithy: Set Piece craft
                (1000◈), Reforge Bench (500◈).
                Persists across deaths, resets on prestige. -->
-          <div class="stat-item shard-item" title="Setshards — crafting currency. Mainly from bosses (10-100 per boss, scaled by boss level), Elders (50 % chance, 2-3) and Elites (25 % chance, 1-2), plus Expedition F10 victories (50 % chance, 5-15). Ordinary monsters only trickle one every ~200 kills. Spent at Brok in Everdawn Central: Set Piece craft (1000◈), Reforge Bench (500◈), Respec (1500◈). Persists across deaths; resets on prestige."><span class="stat-icon ui-ico ico-setshards" aria-label="Setshards"></span><span class="stat-val" id="hud-setshards">0</span></div>
+          <div class="stat-item shard-item" title="Setshards — crafting currency. Mainly from bosses (10-100 per boss, scaled by boss level; refights pay 40 %), Elders (50 % chance, 2-3) and Elites (25 % chance, 1-2), plus Expedition F10 victories (50 % chance, 5-15). Ordinary monsters only trickle one every ~200 kills. Spent at Brok in Everdawn Central: Set Piece craft (1000◈), Reforge Bench (500◈), Respec (1500◈). Persists across deaths; resets on prestige."><span class="stat-icon ui-ico ico-setshards" aria-label="Setshards"></span><span class="stat-val" id="hud-setshards">0</span></div>
           <!-- v0.26.238 — Kaching HUD chip removed. With the P2W tab gone
                (v0.26.235) and ticket items unreachable through normal play,
                the chip displayed a balance that nothing could spend. The
@@ -9738,7 +9738,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.790';
+const GAME_VERSION = 'v0.29.791';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -38413,6 +38413,28 @@ const PLAYER_SAVE_FIELDS = [
   'mojimon',   // v0.29.434 — MojiMon roster + upgrades + active-out + Date.now()-anchored cooldown
   '_tutorialSeen'   // v0.26.x — per-SAVE tutorial gate (replaces the global localStorage key)
 ];
+// =========================================================================
+// v0.29.7xx — BOSS REFIGHTS (per user: "when refighting boss, still can get
+// setshard, but reduced chance to gain other rewards").
+// A refight is decided by a PERSISTENT kill counter, not by the 10-minute
+// respawn flag: that flag is cleared when the boss re-arms, so it cannot tell
+// a first clear from a tenth. game._bossKills survives the re-arm and the
+// reload, so a refight stays a refight however long you waited.
+// =========================================================================
+const LX_REFIGHT_SHARD_MUL  = 0.40;   // shards on a repeat kill — reduced, never zero
+const LX_REFIGHT_REWARD_MUL = 0.40;   // scroll + gear-drop chance on a repeat kill
+function _lxBossKey(m) {
+  if (!m) return null;
+  if (m.zodiacSign) return 'zodiac_' + m.zodiacSign;
+  return (m.type || 'boss') + '@' + ((typeof game !== 'undefined' && game && game.currentMap) || '?');
+}
+// True once this specific boss has been killed before on this save.
+function _lxIsBossRefight(m) {
+  if (!m || !(m.isBoss || m.boss || m.zodiacBoss)) return false;
+  if (m._echoBoss || m._expeditionBoss) return false;   // separate modes, own payouts
+  const k = _lxBossKey(m);
+  return !!(k && typeof game !== 'undefined' && game && game._bossKills && (game._bossKills[k] | 0) > 0);
+}
 const GAME_SAVE_FIELDS = [
   'currentMap','bossDefeated','kills','achievements',
   'qnav',   // v0.29.583 — quest compass target; an allowlist, so tracking resets on reload without it
@@ -38424,6 +38446,7 @@ const GAME_SAVE_FIELDS = [
   'edicts',   // v0.29.66 — Edicts of the Weight-Bearer heat toggles ({edictId:true})
   '_timeHW',   // v0.26.452 - monotonic clock high-water mark (rollback guard)
   '_playMs','_bossDefeatedAt',   // v0.26.453 - boss respawn playtime cooldown
+  '_bossKills',   // v0.29.7xx — per-boss lifetime kill count; drives the refight reward split
   '_qteStats',   // v0.26.x -- shackle-QTE ledger (caught/breaks/clean) for the future achievement
   // v0.26.438 — Guguma return-warp history (recent maps the player left off
   // in, most-recent-first). Persisted so the warp list survives a reload.
@@ -79832,7 +79855,11 @@ function killMonster(m) {
   if (_scrollLvOk && (m.isBoss || m.isElite || m.isMiniBoss) && !(game.expedition && game.expedition.active)) {
     // v0.26.496 — Drop rate reduced slightly per user (boss 0.20→0.15,
     // miniboss 0.10→0.07, elite 0.05→0.035).
-    const rate = m.isBoss ? 0.15 : (m.isMiniBoss ? 0.07 : 0.035);
+    let rate = m.isBoss ? 0.15 : (m.isMiniBoss ? 0.07 : 0.035);
+    // v0.29.7xx — a boss you have already cleared drops scrolls at 40% of the
+    // first-clear rate (0.15 -> 0.06). The shards keep coming (see the payout
+    // block); it is the one-off rewards that thin out on a farm.
+    if (typeof _lxIsBossRefight === 'function' && _lxIsBossRefight(m)) rate *= LX_REFIGHT_REWARD_MUL;
     if (Math.random() < rate) {
       const SET_POOL = ['dawnshard', 'doomforged', 'shadowweave', 'voidcaller', 'skyhunter'];
       const SET_LABEL = { dawnshard:'Dawnshard', doomforged:'Doomforged', shadowweave:'Shadowweave', voidcaller:'Voidcaller', skyhunter:'Skyhunter' };
@@ -79959,7 +79986,9 @@ function killMonster(m) {
   //   normal 0.05 * 0.02 = 0.1%   ·   elite 0.50 * 0.02 = 1.0%
   // The boss base moves 1.0 -> 0.9 solely to HOLD its main roll at the 1.8%
   // v0.29.777 set, since the table does not mention bosses.
-  const dropChance = (tier === 2 ? 0.9 : tier === 1 ? 0.50 : 0.05) * (1 + luck) * 0.02 * (typeof _diffDropMul === 'function' ? _diffDropMul() : 1) * (typeof _edictDropMul === 'function' ? _edictDropMul() : 1) * (typeof _affixDropMul === 'function' ? _affixDropMul() : 1);   // v0.28.7 — Hard +25% / Nightmare +50% gear-drop chance · v0.29.66 Edict Weight drop bonus · v0.29.288 world affix
+  let dropChance = (tier === 2 ? 0.9 : tier === 1 ? 0.50 : 0.05) * (1 + luck) * 0.02 * (typeof _diffDropMul === 'function' ? _diffDropMul() : 1) * (typeof _edictDropMul === 'function' ? _edictDropMul() : 1) * (typeof _affixDropMul === 'function' ? _affixDropMul() : 1);   // v0.28.7 — Hard +25% / Nightmare +50% gear-drop chance · v0.29.66 Edict Weight drop bonus · v0.29.288 world affix
+  // v0.29.7xx — same 40% haircut on the gear roll for an already-cleared boss.
+  if (typeof _lxIsBossRefight === 'function' && _lxIsBossRefight(m)) dropChance *= LX_REFIGHT_REWARD_MUL;
   if (itemRoll < dropChance) {
     // v0.25.678 — Pass the killed mob's effective level so rarity weights
     // (and affix magnitudes downstream) grade with mob difficulty. _mobLevel
@@ -80173,21 +80202,31 @@ function killMonster(m) {
     // branch — only the FINAL boss death reaches this code.
     {
       const _shardMapKey = (game.currentMap || 'unknown') + '_shardsAwarded';
-      if (!m._echoBoss && !m._expeditionBoss && !game.bossDefeated[_shardMapKey]) {   // v0.26.1030 — echo/rush + expedition bosses don't grant per-boss shards (payout is once at run end)
+      // v0.29.7xx — the first-kill flag no longer gates the payout to zero
+      // (per user: "still can get setshard"). A repeat kill pays a reduced
+      // amount instead of nothing, so refighting is always worth something.
+      // Echo/rush + expedition bosses keep their exclusions — separate modes
+      // with their own payout at run end.
+      if (!m._echoBoss && !m._expeditionBoss) {
+        const _isRefight = (typeof _lxIsBossRefight === 'function') && _lxIsBossRefight(m);
         const _bossLvl = (m.level && m.level > 0) ? m.level
                        : (typeof _mobLevel === 'function' ? _mobLevel(m) : 50);
-        // v0.29.7xx — DOUBLED (per user "increase the setshards gained from
-        // bosses"): coefficient 0.5 -> 1.0, cap 50 -> 100. Lv 10 Mooma pays 10
-        // (was 5), Lv 50 Octobaby 50 (was 25), Lv 100 Gravitos 100 (was 50).
-        // The full 8-boss tour moves 164 -> ~330 shards: from 82% of one craft
-        // to over one and a half, keeping bosses the dominant source by far
-        // now that the normal-mob trickle is 6x thinner.
-        const SHARDS = Math.min(100, Math.max(1, Math.floor(_bossLvl * 1.0)));
+        // First clear pays the full level-scaled amount (coefficient 1.0,
+        // cap 100 — Lv 10 Mooma 10, Lv 50 Octobaby 50, Lv 100 Gravitos 100).
+        const _fullShards = Math.min(100, Math.max(1, Math.floor(_bossLvl * 1.0)));
+        const SHARDS = _isRefight
+          ? Math.max(1, Math.round(_fullShards * LX_REFIGHT_SHARD_MUL))
+          : _fullShards;
+        // Stamp the lifetime counter that makes the NEXT kill a refight.
+        try {
+          const _bk = _lxBossKey(m);
+          if (_bk) { game._bossKills = game._bossKills || {}; game._bossKills[_bk] = (game._bossKills[_bk] | 0) + 1; }
+        } catch (e) {}
         player.setshards = (player.setshards || 0) + SHARDS;
         game.bossDefeated[_shardMapKey] = true;
         const _firstWord = (m.name || 'The boss').split(/[\s,—]/)[0];
         setTimeout(() => {
-          showToast(`◈ ${_firstWord} dropped ${SHARDS} Setshard${SHARDS === 1 ? '' : 's'}!`, 'legendary');
+          showToast(`◈ ${_firstWord} dropped ${SHARDS} Setshard${SHARDS === 1 ? '' : 's'}!${_isRefight ? ' (refight)' : ''}`, _isRefight ? 'epic' : 'legendary');
         }, 800);
         // Violet shard burst at the boss death point — preserved from the
         // v0.25.251 Gravitos visual so the endgame feel is retained for
