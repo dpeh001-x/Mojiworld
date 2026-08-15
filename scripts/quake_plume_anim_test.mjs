@@ -30,6 +30,38 @@ const sizes = frames.filter(existsSync).map(f => statSync(f).size);
 ok('no frame is empty or absurd', sizes.length === 9 && sizes.every(b => b > 4000 && b < 400000),
    { min: Math.min(...sizes), max: Math.max(...sizes) });
 
+// --- nothing is cut off ----------------------------------------------------
+// Per user: "ensure that there is no cutoff, it gets truncated at the top".
+// A dust plume grows upward, so any zoom the animator applies eats the top
+// first — the first pass came back with content starting at y=4 of 768, i.e.
+// pressed flat against the ceiling with the billowing heads sliced. Measure
+// the alpha bounding box of every frame and require real clearance.
+const sharpMod = (await import('sharp')).default;
+const boxes = [];
+for (const f of frames) {
+  if (!existsSync(f)) { boxes.push(null); continue; }
+  const { data, info } = await sharpMod(f).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  let x0 = info.width, y0 = info.height, x1 = -1, y1 = -1;
+  for (let y = 0; y < info.height; y++) for (let x = 0; x < info.width; x++) {
+    if (data[(y * info.width + x) * 4 + 3] > 10) {
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+  }
+  boxes.push({ x0, y0, x1, y1, w: info.width, h: info.height });
+}
+const touching = boxes.map((b2, i) => ({ i, b: b2 }))
+  .filter(({ b: b2 }) => b2 && (b2.y0 <= 8 || b2.x0 <= 2 || b2.x1 >= b2.w - 3));
+ok('no frame is CUT OFF — every plume clears the top and side edges',
+   touching.length === 0,
+   { offenders: touching.map(t => `f${t.i} top=${t.b.y0} x=${t.b.x0}..${t.b.x1}`) });
+ok('the plume is bottom-anchored — its base sits on the art\'s bottom edge (the renderer anchors there)',
+   boxes.every(b2 => b2 && b2.y1 >= b2.h - 6), { bottoms: boxes.map(b2 => b2 && b2.y1) });
+// A real eruption gets bigger; nine copies of one drawing would not.
+const heights = boxes.map(b2 => b2 ? b2.y1 - b2.y0 : 0);
+ok('the plume actually GROWS across the set (it is an eruption, not nine copies)',
+   heights[8] > heights[0] * 1.4, { first: heights[0], last: heights[8] });
+
 const net = await import('node:net');
 const free = (p) => new Promise((r) => { const s = net.createServer();
   s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
