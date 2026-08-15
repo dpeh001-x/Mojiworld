@@ -9614,7 +9614,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.737';
+const GAME_VERSION = 'v0.29.738';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -38573,6 +38573,9 @@ function _lxPadMenuNav(root, pad) {
     if (seen.has(el) || el.disabled) continue;
     const r = el.getBoundingClientRect();
     if (r.width < 5 || r.height < 5) continue;
+    // v0.29.7xx — visibility:hidden keeps its rect (the creation form's Back
+    // button on page 1); an invisible control must not take the ring.
+    if (getComputedStyle(el).visibility === 'hidden') continue;
     seen.add(el); els.push(el);
   }
   // v0.29.7xx — a surface with nothing to focus can still be click-to-advance
@@ -38619,7 +38622,31 @@ function _lxPadMenuNav(root, pad) {
       _gridHop = true;
     }
   }
-  if (moved && !_gridHop) idx = clamp(idx + moved);
+  // v0.29.7xx — GEOMETRIC vertical nav (per user: "at skin tone section
+  // pressing direction key down should go to next rather than going
+  // rightwards"). Flat ±1 walks document order, which inside a horizontal
+  // row reads as RIGHT — escaping the 8-swatch skin row took 6 extra
+  // presses. Down/up now hop to the nearest element in the next row band
+  // (smallest vertical gap, then nearest horizontal centre) — the pad-vk
+  // grid treatment generalised. In a vertical list the next band IS the
+  // next item, so this degenerates to the old ±1 exactly; when nothing
+  // exists in the pressed direction the flat walk (and its wrap) runs
+  // unchanged.
+  if (moved && !_gridHop) {
+    const _cr2 = cur().getBoundingClientRect();
+    const _cx2 = _cr2.left + _cr2.width / 2;
+    let _bk = -1, _bs = Infinity;
+    for (let k = 0; k < els.length; k++) {
+      if (k === clamp(idx)) continue;
+      const _r2 = els[k].getBoundingClientRect();
+      const _dy = moved > 0 ? _r2.top - _cr2.bottom : _cr2.top - _r2.bottom;
+      if (_dy < -4) continue;                      // same band or wrong side
+      const _dx = Math.abs(_r2.left + _r2.width / 2 - _cx2);
+      const _sc = Math.max(0, _dy) * 3 + _dx;
+      if (_sc < _bs) { _bs = _sc; _bk = k; }
+    }
+    idx = _bk >= 0 ? _bk : clamp(idx + moved);
+  }
   else if (!moved && lateral && !isRange(cur())) idx = clamp(idx + lateral);
   root._padIdx = idx;
   const el = cur();
