@@ -9614,7 +9614,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.740';
+const GAME_VERSION = 'v0.29.741';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -18136,9 +18136,9 @@ const CUTE_CLASS_COLORS = {
 const ITEM_POOL = {
   weapons: [
     // v0.25.855 — TIER 0 STARTER (Lv 0-9) — completes the every-10 ladder.
-    // Bare-minimum gear for new characters. Players spawn at Lv 1 with no
-    // gear; the Brok shop sells these for tiny mojicoins so a fresh save can
-    // afford a stick + rags from kill one.
+    // v0.29.741 — no longer SOLD anywhere: the stick + rags are Guguma's
+    // tutorial gift, and the shops start their racks at Tier 2. Kept in the
+    // pool for the gift lookup, drops, and old saves.
     { name:'Whittled Stick',     icon:'🪵', atk:1,  rarity:'common',    price:20,   cls:'any', tier:0,
       vis:{ blade:'#8a6030', bladeHi:'#aa8048', bladeShd:'#4a2810', guard:'#3a1808', gold:'#8a6822' } },
     // Generic ladder (any class can wield)
@@ -84875,15 +84875,20 @@ function openShop(type, opts) {
     }
   } else if (type === 'weapon') {
     title.textContent = 'Brok\'s Forge';
-    const allGear = [...ITEM_POOL.weapons, ...ITEM_POOL.armors, ...ITEM_POOL.accessories];
-    // Filter: only show tier-appropriate
-    const maxTier = player.level < 4 ? 2 : player.level < 8 ? 4 : 6;
-    const visible = allGear.slice().filter(it => {
-      const idx = allGear.indexOf(it);
-      return idx < maxTier || allGear.slice(0, 6).indexOf(it) < maxTier
-        || allGear.slice(6, 12).indexOf(it) < maxTier
-        || allGear.slice(12, 18).indexOf(it) < maxTier;
-    });
+    // v0.29.741 — per user "Brok's shop sells absolutely useless items" /
+    // "Brok's and armory shops should sell tier 2-4 items at a substantial
+    // price point that the player need to gather". The T0/T1 junk rack is
+    // gone (that gear is now the tutorial gift), and the racks hold the
+    // T2-4 ladder from level 1 — visible as a savings goal, priced at a
+    // 2.5× forge premium over the catalog value so it is gathered-for, not
+    // impulse-bought. Bought copies keep their CATALOG price, so the ~40%
+    // sell-back stays computed off base value (no buy-high/sell-high loop;
+    // reselling a premium purchase recovers 40% of base = 16% of spend).
+    // This one stock function IS every gear shop — Brok, Yun's armoury
+    // inspection, Barnaby's Glasswind forge all route here.
+    const _gearPx = (it) => Math.ceil(it.price * 2.5 * _mult);
+    // (the old first-N-rows tier proxy died here — it selected by ARRAY
+    // POSITION, which is why the racks led with the Whittled Stick.)
     // v0.25.250 — Class-aware shop. Brok now sells the generic ladder
     // (cls === 'any', no setId) PLUS any class-specific items matching
     // the player's class. Set legendaries (setId) are excluded — those
@@ -84896,9 +84901,8 @@ function openShop(type, opts) {
     const show = [];
     for (const cat of ['weapons','armors','accessories']) {
       const items = ITEM_POOL[cat].filter(it => !it.setId); // exclude loot-only set legendaries
-      const generics    = items.filter(it => !it.cls || it.cls === 'any');
-      const classItems  = items.filter(it => it.cls && it.cls !== 'any' && it.cls === player.cls);
-      const genCap = player.level < 3 ? 2 : player.level < 6 ? 3 : player.level < 10 ? 4 : 6;
+      const generics    = items.filter(it => (!it.cls || it.cls === 'any') && (it.tier | 0) >= 2 && (it.tier | 0) <= 4);
+      const classItems  = items.filter(it => it.cls && it.cls !== 'any' && it.cls === player.cls && (it.tier | 0) >= 2);
       // v0.25.853 — Tier-to-level gating extended to cover the new T4
       // class bridges (Lv 30) + T6/T8/T10 endgame items (Lv 50/70/90).
       // T1: free for everyone (starter band)
@@ -84913,22 +84917,20 @@ function openShop(type, opts) {
       // T10: Lv 90+ (Paragon — v0.25.853 NEW)
       const visibleClass = classItems.filter(it => {
         if (!it.tier) return true;
-        if (it.tier <= 2)  return player.level >= 6;
-        if (it.tier <= 3)  return player.level >= 10;
-        if (it.tier <= 4)  return player.level >= 30;
+        // v0.29.741 — T2-4 always on the racks: the savings ladder must be
+        // SEEN from level 1 to be saved for. Endgame tiers keep their gates.
+        if (it.tier <= 4)  return true;
         if (it.tier <= 6)  return player.level >= 50;
         if (it.tier <= 7)  return player.level >= 60;
         if (it.tier <= 8)  return player.level >= 70;
         if (it.tier <= 9)  return player.level >= 80;
         return player.level >= 90;                      // T10 Paragon
       });
-      for (let i = 0; i < Math.min(genCap, generics.length); i++) {
-        show.push({ ...generics[i], slot: _catToSlot(cat) });
-      }
+      for (const g of generics) show.push({ ...g, slot: _catToSlot(cat) });
       for (const it of visibleClass) show.push({ ...it, slot: _catToSlot(cat) });
     }
     for (const it of show) {
-      list.appendChild(makeShopRow(it.icon, it.name, itemStatString(it), it.price, () => {
+      list.appendChild(makeShopRow(it.icon, it.name, itemStatString(it), _gearPx(it), () => {
         // v0.25.775 — Inventory cap check. Pre-fix Brok would let you buy
         // gear even when the equip tab was full, pushing items past slot
         // 24 silently. Now: refuse the purchase with a clear toast.
@@ -84943,15 +84945,15 @@ function openShop(type, opts) {
           showToast(`Inventory full (${_tab.toUpperCase()}) — sell or destroy something first.`, 'rare');
           return;
         }
-        if (player.mojicoins >= it.price) {
-          player.mojicoins -= it.price;
-          player.inventory.push({...it});
+        if (player.mojicoins >= _gearPx(it)) {
+          player.mojicoins -= _gearPx(it);
+          player.inventory.push({...it});   // catalog price travels with the item — see the premium note above
           // v0.25.246 (Q1) — coin SFX on every successful gear buy.
           if (audio && audio.play) audio.play('chaching');
           showToast(`Bought ${it.name}!`, it.rarity);
           openShop('weapon');
         } else {
-          showToast(`Need ${it.price - player.mojicoins} more Mojicoins`, 'common');
+          showToast(`Need ${_gearPx(it) - player.mojicoins} more Mojicoins`, 'common');
         }
       }, it.rarity, undefined, it));
     }
@@ -92285,11 +92287,11 @@ const TUTORIAL_STEPS = [
     grantsStarterWeapon: true,
     detect: 'panel',   // v0.27.5 — the ask is "open U → Items"; the U-panel open pings 'panel'
     tryIt: 'Open <kbd>U</kbd> → <b>Items</b> and meet your blade',
-    gugumaLine: 'Cheep! I fished a proper blade from the lost-and-found. Try not to leave it in your bag like the last seven Outsiders.',
-    body: 'Guguma just tucked a <b>class starter weapon</b> into your bag — forged for <em>your</em> class. ' +
-          'If your hands were empty it <b>auto-equips on the spot</b> — open the <kbd>U</kbd> panel\'s <b>Items</b> tab to admire it (and click any gear there to swap, any time).<br><br>' +
-          '<b>Class affinity:</b> gear made for your class works at <b>+20%</b> power, while off-class gear is <b>&minus;25%</b>. ' +
-          'Wielding your own class\'s weapon is always the strongest start.',
+    gugumaLine: 'Cheep! A stick and some rags — every legend starts somewhere. The forges sell the real thing, once your pockets stop echoing.',
+    body: 'Guguma just handed you a <b>Whittled Stick</b> and <b>Threadbare Rags</b> — humble, but yours, and they <b>auto-equip on the spot</b> if your slots were empty. ' +
+          'Open the <kbd>U</kbd> panel\'s <b>Items</b> tab to meet them (click any gear there to swap, any time).<br><br>' +
+          '<b>Your first goal:</b> the gear shops (Brok in town, and the armouries beyond) stock <b>Tier 2–4</b> weapons and armour — including a weapon forged for <em>your</em> class at <b>+20%</b> affinity power. ' +
+          'They cost real Mojicoins, so hunt, save, and upgrade.',
   },
   {
     icon: '🧪',
@@ -92794,7 +92796,12 @@ function _closeTutorial(markSeen) {
 // the weapon while the step points at it; close/skip paths also call it as a
 // fallback. Deduped per-character via the PERSISTED player._starterWeaponGiven
 // flag (in PLAYER_SAVE_FIELDS), so replays/reloads never double-grant.
-const _TUT_STARTER_WEAPON = { warrior:'Crusader Mace', rogue:'Quickfang Daggers', mage:'Apprentice Wand', archer:"Hunter's Shortbow" };
+// v0.29.741 — per user "guguma should give a whittled stick weapon and rags
+// at the start rather than a t2 class specific weapon". The humble kit is the
+// point: the class weapons those names refer to moved to the shops as the
+// first real savings goal (see the Brok stock rework in openShop).
+const _TUT_STARTER_WEAPON = { warrior:'Whittled Stick', rogue:'Whittled Stick', mage:'Whittled Stick', archer:'Whittled Stick' };
+const _TUT_STARTER_ARMOR = 'Threadbare Rags';
 function _grantTutorialStarterWeapon() {
   try {
     if (typeof player === 'undefined' || !player) return;
@@ -92814,11 +92821,22 @@ function _grantTutorialStarterWeapon() {
       const _sw = player.inventory.pop();
       player.equipped.weapon = _sw;
       player._equipBonusCache = null;
-      if (typeof refreshGearCache === 'function') refreshGearCache();
-      if (typeof showToast === 'function') showToast(`🎁 Guguma handed you a ${wname} — equipped and ready! (U panel → Items to inspect it.)`, 'epic');
-    } else if (typeof showToast === 'function') {
-      showToast(`🎁 Guguma left you a ${wname} — your class starter weapon! Open the U panel's Items tab to equip it.`, 'epic');
     }
+    // v0.29.741 — the rags come with the stick (same dedupe flag, same
+    // auto-equip rule): a fresh character now starts DRESSED, in the gear
+    // the shops used to sell for pocket change.
+    const abase = (typeof ITEM_POOL !== 'undefined' && ITEM_POOL.armors)
+      ? ITEM_POOL.armors.find(a => a.name === _TUT_STARTER_ARMOR) : null;
+    if (abase) {
+      player.inventory.push({ ...abase, baseName: abase.name, stars: 0, slot: 'armor' });
+      if (!player.equipped.armor) {
+        const _sa = player.inventory.pop();
+        player.equipped.armor = _sa;
+        player._equipBonusCache = null;
+      }
+    }
+    if (typeof refreshGearCache === 'function') refreshGearCache();
+    if (typeof showToast === 'function') showToast('🎁 Guguma handed you a Whittled Stick and some Threadbare Rags — equipped and ready! Real gear waits at the shops — start saving.', 'epic');
   } catch (e) { /* never let a gift failure break tutorial close */ }
 }
 // Wire tutorial buttons once on first call (idempotent).
