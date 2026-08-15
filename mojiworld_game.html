@@ -9626,7 +9626,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.752';
+const GAME_VERSION = 'v0.29.753';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -39589,7 +39589,10 @@ function _dismissBossIntro() {
   // Only unpause if no other modal owns the pause — without this, a story beat /
   // powerup / advancement opening during the intro's close tail got silently
   // unpaused underneath it (the same limbo class closeBeat guards against).
-  setTimeout(() => { if (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen()) game.paused = false; }, 600);
+  // v0.29.753 — was 600 ms of dead air on every boss-fight start. The guard is
+  // the CHECK at fire time, not the length of the wait: a modal opening later
+  // sets its own pause regardless. 150 ms still covers same-tick opens.
+  setTimeout(() => { if (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen()) game.paused = false; }, 150);
 }
 
 // v0.25.795 — Story beat system. Multi-stanza dialog cards that pause
@@ -54559,8 +54562,35 @@ function loadMap(id, entryX, entryY) {
       }, 300);
     };
     const _playEntry = () => _gravitosEntryCutscene(_afterEntry);
+    // v0.29.753 — v0.29.550's preload, which only the PROLOGUE path had: buffer
+    // the entrance clip during the dagger clip so it plays frame-one.
+    // _gravitosEntryCutscene already adopts window._prologueEntryPreload;
+    // fail-open — an errored preload just means the old cold-fetch <video>.
+    try {
+      const _pv = document.createElement('video');
+      _pv.preload = 'auto'; _pv.playsInline = true;
+      _pv.src = 'steam/higgsfield/cinematics/clip_gravitos_entry.mp4';
+      _pv.load();
+      window._prologueEntryPreload = _pv;
+    } catch (e) { window._prologueEntryPreload = null; }
     if (typeof _prologueDaggerCutscene === 'function') _prologueDaggerCutscene(_playEntry);
     else _playEntry();
+  }
+  // v0.29.753 — the introduction's clips warm ONE MAP EARLY. sanctum and
+  // zodiacHall are the only doors into the Singularity; a player standing in
+  // either who has not seen the introduction is about to need ~15 MB of
+  // cinematic. Prime the HTTP cache now (fetch + drain, the story-beat clip
+  // idiom) so both videos play frame-one when the chain starts. Once per
+  // session, only for players who still have the introduction ahead of them.
+  if ((id === 'sanctum' || id === 'zodiacHall') && !window._lxCineWarm
+      && typeof player !== 'undefined' && player && !player._gravitosCineSeen) {
+    window._lxCineWarm = true;
+    try {
+      for (const _cu of ['steam/higgsfield/cinematics/clip_prologue_pov.mp4',
+                         'steam/higgsfield/cinematics/clip_gravitos_entry.mp4']) {
+        fetch(_cu).then((r) => (r && r.ok) ? r.blob() : null).then(() => {}).catch(() => {});
+      }
+    } catch (e) {}
   }
   if (typeof _playBossIntro === 'function' && typeof MAPS !== 'undefined' && MAPS[id]
       && !(game.expedition && game.expedition.active)) {
