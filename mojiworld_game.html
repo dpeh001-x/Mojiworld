@@ -9695,7 +9695,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.772';
+const GAME_VERSION = 'v0.29.773';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -84583,6 +84583,20 @@ So.. do you need a lift?`;
         opts.push({ render: () => _gugumaWarpRow(_hist) });
       }
     }
+    // v0.29.772 — explicit, discoverable recourse. Shown only when the hero
+    // is genuinely missing a starter piece, so a kitted-out player never sees
+    // it. This is the same self-healing grant the tutorial paths call.
+    try {
+      const _eqW = player.equipped && player.equipped.weapon;
+      const _eqA = player.equipped && player.equipped.armor;
+      if (!_eqW || !_eqA) {
+        opts.push({ t:'🎁 I never got my starter gear', cb:() => {
+          if (typeof _grantTutorialStarterWeapon === 'function') _grantTutorialStarterWeapon();
+          const _el = document.getElementById('dialog-text');
+          if (_el) _el.textContent = '*Guguma rummages under a wing and produces, impossibly, a stick and a folded bundle of rags.*\n\nCheep! Knew it. Someone always slips through the tour — no shame in it. There: a stick that has whacked exactly zero monsters, and rags with real character. Off you go.';
+        }});
+      }
+    } catch (e) {}
     opts.push({ t:'Replay the tour ✦', cb:() => {
       closeDialog();
       // Wipe the tutorial-seen flag so startTutorial actually opens
@@ -93372,38 +93386,83 @@ const _TUT_STARTER_ARMOR = 'Threadbare Rags';
 function _grantTutorialStarterWeapon() {
   try {
     if (typeof player === 'undefined' || !player) return;
-    if (player._starterWeaponGiven) return;
+    // v0.29.772 — SELF-HEALING GIFT (per user: "archer class does not receive
+    // the beginner gear from guguma ... when i skip tutorial I do not get the
+    // gears"). The old guard was `if (player._starterWeaponGiven) return;` —
+    // one PERSISTED boolean, set BEFORE the gear was actually in hand, inside
+    // a catch-all that swallows failures silently. Two states were reachable
+    // and, once reached, PERMANENT — reproduced in engine:
+    //   · partial grant: the weapon lands, the armor lookup fails, the flag is
+    //     already true → the rags never arrive, and replaying the tour cannot
+    //     fix it (measured: armor null before AND after a retry);
+    //   · flag true, gear gone: a character carrying the flag with an empty
+    //     weapon+armor slot got NOTHING from every recourse the game offers —
+    //     skip, complete, Guguma's "Replay the tour", the death-dismiss path —
+    //     because all four call this function and it returned on line 4.
+    //     Reproduced: given true, weapon null, armor null, bag empty.
+    // The dedupe now means what it was always meant to mean: never hand out a
+    // SECOND kit — not "never look again". Each piece is checked on its own,
+    // so a half-finished grant completes itself the next time any path runs.
+    //
+    // Why this cannot be farmed: a piece is re-granted only when the player
+    // has that slot EMPTY and no copy in the bag. Anyone wearing anything at
+    // all never re-triggers. The exploit the flag was added for (v0.26.x) was
+    // a repeatable free tier-2 on-class RARE; since v0.29.741 the gift is a
+    // Whittled Stick (T0, atk 1) and Threadbare Rags (T0, def 1) — to farm one
+    // you would have to strip naked and throw the last one away first.
+    if (!player.equipped) player.equipped = {};
+    if (!Array.isArray(player.inventory)) player.inventory = [];
+    const _has = (nm, slot) => {
+      const eq = player.equipped[slot];
+      if (eq && (eq.baseName === nm || eq.name === nm)) return true;
+      if (player.equipped[slot]) return true;   // wearing ANYTHING for that slot counts — they have moved on
+      return player.inventory.some(i => i && (i.baseName === nm || i.name === nm));
+    };
     const cls = player.cls || 'warrior';
     const wname = _TUT_STARTER_WEAPON[cls] || _TUT_STARTER_WEAPON.warrior;
+    let _gaveW = false, _gaveA = false;
     const base = (typeof ITEM_POOL !== 'undefined' && ITEM_POOL.weapons)
       ? ITEM_POOL.weapons.find(w => w.name === wname) : null;
-    if (!base) return;
-    if (!Array.isArray(player.inventory)) player.inventory = [];
-    player.inventory.push({ ...base, baseName: base.name, stars: 0, slot: 'weapon' });   // v0.26.x — FIX: stamp slot so _itemTab routes it to Equip (not Etc); ITEM_POOL bases carry no slot
-    player._starterWeaponGiven = true;
-    // v0.26.x — per playtest: AUTO-EQUIP the starter (players fought unarmed
-    // forever with the gift sitting in the bag). Only when the slot is empty.
-    if (!player.equipped) player.equipped = {};
-    if (!player.equipped.weapon) {
-      const _sw = player.inventory.pop();
-      player.equipped.weapon = _sw;
-      player._equipBonusCache = null;
+    if (base && !_has(wname, 'weapon')) {
+      player.inventory.push({ ...base, baseName: base.name, stars: 0, slot: 'weapon' });   // v0.26.x — FIX: stamp slot so _itemTab routes it to Equip (not Etc); ITEM_POOL bases carry no slot
+      _gaveW = true;
+      // v0.26.x — per playtest: AUTO-EQUIP the starter (players fought unarmed
+      // forever with the gift sitting in the bag). Only when the slot is empty.
+      if (!player.equipped.weapon) {
+        const _sw = player.inventory.pop();
+        player.equipped.weapon = _sw;
+        player._equipBonusCache = null;
+      }
     }
-    // v0.29.741 — the rags come with the stick (same dedupe flag, same
-    // auto-equip rule): a fresh character now starts DRESSED, in the gear
-    // the shops used to sell for pocket change.
+    // v0.29.741 — the rags come with the stick (same auto-equip rule): a fresh
+    // character starts DRESSED, in the gear the shops used to sell for pocket
+    // change. v0.29.772 — checked independently of the weapon, so the partial
+    // grant above can no longer strand a hero in their underwear forever.
     const abase = (typeof ITEM_POOL !== 'undefined' && ITEM_POOL.armors)
       ? ITEM_POOL.armors.find(a => a.name === _TUT_STARTER_ARMOR) : null;
-    if (abase) {
+    if (abase && !_has(_TUT_STARTER_ARMOR, 'armor')) {
       player.inventory.push({ ...abase, baseName: abase.name, stars: 0, slot: 'armor' });
+      _gaveA = true;
       if (!player.equipped.armor) {
         const _sa = player.inventory.pop();
         player.equipped.armor = _sa;
         player._equipBonusCache = null;
       }
     }
+    // Stamped only once the gear is genuinely IN HAND — the old code set this
+    // on line 11, so any throw below it locked the gift out permanently while
+    // the catch reported nothing.
+    if (_gaveW || _gaveA) player._starterWeaponGiven = true;
+    if (!_gaveW && !_gaveA) return;   // already kitted out — nothing to say
     if (typeof refreshGearCache === 'function') refreshGearCache();
-    if (typeof showToast === 'function') showToast('🎁 Guguma handed you a Whittled Stick and some Threadbare Rags — equipped and ready! Real gear waits at the shops — start saving.', 'epic');
+    if (typeof updateUI === 'function') { try { updateUI(); } catch (e) {} }   // v0.29.772 — a heal outside the tutorial still repaints the HUD stats
+    // v0.29.772 — name only what actually arrived; a repair that delivers one
+    // missing piece should not claim to have handed over both.
+    if (typeof showToast === 'function') {
+      const _gift = (_gaveW && _gaveA) ? 'a Whittled Stick and some Threadbare Rags'
+                  : _gaveW ? 'a Whittled Stick' : 'some Threadbare Rags';
+      showToast('🎁 Guguma handed you ' + _gift + ' — equipped and ready! Real gear waits at the shops — start saving.', 'epic');
+    }
   } catch (e) { /* never let a gift failure break tutorial close */ }
 }
 // Wire tutorial buttons once on first call (idempotent).
