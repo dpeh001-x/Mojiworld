@@ -9695,7 +9695,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.774';
+const GAME_VERSION = 'v0.29.775';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -38857,6 +38857,21 @@ function _lxPadCatchAllRoot() {
 // and the pad poller calls it EVERY frame while a pad is connected. Modal
 // open/close reflects within 100ms — below a pad-menu reaction time — and
 // the disconnect handler drops the memo so a fresh pad never sees stale UI.
+// v0.29.774 — a surface the player is meant to PLAY THROUGH rather than
+// navigate. Returns true while the pad should keep driving the game. Only the
+// tutorial dock qualifies today: it is the one listed surface that leaves the
+// game running underneath. Once the step's objective is ticked there is
+// nothing left to play for, so the card becomes navigable (Next / Back / Skip)
+// — and a collapsed card is never a nav target either way.
+function _lxPadSurfacePlayable(el) {
+  try {
+    if (!el || el.id !== 'tutorial-modal') return false;
+    if (!el.classList.contains('tut-dock')) return false;   // not docked = a real modal
+    if (el.classList.contains('tut-collapsed')) return true;
+    const st = (typeof TUTORIAL_STEPS !== 'undefined' && typeof _tutStep === 'number') ? TUTORIAL_STEPS[_tutStep] : null;
+    return !!(st && st.detect && !st._done);   // still owes an objective -> let them play
+  } catch (e) { return false; }
+}
 let _lxPadRootAt = -1, _lxPadRootCache = null;
 function _lxPadModalRoot() {
   const _n = performance.now();
@@ -38877,6 +38892,7 @@ function _lxPadModalRootScan() {
     const r = el.getBoundingClientRect();
     if (r.width <= 4 || r.height <= 4) continue;
     if (getComputedStyle(el).visibility === 'hidden') continue;
+    if (_lxPadSurfacePlayable(el)) continue;   // v0.29.774 — non-blocking HUD surface; gameplay owns the pad
     cands.push({ el, i, r });
   }
   if (cands.length < 2) return cands.length ? cands[0].el : _lxPadCatchAllRoot();   // v0.29.7xx — unlisted-blocker safety net
@@ -93198,8 +93214,13 @@ function _ensureTutChrome() {
 // functions; if it matches the CURRENT step's `detect` tag it ticks the step
 // (✅), swaps Guguma's line to a reaction, chirps, and auto-advances after a
 // beat. Non-blocking — Next/Back/Skip still work, untagged steps are unaffected.
+const _TUT_SEEN_TAGS = Object.create(null);   // v0.29.774 — objectives satisfied ahead of their step
 function _tutPing(tag) {
   try {
+    // Record FIRST, unconditionally — before any modal/step gate. This is the
+    // whole fix: the signal used to be thrown away unless it arrived during
+    // the exact step that wanted it.
+    if (tag) _TUT_SEEN_TAGS[tag] = true;
     const modal = document.getElementById('tutorial-modal');
     if (!modal || modal.style.display === 'none' || !modal.classList.contains('tut-dock')) return;
     const step = TUTORIAL_STEPS[_tutStep];
@@ -93240,6 +93261,20 @@ function _tutPing(tag) {
 function _tutTouchify(html) {
   try {
     // match the touch-control breakpoint: coarse pointer OR <=900px width
+    // v0.29.774 — CONTROLLER GLYPHS. A pad player was being told to press Z,
+    // PageUp and W — keys they do not have. Checked before touch, and gated on
+    // the pad having been used recently so a keyboard player never sees it.
+    if (typeof _lxPadActive === 'function' && _lxPadActive(30000)) {
+      const PAD = { '\u2190':'D-pad \u25C0', '\u2192':'D-pad \u25B6', '\u2191':'D-pad \u25B2', '\u2193':'D-pad \u25BC',
+        'Space':'\u24B6', 'Z':'\u24CD', 'X':'\u24B7', 'S':'LT', 'C':'RT', 'D':'RT', 'F':'RT', 'V':'R3',
+        'U':'Back', 'B':'Back', 'Y':'\u24CE', 'N':'\u24CE', 'E':'\u24CE', 'W':'Back \u2192 Map',
+        'Q':'Back \u2192 Quests', 'L':'Back \u2192 Mojidex', 'H':'Back \u2192 MojiMon',
+        'PageUp':'LB', 'PageDown':'RB', 'Esc':'Start' };
+      return String(html).replace(/<kbd>([^<]+)<\/kbd>/g, (m, k) => {
+        if (k === 'K') return '<kbd>K</kbd> <span style="opacity:0.7;font-size:0.85em;">(keyboard only)</span>';
+        return '<kbd>' + (PAD[k] || k) + '</kbd>';
+      });
+    }
     var _touch = (typeof matchMedia !== 'undefined') && (matchMedia('(pointer: coarse)').matches || matchMedia('(max-width: 900px)').matches);
     if (!_touch) return html;
     const MAP = { '\u2190':'\u25C0','\u2192':'\u25B6','\u2191':'\u25B2','\u2193':'\u25BC','Space':'\u2912 JUMP','Z':'ATTACK','U':'\u2191 LV UP','Y':'\uD83D\uDCD4 CODEX','E':'\uD83D\uDCDC QUEST','W':'\uD83D\uDDFA MAP','N':'\uD83D\uDCAC TALK','PageUp':'\u2665 HP','PageDown':'\u25C6 MP' };
@@ -93350,6 +93385,28 @@ function _renderTutorialStep() {
   // v0.27.5 \u2014 arm the zero-cost movement-ping gate only while the 'move' step
   // is the live, un-done step (read each frame by the updatePlayer input read).
   window._tutWantsMove = (step.detect === 'move' && !step._done);
+  // v0.29.774 — the player already did this one before the tour asked: tick it
+  // on arrival. Deliberately does NOT auto-advance (the _tutPing path does) —
+  // cascading through several pre-satisfied steps would rip the card past text
+  // the player has not read. They see ✅ and a pulsing Next, and move on when
+  // they are ready.
+  if (step.detect && !step._done && _TUT_SEEN_TAGS[step.detect]) {
+    step._done = true;
+    window._tutWantsMove = false;
+    const _p = document.getElementById('tut-try');
+    if (_p && step.tryIt) {
+      _p.classList.add('done');
+      const _b = _p.querySelector('.tt-box'); if (_b) _b.textContent = '\u2705';
+      const _g = _p.querySelector('.tt-tag'); if (_g) _g.textContent = 'DONE';
+    }
+    const _t2 = document.getElementById('tut-step-title');
+    if (_t2 && _t2.textContent.indexOf('\u2705') < 0) _t2.textContent = '\u2705 ' + _t2.textContent;
+    const _gl2 = document.getElementById('tut-guguma-line');
+    if (_gl2) _gl2.textContent = 'Cheep! Already done that one — you are ahead of me. \u2713';
+    const _nb2 = document.getElementById('tut-next');
+    if (_nb2) _nb2.classList.add('ready');
+    if (typeof _renderTutPips === 'function') { try { _renderTutPips(); } catch (e) {} }
+  }
   // v0.27.25 \u2014 DOM pip renderer replaces the monospace text-pip string.
   if (typeof _renderTutPips === 'function') _renderTutPips();
   // v0.25.928 — Update the Guguma canary's line for this step + trigger
