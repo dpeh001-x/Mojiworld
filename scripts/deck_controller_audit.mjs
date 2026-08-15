@@ -164,8 +164,19 @@ const live = await page.evaluate(() => {
     player.exp = 0;
   } catch (e) {}
   attempt('boon pick',        'powerup-modal',       () => showPowerupChoice({ name: 'Test Boss' }));
-  attempt('class advance',    'advancement-modal',   () => openAdvancement());
-  attempt('sage blessing',    'sage-blessing-modal', () => showSageBlessing('atk', null, null));
+  // v0.29.804 — these two were UNVERIFIED for want of their real preconditions.
+  // openAdvancement early-returns unless the player is job-less and eligible,
+  // and showSageBlessing returns false by design when inst is null — the old
+  // attempts could never open either, so their populated content went untested
+  // until a player reported it. Drive them the way the game does.
+  attempt('class advance',    'advancement-modal',   () => {
+    player.cls = 'warrior'; player.job = null; player.level = 20;
+    openAdvancement();
+  });
+  attempt('sage blessing',    'sage-blessing-modal', () => {
+    const pw = _weightedBoonPick(POWERUPS);
+    showSageBlessing(pw, { roll: 5, tier: 'common' }, false);
+  });
   attempt('NPC dialogue',     'dialog',              () => openNPC({ name: 'Test NPC', role: 'shop', x: 0, y: 0 }));
   return res;
 });
