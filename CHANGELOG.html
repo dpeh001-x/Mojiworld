@@ -121,6 +121,23 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.740 <span class="tag"><span class="pill bug">bug</span> Start opens the menu once &mdash; and the pad survives a tab switch</span></h2>
+<p>Per user &mdash; <em>&ldquo;pressing start on the controller causes the menu button to flicker and occasionally does not load the menu glitch&rdquo;</em> and <em>&ldquo;when changing windows/tabs sometimes the gamepad function doesnt work&rdquo;.</em></p>
+<p><b>The flicker: one physical press, two edges.</b> A human Start press spans many input polls. Poll&nbsp;1 (gameplay side) edge-fires and opens Settings. On poll&nbsp;2 &mdash; Start still held &mdash; the router now claims the menu and the pad switches to menu navigation, whose edge state had been reset on every gameplay poll: it saw the same still-held button as a brand-new press and <em>closed the menu it had just opened</em>. Measured on the shipped build with Start held across 8 polls: <code>O.O.O.O..</code> &mdash; open/closed oscillating every ~16&nbsp;ms, ending closed. Whether you got a menu was literally a race with your thumb.</p>
+<p><b>Fix: crossing the gameplay&harr;menu boundary de-edges held buttons.</b> Entering menu navigation pre-marks held action buttons (&#9398;/&#9399;/Start) as already-down, so the press that opened a surface can never also act on it; the mirror case &mdash; a button still held when the menu closes &mdash; is swallowed for one poll so it cannot edge-fire into gameplay (Start reopening the menu it just closed, &#9399; dodging). A button must be released and pressed again to act on the other side of a mode switch &mdash; exactly how consoles behave. Same timeline after the fix: <code>OOOOOOOOO</code>, and three fresh press-cycles ran open&rarr;closed deterministically.</p>
+<p><b>The tab switch: presence could only recover through an event that sometimes never comes.</b> Chrome pauses gamepads for a backgrounded page and usually re-announces them on refocus; when that re-announce is missed, the poller&rsquo;s early-out gated on a flag nothing would ever raise again &mdash; controller dead until replugged. Presence is now self-healing: a reprobe on window focus / visibility, plus a once-per-2-seconds probe inside the early-out itself as the last resort (one <code>getGamepads()</code> per 2&nbsp;s while the flag is down &mdash; nothing like the per-frame allocation the early-out exists to avoid). Reprobes only ever <em>raise</em> the flag; clearing stays where it belongs, in the disconnect handler.</p>
+<div class="callout">
+  <b>Verified with a synthetic controller, A/B against the shipped build:</b>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0">
+  <tr style="text-align:left;opacity:.75"><th>Scenario</th><th>Before (v0.29.739)</th><th>After</th></tr>
+  <tr><td>Start held across 8 polls</td><td><code>O.O.O.O..</code> &mdash; flicker, ends closed</td><td><b><code>OOOOOOOOO</code> &mdash; opens once, stays open</b></td></tr>
+  <tr><td>&#9399; held across the close</td><td>&mdash;</td><td><b>menu closes, zero dodge presses leak into gameplay</b></td></tr>
+  <tr><td>Three fresh Start cycles</td><td>outcome raced the thumb</td><td><b>open&rarr;closed, deterministic &times;3</b></td></tr>
+  <tr><td>Presence flag killed (missed refocus event)</td><td>dead until replug</td><td><b>healed by the focus reprobe; healed again by the 2&nbsp;s probe alone</b></td></tr>
+  </table>
+</div>
+
+
 <h2>v0.29.739 <span class="tag"><span class="pill bug">bug</span> The game refuses to start until its sprites have</h2>
 <p>Per user: <em>alot of the sprites dont load well before the game starts, please ensure all sprites are working before the game commenses.</em> The screenshot shows the symptom exactly: a bald hero and a black square where the HUD class crest belongs. Renderers <b>skip</b> images that have not finished loading, so missing art is silent &mdash; nothing errors, the sprite is simply not there.</p>
 <p>The boot pipeline was full of gates that <b>release on timers instead of finishing</b>: an 8&nbsp;s per-image cap, a 25&nbsp;s map-preload race, a 30&nbsp;s decode cap, a 60&nbsp;s fallback. Measured under a throttled link, the decode gate cleared at its cap with <b>138 of 838 tracked sprites still outstanding</b> &mdash; and the world revealed anyway. Worse, those stragglers could starve <em>forever</em>: requests queued at low priority early in boot are preempted by every newer request; the same ~135 images sat unfinished through 45&nbsp;s of live bandwidth without one completion.</p>

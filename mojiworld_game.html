@@ -9614,7 +9614,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.739';
+const GAME_VERSION = 'v0.29.740';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -38695,10 +38695,26 @@ function _lxPadMenuNav(root, pad) {
 // controllers still light up the instant they're used. Steam Input forces
 // polling on separately (desktop configs need it even without a std gamepad).
 let _lxPadPresent = false;
+let _lxPadMode = 'game';   // v0.29.7xx — 'game' | 'menu'; crossing the boundary de-edges held buttons
+let _lxPadReprobeAt = 0;   // v0.29.7xx — last slow presence reprobe (see the poll early-out)
 let _lxPadBlurHeld = false;   // v0.29.261 — edge state for the text-field B/Start blur hatch
 let _lxPadVkHeld = false;     // v0.29.727 — edge state for the text-field Ⓐ→virtual-keyboard hatch
 try {
   window.addEventListener('gamepadconnected', () => { _lxPadPresent = true; });
+  // v0.29.7xx — TAB-SWITCH RECOVERY (per user: "when changing windows/tabs
+  // sometimes the gamepad function doesnt work"). Chrome pauses gamepads for
+  // a backgrounded page and usually re-announces on refocus — when that
+  // event is missed, this flag stayed false with nothing left to raise it:
+  // pad dead until replug. Reprobe on focus/visibility; only ever SETS the
+  // flag — clearing stays in the disconnect handler.
+  const _lxPadReprobe = () => {
+    try {
+      const ps = navigator.getGamepads ? navigator.getGamepads() : [];
+      if (Array.prototype.some.call(ps, (g) => g && g.connected)) _lxPadPresent = true;
+    } catch (e) {}
+  };
+  window.addEventListener('focus', _lxPadReprobe);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) _lxPadReprobe(); });
   // v0.29.470 — release everything the pad was holding. The poll's ONLY keyup
 // sweep lives past the "no pad present" early-return, so a disconnect while a
 // stick or button was held left game.keys latched with no code path able to
@@ -38939,7 +38955,21 @@ function _lxPadPoll() {
     // v0.29.x PERF — cheap early-out before the getGamepads() allocation: no
     // controller connected AND no Steam Input bridge → nothing to poll.
     const _steamInputOn = _steamAvailable() && window.SteamAPI.input && typeof window.SteamAPI.input.snapshot === 'function';
-    if (!_lxPadPresent && !_steamInputOn) return;
+    if (!_lxPadPresent && !_steamInputOn) {
+      // v0.29.7xx — self-healing presence: if the refocus re-announce never
+      // arrived, one getGamepads() every 2 s rediscovers the pad (first
+      // button press after refocus surfaces it). Nothing like the per-frame
+      // allocation the early-out exists to avoid.
+      const _rpNow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      if (_rpNow - _lxPadReprobeAt > 2000) {
+        _lxPadReprobeAt = _rpNow;
+        try {
+          const _rp = navigator.getGamepads ? navigator.getGamepads() : [];
+          if (Array.prototype.some.call(_rp, (g) => g && g.connected)) _lxPadPresent = true;
+        } catch (e) {}
+      }
+      if (!_lxPadPresent && !_steamInputOn) return;
+    }
     // Don't fight a focused TYPEABLE field (chat / name entry). v0.29.259 —
     // typeable only: menu nav itself FOCUSES range sliders (volume rows), and
     // the old any-INPUT check then early-outed every later poll — controller
@@ -39008,10 +39038,30 @@ function _lxPadPoll() {
     const _mroot = pad ? _lxPadModalRoot() : null;
     if (_mroot) {
       for (const k in _lxPadPrev) if (_lxPadPrev[k]) { _lxPadDispatch(k, false); _lxPadPrev[k] = false; }
+      // v0.29.7xx — START-FLICKER FIX (per user: "pressing start causes the
+      // menu button to flicker and occasionally does not load the menu").
+      // A held press spans polls: the gameplay edge OPENED this menu, and on
+      // the very next poll the nav edge state — freshly reset — saw the same
+      // still-held button as a new press and CLOSED it. Entering menu mode
+      // now pre-marks held action buttons as already-down, so the press that
+      // opened a surface can never also act on it; release and press again.
+      if (_lxPadMode !== 'menu' && pad) {
+        _lxPadMode = 'menu';
+        for (const _bi of [0, 1, 9]) {
+          const _b = pad.buttons[_bi];
+          _lxPadNavPrev[_bi] = !!(_b && (_b.pressed || _b.value > 0.5));
+        }
+      }
       _lxPadMenuNav(_mroot, pad);
       return;
     }
     _lxPadNavPrev = {};   // leaving menu mode — reset nav edge state
+    // v0.29.7xx — the mirror image: a button still held when the menu CLOSED
+    // must not edge-fire into gameplay (Start would reopen the menu it just
+    // closed — the other half of the flicker; B would dodge). Swallow one
+    // poll: held keys are marked already-down without dispatching.
+    const _padSwallow = (_lxPadMode === 'menu');
+    _lxPadMode = 'game';
     // Build the pressed set (resolved physical key -> pressed).
     const pressed = {};
     const mark = (spec, isDown) => { if (!spec || spec.none) return; const k = _lxPadResolveKey(spec); if (k && isDown) pressed[k] = true; };   // v0.29.670 — {none} = unbound
@@ -39029,7 +39079,7 @@ function _lxPadPoll() {
     }
     // Edge-detect vs last poll and dispatch keydown/keyup for changes only.
     for (const k in pressed) { _lxPadLastInput = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); break; }   // v0.29.254 — haptics gate: pad counts as "in use"
-    for (const k in pressed) if (!_lxPadPrev[k]) { _lxPadDispatch(k, true); _lxPadPrev[k] = true; }
+    for (const k in pressed) if (!_lxPadPrev[k]) { if (!_padSwallow) _lxPadDispatch(k, true); _lxPadPrev[k] = true; }   // v0.29.7xx — mode-boundary swallow (see above)
     for (const k in _lxPadPrev) if (_lxPadPrev[k] && !pressed[k]) { _lxPadDispatch(k, false); _lxPadPrev[k] = false; }
   } catch (e) {}
 }
