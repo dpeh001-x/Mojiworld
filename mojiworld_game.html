@@ -9593,7 +9593,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.722';
+const GAME_VERSION = 'v0.29.723';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -120575,7 +120575,30 @@ function loop(time) {
       // while the DOM video played on top. 15 s is beyond any legitimate
       // load on the slowest device; after that, open the gate and let the
       // watchdog do its job.
-      if (!window._lxBootGateParkAt) window._lxBootGateParkAt = time;
+      // v0.29.721 — THE BOOT AND THE MENU ARE NOT WEDGES (per user: "after
+      // loading it should go to the main menu ... not automatically load
+      // game"). This failsafe exists for one real hang — an overlay that
+      // missed its fade under the Gravitos-entry cinematic race, mid-game —
+      // but it measured only "how long has the overlay been up", and BOTH
+      // legitimate long holds live on that same overlay:
+      //   - the initial boot itself: on a slow machine the 806-sprite decode
+      //     gate alone can pass 15 s, so the rescue fired before the menu
+      //     ever existed, stamping 'fade' under it — the menu then mounted
+      //     onto an invisible overlay and the save-world played beneath;
+      //   - the main menu: a player reading Continue / New Game looked
+      //     identical to a blackout, and dissolved 15 s in.
+      // Both read to the player as "the game auto-loaded my save".
+      // The rescue now ARMS only after the menu has been seen once
+      // (_lxBootMenuSeen, stamped in _showAuthGate/_finishHide) — the boot
+      // pipeline owns the overlay until then and has its own 30 s decode
+      // cap — and while the menu is showing, the park clock stays pinned.
+      // The original mid-game cinematic wedge still rescues at 15 s exactly
+      // as before: by then the menu has long been seen and is not up.
+      const _menuUp = (() => {
+        try { const _a = document.getElementById('lo-auth'); return !!(_a && _a.classList.contains('shown')); }
+        catch (_e) { return false; }
+      })();
+      if (!window._lxBootGateParkAt || _menuUp || !window._lxBootMenuSeen) window._lxBootGateParkAt = time;
       if (time - window._lxBootGateParkAt < 15000) {
         lastTime = time;
         _lxNextFrame();
@@ -123986,6 +124009,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     } catch (e) { _proceed(); }
   }
   function _finishHide(session) {
+    try { window._lxBootMenuSeen = true; } catch (e) {}   // v0.29.721 — resume/deeplink paths skip the menu; still arm the rescue
     if (!overlay) return;
     // v0.26.x — perceived-responsiveness: start dissolving the overlay on the
     // very first line, BEFORE the session/toast bookkeeping below — measured
@@ -124147,6 +124171,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
   let _authWired = false;
   function _showAuthGate() {
     if (!overlay) return;
+    try { window._lxBootMenuSeen = true; } catch (e) {}   // v0.29.721 — arms the loop's wedge rescue (see BootGate failsafe)
     // Seamless resume right after a cloud-save pull reload — we already authenticated
     // this tab session, so skip the form and reveal the (now cloud-loaded) world.
     try { const _rs = sessionStorage.getItem('lx_resume'); if (_rs) { sessionStorage.removeItem('lx_resume'); _finishHide(JSON.parse(_rs)); return; } } catch (e) {}
