@@ -35,16 +35,35 @@ const out = await page.evaluate(async () => {
   player._storyBeatsSeen.gravitos_gate = true;
   game.paused = false;
 
-  // count bakes per source while we watch the entrance
+  // count bakes per source while we watch the entrance. Two shapes: the
+  // img-fed path carries src.src on the bitmap call; the blob-fed off-thread
+  // path shows up as one sprite fetch per bake instead - count both, keyed by
+  // URL, so "baked twice" is visible whichever lane carried it.
   const counts = new Map();
+  let imgFed = 0, blobFed = 0;
+  const bump = (key) => counts.set(key, (counts.get(key) || 0) + 1);
   const orig = window.createImageBitmap ? window.createImageBitmap.bind(window) : null;
   if (orig) window.createImageBitmap = (src, opts) => {
-    const key = (src && src.src) ? String(src.src) : 'other';
-    counts.set(key, (counts.get(key) || 0) + 1);
+    if (src && src.src && opts && opts.resizeWidth) { imgFed++; bump(String(src.src)); }
     return orig(src, opts);
+  };
+  const origFetch = window.fetch.bind(window);
+  window.fetch = (u, o) => {
+    const url = String((u && u.url) || u || '');
+    if (/Sprites\/.*\.(webp|png)(\?|$)/.test(url)) { blobFed++; bump(url); }
+    return origFetch(u, o);
   };
 
   const t0 = performance.now();
+  // main-thread responsiveness: a 100 ms heartbeat; drift = how late it fires.
+  // A main-thread decode flood shows up here as multi-hundred-ms stalls.
+  let maxDrift = 0, lastBeat = performance.now();
+  const beat = setInterval(() => {
+    const now = performance.now();
+    const drift = now - lastBeat - 100;
+    if (now - t0 < 8000 && drift > maxDrift) maxDrift = drift;
+    lastBeat = now;
+  }, 100);
   loadMap('gravitosArena', 300);
   let tIntro = null, tClear = null;
   for (let i = 0; i < 220; i++) {                        // watch up to 22 s
@@ -55,9 +74,11 @@ const out = await page.evaluate(async () => {
     if (tIntro != null && tClear == null && !game.paused && (game.blackFlashOverlay || 0) < 0.3
         && !(ov && ov.classList.contains('on'))) { tClear = Math.round(now); break; }
   }
+  clearInterval(beat);
   let maxPer = 0, total = 0;
   for (const n of counts.values()) { total += n; if (n > maxPer) maxPer = n; }
-  return { tIntro, tClear, total, unique: counts.size, maxPer,
+  return { tIntro, tClear, total, unique: counts.size, maxPer, maxDrift: Math.round(maxDrift),
+           imgFed, blobFed,
            bossAlive: (game.monsters || []).some(m => m.isBoss) };
 });
 
@@ -68,6 +89,12 @@ ok('the entrance resolves into the live fight promptly',
 ok('the boss is standing in the arena', out.bossAlive);
 ok('no source image is baked more than once while the entrance plays',
    out.maxPer <= 1, `max bakes for one source: ${out.maxPer} (total ${out.total} across ${out.unique} sources)`);
+ok('the main thread stays responsive through the entrance',
+   out.maxDrift < 300, `worst heartbeat drift in the first 8 s: ${out.maxDrift}ms`);
+ok('the fight is live within eight seconds, hands off',
+   out.tClear != null && out.tClear < 8000, `clear at ${out.tClear}ms`);
+ok('no bake decodes an <img> on the main thread (all ride the blob lane)',
+   out.imgFed === 0, `img-fed resize bakes: ${out.imgFed} (blob-lane sprite fetches: ${out.blobFed})`);
 
 let pass = 0, failed = 0;
 for (const r of res) { if (r.pass) { pass++; console.log(`  PASS  ${r.n}` + (r.extra ? `  (${r.extra})` : '')); }

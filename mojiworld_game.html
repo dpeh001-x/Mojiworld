@@ -9614,7 +9614,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.748';
+const GAME_VERSION = 'v0.29.749';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -12501,6 +12501,22 @@ function _lxBitmapToCanvas(bmp, src) {
   if (src._lxFeatherC) cv._lxFeatherC = src._lxFeatherC;
   return cv;
 }
+// v0.29.749 — OFF-THREAD FOR REAL. createImageBitmap(<img>) re-decodes the
+// encoded source ON the calling thread before its async resize — the
+// profiler's main-thread bake samples lived there, not in the resize. Feeding
+// it the encoded Blob moves decode + resize off-thread; the main thread pays
+// only the final canvas blit. The blob comes from the HTTP cache (the image
+// element already downloaded it); any failure falls back to the old path.
+function _lxBitmapOffThread(im, bw, bh) {
+  const opts = { resizeWidth: bw, resizeHeight: bh, resizeQuality: 'high' };
+  const url = im && im.src;
+  if (url && typeof fetch === 'function' && /^https?:/.test(url)) {
+    return fetch(url).then((r) => { if (!r.ok) throw new Error('http ' + r.status); return r.blob(); })
+      .then((b) => createImageBitmap(b, opts))
+      .catch(() => createImageBitmap(im, opts));
+  }
+  return createImageBitmap(im, opts);
+}
 function _lxAsyncBake(frames, idx, im, maxLong) {
   const w = im.naturalWidth, h = im.naturalHeight;
   const s = maxLong / Math.max(w, h);
@@ -12519,7 +12535,7 @@ function _lxAsyncBake(frames, idx, im, maxLong) {
     if (cv && frames[idx] === im) { frames[idx] = cv; frames._readyN = 0; }
   };
   try {
-    createImageBitmap(im, { resizeWidth: bw, resizeHeight: bh, resizeQuality: 'high' })
+    _lxBitmapOffThread(im, bw, bh)   // v0.29.749 — blob-fed: decode leaves the main thread
       .then((bmp) => {
         let cv = null;
         try { cv = _lxBitmapToCanvas(bmp, im); } catch (e) {}
@@ -39511,6 +39527,10 @@ function _playBossIntro(bossType) {
   // ONCE on window (capture) and stay dormant unless the overlay is showing;
   // a ~450ms grace ignores input already in flight when the overlay appears
   // (held movement keys / the tap that entered the arena) so it can't auto-skip.
+  // v0.29.749 — the quake beat authors its blackout release at 1.85 s, BEFORE
+  // this 2.3 s card; any hold remaining here is starvation debt and used to
+  // keep the screen black long after the card closed. The card IS the reveal.
+  if ((game.blackHoldFrames | 0) > 12) game.blackHoldFrames = 12;
   game._bossIntroShownAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   if (!game._bossIntroDismiss) {
     game._bossIntroDismiss = (e) => {
@@ -109344,7 +109364,7 @@ function _warmMapArt(id, opts) {
     const fallback = () => { try { swap(_lxBakeToLong(im, CAP)); } catch (e) { res(); } };
     if (typeof createImageBitmap !== 'function') return fallback();
     try {
-      createImageBitmap(im, { resizeWidth: bw, resizeHeight: bh, resizeQuality: 'high' })
+      _lxBitmapOffThread(im, bw, bh)   // v0.29.749 — blob-fed: decode leaves the main thread
         .then((bmp) => {
           let cv = null;
           try { cv = _lxBitmapToCanvas(bmp, im); } catch (e) {}
