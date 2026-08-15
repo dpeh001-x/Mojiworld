@@ -56155,7 +56155,12 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // v0.29.619 — no wild spawn may land in a town, whatever called us. Returns the
   // same stub shape as the co-op guard below so callers that set fields on the
   // result do not crash.
-  if (!isBoss && _lxIsSanctuary()) return { _suppressed: true, _sanctuary: true };
+  // v0.29.779 — `game._tutorialSpawn` is a deliberate, scoped opt-out for the
+  // tutorial's practice snail. The tour runs in town, where this guard would
+  // otherwise suppress it and the "Land a hit on any monster" step could never
+  // be completed without leaving. Set only by _spawnTutorialSnail and cleared
+  // in a finally, so no other caller can ride it.
+  if (!isBoss && !(typeof game !== 'undefined' && game && game._tutorialSpawn) && _lxIsSanctuary()) return { _suppressed: true, _sanctuary: true };
   // v0.27.0 co-op — a NON-HOST mirroring the host's map does not spawn its own
   // monsters (they arrive via the host's 'mon' sync). Return a harmless throwaway
   // stub (not added to game.monsters) so the many callers that set fields on the
@@ -92994,6 +92999,10 @@ const TUTORIAL_STEPS = [
     icon: '⚔️',
     title: 'Defeat Monsters → Earn XP',
     detect: 'combo',
+    // v0.29.779 — the tour runs in town, where nothing hostile exists, so this
+    // ask had no target. Showing the step puts one practice snail in front of
+    // the player (see _spawnTutorialSnail).
+    summonsPracticeSnail: true,
     tryIt: 'Land a hit on any monster',
     gugumaLine: 'Peep! Chain your kills — combos make the coins shinier. Impress me; it is harder than it sounds.',
     body: 'Every kill grants XP and Mojicoins (the gold currency). Build combos for bonus XP — chain kills within 2.6s to stack a reward multiplier; every 5 kills raises it, up to 5×.',
@@ -93385,6 +93394,12 @@ function _renderTutorialStep() {
   if (step.grantsStarterWeapon && typeof _grantTutorialStarterWeapon === 'function') {
     _grantTutorialStarterWeapon();
   }
+  // v0.29.779 — same shape as the weapon grant above: the side effect fires
+  // when the step is SHOWN, so the snail is already there while the step is
+  // telling the player to hit something. _spawnTutorialSnail dedupes.
+  if (step.summonsPracticeSnail && typeof _spawnTutorialSnail === 'function') {
+    _spawnTutorialSnail();
+  }
   const $ = (id) => document.getElementById(id);
   if ($('tut-icon')) $('tut-icon').textContent = step.icon;
   // v0.26.x — #tut-title is now the fixed gold "Tutorial" banner; the per-step
@@ -93516,6 +93531,45 @@ function _closeTutorial(markSeen) {
     // browser origin) is marked done; survives reload via PLAYER_SAVE_FIELDS.
     try { if (typeof player !== 'undefined' && player) player._tutorialSeen = true; } catch (e) {}
   }
+}
+// v0.29.779 — PRACTICE SNAIL. The "Defeat Monsters → Earn XP" step asks the
+// player to land a hit on any monster, but the tour runs in TOWN, which is a
+// sanctuary: spawnMonster suppresses wild spawns there, and updateMonsters
+// splices any wild hostile out every frame. So the objective was unreachable
+// without first walking out of town to find a mob. Guguma now puts one snail
+// (the weakest type, natural level 1) in front of the player.
+//
+// Two SEPARATE guards have to be satisfied:
+//   1. the spawn — `game._tutorialSpawn` opts this one call past the sanctuary
+//      check, cleared in a finally so nothing else inherits it.
+//   2. staying alive — the per-frame town sweep deletes anything
+//      _lxIsWildHostile() calls wild. `isSummon` is the existing hook for
+//      "deliberately placed, not a wild spawn"; it also keeps the snail out of
+//      co-op sync, which is correct — it is a local tutorial prop, not
+//      something a partner should see. Nothing in the combat path reads
+//      isSummon, so it stays an ordinary hittable hostile worth real XP.
+function _spawnTutorialSnail() {
+  try {
+    if (typeof player === 'undefined' || !player || typeof spawnMonster !== 'function') return null;
+    if (typeof game === 'undefined' || !game) return null;
+    if (!game.monsters) game.monsters = [];
+    // Re-showing the step (prev/next, or reopening the tour) must not stack
+    // a queue of snails.
+    for (const m of game.monsters) if (m && m._tutorialSnail && m.currentHp > 0) return m;
+    // If there is already something to hit, the step is completable as-is —
+    // don't clutter a real combat map with a bonus snail.
+    for (const m of game.monsters) if (m && m.currentHp > 0 && !m.isBoss) return null;
+    const dir = player.facing || 1;
+    let m = null;
+    game._tutorialSpawn = true;
+    try { m = spawnMonster(player.x + (dir * 150), player.y - 10, 'snail'); }
+    finally { game._tutorialSpawn = false; }
+    if (!m || m._suppressed) return null;
+    m.isSummon = true;        // survives the sanctuary sweep + stays out of co-op sync
+    m._tutorialSnail = true;
+    if (typeof showToast === 'function') showToast('🐌 Guguma nudges a snail your way — hit it!', 'epic');
+    return m;
+  } catch (e) { return null; }   // a tutorial flourish must never break the tour
 }
 // v0.26.x — Tutorial gift: drop the player's class starter weapon (tier-2
 // rare, on-class so it benefits from the +20% class affinity) into their bag
