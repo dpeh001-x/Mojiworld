@@ -121,6 +121,28 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.825 <span class="tag"><span class="pill bug">bug</span> The Rotter stops squeaking like an animal</span></h2>
+<p>Per user: <em>rotter hurt and death noise sounds wrong, its like a animal squeak, regenerate appropriate sounds using ludo.ai ensure it is under 1s then wire.</em></p>
+<p><b>This was a classification bug, not a taste call.</b> Monster SFX prompts are composed by <code>tools/gen_monster_sounds.js</code>, which picks a sonic profile by regex. Its undead branch tests <code>/skel|undead|crypt|sepulchre|ribcage/</code> &mdash; and <code>zombie</code>, the Rotter&rsquo;s type id, matches <b>none of those words</b>. So it fell through to the <code>beast</code> default and its clips were generated from, literally:</p>
+<ul>
+  <li>hit &mdash; <em>&ldquo;a quick gruff <b>animal</b> grunt, a meaty thud&rdquo;</em></li>
+  <li>die &mdash; <em>&ldquo;a feral <b>animal</b> yelp ending in a growling whimper as a <b>beast</b> is felled&rdquo;</em></li>
+</ul>
+<p>plus the shared house tone, <em>&ldquo;Cute, adorable cartoon creature &hellip; playful, endearing, toy-like&rdquo;</em>. An animal squeak is exactly what that asks for. This is the same failure mode as <code>future_lyra</code> (&ldquo;sounds like male&rdquo;), and it is fixed the same way &mdash; a per-monster override, so a whole-roster regen cannot reproduce it.</p>
+<p><b>Both clips regenerated through ludo.ai</b> with the Rotter described as what it is: a 1.8&times;-scale rotting corpse that spits toxin and gets back up once. New generator <code>scripts/gen_rotter_sfx.mjs</code>.</p>
+<p><b>The bar is measured, not requested.</b> Ludo treats its <code>duration</code> field as a hint &mdash; a requested 0.35&nbsp;s came back at <b>1.99&nbsp;s</b> &mdash; so length is read from each MP3&rsquo;s own frame headers, retried shorter, and only then fitted. The fit is a real fade-out through <code>ffmpeg</code>, <b>not</b> the old byte-level frame cut: a hard cut left the death groan ending at <code>-13&nbsp;dB</code> below peak, plainly audible as a chop.</p>
+<p><b>Timbre is measured too</b>, because &ldquo;sounds like a squeak&rdquo; is a brightness complaint and a prompt that <em>reads</em> right can still miss. New tool <code>scripts/sfx_analyze.mjs</code> decodes a clip and reports its spectral centroid, and the generator now rejects any take that is not darker than the clip it replaces &mdash; the incumbent file is seeded as a candidate, so a bad run can never regress what is already on disk. That guard earned itself immediately: <b>three</b> death takes were rejected, two of them <em>brighter</em> than the squeak they were meant to replace (3216&nbsp;Hz and 2689&nbsp;Hz against an incumbent 2604&nbsp;Hz). The cause was the wording &mdash; &ldquo;gurgling&rdquo;, &ldquo;fluid&rdquo;, &ldquo;squelching splat&rdquo; all describe <em>broadband spray</em>. Dropping the wetness and describing a chest-cavity groan plus a dull body-fall, both low-frequency events, landed it.</p>
+<table>
+  <tr><th>Clip</th><th>Length</th><th>Spectral centroid</th><th>Level</th></tr>
+  <tr><td>hurt &mdash; before</td><td>0.86&nbsp;s</td><td>2460&nbsp;Hz</td><td>mean &minus;16.9&nbsp;dB</td></tr>
+  <tr><td><b>hurt &mdash; after</b></td><td><b>0.97&nbsp;s</b></td><td><b>1916&nbsp;Hz</b></td><td>mean &minus;21.5&nbsp;dB, peak &minus;1.0</td></tr>
+  <tr><td>death &mdash; before</td><td>0.81&nbsp;s</td><td>2604&nbsp;Hz</td><td>mean &minus;13.8&nbsp;dB</td></tr>
+  <tr><td><b>death &mdash; after</b></td><td><b>0.99&nbsp;s</b></td><td><b>186&nbsp;Hz</b></td><td>mean &minus;13.1&nbsp;dB, peak &minus;5.8</td></tr>
+</table>
+<p><b>Levels are matched to the family.</b> The accepted death take arrived at mean <code>-5.5&nbsp;dBFS</code> peaking at <b>0.0</b> &mdash; roughly 9&nbsp;dB hotter than the shipped skeleton death and hard against the ceiling, which in game would blast over its neighbours and clip. Both clips are now pulled toward the family level and held under a <code>-1&nbsp;dBFS</code> peak ceiling.</p>
+<p><b>Wiring needed no code change and was still verified in-engine</b> rather than assumed. Per-monster clips override the family fallback by filename (<code>audio/monster/mob_&lt;type&gt;_&lt;kind&gt;.mp3</code>), so the new files are picked up by the path they already occupy. Booted and instrumented: <code>_playMonsterSfx({type:'zombie'}, 'hit'|'die')</code> plays <code>mob_zombie_hit.mp3</code> and <code>mob_zombie_die.mp3</code>, the browser decodes them at <b>0.89&nbsp;s</b> and <b>0.92&nbsp;s</b>, and the generic <code>beast</code> family clip is never reached.</p>
+<p>The Rotter&rsquo;s runtime family is deliberately left as <code>beast</code>: the fallback table only resolves family names that have a <code>mob_&lt;family&gt;_*.mp3</code> pair on disk, so inventing an <code>undead</code> family would resolve to <b>silence</b> for any monster without a custom clip. <code>scripts/sfx_duration_test.mjs</code> now guards both clips and asserts the type exists for them to be probed &mdash; <b>30 passing</b>.</p>
+
 <h2>v0.29.824 <span class="tag"><span class="pill bug">bug</span> Crypt of Whispers gets the bone-graveyard theme</span></h2>
 <p>Per user: <em>crypt of whispers should use the bgm bgm_bone_graveyard.</em></p>
 <p><code>cryptHollow</code> had <b>no entry at all</b> in <code>_BGM_MAP_FILES</code>, so it fell through to the default overworld theme &mdash; a bright track playing under a three-tier burial chamber. That is the same fall-through the comment directly above that block already describes for the three graveyard maps, which were fixed the same way.</p>
