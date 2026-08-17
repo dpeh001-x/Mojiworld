@@ -71,7 +71,10 @@ const r = await page.evaluate(async () => {
   game.paused = false;
   loadMap('void'); await settle();
   game.paused = false;
-  loadMap('town'); await settle();
+  // Short wait on purpose: the overlay is built synchronously inside loadMap,
+  // and the wake ramp releases at 260 ms, so the usual 400 ms settle would
+  // sample the ramp only after it had already finished.
+  loadMap('town'); await new Promise(r2 => setTimeout(r2, 60));
   out.fromVoid = showing();
   out.flagAfterVoid = !!player._storyBeatsSeen.everdawn_welcome;
   const ov = document.getElementById(ovId);
@@ -81,6 +84,13 @@ const r = await page.evaluate(async () => {
   out.muted = vid ? vid.muted : null;          // it must NOT be muted: he speaks
   out.paused = !!game.paused;                  // game held while it plays
   out.hasSkipHint = !!(ov && /skip/i.test(ov.textContent || ''));
+  // The wake is done by the ENGINE, not the clip: an image-to-video model
+  // starts AT its start frame, so "open on black and brighten" is not really
+  // available to it — the first cut that tried got drawn eyelashes instead.
+  // The video therefore starts dark and soft and comes up in CSS.
+  out.wakeStart = vid ? { opacity: vid.style.opacity, filter: vid.style.filter } : null;
+  await new Promise(r2 => setTimeout(r2, 600));
+  out.wakeEnd = vid ? { opacity: vid.style.opacity, filter: vid.style.filter } : null;
   // it must decode, not 404
   out.decodes = vid ? await new Promise((res) => {
     if (vid.readyState >= 1) return res(true);
@@ -119,6 +129,11 @@ ok('the clip DECODES (not a 404 behind a black rectangle)', r.decodes === true, 
 ok('it plays with SOUND — he speaks a line, muting it throws the scene away', r.muted === false, { muted: r.muted });
 ok('the game is held while it plays', r.paused === true, {});
 ok('it offers a skip hint', r.hasSkipHint === true, {});
+ok('the wake starts dark and soft (the engine does the waking, not the clip)',
+   !!r.wakeStart && r.wakeStart.opacity === '0' && /brightness\(0\.12\)/.test(r.wakeStart.filter),
+   r.wakeStart);
+ok('...and comes up to full brightness', !!r.wakeEnd && r.wakeEnd.opacity === '1'
+   && /brightness\(1\)/.test(r.wakeEnd.filter), r.wakeEnd);
 ok('clicking closes it', r.closed === true, {});
 ok('...and hands the game back running (it restores the pause state it found)',
    r.unpaused === true, { pausedAfter: !r.unpaused });
