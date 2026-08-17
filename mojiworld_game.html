@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.812';
+const GAME_VERSION = 'v0.29.813';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -60034,8 +60034,16 @@ function updatePlayer(dt) {
   const _dropLvMul = 1 + Math.min(1.0, ((player.level || 1) - 1) / 99);
   for (let i = game.drops.length - 1; i >= 0; i--) {
     const d = game.drops[i];
-    d.y += d.vy; d.vy += 0.3;
-    if (d.y > 480 - 8) { d.y = 480 - 8; d.vy = 0; }
+    {
+      // v0.29.812 — rest on the real surface under this drop, not a global
+      // y:480. See _lxDropRestY. Only runs while the drop is still falling.
+      const _prevY = d.y;
+      d.y += d.vy; d.vy += 0.3;
+      if (d.vy > 0) {
+        const _rest = _lxDropRestY(d, _prevY);
+        if (_rest !== null && d.y > _rest) { d.y = _rest; d.vy = 0; }
+      }
+    }
     d.life -= dt;
     const dx = _dropPcx - d.x;
     const dy = _dropPcy - d.y;
@@ -72538,6 +72546,37 @@ function updateMonsters(dt) {
 // Only slabs tagged type:'ground' count — that is the whole point: the arena's
 // four perches are type:'platform' and must never qualify. Where slabs overlap
 // the centre the TOPMOST wins, since that is the surface a body would rest on.
+// v0.29.812 — where a falling drop should come to rest. Returns the TOP of
+// the highest surface the drop is crossing this frame, or null to keep falling.
+//
+// Platforms are one-way from above (the same rule the player obeys), so a drop
+// only lands on one whose top it passed through while descending — otherwise a
+// coin spawned under a ledge would snap up onto it. Ground slabs are absolute:
+// a drop never falls past one, which is what stops a coin leaving the map on a
+// tower where no platform sits beneath it.
+function _lxDropRestY(d, prevY) {
+  const md = (typeof game !== 'undefined' && game) ? game.mapData : null;
+  if (!md) return 472;                       // no map data: the old constant, so nothing can fall forever
+  const plats = md.platforms || [];
+  const cx = d.x;
+  let best = null;
+  for (let i = 0; i < plats.length; i++) {
+    const p = plats[i];
+    if (!p) continue;
+    if (cx < p.x || cx > p.x + p.w) continue;
+    const top = p.y - 8;                     // the same 8 px seat the old clamp used
+    // Must be BELOW where the drop already was. Without this the nearest-top
+    // search picks the globally highest surface, and on a tower with a ceiling
+    // slab (coralReef has ground at y:80 AND y:2080) drops snapped UPWARD onto
+    // the ceiling - measured, two of six test drops resting at y:72.
+    if (top < prevY) continue;
+    // ...and crossed this frame. Comparing the whole span rather than the new
+    // position also survives a fast drop tunnelling past a thin platform.
+    if (d.y < top) continue;
+    if (best === null || top < best) best = top;
+  }
+  return best;
+}
 function _lxGroundYUnder(m) {
   const md = (typeof game !== 'undefined' && game) ? game.mapData : null;
   if (!md) return null;
