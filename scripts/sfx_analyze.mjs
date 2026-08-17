@@ -59,6 +59,57 @@ function centroid(x) {
   return den ? num / den : 0;
 }
 
+// VOWEL BAND RATIO — the share of a clip's energy that sits below 1 kHz.
+//
+// This is the number that separates a HUMAN voice from a critter noise, which
+// spectral centroid alone does not. A spoken/babbled vowel puts its first
+// formant at roughly 300-900 Hz and carries serious energy there; a chirp,
+// squeak, trill or birdlike tone is essentially empty below ~1.5 kHz. So a
+// voice clip that reads as "an animal" measures LOW here even when its pitch
+// is nominally in a girl's register.
+function vowelBandRatio(x, cutHz = 1000) {
+  const N = 1024, HOP = 512;
+  let low = 0, all = 0;
+  const kCut = Math.round(cutHz * N / SR);
+  for (let s = 0; s + N <= x.length; s += HOP) {
+    for (let k = 1; k < N / 2; k++) {
+      let re = 0, im = 0;
+      for (let n = 0; n < N; n++) {
+        const w = 0.5 - 0.5 * Math.cos((2 * Math.PI * n) / (N - 1));
+        const a = (2 * Math.PI * k * n) / N;
+        re += x[s + n] * w * Math.cos(a);
+        im -= x[s + n] * w * Math.sin(a);
+      }
+      const mag = Math.hypot(re, im);
+      all += mag;
+      if (k <= kCut) low += mag;
+    }
+  }
+  return all ? low / all : 0;
+}
+
+// f0 by autocorrelation over the highest-energy 40 ms window. Deliberately the
+// SAME algorithm scripts/npc_voice_cast_test.mjs runs in Chrome, so the number
+// a generation is accepted on is the number the shipped test will report.
+function f0Of(x) {
+  const win = Math.floor(SR * 0.04);
+  let best = 0, bestE = -1;
+  for (let s = 0; s + win < x.length; s += Math.floor(win / 2)) {
+    let e = 0;
+    for (let i = s; i < s + win; i++) e += x[i] * x[i];
+    if (e > bestE) { bestE = e; best = s; }
+  }
+  const seg = x.slice(best, best + win);
+  const minLag = Math.floor(SR / 900), maxLag = Math.floor(SR / 70);
+  let bestLag = -1, bestCorr = 0;
+  for (let lag = minLag; lag <= maxLag && lag < seg.length; lag++) {
+    let c = 0;
+    for (let i = 0; i + lag < seg.length; i++) c += seg[i] * seg[i + lag];
+    if (c > bestCorr) { bestCorr = c; bestLag = lag; }
+  }
+  return bestLag > 0 ? SR / bestLag : 0;
+}
+
 const rms = (x, a, b) => {
   let s = 0; const n = Math.max(1, b - a);
   for (let i = a; i < b; i++) s += x[i] * x[i];
@@ -80,7 +131,15 @@ function report(file) {
   };
 }
 
-export { pcm, centroid, rms, report };
+// Voice-specific report: adds the vowel-band ratio. Kept separate because it
+// is another full DFT sweep and monster SFX have no use for it.
+function voiceReport(file) {
+  const base = report(file);
+  const x = pcm(file);
+  return { ...base, f0: Math.round(f0Of(x)), vowelBand: +vowelBandRatio(x).toFixed(3) };
+}
+
+export { pcm, centroid, rms, report, vowelBandRatio, f0Of, voiceReport };
 
 // Importable as a library (gen_rotter_sfx.mjs scores its candidates with it),
 // so only run the CLI when this file IS the entry point.
@@ -96,6 +155,8 @@ if (argv[0] === '--ab') {
   const d = b.centroidHz - a.centroidHz;
   console.log(`centroid ${a.centroidHz} -> ${b.centroidHz} Hz  (${d >= 0 ? '+' : ''}${d}, ` +
     `${d < 0 ? 'DARKER — less squeak' : 'BRIGHTER'})`);
+} else if (argv[0] === '--voice') {
+  for (const f of argv.slice(1)) console.log(JSON.stringify(voiceReport(f)));
 } else {
   for (const f of argv) console.log(JSON.stringify(report(f)));
 }

@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { voiceReport } from './sfx_analyze.mjs';
 
 const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = path.join(repoRoot, 'audio', 'npc');
@@ -59,13 +60,46 @@ const VOICES = {
     //   plucky teen    578 / 3329      KAWAII       667 / 4065   <- shipped
     // 667 Hz also puts Bravo alongside the game's other bright NPCs
     // (Guguma 706, Felina 706) instead of down with Nurse Joyce at 242.
+    // v0.29.x — REPORTED AGAIN: "Bravo NPC sounds like an animal, make sure
+    // she produces a human girl sound." The kawaii recast above overshot: it
+    // chased "not granny" with PITCH, and pitch was never the granny signal
+    // (the clip it replaced read as a granny at 552 Hz — rasp and creak did
+    // that, not register).
+    //
+    // The overshoot is visible in one measurement. A human vowel puts its
+    // first formant at roughly 300-900 Hz and carries real energy there; at
+    // f0 668 Hz there is no harmonic under 1 kHz except the fundamental, so
+    // there is nothing left to form a vowel out of. Measured share of energy
+    // below 1 kHz (scripts/sfx_analyze.mjs --voice):
+    //     Bravo  f0 668  vowel-band 0.026   <- reads as a chirp
+    //     Felina f0 711  vowel-band 0.139
+    //     Nurse Joyce f0 242  vowel-band 0.661   <- unmistakably a person
+    // "tiny happy chirps" got exactly what it asked for.
+    //
+    // So this prompt is TIMBRE-led, not pitch-led: a real girl's voice with
+    // open vowels, kept young and bright but inside a register that can still
+    // hold a vowel. The anti-granny negatives stay, because that complaint was
+    // real and must not come back.
     desc: 'Animal Crossing style character voice BABBLE for a video game: playful nonsense vocal '
       + 'syllables only, NOT real words, NOT speech, NOT singing. Single voice, clean dry studio '
-      + 'recording, no music, no background noise, no reverb. A CUTE KAWAII CARTOON MASCOT GIRL: '
-      + 'sweet, sparkly, very high-pitched and melodic, soft and friendly, tiny happy chirps with an '
-      + 'upward lilt. Absolutely NOT an old woman, NOT elderly, NOT raspy, croaky, creaky, nagging, '
+      + 'recording, no music, no background noise, no reverb. A REAL HUMAN LITTLE GIRL about eight '
+      + 'years old, speaking cheerfully: a clear warm child voice with OPEN ROUNDED VOWEL sounds '
+      + 'like "ba da ya na", full-bodied and breathy and natural, bright and friendly with an '
+      + 'upward lilt at the end. It must sound like an actual child talking. '
+      + 'Absolutely NOT an animal, NOT a creature, NOT a bird, NOT a chirp, squeak, trill, whistle, '
+      + 'peep, mew or chitter. NOT a chipmunk, NOT pitch-shifted or sped-up, NOT a synthesised or '
+      + 'robotic voice. '
+      + 'Absolutely NOT an old woman, NOT elderly, NOT raspy, croaky, creaky, nagging, '
       + 'scolding, weary or grumpy. No vibrato, no growl, no low chest tones.',
     dur: 1.2,
+    // MEASURED acceptance — a prompt that reads right can still miss, and this
+    // one has missed twice in opposite directions.
+    //   f0 band: high enough to stay a child and clear of the granny register,
+    //     low enough that harmonics still land in the vowel band.
+    //   vowelBand: the actual "is this a person" test. Well above the 0.026
+    //     chirp being replaced; not as low-heavy as Nurse Joyce, who is an
+    //     adult and deliberately darker.
+    accept: { minF0: 280, maxF0: 520, minVowelBand: 0.25 },
   },
 };
 
@@ -90,10 +124,34 @@ const API = process.env.LUDO_API_BASE || 'https://api.ludo.ai/api';
 const TIMEOUT = Number(process.env.LUDO_REQ_TIMEOUT_MS || 150000);
 const outDir = arg('out') ? path.resolve(arg('out')) : DIR;
 
+const ATTEMPTS = Number(arg('attempts') || 4);
+
+// Measured acceptance for voices that carry an `accept` spec. Two recasts of
+// Bravo shipped on "the prompt reads right", and both were wrong in ways a
+// single number would have caught, so the roll is now scored before it lands.
+// The incumbent file is seeded as a candidate: a bad run can tell us it failed,
+// but it can never leave the character worse than it found them.
+const scoreOf = (m) => m.vowelBand;   // "is this a person" is the deciding axis
+function verdict(m, acc) {
+  const okF0 = m.f0 >= acc.minF0 && m.f0 <= acc.maxF0;
+  const okVowel = m.vowelBand >= acc.minVowelBand;
+  return { ok: okF0 && okVowel, why: [okF0 ? '' : `f0 ${m.f0} outside ${acc.minF0}-${acc.maxF0}`,
+    okVowel ? '' : `vowel-band ${m.vowelBand} < ${acc.minVowelBand}`].filter(Boolean).join(', ') };
+}
+
 let fail = 0;
 for (const k of keys) {
   const v = VOICES[k];
   const dest = path.join(outDir, `npc_${k}.mp3`);
+  const acc = v.accept;
+  const tries = acc ? ATTEMPTS : 1;
+  let best = null;
+  if (acc && fs.existsSync(dest)) {
+    const m0 = voiceReport(dest);
+    best = { buf: fs.readFileSync(dest), m: m0, incumbent: true };
+    console.log(`  incumbent npc_${k}: f0 ${m0.f0}Hz, vowel-band ${m0.vowelBand} — must be beaten`);
+  }
+  for (let attempt = 1; attempt <= tries; attempt++) {
   try {
     const res = await fetch(`${API}/audio/sound-effect`, {
       method: 'POST',
@@ -110,14 +168,45 @@ for (const k of keys) {
     const buf = Buffer.from(await a.arrayBuffer());
     if (buf.length < 2000) throw new Error(`suspiciously small (${buf.length}B) — not written`);
     fs.mkdirSync(outDir, { recursive: true });
+
+    let pick = { buf, m: null };
+    if (acc) {
+      const scratch = path.join(repoRoot, 'scripts', '_tmp_voice_cand.mp3');
+      fs.writeFileSync(scratch, buf);
+      const m = voiceReport(scratch);
+      try { fs.unlinkSync(scratch); } catch (_) {}
+      const vd = verdict(m, acc);
+      console.log(`  npc_${k} attempt ${attempt}: f0 ${m.f0}Hz, vowel-band ${m.vowelBand}` +
+        (vd.ok ? '  ACCEPT' : `  reject — ${vd.why}`));
+      if (!best || scoreOf(m) > scoreOf(best.m)) best = { buf, m };
+      if (!vd.ok) {
+        if (attempt < tries) continue;
+        if (best.incumbent) {
+          console.error(`FAIL npc_${k}: ${tries} attempts, none beat the incumbent — nothing written`);
+          fail++; break;
+        }
+        console.log(`  ! bar never cleared — keeping the most human take (vowel-band ${best.m.vowelBand})`);
+      }
+      pick = vd.ok ? { buf, m } : best;
+    }
+
+    // Back up ONCE per key, so a second run cannot overwrite the true original
+    // with the previous run's reject.
     if (outDir === DIR && fs.existsSync(dest)) {
       fs.mkdirSync(BACKUP, { recursive: true });
-      fs.copyFileSync(dest, path.join(BACKUP, `npc_${k}.mp3`));
+      const bak = path.join(BACKUP, `npc_${k}.mp3`);
+      if (!fs.existsSync(bak)) fs.copyFileSync(dest, bak);
     }
     const tmp = dest + '.tmp';
-    fs.writeFileSync(tmp, buf);
+    fs.writeFileSync(tmp, pick.buf);
     fs.renameSync(tmp, dest);      // atomic, per project convention
-    console.log(`OK npc_${k}.mp3 (${(buf.length / 1024).toFixed(1)} KB, ${j.duration ?? '?'}s) -> ${dest}`);
-  } catch (e) { fail++; console.error(`FAIL npc_${k}: ${e.message}`); }
+    console.log(`OK npc_${k}.mp3 (${(pick.buf.length / 1024).toFixed(1)} KB) -> ${dest}` +
+      (pick.m ? `  f0 ${pick.m.f0}Hz, vowel-band ${pick.m.vowelBand}` : ''));
+    break;
+  } catch (e) {
+    if (acc && attempt < tries) { console.error(`  npc_${k} attempt ${attempt} error: ${e.message}`); continue; }
+    fail++; console.error(`FAIL npc_${k}: ${e.message}`); break;
+  }
+  }
 }
 process.exit(fail ? 1 : 0);
