@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.817';
+const GAME_VERSION = 'v0.29.818';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -102106,6 +102106,39 @@ const HERO_FLOOR_NUDGE = 6;
 // vertical-scale factor for the eye layer: 1 = open, ~0.12 = fully shut. ludo
 // couldn't author per-style closed-eye art (sparse layers → blank), so we
 // animate the real equipped eye art instead — matches any style, no assets.
+// v0.29.818 — DEAD EYES (per user: "when my character dies, the eyes at blink
+// should be replaced with 2 X X for eyes instead"). While the hero is downed
+// the eye LAYER is skipped entirely and these two crosses are stamped in its
+// place, in the same head-local space the sprite occupies (-58,-52,108,108) —
+// so they rotate with the facedown pose and scale with the hero for free.
+//
+// The coordinates are measured, not guessed. Every eye sprite is an 800x800
+// head-aligned canvas with the art sitting LOW-RIGHT of centre, not centred:
+// across the 30 authored styles the pupils cluster at x 0.545 / 0.710 and
+// y 0.549 of the canvas (spreads of 0.034 / 0.035 / 0.036 — tight enough that
+// one position serves every style). Converted into the 108-unit draw box that
+// is x 0.9 / 18.7, y 7.3.
+//   Known outlier: 'smart' places its art at x 0.224/0.396 — that one sprite
+//   is authored off-register against the other 29. The crosses land where the
+//   other styles' eyes are; fixing that sprite is an art job, not a render one.
+const _LX_DEAD_EYE = { lx: 0.9, rx: 18.7, y: 7.3, r: 4.4 };
+function _lxDrawDeadEyes() {
+  const E = _LX_DEAD_EYE;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.filter = 'none';   // the downed draw may carry a tint; the X stays readable
+  for (const cx of [E.lx, E.rx]) {
+    // Pale rim first, dark cross over it, so the mark reads on any skin tone.
+    for (const pass of [{ w: E.r * 0.90, c: 'rgba(255,255,255,0.9)' }, { w: E.r * 0.50, c: '#2a1420' }]) {
+      ctx.strokeStyle = pass.c; ctx.lineWidth = pass.w;
+      ctx.beginPath();
+      ctx.moveTo(cx - E.r, E.y - E.r); ctx.lineTo(cx + E.r, E.y + E.r);
+      ctx.moveTo(cx + E.r, E.y - E.r); ctx.lineTo(cx - E.r, E.y + E.r);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
 let _heroBlinkEnd = 0, _heroBlinkNext = 0;
 function _heroBlinkFactor() {
   // v0.29.764 — a downed hero's eyes stay CLOSED: hold the blink at its
@@ -105653,7 +105686,12 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
       // is the simplest robust fix. _lxFaceLayerSrc(img) just returns
       // the raw image now (v0.25.862 multi-step bake was reverted —
       // it accumulated blur across smoothing passes).
-      if (_useSpriteEyes) {
+      // v0.29.818 — a downed hero wears X X instead of shut eyes. Drawn
+      // whether or not the eye sprite decoded (the crosses are procedural), and
+      // BEFORE the sprite branch so the layer is replaced, not overdrawn.
+      if (window._lxDownedDraw && typeof _lxDrawDeadEyes === 'function') {
+        _lxDrawDeadEyes();
+      } else if (_useSpriteEyes) {
         ctx.imageSmoothingEnabled = true;
         if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
         // v0.26.x — occasional natural blink: squash the eye layer vertically
