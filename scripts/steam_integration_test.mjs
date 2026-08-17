@@ -30,8 +30,31 @@ try {
     hide(); setInterval(hide, 80);
   });
   await page.waitForTimeout(2500);
-  await page.evaluate(() => { try { player.cls = 'warrior'; game.paused = false; window._prologueActive = false; const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none'; loadMap('glasswindSteppe'); } catch (e) {} });
+  await page.evaluate(() => { try {
+    player.cls = 'warrior'; game.paused = false; window._prologueActive = false;
+    const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none';
+    // Mark every story beat as already seen BEFORE loading the map. On a fresh
+    // save, arriving somewhere fires that map's arrival beat, and the pad is
+    // modal-aware: while a narrative card is open it drives MENU navigation,
+    // not the character — correctly, since the player needs to dismiss it.
+    // Without this the suite opened a story card and then tested gameplay
+    // input against it, so D-pad / stick / attack all read as "pad broken"
+    // when the pad was working exactly as designed. (Measured: with the card
+    // dismissed the same press gives arrowleft and vx -2.1.)
+    if (typeof STORY_BEATS === 'object') {
+      player._storyBeatsSeen = player._storyBeatsSeen || {};
+      for (const k in STORY_BEATS) player._storyBeatsSeen[k] = true;
+    }
+    loadMap('glasswindSteppe');
+  } catch (e) {} });
   await sleep(800);
+  // Belt and braces: close anything that opened anyway, so the pad starts this
+  // run in gameplay mode rather than owned by a leftover surface.
+  await page.evaluate(() => { try {
+    const sb = document.getElementById('story-beat-overlay');
+    if (sb) { sb.classList.remove('on'); sb.style.display = 'none'; }
+    game.paused = false;
+  } catch (e) {} });
 
   // Install a controllable synthetic gamepad.
   await page.evaluate(() => {
@@ -99,7 +122,13 @@ try {
   });
   ok('X button triggers an attack (z key routed through the pipeline)', atk.oneFrame || atk.zKey === true, atk);
 
-  ok('controller-connected toast fired', await page.evaluate(() => (window.__toasts || []).some(t => /Controller connected/i.test(t))));
+  // The connect popup was REMOVED on purpose (v0.29.7xx, per user: "there was
+  // a popup that says L3 dash when controller is connected, please remove
+  // that" — the layout primer lives in Help instead). This check asserted the
+  // toast still fired, so it had been failing for a feature working as
+  // intended. Inverted to pin the removal.
+  ok('no controller-connected popup is thrown over the screen (removed by request)',
+     await page.evaluate(() => !(window.__toasts || []).some(t => /Controller connected/i.test(t))));
 
   // (B) STEAM CLOUD — mock the bridge and verify mirror + newest-wins adopt.
   const cloud = await page.evaluate(async () => {
@@ -320,7 +349,23 @@ try {
   const quit = await page.evaluate(async () => {
     window.__closed = 0;
     const origClose = window.close; window.close = () => { window.__closed++; };
-    openSettingsModal(); await new Promise(r => setTimeout(r, 30));   // SteamAPI mock present -> wrapper build
+    // Start from a known pad state. This block runs after ~40 other checks, and
+    // if any of them left a surface owning the pad (or the ring parked outside
+    // Settings) the walk below never enters the settings ring and reports the
+    // Quit row unreachable — which is what made this check flaky, 15 steps on
+    // one run and never on the next. Traced directly: from a clean state the
+    // ring visits every settings control in order and lands on Quit at step 16.
+    try { const sb = document.getElementById('story-beat-overlay'); if (sb) { sb.classList.remove('on'); sb.style.display = 'none'; } } catch (e) {}
+    window.__pad.buttons.forEach((_, i) => window.__press(i, false));
+    _lxPadPoll(); _lxPadPoll();
+    // Close first, then open. An earlier check can leave Settings already open,
+    // and opening an open panel does not re-seed the focus ring — so the walk
+    // began from wherever the previous test parked it and wandered outside the
+    // settings controls. Closing first makes the starting point the same every
+    // run instead of depending on what ran before.
+    try { closeSettingsModal(); } catch (e) {}
+    await new Promise(r => setTimeout(r, 40));
+    openSettingsModal(); await new Promise(r => setTimeout(r, 60));   // SteamAPI mock present -> wrapper build
     const rowShown = document.getElementById('set-quit-row').style.display !== 'none';
     const quitBtn = document.querySelector('#set-quit-row button');
     window.__pad.buttons.forEach((_, i) => window.__press(i, false)); _lxPadPoll();
