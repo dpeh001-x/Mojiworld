@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.833';
+const GAME_VERSION = 'v0.29.834';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -70528,8 +70528,13 @@ function updateMonsters(dt) {
       } else {
         m._dirRollT -= dt;
         if (m._dirRollT <= 0 && !m._bigMeleeFiring && !(m._dirGuardT > 0) && !(m._dirGhostT > 0)) {
-          m._dirRollT = 12000 + Math.random() * 8000;
-          m._dirOpenT = 4000;
+          // v0.29.834 — 12-20 s -> 18-28 s. v0.29.831 made both windows real,
+          // which was a buff; the break meter adds a fourth opener on top. So
+          // the FREE opening gets rarer in the same pass and earned pressure
+          // takes over supplying them. Total vulnerable time stays near where
+          // it was, but it now tracks how hard the player is fighting.
+          m._dirRollT = 22000 + Math.random() * 12000;
+          m._dirOpenT = 2000;
           // v0.29.264 — no "OPEN!" tag (per user: players must recognise the
           // opening themselves). The tell is behavioural: the boss drags to a
           // crawl, stops attacking, and gold stagger sparks rise.
@@ -70537,6 +70542,7 @@ function updateMonsters(dt) {
       }
       if (m._dirGuardT > 0) m._dirGuardT -= dt;
       if (m._dirGhostT > 0) m._dirGhostT -= dt;
+      if (m._windedCd > 0) m._windedCd -= dt;   // v0.29.834 — winded-window floor
       if (!(m._dirOpenT > 0) && !(m._dirGuardT > 0) && !(m._dirGhostT > 0) &&
           typeof _mobLevel === 'function' && _mobLevel(m) >= 40) {
         m._dirStanceT -= dt;
@@ -70708,8 +70714,15 @@ function updateMonsters(dt) {
           // v0.29.263 — boss director: 35% of boss heavy swings leave the
           // boss WINDED for 3.5 s (recovery lag) — the punish window smart
           // players wait for. Elites keep their instant recovery.
-          if ((m.isBoss || m.boss) && !((m.type || '').indexOf('gravitos') === 0) && Math.random() < 0.35) {
-            m._dirOpenT = 3500;
+          if ((m.isBoss || m.boss) && !((m.type || '').indexOf('gravitos') === 0)
+              && !(m._windedCd > 0) && Math.random() < 0.35) {
+            // v0.29.834 — 3500 -> 2600ms, plus a 7 s floor between winded
+            // windows. Still the most generous of the three, because this one is
+            // read off a tell rather than rolled; but v0.29.831 made it genuinely
+            // freeze every attack, and on a heavy-swing boss it was firing often
+            // enough to hold the fight open half the time.
+            m._dirOpenT = 2600;
+            m._windedCd = 7000;
             // v0.29.264 — no "OPEN!" tag here either; post-swing recovery lag
             // reads through the stagger sparks + crawl alone.
           }
@@ -73853,6 +73866,46 @@ const BOSS_STAGGER_BONUS = 1.6;          // damage multiplier while staggered (E
 // a fight: at x1.6 the roster-wide buff would have been +21% to +28% total
 // damage, at x1.25 it lands near +12%.
 const BOSS_OPENING_BONUS = 1.25;
+// v0.29.834 — BREAK METER. A second, parallel pool the player fills by
+// fighting; full opens a real (earned, x1.6) punish window. maxHp-relative
+// because the boss roster spans three orders of magnitude of HP.
+const BOSS_BREAK_PCT = 0.16;             // a full bar == 16% of maxHp dealt
+const BOSS_BREAK_DECAY_PER_S = 0.09;     // BASE-bar fraction bled per second while not being hit
+const BOSS_BREAK_TELL_MUL = 2.5;         // damage landed during a TELL counts this much
+const BOSS_BREAK_ADAPT = 1.15;           // each break raises the next bar (Skul's StunResistance)
+const BOSS_BREAK_ADAPT_CAP = 1.6;        // ...to a ceiling, so it never becomes unreachable
+// Fill the meter. Called from the damage site for bosses only.
+function _bossFillBreak(m, dmg) {
+  if (!m || !m.isBoss || !(dmg > 0) || m.currentHp <= 0) return;
+  if (m._stagger > 0 || m._dirOpenT > 0) return;      // a window must not feed the next one
+  if (typeof _bossCanPunish === 'function' && !_bossCanPunish(m)) return;   // gravitos / octobaby opt out
+  if (!(m._breakMax > 0)) m._breakMax = Math.max(1, (m.maxHp || 1) * BOSS_BREAK_PCT);
+  // Hitting a boss mid-TELL is the read worth rewarding, so it fills far
+  // faster. Deliberately keyed on the real telegraph flags rather than
+  // "patternState !== idle", which for a busy boss is most of the fight and
+  // would make the bonus unconditional.
+  // _dashCharging is the dash-streak VFX flag on an ACTIVE dash, not a
+  // wind-up, so including it rewarded hits landed DURING the attack -- and
+  // Barnaby's boxer cycle keeps it lit, which is why he broke 10x/min against
+  // every other boss's 2. Real telegraph countdowns only.
+  const _tell = ((m._bigMeleeFiring && m._bigMeleeT > 0) || (m._columnFiring && m._columnT > 0))
+    ? BOSS_BREAK_TELL_MUL : 1;
+  m._break = (m._break || 0) + dmg * _tell;
+  // Accumulate during the window cooldown but do not TRIGGER until it clears,
+  // so pressure applied straight after a punish is banked rather than binned.
+  if (m._break >= m._breakMax && !(m._staggerCd > 0)) {
+    m._break = 0;
+    m._breakMax = Math.min(m._breakMax * BOSS_BREAK_ADAPT,
+                           Math.max(1, (m.maxHp || 1) * BOSS_BREAK_PCT * BOSS_BREAK_ADAPT_CAP));
+    m._stagger = BOSS_STAGGER_MS;
+    m._staggerCd = BOSS_STAGGER_MS + BOSS_STAGGER_COOLDOWN;
+    if (typeof showToast === 'function') showToast('✦ BREAK — ' + (m.name || 'Boss') + ' buckles. PUNISH!', 'epic');
+    if (typeof addShake === 'function') addShake(7);
+    if (typeof flash === 'function') flash(0.14);
+    if (typeof addHitStop === 'function') addHitStop(90);
+    if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('parry'); } catch (e) {} }
+  }
+}
 const BOSS_STAGGER_COOLDOWN = 5200;      // min gap after a window before the next
 // Cheap / movement states that should NOT earn a punish window when they end.
 const _BOSS_NO_PUNISH_STATES = new Set(['idle','walk','airborne','reposition','hover','chase','move','jab','claw','volley','seek','land','leap']);
@@ -74020,6 +74073,19 @@ function bossAI(m, dt, distToPlayer) {
   // v0.26.x — PUNISH WINDOW: tick cooldown, open a window on attack->idle, and
   // while staggered freeze the boss (stunned + vulnerable) and skip its attacks.
   if (m._staggerCd > 0) m._staggerCd -= dt;
+  // v0.29.834 — BREAK DECAY. Bleeds while the boss is not being hit, so the
+  // meter measures sustained PRESSURE rather than the length of the fight.
+  // Ticked here, ahead of the window freeze, so it runs for every boss
+  // including the trait-driven ones that never leave 'idle'.
+  if (m._break > 0 && !(m._stagger > 0) && !(m._dirOpenT > 0)) {
+    // Decay is a fraction of the BASE bar, never the adapted one: scaling it
+    // to _breakMax made adaptation brutally nonlinear -- measured, a 1.30x bar
+    // cut net fill from 12.5%/s to 4.2%/s and stalled every boss at 2
+    // windows/min. Now a raised bar lengthens the fill, as intended, without
+    // also multiplying what bleeds out of it.
+    const _base = Math.max(1, (m.maxHp || 1) * BOSS_BREAK_PCT);
+    m._break = Math.max(0, m._break - _base * BOSS_BREAK_DECAY_PER_S * (dt / 1000));
+  }
   _maybeStartBossStagger(m);
   // v0.29.831 — the other half of the same unification: an OPENING freezes
   // patterns too. bossAI never read _dirOpenT, so the boss dragged to a crawl
@@ -78815,6 +78881,9 @@ function hitMonster(m, dmg, isCrit, skill) {
     finalDmg = Math.max(1, Math.floor(finalDmg * (_earned ? BOSS_STAGGER_BONUS : BOSS_OPENING_BONUS)));
     game.damageNumbers.push({ x: m.x + m.w/2 - 16, y: m.y - 36, vy: -1.8,
       text: _earned ? 'PUNISH!' : 'OPEN!', life: 22, color: _earned ? '#ffdd55' : '#ffc46a', size: 12 });
+  } else if (m.isBoss && typeof _bossFillBreak === 'function') {
+    // v0.29.834 — outside a window, damage feeds the break meter instead.
+    _bossFillBreak(m, finalDmg);
   }
   // v0.27.0 co-op forward — a NON-HOST is not authoritative over shared monsters.
   // finalDmg is now FULLY resolved (every attacker multiplier + DEF above), so
@@ -113616,6 +113685,17 @@ function drawMonster(m) {
     ctx.fillRect(sx + 2, sy - 8, m.w - 4, 4);
     ctx.fillStyle = m._hpBarColor;
     ctx.fillRect(sx + 3, sy - 7, (m.w - 6) * hpPct, 2);
+    // v0.29.834 — BREAK METER, one slim bar above the HP bar, in the same gold
+    // the punish overlay already uses so filling it reads as "the window is
+    // coming". A mechanic the player cannot see is not a mechanic; without this
+    // the meter would be an invisible dice roll from the player's side.
+    if (m.isBoss && m._break > 0 && m._breakMax > 0 && !(m._stagger > 0)) {
+      const _bf = Math.min(1, m._break / m._breakMax);
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(sx + 2, sy - 13, m.w - 4, 3);
+      ctx.fillStyle = _bf >= 0.99 ? '#fff2a8' : '#ffcc33';
+      ctx.fillRect(sx + 3, sy - 12.5, (m.w - 6) * _bf, 2);
+    }
     // v0.29.684 — DOOM brand pips. Only branded foes pay the draw cost, and a
     // branded foe is by definition a damaged one, so living inside the
     // hp<maxHp block loses nothing.
