@@ -18,6 +18,17 @@ try {
   page._errors = []; page.on('pageerror', e => page._errors.push(String(e).slice(0, 160)));
   await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForFunction(() => typeof _lxPadPoll === 'function' && typeof loadMap === 'function', null, { timeout: 45000 });
+  // Hold the boot overlay down for the whole run. Without this the suite is
+  // FLAKY in a way that looks like a pad regression but is not: the title
+  // screen (#loading-overlay's lo-auth panel) reveals itself a few seconds
+  // after the bypass boot, and the pad router is topmost-wins — so whichever
+  // side of that reveal a check lands on decides whether the pad drives the
+  // GAME or the title screen. Two consecutive runs scored 43/49 and 40/49 with
+  // different failures before this went back in.
+  await page.evaluate(() => {
+    const hide = () => { try { const o = document.getElementById('loading-overlay'); if (o && o.style.display !== 'none') o.style.display = 'none'; } catch (e) {} };
+    hide(); setInterval(hide, 80);
+  });
   await page.waitForTimeout(2500);
   await page.evaluate(() => { try { player.cls = 'warrior'; game.paused = false; window._prologueActive = false; const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none'; loadMap('glasswindSteppe'); } catch (e) {} });
   await sleep(800);
