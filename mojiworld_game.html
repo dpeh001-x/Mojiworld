@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.814';
+const GAME_VERSION = 'v0.29.815';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -59856,7 +59856,7 @@ function updatePlayer(dt) {
       const _pbW = pet.w, _pbH = pet.h;
       const _pcx = _pbX + _pbW / 2, _pcy = _pbY + _pbH / 2;
       const _checkContact = (pet.dmgCD <= 0);
-      let tgt = null, bestSq = Infinity, _totalDmg = 0;
+      let tgt = null, bestSq = Infinity, bestScore = Infinity, _totalDmg = 0;
       for (const m of game.monsters) {
         if (!m || m.currentHp <= 0) continue;
         const mcx = m.x + m.w/2, mcy = m.y + m.h/2;
@@ -59865,10 +59865,11 @@ function updatePlayer(dt) {
         // to seek targets a couple of platforms up/down. Pure-distance
         // sort still picks the nearest, so wolves prefer same-platform
         // bites when both are available.
-        if (Math.abs(dy) <= 800) {
-          const sq = dx * dx + dy * dy;
-          if (sq < bestSq) { bestSq = sq; tgt = m; }
-        }
+        // v0.29.815 — scored, not nearest-by-distance (see _allyTargetScore).
+        // bestSq still tracks the TRUE distance so the 900 px engage gate
+        // below keeps measuring range rather than the score.
+        const _sc = _allyTargetScore(pet, m, dx, dy);
+        if (_sc >= 0 && _sc < bestScore) { bestScore = _sc; bestSq = dx * dx + dy * dy; tgt = m; }
         // v0.29.288 — BOSSES CAN HURT SUMMONS (per user "summons should be
         // susceptible to monster attacks"). The `!m.isBoss && !m.isMiniBoss`
         // exclusion made every wolf/eagle/werewolf INVULNERABLE in exactly the
@@ -59882,6 +59883,7 @@ function updatePlayer(dt) {
           }
         }
       }
+      pet._tgtRef = tgt;   // v0.29.815 — hysteresis anchor for _allyTargetScore
       if (tgt && bestSq < 900 * 900) {
         const dx = (tgt.x + tgt.w/2) - _pcx;
         // Smooth steering: target speed ramps with distance, current vx
@@ -59912,6 +59914,13 @@ function updatePlayer(dt) {
         pet.facing = player.facing;
       }
       pet.x += pet.vx;
+      // v0.29.815 — allies had no world clamp at all, so a chase could carry one
+      // straight past the map edge and out of play.
+      {
+        const _ww = (game.mapData && game.mapData.worldWidth) || 0;
+        if (pet.x < 0) { pet.x = 0; pet.vx = 0; }
+        else if (_ww && pet.x + pet.w > _ww) { pet.x = _ww - pet.w; pet.vx = 0; }
+      }
       // v0.26.092 — Hard-snap to player.y only on big deltas (portal /
       // respawn); otherwise let gravity + platform collision handle Y
       // via _allyPlatformStep so the wolf can stand on any platform.
@@ -59966,15 +59975,16 @@ function updatePlayer(dt) {
       const _pbW = pet.w, _pbH = pet.h;
       const _pcx = _pbX + _pbW / 2, _pcy = _pbY + _pbH / 2;
       const _checkContact = (pet.dmgCD <= 0);
-      let tgt = null, bestSq = Infinity, _totalDmg = 0;
+      let tgt = null, bestSq = Infinity, bestScore = Infinity, _totalDmg = 0;
       for (const m of game.monsters) {
         if (!m || m.currentHp <= 0) continue;
         const mcx = m.x + m.w/2, mcy = m.y + m.h/2;
         const dx = mcx - _pcx, dy = mcy - _pcy;
-        if (Math.abs(dy) <= 800) {
-          const sq = dx * dx + dy * dy;
-          if (sq < bestSq) { bestSq = sq; tgt = m; }
-        }
+        // v0.29.815 — scored, not nearest-by-distance (see _allyTargetScore).
+        // bestSq still tracks the TRUE distance so the 900 px engage gate
+        // below keeps measuring range rather than the score.
+        const _sc = _allyTargetScore(pet, m, dx, dy);
+        if (_sc >= 0 && _sc < bestScore) { bestScore = _sc; bestSq = dx * dx + dy * dy; tgt = m; }
         // v0.29.288 — BOSSES CAN HURT SUMMONS (per user "summons should be
         // susceptible to monster attacks"). The `!m.isBoss && !m.isMiniBoss`
         // exclusion made every wolf/eagle/werewolf INVULNERABLE in exactly the
@@ -59988,6 +59998,7 @@ function updatePlayer(dt) {
           }
         }
       }
+      pet._tgtRef = tgt;   // v0.29.815 — hysteresis anchor for _allyTargetScore
       if (tgt && bestSq < 900 * 900) {
         const dx = (tgt.x + tgt.w/2) - _pcx;
         const targetVx = Math.sign(dx) * Math.min(4.0, Math.abs(dx) / 26);
@@ -60007,6 +60018,13 @@ function updatePlayer(dt) {
         pet.facing = player.facing;
       }
       pet.x += pet.vx;
+      // v0.29.815 — allies had no world clamp at all, so a chase could carry one
+      // straight past the map edge and out of play.
+      {
+        const _ww = (game.mapData && game.mapData.worldWidth) || 0;
+        if (pet.x < 0) { pet.x = 0; pet.vx = 0; }
+        else if (_ww && pet.x + pet.w > _ww) { pet.x = _ww - pet.w; pet.vx = 0; }
+      }
       const _dyP = player.y - pet.y;
       if (Math.abs(_dyP) > 600) { pet.y = player.y; pet.vy = 0; pet.onGround = false; }
       _allyPlatformStep(pet, tgt);
@@ -62057,6 +62075,36 @@ function gravMul() {
 // a fixed accel). ally.w / ally.h must be set by the caller so the
 // platform-collision bbox is correct.
 // =========================================================================
+// v0.29.815 — ALLY TARGET SCORING (wolves + warlock raises).
+//
+// The old rule was "nearest by raw 2D distance, any monster within 800 px of
+// vertical". Measured on a live forest run that produced a pack which locked
+// onto prey two platforms away, jumped at it, re-targeted mid-air, and
+// repeated: over 400 frames the wolves landed 10 bites, killed NOTHING (15
+// monsters in, 15 monsters out), and drifted off across the map while the
+// player walked the other way. Three things cause that and all three are fixed
+// here:
+//   • Height is cheap to want and expensive to reach. A pixel of vertical now
+//     costs 3.5 px of ground, so a same-floor bite beats a ledge-hop unless the
+//     ledge target is dramatically closer.
+//   • Anything beyond 200 px of vertical is not a target at all. The 800 px
+//     window let a wolf commit to prey it had no path to and stand under it.
+//   • The leash is measured from the PLAYER, not the wolf. Wolves are a
+//     bodyguard, not a scouting party — prey the player has already left 720 px
+//     behind stops being worth chasing, which is what let the pack stream away
+//     and never come back.
+// Hysteresis: a target the ally already committed to scores 40% cheaper, so a
+// wolf finishes what it started instead of swapping prey whenever two monsters
+// trade places by a pixel. Returns -1 for "not a valid target".
+const _ALLY_DY_MAX = 200, _ALLY_DY_COST = 3.5, _ALLY_LEASH = 720, _ALLY_STICKY = 0.6;
+function _allyTargetScore(ally, m, dx, dy) {
+  if (Math.abs(dy) > _ALLY_DY_MAX) return -1;
+  const _plx = player.x + player.w / 2;
+  if (Math.abs((m.x + m.w / 2) - _plx) > _ALLY_LEASH) return -1;
+  let sc = Math.abs(dx) + Math.abs(dy) * _ALLY_DY_COST;
+  if (ally && ally._tgtRef === m) sc *= _ALLY_STICKY;
+  return sc;
+}
 function _allyPlatformStep(ally, target) {
   if (ally.vy == null) ally.vy = 0;
   if (ally.onGround == null) ally.onGround = false;
@@ -62064,7 +62112,13 @@ function _allyPlatformStep(ally, target) {
   if (target && ally.onGround) {
     const tgtY = target.y + (target.h || 0) / 2;
     const allyY = ally.y + (ally.h || 0) / 2;
-    if (tgtY < allyY - 28 && (!ally._jumpUntil || game.time >= ally._jumpUntil)) {
+    // v0.29.815 — only hop when actually UNDER the ledge. The old gate jumped at
+    // anything higher than the ally at any horizontal distance, so a wolf
+    // crossing open ground toward a raised target launched over and over and
+    // spent the fight airborne (measured: onGround false for most of a run,
+    // climbing 90 px while its prey sat on another platform).
+    const _dxT = Math.abs((target.x + (target.w || 0) / 2) - (ally.x + (ally.w || 0) / 2));
+    if (tgtY < allyY - 28 && _dxT < 120 && (!ally._jumpUntil || game.time >= ally._jumpUntil)) {
       ally.vy = -11;
       ally.onGround = false;
       ally._jumpUntil = game.time + 42;
