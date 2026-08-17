@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.830';
+const GAME_VERSION = 'v0.29.831';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -70371,7 +70371,15 @@ function updateMonsters(dt) {
     // stun/freeze gate further below only `continue`s past movement, so a frozen/
     // stunned mob kept shooting + dropping telegraphed smashes/columns. Mirror the
     // gate's semantics here: stun halts all; freeze halts non-bosses (freeze-immune).
-    const _ccHalted = (m.stunTimer > 0) || (m.freezeTimer > 0 && !(m.isBoss || m.boss));
+    // v0.29.831 — a STAGGERED boss stops attacking. This gate gates bigMelee,
+    // columnStrike and shoot, and it never read _stagger, so every trait-driven
+    // boss attacked through its own punish window: 5 tower/forge bosses,
+    // Barnaby, and 7 of the 12 zodiacs. Measured on towerArbiter before this
+    // line changed -- 4 enemy attacks per 10 s normally, 3 while staggered, 0
+    // while stunned. Reachable by a player today via the zodiac Tempo Break,
+    // which costs three perfect dodges and announces "is staggered. PUNISH!".
+    const _ccHalted = (m.stunTimer > 0) || (m.freezeTimer > 0 && !(m.isBoss || m.boss))
+      || (m._stagger > 0);
     // Monster ranged attack
     if (m.shoot && !m.isBoss && m.currentHp > 0 && !_ccHalted) {
       // v0.29.639 - per-type fire variance; default preserves old behaviour.
@@ -73822,7 +73830,12 @@ function _bossSpecialAttacks(m, dt) {
 // a "!" marker + golden glow. Turns "endure the pattern" into "bait -> dodge ->
 // burst". Excluded by design: gravitos (all phases), octobaby, king (Gloopaloo).
 const BOSS_STAGGER_MS = 1400;            // stun + vulnerable window
-const BOSS_STAGGER_BONUS = 1.6;          // damage multiplier while staggered
+const BOSS_STAGGER_BONUS = 1.6;          // damage multiplier while staggered (EARNED)
+// v0.29.831 — the free opening (_dirOpenT, rolled every 12-20 s) pays less than
+// an earned stagger. Sized from the measured vulnerable duty cycle, 25-47.5% of
+// a fight: at x1.6 the roster-wide buff would have been +21% to +28% total
+// damage, at x1.25 it lands near +12%.
+const BOSS_OPENING_BONUS = 1.25;
 const BOSS_STAGGER_COOLDOWN = 5200;      // min gap after a window before the next
 // Cheap / movement states that should NOT earn a punish window when they end.
 const _BOSS_NO_PUNISH_STATES = new Set(['idle','walk','airborne','reposition','hover','chase','move','jab','claw','volley','seek','land','leap']);
@@ -73952,8 +73965,13 @@ function bossAI(m, dt, distToPlayer) {
   // while staggered freeze the boss (stunned + vulnerable) and skip its attacks.
   if (m._staggerCd > 0) m._staggerCd -= dt;
   _maybeStartBossStagger(m);
-  if (m._stagger > 0) {
-    m._stagger -= dt;
+  // v0.29.831 — the other half of the same unification: an OPENING freezes
+  // patterns too. bossAI never read _dirOpenT, so the boss dragged to a crawl
+  // with gold sparks rising -- its documented "I am open" tell -- and then threw
+  // a full pattern anyway. Only _stagger decrements here; _dirOpenT is owned by
+  // the updateMonsters block that rolls it.
+  if (m._stagger > 0 || m._dirOpenT > 0) {
+    if (m._stagger > 0) m._stagger -= dt;
     m.patternState = 'idle'; m.patternTimer = 0; m.vx = 0;
     if (m.vy < 0) m.vy = 0;   // v0.26.x — a staggered AIRBORNE boss must not keep rising; gravity still pulls it down
     return;
@@ -78577,9 +78595,16 @@ function hitMonster(m, dmg, isCrit, skill) {
   }
   // Elite resistance scales their HP, damage stays normal
   // v0.26.x — PUNISH WINDOW: staggered bosses take BOSS_STAGGER_BONUS extra dmg.
-  if (m._stagger > 0) {
-    finalDmg = Math.max(1, Math.floor(finalDmg * BOSS_STAGGER_BONUS));
-    game.damageNumbers.push({ x: m.x + m.w/2 - 16, y: m.y - 36, vy: -1.8, text: 'PUNISH!', life: 22, color: '#ffdd55', size: 12 });
+  if (m._stagger > 0 || m._dirOpenT > 0) {
+    // v0.29.831 — an OPENING now pays, where it used to pay nothing at all.
+    // It pays LESS than a stagger on purpose: a stagger is earned off a read,
+    // an opening is a dice roll every 12-20 s, and bosses already sit in one
+    // 25-47% of the fight. Same bonus for both would have been a +21 to +28%
+    // stealth buff to the player.
+    const _earned = m._stagger > 0;
+    finalDmg = Math.max(1, Math.floor(finalDmg * (_earned ? BOSS_STAGGER_BONUS : BOSS_OPENING_BONUS)));
+    game.damageNumbers.push({ x: m.x + m.w/2 - 16, y: m.y - 36, vy: -1.8,
+      text: _earned ? 'PUNISH!' : 'OPEN!', life: 22, color: _earned ? '#ffdd55' : '#ffc46a', size: 12 });
   }
   // v0.27.0 co-op forward — a NON-HOST is not authoritative over shared monsters.
   // finalDmg is now FULLY resolved (every attacker multiplier + DEF above), so
