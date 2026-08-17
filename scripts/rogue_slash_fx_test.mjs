@@ -45,7 +45,23 @@ const out = await page.evaluate(() => {
   // does the class SPRITE path still claim this colour? (it must be bypassed)
   const bucket = (typeof _lxFxBucket === 'function') ? _lxFxBucket('#c07bff') : null;
 
+  // Probe the REAL hit edge with dummies, rather than trusting the constant:
+  // plant one at a time at increasing distance and see who actually bleeds.
+  let lastHitFront = -1;
+  for (let gap = 0; gap <= 320; gap += 4) {
+    game.monsters.length = 0;
+    const mob = spawnMonster(player.x + player.w + gap, player.y, 'slime', false, false);
+    if (!mob) continue;
+    mob.currentHp = mob.maxHp = 1e9;
+    const before = mob.currentHp;
+    try { SKILL_FNS.stab(); } catch (e) {}
+    if (mob.currentHp < before) lastHitFront = mob.x;
+    else if (lastHitFront >= 0) break;
+  }
+  game.monsters.length = 0;
+
   return {
+    hitPastCentre: lastHitFront >= 0 ? lastHitFront - pcx : null,
     hasArc: !!arc,
     arc: arc ? { color: arc.color, edgeCol: arc.edgeCol, spread: arc.spread, thickness: arc.thickness,
                  life: arc.maxLife, noSprite: !!arc.noSprite, clean: !!arc.clean, bodyAlpha: arc.bodyAlpha,
@@ -102,12 +118,17 @@ if (out.hasArc) {
   ok('the top side is shorter than the bottom',
      out.arc.arcUp > 0 && out.arc.arcUp < 0.45 && out.arc.topPx < out.arc.bottomPx * 0.7,
      `arcUp ${out.arc.arcUp} -> top ${Math.round(out.arc.topPx)}px vs bottom ${Math.round(out.arc.bottomPx)}px`);
-  // The arc deliberately sits INSIDE the hit box now: the user asked for it
-  // closer to the character. Recorded rather than asserted as a match, so the
-  // gap is visible if it ever needs closing (the hit range is the dial).
-  ok('the arc hugs the character rather than reaching the hit edge',
-     out.arcOuterPastCentre > 80 && out.arcOuterPastCentre < 140,
-     `arc rim ${Math.round(out.arcOuterPastCentre)}px past centre; hit box reaches ~169px`);
+  ok('the arc still hugs the character (the art did not move with the range cut)',
+     out.arcOuterPastCentre > 105 && out.arcOuterPastCentre < 130,
+     `arc rim ${Math.round(out.arcOuterPastCentre)}px past centre`);
+  // The reach was brought in 10% (160 -> 144) at the user's explicit choice --
+  // a PARTIAL close, so some invisible reach remains by design. Probed, not
+  // read off the constant.
+  ok('the hit edge came in toward the art without collapsing onto it',
+     out.hitPastCentre != null && out.hitPastCentre > out.arcOuterPastCentre
+       && out.hitPastCentre < 165,
+     `hit edge ${Math.round(out.hitPastCentre)}px vs arc rim ${Math.round(out.arcOuterPastCentre)}px `
+     + `(${Math.round(out.hitPastCentre - out.arcOuterPastCentre)}px beyond the art)`);
 }
 ok('the thrust lance survives, slimmed, as the core of the strike',
    !!out.lance && out.lance.length === 86 && out.lance.thickness === 5,
