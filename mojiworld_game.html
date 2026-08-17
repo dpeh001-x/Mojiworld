@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.829';
+const GAME_VERSION = 'v0.29.830';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -62104,6 +62104,38 @@ function gravMul() {
 // wolf finishes what it started instead of swapping prey whenever two monsters
 // trade places by a pixel. Returns -1 for "not a valid target".
 const _ALLY_DY_MAX = 200, _ALLY_DY_COST = 3.5, _ALLY_LEASH = 720, _ALLY_STICKY = 0.6;
+// v0.29.830 — LINE OF SIGHT. Segment-vs-AABB (slab method) against the map's
+// SOLID slabs, used by Soul Drain so the player can hide behind terrain.
+// Only real platforms count, never the ground: Gravitos is floor-pinned, so
+// counting the floor would make the drain blockable from anywhere and the
+// mechanic meaningless. Slabs are inflated a few px vertically because the
+// arena's platforms are 12px thin — without that, a line clipping the corner
+// of a ledge you are plainly standing behind would read as "not blocked",
+// which is exactly the kind of near-miss that feels like a bug to a player.
+const _LX_LOS_PAD = 6;
+function _lxLosBlocked(x0, y0, x1, y1) {
+  const md = (typeof game !== 'undefined' && game) ? game.mapData : null;
+  if (!md || !Array.isArray(md.platforms)) return false;
+  const dx = x1 - x0, dy = y1 - y0;
+  for (const p of md.platforms) {
+    if (!p || p.type === 'ground') continue;
+    const bx0 = p.x, bx1 = p.x + p.w;
+    const by0 = p.y - _LX_LOS_PAD, by1 = p.y + (p.h || 0) + _LX_LOS_PAD;
+    // slab clip on the parametric segment
+    let t0 = 0, t1 = 1;
+    let ok = true;
+    for (const [d, s0, lo, hi] of [[dx, x0, bx0, bx1], [dy, y0, by0, by1]]) {
+      if (Math.abs(d) < 1e-9) { if (s0 < lo || s0 > hi) { ok = false; break; } continue; }
+      let a = (lo - s0) / d, b = (hi - s0) / d;
+      if (a > b) { const tmp = a; a = b; b = tmp; }
+      if (a > t0) t0 = a;
+      if (b < t1) t1 = b;
+      if (t0 > t1) { ok = false; break; }
+    }
+    if (ok) return true;
+  }
+  return false;
+}
 function _allyTargetScore(ally, m, dx, dy) {
   if (Math.abs(dy) > _ALLY_DY_MAX) return -1;
   const _plx = player.x + player.w / 2;
@@ -73869,6 +73901,11 @@ const _GLOOP_CYCLE_P1 = ['leap', 'gooBarrage', 'leap', 'leap', 'gluespray', 'lea
 const _GLOOP_CYCLE_P2 = ['teleport', 'gooBarrage', 'leap', 'leap', 'gluespray', 'leap', 'quake', 'leap'];
 function _gloopCycle(m) { return m._bossPhase2 ? _GLOOP_CYCLE_P2 : _GLOOP_CYCLE_P1; }
 // Fixed recovery between beats (pattern-ms; bossAI ticks these at dt x1.30).
+// v0.29.830 — minimum frames between two Singularity Collapses, in game.time
+// frames to match _nowOhko (22 s at 60 fps). Deliberately longer than the
+// phase-3 cooldown it overrides (9 s), because that cooldown is what made the
+// pattern repeat.
+const _GRAV_SING_MIN_GAP = 22 * 60;
 const _GLOOP_GAP = 1800;
 const _GLOOP_LEAP_GAP = 420;   // v0.29.5xx — leap-only gap (see the cycle note above)
 function _gloopMuzzleX(m) { return m.x + m.w / 2; }
@@ -74802,7 +74839,8 @@ function bossAI(m, dt, distToPlayer) {
       if (m.patternTimer > 1300) { m.patternState = 'idle'; m.patternTimer = 0; m._beamFired = false; }
     } else if (m.patternState === 'teleport') {
       // Vanish + reappear at random spot
-      if (m.patternTimer > 200 && !m._teleported) {
+      // v0.29.830 — telegraph floor 350ms (was 200). See the pass note.
+      if (m.patternTimer > 350 && !m._teleported) {
         m._teleported = true;
         // Poof out — v0.25.527 budget-guarded; breaks early when frame
         // particle count is over cap.
@@ -74850,7 +74888,9 @@ function bossAI(m, dt, distToPlayer) {
           showToast('🪽 The celestial choir answers!', 'legendary');
         }
       }
-      if (m.patternTimer > 500) { m.patternState = 'idle'; m.patternTimer = 0; m._teleported = false; }
+      // v0.29.830 — +150 to match the telegraph bump above, so the 300ms window
+      // the player gets to punish after the blink is unchanged.
+      if (m.patternTimer > 650) { m.patternState = 'idle'; m.patternTimer = 0; m._teleported = false; }
     } else if (m.patternState === 'astral') {
       // v0.25.714 — ASTRAL JUDGEMENT. The user-requested signature attack
       // for "much harder": 59 % of max HP damage AND a 99 % MP drain on
@@ -75296,8 +75336,21 @@ function bossAI(m, dt, distToPlayer) {
                       : phase === 2 ? (25 + 35 * m._ohkoGapRoll) * 60
                       : 30 * 60;
       const _ohkoSpaced = (_nowOhko - (m._lastOhkoAt || -999999)) >= _OHKO_GAP;
+      // v0.29.830 — HARD FLOOR ON SINGULARITY RECASTS (per user: "gets very cheesy
+      // at the end where he starts spamming"). The three one-shot mechanics
+      // share a picker that takes whichever timer is MOST overdue, and in
+      // phase 3 Singularity has by far the shortest cooldown (9s, against
+      // Collapse Rain's 11s and Soul Drain's 14s). It therefore comes off
+      // cooldown first and is the most-negative timer nearly every time the
+      // picker runs, so the late fight collapses into the same one-shot on
+      // repeat. This is a floor the shared timers cannot undercut: whatever
+      // else is ready, Singularity cannot be queued again until it has been a
+      // full 22 seconds since the last one. When it is on the floor the picker
+      // falls through to Collapse Rain or Soul Drain, so the fight keeps its
+      // pressure and stops repeating itself.
+      const _singOk = (_nowOhko - (m._lastSingAt || -999999)) >= _GRAV_SING_MIN_GAP;
       const _ohkoReady = _ohkoSpaced && (
-                         (m._instaTimer <= 0) ||
+                         (m._instaTimer <= 0 && _singOk) ||
                          (m._rainTimer  <= 0 && phase >= 2) ||
                          (m._soulTimer  <= 0));
       // v0.29.x — per user "make the 2nd form harder and the 3rd form hardest
@@ -75335,12 +75388,13 @@ function bossAI(m, dt, distToPlayer) {
           } else {
             m.patternState = 'singularity';
             m._instaTimer = _instaCd;
+            m._lastSingAt = _nowOhko;   // v0.29.830 — arms the hard floor
             // v0.26.x — gravitos3 (phase 3) SUPERNOVA: dramatic black-screen flash on cast.
             if (phase >= 3 && typeof blackFlash === 'function') { blackFlash(0.96); if (typeof addShake === 'function') addShake(22); if (typeof addHitStop === 'function') addHitStop(120); }
           }
         }
       } else if (_skillSpaced && _ohkoSpaced &&
-                 ((m._instaTimer <= 0) || (m._rainTimer <= 0 && phase >= 2) || (m._soulTimer <= 0))) {
+                 ((m._instaTimer <= 0 && _singOk) || (m._rainTimer <= 0 && phase >= 2) || (m._soulTimer <= 0))) {
         // v0.29.286 — ROTATE the OHKO queue instead of a fixed priority. The
         // gate above only opens every 15-60 s while each OHKO re-arms in
         // 9-20 s, so singularity was ALWAYS ready first and permanently
@@ -75351,10 +75405,13 @@ function bossAI(m, dt, distToPlayer) {
         // while it waits, so the MOST-NEGATIVE ready timer is the
         // longest-starved move; pick that and the three rotate naturally.
         let _ohkoPick = null, _ohkoWait = Infinity;
-        if (m._instaTimer <= 0 && m._instaTimer < _ohkoWait) { _ohkoWait = m._instaTimer; _ohkoPick = 'singularity'; }
+        if (m._instaTimer <= 0 && _singOk && m._instaTimer < _ohkoWait) { _ohkoWait = m._instaTimer; _ohkoPick = 'singularity'; }
         if (m._rainTimer <= 0 && phase >= 2 && m._rainTimer < _ohkoWait) { _ohkoWait = m._rainTimer; _ohkoPick = 'collapseRain'; }
         if (m._soulTimer <= 0 && m._soulTimer < _ohkoWait) { _ohkoWait = m._soulTimer; _ohkoPick = 'soulDrain'; }
-        m._ohkoQueued = _ohkoPick || 'singularity';
+        // v0.29.830 — no silent fallback to singularity: if nothing is legitimately
+        // ready (because the floor is holding it), queue nothing this cycle.
+        if (!_ohkoPick) { m._ohkoWarnUntil = null; m._ohkoQueued = null; }
+        else m._ohkoQueued = _ohkoPick;
         m._ohkoWarnUntil = _nowOhko + 2 * 60;
         // v0.29.261 — per user: the named danger toast applies through
         // phase 2 only. The 3rd form drops the verbal callout to raise
@@ -75425,13 +75482,16 @@ function bossAI(m, dt, distToPlayer) {
         m._lastSkillAt = _nowOhko;   // v0.26.347 — stamp regular-skill launch so the next OHKO honours the 8 s gap
       }
     } else if (m.patternState === 'soulDrain') {
+      // v0.29.830 — see _lxLosBlocked: the drain is no longer unavoidable.
+
       // v0.25.528 — SOUL DRAIN. Unavoidable HP→1 / MP→1 pulse on a
       // 1.5 s telegraph. Designed as constant heal pressure rather
       // than a kill move; player gets a brief invuln after so back-
       // to-back ticks from other patterns can't chain-kill them.
       if (!m._drainAnnounced) {
         m._drainAnnounced = true;
-        showToast('💀 SOUL DRAIN — HEAL!', 'legendary');
+        // v0.29.830 — the call to action is the mechanic now, not "heal and hope".
+        showToast('💀 SOUL DRAIN — BREAK LINE OF SIGHT!', 'legendary');
         audio.play('crit');
         // v0.26.172 — Authored soul-ring telegraph sprite layered on
         // top of the procedural spiral particles. 1500 ms life matches
@@ -75453,6 +75513,26 @@ function bossAI(m, dt, distToPlayer) {
       }
       if (m.patternTimer >= 1500 && !m._drainFired) {
         m._drainFired = true;
+        // v0.29.830 — THE OUT. Soul Drain was documented in this file as an
+        // "unavoidable HP->1 / MP->1 pulse": no positional check at all, so the
+        // only counterplay was to have healed beforehand. An attack with no
+        // answer teaches the player nothing; it just taxes them. It now checks
+        // line of sight at the moment it resolves — put a platform between
+        // yourself and Gravitos and the drain cannot reach you. The 1.5s
+        // telegraph, the ring and the terror are unchanged; what changes is
+        // that there is now a correct thing to do with those 1.5 seconds.
+        const _drainBlocked = (typeof _lxLosBlocked === 'function')
+          && _lxLosBlocked(m.x + m.w / 2, m.y + m.h / 2,
+                           player.x + player.w / 2, player.y + player.h / 2);
+        if (_drainBlocked) {
+          showToast('⛨ LINE OF SIGHT BROKEN — the drain finds nothing', 'legendary');
+          if (typeof flash === 'function') flash(0.25);
+          game.damageNumbers.push({
+            x: player.x + 8, y: player.y - 14, vy: -2,
+            text: 'BLOCKED', life: 56, color: '#9fe8ff', size: 16,
+          });
+        }
+        if (!_drainBlocked) {
         // Apply unavoidable drain. Clamp to 1 (don't reduce below 1).
         // v0.29.550 — honour godmode. The drain is a CLAMP, not damage, so it
         // sailed past every `hp -= player._god ? 0 : dmg` guard — during the
@@ -75477,6 +75557,7 @@ function bossAI(m, dt, distToPlayer) {
             text: 'MP→1', life: 56, color: '#88aaff', size: 16,
           });
         }
+        }   // v0.29.830 — end of the line-of-sight gate
         // v0.25.716 — Post-drain godmode upped 600 ms → 8000 ms.
         // v0.25.725 — Trimmed back 8000 ms → 2500 ms per user request.
         // 8 seconds was overkill — the player could fully recover, queue
@@ -75968,7 +76049,8 @@ function bossAI(m, dt, distToPlayer) {
       // harder variant; phase 3 inherits Awakened scaling AND adds
       // the same wider footprint. Tagged hazard params drive the
       // resolver at L49792 area via h._bhPullRadius / h._bhCoreRadius.
-      if (m.patternTimer > 300 && !m._bhFired) {
+      // v0.29.830 — telegraph floor 350ms (was 300). See the pass note.
+      if (m.patternTimer > 350 && !m._bhFired) {
         m._bhFired = true;
         const bhx = player.x + player.w/2;
         // Awakened (phase 2) + Ascendant (phase 3): pull radius
@@ -76009,7 +76091,8 @@ function bossAI(m, dt, distToPlayer) {
       // ~3.5 s before despawning. Forces continuous lateral movement;
       // standing still on a platform = guaranteed hit. Pattern ends fast
       // (700 ms) so it overlaps with the next cast for compounding pressure.
-      if (m.patternTimer > 180 && !m._cometsFired) {
+      // v0.29.830 — telegraph floor 350ms (was 180). See the pass note.
+      if (m.patternTimer > 350 && !m._cometsFired) {
         m._cometsFired = true;
         const count = phase === 3 ? 7 : phase === 2 ? 5 : 3;   // v0.26.403 — P3 comet swarm (was 5). v0.29.391 — P2 grading
         const ww = game.mapData.worldWidth || 2200;
@@ -76062,7 +76145,8 @@ function bossAI(m, dt, distToPlayer) {
       // centred on the boss and fan outward at staggered speeds, leaving
       // a moving "gap" the player has to position into. No homing — pure
       // dodge geometry. Phase 3 fires 24 instead of 16 and spins them.
-      if (m.patternTimer > 280 && !m._ringFired) {
+      // v0.29.830 — telegraph floor 350ms (was 280). See the pass note.
+      if (m.patternTimer > 350 && !m._ringFired) {
         m._ringFired = true;
         const count = phase === 3 ? 24 : phase === 2 ? 20 : 16;  // v0.29.391 — P2 grading
         const bx = m.x + m.w/2, by = m.y + m.h/2;
@@ -76104,7 +76188,8 @@ function bossAI(m, dt, distToPlayer) {
         showToast(phase === 3 ? '◉ VOID RING — 24 shards' : '◉ VOID RING', 'epic');
         flash(0.22); addShake(7);
       }
-      if (m.patternTimer > 600) { m.patternState = 'idle'; m.patternTimer = 0; m._ringFired = false; }
+      // v0.29.830 — +70 to match the telegraph bump above; recovery window kept.
+      if (m.patternTimer > 670) { m.patternState = 'idle'; m.patternTimer = 0; m._ringFired = false; }
     } else if (m.patternState === 'crushTendrils') {
       // v0.25.641 — CRUSH TENDRILS. 5 narrow meteor_warn columns spawn
       // staggered over 1.0 s along a predicted player path (current
@@ -76175,7 +76260,8 @@ function bossAI(m, dt, distToPlayer) {
       // strip. Resolves into a heavy hit on anything in the columns.
       // Different feel from crushTendrils: tendrils chase you, decay
       // floor zones STAY PUT but cover most of the arena.
-      if (m.patternTimer > 220 && !m._decayFired) {
+      // v0.29.830 — telegraph floor 350ms (was 220). See the pass note.
+      if (m.patternTimer > 350 && !m._decayFired) {
         m._decayFired = true;
         const count = phase === 3 ? 5 : 4;
         const ww = game.mapData.worldWidth || 2200;
@@ -116742,7 +116828,8 @@ const ZODIAC_AI = {
       }
       // 1/2/3 rings by phase, each ring = 8 projectiles in a real circle.
       const rings = phase === 1 ? 1 : phase === 2 ? 2 : 3;
-      if (m.patternTimer > 300 && !m._flamesFired) {
+      // v0.29.830 — telegraph floor 350ms (was 300). See the pass note.
+      if (m.patternTimer > 350 && !m._flamesFired) {
         m._flamesFired = rings;
         const _mapAtSched = game.currentMap;   // v0.25.615 — capture for cross-map guard
         for (let r = 0; r < rings; r++) {
@@ -117823,7 +117910,8 @@ const ZODIAC_AI = {
       }
     } else if (m.patternState === 'sting') {
       // v0.25.46 — phase 2/3 fire 5 venom shots in a wide cone (was 3).
-      if (m.patternTimer > 280 && !m._stung) {
+      // v0.29.830 — telegraph floor 350ms (was 280). See the pass note.
+      if (m.patternTimer > 350 && !m._stung) {
         m._stung = true;
         const shots = phase === 1 ? 3 : 5;
         const half = (shots - 1) / 2;
