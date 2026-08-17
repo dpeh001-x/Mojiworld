@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.821';
+const GAME_VERSION = 'v0.29.822';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -69560,6 +69560,37 @@ function performMeteor() {
 // every live ranged mob (before the windup/shootTimer gates, so the alloc
 // happened whether or not the mob fired — main loop AND co-op world step).
 // The body captured nothing but `m`.
+// v0.29.820 — live mob-projectile ceiling for non-boss maps. See the note in
+// _fireShotFor. Returns Infinity where no limit applies, so callers never
+// special-case boss arenas.
+function _lxMobShotCap() {
+  const md = game.mapData;
+  if (!md || md.isBossArena) return Infinity;   // a boss pattern IS the fight
+  // Difficulty comes from the map RESIDENTS, not levelReq. Measured: levelReq
+  // reads 1 on every combat map checked (tidepoolShoals, abyssalTrench and
+  // forest all report 1 while housing Lv 30-60 mobs), so keying off it would
+  // pin every map to the lowest tier and quietly break the "higher levels can
+  // have higher peak" half of the ask. MOB_NATURAL_LEVEL is the table the
+  // exp/scaling code already trusts for a mob true level.
+  if (md._lxShotCap != null) return md._lxShotCap;   // per-map, computed once
+  let lv = 1;
+  try {
+    for (const sp of (md.spawns || [])) {
+      if (!sp || !sp.type || sp.boss) continue;      // bosses do not set the map tier
+      const n = (typeof MOB_NATURAL_LEVEL !== 'undefined' && MOB_NATURAL_LEVEL[sp.type]) | 0;
+      if (n > lv) lv = n;
+    }
+  } catch (e) {}
+  const cap = Math.min(7, 3 + Math.floor(lv / 20));  // 3..7 — always under 8
+  try { md._lxShotCap = cap; } catch (e) {}
+  return cap;
+}
+function _lxLiveMobShots() {
+  const arr = game.projectiles || [];
+  let n = 0;
+  for (let i = 0; i < arr.length; i++) { const p = arr[i]; if (p && p.owner !== 'player') n++; }
+  return n;
+}
 function _fireShotFor(m) {
   // v0.25.53 — empowered cookie fires a 3-shot mspore spread.
   if (m._empoweredSpread) {
@@ -69585,6 +69616,8 @@ function _fireShotFor(m) {
   }
 }
 function fireMonsterProjectile(m, angleOffset) {
+  // v0.29.820 — per-projectile ceiling for non-boss maps (see _lxMobShotCap).
+  if (_lxLiveMobShots() >= _lxMobShotCap()) return;
   // v0.25.53 — optional angleOffset (radians) lets empowered cookies
   // fire a 3-shot mspore spread without duplicating this whole function.
   // Default 0 = straight at the player (original behaviour).
