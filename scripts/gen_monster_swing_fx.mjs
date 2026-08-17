@@ -59,6 +59,15 @@ const JOBS = {
   sundered_smith:'a molten forge-hammer sweep — a dark cracked arc glowing with orange magma in its fissures, sparks and anvil-ring shockrings',
   goblinMauler:  'a crude green-brown wooden club swipe — a heavy blunt arc with chipped bark, dirt clods and a dusty impact wake',
   graveReaver:   'a charcoal-black cleaving sweep — a broad ragged dark arc edged in cold grey grave-light, shredded shadow tatters',
+  // ZODIAC SWINGERS. These three carry bigMelee built PROGRAMMATICALLY, so
+  // they appear nowhere in the source text — no grep of monsterTypes can find
+  // them. The only reliable census is at RUNTIME:
+  //   Object.entries(monsterTypes).filter(([,d]) =>
+  //     d.traits?.bigMelee && d.traits.bigMelee.kind !== 'smash')
+  // That is the list this table must match. It is 28.
+  zodiac_aries:  'a blazing orange-red ram charge arc — twin curling fiery horns sweeping through the air, molten ember trails and sparks along the curve',
+  zodiac_capricorn: 'an icy blue peak-lord horn sweep — a frost-rimed curved arc of glacial ice with snow crystals and sharp mountain-shard slivers',
+  zodiac_pisces: 'a violet twin-current sweep — two intertwining purple water streams spiralling through the arc, bubbles and shimmering scales along the flow',
   // NOTE: these two declare bigMelee on a CONTINUATION line, so a naive
   // "type: { ... bigMelee" scan misses them. Any bigMelee whose kind is not
   // 'smash' routes to the crescent — that, not the presence of swingW, is the
