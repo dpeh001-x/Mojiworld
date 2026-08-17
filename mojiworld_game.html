@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.835';
+const GAME_VERSION = 'v0.29.836';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -117428,6 +117428,7 @@ const ZODIAC_AI = {
         twin.maxHp = twin.currentHp;
         twin._isTwin = true;
         twin._twinParent = m;
+        twin.flies = true; twin._noGravity = true; twin.onGround = false;   // v0.29.836
         twin.color = '#ff88cc';
         m._twin = twin;
       }
@@ -117445,6 +117446,13 @@ const ZODIAC_AI = {
         : (player.x + player.w/2);
       m.vx += Math.sign(tx - (m.x + m.w/2)) * 0.18;
       if (Math.abs(m.vx) > 3.5) m.vx = Math.sign(m.vx) * 3.5;
+      // v0.29.836 — the merge converges in TWO axes now that Gemini flies;
+      // with vx alone the twins slid past each other at different altitudes
+      // and the "converge" telegraph never resolved into a meeting.
+      const _ty2 = m._twin && m._twin.currentHp > 0
+        ? (m._twin.y + m._twin.h / 2) : (player.y + player.h / 2 - 60);
+      m.vy += Math.sign(_ty2 - (m.y + m.h / 2)) * 0.18;
+      if (Math.abs(m.vy) > 3.5) m.vy = Math.sign(m.vy) * 3.5;
       if (m._mergeTimer % 6 < dt) {
         for (let k = 0; k < 4; k++) {
           const a = (k / 4) * Math.PI * 2 + game.time * 0.05;
@@ -117471,12 +117479,148 @@ const ZODIAC_AI = {
       }
       return;
     }
-    // Coordinated movement — original drifts opposite the twin so they flank.
-    const targetSide = m._isTwin ? -1 : 1;
-    m.vx += (targetSide - Math.sign(m.vx || 0.001)) * 0.05;
-    m.vx += dir * 0.04;
-    if (Math.abs(m.vx) > 2) m.vx = Math.sign(m.vx) * 2;
-    const cycle = phase === 1 ? 1400 : phase === 2 ? 900 : 600;   // v0.26.390 — idle cut + adds P3 tier (Gemini)
+    // v0.29.836 — GEMINI FLIES. Rides the existing m.flies physics path
+    // (no gravity, no platform collision, damped velocity, clamped to the
+    // ground slab under the flier and to y >= 10), so no new physics.
+    if (!m.flies) {
+      m.flies = true;
+      m._noGravity = true;
+      m.onGround = false;
+      if (m._twin && !m._twin.flies) { m._twin.flies = true; m._twin._noGravity = true; }
+    }
+    const _pcx = player.x + player.w / 2, _pcy = player.y + player.h / 2;
+    // BARYCENTRE ORBIT in ANTIPHASE. Both twins orbit one centre that tracks
+    // the player, pi apart, so they are always on opposite sides. The angle
+    // comes from the shared game clock plus a role offset rather than from the
+    // other twin, so antiphase survives a late spawn or a broken parent link.
+    const _twinsUp = !!(m._twin && m._twin.currentHp > 0) || !!m._isTwin;
+    const _orbR   = _twinsUp ? 196 : 132;          // a lone survivor closes in
+    // Orbit speed must be SHARED. Keyed to each twin's own phase it drifted
+    // apart, because the twin spawns at half the parent's max HP and so
+    // computes a different phase -- two different angular speeds, and the
+    // antiphase decays within seconds (measured: on opposite sides only 46% of
+    // the time, worse than chance). The twin reads the parent's value.
+    let _orbSpd = phase === 1 ? 0.019 : phase === 2 ? 0.026 : 0.034;
+    if (m._isTwin && m._twinParent && m._twinParent._orbSpd > 0) _orbSpd = m._twinParent._orbSpd;
+    else m._orbSpd = _orbSpd;
+    const _ang = (game.time || 0) * _orbSpd + (m._isTwin ? Math.PI : 0);
+    if (!m._gemDive) {
+      const _tx = _pcx + Math.cos(_ang) * _orbR - m.w / 2;
+      // Flatter vertically than horizontally, and biased ABOVE the player so
+      // the fight reads as something circling overhead rather than swimming.
+      const _ty = (_pcy - 74) + Math.sin(_ang) * _orbR * 0.52 - m.h / 2;
+      m.vx += Math.max(-0.9, Math.min(0.9, (_tx - m.x) * 0.010));
+      m.vy += Math.max(-0.9, Math.min(0.9, (_ty - m.y) * 0.010));
+      const _cap = _twinsUp ? 6.2 : 7.4;
+      if (Math.abs(m.vx) > _cap) m.vx = Math.sign(m.vx) * _cap;
+      if (Math.abs(m.vy) > _cap) m.vy = Math.sign(m.vy) * _cap;
+    }
+    m.facing = dir > 0 ? 1 : -1;
+    // v0.29.836 — STAR-LINE. Only the ORIGINAL runs this, so the pair fires
+    // one beam rather than two overlapping ones. While both twins live they
+    // lock and fire along the line JOINING them: the space between the twins
+    // is the kill zone, which turns their orbit into information.
+    if (!m._isTwin && m._twin && m._twin.currentHp > 0 && !m._gemDive && !m._mergeArmed) {
+      if (m._starLineAt == null) m._starLineAt = (game.time | 0) + 300;
+      const _t = m._twin;
+      if (!m._starLining && (game.time | 0) >= m._starLineAt) {
+        m._starLining = true;
+        m._starLineT = 0;
+        if (typeof showToast === 'function') showToast('♊ TWINSTARS ALIGN — get off the line!', 'legendary');
+        if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('charge'); } catch (e) {} }
+      }
+      if (m._starLining) {
+        m._starLineT += dt;
+        const _ax = m.x + m.w / 2, _ay = m.y + m.h / 2;
+        const _bx = _t.x + _t.w / 2, _by = _t.y + _t.h / 2;
+        // TELEGRAPH — sparks walking the segment, so the line is visible
+        // before it is lethal.
+        if (m._starLineT < 700) {
+          m.patternState = 'starLine';   // committed during the telegraph
+          if ((game.time | 0) % 2 === 0 && typeof _budgetedParticlePush === 'function') {
+            for (let k = 0; k <= 8; k++) {
+              const u = k / 8;
+              _budgetedParticlePush({ x: _ax + (_bx - _ax) * u, y: _ay + (_by - _ay) * u,
+                vx: 0, vy: 0, life: 8, color: '#ffffff', size: 2 });
+            }
+          }
+        } else {
+          // FIRE — short-lived hitboxes laid along the segment. Uses the
+          // existing projectile system rather than a bespoke beam renderer.
+          const _len = Math.hypot(_bx - _ax, _by - _ay) || 1;
+          // Coarser spacing than the first cut: at 26 px the beam was laying up
+          // to 27 hitboxes per shot and the pair's projectile rate measured
+          // 390/min, against 81-127/min for the rest of the roster. 44 px still
+          // leaves no gap a player fits through at this hitbox size.
+          const _steps = Math.min(14, Math.max(5, Math.round(_len / 44)));
+          for (let k = 0; k <= _steps; k++) {
+            const u = k / _steps;
+            game.projectiles.push({
+              x: _ax + (_bx - _ax) * u - 11, y: _ay + (_by - _ay) * u - 11,
+              vx: 0, vy: 0, w: 22, h: 22, life: 16,
+              damage: m.atk * 0.85, owner: 'enemy', skill: 'gemini_shard',
+              color: z.colors.aura, noGravity: true,
+            });
+          }
+          if (typeof addShake === 'function') addShake(8);
+          if (typeof flash === 'function') flash(0.16);
+          m._starLining = false;
+          m._starLineAt = (game.time | 0) + (phase === 1 ? 640 : phase === 2 ? 500 : 400);
+          // Back to idle ON THE FIRING FRAME. Leaving it set to 'starLine' held
+          // the label for 40% of the fight (measured 1045 of 2600 frames) and,
+          // because the punish window needs a committed -> idle TRANSITION, a
+          // state that never exits never pays one out.
+          m.patternState = 'idle';
+        }
+        return;
+      }
+    }
+    // v0.29.836 — DIVE CROSS. The antiphase orbit resolving into one attack:
+    // both twins dive through the player from opposite sides and cross.
+    // The ORIGINAL owns the decision and commits the twin with it. Letting each
+    // twin roll its own timer meant they dove at unrelated moments, so the pair
+    // was never actually crossing -- measured, they sat on opposite sides only
+    // 41% of the time, worse than chance. One shared trigger makes the cross
+    // real and keeps the flanking read intact between dives.
+    if (m._gemDiveAt == null) m._gemDiveAt = (game.time | 0) + 520;
+    if (!m._isTwin && !m._gemDive && !m._mergeArmed && !m._starLining && (game.time | 0) >= m._gemDiveAt) {
+      m._gemDive = 'wind'; m._gemDiveT = 0;
+      m._gemDiveAt = (game.time | 0) + (phase === 1 ? 700 : phase === 2 ? 560 : 440);
+      const _t2 = m._twin;
+      if (_t2 && _t2.currentHp > 0) { _t2._gemDive = 'wind'; _t2._gemDiveT = 0; _t2._gemDiveAt = m._gemDiveAt; }
+    }
+    if (m._gemDive) {
+      m._gemDiveT += dt;
+      m.patternState = 'diveCross';
+      if (m._gemDive === 'wind') {
+        m.vx *= 0.86; m.vy *= 0.86;
+        if ((game.time | 0) % 2 === 0 && typeof _budgetedParticlePush === 'function') {
+          _budgetedParticlePush({ x: m.x + m.w * Math.random(), y: m.y + m.h * Math.random(),
+            vx: 0, vy: -0.6, life: 14, color: z.colors.aura, size: 3 });
+        }
+        if (m._gemDiveT > 520) {                     // clears the 350 ms telegraph floor
+          const _dx = _pcx - (m.x + m.w / 2), _dy = _pcy - (m.y + m.h / 2);
+          const _l = Math.max(1, Math.hypot(_dx, _dy));
+          // Aimed THROUGH the player, not at them, so the two arcs cross.
+          m._gemDiveVx = (_dx / _l) * 13.5; m._gemDiveVy = (_dy / _l) * 13.5;
+          m._gemDive = 'dive'; m._gemDiveT = 0;
+          m._dashCharging = 300;
+        }
+      } else {
+        m.vx = m._gemDiveVx; m.vy = m._gemDiveVy;
+        if (m._gemDiveT > 620) { m._gemDive = null; m.patternState = 'idle'; }
+      }
+      return;
+    }
+    // v0.29.836 — while both twins live, only the ORIGINAL keeps up the dual
+    // beam, and at a longer cycle. Both firing it independently measured
+    // 264 projectiles a minute from beams alone, on a roster whose busiest boss
+    // (King Gloopaloo) throws 127. The pair's identity is the star-line now; the
+    // twin's job is its far anchor plus the cross. A lone survivor returns to
+    // the full rate.
+    if (m._isTwin && m._twinParent && m._twinParent.currentHp > 0) return;
+    const _beamSlow = (m._twin && m._twin.currentHp > 0) ? 1.5 : 1;
+    const cycle = (phase === 1 ? 1400 : phase === 2 ? 900 : 600) * _beamSlow;   // v0.26.390 — idle cut + adds P3 tier (Gemini)
     if (m.patternTimer > cycle) {
       m.patternTimer = 0;
       // Dual beam — converging toward player position (high + low)
