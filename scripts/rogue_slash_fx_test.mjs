@@ -49,7 +49,15 @@ const out = await page.evaluate(() => {
     hasArc: !!arc,
     arc: arc ? { color: arc.color, edgeCol: arc.edgeCol, spread: arc.spread, thickness: arc.thickness,
                  life: arc.maxLife, noSprite: !!arc.noSprite, clean: !!arc.clean, bodyAlpha: arc.bodyAlpha,
-                 squashY: arc.squashY, originPastCentre: arc.x - pcx, length: arc.length,
+                 squashY: arc.squashY, arcUp: arc.arcUp,
+                 originPastCentre: arc.x - pcx, length: arc.length,
+                 // How LONG each side of the blade is, measured along the curve
+                 // (r * angle). Vertical extent is the wrong measure here: sin
+                 // saturates near 90 degrees, so a 0.29pi top and a 0.61pi
+                 // bottom came out 22px vs 27px and looked near-symmetric,
+                 // while the drawn sides are plainly 1:2.
+                 topPx: arc.length * arc.spread * (arc.arcUp != null ? arc.arcUp : 0.5),
+                 bottomPx: arc.length * arc.spread * (1 - (arc.arcUp != null ? arc.arcUp : 0.5)),
                  // the arc spans +/-spread/2 around the facing axis at radius
                  // `length`; squashY scales only the vertical extent.
                  widthPx: arc.length * (1 - Math.cos(arc.spread / 2)),
@@ -91,9 +99,15 @@ if (out.hasArc) {
      `thickness ${out.arc.thickness}, bodyAlpha ${out.arc.bodyAlpha}`);
   ok('the glint and speedlines stay on (that streak is the motion)',
      out.arc.clean === false, `clean: ${out.arc.clean}`);
-  ok('the arc reaches the hit edge (~169px past centre), not short of it',
-     out.arcOuterPastCentre > 140 && out.arcOuterPastCentre < 200,
-     `${Math.round(out.arcOuterPastCentre)}px past centre`);
+  ok('the top side is shorter than the bottom',
+     out.arc.arcUp > 0 && out.arc.arcUp < 0.45 && out.arc.topPx < out.arc.bottomPx * 0.7,
+     `arcUp ${out.arc.arcUp} -> top ${Math.round(out.arc.topPx)}px vs bottom ${Math.round(out.arc.bottomPx)}px`);
+  // The arc deliberately sits INSIDE the hit box now: the user asked for it
+  // closer to the character. Recorded rather than asserted as a match, so the
+  // gap is visible if it ever needs closing (the hit range is the dial).
+  ok('the arc hugs the character rather than reaching the hit edge',
+     out.arcOuterPastCentre > 80 && out.arcOuterPastCentre < 140,
+     `arc rim ${Math.round(out.arcOuterPastCentre)}px past centre; hit box reaches ~169px`);
 }
 ok('the thrust lance survives, slimmed, as the core of the strike',
    !!out.lance && out.lance.length === 86 && out.lance.thickness === 5,
