@@ -59,6 +59,12 @@ const JOBS = {
   sundered_smith:'a molten forge-hammer sweep — a dark cracked arc glowing with orange magma in its fissures, sparks and anvil-ring shockrings',
   goblinMauler:  'a crude green-brown wooden club swipe — a heavy blunt arc with chipped bark, dirt clods and a dusty impact wake',
   graveReaver:   'a charcoal-black cleaving sweep — a broad ragged dark arc edged in cold grey grave-light, shredded shadow tatters',
+  // NOTE: these two declare bigMelee on a CONTINUATION line, so a naive
+  // "type: { ... bigMelee" scan misses them. Any bigMelee whose kind is not
+  // 'smash' routes to the crescent — that, not the presence of swingW, is the
+  // test for whether a monster belongs in this table.
+  pqConductor:   'a sweeping conductor\'s baton slash — a crisp pale-blue arc of musical energy with floating gold quaver notes and staff lines trailing along the sweep',
+  legosaurus:    'a heavy green blocky tail-club sweep — a chunky toy-brick arc of interlocking green blocks, studs catching the light, dust and scattered bricks at the leading edge',
   towerWarden:   'a wide ceremonial lilac halberd sweep — a formal polished arc with pale violet ribbon streamers along the trail',
   towerArbiter:  'an immense golden judgement sweep — a vast radiant gold arc with sharp verdict-light rays and floating rune glyphs along it',
   towerSovereign:'a blinding ivory-white apex sweep — a colossal pale-gold arc collapsing into a bright singularity seam, cosmic dust',
