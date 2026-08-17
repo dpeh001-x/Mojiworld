@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.832';
+const GAME_VERSION = 'v0.29.833';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -71522,6 +71522,22 @@ function updateMonsters(dt) {
     if (m._octoParent) {
       const _op = m._octoParent;
       if (!_op || _op.currentHp <= 0) { m.currentHp = 0; continue; }
+      // v0.29.833 — while the head is submerged the tentacles are OFF the leash:
+      // they stop being scenery orbiting a boss and become the fight. Anchoring
+      // is skipped entirely so they can cross the arena, and they re-anchor the
+      // instant the head surfaces, which snaps the formation back and reads as
+      // the boss taking hold of them again.
+      if (_op._octoLoose) {
+        const _ltx = player.x + player.w / 2, _lty = player.y + player.h / 2;
+        const _lcx = m.x + m.w / 2, _lcy = m.y + m.h / 2;
+        const _ldx = _ltx - _lcx, _ldy = _lty - _lcy;
+        const _ldd = Math.max(1, Math.sqrt(_ldx * _ldx + _ldy * _ldy));
+        // Stand off rather than sitting inside the player: the legs already deal
+        // contact damage, and a swarm that stacks on top of you is not a fight.
+        if (_ldd > 150) { m.x += (_ldx / _ldd) * 2.6; m.y += (_ldy / _ldd) * 2.6; }
+        m.vx = 0; m.vy = 0;
+        m.facing = (_ldx < 0) ? -1 : 1;
+      } else {
       const _la = m._octoAngle + Math.sin(game.time * 0.04 + (m._octoLegIndex || 0)) * 0.05;
       const _opx = _op.x + _op.w / 2, _opy = _op.y + _op.h / 2;
       m.x = _opx + Math.cos(_la) * (_op.w * 0.65) - m.w / 2 + (Math.cos(_la) < 0 ? -1 : 1) * (Math.abs(Math.cos(_la)) > 0.6 ? 180 : 90);  // v0.26.x - per user: tentacles spread wider (outer +180px/side, middle 2 +90px)
@@ -71531,6 +71547,7 @@ function updateMonsters(dt) {
       m.y = _opy + (_op.h * 0.32) - m.h / 2;
       m.vx = 0; m.vy = 0;
       m.facing = (player.x + player.w/2 < m.x + m.w/2) ? -1 : 1;
+      }   // v0.29.833 — end of the anchored branch
       // Status fire cycle — 700ms telegraph → fire slow homing missile at 1100ms → idle.
       if (m._octoFireFlash > 0) m._octoFireFlash -= dt;
       m._octoFireT = (m._octoFireT || 0) + dt;
@@ -77473,10 +77490,18 @@ function bossAI(m, dt, distToPlayer) {
     m.facing = (player.x + player.w/2 < m.x + m.w/2) ? -1 : 1;
 
     const t = m.patternTimer;
+    // v0.29.833 — a submerged head does not attack. Without this the "cutscene"
+    // keeps spitting bubbles and missiles out of an immune boss, which is the
+    // exact tell that a transition is cosmetic.
+    // The trigger below sits further down this same tick, so on the very frame
+    // the boss crosses 50% this flag would still be false and one last bubble
+    // would escape out of an already-immune, already-sinking head. Include the
+    // about-to-trip condition so the transition is clean from frame one.
+    const _octoBusy = !!m._octoEvt || (!m._enraged && m.currentHp < m.maxHp * 0.5);
     // ── Bubble-swarm primary attack — 4 beats per 5500 ms cycle.
     const beatTimes = [1000, 2300, 3600, 4900];
     for (let i = 0; i < beatTimes.length; i++) {
-      if (!m._bubbleBeats[i] && t >= beatTimes[i]) {
+      if (!m._bubbleBeats[i] && t >= beatTimes[i] && !_octoBusy) {
         m._bubbleBeats[i] = true;
         const ox = m.x + m.w * (0.25 + 0.15 * i);
         const oy = m.y + m.h * 0.6;
@@ -77508,7 +77533,7 @@ function bossAI(m, dt, distToPlayer) {
     // the player faces near-constant homing pressure on top of the
     // bubble swarm.
     if (m._headMissileAt == null) m._headMissileAt = (game.time | 0) + 240;
-    if ((game.time | 0) >= m._headMissileAt && m.currentHp > 0 && player.hp > 0) {
+    if ((game.time | 0) >= m._headMissileAt && m.currentHp > 0 && player.hp > 0 && !_octoBusy) {
       m._headMissileAt = (game.time | 0) + 330;
       const _hsx = m.x + m.w / 2;
       const _hsy = m.y + m.h * 0.35;
@@ -77533,14 +77558,112 @@ function bossAI(m, dt, distToPlayer) {
       });
       if (typeof addShake === 'function') addShake(2);
     }
-    // ── Enrage at 50% HEAD HP — speed up bubble cadence + extra fan.
+    // ── v0.29.833 — PHASE 2 IS AN EVENT, NOT A STAT LINE.
+    // This used to be a toast, a flash and `m.speed = 0.6`. The player had no
+    // way to perceive it: the same attacks kept coming at nearly the same rate,
+    // so "phase 2" existed only as a number. It is now a scripted three-beat
+    // transition that changes what the fight IS for four seconds, and leaves it
+    // changed. Beat 1 SUBMERGE: the head goes immune and silent. Beat 2 FRENZY:
+    // the tentacles break orbit and hunt you — with the head untouchable, the
+    // arena is a four-enemy swarm and the only thing to fight is the legs.
+    // Beat 3 SURFACE: the head returns on the FAR side of the arena, so the
+    // ground you had learned is not the ground you get back, and TIDAL SWEEP
+    // unlocks for the rest of the fight.
     if (!m._enraged && m.currentHp < m.maxHp * 0.5) {
       m._enraged = true;
-      showToast('🐙 Octobaby is FURIOUS!', 'legendary');
-      flash(0.25); addShake(6);
+      m._octoEvt = 1;            // 1 submerge, 2 frenzy, 3 surfacing
+      m._octoEvtT = 0;
       m.speed = 0.6;
+      m.invulnerable = 4600;     // the existing damage gate; shows IMMUNE
+      showToast('🐙 OCTOBABY SUBMERGES — kill the tentacles!', 'legendary');
+      flash(0.3); addShake(10);
+      // The flag lives on the HEAD: each leg's AI reads `parent._octoLoose`,
+      // so setting it per-leg would leave every tentacle still anchored.
+      m._octoLoose = true;
+      if (m._legRefs) for (const lg of m._legRefs) if (lg) lg._octoFireCd = 3000;
     }
-    if (m._enraged && !m._extraBeat && t >= 2900 && t < 2950) {
+    if (m._octoEvt) {
+      m._octoEvtT += dt;
+      // Hold the immunity topped up for the whole beat rather than trusting a
+      // single 4600 stamp — the flag decays in the monster tick, and a boss that
+      // becomes hittable halfway through its own cutscene reads as a bug.
+      if (m._octoEvt < 3) m.invulnerable = Math.max(m.invulnerable || 0, 400);
+      m.vx = 0;
+      m._octoSink = Math.min(120, (m._octoSink || 0) + dt * 0.12);
+      if (m._octoEvt === 1 && m._octoEvtT >= 1100) {
+        m._octoEvt = 2;
+        showToast('🦑 THE TENTACLES BREAK LOOSE', 'epic');
+        addShake(8);
+      } else if (m._octoEvt === 2 && m._octoEvtT >= 4200) {
+        m._octoEvt = 3;
+        // Surface on the far side — the arena you learned is not the one you get
+        // back. Clamped to the same drift bounds the head already respects.
+        const _far = (player.x + player.w / 2 < 1100) ? (2000 - m.w - 40) : 240;
+        m.x = Math.max(200, Math.min(2000 - m.w, _far));
+        m._driftDir = (m.x < 1100) ? 1 : -1;
+        m.invulnerable = 0;
+        m._octoLoose = false;
+        if (m._legRefs) for (const lg of m._legRefs) if (lg) lg._octoFireCd = 4200;
+        showToast('🐙 OCTOBABY SURFACES — ⚠ TIDAL SWEEP unlocked', 'legendary');
+        flash(0.25); addShake(12);
+      } else if (m._octoEvt === 3) {
+        m._octoSink = Math.max(0, (m._octoSink || 0) - dt * 0.35);
+        if (m._octoSink <= 0) { m._octoEvt = 0; m._octoSweepT = 2400; }
+      }
+    }
+    // ── v0.29.833 — TIDAL SWEEP: the new move phase 2 unlocks. A low, wide wall of
+    // water that crosses the whole arena at floor level and has to be JUMPED.
+    // Every other Octobaby attack is aerial (bubbles rise, missiles home, the
+    // meltdown is a radial burst), so the one thing the fight never asked of you
+    // was to leave the ground. The telegraph is 700ms, comfortably above the
+    // 350ms floor set in v0.29.830.
+    if (m._enraged && !m._octoEvt && m.currentHp > 0) {
+      if (m._octoSweepT == null) m._octoSweepT = 2400;
+      m._octoSweepT -= dt;
+      if (m._octoSweepT <= 0 && !m._octoSweepWarn) {
+        m._octoSweepWarn = 700;
+        showToast('🌊 TIDAL SWEEP — JUMP IT!', 'legendary');
+        addShake(5);
+      }
+      if (m._octoSweepWarn > 0) {
+        m._octoSweepWarn -= dt;
+        if (m._octoSweepWarn <= 0) {
+          m._octoSweepWarn = 0;
+          m._octoSweepT = 8000 + Math.random() * 2000;
+          const _dir = (player.x + player.w / 2 < m.x + m.w / 2) ? -1 : 1;
+          // Read the floor off the map, not off the boss. Octobaby is an
+          // ANCHORED FLOATING boss — its body sits near the top of the arena —
+          // so probing downward from its own feet put the wave 480px above the
+          // ground, a "jump it" attack sailing through the sky. Take the ground
+          // slab under the head's centre instead, falling back to the highest
+          // ground slab and finally to the same worldHeight-60 the Legosaurus
+          // quake uses.
+          const _plats = (game.mapData && game.mapData.platforms) || [];
+          const _hx = m.x + m.w / 2;
+          let _gy = null;
+          for (const pl of _plats) {
+            if (!pl || pl.type !== 'ground') continue;
+            if (_hx >= pl.x && _hx <= pl.x + pl.w && (_gy == null || pl.y < _gy)) _gy = pl.y;
+          }
+          if (_gy == null) for (const pl of _plats) {
+            if (pl && pl.type === 'ground' && (_gy == null || pl.y < _gy)) _gy = pl.y;
+          }
+          if (_gy == null) _gy = (game.mapData && game.mapData.worldHeight ? game.mapData.worldHeight - 60 : 620);
+          game.projectiles.push({
+            x: m.x + m.w / 2 - 60, y: _gy - 78,
+            vx: _dir * 4.2, vy: 0,
+            w: 120, h: 78, life: 320,
+            damage: (m.atk || 360) * 0.7,
+            owner: 'enemy', skill: 'tidalSweep',
+            noGravity: true,
+            color: '#5fd6ff',
+            _sourceLabel: 'the Tidal Sweep',
+          });
+          if (typeof audio !== 'undefined' && audio.play) audio.play('hit');
+        }
+      }
+    }
+    if (m._enraged && !m._extraBeat && t >= 2900 && t < 2950 && !_octoBusy) {
       m._extraBeat = true;
       const ox = m.x + m.w / 2;
       for (let b = -2; b <= 2; b++) {
@@ -77564,7 +77687,7 @@ function bossAI(m, dt, distToPlayer) {
     // long telegraph is the player's window to dodge/block/aegis.
     if (m._crazyT == null) m._crazyT = 12000 + Math.random() * 6000;
     m._crazyT -= dt;
-    if (m._crazyT <= 0 && !m._crazyActive && m.currentHp > 0) {
+    if (m._crazyT <= 0 && !m._crazyActive && m.currentHp > 0 && !_octoBusy) {
       m._crazyActive = true;
       m._crazyPhase = 'telegraph';
       m._crazyTime = 3000;
@@ -114864,6 +114987,9 @@ function drawGravitos(m, sx, sy) {
 // paints the giant round head + cute angry face. 2 px black outline
 // matches the underwater theme spec.
 function drawOctobaby(m, sx, sy) {
+  // v0.29.833 — sink the head into the floor during the phase-2 submerge. A
+  // transition the player is told about but cannot SEE is still a stat line.
+  if (m._octoSink > 0) sy += m._octoSink;
   const cx = sx + m.w / 2;
   const cy = sy + m.h / 2 - 6;
   const headR = m.w * 0.42;
