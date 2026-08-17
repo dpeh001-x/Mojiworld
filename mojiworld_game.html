@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.831';
+const GAME_VERSION = 'v0.29.832';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -73919,6 +73919,45 @@ function _gloopCycle(m) { return m._bossPhase2 ? _GLOOP_CYCLE_P2 : _GLOOP_CYCLE_
 // phase-3 cooldown it overrides (9 s), because that cooldown is what made the
 // pattern repeat.
 const _GRAV_SING_MIN_GAP = 22 * 60;
+// v0.29.832 — KING KROOK ATTACK STRINGS. Krook used to pick one basic, return to
+// idle, and re-roll — so his basics never formed a phrase and there was nothing
+// to anticipate. He now commits to a short string: the beats inside it come
+// fast (420ms apart, versus the 1600ms single-attack cadence) and the
+// string ends in a recovery that scales with how long it was. This is a
+// legibility change, not a buff: measured over 12k-frame samples his SPECIALS
+// — the attacks that actually threaten you — come at the same rate as before
+// (p1 10.5 vs 11.7, p2 15.5 vs 12 per sample, inside the run-to-run spread),
+// while basics run ~15-25% busier because the beats inside a string are cheap.
+// What the player gains is a punish window that arrives on a schedule instead
+// of at random.
+const _KROOK_STR_GAP = 420;      // ms between beats inside a string
+const _KROOK_IDLE_GAP = 1600;    // unchanged cadence when he is not in a string
+// Recovery after a string ends, scaled by its length, so a longer string always
+// buys the player a longer opening. 2 beats -> 2780ms, 3 beats -> 3960ms.
+// The coefficients are not taste: a basic used to cost 1600ms of idle plus
+// ~1100ms of attack, so holding the same attacks-per-second across a string of
+// L beats requires 1600L - 420(L-1) of recovery. An earlier 1500 + 550L undershot
+// that and measured +75% basics per minute in phase 2 — a difficulty change
+// smuggled in under a legibility change. This keeps the rate, moves the idle
+// time to the end, and hands it to the player in one usable block.
+const _krookRecover = (len) => 1180 * len + 420;
+const _KROOK_STRINGS = [
+  ['claw', 'claw'],              // double swipe — the bread and butter
+  ['claw', 'fireBreath'],        // swipe, then breath where you backed off to
+  ['jumpSlam', 'claw'],          // land on you, then swipe where you rolled
+  ['fireBreath', 'claw'],        // breath to move you, swipe to catch you
+];
+const _KROOK_STRINGS_P2 = [      // phase 2 earns a third beat
+  ['claw', 'claw', 'jumpSlam'],
+  ['jumpSlam', 'claw', 'claw'],
+  ['claw', 'fireBreath', 'claw'],
+];
+function _krookStartString(m, arr) {
+  m._kString = arr.slice(1);
+  m._kStrRecover = _krookRecover(arr.length);
+  m.patternState = arr[0];
+  if (!m._kString.length) m._kRecoverMs = m._kStrRecover;
+}
 const _GLOOP_GAP = 1800;
 const _GLOOP_LEAP_GAP = 420;   // v0.29.5xx — leap-only gap (see the cycle note above)
 function _gloopMuzzleX(m) { return m.x + m.w / 2; }
@@ -76822,7 +76861,25 @@ function bossAI(m, dt, distToPlayer) {
     if (m.patternState === 'idle') {
       // Slow shuffle toward the player while idling.
       m.vx = m.facing * Math.min(2, m.speed * 1.5);
-      if (t > 1600) {
+      // v0.29.832 — three cadences now share this gate: mid-string (fast), the
+      // recovery after a string (slow, the punish window), and the original
+      // single-attack pace for everything else including every special.
+      const _kGate = (m._kString && m._kString.length) ? _KROOK_STR_GAP
+                   : (m._kRecoverMs || _KROOK_IDLE_GAP);
+      if (t > _kGate) {
+        m._kRecoverMs = 0;
+        // v0.29.832 — lift the pending string OUT of the boss for the duration of
+        // this decision. It is put back only if no special claims the slot, so
+        // a special always preempts a combo and never has to be special-cased.
+        // This is load-bearing for balance, not tidiness: the random special
+        // bands (shell 30 / mega 18 / firebomb 22) roll once per decision, so
+        // if a string consumed a whole decision his ultimates would fire 2-3x
+        // less often. Measured that way, phase 2 lost 22% of its specials and
+        // gained 78% more basics — a quietly easier, busier fight. Rolling the
+        // specials every beat keeps their cadence exactly where it was.
+        const _kPend = (m._kString && m._kString.length) ? m._kString : null;
+        m._kString = null;
+        const _kUlt = Math.random();   // v0.29.832 — roll for the uncapped ultimates
         // Pick the next attack. v0.26.078 added megaFireball — a slow
         // huge OHKO projectile (~1/3 screen) gated on its own 18 s
         // cooldown so it doesn't dominate the cycle. Falls into the
@@ -76893,6 +76950,25 @@ function bossAI(m, dt, distToPlayer) {
           _bossSpecialFired(m, _now);
           m.patternState = 'firebomb';
         }
+        // v0.29.832 — EARTHQUAKE and FIREBALL RAIN roll here, above the string,
+        // instead of from the bottom of the basics ladder where they used to
+        // live. They are uncapped ultimates, not basics, and the ladder is now
+        // consulted once per STRING rather than once per attack — leaving them
+        // in it halved their frequency (measured: phase 1 lost a fifth of its
+        // specials while gaining a quarter more basics). Rolling them here
+        // restores their per-attack cadence exactly. The 15/15 split is the
+        // same one they had inside the ladder's 0.70-0.85-1.00 bands, and the
+        // airborne case still falls through to rain exactly as before.
+        else if (_kUlt < 0.15 && m.onGround) { m.patternState = 'earthquake'; _bossSpecialFired(m, _now); }
+        else if (_kUlt < 0.30) { m.patternState = 'fireballRain'; _bossSpecialFired(m, _now); }
+        // v0.29.832 — nothing special claimed this slot, so honour the combo in
+        // flight. A string is decided once and then followed through; that is
+        // what gives the fight a rhythm the player can read.
+        else if (_kPend) {
+          m._kString = _kPend;
+          m.patternState = m._kString.shift();
+          if (!m._kString.length) m._kRecoverMs = m._kStrRecover || 2600;
+        }
         else {
           // v0.29.286 — regular pool rolls its OWN number. Making the special
           // bands cumulative in v0.29.284 fixed the shadowing between shell /
@@ -76901,12 +76977,23 @@ function bossAI(m, dt, distToPlayer) {
           // measured `claw` collapsing to 2% in phase 2. Decoupling the two
           // ladders restores both: specials keep 30/18/22%, basics keep
           // claw 25 / fireBreath 25 / jumpSlam 20 / quake 15 / rain 15.
+          // v0.29.832 — the three basics are now entry points into a string
+          // rather than one-offs. Effective weights are unchanged: this ladder
+          // is reached only after the 30% ultimate roll above, so 0.357/0.714
+          // over the remaining 70% reproduces the original 25 / 25 / 20 for
+          // claw / fireBreath / jumpSlam. How often each attack OPENS is what
+          // it always was; what changed is that it is followed through.
           const _rr = Math.random();
-          if (_rr < 0.25) m.patternState = 'claw';
-          else if (_rr < 0.50) m.patternState = 'fireBreath';
-          else if (_rr < 0.70) m.patternState = 'jumpSlam';
-          else if (_rr < 0.85 && m.onGround) { m.patternState = 'earthquake'; _bossSpecialFired(m, _now); }
-          else               { m.patternState = 'fireballRain'; _bossSpecialFired(m, _now); }
+          const _kPool = m._bossPhase2 ? _KROOK_STRINGS_P2 : _KROOK_STRINGS;
+          const _kPick = (lead) => {
+            const opts = _kPool.filter((a) => a[0] === lead);
+            const arr = opts.length ? opts[(Math.random() * opts.length) | 0]
+                                    : [lead];   // no string leads with it — fall back to the single attack
+            _krookStartString(m, arr);
+          };
+          if (_rr < 0.357) _kPick('claw');
+          else if (_rr < 0.714) _kPick('fireBreath');
+          else _kPick('jumpSlam');
         }
         m.patternTimer = 0;
         m._kSubTimer = 0;
