@@ -49,7 +49,11 @@ const out = await page.evaluate(() => {
     hasArc: !!arc,
     arc: arc ? { color: arc.color, edgeCol: arc.edgeCol, spread: arc.spread, thickness: arc.thickness,
                  life: arc.maxLife, noSprite: !!arc.noSprite, clean: !!arc.clean, bodyAlpha: arc.bodyAlpha,
-                 originPastCentre: arc.x - pcx, length: arc.length } : null,
+                 squashY: arc.squashY, originPastCentre: arc.x - pcx, length: arc.length,
+                 // the arc spans +/-spread/2 around the facing axis at radius
+                 // `length`; squashY scales only the vertical extent.
+                 widthPx: arc.length * (1 - Math.cos(arc.spread / 2)),
+                 heightPx: 2 * arc.length * Math.sin(Math.min(Math.PI / 2, arc.spread / 2)) * (arc.squashY || 1) } : null,
     lance: lance ? { length: lance.length, thickness: lance.thickness, color: lance.color } : null,
     bucketClaimsRogue: bucket === 'rogue',
     arcOuterPastCentre: arc ? (arc.x + arc.length + (arc.thickness || 0) / 2) - pcx : null,
@@ -69,13 +73,19 @@ if (out.hasArc) {
   // this colour. noSprite is belt-and-braces for a future palette edit.
   ok('the basic\'s violet does not map to the emblem sprite today either',
      out.bucketClaimsRogue === false, `_lxFxBucket('#c07bff') buckets rogue: ${out.bucketClaimsRogue}`);
-  // Tighter and shorter-lived than the warrior's (1.02pi over 18 frames): a
-  // flick, not a heave. The blade is thick enough to actually read - a first
-  // pass at 6px with 0.44 body alpha was measured on screen and was too faint
-  // to see against a lit map, which is the whole point of the change.
-  ok('it is shaped as a dagger flick, not a warrior heave',
-     out.arc.spread < Math.PI * 0.75 && out.arc.life <= 14,
+  // The horizontal sweep: the reference is the front half of a FLATTENED
+  // ellipse centred on the character, so the arc opens most of the way round
+  // and is squashed hard on Y. Without the squash the shape is a circle and
+  // its height always tracks its width - it cannot be laid down.
+  ok('the arc is flattened into a horizontal sweep',
+     out.arc.squashY > 0 && out.arc.squashY < 0.4,
+     `squashY ${out.arc.squashY}`);
+  ok('it opens wide enough to read as a sweep, and stays a fast flick',
+     out.arc.spread >= Math.PI * 0.8 && out.arc.spread <= Math.PI * 1.0 && out.arc.life <= 14,
      `spread ${(out.arc.spread / Math.PI).toFixed(2)}pi, life ${out.arc.life}`);
+  ok('the sweep is WIDER than it is tall (the point of the squash)',
+     out.arc.widthPx > out.arc.heightPx * 1.6,
+     `${Math.round(out.arc.widthPx)}px wide vs ${Math.round(out.arc.heightPx)}px tall`);
   ok('the blade is bold enough to read on a lit map',
      out.arc.thickness >= 8 && out.arc.bodyAlpha >= 0.6,
      `thickness ${out.arc.thickness}, bodyAlpha ${out.arc.bodyAlpha}`);
