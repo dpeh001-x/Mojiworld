@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.845';
+const GAME_VERSION = 'v0.29.846';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -24590,6 +24590,10 @@ const MAPS = {
     const SP_FLOOR_DY = 80;
     // v0.26.374 — Per user "make it height of 40". Tower height 50 → 40 floors.
     const SP_NUM_FLOORS = 40;
+    // v0.29.846 — max edge-to-edge horizontal gap between consecutive
+    // floors. Held under the measured 112 px air-jump reach so every
+    // crossing is clearable; see the clamp in the platform loop below.
+    const SP_MAX_GAP = 100;
     let _spSeed = 0x6c6b78a1;
     const _spRand = () => {
       _spSeed = (_spSeed + 0x6d2b79f5) | 0;
@@ -24623,7 +24627,26 @@ const MAPS = {
         ? _spRand() * 0.35
         : 0.65 + _spRand() * 0.35;
       const xMax = SP_WORLD_W - w - 40;
-      const x = Math.floor(40 + sideBias * (xMax - 40));
+      let x = Math.floor(40 + sideBias * (xMax - 40));
+      // v0.29.846 — REACHABILITY CLAMP. Measured in-engine on this map
+      // (gravityMul 0.9, getJump() 10): the widest edge-to-edge gap the
+      // player can clear while gaining a floor is 62 px on a plain jump and
+      // 112 px spending the air jump. The wall-to-wall sideBias above was
+      // producing gaps up to 212 px — 9 of the 40 crossings were flatly
+      // unjumpable, including the floor-28 platform that carries puzzle
+      // piece 3 (177 px). Those platforms are solid; the player simply
+      // arrives short and BELOW the ledge, and the landing test only
+      // resolves from above (prevBottom <= p.y + 2), so they pass through
+      // it — which reads as a fake platform, exactly as reported.
+      // Clamp toward the platform below so the crossing stays jumpable.
+      // RNG, side alternation and the arch width profile are untouched:
+      // only over-wide platforms move, and only as far as they must.
+      const _prev = platforms[platforms.length - 1];
+      if (_prev && _prev.type !== 'ground') {
+        if (x > _prev.x + _prev.w + SP_MAX_GAP) x = _prev.x + _prev.w + SP_MAX_GAP;
+        else if (x + w < _prev.x - SP_MAX_GAP)  x = _prev.x - SP_MAX_GAP - w;
+      }
+      x = Math.max(40, Math.min(x, xMax));
       platforms.push({ x, y, w, h: 12, type: 'platform' });
     }
     // Top platform: wider summit landing where the Master Conductor's
