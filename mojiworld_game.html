@@ -9778,7 +9778,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.866';
+const GAME_VERSION = 'v0.29.867';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -43142,6 +43142,14 @@ function _coopTickMonsters() {
     if (m._phaseSprite) _e.sp = String(m._phaseSprite).slice(0, 20);
     if (m._dreamPhase) _e.dp = 1;
     if (m.phase) _e.p = m.phase | 0;
+    // v0.29.867 — BOSS COMBAT STATE. All conditional, so an idle mob's frame is
+    // byte-for-byte what it was. Render-only on the guest (see _coopApplyMonsters):
+    //   sg — stagger ms left · op — opening ms left · bk — break meter percent
+    //   cs — Cancer's shell sealed · sf — the facing that shell locked to
+    if (m._stagger > 0) _e.sg = Math.min(9000, Math.round(m._stagger));
+    if (m._dirOpenT > 0) _e.op = Math.min(9000, Math.round(m._dirOpenT));
+    if (m._break > 0 && m._breakMax > 0) _e.bk = Math.max(0, Math.min(100, Math.round((m._break / m._breakMax) * 100)));
+    if (m._cancerShellClosed) { _e.cs = 1; if (m._shellFace) _e.sf = m._shellFace === -1 ? -1 : 1; }
     list.push(_e);
   }
   try { net.ws.send(JSON.stringify({ t: 'mon', map: game.currentMap, list })); } catch (e) {}
@@ -43988,6 +43996,17 @@ function _coopApplyMonsters(msg) {
     if (e.sp) m._phaseSprite = String(e.sp).slice(0, 20);
     m._dreamPhase = !!e.dp;
     if (e.p != null) m.phase = e.p | 0;
+    // v0.29.867 — boss combat state, RENDER-ONLY on a guest. Mirrors run no AI,
+    // so nothing here decays locally: every field is written from the frame and
+    // CLEARED when absent, so a window ends on the guest exactly when it ends on
+    // the host. The damage math that reads these is authority-gated (hitMonster),
+    // so setting them cannot double-apply the host's own reductions.
+    m._stagger = +e.sg || 0;
+    m._dirOpenT = +e.op || 0;
+    if (e.bk != null) { m._break = Math.max(0, Math.min(100, +e.bk || 0)); m._breakMax = 100; }
+    else { m._break = 0; }
+    m._cancerShellClosed = !!e.cs;
+    m._shellFace = e.sf === -1 ? -1 : (e.sf === 1 ? 1 : 0);
   }
   // Drop mirrors the host no longer reports (killed / despawned upstream).
   for (let i = game.monsters.length - 1; i >= 0; i--) {
@@ -44023,6 +44042,22 @@ function _coopHostApplyDamage(uid, dmg, isCrit, skill) {
   if (m._virgoChanneling)   d = Math.max(1, Math.floor(d * 0.4));         // channel DR
   if (m._libraShield)       d = Math.max(1, Math.floor(d * (m._libraShieldFactor || 0.5)));
   else if (m.zodiacSign === 'libra' && (m._libraOrbsAlive | 0) > 0) d = Math.floor(d * 0.5);
+  // v0.29.867 — remote hits get the SAME window economy as local ones. This
+  // path never applied the punish bonus, so a co-op guest hitting a staggered
+  // boss was paid x1.0 where solo pays x1.6 -- the guest got nothing for the
+  // one mechanic the fight is built around. Their damage also never reached the
+  // break meter, so a guest could not contribute to a break at all. Both now
+  // mirror the solo order in hitMonster: bonus while a window is open, meter
+  // fill while it is not.
+  if (m.isBoss && (m._stagger > 0 || m._dirOpenT > 0)) {
+    const _rEarned = m._stagger > 0;
+    const _rMul = _rEarned
+      ? (typeof BOSS_STAGGER_BONUS === 'number' ? BOSS_STAGGER_BONUS : 1.6)
+      : (typeof BOSS_OPENING_BONUS === 'number' ? BOSS_OPENING_BONUS : 1.25);
+    d = Math.max(1, Math.floor(d * _rMul));
+  } else if (m.isBoss && typeof _bossFillBreak === 'function') {
+    _bossFillBreak(m, d);
+  }
   d = Math.min(d, Math.max(1, Math.floor(m.maxHp || m.currentHp)));       // cap: no single peer packet exceeds one HP bar (anti one-shot)
   m.currentHp -= d;
   // v0.29.x — was 6 (ms): with dt≈16.7/step the white hit-flash lasted ONE
@@ -79370,11 +79405,22 @@ function hitMonster(m, dmg, isCrit, skill) {
     // 25-47% of the fight. Same bonus for both would have been a +21 to +28%
     // stealth buff to the player.
     const _earned = m._stagger > 0;
-    finalDmg = Math.max(1, Math.floor(finalDmg * (_earned ? BOSS_STAGGER_BONUS : BOSS_OPENING_BONUS)));
+    // v0.29.867 — the MULTIPLIER is authoritative-only. A guest forwards its
+    // resolved damage and the host re-applies the window bonus in
+    // _coopHostApplyDamage; applying it here too would pay it twice. The
+    // floating text still shows on the guest, because the window state is now
+    // synced and the callout is true.
+    if (!(typeof _coopFollowingHost === 'function' && _coopFollowingHost())) {
+      finalDmg = Math.max(1, Math.floor(finalDmg * (_earned ? BOSS_STAGGER_BONUS : BOSS_OPENING_BONUS)));
+    }
     game.damageNumbers.push({ x: m.x + m.w/2 - 16, y: m.y - 36, vy: -1.8,
       text: _earned ? 'PUNISH!' : 'OPEN!', life: 22, color: _earned ? '#ffdd55' : '#ffc46a', size: 12 });
-  } else if (m.isBoss && typeof _bossFillBreak === 'function') {
+  } else if (m.isBoss && typeof _bossFillBreak === 'function'
+             && !(typeof _coopFollowingHost === 'function' && _coopFollowingHost())) {
     // v0.29.834 — outside a window, damage feeds the break meter instead.
+    // v0.29.867 — host/solo only. On a guest this ran against the guest's own
+    // mirror and opened a phantom window the host never had; the guest's real
+    // contribution is fed into the host's meter by _coopHostApplyDamage.
     _bossFillBreak(m, finalDmg);
   }
   // v0.27.0 co-op forward — a NON-HOST is not authoritative over shared monsters.
