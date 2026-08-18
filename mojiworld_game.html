@@ -9771,7 +9771,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.854';
+const GAME_VERSION = 'v0.29.855';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -82065,6 +82065,27 @@ const LX_VORTEX_PULL_RIM  = 4.2;   // suction at the rim, px/frame - above any m
 const LX_VORTEX_HOLD = 24;         // px: stop pulling this close in, so mobs clump instead of stacking
 const LX_VORTEX_FLIER_DRAG = 0.5;  // fraction of its own speed a flier keeps at the core
 
+// v0.29.x — MAGIC BOLT SOLIDITY. Per user: "when mage's projectile fades away
+// but somehow can still damage an enemy if it connects, please ensure proper
+// hitbox distance and make sure it does not damage after fading."
+//
+// The bolt drew itself with alpha = life / (maxLife * 0.7), which is full
+// opacity only for the FIRST 30% of flight and then thins across the remaining
+// 70% — at the halfway point it is 49% transparent while still dealing 100%
+// damage, and at life 1 (alpha 0.03, invisible) it still hit. A bolt the player
+// had visually written off was a live hitbox for most of its travel.
+//
+// The bolt is now SOLID for the bulk of its flight and dissolves over a short
+// readable tail, and the tail cannot damage: once it is dissipating it is
+// spent. Both the draw and the hit test call _boltAlpha, so they cannot
+// disagree again.
+const _BOLT_FADE_FRAC = 0.30;   // the last 30% of life is the dissolve
+const _BOLT_HIT_ALPHA = 0.35;   // below this it is smoke, not a projectile
+function _boltAlpha(p) {
+  const _ml = p.maxLife || 55;
+  return Math.max(0, Math.min(1, p.life / Math.max(1, _ml * _BOLT_FADE_FRAC)));
+}
+function _boltSpent(p) { return p.skill === 'bolt' && _boltAlpha(p) < _BOLT_HIT_ALPHA; }
 function updateProjectiles(dt) {
   // v0.26.217 — Pre-filter live mobs once per frame for the per-projectile
   // collision loops below. Pre-fix every projectile iterated game.monsters
@@ -82283,6 +82304,10 @@ function updateProjectiles(dt) {
         // free predicates (the _atkMonBoxCached memo write is idempotent and
         // frame-keyed), so the reorder is behavior-identical.
         if (m.currentHp <= 0 || m._dying) continue;   // v0.26.1027 — _liveMobs is a once-built snapshot; skip an intra-frame corpse so a non-piercing shot isn't consumed by it
+        // v0.29.x — a bolt that has faded out is smoke: it connects with
+        // nothing. Checked before the aabb so a spent bolt is not merely
+        // harmless but cannot consume a pierce charge on the way past either.
+        if (_boltSpent(p)) break;
         if (!aabb(p, _atkMonBoxCached(m))) continue;
         if (hitIds.has(m)) continue;
         {
@@ -120423,7 +120448,10 @@ function drawProjectiles() {
         // v0.26.x — Per user: the arcane Magic Bolt fades to transparent as it
         // ages — full opacity for the first ~30% of flight, then a linear fade
         // to 0 over the rest. Inside this save/restore, so globalAlpha auto-resets.
-        if (p.skill === 'bolt') ctx.globalAlpha *= Math.max(0, Math.min(1, p.life / ((p.maxLife || 55) * 0.7)));
+        // v0.29.x — the same curve the hit test uses, so what the player sees
+        // and what can hurt them are one fact. Solid for the first 70% of
+        // flight, then an honest dissolve that deals no damage (_BOLT_HIT_ALPHA).
+        if (p.skill === 'bolt') ctx.globalAlpha *= _boltAlpha(p);
         ctx.drawImage(_pAnim || _spriteForSkill, Math.round(-sw/2), Math.round(-sh/2), Math.round(sw), Math.round(sh));   // v0.26.x perf — integer blit
         ctx.restore();
         continue;   // skip the procedural branch below for this projectile
