@@ -89,18 +89,18 @@ const have = (k) => T[k] || {};
 check(r.roster.length >= 4, 'the four foundry types are on the map', r.roster);
 
 // Came DOWN — authored values, which is what the patch actually controls.
-check(have('smithgolem').authored === 120, 'Smithgolem DEF reduced (was 182)', have('smithgolem').authored);
-check(have('forgewight').authored === 110, 'Forgewight DEF reduced (was 160)', have('forgewight').authored);
+check(have('smithgolem').authored === 90, 'Smithgolem DEF is 90 (182 -> 120 in v0.29.844, then 90 per user)', have('smithgolem').authored);
+check(have('forgewight').authored === 100, 'Forgewight DEF is 100 (160 -> 110 in v0.29.844, then 100 per user)', have('forgewight').authored);
 check(have('bellowsbat').authored === 47, 'Bellowsbat DEF reduced (was 68)', have('bellowsbat').authored);
 check(have('cinderling').authored === 40, 'Cinderling DEF reduced (was 58)', have('cinderling').authored);
 
 // Still HIGH — the other half of the request. Measured as damage actually blocked.
-check(have('smithgolem').blockedPct >= 62 && have('smithgolem').blockedPct <= 73,
-      'the Smithgolem still blocks most of a hit (76.7% on the old build)', have('smithgolem').blockedPct);
+check(have('smithgolem').blockedPct >= 55 && have('smithgolem').blockedPct <= 66,
+      'the Smithgolem still blocks well over half a hit (76.6% before any of this)', have('smithgolem').blockedPct);
 check(have('smithgolem').armorShield === 0.5,
       'and keeps its frontal shield — the DEF cut did not quietly remove it', have('smithgolem').armorShield);
-check(have('forgewight').blockedPct >= 30 && have('forgewight').blockedPct <= 40,
-      'the Forgewight is still armoured (44.5% on the old build)', have('forgewight').blockedPct);
+check(have('forgewight').blockedPct >= 28 && have('forgewight').blockedPct <= 38,
+      'the Forgewight is still armoured (44.4% before any of this)', have('forgewight').blockedPct);
 check(have('bellowsbat').blockedPct >= 14, 'the Bellowsbat is not paper', have('bellowsbat').blockedPct);
 check(have('cinderling').blockedPct >= 12, 'the Cinderling is not paper', have('cinderling').blockedPct);
 
