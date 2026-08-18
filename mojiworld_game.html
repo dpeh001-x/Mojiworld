@@ -9778,7 +9778,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.862';
+const GAME_VERSION = 'v0.29.863';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -78874,7 +78874,23 @@ function hitMonster(m, dmg, isCrit, skill) {
   }
   // v0.26.398 — Cancer sealed-shell: 70% damage reduction (was full invuln →
   // boss untouchable for the whole sealed window). Chip-able + telegraphed.
-  if (m._cancerShellClosed) dmg = Math.max(1, Math.floor(dmg * 0.3));
+  // v0.29.863 — CANCER'S SHELL IS DIRECTIONAL. It is armour only on the side
+  // the crab sealed itself facing (m._shellFace, locked at seal time because
+  // bossAI otherwise re-points facing at the player every frame). Hit the front
+  // and it is the old 0.3x; come round behind and the shell is not in the way
+  // at all. Either way the damage chips the carapace pool, 3x faster from
+  // behind, and emptying it cracks the shell open (handled in the Cancer AI).
+  if (m._cancerShellClosed) {
+    const _atkCx = (player && player.x != null) ? (player.x + (player.w || 0) / 2) : null;
+    const _side = (_atkCx == null) ? 0 : Math.sign(_atkCx - (m.x + m.w / 2));
+    const _behind = (_side !== 0 && m._shellFace && _side !== m._shellFace);
+    if (m._shellHp > 0) m._shellHp -= dmg * (_behind ? 3 : 1);
+    if (!_behind) dmg = Math.max(1, Math.floor(dmg * 0.3));
+    else if (typeof game !== 'undefined' && game.damageNumbers) {
+      game.damageNumbers.push({ x: m.x + m.w / 2 - 18, y: m.y - 26, vy: -1.6,
+        text: 'SOFT SHELL!', life: 20, color: '#9ff0c8', size: 11 });
+    }
+  }
   // v0.29.263 — GUARD UP stance (boss combat director): −55% damage taken
   // for 5-10 s. Same chip-able pattern as the Cancer shell above.
   if (m._dirGuardT > 0) dmg = Math.max(1, Math.floor(dmg * 0.45));
@@ -118244,8 +118260,27 @@ const ZODIAC_AI = {
     // hits get the BLOCKED toast. Telegraph particles signal the
     // shell-state shift so the player learns when to commit damage.
     if (m._cancerShellAt == null) m._cancerShellAt = (game.time | 0) + 360;
-    if ((game.time | 0) >= m._cancerShellAt) {
+    // v0.29.863 — the shell will not re-seal while it is cracked open.
+    if (m._shellCrackT > 0) m._shellCrackT -= dt;
+    if ((game.time | 0) >= m._cancerShellAt && !(m._shellCrackT > 0)) {
       m._cancerShellClosed = !m._cancerShellClosed;
+      if (m._cancerShellClosed) {
+        // SEALING LOCKS THE FACING. Without this the whole mechanic is inert:
+        // bossAI re-points m.facing at the player every frame before the zodiac
+        // dispatch, so a live-facing test can never report "behind".
+        m._shellFace = m.facing || 1;
+        // 22% of maxHp, not 8%. At 8% the pool emptied in about a second
+        // of front damage and every one of 7 seals in a 60 s sample cracked
+        // immediately, so the sealed window never actually existed. At 22% a
+        // strong player needs roughly the whole 4 s sealed window to crack it
+        // from the front, and about 1.2 s from behind -- which is the trade the
+        // mechanic is meant to pose.
+        m._shellHp = Math.max(1, (m.maxHp || 1) * 0.22);
+        m._shellMax = m._shellHp;
+        m._scuttleAt = (game.time | 0) + 144;      // first skitter ~2.4 s in
+      } else {
+        m._shellFace = 0; m._shellHp = 0;
+      }
       // v0.26.398 — asymmetric window: sealed only 4s (240f), open 8s (480f),
       // so Cancer isn't untouchable ~50% of the fight (was 6s/6s = 50%).
       m._cancerShellAt = (game.time | 0) + (m._cancerShellClosed ? 240 : 480);
@@ -118254,6 +118289,49 @@ const ZODIAC_AI = {
           m._cancerShellClosed ? 'legendary' : 'rare');
       }
       if (typeof addShake === 'function') addShake(m._cancerShellClosed ? 8 : 3);
+    }
+    // v0.29.863 — CARAPACE CRACK. The shell pool is emptied by damage (see
+    // hitMonster): slowly from the front, 3x from behind. Emptying it ends the
+    // sealed window early and hands over a real punish window, so a sealed
+    // Cancer is something to solve rather than something to sit out.
+    if (m._cancerShellClosed && m._shellHp <= 0) {
+      m._cancerShellClosed = false;
+      m._shellFace = 0;
+      m._shellCrackT = 4000;                       // cannot re-seal for 4 s
+      m._cancerShellAt = (game.time | 0) + 480;
+      if (typeof BOSS_STAGGER_MS === 'number') {
+        m._stagger = Math.max(m._stagger || 0, BOSS_STAGGER_MS);
+        m._staggerCd = BOSS_STAGGER_MS + (typeof BOSS_STAGGER_COOLDOWN === 'number' ? BOSS_STAGGER_COOLDOWN : 5200);
+      }
+      if (typeof showToast === 'function') showToast('\ud83e\udd80 CARAPACE CRACKED \u2014 punish it!', 'legendary');
+      if (typeof addShake === 'function') addShake(10);
+      if (typeof flash === 'function') flash(0.18);
+      if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('crit'); } catch (e) {} }
+      if (typeof _budgetedParticlePush === 'function') {
+        for (let k = 0; k < 14; k++) {
+          const a = (k / 14) * Math.PI * 2;
+          _budgetedParticlePush({ x: m.x + m.w / 2, y: m.y + m.h / 2,
+            vx: Math.cos(a) * 3, vy: Math.sin(a) * 3 - 1, life: 26, color: '#ffd9a0', size: 3 });
+        }
+      }
+    }
+    // SCUTTLE — a sealed crab skitters sideways and re-locks its facing, so
+    // getting behind it is re-earned rather than solved once. Sideways because
+    // that is how a crab moves; it also reads as a different verb from every
+    // other boss's approach.
+    if (m._cancerShellClosed && m._scuttleAt != null && (game.time | 0) >= m._scuttleAt) {
+      m._scuttleAt = (game.time | 0) + 144;
+      const _toP = Math.sign((player.x + player.w / 2) - (m.x + m.w / 2)) || 1;
+      m.vx = _toP * 7.5;
+      m._shellFace = _toP;                          // re-orients as it lands
+      if (typeof _budgetedParticlePush === 'function') {
+        for (let k = 0; k < 6; k++) {
+          _budgetedParticlePush({ x: m.x + m.w * Math.random(), y: m.y + m.h - 4,
+            vx: -_toP * (1 + Math.random() * 2), vy: -0.6 - Math.random(),
+            life: 18, color: '#cfe6ff', size: 2 });
+        }
+      }
+      if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('dash'); } catch (e) {} }
     }
     // v0.26.398 — sealed shell now applies heavy DAMAGE REDUCTION (in hitMonster)
     // instead of full invulnerability, so the player can still chip through the
