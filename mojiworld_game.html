@@ -8743,7 +8743,7 @@ The sleeping world is listening.</div>
       <button class="close-btn" onclick="closeAllModals()">✕</button>
       <h2>🚕 Taxi Service</h2>
       <div style="text-align:center; margin-bottom:6px; color:#bbb; font-size:12px;">
-        Click a node to fast-travel. Fare scales with your level (50🪙 early, up to 600🪙). Boss arenas excluded.<br><span style="color:#caa86a; font-style:italic;">"When they call for taxi, I am sure to be here, dutifully." ~ Your Taxi Uncle</span>
+        Click a node to fast-travel. Fare scales with your level (50🪙 early, up to 600🪙). Boss arenas excluded. He also remembers the last 3 monster areas you travelled to.<br><span style="color:#caa86a; font-style:italic;">"When they call for taxi, I am sure to be here, dutifully." ~ Your Taxi Uncle</span>
       </div>
       <div style="text-align:center; margin-bottom:8px;">
         Mojicoins: <span class="gold" id="taxi-lumens">0</span>
@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.837';
+const GAME_VERSION = 'v0.29.838';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -38500,6 +38500,11 @@ const GAME_SAVE_FIELDS = [
   // v0.26.438 — Guguma return-warp history (recent maps the player left off
   // in, most-recent-first). Persisted so the warp list survives a reload.
   'mapHistory',
+  // v0.29.838 — the Taxi Uncle's memory of the last few MONSTER areas the player
+  // entered (most-recent-first, capped). Persisted for the same reason
+  // visitedMaps is: an unpersisted travel history silently empties on reload,
+  // and the symptom a player reports is "he forgot where I have been".
+  'taxiCombatRecent',
   'dailyState','prestige','comboRecord','muted',
   'bestiary','towerBestFloor','mojidexSeen',
   // v0.29.422 — shiny sightings, keyed by monster type. Separate from
@@ -53882,6 +53887,11 @@ _expeditionRestorePlayer = function (snap) {
 // or overworld map. Excludes the town hub itself, the void respawn map, and
 // the transient PQ / expedition special maps (which run their own flow and
 // shouldn't be re-entered cold).
+// v0.29.838 — how many monster areas the Taxi Uncle keeps on his board, per user
+// ("remember the last 3 monster areas travelled"). Kept small on purpose: the
+// taxi's towns-only rule is what stops fast-travel from flattening the walk
+// between zones, and a long combat memory would quietly undo it.
+const TAXI_COMBAT_MEMORY = 3;   // NOTE: the taxi modal blurb says this number in prose — keep both in step
 function _isGugumaWarpable(id) {
   if (!id || typeof MAPS === 'undefined' || !MAPS[id]) return false;
   if (id === 'town' || id === 'void') return false;
@@ -55124,6 +55134,20 @@ function loadMap(id, entryX, entryY) {
   // Track visited maps for the taxi system
   if (!game.visitedMaps) game.visitedMaps = {};
   game.visitedMaps[id] = true;
+  // v0.29.838 — TAXI COMBAT MEMORY. Recorded on ENTERING, not on leaving (the
+  // mapHistory list a few lines up records the outgoing map and is capped at 6
+  // across ALL map types, so a couple of town hops would push every combat area
+  // out of it — it cannot answer "the last 3 monster areas"). Boss arenas are
+  // excluded on purpose: the taxi refuses them by a separate, deliberate rule
+  // and this memory must not become a side door into a boss fight.
+  try {
+    const _tmd = (typeof MAPS !== 'undefined') && MAPS[id];
+    if (_tmd && !_tmd.isBossArena && Array.isArray(_tmd.spawns) && _tmd.spawns.length > 0) {
+      game.taxiCombatRecent = (game.taxiCombatRecent || []).filter((h) => h !== id);
+      game.taxiCombatRecent.unshift(id);
+      if (game.taxiCombatRecent.length > TAXI_COMBAT_MEMORY) game.taxiCombatRecent.length = TAXI_COMBAT_MEMORY;
+    }
+  } catch (e) {}
   // Daily "visit N different maps" challenge — deduped by id in tickDaily
   if (typeof tickDaily === 'function') tickDaily('visit', id);
   // v0.25.61 — quest visit hook
@@ -91816,7 +91840,12 @@ function renderTaxi() {
          them forever since the taxi is their only entrance. */
       const _taxiOnly = m.taxiAccessible === true && !_hasWalkEntry.has(id);
       const _hasMobs = Array.isArray(m.spawns) && m.spawns.length > 0;
-      if (_hasMobs && !_taxiOnly) return { ok: false, reason: 'monsters roam there' };
+      // v0.29.838 — ...except the last few monster areas the player actually
+      // travelled to, which the Taxi Uncle remembers. Without this every combat
+      // map was refused no matter how recently you walked it, and the taxi
+      // looked like it had forgotten your route rather than like it had a rule.
+      const _recentCombat = Array.isArray(game.taxiCombatRecent) && game.taxiCombatRecent.indexOf(id) !== -1;
+      if (_hasMobs && !_taxiOnly && !_recentCombat) return { ok: false, reason: 'monsters roam there' };
       if (!visitedIds.has(id)) return { ok: false, reason: 'unvisited' };
       if (player.mojicoins < _taxiFare()) return { ok: false, reason: `${_taxiFare()}🪙 fare` };
       return { ok: true, reason: `${_taxiFare()}🪙 fare` };
