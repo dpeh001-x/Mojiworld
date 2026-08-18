@@ -9778,7 +9778,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.869';
+const GAME_VERSION = 'v0.29.870';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -123372,6 +123372,29 @@ function _sbBuild() {
 // yet). Async-probed once per id; the per-frame renders below call
 // _applySkillIcon, which is dataset-guarded so it only touches the DOM on change.
 const _skillIconStatus = Object.create(null);   // id -> 'pending' | 'ok' | 'fail'
+// v0.29.870 — ONE-WAY BATCH GATE for the icon swap (see _skillIconUrl).
+// Closed until every probe requested so far has settled, then latched open
+// forever. Latching matters: ids get requested later too (hotkey cards, a
+// class change), and letting those re-close the gate would drop already-
+// resolved icons back to emoji — a worse flicker than the one being fixed.
+// The timeout is the escape hatch: one probe that never settles must not
+// hold the whole bar on emoji for the rest of the session.
+let _lxSkillIconGate = false;
+let _lxSkillIconGateT0 = 0;
+const _LX_ICON_GATE_MAX_WAIT = 15000;
+function _lxSkillIconGateOpen() {
+  if (_lxSkillIconGate) return true;   // latched — cheap path for every later call
+  const ids = Object.keys(_skillIconStatus);
+  if (!ids.length) return false;
+  const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  if (!_lxSkillIconGateT0) _lxSkillIconGateT0 = now;
+  let settled = true;
+  for (let i = 0; i < ids.length; i++) {
+    if (_skillIconStatus[ids[i]] === 'pending') { settled = false; break; }
+  }
+  if (settled || (now - _lxSkillIconGateT0) > _LX_ICON_GATE_MAX_WAIT) _lxSkillIconGate = true;
+  return _lxSkillIconGate;
+}
 function _skillIconUrl(id) {
   if (!id) return null;
   if (_skillIconStatus[id] === undefined) {
@@ -123384,11 +123407,20 @@ function _skillIconUrl(id) {
     // served emoji forever. Silently is the operative word: onerror discards
     // the failure, which is correct for skills that genuinely have no art but
     // meant a wholesale extension mismatch looked identical to "no sprite yet".
+    // v0.29.870 — jump the bulk loader's queue. These nine files gate a
+    // visible HUD element; the ~2700 world sprites behind them do not.
+    try { im.fetchPriority = 'high'; } catch (e) {}
     im.src = 'Sprites/skills/' + id + '.webp';
   }
   // v0.29.735 perf — the status is a one-way latch, so the string is invariant
   // once resolved; this ran ~9-14x per 33ms HUD tick, all discarded.
   if (_skillIconStatus[id] !== 'ok') return null;
+  // v0.29.870 — batch gate, per user "on startup the icons keep changing".
+  // Without it each icon flips to art the moment its own probe decodes, and
+  // during the 2700-sprite startup load those land seconds apart: the bar
+  // visibly reshuffles one glyph at a time. Holding art back until the whole
+  // batch has settled turns N staggered changes into exactly one.
+  if (!_lxSkillIconGateOpen()) return null;
   return _lxSkillIconSrcMemo[id] || (_lxSkillIconSrcMemo[id] = 'Sprites/skills/' + id + '.webp');
 }
 function _applySkillIcon(el, id, emoji) {

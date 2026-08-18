@@ -121,6 +121,40 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.870 <span class="tag"><span class="pill bug">bug</span> The skill bar stops reshuffling its icons on startup</span></h2>
+<p>Per user, with a screenshot taken at <em>"Loading sprites 2544/2731 &middot; 93%"</em>:
+<em>on startup the icons keep changing.</em></p>
+<p>Every skill icon probed its own sprite (<code>_skillIconUrl</code> &rarr; <code>new Image()</code>) and
+flipped from emoji to art the instant <b>that one</b> decoded. During startup the
+bulk loader is pulling 2700+ files and saturating the connection pool, so the
+nine skill-bar probes resolve seconds apart &mdash; nine separate visible changes,
+staggered, while the player is already walking around.</p>
+<p>The property worth fixing is not "icons eventually show art" (they always did)
+but that the bar should never be caught <b>half swapped</b>. Measured on the previous
+build, driving the real status map into the exact startup condition:</p>
+<pre>before   art=4 emoji=5   +magicBolt +fireball +iceSpike +blink
+                         -arcaneBurst -soulSiphon -darkPulse -lich_harvest -lich_ult
+after    art=0 emoji=9   (then all nine together)</pre>
+<p>Two changes:</p>
+<ul>
+  <li><b>Batch the swap.</b> Every icon stays on its emoji until the whole first batch
+      of probes has settled, then they change together &mdash; nine staggered swaps
+      become one. The gate is a <b>one-way latch</b>: ids requested later (a hotkey
+      card, a class change) can never re-close it and drop resolved icons back to
+      emoji, which would be a worse flicker than the one being fixed. A 15&nbsp;s
+      timeout is the escape hatch so a single probe that never settles cannot
+      hold the bar on emoji for the rest of the session.</li>
+  <li><b>Prioritise the probes.</b> They are marked <code>fetchPriority = 'high'</code> so nine
+      files that gate a visible HUD element jump ahead of ~2700 world sprites
+      that do not. The one remaining swap now usually lands before you would
+      look at the bar.</li>
+</ul>
+<p>Guarded by <code>scripts/skill_icon_swap_test.mjs</code>, which drives <code>_skillIconStatus</code>
+into a half-resolved state and inspects the live DOM rather than waiting on real
+network timing. It also pins the two failure modes either side of the fix: the
+bar must fully populate once every probe settles, and a later pending probe must
+not revert it. On the previous build: <b>2 of 5 fail</b>.</p>
+
 <h2>v0.29.869 <span class="tag"><span class="pill polish">polish</span> Progression sweep: the Lv 10 cliff, and a correction</span></h2>
 <p>Per user: <em>do a feedback loop to help ensure that the game progression is smooth, and that the levelling is not too fast, do slight tweaks from the current setup.</em> Every knob combination was swept against the game's <b>own</b> <code>_lxLevelCost</code> and EXP functions and scored by its worst level-to-level jump in kills required.</p>
 
