@@ -9778,7 +9778,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.870';
+const GAME_VERSION = 'v0.29.871';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16482,6 +16482,27 @@ function _mapPlatformTint(md) {
   const id = (typeof game !== 'undefined' && game.currentMap) ? game.currentMap : (md && (md.id || md.name)) || 'town';
   const hit = _MAP_PLATFORM_TINT_CACHE[id];
   if (hit && hit.fromBg) return hit.tint;
+  // v0.29.871 — AUTHORED OVERRIDE, and it beats every inferred source. Before
+  // this there was no per-map platform colour property anywhere in the file, so
+  // a colour stated on a map was simply never read. Accepts either a single hex
+  //   platTint: '#8a5a3a'
+  // or an explicit pair
+  //   platTint: { top:'#a47a69', body:'#39242d' }
+  // A bare hex is expanded with the same maths the backdrop sampler uses, so an
+  // authored map and a sampled one are shaded identically and only the hue
+  // differs. Cached as fromBg so it is resolved once and never recomputed --
+  // which also means an authored map is correct on its FIRST frame and cannot
+  // flicker through a fallback while the art downloads.
+  const _pt = md && md.platTint;
+  if (_pt) {
+    let _tint = null;
+    if (typeof _pt === 'string' && /^#[0-9a-fA-F]{6}$/.test(_pt) && typeof _mixHex === 'function') {
+      _tint = { top: _mixHex(_pt, '#ffffff', 0.12), body: _mixHex(_pt, '#140a1e', 0.72) };
+    } else if (_pt.top && _pt.body) {
+      _tint = { top: String(_pt.top), body: String(_pt.body) };
+    }
+    if (_tint) { _MAP_PLATFORM_TINT_CACHE[id] = { tint: _tint, fromBg: true }; return _tint; }
+  }
   // Predominant colour of the painted backdrop first; the sky band is now the
   // fallback rather than the source.
   let base = null, fromBg = false;
@@ -16496,7 +16517,15 @@ function _mapPlatformTint(md) {
   // authored biome floor theme, never its sky. Only backdrop-less arenas
   // (sanctum / zodiac / carriage, which paint their own art) fall through to the
   // sky branch below, where the last gradient stop is the least sky-like part.
-  const _hasBg = !!_lxOwnBackdrop(md);
+  // v0.29.871 — "has a backdrop" is about what the map DECLARES, not about what
+  // has finished downloading. _lxOwnBackdrop() returns null until the image
+  // decodes, so on a cold load this was false for every map with art, and the
+  // sky branch below ran -- the exact case the comment above forbids. Measured
+  // on bastion: pre-decode it took sky stop #a8d8a8 (the green plains band) and
+  // painted #b2ddb2 slabs, where the decoded artwork samples to #986855 and
+  // gives the brick #a47a69. That is the green in the tester's screenshot, taken
+  // at 93% sprite load.
+  const _hasBg = !!(md && md.bg && typeof BG_IMAGES !== 'undefined' && BG_IMAGES[md.bg]);
   if (!base && _hasBg) {
     const tint = (typeof _pickFloorTheme === 'function'
       ? (_PLATFORM_THEME_TINT[_pickFloorTheme(md)] || _PLATFORM_TINT_DEFAULT)

@@ -121,6 +121,25 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.871 <span class="tag"><span class="pill bug">bug</span> A map can finally state its own floor colour &mdash; and stops going green while it loads</span></h2>
+<p>Per user, with a screenshot of The Bastion&rsquo;s slabs rendering lime green: <em>why does the platform and floor colour from my tester not follow the colour that i state they should be.</em></p>
+<p><b>Because nothing read it.</b> Grepping the whole file for any per-map platform-colour property &mdash; <code>platTint</code>, <code>floorColor</code>, <code>platformTint</code>, <code>slabColor</code> &mdash; returned <b>zero hits</b>. Slab colour was entirely <em>inferred</em>: sample the painted backdrop, else the biome floor theme, else the sky gradient. There was no property to set, so a stated colour could never be honoured.</p>
+<p><b><code>md.platTint</code> now exists and beats every inferred source.</b> It takes either a single hex or an explicit pair:</p>
+<pre><code>platTint: '#8a5a3a'
+platTint: { top:'#a47a69', body:'#39242d' }</code></pre>
+<p>A bare hex is expanded with the same maths the backdrop sampler uses &mdash; 12% toward white for the lit cap, 72% toward near-black for the body &mdash; so an authored map and a sampled one are cel-shaded identically and only the hue differs. It is cached on first resolve, which also means an authored map is correct on its <b>first frame</b> and cannot flicker through a fallback while art downloads.</p>
+<p><b>And the screenshot caught a real bug.</b> Measured on <code>MAPS.bastion</code>:</p>
+<div class="tw"><table>
+  <tr><th>Source</th><th>Base</th><th>Slab top</th><th></th></tr>
+  <tr><td>Sampled from the artwork</td><td><code>#986855</code></td><td><code>#a47a69</code></td><td>brick brown &mdash; correct</td></tr>
+  <tr><td>Sky-branch fallback</td><td><code>#a8d8a8</code></td><td><code>#b2ddb2</code></td><td>pale green</td></tr>
+  <tr><td>Biome fallback (grass)</td><td>&mdash;</td><td><code>#7ec850</code></td><td>lime green</td></tr>
+</table></div>
+<p>The shot was taken at <em>&ldquo;Loading sprites 2544/2731 &middot; 93%&rdquo;</em> &mdash; before the backdrop had decoded. <code>_lxOwnBackdrop()</code> returns null while <code>!img._loaded</code>, so <code>_hasBg</code> computed <b>false</b>: the code concluded the map has no backdrop at all and took the <b>sky</b> branch &mdash; exactly what the comment three lines above it forbids (<em>&ldquo;a map that HAS a backdrop but yielded no non-sky colour gets the authored biome floor theme, never its sky&rdquo;</em>). Bastion&rsquo;s last sky stop is <code>#a8d8a8</code>, its green-plains band. Hence green slabs.</p>
+<p>&ldquo;Has a backdrop&rdquo; is now a question about what the map <b>declares</b>, not about what has finished downloading.</p>
+<p><b>Verified:</b> a bare-hex override resolves to its mixed pair; an explicit pair passes through verbatim; the override wins even when the sampler has a good answer (<code>#986855</code>); and with the backdrop forced undecoded the tint no longer lands on the sky value.</p>
+<p><b>One honest limit:</b> the race fix stops the sky branch, but Bastion&rsquo;s authored biome is <code>grass</code>, so its pre-decode colour is still green &mdash; just a different green. For any map where the loading colour matters, <code>platTint</code> is the cure, because it resolves before either fallback can run.</p>
+
 <h2>v0.29.870 <span class="tag"><span class="pill bug">bug</span> The skill bar stops reshuffling its icons on startup</span></h2>
 <p>Per user, with a screenshot taken at <em>"Loading sprites 2544/2731 &middot; 93%"</em>:
 <em>on startup the icons keep changing.</em></p>
