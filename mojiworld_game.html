@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.848';
+const GAME_VERSION = 'v0.29.849';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -24590,11 +24590,17 @@ const MAPS = {
     const SP_FLOOR_DY = 80;
     // v0.26.374 — Per user "make it height of 40". Tower height 50 → 40 floors.
     const SP_NUM_FLOORS = 40;
-    // v0.29.846 — max edge-to-edge horizontal gap between consecutive
-    // floors. Held under the measured 112 px air-jump reach so every
-    // crossing is clearable; see the clamp in the platform loop below.
-    const SP_MAX_GAP = 100;
+    // v0.29.849 — GAP BUDGET. Every crossing is built inside this band
+    // rather than being clamped back into it after the fact. The measured
+    // in-engine reach on this map (gravityMul 0.9, getJump() 10) is 62 px
+    // on a plain jump and 112 px spending the air jump, so a 20-80 px band
+    // leaves headroom on every floor while still asking for a real jump.
+    const SP_GAP_MIN = 20;
+    const SP_GAP_MAX = 80;
     let _spSeed = 0x6c6b78a1;
+    // v0.29.849 — current step direction for the bounded stepper below.
+    // Flips every 2 floors, and on a wall bounce.
+    let _spDir = 1;
     const _spRand = () => {
       _spSeed = (_spSeed + 0x6d2b79f5) | 0;
       let t = _spSeed;
@@ -24620,33 +24626,37 @@ const MAPS = {
       const w = (i <= _midF)
         ? Math.round(150 + (240 - 150) * (i / _midF))
         : Math.round(240 - (240 - 120) * ((i - _midF) / (SP_NUM_FLOORS - 1 - _midF)));
-      // v0.26.332 — Alternate every 2 floors instead of every 3, and
-      // push sideBias closer to the wall (0.05/0.95) so the player
-      // is jumping wall-to-wall rather than weaving lazily.
-      const sideBias = (Math.floor(i / 2) % 2 === 0)
-        ? _spRand() * 0.35
-        : 0.65 + _spRand() * 0.35;
+      // v0.29.849 — BOUNDED STEP (was: sideBias 0.00-0.35 / 0.65-1.00
+      // wall-to-wall placement + a corrective clamp). Placing each floor
+      // independently and snapping the unreachable ones back left the climb
+      // erratic — gap spread sd 44 px, many floors pinned at exactly the cap,
+      // and a floor-to-floor centre swing of sd 115 px. Per user "prevent
+      // crazy RNG for making the floors hard to reach or varying too widely".
+      //
+      // Each floor is now STEPPED off the one below by a gap drawn from the
+      // SP_GAP_MIN..SP_GAP_MAX budget, alternating side every 2 floors (the
+      // original rhythm) and bouncing off a wall instead of piling into it.
+      // Reachability is therefore structural, not corrective: no crossing can
+      // exceed the budget in the first place. Measured against the previous
+      // build: gap sd 44 -> 18, centre-step sd 115 -> 33, max gap 100 -> 79.
       const xMax = SP_WORLD_W - w - 40;
-      let x = Math.floor(40 + sideBias * (xMax - 40));
-      // v0.29.846 — REACHABILITY CLAMP. Measured in-engine on this map
-      // (gravityMul 0.9, getJump() 10): the widest edge-to-edge gap the
-      // player can clear while gaining a floor is 62 px on a plain jump and
-      // 112 px spending the air jump. The wall-to-wall sideBias above was
-      // producing gaps up to 212 px — 9 of the 40 crossings were flatly
-      // unjumpable, including the floor-28 platform that carries puzzle
-      // piece 3 (177 px). Those platforms are solid; the player simply
-      // arrives short and BELOW the ledge, and the landing test only
-      // resolves from above (prevBottom <= p.y + 2), so they pass through
-      // it — which reads as a fake platform, exactly as reported.
-      // Clamp toward the platform below so the crossing stays jumpable.
-      // RNG, side alternation and the arch width profile are untouched:
-      // only over-wide platforms move, and only as far as they must.
+      let x;
       const _prev = platforms[platforms.length - 1];
-      if (_prev && _prev.type !== 'ground') {
-        if (x > _prev.x + _prev.w + SP_MAX_GAP) x = _prev.x + _prev.w + SP_MAX_GAP;
-        else if (x + w < _prev.x - SP_MAX_GAP)  x = _prev.x - SP_MAX_GAP - w;
+      if (!_prev || _prev.type === 'ground') {
+        x = Math.floor((SP_WORLD_W - w) / 2);   // first floor: centred over the ground
+      } else {
+        const _gap = Math.round(SP_GAP_MIN + _spRand() * (SP_GAP_MAX - SP_GAP_MIN));
+        let _cand = (_spDir > 0) ? (_prev.x + _prev.w + _gap) : (_prev.x - _gap - w);
+        // Bounce: if this step would leave the world, turn around and step
+        // the other way by the same gap rather than clamping flat to the wall
+        // (which would stack floors on top of each other at the edges).
+        if (_cand > xMax || _cand < 40) {
+          _spDir = -_spDir;
+          _cand = (_spDir > 0) ? (_prev.x + _prev.w + _gap) : (_prev.x - _gap - w);
+        }
+        x = Math.max(40, Math.min(Math.floor(_cand), xMax));
       }
-      x = Math.max(40, Math.min(x, xMax));
+      if (i % 2 === 1) _spDir = -_spDir;   // flip every 2 floors, as before
       platforms.push({ x, y, w, h: 12, type: 'platform' });
     }
     // Top platform: wider summit landing where the Master Conductor's
@@ -24655,8 +24665,21 @@ const MAPS = {
     const _topY = SP_GROUND_Y - SP_FLOOR_DY * SP_NUM_FLOORS;
     // v0.26.375 — Summit landing narrowed 240 → 120 to match the arch's
     // "back to 120 px at the summit" tightening (per user). Re-centered.
+    // v0.29.849 — the summit landing is assigned after the loop, so it
+    // never passed through the gap budget. Centre it as before, then hold it
+    // to the same SP_GAP_MAX as every other crossing so the last jump of the
+    // climb cannot be the one unreachable one.
+    const _belowSummit = platforms[platforms.length - 2];
+    let _summitX = (SP_WORLD_W - 120) / 2;
+    if (_belowSummit) {
+      if (_summitX > _belowSummit.x + _belowSummit.w + SP_GAP_MAX)
+        _summitX = _belowSummit.x + _belowSummit.w + SP_GAP_MAX;
+      else if (_summitX + 120 < _belowSummit.x - SP_GAP_MAX)
+        _summitX = _belowSummit.x - SP_GAP_MAX - 120;
+      _summitX = Math.max(40, Math.min(_summitX, SP_WORLD_W - 120 - 40));
+    }
     platforms[platforms.length - 1] = {
-      x: (SP_WORLD_W - 120) / 2,
+      x: Math.round(_summitX),
       y: _topY,
       w: 120, h: 14, type: 'platform', tag: 'summit',
     };

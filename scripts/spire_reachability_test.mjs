@@ -1,18 +1,19 @@
-// CLOCKWORK SPIRE REACHABILITY — regression guard.
+// CLOCKWORK SPIRE — layout stability, reachability and RNG-variance guard.
 // ============================================================================
-// Reported as "3rd piece of the puzzle platform is fake. if I try to jump on it
-// I fall right through". The platform is solid — every one of the 40 holds a
-// clean drop — but it sat behind a 177 px horizontal crossing, and the player
-// cannot jump that far while also gaining a floor. A jump that falls short
-// reaches the ledge's x-range while still BELOW its top surface, and the
-// landing test only resolves from above (prevBottom <= p.y + 2), so the player
-// passes straight through: indistinguishable from a fake platform.
+// Two user reports, one map:
+//   1. "3rd piece of the puzzle platform is fake. if I try to jump on it I
+//      fall right through."  -> the platform was solid but 177 px away, past
+//      the player's reach. A jump that falls short still enters the ledge's
+//      x-range while BELOW its top, and the landing test only resolves from
+//      above (prevBottom <= p.y + 2), so the player passes through it.
+//   2. "ensure that the platform are fixed, also prevent crazy RNG for making
+//      the floors hard to reach or varying too widely."
 //
 // This does NOT hardcode a jump distance. It MEASURES the reach from the live
-// engine (holding the jump key, because the engine cuts vy on release for
-// variable jump height — a short-hop measures ~22 px and proves nothing), then
-// asserts the generated level respects it. So if jump physics or map gravity
-// ever change, the test re-derives the budget instead of going stale.
+// engine (holding the jump key — the engine cuts vy on release for variable
+// jump height, so a short-hop measures ~22 px and proves nothing), then asserts
+// the generated level respects it. If jump physics or map gravity ever change,
+// the budget re-derives instead of going stale.
 // Run: node scripts/spire_reachability_test.mjs   (MOJI_GAME_FILE overrides)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -48,14 +49,35 @@ await page.waitForTimeout(2500);
 
 const R = await page.evaluate(async () => {
   player.level = 60; player._god = true;
+  const sig = () => (game.mapData.platforms || [])
+    .map(p => `${p.x},${p.y},${p.w},${p.h},${p.type}`).join('|');
+
+  // ---- LAYOUT STABILITY: same geometry on every entry ---------------------
+  const sigs = [];
+  for (let n = 0; n < 3; n++) {
+    loadMap('clockworkSpire', 300);
+    await new Promise(r => setTimeout(r, 900));
+    sigs.push(sig());
+    loadMap('forest', 300);                 // leave and come back
+    await new Promise(r => setTimeout(r, 500));
+  }
   loadMap('clockworkSpire', 300);
-  await new Promise(r => setTimeout(r, 1600));
+  await new Promise(r => setTimeout(r, 1400));
   game.paused = false;
+  const stable = sigs.every(s => s === sigs[0]);
+
+  // The authored source array must not be mutated by loading, and the
+  // per-load jitter pass must not touch this map (isVerticalTower skips it).
+  const authored = MAPS.clockworkSpire.platforms
+    .map(p => `${p.x},${p.y},${p.w},${p.h},${p.type}`).join('|');
+  const varied = _variedMapData('clockworkSpire').platforms
+    .map(p => `${p.x},${p.y},${p.w},${p.h},${p.type}`).join('|');
+  const unjittered = varied === authored;
 
   const live = (game.mapData.platforms || []).slice();
   const climb = live.filter(p => p.type !== 'ground').slice().sort((a, b) => b.y - a.y);
 
-  // ---- 1. drop test: is every platform actually solid? --------------------
+  // ---- every platform must actually be solid ------------------------------
   let solid = 0;
   for (const p of climb) {
     player.x = p.x + p.w / 2 - player.w / 2;
@@ -69,7 +91,7 @@ const R = await page.evaluate(async () => {
     if (player.onGround && Math.abs((player.y + player.h) - p.y) < 3) solid++;
   }
 
-  // ---- 2. measure the real jump reach on a flat slab ----------------------
+  // ---- measure the real jump reach on a flat slab --------------------------
   const savedPlats = game.mapData.platforms;
   const Y = 3000;
   game.mapData.platforms = [{ x: -4000, y: Y, w: 9000, h: 20, type: 'platform' }];
@@ -100,17 +122,21 @@ const R = await page.evaluate(async () => {
   const reachSingle = reach(false), reachAir = reach(true);
   game.mapData.platforms = savedPlats;
 
-  // ---- 3. every crossing must be within that reach ------------------------
-  const gaps = [];
+  // ---- crossing geometry ---------------------------------------------------
+  const gaps = [], steps = [];
   for (let n = 1; n < climb.length; n++) {
     const p = climb[n], q = climb[n - 1];
     gaps.push({ n, y: p.y,
       dx: (p.x > q.x + q.w) ? p.x - (q.x + q.w) : (q.x > p.x + p.w) ? q.x - (p.x + p.w) : 0 });
+    steps.push(Math.abs((p.x + p.w / 2) - (q.x + q.w / 2)));
   }
+  const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+  const sd = a => { const m = mean(a); return Math.sqrt(mean(a.map(v => (v - m) ** 2))); };
+  const dxs = gaps.map(g => g.dx);
   const pieceYs = MAPS.clockworkSpire._pqChestPieces.map(c => c.y + 28);
   return {
-    total: climb.length, solid, reachSingle, reachAir,
-    maxGap: Math.max(...gaps.map(g => g.dx)),
+    total: climb.length, solid, reachSingle, reachAir, stable, unjittered,
+    maxGap: Math.max(...dxs), gapSd: +sd(dxs).toFixed(1), stepSd: +sd(steps).toFixed(1),
     overReach: gaps.filter(g => g.dx > reachAir).map(g => ({ y: g.y, dx: g.dx })),
     pieceGaps: pieceYs.map((y, i) => {
       const g = gaps.find(o => o.y === y);
@@ -120,12 +146,24 @@ const R = await page.evaluate(async () => {
 });
 await browser.close(); server.kill();
 
+// Budgets. The map builds to SP_GAP_MAX = 80; these guard the *properties*
+// that matter so a future generator change cannot quietly re-widen the climb.
+const GAP_BUDGET = 80;     // no crossing wider than the authored budget
+const GAP_SD_MAX = 25;     // crossings stay consistent (pre-fix: 44)
+const STEP_SD_MAX = 60;    // floors don't swing across the tower (pre-fix: 115)
+
 const res = [];
-const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 110) });
+const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 115) });
+
+ok('layout is FIXED across repeated entries', R.stable);
+ok('per-load jitter never touches this map', R.unjittered);
 ok('every climbing platform is solid', R.solid === R.total, `${R.solid}/${R.total}`);
 ok('measured jump reach is sane (not a short-hop)', R.reachAir > 60, `single=${R.reachSingle} air=${R.reachAir}`);
 ok('no crossing exceeds the measured air-jump reach', R.overReach.length === 0,
    R.overReach.length ? `${R.overReach.length} over: ` + R.overReach.map(o => `y${o.y}:${o.dx}px`).join(' ') : `maxGap=${R.maxGap}`);
+ok('no crossing exceeds the authored gap budget', R.maxGap <= GAP_BUDGET, `maxGap=${R.maxGap} budget=${GAP_BUDGET}`);
+ok('crossing widths stay consistent', R.gapSd <= GAP_SD_MAX, `gap sd=${R.gapSd} max=${GAP_SD_MAX}`);
+ok('floors do not swing across the tower', R.stepSd <= STEP_SD_MAX, `centre-step sd=${R.stepSd} max=${STEP_SD_MAX}`);
 for (const p of R.pieceGaps) {
   ok(`puzzle piece #${p.piece} is reachable`, p.dx <= R.reachAir, `gap=${p.dx}px vs reach=${R.reachAir}px`);
 }
