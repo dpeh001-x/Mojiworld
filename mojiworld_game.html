@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.846';
+const GAME_VERSION = 'v0.29.847';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -56070,6 +56070,41 @@ function loadMap(id, entryX, entryY) {
       !game.mapData._expeditionMap && !game.mapData._pqSpire && !game.mapData._noNaturalChests;
   if (_chestEligible && (_monoNow() - (game._chestCooldown[id] || 0)) > _CHEST_RESTOCK_MS) {
     const plats = game.mapData.platforms.filter(p => p.type === 'platform');
+    // v0.29.847 — KEEP CHESTS OFF PORTALS AND NPCS. Placement only ever checked
+    // chest-vs-chest, so a chest could land in a portal mouth or under an NPC:
+    // hard to see, hard to aim at, and competing for attention with the thing
+    // it is sitting on. game.npcs and game.portals are both resolved earlier in
+    // this same load, so their real coordinates are readable here — including
+    // the defaults for entries that author no y (portals ride the ground line,
+    // NPCs sit at 436).
+    const _CHEST_CLEAR_X = 130;   // a chest is 35 wide; leaves a clear body-width either side
+    const _CHEST_CLEAR_Y = 70;    // one ledge-height, so directly above or below still counts
+    const _chestKeepOut = [];
+    for (const _po of (game.portals || [])) {
+      if (!_po || !Number.isFinite(_po.x)) continue;
+      _chestKeepOut.push({ x: _po.x, y: (typeof _po.y === 'number') ? _po.y
+        : ((typeof _defaultPortalY === 'function') ? _defaultPortalY() : 480) });
+    }
+    for (const _np of (game.npcs || [])) {
+      if (!_np || !Number.isFinite(_np.x)) continue;
+      _chestKeepOut.push({ x: _np.x, y: (typeof _np.y === 'number') ? _np.y : 436 });
+    }
+    const _chestBlocked = (cx, cy) => _chestKeepOut.some((k) =>
+      Math.abs(k.x - cx) < _CHEST_CLEAR_X && Math.abs(k.y - cy) < _CHEST_CLEAR_Y);
+    // Drop whole ledges with no clear spot anywhere along them, so the random
+    // pick cannot burn its retries on a platform that was never going to work.
+    // If EVERY ledge is crowded — a small map whose portal sits on the only
+    // platform — fall back to the full list rather than silently spawning no
+    // chest: a chest beside a portal still beats no chest at all.
+    const _platClear = (p) => {
+      const _lim = Math.max(0, (p.w || 0) - 55);
+      for (let _dx = 0; _dx <= _lim; _dx += 20) {
+        if (!_chestBlocked(p.x + 27 + _dx, p.y - 24)) return true;
+      }
+      return false;
+    };
+    const _clearPlats = plats.filter(_platClear);
+    const _pool = _clearPlats.length ? _clearPlats : plats;
     // Fewer than before (was always 1-3 per visit): 45% none, else 1, occasionally 2.
     const count = (Math.random() < 0.45) ? 0 : (1 + (Math.random() < 0.30 ? 1 : 0));
     // v0.29.609 (per user: "chest was reusable for more than once") — this
@@ -56087,15 +56122,15 @@ function loadMap(id, entryX, entryY) {
     // The bug was never one chest paying twice; it was two chests in one place.
     const _usedPlats = [];
     const _placed = [];
-    for (let i = 0; i < count && plats.length; i++) {
+    for (let i = 0; i < count && _pool.length; i++) {
       // Prefer a platform this restock has not used yet, so two chests spread
       // across the map rather than sharing a ledge.
       let p = null;
       for (let _t = 0; _t < 8; _t++) {
-        const _c = plats[Math.floor(Math.random() * plats.length)];
+        const _c = _pool[Math.floor(Math.random() * _pool.length)];
         if (_usedPlats.indexOf(_c) < 0) { p = _c; break; }
       }
-      if (!p) p = plats[Math.floor(Math.random() * plats.length)];
+      if (!p) p = _pool[Math.floor(Math.random() * _pool.length)];
       _usedPlats.push(p);
       // Spread ALONG the platform instead of pinning to its centre, and reject
       // a spot within 60px of one already placed — so even when a narrow map
@@ -56108,7 +56143,11 @@ function loadMap(id, entryX, entryY) {
         // every platform's y independently, so two ledges authored at the same
         // height end up a few px apart and a strict equality test then waved
         // through chests 9px from each other (measured).
-        if (!_placed.some(q => Math.abs(q.y - (p.y - 24)) < 40 && Math.abs(q.x - _x) < 60)) break;
+        // v0.29.847 — two rules now: clear of the other chests AND clear of any
+        // portal / NPC. The chest's CENTRE is tested (_x is its left edge) so
+        // the clearance is measured from what the player actually sees.
+        const _clashChest = _placed.some(q => Math.abs(q.y - (p.y - 24)) < 40 && Math.abs(q.x - _x) < 60);
+        if (!_clashChest && !_chestBlocked(_x + 17, p.y - 24)) break;
         _x = p.x + 10 + Math.random() * _span;
       }
       _placed.push({ x: _x, y: p.y - 24 });
@@ -56127,7 +56166,28 @@ function loadMap(id, entryX, entryY) {
   // a gold-tier chest flagged _cursed, spawned mid-map so it's found.
   // Opening it grants tier+1 loot but lays the hex (see openChest).
   if (game._mapCursed && typeof spawnChest === 'function') {
-    const _cplats = (game.mapData.platforms || []).filter(p => p.type === 'platform');
+    // v0.29.847 — the cursed chest spawns from its own block and would otherwise
+    // ignore the keep-out the restock loop now honours. It rebuilds the list
+    // because that one is scoped to the restock branch, which does not run on a
+    // map still inside its 15-minute cooldown.
+    const _ccClearX = 130, _ccClearY = 70;
+    const _ccKeepOut = [];
+    for (const _po of (game.portals || [])) if (_po && Number.isFinite(_po.x)) {
+      _ccKeepOut.push({ x: _po.x, y: (typeof _po.y === 'number') ? _po.y
+        : ((typeof _defaultPortalY === 'function') ? _defaultPortalY() : 480) });
+    }
+    for (const _np of (game.npcs || [])) if (_np && Number.isFinite(_np.x)) {
+      _ccKeepOut.push({ x: _np.x, y: (typeof _np.y === 'number') ? _np.y : 436 });
+    }
+    const _ccBlocked = (cx, cy) => _ccKeepOut.some((k) =>
+      Math.abs(k.x - cx) < _ccClearX && Math.abs(k.y - cy) < _ccClearY);
+    const _cplatsAll = (game.mapData.platforms || []).filter(p => p.type === 'platform');
+    const _cplatsClear = _cplatsAll.filter((p) => {
+      const _lim = Math.max(0, (p.w || 0) - 55);
+      for (let _dx = 0; _dx <= _lim; _dx += 20) if (!_ccBlocked(p.x + 27 + _dx, p.y - 24)) return true;
+      return false;
+    });
+    const _cplats = _cplatsClear.length ? _cplatsClear : _cplatsAll;
     const _cp = _cplats.length ? _cplats[Math.floor(Math.random() * _cplats.length)]
                                : { x: (game.mapData.worldWidth || 960) / 2, y: 440, w: 120 };
     // v0.29.609 — spread + separate, matching the restock loop above. This
@@ -56140,7 +56200,7 @@ function loadMap(id, entryX, entryY) {
     for (let _t = 0; _t < 12; _t++) {
       const _clash = (game.chests || []).some(q => q &&
         Math.abs(q.y - (_cp.y - 24)) < 40 && Math.abs(q.x - _ccX) < 60);
-      if (!_clash) break;
+      if (!_clash && !_ccBlocked(_ccX + 17, _cp.y - 24)) break;   // v0.29.847 — keep-out too
       _ccX = _cp.x + 10 + Math.random() * _ccSpan;
     }
     const _cc = spawnChest(_ccX, _cp.y - 24, 'gold');
