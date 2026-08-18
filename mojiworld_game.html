@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.851';
+const GAME_VERSION = 'v0.29.852';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -60201,13 +60201,44 @@ function updatePlayer(dt) {
         const _scE = pet.scale || 1; pet.w = 44 * _scE; pet.h = 30 * _scE;
         pet.x += ((player.x + player.w / 2 - 80 * (player.facing || 1)) - pet.x) * 0.12;
         pet.y += ((player.y - 80) - pet.y) * 0.12;
-        pet.facing = player.facing || 1; pet.vx = 0;
+        pet.vx = 0;
+        // v0.29.850 — THE EAGLE PICKS A MARK, EVERY FRAME. Two separate faults.
+        // It chose `_ets[(Math.random() * _ets.length) | 0]` — a UNIFORM RANDOM
+        // draw from everything in range, the only ally in the game that did not
+        // aim at all — so it sprayed a room and finished nothing in it. And the
+        // target was resolved only INSIDE the fire gate, so between shots the
+        // bird held no opinion and simply faced wherever the player faced.
+        const _eCx = pet.x + pet.w / 2, _eCy = pet.y + pet.h / 2;
+        let _et = null, _eBest = Infinity;
+        for (const _m of game.monsters) {
+          if (!_m || _m.currentHp <= 0) continue;
+          const _edx = (_m.x + _m.w / 2) - _eCx, _edy = (_m.y + _m.h / 2) - _eCy;
+          // The 950px reach stays — the eagle is the longest-ranged ally and
+          // that IS its role — but it gains the vertical bound it never had,
+          // so it stops sniping things most of a screen below its own altitude.
+          if (Math.abs(_edx) > 950 || Math.abs(_edy) > 420) continue;
+          const _hpF = (_m.maxHp > 0) ? Math.max(0, Math.min(1, _m.currentHp / _m.maxHp)) : 1;
+          // Same shape the wolves and the lich's minions score by: near first,
+          // wounded first, plus stickiness so it finishes its current mark
+          // rather than re-deciding every frame.
+          let _sc = (Math.abs(_edx) + Math.abs(_edy) * 1.5) * (0.55 + 0.45 * _hpF);
+          if (pet._tgtRef === _m) _sc *= _ALLY_STICKY;
+          if (_sc < _eBest) { _eBest = _sc; _et = _m; }
+        }
+        pet._tgtRef = _et;
+        pet.facing = _et ? (Math.sign((_et.x + _et.w / 2) - _eCx) || pet.facing || 1)
+                         : (player.facing || 1);
         pet.fireCd = (pet.fireCd || 0) - dt;
         if (pet.fireCd <= 0) {
-          const _ets = game.monsters.filter(m => m && m.currentHp > 0 && Math.abs((m.x + m.w / 2) - (pet.x + pet.w / 2)) < 950);
-          if (_ets.length) {
-            const _et = _ets[(Math.random() * _ets.length) | 0];
-            game.projectiles.push({ x: pet.x + pet.w / 2, y: pet.y + pet.h / 2, vx: (player.facing || 1) * 9, vy: 0, w: 48, h: 16, life: 130, damage: Math.floor(getAtk() * 1.0) + 6, owner: 'player', skill: 'gale', homing: _et, bspr: 'bult_skyhunter', bsprKeepAspect: true, color: '#ffd24a', pierce: true, pierceLeft: 2 });   // v0.29.5xx — 512×512 art was crushed into a 72×24 box (3.00×); keepAspect draws it square
+          if (_et) {
+            // v0.29.850 — launch ALONG the line to the mark. The arrow left at
+            // `vx: player.facing * 9, vy: 0` and leaned on homing to drag it
+            // back, so a target behind the player got a shot that flew away
+            // first and then turned around. Homing still bends it onto a moving
+            // mark; it just no longer opens by going the wrong way.
+            const _adx = (_et.x + _et.w / 2) - _eCx, _ady = (_et.y + _et.h / 2) - _eCy;
+            const _ad = Math.sqrt(_adx * _adx + _ady * _ady) || 1;
+            game.projectiles.push({ x: _eCx, y: _eCy, vx: (_adx / _ad) * 9, vy: (_ady / _ad) * 9, w: 48, h: 16, life: 130, damage: Math.floor(getAtk() * 1.0) + 6, owner: 'player', skill: 'gale', homing: _et, bspr: 'bult_skyhunter', bsprKeepAspect: true, color: '#ffd24a', pierce: true, pierceLeft: 2 });   // v0.29.5xx — 512×512 art was crushed into a 72×24 box (3.00×); keepAspect draws it square
             pet.fireCd = 600;
           } else { pet.fireCd = 350; }
         }
@@ -60259,10 +60290,22 @@ function updatePlayer(dt) {
           pet.cdAtk = 1500;
         }
       } else {
-        const dx = (player.x + player.w/2) - _pcx - 50 * player.facing;
+        // v0.29.850 — PATROL, DON'T HEEL. The companion steered at exactly
+        // `player.x - 50 * facing` and held it, so it slid along glued to your
+        // hip and teleported sides whenever you turned around. Same roam the
+        // pack got in v0.29.847, at a tighter 140px radius (the pack roams 220):
+        // this is ONE bonded companion, so it should read as circling you, not
+        // as a pack member off on its own errand.
+        const _tW = game.time || 0;
+        if (pet._roamTX == null || _tW >= (pet._roamUntil || 0) || Math.abs(pet._roamTX - _pcx) < 20) {
+          pet._roamTX = (player.x + player.w / 2) + (Math.random() * 2 - 1) * 140;
+          pet._roamUntil = _tW + 120 + Math.floor(Math.random() * 180);
+        }
+        const dx = pet._roamTX - _pcx;
+        pet.facing = Math.sign(dx) || pet.facing || 1;
         pet.vx += Math.sign(dx) * 0.15;
-        pet.vx *= 0.85;
-        pet.facing = player.facing;
+        if (Math.abs(pet.vx) > 1.8) pet.vx = Math.sign(pet.vx) * 1.8;
+        pet.vx *= 0.9;
       }
       pet.x += pet.vx;
       // v0.29.815 — allies had no world clamp at all, so a chase could carry one
@@ -69547,7 +69590,7 @@ const SKILL_FNS = {
     // the hover tick sets the hitbox to 44×30 × scale. Both fall to exactly 75%
     // — 22×2.97 = 65.3 stays clear of the max(32,…) floor, so nothing clamps
     // and the visual and its collision box stay in agreement.
-    player.ultPet = { x: player.x, y: player.y - 80, vx: 0, vy: 0, hp: 9000, maxHp: 9000, life: 42000, maxLife: 42000, cdAtk: 0, fireCd: 0, scale: 2.97, sprite: 'eagle', flying: true, shooter: true };   // v0.26.x — separate slot so it coexists with the F-skill wolf
+    player.ultPet = { x: player.x, y: player.y - 80, vx: 0, vy: 0, hp: 90000, maxHp: 90000,   /* v0.29.850 — 10x, matching the pack. Live: the eagle takes no CONTACT damage (it flies above the melee line) but enemy projectiles hit it through the shared summon-hit path. */ life: 42000, maxLife: 42000, cdAtk: 0, fireCd: 0, scale: 2.97, sprite: 'eagle', flying: true, shooter: true };   // v0.26.x — separate slot so it coexists with the F-skill wolf
     for (let i = 0; i < 14; i++) { const a = (i / 14) * Math.PI * 2; game.particles.push({ x: player.x + player.w / 2, y: player.y, vx: Math.cos(a) * 5, vy: Math.sin(a) * 4, life: 38, color: '#cfeaff', size: 3 }); }
   },
 };
