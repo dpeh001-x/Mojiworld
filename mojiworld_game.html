@@ -9771,7 +9771,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.858';
+const GAME_VERSION = 'v0.29.859';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -38191,7 +38191,13 @@ function blackHold(f) { game.blackHoldFrames = Math.max(game.blackHoldFrames || 
 // The event is a FLAT bonus for everyone; the newbie band outranks it below
 // Lv ~9.5, so the two never stack multiplicatively.
 const LX_EXP = {
-  event:    2,   // v0.29.778 — per user, x10 -> x2. Limited-time event on ALL
+  event:    1,   // v0.29.858 — ENDED (per user: "reduce the exp gain from events
+                 // (or remove it)" + "I level too fast from 10-20"). This is a
+                 // FLOOR under _lxEarlyExpMul's max(band, evt), so at 2 it never
+                 // expired: every award past Lv 10 was permanently doubled while
+                 // quest counts were not, which is the backlog the user is
+                 // describing. The newbie band (Lv 1-10) is untouched.
+                 // v0.29.778 — per user, x10 -> x2. Limited-time event on ALL
                  // EXP. Set to 1 to end it; the login banner and every award
                  // site follow automatically (the banner quotes the ramp's
                  // live value, and _lxEarlyExpMul reads this as its floor, so
@@ -38272,6 +38278,23 @@ const LX_QUEST_EXP_MULT = LX_EXP.quest;       // alias — value lives in LX_EXP
 // flat x5 from ~Lv 9.5 up. Continuous everywhere: the band eases 70..62..1
 // and the switch to the event value happens where the two curves cross.
 // Ending the event (LX_EXP.event = 1) restores plain band -> x1 by Lv 10.
+// v0.29.858 — LEVEL-GAP EXP FALLOFF. Per user: "I'm level 27 [and] still
+// stuck doing quests for level 14". Killing far-under-level monsters paid full
+// EXP, so grinding an old quest pushed the player further past it the whole
+// time. Full rate within 5 levels (so current content and near-level backlog
+// are untouched), then a slide to a 15% floor.
+//     gap  0-5 -> x1.00     gap 10 -> x0.73     gap 13 -> x0.56
+//     gap 15 -> x0.45       gap 20 -> x0.18     gap 22+ -> x0.15
+// Reads m.level, the same signal the level-gap STAT scaler already uses, and
+// returns 1 unchanged for anything without a level.
+function _lxExpLevelGapMul(m) {
+  const pl = (typeof player !== 'undefined' && player) ? (player.level | 0) : 0;
+  const ml = (m && m.level) | 0;
+  if (pl <= 0 || ml <= 0) return 1;
+  const gap = pl - ml;
+  if (gap <= 5) return 1;
+  return Math.max(0.15, 1 - (gap - 5) * 0.055);
+}
 function _lxEarlyExpMul(lv) {
   const L = Math.max(1, lv | 0);
   const evt = (LX_EXP.event > 0) ? LX_EXP.event : 1;
@@ -52569,13 +52592,13 @@ const WORLD_AFFIXES = [
   { id: 'gilded',  name: 'Gilded',        icon: '🪙', color: '#ffd870',
     desc: 'Coin purses run heavy here.',            coin: 1.60, exp: 1.00, drop: 1.00, elite: 0 },
   { id: 'teeming', name: 'Teeming',       icon: '🩸', color: '#ff8a7a',
-    desc: 'Elites stalk this ground.',              coin: 1.00, exp: 1.15, drop: 1.25, elite: 0.14 },
+    desc: 'Elites stalk this ground.',              coin: 1.00, exp: 1.05, drop: 1.25, elite: 0.14 },
   { id: 'lucid',   name: 'Lucid',         icon: '✦',  color: '#9ad8ff',
-    desc: 'Experience settles deeper.',             coin: 1.00, exp: 1.45, drop: 1.00, elite: 0 },
+    desc: 'Experience settles deeper.',             coin: 1.00, exp: 1.12, drop: 1.00, elite: 0 },
   { id: 'hoarded', name: 'Hoard-Touched', icon: '💎', color: '#c8a2ff',
     desc: 'The ground gives up its keepsakes.',     coin: 1.00, exp: 1.00, drop: 1.90, elite: 0.05 },
   { id: 'restless',name: 'Restless',      icon: '🌙', color: '#8fe3c0',
-    desc: 'Everything here is awake, and richer for it.', coin: 1.25, exp: 1.25, drop: 1.15, elite: 0.08 },
+    desc: 'Everything here is awake, and richer for it.', coin: 1.25, exp: 1.08, drop: 1.15, elite: 0.08 },
 ];
 // Weighted draw — 'none' dominates so an affix stays an event, not wallpaper.
 const _WORLD_AFFIX_WEIGHTS = { none: 52, gilded: 12, teeming: 10, lucid: 10, hoarded: 6, restless: 10 };
@@ -81031,7 +81054,7 @@ function killMonster(m) {
   // continuous ramp (see _lxEarlyExpMul): ×30 at Lv 1 → ×10 at Lv 10 → ×1 by
   // Lv 30. No cliff at Lv 6, and the boost genuinely returns to normal.
   const _earlyLvlXpMul = (typeof _lxEarlyExpMul === 'function') ? _lxEarlyExpMul(player.level || 1) : 1;
-  const _xpGain = Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul * mpCoopMul * _pqFarmMul * _earlyLvlXpMul * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _affixExpMul === 'function' ? _affixExpMul() : 1) * _ksXpMul());   // v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.288 world affix · v0.29.352 Slaughter Ladder EXP boon
+  const _xpGain = Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul * mpCoopMul * _pqFarmMul * _earlyLvlXpMul * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _affixExpMul === 'function' ? _affixExpMul() : 1) * _ksXpMul() * _lxExpLevelGapMul(m));   // v0.29.858 level-gap falloff · v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.288 world affix · v0.29.352 Slaughter Ladder EXP boon
   player.exp += _xpGain;
   // v0.29.296 — Trainee Path: count the kill, then test the ladder. Skipped
   // entirely once the path is finished so a long-running save pays nothing.
@@ -81822,7 +81845,7 @@ function triggerSuperBossDeath(m) {
 
   // Huge EXP bonus on top of normal (prestige-scaled)
   const _pXp = (game.prestige && game.prestige.xpMult) || 1;
-  player.exp += Math.floor(m.exp * 0.5 * _pXp * ((typeof _lxEarlyExpMul === 'function') ? _lxEarlyExpMul(player.level || 1) : 1) * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _edictExpMul === 'function' ? _edictExpMul() : 1));   // v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.66 Edict Weight EXP bonus
+  player.exp += Math.floor(m.exp * 0.5 * _pXp * ((typeof _lxEarlyExpMul === 'function') ? _lxEarlyExpMul(player.level || 1) : 1) * _lxExpLevelGapMul(m) * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _edictExpMul === 'function' ? _edictExpMul() : 1));   // v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.66 Edict Weight EXP bonus
   // v0.26.x audit FIX — convert the banked bonus into levels NOW. The kill
   // flow's only _maybeLevelUp runs BEFORE this grant, so without this call a
   // Shardfather kill (a big, level-crossing bonus, more so with the ×20 EXP
