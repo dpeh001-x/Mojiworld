@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.836';
+const GAME_VERSION = 'v0.29.837';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -72674,7 +72674,7 @@ function updateMonsters(dt) {
       // occasional cast pattern (~20% of a fight, measured). Pulse the
       // attack loop exactly when a contact hit lands (same time-based field
       // every other attack path uses, so it self-clears).
-      try { m.atkAnimUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + 650; } catch (_) {}
+      try { m.atkAnimUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + (m.isBoss ? 650 : 760); } catch (_) {}
       // Knight Guardian reflect — bounce the cast's rolled percentage back.
       // v0.29.671 — was a hardcoded 50%; Holy Shield stamps its own 50 below.
       if (player._guardianReflect && game.time < player._guardianReflect && m.currentHp > 0) {
@@ -111077,6 +111077,16 @@ function _bossLoopFrame(frames, frameMs, maxLong, offsetMs) {   // v0.29.418 —
 const BOSS_ATTACK_FRAMES = Object.create(null);
 _loadBossFrames(BOSS_ATTACK_FRAMES, 'attack');
 const _BOSS_ATK_FRAME_MS = 48;   // v0.26.645 — shorter inter-frame gap for a smoother/faster attack loop (~0.43s/9-frame cycle, was 70ms/0.63s)
+// v0.29.x — per user, on a Gate screenshot: "animations on monsters in this map
+// are very fast, basically, the attack animation is incredibly brief". At 48 ms
+// a nine-frame swing is over in 432 ms — a windup, a strike and a recovery in
+// under half a second, which on a heavy silhouette like the Echo Knight reads
+// as a twitch rather than a swing. 48 ms was chosen for BOSSES, where the
+// camera is on one large actor doing a telegraphed pattern; ordinary mobs are
+// small, numerous, and usually mid-chase, so they need longer to register.
+// 72 ms puts a full cycle at 648 ms, close to the 70 ms the whole game used
+// before v0.26.645, and bosses keep the faster rate they were tuned at.
+const _MOB_ATK_FRAME_MS = 72;    // ~0.65s per 9-frame cycle for non-boss monsters
 // v0.29.418 — optional `m`: with the boss in hand, its state cycle is phased
 // per entity (attack plays from frame 0 on entry, idle/walk desynced) via
 // _mobAnimPhase. Without it (readiness probes, legacy sites) behaviour is
@@ -112642,6 +112652,9 @@ function _monsterStateFrame(m) {
   // also rooted, so the swing cannot slide) or the authored attack-animation
   // window that contact hits and parries stamp.
   let attacking = _mobAttackAnim(m);
+  // Bosses keep _BOSS_ATK_FRAME_MS: their pacing was deliberately tuned and a
+  // slower boss swing is a balance change, not a readability fix.
+  const _atkMs = m.isBoss ? _BOSS_ATK_FRAME_MS : _MOB_ATK_FRAME_MS;
   // v0.26.x — Per user: monsters play their attack animation when the player is
   // NEAR (within ~1.2x their width). This block always existed but was dead —
   // it gated on `player.currentHp` (undefined; the player uses player.hp), so it
@@ -112661,7 +112674,7 @@ function _monsterStateFrame(m) {
     const _pdx = Math.abs((m.x + m.w / 2) - (player.x + player.w / 2));
     const _pdy = Math.abs((m.y + m.h / 2) - (player.y + player.h / 2));
     const _inR = m._proxAtk ? (_pdx < m.w * 1.5 && _pdy < m.h * 1.25) : (_pdx < m.w * 1.2 && _pdy < m.h);
-    if (_inR && !m._proxAtk) m._proxAtkMinUntil = now + _BOSS_ATK_FRAME_MS * 9;
+    if (_inR && !m._proxAtk) m._proxAtkMinUntil = now + _atkMs * 9;
     m._proxAtk = _inR || now < (m._proxAtkMinUntil || 0);
     attacking = m._proxAtk;
   }
@@ -112682,7 +112695,7 @@ function _monsterStateFrame(m) {
   // entry (the windup finally plays), walk starts on its first stride, and
   // idle/walk carry a per-mob seed so a pack doesn't animate in lockstep.
   const _mfb = _mobFrameBase(m);   // v0.29.707 — per-type bake base (see above)
-  if (attacking) return _bossLoopFrame(set.attack, _BOSS_ATK_FRAME_MS, _mfb, _mobAnimPhase(m, 'attack', false));
+  if (attacking) return _bossLoopFrame(set.attack, _atkMs, _mfb, _mobAnimPhase(m, 'attack', false));
   if (_mobWalking(m)) return _bossLoopFrame(set.walk, _BOSS_WALK_FRAME_MS, _mfb, _mobAnimPhase(m, 'walk', true));   // v0.29.273 — displacement-aware (slow mobs glided)
   return _bossPingPongFrame(set.idle, _BOSS_IDLE_FRAME_MS, _mfb, _mobAnimPhase(m, 'idle', true));
 }
