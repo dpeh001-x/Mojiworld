@@ -9771,7 +9771,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.855';
+const GAME_VERSION = 'v0.29.856';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -35750,6 +35750,26 @@ function applyClass(clsId) {
   if (!c) return;
   player.cls = clsId;
   if (typeof _lxRefreshBlockIcon === 'function') _lxRefreshBlockIcon(true);   // v0.29.343
+  // v0.29.856 — SETTLE THE INVESTED-STAT LEDGER BEFORE THE WIPE.
+  // The assignments below reset base stats to the new class's starting
+  // values, but player._levelUpSpent / _trainerSpent used to keep claiming
+  // every point the OLD class had invested. Reset Stats then reversed
+  // bonuses that were no longer applied — reported as a Lv99 rogue landing
+  // on ATK -12074 / Speed -0.3 / MP 0 — and refunded SP for them too, so a
+  // class swap minted skill points. Refund and clear here, exactly the way
+  // the old class's skill ranks are refunded a few lines below.
+  {
+    let _spRefund = 0;
+    const _lus = player._levelUpSpent;
+    if (_lus && typeof LEVELUP_OPTIONS !== 'undefined') {
+      for (const _o of LEVELUP_OPTIONS) _spRefund += (_lus[_o.id] || 0) * _o.cost;
+    }
+    const _ts = player._trainerSpent;
+    if (_ts) _spRefund += (_ts.atk | 0) * 1 + (_ts.def | 0) * 2 + (_ts.hp | 0) * 1;
+    if (_spRefund > 0) player.skillPoints = (player.skillPoints || 0) + _spRefund;
+    player._levelUpSpent = {};
+    player._trainerSpent = { atk: 0, def: 0, hp: 0 };
+  }
   player.baseAtk = c.stats.atk;
   player.baseDef = c.stats.def;
   player.baseCrit = c.stats.crit || 5;
@@ -41298,6 +41318,35 @@ function loadState() {
     // that used to live here was relocated so the sanitizer can't zero the
     // wallet before the migration copies it across.
     Object.assign(player, s.player);
+    // v0.29.856 — REPAIR A CORRUPTED STAT BLOCK ON LOAD. Saves written
+    // before the applyClass ledger fix can carry base stats that Reset Stats
+    // drove below the class baseline (reported: ATK -12074, Speed -0.3, MP 0).
+    // _sanitizePlayerSaveNumerics above clamps negatives to its lo bound,
+    // which is still a ruined character — baseSpeed 0 cannot walk. Lift
+    // anything under the class baseline back up to it. A healthy character
+    // always sits at classBase + level growth, so this can only ever fire on
+    // corruption, never on a legitimate value.
+    try {
+      const _cs = (typeof CLASSES !== 'undefined' && player.cls && CLASSES[player.cls]
+                   && CLASSES[player.cls].stats) || null;
+      if (_cs) {
+        const _fixed = [];
+        const _lift = (k, min, label) => {
+          if (typeof player[k] === 'number' && player[k] < min) { _fixed.push(label); player[k] = min; }
+        };
+        _lift('baseAtk',   _cs.atk   || 0, 'ATK');
+        _lift('baseDef',   _cs.def   || 0, 'DEF');
+        _lift('baseSpeed', _cs.speed || 0, 'Speed');
+        _lift('baseJump',  _cs.jump  || 0, 'Jump');
+        _lift('maxHp',     _cs.hp    || 1, 'Max HP');
+        _lift('maxMp',     _cs.mp    || 0, 'Max MP');
+        _lift('baseAcc',   0,              'ACC');
+        if (_fixed.length && typeof showToast === 'function') {
+          setTimeout(() => showToast('\u{1F6E0} Repaired corrupted stats — ' + _fixed.join(', ')
+            + ' were below your class baseline.', 'epic'), 1400);
+        }
+      }
+    } catch (e) {}
     Object.assign(game,   s.game || {});
     // v0.29.843 — PQ HUNT-CURVE UNWIND. The two Ticket Rush kill stages are
     // exempt from the hunt curve as of this version, but noScale is only read
@@ -51103,6 +51152,25 @@ function resetStats() {
       if (_h) player.maxHp = Math.max(1, (player.maxHp || 0) - 10 * _h);
       player.skillPoints = (player.skillPoints || 0) + _a * 1 + _d * 2 + _h * 1;
       player._trainerSpent = { atk: 0, def: 0, hp: 0 };
+    }
+    // v0.29.856 — FLOOR THE REVERSE-APPLY. Only HP and MP were clamped;
+    // ATK / DEF / ACC / Speed / Jump subtracted freely and could pass through
+    // zero, which is how a desynced ledger turned into ATK -12074. A reset
+    // can never legitimately land below the class baseline: a real reset
+    // lands on classBase + level growth, which is >= classBase by
+    // construction, so this clamp only ever catches corruption.
+    {
+      const _cs = (typeof CLASSES !== 'undefined' && CLASSES[player.cls]
+                   && CLASSES[player.cls].stats) || null;
+      if (_cs) {
+        player.baseAtk   = Math.max(_cs.atk   || 0, player.baseAtk   || 0);
+        player.baseDef   = Math.max(_cs.def   || 0, player.baseDef   || 0);
+        player.baseSpeed = Math.max(_cs.speed || 0, player.baseSpeed || 0);
+        player.baseJump  = Math.max(_cs.jump  || 0, player.baseJump  || 0);
+        player.maxHp     = Math.max(_cs.hp    || 1, player.maxHp     || 0);
+        player.maxMp     = Math.max(_cs.mp    || 0, player.maxMp     || 0);
+      }
+      player.baseAcc = Math.max(0, player.baseAcc || 0);
     }
     player._levelUpSpent = {};
     player.skillPoints = (player.skillPoints || 0) + refund;

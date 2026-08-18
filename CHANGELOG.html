@@ -121,6 +121,49 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.856 <span class="tag"><span class="pill bug">bug</span> Reset Stats can no longer drive your stats negative</span></h2>
+<p>Per user, with a Lv&nbsp;99 Rogue showing <b>ATK -12074</b>, <b>Speed -0.3</b> and <b>MP 0</b>:
+<em>huge bug, when I reset stats, my numbers can look like this.</em></p>
+<p><b>Root cause.</b> <code>applyClass()</code> overwrites <code>baseAtk</code> / <code>baseDef</code> /
+<code>baseSpeed</code> / <code>baseJump</code> / <code>maxHp</code> / <code>maxMp</code> with the new class's starting
+values, but left <code>player._levelUpSpent</code> (and <code>_trainerSpent</code>) still claiming every
+point the OLD class had invested. Reset Stats reverses the ledger &mdash; so it
+subtracted bonuses that were no longer applied. Reproduced end to end:</p>
+<table>
+  <tr><th></th><th>ATK</th><th>Speed</th><th>Max MP</th><th>SP</th><th>ledger (ATK)</th></tr>
+  <tr><td>after investing</td><td>9015</td><td>13.8</td><td>1050</td><td>3790</td><td>900</td></tr>
+  <tr><td>after class swap</td><td>15</td><td>4.2</td><td>40</td><td>3790</td><td><b>900</b> &larr; stale</td></tr>
+  <tr><td>after Reset Stats</td><td><b>-8985</b></td><td><b>-5.8</b></td><td><b>0</b></td><td><b>5000</b></td><td>0</td></tr>
+</table>
+<p>Note the SP column: the reset also <b>refunded 1210 SP for bonuses that were already
+gone</b>, so a class swap quietly minted skill points on top of wrecking the stats.</p>
+<p><b>Three fixes.</b></p>
+<ul>
+  <li><b>Settle the ledger before the wipe.</b> <code>applyClass()</code> now refunds the invested
+      SP and clears <code>_levelUpSpent</code> / <code>_trainerSpent</code> before overwriting the base
+      stats &mdash; exactly the way it already refunds the old class's skill ranks a few
+      lines below. The desync can no longer be created.</li>
+  <li><b>Floor the reverse-apply.</b> <code>resetStats()</code> clamped only HP and MP; ATK, DEF,
+      ACC, Speed and Jump subtracted freely through zero. Every stat is now held at
+      or above the class baseline. A legitimate reset lands on
+      classBase&nbsp;+&nbsp;level growth, which is <b>&ge;</b> classBase by construction, so this
+      clamp only ever catches corruption.</li>
+  <li><b>Repair characters already broken by this.</b> A save carrying sub-baseline stats
+      is lifted back to the class baseline on load, with a toast naming what was
+      repaired. Without it the numeric sanitiser clamps the negatives to <b>0</b> &mdash; which
+      still leaves a character with <code>baseSpeed 0</code>, unable to walk.</li>
+</ul>
+<p>Guarded by <code>scripts/reset_stats_ledger_test.mjs</code> (13 checks), which drives the real
+<code>resetStats()</code> with <code>uiConfirm</code> stubbed to auto-accept rather than reimplementing its
+arithmetic &mdash; a test that copies the formula would happily agree with the bug. It
+covers the swap path, the ordinary invest&rarr;reset path (which must still refund
+exactly what was spent), and a corrupted save round-tripped through
+<code>_flushSaveStateNow()</code>. On the previous build: <b>9 of 13 fail</b>, including the
+repaired character sitting at ATK 0 / Speed 0.</p>
+<p><b>If your character is already affected</b>, just load the game &mdash; the repair runs
+automatically. Your invested points were refunded to SP by the faulty reset, so
+re-invest from the Level Up tab.</p>
+
 <h2>v0.29.855 <span class="tag"><span class="pill bug">bug</span> An invisible Magic Bolt could still hit you</h2>
 <p>Per user: <em>when mage's projectile fades away but somehow can still damage an enemy if it connects, please ensure proper hitbox distance and make sure it does not damage after fading.</em></p>
 <p>The bolt drew itself with <code>alpha = life / (maxLife &times; 0.7)</code>. That is full opacity for only the <b>first 30% of its flight</b>, thinning across the remaining 70% — halfway to its target it is already 49% transparent, and on its final frame it is at alpha <b>0.03</b>, invisible. Collision never knew any of this: measured on the live hit path before the change, a bolt dealt full damage at <em>every</em> life value tested, right down to that invisible last frame.</p>
