@@ -9778,7 +9778,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.867';
+const GAME_VERSION = 'v0.29.868';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -127733,6 +127733,22 @@ try { window.LXAuth = LXAuth; } catch (e) {}
       if (_left > 0) {
         if (window._lxSpriteGateHolding) return;   // second click while holding — the running hold finishes the job
         window._lxSpriteGateHolding = true;
+        // v0.29.x — HOLD THE WORLD STILL (per user report: "i clicked my char,
+        // nothing loaded, skills play when i press keys i can hear sound
+        // effects, same with photomode"). This gate can hold the overlay for up
+        // to 120 s while sprites finish, and the world behind it has ALREADY
+        // started — so keypresses cast skills, spend cooldowns and take damage
+        // in a fight the player cannot see. Pausing here makes the loading
+        // screen mean what it says. Both skill paths honour game.paused (the
+        // poll loop and the edge-triggered keydown), so this is enough to stop
+        // input reaching the hero. OWNERSHIP matters here: boot is usually
+        // paused already (menu, class select), and something else may unpause
+        // during the hold — a blind restore would stomp that and strand the
+        // world frozen. We only ever un-pause a pause we put there ourselves.
+        try {
+          window._lxSpriteGatePausedByUs = !game.paused;   // only ours if it was not ALREADY paused
+          game.paused = true;
+        } catch (e) {}
         // Yank every pending watched image to the FRONT of the fetch queue.
         // Measured without this: 138 pending sprites made ZERO progress in
         // 15 s on a live throttled link, because they sat at
@@ -127794,6 +127810,17 @@ try { window.LXAuth = LXAuth; } catch (e) {}
             clearInterval(_iv);
             window._lxSpriteGateDone = true;
             window._lxSpriteGateHolding = false;
+            // v0.29.x — release OUR pause only (see the hold above), and drop
+            // any keys pressed while the screen was black. Without that second
+            // half a player who mashed during the hold has those keys still
+            // latched in game.keys and the hero bolts the instant the world
+            // appears. If the pause was not ours, or someone unpaused while we
+            // held, we leave game.paused exactly as we found it now.
+            try {
+              if (window._lxSpriteGatePausedByUs && game.paused === true) game.paused = false;
+              window._lxSpriteGatePausedByUs = false;
+              if (game.keys) for (const _k in game.keys) game.keys[_k] = false;
+            } catch (e) {}
             try { console.log('[boot] commence gate: ' + (n === 0 ? 'all ' + _total + ' sprites ready' : n + ' unfinished — released by ' + (_capped ? '120s cap' : '45s stall'))); } catch (e) {}
             _finishHide(session);
           }
