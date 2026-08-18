@@ -120,6 +120,36 @@
   <p class="lede">A phased rework layered on top of <code>v0.9.8</code>: save persistence, Web Audio SFX, achievements, daily challenges, respec, prestige, combo milestones, and a moment-to-moment juice pass. Every change lives in <code>mojiworld_game.html</code>. No new assets, no build step.</p>
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
+
+<h2>v0.29.841 <span class="tag"><span class="pill bug">bug</span> Portals stand on their platform instead of hanging beside it</span></h2>
+<p>Per user, on Wildflower Plains: <em>portal is floating midair, anchor and snap it to the platform.</em> Two separate defects were holding it up, and both had to go.</p>
+
+<h3>The portal was standing next to its pad, not on it</h3>
+<p>The Elderwood Grove portal sat at <code>x:1984, y:380</code>. <code>drawPortals</code> treats <code>y</code> as the <b>feet</b> line, and 380 is exactly the authored top of the Zone C tower's first pad &mdash; but that pad spans <code>x&nbsp;2050..2170</code>. Its own <code>y</code> said <em>&ldquo;I stand on that pad&rdquo;</em> while its <code>x</code> planted it 66&nbsp;px short of the pad's left edge, over nothing.</p>
+<p>The <code>y</code> matching the pad to the pixel is what marks this as drift rather than intent: v0.29.374b shifted the Meadow Steps rows &ldquo;off the LIVE portal lanes&rdquo; and moved the pad out from under the portal without bringing the portal down with it.</p>
+<p>The travel was broken too, which had not been reported: entering from Elderwood Grove spawned the player at <code>x:1914</code> with no platform beneath them. Measured over 25 loads of the shipped build, they landed on a platform <b>5 times</b> and fell the full 100&nbsp;px to the ground line the other <b>20</b>.</p>
+<p>The portal now sits at <code>x:2110</code>, the pad's exact centre. The sprite draws 110&nbsp;px wide on a 120&nbsp;px pad, so the art lands inside the platform with 5&nbsp;px to spare each side &mdash; the pad was sized for it. Snapping in <code>x</code> rather than dropping <code>y</code> to the ground keeps the portal where the tower climb pays off.</p>
+
+<h3>Platforms jitter every load; portals did not</h3>
+<p>Fixing the <code>x</code> alone would have left the complaint half-standing. <code>_variedMapData</code> re-rolls every non-ground platform's <code>y</code> by &plusmn;10&nbsp;px on <b>every load</b> &mdash; &ldquo;gentle Y jitter&hellip; feels fresh without breaking jump arcs&rdquo; &mdash; while portals kept their authored <code>y</code>. The same pad measured <code>y&nbsp;389</code> on one load and <code>y&nbsp;370</code> on the next, against a portal pinned at 380. So <em>any</em> perfectly-placed portal sinks into its pad or floats above it, by a different amount each visit.</p>
+<p>Portals are now re-seated on the post-jitter surface at load time. It runs on <code>game.portals</code>, which is already cloned per load precisely so passes like this cannot corrupt the source map data.</p>
+<p>Deliberately conservative in three directions, so it fixes drift without ever relocating a portal:</p>
+<ul>
+<li>Only portals carrying an explicit <code>y</code>. Without one, a portal already tracks the ground line by itself.</li>
+<li>Only when a platform genuinely spans the portal's <code>x</code> &mdash; portals meant to hang in open air stay exactly as authored.</li>
+<li>Only within 24&nbsp;px: clear of the &plusmn;10 jitter, far below the 50&ndash;80&nbsp;px tier spacing, so a portal can never be pulled onto the wrong deck. Anything further out is an authoring bug to fix in the data, not something to paper over at runtime.</li>
+</ul>
+
+<h3>Verification</h3>
+<p>Wildflower Plains, 25 loads, measuring the gap between the portal's feet and the surface under them, and where the arrival actually comes to rest:</p>
+<table>
+<tr><th></th><th>Before</th><th>After</th></tr>
+<tr><td>Worst feet-to-surface gap</td><td>100&nbsp;px (range &minus;100 &hellip; +45)</td><td><b>0&nbsp;px on every load</b></td></tr>
+<tr><td>Arrival lands on the platform</td><td>5 / 25</td><td><b>25 / 25</b></td></tr>
+<tr><td>Arrival falls to the ground line</td><td>20 / 25</td><td><b>0</b></td></tr>
+</table>
+<p>Then a sweep of the whole game to confirm the anchor pass is safe everywhere &mdash; <b>95 maps, 188 portals: zero moved beyond tolerance</b>. 83 were already flush, 20 were re-seated, and the largest correction was <b>12&nbsp;px</b>, which is the jitter itself. An audit of the packed map table also confirmed Wildflower Plains was the only genuinely unsupported portal in the game; the other 12 mismatches were 4&ndash;12&nbsp;px of rounding against the ground line, and those now sit flush too.</p>
+
 <h2>v0.29.840 <span class="tag"><span class="pill bug">bug</span> The PQ pin was quoting a kill count the quest had stopped using</span></h2>
 <p>Per user, with a screenshot of Stage 1 reading <code>444/150 — -294 left to
 clear</code> beside a quest tracker reading <code>444/500</code>: <em>error in
