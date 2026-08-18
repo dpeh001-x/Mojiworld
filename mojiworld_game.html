@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.852';
+const GAME_VERSION = 'v0.29.853';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -19305,7 +19305,13 @@ const POWERUPS = [
   // v0.29.309 — range restored to 1-2 alongside the cap (the +2 nerf was
   // measurement error, not a real imbalance). Range and cap must stay equal
   // so no half of the roll band is silently inert.
-  { id:'multi', tier:'rare',  name:'Double Shot',    icon:'🎯', stat:'multishot', min:1,  max:2,  unit:'',  fmt:r=>`+${r} Projectile`,               scale:r=>r },
+  // v0.29.x — per user: "Double shot boon should only +1 projectile maximum as
+  // it is too overpowered, the +1 projectile should be 50% the damage of the
+  // main projectile". Range 1-2 -> 1-1, cap in _applyEquippedBoons follows
+  // (range and cap must stay equal so no half of the roll band is inert — the
+  // Burning Touch trap). A legacy roll-2 boon from an old save still equips;
+  // the cap clamps its contribution to +1.
+  { id:'multi', tier:'rare',  name:'Double Shot',    icon:'🎯', stat:'multishot', min:1,  max:1,  unit:'',  fmt:r=>`+${r} Projectile`,               scale:r=>r },
   // v0.26.225 — min 1 → 2 (tier-1 felt negligible vs tier-5).
   { id:'mpreg', tier:'common',  name:'Mana Surge',     icon:'♻️', stat:'mpRegen',   min:2,  max:5,  unit:'',  fmt:r=>`+${r} MP regen tier`,            scale:r=>r },
   // v0.26.225 — min 15 → 20 (paired tightening).
@@ -19629,7 +19635,12 @@ function _applyEquippedBoons() {
   // (primary 169, echo 85), so each extra projectile is +50 % and a max roll
   // of +2 is ~+100 % per cast. Against Keen Edge's +57 % that is 1.75×,
   // inside the tolerance everything else here was tuned to. Nothing was broken.
-  if (M.multishot > 2) M.multishot = 2;
+  // v0.29.x — cap 2 -> 1 per user ("only +1 projectile maximum"). Unlike the
+  // v0.29.304 cut, this one pairs with halving the boon's extra on the
+  // self-handled skill paths below, which were the actual imbalance: the
+  // universal duplicator always halved its echoes, but chargedShot / Multi
+  // Shot / the dagger fan / the volleys added the boon's arrow at FULL damage.
+  if (M.multishot > 1) M.multishot = 1;
   // v0.25.269 — Quickening's bypass-cooldown chance was capped at 20 %.
   // v0.26.176 — Cap raised to 30 % per the new roll range (1-30 %).
   // A single god-roll Quickening can hit the ceiling; further copies
@@ -65584,6 +65595,9 @@ const SKILL_FNS = {
     const baseShots = 5;
     const shots = Math.min(6,
       baseShots + (player.mods.multishot || 0) + getEquipBonus('multishot'));
+    // v0.29.x — lanes the BOON added (beyond base + gear) are half-damage
+    // echoes, matching the universal duplicator. Gear lanes stay full.
+    const _dsNoBoon = Math.min(6, baseShots + getEquipBonus('multishot'));
     const speed = 12;
     const life = 32;
     const SPREAD = 0.7;                                  // per-lane vy outward (post-arc)
@@ -65603,7 +65617,7 @@ const SKILL_FNS = {
         vx: player.facing * speed,
         vy,
         w: 18, h: 8, life,
-        damage: getAtk() * 0.6,
+        damage: getAtk() * 0.6 * (i >= _dsNoBoon ? 0.5 : 1),   // v0.29.x — boon lane = 50% echo
         owner: 'player', skill: 'dagger', _enh: player._enh, _msHandled: true,   // v0.26.x — self-applies multishot; opt out of universal Double Shot
         color:'#ff88dd',
       });
@@ -66847,6 +66861,8 @@ const SKILL_FNS = {
     // Cap like the rogue dagger-fan (Math.min(6,…)) and the basic-attack shot
     // count — stacked multishot gear/set/tree/boon could otherwise fire 10+ arrows.
     const count = Math.min(8, 3 + bonus + treeBonus + boonBonus);
+    // v0.29.x — arrows the BOON added are half-damage echoes (gear/tree full).
+    const _mspNoBoon = Math.min(8, 3 + bonus + treeBonus);
     const speed = 10;
     // v0.25.546 — New multi_shot VFX sprite at the muzzle.
     // v0.26.036 → 043 → 044 — Progressive size bumps: 130 → 260 → 400 → 470.
@@ -66888,7 +66904,7 @@ const SKILL_FNS = {
         // v0.25.658 — P1 REBALANCE. Per-arrow 1.5×+5 → 1.4×+4. Net 3-arrow
         // total ~4.2×+12 (was 4.5×+15) — flat trimmed so the skill doesn't
         // disproportionately favour low-ATK builds. Spread mechanic unchanged.
-        damage: getAtk() * 1.4 + 4, owner: 'player', skill: 'arrow', color: '#ddaa66',
+        damage: (getAtk() * 1.4 + 4) * (i >= _mspNoBoon ? 0.5 : 1), owner: 'player', skill: 'arrow', color: '#ddaa66',   // v0.29.x — boon arrow = 50% echo
         // v0.29.7xx (per user) — "multishot skill projectiles should not
         // pierce, until 10 RP (max) where they should only pierce once".
         // multiShot never set a pierce field itself; the pierce came from two
@@ -66939,7 +66955,7 @@ const SKILL_FNS = {
         // v0.29.659 - CAPPED PIERCE (per user: "pierce 2 times instead of
         // unlimited"). The 3.5x multiplier stays: v0.25.658 credited it to
         // "pierce + windup", and a 2-shot budget plus the windup still earns it.
-        damage: getAtk() * 3.5 + 12, owner: 'player', skill: 'charged', color: '#ff9944',
+        damage: (getAtk() * 3.5 + 12) * (i > 0 ? 0.5 : 1), owner: 'player', skill: 'charged', color: '#ff9944',   // v0.29.x — shots beyond the first exist only via the boon; they are 50% echoes
         pierce: true, pierceLeft: _csPierce,
         _enh: player._enh, _msHandled: true,   // v0.26.x — self-applies multishot; opt out of universal Double Shot
       };
@@ -67287,7 +67303,7 @@ const SKILL_FNS = {
         const _liveCamY = (game.camera && game.camera.y) || 0;
         game.projectiles.push({
           x: ox, y: _liveCamY - 20, vx: (Math.random()-0.5) * 1.8, vy: 15,
-          w: 10, h: 18, life: 110, damage: getAtk() * 1.8,
+          w: 10, h: 18, life: 110, damage: getAtk() * 1.8 * (i >= 22 ? 0.5 : 1),   // v0.29.x — the boon's arrow (past the authored 22) = 50% echo
           owner: 'player', skill: 'rainArrow', color: '#66ccff', _msHandled: true,   // v0.26.x — self-applies multishot; opt out of universal Double Shot
         });
       }, i * 45);
@@ -67360,7 +67376,7 @@ const SKILL_FNS = {
         game.projectiles.push({
           x: player.x + (player.facing > 0 ? player.w : -18), y: player.y + 10 + (i % 4) * 6,
           vx: player.facing * (10 + Math.random() * 3), vy: (Math.random() - 0.5) * 2,
-          w: 18, h: 8, life: 80, damage: getAtk() * 1.8 + 6,
+          w: 18, h: 8, life: 80, damage: (getAtk() * 1.8 + 6) * (i >= 10 ? 0.5 : 1),   // v0.29.x — the boon's arrow (past the authored 10) = 50% echo
           owner: 'player', skill: 'elemArrow', color: c, pierce: true, _msHandled: true,   // v0.26.x — self-applies multishot; opt out of universal Double Shot
         });
       }, i * 70);
@@ -69064,7 +69080,7 @@ const SKILL_FNS = {
         x: cx, y: cy,
         vx: player.facing * SPEED * Math.cos(ang),
         vy: SPEED * Math.sin(ang),
-        w: 36, h: 14, life: 200, damage: getAtk() * 1.55 + 10,   // v0.26.x balance audit: 2.0x+18 -> 1.2x+8 (15-arrow no-miss was ~30x, 2.4x peer master-X)
+        w: 36, h: 14, life: 200, damage: (getAtk() * 1.55 + 10) * (i >= 15 ? 0.5 : 1),   // v0.29.x — the boon's arrow (past the authored 15) = 50% echo   // v0.26.x balance audit: 2.0x+18 -> 1.2x+8 (15-arrow no-miss was ~30x, 2.4x peer master-X)
         owner: 'player', skill: 'gale', homing: target, bspr: 'gale_skyhunter', bsprKeepAspect: true, color: '#b0e8ff',   // v0.29.5xx — 512×299 art squashed 1.50× in a 54×21 box; keepAspect restores its true 1.71 aspect
         pierce: false, _msHandled: true,   // v0.26.x — self-applies multishot; opt out of universal Double Shot
       });
