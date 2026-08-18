@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.849';
+const GAME_VERSION = 'v0.29.850';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -83385,6 +83385,57 @@ function updateProjectiles(dt) {
     if (h.type === 'meteor_warn' && (h._markerOnly || h._aquaFlood)) {   // v0.26.1029 — Aqua flood is a slow-zone (slow applied on overlap), never a detonating meteor
       if (h.life <= 0) game.hazards.splice(i, 1);
       continue;
+    }
+    // v0.29.x — per user, on a Virga's Domain screenshot: "I only take damage
+    // at the end of the animation of enemy meteor, please modify to make the
+    // hurtbox to be whole pillar."
+    //
+    // Exactly right, and the reason is that meteor_warn is a pure TELEGRAPH:
+    // the meteor is drawn falling from the top of the viewport to the ground
+    // over its whole timer (Virga's runs 55 frames, ~0.9 s), but damage resolved
+    // in the single frame where life hits 0. So the burning column swept
+    // straight through anyone standing on a platform partway down and did
+    // nothing to them, then hit at the floor. On a tall arena the visual and
+    // the hitbox disagreed for almost a second.
+    //
+    // The falling body now damages whatever it passes through, using the SAME
+    // position the renderer draws it at (_topY + prog*400), so the hurtbox is
+    // the pillar the player can see. Once per hazard — it is a meteor passing
+    // through you, not a burning aura — and the ground detonation below is
+    // unchanged, so landing still hits the people standing where it lands.
+    // Enemy-owned only: the player's own Meteor / Sage shower keep resolving on
+    // impact, because their telegraph is a promise to the player about WHERE
+    // the hit lands, not a thing that should clip mobs on the way past.
+    if (h.type === 'meteor_warn' && h.life > 0 && h.owner === 'enemy'
+        && !h._markerOnly && !h._aquaFlood && !h._coopMirror && !h._passHit
+        && player && player.hp > 0 && (player.invulnerable | 0) <= 0) {
+      const _pCx = (h.cx != null) ? h.cx : (h.x + (h.w || 0) / 2);
+      const _pRad = h.radius || 180;
+      const _pCamY = (game.camera && game.camera.y) || 0;
+      // Same formula as the draw path, so hitbox and sprite cannot drift apart.
+      const _prog = 1 - h.life / (h.maxLife || h.life || 1);
+      const _mY = (_pCamY + 60) + _prog * 400;
+      const _mR = 20 + _prog * 15;                      // matches the drawn head
+      const _inLane = Math.abs((player.x + player.w / 2) - _pCx) < _pRad;
+      const _atHeight = (_mY + _mR) >= player.y && (_mY - _mR) <= (player.y + player.h);
+      if (_inLane && _atHeight) {
+        h._passHit = true;                              // one hit per meteor
+        let _pd = Math.max(1, Math.floor((h.damage || 30) * 0.6));   // the pass-through is the lighter half; the landing is the payload
+        if (typeof _defAbsorbMul === 'function') _pd = Math.max(1, Math.floor(_pd * _defAbsorbMul()));
+        if (player.blockTimer > 0) { _pd = Math.max(1, Math.floor(_pd * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
+        if (player.cls === 'warrior' && typeof _warriorDr === 'function') _pd = Math.max(1, Math.floor(_pd * _warriorDr()));
+        if (player._aegis) _pd = Math.max(1, Math.floor(_pd * 0.5));
+        const _pLost = (player._god ? 0 : ((typeof _diffDmg === 'function') ? _diffDmg(_pd, 0, !!h._pctCap) : _pd));
+        player.hp = Math.max(0, player.hp - _pLost);
+        player.invulnerable = 400;
+        player._lastDamageSource = h._sourceLabel || 'Meteor';
+        if (game.damageNumbers) {
+          game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2,
+            text: '-' + _pLost, life: 40, color: h.color || '#ffaa33', size: 14 });
+        }
+        if (typeof addShake === 'function') addShake(5);
+        if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('hit_heavy'); } catch (e) {} }
+      }
     }
     if (h.type === 'meteor_warn' && h.life === 0) {
       // v0.25.634 — Enemy-owned vs player-owned dispatch. Meteor_warn was
