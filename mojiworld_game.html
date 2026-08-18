@@ -9737,7 +9737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.844';
+const GAME_VERSION = 'v0.29.845';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -21251,11 +21251,15 @@ const QUESTS = {
     // in the Carriage of Ascension). q_pq_finale stays as Stage 4 boss
     // but its prereq points at q_pq_carriage now.
     kind: 'kill', target: 'ticketMech', count: 150,
+    // v0.29.843 — EXEMPT FROM THE HUNT CURVE. A PQ stage is authored content
+    // in a scripted chain, like the Spire's 4 pieces the gate already exempts;
+    // the curve pushed this to 500 and the Carriage to 400.
+    noScale: true,
     npc: 'Milo',
     // v0.26.312 (audit HIGH #3) — Description rewritten for the v0.26.309
     // chain: Stage 1 (150 lobby kills) → Stage 2 (Spire 4 pieces) →
     // Stage 3 (Carriage 8 kills) → Stage 4 (Master Conductor duel).
-    desc: 'STAGE-BY-STAGE:\n  1. STAGE 1 — Clockwork Underpass lobby. Punch 500 Ticket Mechs.\n  2. STAGE 2 — Clockwork Spire (jump quest). Collect 4 puzzle-piece chests on the climb. The summit portal warps you directly to the Carriage.\n  3. STAGE 3 — Carriage of Ascension. Punch 400 last stowaways.\n  4. STAGE 4 — Talk to Milo. He opens the Endless Express for the Master Conductor duel — a level-scaled boss with apex-tier mechanics. Defeat him to graduate the Rush.\n\nABOUT THE TICKET RUSH · The Underpass was thirty seconds from departure when the Pause hit. The mechs still punch fares for a train that never left. Milo — the Master Conductor\'s last apprentice — keeps the timetable current anyway, because somebody had to believe the schedule still mattered. The old transit code demanded a five-person party; Milo runs the whole chain solo with you. The three PQ maps are isolated — his dialog handles all stage warps; no walking portals between them.',
+    desc: 'STAGE-BY-STAGE:\n  1. STAGE 1 — Clockwork Underpass lobby. Punch 150 Ticket Mechs.\n  2. STAGE 2 — Clockwork Spire (jump quest). Collect 4 puzzle-piece chests on the climb. The summit portal warps you directly to the Carriage.\n  3. STAGE 3 — Carriage of Ascension. Punch 8 last stowaways.\n  4. STAGE 4 — Talk to Milo. He opens the Endless Express for the Master Conductor duel — a level-scaled boss with apex-tier mechanics. Defeat him to graduate the Rush.\n\nABOUT THE TICKET RUSH · The Underpass was thirty seconds from departure when the Pause hit. The mechs still punch fares for a train that never left. Milo — the Master Conductor\'s last apprentice — keeps the timetable current anyway, because somebody had to believe the schedule still mattered. The old transit code demanded a five-person party; Milo runs the whole chain solo with you. The three PQ maps are isolated — his dialog handles all stage warps; no walking portals between them.',
     rewards: { mojicoins: 3400, exp: 2800, gearChance: 0.70, gearTier: 3, potions: { hp_m: 4 } },  // v0.26.400 — PQ supplies
   },
   // v0.25.990 — THE ENDLESS EXPRESS. Optional Phase 3 of the Ticket Rush
@@ -21337,9 +21341,10 @@ const QUESTS = {
   q_pq_carriage: {
     name: 'STAGE 3 — The Carriage of Ascension', icon: '🚃', levelReq: 30,   // v0.29.329 — was 25
     kind: 'kill', target: 'ticketMech', count: 8,
+    noScale: true,   // v0.29.843 — see STAGE 1; the curve inflated this beat 8 -> 400
     npc: 'Milo',
     prereq: 'q_pq_spire',
-    desc: 'STAGE 3: The carriage runs hot — the last stowaways stand between you and the Endless Express. Punch 400 Ticket Mechs aboard, then return to Milo. He\'ll open the Express directly for the Master Conductor duel — no town detour required.\n\nCall them stowaways if it helps. They are not riding without paying — they are riding because the fare they already paid was for a station that is not there any more, and not one of them can be the first to say it out loud. Twelve ages is a long time to stay seated.',
+    desc: 'STAGE 3: The carriage runs hot — eight last stowaways stand between you and the Endless Express. Punch all 8 Ticket Mechs aboard, then return to Milo. He\'ll open the Express directly for the Master Conductor duel — no town detour required.\n\nCall them stowaways if it helps. They are not riding without paying — they are riding because the fare they already paid was for a station that is not there any more, and not one of them can be the first to say it out loud. Twelve ages is a long time to stay seated.',
     rewards: { mojicoins: 2400, exp: 2000, gearChance: 0.60, gearTier: 3, potions: { hp_m: 3 } },  // v0.26.400 — PQ supplies
   },
   // v0.26.087 — Per user "have it have 4 stages and 5th boss stage, at
@@ -41203,6 +41208,27 @@ function loadState() {
     // wallet before the migration copies it across.
     Object.assign(player, s.player);
     Object.assign(game,   s.game || {});
+    // v0.29.843 — PQ HUNT-CURVE UNWIND. The two Ticket Rush kill stages are
+    // exempt from the hunt curve as of this version, but noScale is only read
+    // at accept time — a save taken mid-chain still carries the retargeted
+    // count (Stage 1 at 500, Stage 3 at 400 against authored 150 / 8) and would
+    // stay stuck there forever. Clear the override so the authored count
+    // applies; rewardScale goes with it, since it was banked as payment for
+    // work the stage no longer asks for. Guarded on the value actually being
+    // an inflation, so a future deliberate per-accept roll on a PQ stage would
+    // survive this untouched.
+    try {
+      const _pqIds = ['q_clockwork_underpass', 'q_pq_carriage'];
+      const _act = (player.quests && player.quests.active) || {};
+      for (const _id of _pqIds) {
+        const _a = _act[_id];
+        const _authored = (typeof QUESTS !== 'undefined' && QUESTS[_id] && (QUESTS[_id].count | 0)) || 0;
+        if (_a && _authored > 0 && _a.targetCount != null && _a.targetCount > _authored) {
+          delete _a.targetCount;
+          delete _a.rewardScale;
+        }
+      }
+    } catch (e) {}
     // v0.25.801 — Map rename migration: `everdawn_marketplace` was renamed
     // to `everdawn_megamall`. Patch the saved currentMap so existing saves
     // don't drop into a non-existent map (which would throw on loadMap).
@@ -45849,25 +45875,32 @@ function tickQuestKill(monsterType, isBoss) {
     // v0.26.309 — Stage 1 now completes at 150 (no more "150/300 boundary"
     // since q_clockwork_underpass count is 150). Toast now points at
     // the Spire (Stage 2) instead of the carriage.
-    if (id === 'q_clockwork_underpass' && a.progress === 150) {
-      if (typeof showToast === 'function') {
-        showToast('🧩 STAGE 1 cleared! STAGE 2 — Clockwork Spire awaits.', 'legendary');
-      }
-      if (typeof flash === 'function') flash(0.35);
-      if (typeof addShake === 'function') addShake(8);
-    }
-    // v0.26.309 — STAGE 3 → STAGE 4 toast on Carriage clear.
-    if (id === 'q_pq_carriage' && a.progress === 8) {
-      if (typeof showToast === 'function') {
-        showToast('🎩 STAGE 3 cleared! STAGE 4 — Talk to Milo for the Master Conductor duel.', 'legendary');
-      }
-      if (typeof flash === 'function') flash(0.35);
-      if (typeof addShake === 'function') addShake(8);
-    }
     // v0.25.990 — Honor per-player `a.targetCount` override (used by
     // q_clockwork_express, which rolls a random 10-99 target on accept).
     // Falls back to the static q.count for every other quest.
     const _completionTarget = (a.targetCount != null) ? a.targetCount : (q.count || 1);
+    // v0.29.843 — STAGE-CLEAR FANFARE, KEYED TO THE LIVE TARGET. These fired at
+    // a hardcoded `progress === 150` / `=== 8` while completion read
+    // targetCount, so once the hunt curve retargeted the stages the game
+    // announced "STAGE 3 cleared! Talk to Milo" on the 8th kill and then went
+    // on counting to 400. Comparing against the same number the gate below uses
+    // means the announcement is true by construction. Still an equality test,
+    // not >=, so it fires exactly once on the clearing kill.
+    if (a.progress === _completionTarget) {
+      if (id === 'q_clockwork_underpass') {
+        if (typeof showToast === 'function') {
+          showToast('🧩 STAGE 1 cleared! STAGE 2 — Clockwork Spire awaits.', 'legendary');
+        }
+        if (typeof flash === 'function') flash(0.35);
+        if (typeof addShake === 'function') addShake(8);
+      } else if (id === 'q_pq_carriage') {   // v0.26.309 — STAGE 3 → STAGE 4
+        if (typeof showToast === 'function') {
+          showToast('🎩 STAGE 3 cleared! STAGE 4 — Talk to Milo for the Master Conductor duel.', 'legendary');
+        }
+        if (typeof flash === 'function') flash(0.35);
+        if (typeof addShake === 'function') addShake(8);
+      }
+    }
     if (a.progress >= _completionTarget) {
       _questGoalMet(id);
       granted = true;
