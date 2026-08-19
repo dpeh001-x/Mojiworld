@@ -161,7 +161,7 @@ window.LX_MONSTER_STATS = {
   gravitos:                       { lv:100, hp:22050000, atk:20314, def: 55, exp:1212800, coin:374900 },
   octobaby:                       { lv: 50, hp:  800000, atk:  961, def: 10, exp:  44000, coin: 13600 },
   pqConductor:                    { lv: 30, hp:   15000, atk:  284, def: 42, exp:    825, coin:   255 },
-  legosaurus:                     { lv: 59, hp:  700000, atk: 1527, def: 39, exp:  38500, coin: 11900 },
+  legosaurus:                     { lv: 59, hp:  700000, atk: 1527, def: 120, exp:  38500, coin: 11900 },
   young_confused_barnaby:         { lv: 40, hp:  400000, atk:  542, def: 29, exp:  22000, coin:  6800 },
   kingKrook:                      { lv: 50, hp:  667800, atk: 1261, def: 31, exp:  36700, coin: 11400 },
   mirrorSelf:                     { lv: 20, hp:  190850, atk:   20, def:  3, exp:  10500, coin:  3244 },
