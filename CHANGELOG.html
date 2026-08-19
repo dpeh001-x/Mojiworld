@@ -121,6 +121,42 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.878 <span class="tag"><span class="pill bug">bug</span> SFX come back the instant you unmute</span></h2>
+<p>Per user: <em>if you left the game on mute, then unmute, the game takes some time for
+all the sfx to come back.</em></p>
+<p>Only the <b>file-based</b> SFX layer was affected. The synth cues in <code>audio.play()</code>
+need no loading at all, which is exactly why part of the audio returned instantly
+and the rest trickled in — the split that makes this read as "some time" rather
+than "broken". Three compounding faults:</p>
+<ul>
+  <li><b>Clips created while muted stayed muted forever.</b> <code>_uiSfxEl</code> / <code>_skillSfxEl</code>
+      stamp <code>a.muted = audio.muted</code> at creation, and the first-gesture prewarm
+      builds an element for <b>every</b> UI id. Mute at that moment and all of them
+      are born muted — while <code>toggleMute()</code> mirrored its new state onto
+      <code>_bgmEl</code> / <code>_bgmBossEl</code> / <code>_bgmMapEls</code> and never onto the two SFX caches.
+      Measured pre-fix: after unmuting, <b>6 of 6</b> cached UI clips were still
+      <code>muted === true</code>. Those did not come back late — without a reload they did
+      not come back at all.</li>
+  <li><b>Nothing was warmed during the muted stretch.</b> <code>_playSkillSfx</code> / <code>_playUiSfx</code>
+      returned on the mute check <em>before</em> reaching the element builders, so a muted
+      session downloaded nothing (<b>0 of 6</b> skill clips built). Unmuting then paid
+      construct-and-fetch per cue on its first use, so the sounds returned one at
+      a time.</li>
+  <li><b>Skill clips only fetched headers.</b> <code>_skillSfxEl</code> used <code>preload:'metadata'</code>
+      while the UI path uses <code>'auto'</code> plus an explicit <code>load()</code>. v0.26.322 had
+      already written down why that matters on the UI side — <em>"the FIRST play() then
+      had to wait for the byte body to download… the user heard nothing because the
+      file wasn't ready yet"</em> — but the skill path never got the same treatment.</li>
+</ul>
+<p>Fixes: a single <code>_lxSyncSfxMuted()</code> mirrors mute onto both SFX caches, called from
+<code>toggleMute()</code> <b>and</b> the Settings-modal mute path; the mute check moves below the
+element builders so clips are warmed (silently) while muted and only <code>play()</code> is
+gated; and skill clips move to <code>preload:'auto'</code> with an explicit <code>load()</code>.</p>
+<p>Guarded by <code>scripts/mute_unmute_sfx_test.mjs</code>, which replays the real sequence
+against the live <code>audio</code> object — start muted, run the prewarm, fire cues, call
+<code>audio.toggleMute()</code>, then inspect the actual cached <code>HTMLAudioElement</code>s rather
+than trusting a play() call to report anything. On the previous build: <b>4 of 6 fail</b>.</p>
+
 <h2>v0.29.877 <span class="tag"><span class="pill bug">bug</span> Abandoning a quest asks first, and no longer means starting over</span></h2>
 <p>Per user: <em>Quests UI is quite confusing, it's also easy to accidentally cancel a quest you're halfway doing and then have to reset.</em></p>
 <p><code>abandonQuest</code> deleted the active entry outright &mdash; <b>no confirmation of any kind</b>. And the button that calls it is a bare red <b>&#10005;</b> sitting immediately beside the locate pin in the journal row: the destructive control and the harmless one are neighbours, same size, one click each. With hunt targets now in the hundreds, a slip could bin several hundred kills in silence.</p>

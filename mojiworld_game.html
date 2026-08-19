@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.877';
+const GAME_VERSION = 'v0.29.878';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -34713,6 +34713,9 @@ function _applySettings(s) {
     if (typeof _bgmEl !== 'undefined' && _bgmEl) _bgmEl.muted = _m;
     if (typeof _bgmBossEl !== 'undefined' && _bgmBossEl) _bgmBossEl.muted = _m;
     if (typeof _bgmMapEls !== 'undefined' && _bgmMapEls) { for (const _mid of Object.keys(_bgmMapEls)) { const _e = _bgmMapEls[_mid]; if (_e) _e.muted = _m; } }
+    // v0.29.878 — same reason as toggleMute: the SFX caches need the mirror
+    // too, or clips created during a muted stretch stay silent after unmute.
+    if (typeof _lxSyncSfxMuted === 'function') _lxSyncSfxMuted(_m);
   }
   // Low-FX flag (read by _perfLowFx at draw time)
   // v0.25.917 — Debug recon (agent ab3b86fd) flagged that this only
@@ -42053,6 +42056,9 @@ const audio = {
           if (el) el.muted = !!this.muted;
         }
       }
+      // v0.29.878 — and the SFX caches. Without this, clips whose element
+      // was built while muted never sound again (see _lxSyncSfxMuted).
+      if (typeof _lxSyncSfxMuted === 'function') _lxSyncSfxMuted(this.muted);
     } catch (e) {}
   }
 };
@@ -128745,6 +128751,20 @@ const _SKILL_SFX_ALIAS = {
   jumpAttack:'jumpAttack', dash:'dash', volley:'volley', burst:'burst',
 };
 const _skillSfxEls = Object.create(null);
+// v0.29.878 — mirror a mute change onto every cached SFX element.
+// toggleMute() and the Settings modal both mirrored onto the BGM elements
+// but not onto these two caches, so any clip whose element was created
+// during a muted stretch (the first-gesture prewarm builds one for EVERY
+// UI id) stayed muted for the rest of the session. Declared here beside the
+// caches; both callers reach it by forward reference at call time.
+function _lxSyncSfxMuted(m) {
+  try {
+    for (const k of Object.keys(_skillSfxEls)) { const e = _skillSfxEls[k]; if (e) e.muted = !!m; }
+  } catch (_) {}
+  try {
+    for (const k of Object.keys(_uiSfxEls)) { const e = _uiSfxEls[k]; if (e) e.muted = !!m; }
+  } catch (_) {}
+}
 const _skillSfxLastTime = Object.create(null);
 const _SKILL_SFX_COOLDOWN = 80;       // ms — prevents same-skill spam
 const _SKILL_SFX_TARGET_VOL = 0.5;
@@ -128756,14 +128776,25 @@ function _skillSfxEl(id) {
   a.loop = false;
   a._sfxBase = _SKILL_SFX_TARGET_VOL;
   a.volume = _SKILL_SFX_TARGET_VOL * _SFX_MASTER_VOL;
-  a.preload = 'metadata';
+  // v0.29.878 — 'metadata' -> 'auto' + explicit load(), matching the UI SFX
+  // path. v0.26.322 already documented why on that side: with 'metadata'
+  // only the header is fetched and the FIRST play() has to wait for the byte
+  // body, so the cue misses its moment. The skill path never got the fix.
+  a.preload = 'auto';
   if (typeof audio !== 'undefined' && audio) a.muted = !!audio.muted;
+  try { a.load(); } catch (_) {}
   _skillSfxEls[id] = a;
   return a;
 }
 function _playSkillSfx(id) {
   try {
-    if (typeof audio !== 'undefined' && audio && audio.muted) return;
+    // v0.29.878 — the mute check used to sit HERE, above _skillSfxEl(), so a
+    // muted session built and downloaded nothing. Unmuting then paid the
+    // construct-and-fetch cost per cue on its first use and the sounds
+    // trickled back one at a time. Warm the element regardless of mute and
+    // gate only the play() below; the element is created muted and
+    // _lxSyncSfxMuted un-mutes it the moment the player unmutes.
+    const _muted = (typeof audio !== 'undefined' && audio && audio.muted);
     // Resolve alias → bucket id; fall back to the raw id so a user can
     // drop audio/skill/<rawId>.mp3 and have it played directly.
     // v0.26.483 — a direct per-skill file wins over the alias bucket, so
@@ -128776,6 +128807,7 @@ function _playSkillSfx(id) {
     _skillSfxLastTime[key] = now;
     const el = _skillSfxEl(key);
     if (!el) return;
+    if (_muted) return;   // warmed above; just don't sound it
     try { el.currentTime = 0; } catch (_) {}
     const p = el.play();
     if (p && p.catch) p.catch(() => {});
@@ -128952,8 +128984,10 @@ function _uiSfxEl(id) {
 }
 function _playUiSfx(id) {
   try {
-    if (typeof audio !== 'undefined' && audio && audio.muted) return;
+    // v0.29.878 — see _playSkillSfx: warm while muted, gate only the play().
+    const _muted = (typeof audio !== 'undefined' && audio && audio.muted);
     if (!_UI_SFX_FILES[id]) return;
+    if (_muted) { _uiSfxEl(id); return; }   // build + fetch now, sound later
     // ui_toggle is the only event with a cooldown — celebratory events
     // (boon/rare/upgrade) fire at most once per game event so they don't
     // need per-id cooldowns.
