@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.887';
+const GAME_VERSION = 'v0.29.888';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16832,8 +16832,8 @@ const SKILLS = {
   meteor:       { name:'Meteor',         icon:'☄️', cls:'mage', job:'archmage', slot:'q', mp:35, cd:10000, desc:'Call a meteor from above.' },
   elemental:    { name:'Elemental Convergence', icon:'🌟', cls:'mage', job:'archmage', slot:'c', mp:55, cd:14000, desc:'Ultimate: lightning that chains between enemies, stunning and burning each.' },
   // Warlock
-  soulSiphon:   { name:'Soul Siphon',    icon:'💀', cls:'mage', job:'warlock',  slot:'q', mp:12, cd:10000, desc:'Drain nearby foes (2× ATK) into MP and HP, then raise 1 skeletal thrall from the first victim — 8s, fights at 65% of your ATK.' },   // v0.29.671 — per user (Dark Pulse report): the raise was never in the tooltip. It also hid the damage and the self-heal; the description said only "Drain HP from enemies → MP".
-  darkPulse:    { name:'Dark Pulse',     icon:'🖤', cls:'mage', job:'warlock',  slot:'c', mp:45, cd:13000,  desc:'Ultimate: large void AoE (3.5× ATK), then summon 5 undead that fight for you for 15s — each at 65% of your ATK, and killable by monsters.' },   // v0.29.x — the raise was never in the tooltip (per user: the description did not match what it does)
+  soulSiphon:   { name:'Soul Siphon',    icon:'💀', cls:'mage', job:'warlock',  slot:'q', mp:12, cd:20000, desc:'Drain nearby foes (2× ATK) into MP and HP, then raise 1 skeletal thrall from the first victim — 8s, fights at 65% of your ATK.' },   // v0.29.671 — per user (Dark Pulse report): the raise was never in the tooltip. It also hid the damage and the self-heal; the description said only "Drain HP from enemies → MP".
+  darkPulse:    { name:'Dark Pulse',     icon:'🖤', cls:'mage', job:'warlock',  slot:'c', mp:45, cd:26000,  desc:'Ultimate: large void AoE (3.5× ATK), then summon 5 undead that fight for you for 15s — each at 65% of your ATK, and killable by monsters.' },   // v0.29.x — the raise was never in the tooltip (per user: the description did not match what it does)
   // v0.25.514 — Priest F-slot signature: Holy Light. Self-heal scaling
   // on the player's ATK stat. 25 % maxHP at ATK 0, ramps linearly to
   // 100 % maxHP at ATK ≥ 100. Also tops up MP by half the heal % and
@@ -63645,8 +63645,21 @@ function updateMinions(dt) {
       const _pdx = (m.x + m.w/2) - _pcx, _pdy = (m.y + m.h/2) - _pcy;
       if (_pdx*_pdx + _pdy*_pdy <= _MN_LEASH_SQ) {
         const _hpF = (m.maxHp > 0) ? Math.max(0, Math.min(1, m.currentHp / m.maxHp)) : 1;
-        const _score = sq * (0.55 + 0.45 * _hpF);   // wounded foes score better
+        // v0.29.888 — SPLIT THE PACK (per user: "the zombie skeletons will swarm
+        // together ... enable them to split"). The v0.29.690 score below is why
+        // they swarmed: every minion evaluated it independently, so every minion
+        // chose the same nearest-wounded foe and they converged on one body by
+        // construction. A crowding penalty makes an already-claimed target
+        // progressively less attractive, so the pack spreads across whatever
+        // else is in range and only doubles up when there is nothing else left.
+        let _claims = 0;
+        for (const _o of game.minions) { if (_o !== mn && _o._mnTgt === m) _claims++; }
+        const _score = sq * (0.55 + 0.45 * _hpF) * (1 + _claims * 2.6);
+        // wounded foes score better; crowded ones score worse. 2.6 per claim, not
+        // 1.35: at 1.35 distance still dominated and 5 minions against 4 foes
+        // measured only 2 distinct targets.
         if (_score < _bestScore) { _bestScore = _score; bestSq = sq; tgt = m; }
+        // (_mnTgt is stamped once the winner is known, below)
       }
       // v0.26.x - monster contact damage TO the minion (mirrors the wolf-pet
       // model: sum atk of overlapping non-boss mobs, applied once per second).
@@ -63659,6 +63672,9 @@ function updateMinions(dt) {
         _mnIncoming += (m.atk || 0);
       }
     }
+    // v0.29.888 — record who this minion committed to, so the crowding
+    // penalty above can see the pack claims on the next frame.
+    mn._mnTgt = tgt || null;
     // v0.26.x — Per user "let them roam further and separately". Each minion
     // gets a personal lateral offset so they SURROUND a foe instead of stacking
     // on one pixel (kept under the 30px contact range so they all still land
@@ -63666,12 +63682,33 @@ function updateMinions(dt) {
     // spread they naturally cover different enemies. With no foe on the map they
     // ROAM independently to their own random point in a wide radius around you,
     // instead of standing still.
-    if (mn._offX == null) mn._offX = (Math.random() * 2 - 1) * 24;
+    // v0.29.888 — the lateral offset was RANDOM +/-24 px, so two minions could
+    // roll almost the same lane and grind together anyway: measured 8 px between
+    // the closest pair of five. A deterministic slot spreads the pack evenly
+    // instead of hoping the dice do.
+    if (mn._offX == null) {
+      const _slot = game.minions.indexOf(mn);
+      const _packN = Math.max(1, game.minions.length);
+      mn._offX = (_slot - (_packN - 1) / 2) * 42;   // line abreast, 42 px apart
+    }
     if (tgt) {
       const tcx = tgt.x + tgt.w/2;
       const dx = (tcx + mn._offX) - _mnCx;
       mn.facing = Math.sign(tcx - _mnCx) || 1;
       if (Math.abs(dx) > 4) mn.vx += Math.sign(dx) * 0.25; else mn.vx *= 0.85;
+      // v0.29.888 — PERSONAL SPACE. Nothing repelled one minion from another,
+      // so a pack sharing a target settled into the same pixel column and
+      // vibrated against it, which is the "jump around" in the report. A soft
+      // push below 34 px spreads them into a line abreast without stopping them
+      // committing to the target.
+      for (const _o of game.minions) {
+        if (_o === mn) continue;
+        const _sx = (mn.x + mn.w / 2) - (_o.x + _o.w / 2);
+        const _sy = (mn.y + mn.h / 2) - (_o.y + _o.h / 2);
+        if (Math.abs(_sy) > 40) continue;                 // different tier, leave it
+        const _ad = Math.abs(_sx);
+        if (_ad < 34) mn.vx += (_sx === 0 ? (Math.random() < 0.5 ? -1 : 1) : Math.sign(_sx)) * 0.30 * (1 - _ad / 34);
+      }
       if (Math.abs(mn.vx) > 2.2) mn.vx = Math.sign(mn.vx) * 2.2;
     } else {
       const _t = game.time || 0;
@@ -66965,7 +67002,7 @@ const SKILL_FNS = {
       const _src = victims.length > 0 ? victims[0] : null;
       const _rx = _src ? _src.x + _src.w/2 : player.x + player.w/2 + player.facing * 40;
       const _ry = _src ? _src.y : player.y + player.h - 18;
-      raiseMinion(_rx, _ry, _rt, 8000);
+      raiseMinion(_rx, _ry, _rt, 16000);   // v0.29.888 — 8s -> 16s (duration x2)
     }
     showToast(`Soul Siphon`, 'epic');
     flash(0.2);   },
@@ -67008,9 +67045,12 @@ const SKILL_FNS = {
     const _undeadN = 5;
     for (let i = 0; i < _undeadN; i++) {
       const a = (i - (_undeadN - 1) / 2) * 0.5;
-      const mx = cx + player.facing * (60 + i * 14) + Math.cos(a) * 30;
+      // v0.29.888 — 14 px apart meant Dark Pulse raised the whole pack already
+    // stacked, so "split up" had to fight the spawn. 46 px gives each one its
+    // own ground to rise from.
+    const mx = cx + player.facing * (60 + i * 46) + Math.cos(a) * 30;
       const ty = cy + Math.sin(a) * 20;
-      raiseMinion(mx, ty, i % 2 === 0 ? 'skeleton' : 'zombie', 15000);   // v0.26.x — last 15s per user (was 9s)
+      raiseMinion(mx, ty, i % 2 === 0 ? 'skeleton' : 'zombie', 30000);   // v0.26.x — last 15s per user (was 9s)
     }
     showToast('DARK PULSE', 'legendary');
     flash(0.35);   },
