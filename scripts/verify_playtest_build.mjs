@@ -51,10 +51,24 @@ const stagedVer = (_rf(`${DIR}/mojiworld_game.html`, 'utf8')
 // against HEAD alone — HEAD legitimately moves while a 900 MB package builds,
 // and that is not a reason to fail.
 const stagedBlob = execFileSync('git', ['hash-object', `${DIR}/mojiworld_game.html`], { encoding: 'utf8' }).trim();
+// Search origin/main as well as HEAD. The packager accepts `--ref`, and the
+// normal way to use it in this repo is `--ref origin/main` when the local
+// checkout lags behind (parallel sessions push constantly, and this working
+// copy is often several commits back). Searching HEAD alone then reports a
+// perfectly reproducible package as "not a real commit" — the blob is in
+// history, just not in THIS checkout's history.
+const stagedBlobRefs = ['HEAD', 'origin/main'].filter((ref) => {
+  try { execFileSync('git', ['rev-parse', '--verify', '--quiet', ref], { encoding: 'utf8' }); return true; }
+  catch (e) { return false; }
+});
 const recentBlobs = new Map();
-for (const c of execFileSync('git', ['rev-list', '-25', 'HEAD', '--', 'mojiworld_game.html'], { encoding: 'utf8' })
-  .split('\n').map(s => s.trim()).filter(Boolean)) {
-  try { recentBlobs.set(execFileSync('git', ['rev-parse', `${c}:mojiworld_game.html`], { encoding: 'utf8' }).trim(), c); } catch (e) {}
+for (const ref of stagedBlobRefs) {
+  let list = '';
+  try { list = execFileSync('git', ['rev-list', '-25', ref, '--', 'mojiworld_game.html'], { encoding: 'utf8' }); }
+  catch (e) { continue; }
+  for (const c of list.split('\n').map(s => s.trim()).filter(Boolean)) {
+    try { recentBlobs.set(execFileSync('git', ['rev-parse', `${c}:mojiworld_game.html`], { encoding: 'utf8' }).trim(), c); } catch (e) {}
+  }
 }
 const fromCommit = recentBlobs.get(stagedBlob);
 
