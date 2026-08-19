@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.889';
+const GAME_VERSION = 'v0.29.890';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -63680,6 +63680,18 @@ function updateMinions(dt) {
       const sq = dx*dx + dy*dy;
       const _pdx = (m.x + m.w/2) - _pcx, _pdy = (m.y + m.h/2) - _pcy;
       if (_pdx*_pdx + _pdy*_pdy <= _MN_LEASH_SQ) {
+        // v0.29.890 — UNREACHABLE PREY IS NOT PREY (per tester: "if the nearest
+        // mob is on a high platform they are rendered useless ... they will keep
+        // jumping in this spot till they die"). v0.29.815 fixed exactly this for
+        // the wolf pack, but only half of that pass reached the minions: the jump
+        // gate lives in _allyPlatformStep, which they share, while the scoring
+        // lives in _allyTargetScore, which only wolves call. The minion rule was
+        // still raw 2D distance with no vertical ceiling, so a skeleton under a
+        // two-platform-high foe scored it as the nearest thing on the map and
+        // hammered the jump until it expired.
+        // Reuses the pack's own constants so the two cannot drift apart again.
+        const _dyAbs = Math.abs(dy);
+        if (_dyAbs > (typeof _ALLY_DY_MAX === 'number' ? _ALLY_DY_MAX : 200)) continue;
         const _hpF = (m.maxHp > 0) ? Math.max(0, Math.min(1, m.currentHp / m.maxHp)) : 1;
         // v0.29.888 — SPLIT THE PACK (per user: "the zombie skeletons will swarm
         // together ... enable them to split"). The v0.29.690 score below is why
@@ -63690,7 +63702,12 @@ function updateMinions(dt) {
         // else is in range and only doubles up when there is nothing else left.
         let _claims = 0;
         for (const _o of game.minions) { if (_o !== mn && _o._mnTgt === m) _claims++; }
-        const _score = sq * (0.55 + 0.45 * _hpF) * (1 + _claims * 2.6);
+        // v0.29.890 — height is PRICED IN rather than treated as free ground.
+        // sq is a straight 2D distance, so something directly overhead read as
+        // closer than a foe a little further along the same floor. Cost basis
+        // matches the wolves: one pixel of climb per 3.5 px of walking.
+        const _reach = Math.abs(dx) + _dyAbs * (typeof _ALLY_DY_COST === 'number' ? _ALLY_DY_COST : 3.5);
+        const _score = _reach * (0.55 + 0.45 * _hpF) * (1 + _claims * 2.6);
         // wounded foes score better; crowded ones score worse. 2.6 per claim, not
         // 1.35: at 1.35 distance still dominated and 5 minions against 4 foes
         // measured only 2 distinct targets.
