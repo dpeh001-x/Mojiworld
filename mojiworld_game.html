@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.880';
+const GAME_VERSION = 'v0.29.881';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -31764,7 +31764,6 @@ const player = {
   // v0.25.809 — Recipe scrolls: rare drops from elite + boss mobs that
   // craft a specific set piece for free when read at Brok's bench.
   // Each scroll: { name, setId, slot? }.
-  recipeScrolls: [],
   // Boon loadout (v0.19) — rolled instances live in `boons`; indices in
   // `boonsEquipped` are the ones currently applying their stats. Cap 5.
   boons: [],
@@ -38516,10 +38515,7 @@ const PLAYER_SAVE_FIELDS = [
   // "looks like a fresh-character thing").
   //   • setshards — set-piece crafting currency (earned via boss /
   //     legendary drops, spent at Brok's crafting modal + reforge bench).
-  //   • recipeScrolls — alchemy recipe scrolls (drop from elite mobs,
-  //     consumed at Tincture Aunt to unlock crafting recipes).
   'setshards',
-  'recipeScrolls',
   // v0.26.222 — Sage Mira's 12-hour boon-offering cooldown. Real-time
   // wall-clock timestamp (`Date.now() + 12h`) gating her daily boon
   // gift at 5000 mojicoins. Pre-fix this was the ONLY remaining
@@ -41531,32 +41527,6 @@ function loadState() {
     }
     // v0.25.250 — setshards (crafting currency) defaults to 0 on older saves.
     if (typeof player.setshards !== 'number') player.setshards = 0;
-    // v0.25.809 — recipe scrolls array (rare elite/boss drops).
-    if (!Array.isArray(player.recipeScrolls)) player.recipeScrolls = [];
-    // v0.26.496 — Recipe scrolls moved into the inventory (Use tab). Migrate
-    // any scrolls still sitting in the legacy player.recipeScrolls[] list into
-    // real inventory items (random slot baked in) so existing players keep
-    // them, then drain the legacy list. Idempotent — empties the array.
-    if (player.recipeScrolls.length) {
-      const _SETLBL = { dawnshard:'Dawnshard', doomforged:'Doomforged', shadowweave:'Shadowweave', voidcaller:'Voidcaller', skyhunter:'Skyhunter' };
-      const _SL = ['weapon', 'armor', 'accessory'];
-      const _SLL = { weapon:'Weapon', armor:'Armor', accessory:'Accessory' };
-      if (!Array.isArray(player.inventory)) player.inventory = [];
-      // v0.29.7xx — scrolls are retired, so the legacy array is bought out
-      // rather than re-minted into inventory items nothing can read.
-      let _legacyScrolls = 0;
-      for (const _s of player.recipeScrolls) { if (_s && _s.setId) _legacyScrolls++; }
-      if (_legacyScrolls > 0 && typeof SCROLL_BUYOUT_SHARDS === 'number') {
-        player.setshards = (player.setshards | 0) + _legacyScrolls * SCROLL_BUYOUT_SHARDS;
-      }
-      player.recipeScrolls = [];
-    }
-    // v0.25.814 — Old saves may have player.currentMap === 'shadowSlums'
-    // (the pre-rename map id). Migrate to the new id so the spawn loader
-    // doesn't return a "no such map" null. Bossdefeated keys + any other
-    // historical references also migrated below.
-    // v0.29.7xx — and the ones already sitting in the bag (see _lxRetireRecipeScrolls).
-    try { if (typeof _lxRetireRecipeScrolls === 'function') _lxRetireRecipeScrolls(); } catch (e) {}
     if (player.currentMap === 'shadowSlums') player.currentMap = 'shadowWovenHood';
     if (game && game.currentMap === 'shadowSlums') game.currentMap = 'shadowWovenHood';
     if (game && game.bossDefeated && game.bossDefeated.shadowSlums) {
@@ -81253,8 +81223,7 @@ function killMonster(m) {
 
   // RECIPE SCROLLS: retired. The drop, its craft UI, the boss-intro preview and
   // Marbella's Recipe Journal are all gone; zodiac sigils below now trade at Brok
-  // for setshards instead. Legacy scrolls in old saves are bought out on load by
-  // _lxRetireRecipeScrolls().
+  // for setshards instead.
   // v0.26.496 — Zodiac bosses each drop a UNIQUE etc "Sigil" at 100% on kill.
   // Sigils stack (each kill yields one). They used to be spent by recipe
   // scrolls; with scrolls retired they trade at Brok for setshards instead
@@ -88012,9 +87981,7 @@ async function transcendItem(it) {
 //                                    rolled from rollAffixedItem).
 //   • Recipe Scrolls              — RETIRED. The drop, the reading UI and the
 //                                    boss-intro preview are gone; any scroll
-//                                    left in an old save is bought out for
-//                                    setshards on load by
-//                                    _lxRetireRecipeScrolls().
+//                                    left in an old save is inert.
 async function reforgeRandomEquipment() {
   // v0.25.823 — Reforge cost lowered 200 → 100 to keep it a meaningful
   // mid-game spend now that craft cost moved 10 → 200 (the universal
@@ -88152,26 +88119,6 @@ async function _lxTradeZodiacSigil() {
   if (typeof showToast === 'function') showToast('◈ +' + SIGIL_TRADE_SHARDS + ' setshards for ' + (sold.name || 'the sigil') + '!', 'legendary');
   if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('levelup'); } catch (e) {} }
   if (typeof saveState === 'function') saveState();
-}
-// v0.29.7xx — one-time buy-out for scrolls already in a bag. Recipe scrolls no
-// longer drop and can no longer be read, so leaving them as unusable paper is
-// exactly the clutter this change removes. Converts each to 200 setshards.
-const SCROLL_BUYOUT_SHARDS = 200;
-function _lxRetireRecipeScrolls() {
-  try {
-    if (!Array.isArray(player.inventory)) return;
-    let n = 0;
-    for (let i = player.inventory.length - 1; i >= 0; i--) {
-      const it = player.inventory[i];
-      if (it && it.type === 'recipe') { player.inventory.splice(i, 1); n++; }
-    }
-    if (n > 0) {
-      player.setshards = (player.setshards | 0) + n * SCROLL_BUYOUT_SHARDS;
-      if (typeof showToast === 'function') {
-        showToast('◈ Recipe scrolls retired — ' + n + ' exchanged for ' + (n * SCROLL_BUYOUT_SHARDS) + ' setshards.', 'legendary');
-      }
-    }
-  } catch (e) {}
 }
 // v0.25.823 — Craft cost raised 10 → 200 to match the new universal
 // boss-shard economy (Gravitos drops 50, so 1 craft = 4 Gravitos kills
@@ -92511,7 +92458,7 @@ function renderInventory(prefix) {
       // v0.26.496 — Recipe scrolls are usable from the Use tab: click to craft
       // their set piece (spends 3 different Zodiac Sigils — see the helper).
       // v0.29.7xx — recipe scrolls retired; any straggler is inert paper that
-      // _lxRetireRecipeScrolls buys out on the next load.
+      // (recipe scrolls are retired; nothing mints them any more)
       if (it.type === 'recipe') {
         slot.title = (it.name || 'Recipe') + ' — retired; exchanged for setshards on reload';
       }
