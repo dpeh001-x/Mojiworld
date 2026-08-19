@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.882';
+const GAME_VERSION = 'v0.29.883';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -22457,6 +22457,7 @@ const _CLASS_QUESTLINE = (() => {
         cls: cls,
         npc: info.npc,
         desc: 'Speak with ' + info.npc + ' — defeat ' + count + ' ' + friendlyName + '.',
+        friendlyName: friendlyName,   // v0.29.878 — objective line says "Buzzbees", not "honey buzzs"
         rewards: {
           // v0.25.588 — mojicoin reward bumped (was lvl² × 40 → lvl² × 100)
           mojicoins: 200 + lvl * lvl * 100,
@@ -47009,6 +47010,10 @@ function acceptQuest(id) {
     // visit / special counts describe FINITE authored content and are now left
     // exactly as written.
   }
+  // v0.29.878 — state the requirement on every counted quest. Unconditional:
+  // the hunt-curve branch above is gated four ways and the story quests this
+  // exists for never enter it.
+  try { _lxStampObjective(id); } catch (e) {}
   const _npcLine = q.npc ? ` — talk to ${q.npc}` : '';
   showToast(`📜 Quest started — ${q.icon} ${q.name}${_npcLine}`, 'rare');
   saveState();
@@ -47046,6 +47051,46 @@ function _lxQuestProgressLine(id, a) {
   const tgt = (a && a.targetCount != null) ? a.targetCount : (q ? (q.count | 0) : 0);
   if (tgt > 0) return prog + ' of ' + tgt;
   return String(prog);
+}
+// v0.29.878 — QUEST COUNT CLARITY (per user: "make sure to state the correct
+// quantities"). Audited across all 278 quests: 13 counted story quests name no
+// quantity anywhere in their description, and one quotes a stale figure from a
+// dynamic range. Rather than guess which number in a paragraph is the
+// requirement — the guess that let q_clockwork_express keep quoting 45 — every
+// counted quest gets an explicit objective line stating the LIVE target, read
+// from the same value the tracker and the turn-in use.
+//
+// Always rebuilt from the stamped-once _lxDesc0, never appended to, so a
+// re-accept that re-rolls the target restates it instead of stacking lines.
+const _LX_OBJ_MARK = '\n\n\u25B8 OBJECTIVE: ';
+function _lxQuestTargetName(q, n) {
+  // The generated hunts already know the readable word (they build their prose
+  // from it) — prefer it. Without this the fallback de-camel-cases the type key
+  // and produces "honey buzzs" for what the player calls Buzzbees.
+  if (q && q.friendlyName) return q.friendlyName;
+  let nm = '';
+  try {
+    const t = q && q.target;
+    if (t && typeof MONSTERS !== 'undefined' && MONSTERS[t] && MONSTERS[t].name) nm = MONSTERS[t].name;
+    else if (t) nm = String(t).replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+  } catch (e) {}
+  if (!nm) return n === 1 ? 'target' : 'targets';
+  return (n === 1) ? nm : (/s$/i.test(nm) ? nm : nm + 's');
+}
+function _lxStampObjective(id) {
+  const q = (typeof QUESTS !== 'undefined' && QUESTS[id]) || null;
+  if (!q || typeof q.desc !== 'string') return;
+  if (q.kind !== 'kill' && q.kind !== 'boss') return;      // only counted kinds
+  const a = (player.quests && player.quests.active && player.quests.active[id]) || null;
+  const n = (a && a.targetCount != null) ? (a.targetCount | 0) : (q.count | 0);
+  if (n <= 1) return;                                       // "defeat the boss" needs no tally
+  if (q._lxDesc0 == null) q._lxDesc0 = q.desc;
+  const base = q._lxDesc0.split(_LX_OBJ_MARK)[0];
+  // Keep v0.29.872's substitution working on the rebuilt base.
+  const n0 = q.count | 0;
+  let body = base;
+  if (n0 > 0 && n !== n0) body = body.replace(new RegExp('\\b' + n0 + '\\b'), String(n));
+  q.desc = body + _LX_OBJ_MARK + 'defeat ' + n.toLocaleString() + ' ' + _lxQuestTargetName(q, n) + '.';
 }
 function abandonQuest(id, force) {
   _ensureQuests();
