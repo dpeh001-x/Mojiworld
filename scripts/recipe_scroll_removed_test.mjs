@@ -9,8 +9,8 @@
 // The risk in a deletion this size is not that something is left behind, it is
 // that something LIVE went with it. So most of this test is about what must
 // still work: the boss intro still renders its drop preview, the crafting modal
-// still opens, sigils still trade, and an old save holding scrolls is still
-// bought out rather than silently robbed.
+// still opens, and sigils still trade. (The buyout that used to be checked here
+// was itself removed in v0.29.881 — see scripts/scroll_buyout_removed_test.mjs.)
 // Run: node scripts/recipe_scroll_removed_test.mjs [file.html]
 import { chromium } from 'playwright-core';
 import path from 'node:path';
@@ -47,27 +47,21 @@ const r = await page.evaluate(async () => {
     .filter((n) => typeof window[n] !== 'undefined');
   out.modalEl = !!document.getElementById('recipe-scrolls-modal');
 
-  // The things that must STILL work.
-  out.liveFns = ['_lxRetireRecipeScrolls', '_lxTradeZodiacSigil', '_lxSigilCount', 'openCraftingModal']
+  // The things that must STILL work. The buyout used to be in this list; it was
+  // removed in v0.29.881 and its behaviour is now covered by
+  // scripts/scroll_buyout_removed_test.mjs.
+  out.liveFns = ['_lxTradeZodiacSigil', '_lxSigilCount', 'openCraftingModal']
     .filter((n) => typeof window[n] !== 'function');
-  out.buyoutConst = (typeof SCROLL_BUYOUT_SHARDS === 'number') ? SCROLL_BUYOUT_SHARDS : null;
-
-  // An old save still holding scrolls must be bought out, not robbed.
-  player.inventory = [
-    { name: 'Dawnshard Weapon Recipe', type: 'recipe', setId: 'dawnshard' },
-    { name: 'Voidcaller Armor Recipe', type: 'recipe', setId: 'voidcaller' },
-    { name: 'Keep Me', type: 'etc' },
-  ];
-  const shardsBefore = player.setshards | 0;
-  try { _lxRetireRecipeScrolls(); } catch (e) { out.buyoutErr = String(e).slice(0, 80); }
-  out.shardsGained = (player.setshards | 0) - shardsBefore;
-  out.scrollsLeft = player.inventory.filter((i) => i && i.type === 'recipe').length;
-  out.keptOther = player.inventory.some((i) => i && i.name === 'Keep Me');
 
   // Killing an elite/boss must not mint a scroll, and must not throw.
   loadMap('magmaFoundry2');
   await new Promise((res) => setTimeout(res, 800));
-  let killErr = null, minted = 0;
+  let killErr = null;
+  // Count what the kills MINT — a delta. Summing the bag each iteration counts
+  // any pre-existing scroll once per loop, which reads as 80 mints from a bag
+  // holding 2 (that is how this check first failed).
+  player.inventory = [];
+  const bagBefore = 0;
   for (let i = 0; i < 40; i++) {
     game.drops = [];
     let m = null;
@@ -75,9 +69,9 @@ const r = await page.evaluate(async () => {
     if (!m) break;
     m.isElite = (i % 2 === 0); m.isMiniBoss = (i % 2 === 1); m.currentHp = 0;
     try { killMonster(m); } catch (e) { killErr = String(e).slice(0, 120); break; }
-    minted += (player.inventory || []).filter((x) => x && x.type === 'recipe').length;
     game.monsters = [];
   }
+  const minted = (player.inventory || []).filter((x) => x && x.type === 'recipe').length - bagBefore;
   out.killErr = killErr;
   out.scrollsMinted = minted;
 
@@ -91,7 +85,7 @@ const r = await page.evaluate(async () => {
 await browser.close();
 
 console.log(`  reachable dead symbols: ${JSON.stringify(r.deadSymbols)}   modal element: ${r.modalEl}`);
-console.log(`  missing live fns: ${JSON.stringify(r.liveFns)}   buyout: ${r.shardsGained} shards for 2 scrolls`);
+console.log(`  missing live fns: ${JSON.stringify(r.liveFns)}`);
 console.log(`  40 elite/elder kills -> ${r.scrollsMinted} scrolls minted   killErr: ${r.killErr}`);
 
 check(r.deadSymbols.length === 0, 'no scroll function or table is reachable any more', r.deadSymbols);
@@ -103,10 +97,6 @@ check(cnt('Recipe Scroll</span>') === 0 && cnt('20 % drop') === 0,
 check(cnt('Bring me scrolls and I') === 0, 'and no NPC still offers to read them');
 // What must survive.
 check(r.liveFns.length === 0, 'the kept helpers survived the deletion', r.liveFns);
-check(r.buyoutConst === 200, 'the legacy buyout rate is intact', r.buyoutConst);
-check(r.shardsGained === 400 && r.scrollsLeft === 0,
-      'an old save holding 2 scrolls is bought out at 200 each', { gained: r.shardsGained, left: r.scrollsLeft });
-check(r.keptOther === true, 'and non-scroll inventory is untouched', r.keptOther);
 check(r.killErr === null, 'elite and Elder kills still resolve without error', r.killErr);
 check(r.scrollsMinted === 0, 'and mint no scrolls', r.scrollsMinted);
 check(r.craftOpens === true, 'the crafting modal still opens', { opens: r.craftOpens, err: r.craftErr });

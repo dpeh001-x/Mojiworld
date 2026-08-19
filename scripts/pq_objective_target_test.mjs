@@ -96,13 +96,17 @@ console.log(`  stage 3 @50  : ${JSON.stringify({ authored: r.stages.s3.authored,
 console.log(`  journal prose: ${JSON.stringify(r.desc)}`);
 
 check(r.pinFound, 'the PQ objective pin renders on a PQ map', r.pinFound);
-check(r.stages.s1.target === 500, 'Stage 1 really counts to 500, not its authored 150', r.stages.s1.target);
+// Deliberately NOT asserting a number. v0.29.843 exempted the PQ quests from
+// the hunt curve (noScale), so the live target is the authored 150 again — and
+// it may move again. What must hold is that the pin quotes whatever the quest is
+// counting to, authored or scaled, and never the other one.
+check(r.stages.s1.target > 0, 'Stage 1 has a live target to quote', r.stages.s1.target);
 check(r.stages.s1.quotesTarget, 'the pin quotes the target the quest is counting to', r.stages.s1.text);
 check(!r.stages.s1.quotesAuthored, 'and never the dead authored count', r.stages.s1.text);
 check(!r.stages.s1.negative, 'no negative remainder at the reported 444 progress', r.stages.s1.text);
 check(!r.stages.s1over.negative && r.stages.s1over.leftShown === '0',
       'overshooting the target shows 0 left, never a negative', r.stages.s1over);
-check(r.stages.s3.target > r.stages.s3.authored, 'Stage 3 is rescaled too (authored 8)', r.stages.s3);
+check(r.stages.s3.target > 0, 'Stage 3 has a live target to quote', r.stages.s3.target);
 check(r.stages.s3.quotesTarget, 'and its pin quotes the real target as well', r.stages.s3.text);
 check(!r.stages.s3.negative, 'Stage 3 shows no negative remainder past its authored 8', r.stages.s3.text);
 check(r.desc.q_clockwork_underpass.quotesTarget && !r.desc.q_clockwork_underpass.quotesAuthored,
