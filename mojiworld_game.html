@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.874';
+const GAME_VERSION = 'v0.29.875';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -38577,6 +38577,7 @@ function _lxIsBossRefight(m) {
 const GAME_SAVE_FIELDS = [
   'currentMap','bossDefeated','kills','achievements',
   'qnav',   // v0.29.583 — quest compass target; an allowlist, so tracking resets on reload without it
+  'qnavPins',   // v0.29.875 — quests pinned to the HUD tracker; same reason as qnav above
   '_qnavKeyPos',   // v0.29.596 — where the player dragged the guide widget (stored as viewport fractions)
   '_qnavOptOut',   // v0.29.591 — player pressed E past the end to dismiss the guide; must outlive a reload
   // v0.26.451 - per-map chest restock cooldown (anti re-entry farm); persisted so reload can't reset it.
@@ -46248,7 +46249,23 @@ function renderQuestTracker() {
   // Pick countable active quests (kill / boss). Order: insertion order
   // of player.quests.active (which is the order they were accepted in).
   const ids = [];
+  // v0.29.875 — PINNED QUESTS COME FIRST AND ARE NEVER CUT.
+  // Pre-fix this list was built purely from acceptance order, and the 🧭
+  // Track button was invisible to it: the compass moved, the panel did not.
+  // Reported as "Quest Tracking does not work ... it does not show up".
+  // A pin bypasses the kind filter below on purpose — if the player asked
+  // for a quest by name, the panel shows it whatever kind it is.
+  const _pins = (typeof game !== 'undefined' && Array.isArray(game.qnavPins))
+    ? game.qnavPins
+    : ((typeof game !== 'undefined' && game.qnav) ? [game.qnav] : []);
+  for (const _pid of _pins) {
+    if (ids.length >= 3) break;
+    if (!QUESTS[_pid] || !player.quests.active[_pid]) continue;   // finished / dropped
+    if (ids.indexOf(_pid) < 0) ids.push(_pid);
+  }
   for (const id of Object.keys(player.quests.active)) {
+    if (ids.length >= 3) break;
+    if (ids.indexOf(id) >= 0) continue;   // already pinned above
     const q = QUESTS[id];
     if (!q) continue;
     // v0.29.129 — visit quests and done-but-unclaimed quests are now
@@ -46258,7 +46275,6 @@ function renderQuestTracker() {
     const _countable = q.count && (q.kind === 'kill' || q.kind === 'boss');
     if (!_countable && q.kind !== 'visit' && q.kind !== 'talk' && !(_a && _a.readyToHandIn)) continue;
     ids.push(id);
-    if (ids.length >= 3) break;
   }
   // v0.26.888 — "what do I do next" is always answerable: when the next
   // Everdawn beat is NOT already active, the tracker leads with a pointer.
@@ -50059,7 +50075,9 @@ function _qnavRowHtml(id, isDone) {
   else if (d.hops == null) hop = '<span style="color:#c9a0ff;">no walking route</span>';
   else hop = `${d.hops} map${d.hops === 1 ? '' : 's'} away`;
 
-  const tracked = (typeof game !== 'undefined' && game.qnav === id);
+  // v0.29.875 — reflect membership of the pin set, not the single compass slot.
+  const tracked = (typeof game !== 'undefined') &&
+    (Array.isArray(game.qnavPins) ? game.qnavPins.indexOf(id) >= 0 : game.qnav === id);
   const btn = `<button type="button" data-qtrack="${id}" title="${tracked ? 'Stop tracking' : 'Show a compass arrow to this destination'}"
     style="margin-left:auto;flex:0 0 auto;padding:2px 9px;border-radius:7px;font-size:11px;font-weight:800;cursor:pointer;
     border:0.5px solid ${tracked ? 'rgba(255,216,74,0.9)' : 'rgba(140,170,255,0.55)'};
@@ -50428,16 +50446,33 @@ function renderQuestJournal() {
     btn.onclick = (ev) => {
       ev.stopPropagation();
       const qid = btn.dataset.qtrack;
-      if (game.qnav === qid) {
-        game.qnav = null;
+      // v0.29.875 — tracking is a SET now (cap 3, matching the HUD panel's
+      // three rows). game.qnav was a single id, so tracking a second quest
+      // silently replaced the first — the reporter tracked two and saw
+      // neither. The compass still follows ONE destination (the most recent
+      // pin), so every _qnav* consumer keeps working unchanged.
+      if (!Array.isArray(game.qnavPins)) game.qnavPins = game.qnav ? [game.qnav] : [];
+      const _pins = game.qnavPins;
+      const _at = _pins.indexOf(qid);
+      if (_at >= 0) {
+        _pins.splice(_at, 1);
+        if (game.qnav === qid) game.qnav = _pins[_pins.length - 1] || null;
         if (typeof showToast === 'function') showToast('🧭 Tracking off', 'common');
       } else {
+        _pins.push(qid);
+        let _dropped = null;
+        while (_pins.length > 3) _dropped = _pins.shift();   // oldest pin gives way
         game.qnav = qid;
         const d = (typeof _qnavDest === 'function') ? _qnavDest(qid) : null;
         if (typeof showToast === 'function') {
-          showToast(d ? `🧭 Tracking — ${_qnavLabel(d)}` : '🧭 Tracking', 'rare');
+          // Say it out loud when a pin is displaced — the old single-slot
+          // behaviour dropped the previous quest with no message at all.
+          const _dn = _dropped && QUESTS[_dropped] ? QUESTS[_dropped].name : null;
+          showToast(_dn ? `🧭 Tracking — ${d ? _qnavLabel(d) : ''} (untracked ${_dn})`
+                        : (d ? `🧭 Tracking — ${_qnavLabel(d)}` : '🧭 Tracking'), 'rare');
         }
       }
+      try { if (typeof renderQuestTracker === 'function') renderQuestTracker(); } catch (_e) {}
       try { renderQuestJournal(); } catch (_e) {}
     };
   });
