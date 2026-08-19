@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.884';
+const GAME_VERSION = 'v0.29.885';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -27259,6 +27259,9 @@ const MAPS = {
     noPotion: true,
     carriageThrills: true,
     expressScaling: true,
+    // v0.29.885 — the duel arena stops refilling once the Conductor is
+    // down. Read by the respawn drip in killMonster; see the note there.
+    _pqFinaleArena: true,
     monsterCap: 18,
     respawnDelayMul: 0.50,
     // v0.26.344 — RUNTIME-PLAYTHROUGH FIX. Pin the express mech counts
@@ -81512,6 +81515,19 @@ function killMonster(m) {
     // (v0.26.264). Both are sandboxed re-runs; stamping bossDefeated
     // would (a) clobber the first-kill flag on a non-expedition run +
     // (b) suppress future scroll/shard drops from the same arena.
+    // v0.29.885 — a boss's summons do not outlive it. The Conductor tags
+    // his reinforcements `_pqSummoned` only so the alive-count gate works;
+    // nothing cleared them, so whatever he called in the last seconds of the
+    // duel kept fighting after he was gone — half of "he still spawns
+    // enemies after I killed him". Same treatment the Sovereign already
+    // gives its `_sovShardOf` shards.
+    if (m.type === 'pqConductor') {
+      try {
+        for (const _add of game.monsters) {
+          if (_add && _add !== m && _add._pqSummoned && _add.currentHp > 0) _add.currentHp = 0;
+        }
+      } catch (e) {}
+    }
     if (!m._echoBoss && !m._expeditionBoss) {
       game.bossDefeated[game.currentMap] = true;
       game._bossDefeatedAt = game._bossDefeatedAt || {}; game._bossDefeatedAt[game.currentMap] = (game._playMs || 0);   // v0.26.453 - respawn-cooldown stamp
@@ -81712,7 +81728,18 @@ function killMonster(m) {
       // Spirelings respawn before they could clear the last 2 — the
       // floor would never reach "0 enemies remaining" + Bravo would
       // never light up.
-      if (mapD && !mapD.isTown && !mapD.isBossArena && !mapD._expeditionMap) {
+      // v0.29.885 — PQ FINALE ARENA STOPS REFILLING ONCE ITS BOSS IS DOWN
+      // (per user "master conductor still spawns enemies after i killed him").
+      // clockworkExpress sets isTower/isCarriage but NOT isBossArena, so it
+      // fell through to the ordinary field-map drip — at monsterCap 18 and
+      // respawnDelayMul 0.50 it refilled to a full 18 within ~6 s of the
+      // field being cleared, indefinitely, with the boss already dead.
+      // Keyed on "no Conductor alive here" rather than a persistent
+      // bossDefeated stamp so a refight plays exactly like the first run:
+      // adds keep coming while he is up, and stop the moment he is not.
+      const _pqArenaDone = !!(mapD && mapD._pqFinaleArena) &&
+        !game.monsters.some((x) => x && x.type === 'pqConductor' && x.currentHp > 0);
+      if (mapD && !mapD.isTown && !mapD.isBossArena && !mapD._expeditionMap && !_pqArenaDone) {
         const activeRegular = game.monsters.filter(x => !x.isBoss && !x.isMiniBoss).length;
         const _cap = Math.min(MAX_ONSCREEN_MONSTERS, _normMonsterCap(mapD.monsterCap || game.monsterCap || 15));   // v0.26.470 — global on-screen monster ceiling; v0.26.x — variation-compressed
         const room = _cap - activeRegular;
