@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.888';
+const GAME_VERSION = 'v0.29.889';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -53155,6 +53155,13 @@ function _lxFieldBaselineRaw(L) {
 }
 // Re-stat a monster to be a level-L creature. `stat` scales HP/ATK above the
 // field baseline (Train Rush ships ×2 by design); `exp` scales the reward.
+// v0.29.889 — PQ STAGE 3 SCALES TO THE CHARACTER (per user). Expressed as the
+// shape of the fight rather than as stat numbers, so it holds at any level and
+// any gear: a Carriage mech survives ~10 landed hits, blocks ~30% of each, and
+// swings for ~15% of the player's maximum health.
+const LX_CARRIAGE_HITS_TO_KILL = 10;    // landed hits, after its own mitigation
+const LX_CARRIAGE_MITIGATION   = 0.30;  // share of a hit the mech absorbs
+const LX_CARRIAGE_HIT_PCT      = 0.15;  // its swing, as a share of player max HP
 function _lxStatToLevel(m, L, opts) {
   if (!m) return null;
   const b = _lxFieldBaseline(L);
@@ -57701,6 +57708,35 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     _expeditionScaleMob(_spawned, (player && player.level) || 1);
   }
   _lxApplyStatTable(_spawned, type, isBoss, isElite, isMiniBoss);   // v0.29.762 — the table is the final word
+  // v0.29.889 — ...except on PQ Stage 3, which scales to the character. Per user:
+  // "3rd stage of PQ is extremely easy, scale the DEF and HP to the character's
+  // to make it harder". This MUST run after the table: the table is where the
+  // flat hp 3250 / def 9 ticketMech line comes from, and anything written before
+  // it is overwritten (which is exactly how the Express's own scaling died — see
+  // the expressScaling block further up, unchanged here).
+  //
+  // DEF is solved from the damage curve rather than set directly. Damage lands
+  // as dmg * 300/(defVal + 300), so a target mitigation M needs
+  // defVal = 300*M/(1-M) — and defVal already includes the archetype's armour
+  // class, so the stored def is divided back out by it. Writing a raw number
+  // instead would drift the moment either the curve or the archetype changed.
+  //
+  // ATK moves with them deliberately. The ask named HP and DEF, but a mech that
+  // is tanky and still hits for its table value is not a harder fight, only a
+  // longer one — the player stands still and holds the attack button.
+  if (!isBoss && !isMiniBoss && _spawned && game.mapData && game.mapData.isCarriage
+      && !game.mapData.expressScaling
+      && typeof getMaxHp === 'function' && typeof getAtk === 'function') {
+    const _pHp  = Math.max(1, getMaxHp());
+    const _pAtk = Math.max(1, getAtk());
+    const _armor = (typeof _mobArmorClass === 'function') ? Math.max(0.01, _mobArmorClass(_spawned)) : 1;
+    const _defVal = 300 * LX_CARRIAGE_MITIGATION / (1 - LX_CARRIAGE_MITIGATION);
+    _spawned.def = Math.max(0, Math.floor(_defVal / _armor));
+    const _perHit = Math.max(1, _pAtk * (1 - LX_CARRIAGE_MITIGATION));
+    _spawned.maxHp = Math.max(1, Math.floor(_perHit * LX_CARRIAGE_HITS_TO_KILL));
+    _spawned.currentHp = _spawned.maxHp;
+    _spawned.atk = Math.max(1, Math.floor(_pHp * LX_CARRIAGE_HIT_PCT));
+  }
   return _spawned;
 }
 
