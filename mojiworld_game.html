@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.876';
+const GAME_VERSION = 'v0.29.877';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -46988,6 +46988,24 @@ function acceptQuest(id) {
   // 4/4 was unreachable (whole PQ soft-locked). Reset on any accept of the Spire.
   if (id === 'q_pq_spire') player._pqSpirePieces = {};
   player.quests.active[id] = { progress: 0 };
+  // v0.29.877 — resume, don't restart (per user: abandoning "and then have to
+  // reset"). If this quest was abandoned with progress on it, put that back.
+  // Runs BEFORE the hunt-curve retarget further down, and restores the banked
+  // targetCount too, so the retarget's `targetCount == null` guard sees a live
+  // value and leaves the original target in place — the restored progress stays
+  // measured against the number it was earned against.
+  try {
+    const _bank = player._qBank && player._qBank[id];
+    if (_bank) {
+      const _a = player.quests.active[id];
+      _a.progress = _bank.progress | 0;
+      if (_bank.objProgress) _a.objProgress = JSON.parse(JSON.stringify(_bank.objProgress));
+      if (_bank.targetCount != null) _a.targetCount = _bank.targetCount;
+      if (_bank.rewardScale != null) _a.rewardScale = _bank.rewardScale;
+      delete player._qBank[id];
+      if (typeof showToast === 'function') showToast('Progress restored — ' + (_a.progress | 0) + ' already counted', 'rare');
+    }
+  } catch (e) {}
   if (typeof _playUiSfx === 'function') _playUiSfx('quest_accept');   // v0.26.x — SFX-review gap fill
   // v0.26.433 — Init per-target progress map for multi-objective quests.
   if (Array.isArray(q.objectives) && q.objectives.length) {
@@ -47064,14 +47082,62 @@ function acceptQuest(id) {
   if (typeof _renderPqObjectivePin === 'function') _renderPqObjectivePin();
   return true;
 }
-function abandonQuest(id) {
+// v0.29.877 — bank a quest's progress when it leaves the active list so
+// re-accepting restores it. Per user: abandoning "and then have to reset".
+// targetCount is banked too — without it a re-accept re-rolls the hunt curve
+// and the restored progress would be measured against a different target.
+function _lxBankQuestProgress(id, a) {
+  if (!a) return;
+  const prog = a.progress | 0;
+  const hasObj = a.objProgress && Object.keys(a.objProgress).length;
+  if (prog <= 0 && !hasObj) return;            // nothing worth keeping
+  try {
+    player._qBank = player._qBank || {};
+    player._qBank[id] = {
+      progress: prog,
+      objProgress: hasObj ? JSON.parse(JSON.stringify(a.objProgress)) : null,
+      targetCount: (a.targetCount != null) ? a.targetCount : null,
+      rewardScale: (a.rewardScale != null) ? a.rewardScale : null,
+    };
+  } catch (e) {}
+}
+// How far along a quest is, in the words the dialog should use.
+function _lxQuestProgressLine(id, a) {
+  const q = (typeof QUESTS !== 'undefined' && QUESTS[id]) || null;
+  const prog = (a && a.progress) | 0;
+  const tgt = (a && a.targetCount != null) ? a.targetCount : (q ? (q.count | 0) : 0);
+  if (tgt > 0) return prog + ' of ' + tgt;
+  return String(prog);
+}
+function abandonQuest(id, force) {
   _ensureQuests();
-  if (player.quests.active[id]) {
-    delete player.quests.active[id];
-    saveState();
-    // v0.25.595 — refresh HUD tracker on abandon (membership change).
-    if (typeof renderQuestTracker === 'function') renderQuestTracker();
+  const a = player.quests.active[id];
+  if (!a) return;
+  const _q = (typeof QUESTS !== 'undefined' && QUESTS[id]) || {};
+  const _hasProgress = ((a.progress | 0) > 0) ||
+    !!(a.objProgress && Object.keys(a.objProgress).some(k => (a.objProgress[k] | 0) > 0));
+  // v0.29.877 — CONFIRM WHEN THERE IS SOMETHING TO LOSE. The abandon X sits
+  // right beside the locate pin, same size, one click each; with hunt targets
+  // in the hundreds a slip used to bin the lot in silence. A quest at zero
+  // progress still goes instantly — nothing to protect, and a prompt there is
+  // pure friction.
+  if (_hasProgress && !force && typeof _openConfirmDialog === 'function') {
+    _openConfirmDialog(
+      'Abandon this quest?',
+      (_q.name || 'This quest') + ' is at ' + _lxQuestProgressLine(id, a) + '.' +
+      '\n\nYour progress is kept — take the quest again and you resume from here rather than starting over.',
+      'Abandon',
+      () => { if (typeof closeDialog === 'function') closeDialog(); abandonQuest(id, true); if (typeof renderQuestJournal === 'function') renderQuestJournal(); },
+      'Keep it',
+      (typeof closeDialog === 'function') ? closeDialog : undefined
+    );
+    return;
   }
+  _lxBankQuestProgress(id, a);
+  delete player.quests.active[id];
+  saveState();
+  // v0.25.595 — refresh HUD tracker on abandon (membership change).
+  if (typeof renderQuestTracker === 'function') renderQuestTracker();
 }
 function toggleQuestJournal() {
   if (typeof _tutPing === 'function') { _tutPing('panel'); _tutPing('quest'); }   // v0.29.576 — 'quest' ticks the Quests step
@@ -50473,7 +50539,7 @@ function renderQuestJournal() {
     btn.onclick = () => { acceptQuest(btn.dataset.qaccept); _questTab = 'active'; renderQuestJournal(); };
   });
   list.querySelectorAll('[data-qabandon]').forEach(btn => {
-    btn.onclick = () => { abandonQuest(btn.dataset.qabandon); renderQuestJournal(); };
+    btn.onclick = () => { const _id = btn.dataset.qabandon; const _had = !!(player.quests && player.quests.active && player.quests.active[_id] && (player.quests.active[_id].progress | 0) > 0); abandonQuest(_id); if (!_had) renderQuestJournal(); };   // v0.29.877 — with progress the confirm re-renders on commit; re-rendering here would tear the dialog's row out from under it
   });
   // v0.25.778 — Locate handler. Surfaces "where to go" for the active
   // quest in a toast, and (if the target map is a known map id with a
