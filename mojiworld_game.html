@@ -2551,7 +2551,9 @@
     z-index: 8;   /* v0.25.44 — see #top-ui z-index note */
   }
   #minimap-name { font-weight: bold; color: #ffcc66; margin-bottom: 3px; font-size: 11px; }
-  #minimap-canvas { display: block; background: rgba(0,0,0,0.4); border-radius: 3px; }
+  /* v0.29.x — the backing store is 2x (416x100) for crisp symbols on any
+     screen; CSS pins the on-screen size so the layout is unchanged. */
+  #minimap-canvas { display: block; background: rgba(0,0,0,0.4); border-radius: 3px; width: 208px; height: 50px; }
   #taxi-btn {
     position: absolute; bottom: 92px; right: 10px;
     padding: 5px 10px; background: linear-gradient(135deg, #447799, #335577);
@@ -8013,7 +8015,7 @@ The sleeping world is listening.</div>
   <div id="minimap" class="hud-drag">
     <button id="minimap-min" class="hud-min-btn" type="button" title="Minimise the minimap" aria-label="Minimise minimap">–</button>
     <div id="minimap-name">Clockwork Underpass — Ticket Panic</div>
-    <canvas id="minimap-canvas" width="208" height="50"></canvas>
+    <canvas id="minimap-canvas" width="416" height="100"></canvas>
   </div>
 
   <!-- v0.25.595 — HUD quest tracker. Shows up to 3 active quests with
@@ -9647,7 +9649,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.947';
+const GAME_VERSION = 'v0.29.948';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -93283,6 +93285,7 @@ function drawMinimap() {
   if (!canvas || !game.mapData) return;
   const mctx = game._mmCtx || (game._mmCtx = canvas.getContext('2d'));
   const mw = canvas.width, mh = canvas.height;
+  const S = mw / 208;   // v0.29.x — 2x backing store; every symbol constant scales by this
   mctx.clearRect(0, 0, mw, mh);
   const worldW = game.mapData.worldWidth || 2000;
   // v0.25.520 — Use the actual map worldHeight so vertical-tower maps
@@ -93301,7 +93304,7 @@ function drawMinimap() {
   // scaled top to the canvas bottom, and every climb platform shows clearly
   // above it.
   const _gp = (game.mapData.platforms || []).find(p => p.type === 'ground');
-  const _gMy = _gp ? Math.min(mh - 2, _gp.y * scaleY) : (mh - 10);
+  const _gMy = _gp ? Math.min(mh - 2 * S, _gp.y * scaleY) : (mh - 10 * S);
   mctx.fillStyle = 'rgba(80,120,80,0.5)';
   mctx.fillRect(0, _gMy, mw, mh - _gMy);
   // Platforms — v0.26.436: brighter (0.95) so dense climb rows are legible
@@ -93310,27 +93313,83 @@ function drawMinimap() {
   for (const p of game.mapData.platforms || []) {
     if (p.type === 'ground') continue;
     const px = p.x * scaleX;
-    const pw = Math.max(2, p.w * scaleX);
+    const pw = Math.max(2 * S, p.w * scaleX);
     const py = p.y * scaleY;
-    mctx.fillRect(px, py, pw, 2);
+    mctx.fillRect(px, py, pw, 1.5 * S);
   }
-  // Portals (yellow). On vertical-tower maps, anchor portal pip to its
-  // own y (portals carry an explicit y for tall maps); otherwise pin
-  // to the ground rail like before.
-  mctx.fillStyle = '#ffcc44';
+  // v0.29.x — SYMBOL LANGUAGE (per user: "add further polish and finishing on
+  // the mini map, especially the symbols"). Every marker is now a distinct
+  // outlined glyph instead of a bare rectangle, drawn at the 2x backing store:
+  //   portal   gold ARCHWAY with a doorway cut and a soft pulsing glow
+  //   NPC      teal RING (hollow — reads as "someone to talk to", not a foe)
+  //   mob      dark-ringed DOT   ·  elder/elite mob: orange, slightly larger
+  //   boss     pulsing outlined DIAMOND with a glint — unmistakable at a glance
+  //   player   the v0.26.054 layered marker, now with a grounding outline
+  const _mmPulseA = 0.5 + 0.5 * Math.sin((game.time || 0) / 220);
+  // Portals — glow under, arch over.
   for (const po of game.mapData.portals || []) {
     const px = po.x * scaleX;
-    const py = (typeof po.y === 'number') ? po.y * scaleY : (mh - 14);
-    mctx.fillRect(px - 2, py - 5, 4, 10);
+    const py = (typeof po.y === 'number') ? po.y * scaleY : (mh - 7 * S);
+    mctx.fillStyle = 'rgba(255,204,68,' + (0.10 + _mmPulseA * 0.14).toFixed(3) + ')';
+    mctx.beginPath(); mctx.arc(px, py, 7 * S, 0, Math.PI * 2); mctx.fill();
+    mctx.beginPath();
+    mctx.moveTo(px - 3 * S, py + 5 * S);
+    mctx.lineTo(px - 3 * S, py - 1.5 * S);
+    mctx.arc(px, py - 1.5 * S, 3 * S, Math.PI, 0);
+    mctx.lineTo(px + 3 * S, py + 5 * S);
+    mctx.closePath();
+    mctx.fillStyle = '#ffcc44';
+    mctx.fill();
+    mctx.lineWidth = 1 * S;
+    mctx.strokeStyle = 'rgba(40,24,0,0.9)';
+    mctx.stroke();
+    // the doorway cut — what makes it read as a gate, not a blob
+    mctx.beginPath();
+    mctx.moveTo(px - 1.2 * S, py + 5 * S);
+    mctx.lineTo(px - 1.2 * S, py + 0.2 * S);
+    mctx.arc(px, py + 0.2 * S, 1.2 * S, Math.PI, 0);
+    mctx.lineTo(px + 1.2 * S, py + 5 * S);
+    mctx.closePath();
+    mctx.fillStyle = 'rgba(48,30,4,0.95)';
+    mctx.fill();
   }
-  // Monsters (red / orange for bosses)
+  // NPCs — hollow teal rings, dark under-ring for contrast.
+  for (const n of game.npcs || []) {
+    const nx = (n.x + (n.w || 40) / 2) * scaleX;
+    const ny = (n.y || 436) * scaleY;
+    mctx.lineWidth = 2 * S;
+    mctx.strokeStyle = 'rgba(0,20,26,0.85)';
+    mctx.beginPath(); mctx.arc(nx, ny, 2.2 * S, 0, Math.PI * 2); mctx.stroke();
+    mctx.lineWidth = 1.1 * S;
+    mctx.strokeStyle = '#66ddee';
+    mctx.beginPath(); mctx.arc(nx, ny, 2.2 * S, 0, Math.PI * 2); mctx.stroke();
+  }
+  // Monsters — outlined dots; bosses get the diamond.
   for (const m of game.monsters) {
     if (m.currentHp <= 0) continue;
-    const mx = (m.x + m.w/2) * scaleX;
+    const mx = (m.x + m.w / 2) * scaleX;
     const my = m.y * scaleY;
-    mctx.fillStyle = m.isBoss ? '#ff4466' : (m.isMiniBoss ? '#ff8844' : '#cc5544');
-    const s = m.isBoss ? 4 : 2;
-    mctx.fillRect(mx - s/2, my - s/2, s, s);
+    if (m.isBoss) {
+      const r = (3 + _mmPulseA * 0.7) * S;
+      mctx.beginPath();
+      mctx.moveTo(mx, my - r); mctx.lineTo(mx + r, my); mctx.lineTo(mx, my + r); mctx.lineTo(mx - r, my);
+      mctx.closePath();
+      mctx.fillStyle = '#ff4466';
+      mctx.fill();
+      mctx.lineWidth = 1 * S;
+      mctx.strokeStyle = 'rgba(40,0,10,0.9)';
+      mctx.stroke();
+      mctx.fillStyle = 'rgba(255,255,255,0.9)';
+      mctx.fillRect(mx - 0.6 * S, my - r * 0.45, 1.2 * S, 1.2 * S);
+    } else {
+      const r = (m.isMiniBoss ? 2 : 1.5) * S;
+      mctx.beginPath(); mctx.arc(mx, my, r, 0, Math.PI * 2);
+      mctx.fillStyle = m.isMiniBoss ? '#ff8844' : '#cc5544';
+      mctx.fill();
+      mctx.lineWidth = 0.8 * S;
+      mctx.strokeStyle = 'rgba(30,6,4,0.85)';
+      mctx.stroke();
+    }
   }
   // Player — v0.26.054 polish. Was a flat 4×4 green square; now a
   // layered marker (pulsing halo → core dot → bright inner pip) so
@@ -93339,26 +93398,32 @@ function drawMinimap() {
   // halo gentle (~30 % alpha swing) so it's reassuring, not noisy.
   const px = (player.x + player.w/2) * scaleX;
   const py = player.y * scaleY;
-  const _mmPulse = 0.5 + 0.5 * Math.sin((game.time || 0) / 220);  // 0..1
+  const _mmPulse = _mmPulseA;
   // Outer halo — soft pulsing aura
   mctx.fillStyle = 'rgba(120, 255, 150, ' + (0.18 + _mmPulse * 0.20).toFixed(3) + ')';
   mctx.beginPath();
-  mctx.arc(px, py, 5.5 + _mmPulse * 0.6, 0, Math.PI * 2);
+  mctx.arc(px, py, (5.5 + _mmPulse * 0.6) * S, 0, Math.PI * 2);
   mctx.fill();
+  // v0.29.x — grounding ring so the marker keeps its edge over the ground band
+  mctx.lineWidth = 1 * S;
+  mctx.strokeStyle = 'rgba(0,40,16,0.85)';
+  mctx.beginPath();
+  mctx.arc(px, py, 2.5 * S, 0, Math.PI * 2);
+  mctx.stroke();
   // Core dot — fully opaque green
   mctx.fillStyle = '#7dffaa';
   mctx.beginPath();
-  mctx.arc(px, py, 2.5, 0, Math.PI * 2);
+  mctx.arc(px, py, 2.5 * S, 0, Math.PI * 2);
   mctx.fill();
   // Bright inner pip — slight offset for a 3D specular feel
   mctx.fillStyle = '#ffffff';
   mctx.beginPath();
-  mctx.arc(px - 0.5, py - 0.5, 0.9, 0, Math.PI * 2);
+  mctx.arc(px - 0.5 * S, py - 0.5 * S, 0.9 * S, 0, Math.PI * 2);
   mctx.fill();
   // Camera window frame — uses both X and Y on tall maps so the player
   // can see how high up the tower they currently are.
   mctx.strokeStyle = 'rgba(200,220,255,0.35)';
-  mctx.lineWidth = 1;
+  mctx.lineWidth = 1 * S;
   if (isVerticalTower) {
     const camY = (game.camera && game.camera.y) || 0;
     mctx.strokeRect(game.camera.x * scaleX, camY * scaleY, W * scaleX, H * scaleY);
