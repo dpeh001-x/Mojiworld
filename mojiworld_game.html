@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.943';
+const GAME_VERSION = 'v0.29.944';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -43887,7 +43887,16 @@ function _isOnboardingActive() {
 }
 const COOP_DOWN_ONBOARD_MS = 5000;   // short auto-respawn window during onboarding
 function _coopTryDowned() {
-  if (player._downed) return true;   // already down — never double-enter
+  if (player._downed) {
+    // v0.29.944 — an OHKO routed through the revive chain while ALREADY down
+    // (Gravitos' Singularity Collapse does this) used to return true with the
+    // caller's hp = 0 write left standing. updatePlayer only runs at hp > 0,
+    // and it is the sole caller of _coopDownedTick — the function that re-pins
+    // hp to 1 and honours the Respawn button — so the player froze on the
+    // ground at 0 HP with a dead button. Re-pin the held-at-1 invariant here.
+    player.hp = Math.max(1, player.hp || 0);
+    return true;   // already down — never double-enter
+  }
   // v0.29.50 (per user) — PROLOGUE GODMODE. The first 15s of the flash-forward
   // battle are truly invulnerable: absorb any lethal blow, refill, never fall.
   // After the window expires the player is mortal and a down runs the sandboxed
@@ -43952,6 +43961,16 @@ function _coopTryDowned() {
 function _coopDownedGiveUp() {
   if (!player || !player._downed) return;
   player._downedUntil = 0;   // next _coopDownedTick frame runs the bleed-out path
+  // v0.29.944 — pause-independent fallback. The tick above only runs inside
+  // updatePlayer, which stalls while the game is paused (epilogue card, boss
+  // cutscene) or was stalled entirely by the hp=0 trap this build fixes. The
+  // button must never depend on a tick that may not come: if the player is
+  // still down a beat later, finish directly. Same pattern as the onboarding
+  // auto-respawn timer.
+  try { clearTimeout(player._downedGiveUpTimer); } catch (e) {}
+  player._downedGiveUpTimer = setTimeout(() => {
+    try { if (player && player._downed && typeof _coopDownedFinish === 'function') _coopDownedFinish(); } catch (e) {}
+  }, 250);
 }
 // v0.29.50 — single terminal for a bleed-out. Both the onboarding auto-timer and
 // the per-frame _coopDownedTick end here. Normally runs the real death flow; but
@@ -83239,7 +83258,12 @@ function triggerSuperBossDeath(m) {
 
   // Clear any lingering void tears
   if (game.hazards) {
-    game.hazards = game.hazards.filter(h => h.type !== 'void_tear');
+    // v0.29.944 — also drop pending Singularity Collapses. Only void tears
+    // were cleared, so a collapse telegraphed before the killing blow resolved
+    // seconds AFTER victory and OHKO'd the player over the boss's corpse —
+    // the tester's "I beat him but the game bugged". A dead boss detonates
+    // nothing.
+    game.hazards = game.hazards.filter(h => h.type !== 'void_tear' && h.type !== 'gravitos_singularity');
   }
   // v0.25.795 — Endgame epilogue. Fires ONLY for Gravitos (the endgame
   // super-boss) and only on first kill (tracked in player._storyBeatsSeen).
@@ -125692,6 +125716,13 @@ function loop(time) {
   // the next-frame death trigger fires. Clamping here keeps every downstream
   // reader sane while preserving the death detection (≤ 0 still triggers).
   if (typeof player.hp === 'number' && player.hp < 0) player.hp = 0;
+  // v0.29.944 — DOWNED INVARIANT: downed means held at 1 HP, unconditionally.
+  // Anything that zeroes hp on a downed player (the Singularity Collapse wrote
+  // hp = 0 from the hazards loop) otherwise stalls updatePlayer's hp > 0 gate,
+  // and with it _coopDownedTick — countdown frozen, Respawn button dead, the
+  // tester's post-Gravitos soft-lock. Restored here, in the one block that
+  // runs every frame regardless of state, so no future writer can recreate it.
+  if (player._downed && player.hp <= 0) player.hp = 1;
   // v0.29.x — the flash-forward memory can never fall DURING the 15s godmode
   // window (per user): the scripted P2/P3 escalation routes real OHKOs here, so
   // refill on any lethal hit while godmode is up instead of surfacing the death
