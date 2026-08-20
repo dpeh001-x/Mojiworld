@@ -9649,7 +9649,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.963';
+const GAME_VERSION = 'v0.29.964';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -83515,9 +83515,19 @@ function triggerSuperBossDeath(m) {
     // is somehow absent, fall straight through to the original epilogue path so
     // the ending can never soft-lock.
     const _afterGravDefeat = () => { _playStoryBeat('epilogue_gravitos', _showGameComplete); };
-    setTimeout(() => {
-      if (typeof _gravitosDefeatCutscene === 'function') _gravitosDefeatCutscene(_afterGravDefeat);
+    // v0.29.x — THE CYCLE COMPLETES (per user). Between the black-flame
+    // defeat and the epilogue text, the rebirth cutscene plays: the
+    // dragon-knight's embers condense and re-form into GUGUMA — the canary
+    // who met the player at void-entry before they had a name here. Fail-open
+    // at every link: an absent helper or missing clip falls straight through
+    // to the epilogue, whose stanzas carry the same reveal in text.
+    const _afterDefeatCine = () => {
+      if (typeof _gugumaRebirthCutscene === 'function') _gugumaRebirthCutscene(_afterGravDefeat);
       else _afterGravDefeat();
+    };
+    setTimeout(() => {
+      if (typeof _gravitosDefeatCutscene === 'function') _gravitosDefeatCutscene(_afterDefeatCine);
+      else _afterDefeatCine();
     }, 1900);
   }
   // v0.28.6 — Aetherion's first defeat gets its own quieter scene: the
@@ -127949,6 +127959,82 @@ function _gravitosEntryCutscene(onDone) {
 //      cinders, chest-core supernova, white flash). Runs whenever the clip is
 //      missing/blocked, so the beat ships today.
 // onDone fires exactly once (clip end / skip / error / safety timer).
+// v0.29.x — THE CYCLE COMPLETES: after the dragon-knight's black-flame
+// defeat, this beat shows what the embers become. Video-only progressive
+// enhancement — no procedural fallback, because the moment is connective
+// tissue: an absent/blocked clip means instant fail-open to the epilogue
+// text, which carries the same reveal in stanza form. The clip: gravitos3
+// disintegrates, the ember-spiral condenses, and Guguma — the canary from
+// the void-entry eye-zoom — stands in the first true sunrise
+// (steam/higgsfield/cinematics/clip_gravitos_to_guguma.mp4, Seedance 2.0
+// 720p/8s; generation details in the SPEC.md beside the file).
+function _gugumaRebirthCutscene(onDone) {
+  let done = false, timer = 0, titleT = 0, guard = 0, guardArms = 2;
+  let _ducked = false;
+  const _duck   = () => { if (!_ducked) { _ducked = true;  try { _vidDuckBgm();   } catch (e) {} } };
+  const _unduck = () => { if (_ducked)  { _ducked = false; try { _vidUnduckBgm(); } catch (e) {} } };
+  const finish = () => {
+    if (done) return; done = true;
+    if (timer) clearTimeout(timer);
+    if (titleT) clearTimeout(titleT);
+    if (guard) clearTimeout(guard);
+    window.removeEventListener('keydown', onKey, true);
+    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+    _unduck();
+    try { onDone && onDone(); } catch (e) {}
+  };
+  const ov = document.createElement('div');
+  ov.id = 'guguma-rebirth-cine';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:1600;background:#010007;display:flex;'
+    + 'align-items:center;justify-content:center;cursor:pointer;overflow:hidden;';
+  ov.innerHTML =
+    '<video id="gug-reb-vid" playsinline preload="auto" '
+    + 'style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#010007;opacity:0;transition:opacity 500ms ease;"></video>'
+    + '<div id="gug-reb-title" style="position:absolute;left:0;right:0;bottom:12%;text-align:center;'
+    + 'font:800 clamp(22px,5vw,54px)/1.1 \'Segoe UI\',system-ui,sans-serif;letter-spacing:2px;color:#fff6d8;'
+    + 'text-shadow:0 0 26px rgba(255,196,64,0.85),0 2px 4px #000;opacity:0;transition:opacity 900ms ease;pointer-events:none;">'
+    + 'GUGUMA<div style="font:600 clamp(12px,2.2vw,20px)/1.4 \'Segoe UI\',system-ui,sans-serif;'
+    + 'letter-spacing:5px;color:#ffd84a;margin-top:10px;text-shadow:0 0 16px rgba(255,153,51,0.9);">THE FIRST CREATURE OF THE MORNING</div></div>'
+    + '<button id="gug-reb-skip" style="position:absolute;top:16px;right:18px;z-index:2;padding:5px 14px;'
+    + 'border-radius:8px;border:1px solid #907044;background:rgba(44,28,8,0.85);color:#ffe2b8;font:700 12px monospace;cursor:pointer;">Skip ▸▸</button>';
+  function onKey(e) { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(); } }
+  document.body.appendChild(ov);
+  ov.addEventListener('click', finish);
+  const sk = ov.querySelector('#gug-reb-skip'); if (sk) sk.onclick = (e) => { e.stopPropagation(); finish(); };
+  window.addEventListener('keydown', onKey, true);
+  const titleEl = ov.querySelector('#gug-reb-title');
+  const vid = ov.querySelector('#gug-reb-vid');
+  let playing = false;
+  if (!vid) { finish(); return; }
+  vid.oncanplay = () => {
+    if (done || playing) return;
+    playing = true;
+    if (guard) { clearTimeout(guard); guard = 0; }
+    vid.style.opacity = '1'; vid.volume = 0.9;
+    _duck();
+    const pp = vid.play(); if (pp && pp.catch) pp.catch(() => { vid.muted = true; _unduck(); const p2 = vid.play(); if (p2 && p2.catch) p2.catch(finish); });
+    titleT = setTimeout(() => { if (titleEl) titleEl.style.opacity = '1'; }, 5200);
+    timer = setTimeout(finish, 13000);
+  };
+  vid.onended = finish;
+  vid.onerror = finish;              // missing/blocked clip → straight to the epilogue
+  // A hung load can never soft-lock the ending — but a SLOW load must not be
+  // executed for it either. Two measured traps: a 3.8MB clip can take >4s to
+  // canplay on a thin pipe, and Chrome DEFERS media fetches entirely while a
+  // page is still streaming other resources (networkState stays IDLE with
+  // readyState 0 — "not loading" that is really "not started"). So the guard
+  // only fail-fasts on a hard NO_SOURCE verdict; anything else re-arms up to
+  // a 12s ceiling. The explicit load() call un-defers the fetch.
+  const _guardCheck = () => {
+    if (done || playing) return;
+    if (vid.networkState === 3 /* NO_SOURCE */ || guardArms <= 0) { finish(); return; }
+    guardArms--; guard = setTimeout(_guardCheck, 4000);
+  };
+  guard = setTimeout(_guardCheck, 4000);
+  vid.src = 'steam/higgsfield/cinematics/clip_gravitos_to_guguma.mp4';
+  try { vid.load(); } catch (e) {}
+}
+
 function _gravitosDefeatCutscene(onDone) {
   let done = false, raf = 0, timer = 0;
   // v0.29.242 — same hard pause/resume swapped for the shared ducking helper
