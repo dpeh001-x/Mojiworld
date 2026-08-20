@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.981';
+const GAME_VERSION = 'v0.29.982';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -61399,6 +61399,20 @@ function updatePlayer(dt) {
         const _fb = _allyPickFallbackTarget(pet, _pcx, _pcy);
         if (_fb) { tgt = _fb.tgt; bestSq = _fb.bestSq; _fbTgt = true; }
       }
+      // v0.29.982 — the master's mark is a command (see _lxPlayerFocus).
+      // Routed through _allyTargetScore at the relaxed tier so the mark can
+      // pull from further than the ordinary pick but never from nowhere;
+      // bestSq/_fbTgt are set so the 900 px engage gate lifts and the wolf
+      // actually travels to it.
+      {
+        const _pfW = (typeof _lxPlayerFocus === 'function') ? _lxPlayerFocus() : null;
+        if (_pfW && _pfW !== tgt) {
+          const _fdx = (_pfW.x + _pfW.w / 2) - _pcx, _fdy = (_pfW.y + _pfW.h / 2) - _pcy;
+          if (_allyTargetScore(pet, _pfW, _fdx, _fdy, 2.5) >= 0) {
+            tgt = _pfW; bestSq = _fdx * _fdx + _fdy * _fdy; _fbTgt = true;
+          }
+        }
+      }
       pet._tgtRef = tgt;   // v0.29.815 — hysteresis anchor for _allyTargetScore
       if (tgt && (_fbTgt || bestSq < 900 * 900)) {
         // v0.29.847 — SURROUND, DON'T STACK (minion parity). Every wolf used
@@ -61534,6 +61548,14 @@ function updatePlayer(dt) {
             if (_et) break;
           }
         }
+        // v0.29.982 — the master's mark is a command (see _lxPlayerFocus).
+        {
+          const _pfE = (typeof _lxPlayerFocus === 'function') ? _lxPlayerFocus() : null;
+          if (_pfE) {
+            const _fex = (_pfE.x + _pfE.w / 2) - _eCx, _fey = (_pfE.y + _pfE.h / 2) - _eCy;
+            if (Math.abs(_fex) <= 950 * 2.5 && Math.abs(_fey) <= 420 * 2.5) _et = _pfE;
+          }
+        }
         pet._tgtRef = _et;
         pet.facing = _et ? (Math.sign((_et.x + _et.w / 2) - _eCx) || pet.facing || 1)
                          : (player.facing || 1);
@@ -61593,6 +61615,20 @@ function updatePlayer(dt) {
       if (!tgt) {
         const _fb = _allyPickFallbackTarget(pet, _pcx, _pcy);
         if (_fb) { tgt = _fb.tgt; bestSq = _fb.bestSq; _fbTgt = true; }
+      }
+      // v0.29.982 — the master's mark is a command (see _lxPlayerFocus).
+      // Routed through _allyTargetScore at the relaxed tier so the mark can
+      // pull from further than the ordinary pick but never from nowhere;
+      // bestSq/_fbTgt are set so the 900 px engage gate lifts and the wolf
+      // actually travels to it.
+      {
+        const _pfW = (typeof _lxPlayerFocus === 'function') ? _lxPlayerFocus() : null;
+        if (_pfW && _pfW !== tgt) {
+          const _fdx = (_pfW.x + _pfW.w / 2) - _pcx, _fdy = (_pfW.y + _pfW.h / 2) - _pcy;
+          if (_allyTargetScore(pet, _pfW, _fdx, _fdy, 2.5) >= 0) {
+            tgt = _pfW; bestSq = _fdx * _fdx + _fdy * _fdy; _fbTgt = true;
+          }
+        }
       }
       pet._tgtRef = tgt;   // v0.29.815 — hysteresis anchor for _allyTargetScore
       if (tgt && (_fbTgt || bestSq < 900 * 900)) {
@@ -64839,6 +64875,20 @@ function updateMinions(dt) {
           if (_score < _fbScore) { _fbScore = _score; bestSq = dx * dx + dy * dy; tgt = m; }
         }
         if (tgt) break;
+      }
+    }
+    // v0.29.982 — the master's mark is a COMMAND, not a weight. A x0.25
+    // score bonus measured only 15% adoption: a minion already standing on
+    // another live target never left it for a weighted alternative across
+    // the map. Within a widened leash (the mark is deliberate, so it may
+    // pull further than the ordinary pick), the pack converges outright;
+    // spread / wounded-first / crowding resume when the mark goes stale.
+    {
+      const _pfM = (typeof _lxPlayerFocus === 'function') ? _lxPlayerFocus() : null;
+      if (_pfM && _pfM !== tgt) {
+        const _fdx = (_pfM.x + _pfM.w / 2) - _pcx, _fdy = (_pfM.y + _pfM.h / 2) - _pcy;
+        const _fDyMax = (typeof _ALLY_DY_MAX === 'number' ? _ALLY_DY_MAX : 200) * 2.5;
+        if (Math.abs(_fdy) <= _fDyMax && (_fdx * _fdx + _fdy * _fdy) <= _MN_LEASH_SQ * 6.25) tgt = _pfM;
       }
     }
     // v0.29.888 — record who this minion committed to, so the crowding
@@ -80320,6 +80370,25 @@ function _lxSkillImpact(skill) {
 }
 const _LX_IMPACT_STOP = [[35, 80], [60, 95], [95, 120], [120, 140]];   // [weight][isCrit]
 const _LX_IMPACT_FLASH = [0, 0, 0.14, 0.22];
+// v0.29.982 — THE MASTER'S MARK (per user "further improve on AI of
+// summons"; measured: the pack assisted the player's own target 0% of the
+// time). Every player-originated hit marks its victim; each summon family
+// treats a live mark as a command (see the three override sites). Summon
+// skill tags are excluded so a pack's own hits cannot re-stamp their
+// current target and lock themselves onto it; 'thorns' is passive and
+// says nothing about intent, so it does not mark either.
+const _LX_NO_FOCUS_TAGS = new Set(['minion', 'mojimon', 'pack', 'pet', 'thorns']);
+function _lxPlayerFocus() {
+  const t = game._pFocusTgt;
+  if (!t || t.currentHp <= 0) return null;
+  if (((game.time | 0) - (game._pFocusAt | 0)) > 240) return null;   // ~4 s at 60 fps
+  // Membership check: a mob can leave game.monsters WITHOUT dying (map
+  // change, despawn, PQ splice) — a mark held through that sends the whole
+  // pack to converge on empty ground for up to 4 s. O(n) against a
+  // ~20-30 entry array, called a handful of times per frame.
+  if (game.monsters.indexOf(t) < 0) { game._pFocusTgt = null; return null; }
+  return t;
+}
 function hitMonster(m, dmg, isCrit, skill) {
   // v0.25.605 — Dead-monster gate. Without this, a delayed projectile or
   // setTimeout-scheduled bonus hit (ninja extraHit, splashOnHit, chain
@@ -80334,6 +80403,10 @@ function hitMonster(m, dmg, isCrit, skill) {
   // undefined multiplier, a corrupt save feeding getAtk()) would poison m.currentHp to
   // NaN — NaN<=0 is false, so the monster becomes IMMORTAL and never fires on-kill.
   if (!Number.isFinite(dmg)) return;
+  // v0.29.982 — see _lxPlayerFocus above.
+  if (m && m.currentHp > 0 && !_LX_NO_FOCUS_TAGS.has(skill)) {
+    game._pFocusTgt = m; game._pFocusAt = game.time | 0;
+  }
   // =====================================================================
   // v0.29.320 — DEAD-TRAIT IMPLEMENTATION PASS (on-hit half; tick half is
   // in updateMonsters after lowHpHide). DoT ticks are exempt from the
