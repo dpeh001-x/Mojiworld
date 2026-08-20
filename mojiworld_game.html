@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.1';
+const GAME_VERSION = 'v0.30.2';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10979,13 +10979,17 @@ const _PROJ_ANIM_KEYS = new Set(['goo','bubble','pincer','splash','quake','stala
   // (anim/p_ult_warlord_0..8.webp); drawn in the bspr branch, keyed via _BULT_ANIM_KEY.
   'p_ult_warlord',
   // v0.29.934 — Soul Ward orb ghost-flame churn (anim/p_necromancer_soulorb_0..8,
-  // ludo.ai via scripts/gen_soulorb_anim.mjs). Drawn by drawLichOrbs, which
-  // rotates procedurally — the frames churn, the engine spins (bolt rule).
+  // ludo.ai via scripts/gen_soulorb_anim.mjs). Drawn by drawNecromancerOrbs
+  // (there is no drawLichOrbs — the name predates a rename).
+  // v0.30.1 — the engine no longer spins these: the sprite stays upright and
+  // the frame churn is the whole animation, per user. The bolt rule still
+  // applies to the KEYS around it, which are fired projectiles oriented to
+  // their velocity; a hovering ward orb has no velocity to point at.
   'p_necromancer_soulorb',
   // v0.26.x — Mage Z (magicBolt) energy orb: cute electric-crackle loop. Frames
   // at anim/bolt_*.webp; drawn in the player-projectile branch via _projAnimFrame.
   'bolt']);
-function _projAnimFrame(skill) {
+function _projAnimFrame(skill, offsetMs) {
   if (!_PROJ_ANIM_KEYS.has(skill)) return null;
   let arr = PROJ_ANIM_FRAMES[skill];
   if (arr === undefined) {
@@ -10996,7 +11000,11 @@ function _projAnimFrame(skill) {
   }
   // v0.29.284 — projectile anim art is ~768-922 px square but draws at 30-90 px;
   // a 320 long edge is still 3-4× the largest on-screen size.
-  return (typeof _bossLoopFrame === 'function') ? _bossLoopFrame(arr, _PROJ_ANIM_FRAME_MS, 320) : null;   // base 320 logical: biggest blit is ~250 (size 2.8 × a ~90 px hitbox)
+  // v0.30.1 — offsetMs forwarded so callers that draw MANY copies of one
+  // loop at once (the Soul Ward's up-to-5 orbs) can stagger them instead of
+  // pulsing in lockstep. Omitted by every other caller, which keeps the shared
+  // global clock they already had.
+  return (typeof _bossLoopFrame === 'function') ? _bossLoopFrame(arr, _PROJ_ANIM_FRAME_MS, 320, offsetMs) : null;   // base 320 logical: biggest blit is ~250 (size 2.8 × a ~90 px hitbox)
 }
 // =========================================================================
 // LX_PLAYER_PROJ — player projectile-skill sprites (v0.25.208)
@@ -105499,12 +105507,25 @@ function drawNecromancerOrbs() {
       ctx.save();
       ctx.globalAlpha = fade;
       ctx.translate(sx, sy);
-      ctx.rotate(game.time * 0.05 + (orb.phase || 0));
+      // v0.30.1 (per user: "for the necromancer soul orbs sprite do not
+      // rotate it, ensure the sprite remains upright") — the procedural spin
+      // is GONE. A soul-flame has a top and a bottom; rotating it reads as
+      // tumbling debris rather than a hovering ward. No ctx.rotate here, so
+      // the art draws axis-aligned at every orbit position.
       if (typeof _lxUseEntityImageQuality === 'function') _lxUseEntityImageQuality(ctx);
       // v0.29.934 — ghost-flame churn: play the 9-frame loop once it has
-      // decoded; the static base remains the first-frame fallback. The loop
-      // frames deliberately do not rotate (the rotate above is the spin).
-      const _fr = (typeof _projAnimFrame === 'function') ? _projAnimFrame('p_necromancer_soulorb') : null;
+      // decoded; the static base remains the first-frame fallback. The frames
+      // were authored NOT to rotate, precisely so the motion could live in the
+      // churn — with the spin removed that is now the only motion, which is
+      // what the loop was generated for.
+      //
+      // v0.30.1 — the spin was also what made each orb look different from
+      // its siblings (orb.phase). That variety moves here: phase is 0..2π
+      // (i * π for the starting pair, random for regrown ones), and 69 ms per
+      // radian maps a full 2π across ~432 ms — one complete 9-frame cycle — so
+      // the ward's orbs sit at evenly spread points of the same flame instead
+      // of pulsing in unison.
+      const _fr = (typeof _projAnimFrame === 'function') ? _projAnimFrame('p_necromancer_soulorb', (orb.phase || 0) * 69) : null;
       ctx.drawImage(_fr || _img, -SZ / 2, -SZ / 2, SZ, SZ);
       ctx.restore();
     } else {

@@ -121,6 +121,26 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.2 <span class="tag"><span class="pill polish">polish</span> Soul Ward orbs stay upright &mdash; the flame churns, the sprite does not tumble</span></h2>
+<p>Per user: <em>for the necromancer soul orbs sprite do not rotate it, ensure the sprite remains upright.</em></p>
+<p><code>drawNecromancerOrbs</code> spun the art procedurally &mdash; <code>ctx.rotate(game.time * 0.05 + orb.phase)</code> &mdash; on top of the 9-frame ghost-flame loop added in v0.29.934. That is the right treatment for a radially symmetric bolt and the wrong one here: a <b>soul-flame has a readable top and bottom</b>, so spinning it reads as tumbling debris rather than a hovering ward. The rotation is gone; the orbs now draw axis-aligned at every point of their orbit.</p>
+
+<h3>The spin was doing one job worth keeping</h3>
+<p><code>orb.phase</code> was what made each orb look different from its siblings. Simply deleting the <code>rotate</code> would have left every orb blitting the <em>same</em> animation frame off the same global clock &mdash; the whole ward pulsing in lockstep, which is a different kind of wrong. So the per-orb variety moved from <b>rotation</b> to <b>animation phase</b>:</p>
+<ul>
+<li><code>_bossLoopFrame</code> has accepted an <code>offsetMs</code> since v0.29.418; <code>_projAnimFrame</code> simply never forwarded one, so every caller shared one frame clock. It now takes an optional second argument. All nine existing call sites pass one argument and are bit-identical.</li>
+<li>Soul Ward passes <code>orb.phase &times; 69</code>. Phase spans 0&ndash;2&pi; (<code>i &times; &pi;</code> for the starting pair, random for regrown ones), and 69&nbsp;ms per radian maps a full 2&pi; onto ~432&nbsp;ms &mdash; exactly one 9-frame cycle at 48&nbsp;ms. The orbs therefore sit at evenly spread points of the same flame.</li>
+</ul>
+<p>The frames themselves were authored <em>not</em> to rotate, precisely so the motion could live in the churn. With the spin removed that churn is now the whole animation, which is what the loop was generated for.</p>
+
+<h3>Divine Aegis deliberately still spins</h3>
+<p>The five holy orbs a few lines below use an identical <code>rotate</code> call and were left alone: their art is a radially symmetric golden orb, the case where a free procedural spin costs nothing and adds life. The test asserts this explicitly, so a future pass cannot quietly flatten both.</p>
+
+<h3>Verification</h3>
+<p>New <code>scripts/soulorb_upright_test.mjs</code> spies on the real 2D context and reads the <b>canvas transform actually in force at each <code>drawImage</code></b>, rather than trusting that no rotation arrived by some other route. Against the previous build it fails four checks &mdash; the transform shows a genuine rotation (off-diagonal terms 0.42/0.91, about 25&deg;) &mdash; and passes all of them here.</p>
+<p>Two traps were designed out of it, both of which would have turned it green for the wrong reason. <code>drawNecromancerOrbs</code> only takes the sprite branch <b>once the art has decoded</b>; until then it draws procedural circles and never calls <code>drawImage</code> at all, so a test that merely counted <code>ctx.rotate</code> calls would pass on a machine where the webp never loaded &mdash; reporting the orb art as fixed while it was absent entirely. The test now asserts the sprite branch actually ran before trusting the rotation result. Separately, the first <code>_projAnimFrame</code> call only <em>kicks off</em> the frame loads and returns null, and <code>_readyN</code> is refreshed only from inside <code>_bossLoopFrame</code> &mdash; so the stagger check skipped silently on the first run (<code>loop frames decoded: 0</code>) until the test was changed to prime the loop and poll <em>through</em> <code>_projAnimFrame</code>. It now reports both readiness flags in its output so a skipped check is visible rather than inferred.</p>
+
+
 <h2>v0.30.1 <span class="tag"><span class="pill feat">feat</span> Post-40 quests pay much more EXP</span></h2>
 <p>Per user: <em>after level 40, quests should reward much much more exp.</em></p>
 <p><b>The lever is the guaranteed share.</b> A quest pays <code>max(authored, levelCost(design&nbsp;level) &times; share)</code>, where the share was clamped at 0.50. From a Lv-40 design level the share now steps to <b>&times;1.6</b> and ramps <b>+3% per level</b> (&times;2.2 at 60, &times;3.1 at 90), clamped at 0.78 &mdash; keyed to the quest&rsquo;s <em>design</em> level exactly like the floor itself, so back-farming a Lv&nbsp;12 quest at Lv&nbsp;90 gains nothing. The v0.29.309 hard ceiling &mdash; 80% of the <em>current</em> level, a user-set rule &mdash; still has the final word on the base grant.</p>
