@@ -557,6 +557,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "cloudburst": 9,
    "dash_streak": 9,
    "frost_beam": 9,
+   "gloop_puddle": 9,
    "gravity_well": 9,
    "lava_drop": 9,
    "lava_pool": 9,

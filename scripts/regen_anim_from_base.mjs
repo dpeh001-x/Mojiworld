@@ -41,6 +41,13 @@ const TARGETS = {
     motion: 'The tentacle pincer snaps: the two thick curved tentacle arms open wide apart, then clamp shut fast ' +
       'and spring slightly open again, the rubbery segments squashing and flexing with the bite while the rows of ' +
       'suckers ripple along the inner edges and highlights slide across the glossy skin.' },
+  // v0.30.x — King Gloopaloo's gel puddle. _VFX_ANIM_BASE already maps
+  // gloopPuddle -> 'gloop_puddle', so dropping frames here animates it with no
+  // code change; only the frame index has to learn the new set.
+  gloop_puddle: { base: 'Sprites/vfx/gloop_puddle.webp', dir: 'Sprites/vfx/anim',
+    motion: 'The puddle of thick cyan slime seethes in place: its surface undulates in slow gloopy waves, ' +
+      'round bubbles swell up from inside, dome the surface and pop, the rim lobes bulge and settle, ' +
+      'and highlights slide across the wet gel. The puddle stays flat on the ground and keeps its outline.' },
   cloudburst: { base: 'Sprites/vfx/cloudburst.webp', dir: 'Sprites/vfx/anim',
     motion: 'The cloud burst blooms outward from nothing: it swells and billows rapidly, churning and rolling as it expands, ' +
       'then thins and dissipates into wisps that fade away at the edges.' },
@@ -89,8 +96,8 @@ async function framesFrom(data, n) {
 }
 // One shared box, no per-frame trim — trimming each frame independently
 // re-centres them and makes the effect jitter through the loop.
-const normalise = (buf) => sharp(buf)
-  .resize(SIZE, SIZE, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+const normalise = (buf, w, h) => sharp(buf)
+  .resize(w || SIZE, h || SIZE, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
   .webp({ quality: 92 }).toBuffer();
 
 for (const k of keys) {
@@ -113,7 +120,13 @@ for (const k of keys) {
       });
       if (!res.ok) throw new Error(res.status + ': ' + (await res.text()).slice(0, 140));
       const bufs = await framesFrom(await res.json(), FRAMES);
-      for (let i = 0; i < FRAMES; i++) await writeFile(join(outDir, `${k}_${i}.webp`), await normalise(bufs[i]));
+      // Match the BASE's geometry rather than a hardcoded square. gloop_puddle
+      // is a 512x256 ground decal; letterboxed into 768x768 its frames would
+      // render visibly smaller than the static sprite they replace — a size pop
+      // the instant the animation takes over.
+      const _bm = await sharp(basePath).metadata();
+      for (let i = 0; i < FRAMES; i++)
+        await writeFile(join(outDir, `${k}_${i}.webp`), await normalise(bufs[i], _bm.width, _bm.height));
       console.log(`OK — ${FRAMES} frames`);
       done = true;
     } catch (e) {

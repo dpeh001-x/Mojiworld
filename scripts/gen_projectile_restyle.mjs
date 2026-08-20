@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Restyle four projectile sprites into the game's own look (per user:
+// Restyle projectile / vfx sprites into the game's own look (per user:
 // "regenerate the following sprites to be more in sync with the character and
 // game design": mcoffinshard, mspine, mspore, p_pincer).
 //
@@ -72,6 +72,22 @@ const TARGETS = {
       + 'C-shaped claw that opens to the right, rows of small round suckers along the inner edges, tapered pointed '
       + 'tips, plump rubbery segments.',
   },
+  // King Gloopaloo — the cyan gel puddle he leaves on the floor. Was: a tall
+  // glassy WATER dome, closer to a rendered droplet than to the chibi cast, and
+  // domed where the hazard is drawn as a flat 2:1 ground decal.
+  gloop_puddle: {
+    out: 'Sprites/vfx/gloop_puddle.webp',
+    ar: 'ar_16_9',
+    prompt: 'A wide shallow puddle of thick cyan slime spilled flat on the ground, seen from a low three-quarter '
+      + 'angle: a squat irregular blob of glossy aqua-blue gel with rounded drip lobes bulging out around its rim, '
+      + 'a bright glossy highlight streak across the top of the surface, two or three small round bubbles floating '
+      + 'in the gel, and a couple of tiny separate droplets beside it. Low and spread out, wider than it is tall.',
+    style: ' Cute chunky cartoon game sprite in the style of a chibi mobile RPG: ONE puddle centred in frame and '
+      + 'spread wide across the width, a thick uniform near-black outline round the whole silhouette, soft cel '
+      + 'shading, glossy white highlight blobs, bright saturated cyan, a low flat spreading silhouette that reads '
+      + 'as liquid pooled on the floor and NOT as a dome, ball or bubble. Fully transparent background, no ground '
+      + 'shadow, no background scenery, no text, no border, no frame, not pixel art, not photorealistic.',
+  },
 };
 
 const only = val('--only', null);
@@ -109,7 +125,7 @@ for (const k of keys) {
         const res = await fetch(`${API}/assets/image`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `ApiKey ${KEY}` },
-          body: JSON.stringify({ image_type: 'sprite', art_style: 'Anime/Manga', aspect_ratio: 'ar_1_1',
+          body: JSON.stringify({ image_type: 'sprite', art_style: 'Anime/Manga', aspect_ratio: (t.ar || 'ar_1_1'),
                                  n: 1, augment_prompt: false, prompt: t.prompt + (t.style || STYLE) }),
           signal: AbortSignal.timeout(180000),
         });
