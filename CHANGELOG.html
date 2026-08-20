@@ -121,6 +121,46 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.945 <span class="tag"><span class="pill bug">bug</span> Soul Vortex stops shuttering — and actually SUCKS</span></h2>
+<p>Per user: <em>Necromancer G skill animation doesnt work properly, it just keeps
+shuttering between 2 sprites and black hole itself has ambiguous pull</em> — then,
+clarified: <em>if monsters are a bit far or on a platform above the black hole, the
+black hole doesnt work. i think its better if black hole SUCKS everything in this
+radius.</em></p>
+<p><b>The shutter is a loading artifact</b> — the same disease v0.29.870 cured on the
+skill bar, and the reporter's own screenshot shows the tell: <em>"Loading sprites
+3940/4112 · 96%"</em>. The pool's 16 animation frames are lazy-fetched on first cast
+and compete with the 4000-sprite bulk load; the draw picked per-index (ready
+&rarr; that frame, not ready &rarr; the static sprite), so with only a frame or two
+decoded the pool flipped static/frame/static several times a second — literally
+"shuttering between 2 sprites". The healthy directions were verified first: all
+16 committed frames decode, are visually distinct, form a smooth progression
+(seam distance 50 vs average 99) and play at ~20 art-frames/sec once loaded.
+Fix: an <b>all-ready latch</b> — the pool draws the steady static sprite until every
+frame of the set has decoded, then switches to the loop exactly once — plus
+<code>fetchPriority</code> on the fx frames so they jump the bulk queue.</p>
+<p><b>The pull region was the drawn ellipse, 230&times;96&nbsp;px.</b> Platforms sit ~80&nbsp;px
+apart, so one platform up was already the rim and two up was nothing — and
+grounded mobs received no vertical pull at all, so even in-ellipse platform mobs
+only slid sideways. That is precisely "a bit far or on a platform above, the
+black hole doesnt work".</p>
+<p>Per the user, it now <b>sucks</b>: an outer field <b>430&nbsp;px wide and 300&nbsp;px above</b> the
+pool drags everything toward the core — grounded mobs included, which are pulled
+down <em>through</em> platforms (drop-through while clearly above the pool, released as
+they reach its level; the ground never honours drop-through, so nothing can be
+dragged under the map). Bosses still lean in at 30% rather than being vacuumed.
+<b>Damage stays confined to the drawn pool</b> — v0.29.671 fixed "monsters die when
+far away", and widening the kill zone would regress it. Suck from afar, kill at
+the core. Necrotic Ascendance inherits all of it (shared tick).</p>
+<p>Measured on the live engine: a mob on a platform 160&nbsp;px above drops the full
+160&nbsp;px into the pool; a mob 370&nbsp;px away is pulled 331&nbsp;px in; a mob at 640&nbsp;px
+(beyond the field) does not move a pixel and takes no damage.</p>
+<p>Guarded by <code>scripts/soul_vortex_test.mjs</code>: the anim pick is checked against a
+deliberately part-decoded set (the exact startup condition — real network timing
+would be flaky), and the suction against real mobs at the reported positions
+under the live hazard tick, with the bounded radius and confined kill zone
+asserted so the fix cannot overreach. On the previous build: <b>3 of 7 fail</b>.</p>
+
 <h2>v0.29.944 <span class="tag"><span class="pill bug">bug</span> Beating Gravitos can no longer strand you downed at 0&nbsp;HP</span></h2>
 <p>Per the tester (with screenshot): <em>Bug after beating gravitos, i cant go back to the void. I beat him but the game bugged</em> &mdash; downed banner frozen at &ldquo;28s&rdquo;, 0/60.5K&nbsp;HP, the Respawn button dead.</p>
 <p><b>The trap was a three-part interlock, reproduced exactly before fixing it.</b> Gravitos&rsquo; Singularity Collapse resolves from the hazards loop and writes <code>hp&nbsp;=&nbsp;0</code> outside the safe zone. The revive chain&rsquo;s last link answers &ldquo;already down&rdquo; for a player who is <em>already downed</em> &mdash; without restoring the held-at-1&nbsp;HP. And the main loop only runs <code>updatePlayer</code> at <code>hp&nbsp;&gt;&nbsp;0</code>, which is the sole caller of the downed tick &mdash; the one function that re-pins HP, counts the window down, and honours the button. A collapse landing on a downed player therefore froze everything, forever: the every-frame death check kept asking the same chain, which kept swallowing the death. The frozen &ldquo;28s&rdquo; is the signature &mdash; downed at 30s, second collapse two seconds later.</p>

@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.944';
+const GAME_VERSION = 'v0.29.945';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11715,7 +11715,7 @@ function _fxAnimFrames(key) {
   if (arr === undefined) {
     const _n = _lxFrameCount('fx/anim', key, 9);   // v0.29.519
     arr = new Array(_n).fill(null);
-    for (let i = 0; i < _n; i++) { const img = new Image(); img.decoding = 'async'; img.onerror = () => {}; img.src = 'Sprites/fx/anim/' + key + '_' + i + '.webp'; arr[i] = img; }
+    for (let i = 0; i < _n; i++) { const img = new Image(); img.decoding = 'async'; try { img.fetchPriority = 'high'; } catch (e) {} img.onerror = () => {}; img.src = 'Sprites/fx/anim/' + key + '_' + i + '.webp'; arr[i] = img; }   // v0.29.945 — fetchPriority: these gate a live combat effect; the ~4000 world sprites behind them do not
     FX_ANIM_FRAMES[key] = arr;
   }
   // v0.29.284 — fx frames are authored ~952×952 (347 MP across the pack).
@@ -83546,6 +83546,17 @@ const LX_VORTEX_TICK = 30;         // frames between drain ticks (damage scales 
 // the underwater fish). A pull below those is not a vacuum, it is a suggestion —
 // the first pass at 2.8/0.9 lost to both, which is what "ambiguous" meant.
 const LX_VORTEX_PULL_CORE = 6.0;   // suction at the centre, px/frame
+// v0.29.945 — OUTER SUCTION FIELD (per user: "if monsters are a bit far or
+// on a platform above the black hole, the black hole doesnt work ... better
+// if black hole SUCKS everything in this radius"). The pull region used to
+// BE the drawn 230x96 ellipse; platforms sit ~80 px apart, so one platform
+// up was already the rim and two up was nothing. The field reaches 430 px
+// wide and 300 px above the pool and pulls everything toward the core —
+// damage stays confined to the drawn pool (v0.29.671), so this sucks from
+// afar and kills at the core rather than widening the kill zone.
+const LX_VORTEX_SUCK_RX = 430;
+const LX_VORTEX_SUCK_RY = 300;
+const LX_VORTEX_SUCK_PULL = 2.8;   // px/frame at the outer rim — above every grounded mob's walk speed
 // v0.29.x - rim 3.4 -> 4.2 (per user: "ensure that the suction is not
 // bugging"). The flier speed-bleed only engages INSIDE the ellipse and is
 // ~1.0 exactly at the rim, so the boundary was a fair race: fastest swimmer
@@ -85328,7 +85339,40 @@ function updateProjectiles(dt) {
         const _vdy = cy - Math.max(m.y, Math.min(cy, m.y + m.h));
         const _vnx = _vdx / RX, _vny = _vdy / RY;
         const _vn = Math.sqrt(_vnx * _vnx + _vny * _vny);   // < 1 = inside the drawn pool
-        if (_vn >= 1) continue;
+        if (_vn >= 1) {
+          // v0.29.945 — OUTER SUCTION (see LX_VORTEX_SUCK_* above): outside
+          // the pool but inside the field, everything is dragged toward the
+          // core. Position, not velocity — same lesson as note 2 above. NO
+          // drain out here; the kill zone is still the drawn pool.
+          if (!h.follow && m.y > cy + 12) continue;   // never through the floor
+          const _snx = _vdx / LX_VORTEX_SUCK_RX, _sny = _vdy / LX_VORTEX_SUCK_RY;
+          const _sn = Math.sqrt(_snx * _snx + _sny * _sny);
+          if (_sn >= 1) {
+            // left the field entirely — release any drop-through we set
+            if (m._vxSuckDrop) { m._vxSuckDrop = false; m.dropThrough = false; }
+            continue;
+          }
+          const _sdx = cx - (m.x + m.w / 2), _sdy = cy - (m.y + m.h / 2);
+          const _sd = Math.sqrt(_sdx * _sdx + _sdy * _sdy) || 1;
+          const _sIsBoss = m.isBoss || m.isMiniBoss || m.boss;
+          let _sstep = LX_VORTEX_SUCK_PULL + (_pullRim - LX_VORTEX_SUCK_PULL) * (1 - _sn);
+          if (_sIsBoss) _sstep *= 0.30;   // bosses lean, they don't get vacuumed
+          m.x += (_sdx / _sd) * _sstep;
+          if (!_sIsBoss) {
+            // Vertical pull for EVERYTHING out here — this is what "sucks
+            // things off the platform above" means. Grounded mobs fall
+            // through platforms while clearly above the pool (drop-through
+            // is released as they reach its level so the floor still
+            // catches them); the ground branch of platform collision never
+            // honours dropThrough, so nothing can be pulled under the map.
+            m.y += (_sdy / _sd) * _sstep * (m.flies ? 0.7 : 1.0);
+            if (m.y + m.h < cy - 8) { m.dropThrough = true; m._vxSuckDrop = true; }
+            else if (m._vxSuckDrop) { m.dropThrough = false; m._vxSuckDrop = false; }
+          }
+          continue;
+        }
+        // arrived in the pool — release any suction drop-through
+        if (m._vxSuckDrop) { m.dropThrough = false; m._vxSuckDrop = false; }
         // v0.29.672 — NO DRAIN THROUGH THE FLOOR. The ellipse extends RY=96px
         // BELOW the pool's surface, and on multi-platform underwater maps that
         // lower half reaches straight through the floor: a mob on a ledge
@@ -123323,7 +123367,18 @@ function drawHazards() {
       // but there are 78% more samples across it, which is the actual fix for
       // "the animation could be smoother".
       const _vfa = (typeof _fxAnimFrames === 'function') ? _fxAnimFrames(_poolKey) : null;
-      if (_vfa && _vfa.length) { const _f = _vfa[Math.floor(game.time / 3) % _vfa.length]; if (_lxFxReady(_f)) _vortexSprite = _f; }
+      // v0.29.945 — ALL-READY LATCH (per user: "it just keeps shuttering
+      // between 2 sprites"; their screenshot shows the 4000-sprite bulk load
+      // at 96%). The old per-index fallback flipped static/frame/static while
+      // the set was part-decoded. Hold the steady static sprite until EVERY
+      // frame is in, then switch to the loop exactly once. The check is a
+      // monotonic latch, so post-load cost is one boolean read.
+      if (_vfa && _vfa.length && !_vfa._lxAllReady) {
+        let _allOk = true;
+        for (let _i = 0; _i < _vfa.length; _i++) { if (!_lxFxReady(_vfa[_i])) { _allOk = false; break; } }
+        if (_allOk) _vfa._lxAllReady = true;
+      }
+      if (_vfa && _vfa.length && _vfa._lxAllReady) { const _f = _vfa[Math.floor(game.time / 3) % _vfa.length]; if (_lxFxReady(_f)) _vortexSprite = _f; }
       if (_lxFxReady(_vortexSprite)) {
         // v0.29.671 — draw the sprite's CONTENT to the hurtbox, not its canvas
         // (per user: "a monster who is on top of me died despite not being
