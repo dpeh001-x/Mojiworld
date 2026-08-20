@@ -9649,7 +9649,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.967';
+const GAME_VERSION = 'v0.29.968';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -55240,6 +55240,41 @@ function _gugumaWarpRow(hist, label) {
 // v0.26.x — Per user: a brief "entering the Void" cinematic. A big Guguma is
 // shown for ~1.5s, then the whole overlay fades out (0.85s) to reveal the black
 // Void. Non-interactive, self-clearing, and re-triggerable on every Void entry.
+// v0.29.x — HI-RES SOURCE FOR THE EYE ZOOM (per user: "Guguma eyes at void
+// entry seem to be very pixelated and poor quality, ensure that the focus
+// retains the quality").
+//
+// The zoom ends at scale(6.5). Measured on a 1600x900 screen, that stretched
+// the 841x971 town sprite to 3231x3730 — a 3.84x bitmap magnification, so
+// every outline, the beak and both catchlights were invented by the resampler
+// rather than authored. (The compositor was NOT at fault: it rasters at the
+// animated scale, which is exactly why the thin source showed.) Guguma_hi.webp
+// is the same art at 3364x3884, which puts the peak at 0.96x — no stretch at
+// all. Measured sharpness over the eye region, mean |Laplacian|: 0.695 -> 1.962.
+//
+// Swapped in ONLY once it has decoded. The DOM keeps the small sprite as its
+// src so the hold beat paints instantly on a cold boot — the Void is the boot
+// map, and the sprite streamer is still mid-flight when this fires — and a
+// slow or missing hi-res simply leaves the previous behaviour in place. The
+// decoded-check also protects the <img>'s onerror fallback: swapping in a URL
+// that 404s would trip it and replace Guguma with the emoji.
+const _VOID_GUGUMA_HI = 'Sprites/npc/Guguma_hi.webp';
+let _voidGugumaHiImg = null;
+function _voidGugumaPreload() {
+  if (_voidGugumaHiImg) return _voidGugumaHiImg;
+  _voidGugumaHiImg = new Image();
+  try { _voidGugumaHiImg.decoding = 'async'; } catch (e) {}
+  _voidGugumaHiImg.src = _VOID_GUGUMA_HI;
+  return _voidGugumaHiImg;
+}
+function _voidGugumaUseHi(img) {
+  const hi = _voidGugumaHiImg;
+  if (!img || !hi || !hi.complete || !hi.naturalWidth) return false;
+  if (img.getAttribute('src') === _VOID_GUGUMA_HI) return true;
+  img.src = _VOID_GUGUMA_HI;
+  return true;
+}
+
 function _playVoidIntro() {
   const ov = document.getElementById('void-intro-overlay');
   if (!ov) return;
@@ -55249,10 +55284,12 @@ function _playVoidIntro() {
   // Restart the entrance animation so it replays on repeat Void entries.
   const img = document.getElementById('void-intro-guguma');
   const fb  = document.getElementById('void-intro-fallback');
+  _voidGugumaPreload();   // ~1s of hold to land before the zoom needs it
   [img, fb].forEach(el => { if (el) { el.classList.remove('eyezoom'); el.style.animation = 'none'; void el.offsetWidth; el.style.animation = ''; } });
   // v0.26.x — Void entry beat: hold Guguma ~1 s, then a cinematic zoom INTO his
   // eyes + a single chirp, before fading through to the void.
   ov._holdT = setTimeout(() => {
+    _voidGugumaUseHi(img);   // decoded by now on any warm/local load; else unchanged
     if (img) img.classList.add('eyezoom');
     if (fb)  fb.classList.add('eyezoom');
     // The eye-zoom finalises in ~1.0s; HOLD on the eyes for 1s MORE, THEN chirp.
