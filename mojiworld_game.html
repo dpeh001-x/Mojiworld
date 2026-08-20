@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.904';
+const GAME_VERSION = 'v0.29.905';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -19404,7 +19404,7 @@ const POWERUPS = [
   // rather than incremental.
   { id:'flamedash', tier:'epic', name:'Flame Dash',      icon:'🔥', stat:'dashFlame',  min:35, max:80,  unit:'%', fmt:r=>`Dash trails fire — ${r}% ATK/tick + burn`,        scale:r=>r/100, unique:true },
   { id:'blink', tier:'epic',     name:'Hyper Teleport',  icon:'🌀', stat:'dashBlink',  min:60, max:140, unit:'%', fmt:r=>`Dash goes +${r}% further & phases through foes`, scale:r=>r/100, unique:true },
-  { id:'novastep', tier:'epic',  name:'Nova Step',       icon:'💥', stat:'dashNova',   min:90, max:200, unit:'%', fmt:r=>`Dash ends in a shockwave (${r}% ATK)`,           scale:r=>r/100, unique:true },
+  { id:'novastep', tier:'epic',  name:'Nova Step',       icon:'💥', stat:'dashNova',   min:55, max:125, unit:'%', fmt:r=>`Dash ends in a shockwave (${r}% ATK, ~2/sec)`,  scale:r=>r/100, unique:true },   // v0.29.904 — was 90-200%; see _dashNovaBurst for the cadence floor that went with it
   { id:'diagslash', tier:'epic', name:'Diagonal Slash',  icon:'⚔️', stat:'diagSlash',  min:45, max:95,  unit:'%', fmt:r=>`Basics sweep diagonally — +${r}% reach, hits high & low`, scale:r=>r/100, unique:true },
   { id:'echo', tier:'epic',      name:'Phantom Echo',    icon:'👻', stat:'echoStrike', min:25, max:55,  unit:'%', fmt:r=>`Basics echo for ${r}% damage a moment later`,    scale:r=>r/100, unique:true },
   { id:'bloom', tier:'epic',     name:'Death Bloom',     icon:'🌸', stat:'deathBloom', min:8,  max:20,  unit:'%', fmt:r=>`Your kills detonate for ${r}% of their max HP`,  scale:r=>r/100, unique:true },
@@ -51998,6 +51998,27 @@ function _updateDashTrail(dt) {
 function _dashNovaBurst() {
   const M = player.mods || {};
   if (!(M.dashNova > 0)) return;
+  // v0.29.904 — MINIMUM INTERVAL BETWEEN BLASTS (per user: "reduce the damage
+  // of nova step, it is overpowered"). The damage roll came down too, but the
+  // roll was never the reason it ran away — the cadence was. This fires on
+  // every dash END, and a rogue's dash is 280 ms base and 196 ms with the
+  // 0.70 tree node: about five blasts a second, each hitting everything in a
+  // 150 px radius, with no throttle anywhere.
+  //
+  // v0.29.371 did this same audit on the sibling boon: the Flame Dash trail
+  // measured 12.6x basic DPS and was capped with a per-enemy tick throttle.
+  // The note it left says the trail now sits "at ~1.6x basics under full
+  // dash-commitment — the same ceiling Nova Step's optimal cadence lands on".
+  // That was an assumption about this function, never a rule inside it. This
+  // is the rule.
+  //
+  // 500 ms holds it to two blasts a second however fast the dash returns, so
+  // the boon stays a burst rather than becoming a channel. Deliberately a
+  // floor on the BLAST and not on the dash: dashing is movement and defence
+  // too, and slowing that to balance a damage boon would be the wrong tax.
+  const _now = (typeof game !== 'undefined' && game.time) | 0;
+  if (player._novaAt && (_now - player._novaAt) < 30) return;   // 30 frames @60fps = 500ms
+  player._novaAt = _now;
   const cx = player.x + player.w / 2, cy = player.y + player.h / 2;
   const R = 150;
   const atk = (typeof getAtk === 'function') ? getAtk() : 50;
