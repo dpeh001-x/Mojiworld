@@ -46,13 +46,17 @@ const r = await page.evaluate(() => {
   player.cls = 'warrior'; player.hp = getMaxHp(); player.x = 800; player.y = 400;
 
   // Build a monster the way a spawn would, from its authored type.
+  // _bbSeen: 0 pre-dates the v0.29.958 acquisition sweep — this suite asserts
+  // the settled bar (furniture, name, geometry), so its bosses are built
+  // "already acquired"; the sweep and the damage chip have their own suite
+  // (boss_bar_chip_test.mjs) on a virtual clock.
   const mk = (key, over) => {
     const t = monsterTypes[key] || {};
     return Object.assign({
       type: key, name: t.name || key, w: t.w || 60, h: t.h || 60,
       x: 900, y: 400, currentHp: Math.floor((t.hp || 1000) * 0.6), maxHp: t.hp || 1000,
       isBoss: !!t.boss, boss: !!t.boss, superBoss: !!t.superBoss, hyperBoss: !!t.hyperBoss,
-      level: t.level || 50, traits: t.traits,
+      level: t.level || 50, traits: t.traits, _bbSeen: 0,
     }, over || {});
   };
 
