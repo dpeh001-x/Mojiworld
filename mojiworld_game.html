@@ -9649,7 +9649,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.954';
+const GAME_VERSION = 'v0.29.955';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -21609,7 +21609,7 @@ const QUESTS = {
       + 'You have been carrying the smaller pieces for a while now. Dawn Fragments: what settles out of a cut when the cut is that big. The Weight-Bearer took the dreaming off this world so it could never shatter again, and he was thorough, and he was wrong, and the wound he made is still shedding. Most of what came off is small enough to lift. One piece was not. It has been drifting over Everdawn since before Lyra was born, and this season it finally came down.\n\n'
       + 'Here is the arithmetic that ruined her. The tear opened the same season a fifteen-year-old began performing Forms nobody had taught her. Two true facts. One false cause. The Academia is a building full of people trained to find the pattern, and they found the one that fit inside a room.\n\n'
       + 'And it is worse than a coincidence, which is why nobody has corrected it. The loan only works BECAUSE the tear is there — you cannot reach forward to yourself through unbroken time. She did not make the hole. She found it, and she used it, and she has been paying for that ever since. She is guilty of the small thing. She was convicted of the large one.\n\n'
-      + 'Go to the Vigil. The vermillion things holding the watch there were shed by the same cut. Bring Hera proof of what they are made of, and she will strike the paragraph and write a true one — with her name still at the bottom of it.',
+      + 'Hunt the Reflection. The vermillion thing prowling the Fractured Reflection was shed by the same cut — it returns to the glass every few minutes, so hold the map and cut it down twice. Bring Hera proof of what it is made of, and she will strike the paragraph and write a true one — with her name still at the bottom of it.',
     rewards: { mojicoins: 14500, exp: 12800, gearChance: 1.00, gearTier: 3, potions: { hp_l: 6, mp_l: 6 } },
   },
   // =========================================================================
@@ -25285,7 +25285,9 @@ const MAPS = {
       // solo encounter with 3-arrow volleys every 5s + speed 3 / jump 11
       // + activeBoss AI jump-roll (9% / frame). Single source of ranged
       // pressure on top of Barnaby's melee — focus over swarm.
-      { type:'vigil_vermillion', count: 1 },
+      // v0.29.9xx - vigil_vermillion REMOVED from this roster (per user):
+      // he prowls the Fractured Reflection now, as an Elder, on a 5-minute
+      // respawn clock - see _lxVermillionTick. Barnaby holds the Vigil alone.
     ],
   },
   skyGarden: {
@@ -39058,6 +39060,38 @@ const PLAYER_SAVE_FIELDS = [
 const LX_ELDER_DROP_RATE = 0.01;
 const LX_REFIGHT_SHARD_MUL  = 0.40;   // shards on a repeat kill — reduced, never zero
 const LX_REFIGHT_REWARD_MUL = 0.40;   // scroll + gear-drop chance on a repeat kill
+// =========================================================================
+// v0.29.9xx - THE VERMILLION HUNT (per user: "make him a mini-boss instead,
+// remove him from the confused vigil map, make him spawn in the fractured
+// reflection map instead every 5 minutes"). The only spawn path for
+// vigil_vermillion now: an Elder (isMiniBoss) on the Fractured Reflection.
+// Clocked on game._playMs (pause-proof, same base the boss respawn system
+// uses). First visit: ~5s. While he lives the due-time slides forward, so
+// the 5 minutes are measured from his DEATH, not his spawn. The clock
+// survives leaving the map; a lapsed timer spawns him on re-entry.
+// =========================================================================
+const LX_VERM_RESPAWN_MS = 5 * 60 * 1000;
+const LX_VERM_FIRST_MS   = 5000;
+function _lxVermillionTick() {
+  if (typeof game === 'undefined' || !game || game.currentMap !== 'fracturedReflection') return;
+  if (typeof player === 'undefined' || !player || player.hp <= 0 || game.paused) return;
+  const now = game._playMs || 0;
+  let alive = false;
+  for (const mm of (game.monsters || [])) {
+    if (mm && mm.type === 'vigil_vermillion' && mm.currentHp > 0) { alive = true; break; }
+  }
+  if (alive) { game._vermDueAt = now + LX_VERM_RESPAWN_MS; return; }
+  if (game._vermDueAt == null) game._vermDueAt = now + LX_VERM_FIRST_MS;
+  if (now < game._vermDueAt) return;
+  game._vermDueAt = now + LX_VERM_RESPAWN_MS;   // safety; the alive-branch re-slides it anyway
+  try {
+    if (typeof spawnMonster === 'function') {
+      spawnMonster(1200, 360, 'vigil_vermillion', false, true);   // ELDER - explicit isMiniBoss, no promotion roll
+      if (typeof showToast === 'function') showToast('\ud83c\udff9 The Bloodthirsty Vermillion prowls the Reflection!', 'epic');
+      if (typeof addShake === 'function') addShake(4);
+    }
+  } catch (e) {}
+}
 function _lxBossKey(m) {
   if (!m) return null;
   if (m.zodiacSign) return 'zodiac_' + m.zodiacSign;
@@ -82843,6 +82877,10 @@ function killMonster(m) {
   let dropChance = (tier === 2 ? 0.9 : tier === 1 ? 0.15 : 0.05) * (1 + luck) * 0.02 * (typeof _diffDropMul === 'function' ? _diffDropMul() : 1) * (typeof _edictDropMul === 'function' ? _edictDropMul() : 1) * (typeof _affixDropMul === 'function' ? _affixDropMul() : 1);   // v0.28.7 — Hard +25% / Nightmare +50% gear-drop chance · v0.29.66 Edict Weight drop bonus · v0.29.288 world affix
   // v0.29.7xx — same 40% haircut on the gear roll for an already-cleared boss.
   if (typeof _lxIsBossRefight === 'function' && _lxIsBossRefight(m)) dropChance *= LX_REFIGHT_REWARD_MUL;
+  // v0.29.9xx - Vermillion's item drop is a FLAT 2% (per user). Set after
+  // every multiplier so luck / difficulty / edict / affix cannot inflate it,
+  // and the elder tier base cannot either.
+  if (m.type === 'vigil_vermillion') dropChance = 0.02;
   if (itemRoll < dropChance) {
     // v0.25.678 — Pass the killed mob's effective level so rarity weights
     // (and affix magnitudes downstream) grade with mob difficulty. _mobLevel
@@ -83177,7 +83215,7 @@ function killMonster(m) {
     // has no path that returns nothing, so every Elder kill handed over a piece
     // regardless of any drop rate on the books. It is the reason the tier's
     // 0.30% main roll described almost none of an Elder's real yield.
-    const bonus = (Math.random() < LX_ELDER_DROP_RATE) ? rollItemDrop(1, _mobLevel(m)) : null;
+    const bonus = (m.type !== 'vigil_vermillion' && Math.random() < LX_ELDER_DROP_RATE) ? rollItemDrop(1, _mobLevel(m)) : null;   // v0.29.9xx - Vermillion's 2% is TOTAL; he sits out the elder bonus
     if (bonus) {
       game.drops.push({
         x: m.x + m.w/2, y: m.y + m.h/2, vy: -7,
@@ -126172,6 +126210,7 @@ function loop(time) {
     updatePlayer(dt);
     if (typeof _tickZodiacDodgeReward === 'function') _tickZodiacDodgeReward(dt);   // v0.26.x — zodiac perfect-dodge reward
     if (typeof _tickBossCourage === 'function') _tickBossCourage(dt);               // v0.26.x — low-level-boss Brave Dodge / Counter
+    if (typeof _lxVermillionTick === 'function') _lxVermillionTick();               // v0.29.9xx — Vermillion 5-min hunt clock (Fractured Reflection)
     updateMonsters(dt);
     updateProjectiles(dt);
     emitProjectileTrails();   // v0.25.21 — runs every frame regardless of render path
