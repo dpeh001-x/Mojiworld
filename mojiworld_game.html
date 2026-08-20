@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.986';
+const GAME_VERSION = 'v0.29.987';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -45006,11 +45006,13 @@ function _mpHandle(msg) {
       // avatar data riding a verbatim-forwarded frame type, for relays whose
       // state whitelist strips look/eq/v (the deployed CF worker). Merge into
       // the peer exactly like the state path would have. Same peer-flood cap.
-      if (msg && (msg.lk || msg.eq || msg.v) && msg.id !== net.myId) {
+      if (msg && (msg.lk || msg.eq || msg.v || typeof msg.ti === 'string') && msg.id !== net.myId) {
         if (net.peers[msg.id] || Object.keys(net.peers).length < MP_MAX_PEERS) {
           const _pp = net.peers[msg.id] || (net.peers[msg.id] = { id: msg.id, _last: performance.now() });
           if (msg.lk && typeof msg.lk === 'object') _pp.look = msg.lk;
           if (msg.eq && typeof msg.eq === 'object') _pp.eq = msg.eq;
+          // scrubbed by hand here: only the 'state' path runs _mpScrubStrings
+          if (typeof msg.ti === 'string') _pp.ti = msg.ti.replace(/[<>]/g, '').slice(0, 64);
           if (typeof msg.v === 'string') { _pp.v = msg.v.slice(0, 16); _mpNoteVersion(_pp, _pp.v); }
           _pp._last = performance.now();
         }
@@ -45243,7 +45245,13 @@ function _mpTick() {
   // (equip swap / dye / pose — appears on the partner within one tick) or on
   // a ~700 ms refresher; skip otherwise so the steady 14 Hz tick stays tiny.
   net._tickN = (net._tickN | 0) + 1;
-  const _avStr = JSON.stringify(_av);
+  // v0.29.x — the worn title rides with the avatar payload (see the 'ti'
+  // fields below). Sent as '' rather than omitted when nothing is equipped:
+  // an absent key merges as "no change" on the receiver, so UNequipping a
+  // title would otherwise leave it stuck on every partner's screen forever.
+  const _ttlWire = (typeof player !== 'undefined' && player && typeof player.equippedTitle === 'string')
+    ? player.equippedTitle.slice(0, 64) : '';
+  const _avStr = JSON.stringify(_av) + '|' + _ttlWire;
   const _sendAv = (_avStr !== net._lastAvStr) || (net._tickN % 10 === 0);
   if (_sendAv) net._lastAvStr = _avStr;
   // v0.29.x — LOOK-SYNC CARRIER for whitelist relays. The deployed Cloudflare
@@ -45262,7 +45270,7 @@ function _mpTick() {
   if (now - (net._lastLookSyncAt || 0) > 2500) {
     net._lastLookSyncAt = now;
     try {
-      net.ws.send(JSON.stringify({ t: 'ping', lk: _av.look, eq: _av.eq,
+      net.ws.send(JSON.stringify({ t: 'ping', lk: _av.look, eq: _av.eq, ti: _ttlWire,
         rt: Math.round(performance.now()),
         v: (typeof GAME_VERSION !== 'undefined') ? GAME_VERSION : undefined }));
     } catch (e) { /* ignore */ }
@@ -45294,6 +45302,7 @@ function _mpTick() {
       // look for late joiners, and the 2.5 s ping carrier is a further backstop.
       look: _sendAv ? _av.look : undefined,
       eq: _sendAv ? _av.eq : undefined,
+      ti: _sendAv ? _ttlWire : undefined,
     }));
   } catch (e) { /* ignore */ }
   // Decay peer chat / emote lifetimes
@@ -45744,6 +45753,31 @@ function _mpDrawPeers() {
     ctx.strokeRect(sx + 14 - tw/2, sy + 58, tw, 14);
     ctx.fillStyle = '#eddaff';
     ctx.fillText(name, sx + 14, sy + 68);
+    // v0.29.x — a partner's earned title, under their name (per user: "make
+    // sure other players in the same room can see the title"). Same treatment
+    // as the local nameplate copy — Cinzel, flanking diamonds, dark round-join
+    // outline, travelling gold shimmer — so a Conqueror reads identically
+    // whether it is you or the person standing next to you. Width cached on
+    // the peer like the name above it, since measureText is per-peer-per-frame.
+    if (typeof p.ti === 'string' && p.ti) {
+      const _pt = '\u2756 ' + p.ti.toUpperCase() + ' \u2756';
+      ctx.font = '700 9px LXBossTitle, Cinzel, "Palatino Linotype", Georgia, serif';
+      try { ctx.letterSpacing = '1.2px'; } catch (e) {}
+      const _ptk = _pt + '|' + (window._lxBossFontReady ? 1 : 0);
+      if (p._tiCache !== _ptk) { p._tiCache = _ptk; p._tiTw = ctx.measureText(_pt).width; }
+      ctx.lineJoin = 'round';
+      ctx.miterLimit = 2;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(10,5,2,0.92)';
+      ctx.strokeText(_pt, sx + 14, sy + 80);
+      ctx.fillStyle = (typeof _lxTitleGradient === 'function')
+        ? _lxTitleGradient(sx + 14, Math.max(28, p._tiTw || 28)) : '#f2d489';
+      ctx.shadowColor = 'rgba(255,190,80,0.75)';
+      ctx.shadowBlur = 7;
+      ctx.fillText(_pt, sx + 14, sy + 80);
+      ctx.shadowBlur = 0;
+      try { ctx.letterSpacing = '0px'; } catch (e) {}
+    }
     ctx.restore();
     // HP bar (thin) — ABOVE the head. `sy` is the top of the peer's 44px
     // logical box, but the chibi renders ~0.85× anchored at the FEET, so its

@@ -138,6 +138,8 @@ function playerSnap(ws) {
     // v0.29.x — full peer avatar (look/eq, matching mp/server.mjs since
     // v0.29.11) + client build stamp (version-skew detection).
     look: p.look, eq: p.eq, v: p.v,
+    // v0.29.x — worn title, drawn under the peer's nameplate.
+    ti: p.ti,
   };
 }
 
@@ -434,6 +436,9 @@ wss.on('connection', (ws, req) => {
       if (msg.look && typeof msg.look === 'object') p.look = msg.look;
       if (msg.eq   && typeof msg.eq   === 'object') p.eq   = msg.eq;
       if (typeof msg.v === 'string') p.v = sanitizeString(msg.v, 16);
+      // v0.29.x — worn title. Sent as '' when unequipped (never omitted), so
+      // clearing one actually propagates instead of sticking on every peer.
+      if (typeof msg.ti === 'string') p.ti = sanitizeString(msg.ti, 64);
       broadcast(ws._roomId, { t: 'state', ...playerSnap(ws) }, ws);
       return;
     }
