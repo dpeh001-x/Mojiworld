@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.940';
+const GAME_VERSION = 'v0.29.941';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -44490,6 +44490,37 @@ function _lxPqStageCount(qid) {
   } catch (e) {}
   const _q = (typeof QUESTS !== 'undefined') && QUESTS[qid];
   return (_q && _q.count) || 1;
+}
+// v0.29.941 — full Ticket Rush reset, shared by every dialog branch that
+// offers a fresh run. Per tester: "if u finished 2/4 of the pq, and leave, the
+// train pq will automatically teleport u to the 3rd stage as opposed to
+// starting the train pq from stage 1" — with Stages 1-2 done, town Milo's only
+// forward option was "Begin Stage 3"; the reset-papers path lived exclusively
+// in the ALL-FOUR-DONE branch, so mid-chain there was no way back to Stage 1.
+// Resume stays the default everywhere (that linear flow was itself a user
+// request, v0.26.298); this just stops it being the ONLY door.
+function _lxPqRestartChain() {
+  const _ids = ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale'];
+  if (player.quests) {
+    for (const _id of _ids) {
+      if (player.quests.completed) delete player.quests.completed[_id];
+      if (player.quests.active)    delete player.quests.active[_id];
+    }
+    // v0.26.313 — clear unlocked flags so the chain unlock state restarts from
+    // scratch; tickQuestUnlocks re-adds each stage as its prereq completes.
+    // Stage 1 needs no unlock (unconditional; acceptQuest below handles it).
+    if (player.quests.unlocked) {
+      delete player.quests.unlocked.q_pq_spire;
+      delete player.quests.unlocked.q_pq_carriage;
+      delete player.quests.unlocked.q_pq_finale;
+    }
+  }
+  player._pqSpirePieces = {};
+  player._pqFinaleBossPending = false;
+  if (typeof acceptQuest === 'function') acceptQuest('q_clockwork_underpass');
+  if (typeof closeDialog === 'function') { try { closeDialog(); } catch (e) {} }
+  if (typeof showToast === 'function') showToast('🎫 Ticket Rush restarted — Stage 1: Underpass Lobby', 'legendary');
+  if (typeof loadMap === 'function') loadMap('clockworkUnderpassLobby', 300);
 }
 function _lxPqDirectTick() {
   if (game.expedition && game.expedition.active) return false;
@@ -87411,6 +87442,7 @@ So.. do you need a lift?`;
           if (typeof showToast === 'function') showToast('🧩 STAGE 2 — Climb the Spire, find 4 pieces.', 'epic');
           if (typeof loadMap === 'function') loadMap('clockworkSpire', 60);
         }});
+        opts.push({ t:'🔄 Restart from Stage 1 instead — reset my papers', cb:() => { if (typeof _lxPqRestartChain === 'function') _lxPqRestartChain(); } });
         opts.push({ t:'Not yet', cb: closeDialog });
       } else if (!_carriageDone && _carriageUnlocked) {
         // v0.26.309 — Stage 3 (NEW) — Carriage unlock after Spire done.
@@ -87421,6 +87453,7 @@ So.. do you need a lift?`;
           if (typeof showToast === 'function') showToast('🚃 STAGE 3 — Carriage of Ascension. Defeat ' + _lxPqStageCount('q_pq_carriage') + ' Ticket Mechs.', 'epic');
           if (typeof loadMap === 'function') loadMap('tower', 380);
         }});
+        opts.push({ t:'🔄 Restart from Stage 1 instead — reset my papers', cb:() => { if (typeof _lxPqRestartChain === 'function') _lxPqRestartChain(); } });
         opts.push({ t:'Not yet', cb: closeDialog });
       } else if (!_finaleDone && _finaleUnlocked) {
         // Stage 4 unlocked, awaiting accept. (Same as before — last stage.)
@@ -87432,41 +87465,14 @@ So.. do you need a lift?`;
           if (typeof showToast === 'function') showToast('🎩 STAGE 4 — Master Conductor awaits in the Express arena.', 'legendary');
           if (typeof loadMap === 'function') loadMap('clockworkExpress', 100);
         }});
+        opts.push({ t:'🔄 Restart from Stage 1 instead — reset my papers', cb:() => { if (typeof _lxPqRestartChain === 'function') _lxPqRestartChain(); } });
         opts.push({ t:'Not ready yet', cb: closeDialog });
       } else {
         // All 4 stages done. Offer a single "Run again" option.
         text = '*Milo tips his cap with quiet pride.*\n\nThe Rush is complete, Master Conductor\'s blessings. You\'ve done the lot — lobby, spire, carriage, the duel. If the road calls again, I can reset your papers and we ride from Stage 1.';
-        opts.push({ t:'🎫 Run the Ticket Rush again ✦', cb:() => {
-          // v0.26.309 — Reset chain now includes q_pq_carriage.
-          if (player.quests && player.quests.completed) {
-            delete player.quests.completed[_pqQuestId];
-            delete player.quests.completed[_spireId];
-            delete player.quests.completed[_carriageId];
-            delete player.quests.completed[_finaleId];
-          }
-          if (player.quests && player.quests.active) {
-            delete player.quests.active[_pqQuestId];
-            delete player.quests.active[_spireId];
-            delete player.quests.active[_carriageId];   // v0.26.309
-            delete player.quests.active[_finaleId];
-          }
-          // v0.26.313 (audit MED) — Also clear `unlocked` flags so the
-          // chain unlock state restarts from scratch. tickQuestUnlocks
-          // re-adds each downstream stage as the prereq completes,
-          // so no need to pre-unlock anything except Stage 1 (which is
-          // unconditional + acceptQuest below handles).
-          if (player.quests && player.quests.unlocked) {
-            delete player.quests.unlocked[_spireId];
-            delete player.quests.unlocked[_carriageId];
-            delete player.quests.unlocked[_finaleId];
-          }
-          player._pqSpirePieces = {};
-          player._pqFinaleBossPending = false;
-          if (typeof acceptQuest === 'function') acceptQuest(_pqQuestId);
-          closeDialog();
-          if (typeof showToast === 'function') showToast('🎫 Ticket Rush restarted — Stage 1: Underpass Lobby', 'legendary');
-          if (typeof loadMap === 'function') loadMap('clockworkUnderpassLobby', _spawnX);
-        }});
+        // v0.29.941 — body moved to _lxPqRestartChain so the mid-chain
+        // branches below can offer the identical reset.
+        opts.push({ t:'🎫 Run the Ticket Rush again ✦', cb:() => { if (typeof _lxPqRestartChain === 'function') _lxPqRestartChain(); } });
         opts.push({ t:'Close', cb: closeDialog });
       }
     } else if (_isActive) {
