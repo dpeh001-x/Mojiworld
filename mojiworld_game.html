@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.899';
+const GAME_VERSION = 'v0.29.900';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -47104,6 +47104,16 @@ function _applyTicketPuzzleBonus(stageKey) {
   if (typeof _renderPqObjectivePin === 'function') _renderPqObjectivePin();
 }
 
+// v0.29.900 — is every prerequisite of this quest actually completed?
+// `prereq` may be a single id or an array (all required), matching the shape
+// tickQuestUnlocks already reads. Function declaration, so both callers below
+// can sit above it without an ordering hazard.
+function _lxPrereqMet(q) {
+  if (!q || !q.prereq) return true;
+  const done = (typeof player !== 'undefined' && player.quests && player.quests.completed) || null;
+  if (!done) return false;
+  return [].concat(q.prereq).every((pr) => !!done[pr]);
+}
 function acceptQuest(id) {
   _ensureQuests();
   const q = QUESTS[id]; if (!q) return false;
@@ -47114,6 +47124,12 @@ function acceptQuest(id) {
   // in tickQuestUnlocks (a player who somehow has an unlock for a wrong-
   // class quest in their save still can't accept it).
   if (q.cls && q.cls !== player.cls) return false;
+  // v0.29.900 — PREREQ GATE, same defense-in-depth as the class gate above.
+  // tickQuestUnlocks honours q.prereq when it unlocks and prunes stale entries,
+  // but nothing re-checked it here: a stale `unlocked` flag in a save was enough
+  // to accept PQ Stage 3 with Stage 2 unfinished and land mid-chain. Measured
+  // before this line existed: planting unlocked.q_pq_carriage accepted it.
+  if (!_lxPrereqMet(q)) return false;
   // v0.25.916 — Clear any stale multi-visit progress counter before
   // (re-)accepting the quest so a previously-abandoned multi-visit
   // doesn't resume from old count. Pairs with the cleanup in
@@ -50439,7 +50455,10 @@ function renderQuestJournal() {
   for (const id in QUESTS) {
     if (player.quests.completed[id]) buckets.completed.push(id);
     else if (player.quests.active[id]) buckets.active.push(id);
-    else if (player.quests.unlocked[id]) buckets.available.push(id);
+    // v0.29.900 — an unlocked-but-prereq-unmet quest is no longer listed as
+    // available. Without this the journal still renders an Accept button that the
+    // gate above now refuses, which is a dead control rather than a fix.
+    else if (player.quests.unlocked[id] && _lxPrereqMet(QUESTS[id])) buckets.available.push(id);
   }
   // Sort: Available by level asc (closest to current first); Completed
   // by level desc (latest first); Active stays insertion-ordered.
