@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.935';
+const GAME_VERSION = 'v0.29.936';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -20854,7 +20854,7 @@ const monsterTypes = {
     color:'#88aaee', shell:'#2a3a8a',
     hp:75000, atk:240, def:110, evasion:180,
     exp:24000, mojicoins:12000,
-    speed:2.6, jump:10,
+    speed:2.6, jump:10, jumpCdMs:2000,
     boss:true, level:30,
     shoot:'mdark', shootCd:850,
     signature:'Milo\'s mentor. Channels every Express discipline + ticket storms + summons.',
@@ -75666,7 +75666,25 @@ function bossAI(m, dt, distToPlayer) {
     return;
   }
   const dir = (player.x + player.w/2) - (m.x + m.w/2);
-  m.facing = dir > 0 ? 1 : -1;
+  // v0.29.x — FACING HYSTERESIS (per playtester: the PQ final boss's "movement
+  // and animations are erratic"). This line was an unconditional per-frame
+  // re-face — the ordinary chase AI earned a 28px deadband + 220ms hold long
+  // ago ("reads as decisive... instead of micro-jittering around the player"),
+  // but bossAI never did. It only SHOWS on a boss that crosses the player a
+  // lot: measured on the Conductor, 101 facing flips in 10s — the sprite
+  // mirror-flopping ten times a second — while Barnaby, who roots in swing
+  // cycles and never crosses, measured 0. Same grammar as the chase block;
+  // every pattern reads m.facing at fire time and tolerates 220ms exactly as
+  // ordinary heavies already do.
+  if (m._bossFaceHoldT === undefined) m._bossFaceHoldT = 0;
+  if (m._bossFaceHoldT > 0) m._bossFaceHoldT -= dt;
+  {
+    const _fDB = Math.max(28, (m.w || 32) * 0.5);
+    if (Math.abs(dir) > _fDB && m._bossFaceHoldT <= 0) {
+      const _nf = dir > 0 ? 1 : -1;
+      if (_nf !== m.facing) { m.facing = _nf; m._bossFaceHoldT = 220; }
+    }
+  }
   // v0.25.544 — Boss platform-leap. Only ground-bound bosses with
   // m.jump > 0 attempt this; the helper bails for hovering / anchored
   // types via the patternState gate. Excluded explicitly: aetherion
@@ -79581,8 +79599,10 @@ function bossAI(m, dt, distToPlayer) {
     const mcy = m.y + m.h / 2;
     const dxA = pcx - mcx;
     const dyA = pcy - mcy;
-    m.facing = dxA > 0 ? 1 : -1;
-    // Accelerate vx toward player; cap at speed × 1.6.
+    // v0.29.x — facing is OWNED by the held writer at the top of bossAI (28px
+    // deadband + 220ms hold). This branch re-faced unconditionally every frame
+    // — stack-trapped fighting the held writer flip-for-flip — and its vx now
+    // follows the committed side, which also kills the accel dither.
     m.vx += m.facing * 0.22;
     const _vxCapA = (m.speed || 2) * 1.6;
     if (m.vx >  _vxCapA) m.vx =  _vxCapA;
@@ -79590,8 +79610,13 @@ function bossAI(m, dt, distToPlayer) {
     // Jump if grounded AND (player is above OR a small random hop —
     // 4% per frame for active-boss-trait mobs vs the 2% non-trait
     // default seen in the regular AI at L35770).
-    if (m.onGround && (m.jump | 0) > 0) {
-      if (dyA < -40 || Math.random() < 0.04) m.vy = -_mobJumpV(m);
+    const _jcdA = (m.jumpCdMs | 0);
+    if (_jcdA > 0) m._jumpCdT = Math.max(0, (m._jumpCdT || 0) - dt);
+    if (m.onGround && (m.jump | 0) > 0 && !(_jcdA > 0 && m._jumpCdT > 0)) {
+      // v0.29.x — the 4%/frame hop roll ignored jumpCdMs, so the knob only
+      // gated a roll bosses in this branch never used. Types without a
+      // jumpCdMs are byte-identical.
+      if (dyA < -40 || Math.random() < 0.04) { m.vy = -_mobJumpV(m); if (_jcdA > 0) m._jumpCdT = _jcdA; }
     }
     // Shoot cooldown — ticks dedicated `_activeBossShootCd` so it
     // doesn't collide with regular AI's `_shootCd` if a boss ever
