@@ -156,6 +156,20 @@ const R = await page.evaluate(async () => {
     out.packExpect = Math.floor(getMaxHp() * 15);
     try { castSkill('beastmaster_pack'); } catch (e) {}
     out.pack = (player.pack && player.pack[0]) ? player.pack[0].maxHp : null;
+
+    // ---- MojiMon companion: same x15 pool, upgrade points on top ----------
+    try {
+      const mm = _mojimonEnsure();
+      mm.roster['slime'] = { upg: { hp: 0, atk: 0, def: 0 }, at: Date.now() };
+      mm.assigned = 'slime';
+      out.mmExpect = Math.floor(getMaxHp() * 15);
+      out.mm = _mojimonStatsFor('slime').maxHp;
+      // and with upgrade points invested, the multiplier must ride the NEW base
+      const pts = 5;
+      mm.roster['slime'].upg.hp = pts;
+      out.mmUpgExpect = Math.floor(getMaxHp() * 15 * (1 + _mmUpgPts(pts) * MOJIMON_UPG.hp));
+      out.mmUpg = _mojimonStatsFor('slime').maxHp;
+    } catch (e) { out.mmErr = String(e).slice(0, 80); }
     return out;
   })();
 
@@ -193,6 +207,13 @@ ok('lich minion HP is player max HP x15', near(H.minion, H.minionExpect),
 ok('wolf HP is player max HP x15', near(H.wolf, H.wolfExpect), shown(H.wolf, H.wolfExpect));
 ok('skyhunter eagle HP is player max HP x15', near(H.eagle, H.eagleExpect), shown(H.eagle, H.eagleExpect));
 ok('beastmaster pack HP is player max HP x15', near(H.pack, H.packExpect), shown(H.pack, H.packExpect));
+ok('mojimon companion HP is player max HP x15', near(H.mm, H.mmExpect),
+   shown(H.mm, H.mmExpect) + (H.mmErr ? ' err=' + H.mmErr : ''));
+// The companion is the one summon with an upgrade lane — investing points must
+// still multiply, and must multiply the NEW base rather than the old parity one.
+ok('mojimon upgrade points still scale, on top of the x15 base',
+   near(H.mmUpg, H.mmUpgExpect) && H.mmUpg > H.mm,
+   shown(H.mmUpg, H.mmUpgExpect) + ' (unupgraded ' + H.mm + ')');
 
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }
