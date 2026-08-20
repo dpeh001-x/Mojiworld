@@ -584,6 +584,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "octoHead": 9,
    "octoLeg": 9,
    "pincer": 9,
+   "p_necromancer_soulorb": 9,
    "p_ult_warlord": 9,
    "quake": 9,
    "roar": 9,
