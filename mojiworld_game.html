@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.997';
+const GAME_VERSION = 'v0.29.998';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -24083,7 +24083,11 @@ const MAPS = {
     ],
     npcs: [],
     portals: [
-      { x:400, y:420, dest:'town', name:'⭐ Everdawn Central', iconStar:true },
+      // v0.29.996 — was y:420. That is groundY-60, the value drawPortals
+      // derives on its own (it renders the sprite centre 60px above the feet
+      // line), so supplying it here double-applied the offset and left the
+      // star hanging 120px above the floor. No explicit y = ride the ground.
+      { x:400, dest:'town', name:'⭐ Everdawn Central', iconStar:true },
       // v0.26.950 — Hall of Echoes portal removed from The Void (per user);
       // the boss-rush entry now lives at the BASE of the Interdimensional
       // Ascension (x680, beside the Wayfarer's Lantern exit — v0.26.949).
@@ -24109,7 +24113,8 @@ const MAPS = {
     ],
     npcs: [],
     portals: [
-      { x:90, y:420, dest:'void', name:'⭐ The Void', iconStar:true },
+      // v0.29.996 — same ground-60 double-offset as The Void's own portal.
+      { x:90, dest:'void', name:'⭐ The Void', iconStar:true },
     ],
     spawns: [],
   },
@@ -57416,7 +57421,7 @@ function loadMap(id, entryX, entryY) {
     for (const _po of (game.portals || [])) {
       if (!_po || !Number.isFinite(_po.x)) continue;
       _chestKeepOut.push({ x: _po.x, y: (typeof _po.y === 'number') ? _po.y
-        : ((typeof _defaultPortalY === 'function') ? _defaultPortalY() : 480) });
+        : ((typeof _defaultPortalY === 'function') ? _defaultPortalY(_po.x) : 480) });   // v0.29.996 — x-aware
     }
     for (const _np of (game.npcs || [])) {
       if (!_np || !Number.isFinite(_np.x)) continue;
@@ -57507,7 +57512,7 @@ function loadMap(id, entryX, entryY) {
     const _ccKeepOut = [];
     for (const _po of (game.portals || [])) if (_po && Number.isFinite(_po.x)) {
       _ccKeepOut.push({ x: _po.x, y: (typeof _po.y === 'number') ? _po.y
-        : ((typeof _defaultPortalY === 'function') ? _defaultPortalY() : 480) });
+        : ((typeof _defaultPortalY === 'function') ? _defaultPortalY(_po.x) : 480) });   // v0.29.996 — x-aware
     }
     for (const _np of (game.npcs || [])) if (_np && Number.isFinite(_np.x)) {
       _ccKeepOut.push({ x: _np.x, y: (typeof _np.y === 'number') ? _np.y : 436 });
@@ -86541,15 +86546,30 @@ function updateParticles(dt) {
 // on the ground was >100px out of the trigger window — the doors only fired on
 // a jump-apex and the mobile F-button (also hardcoded 480) never lit. Deriving
 // from the ground fixes that whole class (480-ground maps are unchanged).
-function _defaultPortalY() {
-  const g = (game.mapData && game.mapData.platforms || []).find(p => p.type === 'ground');
-  return g ? g.y : 480;
+function _defaultPortalY(x) {
+  const gs = (game.mapData && game.mapData.platforms || []).filter(p => p.type === 'ground');
+  if (!gs.length) return 480;
+  // v0.29.996 — resolve the ground slab UNDER x rather than simply the first
+  // one. Most maps floor themselves with a single slab and are unaffected, but
+  // a map can build its floor as a staircase (Sauropod Slope steps 484 -> 462
+  // across its width) and then "the ground line" is a function of x, not a
+  // constant. Returning gs[0] drew every y-less portal at the leftmost step's
+  // height, sinking the ones further along into the hillside.
+  // Callers that pass no x keep the old behaviour exactly.
+  if (Number.isFinite(x)) {
+    let best = null;
+    // Topmost slab covering x — if floors overlap, the walkable one is the
+    // one you would actually stand on.
+    for (const g of gs) if (x >= g.x && x <= g.x + g.w && (!best || g.y < best.y)) best = g;
+    if (best) return best.y;
+  }
+  return gs[0].y;
 }
 function tryPortal() {
   for (const po of game.portals) {
     // v0.25.470 — portals can carry an explicit `y` for tall maps (vertical
     // tower / multi-tier interiors). Otherwise default to the map's ground line.
-    const _portalY = (typeof po.y === 'number') ? po.y : _defaultPortalY();
+    const _portalY = (typeof po.y === 'number') ? po.y : _defaultPortalY(po.x);   // v0.29.996 — x-aware: stepped floors have no single ground line
     if (Math.abs((player.x + player.w/2) - po.x) < 50 &&
         Math.abs((player.y + player.h) - _portalY) < 100) {
       const dest = MAPS[po.dest];
@@ -104267,7 +104287,7 @@ function drawPortals() {
     // the canvas-bottom ground at y=480). Portals on tall maps can
     // override `po.y` to anchor at any world altitude — we render
     // the sprite center 60 px above the supplied feet line.
-    const portalCenterY = ((typeof po.y === 'number') ? (po.y - 60) : (((typeof _defaultPortalY === 'function') ? _defaultPortalY() : 480) - 60)) + bob;  // v0.26.422 — draw 60px above the map's ground line (was hardcoded 420 → floated on non-480-ground maps like Block-land)
+    const portalCenterY = ((typeof po.y === 'number') ? (po.y - 60) : (((typeof _defaultPortalY === 'function') ? _defaultPortalY(po.x) : 480) - 60)) + bob;  // v0.26.422 — draw 60px above the map's ground line (was hardcoded 420 → floated on non-480-ground maps like Block-land)
     ctx.save();
     ctx.translate(sx, portalCenterY);
     // Soft glow halo underneath (cheap radial gradient). Skip on lowFx.
@@ -104355,7 +104375,7 @@ function drawPortals() {
     // historical 350 exactly on ground-480 maps (480-130), so those are
     // pixel-identical; the ±120 y-window is slightly looser than tryPortal's
     // ±100 so the label appears just as you land at the portal's platform.
-    const _lblFeetY = (typeof po.y === 'number') ? po.y : ((typeof _defaultPortalY === 'function') ? _defaultPortalY() : 480);
+    const _lblFeetY = (typeof po.y === 'number') ? po.y : ((typeof _defaultPortalY === 'function') ? _defaultPortalY(po.x) : 480);   // v0.29.996 — x-aware
     const near = Math.abs((player.x + player.w/2) - po.x) < 100 &&
                  Math.abs((player.y + player.h) - _lblFeetY) < 120;
     if (near) {
@@ -104410,7 +104430,7 @@ function drawPortalEdgeHints() {
   const drawHint = (po, dir) => {   // dir: -1 = left edge, +1 = right edge
     let name = String(po.name || (MAPS[po.dest] && MAPS[po.dest].name) || 'Onward').replace(/^⭐\s*/, '');
     if (name.length > 26) name = name.slice(0, 25) + '…';
-    const feetY = (typeof po.y === 'number') ? po.y : ((typeof _defaultPortalY === 'function') ? _defaultPortalY() : 480);
+    const feetY = (typeof po.y === 'number') ? po.y : ((typeof _defaultPortalY === 'function') ? _defaultPortalY(po.x) : 480);   // v0.29.996 — x-aware
     const sy = Math.max(90, Math.min(H - 100, feetY - 96));
     const ex = dir < 0 ? 18 : W - 18;
     const wob = Math.sin(t * 2.1) * 2.5 * dir;

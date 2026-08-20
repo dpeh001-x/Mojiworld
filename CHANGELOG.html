@@ -120,6 +120,42 @@
   <p class="lede">A phased rework layered on top of <code>v0.9.8</code>: save persistence, Web Audio SFX, achievements, daily challenges, respec, prestige, combo milestones, and a moment-to-moment juice pass. Every change lives in <code>mojiworld_game.html</code>. No new assets, no build step.</p>
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
+
+<h2>v0.29.998 <span class="tag"><span class="pill bug">bug</span> Every portal in the game audited: 4 were not standing on their floor</span></h2>
+<p>Per user, following the Honeycomb Hollow shrink: <em>ensure that the portals still all remain accessible and snapped to platform or floor.</em></p>
+<p>Answered by measuring rather than eyeballing. New <code>scripts/portal_access_test.mjs</code> loads <b>every map for real</b> &mdash; so the packed blob override and the v0.29.841 runtime anchor pass both apply &mdash; and checks all <b>188 portals across 95 maps</b> for two <em>different</em> failures:</p>
+<ul>
+<li><b>Snapped</b> &mdash; is it standing on a real surface, not floating, buried, or outside the world box?</li>
+<li><b>Accessible</b> &mdash; can the player actually climb to that surface? A flood-fill from the ground over jump-connected platforms, with a deliberately generous rise and run budget.</li>
+</ul>
+<p>Those are separate problems and only the first is visible in a screenshot: a portal can sit pixel-perfect on a shelf that no jump chain reaches, and look completely correct while being unusable.</p>
+<p><b>Honeycomb Hollow, the map that prompted the question, was already clean</b> &mdash; and so was reachability everywhere: <b>0 unreachable portals game-wide</b>. But the sweep did turn up four arches not sitting on their floor, from two unrelated causes.</p>
+
+<h3>Cause 1 &mdash; the ground line is not always a constant</h3>
+<p>A portal may omit <code>y</code>, in which case six call sites resolve it through <code>_defaultPortalY()</code>, which returned <b>the first ground platform it found</b>. For a map floored with one slab that is correct. <b>Sauropod Slope floors itself as a staircase</b> of 400&nbsp;px slabs descending 484&nbsp;&rarr;&nbsp;462 across its width &mdash; there is no single ground line, and every y-less portal was being measured against the leftmost step:</p>
+<table>
+<tr><th>Portal</th><th>Drawn at</th><th>Floor actually there</th><th>Error</th></tr>
+<tr><td>Sauropod Slope &rarr; Fiery Hideout (x1200)</td><td>y484</td><td>y470</td><td><b>14&nbsp;px into the hillside</b></td></tr>
+<tr><td>Sauropod Slope &rarr; Krook Throne (x2300)</td><td>y484</td><td>y462</td><td><b>22&nbsp;px into the hillside</b></td></tr>
+</table>
+<p><code>_defaultPortalY(x)</code> now resolves the ground slab <em>under</em> x (topmost, if floors overlap). Callers passing no x keep the old behaviour exactly, so every single-slab map is pixel-identical.</p>
+
+<h3>Cause 2 &mdash; a 60&nbsp;px offset applied twice</h3>
+<p><code>drawPortals()</code> renders a portal's sprite <em>centre</em> 60&nbsp;px above the feet line it is handed. <b>The Void</b> and <b>the Hall of Echoes</b> both floor at <code>y:480</code>, and both authored their portal at <code>y:420</code> &mdash; which is exactly <code>480&nbsp;&minus;&nbsp;60</code>, the drawn centre written into the field that wants the feet. The renderer subtracted 60 again, leaving both stars hanging <b>120&nbsp;px above the ground</b>.</p>
+<p>This survived because it still <em>worked</em>: <code>tryPortal</code>'s trigger window is &plusmn;100&nbsp;px and 60 fits inside it, so the portal was usable and the only symptom was an arch floating in mid-air. Both now drop the explicit <code>y</code> altogether rather than being corrected to 480 &mdash; they are plain ground-line portals, so riding <code>_defaultPortalY()</code> means they follow the floor if either arena is ever re-floored.</p>
+
+<h3>Verification</h3>
+<p>Against the unfixed build the test reports all four; against this one every check passes:</p>
+<table>
+<tr><th>Check</th><th>Before</th><th>After</th></tr>
+<tr><td>Portals floating in mid-air</td><td>4</td><td><b>0</b></td></tr>
+<tr><td>Portals below their map's deepest floor</td><td>0</td><td><b>0</b></td></tr>
+<tr><td>Portals outside the world box</td><td>0</td><td><b>0</b></td></tr>
+<tr><td>Portals on an unreachable surface</td><td>0</td><td><b>0</b></td></tr>
+<tr><td>Honeycomb Hollow portal problems</td><td>0</td><td><b>0</b></td></tr>
+</table>
+<p>Three of the audit's early failures were the <em>test's</em> fault, not the game's, and are worth recording because each is a trap for the next person who writes one: reading <code>md.portals</code> (the unsnapped source) instead of <code>game.portals</code> (the per-load clone the anchor pass actually snaps); treating the underwater maps' <b>water-surface</b> slab at <code>y:80</code> as their ground line, which reported every seabed portal as 2000&nbsp;px underground; and applying a jump-chain reachability model to maps you swim through. The test now reads the same values the portal code reads, and calls the game's own <code>_defaultPortalY</code> rather than reimplementing it, so the oracle cannot drift from the engine.</p>
+
 <h2>v0.29.997 <span class="tag"><span class="pill polish">polish</span> NPC text pass &mdash; six double-taps dropped</span></h2>
 <p>Per user: <em>For NPC texts also ensure to drop the superfluous text.</em></p>
 <p><b>The cuts are confined to this session&rsquo;s own additions</b> (v0.29.967&ndash;985) &mdash; the long-standing NPC prose is the author&rsquo;s approved voice and was not touched. Each trim keeps a line&rsquo;s beat and drops its restatement:</p>
