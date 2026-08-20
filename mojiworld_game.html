@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.898';
+const GAME_VERSION = 'v0.29.899';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -14569,13 +14569,29 @@ function _qnavHeading(d) {
       if (Number.isFinite(d.x)) return { x: d.x, y: Number.isFinite(d.y) ? d.y : 0 };
       return null;
     }
-    let best = null, bd = Infinity;
-    for (const m of ((typeof game !== 'undefined' && game && Array.isArray(game.monsters)) ? game.monsters : [])) {   // v0.29.893 - game.monsters; the bare monsters global does not exist, so this loop never iterated
-      if (!m || m.dead || m.type !== d.who) continue;
-      const dist = Math.abs((m.x || 0) - (player.x || 0));
-      if (dist < bd) { bd = dist; best = m; }
+    // v0.29.899 — NEVER POINT AT A MONSTER (per user: "the navigator points
+    // either at the NPC or the portal and not anything else"). This used to
+    // seek the nearest live mob of the hunt type and pin to it, so on the hunt
+    // map the marker rode along with one wandering creature — something that
+    // moves, that there are dozens of, and that the player is usually about to
+    // kill, at which point the pin jumped to the next one. A moving creature is
+    // a target, not a destination.
+    //
+    // Already on the right map with the right mobs around you, "you are here"
+    // is the honest answer and the key and banner already say it. The one place
+    // still worth pointing at is the quest's own NPC if they stand on this map,
+    // because that is where the hand-in happens. Otherwise: no pin.
+    const _giverName = (() => {
+      try { const _q = d.qid && QUESTS[d.qid]; return _q ? (_q.giver || _q.npc) : null; } catch (_e) { return null; }
+    })();
+    if (_giverName) {
+      for (const n of ((typeof game !== 'undefined' && game.npcs) || [])) {
+        if (n && n.name === _giverName && Number.isFinite(n.x)) {
+          return { x: n.x, y: Number.isFinite(n.y) ? n.y : _qnavAnchorY(n.x) };
+        }
+      }
     }
-    return best ? { x: best.x, y: Number.isFinite(best.y) ? best.y : _qnavAnchorY(best.x) } : null;   // v0.29.717 — ground, not the player
+    return null;
   }
   const r = _qnavRoute(here, d.map);
   const po = r && r.next && r.next.portal;
@@ -46359,7 +46375,7 @@ function _qnavDest(qid) {
   const npcDest = () => {
     if (!spots || !spots.length) return null;
     const hit = pick(spots, (s) => s.map);
-    return hit ? { kind: 'npc', who, map: hit.c.map, x: hit.c.x, y: hit.c.y, hops: hopsOf(hit.d), role: hit.c.role, ready } : null;
+    return hit ? { kind: 'npc', qid, who, map: hit.c.map, x: hit.c.x, y: hit.c.y, hops: hopsOf(hit.d), role: hit.c.role, ready } : null;
   };
   // No placed NPC — 13 boss/visit quests, plus q_inner_dim_trial whose giver is
   // the literal placeholder "your class instructor". Fall back to where the
@@ -46375,7 +46391,7 @@ function _qnavDest(qid) {
       const maps = t && _LX_QNAV.mob[t];
       if (!maps || !maps.length) continue;
       const hit = pick(maps, (m) => m);
-      if (hit) return { kind: 'hunt', who: t, map: hit.c, x: null, y: null, hops: hopsOf(hit.d) };
+      if (hit) return { kind: 'hunt', qid, who: t, map: hit.c, x: null, y: null, hops: hopsOf(hit.d) };
     }
     return null;
   };
