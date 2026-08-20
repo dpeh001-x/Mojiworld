@@ -1764,6 +1764,34 @@
     font-family: 'Segoe UI', Inter, Roboto, system-ui, sans-serif;
   }
   #boss-intro-overlay.on { display: flex; }
+  /* v0.29.x — Earned title under the HUD character name. Gold leaf with the
+     same 3.2s shimmer the canvas nameplate runs, so both read as one object.
+     The gradient fill is @supports-gated: where background-clip:text is not
+     honoured the base gold colour below still paints, rather than the
+     transparent text-fill leaving an invisible line. */
+  #hud-player-title {
+    font-family: 'LXBossTitle', 'Cinzel', Georgia, serif;
+    font-weight: 700; font-size: 9.5px; letter-spacing: 1.6px;
+    margin: -1px 0 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    color: #f2d489;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.95);
+  }
+  @supports ((-webkit-background-clip: text) or (background-clip: text)) {
+    #hud-player-title {
+      background: linear-gradient(100deg,#a8760a 0%,#e8c060 30%,#fff6d0 50%,#e8c060 70%,#a8760a 100%);
+      background-size: 240% 100%;
+      -webkit-background-clip: text; background-clip: text;
+      color: transparent; -webkit-text-fill-color: transparent;
+      text-shadow: none;
+      filter: drop-shadow(0 0 5px rgba(255,190,80,0.45));
+      animation: lxTitleShimmer 3.2s linear infinite;
+    }
+  }
+  @keyframes lxTitleShimmer {
+    0%   { background-position: 120% 0; }
+    100% { background-position: -20% 0; }
+  }
+  @media (prefers-reduced-motion: reduce) { #hud-player-title { animation: none; } }
   /* v0.26.x — Void-entry scene: big Guguma held ~1.5s, then fades to black. */
   #void-intro-overlay {
     position: absolute; inset: 0;
@@ -7789,6 +7817,7 @@
         <img id="hud-class-icon" alt="" style="width: 38px; height: 38px; flex: 0 0 38px; object-fit: contain; border-radius: 9px; border: 1px solid rgba(212, 175, 90, 0.55); background: radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.14), transparent 55%), linear-gradient(165deg, rgb(16, 16, 20), rgb(6, 6, 10)); box-shadow: rgba(0, 0, 0, 0.6) 0px 1px 3px;" onerror="this.style.display='none'" src="Sprites/ui/Class/warrior.webp">
         <div style="min-width:0;flex:1;">
       <div class="stats-name" id="hud-player-name" style="font-family:'Cinzel','Inter',Georgia,serif;font-weight:700;font-size:13px;letter-spacing:1.1px;margin-bottom:2px;color:#fff5d4;text-shadow:0 1px 2px rgba(0,0,0,0.95),0 0 6px rgba(212,175,90,0.35);" title="Your character name (set at creation)">Adventurer</div>
+      <div id="hud-player-title" style="display:none;" title="Earned title"></div>
       <div class="stats-header" style="font-family:'Cinzel','Inter',Georgia,serif;font-weight:600;font-size:11px;letter-spacing:0.9px;margin-bottom:3px;text-shadow:0 1px 2px rgba(0,0,0,0.9),0 0 4px rgba(0,0,0,0.5);">
         <span style="color:#f0e6cc;" title="Your current level — determines mob difficulty, gear access, and stat scaling. Defeat monsters or complete quests to gain EXP and level up.">Lv.<span id="level" style="font-weight:700;color:#fff;">60</span></span>
         <span id="class" style="color: rgb(238, 85, 85); margin-left: 8px; font-weight: 500;" title="Your class — defines starting stats, available skills, and base growth per level. Warrior/Mage/Rogue/Archer paths branch further at higher levels.">Warrior</span>
@@ -9649,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.976';
+const GAME_VERSION = 'v0.29.977';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -39002,6 +39031,9 @@ const PLAYER_SAVE_FIELDS = [
   // _completeExpedition. Cosmetic only for now — future patch can
   // wire equippedTitle into the nameplate render.
   'titles',
+  // v0.29.x — which earned title is worn under the name. Must persist beside
+  // 'titles' or the Conqueror line vanishes on the next reload.
+  'equippedTitle',
   // v0.26.276 — Optional auto-equip toggle. When true, looted gear
   // scoring 5 %+ better than equipped auto-swaps in. Off by default
   // (preserves v0.25.623's "no surprise loadout changes" intent).
@@ -83592,6 +83624,25 @@ function triggerSuperBossDeath(m) {
   // cascade first; the epilogue then takes the stage. Aetherion's death
   // does NOT fire this — Aetherion is the mid-endgame super-boss, the
   // true ending beat belongs to the Weight-Bearer.
+  // v0.29.x — CONQUEROR OF MOJIWORLD (per user: after killing gravitos3, gain
+  // a grand title under the character's name). Granted HERE, on the kill
+  // itself, and deliberately NOT inside the cutscene chain below: the ending
+  // is skippable, the clips can fail to load, and the epilogue is
+  // first-kill-only — the title must survive all three. The first grant
+  // auto-equips, since it outranks anything the expedition pool can drop; a
+  // repeat kill leaves whatever the player is wearing alone.
+  if (m.type === 'gravitos') {
+    if (!player.titles || typeof player.titles !== 'object') player.titles = {};
+    if (!player.titles[LX_TITLE_CONQUEROR]) {
+      player.titles[LX_TITLE_CONQUEROR] = true;
+      player.equippedTitle = LX_TITLE_CONQUEROR;
+      // rides the tail of the loot-rain cascade, before the 1900ms cutscene
+      if (typeof showToast === 'function') {
+        setTimeout(() => showToast('\u2756 TITLE EARNED \u2014 ' + LX_TITLE_CONQUEROR.toUpperCase() + ' \u2756', 'legendary'), 1100);
+      }
+      if (typeof saveState === 'function') { try { saveState(); } catch (e) {} }
+    }
+  }
   if (m.type === 'gravitos' && typeof _playStoryBeat === 'function') {
     if (typeof _sbPreloadClip === 'function') _sbPreloadClip('epilogue_gravitos');   // warm during the loot-rain stagger
     // v0.29.93 — On the 3rd (Ascendant) form's true death, the black-flame
@@ -104884,6 +104935,32 @@ function _spawnPlayerTrail() {
 // Draw player's chosen name + level above their head (in screen coords, post-chibi restore).
 // v0.25.9 — nameplate width cache to skip measureText every frame.
 const _playerNameTagCache = { name: null, tw: 0 };
+// v0.29.x — EARNED TITLES ON THE NAMEPLATE (per user: after killing gravitos3,
+// "gain a grandlooking title under the character's name"). player.titles has
+// existed since v0.26.267 as pure dead data — written by the expedition drop
+// roll, read by nothing, carrying a standing note that a "future patch can
+// wire equippedTitle into the nameplate render". This is that patch, plus the
+// title the endgame never had.
+const LX_TITLE_CONQUEROR = 'Conqueror of Mojiworld';
+const _titleTagCache = { key: null, tw: 0 };
+function _lxEquippedTitle() {
+  const t = (typeof player !== 'undefined') && player && player.equippedTitle;
+  return (typeof t === 'string' && t) ? t : '';
+}
+// Gold leaf with a highlight travelling across the letters — the one piece of
+// motion that separates regalia from another HUD label. 3.2s loop, matched to
+// the CSS shimmer on the HUD copy so the two read as the same object.
+function _lxTitleGradient(cx, w) {
+  const gd = ctx.createLinearGradient(cx - w / 2, 0, cx + w / 2, 0);
+  const p = ((typeof performance !== 'undefined' ? performance.now() : 0) % 3200) / 3200;
+  const at = (v) => Math.max(0, Math.min(1, v));
+  gd.addColorStop(0, '#a8760a');
+  gd.addColorStop(at(p - 0.18), '#e8c060');
+  gd.addColorStop(at(p), '#fff6d0');
+  gd.addColorStop(at(p + 0.18), '#e8c060');
+  gd.addColorStop(1, '#a8760a');
+  return gd;
+}
 function _drawPlayerNameTag(sx, sy) {
   // v0.24.1 — name sits BELOW the character's feet (MMO-style nameplate).
   // No more "Lv N" suffix; the HUD stats line carries level info already.
@@ -104923,6 +105000,37 @@ function _drawPlayerNameTag(sx, sy) {
   // Text
   ctx.fillStyle = '#ffeeaa';
   ctx.fillText(name, tx, ty);
+  // v0.29.x — the earned title, one line UNDER the name. Drawn in the boss-card
+  // face (LXBossTitle / Cinzel) with flanking diamonds, a heavy dark round-join
+  // outline for legibility over any ground, and the travelling gold shimmer:
+  // this is the crowning line of an entire run, so it is meant to read as
+  // regalia rather than as another label. Costs nothing when unequipped, which
+  // is every player before the Ascendant form falls.
+  const _ttl = _lxEquippedTitle();
+  if (_ttl) {
+    const _tt = '\u2756 ' + _ttl.toUpperCase() + ' \u2756';
+    ctx.font = '700 9px LXBossTitle, Cinzel, "Palatino Linotype", Georgia, serif';
+    try { ctx.letterSpacing = '1.2px'; } catch (e) {}
+    // keyed on the font too: measuring before LXBossTitle decodes would cache
+    // the fallback's width and mis-span the gradient for the rest of the run.
+    const _ck = _tt + '|' + (window._lxBossFontReady ? 1 : 0);
+    if (_titleTagCache.key !== _ck) {
+      _titleTagCache.key = _ck;
+      _titleTagCache.tw  = ctx.measureText(_tt).width;
+    }
+    const _tty = ty + 12;
+    ctx.lineJoin = 'round';
+    ctx.miterLimit = 2;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(10,5,2,0.92)';
+    ctx.strokeText(_tt, tx, _tty);
+    ctx.fillStyle = _lxTitleGradient(tx, Math.max(28, _titleTagCache.tw));
+    ctx.shadowColor = 'rgba(255,190,80,0.75)';
+    ctx.shadowBlur = 7;
+    ctx.fillText(_tt, tx, _tty);
+    ctx.shadowBlur = 0;
+    try { ctx.letterSpacing = '0px'; } catch (e) {}
+  }
   ctx.restore();
 }
 
@@ -125503,6 +125611,7 @@ function _uiGetRefs() {
     'hud-atk-item','hud-acc-item',
     // v0.25.735 — Character name header line.
     'hud-player-name',
+    'hud-player-title',   // v0.29.x — earned-title line beneath it
     // v0.26.x perf — cached so updateUI's class block stops calling
     // getElementById('stats') + ('hud-class-icon') every frame.
     'stats','hud-class-icon'];
@@ -125892,6 +126001,19 @@ function updateUI() {
   if (d['hud-player-name']) {
     const _nm = (player.look && player.look.name) || 'Adventurer';
     _uiSetText(d['hud-player-name'], _nm);
+  }
+  // v0.29.x — the earned title, from the same source the in-world nameplate
+  // reads. Kept display:none while nothing is equipped so the stats block
+  // holds its exact pre-endgame height for every player who has not finished.
+  if (d['hud-player-title']) {
+    const _tEl = d['hud-player-title'];
+    const _tv = (typeof _lxEquippedTitle === 'function') ? _lxEquippedTitle() : '';
+    if (_tv) {
+      _uiSetText(_tEl, '\u2756 ' + _tv.toUpperCase() + ' \u2756');
+      if (_tEl.style.display !== 'block') _tEl.style.display = 'block';
+    } else if (_tEl.style.display !== 'none') {
+      _tEl.style.display = 'none';
+    }
   }
   // v0.25.735 — Dynamic thorough tooltips for ATK + ACC. The static
   // tooltips on the HTML element cover the general explanation; here
