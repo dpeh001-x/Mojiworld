@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.912';
+const GAME_VERSION = 'v0.29.913';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -51260,6 +51260,32 @@ function _mojidexTier(t) {
 // list of every standalone monster + a rarity-framed dossier (portrait, stat
 // bars, lore, mastery track, drops, habitat) for the selected entry.
 const _MJX = { filter: 'all', sort: 'level', q: '', sel: null, _hab: null, max: { hp: 1, atk: 1, def: 1 } };
+// v0.29.913 — LIVE STATS for the dossier, not the authored ones. It read
+// monsterTypes, but spawning does not: _lxApplyStatTable overwrites maxHp, atk
+// and def from LX_MONSTER_STATS on every spawn, so monsterTypes had become
+// display-only data drifting away from the game. Seraph showed 209 Power
+// against a real 1,323; Wrappy showed 1,822 Vigor against 7,520, and advertised
+// 276 EXP / 136 coins against a real 150 / 564.
+//
+// Module scope on purpose: the bar-normalisation and the dossier renderer are
+// SEPARATE functions, and declaring this inside the first one threw a
+// ReferenceError in the second the moment a dossier was opened.
+//
+// DEF takes _lxHiLvDefBump exactly as the spawn path does, or the Ward bar
+// would still read wrong for high-level creatures despite a correct base.
+function _mjxLive(k, t) {
+  t = t || (typeof monsterTypes !== 'undefined' ? monsterTypes[k] : null) || {};
+  const T = (typeof LX_MONSTER_STATS !== 'undefined' && LX_MONSTER_STATS) ? LX_MONSTER_STATS[k] : null;
+  if (!T) return { hp: t.hp || 0, atk: t.atk || 0, def: t.def || 0,
+                   exp: t.exp || 0, coins: t.mojicoins || 0, evasion: t.evasion || 0 };
+  const bump = (typeof _lxHiLvDefBump === 'function') ? _lxHiLvDefBump(T.lv) : 1;
+  return { hp: T.hp || t.hp || 0,
+           atk: T.atk || t.atk || 0,
+           def: Math.floor((T.def || 0) * bump) || t.def || 0,
+           exp: (T.exp != null ? T.exp : t.exp) || 0,
+           coins: (T.coin != null ? T.coin : t.mojicoins) || 0,
+           evasion: t.evasion || 0 };
+}
 function _mjxTierOf(k, t) {
   if (k.indexOf('zodiac_') === 0 || t.zodiacSign) return { key: 'zodiac', label: 'ZODIAC', cls: 't-zodiac', frame: '#c79bff' };
   if (t.boss) return { key: 'boss', label: 'BOSS', cls: 't-boss', frame: '#ffae5c' };
@@ -51295,7 +51321,8 @@ function openMojidex() {
   for (const k of types) {
     const t = monsterTypes[k], tk = _mjxTierOf(k, t).key;
     const b = (tk === 'boss' || tk === 'zodiac') ? mx.boss : mx.mob;
-    b.hp = Math.max(b.hp, t.hp || 0); b.atk = Math.max(b.atk, t.atk || 0); b.def = Math.max(b.def, t.def || 0);
+    const _lv = _mjxLive(k, t);   // v0.29.913 — normalise against LIVE numbers
+    b.hp = Math.max(b.hp, _lv.hp); b.atk = Math.max(b.atk, _lv.atk); b.def = Math.max(b.def, _lv.def);
     kills += (game.bestiary[k] | 0); if (_mjxSeen(k)) disc++;
   }
   _MJX.max = mx;
@@ -51355,6 +51382,8 @@ function _mjxRenderDetail() {
   if (!t) { box.innerHTML = '<div class="mjx-empty"><div style="font-size:42px;opacity:.45;">⟡</div><div style="margin-top:8px;font-size:13px;">Select a creature to study its dossier.</div></div>'; return; }
   if (!_mjxSeen(k)) { box.innerHTML = '<div class="mjx-empty"><div style="font-size:54px;opacity:.4;">❔</div><div style="margin-top:10px;font-size:14px;font-weight:700;color:#cfc8e4;">Undiscovered</div><div style="margin-top:4px;font-size:11px;max-width:240px;">Encounter this creature in the wild to unseal its entry.</div></div>'; return; }
   const tier = _mjxTierOf(k, t), kills = (game.bestiary[k] | 0);
+  // v0.29.913 — resolved once and used by every stat the dossier prints.
+  const _S = _mjxLive(k, t);
   // v0.26.x — stat bars compare WITHIN class (boss-class vs beasts/elites).
   const _isBossCls = (tier.key === 'boss' || tier.key === 'zodiac');
   const M = (_MJX.max && (_isBossCls ? _MJX.max.boss : _MJX.max.mob)) || { hp: 1, atk: 1, def: 1 };
@@ -51366,9 +51395,9 @@ function _mjxRenderDetail() {
   const portrait = `<div class="mjx-portrait" style="background:radial-gradient(circle at 35% 28%, ${t.shell || '#888'}, ${t.color || '#555'} 72%); --frame:${tier.frame};"></div>`;
   let h = `<div class="mjx-d-head">${portrait}<div><h3 class="mjx-dname">${_mjxEsc(t.name)}</h3><div class="mjx-dmeta"><span class="mjx-pip ${tier.cls}">${tier.label}</span><span style="color:#9b93b8;">${t.level ? 'Level ' + t.level : '—'}</span></div><div style="font-size:11px;color:#88dd99;margin-top:6px;">Felled <b>${kills.toLocaleString()}</b> time${kills === 1 ? '' : 's'}</div></div></div>`;
   if (t.signature) h += `<div class="mjx-lore">“${_mjxEsc(t.signature)}”</div>`;
-  h += `<div class="mjx-section">Vital Statistics <span style="float:right;color:#6f6a86;letter-spacing:1px;font-size:9px;">relative to ${_cmpLabel}</span></div><div class="mjx-stats">${_mjxBar('Vigor', t.hp, M.hp)}${_mjxBar('Power', t.atk, M.atk)}${_mjxBar('Ward', t.def, M.def)}${t.evasion ? _mjxBar('Evasion', t.evasion, 600) : ''}</div>`;
+  h += `<div class="mjx-section">Vital Statistics <span style="float:right;color:#6f6a86;letter-spacing:1px;font-size:9px;">relative to ${_cmpLabel}</span></div><div class="mjx-stats">${_mjxBar('Vigor', _S.hp, M.hp)}${_mjxBar('Power', _S.atk, M.atk)}${_mjxBar('Ward', _S.def, M.def)}${_S.evasion ? _mjxBar('Evasion', _S.evasion, 600) : ''}</div>`;
   h += `<div class="mjx-section">Quarry Mastery</div><div class="mjx-statbar"><span>${mlvl}/3 ★</span><div class="mjx-track"><div class="mjx-fill" style="width:${mpct}%;background:linear-gradient(90deg,#c79bff,#8a6fff);"></div></div><span style="text-align:right;color:#cfc8e4;font-size:10px;">${nextThr ? kills + '/' + nextThr : 'MAX'}</span></div><div style="font-size:10px;color:#8b84a8;margin-top:5px;">${mlvl > 0 ? '+' + mlvl + '% damage dealt vs this foe' : 'Reach 100 kills for +1% damage vs this foe'}</div>`;
-  h += `<div class="mjx-section">Field Notes</div><div class="mjx-chips"><span class="mjx-chip">⚔ ATK ${t.atk || 0}</span><span class="mjx-chip">🛡 DEF ${t.def || 0}</span><span class="mjx-chip">✦ ${(t.exp || 0).toLocaleString()} EXP</span>${t.mojicoins ? `<span class="mjx-chip">🪙 ~${t.mojicoins.toLocaleString()}</span>` : ''}</div>`;
+  h += `<div class="mjx-section">Field Notes</div><div class="mjx-chips"><span class="mjx-chip">⚔ ATK ${_S.atk || 0}</span><span class="mjx-chip">🛡 DEF ${_S.def || 0}</span><span class="mjx-chip">✦ ~${(_S.exp || 0).toLocaleString()} EXP</span>${_S.coins ? `<span class="mjx-chip">🪙 ~${_S.coins.toLocaleString()}</span>` : ''}</div>`;
   h += `<div class="mjx-section">Habitat</div><div class="mjx-chips">${hab.length ? hab.slice(0, 8).map(nm => `<span class="mjx-chip">📍 ${_mjxEsc(nm)}</span>`).join('') : '<span class="mjx-chip" style="opacity:.6;">Range uncharted</span>'}</div>`;
   box.innerHTML = h;
 }
