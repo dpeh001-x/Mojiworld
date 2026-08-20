@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.919';
+const GAME_VERSION = 'v0.29.920';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -71996,6 +71996,7 @@ function updateMonsters(dt) {
               color: '#ff7722',
               noGravity: true,
               _sourceLabel: m.name || 'Ground Smash',
+              _zoneAttack: true,   // v0.29.x — drawn kill zone => heavy stagger + stun roll on hit
               _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'heavy') : null,   // v0.29.131 — boss heavy-hit band (null for elites)
             });
             addShake(8);
@@ -72032,6 +72033,7 @@ function updateMonsters(dt) {
               color: m.color || '#ffaa55',
               noGravity: true,
               _sourceLabel: m.name || 'Heavy Swing',
+            _zoneAttack: true,   // v0.29.x — drawn kill zone => heavy stagger + stun roll on hit
               _swingType: m.type,   // v0.29.812 — picks that monster's own swing art in the draw branch
               _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'heavy') : null,   // v0.29.131 — boss heavy-hit band (null for elites)
             });
@@ -72112,6 +72114,7 @@ function updateMonsters(dt) {
           if (m._bdT <= 0) {
             m._bdPhase = 'dash';
             m._bdT = bd.dashMs || 380;
+            m._bdTravel = 0;
             const _bdFrames = Math.max(1, (bd.dashMs || 380) / (1000 / 60));
             m._bdVx = m._bdDir * ((bd.distance || 520) / _bdFrames);
             addShake(4);
@@ -72119,6 +72122,16 @@ function updateMonsters(dt) {
         } else if (m._bdPhase === 'dash') {
           m._bdT -= dt;
           m.vx = m._bdVx;                // re-asserted every frame — the chase AI cannot override it
+          // v0.29.x — authored distance is a promise the drawn lane already
+          // made. _bdVx is computed for 60fps frames but integrated per tick,
+          // so ticks that outnumber those frames overshot the distance
+          // (measured 30px at 16ms ticks; a high-refresh loop scales further).
+          // Position integration lags this setter by a tick, so a final-frame
+          // velocity trim never lands (measured: identical sweep with and
+          // without one) — the clamp bounds the overshoot to at most one step
+          // + brake glide, and the LANE carries that as its margin.
+          m._bdTravel = (m._bdTravel || 0) + Math.abs(m._bdVx);
+          if (m._bdTravel >= (bd.distance || 520)) m._bdT = 0;
           if (game.time % 2 === 0 && typeof _budgetedParticlePush === 'function') {
             _budgetedParticlePush({
               x: m.x + m.w/2 - m._bdDir * m.w * 0.5,
@@ -72221,6 +72234,7 @@ function updateMonsters(dt) {
             // render falls back to the procedural beam if unset / undecoded.
             _colSprite: cs.sprite || null,
             _sourceLabel: m.name || 'Pillar Strike',
+            _zoneAttack: true,   // v0.29.x — drawn kill zone => heavy stagger + stun roll on hit
             _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'heavy') : null,   // v0.29.131 — boss heavy-hit band (null for elites)
           });
           addShake(12); flash(0.18);
@@ -74018,7 +74032,10 @@ function updateMonsters(dt) {
       // v0.29.7xx — zodiac bosses + Gravitos stagger 2.5x harder, with a
       // slight chance of a full 1 s stun (see _lxHeavyStaggerMs). Every other
       // monster keeps the 140 ms base exactly.
-      player.hitStun = _lxIsHeavyStaggerMob(m)
+      // v0.29.x — a brace-dash that connects is the punished end of a drawn
+      // lane (the corridor was on screen for the whole 850 ms brace), so it
+      // carries the same heavy-stagger weight as the zone projectiles.
+      player.hitStun = (_lxIsHeavyStaggerMob(m) || (m._braceDashing && m._bdPhase === 'dash'))
         ? _lxHeavyStaggerMs(140)
         : (player.tree.stunImmune ? 0 : Math.floor(140 * (1 - getStunResist())));
       // v0.26.069 — Per user "make the invulnerability period after
@@ -83780,7 +83797,12 @@ function updateProjectiles(dt) {
         // own stunHit (600-2000 ms boss slams) is already tuned heavier and
         // keeps its authored value. _lxHeavyStaggerMs applies the multiplier,
         // the stun resist and the 1 s roll in one place.
-        player.hitStun = (!p.stunHit && _lxHeavyBossPresent())
+        // v0.29.x — a projectile that DREW ITS KILL ZONE hits with the same
+        // weight everywhere (per user: zone attacks get "a punishing attack
+        // and sometimes stat affliction like stun"). The zone bought the
+        // player a fair read; standing in it anyway is the mistake the
+        // heavy-stagger system exists to punish.
+        player.hitStun = (!p.stunHit && (_lxHeavyBossPresent() || p._zoneAttack))
           ? Math.max(stunBase * stunMul, _lxHeavyStaggerMs(stunBase))
           : stunBase * stunMul;
         // v0.26.069 — Per user "make the invulnerability period after
@@ -122124,6 +122146,30 @@ function _lxAttackZones() {
         x: m._columnTargetX - cs.width / 2, y: _camY, w: cs.width, h: H,
         prog: Math.max(0, Math.min(1, 1 - m._columnT / (cs.telegraphMs || 1))),
         color: cs.color || '#ffeeaa', dir: 'up' });
+    }
+    // The dash is contact damage — the boss's own body sweeping `distance` px
+    // in a direction LOCKED at brace start ("the tell is honest — sidestep it
+    // and the dash commits to empty air"), so the whole corridor is known the
+    // moment the brace begins: body-band tall, boss-front to +distance wide.
+    // Brace-phase only; once launched the danger is the visible body itself.
+    // The far side carries one dash-step + brake-glide of safety margin:
+    // per-tick integration can carry up to one step past the travel clamp
+    // (measured 7px at 16ms ticks), and a lane that under-promises is a lie
+    // exactly where it hurts — ~3.6% of over-promise on the far edge is
+    // imperceptible; a hit outside the drawn zone is not.
+    // lateralDash (the non-boss cousin) is deliberately unmarked: a 150-240 ms
+    // reflex dodge on a trash mob is not a zone read.
+    if (m._braceDashing && m._bdPhase === 'brace' && m.traits && m.traits.braceDash) {
+      const bd = m.traits.braceDash;
+      const _d = m._bdDir > 0 ? 1 : -1;
+      const _bdFr = Math.max(1, (bd.dashMs || 380) / (1000 / 60));
+      const _pad = Math.ceil(((bd.distance || 520) / _bdFr) * 1.2);
+      const _dist = (bd.distance || 520) + _pad;
+      out.push({ kind: 'dash',
+        x: _d > 0 ? m.x : m.x - _dist,
+        y: m.y, w: m.w + _dist, h: m.h,
+        prog: Math.max(0, Math.min(1, 1 - m._bdT / (bd.telegraphMs || 1))),
+        color: m.color || '#ffb26b', dir: _d > 0 ? 'right' : 'left' });
     }
     if (m._bigMeleeFiring && m._bigMeleeT > 0 && m.traits && m.traits.bigMelee) {
       const bm = m.traits.bigMelee;

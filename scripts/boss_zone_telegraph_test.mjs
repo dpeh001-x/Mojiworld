@@ -131,6 +131,28 @@ const r = await page.evaluate(() => {
       proj: p ? { x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.w), h: Math.round(p.h) } : null };
   }
 
+  // (4) DASH — Legosaurus's brace-dash. Contact damage, not a projectile, so
+  // the honesty check is different: the lane is drawn during the brace (the
+  // direction is locked there), vanishes at launch, and the body's REAL sweep
+  // across the map must stay inside the lane it promised and fill most of it —
+  // an under-drawn lane lies about safety, an over-drawn one cries wolf.
+  {
+    const m = mk('legosaurus', 700);
+    m._bigMeleeCd = 99999; m._columnCd = 99999; m._bdCd = 0;
+    const started = tickUntil(() => m._braceDashing === true, 60);
+    const z0 = zones().find(z => z.kind === 'dash');
+    let zLast = z0;
+    tickUntil(() => { const z = zones().find(zz => zz.kind === 'dash'); if (z) zLast = z; return m._bdPhase === 'dash'; }, 90);
+    const zoneGoneAtLaunch = zones().every(z => z.kind !== 'dash');
+    let minX = m.x, maxX = m.x + m.w;
+    tickUntil(() => { minX = Math.min(minX, m.x); maxX = Math.max(maxX, m.x + m.w); return m._braceDashing === false; }, 90);
+    out.dash = { started, hasZone: !!z0,
+      prog0: z0 ? +z0.prog.toFixed(3) : null, progEnd: zLast ? +zLast.prog.toFixed(3) : null,
+      zoneGoneAtLaunch,
+      zone: zLast ? { x: Math.round(zLast.x), w: Math.round(zLast.w) } : null,
+      swept: { min: Math.round(minX), max: Math.round(maxX) } };
+  }
+
   game.monsters.length = 0; game.projectiles.length = 0;
   return out;
 });
@@ -165,6 +187,18 @@ ok('the smash zone appears on commit', r.smash && r.smash.hasZone === true, r.sm
 ok('the ground shock that fires matches the drawn zone',
    r.smash && r.smash.fired && rectEq(r.smash.zone, r.smash.proj),
    { zone: r.smash && r.smash.zone, proj: r.smash && r.smash.proj });
+const dz = r.dash || {};
+console.log('dash  :', JSON.stringify(dz));
+ok('the dash lane appears during the brace', dz.hasZone === true, dz);
+ok('its fill advances across the brace', dz.prog0 != null && dz.progEnd > dz.prog0,
+   { prog0: dz.prog0, progEnd: dz.progEnd });
+ok('the lane vanishes the instant the dash launches', dz.zoneGoneAtLaunch === true, {});
+ok('the real sweep stays INSIDE the lane it promised',
+   dz.zone && dz.swept && dz.swept.min >= dz.zone.x - 6 && dz.swept.max <= dz.zone.x + dz.zone.w + 6,
+   { zone: dz.zone, swept: dz.swept });
+ok('...and fills most of it — the lane does not cry wolf',
+   dz.zone && dz.swept && (dz.swept.max - dz.swept.min) >= dz.zone.w * 0.8,
+   { laneW: dz.zone && dz.zone.w, sweptW: dz.swept && (dz.swept.max - dz.swept.min) });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 let pass = 0, fail = 0;
