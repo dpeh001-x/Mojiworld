@@ -9649,7 +9649,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.970';
+const GAME_VERSION = 'v0.29.971';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -83593,7 +83593,24 @@ function triggerSuperBossDeath(m) {
     // the defeat cinematic owns the moment. Fail-open: if the cutscene helper
     // is somehow absent, fall straight through to the original epilogue path so
     // the ending can never soft-lock.
-    const _afterGravDefeat = () => { _playStoryBeat('epilogue_gravitos', _showGameComplete); };
+    // v0.29.9xx — THE LAST WINDING replaces the six-stanza epilogue text on
+    // the played path (per user: "scrap that"). The stanzas survive in ONE
+    // place only: the fail-open cover when the clip cannot play, so a
+    // degraded install still gets the reveal. When the film carries the
+    // ending, the beat is marked seen so repeat kills stay quiet exactly as
+    // they did under the text version.
+    const _epilogueText = () => { _playStoryBeat('epilogue_gravitos', _showGameComplete); };
+    const _afterGravDefeat = () => {
+      if (typeof _gugumaToyboxCutscene !== 'function') { _epilogueText(); return; }
+      const _seen = !!(player._storyBeatsSeen && player._storyBeatsSeen.epilogue_gravitos);
+      _gugumaToyboxCutscene(() => {
+        if (_seen) return;   // repeat kill: the ending already happened
+        player._storyBeatsSeen = player._storyBeatsSeen || {};
+        player._storyBeatsSeen.epilogue_gravitos = true;
+        try { if (typeof saveState === 'function') saveState(); } catch (e) {}
+        _showGameComplete();
+      }, _epilogueText);
+    };
     // v0.29.x — THE CYCLE COMPLETES (per user). Between the black-flame
     // defeat and the epilogue text, the rebirth cutscene plays: the
     // dragon-knight's embers condense and re-form into GUGUMA — the canary
@@ -128112,6 +128129,83 @@ function _gugumaRebirthCutscene(onDone) {
   };
   guard = setTimeout(_guardCheck, 4000);
   vid.src = 'steam/higgsfield/cinematics/clip_gravitos_to_guguma.mp4';
+  try { vid.load(); } catch (e) {}
+}
+
+// v0.29.9xx — THE LAST WINDING (per user: "instead of the load of chunk of
+// text after defeating gravitos, scrap that and with the new guguma as
+// gravitos juxtaposition, using higgsfield develop a new cutscene for a sad
+// dark conclusion"). Plays where the six-stanza epilogue text used to live.
+// The clip reverses the rebirth clip's promise: the sunrise dies, the chick
+// turns away, and high in the dark the embers reassemble the dragon-knight —
+// the chick's own shadow becoming the titan. The cycle is not hope; it is a
+// winding. Two exits, and which one fires decides whether the player ever
+// sees the old text:
+//   onClip     — the film carried the ending (played, ended, or skipped).
+//   onFallback — the clip could not play (missing file / hard error / hung
+//                load). Only THIS path shows the epilogue stanzas, so a
+//                degraded install still receives the reveal — in text.
+function _gugumaToyboxCutscene(onClip, onFallback) {
+  let done = false, timer = 0, titleT = 0, guard = 0, guardArms = 2;
+  let playing = false;
+  let _ducked = false;
+  const _duck   = () => { if (!_ducked) { _ducked = true;  try { _vidDuckBgm();   } catch (e) {} } };
+  const _unduck = () => { if (_ducked)  { _ducked = false; try { _vidUnduckBgm(); } catch (e) {} } };
+  const finish = (viaClip) => {
+    if (done) return; done = true;
+    if (timer) clearTimeout(timer);
+    if (titleT) clearTimeout(titleT);
+    if (guard) clearTimeout(guard);
+    window.removeEventListener('keydown', onKey, true);
+    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+    _unduck();
+    try { (viaClip ? onClip : onFallback) && (viaClip ? onClip : onFallback)(); } catch (e) {}
+  };
+  const ov = document.createElement('div');
+  ov.id = 'guguma-toybox-cine';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:1600;background:#010007;display:flex;'
+    + 'align-items:center;justify-content:center;cursor:pointer;overflow:hidden;';
+  ov.innerHTML =
+    '<video id="gug-toy-vid" playsinline preload="auto" '
+    + 'style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#010007;opacity:0;transition:opacity 500ms ease;"></video>'
+    + '<div id="gug-toy-title" style="position:absolute;left:0;right:0;bottom:12%;text-align:center;'
+    + 'font:800 clamp(22px,5vw,54px)/1.1 \'Segoe UI\',system-ui,sans-serif;letter-spacing:2px;color:#e8dcc8;'
+    + 'text-shadow:0 0 26px rgba(120,40,220,0.7),0 2px 4px #000;opacity:0;transition:opacity 900ms ease;pointer-events:none;">'
+    + 'THE LAST WINDING<div style="font:600 clamp(12px,2.2vw,20px)/1.4 \'Segoe UI\',system-ui,sans-serif;'
+    + 'letter-spacing:5px;color:#d8b84a;margin-top:10px;text-shadow:0 0 16px rgba(90,30,180,0.9);">THE KINDEST HAND IN EVERDAWN HAS FEATHERS</div></div>'
+    + '<button id="gug-toy-skip" style="position:absolute;top:16px;right:18px;z-index:2;padding:5px 14px;'
+    + 'border-radius:8px;border:1px solid #5a4490;background:rgba(20,8,44,0.85);color:#cdb8ff;font:700 12px monospace;cursor:pointer;">Skip ▸▸</button>';
+  // A deliberate skip is the CLIP exit, never the fallback: the player asked
+  // to move on, not to be handed the six stanzas they just skipped past.
+  function onKey(e) { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(true); } }
+  document.body.appendChild(ov);
+  ov.addEventListener('click', () => finish(true));
+  const sk = ov.querySelector('#gug-toy-skip'); if (sk) sk.onclick = (e) => { e.stopPropagation(); finish(true); };
+  window.addEventListener('keydown', onKey, true);
+  const titleEl = ov.querySelector('#gug-toy-title');
+  const vid = ov.querySelector('#gug-toy-vid');
+  if (!vid) { finish(false); return; }
+  vid.oncanplay = () => {
+    if (done || playing) return;
+    playing = true;
+    if (guard) { clearTimeout(guard); guard = 0; }
+    vid.style.opacity = '1'; vid.volume = 0.9;
+    _duck();
+    const pp = vid.play(); if (pp && pp.catch) pp.catch(() => { vid.muted = true; _unduck(); const p2 = vid.play(); if (p2 && p2.catch) p2.catch(() => finish(false)); });
+    titleT = setTimeout(() => { if (titleEl) titleEl.style.opacity = '1'; }, 5200);
+    timer = setTimeout(() => finish(true), 13000);
+  };
+  vid.onended = () => finish(true);
+  vid.onerror = () => finish(false);   // missing/blocked clip → the text fallback
+  // Same slow-load rules as the rebirth clip (see the note there): only a
+  // hard NO_SOURCE fail-fasts; deferred/slow loads re-arm up to a 12s ceiling.
+  const _guardCheck = () => {
+    if (done || playing) return;
+    if (vid.networkState === 3 /* NO_SOURCE */ || guardArms <= 0) { finish(false); return; }
+    guardArms--; guard = setTimeout(_guardCheck, 4000);
+  };
+  guard = setTimeout(_guardCheck, 4000);
+  vid.src = 'steam/higgsfield/cinematics/clip_the_last_winding.mp4';
   try { vid.load(); } catch (e) {}
 }
 
