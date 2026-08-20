@@ -30,7 +30,32 @@ shadow all along — and when the wing lowers, the colossus crumples like
 dropped cloth. The chick looks into the camera as the light narrows to
 nothing. Gravitos was never the mastermind. He was the lantern show.
 
-## Generation (2026-08-20, one attempt)
+## Generation 2 (2026-08-20, SHIPPED) — the cinematic re-roll
+
+Per user: "can be regenerated with a better cinematic approach with better
+effects and smoothness, right now it looks very forced and unconvincing" +
+"guguma can be better designed in that regenerated video" + "can add some
+special effects for that reveal as well". What made v1 read as forced: three
+beats in eight seconds (crumble -> flatten-to-puppet -> tilt-up-strings), and
+morph transitions are exactly where video models look fake. v2 is ONE
+UNBROKEN PULL-BACK: perspective does the revealing (no object morphing) - a
+physical LANTERN in the foreground projects the titan onto hanging smoke,
+embers hang in the beam like projector dust, and the strings metaphor is cut
+(two metaphors fought each other). Guguma redesigned: plush hyper-detailed
+gold plumage, a glowing broken HALO, the burning titan reflected in his eyes,
+regal stillness. Effects: reality-ripple on the reveal, dark shockwave ring
+on the wing-fold, white lantern flare, orbiting gold motes.
+
+- Model **`seedance_2_5`** (mode `omni_reference`) · 720p · 8 s · 16:9 ·
+  `generate_audio: true` · **52 credits** (2_5 rate; quality re-roll).
+- Job id: `def639b7-f342-495f-a46c-a5ec3cd295bb`.
+- Same references as v1 (defeat-clip end frame + Guguma identity).
+- QA: 3.5s titan in god-rays framed between the foreground chick and its
+  halo · 5.5s THE reveal image - haloed chick beside the physical lantern,
+  wing raised, the titan a smoke-projection behind · 7.6s the shadow gone,
+  only the small god and its lantern left in the smoke. Audio track verified.
+
+## Generation 1 (2026-08-20, superseded)
 
 - Model **`seedance_2_0`** · 720p · 8 s · 16:9 · **36 credits** (house
   economy; never 1080p).
