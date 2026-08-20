@@ -33,6 +33,7 @@ const arrOf = (name) => {
 // regenerate, and keys the game never asks for cost nothing.
 const FRAME_DIRS = [
   'bosses/attack', 'bosses/idle', 'bosses/walk',
+  'bosses/weave', 'bosses/duck',   // v0.29.951 - barnaby evade cycles
   'bosses/zodiac/attack', 'bosses/zodiac/idle', 'bosses/zodiac/walk',
   'monsters/idle', 'monsters/walk', 'monsters/attack',
   'npc/idle', 'npc/walk',

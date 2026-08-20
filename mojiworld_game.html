@@ -9649,7 +9649,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.956';
+const GAME_VERSION = 'v0.29.957';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -113188,6 +113188,25 @@ const BOSS_WALK_FRAMES = Object.create(null);
 _loadBossFrames(BOSS_WALK_FRAMES, 'walk');
 const _BOSS_WALK_FRAME_MS = 80;    // brisker than idle
 function _bossWalkFrame(key, m) { return _bossLoopFrame(BOSS_WALK_FRAMES[key], _bossWalkMsFor(m), undefined, m ? _mobAnimPhase(m, 'walk', true) : 0); }   // v0.29.418 — optional m: per-entity phase
+// v0.29.956 — EVADE cycles, per user "for barnaby boss he is doing alot of
+// ducking and weaving, regenerate new duck and weave sprites animation
+// compliment his fighting style". His activeBoss AI hops constantly (jump 8,
+// 1.1s jump cd, 9%/frame jump roll) but the renderer only knew
+// attack/walk/idle, so every airborne dart played the WALK loop. Two new
+// per-boss sets: weave (airborne slip, loops, desynced like walk) and duck
+// (landing crouch, ping-pong from frame 0 so the squash lands ON the landing).
+// Only barnaby ships frames today; any boss can join by dropping art in
+// Sprites/bosses/{weave,duck}/<type>_0..8.webp and listing itself here —
+// bosses without frames fall through to walk/idle exactly as before.
+const BOSS_EVADE_TYPES = ['young_confused_barnaby'];
+const BOSS_WEAVE_FRAMES = Object.create(null);
+_loadBossFrames(BOSS_WEAVE_FRAMES, 'weave', BOSS_EVADE_TYPES);
+const BOSS_DUCK_FRAMES = Object.create(null);
+_loadBossFrames(BOSS_DUCK_FRAMES, 'duck', BOSS_EVADE_TYPES);
+const _BOSS_WEAVE_FRAME_MS = 70;   // brisk — it is an evasive rhythm
+const _BOSS_DUCK_FRAME_MS = 30;    // 9 frames x 30ms ≈ the 260ms landing window
+function _bossWeaveFrame(key, m) { return _bossLoopFrame(BOSS_WEAVE_FRAMES[key], _BOSS_WEAVE_FRAME_MS, undefined, m ? _mobAnimPhase(m, 'weave', true) : 0); }
+function _bossDuckFrame(key, m) { return _bossPingPongFrame(BOSS_DUCK_FRAMES[key], _BOSS_DUCK_FRAME_MS, undefined, m ? _mobAnimPhase(m, 'duck', false) : 0); }
 // v0.29.x — WALK WEIGHT (per user: "the walk animation can be really much
 // improved"). One global 80ms cadence made a 380px colossus scuttle at the
 // same step rate as a 120px duelist. The cadence now scales with stature —
@@ -115501,12 +115520,29 @@ function drawMonster(m) {
        || (/soul$/.test(_spriteKey) && _gravitosSoulFrame(m))   // v0.29.560 — once-through, then holds
        || _bossAttackFrame(_spriteKey, m) || BOSS_ATTACK_SPRITES[_spriteKey])
     : null;
+  const _bodyKey = m._phaseSprite || m.type;   // v0.29.x — walk/idle sets are keyed by the BODY, never by an attack override
+  // v0.29.957 — evade states slot between attack and walk (body-keyed, like
+  // walk/idle). Weave plays while genuinely airborne (a couple of frames of
+  // hangtime, so a 1px step off a tile does not flicker it); landing stamps a
+  // short duck window so the squash reads exactly where the feet hit. Both
+  // resolve to null for bosses without the art, falling through untouched.
+  if (m.onGround === false) { m._lxAirFrames = (m._lxAirFrames | 0) + 1; }
+  else {
+    if ((m._lxAirFrames | 0) > 5) {
+      m._lxDuckUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + 260;
+    }
+    m._lxAirFrames = 0;
+  }
+  const _bossAirborne = !_bossAttacking && m.onGround === false && (m._lxAirFrames | 0) > 2;
+  const _bossWeaveImg = _bossAirborne ? _bossWeaveFrame(_bodyKey, m) : null;
+  const _lxNowEv = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const _bossDucking = !_bossAttacking && !_bossWeaveImg && m.onGround !== false && _lxNowEv < (m._lxDuckUntil || 0);
+  const _bossDuckImg = _bossDucking ? _bossDuckFrame(_bodyKey, m) : null;
   // v0.26.314/322 — when not attacking: walk loop while moving, else idle loop,
   // else the static sprite.
-  const _bossWalking = !_bossAttacking && _bossMoving(m);
-  const _bodyKey = m._phaseSprite || m.type;   // v0.29.x — walk/idle sets are keyed by the BODY, never by an attack override
+  const _bossWalking = !_bossAttacking && !_bossWeaveImg && !_bossDuckImg && _bossMoving(m);
   const _bossWalkImg = _bossWalking ? _bossWalkFrame(_bodyKey, m) : null;
-  const _bossIdleImg = (!_bossAttacking && !_bossWalking) ? _bossIdleFrame(_bodyKey, m) : null;
+  const _bossIdleImg = (!_bossAttacking && !_bossWalking && !_bossWeaveImg && !_bossDuckImg) ? _bossIdleFrame(_bodyKey, m) : null;
   // v0.29.367 — the _dreamPhase "alpha-fade" flag was WRITE-ONLY: six sites
   // set it (Scorpio's burrow, Gemini's Lie, the Pisces dream) with comments
   // promising the sprite-render would dim — but no renderer ever read it, so
@@ -115530,6 +115566,10 @@ function drawMonster(m) {
     ctx.globalAlpha = _xpA;
   } else if (_bossAttackImg) {
     _drawBossSprite(_bossAttackImg, m, sx, sy, true, true);
+  } else if (_bossDuckImg) {
+    _drawBossSprite(_bossDuckImg, m, sx, sy, false, true);
+  } else if (_bossWeaveImg) {
+    _drawBossSprite(_bossWeaveImg, m, sx, sy, false, true);
   } else if (_bossWalkImg && _xfWalk && _xfWalk.b !== _xfWalk.a) {
     _drawBossSprite(_xfWalk.a, m, sx, sy, false, true);
     const _xwA = ctx.globalAlpha;

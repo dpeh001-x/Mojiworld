@@ -69,6 +69,12 @@ window.LX_SPRITE_FRAME_INDEX = {
    "towerSovereign": 9,
    "young_confused_barnaby": 9
   },
+  "bosses/weave": {
+   "young_confused_barnaby": 9
+  },
+  "bosses/duck": {
+   "young_confused_barnaby": 9
+  },
   "bosses/zodiac/attack": {
    "aquarius": 9,
    "aries": 9,
