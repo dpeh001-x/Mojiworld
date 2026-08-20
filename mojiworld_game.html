@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.905';
+const GAME_VERSION = 'v0.29.906';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -44190,6 +44190,7 @@ function _coopHostApplyDamage(uid, dmg, isCrit, skill) {
     d = Math.max(1, Math.floor(d * _rMul));
   } else if (m.isBoss && typeof _bossFillBreak === 'function') {
     _bossFillBreak(m, d);
+    if (typeof _bossThreatHit === 'function') _bossThreatHit(m, d);
   }
   d = Math.min(d, Math.max(1, Math.floor(m.maxHp || m.currentHp)));       // cap: no single peer packet exceeds one HP bar (anti one-shot)
   m.currentHp -= d;
@@ -71540,7 +71541,7 @@ function updateMonsters(dt) {
           m.shootTimer = m.shootCd + Math.random() * (m.shootCdVar || 1200);   // v0.29.639
           if (m.boss || m.isBoss) m._postShotHold = 320;
         }
-      } else if (_shootOnScreen && m.shootTimer <= 0 && !(m._dirOpenT > 0) && !((m.boss || m.isBoss) && (m._dashing || m._dashT > 0)) && dxs < _shootMaxX && dxs > _shootMinX && dys < _shootMaxY && m.aggroTarget) {   // v0.29.263 — winded bosses hold their shots
+      } else if (_shootOnScreen && m.shootTimer <= 0 && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && !((m.boss || m.isBoss) && (m._dashing || m._dashT > 0)) && dxs < _shootMaxX && dxs > _shootMinX && dys < _shootMaxY && m.aggroTarget) {   // v0.29.263 — winded bosses hold their shots
         // v0.29.4xx — a BOSS never snap-fires mid-stride: it always takes the
         // telegraph path (with or without attack art) and charges for 520 ms,
         // planted by _mobCasting. Deliberate: stop -> charge -> fire -> beat.
@@ -71600,6 +71601,28 @@ function updateMonsters(dt) {
       if (m._dirGuardT > 0) m._dirGuardT -= dt;
       if (m._dirGhostT > 0) m._dirGhostT -= dt;
       if (m._windedCd > 0) m._windedCd -= dt;   // v0.29.834 — winded-window floor
+      // v0.29.x — THREAT RESPONSE upkeep (see _bossThreatHit). The burst meter
+      // bleeds continuously, which is what makes it a rate and not a running
+      // total: chip damage under BOSS_BURST_DECAY_PER_S never accumulates to a
+      // reaction no matter how long the fight runs.
+      if (m._threatCd > 0) m._threatCd -= dt;
+      if (m._burst > 0) {
+        m._burst = Math.max(0, m._burst - Math.max(1, m.maxHp || 1) * BOSS_BURST_DECAY_PER_S * (dt / 1000));
+      }
+      if (m._dirFleeT > 0) {
+        m._dirFleeT -= dt;
+        // Backing off, not fleeing the arena: it moves away at a clip it cannot
+        // sustain and the timer is short, so the player closes the gap rather
+        // than chasing. Written AFTER the movement AI, like the _dirOpenT damp
+        // above, so it is the value that survives the frame.
+        const _fleeAway = ((m.x + m.w / 2) < (player.x + player.w / 2)) ? -1 : 1;
+        m.vx = _fleeAway * Math.max(1.8, (m.speed || 1) * 2.2);
+        if ((game.time & 3) === 0 && typeof _budgetedParticlePush === 'function') {
+          _budgetedParticlePush({ x: m.x + m.w * (0.2 + Math.random() * 0.6), y: m.y + m.h * 0.85,
+            vx: -_fleeAway * (1 + Math.random()), vy: -0.4 - Math.random() * 0.6,
+            life: 20, color: '#ffb0a0', size: 3 });
+        }
+      }
       if (!(m._dirOpenT > 0) && !(m._dirGuardT > 0) && !(m._dirGhostT > 0) &&
           typeof _mobLevel === 'function' && _mobLevel(m) >= 40) {
         m._dirStanceT -= dt;
@@ -71658,7 +71681,7 @@ function updateMonsters(dt) {
         if (m.x + m.w < _bcx || m.x > _bcx + W || m.y + m.h < _bcy || m.y > _bcy + H) _bmOnScreen = false;
       }
       // PHASE 1 — start telegraph when cd is up + in range + on screen.
-      if (!m._bigMeleeFiring && m._bigMeleeCd <= 0 && !(m._dirOpenT > 0) && _bmInRange && _bmOnScreen) {   // v0.29.263 — winded bosses can't start a heavy
+      if (!m._bigMeleeFiring && m._bigMeleeCd <= 0 && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && _bmInRange && _bmOnScreen) {   // v0.29.263 — winded bosses can't start a heavy · v0.29.x — nor a retreating one
         m._bigMeleeFiring = true;
         m._bigMeleeT = bm.telegraphMs;
         m.vx = 0;   // root during windup
@@ -71886,7 +71909,7 @@ function updateMonsters(dt) {
         if (m.x + m.w < _ccx || m.x > _ccx + W || m.y + m.h < _ccy || m.y > _ccy + H) _csOnScreen = false;
       }
       // PHASE 1 — start telegraph
-      if (!m._columnFiring && m._columnCd <= 0 && !(m._dirOpenT > 0) && _csInRange && _csOnScreen) {   // v0.29.263 — winded bosses hold column strikes
+      if (!m._columnFiring && m._columnCd <= 0 && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && _csInRange && _csOnScreen) {   // v0.29.263 — winded bosses hold column strikes · v0.29.x — nor a retreating one
         m._columnFiring = true;
         m._columnT = cs.telegraphMs;
         m._columnTargetX = _playerCx;    // v0.26.218
@@ -74931,6 +74954,62 @@ const BOSS_BREAK_DECAY_PER_S = 0.09;     // BASE-bar fraction bled per second wh
 const BOSS_BREAK_TELL_MUL = 2.5;         // damage landed during a TELL counts this much
 const BOSS_BREAK_ADAPT = 1.15;           // each break raises the next bar (Skul's StunResistance)
 const BOSS_BREAK_ADAPT_CAP = 1.6;        // ...to a ceiling, so it never becomes unreachable
+// v0.29.x — BOSS THREAT RESPONSE (per user: "make sure bosses such as
+// legosaurus, barnaby and octababy have clear phases, in which they attack,
+// pause, defend or run when getting damaged too much too quick, make them have
+// smart AI").
+//
+// The pieces were all here and none of them were listening. GUARD UP (-55%
+// damage, _dirGuardT) and GHOST STEP (x2.5 evasion, _dirGhostT) already existed
+// and resolved properly in hitMonster — but they fired off a blind timer,
+// _dirStanceT = 18-28 s, so a boss braced whether or not anything was hitting
+// it and stood there flat-footed through a burst that deleted a third of its
+// bar. Nothing anywhere made a boss disengage.
+//
+// Two things change. The stances now answer PRESSURE: _burst accumulates the
+// damage a boss is taking and bleeds off at BOSS_BURST_DECAY_PER_S, so it only
+// crosses the line when damage arrives faster than that — "too much too quick"
+// as a measured quantity rather than a total. And WHICH answer it picks is read
+// off its own health, so a fight has legible phases:
+//
+//   above 60% HP   BRACE   — it plants and eats the burst (GUARD UP)
+//   30% to 60%     EVADE   — it stops trading and starts slipping (GHOST STEP)
+//   below 30%      RETREAT — it breaks off, backs out of reach, comes back
+//
+// The rule that keeps this honest, and keeps it from being a stealth nerf to
+// the player: a boss NEVER reacts during an opening or a stagger. Burst dumped
+// into an earned window still lands in full. Burst dumped at a braced boss at
+// 90% gets 45% of it. That is exactly the "bank it for the opening" read the
+// break system was built around — this is the half that punished nothing.
+const BOSS_BURST_PCT           = 0.10;   // 10% of maxHp arriving faster than the bleed = pressure
+const BOSS_BURST_DECAY_PER_S   = 0.05;   // ...bled per second, so steady chip damage never trips it
+const BOSS_THREAT_CD           = 9000;   // a boss cannot chain reactions
+const BOSS_THREAT_MS_MIN       = 2200;   // deliberately SHORTER than the 5-10 s timed stance
+const BOSS_THREAT_MS_MAX       = 3000;
+const BOSS_FLEE_MS             = 1100;   // a retreat is a beat, not an escape
+function _bossThreatHit(m, dmg) {
+  if (!m || !m.isBoss || !(dmg > 0) || m.currentHp <= 0) return;
+  if ((m.type || '').indexOf('gravitos') === 0) return;   // runs its own three-form script
+  if (m._stagger > 0 || m._dirOpenT > 0) return;          // never steal an earned window
+  m._burst = (m._burst || 0) + dmg;
+  if (m._threatCd > 0) return;
+  if (m._dirGuardT > 0 || m._dirGhostT > 0 || m._dirFleeT > 0) return;
+  const _max = Math.max(1, m.maxHp || 1);
+  if (m._burst < _max * BOSS_BURST_PCT) return;
+  m._burst = 0;
+  m._threatCd = BOSS_THREAT_CD;
+  const _hp = m.currentHp / _max;
+  const _dur = BOSS_THREAT_MS_MIN + Math.random() * (BOSS_THREAT_MS_MAX - BOSS_THREAT_MS_MIN);
+  let _txt, _col;
+  if (_hp > 0.60)      { m._dirGuardT = _dur; _txt = 'BRACE';   _col = '#9fd4ff'; }
+  else if (_hp > 0.30) { m._dirGhostT = _dur; _txt = 'EVADE';   _col = '#cdb6ff'; }
+  else                 { m._dirFleeT = BOSS_FLEE_MS; _txt = 'RETREAT'; _col = '#ffb0a0'; }
+  try {
+    if (game.damageNumbers) game.damageNumbers.push({
+      x: m.x + m.w / 2, y: m.y - 8, vy: -1.2, text: _txt, life: 60, color: _col, big: true });
+    if (typeof audio !== 'undefined' && audio && audio.play) audio.play('block');
+  } catch (e) {}
+}
 // Fill the meter. Called from the damage site for bosses only.
 function _bossFillBreak(m, dmg) {
   if (!m || !m.isBoss || !(dmg > 0) || m.currentHp <= 0) return;
@@ -79996,6 +80075,7 @@ function hitMonster(m, dmg, isCrit, skill) {
     // mirror and opened a phantom window the host never had; the guest's real
     // contribution is fed into the host's meter by _coopHostApplyDamage.
     _bossFillBreak(m, finalDmg);
+    if (typeof _bossThreatHit === 'function') _bossThreatHit(m, finalDmg);
   }
   // v0.27.0 co-op forward — a NON-HOST is not authoritative over shared monsters.
   // finalDmg is now FULLY resolved (every attacker multiplier + DEF above), so
