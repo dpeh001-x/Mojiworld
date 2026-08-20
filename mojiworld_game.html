@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.901';
+const GAME_VERSION = 'v0.29.902';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -22577,6 +22577,79 @@ function _lxPluralMob(n) {
           gearTier:   gearTier,
         },
       };
+    }
+  }
+})();
+
+// v0.29.902 — QUEST COUNT NORMALISATION (per user: "have the quantity of
+// monsters to kill with a 0 in the back ... at least 20 for each quest, and the
+// quest should have good rewards"). Runs here because every quest table above is
+// complete: the class questline is GENERATED, so its counts are not literals
+// anyone could edit, and a later-authored quest is normalised for free.
+//
+// Before: of 290 kill objectives, 155 were under 20 and 130 were not multiples
+// of ten. Exempt are q.bossFight and any count of 6 or less -- a sweep for
+// objectives at or below 6 returned exactly four and all are story set pieces
+// (Mirror Self x1 twice, Bloodthirsty Vermillion x2, Willeo x6), where "kill 20"
+// would be nonsense.
+//
+// Rewards scale by exactly the ratio the work moved, so a quest asking 1.67x the
+// kills pays 1.67x rather than becoming worse value per kill.
+//
+// The descriptions are rewritten in step. v0.29.898 had just made every
+// objective sentence name the right creature with the right number, and moving
+// the counts underneath would have re-broken all of it.
+(function _lxNormaliseQuestCounts() {
+  if (typeof QUESTS !== 'object' || !QUESTS) return;
+  const ROUND = (n) => Math.max(20, Math.round(n / 10) * 10);
+  const SETPIECE = 6;
+  const mobName = (t) => (typeof monsterTypes !== 'undefined' && monsterTypes[t] && monsterTypes[t].name)
+    ? String(monsterTypes[t].name) : null;
+  const plural = (typeof _lxPluralMob === 'function') ? _lxPluralMob : ((s) => s);
+  const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const swapCount = (desc, oldN, newN, nm) => {
+    if (!desc || oldN === newN) return desc;
+    let out = String(desc);
+    if (nm) {
+      // the number sitting next to this objective's creature, singular or plural
+      for (const form of [plural(nm), nm]) {
+        out = out.replace(new RegExp('\\b' + oldN + '(\\s+(?:of\\s+the\\s+)?' + esc(form) + ')', 'gi'), newN + '$1');
+      }
+    }
+    // verb-led with no name adjacent ("defeat 12", "Cull 32")
+    out = out.replace(
+      new RegExp('\\b(defeat|slay|kill|clear|cull|quell|thin|felled)\\s+' + oldN + '\\b', 'gi'),
+      (m, v) => v + ' ' + newN);
+    return out;
+  };
+  for (const id in QUESTS) {
+    const q = QUESTS[id];
+    if (!q || q.kind !== 'kill' || q.bossFight) continue;
+    const objs = (Array.isArray(q.objectives) && q.objectives.length) ? q.objectives : null;
+    let before = 0, after = 0;
+    if (objs) {
+      for (const o of objs) {
+        const c = o.count | 0;
+        if (!(c > 0)) continue;
+        before += c;
+        if (c <= SETPIECE) { after += c; continue; }
+        const nw = ROUND(c);
+        q.desc = swapCount(q.desc, c, nw, mobName(o.target));
+        o.count = nw; after += nw;
+      }
+      // q.count mirrors the FIRST objective for this data shape, not the total.
+      if (objs[0] && objs[0].count) q.count = objs[0].count;
+    } else {
+      const c = q.count | 0;
+      if (!(c > 0) || c <= SETPIECE) continue;
+      const nw = ROUND(c);
+      q.desc = swapCount(q.desc, c, nw, mobName(q.target));
+      before = c; after = nw; q.count = nw;
+    }
+    if (before > 0 && after > 0 && after !== before && q.rewards) {
+      const k = after / before;
+      if (q.rewards.exp) q.rewards.exp = Math.round(q.rewards.exp * k);
+      if (q.rewards.mojicoins) q.rewards.mojicoins = Math.round(q.rewards.mojicoins * k);
     }
   }
 })();
