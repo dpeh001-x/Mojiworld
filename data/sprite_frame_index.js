@@ -497,6 +497,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "Guguma": 9
   },
   "fx/anim": {
+   "arcane_burst": 9,
    "archbishop_grail": 9,
    "archbishop_ult": 9,
    "ballista_ult": 9,
