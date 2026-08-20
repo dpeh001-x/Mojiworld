@@ -9649,7 +9649,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.951';
+const GAME_VERSION = 'v0.29.952';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -113041,7 +113041,20 @@ const _GRAV_PUNCH_PATTERNS = { crush: 1500, slam: 1100, zip: 1400 };
 // are NOT here — their motion is the attack and stays on the attack set.
 const _BOSS_MOVE_DRAW_STATES = new Set(['chase', 'reposition', 'dashIn',
   'hover', 'seek', 'move', 'airborne', 'walk', 'land', 'leap']);
-function _gravitosPunchFrame(m) {
+// v0.29.x — PUNCH TIMING (per user: "the punch animation very choppy"). The
+// old mapping spread 9 frames linearly across the whole 1.1-1.5s pattern
+// window — ~7fps with hard cuts, and the strike frames crawled exactly where
+// the motion should snap. Two changes:
+//   EASED  — t^1.55, so the windup frames breathe and the playback
+//            accelerates INTO the strike;
+//   EARLY  — playback completes at 85% of the window and HOLDS the final
+//            frame through the recovery, instead of still flipping frames
+//            while the punch is already over.
+// _gravitosPunchPair returns the frame pair + blend fraction so the draw can
+// CROSSFADE between them (frame A full, frame B fading in on top — reads as
+// motion blur and turns the 9-frame set fluid). _gravitosPunchFrame keeps its
+// single-frame contract for every existing caller.
+function _gravitosPunchPair(m) {
   const frames = BOSS_ATTACK_FRAMES[_gravCastKey(m, 'punch')];
   if (!frames) return null;
   if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);   // v0.29.284 — same base as the other boss sets
@@ -113051,7 +113064,14 @@ function _gravitosPunchFrame(m) {
   if (n === 0) return null;
   const _dur = _GRAV_PUNCH_PATTERNS[m.patternState] || 1500;
   const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / _dur));
-  return frames[Math.min(n - 1, Math.floor(t * n))];
+  const tE = Math.pow(Math.min(1, t / 0.85), 1.55);
+  const idxF = tE * (n - 1);
+  const i = Math.min(n - 1, Math.floor(idxF));
+  return { a: frames[i], b: frames[Math.min(n - 1, i + 1)], f: Math.min(1, idxF - i) };
+}
+function _gravitosPunchFrame(m) {
+  const p = _gravitosPunchPair(m);
+  return p ? p.a : null;
 }
 
 // v0.29.560 (per user "wire gravitossoul to more of gravitos special attacks")
@@ -113125,7 +113145,32 @@ function _bossIdleFrame(key, m) { return _bossPingPongFrame(BOSS_IDLE_FRAMES[key
 const BOSS_WALK_FRAMES = Object.create(null);
 _loadBossFrames(BOSS_WALK_FRAMES, 'walk');
 const _BOSS_WALK_FRAME_MS = 80;    // brisker than idle
-function _bossWalkFrame(key, m) { return _bossLoopFrame(BOSS_WALK_FRAMES[key], _BOSS_WALK_FRAME_MS, undefined, m ? _mobAnimPhase(m, 'walk', true) : 0); }   // v0.29.418 — optional m: per-entity phase
+function _bossWalkFrame(key, m) { return _bossLoopFrame(BOSS_WALK_FRAMES[key], _bossWalkMsFor(m), undefined, m ? _mobAnimPhase(m, 'walk', true) : 0); }   // v0.29.418 — optional m: per-entity phase
+// v0.29.x — WALK WEIGHT (per user: "the walk animation can be really much
+// improved"). One global 80ms cadence made a 380px colossus scuttle at the
+// same step rate as a 120px duelist. The cadence now scales with stature —
+// Gravitos strides at ~130ms/frame (a deliberate 1.2s cycle) while
+// human-scale bosses keep the brisk 80ms they were tuned at.
+function _bossWalkMsFor(m) {
+  const h = (m && m.h) || 140;
+  return Math.round(_BOSS_WALK_FRAME_MS * Math.max(1, Math.min(1.8, Math.sqrt(h / 140))));
+}
+// ...and the same clock as a crossfade PAIR, so boss strides blend instead of
+// cutting. Mirrors _bossLoopFrame's readyN/shrink handling exactly.
+function _bossWalkPair(key, m) {
+  const frames = BOSS_WALK_FRAMES[key];
+  if (!frames) return null;
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);
+  let n = frames._readyN || 0;
+  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
+  frames._readyN = n;
+  if (n < 2) return null;
+  const frameMs = _bossWalkMsFor(m);
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const tAbs = Math.max(0, now + (m ? _mobAnimPhase(m, 'walk', true) : 0)) / frameMs;
+  const i = Math.floor(tAbs) % n;
+  return { a: frames[i], b: frames[(i + 1) % n], f: tAbs - Math.floor(tAbs) };
+}
 // v0.29.273 — WALKING SIGNAL: vx OR actual per-frame X displacement. The old
 // vx-only gate (>0.6) made slow walkers glide in idle pose (snail speed 0.4
 // peaks at vx 0.54 — it NEVER walked), and bosses that reposition by writing
@@ -115412,8 +115457,27 @@ function drawMonster(m) {
   // procedural fallbacks) so all of them fade the same way.
   const _dpPrevA = ctx.globalAlpha;
   if (m._dreamPhase) ctx.globalAlpha = _dpPrevA * 0.35;
-  if (_bossAttackImg) {
+  // v0.29.x — FRAME CROSSFADE. Nine-frame sets cut hard at any cadence; the
+  // punch and the boss walk now draw frame A in full with frame B fading in on
+  // top — successive frames are near-identical, so the blend reads as motion
+  // blur rather than ghosting, and the sets play fluid at the same authored
+  // frame count. Costs one extra drawImage per crossfading boss on screen.
+  const _xfPunch = (_bossAttackImg && /punch$/.test(_spriteKey)) ? _gravitosPunchPair(m) : null;
+  const _xfWalk = (!_bossAttackImg && _bossWalkImg) ? _bossWalkPair(_spriteKey, m) : null;
+  if (_bossAttackImg && _xfPunch && _xfPunch.b && _xfPunch.b !== _xfPunch.a) {
+    _drawBossSprite(_xfPunch.a, m, sx, sy, true, true);
+    const _xpA = ctx.globalAlpha;
+    ctx.globalAlpha = _xpA * Math.max(0, Math.min(1, _xfPunch.f));
+    _drawBossSprite(_xfPunch.b, m, sx, sy, true, true);
+    ctx.globalAlpha = _xpA;
+  } else if (_bossAttackImg) {
     _drawBossSprite(_bossAttackImg, m, sx, sy, true, true);
+  } else if (_bossWalkImg && _xfWalk && _xfWalk.b !== _xfWalk.a) {
+    _drawBossSprite(_xfWalk.a, m, sx, sy, false, true);
+    const _xwA = ctx.globalAlpha;
+    ctx.globalAlpha = _xwA * Math.max(0, Math.min(1, _xfWalk.f));
+    _drawBossSprite(_xfWalk.b, m, sx, sy, false, true);
+    ctx.globalAlpha = _xwA;
   } else if (_bossWalkImg) {
     _drawBossSprite(_bossWalkImg, m, sx, sy, false, true);
   } else if (_bossIdleImg) {
