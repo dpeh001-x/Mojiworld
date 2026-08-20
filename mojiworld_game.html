@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.906';
+const GAME_VERSION = 'v0.29.907';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -22653,6 +22653,72 @@ function _lxPluralMob(n) {
     }
   }
 })();
+
+// v0.29.907 — QUEST PAY TRIM (per user: "reduce median quest pay to 35000, by
+// lowering lower level quest rewards, reduce gear rewards as well").
+//
+// Runs after the count normalisation above, so it trims the post-scaling values
+// rather than fighting them.
+//
+// Median mojicoins per band BEFORE: Lv1-10 2,400 · 11-20 20,500 · 21-30 88,500
+// · 31-40 160,500 · 41-50 308,500 · 51-70 49,600, overall 54,400.
+//
+// The shape is not monotonic -- Lv 51-70 pays LESS than Lv 31-50, because the
+// level^2 x 100 coin formula belongs to the class questline and that stops at
+// Lv 49, while the 51-70 quests are hand-authored and modest. The overall median
+// therefore sits in the 51-70 / 21-30 overlap, not at the top, and a curve that
+// leans only on the early game cannot reach it: a linear Lv1->Lv70 ramp bottomed
+// out at a 43,163 median even while cutting Lv 1-10 to 397 coins, wrecking the
+// opening for no movement in the middle.
+//
+// Hence a banded cut, heaviest through the mid-game where the median lives.
+function _lxTrimQuestPay() {
+  if (typeof QUESTS !== 'object' || !QUESTS) return;
+  if (_lxTrimQuestPay._done) return;   // idempotent: one application only
+  _lxTrimQuestPay._done = true;
+  const COIN_MUL = (lv) => lv <= 10 ? 0.90    // tiny amounts; cutting them buys nothing
+                         : lv <= 30 ? 0.45    // heaviest cut, and the biggest single move
+                         : lv <= 40 ? 0.55
+                         : lv <= 50 ? 0.85    // capstones stay aspirational
+                         : 0.68;              // sets the median: this band contains it
+  const GEAR_MUL = 0.60;
+  const TARGET_MEDIAN = 35000;
+  const coinQuests = [];
+  for (const id in QUESTS) {
+    const q = QUESTS[id];
+    if (!q || !q.rewards) continue;
+    const lv = q.levelReq || 1;
+    if (q.rewards.mojicoins) {
+      q.rewards.mojicoins = Math.max(1, Math.round(q.rewards.mojicoins * COIN_MUL(lv)));
+      coinQuests.push(q);
+    }
+    // Thin how OFTEN gear drops, never which tier: demoting tiers would quietly
+    // remove the reward the class questline is built around (its Lv 49 capstone
+    // is a guaranteed tier-2), whereas a lower chance still pays out that tier.
+    if (typeof q.rewards.gearChance === 'number' && q.rewards.gearChance > 0 && q.rewards.gearChance < 1) {
+      q.rewards.gearChance = Math.max(0.01, +(q.rewards.gearChance * GEAR_MUL).toFixed(4));
+    }
+  }
+  // CALIBRATE. The band ladder above decides the SHAPE of the cut; this final
+  // step decides its level, pinning the median exactly on target no matter what
+  // upstream passes did to the authored numbers first. It is a single uniform
+  // factor, so it cannot disturb the shape the ladder just established -- every
+  // quest moves by the same ratio and the ordering is untouched.
+  if (coinQuests.length) {
+    const sorted = coinQuests.map(function (x) { return x.rewards.mojicoins; }).sort(function (a, b) { return a - b; });
+    const cur = sorted[Math.floor(sorted.length / 2)];
+    if (cur > 0) {
+      const k = TARGET_MEDIAN / cur;
+      for (const q of coinQuests) q.rewards.mojicoins = Math.max(1, Math.round(q.rewards.mojicoins * k));
+    }
+  }
+}
+// DEFERRED BY ONE TICK, and that is load-bearing. Placed inline, the pass ran
+// before 31 further reward definitions further down the file - the zodiac set
+// (Lv 68-90, 42000 + o*7800 coins) among them - so the richest quests in the
+// game escaped both the trim and the calibration and held the median up at
+// 45,600. A macrotask runs after every load-time generator has finished.
+if (typeof setTimeout === 'function') setTimeout(_lxTrimQuestPay, 0);
 
 // v0.25.59 — Monster natural-level table. Each mob type has a "design
 // level" — the player level the type is balanced for. When a player
