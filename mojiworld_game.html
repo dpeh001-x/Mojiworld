@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.923';
+const GAME_VERSION = 'v0.29.924';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16901,7 +16901,7 @@ const SKILLS = {
   meteor:       { name:'Meteor',         icon:'☄️', cls:'mage', job:'archmage', slot:'q', mp:35, cd:10000, desc:'Call a meteor from above.' },
   elemental:    { name:'Elemental Convergence', icon:'🌟', cls:'mage', job:'archmage', slot:'c', mp:55, cd:14000, desc:'Ultimate: lightning that chains between enemies, stunning and burning each.' },
   // Warlock
-  soulSiphon:   { name:'Soul Siphon',    icon:'💀', cls:'mage', job:'warlock',  slot:'q', mp:12, cd:20000, desc:'Drain nearby foes (2× ATK) into MP and HP, then raise 1 skeletal thrall from the first victim — 8s, fights at 65% of your ATK.' },   // v0.29.671 — per user (Dark Pulse report): the raise was never in the tooltip. It also hid the damage and the self-heal; the description said only "Drain HP from enemies → MP".
+  soulSiphon:   { name:'Soul Siphon',    icon:'💀', cls:'mage', job:'warlock',  slot:'q', mp:12, cd:20000, desc:'Drain nearby foes (2× ATK) into MP and HP, raise 1 skeletal thrall from the first victim, and call up soul orbs (2 to start, +1 every 1.5s, max 5) that orbit you for 12s and hunt — each homes into a foe within 380px and detonates (6× ATK).' },   // v0.29.671 — per user (Dark Pulse report): the raise was never in the tooltip. It also hid the damage and the self-heal; the description said only "Drain HP from enemies → MP".
   darkPulse:    { name:'Dark Pulse',     icon:'🖤', cls:'mage', job:'warlock',  slot:'c', mp:45, cd:26000,  desc:'Ultimate: large void AoE (3.5× ATK), then summon 5 undead that fight for you for 15s — each at 65% of your ATK, and killable by monsters.' },   // v0.29.x — the raise was never in the tooltip (per user: the description did not match what it does)
   // v0.25.514 — Priest F-slot signature: Holy Light. Self-heal scaling
   // on the player's ATK stat. 25 % maxHP at ATK 0, ramps linearly to
@@ -16971,7 +16971,7 @@ const SKILLS = {
   // Mage path
   sage_meteorshower:  { name:'Meteor Shower',      icon:'📜', cls:'mage', job:'archmage', master:'sage',         slot:'x', mp:55, cd:20000, desc:'5 meteors rain over an area.' },
   elementalist_cascade:{ name:'Prismatic Cascade', icon:'🌈', cls:'mage', job:'archmage', master:'elementalist', slot:'x', mp:50, cd:15000, desc:'Four elements in amplifying sequence.' },
-  lich_harvest:       { name:'Soul Vortex',        icon:'👹', cls:'mage', job:'warlock',  master:'lich',         slot:'x', mp:40, cd:30000, desc:'Open a 30s vortex pool that drags enemies in and drains MASSIVE life damage (2.2× ATK/sec over 30s), and raise soul orbs (2 to start, +1 every 1.5s, max 5) that orbit you for 12s and hunt — each homes into a foe within 380px and detonates (6× ATK). 30s recast — re-drop it wherever the fight moves.' },
+  lich_harvest:       { name:'Soul Vortex',        icon:'👹', cls:'mage', job:'warlock',  master:'lich',         slot:'x', mp:40, cd:30000, desc:'Open a 30s vortex pool that drags enemies in and drains MASSIVE life damage (2.2× ATK/sec over 30s). 30s recast — re-drop it wherever the fight moves.' },
   hexmaster_grandhex: { name:'Grand Hex',          icon:'🧿', cls:'mage', job:'warlock',  master:'hexmaster',    slot:'x', mp:35, cd:24000, desc:'Hex everything inside the rune ring: 1.2s freeze (non-boss), a 1.2× ATK burst, and a stacking curse DOT (0.3× ATK/tick per stack). 5 stacks RUPTURE for 4× ATK, and a hexed foe\'s curse jumps to its nearest neighbour when it dies.' },
   // Archer path
   marksman_oneshot:   { name:'One Shot One Kill',  icon:'🎯', cls:'archer', job:'sniper', master:'marksman',    slot:'x', mp:50, cd:22000, desc:'Guaranteed crit piercing rail. Pure damage, no random kill chance.' },
@@ -67713,6 +67713,19 @@ const SKILL_FNS = {
       const _ry = _src ? _src.y : player.y + player.h - 18;
       raiseMinion(_rx, _ry, _rt, 16000);   // v0.29.888 — 8s -> 16s (duration x2)
     }
+    // v0.29.916 — SOUL WARD (moved here from Soul Vortex in v0.29.924, per
+    // user). Two orbs, phase-opposed; they orbit wide, home into monsters
+    // within 380px, are consumed on impact, and the ward grows one back every
+    // 1.5s to a cap of 5. Engine in updatePlayer beside the aegis block; drawn
+    // by drawLichOrbs. On Soul Siphon's 20s cd the 12s ward is ~60% uptime.
+    player._lichOrbs = { life: 12000, maxLife: 12000, orbs: [] };
+    for (let i = 0; i < 2; i++) {
+      player._lichOrbs.orbs.push({
+        baseAng: i * Math.PI,          // opposite sides
+        phase:   i * Math.PI,          // pendulum counter-phased too
+        hitCd:   0,
+      });
+    }
     showToast(`Soul Siphon`, 'epic');
     flash(0.2);   },
   darkPulse: () => {
@@ -69543,21 +69556,10 @@ const SKILL_FNS = {
   },
 
   lich_harvest: () => {
-    // v0.29.911 — SOUL WARD (per user: "2 rotating blue-greenish orbs that
-    // attacks like paladin's 5 orb skill but a wider radius"). The vortex is a
-    // stationary pool; these travel with the lich, so the cast now has a
-    // moving component the way Divine Aegis moves with the paladin. Two orbs,
-    // phase-opposed, 12s of the 30s recast (~40% uptime — the aegis's own
-    // audited neighbourhood). Update in updatePlayer beside the aegis block;
-    // draw in drawLichOrbs; struck like aegis orbs but on a wider orbit.
-    player._lichOrbs = { life: 12000, maxLife: 12000, orbs: [] };
-    for (let i = 0; i < 2; i++) {
-      player._lichOrbs.orbs.push({
-        baseAng: i * Math.PI,          // opposite sides
-        phase:   i * Math.PI,          // pendulum counter-phased too
-        hitCd:   0,
-      });
-    }
+    // v0.29.924 — the Soul Ward raise moved to soulSiphon (per user: "soul
+    // siphon skill should have the additional soulorbs skill from soul vortex
+    // instead"). The ward's engine (update/homing/regen/draw/clear) is keyed
+    // on player._lichOrbs and lives where it always did.
     // SOUL VORTEX — drop a 30s vacuum pool that pulls enemies and siphons HP/MP
     // v0.25.201 — Major buff: AOE radius 180→320 px (+78%), hazard rect
     // 200×100→400×140, atk×0.80→×1.40 (+75% damage), tick 12→8 frames
