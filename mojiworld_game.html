@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.902';
+const GAME_VERSION = 'v0.29.903';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -32349,6 +32349,34 @@ function _monsterCoinMult(m) { void m; return MONSTER_COIN_MULT; }
 //     rolled independently for each so one kill can be rich but stingy on xp.
 // Edicts (opt-in difficulty toggles) keep working: they are a player choice,
 // not hidden calibration. They default OFF.
+// v0.29.8xx - HIGH-LEVEL DEF: a slight bump, with a softener (per user:
+// "ensure that the higher level monsters have a slight bump in DEF" and
+// "DEF scale should have softener as well"). DEF scaled at one flat rate
+// for every monster, so a late-game mob was never disproportionately
+// armoured, only proportionally - and unlike ATK it had no high-level
+// taper (see _atkHiLvSoften) to stop the top of the curve running away.
+//   bump     +0.375%/level above 40, cap +15% (lv 80)
+//   softener -1%/level     above 60, cap -20% (lv 80)
+//   net = max(1.0, bump x softener)
+// The 1.0 floor is deliberate: the softener is there to stop the bump
+// running away, not to make an endgame monster flimsier than it is today.
+// Net: nothing at or below lv 40, ~+7.5% at lv 60, tapering to neutral by
+// about lv 70 and staying there.
+// Sized against MITIGATION, not the raw stat: DEF feeds
+// finalDmg *= 300 / (defVal + 300), already ~61% on a lv 80 mob, so a
+// bigger bump would make endgame mobs sponges.
+const LX_DEF_HILV_FROM   = 40;      // bump starts above this level
+const LX_DEF_HILV_PER    = 0.00375; // bump per level
+const LX_DEF_HILV_CAP    = 0.15;    // bump ceiling (+15%, lv 80)
+const LX_DEF_SOFT_FROM   = 60;      // softener starts above this level
+const LX_DEF_SOFT_PER    = 0.01;    // softener per level
+const LX_DEF_SOFT_CAP    = 0.20;    // softener floor (-20%, lv 80)
+function _lxHiLvDefBump(lv) {
+  const L = (typeof lv === 'number' && lv > 0) ? lv : 0;
+  const bump   = 1 + Math.min(LX_DEF_HILV_CAP, Math.max(0, L - LX_DEF_HILV_FROM) * LX_DEF_HILV_PER);
+  const soften = 1 - Math.min(LX_DEF_SOFT_CAP, Math.max(0, L - LX_DEF_SOFT_FROM) * LX_DEF_SOFT_PER);
+  return Math.max(1, bump * soften);
+}
 function _lxApplyStatTable(mon, type, isBoss, isElite, isMiniBoss) {
   const T = (typeof LX_MONSTER_STATS !== 'undefined') && LX_MONSTER_STATS && LX_MONSTER_STATS[type];
   if (!T || !mon) return mon;
@@ -32360,7 +32388,7 @@ function _lxApplyStatTable(mon, type, isBoss, isElite, isMiniBoss) {
   const hp = Math.max(1, Math.floor(T.hp * mul('hp') * jit()));
   mon.maxHp = hp; mon.currentHp = hp;
   mon.atk = Math.max(0, Math.floor(T.atk * mul('atk') * jit()));
-  mon.def = Math.max(0, Math.floor(T.def * mul('def') * jit()));
+  mon.def = Math.max(0, Math.floor(T.def * mul('def') * jit() * _lxHiLvDefBump(T.lv)));   // v0.29.8xx - level bump, softened at the top
   // v0.29.771 — per user "add some variation to the exp + and - 10% same goes
   // with final coin output". Rolled INDEPENDENTLY for exp and coin (a good
   // coin roll does not imply a good exp roll) and separately from the stat
