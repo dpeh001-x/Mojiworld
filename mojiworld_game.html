@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.894';
+const GAME_VERSION = 'v0.29.895';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -20010,8 +20010,21 @@ function _renderPqObjectivePin() {
     pin.style.display = 'none';
     return;
   }
+  // v0.29.x — a bonus nobody can see is a bonus nobody plays for. The pin now
+  // states the live party size and the EXP multiplier it is actually paying,
+  // read from the same helpers the kill pipeline uses.
+  let _ptyLine = '';
+  try {
+    const _allies = (typeof _lxPartyAlliesHere === 'function') ? _lxPartyAlliesHere() : 0;
+    if (_allies > 0) {
+      const _mul = _lxPartyExpMul(_allies, true);
+      const _more = _allies < LX_PARTY_MAX_ALLIES
+        ? ` · +1 ally = ×${_lxPartyExpMul(_allies + 1, true)}` : ' · party bonus maxed';
+      _ptyLine = `<span class="pq-progress">👥 Party of ${_allies + 1} — EXP ×${_mul}${_more}</span>`;
+    }
+  } catch (e) {}
   pin.innerHTML = `<span class="pq-title">📜 ${title}</span><span class="pq-goal">${goal}</span>` +
-                  (progress ? `<span class="pq-progress">▸ ${progress}</span>` : '');
+                  (progress ? `<span class="pq-progress">▸ ${progress}</span>` : '') + _ptyLine;
   pin.style.display = 'block';
 }
 
@@ -42180,6 +42193,67 @@ const net = {
 // v0.28.7 — bonus raised ×1.5 → ×2 (per user "with an ally/friend on
 // multiplayer mode you get 2x exp"). The same ×2 now also applies to the
 // EXP SHARE a player receives from an ally's kill (see _coopApplyKill).
+// v0.29.x — PARTY SIZE PAYS (per user: "Improve on PQ aspect, if there are
+// more players increase bonus exp as well"). Every co-op EXP path below stopped
+// at the FIRST nearby ally and returned a flat x2, so a duo and a full five-
+// player room earned identically — there was no reason to bring anybody else,
+// least of all to a PARTY quest.
+//
+// The first ally still pays exactly x2, unchanged: v0.28.7 set that number on
+// request and a balance pass is not what was asked for. Each ally after the
+// first adds a step, and inside the Ticket Rush maps that step is twice as big
+// — a PQ is the one piece of content written for a group, and its own quest
+// text says so: "The old transit code demanded a five-person party."
+//
+//   allies   0     1      2      3      4+
+//   normal   x1    x2     x2.5   x3     x3.5
+//   in a PQ  x1    x2     x3     x4     x5
+//
+// Capped at four allies, i.e. a party of five — the size the transit code
+// asked for, and a hard ceiling so a crowded relay room cannot run the number
+// away.
+const LX_PARTY_MAX_ALLIES = 4;
+const LX_PARTY_STEP_PQ    = 1.0;
+const LX_PARTY_STEP       = 0.5;
+function _lxIsPqMap(id) {
+  return id === 'clockworkUnderpassLobby' || id === 'clockworkSpire' ||
+         id === 'clockworkExpress' || id === 'tower';   // 'tower' is the Carriage of Ascension (Stage 3)
+}
+function _lxPartyExpMul(allies, inPq) {
+  const n = Math.max(0, Math.min(LX_PARTY_MAX_ALLIES, allies | 0));
+  if (n <= 0) return 1;
+  return 2 + (n - 1) * (inPq ? LX_PARTY_STEP_PQ : LX_PARTY_STEP);
+}
+// Count co-op peers standing in the 400px wedge around (cx, cy) on MY map.
+// One definition, used by the killer's multiplier, the ally-kill share and the
+// PQ pin, so the number the player is shown is the number they are paid.
+function _lxCoopAlliesNear(cx, cy, excludeId) {
+  if (typeof net === 'undefined' || !net || !net.connected || !net.peers) return 0;
+  const myMap = game.currentMap || 'town';
+  const RANGE = 400 * 400;
+  // v0.25.699 stale-peer guard, preserved: a peer whose socket died without
+  // firing the disconnect handler keeps a stale x/y and would otherwise pay a
+  // party bonus forever.
+  const _staleCutoff = ((typeof performance !== 'undefined' && performance.now)
+    ? performance.now() : Date.now()) - 15000;
+  let n = 0;
+  for (const id in net.peers) {
+    if (excludeId != null && String(id) === String(excludeId)) continue;
+    const p = net.peers[id];
+    if (!p || p.map !== myMap) continue;
+    if (typeof p._last === 'number' && p._last < _staleCutoff) continue;
+    const dx = (p.x || 0) + player.w / 2 - cx;   // v0.26.1023 — peer broadcasts top-left; the point is centered
+    const dy = (p.y || 0) + player.h / 2 - cy;
+    if (dx * dx + dy * dy <= RANGE) n++;
+  }
+  return n;
+}
+// Allies standing with me right now, for display.
+function _lxPartyAlliesHere() {
+  return _lxCoopAlliesNear(player.x + player.w / 2, player.y + player.h / 2, null);
+}
+try { window._lxPartyExpMul = _lxPartyExpMul; window._lxPartyAlliesHere = _lxPartyAlliesHere;
+      window._lxCoopAlliesNear = _lxCoopAlliesNear; window._lxIsPqMap = _lxIsPqMap; } catch (e) {}
 function _coopXpMul(monster) {
   if (!net.connected || !net.peers) return 1;
   const myMap = game.currentMap || 'town';
@@ -42197,15 +42271,14 @@ function _coopXpMul(monster) {
   const _staleCutoff = (typeof performance !== 'undefined' && performance.now)
     ? performance.now() - 15000
     : Date.now() - 15000;
-  for (const id in net.peers) {
-    const p = net.peers[id];
-    if (!p || p.map !== myMap) continue;
-    if (typeof p._last === 'number' && p._last < _staleCutoff) continue;
-    const dx = (p.x || 0) + player.w / 2 - mx;   // v0.26.1023 — center the peer coord (peer broadcasts top-left; monster is centered)
-    const dy = (p.y || 0) + player.h / 2 - my;
-    if (dx * dx + dy * dy <= RANGE) return 2;   // v0.28.7 — was 1.5
-  }
-  return 1;
+  // v0.29.x — COUNT them; this used to `return 2` on the first hit, which is
+  // why a five-player room paid a duo's rate. _lxCoopAlliesNear applies the same
+  // map / stale / 400px rules the loop here used to.
+  void mx; void my; void RANGE; void _staleCutoff;   // the rules moved into the shared counter
+  const _allies = _lxCoopAlliesNear(
+    (monster && monster.x) ? monster.x + monster.w / 2 : (player.x + player.w / 2),
+    (monster && monster.y) ? monster.y + monster.h / 2 : (player.y + player.h / 2), null);
+  return _lxPartyExpMul(_allies, _lxIsPqMap(myMap));
 }
 // v0.28.7 — receiver-side proximity check for the ally-kill EXP share: is MY
 // player within the 400px co-op wedge of the broadcast kill position? Mirrors
@@ -44043,7 +44116,17 @@ function _coopApplyKill(msg) {
     // v0.28.7 — the ally-kill share gets the same ×2 co-op wedge the killer
     // gets, when THIS peer is within 400px of the kill (msg.x/y). A same-map
     // ally farther away still receives the base share.
-    const coop = (typeof _coopNearKill === 'function' && _coopNearKill(msg.x, msg.y)) ? 2 : 1;
+    // v0.29.x — the share now scales with the party too, computed from the
+    // RECEIVER's side so both halves of a kill agree: the killer counts as one
+    // ally, plus every other peer standing in the same wedge (I am not my own
+    // ally, and the killer is excluded from the peer sweep so they are not
+    // counted twice).
+    let coop = 1;
+    if (typeof _coopNearKill === 'function' && _coopNearKill(msg.x, msg.y)) {
+      const _others = (typeof _lxCoopAlliesNear === 'function') ? _lxCoopAlliesNear(+msg.x, +msg.y, msg.id) : 0;
+      coop = (typeof _lxPartyExpMul === 'function')
+        ? _lxPartyExpMul(1 + _others, (typeof _lxIsPqMap === 'function') && _lxIsPqMap(game.currentMap)) : 2;
+    }
     // v0.29.5xx — REWARD PARITY (per user "make sure coop grants the right exp
     // and rewards and mojicoins"). These four were in the host's own kill
     // pipeline but missing here, and every one of them is the GUEST'S OWN
