@@ -30,7 +30,29 @@ shadow all along — and when the wing lowers, the colossus crumples like
 dropped cloth. The chick looks into the camera as the light narrows to
 nothing. Gravitos was never the mastermind. He was the lantern show.
 
-## Generation 2 (2026-08-20, SHIPPED) — the cinematic re-roll
+## Generation 3 (2026-08-20, SHIPPED) — concrete, cartoon, no props
+
+Per user: "remove the halo, make guguma less realistic, remove the lamp as
+well, this is less forced but also way more abstract, please redo." v2 kept
+the smoothness but the lantern-projection conceit was too abstract and the
+photoreal-plush chick drifted off the game's art style. v3 stages the reveal
+with the most concrete physics there is - A SHADOW COPIES ITS OWNER:
+the titan looms behind the tiny cartoon chick, attached at its feet like an
+ordinary shadow stretched gigantic; the chick raises one wing and the
+colossus mirrors it in unison; the chick closes its eyes and the shadow
+loses its glow, crumbles to ash, and drains back into a small bird-shaped
+shadow. No halo, no lantern, no props. Guguma is flat cel-shaded cartoon
+with bold outlines - the game sprite, alive.
+
+- Model **`seedance_2_5`** (mode `omni_reference`) · 720p · 8 s · 16:9 ·
+  `generate_audio: true` · **52 credits** · one attempt.
+- Job id: `260df9c3-cdca-47a6-92af-5512a091e131`.
+- Same references (defeat-clip end frame + Guguma identity).
+- QA: 4.0s the cartoon chick front-and-centre, the titan looming behind with
+  arm raised · 6.0s eyes closed, the titan crumbling to ash · 7.7s the chick
+  alone in the void, its small shadow subtly wrong-shaped. Audio verified.
+
+## Generation 2 (2026-08-20, superseded) — the cinematic re-roll
 
 Per user: "can be regenerated with a better cinematic approach with better
 effects and smoothness, right now it looks very forced and unconvincing" +
