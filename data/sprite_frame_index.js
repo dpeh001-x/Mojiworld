@@ -520,6 +520,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "lich_ult": 9,
    "marksman_oneshot": 9,
    "marksman_ult": 9,
+   "necro_maelstrom": 16,
    "nightreaper_eclipse": 9,
    "nightreaper_ult": 9,
    "phantom_ult": 9,

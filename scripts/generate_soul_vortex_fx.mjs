@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // Soul Vortex (Lich X) — new pool art + a SMOOTH looping animation.
 // =============================================================================
+//   node scripts/generate_soul_vortex_fx.mjs --key necro_maelstrom   # dry-run
 //   node scripts/generate_soul_vortex_fx.mjs            # dry-run: show prompts
 //   node scripts/generate_soul_vortex_fx.mjs --generate # call Ludo, write art
-//   ... --frames 16 --keep-base   (reuse _work/base.webp instead of re-rolling)
+//   ... --key K --frames 16 --keep-base   (reuse the cached base instead of re-rolling)
+// Keys: soul_vortex (the Lich X pool), necro_maelstrom (the Lv-50 ultimate).
 //
 // Three stages, and the third is the one that matters:
 //   1. /assets/image          -> a new base pool sprite
@@ -32,42 +34,77 @@ sharp.cache(false);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const FX_DIR = join(ROOT, 'Sprites', 'fx');
 const ANIM_DIR = join(FX_DIR, 'anim');
-const WORK = join(ROOT, 'scripts', '_tmp_sv_work');
-const KEY = 'soul_vortex';
-
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 const arg = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
 const FRAMES = Number(arg('--frames') || 16);
 
-// The pool is drawn as a flat ellipse on the ground at 460x192 (LX_VORTEX_RX/RY
-// x2), i.e. ~2.4:1 — so the art is authored wide and the swirl is seen in
-// PERSPECTIVE, not from straight above. Saying so explicitly is the difference
-// between a ground pool and a logo-like top-down spiral.
-const BASE_PROMPT =
-  'A wide flat elliptical necrotic soul-vortex pool lying ON THE GROUND, seen ' +
-  'from a low 3/4 game camera so the whirlpool is a squashed horizontal ellipse ' +
-  'in perspective, about three times wider than it is tall. A dark abyssal core ' +
-  'at the centre sinks away into blackness; spectral ghost-green energy spirals ' +
-  'inward around it in long sweeping arms, with pale translucent wisps and ' +
-  'faint screaming soul-faces drawn down the spiral toward the core. Rim of the ' +
-  'pool glows toxic emerald and frays into drifting embers. Bright rim light, ' +
-  'deep contrast, glowing volumetric energy, crisp clean edges. Centered, whole ' +
-  'effect fully inside the frame with transparent empty margin all around it. ' +
-  'Nothing else in the image — no ground texture, no characters, no background, ' +
-  'no text, no UI, no border. Transparent background.';
+// Both ground pools the shared hazard branch draws. They are separate ENTRIES
+// rather than one shared sprite because that sharing was the bug: Necrotic
+// Ascendance, the Lich's Lv-50 ultimate, wore the Soul Vortex's art at a
+// different size and so read as "the X skill again, but bigger".
+const FX = {
+  // 460x192 (LX_VORTEX_RX/RY x2), ~2.4:1 — authored wide and seen in
+  // PERSPECTIVE, not from straight above. Saying so explicitly is the
+  // difference between a ground pool and a logo-like top-down spiral.
+  soul_vortex: {
+    base:
+      'A wide flat elliptical necrotic soul-vortex pool lying ON THE GROUND, seen ' +
+      'from a low 3/4 game camera so the whirlpool is a squashed horizontal ellipse ' +
+      'in perspective, about three times wider than it is tall. A dark abyssal core ' +
+      'at the centre sinks away into blackness; spectral ghost-green energy spirals ' +
+      'inward around it in long sweeping arms, with pale translucent wisps and ' +
+      'faint screaming soul-faces drawn down the spiral toward the core. Rim of the ' +
+      'pool glows toxic emerald and frays into drifting embers.',
+    motion:
+      'the soul vortex churns continuously in place: the spiral arms rotate ' +
+      'smoothly and evenly around the dark core, wisps and soul-shapes are dragged ' +
+      'inward and swallowed, and the emerald rim glow pulses gently.',
+  },
+  // 600x260, follows the caster, 6s. It is an ULTIMATE and must not read as a
+  // bigger copy of the X skill: violet arcane sorcery over the necrotic green,
+  // a runic circle, lightning, and the souls it has already banked circling as
+  // trophies. Deliberately a storm you STAND INSIDE, not a puddle at your feet.
+  necro_maelstrom: {
+    base:
+      'A vast flat elliptical arcane death-maelstrom lying ON THE GROUND, seen ' +
+      'from a low 3/4 game camera so it is a squashed horizontal ellipse in ' +
+      'perspective, about two and a half times wider than it is tall. A blazing ' +
+      'white-violet singularity burns at the centre. Around it, concentric ' +
+      'sorcerous rings of glowing purple runes and arcane glyphs rotate over a ' +
+      'churning necrotic storm of emerald and deep violet energy. Forked violet ' +
+      'lightning arcs across the surface, ghostly spectral skulls and screaming ' +
+      'soul-wraiths are torn inward around the core, and the outer rim is a ' +
+      'ragged crown of black-purple flame shedding embers and drifting motes of ' +
+      'arcane dust. Epic high-tier spell effect, immense scale, ominous and regal.',
+    motion:
+      'the death maelstrom rages continuously in place: the runic rings rotate ' +
+      'steadily around the blazing violet core, arcane lightning flickers and ' +
+      'forks across the surface, spectral skulls and wraiths spiral inward and ' +
+      'are consumed, and the black-purple flame crown flares and gutters.',
+  },
+};
+const KEY = arg('--key') || 'soul_vortex';
+if (!FX[KEY]) { console.error(`unknown --key "${KEY}". Known: ${Object.keys(FX).join(', ')}`); process.exit(1); }
+const WORK = join(ROOT, 'scripts', `_tmp_fx_work_${KEY}`);
+
+// Shared framing/cleanliness clause — the model needs the same "one effect,
+// nothing else, transparent" instruction whichever pool is being drawn.
+const BASE_PROMPT = FX[KEY].base +
+  ' Bright rim light, deep contrast, glowing volumetric energy, crisp clean ' +
+  'edges. Centered, whole effect fully inside the frame with transparent empty ' +
+  'margin all around it. Nothing else in the image — no ground texture, no ' +
+  'characters, no background, no text, no UI, no border. Transparent background.';
 
 // Motion: it must LOOP and it must not change size. Everything that made the
 // old frames jitter is named as a prohibition here.
-const MOTION_PROMPT =
-  'the soul vortex churns continuously in place: the spiral arms rotate ' +
-  'smoothly and evenly around the dark core, wisps and soul-shapes are dragged ' +
-  'inward and swallowed, and the emerald rim glow pulses gently. The motion is ' +
-  'CONTINUOUS and SEAMLESS so the last frame flows back into the first with no ' +
-  'jump. CRITICAL: the pool stays the EXACT same size, shape, position and ' +
-  'framing in EVERY frame — do NOT zoom, scale, grow, shrink, translate, tilt, ' +
-  'crop or mirror it, and do not change its outer silhouette. Only the energy ' +
-  'inside and the glow move. Keep the whole effect inside the frame with margin.';
+const MOTION_PROMPT = FX[KEY].motion +
+  ' The motion is CONTINUOUS and SEAMLESS so the last frame flows back into ' +
+  'the first with no jump. CRITICAL: the effect stays the EXACT same size, ' +
+  'shape, position and framing in EVERY frame — do NOT zoom, scale, grow, ' +
+  'shrink, translate, tilt, crop or mirror it, and do not change its outer ' +
+  'silhouette. Only the energy inside and the glow move. Keep the whole effect ' +
+  'inside the frame with margin.';
 
 if (!has('--generate')) {
   console.log(`DRY RUN — nothing called, nothing written.\n`);
