@@ -498,6 +498,7 @@ window.LX_SPRITE_FRAME_INDEX = {
   },
   "fx/anim": {
    "arcane_burst": 9,
+   "arcane_shockwave": 9,
    "archbishop_grail": 9,
    "archbishop_ult": 9,
    "ballista_ult": 9,
