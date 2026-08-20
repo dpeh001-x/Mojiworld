@@ -9649,7 +9649,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.949';
+const GAME_VERSION = 'v0.29.950';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -21181,7 +21181,7 @@ const monsterTypes = {
   // v0.26.167 — Sundered Smith now fires mforgespark (was msplinter,
   // shared with Forgewight + Smithgolem). Boss-tier forge spark — the
   // anvil ghost finally throws the right element.
-  sundered_smith: { name:'The Sundered Smith', w:140, h:140, color:'#4a1a08', shell:'#cc6622', hp:1800000, atk:275, def:63, evasion:122, exp:235000, mojicoins:32000, speed:2.3, jump:9, boss:true, level:48, shoot:'mforgespark', shootCd:1500, signature:'Half-melted forge-ghost. Each strike rings the anvil that broke him.', traits:{ revivesOnce:{ hpPct:0.35 }, activeBoss:true, bigMelee:{ kind:'swing', dmgMul:2.0, range:170, swingW:260, swingH:120, cdMs:6000, telegraphMs:600 } } },
+  sundered_smith: { name:'The Sundered Smith', w:140, h:140, color:'#4a1a08', shell:'#cc6622', hp:1800000, atk:275, def:63, evasion:122, exp:235000, mojicoins:32000, speed:2.3, jump:6, jumpCdMs:2600, boss:true, level:48, shoot:'mforgespark', shootCd:1500, signature:'Half-melted forge-ghost. Each strike rings the anvil that broke him.', traits:{ revivesOnce:{ hpPct:0.35 }, activeBoss:true, bigMelee:{ kind:'swing', dmgMul:2.0, range:170, swingW:260, swingH:120, cdMs:6000, telegraphMs:600 } } },
   // ============================================================================
   // v0.26.181 — BONE GRAVEYARD ROSTER (Lv 36-50, populating the new 3-map chain
   // between Crypt Hollow (Lv 26) and Magma Foundry (Lv 51)). Per user request
@@ -75426,8 +75426,41 @@ function _bossSpecialAttacks(m, dt) {
     // then reverses (velocity × −1.15) and tracks back to source for
     // 700 ms more before dying. Net effect: spinning hammer wheel
     // that pressures both sides of the player position.
+    // v0.29.950 — THE HEAT CYCLE (per user: "fighting style is very plain
+    // and simple, make it more unique"). WHITE-HOT 13s <-> QUENCHED 8s. Hot:
+    // the hammer wheel lives here and the soft metal takes +32% damage —
+    // "strike while the iron is hot", taught by the numbers. Quenched:
+    // hardened (-35% damage taken, resolved in hitMonster beside the punish-
+    // window multiplier), drags to a heavy walk, and works the forge — the
+    // pillars moved here, plus the anvil toll below. Timers are frames
+    // (now = game.time), matching the hammer/pillar cadence around them.
+    if (m._smithHeat == null) { m._smithHeat = 'hot'; m._smithHeatAt = now + 780; }
+    if (now >= m._smithHeatAt) {
+      if (m._smithHeat === 'hot') {
+        m._smithHeat = 'quenched'; m._smithHeatAt = now + 480;
+        m._smithTollAt = now + 90;   // first anvil toll ~1.5s into the quench
+        if (typeof showToast === 'function') showToast('🌫 THE SMITH QUENCHES — steel hardens. Wait for the glow.', 'rare');
+        if (typeof flash === 'function') flash(0.18);
+      } else {
+        m._smithHeat = 'hot'; m._smithHeatAt = now + 780;
+        if (typeof showToast === 'function') showToast('🔥 WHITE-HOT — strike while the iron is hot!', 'epic');
+        if (typeof flash === 'function') flash(0.25);
+        if (typeof addShake === 'function') addShake(6);
+      }
+    }
+    // Heat is worn, not announced-only: embers rise off hot steel, steam off
+    // quenched. Same budgeted-particle idiom as the guard/ghost stance tells.
+    if ((game.time & 7) === 0 && typeof _budgetedParticlePush === 'function') {
+      const _hot = m._smithHeat === 'hot';
+      _budgetedParticlePush({ x: m.x + m.w * Math.random(), y: m.y + m.h * (0.25 + Math.random() * 0.55),
+        vx: (Math.random() - 0.5) * (_hot ? 1.6 : 0.6), vy: _hot ? -1.6 : -0.9,
+        life: _hot ? 26 : 34, color: _hot ? '#ff7733' : '#a8bccc', size: _hot ? 3 : 4 });
+    }
+    // Quenched steel is heavy: no chase sprints between attacks.
+    if (m._smithHeat === 'quenched') m.vx *= 0.82;
+
     if (m._smithHammerAt == null) m._smithHammerAt = now + 330;
-    if (now >= m._smithHammerAt) {
+    if (now >= m._smithHammerAt && m._smithHeat === 'hot') {
       m._smithHammerAt = now + 540;
       const _aimDx = (player && player.x ? player.x + player.w/2 : m.x) - (m.x + m.w/2);
       const _aimDy = (player && player.y ? player.y + player.h/2 : m.y) - (m.y + m.h/2);
@@ -75480,8 +75513,11 @@ function _bossSpecialAttacks(m, dt) {
     }
 
     if (m._smithPillarsAt == null) m._smithPillarsAt = now + 480;
-    if (now >= m._smithPillarsAt) {
-      m._smithPillarsAt = now + 1320;
+    // v0.29.950 — pillars are forge-work now: QUENCHED only. Re-arm 1320 ->
+    // 780 frames so the rate stays ~once per cycle despite the narrower gate
+    // (quenched is 8s of every 21s).
+    if (now >= m._smithPillarsAt && m._smithHeat === 'quenched') {
+      m._smithPillarsAt = now + 780;
       // v0.26.468 — Was a flat 9999999 OHKO (per user "avoid OHKO"). Now a
       // heavy-but-survivable hit: max(60% maxHP, atk×3.5) — denser/faster than
       // Barnaby's pillars (7 vs 5, 54f vs 72f telegraph) so it still demands
@@ -75496,6 +75532,40 @@ function _bossSpecialAttacks(m, dt) {
       if (typeof addShake === 'function') addShake(16);
       if (typeof addHitStop === 'function') addHitStop(120);
       if (typeof audio !== 'undefined' && audio && audio.play) audio.play('crit');
+    }
+
+    // v0.29.950 — RING OF THE BROKEN ANVIL (quenched only). He slams the
+    // ground and the anvil that broke him answers: after a 700ms tell, two
+    // quake waves run the floor in both directions — the same Taurus-stomp
+    // projectile shape (skill 'quake'), sized to be JUMPED. He stops jumping
+    // (jump 9 -> 6, jumpCdMs 2600); this is the move that hands the jumping
+    // to the player instead.
+    if (m._smithTollAt == null) m._smithTollAt = now + 570;
+    if (now >= m._smithTollAt && m._smithHeat === 'quenched') {
+      m._smithTollAt = now + 300;   // ~5s — one to two tolls per quench
+      if (typeof showToast === 'function') showToast('🔔 RING OF THE BROKEN ANVIL — jump the wave!', 'epic');
+      if (typeof addShake === 'function') addShake(8);
+      for (let k = 0; k < 10 && typeof _budgetedParticlePush === 'function'; k++) {
+        _budgetedParticlePush({ x: m.x + m.w / 2 + (Math.random() - 0.5) * m.w,
+          y: m.y + m.h - 6, vx: (Math.random() - 0.5) * 3, vy: -2 - Math.random() * 2,
+          life: 30, color: '#ffcc88', size: 3 });
+      }
+      if (typeof scheduleSkillTimer === 'function') scheduleSkillTimer(() => {
+        if (!m || m.currentHp <= 0) return;
+        for (const dir of [-1, 1]) {
+          game.projectiles.push({
+            x: m.x + m.w / 2, y: m.y + m.h - 24,
+            vx: dir * 5.5, vy: 0,
+            w: 48, h: 26, life: 110,
+            damage: (m.atk || 275) * 2.4,
+            owner: 'enemy', skill: 'quake', color: '#ffaa44',
+            _sourceLabel: 'the Broken Anvil\'s toll',
+          });
+        }
+        if (typeof addShake === 'function') addShake(14);
+        if (typeof flash === 'function') flash(0.3);
+        if (typeof audio !== 'undefined' && audio && audio.play) audio.play('crit');
+      }, 700);
     }
   }
 }
@@ -80734,6 +80804,21 @@ function hitMonster(m, dmg, isCrit, skill) {
     player._courageMs = 0;
     game.damageNumbers.push({ x: m.x + m.w / 2 - 14, y: m.y - 30, vy: -1.8,
       text: 'COUNTER!', life: 22, color: '#ffd84a', size: 12 });
+  }
+  // v0.29.950 — SUNDERED SMITH HEAT: soft metal takes +32%, quenched steel
+  // -35% ("strike while the iron is hot" as numbers, not flavor). Averaged
+  // over the 13s/8s cycle this is ~1.06x of the old damage-in — near neutral;
+  // what changes is WHERE it lands. Authoritative-only, same reason as the
+  // window bonus below: a guest's forwarded damage passes back through the
+  // host's hitMonster ('__coop'), where this applies exactly once.
+  if (m.type === 'sundered_smith' && m._smithHeat
+      && !(typeof _coopFollowingHost === 'function' && _coopFollowingHost())) {
+    const _hotNow = m._smithHeat === 'hot';
+    finalDmg = Math.max(1, Math.floor(finalDmg * (_hotNow ? 1.32 : 0.65)));
+    if (!_hotNow && (game.time & 15) === 0) {
+      game.damageNumbers.push({ x: m.x + m.w / 2 - 22, y: m.y - 24, vy: -1.5,
+        text: 'QUENCHED', life: 20, color: '#a8bccc', size: 11 });
+    }
   }
   // Elite resistance scales their HP, damage stays normal
   // v0.26.x — PUNISH WINDOW: staggered bosses take BOSS_STAGGER_BONUS extra dmg.
