@@ -50,7 +50,14 @@ const r = await page.evaluate(() => {
   const hud = () => {
     try { updateUI(); } catch (e) {}
     const el = document.getElementById('hud-player-title');
-    return el ? { text: el.textContent || '', shown: el.style.display === 'block' } : null;
+    if (!el) return null;
+    const nm = document.getElementById('hud-player-name');
+    const px = (e) => e ? parseFloat(getComputedStyle(e).fontSize) || 0 : 0;
+    // ink width, not block width — the block is the panel's full column
+    const ink = (e) => { const r = document.createRange(); r.selectNodeContents(e);
+                         return Math.round(r.getBoundingClientRect().width); };
+    return { text: el.textContent || '', shown: el.style.display === 'block',
+             px: px(el), namePx: px(nm), inkW: el.style.display === 'block' ? ink(el) : 0 };
   };
 
   // ---- BEFORE: nothing earned ----
@@ -112,6 +119,14 @@ ok('the title reads as regalia — flanking diamonds, upper case',
   !!afterTitleLine && afterTitleLine === `${D} CONQUEROR OF MOJIWORLD ${D}`, { line: afterTitleLine });
 ok('the HUD mirrors it under the character name',
   r.afterHud && r.afterHud.shown && /CONQUEROR OF MOJIWORLD/.test(r.afterHud.text), r.afterHud);
+// Design invariant, not a pixel snapshot: a subtitle must never outsize the
+// name it hangs under. The first cut shipped at 9.5px/1.6px tracking, which
+// spanned 75% of the stats panel and read as the headline (per user: "this
+// should be sized smaller"); it is now 7.5px/0.7px. Guarding the RELATIONSHIP
+// keeps that from creeping back without pinning an exact pixel value.
+ok('the HUD title stays smaller than the name above it',
+  r.afterHud && r.afterHud.px > 0 && r.afterHud.px < r.afterHud.namePx,
+  { titlePx: r.afterHud && r.afterHud.px, namePx: r.afterHud && r.afterHud.namePx, inkW: r.afterHud && r.afterHud.inkW });
 ok('equippedTitle is on the save whitelist', r.inSaveFields, { inSaveFields: r.inSaveFields });
 ok('...and survives a real save flush to localStorage', r.savedToDisk === true, { savedToDisk: r.savedToDisk, key: r.saveKey });
 ok('a REPEAT kill leaves the player\'s own choice alone', r.afterRepeat === 'Echo Walker', { afterRepeat: r.afterRepeat });
