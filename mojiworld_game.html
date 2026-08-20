@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.994';
+const GAME_VERSION = 'v0.29.995';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -84037,7 +84037,12 @@ function triggerSuperBossDeath(m) {
         player._storyBeatsSeen = player._storyBeatsSeen || {};
         player._storyBeatsSeen.epilogue_gravitos = true;
         try { if (typeof saveState === 'function') saveState(); } catch (e) {}
-        _showGameComplete();
+        // v0.29.9xx — the last words of the game, held a beat longer than the
+        // other cards. Verbatim from the scrapped stanzas: the one line that
+        // says the cycle has a NEXT.
+        if (typeof _lxEndingCard === 'function') {
+          _lxEndingCard('ASK HIM ABOUT THE LAST OUTSIDER.', 'Ask him about the next.', 4800, _showGameComplete);
+        } else _showGameComplete();
       }, _epilogueText);
     };
     // v0.29.x — THE CYCLE COMPLETES (per user). Between the black-flame
@@ -84053,13 +84058,25 @@ function triggerSuperBossDeath(m) {
     // Winding. The rebirth clip (clip_gravitos_to_guguma) is OUT of the
     // chain entirely; _gugumaRebirthCutscene stays defined but nothing
     // calls it. Fail-open at every link, forward, never sideways.
+    // v0.29.9xx — three single-line cards punctuate the films (per user).
+    // Cards 2 and 3 are VERBATIM lines from the scrapped epilogue — its two
+    // strongest sentences survive; the wall of text stays gone.
+    const _toWindingCard = () => {
+      if (typeof _lxEndingCard === 'function') {
+        _lxEndingCard('YOU WERE NOT SUMMONED TO SAVE THIS WORLD.', 'You were wound up, and set walking.', 4200, _afterGravDefeat);
+      } else _afterGravDefeat();
+    };
     const _toAmnesiac = () => {
-      if (typeof _amnesiacItsHimCutscene === 'function') _amnesiacItsHimCutscene(_afterGravDefeat);
-      else _afterGravDefeat();
+      if (typeof _amnesiacItsHimCutscene === 'function') _amnesiacItsHimCutscene(_toWindingCard);
+      else _toWindingCard();
     };
     const _afterDefeatCine = () => {
-      if (typeof _gravitosShadowRevealCutscene === 'function') _gravitosShadowRevealCutscene(_toAmnesiac);
-      else _toAmnesiac();
+      const _toShadow = () => {
+        if (typeof _gravitosShadowRevealCutscene === 'function') _gravitosShadowRevealCutscene(_toAmnesiac);
+        else _toAmnesiac();
+      };
+      if (typeof _lxEndingCard === 'function') _lxEndingCard('Nothing that vast ever stood on its own.', null, 3800, _toShadow);
+      else _toShadow();
     };
     setTimeout(() => {
       if (typeof _gravitosDefeatCutscene === 'function') _gravitosDefeatCutscene(_afterDefeatCine);
@@ -128762,6 +128779,53 @@ function _gugumaToyboxCutscene(onClip, onFallback) {
 // the Last Winding. The clip carries the spoken line in its own audio track
 // (generated with audio; the player runs at volume 0.9 with the BGM ducked,
 // so the line lands over near-silence). Fail-open to the Last Winding.
+// v0.29.9xx — ENDING CARDS (per user: "add an impactful storybeat style text
+// line between 1 and 2. and a very strong statement between 3 and 4, and a
+// very ominous strong ending after 4"). One line on black between films —
+// not a return of the scrapped wall of text: the two strongest sentences of
+// the old epilogue survive as single cards, the rest stays gone. Pure DOM, no
+// assets to fail; skippable like every cutscene; any exception falls through
+// to onDone so a card can never soft-lock the ending.
+function _lxEndingCard(main, subLine, holdMs, onDone) {
+  let done = false, t1 = 0, t2 = 0;
+  let ov = null;
+  const finish = () => {
+    if (done) return; done = true;
+    if (t1) clearTimeout(t1); if (t2) clearTimeout(t2);
+    window.removeEventListener('keydown', onKey, true);
+    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+    try { onDone && onDone(); } catch (e) {}
+  };
+  function onKey(e) { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(); } }
+  try {
+    ov = document.createElement('div');
+    ov.className = 'lx-ending-card';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:1600;background:#010007;display:flex;'
+      + 'flex-direction:column;align-items:center;justify-content:center;cursor:pointer;'
+      + 'opacity:0;transition:opacity 600ms ease;text-align:center;padding:0 8vw;';
+    const mainEl = document.createElement('div');
+    mainEl.style.cssText = 'font:800 clamp(20px,4.2vw,46px)/1.25 \'Segoe UI\',system-ui,sans-serif;'
+      + 'letter-spacing:2px;color:#e8dcc8;text-shadow:0 0 26px rgba(120,40,220,0.55),0 2px 4px #000;';
+    mainEl.textContent = main;
+    ov.appendChild(mainEl);
+    if (subLine) {
+      const subEl = document.createElement('div');
+      subEl.style.cssText = 'font:600 clamp(13px,2.2vw,21px)/1.5 \'Segoe UI\',system-ui,sans-serif;'
+        + 'letter-spacing:4px;color:#d8b84a;margin-top:16px;text-shadow:0 0 16px rgba(120,40,220,0.8);';
+      subEl.textContent = subLine;
+      ov.appendChild(subEl);
+    }
+    document.body.appendChild(ov);
+    ov.addEventListener('click', finish);
+    window.addEventListener('keydown', onKey, true);
+    requestAnimationFrame(() => { try { ov.style.opacity = '1'; } catch (e) {} });
+    t1 = setTimeout(() => {
+      try { ov.style.opacity = '0'; } catch (e) {}
+      t2 = setTimeout(finish, 550);
+    }, Math.max(1200, holdMs || 3800));
+  } catch (e) { finish(); }
+}
+
 function _amnesiacItsHimCutscene(onDone) {
   let done = false, timer = 0, titleT = 0, guard = 0, guardArms = 2;
   let playing = false;

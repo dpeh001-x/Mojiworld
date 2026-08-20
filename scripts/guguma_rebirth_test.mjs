@@ -36,7 +36,7 @@ const r = await page.evaluate(() => {
   out.chainDoesNotCallIt = !/_gugumaRebirthCutscene\s*\(/.test(km);
   // The chain that replaced it is present and ordered by its own plumbing.
   out.newChain = km.includes('_gravitosShadowRevealCutscene(_toAmnesiac)')
-    && km.includes('_amnesiacItsHimCutscene(_afterGravDefeat)');
+    && km.includes('_amnesiacItsHimCutscene(_toWindingCard)');
   // The epilogue stanzas survive as the Last Winding's fail-open cover.
   const ep = (typeof STORY_BEATS !== 'undefined') && STORY_BEATS.epilogue_gravitos;
   const joined = ep ? ep.stanzas.map(s => typeof s.text === 'function' ? '' : s.text).join('\n') : '';
