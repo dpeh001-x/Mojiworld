@@ -121,6 +121,34 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.29.983 <span class="tag"><span class="pill bug">bug</span> Two monster traits were declared on seven mobs and read by nothing</span></h2>
+<p><code>traits.echoStrike</code> and <code>traits.hourglassCharge</code> are declared across seven monsters and had <b>zero runtime reads</b>. (The <code>echoStrike</code> reads in the damage path are <code>player.mods.echoStrike</code> &mdash; the player boon that happens to share the stat name, a different system.) Both are now implemented rather than stripped, because in each case the repo had already paid for the behaviour.</p>
+
+<h3>Echo Strike — the knight was paying for a mechanic it never got</h3>
+<p>Echo Knight's own signature promises it to the player: <em>&ldquo;Strikes echo 0.5 s later.&rdquo;</em> More decisively, its damage was tuned <b>down</b> on the assumption the echo fires &mdash; the v0.29.9 note on its type line reads <em>&ldquo;swing 2.0&rarr;1.5 (echoStrike doubles the hit, so the pre-fix burst was 2&times;1400)&rdquo;</em>. With the echo dead the knight has been carrying the compensation without the mechanic, at roughly half its intended burst.</p>
+<p>So <b>no stat is touched</b>: firing the echo restores the authored two-hit total exactly, which is what makes this a fix rather than a buff. The echo re-strikes at the <b>original position</b>, not wherever the mob has since walked &mdash; an echo is the blow repeating where it landed, and a second hitbox that re-aims at the player would be an undodgeable follow-up instead of a readable one. It carries a spectral tint and its own damage attribution, and a mob that dies inside the 500&nbsp;ms window strikes nothing.</p>
+
+<h3>Hourglass Charge — a telegraphed lunge, as its own note describes</h3>
+<p>The tower roster documents it as <em>&ldquo;telegraphed lunge with a sand-glass tell&rdquo;</em>. Stripping it was the weaker option for a specific reason: <b>Mirror Stalker's only trait is <code>hourglassCharge</code></b>, so removing it leaves a monster with no declared behaviour at all, and its signature (&ldquo;Cloaks. Strikes from blind side.&rdquo;) reads as exactly the ambush the trait names.</p>
+<p>Built on <code>braceDash</code>'s phase machine, which is already proven against this game's chase AI: direction locks at brace start (so sidestepping the tell makes the lunge commit to empty air) and velocity is re-asserted after the pursuit code (without which the lunge is inert &mdash; measured before adding that guard: <b>137 of 137 brace frames drifting</b> and <b>37&nbsp;px of travel against an authored 460</b>). The trait's value <em>is</em> the brace duration, so the authored 1500&ndash;2500&nbsp;ms keep their meaning. The tell is falling sand at the mob's centre, piling as the wind-up runs out.</p>
+<p>Crucially it adds <b>no new damage source</b>: like braceDash, the lunge deals nothing directly &mdash; the lunging body is the threat, resolved by the existing contact path. That is what makes wiring a dead trait onto three bosses a safe change rather than a balance event.</p>
+
+<h3>Verification</h3>
+<p>New test <code>scripts/boss_dead_traits_test.mjs</code> drives the live monster AI. Against the <b>unfixed</b> build it fails <b>15 checks</b>; against this one, all pass:</p>
+<table>
+<tr><th>Check</th><th>Before</th><th>After</th></tr>
+<tr><td>One heavy swing produces two hitboxes</td><td><b>1</b></td><td><b>2</b>, ~500&nbsp;ms apart</td></tr>
+<tr><td>Echo position / damage</td><td>&mdash;</td><td><b>same x, same damage</b> as the strike</td></tr>
+<tr><td>Same mob with the trait removed</td><td>1</td><td><b>1</b> &mdash; keyed to the declaration</td></tr>
+<tr><td>Mob dies mid-echo</td><td>&mdash;</td><td><b>no posthumous hit</b></td></tr>
+<tr><td>Lunge brace (authored 2200&nbsp;ms)</td><td><b>never braces</b></td><td><b>2208&nbsp;ms, dead still</b></td></tr>
+<tr><td>Lunge commit (dash phase only)</td><td><b>0&nbsp;px</b></td><td><b>&gt;300&nbsp;px</b> toward the player</td></tr>
+<tr><td>Zone-worthy boss lunge draws a lane</td><td><b>no</b></td><td><b>yes</b></td></tr>
+<tr><td>Lunge adds a direct hitbox</td><td>&mdash;</td><td><b>none</b> (contact path only)</td></tr>
+</table>
+<p>Three assertions were rewritten mid-development because they passed vacuously on the broken build &mdash; &ldquo;dead still during the brace&rdquo; and &ldquo;commits to a real lunge&rdquo; both passed when <em>no lunge happened at all</em> (the latter was reading ordinary walk drift). They now gate on the brace having occurred and measure displacement inside the dash phase specifically. The non-boss lane check was also inverted once the rule was read properly: <code>_lxZoneWorthy</code> is boss-only by design, so Mirror Stalker's lunge is correctly <b>unmarked</b>, matching the existing note that a trash mob's dash is &ldquo;deliberately unmarked&rdquo;.</p>
+
+
 <h2>v0.29.982 <span class="tag"><span class="pill feat">feat</span> Summons hunt what their master marks</span></h2>
 <p>Per user: <em>Further improve on AI of summons.</em></p>
 <p><b>Measured first, to find what was still dumb.</b> On the live engine: the pack

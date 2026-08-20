@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.982';
+const GAME_VERSION = 'v0.29.983';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -72499,6 +72499,42 @@ function updateMonsters(dt) {
     // Sovereign declared bigMelee/columnStrike traits but the
     // `!m.isBoss` guard meant the windup never started — they just
     // stood there. Allow opt-in via `m.traits.activeBoss`.
+    // v0.29.976 — ECHO STRIKE release. Ticked before the swing block so an
+    // echo and a fresh swing can never resolve on the same frame. The mob
+    // dying, or the run being halted, drops the pending echo: it is the sound
+    // of a blow that was struck, and a corpse strikes nothing.
+    if (m._echoT > 0 && m.currentHp > 0 && !_ccHalted) {
+      m._echoT -= dt;
+      if (m._echoT <= 0 && m._echoShot) {
+        const _es = m._echoShot;
+        m._echoShot = null;
+        game.projectiles.push({
+          x: _es.x, y: _es.y, vx: _es.vx, vy: 0,
+          w: _es.w, h: _es.h, life: 14,
+          damage: _es.damage, owner: 'enemy', skill: 'swing',
+          _defPierce: (typeof _defPierceMul === 'function') ? _defPierceMul(m) : 1,
+          // Spectral tint so the second hit reads as the echo and not as a
+          // second monster: same arc art, ghost-blue instead of the swinger's
+          // own colour.
+          color: '#9fb4ff',
+          noGravity: true,
+          _sourceLabel: (m.name || 'Heavy Swing') + ' (echo)',
+          _zoneAttack: (typeof _lxZoneWorthy === 'function') && _lxZoneWorthy(m, (m.traits.bigMelee && m.traits.bigMelee.dmgMul) || 1.5),
+          _swingType: m.type,
+          _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'heavy') : null,
+        });
+        if (typeof addShake === 'function') addShake(3);
+        if (typeof _budgetedParticlePush === 'function') {
+          for (let _ei = 0; _ei < 6; _ei++) {
+            _budgetedParticlePush({
+              x: _es.x + Math.random() * _es.w, y: _es.y + Math.random() * _es.h,
+              vx: _es.facing * (0.4 + Math.random()), vy: (Math.random() - 0.5) * 1.2,
+              life: 18, color: '#9fb4ff', size: 2,
+            });
+          }
+        }
+      }
+    } else if (m.currentHp <= 0) { m._echoT = 0; m._echoShot = null; }
     if (m.traits && m.traits.bigMelee && (!m.isBoss || m.traits.activeBoss) && m.currentHp > 0 && !_ccHalted) {
       const bm = m.traits.bigMelee;
       if (m._bigMeleeCd === undefined) m._bigMeleeCd = bm.cdMs * 0.5 + Math.random() * bm.cdMs * 0.5;
@@ -72611,6 +72647,20 @@ function updateMonsters(dt) {
               _swingType: m.type,   // v0.29.812 — picks that monster's own swing art in the draw branch
               _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'heavy') : null,   // v0.29.131 — boss heavy-hit band (null for elites)
             });
+            // v0.29.976 — ECHO STRIKE (traits.echoStrike = delay in ms). The
+            // trait was declared on echoKnight + towerSovereign and read by
+            // nothing; echoKnight's dmgMul was already cut 2.0->1.5 to pay for
+            // it (see the v0.29.9 note on its type line), so firing the echo
+            // restores the authored two-hit burst rather than inflating it.
+            // Frozen here rather than recomputed at fire time: the strike that
+            // echoes is THIS one, so its geometry and damage are the payload.
+            if (m.traits.echoStrike > 0) {
+              m._echoT = m.traits.echoStrike;
+              m._echoShot = {
+                x: _sx, y: m.y + m.h * 0.3, vx: _facing * 1.5,
+                w: _sw, h: _sh, damage: _dmg, facing: _facing,
+              };
+            }
             addShake(5);
             // Swing arc particle trail.
             for (let _si = 0; _si < 8; _si++) {
@@ -72639,6 +72689,88 @@ function updateMonsters(dt) {
             m._windedCd = 7000;
             // v0.29.264 — no "OPEN!" tag here either; post-swing recovery lag
             // reads through the stagger sparks + crawl alone.
+          }
+        }
+      }
+    }
+    // v0.29.976 — HOURGLASS CHARGE (traits.hourglassCharge = brace ms).
+    // Declared on pathsBane / towerStalker / towerArbiter / towerSovereign /
+    // pqConductor and read by nothing until now. Shares braceDash's two-phase
+    // shape and its guarantees, with its own state fields so a monster could
+    // carry both without them fighting over one timer.
+    //
+    // Deals NO direct damage — the lunging body is the threat, resolved by the
+    // existing contact path. That is what makes wiring a dead trait on three
+    // bosses a safe change: it adds pressure and a new place to be, not a new
+    // damage source to balance.
+    if (m.traits && m.traits.hourglassCharge > 0 && (!m.isBoss || m.traits.activeBoss)
+        && m.currentHp > 0 && !_ccHalted) {
+      const _hgBrace = m.traits.hourglassCharge;
+      if (m._hgCd === undefined) m._hgCd = 3000 + Math.random() * 3000;   // staggered first cast
+      m._hgCd -= dt;
+      const _hgDx = _playerCx - (m.x + m.w / 2);
+      let _hgOnScreen = true;
+      {
+        const _cx = game.camera.x, _cy = (game.camera && game.camera.y) || 0;
+        if (m.x + m.w < _cx || m.x > _cx + W || m.y + m.h < _cy || m.y > _cy + H) _hgOnScreen = false;
+      }
+      // Never open a lunge mid-heavy: two committed attacks at once is
+      // unreadable, and bigMelee is the one these mobs already telegraph.
+      if (!m._hgCharging && !m._bigMeleeFiring && m._hgCd <= 0 && _hgOnScreen
+          && Math.abs(_hgDx) < 640 && Math.abs(_hgDx) > 130) {
+        m._hgCharging = true;
+        m._hgPhase = 'brace';
+        m._hgT = _hgBrace;
+        m._hgDir = _hgDx > 0 ? 1 : -1;   // locked at brace start — the tell is honest
+        m.facing = m._hgDir;
+      }
+      if (m._hgCharging) {
+        const _hgNow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        m.atkAnimUntil = _hgNow + 400;
+        if (m._hgPhase === 'brace') {
+          m._hgT -= dt;
+          m.vx = 0;                      // dead still — that IS the tell
+          m.facing = m._hgDir;
+          // The sand-glass tell: grains fall at the mob's centre and pile at
+          // its feet, so the wind-up reads as time running out rather than as
+          // a generic charge glow.
+          if (game.time % 2 === 0 && typeof _budgetedParticlePush === 'function') {
+            const _hgProg = 1 - Math.max(0, m._hgT) / _hgBrace;
+            _budgetedParticlePush({
+              x: m.x + m.w / 2 + (Math.random() - 0.5) * m.w * 0.28,
+              y: m.y + m.h * 0.30 + _hgProg * m.h * 0.35,
+              vx: (Math.random() - 0.5) * 0.25, vy: 1.5 + Math.random() * 1.2,
+              life: 20, color: Math.random() < 0.5 ? '#ffd88a' : '#e8b45c', size: 2,
+            });
+          }
+          if (m._hgT <= 0) {
+            m._hgPhase = 'dash';
+            m._hgT = 320;
+            m._hgTravel = 0;
+            const _hgFrames = Math.max(1, 320 / (1000 / 60));
+            m._hgVx = m._hgDir * (460 / _hgFrames);
+            if (typeof addShake === 'function') addShake(5);
+          }
+        } else if (m._hgPhase === 'dash') {
+          m._hgT -= dt;
+          m.vx = m._hgVx;                // re-asserted every frame — chase AI cannot override
+          // Same per-tick overshoot clamp braceDash carries: _hgVx is sized for
+          // 60fps frames but integrated per tick, so a slower tick would carry
+          // past the authored distance the telegraph promised.
+          m._hgTravel = (m._hgTravel || 0) + Math.abs(m._hgVx);
+          if (m._hgTravel >= 460) m._hgT = 0;
+          if (game.time % 2 === 0 && typeof _budgetedParticlePush === 'function') {
+            _budgetedParticlePush({
+              x: m.x + m.w / 2 - m._hgDir * m.w * 0.5,
+              y: m.y + m.h * (0.3 + Math.random() * 0.5),
+              vx: -m._hgDir * 2.0, vy: (Math.random() - 0.5) * 0.6,
+              life: 12, color: '#ffd88a', size: 2.5,
+            });
+          }
+          if (m._hgT <= 0) {
+            m._hgCharging = false;
+            m._hgCd = 6500 + Math.random() * 2000;
+            m.vx *= 0.15;                // hard brake — no glide-out
           }
         }
       }
@@ -74059,6 +74191,8 @@ function updateMonsters(dt) {
     // v0.29.x — braceDash outranks the cast-plant AND the boss chase AI:
     // dead still through the brace, the full committed vx through the dash.
     if (m._braceDashing) m.vx = (m._bdPhase === 'dash') ? m._bdVx : 0;
+    // v0.29.976 — hourglass lunge, same precedence as the brace-dash above.
+    if (m._hgCharging) m.vx = (m._hgPhase === 'dash') ? m._hgVx : 0;
 
     // Physics (gravity scales with map)
     // v0.25.46 — gate the whole physics block on m._noGravity so bosses
@@ -123428,6 +123562,20 @@ function _lxAttackZones() {
     // imperceptible; a hit outside the drawn zone is not.
     // lateralDash (the non-boss cousin) is deliberately unmarked: a 150-240 ms
     // reflex dodge on a trash mob is not a zone read.
+    // v0.29.976 — hourglass lunge lane, same grammar as the brace-dash lane
+    // below (brace phase only; once launched the visible body is the danger).
+    if (m._hgCharging && m._hgPhase === 'brace' && m.traits && m.traits.hourglassCharge > 0
+        && _lxZoneWorthy(m, 1)) {   // contact damage — raw atk
+      const _hd = m._hgDir > 0 ? 1 : -1;
+      const _hgFr = Math.max(1, 320 / (1000 / 60));
+      const _hpad = Math.ceil((460 / _hgFr) * 1.2);
+      const _hdist = 460 + _hpad;
+      out.push({ kind: 'dash',
+        x: _hd > 0 ? m.x : m.x - _hdist,
+        y: m.y, w: m.w + _hdist, h: m.h,
+        prog: Math.max(0, Math.min(1, 1 - m._hgT / (m.traits.hourglassCharge || 1))),
+        color: '#ffd88a', dir: _hd > 0 ? 'right' : 'left', tg: 'tg_dash' });
+    }
     if (m._braceDashing && m._bdPhase === 'brace' && m.traits && m.traits.braceDash
         && _lxZoneWorthy(m, 1)) {   // dash damage is contact — raw atk
       const bd = m.traits.braceDash;
