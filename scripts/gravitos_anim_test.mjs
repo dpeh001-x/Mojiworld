@@ -44,7 +44,9 @@ await page.waitForFunction(() => {
   const ready = (arr) => arr && arr.length >= 9 && (arr._readyN >= 9
     || arr.slice(0, 9).every(f => f && ((f.complete && f.naturalWidth > 0) || (!f.src && f.width > 0))));
   return typeof BOSS_ATTACK_FRAMES !== 'undefined' && ready(BOSS_ATTACK_FRAMES.gravitospunch)
+    && ready(BOSS_ATTACK_FRAMES.legosaurusdash)
     && typeof BOSS_WALK_FRAMES !== 'undefined' && ready(BOSS_WALK_FRAMES.gravitos)
+    && ready(BOSS_WALK_FRAMES.legosaurus)
     && ready(BOSS_WALK_FRAMES.young_confused_barnaby);
 }, null, { timeout: 45000 }).catch(() => {});
 
@@ -130,6 +132,67 @@ const r = await page.evaluate(() => {
   out.walkGrav = runWalk('gravitos');
   out.walkBarn = runWalk('young_confused_barnaby');
 
+  // ---- NO GLIDING (per user: attack/idle poses only while planted; a moving
+  // boss must draw its stride) ----
+  const classify = (m, frames) => {
+    // which set is being drawn this tick: punch / walk / other
+    const walkArr = BOSS_WALK_FRAMES[m.type] || [];
+    const drawn = [];
+    const _di2 = _drawBossSprite;
+    _drawBossSprite = function (img) {
+      if (frames.indexOf(img) >= 0) drawn.push('atkset');
+      else if (walkArr.indexOf(img) >= 0) drawn.push('walk');
+      else drawn.push('other');
+      return _di2.apply(this, arguments);
+    };
+    try { drawMonster(m); } catch (e) { drawn.push('err'); }
+    _drawBossSprite = _di2;
+    return drawn[0] || 'none';
+  };
+  {
+    // (a) gravitos mid-crush while MOVING -> must draw the WALK set
+    const m = mk('gravitos');
+    m.patternState = 'crush'; m.patternTimer = 400;
+    let moving = { atkset: 0, walk: 0, other: 0, none: 0, err: 0 };
+    for (let i = 0; i < 30; i++) {
+      simNow += 16;
+      m.vx = 2.4; m._animXV = 2; m._walkLatch = true;   // genuinely moving
+      const c = classify(m, punchArr);
+      moving[c] = (moving[c] || 0) + 1;
+    }
+    out.glideMoving = moving;
+    // (b) the same crush PLANTED -> the punch set draws (attacks intact)
+    m.vx = 0; m._animXV = 0; m._walkLatch = false;
+    simNow += 400;   // let the planted window (140ms) elapse with no movement
+    let planted = { atkset: 0, walk: 0, other: 0, none: 0, err: 0 };
+    for (let i = 0; i < 30; i++) {
+      simNow += 16;
+      m.vx = 0; m._animXV = 0; m._walkLatch = false;
+      m.patternTimer = 400 + i * 16;
+      const c = classify(m, punchArr);
+      planted[c] = (planted[c] || 0) + 1;
+    }
+    out.glidePlanted = planted;
+    game.monsters.length = 0;
+  }
+  {
+    // (c) the Legosaurus DASH set survives while moving — its motion IS the
+    // art, and the v0.29.938 planted gate had silently benched it.
+    const m = mk('legosaurus');
+    m._braceDashing = true; m._bdPhase = 'dash';
+    const dashArr = BOSS_ATTACK_FRAMES.legosaurusdash || [];
+    let dash = { atkset: 0, walk: 0, other: 0, none: 0, err: 0 };
+    for (let i = 0; i < 30; i++) {
+      simNow += 16;
+      m.vx = 8; m._animXV = 6; m._walkLatch = true;
+      m.atkAnimUntil = performance.now() + 400;
+      const c = classify(m, dashArr);
+      dash[c] = (dash[c] || 0) + 1;
+    }
+    out.glideDash = dash;
+    game.monsters.length = 0;
+  }
+
   performance.now = realNow;
   game.monsters.length = 0; game.paused = false;
   return out;
@@ -139,6 +202,7 @@ await b.close(); try { srv.kill(); } catch (e) {}
 console.log('punch    :', JSON.stringify(r.punch));
 console.log('walk grav:', JSON.stringify(r.walkGrav));
 console.log('walk barn:', JSON.stringify(r.walkBarn));
+console.log('glide: moving-crush', JSON.stringify(r.glideMoving), '| planted-crush', JSON.stringify(r.glidePlanted), '| lego dash', JSON.stringify(r.glideDash));
 
 const p = r.punch || {}, wg = r.walkGrav || {}, wb = r.walkBarn || {};
 ok('the punch plays through all nine frames', p.distinct >= 9, { distinct: p.distinct });
@@ -154,6 +218,13 @@ ok('a human-scale boss keeps the brisk 80ms cadence it was tuned at',
    wb.avgHold >= 60 && wb.avgHold <= 100, { avgHold: wb.avgHold });
 ok('walk frames actually cycle for both', wg.frames >= 8 && wb.frames >= 8,
    { grav: wg.frames, barn: wb.frames });
+const gm = r.glideMoving || {}, gp = r.glidePlanted || {}, gd = r.glideDash || {};
+ok('NO GLIDING: a moving boss never draws its attack pose — the stride plays',
+   (gm.atkset || 0) === 0 && (gm.walk || 0) >= 25, gm);
+ok('...while a PLANTED attack still draws the attack set (attacks intact)',
+   (gp.atkset || 0) >= 25 && (gp.walk || 0) === 0, gp);
+ok('the Legosaurus dash keeps its authored motion set while moving (v0.29.938 had benched it)',
+   (gd.atkset || 0) >= 25, gd);
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 let pass = 0, fail = 0;

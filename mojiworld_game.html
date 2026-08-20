@@ -9649,7 +9649,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.955';
+const GAME_VERSION = 'v0.29.956';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -115420,9 +115420,24 @@ function drawMonster(m) {
   //      84 attack re-entries a minute of pure walk/attack flicker.
   if (_bossMoving(m)) m._lxLastMoveAt = _nowAtk;
   const _lxPlanted = (_nowAtk - (m._lxLastMoveAt || 0)) > 140;
-  const _bossAttacking = (m.patternState && m.patternState !== 'idle'
+  // v0.29.x — NO GLIDING (per user: "prevent 'gliding' animation, meaning as
+  // he attacks or idles he should not be moving, if he moves he should be
+  // 'walking'"). v0.29.938 put the planted gate on the atkAnimUntil half only;
+  // the patternState half still let a pattern-driven boss slide across the
+  // arena frozen in its attack pose — Gravitos's zip and slam being the worst
+  // offenders. BOTH halves now require the body to be planted: a moving boss
+  // falls through to the walk branch (the idle branch already requires
+  // stillness via _bossMoving), so pose always matches motion.
+  //
+  // The one exemption is m._braceDashing: the Legosaurus dash owns a dedicated
+  // MOTION set (legosaurusdash, an authored sprint), and the v0.29.938 gate
+  // had silently benched it — the draw comment below still says "atkAnimUntil
+  // is stamped ... so _bossAttacking is true", which the planted gate made
+  // false for the whole moving half of the dash. Restored here.
+  const _bossAttacking = ((m.patternState && m.patternState !== 'idle'
                           && !_BOSS_MOVE_DRAW_STATES.has(m.patternState))
-                       || (m.atkAnimUntil && _nowAtk < m.atkAnimUntil && _lxPlanted);
+                       || (m.atkAnimUntil && _nowAtk < m.atkAnimUntil))
+                       && (_lxPlanted || m._braceDashing);
   // v0.25.708 — Phase-sprite override. Aetherion / Gravitos swap to a
   // different boss sprite mid-fight on HP-threshold (Aetherion @ 50 %)
   // or on form-death (Gravitos 1→2, 2→3). The transition code sets
@@ -115489,8 +115504,9 @@ function drawMonster(m) {
   // v0.26.314/322 — when not attacking: walk loop while moving, else idle loop,
   // else the static sprite.
   const _bossWalking = !_bossAttacking && _bossMoving(m);
-  const _bossWalkImg = _bossWalking ? _bossWalkFrame(_spriteKey, m) : null;
-  const _bossIdleImg = (!_bossAttacking && !_bossWalking) ? _bossIdleFrame(_spriteKey, m) : null;
+  const _bodyKey = m._phaseSprite || m.type;   // v0.29.x — walk/idle sets are keyed by the BODY, never by an attack override
+  const _bossWalkImg = _bossWalking ? _bossWalkFrame(_bodyKey, m) : null;
+  const _bossIdleImg = (!_bossAttacking && !_bossWalking) ? _bossIdleFrame(_bodyKey, m) : null;
   // v0.29.367 — the _dreamPhase "alpha-fade" flag was WRITE-ONLY: six sites
   // set it (Scorpio's burrow, Gemini's Lie, the Pisces dream) with comments
   // promising the sprite-render would dim — but no renderer ever read it, so
@@ -115505,7 +115521,7 @@ function drawMonster(m) {
   // blur rather than ghosting, and the sets play fluid at the same authored
   // frame count. Costs one extra drawImage per crossfading boss on screen.
   const _xfPunch = (_bossAttackImg && /punch$/.test(_spriteKey)) ? _gravitosPunchPair(m) : null;
-  const _xfWalk = (!_bossAttackImg && _bossWalkImg) ? _bossWalkPair(_spriteKey, m) : null;
+  const _xfWalk = (!_bossAttackImg && _bossWalkImg) ? _bossWalkPair(_bodyKey, m) : null;
   if (_bossAttackImg && _xfPunch && _xfPunch.b && _xfPunch.b !== _xfPunch.a) {
     _drawBossSprite(_xfPunch.a, m, sx, sy, true, true);
     const _xpA = ctx.globalAlpha;
