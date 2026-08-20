@@ -54,17 +54,26 @@ const r = await page.evaluate(() => {
       sF = LX_FX.ui_bossbar_frame; sR = LX_FX.ui_bossbar_fill;
       LX_FX.ui_bossbar_frame = null; LX_FX.ui_bossbar_fill = null;
     }
-    const rects = [];
+    const rects = []; let card = null;
     const _fr = ctx.fillRect;
+    const _ft = ctx.fillText;
+    ctx.fillText = function (t, tx, ty) {
+      if (String(this.font).indexOf('46px') >= 0) card = { a: +this.globalAlpha.toFixed(3), y: ty };
+      return _ft.apply(this, arguments);
+    };
     ctx.fillRect = function (x, y, w, h) { rects.push({ s: String(this.fillStyle), x, y, w, h }); return _fr.apply(this, arguments); };
     try { drawSuperBossBar(); } catch (e) { rects.push({ s: 'THREW:' + e }); }
-    ctx.fillRect = _fr;
+    ctx.fillRect = _fr; ctx.fillText = _ft;
     if (blockArt && typeof LX_FX !== 'undefined') { LX_FX.ui_bossbar_frame = sF; LX_FX.ui_bossbar_fill = sR; }
     const strip = rects.filter(q => q.y === 20 && q.h === 18);
     const ember = strip.find(q => /255,\s*225,\s*170/.test(q.s));
     const tint = strip.find(q => /140,\s*90,\s*255|255,\s*110,\s*200|255,\s*60,\s*90/.test(q.s));
+    const pulse = strip.find(q => /255,\s*255,\s*255/.test(q.s) && q.w > 10);
     return { emberX: ember ? Math.round(ember.x) : -1, emberW: ember ? Math.round(ember.w) : 0,
-             tintW: tint ? Math.round(tint.w) : 0, threw: rects.find(q => /THREW/.test(q.s)) };
+             tintW: tint ? Math.round(tint.w) : 0, card,
+             pulseW: pulse ? Math.round(pulse.w) : 0,
+             pulseA: pulse ? +((pulse.s.match(/([\d.]+)\)\s*$/) || [0, 0])[1]) : 0,
+             threw: rects.find(q => /THREW/.test(q.s)) };
   };
 
   // ---- intro sweep: 0 → full over 700ms, monotonic ----
@@ -94,6 +103,19 @@ const r = await page.evaluate(() => {
   simNow += 800; draw(p, true);         // settle its intro
   p.currentHp = Math.floor(p.maxHp * 0.4);
   simNow += 16; out.procHit = draw(p, true);
+  // ---- title card: the name reveal rides the acquisition stamp ----
+  const c = mk('gravitos');
+  simNow = 20000; draw(c);              // first draw stamps _bbSeen
+  const cardAt = (dt) => { simNow = 20000 + dt; return draw(c).card; };
+  out.card100 = cardAt(100); out.card800 = cardAt(800);
+  out.card1700 = cardAt(1700); out.card2500 = cardAt(2500);
+  // ---- phase flip: one-shot white pulse over the fill ----
+  const pz = mk('gravitos', { phase: 1 });
+  simNow += 5000; draw(pz);             // stamps seen + phase
+  simNow += 2500; draw(pz);             // card window over
+  pz.phase = 2;
+  simNow += 16; out.pulse = draw(pz);
+  simNow += 600; out.pulseGone = draw(pz);
   game.monsters.length = 0; game._superBossRef = null;
   return out;
 });
@@ -113,6 +135,12 @@ ok('second hit re-arms the chip at the new HP edge (from 30%, spans the fresh lo
 ok('...and holds again', r.held2 && r.held2.emberW >= r.hit2.emberW - 10, r.held2);
 ok('a heal snaps the ghost up — no ember painted', r.healed && r.healed.emberW === 0, r.healed);
 ok('procedural fallback branch paints the chip too', r.procHit && r.procHit.emberW >= 100, r.procHit);
+ok('title card: easing in at 100ms (alpha ~0.3, still settling)', r.card100 && r.card100.a > 0.1 && r.card100.a < 0.7, r.card100);
+ok('title card: full presence by 800ms', r.card800 && r.card800.a > 0.95, r.card800);
+ok('title card: fading out at 1700ms', r.card1700 && r.card1700.a > 0.1 && r.card1700.a < 0.6, r.card1700);
+ok('title card: gone after 1.9s', !r.card2500, r.card2500);
+ok('phase flip: a white pulse flushes the fill', r.pulse && r.pulse.pulseW > 10 && r.pulse.pulseA > 0.25, r.pulse);
+ok('phase flip: the pulse decays away', r.pulseGone && !r.pulseGone.pulseW, r.pulseGone);
 ok('no draw threw', !r.hit1?.threw && !r.drained?.threw && !r.procHit?.threw, '');
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
