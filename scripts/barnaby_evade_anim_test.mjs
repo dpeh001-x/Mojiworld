@@ -159,6 +159,52 @@ const r = await page.evaluate(async () => {
     }
   }
   out.settledDelta = { frames: settledFrames, violations: settledViolations };
+
+  // ---------- FLOW (v0.29.960): the seams between states ----------
+  // (a) duck is once-through-and-HOLD: deep into its window it returns the
+  //     LAST ready frame, never a ping-pong wrap back into the crouch.
+  if (typeof _bossDuckFrame === 'function') {
+    const held = _bossDuckFrame('young_confused_barnaby', { _animSt: 'duck', _animStAt: performance.now() - 1000 });
+    const lastReady = dArr[(dArr._readyN || dArr.length) - 1];
+    out.duckHold = { holds: !!held && held === lastReady };
+  }
+  // (b) weave crossfades like walk: the pair helper hands back two distinct
+  //     adjacent frames and a blend fraction.
+  if (typeof _bossWeavePair === 'function') {
+    const pr = _bossWeavePair('young_confused_barnaby', { _animSt: 'weave', _animStAt: performance.now() - 500, _animSeed: 0 });
+    out.weavePair = pr ? { distinct: pr.a !== pr.b, f: +(pr.f || 0).toFixed(3), inRange: pr.f >= 0 && pr.f < 1 } : null;
+  }
+  // (c) THE CHAIN: hop -> weave from the FIRST frames (vy gate), land -> duck,
+  //     hop again inside the duck window -> weave again — and never one walk
+  //     or idle frame anywhere in it. This is the seam the old gate leaked:
+  //     airFrames > 2 alone put 1-2 WALK frames at the start of every hop.
+  const wkArr = (typeof BOSS_WALK_FRAMES !== 'undefined' && BOSS_WALK_FRAMES['young_confused_barnaby']) || [];
+  const idArr = (typeof BOSS_IDLE_FRAMES !== 'undefined' && BOSS_IDLE_FRAMES['young_confused_barnaby']) || [];
+  let chainMode = false, chainWalkIdle = 0, chainWeaveEarly = 0;
+  const orig2 = CanvasRenderingContext2D.prototype.drawImage;
+  CanvasRenderingContext2D.prototype.drawImage = function (img, ...a) {
+    try {
+      if (this.canvas === mainCv && chainMode) {
+        if (wkArr.indexOf(img) >= 0 || idArr.indexOf(img) >= 0) chainWalkIdle++;
+      }
+    } catch (e) {}
+    return orig2.call(this, img, ...a);
+  };
+  b._lxDuckUntil = 0; b._lxAirFrames = 0;
+  const wSeen0 = seen.weave;
+  chainMode = true;
+  b.y -= 6; b.vy = -14; b.onGround = false;
+  for (let i = 0; i < 3; i++) await new Promise((res) => requestAnimationFrame(res));
+  chainWeaveEarly = seen.weave - wSeen0;   // the vy gate: weave within 3 frames
+  for (let i = 0; i < 900; i++) { if (b.onGround && i > 10) break; await new Promise((res) => requestAnimationFrame(res)); }
+  const duckAtLand = (b._lxDuckUntil || 0) > 0;
+  // chained hop, inside the duck window
+  b.y -= 6; b.vy = -14; b.onGround = false;
+  for (let i = 0; i < 900; i++) { if (b.onGround && i > 10) break; await new Promise((res) => requestAnimationFrame(res)); }
+  chainMode = false;
+  CanvasRenderingContext2D.prototype.drawImage = orig2;
+  out.chain = { weaveEarly: chainWeaveEarly, duckAtLand, walkIdleLeaks: chainWalkIdle,
+                weaveTotal: seen.weave - wSeen0 };
   CanvasRenderingContext2D.prototype.drawImage = orig;
   out.onGround = b.onGround;
   game.monsters = [];
@@ -167,6 +213,7 @@ const r = await page.evaluate(async () => {
 await browser.close();
 
 console.log(`  live: loaded=${JSON.stringify(r.loaded)} air=${JSON.stringify(r.airSeen)} afterLand=${JSON.stringify(r.afterLand)} settled=${JSON.stringify(r.settledDelta)}`);
+if (r.chain) console.log(`  flow: duckHold=${JSON.stringify(r.duckHold)} weavePair=${JSON.stringify(r.weavePair)} chain=${JSON.stringify(r.chain)}`);
 
 check(r.stores && r.stores.weave && r.stores.duck, 'the weave/duck frame stores exist', r.stores);
 check(r.loaded && r.loaded.weave === 9 && r.loaded.duck === 9, 'the loader built 9 frames per set from the index', r.loaded);
@@ -176,6 +223,19 @@ check(r.landStamped === true, 'LANDING: touching down stamps the duck window (th
 check(r.afterLand && r.afterLand.duck > r.airSeen.duck, 'and the duck set draws while the window is open (the render path)', r.afterLand);
 check(r.settledDelta && r.settledDelta.frames >= 20 && r.settledDelta.violations === 0,
       'SETTLED: grounded frames past the duck window never draw an evade set', r.settledDelta);
+// The v0.29.960 flow contract. Skipped wholesale on builds that predate it.
+if (r.duckHold !== undefined || r.weavePair !== undefined) {
+  check(!!(r.duckHold && r.duckHold.holds),
+        'FLOW: deep in its window the duck HOLDS its standing frame (no ping-pong wrap)', r.duckHold);
+  check(!!(r.weavePair && r.weavePair.distinct && r.weavePair.inRange),
+        'FLOW: weave crossfades — the pair helper blends adjacent frames like walk does', r.weavePair);
+  check(!!(r.chain && r.chain.weaveEarly > 0),
+        'FLOW: a strong jump weaves from its first frames (the vy gate; was 1-2 walk frames)', r.chain);
+  check(!!(r.chain && r.chain.duckAtLand),
+        'FLOW: the mid-chain landing stamps its duck', r.chain);
+  check(!!(r.chain && r.chain.walkIdleLeaks === 0),
+        'FLOW: the whole hop-duck-hop chain shows ZERO walk/idle frames (the seam)', r.chain);
+}
 check(errs.length === 0, 'no page errors', [...new Set(errs)].slice(0, 3));
 console.log(bad ? `\n${bad} FAILED` : '\nall green');
 process.exit(bad ? 1 : 0);

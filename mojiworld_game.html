@@ -9649,7 +9649,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.959';
+const GAME_VERSION = 'v0.29.960';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -113206,7 +113206,39 @@ _loadBossFrames(BOSS_DUCK_FRAMES, 'duck', BOSS_EVADE_TYPES);
 const _BOSS_WEAVE_FRAME_MS = 70;   // brisk — it is an evasive rhythm
 const _BOSS_DUCK_FRAME_MS = 30;    // 9 frames x 30ms ≈ the 260ms landing window
 function _bossWeaveFrame(key, m) { return _bossLoopFrame(BOSS_WEAVE_FRAMES[key], _BOSS_WEAVE_FRAME_MS, undefined, m ? _mobAnimPhase(m, 'weave', true) : 0); }
-function _bossDuckFrame(key, m) { return _bossPingPongFrame(BOSS_DUCK_FRAMES[key], _BOSS_DUCK_FRAME_MS, undefined, m ? _mobAnimPhase(m, 'duck', false) : 0); }
+// v0.29.960 — once-through-and-hold (was ping-pong): the squash plays 0..8 and
+// HOLDS the standing recover frame until the window closes, so the handoff to
+// idle/walk always happens from a standing pose instead of wherever the
+// ping-pong happened to be when the timer expired.
+function _bossDuckFrame(key, m) {
+  const frames = BOSS_DUCK_FRAMES[key];
+  if (!frames) return null;
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);
+  let n = frames._readyN || 0;
+  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
+  frames._readyN = n;
+  if (n === 0) return null;
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const i = Math.floor(Math.max(0, now + (m ? _mobAnimPhase(m, 'duck', false) : 0)) / _BOSS_DUCK_FRAME_MS);
+  return frames[Math.min(n - 1, i)];
+}
+// v0.29.960 — weave as a crossfade PAIR on the same clock, mirroring
+// _bossWalkPair: the walk got frame-blending in v0.29.95x and the evade slip
+// cut hard next to it, which read as a quality drop the moment he left the
+// ground. Same readyN/shrink handling, same {a, b, f} contract.
+function _bossWeavePair(key, m) {
+  const frames = BOSS_WEAVE_FRAMES[key];
+  if (!frames) return null;
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);
+  let n = frames._readyN || 0;
+  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
+  frames._readyN = n;
+  if (n < 2) return null;
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const tAbs = Math.max(0, now + (m ? _mobAnimPhase(m, 'weave', true) : 0)) / _BOSS_WEAVE_FRAME_MS;
+  const i = Math.floor(tAbs) % n;
+  return { a: frames[i], b: frames[(i + 1) % n], f: tAbs - Math.floor(tAbs) };
+}
 // v0.29.x — WALK WEIGHT (per user: "the walk animation can be really much
 // improved"). One global 80ms cadence made a 380px colossus scuttle at the
 // same step rate as a 120px duelist. The cadence now scales with stature —
@@ -115526,14 +115558,23 @@ function drawMonster(m) {
   // hangtime, so a 1px step off a tile does not flicker it); landing stamps a
   // short duck window so the squash reads exactly where the feet hit. Both
   // resolve to null for bosses without the art, falling through untouched.
+  // A hop launched INSIDE a live duck window continues the evade chain (duck
+  // squash -> spring -> weave) with no walk frames between.
+  function _lxNowEvGate(mm) {
+    const t = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    return t < ((mm._lxDuckUntil || 0) + 200);
+  }
   if (m.onGround === false) { m._lxAirFrames = (m._lxAirFrames | 0) + 1; }
   else {
     if ((m._lxAirFrames | 0) > 5) {
-      m._lxDuckUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + 260;
+      m._lxDuckUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + 300;
     }
     m._lxAirFrames = 0;
   }
-  const _bossAirborne = !_bossAttacking && m.onGround === false && (m._lxAirFrames | 0) > 2;
+  const _bossAirborne = !_bossAttacking && m.onGround === false
+    && ((m._lxAirFrames | 0) > 2
+        || (m.vy || 0) < -3
+        || _lxNowEvGate(m));
   const _bossWeaveImg = _bossAirborne ? _bossWeaveFrame(_bodyKey, m) : null;
   const _lxNowEv = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const _bossDucking = !_bossAttacking && !_bossWeaveImg && m.onGround !== false && _lxNowEv < (m._lxDuckUntil || 0);
@@ -115569,7 +115610,16 @@ function drawMonster(m) {
   } else if (_bossDuckImg) {
     _drawBossSprite(_bossDuckImg, m, sx, sy, false, true);
   } else if (_bossWeaveImg) {
-    _drawBossSprite(_bossWeaveImg, m, sx, sy, false, true);
+    const _xfWv = _bossWeavePair(_bodyKey, m);
+    if (_xfWv && _xfWv.b !== _xfWv.a) {
+      _drawBossSprite(_xfWv.a, m, sx, sy, false, true);
+      const _xvA = ctx.globalAlpha;
+      ctx.globalAlpha = _xvA * Math.max(0, Math.min(1, _xfWv.f));
+      _drawBossSprite(_xfWv.b, m, sx, sy, false, true);
+      ctx.globalAlpha = _xvA;
+    } else {
+      _drawBossSprite(_bossWeaveImg, m, sx, sy, false, true);
+    }
   } else if (_bossWalkImg && _xfWalk && _xfWalk.b !== _xfWalk.a) {
     _drawBossSprite(_xfWalk.a, m, sx, sy, false, true);
     const _xwA = ctx.globalAlpha;
