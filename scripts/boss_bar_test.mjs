@@ -33,6 +33,7 @@ await page.waitForFunction(() => typeof drawSuperBossBar === 'function' && typeo
 // the bar furniture streams with the rest of LX_FX at boot — wait for the two
 // pieces to decode before asserting on them (same pattern as the telegraph
 // art suite).
+await page.waitForFunction(() => window._lxBossFontReady === true, null, { timeout: 20000 }).catch(() => {});
 await page.waitForFunction(() => typeof LX_FX !== 'undefined'
   && LX_FX.ui_bossbar_frame && LX_FX.ui_bossbar_frame.complete && LX_FX.ui_bossbar_frame.naturalWidth > 0
   && LX_FX.ui_bossbar_fill && LX_FX.ui_bossbar_fill.complete && LX_FX.ui_bossbar_fill.naturalWidth > 0,
@@ -92,6 +93,26 @@ const r = await page.evaluate(() => {
   };
   out.barArtReady = !!(typeof LX_FX !== 'undefined' && LX_FX.ui_bossbar_frame && LX_FX.ui_bossbar_frame.complete && LX_FX.ui_bossbar_frame.naturalWidth > 0
     && LX_FX.ui_bossbar_fill && LX_FX.ui_bossbar_fill.complete && LX_FX.ui_bossbar_fill.naturalWidth > 0);
+  // v0.29.x — TITLE FACE + OUTLINES: the embedded Cinzel loads, the name draws
+  // in it, and every text on the bar is stroke-outlined before it is filled.
+  out.fontLoaded = window._lxBossFontReady === true
+    && (typeof document !== 'undefined' && document.fonts && document.fonts.check('700 19px LXBossTitle'));
+  {
+    game.monsters.length = 0; game._superBossRef = null;
+    game.monsters.push(mk('legosaurus'));
+    const strokes = []; let nameFont = null;
+    const _st = ctx.strokeText, _ft = ctx.fillText;
+    ctx.strokeText = function (t) { strokes.push(String(t)); return _st.apply(this, arguments); };
+    ctx.fillText = function (t) {
+      if (String(t).includes('LEGOSAURUS')) nameFont = String(ctx.font);
+      return _ft.apply(this, arguments);
+    };
+    try { drawSuperBossBar(); } catch (e) { strokes.push('THREW:' + e); }
+    ctx.strokeText = _st; ctx.fillText = _ft;
+    out.nameFont = nameFont;
+    out.nameOutlined = strokes.filter(t => t.includes('LEGOSAURUS')).length;
+    out.hpOutlined = strokes.some(t => /[KM]\s*\/|·/.test(t) || /%/.test(t));
+  }
   out.paintArt = paint(mk('legosaurus'), false);
   out.paintFallback = paint(mk('legosaurus'), true);
 
@@ -120,6 +141,7 @@ console.log('gravitos       ->', JSON.stringify(r.superBoss));
 console.log('legosaurus     ->', JSON.stringify(r.plainBoss));
 console.log('sundered smith ->', JSON.stringify(r.smith));
 console.log('snail          ->', JSON.stringify(r.ordinary));
+console.log('font loaded:', r.fontLoaded, '| name font:', r.nameFont, '| name strokes:', r.nameOutlined, '| hp outlined:', r.hpOutlined);
 console.log('bar art ready:', r.barArtReady, '| paint w/ art:', JSON.stringify(r.paintArt), '| fallback:', JSON.stringify(r.paintFallback));
 
 ok('a super boss still gets its bar (no regression)',
@@ -140,6 +162,10 @@ ok('with the art, the bar is drawImage-framed — no border rectangles',
    r.paintArt && r.paintArt.drawImage >= 2 && r.paintArt.strokeRect === 0, r.paintArt);
 ok('with the art blocked, the procedural plate still draws (fallback intact)',
    r.paintFallback && r.paintFallback.drawImage === 0 && r.paintFallback.strokeRect >= 2, r.paintFallback);
+ok('the embedded Cinzel title face loads (offline, no machine fonts)', r.fontLoaded === true, {});
+ok('the name draws IN the title face', typeof r.nameFont === 'string' && r.nameFont.includes('LXBossTitle'), { font: r.nameFont });
+ok('the name is stroke-outlined (dark ring + accent ring)', r.nameOutlined >= 2, { strokes: r.nameOutlined });
+ok('the HP readout is outlined over the ribbon', r.hpOutlined === true, {});
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 let pass = 0, fail = 0;
