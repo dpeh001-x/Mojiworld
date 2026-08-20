@@ -105,7 +105,8 @@ const r = await page.evaluate(() => {
     const m = Object.assign({}, t, { type: 'young_confused_barnaby', w: t.w, h: t.h,
       x: 800, y: 400 - (t.h - 60), vx: 0, vy: 0, onGround: true, maxHp: 1000000, currentHp: 1000000,
       isBoss: true, boss: true, level: 40, def: 0, evasion: 0, exp: 0, mojicoins: 0,
-      traits: t.traits, aggroTarget: player, facing: -1, atk: 100,
+      traits: t.traits, aggroTarget: player, facing: -1,
+      atk: Math.ceil(((typeof getMaxHp === 'function') ? getMaxHp() : 1000) * 0.3),   // worthy: zone stun requires a devastating attack since the worthiness rule
       _bigMeleeCd: 0, _columnCd: 99999, _bdCd: 99999, shootTimer: 99999 });
     player.x = 790; player.y = 400;
     game.monsters.length = 0; game.monsters.push(m); game.projectiles.length = 0;

@@ -54,7 +54,9 @@ const r = await page.evaluate(() => {
       x: 800, y: 400 - (t.h - 60), vx: 0, vy: 0, onGround: true,
       maxHp: 1000000, currentHp: 1000000, isBoss: !!t.boss, boss: !!t.boss,
       level: t.level || 50, def: 0, evasion: 0, exp: 0, mojicoins: 0,
-      traits: t.traits, aggroTarget: player, facing: -1, atk: 100,
+      traits: t.traits, aggroTarget: player, facing: -1,
+      // Worthy by construction: raw swing (atk x2) lands at ~60% of maxHp.
+      atk: Math.ceil(((typeof getMaxHp === 'function') ? getMaxHp() : 1000) * 0.3),
       _bigMeleeCd: 0, _columnCd: 99999, _bdCd: 99999, shootTimer: 99999,
     });
     game.monsters.length = 0; game.monsters.push(m);
@@ -120,6 +122,32 @@ const r = await page.evaluate(() => {
     player.tree.stunImmune = false;
   }
 
+  // ---- a WEAK boss swing (trivial vs this player) is unmarked: no heavy
+  // stagger, no stun — the punishment follows the drawn zone, per the rule
+  // that justified it ("the zone bought you a fair read").
+  {
+    const t2 = monsterTypes.young_confused_barnaby;
+    const weak = Object.assign({}, t2, { type: 'young_confused_barnaby', w: t2.w, h: t2.h,
+      x: 800, y: 400 - (t2.h - 60), vx: 0, vy: 0, onGround: true, maxHp: 1000000, currentHp: 1000000,
+      isBoss: true, boss: true, level: 40, def: 0, evasion: 0, exp: 0, mojicoins: 0,
+      traits: t2.traits, aggroTarget: player, facing: -1, atk: 10,
+      _bigMeleeCd: 0, _columnCd: 99999, _bdCd: 99999, shootTimer: 99999 });
+    player.x = 790; player.y = 400;
+    game.monsters.length = 0; game.monsters.push(weak); game.projectiles.length = 0;
+    for (let i = 0; i < 120; i++) { try { updateMonsters(16); } catch (e) {}
+      if (game.projectiles.some(p => p.owner === 'enemy' && p.skill === 'swing')) break; }
+    const wproto = game.projectiles.find(p => p.owner === 'enemy' && p.skill === 'swing');
+    let maxStagger = null, stuns = 0, landed = 0;
+    if (wproto) for (let i = 0; i < 25 && landed < 10; i++) {
+      const tr = throwAt(wproto, false);
+      if (!tr.landed) continue;
+      landed++;
+      if (tr.stunned) stuns++;
+      maxStagger = Math.max(maxStagger || 0, tr.stun);
+    }
+    out.weakSwing = { flag: wproto ? !!wproto._zoneAttack : null, landed, stuns, maxStagger };
+  }
+
   // ---- dash contact carries the same weight while the dash is live ----
   {
     const m = mkBoss('legosaurus', 700);
@@ -150,12 +178,16 @@ await b.close(); try { srv.kill(); } catch (e) {}
 console.log('captured real swing:', r.captured, '| damage', r.swingDamage, 'vs boss atk', r.bossAtk, '| zone-flagged:', r.zoneFlag);
 console.log('70 zone hits       :', JSON.stringify(r.zoneHits));
 console.log('same proj, no flag :', r.plainStagger, '| stun-immune max:', r.immuneMax);
+console.log('weak boss swing    :', JSON.stringify(r.weakSwing));
 console.log('dash contact       :', JSON.stringify(r.dashContact), '| plain contact:', JSON.stringify(r.plainContact));
 
 const zh = r.zoneHits || {};
 ok('the real swing spawn carries the zone flag', r.zoneFlag === true, { flag: r.zoneFlag });
 ok('the zone attack is authored PUNISHING — damage well above the boss\'s raw atk',
    r.swingDamage != null && r.swingDamage >= r.bossAtk * 1.5, { damage: r.swingDamage, atk: r.bossAtk });
+ok('a WEAK boss swing is unmarked and stays at the 200ms baseline — no zone, no zone punishment',
+   r.weakSwing && r.weakSwing.flag === false && r.weakSwing.maxStagger != null && r.weakSwing.maxStagger <= 210 && r.weakSwing.stuns === 0,
+   r.weakSwing);
 ok('enough replayed hits landed to measure', zh.landed >= 40, { landed: zh.landed });
 ok('a zone hit staggers HEAVY — 2.5x the 200ms baseline on every non-stun hit',
    zh.minStagger != null && zh.minStagger >= 490, { minStagger: zh.minStagger });

@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.924';
+const GAME_VERSION = 'v0.29.925';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -72040,7 +72040,7 @@ function updateMonsters(dt) {
               color: '#ff7722',
               noGravity: true,
               _sourceLabel: m.name || 'Ground Smash',
-              _zoneAttack: true,   // v0.29.x — drawn kill zone => heavy stagger + stun roll on hit
+              _zoneAttack: (typeof _lxZoneWorthy === 'function') && _lxZoneWorthy(m, (bm.dmgMul || 1.5)),   // v0.29.x — punishment follows the DRAWN zone; unmarked stays baseline
               _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'heavy') : null,   // v0.29.131 — boss heavy-hit band (null for elites)
             });
             addShake(8);
@@ -72077,7 +72077,7 @@ function updateMonsters(dt) {
               color: m.color || '#ffaa55',
               noGravity: true,
               _sourceLabel: m.name || 'Heavy Swing',
-            _zoneAttack: true,   // v0.29.x — drawn kill zone => heavy stagger + stun roll on hit
+            _zoneAttack: (typeof _lxZoneWorthy === 'function') && _lxZoneWorthy(m, (bm.dmgMul || 1.5)),   // v0.29.x — punishment follows the DRAWN zone; unmarked stays baseline
               _swingType: m.type,   // v0.29.812 — picks that monster's own swing art in the draw branch
               _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'heavy') : null,   // v0.29.131 — boss heavy-hit band (null for elites)
             });
@@ -72278,7 +72278,7 @@ function updateMonsters(dt) {
             // render falls back to the procedural beam if unset / undecoded.
             _colSprite: cs.sprite || null,
             _sourceLabel: m.name || 'Pillar Strike',
-            _zoneAttack: true,   // v0.29.x — drawn kill zone => heavy stagger + stun roll on hit
+            _zoneAttack: !!(m.isBoss || m.boss),   // v0.29.x — a boss pillar is always drawn, so it always punishes
             _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'heavy') : null,   // v0.29.131 — boss heavy-hit band (null for elites)
           });
           addShake(12); flash(0.18);
@@ -74079,7 +74079,8 @@ function updateMonsters(dt) {
       // v0.29.x — a brace-dash that connects is the punished end of a drawn
       // lane (the corridor was on screen for the whole 850 ms brace), so it
       // carries the same heavy-stagger weight as the zone projectiles.
-      player.hitStun = (_lxIsHeavyStaggerMob(m) || (m._braceDashing && m._bdPhase === 'dash'))
+      player.hitStun = (_lxIsHeavyStaggerMob(m) || (m._braceDashing && m._bdPhase === 'dash'
+                          && typeof _lxZoneWorthy === 'function' && _lxZoneWorthy(m, 1)))
         ? _lxHeavyStaggerMs(140)
         : (player.tree.stunImmune ? 0 : Math.floor(140 * (1 - getStunResist())));
       // v0.26.069 — Per user "make the invulnerability period after
@@ -122178,12 +122179,39 @@ function drawPet() {
 // _lxAttackZones is pure computation (returns descriptors; the test drives it
 // directly); _drawAttackZones paints them. Zones only exist while a monster is
 // mid-telegraph, so the common frame costs one empty loop.
+// v0.29.x — ZONES ARE FOR DEVASTATION (per user, with a screenshot of a trash
+// hippo wearing a telegraph box: "remove all the hitbox display except for big
+// devastating boss attacks that deals immense damage or OHKO" — and, in the
+// same breath, "also keep the hitboxes for the column strikes by bosses").
+// bigMelee / columnStrike belong to plenty of ordinary mobs, so v0.29.918's
+// zones were spamming ordinary fights. The rule now:
+//   BOSS    — only a boss's committed attacks may mark themselves. Non-boss
+//             heavies fire exactly as before, unmarked.
+//   IMMENSE — swings, smashes and the dash mark only when their raw damage is
+//             a serious fraction of the player's OWN max HP (an OHKO trivially
+//             qualifies). Relative on purpose: the same Legosaurus swing that
+//             would delete a level-40 draws its box for them, and draws
+//             nothing for the level-90 farming him.
+//   PILLARS — a boss columnStrike is ALWAYS marked, immense or not, per the
+//             user's explicit carve-out: it is the classic marked-zone attack.
+// The heavy-stagger + stun of v0.29.920 rides the SAME rule, because its
+// justification was "the zone bought you a fair read" — punishment follows
+// the drawn zone exactly.
+const LX_ZONE_DMG_PCT = 0.30;   // raw attack >= 30% of player maxHp = devastating
+function _lxZoneWorthy(m, mul) {
+  if (!m || !(m.isBoss || m.boss)) return false;
+  const _hp = (typeof getMaxHp === 'function') ? getMaxHp() : 0;
+  if (!(_hp > 0)) return true;
+  return (m.atk || 0) * (mul || 1) >= _hp * LX_ZONE_DMG_PCT;
+}
+try { window._lxZoneWorthy = _lxZoneWorthy; } catch (e) {}
 function _lxAttackZones() {
   const out = [];
   if (!game.monsters || !game.monsters.length) return out;
   for (const m of game.monsters) {
     if (!m || m.currentHp <= 0 || m._dying) continue;
-    if (m._columnFiring && m._columnT > 0 && m.traits && m.traits.columnStrike) {
+    if (m._columnFiring && m._columnT > 0 && m.traits && m.traits.columnStrike
+        && (m.isBoss || m.boss)) {   // boss pillars ALWAYS mark — user carve-out
       const cs = m.traits.columnStrike;
       const _camY = (game.camera && game.camera.y) || 0;
       out.push({ kind: 'column',
@@ -122203,7 +122231,8 @@ function _lxAttackZones() {
     // imperceptible; a hit outside the drawn zone is not.
     // lateralDash (the non-boss cousin) is deliberately unmarked: a 150-240 ms
     // reflex dodge on a trash mob is not a zone read.
-    if (m._braceDashing && m._bdPhase === 'brace' && m.traits && m.traits.braceDash) {
+    if (m._braceDashing && m._bdPhase === 'brace' && m.traits && m.traits.braceDash
+        && _lxZoneWorthy(m, 1)) {   // dash damage is contact — raw atk
       const bd = m.traits.braceDash;
       const _d = m._bdDir > 0 ? 1 : -1;
       const _bdFr = Math.max(1, (bd.dashMs || 380) / (1000 / 60));
@@ -122215,7 +122244,8 @@ function _lxAttackZones() {
         prog: Math.max(0, Math.min(1, 1 - m._bdT / (bd.telegraphMs || 1))),
         color: m.color || '#ffb26b', dir: _d > 0 ? 'right' : 'left' });
     }
-    if (m._bigMeleeFiring && m._bigMeleeT > 0 && m.traits && m.traits.bigMelee) {
+    if (m._bigMeleeFiring && m._bigMeleeT > 0 && m.traits && m.traits.bigMelee
+        && _lxZoneWorthy(m, (m.traits.bigMelee.dmgMul || 1.5))) {
       const bm = m.traits.bigMelee;
       const prog = Math.max(0, Math.min(1, 1 - m._bigMeleeT / (bm.telegraphMs || 1)));
       if (bm.kind === 'smash') {

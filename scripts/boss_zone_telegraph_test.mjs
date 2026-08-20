@@ -60,6 +60,9 @@ const r = await page.evaluate(() => {
       maxHp: 1000000, currentHp: 1000000,
       isBoss: !!t.boss, boss: !!t.boss, level: t.level || 50, def: 0, evasion: 0,
       exp: 0, mojicoins: 0, traits: t.traits, aggroTarget: player, facing: -1,
+      // v0.29.x — zones are reserved for devastating boss attacks (raw >= 30%
+      // of player maxHp); the positive cases here must clear that bar.
+      atk: Math.ceil(((typeof getMaxHp === 'function') ? getMaxHp() : 1000) * 0.5),
       _bigMeleeCd: 0, _columnCd: 0, shootTimer: 99999,
     });
     // updateMonsters skips expensive AI for faraway NON-bosses, and "far" is
@@ -118,17 +121,34 @@ const r = await page.evaluate(() => {
       proj: p ? { x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.w), h: Math.round(p.h) } : null };
   }
 
-  // (3) SMASH — Blight Elder's ground shock (non-boss heavy, same trait path).
+  // (3) SMASH — Blight Elder is a NON-BOSS heavy: per user ("remove all the
+  // hitbox display except for big devastating boss attacks"), its swing still
+  // fires but must draw NO zone — trash mobs stop wearing telegraph boxes.
   {
     const m = mk('blightElder', 790);
     const started = tickUntil(() => m._bigMeleeFiring === true, 40);
     const z0 = zones().find(z => z.kind === 'smash');
-    let zLast = z0;
-    const fired = tickUntil(() => { const z = zones().find(zz => zz.kind === 'smash'); if (z) zLast = z; return !!enemyProj('smash'); }, 80);
-    const p = enemyProj('smash');
-    out.smash = { started, hasZone: !!z0, fired: fired >= 0,
-      zone: zLast ? { x: Math.round(zLast.x), y: Math.round(zLast.y), w: Math.round(zLast.w), h: Math.round(zLast.h) } : null,
-      proj: p ? { x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.w), h: Math.round(p.h) } : null };
+    const fired = tickUntil(() => !!enemyProj('smash'), 80);
+    out.smash = { started, hasZone: !!z0, fired: fired >= 0 };
+  }
+
+  // (3b) a boss PILLAR is ALWAYS marked — per user ("also keep the hitboxes
+  // for the column strikes by bosses"), even when the boss is trivial to this
+  // player: the pillar is the classic marked-zone attack.
+  {
+    const m = mk('legosaurus', 700);
+    m.atk = 1;
+    const started = tickUntil(() => m._columnFiring === true, 40);
+    out.weakBoss = { started, hasZone: !!zones().find(z => z.kind === 'column') };
+  }
+
+  // (3c) the "immense" gate governs everything else: the same trivial boss's
+  // SWING is unmarked.
+  {
+    const m = mk('young_confused_barnaby', 790);
+    m.atk = 1; m._columnCd = 99999;
+    const started = tickUntil(() => m._bigMeleeFiring === true, 40);
+    out.weakSwing = { started, hasZone: !!zones().find(z => z.kind === 'swing') };
   }
 
   // (4) DASH — Legosaurus's brace-dash. Contact damage, not a projectile, so
@@ -161,7 +181,9 @@ await b.close(); try { srv.kill(); } catch (e) {}
 console.log('helper present:', r.hasFn, '| quiet map zones:', r.quiet);
 console.log('column:', JSON.stringify(r.column));
 console.log('swing :', JSON.stringify(r.swing));
-console.log('smash :', JSON.stringify(r.smash));
+console.log('smash (non-boss):', JSON.stringify(r.smash));
+console.log('weak boss pillar:', JSON.stringify(r.weakBoss));
+console.log('weak boss swing :', JSON.stringify(r.weakSwing));
 
 const rectEq = (a, b2, tol) => a && b2 && Math.abs(a.x - b2.x) <= (tol || 2) && Math.abs(a.w - b2.w) <= (tol || 2)
   && (a.y == null || b2.y == null || Math.abs(a.y - b2.y) <= (tol || 2))
@@ -183,10 +205,12 @@ ok('the swing zone appears on commit', r.swing && r.swing.hasZone === true, r.sw
 ok('the swing that fires matches the drawn zone, all four edges',
    r.swing && r.swing.fired && rectEq(r.swing.zone, r.swing.proj),
    { zone: r.swing && r.swing.zone, proj: r.swing && r.swing.proj });
-ok('the smash zone appears on commit', r.smash && r.smash.hasZone === true, r.smash);
-ok('the ground shock that fires matches the drawn zone',
-   r.smash && r.smash.fired && rectEq(r.smash.zone, r.smash.proj),
-   { zone: r.smash && r.smash.zone, proj: r.smash && r.smash.proj });
+ok('a NON-BOSS heavy fires with NO zone — trash mobs stop wearing boxes',
+   r.smash && r.smash.fired === true && r.smash.hasZone === false, r.smash);
+ok('a boss PILLAR is always marked, even from a trivial boss — the user carve-out',
+   r.weakBoss && r.weakBoss.started >= 0 && r.weakBoss.hasZone === true, r.weakBoss);
+ok('a boss swing that is NOT devastating to this player stays unmarked',
+   r.weakSwing && r.weakSwing.started >= 0 && r.weakSwing.hasZone === false, r.weakSwing);
 const dz = r.dash || {};
 console.log('dash  :', JSON.stringify(dz));
 ok('the dash lane appears during the brace', dz.hasZone === true, dz);
