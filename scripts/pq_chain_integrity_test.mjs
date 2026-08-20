@@ -2,7 +2,8 @@
 // that the PQ numbers and objectives are bugless".
 //
 // The numbers were already sound and this pins them so they stay that way:
-// targets honour noScale (150 / 4 / 8 / 1), the pin and tracker quote the live
+// targets honour noScale (accepting a stage never moves its authored count),
+// the pin and tracker quote the live
 // target, the remainder never goes negative, kill credit is map-gated (a
 // Carriage kill must NOT feed Stage 1, an Express kill must NOT feed Stage 3),
 // and each stage completes on exactly its target kill.
@@ -47,9 +48,27 @@ const r = await page.evaluate(async () => {
     }
   };
   const out = {};
+  // One spawn is not one death. The elite affix pool includes `undying`
+  // (traits.revivesOnce): such a mob absorbs a killMonster() call and comes
+  // back at 35% HP, so a one-call-per-mob loop drops that kill's credit about
+  // once every 240 mech kills — which reads as a random off-by-one in the
+  // counts this test grades. killMonster() no-ops once the mob has left
+  // game.monsters, so that is the liveness test to swing against.
+  const killOne = () => {
+    let m = null; try { m = spawnMonster(300, 200, 'ticketMech'); } catch (e) { return false; }
+    if (!m) return false;
+    for (let s = 0; s < 5 && game.monsters.indexOf(m) >= 0; s++) {
+      m.currentHp = 0; try { killMonster(m); } catch (e) { return false; }
+    }
+    const ok = game.monsters.indexOf(m) < 0;
+    game.monsters = [];
+    return ok;
+  };
 
   // --- targets honour noScale ---
   out.targets = {};
+  out.authored = {};
+  for (const id of IDS) out.authored[id] = QUESTS[id].count;
   for (const id of IDS) {
     clear(); player.quests.completed.q_clockwork_underpass = (id !== 'q_clockwork_underpass');
     player.quests.completed.q_pq_spire = (id === 'q_pq_carriage' || id === 'q_pq_finale');
@@ -80,12 +99,7 @@ const r = await page.evaluate(async () => {
     for (const id of actives) acceptQuest(id);
     loadMap(mapId); game.monsters = [];
     const before = {}; for (const id of actives) before[id] = (player.quests.active[id] || {}).progress | 0;
-    for (let i = 0; i < 3; i++) {
-      let m = null; try { m = spawnMonster(300, 200, 'ticketMech'); } catch (e) {}
-      if (!m) break;
-      m.currentHp = 0; try { killMonster(m); } catch (e) {}
-      game.monsters = [];
-    }
+    for (let i = 0; i < 3; i++) { if (!killOne()) break; }
     const d = {};
     for (const id of actives) d[id] = ((player.quests.active[id] || {}).progress | 0) - before[id];
     return d;
@@ -101,10 +115,7 @@ const r = await page.evaluate(async () => {
   const t3 = player.quests.active.q_pq_carriage.targetCount ?? QUESTS.q_pq_carriage.count;
   let doneAt = null, maxProg = 0;
   for (let i = 1; i <= t3 + 3; i++) {
-    let m = null; try { m = spawnMonster(300, 200, 'ticketMech'); } catch (e) {}
-    if (!m) break;
-    m.currentHp = 0; try { killMonster(m); } catch (e) {}
-    game.monsters = [];
+    if (!killOne()) break;
     const a = player.quests.active.q_pq_carriage;
     if (a) maxProg = Math.max(maxProg, a.progress | 0);
     if (doneAt == null && !a) doneAt = i;
@@ -137,16 +148,24 @@ const r = await page.evaluate(async () => {
 });
 await browser.close();
 
-console.log(`  targets:    ${JSON.stringify(r.targets)}`);
+console.log(`  targets:    ${JSON.stringify(r.targets)}   authored: ${JSON.stringify(r.authored)}`);
 console.log(`  pin:        ${JSON.stringify(r.pin)}`);
 console.log(`  credit:     carriage ${JSON.stringify(r.creditCarriage)}  forest ${JSON.stringify(r.creditForest)}`);
 console.log(`  completion: ${JSON.stringify(r.completion)}`);
 console.log(`  skip:       ${JSON.stringify(r.skip)}   legit chain: ${JSON.stringify(r.walk)}`);
 
-check(r.targets.q_clockwork_underpass === 150, 'Stage 1 asks for 150 (noScale honoured)', r.targets);
-check(r.targets.q_pq_spire === 4, 'Stage 2 asks for 4 pieces', r.targets);
-check(r.targets.q_pq_carriage === 8, 'Stage 3 asks for 8 (noScale honoured)', r.targets);
-check(r.targets.q_pq_finale === 1, 'Stage 4 asks for 1 boss', r.targets);
+// Graded against the AUTHORED counts, not against literals. The stages get
+// retuned (Stage 3 went 8 -> 20 after this test first shipped) and hardcoding
+// the numbers here only means the guard fails the next time someone rebalances
+// — which is the opposite of what it is for. What must hold is that accepting a
+// stage does not move its number: that is exactly what noScale buys, and the
+// hunt curve silently retargeting these beats is the bug it was added for.
+check(r.targets.q_clockwork_underpass === r.authored.q_clockwork_underpass,
+      'Stage 1 asks for its authored count, unscaled (noScale honoured)', r);
+check(r.targets.q_pq_spire === r.authored.q_pq_spire, 'Stage 2 asks for its authored piece count', r);
+check(r.targets.q_pq_carriage === r.authored.q_pq_carriage,
+      'Stage 3 asks for its authored count, unscaled (noScale honoured)', r);
+check(r.targets.q_pq_finale === r.authored.q_pq_finale, 'Stage 4 asks for 1 boss', r);
 check(r.pin.quotesTarget && !r.pin.negative, 'the pin quotes the live target and never shows a negative', r.pin);
 check(r.creditCarriage.q_pq_carriage === 3 && r.creditCarriage.q_clockwork_underpass === 0,
       'a Carriage kill credits Stage 3 only — never Stage 1', r.creditCarriage);
