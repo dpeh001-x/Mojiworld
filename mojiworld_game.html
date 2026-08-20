@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.938';
+const GAME_VERSION = 'v0.29.939';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -79688,7 +79688,22 @@ function bossAI(m, dt, distToPlayer) {
     // deadband + 220ms hold). This branch re-faced unconditionally every frame
     // — stack-trapped fighting the held writer flip-for-flip — and its vx now
     // follows the committed side, which also kills the accel dither.
-    m.vx += m.facing * 0.22;
+    // v0.29.x — ARRIVAL DEADBAND (per user: "ensure that it is smoother").
+    // The generic chase has had one for ages (_accelDB: stop accelerating
+    // inside ~40px, damp vx instead); this branch accelerated INTO the player
+    // to the bitter end, overshot, turned, and sawed back — measured on a
+    // virtual clock: 7 side-crossings in 10s against a stationary player,
+    // each dragging a facing flip and a walk-state churn with it. Same
+    // grammar as the chase: accelerate outside, damp inside — but only when
+    // roughly CO-ELEVATED. Traced on glasswind: random hops ratcheted him up
+    // the one-way platforms (y 340 -> 78 in one run, 274px above the player),
+    // and a co-blind deadband then PARKED him directly overhead with no path
+    // down — no swing can cross that. When the player is well above or below,
+    // vx keeps driving so he walks off ledges back toward the fight.
+    const _dbA = Math.max(48, (m.w || 32) * 0.6);
+    const _coEl = Math.abs(dyA) < 90;
+    if (Math.abs(dxA) > _dbA || !_coEl) m.vx += m.facing * 0.22;
+    else m.vx *= 0.85;
     const _vxCapA = (m.speed || 2) * 1.6;
     if (m.vx >  _vxCapA) m.vx =  _vxCapA;
     if (m.vx < -_vxCapA) m.vx = -_vxCapA;
@@ -79701,7 +79716,7 @@ function bossAI(m, dt, distToPlayer) {
       // v0.29.x — the 4%/frame hop roll ignored jumpCdMs, so the knob only
       // gated a roll bosses in this branch never used. Types without a
       // jumpCdMs are byte-identical.
-      if (dyA < -40 || Math.random() < 0.04) { m.vy = -_mobJumpV(m); if (_jcdA > 0) m._jumpCdT = _jcdA; }
+      if (dyA < -40 || (Math.abs(dyA) < 90 && Math.random() < 0.04)) { m.vy = -_mobJumpV(m); if (_jcdA > 0) m._jumpCdT = _jcdA; }
     }
     // Shoot cooldown — ticks dedicated `_activeBossShootCd` so it
     // doesn't collide with regular AI's `_shootCd` if a boss ever

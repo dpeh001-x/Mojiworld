@@ -92,6 +92,50 @@ const r = await page.evaluate(() => {
     game.monsters.length = 0;
   }
 
+  // SMOOTHNESS, on a virtual clock (anim windows are wall-clock; the clock
+  // advances 16ms per synthetic tick so every window moves in sim-time and
+  // the counts are deterministic). Against a stationary target the pre-fix
+  // catch-all sawed straight through: 7 side-crossings in 10s, each dragging
+  // a facing flip and a walk-state churn. The arrival deadband parks him at
+  // ~48px — INSIDE his 170px swing range, so standing off must not mean
+  // standing down: the same window demands real swings and ticket storms.
+  {
+    game.monsters.length = 0; game.projectiles.length = 0;
+    player.x = 600; player.y = 400; player._god = true;
+    const m = spawnMonster(900, 300, 'pqConductor', true, false);
+    m.aggroTarget = player;
+    const realNow = performance.now.bind(performance);
+    let simNow = realNow();
+    performance.now = () => simNow;
+    let crossings = 0, vxRev = 0, stateChanges = 0, swings = 0, storms = 0;
+    let prevSide = 1, prevVxSign = 0, prevState = '';
+    const seenProj = new Set();
+    for (let i = 0; i < 625; i++) {
+      simNow += 16;
+      game.time = (game.time | 0) + 1;   // the storm/summon timers key on the frame counter, which only the paused loop advances
+      player.x = 600; player.y = 400; player.vx = 0;
+      try { updateMonsters(16); } catch (e) {}
+      const side = Math.sign((m.x + m.w / 2) - (player.x + player.w / 2)) || prevSide;
+      if (side !== prevSide) { crossings++; prevSide = side; }
+      const vs = m.vx > 0.3 ? 1 : m.vx < -0.3 ? -1 : 0;
+      if (vs !== 0 && prevVxSign !== 0 && vs !== prevVxSign) vxRev++;
+      if (vs !== 0) prevVxSign = vs;
+      const now = performance.now();
+      const atk = (m.patternState && m.patternState !== 'idle') || (m.atkAnimUntil && now < m.atkAnimUntil);
+      const st = !m.onGround ? 'air' : atk ? 'attack' : (_mobWalking(m) ? 'walk' : 'idle');
+      if (st !== prevState) { if (prevState) stateChanges++; prevState = st; }
+      for (const pr of game.projectiles) {
+        if (pr.owner !== 'enemy' || seenProj.has(pr)) continue;
+        seenProj.add(pr);
+        if (pr.skill === 'swing') swings++;
+        if (pr.skill === 'mticket') storms++;
+      }
+    }
+    performance.now = realNow;
+    out.smooth = { crossings, vxRev, stateChanges, swings, storms };
+    game.monsters.length = 0; game.projectiles.length = 0;
+  }
+
   // the animation sets were never missing — pin that so "erratic anims" cannot
   // be mis-diagnosed as absent art again.
   out.frames = (() => {
@@ -114,6 +158,7 @@ console.log('conductor:', JSON.stringify(r.conductor));
 console.log('barnaby  :', JSON.stringify(r.barnaby));
 console.log('crossing :', JSON.stringify(r.crossing));
 console.log('frames   :', JSON.stringify(r.frames));
+console.log('smooth   :', JSON.stringify(r.smooth));
 
 const c = r.conductor || {}, bb = r.barnaby || {}, x = r.crossing || {};
 ok('the Conductor declares a jump cooldown (the v0.29.645 knob)', c.jumpCdMs >= 1000, { jumpCdMs: c.jumpCdMs });
@@ -127,6 +172,14 @@ ok('facing flips are bounded (was 101/10s — ten per second)', c.flips <= 20, {
 ok('even a player deliberately crossing him every 120ms cannot strobe him',
    x.flips <= 48, { flips: x.flips, holdCapPer10s: 45 });
 ok('Barnaby is untouched by the shared fix', bb.flips <= 6 && bb.airPct <= 10, bb);
+const sm = r.smooth || {};
+ok('he no longer saws through a stationary player (was 7 crossings/10s)',
+   sm.crossings <= 1, { crossings: sm.crossings });
+ok('...with no velocity dither at arrival (was 6 reversals)', sm.vxRev <= 2, { vxRev: sm.vxRev });
+ok('...and animation states settle (was 22 changes/10s)', sm.stateChanges <= 16, { stateChanges: sm.stateChanges });
+ok('standing off is not standing down: he still swings from the deadband',
+   sm.swings >= 1, { swings: sm.swings });
+ok('...and still throws ticket storms', sm.storms >= 8, { storms: sm.storms });
 ok('his 9-frame animation sets were never missing — no art needed generating',
    r.frames && r.frames.attack === 9 && r.frames.idle === 9 && r.frames.walk === 9, r.frames);
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
