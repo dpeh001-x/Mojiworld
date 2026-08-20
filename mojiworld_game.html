@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.911';
+const GAME_VERSION = 'v0.29.912';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -118016,6 +118016,42 @@ function _zodiacDesperationFire(m, z) {
   }
 }
 
+// =========================================================================
+// v0.29.9xx - ZODIAC PATTERN DIRECTOR (per user: rework the zodiac AI toward
+// AAA standards). One shared brain for the eight pattern-driven signs:
+// anti-repeat memory, range-aware weighting, deterministic phase openers,
+// and difficulty that follows the player's measured dodge skill. See the
+// call sites in each sign's idle branch; weights mirror the old per-sign
+// probabilities so the long-run attack mix is preserved.
+// =========================================================================
+const _Z_NEAR_PX = 240;   // 'near' band edge - melee/point-blank territory
+function _zChoose(m, dist, phase, options) {
+  const live = options.filter(o => o.when !== false);
+  if (!live.length) return null;
+  // Phase opener: the first pick after entering a phase is the signature.
+  if (m._zOpenedPhase !== phase) {
+    m._zOpenedPhase = phase;
+    const op = live.find(o => o.opener);
+    if (op) { m._zLastPat = op.s; return op.s; }
+  }
+  const e = (typeof game !== 'undefined' && game && game._zdEma != null) ? game._zdEma : 0.5;
+  let total = 0;
+  const w = live.map(o => {
+    let k = o.w || 1;
+    if (o.s === m._zLastPat) k *= 0.15;                               // anti-repeat
+    if (o.band === 'near') k *= (dist <= _Z_NEAR_PX ? 2.2 : 0.6);     // range affinity
+    else if (o.band === 'far') k *= (dist > _Z_NEAR_PX ? 2.2 : 0.6);
+    if (o.hard) k *= (0.7 + 0.6 * e);                                 // skill-follows difficulty
+    total += k; return k;
+  });
+  let r = Math.random() * total;
+  for (let i = 0; i < live.length; i++) {
+    r -= w[i];
+    if (r <= 0) { m._zLastPat = live[i].s; return live[i].s; }
+  }
+  m._zLastPat = live[live.length - 1].s;
+  return m._zLastPat;
+}
 function _zodiacAiGeneric(m, dt, distToPlayer, phase, z) {
   // Chase + periodic projectile volley.
   // v0.25.46 — tighter cycles (was 1800/1200/800 → 1450/950/650).
@@ -118117,7 +118153,10 @@ const ZODIAC_AI = {
       m.vx *= 0.9;
       const cycle = phase === 1 ? 1500 : phase === 2 ? 1000 : 650;   // v0.26.390 — idle cut (Aries)
       if (m.patternTimer > cycle) {
-        m.patternState = Math.random() < 0.6 ? 'chargeWindup' : 'flames';
+        m.patternState = _zChoose(m, dist, phase, [
+          { s: 'chargeWindup', w: 0.6, band: 'far', opener: true },
+          { s: 'flames',       w: 0.4, band: 'near' },
+        ]);
         m.patternTimer = 0;
         m._chargeDir = dir;
         m._flamesFired = 0;
@@ -118289,13 +118328,13 @@ const ZODIAC_AI = {
         // plants — Taurus's Immovable Stance was effectively dead. 14 s =
         // 14 × 60 = 840 frames.
         const _plantReady = (_now - (m._lastPlantAt || 0)) > 840;
-        if (_plantReady && r < 0.25) {
-          m._lastPlantAt = _now;
-          m.patternState = 'plant';
-        }
-        else if (phase === 3 && r < 0.45) m.patternState = 'stalactites';
-        else if (r < 0.65) m.patternState = 'stomp';
-        else m.patternState = 'headbuttWindup';
+        m.patternState = _zChoose(m, dist, phase, [
+          { s: 'plant',          w: 0.25, band: 'any',  when: _plantReady },
+          { s: 'stalactites',    w: 0.30, band: 'any',  when: phase === 3, hard: true },
+          { s: 'stomp',          w: 0.40, band: 'near' },
+          { s: 'headbuttWindup', w: 0.35, band: 'far',  opener: true },
+        ]);
+        if (m.patternState === 'plant') m._lastPlantAt = _now;
         m.patternTimer = 0;
         // v0.25.583 — reset _taurusStalXs too. Without this, a phase change
         // mid-stalactites leaves the array intact, and the next stalactites
@@ -118858,9 +118897,11 @@ const ZODIAC_AI = {
       if (m.patternTimer > cycle) {
         m.patternTimer = 0;
         const roll = Math.random();
-        if (phase === 3 && roll < 0.3) m.patternState = 'sweep';
-        else if (roll < 0.55) m.patternState = 'pincer';
-        else m.patternState = 'bubbles';
+        m.patternState = _zChoose(m, dist, phase, [
+          { s: 'sweep',   w: 0.30, band: 'any', when: phase === 3, hard: true },
+          { s: 'pincer',  w: 0.55, band: 'any', opener: true },
+          { s: 'bubbles', w: 0.45, band: 'far' },
+        ]);
         // v0.25.583 — reset ALL Cancer-state vars on transition. zodiacBossAI
         // resets patternTimer + patternState on phase change but NOT custom
         // *Until / counter flags. Without these resets, _cancerLockX would
@@ -119023,9 +119064,11 @@ const ZODIAC_AI = {
         // structurally unreachable exactly when the fight should be widest.
         // Same defect Sagittarius had (fixed in v0.26.390); P3 now reads
         // flare 30% / roar 38% / comet 32%. P1-P2 weighting is unchanged.
-        if (phase === 3 && r < 0.3) m.patternState = 'flare';
-        else if (r < 0.5 || (phase === 3 && r < 0.68)) m.patternState = 'roarWindup';
-        else m.patternState = 'comet';
+        m.patternState = _zChoose(m, dist, phase, [
+          { s: 'flare',      w: 0.30, band: 'any',  when: phase === 3, hard: true },
+          { s: 'roarWindup', w: 0.50, band: 'near', opener: true },
+          { s: 'comet',      w: 0.50, band: 'far' },
+        ]);
         m._leoFired = false; m._leoRoarDir = dir;
       }
     } else if (m.patternState === 'roarWindup') {
@@ -119519,7 +119562,10 @@ const ZODIAC_AI = {
       // v0.25.46 — tighter cycles + 50% burrow chance (was 40%).
       const cycle = phase === 1 ? 1500 : phase === 2 ? 950 : 600;
       if (m.patternTimer > cycle) {
-        m.patternState = Math.random() < 0.5 ? 'burrow' : 'sting';
+        m.patternState = _zChoose(m, dist, phase, [
+          { s: 'burrow', w: 0.5, band: 'far',  opener: true },
+          { s: 'sting',  w: 0.5, band: 'near' },
+        ]);
         m.patternTimer = 0;
       }
     } else if (m.patternState === 'sting') {
@@ -119737,9 +119783,11 @@ const ZODIAC_AI = {
       if (m.patternTimer > cycle) {
         m.patternTimer = 0;
         const r = Math.random();
-        if (phase === 3 && r < 0.35) m.patternState = 'marked';
-        else if (r < 0.5 || (phase === 3 && r < 0.68)) m.patternState = 'rain';   // v0.26.390 — was `r<0.5 || phase===3` which made 'beam' UNREACHABLE in P3 (lost an attack). Now P3 = marked<0.35 / rain<0.68 / beam else.
-        else m.patternState = 'beam';
+        m.patternState = _zChoose(m, dist, phase, [
+          { s: 'marked', w: 0.35, band: 'any', when: phase === 3, hard: true },
+          { s: 'rain',   w: 0.50, band: 'any', opener: true },
+          { s: 'beam',   w: 0.50, band: 'far' },
+        ]);
         // v0.25.583 — reset _sagRainCount too. Without this, a phase change
         // mid-rain leaves the count at its stale value, and the next rain
         // run only fires arrows from index (oldCount + 1) onward — visible
@@ -119964,7 +120012,10 @@ const ZODIAC_AI = {
       const cycle = phase === 1 ? 1200 : phase === 2 ? 850 : 520;   // v0.26.390 — idle cut (Capricorn)
       if (m.patternTimer > cycle) {
         m.patternTimer = 0;
-        m.patternState = (phase >= 2 && Math.random() < 0.5) ? 'pillars' : 'cone';
+        m.patternState = _zChoose(m, dist, phase, [
+          { s: 'pillars', w: 0.5, band: 'any',  when: phase >= 2, hard: true },
+          { s: 'cone',    w: 0.5, band: 'near', opener: true },
+        ]);
         // v0.25.583 — reset _caprPillarXs too. The pillars state only
         // initializes the array when it's null; if a stale array survives
         // a phase change, the next pillars run reuses the OLD x positions
@@ -120155,9 +120206,11 @@ const ZODIAC_AI = {
       if (m.patternTimer > cycle) {
         m.patternTimer = 0;
         const r = Math.random();
-        if (phase === 3 && r < 0.33) m.patternState = 'tsunami';
-        else if (r < 0.55) m.patternState = 'pillars';
-        else m.patternState = 'waves';
+        m.patternState = _zChoose(m, dist, phase, [
+          { s: 'tsunami', w: 0.33, band: 'any',  when: phase === 3, hard: true },
+          { s: 'pillars', w: 0.55, band: 'near' },
+          { s: 'waves',   w: 0.45, band: 'far',  opener: true },
+        ]);
         // v0.25.583 — reset _aquaFromLeft too. Without this, a phase change
         // mid-tsunami leaves the side-flag stuck, and the next tsunami
         // ALWAYS comes from the same side (loses the surprise/randomness).
