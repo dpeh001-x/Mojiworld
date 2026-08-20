@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.903';
+const GAME_VERSION = 'v0.29.904';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -60674,8 +60674,17 @@ function updatePlayer(dt) {
           }
         }
       }
+      // v0.29.904 — nothing cleared the strict gates: widen and look again
+      // instead of standing still. `_fbTgt` also lifts the 900 px engage gate
+      // below, which would otherwise accept the fallback target and then
+      // refuse to walk to it — idle for a second reason.
+      let _fbTgt = false;
+      if (!tgt) {
+        const _fb = _allyPickFallbackTarget(pet, _pcx, _pcy);
+        if (_fb) { tgt = _fb.tgt; bestSq = _fb.bestSq; _fbTgt = true; }
+      }
       pet._tgtRef = tgt;   // v0.29.815 — hysteresis anchor for _allyTargetScore
-      if (tgt && bestSq < 900 * 900) {
+      if (tgt && (_fbTgt || bestSq < 900 * 900)) {
         // v0.29.847 — SURROUND, DON'T STACK (minion parity). Every wolf used
         // to steer at the target's exact centre, so four of them converged into
         // one pixel and read as a single sprite. A personal lateral offset,
@@ -60791,6 +60800,24 @@ function updatePlayer(dt) {
           if (pet._tgtRef === _m) _sc *= _ALLY_STICKY;
           if (_sc < _eBest) { _eBest = _sc; _et = _m; }
         }
+        // v0.29.904 — the 950/420 box is the eagle's normal reach, but past
+        // it the bird held no mark at all and just faced wherever the player
+        // faced. Widen and re-score so it keeps hunting; the scoring is
+        // unchanged, so inside its usual box nothing about its aim moves.
+        if (!_et) {
+          for (const _rx of [2.5, 1e6]) {
+            let _fbBest = Infinity;
+            for (const _m of game.monsters) {
+              if (!_m || _m.currentHp <= 0) continue;
+              const _edx2 = (_m.x + _m.w / 2) - _eCx, _edy2 = (_m.y + _m.h / 2) - _eCy;
+              if (Math.abs(_edx2) > 950 * _rx || Math.abs(_edy2) > 420 * _rx) continue;
+              const _hpF2 = (_m.maxHp > 0) ? Math.max(0, Math.min(1, _m.currentHp / _m.maxHp)) : 1;
+              const _sc2 = (Math.abs(_edx2) + Math.abs(_edy2) * 1.5) * (0.55 + 0.45 * _hpF2);
+              if (_sc2 < _fbBest) { _fbBest = _sc2; _et = _m; }
+            }
+            if (_et) break;
+          }
+        }
         pet._tgtRef = _et;
         pet.facing = _et ? (Math.sign((_et.x + _et.w / 2) - _eCx) || pet.facing || 1)
                          : (player.facing || 1);
@@ -60842,8 +60869,17 @@ function updatePlayer(dt) {
           }
         }
       }
+      // v0.29.904 — nothing cleared the strict gates: widen and look again
+      // instead of standing still. `_fbTgt` also lifts the 900 px engage gate
+      // below, which would otherwise accept the fallback target and then
+      // refuse to walk to it — idle for a second reason.
+      let _fbTgt = false;
+      if (!tgt) {
+        const _fb = _allyPickFallbackTarget(pet, _pcx, _pcy);
+        if (_fb) { tgt = _fb.tgt; bestSq = _fb.bestSq; _fbTgt = true; }
+      }
       pet._tgtRef = tgt;   // v0.29.815 — hysteresis anchor for _allyTargetScore
-      if (tgt && bestSq < 900 * 900) {
+      if (tgt && (_fbTgt || bestSq < 900 * 900)) {
         const dx = (tgt.x + tgt.w/2) - _pcx;
         const targetVx = Math.sign(dx) * Math.min(4.0, Math.abs(dx) / 26);
         pet.vx += (targetVx - pet.vx) * 0.25;
@@ -62985,10 +63021,15 @@ function _lxLosBlocked(x0, y0, x1, y1) {
   }
   return false;
 }
-function _allyTargetScore(ally, m, dx, dy) {
-  if (Math.abs(dy) > _ALLY_DY_MAX) return -1;
+// v0.29.904 — `relax` widens the two hard gates for the fallback passes
+// below. At relax 1 (the default) this is byte-for-byte the old behaviour,
+// so normal engagements are unchanged; the wider tiers only ever run when
+// the strict pass found nothing at all.
+function _allyTargetScore(ally, m, dx, dy, relax) {
+  const _rx = relax || 1;
+  if (Math.abs(dy) > _ALLY_DY_MAX * _rx) return -1;
   const _plx = player.x + player.w / 2;
-  if (Math.abs((m.x + m.w / 2) - _plx) > _ALLY_LEASH) return -1;
+  if (Math.abs((m.x + m.w / 2) - _plx) > _ALLY_LEASH * _rx) return -1;
   let sc = Math.abs(dx) + Math.abs(dy) * _ALLY_DY_COST;
   // v0.29.847 — WOUNDED PREY FIRST (per user: "not as smart as lich's summon").
   // Same weighting the minions use: score scales 0.55x at 1 HP up to 1.0x at
@@ -62999,6 +63040,26 @@ function _allyTargetScore(ally, m, dx, dy) {
   sc *= (0.55 + 0.45 * _hpF);
   if (ally && ally._tgtRef === m) sc *= _ALLY_STICKY;
   return sc;
+}
+// v0.29.904 — NEVER IDLE WHILE SOMETHING IS ALIVE. The strict gates in
+// _allyTargetScore are what keep an ally in your fight, but they were also
+// a dead end: past them an ally held no target and milled around, measured
+// at 100% idle whenever every foe sat on a ledge or across the map. Widen
+// in two steps and re-score rather than giving up. Returns null only when
+// the map really is empty.
+const _ALLY_RELAX_TIERS = [2.5, 1e6];
+function _allyPickFallbackTarget(ally, cx, cy) {
+  let tgt = null, best = Infinity, bestSq = Infinity;
+  for (const _rx of _ALLY_RELAX_TIERS) {
+    for (const m of game.monsters) {
+      if (!m || m.currentHp <= 0) continue;
+      const dx = (m.x + m.w / 2) - cx, dy = (m.y + m.h / 2) - cy;
+      const sc = _allyTargetScore(ally, m, dx, dy, _rx);
+      if (sc >= 0 && sc < best) { best = sc; bestSq = dx * dx + dy * dy; tgt = m; }
+    }
+    if (tgt) break;
+  }
+  return tgt ? { tgt, bestSq } : null;
 }
 function _allyPlatformStep(ally, target) {
   if (ally.vy == null) ally.vy = 0;
@@ -63893,8 +63954,8 @@ function raiseMinion(x, y, type, life) {
     // v0.26.x - Per user "make monsters move towards and attack the summoned
     // creatures also". Minions carry HP + a damage cooldown so monsters can
     // kill them (mirrors the wolf-pet model). HP scales with the player pool.
-    maxHp: Math.max(60, Math.floor((player.maxHp || 100) * 0.30)),
-    currentHp: Math.max(60, Math.floor((player.maxHp || 100) * 0.30)),
+    maxHp: _lxSummonHp(),     // v0.29.904 — player max HP x15 (per user)
+    currentHp: _lxSummonHp(),
     dmgCD: 0,
     spawn: 18,   // rise-from-ground animation timer
   });
@@ -63909,6 +63970,13 @@ function raiseMinion(x, y, type, life) {
   }
 }
 
+// v0.29.904 — shared summon HP pool: the player's CURRENT max HP x15.
+// Declared as a function so it hoists over every spawn site below.
+function _lxSummonHp() {
+  const _base = (typeof getMaxHp === 'function') ? getMaxHp()
+              : ((typeof player !== 'undefined' && player && player.maxHp) || 100);
+  return Math.max(1, Math.floor(_base * 15));
+}
 function updateMinions(dt) {
   if (!game.minions) return;
   for (let i = game.minions.length - 1; i >= 0; i--) {
@@ -63931,7 +63999,7 @@ function updateMinions(dt) {
     // the loop. Contact-damage check below also dropped to squared
     // compare (30² = 900) so a 30-mob frame skips ~30 sqrt calls.
     // v0.26.x - minion HP back-compat + damage-cooldown tick.
-    if (mn.maxHp == null) { mn.maxHp = Math.max(60, Math.floor((player.maxHp || 100) * 0.30)); mn.currentHp = mn.maxHp; }
+    if (mn.maxHp == null) { mn.maxHp = _lxSummonHp(); mn.currentHp = mn.maxHp; }   // v0.29.904 — back-compat path, same x15 pool
     if (mn.dmgCD == null) mn.dmgCD = 0;
     mn.dmgCD -= dt;
     // v0.29.690 — per user "dark pulse summons disappear on moving to certain
@@ -64019,6 +64087,34 @@ function updateMinions(dt) {
           m.x < mn.x + mn.w && m.x + m.w > mn.x &&
           m.y < mn.y + mn.h && m.y + m.h > mn.y) {
         _mnIncoming += (m.atk || 0);
+      }
+    }
+    // v0.29.904 — NOTHING PASSED THE LEASH / HEIGHT GATES. Before this the
+    // minion simply held no target and roamed: measured 100% idle whenever
+    // every foe was on a ledge (dy 300) or across the map (dx 900), with live
+    // enemies up the whole time. Widen both gates in two steps and re-score
+    // with the same rules (reach, wounded-first, crowding) rather than give
+    // up. The strict pass above is untouched, so ordinary fights are
+    // identical — this only fires when that pass came back empty.
+    if (!tgt && game._mnLive.length) {
+      const _mnDyMax = (typeof _ALLY_DY_MAX === 'number' ? _ALLY_DY_MAX : 200);
+      const _mnDyCost = (typeof _ALLY_DY_COST === 'number' ? _ALLY_DY_COST : 3.5);
+      for (const _rx of [2.5, 1e6]) {
+        let _fbScore = Infinity;
+        for (const m of game._mnLive) {
+          const dx = (m.x + m.w / 2) - _mnCx, dy = (m.y + m.h / 2) - _mnCy;
+          const _dyAbs = Math.abs(dy);
+          if (_dyAbs > _mnDyMax * _rx) continue;
+          const _pdx = (m.x + m.w / 2) - _pcx, _pdy = (m.y + m.h / 2) - _pcy;
+          if (_pdx * _pdx + _pdy * _pdy > _MN_LEASH_SQ * _rx * _rx) continue;
+          const _hpF = (m.maxHp > 0) ? Math.max(0, Math.min(1, m.currentHp / m.maxHp)) : 1;
+          let _claims = 0;
+          for (const _o of game.minions) { if (_o !== mn && _o._mnTgt === m) _claims++; }
+          const _reach = Math.abs(dx) + _dyAbs * _mnDyCost;
+          const _score = _reach * (0.55 + 0.45 * _hpF) * (1 + _claims * 2.6);
+          if (_score < _fbScore) { _fbScore = _score; bestSq = dx * dx + dy * dy; tgt = m; }
+        }
+        if (tgt) break;
       }
     }
     // v0.29.888 — record who this minion committed to, so the crowding
@@ -67945,7 +68041,7 @@ const SKILL_FNS = {
     // v0.25.557 — Wild Bond rebalance: HP 10000 → 8000 per spec.
     player.pet = {
       x: player.x, y: player.y, vx: 0, vy: 0,
-      hp: 80000, maxHp: 80000,   // v0.29.847 — 8 000 -> 80 000 (10x, per user; same wolf as the pack)
+      hp: _lxSummonHp(), maxHp: _lxSummonHp(),   // v0.29.904 — player max HP x15 (was a flat 80 000)
       life: 60000, maxLife: 60000,   // v0.26.x — maxLife stamped for the summon duration timer
       cdAtk: 0,
       // v0.26.148 — Per user "make the summons for warlock and ranger
@@ -69644,7 +69740,7 @@ const SKILL_FNS = {
     for (let i = 0; i < slots; i++) {
       player.pack.push({
         x: player.x + (i - 1) * 50, y: player.y, vx: 0, vy: 0,
-        hp: 100000, maxHp: 100000,   // v0.29.847 — 10 000 -> 100 000 (10x, per user)
+        hp: _lxSummonHp(), maxHp: _lxSummonHp(),   // v0.29.904 — player max HP x15 (was a flat 100 000)
         life: 100000, maxLife: 100000,    // 100 s (maxLife → summon duration timer)
         cdAtk: 0,
         facing: player.facing,
@@ -70204,7 +70300,7 @@ const SKILL_FNS = {
     // v0.26.x — Apex Bond's werewolf had no player-indicated duration; per
     // "if not indicated make them last 75% their cooldown time" → 0.75 × 68s
     // cd = 51s (was a surprising 14s). maxLife stamped for the duration timer.
-    player.ultPet = { x: player.x + (player.facing || 1) * 44, y: player.y, vx: 0, vy: 0, hp: 140000, maxHp: 140000,   /* v0.29.847 — 10x with the rest of the pack */ life: 51000, maxLife: 51000, cdAtk: 0, scale: 2.8, sprite: 'werewolf' };   // v0.26.x — separate slot so it coexists with the F-skill wolf
+    player.ultPet = { x: player.x + (player.facing || 1) * 44, y: player.y, vx: 0, vy: 0, hp: _lxSummonHp(), maxHp: _lxSummonHp(),   /* v0.29.904 — player max HP x15 */ life: 51000, maxLife: 51000, cdAtk: 0, scale: 2.8, sprite: 'werewolf' };   // v0.26.x — separate slot so it coexists with the F-skill wolf
     for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2; game.particles.push({ x: player.x + player.w / 2, y: player.y + player.h, vx: Math.cos(a) * 4, vy: Math.sin(a) * 3, life: 42, color: i % 2 ? '#ffaa44' : '#cc8833', size: 3 }); }
   },
   skyhunter_ult: () => {
@@ -70221,7 +70317,7 @@ const SKILL_FNS = {
     // the hover tick sets the hitbox to 44×30 × scale. Both fall to exactly 75%
     // — 22×2.97 = 65.3 stays clear of the max(32,…) floor, so nothing clamps
     // and the visual and its collision box stay in agreement.
-    player.ultPet = { x: player.x, y: player.y - 80, vx: 0, vy: 0, hp: 90000, maxHp: 90000,   /* v0.29.850 — 10x, matching the pack. Live: the eagle takes no CONTACT damage (it flies above the melee line) but enemy projectiles hit it through the shared summon-hit path. */ life: 42000, maxLife: 42000, cdAtk: 0, fireCd: 0, scale: 2.97, sprite: 'eagle', flying: true, shooter: true };   // v0.26.x — separate slot so it coexists with the F-skill wolf
+    player.ultPet = { x: player.x, y: player.y - 80, vx: 0, vy: 0, hp: _lxSummonHp(), maxHp: _lxSummonHp(),   /* v0.29.904 — player max HP x15. Live: the eagle takes no CONTACT damage (it flies above the melee line) but enemy projectiles hit it through the shared summon-hit path. */ life: 42000, maxLife: 42000, cdAtk: 0, fireCd: 0, scale: 2.97, sprite: 'eagle', flying: true, shooter: true };   // v0.26.x — separate slot so it coexists with the F-skill wolf
     for (let i = 0; i < 14; i++) { const a = (i / 14) * Math.PI * 2; game.particles.push({ x: player.x + player.w / 2, y: player.y, vx: Math.cos(a) * 5, vy: Math.sin(a) * 4, life: 38, color: '#cfeaff', size: 3 }); }
   },
 };
