@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.913';
+const GAME_VERSION = 'v0.29.914';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11006,7 +11006,8 @@ const LX_BULT_PROJ = (() => {
     bult_doombringer:  'p_ult_doombringer.webp',  // Calamity Incarnate — crimson blade-wave crescent
     bloodlust_wave:    'p_bloodlust_shockwave.webp', // v0.29.694 — Bloodlust swing-rider's own crescent (was borrowing bult_doombringer). NOT bult_-prefixed: the rider is a basic-swing side-effect, so the multishot mod may echo it like any basic projectile — the exemption it had was an accident of the borrowed key.
     bult_hexorb:       'p_ult_hexorb.webp',       // v0.29.693 Pandemic Hex — void orb, hex runes + poison wisps (ludo.ai)
-    bult_holyorb:      'p_ult_holyorb.webp',      // v0.29.710 Judgement orbs — golden aegis orb, sapphire core (ludo.ai)
+    bult_holyorb:      'p_ult_holyorb.webp',
+    lich_soulorb:      'p_lich_soulorb.webp',     // v0.29.911 Soul Ward orbs — spectral teal soul-flame (ludo.ai). Not bult_-prefixed: drawn by drawLichOrbs, never fired as a projectile.      // v0.29.710 Judgement orbs — golden aegis orb, sapphire core (ludo.ai)
     bult_dragoon:      'p_ult_dragoon.webp',       // Skyfall Dominion — descending dragon-lance
     bult_nightreaper:  'p_ult_nightreaper.webp',   // Bloodmoon Domain — blood-red soul scythe
     bult_phantom:      'p_ult_phantom.webp',       // Voidwalk — void shuriken
@@ -16970,7 +16971,7 @@ const SKILLS = {
   // Mage path
   sage_meteorshower:  { name:'Meteor Shower',      icon:'📜', cls:'mage', job:'archmage', master:'sage',         slot:'x', mp:55, cd:20000, desc:'5 meteors rain over an area.' },
   elementalist_cascade:{ name:'Prismatic Cascade', icon:'🌈', cls:'mage', job:'archmage', master:'elementalist', slot:'x', mp:50, cd:15000, desc:'Four elements in amplifying sequence.' },
-  lich_harvest:       { name:'Soul Vortex',        icon:'👹', cls:'mage', job:'warlock',  master:'lich',         slot:'x', mp:40, cd:30000, desc:'Open a 30s vortex pool that drags enemies in and drains MASSIVE life damage (2.2× ATK/sec over 30s). 30s recast — re-drop it wherever the fight moves.' },
+  lich_harvest:       { name:'Soul Vortex',        icon:'👹', cls:'mage', job:'warlock',  master:'lich',         slot:'x', mp:40, cd:30000, desc:'Open a 30s vortex pool that drags enemies in and drains MASSIVE life damage (2.2× ATK/sec over 30s), and raise 2 soul orbs that orbit you for 12s, striking foes they pass (6× ATK each). 30s recast — re-drop it wherever the fight moves.' },
   hexmaster_grandhex: { name:'Grand Hex',          icon:'🧿', cls:'mage', job:'warlock',  master:'hexmaster',    slot:'x', mp:35, cd:24000, desc:'Hex everything inside the rune ring: 1.2s freeze (non-boss), a 1.2× ATK burst, and a stacking curse DOT (0.3× ATK/tick per stack). 5 stacks RUPTURE for 4× ATK, and a hexed foe\'s curse jumps to its nearest neighbour when it dies.' },
   // Archer path
   marksman_oneshot:   { name:'One Shot One Kill',  icon:'🎯', cls:'archer', job:'sniper', master:'marksman',    slot:'x', mp:50, cd:22000, desc:'Guaranteed crit piercing rail. Pure damage, no random kill chance.' },
@@ -41889,6 +41890,7 @@ function loadState() {
     player._bloodstorm = 0;
     player._bloodstormNextTick = 0;
     player._aegis = null;
+    player._lichOrbs = null;   // v0.29.911 — Soul Ward orbs die with their caster
     player._clones = null;
     player._ballistaTurrets = null;     // v0.26.x — clear War Machine turrets on save load
     player._ballistaChannel = null;     // v0.25.257 — clear channel state on save load
@@ -56219,6 +56221,7 @@ function loadMap(id, entryX, entryY) {
     player._bloodstorm = 0;
     player._bloodstormNextTick = 0;
     player._aegis = null;
+    player._lichOrbs = null;   // v0.29.911 — Soul Ward orbs die with their caster
     player._clones = null;
     player._ballistaTurrets = null;
     player._ballistaChannel = null;
@@ -59728,6 +59731,49 @@ function updatePlayer(dt) {
     if (player._bloodstorm <= 0) player._bloodstorm = 0;
   }
 
+  // v0.29.911 — SOUL WARD orbs (lich). A deliberate sibling of the aegis
+  // block below — same pendulum, same per-orb strike cooldown, same per-hit
+  // formula — with the differences the ask names: 2 orbs, and a wider orbit
+  // (130±75 = 55..205px vs the aegis's 39..143, +43% max reach). Strike radius
+  // 34 vs 29, scaled with the reach so what the player sees connect is what
+  // hits. Counter-rotates (-0.6) so side by side in co-op the two skills read
+  // as kin, not copies.
+  if (player._lichOrbs) {
+    const ward = player._lichOrbs;
+    ward.life -= dt;
+    if (ward.life <= 0) {
+      player._lichOrbs = null;
+    } else {
+      const t = game.time * 0.06;
+      const cx = player.x + player.w / 2;
+      const cy = player.y + player.h / 2;
+      for (const orb of ward.orbs) {
+        const r = 130 + Math.sin(t + orb.phase) * 75;
+        const ang = orb.baseAng - t * 0.6;
+        const ox = cx + Math.cos(ang) * r;
+        const oy = cy + Math.sin(ang) * r * 0.6;
+        orb.x = ox; orb.y = oy;
+        if (orb.hitCd > 0) orb.hitCd -= dt;
+        if (orb.hitCd <= 0) {
+          for (const m of game.monsters) {
+            if (m.currentHp <= 0) continue;
+            const dx = (m.x + m.w / 2) - ox;
+            const dy = (m.y + m.h / 2) - oy;
+            if (dx * dx + dy * dy < 34 * 34) {
+              // Same per-hit formula as the aegis orbs (6.0xATK+40, 1000ms
+              // per-orb cd). Two orbs cap the ceiling at 2 hits/sec against
+              // the paladin's 5 — the wider orbit is the trade.
+              const dmg = Math.floor(getAtk() * 6.0 + 40);
+              const _c = rollCrit(); hitMonster(m, Math.floor(dmg * (_c ? getCritDmg() : 1)), _c, 'lichorb');
+              spawnSmoothImpact(ox, oy, '#7dffd6');
+              orb.hitCd = 1000;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
   if (player._aegis) {
     const aegis = player._aegis;
     aegis.life -= dt;
@@ -69438,6 +69484,21 @@ const SKILL_FNS = {
   },
 
   lich_harvest: () => {
+    // v0.29.911 — SOUL WARD (per user: "2 rotating blue-greenish orbs that
+    // attacks like paladin's 5 orb skill but a wider radius"). The vortex is a
+    // stationary pool; these travel with the lich, so the cast now has a
+    // moving component the way Divine Aegis moves with the paladin. Two orbs,
+    // phase-opposed, 12s of the 30s recast (~40% uptime — the aegis's own
+    // audited neighbourhood). Update in updatePlayer beside the aegis block;
+    // draw in drawLichOrbs; struck like aegis orbs but on a wider orbit.
+    player._lichOrbs = { life: 12000, maxLife: 12000, orbs: [] };
+    for (let i = 0; i < 2; i++) {
+      player._lichOrbs.orbs.push({
+        baseAng: i * Math.PI,          // opposite sides
+        phase:   i * Math.PI,          // pendulum counter-phased too
+        hitCd:   0,
+      });
+    }
     // SOUL VORTEX — drop a 30s vacuum pool that pulls enemies and siphons HP/MP
     // v0.25.201 — Major buff: AOE radius 180→320 px (+78%), hazard rect
     // 200×100→400×140, atk×0.80→×1.40 (+75% damage), tick 12→8 frames
@@ -103960,6 +104021,44 @@ function _drawPlayerNameTag(sx, sy) {
 // Divine Aegis — 5 hovering holy orbs rendered with additive glow + golden
 // halo. Orb positions are computed each frame in updatePlayer and stashed
 // on the orb object.
+// v0.29.911 — Soul Ward orbs. Same structure as drawAegisOrbs below: prefer
+// the authored sprite once decoded, procedural glow until then, additive halo
+// under source-over art so the teal core is not blown to white.
+function drawLichOrbs() {
+  if (!player._lichOrbs) return;
+  const camX = game.camera.x;
+  const fade = player._lichOrbs.life < 600 ? player._lichOrbs.life / 600 : 1;
+  const _img = (typeof LX_BULT_PROJ !== 'undefined' && LX_BULT_PROJ.lich_soulorb
+                && _lxPlayerProjReady(LX_BULT_PROJ.lich_soulorb)) ? LX_BULT_PROJ.lich_soulorb : null;
+  ctx.save();
+  for (const orb of player._lichOrbs.orbs) {
+    if (orb.x === undefined) continue;
+    const sx = orb.x - camX;
+    const sy = orb.y;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = `rgba(110,255,210,${(_img ? 0.26 : 0.32) * fade})`;
+    ctx.beginPath(); ctx.arc(sx, sy, _img ? 20 : 16, 0, Math.PI * 2); ctx.fill();
+    if (_img) {
+      // 40px draw against the 34px strike radius — same see-what-hits ratio
+      // the aegis keeps (34px art / 29px strike).
+      const SZ = 40;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.save();
+      ctx.globalAlpha = fade;
+      ctx.translate(sx, sy);
+      ctx.rotate(game.time * 0.05 + (orb.phase || 0));
+      if (typeof _lxUseEntityImageQuality === 'function') _lxUseEntityImageQuality(ctx);
+      ctx.drawImage(_img, -SZ / 2, -SZ / 2, SZ, SZ);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = `rgba(190,255,235,${0.85 * fade})`;
+      ctx.beginPath(); ctx.arc(sx, sy, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = `rgba(240,255,250,${0.95 * fade})`;
+      ctx.beginPath(); ctx.arc(sx, sy, 3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
 function drawAegisOrbs() {
   if (!player._aegis) return;
   const camX = game.camera.x;
@@ -125304,6 +125403,7 @@ function loop(time) {
   if (typeof _mpDrawPeers === 'function') _mpDrawPeers();   // ghost peers underneath
   drawPlayer();
   drawAegisOrbs();
+  drawLichOrbs();   // v0.29.911 — Soul Ward orbs (lich)
   drawPet();
   drawClassIdentityHUD();
   drawParticles();
