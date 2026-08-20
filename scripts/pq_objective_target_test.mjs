@@ -50,6 +50,12 @@ const r = await page.evaluate(() => {
     for (const k of ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale']) {
       delete player.quests.active[k];
     }
+    // v0.29.900 gated acceptQuest on the prereq chain, so accepting Stage 3
+    // cold now (correctly) fails. Seed the earlier stages as done first —
+    // this test grades the pin's arithmetic, not the order gate (that is
+    // pq_chain_integrity_test's job).
+    player.quests.completed.q_clockwork_underpass = true;
+    player.quests.completed.q_pq_spire = true;
     delete player.quests.completed[id];
     acceptQuest(id);
     const a = player.quests.active[id];
@@ -76,15 +82,20 @@ const r = await page.evaluate(() => {
   out.stages.s3 = stage('q_pq_carriage', 50);
 
   // The journal prose must not quote a number the quest is not counting to.
+  // Since v0.29.916 the prose may instead name NO number (static strings have
+  // nowhere to interpolate a live target) — that is fine; a WRONG number is not.
   out.desc = {};
   for (const id of ['q_clockwork_underpass', 'q_pq_carriage']) {
     delete player.quests.active[id]; delete player.quests.completed[id];
+    player.quests.completed.q_clockwork_underpass = (id !== 'q_clockwork_underpass');
+    player.quests.completed.q_pq_spire = (id === 'q_pq_carriage');
     acceptQuest(id);
     const a = player.quests.active[id];
     const t = (a && a.targetCount != null) ? a.targetCount : QUESTS[id].count;
     const d = QUESTS[id].desc || '';
     out.desc[id] = { target: t, quotesTarget: d.indexOf(String(t)) !== -1,
-                     quotesAuthored: t !== QUESTS[id].count && new RegExp('\\b' + QUESTS[id].count + '\\b').test(d) };
+                     quotesAuthored: t !== QUESTS[id].count && new RegExp('\\b' + QUESTS[id].count + '\\b').test(d),
+                     namesAnyMechCount: /\b\d+\s+(?:last\s+)?(?:stowaways?|Ticket Mechs?)/i.test(d) };
   }
   return out;
 });
@@ -108,11 +119,15 @@ check(!r.stages.s1over.negative && r.stages.s1over.leftShown === '0',
       'overshooting the target shows 0 left, never a negative', r.stages.s1over);
 check(r.stages.s3.target > 0, 'Stage 3 has a live target to quote', r.stages.s3.target);
 check(r.stages.s3.quotesTarget, 'and its pin quotes the real target as well', r.stages.s3.text);
-check(!r.stages.s3.negative, 'Stage 3 shows no negative remainder past its authored 8', r.stages.s3.text);
+check(!r.stages.s3.negative, 'Stage 3 shows no negative remainder past its authored count', r.stages.s3.text);
 check(r.desc.q_clockwork_underpass.quotesTarget && !r.desc.q_clockwork_underpass.quotesAuthored,
       'Stage 1 journal text states the real target', r.desc.q_clockwork_underpass);
-check(r.desc.q_pq_carriage.quotesTarget && !r.desc.q_pq_carriage.quotesAuthored,
-      'Stage 3 journal text states the real target', r.desc.q_pq_carriage);
+// Stage 3's prose deliberately names no number since v0.29.916 (a static
+// string cannot follow a retune, so it stopped trying). Either the live
+// target or silence is honest; a stale count is the only failure.
+check(!r.desc.q_pq_carriage.quotesAuthored
+      && (r.desc.q_pq_carriage.quotesTarget || !r.desc.q_pq_carriage.namesAnyMechCount),
+      'Stage 3 journal text quotes the live target or no number at all', r.desc.q_pq_carriage);
 check(errs.length === 0, 'no page errors', [...new Set(errs)].slice(0, 3));
 console.log(bad ? `\n${bad} FAILED` : '\nall green');
 process.exit(bad ? 1 : 0);

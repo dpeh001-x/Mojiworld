@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.918';
+const GAME_VERSION = 'v0.29.919';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -21216,7 +21216,7 @@ const QUESTS = {
     name: 'II · What the Sleepers Say', icon: '💤', levelReq: 2, giver: 'Nurse Joyce', handIn: true,
     kind: 'kill', target: 'petalfly', count: 10,
     prereq: 'q_act1_waking',
-    desc: 'Everyone in town sleeps. Nobody in town dreams — they lie down, the hours pass, and they get up carrying nothing. Joyce keeps a ledger of what the sleepers say anyway, because twice a year someone talks. The entries are all one sentence in different handwriting: "It is still there, it is only being carried." Thin the petalflies fogging the clearing so the ward-lanterns can be re-lit, and she will let you read the ledger yourself. Ten. She counts.',
+    desc: 'Everyone in town sleeps. Nobody in town dreams — they lie down, the hours pass, and they get up carrying nothing. Joyce keeps a ledger of what the sleepers say anyway, because twice a year someone talks. The entries are all one sentence in different handwriting: "It is still there, it is only being carried." Thin the petalflies fogging the clearing so the ward-lanterns can be re-lit, and she will let you read the ledger yourself. Every one. She counts.',
     rewards: { mojicoins: 500, exp: 380, potions: { hp_s: 6, mp_s: 4 } },
   },
   q_act1_quiet: {
@@ -22633,19 +22633,38 @@ function _lxNormaliseQuestCounts() {
     ? String(monsterTypes[t].name) : null;
   const plural = (typeof _lxPluralMob === 'function') ? _lxPluralMob : ((s) => s);
   const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const swapCount = (desc, oldN, newN, nm) => {
+  // v0.29.919 — the rewrite was digit-blind. Four Act-1 quests spell their
+  // objective ("ten snails", "ten mushpups", "ten mushrooms", "ten sproutles"),
+  // so this pass moved their counts 10 -> 20 while the prose kept saying ten —
+  // exactly the stale-number bug the rewrite exists to prevent. Spelled numbers
+  // are swapped too now, and written back as DIGITS, so any future retune
+  // re-matches them through the digit path.
+  const WORDNUMS = { one:1, two:2, three:3, four:4, five:5, six:6, seven:7,
+    eight:8, nine:9, ten:10, eleven:11, twelve:12, thirteen:13, fourteen:14,
+    fifteen:15, sixteen:16, seventeen:17, eighteen:18, nineteen:19, twenty:20,
+    thirty:30, forty:40, fifty:50, sixty:60, seventy:70, eighty:80, ninety:90,
+    hundred:100 };
+  const numTokens = (n) => [String(n), ...Object.keys(WORDNUMS).filter((w) => WORDNUMS[w] === n)];
+  // The prose may name the species key rather than the display name — Act 1
+  // says "ten snails" while monsterTypes.snail.name is "Slippy", and the
+  // display-name-only match walked straight past it. Try both.
+  const swapCount = (desc, oldN, newN, nm, key) => {
     if (!desc || oldN === newN) return desc;
     let out = String(desc);
-    if (nm) {
-      // the number sitting next to this objective's creature, singular or plural
-      for (const form of [plural(nm), nm]) {
-        out = out.replace(new RegExp('\\b' + oldN + '(\\s+(?:of\\s+the\\s+)?' + esc(form) + ')', 'gi'), newN + '$1');
+    const forms = [];
+    for (const base of [nm, key]) if (base) forms.push(plural(base), base);
+    for (const tok of numTokens(oldN)) {
+      if (forms.length) {
+        // the number sitting next to this objective's creature, singular or plural
+        for (const form of forms) {
+          out = out.replace(new RegExp('\\b' + esc(tok) + '(\\s+(?:of\\s+the\\s+)?' + esc(form) + ')', 'gi'), newN + '$1');
+        }
       }
+      // verb-led with no name adjacent ("defeat 12", "Cull 32", "clear ten")
+      out = out.replace(
+        new RegExp('\\b(defeat|slay|kill|clear|cull|quell|thin|felled)\\s+' + esc(tok) + '\\b', 'gi'),
+        (m, v) => v + ' ' + newN);
     }
-    // verb-led with no name adjacent ("defeat 12", "Cull 32")
-    out = out.replace(
-      new RegExp('\\b(defeat|slay|kill|clear|cull|quell|thin|felled)\\s+' + oldN + '\\b', 'gi'),
-      (m, v) => v + ' ' + newN);
     return out;
   };
   for (const id in QUESTS) {
@@ -22660,7 +22679,7 @@ function _lxNormaliseQuestCounts() {
         before += c;
         if (c <= SETPIECE) { after += c; continue; }
         const nw = ROUND(c);
-        q.desc = swapCount(q.desc, c, nw, mobName(o.target));
+        q.desc = swapCount(q.desc, c, nw, mobName(o.target), o.target);
         o.count = nw; after += nw;
       }
       // q.count mirrors the FIRST objective for this data shape, not the total.
@@ -22669,7 +22688,7 @@ function _lxNormaliseQuestCounts() {
       const c = q.count | 0;
       if (!(c > 0) || c <= SETPIECE) continue;
       const nw = ROUND(c);
-      q.desc = swapCount(q.desc, c, nw, mobName(q.target));
+      q.desc = swapCount(q.desc, c, nw, mobName(q.target), q.target);
       before = c; after = nw; q.count = nw;
     }
     if (before > 0 && after > 0 && after !== before && q.rewards) {
@@ -57908,50 +57927,13 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // Skips bosses and mini-bosses entirely (preserves curated encounters).
   // Mojicoins drop also scales with level so the run pays out proportional
   // to effort. Name is prefixed with "Express " for the player feedback.
-  if (!isBoss && !isMiniBoss && game.mapData && game.mapData.expressScaling) {
-    const _m = game.monsters[game.monsters.length - 1];
-    // v0.29.313 — capped at LX_SCALED_LEVEL_CAP (85), same ceiling the Tower
-    // Expedition uses, so the two scaled modes cannot drift apart.
-    const _pLv = (typeof _lxScaledMobLevel === 'function')
-      ? _lxScaledMobLevel((typeof player !== 'undefined' && player) ? player.level : 25)
-      : 25;
-    // Baseline curves for "an average mob at level L":
-    //   hp  ≈ 200 + L × 20   (Lv 25 → 700, Lv 50 → 1200, Lv 75 → 1700)
-    //   atk ≈ 15  + L × 1.2  (Lv 25 → 45,  Lv 50 → 75,   Lv 75 → 105)
-    //   exp ≈ 80  + L × 5    (Lv 25 → 205, Lv 50 → 330,  Lv 75 → 455)
-    //   mes ≈ 30  + L × 2.5  (Lv 25 → 92,  Lv 50 → 155,  Lv 75 → 218)
-    // ×2 multiplier applied to HP + ATK per spec; EXP stays at baseline
-    // ("average for mobs that level"); mojicoins also at baseline.
-    // v0.29.316 — the linear baselines above are RETIRED. They were invented
-    // for this mode while every field monster rides the exponential x linear
-    // per-level curve, so the two diverged by orders of magnitude: at Lv 85
-    // this produced a 3,800 HP "Lv 85" mech against a Lv-80 field mob's
-    // ~346,000. The mech now re-bases its ALREADY-SPAWNED stats (which were
-    // built at its own natural level) onto the player's capped level using the
-    // shared curve, then takes this mode's ×2 HP/ATK on top — so "twice as
-    // tough as a monster your level" is finally literally true.
-    // The mech is re-statted to BE a level-_pLv creature at this mode's stated
-    // ×2 HP/ATK, and pays the EXP a same-level field monster pays.
-    // Preserve THIS map's EXP multiplier. expMult is (tier × dist × map × 0.1),
-    // and overwriting m.exp with a flat baseline threw the dist/map part away —
-    // so on a map that pays 2.1× (the Void, for one) a scaled mech paid less
-    // than half what a field monster standing next to it pays. Re-apply it.
-    const _exMapFactor = (typeof expMult === 'number' && expMult > 0)
-      ? Math.max(0.25, Math.min(8, expMult / 0.1)) : 1;
-    _lxStatToLevel(_m, _pLv, { stat: 2, exp: _exMapFactor });
-    _m.mojicoins = Math.max(1, Math.floor(30 + _pLv * 2.5));
-    // v0.29.313 — stamp the LEVEL too. This block re-statted HP/ATK/EXP to the
-    // player's level but left m.level at the authored value (the ticket mechs
-    // are Lv 31/36), so a high-level player fought a level-31 nameplate, and
-    // the level-gap EXP penalty was applied against that stale number even
-    // though the mob was built at their level. Now the whole monster agrees.
-    _m.level     = _pLv;
-    _m.name      = 'Express ' + (_m.name || 'Ticket Mech');
-    // Visual cue — slightly bigger silhouette so the player reads
-    // "elite version" at a glance, even without seeing the HP bar.
-    _m.w = Math.floor((_m.w || 30) * 1.15);
-    _m.h = Math.floor((_m.h || 26) * 1.15);
-  }
+  // v0.25.990 -> v0.29.919 — the Endless Express spawn-time override LIVED
+  // here, pre-table, which is how it died: v0.29.762 made _lxApplyStatTable
+  // the final word, and the table runs AFTER this point, so every stat this
+  // block wrote was flattened back to the authored Lv-31 line — while the
+  // level stamp and the "Express " name prefix survived, leaving a Lv-matched
+  // nameplate on unscaled stats. The block now lives directly after the table
+  // call, beside the Stage-3 carriage scaler that documented the corpse.
   // v0.25.778 — Mirror Self spawn-time override. The Inner Dimension
   // boss reads its HP and ATK from the LIVE player stats so the trial
   // always scales to the player's current build. HP = player.maxHp × 50
@@ -58198,6 +58180,41 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     _spawned.maxHp = Math.max(1, Math.floor(_perHit * LX_CARRIAGE_HITS_TO_KILL));
     _spawned.currentHp = _spawned.maxHp;
     _spawned.atk = Math.max(1, Math.floor(_pHp * LX_CARRIAGE_HIT_PCT));
+  }
+  // v0.29.919 — THE EXPRESS'S OWN SCALING, RESURRECTED (per user "fix stage 4
+  // scaling"). This override ran BEFORE _lxApplyStatTable, so from v0.29.762
+  // the table flattened everything it wrote — measured on the previous build:
+  // a mech NAMED "⚔ Express Ticket Mech Lv 60" carrying the flat authored line
+  // (3,250 HP / 90 ATK / 65 EXP), because the name and level stamps are the
+  // only fields the table does not touch. The journal's "double HP and double
+  // ATK compared to ordinary mobs at that level" had been false on all three
+  // expressScaling maps (Stage 1 lobby, Stage 4 finale arena, the Endless
+  // Express) ever since. Same cure as Stage 3 above: run AFTER the table.
+  //
+  // Semantics preserved from v0.29.316: re-base the mech onto the player's
+  // capped level via the shared field curve, then ×2 HP/ATK on top; EXP at the
+  // same-level baseline × this map's expMult factor (tier × dist × map × 0.1,
+  // clamped) so the carriage never pays less than a field mob standing next to
+  // it. One deliberate change: the pre-table veteran-gap scaler has already
+  // stamped its "⚔ " tag and _veteranGap from MOB_NATURAL_LEVEL by now — both
+  // claim the mob is under-leveled, which stops being true the moment this
+  // line re-bases it to the player's level, so they are cleared rather than
+  // resurrected into the old accidental veteran-×-express double-scale.
+  if (!isBoss && !isMiniBoss && _spawned && game.mapData && game.mapData.expressScaling) {
+    const _pLv = (typeof _lxScaledMobLevel === 'function')
+      ? _lxScaledMobLevel((typeof player !== 'undefined' && player) ? player.level : 25)
+      : 25;
+    const _exMapFactor = (typeof expMult === 'number' && expMult > 0)
+      ? Math.max(0.25, Math.min(8, expMult / 0.1)) : 1;
+    _lxStatToLevel(_spawned, _pLv, { stat: 2, exp: _exMapFactor });
+    _spawned.mojicoins = Math.max(1, Math.floor(30 + _pLv * 2.5));
+    _spawned.level = _pLv;
+    delete _spawned._veteranGap;
+    _spawned.name = 'Express ' + String(_spawned.name || 'Ticket Mech').replace(/^⚔ /, '');
+    // Visual cue — slightly bigger silhouette so the player reads "elite
+    // version" at a glance, even without seeing the HP bar.
+    _spawned.w = Math.floor((_spawned.w || 30) * 1.15);
+    _spawned.h = Math.floor((_spawned.h || 26) * 1.15);
   }
   return _spawned;
 }
