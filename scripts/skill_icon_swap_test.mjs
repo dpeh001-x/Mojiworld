@@ -47,7 +47,7 @@ await page.click('#cs-nav-next').catch(() => {});
 await page.waitForTimeout(2500);
 
 const R = await page.evaluate(async () => {
-  player.level = 99; player.job = 'warlock'; player.master = 'lich';
+  player.level = 99; player.job = 'warlock'; player.master = 'necromancer';
   renderSkillBar();
   await new Promise(r => setTimeout(r, 300));
 

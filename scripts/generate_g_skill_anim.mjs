@@ -14,7 +14,7 @@
 // Output -> Sprites/fx/anim/<key>_0..8.webp
 //
 //   node scripts/generate_g_skill_anim.mjs                 # dry-run
-//   node scripts/generate_g_skill_anim.mjs --only lich --generate
+//   node scripts/generate_g_skill_anim.mjs --only necromancer --generate
 //   node scripts/generate_g_skill_anim.mjs --generate      # all 17
 // Needs LUDO_API_KEY. Resumable: skips a skill whose 9 frames already exist.
 // =============================================================================
@@ -58,7 +58,7 @@ const FX = {
   phantom_voidrift:     { file: 'phantom_voidrift.png',     prompt: 'a violet void-rift portal with crossed daggers (Phantom) — the rift swirls and warps, spectral hands flicker, purple void energy crackles around the rim.' },
   sage_meteorshower:    { file: 'sage_meteorshower.png',    prompt: 'a fiery meteor-shower impact (Sage) — molten fireballs glow and flicker, flame licks and embers shed, a hot impact glow pulses.' },
   elementalist_cascade: { file: 'elementalist_cascade.png', prompt: 'a fire-ice-lightning elemental cascade (Elementalist) — the three elements swirl and pulse together, sparks crackle, frost shimmers, flames flicker in place.' },
-  soul_vortex:          { file: 'soul_vortex.webp',         prompt: 'a swirling green soul-vortex pool (Lich) — ghostly souls spiral and drift inward, the vortex churns, an eerie necrotic glow pulses.' },
+  soul_vortex:          { file: 'soul_vortex.webp',         prompt: 'a swirling green soul-vortex pool (Necromancer) — ghostly souls spiral and drift inward, the vortex churns, an eerie necrotic glow pulses.' },
   hexmaster_grandhex:   { file: 'hexmaster_grandhex.png',   prompt: 'a grand dark-magic hex curse circle (Hexmaster) — purple hex runes orbit and flicker, dark-frost crackles, a cursed glow throbs.' },
   archbishop_grail:     { file: 'archbishop_grail.png',     prompt: 'a radiant holy grail blessing (Archbishop) — golden divine light pours and pulses from the grail, choral sparkles rise, a warm halo breathes.' },
   marksman_oneshot:     { file: 'marksman_oneshot.png',     prompt: 'a focused one-shot reticle / charged shot burst (Marksman) — the aiming glow tightens and pulses, energy charges with a sharp glint, sparks flicker.' },

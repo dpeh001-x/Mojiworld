@@ -8,7 +8,7 @@
 // repo fails the same check, so this is the pipeline, not one bad roll.
 //
 // Prompt-wrangling alone cannot fix it (the smoothest loop in the repo,
-// lich_ult at 2.93x, uses a THREE-motion prompt the style guide warns against).
+// necromancer_ult at 2.93x, uses a THREE-motion prompt the style guide warns against).
 // So this fixes it mechanically:
 //   1. OVERSAMPLE  ask for --src frames (default 20) instead of 9.
 //   2. ARC-LENGTH  measure the cumulative visual change around the loop.

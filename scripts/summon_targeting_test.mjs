@@ -1,6 +1,6 @@
 // SUMMON AI — a summon must keep finding targets, not idle.
 // ============================================================================
-// Per user: "improve the various summons AI (lich, skyhunter etc.), make sure
+// Per user: "improve the various summons AI (necromancer, skyhunter etc.), make sure
 // they are intelligent and try to keep finding targets to attack."
 //
 // Each family scores targets well but rejected them with hard gates and had no
@@ -49,7 +49,7 @@ await page.waitForTimeout(2500);
 
 const R = await page.evaluate(async () => {
   player.level = 99; player._god = true;
-  player.job = 'warlock'; player.master = 'lich';
+  player.job = 'warlock'; player.master = 'necromancer';
   loadMap('forest', 300);
   await new Promise(r => setTimeout(r, 1400));
   game.paused = false;
@@ -180,7 +180,7 @@ await browser.close(); server.kill();
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 125) });
 
-ok('lich minions actually spawn', R.mNormal.n >= 3, `n=${R.mNormal.n}`);
+ok('necromancer minions actually spawn', R.mNormal.n >= 3, `n=${R.mNormal.n}`);
 // The tuned normal case must NOT regress — a fix that just deleted the gates
 // would drag summons out of the player's fight and still pass everything else.
 ok('minions stay engaged in an ordinary fight (unchanged)', R.mNormal.idlePct <= 5,
@@ -202,7 +202,7 @@ ok('skyhunter eagle keeps firing at it', R.eagle.shots > 0, `${R.eagle.shots} sh
 const H = R.hp;
 const near = (v, e) => v != null && Math.abs(v - e) <= Math.max(2, e * 0.02);
 const shown = (v, e) => (v == null ? 'NOT SUMMONED' : v) + ' vs expected ' + e;
-ok('lich minion HP is player max HP x15', near(H.minion, H.minionExpect),
+ok('necromancer minion HP is player max HP x15', near(H.minion, H.minionExpect),
    shown(H.minion, H.minionExpect) + ' (player maxHp ' + H.playerMax + ')');
 ok('wolf HP is player max HP x15', near(H.wolf, H.wolfExpect), shown(H.wolf, H.wolfExpect));
 ok('skyhunter eagle HP is player max HP x15', near(H.eagle, H.eagleExpect), shown(H.eagle, H.eagleExpect));

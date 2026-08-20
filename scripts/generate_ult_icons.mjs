@@ -8,7 +8,7 @@
 // One icon per Lv-50 ultimate (<master>_ult).
 //
 //   node scripts/generate_ult_icons.mjs                 # dry-run
-//   node scripts/generate_ult_icons.mjs --only lich --generate
+//   node scripts/generate_ult_icons.mjs --only necromancer --generate
 //   node scripts/generate_ult_icons.mjs --generate      # all 17 (skip-existing)
 //   flags: --force --only a,b,c
 // Needs LUDO_API_KEY.
@@ -44,7 +44,7 @@ const ICON = {
   phantom_ult:      'a swirling violet void-rift singularity emblem with two crossed spectral daggers',
   sage_ult:         'a blazing comet emblem streaking over a glowing arcane fire-sigil, molten embers',
   elementalist_ult: 'a four-element orb emblem swirling fire, ice, lightning and violet arcane energy together',
-  lich_ult:         'a ghostly green skull emblem crowned in emerald soul-flame, drifting necrotic wisps',
+  necromancer_ult:         'a ghostly green skull emblem crowned in emerald soul-flame, drifting necrotic wisps',
   hexmaster_ult:    'a purple evil-eye hex sigil emblem with branching curse tendrils and dark-frost',
   archbishop_ult:   'a radiant golden grail-and-halo emblem with a fleur-de-lis and a beam of holy light',
   marksman_ult:     'a sharp focus-reticle crosshair emblem locking onto a glinting energy bullet, cold blue glow',

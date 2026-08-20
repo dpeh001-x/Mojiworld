@@ -5,12 +5,12 @@
 // with a setTimeout collapse).
 //
 //   pool rim  : 4.2 pull must beat the fastest flier (1.6 x 2.4 = 3.84 px/f)
-//   storm     : follows the lich, drags + drains + harvests on sim frames
+//   storm     : follows the necromancer, drags + drains + harvests on sim frames
 //   collapse  : fires on the 360th storming FRAME, once, with the harvest
 //   pause     : 6.5s of real time with zero frames driven changes nothing
 //   recast    : one storm at a time, one collapse total
 //   heal cap  : flat rider pays at most 3 souls per drain tick
-//   node scripts/lich_maelstrom_test.mjs [port]
+//   node scripts/necromancer_maelstrom_test.mjs [port]
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
@@ -27,14 +27,14 @@ await new Promise(r => setTimeout(r, 2000));
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const page = await (await b.newContext()).newPage();
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}`, { waitUntil: 'domcontentloaded', timeout: 180000 });   // MOJI_GAME_FILE lets this grade a candidate build, like the buff test
 await page.waitForFunction(() => typeof SKILL_FNS === 'object' && typeof updateProjectiles === 'function', { timeout: 120000 });
 
 const r = await page.evaluate(async () => {
   const out = {};
   game.paused = true;   // the suite owns the clock; the live loop stays out
   const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none';
-  player.cls = 'mage'; player.job = 'warlock'; player.master = 'lich';
+  player.cls = 'mage'; player.job = 'warlock'; player.master = 'necromancer';
   player.hp = getMaxHp(); player.mp = 9999; player.skillCooldowns = {};
   const mob = (x, y, extra) => Object.assign({
     x, y, w: 40, h: 40, hp: 1e9, maxHp: 1e9, currentHp: 1e9, def: 0,
@@ -46,7 +46,7 @@ const r = await page.evaluate(async () => {
   // --- A. POOL RIM RACE ------------------------------------------------------
   out.rimRace = (() => {
     game.hazards.length = 0; game.monsters.length = 0;
-    SKILL_FNS.lich_harvest();
+    SKILL_FNS.necromancer_harvest();
     const h = game.hazards.find(z => z.type === 'soul_vortex');
     const cx = h.cx, cy = h.y + h.h / 2;
     const m = mob(cx + (h.w / 2) - 30, cy - 30, { flies: true, speed: 1.6 });
@@ -71,12 +71,12 @@ const r = await page.evaluate(async () => {
   const farStart = far.x;
   player.hp = Math.floor(getMaxHp() * 0.5);
   const hpAtCast = player.hp;
-  SKILL_FNS.lich_ult();
+  SKILL_FNS.necromancer_ult();
   const hz0 = storm();
   out.spawned = { exists: !!hz0, follows: !!(hz0 && hz0.follow),
     protectedType: (typeof _HAZ_PROTECTED !== 'undefined') && _HAZ_PROTECTED.has('necro_maelstrom') };
   frames(60);
-  player.x += 140;               // the lich repositions mid-storm
+  player.x += 140;               // the necromancer repositions mid-storm
   frames(90);
   const hzMid = storm();
   out.mid = {
@@ -111,10 +111,10 @@ const r = await page.evaluate(async () => {
   // --- E. RECAST: one storm at a time, one collapse total -------------------
   game.hazards.length = 0; game.monsters.length = 0;
   player.skillCooldowns = {}; player.mp = 9999; player.hp = getMaxHp();
-  SKILL_FNS.lich_ult();
+  SKILL_FNS.necromancer_ult();
   frames(60);
   player.skillCooldowns = {}; player.mp = 9999;
-  SKILL_FNS.lich_ult();                            // refunded-cooldown recast
+  SKILL_FNS.necromancer_ult();                            // refunded-cooldown recast
   const count = game.hazards.filter(z => z.type === 'necro_maelstrom').length;
   const fresh = storm();
   out.recast = { stormsAfterRecast: count, soulsReset: fresh ? (fresh.souls | 0) : -1 };
@@ -133,7 +133,7 @@ const r = await page.evaluate(async () => {
   const healOverOneTick = (mobN) => {
     game.hazards.length = 0; game.monsters.length = 0;
     player.skillCooldowns = {}; player.mp = 9999;
-    SKILL_FNS.lich_ult();
+    SKILL_FNS.necromancer_ult();
     for (let i = 0; i < mobN; i++) game.monsters.push(mob(player.x + 30 + i * 8, player.y));
     const h = storm();
     frames(29 - (h.tick % 30) + 29);   // run up to just before a drain tick
@@ -153,7 +153,7 @@ const r = await page.evaluate(async () => {
   out.heal = { three: h3, ten: h10,
     flatCapped: Math.abs(h10.flat - h3.flat) <= Math.ceil(getMaxHp() * 0.005) + 3 };
 
-  out.desc = SKILLS.lich_ult && SKILLS.lich_ult.desc;
+  out.desc = SKILLS.necromancer_ult && SKILLS.necromancer_ult.desc;
   game.hazards.length = 0; game.monsters.length = 0; game.paused = false;
   return out;
 });
@@ -169,15 +169,15 @@ console.log('heal     :', JSON.stringify(r.heal));
 ok('POOL: the fastest flier cannot out-swim the rim', r.rimRace.captured === true, r.rimRace);
 ok('storm spawns as a following hazard, perf-trim protected',
    r.spawned.exists && r.spawned.follows && r.spawned.protectedType, r.spawned);
-ok('the storm re-centres on the lich after a mid-storm reposition', r.mid.followed === true, r.mid);
+ok('the storm re-centres on the necromancer after a mid-storm reposition', r.mid.followed === true, r.mid);
 ok('a foe 260px out is dragged in', r.mid.farMoved >= 60, r.mid);
 ok('held foes are drained and souls harvested', r.mid.drained === true && r.mid.souls >= 3, r.mid);
-ok('draining heals the lich', r.mid.healed === true, r.mid);
+ok('draining heals the necromancer', r.mid.healed === true, r.mid);
 ok('PAUSE: 6.5 real seconds with zero frames leave the storm untouched (the old setTimeout finale fails here)',
    r.pause.stormSurvives === true && r.pause.noEarlyCollapse === true, r.pause);
 ok('...and the harvest is exactly as it was', r.pause.soulsUnchanged === true, r.pause);
 ok('the collapse fires on the storm\'s own FRAMES, consuming it', r.collapse.hazardGone === true, r.collapse);
-ok('...and the nova actually lands on a foe beside the lich', r.collapse.observerHit === true, r.collapse);
+ok('...and the nova actually lands on a foe beside the necromancer', r.collapse.observerHit === true, r.collapse);
 ok('RECAST mid-storm leaves exactly one storm, with a reset harvest',
    r.recast.stormsAfterRecast === 1 && r.recast.soulsReset === 0, r.recast);
 ok('...and exactly ONE collapse total (no stale double detonation)', r.recast.collapses === 1, r.recast);

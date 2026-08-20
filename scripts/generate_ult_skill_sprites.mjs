@@ -7,7 +7,7 @@
 // Mirrors scripts/generate_g_skill_anim.mjs (anti-cutoff pad + True-Size HOLD).
 //
 //   node scripts/generate_ult_skill_sprites.mjs                       # dry-run list
-//   node scripts/generate_ult_skill_sprites.mjs --only lich --generate
+//   node scripts/generate_ult_skill_sprites.mjs --only necromancer --generate
 //   node scripts/generate_ult_skill_sprites.mjs --generate            # all 17, base+anim
 //   flags: --base-only | --anim-only | --force | --only a,b,c
 // Needs LUDO_API_KEY. Resumable: skips a key whose base / 9 frames already exist.
@@ -56,7 +56,7 @@ const ULT = {
   phantom_ult:      { p: 'a swirling violet void-singularity tearing reality with crossed spectral daggers, warping purple event-horizon rings pulling inward, ghostly phantom hands reaching from the rift, crackling void energy.', m: 'a violet void-singularity — the rift swirls and warps, spectral hands flicker, void energy crackles around the rim.' },
   sage_ult:         { p: 'a colossal blazing comet plunging with a fiery tail, a glowing arcane targeting sigil scorched beneath linking radiant impact-runes with fire-web threads, molten embers and a hot shockwave glow.', m: 'a blazing comet and arcane sigil — the comet glow flickers, the sigil runes pulse, embers shed, a hot glow breathes.' },
   elementalist_ult: { p: 'a swirling convergence of all four elements spiraling into a brilliant prismatic vortex — fire licking, ice shards glinting, lightning arcs crackling, violet arcane runes orbiting, radiant ascended energy.', m: 'a four-element prismatic vortex — fire flickers, frost shimmers, lightning crackles, arcane runes orbit in place.' },
-  lich_ult:         { p: 'a necromantic surge of ghostly green souls spiraling upward into a risen lich-crown, skeletal thralls forming from emerald soul-fire, a swirling necrotic vortex core, eerie phosphor glow and drifting wisps.', m: 'ghostly green souls spiraling — the soul-wisps drift and flicker, the necrotic vortex churns, phosphor glow pulses.' },
+  necromancer_ult:         { p: 'a necromantic surge of ghostly green souls spiraling upward into a risen necromancer-crown, skeletal thralls forming from emerald soul-fire, a swirling necrotic vortex core, eerie phosphor glow and drifting wisps.', m: 'ghostly green souls spiraling — the soul-wisps drift and flicker, the necrotic vortex churns, phosphor glow pulses.' },
   hexmaster_ult:    { p: 'a spreading plague of purple hex-runes and cursed evil-eye sigils branching like contagion tendrils, dark-frost and sickly violet miasma creeping outward, a throbbing cursed glow, malignant runic circles.', m: 'spreading purple hex-runes — cursed sigils orbit and flicker, sickly miasma creeps, a cursed glow throbs.' },
   // v0.29.403 — per user "animation not smooth". Same root cause as
   // skyhunter_ult (v0.29.402): the old motion prompt stacked FOUR competing

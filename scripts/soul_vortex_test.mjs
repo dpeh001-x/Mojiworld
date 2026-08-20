@@ -1,4 +1,4 @@
-// Soul Vortex (Lich, key X). Tester: "hurtbox feels very weird, monsters can
+// Soul Vortex (Necromancer, key X). Tester: "hurtbox feels very weird, monsters can
 // die when it's very far, the suction effect also a bit ambiguous when i used
 // in underwater maps, skill is overall clunky."
 //
@@ -37,13 +37,13 @@ await page.waitForFunction(() => typeof SKILL_FNS === 'object' && typeof updateP
 const r = await page.evaluate(() => {
   const out = {};
   game.paused = false;
-  player.cls = 'mage'; player.job = 'warlock'; player.master = 'lich';
+  player.cls = 'mage'; player.job = 'warlock'; player.master = 'necromancer';
   player.hp = Math.max(1, player.maxHp || 100); player.mp = 9999;
   player.facing = 1; player.skillCooldowns = {};
 
   const cast = () => {
     game.hazards.length = 0;
-    SKILL_FNS.lich_harvest();
+    SKILL_FNS.necromancer_harvest();
     return game.hazards.find(h => h.type === 'soul_vortex');
   };
   const mob = (x, y, w, h, extra) => Object.assign({
@@ -173,7 +173,7 @@ const r = await page.evaluate(() => {
              rawTick, rawPerSecond: rawTick * ticksPerSec, atk: Math.floor(h.atk) };
   })();
 
-  out.desc = SKILLS.lich_harvest && SKILLS.lich_harvest.desc;
+  out.desc = SKILLS.necromancer_harvest && SKILLS.necromancer_harvest.desc;
   game.hazards.length = 0;
   return out;
 });

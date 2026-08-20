@@ -1,16 +1,16 @@
 #!/usr/bin/env node
-// Lich SOUL WARD orb (ludo.ai text->sprite).
-// Output -> Sprites/projectiles/p_lich_soulorb.webp, drawn ~40px by
-// drawLichOrbs (the Soul Vortex orbiting-orb renderer added v0.29.911).
-//   node scripts/gen_lich_soulorb.mjs            # dry-run (prints prompt)
-//   node scripts/gen_lich_soulorb.mjs --generate # needs LUDO_API_KEY
+// Necromancer SOUL WARD orb (ludo.ai text->sprite).
+// Output -> Sprites/projectiles/p_necromancer_soulorb.webp, drawn ~40px by
+// drawNecromancerOrbs (the Soul Vortex orbiting-orb renderer added v0.29.911).
+//   node scripts/gen_necromancer_soulorb.mjs            # dry-run (prints prompt)
+//   node scripts/gen_necromancer_soulorb.mjs --generate # needs LUDO_API_KEY
 //   flags: --force
 //
 // Per user: "add 2 rotating blue-greenish orbs that attacks like paladin's
 // 5 orb skill but a wider radius". The paladin's orbs draw p_ult_holyorb
 // (gold, sapphire core); this is its necrotic counterpart — same silhouette
 // language so the mechanic reads as the same KIND of thing, but spectral
-// teal-green so it is unmistakably the lich's.
+// teal-green so it is unmistakably the necromancer's.
 // =============================================================================
 import sharp from 'sharp';
 import { writeFile, mkdir, access } from 'node:fs/promises';
@@ -43,7 +43,7 @@ const exists = async p => { try { await access(p); return true; } catch { return
 async function fetchBuf(url) { const r = await fetch(url, { signal: AbortSignal.timeout(90000) }); if (!r.ok) throw new Error('fetch ' + r.status); return Buffer.from(await r.arrayBuffer()); }
 
 if (!has('--generate')) {
-  console.log('# lich soul orb -> Sprites/projectiles/p_lich_soulorb.webp\n');
+  console.log('# necromancer soul orb -> Sprites/projectiles/p_necromancer_soulorb.webp\n');
   console.log(PROMPT + '\n');
   console.log('# Re-run with --generate (needs LUDO_API_KEY). Flags: --force');
   process.exit(0);
@@ -54,7 +54,7 @@ const API = process.env.LUDO_API_BASE || 'https://api.ludo.ai/api';
 const TIMEOUT = Number(process.env.LUDO_REQ_TIMEOUT_MS || 150000);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-const dest = join(DIR, 'p_lich_soulorb.webp');
+const dest = join(DIR, 'p_necromancer_soulorb.webp');
 if (!has('--force') && await exists(dest)) { console.log('skip (exists)'); process.exit(0); }
 let lastErr;
 for (let attempt = 1; attempt <= 4; attempt++) {
