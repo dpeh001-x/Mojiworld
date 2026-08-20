@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.929';
+const GAME_VERSION = 'v0.29.930';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -37936,6 +37936,17 @@ function _defAbsorbMul(pierceMul) {
 // The ×6 punish is deliberately NOT applied inside the band — it's what broke
 // the fight. True OHKOs (Singularity Collapse / Collapse Rain, phase ≥2) are
 // untouched: safe-zone / i-frame phase / perfect-parry remain the counters.
+// v0.29.929 — telegraph floors in REAL time. patternTimer accrues at
+// 1.30 x ((cadenceMul||1) + (phase2 ? 0.18 : 0)) times real dt, so a fixed
+// floor shrinks in exactly the forms that need reading time most (measured
+// 165 real ms in form 3 + phase 2 for an authored 350). Scaling the floor by
+// the same factor pins the REAL window to the authored value at any cadence.
+// (The 25%-HP enrage x0.75 dt layer is deliberately not compensated — enrage
+// is meant to compress everything, telegraphs included.)
+function _gravTeleMs(m, ms) {
+  const _f = 1.30 * (((m && m._gravCadenceMul) || 1) + ((m && m._bossPhase2) ? 0.18 : 0));
+  return ms * _f;
+}
 function _gravPhaseOf(m) {
   try {
     if (typeof window !== 'undefined' && window._prologueActive && window._prologuePhase) return window._prologuePhase;
@@ -77262,6 +77273,18 @@ function bossAI(m, dt, distToPlayer) {
             w: safeW, h: safeH,
           },
         ];
+        // v0.29.929 — THE COLLAPSE SWALLOWS THE LESSER WELLS (per user: black
+        // holes "overlap with the safe areas"). The singularity is the greater
+        // gravity: every live black hole is consumed the moment the collapse is
+        // announced, so the safe zones it names are truly safe — the escape is
+        // learnable and always physically possible.
+        for (let _hi = game.hazards.length - 1; _hi >= 0; _hi--) {
+          const _bh = game.hazards[_hi];
+          if (_bh && _bh.type === 'blackhole') {
+            try { spawnSpriteBurst(_bh.cx, _bh.y + _bh.h / 2, 'gravitos_blackhole', { size: 180, life: 26, spin: Math.PI * 2 }); } catch (e) {}
+            game.hazards.splice(_hi, 1);
+          }
+        }
         game.hazards.push({
           type: 'gravitos_singularity',
           x: 0, y: 0,
@@ -77344,6 +77367,15 @@ function bossAI(m, dt, distToPlayer) {
         // render branch + resolve path already handle the safe-zone
         // exclusion math, so we just spawn one with a single-element
         // safeZones array and a shorter `life`.
+        // v0.29.929 — each rain box swallows live black holes too (same rule
+        // as the main collapse; see the note there).
+        for (let _hi = game.hazards.length - 1; _hi >= 0; _hi--) {
+          const _bh = game.hazards[_hi];
+          if (_bh && _bh.type === 'blackhole') {
+            try { spawnSpriteBurst(_bh.cx, _bh.y + _bh.h / 2, 'gravitos_blackhole', { size: 180, life: 26, spin: Math.PI * 2 }); } catch (e) {}
+            game.hazards.splice(_hi, 1);
+          }
+        }
         game.hazards.push({
           type: 'gravitos_singularity',
           x: 0, y: 0,
@@ -77682,7 +77714,7 @@ function bossAI(m, dt, distToPlayer) {
       // the same wider footprint. Tagged hazard params drive the
       // resolver at L49792 area via h._bhPullRadius / h._bhCoreRadius.
       // v0.29.830 — telegraph floor 350ms (was 300). See the pass note.
-      if (m.patternTimer > 350 && !m._bhFired) {
+      if (m.patternTimer > _gravTeleMs(m, 350) && !m._bhFired) {   // v0.29.929 — real-time floor
         m._bhFired = true;
         const bhx = player.x + player.w/2;
         // Awakened (phase 2) + Ascendant (phase 3): pull radius
@@ -77704,7 +77736,13 @@ function bossAI(m, dt, distToPlayer) {
         game.hazards.push({
           type:'blackhole', cx: bhx, x: bhx - _w/2, y: 380 - (_awakened ? 60 : 0),
           w: _w, h: _h,
-          life: 2400, maxLife: 2400, atk: m.atk * _atkMul,
+          // v0.29.929 — 2400 -> 144. life is FRAMES (h.life -= 1/frame);
+          // 2400 was 40 s for a hazard every surrounding comment prices at
+          // 2.4 s (~2 capped core ticks against the 1.25 s tick i-frame).
+          // Same ms-in-a-frames-field bug v0.25.202 fixed on the Soul
+          // Vortex. The 40 s version stacked 3-4 overlapping wells by
+          // mid-fight and parked them on the collapse safe zones.
+          life: 144, maxLife: 144, atk: m.atk * _atkMul,
           _bhPullRadius: _pullR,
           _bhCoreRadius: _coreR,
           _bhAwakened: _awakened,
@@ -77724,7 +77762,7 @@ function bossAI(m, dt, distToPlayer) {
       // standing still on a platform = guaranteed hit. Pattern ends fast
       // (700 ms) so it overlaps with the next cast for compounding pressure.
       // v0.29.830 — telegraph floor 350ms (was 180). See the pass note.
-      if (m.patternTimer > 350 && !m._cometsFired) {
+      if (m.patternTimer > _gravTeleMs(m, 350) && !m._cometsFired) {   // v0.29.929 — real-time floor
         m._cometsFired = true;
         const count = phase === 3 ? 7 : phase === 2 ? 5 : 3;   // v0.26.403 — P3 comet swarm (was 5). v0.29.391 — P2 grading
         const ww = game.mapData.worldWidth || 2200;
@@ -77778,7 +77816,7 @@ function bossAI(m, dt, distToPlayer) {
       // a moving "gap" the player has to position into. No homing — pure
       // dodge geometry. Phase 3 fires 24 instead of 16 and spins them.
       // v0.29.830 — telegraph floor 350ms (was 280). See the pass note.
-      if (m.patternTimer > 350 && !m._ringFired) {
+      if (m.patternTimer > _gravTeleMs(m, 350) && !m._ringFired) {   // v0.29.929 — real-time floor
         m._ringFired = true;
         const count = phase === 3 ? 24 : phase === 2 ? 20 : 16;  // v0.29.391 — P2 grading
         const bx = m.x + m.w/2, by = m.y + m.h/2;
@@ -77893,7 +77931,7 @@ function bossAI(m, dt, distToPlayer) {
       // Different feel from crushTendrils: tendrils chase you, decay
       // floor zones STAY PUT but cover most of the arena.
       // v0.29.830 — telegraph floor 350ms (was 220). See the pass note.
-      if (m.patternTimer > 350 && !m._decayFired) {
+      if (m.patternTimer > _gravTeleMs(m, 350) && !m._decayFired) {   // v0.29.929 — real-time floor
         m._decayFired = true;
         const count = phase === 3 ? 5 : 4;
         const ww = game.mapData.worldWidth || 2200;
@@ -84623,7 +84661,11 @@ function updateProjectiles(dt) {
         const _coreR = h._bhCoreRadius || 50;
         const _pullForce = h._bhAwakened ? 1.7 : 0.8;
         // PULL — gated against iframes / god / stun (same idiom as Gravitos pull)
-        if (dist < _pullR && (player.invulnerable | 0) <= 0 && !player._god &&
+        // v0.29.929 — the rogue's roll (evade window, no i-frames since
+        // v0.26.966) breaks the pull like every other class's dodge does via
+        // i-frames. One counterplay rule, no class exceptions: dash out.
+        const _bhRolling = !!(player._dashEvadeUntil && game.time < player._dashEvadeUntil);
+        if (dist < _pullR && (player.invulnerable | 0) <= 0 && !player._god && !_bhRolling &&
             (player.stunTimer | 0) <= 0 && (player.frozenTimer | 0) <= 0) {
           const force = _pullForce * (1 - dist / _pullR);
           player.vx += (dxp / dist) * force;
