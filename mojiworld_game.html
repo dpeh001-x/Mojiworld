@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.908';
+const GAME_VERSION = 'v0.29.909';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -71688,6 +71688,7 @@ function updateMonsters(dt) {
       // total: chip damage under BOSS_BURST_DECAY_PER_S never accumulates to a
       // reaction no matter how long the fight runs.
       if (m._threatCd > 0) m._threatCd -= dt;
+      if (m._guardFxT > 0) m._guardFxT -= dt;   // v0.29.x — GUARDED marker throttle
       if (m._burst > 0) {
         m._burst = Math.max(0, m._burst - Math.max(1, m.maxHp || 1) * BOSS_BURST_DECAY_PER_S * (dt / 1000));
       }
@@ -79669,7 +79670,18 @@ function hitMonster(m, dmg, isCrit, skill) {
   }
   // v0.29.263 — GUARD UP stance (boss combat director): −55% damage taken
   // for 5-10 s. Same chip-able pattern as the Cancer shell above.
-  if (m._dirGuardT > 0) dmg = Math.max(1, Math.floor(dmg * 0.45));
+  if (m._dirGuardT > 0) {
+    dmg = Math.max(1, Math.floor(dmg * 0.45));
+    // v0.29.x — say so. Same principle the break meter shipped under: "a
+    // mechanic the player cannot see is not a mechanic".
+    if (!(m._guardFxT > 0)) {
+      m._guardFxT = 420;
+      try {
+        game.damageNumbers.push({ x: m.x + m.w / 2 - 20, y: m.y - 22, vy: -1.6,
+          text: 'GUARDED', life: 24, color: '#9fd4ff', size: 11 });
+      } catch (e) {}
+    }
+  }
   // v0.26.402 — Virgo's Banishment is a committed channel: 60% DR while it
   // resolves, so the player can't burst-cancel it (the cast now reliably fires
   // and arms the Sin → Judgment loop).
@@ -125498,6 +125510,20 @@ function drawSuperBossBar() {
   };
   const _pctTxt = (hpPct * 100).toFixed(hpPct > 0 && hpPct < 0.1 ? 1 : 0);
   ctx.fillText(`${_hpFmt(sb.currentHp)} / ${_hpFmt(sb.maxHp)}  ·  ${_pctTxt}%`, W / 2, y + 13);
+  // v0.29.x — STATE CHIP. Ordered by what matters most to the player's next
+  // input: a window you can punish outranks a defence you should wait out.
+  const _bst = (sb._stagger   > 0) ? { t: 'BREAK',      c: '#ffdd55' }
+             : (sb._dirOpenT  > 0) ? { t: 'OPEN',       c: '#ffc46a' }
+             : (sb._dirFleeT  > 0) ? { t: 'RETREATING', c: '#ffb0a0' }
+             : (sb._dirGhostT > 0) ? { t: 'EVADING',    c: '#cdb6ff' }
+             : (sb._dirGuardT > 0) ? { t: 'BRACING',    c: '#9fd4ff' }
+             : null;
+  if (_bst) {
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillStyle = _bst.c;
+    ctx.fillText(_bst.t, x + barW, y + barH + 14);
+  }
   ctx.textAlign = 'left';
 }
 
