@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.922';
+const GAME_VERSION = 'v0.29.923';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -71888,6 +71888,35 @@ function updateMonsters(dt) {
         // above, so it is the value that survives the frame.
         const _fleeAway = ((m.x + m.w / 2) < (player.x + player.w / 2)) ? -1 : 1;
         m.vx = _fleeAway * Math.max(1.8, (m.speed || 1) * 2.2);
+        // v0.29.x — CORNERED. The map walls mobs in, and a retreat pointed at a
+        // wall spent its remaining ~950 ms of the 1100 grinding against it at
+        // full speed (measured: x pinned at 0, vx -3.2, for 86% of the flee) —
+        // which reads as a pathing bug, not a decision. A boss that stops
+        // making progress for ~100 ms has nowhere to go: it abandons the
+        // retreat and takes a stand instead — the existing GUARD stance, so
+        // the bar chip flips RETREATING -> BRACING and the -55% damage brace
+        // gives the stand teeth. The fiction is a cornered animal turning to
+        // face you, and mechanically it is strictly more interesting than a
+        // boss vibrating against a wall.
+        if (m._fleePrevX != null && Math.abs(m.x - m._fleePrevX) < 0.5) {
+          m._fleeStuckT = (m._fleeStuckT || 0) + dt;
+          if (m._fleeStuckT >= 100) {
+            m._dirFleeT = 0;
+            m._fleeStuckT = 0;
+            m._fleePrevX = null;
+            m._dirGuardT = Math.max(m._dirGuardT || 0, 1400);
+            m.facing = _fleeAway > 0 ? -1 : 1;   // turn to face the player
+            try {
+              if (game.damageNumbers) game.damageNumbers.push({
+                x: m.x + m.w / 2, y: m.y - 8, vy: -1.2,
+                text: 'CORNERED', life: 60, color: '#9fd4ff', big: true });
+            } catch (e) {}
+          }
+        } else {
+          m._fleeStuckT = 0;
+        }
+        m._fleePrevX = m.x;
+        if (!(m._dirFleeT > 0)) { m._fleePrevX = null; m._fleeStuckT = 0; }
         if ((game.time & 3) === 0 && typeof _budgetedParticlePush === 'function') {
           _budgetedParticlePush({ x: m.x + m.w * (0.2 + Math.random() * 0.6), y: m.y + m.h * 0.85,
             vx: -_fleeAway * (1 + Math.random()), vy: -0.4 - Math.random() * 0.6,
