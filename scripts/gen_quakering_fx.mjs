@@ -43,14 +43,32 @@ const BASE_PROMPT =
   'with a touch of warm amber. Fully TRANSPARENT background (alpha only), generous margin. ' +
   'NO face, NO eyes, NO creature, NO character, NO text, NO shadow, NO background, NO fire.';
 
+// v0.29.973 — motion re-specified after measuring the v0.29.972 loop at
+// 1.67% average per-step pixel delta — near the bottom of the scale (the
+// arcane burst star runs 9.04%, the soul orb 6.05%). The ring was animated
+// but barely moved, so it read as a still image. This asks for large,
+// obvious change in every frame.
 const MOTION =
-  'The ground shockwave ROLLS OUTWARD continuously, with visible change in EVERY frame: the dust ' +
-  'billows and churns outward along the ring, the cracked earth plates shift and settle, the small ' +
-  'rock chunks tumble and fall back, and the warm amber dust glow underneath pulses. ' +
+  'The ground shockwave ROLLS OUTWARD VIOLENTLY, with LARGE and OBVIOUS change in EVERY single ' +
+  'frame — no two frames may look alike, and none may be still: ' +
+  'thick dust plumes boil up and surge outward along the ring, swelling and collapsing; ' +
+  'the cracked earth plates buckle, tilt and drop back one after another; ' +
+  'rock chunks and pebbles are flung upward on some frames and tumble back down on others, ' +
+  'their positions clearly different every frame; ' +
+  'the cracks between the plates flare bright hot amber and fade to dark in a travelling pulse ' +
+  'around the ring; and the dust glow underneath throbs strongly bright and dim. ' +
   'CRITICAL — DO NOT ROTATE: the ring must NOT spin or turn as a whole; it lies flat on the ground ' +
   'and keeps the same orientation in every frame. Only the dust and debris move. ' +
-  'CRITICAL — LOCKED FRAMING: perfectly centred at the same size, position and scale every frame; ' +
-  'no zoom, pan, crop, drift, mirror or flip. The ellipse keeps its width and height. ' +
+  // v0.29.973 — the lock-down clauses were over-constraining: two passes with
+  // stronger motion wording measured 1.67% then 1.47% per-step delta, i.e.
+  // asking for more movement while forbidding everything to move made it
+  // WORSE. The anchor the engine actually needs is the ring BAND (it applies
+  // its own 0.5->1.1 grow curve, which double-scaling would fight); the dust
+  // and debris above it are free to change shape as violently as they like.
+  'FRAMING: the stone ring BAND itself stays centred at the same width, height and position in ' +
+  'every frame — do not zoom, pan, crop, mirror or flip the ring. But the DUST PLUMES and the ' +
+  'flying rock debris around and above the band are NOT constrained: they should change shape, ' +
+  'size and position dramatically from frame to frame, boiling and swirling. ' +
   'CRITICAL — KEEP THE CENTRE EMPTY: the middle of the ellipse stays transparent in every frame. ' +
   'CRITICAL — SEAMLESS LOOP: the last frame flows continuously back into the first with no pop. ' +
   // v0.29.967 — the first generation lost transparency in the back half:
