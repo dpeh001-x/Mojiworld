@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.936';
+const GAME_VERSION = 'v0.29.937';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -37237,6 +37237,24 @@ function _advCommitJob(jobId) {
     }, 1400);
   }
 }
+// v0.29.937 — the ONE test for "this player should be offered the master pick
+// right now". Written once because the bug it fixes was three call sites each
+// checking a different subset: the level-up trigger checked level === 40 (a
+// single frame), the job-pick chain checked level only, and NOTHING checked
+// after q_distorted_portal completed — which is the actual order most players
+// hit: reach 40, get told to do the quest, do the quest, and then no code path
+// ever offers the advancement again. Worse than a missing reward: the XP chain
+// deliberately blocks at Lv 40 until a master is picked (_blockedByMaster in
+// gainXp), so the stranded player also cannot level. Reported by a tester as
+// exactly that — quest checked off, no advancement, stuck.
+function _masterAdvancePending() {
+  try {
+    const _need = (typeof MASTER_ADVANCE_LEVEL !== 'undefined') ? MASTER_ADVANCE_LEVEL : 40;
+    return !!(player && player.job && !player.master
+      && (player.level || 1) >= _need
+      && player.quests && player.quests.completed && player.quests.completed.q_distorted_portal);
+  } catch (e) { return false; }
+}
 function openMasterAdvancement() {
   const job = JOBS[player.job];
   if (!job) return;
@@ -42085,6 +42103,27 @@ function loadState() {
     // so any active quests are visible from frame 1 instead of waiting
     // for the first kill / accept event.
     try { if (typeof renderQuestTracker === 'function') renderQuestTracker(); } catch(e) {}
+    // v0.29.937 — STRANDED-ADVANCEMENT RECOVERY. A save made under the old
+    // trigger wiring can be sitting in the exact dead state the tester
+    // reported: q_distorted_portal completed, Lv 40+, job picked, no master —
+    // and (worse) the XP chain frozen by _blockedByMaster until a master is
+    // picked. The two in-session triggers above only help players who have
+    // not hit the bug yet; this one heals every save that already has.
+    // Delayed long enough for the boot overlay + resume toasts to clear so
+    // the modal is not buried under them.
+    try {
+      if (typeof _masterAdvancePending === 'function' && _masterAdvancePending()) {
+        setTimeout(() => {
+          try {
+            if (typeof _masterAdvancePending === 'function' && _masterAdvancePending()
+                && typeof openMasterAdvancement === 'function') {
+              if (typeof showToast === 'function') showToast('✦ Your MASTER Advancement is ready — the Sentinel was freed.', 'legendary');
+              setTimeout(() => openMasterAdvancement(), 1200);
+            }
+          } catch (e) {}
+        }, 2500);
+      }
+    } catch (e) {}
     return true;
   } catch (e) {
     // v0.29.469 — a save EXISTED but could not be read. Returning a bare false
@@ -47234,6 +47273,18 @@ function _completeQuest(id) {
     setTimeout(() => {
       showToast('🪞 Trial passed — your Class Advancement awaits.', 'legendary');
       setTimeout(() => openAdvancement(), 1400);
+    }, 600);
+  }
+  // v0.29.937 — the Lv-40 counterpart of the hook above, which never existed:
+  // q_distorted_portal is REQUIRED for the master advancement, the Lv-40
+  // level-up fires the offer before the quest is done (it toasts "complete the
+  // quest first" and returns), and completing the quest afterwards triggered
+  // nothing. Same pattern as the trial: completion IS the moment.
+  if (id === 'q_distorted_portal' && typeof _masterAdvancePending === 'function' && _masterAdvancePending()
+      && typeof openMasterAdvancement === 'function') {
+    setTimeout(() => {
+      showToast('🌀 The Sentinel is free — your MASTER Advancement awaits.', 'legendary');
+      setTimeout(() => openMasterAdvancement(), 1400);
     }, 600);
   }
   // v0.29.60 — HOURGLASS V VERDICT. The five-chapter chain ends on a
@@ -81391,7 +81442,14 @@ function _maybeLevelUp() {
       }
     }, 600);
   }
-  if (player.level === MASTER_ADVANCE_LEVEL && player.job && !player.master) {
+  // v0.29.937 — was strict === MASTER_ADVANCE_LEVEL: one frame, once. A player
+  // who hit 40 with the portal quest unfinished got the redirect toast, and no
+  // later level-up could ever re-offer the pick. Now any level-up while the
+  // pick is pending re-offers it; the first-contact nag at exactly 40 is kept
+  // for players who still owe the quest.
+  if (player.job && !player.master
+      && (player.level === MASTER_ADVANCE_LEVEL
+          || (typeof _masterAdvancePending === 'function' && _masterAdvancePending()))) {
     setTimeout(() => openMasterAdvancement(), 600);
   }
   // v0.25.243 (S3) — first-time discoverability: when the player hits
