@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.993';
+const GAME_VERSION = 'v0.29.994';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -61645,6 +61645,7 @@ function updatePlayer(dt) {
         let _et = null, _eBest = Infinity;
         for (const _m of game.monsters) {
           if (!_m || _m.currentHp <= 0) continue;
+          if (typeof _lxMobUntargetable === 'function' && _lxMobUntargetable(_m)) continue;   // v0.29.994
           const _edx = (_m.x + _m.w / 2) - _eCx, _edy = (_m.y + _m.h / 2) - _eCy;
           // The 950px reach stays — the eagle is the longest-ranged ally and
           // that IS its role — but it gains the vertical bound it never had,
@@ -61667,6 +61668,7 @@ function updatePlayer(dt) {
             let _fbBest = Infinity;
             for (const _m of game.monsters) {
               if (!_m || _m.currentHp <= 0) continue;
+              if (typeof _lxMobUntargetable === 'function' && _lxMobUntargetable(_m)) continue;   // v0.29.994
               const _edx2 = (_m.x + _m.w / 2) - _eCx, _edy2 = (_m.y + _m.h / 2) - _eCy;
               if (Math.abs(_edx2) > 950 * _rx || Math.abs(_edy2) > 420 * _rx) continue;
               const _hpF2 = (_m.maxHp > 0) ? Math.max(0, Math.min(1, _m.currentHp / _m.maxHp)) : 1;
@@ -63906,6 +63908,10 @@ function _lxLosBlocked(x0, y0, x1, y1) {
 // so normal engagements are unchanged; the wider tiers only ever run when
 // the strict pass found nothing at all.
 function _allyTargetScore(ally, m, dx, dy, relax) {
+  // v0.29.994 — immune mobs are not prey (see _lxMobUntargetable). One line
+  // here covers both wolf call sites, the fallback picker AND the master's-
+  // mark override, since all of them route through this scorer.
+  if (typeof _lxMobUntargetable === 'function' && _lxMobUntargetable(m)) return -1;
   const _rx = relax || 1;
   if (Math.abs(dy) > _ALLY_DY_MAX * _rx) return -1;
   const _plx = player.x + player.w / 2;
@@ -64931,7 +64937,8 @@ function updateMinions(dt) {
       const dx = (m.x + m.w/2) - _mnCx, dy = (m.y + m.h/2) - _mnCy;
       const sq = dx*dx + dy*dy;
       const _pdx = (m.x + m.w/2) - _pcx, _pdy = (m.y + m.h/2) - _pcy;
-      if (_pdx*_pdx + _pdy*_pdy <= _MN_LEASH_SQ) {
+      if (!(typeof _lxMobUntargetable === 'function' && _lxMobUntargetable(m))
+          && _pdx*_pdx + _pdy*_pdy <= _MN_LEASH_SQ) {   // v0.29.994 — immune mobs are not prey (contact check below still runs)
         // v0.29.890 — UNREACHABLE PREY IS NOT PREY (per tester: "if the nearest
         // mob is on a high platform they are rendered useless ... they will keep
         // jumping in this spot till they die"). v0.29.815 fixed exactly this for
@@ -64990,6 +64997,7 @@ function updateMinions(dt) {
       for (const _rx of [2.5, 1e6]) {
         let _fbScore = Infinity;
         for (const m of game._mnLive) {
+          if (typeof _lxMobUntargetable === 'function' && _lxMobUntargetable(m)) continue;   // v0.29.994
           const dx = (m.x + m.w / 2) - _mnCx, dy = (m.y + m.h / 2) - _mnCy;
           const _dyAbs = Math.abs(dy);
           if (_dyAbs > _mnDyMax * _rx) continue;
@@ -80640,6 +80648,21 @@ const _LX_IMPACT_FLASH = [0, 0, 0.14, 0.22];
 // current target and lock themselves onto it; 'thorns' is passive and
 // says nothing about intent, so it does not mark either.
 const _LX_NO_FOCUS_TAGS = new Set(['minion', 'mojimon', 'pack', 'pet', 'thorns']);
+// v0.29.994 — CAN THIS MOB BE DAMAGED RIGHT NOW? The flags are exactly the
+// ones hitMonster / the co-op damage gate already honour (invulnerable,
+// _invulnBurrow, burrow states, the mirror-boss shroud, Gemini's lying
+// twin). Every summon picker consults this: measured pre-fix, the whole
+// pack hammered a fully-immune target for 100% of a 5 s window — every one
+// of those hits drew an IMMUNE floater and dealt nothing — while a live
+// add stood free.
+function _lxMobUntargetable(m) {
+  if (!m) return true;
+  if ((m.invulnerable | 0) > 0) return true;
+  if (m._invulnBurrow || m._burrowed || m._underground) return true;
+  if (m._shroudUntil && (game.time || 0) < m._shroudUntil) return true;
+  if (m._geminiLying && m.zodiacSign === 'gemini') return true;
+  return false;
+}
 function _lxPlayerFocus() {
   const t = game._pFocusTgt;
   if (!t || t.currentHp <= 0) return null;
@@ -80649,6 +80672,10 @@ function _lxPlayerFocus() {
   // pack to converge on empty ground for up to 4 s. O(n) against a
   // ~20-30 entry array, called a handful of times per frame.
   if (game.monsters.indexOf(t) < 0) { game._pFocusTgt = null; return null; }
+  // v0.29.994 — an immune mark commands nobody. Deliberately NOT cleared:
+  // the player usually keeps attacking through a submerge/i-frame, so the
+  // mark should be live again the instant the target is damageable.
+  if (_lxMobUntargetable(t)) return null;
   return t;
 }
 function hitMonster(m, dmg, isCrit, skill) {
