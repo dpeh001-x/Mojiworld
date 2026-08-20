@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.900';
+const GAME_VERSION = 'v0.29.901';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -125028,7 +125028,18 @@ function drawSuperBossBar() {
     game._superBossRef = null;
   }
   if (!sb) {
-    sb = game.monsters.find(m => m.superBoss && m.currentHp > 0);
+    // v0.29.x — EVERY BOSS GETS THE BAR. This furniture — plate, name, gradient
+    // fill, HP readout — already existed and was gated on `superBoss`, which is
+    // exactly three monsters: Aetherion, Gravitos, Octobaby. The other 22 bosses
+    // in the roster fought behind the same 4px sliver a snail gets: drawn
+    // m.w - 6 wide above the head, and suppressed entirely at full HP by the
+    // `m.currentHp < m.maxHp` gate around it. Legosaurus has 2.98M HP and the
+    // Sundered Smith 1.8M; neither painted a single pixel of boss UI.
+    // Nothing new is introduced here — the same renderer is simply pointed at
+    // the tier it was always describing. A super boss still wins the slot when
+    // both are alive, so a Gravitos fight is unchanged.
+    sb = game.monsters.find(m => m.superBoss && m.currentHp > 0)
+      || game.monsters.find(m => (m.isBoss || m.boss) && m.currentHp > 0 && !m._dying);
     if (sb) game._superBossRef = sb;
   }
   if (!sb) return;
@@ -125063,10 +125074,14 @@ function drawSuperBossBar() {
   ctx.fillStyle = '#1a0a2a';
   ctx.fillRect(x, y, barW, barH);
 
-  // Phase tick marks at 33% and 66%
-  ctx.fillStyle = 'rgba(255,255,255,0.25)';
-  ctx.fillRect(x + barW * 0.33, y, 2, barH);
-  ctx.fillRect(x + barW * 0.66, y, 2, barH);
+  // Phase tick marks at 33% and 66% — only for the multi-form bosses they
+  // describe. v0.29.391 made these one of the two surviving phase cues, so
+  // painting them on a boss that has no phases would be a cue that lies.
+  if (sb.superBoss) {
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.fillRect(x + barW * 0.33, y, 2, barH);
+    ctx.fillRect(x + barW * 0.66, y, 2, barH);
+  }
 
   // HP fill (gradient by phase) — v0.25.535: cached gradient, rebuilt
   // only when phase or bar dimensions change. fillRect clips visually.
@@ -125090,7 +125105,19 @@ function drawSuperBossBar() {
   // HP only; the "· PHASE n" suffix that used to trail it is gone, as is the
   // "PHASE n/3" badge that sat beside the bar. `phase` still drives the plate,
   // border, name and bar tints plus the 33%/66% tick marks.
-  ctx.fillText(`${sb.currentHp | 0} / ${sb.maxHp | 0}`, W / 2, y + 13);
+  // v0.29.x — 63000000 / 63000000 is nine digits of nothing: at a glance it
+  // reads as noise, and mid-fight the player cannot tell 12% from 8% from it.
+  // Compact figures plus the percentage the bar is already drawing. Math.floor
+  // rather than `| 0` — the bitwise coercion silently wraps past 2^31, which a
+  // future HP pool is one balance pass away from reaching.
+  const _hpFmt = (n) => {
+    n = Math.max(0, Math.floor(n || 0));
+    if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M';
+    if (n >= 1e4) return Math.round(n / 1e3) + 'K';
+    return String(n);
+  };
+  const _pctTxt = (hpPct * 100).toFixed(hpPct > 0 && hpPct < 0.1 ? 1 : 0);
+  ctx.fillText(`${_hpFmt(sb.currentHp)} / ${_hpFmt(sb.maxHp)}  ·  ${_pctTxt}%`, W / 2, y + 13);
   ctx.textAlign = 'left';
 }
 
