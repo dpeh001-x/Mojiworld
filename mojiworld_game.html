@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.991';
+const GAME_VERSION = 'v0.29.992';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -45029,13 +45029,23 @@ function _mpHandle(msg) {
       // avatar data riding a verbatim-forwarded frame type, for relays whose
       // state whitelist strips look/eq/v (the deployed CF worker). Merge into
       // the peer exactly like the state path would have. Same peer-flood cap.
-      if (msg && (msg.lk || msg.eq || msg.v || typeof msg.ti === 'string') && msg.id !== net.myId) {
+      if (msg && (msg.lk || msg.eq || msg.v || typeof msg.ti === 'string' || msg.cp) && msg.id !== net.myId) {
         if (net.peers[msg.id] || Object.keys(net.peers).length < MP_MAX_PEERS) {
           const _pp = net.peers[msg.id] || (net.peers[msg.id] = { id: msg.id, _last: performance.now() });
           if (msg.lk && typeof msg.lk === 'object') _pp.look = msg.lk;
           if (msg.eq && typeof msg.eq === 'object') _pp.eq = msg.eq;
           // scrubbed by hand here: only the 'state' path runs _mpScrubStrings
           if (typeof msg.ti === 'string') _pp.ti = msg.ti.replace(/[<>]/g, '').slice(0, 64);
+          // v0.29.x — hand-painted layers. _lxCleanPaintLayers is the existing
+          // trust boundary: it keeps ONLY known layer ids whose value is a
+          // data:image/png string, so a hostile peer cannot smuggle a foreign
+          // URL (or a javascript: src) into an Image the renderer will load.
+          if (msg.cp && typeof msg.cp === 'object' && typeof _lxCleanPaintLayers === 'function') {
+            const _cln = _lxCleanPaintLayers(msg.cp);
+            _pp.cp = Object.keys(_cln).length ? _cln : null;
+            // decode ahead of the first draw so the partner does not flicker
+            if (_pp.cp && typeof _lxPreloadPaintCache === 'function') _lxPreloadPaintCache(_pp.cp, null);
+          }
           if (typeof msg.v === 'string') { _pp.v = msg.v.slice(0, 16); _mpNoteVersion(_pp, _pp.v); }
           _pp._last = performance.now();
         }
@@ -45233,6 +45243,41 @@ function _mpAvatarWire() {
   }
   return { look, eq };
 }
+// v0.29.x — HAND-PAINTED COSMETICS ON THE WIRE (per user: partners should see
+// painted cosmetic equipment too).
+//
+// The old code nulled a peer's paint and the comment beside it explained why:
+// "canvas data blows the relay's 64 KB frame cap". Measured, that turned out
+// not to hold — a real 192x256 painted layer is ~3 KB of PNG data URL, so even
+// all 11 layers land near 34 KB, inside the cap. The limitation was assumed,
+// not measured.
+//
+// It rides a 'ping' frame rather than a new frame type on purpose: every
+// deployed relay forwards 'ping' VERBATIM, while unknown types are dropped by
+// their allowlist. So painted gear reaches partners on the relay that is live
+// today, with no deploy needed — the same reasoning that put look/eq there.
+// Sent only when the paint CHANGES or a NEW peer appears, never on the tick.
+const MP_PAINT_BUDGET = 44 * 1024;   // headroom under the relays' 64KB maxPayload
+function _mpPaintWire() {
+  if (typeof player === 'undefined' || !player) return null;
+  const src = (typeof _lxCleanPaintLayers === 'function')
+    ? _lxCleanPaintLayers(player.customPaintLayers) : null;
+  if (!src) return null;
+  const order = (typeof CHAR_PAINT_RENDER_ORDER !== 'undefined') ? CHAR_PAINT_RENDER_ORDER : Object.keys(src);
+  const out = {}; let used = 0, dropped = 0;
+  for (const k of order) {
+    const v = src[k];
+    if (typeof v !== 'string' || !v) continue;
+    // Degrade by whole layers rather than truncating one into a broken PNG.
+    if (used + v.length > MP_PAINT_BUDGET) { dropped++; continue; }
+    out[k] = v; used += v.length;
+  }
+  if (dropped && !net._paintBudgetWarned) {
+    net._paintBudgetWarned = true;
+    try { console.warn('[mp] paint payload over ' + MP_PAINT_BUDGET + 'B; ' + dropped + ' layer(s) not sent'); } catch (e) {}
+  }
+  return Object.keys(out).length ? out : null;
+}
 // v0.29.x — version-skew hint (once per peer). A partner on a stale cached
 // build sends an older `v` — their avatar data is missing fields, so what
 // you see CAN'T match their screen. Say so instead of leaving the mismatch
@@ -45328,6 +45373,26 @@ function _mpTick() {
       ti: _sendAv ? _ttlWire : undefined,
     }));
   } catch (e) { /* ignore */ }
+  // v0.29.x — PAINT SYNC. Fires only on a real edge: the paint changed, or a
+  // peer id we have not shipped to yet turned up (a late joiner missed the
+  // last broadcast). Both cases send one 'ping' carrying just 'cp' — no lk/eq,
+  // so the ordinary 2.5s carrier stays small and this never rides the 14Hz
+  // tick. A room that nobody repaints costs exactly one frame per new peer.
+  try {
+    const _peerIds = Object.keys(net.peers).sort().join(',');
+    const _cp = _mpPaintWire();
+    const _cpKey = _cp ? JSON.stringify(_cp).length + ':' + Object.keys(_cp).join(',') : '';
+    // a cheap content stamp: layer set + total byte length changes on any edit
+    const _cpStamp = _cp ? _cpKey + ':' + Object.values(_cp).reduce((a, v) => a + v.charCodeAt(v.length - 1) + v.length, 0) : '';
+    if (_cpStamp !== net._paintStamp || (_peerIds && _peerIds !== net._paintPeers)) {
+      net._paintStamp = _cpStamp;
+      net._paintPeers = _peerIds;
+      if (_peerIds) {
+        // '' clears: a peer who wiped their paint must stop showing it on ours
+        net.ws.send(JSON.stringify({ t: 'ping', cp: _cp || {} }));
+      }
+    }
+  } catch (e) { /* never let a cosmetic frame break the tick */ }
   // Decay peer chat / emote lifetimes
   for (const id in net.peers) {
     const p = net.peers[id];
@@ -45541,12 +45606,18 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
     };
     // v0.29.x — the viewer's own hand-painted wardrobe layers live on
     // player.customPaint / customPaintLayers, which _lxGetCustomPaintSource
-    // reads GLOBALLY — without nulling them here every peer would render
-    // wearing the VIEWER's paint job. (A peer's own paint can't travel —
-    // canvas data blows the relay's 64 KB frame cap — so peers render
-    // their base parts instead; documented limitation.)
+    // reads GLOBALLY — so these must be swapped out or every peer renders
+    // wearing the VIEWER's paint job.
+    //
+    // They are now swapped for the PEER's own painted layers rather than
+    // nulled. The old note here said a peer's paint "can't travel — canvas
+    // data blows the relay's 64 KB frame cap"; measured, a 192x256 layer is
+    // ~3 KB of PNG data URL and a full set lands near 34 KB, so it fits. It
+    // arrives on the 'ping' carrier (see _mpPaintWire) and is sanitised at
+    // ingestion by _lxCleanPaintLayers. A peer who has sent none still gets
+    // null here, which is the old behaviour exactly.
     player.customPaint = null;
-    player.customPaintLayers = null;
+    player.customPaintLayers = (p.cp && typeof p.cp === 'object') ? p.cp : null;
     // Rebuild the peer's equipment map for the override hook. Generic
     // over whatever slots arrived so wardrobe visual slots (body_top /
     // cape / helmet) render too, not just weapon/armor/accessory. An
