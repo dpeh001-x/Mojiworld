@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.925';
+const GAME_VERSION = 'v0.29.926';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -122936,24 +122936,36 @@ function drawHazards() {
       // dimensions. Falls back to procedural-only when the sprite
       // hasn't decoded yet so the v0.25.201 visual still works.
       let _vortexSprite = LX_FX && LX_FX.soul_vortex;
-      // v0.26.504 — animate the lingering pool: loop the 9-frame soul_vortex VFX
-      // over time (~12fps). Frames share the base aspect (padded), drawn in the
-      // same SP_W×SP_H box below — no cutoff. Falls back to the static sprite.
+      // v0.26.504 — animate the lingering pool by looping the soul_vortex VFX
+      // frames. Falls back to the static sprite until they decode.
+      // v0.29.926 — the modulus was the literal 9 while the loader has asked the
+      // frame index for the real count since v0.29.519, so a set of any other
+      // length silently played only its first nine frames. It reads _vfa.length
+      // now, which is what let the pool go to 16.
+      // Cadence: one art frame every 3 game frames (20fps, was 5/12fps). The
+      // loop period barely moves (48 frames vs 45, so the swirl keeps its speed)
+      // but there are 78% more samples across it, which is the actual fix for
+      // "the animation could be smoother".
       const _vfa = (typeof _fxAnimFrames === 'function') ? _fxAnimFrames('soul_vortex') : null;
-      if (_vfa) { const _f = _vfa[Math.floor(game.time / 5) % 9]; if (_lxFxReady(_f)) _vortexSprite = _f; }
+      if (_vfa && _vfa.length) { const _f = _vfa[Math.floor(game.time / 3) % _vfa.length]; if (_lxFxReady(_f)) _vortexSprite = _f; }
       if (_lxFxReady(_vortexSprite)) {
         // v0.29.671 — draw the sprite's CONTENT to the hurtbox, not its canvas
         // (per user: "a monster who is on top of me died despite not being
-        // near the skill"). The art's canvas is 1088x512 but its opaque
-        // content is only ~76% x 46% of that; stretching the canvas to the
-        // 460x192 rect left the VISIBLE pool at roughly 350x88 — under half
-        // the hurtbox height — so mobs died in the invisible margin. Scaling
-        // the draw box up by the content fractions makes the visible pool
-        // fill the rect exactly; mechanics are untouched, the player just
-        // finally sees the real region. Fractions are baked constants of the
-        // shipped soul_vortex art (content 828x236 in 1088x512) and its anim
-        // frames, which share the padded canvas.
-        const SP_W = h.w / 0.76, SP_H = h.h / 0.46;
+        // near the skill"), which the old art needed because its opaque content
+        // was only ~76% x 46% of its 1088x512 canvas.
+        // v0.29.926 — those fractions are GONE, along with the reason for them.
+        // The claim above that the anim frames "share the padded canvas" was
+        // simply untrue: measured on the shipped set, the frames were 0.60 x
+        // 0.37-0.43 of their canvas, not 0.76 x 0.46. So the ANIMATED pool —
+        // i.e. the pool for all but the first few decode frames — drew about
+        // 20% narrower than its own hurtbox, and its height swung +/-16% from
+        // frame to frame, which is exactly the size-jitter that read as
+        // choppiness. The new frames are cropped at bake time to the union of
+        // every frame's content box (see scripts/generate_soul_vortex_fx.mjs),
+        // so the art IS its content: one canvas for all 16 frames, no margin,
+        // no per-frame rescale, and the rect the game already owns is the
+        // correct draw box with no magic number in the middle of it.
+        const SP_W = h.w, SP_H = h.h;
         ctx.globalAlpha = 0.85 * fade;
         ctx.drawImage(_vortexSprite, sx - SP_W/2, cy - SP_H/2, SP_W, SP_H);
         ctx.globalAlpha = 1;
@@ -122968,15 +122980,21 @@ function drawHazards() {
         ctx.ellipse(sx, cy, (h.w / 2) * 0.74, (h.h / 2) * 0.42, 0, 0, Math.PI * 2);
         ctx.fill();
       }
-      // Rotating green rings — 5 rings out from the centre. Kept on
-      // top of the sprite so the pool reads as actively channelling.
-      for (let i = 0; i < 2; i++) {
-        const a = t + i * Math.PI / 2.5;
-        ctx.strokeStyle = `rgba(130,255,160,${0.5 * fade})`;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.ellipse(sx, cy, 160 - i * 24, 36 - i * 5, 0, a, a + Math.PI);
-        ctx.stroke();
+      // Rotating green rings, drawn over the procedural fallback only.
+      // v0.29.926 — these were painted on TOP of the sprite because a single
+      // static pool could not sell "actively channelling". The 16-frame loop
+      // sells it by itself, and two flat 2px stroke arcs over the new art read
+      // as leftover debug geometry rather than energy. They stay for the
+      // fallback path, which still has no motion of its own.
+      if (!_lxFxReady(_vortexSprite)) {
+        for (let i = 0; i < 2; i++) {
+          const a = t + i * Math.PI / 2.5;
+          ctx.strokeStyle = `rgba(130,255,160,${0.5 * fade})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.ellipse(sx, cy, 160 - i * 24, 36 - i * 5, 0, a, a + Math.PI);
+          ctx.stroke();
+        }
       }
       // Rising wisp particles — wider spawn box matching AOE
       if (game.time % 3 === 0) {

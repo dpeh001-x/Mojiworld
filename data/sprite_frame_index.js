@@ -539,7 +539,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "shinobi_ult": 9,
    "skyhunter_gale": 9,
    "skyhunter_ult": 9,
-   "soul_vortex": 9,
+   "soul_vortex": 16,
    "warlord_banner": 9,
    "warlord_ult": 9
   },

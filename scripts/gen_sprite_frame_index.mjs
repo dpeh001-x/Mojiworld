@@ -17,7 +17,7 @@ import { readFileSync, writeFileSync, renameSync, existsSync, readdirSync } from
 
 const GAME = 'mojiworld_game.html';
 const OUT = 'data/sprite_frame_index.js';
-const MAX = 9;
+const MAX = 24;   // v0.29.x - was 9, a floor left over from every set being a 3x3 sheet; soul_vortex now ships 16 for a smoother loop
 const CHECK = process.argv.includes('--check');
 const src = readFileSync(GAME, 'utf8');
 
