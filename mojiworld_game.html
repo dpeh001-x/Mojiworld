@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.917';
+const GAME_VERSION = 'v0.29.918';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -122074,6 +122074,93 @@ function drawPet() {
   drawWolf(player.pet, null);
 }
 
+// v0.29.x — ATTACK-ZONE TELEGRAPHS (per user: "There are some boss fights that
+// involved marking the area or zone they attack that players have to evade,
+// worth looking into it and implementing in a AAA game style").
+//
+// The meteor already has the full treatment — ground rune, pulse, falling rock.
+// The other two committed attacks did not: columnStrike (8 bosses + the zodiac
+// column movesets — a full-height pillar) telegraphed with a loose particle
+// sprinkle, and bigMelee (swing/smash) with embers at the boss's hands. In both
+// cases the actual kill rectangle was never on screen; the player was asked to
+// infer a precise box from a vibe.
+//
+// The AAA grammar, applied: the full danger zone is drawn the moment the boss
+// commits (dim fill + hard rim), an inner fill GROWS to meet the rim as the
+// windup runs — "when it is full, it hits" — and the rim flares white in the
+// final 160 ms. The zone geometry below is copied line-for-line from the strike
+// code that fires when the telegraph ends, and the test suite asserts the two
+// stay equal, so the marked zone cannot drift from the hurt zone.
+//
+// _lxAttackZones is pure computation (returns descriptors; the test drives it
+// directly); _drawAttackZones paints them. Zones only exist while a monster is
+// mid-telegraph, so the common frame costs one empty loop.
+function _lxAttackZones() {
+  const out = [];
+  if (!game.monsters || !game.monsters.length) return out;
+  for (const m of game.monsters) {
+    if (!m || m.currentHp <= 0 || m._dying) continue;
+    if (m._columnFiring && m._columnT > 0 && m.traits && m.traits.columnStrike) {
+      const cs = m.traits.columnStrike;
+      const _camY = (game.camera && game.camera.y) || 0;
+      out.push({ kind: 'column',
+        x: m._columnTargetX - cs.width / 2, y: _camY, w: cs.width, h: H,
+        prog: Math.max(0, Math.min(1, 1 - m._columnT / (cs.telegraphMs || 1))),
+        color: cs.color || '#ffeeaa', dir: 'up' });
+    }
+    if (m._bigMeleeFiring && m._bigMeleeT > 0 && m.traits && m.traits.bigMelee) {
+      const bm = m.traits.bigMelee;
+      const prog = Math.max(0, Math.min(1, 1 - m._bigMeleeT / (bm.telegraphMs || 1)));
+      if (bm.kind === 'smash') {
+        const _arcW = bm.arcW || 220;
+        out.push({ kind: 'smash',
+          x: m.x + m.w / 2 - _arcW / 2, y: m.y + m.h - 14, w: _arcW, h: 28,
+          prog, color: '#ff7722', dir: 'center' });
+      } else {
+        const _sw = bm.swingW || 180, _sh = bm.swingH || 80;
+        const _facing = m.facing > 0 ? 1 : -1;
+        out.push({ kind: 'swing',
+          x: _facing > 0 ? m.x + m.w - 8 : m.x - _sw + 8, y: m.y + m.h * 0.3,
+          w: _sw, h: _sh,
+          prog, color: m.color || '#ffaa55', dir: _facing > 0 ? 'right' : 'left' });
+      }
+    }
+  }
+  return out;
+}
+function _lxZoneRgba(hex, a) {
+  let r = 255, gr = 200, b = 120;
+  try {
+    if (hex && hex[0] === '#' && hex.length >= 7) {
+      r = parseInt(hex.slice(1, 3), 16); gr = parseInt(hex.slice(3, 5), 16); b = parseInt(hex.slice(5, 7), 16);
+    }
+  } catch (e) {}
+  return `rgba(${r},${gr},${b},${a})`;
+}
+function _drawAttackZones() {
+  const zones = _lxAttackZones();
+  if (!zones.length) return;
+  const _camX = game.camera.x, _camY = (game.camera && game.camera.y) || 0;
+  for (const z of zones) {
+    const sx = z.x - _camX, sy = z.y - _camY;
+    if (sx + z.w < 0 || sx > W) continue;
+    const _final = z.prog > 0.82;   // the last beats of the windup
+    // dim base fill over the whole zone — the commitment
+    ctx.fillStyle = _lxZoneRgba(z.color, 0.08 + z.prog * 0.08);
+    ctx.fillRect(sx, sy, z.w, z.h);
+    // inner fill grows to meet the rim — "when it is full, it hits"
+    ctx.fillStyle = _lxZoneRgba(z.color, 0.16 + z.prog * 0.10);
+    if (z.dir === 'up')          ctx.fillRect(sx, sy + z.h * (1 - z.prog), z.w, z.h * z.prog);
+    else if (z.dir === 'center') ctx.fillRect(sx + (z.w / 2) * (1 - z.prog), sy, z.w * z.prog, z.h);
+    else if (z.dir === 'right')  ctx.fillRect(sx, sy, z.w * z.prog, z.h);
+    else                         ctx.fillRect(sx + z.w * (1 - z.prog), sy, z.w * z.prog, z.h);
+    // hard rim, flaring white as impact arrives
+    ctx.strokeStyle = _final ? 'rgba(255,255,255,0.95)' : _lxZoneRgba(z.color, 0.55 + z.prog * 0.35);
+    ctx.lineWidth = _final ? 3 : 2;
+    ctx.strokeRect(sx + 1, sy + 1, z.w - 2, z.h - 2);
+  }
+}
+try { window._lxAttackZones = _lxAttackZones; } catch (e) {}
 function drawHazards() {
   if (!game.hazards || game.hazards.length === 0) return;   // v0.25.451: empty-list early-out
   const _camYH = (game.camera && game.camera.y) || 0;   // v0.29.x — world->screen Y for the planted banner
@@ -125447,6 +125534,7 @@ function loop(time) {
   // calls + expired-entry cleanup). Helper lives next to killMonster
   // so the whole fade module sits in one place.
   _drawFadingMonsters();
+  _drawAttackZones();   // v0.29.x — committed-attack zones, under the strike beam and the player
   drawProjectiles();
   drawHazards();
   drawAfterImages();
