@@ -9647,7 +9647,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.29.941';
+const GAME_VERSION = 'v0.29.942';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11507,6 +11507,13 @@ const LX_FX = (() => {
     tg_swing:                       'tg_swing.webp',                       // hollow warning frame + ghost slash arc
     tg_smash:                       'tg_smash.webp',                       // isolated molten ground-crack band
     tg_dash:                        'tg_dash.webp',                        // charge-lane chevrons (point right; draw mirrors)
+    // v0.29.x — boss HP bar furniture (ludo.ai, scripts/gen_bossbar_ui.mjs).
+    // Per user: "For the boss HP bar can customise and make images nicer for
+    // it." The frame has a hollow transparent centre; the fill is an energy
+    // ribbon source-cropped by HP% at draw time. The procedural plate stays as
+    // the decode fallback.
+    ui_bossbar_frame:               'ui_bossbar_frame.webp',               // ornate filigree rails + end caps
+    ui_bossbar_fill:                'ui_bossbar_fill.webp',                // crimson-violet energy ribbon
     fx_col_pathsbane:   'fx_col_pathsbane.webp',   // Path's Bane — necrotic withered green
     fx_col_archon:      'fx_col_archon.webp',      // Archon — holy gold light pillar
     fx_col_legosaurus:   'fx_col_legosaurus.webp',   // Legosaurus — fiery brick/lava column
@@ -126281,15 +126288,32 @@ function drawSuperBossBar() {
   const hpPct = Math.max(0, sb.currentHp / sb.maxHp);
   const phase = sb.phase || 1;
 
-  // Backdrop plate — hyper bosses get a darker/gold-edged plate
+  // v0.29.x — BAR FURNITURE (per user: "For the boss HP bar can customise and
+  // make images nicer for it"). When both pieces have decoded, the bar is an
+  // ornate filigree frame over an energy-ribbon fill (ludo.ai,
+  // scripts/gen_bossbar_ui.mjs): the ribbon is SOURCE-CROPPED by HP% so it
+  // drains left-to-right without squashing its texture, the phase tint
+  // (violet / pink / red) survives as a translucent overlay on top of it, and
+  // the plate's hard border rectangles are gone — the frame IS the border.
+  // Until decode, the original procedural plate draws unchanged.
   const hyper = !!sb.hyperBoss;
-  ctx.fillStyle = hyper ? 'rgba(2,0,6,0.92)' : 'rgba(10,5,30,0.82)';
-  ctx.fillRect(x - 6, y - 22, barW + 12, barH + 42);
-  ctx.strokeStyle = hyper
-    ? (phase === 1 ? '#aa66ff' : phase === 2 ? '#ff66cc' : '#ffaa44')
-    : (phase === 1 ? '#b090ff' : phase === 2 ? '#ff88dd' : '#ff4466');
-  ctx.lineWidth = hyper ? 3 : 2;
-  ctx.strokeRect(x - 6, y - 22, barW + 12, barH + 42);
+  const _bbFrame = (typeof LX_FX !== 'undefined') && LX_FX.ui_bossbar_frame;
+  const _bbFill  = (typeof LX_FX !== 'undefined') && LX_FX.ui_bossbar_fill;
+  const _bbArt = _lxFxReady(_bbFrame) && _lxFxReady(_bbFill);
+  if (_bbArt) {
+    // soft smoked backing keeps the name + numbers readable over any arena;
+    // deliberately borderless — the filigree carries the silhouette.
+    ctx.fillStyle = hyper ? 'rgba(4,0,10,0.62)' : 'rgba(8,4,20,0.55)';
+    ctx.fillRect(x - 6, y - 22, barW + 12, barH + 42);
+  } else {
+    ctx.fillStyle = hyper ? 'rgba(2,0,6,0.92)' : 'rgba(10,5,30,0.82)';
+    ctx.fillRect(x - 6, y - 22, barW + 12, barH + 42);
+    ctx.strokeStyle = hyper
+      ? (phase === 1 ? '#aa66ff' : phase === 2 ? '#ff66cc' : '#ffaa44')
+      : (phase === 1 ? '#b090ff' : phase === 2 ? '#ff88dd' : '#ff4466');
+    ctx.lineWidth = hyper ? 3 : 2;
+    ctx.strokeRect(x - 6, y - 22, barW + 12, barH + 42);
+  }
 
   // Name + subtitle (hyper-boss prefix)
   ctx.fillStyle = phase === 1 ? '#e0c8ff' : phase === 2 ? '#ffaadd' : '#ff7a8e';
@@ -126316,20 +126340,38 @@ function drawSuperBossBar() {
     ctx.fillRect(x + barW * 0.66, y, 2, barH);
   }
 
-  // HP fill (gradient by phase) — v0.25.535: cached gradient, rebuilt
-  // only when phase or bar dimensions change. fillRect clips visually.
+  // HP fill — art ribbon when decoded (source-cropped by HP% so the texture
+  // drains instead of squashing), phase-tinted; else the v0.25.535 gradient.
   const fillW = barW * hpPct;
-  ctx.fillStyle = _getSBossBarGrad(phase, x, barW);
-  ctx.fillRect(x, y, fillW, barH);
+  if (_bbArt) {
+    if (fillW > 0.5) {
+      const _srcW = Math.max(1, Math.floor(_bbFill.naturalWidth * hpPct));
+      ctx.drawImage(_bbFill, 0, 0, _srcW, _bbFill.naturalHeight, x, y, fillW, barH);
+      // phase tint rides ON TOP of the fixed ribbon so the p1/p2/p3 cue the
+      // procedural gradient carried is not lost to the art.
+      ctx.fillStyle = phase === 1 ? 'rgba(140,90,255,0.22)' : phase === 2 ? 'rgba(255,110,200,0.26)' : 'rgba(255,60,90,0.30)';
+      ctx.fillRect(x, y, fillW, barH);
+    }
+    // shimmer stays — it is what makes the bar read as liquid
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.fillRect(x, y + 1, fillW, 3);
+    // the ornate frame replaces the white border; rails hug the strip, the
+    // end caps overhang. 1024x112 art with a ~64px hollow centre -> the rails
+    // need ~(112-64)/2 / 64 of barH above and below, and the caps ~26px out.
+    ctx.drawImage(_bbFrame, x - 26, y - Math.round(barH * 0.42), barW + 52, barH + Math.round(barH * 0.84));
+  } else {
+    ctx.fillStyle = _getSBossBarGrad(phase, x, barW);
+    ctx.fillRect(x, y, fillW, barH);
 
-  // Shimmer highlight
-  ctx.fillStyle = 'rgba(255,255,255,0.25)';
-  ctx.fillRect(x, y + 1, fillW, 3);
+    // Shimmer highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.fillRect(x, y + 1, fillW, 3);
 
-  // Border
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x, y, barW, barH);
+    // Border
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, barW, barH);
+  }
 
   // HP text
   ctx.fillStyle = '#ffffff';

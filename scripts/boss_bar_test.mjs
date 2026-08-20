@@ -30,6 +30,13 @@ const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
 await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof drawSuperBossBar === 'function' && typeof monsterTypes === 'object',
   null, { timeout: 120000 });
+// the bar furniture streams with the rest of LX_FX at boot — wait for the two
+// pieces to decode before asserting on them (same pattern as the telegraph
+// art suite).
+await page.waitForFunction(() => typeof LX_FX !== 'undefined'
+  && LX_FX.ui_bossbar_frame && LX_FX.ui_bossbar_frame.complete && LX_FX.ui_bossbar_frame.naturalWidth > 0
+  && LX_FX.ui_bossbar_fill && LX_FX.ui_bossbar_fill.complete && LX_FX.ui_bossbar_fill.naturalWidth > 0,
+  null, { timeout: 30000 }).catch(() => {});
 
 const r = await page.evaluate(() => {
   const out = {};
@@ -61,6 +68,33 @@ const r = await page.evaluate(() => {
     return painted;
   };
 
+  // v0.29.x — BAR FURNITURE: with the frame + ribbon decoded, the bar paints
+  // drawImage-framed with NO border rectangles; with the art blocked, the
+  // original procedural plate (borders included) must draw unchanged.
+  const paint = (mon, blockArt) => {
+    game.monsters.length = 0; game._superBossRef = null;
+    game.monsters.push(mon);
+    let savedF, savedR;
+    if (blockArt && typeof LX_FX !== 'undefined') {
+      savedF = LX_FX.ui_bossbar_frame; savedR = LX_FX.ui_bossbar_fill;
+      LX_FX.ui_bossbar_frame = null; LX_FX.ui_bossbar_fill = null;
+    }
+    const counts = { drawImage: 0, strokeRect: 0 };
+    const _di = ctx.drawImage, _sr = ctx.strokeRect;
+    ctx.drawImage = function () { counts.drawImage++; return _di.apply(this, arguments); };
+    ctx.strokeRect = function () { counts.strokeRect++; return _sr.apply(this, arguments); };
+    try { drawSuperBossBar(); } catch (e) { counts.threw = String(e).slice(0, 80); }
+    ctx.drawImage = _di; ctx.strokeRect = _sr;
+    if (blockArt && typeof LX_FX !== 'undefined') {
+      LX_FX.ui_bossbar_frame = savedF; LX_FX.ui_bossbar_fill = savedR;
+    }
+    return counts;
+  };
+  out.barArtReady = !!(typeof LX_FX !== 'undefined' && LX_FX.ui_bossbar_frame && LX_FX.ui_bossbar_frame.complete && LX_FX.ui_bossbar_frame.naturalWidth > 0
+    && LX_FX.ui_bossbar_fill && LX_FX.ui_bossbar_fill.complete && LX_FX.ui_bossbar_fill.naturalWidth > 0);
+  out.paintArt = paint(mk('legosaurus'), false);
+  out.paintFallback = paint(mk('legosaurus'), true);
+
   out.superBoss  = draw(mk('gravitos'));
   out.plainBoss  = draw(mk('legosaurus'));
   out.smith      = draw(mk('sundered_smith'));
@@ -86,6 +120,7 @@ console.log('gravitos       ->', JSON.stringify(r.superBoss));
 console.log('legosaurus     ->', JSON.stringify(r.plainBoss));
 console.log('sundered smith ->', JSON.stringify(r.smith));
 console.log('snail          ->', JSON.stringify(r.ordinary));
+console.log('bar art ready:', r.barArtReady, '| paint w/ art:', JSON.stringify(r.paintArt), '| fallback:', JSON.stringify(r.paintFallback));
 
 ok('a super boss still gets its bar (no regression)',
    said(r.superBoss, 'GRAVITOS'), { painted: r.superBoss });
@@ -100,6 +135,11 @@ ok('an empty map draws nothing', (r.noMonsters || []).length === 0, { painted: r
 ok('the HP readout is legible, not an 8-digit wall',
    /[KM]|%/.test(hpText(r.plainBoss)), { hp: hpText(r.plainBoss) });
 ok('...for the 63-million-HP one too', /[KM]|%/.test(hpText(r.superBoss)), { hp: hpText(r.superBoss) });
+ok('the bar frame + ribbon fill are decoded by the live loader', r.barArtReady === true, {});
+ok('with the art, the bar is drawImage-framed — no border rectangles',
+   r.paintArt && r.paintArt.drawImage >= 2 && r.paintArt.strokeRect === 0, r.paintArt);
+ok('with the art blocked, the procedural plate still draws (fallback intact)',
+   r.paintFallback && r.paintFallback.drawImage === 0 && r.paintFallback.strokeRect >= 2, r.paintFallback);
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 let pass = 0, fail = 0;
