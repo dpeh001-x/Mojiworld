@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.21';
+const GAME_VERSION = 'v0.30.22';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -17102,7 +17102,7 @@ const SKILLS = {
   necromancer_harvest:       { name:'Soul Vortex',        icon:'👹', cls:'mage', job:'warlock',  master:'necromancer',         slot:'x', mp:40, cd:30000, desc:'Open a 30s vortex pool that drags enemies in and drains MASSIVE life damage (2.2× ATK/sec over 30s). 30s recast — re-drop it wherever the fight moves.' },
   hexmaster_grandhex: { name:'Grand Hex',          icon:'🧿', cls:'mage', job:'warlock',  master:'hexmaster',    slot:'x', mp:35, cd:24000, desc:'Hex everything inside the rune ring: 1.2s freeze (non-boss), a 1.2× ATK burst, and a stacking curse DOT (0.3× ATK/tick per stack). 5 stacks RUPTURE for 4× ATK, and 1.5s later the ring PULSES AGAIN so latecomers inside are hexed too; a hexed foe\'s curse jumps to its nearest neighbour when it dies.' },
   // Archer path
-  marksman_oneshot:   { name:'One Shot One Kill',  icon:'🎯', cls:'archer', job:'sniper', master:'marksman',    slot:'x', mp:50, cd:22000, desc:'Guaranteed crit piercing rail. Pure damage, no random kill chance.' },
+  marksman_oneshot:   { name:'Deadeye',            icon:'🎯', cls:'archer', job:'sniper', master:'marksman',    slot:'x', mp:50, cd:22000, desc:'Opens a 5s window: fire as many guaranteed-crit piercing rails as you can line up, free of MP. High impact, not spray.' },
   ballista_volley:    { name:'Siege Volley',       icon:'🛡️', cls:'archer', job:'sniper', master:'ballista',    slot:'x', mp:25, cd:23000, desc:'One press unleashes an 8 s piercing arrow stream. Drains MP while active — no holding needed.' },
   beastmaster_pack:   { name:'Call of the Wild',   icon:'🐾', cls:'archer', job:'ranger', master:'beastmaster', slot:'x', mp:50, cd:100000, desc:'Summon up to 4 oversized wolves (100 000 HP each, 100 s life). Cap is global — re-cast tops up to 4.' },
   skyhunter_gale:     { name:'Gale Storm',         icon:'🦅', cls:'archer', job:'ranger', master:'skyhunter',   slot:'x', mp:45, cd:22000, desc:'15 homing arrows fanned across that cannot miss.' },
@@ -63091,6 +63091,21 @@ const WAR_CHARGE_FRAMES  = 45;   // ~0.75 s to full charge at 60 fps
 const WAR_CHARGE_TAP     = 7;    // < 7 frames held = tap (no charge bonus)
 const MAGE_CHAIN_FRAMES  = 60;   // ~1 s window for chain cast
 const ARCHER_ROOT_MS     = 420;  // ms — _rootedTimer is decayed via dt(ms)
+// v0.30.22 — DEADEYE WINDOW (Marksman G). "Shoot as many railshots as u want"
+// for 5 s. The per-shot gate is the load-bearing number and it is NOT a
+// nerf-by-stealth: without one, the poll loop auto-casts while a key is held,
+// so an uncapped window would fire at the frame rate and Marksman would become
+// a better Ballista than Ballista. The tester's own framing is the spec —
+// "Ballista: machine gun / Marksman: high impact fast shot" — so the window
+// gives roughly ELEVEN heavy rails rather than thirty light ones.
+//   old: one rail at 6.5x ATK + 40, auto-crit => ~9.75x effective, 22 s CD
+//   new: ~11 rails at 1.9x ATK + 15, auto-crit => ~2.85x each, ~31x if every
+//        shot lands on one target — a real ult payoff that costs 11 presses
+//        and five seconds of standing in the open.
+const LX_DEADEYE_MS      = 5000;
+const LX_DEADEYE_GATE_MS = 420;
+const LX_DEADEYE_DMG     = 1.9;
+const LX_DEADEYE_FLAT    = 15;
 const ARCHER_STEADY_CAP  = 40;   // +40% damage at max steady
 // v0.30.21 — ELEMENTAL APOTHEOSIS charge. 90 frames (1.5 s) rather than the
 // warrior's 45: this is a Lv-50 ultimate on a 66 s cooldown, and the wind-up
@@ -63309,6 +63324,9 @@ const _LX_NO_CHARGE_SKILLS = new Set([
   'guardian',          // warrior — pure defensive buff
   'wildBond',          // archer — pure summon
   'beastmaster_pack',  // archer — pure summon
+  // v0.30.22 — Marksman G is a 5 s rapid-fire window; charging each rail would
+  // defeat the entire point of it.
+  'marksman_oneshot',  // archer — Deadeye window, taps not draws
 ]);
 function tryStartClassCharge(slotKey) {
   if (!_classIdentityActive()) return false;
@@ -63885,6 +63903,27 @@ function castSkill(id) {
     }
     player._kageCharges--;
     if (player._kageCharges > 0) player.skillCooldowns[id] = 300;
+  }
+  // v0.30.22 — DEADEYE WINDOW. The first press opens a 5 s window and pays the
+  // MP; every press inside it re-fires behind a short gate, free. The real
+  // cooldown is stamped by a timer when the window CLOSES rather than by the
+  // last shot — the shots cannot know which of them is last, and a window that
+  // simply stopped refreshing would leave the skill ready again after one
+  // gate, i.e. an unlimited window.
+  if (id === 'marksman_oneshot') {
+    const _dnow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    if (!player._deadeyeUntil || _dnow >= player._deadeyeUntil) {
+      player._deadeyeUntil = _dnow + LX_DEADEYE_MS;
+      const _realCd = computedCd;
+      if (typeof showToast === 'function') showToast('DEADEYE — 5s', 'legendary');
+      scheduleSkillTimer(() => {
+        player._deadeyeUntil = 0;
+        player.skillCooldowns[id] = _realCd;
+      }, LX_DEADEYE_MS);
+    } else {
+      player.mp = _preCastMp;   // shots inside the window are free
+    }
+    player.skillCooldowns[id] = LX_DEADEYE_GATE_MS;
   }
   player.attacking = true;
   // v0.29.x — Tutorial "Swing your weapon (Z)" step ticks on the SWING itself,
@@ -71131,65 +71170,46 @@ const SKILL_FNS = {
   },
 
   marksman_oneshot: () => {
-    // v0.25.540 — Removed 12% instakill chance per user request.
-    // Skill is now pure raw damage: ATK × 7 + 60, auto-crit, pierces.
-    // The L10 dmgOverride (×1.30 at rank 10, ≈ 1.885× total) keeps the
-    // master path scaling competitively without the random one-shot.
+    // DEADEYE (v0.30.22) — per tester: "For 5 Seconds, shoot as many railshots as
+    // u want", with the class split stated outright: "Ballista - shoot arrows
+    // like machine gun / Bowmaster - high impact fast shot".
+    //
+    // The window itself is owned by castSkill (it has to be: the cooldown and
+    // MP rules are what make it a window rather than a skill). This function
+    // only fires ONE rail, and is called once per press inside it.
+    //
+    // Damage moved 6.5x -> 1.9x because the press count moved 1 -> ~11. The
+    // rail keeps pierce and alwaysCrit, so each one still lands ~2.85x ATK
+    // effective and reads as a heavy shot, not chip.
+    const _dnow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    const _remain = Math.max(0, (player._deadeyeUntil || 0) - _dnow);
+    const _first = _remain > LX_DEADEYE_MS - 200;   // the shot that opened it
     game.projectiles.push({
       x: player.x + (player.facing > 0 ? player.w : -30), y: player.y + 18,
-      vx: player.facing * 24, vy: 0, w: 50, h: 12, life: 400,
-      // v0.25.658 — P1 REBALANCE. 4×+10 → 5.5×+30 for a 22 s cd master-X.
-      // With alwaysCrit (×1.5) and pierce, this lands ~8.25×+45 per target
-      // — strong but appropriate for the longest sniper master cooldown.
-      // v0.26.055 — Per balance audit. Marksman G is the 22-s-CD master
-      // ult; pre-audit damage 5.5×+30 with auto-crit landed at ~8.25×
-      // effective per pierce. Peer railshot (job-tier, 12 s CD) sustains
-      // 3-5× per cast over 12 s — One Shot's longer CD wasn't paying off
-      // in burst-vs-sustained. Bumped base 5.5 → 6.5 + flat 30 → 40 so
-      // a single piercing rail lands ~9.75× ATK with the auto-crit, a
-      // clear step above railshot per cast and worth the 50 MP / 22 s
-      // commitment.
-      damage: getAtk() * 6.5 + 40, owner: 'player', skill: 'oneshot',
+      vx: player.facing * 26, vy: 0, w: 50, h: 12, life: 400,
+      damage: getAtk() * LX_DEADEYE_DMG + LX_DEADEYE_FLAT, owner: 'player', skill: 'oneshot',
       pierce: true, alwaysCrit: true, color: '#ff7744',
     });
-    // v0.25.215 — epic crosshair-and-laser sprite as the precision
-    // shot lines up at the player's eye level.
-    // v0.25.966 — Sprite now mirrors when facing left per user "Marksman
-    // G skill sprite should change on the direction faced". The laser
-    // sprite is authored facing right; flipX flips the canvas X so the
-    // crosshair + beam extend toward the actual shot direction instead
-    // of always pointing right. Avoids using `angle: Math.PI` which
-    // would rotate 180° upside-down rather than mirror.
-    // v0.26.042 — Per user "Make marksman G skill sprite significantly
-    // bigger". Size 180 → 360 (2×). One Shot One Kill is a 22-s-cd
-    // master-tier ult; the prior 180 px crosshair read smaller than
-    // peer ults (cascade 280, grandhex 500, eclipse). 360 puts it in
-    // the ult-tier visual band. Life bumped 30 → 42 frames so the
-    // larger sprite has time to read the crosshair detail before
-    // fading. Forward offset 40 → 70 px so the bigger sprite anchors
-    // on the laser's mid-arc rather than overlapping the player.
-    // v0.26.045 — Per user "for G skill sprite position more vertically
-    // higher by 10 px and closer to character by 15 px". Y anchor
-    // raised (24 → 14, -10 px so the crosshair frames the player's
-    // chest/head rather than waist) and forward offset reduced
-    // (70 → 55 px, -15 px so the larger sprite reads as anchored to
-    // the shot's origin rather than floating ahead of the player).
-    // v0.26.046 — Per user "For marksman G skill do not distort it
-    // horizontally". The spriteBurst draw branch (L30853-area) renders
-    // at `fx.size × fx.size` (forced square box × the uniform grow
-    // curve). The marksman_oneshot.png source is 452×756 — taller
-    // than wide, aspect ≈ 0.598. Forcing it into a square stretched
-    // the X dimension wider than the source intended, making the
-    // crosshair-and-laser sprite look horizontally squashed/widened.
-    // Fix: pass per-axis scaleStart/End that bakes the source aspect
-    // into the X axis only. Y keeps the legacy 0.5 → 1.1 grow; X
-    // does 0.5 × 0.598 → 1.1 × 0.598 (≈ 0.299 → 0.658). The sprite
-    // now renders at its native aspect across the full grow curve.
+    // The crosshair sprite is authored 452x756 (taller than wide) and the
+    // spriteBurst branch draws into a SQUARE box, so the per-axis scale keeps
+    // its native aspect — see the v0.26.046 note this replaces. The opening
+    // shot keeps the full 360 px flourish; the follow-ups are half that, or
+    // eleven of them in five seconds would bury the screen.
+    const _sz = _first ? 360 : 190;
+    const _sx = _first ? 0.299 : 0.190, _ex = _first ? 0.658 : 0.395;
     spawnSpriteBurst(player.x + player.w / 2 + player.facing * 55, player.y + 14, 'marksman_oneshot',
-      { size: 360, life: 42, flipX: player.facing < 0,
-        scaleStartX: 0.299, scaleEndX: 0.658,
-        scaleStartY: 0.5,   scaleEndY: 1.1 });
-    flash(0.3);   },
+      { size: _sz, life: _first ? 42 : 22, flipX: player.facing < 0,
+        scaleStartX: _sx, scaleEndX: _ex,
+        scaleStartY: _first ? 0.5 : 0.32, scaleEndY: _first ? 1.1 : 0.7 });
+    // A muzzle streak down the rail's own line, so a rapid string of shots
+    // reads as fire coming from the bow rather than sprites popping.
+    if (typeof spawnSmoothBeam === 'function') {
+      spawnSmoothBeam(player.x + player.w / 2, player.y + 24,
+        player.facing > 0 ? 0 : Math.PI, 320, 7, '#ffb070', { life: 9 });
+    }
+    flash(_first ? 0.3 : 0.12);
+    if (!_first) addShake(3);
+  },
 
   ballista_volley: () => {
     // v0.25.257 — Reworked from a 0.5 s burst into a hold channel.
