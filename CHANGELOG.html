@@ -121,6 +121,25 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.15 <span class="tag"><span class="pill polish">polish</span> Past Lv 70 the PQ keeps scaling down instead of holding flat</span></h2>
+<p>Per user: <em>after level 70 it is still available but EXP rewards scale down.</em></p>
+<p>Availability needed no code &mdash; the PQ was never gated, at any level. What needed fixing is that v0.30.13's budget <b>stopped being a taper</b> the moment the player passed 70: it held flat at 0.15 of a level forever.</p>
+<table>
+<tr><th>Player level</th><th>40</th><th>45</th><th>50</th><th>60</th><th>70</th><th>75</th><th>80</th><th>85</th><th>95</th></tr>
+<tr><td><b>Full four-stage run</b></td><td>0.500</td><td>0.442</td><td>0.383</td><td>0.267</td><td>0.150</td><td><b>0.123</b></td><td><b>0.100</b></td><td><b>0.082</b></td><td><b>0.055</b></td></tr>
+<tr><td><em>was (v0.30.13)</em></td><td><em>0.500</em></td><td><em>0.442</em></td><td><em>0.383</em></td><td><em>0.267</em></td><td><em>0.150</em></td><td><em>0.150</em></td><td><em>0.150</em></td><td><em>0.150</em></td><td><em>0.020</em></td></tr>
+</table>
+<p>The post-70 leg is <b>geometric</b>, at the same proportional rate the 40&ndash;70 leg averaged: <code>(0.15/0.50)^(1/30)</code> per level, about &minus;3.9%/level. Continuing the straight line instead was considered and rejected &mdash; its slope of &minus;0.0117/level crosses <b>zero at Lv 82.8</b>, which is not "scales down", it is a second lockout with extra steps. A geometric decay approaches zero without reaching it, so a run keeps paying something at any level.</p>
+
+<h3>Two decay curves were fighting each other</h3>
+<p>The first build of this change left the old Lv-85 payout cap in place alongside the new taper, and the measurement caught what that did: the run fell from <b>0.082 of a level at Lv 85 to 0.010 at Lv 95</b> &mdash; an 8&times; drop in ten levels. A cliff, not a taper, and the exact shape this change exists to remove.</p>
+<p>That cap (<code>_qL</code> pinned at <code>LX_SCALED_LEVEL_CAP</code>) was introduced in v0.30.9 to stop the payout <em>climbing</em> past the level where monsters stop scaling. It was right when the budget was flat and wrong the moment the budget began tapering on its own, because then both curves decayed at once. The taper is now the <b>only</b> decay law above 70, and the payout simply follows the player &mdash; so a run is worth exactly <code>_lxPqRunTarget(level)</code> at every level, which is what the table above shows.</p>
+
+<h3>Verification</h3>
+<p><code>scripts/pq_post40_exp_test.mjs</code> now asserts every point on the curve to Lv 95, that each step past 70 is a strict <em>decrease</em>, and that the run still pays something at Lv 95. Against v0.30.13 it fails seven checks &mdash; flat 0.15 through the 70s and 80s, then the 0.02 collapse at 95.</p>
+<p>Two of its own checks had to change with the intent, which is worth noting because a stale assertion is worse than a missing one. A per-stage floor of "at least 2% of a level" was written for the flat era and directly contradicts a deliberate taper, so it is now "every stage still pays something" plus a check that the budget stays split in the <em>authored proportions</em> rather than collapsing onto one stage as the total shrinks. And the harness rounded shares to three decimals, which at Lv 95 (values near 0.01) is a &plusmn;5% relative error &mdash; enough to report fake proportion drift. It keeps five.</p>
+
+
 <h2>v0.30.14 <span class="tag"><span class="pill bug">bug</span> The start gate covers everything now &mdash; backgrounds, icons, every registry</h2>
 <p>Per user: <em>It is not just NPC sprites but even background images and icons need to load first before the game starts.</em></p>
 <p>The v0.30.10 gate watched what the map preloader fed it: spawn art, NPC frames, the start map's own background file, tiles, deck icons. Everything else &mdash; the background cycle's other files, <code>LX_UI</code> / <code>LX_FX</code> icons, item art, world props, and every live DOM <code>&lt;img&gt;</code> &mdash; was decoded on a best-effort cap before the menu but <b>never held for and never retried</b>. The machinery to see them already existed: <code>_warmDecodeRegistries</code> walks every registry at boot and then threw its collection away. It now keeps it, and at the click the gate sweeps that collection plus <code>document.images</code> into the watch &mdash; <b>487 &rarr; 1,278 watched images</b> on a town boot &mdash; where the v0.30.10 retry + hold + heal machinery treats them like everything else. The heavy pass (boss anim frames, zodiac) deliberately stays out: art for fights that cannot happen in the first minute must not turn a slow boot into the 120&nbsp;s cap; the world streamer's per-map feeds heal those post-boot.</p>

@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.14';
+const GAME_VERSION = 'v0.30.15';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -47510,11 +47510,27 @@ function _bossEpitaph(type, m) {
 const LX_PQ_CHAIN = ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale'];
 const LX_PQ_RUN_AT_40 = 0.50;   // share of one level for a full 4-stage run
 const LX_PQ_RUN_AT_70 = 0.15;
+// Past 70 the run keeps scaling DOWN rather than holding flat (per user:
+// "after level 70 it is still available but EXP rewards scale down"). The PQ
+// was never gated, so "still available" needs no code — what needed fixing is
+// that a flat 0.15 stopped being a taper the moment the player passed 70.
+//
+// The continuation is GEOMETRIC at the same proportional rate the 40->70 leg
+// averaged: (0.15/0.50)^(1/30) per level, about -3.9%/level. Chosen over
+// continuing the straight line, which has a slope of -0.0117/level and would
+// therefore cross ZERO at Lv 82.8 — that is not "scales down", that is a
+// second lockout with extra steps. A geometric decay approaches zero without
+// reaching it, so the run keeps paying something at any level.
+//
+// This is now the ONLY decay above 70 — see the _qL change above. Letting the
+// Lv-85 payout cap decay alongside it stacked two curves and collapsed the run
+// from 0.082 of a level at Lv 85 to 0.010 at Lv 95.
 function _lxPqRunTarget(L) {
   const lv = Math.max(1, Math.floor(L || 1));
   if (lv <= 40) return LX_PQ_RUN_AT_40;
-  if (lv >= 70) return LX_PQ_RUN_AT_70;
-  return LX_PQ_RUN_AT_40 + (lv - 40) * (LX_PQ_RUN_AT_70 - LX_PQ_RUN_AT_40) / 30;
+  if (lv <= 70) return LX_PQ_RUN_AT_40 + (lv - 40) * (LX_PQ_RUN_AT_70 - LX_PQ_RUN_AT_40) / 30;
+  const k = Math.pow(LX_PQ_RUN_AT_70 / LX_PQ_RUN_AT_40, 1 / 30);   // same per-level ratio as the 40-70 leg
+  return LX_PQ_RUN_AT_70 * Math.pow(k, lv - 70);
 }
 // A quest's un-tapered weight — the SAME rule the ordinary path uses, so the
 // two cannot drift: the authored EXP only ever picks a weight, never a payout.
@@ -47631,9 +47647,16 @@ function _completeQuest(id) {
     // so the flag is inert and the payout is exactly what it was before
     // v0.30.9 — no change to on-level play, the whole effect stays post-40.
     const _qScaled = !!(q && q.scalesToPlayer) && (player.level || 1) >= 40;
+    // ONE decay law past 70, not two. v0.30.9 capped this at
+    // LX_SCALED_LEVEL_CAP so the payout stopped climbing where the monsters
+    // stop scaling — correct when the budget was flat, wrong now that
+    // _lxPqRunTarget tapers on its own. Both decaying at once collapsed the
+    // run from 0.082 of a level at Lv 85 to 0.010 at Lv 95, an 8x drop in ten
+    // levels: a cliff, not the "scale down" that was asked for. The taper now
+    // does all of the declining and this simply follows the player, so the run
+    // is worth exactly _lxPqRunTarget(level) at every level.
     const _qL = _qScaled
-      ? Math.max(1, Math.min((typeof LX_SCALED_LEVEL_CAP === 'number') ? LX_SCALED_LEVEL_CAP : 85,
-                             Math.floor(player.level || 1)))
+      ? Math.max(1, Math.floor(player.level || 1))
       : Math.max(1, (q && q.levelReq) || player.level || 1);
     // v0.29.886 — the curve floor was the quiet reason late quests paid so
     // little. _frac is the share of a level a quest guarantees, and at /30000

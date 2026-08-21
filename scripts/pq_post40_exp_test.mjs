@@ -39,10 +39,16 @@ await page.waitForFunction(() => typeof _completeQuest === 'function' && typeof 
 const r = await page.evaluate(() => {
   const CHAIN = ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale'];
   const ALL = CHAIN.concat(['q_clockwork_express']);
-  const LEVELS = [40, 45, 50, 60, 70, 80];
-  // Per user: a full run is worth 0.50 of a level at Lv 40, tapering linearly
-  // to 0.15 at Lv 70 and holding there afterwards.
-  const TARGET = { 40: 0.50, 45: 0.4417, 50: 0.3833, 60: 0.2667, 70: 0.15, 80: 0.15 };
+  const LEVELS = [40, 45, 50, 60, 70, 75, 80, 85, 95];
+  // Per user: 0.50 of a level at Lv 40, tapering linearly to 0.15 at Lv 70 —
+  // and past 70 it keeps scaling DOWN rather than holding flat ("after level 70
+  // it is still available but EXP rewards scale down"). The post-70 leg is
+  // geometric at the same proportional rate the 40-70 leg averaged, and is the
+  // ONLY decay law above 70 — the payout no longer also caps at Lv 85, because
+  // two curves decaying at once turned the tail into a cliff (0.082 at Lv 85 to
+  // 0.010 at Lv 95). Targets below are that single curve.
+  const TARGET = { 40: 0.50, 45: 0.4417, 50: 0.3833, 60: 0.2667,
+                   70: 0.15, 75: 0.1227, 80: 0.1004, 85: 0.0822, 95: 0.0551 };
 
   // Share of ONE level paid by completing `id` at level `lv`.
   //
@@ -63,7 +69,7 @@ const r = await page.evaluate(() => {
     try { _completeQuest(id); gained = player.exp; }
     catch (e) { return null; }
     finally { window._maybeLevelUp = _origLvUp; }
-    return +(gained / _lxLevelCost(lv)).toFixed(3);
+    return +(gained / _lxLevelCost(lv)).toFixed(5);
   };
 
   const out = { levels: LEVELS, target: TARGET, per: {}, chain: {}, control: {}, flags: {} };
@@ -73,7 +79,7 @@ const r = await page.evaluate(() => {
     for (const lv of LEVELS) out.per[id][lv] = share(id, lv);
   }
   for (const lv of LEVELS) {
-    out.chain[lv] = +CHAIN.reduce((a, id) => a + (out.per[id][lv] || 0), 0).toFixed(2);
+    out.chain[lv] = +CHAIN.reduce((a, id) => a + (out.per[id][lv] || 0), 0).toFixed(4);
     // What ordinary, level-appropriate content pays at the same moment.
     const near = Object.keys(QUESTS).filter(k => {
       const q = QUESTS[k]; return q && q.levelReq && Math.abs(q.levelReq - lv) <= 3 && q.rewards && q.rewards.exp;
@@ -88,24 +94,45 @@ const L = r.levels;
 console.log('\nShare of ONE level paid, by player level');
 console.log('  ' + 'quest'.padEnd(24) + L.map(l => ('Lv' + l).padStart(9)).join(''));
 for (const id of Object.keys(r.per)) {
-  console.log('  ' + id.padEnd(24) + L.map(l => String(r.per[id][l]).padStart(9)).join(''));
+  console.log('  ' + id.padEnd(24) + L.map(l => r.per[id][l].toFixed(3).padStart(9)).join(''));
 }
-console.log('  ' + 'FULL CHAIN (4 stages)'.padEnd(24) + L.map(l => String(r.chain[l]).padStart(9)).join(''));
+console.log('  ' + 'FULL CHAIN (4 stages)'.padEnd(24) + L.map(l => r.chain[l].toFixed(3).padStart(9)).join(''));
 console.log('  ' + 'control (median quest)'.padEnd(24) + L.map(l => String(r.control[l]).padStart(9)).join(''));
 
-console.log('\nRUN BUDGET — 0.50 of a level at Lv 40, tapering to 0.15 at Lv 70');
+console.log('\nRUN BUDGET — 0.50 at Lv 40 → 0.15 at Lv 70, still declining after');
 for (const lv of L) {
-  const want = r.target[lv], got = r.chain[lv];
-  check(Math.abs(got - want) <= 0.02, `full 4-stage run pays ~${want} of a level at Lv ${lv}`, { want, got });
+  const want = r.target[lv];
+  if (want == null) continue;                       // 95: checked as a decrease below
+  check(Math.abs(r.chain[lv] - want) <= 0.02, `full 4-stage run pays ~${want} of a level at Lv ${lv}`, { want, got: r.chain[lv] });
 }
 check(L.every((lv, i) => i === 0 || r.chain[lv] <= r.chain[L[i - 1]] + 0.001),
       'the run budget never rises with level', L.map(lv => r.chain[lv]));
+// The point of this change: past 70 it must keep FALLING, not sit flat.
+for (const [a, b] of [[70, 75], [75, 80], [80, 85], [85, 95]]) {
+  check(r.chain[b] < r.chain[a] - 0.001, `the run is still scaling down from Lv ${a} to Lv ${b}`,
+        { [a]: r.chain[a], [b]: r.chain[b] });
+}
+// ...but never to nothing. A linear continuation of the 40-70 slope would have
+// crossed zero at Lv 82.8, which is a second lockout rather than a taper.
+check(r.chain[95] > 0.01, 'the run still pays something at Lv 95 (taper, not a cliff)', r.chain[95]);
 
-console.log('\nSTILL WORTH DOING (not re-locked-out)');
+console.log('\nSTILL AVAILABLE, NEVER ZERO');
+// A flat floor per stage would contradict the taper this file now asserts —
+// stages are SUPPOSED to shrink at high level. What must hold is that the PQ
+// never becomes worthless (the original complaint) and that the budget is
+// always split in the authored proportions rather than collapsing onto one
+// stage as the total shrinks.
 for (const lv of L) {
   const worst = Math.min(...Object.keys(r.per).map(id => r.per[id][lv]));
-  check(worst >= 0.02, `every PQ stage still pays >= 2% of a level at Lv ${lv}`, { worst });
+  check(worst > 0, `every PQ stage still pays something at Lv ${lv}`, { worst });
 }
+const base = Object.fromEntries(Object.keys(r.per).map(id => [id, r.per[id][L[0]] / r.chain[L[0]]]));
+const drift = [];
+for (const id of Object.keys(r.per)) for (const lv of L) {
+  const p = r.per[id][lv] / r.chain[lv];
+  if (Math.abs(p - base[id]) > 0.03) drift.push({ id, lv, want: +base[id].toFixed(3), got: +p.toFixed(3) });
+}
+check(drift.length === 0, 'each stage keeps its authored share of the run at every level', drift.slice(0, 5));
 const ceilingBreaches = [];
 for (const id of Object.keys(r.per)) for (const lv of L) if (r.per[id][lv] > 0.80) ceilingBreaches.push({ id, lv, v: r.per[id][lv] });
 check(ceilingBreaches.length === 0, 'no stage exceeds the 80%-of-a-level hard ceiling', ceilingBreaches);
