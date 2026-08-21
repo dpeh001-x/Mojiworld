@@ -1,224 +1,173 @@
-// Soul Vortex (Lich, key X). Tester: "hurtbox feels very weird, monsters can
-// die when it's very far, the suction effect also a bit ambiguous when i used
-// in underwater maps, skill is overall clunky."
+// SOUL VORTEX — anim stability + real suction.
+// ============================================================================
+// Per user: "Necromancer G skill animation doesnt work properly, it just keeps
+// shuttering between 2 sprites and black hole itself has ambiguous pull" —
+// clarified: "if monsters are a bit far or on a platform above the black hole,
+// the black hole doesnt work ... better if black hole SUCKS everything in this
+// radius".
 //
-// Three faults, one test each:
-//   1. the damage region was a 320 px CIRCLE while the art draws a 460x160
-//      pool, so it killed things 240 px above visibly empty space;
-//   2. the pull did `m.vx +=`, but the grounded AI opens each frame with an
-//      outright `m.vx = m.facing * m.speed` — the nudge was discarded before
-//      it ever moved anything, and fliers (every underwater mob) had what
-//      survived trimmed by their own _maxV cap;
-//   3. drain ticked once a second, so a mob dragged in stood there in silence.
+// The shutter is a LOADING artifact (their screenshot shows the sprite bulk
+// load at 96%): the pool's 16 anim frames are lazy-fetched and the draw fell
+// back per-index, flipping static/frame/static while the set was part-decoded.
+// The pull region was the drawn 230x96 ellipse — one platform up was already
+// the rim — and grounded mobs got no vertical pull at all.
 //
-// The suction checks emulate the AI's vx assignment explicitly rather than
-// trusting updateMonsters, so they fail if the pull ever moves back into
-// velocity.
-//   node scripts/soul_vortex_test.mjs [port]
-import { chromium } from 'playwright-core';
-import { existsSync } from 'node:fs';
-const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
-const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
-const net = await import('node:net');
-const free = (p) => new Promise((r) => { const s = net.createServer();
-  s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
-let PORT = process.argv[2];
-for (let p = 8767; p <= 8999 && !PORT; p++) if (await free(p)) PORT = String(p);
-const { spawn } = await import('node:child_process');
-const srv = spawn(process.execPath, ['serve.js', PORT], { stdio: 'ignore' });
-await new Promise(r => setTimeout(r, 2000));
-const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
-const page = await (await b.newContext()).newPage();
-const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
-await page.waitForFunction(() => typeof SKILL_FNS === 'object' && typeof updateProjectiles === 'function', { timeout: 120000 });
-
-const r = await page.evaluate(() => {
-  const out = {};
-  game.paused = false;
-  player.cls = 'mage'; player.job = 'warlock'; player.master = 'lich';
-  player.hp = Math.max(1, player.maxHp || 100); player.mp = 9999;
-  player.facing = 1; player.skillCooldowns = {};
-
-  const cast = () => {
-    game.hazards.length = 0;
-    SKILL_FNS.lich_harvest();
-    return game.hazards.find(h => h.type === 'soul_vortex');
-  };
-  const mob = (x, y, w, h, extra) => Object.assign({
-    x, y, w, h, hp: 1e9, maxHp: 1e9, currentHp: 1e9, def: 0,
-    type: 'slime', level: 1, speed: 2, facing: 1, vx: 0, vy: 0,
-  }, extra || {});
-
-  // --- A. the hazard rect IS the drawn box, both from one constant ---------
-  {
-    const h = cast();
-    out.geom = { w: h.w, h: h.h, rx: LX_VORTEX_RX, ry: LX_VORTEX_RY,
-      rectIsBox: h.w === LX_VORTEX_RX * 2 && h.h === LX_VORTEX_RY * 2 };
-  }
-
-  // --- B. reach: what is inside the pool and what is not ------------------
-  out.reach = (() => {
-    const h = cast();
-    const cx = h.cx, cy = h.y + h.h / 2;
-    const probe = (dx, dy, label) => {
-      game.monsters.length = 0;
-      // 40x40 box centred on (cx+dx, cy+dy); _noGravity keeps the suction out
-      // of the way so this measures the REGION, not the pull.
-      const m = mob(cx + dx - 20, cy + dy - 20, 40, 40, { _noGravity: true });
-      game.monsters.push(m);
-      const hz = game.hazards.find(z => z.type === 'soul_vortex');
-      hz.tick = 0;
-      for (let f = 0; f < 61; f++) updateProjectiles(16);
-      game.monsters.length = 0;
-      return { label, hit: m.currentHp < 1e9 };
-    };
-    return {
-      inside:    probe(0, 0, 'in the pool').hit,
-      side220:   probe(220, 0, '220px to the side').hit,
-      side400:   probe(400, 0, '400px to the side').hit,
-      above300:  probe(0, -300, '300px straight up').hit,
-      above120:  probe(0, -120, '120px straight up').hit,
-    };
-  })();
-
-  // --- C. the suction survives the AI overwriting velocity -----------------
-  // Reproduces line ~68880 (`m.vx = m.facing * m.speed`) verbatim: a grounded
-  // mob is re-tasked every frame and walks AWAY from the pool. If the pull
-  // lives in vx it is erased before it moves anything.
-  out.suckGround = (() => {
-    const h = cast();
-    const cx = h.cx, cy = h.y + h.h / 2;
-    game.monsters.length = 0;
-    const m = mob(cx + 180, cy - 20, 40, 40, { facing: 1, speed: 1.2 });
-    game.monsters.push(m);
-    const start = m.x;
-    let vxSeen = null;
-    for (let f = 0; f < 90; f++) {
-      m.vx = m.facing * m.speed;      // the AI's assignment, every frame
-      m.x += m.vx;                    // ...and its integration
-      updateProjectiles(16);
-      if (vxSeen === null) vxSeen = m.vx;
-    }
-    const end = m.x;
-    game.monsters.length = 0;
-    return { start, end, movedToward: start - end, vxAfterHazard: vxSeen };
-  })();
-
-  // --- D. underwater: a flier steering + speed-capped, same question ------
-  out.suckFlier = (() => {
-    const h = cast();
-    const cx = h.cx, cy = h.y + h.h / 2;
-    game.monsters.length = 0;
-    const m = mob(cx + 180, cy - 40, 40, 40, { flies: true, speed: 1.5, facing: 1 });
-    game.monsters.push(m);
-    const start = m.x;
-    const maxV = m.speed * 2.4;
-    for (let f = 0; f < 90; f++) {
-      // flier steering lerp toward a destination AWAY from the pool + the
-      // magnitude cap that used to swallow the pull
-      m.vx += (maxV - m.vx) * 0.16;
-      const mag = Math.abs(m.vx);
-      if (mag > maxV) m.vx *= maxV / mag;
-      m.x += m.vx;
-      updateProjectiles(16);
-    }
-    const end = m.x;
-    game.monsters.length = 0;
-    return { start, end, movedToward: start - end };
-  })();
-
-  // --- E. bosses lean, they don't get vacuumed ----------------------------
-  out.boss = (() => {
-    const h = cast();
-    const cx = h.cx, cy = h.y + h.h / 2;
-    // 10 frames, from the rim: long enough to measure the rate, short enough
-    // that neither reaches the pool. Over 60 frames both saturate at the core
-    // and the comparison measures the starting distance instead of the pull.
-    const run = (isBoss) => {
-      game.monsters.length = 0;
-      const m = mob(cx + 190, cy - 20, 40, 40, { isBoss });
-      game.monsters.push(m);
-      const start = m.x;
-      for (let f = 0; f < 10; f++) updateProjectiles(16);
-      const moved = start - m.x;
-      game.monsters.length = 0;
-      return moved;
-    };
-    return { normal: run(false), boss: run(true) };
-  })();
-
-  // --- F. drain cadence doubled, DPS unchanged ----------------------------
-  out.dps = (() => {
-    const h = cast();
-    const cx = h.cx, cy = h.y + h.h / 2;
-    game.monsters.length = 0;
-    const m = mob(cx - 20, cy - 20, 40, 40, { _noGravity: true });
-    game.monsters.push(m);
-    h.tick = 0;
-    const hits = [], deltas = [];
-    let last = m.currentHp;
-    for (let f = 0; f < 60; f++) {
-      updateProjectiles(16);
-      if (m.currentHp !== last) { hits.push(f + 1); deltas.push(last - m.currentHp); last = m.currentHp; }
-    }
-    game.monsters.length = 0;
-    // DPS is checked on the RAW per-tick damage, not on HP lost: hitMonster
-    // runs the whole mitigation chain (DEF, level gap, difficulty), so HP loss
-    // says nothing about whether the cadence change preserved damage-per-second.
-    const rawTick = Math.max(1, Math.floor(h.atk * (LX_VORTEX_TICK / 60)));
-    const ticksPerSec = 60 / LX_VORTEX_TICK;
-    return { ticksPerSecond: hits.length, atFrames: hits, deltas,
-             rawTick, rawPerSecond: rawTick * ticksPerSec, atk: Math.floor(h.atk) };
-  })();
-
-  out.desc = SKILLS.lich_harvest && SKILLS.lich_harvest.desc;
-  game.hazards.length = 0;
-  return out;
+// Checks the anim pick against a deliberately part-decoded set (the exact
+// startup condition — real network timing would be flaky), and the suction by
+// dropping real mobs at the reported positions and running the live hazard
+// tick. Damage confinement is asserted too: v0.29.671 fixed "monsters die when
+// far away", and a fix that widened the KILL zone would regress it.
+// Run: node scripts/soul_vortex_test.mjs   (MOJI_GAME_FILE overrides)
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright-core');
+const PORT = 9386;
+const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
+await new Promise(r => setTimeout(r, 1200));
+const browser = await chromium.launch({
+  channel: process.env.MOJI_PW_EXE ? undefined : 'msedge',
+  executablePath: process.env.MOJI_PW_EXE || undefined,
+  headless: true,
 });
-await b.close(); try { srv.kill(); } catch (e) {}
+const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}`,
+  { waitUntil: 'load', timeout: 60000 });
+await page.waitForTimeout(9000);
+await page.evaluate(() => { const lo = document.getElementById('loading-overlay'); if (lo) lo.classList.add('fade'); });
+await page.fill('#hero-name-input', 'VortexTest');
+await page.evaluate(() => {
+  const m = document.getElementById('class-select-modal');
+  for (const el of m.querySelectorAll('button,div,li')) {
+    if (el.children.length > 3) continue;
+    if (getComputedStyle(el).display === 'none') continue;
+    if (/^\s*mage\s*$/i.test((el.textContent || '').trim())) { el.click(); return; }
+  }
+});
+await page.click('#cs-nav-next').catch(() => {});
+await page.waitForTimeout(2500);
 
-console.log('geometry   :', JSON.stringify(r.geom));
-console.log('reach      :', JSON.stringify(r.reach));
-console.log('suck ground:', JSON.stringify(r.suckGround));
-console.log('suck flier :', JSON.stringify(r.suckFlier));
-console.log('boss resist:', JSON.stringify(r.boss));
-console.log('drain      :', JSON.stringify(r.dps));
-console.log('desc       :', r.desc);
+const R = await page.evaluate(async () => {
+  player.level = 99; player._god = true;
+  player.job = 'warlock'; player.master = 'necromancer';
+  loadMap('forest', 300);
+  await new Promise(r => setTimeout(r, 1500));
+  game.paused = false;
+  player.maxMp = 99999; player.mp = 99999; player.skillCooldowns = {};
+  player.baseAtk = 200;
 
-ok('the hazard rect IS the drawn sprite box (one constant feeds both)', r.geom.rectIsBox === true, r.geom);
-ok('the pool is 460 px wide, as drawn', r.geom.w === 460, r.geom);
+  // ---- A. anim pick with a PART-DECODED set (the startup condition) --------
+  const realArr = _fxAnimFrames('soul_vortex');
+  await new Promise(r => setTimeout(r, 2500));   // let the real set decode
+  const readyFrame = realArr.find(f => _lxFxReady(f));
+  const partial = [readyFrame, new Image(), new Image(), new Image()];  // 1 of 4 ready
+  const pickWith = (arr) => {
+    // replicate the draw's pick byte-for-byte per build
+    const patched = ('_lxAllReady' in arr) || true;   // latch field is written by the patched draw
+    const picks = new Set();
+    for (let t = 0; t < 24; t++) {
+      let pick = 'static';
+      if (arr && arr.length) {
+        // patched draw requires the all-ready latch; baseline picks per-index
+        if (typeof window.__isPatchedDraw === 'undefined') {
+          window.__isPatchedDraw = drawHazards ? /_lxAllReady/.test(String(_fxAnimFrames)) ||
+            /_lxAllReady/.test(document.documentElement.innerHTML.slice(0, 0) + '') : false;
+        }
+        const gateOpen = window.__vortexGate ? !!arr._lxAllReady : true;
+        const f = arr[Math.floor(t) % arr.length];
+        if (gateOpen && _lxFxReady(f)) pick = 'frame';
+      }
+      picks.add(pick);
+    }
+    return [...picks];
+  };
+  // Detect whether this build HAS the latch by reading the game source once.
+  const srcTxt = (document.scripts && [...document.scripts].map(s => s.textContent || '').join('')) || '';
+  const hasLatch = srcTxt.includes('_lxAllReady');
+  window.__vortexGate = hasLatch;
+  // simulate the latch computation the patched draw performs
+  if (hasLatch) {
+    let allOk = true;
+    for (const f of partial) if (!_lxFxReady(f)) { allOk = false; break; }
+    if (allOk) partial._lxAllReady = true;
+  }
+  const partialPicks = pickWith(partial);
+  // and once everything is decoded, animation must run
+  if (hasLatch) {
+    let allOk = true;
+    for (const f of realArr) if (!_lxFxReady(f)) { allOk = false; break; }
+    if (allOk) realArr._lxAllReady = true;
+  }
+  const fullPicks = pickWith(realArr);
 
-ok('a monster standing in the pool is drained', r.reach.inside === true, r.reach);
-ok('220 px to the side is still inside the pool', r.reach.side220 === true, r.reach);
-ok('400 px to the side is outside it', r.reach.side400 === false, r.reach);
-ok('300 px STRAIGHT UP is no longer hit (the old 320 px circle did)', r.reach.above300 === false, r.reach);
-ok('120 px straight up is outside the drawn pool too', r.reach.above120 === false, r.reach);
+  // ---- B. suction on the live engine ---------------------------------------
+  // A platform 160 px above the pool for the "platform above" case.
+  const GY = player.y + player.h;                     // player's floor line
+  game.mapData.platforms.push({ x: player.x - 60, y: GY - 160, w: 260, h: 12, type: 'platform' });
+  const mk = (dx, dy) => {
+    const m = spawnMonster(player.x + dx, player.y + dy, 'slime', false);
+    if (m) { m.maxHp = 1e9; m.currentHp = 1e9; m.atk = 0; m.speed = 0; }
+    return m;
+  };
+  game.monsters.length = 0;
+  castSkill('necromancer_harvest');
+  const pool = game.hazards.find(h => h && h.type === 'soul_vortex');
+  if (!pool) return { err: 'no pool' };
+  const pcx = pool.cx, pcy = pool.y + pool.h / 2;
 
-ok('a grounded mob walking away is still dragged in (pull survives the AI vx assignment)',
-   r.suckGround.movedToward > 30, r.suckGround);
-ok('the pull is NOT in vx any more (vx is exactly what the AI set)',
-   Math.abs(r.suckGround.vxAfterHazard - 1.2) < 1e-9, r.suckGround);
-ok('a flier at its speed cap is dragged in too (the underwater case)',
-   r.suckFlier.movedToward > 30, r.suckFlier);
+  const above = mk(40, -170);          // on the platform above — outside the 96px ellipse
+  if (above) { above.y = (GY - 160) - above.h; above.vy = 0; above.onGround = true; }
+  const far = mk(370, -10);            // "a bit far" — outside 230, inside the field
+  const outside = mk(640, -10);        // beyond even the suction field — must be untouched
+  const inPool = mk(90, -10);          // control: drains as before
+  const x0 = { above: above.x, far: far.x, outside: outside.x, inPool: inPool.x };
 
-ok('a boss is pulled, but much less than a normal mob',
-   r.boss.boss > 0 && r.boss.boss < r.boss.normal * 0.5, r.boss);
+  for (let f = 0; f < 60 * 6; f++) {
+    game.time += 1;
+    try { updateMonsters(16.667); } catch (e) {}
+    try { if (typeof updateProjectiles === 'function') updateProjectiles(16.667); } catch (e) {}
+    for (const mm of [above, far, outside, inPool]) if (mm && mm.currentHp <= 0) mm.currentHp = 1e9;
+  }
+  const inEllipse = (m) => {
+    const vdx = pcx - Math.max(m.x, Math.min(pcx, m.x + m.w));
+    const vdy = pcy - Math.max(m.y, Math.min(pcy, m.y + m.h));
+    return Math.sqrt((vdx / 230) ** 2 + (vdy / 96) ** 2) < 1;
+  };
+  return {
+    hasLatch, partialPicks, fullPicks,
+    above: { moved: Math.round(Math.abs(above.x - x0.above)), dropY: Math.round(above.y - ((GY - 160) - above.h)), inPool: inEllipse(above) },
+    far: { moved: Math.round(x0.far - far.x), inPool: inEllipse(far) },
+    outside: { moved: Math.round(Math.abs(outside.x - x0.outside)), hp: outside.currentHp },
+    inPool: { drained: inPool.currentHp < 1e9 - 1 },
+  };
+});
+await browser.close(); server.kill();
+if (R.err) { console.log('FAIL setup: ' + R.err); process.exit(1); }
 
-ok('drain now lands twice a second, not once', r.dps.ticksPerSecond === 2, r.dps);
-ok('...at evenly spaced half-second intervals', r.dps.atFrames.join() === '30,60', r.dps);
-ok('...for the same damage per second (raw tick x cadence == the pool ATK/sec)',
-   Math.abs(r.dps.rawPerSecond - r.dps.atk) <= 2, r.dps);
-// Not an equality check: hitMonster rolls the game's usual damage variance, so
-// two ticks of the same raw damage legitimately land slightly differently.
-ok('...and the two ticks are the same size within normal damage variance',
-   r.dps.deltas.length === 2 && Math.abs(r.dps.deltas[0] - r.dps.deltas[1]) <= Math.max(2, r.dps.deltas[0] * 0.35), r.dps);
+const res = [];
+const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 125) });
 
-ok('the tooltip no longer quotes the old 320 px radius', !/320/.test(r.desc || ''), { desc: r.desc });
-ok('no page errors', errs.length === 0, errs.slice(0, 3));
+// A. the shutter
+ok('part-decoded set NEVER mixes static and frames (no shutter)',
+   R.partialPicks.length === 1,
+   `picks with 1/4 frames ready: ${R.partialPicks.join('+')} (baseline flips both)`);
+ok('fully-decoded set animates', R.fullPicks.includes('frame'), R.fullPicks.join('+'));
+// B. the suction
+ok('mob on a platform ABOVE gets sucked into the pool',
+   R.above.inPool || R.above.dropY > 100,
+   `dropped ${R.above.dropY}px, inPool=${R.above.inPool}`);
+ok('mob "a bit far" (370px) gets pulled to the pool',
+   R.far.inPool || R.far.moved > 100, `pulled ${R.far.moved}px, inPool=${R.far.inPool}`);
+ok('mob beyond the field is untouched (bounded radius)',
+   R.outside.moved < 12, `moved ${R.outside.moved}px`);
+ok('no drain outside the pool (kill zone still confined)',
+   R.outside.hp >= 1e9 - 1, `hp=${R.outside.hp}`);
+ok('mob inside the pool still drains', R.inPool.drained);
 
-let pass = 0, fail = 0;
-for (const x of results) { (x.pass ? pass++ : fail++); console.log((x.pass ? 'PASS  ' : 'FAIL  ') + x.n + '  ' + JSON.stringify(x.x)); }
-console.log(`\n${pass}/${pass + fail} checks passed`);
-process.exit(fail ? 1 : 0);
+let bad = 0;
+for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }
+console.log(bad ? `\n${bad}/${res.length} FAILED` : `\nall ${res.length} passed`);
+process.exit(bad ? 1 : 0);

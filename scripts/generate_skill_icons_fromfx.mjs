@@ -42,7 +42,7 @@ const MAP = {
   elementalist_cascade: 'elementalist_cascade.png', evadeRoll: 'evade_burst.png', fireball: 'fireball.png',
   flurry: 'flurry.webp', groundSlam: 'ground_slam.png', guardian: 'knight_guardian.png',
   hexmaster_grandhex: 'hexmaster_grandhex.png', holyLight: 'holy_light.png', holyShield: 'holy_shield.png',
-  iceSpike: 'ice_spike.png', lich_harvest: 'soul_vortex.webp', magicBolt: 'magic_bolt.png',
+  iceSpike: 'ice_spike.png', necromancer_harvest: 'soul_vortex.webp', magicBolt: 'magic_bolt.png',
   marksman_oneshot: 'marksman_oneshot.png', meteor: 'meteor.png', multiShot: 'multi_shot.png',
   nightreaper_mark: 'nightreaper_eclipse.png', phantom_cut: 'phantom_cut.png', powerStrike: 'power_strike.png',
   rampage: 'rampage.webp', rush: 'rush.webp', sage_meteorshower: 'sage_meteorshower.png',

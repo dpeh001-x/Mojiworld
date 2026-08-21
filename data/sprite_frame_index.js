@@ -69,6 +69,12 @@ window.LX_SPRITE_FRAME_INDEX = {
    "towerSovereign": 9,
    "young_confused_barnaby": 9
   },
+  "bosses/weave": {
+   "young_confused_barnaby": 9
+  },
+  "bosses/duck": {
+   "young_confused_barnaby": 9
+  },
   "bosses/zodiac/attack": {
    "aquarius": 9,
    "aries": 9,
@@ -497,6 +503,8 @@ window.LX_SPRITE_FRAME_INDEX = {
    "Guguma": 9
   },
   "fx/anim": {
+   "arcane_burst": 9,
+   "arcane_shockwave": 9,
    "archbishop_grail": 9,
    "archbishop_ult": 9,
    "ballista_ult": 9,
@@ -517,9 +525,10 @@ window.LX_SPRITE_FRAME_INDEX = {
    "fx_voidbeam": 9,
    "hexmaster_grandhex": 1,
    "hexmaster_ult": 9,
-   "lich_ult": 9,
    "marksman_oneshot": 9,
    "marksman_ult": 9,
+   "necromancer_ult": 9,
+   "necro_maelstrom": 16,
    "nightreaper_eclipse": 9,
    "nightreaper_ult": 9,
    "phantom_ult": 9,
@@ -531,6 +540,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "qte_molten": 9,
    "qte_spore": 9,
    "qte_tidal": 9,
+   "quakeRing": 9,
    "sage_meteorshower": 9,
    "sage_ult": 9,
    "shadowlord_clones": 9,
@@ -539,7 +549,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "shinobi_ult": 9,
    "skyhunter_gale": 9,
    "skyhunter_ult": 9,
-   "soul_vortex": 9,
+   "soul_vortex": 16,
    "warlord_banner": 9,
    "warlord_ult": 9
   },
@@ -547,11 +557,13 @@ window.LX_SPRITE_FRAME_INDEX = {
    "cloudburst": 9,
    "dash_streak": 9,
    "frost_beam": 9,
+   "gloop_puddle": 9,
    "gravity_well": 9,
    "lava_drop": 9,
    "lava_pool": 9,
    "lightning_pillar": 9,
    "poison_cloud": 9,
+   "quake_plume": 9,
    "quake_ring": 9,
    "shock_ring": 9
   },
@@ -582,6 +594,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "octoHead": 9,
    "octoLeg": 9,
    "pincer": 9,
+   "p_necromancer_soulorb": 9,
    "p_ult_warlord": 9,
    "quake": 9,
    "roar": 9,

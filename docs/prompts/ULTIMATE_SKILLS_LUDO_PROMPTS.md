@@ -100,8 +100,8 @@ Format: **master** · *Ultimate* · `key`. Append the block to the locked prefix
 > ascended energy.
 > *motion:* fire flickers, frost shimmers, lightning crackles, arcane runes orbit in place.
 
-**lich** · *Necrotic Ascendance* · `lich_ult`
-> A necromantic surge of ghostly green souls spiraling upward into a risen lich-crown, skeletal
+**necromancer** · *Necrotic Ascendance* · `necromancer_ult`
+> A necromantic surge of ghostly green souls spiraling upward into a risen necromancer-crown, skeletal
 > thralls forming from emerald soul-fire, a swirling necrotic vortex core, eerie phosphor glow and
 > drifting wisps.
 > *motion:* the soul-wisps drift and flicker, the necrotic vortex churns, phosphor glow pulses.

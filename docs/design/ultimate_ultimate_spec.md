@@ -28,7 +28,7 @@ has only **one** master (Arch Bishop), so the total is **17**, not the codex's "
 | Rogue | Ninja | shadowlord, shinobi |
 | Rogue | Assassin | nightreaper, phantom |
 | Mage | Archmage | sage, elementalist |
-| Mage | Warlock | lich, hexmaster |
+| Mage | Warlock | necromancer, hexmaster |
 | Mage | Priest | archbishop *(only 1 — see Open Decisions)* |
 | Archer | Sniper | marksman, ballista |
 | Archer | Ranger | beastmaster, skyhunter |
@@ -40,7 +40,7 @@ Skill damage is `floor(getAtk() * dmgPct + rng) * critMul`, with class ATK multi
 
 Reference ceilings in the current game:
 - **Master signatures (slot x):** MP 30–60, cd 12k–45k ms, payoff ~2.6×–8.6× ATK.
-- **Biggest existing:** Lich Soul Vortex (cd 45k, ~2.6×/s channel), Doombringer (10 cleaves),
+- **Biggest existing:** Necromancer Soul Vortex (cd 45k, ~2.6×/s channel), Doombringer (10 cleaves),
   powerStrike (8.6×).
 
 **The B ultimate sits one tier above all of that.** Target envelope:
@@ -48,7 +48,7 @@ Reference ceilings in the current game:
 | Lever | Martial (W/R/A) | Caster (Mage) | Rationale |
 | --- | --- | --- | --- |
 | MP cost | **55–70** | **85–100** | Mage Lv-50 pool ≈ 2370 vs martial ≈ 530; scale to pool. (All ×1.25 `MP_MUL` at runtime.) |
-| Cooldown | **55,000–65,000 ms** | **60,000–75,000 ms** | Once-per-major-fight. Longer than Lich's 45 s — this is *the* button. |
+| Cooldown | **55,000–65,000 ms** | **60,000–75,000 ms** | Once-per-major-fight. Longer than Necromancer's 45 s — this is *the* button. |
 | Total damage | **~12×–20× ATK** | **~18×–33× ATK** (spread AoE) | ~1.5–2× the master signature's payoff. |
 
 **Why damage isn't the risk:** at Lv 50 a martial ATK ≈ 110–162, so even 20× ≈ 2,200–3,200 —
@@ -96,7 +96,7 @@ All entries: `slot:'b'`, Lv 50. `id` = `<master>_ult`. Dmg = total ≈× ATK. MP
 | --- | --- | --- | --- | --- | --- | --- |
 | Sage | Meteor Sigil `sage_ult` | ☄️ | 92 | 62000 | 🎯📈 | **Hold to grow a targeting sigil** and stamp multiple impact points; release to drop a comet sized to the charge that links all stamps with a fire-web (16× core + web ticks). ↳ *A player-aimed, charge-scaled armageddon, not 5 random meteors.* |
 | Elementalist | Elemental Apotheosis `elementalist_ult` | 🌀 | 100 | 66000 | 🦋🔁 | **Ascend to elemental form** 6 s: your Z cycles Fire→Ice→Lightning→Arcane (each empowered + AoE). **Recast** to fire a Convergence beam combining whichever elements you used — more variety = bigger beam. ↳ *An elemental stance + combo payoff, not a fixed sequence.* |
-| Lich | Necrotic Ascendance `lich_ult` | ☠️ | 92 | 72000 | 📈🔁 | For 8 s every foe you damage drops a soul that **raises a skeletal thrall** to fight for you. **Recast** (or on end) to consume all thralls in a death-nova scaling with thrall count; you heal per soul. ↳ *Raise an army then detonate it, not a sustained drain.* |
+| Necromancer | Necrotic Ascendance `necromancer_ult` | ☠️ | 92 | 72000 | 📈🔁 | For 8 s every foe you damage drops a soul that **raises a skeletal thrall** to fight for you. **Recast** (or on end) to consume all thralls in a death-nova scaling with thrall count; you heal per soul. ↳ *Raise an army then detonate it, not a sustained drain.* |
 | Hexmaster | Pandemic Hex `hexmaster_ult` | 🧿 | 85 | 65000 | 📈 | Infect the nearest foe with a **contagious curse** that spreads on contact/death; each spread stacks -DEF/-ATK + a doom timer, and every cursed death jumps the curse onward + erupts (9×). ↳ *A viral, self-propagating plague, not a one-shot AoE hex.* |
 | Arch Bishop | Apotheosis `archbishop_ult` | ⚜️ | 100 | 72000 | 🕹️ | Ascend: **you cannot die** for the duration (lethal hits heal instead) and you **steer a roaming pillar of light** across the field that judges all it sweeps (10×, ×1.5 vs dark/undead). Ends with full HP+MP restore. ↳ *A steerable holy beam + cheat-death, not fixed pillars.* |
 
@@ -110,7 +110,7 @@ All entries: `slot:'b'`, Lv 50. `id` = `<master>_ult`. Dmg = total ≈× ATK. MP
 | Skyhunter | Eye of the Tempest `skyhunter_ult` | 🌪️ | 65 | 56000 | 🕹️📈 | Summon a **storm-eye you steer**: it rains homing arrows on everything in range and sucks in enemy projectiles; arrows that kill **split into more arrows** (cascade). ↳ *A steerable storm with a kill-cascade, not a one-time fan.* |
 
 > **Per-master fit:** each ultimate still keys to its G signature's fantasy (Warlord/banners,
-> Doombringer/giant blade, Crusader/holy aegis, Lich/soul-undeath, Skyhunter/homing arrows,
+> Doombringer/giant blade, Crusader/holy aegis, Necromancer/soul-undeath, Skyhunter/homing arrows,
 > Phantom/void-phase, Beastmaster/beasts) — but now delivers it through an **interactive hook**
 > that rewards play, so it's a dramatic, skill-expressive capstone rather than a fire-and-forget nuke.
 
@@ -136,7 +136,7 @@ Line numbers drift (file is edited concurrently) — match by the **anchor text*
 
 3. **17 `SKILLS` entries** (anchor `const SKILLS = {` … `skyhunter_gale:`)
    - Add one `<master>_ult` entry per roster row: `{ name, icon, cls, job, master, slot:'b', mp, cd, desc }`.
-   - `cls/job/master` must match each master (e.g. `cls:'mage', job:'warlock', master:'lich'`).
+   - `cls/job/master` must match each master (e.g. `cls:'mage', job:'warlock', master:'necromancer'`).
    - `skillsForClass()` (anchor `function skillsForClass(`) already filters by cls/job/master — no change.
 
 4. **17 `SKILL_FNS` implementations** (anchor `const SKILL_FNS = {`)
@@ -169,7 +169,7 @@ Line numbers drift (file is edited concurrently) — match by the **anchor text*
 - **Mobile 9-button deck** may need a layout pass (wrap to 2 rows or shrink buttons).
 - **Power creep vs PvE:** damage is deliberately modest in absolute terms (see §3); if these feel
   weak vs trash and strong vs nothing, the lever to pull is cooldown, not damage.
-- **Cast-lock interactions:** channelled ultimates (Nightreaper, Phantom, Lich, Arch Bishop) must
+- **Cast-lock interactions:** channelled ultimates (Nightreaper, Phantom, Necromancer, Arch Bishop) must
   set/clear the cast-lock so they can't be interrupted into a broken state (mirror existing
   channelled signatures).
 - **Icons:** each ultimate uses an icon *distinct from* its own G signature (so the skill bar
@@ -178,7 +178,7 @@ Line numbers drift (file is edited concurrently) — match by the **anchor text*
 - **New engine primitives (scope ↑):** the interactive hooks need a few reusable systems the
   current skills don't all have. Build these once, reuse across ultimates:
   - **🔁 Recast** — a skill that arms a window and re-triggers on the next B press (Warlord,
-    Crusader, Shadowlord, Phantom, Elementalist, Lich). Needs a per-player "armed ultimate" state
+    Crusader, Shadowlord, Phantom, Elementalist, Necromancer). Needs a per-player "armed ultimate" state
     + a B-press router that fires the finisher instead of re-casting; auto-fires on timeout.
   - **⏳ Bullet-time** — a global time-scale multiplier on enemy/projectile updates while the
     player acts at normal speed (Shinobi, Marksman). Check the update loop uses a `dt` we can

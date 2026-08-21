@@ -62,6 +62,16 @@ function describe(rel) {
     if (m) return { cat: 'monster-' + m[2], when: (m[2] === 'hit' ? 'Plays when the player HITS a ' : 'Plays when a ') + m[1] + (m[2] === 'die' ? ' DIES' : '') };
     return { cat: 'monster', when: 'Monster SFX: ' + base };
   }
+  // NPC talk babble. Without this branch every audio/npc/*.mp3 fell through to
+  // the bgm catch-all at the bottom and shipped as 'Background music track
+  // "npc_ashka" (map theme)' -- 44 clips, none of them music, none of them
+  // findable by anyone reviewing NPC voices. The key is the NPC's display name
+  // lowercased with non-alphanumerics collapsed to _ (see _npcTalkKey in
+  // mojiworld_game.html), so it reverses cleanly back to a readable name.
+  if (dir === 'npc') {
+    const who = base.replace(/^npc_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    return { cat: 'npc', when: 'NPC talk babble \u2014 plays when you open a conversation with ' + who + ' (1.2s cooldown; probed and cached on first open)' };
+  }
   if (dir === 'skill') return { cat: 'skill', when: 'Cast SFX — plays when the player uses the "' + base.replace(/_/g, ' ') + '" skill' };
   if (dir === 'boss')  return { cat: 'boss-voice', when: 'Boss intro VOICE — plays once when first entering the ' + base.replace(/^boss_/, '').replace(/_/g, ' ') + ' arena (gated by _bossIntrosSeen)' };
   if (dir === 'ambient') return { cat: 'ambient', when: 'Ambient loop layered under the BGM on ' + base + '-biome maps' };

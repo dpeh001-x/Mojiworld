@@ -79,7 +79,7 @@ Per-skill prompts live in **`SPRITE_DROPIN_PROMPTS.md` §v0.25.488** (lines 144�
 | 🟧 Archer (9) | `arrowShot`, `multiShot`, `chargedShot`, `evadeRoll`, `eagleEye`, `snipe_railgun`, `arrowRain`, `wildBond`, `elementalArrows` |
 | ⭐ Master Warrior (4) | `warlord_warcry`, `doombringer_apoc`, `crusader_aegis`, `dragoon_skylance` |
 | ⭐ Master Rogue (4) | `shadowlord_clones`, `shinobi_seal`, `nightreaper_mark`, `phantom_cut` |
-| ⭐ Master Mage (4) | `sage_meteorshower`, `elementalist_cascade`, `lich_harvest`, `hexmaster_grandhex` |
+| ⭐ Master Mage (4) | `sage_meteorshower`, `elementalist_cascade`, `necromancer_harvest`, `hexmaster_grandhex` |
 | ⭐ Master Archer (4) | `marksman_oneshot`, `ballista_volley`, `beastmaster_pack`, `skyhunter_gale` |
 
 **To generate one:** open `SPRITE_DROPIN_PROMPTS.md`, find the heading matching the key (e.g. `**slash** · *Slash* · D ·`), paste *master VFX prefix* + the `>` line that follows the heading into Ludo.ai, save the output as `Sprites/vfx/<key>.webp`.
