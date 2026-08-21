@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.16';
+const GAME_VERSION = 'v0.30.17';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -54512,6 +54512,50 @@ function _expeditionMobKilled(m) {
     setTimeout(() => _expeditionFloorCleared(), 700);
   }
 }
+// v0.30.16 — EXPEDITION RUN EXP (per user: "as for expedition also similar
+// exp, but after 70 cap at about 0.2 per run").
+//
+// Same shape as the PQ's run budget and the same unit — one full run, priced as
+// a share of one level — so the two big repeatable modes are directly
+// comparable instead of each inventing its own scale. Where they differ is the
+// tail, and that is the user's call: the PQ keeps tapering past 70, the
+// Expedition HOLDS at 0.20. It is the longer, harder mode (10 floors, a boss
+// per five, a run you can lose), so it is the one that stays worth doing.
+const LX_EXP_RUN_AT_40 = 0.50;   // share of one level for a full 10-floor clear
+const LX_EXP_RUN_AT_70 = 0.20;   // per user: "after 70 cap at about 0.2 per run"
+function _lxExpeditionRunTarget(L) {
+  const lv = Math.max(1, Math.floor(L || 1));
+  if (lv <= 40) return LX_EXP_RUN_AT_40;
+  if (lv >= 70) return LX_EXP_RUN_AT_70;   // the cap, flat from here up
+  return LX_EXP_RUN_AT_40 + (lv - 40) * (LX_EXP_RUN_AT_70 - LX_EXP_RUN_AT_40) / 30;
+}
+// Paid PER FLOOR rather than as one lump at the end. A run can be lost, and an
+// all-or-nothing reward would mean nine floors of a ten-floor gauntlet are
+// worth nothing — which is how the mode got into this state. A death on floor 7
+// now banks 7/10 of the budget.
+//
+// Idempotent per floor because two different paths reach the last one: the F10
+// boss kill calls _completeExpedition directly, while floors 1-9 arrive through
+// _expeditionFloorCleared. Both call this; the stamp makes the overlap safe
+// instead of paying the final floor twice.
+function _lxGrantExpeditionFloorExp(floor) {
+  if (!game.expedition || !game.expedition.active) return 0;
+  const f = floor | 0;
+  if (f < 1 || f > EXPEDITION_FLOOR_COUNT) return 0;
+  const _paid = game.expedition._expPaidFloors || (game.expedition._expPaidFloors = {});
+  if (_paid[f]) return 0;
+  _paid[f] = 1;
+  if (typeof _lxLevelCost !== 'function') return 0;
+  // Priced at the player's level AS OF THIS FLOOR, so a level gained mid-run
+  // re-prices the floors still to come rather than paying out against a level
+  // the player has already left.
+  const lv = Math.max(1, Math.floor(player.level || 1));
+  const gain = Math.floor(_lxLevelCost(lv) * _lxExpeditionRunTarget(lv) / EXPEDITION_FLOOR_COUNT);
+  if (!(gain > 0)) return 0;
+  player.exp += gain;
+  if (typeof _maybeLevelUp === 'function') _maybeLevelUp();
+  return gain;
+}
 function _expeditionFloorCleared() {
   if (!game.expedition || !game.expedition.active) return;
   // v0.26.343 — AUDIT FIX (Expedition #3, idempotency). When the last
@@ -54524,6 +54568,13 @@ function _expeditionFloorCleared() {
   const _flr = game.expedition.floor;
   if (game.expedition._floorClearedFor === _flr) return;
   game.expedition._floorClearedFor = _flr;
+  // v0.30.16 — bank this floor's share of the run's EXP budget.
+  {
+    const _xg = _lxGrantExpeditionFloorExp(_flr);
+    if (_xg > 0 && typeof showToast === 'function') {
+      showToast('⚜ Floor ' + _flr + ' cleared — +' + _xg.toLocaleString() + ' EXP', 'epic');
+    }
+  }
   // v0.26.288 — Fire the per-floor quest completion toast BEFORE the
   // floor advances. Pulls from game.expedition.currentQuest stamped by
   // the loadMap entry hook. Also clears it so the next floor's entry
@@ -54992,6 +55043,16 @@ const EXPEDITION_TITLES = [
 // Final completion handler. Grants Mojicoins + bonus rewards + restores snapshot.
 function _completeExpedition() {
   if (!game.expedition || !game.expedition.active) return;
+  // v0.30.16 — the F10 boss kill reaches here WITHOUT passing through
+  // _expeditionFloorCleared, so the final floor's share is banked here too.
+  // The grant is stamped per floor, so whichever path arrives first pays and
+  // the other is a no-op.
+  {
+    const _xg = _lxGrantExpeditionFloorExp(game.expedition.floor);
+    if (_xg > 0 && typeof showToast === 'function') {
+      showToast('⚜ Final floor — +' + _xg.toLocaleString() + ' EXP', 'epic');
+    }
+  }
   // Base reward: 5000c × player.level for finishing the full 10-floor run.
   // Scales with player level so higher-level expeditions pay more.
   // v0.26.293 — Per user "mojicoins does not survive the run". Mojicoins
