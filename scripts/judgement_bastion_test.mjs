@@ -22,7 +22,8 @@ await new Promise(r => setTimeout(r, 2000));
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const page = await (await b.newContext()).newPage();
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+const GAME = process.env.MOJI_GAME_FILE || 'mojiworld_game.html';
+await page.goto(`http://localhost:${PORT}/${GAME}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof SKILL_FNS === 'object' && typeof updatePlayer === 'function', { timeout: 120000 });
 
 const r = await page.evaluate(async () => {
@@ -30,6 +31,7 @@ const r = await page.evaluate(async () => {
   game.paused = false;
   const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none';
   player.cls = 'warrior'; player.job = 'knight'; player.master = 'crusader';
+  player.level = 60;   // the release now drives the REAL castSkill path, which honours the slot-level gate
   player.hp = getMaxHp(); player.mp = 9999; player.skillCooldowns = {};
   game.monsters.length = 0; game.projectiles.length = 0;
   player._judgeStacks = 0; player._judgeHitSeen = player.lastHitTime || 0; player._judgeStackFr = -999;
@@ -69,7 +71,21 @@ const r = await page.evaluate(async () => {
   const farStart = far.x;
 
   player.hp = Math.floor(getMaxHp() * 0.4);
-  SKILL_FNS.crusader_ult();
+  // v0.29.697 made the ult TWO-TAP (this suite predates it and used to call
+  // the FN once, which only ARMS). Drive the real cycle: arm, key-up so the
+  // held-edge clears, then the release tap.
+  // Arm via the FN directly: the boot-default dummy has maxMp ~50 and
+  // updatePlayer clamps to it, so castSkill's 68-MP entry gate (refunded, but
+  // still checked) can never pass here. Arming is free by design; what v0.30.x
+  // actually changed is the RELEASE path, so that is the one routed through
+  // the real castSkill below.
+  SKILL_FNS.crusader_ult();                 // tap 1 — ARM
+  game.keys = {};  updatePlayer(16);        // key physically up -> held-edge clears
+  game.time += 30;                          // past the anti-spam cast lock, like a real second tap
+  // v0.30.x — the release must fire even if MP sits under the cost while
+  // armed (the banked-cast rule); mp=10 < 68 proves it.
+  player.mp = 10;
+  castSkill('crusader_ult');                // tap 2 — RELEASE through the real gate
   out.cast = {
     stacksAfter: player._judgeStacks | 0,
     healed: player.hp === getMaxHp(),
@@ -117,7 +133,9 @@ const r = await page.evaluate(async () => {
   player.skillRanks = { crusader_ult: 10 };
   player._judgeStacks = 5; player.buffs.aegisShield = 0; game.projectiles.length = 0;
   player.skillCooldowns = {}; player.mp = 9999;
-  SKILL_FNS.crusader_ult();
+  SKILL_FNS.crusader_ult();                                   // arm
+  game.keys = {}; updatePlayer(16); game.time += 30;
+  SKILL_FNS.crusader_ult();                                   // release
   out.r10shield = player.buffs.aegisShield | 0;
   await new Promise(r2 => setTimeout(r2, 1700));
   out.r10orbs = game.projectiles.filter(p => p && p.skill === 'holyorb').length;
@@ -126,7 +144,9 @@ const r = await page.evaluate(async () => {
   // --- F. zero stacks: shield + heal still fire, no orbs --------------------
   player._judgeStacks = 0; player.buffs.aegisShield = 0; game.projectiles.length = 0;
   player.skillCooldowns = {}; player.mp = 9999;
-  SKILL_FNS.crusader_ult();
+  SKILL_FNS.crusader_ult();                                   // arm
+  game.keys = {}; updatePlayer(16); game.time += 30;
+  SKILL_FNS.crusader_ult();                                   // release
   await new Promise(r2 => setTimeout(r2, 900));
   out.zero = { shield: player.buffs.aegisShield | 0,
     orbs: game.projectiles.filter(p => p && p.skill === 'holyorb').length };
