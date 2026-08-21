@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.12';
+const GAME_VERSION = 'v0.30.13';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -47492,6 +47492,43 @@ function _bossEpitaph(type, m) {
   }
   return null;   // unlisted bosses get no epitaph (rather than a generic one)
 }
+// v0.30.11 — THE PQ RUN BUDGET (per user: "a full run should scale from 0.5
+// to 0.15 from level 40 to 70").
+//
+// v0.30.9 stopped the PQ paying a Lv-31 reward for a fight that scales to the
+// player, which un-did the post-40 lockout. What it did NOT do is give the run
+// a shape: a full four-stage clear sat flat at ~1.5 levels whether you were 40
+// or 70. The PQ is restartable, so a flat payout means its value relative to
+// the rest of the game grows as the curve steepens — it quietly becomes the
+// best content in the game rather than one option among several.
+//
+// So the CHAIN, not the stage, is the unit that gets budgeted. One full run is
+// worth 0.50 of a level at 40, tapering linearly to 0.15 at 70 and holding
+// there. Each stage takes its authored share of that budget, so the tier
+// spread the numbers were written to express (stage 1 < stage 3 < the boss) is
+// preserved exactly while the total tracks the curve.
+const LX_PQ_CHAIN = ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale'];
+const LX_PQ_RUN_AT_40 = 0.50;   // share of one level for a full 4-stage run
+const LX_PQ_RUN_AT_70 = 0.15;
+function _lxPqRunTarget(L) {
+  const lv = Math.max(1, Math.floor(L || 1));
+  if (lv <= 40) return LX_PQ_RUN_AT_40;
+  if (lv >= 70) return LX_PQ_RUN_AT_70;
+  return LX_PQ_RUN_AT_40 + (lv - 40) * (LX_PQ_RUN_AT_70 - LX_PQ_RUN_AT_40) / 30;
+}
+// A quest's un-tapered weight — the SAME rule the ordinary path uses, so the
+// two cannot drift: the authored EXP only ever picks a weight, never a payout.
+function _lxScaledFracBase(q) {
+  const e = (q && q.rewards && q.rewards.exp) || 0;
+  return Math.max(0.07, Math.min(0.50, e / 11000));
+}
+// Summed live from the quest table rather than hardcoded, so retuning any
+// stage's authored EXP re-divides the same budget instead of inflating it.
+function _lxPqChainBaseSum() {
+  let sum = 0;
+  for (const id of LX_PQ_CHAIN) sum += _lxScaledFracBase(typeof QUESTS !== 'undefined' && QUESTS[id]);
+  return sum || 1;
+}
 function _completeQuest(id) {
   const q = QUESTS[id]; if (!q) return;
   // v0.25.788 — Idempotency guard. Without this, a misfire from dev
@@ -47589,7 +47626,11 @@ function _completeQuest(id) {
     // floor, the same post-40 lift, the same post-50 floor and the same
     // 80%-of-current-level hard ceiling as every other quest — it just stops
     // claiming to be level 31 while fielding level-60 enemies.
-    const _qScaled = !!(q && q.scalesToPlayer);
+    // v0.30.11 — the scaled path applies from Lv 40 up. Below that the player
+    // is at or near the PQ's design level (29-31) and is not outlevelling it,
+    // so the flag is inert and the payout is exactly what it was before
+    // v0.30.9 — no change to on-level play, the whole effect stays post-40.
+    const _qScaled = !!(q && q.scalesToPlayer) && (player.level || 1) >= 40;
     const _qL = _qScaled
       ? Math.max(1, Math.min((typeof LX_SCALED_LEVEL_CAP === 'number') ? LX_SCALED_LEVEL_CAP : 85,
                              Math.floor(player.level || 1)))
@@ -47622,7 +47663,14 @@ function _completeQuest(id) {
     // authored EXP pins the weight at the 0.07 bottom, and past 50 the codex
     // is effectively the only quest content left. Minimum share 0.30 for any
     // 50+ design level: every post-50 quest pays 30-78% of a level.
-    if (_qL >= 50) _frac = Math.max(_frac, 0.30);
+    if (!_qScaled && _qL >= 50) _frac = Math.max(_frac, 0.30);
+    // v0.30.11 — SCALED RUN BUDGET. Take this stage's authored share of what a
+    // full run is worth at the player's level. Stage weights stay in their
+    // authored proportion (2800 / 2800 / 5000 / 6500), so the boss is still
+    // worth more than the lobby sweep; only the total moves.
+    if (_qScaled && typeof _lxPqRunTarget === 'function') {
+      _frac = _lxScaledFracBase(q) * (_lxPqRunTarget(player.level || 1) / _lxPqChainBaseSum());
+    }
     const _floor = (typeof _lxLevelCost === 'function') ? Math.floor(_lxLevelCost(_qL) * _frac) : 0;
     const _questMul = (typeof LX_QUEST_EXP_MULT === 'number') ? LX_QUEST_EXP_MULT : 1;
     // v0.29.301 — mid/late weighting (×1 to Lv 30, up to ×3 by Lv 70). Applied

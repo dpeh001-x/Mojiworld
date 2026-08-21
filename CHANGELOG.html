@@ -121,6 +121,31 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.13 <span class="tag"><span class="pill polish">polish</span> A full PQ run now has a budget: 0.50 of a level at 40, 0.15 at 70</span></h2>
+<p>Per user: <em>a full run should scale from 0.5 to 0.15 from level 40 to 70.</em></p>
+<p>v0.30.9 stopped the PQ paying a Lv-31 reward for a fight that scales to the player, which un-did the post-40 lockout. What it did not do is give the run a <em>shape</em>: a full four-stage clear sat flat at ~1.5 levels whether you were 40 or 70. Since the PQ is restartable, a flat payout means its value relative to everything else grows as the curve steepens &mdash; it quietly becomes the best content in the game rather than one option among several.</p>
+<p>So the <b>chain</b>, not the stage, is now the unit that gets budgeted.</p>
+<table>
+<tr><th>Player level</th><th>Lv 40</th><th>Lv 45</th><th>Lv 50</th><th>Lv 60</th><th>Lv 70</th><th>Lv 80</th></tr>
+<tr><td>Stage 1 &mdash; Ticket Rush Lobby</td><td>0.087</td><td>0.077</td><td>0.067</td><td>0.046</td><td>0.026</td><td>0.026</td></tr>
+<tr><td>Stage 2 &mdash; Clockwork Spire</td><td>0.087</td><td>0.077</td><td>0.067</td><td>0.046</td><td>0.026</td><td>0.026</td></tr>
+<tr><td>Stage 3 &mdash; Carriage of Ascension</td><td>0.155</td><td>0.137</td><td>0.119</td><td>0.083</td><td>0.047</td><td>0.047</td></tr>
+<tr><td>Stage 4 &mdash; Master Conductor</td><td>0.171</td><td>0.151</td><td>0.131</td><td>0.091</td><td>0.051</td><td>0.051</td></tr>
+<tr><td><b>Full four-stage run</b></td><td><b>0.50</b></td><td><b>0.44</b></td><td><b>0.38</b></td><td><b>0.27</b></td><td><b>0.15</b></td><td><b>0.15</b></td></tr>
+<tr><td><em>was (v0.30.9)</em></td><td><em>1.47</em></td><td><em>1.47</em></td><td><em>1.55</em></td><td><em>1.55</em></td><td><em>1.55</em></td><td><em>1.55</em></td></tr>
+</table>
+<p>The taper is linear from 40 to 70 and holds at 0.15 above it. Each stage takes its <b>authored share</b> of the budget (2800 / 2800 / 5000 / 6500), so the tier spread the numbers were written to express &mdash; lobby sweep &lt; carriage &lt; boss duel &mdash; is preserved exactly while only the total moves. The chain sum is read live from the quest table rather than hardcoded, so retuning any stage's authored EXP re-divides the same budget instead of inflating it.</p>
+<p>The Endless Express is not part of the four-stage chain but rides the same per-level factor, so the repeatable run tapers with everything else rather than becoming the way around the budget.</p>
+
+<h3>Below Lv 40 is untouched &mdash; verified, not assumed</h3>
+<p>The scaled path now applies only from Lv 40 up. Below that a player is at or near the PQ's design level of 29&ndash;31 and is not outlevelling anything, so the flag goes inert and the payout is exactly what it was before v0.30.9 touched this. Measured against the commit that predates the flag, the full-chain share is identical at every level checked: <b>Lv 25 &rarr; 3.137, Lv 30 &rarr; 1.597, Lv 35 &rarr; 0.313, Lv 39 &rarr; 0.168</b> on both builds.</p>
+<p>One consequence worth stating plainly: because the old design-level decay is steep, the run is worth <b>0.168 of a level at Lv 39 and 0.50 at Lv 40</b> &mdash; a step <em>up</em> for gaining one level. That falls directly out of the spec (0.50 at 40) meeting the untouched pre-40 curve. It is left as specified rather than quietly smoothed; extending the taper down to ~36 would remove the step without changing either endpoint, if that reads better in play.</p>
+<p>The post-50 floor is skipped for scaled content for the same reason the post-40 lift already was: both exist to rescue quests pinned to a fixed design level, and an explicit budget supersedes them. A floor would fight the taper and hold the run above target at exactly the levels it is meant to be coming down.</p>
+
+<h3>Verification</h3>
+<p><code>scripts/pq_post40_exp_test.mjs</code> now asserts the curve itself &mdash; every point within 0.02 of target, and monotonically non-increasing in level. Against v0.30.9 it fails all seven budget checks (flat 1.47&ndash;1.55); against this build all pass, alongside the existing guards that no stage breaches the 80%-of-a-level ceiling and that the authored tier spread survives.</p>
+
+
 <h2>v0.30.12 <span class="tag"><span class="pill bug">bug</span> Soul Vortex could strand mobs falling through every platform</span></h2>
 <p>Per user: <em>Soul vortex has some glitch in underwater maps: in the middle of the map, some mobs will fall past their platform and through to the vortex.</em></p>
 <p><b>The pull itself is correct</b> &mdash; <code>v0.29.945</code>&rsquo;s outer suction sets <code>dropThrough</code> on a grounded mob above the pool precisely so it can be sucked off its ledge. <b>The defect is that the flag had no owner.</b> The player&rsquo;s <code>dropThrough</code> is re-cleared every single frame by <code>dropTimer</code>; monsters have no such reset, and this hazard tick is the only writer in the file. So any exit that skipped a release stranded the mob <em>permanently</em> able to fall through every platform on the map. Two such exits existed:</p>

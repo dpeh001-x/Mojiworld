@@ -39,7 +39,10 @@ await page.waitForFunction(() => typeof _completeQuest === 'function' && typeof 
 const r = await page.evaluate(() => {
   const CHAIN = ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale'];
   const ALL = CHAIN.concat(['q_clockwork_express']);
-  const LEVELS = [40, 50, 60, 70];
+  const LEVELS = [40, 45, 50, 60, 70, 80];
+  // Per user: a full run is worth 0.50 of a level at Lv 40, tapering linearly
+  // to 0.15 at Lv 70 and holding there afterwards.
+  const TARGET = { 40: 0.50, 45: 0.4417, 50: 0.3833, 60: 0.2667, 70: 0.15, 80: 0.15 };
 
   // Share of ONE level paid by completing `id` at level `lv`.
   //
@@ -63,7 +66,7 @@ const r = await page.evaluate(() => {
     return +(gained / _lxLevelCost(lv)).toFixed(3);
   };
 
-  const out = { levels: LEVELS, per: {}, chain: {}, control: {}, flags: {} };
+  const out = { levels: LEVELS, target: TARGET, per: {}, chain: {}, control: {}, flags: {} };
   for (const id of ALL) {
     out.flags[id] = !!(QUESTS[id] && QUESTS[id].scalesToPlayer);
     out.per[id] = {};
@@ -90,15 +93,18 @@ for (const id of Object.keys(r.per)) {
 console.log('  ' + 'FULL CHAIN (4 stages)'.padEnd(24) + L.map(l => String(r.chain[l]).padStart(9)).join(''));
 console.log('  ' + 'control (median quest)'.padEnd(24) + L.map(l => String(r.control[l]).padStart(9)).join(''));
 
-console.log('\nNOT LOCKED OUT AFTER 40');
+console.log('\nRUN BUDGET — 0.50 of a level at Lv 40, tapering to 0.15 at Lv 70');
+for (const lv of L) {
+  const want = r.target[lv], got = r.chain[lv];
+  check(Math.abs(got - want) <= 0.02, `full 4-stage run pays ~${want} of a level at Lv ${lv}`, { want, got });
+}
+check(L.every((lv, i) => i === 0 || r.chain[lv] <= r.chain[L[i - 1]] + 0.001),
+      'the run budget never rises with level', L.map(lv => r.chain[lv]));
+
+console.log('\nSTILL WORTH DOING (not re-locked-out)');
 for (const lv of L) {
   const worst = Math.min(...Object.keys(r.per).map(id => r.per[id][lv]));
-  check(worst >= 0.15, `every PQ stage pays >= 15% of a level at Lv ${lv}`, { worst });
-}
-
-console.log('\nSTILL IN THE LEVEL-APPROPRIATE BAND (not a farm)');
-for (const lv of L) {
-  check(r.chain[lv] <= 2.0, `a full 4-stage run pays <= 2 levels at Lv ${lv}`, r.chain[lv]);
+  check(worst >= 0.02, `every PQ stage still pays >= 2% of a level at Lv ${lv}`, { worst });
 }
 const ceilingBreaches = [];
 for (const id of Object.keys(r.per)) for (const lv of L) if (r.per[id][lv] > 0.80) ceilingBreaches.push({ id, lv, v: r.per[id][lv] });
