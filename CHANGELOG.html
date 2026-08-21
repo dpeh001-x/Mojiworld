@@ -121,6 +121,14 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.10 <span class="tag"><span class="pill bug">bug</span> The start gate now retries failed sprites &mdash; the refresh is built in</h2>
+<p>Per user: <em>my tester experienced unloaded sprites when starting the game that resolved on refresh, we MUST gate the start of the game to ensure sprites load prior to game start.</em></p>
+<p>The v0.29.735 commence gate already holds the door for <em>pending</em> sprites &mdash; but it waved an <b>errored</b> one through, by design, on the theory that a failed image "is not coming". That theory is wrong for the common case: in a ~2,000-request boot burst the typical failure is <b>transient</b> (reset socket, HTTP/2 stream error, CDN blip). The file exists; the one attempt died; nothing anywhere asked again. Renderers skip broken images silently, so the world started with holes &mdash; and a refresh fixed it precisely because a refresh <em>is</em> the retry.</p>
+<p><b>The gate now issues that retry itself.</b> At the click, and on every 200&nbsp;ms tick while holding, any errored watched sprite is re-fetched (twice at most) at high priority &mdash; the re-fetch turns it pending again, so it <b>holds the door</b> like everything else. Only a file that fails three attempts is treated as genuinely absent, and a genuinely absent file must not hold the player: fail-open is preserved.</p>
+<p><b>And a post-boot self-heal covers everything after the door.</b> The gate has bounded-hostage releases (45&nbsp;s stall / 120&nbsp;s cap) and the world streamer keeps fetching art long into play &mdash; any of it can hit the same transient error, where "walk out and walk back in" would have been the only fix. Post-boot preloads now feed the same watch list, and a 20&nbsp;s sweep re-fetches failures (three attempts lifetime), compacts finished entries, and retires itself when the list drains.</p>
+<p>Proven through the <b>real boot</b> &mdash; real overlay, real menu click, real gate (<code>scripts/sprite_gate_retry_test.mjs</code>, 9/9): with the first two fetches of <b>every NPC sprite</b> forcibly aborted (42 URLs, 87 aborted requests), the gate holds, retries, and releases with <b>zero broken sprites</b> across all 487 watched; a permanently-dead file releases the door in ~5&nbsp;s (retries spent, no 45&nbsp;s stall); the gate owns no pause and no latched keys after release; the heal sweep retries errored images and drops healthy + retry-spent ones. Neighbours green: rebirth 9/9, title 12/12.</p>
+
+
 <h2>v0.30.9 <span class="tag"><span class="pill bug">bug</span> The Clockwork PQ is a post-40 levelling path again</span></h2>
 <p>Per user: <em>PQ should not be block out doing for post 40 levelling.</em></p>
 <p>Measured before touching anything, by driving the real <code>_completeQuest</code> path. What the PQ paid, as a share of one level:</p>

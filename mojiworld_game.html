@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.9';
+const GAME_VERSION = 'v0.30.10';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -55767,6 +55767,44 @@ function _lxSpritePillTick() {
     }, 1800);
   }
 }
+// v0.30.x — POST-BOOT SPRITE SELF-HEAL. The commence gate covers the front
+// door, but it has bounded-hostage releases (45s stall / 120s cap) and the
+// world keeps loading art for as long as the streamer runs — any of those
+// loads can hit the same transient error. This sweep re-fetches every failed
+// image on the watch list (three attempts lifetime, then it is a genuinely
+// missing file), drops finished entries so the list shrinks toward empty,
+// and retires itself when there is nothing left to watch.
+function _lxSpriteHealSweep() {
+  const list = window._lxSpriteWatch || [];
+  const keep = [];
+  let retried = 0;
+  for (const im of list) {
+    if (!im || !im.src) continue;
+    if (im.complete && im.naturalWidth) continue;          // healthy — off the list
+    if (im.complete && !im.naturalWidth) {                  // errored
+      if ((im._lxRetries | 0) >= 3) continue;               // three strikes — a 404, not a blip
+      im._lxRetries = (im._lxRetries | 0) + 1;
+      const u = im.src; im.src = ''; im.src = u; retried++;
+      keep.push(im);
+    } else keep.push(im);                                   // still in flight — keep watching
+  }
+  window._lxSpriteWatch = keep;
+  return retried;
+}
+function _lxSpriteHealStart() {
+  if (window._lxSpriteHealIv) return;
+  let rounds = 0;
+  window._lxSpriteHealIv = setInterval(() => {
+    let r = 0;
+    try { r = _lxSpriteHealSweep(); } catch (e) {}
+    rounds++;
+    try { if (r) console.log('[heal] re-fetching ' + r + ' failed sprite(s)'); } catch (e) {}
+    if (rounds >= 15 || !(window._lxSpriteWatch || []).length) {
+      clearInterval(window._lxSpriteHealIv);
+      window._lxSpriteHealIv = 0;
+    }
+  }, 20000);
+}
 function _lxPreloadMapAssets(id, onProgress, prio) {
   // v0.26.962 — collect now, load/decode through a x6 pool below (the
   // all-at-once version contributed to the iOS boot kill).
@@ -55900,7 +55938,16 @@ function _lxPreloadMapAssets(id, onProgress, prio) {
   // gate watches the images themselves, not this promise, so nothing that
   // times out here is forgotten. Post-boot calls (map enters, the world
   // streamer) skip the feed: the gate has already run its one shot.
-  try { if (!window._lxSpriteGateDone) window._lxSpriteWatch = (window._lxSpriteWatch || []).concat(_imgs); } catch (e) {}
+  // v0.29.735 fed pre-boot calls only. v0.30.x — post-boot calls (map
+  // enters, the world streamer) now feed the SAME list: a transient fetch
+  // error on a newly-entered map's mobs has the exact no-retry hole the boot
+  // gate had, and "walk out and back in" must not be the fix for those. The
+  // gate still runs its one shot; _lxSpriteHealSweep compacts the list as
+  // entries finish, so this never grows unbounded.
+  try {
+    window._lxSpriteWatch = (window._lxSpriteWatch || []).concat(_imgs);
+    if (window._lxSpriteGateDone && typeof _lxSpriteHealStart === 'function') _lxSpriteHealStart();
+  } catch (e) {}
   const all = _lxAsyncPool(6, _imgs, _loadOne);
   return Promise.race([all, new Promise((res) => setTimeout(res, 25000))]).then(() => total);
 }
@@ -130913,6 +130960,36 @@ try { window.LXAuth = LXAuth; } catch (e) {}
         for (const _im of (window._lxSpriteWatch || [])) if (_im && _im.src && !_im.complete) n++;
         return n;
       };
+      // v0.30.x — RETRY ERRORED SPRITES (per user: "my tester experienced
+      // unloaded sprites when starting the game that resolved on refresh, we
+      // MUST gate the start of the game to ensure sprites load prior to game
+      // start"). The v0.29.735 gate waved an errored image through on the
+      // theory that it is "not coming" — but in a ~2,000-request boot burst
+      // the common failure is TRANSIENT (reset socket, h2 stream error, CDN
+      // blip): the file exists, the one attempt died, and nothing anywhere
+      // asked again. Renderers skip broken images SILENTLY, so the world
+      // started with holes, and a refresh fixed it precisely because a
+      // refresh IS the retry. The gate now issues that retry itself: an
+      // errored watch image is re-fetched (twice at most), becomes
+      // !complete again, and holds the door like any other pending sprite.
+      // Only a file that has failed three attempts is treated as truly
+      // absent — that is a 404, not a blip, and it must not hold the door.
+      const _retryErrored = () => {
+        let k = 0;
+        try {
+          for (const _im of (window._lxSpriteWatch || [])) {
+            if (!_im || !_im.src || !_im.complete || _im.naturalWidth) continue;
+            if ((_im._lxRetries | 0) >= 2) continue;
+            _im._lxRetries = (_im._lxRetries | 0) + 1;
+            if ('fetchPriority' in _im) { try { _im.fetchPriority = 'high'; } catch (e) {} }
+            const _u = _im.src; _im.src = ''; _im.src = _u; k++;
+          }
+        } catch (e) {}
+        return k;
+      };
+      let _retried0 = 0;
+      try { _retried0 = _retryErrored(); } catch (e) {}
+      try { if (_retried0) console.log('[boot] commence gate: re-fetching ' + _retried0 + ' errored sprite(s)'); } catch (e) {}
       let _left = 0;
       try { _left = _pend(); } catch (e) { _left = 0; }
       if (_left > 0) {
@@ -130968,6 +131045,9 @@ try { window.LXAuth = LXAuth; } catch (e) {}
         let _rekicked = false;
         const _iv = setInterval(() => {
           let n = _total; try { n = _pend(); } catch (e) { n = 0; }
+          // an image that ERRORS while we hold would silently leave the
+          // count; give it the same capped retry the gate-entry sweep ran
+          try { if (_retryErrored()) n = _pend(); } catch (e) {}
           if (n < _lastLeft) { _lastLeft = n; _lastMove = Date.now(); }
           _paint(n);
           // THE RE-KICK. Measured (25 Mbps throttle, ~2,000-request boot
@@ -131015,6 +131095,9 @@ try { window.LXAuth = LXAuth; } catch (e) {}
       window._lxSpriteGateDone = true;
       try { console.log('[boot] commence gate: all ' + (window._lxSpriteWatch || []).length + ' sprites ready at click'); } catch (e) {}
     }
+    // v0.30.x — the held path re-enters _finishHide after release, so this
+    // single line arms the post-boot self-heal for every way through the door
+    try { if (typeof _lxSpriteHealStart === 'function') _lxSpriteHealStart(); } catch (e) {}
     // v0.26.x — perceived-responsiveness: start dissolving the overlay on the
     // very first line, BEFORE the session/toast bookkeeping below — measured
     // ~290 ms from click to fade start when the fade waited its turn.
