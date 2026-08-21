@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.8';
+const GAME_VERSION = 'v0.30.9';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -21402,6 +21402,8 @@ const QUESTS = {
   // every consumer guards against that), and the new combined quest
   // will pick up automatically on their next level-up tick.
   q_clockwork_underpass: {
+    // v0.30.8 — lobby mobs ride expressScaling (2x field HP/ATK at the player's level)
+    scalesToPlayer: true,
     name: 'STAGE 1 — The Ticket Rush Lobby', icon: '🎫', levelReq: 29,   // v0.29.329 — was 15; Ticket Mechs are Lv 31
     // v0.26.309 — Per user "Replace the 2nd stage of the PQ with the
     // current 3rd stage jump quest". Stage 2 (Carriage of Ascension
@@ -21442,6 +21444,8 @@ const QUESTS = {
   //     _completeQuest via a `q.dynamicRewardFn(a)` hook. The static
   //     rewards block below is the floor / display fallback.
   q_clockwork_express: {
+    // v0.30.8 — the repeatable Express run - express mechs ride expressScaling
+    scalesToPlayer: true,
     name: 'The Endless Express — Conductor\'s Final Punch', icon: '🚄', levelReq: 31,   // v0.29.329 — was 25; Express mechs are Lv 31
     kind: 'kill', target: 'ticketMech', count: 99,
     npc: 'Milo',
@@ -21484,6 +21488,8 @@ const QUESTS = {
   // summit portal warps to the Carriage (was: town) when the 4 pieces
   // are collected, so the player chains straight into Stage 3.
   q_pq_spire: {
+    // v0.30.8 — no combat, but it is a required rung of a scaled chain - leaving it pinned would make the middle of the PQ the one stage worth nothing
+    scalesToPlayer: true,
     name: 'STAGE 2 — The Clockwork Spire', icon: '🧩', levelReq: 30,   // v0.29.329 — was 25
     kind: 'visit', target: 'pq_piece', count: 4,
     npc: 'Milo',
@@ -21499,6 +21505,8 @@ const QUESTS = {
   // mid-trial between the Spire and the Master Conductor duel, not a
   // long mob grind. Spawn cap on tower (carriage) map reduced to 8.
   q_pq_carriage: {
+    // v0.30.8 — carriage mechs ride expressScaling
+    scalesToPlayer: true,
     name: 'STAGE 3 — The Carriage of Ascension', icon: '🚃', levelReq: 30,   // v0.29.329 — was 25
     kind: 'kill', target: 'ticketMech', count: 8,
     noScale: true,   // v0.29.843 — see STAGE 1; the curve inflated this beat 8 -> 400
@@ -21519,6 +21527,8 @@ const QUESTS = {
   // v0.26.088 — Prereq updated: now requires q_pq_spire (puzzle pieces)
   // in addition to the original q_clockwork_underpass kill quest.
   q_pq_finale: {
+    // v0.30.8 — the duel already scales to the player, as this quest's own name comment says
+    scalesToPlayer: true,
     name: 'STAGE 4 — The Master Conductor', icon: '🎩', levelReq: 31,   // v0.29.329 — was 25; the duel itself scales to the player
     advancement: false,
     kind: 'boss', target: 'pqConductor', count: 1,
@@ -47559,7 +47569,31 @@ function _completeQuest(id) {
     // quest's DESIGN level (q.levelReq) so back-tracking a low quest at high
     // level can't be farmed. Floor is event-independent → quests never go
     // negligible whether or not the opening ×10 event is running.
-    const _qL = Math.max(1, (q && q.levelReq) || player.level || 1);
+    // v0.30.8 — SCALED CONTENT PAYS AT THE LEVEL IT IS FOUGHT AT (per user:
+    // "PQ should not be block out doing for post 40 levelling").
+    //
+    // The design-level keying below exists to stop back-farming a low quest at
+    // high level, and it is right for every quest whose content is fixed at its
+    // design level. The PQ's is not: its maps set `expressScaling`, which
+    // re-stats each mech onto the player's own capped level at DOUBLE field
+    // HP/ATK. Pinning the payout to levelReq 29-31 meant a Lv 60 player fought
+    // Lv 60 mechs for a Lv 31 reward — 0.4% of a level, against the 30% an
+    // ordinary quest pays at that level. Measured, not estimated.
+    //
+    // Capped at LX_SCALED_LEVEL_CAP because that is where the MONSTERS stop
+    // scaling: past 85 the content is no longer getting harder, so the reward
+    // must not keep climbing either. The two ceilings are deliberately the same
+    // constant so they cannot drift apart.
+    //
+    // This is not a new reward tier. A flagged quest goes through the same
+    // floor, the same post-40 lift, the same post-50 floor and the same
+    // 80%-of-current-level hard ceiling as every other quest — it just stops
+    // claiming to be level 31 while fielding level-60 enemies.
+    const _qScaled = !!(q && q.scalesToPlayer);
+    const _qL = _qScaled
+      ? Math.max(1, Math.min((typeof LX_SCALED_LEVEL_CAP === 'number') ? LX_SCALED_LEVEL_CAP : 85,
+                             Math.floor(player.level || 1)))
+      : Math.max(1, (q && q.levelReq) || player.level || 1);
     // v0.29.886 — the curve floor was the quiet reason late quests paid so
     // little. _frac is the share of a level a quest guarantees, and at /30000
     // the authored values (mostly ~2400-4000) resolved to 8-13% -- so a Lv 26-40
@@ -47577,7 +47611,10 @@ function _completeQuest(id) {
     // +3%/level (x2.2 at 60, x3.1 at 90), clamped to 0.78 so the v0.29.309
     // hard ceiling — 80% of the CURRENT level, user-set — keeps the final
     // word. Net: post-40 quests pay ~35-78% of a level instead of ~21-36%.
-    if (_qL >= 40) _frac = Math.min(0.78, _frac * (1.6 + (_qL - 40) * 0.03));
+    // v0.30.8 — scaled content is exempt: its payout already tracks the
+    // player's level via _qScaled above, so applying the design-level lift on
+    // top compensates twice and pins every PQ stage to the 0.78 ceiling.
+    if (!_qScaled && _qL >= 40) _frac = Math.min(0.78, _frac * (1.6 + (_qL - 40) * 0.03));
     // v0.30.5 — POST-50 FLOOR (per user: "make sure that the quests are
     // well tuned to give exp after level 40"). Measured with a corrected
     // harness: the 40s band lands med 0.67 of a level, but 50+ sagged to med

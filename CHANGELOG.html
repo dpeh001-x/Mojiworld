@@ -121,6 +121,41 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.9 <span class="tag"><span class="pill bug">bug</span> The Clockwork PQ is a post-40 levelling path again</span></h2>
+<p>Per user: <em>PQ should not be block out doing for post 40 levelling.</em></p>
+<p>Measured before touching anything, by driving the real <code>_completeQuest</code> path. What the PQ paid, as a share of one level:</p>
+<table>
+<tr><th>Player level</th><th>Lv 40</th><th>Lv 50</th><th>Lv 60</th><th>Lv 70</th></tr>
+<tr><td>PQ finale (Master Conductor)</td><td>0.062</td><td>0.013</td><td>0.004</td><td><b>0.002</b></td></tr>
+<tr><td>PQ Stage 1</td><td>0.018</td><td>0.004</td><td>0.001</td><td><b>0.000</b></td></tr>
+<tr><td><em>Ordinary quest at that level</em></td><td><em>0.713</em></td><td><em>0.429</em></td><td><em>0.300</em></td><td><em>0.360</em></td></tr>
+</table>
+<p>At Lv 60 the PQ paid <b>75&times; less</b> than ordinary content; at Lv 70 a full four-stage run rounded to <b>zero</b>. Not "worth less" &mdash; worth nothing, which is a lockout in everything but name.</p>
+
+<h3>One line, and an assumption that stopped being true</h3>
+<p>Quest EXP keys every calculation to the quest's <b>design</b> level:</p>
+<p><code>const _qL = Math.max(1, (q &amp;&amp; q.levelReq) || player.level || 1);</code></p>
+<p>That is deliberate and correct &mdash; it is what stops a Lv 70 player back-farming the Lv 5 board. Its unstated assumption is that a quest's <em>content</em> is frozen at its design level too. For the PQ that is false: its maps carry <code>expressScaling</code>, which re-stats every mech onto the player's own capped level at <b>double a field mob's HP and ATK</b>. Stage 4's own source comment already said <em>"the duel itself scales to the player"</em>. The fight tracked the player up to Lv 85; the payout stayed pinned at <code>levelReq</code> 29&ndash;31.</p>
+<p>So the PQ got strictly <em>harder</em> as you levelled while paying a Lv-31 reward &mdash; the worst of both. Five quests now carry <code>scalesToPlayer</code>, and for those the payout keys to the player's level, capped at <code>LX_SCALED_LEVEL_CAP</code> &mdash; the same constant that caps the monsters, deliberately shared so the two ceilings cannot drift apart. Past 85 the content stops getting harder, so the reward stops climbing.</p>
+
+<h3>The first attempt was too generous, and the measurement caught it</h3>
+<p>Re-keying alone pinned stages 3, 4 and the Express to <b>exactly 0.78</b> &mdash; the clamp ceiling &mdash; at every level from 40 up, and a full chain paid <b>2.3 levels per run</b> on content the player can restart at will via the Ticket Rush restart. That re-creates precisely the failure v0.29.320 was written to fix: everything at the ceiling, so the authored tier spread stops meaning anything and a stage-1 errand is worth what the boss duel is worth. It also makes the PQ a farm, against the standing <em>"levelling should not be so quick, there should be some grind"</em>.</p>
+<p>The cause was double compensation. The post-40 <em>lift</em> exists to help quests whose payout is pinned to a fixed design level &mdash; which is exactly the pinning the new flag removes. Scaled content is now exempt from it. The post-50 <b>floor</b> is deliberately kept: that one is a genuine never-go-negligible guarantee, not a compensation.</p>
+<table>
+<tr><th>Stage</th><th>Before (Lv 60)</th><th>After (all levels 40&ndash;70)</th></tr>
+<tr><td>Stage 1 &mdash; Ticket Rush Lobby</td><td>0.001</td><td><b>0.26&ndash;0.30</b></td></tr>
+<tr><td>Stage 2 &mdash; Clockwork Spire</td><td>0.002</td><td><b>0.26&ndash;0.30</b></td></tr>
+<tr><td>Stage 3 &mdash; Carriage of Ascension</td><td>0.003</td><td><b>0.455</b></td></tr>
+<tr><td>Stage 4 &mdash; Master Conductor</td><td>0.004</td><td><b>0.50</b></td></tr>
+<tr><td><b>Full four-stage run</b></td><td>0.01</td><td><b>1.47&ndash;1.55 levels</b></td></tr>
+</table>
+<p>The authored spread survives intact and holds at every level, which is the shape the numbers were written to have. A full run is worth roughly four to five ordinary quests &mdash; a reasonable price for 150 kills, a thirty-floor jump quest, a carriage sweep and a boss duel.</p>
+
+<h3>Verification</h3>
+<p>New <code>scripts/pq_post40_exp_test.mjs</code> guards <em>both</em> directions &mdash; too little and the PQ is locked out again, too much and it is a farm. Against the previous build it fails five checks, including a Lv-70 payout of 0.000; against this one all pass.</p>
+<p>Two rounds of its numbers were wrong before they were right, both my harness rather than the game, and both worth recording. <code>_completeQuest</code> calls <code>_maybeLevelUp()</code>, so reading <code>player.exp</code> afterwards under-reports exactly the large payouts the test exists to check. Worse, assigning <code>player.level</code> directly does not rebuild the bookkeeping the level-up path reads, so it consumed an unrelated amount of the grant &mdash; which surfaced as wild non-monotonic figures (0.13 at Lv 40, 0.054 at 50, 0.30 at 60) that looked like a game bug and were not. Reconstructing the total across levels crossed fixed the arithmetic but not the cause; the test now holds <code>_maybeLevelUp</code> off and measures the <b>grant</b>, which is what the question actually asks.</p>
+
+
 <h2>v0.30.8 <span class="tag"><span class="pill bug">bug</span> No fall damage underwater</span></h2>
 <p>Per user: <em>ensure players do not take fall damage in underwater maps.</em></p>
 <p>Four underwater maps set <code>isVerticalTower: true</code> &mdash; <b>Coral Reef Depths</b> (2200&nbsp;px), <b>Abyssal Trench</b> (2400), <b>Sunken Kelp Forest</b> (2100) and <b>Bubblebloom Grotto</b> (2200). They set it so the camera follows on both axes, but the v0.25.470 fall-damage block reads the same flag, so it was arming on all four. None of them override the tuning, so they inherited the flat default free window of <b>20 floors &times; 70&nbsp;px = 1400&nbsp;px</b> &mdash; comfortably shorter than the shafts themselves. Swimming down one and touching the floor cost <b>&minus;11&nbsp;HP and 384&nbsp;ms of hitstun</b>, measured on the live build.</p>
