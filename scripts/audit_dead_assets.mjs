@@ -59,10 +59,18 @@ for (const f of files) {
   if (d && !dirsReferenced.has(d + '/') && BLOB.includes(`'${d}/`) === false && BLOB.includes(d)) dirsReferenced.add(d + '/');
 }
 
+// ---- documented keeps: files with NO path reference BY DESIGN -----------
+// assets/fonts/ holds the sources of fonts the game EMBEDS as base64
+// (cinzel-700.woff2 -> LX_BOSSFONT_B64). No runtime path ever names them, so
+// the sweep calls them dead - deleting one silently orphans the embedded
+// copy with no way to regenerate it. Anything matching stays, always.
+const KEEP = ['assets/fonts/'];
+
 const alive = [];
 const dead = [];
 const why = {};
 for (const f of files) {
+  if (KEEP.some(pre => f.startsWith(pre))) { alive.push(f); why[f] = 'keep-list'; continue; }
   const dir = f.slice(0, f.lastIndexOf('/') + 1);
   const base = f.slice(f.lastIndexOf('/') + 1);
   const stem = base.replace(/\.[a-z0-9]+$/i, '');
