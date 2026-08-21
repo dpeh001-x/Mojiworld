@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.20';
+const GAME_VERSION = 'v0.30.21';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -63092,6 +63092,19 @@ const WAR_CHARGE_TAP     = 7;    // < 7 frames held = tap (no charge bonus)
 const MAGE_CHAIN_FRAMES  = 60;   // ~1 s window for chain cast
 const ARCHER_ROOT_MS     = 420;  // ms — _rootedTimer is decayed via dt(ms)
 const ARCHER_STEADY_CAP  = 40;   // +40% damage at max steady
+// v0.30.21 — ELEMENTAL APOTHEOSIS charge. 90 frames (1.5 s) rather than the
+// warrior's 45: this is a Lv-50 ultimate on a 66 s cooldown, and the wind-up
+// IS the skill now — the ring of elemental pulses it throws while charging is
+// where a good chunk of its damage lives, so a short charge would cheat the
+// player out of the part they are holding the key for.
+const LX_APO_CHARGE_FRAMES = 90;
+const LX_APO_PULSE_EVERY   = 10;    // frames between charge pulses (~6/s)
+const LX_APO_PULSE_DMG     = 0.8;   // x ATK per pulse
+const LX_APO_PULSE_R0      = 130;   // pulse radius at 0% charge...
+const LX_APO_PULSE_R1      = 330;   // ...and at 100%
+const LX_APO_SPHERE_BASE   = 3.5;   // x ATK on the released sphere at no charge
+const LX_APO_SPHERE_SCALE  = 7.5;   // ...plus this much at full charge
+const LX_APO_TAP_FLOOR     = 0.35;  // a tap still launches something real
 
 function _classIdentityActive() {
   // v0.21.2 — class identity mechanics (charge, momentum, chain, rooted fire)
@@ -63117,7 +63130,37 @@ function _tickClassIdentity(dt) {
   }
   if (player._warCharge) {
     const held = game.time - player._warCharge.start;
-    player._warCharge.power = Math.min(1, held / WAR_CHARGE_FRAMES);
+    player._warCharge.power = Math.min(1, held / (player._warCharge.frames || WAR_CHARGE_FRAMES));
+    // v0.30.21 — APOTHEOSIS: the charge is not just a meter, it is an attack.
+    // Elemental pulses ripple out from the mage while the key is held, growing
+    // with the charge, so holding in the middle of a pack is the correct play
+    // and the wind-up is never dead time.
+    if (player._warCharge.skillId === 'elementalist_ult') {
+      const _ap = player._warCharge.power;
+      if ((held % LX_APO_PULSE_EVERY) === 0 && held > 0) {
+        const _ar = LX_APO_PULSE_R0 + (LX_APO_PULSE_R1 - LX_APO_PULSE_R0) * _ap;
+        const _acol = ['#ff5522', '#66ddff', '#ffee44', '#aa66ff'][(held / LX_APO_PULSE_EVERY | 0) % 4];
+        if (typeof performAround === 'function') performAround(_ar, LX_APO_PULSE_DMG, { color: _acol, kb: 2 });
+        if (typeof spawnSmoothExplosion === 'function') {
+          spawnSmoothExplosion(player.x + player.w / 2, player.y + player.h / 2, _ar * 0.9, _acol, _acol + '55', { life: 14 });
+        }
+      }
+      // Elements spiralling INWARD to the gathering sphere — the read the
+      // tester asked for: you can see the shot being assembled.
+      if (game.particles && (held % 2) === 0) {
+        const _aa = (held * 0.35) + Math.random() * 0.6;
+        const _ad = 90 + (1 - _ap) * 70;
+        game.particles.push({
+          x: player.x + player.w / 2 + Math.cos(_aa) * _ad,
+          y: player.y + player.h / 2 + Math.sin(_aa) * _ad * 0.7,
+          vx: -Math.cos(_aa) * (2.4 + _ap * 2.6),
+          vy: -Math.sin(_aa) * (2.0 + _ap * 2.2),
+          life: 16 + Math.random() * 8,
+          color: ['#ff7744', '#88e8ff', '#ffee66', '#c08cff'][(held >> 1) % 4],
+          size: 2 + _ap * 2.5
+        });
+      }
+    }
     // Archer: holding to charge locks the feet — freeze horizontal motion
     // while the bow is drawn. Matches the user request: "hold to freeze for
     // more damage". Gravity still applies; Steady Aim still builds.
@@ -63269,9 +63312,17 @@ const _LX_NO_CHARGE_SKILLS = new Set([
 ]);
 function tryStartClassCharge(slotKey) {
   if (!_classIdentityActive()) return false;
-  if (player.cls !== 'warrior' && player.cls !== 'archer') return false;
   const slot = KEY_TO_SLOT[slotKey];
   if (!slot || slot === 'd') return false;  // basic attack untouched
+  // v0.30.21 — the charge meter was warrior/archer only. Elemental Apotheosis is
+  // now a hold-and-release cast, so the mage is admitted for THAT SKILL ALONE:
+  // a blanket class opening would turn every mage spell into a hold, which is
+  // not what was asked for and would change the whole class's feel.
+  if (player.cls !== 'warrior' && player.cls !== 'archer') {
+    if (player.cls !== 'mage') return false;
+    const _mf = skillBySlot(slot);
+    if (!_mf || _mf.id !== 'elementalist_ult') return false;
+  }
   // v0.25.277 — Tower basicOnly modifier blocks all non-'d' skills in
   // castSkill at L14120, but the charge windup still ran (consuming
   // animation frames + sound + visual feedback) only to be silently
@@ -63285,7 +63336,9 @@ function tryStartClassCharge(slotKey) {
   if (player.hp <= 0 || game.paused || game.dying > 0) return false;
   if (((player.frozenTimer | 0) > 0 || (typeof _QTE !== 'undefined' && _QTE.active)) && !player._god) return false;  // frozen / shackle-QTE: no voluntary action (poll-loop gate doesn't cover charge)
   if (player._warCharge) return true;  // already charging
-  player._warCharge = { slotKey, start: game.time, skillId: found.id, power: 0, cls: player.cls };
+  player._warCharge = { slotKey, start: game.time, skillId: found.id, power: 0, cls: player.cls,
+    // v0.30.21 — per-skill charge length; everything else keeps WAR_CHARGE_FRAMES.
+    frames: (found.id === 'elementalist_ult') ? LX_APO_CHARGE_FRAMES : WAR_CHARGE_FRAMES };
   return true;
 }
 
@@ -63308,7 +63361,7 @@ function tryReleaseClassCharge(slotKey) {
     return true;
   }
   const held = game.time - c.start;
-  const power = Math.min(1, held / WAR_CHARGE_FRAMES);
+  const power = Math.min(1, held / (c.frames || WAR_CHARGE_FRAMES));
   player._warCharge = null;
   if (!isReady(c.skillId)) {
     // v0.25.277 — silent-consume toast. Previously the charge was eaten
@@ -63331,7 +63384,7 @@ function tryReleaseClassCharge(slotKey) {
   }
   // Tap — tiny hold time = minimum charge
   if (held < WAR_CHARGE_TAP) {
-    player._releasedCharge = 0;
+    player._releasedCharge = (c.skillId === 'elementalist_ult') ? LX_APO_TAP_FLOOR : 0;
     castSkill(c.skillId);
     return true;
   }
@@ -71570,14 +71623,65 @@ const SKILL_FNS = {
     }
   },
   elementalist_ult: () => {
-    // v0.26.x — sequential element novas (Fire / Ice-freeze / Lightning) → Convergence beam.
-    spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'elementalist_ult', { size: 280, life: 90, spin: Math.PI * 2 });   // v0.26.x — full 360° rotation per user (rot = spin×t, t:0→1)
-    showToast('ELEMENTAL APOTHEOSIS', 'legendary'); flash(0.6);
+    // ELEMENTAL APOTHEOSIS v2 (v0.30.21) — per tester: "u can hold to charge,
+    // when charging, deal damage around u, then u let go the sphere gets
+    // launched across the map".
+    //
+    // The old cast was four scripted beats on fixed timers: fire nova, ice
+    // nova, lightning nova, then a beam. Nothing about it was played — you
+    // pressed the key and watched 1.7 s of cutscene. The damage is now split
+    // across two halves the player actually controls: the ring of elemental
+    // pulses thrown WHILE the key is held (see _tickClassIdentity, which owns
+    // that half), and the sphere released when it is let go.
+    //
+    // Charge power arrives through _releasedCharge, the same field the warrior
+    // and archer holds use. The mage branch of _computeClassSkillMul does not
+    // consume it — it is doing chain-cast detection — so it is still here to
+    // read, and this cast clears it so it can never leak into a later one.
+    const power = (player._releasedCharge != null) ? player._releasedCharge : LX_APO_TAP_FLOOR;
+    player._releasedCharge = null;
     const cx = player.x + player.w / 2, cy = player.y + player.h / 2;
-    scheduleSkillTimer(() => { if (player.hp <= 0) return; performAround(360, 3.2, { color: '#ff5522', kb: 7 }); flash(0.25); }, 120);
-    scheduleSkillTimer(() => { if (player.hp <= 0) return; performAround(390, 2.6, { color: '#66ddff', kb: 5 }); for (const m of game.monsters) { if (m.currentHp > 0 && !m.boss && ((m.x + m.w/2 - cx)*(m.x + m.w/2 - cx) + (m.y + m.h/2 - cy)*(m.y + m.h/2 - cy)) < 390*390) m.freezeTimer = Math.max(m.freezeTimer || 0, 1500); } flash(0.25); }, 620);
-    scheduleSkillTimer(() => { if (player.hp <= 0) return; performAround(410, 3.4, { color: '#ffee44', kb: 7 }); flash(0.3); }, 1120);
-    scheduleSkillTimer(() => { if (player.hp <= 0) return; const dir = player.facing || 1; game.projectiles.push({ x: cx, y: cy - 20, vx: dir * 15, vy: 0, w: 180, h: 96, life: 95, damage: getAtk() * 7.0 + 40, owner: 'player', skill: 'voidbeam', bspr: 'bult_elementalist', spin: 0.12, bsprKeepAspect: true, color: '#ffffff', noGravity: true, pierce: true }); flash(0.85); addShake(16); addHitStop(120); }, 1700);   // v0.26.x — spinning vortex (360°) + spawned 20px higher per user
+    const dir = player.facing || 1;
+    const full = power >= 0.999;
+
+    spawnSpriteBurst(cx, cy, 'elementalist_ult', { size: 200 + 140 * power, life: 70, spin: Math.PI * 2 });
+    showToast(full ? 'ELEMENTAL APOTHEOSIS — CONVERGENCE' : 'ELEMENTAL APOTHEOSIS', 'legendary');
+    flash(0.35 + 0.35 * power);
+    addShake(8 + 10 * power);
+    if (full) addHitStop(90);
+
+    // The release itself still pops a nova at the mage's feet — the sphere
+    // leaves, and everything already pressed against you eats the departure.
+    performAround(240 + 120 * power, 1.6 + 2.0 * power, { color: '#c08cff', kb: 6 });
+
+    // ---- the sphere ------------------------------------------------------
+    // Travels the map (pierce + noGravity, life 200 frames), sized and
+    // damaged by the charge. The four-element trail is stamped by the
+    // projectile loop's own draw; this only has to launch it.
+    const dmg = getAtk() * (LX_APO_SPHERE_BASE + LX_APO_SPHERE_SCALE * power) + 40;
+    const sz = 110 + 130 * power;
+    game.projectiles.push({
+      x: cx, y: cy - 20, vx: dir * (11 + 5 * power), vy: 0,
+      w: sz, h: sz * 0.92, life: 200,
+      damage: dmg, owner: 'player', skill: 'voidbeam',
+      bspr: 'bult_elementalist', spin: 0.12, bsprKeepAspect: true,
+      color: '#ffffff', noGravity: true, pierce: true,
+    });
+    // A short lead-in beam so the launch reads as a shot rather than a drift.
+    if (typeof spawnSmoothBeam === 'function') {
+      spawnSmoothBeam(cx, cy - 20, dir > 0 ? 0 : Math.PI, 260 + 200 * power, 12 + 14 * power, '#c08cff', { life: 14 });
+    }
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      game.particles.push({
+        x: cx, y: cy - 20,
+        vx: Math.cos(a) * (3 + 5 * power) + dir * 2,
+        vy: Math.sin(a) * (3 + 5 * power),
+        life: 26 + Math.random() * 14,
+        color: ['#ff7744', '#88e8ff', '#ffee66', '#c08cff'][i % 4],
+        size: 2 + power * 3
+      });
+    }
   },
   necromancer_ult: () => {
     // v0.29.x - NECROTIC ASCENDANCE, remade on the Soul Vortex machinery
