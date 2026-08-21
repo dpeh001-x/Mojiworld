@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.18';
+const GAME_VERSION = 'v0.30.19';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -17093,7 +17093,7 @@ const SKILLS = {
   dragoon_skylance:   { name:'Sky Lance',          icon:'🐉', cls:'warrior', job:'knight',    master:'dragoon',     slot:'x', mp:35, cd:16000,  desc:'Warp above the nearest foe on screen and dive, punching through one platform — then a second dive re-targets and lands ~1s later. Rank 10 adds a third dive.' },
   // Rogue path
   shadowlord_clones:  { name:'Mirror Shadow',      icon:'👥', cls:'rogue', job:'ninja',    master:'shadowlord',  slot:'x', mp:40, cd:22000, desc:'3 levitating clones flank you at long range — circular AOE strikes for 11s; when they fade they SHATTER in a triple shadow nova.' },
-  shinobi_seal:       { name:'Kage Rush',          icon:'🎴', cls:'rogue', job:'ninja',    master:'shinobi',     slot:'x', mp:35, cd:9000,  desc:'Zip across the map slashing in rapid succession.' },
+  shinobi_seal:       { name:'Kage Rush',          icon:'🎴', cls:'rogue', job:'ninja',    master:'shinobi',     slot:'x', mp:18, cd:9000,  desc:'4 charges. Each is a short shadow-step slash across a crimson lane — chain them, then the seal recharges.' },
   nightreaper_mark:   { name:'Eclipse Massacre',   icon:'🌑', cls:'rogue', job:'assassin', master:'nightreaper', slot:'x', mp:55, cd:12000, desc:'Stationary 2.4 s channel: a blood-eclipse rains spectral daggers on every visible enemy in 10 batches, staggering them, then snaps shut for an aftershock nova and a small heal.' },
   phantom_cut:        { name:'Voidrift Execution', icon:'👻', cls:'rogue', job:'assassin', master:'phantom',     slot:'x', mp:55, cd:12000, desc:'Mark up to 6 enemies and execute them in chain-teleport strikes — each pierces 40% DEF with a strong crit bias; final hit detonates a shadow nova.' },
   // Mage path
@@ -63772,7 +63772,7 @@ function castSkill(id) {
   // v0.26.399 — holyShield (Knight ultimate) excluded: it grants a 5 s
   // invuln on a 22 s CD, so letting Quickening zero its cooldown allowed a
   // near-continuous invulnerability chain. Same class of exploit Sleight had.
-  if (computedCd > 0 && id !== 'sleight' && id !== 'holyShield') {
+  if (computedCd > 0 && id !== 'sleight' && id !== 'holyShield' && id !== 'shinobi_seal') {
     const cdrChance = (player.mods && player.mods.cdrChance) || 0;
     if (cdrChance > 0 && Math.random() < cdrChance) {
       player.skillCooldowns[id] = 0;
@@ -63794,6 +63794,19 @@ function castSkill(id) {
       player.skillCooldowns[id] = 250;  // short re-cast gate, no full CD yet
     }
     // else: full computedCd already applied above; charges stay at 0
+  }
+  // v0.30.19 — KAGE RUSH is a 4-charge chain (per user: "make it a 4x spammable
+  // onscreen only" skill). Same cadence as Sleight above: each press spends a
+  // charge behind a short re-cast gate, and the full cooldown lands only when
+  // the fourth is spent. The gate is 300 ms rather than Sleight's 250 because
+  // one dash takes ~230 ms to play out and a shorter gate lets a second cast
+  // start before the first has finished moving the player.
+  if (id === 'shinobi_seal') {
+    if (!player._kageCharges || player._kageCharges <= 0) {
+      player._kageCharges = LX_KAGE_CHARGES;
+    }
+    player._kageCharges--;
+    if (player._kageCharges > 0) player.skillCooldowns[id] = 300;
   }
   player.attacking = true;
   // v0.29.x — Tutorial "Swing your weapon (Z)" step ticks on the SWING itself,
@@ -63933,8 +63946,8 @@ function castSkill(id) {
     // Drives the new attack_rogue_crouch anim. Same 540 ms hold so
     // the seal phase reads before the kage-rush kicks in.
     player._ninjaCrouchAt = (game.time | 0);
-    player._ninjaCrouchUntil = (game.time | 0) + 32;
-    player.attackTimer = Math.max(player.attackTimer, 540);
+    player._ninjaCrouchUntil = (game.time | 0) + 14;   // v0.30.19 — was 32; see the cast-lock note in castSkill
+    player.attackTimer = Math.max(player.attackTimer, 240);
   } else if (id === 'necromancer_harvest' || id === 'hexmaster_grandhex') {
     // v0.25.294 — Necromancer + Hexmaster G — levitate into the air with
     // arms spread wide. Stylised dark-magic pose: body hovers ~10 px
@@ -64052,7 +64065,7 @@ function castSkill(id) {
     // _ninjaCrouchUntil flag (32 frames = 540 ms) only covers the
     // initial pose, not the dash-resolution chain that follows.
     if (id === 'shinobi_seal') {
-      const _shinobiFrames = Math.ceil(1300 / (1000 / 60));
+      const _shinobiFrames = Math.ceil(LX_KAGE_LOCK_MS / (1000 / 60));
       if (_now + _shinobiFrames > _lockEnd) _lockEnd = _now + _shinobiFrames;
     }
     if (!_castNoOp) player._castLockUntil = _lockEnd;   // v0.29.697 — a cast that no-op'd (and refunded) must not lock the next press
@@ -65937,6 +65950,56 @@ function spawnSmoothBeam(x, y, angle, length, width, color, opts) {
     life: opts.life || 14, maxLife: opts.life || 14,
   });
 }
+// v0.30.19 — KAGE RUSH v2 tuning constants, gathered so the cadence, the reach
+// and the damage can be read (and re-tuned) in one place instead of being
+// scattered through the cast.
+//   CHARGES     how many dashes one seal holds
+//   REACH_FRAC  dash distance as a fraction of the VIEWPORT — the "onscreen
+//               only" requirement expressed the only way that survives maps
+//               of different widths
+//   DMG         per-mob multiplier PER DASH. The old single cast paid 4.5x
+//               once; four dashes at 1.7x pay 6.8x on a target you actually
+//               stay next to, which is the trade: more total damage, but only
+//               if you keep committing to the same enemy.
+const LX_KAGE_CHARGES = 4;
+const LX_KAGE_REACH_FRAC = 0.42;
+const LX_KAGE_STEPS = 8;
+const LX_KAGE_STEP_MS = 26;
+const LX_KAGE_DMG = 1.7;
+const LX_KAGE_LOCK_MS = 240;
+// v0.30.19 — KAGE RUSH VFX. Two primitives the effect library did not have, both
+// drawn procedurally: the game ships no kanji art and a bolt is cheaper to
+// generate than to author (every strike wants a different jag).
+// A glyph stamp — scales up and fades, dark rim + hot core, so it reads over
+// both the bright hive and the dark sepulchre backgrounds.
+function spawnKanjiFlash(x, y, glyph, color, opts) {
+  opts = opts || {};
+  if (!game.smoothFx) game.smoothFx = [];
+  game.smoothFx.push({
+    type: 'kanji', x, y, glyph: glyph || '影', color: color || '#ff2b46',
+    size: opts.size || 96, rot: opts.rot || 0,
+    life: opts.life || 26, maxLife: opts.life || 26,
+  });
+}
+// A jagged bolt. The jag is generated ONCE at spawn and stored, never per
+// frame: a bolt re-jittered every frame reads as noise rather than a strike.
+function spawnKageBolt(x, y, angle, length, color, opts) {
+  opts = opts || {};
+  if (!game.smoothFx) game.smoothFx = [];
+  const segs = opts.segs || 6;
+  const jag = opts.jag || 16;
+  const pts = [];
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs;
+    const off = (i === 0 || i === segs) ? 0 : (Math.random() * 2 - 1) * jag;
+    pts.push({ t, off });
+  }
+  game.smoothFx.push({
+    type: 'bolt', x, y, angle, length, color: color || '#fff0f4', pts,
+    thickness: opts.thickness || 3,
+    life: opts.life || 12, maxLife: opts.life || 12,
+  });
+}
 // v0.25.212 — One-shot named-sprite burst for class skill flair. Spawns
 // a smoothFx entry that drawSmoothFx renders via drawImage from LX_FX
 // (the burst grows + fades over its lifetime so it pops on cast). Use
@@ -66512,6 +66575,52 @@ function drawSmoothFx(_behindPass) {
       const _oy = fx.anchorBottom ? -hpx : -hpx * _py;
       ctx.drawImage(sprite, _ox, _oy, wpx, hpx);
       ctx.restore();
+    } else if (fx.type === 'kanji') {
+      // v0.30.19 — glyph stamp: punches in fast, holds, fades. Drawn additively
+      // over a dark rim so it survives a bright background.
+      const t = 1 - fx.life / fx.maxLife;
+      const grow = 0.55 + Math.min(1, t * 3.2) * 0.55;
+      ctx.save();
+      ctx.translate(sx, fx.y);
+      ctx.rotate(fx.rot);
+      ctx.scale(grow, grow);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '900 ' + fx.size + 'px "Noto Sans JP", "Yu Gothic", "Meiryo", sans-serif';
+      ctx.globalAlpha = alpha * 0.9;
+      ctx.lineWidth = Math.max(3, fx.size * 0.09);
+      ctx.strokeStyle = 'rgba(20,0,6,0.85)';
+      ctx.strokeText(fx.glyph, 0, 0);
+      ctx.fillStyle = fx.color;
+      ctx.fillText(fx.glyph, 0, 0);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = alpha * 0.5;
+      ctx.fillStyle = '#ffd8de';
+      ctx.fillText(fx.glyph, 0, 0);
+      ctx.restore();
+      ctx.globalCompositeOperation = 'source-over';
+    } else if (fx.type === 'bolt') {
+      // v0.30.19 — lightning crackle. The jag came from spawn; this only draws it.
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.translate(sx, fx.y);
+      ctx.rotate(fx.angle);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (let pass = 0; pass < 2; pass++) {
+        ctx.beginPath();
+        for (let i = 0; i < fx.pts.length; i++) {
+          const p = fx.pts[i];
+          const px = p.t * fx.length, py2 = p.off;
+          if (i === 0) ctx.moveTo(px, py2); else ctx.lineTo(px, py2);
+        }
+        ctx.globalAlpha = alpha * (pass === 0 ? 0.35 : 0.95);
+        ctx.lineWidth = fx.thickness * (pass === 0 ? 3.2 : 1);
+        ctx.strokeStyle = pass === 0 ? fx.color : '#ffffff';
+        ctx.stroke();
+      }
+      ctx.restore();
+      ctx.globalCompositeOperation = 'source-over';
     } else if (fx.type === 'impact') {
       // Expanding star-burst flash — 4-point with soft radial
       const t = 1 - fx.life / fx.maxLife;
@@ -69861,111 +69970,110 @@ const SKILL_FNS = {
   },
 
   shinobi_seal: () => {
-    // KAGE RUSH — rocket horizontally across the arena with repeat slashes
+    // KAGE RUSH v2 (v0.30.19) — per user: "make it a 4x spammable onscreen only
+    // crossmap skill with new VFX", with a reference image of a single heavy
+    // crimson slash beam carrying a kanji glyph and lightning crackle.
+    //
+    // WHAT CHANGED AND WHY. The old cast rocketed to the far map edge in one
+    // press — 14 steps over ~490 ms, hitting every mob in the lane once. That
+    // is what made the class read as "samey": it was a screen-clear that also
+    // removed you from the fight, so there was nothing to aim and nothing to
+    // follow up. It is now a SHORT step you spend four times (the charge
+    // cadence lives in castSkill next to Sleight's), which turns one button
+    // into a chain you steer.
+    //
+    // The reach is deliberately derived from the VIEWPORT, not the world: the
+    // whole point is that a dash never takes you somewhere you cannot see.
+    // 0.42 of a screen puts the landing well inside the camera even when the
+    // camera lags the player, and four of them still cover more ground than
+    // the old single cast did on most maps.
     const startX = player.x;
     const wMax = game.mapData.worldWidth;
-    const destX = player.facing > 0 ? wMax - player.w - 40 : 40;
-    player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
+    const _vw = (typeof W === 'number' && W > 0) ? W : 960;
+    const reach = Math.round(_vw * LX_KAGE_REACH_FRAC);
+    const destX = Math.max(40, Math.min(wMax - player.w - 40, startX + player.facing * reach));
     player.vy = 0;
-    // v0.25.217 — Epic chained seal animation. Spawn 7 talismans along
-    // the dash path with staggered timing + alternating spin direction
-    // so the cast reads as a flowing seal-trail. First and last are
-    // bigger (cast + final stamp); intermediate seals scale up subtly
-    // toward the destination for a "chain accelerates" feel.
-    const SEALS = 7;
+    const dir = player.facing;
     const py = player.y + player.h / 2;
-    // v0.26.145 — Per user "make shinobi G skill sprite direction
-    // dependent". Capture facing at cast time and pass it as flipX into
-    // every seal burst along the dash, so the seal silhouette (asymmetric
-    // talisman art) faces the direction the player is rushing. Capture
-    // BEFORE the dash because player.facing changes per-step inside the
-    // dash loop (L34437) once the rush starts.
-    const _shinobiFlipX = player.facing < 0;
-    for (let i = 0; i < SEALS; i++) {
-      const t = i / (SEALS - 1);
-      const sx = startX + (destX - startX) * t + player.w / 2;
-      const isEnd = (i === 0 || i === SEALS - 1);
-      // v0.26.442 — Kage Rush seal sprite 150% size (×1.5) per user.
-      const sz   = (isEnd ? 170 : 110 + i * 6) * 1.5;
-      const life = isEnd ? 32  : 22;
-      // v0.25.551 — spin removed per user request; seals hold steady.
+    const laneL = Math.min(startX, destX);
+    const laneW = Math.abs(destX - startX) + player.w;
+    const _flipX = dir < 0;
+
+    // ---- the cut ---------------------------------------------------------
+    // One crimson beam down the whole lane, laid at cast time so the strike
+    // reads as a single stroke rather than a trail of pieces. Three widths on
+    // the same axis: a wide bloom, the body, and a hot white core.
+    spawnSmoothBeam(laneL, py, 0, laneW, 34, '#8c0018', { life: 15 });
+    spawnSmoothBeam(laneL, py, 0, laneW, 18, '#ff2b46', { life: 17 });
+    spawnSmoothBeam(laneL, py, 0, laneW, 6,  '#ffd8de', { life: 13 });
+    // Two shorter diagonal accents so the strike has the reference's rake
+    // instead of reading as a flat bar.
+    spawnSmoothBeam(laneL + laneW * 0.18, py, -0.42 * dir, laneW * 0.55, 7, '#ff5a70', { life: 12 });
+    spawnSmoothBeam(laneL + laneW * 0.42, py,  0.38 * dir, laneW * 0.45, 6, '#ff5a70', { life: 11 });
+    // Lightning crackle along the lane.
+    for (let b = 0; b < 5; b++) {
+      const bx = laneL + laneW * (0.1 + 0.2 * b);
       scheduleSkillTimer(() => {
-        spawnSpriteBurst(sx, py, 'shinobi_seal', { size: sz, life, flipX: _shinobiFlipX, keepAspect: true });   // v0.26.x — keep landscape talisman aspect (was squashed into a square)
-      }, i * 90);
+        spawnKageBolt(bx, py + (Math.random() * 40 - 20), (Math.random() * 2 - 1) * 0.9,
+          70 + Math.random() * 70, '#ff6a80', { thickness: 3, jag: 15, life: 11 });
+      }, b * 26);
     }
-    const totalSteps = 14;
+    // The seal stamp and the glyph, at the landing.
+    scheduleSkillTimer(() => {
+      spawnSpriteBurst(destX + player.w / 2, py, 'shinobi_seal',
+        { size: 240, life: 30, flipX: _flipX, keepAspect: true });
+      spawnKanjiFlash(destX + player.w / 2, py - 34, '影', '#ff2b46', { size: 104, life: 28 });
+    }, 90);
+
+    // ---- the dash --------------------------------------------------------
+    // Eight steps at 26 ms (~208 ms) instead of fourteen at 35: the step is a
+    // fifth of the old distance, so the old cadence would have crawled.
+    const totalSteps = LX_KAGE_STEPS;
     const hitIds = new Set();
     for (let i = 0; i < totalSteps; i++) {
       scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
         const t = (i + 1) / totalSteps;
         player.x = startX + (destX - startX) * t;
-        player.y = player.y;
         player.vx = 0; player.vy = 0;
-        player.facing = destX > startX ? 1 : -1;
-        // Slash hitbox in a 160-wide strip around the player
-        const hitbox = {
-          x: player.x - 80, y: player.y - 10,
-          w: player.w + 160, h: player.h + 20,
-        };
+        player.facing = dir;
+        const hitbox = { x: player.x - 80, y: player.y - 10, w: player.w + 160, h: player.h + 20 };
         for (const m of game.monsters) {
           if (m.currentHp <= 0) continue;
-          // v0.25.939 — Audit caught the dedup hash bug: the old key
-          // `m.type + (m.x|0)` rounds the mob's X to the nearest integer.
-          // The knockback applied below (`m.vx += player.facing * 5`)
-          // changes m.x between dash steps, producing a NEW key on the
-          // next step and re-hitting the same mob. Fast-moving targets
-          // (elites, bosses) could take 2-3× intended damage on a single
-          // Kage Rush. Fix: use the monster OBJECT REFERENCE as the
-          // Set key — JavaScript Sets accept object identity, and the
-          // reference stays stable across the 14 dash steps regardless
-          // of position changes.
+          // Object-ref dedup (v0.25.939): knockback moves the mob between
+          // steps, so any position-derived key re-hits the same target.
           if (aabb(hitbox, _atkMonBox(m)) && !hitIds.has(m)) {
-            // v0.26.050 — Per user "make shinobi's G skill do 4 x the
-            // present damage". Per-step multiplier 1.7 → 6.8 (×4). With
-            // 14 dash steps and the v0.25.939 object-ref dedup (each
-            // mob can only be hit once across the dash), single-target
-            // total stays 6.8× ATK — but the strip-AoE up-tier is
-            // dramatic: a 7-mob lane previously took 7 × 1.7 = 11.9×
-            // ATK distributed, now 7 × 6.8 = 47.6×. Matches the user's
-            // "4× present damage" intent across both single-target and
-            // cleave paths since the multiplier is the single damage
-            // input — every downstream calculation (crit, on-hit
-            // status, dedup) scales linearly.
-            hitMonster(m, Math.floor(getAtk() * 4.5), rollCrit(), 'melee');   // v0.26.x balance audit: 6.8x->4.5x (7-mob lane ~47.6x -> ~31.5x, peer AoE parity)
-            m.vx += player.facing * 5;
-            spawnSmoothImpact(m.x + m.w/2, m.y + m.h/2, '#ff99aa');
+            hitMonster(m, Math.floor(getAtk() * LX_KAGE_DMG), rollCrit(), 'melee');
+            m.vx += dir * 5;
+            spawnSmoothImpact(m.x + m.w / 2, m.y + m.h / 2, '#ff4a62');
             hitIds.add(m);
           }
         }
-        // Slash streak behind
-        spawnSmoothSlash(player.x + player.w/2 - player.facing * 30,
-          player.y + player.h/2, player.facing > 0 ? 0 : Math.PI,
-          90, '#ff88cc', { thickness: 4, life: 12 });
-        // Afterimage
         game.afterImages.push({
-          x: player.x - player.facing * 20, y: player.y,
-          facing: player.facing, state: 'attack',
-          life: 22, maxLife: 22, color: 'rgba(200,120,220,0.55)'
+          x: player.x - dir * 20, y: player.y,
+          facing: dir, state: 'attack',
+          life: 20, maxLife: 20, color: 'rgba(220,40,70,0.5)'
         });
-        // v0.26.442 — Petal trail streaming behind the rush (sakura pink),
-        // drifting back + outward so the dash leaves a blossom wake.
+        // Crimson embers streaming back off the step (replaces the old sakura
+        // petal wake — that palette belonged to the skill this one replaces).
         for (let _pi = 0; _pi < 3; _pi++) {
           const _pa = Math.random() * Math.PI * 2;
           game.particles.push({
-            x: player.x + player.w/2 - player.facing * 26 + (Math.random()*22 - 11),
-            y: player.y + player.h/2 + (Math.random()*34 - 17),
-            vx: -player.facing * (1 + Math.random()*1.6) + Math.cos(_pa)*0.5,
-            vy: Math.sin(_pa) * 1.2 - 0.3,
-            life: 30 + Math.random()*18,
-            color: Math.random() < 0.5 ? '#ff8ac0' : '#ffd0e6',
-            size: 3 + Math.random()*2
+            x: player.x + player.w / 2 - dir * 24 + (Math.random() * 20 - 10),
+            y: player.y + player.h / 2 + (Math.random() * 32 - 16),
+            vx: -dir * (1.2 + Math.random() * 1.8) + Math.cos(_pa) * 0.5,
+            vy: Math.sin(_pa) * 1.1 - 0.3,
+            life: 24 + Math.random() * 16,
+            color: Math.random() < 0.5 ? '#ff3b58' : '#ffb0bc',
+            size: 2 + Math.random() * 2
           });
         }
-              }, i * 35);
+      }, i * LX_KAGE_STEP_MS);
     }
-    showToast('KAGE RUSH', 'legendary');
-    flash(0.25);
+    // Only announce the chain on its first charge — four toasts in a second is
+    // noise, and the charge counter is what the player is actually tracking.
+    if ((player._kageCharges | 0) >= LX_KAGE_CHARGES - 1) showToast('KAGE RUSH', 'legendary');
+    flash(0.18);
   },
 
   nightreaper_mark: () => {
