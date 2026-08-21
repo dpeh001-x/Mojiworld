@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.22';
+const GAME_VERSION = 'v0.30.23';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -17092,7 +17092,7 @@ const SKILLS = {
   crusader_aegis:     { name:'Divine Aegis',       icon:'✝️', cls:'warrior', job:'knight',    master:'crusader',    slot:'x', mp:45, cd:26000, desc:'Heal 60% (co-op partners on your map too) + 5 hovering holy orbs strike nearby foes · HALF damage taken for 9s.' },
   dragoon_skylance:   { name:'Sky Lance',          icon:'🐉', cls:'warrior', job:'knight',    master:'dragoon',     slot:'x', mp:35, cd:16000,  desc:'Warp above the nearest foe on screen and dive, punching through one platform — then a second dive re-targets and lands ~0.7s later (only while prey remains). Rank 10 adds a third dive.' },
   // Rogue path
-  shadowlord_clones:  { name:'Mirror Shadow',      icon:'👥', cls:'rogue', job:'ninja',    master:'shadowlord',  slot:'x', mp:40, cd:22000, desc:'3 levitating clones flank you at long range — circular AOE strikes for 11s; when they fade they SHATTER in a triple shadow nova.' },
+  shadowlord_clones:  { name:'Mirror Shadow',      icon:'👥', cls:'rogue', job:'ninja',    master:'shadowlord',  slot:'x', mp:40, cd:22000, desc:'3 levitating clones flank you at long range — circular AOE strikes for 11s, then SHATTER in a triple shadow nova. While they stand, press again to BLINK to the next clone.' },
   shinobi_seal:       { name:'Kage Rush',          icon:'🎴', cls:'rogue', job:'ninja',    master:'shinobi',     slot:'x', mp:18, cd:9000,  desc:'4 charges. Each is a short shadow-step slash across a crimson lane — chain them, then the seal recharges.' },
   nightreaper_mark:   { name:'Eclipse Massacre',   icon:'🌑', cls:'rogue', job:'assassin', master:'nightreaper', slot:'x', mp:55, cd:12000, desc:'Stationary 2.4 s channel: a blood-eclipse rains spectral daggers on every visible enemy in 10 batches, staggering them, then snaps shut for an aftershock nova and a small heal.' },
   phantom_cut:        { name:'Voidrift Execution', icon:'👻', cls:'rogue', job:'assassin', master:'phantom',     slot:'x', mp:55, cd:12000, desc:'Mark up to 6 enemies and execute them in chain-teleport strikes — each pierces 40% DEF with a strong crit bias; final hit detonates a shadow nova.' },
@@ -63037,7 +63037,14 @@ function isReady(id) {
   // v0.23 — slot-level gate (every 5 levels unlocks the next slot key).
   const req = SLOT_LEVEL_REQ[s.slot] || 1;
   if (player.level < req) return false;
-  if ((player.skillCooldowns[id] || 0) > 0) return false;
+  if ((player.skillCooldowns[id] || 0) > 0) {
+    // v0.30.23 — MIRROR SHADOW BLINK. While the clones stand, this key is not the
+    // summon at all — it is a teleport to the next clone, gated by its own
+    // short timer. The summon's cooldown keeps running underneath, untouched,
+    // so the skill's uptime is exactly what it was before blinking existed.
+    if (!(id === 'shadowlord_clones' && player._clones && player._clones.length
+          && game.time >= (player._mirrorGate || 0))) return false;
+  }
   // v0.26.x — match castSkill's effective MP cost so a skill that passes isReady
   // never then fails-to-cast on MP (mage -20%, Overload milestone +50% on spells).
   let _mpCost = s.mp;
@@ -63102,6 +63109,15 @@ const ARCHER_ROOT_MS     = 420;  // ms — _rootedTimer is decayed via dt(ms)
 //   new: ~11 rails at 1.9x ATK + 15, auto-crit => ~2.85x each, ~31x if every
 //        shot lands on one target — a real ult payoff that costs 11 presses
 //        and five seconds of standing in the open.
+// v0.30.23 — MIRROR SHADOW BLINK. While clones stand, the skill key stops
+// re-summoning and becomes a three-stop teleport network instead. The blink is
+// cheap and on a short gate rather than free: three instant repositions at no
+// cost would beat every mobility skill in the game, including Sleight, which is
+// the rogue's dedicated blink and spends a charge for a single hop.
+// The gate is in FRAMES because it is compared against game.time, which is a
+// frame counter — the same units isReady's cast-lock check uses.
+const LX_MIRROR_BLINK_FRAMES = 54;   // ~0.9 s at 60 fps
+const LX_MIRROR_BLINK_MP     = 10;   // vs the 40 the summon itself costs
 const LX_DEADEYE_MS      = 5000;
 const LX_DEADEYE_GATE_MS = 420;
 const LX_DEADEYE_DMG     = 1.9;
@@ -63910,6 +63926,20 @@ function castSkill(id) {
   // last shot — the shots cannot know which of them is last, and a window that
   // simply stopped refreshing would leave the skill ready again after one
   // gate, i.e. an unlimited window.
+  // v0.30.23 — MIRROR SHADOW: with clones already up, this press is a BLINK.
+  // Decided here rather than in the SKILL_FN because this is the only place
+  // where the PRE-CAST cooldown and MP are still known — and restoring the
+  // pre-cast cooldown is the whole trick: castSkill has already overwritten it
+  // with a fresh full-length cooldown, which would silently restart the
+  // summon's timer on every hop.
+  if (id === 'shadowlord_clones') {
+    player._mirrorBlink = !!(player._clones && player._clones.length);
+    if (player._mirrorBlink) {
+      player.skillCooldowns[id] = _preCastCd;
+      player.mp = Math.max(0, _preCastMp - LX_MIRROR_BLINK_MP);
+      player._mirrorGate = game.time + LX_MIRROR_BLINK_FRAMES;
+    }
+  }
   if (id === 'marksman_oneshot') {
     const _dnow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     if (!player._deadeyeUntil || _dnow >= player._deadeyeUntil) {
@@ -69989,6 +70019,65 @@ const SKILL_FNS = {
   },
 
   shadowlord_clones: () => {
+    // v0.30.23 — BLINK BRANCH (per user: "for mirror shadow you can teleport to
+    // clone's location as well"). While clones stand, the key is a three-stop
+    // teleport network rather than a re-summon. castSkill has already priced
+    // this press as a blink (short gate, 10 MP) and set the flag.
+    //
+    // Cycling to the NEXT clone rather than the nearest is the deliberate
+    // choice: the three anchors are fixed at cast time, so a predictable
+    // left -> centre -> right rotation is something the player can plan a
+    // route around, whereas "nearest" would usually just return you to the
+    // one you are already standing on.
+    if (player._mirrorBlink && player._clones && player._clones.length) {
+      player._mirrorBlink = false;
+      const _n = player._clones.length;
+      player._mirrorIdx = (((player._mirrorIdx | 0) + 1) % _n + _n) % _n;
+      const _c = player._clones[player._mirrorIdx];
+      const _fromX = player.x, _fromY = player.y;
+      const _tx = (_c.lastX != null ? _c.lastX : _c.anchorX);
+      const _ty = (_c.lastY != null ? _c.lastY : _c.anchorY);
+      // Land ON the clone's spot: its coords are a CENTRE, the player's are a
+      // top-left corner, so both axes need the half-extent removed or the
+      // blink lands consistently low and to the right.
+      player.x = _tx - player.w / 2;
+      player.y = _ty - player.h / 2;
+      player.vx = 0; player.vy = 0;
+      // A blink through solid ground would be a teleport exploit; clamp to the
+      // world box and let the normal physics settle the landing.
+      const _wmax = (game.mapData && game.mapData.worldWidth) || 3200;
+      player.x = Math.max(20, Math.min(_wmax - player.w - 20, player.x));
+      player.facing = (_tx - _fromX) >= 0 ? 1 : -1;
+      // Swap-in / swap-out shadow trail: the vacated spot and the arrival both
+      // get an afterimage, so the blink reads as an exchange with the clone.
+      for (let _i = 0; _i < 5; _i++) {
+        const _t = _i / 4;
+        game.afterImages.push({
+          x: _fromX + (player.x - _fromX) * _t,
+          y: _fromY + (player.y - _fromY) * _t,
+          facing: player.facing, state: 'attack',
+          life: 20, maxLife: 20, color: 'rgba(140,80,220,0.5)'
+        });
+      }
+      if (typeof spawnSpriteBurst === 'function') {
+        spawnSpriteBurst(_fromX + player.w / 2, _fromY + player.h / 2, 'shadowlord_clones', { size: 130, life: 22 });
+        spawnSpriteBurst(_tx, _ty, 'shadowlord_clones', { size: 160, life: 26 });
+      }
+      if (typeof spawnSmoothImpact === 'function') spawnSmoothImpact(_tx, _ty, '#aa66ff');
+      for (let _i = 0; _i < 8; _i++) {
+        const _a = (_i / 8) * Math.PI * 2;
+        game.particles.push({
+          x: _tx, y: _ty,
+          vx: Math.cos(_a) * 3.4, vy: Math.sin(_a) * 3.4,
+          life: 22 + Math.random() * 10, color: _i % 2 ? '#c08cff' : '#6a3ab0', size: 3
+        });
+      }
+      flash(0.14);
+      showToast('SHADOW STEP — ' + (player._mirrorIdx + 1) + '/' + _n, 'epic');
+      return;   // the clones keep standing; this press did NOT re-summon
+    }
+    player._mirrorIdx = -1;   // a fresh summon restarts the rotation
+
     // v0.25.237 — Lifetime extended to 15 s and clones spawn FAR from the
     // player so they project a wide turret screen across the map. CD is
     // now 22 s (see SKILLS table) — uptime sits at ~68%.
