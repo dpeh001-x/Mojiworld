@@ -19,8 +19,13 @@ const OUT = arg('--out') || join(ROOT, '_playtest');
 
 // Files the game itself needs at the root.
 const ROOT_FILES = ['mojiworld_game.html', 'sw.js', 'serve.js', 'Mojiworld.cmd', 'Mojiworld.exe'];
-// Asset trees it loads from.
-const ASSET_DIRS = ['Sprites', 'audio', 'backgrounds', 'assets', 'data'];
+// Asset trees it loads from. The cinematics subtree rides along because the
+// game <video>-plays 21 films from it at runtime (prologue through the ending
+// chain) and every cutscene FAILS OPEN on a missing clip — a package without
+// them boots green and silently shows no films at all. It is ~135 MB of the
+// steam/ tree; the other ~2.4 GB (Electron, store art) still stays out.
+const ASSET_DIRS = ['Sprites', 'audio', 'backgrounds', 'assets', 'data',
+  'steam/higgsfield/cinematics'];
 
 // Working directories and source files that never ship.
 const SKIP_DIR = (name) =>

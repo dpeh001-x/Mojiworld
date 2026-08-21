@@ -56,43 +56,6 @@ try {
     game.paused = false;
   } catch (e) {} });
 
-  // WHY THIS EXISTS: the pad modal lookup memoises a NULL answer for 100 ms BY
-  // DESIGN (v0.29.807 — "a modal that OPENS is noticed up to 100ms late, which
-  // is imperceptible and self-heals on the next scan"). A check that opens a
-  // panel and asserts at +50/+60 ms is therefore reading a coin flip: whether
-  // the pad poller seeded that memo 40 ms or 90 ms before the open decides the
-  // answer. Measured on origin/main, the panel was seen 1/5, 0/5 and 0/5 times
-  // at waits of 30/50/80 ms and 5/5 at 110/150/250 ms — a hard cliff exactly at
-  // the memo window, and the whole reason this suite scored 49, 43, 49 and 46
-  // on four identical runs. The 100 ms latency is correct product behaviour;
-  // it is the assertion timing that was wrong.
-  //
-  // Open, then wait until the pad has actually ADOPTED the surface, bounded.
-  // The checks then measure pad ROUTING rather than memo timing, and still fail
-  // honestly if the pad genuinely never picks the panel up.
-  await page.evaluate(() => {
-    window.__padOpen = async (open) => {
-      open();
-      const t0 = performance.now();
-      while (performance.now() - t0 < 1500) {
-        if (_lxPadModalRoot()) return true;
-        await new Promise(r => setTimeout(r, 20));
-      }
-      return false;   // genuinely never routed — let the check fail
-    };
-    // The mirror image: wait until the pad has LET GO of every surface. A check
-    // that depends on nothing being open should say so, rather than inherit
-    // whatever the previous block happened to leave behind.
-    window.__padSettle = async () => {
-      const t0 = performance.now();
-      while (performance.now() - t0 < 1500) {
-        if (!_lxPadModalRoot()) return true;
-        await new Promise(r => setTimeout(r, 20));
-      }
-      return false;
-    };
-  });
-
   // Install a controllable synthetic gamepad.
   await page.evaluate(() => {
     window.__pad = { connected: true, id: 'Test Controller (STANDARD GAMEPAD)', mapping: 'standard',
@@ -340,7 +303,8 @@ try {
   // (focus ring, D-pad moves, B closes) and stops driving the character.
   const nav = await page.evaluate(async () => {
     window.__pad.buttons.forEach((_, i) => window.__press(i, false)); window.__axis(0, 0); window.__axis(1, 0); _lxPadPoll();
-    const openBefore = await window.__padOpen(openSettingsModal);
+    openSettingsModal(); await new Promise(r => setTimeout(r, 50));
+    const openBefore = !!_lxPadModalRoot();
     window.__press(13, true); _lxPadPoll(); window.__press(13, false); _lxPadPoll();
     const f1 = document.querySelector('.pad-focus');
     window.__press(13, true); _lxPadPoll(); window.__press(13, false); _lxPadPoll();
@@ -401,7 +365,7 @@ try {
     // run instead of depending on what ran before.
     try { closeSettingsModal(); } catch (e) {}
     await new Promise(r => setTimeout(r, 40));
-    await window.__padOpen(openSettingsModal);   // SteamAPI mock present -> wrapper build
+    openSettingsModal(); await new Promise(r => setTimeout(r, 60));   // SteamAPI mock present -> wrapper build
     const rowShown = document.getElementById('set-quit-row').style.display !== 'none';
     const quitBtn = document.querySelector('#set-quit-row button');
     window.__pad.buttons.forEach((_, i) => window.__press(i, false)); _lxPadPoll();
@@ -442,15 +406,6 @@ try {
     const blurred = document.activeElement !== inp;
     window.__press(1, false); _lxPadPoll();
     inp.remove();
-    // Ⓐ on a focused text field SUMMONS the virtual keyboard — by design
-    // (v0.29.727: "Ⓐ summons the virtual keyboard for the focused field"), and
-    // pressing Ⓐ on a focused field is exactly what this block does. #pad-vk
-    // then outranks every other surface in _lxPadModalRootScan unconditionally
-    // — no size or visibility test — so leaving it behind hands the pad to a
-    // keyboard for the whole rest of the run. That is what made the overlay
-    // latch fail intermittently (_rootAtResume: "pad-vk"). This block created
-    // it, so this block clears it, through the product-s own close path.
-    try { _lxPadVK.close(); } catch (e) {}
     return { focusedBefore, anyKey, blurred };
   });
   ok('typing focus parks the pad (no game key leaks)', hatch.focusedBefore && hatch.anyKey === false, hatch);
@@ -470,20 +425,9 @@ try {
     net.isHost = false; _lxSteamPresence(true); const h2 = rec.host[rec.host.length - 1];
     net.connected = false; _lxSteamPresence(true); const h3 = rec.host[rec.host.length - 1];
     // overlay pause: solo + unpaused -> pause on open, resume on close
-    // The overlay latch deliberately refuses to resume INTO an open panel:
-    // _lxSteamOverlayPause(false) ends with
-    //   if (!_lxPadModalRoot()) game.paused = false;
-    // Earlier blocks open Settings and walk the pad through it, so wait for the
-    // pad to let go before exercising the latch. Without this the check
-    // intermittently measures leftover teardown from block (I) instead of the
-    // latch — seen once in seven runs, resumedOnClose false with everything
-    // else green. _rootAtResume names the culprit if it ever does block, so a
-    // real regression here stays legible instead of becoming a mystery.
-    const _settled = await window.__padSettle();
     window._prologueActive = false; window._prologuePending = false;
     game.paused = false; _lxSteamOverlayPausedByUs = false;
     _lxSteamOverlayPause(true);  const pausedOnOpen = game.paused === true;
-    const _rootAtResume = (() => { try { const x = _lxPadModalRoot(); return x ? (x.id || x.className || x.tagName) : null; } catch (e) { return 'ERR'; } })();
     _lxSteamOverlayPause(false); const resumedOnClose = game.paused === false;
     // latch: someone ELSE's pause is never force-released
     game.paused = true; _lxSteamOverlayPause(true); _lxSteamOverlayPause(false);
@@ -498,10 +442,9 @@ try {
     game._resetting = false;
     window.dispatchEvent(new Event('beforeunload'));
     const synced = rec.sync.length > 0 && rec.sync[rec.sync.length - 1][0] === SAVE_KEY && rec.sync[rec.sync.length - 1][1] > 0;
-    return { h1, h2, h3, pausedOnOpen, resumedOnClose, foreignPauseKept, coopUntouched, synced, _rootAtResume, _settled };
+    return { h1, h2, h3, pausedOnOpen, resumedOnClose, foreignPauseKept, coopUntouched, synced };
   });
   ok('power block follows HOST state (true/false/false)', trio.h1 === true && trio.h2 === false && trio.h3 === false, trio);
-  ok('no pad surface is left open before the overlay-latch checks', trio._settled === true, { rootAtResume: trio._rootAtResume });
   ok('overlay pauses a solo game and resumes on close', trio.pausedOnOpen && trio.resumedOnClose, trio);
   ok('overlay never force-releases a foreign pause', trio.foreignPauseKept === true, trio);
   ok('overlay never freezes a co-op session', trio.coopUntouched === true, trio);

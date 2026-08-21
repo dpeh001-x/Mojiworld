@@ -157,6 +157,20 @@ ok('README ships with it', existsSync(`${DIR}/README.txt`), {});
      drift.length ? drift.slice(0, 5) : { keysTaught: taught.size });
   ok('README states the packaged version', verOk, { want: stagedVer });
 }
+// Cutscene films: the game <video>-plays these from steam/higgsfield/
+// cinematics/ at runtime. Boot never requests them, so the 404 check above is
+// blind here — and the cutscene player FAILS OPEN, so a tester missing the
+// clips just never sees a film, silently. Assert every clip the staged build
+// references is actually staged beside it.
+{
+  const { readFileSync } = await import('node:fs');
+  const refs = [...new Set(readFileSync(`${DIR}/mojiworld_game.html`, 'utf8')
+    .match(/steam\/higgsfield\/cinematics\/[a-z0-9_]+\.mp4/g) || [])];
+  const missing = refs.filter(p => !existsSync(`${DIR}/${p}`));
+  ok(`every cutscene film the build references ships (${refs.length} clips)`,
+     refs.length > 0 && missing.length === 0,
+     missing.length ? missing.slice(0, 6) : { clips: refs.length });
+}
 ok('launcher ships with it', existsSync(`${DIR}/Mojiworld.cmd`), {});
 ok('bundled node ships (tester installs nothing)', existsSync(`${DIR}/node/node.exe`), {});
 

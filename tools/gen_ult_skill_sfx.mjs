@@ -5,7 +5,7 @@
 // Wire-up: _SKILL_SFX_FILES in mojiworld_game.html (done alongside this).
 // =============================================================================
 //   node tools/gen_ult_skill_sfx.mjs                 # dry-run (prompts + cost)
-//   node tools/gen_ult_skill_sfx.mjs --only necromancer_ult,sage_ult --generate
+//   node tools/gen_ult_skill_sfx.mjs --only lich_ult,sage_ult --generate
 //   node tools/gen_ult_skill_sfx.mjs --generate --force
 // Needs LUDO_API_KEY. Resumable: skips a clip whose mp3 already exists.
 // =============================================================================
@@ -30,7 +30,7 @@ const ULT = {
   phantom_ult:      { p: 'a warping void singularity sucking everything inward, building to a collapsing implosion boom', dur: 3.0 },
   sage_ult:         { p: 'a screaming comet descending into a massive fiery impact with a rumbling ground quake', dur: 3.5 },
   elementalist_ult: { p: 'a swirling four-element surge — fire roar, ice shatter, lightning crackle, arcane hum — converging into a beam blast', dur: 3.5 },
-  necromancer_ult:         { p: 'a ghostly necrotic surge with rattling rising bones, then a soul-detonation blast', dur: 3.0 },
+  lich_ult:         { p: 'a ghostly necrotic surge with rattling rising bones, then a soul-detonation blast', dur: 3.0 },
   hexmaster_ult:    { p: 'a sickly cursed incantation crackle spreading like contagion, then a malignant dark burst', dur: 2.5 },
   archbishop_ult:   { p: 'a soaring choral angelic ascension with a sweeping radiant holy light beam', dur: 3.5 },
   marksman_ult:     { p: 'a focus time-slow hush, then several precise charged rifle cracks firing at once', dur: 2.5 },

@@ -50,10 +50,6 @@ ok('no page errors', errs.length === 0, errs.slice(0, 3));
 const after = await page.evaluate(() => {
   const auth = document.getElementById('lo-auth');
   if (auth) { auth.classList.remove('shown'); auth.setAttribute('hidden', ''); auth.style.display = 'none'; }
-  // v0.29.804 — bust the router's 100ms memo (added after this test was
-  // written): hiding the title and querying in the same synchronous breath
-  // otherwise returns the cached lo-auth root and fails a healthy build.
-  try { eval('_lxPadRootAt = -1'); } catch (e) {}
   const root = eval('_lxPadModalRoot')();
   return { rootAfterTitleClosed: root ? root.id : null };
 });

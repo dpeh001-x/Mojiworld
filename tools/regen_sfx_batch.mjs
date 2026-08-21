@@ -26,7 +26,7 @@ const ITEMS = {
   dragoon_ult:         { file: 'audio/skill/dragoon_ult.mp3',         ep: 'sfx', sec: 1.4,  d: 'a thunderous dragon-lance dive impact: sharp draconic energy crack into a compact boom, epic but tight, short' },
   elementalist_cascade:{ file: 'audio/skill/elementalist_cascade.mp3',ep: 'sfx', sec: 1.1,  d: 'a quick four-element burst layered into one cascade: fire crackle, ice glint, electric spark, arcane hum, short' },
   hexmaster_grandhex:  { file: 'audio/skill/hexmaster_grandhex.mp3',  ep: 'sfx', sec: 1.0,  d: 'a dark spreading curse pulse with a witchy descending warble, ominous magical hex, short' },
-  necromancer_harvest:        { file: 'audio/skill/necromancer_harvest.mp3',        ep: 'sfx', sec: 1.0,  d: 'a ghostly soul-drain inhale sweeping inward with an eerie cold chime, necromantic, short' },
+  lich_harvest:        { file: 'audio/skill/lich_harvest.mp3',        ep: 'sfx', sec: 1.0,  d: 'a ghostly soul-drain inhale sweeping inward with an eerie cold chime, necromantic, short' },
   mage_ice:            { file: 'audio/skill/mage_ice.mp3',            ep: 'sfx', sec: 0.6,  d: 'a sharp ice crystal forming instantly: crisp frost crackle with a glassy ring, cold and clean, extremely short' },
   mage_meteor:         { file: 'audio/skill/mage_meteor.mp3',         ep: 'sfx', sec: 1.0,  d: 'a fast fiery meteor whoosh ending in one compact impact boom, no rumble tail, punchy, short' },
   warrior_roar:        { file: 'audio/skill/warrior_roar.mp3',        ep: 'sfx', sec: 0.9,  d: 'one fierce battle roar shout, powerful and commanding, single burst with no echo tail, short' },

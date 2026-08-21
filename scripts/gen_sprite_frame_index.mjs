@@ -17,7 +17,7 @@ import { readFileSync, writeFileSync, renameSync, existsSync, readdirSync } from
 
 const GAME = 'mojiworld_game.html';
 const OUT = 'data/sprite_frame_index.js';
-const MAX = 24;   // v0.29.x - was 9, a floor left over from every set being a 3x3 sheet; soul_vortex now ships 16 for a smoother loop
+const MAX = 9;
 const CHECK = process.argv.includes('--check');
 const src = readFileSync(GAME, 'utf8');
 
@@ -33,7 +33,6 @@ const arrOf = (name) => {
 // regenerate, and keys the game never asks for cost nothing.
 const FRAME_DIRS = [
   'bosses/attack', 'bosses/idle', 'bosses/walk',
-  'bosses/weave', 'bosses/duck',   // v0.29.951 - barnaby evade cycles
   'bosses/zodiac/attack', 'bosses/zodiac/idle', 'bosses/zodiac/walk',
   'monsters/idle', 'monsters/walk', 'monsters/attack',
   'npc/idle', 'npc/walk',

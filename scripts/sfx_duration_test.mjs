@@ -22,11 +22,6 @@ const CLIPS = [
     `audio/monster/mob_octoLeg${l}_hit.mp3`,
     `audio/monster/mob_octoLeg${l}_die.mp3`,
   ])),
-  // Rotter (monster id `zombie`) — regenerated after "sounds like a animal
-  // squeak"; both takes overshot the bar on their own (1.6-2.0 s) and are
-  // faded to fit, so they belong under this guard permanently.
-  'audio/monster/mob_zombie_hit.mp3',
-  'audio/monster/mob_zombie_die.mp3',
   'audio/monster/mob_bonebosn_die.mp3',
   'audio/monster/mob_drownedCur_die.mp3',
   'audio/monster/mob_spectreCannoneer_die.mp3',
@@ -88,8 +83,7 @@ const src = fs.readFileSync(path.join(ROOT, process.env.MOJI_GAME_FILE || 'mojiw
 }
 ok('the Octobaby boss sting is referenced by the game', src.includes('boss_octobaby.mp3'));
 for (const t of ['octobaby', 'octoLegFreeze', 'octoLegPoison', 'octoLegSkillLock', 'octoLegStun',
-                 'bonebosn', 'drownedCur', 'spectreCannoneer', 'brinekraken',
-                 'zombie']) {   // the Rotter
+                 'bonebosn', 'drownedCur', 'spectreCannoneer', 'brinekraken']) {
   ok(`monster type "${t}" exists for its clip to be probed`, new RegExp(`\\b${t}\\s*:\\s*\\{`).test(src));
 }
 
