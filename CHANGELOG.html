@@ -121,6 +121,37 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.11 <span class="tag"><span class="pill bug">bug</span> Flying monsters animate again &mdash; the phase-stamp fix</span></h2>
+<p>Per user, on a Honeycomb Hollow screenshot: <em>somehow the bees lost their animation.</em></p>
+<p>They had. A Buzzbee sampled across <b>150 rendered frames</b> showed exactly <b>one</b> image &mdash; not a slow cycle, not a stutter, a single frozen pose held for its entire life. And it was never about bees: <b>every one of the 18 mob types with <code>flies:true</code></b> was frozen the same way. A Lantern Wisp measured 2 distinct frames over 130. A grounded Nougat Bear measured 4, which is why the map's walkers looked fine and the swarm did not.</p>
+
+<h3>The sprites were never the problem</h3>
+<p>The obvious suspects were all clean, and checking them first is what made the real cause findable. All 27 <code>honeyBuzz</code> frames (idle, walk, attack) are present on disk and in <code>data/sprite_frame_index.js</code> at 9 apiece; the loader requested them; every frame decoded; <code>_readyN</code> reported 9 of 9. The animation system was being <em>handed</em> nine good frames and returning the same one every time.</p>
+
+<h3>An argument evaluated a moment too early</h3>
+<p><code>_mobAnimPhase</code> <b>restamps</b> an entity's animation epoch whenever the state it is asked for differs from the state it currently holds &mdash; that is its whole job, so an attack windup starts on frame&nbsp;0. The frame index is then wall-clock: <em>time since that epoch</em>, divided by the cadence.</p>
+<p>The four one-line boss frame helpers passed that call as an <b>argument</b>:</p>
+<p><code>function _bossWeaveFrame(key, m) { return _bossLoopFrame(BOSS_WEAVE_FRAMES[key], _BOSS_WEAVE_FRAME_MS, undefined, m ? _mobAnimPhase(m, 'weave', true) : 0); }</code></p>
+<p>So the phase was stamped <b>before</b> <code>_bossLoopFrame</code> could look at the set and bail on art that does not exist. And <code>drawMonster</code> runs its boss branch for <em>every</em> monster, not only bosses &mdash; so an ordinary mob, which owns no <code>BOSS_*</code> art at its key, had its epoch rewritten by helpers whose return value was always <code>null</code>.</p>
+<p><b>Flying mobs took it worst, and that is the visible bug.</b> A mob with <code>flies:true</code> is never <code>onGround</code>, so the airborne <em>weave</em> probe &mdash; added in v0.29.957 for Barnaby's ducking and weaving, and owned by Barnaby alone &mdash; fired on every single frame of every bee's life. The instrumented call order per rendered frame was <code>weave, walk, walk</code>: two restamps. Elapsed-since-epoch never grew past a frame, so the index collapsed to a constant fixed by the mob's own desync seed. Different seed, different frozen pose &mdash; which is exactly why a hive full of bees looked like a hive full of slightly different statues rather than an obvious single-frame glitch.</p>
+
+<h3>No art in the set, no stamp</h3>
+<p>One guard, used by all four helpers. It is deliberately keyed on the <b>frame set</b> rather than on <code>m.isBoss</code>: the helpers' contract is already "return null when this key owns no art", and the fix simply makes the phase stamp obey the same contract instead of running ahead of it.</p>
+<p><code>function _bossAnimPhase(frames, m, state, desync) { if (!m || !frames || !frames.length) return 0; return _mobAnimPhase(m, state, desync); }</code></p>
+<p>Bosses are untouched by construction &mdash; their sets exist, so they stamp exactly as before. The <code>_bossWeavePair</code>, <code>_bossWalkPair</code> and <code>_bossDuckFrame</code> helpers already stamped only <em>after</em> their own frame-count checks, so they were never part of this and are unchanged.</p>
+
+<h3>Verification</h3>
+<p>New <code>scripts/flying_mob_anim_test.mjs</code> (8 checks) samples <code>_monsterStateFrame</code> on real <code>requestAnimationFrame</code> ticks &mdash; the index is wall-clock driven, so stepping the loop by hand would not have reproduced it &mdash; and asserts <b>distinct images over time</b>. That distinction is the whole test: the broken build also returned a frame on every call, the same one. Against the previous build it fails 5 of 8; against this one all 8 pass.</p>
+<table>
+<tr><th>Distinct frames while in one state</th><th>Before</th><th>After</th></tr>
+<tr><td>Buzzbee (150 ticks)</td><td>1</td><td><b>9</b></td></tr>
+<tr><td>Lantern Wisp (130 ticks)</td><td>2</td><td><b>7</b></td></tr>
+<tr><td>Nougat Bear &mdash; grounded, as a control (130 ticks)</td><td>4</td><td><b>9</b></td></tr>
+<tr><td>Epoch restamps per 150 ticks (Buzzbee)</td><td>39</td><td><b>0</b></td></tr>
+</table>
+<p>The grounded control improving from 4 to 9 is not incidental &mdash; walkers were quietly losing frames to the same double-stamp whenever the idle and walk helpers disagreed for a frame; they just never froze outright, so nobody reported it. Two collateral checks pin the boundary: asking a boss helper for art that does not exist must leave the epoch alone, and Barnaby &mdash; who genuinely owns weave frames &mdash; must still get his weave phase. Neighbour suite green: <code>boss_anim_churn_test.mjs</code> 8/8.</p>
+
+
 <h2>v0.30.10 <span class="tag"><span class="pill bug">bug</span> The start gate now retries failed sprites &mdash; the refresh is built in</h2>
 <p>Per user: <em>my tester experienced unloaded sprites when starting the game that resolved on refresh, we MUST gate the start of the game to ensure sprites load prior to game start.</em></p>
 <p>The v0.29.735 commence gate already holds the door for <em>pending</em> sprites &mdash; but it waved an <b>errored</b> one through, by design, on the theory that a failed image "is not coming". That theory is wrong for the common case: in a ~2,000-request boot burst the typical failure is <b>transient</b> (reset socket, HTTP/2 stream error, CDN blip). The file exists; the one attempt died; nothing anywhere asked again. Renderers skip broken images silently, so the world started with holes &mdash; and a refresh fixed it precisely because a refresh <em>is</em> the retry.</p>

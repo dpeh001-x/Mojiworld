@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.10';
+const GAME_VERSION = 'v0.30.11';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -113917,7 +113917,26 @@ const _MOB_ATK_FRAME_MS = 72;    // ~0.65s per 9-frame cycle for non-boss monste
 // per entity (attack plays from frame 0 on entry, idle/walk desynced) via
 // _mobAnimPhase. Without it (readiness probes, legacy sites) behaviour is
 // unchanged — global wall clock.
-function _bossAttackFrame(key, m) { return _bossLoopFrame(BOSS_ATTACK_FRAMES[key], _BOSS_ATK_FRAME_MS, undefined, m ? _mobAnimPhase(m, 'attack', false) : 0); }
+// v0.30.11 — PHASE-STAMP GUARD. _mobAnimPhase RESTAMPS an entity's animation
+// epoch whenever the requested state differs from its current one, and the
+// four helpers below evaluated it as an ARGUMENT — i.e. before
+// _bossLoopFrame/_bossPingPongFrame could bail on a set that does not exist.
+// drawMonster runs its boss branch for EVERY monster, so an ordinary mob (which
+// owns no BOSS_* art at its key) had its epoch rewritten one to two times per
+// rendered frame by helpers that then returned null. Elapsed-since-epoch never
+// grew past a frame, so the wall-clock frame index froze at a constant and the
+// mob held a single pose for its whole life.
+// Flying mobs took it worst and it is what the user saw on the Buzzbees: they
+// are never onGround, so the airborne 'weave' probe fired on every single frame
+// (measured call order per frame: weave, walk, walk — two restamps), and their
+// idle and walk cycles stopped dead. 18 mob types carry flies:true.
+// Rule: no art in the set => no stamp. The four Pair/Duck helpers already
+// stamp only after their own frame-count checks, so they were never affected.
+function _bossAnimPhase(frames, m, state, desync) {
+  if (!m || !frames || !frames.length) return 0;
+  return _mobAnimPhase(m, state, desync);
+}
+function _bossAttackFrame(key, m) { return _bossLoopFrame(BOSS_ATTACK_FRAMES[key], _BOSS_ATK_FRAME_MS, undefined, _bossAnimPhase(BOSS_ATTACK_FRAMES[key], m, 'attack', false)); }
 // v0.29.x — Gravitos form-1 GRAVITY CRUSH punch. Plays the 9-frame punch ONCE
 // across the pattern's 1500 ms window, driven by m.patternTimer instead of the
 // generic 48 ms wall-clock loop (which would replay the punch ~3.5×): windup
@@ -114057,13 +114076,13 @@ function _gravitosLaserFrame(m) {
 const BOSS_IDLE_FRAMES = Object.create(null);
 _loadBossFrames(BOSS_IDLE_FRAMES, 'idle');
 const _BOSS_IDLE_FRAME_MS = 130;   // slower than attack — relaxed breathing (~2s cycle at 9 frames)
-function _bossIdleFrame(key, m) { return _bossPingPongFrame(BOSS_IDLE_FRAMES[key], _BOSS_IDLE_FRAME_MS, undefined, m ? _mobAnimPhase(m, 'idle', true) : 0); }   // v0.29.418 — optional m: per-entity phase
+function _bossIdleFrame(key, m) { return _bossPingPongFrame(BOSS_IDLE_FRAMES[key], _BOSS_IDLE_FRAME_MS, undefined, _bossAnimPhase(BOSS_IDLE_FRAMES[key], m, 'idle', true)); }   // v0.29.418 — optional m: per-entity phase
 // v0.26.322 — walk cycle, played while the boss is moving horizontally (and not
 // attacking). Falls back to idle, then the static sprite, when absent.
 const BOSS_WALK_FRAMES = Object.create(null);
 _loadBossFrames(BOSS_WALK_FRAMES, 'walk');
 const _BOSS_WALK_FRAME_MS = 80;    // brisker than idle
-function _bossWalkFrame(key, m) { return _bossLoopFrame(BOSS_WALK_FRAMES[key], _bossWalkMsFor(m), undefined, m ? _mobAnimPhase(m, 'walk', true) : 0); }   // v0.29.418 — optional m: per-entity phase
+function _bossWalkFrame(key, m) { return _bossLoopFrame(BOSS_WALK_FRAMES[key], _bossWalkMsFor(m), undefined, _bossAnimPhase(BOSS_WALK_FRAMES[key], m, 'walk', true)); }   // v0.29.418 — optional m: per-entity phase
 // v0.29.956 — EVADE cycles, per user "for barnaby boss he is doing alot of
 // ducking and weaving, regenerate new duck and weave sprites animation
 // compliment his fighting style". His activeBoss AI hops constantly (jump 8,
@@ -114081,7 +114100,7 @@ const BOSS_DUCK_FRAMES = Object.create(null);
 _loadBossFrames(BOSS_DUCK_FRAMES, 'duck', BOSS_EVADE_TYPES);
 const _BOSS_WEAVE_FRAME_MS = 70;   // brisk — it is an evasive rhythm
 const _BOSS_DUCK_FRAME_MS = 30;    // 9 frames x 30ms ≈ the 260ms landing window
-function _bossWeaveFrame(key, m) { return _bossLoopFrame(BOSS_WEAVE_FRAMES[key], _BOSS_WEAVE_FRAME_MS, undefined, m ? _mobAnimPhase(m, 'weave', true) : 0); }
+function _bossWeaveFrame(key, m) { return _bossLoopFrame(BOSS_WEAVE_FRAMES[key], _BOSS_WEAVE_FRAME_MS, undefined, _bossAnimPhase(BOSS_WEAVE_FRAMES[key], m, 'weave', true)); }
 // v0.29.960 — once-through-and-hold (was ping-pong): the squash plays 0..8 and
 // HOLDS the standing recover frame until the window closes, so the handoff to
 // idle/walk always happens from a standing pose instead of wherever the
