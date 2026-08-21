@@ -59,7 +59,13 @@ const gateRun = async (page) => {
       }
     }
     let npcTotal = 0; try { npcTotal = Object.keys(NPC_SPRITES).length; } catch (e) {}
+    const has = (frag) => watch.some(im => im && im.src && im.src.indexOf(frag) >= 0);
+    const brokenSrcs = watch.filter(im => im && im.src && im.complete && !im.naturalWidth)
+      .map(im => im.src.split('/').slice(-2).join('/')).slice(0, 6);
     return {
+      brokenSrcs,
+      coversBg: has('/backgrounds/'), coversUi: has('/Sprites/ui/'),
+      coversSkills: has('/Sprites/skills/'), coversNpc: has('/Sprites/npc/'),
       gateDone: !!window._lxSpriteGateDone,
       paused: (typeof game !== 'undefined') ? game.paused : null,
       // the gate's OWN pause bookkeeping: it must never still own a pause
@@ -78,10 +84,15 @@ const errs = [];
 {
   const ctx = await b.newContext({ viewport: { width: 1280, height: 720 } });
   const hits = new Map(); let aborted = 0;
-  await ctx.route('**/Sprites/npc/*.webp', (route) => {
+  // per user this is not just NPC sprites: backgrounds and icons fault too
+  const faultFirst2 = (route) => {
     const u = route.request().url(); const n = (hits.get(u) || 0) + 1; hits.set(u, n);
     if (n <= 2) { aborted++; route.abort(); } else route.continue();
-  });
+  };
+  await ctx.route('**/Sprites/npc/*.webp', faultFirst2);
+  await ctx.route('**/backgrounds/**', faultFirst2);
+  await ctx.route('**/Sprites/ui/**', faultFirst2);
+  await ctx.route('**/Sprites/skills/*.webp', faultFirst2);
   const page = await bootTo(ctx, 'transient', errs);
   const r = await gateRun(page);
   const faultedUrls = [...hits.values()].filter(v => v >= 2).length;
@@ -89,6 +100,13 @@ const errs = [];
     aborted >= 6 && faultedUrls >= 3, { aborted, faultedUrls });
   ok('the gate releases with the world INTACT — every faulted sprite recovered',
     r.gateDone && r.broken === 0 && r.watchLen > 300, r);
+  ok('the widened watch covers backgrounds, UI icons, skill icons AND npc art',
+    r.coversBg && r.coversUi && r.coversSkills && r.coversNpc,
+    { bg: r.coversBg, ui: r.coversUi, skills: r.coversSkills, npc: r.coversNpc, watchLen: r.watchLen });
+  ok('fault reached the new classes too (backgrounds/ui aborted, then recovered)',
+    [...hits.keys()].some(u => u.indexOf('/backgrounds/') >= 0) && [...hits.keys()].some(u => u.indexOf('/Sprites/ui/') >= 0),
+    { faultedBg: [...hits.keys()].filter(u => u.indexOf('/backgrounds/') >= 0).length,
+      faultedUi: [...hits.keys()].filter(u => u.indexOf('/Sprites/ui/') >= 0).length });
   ok('the gate no longer owns a pause and no keys are latched after release',
     !r.gateOwnsPause && !r.keysLatched, { gateOwnsPause: r.gateOwnsPause, keysLatched: r.keysLatched, paused: r.paused });
   ok('the post-boot self-heal is armed', r.healArmed, { healArmed: r.healArmed });
