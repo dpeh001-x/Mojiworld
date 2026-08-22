@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.37';
+const GAME_VERSION = 'v0.30.38';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -42391,7 +42391,7 @@ function loadState() {
     player._clones = null;
     player._ballistaTurrets = null;     // v0.26.x — clear War Machine turrets on save load
     player._ballistaChannel = null;     // v0.25.257 — clear channel state on save load
-    player._eclipseHold = null;   // v0.30.34 - Eclipse hold resets with the channel
+    player._eclipseHold = null; player._eclipseRain = null;   // v0.30.34 - Eclipse hold resets with the channel; v0.30.38 - and its rain clock
     // v0.25.605 — Pack defaulter. `player.pet` round-trips via PLAYER_
     // SAVE_FIELDS but `player.pack` (Beastmaster Call of the Wild
     // wolves) does not — so old saves load with `pack === undefined`
@@ -46127,13 +46127,14 @@ function _mpPartyFrames() {
 // whole skill together. See SKILL_FNS.nightreaper_mark.
 const LX_ECLIPSE_CHANNEL_MS = 2400;   // rain window (unchanged since v0.25.260)
 const LX_ECLIPSE_BATCHES    = 10;     // dagger waves across the window
-const LX_ECLIPSE_SNAP_MS    = LX_ECLIPSE_CHANNEL_MS + 60;   // finale, then release
+const LX_ECLIPSE_SNAP_MS    = LX_ECLIPSE_CHANNEL_MS + 60;   // finale
+const LX_ECLIPSE_HOLD_MS    = Math.round(LX_ECLIPSE_SNAP_MS / 2);   // v0.30.38 - the pin lasts HALF the eclipse (per user); the rain runs on without it
 const LX_ECLIPSE_HOVER_PX   = 40;     // lift above the pre-blink feet
 const LX_ECLIPSE_REACH      = 80;     // px past half a screen either side of the moon
 function _lxEclipseTick(dt) {
-  const h = player._eclipseHold;
+  const h = player._eclipseRain;   // v0.30.38 - the clock outlives the pin
   if (!h) return;
-  if (player.hp <= 0) { player._eclipseHold = null; return; }
+  if (player.hp <= 0) { player._eclipseRain = null; player._eclipseHold = null; return; }
   // Clock. Called from loop() beside game.time++, NOT from updatePlayer:
   // every dagger crit adds up to 80 ms of hit-stop, and hit-stop skips
   // updatePlayer while the frame counter, the moon sprite and the cast lock
@@ -46142,6 +46143,10 @@ function _lxEclipseTick(dt) {
   // hit-stop like those do; a pause (menu) still stops it. The POSITION
   // pin lives in updatePlayer, where movement happens.
   h.elapsed += dt;
+  // v0.30.38 - release the pin at the half-way mark. _eclipseHold is the same
+  // object as _eclipseRain while live; nulling it frees input, jump, dash,
+  // the pose and both position pins in one go. The waves keep falling.
+  if (player._eclipseHold && h.elapsed >= LX_ECLIPSE_HOLD_MS) player._eclipseHold = null;
   const reachL = h.moonX - (W / 2 + LX_ECLIPSE_REACH);
   const reachR = h.moonX + (W / 2 + LX_ECLIPSE_REACH);
   const under = () => game.monsters.filter(m => m.currentHp > 0 && (m.x + m.w) > reachL && m.x < reachR);
@@ -46173,7 +46178,7 @@ function _lxEclipseTick(dt) {
     audio.play('hit');
   }
   // Hover motes - a slow violet drift around the rogue while held.
-  if ((game.time & 3) === 0) {
+  if (player._eclipseHold && (game.time & 3) === 0) {   // v0.30.38 - only while pinned
     const cx = player.x + player.w / 2, cy = player.y + player.h / 2;
     const ang = Math.random() * Math.PI * 2;
     game.particles.push({
@@ -46186,7 +46191,7 @@ function _lxEclipseTick(dt) {
   if (h.elapsed < LX_ECLIPSE_SNAP_MS) return;
   // Finale - the eclipse snaps shut. Same 2x ATK + 25, half-DEF, 1.5x forced
   // crit, knockback, 800 ms stun and 14% heal as before.
-  player._eclipseHold = null;
+  player._eclipseRain = null; player._eclipseHold = null;
   const fx = player.x + player.w / 2, fy = player.y + player.h / 2;
   flash(0.7); addHitStop(180);
   audio.play('crit');
@@ -56924,7 +56929,7 @@ function loadMap(id, entryX, entryY) {
   // ascend window survived map transitions, granting partial flight on
   // any map. Resetting all three on map load matches the respawn cleanup.
   player._ballistaChannel = null;
-  player._eclipseHold = null;   // v0.30.34 - Eclipse hold resets with the channel
+  player._eclipseHold = null; player._eclipseRain = null;   // v0.30.34 - Eclipse hold resets with the channel; v0.30.38 - and its rain clock
   player._warCharge = null;
   player._releasedCharge = null;
   // v0.25.605 — _chargeStart was the lone holdout from the warrior
@@ -57278,7 +57283,7 @@ function loadMap(id, entryX, entryY) {
     player._clones = null;
     player._ballistaTurrets = null;
     player._ballistaChannel = null;
-    player._eclipseHold = null;   // v0.30.34 - Eclipse hold resets with the channel
+    player._eclipseHold = null; player._eclipseRain = null;   // v0.30.34 - Eclipse hold resets with the channel; v0.30.38 - and its rain clock
     player._warCharge = null;
     player._releasedCharge = null;
     player._chargeStart = 0;
@@ -62737,7 +62742,7 @@ function triggerDeath() {
   player._clones = null;
   player._ballistaTurrets = null;     // v0.26.x — turrets can't survive death
   player._ballistaChannel = null;     // v0.25.257 — channel can't survive death
-  player._eclipseHold = null;   // v0.30.34 - Eclipse hold resets with the channel
+  player._eclipseHold = null; player._eclipseRain = null;   // v0.30.34 - Eclipse hold resets with the channel; v0.30.38 - and its rain clock
   // v0.25.605 — Pet & pack cleanup. Wild Bond's wolf (`player.pet`) and
   // Beastmaster Call of the Wild's pack (`player.pack`) used to survive
   // death and keep mauling whatever killed the player while they were
@@ -63075,7 +63080,7 @@ function respawnAtTown() {
   player._clones = null;
   player._ballistaTurrets = null;     // v0.26.x — turrets reset on respawn
   player._ballistaChannel = null;     // v0.25.257 — channel resets on respawn
-  player._eclipseHold = null;   // v0.30.34 - Eclipse hold resets with the channel
+  player._eclipseHold = null; player._eclipseRain = null;   // v0.30.34 - Eclipse hold resets with the channel; v0.30.38 - and its rain clock
   player._warCharge = null;
   player._releasedCharge = null;
   player._chargeStart = 0;            // v0.25.605
@@ -64371,7 +64376,7 @@ function castSkill(id) {
     // Nightreaper Eclipse — 2400 ms scheduleSkillTimer chain (10 batches
     // + finale nova). No *Until flag, so we add it explicitly.
     if (id === 'nightreaper_mark') {
-      const _eclipseFrames = Math.ceil(LX_ECLIPSE_SNAP_MS / (1000 / 60));   // v0.30.34 - hold + snap, one constant
+      const _eclipseFrames = Math.ceil(LX_ECLIPSE_HOLD_MS / (1000 / 60));   // v0.30.38 - locked only while pinned (half the eclipse); the second half is free
       if (_now + _eclipseFrames > _lockEnd) _lockEnd = _now + _eclipseFrames;
     }
     // Phantom Cut — up to 6 marks chain-teleported at ~180 ms each
@@ -70623,6 +70628,11 @@ const SKILL_FNS = {
     // v0.30.34 — ECLIPSE MASSACRE v2 (per user: "very buggy ... the character
     // teleports to the middle of the map where the eclipse is and stays
     // there until the eclipse is done, no need to hold down skill").
+    // v0.30.38 — per user: "no not the middle of the map, what i meant is
+    // middle of the screen, ensure that the character stays there for half
+    // of the duration of the eclipse". moonX is now the centre of the
+    // visible screen and the pin lasts LX_ECLIPSE_HOLD_MS (half); the rain
+    // and the snap still run the full LX_ECLIPSE_SNAP_MS.
     //
     // What was broken: "roots in place" was a single `player.vx = 0` at
     // cast, so the rogue could walk off while the moon stayed behind; the
@@ -70632,18 +70642,23 @@ const SKILL_FNS = {
     //
     // Now, one press:
     //   1. targets are counted UNDER THE MOON - within half a screen (+80 px)
-    //      of the map's horizontal centre - before anything moves. No prey
-    //      there = whiff + partial refund, no blink (unchanged rule, new spot).
-    //   2. the rogue vanishes and reappears hovering at the map's centre,
-    //      LX_ECLIPSE_HOVER_PX above where their feet were. Camera snaps.
+    //      of the screen's centre, i.e. everything visible - before anything
+    //      moves. No prey = whiff + partial refund, no blink (unchanged rule).
+    //   2. the rogue vanishes and reappears hovering at the centre of the
+    //      screen, LX_ECLIPSE_HOVER_PX above where their feet were. The
+    //      camera is already there, so it does not move.
     //   3. the moon rises overhead and player._eclipseHold pins them for
-    //      LX_ECLIPSE_SNAP_MS: no gravity, no knockback, no walk / jump /
-    //      dash, stun shaken off (pin in updatePlayer). _lxEclipseTick, run
-    //      from loop() beside game.time++, fires the ten dagger waves and
-    //      the snap on the fixed sim step - through hit-stop, not pause.
+    //      LX_ECLIPSE_HOLD_MS (half the eclipse): no gravity, no knockback,
+    //      no walk / jump / dash, stun shaken off (pin in updatePlayer).
+    //      _lxEclipseTick, run from loop() beside game.time++, fires the
+    //      ten dagger waves and the snap off player._eclipseRain on the
+    //      fixed sim step - through hit-stop, not pause - for the full
+    //      LX_ECLIPSE_SNAP_MS, with the rogue free for the second half.
     // Damage, stuns, heal, MP, CD: exactly the v0.29.826 numbers.
     const ww = game.mapData.worldWidth || W;
-    const moonX = ww / 2;
+    // v0.30.38 — the centre of the VISIBLE screen. Narrow maps (ww <= W) keep a
+    // negative camera.x that centres the world, so this lands on ww/2 there.
+    const moonX = (game.camera ? game.camera.x : 0) + W / 2;
     const reachL = moonX - (W / 2 + LX_ECLIPSE_REACH);
     const reachR = moonX + (W / 2 + LX_ECLIPSE_REACH);
     const initialTargets = game.monsters
@@ -70665,18 +70680,14 @@ const SKILL_FNS = {
       state: 'attack', life: 20, maxLife: 20, color: 'rgba(255,80,140,0.55)' });
     spawnSmoothExplosion(ox, oy, 110, '#ff66aa', '#1a023080', { life: 20 });
 
-    // ── blink to the map's centre, lifted off the ground ────────────────
+    // ── blink to the centre of the screen, lifted off the ground ────────
     player.x = Math.max(0, Math.min(ww - player.w, moonX - player.w / 2));
     player.y = Math.max(0, player.y - LX_ECLIPSE_HOVER_PX);
     player.vx = 0; player.vy = 0;
     player.onGround = false;
     player.hitStun = 0;
-    // Camera: cut, don't slide. Mirrors loadMap's first-frame snap so the
-    // blink reads as a teleport instead of a pan.
-    if (game.camera) {
-      game.camera.x = (ww <= W) ? (ww - W) / 2
-        : Math.max(0, Math.min(ww - W, (player.x + player.w / 2) - W / 2));
-    }
+    // v0.30.38 — no camera snap: the rogue is now at the viewport's own centre
+    // and vx is 0, so updateCamera's target equals the current camera.x.
     const pcx0 = player.x + player.w / 2;
     const pcy0 = player.y + player.h / 2;
     game.afterImages.push({ x: player.x, y: player.y, facing: player.facing,
@@ -70697,13 +70708,16 @@ const SKILL_FNS = {
         scaleStartX: 0.9, scaleEndX: 1.5, scaleStartY: 0.9, scaleEndY: 1.5,
         fadeOut: 0.85, sticky: true });   // sticky: survives the smooth-fx cap (see v0.30.34 note there)
 
-    // ── the hold: everything after this point happens in _lxEclipseTick ──
-    player._eclipseHold = {
+    // ── the clock + the hold: everything after this point happens in
+    // _lxEclipseTick. _eclipseHold aliases the clock while the pin is live
+    // (first half); the tick nulls it at LX_ECLIPSE_HOLD_MS.
+    player._eclipseRain = {
       x: player.x, y: player.y,
       moonX,
       elapsed: 0,
       nextBatch: 0,
     };
+    player._eclipseHold = player._eclipseRain;
   },
 
   phantom_cut: () => {
@@ -127925,7 +127939,7 @@ function loop(time) {
   const dt = _LX_SIM_STEP_MS;   // v0.28.3 — fixed 60 Hz step (the gate above already banked/consumed the real elapsed time and updated lastTime). Replaces the old wall-clock delta so the frame-locked sim is refresh-independent; dt-scaled timers stay real-time because the sim runs at a true 60 steps/sec.
   game.time++;
   game._playMs = (game._playMs || 0) + dt;   // v0.26.453 - accumulated in-game playtime (ms) for boss respawn gating
-  if (player._eclipseHold && !game.paused) _lxEclipseTick(dt);   // v0.30.34 - Eclipse clock: same cadence as game.time, so hit-stop cannot stretch the hold past the moon
+  if (player._eclipseRain && !game.paused) _lxEclipseTick(dt);   // v0.30.34 - Eclipse clock: same cadence as game.time, so hit-stop cannot stretch the hold past the moon
   // v0.26.317 — Low-HP audio warning. Fires a one-shot `low_hp` SFX
   // when player HP first drops below 25 % of max, then re-arms once
   // HP climbs back above 35 % (hysteresis avoids stutter at the edge).
