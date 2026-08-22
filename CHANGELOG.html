@@ -121,6 +121,44 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.65 <span class="tag"><span class="pill bug">bug</span> Combat lag: every tinted sprite was re-probing its own edges</span></h2>
+<p>Per user: <em>there is a lot of lag in maps with monsters, could you reduce it.</em></p>
+
+<h3>What was actually costing the frames</h3>
+<p><code>_lxDrawSoft</code> softens the harsh square cut on sprite art, and to know <em>which</em> edges to fade it runs <code>_lxEdgesTouched</code> &mdash; a 48&times;48 alpha probe. The first probe of any image forces a synchronous webp decode on the render thread (~11&nbsp;ms), which is why the result is memoised on the image object.</p>
+<p>But <code>_lxTintBake</code> mints a <b>new canvas per (sprite frame &times; tint filter)</b>, and the probe ran on that copy. So all eight tint variants &mdash; freeze, burn, poison, stun, hit-flash, flash+freeze, dying, plain &mdash; cold-probed <em>every animation frame they ever appeared on</em>, and a fight is exactly when mobs are flashing and afflicted. Measured on a 28-mob fight: <b>217 probes costing 2198&nbsp;ms across 8.1&nbsp;s</b> &mdash; 27% of wall-clock, and the largest single entry in the CPU profile.</p>
+<p>The probe measures <b>alpha</b>, and every mob tint filter is colour-only (<code>sepia</code> / <code>saturate</code> / <code>hue-rotate</code> / <code>brightness</code> / <code>grayscale</code>) &mdash; none of them touch alpha. So the source's answer <em>is</em> the copy's answer. Three changes:</p>
+<ul>
+<li><b>Probe the source, never the tinted copy.</b> One probe per image, shared by the untinted draw and all eight tints. It also keeps the v0.29.707/708 idle-deferral working, which is keyed to the real <code>&lt;img&gt;</code>.</li>
+<li><b>Carry the memo across the bake</b> (<code>cv._lxEdges = img._lxEdges</code>) &mdash; the same carry-over <code>_lxBitmapToCanvas</code> has done for the shrink bake since v0.29.707. <code>_lxFeatherC</code> is deliberately <em>not</em> carried: that cache holds real pixels and the tint changed their colour.</li>
+<li><b>Stop rebuilding the probe scratch canvas.</b> It is always 48&times;48, but the old code assigned <code>.width</code>/<code>.height</code> and re-fetched the context on every call &mdash; and assigning <code>canvas.width</code> reallocates the backing store and resets all context state.</li>
+</ul>
+
+<h3>Measured</h3>
+<p>Three interleaved A/B pairs on the standard 8&nbsp;s / ~21-mob fight (medians):</p>
+<table>
+<tr><th>Metric</th><th>Before</th><th>After</th><th></th></tr>
+<tr><td>Frames rendered in the 8&nbsp;s window</td><td>625</td><td><b>779</b></td><td><b>+25%</b></td></tr>
+<tr><td>Frame time p50</td><td>10.3&nbsp;ms</td><td><b>7.0&nbsp;ms</b></td><td>&minus;32%</td></tr>
+<tr><td>Frame time p90</td><td>24.5&nbsp;ms</td><td><b>19.9&nbsp;ms</b></td><td>&minus;19%</td></tr>
+<tr><td>Frame time p99</td><td>52.6&nbsp;ms</td><td><b>40.4&nbsp;ms</b></td><td>&minus;23%</td></tr>
+<tr><td><code>_lxEdgesTouched</code> cost</td><td>109&nbsp;ms/s</td><td><b>27&nbsp;ms/s</b></td><td>&minus;75%</td></tr>
+</table>
+<p>The probe-cost line improved in all three pairs (134&rarr;73, 102&rarr;27, 109&rarr;24&nbsp;ms/s) &mdash; that is the direct effect and it is unambiguous. Frame counts were clearly better in two pairs and a wash in the third; the machine was running ~19 competing browser/node processes, so treat the frame figures as indicative and the probe figures as solid.</p>
+
+<h3>The profiler was measuring a path nobody plays</h3>
+<p><code>scripts/perf_combat_profile.mjs</code> loaded the build over <code>file:///</code>. Every real client uses http &mdash; Steam's Electron shell calls <code>loadURL('http://127.0.0.1:&hellip;')</code>, the desktop launcher runs <code>serve.js</code>, Pages is https &mdash; and the distinction is not cosmetic: <code>_lxBitmapOffThread</code> only takes its fast blob path for <code>/^https?:/</code> sources, so under <code>file://</code> every bake fell back to the on-thread <code>createImageBitmap(&lt;img&gt;)</code> decode. That fallback dominated the profile at <b>29.6% self-time with p50 39&nbsp;ms</b>. Same build, same fight, served over http: <b>p50 19.5&nbsp;ms and no <code>createImageBitmap</code> in the profile at all</b>. The harness now serves over http, so future passes optimise something real.</p>
+
+<h3>Verification</h3>
+<p>New <code>scripts/mob_tint_edge_memo_test.mjs</code> pins the invariant the fix rests on rather than the speedup (which is machine-dependent). Against the unfixed build the carry assertion fails <b>0/24</b>; against this one, 4/4 pass:</p>
+<ul>
+<li>colour-only tints leave the <b>feathered</b> edges (left/right/top) byte-identical on the bake &mdash; 48 (sprite &times; tint) pairs, <b>zero</b> differing;</li>
+<li>every source memo is carried onto its tint bake &mdash; <b>24/24</b>, with the 24 pairs whose source probe is still deferred to idle counted separately, since those correctly have nothing to carry yet.</li>
+</ul>
+<p>If anyone later adds an <code>opacity()</code> or <code>blur()</code> to a mob tint, both of which <em>do</em> change alpha, that test fails loudly instead of the feather quietly going wrong on tinted mobs. The bottom edge shows 24 harmless diffs and is reported but not asserted: it is never feathered (feet are full-bleed by design; only <code>_LX_FEATHER_BOTTOM</code> = {king, kingKrook} opt in), and the diffs come from the test's own two-step downscale resolving a threshold-marginal row differently, not from the filter.</p>
+<p><b>Tried and rejected:</b> adding the monster loader's <code>decode()</code> warm to the boss frame loader. It looked like the same missing fix, but forcing decode on ~18 boss types &times; 3 states &times; 9 frames of 768&sup2; art balloons the decoded working set into the hundreds of MB &mdash; the very problem the v0.29.707 shrink bake exists to avoid. It measured consistently <em>slower</em> and was dropped.</p>
+
+
 <h2>v0.30.64 <span class="tag"><span class="pill polish">polish</span> Bloomhaven Jungle looks like a jungle</span></h2>
 <p>Per user &mdash; <em>&ldquo;bloomhaven jungle should also have verdant background&rdquo;.</em></p>
 <p>The town kept the Fungal Hollow plate through v0.30.56&rsquo;s rename, so it read as a mushroom cave behind a jungle name. It now takes <code>verdant</code> &mdash; the near Bloom Reaches plate, the same one Verdant Hollow uses &mdash; rather than <code>verdantDeep</code>, which is the darker Thornspire / Gloomspore look and wrong for a safe town.</p>

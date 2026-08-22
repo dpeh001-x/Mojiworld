@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.64';
+const GAME_VERSION = 'v0.30.65';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -116768,6 +116768,11 @@ const MONSTER_ANIM_DEFS = {};
 //     to the raw draw, so this can never break rendering.
 // =========================================================================
 const _LX_EDGE_PROBE = (typeof document !== 'undefined') ? document.createElement('canvas') : null;
+// v0.30.65 perf — the probe is ALWAYS 48x48, but the old code assigned .width/.height
+// and re-fetched the context on every call. Assigning canvas.width reallocates the
+// backing store and resets all context state, so each probe paid a fresh software
+// canvas allocation before it drew anything. Size it once, hold the context.
+let _LX_EDGE_PROBE_CTX = null;
 function _lxEdgesTouched(img) {
   if (img._lxEdges !== undefined) return img._lxEdges;
   // v0.29.278 — don't MEMOIZE before the image has decoded. The star-form
@@ -116815,8 +116820,8 @@ function _lxEdgesTouched(img) {
   let res = null;
   try {
     const S = 48;
-    _LX_EDGE_PROBE.width = S; _LX_EDGE_PROBE.height = S;
-    const g = _LX_EDGE_PROBE.getContext('2d', { willReadFrequently: true });
+    if (_LX_EDGE_PROBE.width !== S) { _LX_EDGE_PROBE.width = S; _LX_EDGE_PROBE.height = S; _LX_EDGE_PROBE_CTX = null; }
+    const g = _LX_EDGE_PROBE_CTX || (_LX_EDGE_PROBE_CTX = _LX_EDGE_PROBE.getContext('2d', { willReadFrequently: true }));
     g.clearRect(0, 0, S, S);
     g.drawImage(img, 0, 0, S, S);
     const d = g.getImageData(0, 0, S, S).data;
@@ -116891,18 +116896,39 @@ function _lxTintBake(img, filterStr) {
     g.filter = filterStr;
     g.drawImage(img, 0, 0);
     cv._lxNoShrink = true;
+    // v0.30.65 perf — CARRY THE EDGE MEMO. Every mob tint filter is colour-only
+    // (sepia / saturate / hue-rotate / brightness / grayscale) and none of them
+    // touch alpha, so the baked canvas has byte-identical alpha geometry to its
+    // source — which is exactly, and only, what _lxEdges describes. Same
+    // carry-over _lxBitmapToCanvas already does for the shrink bake (v0.29.707).
+    // _lxFeatherC is deliberately NOT carried: that cache holds real pixels and
+    // the tint changed their colour.
+    if (img._lxEdges !== undefined) cv._lxEdges = img._lxEdges;
   } catch (e) { cv = null; }
   bakes[filterStr] = cv;
   return cv;
 }
 const _LX_FORCED_EDGES = { l: { f: 0.35, a: 0, b: 1 }, r: { f: 0.35, a: 0, b: 1 }, t: { f: 0.35, a: 0, b: 1 } };
 function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
+  // v0.30.65 perf — COMBAT LAG. The tint bake mints a NEW canvas per
+  // (sprite frame x filter) and the probe below ran on that copy, so every one
+  // of the 8 tint variants (freeze / burn / poison / stun / flash / flash+freeze
+  // / dying / hit) cold-probed every animation frame it ever appeared on.
+  // A cold probe is a synchronous GPU->CPU getImageData readback: measured at
+  // ~10 ms each, 217 of them costing 2198 ms across 8.1 s of a 28-mob fight —
+  // 27% of wall-clock, and the single largest cost in the profile.
+  //
+  // The probe measures ALPHA, and the tint filters are colour-only, so the
+  // source's answer is the copy's answer. Probe the original: one probe per
+  // image, shared by the untinted draw and all 8 tints. This also keeps the
+  // v0.29.707/708 deferral working, which is keyed to the real <img>.
+  const _edgeSrc = img;
   if (_lxMobTintFilter && img) {           // v0.29.5xx — baked tint swap
     const _tb = _lxTintBake(img, _lxMobTintFilter);
     if (_tb) img = _tb;
   }
   if (dw == null) { dw = img.width; dh = img.height; }
-  let e = _lxEdgesTouched(img);
+  let e = _lxEdgesTouched(_edgeSrc);
   // force: fill in any edge the probe missed (partial detections keep their
   // measured span; sides the glow defeated get the full-span fallback).
   if (opts && opts.force) {

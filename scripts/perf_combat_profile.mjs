@@ -7,7 +7,19 @@ import { chromium } from 'playwright-core';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const URL = 'file:///' + path.join(ROOT, process.argv[2] || 'mojiworld_game.html').split(path.sep).join('/');
+// v0.30.x — SERVE OVER HTTP, because that is the only way anyone plays: Steam's
+// Electron shell does loadURL('http://127.0.0.1:...'), the desktop launcher runs
+// serve.js, and Pages is https. The old file:/// URL measured a path no client
+// takes, and it measured it WRONGLY: _lxBitmapOffThread only routes through the
+// fast blob path for /^https?:/ sources, so under file:// every bake fell back to
+// the on-thread createImageBitmap(<img>) decode. That fallback dominated the
+// profile at 29.6% self-time and p50 39ms — against 19.5ms and no
+// createImageBitmap at all over http. Same build, same fight, half the frame time.
+import { spawn as _spawn } from 'node:child_process';
+const _PORT = process.env.PERF_PORT || '9495';
+const _srv = _spawn(process.execPath, [path.join(ROOT, 'serve.js'), _PORT], { stdio: 'ignore' });
+await new Promise((r) => setTimeout(r, 1500));
+const URL = 'http://localhost:' + _PORT + '/' + (process.argv[2] || 'mojiworld_game.html');
 const browser = await chromium.launch({ channel: 'chrome', args: [
   '--disable-background-timer-throttling', '--disable-renderer-backgrounding',
   '--disable-backgrounding-occluded-windows'] });
@@ -63,7 +75,7 @@ const frames = await page.evaluate(async () => {
   return out;
 });
 const { profile } = await cdp.send('Profiler.stop');
-await browser.close();
+await browser.close(); try { _srv.kill(); } catch (e) {}
 
 frames.sort((a, b) => a - b);
 const pct = (p) => frames[Math.floor(frames.length * p)].toFixed(1);
