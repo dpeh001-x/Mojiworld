@@ -29,6 +29,10 @@ await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'do
 await page.waitForFunction(() => typeof _tickSovereignShade === 'function' && typeof hitMonster === 'function'
   && typeof SKILL_FNS !== 'undefined' && typeof drawSovereignShade === 'function', null, { timeout: 120000 });
 await page.waitForTimeout(1500);
+// the hero's hair streams with LX_HAIR; the shade must not bake bald, so wait
+await page.waitForFunction(() => { try { const h = player.lookCustom && player.lookCustom.hairId;
+  return !h || !LX_HAIR || !LX_HAIR[h] || (LX_HAIR[h].complete && LX_HAIR[h].naturalWidth > 0); } catch (e) { return true; } },
+  null, { timeout: 20000 }).catch(() => {});
 
 const r = await page.evaluate(() => {
   const out = {};
@@ -99,15 +103,47 @@ const r = await page.evaluate(() => {
 
   // ---- draw: the body is the tinted hero bake, flipped with facing ----
   const spyDraw = () => {
-    let blits = 0, flipped = false, canvasSrc = false;
+    let blits = 0, flipped = false, canvasSrc = false, ellipses = 0;
     const P = CanvasRenderingContext2D.prototype;
-    const od = P.drawImage, os = P.scale;
+    const od = P.drawImage, os = P.scale, oe = P.ellipse;
     P.drawImage = function (img) { blits++; if (img && img.tagName === 'CANVAS') canvasSrc = true; return od.apply(this, arguments); };
     P.scale = function (a) { if (a === -1) flipped = true; return os.apply(this, arguments); };
+    P.ellipse = function () { ellipses++; return oe.apply(this, arguments); };
     try { drawSovereignShade(); } catch (e) { blits = -1; }
-    P.drawImage = od; P.scale = os;
-    return { blits, flipped, canvasSrc };
+    P.drawImage = od; P.scale = os; P.ellipse = oe;
+    return { blits, flipped, canvasSrc, ellipses };
   };
+  // the bake must hold the WHOLE hero: an empty top row (nothing clipped at
+  // the canvas edge) and ink present in the body rows
+  try {
+    const bk = _lxShadeBake();
+    const bc = bk.getContext('2d');
+    const top = bc.getImageData(0, 0, bk.width, 2).data;
+    let topInk = 0; for (let i = 3; i < top.length; i += 4) if (top[i] > 8) topInk++;
+    const mid = bc.getImageData(0, Math.floor(bk.height * 0.45), bk.width, 4).data;
+    let midInk = 0; for (let i = 3; i < mid.length; i += 4) if (mid[i] > 8) midInk++;
+    // first row with ink, as a fraction of height: headroom above the hair
+    let firstInkRow = -1;
+    for (let y = 0; y < bk.height && firstInkRow < 0; y += 3) {
+      const row = bc.getImageData(0, y, bk.width, 1).data;
+      for (let i = 3; i < row.length; i += 4) if (row[i] > 8) { firstInkRow = y; break; }
+    }
+    out.bake = { w: bk.width, h: bk.height, topInk, midInk, headroomFrac: +(firstInkRow / bk.height).toFixed(3) };
+    // the cache gate: with a hair sprite that is NOT decoded, the bake must
+    // not be kept (an unknown id has nothing to wait for and caches normally)
+    _LX_SHADE_BAKE.clear();
+    const savedLook = player.lookCustom;
+    const fakeImg = new Image();                       // never given a src: complete, naturalWidth 0
+    const realHair = (player.lookCustom && player.lookCustom.hairId) || 'x';
+    const savedSprite = LX_HAIR[realHair];
+    LX_HAIR[realHair] = fakeImg;
+    _lxShadeBake();
+    out.baldNotCached = _LX_SHADE_BAKE.size === 0;
+    LX_HAIR[realHair] = savedSprite;
+    _lxShadeBake();
+    out.readyCached = _LX_SHADE_BAKE.size === 1;
+    player.lookCustom = savedLook;
+  } catch (e) { out.bake = { err: String(e).slice(0, 100) }; }
   player._shade.facing = 1;  out.drawR = spyDraw();
   player._shade.facing = -1; out.drawL = spyDraw();
 
@@ -119,7 +155,10 @@ const r = await page.evaluate(() => {
   // ---- exemption + connected-only ----
   out.shadeExempt = (typeof MISS_EXEMPT_SKILLS !== 'undefined') && MISS_EXEMPT_SKILLS.has('shade');
   player._shade = { life: 9000, maxLife: 12000, x: 0, y: 0, facing: 1, queue: [], swing: 0, echoes: 0 };
-  const dodgy = Object.assign(mk(), { evasion: 100000 });   // guaranteed MISS on the evasion roll
+  // deterministic non-connect: IMMUNE returns before the damage write. (An
+  // evasion-based "guaranteed miss" is NOT guaranteed - the accuracy roll has
+  // a hit floor, and it landed on one run.)
+  const dodgy = Object.assign(mk(), { invulnerable: 1 });
   game.monsters = [m, dodgy];
   hitMonster(dodgy, 100, false, 'test');
   out.missQueued = player._shade.queue.length;
@@ -147,7 +186,7 @@ ok('the echo does not echo itself (queue empty after payout)', r.queueAfter === 
   { queueAfter: r.queueAfter, echoes: r.echoCount });
 ok("the echo is miss-exempt (it repeats a strike that already connected — same rule as 'overflow')",
   r.shadeExempt === true, { exempt: r.shadeExempt });
-ok('a MISSED original queues no echo (nothing connected, nothing to repeat)', r.missQueued === 0, { queued: r.missQueued });
+ok('an original that does NOT connect (IMMUNE) queues no echo - nothing to repeat', r.missQueued === 0, { queued: r.missQueued });
 // hitMonster takes isCrit as a FLAG — callers pre-multiply the crit into
 // dmg (see performAround) — so the flag changes colour and procs, not the
 // number. The echo re-enters with the caller's raw dmg AND the flag, so a
@@ -158,6 +197,12 @@ ok("a crit's echo carries the same damage (and the flag) as the original crit",
 ok('an echo for a target that died in the gap is dropped, not landed on a corpse', r.deadSkipped, { deadSkipped: r.deadSkipped });
 ok('the body draws as a baked canvas (the tinted hero), flipped with facing',
   r.drawR.blits >= 1 && r.drawR.canvasSrc && !r.drawR.flipped && r.drawL.flipped, { right: r.drawR, left: r.drawL });
+ok('NO CIRCLE: the shade draws no under-glow ellipse (per user)', r.drawR.ellipses === 0 && r.drawL.ellipses === 0,
+  { ellipses: [r.drawR.ellipses, r.drawL.ellipses] });
+ok('NOT CUT OFF: the bake has an empty top row, ink in the body, and headroom above the hair (per user)',
+  r.bake && r.bake.topInk === 0 && r.bake.midInk > 0 && r.bake.headroomFrac > 0.04, r.bake);
+ok('NEVER BALD FOR THE SESSION: a bake taken before the hair decodes is not cached; a ready one is',
+  r.baldNotCached === true && r.readyCached === true, { baldNotCached: r.baldNotCached, readyCached: r.readyCached });
 ok('the shade expires on its timer', r.expired, { expired: r.expired });
 ok('no shade, no queue — the hook is inert outside the buff', r.noShadeNoQueue, '');
 ok('no page errors', errs.length === 0, errs.slice(0, 3));

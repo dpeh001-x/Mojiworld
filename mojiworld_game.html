@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.49';
+const GAME_VERSION = 'v0.30.50';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -107698,21 +107698,40 @@ const LX_SHADE_ECHO_FRAMES = 7;       // ~115ms behind the original hit
 const LX_SHADE_ECHO_MULT   = 1.0;     // "doubles up" — a true double
 const LX_SHADE_QUEUE_CAP   = 48;
 const _LX_SHADE_BAKE = new Map();
+// v0.30.x — the shade's OWN bake box (per user: "it looks cut off at the top").
+// The first cut reused _lxBakeHeroIdle's 100x100 canvas, whose feet sit at
+// y=80: the hero's hair reaches above y=0 of that box and was clipped flat.
+// That bake's geometry is shared with the studio / peer paths, so it is left
+// alone; the shade gets 120x140 with the feet at (60,120) — 120 logical px of
+// headroom — at 3x supersample for the display scale.
+const LX_SHADE_BAKE_W = 120, LX_SHADE_BAKE_H = 140, LX_SHADE_FOOT_X = 60, LX_SHADE_FOOT_Y = 120, LX_SHADE_SUPER = 3;
 function _lxShadeBake() {
   const lc = (player && player.lookCustom) || {};
   const key = [player.cls, lc.skinIdx | 0, lc.hairId, lc.eyeId || 'default', lc.mouthId || 'default'].join('|');
   let cv = _LX_SHADE_BAKE.get(key);
   if (cv) return cv;
-  const base = _lxBakeHeroIdle(player.cls, lc.skinIdx | 0, lc.hairId, lc.eyeId, lc.mouthId);
   cv = document.createElement('canvas');
-  cv.width = base.width; cv.height = base.height;
+  cv.width = LX_SHADE_BAKE_W * LX_SHADE_SUPER; cv.height = LX_SHADE_BAKE_H * LX_SHADE_SUPER;
   const c = cv.getContext('2d');
-  c.drawImage(base, 0, 0);
+  if (typeof _lxUseEntityImageQuality === 'function') _lxUseEntityImageQuality(c);
+  c.scale(LX_SHADE_SUPER, LX_SHADE_SUPER);
+  const pw = player.w || 28, ph = player.h || 44;
+  _drawVectorHero(LX_SHADE_FOOT_X - pw / 2, LX_SHADE_FOOT_Y - ph, c, {
+    cls: player.cls,
+    lookCustom: { skinIdx: lc.skinIdx | 0, hairId: lc.hairId, eyeId: lc.eyeId, mouthId: lc.mouthId, msxId: null },
+    animName: 'idle', animTime: 0.5, forcedFacing: 1,
+  });
+  c.setTransform(1, 0, 0, 1, 0, 0);
   c.globalCompositeOperation = 'source-atop';
   c.fillStyle = 'rgba(26,6,52,0.86)';          // the shadow: near-black violet
   c.fillRect(0, 0, cv.width, cv.height);
   c.globalCompositeOperation = 'source-over';
-  _LX_SHADE_BAKE.set(key, cv);
+  // cache only once the hair sprite has decoded (an unknown id has nothing to
+  // wait for); otherwise this is a bald pre-decode bake — use it this frame,
+  // but do not keep it
+  const _hs = (lc.hairId && typeof LX_HAIR !== 'undefined' && LX_HAIR) ? LX_HAIR[lc.hairId] : null;
+  const _hairDone = !_hs || (typeof _lxHairReady === 'function' ? _lxHairReady(_hs) : !!(_hs.complete && _hs.naturalWidth));
+  if (_hairDone) _LX_SHADE_BAKE.set(key, cv);
   return cv;
 }
 function _lxShadeQueue(m, rawDmg, isCrit, skill) {
@@ -107769,22 +107788,27 @@ function drawSovereignShade() {
   const sx = sh.x - game.camera.x, sy = sh.y;
   const fade = sh.life < 400 ? sh.life / 400 : 1;
   const SC = HERO_WORLD_DISPLAY_SCALE;
-  // violet under-glow, breathing with each echo
+  // v0.30.x — the under-glow disc is gone (per user: "why is there a
+  // circle"). The echo still reads through the slash + lunge ghosts at the
+  // target; the body alone marks the shade.
+  if (false) {
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.fillStyle = 'rgba(140,68,204,' + (fade * (0.16 + sh.swing * 0.3)).toFixed(3) + ')';
   ctx.beginPath(); ctx.ellipse(sx, sy + 4, 20 + sh.swing * 6, 24 + sh.swing * 6, 0, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
+  }
   // the body: the bake's feet sit at (50,80) of a 100x100 logical box; the
   // hero is drawn at HERO_WORLD_DISPLAY_SCALE, so the shade matches it
   const footX = sx, footY = sy + player.h / 2;
+  const BW = LX_SHADE_BAKE_W * SC, BH = LX_SHADE_BAKE_H * SC, FX = LX_SHADE_FOOT_X * SC, FY = LX_SHADE_FOOT_Y * SC;
   ctx.save();
   ctx.globalAlpha = 0.9 * fade;
   if (sh.facing < 0) {
     ctx.translate(footX, 0); ctx.scale(-1, 1);
-    ctx.drawImage(bake, -50 * SC, footY - 80 * SC, 100 * SC, 100 * SC);
+    ctx.drawImage(bake, -FX, footY - FY, BW, BH);
   } else {
-    ctx.drawImage(bake, footX - 50 * SC, footY - 80 * SC, 100 * SC, 100 * SC);
+    ctx.drawImage(bake, footX - FX, footY - FY, BW, BH);
   }
   ctx.restore();
   if (typeof _drawSummonTimer === 'function') _drawSummonTimer(sx, sy - 46, sh.life, sh.maxLife);
