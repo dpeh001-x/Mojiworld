@@ -388,9 +388,19 @@ window.LX_ANIM_CALIB = {
       "dy": 0
     },
     "attack": {
-      "s": 1.08,
+      "s": 0.8617,
       "dx": 0,
       "dy": -0.01
+    },
+    "duck": {
+      "s": 0.9017,
+      "dx": 0,
+      "dy": 0
+    },
+    "weave": {
+      "s": 0.8758,
+      "dx": 0,
+      "dy": 0
     }
   },
   "gravitospunch": {

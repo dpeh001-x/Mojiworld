@@ -28,7 +28,12 @@ if (patch.LX_ANIM_PATCH !== 1 || !patch.type || !patch.calib) {
 const t = patch.type;
 
 const src = readFileSync(CALIB, 'utf8');
-const m = src.match(/^([\s\S]*?)window\.LX_ANIM_CALIB = (\{[\s\S]*?\});\nwindow\.LX_ATK_HITBOX = (\{[\s\S]*?\});\n?$/);
+// CRLF-tolerant. core.autocrlf=true on Windows means `git checkout` smudges
+// this file to CRLF while the blob stays LF, so a strict \n here made the
+// script refuse ("did not match the expected shape") on any freshly checked-out
+// working copy — which is exactly the state right after materialising a commit.
+// The rewrite below always emits LF, so applying a patch also normalises it.
+const m = src.match(/^([\s\S]*?)window\.LX_ANIM_CALIB = (\{[\s\S]*?\});\r?\nwindow\.LX_ATK_HITBOX = (\{[\s\S]*?\});\r?\n?$/);
 if (!m) { console.error('anim_calib.js did not match the expected shape'); process.exit(1); }
 const header = m[1];
 const calib = JSON.parse(m[2]);
