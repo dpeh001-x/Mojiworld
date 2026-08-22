@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.47';
+const GAME_VERSION = 'v0.30.48';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11797,7 +11797,7 @@ function _lxTintedFx(img, color) {
 // lifetime; falls back to the static LX_FX sprite until frames decode.
 const FX_ANIM_FRAMES = Object.create(null);
 const _FX_ANIM_KEYS = new Set([
-  'bolt_impact',    // v0.30.x - Magic Bolt contact burst (anim/bolt_impact_0..7, ludo.ai via gen_bolt_impact_fx.mjs)
+  'bolt_impact',    // v0.30.x - Magic Bolt contact burst (anim/bolt_impact_0..7, ludo.ai via gen_bolt_impact_fx.mjs). Warmed eagerly below: it is a BASIC attack, so it fires long before the staggered boot warmer would reach it.
   'arcane_burst',   // v0.29.946 — mage W detonation star (anim/arcane_burst_0..8, ludo.ai via gen_arcane_burst_fx.mjs)
   'arcane_shockwave',   // v0.29.951 — the AoE ring animates too: runes pulse around the band, arcs snap across it
   'quakeRing',          // v0.29.967 — boss quake ground ring: dust rolls outward, plates settle (frameGap 5 at the spawn site)
@@ -11821,6 +11821,10 @@ const _FX_ANIM_KEYS = new Set([
   // v0.26.x — Boss Shackle QTE sigils (capture wrap + break burst).
   'qte_chains', 'qte_gravity', 'qte_molten', 'qte_tidal', 'qte_holy', 'qte_spore', 'qte_break',
 ]);
+// v0.30.x - the bolt burst rides the mage's basic attack, so its frames are
+// requested on the first hit of a run. Kick the decode at load rather than
+// letting that first detonation fall back to the static sprite.
+setTimeout(() => { try { _fxAnimFrames('bolt_impact'); } catch (e) {} }, 0);
 function _fxAnimFrames(key) {
   if (!_FX_ANIM_KEYS.has(key)) return null;
   let arr = FX_ANIM_FRAMES[key];
@@ -67004,9 +67008,10 @@ function drawSmoothFx(_behindPass) {
       if (_fxFrames) {
         // v0.26.x — frameGap (game-frames per frame) loops the 9-frame anim at
         // a fixed cadence for smoother playback; default stretches t→frame once.
+        const _fn = _fxFrames.length || 9;   // v0.30.x - was hardcoded 9; an 8-frame set blipped to the static sprite and then looped
         const _fi = fx.frameGap
-          ? (Math.floor((fx.maxLife - fx.life) / fx.frameGap) % 9)
-          : Math.min(8, Math.max(0, Math.floor(t * 9)));
+          ? (Math.floor((fx.maxLife - fx.life) / fx.frameGap) % _fn)
+          : Math.min(_fn - 1, Math.max(0, Math.floor(t * _fn)));
         const _fr = _fxFrames[_fi];
         if (_lxFxReady(_fr)) sprite = _fr;
       }
@@ -85662,9 +85667,13 @@ function updateProjectiles(dt) {
           // Guarded on the bolt tag alone so no other projectile inherits it,
           // and skipped under adaptive low-fx like every other flourish. A crit
           // blooms wider - the burst reads the hit, not just the collision.
-          if (p.skill === 'bolt' && !(typeof _perfLowFx === 'function' && _perfLowFx())) {
+          if (p.skill === 'bolt' && !(typeof _perfVeryLowFx === 'function' && _perfVeryLowFx())) {
+            // v0.30.x - one blit/frame, so it survives boss fights. Under the
+            // ordinary low-fx tier it shrinks rather than vanishing.
+            const _lean = (typeof _perfLowFx === 'function' && _perfLowFx());
             spawnSpriteBurst(p.x + (p.w || 0) / 2, p.y + (p.h || 0) / 2, 'bolt_impact',
-              { size: crit ? 150 : 110, life: 22, frameGap: 2, fadeOut: 0.85 });
+              { size: (crit ? 190 : 140) * (_lean ? 0.72 : 1),
+                life: _lean ? 20 : 30, fadeOut: 0.55 });
           }
           if (p.doomBrand && typeof _doomBrandAdd === 'function') _doomBrandAdd(m, p.doomBrand);
           // v0.29.693 — SUPER POISON (Pandemic Hex orbs). A hotter tier of the

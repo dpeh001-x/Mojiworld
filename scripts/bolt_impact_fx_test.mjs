@@ -85,6 +85,67 @@ const r = await page.evaluate(async () => {
     const fx = (game.smoothFx || []).filter(f => f && f.spriteKey === 'bolt_impact');
     return { spawned: fx.length - before, last: fx[fx.length - 1] || null };
   };
+  // v0.30.x - THE REAL CAST. The original suite pushed a SYNTHETIC projectile
+  // with skill:'bolt', which is why it passed green while the effect was dead
+  // in play: it never went through the spawn gate. Drive SKILL_FNS.magicBolt()
+  // and let the projectile fly into a dummy, exactly as a player does.
+  const realCast = (withBoss) => {
+    game.monsters.length = 0; game.projectiles.length = 0;
+    if (game.smoothFx) game.smoothFx.length = 0;
+    if (game._lowFxCache) game._lowFxCache = null;
+    player.cls = 'mage'; player.job = 'archmage'; player.level = 60;
+    player.facing = 1; player.mp = 9999; player.hp = getMaxHp();
+    player.skillCooldowns = {}; player._castLockUntil = 0;
+    const m = { x: player.x + 150, y: player.y, w: 40, h: 40, hp: 1e9, maxHp: 1e9, currentHp: 1e9,
+      def: 0, type: 'slime', level: 1, speed: 0, facing: 1, vx: 0, vy: 0, _noGravity: true, name: 'dummy' };
+    game.monsters.push(m);
+    if (withBoss) {
+      // a live boss trips _perfLowFx() — the gate that silently ate the burst
+      game.monsters.push({ x: player.x - 600, y: player.y, w: 90, h: 90, hp: 1e9, maxHp: 1e9,
+        currentHp: 1e9, def: 0, type: 'slime', level: 60, speed: 0, facing: 1, vx: 0, vy: 0,
+        _noGravity: true, name: 'bossy', isBoss: true });
+    }
+    SKILL_FNS.magicBolt();
+    for (let f = 0; f < 40; f++) {
+      updateProjectiles(16);
+      const bs = (game.smoothFx || []).filter(x => x && x.spriteKey === 'bolt_impact');
+      if (bs.length) return { spawned: bs.length, size: Math.round(bs[0].size), life: bs[0].maxLife, hurt: m.currentHp < 1e9 };
+    }
+    return { spawned: 0, size: 0, life: 0, hurt: m.currentHp < 1e9 };
+  };
+  out.real = realCast(false);
+  out.realBoss = realCast(true);
+  out.lowFxWithBoss = (typeof _perfLowFx === 'function') ? _perfLowFx() : null;
+
+  // ...and it must reach the SCREEN as animated frames, not the static sprite.
+  {
+    game.monsters.length = 0; game.projectiles.length = 0;
+    if (game.smoothFx) game.smoothFx.length = 0;
+    const drawn = [];
+    const proto = CanvasRenderingContext2D.prototype;
+    const oDI = proto.drawImage;
+    proto.drawImage = function (img, ...a) {
+      try { const src = (img && img.src) || ''; if (/bolt_impact/.test(src)) drawn.push(src.split('/').pop()); } catch (e) {}
+      return oDI.call(this, img, ...a);
+    };
+    try {
+      const m2 = { x: player.x + 150, y: player.y, w: 40, h: 40, hp: 1e9, maxHp: 1e9, currentHp: 1e9,
+        def: 0, type: 'slime', level: 1, speed: 0, facing: 1, vx: 0, vy: 0, _noGravity: true, name: 'd2' };
+      game.monsters.push(m2);
+      player.skillCooldowns = {}; player._castLockUntil = 0;
+      SKILL_FNS.magicBolt();
+      for (let f = 0; f < 60; f++) {
+        updateProjectiles(16);
+        if (typeof updateSmoothFx === 'function') updateSmoothFx(16);
+        else for (const fx of (game.smoothFx || [])) if (fx && fx.life > 0) fx.life -= 1;
+        try { drawSmoothFx(); } catch (e) {}
+      }
+    } finally { proto.drawImage = oDI; }
+    out.drawn = { total: drawn.length, uniq: [...new Set(drawn)].sort(),
+      animated: drawn.filter(f => f !== 'bolt_impact.webp').length,
+      still: drawn.filter(f => f === 'bolt_impact.webp').length };
+  }
+
   mk(); const boltHit = shoot('bolt', false);
   out.bolt = { spawned: boltHit.spawned, size: boltHit.last && Math.round(boltHit.last.size) };
   mk(); const critHit = shoot('bolt', true);
@@ -99,6 +160,16 @@ ok('the loader asks for 8 frames and they decode', r.frameCount === 8 && r.decod
 ok('a bolt hitting a monster spawns the burst', r.bolt.spawned === 1, r.bolt);
 ok('a CRIT blooms wider than a normal hit', r.crit.size > r.bolt.size, { crit: r.crit.size, normal: r.bolt.size });
 ok('an arrow hit spawns NO bolt burst (bolt-only, per the tag guard)', r.arrow.spawned === 0, r.arrow);
+// v0.30.x — the checks that would have caught the dead effect.
+ok('THE REAL CAST spawns the burst (SKILL_FNS.magicBolt, not a synthetic projectile)',
+   r.real.spawned === 1 && r.real.hurt === true, r.real);
+ok('...and it still spawns WITH A BOSS ALIVE (the low-fx gate used to eat it)',
+   r.realBoss.spawned === 1 && r.lowFxWithBoss === true, { boss: r.realBoss, lowFx: r.lowFxWithBoss });
+ok('...at a readable size (140 normal / 190 crit) over 30 ticks', r.real.size === 140 && r.real.life === 30, r.real);
+ok('the burst reaches the screen as ANIMATED frames, not the static sprite',
+   r.drawn.animated > 0 && r.drawn.animated >= r.drawn.still, r.drawn);
+ok('no frame index runs past the end of the 8-frame set (no static blip mid-burst)',
+   !r.drawn.uniq.includes('bolt_impact_8.webp'), r.drawn.uniq);
 ok('no 404s on the burst art', bad.length === 0, bad.slice(0, 4));
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 for (const q of results) console.log((q.pass ? 'PASS ' : 'FAIL ') + ' ' + q.n + '  ' + JSON.stringify(q.x ?? ''));
