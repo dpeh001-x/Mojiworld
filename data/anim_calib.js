@@ -184,9 +184,9 @@ window.LX_ANIM_CALIB = {
       "dy": 0.025
     },
     "attack": {
-      "s": 1.1259,
+      "s": 1.1415,
       "dx": 0,
-      "dy": 0.025
+      "dy": 0.0254
     }
   },
   "aetherion": {
