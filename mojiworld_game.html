@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.32';
+const GAME_VERSION = 'v0.30.33';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -83977,10 +83977,36 @@ function killMonster(m) {
   //   showToast('Marked kill — MP refilled!', 'epic');
   //   flash(0.2);
   // }
+  // v0.30.32 (per user: "my neromancer skill has a skill that + 3 maxhp all
+  // the time, change it to mp and hp heal of about 5% instead") — was
+  // `player.maxHp += 3` on every kill inside the Soul Vortex window. That was
+  // PERMANENT: getMaxHp() reads player.maxHp as its base and multiplies from
+  // there, so each cast raised the character's ceiling for the rest of the save
+  // with nothing to decay or cap it. Now it restores instead of inflating.
+  //
+  // Note this deliberately re-opens a narrow exception to the v0.25.920 rule
+  // above ("do not heal player HP or MP when killing monsters"), which is why
+  // the two paths above it stay commented out. That rule was about kills in
+  // general; this is scoped to the 30 s pool the necromancer has to spend a
+  // cast and a cooldown to put down, which is the skill the user is asking to
+  // work this way.
   if (player.buffs.necromancer > 0) {
-    player.maxHp += 3;
-    game.damageNumbers.push({ x: player.x + 14, y: player.y - 10, vy: -2,
-      text: '+3 MaxHP', life: 40, color: '#66ff99', size: 13 });
+    const _nMaxHp = getMaxHp(), _nMaxMp = getMaxMp();
+    // Report what was ACTUALLY restored, not the notional 5%. At full HP the
+    // old line still announced itself every kill, which is the floating-text
+    // spam visible in the user's screenshot; a capped heal that shows its real
+    // value goes quiet exactly when it stops doing anything.
+    const _nHp = Math.min(Math.max(1, Math.floor(_nMaxHp * 0.05)), Math.max(0, _nMaxHp - player.hp));
+    const _nMp = Math.min(Math.max(1, Math.floor(_nMaxMp * 0.05)), Math.max(0, _nMaxMp - player.mp));
+    if (_nHp > 0) player.hp = Math.min(_nMaxHp, player.hp + _nHp);
+    if (_nMp > 0) player.mp = Math.min(_nMaxMp, player.mp + _nMp);
+    if (_nHp > 0 || _nMp > 0) {
+      const _parts = [];
+      if (_nHp > 0) _parts.push('+' + _nHp + ' HP');
+      if (_nMp > 0) _parts.push('+' + _nMp + ' MP');
+      game.damageNumbers.push({ x: player.x + 14, y: player.y - 10, vy: -2,
+        text: _parts.join('  '), life: 40, color: '#7dffd6', size: 13 });   // soul-flame teal, matching the ward orbs
+    }
   }
   player._recentKills = (player._recentKills || 0) + 1;
   player._recentKillsDecay = 4000;
