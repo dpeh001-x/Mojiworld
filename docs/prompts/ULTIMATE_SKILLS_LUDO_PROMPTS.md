@@ -67,11 +67,25 @@ Format: **master** · *Ultimate* · `key`. Append the block to the locked prefix
 > ominous sovereign aura.
 > *motion:* violet phantom after-images flicker and shimmer, umbral wisps coil in place.
 
-**shinobi** · *Hundred-Hand Shadow Dance* · `shinobi_ult`
-> A radial flurry of crossed glowing katana slash-arcs and crimson paper talisman seals frozen
-> mid-dance, countless after-image blades fanning out, ribbons of cyan-and-red motion, petals and
-> sparks scattering.
-> *motion:* blade after-images shimmer and the talisman glow pulses in place.
+**shinobi** · *Hundred-Hand Shadow Dance* · `shinobi_ult`  ⟲ *reworked v0.30.43*
+> A radial mandala of MANY overlapping ghostly arms fanning outward from a dark hooded silhouette
+> at the centre, like a thousand-armed asura of shadow — each hand gripping a short moonlit kunai
+> or tanto blade, the arms layered in receding indigo and black after-image echoes so the ring
+> reads as one figure moving everywhere at once. Cold steel-white edge-light traces every blade,
+> thin crimson talisman ribbons trail between the arms, and a dark violet shadow-vortex churns at
+> the core. PALETTE IS STRICTLY DEEP INDIGO, BLACK AND COLD STEEL-WHITE with ONE restrained
+> crimson accent — absolutely NO gold, NO warm orange, NO festive red-and-cyan fireworks look.
+> SHAPE BANS: no banners, no pennants, no flags, no ribbands, no arrow or chevron or dart shapes,
+> no scrolls, no placards — nothing that could carry a marking. Wordless imagery only.
+> *motion:* the ONE and ONLY motion is the after-image arms flickering softly in place, every arm
+> at the same steady rate, each frame differing from the one before by the SAME small amount. Core
+> brightness stays CONSTANT — no flare, no strobe, no bloom, no rotation, no zoom, no travel.
+>
+> *Why it was redone:* the original read as a red-and-gold firework of pennant shapes — no hands,
+> no shadow, and garbled glyph marks on the pennants that the locked prefix forbids. The banner
+> silhouette is what invited the marks, so the shapes are banned outright rather than the letters
+> re-forbidden. The single-motion, constant-brightness rewrite fixes a loop that strobed on frames
+> 6–7 (same failure the v0.29.402/403 notes describe for skyhunter and archbishop).
 
 **nightreaper** · *Bloodmoon Domain* · `nightreaper_ult`
 > A blood-red eclipse domain — a black sun corona ringed with crimson light, spectral soul-scythes
