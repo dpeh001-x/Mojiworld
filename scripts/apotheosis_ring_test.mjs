@@ -1,15 +1,20 @@
-// Live test: ELEMENTAL APOTHEOSIS charge ring (per user: "remove the dust
-// circle in apotheosis skill, change it something unique").
+// Live test: THE TWO APOTHEOSIS RINGS.
+//   · Elementalist B ("Elemental Apotheosis") -> apo_ring, the four-element
+//     rune band (per user: "use this ring for elementalist B skill").
+//   · Archbishop  ("Apotheosis")              -> holy_ring, a gold halo
+//     (per user: "apotheosis needs a holy gold ring").
 //
-// The circle was performAround's OWN generic radial-gradient shockwave: every
-// pulse called performAround (which ends by spawning one at full radius) AND
-// spawnSmoothExplosion, so two circles stacked and the soft grey-white blob
-// underneath read as dust. (My first theory — that #ffee44 hit the warrior
-// palette and pulled in dust_ring — was WRONG; that colour is not in the set.
-// The legacy assertion below pins the truth so the theory cannot creep back.)
-// Asserted through the real tick + draw: the generic shockwave is suppressed
-// for this caller only, every pulse draws the new apo_ring, and the colour
-// heuristic still serves the callers that do rely on it.
+// The archbishop case is the one where the colour heuristic REALLY bit: its
+// judgment pulse passes #fff1a0, which IS in _LX_FX_WARRIOR_COLORS, so the
+// priest's holy pulse drew the WARRIOR'S TAN DUST RING five times a cast.
+//
+// On the ELEMENTALIST side the cause was different: no palette collision
+// there (#ffee44 and friends miss both sets — asserted below so that wrong
+// theory cannot creep back), but every pulse called performAround AND
+// spawnSmoothExplosion, so two circles stacked and the soft grey-white
+// gradient blob underneath read as dust. That one is fixed with noShock.
+//
+// Both are asserted through the real tick / real cast and the real draw.
 //   node scripts/apotheosis_ring_test.mjs [port]
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
@@ -33,8 +38,10 @@ await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'do
 await page.waitForFunction(() => typeof spawnSmoothExplosion === 'function' && typeof drawSmoothFx === 'function'
   && typeof _tickClassIdentity === 'function', null, { timeout: 120000 });
 // the ring art streams with LX_FX; wait for decode before asserting on blits
-await page.waitForFunction(() => typeof LX_FX !== 'undefined' && LX_FX.apo_ring
-  && LX_FX.apo_ring.complete && LX_FX.apo_ring.naturalWidth > 0, null, { timeout: 30000 }).catch(() => {});
+await page.waitForFunction(() => typeof LX_FX !== 'undefined'
+  && LX_FX.apo_ring && LX_FX.apo_ring.complete && LX_FX.apo_ring.naturalWidth > 0
+  && LX_FX.holy_ring && LX_FX.holy_ring.complete && LX_FX.holy_ring.naturalWidth > 0,
+  null, { timeout: 30000 }).catch(() => {});
 await page.waitForTimeout(1200);
 
 const r = await page.evaluate(() => {
@@ -87,6 +94,39 @@ const r = await page.evaluate(() => {
   out.plainAoe = aoeShock({ color: '#ffee44' });
   out.apoAoe   = aoeShock({ color: '#ffee44', noShock: true });
 
+  // ---- ARCHBISHOP: #fff1a0 is genuinely in the warrior palette ----
+  out.holyRegistered = !!LX_FX.holy_ring;
+  out.holyReady = !!(LX_FX.holy_ring && LX_FX.holy_ring.complete && LX_FX.holy_ring.naturalWidth > 0);
+  out.abColourBuckets = _lxFxBucket('#fff1a0');            // -> 'warrior', the bug
+  // what the OLD call drew, vs the new one
+  const aoeBlit = (opts) => {
+    game.smoothFx = [];
+    const before = game.monsters; game.monsters = [];
+    try { performAround(200, 0.5, opts); } catch (e) {}
+    game.monsters = before;
+    const fx = game.smoothFx.find(f => f.type === 'explosion');
+    if (!fx) { game.smoothFx = []; return { hit: '(none)' }; }
+    return blitOf(fx);
+  };
+  out.abLegacy = aoeBlit({ color: '#fff1a0' });
+  out.abNow    = aoeBlit({ color: '#fff1a0', shockSprite: 'holy_ring', shockSpin: 0.012 });
+
+  // LIVE: cast the real archbishop ultimate and collect its shockwaves
+  const _st = window.scheduleSkillTimer;
+  const _queued = [];
+  window.scheduleSkillTimer = (fn) => { _queued.push(fn); };
+  game.smoothFx = [];
+  player.cls = 'mage'; player.job = 'priest'; player.master = 'archbishop';
+  player.hp = 100; player.invulnerable = 0;
+  const before2 = game.monsters; game.monsters = [];
+  try { SKILL_FNS.archbishop_ult(); } catch (e) { out.abThrew = String(e).slice(0, 120); }
+  for (const fn of _queued) { try { fn(); } catch (e) {} }
+  game.monsters = before2;
+  window.scheduleSkillTimer = _st;
+  out.abLive = game.smoothFx.filter(f => f.type === 'explosion')
+    .map(f => ({ sprite: f.sprite, col: f.coreCol }));
+  game.smoothFx = [];
+
   // and the LIVE path: drive the real charge tick and see what it spawns
   player.cls = 'mage'; player.hp = 100; player.hitStun = 0; game.dying = 0;
   const wasPaused = game.paused; game.paused = false;
@@ -130,6 +170,20 @@ ok('...with alternating spin direction so held pulses counter-rotate',
   new Set(r.livePulses.map(p => Math.sign(p.spin))).size === 2
     && r.livePulses.every(p => p.spin !== 0),
   { spins: r.livePulses.map(p => p.spin) });
+// ---- archbishop ----
+ok('the holy halo art is registered and decoded', r.holyRegistered && r.holyReady,
+  { registered: r.holyRegistered, ready: r.holyReady });
+ok("THE ARCHBISHOP BUG WAS REAL: its pulse colour #fff1a0 buckets as 'warrior'",
+  r.abColourBuckets === 'warrior', { bucket: r.abColourBuckets });
+ok("...so the priest's holy pulse used to draw the warrior TAN DUST ring",
+  r.abLegacy.hit === 'dust_ring', r.abLegacy);
+ok('...and now draws the gold halo instead', r.abNow.hit === 'holy_ring', r.abNow);
+ok('LIVE: a real Apotheosis cast throws only holy halos, zero dust',
+  r.abLive.length >= 5 && r.abLive.every(f => f.sprite === 'holy_ring'),
+  { pulses: r.abLive.length, sprites: [...new Set(r.abLive.map(f => f.sprite))], threw: r.abThrew });
+ok('the two ultimates stay visually distinct (rune band vs gold halo)',
+  r.perColour.every(x => x.hit === 'apo_ring') && r.abNow.hit === 'holy_ring',
+  { elementalist: 'apo_ring', archbishop: r.abNow.hit });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 // a frame for the eye

@@ -105,6 +105,23 @@ const TARGETS = {
       + 'centre. Fully transparent background, no ground, no character, no scenery, no text, no border, no frame, '
       + 'not pixel art, not photorealistic.',
   },
+  // Archbishop "Apotheosis" judgment pulse. NEW file. Its performAround uses
+  // #fff1a0, which IS in _LX_FX_WARRIOR_COLORS - so the priest's holy pulse
+  // was drawing the WARRIOR'S TAN DUST RING, five times per cast.
+  holy_ring: {
+    out: 'Sprites/fx/holy_ring.webp',
+    size: [768, 768],
+    prompt: 'A radiant holy halo ring seen from a low angle: one wide circular band of polished warm gold with a '
+      + 'COMPLETELY EMPTY transparent centre, sacred geometry engraved along the band, small cross and sunburst '
+      + 'glyphs spaced evenly around it, four ornate laurel or feathered-wing flourishes at the cardinal points, '
+      + 'soft white-gold light blooming off the whole circumference and thin rays of blessed light rising from the '
+      + 'outer edge. Divine, consecrated, benevolent.',
+    style: ' Cute chunky cartoon game sprite in the style of a chibi mobile RPG: ONE ring centred in frame, filling '
+      + 'the frame edge to edge, a thick dark outline on the band, soft cel shading, glossy highlights, warm '
+      + 'saturated gold and cream, and a HOLLOW transparent middle — a halo ring, not a disc, not a coin, not a '
+      + 'sphere, not a portal with a filled centre. Fully transparent background, no ground, no character, no '
+      + 'scenery, no text, no border, no frame, not pixel art, not photorealistic.',
+  },
 };
 
 const only = val('--only', null);
