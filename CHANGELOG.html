@@ -121,6 +121,32 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.102 <span class="tag"><span class="pill polish">polish</span> A frame profiler, baked platform slabs &mdash; and what the numbers actually say</span></h2>
+<p>Per user: <em>work on improving the lag of the game even much more, such as reducing unnecessary shaders or effects, the game should always run smooth.</em></p>
+<p>New <code>scripts/perf_frame_profile.mjs</code> wraps all 38 top-level per-frame systems in timers, gets past the boot gate, fills the densest map to its monster cap and lets the <b>real</b> rAF loop run. tower_b1, 200 monsters, 6&nbsp;s:</p>
+<table>
+<tr><th>System</th><th>ms</th><th>%</th><th>ms/call</th></tr>
+<tr><td>drawMonster</td><td>417.9</td><td><b>52.6%</b></td><td>0.007</td></tr>
+<tr><td>updateMonsters</td><td>142.7</td><td>18.0%</td><td>0.471</td></tr>
+<tr><td>drawPlayer</td><td>81.1</td><td>10.2%</td><td>0.259</td></tr>
+<tr><td>drawPlatforms</td><td>65.0</td><td>7.9%</td><td>0.210</td></tr>
+<tr><td>drawParticles</td><td>30.8</td><td>3.9%</td><td>0.098</td></tr>
+</table>
+<p>median <b>4.6&nbsp;ms</b> &middot; p95 14&nbsp;ms &middot; p99 15.8&nbsp;ms &middot; frames below 60&nbsp;fps: <b>5 of 817 (0.6%)</b></p>
+
+<h3>The headline is awkward, and worth stating plainly</h3>
+<p>Under a 200-monster stress test the game <b>already holds ~60&nbsp;fps</b>, and the <b>effect systems are not the bottleneck</b>. Re-run with <code>--fx</code>, which saturates the FX pipeline to busy-fight volume on every frame, and they still are not: <code>drawParticles</code> 8.5%, <code>drawDamageNumbers</code> 2.2%, <code>drawSmoothFx</code> 2.1%, <code>updateSmoothFx</code> 0.2%.</p>
+<p>So cutting shaders and effects would cost visuals and buy almost nothing. The budget goes to monster draw and update &mdash; and <code>drawMonster</code> already culls off-screen mobs on the <em>visual</em> box in both axes, so that 52.6% is real work for 200 sprites rather than waste.</p>
+
+<h3>What did ship</h3>
+<p><code>drawPlatforms</code> was the one anomaly on that list. Platforms are <b>static</b> &mdash; size, tint and shape never change, only the screen x they land at &mdash; yet <code>_drawCutePlatform</code> re-ran about a dozen canvas operations per platform per frame (roundRect, fill, save, clip, three fillRects, restore, stroke) to produce identical pixels. It is now baked once per distinct <code>(w, h, tint, ground)</code> and blitted, with an LRU cap and a size guard that falls back to the direct paint for oversized slabs.</p>
+<p>Honest about the size of it: <b>0.210 &rarr; 0.198&nbsp;ms/call</b>, roughly 6% of that function and well under 1% of the frame. Real, free and permanent &mdash; but not a cure for lag. The remaining cost is the per-platform loop and the blit's own call overhead, not the procedural painting.</p>
+
+<h3>Visual parity verified, not assumed</h3>
+<p>Max per-channel delta <b>2 / 255</b> across five slab shapes including the 2400&times;60 ground. Two things had to be right for that. The bake keeps the 0.55 alpha <em>per shape</em> and blits the group at 1 &mdash; baking opaque and fading the whole group to 0.55 would composite the internal gloss and shadow against each other differently. And the canvas is padded by 2&nbsp;px, because the outline is stroked <em>centred</em> on the path, so half of it lies outside the <code>w &times; h</code> box.</p>
+<p>The harness was wrong twice before it was right, both times in ways that looked like findings. It first measured <b>0&nbsp;ms for all 38 systems</b> across 833 frames &mdash; it was counting its <em>own</em> rAF while the game loop never ran, because <code>loop()</code> returns early behind a boot gate until the loading overlay fades. Then the pixel comparison reported maxDelta 67 over half the bytes: <code>ctx</code> is a lexical <code>const</code>, not a window property, so assigning <code>window.ctx</code> never rebound it &mdash; the "cached" render was painting the real game canvas while the test compared blank background.</p>
+
+
 <h2>v0.30.101 <span class="tag"><span class="pill bug">bug</span> Gravitos was not walking backwards &mdash; he was never walking at all</span></h2>
 <p>Per user: <em>"gravitos walk probably needs to retime as well, it looks like
 he is walking backwards."</em> He had been re-timed, in v0.30.92. That was the

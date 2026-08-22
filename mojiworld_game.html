@@ -9708,7 +9708,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.101';
+const GAME_VERSION = 'v0.30.102';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16746,10 +16746,52 @@ function _mapPlatformTint(md) {
 // their top corners less and cap a thicker surface band.
 // v0.29.x — Per user: whole slab draws at 55% opacity so the painted map
 // backgrounds glow through while the silhouette + outline still read.
-function _drawCutePlatform(sx, y, w, h, tint, ground) {
+// v0.30.x — BAKED PLATFORM SLABS (perf). _drawCutePlatform is a pure
+// function of (w, h, tint, ground): no position term, no time term, no
+// randomness — the same arguments always produced the same pixels, and it ran
+// a dozen canvas ops per platform per frame to produce them again.
+//
+// Profiled at 8.4% of a 200-monster frame, which is why this is worth a cache
+// and, say, drawPortals (0.2%) is not.
+//
+// ON THE ALPHA, which is the subtle part. The original draws each sub-shape at
+// 0.55 alpha directly onto the scene. Baking those same per-shape alphas onto a
+// TRANSPARENT canvas and blitting the group at alpha 1 is pixel-identical —
+// source-over is associative when the group opacity is 1 — whereas baking them
+// opaque and fading the group to 0.55 would NOT be, because the internal gloss
+// and shadow would composite against each other differently. So the bake keeps
+// the 0.55 per shape and the blit carries the caller's own alpha.
+const _CUTE_PLAT_CACHE = new Map();
+const _CUTE_PLAT_MAX_PX = 1500000;   // ~6 MB at 4 bytes/px — a 2400x60 ground fits fine
+function _cutePlatformSprite(w, h, tint, ground) {
+  const key = w + '|' + h + '|' + tint.body + '|' + tint.top + '|' + (ground ? 1 : 0);
+  let cv = _CUTE_PLAT_CACHE.get(key);
+  if (cv) return cv;
+  if (!(w > 0 && h > 0) || w * h > _CUTE_PLAT_MAX_PX) return null;   // caller falls back
+  // Same eviction discipline as _FX_STAMPS: drop the oldest few rather than
+  // clearing wholesale mid-render, which just repays the bake cost in a burst.
+  if (_CUTE_PLAT_CACHE.size > 160) {
+    let n = 32;
+    for (const k of _CUTE_PLAT_CACHE.keys()) { _CUTE_PLAT_CACHE.delete(k); if (--n <= 0) break; }
+  }
+  // PAD BY 2. The 2px outline is stroked CENTRED on the path, so half of it
+  // lies OUTSIDE the w x h box; an exact-size canvas crops that outer pixel and
+  // the blit no longer matches the direct paint. Measured before this padding:
+  // maxDelta 67 over half the bytes. The blit offsets by the same pad.
+  const PAD = 2;
+  cv = document.createElement('canvas');
+  cv.width = Math.ceil(w) + PAD * 2; cv.height = Math.ceil(h) + PAD * 2;
+  const c = cv.getContext('2d');
+  _paintCutePlatform(c, PAD, PAD, w, h, tint, ground, 0.55);
+  _CUTE_PLAT_CACHE.set(key, cv);
+  return cv;
+}
+// The original body, lifted verbatim onto an arbitrary context so the bake and
+// the uncached fallback cannot drift apart. `a` is the per-shape alpha.
+function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a) {
   const OUT = '#0a0510';
   const _pa = ctx.globalAlpha;
-  ctx.globalAlpha = _pa * 0.55;
+  ctx.globalAlpha = _pa * a;
   if (w < 6 || h < 6) {   // too small for banding — flat fill + outline
     ctx.fillStyle = tint.body; ctx.fillRect(sx, y, w, h);
     ctx.lineWidth = 2; ctx.strokeStyle = OUT; ctx.strokeRect(sx + 1, y + 1, w - 2, h - 2);
@@ -16774,6 +16816,12 @@ function _drawCutePlatform(sx, y, w, h, tint, ground) {
   // crisp 2px black outline
   ctx.lineWidth = 2; ctx.strokeStyle = OUT; ctx.stroke();
   ctx.globalAlpha = _pa;
+}
+function _drawCutePlatform(sx, y, w, h, tint, ground) {
+  const spr = _cutePlatformSprite(w, h, tint, ground);
+  if (spr) { ctx.drawImage(spr, sx - 2, y - 2); return; }   // undo the bake pad
+  // Oversized slab (or a zero-size one): paint it directly, exactly as before.
+  _paintCutePlatform(ctx, sx, y, w, h, tint, ground, 0.55);
 }
 // v0.25.461 — Map id → floor-tile key. Wins over the theme lookup
 // when the player is on one of these maps and the matching authored
