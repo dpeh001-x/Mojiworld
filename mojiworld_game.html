@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.33';
+const GAME_VERSION = 'v0.30.34';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -42382,6 +42382,7 @@ function loadState() {
     player._clones = null;
     player._ballistaTurrets = null;     // v0.26.x — clear War Machine turrets on save load
     player._ballistaChannel = null;     // v0.25.257 — clear channel state on save load
+    player._eclipseHold = null;   // v0.30.34 - Eclipse hold resets with the channel
     // v0.25.605 — Pack defaulter. `player.pet` round-trips via PLAYER_
     // SAVE_FIELDS but `player.pack` (Beastmaster Call of the Wild
     // wolves) does not — so old saves load with `pack === undefined`
@@ -46111,6 +46112,94 @@ function _mpPartyFrames() {
 // so triggerDeath / respawnAtTown / loadMap can cancel the queue and stop
 // dead skills from continuing to apply effects after the player is gone.
 // =========================================================================
+// v0.30.34 - ECLIPSE MASSACRE hold. One press: blink to the map's centre, hover
+// under the moon, the rain + snap fire off THIS tick (fixed 60 Hz sim step,
+// driven from loop()) instead of wall-clock setTimeouts, so a pause stops the
+// whole skill together. See SKILL_FNS.nightreaper_mark.
+const LX_ECLIPSE_CHANNEL_MS = 2400;   // rain window (unchanged since v0.25.260)
+const LX_ECLIPSE_BATCHES    = 10;     // dagger waves across the window
+const LX_ECLIPSE_SNAP_MS    = LX_ECLIPSE_CHANNEL_MS + 60;   // finale, then release
+const LX_ECLIPSE_HOVER_PX   = 40;     // lift above the pre-blink feet
+const LX_ECLIPSE_REACH      = 80;     // px past half a screen either side of the moon
+function _lxEclipseTick(dt) {
+  const h = player._eclipseHold;
+  if (!h) return;
+  if (player.hp <= 0) { player._eclipseHold = null; return; }
+  // Clock. Called from loop() beside game.time++, NOT from updatePlayer:
+  // every dagger crit adds up to 80 ms of hit-stop, and hit-stop skips
+  // updatePlayer while the frame counter, the moon sprite and the cast lock
+  // all keep ticking. Measured from updatePlayer the hold stretched 148 ->
+  // 200+ frames and outlived the 180-frame moon. Here it runs through
+  // hit-stop like those do; a pause (menu) still stops it. The POSITION
+  // pin lives in updatePlayer, where movement happens.
+  h.elapsed += dt;
+  const reachL = h.moonX - (W / 2 + LX_ECLIPSE_REACH);
+  const reachR = h.moonX + (W / 2 + LX_ECLIPSE_REACH);
+  const under = () => game.monsters.filter(m => m.currentHp > 0 && (m.x + m.w) > reachL && m.x < reachR);
+  // Dagger waves - one per BATCH_DELAY, catching up if a long frame skipped
+  // one. Targets re-evaluated per wave so kills drop out and arrivals get hit.
+  const BATCH_DELAY = Math.floor(LX_ECLIPSE_CHANNEL_MS / LX_ECLIPSE_BATCHES);
+  while (h.nextBatch < LX_ECLIPSE_BATCHES && h.elapsed >= h.nextBatch * BATCH_DELAY) {
+    h.nextBatch++;
+    const alive = under();
+    if (!alive.length) continue;
+    for (const m of alive) {
+      const tx = m.x + m.w / 2, ty = m.y + m.h / 2;
+      // v0.29.826 numbers, untouched: 1.0x per dagger, 40% free-crit floor.
+      const isCrit = rollCrit() || Math.random() < 0.40;
+      const dmg = Math.max(1, Math.floor(getAtk() * 1.0 * (isCrit ? getCritDmg() : 1)));
+      hitMonster(m, dmg, isCrit, 'dagger');
+      m.stunTimer = Math.max(m.stunTimer || 0, 200);   // shorter than the 240 ms gap, so it can lapse
+      spawnSmoothSlash(tx, ty, Math.PI / 2, 90, '#ff66aa', { thickness: 5, spread: Math.PI * 0.25, life: 14 });
+      spawnSmoothSlash(tx, ty - 170, Math.PI / 2, 240, '#ffd0e4', { thickness: 2.5, spread: Math.PI * 0.10, life: 10 });
+      for (let k = 0; k < 4; k++) {
+        if (!_budgetedParticlePush({
+          x: tx + (Math.random() - 0.5) * 24, y: ty - 60 - k * 18,
+          vx: 0, vy: 4 + Math.random() * 2, life: 16,
+          color: k % 2 ? '#ff5588' : '#1a0230', size: 3,
+        })) break;
+      }
+    }
+    flash(0.08);
+    audio.play('hit');
+  }
+  // Hover motes - a slow violet drift around the rogue while held.
+  if ((game.time & 3) === 0) {
+    const cx = player.x + player.w / 2, cy = player.y + player.h / 2;
+    const ang = Math.random() * Math.PI * 2;
+    game.particles.push({
+      x: cx + Math.cos(ang) * 20, y: cy + Math.sin(ang) * 24,
+      vx: Math.cos(ang) * 0.3, vy: -0.6 - Math.random() * 0.4,
+      life: 24 + Math.random() * 10,
+      color: (game.time & 7) ? '#ff66aa' : '#ffffff', size: 1.5 + Math.random(),
+    });
+  }
+  if (h.elapsed < LX_ECLIPSE_SNAP_MS) return;
+  // Finale - the eclipse snaps shut. Same 2x ATK + 25, half-DEF, 1.5x forced
+  // crit, knockback, 800 ms stun and 14% heal as before.
+  player._eclipseHold = null;
+  const fx = player.x + player.w / 2, fy = player.y + player.h / 2;
+  flash(0.7); addHitStop(180);
+  audio.play('crit');
+  for (const m of under()) {
+    const baseDmg = Math.floor(getAtk() * 2.0 + 25);
+    const defRed = Math.floor((m.def || 0) * 0.5);
+    const dmg = Math.max(1, Math.floor((baseDmg - defRed) * 1.5));
+    hitMonster(m, dmg, true, 'eclipse_snap');
+    m.vx += ((m.x + m.w / 2) - fx > 0 ? 1 : -1) * 11;
+    m.vy -= 8;
+    m.stunTimer = Math.max(m.stunTimer || 0, 800);
+  }
+  spawnSmoothSlash(fx, fy,  Math.PI * 0.25, 240, '#ff66aa', { thickness: 12, spread: Math.PI * 0.9, life: 22 });
+  spawnSmoothSlash(fx, fy, -Math.PI * 0.25, 240, '#1a0230', { thickness: 12, spread: Math.PI * 0.9, life: 22 });
+  spawnSmoothExplosion(fx, fy, 280, '#ff5588', '#1a0230a0', { life: 44 });
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2;
+    game.particles.push({ x: fx, y: fy, vx: Math.cos(a) * 12, vy: Math.sin(a) * 12, life: 56,
+      color: i % 3 === 0 ? '#ffffff' : i % 2 ? '#ff66aa' : '#1a0230', size: 3 });
+  }
+  player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.14));
+}
 function scheduleSkillTimer(fn, ms) {
   const id = setTimeout(() => {
     // Drop self from the tracked list before firing, so long chains of
@@ -53066,6 +53155,7 @@ function _rogueChainDash(dir) {
   }
 }
 function quickDash(dir) {
+  if (player._eclipseHold) return;   // v0.30.34 - held under the eclipse
   // v0.29.605 — a fresh dash always begins an unchained sequence.
   player._dashIsChain = 0;
   player._dashChained = 0;
@@ -56825,6 +56915,7 @@ function loadMap(id, entryX, entryY) {
   // ascend window survived map transitions, granting partial flight on
   // any map. Resetting all three on map load matches the respawn cleanup.
   player._ballistaChannel = null;
+  player._eclipseHold = null;   // v0.30.34 - Eclipse hold resets with the channel
   player._warCharge = null;
   player._releasedCharge = null;
   // v0.25.605 — _chargeStart was the lone holdout from the warrior
@@ -57178,6 +57269,7 @@ function loadMap(id, entryX, entryY) {
     player._clones = null;
     player._ballistaTurrets = null;
     player._ballistaChannel = null;
+    player._eclipseHold = null;   // v0.30.34 - Eclipse hold resets with the channel
     player._warCharge = null;
     player._releasedCharge = null;
     player._chargeStart = 0;
@@ -59984,6 +60076,16 @@ function updatePlayer(dt) {
   // v0.25.485 — Skill-lock timer (octopus boss "Skill Lock" leg).
   if (player._skillLockTimer && player._skillLockTimer > 0) player._skillLockTimer -= dt;
 
+  // v0.30.34 - Eclipse hold pin, FIRST: position written outright so knockback,
+  // boss pulls and gravity cannot move the rogue; velocity zeroed so nothing
+  // integrates; hitStun cleared so the stunned early-return below cannot
+  // carry a knockback. (The rain / snap clock runs from loop() - see
+  // _lxEclipseTick.)
+  if (player._eclipseHold) {
+    const _eh = player._eclipseHold;
+    player.x = _eh.x; player.y = _eh.y; player.vx = 0; player.vy = 0;
+    player.hitStun = 0; player.onGround = false; player.state = 'attack';
+  }
   // Hit-stun: no voluntary action during stun
   const stunned = player.hitStun > 0;
   if (stunned) {
@@ -60211,6 +60313,10 @@ function updatePlayer(dt) {
   } else if (player.smokeLock > 0) {
     // Smoke Dash settle — brief immobile lock
     player.smokeLock -= dt;
+    player.vx = 0;
+    player.state = 'attack';
+  } else if (player._eclipseHold) {
+    // v0.30.34 - held under the eclipse: input cannot set vx.
     player.vx = 0;
     player.state = 'attack';
   } else if ((player._ascendLockX || 0) > 0) {
@@ -60459,7 +60565,7 @@ function updatePlayer(dt) {
   if (player.onGround) { player.doubleJumpUsed = false; player.airJumps = 0; player.coyoteTime = _isIcyForCoyote ? 220 : 140; }
   else player.coyoteTime = Math.max(0, player.coyoteTime - dt);
 
-  const tryJump = player.jumpBufferTimer > 0 && !player._jumpHeld;
+  const tryJump = player.jumpBufferTimer > 0 && !player._jumpHeld && !player._eclipseHold;   // v0.30.34 - no jumping off the moon
   if (tryJump) {
     // ↓ + Space → drop through platform instead of jumping. v0.25.279
     // gates on the captured intent flag so stale buffers can't ghost-drop.
@@ -60626,6 +60732,9 @@ function updatePlayer(dt) {
     player._musclePose = Math.max(0, player._musclePose - dt);
     if (player._musclePose <= 0) player._musclePoseDur = 0;
   }
+  // v0.30.34 - Eclipse hold re-pin. The gravity step above added 0.5*gM to vy
+  // since the early tick; zero it again here so integration moves nothing.
+  if (player._eclipseHold) { player.x = player._eclipseHold.x; player.y = player._eclipseHold.y; player.vx = 0; player.vy = 0; }
   // v0.25.512 — Arch Bishop "Judgment of the Holy Grail" ascend phase.
   // While player._ascended > 0:
   //   • gravity is suppressed (player floats at start-Y minus 70 px)
@@ -62619,6 +62728,7 @@ function triggerDeath() {
   player._clones = null;
   player._ballistaTurrets = null;     // v0.26.x — turrets can't survive death
   player._ballistaChannel = null;     // v0.25.257 — channel can't survive death
+  player._eclipseHold = null;   // v0.30.34 - Eclipse hold resets with the channel
   // v0.25.605 — Pet & pack cleanup. Wild Bond's wolf (`player.pet`) and
   // Beastmaster Call of the Wild's pack (`player.pack`) used to survive
   // death and keep mauling whatever killed the player while they were
@@ -62956,6 +63066,7 @@ function respawnAtTown() {
   player._clones = null;
   player._ballistaTurrets = null;     // v0.26.x — turrets reset on respawn
   player._ballistaChannel = null;     // v0.25.257 — channel resets on respawn
+  player._eclipseHold = null;   // v0.30.34 - Eclipse hold resets with the channel
   player._warCharge = null;
   player._releasedCharge = null;
   player._chargeStart = 0;            // v0.25.605
@@ -64244,7 +64355,7 @@ function castSkill(id) {
     // Nightreaper Eclipse — 2400 ms scheduleSkillTimer chain (10 batches
     // + finale nova). No *Until flag, so we add it explicitly.
     if (id === 'nightreaper_mark') {
-      const _eclipseFrames = Math.ceil(2400 / (1000 / 60));
+      const _eclipseFrames = Math.ceil(LX_ECLIPSE_SNAP_MS / (1000 / 60));   // v0.30.34 - hold + snap, one constant
       if (_now + _eclipseFrames > _lockEnd) _lockEnd = _now + _eclipseFrames;
     }
     // Phantom Cut — up to 6 marks chain-teleported at ~180 ms each
@@ -66245,6 +66356,9 @@ function spawnSpriteBurst(x, y, spriteKey, opts) {
     behind: !!opts.behind,
     flipX: !!opts.flipX,
     flipY: !!opts.flipY,
+    // v0.30.34 - sticky bursts are never evicted by the MAX_SMOOTH_FX cap (the
+    // Eclipse moon; see the cap in the budget pass). Short-lived fx only.
+    sticky: !!opts.sticky,
     // v0.25.996 — Per-axis scale transitions. When all four start/end
     // values are provided, the draw branch overrides the uniform
     // 0.5×→1.1× `grow` curve with independent X/Y scales interpolated
@@ -70467,210 +70581,93 @@ const SKILL_FNS = {
 
   nightreaper_mark: () => {
     // v0.25.260 — Reworked to be MECHANICALLY DISTINCT from Phantom's
-    // chain-teleport. Now an Eclipse Massacre: the rogue ROOTS in place
-    // and summons a blood-eclipsed moon that rains spectral daggers
-    // down on every visible enemy for 2.4 s. Final beat snaps the
-    // eclipse closed for an aftershock nova.
+    // chain-teleport: a stationary channel under a blood-eclipsed moon that
+    // rains spectral daggers on every enemy beneath it, then snaps shut.
     //
-    // Core distinctions vs Phantom Cut:
-    //   • Stationary channel (Phantom moves via chain-teleport)
-    //   • Sustained AoE rain across the entire visible screen
-    //     (Phantom is single-target precision capped at 6 marks)
-    //   • Cinematic eclipse overlay with rainfall (Phantom is a portal
-    //     burst followed by chain-blink to each mark)
-    //   • Uses falling-dagger smoothFx instead of teleport afterimages
-    //   • Builds tension across 2.4 s rather than firing in 1 s
+    // v0.30.34 — ECLIPSE MASSACRE v2 (per user: "very buggy ... the character
+    // teleports to the middle of the map where the eclipse is and stays
+    // there until the eclipse is done, no need to hold down skill").
     //
-    // v0.25.557 — was CDR-immune at 12 s; the override has been removed
-    // so this scales with WIS / class CDR like every other skill, using
-    // the 12 000 ms source CD as the input. Max-WIS mage build can pull
-    // this down toward ~5 000 ms.
-    const camL = game.camera.x, camR = camL + W;
-    const pcx0 = player.x + player.w/2;
-    const pcy0 = player.y + player.h/2;
-    // Pick targets within the visible viewport (a bit past the edges so
-    // mobs about to peek in still get tagged). Cap at 14 so a saturated
-    // forest frame doesn't blow past the skill's tempo.
-    // Build the target list — every visible enemy on screen, no cap.
-    // Distinct from Phantom which selects 6 nearest. Eclipse hits ALL.
+    // What was broken: "roots in place" was a single `player.vx = 0` at
+    // cast, so the rogue could walk off while the moon stayed behind; the
+    // viewport bounds were captured once, so the daggers kept hitting the
+    // screen the player had LEFT; and the ten batches ran on wall-clock
+    // setTimeouts that ignored pause and the skill's own hit-stops.
+    //
+    // Now, one press:
+    //   1. targets are counted UNDER THE MOON - within half a screen (+80 px)
+    //      of the map's horizontal centre - before anything moves. No prey
+    //      there = whiff + partial refund, no blink (unchanged rule, new spot).
+    //   2. the rogue vanishes and reappears hovering at the map's centre,
+    //      LX_ECLIPSE_HOVER_PX above where their feet were. Camera snaps.
+    //   3. the moon rises overhead and player._eclipseHold pins them for
+    //      LX_ECLIPSE_SNAP_MS: no gravity, no knockback, no walk / jump /
+    //      dash, stun shaken off (pin in updatePlayer). _lxEclipseTick, run
+    //      from loop() beside game.time++, fires the ten dagger waves and
+    //      the snap on the fixed sim step - through hit-stop, not pause.
+    // Damage, stuns, heal, MP, CD: exactly the v0.29.826 numbers.
+    const ww = game.mapData.worldWidth || W;
+    const moonX = ww / 2;
+    const reachL = moonX - (W / 2 + LX_ECLIPSE_REACH);
+    const reachR = moonX + (W / 2 + LX_ECLIPSE_REACH);
     const initialTargets = game.monsters
       .filter(m => m.currentHp > 0)
-      .filter(m => (m.x + m.w) > camL - 80 && m.x < camR + 80);
+      .filter(m => (m.x + m.w) > reachL && m.x < reachR);
 
     if (!initialTargets.length) {
       // Whiff — refund part of the cost so the skill still feels alive.
       player.mp = Math.min(getMaxMp(), player.mp + 30);
-      player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
-      // v0.25.950 — Whiff-refund toast removed per user "remove some
-      // other notifications with minimal utility". The audio cue +
-      // visible MP-bar refill already signal the refund; the toast was
-      // redundant text noise stacked into the top-center queue.
+      // v0.25.950 — no whiff toast (per user); the refund audio + MP bar
+      // already say it.
       audio.play('mp_refund');
       return;
     }
 
+    // ── vanish ─────────────────────────────────────────────────────────
+    const ox = player.x + player.w / 2, oy = player.y + player.h / 2;
+    game.afterImages.push({ x: player.x, y: player.y, facing: player.facing,
+      state: 'attack', life: 20, maxLife: 20, color: 'rgba(255,80,140,0.55)' });
+    spawnSmoothExplosion(ox, oy, 110, '#ff66aa', '#1a023080', { life: 20 });
+
+    // ── blink to the map's centre, lifted off the ground ────────────────
+    player.x = Math.max(0, Math.min(ww - player.w, moonX - player.w / 2));
+    player.y = Math.max(0, player.y - LX_ECLIPSE_HOVER_PX);
+    player.vx = 0; player.vy = 0;
+    player.onGround = false;
+    player.hitStun = 0;
+    // Camera: cut, don't slide. Mirrors loadMap's first-frame snap so the
+    // blink reads as a teleport instead of a pan.
+    if (game.camera) {
+      game.camera.x = (ww <= W) ? (ww - W) / 2
+        : Math.max(0, Math.min(ww - W, (player.x + player.w / 2) - W / 2));
+    }
+    const pcx0 = player.x + player.w / 2;
+    const pcy0 = player.y + player.h / 2;
+    game.afterImages.push({ x: player.x, y: player.y, facing: player.facing,
+      state: 'attack', life: 14, maxLife: 14, color: 'rgba(255,255,255,0.45)' });
+    spawnSmoothExplosion(pcx0, pcy0, 140, '#ffffff', '#ff66aa80', { life: 18 });
+
     audio.play('levelup');
     showToast(`🌑 ECLIPSE MASSACRE — ${initialTargets.length} prey under the moon`, 'legendary');
-    flash(0.55); addHitStop(160);
+    flash(0.55); addHitStop(160); addShake(8);
 
-    // Total channel: 2400 ms. Player roots in place + invulnerable.
-    const CHANNEL_MS = 2400;
-    // v0.26.x balance audit: i-frame 2600->1600ms (was 21.7% uptime on the 12s
-    // cd). The channel still roots for 2400ms but the last ~800ms is now
-    // vulnerable, so it can't tank a boss combo for free.
-    player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
-    player.vx = 0;            // root in place — no chain-teleport movement
-    player.hitStun = 0;       // any incoming stun shaken off
-
-    // Big eclipse sprite as the cinematic backdrop. Spawn slightly
-    // above the player so it dominates the upper half of the screen.
-    // v0.25.965 — Spin bumped from Math.PI * 0.3 (≈ 54° over lifetime)
-    // to Math.PI (180°) per user "Sprite for eclipse massacre G skill
-    // should rotate 180 degrees".
-    // v0.26.035 — Per user "For the main sprite for eclipse massacre
-    // make it remain on screen and rotate 3s 180 degrees". Life
-    // extended from CHANNEL_MS (2.4 s = 144 frames) to a hard-coded
-    // 180 frames (3.0 s @ 60 fps). The sprite now persists ~0.6 s
-    // AFTER the channel finishes — the moon lingers in the sky after
-    // the daggers stop falling, capping the cinematic instead of
-    // popping out the moment the channel ends. Spin stays Math.PI
-    // (180° across the extended 3-second lifetime), so the rotation
-    // pace slows slightly (180°/3s vs 180°/2.4s previously) — reads
-    // as a more deliberate eclipse sweep.
-    // v0.26.x — Spin around the moon's CORE, not the image centre. The
-    // eclipse art places the moon swirl in the upper ~41% of its (square)
-    // image, with the dagger fan hanging below; the geometric centre sits
-    // near the bottom of the moon. Spinning around the centre swung the
-    // whole moon in an arc. pivotX/Y ≈ (0.50, 0.41) re-anchors rotation
-    // (and the grow-scale) on the swirl core so the eclipse rotates in
-    // place. Spawn lifted to pcy0-96 (was -60) so the now core-anchored
-    // moon keeps the same upper-half framing it had when centre-anchored.
-    // v0.26.x — Per user "make it enlarge as well as diminish in opacity":
-    // the moon now grows steadily 0.9×→1.5× over its 3 s life (scaleStart→
-    // scaleEnd on both axes, replacing the default 0.5→1.1 grow) while
-    // fadeOut:0.85 dims it from full toward ~15% opacity by the end. Reads
-    // as the eclipse swelling open then dissolving as the channel closes.
-    // The growth radiates from the (0.50, 0.41) core pivot, so the swirl
-    // stays anchored while it expands and spins.
+    // ── the moon (unchanged art direction) ──────────────────────────────
+    // v0.26.035 — 180 frames so it lingers ~0.6 s after the snap.
+    // v0.26.x — spins + grows around the swirl core at (0.50, 0.41), fades
+    // to ~15% by the end; spawned 96 px above the rogue so it owns the
+    // upper half of the screen.
     spawnSpriteBurst(pcx0, pcy0 - 96, 'nightreaper_eclipse',
       { size: 360, life: 180, spin: Math.PI * 4, pivotX: 0.50, pivotY: 0.41,
         scaleStartX: 0.9, scaleEndX: 1.5, scaleStartY: 0.9, scaleEndY: 1.5,
-        fadeOut: 0.85 });   // v0.26.x — fast 720° CW spin + enlarge + fade
-    // Atmospheric darkening — repeated via flash dim every few frames.
+        fadeOut: 0.85, sticky: true });   // sticky: survives the smooth-fx cap (see v0.30.34 note there)
 
-    // Dagger rain — 10 batches over the 2.4 s window. Each batch picks
-    // one CURRENT alive enemy (re-evaluated each tick so kills drop out
-    // and new mobs spawning in get hit too) and rains a falling-dagger
-    // smoothFx slash + damage tick on each.
-    const BATCHES = 10;
-    const BATCH_DELAY = Math.floor(CHANNEL_MS / BATCHES);
-    for (let b = 0; b < BATCHES; b++) {
-      scheduleSkillTimer(() => {
-        if (player.hp <= 0) return;
-        // Re-evaluate alive on-screen enemies each batch.
-        const alive = game.monsters.filter(m =>
-          m.currentHp > 0 &&
-          (m.x + m.w) > camL - 80 && m.x < camR + 80
-        );
-        if (!alive.length) return;
-        for (const m of alive) {
-          const tx = m.x + m.w/2;
-          const ty = m.y + m.h/2;
-          // Damage per dagger — roughly 70% of old per-strike value, but
-          // multiplied by 10 batches × N targets = MUCH more total damage
-          // when many enemies present. Single-target stays comparable.
-          // v0.26.397 — route through the canonical hitMonster pipeline. Was a
-          // flat def×0.5 + direct currentHp write that BYPASSED the DEF curve,
-          // combo/mastery mults, lifesteal, and the invuln/mirror/Libra immunity
-          // gates (could damage things that should be untouchable). hitMonster
-          // handles the flash, floating damage number, and the kill.
-          // v0.29.826 — NERF (per user: "easily the best screen clear in the
-          // entire game, nerf it a little"). Measured against the other master
-          // screen-clears on an identical 8-dummy stage, Eclipse was putting out
-          // 636 damage per second of cooldown against 240-262 for Meteor Shower,
-          // Blade of Calamity and Prismatic Cascade — roughly 2.5x the field,
-          // on the shortest cooldown of the group. Two levers on the rain
-          // itself: the per-dagger multiplier 1.2 -> 1.0, and the free-crit
-          // floor 55% -> 40%. The assassin still crits far more often than
-          // anyone else here (rollCrit() on top), it just no longer gets more
-          // than half its daggers doubled for nothing.
-          const isCrit = rollCrit() || Math.random() < 0.40;
-          const dmg = Math.max(1, Math.floor(getAtk() * 1.0 * (isCrit ? getCritDmg() : 1)));
-          hitMonster(m, dmg, isCrit, 'dagger');
-          // v0.29.826 — 280 ms of stun refreshed every 240 ms batch meant the
-          // whole screen was stunned for 100% of the channel and could never
-          // act. 200 ms is shorter than the 240 ms batch gap, so the lock can
-          // lapse between waves instead of never expiring.
-          m.stunTimer = Math.max(m.stunTimer || 0, 200);
-          // Falling-dagger smoothFx — vertical slash from above
-          spawnSmoothSlash(tx, ty, Math.PI / 2, 90, '#ff66aa',
-            { thickness: 5, spread: Math.PI * 0.25, life: 14 });
-          // v0.30.x — the dagger now has a visible FALL: a long faint streak
-          // from moon-height down onto the victim, so each hit traces back to
-          // the eclipse instead of "just happening" (tester attribution note).
-          spawnSmoothSlash(tx, ty - 170, Math.PI / 2, 240, '#ffd0e4',
-            { thickness: 2.5, spread: Math.PI * 0.10, life: 10 });
-          // Trailing shadow particles falling from the moon
-          // v0.25.264 — budget-guarded; this fires inside a 10-batch
-          // outer loop so a packed room could spawn 400 particles for one
-          // Eclipse cast. Break per-batch when frame budget is exhausted.
-          for (let k = 0; k < 4; k++) {
-            if (!_budgetedParticlePush({
-              x: tx + (Math.random() - 0.5) * 24,
-              y: ty - 60 - k * 18,
-              vx: 0, vy: 4 + Math.random() * 2,
-              life: 16,
-              color: k % 2 ? '#ff5588' : '#1a0230',
-              size: 3,
-            })) break;
-          }
-        }
-        flash(0.08);
-        audio.play('hit');   // v0.30.x — every batch answers audibly (tester: kills read as unearned)
-      }, b * BATCH_DELAY);
-    }
-
-    // Finale — eclipse "snap": all on-screen enemies take a 2× ATK
-    // aftershock with knockback + a screen-wide flash.
-    scheduleSkillTimer(() => {
-      if (player.hp <= 0) return;
-      const fx = player.x + player.w/2, fy = player.y + player.h/2;
-      flash(0.7); addHitStop(180);
-      audio.play('crit');
-      // Re-eval: hit every enemy still alive on screen
-      for (const m of game.monsters) {
-        if (m.currentHp <= 0) continue;
-        if ((m.x + m.w) <= camL - 80 || m.x >= camR + 80) continue;
-        const baseDmg = Math.floor(getAtk() * 2.0 + 25);
-        const defRed = Math.floor((m.def || 0) * 0.5);
-        const dmg = Math.max(1, Math.floor((baseDmg - defRed) * 1.5));      // forced crit
-        hitMonster(m, dmg, true, 'eclipse_snap');
-        m.vx += ((m.x + m.w/2) - fx > 0 ? 1 : -1) * 11;
-        m.vy -= 8;
-        m.stunTimer = Math.max(m.stunTimer || 0, 800);
-      }
-      // Two crossed dagger slashes at player position (signature dual-blade)
-      spawnSmoothSlash(fx, fy,  Math.PI * 0.25, 240, '#ff66aa', { thickness: 12, spread: Math.PI * 0.9, life: 22 });
-      spawnSmoothSlash(fx, fy, -Math.PI * 0.25, 240, '#1a0230', { thickness: 12, spread: Math.PI * 0.9, life: 22 });
-      // Eclipse "snap" — tight ring at player, expanding outward
-      spawnSmoothExplosion(fx, fy, 280, '#ff5588', '#1a0230a0', { life: 44 });
-      // v0.25.565 — divisor 56 → 3 (post-cut alignment).
-      for (let i = 0; i < 3; i++) {
-        const a = (i / 3) * Math.PI * 2;
-        game.particles.push({
-          x: fx, y: fy,
-          vx: Math.cos(a) * 12, vy: Math.sin(a) * 12,
-          life: 56,
-          color: i % 3 === 0 ? '#ffffff' : i % 2 ? '#ff66aa' : '#1a0230',
-          size: 3
-        });
-      }
-      // Small HP top-up reward for surviving the channel
-      // v0.29.826 — 18% -> 11% of max HP. Measured at 50% of the bar restored in
-      // also refills a chunk of the bar needs the chunk to be a reward, not a
-      // reason to press it defensively.
-      player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.14));
-    }, CHANNEL_MS + 60);
+    // ── the hold: everything after this point happens in _lxEclipseTick ──
+    player._eclipseHold = {
+      x: player.x, y: player.y,
+      moonX,
+      elapsed: 0,
+      nextBatch: 0,
+    };
   },
 
   phantom_cut: () => {
@@ -87347,7 +87344,16 @@ function _trimVisualQueues() {
   // spam-spawns 5+ explosions in a single beat. The ones evicted are
   // older than the visible animation window anyway, so visually a no-op.
   if (game.smoothFx && game.smoothFx.length > MAX_SMOOTH_FX) {
-    game.smoothFx.splice(0, game.smoothFx.length - MAX_SMOOTH_FX);
+    // v0.30.34 - evict the oldest NON-sticky entries. The Eclipse moon (180
+    // frames, sticky) used to be the oldest entry on the frame its own
+    // dagger wave overflowed the cap, so it was dropped one frame in.
+    let _over = game.smoothFx.length - MAX_SMOOTH_FX, _w = 0;
+    for (let _r = 0; _r < game.smoothFx.length; _r++) {
+      const _fx = game.smoothFx[_r];
+      if (_over > 0 && !_fx.sticky) { _over--; continue; }
+      game.smoothFx[_w++] = _fx;
+    }
+    game.smoothFx.length = _w;
   }
   // v0.25.241 (P7) — reset the per-frame burst counter. Skill bursts
   // can't use this directly (they fire once on cast), but mob-loop
@@ -108921,7 +108927,7 @@ function _heroVecAnimFor() {
   // G (`archbishop_grail` cast) for a 2.5 s window; the pose holds for
   // the duration regardless of attack/walk/jump flags. Untargetable +
   // hp-locked during this window so other anims are gameplay-irrelevant.
-  if ((player._ascended || 0) > 0) return 'fly';
+  if ((player._ascended || 0) > 0 || player._eclipseHold) return 'fly';   // v0.30.34 - Eclipse hover shares the levitate pose
   if (_heroVecAttackActive(now)) {
     // v0.25.194 — Per-class attack animations. Warrior gets a wide
     // 2-handed slash, mage raises staff at the sky, archer holds the
@@ -127867,6 +127873,7 @@ function loop(time) {
   const dt = _LX_SIM_STEP_MS;   // v0.28.3 — fixed 60 Hz step (the gate above already banked/consumed the real elapsed time and updated lastTime). Replaces the old wall-clock delta so the frame-locked sim is refresh-independent; dt-scaled timers stay real-time because the sim runs at a true 60 steps/sec.
   game.time++;
   game._playMs = (game._playMs || 0) + dt;   // v0.26.453 - accumulated in-game playtime (ms) for boss respawn gating
+  if (player._eclipseHold && !game.paused) _lxEclipseTick(dt);   // v0.30.34 - Eclipse clock: same cadence as game.time, so hit-stop cannot stretch the hold past the moon
   // v0.26.317 — Low-HP audio warning. Fires a one-shot `low_hp` SFX
   // when player HP first drops below 25 % of max, then re-arms once
   // HP climbs back above 35 % (hysteresis avoids stutter at the edge).
