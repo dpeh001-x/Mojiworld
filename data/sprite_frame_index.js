@@ -511,6 +511,8 @@ window.LX_SPRITE_FRAME_INDEX = {
    "ballista_volley": 9,
    "beastmaster_pack": 9,
    "beastmaster_ult": 9,
+   "bolt_impact": 8,
+   "cascade_fire": 9,
    "crusader_aegis": 9,
    "crusader_ult": 9,
    "doombringer_apoc": 9,
