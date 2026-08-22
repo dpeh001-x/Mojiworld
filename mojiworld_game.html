@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.62';
+const GAME_VERSION = 'v0.30.63';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -50401,7 +50401,23 @@ function _wmBgRasterURL(W, H) {
     const sc = Math.max(W / pw, H / ph);
     const dw = pw * sc, dh = ph * sc;
     c.drawImage(_wmPlate, (W - dw) / 2, (H - dh) / 2, dw, dh);
-    c.fillStyle = 'rgba(6,3,20,0.22)'; c.fillRect(0, 0, W, H);
+    c.fillStyle = 'rgba(6,3,20,0.18)'; c.fillRect(0, 0, W, H);
+    // v0.30.63 — CENTRE SCRIM (per user: "make the middle part more legible").
+    // A flat wash cannot fix this: the labels that are hardest to read are the
+    // small ones in the middle, and the plate's brightest cores are there too.
+    // An elliptical scrim, strongest dead centre and feathered out by ~78% of
+    // the half-diagonal, so the edges keep their colour and the reading area
+    // goes quiet. Applied BEFORE the stars so the star field still sparkles
+    // over it.
+    c.save();
+    c.translate(W / 2, H / 2); c.scale(W * 0.62, H * 0.70);
+    const _mid = c.createRadialGradient(0, 0, 0, 0, 0, 1);
+    _mid.addColorStop(0.00, 'rgba(4,2,16,0.50)');
+    _mid.addColorStop(0.55, 'rgba(4,2,16,0.32)');
+    _mid.addColorStop(0.78, 'rgba(4,2,16,0.10)');
+    _mid.addColorStop(1.00, 'rgba(4,2,16,0)');
+    c.fillStyle = _mid; c.fillRect(-1, -1, 2, 2);
+    c.restore();
   }
   const blob = (nx, ny, rx, ry, rot, stops) => {   // soft elliptical nebula
     c.save(); c.translate(nx, ny); c.rotate(rot * Math.PI / 180); c.scale(rx, ry);
@@ -50518,12 +50534,14 @@ function _renderWorldMapDiagram(host, opts) {
   _bgImg.setAttribute('href', _wmBgRasterURL(W, H));
   _bgImg.setAttribute('x', 0); _bgImg.setAttribute('y', 0);
   _bgImg.setAttribute('width', W); _bgImg.setAttribute('height', H);
+  _bgImg.setAttribute('data-wm-bg', '1');   // v0.30.63 — resized after attach
   _bgImg.setAttribute('pointer-events', 'none');
   svg.appendChild(_bgImg);
   for (let i = 0; i < 12; i++) {
     const s = document.createElementNS(SVG_NS, 'circle');
     s.setAttribute('cx', (Math.random() * W).toFixed(1));
     s.setAttribute('cy', (Math.random() * H).toFixed(1));
+    s.setAttribute('data-wm-star', '1');   // v0.30.63 — respread over the covered area after attach
     s.setAttribute('r', (Math.random() * 1.4 + 0.7).toFixed(2));
     s.setAttribute('fill', '#fff');
     s.setAttribute('class', 'wm-tw');
@@ -51217,6 +51235,34 @@ function _renderWorldMapDiagram(host, opts) {
     svg.appendChild(_zoomHint);
   }
   host.appendChild(svg);
+  {   // v0.30.63 — fill the letterbox bands with the plate (see note above)
+    const _wmFit = () => {
+      const _hr = host.getBoundingClientRect();
+      if (!(_hr.width > 8 && _hr.height > 8)) return false;
+      const _sc = Math.min(_hr.width / W, _hr.height / H);
+      const _cw = _hr.width / _sc, _ch = _hr.height / _sc;
+      const _key = Math.round(_cw) + 'x' + Math.round(_ch);
+      if (svg._lxFitKey === _key) return true;          // same box: nothing to redo
+      svg._lxFitKey = _key;
+      const _cx = (W - _cw) / 2, _cy = (H - _ch) / 2;
+      _bgImg.setAttribute('href', _wmBgRasterURL(Math.round(_cw), Math.round(_ch)));
+      _bgImg.setAttribute('x', _cx); _bgImg.setAttribute('y', _cy);
+      _bgImg.setAttribute('width', _cw); _bgImg.setAttribute('height', _ch);
+      for (const _st of svg.querySelectorAll('circle[data-wm-star="1"]')) {
+        _st.setAttribute('cx', (_cx + Math.random() * _cw).toFixed(1));
+        _st.setAttribute('cy', (_cy + Math.random() * _ch).toFixed(1));
+      }
+      return true;
+    };
+    if (!_wmFit()) requestAnimationFrame(_wmFit);
+    try {
+      if (typeof ResizeObserver === 'function') {
+        if (host._lxWmRO) host._lxWmRO.disconnect();   // one per host, not one per render
+        host._lxWmRO = new ResizeObserver(() => { try { _wmFit(); } catch (e) {} });
+        host._lxWmRO.observe(host);
+      }
+    } catch (e) {}
+  }
   // v0.26.x — Per user "make sure the words are not overlapping". Final
   // guarantee on top of the font shrink + compound-name wrapping + position
   // spread: once the SVG is attached (so it has real geometry), greedily push
