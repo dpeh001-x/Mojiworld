@@ -136,6 +136,19 @@
     if (!set || !set.game) return;
     calibOf(key, state).dy = clamp(px / set.game.targetH, -1.5, 1.5);
   }
+  // Horizontal is the same translate — and the game scales dx by targetH too
+  // (the box HEIGHT, not its width), so a unit is the same distance on either
+  // axis and this is plain game pixels, positive = right.
+  function dxPx(key, state) {
+    const set = setOf(key, state);
+    if (!set || !set.game) return 0;
+    return calibOf(key, state).dx * set.game.targetH;
+  }
+  function setDxPx(key, state, px) {
+    const set = setOf(key, state);
+    if (!set || !set.game) return;
+    calibOf(key, state).dx = clamp(px / set.game.targetH, -1.5, 1.5);
+  }
   // The FORM a calib key belongs to: gravitos2star -> gravitos2, gravitoslaser
   // -> gravitos, legosaurusdash -> legosaurus. Cast sets borrow their form's
   // body, so that form's idle is what they should measure against.
@@ -176,7 +189,7 @@
   const cur = { boss: null, cards: [], t0: 0 };
   window.__BR = { MAN, BAKED, HITBOX, BOSSES, STATE_MS, CLAMP, cur, edits,
     $, el, clamp, median, toast, bossOf, animLabel, calibOf, setOf, srcSpan,
-    frameH, animH, setAnimH, dyPx, setDyPx, idleH, spread, refH, isRef, formKeyOf };
+    frameH, animH, setAnimH, dyPx, setDyPx, dxPx, setDxPx, idleH, spread, refH, isRef, formKeyOf };
 })();
 
 /* ---- the contact sheet: every animation of one boss, playing at once ------
@@ -187,7 +200,10 @@
  * ----------------------------------------------------------------------- */
 (function () {
   const B = window.__BR, cur = B.cur, $ = B.$, el = B.el;
-  const CW = 200, CH = 250, GROUND = CH - 26;
+  // GROUND sits well above the bottom edge: a sprite nudged DOWN has to stay
+  // visible, and at 26px of headroom it left the card almost immediately.
+  const CW = 200, CH = 268, GROUND = CH - 62;
+  const HANDLE_W = 54, HANDLE_H = 13;
 
   // Fixed for as long as one boss is selected — see the note in br4_scale.
   function fitScale() {
@@ -265,7 +281,7 @@
   }
   // Draw so the frame's content is exactly `h` game px tall with its feet on
   // the ground line — the same foot anchoring _drawBossSprite uses.
-  function blit(c2, img, set, i, h, k, alpha, yOff) {
+  function blit(c2, img, set, i, h, k, alpha, yOff, xOff) {
     // canvases have no .complete / .naturalWidth - the old guard silently
     // dropped every overlay draw, which is why the idle never appeared
     if (!img) return;
@@ -274,7 +290,7 @@
     const canvasH = h * (set.h / cH), canvasW = canvasH * (set.w / set.h);
     const below = (set.h - 1 - bot) / set.h * canvasH;
     c2.save(); c2.globalAlpha = alpha;
-    c2.drawImage(img, CW / 2 - canvasW * k / 2,
+    c2.drawImage(img, CW / 2 - canvasW * k / 2 + (xOff || 0) * k,
                  GROUND - (canvasH - below) * k + (yOff || 0) * k,
                  canvasW * k, canvasH * k);
     c2.restore();
@@ -310,14 +326,19 @@
       card.appendChild(ctl);
       // vertical nudge — the same value the game reads as calib.dy
       const ctl2 = el('div', 'ctl');
+      ctl2.appendChild(el('span', 'axis', '\u2194'));
+      const xin = el('input'); xin.type = 'number'; xin.step = '1'; xin.min = '-400'; xin.max = '400';
+      xin.title = 'horizontal offset in game pixels, + is right';
+      xin.onchange = () => { B.setDxPx(a.key, a.state, +xin.value); refresh(); };
+      ctl2.appendChild(xin);
       ctl2.appendChild(el('span', 'axis', '\u2195'));
       const yin = el('input'); yin.type = 'number'; yin.step = '1'; yin.min = '-400'; yin.max = '400';
       yin.title = 'vertical offset in game pixels, + is down';
       yin.onchange = () => { B.setDyPx(a.key, a.state, +yin.value); refresh(); };
       ctl2.appendChild(yin);
       const zero = el('button', 'ghost mini', '0');
-      zero.title = 'clear the vertical offset';
-      zero.onclick = () => { B.setDyPx(a.key, a.state, 0); refresh(); };
+      zero.title = 'clear both offsets';
+      zero.onclick = () => { B.setDxPx(a.key, a.state, 0); B.setDyPx(a.key, a.state, 0); refresh(); };
       ctl2.appendChild(zero);
       card.appendChild(ctl2);
       const imgs = [];
@@ -326,7 +347,7 @@
         im.src = set.dir + '_' + i + '.webp'; imgs.push(im);
       }
       host.appendChild(card);
-      const rec = { a, set, cv, c2: cv.getContext('2d'), imgs, inp, yin, vs, card,
+      const rec = { a, set, cv, c2: cv.getContext('2d'), imgs, inp, xin, yin, vs, card,
                     sil: silhouette(B.formKeyOf(a.key)) };
       cur.cards.push(rec);
       attachDrag(rec);
@@ -338,28 +359,60 @@
   // pointer, relative to where the drag began, so grabbing the middle of a
   // sprite does not make it jump. The canvas is CSS-sized to its own pixel
   // height, so one pointer pixel is one canvas pixel vertically.
-  // Which axis a drag edits: the toolbar toggle, or Shift for one gesture.
-  const dragMode = (e) => (e.shiftKey ? (B.mode === 'size' ? 'move' : 'size') : B.mode);
+  // Where the pointer is in CANVAS coordinates. The canvas is CSS-stretched
+  // horizontally but its height is pinned to its pixel height, so only x needs
+  // the ratio.
+  function local(c, e) {
+    const r = c.cv.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (c.cv.width / r.width),
+             y: (e.clientY - r.top) * (c.cv.height / r.height) };
+  }
+  const onHandle = (c, p) => !!c.handle && p.x >= c.handle.x0 - 4 && p.x <= c.handle.x1 + 4
+                          && p.y >= c.handle.y0 - 4 && p.y <= c.handle.y1 + 4;
+  // Direct manipulation: the body moves, the grip scales. Shift swaps them, and
+  // the toolbar toggle still decides what a plain body drag does.
+  function dragMode(c, e, p) {
+    const base = onHandle(c, p) ? 'size' : B.mode;
+    return e.shiftKey ? (base === 'size' ? 'move' : 'size') : base;
+  }
   function attachDrag(c) {
     let from = null;
     c.cv.addEventListener('pointerdown', (e) => {
-      from = { y: e.clientY, h: B.animH(c.a.key, c.a.state, true),
-               dy: B.dyPx(c.a.key, c.a.state), mode: dragMode(e) };
+      const p = local(c, e);
+      // deltas are measured in CANVAS space: the card is CSS-stretched wider
+      // than its 200px backing store, so client px and canvas px differ on x
+      from = { p, h: B.animH(c.a.key, c.a.state, true),
+               dy: B.dyPx(c.a.key, c.a.state), dx: B.dxPx(c.a.key, c.a.state),
+               mode: dragMode(c, e, p) };
       c.cv.setPointerCapture(e.pointerId);
       c.card.classList.add('dragging');
+      c.cv.style.cursor = from.mode === 'size' ? 'ns-resize' : 'grabbing';   // free move on both axes
       e.preventDefault();
     });
+    // hover feedback so the grip is discoverable without reading anything
+    c.cv.addEventListener('pointermove', (e) => {
+      if (from) return;
+      const over = onHandle(c, local(c, e));
+      c.hover = over ? 'handle' : null;
+      c.cv.style.cursor = over ? 'ns-resize' : (B.mode === 'move' ? 'move' : 'ns-resize');
+    });
+    c.cv.addEventListener('pointerleave', () => { c.hover = null; });
     c.cv.addEventListener('pointermove', (e) => {
       if (!from) return;
       const k = viewScale();
       if (!k) return;
-      const d = (from.y - e.clientY) / k;
-      if (from.mode === 'move') B.setDyPx(c.a.key, c.a.state, from.dy - d);   // up = negative dy
-      else B.setAnimH(c.a.key, c.a.state, from.h + d);
+      const q = local(c, e);
+      const d = (from.p.y - q.y) / k;
+      if (from.mode === 'move') {
+        B.setDyPx(c.a.key, c.a.state, from.dy - d);                      // up = negative dy
+        B.setDxPx(c.a.key, c.a.state, from.dx + (q.x - from.p.x) / k);
+      } else B.setAnimH(c.a.key, c.a.state, from.h + d);
       refresh(true);                       // light: numbers now, list on release
     });
     const end = () => { if (!from) return; from = null;
-      c.card.classList.remove('dragging'); refresh(); };
+      c.card.classList.remove('dragging');
+      c.cv.style.cursor = B.mode === 'move' ? 'move' : 'ns-resize';
+      refresh(); };
     c.cv.addEventListener('pointerup', end);
     c.cv.addEventListener('pointercancel', end);
   }
@@ -373,6 +426,7 @@
       const h = B.animH(c.a.key, c.a.state, true);
       c.inp.value = Math.round(h);
       if (c.yin) c.yin.value = Math.round(B.dyPx(c.a.key, c.a.state));
+      if (c.xin) c.xin.value = Math.round(B.dxPx(c.a.key, c.a.state));
       const r = B.refH(c.a.key);
       const off = r ? (h / r - 1) * 100 : 0;
       const same = B.isRef(c.a.key, c.a.state);
@@ -419,17 +473,36 @@
       // the reference is drawn with the IDLE'S own offset, so matching the
       // outline means matching footing as well as height
       const refDy = B.dyPx(B.formKeyOf(a.key), 'idle');
+      const refDx = B.dxPx(B.formKeyOf(a.key), 'idle');
       if (showIdle && c.sil && c.sil.cv && rr)
-        blit(c2, c.sil.cv, c.sil.set, c.sil.idx, rr, k, 0.30, refDy);
+        blit(c2, c.sil.cv, c.sil.set, c.sil.idx, rr, k, 0.30, refDy, refDx);
       const ms = B.STATE_MS[a.state] || 100;
       const i = playing ? frameIndex(set.count, ms, t) : 0;
-      const yo = B.dyPx(a.key, a.state);
-      if (showWas) blit(c2, c.imgs[i], set, i, B.frameH(a.key, a.state, i, false), k, 0.25, 0);
-      blit(c2, c.imgs[i], set, i, B.frameH(a.key, a.state, i, true), k, 1, yo);
+      const yo = B.dyPx(a.key, a.state), xo = B.dxPx(a.key, a.state);
+      if (showWas) blit(c2, c.imgs[i], set, i, B.frameH(a.key, a.state, i, false), k, 0.25, 0, 0);
+      blit(c2, c.imgs[i], set, i, B.frameH(a.key, a.state, i, true), k, 1, yo, xo);
       // the idle's outline goes ON TOP: when the animation is the bigger of
       // the two it spills past this ring, which the fill behind cannot show
       if (showIdle && c.sil && c.sil.ring && rr)
-        blit(c2, c.sil.ring, c.sil.set, c.sil.idx, rr, k, 1, refDy);
+        blit(c2, c.sil.ring, c.sil.set, c.sil.idx, rr, k, 1, refDy, refDx);
+      // the resize grip, pinned to the top of the drawn figure: drag the BODY
+      // to move, drag this to scale. Stored so the hit test agrees with it.
+      const topY = GROUND + yo * k - B.frameH(a.key, a.state, i, true) * k;
+      const cxo = xo * k;
+      c.handle = { x0: CW / 2 + cxo - HANDLE_W / 2, x1: CW / 2 + cxo + HANDLE_W / 2,
+                   y0: topY - HANDLE_H / 2, y1: topY + HANDLE_H / 2 };
+      const hot = c.hover === 'handle';
+      c2.fillStyle = hot ? 'rgba(192,140,255,.95)' : 'rgba(192,140,255,.42)';
+      c2.beginPath();
+      const rr2 = 4, hx = c.handle.x0, hy = c.handle.y0;   // rides the sprite on both axes
+      c2.roundRect ? c2.roundRect(hx, hy, HANDLE_W, HANDLE_H, rr2)
+                   : c2.rect(hx, hy, HANDLE_W, HANDLE_H);
+      c2.fill();
+      c2.strokeStyle = hot ? '#fff' : 'rgba(255,255,255,.55)'; c2.lineWidth = 1;
+      for (const gy of [topY - 2, topY + 2]) {
+        c2.beginPath(); c2.moveTo(CW / 2 + cxo - 9, gy + .5);
+        c2.lineTo(CW / 2 + cxo + 9, gy + .5); c2.stroke();
+      }
     }
   }
   (function loop() { paint(); requestAnimationFrame(loop); })();
@@ -513,7 +586,7 @@
       .catch(() => B.toast('copy blocked - select the text in the box below'));
   };
 
-  B.mode = 'size';
+  B.mode = 'move';   // positioning is the default gesture; the grip resizes
   $('mode').onclick = (e) => {
     const b = e.target.closest('button[data-m]');
     if (!b) return;
