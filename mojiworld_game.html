@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.54';
+const GAME_VERSION = 'v0.30.55';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -66553,9 +66553,23 @@ let _zodiacLabelW = 0;   // v0.29.x perf — memoized ZODIAC SANCTUM banner widt
 let _zodiacSignCv = null;
 function _zodiacSignSprite() {
   if (_zodiacSignCv) return _zodiacSignCv;
-  const W = 232, H = 40, PAD = 8;
-  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  // v0.30.x (per user "reduce the size of the zodiac sanctum title") — was a
+  // fixed 232x40 on a 12px face; now 30 tall on a 10px face.
+  //
+  // The WIDTH is measured from the title rather than hardcoded. A fixed width
+  // has to be re-guessed by hand every time the face, the label or the letter
+  // spacing moves — and guessing low clips the title, which is exactly the
+  // failure this shrink could have introduced. Measuring cannot drift.
+  const H = 30, PAD = 6, ORN = 26;   // ORN — the line+star ornament block, per side
+  const FONT = 'bold 10px Georgia, "Times New Roman", serif';
+  const label = 'ZODIAC SANCTUM', SP = 1.6;
+  const cv = document.createElement('canvas');
   const c = cv.getContext('2d');
+  c.font = FONT;
+  let tw = 0; for (const ch of label) tw += c.measureText(ch).width + SP; tw -= SP;
+  const W = Math.ceil(tw + (PAD + ORN) * 2);
+  cv.width = W; cv.height = H;
+  c.font = FONT;   // resizing a canvas resets its 2D state, the font included
   const rr = (x, y, w, h, r) => { c.beginPath(); c.moveTo(x + r, y); c.lineTo(x + w - r, y); c.quadraticCurveTo(x + w, y, x + w, y + r);
     c.lineTo(x + w, y + h - r); c.quadraticCurveTo(x + w, y + h, x + w - r, y + h); c.lineTo(x + r, y + h);
     c.quadraticCurveTo(x, y + h, x, y + h - r); c.lineTo(x, y + r); c.quadraticCurveTo(x, y, x + r, y); c.closePath(); };
@@ -66577,13 +66591,13 @@ function _zodiacSignSprite() {
   rr(PAD + 3, PAD + 3, W - PAD * 2 - 6, H - PAD * 2 - 6, 4); c.strokeStyle = 'rgba(255,220,150,0.22)'; c.lineWidth = 1; c.stroke();
   // flanking ornaments: line - star - line
   c.strokeStyle = 'rgba(255,216,106,0.7)'; c.lineWidth = 1;
-  c.beginPath(); c.moveTo(PAD + 10, H / 2); c.lineTo(PAD + 24, H / 2); c.moveTo(W - PAD - 24, H / 2); c.lineTo(W - PAD - 10, H / 2); c.stroke();
-  star(PAD + 31, H / 2, 5, '#ffd86a'); star(W - PAD - 31, H / 2, 5, '#ffd86a');
-  star(PAD + 31, H / 2, 2, '#fff7dd'); star(W - PAD - 31, H / 2, 2, '#fff7dd');
-  // title: letter-spaced caps, cream-to-gold fill, violet halo
-  const label = 'ZODIAC SANCTUM', SP = 2.2;
-  c.font = 'bold 12px Georgia, "Times New Roman", serif'; c.textBaseline = 'middle'; c.textAlign = 'left';
-  let tw = 0; for (const ch of label) tw += c.measureText(ch).width + SP; tw -= SP;
+  // ornaments scaled with the plaque (was +10/+24 line, star at +31 r5)
+  c.beginPath(); c.moveTo(PAD + 6, H / 2); c.lineTo(PAD + 15, H / 2); c.moveTo(W - PAD - 15, H / 2); c.lineTo(W - PAD - 6, H / 2); c.stroke();
+  star(PAD + 20, H / 2, 4, '#ffd86a'); star(W - PAD - 20, H / 2, 4, '#ffd86a');
+  star(PAD + 20, H / 2, 1.6, '#fff7dd'); star(W - PAD - 20, H / 2, 1.6, '#fff7dd');
+  // title: letter-spaced caps, cream-to-gold fill, violet halo. label/SP/font
+  // and the tw measurement all moved to the top — the width depends on them.
+  c.textBaseline = 'middle'; c.textAlign = 'left';
   let x = W / 2 - tw / 2; const y = H / 2 + 0.5;
   const tg = c.createLinearGradient(0, y - 7, 0, y + 7);
   tg.addColorStop(0, '#fff6dc'); tg.addColorStop(1, '#ffcf6a');
@@ -106311,26 +106325,71 @@ function drawNPCs() {
       ctx.globalCompositeOperation = 'lighter';
       ctx.drawImage(_getAmnesiacHaloCanvas(), (cx - 45) | 0, (cy - 45) | 0);
       ctx.restore();
-      // 8-point star body (pulses in size)
+      // v0.30.x (per user "rework the triangle to make it look more grand").
+      //
+      // Worth recording what this was: the comment said "8-point star body"
+      // while the loop ran i < 3 with an `i % 2` radius alternation — which on
+      // three vertices gives outer, INNER, outer. Two long points and one short
+      // one, i.e. the lopsided wedge that reads on screen as a plain triangle.
+      // The star it was written to be never actually drew.
+      //
+      // The triangle is the mark players already associate with the Sanctum, so
+      // it stays — it is now the CENTRE of a sigil rather than the whole of it:
+      //   · a counter-rotating ray burst behind, long rays every third spoke
+      //   · a gold ring, with pips seated on the triangle's three vertices
+      //   · the triangle itself: violet-to-white fill, violet rim, gold inlay
       const pulse = 1 + Math.sin(t * 3) * 0.18;
-      const rOuter = 16 * pulse;
-      const rInner = 5.2 * pulse;
+      const R = 19 * pulse;                       // triangle circumradius
       ctx.save();
       ctx.translate(cx, cy);
-      ctx.rotate(t * 0.35);
-      ctx.fillStyle = '#f6e6ff';
-      ctx.strokeStyle = '#aa77ff';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      for (let i = 0; i < 3; i++) {
-        const a = (i / 3) * Math.PI * 2;
-        const r = (i % 2 === 0) ? rOuter : rInner;
-        const x = Math.cos(a) * r, y = Math.sin(a) * r;
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      // Ray burst — behind everything and turning the other way, so the sigil
+      // reads as two nested mechanisms rather than one spinning shape.
+      if (!(_perfLowFx && _perfLowFx())) {
+        ctx.save();
+        ctx.rotate(-t * 0.18);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = 'rgba(200,160,255,0.55)';
+        ctx.lineCap = 'round';
+        for (let i = 0; i < 12; i++) {
+          const a = (i / 12) * Math.PI * 2;
+          const long = (i % 3 === 0);
+          ctx.lineWidth = long ? 2 : 1;
+          const r0 = R * 1.15, r1 = R * (long ? 1.85 : 1.5);
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a) * r0, Math.sin(a) * r0);
+          ctx.lineTo(Math.cos(a) * r1, Math.sin(a) * r1);
+          ctx.stroke();
+        }
+        ctx.restore();
       }
+      ctx.rotate(t * 0.35);
+      // Ring
+      ctx.strokeStyle = 'rgba(255,216,106,0.75)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.arc(0, 0, R * 1.12, 0, Math.PI * 2); ctx.stroke();
+      // The triangle — apex DOWN, the orientation the old wedge happened to
+      // land on and the one players have been reading as the Sanctum's mark.
+      const _tri = [];
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2 + Math.PI / 2;
+        _tri.push([Math.cos(a) * R, Math.sin(a) * R]);
+      }
+      const _tgd = ctx.createLinearGradient(0, -R, 0, R);
+      _tgd.addColorStop(0, '#ffffff');
+      _tgd.addColorStop(0.55, '#e8d4ff');
+      _tgd.addColorStop(1, '#b98cff');
+      ctx.beginPath();
+      ctx.moveTo(_tri[0][0], _tri[0][1]);
+      for (let i = 1; i < 3; i++) ctx.lineTo(_tri[i][0], _tri[i][1]);
       ctx.closePath();
+      ctx.fillStyle = _tgd;
       ctx.fill();
-      ctx.stroke();
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = '#7a44cc'; ctx.lineWidth = 3;   ctx.stroke();   // heavy violet rim
+      ctx.strokeStyle = '#ffd86a'; ctx.lineWidth = 1.2; ctx.stroke();   // gold inlay over it
+      // Pips on the vertices, seated out on the ring.
+      ctx.fillStyle = '#ffd86a';
+      for (const _p of _tri) { ctx.beginPath(); ctx.arc(_p[0] * 1.12, _p[1] * 1.12, 1.9, 0, Math.PI * 2); ctx.fill(); }
       // Inner core dot
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
@@ -106362,7 +106421,10 @@ function drawNPCs() {
         // sign": the flat purple-stroked box is now a baked plaque (see
         // _zodiacSignSprite) with a slow shimmer sweep riding the star's beat.
         const _zs = _zodiacSignSprite();
-        const _zx = Math.round(cx - _zs.width / 2), _zy = Math.round(cy + 18);
+        // v0.30.x (per user "place it above the triangle") — was cy + 18,
+        // i.e. hanging under the sigil. Now its BOTTOM edge sits 34 px above
+        // the sigil's centre, clear of the reworked mark's 1.85x ray reach.
+        const _zx = Math.round(cx - _zs.width / 2), _zy = Math.round(cy - 34 - _zs.height);
         ctx.drawImage(_zs, _zx, _zy);
         if (!(_perfLowFx && _perfLowFx())) {
           const _ph = (t * 0.35) % 2.4;                       // one sweep every ~2.4 beats, then rest
