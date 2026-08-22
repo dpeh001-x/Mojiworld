@@ -419,12 +419,12 @@ window.LX_ANIM_CALIB = {
     "walk": {
       "s": 1.655,
       "dx": 0,
-      "dy": 0.08
+      "dy": 0.1036
     },
     "attack": {
-      "s": 1.66,
+      "s": 1.4946,
       "dx": 0,
-      "dy": 0.045
+      "dy": 0.0532
     }
   },
   "towerArbiter": {
