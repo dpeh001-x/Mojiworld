@@ -121,6 +121,50 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.77 <span class="tag"><span class="pill polish">polish</span> The half-second freeze when a room fills up</span></h2>
+<p>Continuing the lag work. With the bbox readbacks gone (v0.30.76) the steady
+state is healthy &mdash; profiling 2,002 frames gave a median of
+<b>4.2&nbsp;ms</b> and only <b>7 frames</b> over 28&nbsp;ms &mdash; so this pass
+went after those 7 instead of the average. One of them was enormous:</p>
+<table>
+  <tr><th>Frame</th><th>What ran inside it</th></tr>
+  <tr><td><b>517.9 ms</b></td><td><code>_lxEdgesTouched</code> &times;127 = 504 ms (70 getImageData = 502 ms)</td></tr>
+  <tr><td>36.8 ms</td><td>nothing instrumented (browser raster)</td></tr>
+  <tr><td>31.3 ms</td><td>drawMonster &times;29 + _lxDrawSoft &times;29</td></tr>
+</table>
+<p><b>One frame, 127 cold probes.</b> The first time a sprite is drawn the game
+probes it to decide whether its art is cut off at the frame edge and needs
+feathering. Each probe is a synchronous GPU&rarr;CPU readback of about
+7&nbsp;ms, and when a wave of monsters appears they all probe in the same frame
+&mdash; a half-second freeze exactly when a room fills up.</p>
+<p><b>The deferral was already in the file; it was gated on size.</b> Only
+sources over 300&nbsp;px went to idle time, which left the shrink-baked canvases
+(203&ndash;304&nbsp;px, and they are the many) probing inline. The gate is now
+simply "has this been probed yet", and two further things had to be right, both
+learned by measuring versions that were not:</p>
+<ul>
+  <li><b>One scheduler, not one callback per image.</b> 127 separate idle
+  callbacks each carrying a 300&nbsp;ms timeout all come due together and the
+  browser runs them back to back &mdash; the freeze simply moves.</li>
+  <li><b>Budget by wall-clock window, not per callback.</b> An 8&nbsp;ms cap on
+  one drain does nothing when the browser grants a 50&nbsp;ms idle period and
+  runs the rescheduled callback inside it: 648&nbsp;ms of readback piled between
+  two frames that way. The queue now spends at most 4&nbsp;ms per 16&nbsp;ms
+  window, and when that is used up the continuation goes through
+  <code>setTimeout</code> &mdash; a real delay &mdash; rather than another idle
+  callback that would fire immediately.</li>
+</ul>
+<p><b>Measured on the same fight:</b> frames over 28&nbsp;ms drop from
+<b>6 to 1</b>, and the worst frame in the run goes from <b>517&ndash;570&nbsp;ms
+to 33&nbsp;ms</b>. Median is unchanged. A sprite's first beat on screen may be
+unfeathered, which is the tradeoff this file already accepted for large art.</p>
+<p>Guarded by <code>scripts/edge_probe_defer_test.mjs</code>: a first-sight
+probe must be deferred rather than run inline, the queue must actually drain
+(deferring work you never do is not a fix, so the feather is asserted to
+arrive), and no more than 120&nbsp;ms of readback may pile between two frames
+&mdash; stated in milliseconds because probe <em>cost</em> swings with how warm
+the texture is, so counting calls would pass a build that freezes.</p>
+
 <h2>v0.30.76 <span class="tag"><span class="pill polish">polish</span> Combat lag: the stutters, measured and cut</span></h2>
 <p>Per user: <em>"reduce lag even more throughout the game."</em> Profiled
 first, on a fixed 29-mob fight, because the previous guess-and-check rounds had

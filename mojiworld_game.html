@@ -9708,7 +9708,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.76';
+const GAME_VERSION = 'v0.30.77';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -116925,6 +116925,57 @@ const _LX_EDGE_PROBE = (typeof document !== 'undefined') ? document.createElemen
 // backing store and resets all context state, so each probe paid a fresh software
 // canvas allocation before it drew anything. Size it once, hold the context.
 let _LX_EDGE_PROBE_CTX = null;
+// v0.30.x perf — COLD-PROBE QUEUE. Measured with the spike profiler: of 2,002
+// frames only 7 ran long, and the worst was 517 ms made of _lxEdgesTouched x127
+// (~7 ms of synchronous GPU readback each) — a wave of monsters drawing for the
+// first time, all probing in one frame. That is the hitch a player feels.
+//
+// Probes now never run on a render frame; they queue and drain on idle. Two
+// things this has to get right, both learned by measuring the versions that
+// did not:
+//   1. ONE scheduler, not one callback per image. 127 separate idle callbacks
+//      each carrying a 300 ms timeout all come due together, and the browser
+//      runs them back to back — the freeze just moves.
+//   2. Budget by WALL-CLOCK WINDOW, not per callback. An 8 ms cap on a single
+//      drain does nothing when the browser grants a 50 ms idle period and runs
+//      the rescheduled callback inside it: measured 648 ms of readback piled
+//      between two frames that way. When the window is spent the continuation
+//      goes through setTimeout — a real delay — not another idle callback.
+const _lxEdgeQ = [];
+let _lxEdgeQScheduled = false;
+const _LX_EDGE_WIN = 16, _LX_EDGE_MS = 4;
+let _lxEdgeWinAt = 0, _lxEdgeWinUsed = 0;
+function _lxEdgeDrain(deadline) {
+  _lxEdgeQScheduled = false;
+  const _now = performance.now();
+  if (_now - _lxEdgeWinAt > _LX_EDGE_WIN) { _lxEdgeWinAt = _now; _lxEdgeWinUsed = 0; }
+  if (_lxEdgeWinUsed >= _LX_EDGE_MS) { _lxEdgeScheduleLater(); return; }
+  const _t0 = performance.now();
+  // Always at least one, so a callback that fired via its TIMEOUT (where
+  // timeRemaining() is 0) still advances the queue on a machine that never idles.
+  do {
+    const im = _lxEdgeQ.shift();
+    if (!im) break;
+    im._lxEdgeQueued = false;
+    im._lxEdgesWarm = true;
+    try { _lxEdgesTouched(im); } catch (e) {}
+  } while (_lxEdgeQ.length && (performance.now() - _t0) < (_LX_EDGE_MS - _lxEdgeWinUsed)
+           && deadline && typeof deadline.timeRemaining === 'function'
+           && deadline.timeRemaining() > 6);
+  _lxEdgeWinUsed += performance.now() - _t0;
+  if (_lxEdgeQ.length) _lxEdgeScheduleLater();
+}
+function _lxEdgeScheduleLater() {
+  if (_lxEdgeQScheduled) return;
+  _lxEdgeQScheduled = true;
+  setTimeout(function () { _lxEdgeQScheduled = false; _lxEdgeSchedule(); }, _LX_EDGE_WIN);
+}
+function _lxEdgeSchedule() {
+  if (_lxEdgeQScheduled) return;
+  _lxEdgeQScheduled = true;
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(_lxEdgeDrain, { timeout: 400 });
+  else setTimeout(function () { _lxEdgeDrain(null); }, 24);
+}
 function _lxEdgesTouched(img) {
   if (img._lxEdges !== undefined) return img._lxEdges;
   // v0.30.x perf — RESOLVE THROUGH THE SOURCE. A baked canvas (shrink or tint)
@@ -116970,14 +117021,13 @@ function _lxEdgesTouched(img) {
   // before its source image was ever probed gets no memo to carry, and its
   // first probe (software downscale of a 300-480px raster) still cost >2ms
   // on the render path — measured 24 such events in a 300-frame run.
-  if (img.tagName !== undefined && !img._lxEdgesWarm &&
-      Math.max(img.naturalWidth || img.width || 0, img.naturalHeight || img.height || 0) > 300) {
-    if (!img._lxEdgesQueued) {
-      img._lxEdgesQueued = true;
-      const _run = () => { img._lxEdgesQueued = false; img._lxEdgesWarm = true; try { _lxEdgesTouched(img); } catch (e) {} };
-      if (typeof requestIdleCallback === 'function') requestIdleCallback(_run, { timeout: 300 });
-      else setTimeout(_run, 32);
-    }
+  // v0.30.x perf — EVERY cold probe queues. The old gate was "> 300 px", which
+  // left the shrink-baked canvases (203-304 px, and they are the many) probing
+  // inline. There is no size at which a synchronous GPU readback belongs in a
+  // frame. A sprite is unfeathered for its first beat on screen — the tradeoff
+  // this file already accepted for big art, and invisible beside a 517 ms stall.
+  if (img.tagName !== undefined && !img._lxEdgesWarm) {
+    if (!img._lxEdgeQueued) { img._lxEdgeQueued = true; _lxEdgeQ.push(img); _lxEdgeSchedule(); }
     return null;
   }
   let res = null;
