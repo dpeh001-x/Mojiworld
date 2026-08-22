@@ -112,7 +112,7 @@ const r = await page.evaluate(() => {
     const m = mk('gravitos');
     m.patternState = 'crush';
     const seen = []; let pairTicks = 0, ticks = 0, fadedAlpha = false, frame8At = null, errCt = 0;
-    let moveTicks = 0, maxOff = 0;
+    let moveTicks = 0, maxOff = 0; const arriveAt = {};
     for (let t = 0; t <= 1500; t += 16) {
       m.patternTimer = t; simNow += 16; ticks++;
       const _tt = tickT(m, punchArr);
@@ -122,11 +122,16 @@ const r = await page.evaluate(() => {
       const fr = drawn.filter(d => d.i != null);
       if (fr.length >= 2) { pairTicks++; if (fr[1].alpha < 1) fadedAlpha = true; }
       if (fr.length) {
-        if (!seen.includes(fr[0].i)) seen.push(fr[0].i);
+        if (!seen.includes(fr[0].i)) { seen.push(fr[0].i); arriveAt[fr[0].i] = t; }
         if (frame8At === null && fr[0].i === 8) frame8At = t;
       }
     }
-    out.punch = { distinct: seen.length, pairTicks, ticks, fadedAlpha, frame8At, errCt, moveTicks, maxOff };
+    // gaps between consecutive frame arrivals, and how long frame 8 is held
+    const _g = [];
+    for (let k = 1; k <= 8; k++) if (arriveAt[k] != null && arriveAt[k - 1] != null) _g.push(arriveAt[k] - arriveAt[k - 1]);
+    out.punch = { distinct: seen.length, pairTicks, ticks, fadedAlpha, frame8At, errCt, moveTicks, maxOff,
+      gaps: _g, maxGap: _g.length ? Math.max(..._g) : -1,
+      hold8: frame8At != null ? 1500 - frame8At : -1 };
   }
 
   // ---- WALK (gravitos vs a human-scale control) ----
@@ -262,8 +267,15 @@ ok('NO OVERLAPPING SPRITES: the punch draws one frame per tick, never a faded se
 ok('...and is smoothed by sub-frame MOTION instead: a small, continuous, always-moving offset',
    sf.nonZero > sf.samples * 0.8 && sf.maxAbs > 0.3 && sf.maxAbs < 8 && sf.maxStep < 1.5 && sf.seamDy < 1.0,
    sf);
-ok('the punch completes by 85% of its window and holds through recovery (eased, was linear-to-the-end)',
-   p.frame8At != null && p.frame8At <= 1300, { frame8At: p.frame8At });
+// v0.30.x — per user: "reduce the time gap and just hold the last frame
+// slightly longer". Both measured off the real frame arrivals.
+ok('the punch has TIGHTER gaps now — no long stall on the windup frame (was 333ms)',
+   p.maxGap > 0 && p.maxGap <= 190, { maxGap: p.maxGap, gaps: p.gaps });
+ok('...and the gaps are near-even rather than front-loaded (max is under 1.9x the min)',
+   p.gaps && p.gaps.length >= 7 && p.maxGap <= Math.min(...p.gaps) * 1.9,
+   { min: p.gaps && Math.min(...p.gaps), max: p.maxGap });
+ok('...and the LANDED POSE holds longer (was 225ms of the 1500ms window)',
+   p.hold8 >= 450 && p.hold8 <= 800, { frame8At: p.frame8At, hold8: p.hold8 });
 // v0.30.x — QUICKER STRIDE (per user: "play the sprite animation faster ...
 // less time gap between the frames"). v0.29.952's 130ms colossus cadence is
 // reversed: the stature term now only speeds it up.
