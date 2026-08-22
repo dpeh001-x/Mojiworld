@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.68';
+const GAME_VERSION = 'v0.30.69';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -23900,6 +23900,20 @@ const MONSTER_SKILL_FNS = {
   // sideways along the ground. The cloud is drawn SIDE-ON at its own
   // altitude, so unlike the top-down well it never has to be squashed.
   cloudburst(m) {
+    // v0.30.69 — ONE CLOUD AT A TIME (per user: "skywisp seems to summon 2
+    // cloudburst, change it to 1 only"). Every caster drops its cloud ON the
+    // player, so with more than one skywisp in range the clouds land on top of
+    // each other: one sprite, several hitboxes, and damage that multiplies with
+    // the size of the flock rather than with anything the player can read or
+    // dodge. Sky Garden spawns EIGHT wisps (3 platform-locked + 5 roaming) and
+    // measured 4 of 4 casters stacked for 42% of a 14 s sample.
+    //
+    // A caster that finds the sky already taken skips rather than refreshing:
+    // refreshing would let a flock hold one permanent squall over the player by
+    // relay, and re-arming the telegraph mid-rain is the unfair half of that.
+    // Returning false tells the dispatcher this was not a cast, so the wisp
+    // retries shortly instead of burning its full cooldown on a no-op.
+    for (const _h of game.hazards) if (_h && _h.type === 'mob_cloudburst') return false;
     // Spawn over the player but deliberately imperfect, so the squall is
     // dodgeable by walking rather than a guaranteed hit.
     const cx = player.x + player.w / 2 + (Math.random() * 70 - 35);
@@ -74610,8 +74624,19 @@ function updateMonsters(dt) {
         if (dxs < 320 && dys < 220 && m.aggroTarget) {
           const sk = MONSTER_SKILLS[m.type];
           const fn = MONSTER_SKILL_FNS[sk.kind];
-          if (fn) fn(m);
-          m._mskTimer = sk.cd * (0.85 + Math.random() * 0.30);
+          // v0.30.69 — a special may DECLINE by returning exactly false (see
+          // cloudburst, which refuses to stack a second cloud). That is not a
+          // cast, so it does not burn the full cooldown — but it backs off to
+          // roughly half of one rather than retrying almost immediately. On a
+          // 700 ms retry (what the out-of-range branch uses) a flock refilled
+          // the gap the instant a cloud expired: measured 94% of frames under a
+          // cloud, against 76% before the cap — capping the count but making
+          // the squall more relentless than it had been. Half-cooldown keeps
+          // the pre-cap cadence while still never stacking. Strict === false,
+          // so every existing void special keeps its old behaviour exactly.
+          const _fired = fn ? fn(m) : undefined;
+          m._mskTimer = (_fired === false) ? sk.cd * (0.45 + Math.random() * 0.20)
+                                           : sk.cd * (0.85 + Math.random() * 0.30);
         } else {
           // Player out of range — short retry, don't burn the cd.
           m._mskTimer = 600;
