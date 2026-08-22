@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.34';
+const GAME_VERSION = 'v0.30.35';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11327,6 +11327,11 @@ const LX_FX = (() => {
     slash_rogue:   'slash_rogue.webp',
     smoke_puff:    'smoke_puff.webp',
     dust_ring:     'dust_ring.webp',
+    // v0.30.x — Elemental Apotheosis charge ring (ludo.ai, see
+    // scripts/gen_projectile_restyle.mjs). A rune band whose circumference is
+    // split into fire / ice / lightning / arcane quarters — the four elements
+    // the ultimate actually converges, instead of the warrior's tan dust.
+    apo_ring:      'apo_ring.webp',
     // v0.25.212 — flashy thief skill bursts (one-shot sprites spawned at
     // cast/impact via spawnSpriteBurst() and rendered through the
     // 'spriteBurst' branch of drawSmoothFx).
@@ -63327,9 +63332,16 @@ function _tickClassIdentity(dt) {
       if ((held % LX_APO_PULSE_EVERY) === 0 && held > 0) {
         const _ar = LX_APO_PULSE_R0 + (LX_APO_PULSE_R1 - LX_APO_PULSE_R0) * _ap;
         const _acol = ['#ff5522', '#66ddff', '#ffee44', '#aa66ff'][(held / LX_APO_PULSE_EVERY | 0) % 4];
-        if (typeof performAround === 'function') performAround(_ar, LX_APO_PULSE_DMG, { color: _acol, kb: 2 });
+        if (typeof performAround === 'function') performAround(_ar, LX_APO_PULSE_DMG, { color: _acol, kb: 2, noShock: true });   // v0.30.x — the rune ring below IS the pulse's visual; no generic blob under it
         if (typeof spawnSmoothExplosion === 'function') {
-          spawnSmoothExplosion(player.x + player.w / 2, player.y + player.h / 2, _ar * 0.9, _acol, _acol + '55', { life: 14 });
+          // v0.30.x — per user: no more dust circle. The pulse draws the
+          // four-element rune ring (apo_ring), named EXPLICITLY so no future
+          // palette tweak can let the colour heuristic swap other art in.
+          // Alternating spin direction per pulse so a held charge reads as
+          // counter-rotating rings, not one decal stuttering outward.
+          const _aspin = ((held / LX_APO_PULSE_EVERY | 0) % 2 ? -1 : 1) * 0.018;
+          spawnSmoothExplosion(player.x + player.w / 2, player.y + player.h / 2, _ar * 0.9, _acol, _acol + '55',
+            { life: 14, sprite: 'apo_ring', spin: _aspin });
         }
       }
       // Elements spiralling INWARD to the gathering sphere — the read the
@@ -66243,6 +66255,9 @@ function spawnSmoothExplosion(x, y, radius, coreCol, edgeCol, opts) {
     radius: 0, maxRadius: radius,
     coreCol: _core, edgeCol: _edge,
     life: opts.life || 22, maxLife: opts.life || 22,
+    // v0.30.x — opts.sprite: an LX_FX key that OVERRIDES the colour-bucket
+    // guess below. opts.spin: radians/frame, for art that reads as a ring.
+    sprite: opts.sprite || null, spin: opts.spin || 0,
   });
 }
 function spawnSmoothBeam(x, y, angle, length, width, color, opts) {
@@ -66780,14 +66795,31 @@ function drawSmoothFx(_behindPass) {
       // tan dust-ring sprite; rogue purple core (smoke skills, shadow
       // bursts) -> smoke puff sprite. Falls through to the radial
       // gradient for any other palette.
-      const _bucket = _lxFxBucket(fx.coreCol);
-      const _explosionSprite = _bucket === 'warrior' ? LX_FX.dust_ring
+      // v0.30.x — an explicit fx.sprite wins over the colour heuristic. The
+      // heuristic stays for the callers that rely on it (warrior slam, rogue
+      // smoke); it just no longer gets to decide for a caller that named its
+      // own art.
+      const _bucket = fx.sprite ? null : _lxFxBucket(fx.coreCol);
+      const _explosionSprite = fx.sprite ? (LX_FX && LX_FX[fx.sprite])
+                             : _bucket === 'warrior' ? LX_FX.dust_ring
                              : _bucket === 'rogue'   ? LX_FX.smoke_puff
                              : null;
       if (_explosionSprite && _lxFxReady(_explosionSprite)) {
         const sz = r * 2.2;
         ctx.globalAlpha = alpha;
-        ctx.drawImage(_explosionSprite, sx - sz / 2, fx.y - sz / 2, sz, sz);
+        if (fx.spin) {
+          // a rune circle that never turns reads as a decal. Rotation is by
+          // AGE, not by a per-frame accumulator, so the spin is identical
+          // however the frame rate wobbles.
+          const _age = fx.maxLife - fx.life;
+          ctx.save();
+          ctx.translate(sx, fx.y);
+          ctx.rotate(_age * fx.spin);
+          ctx.drawImage(_explosionSprite, -sz / 2, -sz / 2, sz, sz);
+          ctx.restore();
+        } else {
+          ctx.drawImage(_explosionSprite, sx - sz / 2, fx.y - sz / 2, sz, sz);
+        }
         ctx.globalAlpha = 1;
         continue;
       }
@@ -72222,15 +72254,21 @@ function performAround(radius, dmgPct, opts = {}) {
       }
     }
   }
-  // Modern radial shockwave explosion at the player's centre
-  const col = opts.color || '#ffffff';
-  spawnSmoothExplosion(
-    pcx, pcy,
-    radius,
-    col,
-    col.length === 7 ? col + '80' : 'rgba(255,255,255,0.4)',
-    { life: 24 }
-  );
+  // Modern radial shockwave explosion at the player's centre.
+  // v0.30.x — opts.noShock skips it, for a caller that draws its OWN signature
+  // ring and does not want the generic gradient blob stacked underneath (per
+  // user, on Apotheosis: "remove the dust circle"). Default is unchanged, so
+  // every other AoE in the game keeps its shockwave.
+  if (!opts.noShock) {
+    const col = opts.color || '#ffffff';
+    spawnSmoothExplosion(
+      pcx, pcy,
+      radius,
+      col,
+      col.length === 7 ? col + '80' : 'rgba(255,255,255,0.4)',
+      { life: 24 }
+    );
+  }
 }
 
 // Apply per-hit effects from the current basic-skill job enhancement.

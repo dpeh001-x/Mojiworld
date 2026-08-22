@@ -88,6 +88,23 @@ const TARGETS = {
       + 'as liquid pooled on the floor and NOT as a dome, ball or bubble. Fully transparent background, no ground '
       + 'shadow, no background scenery, no text, no border, no frame, not pixel art, not photorealistic.',
   },
+  // Elemental Apotheosis charge pulse. NEW file. Was borrowing the warrior
+  // dust_ring via the colour-bucket heuristic (#ffee44 is in the warrior
+  // palette), so a four-element mage ultimate threw tan dust.
+  apo_ring: {
+    out: 'Sprites/fx/apo_ring.webp',
+    size: [768, 768],
+    prompt: 'A magic convergence ring seen from a low angle, top-down-ish: one wide flat circular rune band with a '
+      + 'COMPLETELY EMPTY transparent centre, its circumference split into four glowing elemental quarters that blend '
+      + 'into one another — orange fire with licking flames, pale cyan ice with sharp crystal shards, bright yellow '
+      + 'lightning with jagged arcs, violet arcane with drifting motes — set with small angular glyphs around the band '
+      + 'and four bright nodes where the quarters meet, energy sparks flicking outward from the outer edge.',
+    style: ' Cute chunky cartoon game sprite in the style of a chibi mobile RPG: ONE ring centred in frame, filling the '
+      + 'frame edge to edge, a thick dark outline on the band, soft cel shading, glossy highlights, bright saturated '
+      + 'colours, and a HOLLOW transparent middle — a ring, not a disc, not a sphere, not a portal with a filled '
+      + 'centre. Fully transparent background, no ground, no character, no scenery, no text, no border, no frame, '
+      + 'not pixel art, not photorealistic.',
+  },
 };
 
 const only = val('--only', null);
@@ -114,7 +131,11 @@ const fetchBuf = async (url) => {
 for (const k of keys) {
   const t = TARGETS[k];
   // keep each file's shipped geometry so nothing shifts in-game
-  const meta = await sharp(join(repoRoot, t.out)).metadata();
+  // an existing target keeps its shipped geometry; a NEW one declares it
+  const _outAbs = join(repoRoot, t.out);
+  const meta = (await import('node:fs')).existsSync(_outAbs)
+    ? await sharp(_outAbs).metadata()
+    : { width: (t.size && t.size[0]) || 768, height: (t.size && t.size[1]) || 768 };
   const dir = join(OUT_ROOT, k);
   await mkdir(dir, { recursive: true });
   console.log(`\n=== ${k}  (${meta.width}x${meta.height})`);
