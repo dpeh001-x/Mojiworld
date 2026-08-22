@@ -1,20 +1,16 @@
-/* Boss Frame Resizer — authoring UI for per-frame boss sprite scale.
+/* Boss Frame Resizer — resize a boss animation by its FINAL on-screen height.
  * ---------------------------------------------------------------------------
- * WHY: _BOSS_FRAME_TRUST_ALL = true, so the runtime never rescales a boss
- * frame any more — whatever size drift is baked into the art reaches the
- * screen. _drawBossSprite DOES honour a per-frame scale array (calib.fs[i],
- * foot-anchored) and scripts/apply_anim_patch.mjs already bakes it, but no
- * tool could author one, so no entity has ever had an fs. This is that tool.
+ * v1 of this tool exposed the machinery: source-canvas pixels, per-state s,
+ * per-frame fs, three measurement modes, a draggable band, a reference picker.
+ * Per user that was confusing. This version folds the whole size chain into ONE
+ * number — the height in GAME PIXELS the sprite actually draws at — and you
+ * resize that. The tool works backwards to the calibration.
  *
- * Two independent size faults, both authorable here:
- *   1. CROSS-STATE  — the figure occupies a different share of the canvas in
- *      one state than another (aetherion / towerArbiter attack frames draw the
- *      body at 58% of idle). Fixed with the per-state scale `s`.
- *   2. WITHIN-STATE — frames of one set disagree with each other. Fixed with
- *      `fs[i]`.
- * Not all drift is a fault: a reared weapon legitimately grows the content box
- * without the figure growing, which is why the measurement band is a first-
- * class control and nothing is ever auto-applied.
+ * The chain it folds (mirrors _drawBossSprite with the runtime normaliser off):
+ *   targetH = round(m.h x BOSS_DRAW_SCALE x sizeFactor x zodiacSizeMul)
+ *             [baked into the manifest as state.game.targetH]
+ *   drawn   = targetH x (frame content height / canvas height) x s x fs[i]
+ * Typing a height solves s. "Even out frames" solves fs[].
  * ------------------------------------------------------------------------- */
 'use strict';
 (function () {
@@ -22,115 +18,96 @@
   const BAKED = window.LX_ANIM_CALIB || {};
   const HITBOX = window.LX_ATK_HITBOX || {};
   const STATE_MS = { idle: 130, walk: 80, attack: 48, duck: 90, weave: 80 };
-  const BAND_T = 8;            // profile byte above which a row band counts as occupied
-  const CLAMP = [0.2, 5];      // the game's own clamp in _lxAnimCalib
+  const CLAMP = [0.2, 5];
+  const BAND_T = 8;
 
   const $ = (id) => document.getElementById(id);
-  const el = (tag, cls, txt) => { const n = document.createElement(tag);
-    if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; };
+  const el = (t, c, x) => { const n = document.createElement(t); if (c) n.className = c;
+    if (x != null) n.textContent = x; return n; };
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const median = (a) => { const s = [...a].sort((x, y) => x - y); const m = s.length >> 1;
     return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
-
   let toastT = 0;
-  function toast(msg) {
-    const t = $('toast'); t.textContent = msg; t.classList.add('on');
-    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 1700);
-  }
+  const toast = (m) => { const t = $('toast'); t.textContent = m; t.classList.add('on');
+    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 1700); };
 
-  // ---- edit model ---------------------------------------------------------
-  // edits[type][state] = { s, dx, dy, fs:[] }. Seeded from the baked calib so
-  // the tool round-trips whatever is already hardbaked instead of stomping it.
+  const setOf = (t, s) => MAN[t] && MAN[t].states[s];
+  const statesOf = (t) => MAN[t] ? Object.keys(MAN[t].states) : [];
+
+  // ---- edit model, seeded from the hardbaked calib so nothing is stomped ----
   const edits = {};
   function calibOf(type, state) {
     const t = edits[type] || (edits[type] = {});
     if (!t[state]) {
       const b = (BAKED[type] && BAKED[type][state]) || null;
-      t[state] = {
-        s: b && +b.s > 0 ? +b.s : 1,
-        dx: b && isFinite(+b.dx) ? +b.dx : 0,
+      t[state] = { s: b && +b.s > 0 ? +b.s : 1, dx: b && isFinite(+b.dx) ? +b.dx : 0,
         dy: b && isFinite(+b.dy) ? +b.dy : 0,
-        fs: (b && Array.isArray(b.fs)) ? b.fs.map(Number) : null,
-      };
+        fs: (b && Array.isArray(b.fs)) ? b.fs.map(Number) : null };
     }
     return t[state];
   }
-  function fsAt(type, state, i) {
-    const c = calibOf(type, state);
-    return (c.fs && +c.fs[i] > 0) ? +c.fs[i] : 1;
-  }
-  function setFs(type, state, i, v) {
-    const c = calibOf(type, state), n = setOf(type, state).count;
-    if (!c.fs) c.fs = new Array(n).fill(1);
-    c.fs[i] = clamp(+v || 1, CLAMP[0], CLAMP[1]);
-    if (c.fs.every(x => Math.abs(x - 1) < 1e-6)) c.fs = null;
-  }
+  const fsAt = (t, s, i) => { const c = calibOf(t, s); return (c.fs && +c.fs[i] > 0) ? +c.fs[i] : 1; };
 
-  // ---- measurement (manifest only — never needs canvas pixel access) ------
+  // ---- measurement ---------------------------------------------------------
   const profCache = new Map();
   function prof(set, i) {
-    const key = set.dir + '|' + i;
-    let p = profCache.get(key);
-    if (!p) {
-      const bin = atob(set.f[i].p);
-      p = new Uint8Array(bin.length);
-      for (let k = 0; k < bin.length; k++) p[k] = bin.charCodeAt(k);
-      profCache.set(key, p);
-    }
+    const k = set.dir + '|' + i;
+    let p = profCache.get(k);
+    if (!p) { const b = atob(set.f[i].p); p = new Uint8Array(b.length);
+      for (let j = 0; j < b.length; j++) p[j] = b.charCodeAt(j); profCache.set(k, p); }
     return p;
   }
-  // Returns {top, bottom, h} in SOURCE pixels for the chosen measurement mode.
-  function span(set, i, mode, band) {
-    const f = set.f[i];
-    if (mode === 'solid' && f.s) return { top: f.s[0], bottom: f.s[1], h: f.s[1] - f.s[0] + 1 };
-    if (mode === 'band') {
-      const p = prof(set, i), N = p.length;
-      const b0 = clamp(Math.floor(band[0] * N), 0, N - 1);
-      const b1 = clamp(Math.ceil(band[1] * N), 1, N);
-      let t = -1, b = -1;
-      for (let k = b0; k < b1; k++) if (p[k] > BAND_T) { if (t < 0) t = k; b = k; }
-      if (t < 0) return { top: 0, bottom: 0, h: 0 };
-      const top = Math.round(t * set.h / N), bottom = Math.round((b + 1) * set.h / N) - 1;
-      return { top, bottom, h: bottom - top + 1 };
-    }
-    return { top: f.c[0], bottom: f.c[1], h: f.c[1] - f.c[0] + 1 };
+  // Full drawn extent of a frame, in SOURCE px — what "how tall does this look"
+  // means, and what the on-screen height is computed from.
+  const srcH = (set, i) => set.f[i].c[1] - set.f[i].c[0] + 1;
+  // Body height: the lower 55% of the canvas only. A reared weapon grows the
+  // content box without the FIGURE growing (Barnaby's attack drifts 15.5% by
+  // content and 0.0% by this), so evening out frames measures here — otherwise
+  // levelling a set would shrink every wind-up pose.
+  function bodyH(set, i) {
+    const p = prof(set, i), N = p.length, b0 = Math.floor(0.45 * N);
+    let t = -1, b = -1;
+    for (let k = b0; k < N; k++) if (p[k] > BAND_T) { if (t < 0) t = k; b = k; }
+    return t < 0 ? 0 : Math.round((b - t + 1) * set.h / N);
   }
-  function heights(set, mode, band) {
-    return set.f.map((_, i) => span(set, i, mode, band).h);
+  // FINAL on-screen height in game pixels, calibration included.
+  function finalH(type, state, i, withCalib) {
+    const set = setOf(type, state);
+    if (!set || !set.game) return 0;
+    const base = srcH(set, i) / set.h * set.game.targetH;
+    return withCalib === false ? base : base * calibOf(type, state).s * fsAt(type, state, i);
   }
-  function driftPct(hs) {
-    const v = hs.filter(h => h > 0);
-    if (v.length < 2) return 0;
-    const mn = Math.min(...v), mx = Math.max(...v);
-    return mn > 0 ? (mx - mn) / mn * 100 : 0;
+  // The state's representative height — the median frame, so a single wind-up
+  // pose does not define the number you are typing into.
+  function stateH(type, state, withCalib) {
+    const set = setOf(type, state);
+    if (!set || !set.game) return 0;
+    return median(set.f.map((_, i) => finalH(type, state, i, withCalib)));
   }
+  const idleH = (type) => statesOf(type).includes('idle') ? stateH(type, 'idle', true) : 0;
 
-  const setOf = (type, state) => MAN[type] && MAN[type].states[state];
-  const statesOf = (type) => MAN[type] ? Object.keys(MAN[type].states) : [];
-
-  // ---- entity list --------------------------------------------------------
-  // Each row is badged with its worst CONTENT drift across states, which is the
-  // cheap screen for "does this boss need looking at" — the honest verdict
-  // still needs the band, and the panel says so once a boss is open.
-  const worstDrift = {};
-  for (const [type, e] of Object.entries(MAN)) {
+  // ---- entity list: ranked by the largest state-to-state size difference ----
+  function spread(type) {
+    const ih = idleH(type);
+    if (!ih) return 0;
     let w = 0;
-    for (const st of Object.keys(e.states)) w = Math.max(w, driftPct(heights(e.states[st], 'content', [0, 1])));
-    worstDrift[type] = w;
+    for (const st of statesOf(type)) w = Math.max(w, Math.abs(stateH(type, st, true) / ih - 1) * 100);
+    return w;
   }
   function buildList(filter) {
     const host = $('ents'); host.innerHTML = '';
     const q = (filter || '').toLowerCase();
     const names = Object.keys(MAN).filter(t => !q || t.toLowerCase().includes(q))
-      .sort((a, b) => worstDrift[b] - worstDrift[a]);
+      .sort((a, b) => spread(b) - spread(a));
     for (const type of names) {
       const row = el('div', 'ent' + (type === cur.type ? ' sel' : ''));
       const left = el('div');
       left.appendChild(el('div', 'n', type));
-      left.appendChild(el('div', 'g', MAN[type].group + ' · ' + statesOf(type).join(' ')));
-      const d = worstDrift[type];
-      const pill = el('span', 'pill ' + (d < 3 ? 'p-ok' : d < 12 ? 'p-warn' : 'p-bad'), d.toFixed(0) + '%');
-      pill.title = 'worst content-height drift across this boss’s states';
+      const h = idleH(type) || stateH(type, statesOf(type)[0], true);
+      left.appendChild(el('div', 'g', Math.round(h) + ' px · ' + statesOf(type).join(' ')));
+      const d = spread(type);
+      const pill = el('span', 'pill ' + (d < 4 ? 'p-ok' : d < 12 ? 'p-warn' : 'p-bad'), d.toFixed(0) + '%');
+      pill.title = 'largest state-to-state size difference';
       row.appendChild(left); row.appendChild(pill);
       row.onclick = () => select(type);
       host.appendChild(row);
@@ -138,24 +115,12 @@
     if (!names.length) host.appendChild(el('div', 'empty', 'no boss matches that'));
   }
 
-  // ---- selection ----------------------------------------------------------
-  const cur = { type: null, state: null, frame: 0, mode: 'content', band: [0.45, 1], imgs: [], t0: 0 };
-  window.__BR = { cur, edits, MAN, calibOf, span, heights, driftPct, setOf };
-
+  const cur = { type: null, state: null, frame: 0, imgs: [], t0: 0 };
   function select(type) {
     cur.type = type;
-    cur.state = statesOf(type).includes('attack') ? 'attack' : statesOf(type)[0];
+    cur.state = statesOf(type)[0];
     cur.frame = 0; cur.t0 = performance.now();
-    loadFrames();
-    buildList($('q').value);
-    buildStates();
-    redraw();
-  }
-  // late-bound: the render half of the tool is the second IIFE below
-  function redraw() {
-    const B = window.__BR;
-    if (B.renderPanel) B.renderPanel();
-    if (B.renderStrip) B.renderStrip();
+    loadFrames(); buildList($('q').value); buildStates(); redraw();
   }
   function loadFrames() {
     const set = setOf(cur.type, cur.state);
@@ -163,7 +128,7 @@
     if (!set) return;
     for (let i = 0; i < set.count; i++) {
       const img = new Image();
-      img.crossOrigin = 'anonymous';   // CDN art is ACAO:* — keeps the canvas clean
+      img.crossOrigin = 'anonymous';
       img.src = set.dir + '_' + i + '.webp';
       cur.imgs.push(img);
     }
@@ -177,355 +142,297 @@
       host.appendChild(b);
     }
   }
+  function redraw() {
+    const B = window.__BR;
+    if (B.renderPanel) B.renderPanel();
+    if (B.renderStrip) B.renderStrip();
+  }
 
-  window.__BR.redraw = redraw;
-  window.__BR.loadFrames = loadFrames;
-  window.__BR.buildStates = buildStates;
-  window.__BR.select = select;
-  window.__BR.buildList = buildList;
-  window.__BR.toast = toast;
-  window.__BR.fsAt = fsAt;
-  window.__BR.setFs = setFs;
-  window.__BR.clamp = clamp;
-  window.__BR.median = median;
-  window.__BR.el = el;
-  window.__BR.$ = $;
-  window.__BR.STATE_MS = STATE_MS;
-  window.__BR.CLAMP = CLAMP;
-  window.__BR.HITBOX = HITBOX;
-  window.__BR.BAKED = BAKED;
-  window.__BR.statesOf = statesOf;
+  window.__BR = { MAN, BAKED, HITBOX, STATE_MS, CLAMP, cur, edits, $, el, clamp, median, toast,
+    setOf, statesOf, calibOf, fsAt, srcH, bodyH, finalH, stateH, idleH, buildList, buildStates,
+    loadFrames, select, redraw };
 })();
 
-/* ---- render half: stage, frame strip -------------------------------------
- * The stage shows the SAME frame twice, playing in sync: "as authored" on the
- * left and "with calibration" on the right. That side-by-side is the whole
- * point of the tool — a size pulse is invisible in numbers and obvious when
- * the two figures are running next to each other.
- * Geometry mirrors the game under _BOSS_FRAME_TRUST_ALL: every frame of a set
- * shares one canvas, that canvas maps to a CONSTANT on-screen box, and the
- * scale (s x fs[i]) is applied about the foot point — ctx.translate(footX,
- * footY); ctx.scale(v, v) — exactly as _drawBossSprite does it.
+/* ---- stage: the sprite at its true final size, on a game-pixel ruler ------
+ * One stage pixel is one game pixel wherever the boss fits, so the number in
+ * the panel and the figure on screen are the same thing. The view scale is
+ * fixed per BOSS, not per state, or switching idle->walk would rescale the
+ * canvas and hide the very size change you are looking for.
  * ----------------------------------------------------------------------- */
 (function () {
   const B = window.__BR, cur = B.cur, $ = B.$, el = B.el;
   const stage = $('stage'), sx = stage.getContext('2d');
-  // The box a frame's canvas maps to, and the foot line. H0 is re-fitted per
-  // set so the LARGEST fs still draws inside the stage - a frame scaled 1.4x
-  // was running off the top and reading as 'no change' when it was the biggest
-  // change on screen.
-  const GROUND = 400, H_MAX = 236;
-  let H0 = H_MAX;
-  function fitH0(set) {
-    let mx = 1;
-    for (let i = 0; i < set.count; i++) mx = Math.max(mx, B.fsAt(cur.type, cur.state, i));
-    mx *= Math.max(1, B.calibOf(cur.type, cur.state).s);
-    H0 = Math.min(H_MAX, (GROUND - 12) / mx);
-    B.GEO = { GROUND, H0 };
-  }
+  const GROUND = 578, CX = 470;
 
-  function curSet() { return B.setOf(cur.type, cur.state); }
-  function refHeight() {
-    const set = curSet(); if (!set) return 0;
-    const hs = B.heights(set, cur.mode, cur.band).filter(h => h > 0);
-    if (!hs.length) return 0;
-    switch (cur.ref || 'median') {
-      case 'first': return B.heights(set, cur.mode, cur.band)[0] || hs[0];
-      case 'max': return Math.max(...hs);
-      case 'min': return Math.min(...hs);
-      case 'idle': {
-        const idle = B.setOf(cur.type, 'idle');
-        if (!idle) return B.median(hs);
-        const ih = B.heights(idle, cur.mode, cur.band).filter(h => h > 0);
-        return ih.length ? B.median(ih) * (set.h / idle.h) : B.median(hs);
-      }
-      default: return B.median(hs);
-    }
+  function viewScale() {
+    let tall = 1;
+    for (const st of B.statesOf(cur.type))
+      for (let i = 0; i < B.setOf(cur.type, st).count; i++)
+        tall = Math.max(tall, B.finalH(cur.type, st, i, true), B.finalH(cur.type, st, i, false));
+    return Math.min(1, (GROUND - 46) / tall);
   }
 
   function gameFrameIndex(n, ms, t) {
-    // ping-pong over the contiguous run, the game's _bossLoopFrame cadence
     if (n < 2) return 0;
     const period = (n - 1) * 2, k = Math.floor(t / ms) % period;
     return k < n ? k : period - k;
   }
 
-  function drawSide(cx, img, set, scale, label, tint) {
-    const k = H0 / set.h, W0 = set.w * k;
+  // Draw one frame so its CONTENT sits exactly `h` game px tall, feet on the
+  // ground line — the same foot anchoring the game uses.
+  function drawFrame(img, set, h, k, alpha) {
+    if (!img || !img.complete || !img.naturalWidth) return;
+    const i = cur.frame;
+    const cH = B.srcH(set, i), top = set.f[i].c[0], bot = set.f[i].c[1];
+    const canvasH = h * (set.h / cH);              // whole canvas height at this content height
+    const canvasW = canvasH * (set.w / set.h);
+    const belowFeet = (set.h - 1 - bot) / set.h * canvasH;   // gap under the content, kept
     sx.save();
-    sx.translate(cx, GROUND);
-    sx.scale(scale, scale);
-    if (img && img.complete && img.naturalWidth) sx.drawImage(img, -W0 / 2, -H0, W0, H0);
+    sx.globalAlpha = alpha;
+    sx.drawImage(img, CX - canvasW * k / 2, GROUND - (canvasH - belowFeet) * k,
+                 canvasW * k, canvasH * k);
     sx.restore();
-    sx.fillStyle = tint; sx.font = '600 11px ui-sans-serif,system-ui';
-    sx.textAlign = 'center';
-    sx.fillText(label, cx, GROUND + 34);
+    return { topY: GROUND - (canvasH - belowFeet) * k + (top / set.h) * canvasH * k };
   }
 
-  // refScale: the scale the REFERENCE is drawn at on this side (1 for the
-  // authored figure, the state's s for the calibrated one). Without it the
-  // dashed line sat at the unscaled reference while the figure was drawn at
-  // s x fs, so a correctly-normalised set still looked like it overshot.
-  function drawSpanBar(cx, set, sp, scale, ref, color, refScale) {
-    if (!sp.h) return;
-    const k = H0 / set.h;
-    const yb = GROUND - (set.h - sp.bottom - 1) * k * scale;
-    const yt = GROUND - (set.h - sp.top) * k * scale;
-    // track the ACTUAL scaled half-width, else a scaled-up frame draws over its own bar
-    const x = Math.min(stage.width - 46, cx + (set.w * k) / 2 * scale + 14);
-    sx.strokeStyle = color; sx.lineWidth = 2;
-    sx.beginPath(); sx.moveTo(x, yt); sx.lineTo(x, yb);
-    sx.moveTo(x - 5, yt); sx.lineTo(x + 5, yt);
-    sx.moveTo(x - 5, yb); sx.lineTo(x + 5, yb); sx.stroke();
-    if ($('ghost').checked && ref > 0) {
-      const yRef = yb - ref * k * (refScale || 1);   // the target span height on THIS side
-      sx.strokeStyle = '#ffcc66'; sx.lineWidth = 1; sx.setLineDash([5, 4]);
-      sx.beginPath(); sx.moveTo(cx - 130, yRef); sx.lineTo(cx + 130, yRef); sx.stroke();
-      sx.setLineDash([]);
+  function ruler(k) {
+    sx.strokeStyle = '#2c2340'; sx.fillStyle = '#6f658c';
+    sx.font = '10px ui-monospace,Consolas,monospace'; sx.textAlign = 'left';
+    sx.lineWidth = 1;
+    for (let g = 0; g <= 900; g += 50) {
+      const y = GROUND - g * k;
+      if (y < 26) break;
+      sx.globalAlpha = g % 100 ? 0.35 : 0.7;
+      sx.beginPath(); sx.moveTo(34, y + .5); sx.lineTo(stage.width - 8, y + .5); sx.stroke();
+      if (!(g % 100)) { sx.globalAlpha = 1; sx.fillText(g + '', 6, y + 3); }
     }
-    sx.fillStyle = color; sx.font = '10px ui-monospace,Consolas,monospace';
-    sx.textAlign = 'left';
-    sx.fillText(Math.round(sp.h * scale) + 'px', x + 8, (yt + yb) / 2);
-  }
-
-  function drawBand(set) {
-    if (cur.mode !== 'band') return;
-    const k = H0 / set.h;
-    for (const [f, lbl] of [[cur.band[0], 'band top'], [cur.band[1], 'band bottom']]) {
-      const y = GROUND - (1 - f) * set.h * k;
-      sx.strokeStyle = 'rgba(192,140,255,.55)'; sx.lineWidth = 1; sx.setLineDash([3, 3]);
-      sx.beginPath(); sx.moveTo(0, y); sx.lineTo(stage.width, y); sx.stroke(); sx.setLineDash([]);
-      sx.fillStyle = 'rgba(192,140,255,.75)'; sx.font = '10px ui-sans-serif';
-      sx.textAlign = 'left'; sx.fillText(lbl, 6, y - 3);
-    }
+    sx.globalAlpha = 1;
   }
 
   function paint() {
     sx.clearRect(0, 0, stage.width, stage.height);
-    const set = curSet();
+    const set = cur.type && B.setOf(cur.type, cur.state);
     if (!set) return;
-    fitH0(set);
-    const n = set.count;
-    const ms = B.STATE_MS[cur.state] || 100;
+    const k = viewScale();
+    const n = set.count, ms = B.STATE_MS[cur.state] || 100;
     if ($('play').checked) cur.frame = gameFrameIndex(n, ms, performance.now() - cur.t0);
-    const i = Math.min(cur.frame, n - 1);
-    const img = cur.imgs[i];
-    const c = B.calibOf(cur.type, cur.state);
-    const fsv = $('applyfs').checked ? B.fsAt(cur.type, cur.state, i) : 1;
-    const sv = $('applyfs').checked ? c.s : 1;
+    if (cur.frame >= n) cur.frame = 0;
+    ruler(k);
 
-    // ground line
-    sx.strokeStyle = '#3a2f55'; sx.lineWidth = 1;
-    sx.beginPath(); sx.moveTo(0, GROUND + .5); sx.lineTo(stage.width, GROUND + .5); sx.stroke();
-    drawBand(set);
+    // the idle height, so every other state has something to agree with
+    const ih = B.idleH(cur.type);
+    if (ih) {
+      const y = GROUND - ih * k;
+      sx.strokeStyle = '#ffcc66'; sx.setLineDash([6, 4]); sx.lineWidth = 1;
+      sx.beginPath(); sx.moveTo(34, y + .5); sx.lineTo(stage.width - 8, y + .5); sx.stroke();
+      sx.setLineDash([]);
+      sx.fillStyle = '#ffcc66'; sx.font = '11px ui-sans-serif,system-ui'; sx.textAlign = 'right';
+      sx.fillText('idle ' + Math.round(ih) + 'px', stage.width - 12, y - 5);
+    }
 
-    const sp = B.span(set, i, cur.mode, cur.band);
-    const ref = refHeight();
-    drawSide(250, img, set, 1, 'as authored', '#9d92bb');
-    drawSpanBar(250, set, sp, 1, ref, '#9d92bb', 1);
-    drawSide(650, img, set, fsv * sv, 'with calibration', '#c08cff');
-    drawSpanBar(650, set, sp, fsv * sv, ref, '#c08cff', sv);
+    // ground
+    sx.strokeStyle = '#4a3d6b'; sx.lineWidth = 2;
+    sx.beginPath(); sx.moveTo(34, GROUND + 1); sx.lineTo(stage.width - 8, GROUND + 1); sx.stroke();
 
-    sx.textAlign = 'left'; sx.fillStyle = '#6f658c'; sx.font = '11px ui-monospace,Consolas,monospace';
-    sx.fillText(`${cur.type} / ${cur.state} — frame ${i}/${n - 1} · ${ms}ms · s=${c.s.toFixed(3)} fs=${fsv.toFixed(3)}`, 10, 16);
-    sx.fillText(`ref ${Math.round(ref)}px (${cur.ref || 'median'})`, 10, 30);
+    const img = cur.imgs[cur.frame];
+    const hNow = B.finalH(cur.type, cur.state, cur.frame, true);
+    if ($('before').checked) {
+      const hWas = B.finalH(cur.type, cur.state, cur.frame, false);
+      drawFrame(img, set, hWas, k, 0.28);
+      sx.fillStyle = 'rgba(157,146,187,.85)'; sx.font = '11px ui-sans-serif,system-ui';
+      sx.textAlign = 'left';
+      sx.fillText('ghost = original ' + Math.round(hWas) + 'px', 40, GROUND - hWas * k - 8);
+    }
+    drawFrame(img, set, hNow, k, 1);
+
+    sx.textAlign = 'left'; sx.fillStyle = '#c08cff';
+    sx.font = '600 12px ui-sans-serif,system-ui';
+    sx.fillText(Math.round(hNow) + ' px', 40, GROUND - hNow * k - 24);
+    sx.fillStyle = '#6f658c'; sx.font = '11px ui-monospace,Consolas,monospace';
+    sx.fillText(`${cur.type} / ${cur.state} — frame ${cur.frame}/${n - 1} · ${ms}ms`
+      + (k < 0.999 ? `  ·  view ${(k * 100).toFixed(0)}%` : '  ·  1:1'), 40, 18);
   }
-  B.paint = paint;   // exposed so a headless check can drive a frame without rAF
+  B.paint = paint;
   (function loop() { paint(); requestAnimationFrame(loop); })();
 
-  // ---- frame strip --------------------------------------------------------
+  // ---- frame strip: every frame's final height, at a glance ---------------
   B.renderStrip = function () {
     const host = $('strip'); host.innerHTML = '';
-    const set = curSet(); if (!set) return;
-    const hs = B.heights(set, cur.mode, cur.band), ref = refHeight();
+    const set = cur.type && B.setOf(cur.type, cur.state);
+    if (!set) return;
+    const hs = set.f.map((_, i) => B.finalH(cur.type, cur.state, i, true));
+    const med = B.median(hs);
     for (let i = 0; i < set.count; i++) {
       const cell = el('div', 'fr' + (i === cur.frame ? ' on' : ''));
-      const cv = el('canvas'); cv.width = 148; cv.height = 110;
-      const c2 = cv.getContext('2d');
-      const img = cur.imgs[i];
-      const paintThumb = () => {
+      const cv = el('canvas'); cv.width = 140; cv.height = 100;
+      const c2 = cv.getContext('2d'), img = cur.imgs[i];
+      const draw = () => {
         c2.clearRect(0, 0, cv.width, cv.height);
         if (!img.complete || !img.naturalWidth) return;
-        const k = cv.height / set.h * 0.95, w = set.w * k, h = set.h * k;
-        const v = $('applyfs').checked ? B.fsAt(cur.type, cur.state, i) : 1;
-        c2.save(); c2.translate(cv.width / 2, cv.height - 2); c2.scale(v, v);
-        c2.drawImage(img, -w / 2, -h, w, h); c2.restore();
+        const kk = (cv.height * 0.92) / Math.max(...hs);
+        const cH = B.srcH(set, i), bot = set.f[i].c[1];
+        const canvasH = hs[i] * (set.h / cH), canvasW = canvasH * (set.w / set.h);
+        const below = (set.h - 1 - bot) / set.h * canvasH;
+        c2.drawImage(img, cv.width / 2 - canvasW * kk / 2, cv.height - 2 - (canvasH - below) * kk,
+                     canvasW * kk, canvasH * kk);
       };
-      paintThumb(); img.addEventListener('load', paintThumb, { once: true });
+      draw(); img.addEventListener('load', draw, { once: true });
       cell.appendChild(cv);
-      const dev = ref > 0 && hs[i] > 0 ? (hs[i] * B.fsAt(cur.type, cur.state, i) / ref - 1) * 100 : 0;
-      const t = el('div', 't', `${i} · ${hs[i]}px`);
-      const v = el('div', 'v', (dev >= 0 ? '+' : '') + dev.toFixed(1) + '%');
-      v.style.color = Math.abs(dev) < 1 ? '#7ddba0' : Math.abs(dev) < 5 ? '#ffcc66' : '#ff7a7a';
-      const inp = el('input'); inp.type = 'number'; inp.step = '0.005'; inp.min = '0.2'; inp.max = '5';
-      inp.value = B.fsAt(cur.type, cur.state, i).toFixed(3);
-      inp.onchange = () => { B.setFs(cur.type, cur.state, i, inp.value); B.renderStrip(); B.renderPanel(); };
-      inp.onclick = (e) => e.stopPropagation();
-      cell.appendChild(t); cell.appendChild(v); cell.appendChild(inp);
+      const dev = med > 0 ? (hs[i] / med - 1) * 100 : 0;
+      const t = el('div', 't', Math.round(hs[i]) + 'px');
+      t.style.color = Math.abs(dev) < 1.5 ? '#7ddba0' : Math.abs(dev) < 6 ? '#ffcc66' : '#ff7a7a';
+      cell.appendChild(t);
       cell.onclick = () => { $('play').checked = false; cur.frame = i; B.renderStrip(); };
       host.appendChild(cell);
     }
   };
 })();
 
-/* ---- control half: verdict, cross-state, solve, export ------------------- */
+/* ---- panel: one number, and the two buttons that move it ----------------- */
 (function () {
   const B = window.__BR, cur = B.cur, $ = B.$, el = B.el;
 
-  function curSet() { return B.setOf(cur.type, cur.state); }
-  function num(val, step, min, max, on) {
-    const i = el('input'); i.type = 'number'; i.step = step; i.min = min; i.max = max;
-    i.value = (+val).toFixed(3); i.onchange = () => on(+i.value); return i;
+  // Typing a height solves the per-state scale: drawn = natural x s, so
+  // s = wanted / natural. Everything else in the chain is already inside
+  // `natural`, which is the point of this rewrite.
+  function setHeight(px) {
+    const nat = B.stateH(cur.type, cur.state, false);
+    if (!nat) return;
+    const c = B.calibOf(cur.type, cur.state);
+    c.s = B.clamp(px / nat, B.CLAMP[0], B.CLAMP[1]);
+    B.redraw();
   }
-  function kv(k, v, color) {
-    const r = el('div', 'kv'); r.appendChild(el('span', null, k));
-    const b = el('b', null, v); if (color) b.style.color = color;
-    r.appendChild(b); return r;
-  }
-  // Figure size of a state relative to idle, measured the same way. This is the
-  // CROSS-STATE fault (aetherion attack draws the body at 58% of its idle), and
-  // it is fixed with one `s` per state — fs is for frames disagreeing INSIDE a
-  // state. Normalising by canvas share, so sets on different canvases compare.
-  function relToIdle(state) {
-    const set = B.setOf(cur.type, state), idle = B.setOf(cur.type, 'idle');
-    if (!set || !idle) return null;
-    const a = B.heights(set, cur.mode, cur.band).filter(h => h > 0);
-    const b = B.heights(idle, cur.mode, cur.band).filter(h => h > 0);
-    if (!a.length || !b.length) return null;
-    return (B.median(a) / set.h) / (B.median(b) / idle.h);
+  // Level the frames of one state against each other. Measured on the LOWER
+  // BODY, not the full extent, so a reared weapon or an outstretched limb does
+  // not read as the figure growing and get shrunk away.
+  function evenOut(on) {
+    const set = B.setOf(cur.type, cur.state), c = B.calibOf(cur.type, cur.state);
+    if (!on) { c.fs = null; B.redraw(); return; }
+    const body = set.f.map((_, i) => B.bodyH(set, i));
+    const good = body.filter(h => h > 0);
+    if (!good.length) { B.toast('cannot measure this set'); return; }
+    const ref = B.median(good);
+    c.fs = body.map(h => h > 0 ? +B.clamp(ref / h, B.CLAMP[0], B.CLAMP[1]).toFixed(4) : 1);
+    if (c.fs.every(v => Math.abs(v - 1) < 1e-6)) c.fs = null;
+    B.redraw();
   }
 
   B.renderPanel = function () {
-    const host = $('ctrlBody'), set = curSet();
+    const host = $('ctrlBody'), set = cur.type && B.setOf(cur.type, cur.state);
     $('ctrlEmpty').style.display = set ? 'none' : '';
     host.style.display = set ? '' : 'none';
     if (!set) return;
     host.innerHTML = '';
+    if (!set.game) {
+      host.appendChild(el('div', 'sec', 'No game size is known for this entity, so a final height cannot be shown.'));
+      return;
+    }
+    const now = B.stateH(cur.type, cur.state, true);
+    const was = B.stateH(cur.type, cur.state, false);
+    const ih = B.idleH(cur.type);
     const c = B.calibOf(cur.type, cur.state);
-    const hs = B.heights(set, cur.mode, cur.band);
-    const dContent = B.driftPct(B.heights(set, 'content', cur.band));
-    const dBand = B.driftPct(B.heights(set, 'band', cur.band));
-    const dNow = B.driftPct(hs);
-    const after = B.driftPct(hs.map((h, i) => h * B.fsAt(cur.type, cur.state, i)));
 
-    const s1 = el('div', 'sec'); s1.appendChild(el('h2', null, 'drift - ' + cur.state));
-    s1.appendChild(kv('content (alpha>16)', dContent.toFixed(1) + '%'));
-    s1.appendChild(kv('measured (' + cur.mode + ')', dNow.toFixed(1) + '%'));
-    s1.appendChild(kv('after calibration', after.toFixed(1) + '%',
-      after < 1 ? '#7ddba0' : after < 5 ? '#ffcc66' : '#ff7a7a'));
-    // The trap this tool exists to avoid: a reared weapon grows the content box
-    // while the body holds still. Normalising THAT shrinks the wind-up pose.
-    if (dContent > 6 && dBand < 2) {
-      const w = el('div', 'warnbox');
-      w.innerHTML = '<b>Content drift here is pose, not size.</b> The full extent varies '
-        + dContent.toFixed(0) + '% but the band holds to ' + dBand.toFixed(1)
-        + '% - a weapon or limb is reaching out of frame. Normalising on <i>content</i> would '
-        + 'shrink the wind-up. Leave this state alone, or switch to <b>band</b>.';
-      s1.appendChild(w);
-    } else if (dNow < 2) {
-      s1.appendChild(el('div', 'okbox', 'Consistent under the current measure - nothing to fix here.'));
+    // ---- the one number ----
+    const s1 = el('div', 'sec');
+    s1.appendChild(el('h2', null, cur.state + ' — final height'));
+    const big = el('div', 'big', Math.round(now) + '');
+    big.appendChild(el('small', null, 'px on screen'));
+    s1.appendChild(big);
+    if (Math.abs(now - was) > 0.5) {
+      const d = el('div', 'delta', 'was ' + Math.round(was) + 'px  ·  ' +
+        ((now / was - 1) * 100 >= 0 ? '+' : '') + ((now / was - 1) * 100).toFixed(1) + '%');
+      d.style.color = '#c08cff'; s1.appendChild(d);
+    }
+    const range = el('input'); range.type = 'range';
+    range.min = Math.round(was * 0.4); range.max = Math.round(was * 2.2);
+    range.step = 1; range.value = Math.round(now);
+    range.style.marginTop = '12px';
+    range.oninput = () => setHeight(+range.value);
+    s1.appendChild(range);
+    const numRow = el('div', 'row'); numRow.style.marginTop = '8px';
+    const num = el('input'); num.type = 'number'; num.step = '1';
+    num.min = '10'; num.max = '2000'; num.value = Math.round(now);
+    num.onchange = () => setHeight(+num.value);
+    numRow.appendChild(num);
+    if (ih && cur.state !== 'idle') {
+      const mi = el('button', 'ghost', 'match idle');
+      mi.title = 'set this state to ' + Math.round(ih) + 'px';
+      mi.onclick = () => { setHeight(ih); B.toast(cur.state + ' -> ' + Math.round(ih) + 'px'); };
+      numRow.appendChild(mi);
+    }
+    s1.appendChild(numRow);
+    if (ih && cur.state !== 'idle') {
+      const off = (now / ih - 1) * 100;
+      const line = el('div', 'delta', Math.abs(off) < 0.5 ? 'matches idle'
+        : (off > 0 ? '+' : '') + off.toFixed(0) + '% vs idle (' + Math.round(ih) + 'px)');
+      line.style.color = Math.abs(off) < 4 ? '#7ddba0' : Math.abs(off) < 12 ? '#ffcc66' : '#ff7a7a';
+      s1.appendChild(line);
     }
     host.appendChild(s1);
 
-    const s2 = el('div', 'sec'); s2.appendChild(el('h2', null, 'figure size vs idle'));
+    // ---- every state at a glance, click to jump ----
+    const s2 = el('div', 'sec');
+    s2.appendChild(el('h2', null, 'all states'));
     for (const st of B.statesOf(cur.type)) {
-      const r = relToIdle(st);
-      if (r == null) continue;
-      const row = el('div', 'row'); row.style.justifyContent = 'space-between';
-      const lab = el('span', null, st); lab.style.flex = '1';
-      const val = el('b', null, (r * 100).toFixed(0) + '%');
-      val.style.color = Math.abs(r - 1) < .04 ? '#7ddba0' : Math.abs(r - 1) < .12 ? '#ffcc66' : '#ff7a7a';
-      row.appendChild(lab); row.appendChild(val);
-      if (Math.abs(r - 1) >= .04) {
-        const b = el('button', 'ghost', 'match idle');
-        b.title = 'set s = ' + (1 / r).toFixed(3) + ' for ' + st;
-        b.onclick = () => {
-          B.calibOf(cur.type, st).s = B.clamp(1 / r, B.CLAMP[0], B.CLAMP[1]);
-          B.toast(st + ' s = ' + (1 / r).toFixed(3)); B.renderPanel();
-        };
-        row.appendChild(b);
-      }
-      s2.appendChild(row);
+      const h = B.stateH(cur.type, st, true);
+      const r = el('div', 'kv');
+      r.appendChild(el('span', null, st));
+      const b = el('b', null, Math.round(h) + ' px');
+      if (ih) b.style.color = Math.abs(h / ih - 1) < .04 ? '#7ddba0'
+        : Math.abs(h / ih - 1) < .12 ? '#ffcc66' : '#ff7a7a';
+      r.appendChild(b);
+      r.onclick = () => { cur.state = st; cur.frame = 0; cur.t0 = performance.now();
+        B.loadFrames(); B.buildStates(); B.redraw(); };
+      s2.appendChild(r);
     }
-    s2.appendChild(el('div', 'note', 'Median figure height as a share of its own canvas, against idle. '
-      + 'One scale per state fixes this axis; fs fixes frames disagreeing inside a state.'));
     host.appendChild(s2);
 
-    const s3 = el('div', 'sec'); s3.appendChild(el('h2', null, 'solve fs'));
-    const refRow = el('div', 'row');
-    refRow.appendChild(el('span', null, 'reference'));
-    const sel = el('select');
-    for (const [v, t] of [['median', 'median frame'], ['first', 'frame 0'], ['max', 'tallest'],
-                          ['min', 'shortest'], ['idle', 'idle set']]) {
-      const o = el('option', null, t); o.value = v;
-      if ((cur.ref || 'median') === v) o.selected = true;
-      sel.appendChild(o);
+    // ---- the only other control ----
+    const s3 = el('div', 'sec');
+    s3.appendChild(el('h2', null, 'frames'));
+    const hs = set.f.map((_, i) => B.finalH(cur.type, cur.state, i, true));
+    const med = B.median(hs);
+    const pulse = med > 0 ? (Math.max(...hs) - Math.min(...hs)) / med * 100 : 0;
+    const bodyHs = set.f.map((_, i) => B.bodyH(set, i)).filter(h => h > 0);
+    const bodyPulse = bodyHs.length ? (Math.max(...bodyHs) - Math.min(...bodyHs)) / B.median(bodyHs) * 100 : 0;
+    s3.appendChild(el('div', 'delta', 'frame-to-frame spread ' + pulse.toFixed(0) + '%'));
+    const lab = el('label', 'chk'); lab.style.marginTop = '9px';
+    const cb = el('input'); cb.type = 'checkbox'; cb.checked = !!c.fs;
+    cb.onchange = () => evenOut(cb.checked);
+    lab.appendChild(cb); lab.appendChild(el('span', null, 'even out frames'));
+    s3.appendChild(lab);
+    if (pulse > 6 && bodyPulse < 3) {
+      s3.appendChild(el('div', 'warnbox', 'That spread is pose, not size — the body holds to '
+        + bodyPulse.toFixed(1) + '% while the full extent moves ' + pulse.toFixed(0)
+        + '%, so a weapon or limb is reaching out of frame. Levelling here would only flatten the wind-up; the body is already even.'));
     }
-    sel.onchange = () => { cur.ref = sel.value; B.renderPanel(); B.renderStrip(); };
-    refRow.appendChild(sel); s3.appendChild(refRow);
-    const solve = el('button', 'primary', 'Solve fs for ' + cur.state);
-    solve.style.marginTop = '8px'; solve.style.width = '100%';
-    solve.onclick = () => {
-      const m = B.heights(set, cur.mode, cur.band), hh = m.filter(h => h > 0);
-      if (!hh.length) return;
-      const idleSet = B.setOf(cur.type, 'idle');
-      const idleRef = () => {
-        if (!idleSet) return B.median(hh);
-        const ih = B.heights(idleSet, cur.mode, cur.band).filter(h => h > 0);
-        return ih.length ? B.median(ih) * (set.h / idleSet.h) : B.median(hh);
-      };
-      const target = { median: B.median(hh), first: m[0], max: Math.max(...hh),
-                       min: Math.min(...hh), idle: idleRef() }[cur.ref || 'median'];
-      let clamped = 0;
-      for (let i = 0; i < set.count; i++) {
-        if (!m[i]) continue;
-        const want = target / m[i];
-        if (want < B.CLAMP[0] || want > B.CLAMP[1]) clamped++;
-        B.setFs(cur.type, cur.state, i, want);
-      }
-      B.toast('solved ' + cur.state + (clamped ? ' - ' + clamped + ' clamped' : ''));
-      B.renderPanel(); B.renderStrip();
-    };
-    s3.appendChild(solve);
-    s3.appendChild(el('div', 'note', 'fs[i] = reference / measured[i], applied about the feet, so an '
-      + 'under-drawn frame grows in place instead of hopping. Clamped to the game 0.2-5 range.'));
+    s3.appendChild(el('div', 'note', 'Levelling measures the lower body, so a reared weapon does not count as the figure growing.'));
     host.appendChild(s3);
 
-    const s4 = el('div', 'sec'); s4.appendChild(el('h2', null, cur.state + ' calib'));
-    for (const [k, step, mn, mx] of [['s', '0.005', '0.2', '5'], ['dx', '0.005', '-1.5', '1.5'],
-                                     ['dy', '0.005', '-1.5', '1.5']]) {
-      const r = el('div', 'row'); r.style.marginBottom = '5px';
-      const lab = el('span', null, k); lab.style.width = '22px';
-      r.appendChild(lab);
-      r.appendChild(num(c[k], step, mn, mx, (v) => { c[k] = v; B.renderPanel(); }));
-      s4.appendChild(r);
-    }
-    s4.appendChild(el('div', 'note', 'dx / dy are fractions of the rendered sprite height, as the game reads them.'));
-    host.appendChild(s4);
-
-    const s5 = el('div', 'sec'); s5.appendChild(el('h2', null, 'export'));
+    // ---- export ----
+    const s4 = el('div', 'sec');
+    s4.appendChild(el('h2', null, 'export'));
     const ta = el('textarea'); ta.readOnly = true; ta.value = B.patchJSON();
-    s5.appendChild(ta);
+    s4.appendChild(ta);
     const btn = el('button', 'primary', 'Copy patch');
     btn.style.width = '100%'; btn.style.marginTop = '7px';
     btn.onclick = B.copyPatch;
-    s5.appendChild(btn);
-    s5.appendChild(el('div', 'note', 'Paste in chat to have it hardbaked (scripts/apply_anim_patch.mjs). '
-      + 'The blob carries every state of this boss plus its existing attack hitbox, because the '
-      + 'applier replaces the whole entity block.'));
-    host.appendChild(s5);
+    s4.appendChild(btn);
+    s4.appendChild(el('div', 'note', 'Paste in chat to have it hardbaked. Carries every state of '
+      + 'this boss plus its existing attack hitbox, because the applier replaces the whole entity block.'));
+    host.appendChild(s4);
   };
+  B.setHeight = setHeight;
+  B.evenOut = evenOut;
 })();
 
-/* ---- patch export + input wiring ----------------------------------------- */
+/* ---- export + wiring ----------------------------------------------------- */
 (function () {
   const B = window.__BR, cur = B.cur, $ = B.$;
 
-  // apply_anim_patch.mjs is DECLARATIVE per entity: it replaces the entity's
-  // whole calib block, and DELETES its hitbox when the patch carries none. So
-  // emit every state that has (or had) a value, and carry the baked hitbox
-  // through untouched - otherwise baking a resize would silently drop an
-  // authored attack hitbox.
+  // apply_anim_patch.mjs is declarative per entity: it replaces the whole calib
+  // block and DELETES the hitbox when the patch carries none. Emit every state,
+  // and carry the baked hitbox through untouched.
   B.patchJSON = function () {
     const type = cur.type;
     if (!type) return '';
@@ -550,49 +457,14 @@
   };
 
   $('q').oninput = () => B.buildList($('q').value);
-  $('mode').onclick = (e) => {
-    const b = e.target.closest('button[data-m]');
-    if (!b) return;
-    cur.mode = b.dataset.m;
-    for (const x of $('mode').querySelectorAll('button')) x.classList.toggle('on', x === b);
-    B.redraw();
-  };
-  for (const id of ['applyfs', 'ghost']) $(id).onchange = () => B.redraw();
   $('play').onchange = () => { cur.t0 = performance.now(); };
-  $('reset').onclick = () => {
-    if (!cur.type) return;
-    B.calibOf(cur.type, cur.state).fs = null;
-    B.toast('fs cleared for ' + cur.state);
-    B.redraw();
-  };
+  $('before').onchange = () => B.redraw();
   $('copy').onclick = () => B.copyPatch();
-
-  // Drag on the stage to set the measurement band - a pair of fractions of the
-  // canvas height, measured up from the ground. This is how you tell the tool
-  // "measure the torso and ignore the hammer".
-  let dragging = null;
-  const stage = $('stage');
-  const fracAt = (ev) => {
-    const r = stage.getBoundingClientRect();
-    const y = (ev.clientY - r.top) * (stage.height / r.height);
-    const G = B.GEO || { GROUND: 400, H0: 236 };
-    return B.clamp(1 - (G.GROUND - y) / G.H0, 0, 1);
+  $('revert').onclick = () => {
+    if (!cur.type) return;
+    delete B.edits[cur.type];
+    B.toast('reverted ' + cur.type);
+    B.buildList($('q').value); B.redraw();
   };
-  stage.addEventListener('pointerdown', (e) => {
-    if (cur.mode !== 'band' || !cur.type) return;
-    const f = fracAt(e);
-    dragging = Math.abs(f - cur.band[0]) < Math.abs(f - cur.band[1]) ? 0 : 1;
-    cur.band[dragging] = f;
-    stage.setPointerCapture(e.pointerId);
-    B.redraw();
-  });
-  stage.addEventListener('pointermove', (e) => {
-    if (dragging == null) return;
-    cur.band[dragging] = fracAt(e);
-    if (cur.band[0] > cur.band[1]) { cur.band.reverse(); dragging = 1 - dragging; }
-    B.redraw();
-  });
-  stage.addEventListener('pointerup', () => { dragging = null; });
-
   B.buildList('');
 })();
