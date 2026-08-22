@@ -10,7 +10,15 @@
 //
 //   node scripts/gen_bolt_impact_fx.mjs              # dry run (prints prompts)
 //   node scripts/gen_bolt_impact_fx.mjs --generate   # needs LUDO_API_KEY
-//   flags: --force --only=still|anim
+//   flags: --force --only=still|anim --feather-only
+//
+// EDGE FEATHER (per user: "feather the edges for magic bolt energy burst").
+// The raw roll put fully opaque pixels (alpha 255) hard on the frame border in
+// 7 of 8 frames — the burst read as a rectangle cropping the shards. Every
+// write now ramps alpha smoothly to zero over the outermost RAMP px, so the
+// shards fade out instead of being guillotined. --feather-only re-runs the
+// ramp over the shipped files in place (idempotent: already-faded edges are
+// multiplied by ~1 and a second pass is a no-op within rounding).
 //
 // NO whole-image rotation in the frames — spawnSpriteBurst applies spin
 // procedurally (the smoothness rule from gen_bolt_anim.mjs / gen_arcane_burst_fx.mjs).
@@ -55,13 +63,13 @@ const MOTION =
   'Keep the exact same art style, palette and fully transparent background in every frame. ' +
   'No face, no character, no text, no background, no shadow.';
 
-if (!has('--generate')) {
+if (!has('--generate') && !has('--feather-only')) {
   console.log('# still -> Sprites/fx/bolt_impact.webp\n' + STILL_PROMPT + '\n');
   console.log('# anim  -> Sprites/fx/anim/bolt_impact_0..8.webp\n' + MOTION + '\n# Re-run with --generate.');
   process.exit(0);
 }
 const key = process.env.LUDO_API_KEY;
-if (!key) { console.error('LUDO_API_KEY required.'); process.exit(1); }
+if (!key && !has('--feather-only')) { console.error('LUDO_API_KEY required.'); process.exit(1); }
 const API = process.env.LUDO_API_BASE || 'https://api.ludo.ai/api';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 async function fetchBuf(url) { const r = await fetch(url, { signal: AbortSignal.timeout(120000) }); if (!r.ok) throw new Error('fetch ' + r.status); return Buffer.from(await r.arrayBuffer()); }
@@ -78,7 +86,45 @@ async function framesFrom(data, n) {
   if (urls.length >= n) { const o = []; for (let i = 0; i < n; i++) o.push(await fetchBuf(urls[i])); return o; }
   throw new Error('no usable frames in response');
 }
-const normalise = (buf) => sharp(buf).resize(SIZE, SIZE, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).webp({ quality: 92 }).toBuffer();
+const RAMP = 56;   // feather width in px on the 768 canvas (~7%)
+// Multiply alpha by a smooth (smoothstep) ramp toward each canvas edge:
+// content deeper than RAMP px is untouched, content ON the edge goes to 0.
+// Same shape as scripts/generate_gravitos_star_anim.mjs's feather.
+async function feather(buf) {
+  const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width: W, height: H, channels: C } = info;
+  const smooth = (t) => { const x = Math.max(0, Math.min(1, t)); return x * x * (3 - 2 * x); };
+  const rowRamp = new Float32Array(H), colRamp = new Float32Array(W);
+  for (let y = 0; y < H; y++) rowRamp[y] = Math.min(smooth(y / RAMP), smooth((H - 1 - y) / RAMP));
+  for (let x = 0; x < W; x++) colRamp[x] = Math.min(smooth(x / RAMP), smooth((W - 1 - x) / RAMP));
+  for (let y = 0; y < H; y++) {
+    const ry = rowRamp[y];
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * C + 3;
+      if (data[i] === 0) continue;
+      const r = Math.min(ry, colRamp[x]);
+      if (r < 1) data[i] = Math.round(data[i] * r);
+    }
+  }
+  return sharp(data, { raw: { width: W, height: H, channels: C } }).webp({ quality: 92 }).toBuffer();
+}
+const normalise = async (buf) => feather(await sharp(buf).resize(SIZE, SIZE, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer());
+
+// ---- re-feather the shipped art in place -----------------------------------
+if (has('--feather-only')) {
+  const targets = [STILL];
+  for (let i = 0; i < FRAMES - 1; i++) targets.push(join(ANIM_DIR, `bolt_impact_${i}.webp`));
+  for (const t of targets) {
+    if (!(await exists(t))) { console.log('(absent) ' + t); continue; }
+    const out = await feather(await readFile(t));
+    await writeFile(t + '.tmp', out);
+    const { rename } = await import('node:fs/promises');
+    await rename(t + '.tmp', t);
+    console.log('feathered ' + t.split(/[\/]/).pop());
+  }
+  console.log('done.');
+  process.exit(0);
+}
 
 // ---- 1) the still burst, seeded with the shipped bolt art -------------------
 if ((!only || only === 'still') && (has('--force') || !(await exists(STILL)))) {

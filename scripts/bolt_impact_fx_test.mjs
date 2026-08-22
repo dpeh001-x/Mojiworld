@@ -19,6 +19,29 @@ ok('all 8 burst frames ship', frames.every(existsSync), frames.filter(f => !exis
   ok('the frame index records the set (so the loader asks for exactly 8)', /"bolt_impact":\s*8/.test(idx), '');
 }
 
+// ---- EDGE FEATHER (per user: "feather the edges") --------------------------
+// The raw ludo roll put alpha-255 pixels hard on the frame border in 7 of 8
+// frames, so the burst read as a rectangle guillotining its own shards. Every
+// write now ramps alpha to zero over the outer 56 px. Graded on the files:
+// nothing opaque may touch the border, and the interior must survive the ramp
+// (a feather that ate the burst would also pass an edges-are-clear check).
+{
+  const sharp = (await import('sharp')).default;
+  let worstEdge = 0, thinnest = Infinity;
+  for (const f of ['Sprites/fx/bolt_impact.webp', ...frames]) {
+    const { data, info } = await sharp(f).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const { width: W, height: H, channels: C } = info;
+    const at = (x, y) => data[(y * W + x) * C + 3];
+    for (let x = 0; x < W; x++) for (const y of [0, 1, H - 2, H - 1]) if (at(x, y) > worstEdge) worstEdge = at(x, y);
+    for (let y = 0; y < H; y++) for (const x of [0, 1, W - 2, W - 1]) if (at(x, y) > worstEdge) worstEdge = at(x, y);
+    let core = 0;
+    for (let y = 80; y < H - 80; y++) for (let x = 80; x < W - 80; x++) if (at(x, y) > 20) core++;
+    if (core < thinnest) thinnest = core;
+  }
+  ok('edges are feathered: nothing opaque touches any frame border', worstEdge <= 8, { worstBorderAlpha: worstEdge });
+  ok('...and the feather did not eat the burst (interior survives)', thinnest > 20000, { thinnestInterior: thinnest });
+}
+
 const net_ = await import('node:net');
 const free = (p) => new Promise((r) => { const s = net_.createServer();
   s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
