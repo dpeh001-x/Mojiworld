@@ -24,7 +24,23 @@
   const MAN = window.LX_BOSS_RESIZE || {};
   const BAKED = window.LX_ANIM_CALIB || {};
   const HITBOX = window.LX_ATK_HITBOX || {};
-  const STATE_MS = { idle: 130, walk: 80, attack: 48, duck: 90, weave: 80 };
+  // Cadences mirror the game's constants exactly: _BOSS_IDLE_FRAME_MS 130,
+  // _BOSS_ATK_FRAME_MS 48, _BOSS_DUCK_FRAME_MS 30, _BOSS_WEAVE_FRAME_MS 70.
+  // duck was 90 here and weave 80 - both invented, both wrong.
+  const STATE_MS = { idle: 130, walk: 80, attack: 48, duck: 30, weave: 70 };
+  // WALK IS NOT A CONSTANT IN THE GAME. _bossWalkMsFor scales the 80 ms base
+  // with stature and only ever downward, so a colossus strides FASTER, not
+  // slower: mul = clamp(0.8 / sqrt(h/140), 0.62, 0.8). Gravitos (m.h 380)
+  // lands on the 0.62 floor = 50 ms a frame, a 450 ms cycle, where this tool
+  // was showing 80 ms bounced over 16 steps - a 1280 ms cycle, 2.8x too slow.
+  // game.boxH in the manifest IS m.h from MONSTER_TYPES, so the same number
+  // that drives the game drives the preview.
+  const stateMs = (state, set) => {
+    if (state !== 'walk') return STATE_MS[state] || 100;
+    const h = (set && set.game && set.game.boxH) || 140;
+    const mul = Math.max(0.62, Math.min(0.8, 0.8 / Math.sqrt(Math.max(1, h / 140))));
+    return Math.max(38, Math.round(STATE_MS.walk * mul));
+  };
   const CLAMP = [0.2, 5];
 
   const $ = (id) => document.getElementById(id);
@@ -187,7 +203,7 @@
   }
 
   const cur = { boss: null, cards: [], t0: 0 };
-  window.__BR = { MAN, BAKED, HITBOX, BOSSES, STATE_MS, CLAMP, cur, edits,
+  window.__BR = { MAN, BAKED, HITBOX, BOSSES, STATE_MS, stateMs, CLAMP, cur, edits,
     $, el, clamp, median, toast, bossOf, animLabel, calibOf, setOf, srcSpan,
     frameH, animH, setAnimH, dyPx, setDyPx, dxPx, setDxPx, idleH, spread, refH, isRef, formKeyOf };
 })();
@@ -297,11 +313,25 @@
     return rec;
   }
 
-  function frameIndex(n, ms, t) {
+  // Per user, on Gravitos: "gravitos walk ... looks like its pingponging,
+  // ensure the animation does not pingpong and is fast and smooth". Every
+  // state here bounced 0..8..1, but the game ping-pongs IDLE only
+  // (_bossPingPongFrame, relaxed breathing). Walk, attack and weave run a
+  // straight forward loop - _bossLoopFrame's own comment says ping-pong "would
+  // play the motion in reverse" - and duck plays once and holds
+  // (_bossDuckFrame). So a walk cycle authored to loop was being previewed
+  // striding forward and then moonwalking back, at 2.8x the game's cycle time.
+  const PINGPONG = { idle: 1 };
+  const HOLD = { duck: 1 };
+  const HOLD_MS = 900;          // duck holds the recover pose, then restarts so the card stays watchable
+  function frameIndex(n, ms, t, state) {
     if (n < 2) return 0;
-    const period = (n - 1) * 2, k = Math.floor(t / ms) % period;
-    return k < n ? k : period - k;
+    const k = Math.floor(t / ms);
+    if (HOLD[state]) return Math.min(n - 1, k % Math.max(n, Math.ceil(HOLD_MS / ms)));
+    if (PINGPONG[state]) { const p = (n - 1) * 2, j = k % p; return j < n ? j : p - j; }
+    return k % n;
   }
+  B.frameIndex = frameIndex;   // scripts/boss_resizer_anim_test.mjs checks the sequencing directly
   // Draw so the frame's content is exactly `h` game px tall with its feet on
   // the ground line — the same foot anchoring _drawBossSprite uses.
   function blit(c2, img, set, i, h, k, alpha, yOff, xOff) {
@@ -493,15 +523,42 @@
     // (each card's dashed marker is its OWN form's idle — see refresh())
     for (const c of cur.cards) {
       const { c2, set, a } = c;
-      // 1:1 cards are big and there can be twenty of them — only paint what is
-      // actually on screen
-      if (B.real) {
-        const r = c.cv.getBoundingClientRect();
-        if (r.bottom < -200 || r.top > innerHeight + 200) continue;
-      }
+      // There can be twenty of these and they are big — only paint what is
+      // actually on screen. This was gated on 1:1 mode; measured with Gravitos
+      // (20 animations, 15 of them on screen) the loop ran at 14.8 fps, which
+      // cannot show a 50 ms cadence at all: the walk skipped frames no matter
+      // what the sequencer said. Culling and the repaint key below are the
+      // "smooth" half of the request.
+      const r = c.cv.getBoundingClientRect();
+      if (r.bottom < -200 || r.top > innerHeight + 200) continue;
+      const rr = c.ref || ih;
+      const refDy0 = B.dyPx(B.formKeyOf(a.key), 'idle');
+      const refDx0 = B.dxPx(B.formKeyOf(a.key), 'idle');
+      const ms = B.stateMs(a.state, set);
+      const i = playing ? frameIndex(set.count, ms, t, a.state) : 0;
+      c.lastFrame = i; c.lastMs = ms;   // what is actually on screen, for the anim test
+      const yo0 = B.dyPx(a.key, a.state), xo0 = B.dxPx(a.key, a.state);
+      const hNow = B.frameH(a.key, a.state, i, true);
+      const hWas = showWas ? B.frameH(a.key, a.state, i, false) : 0;
+      const topY0 = GROUND + yo0 * k - hNow * k, cxo0 = xo0 * k;
+      // hit testing reads this every pass, so it is computed before any skip
+      c.handle = { x0: CW / 2 + cxo0 - HANDLE_W / 2, x1: CW / 2 + cxo0 + HANDLE_W / 2,
+                   y0: topY0 - HANDLE_H / 2, y1: topY0 + HANDLE_H / 2 };
+      const hot0 = c.hover === 'handle';
+      // A card's pixels change only when one of these does, and at a 50 ms
+      // cadence against a 60 Hz loop that is one repaint in three. Redrawing
+      // all twenty every tick is what starved the frame rate. Image and
+      // silhouette readiness are in the key so an async decode still lands;
+      // canvas dimensions are in it so a resize (which clears the backing
+      // store) cannot leave a card blank.
+      const img0 = c.imgs[i];
+      const pkey = [i, k, rr, refDy0, refDx0, yo0, xo0, hNow, hWas, showIdle, showWas, playing,
+        hot0, B.real ? 1 : 0, c.cv.width, c.cv.height,
+        img0 && img0.complete && img0.naturalWidth ? 1 : 0, c.sil && c.sil.cv ? 1 : 0].join('|');
+      if (c.pkey === pkey) continue;
+      c.pkey = pkey;
       c2.clearRect(0, 0, CW, CH);
       // shared idle marker — same y in every card because k is shared
-      const rr = c.ref || ih;
       if (rr) {
         const y = GROUND - rr * k;
         c2.strokeStyle = 'rgba(255,204,102,.55)'; c2.setLineDash([5, 4]); c2.lineWidth = 1;
@@ -514,26 +571,18 @@
       // cover it. Anything sticking out is the size difference, to scale.
       // the reference is drawn with the IDLE'S own offset, so matching the
       // outline means matching footing as well as height
-      const refDy = B.dyPx(B.formKeyOf(a.key), 'idle');
-      const refDx = B.dxPx(B.formKeyOf(a.key), 'idle');
       if (showIdle && c.sil && c.sil.cv && rr)
-        blit(c2, c.sil.cv, c.sil.set, c.sil.idx, rr, k, 0.30, refDy, refDx);
-      const ms = B.STATE_MS[a.state] || 100;
-      const i = playing ? frameIndex(set.count, ms, t) : 0;
-      const yo = B.dyPx(a.key, a.state), xo = B.dxPx(a.key, a.state);
-      if (showWas) blit(c2, c.imgs[i], set, i, B.frameH(a.key, a.state, i, false), k, 0.25, 0, 0);
-      blit(c2, c.imgs[i], set, i, B.frameH(a.key, a.state, i, true), k, 1, yo, xo);
+        blit(c2, c.sil.cv, c.sil.set, c.sil.idx, rr, k, 0.30, refDy0, refDx0);
+      if (showWas) blit(c2, c.imgs[i], set, i, hWas, k, 0.25, 0, 0);
+      blit(c2, c.imgs[i], set, i, hNow, k, 1, yo0, xo0);
       // the idle's outline goes ON TOP: when the animation is the bigger of
       // the two it spills past this ring, which the fill behind cannot show
       if (showIdle && c.sil && c.sil.ring && rr)
-        blit(c2, c.sil.ring, c.sil.set, c.sil.idx, rr, k, 1, refDy, refDx);
+        blit(c2, c.sil.ring, c.sil.set, c.sil.idx, rr, k, 1, refDy0, refDx0);
       // the resize grip, pinned to the top of the drawn figure: drag the BODY
-      // to move, drag this to scale. Stored so the hit test agrees with it.
-      const topY = GROUND + yo * k - B.frameH(a.key, a.state, i, true) * k;
-      const cxo = xo * k;
-      c.handle = { x0: CW / 2 + cxo - HANDLE_W / 2, x1: CW / 2 + cxo + HANDLE_W / 2,
-                   y0: topY - HANDLE_H / 2, y1: topY + HANDLE_H / 2 };
-      const hot = c.hover === 'handle';
+      // to move, drag this to scale. c.handle is set above the repaint skip so
+      // the hit test agrees with it even on a tick that draws nothing.
+      const topY = topY0, cxo = cxo0, hot = hot0;
       c2.fillStyle = hot ? 'rgba(192,140,255,.95)' : 'rgba(192,140,255,.42)';
       c2.beginPath();
       const rr2 = 4, hx = c.handle.x0, hy = c.handle.y0;   // rides the sprite on both axes

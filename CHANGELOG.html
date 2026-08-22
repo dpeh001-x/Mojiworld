@@ -121,6 +121,22 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.103 <span class="tag"><span class="pill bug">bug</span> The boss resizer ping-ponged every animation, and ran the walk 2.8&times; too slow</h2>
+<p>Per user, on Gravitos in <code>tools/boss_resizer.html</code>: <em>gravitos walk looks like its pingponging, ensure the animation does not pingpong and is fast and smooth.</em></p>
+<p><b>It was, and worse than the walk.</b> The tool had one sequencer &mdash; <code>frameIndex</code> bounced 0..8..1 for every state at a flat table of cadences. The game does four different things, and the tool matched exactly one of them:</p>
+<table>
+<tr><th>state</th><th>game</th><th>tool, before</th></tr>
+<tr><td>idle</td><td><code>_bossPingPongFrame</code>, 130&nbsp;ms</td><td>ping-pong, 130&nbsp;ms &mdash; the only one right</td></tr>
+<tr><td>walk</td><td><code>_bossLoopFrame</code>, <code>_bossWalkMsFor(m)</code></td><td>ping-pong, flat 80&nbsp;ms</td></tr>
+<tr><td>attack</td><td><code>_bossLoopFrame</code>, 48&nbsp;ms</td><td>ping-pong, 48&nbsp;ms</td></tr>
+<tr><td>duck</td><td><code>_bossDuckFrame</code> &mdash; once, then hold, 30&nbsp;ms</td><td>ping-pong, 90&nbsp;ms</td></tr>
+<tr><td>weave</td><td><code>_bossLoopFrame</code>, 70&nbsp;ms</td><td>ping-pong, 80&nbsp;ms</td></tr>
+</table>
+<p>So a walk cycle authored to loop was previewed striding forward and then <em>moonwalking back</em> &mdash; which is exactly what <code>_bossLoopFrame</code>'s own comment warns about ("ping-pong would play the motion in reverse"). And the walk cadence is not a constant in the game at all: <code>_bossWalkMsFor</code> scales it with stature and only ever downward, so Gravitos (<code>m.h</code> 380) strides at <b>50&nbsp;ms</b> a frame &mdash; a 450&nbsp;ms cycle. The tool showed 80&nbsp;ms bounced over 16 steps: <b>1280&nbsp;ms</b>, 2.8&times; too slow.</p>
+<p><b>Then the "smooth" half, which the numbers found on their own.</b> With Gravitos up there are 20 cards; the loop repainted every one of them on every frame, and measured it managed <b>14.8&nbsp;fps</b> &mdash; which cannot show a 50&nbsp;ms cadence no matter what the sequencer says, so the stride dropped frames regardless. Two fixes: off-screen cards are now culled always (that was gated on 1:1 mode only), and each card carries a repaint key over everything that can change its pixels, so at a 50&nbsp;ms cadence against a 60&nbsp;Hz loop it redraws once in three instead of every tick. <b>14.8 &rarr; 47.9&nbsp;fps</b>, and all nine walk frames now reach the screen where six did.</p>
+<p><code>scripts/boss_resizer_anim_test.mjs</code> (new) <b>13/13</b>. It does not hardcode the game's numbers &mdash; it reads <code>_bossWalkMsFor</code> and the per-state call sites out of <code>mojiworld_game.html</code> and checks the tool agrees, so drift in either file turns it red. The live card is checked through the real <code>paint()</code> with a driven clock rather than free-running rAF: a sampler that misses a tick turns a forward wrap (8&nbsp;&rarr;&nbsp;3) into what looks like a backwards step, and that false signal cost a red herring before the clock was driven. The repaint key is checked too &mdash; ghost, overlay, hover and pause all still invalidate.</p>
+
+
 <h2>v0.30.102 <span class="tag"><span class="pill polish">polish</span> A frame profiler, baked platform slabs &mdash; and what the numbers actually say</span></h2>
 <p>Per user: <em>work on improving the lag of the game even much more, such as reducing unnecessary shaders or effects, the game should always run smooth.</em></p>
 <p>New <code>scripts/perf_frame_profile.mjs</code> wraps all 38 top-level per-frame systems in timers, gets past the boot gate, fills the densest map to its monster cap and lets the <b>real</b> rAF loop run. tower_b1, 200 monsters, 6&nbsp;s:</p>
