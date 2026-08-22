@@ -91,6 +91,19 @@ const FACING = ' Keep the EXACT same left/right facing and orientation as the ' 
 // with the head cropped. "Do not zoom" buried mid-paragraph was not enough, so
 // framing now leads the clause and is stated in terms the model can measure:
 // full figure, feet visible, small in frame, wide shot, identical crop.
+// Form 3 wreathes himself in flame and it POOLS AT HIS FEET, which is exactly
+// where the shipped punch and soul sets lose it: ~36 px of burning ground runs
+// off the BOTTOM edge in every frame (320 and 324 px summed over nine, against
+// 0 for the clean gravitos3 and gravitos3star sets). Feet touching the canvas
+// floor is expected and fine; fire leaving the picture is not. Written as a FIT
+// requirement so the model keeps the flame and makes room for it, rather than
+// reading "smaller" and shrinking the effect away.
+const FLAME_FITS =
+  ' ALL FIRE STAYS INSIDE THE PICTURE. Any flame around his feet, wings or body ' +
+  'is drawn COMPLETE, with clear empty transparent space beneath and around it — ' +
+  'no flame, ember or glow is ever clipped by the bottom, left, right or top ' +
+  'edge. Leave a generous transparent margin below his feet for the fire to sit in.';
+
 const CONTAIN =
   // Leads the clause because framing instructions only stick in first position
   // — and because form 3 twice answered a motion prompt with a painted
@@ -185,6 +198,42 @@ const ATTACKS = {
     'and hugs his outline — it does NOT radiate outward across the picture. ' +
     'Do NOT draw any beam, ray, laser line, bolt or projectile leaving his ' +
     'body, and no expanding shockwave or explosion.' + CONTAIN },
+  // PUNCH and SOUL DRAIN. Both sets shipped as PING-PONGS — four unique cells
+  // mirrored into nine (see scripts/boss_anim_pingpong_test.mjs, which tracks
+  // gravitos2soul / gravitos3punch / gravitos3soul as known-unfixed). They were
+  // built by one-off scripts that predate this pipeline, so they never had a
+  // preset here to re-roll from; these two are that preset. The ACTIONS are
+  // deliberately the shipped ones — the art was described as good, only the
+  // frame count and the clipping were wrong.
+  //
+  // FORM 3's flames are the specific fault to avoid: its wreath pools at his
+  // feet and the shipped punch/soul sets run 36 px of it off the BOTTOM of the
+  // canvas every frame (320 and 324 px summed over nine, against 0 for the
+  // clean gravitos3 and gravitos3star sets). Feet-on-the-floor is fine and
+  // expected — burning ground that leaves the picture is not, so the flame is
+  // named as a thing that must FIT rather than as a thing to shrink.
+  punch: { key: 'gravitospunch', tol: 0.30, pad: 0.12, prompt:
+    'the full-body {{LOOK}} throws ONE enormous straight punch, shown head to ' +
+    'toe. He coils back with the striking fist drawn to his hip and his ' +
+    'shoulder turned away, then drives that fist straight forward at full ' +
+    'extension with his whole body behind it, back leg braced and torso ' +
+    'rotated through. Every frame is a clearly different point in that one ' +
+    'punch — coil, turn, drive, extend, recover — and no two consecutive ' +
+    'frames repeat a pose. ' +
+    '{{ACCENT}} gathers around the striking fist and trails off his knuckles ' +
+    'as it travels, clinging to his outline rather than spraying across the ' +
+    'picture.' + FLAME_FITS + CONTAIN },
+  soul: { key: 'gravitossoul', tol: 0.30, pad: 0.12, prompt:
+    'the full-body {{LOOK}} DRAINS SOULS INTO HIMSELF, shown head to toe. He ' +
+    'spreads both arms wide and low with his palms turned up and his chest ' +
+    'thrown open, then slowly closes both arms inward and clutches them across ' +
+    'his chest as his head tips back. The motion is a steady INWARD pull that ' +
+    'progresses a clear step every frame — nothing is thrown, fired or ' +
+    'expelled, and no two consecutive frames repeat a pose. ' +
+    'Small wisps and motes of {{ACCENT}} spiral INWARD toward the golden core ' +
+    'burning in his chest, which brightens as they arrive. The wisps stay ' +
+    'close around his body and are drawn being absorbed, never radiating out.' +
+    FLAME_FITS + CONTAIN },
   // Regenerates the GENERIC attack set (Sprites/bosses/attack/gravitos_*), the
   // one drawn for every pattern without dedicated art — which is most of his
   // kit, so its stiffness is the most-seen animation on the boss.
