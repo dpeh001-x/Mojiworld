@@ -122,6 +122,20 @@
     if (!nat) return;
     calibOf(key, state).s = clamp(px / nat, CLAMP[0], CLAMP[1]);
   }
+  // VERTICAL NUDGE. calib.dy is a fraction of the pre-calib box height and the
+  // game translates by dy * targetH before scaling, so on screen it is exactly
+  // that many game pixels, positive = DOWN, and it does not drift when the
+  // animation is resized.
+  function dyPx(key, state) {
+    const set = setOf(key, state);
+    if (!set || !set.game) return 0;
+    return calibOf(key, state).dy * set.game.targetH;
+  }
+  function setDyPx(key, state, px) {
+    const set = setOf(key, state);
+    if (!set || !set.game) return;
+    calibOf(key, state).dy = clamp(px / set.game.targetH, -1.5, 1.5);
+  }
   // The FORM a calib key belongs to: gravitos2star -> gravitos2, gravitoslaser
   // -> gravitos, legosaurusdash -> legosaurus. Cast sets borrow their form's
   // body, so that form's idle is what they should measure against.
@@ -162,7 +176,7 @@
   const cur = { boss: null, cards: [], t0: 0 };
   window.__BR = { MAN, BAKED, HITBOX, BOSSES, STATE_MS, CLAMP, cur, edits,
     $, el, clamp, median, toast, bossOf, animLabel, calibOf, setOf, srcSpan,
-    frameH, animH, setAnimH, idleH, spread, refH, isRef, formKeyOf };
+    frameH, animH, setAnimH, dyPx, setDyPx, idleH, spread, refH, isRef, formKeyOf };
 })();
 
 /* ---- the contact sheet: every animation of one boss, playing at once ------
@@ -251,7 +265,7 @@
   }
   // Draw so the frame's content is exactly `h` game px tall with its feet on
   // the ground line — the same foot anchoring _drawBossSprite uses.
-  function blit(c2, img, set, i, h, k, alpha) {
+  function blit(c2, img, set, i, h, k, alpha, yOff) {
     // canvases have no .complete / .naturalWidth - the old guard silently
     // dropped every overlay draw, which is why the idle never appeared
     if (!img) return;
@@ -260,7 +274,8 @@
     const canvasH = h * (set.h / cH), canvasW = canvasH * (set.w / set.h);
     const below = (set.h - 1 - bot) / set.h * canvasH;
     c2.save(); c2.globalAlpha = alpha;
-    c2.drawImage(img, CW / 2 - canvasW * k / 2, GROUND - (canvasH - below) * k,
+    c2.drawImage(img, CW / 2 - canvasW * k / 2,
+                 GROUND - (canvasH - below) * k + (yOff || 0) * k,
                  canvasW * k, canvasH * k);
     c2.restore();
   }
@@ -293,13 +308,25 @@
       mi.onclick = () => { B.setAnimH(a.key, a.state, B.refH(a.key)); refresh(); };
       ctl.appendChild(mi);
       card.appendChild(ctl);
+      // vertical nudge — the same value the game reads as calib.dy
+      const ctl2 = el('div', 'ctl');
+      ctl2.appendChild(el('span', 'axis', '\u2195'));
+      const yin = el('input'); yin.type = 'number'; yin.step = '1'; yin.min = '-400'; yin.max = '400';
+      yin.title = 'vertical offset in game pixels, + is down';
+      yin.onchange = () => { B.setDyPx(a.key, a.state, +yin.value); refresh(); };
+      ctl2.appendChild(yin);
+      const zero = el('button', 'ghost mini', '0');
+      zero.title = 'clear the vertical offset';
+      zero.onclick = () => { B.setDyPx(a.key, a.state, 0); refresh(); };
+      ctl2.appendChild(zero);
+      card.appendChild(ctl2);
       const imgs = [];
       for (let i = 0; i < set.count; i++) {
         const im = new Image(); im.crossOrigin = 'anonymous';
         im.src = set.dir + '_' + i + '.webp'; imgs.push(im);
       }
       host.appendChild(card);
-      const rec = { a, set, cv, c2: cv.getContext('2d'), imgs, inp, vs, card,
+      const rec = { a, set, cv, c2: cv.getContext('2d'), imgs, inp, yin, vs, card,
                     sil: silhouette(B.formKeyOf(a.key)) };
       cur.cards.push(rec);
       attachDrag(rec);
@@ -311,10 +338,13 @@
   // pointer, relative to where the drag began, so grabbing the middle of a
   // sprite does not make it jump. The canvas is CSS-sized to its own pixel
   // height, so one pointer pixel is one canvas pixel vertically.
+  // Which axis a drag edits: the toolbar toggle, or Shift for one gesture.
+  const dragMode = (e) => (e.shiftKey ? (B.mode === 'size' ? 'move' : 'size') : B.mode);
   function attachDrag(c) {
     let from = null;
     c.cv.addEventListener('pointerdown', (e) => {
-      from = { y: e.clientY, h: B.animH(c.a.key, c.a.state, true) };
+      from = { y: e.clientY, h: B.animH(c.a.key, c.a.state, true),
+               dy: B.dyPx(c.a.key, c.a.state), mode: dragMode(e) };
       c.cv.setPointerCapture(e.pointerId);
       c.card.classList.add('dragging');
       e.preventDefault();
@@ -323,7 +353,9 @@
       if (!from) return;
       const k = viewScale();
       if (!k) return;
-      B.setAnimH(c.a.key, c.a.state, from.h + (from.y - e.clientY) / k);
+      const d = (from.y - e.clientY) / k;
+      if (from.mode === 'move') B.setDyPx(c.a.key, c.a.state, from.dy - d);   // up = negative dy
+      else B.setAnimH(c.a.key, c.a.state, from.h + d);
       refresh(true);                       // light: numbers now, list on release
     });
     const end = () => { if (!from) return; from = null;
@@ -340,6 +372,7 @@
     for (const c of cur.cards) {
       const h = B.animH(c.a.key, c.a.state, true);
       c.inp.value = Math.round(h);
+      if (c.yin) c.yin.value = Math.round(B.dyPx(c.a.key, c.a.state));
       const r = B.refH(c.a.key);
       const off = r ? (h / r - 1) * 100 : 0;
       const same = B.isRef(c.a.key, c.a.state);
@@ -383,16 +416,20 @@
       c2.beginPath(); c2.moveTo(0, GROUND + 1); c2.lineTo(CW, GROUND + 1); c2.stroke();
       // the form's idle, pinned to the same foot line: the animation should
       // cover it. Anything sticking out is the size difference, to scale.
+      // the reference is drawn with the IDLE'S own offset, so matching the
+      // outline means matching footing as well as height
+      const refDy = B.dyPx(B.formKeyOf(a.key), 'idle');
       if (showIdle && c.sil && c.sil.cv && rr)
-        blit(c2, c.sil.cv, c.sil.set, c.sil.idx, rr, k, 0.30);
+        blit(c2, c.sil.cv, c.sil.set, c.sil.idx, rr, k, 0.30, refDy);
       const ms = B.STATE_MS[a.state] || 100;
       const i = playing ? frameIndex(set.count, ms, t) : 0;
-      if (showWas) blit(c2, c.imgs[i], set, i, B.frameH(a.key, a.state, i, false), k, 0.25);
-      blit(c2, c.imgs[i], set, i, B.frameH(a.key, a.state, i, true), k, 1);
+      const yo = B.dyPx(a.key, a.state);
+      if (showWas) blit(c2, c.imgs[i], set, i, B.frameH(a.key, a.state, i, false), k, 0.25, 0);
+      blit(c2, c.imgs[i], set, i, B.frameH(a.key, a.state, i, true), k, 1, yo);
       // the idle's outline goes ON TOP: when the animation is the bigger of
       // the two it spills past this ring, which the fill behind cannot show
       if (showIdle && c.sil && c.sil.ring && rr)
-        blit(c2, c.sil.ring, c.sil.set, c.sil.idx, rr, k, 1);
+        blit(c2, c.sil.ring, c.sil.set, c.sil.idx, rr, k, 1, refDy);
     }
   }
   (function loop() { paint(); requestAnimationFrame(loop); })();
@@ -476,6 +513,14 @@
       .catch(() => B.toast('copy blocked - select the text in the box below'));
   };
 
+  B.mode = 'size';
+  $('mode').onclick = (e) => {
+    const b = e.target.closest('button[data-m]');
+    if (!b) return;
+    B.mode = b.dataset.m;
+    for (const x of $('mode').querySelectorAll('button')) x.classList.toggle('on', x === b);
+    for (const c of cur.cards) c.cv.style.cursor = B.mode === 'move' ? 'grab' : 'ns-resize';
+  };
   $('q').oninput = () => buildList($('q').value);
   $('play').onchange = () => { cur.t0 = performance.now(); };
   $('before').onchange = () => {};
