@@ -101,8 +101,14 @@ async function strideOf(key) {
   ok('every re-timed set actually has a stride (feet travel, stance opens and closes)',
      bad.length === 0, bad);
 }
-ok('Gravitos is NOT re-timed — his feet never leave the ground', !table.gravitos,
-   table.gravitos ? { wrongly_retimed: table.gravitos } : '');
+// Gravitos specifically: the complaint was that he looked like he walked
+// backwards, and the cause was that he had no walk. This pins the ART, so a
+// revert to the stance-pulse set fails here rather than in play.
+{
+  const s = await strideOf('gravitos');
+  ok('Gravitos actually walks — his feet leave the ground', s.foot >= 9 && s.gap >= 9, s);
+  ok('...and is therefore re-timed', !!table.gravitos, { retimed: !!table.gravitos });
+}
 
 // The smoothing is REAL: recompute apparent-velocity variance both ways.
 {

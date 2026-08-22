@@ -70,6 +70,73 @@ const MOTION =
 
 const hashOf = (b) => createHash('md5').update(b).digest('hex');
 
+// What the player will actually see. A set that strides gets re-timed by
+// gen_boss_walk_timing.mjs, so judging a roll on its RAW pacing is judging
+// something that never reaches the screen. Apply the same clamp-and-normalise
+// and report the cv that survives it.
+function playedCv(step) {
+  const MIN_W = 0.45, MAX_W = 2.2;
+  const mean = step.reduce((a, b) => a + b, 0) / step.length;
+  const w = step.map((x) => Math.max(MIN_W, Math.min(MAX_W, x / mean)));
+  const sum = w.reduce((a, b) => a + b, 0);
+  const norm = w.map((x) => x * step.length / sum);
+  const v = step.map((x, i) => x / norm[i]);
+  const m2 = v.reduce((a, b) => a + b, 0) / v.length;
+  return +(Math.sqrt(v.reduce((a, b) => a + (b - m2) ** 2, 0) / v.length) / m2).toFixed(2);
+}
+
+
+// --- containment by construction -------------------------------------------
+// The model re-frames: it zooms and drifts the figure to fill the canvas it is
+// handed, so cropping the padding back off slices through whatever it moved
+// outward. Every roll so far failed on that, not on the motion. So do not crop
+// to a fixed box - REFIT.
+//
+// Take the union of the content boxes across ALL returned frames, apply ONE
+// scale and ONE offset to that union, and place it so the figure stands the
+// same height and on the same ground line as the source sprite. A single shared
+// transform keeps every frame's motion relative to the others intact (per-frame
+// fitting would squash a raised leg back down and destroy the walk), and the
+// union fitting inside the canvas makes edge bleed impossible rather than
+// unlikely.
+async function contentBox(buf) {
+  const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width: W, height: H, channels: C } = info;
+  let x0 = W, y0 = H, x1 = -1, y1 = -1;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (data[(y * W + x) * C + 3] > 24) {
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  if (x1 < 0) return null;
+  return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1, W, H };
+}
+async function refit(raw, srcBox, outW, outH) {
+  const boxes = [];
+  for (const b of raw) { const bx = await contentBox(b); if (!bx) throw new Error('a frame came back empty'); boxes.push(bx); }
+  const U = {
+    x: Math.min(...boxes.map((b) => b.x)), y: Math.min(...boxes.map((b) => b.y)),
+    W: boxes[0].W, H: boxes[0].H,
+  };
+  U.w = Math.max(...boxes.map((b) => b.x + b.w)) - U.x;
+  U.h = Math.max(...boxes.map((b) => b.y + b.h)) - U.y;
+  // Height is the stable reference - a walk does not make him taller - then
+  // clamp so the union still fits the canvas with a margin either side.
+  const scale = Math.min(srcBox.h / U.h, (outW * 0.96) / U.w, (outH * 0.98) / U.h);
+  const dw = Math.max(1, Math.round(U.w * scale)), dh = Math.max(1, Math.round(U.h * scale));
+  const cx = srcBox.x + srcBox.w / 2, bottom = srcBox.y + srcBox.h;
+  const dx = Math.max(0, Math.min(outW - dw, Math.round(cx - dw / 2)));
+  const dy = Math.max(0, Math.min(outH - dh, Math.round(bottom - dh)));
+  const out = [];
+  for (const b of raw) {
+    const cropped = await sharp(b).extract({ left: U.x, top: U.y, width: U.w, height: U.h })
+      .resize(dw, dh, { fit: 'fill' }).png().toBuffer();
+    out.push(await sharp({ create: { width: outW, height: outH, channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .composite([{ input: cropped, left: dx, top: dy }]).webp({ quality: 92 }).toBuffer());
+  }
+  return { finals: out, scale: +scale.toFixed(3), placed: `${dw}x${dh}@${dx},${dy}` };
+}
+
+
 // --- the stride measurement -------------------------------------------------
 // Find the two feet in the bottom band of the figure and report how far each
 // travels relative to the TORSO centroid over the cycle. Frames where the feet
@@ -168,18 +235,23 @@ const fetchBuf = async (u) => {
 
 const baseBuf = readFileSync(BASE);
 const baseMeta = await sharp(baseBuf).metadata();
-// Transparent margin given to the model so it has somewhere to put a swinging
-// limb. 12% is the house default for a POSE; a WALK throws arms and legs wider
-// than the source stands, and the first roll came back with a real stride and
-// 335px of it welded to the frame edge. Tunable so a bleed rejection can be
-// retried with more room instead of re-rolling the motion.
-const PAD = Number(process.env.PAD || 0.18);
+// Transparent margin given to the model. NOTE: raising this does NOT buy
+// containment - it costs it. The model re-frames to fill whatever canvas it is
+// handed, so a bigger pad just invites it to zoom, and a bigger zoom bleeds
+// harder through the crop: 12% gave 335-1066px of edge bleed, 18% gave 790-973px
+// AND degraded the stride (the figure gets fewer pixels to animate). Containment
+// is fixed by refit() below, not here.
+const PAD = Number(process.env.PAD || 0.12);
 const padX = Math.round(baseMeta.width * PAD), padY = Math.round(baseMeta.height * PAD);
 const padded = await sharp({ create: { width: baseMeta.width + padX * 2, height: baseMeta.height + padY * 2,
   channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
   .composite([{ input: baseBuf, left: padX, top: padY }]).png().toBuffer();
 const padMeta = await sharp(padded).metadata();
 const small = await sharp(padded).resize(920, 920, { fit: 'inside' }).png().toBuffer();
+// Where the figure stands in the source sprite: refit() puts the animation back
+// at this height, on this ground line.
+const srcBox = await contentBox(baseBuf);
+if (!srcBox) { console.error('base sprite is empty'); process.exit(1); }
 
 const ROLLS = Number(process.env.ROLLS || 5);
 let best = null;
@@ -207,12 +279,8 @@ for (let attempt = 1; attempt <= ROLLS; attempt++) {
       for (let i = 0; i < FRAMES; i++) raw.push(await fetchBuf(urls[i]));
     }
     if (raw.length < FRAMES) throw new Error(`got ${raw.length}`);
-    const finals = [];
-    for (const b of raw) {
-      finals.push(await sharp(await sharp(b).resize(padMeta.width, padMeta.height, { fit: 'fill' }).png().toBuffer())
-        .extract({ left: padX, top: padY, width: baseMeta.width, height: baseMeta.height })
-        .webp({ quality: 92 }).toBuffer());
-    }
+    const fit = await refit(raw, srcBox, baseMeta.width, baseMeta.height);
+    const finals = fit.finals;
     const uniq = new Set(finals.map(hashOf)).size;
     const sd2 = await strideOf(finals);
     const st = await steps(finals);
@@ -220,15 +288,20 @@ for (let attempt = 1; attempt <= ROLLS; attempt++) {
     let bleed = 0;
     for (const f of finals) bleed = Math.max(bleed, await edgeBleed(f));
     console.log(`unique=${uniq}/${FRAMES} foot=${sd2.foot} gap=${sd2.gap} pairs=${sd2.pairs}` +
-                ` jerk=${rep.jerk} bleed=${bleed}`);
+                ` jerk=${rep.jerk} bleed=${bleed} refit=${fit.placed} x${fit.scale}`);
     if (uniq < FRAMES) throw new Error(`only ${uniq} unique frames`);
     if (bleed > 120) throw new Error(`edge bleed ${bleed}px`);
     if (!sd2.stride) throw new Error(
       `still no stride (foot travel ${sd2.foot} < ${MIN_FOOT_TRAVEL}` +
       ` or stance spread ${sd2.gap} < ${MIN_GAP_SPREAD}) — he is shuffling, not walking`);
     if (sd2.foot <= curStride.foot) throw new Error(`no more stride than the current art`);
-    best = { finals, sd2, st };
-    break;
+    const score = playedCv(st);
+    console.log(`         accepted — played cv ${score}` +
+      (best ? ` (incumbent ${best.score})` : ''));
+    // Keep rolling and keep the BEST. The first roll that merely passes the
+    // gate is not the best roll available, and a walk is watched for the whole
+    // fight - it is worth the extra credits to pick rather than take.
+    if (!best || score < best.score) best = { finals, sd2, st, score };
   } catch (e) {
     console.log('rejected: ' + e.message);
     if (/\b402\b|credit/i.test(e.message)) { console.error('OUT OF CREDITS'); process.exit(3); }
@@ -241,5 +314,5 @@ for (let i = 0; i < FRAMES; i++) {
   await rename(p + '.tmp', p);
 }
 console.log(`WROTE ${FRAMES} frames — foot travel ${best.sd2.foot} (was ${curStride.foot}),` +
-            ` stance spread ${best.sd2.gap} (was ${curStride.gap})`);
+            ` stance spread ${best.sd2.gap} (was ${curStride.gap}), played cv ${best.score}`);
 console.log(`  steps ${best.st.join(' ')} (was ${curSteps.join(' ')})`);
