@@ -202,18 +202,41 @@
   const B = window.__BR, cur = B.cur, $ = B.$, el = B.el;
   // GROUND sits well above the bottom edge: a sprite nudged DOWN has to stay
   // visible, and at 26px of headroom it left the card almost immediately.
-  const CW = 200, CH = 268, GROUND = CH - 62;
+  const FIT_W = 200, FIT_H = 268, FLOOR = 62, MAX_H = 1100;
   const HANDLE_W = 54, HANDLE_H = 13;
+  // live card geometry — fixed in fit mode, sized to the art in 1:1 mode
+  let CW = FIT_W, CH = FIT_H, GROUND = FIT_H - FLOOR;
 
-  // Fixed for as long as one boss is selected — see the note in br4_scale.
-  function fitScale() {
-    let tall = 1;
+  // The tallest and widest a frame of this boss draws, in GAME pixels.
+  function extents() {
+    let tall = 1, wide = 1;
     for (const a of B.BOSSES[cur.boss]) {
       const set = B.setOf(a.key, a.state);
-      for (let i = 0; i < set.count; i++)
-        tall = Math.max(tall, B.frameH(a.key, a.state, i, true), B.frameH(a.key, a.state, i, false));
+      for (let i = 0; i < set.count; i++) {
+        const h = Math.max(B.frameH(a.key, a.state, i, true), B.frameH(a.key, a.state, i, false));
+        tall = Math.max(tall, h);
+        // the whole canvas is blitted, so its width is what needs room
+        wide = Math.max(wide, h * (set.h / B.srcSpan(set, i)) * (set.w / set.h));
+      }
     }
-    cur.k = (GROUND - 14) / (tall * 1.15);   // headroom so a grow does not clip at once
+    return { tall, wide };
+  }
+  // Fixed for as long as one boss is selected — see the note in br4_scale.
+  function fitScale() {
+    const { tall, wide } = extents();
+    if (!B.real) {
+      CW = FIT_W; CH = FIT_H; GROUND = FIT_H - FLOOR;
+      cur.k = (GROUND - 14) / (tall * 1.15);   // headroom so a grow does not clip at once
+    } else {
+      // 1:1 — the card grows to the art. Past MAX_H the browser would be
+      // painting half-metre canvases, so it clamps and says so in the header.
+      const want = Math.ceil(tall * 1.12) + FLOOR + 16;
+      CH = Math.min(MAX_H, want);
+      GROUND = CH - FLOOR;
+      cur.k = want > MAX_H ? (GROUND - 14) / (tall * 1.12) : 1;
+      CW = Math.max(FIT_W, Math.ceil(wide * cur.k) + 40);
+    }
+    cur.CW = CW; cur.CH = CH; cur.GROUND = GROUND;
   }
   const viewScale = () => cur.k || 0.3;
   // One flat silhouette per FORM, baked from that form's idle at the frame
@@ -299,15 +322,26 @@
   function buildCards() {
     const host = $('cards');
     host.innerHTML = '';
+    host.style.gridTemplateColumns = B.real
+      ? 'repeat(auto-fill, minmax(' + (Math.max(FIT_W, cur.CW || FIT_W) + 20) + 'px, max-content))'
+      : '';
     cur.cards = [];
     if (!cur.boss) { host.appendChild(el('div', 'empty', 'Pick a boss on the left to see all of its animations.')); return; }
     fitScale();
+    host.style.gridTemplateColumns = B.real
+      ? 'repeat(auto-fill, minmax(' + (CW + 20) + 'px, max-content))'
+      : '';
     const ih = B.idleH(cur.boss);
     for (const a of B.BOSSES[cur.boss]) {
       const set = B.setOf(a.key, a.state);
       const card = el('div', 'card');
       const cv = el('canvas'); cv.width = CW; cv.height = CH;
-      cv.title = 'drag up or down to resize this animation';
+      cv.title = B.real ? 'drag to position, top grip to resize (1:1 — real game pixels)'
+                        : 'drag to position, top grip to resize';
+      // in 1:1 the CSS box must equal the backing store or the grid stretches
+      // it horizontally and "real size" is off by the stretch factor
+      if (B.real) { cv.style.width = CW + 'px'; cv.style.height = CH + 'px'; }
+      else { cv.style.width = ''; cv.style.height = ''; }
       card.appendChild(cv);
       const nm = el('div', 'nm');
       nm.appendChild(el('span', null, B.animLabel(a.key, a.state)));
@@ -442,6 +476,8 @@
     $('summary').textContent = cur.boss
       ? B.BOSSES[cur.boss].length + ' animations · idle ' + Math.round(ih) + ' px · worst '
         + sp.toFixed(0) + '% off'
+        + (B.real ? (cur.k >= 0.999 ? ' · 1:1' : ' · ' + Math.round(cur.k * 100) + '% (too tall for 1:1)')
+                  : ' · fitted ' + Math.round((cur.k || 0) * 100) + '%')
       : '';
     if (light) return;
     $('patch').value = B.patchJSON();
@@ -457,6 +493,12 @@
     // (each card's dashed marker is its OWN form's idle — see refresh())
     for (const c of cur.cards) {
       const { c2, set, a } = c;
+      // 1:1 cards are big and there can be twenty of them — only paint what is
+      // actually on screen
+      if (B.real) {
+        const r = c.cv.getBoundingClientRect();
+        if (r.bottom < -200 || r.top > innerHeight + 200) continue;
+      }
       c2.clearRect(0, 0, CW, CH);
       // shared idle marker — same y in every card because k is shared
       const rr = c.ref || ih;
@@ -596,6 +638,13 @@
   };
   $('q').oninput = () => buildList($('q').value);
   $('play').onchange = () => { cur.t0 = performance.now(); };
+  // 1:1 changes the card geometry, so the cards have to be rebuilt, not repainted
+  B.real = false;
+  $('real').onchange = () => {
+    B.real = $('real').checked;
+    if (cur.boss) B.buildCards();
+    B.toast(B.real ? 'real size — 1 card pixel is 1 game pixel' : 'fitted to the card');
+  };
   $('before').onchange = () => {};
   $('copy').onclick = () => B.copyPatch();
   $('revert').onclick = () => {
