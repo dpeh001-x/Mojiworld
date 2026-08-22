@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.45';
+const GAME_VERSION = 'v0.30.46';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -17161,7 +17161,7 @@ const SKILLS = {
   doombringer_ult:    { name:'Calamity Incarnate',      icon:'🗡️', cls:'warrior', job:'berserker', master:'doombringer', slot:'b', mp:72,  cd:66000, desc:'Wield the colossal blade — a melee cleave plus three screen-crossing piercing blade-waves. Collects every DOOM brand on screen (+1% execute threshold and +0.4s window each) and burns all Calamity Heat (+0.5% damage per point).' },
   crusader_ult:       { name:'Bastion of Dawn',         icon:'🛡️', cls:'warrior', job:'knight',    master:'crusader',    slot:'b', mp:68,  cd:62000, desc:'Tap once to ARM (free), tap again to RELEASE — no cooldown between taps; the 62s cooldown starts at release. Judgement stacks per hit taken (max 5). Release: full party heal + 15s half-damage shield for everyone, drag foes in, and 2 homing orbs per stack burst on impact. Armed for 15s, then erupts on its own.' },
   dragoon_ult:        { name:'Skyfall Dominion',        icon:'🌩️', cls:'warrior', job:'knight',    master:'dragoon',     slot:'b', mp:62,  cd:56000, desc:'Leap skyward and call down 9 dragon-lances that fall on foes within 900px (or rain around you if none), then crash down in a 460px shockwave.' },
-  shadowlord_ult:     { name:'Shadow Sovereign',        icon:'🌑', cls:'rogue',   job:'ninja',     master:'shadowlord',  slot:'b', mp:62,  cd:62000, desc:'Split into a shadow swarm whose echoed strikes collapse onto your foes.' },
+  shadowlord_ult:     { name:'Shadow Sovereign',        icon:'🌑', cls:'rogue',   job:'ninja',     master:'shadowlord',  slot:'b', mp:62,  cd:60000, desc:'Summon your Sovereign Shade: a shadow of yourself that follows your every step for 12s and echoes EVERY hit you land as a second strike. Cooldown 60s.' },
   shinobi_ult:        { name:'Hundred-Hand Shadow Dance', icon:'🥷', cls:'rogue', job:'ninja',     master:'shinobi',     slot:'b', mp:60,  cd:40000, desc:'A blade dance that teleport-chains through every nearby foe in a flurry of slashes.' },
   nightreaper_ult:    { name:'Bloodmoon Domain',        icon:'🌒', cls:'rogue',   job:'assassin',  master:'nightreaper', slot:'b', mp:62,  cd:60000, desc:'Raise a blood-eclipse domain: all hits crit and bleed, kills chain soul-scythes.' },
   phantom_ult:        { name:'Voidwalk',                icon:'🕳️', cls:'rogue',   job:'assassin',  master:'phantom',     slot:'b', mp:62,  cd:60000, desc:'Phase into the void, drag foes into a singularity, then implode it.' },
@@ -17782,7 +17782,7 @@ const SKILL_LV10_BONUS = {
   phantom_cut:       { window: { ms: 7000,  execute: { frac: 0.25, bossMul: 1.40 },
                                  announce: '🗡 VOIDRIFT — the marked are already dead.' } },
   shadowlord_ult:    { window: { ms: 9000,  mark: { mul: 1.22, ms: 7000 },
-                                 announce: '👑 SHADOW SOVEREIGN — the dark names its prey.' } },
+                                 announce: '👑 SHADOW SOVEREIGN — your shadow takes up the blade.' } },
   shinobi_ult:       { window: { ms: 8000,  chain: { n: 4, frac: 0.55 },
                                  announce: '🌀 HUNDRED HANDS — one blade, everywhere.' } },
   nightreaper_ult:   { window: { ms: 10000, refundOnKill: 0.30, lifesteal: 0.15,
@@ -33405,7 +33405,7 @@ const BASIC_HIT_SKILLS = new Set(['melee','arrow','dagger','bolt']);
 // corpse detonating, so it does not roll either.
 // v0.29.362 — 'overflow' joins: the carried overkill was already EARNED by a
 // hit that connected and killed; the jump to the neighbour does not re-roll.
-const MISS_EXEMPT_SKILLS = new Set(['thorns','burn','flamedash','nova','bloom','overflow']);
+const MISS_EXEMPT_SKILLS = new Set(['thorns','burn','flamedash','nova','bloom','overflow','shade']);   // v0.30.x — 'shade': the Sovereign Shade repeats a strike that already connected
 function _rollAccuracyHit(attackerAccuracy, targetEvasion, minFloor) {
   const ev = +targetEvasion || 0;
   if (ev <= 0) return true;
@@ -42406,6 +42406,7 @@ function loadState() {
     player._aegis = null;
     player._necromancerOrbs = null;   // v0.29.911 — Soul Ward orbs die with their caster
     player._clones = null;
+    player._shade = null;               // v0.30.x — the Sovereign Shade does not survive a load either
     player._ballistaTurrets = null;     // v0.26.x — clear War Machine turrets on save load
     player._ballistaChannel = null;     // v0.25.257 — clear channel state on save load
     player._eclipseHold = null; player._eclipseRain = null;   // v0.30.34 - Eclipse hold resets with the channel; v0.30.38 - and its rain clock
@@ -57298,6 +57299,7 @@ function loadMap(id, entryX, entryY) {
     player._aegis = null;
     player._necromancerOrbs = null;   // v0.29.911 — Soul Ward orbs die with their caster
     player._clones = null;
+    player._shade = null;
     player._ballistaTurrets = null;
     player._ballistaChannel = null;
     player._eclipseHold = null; player._eclipseRain = null;   // v0.30.34 - Eclipse hold resets with the channel; v0.30.38 - and its rain clock
@@ -61033,6 +61035,7 @@ function updatePlayer(dt) {
     }
   }
 
+  if (player._shade) _tickSovereignShade(dt);   // v0.30.x — Sovereign Shade follow + echo payout
   // v0.25.236 — Shadow Clones reworked into floating turrets. Each clone
   // anchors to a fixed world position (set at cast time), bobs gently in
   // place, and pulses a circular AOE every ~400 ms that hits every enemy
@@ -62766,6 +62769,7 @@ function triggerDeath() {
   player._bloodstormNextTick = 0;
   player._aegis = null;
   player._clones = null;
+  player._shade = null;               // v0.30.x — a shadow needs a caster
   player._ballistaTurrets = null;     // v0.26.x — turrets can't survive death
   player._ballistaChannel = null;     // v0.25.257 — channel can't survive death
   player._eclipseHold = null; player._eclipseRain = null;   // v0.30.34 - Eclipse hold resets with the channel; v0.30.38 - and its rain clock
@@ -63104,6 +63108,7 @@ function respawnAtTown() {
   player._bloodstormNextTick = 0;
   player._aegis = null;
   player._clones = null;
+  player._shade = null;
   player._ballistaTurrets = null;     // v0.26.x — turrets reset on respawn
   player._ballistaChannel = null;     // v0.25.257 — channel resets on respawn
   player._eclipseHold = null; player._eclipseRain = null;   // v0.30.34 - Eclipse hold resets with the channel; v0.30.38 - and its rain clock
@@ -71835,6 +71840,30 @@ const SKILL_FNS = {
     scheduleSkillTimer(() => { if (player.hp <= 0) return; player.vy = 18; performAround(460, 6.0, { color: '#3388ff', kb: 14 }); flash(0.7); addShake(12); addHitStop(100); }, 180 + 9 * 100 + 200);
   },
   shadowlord_ult: () => {
+    // v0.30.x — SOVEREIGN SHADE (per user: "improve on the shadow sovereign
+    // skill by making a clone shadow partner self buff (much like the mirror)
+    // clone that follows you and doubles up all your attacks, cooldown 60
+    // seconds"). The v0.26 star-pattern teleport is gone; the ultimate is
+    // now a 12s partner: a shadow of the hero's OWN look (same pipeline the
+    // Mirror Self reflection uses) that trails a step behind and lands a
+    // second strike on every hit the player deals — see the hook in
+    // hitMonster and _tickSovereignShade for the echo itself.
+    showToast('SOVEREIGN SHADE — your shadow takes up the blade', 'legendary'); flash(0.5); addShake(6);
+    player.invulnerable = Math.max(player.invulnerable, 300);
+    const _scx = player.x + player.w / 2, _scy = player.y + player.h / 2;
+    player._shade = {
+      life: LX_SHADE_LIFE, maxLife: LX_SHADE_LIFE,
+      x: _scx - player.facing * 46, y: _scy,
+      facing: player.facing, queue: [], swing: 0, echoes: 0,
+    };
+    spawnSpriteBurst(_scx, _scy, 'shadowlord_ult', { size: 300, life: 34, spin: 0.4, frameGap: 3 });
+    for (let _i = 0; _i < 10; _i++) {
+      const _a = (_i / 10) * Math.PI * 2;
+      game.particles.push({ x: _scx, y: _scy, vx: Math.cos(_a) * 3.2, vy: Math.sin(_a) * 3.2,
+        life: 24 + Math.random() * 10, color: _i % 2 ? '#c08cff' : '#3a1070', size: 3 });
+    }
+  },
+  shadowlord_ult_legacy_star: () => {
     // v0.26.x — star-pattern shadow teleport: blink through a 5-point star,
     // striking each node, then a heavy punisher back at the start.
     showToast('SHADOW SOVEREIGN', 'legendary'); flash(0.5); addShake(8);
@@ -81639,6 +81668,7 @@ function hitMonster(m, dmg, isCrit, skill) {
   // overwriting the real cause-of-death, and combo counter ticking on
   // corpses. One-line gate at the entry kills the whole class.
   if (!m || m.currentHp <= 0) return;
+  const _shadeRawDmg = +dmg;   // v0.30.x — Sovereign Shade: what this hit ENTERED with (see _lxShadeQueue)
   // v0.27.1 — NaN/Infinity guard. Math.max(1, NaN) === NaN (Math.max is not a NaN
   // filter), so a single caller ever passing a non-finite dmg (a 0/0 stat helper, an
   // undefined multiplier, a corrupt save feeding getAtk()) would poison m.currentHp to
@@ -82417,6 +82447,7 @@ function hitMonster(m, dmg, isCrit, skill) {
     // how a desync starts. `mark` already applied upstream with the global
     // multipliers, so guests get that too.
     _msApplyOnHit(m, finalDmg, isCrit, skill, true);
+    _lxShadeQueue(m, _shadeRawDmg, isCrit, skill);   // v0.30.x — guests get their shade too; the host validates the echo like any hit
     _coopSendDamage(m, finalDmg, isCrit, skill);
     m.currentHp = Math.max(0, m.currentHp - finalDmg);
     // v0.29.x — was 6ms (one frame); match the solo 50ms flash duration.
@@ -82429,6 +82460,7 @@ function hitMonster(m, dmg, isCrit, skill) {
   // exact-lethal value and fall through the NORMAL kill pipeline below —
   // kill credit, EXP, drops and the finisher beat all fire as usual.
   finalDmg = _msApplyOnHit(m, finalDmg, isCrit, skill);
+  _lxShadeQueue(m, _shadeRawDmg, isCrit, skill);   // v0.30.x — the strike connected: the shade will repeat it
   const _hpBeforeWrite = m.currentHp;   // v0.29.362 — Overflow Valve reads overkill off the authoritative write
   m.currentHp -= finalDmg;
   // v0.29.362 — OVERFLOW VALVE (Tier-1). The killing blow's overkill jumps
@@ -107595,6 +107627,119 @@ const _LX_HERO_BAKE_FOOT_X = 50, _LX_HERO_BAKE_FOOT_Y = 80;
 // diminishing returns once the source > 4× the destination pixel size.
 const _LX_HERO_BAKE_SUPER = 5;
 const _LX_HERO_IDLE_BAKE_CACHE = new Map();
+// =========================================================================
+// v0.30.x — SOVEREIGN SHADE (Shadow Sovereign v2). A 12s shadow partner.
+//   BODY    the hero's own look, baked once through the same _drawVectorHero
+//           pipeline the Mirror Self uses (_lxBakeHeroIdle), then darkened
+//           with a source-atop fill on the TRANSPARENT bake — the only place
+//           that tint is correct (on the opaque main canvas it paints a box;
+//           see the v0.29.x Mirror Self note). One bake per look, cached.
+//   FOLLOW  a spring toward a point one step behind the hero (46px against
+//           facing), frame-rate independent (pow(0.80, dt/16)); a jump of
+//           >420px (map change, blink) snaps instead of streaking across.
+//   ECHO    hitMonster queues every player-dealt hit while the shade stands;
+//           the tick pays them out LX_SHADE_ECHO_FRAMES later as a second
+//           hitMonster call tagged 'shade' — the tag is what stops an echo
+//           from echoing. Same raw dmg in, same pipeline, so it is a true
+//           double rather than a flat bonus. Queue is capped and paid out at
+//           most 12 per frame so a multi-hit ultimate cannot stall a frame.
+// =========================================================================
+const LX_SHADE_LIFE        = 12000;   // ms the shade stands
+const LX_SHADE_ECHO_FRAMES = 7;       // ~115ms behind the original hit
+const LX_SHADE_ECHO_MULT   = 1.0;     // "doubles up" — a true double
+const LX_SHADE_QUEUE_CAP   = 48;
+const _LX_SHADE_BAKE = new Map();
+function _lxShadeBake() {
+  const lc = (player && player.lookCustom) || {};
+  const key = [player.cls, lc.skinIdx | 0, lc.hairId, lc.eyeId || 'default', lc.mouthId || 'default'].join('|');
+  let cv = _LX_SHADE_BAKE.get(key);
+  if (cv) return cv;
+  const base = _lxBakeHeroIdle(player.cls, lc.skinIdx | 0, lc.hairId, lc.eyeId, lc.mouthId);
+  cv = document.createElement('canvas');
+  cv.width = base.width; cv.height = base.height;
+  const c = cv.getContext('2d');
+  c.drawImage(base, 0, 0);
+  c.globalCompositeOperation = 'source-atop';
+  c.fillStyle = 'rgba(26,6,52,0.86)';          // the shadow: near-black violet
+  c.fillRect(0, 0, cv.width, cv.height);
+  c.globalCompositeOperation = 'source-over';
+  _LX_SHADE_BAKE.set(key, cv);
+  return cv;
+}
+function _lxShadeQueue(m, rawDmg, isCrit, skill) {
+  const sh = player._shade;
+  if (!sh || sh.life <= 0 || skill === 'shade' || !Number.isFinite(rawDmg)) return;
+  if (sh.queue.length < LX_SHADE_QUEUE_CAP) sh.queue.push({ m, dmg: rawDmg, isCrit: !!isCrit, at: (game.time || 0) + LX_SHADE_ECHO_FRAMES });
+}
+function _tickSovereignShade(dt) {
+  const sh = player._shade;
+  if (!sh) return;
+  sh.life -= dt;
+  const pcx = player.x + player.w / 2, pcy = player.y + player.h / 2;
+  const tx = pcx - player.facing * 46;
+  const ty = pcy - 3 + Math.sin((game.time || 0) * 0.07) * 4;
+  if (Math.abs(sh.x - tx) > 420 || Math.abs(sh.y - ty) > 300) { sh.x = tx; sh.y = ty; }
+  else {
+    const k = 1 - Math.pow(0.80, dt / 16);
+    sh.x += (tx - sh.x) * k; sh.y += (ty - sh.y) * k;
+  }
+  sh.facing = player.facing;
+  // pay out the echoes that have come due
+  const q = sh.queue; let paid = 0;
+  for (let i = 0; i < q.length && paid < 12; ) {
+    const e = q[i];
+    if (e.at > (game.time || 0)) { i++; continue; }
+    q.splice(i, 1); paid++;
+    const m = e.m;
+    if (!m || m.currentHp <= 0 || game.monsters.indexOf(m) < 0) continue;
+    hitMonster(m, e.dmg * LX_SHADE_ECHO_MULT, e.isCrit, 'shade');
+    sh.echoes++; sh.swing = 1;
+    const mcx = m.x + m.w / 2, mcy = m.y + m.h / 2;
+    if (typeof spawnSmoothSlash === 'function')
+      spawnSmoothSlash(mcx, mcy, Math.atan2(mcy - sh.y, mcx - sh.x), 44, '#7a2ad0', { thickness: 3, spread: Math.PI * 0.9, life: 10 });
+    if (typeof spawnSmoothImpact === 'function') spawnSmoothImpact(mcx, mcy, '#8844cc');
+    // the shade lunges: two ghosts from its spot toward the target
+    if (game.afterImages) for (let _k = 1; _k <= 2; _k++) {
+      const _t = _k / 3;
+      game.afterImages.push({ x: sh.x + (mcx - sh.x) * _t - player.w / 2, y: sh.y + (mcy - sh.y) * _t - player.h / 2,
+        facing: sh.facing, state: 'attack', life: 12, maxLife: 12, color: 'rgba(110,40,190,0.6)' });
+    }
+  }
+  if (sh.swing > 0) sh.swing = Math.max(0, sh.swing - dt / 180);
+  if (sh.life <= 0) {
+    if (typeof spawnSpriteBurst === 'function') spawnSpriteBurst(sh.x, sh.y, 'shadowlord_ult', { size: 200, life: 26, spin: 0.3, frameGap: 3 });
+    player._shade = null;
+  }
+}
+function drawSovereignShade() {
+  const sh = player._shade;
+  if (!sh || typeof _lxBakeHeroIdle !== 'function' || typeof _drawVectorHero !== 'function') return;
+  let bake = null;
+  try { bake = _lxShadeBake(); } catch (e) { bake = null; }
+  if (!bake) return;
+  const sx = sh.x - game.camera.x, sy = sh.y;
+  const fade = sh.life < 400 ? sh.life / 400 : 1;
+  const SC = HERO_WORLD_DISPLAY_SCALE;
+  // violet under-glow, breathing with each echo
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = 'rgba(140,68,204,' + (fade * (0.16 + sh.swing * 0.3)).toFixed(3) + ')';
+  ctx.beginPath(); ctx.ellipse(sx, sy + 4, 20 + sh.swing * 6, 24 + sh.swing * 6, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  // the body: the bake's feet sit at (50,80) of a 100x100 logical box; the
+  // hero is drawn at HERO_WORLD_DISPLAY_SCALE, so the shade matches it
+  const footX = sx, footY = sy + player.h / 2;
+  ctx.save();
+  ctx.globalAlpha = 0.9 * fade;
+  if (sh.facing < 0) {
+    ctx.translate(footX, 0); ctx.scale(-1, 1);
+    ctx.drawImage(bake, -50 * SC, footY - 80 * SC, 100 * SC, 100 * SC);
+  } else {
+    ctx.drawImage(bake, footX - 50 * SC, footY - 80 * SC, 100 * SC, 100 * SC);
+  }
+  ctx.restore();
+  if (typeof _drawSummonTimer === 'function') _drawSummonTimer(sx, sy - 46, sh.life, sh.maxLife);
+}
 function _lxBakeHeroIdle(cls, skinIdx, hairId, eyeId, mouthId) {
   const key = cls + '|' + skinIdx + '|' + hairId + '|' + (eyeId || 'default') + '|' + (mouthId || 'default');
   let baked = _LX_HERO_IDLE_BAKE_CACHE.get(key);
@@ -128496,6 +128641,7 @@ function loop(time) {
   drawAfterImages();
   drawMinions();
   drawShadowClones();
+  drawSovereignShade();   // v0.30.x — the shade sits behind the hero like the clones do
   drawBallistaTurrets();
   if (typeof _mpDrawPeers === 'function') _mpDrawPeers();   // ghost peers underneath
   drawPlayer();
