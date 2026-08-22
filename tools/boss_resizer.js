@@ -73,8 +73,8 @@
   const rank = (a) => {
     const boss = bossOf(a.key);
     const rest = a.key === boss ? '' : a.key.slice(boss.length);
-    const form = (rest.match(/^(d+)/) || [0, 1])[1] | 0;
-    const move = rest.replace(/^d+/, '') || a.state;
+    const form = (rest.match(/^(\d+)/) || [0, 1])[1] | 0;
+    const move = rest.replace(/^\d+/, '') || a.state;
     return [form || 1, MOVE[move] != null ? MOVE[move] : 20, move];
   };
   for (const list of Object.values(BOSSES)) {
@@ -175,15 +175,75 @@
   const B = window.__BR, cur = B.cur, $ = B.$, el = B.el;
   const CW = 200, CH = 250, GROUND = CH - 26;
 
-  function viewScale() {
+  // Fixed for as long as one boss is selected — see the note in br4_scale.
+  function fitScale() {
     let tall = 1;
     for (const a of B.BOSSES[cur.boss]) {
       const set = B.setOf(a.key, a.state);
       for (let i = 0; i < set.count; i++)
         tall = Math.max(tall, B.frameH(a.key, a.state, i, true), B.frameH(a.key, a.state, i, false));
     }
-    return (GROUND - 14) / tall;
+    cur.k = (GROUND - 14) / (tall * 1.15);   // headroom so a grow does not clip at once
   }
+  const viewScale = () => cur.k || 0.3;
+  // One flat silhouette per FORM, baked from that form's idle at the frame
+  // closest to its median height — a stable shape to hold the animation
+  // against. Tinted on a transparent canvas (source-atop on the opaque card
+  // would paint a box, the Mirror Self lesson).
+  const SIL = new Map();
+  function silhouette(formKey) {
+    if (SIL.has(formKey)) return SIL.get(formKey);
+    const set = B.setOf(formKey, 'idle');
+    if (!set) { SIL.set(formKey, null); return null; }
+    const hs = set.f.map((_, i) => B.srcSpan(set, i));
+    const med = B.median(hs);
+    let idx = 0;
+    for (let i = 1; i < hs.length; i++)
+      if (Math.abs(hs[i] - med) < Math.abs(hs[idx] - med)) idx = i;
+    const rec = { set, idx, img: new Image(), cv: null };
+    rec.img.crossOrigin = 'anonymous';
+    rec.img.onload = () => {
+      const H = 460, W = Math.max(1, Math.round(H * set.w / set.h));
+      const tint = (col) => {
+        const cv = document.createElement('canvas');
+        cv.width = W; cv.height = H;
+        const c = cv.getContext('2d');
+        c.drawImage(rec.img, 0, 0, W, H);
+        c.globalCompositeOperation = 'source-atop';
+        c.fillStyle = col; c.fillRect(0, 0, W, H);
+        c.globalCompositeOperation = 'source-over';
+        return cv;
+      };
+      rec.cv = tint('#57c9ff');                 // the soft fill, drawn behind
+      // Compounding an image onto itself drives alpha toward 1 — the cheap way
+      // to turn a soft-edged sprite into a hard stencil.
+      const solidify = (src, times) => {
+        const cv = document.createElement('canvas');
+        cv.width = W; cv.height = H;
+        const c = cv.getContext('2d');
+        for (let n = 0; n < times; n++) c.drawImage(src, 0, 0);
+        return cv;
+      };
+      const hard = solidify(rec.cv, 6);
+      // the ring: smear the hard stencil 8 ways, then punch the stencil out
+      const R = 14;   // bake-space; the ring scales down with the sprite
+      const ring = document.createElement('canvas');
+      ring.width = W; ring.height = H;
+      const rc = ring.getContext('2d');
+      for (let a = 0; a < 8; a++) {
+        const th = a * Math.PI / 4;
+        rc.drawImage(hard, Math.round(Math.cos(th) * R), Math.round(Math.sin(th) * R));
+      }
+      rc.globalCompositeOperation = 'destination-out';
+      rc.drawImage(hard, 0, 0);
+      rc.globalCompositeOperation = 'source-over';
+      rec.ring = solidify(ring, 3);
+    };
+    rec.img.src = set.dir + '_' + idx + '.webp';
+    SIL.set(formKey, rec);
+    return rec;
+  }
+
   function frameIndex(n, ms, t) {
     if (n < 2) return 0;
     const period = (n - 1) * 2, k = Math.floor(t / ms) % period;
@@ -192,7 +252,10 @@
   // Draw so the frame's content is exactly `h` game px tall with its feet on
   // the ground line — the same foot anchoring _drawBossSprite uses.
   function blit(c2, img, set, i, h, k, alpha) {
-    if (!img || !img.complete || !img.naturalWidth) return;
+    // canvases have no .complete / .naturalWidth - the old guard silently
+    // dropped every overlay draw, which is why the idle never appeared
+    if (!img) return;
+    if (img.tagName === 'IMG' && (!img.complete || !img.naturalWidth)) return;
     const cH = B.srcSpan(set, i), bot = set.f[i].c[1];
     const canvasH = h * (set.h / cH), canvasW = canvasH * (set.w / set.h);
     const below = (set.h - 1 - bot) / set.h * canvasH;
@@ -207,11 +270,13 @@
     host.innerHTML = '';
     cur.cards = [];
     if (!cur.boss) { host.appendChild(el('div', 'empty', 'Pick a boss on the left to see all of its animations.')); return; }
+    fitScale();
     const ih = B.idleH(cur.boss);
     for (const a of B.BOSSES[cur.boss]) {
       const set = B.setOf(a.key, a.state);
       const card = el('div', 'card');
       const cv = el('canvas'); cv.width = CW; cv.height = CH;
+      cv.title = 'drag up or down to resize this animation';
       card.appendChild(cv);
       const nm = el('div', 'nm');
       nm.appendChild(el('span', null, B.animLabel(a.key, a.state)));
@@ -234,13 +299,43 @@
         im.src = set.dir + '_' + i + '.webp'; imgs.push(im);
       }
       host.appendChild(card);
-      cur.cards.push({ a, set, cv, c2: cv.getContext('2d'), imgs, inp, vs, card });
+      const rec = { a, set, cv, c2: cv.getContext('2d'), imgs, inp, vs, card,
+                    sil: silhouette(B.formKeyOf(a.key)) };
+      cur.cards.push(rec);
+      attachDrag(rec);
     }
     refresh();
   }
 
+  // Drag anywhere on a card to scale that animation: the height follows the
+  // pointer, relative to where the drag began, so grabbing the middle of a
+  // sprite does not make it jump. The canvas is CSS-sized to its own pixel
+  // height, so one pointer pixel is one canvas pixel vertically.
+  function attachDrag(c) {
+    let from = null;
+    c.cv.addEventListener('pointerdown', (e) => {
+      from = { y: e.clientY, h: B.animH(c.a.key, c.a.state, true) };
+      c.cv.setPointerCapture(e.pointerId);
+      c.card.classList.add('dragging');
+      e.preventDefault();
+    });
+    c.cv.addEventListener('pointermove', (e) => {
+      if (!from) return;
+      const k = viewScale();
+      if (!k) return;
+      B.setAnimH(c.a.key, c.a.state, from.h + (from.y - e.clientY) / k);
+      refresh(true);                       // light: numbers now, list on release
+    });
+    const end = () => { if (!from) return; from = null;
+      c.card.classList.remove('dragging'); refresh(); };
+    c.cv.addEventListener('pointerup', end);
+    c.cv.addEventListener('pointercancel', end);
+  }
+
   // Numbers only — the canvases repaint themselves on the animation loop.
-  function refresh() {
+  // `light` skips the boss list and the patch box, which are too heavy to
+  // rebuild on every pointermove.
+  function refresh(light) {
     const ih = B.idleH(cur.boss);
     for (const c of cur.cards) {
       const h = B.animH(c.a.key, c.a.state, true);
@@ -261,6 +356,7 @@
       ? B.BOSSES[cur.boss].length + ' animations · idle ' + Math.round(ih) + ' px · worst '
         + sp.toFixed(0) + '% off'
       : '';
+    if (light) return;
     $('patch').value = B.patchJSON();
     B.buildList($('q').value);
   }
@@ -268,6 +364,7 @@
   function paint() {
     if (!cur.boss || !cur.cards.length) return;
     const k = viewScale(), showWas = $('before').checked, playing = $('play').checked;
+    const showIdle = $('idleover').checked;
     const t = performance.now() - cur.t0;
     const ih = B.idleH(cur.boss);
     // (each card's dashed marker is its OWN form's idle — see refresh())
@@ -284,10 +381,18 @@
       }
       c2.strokeStyle = '#4a3d6b'; c2.lineWidth = 2;
       c2.beginPath(); c2.moveTo(0, GROUND + 1); c2.lineTo(CW, GROUND + 1); c2.stroke();
+      // the form's idle, pinned to the same foot line: the animation should
+      // cover it. Anything sticking out is the size difference, to scale.
+      if (showIdle && c.sil && c.sil.cv && rr)
+        blit(c2, c.sil.cv, c.sil.set, c.sil.idx, rr, k, 0.30);
       const ms = B.STATE_MS[a.state] || 100;
       const i = playing ? frameIndex(set.count, ms, t) : 0;
       if (showWas) blit(c2, c.imgs[i], set, i, B.frameH(a.key, a.state, i, false), k, 0.25);
       blit(c2, c.imgs[i], set, i, B.frameH(a.key, a.state, i, true), k, 1);
+      // the idle's outline goes ON TOP: when the animation is the bigger of
+      // the two it spills past this ring, which the fill behind cannot show
+      if (showIdle && c.sil && c.sil.ring && rr)
+        blit(c2, c.sil.ring, c.sil.set, c.sil.idx, rr, k, 1);
     }
   }
   (function loop() { paint(); requestAnimationFrame(loop); })();
