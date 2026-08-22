@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.56';
+const GAME_VERSION = 'v0.30.57';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -17183,7 +17183,7 @@ const SKILLS = {
   doombringer_ult:    { name:'Calamity Incarnate',      icon:'🗡️', cls:'warrior', job:'berserker', master:'doombringer', slot:'b', mp:72,  cd:66000, desc:'Wield the colossal blade — a melee cleave plus three screen-crossing piercing blade-waves. Collects every DOOM brand on screen (+1% execute threshold and +0.4s window each) and burns all Calamity Heat (+0.5% damage per point).' },
   crusader_ult:       { name:'Bastion of Dawn',         icon:'🛡️', cls:'warrior', job:'knight',    master:'crusader',    slot:'b', mp:68,  cd:62000, desc:'Tap once to ARM (free), tap again to RELEASE — no cooldown between taps; the 62s cooldown starts at release. Judgement stacks per hit taken (max 5). Release: full party heal + 15s half-damage shield for everyone, drag foes in, and 2 homing orbs per stack burst on impact. Armed for 15s, then erupts on its own.' },
   dragoon_ult:        { name:'Skyfall Dominion',        icon:'🌩️', cls:'warrior', job:'knight',    master:'dragoon',     slot:'b', mp:62,  cd:56000, desc:'Leap skyward and call down 9 dragon-lances that fall on foes within 900px (or rain around you if none), then crash down in a 460px shockwave.' },
-  shadowlord_ult:     { name:'Shadow Sovereign',        icon:'🌑', cls:'rogue',   job:'ninja',     master:'shadowlord',  slot:'b', mp:62,  cd:60000, desc:'Summon your Sovereign Shade: a shadow of yourself that follows your every step for 12s and echoes EVERY hit you land as a second strike. Cooldown 60s.' },
+  shadowlord_ult:     { name:'Shadow Sovereign',        icon:'🌑', cls:'rogue',   job:'ninja',     master:'shadowlord',  slot:'b', mp:62,  cd:60000, desc:'Summon your Sovereign Shade: a shadow of yourself that mirrors your every move — run, jump, strike — a beat behind for 20s, and echoes EVERY hit you land as a second strike. Cooldown 60s.' },
   shinobi_ult:        { name:'Hundred-Hand Shadow Dance', icon:'🥷', cls:'rogue', job:'ninja',     master:'shinobi',     slot:'b', mp:60,  cd:40000, desc:'A blade dance that teleport-chains through every nearby foe in a flurry of slashes.' },
   nightreaper_ult:    { name:'Bloodmoon Domain',        icon:'🌒', cls:'rogue',   job:'assassin',  master:'nightreaper', slot:'b', mp:62,  cd:60000, desc:'Raise a blood-eclipse domain: all hits crit and bleed, kills chain soul-scythes.' },
   phantom_ult:        { name:'Voidwalk',                icon:'🕳️', cls:'rogue',   job:'assassin',  master:'phantom',     slot:'b', mp:62,  cd:60000, desc:'Phase into the void, drag foes into a singularity, then implode it.' },
@@ -71901,7 +71901,7 @@ const SKILL_FNS = {
     // skill by making a clone shadow partner self buff (much like the mirror)
     // clone that follows you and doubles up all your attacks, cooldown 60
     // seconds"). The v0.26 star-pattern teleport is gone; the ultimate is
-    // now a 12s partner: a shadow of the hero's OWN look (same pipeline the
+    // now a 20s partner: a shadow of the hero's OWN look (same pipeline the
     // Mirror Self reflection uses) that trails a step behind and lands a
     // second strike on every hit the player deals — see the hook in
     // hitMonster and _tickSovereignShade for the echo itself.
@@ -71910,8 +71910,11 @@ const SKILL_FNS = {
     const _scx = player.x + player.w / 2, _scy = player.y + player.h / 2;
     player._shade = {
       life: LX_SHADE_LIFE, maxLife: LX_SHADE_LIFE,
-      x: _scx - player.facing * 46, y: _scy,
+      x: _scx - player.facing * LX_SHADE_OFFSET, y: _scy,
       facing: player.facing, queue: [], swing: 0, echoes: 0,
+      // v0.30.57 — the mimicry buffer: filled by the tick, replayed
+      // LX_SHADE_DELAY frames later. map is what a room change is caught by.
+      trail: [], anim: 'idle', animT: 0.5, off: null, map: game.currentMap,
     };
     spawnSpriteBurst(_scx, _scy, 'shadowlord_ult', { size: 300, life: 34, spin: 0.4, frameGap: 3 });
     for (let _i = 0; _i < 10; _i++) {
@@ -107807,15 +107810,22 @@ const _LX_HERO_BAKE_FOOT_X = 50, _LX_HERO_BAKE_FOOT_Y = 80;
 const _LX_HERO_BAKE_SUPER = 5;
 const _LX_HERO_IDLE_BAKE_CACHE = new Map();
 // =========================================================================
-// v0.30.x — SOVEREIGN SHADE (Shadow Sovereign v2). A 12s shadow partner.
+// v0.30.x — SOVEREIGN SHADE (Shadow Sovereign v2). A 20s shadow partner.
 //   BODY    the hero's own look, baked once through the same _drawVectorHero
 //           pipeline the Mirror Self uses (_lxBakeHeroIdle), then darkened
 //           with a source-atop fill on the TRANSPARENT bake — the only place
 //           that tint is correct (on the opaque main canvas it paints a box;
 //           see the v0.29.x Mirror Self note). One bake per look, cached.
-//   FOLLOW  a spring toward a point one step behind the hero (46px against
-//           facing), frame-rate independent (pow(0.80, dt/16)); a jump of
-//           >420px (map change, blink) snaps instead of streaking across.
+//   MIMIC   v0.30.57 — the shade REPLAYS the hero. Each frame the tick
+//           records {centre, facing, resolved anim, anim time} into a ring
+//           buffer LX_SHADE_DELAY deep and renders the oldest entry, so every
+//           run, jump, fall, dash and class attack pose is reproduced a beat
+//           behind — the delay is the echo delay, so the swing lands on the
+//           frame the echo pays. Position is taken exactly (the recorded path
+//           is already smooth); only the behind-the-hero offset eases, so a
+//           turn on the spot slides across instead of popping. A room change,
+//           or any single-frame move past LX_SHADE_WARP, flushes the buffer
+//           rather than replaying a spot in a map you have left.
 //   ECHO    hitMonster queues every player-dealt hit while the shade stands;
 //           the tick pays them out LX_SHADE_ECHO_FRAMES later as a second
 //           hitMonster call tagged 'shade' — the tag is what stops an echo
@@ -107823,10 +107833,19 @@ const _LX_HERO_IDLE_BAKE_CACHE = new Map();
 //           double rather than a flat bonus. Queue is capped and paid out at
 //           most 12 per frame so a multi-hit ultimate cannot stall a frame.
 // =========================================================================
-const LX_SHADE_LIFE        = 12000;   // ms the shade stands
+// v0.30.57 — 12000 -> 20000 per user ("make the skill buff last longer").
+// A 60 s cooldown bought 12 s of partner: 20% uptime for a rogue ultimate.
+const LX_SHADE_LIFE        = 20000;   // ms the shade stands
 const LX_SHADE_ECHO_FRAMES = 7;       // ~115ms behind the original hit
 const LX_SHADE_ECHO_MULT   = 1.0;     // "doubles up" — a true double
 const LX_SHADE_QUEUE_CAP   = 48;
+// v0.30.57 — MIMICRY (per user: "the shadow should mimic the player's every
+// movement"). The delay is deliberately LX_SHADE_ECHO_FRAMES: the shade's
+// swing then plays on the same frame the echo damage is paid, so the second
+// strike has a body behind it instead of arriving from nowhere.
+const LX_SHADE_DELAY       = LX_SHADE_ECHO_FRAMES;   // frames the shade lags you
+const LX_SHADE_OFFSET      = 40;      // px behind the recorded facing
+const LX_SHADE_WARP        = 700;     // px in one frame => a room change, not a blink
 const _LX_SHADE_BAKE = new Map();
 // v0.30.x — the shade's OWN bake box (per user: "it looks cut off at the top").
 // The first cut reused _lxBakeHeroIdle's 100x100 canvas, whose feet sit at
@@ -107864,6 +107883,47 @@ function _lxShadeBake() {
   if (_hairDone) _LX_SHADE_BAKE.set(key, cv);
   return cv;
 }
+// v0.30.57 — the shade's pose, drawn LIVE (per user: "the shadow should
+// mimic the player's every movement"). _lxShadeBake below caches ONE frozen
+// idle pose per look, which is why the old shade stood still through a
+// 12-second jump-and-swing. This renders the recorded anim + anim time into a
+// single reused offscreen canvas each frame — one _drawVectorHero call, the
+// same cost the hero itself pays, and only while the shade stands. Facing is
+// forced to 1 and flipped at blit time, exactly as the bake path does, so one
+// canvas serves both directions.
+let _LX_SHADE_POSE_CV = null, _LX_SHADE_POSE_CTX = null;
+function _lxShadePose(sh) {
+  if (typeof document === 'undefined' || typeof _drawVectorHero !== 'function') return null;
+  if (!_LX_SHADE_POSE_CV) {
+    _LX_SHADE_POSE_CV = document.createElement('canvas');
+    _LX_SHADE_POSE_CV.width  = LX_SHADE_BAKE_W * LX_SHADE_SUPER;
+    _LX_SHADE_POSE_CV.height = LX_SHADE_BAKE_H * LX_SHADE_SUPER;
+    _LX_SHADE_POSE_CTX = _LX_SHADE_POSE_CV.getContext('2d');
+  }
+  const cv = _LX_SHADE_POSE_CV, c = _LX_SHADE_POSE_CTX;
+  if (!c) return null;
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.clearRect(0, 0, cv.width, cv.height);
+  if (typeof _lxUseEntityImageQuality === 'function') _lxUseEntityImageQuality(c);
+  c.scale(LX_SHADE_SUPER, LX_SHADE_SUPER);
+  const lc = (player && player.lookCustom) || {};
+  const pw = player.w || 28, ph = player.h || 44;
+  _drawVectorHero(LX_SHADE_FOOT_X - pw / 2, LX_SHADE_FOOT_Y - ph, c, {
+    cls: player.cls,
+    lookCustom: { skinIdx: lc.skinIdx | 0, hairId: lc.hairId, eyeId: lc.eyeId, mouthId: lc.mouthId, msxId: null },
+    animName: sh.anim || 'idle',
+    animTime: (sh.animT != null) ? sh.animT : 0.5,
+    forcedFacing: 1,
+  });
+  // the tint is correct only on a TRANSPARENT canvas — source-atop on the
+  // opaque main canvas paints a box (the v0.29.x Mirror Self note)
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.globalCompositeOperation = 'source-atop';
+  c.fillStyle = 'rgba(26,6,52,0.86)';
+  c.fillRect(0, 0, cv.width, cv.height);
+  c.globalCompositeOperation = 'source-over';
+  return cv;
+}
 function _lxShadeQueue(m, rawDmg, isCrit, skill) {
   const sh = player._shade;
   if (!sh || sh.life <= 0 || skill === 'shade' || !Number.isFinite(rawDmg)) return;
@@ -107873,15 +107933,32 @@ function _tickSovereignShade(dt) {
   const sh = player._shade;
   if (!sh) return;
   sh.life -= dt;
+  // v0.30.57 — MIMICRY. Record the hero's pose this frame, render the one
+  // from LX_SHADE_DELAY frames ago. _heroVecAnimFor / _heroVecTimeNorm are the
+  // exact pair drawPlayer resolves through, so whatever the hero is doing —
+  // walk, jump, dash, chant, a class-specific attack — is what the shade does
+  // a beat later. Nothing is re-derived from velocity, so nothing can disagree.
   const pcx = player.x + player.w / 2, pcy = player.y + player.h / 2;
-  const tx = pcx - player.facing * 46;
-  const ty = pcy - 3 + Math.sin((game.time || 0) * 0.07) * 4;
-  if (Math.abs(sh.x - tx) > 420 || Math.abs(sh.y - ty) > 300) { sh.x = tx; sh.y = ty; }
-  else {
-    const k = 1 - Math.pow(0.80, dt / 16);
-    sh.x += (tx - sh.x) * k; sh.y += (ty - sh.y) * k;
+  const _sAnim = (typeof _heroVecAnimFor === 'function') ? _heroVecAnimFor() : 'idle';
+  const _sT = (typeof _heroVecTimeNorm === 'function') ? _heroVecTimeNorm(_sAnim) : 0.5;
+  const _tr = sh.trail || (sh.trail = []);
+  const _prev = _tr.length ? _tr[_tr.length - 1] : null;
+  // a room change (or a move no blink could make) would have the shade
+  // replaying a spot in a map you have left — flush instead of streaking
+  if (sh.map !== game.currentMap
+      || (_prev && Math.abs(pcx - _prev.cx) + Math.abs(pcy - _prev.cy) > LX_SHADE_WARP)) {
+    _tr.length = 0; sh.map = game.currentMap; sh.off = null;
   }
-  sh.facing = player.facing;
+  _tr.push({ cx: pcx, cy: pcy, f: player.facing, a: _sAnim, t: _sT });
+  while (_tr.length > LX_SHADE_DELAY + 1) _tr.shift();
+  const _s = _tr[0];
+  // the path is replayed exactly; only WHICH SIDE it stands on eases, so a
+  // turn on the spot slides the shade across rather than teleporting it 80px
+  const _wantOff = -_s.f * LX_SHADE_OFFSET;
+  if (sh.off == null) sh.off = _wantOff;
+  else sh.off += (_wantOff - sh.off) * (1 - Math.pow(0.82, dt / 16));
+  sh.x = _s.cx + sh.off; sh.y = _s.cy;
+  sh.facing = _s.f; sh.anim = _s.a; sh.animT = _s.t;
   // pay out the echoes that have come due
   const q = sh.queue; let paid = 0;
   for (let i = 0; i < q.length && paid < 12; ) {
@@ -107912,8 +107989,10 @@ function _tickSovereignShade(dt) {
 function drawSovereignShade() {
   const sh = player._shade;
   if (!sh || typeof _lxBakeHeroIdle !== 'function' || typeof _drawVectorHero !== 'function') return;
+  // v0.30.57 — the live mimicked pose; the frozen idle bake is the fallback
   let bake = null;
-  try { bake = _lxShadeBake(); } catch (e) { bake = null; }
+  try { bake = _lxShadePose(sh); } catch (e) { bake = null; }
+  if (!bake) { try { bake = _lxShadeBake(); } catch (e2) { bake = null; } }
   if (!bake) return;
   const sx = sh.x - game.camera.x, sy = sh.y;
   const fade = sh.life < 400 ? sh.life / 400 : 1;
