@@ -9678,7 +9678,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.28';
+const GAME_VERSION = 'v0.30.29';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -66129,13 +66129,35 @@ const LX_KAGE_LOCK_MS = 240;
 // generate than to author (every strike wants a different jag).
 // A glyph stamp — scales up and fades, dark rim + hot core, so it reads over
 // both the bright hive and the dark sepulchre backgrounds.
+// v0.30.x — per user: the glyph is 凶 (kyō — "fierce / calamity": the seal's
+// VERDICT on the target, where 影 merely named the technique), and the stamp
+// is restyled as brushed ink (see the 'kanji' draw branch). Everything random
+// about the ink — bleed offsets, drip positions, the landing tilt — is seeded
+// HERE, once per spawn: re-rolled per frame it reads as noise, not ink.
 function spawnKanjiFlash(x, y, glyph, color, opts) {
   opts = opts || {};
   if (!game.smoothFx) game.smoothFx = [];
+  const _sz = opts.size || 96;
+  const _bleed = [];
+  for (let i = 0; i < 3; i++) _bleed.push({ dx: (Math.random() * 2 - 1) * _sz * 0.045, dy: (Math.random() * 2 - 1) * _sz * 0.045 });
+  const _drips = [];
+  const _nd = 2 + (Math.random() < 0.5 ? 1 : 0);
+  for (let i = 0; i < _nd; i++) _drips.push({
+    x: (Math.random() * 2 - 1) * 0.32,          // fraction of size, from centre
+    len: 0.18 + Math.random() * 0.30,            // fraction of size at full run
+    w: 2 + Math.random() * 2.5,
+  });
+  const _spray = [];
+  for (let i = 0; i < 9; i++) _spray.push({
+    a: Math.random() * Math.PI * 2,
+    d: 0.42 + Math.random() * 0.38,              // fraction of size, from centre
+    r: 1.2 + Math.random() * 2.6,
+  });
   game.smoothFx.push({
-    type: 'kanji', x, y, glyph: glyph || '影', color: color || '#ff2b46',
-    size: opts.size || 96, rot: opts.rot || 0,
+    type: 'kanji', x, y, glyph: glyph || '凶', color: color || '#ff2b46',
+    size: _sz, rot: (opts.rot !== undefined) ? opts.rot : (Math.random() * 2 - 1) * 0.09,
     life: opts.life || 26, maxLife: opts.life || 26,
+    bleed: _bleed, drips: _drips, spray: _spray,
   });
 }
 // A jagged bolt. The jag is generated ONCE at spawn and stored, never per
@@ -66784,25 +66806,76 @@ function drawSmoothFx(_behindPass) {
       ctx.drawImage(sprite, _ox, _oy, wpx, hpx);
       ctx.restore();
     } else if (fx.type === 'kanji') {
-      // v0.30.19 — glyph stamp: punches in fast, holds, fades. Drawn additively
-      // over a dark rim so it survives a bright background.
-      const t = 1 - fx.life / fx.maxLife;
-      const grow = 0.55 + Math.min(1, t * 3.2) * 0.55;
+      // v0.30.x — KANJI STAMP v2 (per user: "can be further stylised"). The
+      // v0.30.19 version typeset the glyph in a gothic sans and grew it in —
+      // it read as a chunky pink letter. This reads as a brushed ink seal
+      // SLAMMED onto the screen:
+      //   · lands with OVERSHOOT (1.3 → 1.0, cubic ease-out over the first
+      //     quarter) plus a two-frame impact shake — a stamp lands, it does
+      //     not inflate;
+      //   · a mincho / serif CJK stack first, so the strokes get brush
+      //     contrast wherever the system has such a face; gothic is the last
+      //     resort, not the first;
+      //   · INK BLEED: three low-alpha offset copies behind the glyph, fixed
+      //     per spawn (see spawnKanjiFlash);
+      //   · a CHROMATIC SPLIT on the impact frames — a red / cyan ghost pair
+      //     that collapses into the glyph as it lands;
+      //   · INK DRIPS: two or three runs from the lower edge that lengthen
+      //     through the life, each ending in a bead;
+      //   · the hot core fades faster than the ink, so the afterimage is
+      //     pure red.
+      const t = 1 - fx.life / fx.maxLife;                    // 0 → 1 over life
+      const tIn = Math.min(1, t * 4);                         // the landing quarter
+      const grow = 1.3 - 0.3 * (1 - Math.pow(1 - tIn, 3));   // 1.3 → 1.0, ease-out
+      const shake = tIn < 0.5 ? (Math.random() * 2 - 1) * 3 * (1 - tIn * 2) : 0;
+      const split = (1 - tIn) * fx.size * 0.06;               // chromatic offset, px
       ctx.save();
-      ctx.translate(sx, fx.y);
-      ctx.rotate(fx.rot);
+      ctx.translate(sx + shake, fx.y + shake * 0.6);
+      ctx.rotate(fx.rot || 0);
       ctx.scale(grow, grow);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.font = '900 ' + fx.size + 'px "Noto Sans JP", "Yu Gothic", "Meiryo", sans-serif';
-      ctx.globalAlpha = alpha * 0.9;
-      ctx.lineWidth = Math.max(3, fx.size * 0.09);
-      ctx.strokeStyle = 'rgba(20,0,6,0.85)';
+      ctx.font = '900 ' + fx.size + 'px "Yu Mincho", "MS Mincho", "Hiragino Mincho ProN", "Noto Serif JP", "Noto Serif CJK JP", "Yu Gothic", "Meiryo", serif';
+      ctx.lineJoin = 'round';
+      // ink bleed — behind everything, soft and dark
+      ctx.globalAlpha = alpha * 0.28;
+      ctx.fillStyle = '#3a0010';
+      for (const b of (fx.bleed || [])) ctx.fillText(fx.glyph, b.dx, b.dy);
+      // dark rim + the ink body
+      ctx.globalAlpha = alpha * 0.92;
+      ctx.lineWidth = Math.max(3, fx.size * 0.1);
+      ctx.strokeStyle = 'rgba(20,0,6,0.9)';
       ctx.strokeText(fx.glyph, 0, 0);
       ctx.fillStyle = fx.color;
       ctx.fillText(fx.glyph, 0, 0);
+      // ink drips from the lower edge, growing through the life
+      const _run = Math.min(1, t * 1.6);
+      ctx.lineCap = 'round';
+      for (const d of (fx.drips || [])) {
+        const dx = d.x * fx.size, y0 = fx.size * 0.40, len = d.len * fx.size * _run;
+        if (len < 1) continue;
+        ctx.strokeStyle = fx.color;
+        ctx.lineWidth = d.w;
+        ctx.beginPath(); ctx.moveTo(dx, y0); ctx.lineTo(dx, y0 + len); ctx.stroke();
+        ctx.beginPath(); ctx.arc(dx, y0 + len, d.w * 0.95, 0, Math.PI * 2); ctx.fill();
+      }
+      // ink spray: nine dots flung outward on the landing, settling by a third
+      // of the life and fading with the ink — the brush-stamp cue that does
+      // not depend on which CJK face the system happens to have
+      const _fling = 0.55 + 0.45 * Math.min(1, t * 3);
+      ctx.fillStyle = fx.color;
+      for (const sp of (fx.spray || [])) {
+        const px = Math.cos(sp.a) * sp.d * fx.size * _fling, py = Math.sin(sp.a) * sp.d * fx.size * _fling;
+        ctx.beginPath(); ctx.arc(px, py, sp.r, 0, Math.PI * 2); ctx.fill();
+      }
+      // chromatic ghosts on the landing frames, then the hot core
       ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = alpha * 0.5;
+      if (split > 0.5) {
+        ctx.globalAlpha = alpha * 0.45 * (1 - tIn);
+        ctx.fillStyle = '#ff3a50'; ctx.fillText(fx.glyph, -split, 0);
+        ctx.fillStyle = '#3ae0ff'; ctx.fillText(fx.glyph, split, 0);
+      }
+      ctx.globalAlpha = alpha * 0.55 * (1 - t);
       ctx.fillStyle = '#ffd8de';
       ctx.fillText(fx.glyph, 0, 0);
       ctx.restore();
@@ -70298,7 +70371,7 @@ const SKILL_FNS = {
     scheduleSkillTimer(() => {
       spawnSpriteBurst(destX + player.w / 2, py, 'shinobi_seal',
         { size: 240, life: 30, flipX: _flipX, keepAspect: true });
-      spawnKanjiFlash(destX + player.w / 2, py - 34, '影', '#ff2b46', { size: 104, life: 28 });
+      spawnKanjiFlash(destX + player.w / 2, py - 34, '凶', '#ff2b46', { size: 104, life: 28 });   // v0.30.x — 凶 per user (was 影)
     }, 90);
 
     // ---- the dash --------------------------------------------------------
