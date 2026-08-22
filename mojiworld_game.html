@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.53';
+const GAME_VERSION = 'v0.30.54';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -50364,21 +50364,51 @@ function _wmMobRoster(map) {
 // embedded as a single <image>; only a handful of cheap opacity/transform
 // twinkles stay live. Cached per W×H — repeat opens cost one cache hit.
 let _wmBgCache = null;
+// v0.30.54 — the painted nebula plate (backgrounds/worldmap_bg.webp, ludo.ai)
+// is now the BASE of the diagram's raster backdrop. Before this, the
+// rectangle the nodes sit in was a procedural canvas — four soft gradient
+// blobs, 58 random dots and a cross-flare — and the painted file was only ever
+// referenced by the modal frame's CSS, where three 0.85-opacity gradients
+// buried it anyway. Decoding is async, so the first open paints the old
+// procedural sky and the image's onload re-renders every live diagram.
+const _wmPlate = new Image();
+_wmPlate._lxReady = false;
+_wmPlate.onload = () => {
+  _wmPlate._lxReady = true;
+  _wmBgCache = null;
+  for (const host of document.querySelectorAll('[data-wm-diagram="1"]')) {
+    try { if (host._lxWmRerender) host._lxWmRerender(); } catch (e) {}
+  }
+};
+_wmPlate.onerror = () => { _wmPlate._lxReady = false; };
+_wmPlate.src = 'backgrounds/worldmap_bg.webp';
 function _wmBgRasterURL(W, H) {
   if (_wmBgCache && _wmBgCache.key === W + 'x' + H) return _wmBgCache.url;
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
   const c = cv.getContext('2d');
+  const _plate = _wmPlate._lxReady && _wmPlate.naturalWidth > 0;
+  if (_plate) {
+    // cover-fit the plate, then a light cool scrim so the node labels keep
+    // their contrast against the brightest nebula cores
+    const pw = _wmPlate.naturalWidth, ph = _wmPlate.naturalHeight;
+    const sc = Math.max(W / pw, H / ph);
+    const dw = pw * sc, dh = ph * sc;
+    c.drawImage(_wmPlate, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    c.fillStyle = 'rgba(6,3,20,0.22)'; c.fillRect(0, 0, W, H);
+  }
   const blob = (nx, ny, rx, ry, rot, stops) => {   // soft elliptical nebula
     c.save(); c.translate(nx, ny); c.rotate(rot * Math.PI / 180); c.scale(rx, ry);
     const g = c.createRadialGradient(0, 0, 0, 0, 0, 1);
     for (const s of stops) g.addColorStop(s[0], s[1]);
     c.fillStyle = g; c.fillRect(-1, -1, 2, 2); c.restore();
   };
+  if (!_plate) {   // v0.30.54 — procedural sky only while the plate is still decoding
   blob(W*0.22, H*0.20, W*0.34, H*0.26, -18, [[0,'rgba(150,80,255,0.30)'],[1,'rgba(150,80,255,0)']]);
   blob(W*0.78, H*0.74, W*0.32, H*0.24, 14,  [[0,'rgba(70,180,255,0.23)'],[1,'rgba(70,180,255,0)']]);
   blob(W*0.58, H*0.34, W*0.24, H*0.17, -30, [[0,'rgba(255,90,200,0.18)'],[1,'rgba(255,90,200,0)']]);
   blob(W*0.50, H*0.50, W*0.66, H*0.15, -16, [[0,'rgba(235,240,255,0.06)'],[1,'rgba(235,240,255,0)']]); // milky way
+  }
   const cols = ['rgba(255,255,255,0.65)','rgba(170,210,255,0.6)','rgba(255,230,170,0.55)'];
   for (let i = 0; i < 58; i++) {
     c.globalAlpha = 0.25 + Math.random() * 0.5;
@@ -50399,6 +50429,8 @@ function _wmBgRasterURL(W, H) {
 }
 function _renderWorldMapDiagram(host, opts) {
   if (!host) return;
+  host.setAttribute('data-wm-diagram', '1');                      // v0.30.54
+  host._lxWmRerender = () => _renderWorldMapDiagram(host, opts);   // v0.30.54 — plate decoded after first paint
   host.innerHTML = '';
   const { positions, W, H } = _wmComputePositions();
   const cur = game.currentMap;
@@ -50428,7 +50460,7 @@ function _renderWorldMapDiagram(host, opts) {
   // caller's isAccessible/onPick, so this flag is presentation-only.
   const _wmDev = !!(opts && opts.devMode);
   const _fitCss = _wmFit ? 'width:100%; height:100%; max-height:100%; min-height:0; flex:1 1 auto; ' : 'width:100%; ';
-  svg.style.cssText = _fitCss + 'background:radial-gradient(ellipse at 24% 18%, rgba(88,44,160,0.40), transparent 52%),radial-gradient(ellipse at 78% 80%, rgba(30,90,190,0.34), transparent 55%),radial-gradient(ellipse at 55% 40%, rgba(190,60,160,0.16), transparent 45%),radial-gradient(ellipse at center, #14102e, #060314 82%); border-radius:12px; border:1px solid rgba(160,120,255,0.45); box-shadow:0 0 26px rgba(120,80,220,0.25) inset, 0 0 18px rgba(120,80,220,0.30); display:block;';   // v0.26.868 — galaxy canvas
+  svg.style.cssText = _fitCss + 'background:radial-gradient(ellipse at center, #14102e, #060314 82%); border-radius:12px; border:1px solid rgba(160,120,255,0.45); box-shadow:0 0 26px rgba(120,80,220,0.25) inset, 0 0 18px rgba(120,80,220,0.30); display:block;';   // v0.26.868 — galaxy canvas
   // v0.26.868 — GALAXY BACKDROP (per user "galaxy themed and very fancy").
   // Supersedes the v0.25.563 14-star sparkle: blurred nebula clouds, a tilted
   // milky-way band, ~58 static + 12 twinkling stars, one lazy shooting star,
