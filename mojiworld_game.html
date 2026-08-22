@@ -9708,7 +9708,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.94';
+const GAME_VERSION = 'v0.30.95';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -12137,11 +12137,15 @@ function itemIconHtml(it, sizePx) {
 // lazily probed (emoji fallback until decode / if missing). boonIconHtml(def)
 // drops into the powerup cards, boon panel, and pick prompts.
 const _boonIconStatus = Object.create(null);
+// v0.30.x — the Image the probe below already builds, kept so the canvas
+// renderers can blit it (see _boonSprite). Same object, same single request.
+const _boonIconImg = Object.create(null);
 function _boonIconUrl(id) {
   if (!id) return null;
   if (_boonIconStatus[id] === undefined) {
     _boonIconStatus[id] = 'pending';
     const im = new Image(); im.decoding = 'async';
+    _boonIconImg[id] = im;
     // The Boon panel renders ONCE on open and doesn't re-render when an async
     // sprite finishes decoding (unlike the skill bar, which redraws each frame).
     // On first open the still-pending sprites fall back to emoji and never
@@ -12156,6 +12160,16 @@ function _boonIconUrl(id) {
     im.src = 'Sprites/boons/' + id + '.webp';   // v0.29.528 — .webp; Sprites/boons is 43 webp / 0 png
   }
   return _boonIconStatus[id] === 'ok' ? ('Sprites/boons/' + id + '.webp') : null;
+}
+// v0.30.x — canvas-side twin of _boonIconUrl: returns a DECODED Image or null.
+// Calling _boonIconUrl first is deliberate — it is what kicks the lazy probe
+// off, so the first frame that wants to draw a boon also starts its load.
+// Mirrors _itemSprite()'s contract: null until ready, caller falls back.
+function _boonSprite(id) {
+  if (!id) return null;
+  _boonIconUrl(id);
+  const im = _boonIconImg[id];
+  return (im && im.complete && im.naturalWidth > 0) ? im : null;
 }
 // def = a POWERUPS entry ({id, icon, ...}). Returns an <img> once the sprite
 // decodes, else the emoji fallback. Safe to call every render (dataset-free).
@@ -58338,10 +58352,18 @@ function drawPowerupOrbs() {
     ctx.beginPath(); ctx.arc(sx, cy, 13, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = col;
     ctx.beginPath(); ctx.arc(sx, cy, 10, 0, Math.PI * 2); ctx.fill();
-    // Icon
-    ctx.font = '16px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(o.pw.icon, sx, cy + 5);
+    // Icon — v0.30.x (per user: "boons ... could be replaced with their actual
+    // custom images instead"). Same sprite the boon panel and the Bravo pick
+    // cards use; emoji until it decodes, or if the boon has no art.
+    const _oImg = (typeof _boonSprite === 'function' && o.pw) ? _boonSprite(o.pw.id) : null;
+    if (_oImg) {
+      const _oz = 26;   // over the r=13 white core, inside the r=22 halo
+      ctx.drawImage(_oImg, Math.round(sx - _oz / 2), Math.round(cy - _oz / 2), _oz, _oz);
+    } else {
+      ctx.font = '16px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(o.pw.icon, sx, cy + 5);
+    }
     // Rarity ribbon
     if (o.rarity !== 'common') {
       ctx.font = 'bold 9px sans-serif';
@@ -127014,8 +127036,19 @@ function drawDrops() {
       ctx.beginPath(); ctx.arc(sx, d.y, 14 + glow, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = col;
       ctx.beginPath(); ctx.arc(sx, d.y, 9, 0, Math.PI * 2); ctx.fill();
-      if (_lastDropFont !== '14px sans-serif') ctx.font = _lastDropFont = '14px sans-serif';
-      ctx.fillText(d.item.icon, sx, d.y + 5);
+      // v0.30.x (per user: "dropped gears ... could be replaced with their
+      // actual custom images instead") — blit the equipment sprite the
+      // inventory already shows. _itemSprite returns null until the file
+      // decodes (or forever, for an item with no authored art), and the emoji
+      // still covers that case, so a drop is never a blank orb.
+      const _dImg = (typeof _itemSprite === 'function') ? _itemSprite(d.item) : null;
+      if (_dImg) {
+        const _dz = 22;   // sits over the r=9 core, inside the r=14 glow
+        ctx.drawImage(_dImg, Math.round(sx - _dz / 2), Math.round(d.y - _dz / 2), _dz, _dz);
+      } else {
+        if (_lastDropFont !== '14px sans-serif') ctx.font = _lastDropFont = '14px sans-serif';
+        ctx.fillText(d.item.icon, sx, d.y + 5);
+      }
     }
   }
 }
