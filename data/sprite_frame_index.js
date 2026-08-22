@@ -32,6 +32,11 @@ window.LX_SPRITE_FRAME_INDEX = {
    "pqConductor": 9,
    "sundered_smith": 9,
    "towerArbiter": 9,
+   "towerSovereigncollapse": 9,
+   "towerSovereigncolumn": 9,
+   "towerSovereigndrain": 9,
+   "towerSovereignswing": 9,
+   "towerSovereignvolley": 9,
    "towerSovereign": 9,
    "young_confused_barnaby": 9
   },

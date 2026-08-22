@@ -9708,7 +9708,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.88';
+const GAME_VERSION = 'v0.30.89';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -73899,6 +73899,7 @@ function updateMonsters(dt) {
         m._bigMeleeFiring = true;
         m._bigMeleeT = bm.telegraphMs;
         m.vx = 0;   // root during windup
+        if (typeof _lxSovAtkPose === 'function') _lxSovAtkPose(m, 'swing', 60);   // v0.30.89
         // v0.26.x — drive the per-type weapon-swing ANIMATION (Sprites/monsters/
         // attack/<type>_*.webp) through the windup→strike so the morph swing
         // syncs with the real hitbox instead of only playing on proximity.
@@ -74236,6 +74237,7 @@ function updateMonsters(dt) {
         m._columnFiring = true;
         m._columnT = cs.telegraphMs;
         m._columnTargetX = _playerCx;    // v0.26.218
+        if (typeof _lxSovAtkPose === 'function') _lxSovAtkPose(m, 'column', 66);   // v0.30.89
       }
       // PHASE 2 — telegraph tick (vertical particle warning line)
       if (m._columnFiring && m._columnT > 0) {
@@ -76851,6 +76853,7 @@ function _bossSpecialAttacks(m, dt) {
       const _sp = m._sovPhase || 1;
       m._sovereignOhkoTick = (game.time | 0) + (_sp === 1 ? 960 : _sp === 2 ? 720 : 540);
       m._sovSpentUntil = (game.time | 0) + 210 + 150;
+      if (typeof _lxSovAtkPose === 'function') _lxSovAtkPose(m, 'collapse', 200);   // v0.30.89 — held across the 3.5s telegraph
     }
     if (game.hazards && game.mapData) {
       const _ww = game.mapData.worldWidth || 1400;
@@ -76910,6 +76913,7 @@ function _bossSpecialAttacks(m, dt) {
     {
       const _hpP = m._sovPhase || 1;
       m._sovereignHomingAt = (game.time | 0) + (_hpP === 1 ? 132 : _hpP === 2 ? 102 : 78);
+      if (typeof _lxSovAtkPose === 'function') _lxSovAtkPose(m, 'volley', 44);   // v0.30.89
     }
     if (player && player.hp > 0 && game.projectiles) {
       const _scx = m.x + m.w/2, _scy = m.y + m.h/2;
@@ -76953,6 +76957,7 @@ function _bossSpecialAttacks(m, dt) {
     {
       const _dpP = m._sovPhase || 1;
       m._sovereignDrainAt = (game.time | 0) + (_dpP === 1 ? 840 : _dpP === 2 ? 660 : 540);
+      if (typeof _lxSovAtkPose === 'function') _lxSovAtkPose(m, 'drain', 96);   // v0.30.89 — covers the pillar telegraph
     }
     if (player && player.hp > 0 && game.hazards && game.mapData) {
       const _ww = game.mapData.worldWidth || 1400;
@@ -115371,6 +115376,13 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
   // final (Sovereign of the Spire). Authored sprites at
   // Sprites/bosses/towerArbiter.webp + towerSovereign.png.
   'towerArbiter', 'towerSovereign',
+  // v0.30.89 — SOVEREIGN PER-ATTACK SETS (Sprites/bosses/attack/towerSovereign<x>_0..8).
+  // Animated from the Sovereign's own sprite so the character is identical and
+  // only the motion differs (scripts/generate_sovereign_attacks.mjs). Driven by
+  // the _sovAtkKey override below; no idle/walk sets exist for these keys
+  // because they are only ever live mid-attack.
+  'towerSovereignswing', 'towerSovereigncolumn', 'towerSovereigncollapse',
+  'towerSovereignvolley', 'towerSovereigndrain',
   // v0.26.334 — Block-land chain-end boss. Authored sprite at
   // Sprites/bosses/legosaurus.webp — warped Tyrannosaurus-shaped lego
   // beast. Boss is post-load-spawned in the blockland_apex arena's
@@ -115441,6 +115453,21 @@ const BOSS_ATTACK_META = Object.create(null);
 // v0.26.315 — frame count is now 9 (3x3 sheet) for smoother motion, but the
 // loader/cycler are count-agnostic (handle any N: legacy 4-frame sets, 9, ...).
 const _BOSS_ANIM_MAX = 9;   // most frames we attempt to load per boss
+// v0.30.89 — SOVEREIGN ATTACK POSE. Stamps which of the five attack sets should
+// draw, and for how long. Timer-driven attacks have no patternState to read, so
+// unlike Gravitos (whose key is recomputed every frame from the live pattern)
+// this one is stamped at the moment the attack fires and expires on its own.
+// Guarded on the frame set actually existing, exactly like the legosaurusdash
+// override: a missing art drop falls back to the generic attack pose rather
+// than blanking the boss.
+function _lxSovAtkPose(m, key, frames) {
+  if (!m || m.type !== 'towerSovereign') return;
+  const _k = 'towerSovereign' + key;
+  const _set = (typeof BOSS_ATTACK_FRAMES !== 'undefined') ? BOSS_ATTACK_FRAMES[_k] : null;
+  if (!_set || !_set.length) return;
+  m._sovAtkKey = _k;
+  m._sovAtkUntil = (game.time | 0) + (frames | 0);
+}
 function _loadBossFrames(map, subdir, types) {
   // v0.29.518 — this used to request _0.._8 unconditionally for every type in
   // every set (boss attack/idle/walk + the three zodiac sets), so a boss with
@@ -118146,10 +118173,12 @@ function drawMonster(m) {
   // had silently benched it — the draw comment below still says "atkAnimUntil
   // is stamped ... so _bossAttacking is true", which the planted gate made
   // false for the whole moving half of the dash. Restored here.
-  const _bossAttacking = ((m.patternState && m.patternState !== 'idle'
+  // v0.30.89 — a live Sovereign attack window is attacking outright (see note).
+  const _sovAtkLive = !!(m._sovAtkKey && (game.time | 0) < (m._sovAtkUntil | 0));
+  const _bossAttacking = _sovAtkLive || (((m.patternState && m.patternState !== 'idle'
                           && !_BOSS_MOVE_DRAW_STATES.has(m.patternState))
                        || (m.atkAnimUntil && _nowAtk < m.atkAnimUntil))
-                       && (_lxPlanted || m._braceDashing);
+                       && (_lxPlanted || m._braceDashing));
   // v0.25.708 — Phase-sprite override. Aetherion / Gravitos swap to a
   // different boss sprite mid-fight on HP-threshold (Aetherion @ 50 %)
   // or on form-death (Gravitos 1→2, 2→3). The transition code sets
@@ -118198,7 +118227,7 @@ function drawMonster(m) {
   // instead of a blank boss.
   const _spriteKey = (m._braceDashing && BOSS_ATTACK_FRAMES.legosaurusdash && BOSS_ATTACK_FRAMES.legosaurusdash.length)
     ? 'legosaurusdash'
-    : (m._gravStarKey || m._phaseSprite || m.type);
+    : (_sovAtkLive ? m._sovAtkKey : (m._gravStarKey || m._phaseSprite || m.type));   // v0.30.89 — per-attack Sovereign set
   // v0.26.310 — prefer the 4-frame attack animation when its frames have
   // decoded; otherwise the single static attack pose, then idle.
   // v0.29.418 — pass m so the boss's cycle is phased per entity: an attack
