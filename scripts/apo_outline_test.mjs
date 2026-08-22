@@ -14,11 +14,19 @@ const KEYS = ['p_apo_fire', 'p_apo_ice', 'p_apo_lightning', 'p_apo_void'];
 const lum = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
 const DARK = 70;
 
-// The rim each sprite is allowed, in source px on its 512 canvas. Fire/ice/
-// lightning are cel art whose outline should be hairline. The singularity is
-// the deliberate exception: its outer shadow is the effect, so it is held to
-// "no worse than the peel achieved" rather than to a hairline.
-const RIM_MAX = { p_apo_fire: 14, p_apo_ice: 4, p_apo_lightning: 4, p_apo_void: 48 };
+// The keyline BAND each sprite must land in, in source px on its 512 canvas.
+// Both bounds matter, and the lower one is the point (user: "should have still
+// at least a 2-3px black outline") — an earlier pass peeled the lightning to
+// 0 px and the ice to 1 px, which reads as washed-out cel art. Upper bounds
+// keep the original complaint fixed. Fire's ceiling is looser because its own
+// smoke is dark and sits against the keyline; the singularity's is looser still
+// because its outer shadow IS the effect, not an outline.
+const RIM = {
+  p_apo_fire:      { min: 2, max: 9 },
+  p_apo_ice:       { min: 2, max: 6 },
+  p_apo_lightning: { min: 2, max: 6 },
+  p_apo_void:      { min: 2, max: 48 },
+};
 
 async function rim(file) {
   const { data, info } = await sharp(readFileSync(file)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
@@ -62,7 +70,8 @@ ok('all 4 stills + 36 animation frames ship', missing === 0, { missing });
 
 for (const k of KEYS) {
   const r = await rim(`Sprites/projectiles/${k}.webp`);
-  ok(`${k}: outline is thin (<= ${RIM_MAX[k]}px on the 512 canvas)`, r.median <= RIM_MAX[k], { rimPx: r.median });
+  ok(`${k}: keeps a black keyline (>= ${RIM[k].min}px — not peeled away)`, r.median >= RIM[k].min, { rimPx: r.median });
+  ok(`${k}: and it is not a heavy rim (<= ${RIM[k].max}px)`, r.median <= RIM[k].max, { rimPx: r.median });
   ok(`${k}: canvas is still 512x512 (draw sizing unchanged)`, r.W === 512 && r.H === 512, { size: r.W + 'x' + r.H });
 }
 
@@ -77,7 +86,8 @@ for (const k of KEYS) {
 // not flash a thick outline on its first frame.
 for (const k of KEYS) {
   const f = await rim(`Sprites/projectiles/anim/${k}_0.webp`);
-  ok(`${k}_0: the animation's first frame is de-outlined too`, f.median <= RIM_MAX[k] + 4, { rimPx: f.median });
+  ok(`${k}_0: the animation's first frame carries the same keyline`,
+     f.median >= RIM[k].min && f.median <= RIM[k].max + 4, { rimPx: f.median });
 }
 
 for (const q of results) console.log((q.pass ? 'PASS ' : 'FAIL ') + ' ' + q.n + '  ' + JSON.stringify(q.x ?? ''));
