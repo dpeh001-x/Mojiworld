@@ -237,7 +237,7 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 0.965,
       "dx": 0,
-      "dy": 0.265
+      "dy": 0.0294
     }
   },
   "gravitos3": {
@@ -496,21 +496,21 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.0658,
       "dx": 0,
-      "dy": 0
+      "dy": 0.026
     }
   },
   "gravitos3punch": {
     "attack": {
       "s": 1.0478,
       "dx": 0,
-      "dy": 0
+      "dy": 0.0294
     }
   },
   "gravitos3soul": {
     "attack": {
       "s": 1.0432,
       "dx": 0,
-      "dy": 0
+      "dy": 0.0294
     }
   },
   "legosaurusdash": {
@@ -518,6 +518,27 @@ window.LX_ANIM_CALIB = {
       "s": 1,
       "dx": 0.0249,
       "dy": 0.0805
+    }
+  },
+  "gravitos2laser": {
+    "attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.0298
+    }
+  },
+  "gravitos2punch": {
+    "attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.0298
+    }
+  },
+  "gravitos2soul": {
+    "attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.0294
     }
   }
 };
