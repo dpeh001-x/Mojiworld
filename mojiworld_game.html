@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.44';
+const GAME_VERSION = 'v0.30.45';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -86825,6 +86825,37 @@ function updateProjectiles(dt) {
     // Enemy-owned only: the player's own Meteor / Sage shower keep resolving on
     // impact, because their telegraph is a promise to the player about WHERE
     // the hit lands, not a thing that should clip mobs on the way past.
+    // v0.30.45 — PLAYER meteors hit on the way down too (per user: "player and
+    // enemy meteor skills should deal damage on the way of falling rather than
+    // at the end"). Same geometry as the enemy branch and the renderer; every
+    // monster the drawn head passes through takes the full meteor damage once,
+    // tracked per hazard so a Sage shower's nine bodies each get their own pass.
+    // Pyre columns rise rather than fall and keep their impact-only resolve.
+    if (h.type === 'meteor_warn' && h.life > 0 && h.owner !== 'enemy'
+        && !h._markerOnly && !h._aquaFlood && !h._fireColumn && !h._coopMirror) {
+      const _qCx = (h.cx != null) ? h.cx : (h.x + (h.w || 0) / 2);
+      const _qRad = h.radius || 180;
+      const _qCamY = (game.camera && game.camera.y) || 0;
+      const _qProg = 1 - h.life / (h.maxLife || h.life || 1);
+      const _qY = (_qCamY + 60) + _qProg * 400;
+      const _qR = 20 + _qProg * 15;
+      const _qDmgBase = (typeof h._sageDmgMul === 'number') ? getAtk() * h._sageDmgMul : getAtk() * 4 + 30;
+      if (!h._passSet) h._passSet = new Set();
+      for (const m of [...game.monsters]) {
+        if (m.currentHp <= 0 || h._passSet.has(m)) continue;
+        if (Math.abs((m.x + m.w / 2) - _qCx) >= _qRad) continue;
+        if (!((_qY + _qR) >= m.y && (_qY - _qR) <= (m.y + m.h))) continue;
+        h._passSet.add(m);
+        const _qdx = Math.abs((m.x + m.w / 2) - _qCx);
+        const _qInner = Math.min(120, _qRad * 0.7);
+        const _qFall = _qdx < _qInner ? 1 : 1 - Math.min(1, (_qdx - _qInner) / Math.max(1, _qRad - _qInner)) * 0.5;
+        const _qCrit = rollCrit();
+        const _qd = Math.floor((_qDmgBase * _qFall + Math.random() * 20) * (_qCrit ? getCritDmg() : 1));
+        hitMonster(m, _qd, _qCrit, 'meteor');
+        m.vy = -4;
+        m.vx += Math.sign((m.x + m.w / 2) - _qCx) * 4 * _qFall;
+      }
+    }
     if (h.type === 'meteor_warn' && h.life > 0 && h.owner === 'enemy'
         && !h._markerOnly && !h._aquaFlood && !h._coopMirror && !h._passHit
         && player && player.hp > 0 && (player.invulnerable | 0) <= 0) {
@@ -86839,7 +86870,7 @@ function updateProjectiles(dt) {
       const _atHeight = (_mY + _mR) >= player.y && (_mY - _mR) <= (player.y + player.h);
       if (_inLane && _atHeight) {
         h._passHit = true;                              // one hit per meteor
-        let _pd = Math.max(1, Math.floor((h.damage || 30) * 0.6));   // the pass-through is the lighter half; the landing is the payload
+        let _pd = Math.max(1, Math.floor((h.damage || 30) * 1.0));   // v0.30.45 — the fall IS the payload now (was 0.6); the landing is the 35% residual
         if (typeof _defAbsorbMul === 'function') _pd = Math.max(1, Math.floor(_pd * _defAbsorbMul()));
         if (player.blockTimer > 0) { _pd = Math.max(1, Math.floor(_pd * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
         if (player.cls === 'warrior' && typeof _warriorDr === 'function') _pd = Math.max(1, Math.floor(_pd * _warriorDr()));
@@ -86896,7 +86927,11 @@ function updateProjectiles(dt) {
         if (!h._coopMirror && player && player.hp > 0 && (player.invulnerable | 0) <= 0 && aabb(hbox, player)) {
           const dx = Math.abs((player.x + player.w/2) - _cx);
           const falloff = dx < _inner ? 1 : 1 - Math.min(1, (dx - _inner) / Math.max(1, radius - _inner)) * 0.5;   // v0.26.1031 — plateau scales to the authored radius
-          let dmg = Math.max(1, Math.floor((h.damage || 30) * falloff));
+          // v0.30.45 — the landing is the 35% residual now; the fall carried the
+          // payload (pass-through above). Pyre columns never fall, so they keep
+          // the full impact. Same for a meteor whose body never reached anyone.
+          const _landMul = (h._fireColumn || !h._passHit) ? 1.0 : 0.35;
+          let dmg = Math.max(1, Math.floor((h.damage || 30) * falloff * _landMul));
           // DEF mitigation
           const _def = (typeof getDef === 'function') ? getDef() : 0;
           dmg = Math.max(1, Math.floor(dmg * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
@@ -86943,8 +86978,14 @@ function updateProjectiles(dt) {
             // Falloff — full damage inside 120 px, halved at the outer edge
             const dx = Math.abs((m.x + m.w/2) - _cx);
             const falloff = dx < _inner ? 1 : 1 - Math.min(1, (dx - _inner) / Math.max(1, radius - _inner)) * 0.5;   // v0.26.1031 — plateau scales to the authored radius
+            // v0.30.45 — the fall carried the payload; the landing is a 35%
+            // residual, and a monster the body already struck is not paid twice.
+            // Pyre columns never fall and keep the full impact.
+            const _hitInFall = !!(h._passSet && h._passSet.has(m));
+            if (_hitInFall) continue;
+            const _landMulP = h._fireColumn ? 1.0 : 0.35;
             const crit = rollCrit();
-            const dmg = Math.floor((damage * falloff + Math.random() * 20) * (crit ? getCritDmg() : 1));
+            const dmg = Math.floor((damage * falloff * _landMulP + Math.random() * 20) * (crit ? getCritDmg() : 1));
             hitMonster(m, dmg, crit, 'meteor');
             m.vy = h._fireColumn ? -9 : -4;   // v0.30.x - pyre columns launch skyward
             m.vx += Math.sign((m.x + m.w/2) - _cx) * 4 * falloff;
