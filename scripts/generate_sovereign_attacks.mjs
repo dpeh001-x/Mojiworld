@@ -45,6 +45,13 @@ const FRAMES = Number(arg('--frames') || 9);
 
 const COMMON = ' The character stays the same hooded armoured sovereign in black and gold plate with a long cloak and a runed staff, identical costume and colours in every frame. '
   + 'Centred, full body, feet on the same line, the silhouette stays the same size and position in frame. '
+  // v2 — the first pass of volley and collapse came back CROPPED: the model
+  // zoomed in, so the shard burst was sliced flat at the frame edge and the
+  // Sovereign's legs were cut off below the knee. Padding alone did not stop
+  // it; the prompt has to forbid it outright, and _edgeTouching() below now
+  // measures it so a clipped set is never silently accepted.
+  + 'The ENTIRE figure stays inside the frame at all times: the top of the head, both feet, the full cloak and every effect are fully visible with a wide empty margin on all four sides. '
+  + 'Nothing is ever cropped or cut by the frame edge. Do not zoom in, do not scale the character up, keep the framing wide. '
   + 'Seamless loop, no camera movement, no zooming, no drifting, no text, transparent background.';
 
 // One motion per attack. Each is written as a BODY ACTION rather than as an
@@ -61,11 +68,27 @@ const ATTACKS = {
   },
   collapse: {
     key: 'towerSovereigncollapse',
-    motion: 'The sovereign lifts both arms wide and high above the head, palms up, back arched, gathering a heavy collapsing sphere of dark light overhead, cloak dragged upward toward it.' + COMMON,
+    // v2 — the sphere is explicitly SMALL and held clear of the frame edge. The
+    // first pass grew it until it dominated the top of the frame, which pushed
+    // the figure down and cropped its legs.
+    motion: 'The sovereign lifts both arms high and wide, palms up, back slightly arched, gathering a SMALL dark sphere of collapsing light in the air above the hands. '
+      + 'The sphere stays small and compact, well clear of the top of the frame. The sovereign remains standing upright with both feet planted and fully visible.' + COMMON,
   },
   volley: {
     key: 'towerSovereignvolley',
-    motion: 'The sovereign thrusts one open palm sharply forward at the viewer while the staff arm sweeps back for balance, five bright shards fanning away from the outstretched hand.' + COMMON,
+    // v2 — the shards travel FORWARD from the hand rather than exploding
+    // radially. The first pass produced a full-frame starburst that buried the
+    // character and was sliced flat on three sides.
+    // v3 tried to strengthen the motion with "THRUSTS ... sharply forward" and
+    // clipped 9 frames out of 9 on three consecutive rolls at x1.46-1.63 zoom:
+    // the urgent verbs make the model frame in tighter, every time. That is a
+    // property of the prompt, not luck, so v4 keeps v2's calm wording (which
+    // never clipped) and gets the motion from a described ARM POSITION instead
+    // of from an urgent verb. Residual drift is corrected by --normalize.
+    motion: 'The sovereign stands and slowly extends one arm straight out in front of the body at shoulder height, palm open and facing away, while the staff arm lowers and draws back behind the hip. '
+      + 'The extended arm is held out clearly away from the torso through the middle of the sequence, then lowers again. '
+      + 'A few small bright shards drift away from the open palm. '
+      + 'No radial explosion, no starburst, no glow around the body, nothing covering the sovereign.' + COMMON,
   },
   drain: {
     key: 'towerSovereigndrain',
@@ -123,10 +146,42 @@ const srcBox = await bbox(await sharp(SRC).toBuffer());
 if (!srcBox) { console.error('source sprite is empty'); process.exit(1); }
 console.log(`source ${CANVAS_W}x${CANVAS_H}, content box ${srcBox.x1 - srcBox.x0 + 1}x${srcBox.y1 - srcBox.y0 + 1} at (${srcBox.x0},${srcBox.y0})`);
 
-// Feed the model a TIGHT, padded crop so the subject fills the frame.
+// Is any opaque pixel sitting on the outer border of its own frame? That is
+// exactly the reported defect -- "the sprite edges are cut off" -- and it can
+// only be seen on the RAW returned frame: once the set is baked into the game
+// canvas the clip is already inside the art and looks like a design choice.
+async function edgeTouching(buf, margin = 2) {
+  const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width: W, height: H, channels: C } = info;
+  const hot = (x, y) => data[(y * W + x) * C + 3] > 48;
+  let n = 0;
+  for (let x = 0; x < W; x++) for (let m = 0; m < margin; m++) { if (hot(x, m)) n++; if (hot(x, H - 1 - m)) n++; }
+  for (let y = 0; y < H; y++) for (let m = 0; m < margin; m++) { if (hot(m, y)) n++; if (hot(W - 1 - m, y)) n++; }
+  return n;
+}
+
+// NOTE — a foot-band width check was tried here as a "did the model zoom?"
+// gate and REMOVED: measured across the finished sets it reported 1.64-1.88x
+// drift for every one of them, including swing and column, which do not zoom at
+// all. The band widens when the cloak flares, so it tracks the POSE rather than
+// the character's scale. Gating on it would have rejected good sets and, worse,
+// "normalising" against it would have shrunk exactly the frames whose cloak is
+// doing the most work. Clipping is still gated below, because that one is
+// unambiguous: opaque pixels on the frame border are always a defect.
+
+// Feed the model a padded crop. v2: 0.16 -> 0.42. The first pass of volley and
+// collapse both came back clipped because an arms-up pose and a radiating burst
+// need far more headroom than a standing pose does, and the model treats the
+// supplied frame as the whole world.
 const cropW = srcBox.x1 - srcBox.x0 + 1, cropH = srcBox.y1 - srcBox.y0 + 1;
-const PAD = 0.16;
-const initial = await sharp(SRC)
+const PAD = 0.42;
+// The endpoint refuses a source over 1 megapixel ("True Size only works with
+// source images under 1 megapixel"), and 0.42 padding on a 523x615 crop lands
+// right on that line. Downscaling the initial costs nothing -- the returned
+// frames are rescaled back onto the source canvas regardless -- so cap it well
+// under the limit rather than trading away the headroom that stops the crops.
+const MAX_PX = 900000;
+let initial = await sharp(SRC)
   .extract({ left: srcBox.x0, top: srcBox.y0, width: cropW, height: cropH })
   .extend({
     top: Math.round(cropH * PAD), bottom: Math.round(cropH * PAD),
@@ -134,34 +189,55 @@ const initial = await sharp(SRC)
     background: { r: 0, g: 0, b: 0, alpha: 0 },
   })
   .webp({ quality: 94 }).toBuffer();
+{
+  const im = await sharp(initial).metadata();
+  const px = im.width * im.height;
+  if (px > MAX_PX) {
+    const k = Math.sqrt(MAX_PX / px);
+    initial = await sharp(initial)
+      .resize(Math.floor(im.width * k), Math.floor(im.height * k))
+      .webp({ quality: 94 }).toBuffer();
+    const im2 = await sharp(initial).metadata();
+    console.log(`initial downscaled ${im.width}x${im.height} -> ${im2.width}x${im2.height} (1MP API cap)`);
+  }
+}
 
 const only = arg('--only');
+const TRIES = Math.max(1, Number(arg('--tries') || 3));
 let failed = 0;
 for (const [name, a] of Object.entries(ATTACKS)) {
   if (only && only !== name && only !== a.key) continue;
   process.stdout.write(`  ${name} (${a.key}) ... `);
   try {
-    const anim = await post('/assets/sprite/animate', {
-      initial_image: `data:image/webp;base64,${initial.toString('base64')}`,
-      motion_prompt: a.motion, frames: FRAMES, frame_size: -9,
-      model: 'eagle', individual_frames: true, loop: true, image_type: 'sprite',
-    });
-    let bufs = [];
-    if (anim.spritesheet_url && anim.num_cols && anim.num_rows) {
-      const sheet = await fetchBuf(anim.spritesheet_url), sm = await sharp(sheet).metadata();
-      const cw = Math.floor(sm.width / anim.num_cols), ch = Math.floor(sm.height / anim.num_rows);
-      for (let r = 0; r < anim.num_rows && bufs.length < FRAMES; r++)
-        for (let c = 0; c < anim.num_cols && bufs.length < FRAMES; c++)
-          bufs.push(await sharp(sheet).extract({ left: c * cw, top: r * ch, width: cw, height: ch }).webp({ quality: 94 }).toBuffer());
+    let bufs = [], clipped = 0;
+    // Re-roll a clipped set rather than shipping it. The model is stochastic:
+    // the same prompt that crops on one draw is usually clean on the next, and
+    // "cut off at the edge" is cheap to detect and impossible to fix later.
+    for (let attempt = 1; attempt <= TRIES; attempt++) {
+      const anim = await post('/assets/sprite/animate', {
+        initial_image: `data:image/webp;base64,${initial.toString('base64')}`,
+        motion_prompt: a.motion, frames: FRAMES, frame_size: -9,
+        model: 'eagle', individual_frames: true, loop: true, image_type: 'sprite',
+      });
+      bufs = [];
+      if (anim.spritesheet_url && anim.num_cols && anim.num_rows) {
+        const sheet = await fetchBuf(anim.spritesheet_url), sm = await sharp(sheet).metadata();
+        const cw = Math.floor(sm.width / anim.num_cols), ch = Math.floor(sm.height / anim.num_rows);
+        for (let r = 0; r < anim.num_rows && bufs.length < FRAMES; r++)
+          for (let c = 0; c < anim.num_cols && bufs.length < FRAMES; c++)
+            bufs.push(await sharp(sheet).extract({ left: c * cw, top: r * ch, width: cw, height: ch }).webp({ quality: 94 }).toBuffer());
+      }
+      if (bufs.length < FRAMES && Array.isArray(anim.individual_frame_urls)) {
+        bufs = []; for (const u of anim.individual_frame_urls.slice(0, FRAMES)) bufs.push(await fetchBuf(u));
+      }
+      if (bufs.length < FRAMES) throw new Error(`got ${bufs.length}/${FRAMES} frames`);
+      clipped = 0;
+      for (const b of bufs) { if (await edgeTouching(b) > 24) clipped++; }
+      if (!clipped) break;
+      process.stdout.write(`[clipped ${clipped}/${FRAMES}; re-roll ${attempt}/${TRIES}] `);
     }
-    if (bufs.length < FRAMES && Array.isArray(anim.individual_frame_urls)) {
-      bufs = []; for (const u of anim.individual_frame_urls.slice(0, FRAMES)) bufs.push(await fetchBuf(u));
-    }
-    if (bufs.length < FRAMES) throw new Error(`got ${bufs.length}/${FRAMES} frames`);
+    if (clipped) throw new Error(`still ${clipped}/${FRAMES} frames clipped after ${TRIES} tries`);
 
-    // UNION box across the whole set, then place it back on the source canvas at
-    // the source's own content offset. Per-frame boxes would rescale the boss
-    // frame to frame; a tight crop would rescale it against the other sets.
     const boxes = [];
     for (const b of bufs) { const bb = await bbox(b); if (bb) boxes.push(bb); }
     if (!boxes.length) throw new Error('every frame empty');
@@ -177,8 +253,11 @@ for (const [name, a] of Object.entries(ATTACKS)) {
     const offY = srcBox.y0 + (cropH - dh);          // feet-aligned: bottom, not centre
     await mkdir(ATK_DIR, { recursive: true });
     for (let i = 0; i < bufs.length; i++) {
-      const cut = await sharp(bufs[i]).extract({ left: U.x0, top: U.y0, width: uw, height: uh })
-        .resize(dw, dh, { fit: 'fill' }).png().toBuffer();
+      let cut = null;
+      {
+        cut = await sharp(bufs[i]).extract({ left: U.x0, top: U.y0, width: uw, height: uh })
+          .resize(dw, dh, { fit: 'fill' }).png().toBuffer();
+      }
       const out = await sharp({ create: { width: CANVAS_W, height: CANVAS_H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
         .composite([{ input: cut, left: offX, top: offY }])
         .webp({ quality: 92 }).toBuffer();
