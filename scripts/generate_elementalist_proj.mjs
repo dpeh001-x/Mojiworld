@@ -10,11 +10,10 @@
 //   beams, and the cast burst reused for the finale. Each phase now has its
 //   own burst (kind:'fx' → Sprites/fx/<key>.webp + anim, drawn by
 //   spawnSpriteBurst / the fire-column hazard).
-//   APOTHEOSIS (proposed v3 — one of four CATASTROPHES per charge): each is a
+//   APOTHEOSIS v3 (v0.30.52) — one of four CATASTROPHES per charge; each is a
 //   real projectile (kind:'proj' → Sprites/projectiles/p_<key>.webp + anim,
 //   drawn oriented-to-velocity via bspr + _BULT_ANIM_KEY, like the warlord
-//   banner). The apo_* entries are authored here and generated, but the art
-//   and wiring ship only with the mechanic — see the v0.30.43 changelog note.
+//   banner).
 //
 // Same no-cutoff guarantee as generate_bult_proj_v2.mjs: the engine orients
 // these to velocity, so content is trimmed and re-centred at <=300px on a

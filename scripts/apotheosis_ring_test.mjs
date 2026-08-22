@@ -34,7 +34,7 @@ await new Promise(r => setTimeout(r, 2000));
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const page = await (await b.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}`, { waitUntil: 'domcontentloaded', timeout: 180000 });   // MOJI_GAME_FILE overrides, like the other skill tests
 await page.waitForFunction(() => typeof spawnSmoothExplosion === 'function' && typeof drawSmoothFx === 'function'
   && typeof _tickClassIdentity === 'function', null, { timeout: 120000 });
 // the ring art streams with LX_FX; wait for decode before asserting on blits
@@ -127,20 +127,23 @@ const r = await page.evaluate(() => {
     .map(f => ({ sprite: f.sprite, col: f.coreCol }));
   game.smoothFx = [];
 
-  // and the LIVE path: drive the real charge tick and see what it spawns
-  player.cls = 'mage'; player.hp = 100; player.hitStun = 0; game.dying = 0;
+  // and the LIVE path. Apotheosis v3 (three catastrophe strikes, no hold) —
+  // the ring moved from the charge pulses to each strike's departure nova, so
+  // the live check casts the real skill three times and reads what the
+  // strikes spawn. (Pre-v3 this drove _tickClassIdentity with a fake hold.)
+  player.cls = 'mage'; player.job = 'archmage'; player.master = 'elementalist';
+  player.hp = 100; player.hitStun = 0; game.dying = 0; player.level = 99; player._god = true;
   const wasPaused = game.paused; game.paused = false;
-  game.keys = game.keys || {}; game.keys.b = true;
-  player._warCharge = { skillId: 'elementalist_ult', cls: 'mage', slotKey: 'b',
-                        start: 0, frames: 90, power: 0 };
-  game.smoothFx = [];
+  player.maxMp = 1000; player.mp = 1000; player.skillCooldowns = {};
+  player._apoCharges = 3; player._apoHand = ['fire', 'ice', 'lightning'];
+  game.smoothFx = []; game.projectiles = [];
   const spawned = [];
-  for (let t = 0; t <= 40; t++) {
-    game.time = t;
-    try { _tickClassIdentity(1); } catch (e) {}
+  for (let k = 0; k < 3; k++) {
+    player.skillCooldowns = {};
+    try { castSkill('elementalist_ult'); } catch (e) {}
     for (const fx of game.smoothFx) if (fx.type === 'explosion' && !fx._seen) { fx._seen = 1; spawned.push({ sprite: fx.sprite, spin: fx.spin, col: fx.coreCol }); }
   }
-  game.paused = wasPaused; player._warCharge = null; game.keys.b = false; game.smoothFx = [];
+  game.paused = wasPaused; game.smoothFx = []; game.projectiles = [];
   out.livePulses = spawned;
   return out;
 });
@@ -163,10 +166,10 @@ ok('the ring spins (rotation applied on the blit)', r.perColour.every(x => x.rot
 ok('the colour heuristic still serves its original callers (warrior dust, rogue smoke)',
   r.warriorSlam.hit === 'dust_ring' && r.rogueSmoke.hit === 'smoke_puff',
   { warrior: r.warriorSlam.hit, rogue: r.rogueSmoke.hit });
-ok('LIVE: the real charge tick spawns apo_ring pulses, none of them dust',
+ok('LIVE: three real catastrophe strikes each spawn an apo_ring nova, none of them dust',
   r.livePulses.length >= 3 && r.livePulses.every(p => p.sprite === 'apo_ring'),
   { pulses: r.livePulses.length, sprites: [...new Set(r.livePulses.map(p => p.sprite))] });
-ok('...with alternating spin direction so held pulses counter-rotate',
+ok('...with alternating spin direction so the three departures counter-rotate',
   new Set(r.livePulses.map(p => Math.sign(p.spin))).size === 2
     && r.livePulses.every(p => p.spin !== 0),
   { spins: r.livePulses.map(p => p.spin) });

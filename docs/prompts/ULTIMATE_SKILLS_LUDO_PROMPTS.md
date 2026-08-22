@@ -108,11 +108,19 @@ Format: **master** · *Ultimate* · `key`. Append the block to the locked prefix
 > glow.
 > *motion:* the comet glow flickers, the sigil runes pulse, embers shed and a hot glow breathes.
 
-**elementalist** · *Elemental Apotheosis* · `elementalist_ult`
-> A swirling convergence of all four elements spiraling into a brilliant prismatic vortex — fire
-> licking, ice shards glinting, lightning arcs crackling, violet arcane runes orbiting, radiant
-> ascended energy.
-> *motion:* fire flickers, frost shimmers, lightning crackles, arcane runes orbit in place.
+**elementalist** · *Elemental Apotheosis* · `elementalist_ult`  ⟲ *reworked v0.30.52*
+> THREE colossal elemental orbs — a blazing orange fire orb, a glacial blue-white ice orb and a
+> crackling yellow-white lightning orb — orbiting a violet-black void singularity at the centre,
+> linked to it by arcs of prismatic energy, all enclosed in a ring of radiant white ascension
+> light. PALETTE: orange, ice-blue, electric yellow, violet and white. No runes, no glyphs, no
+> symbols, no writing of any kind.
+> *motion:* the prismatic arcs linking the orbs shimmer softly in place at one steady rate; no
+> rotation, no flare, core brightness constant.
+>
+> *Why it was redone:* Apotheosis v3 is three random catastrophe strikes per cast, so the burst
+> shows the three charges being gathered rather than one convergence beam. The four catastrophe
+> PROJECTILES (`p_apo_fire` / `_ice` / `_lightning` / `_void`) live in
+> `scripts/generate_elementalist_proj.mjs` alongside the Cascade phase bursts.
 
 **necromancer** · *Necrotic Ascendance* · `necromancer_ult`
 > A necromantic surge of ghostly green souls spiraling upward into a risen necromancer-crown, skeletal
