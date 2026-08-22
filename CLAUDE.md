@@ -241,7 +241,7 @@ Root files (17), and why each one has to be there:
 
 Buckets:
 
-- `data/` — runtime tables loaded by the game and animator: `anim_calib.js`, `anim_calib_manifest.js`, `sprite_frame_index.js`, `gear_calibration.js`, `gear_erase.js`, `mob_offsets.js`, `npc_offsets.js`, `monster_hitboxes.js`, `sfx_manifest.js`, `assets_manifest.json`. Referenced as `data/<file>` from `mojiworld_game.html`, `monster_animator.html` and `steam/package.json`'s `extraResources` filter — **update all three when adding one.**
+- `data/` — runtime tables loaded by the game and animator: `anim_calib.js`, `anim_calib_manifest.js`, `sprite_frame_index.js`, `sprite_bbox.js`, `gear_calibration.js`, `gear_erase.js`, `mob_offsets.js`, `npc_offsets.js`, `monster_hitboxes.js`, `sfx_manifest.js`, `assets_manifest.json`. Referenced as `data/<file>` from `mojiworld_game.html`, `monster_animator.html` and `steam/package.json`'s `extraResources` filter — **update all three when adding one.**
   `sprite_frame_index.js` is GENERATED — **after any art drop under
   `Sprites/{bosses,monsters,npc,fx,vfx,projectiles,summons}/…` run
   `node scripts/gen_sprite_frame_index.mjs`.** Every animation loader walks a

@@ -9692,6 +9692,7 @@ The sleeping world is listening.</div>
      when this file is missing every loader falls back to probing, so an
      older build still runs. -->
 <script src="data/sprite_frame_index.js"></script>
+  <script src="data/sprite_bbox.js"></script>
 <script>
 // v0.29.519 — Frame count for <dir>/<key>_0.. from the baked index, or
 // `fallback` when the index (or that entry) is absent. Function declaration
@@ -9707,7 +9708,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.75';
+const GAME_VERSION = 'v0.30.76';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10227,6 +10228,16 @@ const LX_OBJECTS_FILES_EXPLICIT = {
 // that read as the prop "floating" above the ground.
 const LX_OBJECTS_META = Object.create(null);
 function _detectSpriteBboxTop(img) {
+  if (img && img._lxBboxTop !== undefined) return img._lxBboxTop;
+  {
+    const _t = _lxBboxFromTable(img);
+    if (_t) { img._lxBboxTop = _t.top; return _t.top; }
+  }
+  const _r = _detectSpriteBboxTopRaw(img);
+  if (_r !== null && img && img.naturalWidth) img._lxBboxTop = _r;
+  return _r;
+}
+function _detectSpriteBboxTopRaw(img) {
   if (!img.naturalWidth || !img.naturalHeight) return null;
   try {
     const cv = document.createElement('canvas');
@@ -10234,10 +10245,15 @@ function _detectSpriteBboxTop(img) {
     cv.height = img.naturalHeight;
     const c = cv.getContext('2d', { willReadFrequently: true });
     c.drawImage(img, 0, 0);
-    const data = c.getImageData(0, 0, cv.width, cv.height).data;
-    for (let y = 0; y < cv.height; y++) {
-      for (let x = 0; x < cv.width; x++) {
-        if (data[(y * cv.width + x) * 4 + 3] > 12) return y;
+    // v0.30.x perf — band scan downward (see _detectSpriteBboxBottomRaw).
+    const W2 = cv.width, H2 = cv.height, BAND = 48;
+    for (let y0 = 0; y0 < H2; y0 += BAND) {
+      const rows = Math.min(BAND, H2 - y0);
+      const bd = c.getImageData(0, y0, W2, rows).data;
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < W2; x++) {
+          if (bd[(y * W2 + x) * 4 + 3] > 12) return y0 + y;
+        }
       }
     }
     return 0;
@@ -12730,6 +12746,7 @@ function _lxBakeToLong(im, maxLong) {
     cv._lxSrc = im;   // keep the original addressable for debugging / future re-bake
     cv._lxOrigLong = Math.max(w, h);   // v0.29.293 — see _lxBitmapToCanvas
     if (im._lxEdges !== undefined) cv._lxEdges = im._lxEdges;   // v0.29.707 — see _lxBitmapToCanvas
+    else cv._lxEdgeSrc = im;   // v0.30.x perf — see _lxEdgesTouched
     if (im._lxFeatherC) cv._lxFeatherC = im._lxFeatherC;
     return cv;
   } catch (e) { return null; }
@@ -12786,6 +12803,7 @@ function _lxBitmapToCanvas(bmp, src) {
   // bake reopened a ~24ms cold probe and a composite rebuild. The bake is the
   // same picture; both carry over byte-equivalently.
   if (src._lxEdges !== undefined) cv._lxEdges = src._lxEdges;
+  else cv._lxEdgeSrc = src;   // v0.30.x perf — carry the PROMISE of a memo
   if (src._lxFeatherC) cv._lxFeatherC = src._lxFeatherC;
   return cv;
 }
@@ -114546,7 +114564,43 @@ const _MOB_SPRITE_XFLIP = new Set(['mayo', 'towerSeer']);
 // Detect the lowest opaque pixel Y in a loaded sprite — used to anchor the
 // character's actual feet (rather than canvas-bottom) to the monster's foot
 // line. Returns canvas-bottom-Y when no opaque pixels found.
+// v0.30.x perf — PRECOMPUTED BBOX. Profiling a 29-mob fight put 5,697 ms of
+// the run INSIDE getImageData, and these two scanners were 3,219 ms of it.
+// Band-scanning them first cut the pixels they read by 83% and bought only 7%
+// of the time — which is the whole lesson: the price is the per-call GPU->CPU
+// sync stall (~7 ms EVERY call, near enough regardless of size), not the bytes.
+// So the fix is not to call it. data/sprite_bbox.js carries the same two
+// numbers computed offline by the same rules (scripts/gen_sprite_bbox.mjs,
+// proven equivalent in scripts/sprite_bbox_test.mjs); the pixel scan survives
+// only as the fallback for art the table does not know.
+function _lxBboxFromTable(img) {
+  const t = (typeof window !== 'undefined') && window.LX_SPRITE_BBOX;
+  if (!t || !img || !img.src) return null;
+  let s = img.src;
+  const i = s.indexOf('/Sprites/');
+  if (i < 0) return null;
+  s = s.slice(i + 9);
+  const q = s.indexOf('?'); if (q >= 0) s = s.slice(0, q);
+  try { s = decodeURIComponent(s); } catch (e) {}
+  const row = t[s];
+  if (row === undefined) return null;
+  const p = row.split(',');
+  // Dimension guard: if the art was re-exported at a new size the row is stale
+  // for this sprite, and a wrong foot-anchor is worse than a slow one.
+  if ((+p[2]) !== (img.naturalWidth | 0) || (+p[3]) !== (img.naturalHeight | 0)) return null;
+  return { top: +p[0], bottom: +p[1] };
+}
 function _detectSpriteBboxBottom(img) {
+  if (img && img._lxBboxBot !== undefined) return img._lxBboxBot;
+  {
+    const _t = _lxBboxFromTable(img);
+    if (_t) { img._lxBboxBot = _t.bottom; return _t.bottom; }
+  }
+  const _r = _detectSpriteBboxBottomRaw(img);
+  if (_r !== null && img && img.naturalWidth) img._lxBboxBot = _r;
+  return _r;
+}
+function _detectSpriteBboxBottomRaw(img) {
   if (!img.naturalWidth || !img.naturalHeight) return null;
   try {
     const cv = document.createElement('canvas');
@@ -114554,34 +114608,26 @@ function _detectSpriteBboxBottom(img) {
     cv.height = img.naturalHeight;
     const c = cv.getContext('2d', { willReadFrequently: true });
     c.drawImage(img, 0, 0);
-    const data = c.getImageData(0, 0, cv.width, cv.height).data;
-    // v0.26.132 — Per user "ensure that the base of non-flying monster
-    // sprites touch the floor / platform". Two changes to make detection
-    // more reliable:
-    //   1. Alpha threshold raised 12 → 64 (out of 255). Many Ludo-
-    //      generated transparent sprites have low-alpha "ghost" pixels
-    //      at the very bottom of the canvas (compression / dithering
-    //      artifacts). The old threshold of 12 picked them up, returning
-    //      canvas-bottom-Y as the "bbox" — which planted the canvas
-    //      bottom on the foot line and lifted the visible content above
-    //      it. 64 is high enough to ignore those ghosts but low enough
-    //      to still catch the genuine sprite edge.
-    //   2. Require TWO opaque-enough pixels in a row before declaring a
-    //      bottom edge. Single-pixel artifacts (dust speckles, JPEG
-    //      banding remnants on .webp) get filtered out. Two-pixel
-    //      clusters are essentially always real sprite content.
+    // v0.30.x perf — band scan: only the LOWEST opaque row is wanted, so walk up
+    // in 48-row bands and stop at the first hit. Same threshold, same two-pixel
+    // run rule, same answer — a reordering, not an approximation.
     const ALPHA_THRESHOLD = 64;
-    for (let y = cv.height - 1; y >= 0; y--) {
-      let opaqueRun = 0;
-      for (let x = 0; x < cv.width; x++) {
-        if (data[(y * cv.width + x) * 4 + 3] > ALPHA_THRESHOLD) {
-          if (++opaqueRun >= 2) return y;
-        } else {
-          opaqueRun = 0;
+    const W2 = cv.width, H2 = cv.height, BAND = 48;
+    for (let bandBottom = H2; bandBottom > 0; bandBottom -= BAND) {
+      const y0 = Math.max(0, bandBottom - BAND), rows = bandBottom - y0;
+      const bd = c.getImageData(0, y0, W2, rows).data;
+      for (let y = rows - 1; y >= 0; y--) {
+        let opaqueRun = 0;
+        for (let x = 0; x < W2; x++) {
+          if (bd[(y * W2 + x) * 4 + 3] > ALPHA_THRESHOLD) {
+            if (++opaqueRun >= 2) return y0 + y;
+          } else {
+            opaqueRun = 0;
+          }
         }
       }
     }
-    return cv.height - 1;
+    return H2 - 1;
   } catch (e) { return null; }
 }
 // v0.25.821 — The bbox-top detector previously declared here was a
@@ -116881,6 +116927,17 @@ const _LX_EDGE_PROBE = (typeof document !== 'undefined') ? document.createElemen
 let _LX_EDGE_PROBE_CTX = null;
 function _lxEdgesTouched(img) {
   if (img._lxEdges !== undefined) return img._lxEdges;
+  // v0.30.x perf — RESOLVE THROUGH THE SOURCE. A baked canvas (shrink or tint)
+  // has byte-identical alpha geometry to the image it came from, which is all
+  // this probe measures. When a bake was minted before its source had been
+  // probed it carries a back-reference instead of a memo; following it means
+  // ONE probe serves every derivative rather than one per anim frame per tint.
+  const _es = img._lxEdgeSrc;
+  if (_es !== undefined && _es !== null && _es !== img) {
+    const _r = _lxEdgesTouched(_es);
+    if (_es._lxEdges !== undefined) { img._lxEdges = _es._lxEdges; return img._lxEdges; }
+    return _r;   // source not warm yet — do NOT memo, retry next frame
+  }
   // v0.29.278 — don't MEMOIZE before the image has decoded. The star-form
   // swaps (gravitos2star/3star) draw on the same frame their art first
   // resolves; probing a not-yet-decoded image reads all-transparent, and the
@@ -117010,6 +117067,7 @@ function _lxTintBake(img, filterStr) {
     // _lxFeatherC is deliberately NOT carried: that cache holds real pixels and
     // the tint changed their colour.
     if (img._lxEdges !== undefined) cv._lxEdges = img._lxEdges;
+    else cv._lxEdgeSrc = img;   // v0.30.x perf — see _lxEdgesTouched
   } catch (e) { cv = null; }
   bakes[filterStr] = cv;
   return cv;

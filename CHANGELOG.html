@@ -121,6 +121,65 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.76 <span class="tag"><span class="pill polish">polish</span> Combat lag: the stutters, measured and cut</span></h2>
+<p>Per user: <em>"reduce lag even more throughout the game."</em> Profiled
+first, on a fixed 29-mob fight, because the previous guess-and-check rounds had
+already taken the obvious wins.</p>
+<p><b>What the profile actually said.</b> <code>getImageData</code> was the
+single largest self-time entry, and <b>5,697&nbsp;ms of one run was spent
+blocked inside it</b> &mdash; a synchronous GPU&rarr;CPU readback stalls the
+render thread. Attributing those milliseconds by caller:</p>
+<table>
+  <tr><th>Caller</th><th>Time</th><th>Calls</th><th>Pixels</th></tr>
+  <tr><td><code>_detectSpriteBboxBottom</code></td><td>2,548 ms</td><td>284</td><td>256.9 MPix</td></tr>
+  <tr><td><code>_lxEdgesTouched</code></td><td>1,575 ms</td><td>274</td><td>0.6 MPix</td></tr>
+  <tr><td><code>_lxBakeSeamlessTile</code></td><td>852 ms</td><td>164</td><td>31.8 MPix</td></tr>
+  <tr><td><code>_detectSpriteBboxTop</code></td><td>671 ms</td><td>88</td><td>57.9 MPix</td></tr>
+</table>
+<p><b>The finding that changed the fix.</b> The first attempt made the bbox
+scanners read 48-row bands instead of whole sheets &mdash; pixel traffic fell
+<b>83%</b> (347&nbsp;&rarr;&nbsp;59&nbsp;MPix) and the time fell <b>7%</b>. That
+is the whole lesson in one measurement: the cost is the <em>per-call</em> sync
+stall, roughly 7&nbsp;ms every call near enough regardless of size, and
+<code>_lxEdgesTouched</code> proves it from the other side &mdash; 274 calls,
+0.6&nbsp;MPix, 1,575&nbsp;ms. Optimising the pixels was optimising the wrong
+number.</p>
+<p><b>So the scan does not run.</b> <code>data/sprite_bbox.js</code> now ships
+the opaque bounds of 4,498 sprites, computed offline by
+<code>scripts/gen_sprite_bbox.mjs</code> using the same thresholds and the same
+two-opaque-pixel run rule as the live scan. The runtime reads a string. The
+pixel scan survives as the fallback for art the table does not know, and it
+band-scans now, so even that path is cheap. A dimension guard rejects any row
+whose width/height no longer match the shipped art, because a stale foot-anchor
+is worse than a slow one. The edge probe additionally resolves through its
+source image, so one probe serves every baked derivative instead of one per
+anim frame per tint.</p>
+<p><b>Measured after</b> (same harness, same fight):</p>
+<table>
+  <tr><th></th><th>Before</th><th>After</th></tr>
+  <tr><td>Time blocked in readback</td><td>5,697 ms</td><td><b>2,616 ms</b> (&minus;54%)</td></tr>
+  <tr><td>Pixels read back</td><td>347.3 MPix</td><td><b>33.6 MPix</b> (&minus;90%)</td></tr>
+  <tr><td><code>_detectSpriteBboxBottom</code></td><td>2,548 ms</td><td><b>281 ms</b></td></tr>
+  <tr><td><code>_detectSpriteBboxTop</code></td><td>671 ms</td><td><b>0 ms</b></td></tr>
+  <tr><td>Worst frame in a fight</td><td>221&ndash;371 ms</td><td><b>61&ndash;93 ms</b></td></tr>
+</table>
+<p>The worst-frame figure is the one a player feels: the long stalls that read
+as a hitch are gone, and across five interleaved A/B rounds the candidate never
+produced a frame above 94&nbsp;ms while the baseline repeatedly passed
+200&nbsp;ms. Median frame time is unchanged within this machine's noise (the
+baseline's own p50 ranged 6.5&ndash;12.2&nbsp;ms run to run).</p>
+<p><b>One idea was measured and thrown away.</b> A per-frame budget on cold edge
+probes looked obviously right and made the median <em>worse</em> in three
+straight rounds &mdash; blocked probes return un-memoised, so they re-probed
+every frame forever. It is not in this build.</p>
+<p>Guarded by <code>scripts/sprite_bbox_test.mjs</code> (7): the table is
+compared against a live pixel scan on 40 sprites sampled across the trees, and
+the runtime is asserted to return the table's value &mdash; because a wrong
+bbox does not crash, it silently floats a monster off the floor.
+<code>scripts/perf_readback_test.mjs</code> is the new deterministic harness:
+frame-time medians swing +/-50% on a loaded machine, but milliseconds spent
+inside a named API do not.</p>
+
 <h2>v0.30.75 <span class="tag"><span class="pill polish">polish</span> Elemental Convergence: the chain is lightning now, not a wire</span></h2>
 <p>Per user: <em>The lightning chain of the elemental convergence skill can be regenerated with more spark and intensity.</em></p>
 <p>Two things were wrong, and neither was the spark count. <b>The arc between hops was one straight gradient beam</b> — v0.26.126 had already tripled the spark particles along it, but the shape underneath stayed a ruler-straight line, so it read as a glowing wire strung between bodies. And <b>the node stamp was a heraldic sunburst</b>: a clean eight-point star inside a rune circle, stamped on every enemy the chain hops to. A sigil, not a discharge.</p>
