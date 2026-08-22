@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.71';
+const GAME_VERSION = 'v0.30.72';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10748,7 +10748,11 @@ const LX_MOB_PROJ = (() => {
     waterPillar: 'p_splash.webp',      // zodiac water pillar — vertical burst; was the white-blue procedural ball
     pincerSweep: 'p_pincer.webp',      // zodiac pincer charge — the pincer art it is named after
     claw:        'p_pincer.webp',      // generic boss claw — same clamped-claw read
-    barnJab:     'p_dagger.webp',      // Barnaby's jab — a thrust, not a bolt
+    // v0.30.x — per user: "instead of a dagger when he charges, rework such
+    // that he does a strong punch forward with flaming fist". He is a
+    // bare-knuckle boxer in every other frame of his art; the jab was
+    // borrowing p_dagger.webp, so his signature blow was a thrown KNIFE.
+    barnFist:    'p_flamefist.webp',   // Barnaby's haymaker — wrapped knuckles, flame trailing
     arrowRain:   'p_arrow.webp',       // falling arrow volley
     mhoming:     'mstormorb.webp',     // generic homing orb
     mlob:        'mstone.webp',        // generic lobbed arc — reads as a thrown rock
@@ -10932,7 +10936,7 @@ const _PROJ_SPRITE_BLIT = {
   waterPillar: { mode: 'static', size: 1.0 },                   // vertical column — rotation would tip it over
   pincerSweep: { mode: 'orient', size: 1.0 },                   // pincer charges along the ground
   claw:        { mode: 'orient', size: 1.0 },                   // claw leads with its point
-  barnJab:     { mode: 'orient', size: 1.0 },                   // jab points where it is thrown
+  barnFist:    { mode: 'orient', size: 1.45 },                  // v0.30.x — the haymaker points where it is thrown, and lands big
   arrowRain:   { mode: 'orient', size: 1.0 },                   // arrows point along their fall
   mhoming:     { mode: 'spin',   size: 1.2, spinRate: 0.10 },   // orb tumbles as it tracks
   mlob:        { mode: 'spin',   size: 1.2, spinRate: 0.14 },   // thrown rock tumbles through its arc
@@ -78223,7 +78227,13 @@ function bossAI(m, dt, distToPlayer) {
         // it timed out and threw a 68px hook into empty air. The distance
         // exit below is the intended end; this is just its ceiling.
         m._bxState = 'dashIn'; m._bxT = 420;
-        m._bxJabs = 2 + (Math.random() < 0.5 ? 1 : 0);
+        // v0.30.x — ONE punch, not 2-3 (per user: "a strong punch forward").
+        // Damage is held roughly level rather than quietly buffed: the old
+        // flurry paid 2-3 x 0.9 = 1.8-2.7x ATK, the haymaker pays 2.2x once —
+        // the midpoint. The win is legibility, not numbers: a single heavy
+        // blow after a telegraphed charge is something a player can read and
+        // step out of, where an unavoidable three-hit flurry is not.
+        m._bxJabs = 1;
         m._dashCharging = 280;          // generic dash-streak VFX, no render changes
       }
     } else if (m._bxState === 'dashIn') {
@@ -78238,16 +78248,32 @@ function bossAI(m, dt, distToPlayer) {
       if (m._bxT <= 0) {
         if (m._bxJabs > 0 && Array.isArray(game.projectiles)) {
           m._bxJabs--;
+          // v0.30.x — THE HAYMAKER. Bigger box, longer reach and a longer
+          // live window than the old poke, so the flaming fist connects the
+          // way it looks like it should.
           game.projectiles.push({
-            x: _mcx + _toP * (m.w * 0.42) - 34,
-            y: m.y + m.h * 0.34,
-            vx: _toP * 1.1, vy: 0,
-            w: 68, h: 58, life: 9,
-            damage: (m.atk || 225) * 0.9,
-            owner: 'enemy', skill: 'barnJab', color: '#ffdd88',
+            x: _mcx + _toP * (m.w * 0.42) - 52,
+            y: m.y + m.h * 0.30,
+            vx: _toP * 2.2, vy: 0,
+            w: 104, h: 76, life: 13,
+            damage: (m.atk || 225) * 2.2,
+            owner: 'enemy', skill: 'barnFist', color: '#ff9a3c',
             noGravity: true,
           });
-          if (typeof addShake === 'function') addShake(3);
+          // fire off the knuckles: embers thrown along the punch line
+          if (typeof _budgetedParticlePush === 'function') {
+            for (let _i = 0; _i < 9; _i++) {
+              _budgetedParticlePush({
+                x: _mcx + _toP * (m.w * 0.5), y: m.y + m.h * 0.34 + (Math.random() - 0.5) * 22,
+                vx: _toP * (1.6 + Math.random() * 3.2), vy: -0.5 - Math.random() * 1.4,
+                life: 16 + Math.random() * 10,
+                color: _i % 3 === 0 ? '#fff0c0' : (_i % 3 === 1 ? '#ff9a3c' : '#e2431a'),
+                size: 2 + Math.random() * 2,
+              });
+            }
+          }
+          if (typeof spawnSmoothImpact === 'function') spawnSmoothImpact(_mcx + _toP * (m.w * 0.62), m.y + m.h * 0.34, '#ff9a3c');
+          if (typeof addShake === 'function') addShake(9);         // was 3: this one lands
           if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('hit'); } catch (e) {} }
           m._bxT = 150;
         } else {

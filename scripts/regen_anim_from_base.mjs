@@ -48,6 +48,18 @@ const TARGETS = {
     motion: 'The puddle of thick cyan slime seethes in place: its surface undulates in slow gloopy waves, ' +
       'round bubbles swell up from inside, dome the surface and pop, the rim lobes bulge and settle, ' +
       'and highlights slide across the wet gel. The puddle stays flat on the ground and keeps its outline.' },
+  // v0.30.x — Barnaby's ATTACK set (per user: "barnaby action animation
+  // should also be a strong punch forward"). The shipped set has him charging
+  // BLUE LIGHTNING in both fists and throwing a swirl — no punch in it at
+  // all, and the lightning fights the bare-knuckle boxer he is everywhere
+  // else. Rebuilt as one committed straight right with a flaming fist, to
+  // match the projectile his charge now throws.
+  barn_attack: { base: 'Sprites/bosses/young_confused_barnaby.webp', dir: 'Sprites/bosses/attack',
+    motion: 'The bare-knuckle boxer throws ONE strong straight punch forward to the right: he loads his weight ' +
+      'back and cocks the right fist by his chin, then drives it out in a full committed straight punch, arm ' +
+      'extending all the way, shoulder rotating in behind it, and the punching fist ERUPTS IN ORANGE FLAME with ' +
+      'embers trailing off the knuckles at full extension, then he recoils the fist back to guard. His other hand ' +
+      'stays up guarding his face throughout. No lightning, no blue energy, no weapon.' },
   cloudburst: { base: 'Sprites/vfx/cloudburst.webp', dir: 'Sprites/vfx/anim',
     motion: 'The cloud burst blooms outward from nothing: it swells and billows rapidly, churning and rolling as it expands, ' +
       'then thins and dissipates into wisps that fade away at the edges.' },

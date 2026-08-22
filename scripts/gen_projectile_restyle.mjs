@@ -122,6 +122,23 @@ const TARGETS = {
       + 'sphere, not a portal with a filled centre. Fully transparent background, no ground, no character, no '
       + 'scenery, no text, no border, no frame, not pixel art, not photorealistic.',
   },
+  // Barnaby's charge finisher. NEW file. He threw a DAGGER sprite
+  // (p_dagger.webp) as his boxing jab - a knife on a bare-knuckle boxer.
+  // Drawn in 'orient' mode, so the fist must point RIGHT in the source.
+  p_flamefist: {
+    out: 'Sprites/projectiles/p_flamefist.webp',
+    size: [640, 512],
+    ar: 'ar_1_1',   // ar_4_3 and ar_5_4 both fail the API (400 / hang); square + letterbox
+    prompt: 'A massive clenched fist punching straight to the RIGHT, seen from the side, wreathed in fire: a chunky '
+      + 'boxing-glove-like fist with the knuckles leading, wrapped in scuffed tan hand-wraps at the wrist, engulfed '
+      + 'in orange and yellow flames that stream BACKWARD to the left off the wrist in a trailing comet tail, bright '
+      + 'white-hot core at the knuckles, embers flicking off the flames. The fist fills the frame and drives right.',
+    style: ' Cute chunky cartoon game sprite in the style of a chibi mobile RPG: ONE fist centred in frame and aimed '
+      + 'RIGHT, a thick uniform near-black outline round the whole silhouette, soft cel shading, glossy highlights, '
+      + 'bright saturated orange and gold flame, a bold silhouette that reads instantly as a flaming punch at '
+      + 'thumbnail size. No arm beyond the wrist, no character, no body. Fully transparent background, no ground '
+      + 'shadow, no background scenery, no text, no border, no frame, not pixel art, not photorealistic.',
+  },
 };
 
 const only = val('--only', null);
@@ -165,7 +182,7 @@ for (const k of keys) {
           headers: { 'Content-Type': 'application/json', Authorization: `ApiKey ${KEY}` },
           body: JSON.stringify({ image_type: 'sprite', art_style: 'Anime/Manga', aspect_ratio: (t.ar || 'ar_1_1'),
                                  n: 1, augment_prompt: false, prompt: t.prompt + (t.style || STYLE) }),
-          signal: AbortSignal.timeout(180000),
+          signal: AbortSignal.timeout(420000),   // the image endpoint has run 3min+ under load
         });
         if (!res.ok) throw new Error('api ' + res.status + ' ' + (await res.text()).slice(0, 120));
         const data = await res.json();
