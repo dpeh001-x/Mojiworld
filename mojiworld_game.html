@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.60';
+const GAME_VERSION = 'v0.30.61';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -115420,7 +115420,7 @@ function _gravitosPunchPair(m) {
   const tE = Math.pow(Math.min(1, t / 0.85), 1.55);
   const idxF = tE * (n - 1);
   const i = Math.min(n - 1, Math.floor(idxF));
-  return { a: frames[i], b: frames[Math.min(n - 1, i + 1)], f: Math.min(1, idxF - i) };
+  return { a: frames[i], b: frames[Math.min(n - 1, i + 1)], f: Math.min(1, idxF - i), i, n };
 }
 function _gravitosPunchFrame(m) {
   const p = _gravitosPunchPair(m);
@@ -115548,16 +115548,60 @@ function _bossWeavePair(key, m) {
   const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const tAbs = Math.max(0, now + (m ? _mobAnimPhase(m, 'weave', true) : 0)) / _BOSS_WEAVE_FRAME_MS;
   const i = Math.floor(tAbs) % n;
-  return { a: frames[i], b: frames[(i + 1) % n], f: tAbs - Math.floor(tAbs) };
+  return { a: frames[i], b: frames[(i + 1) % n], f: tAbs - Math.floor(tAbs), i, n };
 }
 // v0.29.x — WALK WEIGHT (per user: "the walk animation can be really much
 // improved"). One global 80ms cadence made a 380px colossus scuttle at the
 // same step rate as a 120px duelist. The cadence now scales with stature —
 // Gravitos strides at ~130ms/frame (a deliberate 1.2s cycle) while
 // human-scale bosses keep the brisk 80ms they were tuned at.
+// v0.30.x — QUICKER STRIDE (per user: "when walking, could you play the sprite
+// animation faster as well (less time gap between the frames)"). v0.29.952
+// slowed a colossus to ~1.65x the base cadence on the theory that mass means
+// slow feet; measured on Gravitos that was 132 ms a frame — a 1.2 s cycle that
+// read as wading. The stature term is kept but INVERTED in effect: it now only
+// ever speeds the cadence up, from 0.62x for the largest bosses to 0.8x for a
+// human-scale one, so Gravitos strides at ~50 ms and the whole roster is
+// brisker than the old 80 ms base.
 function _bossWalkMsFor(m) {
   const h = (m && m.h) || 140;
-  return Math.round(_BOSS_WALK_FRAME_MS * Math.max(1, Math.min(1.8, Math.sqrt(h / 140))));
+  const _mul = Math.max(0.62, Math.min(0.8, 0.8 / Math.sqrt(Math.max(1, h / 140))));
+  return Math.max(38, Math.round(_BOSS_WALK_FRAME_MS * _mul));
+}
+// v0.30.x — SUB-FRAME MOTION, the crossfade's replacement (per user: "you are
+// applying overlapping sprites to make it like a shadow style, I do not like
+// that, but I still want the animation transitions smoothened").
+//
+// The old smoothing drew frame A and faded frame B in on top: two bodies on
+// screen at once through the middle of every hold, which is the doubled
+// "shadow" look. This draws ONE sprite and instead keeps the body in
+// continuous motion, so the eye tracks a moving object rather than a series
+// of stills — the frame swap stops reading as a cut because nothing else on
+// the sprite is standing still when it happens.
+//
+// It returns a transform, not an image, so the draw stays one drawImage:
+//   dx  a lateral drift, forward through the hold and continuous ACROSS the
+//       swap (it is a function of the whole cycle phase, not the frame index)
+//   dy  a vertical bob on the stride cycle — the part that sells weight
+//   sc  a breath of squash-and-stretch, peaking mid-hold
+// Amplitudes are deliberately small (a few px on a 380px boss): enough to
+// carry the eye, not enough to read as the sprite sliding around.
+function _bossSubFrameMotion(f, i, n, h) {
+  const _amp = Math.max(1, Math.min(3.4, (h || 140) / 110));
+  const _cyc = ((i + f) % n) / n;                    // 0..1 across the whole loop
+  // Every term is a function of the CYCLE phase, never of f alone, so the
+  // offset is continuous across a frame swap. The first draft used a
+  // per-hold ramp for dx — smoothstep(f) - 0.5 — which snapped from +half to
+  // -half at every boundary: a ~3px jump exactly where the swap happens,
+  // i.e. it added a pop instead of hiding one. The test measured that
+  // (maxStep 3.0) and it is now sub-0.2px between adjacent samples.
+  // sc is the one per-hold term, and it is zero at BOTH ends of the hold, so
+  // it is continuous too.
+  return {
+    dx: Math.sin(_cyc * Math.PI * 2) * _amp * 0.55,
+    dy: -Math.abs(Math.sin(_cyc * Math.PI * 2)) * _amp * 0.8,
+    sc: 1 + Math.sin(f * Math.PI) * 0.006,
+  };
 }
 // ...and the same clock as a crossfade PAIR, so boss strides blend instead of
 // cutting. Mirrors _bossLoopFrame's readyN/shrink handling exactly.
@@ -115573,7 +115617,7 @@ function _bossWalkPair(key, m) {
   const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const tAbs = Math.max(0, now + (m ? _mobAnimPhase(m, 'walk', true) : 0)) / frameMs;
   const i = Math.floor(tAbs) % n;
-  return { a: frames[i], b: frames[(i + 1) % n], f: tAbs - Math.floor(tAbs) };
+  return { a: frames[i], b: frames[(i + 1) % n], f: tAbs - Math.floor(tAbs), i, n };
 }
 // v0.29.273 — WALKING SIGNAL: vx OR actual per-frame X displacement. The old
 // vx-only gate (>0.6) made slow walkers glide in idle pose (snail speed 0.4
@@ -117903,6 +117947,14 @@ function drawMonster(m) {
   // procedural fallbacks) so all of them fade the same way.
   const _dpPrevA = ctx.globalAlpha;
   if (m._dreamPhase) ctx.globalAlpha = _dpPrevA * 0.35;
+  // v0.30.x — SUB-FRAME MOTION replaces the frame crossfade (per user: the
+  // overlapping sprites read as a shadow). One sprite per frame now; the pair
+  // functions are still used, but only for their {i, f} phase, which drives a
+  // small continuous transform (see _bossSubFrameMotion) so the sprite is
+  // never static at the instant a frame swaps. Cost is back down to one
+  // drawImage per boss.
+  //
+  // The original v0.29.x note, kept for the record:
   // v0.29.x — FRAME CROSSFADE. Nine-frame sets cut hard at any cadence; the
   // punch and the boss walk now draw frame A in full with frame B fading in on
   // top — successive frames are near-identical, so the blend reads as motion
@@ -117911,11 +117963,12 @@ function drawMonster(m) {
   const _xfPunch = (_bossAttackImg && /punch$/.test(_spriteKey)) ? _gravitosPunchPair(m) : null;
   const _xfWalk = (!_bossAttackImg && _bossWalkImg) ? _bossWalkPair(_bodyKey, m) : null;
   if (_bossAttackImg && _xfPunch && _xfPunch.b && _xfPunch.b !== _xfPunch.a) {
+    // the punch drifts forward through each hold: a lunge, not a slide show
+    const _sm = _bossSubFrameMotion(_xfPunch.f, _xfPunch.i || 0, _xfPunch.n || 9, m.h);
+    ctx.save();
+    ctx.translate((m.facing < 0 ? -_sm.dx : _sm.dx) * 1.6, _sm.dy * 0.35);
     _drawBossSprite(_xfPunch.a, m, sx, sy, true, true);
-    const _xpA = ctx.globalAlpha;
-    ctx.globalAlpha = _xpA * Math.max(0, Math.min(1, _xfPunch.f));
-    _drawBossSprite(_xfPunch.b, m, sx, sy, true, true);
-    ctx.globalAlpha = _xpA;
+    ctx.restore();
   } else if (_bossAttackImg) {
     _drawBossSprite(_bossAttackImg, m, sx, sy, true, true);
   } else if (_bossDuckImg) {
@@ -117923,20 +117976,22 @@ function drawMonster(m) {
   } else if (_bossWeaveImg) {
     const _xfWv = _bossWeavePair(_bodyKey, m);
     if (_xfWv && _xfWv.b !== _xfWv.a) {
+      const _sm = _bossSubFrameMotion(_xfWv.f, _xfWv.i || 0, _xfWv.n || 9, m.h);
+      ctx.save();
+      ctx.translate((m.facing < 0 ? -_sm.dx : _sm.dx), _sm.dy);
       _drawBossSprite(_xfWv.a, m, sx, sy, false, true);
-      const _xvA = ctx.globalAlpha;
-      ctx.globalAlpha = _xvA * Math.max(0, Math.min(1, _xfWv.f));
-      _drawBossSprite(_xfWv.b, m, sx, sy, false, true);
-      ctx.globalAlpha = _xvA;
+      ctx.restore();
     } else {
       _drawBossSprite(_bossWeaveImg, m, sx, sy, false, true);
     }
   } else if (_bossWalkImg && _xfWalk && _xfWalk.b !== _xfWalk.a) {
+    // the stride bobs and drifts across the cycle, so the swap is not the only
+    // thing moving on screen
+    const _sm = _bossSubFrameMotion(_xfWalk.f, _xfWalk.i || 0, _xfWalk.n || 9, m.h);
+    ctx.save();
+    ctx.translate((m.facing < 0 ? -_sm.dx : _sm.dx), _sm.dy);
     _drawBossSprite(_xfWalk.a, m, sx, sy, false, true);
-    const _xwA = ctx.globalAlpha;
-    ctx.globalAlpha = _xwA * Math.max(0, Math.min(1, _xfWalk.f));
-    _drawBossSprite(_xfWalk.b, m, sx, sy, false, true);
-    ctx.globalAlpha = _xwA;
+    ctx.restore();
   } else if (_bossWalkImg) {
     _drawBossSprite(_bossWalkImg, m, sx, sy, false, true);
   } else if (_bossIdleImg) {

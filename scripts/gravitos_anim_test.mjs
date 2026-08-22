@@ -1,4 +1,4 @@
-// Gravitos animates like a colossus: an eased, crossfaded punch and a
+// Gravitos animates like a colossus: an eased punch and a
 // weighted, blended stride.
 //
 // Per user: "lets work on smoothening out gravitos, the punch animation very
@@ -8,7 +8,9 @@
 // the problem:
 //   PUNCH  9 frames spread linearly over the whole 1.1-1.5s window (~7fps,
 //          hard cuts). Now t^1.55 eased, completing at 85% of the window and
-//          holding, drawn as a crossfaded frame PAIR.
+//          holding, drawn as ONE sprite per frame (v0.30.x: the crossfade is
+//          gone per user — "overlapping sprites ... like a shadow style, I do
+//          not like that" — replaced by sub-frame motion, asserted below).
 //   WALK   one global 80ms cadence for every boss — a 380px colossus at a
 //          duelist's step rate — with hard cuts. Now stature-scaled (~130ms
 //          for Gravitos, 80ms untouched for human-scale bosses) and blended.
@@ -90,15 +92,32 @@ const r = await page.evaluate(() => {
     _drawBossSprite = realDBS;
     return drawn;
   };
+  // v0.30.x — the smoothing is now a TRANSFORM, so watch ctx.translate: a
+  // non-zero offset during a hold is the sub-frame motion doing its job.
+  const tickT = (m, frames) => {
+    const P = CanvasRenderingContext2D.prototype;
+    const ot = P.translate;
+    let moved = 0, maxAbs = 0;
+    P.translate = function (x, y) {
+      if (x || y) { moved++; maxAbs = Math.max(maxAbs, Math.abs(x), Math.abs(y)); }
+      return ot.apply(this, arguments);
+    };
+    const drawn = tick(m, frames);
+    P.translate = ot;
+    return { drawn, moved, maxAbs: +maxAbs.toFixed(2) };
+  };
 
   // ---- PUNCH ----
   {
     const m = mk('gravitos');
     m.patternState = 'crush';
     const seen = []; let pairTicks = 0, ticks = 0, fadedAlpha = false, frame8At = null, errCt = 0;
+    let moveTicks = 0, maxOff = 0;
     for (let t = 0; t <= 1500; t += 16) {
       m.patternTimer = t; simNow += 16; ticks++;
-      const drawn = tick(m, punchArr);
+      const _tt = tickT(m, punchArr);
+      const drawn = _tt.drawn;
+      if (_tt.moved) { moveTicks++; maxOff = Math.max(maxOff, _tt.maxAbs); }
       if (drawn.some(d => d.err)) errCt++;
       const fr = drawn.filter(d => d.i != null);
       if (fr.length >= 2) { pairTicks++; if (fr[1].alpha < 1) fadedAlpha = true; }
@@ -107,7 +126,7 @@ const r = await page.evaluate(() => {
         if (frame8At === null && fr[0].i === 8) frame8At = t;
       }
     }
-    out.punch = { distinct: seen.length, pairTicks, ticks, fadedAlpha, frame8At, errCt };
+    out.punch = { distinct: seen.length, pairTicks, ticks, fadedAlpha, frame8At, errCt, moveTicks, maxOff };
   }
 
   // ---- WALK (gravitos vs a human-scale control) ----
@@ -115,11 +134,13 @@ const r = await page.evaluate(() => {
     const m = mk(type);
     m.patternState = 'idle';
     const arr = walkArrs[type];
-    const holds = []; let cur = null, curAt = 0, pairTicks = 0, fadedAlpha = false;
+    const holds = []; let cur = null, curAt = 0, pairTicks = 0, fadedAlpha = false, moveTicks = 0, maxOff = 0;
     for (let t = 0; t <= 2600; t += 16) {
       simNow += 16;
       m.vx = 2.2; m._animXV = 2; m._walkLatch = true;
-      const drawn = tick(m, arr).filter(d => d.i != null);
+      const _tt = tickT(m, arr);
+      const drawn = _tt.drawn.filter(d => d.i != null);
+      if (_tt.moved) { moveTicks++; maxOff = Math.max(maxOff, _tt.maxAbs); }
       if (drawn.length >= 2) { pairTicks++; if (drawn[1].alpha < 1) fadedAlpha = true; }
       if (drawn.length) {
         const f = drawn[0].i;
@@ -127,7 +148,7 @@ const r = await page.evaluate(() => {
       }
     }
     const avgHold = holds.length ? Math.round(holds.reduce((a2, b2) => a2 + b2, 0) / holds.length) : 0;
-    return { avgHold, frames: holds.length, pairTicks, fadedAlpha };
+    return { avgHold, frames: holds.length, pairTicks, fadedAlpha, moveTicks, maxOff };
   };
   out.walkGrav = runWalk('gravitos');
   out.walkBarn = runWalk('young_confused_barnaby');
@@ -193,6 +214,33 @@ const r = await page.evaluate(() => {
     game.monsters.length = 0;
   }
 
+  // ---- SUB-FRAME MOTION, measured on the helper itself ----
+  // (the ctx.translate spy above also catches the camera / body transforms —
+  // it read 570px, which is the camera, not this.)
+  {
+    const H = 380, N = 9;
+    let maxAbs = 0, nonZero = 0, samples = 0, maxStep = 0, prev = null;
+    for (let i = 0; i < N; i++) {
+      for (let k = 0; k < 12; k++) {
+        const f = k / 12;
+        const sm = _bossSubFrameMotion(f, i, N, H);
+        samples++;
+        const a = Math.max(Math.abs(sm.dx), Math.abs(sm.dy));
+        if (a > 0.01) nonZero++;
+        maxAbs = Math.max(maxAbs, a);
+        if (prev) maxStep = Math.max(maxStep, Math.abs(sm.dx - prev.dx), Math.abs(sm.dy - prev.dy));
+        prev = sm;
+      }
+    }
+    // continuity across the loop seam: last sample of the cycle vs the first
+    const first = _bossSubFrameMotion(0, 0, N, H);
+    const last = _bossSubFrameMotion(11 / 12, N - 1, N, H);
+    out.subFrame = {
+      samples, nonZero, maxAbs: +maxAbs.toFixed(2), maxStep: +maxStep.toFixed(2),
+      seamDy: +Math.abs(last.dy - first.dy).toFixed(2),
+    };
+  }
+
   performance.now = realNow;
   game.monsters.length = 0; game.paused = false;
   return out;
@@ -204,18 +252,30 @@ console.log('walk grav:', JSON.stringify(r.walkGrav));
 console.log('walk barn:', JSON.stringify(r.walkBarn));
 console.log('glide: moving-crush', JSON.stringify(r.glideMoving), '| planted-crush', JSON.stringify(r.glidePlanted), '| lego dash', JSON.stringify(r.glideDash));
 
-const p = r.punch || {}, wg = r.walkGrav || {}, wb = r.walkBarn || {};
+const p = r.punch || {}, wg = r.walkGrav || {}, wb = r.walkBarn || {}, sf = r.subFrame || {};
 ok('the punch plays through all nine frames', p.distinct >= 9, { distinct: p.distinct });
-ok('the punch CROSSFADES — two frames drawn, the second fading in',
-   p.pairTicks > p.ticks * 0.4 && p.fadedAlpha === true, { pairTicks: p.pairTicks, of: p.ticks });
+// v0.30.x — the crossfade is REMOVED (per user: overlapping sprites read as a
+// shadow). These two pin the replacement: exactly one sprite per frame, and
+// the smoothing carried by a sub-frame TRANSFORM instead.
+ok('NO OVERLAPPING SPRITES: the punch draws one frame per tick, never a faded second',
+   p.pairTicks === 0 && p.fadedAlpha === false, { pairTicks: p.pairTicks, faded: p.fadedAlpha, of: p.ticks });
+ok('...and is smoothed by sub-frame MOTION instead: a small, continuous, always-moving offset',
+   sf.nonZero > sf.samples * 0.8 && sf.maxAbs > 0.3 && sf.maxAbs < 8 && sf.maxStep < 1.5 && sf.seamDy < 1.0,
+   sf);
 ok('the punch completes by 85% of its window and holds through recovery (eased, was linear-to-the-end)',
    p.frame8At != null && p.frame8At <= 1300, { frame8At: p.frame8At });
-ok('Gravitos strides at a colossus cadence (~130ms/frame, was the global 80ms)',
-   wg.avgHold >= 110 && wg.avgHold <= 170, { avgHold: wg.avgHold });
-ok('...and his stride crossfades too', wg.pairTicks > 0 && wg.fadedAlpha === true,
-   { pairTicks: wg.pairTicks });
-ok('a human-scale boss keeps the brisk 80ms cadence it was tuned at',
-   wb.avgHold >= 60 && wb.avgHold <= 100, { avgHold: wb.avgHold });
+// v0.30.x — QUICKER STRIDE (per user: "play the sprite animation faster ...
+// less time gap between the frames"). v0.29.952's 130ms colossus cadence is
+// reversed: the stature term now only speeds it up.
+ok('Gravitos strides QUICKLY now (well under the old 130ms, and under the 80ms base)',
+   wg.avgHold > 0 && wg.avgHold < 80, { avgHold: wg.avgHold });
+ok('...his stride is single-sprite too (the same sub-frame motion carries it)',
+   wg.pairTicks === 0 && wg.fadedAlpha === false,
+   { pairTicks: wg.pairTicks, faded: wg.fadedAlpha });
+ok('a human-scale boss also quickened (was 80ms, now under it) and stays quicker than none',
+   wb.avgHold > 0 && wb.avgHold < 80, { avgHold: wb.avgHold });
+ok('the colossus is no SLOWER than the human-scale boss any more (v0.29.952 had him 1.65x slower)',
+   wg.avgHold <= wb.avgHold + 8, { grav: wg.avgHold, barn: wb.avgHold });
 ok('walk frames actually cycle for both', wg.frames >= 8 && wb.frames >= 8,
    { grav: wg.frames, barn: wb.frames });
 const gm = r.glideMoving || {}, gp = r.glidePlanted || {}, gd = r.glideDash || {};
