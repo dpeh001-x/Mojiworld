@@ -512,6 +512,13 @@ window.LX_ANIM_CALIB = {
       "dx": 0,
       "dy": 0
     }
+  },
+  "legosaurusdash": {
+    "attack": {
+      "s": 1,
+      "dx": 0.0249,
+      "dy": 0.0805
+    }
   }
 };
 window.LX_ATK_HITBOX = {
