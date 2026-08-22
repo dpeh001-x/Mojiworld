@@ -9707,7 +9707,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.74';
+const GAME_VERSION = 'v0.30.75';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -66500,9 +66500,33 @@ function spawnKageBolt(x, y, angle, length, color, opts) {
     const off = (i === 0 || i === segs) ? 0 : (Math.random() * 2 - 1) * jag;
     pts.push({ t, off });
   }
+  // v0.30.75 — BRANCHES, carried by the same fx entry. A fork drawn as its own
+  // smoothFx would be correct and unaffordable: the list is capped at
+  // MAX_SMOOTH_FX and evicts oldest-first, so extra entries per hop delete the
+  // start of a chain rather than decorating it. Branch geometry is generated
+  // once here, in the bolt's LOCAL space (x along the length, y across it), and
+  // the draw pass strokes it under the same transform.
+  const branches = [];
+  const nB = opts.branches | 0;
+  for (let b = 0; b < nB; b++) {
+    const at = 1 + Math.floor(Math.random() * Math.max(1, segs - 1));   // never the endpoints
+    const root = pts[at];
+    const dir = Math.random() < 0.5 ? -1 : 1;
+    const bl = length * (0.10 + Math.random() * 0.16);
+    const bp = [{ x: root.t * length, y: root.off }];
+    let bx = root.t * length, by = root.off;
+    const stepN = 2 + (Math.random() * 2 | 0);
+    for (let k = 0; k < stepN; k++) {
+      bx += (bl / stepN) * (Math.random() * 0.7 + 0.5) * (Math.random() < 0.25 ? -0.5 : 1);
+      by += dir * (bl / stepN) * (0.5 + Math.random() * 0.8);
+      bp.push({ x: bx, y: by });
+    }
+    branches.push(bp);
+  }
   game.smoothFx.push({
-    type: 'bolt', x, y, angle, length, color: color || '#fff0f4', pts,
+    type: 'bolt', x, y, angle, length, color: color || '#fff0f4', pts, branches,
     thickness: opts.thickness || 3,
+    rim: opts.rim !== false,
     life: opts.life || 12, maxLife: opts.life || 12,
   });
 }
@@ -67245,20 +67269,34 @@ function drawSmoothFx(_behindPass) {
     } else if (fx.type === 'bolt') {
       // v0.30.19 — lightning crackle. The jag came from spawn; this only draws it.
       ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
       ctx.translate(sx, fx.y);
       ctx.rotate(fx.angle);
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      for (let pass = 0; pass < 2; pass++) {
+      // v0.30.75 — path the main jag once and reuse it for every pass.
+      const _boltPath = (scale) => {
         ctx.beginPath();
         for (let i = 0; i < fx.pts.length; i++) {
           const p = fx.pts[i];
-          const px = p.t * fx.length, py2 = p.off;
-          if (i === 0) ctx.moveTo(px, py2); else ctx.lineTo(px, py2);
+          if (i === 0) ctx.moveTo(p.t * fx.length, p.off); else ctx.lineTo(p.t * fx.length, p.off);
         }
+        for (const br of (fx.branches || [])) {
+          for (let i = 0; i < br.length; i++) {
+            if (i === 0) ctx.moveTo(br[i].x, br[i].y); else ctx.lineTo(br[i].x, br[i].y);
+          }
+        }
+        ctx.lineWidth = Math.max(0.6, fx.thickness * scale);
+      };
+      if (fx.rim !== false) {   // v0.30.75 — silhouette for bright backgrounds
+        _boltPath(2.7);
+        ctx.globalAlpha = alpha * 0.5;
+        ctx.strokeStyle = 'rgba(22,8,40,0.95)';
+        ctx.stroke();
+      }
+      ctx.globalCompositeOperation = 'lighter';
+      for (let pass = 0; pass < 2; pass++) {
+        _boltPath(pass === 0 ? 3.2 : 1);
         ctx.globalAlpha = alpha * (pass === 0 ? 0.35 : 0.95);
-        ctx.lineWidth = fx.thickness * (pass === 0 ? 3.2 : 1);
         ctx.strokeStyle = pass === 0 ? fx.color : '#ffffff';
         ctx.stroke();
       }
@@ -69337,13 +69375,21 @@ const SKILL_FNS = {
       // every enemy the chain hops to. Reads as a glowing arc terminus
       // and makes the link path much more readable than a plain beam.
       spawnSpriteBurst(cx, cy, 'elemental_link',
-        { size: 80, life: 22, spin: Math.PI * 1.2 });
+        { size: 96, life: 24, spin: Math.PI * 1.2 });   // v0.30.75 — 80 -> 96
       // Smooth beam between prev and current
       const ang = Math.atan2(cy - prev.y, cx - prev.x);
       const len = Math.hypot(cx - prev.x, cy - prev.y);
-      // v0.25.238 — beam recoloured to bright gold-white so it matches
-      // the new golden-electric cast theme.
-      spawnSmoothBeam(prev.x, prev.y, ang, len, 5, '#ffee66', { life: 18 });
+      // v0.30.75 — FORKED ARC (per user: more spark and intensity). Same ONE
+      // fx entry the straight beam used, so the per-hop budget is unchanged and
+      // a long chain still draws every hop -- but the shape is now a jagged
+      // bolt that throws two dead-end branches. A chain drawn as clean
+      // node-to-node segments reads as ROUTED; the energy that misses is what
+      // makes it read as arcing.
+      spawnKageBolt(prev.x, prev.y, ang, len, '#ffee66', {
+        segs: Math.max(5, Math.min(11, Math.round(len / 46))),
+        jag: Math.max(10, Math.min(30, len * 0.12)),
+        branches: 2, thickness: 3.2, life: 16,
+      });
       // Jagged lightning particles along the arc.
       // v0.26.126 — Per user "Make the elemental lightning chain V skill
       // chain has more electric sparks effect". Tripled particle density
