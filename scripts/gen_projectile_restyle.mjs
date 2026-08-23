@@ -191,9 +191,15 @@ const TARGETS = {
   // pink petals; far too intricate to resolve at the ~14 px it is drawn at.
   mblightseed: {
     out: 'Sprites/projectiles/mblightseed.webp',
-    prompt: 'A single fat corrupted seed pod flying as a projectile: ONE plump rounded seed with a hard dark husk '
-      + 'in sickly olive-green, a bright acid-green crack of blight glowing down its middle, and just THREE thick '
-      + 'curling tendrils wrapping it. Simple and bold, only a few large shapes, no fine detail, no smoke, no petals.',
+    // Roll 1 came back as a plain olive bean: the blight crack and the tendrils
+    // were both listed AFTER the seed and the model kept only the seed, so the
+    // Blight Elder identity was gone. Readability was fixed and character lost.
+    // The glowing crack now LEADS the description and the tendrils are given a
+    // shape and a count instead of an adjective.
+    prompt: 'A cracked corrupted seed pod split by glowing blight: a jagged BRIGHT ACID-GREEN glowing crack runs '
+      + 'down the middle of the pod like lava through rock, throwing off a green glow, and the pod around it is a '
+      + 'hard dark olive-brown husk. THREE thick black curling tendrils, each as fat as a finger, hook out from the '
+      + 'top and sides of the pod and curl over it. Only a few large shapes, no fine detail, no smoke, no petals.',
   },
   // Emberling — fire ember. Already close to house style; regenerated for the
   // outline weight and glossy cel shading the rest of the set carries.

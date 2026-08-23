@@ -51,7 +51,14 @@ const PROJ = {
   // --- Wayfarer + Expedition monster projectiles (v0.26.341) ---
   mforgespark:{ file: 'mforgespark.png',  prompt: 'a molten forge-ember spark (Forgewight / Smith Golem) — the white-hot core pulses, orange sparks crackle and shed off it, a glowing heat-haze shimmers around it.' },
   mfirespit:  { file: 'mfirespit.webp',   prompt: 'a fiery fire-spit jet (Bellowsbat) pointing forward — the flame licks and flickers, a hot yellow-orange core pulses, embers trail off the tail.' },
-  mghostshot: { file: 'mghostshot.png',   prompt: 'a spectral ghost-shot bolt (Spectre Cannoneer) pointing forward — a translucent blue-green phantom wisp, ghostly ectoplasm trails and shimmers, eerie glow pulsing.' },
+  // v0.30.x — the base moved and the art changed. The path was
+  // 'mghostshot.png', which has not existed for some time, so this entry
+  // silently returned 'nobase' on every run; the shipped frames are older than
+  // the base they claim to animate. It now points at the real file. The prompt
+  // described the PREVIOUS art — a translucent blue-green wisp — but the
+  // restyled sprite is a violet skull leading right with tattered tails behind
+  // it, so animating to the old description would have fought the new art.
+  mghostshot: { file: 'cast/mghostshot.webp', prompt: 'a violet spectral skull cannon-shot (Spectre Cannoneer) flying to the right — the hollow eye sockets flare and dim, ectoplasm shimmers across the skull, and the tattered ghost-tails behind it ripple and flick. The skull itself stays the same size and in the same place.' },
   mink:       { file: 'mink.png',         prompt: 'a wispy semi-transparent ink cloud (Brinekraken) — soft translucent violet-black ink billows, swirls and roils with see-through smoky edges, thin tendrils curling and dissolving outward, a few droplets dispersing. Keep it diffuse, gauzy and cloud-like rather than a solid opaque blob.' },
   mlantern:   { file: 'mlantern.png',     prompt: 'an eerie soul-flame lantern wisp (Mournshade / Tower Seer) — a ghostly blue-green flame flickers and dances, faint embers rising, a haunting glow pulsing.' },
   mtidemark:  { file: 'mtidemark.png',    prompt: 'an arcane glyph/rune projectile (Tower Hexer) — a glowing magic sigil pulses, runic symbols shimmer within, teal-violet energy crackling along the edges.' },
