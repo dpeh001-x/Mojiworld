@@ -100,10 +100,11 @@ const TARGETS = {
   // What moves is the loose sheet flapping; the ball itself stays put.
   mwrap: { base: 'Sprites/projectiles/mwrap.webp', dir: 'Sprites/projectiles/anim',
     motion: 'The ball of toilet paper stays exactly where it is in the frame, the same size, and does NOT rotate ' +
-      'or spin at all. The only thing that moves is the loose sheet of paper peeling off it: that sheet flutters ' +
-      'and ripples in the airflow, curling and uncurling, its torn perforated edge flicking, and one or two tiny ' +
-      'paper scraps flick off it. The wound layers on the ball shift very slightly as it flexes. A continuous ' +
-      'seamless loop that ends exactly as it began.' },
+      'or spin at all. Nothing unfurls and nothing sticks out: keep the smooth round silhouette unchanged in ' +
+      'every frame, with no loose sheet, no trailing streamer and no flapping tail appearing at any point. The ' +
+      'only movement is ON the ball: the wound paper layers shift and settle against one another, the soft ' +
+      'shadows in the creases breathe, the quilted dimples flex, and a few tiny tissue fibres drift off the ' +
+      'surface. A continuous seamless loop that ends exactly as it began.' },
 };
 
 const only = val('--only', null);

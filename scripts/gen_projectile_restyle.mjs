@@ -362,11 +362,14 @@ const TARGETS = {
   // mspore and p_pincer in the mob-projectile set.
   mwrap: {
     out: 'Sprites/projectiles/mwrap.webp',
-    prompt: 'A ball of toilet paper flying through the air: one plump round ball of soft white tissue wound up '
-      + 'like a ball of yarn, the layered paper edges spiralling round it so you can see it is wound from a roll, '
-      + 'a couple of quilted dimples pressed into the surface, and ONE loose sheet of toilet paper peeling off '
-      + 'the side and streaming out behind it with a torn perforated edge. Bright clean white paper with soft '
-      + 'cool-grey shadows in the creases and one small pale blue tint in the deepest fold.',
+    prompt: 'A ball of toilet paper: one plump ROUND ball of soft white tissue wound up like a ball of yarn, the '
+      + 'layered paper edges spiralling round it so you can see it is wound from a roll, a couple of quilted '
+      + 'dimples pressed into the surface, and the very end of the paper tucked flat against the ball so nothing '
+      + 'sticks out. Bright clean white paper with soft cool-grey shadows in the creases and one small pale blue '
+      + 'tint in the deepest fold. A COMPACT self-contained ball with a smooth round silhouette: no loose sheet, '
+      + 'no trailing streamer, no flapping tail, no torn strips coming off it, nothing extending past the ball. '
+      + 'Draw it comfortably INSIDE the frame with clear empty space on all four sides — it must not touch or '
+      + 'run off any edge.',
   },
 };
 
