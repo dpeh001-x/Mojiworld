@@ -9738,7 +9738,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.139';
+const GAME_VERSION = 'v0.30.140';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -17914,6 +17914,22 @@ function getSkillRank(id) {
   if (!id || !player.skillRanks) return 0;
   return Math.max(0, Math.min(SKILL_RANK_CAP, player.skillRanks[id] | 0));
 }
+// v0.30.140 - the rank curve as PURE MATH for any (skill, rank), so the panel can
+// ask what a rank is worth without mutating player.skillRanks, and can never
+// print a number the damage pipeline disagrees with. getSkillRankMul below is
+// now just "resolve the tag to a skill + its current rank, then call this".
+// The dmgOverride branch lives here, which is what marksman_oneshot needs:
+// its rank 10 is r9 x 1.30 = 1.885, NOT the additive 1.70.
+function _skillRankMulAt(id, r) {
+  if (!(r > 0)) return 1;
+  if (r >= SKILL_RANK_CAP) {
+    const lv10 = (typeof SKILL_LV10_BONUS !== 'undefined') ? SKILL_LV10_BONUS : null;
+    const ov = lv10 && lv10[id] && lv10[id].dmgOverride;
+    const r9 = 1 + SKILL_RANK_BONUS_PER * (SKILL_RANK_CAP - 1);
+    return ov ? r9 * ov : r9 + SKILL_RANK_BONUS_PER + SKILL_RANK_BONUS_LV10;
+  }
+  return 1 + r * SKILL_RANK_BONUS_PER;
+}
 function getSkillRankMul(tag) {
   if (!tag || SKILL_RANK_BLACKLIST.has(tag)) return 1;
   // Try direct id match first; fall back to the alias bridge.
@@ -17925,18 +17941,9 @@ function getSkillRankMul(tag) {
   }
   // v0.25.529 — Linear +5% per rank with an extra +5% jump at rank 10.
   // r=0 → 1.00, r=1 → 1.05, r=5 → 1.25, r=9 → 1.45, r=10 → 1.55.
-  if (r <= 0) return 1;
-  if (r >= SKILL_RANK_CAP) {
-    // v0.25.530 — per-skill `dmgOverride` lookup. When set, the L10 bonus
-    // multiplies the rank-9 base by the override (replaces the +5% jump).
-    // Used by skills with bespoke "Level 10: dmg×N" specs (e.g. marksman_oneshot).
-    const lv10 = (typeof SKILL_LV10_BONUS !== 'undefined' ? SKILL_LV10_BONUS : null);
-    const ov = lv10 && lv10[canonId] && lv10[canonId].dmgOverride;
-    const r9 = 1 + SKILL_RANK_BONUS_PER * (SKILL_RANK_CAP - 1);
-    if (ov) return r9 * ov;
-    return r9 + SKILL_RANK_BONUS_PER + SKILL_RANK_BONUS_LV10;
-  }
-  return 1 + r * SKILL_RANK_BONUS_PER;
+  // v0.30.140 - delegates to _skillRankMulAt so the panel and the damage pipeline
+  // read the same function (the dmgOverride branch moved there with it).
+  return _skillRankMulAt(canonId, r);
 }
 // Level-10 SKILL_FNS reference helper. Returns a small object describing
 // the special level-10 bonuses that the per-skill function bodies should
@@ -18536,10 +18543,13 @@ function _formatMilestoneObj(b) {
   return parts.length ? parts.join(' · ') : null;
 }
 // Format a single rank as "+N% damage" with optional "MAX" tag.
-function _formatRankPct(r) {
+// v0.30.140 - takes the skill id so a bespoke curve prints its OWN number. Without
+// it, marksman_oneshot (dmgOverride x1.30) advertised the generic +70% while
+// the engine dealt +88.5%. id is optional: callers without one get the
+// standard curve, which is what every other skill uses.
+function _formatRankPct(r, id) {
   if (r <= 0) return '+0%';
-  if (r >= SKILL_RANK_CAP) return '+' + SKILL_RANK_MAX_PCT + '%';   // v0.30.116 - derived, was hardcoded
-  return '+' + (r * 5) + '%';
+  return '+' + Math.round((_skillRankMulAt(id, r) - 1) * 100) + '%';
 }
 // Central cooldown-bonus hook. Called from setSkillCooldown after the
 // computed cd is written. Honours `cdMs` (replace base cd) and
@@ -93846,9 +93856,14 @@ function renderSkillsReference(host) {
           // rank, next-rank delta, and the rank-10 milestone perk
           // (pulled from SKILL_LV10_BONUS via _formatSkillLv10Bonus).
           const _atMax = _curRank >= SKILL_RANK_CAP;
-          const _curPct = _formatRankPct(_curRank);
+          const _curPct = _formatRankPct(_curRank, skillId);
           const _nextRank = _curRank + 1;
-          const _nextPct = _formatRankPct(_nextRank);
+          const _nextPct = _formatRankPct(_nextRank, skillId);
+          // v0.30.140 - the ACTUAL step for the rank in front of you. The old fixed
+          // fixed per-rank caption contradicted its own neighbours at rank
+          // 9 -> 10, where the step is +25 points.
+          const _stepPct = Math.round((_skillRankMulAt(skillId, _nextRank)
+                                     - _skillRankMulAt(skillId, _curRank)) * 100);
           const _milestoneStr = (typeof _formatSkillLv10Bonus === 'function')
             ? _formatSkillLv10Bonus(skillId)
             : null;
@@ -93877,7 +93892,7 @@ function renderSkillsReference(host) {
                   <span style="color:#666;">→</span>
                   <span style="color:#aaa;">Next:</span>
                   <b style="color:#cce;">${_nextPct} dmg</b>
-                  <span style="color:#888; font-size:9.5px;">(+5% per rank)</span>
+                  <span style="color:#888; font-size:9.5px;">(+${_stepPct}% this rank)</span>
                 `}
               </div>
               ${_atMax ? '' : `
@@ -93890,7 +93905,7 @@ function renderSkillsReference(host) {
                 <div style="margin-top:4px; padding-top:4px;
                      border-top:1px dashed rgba(255,221,102,0.18);
                      display:flex; gap:5px; align-items:flex-start; font-size:10px;">
-                  <span style="color:#aaddff; flex:0 0 auto;">★ Rank 5:</span>
+                  <span style="color:#aaddff; flex:0 0 auto;">★ Rank 5${_curRank >= SKILL_RANK_CAP ? ' (superseded)' : (_curRank >= SKILL_RANK_MID ? ' · ACTIVE' : '')}:</span>
                   <span style="color:#ddd; flex:1; line-height:1.35;">
                     <span style="color:#aaddff;">⤷ ${_milestone5Str}</span>
                   </span>
@@ -93899,7 +93914,7 @@ function renderSkillsReference(host) {
               <div style="margin-top:4px; padding-top:4px;
                    border-top:1px dashed rgba(255,221,102,0.18);
                    display:flex; gap:5px; align-items:flex-start; font-size:10px;">
-                <span style="color:#ffe5a0; flex:0 0 auto;">★ Rank 10:</span>
+                <span style="color:#ffe5a0; flex:0 0 auto;">★ Rank 10${_curRank >= SKILL_RANK_CAP ? ' · ACTIVE' : ''}:</span>
                 <span style="color:#ddd; flex:1; line-height:1.35;">
                   <b style="color:#ffe5a0;">+${SKILL_RANK_LV10_PCT}% damage</b> (full curve = +${SKILL_RANK_MAX_PCT}% over base)
                   ${_milestoneStr ? `<br><span style="color:#cce;">⤷ ${_milestoneStr}</span>` : ''}
@@ -93908,7 +93923,7 @@ function renderSkillsReference(host) {
               ${_atMax ? `
                 <div style="margin-top:3px; font-size:10px; color:#88dd66; text-align:center;
                      background:rgba(136,221,102,0.08); padding:2px; border-radius:3px;">
-                  ✓ Mastered — all level-up perks active
+                  ✓ Mastered — rank-10 perk active (it replaces the rank-5 one)
                 </div>
               ` : ''}
             </div>
