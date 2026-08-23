@@ -121,6 +121,20 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.119 <span class="tag"><span class="pill bug">bug</span> The Sovereign's authored calibration actually applies now</span></h2>
+<p>Five <code>LX_ANIM_PATCH</code> blobs from the resizer, hardbaked into <code>data/anim_calib.js</code> via <code>scripts/apply_anim_patch.mjs</code> &mdash; swing <code>dx&nbsp;-0.0469</code>, column <code>-0.0427</code>, collapse <code>-0.0396</code>, volley <code>-0.0552</code>, drain <code>s&nbsp;1.0109 / dx&nbsp;-0.0458</code>. Values passed through verbatim; never hand-edited in transit.</p>
+
+<h3>They would have been inert</h3>
+<p>v0.30.89 taught <code>_spriteKey</code> to pick the right FRAMES for each attack, but every sibling lookup in the boss draw path still resolved <code>m._gravStarKey || m._phaseSprite || m.type</code>, which has no branch for the Sovereign. So the calibration for <code>towerSovereignswing</code> was being looked up under <code>towerSovereign</code> and thrown away.</p>
+<p>That is not a hypothesis. Instrumenting the real <code>_lxAnimCalib</code> call during a live fight, the pre-fix build asks for the base type <b>469 times and the per-attack keys zero times</b>; after the fix it asks for column 67, collapse 130, volley 139, drain 226, swing 2. The comment sitting on that very line records the identical bug for Gravitos in v0.29.253 &mdash; "It was omitted here only, so the animator-authored gravitospunch / gravitos2star / gravitos3star calibs never applied in-game." Same trap, new key.</p>
+<p>One resolver (<code>_lxSovArtKey</code>) now feeds the calib lookup, the bbox meta that anchors the feet, and the size-strict / frame-trust / content-norm keys, so they cannot drift apart again.</p>
+<p><b>The attack hitbox is deliberately left on the base type.</b> The per-attack sets carry no authored hitbox, so routing that lookup through the same resolver would return <code>null</code> and silently change the Sovereign's melee reach mid-swing. Art keys move; the combat box stays with the type that authored it.</p>
+
+<h3>Verification</h3>
+<p><code>scripts/sovereign_attack_wiring_test.mjs</code> grows a check that the draw path asks for calibration under each per-attack key: 1 of 7 fails before, all 7 pass after.</p>
+<p>Getting that test honest took two corrections, both mine. It first reported <b>swing: 0 activations</b> with the diagnostics showing <code>_bigMeleeFiring</code> true on <b>1362 of 1400 frames</b> &mdash; the swing was firing the entire time, but the test re-armed all three timer attacks every frame and their 44-200 frame stamps buried the swing's 60-frame window, so there was nothing left to observe it with. It now runs one window per attack. Before that, an earlier version parked the player 197&nbsp;px from the boss against a 200&nbsp;px range and both ends drifted because the Sovereign is an <code>activeBoss</code> that repositions every frame; both ends are now pinned.</p>
+
+
 <h2>v0.30.118 <span class="tag"><span class="pill feat">feat</span> The 2nd advancement grants a talent &mdash; it never did</span></h2>
 <p>Per user: <em>ensure that talents exist on the 2nd job advancement and that the 2nd job advancement quest actually works in entirety.</em></p>
 <p><b>The talents did not exist, and could not have worked if they had.</b> Measured before this change: all 9 jobs carried 3 talents each, and <b>all 17 masters carried none</b> &mdash; <code>JOB_TALENTS[player.master]</code> was undefined for every one of them. Two more things had to be true for that to be fixable: <code>applyMaster</code> never scheduled a talent picker the way <code>applyJob</code> has since the system landed, and <code>talentFx()</code> keyed on <code>player.job</code> alone, so a master talent was <em>unreadable by construction</em> even if a table had existed.</p>

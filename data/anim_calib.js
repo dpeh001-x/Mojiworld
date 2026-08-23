@@ -540,6 +540,41 @@ window.LX_ANIM_CALIB = {
       "dx": 0,
       "dy": 0.0294
     }
+  },
+  "towerSovereignswing": {
+    "attack": {
+      "s": 1,
+      "dx": -0.0469,
+      "dy": 0
+    }
+  },
+  "towerSovereigncolumn": {
+    "attack": {
+      "s": 1,
+      "dx": -0.0427,
+      "dy": 0
+    }
+  },
+  "towerSovereigncollapse": {
+    "attack": {
+      "s": 1,
+      "dx": -0.0396,
+      "dy": 0
+    }
+  },
+  "towerSovereignvolley": {
+    "attack": {
+      "s": 1,
+      "dx": -0.0552,
+      "dy": 0
+    }
+  },
+  "towerSovereigndrain": {
+    "attack": {
+      "s": 1.0109,
+      "dx": -0.0458,
+      "dy": 0
+    }
   }
 };
 window.LX_ATK_HITBOX = {

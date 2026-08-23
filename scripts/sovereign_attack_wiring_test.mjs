@@ -65,38 +65,70 @@ const R = await page.evaluate(async () => {
   boss._sovereignHomingAt = (game.time | 0) + 20;
   boss._sovereignDrainAt = (game.time | 0) + 40;
   boss._bigMeleeCd = 0; boss._columnCd = 0;
+  const BOSS_X = boss.x, BOSS_Y = boss.y;
 
+  // Which key does the DRAW path ask calibration for? The user authors calib
+  // per attack set in the resizer; if the draw path resolves the base type
+  // instead, those numbers are baked and dead. Instrumenting the real lookup is
+  // the only way to know -- reading data/anim_calib.js proves only that the file
+  // has values in it.
+  const calibKeys = {};
+  if (typeof _lxAnimCalib === 'function') {
+    const _origCalib = _lxAnimCalib;
+    window._lxAnimCalib = function (type, state) {
+      if (typeof type === 'string' && type.indexOf('towerSovereign') === 0 && state === 'attack') {
+        calibKeys[type] = (calibKeys[type] || 0) + 1;
+      }
+      return _origCalib.apply(this, arguments);
+    };
+  }
+  const diag = { dx: 1e9, dy: 1e9, range: 0, swingH: 0, firing: 0, cdReady: 0 };
   const seen = {};
   const order = [];
   let lastKey = null;
-  for (let f = 0; f < 1400; f++) {
-    await new Promise(r => requestAnimationFrame(r));
-    // keep the fight alive and the player in melee+column range
-    boss.currentHp = boss.maxHp;
-    player.hp = getMaxHp();
-    // Inside the bigMelee window on BOTH axes: range 200 horizontally between
-    // centres, swingH 130 vertically. Standing 90px from the boss's left edge
-    // put the centres ~197px apart -- just outside 200 -- so the swing never
-    // armed and the set looked dead.
-    player.x = boss.x + boss.w / 2 - player.w / 2 - 80;
-    player.invulnerable = 60;
-    // The active-boss AI opens distance and retreats; both gate the heavy.
-    boss._dirOpenT = 0; boss._dirFleeT = 0;
-    if ((boss._bigMeleeCd | 0) > 200) boss._bigMeleeCd = 0;
-    if ((boss._columnCd | 0) > 200) boss._columnCd = 0;
-    // re-arm the slow timers so all three fire inside the sample window
-    const now = game.time | 0;
-    if ((boss._sovereignOhkoTick | 0) > now + 200) boss._sovereignOhkoTick = now + 5;
-    if ((boss._sovereignHomingAt | 0) > now + 200) boss._sovereignHomingAt = now + 5;
-    if ((boss._sovereignDrainAt | 0) > now + 200) boss._sovereignDrainAt = now + 5;
-    // these three gate the timer attacks; the fight clears them naturally but
-    // the test cannot wait minutes for that
-    boss._sovShielded = false; boss._sovExposedUntil = 0; boss._sovSpentUntil = 0;
-    const k = boss._sovAtkKey && (game.time | 0) < (boss._sovAtkUntil | 0) ? boss._sovAtkKey : null;
-    if (k && k !== lastKey) { seen[k] = (seen[k] || 0) + 1; order.push(k.replace('towerSovereign', '')); }
-    lastKey = k;
-  }
-  return { seen, order: order.slice(0, 24), frames: 1400 };
+
+  // One WINDOW per attack rather than one long free-for-all. The timer attacks
+  // stamp for 44-200 frames each, so re-arming all three at once buries the
+  // melee swing's 60-frame stamp entirely -- an earlier version of this test
+  // did exactly that and reported "swing: 0 activations" while the diagnostics
+  // showed _bigMeleeFiring true on 1362 of 1400 frames. The swing was firing
+  // the whole time; nothing was left to observe it with.
+  const step = async (frames, arm) => {
+    for (let f = 0; f < frames; f++) {
+      await new Promise(r => requestAnimationFrame(r));
+      boss.currentHp = boss.maxHp;
+      player.hp = getMaxHp();
+      boss.x = BOSS_X; boss.y = BOSS_Y; boss.vx = 0;
+      player.x = boss.x + boss.w / 2 - player.w / 2 - 80;
+      player.invulnerable = 60;
+      boss._dirOpenT = 0; boss._dirFleeT = 0;
+      boss._sovShielded = false; boss._sovExposedUntil = 0; boss._sovSpentUntil = 0;
+      const now = game.time | 0;
+      // park the timers far away unless this window is arming them
+      const FAR = now + 100000;
+      boss._sovereignOhkoTick = (arm === 'collapse') ? Math.min(boss._sovereignOhkoTick | 0, now + 5) : FAR;
+      boss._sovereignHomingAt = (arm === 'volley')  ? Math.min(boss._sovereignHomingAt | 0, now + 5) : FAR;
+      boss._sovereignDrainAt  = (arm === 'drain')   ? Math.min(boss._sovereignDrainAt | 0, now + 5) : FAR;
+      { const bm = (boss.traits || {}).bigMelee || { range: 200, swingH: 130 };
+        const dx = Math.abs((player.x + player.w/2) - (boss.x + boss.w/2));
+        const dy = Math.abs((player.y + player.h/2) - (boss.y + boss.h/2));
+        diag.dx = Math.min(diag.dx, Math.round(dx)); diag.dy = Math.min(diag.dy, Math.round(dy));
+        diag.range = bm.range; diag.swingH = bm.swingH;
+        if (boss._bigMeleeFiring) diag.firing++;
+        if ((boss._bigMeleeCd | 0) <= 0) diag.cdReady++; }
+      const k = boss._sovAtkKey && (game.time | 0) < (boss._sovAtkUntil | 0) ? boss._sovAtkKey : null;
+      if (k && k !== lastKey) { seen[k] = (seen[k] || 0) + 1; order.push(k.replace('towerSovereign', '')); }
+      lastKey = k;
+    }
+  };
+  // melee + column first, with every timer attack parked
+  await step(420, null);
+  await step(320, 'collapse');
+  await step(240, 'volley');
+  await step(300, 'drain');
+
+  return { seen, diag, order: order.slice(0, 24), frames: 1280, calibKeys,
+           calibHooked: typeof _lxAnimCalib === 'function' };
 });
 await browser.close(); server.kill();
 
@@ -109,10 +141,16 @@ for (const w of WANT) {
   ok(`the ${w} attack stamps its own set in a real fight`, (seen[k] | 0) > 0,
      `${seen[k] | 0} activations across ${R.frames} frames`);
 }
+// The calibration the user authors per set only matters if the draw path asks
+// for it under that set's key.
+ok('the draw path asks for calibration under each per-attack key',
+   WANT.every(w => ((R.calibKeys || {})['towerSovereign' + w] | 0) > 0),
+   'calib lookups: ' + Object.entries(R.calibKeys || {}).map(([k, n]) => k.replace('towerSovereign', '') + ':' + n).join(' ') || '(none)');
 ok('all five sets are reached by the game itself, not just by the helper',
    WANT.every(w => (seen['towerSovereign' + w] | 0) > 0),
    'observed order: ' + (R.order || []).join(' > '));
 
+console.log('  diag:', JSON.stringify(R.diag));
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }
 console.log(bad ? `\n${bad}/${res.length} FAILED` : `\nall ${res.length} passed`);
