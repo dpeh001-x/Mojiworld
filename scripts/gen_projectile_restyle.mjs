@@ -206,25 +206,34 @@ const TARGETS = {
     // p_pincer) are all BRIGHT bodies that let the black outline act as an
     // outline rather than as the subject.
     //
-    // So this roll is written around value, not detail: the husk is pale, the
-    // tendrils are gone as black mass, and the brief says outright that the pod
-    // must be the lightest thing in frame. It spins, so the silhouette stays
-    // compact and roughly round like mspore's.
-    prompt: 'A cute round corrupted seed pod CRACKED OPEN BY GLOWING BLIGHT. The seam is the hero: a wide '
-      + 'jagged EMISSIVE crack of blazing yellow-green light splits the pod from top to bottom, glowing white-hot '
-      + 'at its centre and throwing a bright halo of light onto the husk on either side of it, like molten lava in '
-      + 'a rock. The pod itself is ONE plump pale lime-green husk, LIGHT and BRIGHT in colour like a '
-      + 'ripe green apple, with a glossy highlight on its upper left. A jagged glowing ACID-YELLOW seam splits down '
-      + 'its middle and gives off a soft light. Two short stubby dark-violet thorn hooks poke out at the top, small '
-      + 'and thin, and three tiny bright yellow-green spore motes float around it. The pod is BRIGHT and the darkest '
-      + 'thing in the picture is only its own outline.',
-    style: ' Cute chunky cartoon game sprite in the style of a chibi mobile RPG: ONE compact round object centred in '
-      + 'frame, a thick uniform near-black outline running the whole way round the silhouette, soft cel shading from '
-      + 'a single upper-left light, glossy white highlight blobs, and BRIGHT HIGH-VALUE saturated colour on the body '
-      + 'so the object reads clearly as a light shape against a dark background. Do NOT make it dark, murky, olive, '
-      + 'brown or black; no large black masses, no heavy black tendrils, no smoke, no shadow blobs. A simple bold '
-      + 'rounded silhouette that still reads at thumbnail size while spinning. Fully transparent background, no '
-      + 'ground shadow, no background scenery, no text, no border, no frame, not pixel art, not photorealistic.',
+    // Roll 3 went the other way and over-corrected into a pale green pod:
+    // readable, but it had stopped looking like anything the Blight Elder would
+    // throw. Per user, the roll-2 DESIGN is the right one — chunky pod, thick
+    // tendrils hooking over it, glowing crack — and what it needed was to
+    // resemble the CHARACTER.
+    //
+    // So the silhouette is kept and the palette is taken off the Elder himself:
+    // he is a hunched BROWN-BARK treant under bright green moss, with small
+    // PINK mushroom caps and amber glowing eyes. The roll-2 pod was olive-grey
+    // and black with acid green — his mood, none of his colours.
+    //
+    // Bark brown + moss green + pink caps also answers the value problem that
+    // made roll 2 collapse into a smudge at its ~28 px draw size, without going
+    // pale the way roll 3 did: the separation now comes from HUE contrast
+    // between four named materials rather than from lightening everything.
+    prompt: 'A gnarled seed pod torn from a mossy treant, flying as a projectile: ONE chunky rounded pod of warm '
+      + 'BROWN BARK with carved woody grain, clumps of bright green moss growing across its shoulders, and two '
+      + 'small PINK mushroom caps sprouting from it. A jagged glowing AMBER-GREEN crack splits down its middle and '
+      + 'throws light onto the bark either side. THREE thick dark-brown woody tendrils, fat as roots, hook out of '
+      + 'the top and curl over the pod. Bark brown, moss green and pink caps together — not grey, not olive, '
+      + 'not black.',
+    style: ' Cute chunky cartoon game sprite in the style of a chibi mobile RPG: ONE compact object centred in '
+      + 'frame, a thick uniform near-black outline round the whole silhouette, soft cel shading from a single '
+      + 'upper-left light, glossy highlight blobs, and clear HUE SEPARATION between the brown bark, the green moss, '
+      + 'the pink caps and the glowing crack so each part still reads apart at thumbnail size. Rich and saturated '
+      + 'rather than pale, but never one single dark mass — no large black blobs, no smoke, no shadow blobs. A bold '
+      + 'rounded silhouette that reads while spinning. Fully transparent background, no ground shadow, no '
+      + 'background scenery, no text, no border, no frame, not pixel art, not photorealistic.',
   },
   // Emberling — fire ember. Already close to house style; regenerated for the
   // outline weight and glossy cel shading the rest of the set carries.
@@ -287,21 +296,33 @@ const TARGETS = {
   // core, crimson body, jagged near-black corona, the horizontal lance streak
   // that made the old one read as a shockwave at all - drawn WIDE this time so
   // the boxes it actually lives in stop distorting it.
+  // Roll 2, per user "this sprite needs regeneration". Roll 1 got the SHAPE
+  // right (content box 1.77:1, so the 46x24 / 78x52 draw boxes stop squashing
+  // it) and the RENDERING wrong: asking for "soft additive glow" and "no
+  // outline" bought an airbrushed smear with no structure at all - a blurry red
+  // cloud, its flame licks dissolved into fog, and the lance a thin white stick
+  // stuck on the front. The landscape framing is kept; the style tail now asks
+  // for hard-edged graphic shapes, which is what the sprites this has to sit
+  // beside (p_bloodlust_shockwave, p_ult_doombringer) actually are.
   p_shockwave: {
     out: 'Sprites/projectiles/p_shockwave.webp',
     ar: 'ar_16_9',
     size: [768, 432],
-    prompt: 'A horizontal shockwave blast tearing to the RIGHT across a wide frame: a searing white-hot core at '
-      + 'the right end firing a bright piercing lance of light straight ahead, a crescent wall of layered crimson '
-      + 'and scarlet force curving back from it, a jagged corona of near-black torn flame licks around the outer '
-      + 'edge, and the whole wave trailing off to the left in ragged streaks of red energy and dark smoke. Wider '
-      + 'than it is tall, filling the frame edge to edge horizontally, unmistakably a wave in motion and not a ball.',
-    style: ' Painterly 2D game VFX sprite in the style of an action RPG skill effect: ONE wave centred in frame '
-      + 'and aimed RIGHT, rendered as glowing light and force with NO outline and NO cel-shaded cartoon edges, a '
-      + 'blown-out white core falling off through hot crimson to deep red and to charred near-black at the jagged '
-      + 'rim, soft additive glow, a bold LANDSCAPE silhouette that still reads as a shockwave at thumbnail size. '
-      + 'Fully transparent background, no ground shadow, no background scenery, no text, no border, no frame, '
-      + 'not pixel art, not photorealistic.',
+    prompt: 'A horizontal shockwave blast tearing to the RIGHT across a wide frame, drawn with hard defined '
+      + 'shapes: at the right end a bright CRESCENT wavefront arcing vertically like a drawn blade edge, its '
+      + 'inside face blown out to white and its outer face deep scarlet, with a spearhead of white light bursting '
+      + 'forward out of the crescent tip. Behind it, three or four clearly separated bands of crimson force curve '
+      + 'back in parallel arcs, each band a distinct crisp shape with a clean edge. Around the outside, sharp '
+      + 'pointed tongues of near-black flame with hard silhouettes, like torn paper. Behind that, long straight '
+      + 'streaks of red energy raking off to the left, and a scatter of small hard-edged sparks. Wider than it is '
+      + 'tall, filling the frame edge to edge horizontally.',
+    style: ' Bold 2D anime game VFX sprite in the style of a hand-drawn action RPG skill effect: ONE wave centred '
+      + 'in frame and aimed RIGHT, built from CRISP HARD-EDGED shapes with clean confident boundaries between '
+      + 'colour bands - white core, hot crimson, deep red, charred near-black - like flat cel-painted anime '
+      + 'effects animation. Absolutely NOT an airbrushed blur, NOT a soft fog or smear, NOT a hazy gradient '
+      + 'cloud; every flame tongue and every band must have a readable edge. A bold LANDSCAPE silhouette that '
+      + 'still reads as a shockwave at thumbnail size. Fully transparent background, no ground shadow, no '
+      + 'background scenery, no text, no border, no frame, not pixel art, not photorealistic.',
   },
 };
 
