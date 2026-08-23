@@ -18416,13 +18416,27 @@ function _doomApplyWinBonus() {
 // The revamp makes the drawn ring the REAL hitbox, removes every dice roll,
 // and builds the signature: stacking HEX, rupture at 5, spread on death.
 const LX_GRANDHEX_RADIUS = 520;         // the ring you see is the area you get
-const LX_GRANDHEX_STACK_MS = 10000;     // hex lifetime, refreshed per stack
+const LX_GRANDHEX_STACK_MS = 22000;     // hex lifetime -- MUST outlive the 16.2s played cooldown
 const LX_GRANDHEX_RUPTURE_AT = 5;       // the signature's "5 stacks"
-const LX_GRANDHEX_RUPTURE_MUL = 4.0;    // ...and its "massive damage"
+const LX_GRANDHEX_RUPTURE_MUL = 5.5;    // ...and its "massive damage" (was 4.0)
 const LX_GRANDHEX_DOT_PER_STACK = 0.30; // ATK per poison tick per stack
-const LX_GRANDHEX_BURST_MUL = 1.2;      // instant burst (was 1.9 — stacks pay the rest)
+const LX_GRANDHEX_BURST_MUL = 1.5;      // instant burst (was 1.2)
 const LX_GRANDHEX_SPREAD_RANGE = 280;   // death-jump reach
 const LX_GRANDHEX_FREEZE_MS = 1200;     // unchanged, non-boss, now radius-only
+// v0.30.x — HEX VULNERABILITY. A boss cannot be frozen, so the ring gave a boss
+// nothing but chip damage; the curse was flavour. Stacks now soften what they
+// sit on: +4% damage taken each, and since 5 stacks consume themselves as a
+// rupture, the live ceiling is 4 stacks = +16%. DoT tags are excluded on
+// purpose -- the DOT already scales with the same stack count, so letting it
+// read the multiplier too would make curse damage grow quadratically.
+const LX_HEX_VULN_PER_STACK = 0.04;
+const LX_HEX_VULN_SKIP = new Set(['burn', 'thorns', 'poison']);
+// Rupture is no longer a private event between one mob and the player. It
+// splashes: neighbours in spread range eat a fraction AND catch a stack, so a
+// packed room can chain-detonate. This is the "curses spread" half of the
+// signature doing something while the target is still alive, instead of only
+// on death.
+const LX_GRANDHEX_RUPTURE_SPLASH = 0.55;
 // v0.29.693 — PANDEMIC HEX buff (per user: "add in a super poison element ... and
 // make it summon 10 dark orbs that dishes damage and poisons").
 const LX_PANDEMIC_ORBS = 10;            // the asked-for count, exactly
@@ -18451,6 +18465,28 @@ function _hexAdd(m, n) {
         life: 26, color: i % 2 ? '#cc66ff' : '#88ff44', size: 3 });
     }
     if (typeof hitMonster === 'function') hitMonster(m, dmg, _c, 'grandhexRupture');
+    // CONTAGION: the burst carries to everything in spread range, and hands
+    // each neighbour a stack. Snapshot the array first -- this loop can kill,
+    // and killMonster splices, which is the exact bug the v0.29.688 revamp
+    // fixed in the cast loop. The splash never re-enters _hexAdd on the mob it
+    // came from (o === m is skipped), so it cannot recurse infinitely; a
+    // neighbour tipped to 5 by the stack does rupture, one level deeper, which
+    // is the intended cascade.
+    {
+      const _rx = m.x + m.w / 2, _ry = m.y + m.h / 2;
+      const _rr = LX_GRANDHEX_SPREAD_RANGE * LX_GRANDHEX_SPREAD_RANGE;
+      const _sdmg = Math.floor(dmg * LX_GRANDHEX_RUPTURE_SPLASH);
+      for (const o of [...game.monsters]) {
+        if (o === m || !o || o.currentHp <= 0) continue;
+        const _dx = o.x + o.w / 2 - _rx, _dy = o.y + o.h / 2 - _ry;
+        if (_dx * _dx + _dy * _dy > _rr) continue;
+        if (typeof hitMonster === 'function') hitMonster(o, _sdmg, false, 'grandhex');
+        if (o.currentHp > 0) {
+          if (typeof _applyMobStatus === 'function') _applyMobStatus(o, 'poison', LX_GRANDHEX_STACK_MS, { chance: 100 });
+          _hexAdd(o, 1);
+        }
+      }
+    }
     return LX_GRANDHEX_RUPTURE_AT;
   }
   m._hexStacks = next;
@@ -71880,8 +71916,12 @@ const SKILL_FNS = {
       for (const m of [...game.monsters]) {
         if (!m || m.currentHp <= 0) continue;
         // active-stack gate mirrors _hexAdd's own expiry read
-        const _cur = ((game.time || 0) <= (m._hexUntil || 0)) ? (m._hexStacks | 0) : 0;
-        if (_cur > 0) continue;                                // veterans already paid
+        // v0.30.x — the echo used to skip anyone already hexed, which is what
+        // pinned every target at exactly one stack forever. It now lands on
+        // EVERYONE in the ring, so one cast is worth two stacks and the rupture
+        // is reachable by casting the skill (3 casts) instead of only by
+        // chaining kills. Latecomers still gain the most: they get the freeze
+        // and the burst as well as the stack.
         const dx = m.x + m.w / 2 - px, dy = m.y + m.h / 2 - py;
         if (dx * dx + dy * dy > r2) continue;
         if (!m.isBoss && !m.isMiniBoss && !m.boss) m.freezeTimer = Math.max(m.freezeTimer || 0, LX_GRANDHEX_FREEZE_MS);
@@ -82489,6 +82529,12 @@ function hitMonster(m, dmg, isCrit, skill) {
   // undefined multiplier, a corrupt save feeding getAtk()) would poison m.currentHp to
   // NaN — NaN<=0 is false, so the monster becomes IMMORTAL and never fires on-kill.
   if (!Number.isFinite(dmg)) return;
+  // v0.30.x — hex vulnerability (see LX_HEX_VULN_PER_STACK). Read live so it
+  // expires with the stacks. Rupture damage is unaffected in practice because
+  // _hexAdd zeroes the pile before it swings.
+  if (m._hexStacks > 0 && (game.time || 0) <= (m._hexUntil || 0) && !LX_HEX_VULN_SKIP.has(skill)) {
+    dmg = Math.floor(dmg * (1 + LX_HEX_VULN_PER_STACK * (m._hexStacks | 0)));
+  }
   // v0.29.982 — see _lxPlayerFocus above.
   if (m && m.currentHp > 0 && !_LX_NO_FOCUS_TAGS.has(skill)) {
     game._pFocusTgt = m; game._pFocusAt = game.time | 0;
