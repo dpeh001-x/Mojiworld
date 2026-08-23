@@ -173,6 +173,37 @@ const R = await page.evaluate(async () => {
     const p = xbox([1.0, 1.0, 0, 0]); p.index = 11;
     out.poll.pinnedAxis = moveKeys(runPoll([p], 30));
   }
+  // ---- Steam Input: analog Move, and the contradictory-direction gate -----
+  // window.SteamAPI only exists inside the Electron wrapper, so it is stubbed
+  // here to drive the same code path the shipped build takes.
+  out.steam = {};
+  try {
+    const realSteam = window.SteamAPI;
+    // Each case releases everything first. _lxPadPrev survives between polls by
+    // design (it is the edge-detection memo), so a direction still held from the
+    // previous case produces no fresh keydown and the next case silently reads
+    // as "dispatched nothing" -- a false pass on a good build and a false
+    // failure on a bad one.
+    const withSteam = (snap, list, times) => {
+      window.SteamAPI = { available: true, input: { snapshot: () => ({}) } };
+      runPoll(list || [], 2);                       // release any held direction
+      window.SteamAPI = { available: true, input: { snapshot: () => snap } };
+      const keys = runPoll(list || [], times || 3);
+      window.SteamAPI = realSteam;
+      return moveKeys(keys);
+    };
+    const idle = xbox([0, 0, 0, 0]);
+    out.steam.analogRight = withSteam({ _moveX: 1, _moveY: 0 }, [idle]);
+    out.steam.analogUp = withSteam({ _moveX: 0, _moveY: 1 }, [idle]);
+    out.steam.analogIdle = withSteam({ _moveX: 0, _moveY: 0 }, [idle]);
+    // An unactivated action set reports every direction at once. That is not a
+    // stick position, it is broken data, and believing it is what walks the
+    // player down-and-right for the whole session.
+    out.steam.allFourDirections = withSteam(
+      { moveUp: true, moveDown: true, moveLeft: true, moveRight: true }, [idle]);
+    out.steam.digitalRightAlone = withSteam({ moveRight: true }, [idle]);
+  } catch (e) { out.steamErr = String(e).slice(0, 120); }
+
   navigator.getGamepads = origGet;
   window._lxPadDispatch = origDispatch;
   return out;
@@ -206,6 +237,16 @@ ok('an idle Sony pad with a resting hat dispatches no movement',
 ok('THE REPORTED BUG: a pinned axis never walks the player down-and-right',
    (R.poll.pinnedAxis || []).length === 0,
    'dispatched over 30 polls: ' + JSON.stringify(R.poll.pinnedAxis));
+
+ok('Steam Input analog Move drives movement (it was read by nothing)',
+   (R.steam.analogRight || []).some(k => /right/i.test(k)), JSON.stringify(R.steam.analogRight) + (R.steamErr ? ' err: ' + R.steamErr : ''));
+ok('...with the right sign: +Y on a Steam stick is UP',
+   (R.steam.analogUp || []).some(k => /up/i.test(k)), JSON.stringify(R.steam.analogUp));
+ok('...and a centred Steam stick moves nothing', (R.steam.analogIdle || []).length === 0, JSON.stringify(R.steam.analogIdle));
+ok('THE OTHER HALF: all-four-directions at once is rejected, not obeyed',
+   (R.steam.allFourDirections || []).length === 0, 'dispatched: ' + JSON.stringify(R.steam.allFourDirections));
+ok('...while one honest direction still works',
+   (R.steam.digitalRightAlone || []).some(k => /right/i.test(k)), JSON.stringify(R.steam.digitalRightAlone));
 
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }
