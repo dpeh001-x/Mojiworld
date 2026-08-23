@@ -192,7 +192,10 @@ async function measure(buf) {
       const px = Math.round(cx + Math.cos(a) * R), py = Math.round(cy + Math.sin(a) * R);
       if (px < 0 || py < 0 || px >= W || py >= H) continue;
       const o = (py * W + px) * C;
-      lum[i] = data[o + 3] < 60 ? 0 : (0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2]) * (data[o + 3] / 255);
+      // Alpha-INDEPENDENT on purpose: petals are told apart by their shading,
+      // not their opacity, and the finishing feather pass changes opacity
+      // everywhere. Weighting by alpha here made the metric measure the feather.
+      lum[i] = data[o + 3] < 128 ? 0 : (0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2]);
     }
     const K = 3;
     const sm = lum.map((_, i) => { let t = 0; for (let d = -K; d <= K; d++) t += lum[(i + d + NB) % NB]; return t / (2 * K + 1); });
@@ -257,6 +260,9 @@ if (!has('--generate')) {
   console.log(`# Burst: spread >= x${MIN_GROW}, ends between ${Math.round(MIN_THIN * 100)}% and` +
               ` ${Math.round(MAX_THIN * 100)}% of its art, core >= ${Math.round(MIN_HOLLOW * 100)}% cleared,` +
               ' never falls back inward.');
+  console.log('# Edges are feathered as a finishing pass (radius 6):');
+  console.log('#   node scripts/feather_sprite_edges.mjs Sprites/fx/shinobi_ult.webp \\');
+  console.log('#     Sprites/fx/anim/shinobi_ult_{0..8}.webp --radius=6');
   console.log('# NOT scorable, check by eye: the Chinese seal-script glyphs, and that');
   console.log('# no hands / hooded figure came back.');
   process.exit(0);
