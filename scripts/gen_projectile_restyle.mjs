@@ -354,6 +354,20 @@ const TARGETS = {
       + 'no ground shadow, no background scenery, no text, no border, no frame, not pixel art, not '
       + 'photorealistic.',
   },
+  // Wrappy the mummy's throw, per user: a ball of toilet roll. Was a grubby tan
+  // bandage squiggle. Two constraints from the engine rather than from taste:
+  // it is drawn at 48 px in `spin` mode, so the silhouette has to survive a
+  // thumbnail AND has to look right tumbling - which means ROUND, not a
+  // cylinder or a ribbon. It keeps the shared chibi style: it lives beside
+  // mspore and p_pincer in the mob-projectile set.
+  mwrap: {
+    out: 'Sprites/projectiles/mwrap.webp',
+    prompt: 'A ball of toilet paper flying through the air: one plump round ball of soft white tissue wound up '
+      + 'like a ball of yarn, the layered paper edges spiralling round it so you can see it is wound from a roll, '
+      + 'a couple of quilted dimples pressed into the surface, and ONE loose sheet of toilet paper peeling off '
+      + 'the side and streaming out behind it with a torn perforated edge. Bright clean white paper with soft '
+      + 'cool-grey shadows in the creases and one small pale blue tint in the deepest fold.',
+  },
 };
 
 const only = val('--only', null);

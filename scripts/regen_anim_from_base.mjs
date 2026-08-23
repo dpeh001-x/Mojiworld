@@ -94,6 +94,16 @@ const TARGETS = {
       'that changes is the light on it: the pale highlight travels slowly along the thick outer edge, the deep ' +
       'maroon shadows between the layered blades drift and breathe, and a few tiny red motes flick off the sharp ' +
       'tips. A continuous seamless loop that ends exactly as it began.' },
+  // Wrappy's toilet-roll ball. The engine draws this one in `spin` mode at
+  // 0.16 rad/frame, so the frames must NOT rotate it themselves - the tumble
+  // is already there, and baking a second rotation in would beat against it.
+  // What moves is the loose sheet flapping; the ball itself stays put.
+  mwrap: { base: 'Sprites/projectiles/mwrap.webp', dir: 'Sprites/projectiles/anim',
+    motion: 'The ball of toilet paper stays exactly where it is in the frame, the same size, and does NOT rotate ' +
+      'or spin at all. The only thing that moves is the loose sheet of paper peeling off it: that sheet flutters ' +
+      'and ripples in the airflow, curling and uncurling, its torn perforated edge flicking, and one or two tiny ' +
+      'paper scraps flick off it. The wound layers on the ball shift very slightly as it flexes. A continuous ' +
+      'seamless loop that ends exactly as it began.' },
 };
 
 const only = val('--only', null);
