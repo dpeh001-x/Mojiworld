@@ -9723,6 +9723,7 @@ The sleeping world is listening.</div>
      older build still runs. -->
 <script src="data/sprite_frame_index.js"></script>
   <script src="data/sprite_bbox.js"></script>
+  <script src="data/sprite_edges.js"></script>
 <script>
 // v0.29.519 — Frame count for <dir>/<key>_0.. from the baked index, or
 // `fallback` when the index (or that entry) is absent. Function declaration
@@ -9738,7 +9739,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.148';
+const GAME_VERSION = 'v0.30.149';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -117848,8 +117849,62 @@ function _lxEdgeSchedule() {
   if (typeof requestIdleCallback === 'function') requestIdleCallback(_lxEdgeDrain, { timeout: 400 });
   else setTimeout(function () { _lxEdgeDrain(null); }, 24);
 }
+// v0.30.x — PRECOMPUTED EDGE TABLE (data/sprite_edges.js, built by
+// scripts/gen_sprite_edges.mjs; scripts/sprite_edges_test.mjs proves it against
+// live probes).
+//
+// Measured: _lxEdgesTouched spent 832 ms on the main thread in the first six
+// seconds after entering the forest — the largest single contributor to
+// map-entry stutter, and why a fresh map ran ~33 ms/frame for about four
+// seconds before settling to the 16.7 ms floor. The probe already reads only
+// 48x48; the cost is drawImage(img, 0,0,48,48) resampling a 768 px webp, ~13 ms
+// per cold sprite in software.
+//
+// gen_sprite_bbox.mjs records why edge data was left out of ITS table: the
+// probe "downscales to 48x48 through the browser's own resampler, and sharp's
+// resize would not match it pixel for pixel. Wrong feather is a visible
+// regression." That is right — measured, an off-thread createImageBitmap resize
+// shifts the severity fraction on ~5% of sprites even counting only the edges
+// that actually get feathered.
+//
+// The objection is specific to resampling with sharp. This table is generated
+// by running THIS function's own drawImage+getImageData path in headless
+// Chromium, so it is what the runtime would have computed rather than an
+// approximation of it — verified 500/500 identical against live probes in a
+// fresh browser. Non-Chromium engines still probe live for anything the table
+// does not answer.
+function _lxEdgesFromTable(img) {
+  const T = window.LX_SPRITE_EDGES;
+  if (!T) return undefined;
+  const src = img.src || '';
+  const i = src.indexOf('Sprites/');
+  if (i < 0) return undefined;                  // not a sprite-tree asset
+  let k = src.slice(i + 8);
+  const q = k.indexOf('?');
+  if (q >= 0) k = k.slice(0, q);                // cache-buster query
+  try { k = decodeURIComponent(k); } catch (e) {}
+  const v = T[k];
+  if (v === undefined) return undefined;        // ABSENT means unknown, not clean
+  if (v === '') return null;                    // no cut edges
+  // Stored as the raw 48-sample integers so it round-trips exactly:
+  // f = n/48, a = first/48, b = (last+1)/48.
+  const dec = (p) => {
+    if (!p) return null;
+    const a = p.split(':');
+    return { f: (+a[0]) / 48, a: (+a[1]) / 48, b: ((+a[2]) + 1) / 48 };
+  };
+  const P = v.split('|');
+  return { l: dec(P[0]), r: dec(P[1]), t: dec(P[2]), b: dec(P[3]) };
+}
 function _lxEdgesTouched(img) {
   if (img._lxEdges !== undefined) return img._lxEdges;
+  // v0.30.x — see _lxEdgesFromTable. A hit answers without touching a canvas,
+  // so the sprite is feathered correctly on its FIRST frame on screen rather
+  // than a beat later, and costs nothing.
+  if (img.src) {
+    const _tv = _lxEdgesFromTable(img);
+    if (_tv !== undefined) { img._lxEdges = _tv; return _tv; }
+  }
   // v0.30.x perf — RESOLVE THROUGH THE SOURCE. A baked canvas (shrink or tint)
   // has byte-identical alpha geometry to the image it came from, which is all
   // this probe measures. When a bake was minted before its source had been
