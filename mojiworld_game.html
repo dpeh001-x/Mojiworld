@@ -9738,7 +9738,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.143';
+const GAME_VERSION = 'v0.30.144';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -17308,7 +17308,7 @@ const SKILLS = {
   // iceSpike 7000→4500, blink 3000→2400, arcaneBurst 10000→7000 (mage
   // kit ≈98→≈140 DPS-units) — damage numbers untouched.
   fireball:     { name:'Fireball',       icon:'🔥', cls:'mage', slot:'s', mp:14, cd:2400, desc:'Explodes on impact (180 px AoE). 2.4s recast.' },
-  iceSpike:     { name:'Ice Spike',      icon:'❄️', cls:'mage', slot:'a', mp:12, cd:4500, desc:'3 ice spikes; 50% chance to freeze on hit. Rank 10: each spike pierces 1 foe.' },
+  iceSpike:     { name:'Ice Spike',      icon:'❄️', cls:'mage', slot:'a', mp:12, cd:4500, desc:'3 ice spikes (4 at rank 5, 5 at rank 10); 50% chance to freeze on hit. Rank 10: each spike also pierces 1 foe.' },
   blink:        { name:'Dimensional Warp', icon:'🌀', cls:'mage', slot:'e', mp:14, cd:2400, desc:'Phase across a dimension. Damages every monster in the path traversed (+100×50 px AoE around it). Hold ↑ while casting (or double-tap ↑) to warp skyward.' },
   arcaneBurst:  { name:'Arcane Burst',   icon:'💥', cls:'mage', slot:'w', mp:22, cd:7000, desc:'Massive 320-px AoE explosion centred on you.' },
   // Archmage
@@ -17987,7 +17987,7 @@ const SKILL_LV10_BONUS = {
   crusader_aegis:    { orbDurMul: 1.20 },                        // +20% orb dur
   // ── ROGUE ──
   backstab:          { chainHits: 1, chainChance: 0.80 },        // Na:2 80%
-  smokeDash:         { distMul: 1.20, mobCap: 5 },               // +20% dash, mob:5
+  smokeDash:         { distMul: 1.20 },                          // v0.30.144 - mobCap removed: the body reads only distMul, so the "mob cap" line described a perk that could not happen
   flurry:            { hits: 1 },                                // Na:2
   shadowStrike:      { finalHits: 1 },                           // +1 final hit
   smokeBomb:         { extraStars: 2 },                          // v0.25.961: +2 extra shuriken (Shin-Shuriken)
@@ -18107,7 +18107,7 @@ const SKILL_LV5_BONUS = {
   crusader_aegis:    { orbDurMul: 1.10 },                        // +10% orb dur (L10: +20%)
   // ── ROGUE ──
   backstab:          { chainHits: 1, chainChance: 0.40 },        // 40% bonus stab (L10: 80%)
-  smokeDash:         { distMul: 1.10, mobCap: 4 },               // +10% dash, mob:4 (L10: +20%, 5)
+  smokeDash:         { distMul: 1.10 },                          // v0.30.144 - mobCap removed (unread; see the L10 entry)
   flurry:            { cdReducePct: 0.05 },                      // (L10 adds a hit)
   shadowStrike:      { cdReducePct: 0.05 },                      // (L10 adds a final hit)
   smokeBomb:         { extraStars: 1 },                          // +1 shuriken (L10: +2)
@@ -18493,24 +18493,50 @@ function _msRefundOnKill(skill) {
 // Returns null when the skill has no L10 special (just the global +5%
 // jump). Used by the Skills tab detail panel to show the rank-10
 // milestone perk in plain English alongside the curve numbers.
+// v0.30.144 - PER-SKILL PERK LABELS. _formatMilestoneObj names each key by its
+// generic meaning, but three skills reuse a key for something else entirely, so
+// the generic sentence described none of what happens. Verified by reading the
+// skill bodies and by measuring the result:
+//   iceSpike.mobCap = lane count   - measured 3 / 4 / 5 spikes at rank 0 / 5 / 10
+//   iceSpike.hits   = splash radius (90 -> 130), not an extra hit
+//   rush.mobCap     = dash reach    (60 + (v - 3) * 20 px)
+// A skill listed here overrides the generic clause for that key only; every
+// other key still falls through to the shared wording.
+const MS_KEY_LABEL = {
+  iceSpike: {
+    mobCap: (v) => v + ' ice spikes (up from 3)',
+    hits:   ()  => 'wider frost splash on impact',
+  },
+  rush: {
+    mobCap: (v) => '+' + ((v - 3) * 20) + ' px dash reach',
+  },
+};
 function _formatSkillLv10Bonus(id) {
   const b = (typeof SKILL_LV10_BONUS !== 'undefined') ? SKILL_LV10_BONUS[id] : null;
-  return _formatMilestoneObj(b);
+  return _formatMilestoneObj(b, id);
 }
 // v0.26.x — rank-5 milestone text. Unlisted skills show the generic shave.
 function _formatSkillLv5Bonus(id) {
   const b = (typeof SKILL_LV5_BONUS !== 'undefined') ? (SKILL_LV5_BONUS[id] || _MS_GENERIC_L5) : null;
-  return _formatMilestoneObj(b);
+  return _formatMilestoneObj(b, id);
 }
-function _formatMilestoneObj(b) {
+function _formatMilestoneObj(b, id) {
   if (!b) return null;
   const parts = [];
-  if (b.hits)        parts.push('+' + b.hits + ' bonus hit' + (b.hits > 1 ? 's' : ''));
+  // v0.30.144 - a skill may relabel a key whose generic name does not fit it.
+  const _ov = (id && typeof MS_KEY_LABEL !== 'undefined' && MS_KEY_LABEL[id]) || null;
+  const _lab = (k, v) => (_ov && typeof _ov[k] === 'function') ? _ov[k](v) : null;
+  if (b.hits)        parts.push(_lab('hits', b.hits) || ('+' + b.hits + ' bonus hit' + (b.hits > 1 ? 's' : '')));
   if (b.finalHits)   parts.push('+' + b.finalHits + ' final hit');
   if (b.chainHits)   parts.push((b.chainChance * 100 | 0) + '% chance: +' + b.chainHits + ' bonus stab');
   if (b.extraHit)    parts.push('+1 finisher attack at ATK × ' + b.extraHit.toFixed(1));
   if (b.wolfHits)    parts.push('+' + b.wolfHits + ' bonus bite per wolf');
-  if (b.mobCap)      parts.push('mob cap → ' + b.mobCap);
+  if (b.mobCap)      parts.push(_lab('mobCap', b.mobCap) || ('mob cap → ' + b.mobCap));
+  // v0.30.144 - both were silently dropped: guardian's rank-10 DEF bonus (the body
+  // does 20 + 2*rank + 5, so DEF 38 -> 45) and smokeBomb's extra shuriken,
+  // whose entry has no other key and so rendered as nothing at all.
+  if (b.defBonusPct) parts.push('+' + b.defBonusPct + '% DEF while active');
+  if (b.extraStars)  parts.push('+' + b.extraStars + ' shuriken per round');
   if (b.pierceAdd)   parts.push('pierces ' + b.pierceAdd + ' more foe' + (b.pierceAdd > 1 ? 's' : ''));
   if (b.orbAdd)      parts.push('+' + b.orbAdd + ' judgement orb' + (b.orbAdd > 1 ? 's' : ''));
   if (b.distMul)     parts.push('distance × ' + b.distMul.toFixed(2));
@@ -69284,7 +69310,11 @@ const SKILL_FNS = {
     const _ssBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('smokeBomb') : null;
     const extraStars = (_ssBonus && _ssBonus.extraStars) || 0;
     const daggerCount = 5;
-    const shurikenCount = 2 + Math.floor(extraStars / 2);
+    // v0.30.144 - was 2 + floor(extraStars / 2), which HALVED the authored value:
+    // rank 5 (extraStars 1) granted nothing at all and rank 10 (2) granted +1,
+    // while the two table comments and the note above this function all say
+    // +1 and +2. Measured before: 2 / 2 / 2 / 3 shuriken at rank 4 / 5 / 9 / 10.
+    const shurikenCount = 2 + extraStars;
     const total = daggerCount + shurikenCount;
     const speed = 13;
     const life = 34;
