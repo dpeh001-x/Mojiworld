@@ -40313,6 +40313,123 @@ const _LX_PAD_MAP = {
 };
 const _LX_PAD_AXIS = { lxNeg: { a: 'moveLeft' }, lxPos: { a: 'moveRight' }, lyNeg: { a: 'moveUp' }, lyPos: { a: 'moveDown' } };
 const _LX_PAD_DEADZONE = 0.55;
+// ===========================================================================
+// v0.30.x — STEAM REVIEW FIX: "the camera automates down and to the right
+// throughout the whole gameplay" + "Dual Shock and Dual Sense have no
+// functionality".
+//
+// Both trace to the same omission: this file never read gamepad.mapping. Not
+// once. Every button index and both movement axes were addressed as though the
+// browser had given us the W3C "standard" layout, and the pad was chosen with
+// "first entry that says connected".
+//
+// That is fine for an Xbox pad, which Chromium standard-maps. It is wrong for a
+// DualShock 4 / DualSense whenever Chromium does NOT standard-map it (mapping
+// === ""), which is the common case under the Electron wrapper and under
+// Proton. In that layout the face buttons are rotated (cross is 1, not 0), the
+// D-pad is not buttons 12-15 at all but a HAT packed into an axis, and that hat
+// RESTS AT ~3.2857 -- a value that is greater than any deadzone and never
+// changes. Read as though it were a stick, a resting hat is a stick held hard
+// in one direction for ever. That is the reported drift, and it is also why the
+// same pad appears to have "no functionality": its real buttons are at indices
+// this file was not looking at.
+//
+// Three defences, deliberately layered, because the failure mode is a game that
+// plays itself and no single check catches every bad device:
+//   1. pick the best pad rather than the first one (standard mapping wins);
+//   2. translate non-standard devices through a profile, including hat decode;
+//   3. refuse to trust ANY axis that has never moved -- see _lxPadAxis.
+// ===========================================================================
+const _LX_PAD_STICK_TRUST = 0.15;   // an axis must vary this much before it may move the player
+const _lxPadAxisSeen = Object.create(null);   // padIndex:axis -> { min, max }
+// Known non-standard layouts. Sony pads under DirectInput-style enumeration put
+// the face buttons in a different order and expose the D-pad as a hat axis.
+function _lxPadProfile(pad) {
+  if (!pad) return null;
+  if (pad.mapping === 'standard') return null;              // nothing to translate
+  const id = String(pad.id || '').toLowerCase();
+  const sony = /054c|dualshock|dualsense|wireless controller|ps4|ps5/.test(id);
+  if (!sony) return null;
+  return {
+    name: 'sony-nonstandard',
+    // standard index -> this device's index
+    btn: { 0: 1, 1: 2, 2: 0, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, 10: 10, 11: 11, 16: 12 },
+    lx: 0, ly: 1,
+    hat: 9,   // D-pad; rests > 1 (commonly 3.2857) and only then means "centred"
+  };
+}
+// Decode an HTML5 hat axis into the four standard D-pad indices. Rest is any
+// value outside [-1, 1] -- that out-of-range resting value is exactly what made
+// a hat read as a pinned stick.
+function _lxPadHat(v) {
+  const out = { 12: false, 13: false, 14: false, 15: false };
+  if (!(v >= -1.05 && v <= 1.05)) return out;               // centred / not a hat
+  const a = Math.round(((v + 1) / 2) * 8) % 8;              // 0=up .. 7=up-left
+  if (a === 7 || a === 0 || a === 1) out[12] = true;        // up
+  if (a >= 1 && a <= 3) out[15] = true;                     // right
+  if (a >= 3 && a <= 5) out[13] = true;                     // down
+  if (a >= 5 && a <= 7) out[14] = true;                     // left
+  return out;
+}
+// Read one logical stick axis with the stuck-axis guard applied. The range is
+// seeded from the FIRST sample rather than from zero, on purpose: seeding at
+// zero would score a pad that reports +1 from the very first poll as having
+// "moved" a full unit, which is the precise device this guard exists to reject.
+// A player who happens to be holding the stick when the pad is enumerated is
+// ignored until they let go once -- a momentary false negative that heals
+// itself, traded against a game that walks into a wall for ever.
+function _lxPadAxis(pad, which) {
+  if (!pad) return 0;
+  const prof = _lxPadProfile(pad);
+  const i = prof ? (which === 'x' ? prof.lx : prof.ly) : (which === 'x' ? 0 : 1);
+  const ax = pad.axes || [];
+  const v = ax[i];
+  if (typeof v !== 'number' || !isFinite(v)) return 0;
+  const key = (pad.index | 0) + ':' + i;
+  let seen = _lxPadAxisSeen[key];
+  if (!seen) { seen = _lxPadAxisSeen[key] = { min: v, max: v }; }
+  if (v < seen.min) seen.min = v;
+  if (v > seen.max) seen.max = v;
+  if ((seen.max - seen.min) < _LX_PAD_STICK_TRUST) return 0;   // never moved => not a stick
+  return v;
+}
+function _lxPadForget(padIndex) {
+  const p = (padIndex | 0) + ':';
+  for (const k in _lxPadAxisSeen) if (k.indexOf(p) === 0) delete _lxPadAxisSeen[k];
+}
+// Is this button down, in whatever layout the device actually uses?
+function _lxPadBtn(pad, stdIdx) {
+  if (!pad) return false;
+  const prof = _lxPadProfile(pad);
+  if (prof) {
+    if (stdIdx >= 12 && stdIdx <= 15) {
+      const ax = pad.axes || [];
+      return !!_lxPadHat(ax[prof.hat])[stdIdx];
+    }
+    const mapped = prof.btn[stdIdx];
+    if (mapped == null) return false;
+    const b = pad.buttons[mapped];
+    return !!(b && (b.pressed || b.value > 0.5));
+  }
+  const b = pad.buttons[stdIdx];
+  return !!(b && (b.pressed || b.value > 0.5));
+}
+// Prefer a standard-mapped pad, then one we have a profile for, then anything.
+// Steam Input can leave a virtual pad and the physical device both enumerated,
+// and "first connected" is a coin flip between them.
+function _lxPadPick(pads) {
+  let best = null, bestScore = -1;
+  for (let i = 0; i < (pads ? pads.length : 0); i++) {
+    const p = pads[i];
+    if (!p || !p.connected) continue;
+    if (!p.buttons || !p.buttons.length) continue;          // not an input device we can use
+    let score = 1;
+    if (p.mapping === 'standard') score = 3;
+    else if (_lxPadProfile(p)) score = 2;
+    if (score > bestScore) { bestScore = score; best = p; }
+  }
+  return best;
+}
 const _lxPadPrev = {};        // resolved-key -> pressed(bool) last poll, for edge detection
 let _lxPadConnectedToasted = false;
 function _lxPadResolveKey(spec) {
@@ -40788,7 +40905,10 @@ function _lxPadFlushHeld() {
     }
   } catch (e) {}
 }
-window.addEventListener('gamepaddisconnected', () => {
+window.addEventListener('gamepaddisconnected', (e) => {
+  // v0.30.x — drop the stuck-axis history with the device, so re-plugging a pad
+  // re-learns it instead of inheriting the last one's ranges.
+  try { if (e && e.gamepad && typeof _lxPadForget === 'function') _lxPadForget(e.gamepad.index); } catch (_) {}
   _lxPadRootAt = -1; _lxPadRootCache = null;   // v0.29.744 — drop the 10 Hz memo
   _lxPadFlushHeld();
   // v0.29.668 — auto-pause on unplug (Steam review best-practice): a dead
@@ -41088,8 +41208,10 @@ function _lxPadPoll() {
       } catch (e) { return; }
     }
     const pads = navigator.getGamepads();
-    let pad = null;
-    for (let i = 0; i < pads.length; i++) if (pads[i] && pads[i].connected) { pad = pads[i]; break; }
+    // v0.30.x — was "first entry that says connected", which is a coin flip
+    // whenever Steam Input leaves a virtual pad enumerated alongside the
+    // physical one. _lxPadPick prefers a standard-mapped device.
+    const pad = _lxPadPick(pads);
     // Native Steam Input digital states (custom Steam controller configs), ORed in.
     let steamBtns = null;
     if (_steamAvailable() && window.SteamAPI.input && typeof window.SteamAPI.input.snapshot === 'function') {
@@ -41183,17 +41305,35 @@ function _lxPadPoll() {
       }
       for (const idx in _LX_PAD_MAP) {
         if (_tutTrig && (+idx === 6 || +idx === 7)) continue;   // the tour owns the triggers while its card is open
-        const b = pad.buttons[idx]; if (b && (b.pressed || b.value > 0.5)) mark(_lxPadMapEff(idx), true);
+        if (_lxPadBtn(pad, +idx)) mark(_lxPadMapEff(idx), true);   // v0.30.x — layout-aware (Sony pads rotate the face buttons and hat the D-pad)
       }   // v0.29.670 — user overrides
-      const ax = pad.axes || [];
-      if (ax[0] < -_LX_PAD_DEADZONE) mark(_LX_PAD_AXIS.lxNeg, true);
-      if (ax[0] > _LX_PAD_DEADZONE) mark(_LX_PAD_AXIS.lxPos, true);
-      if (ax[1] < -_LX_PAD_DEADZONE) mark(_LX_PAD_AXIS.lyNeg, true);
-      if (ax[1] > _LX_PAD_DEADZONE) mark(_LX_PAD_AXIS.lyPos, true);
+      // v0.30.x — _lxPadAxis applies the profile AND refuses an axis that has
+      // never varied, so a resting hat (or any pinned axis) can no longer walk
+      // the player across the map for the whole session.
+      const _lxv = _lxPadAxis(pad, 'x'), _lyv = _lxPadAxis(pad, 'y');
+      if (_lxv < -_LX_PAD_DEADZONE) mark(_LX_PAD_AXIS.lxNeg, true);
+      if (_lxv > _LX_PAD_DEADZONE) mark(_LX_PAD_AXIS.lxPos, true);
+      if (_lyv < -_LX_PAD_DEADZONE) mark(_LX_PAD_AXIS.lyNeg, true);
+      if (_lyv > _LX_PAD_DEADZONE) mark(_LX_PAD_AXIS.lyPos, true);
     }
     if (steamBtns && typeof steamBtns === 'object') {
       // { actionName: bool } from the native bridge — actionName maps 1:1 to _LX_PAD map specs by key/action.
-      for (const idx in _LX_PAD_MAP) { const spec = _lxPadMapEff(idx); const nm = spec.a || spec.k; if (steamBtns[nm]) mark(spec, true); }   // v0.29.670 — user overrides
+      // v0.30.x — SANITY GATE. steam_integration's snapshot() reports digital
+      // action state; if the action set was never activated, or a handle failed
+      // to resolve, that data is not merely absent but meaningless. A snapshot
+      // claiming both moveLeft AND moveRight (or both moveUp and moveDown) is
+      // describing something no stick or D-pad can physically do, and because
+      // _LX_PAD_MAP is walked in index order 12,13,14,15 the last writes win --
+      // which resolves to exactly "down and to the right", the reported bug.
+      // When the directions contradict themselves, drop the directional half of
+      // the snapshot and keep the buttons.
+      const _sDirBad = (!!steamBtns.moveLeft && !!steamBtns.moveRight) ||
+                       (!!steamBtns.moveUp && !!steamBtns.moveDown);
+      for (const idx in _LX_PAD_MAP) {
+        const spec = _lxPadMapEff(idx); const nm = spec.a || spec.k;
+        if (_sDirBad && (nm === 'moveLeft' || nm === 'moveRight' || nm === 'moveUp' || nm === 'moveDown')) continue;
+        if (steamBtns[nm]) mark(spec, true);
+      }   // v0.29.670 — user overrides
     }
     // Edge-detect vs last poll and dispatch keydown/keyup for changes only.
     for (const k in pressed) { _lxPadLastInput = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); break; }   // v0.29.254 — haptics gate: pad counts as "in use"
