@@ -176,9 +176,27 @@ for (const k of keys) {
       // render visibly smaller than the static sprite they replace — a size pop
       // the instant the animation takes over.
       const _bm = await sharp(basePath).metadata();
-      for (let i = 0; i < FRAMES; i++)
-        await writeFile(join(outDir, `${k}_${i}.webp`), await normalise(bufs[i], _bm.width, _bm.height));
+      const _written = [];
+      for (let i = 0; i < FRAMES; i++) {
+        const _f = join(outDir, `${k}_${i}.webp`);
+        await writeFile(_f, await normalise(bufs[i], _bm.width, _bm.height));
+        _written.push(_f);
+      }
       console.log(`OK — ${FRAMES} frames`);
+      // v0.30.x — FRAMING, automatically. The animator re-composes to fill the
+      // canvas, so frames routinely come back edge-to-edge even when the base
+      // was fitted, and anything drawn fitted to a box then shows a shaved
+      // outline (see the mwrap "bit of cutoff"). match-base, NOT inset-to-
+      // margin: the base here is shipped art that is usually already framed, so
+      // insetting the whole set again would shrink it a second time. Mapping
+      // the frames onto the base's own box leaves the base alone and keeps the
+      // static sprite and its loop the same size.
+      if (!argv.includes('--no-fit')) {
+        try {
+          const { fitFramesToBase } = await import('./fit_sprite_frames.mjs');
+          await fitFramesToBase(basePath, _written, { write: true, log: (m) => console.log('  ' + m) });
+        } catch (e) { console.log('  fit skipped: ' + String(e.message).slice(0, 100)); }
+      }
       done = true;
     } catch (e) {
       last = e; console.log('fail: ' + String(e.message).slice(0, 120));

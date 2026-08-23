@@ -439,7 +439,23 @@ for (const k of keys) {
         const clear = alpha ? Math.round((1 - alpha.mean / 255) * 100) : 0;
         const f = join(dir, `${k}_c${i}.webp`);
         await writeFile(f, buf);
-        console.log(`  c${i}: ${(buf.length / 1024).toFixed(1)}KB, ${clear}% transparent -> ${f}`);
+        // v0.30.x — FRAMING, automatically. ludo composes to fill the frame, so
+        // candidates land edge-to-edge and whatever draws them fitted to a box
+        // shaves the outline (the mwrap "bit of cutoff"). Asking the prompt for
+        // clear margins does not work — four candidates in a row came back at
+        // margin 0 with it in — so every candidate is inset here instead.
+        // Candidates are throwaway, so rewriting them in place is free, and it
+        // means whatever gets installed is already safe.
+        let _fitNote = '';
+        if (!argv.includes('--no-fit')) {
+          try {
+            const { fitToMargin, measure } = await import('./fit_sprite_frames.mjs');
+            const before = await measure(f);
+            const r = await fitToMargin([f], { margin: 0.07, write: true, log: () => {} });
+            if (r.changed) _fitNote = `, inset ${r.scale.toFixed(2)}x (was ${before.margin}px from the edge)`;
+          } catch (e) { _fitNote = ', fit skipped: ' + String(e.message).slice(0, 60); }
+        }
+        console.log(`  c${i}: ${(buf.length / 1024).toFixed(1)}KB, ${clear}% transparent${_fitNote} -> ${f}`);
         done = true;
       } catch (e) {
         console.log(`  c${i} attempt ${attempt} failed: ${String(e).slice(0, 140)}`);
