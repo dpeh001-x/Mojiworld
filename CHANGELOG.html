@@ -121,6 +121,35 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.120 <span class="tag"><span class="pill polish">polish</span> Decode sprites before edge-probing them &mdash; town's single biggest cost</span></h2>
+<p>Per user: <em>the game should be buttery smooth.</em></p>
+<p>Found with the browser's own <b>sampling profiler</b> (new <code>scripts/perf_cpu_profile.mjs</code>). That matters: the <code>performance.now()</code> wrappers used previously misattribute GPU backpressure &mdash; whichever call triggers a flush absorbs everything queued before it, which is why they reported <code>drawNPCs</code> at 1.79&nbsp;ms while calling it directly timed 0.037&nbsp;ms. A sampling profiler attributes <em>self</em> time and has no such failure mode.</p>
+<p>Town, zero monsters, eight seconds:</p>
+<table>
+<tr><th>Function (self time)</th><th>%</th><th>ms</th></tr>
+<tr><td>(idle)</td><td>55.1</td><td>4473</td></tr>
+<tr><td><b>getImageData</b></td><td><b>19.4</b></td><td><b>1577</b></td></tr>
+<tr><td>(program)</td><td>13.2</td><td>1074</td></tr>
+<tr><td>drawNPCs</td><td>2.0</td><td>161</td></tr>
+</table>
+<p>Caller attribution says <b>100% of it is <code>_lxEdgesTouched</code></b>. Counted per image that is <b>136 readbacks across 136 distinct images, each probed exactly once</b> &mdash; the memoization is working perfectly. The images are NPC idle animation frames (nine NPCs &times; ~9 frames, plus bake derivatives). So it is neither a leak nor a loop: it is a one-time cost per frame-image, paid <em>on the main thread</em> while the player stands in town.</p>
+
+<h3>Why each probe costs so much</h3>
+<p>The probe <code>drawImage</code>s the source into a readback canvas. On a webp that has not decoded yet, that forces a <b>synchronous full-size decode on the main thread</b>. The code's own note beside the monster frame loader measures this at <b>~24&nbsp;ms cold against ~1&nbsp;ms hot</b> &mdash; which is exactly why <em>that</em> path awaits <code>img.decode()</code> before probing. The warm queue never got the same treatment, so every NPC idle frame paid the cold price. It does now.</p>
+
+<h3>The obvious lever was tried first, and measured as ineffective</h3>
+<p>The queue's budget is 4&nbsp;ms per 16&nbsp;ms window &mdash; a quarter of a 60&nbsp;fps frame &mdash; so tightening it looked like the fix. It is not: <code>_LX_EDGE_MS</code> 4 &rarr; 2 &rarr; 1 moved <code>getImageData</code> only <b>19.3% &rarr; 17.2% &rarr; 17.1%</b>, because the drain deliberately always processes at least one image per callback and a single cold probe already overruns any budget. The cost had to come out of the probe itself rather than the scheduling around it, so the budget is left alone.</p>
+
+<h3>Honest about the win</h3>
+<table>
+<tr><th></th><th colspan="3">getImageData, three interleaved runs</th><th>mean</th></tr>
+<tr><td>before</td><td>19.6%</td><td>8.7%</td><td>16.8%</td><td>15.0%</td></tr>
+<tr><td>after</td><td>13.7%</td><td>12.7%</td><td>11.1%</td><td><b>12.5%</b></td></tr>
+</table>
+<p>Mean drops ~17% and the spread tightens considerably (before spans 8.7&ndash;19.6, after 11.1&ndash;13.7). This harness is noisy enough that a single run proves nothing, which is why the runs are interleaved and all six are reported rather than the flattering pair. The mechanism is not in doubt &mdash; it is the same decode-then-probe the monster loader already documents &mdash; and the benefit should be larger on hardware where a cold webp decode costs more than it does here.</p>
+<p>Behaviour is unchanged: the probe still runs and still memoizes, only later. An image whose <code>decode()</code> rejects is still enqueued, so a broken source cannot strand itself unprobed.</p>
+
+
 <h2>v0.30.119 <span class="tag"><span class="pill bug">bug</span> The Sovereign's authored calibration actually applies now</span></h2>
 <p>Five <code>LX_ANIM_PATCH</code> blobs from the resizer, hardbaked into <code>data/anim_calib.js</code> via <code>scripts/apply_anim_patch.mjs</code> &mdash; swing <code>dx&nbsp;-0.0469</code>, column <code>-0.0427</code>, collapse <code>-0.0396</code>, volley <code>-0.0552</code>, drain <code>s&nbsp;1.0109 / dx&nbsp;-0.0458</code>. Values passed through verbatim; never hand-edited in transit.</p>
 

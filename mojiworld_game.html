@@ -9708,7 +9708,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.119';
+const GAME_VERSION = 'v0.30.120';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -117544,7 +117544,25 @@ function _lxEdgesTouched(img) {
   // frame. A sprite is unfeathered for its first beat on screen — the tradeoff
   // this file already accepted for big art, and invisible beside a 517 ms stall.
   if (img.tagName !== undefined && !img._lxEdgesWarm) {
-    if (!img._lxEdgeQueued) { img._lxEdgeQueued = true; _lxEdgeQ.push(img); _lxEdgeSchedule(); }
+    if (!img._lxEdgeQueued) {
+      img._lxEdgeQueued = true;
+      // v0.30.x — DECODE BEFORE PROBING. The probe drawImages this source into
+      // the readback canvas; on a webp that has not decoded yet that is a
+      // SYNCHRONOUS full-size decode on the main thread (~24 ms) rather than a
+      // sample of a hot bitmap (~1 ms). The monster frame loader already awaits
+      // decode() for exactly this reason; the queue did not, so every NPC idle
+      // frame paid the cold price — measured at 19.4% of all samples in town,
+      // 136 cold probes for 136 distinct frames.
+      //
+      // decode() resolves off-thread and waits for the fetch internally, so the
+      // image only enters the drain queue once probing it is cheap. The catch
+      // path still enqueues: a decode failure must not strand the image
+      // unprobed forever, and the probe's own guards handle a broken source.
+      if (img.decode) {
+        const _q = () => { _lxEdgeQ.push(img); _lxEdgeSchedule(); };
+        img.decode().then(_q, _q);
+      } else { _lxEdgeQ.push(img); _lxEdgeSchedule(); }
+    }
     return null;
   }
   let res = null;
