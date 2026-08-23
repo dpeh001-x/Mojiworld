@@ -8388,13 +8388,18 @@ The sleeping world is listening.</div>
                mirror of _LX_PAD_MAP so pad players can learn the kit from Help. -->
           <div class="kb" style="margin-top:9px;border-top:1px solid rgba(255,255,255,0.14);padding-top:9px;"><span style="color:#ffd166;font-weight:700;">🎮 CONTROLLER</span><span></span></div>
           <div class="kb"><span>Move</span><span>D-pad / Left stick</span></div>
-          <div class="kb"><span>Jump / Dash</span><span>Ⓐ / <kbd>L3</kbd></span></div>
+          <div class="kb"><span>Jump</span><span>Ⓐ</span></div>
+          <div class="kb"><span>Block / Parry</span><span><kbd>L3</kbd></span></div>
+          <div class="kb"><span>Dodge / Roll</span><span><kbd>Back</kbd> + <kbd>LB</kbd></span></div>
           <div class="kb"><span>Attack / Interact</span><span>Ⓧ / Ⓨ</span></div>
-          <div class="kb"><span>Skills</span><span>Ⓑ <kbd>LT</kbd><kbd>RT</kbd><kbd>R3</kbd></span></div>
+          <div class="kb"><span>Skills 1–3 · signature · ultimate</span><span>Ⓑ <kbd>LT</kbd><kbd>RT</kbd><kbd>R3</kbd></span></div>
+          <div class="kb" style="color:#ffd166;"><span>Skill 4 / Skill 5</span><span><kbd>Back</kbd> + Ⓐ / Ⓑ</span></div>
+          <div class="kb" style="color:#ffd166;"><span>Master signature / Master ultimate</span><span><kbd>Back</kbd> + Ⓧ / Ⓨ</span></div>
           <div class="kb"><span>Potions</span><span><kbd>LB</kbd> red · <kbd>RB</kbd> blue</span></div>
           <div class="kb"><span>Character / Pause</span><span><kbd>Back</kbd> / <kbd>Start</kbd></span></div>
           <div class="kb"><span>Menus</span><span>D-pad move · Ⓐ pick · Ⓑ close</span></div>
-          <div class="kb"><span>Map / Quests / Codex / Mojidex</span><span><kbd>Back</kbd> + D-pad ◀ ▶ ▲ ▼</span></div>
+          <div class="kb"><span>Map ▲ · Quests ▼ · Codex ◀ · Mojidex ▶</span><span><kbd>Back</kbd> + D-pad</span></div>
+          <div class="kb" style="opacity:.75;"><span>Character panel</span><span>tap <kbd>Back</kbd> on its own</span></div>
           <div class="kb"><span>Codex of Mojiworld</span><span><kbd>Y</kbd></span></div>
           <div class="kb"><span>Open Chest / Pickup</span><span><kbd>F</kbd></span></div>
           <div class="kb"><span>Inventory</span><span><kbd>B</kbd></span></div>
@@ -40340,6 +40345,47 @@ const _LX_PAD_DEADZONE = 0.55;
 //   2. translate non-standard devices through a profile, including hat decode;
 //   3. refuse to trust ANY axis that has never moved -- see _lxPadAxis.
 // ===========================================================================
+// ===========================================================================
+// v0.30.x — STEAM REVIEW FIX 2: "The user is not able to access all of the
+// gameplay functions using the controller."
+//
+// That was literally true, and the missing functions were not minor ones.
+// There are NINE skill slots (z x s c d f v g b). The pad bound five. Missing:
+//
+//   c -> skill 4        d -> skill 5        dodge (shift)
+//   g -> MASTER SIGNATURE          b -> MASTER ULTIMATE
+//
+// g and b are the two capstone skills every master class is built around --
+// Grand Hex and Pandemic Hex for the Hexmaster, and the equivalent pair for all
+// the others. A controller player could not cast either one, ever, at any
+// level. The existing comment in _LX_PAD_MAP even says so out loud ("that
+// leaves four buttons for six skill keys"), treating it as a tidy trade; it is
+// the exact thing Steam failed the build for.
+//
+// All 16 usable buttons were already spoken for (17 is the Guide button, which
+// Steam reserves), so the only honest fix is a MODIFIER LAYER.
+//
+// The modifier is BACK/VIEW, chosen because it is the one bound control that is
+// never time-critical: holding it costs you nothing in a fight. Putting the
+// layer on LB or L3 would have meant delaying a health potion or a parry until
+// the button is released, which trades a review failure for a combat feel
+// regression. Tapping Back still opens the character panel exactly as before --
+// just on release rather than on press, which for a menu is imperceptible.
+const _LX_PAD_MOD = 8;              // Back / View / Share
+const _LX_PAD_MOD_MAP = {
+  0:  { k: 'c' },            // Back + A  -> skill 4
+  1:  { k: 'd' },            // Back + B  -> skill 5
+  2:  { k: 'g' },            // Back + X  -> MASTER SIGNATURE
+  3:  { k: 'b' },            // Back + Y  -> MASTER ULTIMATE
+  4:  { a: 'dodge' },        // Back + LB -> dodge / roll
+  12: { a: 'worldMap' },     // Back + D-pad up
+  13: { a: 'questJournal' }, // Back + D-pad down
+  14: { a: 'codex' },        // Back + D-pad left
+  15: { a: 'mojidex' },      // Back + D-pad right
+};
+let _lxPadModPrev = false;          // modifier held on the previous poll
+let _lxPadModUsed = false;          // ...and did the player actually use the layer?
+let _lxPadTap = null;               // { key, polls } — a queued tap-on-release
 const _LX_STEAM_MOVE_Y_UP = true;   // Steam Input joystick: +Y is UP (browser gamepad: +Y is DOWN)
 const _LX_PAD_STICK_TRUST = 0.15;   // an axis must vary this much before it may move the player
 const _lxPadAxisSeen = Object.create(null);   // padIndex:axis -> { min, max }
@@ -41111,7 +41157,8 @@ function _kbRenderPad() {
   const host = document.getElementById('kbm-tab-pad');
   if (!host) return;
   const row = (inner) => '<div style="display:flex;align-items:center;gap:10px;margin:4px 0;">' + inner + '</div>';
-  let html = '<div style="font:600 12px Inter,sans-serif;color:#9990b8;margin:10px 2px 8px;">Every button is rebindable. Pick a button, then pick what it does. Changes apply instantly and persist.</div>';
+  let html = '<div style="font:600 12px Inter,sans-serif;color:#ffd166;margin:10px 2px 0;">Holding <b>Back</b> is a second layer: Ⓐ skill 4 · Ⓑ skill 5 · Ⓧ master signature · Ⓨ master ultimate · LB dodge · D-pad map/quests/codex/mojidex. Tap Back on its own for the character panel. This layer is fixed and is not affected by the rebinds below.</div>'
+           + '<div style="font:600 12px Inter,sans-serif;color:#9990b8;margin:10px 2px 8px;">Every button is rebindable. Pick a button, then pick what it does. Changes apply instantly and persist.</div>';
   if (_kbPadPick == null) {
     for (let i = 0; i < 16; i++) {
       const ov = _lxPadOverrides()[i];
@@ -41258,6 +41305,16 @@ function _lxPadPoll() {
     // Build the pressed set (resolved physical key -> pressed).
     const pressed = {};
     const mark = (spec, isDown) => { if (!spec || spec.none) return; const k = _lxPadResolveKey(spec); if (k && isDown) pressed[k] = true; };   // v0.29.670 — {none} = unbound
+    // v0.30.x — modifier layer state (see _LX_PAD_MOD).
+    const _lxPadModDown = !!(pad && _lxPadBtn(pad, _LX_PAD_MOD));
+    if (_lxPadModDown && !_lxPadModPrev) _lxPadModUsed = false;      // fresh hold
+    if (!_lxPadModDown && _lxPadModPrev && !_lxPadModUsed) {
+      // Released without touching the layer: honour it as a plain tap of its
+      // own binding, so Back still opens the character panel.
+      const _tk = _lxPadResolveKey(_lxPadMapEff(_LX_PAD_MOD));
+      if (_tk) _lxPadTap = { key: _tk, polls: 2 };
+    }
+    _lxPadModPrev = _lxPadModDown;
     if (pad) {
       // v0.29.785 — tutorial trigger nav (see note above the poll).
       let _tutTrig = false;
@@ -41306,8 +41363,23 @@ function _lxPadPoll() {
       }
       for (const idx in _LX_PAD_MAP) {
         if (_tutTrig && (+idx === 6 || +idx === 7)) continue;   // the tour owns the triggers while its card is open
+        // v0.30.x — the modifier itself never fires its own binding while held;
+        // it resolves on release below, and only if the layer went unused.
+        if (+idx === _LX_PAD_MOD) continue;
+        if (_lxPadModDown && _LX_PAD_MOD_MAP[+idx]) {
+          if (_lxPadBtn(pad, +idx)) { mark(_LX_PAD_MOD_MAP[+idx], true); _lxPadModUsed = true; }
+          continue;                      // the layer replaces the base binding
+        }
         if (_lxPadBtn(pad, +idx)) mark(_lxPadMapEff(idx), true);   // v0.30.x — layout-aware (Sony pads rotate the face buttons and hat the D-pad)
       }   // v0.29.670 — user overrides
+      // A queued tap (Back released without using the layer) is held down for a
+      // couple of polls rather than pulsed inside one, so the edge detector
+      // below emits a real keydown/keyup pair that a handler reading key STATE
+      // on the next frame still sees.
+      if (_lxPadTap) {
+        pressed[_lxPadTap.key] = true;
+        if (--_lxPadTap.polls <= 0) _lxPadTap = null;
+      }
       // v0.30.x — _lxPadAxis applies the profile AND refuses an axis that has
       // never varied, so a resting hat (or any pinned axis) can no longer walk
       // the player across the map for the whole session.
