@@ -121,6 +121,47 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.125 <span class="tag"><span class="pill polish">polish</span> No-backdrop mode &mdash; 4.8&times; faster on a machine with no graphics card</span></h2>
+<p>Per user: <em>even a computer without graphics card can run this smooth.</em></p>
+<p>That reframed the whole problem. Every previous performance pass measured an <b>accelerated</b> browser. Re-measured with the GPU disabled, which is what a machine without a graphics card actually does:</p>
+<table>
+<tr><th>Scenario</th><th>median frame</th></tr>
+<tr><td>GPU, town, running</td><td>5.3&nbsp;ms</td></tr>
+<tr><td>Software, town, running</td><td><b>89.0&nbsp;ms</b> &mdash; ~11&nbsp;fps</td></tr>
+<tr><td>Software, town, <em>paused</em></td><td>89.3&nbsp;ms &mdash; the sim is not the cost</td></tr>
+<tr><td>Software, blank page</td><td>16.6&nbsp;ms &mdash; the environment is fine</td></tr>
+</table>
+<p>Paused and running cost <b>the same</b>, so it was never the draw loop. Halving the canvas resolution changed nothing either (89.1 &rarr; 88.4&nbsp;ms at a <em>quarter</em> of the pixels), so it was not fill rate. Something fixed, per-frame, outside the game's own rendering.</p>
+
+<h3>It is <code>backdrop-filter</code></h3>
+<p>Injecting <code>* { backdrop-filter: none }</code> and changing nothing else took town from 88.3&nbsp;ms to 18.2&nbsp;ms. There are <b>110 <code>backdrop-filter</code> declarations</b> in the stylesheet, and each one makes the browser read back and re-blur everything behind that element every frame. The sheet already drops them on touch devices &mdash; and its own comment states the assumption this fixes: <em>"Desktop keeps the blur &mdash; it's free on hover-pointer devices."</em> It is free on a desktop <b>with</b> a GPU. On a desktop without one it is the entire frame budget.</p>
+<table>
+<tr><th>Software renderer, town</th><th>median</th><th>p95</th><th>below 30&nbsp;fps</th></tr>
+<tr><td>before</td><td>86.0&nbsp;ms</td><td>175.3&nbsp;ms</td><td><b>100%</b></td></tr>
+<tr><td>after</td><td><b>17.9&nbsp;ms</b></td><td>31.4&nbsp;ms</td><td><b>4%</b></td></tr>
+</table>
+<p>Roughly <b>11&nbsp;fps &rarr; 56&nbsp;fps</b>.</p>
+
+<h3>Nothing changes for players with a GPU &mdash; verified, not assumed</h3>
+<table>
+<tr><th></th><th>median</th><th>p95</th><th>mode engaged?</th></tr>
+<tr><td>GPU, before</td><td>4.5&nbsp;ms</td><td>7.0&nbsp;ms</td><td>&mdash;</td></tr>
+<tr><td>GPU, after</td><td>4.5&nbsp;ms</td><td>7.6&nbsp;ms</td><td><b>no</b> (renderer: ANGLE Intel Direct3D11)</td></tr>
+<tr><td>Software, after</td><td>17.9&nbsp;ms</td><td>31.4&nbsp;ms</td><td><b>yes</b> (renderer: ANGLE SwiftShader)</td></tr>
+</table>
+
+<h3>How it engages</h3>
+<p>Two independent triggers, because either alone has a blind spot:</p>
+<ul>
+<li>the WebGL renderer string naming a software rasteriser (SwiftShader, llvmpipe, Microsoft Basic Render Driver) &mdash; or no WebGL context at all;</li>
+<li>the <b>existing</b> frame watchdog: whatever already decides a machine needs <code>lowFx</code> also decides it cannot afford 110 per-frame blurs. That covers the case the renderer probe misses &mdash; a real GPU reported, still too slow in practice.</li>
+</ul>
+<p>The rule is <code>html.lx-nobackdrop *</code> rather than a selector list on purpose: 110 declarations are spread across the sheet, and a hand-maintained list would silently miss whichever one is added next. Panels keep their translucent backgrounds; they simply stop blurring what is behind them. It is <b>sticky</b> once engaged &mdash; toggling the class restyles every element on the page, and a machine slow enough to trip it will trip it again the moment the blurs return, so flapping would cost more than the blurs do.</p>
+
+<h3>A tool worth keeping</h3>
+<p>New <code>scripts/perf_swrender_frames.mjs</code> runs the game with the GPU off and reports frame-time plus a micro-benchmark of the canvas features that behave differently in software. That benchmark is the useful part: <code>'lighter'</code> compositing costs <b>9.8&times;</b> a plain blit and a scaled blit <b>4.7&times;</b>, while fills, arcs, gradients and <code>shadowBlur</code> all land near <b>0.1&times;</b> &mdash; the opposite of the intuition a GPU gives you, and the reason the earlier passes were hunting the wrong things.</p>
+
+
 <h2>v0.30.124 <span class="tag"><span class="pill polish">polish</span> The blight seed reads at the size it is actually drawn</span></h2>
 <p>Per user: <em>mblightseed still needs improvement, regenerate.</em></p>
 <p>The v0.30.123 version failed on <b>value</b>, not detail. A dark olive husk, fat black tendrils and the house style's near-black outline gave three dark masses with nothing between them &mdash; so at the <b>~28&nbsp;px this is actually blitted</b> it collapsed into a smudge with a green squiggle, and against the game's dark backgrounds it barely had a silhouette at all. The house references it sits beside are all bright bodies that let the black outline act as an outline rather than as the subject:</p>

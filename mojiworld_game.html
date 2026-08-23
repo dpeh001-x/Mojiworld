@@ -3656,6 +3656,24 @@
       -webkit-backdrop-filter: none !important;
     }
   }
+  /* v0.30.x — NO-BACKDROP MODE (per user: "even a computer without graphics
+     card can run this smooth"). backdrop-filter makes the browser read back and
+     re-blur the content behind an element every frame. On a GPU that is nearly
+     free, which is why the touch-only rule above says the desktop blur costs
+     nothing — true only on a desktop WITH a GPU. Measured with the GPU
+     disabled, town runs 88.3 ms/frame with these blurs and 18.2 ms without:
+     4.8x, roughly 11 fps against 55.
+     Deliberately `*` rather than a selector list: there are 110 of these
+     declarations across the sheet, and a hand-maintained list would silently
+     miss whichever one is added next. Nothing else about the panels changes —
+     they keep their translucent backgrounds, they simply stop blurring what is
+     behind them. */
+  html.lx-nobackdrop *,
+  html.lx-nobackdrop *::before,
+  html.lx-nobackdrop *::after {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
   .modal h2 {
     /* v0.25.873 — Aesthetic pass. Was flat gold text with a single
        glow halo. Now a gold gradient via background-clip + a thin
@@ -9708,7 +9726,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.124';
+const GAME_VERSION = 'v0.30.125';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -9972,6 +9990,38 @@ function _lxGfxIsCustom(s) {
             s.fxShadows !== p.shadows || s.fxDmgNum !== p.dmgnum);
 }
 
+// v0.30.x — see the .lx-nobackdrop rule in the stylesheet. Engaged either
+// because the renderer is known to be software, or because the frame watchdog
+// gave up on this machine.
+//
+// STICKY ON PURPOSE. Toggling this class restyles every element on the page, and
+// a machine slow enough to trip it will trip it again the moment the blurs come
+// back — flapping would cost more than the blurs do. Once off, off for the
+// session; the player can still reload.
+let _lxNoBackdropOn = false;
+function _lxSetNoBackdrop(reason) {
+  if (_lxNoBackdropOn) return;
+  _lxNoBackdropOn = true;
+  try {
+    document.documentElement.classList.add('lx-nobackdrop');
+    console.log('[perf] backdrop blur disabled (' + reason + ')');
+  } catch (e) {}
+}
+// A software rasteriser identifies itself in the WebGL renderer string
+// (SwiftShader, llvmpipe, Microsoft Basic Render Driver). No WebGL context at
+// all is treated the same way: a browser that cannot give us one is not a
+// machine that should be re-blurring the HUD sixty times a second.
+function _lxRendererIsSoftware() {
+  try {
+    const c = document.createElement('canvas');
+    const gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+    if (!gl) return true;
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    const r = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || '') : '';
+    return /swiftshader|llvmpipe|basic render|software|microsoft basic/i.test(r);
+  } catch (e) { return false; }
+}
+try { if (_lxRendererIsSoftware()) _lxSetNoBackdrop('software renderer'); } catch (e) {}
 function _perfTick(dt, time) {
   const frame = Math.min(80, Math.max(0, dt || 16.7));
   LX_PERF.avgFrame += (frame - LX_PERF.avgFrame) * 0.06;
@@ -9994,6 +10044,10 @@ function _perfTick(dt, time) {
   if (!LX_PERF.lowFx && LX_PERF.slowFrames >= 4) {
     LX_PERF.lowFx = true;
     LX_PERF.lowFxUntil = time + 6000;
+    // v0.30.x — a machine that trips the FX watchdog cannot afford 110
+    // per-frame backdrop blurs either. Covers the case the renderer probe
+    // misses: real GPU reported, still too slow in practice.
+    try { _lxSetNoBackdrop('frame watchdog'); } catch (e) {}
     // v0.25.262 — Surface the auto-toggle the FIRST time it fires per
     // session so the player understands why FX got softer. Subsequent
     // toggles are silent (don't spam).

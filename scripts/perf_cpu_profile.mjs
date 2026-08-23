@@ -20,7 +20,14 @@ const SECS = +((args.find(a => a.startsWith('--secs=')) || '').split('=')[1] || 
 const FILL = args.includes('--fill');
 const URL = 'file:///' + path.join(ROOT, file).split(path.sep).join('/');
 
-const browser = await chromium.launch({ channel: 'msedge', args: ['--allow-file-access-from-files'] });
+// --swrender: simulate a machine with NO GPU. Canvas2D falls back to software
+// rasterisation, where the cost model INVERTS - fill rate, globalAlpha,
+// composite modes and shadowBlur dominate, while GPU readbacks get cheaper.
+// Profiling only on an accelerated browser answers the wrong question for
+// anyone running integrated or no graphics.
+const SW = args.includes('--swrender');
+const browser = await chromium.launch({ channel: 'msedge', args: ['--allow-file-access-from-files']
+  .concat(SW ? ['--disable-gpu', '--disable-accelerated-2d-canvas', '--disable-gpu-compositing'] : []) });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 await page.goto(URL + '?dev=1', { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => typeof loadMap === 'function', { timeout: 90000 });
