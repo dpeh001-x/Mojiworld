@@ -308,21 +308,26 @@ const TARGETS = {
     out: 'Sprites/projectiles/p_shockwave.webp',
     ar: 'ar_16_9',
     size: [768, 432],
-    prompt: 'A horizontal shockwave blast tearing to the RIGHT across a wide frame, drawn with hard defined '
-      + 'shapes: at the right end a bright CRESCENT wavefront arcing vertically like a drawn blade edge, its '
-      + 'inside face blown out to white and its outer face deep scarlet, with a spearhead of white light bursting '
-      + 'forward out of the crescent tip. Behind it, three or four clearly separated bands of crimson force curve '
-      + 'back in parallel arcs, each band a distinct crisp shape with a clean edge. Around the outside, sharp '
-      + 'pointed tongues of near-black flame with hard silhouettes, like torn paper. Behind that, long straight '
-      + 'streaks of red energy raking off to the left, and a scatter of small hard-edged sparks. Wider than it is '
-      + 'tall, filling the frame edge to edge horizontally.',
-    style: ' Bold 2D anime game VFX sprite in the style of a hand-drawn action RPG skill effect: ONE wave centred '
-      + 'in frame and aimed RIGHT, built from CRISP HARD-EDGED shapes with clean confident boundaries between '
-      + 'colour bands - white core, hot crimson, deep red, charred near-black - like flat cel-painted anime '
-      + 'effects animation. Absolutely NOT an airbrushed blur, NOT a soft fog or smear, NOT a hazy gradient '
-      + 'cloud; every flame tongue and every band must have a readable edge. A bold LANDSCAPE silhouette that '
-      + 'still reads as a shockwave at thumbnail size. Fully transparent background, no ground shadow, no '
-      + 'background scenery, no text, no border, no frame, not pixel art, not photorealistic.',
+    prompt: 'A single bold crescent slash of force flying to the RIGHT across a wide frame: ONE thick curved '
+      + 'blade-shaped arc, fat in the middle and tapering to sharp points at its top and bottom tips, bowing '
+      + 'FORWARD so its leading edge faces right. The leading edge is a thin searing white-hot line, falling back '
+      + 'through hot scarlet into deep crimson and to charred near-black at the trailing inside of the arc, with '
+      + 'a few sharp pointed tongues of black flame torn off the outer rim. The arc is THICK and SOLID - a heavy '
+      + 'wedge of packed red force at least a quarter as wide as the whole crescent, filled in with colour, not a '
+      + 'thin outline and not hollow. From its top and bottom tips, two SHORT tapering ribbons of fire peel back '
+      + 'to the left and dissolve to a point within about half the crescent\'s height; they stay apart and never '
+      + 'curl round to meet each other. Nothing else in the frame - no ring, no orb, no hollow loop, no teardrop, '
+      + 'no concentric circles, no rocket exhaust cone, no needle spike, and absolutely NO straight parallel '
+      + 'bars, NO evenly spaced stripes, NO detached floating lines behind it.',
+    style: ' Bold 2D anime game VFX sprite in the style of a hand-drawn action RPG SLASH effect: ONE crescent '
+      + 'centred in frame and aimed RIGHT, built from CRISP HARD-EDGED shapes with clean confident boundaries '
+      + 'between colour bands, like flat cel-painted anime effects animation. Mostly RED - the white is only a '
+      + 'thin hot edge, not the body. Every shape is a tapering brush stroke that comes to a point; nothing in '
+      + 'the frame has a constant width or a blunt cut-off end. Absolutely NOT an airbrushed blur, NOT a soft '
+      + 'fog, NOT concentric rings, NOT a nozzle or exhaust plume, NOT motion lines drawn as flat rectangles. A '
+      + 'bold LANDSCAPE silhouette that still reads as a slashing wave at thumbnail size. Fully transparent '
+      + 'background, no ground shadow, no background scenery, no text, no border, no frame, not pixel art, not '
+      + 'photorealistic.',
   },
 };
 
