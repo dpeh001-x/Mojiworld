@@ -235,6 +235,33 @@ const TARGETS = {
       + 'rounded silhouette that reads while spinning. Fully transparent background, no ground shadow, no '
       + 'background scenery, no text, no border, no frame, not pixel art, not photorealistic.',
   },
+  // Wrappy (mummy) — thrown bandage. The ROOT projectile reads as a flat
+  // bandaged DISC: a tan coin or wrapped round shield, which at its 28 px draw
+  // size is just a circle. Its own registry line calls it a bandage and
+  // LX_PROJ gives it mode:spin with the note "bandage — slow ribbon spin", so
+  // the art was never the object the game thinks it is throwing.
+  //
+  // Palette comes off Wrappy himself (color #d8c090 sandy linen, shell #8a6a40
+  // brown), which is also the tint the damage path uses for this shot. Compact
+  // and roughly balanced rather than a long straight strip: it spins at 0.16
+  // rad/frame and a bar shape would read as a rotating stick.
+  mwrap: {
+    out: 'Sprites/projectiles/mwrap.webp',
+    prompt: 'A torn strip of mummy bandage hurled through the air, tumbling: ONE long ribbon of sandy cream '
+      + 'linen loosely coiled and twisting over itself into a rough S-curve, both ends TORN and frayed into '
+      + 'loose threads, warm brown shadow in the folds where the cloth overlaps, and two small dust puffs '
+      + 'shaking loose from it. It is clearly a length of cloth caught mid-tumble, with gaps you can see '
+      + 'through between the coils. The cloth is PALE - bleached bone-cream and light sand, the colour of '
+      + 'clean dry bandage, LIGHT overall with warm brown shading ONLY in the narrow creases where it folds '
+      + 'under itself. Not dim, not muddy, not dark brown leather.',
+    style: ' Cute chunky cartoon game sprite in the style of a chibi mobile RPG: ONE object centred in frame, '
+      + 'a thick uniform near-black outline round the whole silhouette, soft cel shading from a single '
+      + 'upper-left light, glossy highlights on the cloth folds, warm sandy cream and brown linen colours. '
+      + 'The silhouette must read as a RIBBON OF CLOTH with frayed ends and open gaps - NOT a solid disc, '
+      + 'NOT a coin, NOT a wrapped ball, NOT a round shield, NOT a ball of yarn. Compact enough to read while '
+      + 'spinning. Fully transparent background, no ground shadow, no background scenery, no text, no border, '
+      + 'no frame, not pixel art, not photorealistic.',
+  },
   // Emberling — fire ember. Already close to house style; regenerated for the
   // outline weight and glossy cel shading the rest of the set carries.
   memberspark: {
@@ -308,25 +335,23 @@ const TARGETS = {
     out: 'Sprites/projectiles/p_shockwave.webp',
     ar: 'ar_16_9',
     size: [768, 432],
-    prompt: 'A single bold crescent slash of force flying to the RIGHT across a wide frame: ONE thick curved '
-      + 'blade-shaped arc, fat in the middle and tapering to sharp points at its top and bottom tips, bowing '
-      + 'FORWARD so its leading edge faces right. The leading edge is a thin searing white-hot line, falling back '
-      + 'through hot scarlet into deep crimson and to charred near-black at the trailing inside of the arc, with '
-      + 'a few sharp pointed tongues of black flame torn off the outer rim. The arc is THICK and SOLID - a heavy '
-      + 'wedge of packed red force at least a quarter as wide as the whole crescent, filled in with colour, not a '
-      + 'thin outline and not hollow. From its top and bottom tips, two SHORT tapering ribbons of fire peel back '
-      + 'to the left and dissolve to a point within about half the crescent\'s height; they stay apart and never '
-      + 'curl round to meet each other. Nothing else in the frame - no ring, no orb, no hollow loop, no teardrop, '
-      + 'no concentric circles, no rocket exhaust cone, no needle spike, and absolutely NO straight parallel '
-      + 'bars, NO evenly spaced stripes, NO detached floating lines behind it.',
-    style: ' Bold 2D anime game VFX sprite in the style of a hand-drawn action RPG SLASH effect: ONE crescent '
-      + 'centred in frame and aimed RIGHT, built from CRISP HARD-EDGED shapes with clean confident boundaries '
-      + 'between colour bands, like flat cel-painted anime effects animation. Mostly RED - the white is only a '
-      + 'thin hot edge, not the body. Every shape is a tapering brush stroke that comes to a point; nothing in '
-      + 'the frame has a constant width or a blunt cut-off end. Absolutely NOT an airbrushed blur, NOT a soft '
-      + 'fog, NOT concentric rings, NOT a nozzle or exhaust plume, NOT motion lines drawn as flat rectangles. A '
-      + 'bold LANDSCAPE silhouette that still reads as a slashing wave at thumbnail size. Fully transparent '
-      + 'background, no ground shadow, no background scenery, no text, no border, no frame, not pixel art, not '
+    prompt: 'A single fat crescent slash of red force, shaped like a thick letter C that OPENS TO THE LEFT: the '
+      + 'heavy solid body of the crescent runs down the RIGHT side of the frame, and the two horns sweep round to '
+      + 'the left, top and bottom, each thinning to a needle-sharp point. The crescent is built from many '
+      + 'overlapping FEATHERED BLADE STROKES layered over one another like stacked flame petals, every stroke a '
+      + 'clean tapering shape ending in a sharp point, giving the inner edge a ragged sawtooth of spikes. Bright '
+      + 'pure red across the body, deep maroon where the layers overlap and shadow one another, and a soft pale '
+      + 'pink-white highlight running along the outer right edge of the thickest part. Solid and heavy, filled '
+      + 'with colour. Nothing else at all in the frame - no glow, no white hot core, no lance or spike of light, '
+      + 'no speed lines, no bars, no trail, no ring, no orb.',
+    style: ' Clean 2D vector-style game VFX sprite, hand-drawn anime slash art: ONE crescent filling the frame, '
+      + 'built from crisp overlapping tapered strokes with hard clean edges and flat glossy shading, in the '
+      + 'style of a stylised blood-red claw slash. Pure saturated red as the body colour, dark maroon for the '
+      + 'shadowed overlaps, one soft pale highlight on the thick outer edge - no other colours at all. Every '
+      + 'stroke tapers to a needle point; nothing has a blunt end or a constant width. Absolutely NOT an '
+      + 'airbrushed blur, NOT a glow effect, NOT a hollow ring or loop, NOT concentric circles, NOT a nozzle, '
+      + 'NOT motion lines. Reads instantly as a curved slash at thumbnail size. Fully transparent background, '
+      + 'no ground shadow, no background scenery, no text, no border, no frame, not pixel art, not '
       + 'photorealistic.',
   },
 };
