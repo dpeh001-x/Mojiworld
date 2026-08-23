@@ -121,6 +121,58 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.x <span class="tag"><span class="pill feat">feat</span> The Hexmaster&rsquo;s signature was unreachable &mdash; both final skills reworked</span></h2>
+<p>Per user: <em>further improve on hexmaster&rsquo;s final 2 skills, improve the mechanics, utility and damage.</em></p>
+<p>The Hexmaster&rsquo;s kit is exactly two master-tier skills &mdash; <b>Grand Hex</b> (<kbd>X</kbd>) and <b>Pandemic Hex</b> (<kbd>B</kbd>) &mdash; and the class advertises itself as <em>&ldquo;curses spread; 5 stacks = massive damage&rdquo;</em>. Five stacks could not happen.</p>
+
+<div class="callout">
+  <b>The arithmetic.</b> Grand Hex&rsquo;s played cooldown is <code>24000ms &times; 0.90</code> (mage) <code>&times; 0.75</code> (<code>JOB_CD_MUL</code>) = <b>16.2s</b>. A hex stack lived <b>10s</b>, and each cast added exactly <b>one</b> &mdash; the echo pulse deliberately skipped anyone already hexed. So every stack expired <b>~6 seconds before the skill came back up</b>. Casting it on cooldown pinned every target at one stack for ever; the rupture could only ever fire by chaining deaths through the spread, and against a lone boss &mdash; no neighbour to inherit anything &mdash; it was <b>impossible outright</b>.
+</div>
+
+<p>Measured on the old build rather than argued from the source:</p>
+<table>
+<tr><th>Check</th><th>Before</th><th>After</th></tr>
+<tr><td>stack lifetime vs its own cooldown</td><td>10000ms vs 16200ms</td><td><b>22000ms</b> vs 16200ms</td></tr>
+<tr><td>two casts on a lone target</td><td>1 &rarr; 1 stacks</td><td><b>2 &rarr; 4 stacks</b></td></tr>
+<tr><td>stacks alive when the skill returns</td><td>0</td><td><b>2</b></td></tr>
+<tr><td>ult orbs landing hex stacks</td><td>0 (super poison only)</td><td><b>4</b></td></tr>
+</table>
+
+<h3>Grand Hex &mdash; the signature is now reachable by casting the skill</h3>
+<p>Stack lifetime <b>10s &rarr; 22s</b> so it outlives the cooldown, and the echo pulse now stacks <b>everyone</b> in the ring instead of only latecomers &mdash; so a cast is worth <b>2 stacks</b> and the rupture lands on the <b>3rd cast</b> instead of never. Latecomers still gain the most: they get the freeze and the burst as well as the stack.</p>
+<p>Two new mechanics carry the &ldquo;curses spread&rdquo; half of the signature while the target is still alive:</p>
+<ul>
+<li><b>Rupture splashes.</b> Neighbours in spread range take <b>55%</b> of it <em>and catch a stack</em>, so a packed room can chain-detonate.</li>
+<li><b>Hex vulnerability.</b> Each stack makes the target take <b>+4% damage</b> (live ceiling 4 stacks = <b>+16%</b>, since the 5th consumes the pile). A boss cannot be frozen, so before this the ring gave a boss nothing but chip damage &mdash; the curse was flavour.</li>
+</ul>
+<p>Damage: burst <b>1.2&times; &rarr; 1.5&times;</b>, rupture <b>4.0&times; &rarr; 5.5&times;</b>.</p>
+<p>DoT tags are excluded from the vulnerability <em>on purpose</em>: the DOT already scales with the same stack count, so letting it read the multiplier too would make curse damage grow quadratically.</p>
+
+<h3>Pandemic Hex &mdash; the capstone now plays the class&rsquo;s own game</h3>
+<p>The ult was named for a mechanic it did not have. It applied SUPER POISON and nothing else, so it was the one skill in the kit that <b>never touched a hex stack</b>: &ldquo;contagious&rdquo; was flavour text over a curse that could not spread, and the Hexmaster&rsquo;s two skills ran as separate parallel damage systems. Its description also promised a <b>weaken</b> that no code anywhere applied.</p>
+<ul>
+<li><b>The 10 orbs land a hex stack each</b> &mdash; ten orbs over the nearest four targets is 2&ndash;3 stacks apiece, so the ult sets up ruptures instead of running a private DOT beside them.</li>
+<li><b>WEAKEN is real:</b> <b>&minus;35% enemy ATK for 9s</b>, bosses included &mdash; which is the half of the cast that actually does something to a target that cannot be frozen.</li>
+<li><b>Pandemic window:</b> for 9s a dying hexed foe infects <b>every</b> neighbour in spread range instead of handing its stacks to the single nearest one. That is the contagion the skill is named for.</li>
+<li><b>The eruption reads the board:</b> <b>10&times;</b> base, <b>+0.35&times; per live hex stack</b> on the field, capped at <b>16&times;</b> (was a flat 9&times;). Stacking the room with Grand Hex first is now rewarded rather than being a side activity.</li>
+<li>Orb impact <b>1.4&times; &rarr; 1.7&times;</b>.</li>
+</ul>
+<p>Both skill descriptions were rewritten to state what the code does &mdash; including the numbers Grand Hex changed.</p>
+
+<h3>How the weaken is implemented, and why</h3>
+<p>This engine has <b>no single player-damage chokepoint</b> &mdash; monster damage is applied inline at many sites, so there was nowhere to hang a &ldquo;take less from cursed enemies&rdquo; multiplier without touching gameplay code all over the file. Instead the cast scales the monster&rsquo;s <b>own <code>atk</code></b> and restores it when the window closes: every existing read (contact, projectile, special) picks it up with <b>no new read sites at all</b>. A null guard stops a second application from compounding.</p>
+
+<h3>Two harnesses, and the traps they walked out of</h3>
+<p><code>scripts/hexmaster_grandhex_test.mjs</code> fails <b>10/11</b> on the commit before the fix; <code>scripts/hexmaster_pandemic_test.mjs</code> fails <b>7/9</b>. Both pass fully after. Three measurement traps are recorded in the files so they are not re-entered:</p>
+<ul>
+<li><b>Frames vs wall-clock is not interchangeable here.</b> <code>_hexUntil</code> is stamped in <em>frames</em>, so stack waits are counted in frames &mdash; headless does not hold 60fps, and a wall-clock sleep would let fewer frames elapse than the cooldown really costs, biasing the stack toward surviving. But <code>scheduleSkillTimer</code> is a plain <code>setTimeout</code>, so the weaken restore must be waited on in wall-clock. Getting these backwards made a working restore look broken.</li>
+<li><b>Order of measurement changed the answer.</b> Casting Grand Hex opens its rank-10 &ldquo;window&rdquo;, which marks what it hits. A vulnerability sweep run <em>after</em> the casts read <code>1.00 1.04 1.22 1.27 1.31</code> &mdash; not a per-stack multiplier at all, and close enough to a compounding <code>1.3456</code> to look like a genuine double-application bug. Run before any cast, on a fresh mob, the same measurement is exact: <b>1.0400 1.0800 1.1200 1.1600</b>.</li>
+<li><b>The test kept killing its own subject.</b> At +200px it died inside the ult&rsquo;s eruption and was spliced out of <code>game.monsters</code>; at +900px it survived but the orbs expired in flight. 650px is outside every blast and inside orb reach.</li>
+</ul>
+<p>The sharpest line in the baseline run is the ult&rsquo;s own diagnostic: <code>orb superPoison burnDmg 0 &rarr; 10</code> with <b>0 hex stacks</b>. An orb demonstrably arrived and applied its DOT while landing no stack at all.</p>
+
+
+
 <h2>v0.30.148 <span class="tag"><span class="pill feat">feat</span> The shockwave crescent animates &mdash; and the generic branch can now animate anything</h2>
 <p>Per user: <em>create animation sprites for it and wire it as well.</em></p>
 <p>Nine frames at <code>Sprites/projectiles/anim/shockwave_0..8.webp</code> (ludo.ai, from the crescent shipped in v0.30.143): the pale highlight travels along the thick outer edge, the maroon shadows between the layered blades drift, and small red motes flick off the tips. It had to be a lighting loop and not a motion loop &mdash; the engine rotates this sprite to its velocity every tick and draws it in a square box, so anything that moved or resized in the frames would fight the draw.</p>
