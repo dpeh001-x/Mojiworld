@@ -25,7 +25,13 @@ const ITEMS = {
   mseed:      'A spat WATERMELON SEED projectile pointing right — a glossy jet-black teardrop watermelon seed with a wet pink sheen of melon flesh at its blunt end, a bright white specular highlight, and two tiny comic speed-streaks behind it. Simple, chunky, cartoon.',
   mthorn:     'A snapped-off BRAMBLE THORN projectile pointing right — a curved dark-green woody thorn spike with a wickedly sharp point, faint bark texture, one tiny leaf fleck at its base and a hint of sap glisten. Simple, chunky, cartoon.',
   macorn:     'A hurled ACORN projectile — a plump oak acorn with a textured brown cap and smooth tan nut body, a small white highlight, tiny motion flecks around it as it tumbles. Roughly round, simple, chunky, cartoon.',
-  mpinespike: 'A flung PINEAPPLE SPIKE chunk projectile pointing right — a sharp golden-yellow pineapple skin fragment with diamond crosshatch texture and a short green leaf-blade fin, glinting with a confident sparkle. Simple, chunky, cartoon.',
+  // v0.30.x — rewritten after a regeneration. "Skin fragment ... leaf-blade fin"
+  // sounds specific but left the model free to draw a WHOLE PINEAPPLE with one
+  // leaf poking out, which is what shipped: round, lumpy, and read as rolling
+  // fruit under LX_MOB_PROJ's mode:'spin'. A spinning projectile only reads as a
+  // weapon if it is tapered along one axis, so the shape is now stated as a
+  // dart and the round reading is negated outright.
+  mpinespike: 'A single sharp PINEAPPLE SPIKE thrown as a weapon, one long narrow tapered shard pointing right, a hard sharp point at the leading tip, the body widening slightly toward the back, golden amber rind with a criss-cross diamond pattern along it, two short stiff green pineapple frond leaves swept back at the tail like fletching, much longer than it is wide, strong sense of fast forward motion, no whole fruit, no round shape. Simple, chunky, cartoon.',
 };
 
 let keys = Object.keys(ITEMS);
