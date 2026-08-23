@@ -9744,7 +9744,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.152';
+const GAME_VERSION = 'v0.30.153';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -12976,11 +12976,52 @@ function _lxBitmapToCanvas(bmp, src) {
 // it the encoded Blob moves decode + resize off-thread; the main thread pays
 // only the final canvas blit. The blob comes from the HTTP cache (the image
 // element already downloaded it); any failure falls back to the old path.
+// v0.30.x — fetch a Blob for the bake, trying fetch first and falling back to
+// XHR. Both exist because file:// is the case that matters here and the two
+// engines disagree about it: Chromium allows fetch on file:// only with
+// --allow-file-access-from-files, while XHR with responseType 'blob' is
+// permitted more widely, and Electron's webSecurity settings can flip either.
+// Whichever works, the caller gets a Blob; if neither does, the caller falls
+// back to the <img> path, which is what shipped before.
+function _lxBlobFor(url) {
+  const viaXhr = () => new Promise((res, rej) => {
+    try {
+      const x = new XMLHttpRequest();
+      x.open('GET', url, true);
+      x.responseType = 'blob';
+      x.onload = () => (x.response ? res(x.response) : rej(new Error('empty')));
+      x.onerror = () => rej(new Error('xhr'));
+      x.send();
+    } catch (e) { rej(e); }
+  });
+  if (typeof fetch === 'function') {
+    return fetch(url)
+      .then((r) => { if (!r.ok) throw new Error('http ' + r.status); return r.blob(); })
+      .catch(viaXhr);
+  }
+  return viaXhr();
+}
 function _lxBitmapOffThread(im, bw, bh) {
   const opts = { resizeWidth: bw, resizeHeight: bh, resizeQuality: 'high' };
   const url = im && im.src;
-  if (url && typeof fetch === 'function' && /^https?:/.test(url)) {
-    return fetch(url).then((r) => { if (!r.ok) throw new Error('http ' + r.status); return r.blob(); })
+  // v0.30.x — file: added to this gate, and it is the whole point of the change.
+  //
+  // createImageBitmap on an <img> blocks the render thread while it snapshots
+  // the source; from a Blob the decode happens off-thread. Measured on a
+  // file:// origin over six large sprites: 41.5 ms of SYNCHRONOUS main-thread
+  // time each from the <img>, against 0.1 ms from a Blob.
+  //
+  // The gate used to be /^https?:/ only, so the Electron/Steam desktop build --
+  // which serves from file:// -- fell straight through to the blocking call. On
+  // a forest entry that showed up as six bakes of 25-30 ms inside ONE 164 ms
+  // _lxShrinkFrames call: a ten-frame freeze a few seconds after walking in.
+  // Serving the identical build over localhost made it vanish, which is what
+  // identified the gate rather than the bake itself.
+  //
+  // data: and blob: sources are deliberately excluded -- they are already
+  // in-memory, so re-fetching them buys nothing.
+  if (url && /^(https?|file):/i.test(url)) {
+    return _lxBlobFor(url)
       .then((b) => createImageBitmap(b, opts))
       .catch(() => createImageBitmap(im, opts));
   }

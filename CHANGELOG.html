@@ -121,6 +121,35 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.153 <span class="tag"><span class="pill bug">bug</span> The desktop build's one-second freeze on entering a map</span></h2>
+<p>Per user: <em>reduce lag.</em></p>
+
+<h3>The bake that was never actually asynchronous</h3>
+<p>With the edge probes gone (v0.30.149), the biggest thing left on a forest entry was a <b>single 164&nbsp;ms <code>_lxShrinkFrames</code> call</b>, with six <code>_lxAsyncBake</code> calls of 25&ndash;30&nbsp;ms clustered inside it. <code>_lxAsyncBake</code> is supposed to hand the work off; that time was synchronous, on the render thread.</p>
+<p>The cause was a gate in <code>_lxBitmapOffThread</code>. The blob path exists precisely so the decode leaves the main thread &mdash; and it was reachable only from <code>http(s)</code>:</p>
+<pre><code>if (url &amp;&amp; typeof fetch === 'function' &amp;&amp; /^https?:/.test(url)) { ...blob... }
+return createImageBitmap(im, opts);        // file:// lands here</code></pre>
+<p><b>The Electron/Steam desktop build serves from <code>file://</code></b>, so it never got the path that was written for it. Measured on a <code>file://</code> origin across six large sprites:</p>
+<table>
+<tr><th>source passed to <code>createImageBitmap</code></th><th>synchronous main-thread time</th></tr>
+<tr><td><code>&lt;img&gt;</code> element (what <code>file://</code> got)</td><td><b>41.5&nbsp;ms each</b></td></tr>
+<tr><td><code>Blob</code> (what <code>http(s)</code> got)</td><td>0.1&nbsp;ms each</td></tr>
+</table>
+
+<h3>How it was pinned down</h3>
+<p>By serving the <em>identical build</em> over <code>localhost</code> and re-running the same attribution. On <code>http</code> the forest entry shows <b>no <code>_lxAsyncBake</code> cost at all</b>; on <code>file://</code> the same build shows 164&nbsp;ms. That is what identified the gate rather than the bake &mdash; and it means the web build was never affected. This is a desktop-build fix.</p>
+
+<h3>Result — three paired runs, <code>file://</code>, forest entry</h3>
+<table>
+<tr><th></th><th>before</th><th>after</th></tr>
+<tr><td><code>_lxShrinkFrames</code> synchronous total</td><td>165 / 126 / 147&nbsp;ms</td><td><b>2 / 1 / 2&nbsp;ms</b></td></tr>
+<tr><td>worst single call</td><td>164 / 125.7 / 147&nbsp;ms</td><td><b>1.8 / 1.2 / 1.5&nbsp;ms</b></td></tr>
+<tr><td>worst frame in the run</td><td>988 / 1083 / 1147&nbsp;ms</td><td><b>87 / 182 / 96&nbsp;ms</b></td></tr>
+</table>
+<p>A freeze of roughly a full second on walking into a map, gone, on every run. The fix tries <code>fetch</code> first and falls back to <code>XMLHttpRequest</code>: the two engines disagree about <code>file://</code> &mdash; Chromium allows <code>fetch</code> there only with <code>--allow-file-access-from-files</code>, while XHR with <code>responseType: 'blob'</code> is permitted more widely, and Electron's <code>webSecurity</code> can flip either. If neither works the old <code>&lt;img&gt;</code> path still runs, so the worst case is what shipped before. <code>data:</code> and <code>blob:</code> sources are excluded deliberately &mdash; they are already in memory, so re-fetching them buys nothing.</p>
+<p>Stated plainly: this removes <b>freezes</b>, not steady-state cost. Median frame time on entry is essentially unchanged &mdash; the remaining ~28&nbsp;ms medians during the first seconds of a map are a separate matter.</p>
+
+
 <h2>v0.30.152 <span class="tag"><span class="pill bug">bug</span> The toilet roll loses its flapping sheet, and a new tool stops sprites being clipped by the frame</h2>
 <p>Per user: <em>there seems to be a bit of cutoff of the loose toilet paper, regenerate removing the loose flutters.</em></p>
 <p>Regenerated as a compact ball with nothing hanging off it &mdash; the end of the paper tucked flat, no streamer, no tail &mdash; and re-animated to match: the wound layers shift and settle, the creases breathe, a few tissue fibres drift off the surface, and the round silhouette never changes. Loop measures clean: the 8&rarr;0 seam is <b>0.9</b>, the smallest step of the nine, and worst-case silhouette IoU against the base is <b>0.968</b> now that there is no sheet to legitimately change the outline.</p>
