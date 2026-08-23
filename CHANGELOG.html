@@ -121,6 +121,41 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.114 <span class="tag"><span class="pill polish">polish</span> Town was sampling 768&nbsp;px NPC art at 50&nbsp;px &mdash; textures right-sized</span></h2>
+<p>Per user: <em>Further further reduce on the lag</em>, <em>even in town</em>.</p>
+
+<h3>First, a correction to the last report</h3>
+<p>v0.30.102 said town's cost was a decode transient that settles after ~2&nbsp;s. <b>That was wrong</b>, and it was wrong because the harness forced the boot gate open. The real commence gate already awaits <code>window._lxNpcSpritesReady</code>, so a player never sees the pre-decode state &mdash; <b>preloading before the game starts is already implemented</b>. The profiler now waits the same way a player does.</p>
+<p>Measured properly, with no instrumentation at all (raw rAF deltas):</p>
+<table>
+<tr><th></th><th>town</th><th>tower_b1</th></tr>
+<tr><td>entities</td><td>0 monsters, <b>9 NPCs</b></td><td><b>200 monsters</b></td></tr>
+<tr><td>median</td><td>10.9 ms</td><td>11.5 ms</td></tr>
+<tr><td>p99</td><td><b>66.5 ms</b></td><td>37.6 ms</td></tr>
+</table>
+<p><b>Nine NPCs cost as much as two hundred monsters</b>, with a worse tail. And it is not JS &mdash; <code>drawNPCs</code> called directly times at 0.037&nbsp;ms for all nine. It is what those draws ask the GPU to do.</p>
+
+<h3>The cause</h3>
+<p>Town NPC source textures are <b>378&times;510 to 841&times;971</b> and draw at roughly <b>50&ndash;60&nbsp;px</b> tall &mdash; a ~15&times; downscale resampled from the full-size texture every frame, nine times over. The codebase already fixes exactly this for boss and projectile art through <code>_lxShrinkSlot</code>; NPC sprites simply never went through it. They do now: 768&times;768 &rarr; 148&times;148, 709 &rarr; 136, 680 &rarr; 130, 567 &rarr; 110, 841&times;971 &rarr; 130&times;150. Roughly a <b>27&times; cut in sampled texture area</b> per NPC.</p>
+
+<h3>Two couplings had to be broken first</h3>
+<p>Both of these bit during development, and both produced a visible regression before they were fixed:</p>
+<ul>
+<li><code>_npcSpriteTargetHeight</code> derives an NPC's <b>world size from its texture resolution</b> (<code>srcH / NPC_PX_PER_GAME_PX</code>). Shrinking the texture shrank the character &mdash; measured draw rect <b>128&times;128 &rarr; 25&times;25</b>, every town NPC a fifth of its size. It now reads <code>metaH</code>, the height the sprite was registered at, so size no longer tracks texture resolution.</li>
+<li><code>bboxBottomY</code> is consumed as a <em>ratio</em> against the live sprite (<code>bbox / srcH</code>) but is measured on the full-size image, so the shrink broke every NPC's footing. The bbox is rescaled in place and tracked by its own <code>bboxH</code> field &mdash; <b>not</b> by <code>metaH</code>, which must stay immutable. An earlier attempt collapsed the two into one field and reproduced the first failure exactly.</li>
+</ul>
+<p>Verified: destination draw rects are unchanged &mdash; 128&times;128, 118&times;118, 113&times;113, 95&times;95, 113&times;130 before and after. Three NPCs sit <b>1&nbsp;px lower</b> from bbox rounding after the rescale.</p>
+
+<h3>Honest about the frame-time win</h3>
+<p>This desktop harness has run-to-run variance <em>larger than the effect being measured</em>: the same build produced median 10.9&nbsp;ms in one run and 4.5&nbsp;ms in another. Interleaved three times:</p>
+<table>
+<tr><th></th><th>median (3 runs)</th><th>p95 (3 runs)</th></tr>
+<tr><td>before</td><td>4.7 / 8.5 / 5.4</td><td>8.0 / 15.4 / 11.1</td></tr>
+<tr><td>after</td><td>5.3 / 5.3 / 5.7</td><td>9.5 / 9.6 / 10.6</td></tr>
+</table>
+<p>Median sits inside the noise. What does move is <b>consistency</b>: before swings 4.7&ndash;8.5, after holds 5.3&ndash;5.7, and mean p95 improves 11.5 &rarr; 9.9&nbsp;ms (~14%). The texture-memory reduction is not in doubt at all &mdash; and that is the part that should matter most on devices with far less GPU bandwidth than this one, which is where the reported lag actually lives.</p>
+
+
 <h2>v0.30.113 <span class="tag"><span class="pill bug">bug</span> The world-map dimming actually lands this time</span></h2>
 <p><b>v0.30.110 shipped its changelog entry without the code change.</b> The ship script for it was derived from a calibration-patch script, which bumps the version and commits a data file but never applies a patch to <code>mojiworld_game.html</code> &mdash; so the entry described a backdrop opacity that was still <code>1.0</code> in the build. A post-push check for the emitted line caught it: <code>_bgImg.setAttribute('opacity', …)</code> appeared 0 times in the shipped file while the changelog claiming it appeared once.</p>
 <p>This commit carries the change v0.30.110 described: the world-map nebula <code>&lt;image&gt;</code> now draws at <b>0.55</b> opacity so the SVG's plain near-black radial (<code>#14102e &rarr; #060314</code>) carries more of the frame, and the node rings and their &ldquo;unexplored&rdquo; captions stop competing with the bloom behind them. Backdrop mean luminance 32.1 &rarr; 26.0 with the nodes' own brightness unchanged.</p>

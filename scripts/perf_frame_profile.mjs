@@ -119,6 +119,22 @@ const setup = await page.evaluate(({ SYSTEMS, MAP, FX }) => {
 
 console.log(`\nscene: ${setup.map}   monsters ${setup.monsters}/${setup.cap}   systems wrapped ${setup.wrapped}`);
 if (setup.missing.length) console.log(`  (not found, skipped: ${setup.missing.join(', ')})`);
+// WAIT LIKE THE REAL BOOT GATE DOES. The commence gate awaits
+// _lxNpcSpritesReady (and the registry warm) before the game starts, so a
+// player never sees the pre-decode state. Forcing the gate open and measuring
+// immediately profiles a moment that does not exist in play - it reported town
+// NPCs costing 1.79ms/frame on the procedural fallback when the real starting
+// condition is 0.05ms with the sprites already decoded.
+const warm = await page.evaluate(async () => {
+  const t0 = Date.now();
+  try { await Promise.race([window._lxNpcSpritesReady || Promise.resolve(), new Promise(r => setTimeout(r, 30000))]); } catch (e) {}
+  const names = (game.npcs || []).map(n => n.name);
+  return { waitedMs: Date.now() - t0, npcs: names.length,
+           decoded: names.filter(n => { const i = NPC_SPRITES[n]; return i && i.complete && i.naturalWidth > 0; }).length };
+});
+console.log(`boot-gate warm: waited ${warm.waitedMs}ms, NPC sprites decoded ${warm.decoded}/${warm.npcs}`);
+// Zero the counters so the warm-up is not folded into the measurement.
+await page.evaluate(() => { for (const k of Object.keys(window.__perf)) { window.__perf[k].ms = 0; window.__perf[k].calls = 0; } window.__frameTimes.length = 0; });
 console.log(`profiling ${SECS}s of real frames ...`);
 await page.waitForTimeout(SECS * 1000);
 

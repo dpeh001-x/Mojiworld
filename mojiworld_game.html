@@ -9708,7 +9708,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.113';
+const GAME_VERSION = 'v0.30.114';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -115119,7 +115119,11 @@ const NPC_FALLBACK_HEIGHT = 128;  // before sprite loads / on decode error
 function _npcSpriteTargetHeight(npcName) {
   const sprite = npcName && NPC_SPRITES[npcName];
   if (!sprite) return _lxWholeSize(NPC_FALLBACK_HEIGHT);
-  const srcH = sprite.naturalHeight || sprite.height || 0;
+  // v0.30.x — metaH is the height the sprite was REGISTERED at. The live
+  // texture may since have been right-sized by _lxShrinkSlot, and a character's
+  // world size must not track that.
+  const _meta = (typeof NPC_SPRITE_META !== 'undefined') ? NPC_SPRITE_META[npcName] : null;
+  const srcH = (_meta && _meta.metaH) || sprite.naturalHeight || sprite.height || 0;
   if (!srcH) return _lxWholeSize(NPC_FALLBACK_HEIGHT);
   return _lxWholeSize(srcH / NPC_PX_PER_GAME_PX);
 }
@@ -115150,6 +115154,7 @@ function _lxLoadNpcSpriteInto(name) {
       NPC_SPRITE_META[name] = {
         bboxTopY:    _detectSpriteBboxTop(img),
         bboxBottomY: _detectSpriteBboxBottom(img),
+        metaH:       img.naturalHeight || img.height || 0,   // v0.30.x - reference height for the shrink rescale
       };
       resolve(true);
     };
@@ -115361,8 +115366,41 @@ function _drawNpcSprite(sprite, cx, feetY, npcName, npc) {
   // v0.25.271 — per-NPC override via NPC_SPRITE_HEIGHTS. Falls back to
   // 78 px (the v0.25.86 default) for any NPC not in the override map.
   const targetH = _lxWholeSize(_npcSpriteTargetHeight(npcName) * ((typeof _lxNpcScale === 'function') ? _lxNpcScale(npcName) : 1));
+  // v0.30.x — RIGHT-SIZE THE NPC TEXTURE (perf). Same treatment boss frames
+  // already get: bake the oversized source down to its actual draw size once,
+  // then blit the small copy. Town's sources are 378x510-841x971 drawn at
+  // ~50-60 px, i.e. resampling a ~15x downscale every frame per NPC.
+  // _lxShrinkSlot is self-memoizing (_lxNoShrink) and bakes asynchronously, so
+  // this costs one flag check per NPC per frame once settled, and the ORIGINAL
+  // image keeps drawing until the bake lands.
+  try { if (typeof _lxShrinkSlot === 'function' && npcName) _lxShrinkSlot(NPC_SPRITES, npcName, targetH); } catch (e) {}
   const srcW = sprite.naturalWidth  || sprite.width  || 1;
   const srcH = sprite.naturalHeight || sprite.height || 1;
+  // THE BBOX META IS A RATIO AGAINST THE LIVE SPRITE. bboxBottomY is consumed
+  // as (bboxBottomY / srcH), and it was measured on the FULL-SIZE image — so
+  // the moment the shrink swaps a smaller canvas in, that ratio is wrong by the
+  // shrink factor and every NPC would jump in size and footing. Rescale the
+  // meta in place, once, when the source height changes. In place rather than
+  // inline because the same meta is read by the portrait and anchor paths too;
+  // fixing it at the source keeps them all correct.
+  //
+  // metaH is IMMUTABLE — it is the size authority _npcSpriteTargetHeight reads.
+  // An earlier version of this stamped the shrunk height back onto metaH and
+  // every town NPC rendered at a fifth of its size, because the size authority
+  // and the bbox reference had been collapsed into one field. bboxH tracks what
+  // the bbox is currently normalised to; metaH never moves.
+  {
+    const _m = (typeof NPC_SPRITE_META !== 'undefined') ? NPC_SPRITE_META[npcName] : null;
+    if (_m && srcH > 0) {
+      const _ref = _m.bboxH || _m.metaH || 0;
+      if (_ref && _ref !== srcH) {
+        const _k = srcH / _ref;
+        if (_m.bboxTopY    != null) _m.bboxTopY    *= _k;
+        if (_m.bboxBottomY != null) _m.bboxBottomY *= _k;
+        _m.bboxH = srcH;
+      }
+    }
+  }
   const targetW = _lxWholeSize(targetH * (srcW / srcH));
   // v0.25.490 — NPCs no longer bob vertically. Sprite path matches the
   // procedural path: planted feet, no hover. Walk-cycle / breathing for
