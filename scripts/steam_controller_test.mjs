@@ -173,6 +173,92 @@ const R = await page.evaluate(async () => {
     const p = xbox([1.0, 1.0, 0, 0]); p.index = 11;
     out.poll.pinnedAxis = moveKeys(runPoll([p], 30));
   }
+  // ---- menu navigation on a non-standard pad -----------------------------
+  // Gameplay was taught the Sony layout before menu nav was, so a player could
+  // fight but could not answer a dialog, buy anything, or press RESPAWN.
+  out.menu = {};
+  try {
+    // axes[3] on this layout is the L2 TRIGGER, resting at -1. Read as "right
+    // stick Y" it is a permanent full deflection, and every menu scrolls itself
+    // off the screen for as long as the pad is plugged in.
+    const rest = sony([...SONY_REST]); rest.index = 40;
+    out.menu.sonyRestingTriggerIsNotScroll = _lxPadAxis(rest, 'ry') === 0;
+    out.menu.rawAxis3WouldHaveBeen = rest.axes[3];
+    // a standard pad must still read axes[3] as right-stick Y
+    const std = xbox([0, 0, 0, 0]); std.index = 41;
+    _lxPadAxis(std, 'ry'); std.axes[3] = 0; _lxPadAxis(std, 'ry'); std.axes[3] = 0.9;
+    out.menu.standardRightStickStillWorks = _lxPadAxis(std, 'ry') === 0.9;
+
+    // Integration. Both checks below drive the REAL _lxPadMenuNav, because the
+    // unit reads above do not: the scroller reads pad.axes[3] itself rather
+    // than going through _lxPadAxis, and a focus ring merely EXISTING proves
+    // nothing (menu mode sets one on entry regardless of input). Measuring the
+    // helper instead of the scroller made both of these pass on a build with
+    // the bug still in it.
+    const ov = document.getElementById('death-overlay');
+    if (ov) {
+      const prevDisplay = ov.style.display, prevHTML = ov.innerHTML;
+      ov.style.display = 'block';
+      // a scrollable body + two focusable controls, so there is something for
+      // the scroller and the nav ring to actually act on
+      ov.innerHTML = '<div id="_t_scroll" style="height:120px;overflow-y:auto;">' +
+                     '<button id="_t_b1">one</button><div style="height:800px"></div>' +
+                     '<button id="_t_b2">two</button></div>';
+      const sc = document.getElementById('_t_scroll');
+      const drive = async (p, frames) => {
+        navigator.getGamepads = () => [p];
+        try { window.dispatchEvent(new Event('gamepadconnected')); } catch (e) {}
+        // _lxPadModalRoot MEMOISES "no modal open" for 100ms by design, so a
+        // surface shown and polled in the same microsecond is invisible to it.
+        // Wait past the memo in REAL time (it is keyed on performance.now()) or
+        // this measures the cache instead of the code.
+        await new Promise(r => setTimeout(r, 150));
+        for (let i = 0; i < (frames || 8); i++) { _lxPadPoll(); await new Promise(r => requestAnimationFrame(r)); }
+      };
+
+      // (a) a RESTING Sony pad must not scroll anything. axes[3] is its L2
+      //     trigger at -1; read as right-stick Y that is a permanent full push.
+      // Start SCROLLED DOWN. A resting L2 reads -1, which scrolls UP -- from
+      // scrollTop 0 that is invisible, because there is nowhere above to go.
+      // The symptom is a menu pinned to the top that fights you the moment you
+      // scroll down, so the test has to start where the symptom lives.
+      sc.scrollTop = 400;
+      const rp = sony([...SONY_REST]); rp.index = 42;
+      await drive(rp);
+      out.menu.restingScrollTop = sc.scrollTop;
+      const _root = (typeof _lxPadModalRoot === 'function') ? _lxPadModalRoot() : null;
+      out.menu.surfaceSeen = !!_root;
+      out.menu.rootId = _root ? (_root.id || _root.className || '?') : null;
+
+      // (b) CONTROL: a standard pad pushing the real right stick must scroll,
+      //     or (a) proves nothing.
+      sc.scrollTop = 0;
+      const xp = xbox([0, 0, 0, 0]); xp.index = 43;
+      navigator.getGamepads = () => [xp];
+      _lxPadPoll(); xp.axes[3] = 0; _lxPadPoll();        // let the guard see movement
+      xp.axes[3] = 0.9;
+      await drive(xp);
+      out.menu.standardScrollTop = sc.scrollTop;
+
+      // (c) the HAT must move the focus ring, not merely coexist with one.
+      sc.scrollTop = 0;
+      const before1 = document.querySelector('.pad-focus');
+      out.menu.focusBefore = before1 ? before1.id : null;
+      const hp = sony([0, 0, 0, -1, -1, 0, 0, 0, 0, 3.2857]); hp.index = 44;
+      await drive(hp, 4);                                  // centred hat: settle
+      const mid = document.querySelector('.pad-focus');
+      out.menu.focusSettled = mid ? mid.id : null;
+      hp.axes[9] = 0.1429;                                 // hat DOWN
+      for (let i = 0; i < 8; i++) { _lxPadPoll(); await new Promise(r => requestAnimationFrame(r)); }
+      const after = document.querySelector('.pad-focus');
+      out.menu.focusAfterHat = after ? after.id : null;
+      out.menu.hatMovedFocus = !!(after && mid && after !== mid);
+
+      ov.innerHTML = prevHTML; ov.style.display = prevDisplay;
+      for (let i = 0; i < 3; i++) _lxPadPoll();
+    } else { out.menu.noOverlay = true; }
+  } catch (e) { out.menuErr = String(e).slice(0, 140); }
+
   // ---- Steam Input: analog Move, and the contradictory-direction gate -----
   // window.SteamAPI only exists inside the Electron wrapper, so it is stubbed
   // here to drive the same code path the shipped build takes.
@@ -247,6 +333,18 @@ ok('THE OTHER HALF: all-four-directions at once is rejected, not obeyed',
    (R.steam.allFourDirections || []).length === 0, 'dispatched: ' + JSON.stringify(R.steam.allFourDirections));
 ok('...while one honest direction still works',
    (R.steam.digitalRightAlone || []).some(k => /right/i.test(k)), JSON.stringify(R.steam.digitalRightAlone));
+
+ok('the death overlay is recognised as a pad surface',
+   R.menu && (R.menu.surfaceSeen === true || R.menu.noOverlay === true),
+   'root: ' + (R.menu && R.menu.rootId) + (R.menuErr ? ' err: ' + R.menuErr : ''));
+ok('CONTROL: a real right-stick push DOES scroll the menu',
+   R.menu && R.menu.standardScrollTop > 0, 'scrollTop ' + (R.menu && R.menu.standardScrollTop));
+ok('a RESTING Sony pad does not drag a scrolled menu back to the top',
+   R.menu && R.menu.restingScrollTop === 400,
+   'scrollTop 400 -> ' + (R.menu && R.menu.restingScrollTop) + ' after 8 polls (its axes[3] is the L2 trigger, resting at -1, i.e. a permanent scroll-UP)');
+ok('a Sony HAT MOVES the menu focus (it has no buttons 12-15)',
+   R.menu && R.menu.hatMovedFocus === true,
+   'focus ' + JSON.stringify(R.menu && R.menu.focusSettled) + ' -> ' + JSON.stringify(R.menu && R.menu.focusAfterHat));
 
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }

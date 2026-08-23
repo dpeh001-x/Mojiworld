@@ -40443,6 +40443,12 @@ function _lxPadProfile(pad) {
     // standard index -> this device's index
     btn: { 0: 1, 1: 2, 2: 0, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, 10: 10, 11: 11, 16: 12 },
     lx: 0, ly: 1,
+    // Right stick. On this layout axes[3] and axes[4] are the TRIGGERS, resting
+    // at -1, and the right stick's Y lives at 5. Code that reads axes[3] as
+    // "right stick Y" (the menu scroller did) therefore sees a permanent -1 --
+    // a full, constant scroll-UP. From the top of a list that is invisible;
+    // scroll down and the menu is dragged straight back up under your thumb.
+    rx: 2, ry: 5,
     hat: 9,   // D-pad; rests > 1 (commonly 3.2857) and only then means "centred"
   };
 }
@@ -40469,7 +40475,9 @@ function _lxPadHat(v) {
 function _lxPadAxis(pad, which) {
   if (!pad) return 0;
   const prof = _lxPadProfile(pad);
-  const i = prof ? (which === 'x' ? prof.lx : prof.ly) : (which === 'x' ? 0 : 1);
+  const STD = { x: 0, y: 1, rx: 2, ry: 3 };
+  const i = prof ? (prof[which === 'x' ? 'lx' : which === 'y' ? 'ly' : which]) : STD[which];
+  if (typeof i !== 'number') return 0;
   const ax = pad.axes || [];
   const v = ax[i];
   if (typeof v !== 'number' || !isFinite(v)) return 0;
@@ -40758,16 +40766,23 @@ function _lxPadMenuNav(root, pad) {
       st.textContent = '.pad-focus{outline:2px solid #ffd166 !important;outline-offset:2px;border-radius:6px;box-shadow:0 0 10px rgba(255,209,102,0.45) !important;}';
       document.head.appendChild(st); } catch (e) {}
   }
-  const down = (i) => { const b = pad.buttons[i]; return !!(b && (b.pressed || b.value > 0.5)); };
+  // v0.30.x — menu nav was the last place still reading RAW standard indices.
+  // Gameplay was taught the Sony layout; this was not, so on a non-standard pad
+  // the D-pad did not navigate AT ALL -- that layout has no buttons 12-15, its
+  // D-pad is a hat on an axis. Measured: focus stayed put on every press. A
+  // player could fight but could not answer a dialog, buy anything, or press
+  // RESPAWN on the death overlay.
+  const down = (i) => _lxPadBtn(pad, i);
   const edge = (i) => { const d = down(i); const was = !!_lxPadNavPrev[i]; _lxPadNavPrev[i] = d; return d && !was; };
   const ax = pad.axes || [];
-  const stickY = ax[1] || 0;
+  const stickY = _lxPadAxis(pad, 'y');
   const sUp = stickY < -0.6, sDn = stickY > 0.6;
   // ── v0.29.801 — RIGHT STICK = SCROLL ──────────────────────────────────────
   // Analogue, not stepped: speed follows deflection past the deadzone, so a
   // nudge creeps and a full push travels. Runs every poll while held.
   {
-    const _ry = ax[3] || 0;
+    // Was ax[3] -- correct only for a standard pad. See the profile note.
+    const _ry = _lxPadAxis(pad, 'ry');
     if (Math.abs(_ry) > 0.18) {
       // The scroll container is rarely the root itself — panels put their
       // overflow on an inner body — so find the tallest actually-scrollable
@@ -41262,7 +41277,7 @@ function _lxPadPoll() {
       try {
         const _ps = navigator.getGamepads ? navigator.getGamepads() : [];
         let _p0 = null; for (let i = 0; i < _ps.length; i++) if (_ps[i] && _ps[i].connected) { _p0 = _ps[i]; break; }
-        const _bd = (i) => { const b = _p0 && _p0.buttons[i]; return !!(b && (b.pressed || b.value > 0.5)); };
+        const _bd = (i) => _lxPadBtn(_p0, i);   // v0.30.x — layout-aware, same reason as menu nav
         const _esc = _bd(1) || _bd(9);
         if (_esc && !_lxPadBlurHeld) {
           _lxPadBlurHeld = true;
@@ -41287,7 +41302,7 @@ function _lxPadPoll() {
         // fall through so this same press drives menu nav below. Gated off
         // while the virtual keyboard is open — its grid owns the D-pad then
         // and manages the field's focus itself.
-        const _ax = (_p0 && _p0.axes) || [];
+        const _ax = { 0: _lxPadAxis(_p0, 'x'), 1: _lxPadAxis(_p0, 'y') };   // v0.30.x — profiled + drift-guarded
         if (!document.getElementById('pad-vk') &&
             (_bd(12) || _bd(13) || _bd(14) || _bd(15) ||
              Math.abs(_ax[0] || 0) > 0.6 || Math.abs(_ax[1] || 0) > 0.6)) {
