@@ -43,6 +43,15 @@ const has = (f) => process.argv.slice(2).includes(f);
 const MIN_OUTER_VIOLET = 55;  // % of lit pixels outside r > 0.5
 const MIN_CENTRE_PINK  = 30;  // % of lit pixels inside  r < 0.32
 const MIN_PETALS = 46;        // against 36 today, on the interior metric below
+// Burst shape. These nine frames are played ONCE across the burst's life, so the
+// set is a one-shot progression: it has to actually come apart.
+const MIN_GROW = 1.25;        // last frame's mean radius against the first
+const MAX_THIN = 0.80;        // at most this much of the art still present at the end
+const MIN_THIN = 0.12;        // ...and at least this much: petals still flying, not gone
+// A fade-out and a real burst both shed pixels - the first five rolls all shed
+// 66-75% of theirs while the survivors ended up MORE central than they started.
+// Only a burst empties the middle, so that is the gate that tells them apart.
+const MIN_HOLLOW = 0.55;      // fraction of the core that must have cleared out
 
 const PALETTE =
   'TWO COLOURS, KEPT APART. ' +
@@ -77,18 +86,37 @@ const STILL_PROMPT =
   'with clear margin on every side, no cropping. Anime game-VFX art style, bold ' +
   'clean outlines, fully transparent background, no text, no logo, no border.';
 
+// NOT A LOOP. The game plays this set ONCE across the burst's life -
+// Math.floor(t * n), and neither shinobi_ult spawn sets frameGap - so it must be
+// authored as a one-shot progression. The first version of this prompt asked for
+// a SEAMLESS LOOP, which authored the wrong shape entirely: a breathing cycle
+// that re-forms, played once and cut off wherever the burst happened to die.
 const MOTION =
-  'the lotus mandala SPINS SLOWLY and BREATHES: the petal rings rotate steadily ' +
-  'around the centre, the ring of Chinese seal-script characters counter-rotates, ' +
-  'and the whole flower pulses gently open and closed once across the cycle while ' +
-  'the pink-violet sakura blossom at the centre turns slowly the other way. ' +
+  'the lotus mandala BLOWS APART and its petals FLY OUTWARD across the nine ' +
+  'frames, like a flower hit by an explosion. ' +
+  'Frame 1: the mandala whole and intact. ' +
+  'Frame 5: the petals have detached and are HALFWAY OUT toward the edge of the ' +
+  'frame, spread wide apart with big gaps of empty space between them, and the ' +
+  'middle of the image is already emptying. ' +
+  'Frame 9: THE CENTRE IS EMPTY. The petals have travelled all the way out and ' +
+  'sit as a wide sparse ring of separate petals near the edge of the frame, far ' +
+  'apart from each other, with nothing at all left in the middle. ' +
+  'CRITICAL - THE PETALS TRAVEL, THEY DO NOT FADE. Each petal MOVES a long way ' +
+  'from where it started, keeping its full solid colour and hard edges the whole ' +
+  'time. Do NOT fade them out. Do NOT dissolve them. Do NOT make them ' +
+  'transparent, blurry, wispy or smoky. Do NOT shrink them. Do NOT let them dim ' +
+  'in place. A petal that is still where it started is WRONG. ' +
+  'CRITICAL - THE MIDDLE MUST EMPTY OUT. As the petals leave, the centre of the ' +
+  'image becomes bare transparent background. By the last frame there is a HOLE ' +
+  'in the middle where the flower used to be. ' +
+  'The flower must not stay whole, must not merely spin, must not bloom and ' +
+  'close again, and the last frame must NOT look like the first. ' +
+  'CRITICAL - EVEN PACING: every frame carries the burst the SAME amount ' +
+  'further; no lurch, no two consecutive frames that look alike. ' +
   'Do NOT add hands, arms, fingers, a hooded figure or a face. ' + PALETTE + ' ' +
-  'CRITICAL - EVEN PACING: every frame advances the rotation by the SAME small ' +
-  'amount; no lurch, no two consecutive frames that look alike. ' +
-  'CRITICAL - SEAMLESS LOOP: the ninth frame flows straight back into the first. ' +
-  'CRITICAL - LOCKED FRAMING: the mandala stays the EXACT same size, scale and ' +
-  'screen position in every frame; do NOT zoom, drift, crop closer or resize, and ' +
-  'keep the whole flower inside the frame with clear margin. ' +
+  'CRITICAL - STAY IN FRAME: the flying petals must all stay INSIDE the frame ' +
+  'with clear margin; do not let a petal touch or cross the edge, and do not ' +
+  'zoom, crop closer or move the centre of the burst. ' +
   'DO NOT ADD new effects, sparks, background or text. Keep the same art style ' +
   'and a fully transparent background.';
 
@@ -101,7 +129,9 @@ let kept_n = 0;
 async function keep(tag, buf) {
   if (!KEEP) return;
   const { writeFile } = await import('node:fs/promises');
-  await writeFile(join(KEEP, `${tag}_${String(++kept_n).padStart(2, '0')}.webp`), buf);
+  // Frame tags carry their own index; only untagged rolls need a counter.
+  const name = /_f\d+$/.test(tag) ? tag : `${tag}_${String(++kept_n).padStart(2, '0')}`;
+  await writeFile(join(KEEP, name + '.webp'), buf);
 }
 
 // --- measurement -----------------------------------------------------------
@@ -224,6 +254,9 @@ if (!has('--generate')) {
   console.log(`\n# Re-run with --generate (needs LUDO_API_KEY).`);
   console.log(`# Gate: rim violet >= ${MIN_OUTER_VIOLET}%, centre pink >= ${MIN_CENTRE_PINK}%,` +
               ` petals >= ${MIN_PETALS}, contained, ${FRAMES} unique frames.`);
+  console.log(`# Burst: spread >= x${MIN_GROW}, ends between ${Math.round(MIN_THIN * 100)}% and` +
+              ` ${Math.round(MAX_THIN * 100)}% of its art, core >= ${Math.round(MIN_HOLLOW * 100)}% cleared,` +
+              ' never falls back inward.');
   console.log('# NOT scorable, check by eye: the Chinese seal-script glyphs, and that');
   console.log('# no hands / hooded figure came back.');
   process.exit(0);
@@ -319,6 +352,39 @@ async function refit(raw, px) {
   }
   return out;
 }
+// Does the sequence actually BURST? Two numbers answer that: the art must
+// spread outward from its own centre, and it must thin out as petals leave.
+// Measured in raw pixels rather than normalised - a burst that grows is exactly
+// what a scale-invariant metric would hide.
+async function dispersal(bufs) {
+  const spread = [], mass = [], core = [];
+  for (const b of bufs) {
+    const { data, info } = await sharp(b).resize(200, 200, { fit: 'fill' })
+      .ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const W = info.width, H = info.height, C = info.channels;
+    let n = 0, cx = 0, cy = 0;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (data[(y * W + x) * C + 3] > 96) { n++; cx += x; cy += y; }
+    if (!n) { spread.push(0); mass.push(0); core.push(0); continue; }
+    cx /= n; cy /= n;
+    let r = 0, inner = 0;
+    const R = W * 0.22;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (data[(y * W + x) * C + 3] > 96) {
+      const d2 = Math.hypot(x - cx, y - cy);
+      r += d2;
+      if (d2 < R) inner++;
+    }
+    spread.push(+(r / n).toFixed(1)); mass.push(n); core.push(inner);
+  }
+  // Where the mass SITS, not just how much of it survives. A fade-out and a
+  // real burst both shed pixels; only a burst empties the middle.
+  const grow = +(spread[spread.length - 1] / Math.max(0.001, spread[0])).toFixed(2);
+  const thin = +(mass[mass.length - 1] / Math.max(1, mass[0])).toFixed(2);
+  let out = 0;
+  for (let i = 1; i < spread.length; i++) if (spread[i] >= spread[i - 1] - 0.3) out++;
+  // Hollow = how much of the middle has emptied. 1.0 means the core is bare.
+  const hollow = +(1 - core[core.length - 1] / Math.max(1, core[0])).toFixed(2);
+  return { spread, mass, core, grow, thin, out, hollow };
+}
 async function steps(bufs) {
   const small = [];
   for (const b of bufs) small.push(await sharp(b).resize(96, 96, { fit: 'fill' }).ensureAlpha().raw().toBuffer());
@@ -342,7 +408,7 @@ for (let a = 1; a <= ROLLS; a++) {
     const data = await post('/assets/sprite/animate', {
       initial_image: 'data:image/png;base64,' + src.toString('base64'),
       motion_prompt: MOTION, frames: FRAMES, frame_size: -9, model: 'eagle',
-      individual_frames: true, loop: true, image_type: 'sprite',
+      individual_frames: true, loop: false, image_type: 'sprite',
     });
     // Slice the SPRITESHEET, never individual_frame_urls: those square off a
     // non-square frame and the art comes back stretched.
@@ -364,18 +430,33 @@ for (let a = 1; a <= ROLLS; a++) {
     const uniq = new Set(finals.map(hashOf)).size;
     const m0 = await measure(finals[0]);
     const st = await steps(finals);
+    const d = await dispersal(finals);
     let edge = 0;
     for (const f of finals) { const mm = await measure(f); if (mm.edge > edge) edge = mm.edge; }
-    console.log(`unique=${uniq}/${FRAMES} ${fmt(m0)} cv=${cvOf(st)} worstEdge=${edge}`);
-    await keep('anim0', finals[0]);
+    console.log(`unique=${uniq}/${FRAMES} ${fmt(m0)} spread=[${d.spread.join(' ')}] x${d.grow} thin=${d.thin} hollow=${d.hollow} cv=${cvOf(st)} worstEdge=${edge}`);
+    for (let q = 0; q < finals.length; q++) await keep(`anim${String(a).padStart(2, '0')}_f${q}`, finals[q]);
     if (uniq < FRAMES) throw new Error(`only ${uniq} unique frames`);
     if (edge > 0) throw new Error(`touches the frame edge (${edge}px)`);
     if (m0.outerViolet < MIN_OUTER_VIOLET) throw new Error(`the animation lost the violet rim (${m0.outerViolet}%)`);
     if (m0.petals < MIN_PETALS) throw new Error(`the animation lost the petals (${m0.petals})`);
     if (m0.centrePink < MIN_CENTRE_PINK) throw new Error(`the animation lost the pink centre (${m0.centrePink}%)`);
-    const score = cvOf(st);
-    console.log(`        accepted — cv ${score}` + (bestA ? ` (incumbent ${bestA.score})` : ''));
-    if (!bestA || score < bestA.score) bestA = { finals, m0, st, score };
+    if (d.grow < MIN_GROW) throw new Error(`it does not burst outward (spread x${d.grow} < x${MIN_GROW})`);
+    if (d.thin > MAX_THIN) throw new Error(`nothing leaves - it stays whole (${Math.round(d.thin * 100)}% of the art still there at the end)`);
+    if (d.thin < MIN_THIN) throw new Error(`it bursts into nothing (only ${Math.round(d.thin * 100)}% left at the end; the game fades it out too)`);
+    if (d.hollow < MIN_HOLLOW) throw new Error(`the middle never empties (hollow ${d.hollow} < ${MIN_HOLLOW}) - the petals faded instead of flying`);
+    if (d.out < FRAMES - 2) throw new Error(`the burst falls back inward (only ${d.out}/${FRAMES - 1} steps move outward)`);
+    // The last frame must NOT resemble the first. This plays once, so a
+    // re-formed flower at the end is a loop authored into a one-shot.
+    const wrap = st[st.length - 1], mid = st.slice(0, -1).reduce((a, b) => a + b, 0) / (st.length - 1);
+    if (wrap < mid * 0.6) throw new Error(`it re-forms into frame 1 (wrap step ${wrap} vs mean ${Math.round(mid)})`);
+    // Dispersal is GATED, not scored - scoring it just picks the most extreme
+    // roll on offer, which is how a burst that ends at 5% won the first round.
+    // Among rolls that burst properly, prefer even pacing and a remainder that
+    // still reads as petals in flight (~25%).
+    const score = +(-(cvOf(st) + Math.abs(d.thin - 0.25) * 2)).toFixed(2);
+    console.log(`        accepted — burst x${d.grow} thin ${d.thin} cv ${cvOf(st)} score ${score}` +
+      (bestA ? ` (incumbent ${bestA.score})` : ''));
+    if (!bestA || score > bestA.score) bestA = { finals, m0, st, score, d };
   } catch (e) {
     console.log('rejected: ' + e.message);
     if (/\b402\b|credit/i.test(e.message)) { console.error('OUT OF CREDITS'); process.exit(3); }
@@ -387,4 +468,6 @@ for (let i = 0; i < FRAMES; i++) {
   await writeFile(p + '.tmp', bestA.finals[i]);
   await rename(p + '.tmp', p);
 }
-console.log(`WROTE ${FRAMES} frames — ${fmt(bestA.m0)}, cv ${bestA.score}, steps ${bestA.st.join(' ')}`);
+console.log(`WROTE ${FRAMES} frames — ${fmt(bestA.m0)}`);
+console.log(`  bursts x${bestA.d.grow} outward, thins to ${Math.round(bestA.d.thin * 100)}%, core ${Math.round(bestA.d.hollow * 100)}% cleared`);
+console.log(`  spread ${bestA.d.spread.join(' ')}`);
