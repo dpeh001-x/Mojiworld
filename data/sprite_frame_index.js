@@ -608,6 +608,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "p_apo_ice": 9,
    "p_apo_lightning": 9,
    "p_apo_void": 9,
+   "p_doom_fireball": 9,
    "p_necromancer_soulorb": 9,
    "p_ult_warlord": 9,
    "quake": 9,

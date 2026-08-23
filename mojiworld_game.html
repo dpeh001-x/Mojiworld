@@ -9708,7 +9708,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.116';
+const GAME_VERSION = 'v0.30.117';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11006,6 +11006,8 @@ const _PROJ_ANIM_KEYS = new Set(['goo','bubble','pincer','splash','quake','stala
   // (quake already listed above; re-animated from the new molten base.) deathOrb
   // is camelCase to match the engine skill key + the renamed deathOrb_*.webp frames.
   'gemini_shard', 'taurus_boulder', 'deathOrb',
+  // v0.30.x — Doombringer homing doom-fire (9-frame loop, ludo.ai).
+  'p_doom_fireball',
   // v0.26.511 — remaining zodiac bosses (clean, no-cutoff anims). 'zodiac' (Aries)
   // is wired as a static sprite for now — its animated flame-trail clipped the
   // frame edge, pending a higher-pad re-render once Ludo credits renew. icePillar
@@ -11135,6 +11137,10 @@ const LX_BULT_PROJ = (() => {
     bult_nightreaper:  'p_ult_nightreaper.webp',   // Bloodmoon Domain — blood-red soul scythe
     bult_phantom:      'p_ult_phantom.webp',       // Voidwalk — void shuriken
     bult_sage:         'p_ult_sage.webp',          // Meteor Sigil — flaming meteor
+    // v0.30.x — Calamity Incarnate's homing doom-fire (ludo.ai). Styled off
+    // p_shockwave per user, and kept CRIMSON rather than the Sage meteor's
+    // orange so the game's two homing ults never read as the same skill.
+    bult_doomfire:     'p_doom_fireball.webp',     // Calamity Incarnate — homing doom-fire
     bult_elementalist: 'p_ult_elementalist.webp',  // Elemental Apotheosis — four-element convergence beam
     bult_marksman:     'p_ult_marksman.webp',      // Deadeye Protocol — piercing crit round
     bult_ballista:     'p_ult_ballista.webp',      // War Machine — explosive siege bolt
@@ -11167,6 +11173,10 @@ const _BULT_ANIM_KEY = {
   bult_warlord: 'p_ult_warlord',   // 9-frame waving banner (flag portion animates)
   // v0.30.53 — the four Apotheosis catastrophes animate too.
   apo_fire: 'p_apo_fire', apo_ice: 'p_apo_ice', apo_lightning: 'p_apo_lightning', apo_void: 'p_apo_void',
+  // v0.30.x — the doom-fire churns in place (core pulses, rim licks reshape);
+  // it must not translate in the frames, because the engine rotates it to its
+  // velocity every tick and baked movement would fight the steering.
+  bult_doomfire: 'p_doom_fireball',
 };
 // =========================================================================
 // LX_SUMMON — class-summoned ally sprites (v0.25.203)
@@ -17284,7 +17294,7 @@ const SKILLS = {
   // See ultimate_ultimate_spec.md. v1 = auto-resolved effects (interactive
   // hooks land in a later pass).
   warlord_ult:        { name:'War of Banners',          icon:'🚩', cls:'warrior', job:'berserker', master:'warlord',     slot:'b', mp:70,  cd:62000, desc:'Enter a 10s enrage (Bloodlust + heal, shared with co-op partners on your map); re-press B for free, rapid banner strikes.' },
-  doombringer_ult:    { name:'Calamity Incarnate',      icon:'🗡️', cls:'warrior', job:'berserker', master:'doombringer', slot:'b', mp:72,  cd:66000, desc:'Wield the colossal blade — a melee cleave plus three screen-crossing piercing blade-waves. Collects every DOOM brand on screen (+1% execute threshold and +0.4s window each) and burns all Calamity Heat (+0.5% damage per point).' },
+  doombringer_ult:    { name:'Calamity Incarnate',      icon:'🗡️', cls:'warrior', job:'berserker', master:'doombringer', slot:'b', mp:72,  cd:66000, desc:'Name one foe — boss first, else the biggest health pool — and drop the verdict on it: a melee cleave, then SEVEN homing doom-fires that all converge on that single target (~38x ATK total, ~65x at full heat). Each fire re-brands with DOOM. Collects every DOOM brand on screen (+1% execute threshold and +0.4s window each) and burns all Calamity Heat (+0.7% damage per point).' },
   crusader_ult:       { name:'Bastion of Dawn',         icon:'🛡️', cls:'warrior', job:'knight',    master:'crusader',    slot:'b', mp:68,  cd:62000, desc:'Tap once to ARM (free), tap again to RELEASE — no cooldown between taps; the 62s cooldown starts at release. Judgement stacks per hit taken (max 5). Release: full party heal + 15s half-damage shield for everyone, drag foes in, and 2 homing orbs per stack burst on impact. Armed for 15s, then erupts on its own.' },
   dragoon_ult:        { name:'Skyfall Dominion',        icon:'🌩️', cls:'warrior', job:'knight',    master:'dragoon',     slot:'b', mp:62,  cd:56000, desc:'Leap skyward and call down 9 dragon-lances that fall on foes within 900px (or rain around you if none), then crash down in a 460px shockwave.' },
   shadowlord_ult:     { name:'Shadow Sovereign',        icon:'🌑', cls:'rogue',   job:'ninja',     master:'shadowlord',  slot:'b', mp:62,  cd:60000, desc:'Summon your Sovereign Shade: a shadow of yourself that mirrors your every move — run, jump, strike — a beat behind for 20s, and echoes EVERY hit you land as a second strike. Cooldown 60s.' },
@@ -72039,19 +72049,65 @@ const SKILL_FNS = {
     player._calamityHeat = 0;
     // v0.26.x — directional screen-crossing blade-wave nuke (aim it; pierces all).
     spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'doombringer_ult', { size: 280, life: 80, spin: 0.3 });
-    showToast('CALAMITY INCARNATE'
-      + (_doomEaten ? ' — ' + _doomEaten + ' brand' + (_doomEaten > 1 ? 's' : '') + ' collected' : '')
-      + (_heat ? ' · heat ' + _heat + ' (+' + Math.round(_heat * LX_DOOM_HEAT_DMG * 100) + '%)' : ''), 'legendary'); flash(0.6); addShake(12); addHitStop(90);
     const dir = player.facing || 1, cx = player.x + player.w / 2, cy = player.y + player.h / 2;
+    // v0.30.x — THE CONDEMNED (per user: "it should be one of the more powerful
+    // skills dealing good strong damage to 1 monster, like summoning homing
+    // fireballs"). Was three screen-crossing PIERCING blade-waves: enormous on a
+    // packed lane, and on a lone boss it asked you to stand in exactly the right
+    // line three times. Now the verdict names ONE foe and seven homing doom-fires
+    // converge on it, so the skill's power is where the tooltip says it is.
+    //
+    // Pick order is deliberate: boss first, then the biggest health pool, then
+    // nearest. This is the Doombringer's execute setup, so it should choose the
+    // thing worth executing rather than whatever is closest to your elbow. No
+    // facing filter — they are homing; curving back onto a foe behind you is the
+    // point, and the Sage's "comets fly backwards" complaint was about
+    // NON-homing aim, not this.
+    const _pick = () => {
+      let best = null, bestKey = null;
+      for (const m of (game.monsters || [])) {
+        if (!m || m.currentHp <= 0) continue;
+        const ddx = Math.abs((m.x + m.w / 2) - cx), ddy = Math.abs((m.y + m.h / 2) - cy);
+        if (ddx > 1200 || ddy > 520) continue;
+        const key = [(m.isBoss || m.boss) ? 1 : 0, m.currentHp || 0, -ddx];
+        if (!best || key[0] > bestKey[0] || (key[0] === bestKey[0] && key[1] > bestKey[1])
+            || (key[0] === bestKey[0] && key[1] === bestKey[1] && key[2] > bestKey[2])) { best = m; bestKey = key; }
+      }
+      return best;
+    };
+    const _condemned = _pick();
+    showToast('CALAMITY INCARNATE'
+      + (_condemned ? ' — ' + (_condemned.name || 'the condemned') + ' is condemned' : '')
+      + (_doomEaten ? ' · ' + _doomEaten + ' brand' + (_doomEaten > 1 ? 's' : '') : '')
+      + (_heat ? ' · heat ' + _heat + ' (+' + Math.round(_heat * LX_DOOM_HEAT_DMG * 100) + '%)' : ''), 'legendary'); flash(0.6); addShake(12); addHitStop(90);
     player._doomUltMelee = true;   // performMelee is synchronous; the flag brands its hits
     performMelee(440, 6.0 * _heatMul, { color: '#cc3344', kb: 14 });   // v0.30.x — 5.0 -> 6.0
     player._doomUltMelee = false;
-    // v0.26.x — per user: shift the blade-wave up 30px (y: cy-30) and flip the
-    // sprite on the x axis (bsprFlipX).
-    const wave = (mul, w, h, life) => game.projectiles.push({ x: cx, y: cy - 30, vx: dir * 16, vy: 0, w, h, life, damage: getAtk() * mul + 30, owner: 'player', skill: 'shockwave', doomBrand: 1, bspr: 'bult_doombringer', bsprFlipX: true, color: '#ff4455', noGravity: true, pierce: true });
-    wave(9.5 * _heatMul, 130, 170, 90);   // v0.30.x — 8.0 -> 9.5
-    scheduleSkillTimer(() => { if (player.hp <= 0) return; wave(5.5 * _heatMul, 100, 130, 90); }, 160);   // v0.30.x — 4.5 -> 5.5
-    scheduleSkillTimer(() => { if (player.hp <= 0) return; wave(5.5 * _heatMul, 100, 130, 90); }, 320);   // v0.30.x — 4.5 -> 5.5
+    // The barrage. Seven fires at 4.6x ATK each = 32.2x, plus the 6.0x cleave =
+    // 38.2x on ONE target, against 26.5x before — and that 26.5 needed all three
+    // waves to line up on the same foe. Crowd output drops on purpose: nothing
+    // pierces any more, so a packed lane no longer eats three full-power waves.
+    // At full Calamity Heat (100 x 0.007 = +70%) the single-target total is ~65x.
+    // Each fire re-brands with DOOM, so the ult keeps feeding the mechanic it
+    // just consumed.
+    const _doomFire = (i) => {
+      if (player.hp <= 0) return;
+      const t = (_condemned && _condemned.currentHp > 0) ? _condemned : _pick();
+      const side = (i % 2 ? 1 : -1) * (1 + (i >> 1) * 0.45);
+      game.projectiles.push({
+        x: cx + dir * 8 + side * 26, y: cy - 96 - (i % 3) * 24,
+        vx: dir * 2 + side * 1.6, vy: -3.4 - (i % 3) * 0.5,
+        w: 60, h: 60, life: 150,
+        damage: getAtk() * 4.6 * _heatMul + 24,
+        owner: 'player', skill: 'fire', doomBrand: 1,
+        bspr: 'bult_doomfire', sprScale: 1.5, spin: 0,
+        homing: t, retarget: true,
+        color: '#ff3344', noGravity: true, explode: 44,
+      });
+      addShake(2);
+    };
+    _doomFire(0);
+    for (let _i = 1; _i < 7; _i++) scheduleSkillTimer(((n) => () => _doomFire(n))(_i), _i * 80);
     _doomApplyWinBonus();   // covers the window-opened-before-impl cast order
   },
   crusader_ult: (_o) => {
@@ -85918,8 +85974,25 @@ function updateProjectiles(dt) {
         }
       }
     } else if (p.homing && p.homing !== true) {
-      // Target gone — dead reckoning
-      p.homing = null;
+      // v0.30.x — RE-ACQUIRE, opt-in. Dead reckoning is right for a fanned
+      // volley (Gale Storm), but wrong for a focused single-target barrage:
+      // kill the Doombringer's mark with the third of seven doom-fires and the
+      // other four sail off into empty air, which turns the skill's whole point
+      // — everything lands on one thing — into a whiff whenever it overkills.
+      // Only projectiles that ask for it retarget; every existing caller keeps
+      // the old behaviour exactly.
+      let _re = null;
+      if (p.retarget && Array.isArray(game.monsters)) {
+        const _pcx = p.x + p.w / 2, _pcy = p.y + p.h / 2;
+        let _bd = Infinity;
+        for (const _m of game.monsters) {
+          if (!_m || _m.currentHp <= 0) continue;
+          const _dx = (_m.x + _m.w / 2) - _pcx, _dy = (_m.y + _m.h / 2) - _pcy;
+          const _d2 = _dx * _dx + _dy * _dy;
+          if (_d2 < _bd) { _bd = _d2; _re = _m; }
+        }
+      }
+      p.homing = _re;
     }
     // Archer class perk — arrows/projectiles fly much further
     if (p.owner === 'player' && !p._ranged && player.cls === 'archer') {

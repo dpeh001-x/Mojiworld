@@ -66,6 +66,19 @@ const TARGETS = {
   quake_ring: { base: 'Sprites/vfx/quake_ring.webp', dir: 'Sprites/vfx/anim',
     motion: 'The shockwave ring expands outward from the centre: the ring grows steadily wider and thinner as it travels, ' +
       'dust and debris kick up along its leading edge, and the whole ring fades as it spreads.' },
+  // v0.30.x — Doombringer's homing doom-fire. The key IS the anim key: frames
+  // land as Sprites/projectiles/anim/p_doom_fireball_0..8.webp, which is what
+  // _projAnimFrame('p_doom_fireball') loads for the bult_doomfire sprite.
+  // It must LOOP and must not drift: the engine rotates the sprite to its
+  // velocity every frame, so any translation baked into the frames fights the
+  // steering, and a burn-out ending would leave the fireball invisible for
+  // most of its flight.
+  p_doom_fireball: { base: 'Sprites/projectiles/p_doom_fireball.webp', dir: 'Sprites/projectiles/anim',
+    motion: 'The fireball burns in place without moving across the frame, staying centred and still pointed to the ' +
+      'right: the white-hot core pulses brighter and dimmer, the crimson flame layers churn and roll around it, the ' +
+      'jagged black flame licks at the rim flicker and reshape, the trailing tail of fire behind it ripples and ' +
+      'whips, and embers flick off it. A continuous seamless loop that ends exactly as it began — it never shrinks, ' +
+      'never burns out, never flies away.' },
 };
 
 const only = val('--only', null);

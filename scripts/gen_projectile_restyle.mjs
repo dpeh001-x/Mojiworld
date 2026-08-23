@@ -139,6 +139,113 @@ const TARGETS = {
       + 'thumbnail size. No arm beyond the wrist, no character, no body. Fully transparent background, no ground '
       + 'shadow, no background scenery, no text, no border, no frame, not pixel art, not photorealistic.',
   },
+  // v0.30.x — Doombringer B, remade as a homing single-target barrage (per user:
+  // "it should be one of the more powerful skills dealing good strong damage to
+  // 1 monster, like summoning homing fireballs. Then generate the necessary
+  // sprites that are similar to the shockwave").
+  //
+  // "Similar to the shockwave" is a STYLE brief, not a shape one: p_shockwave is
+  // a painterly VFX orb - white-hot core, crimson body, jagged near-black flame
+  // corona, glow - with no outline anywhere. The chibi house style above would
+  // fight it, so this target overrides the style entirely and matches the
+  // Doombringer's own crimson palette (#cc3344 / #ff4455) rather than the Sage
+  // meteor's orange, so the two homing ults never read as the same skill.
+  p_doom_fireball: {
+    out: 'Sprites/projectiles/p_doom_fireball.webp',
+    size: [640, 640],
+    ar: 'ar_1_1',
+    prompt: 'A hurtling ball of dark crimson hellfire seen from the side, travelling to the RIGHT: a searing '
+      + 'white-hot core at the leading right edge, wrapped in layered crimson and blood-red flame, ringed by a '
+      + 'jagged corona of near-black charred flame licks, with a long tapering tail of red fire and dark smoke '
+      + 'streaming BACKWARD to the left. A few bright embers and one thin ring of shockwave light around the core. '
+      + 'The fireball fills the frame and drives right.',
+    style: ' Painterly 2D game VFX sprite in the style of an action RPG skill effect: ONE fireball centred in '
+      + 'frame and aimed RIGHT, rendered as glowing light and flame with NO outline and NO cel-shaded cartoon '
+      + 'edges, a blown-out white core falling off through hot crimson to deep blood red and finally to charred '
+      + 'near-black at the jagged rim, soft additive glow, a bold silhouette that still reads at thumbnail size. '
+      + 'Dark crimson and black palette, no orange-gold campfire tones. Fully transparent background, no ground '
+      + 'shadow, no background scenery, no text, no border, no frame, not pixel art, not photorealistic.',
+  },
+
+  // ---- second restyle wave -------------------------------------------------
+  // Per user: "will need to use ludo.ai to rework the sprites to fit the game
+  // aesthetics more". Seven, and they miss in different ways, so each gets its
+  // own correction rather than a shared re-roll.
+  //
+  // Two of them are shaped wrong for their OWN render mode, which is the part
+  // no amount of restyling would have fixed: LX_PROJ gives mghostshot and
+  // venom `mode: 'orient'`, meaning the sprite is rotated to point along its
+  // velocity — but both are drawn radially symmetric (a ring and a ball), so
+  // the rotation communicates nothing. Both are rebuilt with a leading edge
+  // aimed RIGHT, which is the direction the orient blit treats as forward.
+
+  // stump — bark chunk. Was: a photoreal slab of mossy timber, no outline,
+  // reads as a photograph of wood rather than a thrown projectile.
+  mbark: {
+    out: 'Sprites/projectiles/mbark.webp',
+    prompt: 'A single chunky wedge of tree bark flying through the air as a thrown projectile: one thick angular '
+      + 'slab of warm brown bark with two or three bold carved grain lines, a few chunky rounded clumps of bright '
+      + 'moss clinging to one edge, and two small splinters breaking off the corner.',
+  },
+  // Blight Elder — grave-seed. Was: a dense tangle of thin tendrils, smoke and
+  // pink petals; far too intricate to resolve at the ~14 px it is drawn at.
+  mblightseed: {
+    out: 'Sprites/projectiles/mblightseed.webp',
+    prompt: 'A single fat corrupted seed pod flying as a projectile: ONE plump rounded seed with a hard dark husk '
+      + 'in sickly olive-green, a bright acid-green crack of blight glowing down its middle, and just THREE thick '
+      + 'curling tendrils wrapping it. Simple and bold, only a few large shapes, no fine detail, no smoke, no petals.',
+  },
+  // Emberling — fire ember. Already close to house style; regenerated for the
+  // outline weight and glossy cel shading the rest of the set carries.
+  memberspark: {
+    out: 'Sprites/projectiles/cast/memberspark.webp',
+    prompt: 'A single chunky teardrop flame ember flying as a projectile: ONE rounded blob of fire, deep orange at '
+      + 'the base rising through bright amber to a pale yellow-white hot core, with two short curling flame licks '
+      + 'off the top and two small round embers floating beside it.',
+  },
+  // Spectre Cannoneer — ghost shot. Was: a flat violet RING that reads as a
+  // copyright symbol, and symmetric besides, so its orient rotation is invisible.
+  mghostshot: {
+    out: 'Sprites/projectiles/cast/mghostshot.webp',
+    prompt: 'A single ghostly cannon shot streaking to the RIGHT: a rounded skull-like spectral head of pale violet '
+      + 'ectoplasm forming the LEADING edge on the right with two hollow glowing eye sockets, its body tapering '
+      + 'BACKWARD to the left into two or three wispy tattered ghost-tails. Clearly a projectile in flight with a '
+      + 'front and a back. Absolutely NOT a ring, NOT a circle, NOT a letter or symbol.',
+    style: ' Cute cartoon game sprite in the style of a chibi mobile RPG: ONE object centred in frame and clearly '
+      + 'aimed RIGHT, a thick uniform near-black outline round the whole silhouette, soft cel shading, glossy white '
+      + 'highlight blobs, bright saturated violet and pale cyan, an ASYMMETRIC silhouette with an obvious leading '
+      + 'edge that reads instantly as something flying rightward. Fully transparent background, no ground shadow, '
+      + 'no background scenery, no text, no letters, no border, no frame, not pixel art.',
+  },
+  // Aries — cosmic ram-bolt. Directional already; thin and muddy in the middle.
+  p_zodiacbolt: {
+    out: 'Sprites/projectiles/p_zodiacbolt.webp',
+    prompt: 'A single fiery ram-horn bolt streaking to the RIGHT: a chunky curled ram horn of molten gold-orange '
+      + 'flame forming the LEADING point on the right, with a thick tapering tail of fire and two or three sparks '
+      + 'streaming BACKWARD to the left. Bold and solid, not thin or stringy.',
+    ar: 'ar_16_9',
+  },
+  // Scorpio — stinger venom. Was: a symmetric green ball with a small nub, so
+  // its orient rotation reads as nothing at all.
+  p_venom: {
+    out: 'Sprites/projectiles/p_venom.webp',
+    prompt: 'A single venom stinger dart flying to the RIGHT: a sharp curved scorpion stinger barb of glossy dark '
+      + 'violet chitin forming the LEADING point on the right, a fat glowing droplet of acid-green venom clinging '
+      + 'behind it, and two small venom droplets trailing BACKWARD to the left.',
+    style: ' Cute cartoon game sprite in the style of a chibi mobile RPG: ONE object centred in frame and clearly '
+      + 'aimed RIGHT, a thick uniform near-black outline round the whole silhouette, soft cel shading from an '
+      + 'upper-left light, glossy white highlight blobs on the droplet, bright saturated acid-green and violet, an '
+      + 'ASYMMETRIC pointed silhouette that reads instantly as a dart in flight, not a ball and not an egg. Fully '
+      + 'transparent background, no ground shadow, no background scenery, no text, no border, no frame, not pixel art.',
+  },
+  // Leo — cosmic burst. Spins fast, so it stays radial; it just needs the
+  // house outline and gloss instead of reading as a flat vector star.
+  p_starburst: {
+    out: 'Sprites/projectiles/p_starburst.webp',
+    prompt: 'A single chunky cosmic starburst: ONE bold eight-pointed star with thick tapering points of radiant '
+      + 'gold, a warm amber core with a glossy white hot centre, and four small round sparkles tucked between the '
+      + 'points. Radially symmetric so it reads while spinning fast.',
+  },
 };
 
 const only = val('--only', null);
@@ -148,7 +255,10 @@ for (const k of keys) if (!TARGETS[k]) { console.error('unknown target: ' + k); 
 
 if (!argv.includes('--generate')) {
   console.log(`restyle ${keys.length} sprite(s), ${N} candidate(s) each -> scripts/_style_pack/<key>/\n`);
-  for (const k of keys) console.log(`=== ${k}  -> ${TARGETS[k].out}\n${TARGETS[k].prompt}${STYLE}\n`);
+  // Show the style the target will ACTUALLY be sent, not the global default:
+  // per-target overrides exist (p_flamefist, p_doom_fireball) and previewing
+  // the wrong one makes the dry run worse than no dry run.
+  for (const k of keys) console.log(`=== ${k}  -> ${TARGETS[k].out}\n${TARGETS[k].prompt}${TARGETS[k].style || STYLE}\n`);
   console.log('Re-run with --generate. Writes candidates only; install is separate.');
   process.exit(0);
 }
