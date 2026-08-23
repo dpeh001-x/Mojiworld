@@ -9708,7 +9708,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.121';
+const GAME_VERSION = 'v0.30.122';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -56068,7 +56068,12 @@ function _expeditionSpawnTowerBoss(slot) {
         // v0.26.321 — Schedule the new homing-volley + drain-pillar
         // patterns. _bossSpecialAttacks ticks both every frame.
         m._sovereignHomingAt = (game.time || 0) + 180;   // first volley 3 s in
-        m._sovereignDrainAt  = (game.time || 0) + 960;   // v0.26.359 — first drain 16 s in (16*60 FRAMES; was 16000 = a frame/ms unit bug missed when v0.26.349 fixed the re-arm → drain fired at ~4.4 min, i.e. never)
+        m._sovereignDrainAt  = (game.time || 0) + 960;
+        // v0.30.122 — an arrival beat. The apex boss used to simply appear behind
+        // a toast, which read the same as any elite spawning off-screen.
+        if (typeof _lxSovBeat === 'function') {
+          _lxSovBeat(m, { flash: 0.55, shake: 16, stop: 220, ring: 420, motes: 30 });
+        }   // v0.26.359 — first drain 16 s in (16*60 FRAMES; was 16000 = a frame/ms unit bug missed when v0.26.349 fixed the re-arm → drain fired at ~4.4 min, i.e. never)
       }
     }
     if (typeof showToast === 'function') {
@@ -77131,12 +77136,19 @@ function _bossSpecialAttacks(m, dt) {
     if ((m._sovPhaseSeen | 0) < _ph) {
       m._sovPhaseSeen = _ph;
       if (_ph > 1) {
-        if (typeof showToast === 'function') {
-          showToast(_ph === 2 ? '⚜ The Sovereign presses the descent — faster now.'
-                              : '⚜ THE SOVEREIGN UNCROWNS — the Spire itself turns on you.', 'legendary');
-        }
-        if (typeof flash === 'function') flash(0.3);
-        if (typeof addShake === 'function') addShake(8);
+        // v0.30.122 — a phase turn was a toast, flash 0.3 and shake 8: the same
+        // weight as an ordinary contact hit. An apex boss changing gear should
+        // stop the screen for a moment. Phase 3 is louder than phase 2 because
+        // it is the last one the player will ever see.
+        _lxSovBeat(m, {
+          toast: _ph === 2 ? '⚜ The Sovereign presses the descent — faster now.'
+                           : '⚜ THE SOVEREIGN UNCROWNS — the Spire itself turns on you.',
+          flash: _ph === 2 ? 0.45 : 0.62,
+          shake: _ph === 2 ? 13 : 19,
+          stop:  _ph === 2 ? 130 : 210,
+          ring:  _ph === 2 ? 330 : 460,
+          motes: _ph === 2 ? 22 : 34,
+        });
       }
     }
     // ---- CROWN REGALIA -------------------------------------------------
@@ -77232,6 +77244,10 @@ function _bossSpecialAttacks(m, dt) {
       m._sovereignOhkoTick = (game.time | 0) + (_sp === 1 ? 960 : _sp === 2 ? 720 : 540);
       m._sovSpentUntil = (game.time | 0) + 210 + 150;
       if (typeof _lxSovAtkPose === 'function') _lxSovAtkPose(m, 'collapse', 200);   // v0.30.89 — held across the 3.5s telegraph
+      if (typeof _lxSovBeat === 'function') {   // v0.30.122 — the one attack that can kill outright
+        _lxSovBeat(m, { flash: 0.5, shake: 12, stop: 90, ring: 300, motes: 18,
+                        toast: '☄ SINGULARITY COLLAPSE — reach the light.' });
+      }
     }
     if (game.hazards && game.mapData) {
       const _ww = game.mapData.worldWidth || 1400;
@@ -77336,6 +77352,10 @@ function _bossSpecialAttacks(m, dt) {
       const _dpP = m._sovPhase || 1;
       m._sovereignDrainAt = (game.time | 0) + (_dpP === 1 ? 840 : _dpP === 2 ? 660 : 540);
       if (typeof _lxSovAtkPose === 'function') _lxSovAtkPose(m, 'drain', 96);   // v0.30.89 — covers the pillar telegraph
+      if (typeof _lxSovBeat === 'function') {   // v0.30.122
+        _lxSovBeat(m, { flash: 0.28, shake: 7, ring: 210, motes: 10,
+                        toast: '⚜ DRAIN PILLARS — the Spire feeds.', tier: 'epic' });
+      }
     }
     if (player && player.hp > 0 && game.hazards && game.mapData) {
       const _ww = game.mapData.worldWidth || 1400;
@@ -115893,6 +115913,36 @@ const _BOSS_ANIM_MAX = 9;   // most frames we attempt to load per boss
 // Guarded on the frame set actually existing, exactly like the legosaurusdash
 // override: a missing art drop falls back to the generic attack pose rather
 // than blanking the boss.
+// v0.30.122 — one place for the Sovereign's spectacle, so an "epic" beat cannot
+// drift out of step with the pose it belongs to. Presentation only: flash,
+// shake, hit-stop, particles. Nothing here changes a number the fight is
+// balanced on.
+function _lxSovBeat(m, opts) {
+  opts = opts || {};
+  try {
+    if (opts.flash && typeof flash === 'function') flash(opts.flash);
+    if (opts.shake && typeof addShake === 'function') addShake(opts.shake);
+    if (opts.stop && typeof addHitStop === 'function') addHitStop(opts.stop);
+    if (opts.toast && typeof showToast === 'function') showToast(opts.toast, opts.tier || 'legendary');
+    if (opts.ring && m && typeof spawnSmoothExplosion === 'function') {
+      const cx = m.x + m.w / 2, cy = m.y + m.h / 2;
+      spawnSmoothExplosion(cx, cy, opts.ring, '#fff5d0', '#aa1a1466', { life: 34 });
+    }
+    if (opts.motes && m && game.particles) {
+      const cx = m.x + m.w / 2, cy = m.y + m.h / 2;
+      for (let i = 0; i < opts.motes; i++) {
+        const a = (i / opts.motes) * Math.PI * 2 + Math.random() * 0.3;
+        const sp = 3 + Math.random() * 5;
+        game.particles.push({
+          x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 1,
+          life: 30 + (Math.random() * 20 | 0),
+          color: i % 3 === 0 ? '#fff5d0' : (i % 3 === 1 ? '#ffcc66' : '#aa1a14'),
+          size: 2 + Math.random() * 2,
+        });
+      }
+    }
+  } catch (e) {}
+}
 function _lxSovAtkPose(m, key, frames) {
   if (!m || m.type !== 'towerSovereign') return;
   const _k = 'towerSovereign' + key;
