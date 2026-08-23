@@ -121,6 +121,44 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.x <span class="tag"><span class="pill bug">bug</span> Controller support: the drift, and why Sony pads did nothing</span></h2>
+<p>Steam failed the build on <b>Partial Controller Support</b>, with two symptoms: <em>&ldquo;the camera automates down and to the right throughout the whole gameplay&rdquo;</em> and <em>&ldquo;Dual Shock and Dual Sense controllers have no functionality&rdquo;</em>.</p>
+
+<div class="callout">
+  <b>The root cause is one line that was never written.</b> <code>mojiworld_game.html</code> never read <code>gamepad.mapping</code> &mdash; not once, anywhere in 8&nbsp;MB. Every button index and both movement axes were addressed as though the browser had handed us the W3C <b>standard</b> layout, and the device was chosen with &ldquo;first entry that says connected&rdquo;. That holds for an Xbox pad, which Chromium standard-maps. It is wrong for a DualShock&nbsp;4 / DualSense whenever Chromium does not (<code>mapping === ""</code>), which is the common case under the Electron wrapper and under Proton: the face buttons are rotated (cross is index&nbsp;<b>1</b>, not 0) and the D-pad is not buttons 12&ndash;15 at all but a <b>hat packed into an axis</b>. The pad&rsquo;s buttons were simply not where the code was looking.
+</div>
+
+<h3>The drift was reproduced &mdash; twice, from opposite ends of the stack</h3>
+<p>Neither symptom could be reproduced directly: there is no pad on the build machine and no Steam client. So both input paths were driven with injected fixtures instead, and both produce the reported behaviour on the pre-fix build.</p>
+<table>
+<tr><th>Path</th><th>Input</th><th>What the old build dispatched</th></tr>
+<tr><td>Browser gamepad</td><td>a device with a pinned axis</td><td><code>["arrowright", "arrowdown"]</code>, for 30 polls straight</td></tr>
+<tr><td>Steam Input</td><td>an <em>unactivated</em> action set</td><td><code>["arrowup","arrowdown","arrowleft","arrowright"]</code></td></tr>
+</table>
+<p>The second one explains the direction exactly. <code>_LX_PAD_MAP</code> is walked in index order <code>12,13,14,15</code> &mdash; up, down, left, right &mdash; and the later writes win, so &ldquo;all four at once&rdquo; resolves to <b>down and to the right</b>. That is not a camera bug at all; it is the character walking, with the camera following it.</p>
+
+<h3>Steam Input was never switched on</h3>
+<p><code>ISteamInput</code> requires <code>ActivateActionSet()</code> on a controller before <code>GetDigitalActionData()</code> means anything. <code>steam/steam_integration.js</code> <b>never called it</b>, and never even resolved the action-set handle &mdash; there was no <code>getActionSetHandle</code> call in the file. Unactivated action data is not &ldquo;all false&rdquo;; it is undefined, and the game believed it.</p>
+<p>Worse for the second symptom: the shipped Game Actions File (<code>controller_config/game_actions_4842650.vdf</code>) has always declared <code>Move</code> as <code>joystick_move</code> &mdash; <b>the primary movement binding</b> &mdash; and nothing in the codebase ever read an analog action. On the Steam Input config this game hands Steam, the stick was wired to nothing. That alone is enough to report a controller as non-functional.</p>
+
+<h3>What changed</h3>
+<ul>
+<li><b><code>_lxPadPick</code></b> &mdash; prefer a standard-mapped pad over whichever enumerates first. Steam Input can leave a virtual pad beside the physical one, and first-connected is a coin flip between them.</li>
+<li><b><code>_lxPadProfile</code> / <code>_lxPadBtn</code></b> &mdash; translate non-standard Sony devices, including decoding the D-pad hat. A resting hat sits at <b>~3.2857</b>, outside <code>[-1,1]</code>, and now reads as centred rather than as a direction held down.</li>
+<li><b><code>_lxPadAxis</code></b> &mdash; refuse any axis that has <b>never varied</b>. A value pinned since the first poll is not a player holding a stick; it is a mis-mapped axis, and it can no longer move the character. The range is seeded from the first sample, not from zero, or the very device this rejects would score as having &ldquo;moved&rdquo; a full unit.</li>
+<li><b>Contradiction gate</b> &mdash; a snapshot claiming both <code>moveLeft</code> and <code>moveRight</code> is describing something no stick can do. The directional half is dropped; the buttons are kept.</li>
+<li><b>Steam bridge</b> &mdash; resolve and activate <code>InGameControls</code> on every snapshot (Steam reverts to the default set on overlay close, reconnect and layout change); require <code>active</code> before believing <code>state</code>; accept both the <code>{state, active}</code> and SDK <code>{bState, bActive}</code> spellings; and return <code>null</code> rather than half-trusted data, which hands the renderer back to the raw gamepad path.</li>
+<li><b>Analog <code>Move</code></b> is read at last, with the sign convention in a named constant (<code>_LX_STEAM_MOVE_Y_UP</code>): Steam&rsquo;s joystick reports <b>+Y as up</b>, a browser gamepad axis reports <b>+Y as down</b>.</li>
+</ul>
+
+<h3>What the tests do and do not prove</h3>
+<p><code>scripts/steam_controller_test.mjs</code> fails <b>17/22</b> on the pre-fix build and passes 22/22 after; <code>scripts/steam_input_test.mjs</code> fails <b>7/10</b> and passes 10/10. They inject the device shapes a browser reports and mock <code>steamworks.js</code> at <code>require()</code> time. That proves the input layer handles every documented layout and refuses to walk the player on a dead axis. It does <b>not</b> prove what the reviewer had plugged in, and it cannot: <b>this needs one pass on a real DualSense before resubmission.</b></p>
+<div class="callout">
+  <b>A harness bug worth recording.</b> The first version of the controller test watched for <code>'ArrowRight'</code>. The dispatch is lowercase <code>'arrowright'</code>, so the filter matched <em>nothing</em> and every &ldquo;no movement was dispatched&rdquo; assertion was vacuously true &mdash; green on a build that drifts. A deliberate <b>positive control</b> (&ldquo;a deflected stick MUST move the player&rdquo;) is what caught it. The key set is now read from the game&rsquo;s own <code>_lxPadResolveKey</code> instead of being guessed.
+</div>
+
+
+
 <h2>v0.30.149 <span class="tag"><span class="pill polish">polish</span> Map entry stops stuttering &mdash; the edge-feather probe is precomputed</span></h2>
 <p>Per user: <em>run another loop that helps reduce the lag even more.</em></p>
 
