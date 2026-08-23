@@ -150,15 +150,20 @@ const TARGETS = {
   // fight it, so this target overrides the style entirely and matches the
   // Doombringer's own crimson palette (#cc3344 / #ff4455) rather than the Sage
   // meteor's orange, so the two homing ults never read as the same skill.
+  // Roll 2, per user "Regenerate": roll 1 read as a competent but generic red
+  // fireball. This one leans harder on what makes it the DOOMBRINGER's — more
+  // charred black in the rim, a harder smaller white core, and a longer more
+  // violent tail — so it is menacing rather than merely hot.
   p_doom_fireball: {
     out: 'Sprites/projectiles/p_doom_fireball.webp',
     size: [640, 640],
     ar: 'ar_1_1',
-    prompt: 'A hurtling ball of dark crimson hellfire seen from the side, travelling to the RIGHT: a searing '
-      + 'white-hot core at the leading right edge, wrapped in layered crimson and blood-red flame, ringed by a '
-      + 'jagged corona of near-black charred flame licks, with a long tapering tail of red fire and dark smoke '
-      + 'streaming BACKWARD to the left. A few bright embers and one thin ring of shockwave light around the core. '
-      + 'The fireball fills the frame and drives right.',
+    prompt: 'A hurtling sphere of cursed black-and-crimson hellfire seen from the side, travelling to the RIGHT: '
+      + 'a small hard searing WHITE core at the leading right edge throwing a bright horizontal lance of light, '
+      + 'wrapped in tight layered blood-red flame that darkens outward to charred black, the whole ball ringed by '
+      + 'a violent jagged corona of near-BLACK flame licks and torn soot, and a long violent tail of dark red fire '
+      + 'and black smoke whipping BACKWARD to the left in ragged forked tongues. Thin ring of shockwave light '
+      + 'around the core, a scatter of white-hot embers. Menacing and heavy, more black than red at the rim.',
     style: ' Painterly 2D game VFX sprite in the style of an action RPG skill effect: ONE fireball centred in '
       + 'frame and aimed RIGHT, rendered as glowing light and flame with NO outline and NO cel-shaded cartoon '
       + 'edges, a blown-out white core falling off through hot crimson to deep blood red and finally to charred '
@@ -191,15 +196,35 @@ const TARGETS = {
   // pink petals; far too intricate to resolve at the ~14 px it is drawn at.
   mblightseed: {
     out: 'Sprites/projectiles/mblightseed.webp',
-    // Roll 1 came back as a plain olive bean: the blight crack and the tendrils
-    // were both listed AFTER the seed and the model kept only the seed, so the
-    // Blight Elder identity was gone. Readability was fixed and character lost.
-    // The glowing crack now LEADS the description and the tendrils are given a
-    // shape and a count instead of an adjective.
-    prompt: 'A cracked corrupted seed pod split by glowing blight: a jagged BRIGHT ACID-GREEN glowing crack runs '
-      + 'down the middle of the pod like lava through rock, throwing off a green glow, and the pod around it is a '
-      + 'hard dark olive-brown husk. THREE thick black curling tendrils, each as fat as a finger, hook out from the '
-      + 'top and sides of the pod and curl over it. Only a few large shapes, no fine detail, no smoke, no petals.',
+    // Third roll. Roll 1 was a plain olive bean — crack and tendrils listed
+    // after the seed, model kept only the seed, character lost. Roll 2 restored
+    // both and lost something worse: VALUE. A dark olive husk plus fat BLACK
+    // tendrils plus the house style's near-black outline gave three dark masses
+    // with nothing between them, so at the ~28 px this is actually blitted it
+    // read as a smudge with a green squiggle, and it would sink into the game's
+    // dark backgrounds entirely. The house references it sits beside (mspore,
+    // p_pincer) are all BRIGHT bodies that let the black outline act as an
+    // outline rather than as the subject.
+    //
+    // So this roll is written around value, not detail: the husk is pale, the
+    // tendrils are gone as black mass, and the brief says outright that the pod
+    // must be the lightest thing in frame. It spins, so the silhouette stays
+    // compact and roughly round like mspore's.
+    prompt: 'A cute round corrupted seed pod CRACKED OPEN BY GLOWING BLIGHT. The seam is the hero: a wide '
+      + 'jagged EMISSIVE crack of blazing yellow-green light splits the pod from top to bottom, glowing white-hot '
+      + 'at its centre and throwing a bright halo of light onto the husk on either side of it, like molten lava in '
+      + 'a rock. The pod itself is ONE plump pale lime-green husk, LIGHT and BRIGHT in colour like a '
+      + 'ripe green apple, with a glossy highlight on its upper left. A jagged glowing ACID-YELLOW seam splits down '
+      + 'its middle and gives off a soft light. Two short stubby dark-violet thorn hooks poke out at the top, small '
+      + 'and thin, and three tiny bright yellow-green spore motes float around it. The pod is BRIGHT and the darkest '
+      + 'thing in the picture is only its own outline.',
+    style: ' Cute chunky cartoon game sprite in the style of a chibi mobile RPG: ONE compact round object centred in '
+      + 'frame, a thick uniform near-black outline running the whole way round the silhouette, soft cel shading from '
+      + 'a single upper-left light, glossy white highlight blobs, and BRIGHT HIGH-VALUE saturated colour on the body '
+      + 'so the object reads clearly as a light shape against a dark background. Do NOT make it dark, murky, olive, '
+      + 'brown or black; no large black masses, no heavy black tendrils, no smoke, no shadow blobs. A simple bold '
+      + 'rounded silhouette that still reads at thumbnail size while spinning. Fully transparent background, no '
+      + 'ground shadow, no background scenery, no text, no border, no frame, not pixel art, not photorealistic.',
   },
   // Emberling — fire ember. Already close to house style; regenerated for the
   // outline weight and glossy cel shading the rest of the set carries.
@@ -251,6 +276,32 @@ const TARGETS = {
     prompt: 'A single chunky cosmic starburst: ONE bold eight-pointed star with thick tapering points of radiant '
       + 'gold, a warm amber core with a glossy white hot centre, and four small round sparkles tucked between the '
       + 'points. Radially symmetric so it reads while spinning fast.',
+  },
+  // The shared warrior shockwave, regenerated per user.
+  //
+  // AND RESHAPED, because the file is square and every box it is drawn into is
+  // NOT. The generic branch stretches the sprite to the projectile's w/h, and
+  // the three call sites are 46x24 (the three-way fan), 64x44 and 78x52 - a
+  // 1.5:1 to 1.9:1 landscape. A 768x768 orb squashed into 46x24 is why this
+  // reads as a flattened ball rather than a wave. Same identity - white-hot
+  // core, crimson body, jagged near-black corona, the horizontal lance streak
+  // that made the old one read as a shockwave at all - drawn WIDE this time so
+  // the boxes it actually lives in stop distorting it.
+  p_shockwave: {
+    out: 'Sprites/projectiles/p_shockwave.webp',
+    ar: 'ar_16_9',
+    size: [768, 432],
+    prompt: 'A horizontal shockwave blast tearing to the RIGHT across a wide frame: a searing white-hot core at '
+      + 'the right end firing a bright piercing lance of light straight ahead, a crescent wall of layered crimson '
+      + 'and scarlet force curving back from it, a jagged corona of near-black torn flame licks around the outer '
+      + 'edge, and the whole wave trailing off to the left in ragged streaks of red energy and dark smoke. Wider '
+      + 'than it is tall, filling the frame edge to edge horizontally, unmistakably a wave in motion and not a ball.',
+    style: ' Painterly 2D game VFX sprite in the style of an action RPG skill effect: ONE wave centred in frame '
+      + 'and aimed RIGHT, rendered as glowing light and force with NO outline and NO cel-shaded cartoon edges, a '
+      + 'blown-out white core falling off through hot crimson to deep red and to charred near-black at the jagged '
+      + 'rim, soft additive glow, a bold LANDSCAPE silhouette that still reads as a shockwave at thumbnail size. '
+      + 'Fully transparent background, no ground shadow, no background scenery, no text, no border, no frame, '
+      + 'not pixel art, not photorealistic.',
   },
 };
 
