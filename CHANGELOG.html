@@ -121,6 +121,37 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.141 <span class="tag"><span class="pill polish">polish</span> Opaque canvas &mdash; and a correction to the last report</span></h2>
+<p>Per user: <em>run another loop that helps reduce the lag even more.</em></p>
+
+<h3>First, a correction</h3>
+<p>The previous pass reported that making the canvas opaque <em>"changes 15% of pixels"</em> and dropped it as unsafe. <b>That was wrong</b>, and the reason is worth recording: it compared two screenshots of a <em>live</em> town. NPCs wander, parallax drifts, animation phase advances &mdash; the scene is not reproducible between loads, so its own nondeterminism was blamed on the change.</p>
+<p>The control that should have been run first: the <b>same build</b> screenshotted twice differs by <b>3.82%</b> &mdash; <em>more</em> than base-vs-change at 2.85%. The comparison never had the resolution to say anything at all.</p>
+<p>Re-run against a frozen frame &mdash; <code>game.paused</code>, <code>game.time</code> pinned, player and NPC positions and facings pinned, particle/fx/monster lists emptied, <code>Math.random</code> stubbed, one frame painted by hand:</p>
+<table>
+<tr><th>Comparison</th><th>differing pixels</th><th>maxDelta</th></tr>
+<tr><td>control (same build, twice)</td><td>0.01%</td><td>178</td></tr>
+<tr><td>base vs opaque canvas</td><td>0.01%</td><td>207</td></tr>
+</table>
+<p>Identical to within the control's own noise. The opaque canvas renders the same picture.</p>
+
+<h3>What it buys</h3>
+<p>A translucent canvas is blended per-pixel by the compositor against whatever sits behind it, every frame. The game paints its own background edge to edge, so that blend buys nothing &mdash; declaring the context opaque skips it.</p>
+<table>
+<tr><th>Software renderer, forest, 20 monsters (&times;3 interleaved)</th><th>median</th><th>p95</th><th>frames &gt;16.7&nbsp;ms</th></tr>
+<tr><td>before</td><td>18.63&nbsp;ms</td><td>22.6&nbsp;ms</td><td>98.7%</td></tr>
+<tr><td>after</td><td><b>17.77&nbsp;ms</b></td><td><b>21.1&nbsp;ms</b></td><td><b>86.0%</b></td></tr>
+</table>
+<p>Modest &mdash; about 5% on median, 7% on p95 &mdash; but free, and it is the <b>busy</b> maps that gain. Town shows nothing, because town already sits on the 16.7&nbsp;ms vsync floor after v0.30.135; there is no headroom left there to give back.</p>
+
+<h3>Also tried this loop, and rejected</h3>
+<ul>
+<li><code>desynchronized: true</code> &mdash; p95 went from 22&ndash;30&nbsp;ms to <b>37&ndash;43&nbsp;ms</b> across three runs, with no median benefit. Not shipped.</li>
+<li><code>imageSmoothingQuality</code> <code>'high'</code>&nbsp;&rarr;&nbsp;<code>'low'</code> &mdash; bought 19.3&nbsp;&rarr;&nbsp;18.7&nbsp;ms. The existing comment claims the cost is negligible; in software that is roughly true, so it is left alone.</li>
+</ul>
+<p>One non-finding worth recording: <b>nothing in the frame sets a composite mode on the main context at all</b> &mdash; <code>drawPlayer</code> and a whole frame both record zero <code>globalCompositeOperation</code> changes &mdash; so the "<code>destination-out</code> needs a transparent canvas" hazard that motivated the original doubt does not apply here.</p>
+
+
 <h2>v0.30.x <span class="tag"><span class="pill polish">polish</span> mhornshot is Horncap&rsquo;s horn now, not a moon sliver</span></h2>
 <p>Per user: <em>also regenerate mhornshot to suit more like the monster that uses it.</em></p>
 <p>Only one monster fires <code>mhornshot</code> &mdash; <b>Horncap</b>, a cute mushroom with a <b>red cap covered in cream polka dots</b> and <b>two ridged tan-gold horns</b> curving out of it. The projectile it threw was a smooth, featureless, pale-cream crescent. Put the two side by side and nothing connects them: no gold, no ribbing, no red. At the size the game actually draws it, it read as a <em>banana</em>.</p>
