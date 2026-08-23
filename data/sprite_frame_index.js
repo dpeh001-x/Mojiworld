@@ -615,6 +615,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "quake": 9,
    "roar": 9,
    "scale": 9,
+   "shockwave": 9,
    "splash": 9,
    "spore": 9,
    "stalactite": 9,

@@ -79,6 +79,21 @@ const TARGETS = {
       'jagged black flame licks at the rim flicker and reshape, the trailing tail of fire behind it ripples and ' +
       'whips, and embers flick off it. A continuous seamless loop that ends exactly as it began — it never shrinks, ' +
       'never burns out, never flies away.' },
+  // v0.30.x — the shared warrior shockwave crescent. The key IS the anim key:
+  // frames land as Sprites/projectiles/anim/shockwave_0..8.webp, which is what
+  // _projAnimFrame('shockwave') loads for the generic player-projectile branch
+  // (both the three-way fan and the bloodwave rider resolve to it).
+  // The engine rotates this sprite to its velocity every tick and draws it in a
+  // SQUARE box, so the frames must not translate and must not change the
+  // silhouette's proportions - only the layers inside may move.
+  shockwave: { base: 'Sprites/projectiles/p_shockwave.webp', dir: 'Sprites/projectiles/anim',
+    motion: 'Keep the crescent EXACTLY as it is drawn. Its outline must be identical in every frame: the same ' +
+      'wide open C-shape with the same gap on the left, the same sharp sawtooth spikes along the inner edge, the ' +
+      'same thick body on the right. Do NOT close the opening into a ring or a hole, do NOT round off the ' +
+      'spikes, do NOT smooth it into a swirl, do NOT rotate it, do NOT resize it, do NOT move it. The ONLY thing ' +
+      'that changes is the light on it: the pale highlight travels slowly along the thick outer edge, the deep ' +
+      'maroon shadows between the layered blades drift and breathe, and a few tiny red motes flick off the sharp ' +
+      'tips. A continuous seamless loop that ends exactly as it began.' },
 };
 
 const only = val('--only', null);
