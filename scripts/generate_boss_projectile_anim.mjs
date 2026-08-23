@@ -58,7 +58,16 @@ const PROJ = {
   // described the PREVIOUS art — a translucent blue-green wisp — but the
   // restyled sprite is a violet skull leading right with tattered tails behind
   // it, so animating to the old description would have fought the new art.
-  mghostshot: { file: 'cast/mghostshot.webp', prompt: 'a violet spectral skull cannon-shot (Spectre Cannoneer) flying to the right — the hollow eye sockets flare and dim, ectoplasm shimmers across the skull, and the tattered ghost-tails behind it ripple and flick. The skull itself stays the same size and in the same place.' },
+  // v0.30.x — points at the ROOT base, not cast/. These frames replace the
+  // LX_MOB_PROJ sprite, which is the root file; cast/mghostshot.webp is the
+  // separate muzzle ripple and animating THAT would have loaded the wrong art
+  // into the projectile loop. (It briefly did point there, while the restyled
+  // skull was mis-installed into the cast slot — see v0.30.139.)
+  mghostshot: { file: 'mghostshot.webp', prompt: 'a violet spectral skull cannon-shot (Spectre Cannoneer) flying to the right — the hollow eye sockets flare and dim, ectoplasm shimmers across the skull, and the tattered ghost-tails behind it ripple and flick. The skull itself stays the same size and in the same place.' },
+  // v0.30.x — Wrappy's thrown bandage. The blit already spins this one
+  // (LX_PROJ mode:'spin', 0.16 rad/frame), so the motion is cloth-only: baking
+  // rotation in would double up against the engine's own.
+  mwrap:      { file: 'mwrap.webp',       prompt: 'a torn strip of sandy cream mummy bandage tumbling through the air (Wrappy) — the linen ripples and flutters along its length, the frayed threads at both torn ends twitch and flick, and small puffs of dust shake loose from the folds. The ribbon keeps exactly the same coiled shape, the same size and the same position in frame — it does NOT rotate, spin, travel or unravel.' },
   mink:       { file: 'mink.png',         prompt: 'a wispy semi-transparent ink cloud (Brinekraken) — soft translucent violet-black ink billows, swirls and roils with see-through smoky edges, thin tendrils curling and dissolving outward, a few droplets dispersing. Keep it diffuse, gauzy and cloud-like rather than a solid opaque blob.' },
   mlantern:   { file: 'mlantern.png',     prompt: 'an eerie soul-flame lantern wisp (Mournshade / Tower Seer) — a ghostly blue-green flame flickers and dances, faint embers rising, a haunting glow pulsing.' },
   mtidemark:  { file: 'mtidemark.png',    prompt: 'an arcane glyph/rune projectile (Tower Hexer) — a glowing magic sigil pulses, runic symbols shimmer within, teal-violet energy crackling along the edges.' },

@@ -601,6 +601,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "msplinter": 1,
    "mtidemark": 9,
    "mvoltzap": 9,
+   "mwrap": 9,
    "octoHead": 9,
    "octoLeg": 9,
    "pincer": 9,
