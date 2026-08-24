@@ -211,7 +211,7 @@ name of skill: Prismatic Cascade, key: G
 damage calculator: ATK × ~2.0 per element × 4 elements (amplifying) — fire / ice / lightning / nature
 number of monsters: unlimited per element strike
 
-class: mage · warlock · master Necromancer
+class: mage · warlock · master Lich
 name of skill: Soul Vortex, key: G
 damage calculator: ATK × 1.40 per tick × ~225 ticks over 30 s (320 px vortex, 30 % HP drain → caster)
 number of monsters: unlimited within 320 px

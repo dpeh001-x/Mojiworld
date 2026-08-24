@@ -63,12 +63,6 @@ function baseType(key) {
   if (key.startsWith('gravitos')) return 'gravitos';
   if (key.startsWith('aetherion')) return 'aetherion';
   if (key.startsWith('legosaurus')) return 'legosaurus';
-  // The Sovereign's per-attack sets (towerSovereignswing / column / collapse /
-  // volley / drain) size from the Sovereign, exactly as the Gravitos cast sets
-  // size from Gravitos. Without this they fall through to BOX_H[key] ===
-  // undefined and gameBox() returns null, so the resizer shows them with no
-  // game height at all -- the one number the tool exists to report.
-  if (key.startsWith('towerSovereign')) return 'towerSovereign';
   return key;
 }
 // The on-screen box a frame of this set is drawn into, before calibration.

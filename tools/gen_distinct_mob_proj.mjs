@@ -32,20 +32,6 @@ const FLAT_OUTLINE = ' Minimal FLAT VECTOR game icon, one solid uniform fill col
 const FLAT_KEYS = new Set(['mbark']);
 // key (= new in-engine m.shoot id) -> prompt. Orient-mode sprites point RIGHT.
 const ITEMS = {
-  // v0.30.x (per user "regenerate mhornshot to suit more like the monster that
-  // uses it"). The shipped art was a smooth featureless pale crescent that read
-  // as a banana or a moon sliver — it had nothing of Horncap in it. Horncap is
-  // a cute mushroom with a RED cap covered in cream polka dots and two RIDGED
-  // tan-gold horns curving out of it, so the shot it fires should obviously be
-  // one of those horns: same ribbing, same gold, and a flick of the red-and-
-  // cream cap at the broken base to tie it to the creature.
-  // The horn is STRAIGHT, and that is deliberate rather than a miss. The first
-  // wording asked for one "gently curved like a bull horn"; ludo drew a straight
-  // tapered cone anyway on all three rolls, which is the better sprite -- a
-  // CURVE is precisely what made the old art read as a banana at 38px, because
-  // a crescent has no leading point to aim the eye. Asking for the straight
-  // taper outright keeps a re-roll from wandering back to the crescent.
-  mhornshot:    'A snapped-off HORN projectile pointing right -- a straight tapering tan-gold horn with clear raised ridges banded along its length like a ram horn, narrowing to a sharp pale ivory tip that leads the flight, the broken base at the back showing a small ring of cream and a fleck of red mushroom cap. Straight and dart-like, NOT curved, no crescent, no banana shape. A single inanimate horn object only. Simple, chunky, cartoon.',   // horny (Horncap)
   mquery:       'A wobbling spectral QUESTION MARK bolt projectile — a curling indigo-violet glowing question-mark glyph made of uncertain flickering ghost-light, slightly tilted as if hesitating, tiny sweat-drop sparkle beside it. Comedic, mystical, chunky cartoon.',           // young_confused_barnaby
   mossbaton:    'A spinning BONE BATON projectile — a polished ivory officer’s baton carved from a femur with knobbed ends and a thin gold band at its grip, slight motion blur arcs around it as it twirls. Simple, chunky, cartoon.',                                          // towerOssifer
   mspine:       'A venomous NEEDLE DART projectile pointing right -- one long thin tapered spike like a sea-urchin needle, banded teal and cream along its length, razor point with a tiny green venom droplet, two small comic speed-streaks behind it. A single inanimate needle object only. Simple, chunky, cartoon.',

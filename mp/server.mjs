@@ -33,11 +33,7 @@ const PORT = process.env.PORT || 8080;
 // v0.29.x — 'v' (client build stamp) rides along so peers can detect a
 // version-skewed partner and explain look mismatches instead of hiding them.
 const PRESENCE_FIELDS = ['name', 'cls', 'job', 'master', 'level', 'map', 'x', 'y', 'vx', 'vy',
-  'facing', 'hp', 'maxHp', 'mp', 'maxMp', 'anim', 'look', 'eq', 'v',
-  // v0.29.x — 'ti' = the peer's worn title, shown under their nameplate.
-  // Without it here the field is stripped off 'state' and a partner's title
-  // only lands via the slower 2.5s 'ping' carrier.
-  'ti'];
+  'facing', 'hp', 'maxHp', 'mp', 'maxMp', 'anim', 'look', 'eq', 'v'];
 const CTRL = /[\u0000-\u001f\u007f]/g;     // strip control chars (matches the in-game sanitizer)
 const STR_CAP = 48;                        // cap every relayed string presence field
 const MAX_BUFFERED = 256 * 1024;           // shed droppable (state) frames to a backed-up socket past this

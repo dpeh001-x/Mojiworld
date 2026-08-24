@@ -21,9 +21,11 @@ IMPORTANT
 ---------
 Do NOT double-click "mojiworld_game.html" directly.
 
-It will appear to work, but the browser blocks part of the
-game from loading that way and the floor and platform
-textures go missing. Always start with Mojiworld.cmd.
+It does run, but the browser blocks part of what the game
+loads that way: the world map wears a plain starfield
+instead of its painted backdrop, and the ground textures
+tile more roughly. Always start with Mojiworld.cmd - it
+serves the game properly and everything looks as intended.
 
 
 IF IT DOESN'T OPEN

@@ -295,7 +295,7 @@ Chibi anime spell-effect / weapon-strike VFX sprite for a 2D platformer game in 
 **elementalist_cascade** · *Prismatic Cascade* · `Sprites/vfx/elementalist_cascade.webp`
 > Four-element vertical cascade — fire (top) cascading into ice (upper-mid) into lightning (lower-mid) into nature green (bottom), each element seamlessly blending into the next, prismatic energy bridging them.
 
-**necromancer_harvest** · *Soul Vortex* · `Sprites/vfx/necromancer_harvest.webp`
+**lich_harvest** · *Soul Vortex* · `Sprites/vfx/lich_harvest.webp`
 > Large swirling dark-violet vortex in the centre — black-purple spiral pulling spectral souls inward, ghostly skull silhouettes spiralling toward the singularity, sickly-green life-drain energy radiating outward.
 
 **hexmaster_grandhex** · *Grand Hex* · `Sprites/vfx/hexmaster_grandhex.webp`
@@ -481,7 +481,7 @@ Workflow: prepend the **VFX master prefix** below to each skill's per-line promp
 **elementalist_cascade** · *Prismatic Cascade* (Elementalist master) — `Sprites/vfx/elementalist_cascade.webp`
 > Four-element vertical cascade — fire (top) cascading into ice (upper-mid) into lightning (lower-mid) into nature green (bottom), each element seamlessly blending into the next, prismatic energy bridging them.
 
-**necromancer_harvest** · *Soul Vortex* (Necromancer master) — `Sprites/vfx/necromancer_harvest.webp`
+**lich_harvest** · *Soul Vortex* (Lich master) — `Sprites/vfx/lich_harvest.webp`
 > Large swirling dark-violet vortex in the centre — black-purple spiral pulling spectral souls inward, ghostly skull silhouettes spiralling toward the singularity, sickly-green life-drain energy radiating outward.
 
 **hexmaster_grandhex** · *Grand Hex* (Hexmaster master) — `Sprites/vfx/hexmaster_grandhex.webp`

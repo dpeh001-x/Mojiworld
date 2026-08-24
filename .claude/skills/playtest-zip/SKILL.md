@@ -97,10 +97,19 @@ they need it for bug reports, and the README asks them to quote it.
 
 ## Facts worth not rediscovering
 
-- **`file://` is broken by design.** Opening `mojiworld_game.html` by
-  double-click taints the canvas and blocks tile loads: floors and platforms go
-  missing. The README says this twice. If a tester reports missing ground, ask
-  how they launched it before debugging anything.
+- **`file://` is degraded, not broken — and it used to be worse.** Opening
+  `mojiworld_game.html` by double-click gives the page a `null` origin, which
+  taints any canvas an image is drawn into. Two bugs came out of that and are
+  fixed: until v0.30.157 the world map threw `SecurityError` out of its
+  backdrop raster and **would not open at all**, from either the W key or the
+  Taxi; until v0.30.159 `crossOrigin='anonymous'` on the tile loader made 22 of
+  43 tile images fail outright, so floors and platforms went missing. Both now
+  detect the taint and fall back. What still costs you on `file://`: the world
+  map wears the procedural starfield instead of the painted plate, and 0 of 43
+  tiles get the seamless bake (41 do over http). So the launcher advice stands
+  — but a tester reporting missing ground on a build at or past v0.30.159 is
+  reporting something new, not this. Verify the claim before repeating it: the
+  measured numbers live in the CHANGELOG entries for those two versions.
 - **Server port is 8765**, hardcoded in `Mojiworld.cmd`. It reuses a listener
   already on that port, so a stale console window makes a new build appear not
   to update.
