@@ -9845,7 +9845,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.168';
+const GAME_VERSION = 'v0.30.169';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -78058,9 +78058,42 @@ function mirrorSelfAI(m, dt, distToPlayer) {
 // Each timer reads from dedicated per-mob fields (`_vermSprayAt`,
 // `_barnPillarsAt`, `_smithPillarsAt`) so they survive across the
 // boss/regular AI branches without re-init churn.
+// v0.30.x — BOSS WARD (per user: "having the bosses occasionally receive only
+// 1 damage for a period of time"). See the note in hitMonster for why a
+// percentage lifesteal cap could not do this job.
+//
+// game.time counts FRAMES at 60fps, matching every other boss timer in this
+// function (the Sovereign's "16 s" cadence is 960).
+const LX_BOSS_WARD_EVERY = 840;   // 14 s between wards
+const LX_BOSS_WARD_LEN   = 210;   // 3.5 s of 1-damage hits — 25% uptime
+const LX_BOSS_WARD_FIRST = 480;   // 8 s of clean opening before the first one
+function _lxBossWardTick(m) {
+  if (!m || !m.isBoss || m.currentHp <= 0) return;
+  const now = game.time | 0;
+  // The Sovereign's Regalia already IS an invulnerability beat; stacking a
+  // second "you cannot hurt me" window on top of it would read as the fight
+  // being broken rather than as a mechanic.
+  if (m._sovShielded) { m._wardNextAt = now + LX_BOSS_WARD_EVERY; return; }
+  if (m._wardNextAt == null) { m._wardNextAt = now + LX_BOSS_WARD_FIRST; return; }
+  if ((m._wardUntil | 0) > now) return;                 // already warded
+  if (now < m._wardNextAt) return;
+  m._wardUntil  = now + LX_BOSS_WARD_LEN;
+  m._wardNextAt = now + LX_BOSS_WARD_EVERY;
+  // Telegraph it. An unannounced damage floor reads as a bug — the player
+  // needs to know their hits are being refused, not that the game broke.
+  try {
+    if (game.damageNumbers) {
+      game.damageNumbers.push({ x: m.x + m.w / 2 - 30, y: m.y - 52, vy: -1.4,
+        text: 'WARDED', life: 46, color: '#7fd8ff', size: 15 });
+    }
+    if (typeof showToast === 'function') showToast('🛡 Warded — your blows glance off', 'rare');
+    if (typeof addShake === 'function') addShake(4);
+  } catch (e) {}
+}
 function _bossSpecialAttacks(m, dt) {
   if (!m || m.currentHp <= 0) return;
   const now = game.time | 0;
+  try { _lxBossWardTick(m); } catch (e) {}
 
   // v0.26.087 — Master Conductor (PQ STAGE 5 boss) specials. Two
   // bespoke patterns on top of the v0.26.080 activeBoss chase+shoot
@@ -84117,6 +84150,27 @@ function hitMonster(m, dmg, isCrit, skill) {
     // contribution is fed into the host's meter by _coopHostApplyDamage.
     _bossFillBreak(m, finalDmg);
     if (typeof _bossThreatHit === 'function') _bossThreatHit(m, finalDmg);
+  }
+  // v0.30.x — BOSS WARD: while it holds, every hit lands for exactly 1.
+  //
+  // This is the lifesteal answer (per user: "lifesteal is very broken … such as
+  // having the bosses occasionally receive only 1 damage for a period of time").
+  // The v0.30.156 cap limits healing to 7% OF DAMAGE DEALT, which bounds
+  // nothing when damage outscales health: measured at that cap, a hit worth 4x
+  // the player's own health bar still returns 134% of their max HP per second,
+  // and 10x returns 194%. A boss cannot out-damage that. Refusing the damage
+  // breaks the proportionality instead of shaving it — 7% of 1 floors to zero,
+  // so the sustain loop stops for the window without changing one lifesteal
+  // number, and without touching builds that never stacked it.
+  //
+  // Sits here on purpose: after every attacker multiplier and the DEF curve, so
+  // nothing scales the 1 back up; before the co-op forward, so a guest's
+  // predicted damage and the host's authoritative write agree; and before
+  // _msApplyOnHit, which is where the ult-window lifesteal reads its damage.
+  // 'thorns' is exempt — it is the player's own retaliation, not an attack the
+  // ward is being raised against.
+  if (m.isBoss && (m._wardUntil | 0) > (game.time | 0) && skill !== 'thorns') {
+    finalDmg = 1;
   }
   // v0.27.0 co-op forward — a NON-HOST is not authoritative over shared monsters.
   // finalDmg is now FULLY resolved (every attacker multiplier + DEF above), so
