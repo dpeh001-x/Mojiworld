@@ -9845,7 +9845,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.182';
+const GAME_VERSION = 'v0.30.181';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11018,9 +11018,6 @@ const LX_MOB_PROJ = (() => {
     // `else` of `if (p.owner === 'player')`, so the player's own fireball is
     // untouched by this entry.
     fire:         'm_ariesember.webp',   // Ariel's ember mote — small blazing ball (ludo.ai)
-    // v0.30.x — Virga's Starburst lance. Her own art rather than a borrowed
-    // bolt: the burst has to read as the same spell as her light pillars.
-    radiantLance: 'p_virga_lance.webp',  // Virga seraph light-lance (8-way starburst)
     zodiac:       'p_zodiacbolt.webp',   // Aries fiery cosmic ram-bolt
     zodiacHoming: 'p_zodiacbolt.webp',   // Aries homing variant — reuses the ram-bolt
     scale:        'p_scale.webp',        // Libra balance-scale energy
@@ -11114,7 +11111,6 @@ const _PROJ_SPRITE_BLIT = {
   mforgespark: { mode: 'spin',   size: 0.5, spinRate: 0.20 },   // forge ember — tumbles fast
   forgeHammer: { mode: 'spin',   size: 0.5, spinRate: 0.30 },   // v0.26.503 — Sundered Smith boomerang hammer (spins as it flies/returns)
   mholybeam:   { mode: 'orient', size: 0.5 },                   // holy beam — large oriented arrow
-  radiantLance:{ mode: 'orient', size: 0.5 },                   // v0.30.x — Virga starburst lance; points along its own velocity
   mghostshot:  { mode: 'orient', size: 0.5 },                   // ghost shot — leading edge
   mhornshot:   { mode: 'orient', size: 0.5 },                   // horn — pointed projectile
   mstinger:    { mode: 'orient', size: 0.5 },                   // bee stinger — small + pointed
@@ -76517,14 +76513,20 @@ function updateMonsters(dt) {
       m.burnTimer -= dt;
       // v0.26.x — clear the DOT flavor (icon/tint kind) the moment the
       // timer runs out, so a later plain burn can't inherit poison green.
-      if (m.burnTimer <= 0) { m._dotKind = null; m._poisonGrandHex = false; m.burnDmg = 0; }   // v0.26.1026 — clear burnDmg on expiry so a later plain burn can't inherit a stranded value via Math.max
+      if (m.burnTimer <= 0) { m._dotKind = null; m._poisonGrandHex = false; m.burnDmg = 0; m._burnTickAcc = 0; m._burnStack = 0; }   // v0.30.x — reset the tick accumulator too, so a later burn starts a fresh interval   // v0.26.1026 — clear burnDmg on expiry so a later plain burn can't inherit a stranded value via Math.max
       // v0.25.557 — burn tick rate 30 frames → 60 frames (1 s).
       // v0.25.591 — rate halved again 60 → 120 frames (2 s) per user spec.
       // Per-tick damage now 2× m.burnDmg so total burn DPS is preserved.
       // Cleaner readability: half as many damage numbers fly off the
       // mob during a burn, each one twice as big — easier to read in
       // crowded fights, no DPS regression.
-      if (m.animTimer % 120 < dt) {
+      // v0.30.x — a real accumulator, not a modulo on a millisecond counter.
+      // The old gate also fired on EVERY frame whose animTimer landed inside a
+      // dt-wide window, so its rate depended on how dt divided into 120; an
+      // accumulator ticks exactly once per interval whatever the step is.
+      m._burnTickAcc = (m._burnTickAcc || 0) + dt;
+      if (m._burnTickAcc >= LX_BURN_TICK_MS) {
+        m._burnTickAcc -= LX_BURN_TICK_MS;
         if ((game._burnTickedThisFrame | 0) < MAX_BURNING) {
           game._burnTickedThisFrame = (game._burnTickedThisFrame | 0) + 1;
           // v0.25.592 — defensive `|| 1` on burnDmg. All current burn
@@ -76532,11 +76534,33 @@ function updateMonsters(dt) {
           // a future code path ever sets burnTimer without burnDmg,
           // `undefined * 2` becomes NaN which then propagates into
           // m.currentHp. Default to 1 so the floor of 1 still applies.
-          const tickDmg = Math.max(1, Math.floor((m.burnDmg || 1) * 2));
+          // v0.30.x — capped at LX_BURN_TICK_MAXHP_PCT of the target's own max
+          // HP. Burn is ATK-derived and DEF-blind, so without a ceiling a
+          // geared player's DOT deletes a trash mob in one tick while barely
+          // scratching a boss. The cap only ever binds on the low-HP end,
+          // which is exactly the case that read as broken.
+          const _burnSec = LX_BURN_TICK_MS / 1000;
+          const _burnCap = Math.max(1, Math.floor((m.maxHp || 1) * LX_BURN_MAXHP_PCT_PER_SEC * _burnSec));
+          const tickDmg = Math.min(_burnCap, Math.max(1, Math.floor((m.burnDmg || 1) * LX_BURN_DPS_MUL * _burnSec)));
+          // v0.30.x — STACKING TICK VISUAL (per user: "should have a visual
+          // stacking damage effect"). Consecutive ticks on the same target
+          // used to spawn their number at the same spot, so a fast DOT just
+          // looked like one number flickering. Each tick now ladders upward
+          // from the last and rides a rising intensity, so a burn that has
+          // been running reads hotter than one that just landed. The ladder
+          // wraps every 5 so it cannot climb off the top of the screen, and
+          // the ramp caps so a long burn does not end up shouting.
+          m._burnStack = (m._burnStack || 0) + 1;
+          const _bStep = (m._burnStack - 1) % 5;
+          const _bRamp = Math.min(1, (m._burnStack - 1) / 6);
           m.currentHp -= tickDmg;
           game.damageNumbers.push({
-            x: m.x + m.w/2, y: m.y - 5, vy: -1,
-            text: tickDmg, life: 26, color: (m._dotKind === 'poison' || m._poisonGrandHex) ? '#88ff44' : '#ff6622', size: 11
+            x: m.x + m.w/2 + (_bStep - 2) * 7, y: m.y - 5 - _bStep * 9, vy: -1,
+            text: tickDmg, life: 26 + Math.round(_bRamp * 10),
+            color: (m._dotKind === 'poison' || m._poisonGrandHex)
+              ? (_bRamp > 0.5 ? '#ccff66' : '#88ff44')
+              : (_bRamp > 0.5 ? '#ffaa33' : '#ff6622'),
+            size: 11 + Math.round(_bRamp * 4)
           });
           // v0.25.585 — bug fix. Was `killMonster(m); continue;`, but
           // killMonster splices the dead monster out of game.monsters
@@ -87850,8 +87874,7 @@ function updateProjectiles(dt) {
         // Magic-type projectiles use magic defense
         const isMagic = p.skill === 'bolt' || p.skill === 'fire' || p.skill === 'ice' ||
                         p.skill === 'lightning' || p.skill === 'void' || p.skill === 'shard' ||
-                        p.skill === 'voidbeam' || p.skill === 'gravbolt' || p.skill === 'spore' || p.skill === 'mdark' ||
-                        p.skill === 'radiantLance';   // v0.30.x — Virga's starburst is holy light, so it tests MDEF (her pillars stay physical)   // v0.29.283 — gravbolt keeps voidbeam's magic typing
+                        p.skill === 'voidbeam' || p.skill === 'gravbolt' || p.skill === 'spore' || p.skill === 'mdark';   // v0.29.283 — gravbolt keeps voidbeam's magic typing
         // v0.26.330 — Per user "Gravitos damage should be much higher
         // with ignore defence occasionally". New `p._ignoreDef` flag
         // on projectile spawns bypasses the standard def subtraction
@@ -89433,6 +89456,39 @@ const MAX_SMOOTH_FX    = _IS_MOBILE_AT_LOAD ? 9   : 14;
 const MAX_PLAYER_PROJECTILES = _IS_MOBILE_AT_LOAD ? 60 : 120;
 const MAX_MINIONS            = _IS_MOBILE_AT_LOAD ? 6  : 10;
 const MAX_BURNING            = _IS_MOBILE_AT_LOAD ? 12 : 24;
+// v0.30.x — BURN WAS TICKING 16.7x TOO OFTEN (per user: "burn or DOT damage
+// ... anything that takes damage from burn dies insanely fast").
+//
+// The gate was `if (m.animTimer % 120 < dt)`, and its comments read "burn tick
+// rate 30 frames -> 60 frames (1 s)" then "60 -> 120 frames (2 s)". animTimer
+// does not count frames. It accumulates MILLISECONDS -- `m.animTimer += dt`
+// with dt = _LX_SIM_STEP_MS (16.667). So "% 120" is 120 MILLISECONDS, and the
+// tick the author believed fired every 2 s fired every 0.12 s.
+//
+// Worse, the per-tick damage had been DOUBLED specifically to compensate for
+// the rate being (supposedly) halved, so the error compounds: intended DPS is
+// burnDmg/second, actual was ~16.7x that. Measured before the fix, a 2956 HP
+// mob died to burn alone in 13.5 s at 28 damage a tick -- about 105 ticks,
+// i.e. one every ~129 ms.
+// v0.30.x — per user: "Burn should be every 800ms instead". The rate is now a
+// PRESENTATION knob only: per-tick damage and the cap are both derived from
+// it below, so moving this number changes how often numbers fly off a burning
+// mob and changes nothing about how fast it dies. That property is the whole
+// reason this bug was possible -- the previous author changed the rate and
+// hand-compensated the damage, and the two drifted apart.
+const LX_BURN_TICK_MS = 800;
+// Damage per SECOND, in units of burnDmg. 1.0 keeps the documented intent
+// ("burnDmg per second"); per-tick damage is this scaled by the interval.
+const LX_BURN_DPS_MUL = 1.0;
+// A ceiling as a share of the TARGET's own max HP PER SECOND, mirroring the
+// cap the player already has on incoming burn (3.5% per 1 s tick). Monster
+// burn had no damage cap at all, and it subtracts from currentHp directly --
+// it never passes through hitMonster, so DEF and every resistance are
+// bypassed. That is fine for a flat chip effect and ruinous once burnDmg
+// scales with a geared player's ATK. 3%/s sits just under the player's own
+// 3.5%/s, so the two sides finally read the same. Expressed per SECOND, not
+// per tick, so it survives another cadence change.
+const LX_BURN_MAXHP_PCT_PER_SEC = 0.03;
 // v0.26.129 — Per user "reduce lags as much as possible especially with
 // boss fights and monster battles". Enemy projectiles were uncapped
 // pre-v0.26.129 — multi-boss arenas (Trinity, all-zodiac, Master
@@ -125273,101 +125329,12 @@ const ZODIAC_AI = {
     m.vy = Math.sin(game.time * 0.03) * 0.6;
     m.vx += dir * 0.04;
     if (Math.abs(m.vx) > 1.4) m.vx = Math.sign(m.vx) * 1.4;
-    // v0.30.x - STARBURST.
-    const _sbEvery = phase === 1 ? 13000 : phase === 2 ? 10500 : 8400;
-    const _SB_CLIMB = 900, _SB_AIM = 950, _SB_GAP = 380, _SB_WAVES = 3, _SB_TAIL = 520;
-    const _sbFireAt = _SB_CLIMB + _SB_AIM;
-    if (m._sbCd == null) m._sbCd = _sbEvery * 0.8;
-    if (!m._sbPhase) m._sbCd -= dt;
-    if (!m._sbPhase && m._sbCd <= 0 && !(m._virgoChannel > 0) && !m._virgoExecuteFiring) {
-      m._sbPhase = 1; m._sbT = 0; m._sbWave = 0;
-      // Where to come back down to. If she is already soaring, her soar
-      // captured the real ground y and m.y is 200px above it - landing on m.y
-      // would strand her in the air a little higher after every starburst.
-      m._sbGroundY = (m._zFlying && m._zFlyGroundY != null) ? m._zFlyGroundY : m.y;
-      m._sbFromX = m.x; m._sbFromY = m.y;
-      m._zFlying = false; m._zFlyCd = _sbEvery;   // the ordinary soar stands down
-      m._noGravity = true; m.onGround = false;
-      if (typeof showToast === 'function') showToast('⚜ Virga ascends — STARBURST! Find the gap between the rays.', 'legendary');
-      if (typeof flash === 'function') flash(0.34);
-      if (typeof addShake === 'function') addShake(8);
-    }
-    if (m._sbPhase) {
-      m._sbT += dt;
-      m.vx = 0; m.vy = 0;
-      m._zFlying = true;            // airborne: the flight loop is the honest art
-      const _sbEase = (t) => t * t * (3 - 2 * t);
-      const _sbCamX = (game.camera ? game.camera.x : 0), _sbCamY = (game.camera && game.camera.y) || 0;
-      const _sbTx = _sbCamX + W / 2 - m.w / 2;
-      const _sbTy = _sbCamY + H * 0.38 - m.h / 2;
-      const _sbCx = m.x + m.w / 2, _sbCy = m.y + m.h / 2;
-      // Her pillars stand down for the duration - the starburst has to be
-      // readable, and two overlapping telegraphs is not a difficulty knob.
-      if (m._columnCd < 1400) m._columnCd = 1400;
-      if (m._sbT < _SB_CLIMB) {
-        const _k = _sbEase(m._sbT / _SB_CLIMB);
-        m.x = m._sbFromX + (_sbTx - m._sbFromX) * _k;
-        m.y = m._sbFromY + (_sbTy - m._sbFromY) * _k;
-      } else if (m._sbT < _sbFireAt) {
-        // AIM - hold dead centre and draw the eight rays as growing spokes, so
-        // the wedges are visible for the best part of a second before anything
-        // is fired.
-        m.x = _sbTx; m.y = _sbTy + Math.sin(game.time * 0.09) * 5;
-        const _ai = (m._sbT - _SB_CLIMB) / _SB_AIM;
-        if (game.time % 2 === 0 && typeof _budgetedParticlePush === 'function') {
-          for (let _si = 0; _si < 8; _si++) {
-            const _sa = (_si / 8) * Math.PI * 2;
-            const _sr = 40 + _ai * 250 * (0.55 + Math.random() * 0.45);
-            if (!_budgetedParticlePush({
-              x: _sbCx + Math.cos(_sa) * _sr, y: _sbCy + Math.sin(_sa) * _sr,
-              vx: Math.cos(_sa) * 1.4, vy: Math.sin(_sa) * 1.4,
-              life: 12 + Math.floor(_ai * 8), color: '#ffeecc', size: 1.5 + _ai * 2.5,
-            })) break;
-          }
-        }
-      } else {
-        m.x = _sbTx; m.y = _sbTy + Math.sin(game.time * 0.09) * 5;
-        const _wave = Math.floor((m._sbT - _sbFireAt) / _SB_GAP);
-        if (_wave < _SB_WAVES && _wave >= m._sbWave) {
-          m._sbWave = _wave + 1;
-          const _sbDmg = Math.max(8, Math.floor(m.atk * 1.15));
-          // The waves evenly SUBDIVIDE one wedge (0, 15, 30 degrees for three),
-          // rather than stepping by a fixed half-wedge. Half a wedge looks
-          // right and is not: 8 rays are 45 degrees apart, so a 22.5 step puts
-          // the third wave back on the first wave's rays exactly — measured,
-          // the burst fired 0, 22.5, 0 and the last wave was a repeat.
-          const _sbOff = (_wave / _SB_WAVES) * (Math.PI / 4);
-          for (let _si = 0; _si < 8; _si++) {
-            const _sa = (_si / 8) * Math.PI * 2 + _sbOff;
-            game.projectiles.push({
-              x: _sbCx - 13, y: _sbCy - 13,
-              vx: Math.cos(_sa) * 6.2, vy: Math.sin(_sa) * 6.2,
-              w: 26, h: 26, life: 160,
-              damage: _sbDmg, owner: 'enemy', skill: 'radiantLance',
-              noGravity: true, color: '#ffeecc',
-              _defPierce: (typeof _defPierceMul === 'function') ? _defPierceMul(m) : 1,
-              _sourceLabel: 'Virga — Starburst',
-              _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null,
-            });
-          }
-          if (typeof addShake === 'function') addShake(9);
-          if (typeof flash === 'function') flash(0.16);
-        }
-        if (m._sbT > _sbFireAt + _SB_GAP * _SB_WAVES + _SB_TAIL) {
-          // Settle back to the height she started from and hand control back.
-          m._sbPhase = 0; m._sbWave = 0;
-          m.y = m._sbGroundY;
-          m._noGravity = false; m._zFlying = false;
-          m._sbCd = _sbEvery;
-        }
-      }
-    }
     // v0.30.x - FLIGHT MODE.
     const _vFlyEvery = phase === 1 ? 9200 : phase === 2 ? 7200 : 5400;
     const _V_RISE = 720, _V_HOLD = 5400, _V_FALL = 900, _V_ALT = 200;
     if (m._zFlyCd == null) m._zFlyCd = _vFlyEvery * 0.55;
     if (!m._zFlying) m._zFlyCd -= dt;
-    if (!m._zFlying && !m._sbPhase && m._zFlyCd <= 0 && !(m._virgoChannel > 0) && !m._virgoExecuteFiring) {
+    if (!m._zFlying && m._zFlyCd <= 0 && !(m._virgoChannel > 0) && !m._virgoExecuteFiring) {
       m._zFlying = true; m._zFlyT = 0;
       m._zFlyGroundY = m.y;
       m._noGravity = true;          // physics block honors this
@@ -125375,7 +125342,7 @@ const ZODIAC_AI = {
       if (typeof showToast === 'function') showToast('Virga takes wing — the sky is hers.', 'epic');
       if (typeof addShake === 'function') addShake(7);
     }
-    if (m._zFlying && !m._sbPhase) {
+    if (m._zFlying) {
       m._zFlyT += dt;
       m.vy = 0;
       const _vEase = (t) => t * t * (3 - 2 * t);
