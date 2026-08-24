@@ -1,0 +1,178 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Skill Tuner — cooldown &amp; MP</title>
+<!-- reads mojiworld_game.html from the repo root; tools/ pages need this -->
+<base href="../">
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; background:#0f0a1e; color:#e8e2f4;
+         font:13px/1.5 "Segoe UI",system-ui,sans-serif; }
+  header { padding:14px 18px; background:linear-gradient(160deg,#2a1848,#160d2c);
+           border-bottom:1px solid #3d2a66; position:sticky; top:0; z-index:5; }
+  h1 { margin:0 0 4px; font-size:18px; color:#ffd970; letter-spacing:.5px; }
+  .sub { color:#a99cc4; font-size:12px; }
+  .bar { display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap; }
+  input,select,button { background:#1d1236; color:#e8e2f4; border:1px solid #46306f;
+                        border-radius:6px; padding:5px 8px; font:inherit; }
+  input[type=number] { width:80px; text-align:right; }
+  button { cursor:pointer; background:#3a2266; }
+  button:hover { background:#4d2e86; }
+  button.primary { background:#6b4bb8; border-color:#8a6ad6; font-weight:600; }
+  #wrap { padding:0 18px 60px; }
+  table { border-collapse:collapse; width:100%; margin-top:12px; }
+  th,td { padding:5px 8px; border-bottom:1px solid #2a1c4a; text-align:left; white-space:nowrap; }
+  th { position:sticky; top:96px; background:#1a1030; color:#c9b8ee; font-size:11px;
+       text-transform:uppercase; letter-spacing:.6px; z-index:4; }
+  tr:hover td { background:#191033; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .tier-master { color:#ffd970; }
+  .tier-job { color:#8fd6ff; }
+  .tier-base { color:#9aa; }
+  .changed input { border-color:#ffd970; background:#2a2110; }
+  .dim { color:#8b7fae; }
+  .note { margin:10px 0 0; padding:10px 12px; background:#1b1233; border-left:3px solid #6b4bb8;
+          border-radius:0 6px 6px 0; color:#c4b8e0; max-width:1000px; }
+  .note b { color:#ffd970; }
+  #count { color:#a99cc4; }
+  #out { width:100%; height:150px; margin-top:12px; background:#120c24; color:#b9ffd0;
+         border:1px solid #2f4a3a; border-radius:8px; padding:10px;
+         font:12px/1.45 ui-monospace,Consolas,monospace; display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Skill Tuner</h1>
+  <div class="sub">Edit <b>cooldown</b> and <b>MP</b> for any skill, then copy the patch and bake it.</div>
+  <div class="bar">
+    <input id="q" placeholder="filter by name, class, job, master…" style="width:260px">
+    <select id="tier">
+      <option value="">all tiers</option>
+      <option value="master">2nd advancement (master)</option>
+      <option value="job">1st advancement (job)</option>
+      <option value="base">base</option>
+    </select>
+    <select id="slot"><option value="">all slots</option></select>
+    <span id="count"></span>
+    <span style="flex:1"></span>
+    <button id="reset">Reset edits</button>
+    <button class="primary" id="copy">📋 Copy patch</button>
+  </div>
+</header>
+<div id="wrap">
+  <div class="note">
+    <b>Cooldown and MP are real per-skill fields</b>, so what you type here is exactly what the game
+    will use. <b>Damage is not a field</b> — each skill computes its own numbers inside its function,
+    at different times and through different paths, so there is no single number to edit. A universal
+    multiplier was tried and measured: it moved the necromancer's vortex <b>6.3×</b> for a requested 2×
+    and the sage's columns <b>1.04×</b>, so it was discarded rather than shipped. To change a skill's
+    damage, edit the constant in its own <code>SKILL_FNS</code> entry.
+  </div>
+  <textarea id="out" readonly></textarea>
+  <table><thead><tr>
+    <th>skill</th><th>class</th><th>tier</th><th>slot</th>
+    <th style="text-align:right">cooldown (s)</th>
+    <th style="text-align:right">MP</th>
+    <th>description</th>
+  </tr></thead><tbody id="rows"></tbody></table>
+</div>
+<script>
+const rows = [];
+const edits = {};
+
+function tierOf(s) { return s.master ? 'master' : (s.job ? 'job' : 'base'); }
+
+function parseSkills(src) {
+  const lines = src.split('\n');
+  const start = lines.findIndex(l => /^const SKILLS = \{/.test(l));
+  if (start < 0) return [];
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) if (/^\};/.test(lines[i])) { end = i; break; }
+  const out = [];
+  for (let i = start; i <= end; i++) {
+    const L = lines[i];
+    const id = (L.match(/^\s{2}([A-Za-z_0-9]+)\s*:\s*\{/) || [])[1];
+    if (!id) continue;
+    const str = k => { const m = L.match(new RegExp(k + ":\\s*'((?:[^'\\\\]|\\\\.)*)'")); return m ? m[1].replace(/\\'/g, "'") : ''; };
+    const num = k => { const m = L.match(new RegExp(k + ':\\s*(\\d+)')); return m ? +m[1] : null; };
+    if (num('cd') === null && num('mp') === null) continue;   // not a castable entry
+    out.push({ id, name: str('name'), cls: str('cls'), job: str('job'), master: str('master'),
+               slot: str('slot'), mp: num('mp'), cd: num('cd'), desc: str('desc') });
+  }
+  return out;
+}
+
+function render() {
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  const tf = document.getElementById('tier').value;
+  const sf = document.getElementById('slot').value;
+  const tb = document.getElementById('rows');
+  tb.innerHTML = '';
+  let shown = 0;
+  for (const s of rows) {
+    const tier = tierOf(s);
+    if (tf && tier !== tf) continue;
+    if (sf && (s.slot || '') !== sf) continue;
+    if (q && ![s.name, s.id, s.cls, s.job, s.master].join(' ').toLowerCase().includes(q)) continue;
+    shown++;
+    const e = edits[s.id] || {};
+    const tr = document.createElement('tr');
+    if (e.cd !== undefined || e.mp !== undefined) tr.className = 'changed';
+    tr.innerHTML =
+      '<td>' + s.name + ' <span class="dim">' + s.id + '</span></td>' +
+      '<td>' + s.cls + (s.master ? ' <span class="dim">' + s.master + '</span>'
+                     : s.job ? ' <span class="dim">' + s.job + '</span>' : '') + '</td>' +
+      '<td class="tier-' + tier + '">' + tier + '</td>' +
+      '<td>' + (s.slot || '') + '</td>' +
+      '<td class="num"><input type="number" step="0.5" min="0" data-id="' + s.id + '" data-f="cd" value="' +
+        ((e.cd !== undefined ? e.cd : s.cd) / 1000) + '"></td>' +
+      '<td class="num"><input type="number" step="1" min="0" data-id="' + s.id + '" data-f="mp" value="' +
+        (e.mp !== undefined ? e.mp : s.mp) + '"></td>' +
+      '<td class="dim">' + (s.desc || '').slice(0, 90) + '</td>';
+    tb.appendChild(tr);
+  }
+  document.getElementById('count').textContent = shown + ' of ' + rows.length + ' skills · ' +
+    Object.keys(edits).length + ' edited';
+}
+
+document.addEventListener('input', ev => {
+  const el = ev.target;
+  if (el.tagName !== 'INPUT' || !el.dataset.id) { render(); return; }
+  const s = rows.find(r => r.id === el.dataset.id);
+  const f = el.dataset.f;
+  const v = f === 'cd' ? Math.round(parseFloat(el.value) * 1000) : Math.round(parseFloat(el.value));
+  if (!isFinite(v)) return;
+  edits[s.id] = edits[s.id] || {};
+  if (v === s[f]) { delete edits[s.id][f]; if (!Object.keys(edits[s.id]).length) delete edits[s.id]; }
+  else edits[s.id][f] = v;
+  document.getElementById('count').textContent =
+    document.getElementById('count').textContent.replace(/\d+ edited/, Object.keys(edits).length + ' edited');
+  el.closest('tr').className = edits[s.id] ? 'changed' : '';
+});
+document.getElementById('tier').onchange = render;
+document.getElementById('slot').onchange = render;
+document.getElementById('reset').onclick = () => { for (const k in edits) delete edits[k]; render(); };
+document.getElementById('copy').onclick = async () => {
+  if (!Object.keys(edits).length) { alert('No edits yet.'); return; }
+  const patch = 'LX_SKILL_PATCH:1 ' + JSON.stringify(edits);
+  const out = document.getElementById('out');
+  out.style.display = 'block';
+  out.value = patch + '\n\nBake it with:\n  node scripts/apply_skill_patch.mjs \'' + patch + '\'';
+  try { await navigator.clipboard.writeText(patch); } catch (e) {}
+  out.select();
+};
+
+fetch('mojiworld_game.html').then(r => r.text()).then(src => {
+  rows.push(...parseSkills(src));
+  const slots = [...new Set(rows.map(r => r.slot).filter(Boolean))].sort();
+  const sel = document.getElementById('slot');
+  for (const s of slots) { const o = document.createElement('option'); o.value = o.textContent = s; sel.appendChild(o); }
+  render();
+}).catch(e => {
+  document.getElementById('rows').innerHTML =
+    '<tr><td colspan="7">Could not read mojiworld_game.html — serve the repo over http (Mojiworld.cmd) rather than opening this file directly. ' + e + '</td></tr>';
+});
+</script>
+</body>
+</html>
