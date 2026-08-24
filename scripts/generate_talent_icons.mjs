@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Job-talent icons (ludo.ai) — the 27 JOB_TALENTS picks, 3 per advanced job.
+// Talent icons (ludo.ai) — the 27 JOB_TALENTS picks (3 per advanced job) and
+// the 39 MASTER_TALENTS picks (3 per master class).
 // Output -> Sprites/talents/<id>.webp (256, lossless). Wired via _talentIconHtml().
 //   node scripts/generate_talent_icons.mjs                 # dry-run, lists ids
 //   node scripts/generate_talent_icons.mjs --generate      # all (skip-existing)
@@ -119,6 +120,88 @@ const TALENT = {
   // confused with lifewall, the other heart icon, which is glossy red on steel.
   wildheart:  'a single large heart carved from dark weathered wood and bark, thick green moss and small leaves growing across its surface and short antler branches curling up from its top, a warm red inner light glowing out through the cracks in the bark',
   huntsmark:  'a fletched hunting arrow at a steep diagonal with a glowing emerald rune-mark blazing on its shaft, a soft tracking glow around the tip',
+
+  // ---- MASTER TALENTS (2nd advancement) --------------------------------
+  // Same house style and the same effect-first phrasing as the job tier above.
+  // warlord
+  m_warbanner:  'a tall war banner on a spear driven into the ground, a fierce red-orange power surge blazing upward along the pole and the cloth streaming hard in it, bright attack sparks flying off the top',
+  m_ironhorn:   'a huge curved iron war-horn banded in dark steel with a hard blue-white guard barrier shimmering across its bell like plate armour',
+  m_warsong:    'a golden brass trumpet with warm green-gold restorative motes spiralling out of its bell and curling back inward into the metal, the whole horn lit by a soft healing glow',
+  // deathknight
+  m_calamity:   'a violent violet shockwave blast bursting outward, a black skull-pommel greatsword silhouetted at its centre, cracked purple energy splitting the air',
+  m_deathward:  'a dark rune-carved obsidian heart-amulet swelling with a deep red vitality light pouring out through its engraved runes',
+  m_reaping:    'a curved scythe blade at a steep angle with one brilliant white critical spark flashing at its very tip, thin speed arcs trailing the edge',
+  // templar
+  m_bastion:    'a fortress-shaped tower shield with crenellated battlements along its top edge, a thick blue-white guard glow banding its face',
+  m_dawnvow:    'a golden sunrise cresting over a rounded steel breastplate, warm amber vitality light streaming upward from the horizon line',
+  m_reliquary:  'an ornate gold reliquary flask with a glass belly, bright emerald potion light brimming over its lip and spilling down the gold filigree',
+  // dragoon
+  // Roll 1 led with the burst and came back as a bare blue ice-burst with no
+  // lance in it at all — the same failure the bloodrush / rampage notes above
+  // describe, running the other way: the endpoint drew the first noun it hit
+  // (the burst) and dropped everything the sentence added after it. The lance
+  // is now the subject and the burst is what it trails.
+  m_skylance:   'a long winged polearm lance held point-down at a steep diagonal, its broad steel head driving toward the ground, a blue shockwave and wind rings snapping outward off the spear tip',
+  m_windstep:   'a single feathered leather boot mid-stride with sharp white wind streaks tearing backward off its heel',
+  m_dragonhide: 'a curved plate of overlapping deep-green dragon scales, each scale rimmed in dark horn, a hard blue guard sheen running across the surface',
+  // umbra
+  m_umbra:      'a violet void-energy burst tearing outward with a black-bladed dagger silhouetted inside it, ragged purple shadow ribbons streaming off the edge',
+  m_nightveil:  'a dark hooded veil dissolving into drifting indigo smoke wisps, thin white speed streaks pulling backward through the smoke',
+  m_soulsiphon: 'a curved dagger with bright cyan-green soul motes streaming off a struck target and spiralling back down the blade into the grip, the metal lit by an intense drain glow',
+  // ninja
+  m_kagelash:   'a kusarigama chain-sickle whipping in an arc with one brilliant white critical flash bursting at the blade tip, chain links blurring behind it',
+  m_smokewalk:  'a split-toe tabi sandal bursting out of a thick grey smoke plume, hard white speed lines trailing behind it',
+  m_ironkata:   'two armoured forearm guards crossed in a hard block, a bright blue-white guard barrier flaring at the point where they meet',
+  // bloodmoon
+  m_bloodmoon:  'a huge crimson full moon with a curved fanged blade crossing it, a deep red energy burst blasting outward from the blade',
+  m_exsanguin:  'a fanged curved blade with thick luminous red life-motes streaming off it and being pulled inward along the fuller into the hilt, lit by an intense red drain glow',
+  m_coldedge:   'an ice-rimed dagger with frost crystals crusting the blade and one brilliant white-blue critical spark flashing off its edge',
+  // voidblade
+  m_voidrift:   'a jagged purple-black tear ripped open in space with violet void energy blasting out of the rift, the edges of reality curling and fraying',
+  m_afterimage: 'three overlapping translucent violet silhouettes of the same running figure staggered behind one another, hard white speed streaks between them',
+  m_killerseye: 'a glowing golden eye with a sharp crosshair reticle overlaid across the iris, one bright white critical spark flashing at the corner',
+  // archmage
+  m_leyline:    'a tall glowing blue mana crystal with luminous cyan leyline threads running across the ground into its base and feeding upward through it',
+  m_convergence:'four brilliant arcane beams converging from the corners into one white-hot point of light, the point bursting outward in a sharp star flare',
+  m_wardstone:  'a floating carved grey rune-stone with a hexagonal blue barrier lattice snapping into place around it',
+  // apotheosis
+  m_apotheosis: 'a radiant prismatic rainbow burst of elemental light exploding outward, a simple golden crown silhouetted at its centre',
+  m_stormwell:  'a swirling storm vortex funnelling down into a wide stone chalice, blue lightning arcs crackling around the rim and mana light welling up inside',
+  m_emberheart: 'a burning ember-orange heart wrapped in curling flame, a warm vitality glow radiating out through the cracks in its glowing crust',
+  // necromancer
+  m_gravecall:  'a violet necrotic burst erupting from broken grave soil with a skeletal hand thrusting up through the centre of it, purple grave-light streaming upward',
+  m_soulwell:   'a round stone well brimming with glowing pale-blue soul light, luminous wisps rising out of the opening',
+  m_deathgrip:  'a skeletal gauntlet clenched into a fist with pale green soul motes streaming inward from all sides and sinking into the bones, lit by a drain glow',
+  // plague
+  m_pandemic:   'a sickly green toxic burst billowing outward with a black plague-doctor beaked mask silhouetted at its centre',
+  m_cursework:  'a violet curse surge blazing upward off a blue-and-white nazar evil-eye charm on a chain, dark hex runes spiralling in the surge',
+  m_blightskin: 'a mottled sickly-green chitin carapace plate, thick and ridged, with a dull protective sheen banding across it',
+  // saint
+  m_grail:      'a tall golden chalice overflowing with brilliant white-gold radiant light pouring down its sides in thick luminous streams',
+  m_sanctum:    'a small domed white stone shrine with a golden protective dome of light arcing over it, warm rays streaming down inside',
+  m_benediction:'a white dove with wings spread wide, a brilliant golden holy light burst blazing outward behind it',
+  // marksman — precision rifles and long shots
+  m_deadeye:    'a single brilliant white critical spark bursting at the exact centre of a thin gold crosshair reticle, a long dark rifle barrel receding behind it',
+  m_railcore:   'a searing blue-white energy lance firing down the length of a heavy dark rail-rifle, arcs of power crackling along its coils',
+  // Roll 1 came back as a rifle on a solid RED ROUNDED-SQUARE tile - the exact
+  // thing the PREFIX spends four sentences forbidding. The prompt caused it:
+  // asking for a "red-orange power aura wrapped around" the subject is asking
+  // for a large red field, and the model resolved that field into a backdrop.
+  // The boost is now carried by discrete marks that cannot spread into a
+  // plate - chevrons and sparks against the metal - instead of an aura.
+  m_steadyhand: 'a braced dark marksman rifle resting on a folded bipod, three sharp glowing orange power chevrons stacked along its barrel and a few bright sparks at the muzzle, nothing behind it',
+  // ballista — siege engines
+  m_siegework:  'a heavy siege-bolt burst blasting outward with a dark timber ballista frame silhouetted behind it, splinters flying',
+  m_bulwarkbolt:'a broad iron pavise shield planted in front of a mounted crossbow, a hard blue-white guard barrier shimmering across the shield face',
+  m_overdraw:   'a heavy crossbow drawn far past its limit, the thick limbs bent hard and straining, a fierce red-orange power surge blazing along the drawn string',
+  // beastmaster — beasts and the wild
+  m_packlord:   'a fierce red-orange power surge blazing off a dark wolf-head standard mounted on a carved wooden haft, bright attack sparks flying from it',
+  m_wildhide:   'a thick layered pelt of shaggy brown-and-grey fur over a bone shoulder-guard, a warm red vitality glow pulsing out from beneath it',
+  m_huntsrun:   'a lean beast paw mid-stride with hard white speed streaks tearing backward off it, dust kicking up behind',
+  // skyhunter — storms and high air
+  m_tempest:    'a bright white critical flash at the calm eye of a swirling dark storm ring, lightning curling around the outside',
+  m_stormfeather:'a long dark storm-feather trailing hard white wind streaks and small blue lightning arcs off its barbs',
+  m_galeshot:   'a blue gale shockwave bursting outward with a single arrow driving through its centre, wind rings snapping off the shaft',
 };
 
 // The prompt asks for the subject to fill ~82% of the frame; measured output
