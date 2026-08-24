@@ -9845,7 +9845,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.174';
+const GAME_VERSION = 'v0.30.175';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -87846,6 +87846,12 @@ function updateProjectiles(dt) {
         }
         // v0.25.485 — Octobaby tentacle: skill-lock effect (silences active skills,
         // basic attack still allowed). Uses the player._skillLockTimer added above.
+        // v0.30.x - SLOW ON HIT. The projectile status set had freeze, poison
+        // and skill-lock but no slow, even though _slowTimer (speed x0.5) has
+        // existed since the Frostkin beam - so a projectile that wanted to slow
+        // had no way to say so. Refresh-or-extend via Math.max, matching every
+        // other CC here: a shorter application must never CUT a longer one short.
+        if (p.slow) player._slowTimer = Math.max(player._slowTimer || 0, p.slow);
         if (p.skillLock) {
           player._skillLockTimer = Math.max(player._skillLockTimer || 0, p.skillLock);
         }
@@ -125253,28 +125259,89 @@ const ZODIAC_AI = {
       m._libraOrbsAlive = _aliveOrbs;
     }
     if (!m._orbA && !m._orbADead) {
-      spawnMonster(m.x - 60, m.y - 40, 'slime', false, false);
-      const a = game.monsters[game.monsters.length - 1];
+      // v0.30.x - per user: "for libra boss slimes should not spawn on the same
+      // map, instead it should be lanternWisp". The arena's spawn list only ever
+      // held the boss - these two plates were the ONLY slimes on the map, and a
+      // slime reads as filler wandering in, not as one pan of a hanging scale.
+      // A Lantern Wisp is the right object on every axis: it FLIES, so the plates
+      // hang either side of her instead of sitting on the floor; it is a lamp, so
+      // lit/dark carries the active-plate rule without a legend; and its native
+      // explodesOnDeath (80 px, 50%) means breaking one in your face costs you
+      // something. Falls back to slime if the type is ever missing.
+      const _PLATE = (typeof monsterTypes !== 'undefined' && monsterTypes.lanternWisp) ? 'lanternWisp' : 'slime';
+      // Take the plate only if one was actually APPENDED. The old line read
+      // game.monsters[length-1] unconditionally, so whenever spawnMonster returns
+      // a suppressed stub instead of pushing - inside a sanctuary map, or on a
+      // co-op guest mirroring the host - Libra adopted HERSELF as her own scale
+      // pan: the boss was renamed, her maxHp overwritten with the plate value,
+      // and she inherited _libraOrb, so the inactive-plate rule cut incoming
+      // damage to 25%. Leaving _orbA null simply retries next frame, which is
+      // what should always have happened.
+      const _n0 = game.monsters.length;
+      spawnMonster(m.x - 60, m.y - 40, _PLATE, false, false);
+      const a = (game.monsters.length > _n0) ? game.monsters[game.monsters.length - 1] : null;
       if (a) {
         a._libraOrb = 'A'; a.color = z.colors.hi;
-        a.currentHp = a.maxHp = 900;
+        a.name = 'Scale Lantern (Left)';
+        // v0.30.x - sized to the fight instead of a flat 900. At the Lv 70 gate a
+        // 900-HP plate evaporated to a single hit, so the whole balance mechanic -
+        // read which pan is lit, burst THAT one, drop her shield - never actually
+        // happened; the plates died before the first 4 s swap. Floored at the old
+        // 900 so this can only ever be stronger than what shipped.
+        a.currentHp = a.maxHp = Math.max(900, Math.floor((m.maxHp || 0) * 0.05));
         a._libraOrbActive = true;        // start: A is the active plate
         m._orbA = a;
       }
     }
     if (!m._orbB && !m._orbBDead) {
-      spawnMonster(m.x + 60, m.y - 40, 'slime', false, false);
-      const b = game.monsters[game.monsters.length - 1];
+      const _PLATE2 = (typeof monsterTypes !== 'undefined' && monsterTypes.lanternWisp) ? 'lanternWisp' : 'slime';
+      const _n0b = game.monsters.length;
+      spawnMonster(m.x + 60, m.y - 40, _PLATE2, false, false);
+      const b = (game.monsters.length > _n0b) ? game.monsters[game.monsters.length - 1] : null;
       if (b) {
         b._libraOrb = 'B'; b.color = z.colors.aura;
-        b.currentHp = b.maxHp = 900;
+        b.name = 'Scale Lantern (Right)';
+        b.currentHp = b.maxHp = Math.max(900, Math.floor((m.maxHp || 0) * 0.05));
         b._libraOrbActive = false;       // start: B is the inactive plate
         m._orbB = b;
+        // Teach the rule ONCE, when the second plate goes up. The mechanic was
+        // fully implemented and completely unexplained: a player had no way to
+        // learn that the dark lantern eats 75% of what you throw at it except by
+        // wasting a rotation on it.
+        if (!m._libraTaught && typeof showToast === 'function') {
+          m._libraTaught = true;
+          showToast('\u2696 Libra hangs two Scale Lanterns - only the LIT one can be broken. Break both to unbalance her.', 'legendary');
+        }
       }
     }
     // Status re-check
-    if (m._orbA && m._orbA.currentHp <= 0) { m._orbA = null; m._orbADead = true; }
-    if (m._orbB && m._orbB.currentHp <= 0) { m._orbB = null; m._orbBDead = true; }
+    // v0.30.x - BREAKING A SCALE PAYS. Stepping her shield 0.5 -> 0.75 -> 1.0 was
+    // the entire reward, and it is invisible while it is happening. A broken pan
+    // now drops her into the game's own EARNED stagger window (BOSS_STAGGER_MS at
+    // BOSS_STAGGER_BONUS = 1.6x), which is the established currency for 'you did
+    // the mechanic' - no bespoke economy invented for one boss. Deliberately not
+    // routed through _maybeStartBossStagger: that helper only opens a window on an
+    // attack->idle transition and refuses while _staggerCd is ticking, and a scale
+    // you broke should pay whether or not she happened to be mid-pattern.
+    const _libraScaleBroke = (side) => {
+      m._stagger = Math.max(m._stagger || 0, (typeof BOSS_STAGGER_MS === 'number') ? BOSS_STAGGER_MS : 1400);
+      m._staggerCd = Math.max(m._staggerCd || 0, m._stagger + ((typeof BOSS_STAGGER_COOLDOWN === 'number') ? BOSS_STAGGER_COOLDOWN : 5200));
+      m._libraT = 0;                       // the scales are level again; the imbalance meter resets
+      if (typeof showToast === 'function') showToast('\u2696 A scale BREAKS - Libra reels! Punish her!', 'legendary');
+      if (typeof addShake === 'function') addShake(10);
+      if (typeof flash === 'function') flash(0.3);
+      if (typeof audio !== 'undefined' && audio.play) { try { audio.play('crit'); } catch (e) {} }
+      if (typeof _budgetedParticlePush === 'function') {
+        for (let k = 0; k < 16; k++) {
+          const a = Math.random() * Math.PI * 2;
+          _budgetedParticlePush({ x: m.x + m.w / 2 + side * 60, y: m.y + 20,
+            vx: Math.cos(a) * (1.5 + Math.random() * 3), vy: Math.sin(a) * (1.5 + Math.random() * 3),
+            life: 24 + Math.random() * 14, color: k % 2 ? '#ffd470' : '#ffcc88', size: 2 + Math.random() * 2 });
+        }
+      }
+    };
+    if (m._orbA && m._orbA.currentHp <= 0) { m._orbA = null; m._orbADead = true; _libraScaleBroke(-1); }
+    if (m._orbB && m._orbB.currentHp <= 0) { m._orbB = null; m._orbBDead = true; _libraScaleBroke(1); }
     // Activeness toggle — swap every 4 s while both orbs alive.
     if (m._orbA && m._orbB) {
       m._libraSwapTimer = (m._libraSwapTimer || 0) + dt;
@@ -125305,7 +125372,14 @@ const ZODIAC_AI = {
         x: m.x + m.w/2, y: player.y + player.h/2,
         vx: Math.sign((player.x) - m.x) * 10, vy: 0,
         w: 45, h: 18, life: 120,   // v0.26.x — ~1.5x larger Libra scale projectile per user (was 30x12; render scales off p.w so visual + hitbox both grow)
-        damage: m.atk * 1.1, owner: 'enemy', skill: 'scale', color: '#ffcc66'
+        // v0.30.x - per user: "when libra projectile touches, ensure that it slows
+        // player for about 3 seconds". Deterministic, not a roll - the beam is
+        // fired at your exact height on a fixed cadence, so the counterplay is
+        // reading it and moving, and a coin-flip on top of that would only make
+        // the same dodge feel arbitrary. Half speed for 3 s stacks real pressure
+        // against the arena's centre-line rule: slowed, crossing costs more.
+        damage: m.atk * 1.1, owner: 'enemy', skill: 'scale', color: '#ffcc66',
+        slow: 3000, sourceLabel: "Libra's scale beam"
       });
       addShake(4);
     }
