@@ -9744,7 +9744,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.156';
+const GAME_VERSION = 'v0.30.157';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -51262,6 +51262,10 @@ function _wmMobRoster(map) {
 // embedded as a single <image>; only a handful of cheap opacity/transform
 // twinkles stay live. Cached per W×H — repeat opens cost one cache hit.
 let _wmBgCache = null;
+// v0.30.x — set once toDataURL has proven the plate taints this canvas (see
+// the guard at the end of _wmBgRasterURL). Sticky: a tainted origin does not
+// become untainted, so retrying only costs a wasted raster per open.
+let _wmPlateTainted = false;
 // v0.30.54 — the painted nebula plate (backgrounds/worldmap_bg.webp, ludo.ai)
 // is now the BASE of the diagram's raster backdrop. Before this, the
 // rectangle the nodes sit in was a procedural canvas — four soft gradient
@@ -51285,7 +51289,7 @@ function _wmBgRasterURL(W, H) {
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
   const c = cv.getContext('2d');
-  const _plate = _wmPlate._lxReady && _wmPlate.naturalWidth > 0;
+  const _plate = _wmPlate._lxReady && _wmPlate.naturalWidth > 0 && !_wmPlateTainted;
   if (_plate) {
     // cover-fit the plate, then a light cool scrim so the node labels keep
     // their contrast against the brightest nebula cores
@@ -51337,7 +51341,22 @@ function _wmBgRasterURL(W, H) {
   const vg = c.createRadialGradient(W/2, H/2, Math.min(W,H)*0.35, W/2, H/2, Math.max(W,H)*0.62); // vignette
   vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(2,0,14,0.55)');
   c.fillStyle = vg; c.fillRect(0, 0, W, H);
-  const url = cv.toDataURL('image/png');
+  // v0.30.x — TAINT GUARD (tester: "the world map doesnt open", both the W key
+  // and the Taxi's Browse Routes). drawImage of the plate taints the canvas on
+  // a file:// origin - which is exactly how a playtest zip is opened - and
+  // toDataURL then throws SecurityError. That throw escaped _renderWorldMapDiagram
+  // before it drew a single node or showed either modal, so the map never
+  // appeared and nothing was logged. Drop the plate for good and re-raster the
+  // procedural sky, which draws no image and therefore cannot taint. The map
+  // opens everywhere; on file:// it wears the generated galaxy instead of the
+  // painted plate - degraded, never broken.
+  let url;
+  try { url = cv.toDataURL('image/png'); }
+  catch (e) {
+    _wmPlateTainted = true;
+    if (_plate) return _wmBgRasterURL(W, H);   // one retry, now plate-free
+    return '';                                  // untainted and still failing: let the SVG gradient carry it
+  }
   _wmBgCache = { key: W + 'x' + H, url };
   return url;
 }
@@ -51423,7 +51442,8 @@ function _renderWorldMapDiagram(host, opts) {
   // v0.26.x — static galaxy backdrop: ONE pre-rendered image (cached) in
   // place of 4 blur-filtered ellipses + 58 star elements + core + vignette.
   const _bgImg = document.createElementNS(SVG_NS, 'image');
-  _bgImg.setAttribute('href', _wmBgRasterURL(W, H));
+  // the backdrop is decoration; the map is not. Never let it throw out of here.
+  try { _bgImg.setAttribute('href', _wmBgRasterURL(W, H)); } catch (e) {}
   _bgImg.setAttribute('x', 0); _bgImg.setAttribute('y', 0);
   _bgImg.setAttribute('width', W); _bgImg.setAttribute('height', H);
   _bgImg.setAttribute('data-wm-bg', '1');   // v0.30.63 — resized after attach
@@ -52150,7 +52170,7 @@ function _renderWorldMapDiagram(host, opts) {
       if (svg._lxFitKey === _key) return true;          // same box: nothing to redo
       svg._lxFitKey = _key;
       const _cx = (W - _cw) / 2, _cy = (H - _ch) / 2;
-      _bgImg.setAttribute('href', _wmBgRasterURL(Math.round(_cw), Math.round(_ch)));
+      try { _bgImg.setAttribute('href', _wmBgRasterURL(Math.round(_cw), Math.round(_ch))); } catch (e) {}
       _bgImg.setAttribute('x', _cx); _bgImg.setAttribute('y', _cy);
       _bgImg.setAttribute('width', _cw); _bgImg.setAttribute('height', _ch);
       for (const _st of svg.querySelectorAll('circle[data-wm-star="1"]')) {
