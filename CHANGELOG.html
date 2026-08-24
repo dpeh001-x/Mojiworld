@@ -121,6 +121,36 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.x <span class="tag"><span class="pill polish">polish</span> Monsters stop sliding under a static sprite, and stride quicker</span></h2>
+<p>Per user: <em>make sure monsters only move horizontally when walking sprite plays, and make the walking animation time gap quicker.</em></p>
+<p>The slide was real but small enough that it needed measuring rather than eyeballing. Over 900 frames on four mobs, before:</p>
+<table>
+<tr><th>State</th><th>Frames</th><th>With motion</th><th>Total |dx|</th><th>Max |dx|/frame</th></tr>
+<tr><td>idle</td><td>671</td><td>36</td><td>4.9 px</td><td><b>0.55</b></td></tr>
+<tr><td>attack</td><td>258</td><td>16</td><td>5.7 px</td><td><b>0.57</b></td></tr>
+</table>
+<p>0.55&nbsp;px/frame is about <b>33&nbsp;px/s of travel under a static sprite</b> &mdash; small per frame, unmistakable as a glide. There were <b>two</b> separate causes, and neither is the obvious one.</p>
+
+<h3>1. A dead band in the walk latch</h3>
+<p>The latch engaged at an <b>absolute</b> <code>vx &gt; 0.6</code> and released at <code>vx &lt; 0.35</code>. Anything travelling between those two numbers was <em>too slow to animate and too fast to have been stopped</em>, so it slid under idle art.</p>
+<div class="callout">
+  <b>Why the naive fix would have been a disaster.</b> &ldquo;Root the mob unless it is walking&rdquo; sounds right and would have frozen a chunk of the roster solid: there are monsters with <code>speed: 0.5</code> and lower, so any fixed cutoff high enough to catch the drift is also above their entire top speed. The thresholds are now a <b>fraction of each mob&rsquo;s own speed</b> (35% on, 60% of that off), and the paired kill in the movement step uses the <em>same</em> number the latch engages on &mdash; so there is no longer a speed at which a mob can travel without animating.
+</div>
+
+<h3>2. The incidental attack pose</h3>
+<p>A mob that so much as brushes the player gets <code>atkAnimUntil</code> stamped for <b>650&nbsp;ms</b> and keeps chasing at full speed underneath it. Rooting <em>that</em> is not an option, and the codebase already says why in <code>_mobCasting</code>: it would stall a mob for two thirds of a second every time it touched the player.</p>
+<p>So the <b>art yields instead of the movement</b> &mdash; a mob that is genuinely walking is drawn walking. Deliberate attacks are unaffected: <code>_mobCasting</code> (shot windups, heavy-swing telegraphs, the post-shot beat) already plants those at <code>vx&nbsp;=&nbsp;0</code>, and that is exactly the case where the pose carries information the player needs to read.</p>
+
+<h3>Knockback is untouched, and provably out of reach</h3>
+<p>The kill only fires when the mob is <b>not</b> walking, and the lightest knockback in the game (1.2, up to 9 on a heavy skill) is far above any mob&rsquo;s walk threshold &mdash; so a shoved mob still slides from the hit exactly as before. Zeroing <code>vx</code> outright would have flattened every impact in the game.</p>
+
+<h3>Result</h3>
+<p>Peak drift outside walk: <b>0.55 &rarr; at most 0.12 px/frame</b> (~33&nbsp;px/s &rarr; ~7). <b>Not zero</b>, and the test says so rather than pretending otherwise &mdash; mob-vs-mob separation nudges position with a direct <code>m.x +=</code> write that never passes through the velocity chokepoint this works on. An exact-zero assertion looked green on one run and reported 130 drifting frames on the next; it is a per-frame ceiling now.</p>
+<p><b>Stride:</b> bosses already ran at 50&ndash;64&nbsp;ms via <code>_bossWalkMsFor</code> (added when the same request was made of <em>them</em>), while ordinary monsters were still on the flat 80&nbsp;ms base &mdash; the roster walked visibly slower than its own bosses. Now <b>55&nbsp;ms, ~31% quicker</b>.</p>
+<p><code>scripts/mob_walk_anim_test.mjs</code> passes <b>9/9 on three consecutive runs</b> and fails 4/9 on the previous build. Its controls matter as much as its assertions: &ldquo;nothing moves outside walk&rdquo; is trivially true of a frozen game, so every mob&rsquo;s travel is checked too.</p>
+
+
+
 <h2>v0.30.160 <span class="tag"><span class="pill bug">bug</span> Goblin Scout idle: a quarter of the black keyline was missing</span></h2>
 <p>Per user: <em>some of goblin scout idle frames black outline partially missing, fix it.</em></p>
 <p><b>Seven of the nine frames were affected, and the two that were not say why.</b> Frames 0 and 8 match the base sprite exactly &mdash; 0% of the silhouette perimeter without a keyline, median line 13&nbsp;px at 768. Frames 1&ndash;7 were missing the line across <b>22.7&ndash;27.2%</b> of their perimeter, and where it survived it had thinned to 8&ndash;10&nbsp;px. Those are the generated in-between frames; the endpoints kept the artist's line because they are the base pose.</p>
