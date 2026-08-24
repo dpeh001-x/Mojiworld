@@ -113,7 +113,8 @@ const r = await page.evaluate(() => {
     }
     return log;
   };
-  const arm = () => { leo.patternState = 'pounceWindup'; leo.patternTimer = 0;
+  const arm = () => { leo._stagger = 0; leo._staggerCd = 0; leo._dirOpenT = 0;
+    leo.patternState = 'pounceWindup'; leo.patternTimer = 0;
     leo._leoPounceX = null; leo._leoPounceY = null; leo._leoMarking = false;
     leo._leoLanded = false; leo._leoWasAir = false; };
   const digest = (L) => {
@@ -168,6 +169,14 @@ const r = await page.evaluate(() => {
     }
   }));
   out.B.fledTo = fledTo;
+
+  // ---- a STRANDED flag must never draw a circle ----
+  // The flag is cleared at the top of the leo AI, but that AI does not run while
+  // the boss is staggered, so the zone itself has to read the pattern state.
+  leo.patternState = 'idle'; leo._leoMarking = true;
+  leo._leoPounceX = A; leo._leoPounceY = 400;
+  out.strandedZone = !!zone();
+  leo._leoMarking = false; leo._leoPounceX = null; leo._leoPounceY = null;
 
   // ---- CASE C: left alone, does he reach for it himself? ----
   player._god = true;                  // survive an unsupervised lion
@@ -236,6 +245,8 @@ ok('having MOVED is the counterplay - the circle does not follow you',
   { circleStayedAt: B.markX, playerFledTo: B.fledTo, radius: r.tune.R, tookPounceDamage: B.hit });
 ok('...and that case cleans up too', B.end === 'idle' && B.endMk === false && B.endMx === null,
   { endState: B.end, marking: B.endMk, markX: B.endMx });
+ok('a stranded mark cannot draw a circle - the pattern state is the authority',
+  r.strandedZone === false, { zoneDrawnWhileIdle: r.strandedZone });
 ok('left alone, Regulus reaches for the pounce himself', C.sawPounce,
   { patternTicksIn66s: C.seen });
 ok('no other sign picked this up by accident', (r.otherSigns || []).length === 0,
