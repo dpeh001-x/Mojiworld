@@ -252,3 +252,52 @@ spine the puzzle hangs on.**
 
 *The sun has not risen. You are the first one in an age to walk far
 enough to maybe make it. Walk on, Wayfarer.*
+
+## 6. The Cycle Completes — the Weight becomes the Song (v0.29.964)
+
+**Canonical ending, shipped as the Guguma rebirth cutscene**
+(`steam/higgsfield/cinematics/clip_gravitos_to_guguma.mp4`, played between
+the black-flame defeat and the epilogue text).
+
+When the Ascendant form falls, the black flames do not consume Gravitos —
+they *unburden* him. Twelve ages of held weight peel away as ember and ash,
+the spiral contracts to a single warm point, and what condenses out of it
+is small, and gold, and singing: **Guguma, the canary**.
+
+The reveal reframes the whole game:
+
+- **Guguma was never a messenger.** The "watcher above the sky" did not
+  send a herald down to greet the Outsider — the watcher sends the
+  *finished dawn's first creature* back to the beginning. Guguma is what
+  the Weight-Bearer becomes whenever someone completes the morning: the
+  Law, released, reborn as the lightest thing in the cosmos.
+- **The void-entry eye-zoom is the loop's seam.** The game opens by zooming
+  INTO Guguma's eye; the ending clip closes by pushing into that same
+  glossy black eye with the first true sunrise reflected in it. The player
+  has been inside that reflection since the title screen. The ending seeds
+  the beginning.
+- **The Everdawn was never a prison. It was an egg.** The pause was
+  incubation: a cosmos holding perfectly still until something inside it
+  grew strong enough — *wanted* hard enough — to crack it open. Gravitos
+  was not the world's jailer but its shell, and a shell's whole purpose is
+  to be outgrown.
+- **The cycle of Everdawn:** dreamer walks the frozen world → gathers the
+  twelve fragments → answers the question at the gate → convinces the Law
+  to set the weight down → the dawn completes → the Law becomes Guguma →
+  Guguma waits at the edge of the next Void for the next dreamer. Every
+  playthrough is one turn of the wheel. The chick who delightedly cheeps
+  at YOUR arrival is the previous cycle's Gravitos, still warm from his
+  own sunrise.
+
+**Division of the reveal (two parallel work lines, 2026-08-20):** the TEXT
+half shipped in v0.29.961/.962 — the "Law of the Kindest Hand" thread laid
+under the endgame, paying off in the `epilogue_gravitos` stanzas ("What
+steps out of the dark is small. / Golden. / Feathered." … "THE KINDEST HAND
+IN EVERDAWN HAS FEATHERS. / It held the whole world down. / It held your
+hand the entire time."). The CINEMATIC half is v0.29.964's rebirth clip,
+played just before those stanzas: the clip shows the event, the stanzas
+name its meaning. The stanzas double as fail-open cover — the lore lands
+even for players who skip the clip or run a build without the cinematics.
+Name the two halves consistently: *the Kindest Hand* is what Guguma was
+during the pause; *the First Creature of the Morning* is what he is after
+it breaks (the rebirth cutscene's title card).

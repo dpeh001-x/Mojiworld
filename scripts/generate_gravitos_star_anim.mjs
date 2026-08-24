@@ -34,17 +34,31 @@ const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 
 const MOTION =
-  'the colossal cosmic star-titan performs his charge-up attack IN PLACE: the ' +
-  'blazing blue-white star core in his chest flares brighter and pulses, ' +
-  'violet-and-cyan cosmic energy erupts and swirls around his body, lava-crack ' +
-  'seams glow hotter, his fists clench and arms flex as power builds, loose ' +
-  'nebula wisps orbit him. CRITICAL: the character stays the EXACT same size, ' +
-  'scale and position in EVERY frame — do NOT zoom in, do NOT enlarge him, do ' +
-  'NOT crop closer; the whole body including the legs and feet stays fully ' +
-  'inside the frame with clear margin on all sides in every frame. The aura ' +
-  'stays wispy and FADES OUT well before the frame edges — never a hard ' +
-  'rectangular edge of energy. Keep the same left/right facing as the source; ' +
-  'never mirror or flip.';
+  'the colossal cosmic star-titan performs a FEROCIOUS charge-up attack IN ' +
+  'PLACE: the blazing blue-white star core in his chest detonates with light, ' +
+  'strobing from hard white to deep violet as it builds; ribbons and whipping ' +
+  'arcs of violet-and-cyan PLASMA tear upward off his shoulders and forearms ' +
+  'and wrap around his limbs; the lava-crack seams across his dark armour ' +
+  'flare white-hot; he hauls both fists in toward the core, shoulders ' +
+  'hunching, head tipping back, his whole frame straining; forked lightning ' +
+  'snaps between his arms and the core; thin rings of pure light expand and ' +
+  'fade around him. Every frame must look VIOLENTLY different from the last ' +
+  '- big, dramatic, high-contrast swings in the light and the energy, never ' +
+  'a subtle shimmer. PALETTE IS ABSOLUTE: only deep violet, magenta, ' +
+  'electric cyan and blue-white starlight against his near-black armour. ' +
+  'NO smoke, NO white puffy clouds, NO steam, NO dust, NO sand, NO soil, NO ' +
+  'rubble, NO ground debris, NO beige or cream or tan or brown anywhere, and ' +
+  'NOTHING on the floor around his feet - he stands on empty transparent ' +
+  'space. The energy is clean glowing plasma and light, never particulate. ' +
+  'CRITICAL: the character stays the EXACT same size, scale and position in ' +
+  'EVERY frame - do NOT zoom in, do NOT enlarge him, do NOT crop closer; the ' +
+  'whole body including the legs and feet stays fully inside the frame with ' +
+  'clear margin on all sides in every frame. Frame him so he occupies about ' +
+  '80% of the frame height, centred, feet well above the bottom edge, and ' +
+  'hold that framing in every single frame. The aura stays wispy and FADES ' +
+  'OUT well before the frame edges - never a hard rectangular edge of ' +
+  'energy, and never let the energy reach a border. Keep the same left/right ' +
+  'facing as the source; never mirror or flip.';
 
 // ---------- the feather ----------
 // Multiply alpha by a smooth ramp toward each canvas edge. Content deep in the
@@ -162,17 +176,35 @@ const baseBuf = await readFile(join(ATK_DIR, `${KEY}_0.webp`));
 const baseUri = 'data:image/png;base64,' +
   (await sharp(baseBuf).resize(990, 990, { fit: 'inside', withoutEnlargement: true }).png().toBuffer()).toString('base64');
 
-process.stdout.write(`animating ${FRAMES} frames ... `);
-const res = await fetch(`${API}/assets/sprite/animate`, {
-  method: 'POST', headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' },
-  signal: AbortSignal.timeout(300000),
-  body: JSON.stringify({ initial_image: baseUri, motion_prompt: MOTION,
-    frames: FRAMES, frame_size: -9, model: 'eagle', individual_frames: true, loop: true, image_type: 'sprite' }),
-});
-if (!res.ok) { const t = await res.text();
-  if (/\b402\b/.test(t) || res.status === 402) throw new Error('402 OUT OF CREDITS');
-  throw new Error(`${res.status}: ${t.slice(0, 160)}`); }
-const anim = await res.json();
+// Ludo's animate call routinely outruns undici's 300s HEADERS timeout, which
+// AbortSignal cannot extend — so retry rather than wait longer, the same way
+// gen_bolt_anim.mjs and the other animation generators do.
+async function animate() {
+  let last;
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      process.stdout.write(`animating ${FRAMES} frames, attempt ${attempt} ... `);
+      const res = await fetch(`${API}/assets/sprite/animate`, {
+        method: 'POST', headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(900000),
+        body: JSON.stringify({ initial_image: baseUri, motion_prompt: MOTION,
+          frames: FRAMES, frame_size: -9, model: 'eagle', individual_frames: true, loop: true, image_type: 'sprite' }),
+      });
+      if (!res.ok) { const t = await res.text();
+        if (/\b402\b/.test(t) || res.status === 402) throw new Error('402 OUT OF CREDITS');
+        throw new Error(`${res.status}: ${t.slice(0, 160)}`); }
+      console.log('OK');
+      return await res.json();
+    } catch (e) {
+      last = e;
+      console.log('fail: ' + e.message);
+      if (/OUT OF CREDITS/.test(e.message)) break;
+      if (attempt < 4) await new Promise(r => setTimeout(r, 5000 * attempt));
+    }
+  }
+  throw new Error('animate failed after retries: ' + (last && last.message));
+}
+const anim = await animate();
 let bufs = [];
 if (anim.spritesheet_url && anim.num_cols && anim.num_rows) {
   const sheet = await fetchBuf(anim.spritesheet_url), sm = await sharp(sheet).metadata();
@@ -185,7 +217,6 @@ if (bufs.length < FRAMES && Array.isArray(anim.individual_frame_urls)) {
   bufs = []; for (const u of anim.individual_frame_urls.slice(0, FRAMES)) bufs.push(await fetchBuf(u));
 }
 if (bufs.length < FRAMES) throw new Error(`got ${bufs.length}/${FRAMES} frames`);
-console.log('OK');
 
 process.stdout.write('normalising + feathering ... ');
 for (let i = 0; i < FRAMES; i++) {
@@ -198,3 +229,9 @@ for (let i = 0; i < FRAMES; i++) {
   await writeFile(join(ATK_DIR, `${KEY}.webp`), await feather(onCanvas));
 }
 console.log(`OK — ${FRAMES} frames + static at ${CANVAS_W}x${CANVAS_H}, ramp ${RAMP}px`);
+
+// A fresh roll can still drift, and the prompt alone is not a guarantee — so
+// always follow a generate with the body normalisation that pins the dark
+// armour's height and feet to frame 0. Previously this had to be run by hand.
+process.stdout.write('body-normalising the fresh roll ... \n');
+await bodyNormalize();

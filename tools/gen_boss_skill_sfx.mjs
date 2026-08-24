@@ -5,7 +5,7 @@
 //   node tools/gen_boss_skill_sfx.mjs                 # dry-run (prompts + cost)
 //   node tools/gen_boss_skill_sfx.mjs --kind boss     # boss | skill | both(default)
 //   node tools/gen_boss_skill_sfx.mjs --generate
-//   node tools/gen_boss_skill_sfx.mjs --generate --only zodiac_aries,lich_harvest --force
+//   node tools/gen_boss_skill_sfx.mjs --generate --only zodiac_aries,necromancer_harvest --force
 // Boss stingers → audio/boss/boss_<key>.mp3 (longer, ~4s). Skill sounds →
 // audio/skill/<id>.mp3 (~1.3s). Wire-up (maps) is done in mojiworld_game.html.
 // =============================================================================
@@ -51,7 +51,7 @@ const SKILL = {
   archbishop_grail:'a holy grail blessing, a radiant choral heal swell',
   sage_meteorshower:'a meteor shower, repeated falling fireball impacts',
   elementalist_cascade:'an elemental cascade, a fire-ice-lightning surge combo',
-  lich_harvest:'a soul vortex, a draining ghostly suction pull',
+  necromancer_harvest:'a soul vortex, a draining ghostly suction pull',
   skyhunter_gale:'a gale of arrows, a whistling wind-charged volley',
   deadeye:'a deadeye focus shot, a precise charged twang and crack',
   snipe_railgun:'a railgun snipe, an electric charge then a piercing supersonic crack',

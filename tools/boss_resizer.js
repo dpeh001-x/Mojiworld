@@ -61,6 +61,12 @@
     if (key.startsWith('gravitos')) return 'gravitos';
     if (key.startsWith('aetherion')) return 'aetherion';
     if (key.startsWith('legosaurus')) return 'legosaurus';
+    // The Sovereign's five per-attack sets belong to the Sovereign, exactly as
+    // gravitospunch/laser/soul/star belong to Gravitos. Without this line they
+    // listed as five separate one-animation bosses, so the whole point of the
+    // tool -- seeing a boss's animations side by side against its own idle --
+    // was unavailable for precisely the sets that need it most.
+    if (key.startsWith('towerSovereign')) return 'towerSovereign';
     return key;
   }
   // Human label for a (key, state) pair: the form, then the move.
@@ -85,7 +91,9 @@
   // idle -> walk -> attack -> the cast sets. Sorting by key name alone put
   // 'soul' ahead of 'laser' and scattered the forms.
   const MOVE = { idle: 0, walk: 1, attack: 2, dash: 3, duck: 4, weave: 5,
-                 laser: 6, punch: 7, soul: 8, star: 9 };
+                 laser: 6, punch: 7, soul: 8, star: 9,
+                 // the Sovereign's cast sets, in the order the fight uses them
+                 swing: 10, column: 11, collapse: 12, volley: 13, drain: 14 };
   const rank = (a) => {
     const boss = bossOf(a.key);
     const rest = a.key === boss ? '' : a.key.slice(boss.length);

@@ -70,6 +70,24 @@ function init() {
   // Steam Input: init + resolve the digital-action handles once (best-effort).
   let inputReady = false;
   const actionHandles = {};
+  // v0.30.x — STEAM REVIEW FIX. ISteamInput requires ActivateActionSet() on a
+  // controller before GetDigitalActionData() means anything; this bridge never
+  // called it, so every action was read from a set that was never switched on.
+  // Unactivated action data is not merely "all false" -- it is undefined, and
+  // the game-side poll walks _LX_PAD_MAP in the order 12,13,14,15
+  // (up,down,left,right) with last-write-wins, so garbage there resolves to
+  // exactly "down and to the right": the reported bug.
+  let actionSetHandle = null;
+  const ACTION_SET = 'InGameControls';   // must match the Game Actions File
+  const analogHandles = {};
+  const ANALOG_ACTIONS = ['Move'];       // declared joystick_move in the VDF
+  function _activateFor(c) {
+    if (!c || actionSetHandle == null) return;
+    try {
+      if (typeof c.activateActionSet === 'function') c.activateActionSet(actionSetHandle);
+      else if (typeof c.ActivateActionSet === 'function') c.ActivateActionSet(actionSetHandle);
+    } catch (_) {}
+  }
   // The invite lobby we currently host (party-code carrier; null = none).
   let curLobby = null;
   // The SteamCallback enum has lived on the module root AND on client.callback
@@ -85,6 +103,16 @@ function init() {
       inputReady = true;
       for (const a of INPUT_ACTIONS) {
         try { const h = client.input.getDigitalActionHandle ? client.input.getDigitalActionHandle(a) : null; if (h) actionHandles[a] = h; } catch (_) {}
+      }
+      // The action SET handle, and the analog Move the VDF declares but which
+      // nothing has ever read -- so on a Steam Input config where the stick is
+      // bound to Move (the default this game ships), the stick did nothing.
+      try {
+        const g = client.input.getActionSetHandle || client.input.GetActionSetHandle;
+        if (typeof g === 'function') actionSetHandle = g.call(client.input, ACTION_SET);
+      } catch (_) { actionSetHandle = null; }
+      for (const a of ANALOG_ACTIONS) {
+        try { const h = client.input.getAnalogActionHandle ? client.input.getAnalogActionHandle(a) : null; if (h) analogHandles[a] = h; } catch (_) {}
       }
     }
   } catch (e) { inputReady = false; }
@@ -275,10 +303,45 @@ function init() {
           const controllers = client.input.getControllers ? client.input.getControllers() : [];
           if (!controllers || !controllers.length) return null;
           const c0 = controllers[0];
+          // Re-assert every poll: Steam drops back to the default set on
+          // overlay close, controller reconnect and layout change, and a set
+          // that silently deactivates reads exactly like a broken game.
+          _activateFor(c0);
+          // If we could not resolve the set at all, do NOT report digital state.
+          // Returning null hands the renderer back to the raw gamepad path,
+          // which works; returning half-trusted data is what made the character
+          // walk itself into a wall.
+          if (actionSetHandle == null) return null;
           const out = {};
+          let sawActive = false;
           for (const a in actionHandles) {
-            try { const d = c0.getDigitalActionData ? c0.getDigitalActionData(actionHandles[a]) : null; if (d && d.state) out[a] = true; } catch (_) {}
+            try {
+              const d = c0.getDigitalActionData ? c0.getDigitalActionData(actionHandles[a]) : null;
+              if (!d) continue;
+              // steamworks.js has shipped both {state, active} and the SDK's own
+              // {bState, bActive}; accept either, and require ACTIVE before
+              // believing STATE. An inactive action's state is meaningless.
+              const active = (d.active !== undefined) ? !!d.active
+                           : (d.bActive !== undefined) ? !!d.bActive : true;
+              const state  = (d.state  !== undefined) ? !!d.state
+                           : (d.bState !== undefined) ? !!d.bState : false;
+              if (active) sawActive = true;
+              if (active && state) out[a] = true;
+            } catch (_) {}
           }
+          if (!sawActive) return null;    // nothing is live -> stay out of the way
+          // The analog stick the VDF binds to Move, surfaced so the renderer can
+          // drive movement from Steam Input rather than only from raw gamepad.
+          try {
+            const h = analogHandles.Move;
+            if (h && c0.getAnalogActionData) {
+              const v = c0.getAnalogActionData(h);
+              if (v && (typeof v.x === 'number' || typeof v.y === 'number')) {
+                out._moveX = +v.x || 0;
+                out._moveY = +v.y || 0;
+              }
+            }
+          } catch (_) {}
           return out;
         } catch (e) { return null; }
       },

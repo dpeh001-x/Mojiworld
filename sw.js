@@ -26,7 +26,18 @@
 // as "it's different for me" rather than "it's out of date". Any art swap that
 // REPLACES a filename (rather than adding one) needs this bump; a new filename
 // is safe because nothing is cached under it yet.
-const CACHE = 'mojiworld-assets-v4';
+//
+// v0.30.73 - v5 -> v6. The Sage "Meteor Sigil" art drop REPLACES eleven filenames
+// (Sprites/projectiles/p_ult_sage.webp, Sprites/fx/sage_ult.webp and
+// Sprites/fx/anim/sage_ult_0..8.webp), so without this bump every returning
+// browser keeps serving the old meteor and the old sigil indefinitely.
+//
+// v0.30.52 - v4 -> v5. Six background filenames were REPLACED with different
+// paintings (forest, azureAcademia, emeraldVillage, tidepoolShoals,
+// abyssalTrench, worldmap_bg). That is precisely the "REPLACES a filename"
+// case above, so without this bump every returning browser keeps serving the
+// old art indefinitely - silently, because SWR serves stale first.
+const CACHE = 'mojiworld-assets-v6';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());

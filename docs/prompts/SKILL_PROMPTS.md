@@ -349,7 +349,7 @@ class are noted before each block for easy lookup.
 > each element seamlessly blending into the next, prismatic energy
 > bridging them.
 
-**lich_harvest** · *Soul Vortex*
+**necromancer_harvest** · *Soul Vortex*
 > A large swirling dark-violet vortex in the centre — black-purple
 > spiral pulling spectral souls inward, ghostly skull silhouettes
 > spiralling toward the singularity, sickly green life-drain energy
