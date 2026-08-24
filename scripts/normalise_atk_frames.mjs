@@ -16,6 +16,13 @@
 // lowest opaque pixel ("the character's ACTUAL feet land at the monster's foot
 // line"), and horizontally about its centre.
 //
+// STATUS: this WAS applied to fatDragon and then deliberately REVERTED. Shown
+// the corrected cycle frame by frame, the user chose the original art ("lets go
+// with the before") and asked for a longer attack instead, so Plumpdrake's
+// size variation through the swing is intentional. Do not re-apply it to that
+// type without asking. The tool itself is unchanged and still correct for any
+// type whose padded attack frames genuinely do pulse.
+//
 //   node scripts/normalise_atk_frames.mjs fatDragon            # report only
 //   node scripts/normalise_atk_frames.mjs fatDragon --write
 // ============================================================================
