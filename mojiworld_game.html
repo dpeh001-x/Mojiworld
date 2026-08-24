@@ -9845,7 +9845,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.182';
+const GAME_VERSION = 'v0.30.183';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -23638,7 +23638,22 @@ function _lxNormaliseQuestCounts() {
     if (!desc || oldN === newN) return desc;
     let out = String(desc);
     const forms = [];
-    for (const base of [nm, key]) if (base) forms.push(plural(base), base);
+    // v0.30.x - PROSE SPELLING. The forms were the display name and the type
+    // key verbatim, so a sentence that writes the creature the way English does
+    // - hyphenated and lowercase - was invisible to the rewrite. Measured on
+    // "Tend the Wayfarer's Vigil": the quotas normalised to 20/20/20 while the
+    // body kept saying "20 mournshades, 14 lantern-wisps and 8 echo-knights",
+    // because neither "Lantern Wisp" nor "lanternWisp" matches "lantern-wisps".
+    // De-camel-case and hyphenate both bases, singular and plural; the match is
+    // already case-insensitive, so that covers every spelling on the roster.
+    for (const base of [nm, key]) {
+      if (!base) continue;
+      const spaced = String(base).replace(/([a-z])([A-Z])/g, '$1 $2');
+      for (const v of new Set([String(base), spaced])) {
+        const hy = v.replace(/\s+/g, '-');
+        for (const f of new Set([v, plural(v), hy, plural(hy)])) if (f) forms.push(f);
+      }
+    }
     for (const tok of numTokens(oldN)) {
       if (forms.length) {
         // the number sitting next to this objective's creature, singular or plural
@@ -23669,7 +23684,14 @@ function _lxNormaliseQuestCounts() {
         o.count = nw; after += nw;
       }
       // q.count mirrors the FIRST objective for this data shape, not the total.
-      if (objs[0] && objs[0].count) q.count = objs[0].count;
+      // v0.30.x - q.count is the SUM of the quotas, not the first one. Two
+      // comments in this file disagreed about which, and the consumers sided with
+      // the sum: tickQuestKill sets a.progress to the capped sum across every
+      // objective, and the tracker and journal draw a.progress against this
+      // number. Mirroring only the first quota meant a three-target quest showed
+      // its bar against 20 while progress climbed to 60 - full at a third, and
+      // still labelled 60/20 after that.
+      if (after > 0) q.count = after;
     } else {
       const c = q.count | 0;
       if (!(c > 0) || c <= SETPIECE) continue;
@@ -48772,6 +48794,7 @@ function renderQuestTracker() {
   const el = document.getElementById('quest-tracker');
   if (!el) return;
   _ensureQuests();
+  if (typeof _lxStampAllActive === 'function') _lxStampAllActive();   // v0.30.x - see _lxStampAllActive
   // Pick countable active quests (kill / boss). Order: insertion order
   // of player.quests.active (which is the order they were accepted in).
   const ids = [];
@@ -49682,8 +49705,23 @@ function acceptQuest(id) {
       // (the authored count is unrecoverable once targetCount is written) so
       // the turn-in can pay proportionally. Deliberately NOT combined with
       // a percentage multiplier: that would multiply an already-absolute target.
+      // v0.30.x - A MULTI-OBJECTIVE QUEST IS NOT GOVERNED BY THIS ROLL, so it
+      // must not be shown as its requirement. tickQuestKill handles objective
+      // quests in a branch that returns before the targetCount gate is ever
+      // reached: they complete when EVERY quota is filled, and a.progress is the
+      // capped sum, which cannot exceed that total. Writing the hunt roll into
+      // targetCount therefore painted a headline the quest could never reach and
+      // never needed to - a Lv-70 'Sweet Tooth' read 0/500 while it completed at
+      // 60, and the prose substitution below turned '20 Gummibeau, 20 Choco-chips,
+      // 20 Pincers' into '500 Gummibeau, 20 Choco-chips, 20 Pincers'.
+      //
+      // rewardScale is still banked from the roll: this is an accuracy fix, and
+      // silently cutting the payout of ~90 quests is a balance decision that is
+      // not mine to take. The quotas themselves are left exactly where they are
+      // for the same reason - see the changelog note.
+      const _hasObjectives = Array.isArray(q.objectives) && q.objectives.length > 0;
       const _tgt = _lxQuestKillTarget(q);
-      player.quests.active[id].targetCount = _tgt;
+      if (!_hasObjectives) player.quests.active[id].targetCount = _tgt;
       player.quests.active[id].rewardScale = _lxHuntRewardScale(q, _tgt);
       // v0.29.872 — SYNC THE PROSE TO THE LIVE TARGET (per user: "defeat 12"
       // over a 15/400 tracker). The generated hunt descs bake the authored
@@ -49777,6 +49815,27 @@ function _lxQuestTargetName(q, n) {
   if (!nm) return n === 1 ? 'target' : 'targets';
   return (n === 1) ? nm : (/s$/i.test(nm) ? nm : nm + 's');
 }
+// v0.30.x - THE STAMP HAS TO RUN ON EVERY PAINT, not once at accept.
+//
+// This is the bug the user photographed: a Journal reading 'Hera has posted
+// your next trial: 20 Sandhusks' above a 22/400 tracker. QUESTS is a module
+// table rebuilt from source on every page load, while a.targetCount lives in
+// the save - so acceptQuest's one-shot sync was undone by the next reload and
+// never re-applied. Measured across the whole roster: 12 of 159 counted quests
+// stated a wrong number on a fresh accept, and 39 of 159 after a reload, the
+// worst saying 20 for a job of 4,700.
+//
+// _lxStampObjective always rebuilds from the stamped-once _lxDesc0, so calling
+// it repeatedly is free of drift; this walks the active list from the two
+// paint entry points, which between them cover accept, abandon, kill progress
+// and the load path.
+function _lxStampAllActive() {
+  try {
+    const act = (player && player.quests && player.quests.active) || null;
+    if (!act) return;
+    for (const id in act) { try { _lxStampObjective(id); } catch (e) {} }
+  } catch (e) {}
+}
 function _lxStampObjective(id) {
   const q = (typeof QUESTS !== 'undefined' && QUESTS[id]) || null;
   if (!q || typeof q.desc !== 'string') return;
@@ -49784,12 +49843,45 @@ function _lxStampObjective(id) {
   const a = (player.quests && player.quests.active && player.quests.active[id]) || null;
   const n = (a && a.targetCount != null) ? (a.targetCount | 0) : (q.count | 0);
   if (n <= 1) return;                                       // "defeat the boss" needs no tally
+  // v0.30.x - NORMALISE FIRST, THEN STAMP. _lxDesc0 is captured once and every
+  // later rebuild starts from it, so capturing it before the count normaliser
+  // has run freezes the pre-normalised prose FOREVER - the normaliser's own
+  // rewrite lands on q.desc and is then thrown away by the next rebuild. That
+  // is a live ordering race, not a theoretical one: the normaliser is deferred
+  // to a setTimeout so the bestiary studies exist before it runs, while the
+  // load path paints the tracker as soon as the save is in. Measured after a
+  // reload: all ten multi-objective quests reverted to their authored quotas
+  // ("16 Choco-chips" against a quota of 20). It is idempotent, so this is a
+  // no-op on every call but the first.
+  if (typeof _lxNormaliseQuestCounts === 'function') { try { _lxNormaliseQuestCounts(); } catch (e) {} }
   if (q._lxDesc0 == null) q._lxDesc0 = q.desc;
   const base = q._lxDesc0.split(_LX_OBJ_MARK)[0];
-  // Keep v0.29.872's substitution working on the rebuilt base.
+  // v0.30.x - a multi-objective quest states each quota beside its own
+  // creature, which the authored prose already does correctly ('20 Gummibeau,
+  // 20 Choco-chips, and 20 Pincers'). Substituting a single number into that
+  // sentence could only make it wrong, so the body is left alone and the
+  // objective line spells the whole list out.
+  const _objs = (Array.isArray(q.objectives) && q.objectives.length) ? q.objectives : null;
+  if (_objs) {
+    const _parts = _objs.map((o) => {
+      const _c = o.count | 0;
+      const _nm = (typeof monsterTypes !== 'undefined' && monsterTypes[o.target] && monsterTypes[o.target].name)
+        ? String(monsterTypes[o.target].name) : String(o.target || '');
+      const _pl = (typeof _lxPluralMob === 'function' && _c !== 1) ? _lxPluralMob(_nm) : _nm;
+      return _c.toLocaleString() + ' ' + _pl;
+    });
+    const _sum = _objs.reduce((t, o) => t + (o.count | 0), 0);
+    q.desc = base + _LX_OBJ_MARK + 'defeat ' + _parts.join(', ')
+      + (_parts.length > 1 ? ' \u2014 ' + _sum.toLocaleString() + ' in all.' : '.');
+    return;
+  }
+  // Single-target: the hunt roll IS the requirement, so every mention of the
+  // pre-roll number in the prose has to move with it. v0.29.872 replaced only
+  // the first, which was enough for the generated one-line hunts and wrong for
+  // any desc that states its count twice.
   const n0 = q.count | 0;
   let body = base;
-  if (n0 > 0 && n !== n0) body = body.replace(new RegExp('\\b' + n0 + '\\b'), String(n));
+  if (n0 > 0 && n !== n0) body = body.replace(new RegExp('\\b' + n0 + '\\b', 'g'), String(n));
   q.desc = body + _LX_OBJ_MARK + 'defeat ' + n.toLocaleString() + ' ' + _lxQuestTargetName(q, n) + '.';
 }
 function abandonQuest(id, force) {
@@ -53033,6 +53125,7 @@ function _questIconHtml(id, fallbackEmoji) {
 
 function renderQuestJournal() {
   _ensureQuests();
+  if (typeof _lxStampAllActive === 'function') _lxStampAllActive();   // v0.30.x - see _lxStampAllActive
   const list = document.getElementById('quest-list');
   if (!list) return;
   // v0.25.609 — Condensed, aesthetic redesign per user request.
