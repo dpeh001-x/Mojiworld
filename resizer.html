@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Cache-Control" content="no-store" />
+<title>Boss Resizer — latest build</title>
+<style>
+  body { margin:0; height:100vh; display:grid; place-items:center; background:#0d1018;
+         color:#dfe6f2; font:14px/1.6 system-ui, "Segoe UI", Roboto, sans-serif; }
+  .box { text-align:center; }
+  .mut { color:#8a97ad; font-size:12px; }
+  code { background:#161b27; border:1px solid #2a3346; border-radius:6px; padding:1px 7px; }
+  a { color:#5b8cff; }
+</style>
+</head>
+<body>
+<div class="box">
+  <div style="font-size:17px;font-weight:600">Boss Animation Resizer</div>
+  <p id="msg" class="mut">finding the latest build…</p>
+</div>
+<script>
+// CACHE-PROOF LAUNCHER v3 (v0.29.231). Asks the GitHub API for main's current
+// commit and redirects to that build's PINNED rawcdn.githack.com URL.
+// v2: ETag CONDITIONAL requests — GitHub does not count 304 responses against
+// the unauthenticated rate limit, so heavy tuning sessions can reload as often
+// as they like without ever tripping the 60/hr cap.
+// v3 (per user "the launcher seems cached"): two stale-serving holes closed —
+//   1. fetch(..., {cache:'no-store'}): the browser's HTTP cache could satisfy
+//      the API GET for up to its max-age (~60s) and hand back a stale sha.
+//   2. The rate-limit fallback used the last-known localStorage sha with NO
+//      age limit — after a burst of reloads tripped the 60/hr cap, the
+//      launcher silently pinned an hour-old build. The last-known sha is now
+//      honoured only if it was resolved < 10 minutes ago; anything older
+//      falls through to the branch URL with a cache-busting query instead.
+(async function () {
+  const msg = document.getElementById('msg');
+  const OWNER = 'dpeh001-x', REPO = 'Mojiworld';
+  const API = 'https://api.github.com/repos/' + OWNER + '/' + REPO + '/commits/main';
+  const LS = 'lx_resizer_launcher_sha';
+  const bust = () => '?v=' + Date.now();
+  const FALLBACK = 'https://raw.githack.com/' + OWNER + '/' + REPO + '/main/tools/boss_resizer.html';
+  const pinned = sha => 'https://rawcdn.githack.com/' + OWNER + '/' + REPO + '/' + sha + '/tools/boss_resizer.html';
+  const cache = (() => { try { return JSON.parse(localStorage.getItem(LS) || 'null'); } catch (e) { return null; } })();
+  try {
+    const headers = { Accept: 'application/vnd.github+json' };
+    if (cache && cache.etag && cache.sha) headers['If-None-Match'] = cache.etag;   // v0.29.249 — a corrupted {etag, sha:undefined} record would 304 into the throw path on every load until the next push
+    const r = await fetch(API, { headers, cache: 'no-store' });
+    let sha;
+    if (r.status === 304 && cache && cache.sha) {
+      sha = cache.sha;                       // no new commits since last check — free request
+      try { localStorage.setItem(LS, JSON.stringify({ sha, etag: cache.etag, at: Date.now() })); } catch (e) {}
+    } else if (r.ok) {
+      sha = (await r.json()).sha;
+      try { localStorage.setItem(LS, JSON.stringify({ sha, etag: r.headers.get('ETag'), at: Date.now() })); } catch (e) {}
+    } else {
+      throw new Error('GitHub API ' + r.status);
+    }
+    msg.innerHTML = 'opening build <code>' + sha.slice(0, 7) + '</code>…';
+    location.replace(pinned(sha));
+  } catch (e) {
+    const fresh = cache && cache.sha && cache.at && (Date.now() - cache.at) < 10 * 60 * 1000;
+    if (fresh) {
+      // API unreachable but the last resolution is minutes old — still the
+      // best available answer.
+      msg.innerHTML = 'API unavailable (' + e.message + ') — opening recent build <code>' + cache.sha.slice(0, 7) + '</code>';
+      setTimeout(() => location.replace(pinned(cache.sha)), 1200);
+    } else {
+      // No fresh sha: branch URL with a cache-busting query so neither the
+      // browser nor the githack edge can serve a stale copy of the page.
+      msg.innerHTML = 'could not resolve the latest commit (' + e.message +
+        ') — <a href="' + FALLBACK + '">opening the branch URL instead</a> (may lag a few minutes)';
+      setTimeout(() => location.replace(FALLBACK + bust()), 2500);
+    }
+  }
+})();
+</script>
+</body>
+</html>

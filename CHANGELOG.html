@@ -417,6 +417,99 @@
 <p><b>Two wrong turns, both caught by looking rather than by the numbers.</b> A 4-connected flood fill was the first way to carry the line inward; it yields Manhattan distance, whose fronts are diamonds, so the restored line came out stair-stepped along every diagonal &mdash; replaced with a chamfer transform. Then the black was being scaled by each pixel's alpha, which reads as a thin line: the outermost pixels of a silhouette are semi-transparent, so weighting by alpha left them greenish and the line appeared to start a few px inside the edge. On the good frames the line owns the edge &mdash; its antialiasing is black fading to transparent, not green.</p>
 <p><b>Result:</b> perimeter without a keyline <b>22.7&ndash;27.2% &rarr; 0.0&ndash;0.3%</b>, median width 8&ndash;10 &rarr; 11&ndash;12&nbsp;px against the base sprite's 13. The safety check is the dark-pixel budget: the base sprite is <b>40.1%</b> dark, frames 1&ndash;7 went <b>33.5&ndash;35.0% &rarr; 38.0&ndash;39.0%</b> &mdash; toward the reference and stopping short of it, so no thin feature was blown out. Verified at the size the game actually draws this monster (43&nbsp;px), not just at zoom.</p>
 
+<h2>v0.30.159 <span class="tag"><span class="pill bug">bug</span> Half the terrain tiles never loaded on a file:// build</span></h2>
+<p>Found while verifying the world-map fix in real Chrome against a real <code>file://</code> origin &mdash; not reported, but the tester has been playing with it.</p>
+<p><b>22 of 43 tile sources failed outright.</b> The themed-tile loader sets <code>img.crossOrigin = 'anonymous'</code>. On <code>file://</code> the page origin is <code>null</code>, so the CORS request is rejected and the image never arrives at all: <code>Access to image ... from origin 'null' has been blocked by CORS policy</code>, then <code>net::ERR_FAILED</code>. Grass, stone, ice and lava floors and platforms were all in the failed set.</p>
+<p><b>The same hazard was already found and fixed one loader down.</b> The v0.25.598 note on the per-map floor-override loader records dropping <code>crossOrigin</code> because &ldquo;on file:// origins it can taint the canvas&rdquo;. The themed-tile loader kept its copy and was missed.</p>
+<p><b>Fixed by retrying without the attribute rather than dropping it.</b> Dropping it outright would cost the seamless bake on any CORS-enabled CDN host, where it currently works; retrying on error keeps that and rescues <code>file://</code>. The only thing lost on the retry path is the seamless bake for <code>'auto'</code> tiles, which is already failure-tolerant &mdash; <code>_lxBakeSeamlessTile</code> is try-wrapped and the caller keeps the raw image as the renderable source.</p>
+<p>Measured in headless Chrome, probing <code>LX_TILES</code> directly because a failed-request count cannot tell a permanent failure from a retried one. On <code>file://</code>: <b>21 loaded / 22 broken &rarr; 43 loaded / 0 broken</b>. Over http, unchanged either way: 43 loaded, 41 seamless-baked.</p>
+
+
+<h2>v0.30.158 <span class="tag"><span class="pill bug">bug</span> The Ice Spike ring floated 1,317&nbsp;px above the caster underwater</span></h2>
+<p>Per user: <em>bug with ice spike, the circle seems to be disjointed from my character when using the skill in underwater maps</em> &mdash; and it should <em>stick with my character regardless of the map I am on.</em></p>
+
+<h3>Why only underwater</h3>
+<p><code>drawFlameTrail</code> runs from <code>drawParticles</code>, which <code>drawGame</code> calls <b>inside</b> the vertical-scroll translate and never restores before:</p>
+<pre><code>if (game.camera.y) ctx.translate(0, -Math.round(game.camera.y));
+...
+drawParticles();            // -&gt; drawFlameTrail(), still translated</code></pre>
+<p>World-Y is therefore already on screen by the time the ring draws &mdash; but it subtracted <code>camera.y</code> a <b>second</b> time, so it landed exactly <code>camera.y</code> px above the caster. Flat maps have <code>camera.y === 0</code> and show nothing at all, and <b>every underwater map is an <code>isVerticalTower</code> map</b> (Coral Reef Depths, Abyssal Trench) &mdash; which is why the bug looked like a water bug.</p>
+<p>Measured on the pre-fix build, Coral Reef Depths at <code>camera.y</code> 1317: the ring's device centre sat <b>dy −1317</b> from the player's, and dy 0 on Forest. Not a wobble &mdash; the error <em>is</em> the camera scroll.</p>
+
+<h3>Five sites, not one</h3>
+<p>The ring was the reported symptom; the same function had four more of the identical mistake, all drawing <code>camera.y</code> px too high on the same maps:</p>
+<table>
+<tr><th>effect</th><th>was</th></tr>
+<tr><td><b>Ice Spike rune ring</b> (reported)</td><td><code>player.y + player.h/2 - (game.camera.y || 0)</code></td></tr>
+<tr><td>Phantom Waltz time ripple (player)</td><td><code>player.y + player.h/2 - (game.camera.y || 0)</code></td></tr>
+<tr><td>Phantom Waltz ripple (decoy)</td><td><code>_pwD.y + _pwD.h/2 - (game.camera.y || 0)</code></td></tr>
+<tr><td>Mirror Step greyscale decoy</td><td><code>_mdD.y - (game.camera.y || 0)</code></td></tr>
+<tr><td>Flame-trail patches</td><td><code>f.y - camY</code></td></tr>
+</table>
+<p>All five now use world-Y directly. <b>X is deliberately untouched</b> &mdash; only Y is translated, so entities still subtract <code>camera.x</code> by hand exactly as <code>drawPlayer</code> does; the measurement confirms dx was already 0 on both a flat and a vertical map.</p>
+
+<h3>This is the third time for this bug class</h3>
+<p>The same double-subtraction was fixed for <code>drawProjectiles</code> in v0.26.x (its comment: <em>"drew every B-ult / turret projectile at p.y − 2·camera.y … the Sage Meteor Sigil 'B' shot simply never appeared"</em>) and for the quest pin in v0.29.896. Both fixed a single site. So <code>scripts/ice_ring_anchor_test.mjs</code> now carries a <b>structural guard</b> as well as the runtime measurement: it fails if <em>any</em> line in <code>drawFlameTrail</code> subtracts <code>camera.y</code>, since nothing in that function legitimately can. Against the pre-fix build it lists all five; against this one, none.</p>
+
+<h3>Verified</h3>
+<table>
+<tr><th>scene</th><th>camera.y</th><th>ring offset from player &mdash; before</th><th>after</th></tr>
+<tr><td>Coral Reef Depths (underwater, vertical)</td><td>1317</td><td>dx 0, <b>dy −1317</b></td><td><b>dx 0, dy 0</b></td></tr>
+<tr><td>Forest (flat, control)</td><td>0</td><td>dx 0, dy 0</td><td>dx 0, dy 0</td></tr>
+</table>
+<p>The test reads the live canvas transform at the moment of the ring's own <code>drawImage</code>, so it measures where the ring actually lands on the device rather than trusting the arithmetic that produced it.</p>
+
+
+
+<h2>v0.30.157 <span class="tag"><span class="pill bug">bug</span> The world map would not open at all from a file:// build</span></h2>
+<p>Reported by the tester: <em>when i press &quot;W&quot; key or use taxi uncle to look at world map &mdash; the world map doesnt open.</em> Both entry points, no error, no toast, nothing.</p>
+<p><b>Both of them go through the same function, and it was throwing before it drew anything.</b> <code>_renderWorldMapDiagram</code> builds the galaxy backdrop by drawing <code>backgrounds/worldmap_bg.webp</code> into a canvas and calling <code>toDataURL()</code>. Drawing an image taints a canvas on a <code>file://</code> origin, and <code>toDataURL()</code> on a tainted canvas throws <code>SecurityError</code>. That throw escaped the builder <em>before the first node was drawn and before either modal was shown</em> &mdash; so the map never appeared, and because the W key path swallows exceptions at the event-listener boundary, it failed in total silence.</p>
+<p>Reproduced by re-pointing the plate at a second local origin, which taints identically: <code>SecurityError: Tainted canvases may not be exported</code>, <code>worldmap-modal</code> stuck at <code>display:none</code> with 0 children, <code>taxi-modal</code> the same. After the fix, under that same taint: both modals <code>flex</code>, 80 nodes drawn, backdrop present.</p>
+<p><b>The fix keeps the map and drops the decoration.</b> The export is guarded; on failure the plate is marked tainted for the session and the backdrop is re-rastered as the procedural galaxy &mdash; the same sky already used while the plate is still decoding, which draws no image and therefore cannot taint. Both call sites are additionally wrapped, because the backdrop is decoration and the map is not. On a normally served build nothing changes: verified the plate still decodes, the taint flag stays false, and the painted backdrop is still what you see.</p>
+<p><b>Why it only bites testers.</b> A playtest zip gets unzipped and the HTML double-clicked, which is <code>file://</code>; every developer and every hosted build runs over http, where the canvas is clean. The codebase already guards this exact hazard in three other places &mdash; the gear eraser, the Codex fit scan, the MojiMon tint &mdash; and the world-map raster was the one that never got one. Opening the game through <code>Mojiworld.cmd</code> instead of the raw HTML serves it over http and restores those three too.</p>
+
+
+<h2>v0.30.156 <span class="tag"><span class="pill polish">balance</span> Lifesteal: 1.5% per source, 7% combined</span></h2>
+<p>Per user: <em>nerf the equipments stats and boons to adjust that the max tier of lifesteal is at 1.5% each, and total combined lifesteal is at 7% max.</em></p>
+
+<h3>First: the v0.30.155 cap had been wiped from main</h3>
+<p>Before any of this could be built on, the combined-lifesteal cap shipped in v0.30.155 was <b>gone from <code>main</code></b> &mdash; zero occurrences of <code>LX_LIFESTEAL_CAP</code> or <code>_lxLsTake</code>, and all three uncapped heal expressions back in place. The commit is still in history; a later one wrote <code>mojiworld_game.html</code> from a stale buffer. <code>9c6a5863</code> ("per-item equipment crit cap 20&nbsp;&rarr;&nbsp;25") records <b>98 deletions</b> in that file for what should have been a one-line change. This release restores the cap and applies the nerf on top of it.</p>
+
+<h3>Per-source ceiling: 1.5%</h3>
+<p>Every innate item stat was rescaled so the highest in the game &mdash; Oblivion Whisper, T10 legendary, 12% &mdash; lands exactly on 1.5%. The mapping is monotonic, so the ladder between pieces is unchanged: Wraith Fangs still out-steals Eclipse Daggers by the same ordering.</p>
+<table>
+<tr><th>was</th><th>now</th><th>was</th><th>now</th><th>was</th><th>now</th></tr>
+<tr><td>2%</td><td>0.3%</td><td>5%</td><td>0.6%</td><td>9%</td><td>1.1%</td></tr>
+<tr><td>3%</td><td>0.4%</td><td>7%</td><td>0.9%</td><td>10%</td><td>1.3%</td></tr>
+<tr><td>4%</td><td>0.5%</td><td>8%</td><td>1.0%</td><td>12%</td><td><b>1.5%</b></td></tr>
+</table>
+<ul>
+<li><b>Random affix roll</b> &mdash; 5&ndash;10% &rarr; <b>0.5&ndash;1.5%</b>. Rolls are integers, so the roll now counts <em>tenths</em> of a percent (5&ndash;15 through <code>scale: r/1000</code>). Its <code>unit</code> is cleared: the raw roll is appended to a <code>'%'</code> in four other places, and a 1.2% affix would have read "12%" there.</li>
+<li><b>'of Vampirism' suffix</b> &mdash; 2&ndash;5% &rarr; <b>0.5&ndash;1.5%</b>.</li>
+<li><b>Shadowweave 2-piece set bonus</b> &mdash; 4% &rarr; <b>0.5%</b>, on the same ladder as the items. Its blurb text is updated too.</li>
+<li><b>Berserker boon</b> (skill tree) &mdash; 5% &rarr; <b>1.5%</b>, in both places that grant it: the node's <code>apply()</code> and the mods rebuild that re-derives it after a wipe. The test asserts those two agree, because a mismatch would only show up after a save wipe.</li>
+<li><b>Item tooltip</b> now shows one decimal. Every value is under 2% and <code>Math.round</code> was turning a 1.5% stat into "2% Lifesteal" &mdash; a tooltip overstating the stat by a third.</li>
+</ul>
+
+<h3>Combined ceiling: 10% &rarr; 7%</h3>
+<p>Reaching it now takes roughly five stacked sources instead of a single end-game piece.</p>
+
+<h3>Verified</h3>
+<p><code>scripts/lifesteal_cap_test.mjs</code> drives real hits with every source stacked and measures healing against damage actually dealt:</p>
+<table>
+<tr><th>scenario</th><th>before the cap existed</th><th>now</th></tr>
+<tr><td>all four sources stacked</td><td>84.78%</td><td><b>7.00%</b></td></tr>
+<tr><td>burning target (Sanguine Flame)</td><td>134.78%</td><td><b>7.00%</b></td></tr>
+<tr><td>high-DEF target</td><td>578.33%</td><td><b>6.99%</b></td></tr>
+<tr><td>basic-attack talent alone (must still heal)</td><td>3.48%</td><td>4.00%</td></tr>
+</table>
+<p>New <code>scripts/lifesteal_source_cap_test.mjs</code> covers the other half &mdash; that no source <em>declares</em> more than 1.5%, so the combined cap is a backstop rather than the only thing holding the line. Against the pre-nerf build it reports <b>29 sources over the ceiling</b>; against this one, none.</p>
+
+<h3>What was left alone, deliberately</h3>
+<p>The request named equipment and boons, so <b>job passives</b> (Knight 10%, Warlock 15%) and the <b>18 temp-fx ult windows</b> (5&ndash;25%) keep their values. They are skills, not gear. Both are still bounded by the 7% combined cap &mdash; but note the consequence: a Warlock's passive alone saturates that cap, so gear lifesteal contributes nothing further for that job until the passive is scaled too. The source test prints both lists on every run so the omission stays visible rather than silent.</p>
+
+
+
 <h2>v0.30.155 <span class="tag"><span class="pill bug">bug</span> The Act III arrival card plays at the bone graveyards only</h2>
 <p>Per user, after a tester met it walking into Lava Cavern: <em>ACT III arrival card should only play at bone graveyards.</em></p>
 <p>Act III's card was mapped to <b>twelve</b> maps and fired on whichever the player reached first &mdash; so "the cutscene before Lava Cavern" was never a Lava Cavern cutscene at all, it was the continent-crossing card landing wherever the route happened to go. Now two: <code>boneGraveyard</code> and <code>boneGraveyard2</code>. Dropped: Stardust Atrium, Storm Crest, Lava Cavern, Coral Reef, Sauro Slope, Kelp Forest, Bubble Grotto, Distorted Threshold, Fractured Reflection, Abyssal Trench.</p>
