@@ -121,6 +121,41 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.158 <span class="tag"><span class="pill bug">bug</span> The Ice Spike ring floated 1,317&nbsp;px above the caster underwater</span></h2>
+<p>Per user: <em>bug with ice spike, the circle seems to be disjointed from my character when using the skill in underwater maps</em> &mdash; and it should <em>stick with my character regardless of the map I am on.</em></p>
+
+<h3>Why only underwater</h3>
+<p><code>drawFlameTrail</code> runs from <code>drawParticles</code>, which <code>drawGame</code> calls <b>inside</b> the vertical-scroll translate and never restores before:</p>
+<pre><code>if (game.camera.y) ctx.translate(0, -Math.round(game.camera.y));
+...
+drawParticles();            // -&gt; drawFlameTrail(), still translated</code></pre>
+<p>World-Y is therefore already on screen by the time the ring draws &mdash; but it subtracted <code>camera.y</code> a <b>second</b> time, so it landed exactly <code>camera.y</code> px above the caster. Flat maps have <code>camera.y === 0</code> and show nothing at all, and <b>every underwater map is an <code>isVerticalTower</code> map</b> (Coral Reef Depths, Abyssal Trench) &mdash; which is why the bug looked like a water bug.</p>
+<p>Measured on the pre-fix build, Coral Reef Depths at <code>camera.y</code> 1317: the ring's device centre sat <b>dy −1317</b> from the player's, and dy 0 on Forest. Not a wobble &mdash; the error <em>is</em> the camera scroll.</p>
+
+<h3>Five sites, not one</h3>
+<p>The ring was the reported symptom; the same function had four more of the identical mistake, all drawing <code>camera.y</code> px too high on the same maps:</p>
+<table>
+<tr><th>effect</th><th>was</th></tr>
+<tr><td><b>Ice Spike rune ring</b> (reported)</td><td><code>player.y + player.h/2 - (game.camera.y || 0)</code></td></tr>
+<tr><td>Phantom Waltz time ripple (player)</td><td><code>player.y + player.h/2 - (game.camera.y || 0)</code></td></tr>
+<tr><td>Phantom Waltz ripple (decoy)</td><td><code>_pwD.y + _pwD.h/2 - (game.camera.y || 0)</code></td></tr>
+<tr><td>Mirror Step greyscale decoy</td><td><code>_mdD.y - (game.camera.y || 0)</code></td></tr>
+<tr><td>Flame-trail patches</td><td><code>f.y - camY</code></td></tr>
+</table>
+<p>All five now use world-Y directly. <b>X is deliberately untouched</b> &mdash; only Y is translated, so entities still subtract <code>camera.x</code> by hand exactly as <code>drawPlayer</code> does; the measurement confirms dx was already 0 on both a flat and a vertical map.</p>
+
+<h3>This is the third time for this bug class</h3>
+<p>The same double-subtraction was fixed for <code>drawProjectiles</code> in v0.26.x (its comment: <em>"drew every B-ult / turret projectile at p.y − 2·camera.y … the Sage Meteor Sigil 'B' shot simply never appeared"</em>) and for the quest pin in v0.29.896. Both fixed a single site. So <code>scripts/ice_ring_anchor_test.mjs</code> now carries a <b>structural guard</b> as well as the runtime measurement: it fails if <em>any</em> line in <code>drawFlameTrail</code> subtracts <code>camera.y</code>, since nothing in that function legitimately can. Against the pre-fix build it lists all five; against this one, none.</p>
+
+<h3>Verified</h3>
+<table>
+<tr><th>scene</th><th>camera.y</th><th>ring offset from player &mdash; before</th><th>after</th></tr>
+<tr><td>Coral Reef Depths (underwater, vertical)</td><td>1317</td><td>dx 0, <b>dy −1317</b></td><td><b>dx 0, dy 0</b></td></tr>
+<tr><td>Forest (flat, control)</td><td>0</td><td>dx 0, dy 0</td><td>dx 0, dy 0</td></tr>
+</table>
+<p>The test reads the live canvas transform at the moment of the ring's own <code>drawImage</code>, so it measures where the ring actually lands on the device rather than trusting the arithmetic that produced it.</p>
+
+
 <h2>v0.30.x <span class="tag"><span class="pill polish">polish</span> Equipment crit cap back to 20% per item</span></h2>
 <p>Per user: <em>sorry push it down to 20%.</em> This reverts the raise in the entry below, restoring the v0.26.461 value. That entry is now history, not current behaviour.</p>
 <table>
