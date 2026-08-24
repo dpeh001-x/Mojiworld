@@ -55,6 +55,19 @@ const TG_TAIL = ', ominous but clearly a warning marker not an explosion, vibran
   + 'style, crisp thick outline, single centered vertical column, transparent background, no text';
 
 const SIGNS = {
+  // v0.30.x — Virga the Seraph. Per user her attack becomes RAINING COLUMNS OF
+  // LIGHT rather than fireballs, so she needs the per-caster column art the
+  // other four column signs already have. Palette is her own, taken from the
+  // zodiac table rather than invented: base #ffeecc, aura #ffee99, hi #ffffff,
+  // element 'light', described as a winged maiden.
+  virgo: {
+    beam: 'seraph holy-light theme: radiant warm white and pale gold, a blinding white core with soft '
+      + 'golden falloff, drifting weightless feathers and rising motes of light inside the beam, faint '
+      + 'concentric halo rings stacked up the column, thin prismatic glints, no fire and no smoke',
+    tg: 'seraph holy-light theme: pale gold and warm white warning light, translucent drifting feathers '
+      + 'and slow motes inside the column, a glowing golden halo rune ring at the base, serene and '
+      + 'judgemental rather than fiery',
+  },
   taurus: {
     beam: 'granite-bull earth theme: dusty stone-grey and warm amber light, cracked granite shards and '
       + 'tumbling rock chips rising inside the beam, glowing molten seams between the stones, ochre dust haze',
