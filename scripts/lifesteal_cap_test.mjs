@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// Per user: "nerf max limit of combined lifesteal to only 10% of damage dealt".
+// Per user: "nerf max limit of combined lifesteal to only 10% of damage
+// dealt", then "max tier of lifesteal is at 1.5% each, and total combined
+// lifesteal is at 7% max".
 //
 // Four independent paths heal off one hit — gear/mods, the job-talent basic
 // steal, the temp-fx ult window, and weapon enhancements. This drives a hit
@@ -91,23 +93,48 @@ const out = await page.evaluate(async () => {
   window.getMaxHp = _origMax;
   window.getEquipBonus = _origEq;
   if (_origTfx) window.talentFx = _origTfx;
-  return results;
+  // The per-source ceiling: no equipment innate stat, set bonus, affix roll
+  // or boon grant may declare more than 1.5%.
+  const overs = [];
+  try {
+    const scan = (list, label, get) => {
+      for (const it of (list || [])) {
+        const v = get(it);
+        if (v > 0.015 + 1e-9) overs.push(label + " " + (it.name || "?") + " = " + (v * 100).toFixed(2) + "%");
+      }
+    };
+    if (typeof SHOP_ITEMS !== "undefined") scan(SHOP_ITEMS, "item", (i) => i.lifesteal || 0);
+    if (typeof AFFIX_POOL !== "undefined") {
+      for (const a of AFFIX_POOL) {
+        if (a.stat !== "lifesteal") continue;
+        const top = a.scale(a.max);
+        if (top > 0.015 + 1e-9) overs.push("affix " + a.name + " max = " + (top * 100).toFixed(2) + "%");
+      }
+    }
+    if (typeof SUFFIXES !== "undefined" && SUFFIXES.vampirism) {
+      let hi = 0;
+      for (let i = 0; i < 400; i++) hi = Math.max(hi, SUFFIXES.vampirism.roll().lifesteal || 0);
+      if (hi > 0.015 + 1e-9) overs.push("suffix of Vampirism max = " + (hi * 100).toFixed(2) + "%");
+    }
+  } catch (e) { overs.push("scan error: " + e); }
+  return { results, overs };
 });
 await browser.close();
+const out2 = out.results ? out : { results: out, overs: [] };
 
 console.log('\n  ' + FILE + '\n');
 console.log('  scenario'.padEnd(46) + 'damage'.padStart(12) + 'healed'.padStart(12) + 'ratio'.padStart(9));
 let fail = 0, checked = 0;
-for (const r of out) {
+for (const r of out2.results) {
   if (r.ratio === null) { console.log('  ' + r.label.padEnd(46) + '   no damage dealt — INCONCLUSIVE'); fail++; continue; }
   if (r.clippedAtFull) { console.log('  ' + r.label.padEnd(46) + '   healed to full — INCONCLUSIVE'); fail++; continue; }
   checked++;
-  const bad = r.ratio > 0.1005                     // small epsilon for integer rounding
+  const bad = r.ratio > 0.0705                     // small epsilon for integer rounding
            || (/must still heal/.test(r.label) && r.healed <= 0);
   if (bad) fail++;
   console.log('  ' + r.label.padEnd(46) + String(r.dealt).padStart(12) + String(r.healed).padStart(12) +
-              (r.ratio * 100).toFixed(2).padStart(8) + '%' + (bad ? '   <-- OVER 10%' : ''));
+              (r.ratio * 100).toFixed(2).padStart(8) + '%' + (bad ? '   <-- OVER 7%' : ''));
 }
 if (!checked) { console.error('\nFAIL — nothing was actually measured.'); process.exit(1); }
-if (fail) { console.error('\nFAIL — combined lifesteal exceeds 10% of damage dealt.'); process.exit(1); }
-console.log('\nPASS — combined lifesteal is capped at 10% of damage dealt.');
+if (fail) { console.error('\nFAIL — combined lifesteal exceeds 7% of damage dealt.'); process.exit(1); }
+console.log('\nPASS — combined lifesteal is capped at 7% of damage dealt.');
