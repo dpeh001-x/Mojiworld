@@ -395,6 +395,43 @@ const TARGETS = {
       + 'fine detail that disappears when shrunk. Fully transparent background, no ground shadow, no background '
       + 'scenery, no text, no border, no frame, not pixel art, not photorealistic.',
   },
+  // Taur the Granite Bull — GORING CHARGE (per user: 'zodiac taurus boss is way
+  // too easy… add more lethal attacks like a charging one, with like zones
+  // indicating danger'). Two pieces of art the attack needs:
+  //  tg_dash_zodiac_taurus — the danger LANE drawn during the brace. Kind-level
+  //    tg_dash exists and stays the fallback; Taurus earns his own for the same
+  //    reason the four column signs did — the lane is the read that saves you,
+  //    and it should look like the thing about to run you over.
+  //  fx_taurus_gore — the impact when it connects.
+  // Both are stretched across a wide band at draw time, so they are authored
+  // 16:9 and must read at a glance, not reward inspection.
+  tg_dash_zodiac_taurus: {
+    out: 'Sprites/fx/tg_dash_zodiac_taurus.webp',
+    ar: 'ar_16_9',
+    prompt: 'A danger-lane warning marker for a charging bull, seen flat on the ground and running left to right: '
+      + 'a long horizontal corridor edged top and bottom by heavy cracked-granite kerbs, its floor filled with a row '
+      + 'of five large forward-pointing chevron arrows in warning amber that get brighter toward the right, deep '
+      + 'stone fissures splitting the ground between them, and small rocks and dust shaken loose along the edges. '
+      + 'Wider than it is tall, filling the frame edge to edge, unmistakably a lane you must not stand in.',
+    style: ' Bold 2D game VFX overlay in the style of an action RPG danger telegraph: ONE horizontal lane centred '
+      + 'in frame, crisp hard-edged shapes, flat graphic shading, warning amber and dusty granite grey-brown with '
+      + 'a dark cracked outline. Semi-transparent look with an EMPTY unpainted middle band so the floor reads '
+      + 'through it. No characters, no bull, no text, no numbers. Fully transparent background, no scenery, no '
+      + 'border, no frame, not pixel art, not photorealistic.',
+  },
+  fx_taurus_gore: {
+    out: 'Sprites/fx/fx_taurus_gore.webp',
+    ar: 'ar_16_9',
+    prompt: 'A massive impact burst of shattered stone, seen side on: a blinding pale-gold core at the centre where '
+      + 'the blow landed, a ring of jagged granite shards and dust blasting outward horizontally in both '
+      + 'directions, two curved horn-shaped shockwave arcs sweeping out from the middle, and a low cloud of tan '
+      + 'dust boiling along the bottom. Violent and heavy, wider than it is tall, filling the frame.',
+    style: ' Bold 2D game VFX sprite in the style of an action RPG impact effect: ONE burst centred in frame, '
+      + 'crisp hard-edged shards with clean silhouettes, flat graphic shading, pale gold core falling off through '
+      + 'dusty amber to dark granite brown. NOT an airbrushed blur, NOT a soft fog. Reads instantly as a '
+      + 'bone-breaking impact at thumbnail size. Fully transparent background, no ground shadow, no scenery, no '
+      + 'text, no border, no frame, not pixel art, not photorealistic.',
+  },
 };
 
 const only = val('--only', null);

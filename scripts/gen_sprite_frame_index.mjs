@@ -35,6 +35,9 @@ const FRAME_DIRS = [
   'bosses/attack', 'bosses/idle', 'bosses/walk',
   'bosses/weave', 'bosses/duck',   // v0.29.951 - barnaby evade cycles
   'bosses/zodiac/attack', 'bosses/zodiac/idle', 'bosses/zodiac/walk',
+  // v0.30.x - Taur's charge set. A dir absent from this list is invisible to the
+  // loader's frame count, so the art sits on disk and the game never asks for it.
+  'bosses/zodiac/charge',
   'monsters/idle', 'monsters/walk', 'monsters/attack',
   'npc/idle', 'npc/walk',
   'fx/anim', 'vfx/anim', 'projectiles/anim', 'summons/anim',

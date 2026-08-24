@@ -9845,7 +9845,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.167';
+const GAME_VERSION = 'v0.30.168';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11892,6 +11892,12 @@ const LX_FX = (() => {
     tg_swing:                       'tg_swing.webp',                       // hollow warning frame + ghost slash arc
     tg_smash:                       'tg_smash.webp',                       // isolated molten ground-crack band
     tg_dash:                        'tg_dash.webp',                        // charge-lane chevrons (point right; draw mirrors)
+    // v0.30.x - Taur's own charge lane. Kind-level tg_dash stays the fallback
+    // for every other charger; the bull earns a per-sign warning for the same
+    // reason the four column signs did (v0.30.91) - the lane is the read that
+    // saves you, so it should look like the thing about to run you over.
+    tg_dash_zodiac_taurus:          'tg_dash_zodiac_taurus.webp',           // granite kerbs + amber chevrons
+    fx_taurus_gore:                 'fx_taurus_gore.webp',                  // the impact when the charge connects
     // v0.29.x — boss HP bar furniture (ludo.ai, scripts/gen_bossbar_ui.mjs).
     // Per user: "For the boss HP bar can customise and make images nicer for
     // it." The frame has a hollow transparent centre; the fill is an energy
@@ -32279,6 +32285,27 @@ for (const z of ZODIAC_SIGNS) {
   let _zTraits = null;
   if (_sigMove[z.id] === 'swing') _zTraits = { activeBoss:true, bigMelee:{ kind:'swing', dmgMul:1.3, range:175, swingW:255, swingH:115, cdMs:6600, telegraphMs:640 } };
   else if (_sigMove[z.id] === 'column') _zTraits = { activeBoss:true, columnStrike:{ dmgMul:1.25, width:120, range:580, cdMs:7400, telegraphMs:720, color:z.colors.aura, sprite:'fx_col_zodiac_' + z.id } };   // v0.30.91 — per-sign beam (was one shared 'fx_col_zodiac')
+  // v0.30.x - TAUR'S GORING CHARGE (per user: Zodiac taurus boss is way too
+  // easy; add more lethal attacks like a charging one, with zones indicating
+  // danger, then deal a lot of damage, like bring down to 1).
+  //
+  // The bull already had the right idea and none of the threat: an unstoppable
+  // gait, a plant, a stomp, a headbutt - all contact damage a geared player
+  // simply tanks. braceDash is the existing engine trait for exactly this shape
+  // (a long dead-still brace with the direction locked at brace start, then a
+  // committed sprint) and it already publishes a lane zone to _lxAttackZones, so
+  // the danger read comes for free and is honest: sidestep it and the charge
+  // commits to empty air.
+  //
+  // What is new is the gore option below - a connect takes a FRACTION of max HP,
+  // ceilinged at 99.9% so a full-HP player is left on 1 rather than deleted.
+  if (z.id === 'taurus') {
+    _zTraits = _zTraits || { activeBoss: true };
+    _zTraits.activeBoss = true;
+    _zTraits.braceDash = { range: 900, minRange: 90, cdMs: 7000, telegraphMs: 950,
+      dashMs: 420, distance: 620,
+      gore: { frac: 0.99, label: 'a goring charge', color: '#ffcc66' } };
+  }
   // v0.29.338 — PER-SIGN STAT PROFILES. Per user: "vary the STATs in a manner
   // that would suit the boss — Ariel should have way higher ATK and lower EVA,
   // Taur being a bull should have high ATK and even higher DEF and HP but low
@@ -75403,6 +75430,7 @@ function updateMonsters(dt) {
           && Math.abs(_bdDx) > (bd.minRange || 120) && _bdOnScreen) {
         m._braceDashing = true;
         m._bdPhase = 'brace';
+        m._bdGored = false;              // v0.30.x - gore lands at most once per charge
         m._bdT = bd.telegraphMs || 850;
         m._bdDir = _bdDx > 0 ? 1 : -1;   // locked NOW, not at launch
         m.facing = m._bdDir;
@@ -75443,6 +75471,40 @@ function updateMonsters(dt) {
           // + brake glide, and the LANE carries that as its margin.
           m._bdTravel = (m._bdTravel || 0) + Math.abs(m._bdVx);
           if (m._bdTravel >= (bd.distance || 520)) m._bdT = 0;
+          // v0.30.x - GORE. Once per charge, a body-overlap with the player is
+          // catastrophic rather than incidental, and it fires on TOUCH (per user).
+          // It deliberately does NOT check player.invulnerable: the bull is on top
+          // of you when it connects, so its ordinary contact damage has already
+          // landed this tick and granted 600ms of i-frames - gating on those meant
+          // the gore silently did nothing, every time. OVERLAP is the honest dodge
+          // check: a real dash or sidestep puts you outside the body, and the lane
+          // was drawn for most of a second before any of it. _god still saves you.
+          //
+          // The damage is applied here rather than through _coopSelfBossHit for the
+          // same reason - that helper returns early on any i-frame. Everything else
+          // it does is kept: block/warrior/aegis mitigation, and the
+          // 99.9%-of-maxHP ceiling via _diffDmg's isFrac path.
+          if (bd.gore && !m._bdGored && player && player.hp > 0 && !player._god
+              && Math.abs((player.x + player.w / 2) - (m.x + m.w / 2)) < (m.w + player.w) / 2
+              && Math.abs((player.y + player.h / 2) - (m.y + m.h / 2)) < (m.h + player.h) / 2) {
+            m._bdGored = true;
+            const _mh = Math.max(1, (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100));
+            let _g = Math.max(1, Math.floor(_mh * Math.min(1, bd.gore.frac || 0.99)));
+            if (player.blockTimer > 0) { _g = Math.max(1, Math.floor(_g * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
+            if (player.cls === 'warrior' && typeof _warriorDr === 'function') _g = Math.max(1, Math.floor(_g * _warriorDr()));
+            if (player._aegis) _g = Math.max(1, Math.floor(_g * 0.5));
+            player.hp -= (typeof _diffDmg === 'function') ? _diffDmg(_g, 0, true) : _g;
+            player.lastHitTime = game.time;
+            player.invulnerable = 900;
+            player._lastDamageSource = bd.gore.label || 'a goring charge';
+            player.vx = m._bdDir * 22; player.vy = -9;          // launched, not nudged
+            if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: '-' + _g, life: 46, color: bd.gore.color || '#ffcc66', big: true });
+            if (typeof spawnSpriteBurst === 'function') spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'fx_taurus_gore', { size: 260, life: 46 });
+            if (typeof addShake === 'function') addShake(22);
+            if (typeof addHitStop === 'function') addHitStop(130);
+            if (typeof flash === 'function') flash(0.65);
+            if (typeof showToast === 'function') showToast('GORED - do not stand in the lane!', 'danger');
+          }
           if (game.time % 2 === 0 && typeof _budgetedParticlePush === 'function') {
             _budgetedParticlePush({
               x: m.x + m.w/2 - m._bdDir * m.w * 0.5,
@@ -117580,6 +117642,7 @@ function _warmMapArt(id, opts) {
       const sign = sp.type.slice(7);
       addImg(ZODIAC_SPRITES, sign, sign);
       addSet(ZODIAC_IDLE_FRAMES[sign], sign); addSet(ZODIAC_WALK_FRAMES[sign], sign); addSet(ZODIAC_ATTACK_FRAMES[sign], sign);
+      addSet(ZODIAC_CHARGE_FRAMES[sign], sign);   // v0.30.x - Taur's charge set
       continue;
     }
     const keys = Object.keys(BOSS_SPRITES || {}).filter((k) => k === sp.type || k.indexOf(sp.type) === 0);
@@ -117729,11 +117792,18 @@ const ZODIAC_SPRITE_TYPES = ['aries','taurus','gemini','cancer','leo','virgo','l
 const ZODIAC_ATTACK_FRAMES = Object.create(null);
 const ZODIAC_IDLE_FRAMES = Object.create(null);
 const ZODIAC_WALK_FRAMES = Object.create(null);
+// v0.30.x - a FOURTH zodiac state, per user: Taur gets his own charge sprite.
+// Only he ships frames today; any sign can join by dropping
+// Sprites/bosses/zodiac/charge/<sign>_N.webp, and a sign without them falls
+// through to its normal attack/walk/idle exactly as before.
+const ZODIAC_CHARGE_FRAMES = Object.create(null);
+_loadBossFrames(ZODIAC_CHARGE_FRAMES, 'zodiac/charge', ZODIAC_SPRITE_TYPES);
 _loadBossFrames(ZODIAC_ATTACK_FRAMES, 'zodiac/attack', ZODIAC_SPRITE_TYPES);
 _loadBossFrames(ZODIAC_IDLE_FRAMES, 'zodiac/idle', ZODIAC_SPRITE_TYPES);
 _loadBossFrames(ZODIAC_WALK_FRAMES, 'zodiac/walk', ZODIAC_SPRITE_TYPES);
 // state: 'attack' | 'walk' | 'idle'
 function _zodiacFrame(sign, state) {
+  if (state === 'charge') return _bossLoopFrame(ZODIAC_CHARGE_FRAMES[sign], _BOSS_ATK_FRAME_MS);
   if (state === 'attack') return _bossLoopFrame(ZODIAC_ATTACK_FRAMES[sign], _BOSS_ATK_FRAME_MS);
   if (state === 'walk')   return _bossLoopFrame(ZODIAC_WALK_FRAMES[sign], _BOSS_WALK_FRAME_MS);
   return _bossPingPongFrame(ZODIAC_IDLE_FRAMES[sign], _BOSS_IDLE_FRAME_MS);
@@ -117765,6 +117835,7 @@ function _zodiacRelFrame(frames, frameMs, elapsedMs, pingpong) {
   return frames[i < n ? i : seqLen - i];
 }
 function _zodiacStateImg(sign, state, elapsedMs) {
+  if (state === 'charge') return _zodiacRelFrame(ZODIAC_CHARGE_FRAMES[sign], _BOSS_ATK_FRAME_MS, elapsedMs, false);
   if (state === 'attack') return _zodiacRelFrame(ZODIAC_ATTACK_FRAMES[sign], _BOSS_ATK_FRAME_MS, elapsedMs, false);
   if (state === 'walk')   return _zodiacRelFrame(ZODIAC_WALK_FRAMES[sign], _BOSS_WALK_FRAME_MS, elapsedMs, false);
   return _zodiacRelFrame(ZODIAC_IDLE_FRAMES[sign], _BOSS_IDLE_FRAME_MS, elapsedMs, true);
@@ -117777,7 +117848,14 @@ function _zodiacAnimTick(m, now) {
   // v0.29.273 — displacement signal joins the hysteresis: a zodiac that
   // repositions by writing m.x directly (or drifts under the vx gate) walks.
   const _dispWalk = (m._animXV || 0) > 0.25;
-  const st = atk ? 'attack' : ((_dispWalk || (wasWalk ? vx > 0.35 : vx > 0.85)) ? 'walk' : 'idle');
+  // v0.30.x - CHARGE outranks everything while the brace-dash owns the body,
+  // across BOTH its phases: the brace is the tell (head down, hooves digging)
+  // and the dash is the sprint, and they are one motion. Gated on the frames
+  // existing so a sign without a charge set is untouched.
+  const _charging = !!(m._braceDashing && typeof ZODIAC_CHARGE_FRAMES !== 'undefined'
+    && ZODIAC_CHARGE_FRAMES[m.zodiacSign] && ZODIAC_CHARGE_FRAMES[m.zodiacSign].length);
+  const st = _charging ? 'charge'
+    : (atk ? 'attack' : ((_dispWalk || (wasWalk ? vx > 0.35 : vx > 0.85)) ? 'walk' : 'idle'));
   if (!a) {
     a = m._zAnim = { state: st, since: now, prev: null, prevElapsed: 0, transAt: -1e9 };
   } else if (a.state !== st) {
@@ -127513,7 +127591,11 @@ function _lxAttackZones() {
         x: _d > 0 ? m.x : m.x - _dist,
         y: m.y, w: m.w + _dist, h: m.h,
         prog: Math.max(0, Math.min(1, 1 - m._bdT / (bd.telegraphMs || 1))),
-        color: m.color || '#ffb26b', dir: _d > 0 ? 'right' : 'left', tg: 'tg_dash' });
+        color: m.color || '#ffb26b', dir: _d > 0 ? 'right' : 'left',
+        // v0.30.x - per-boss lane art where it exists; an unregistered or
+        // undecoded key falls through to the shared chevrons and then to the
+        // procedural fill, so this can never blank the warning.
+        tg: (typeof LX_FX !== 'undefined' && LX_FX['tg_dash_' + m.type]) ? 'tg_dash_' + m.type : 'tg_dash' });
     }
     if (m._bigMeleeFiring && m._bigMeleeT > 0 && m.traits && m.traits.bigMelee
         && _lxZoneWorthy(m, (m.traits.bigMelee.dmgMul || 1.5))) {

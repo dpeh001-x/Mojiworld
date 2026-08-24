@@ -105,6 +105,18 @@ const TARGETS = {
       'only movement is ON the ball: the wound paper layers shift and settle against one another, the soft ' +
       'shadows in the creases breathe, the quilted dimples flex, and a few tiny tissue fibres drift off the ' +
       'surface. A continuous seamless loop that ends exactly as it began.' },
+  // v0.30.x — TAUR'S CHARGE SET (per user: 'The Taur should have a charge sprite
+  // generated as well by ludo.ai then wire it in'). Zodiac bosses carry their own
+  // frame sets under Sprites/bosses/zodiac/<state>/<sign>_N.webp; this adds a
+  // fourth state, 'charge', drawn while the brace-dash runs. Authored at the base
+  // sprite's exact dimensions so it overlays the portrait pixel-for-pixel, like
+  // the attack/idle/walk sets beside it.
+  taurus: { base: 'Sprites/bosses/zodiac/taurus.webp', dir: 'Sprites/bosses/zodiac/charge',
+    motion: 'The granite bull CHARGES: he drops his head and levels his horns straight forward, front hooves '
+      + 'digging in and throwing chips of stone, body low and driving hard to one side, hind legs extending in a '
+      + 'full committed gallop, dust and grit kicking up around the hooves and streaming behind him. He builds '
+      + 'from a braced crouch into a full sprint and holds it. He stays the same size and stays centred in frame '
+      + '— it is the POSE that changes, not his position. A continuous loop that ends ready to begin again.' },
 };
 
 const only = val('--only', null);
