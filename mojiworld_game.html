@@ -9845,7 +9845,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.177';
+const GAME_VERSION = 'v0.30.178';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11899,6 +11899,7 @@ const LX_FX = (() => {
     tg_col_zodiac_scorpio:       'tg_col_zodiac_scorpio.webp',
     tg_col_zodiac_sagittarius:   'tg_col_zodiac_sagittarius.webp',
     tg_col_zodiac_aquarius:      'tg_col_zodiac_aquarius.webp',
+    tg_col_zodiac_virgo:         'tg_col_zodiac_virgo.webp',       // v0.30.x — seraph holy-light warning
     // v0.29.x — kind-level zone telegraphs (ludo.ai, scripts/
     // gen_zone_kind_telegraphs.mjs). Per user: "so there should be no hit
     // plain hit boxes, ensure that" — with these, every zone kind has art and
@@ -11934,6 +11935,7 @@ const LX_FX = (() => {
     fx_col_zodiac_scorpio:       'fx_col_zodiac_scorpio.webp',
     fx_col_zodiac_sagittarius:   'fx_col_zodiac_sagittarius.webp',
     fx_col_zodiac_aquarius:      'fx_col_zodiac_aquarius.webp',
+    fx_col_zodiac_virgo:         'fx_col_zodiac_virgo.webp',       // v0.30.x — seraph holy-light pillar
     fx_col_blightelder:   'fx_col_blightelder.webp',   // v0.26.892 — Blight Elder — blighted-nature pillar
     fx_col_ossuarytyrant: 'fx_col_ossuarytyrant.webp', // v0.26.892 — Ossuary Tyrant — erupting-bone pill
     fx_col_arbiter:     'fx_col_arbiter.webp',     // v0.29.316 — The Arbiter — amber-gold judgement beam
@@ -32344,6 +32346,28 @@ for (const z of ZODIAC_SIGNS) {
       dashMs: 420, distance: 620,
       gore: { frac: 0.99, label: 'a goring charge', color: '#ffcc66' } };
   }
+  // v0.30.x - VIRGA THE SERAPH rains light, per user: "Virga should not be
+  // shooting fireballs, it should rain columns of light rays, that does
+  // significant significant damage, occasional leaves user with 1hp".
+  //
+  // She is deliberately NOT in _sigMove: that table drives the seven signs with
+  // no bespoke AI, and Virga has one (sin / judgment / banishment). So she opts
+  // into columnStrike explicitly, exactly the way Taur opts into braceDash above
+  // - the signature layer rides on top of her ritual instead of replacing it.
+  //
+  // radiance is the column's answer to Taur's gore: a rare connect that takes a
+  // FRACTION of max HP, ceilinged at 99.9% by _diffDmg's isFrac path, so a
+  // full-HP player is left standing on 1 rather than deleted.
+  if (z.id === 'virgo') {
+    _zTraits = _zTraits || { activeBoss: true };
+    _zTraits.activeBoss = true;
+    _zTraits.columnStrike = {
+      dmgMul: 2.4, width: 130, range: 980, cdMs: 5200, telegraphMs: 820,
+      color: '#ffeecc', sprite: 'fx_col_zodiac_virgo',
+      volley: { count: 3, spread: 620, jitter: 80 },
+      radiance: { chance: 0.2, frac: 0.99, label: 'a pillar of judgment', color: '#fff3c4' },
+    };
+  }
   // v0.29.338 — PER-SIGN STAT PROFILES. Per user: "vary the STATs in a manner
   // that would suit the boss — Ariel should have way higher ATK and lower EVA,
   // Taur being a bull should have high ATK and even higher DEF and HP but low
@@ -39660,6 +39684,18 @@ function _gravHeavyBand(phase, kind) {
 // (Sovereign collapse, Gravitos singularity) stay the only true kills.
 // Tiers: gravitos keeps its own phase bands; super/hyper/zodiac bosses hit
 // harder than story bosses. Returns null for non-bosses (no clamp).
+function _columnLanesFor(cs, cx) {
+  const v = cs && cs.volley;
+  const n = (v && v.count | 0) > 1 ? (v.count | 0) : 1;
+  if (n === 1) return [cx];
+  const spread = (v.spread || 520), jitter = (v.jitter || 0);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i / (n - 1)) - 0.5;   // -0.5 .. +0.5
+    out.push(cx + t * spread + (Math.random() - 0.5) * jitter);
+  }
+  return out;
+}
 function _bossHitBand(m, kind) {
   if (!m || !(m.isBoss || m.boss || m.zodiacBoss)) return null;
   if (m.type === 'gravitos') {
@@ -75615,6 +75651,10 @@ function updateMonsters(dt) {
         m._columnFiring = true;
         m._columnT = cs.telegraphMs;
         m._columnTargetX = _playerCx;    // v0.26.218
+        // v0.30.x — a volley rains SEVERAL pillars at once. Locked at
+        // telegraph start, same as the single-column target, so the drawn
+        // zones and the strike can never disagree.
+        m._columnLanes = _columnLanesFor(cs, _playerCx);
         if (typeof _lxSovAtkPose === 'function') _lxSovAtkPose(m, 'column', 66);   // v0.30.89
       }
       // PHASE 2 — telegraph tick (vertical particle warning line)
@@ -75626,7 +75666,9 @@ function updateMonsters(dt) {
           const _rows = 4 + Math.floor(_intensity * 4);
           for (let _ri = 0; _ri < _rows; _ri++) {
             _budgetedParticlePush({
-              x: m._columnTargetX + (Math.random() - 0.5) * cs.width,
+              x: (m._columnLanes && m._columnLanes.length
+                   ? m._columnLanes[(Math.random() * m._columnLanes.length) | 0]
+                   : m._columnTargetX) + (Math.random() - 0.5) * cs.width,
               y: _camY + Math.random() * H,
               vx: (Math.random() - 0.5) * 0.6,
               vy: -1 - Math.random() * 1.5 * _intensity,
@@ -75650,11 +75692,12 @@ function updateMonsters(dt) {
             const _cb = _dmgBandPct(_clv);   // v0.29.269 — level-ramped band
             _csDmg = Math.min(Math.floor(_cref * _cb.pCap), Math.max(Math.floor(_cref * _cb.pFloor), _csDmg));
           }
+          const _csLanes = (m._columnLanes && m._columnLanes.length) ? m._columnLanes : [m._columnTargetX];
           const _camY2 = (game.camera && game.camera.y) || 0;
           const _colY = _camY2 - 200;
           const _colH = H + 400;   // covers full viewport + buffer above/below
-          game.projectiles.push({
-            x: m._columnTargetX - cs.width / 2,
+          for (const _lane of _csLanes) game.projectiles.push({
+            x: _lane - cs.width / 2,
             y: _colY,
             vx: 0, vy: 0,
             w: cs.width, h: _colH, life: 22,
@@ -75665,17 +75708,18 @@ function updateMonsters(dt) {
             // v0.26.350 — per-caster ludo.ai column sprite (LX_FX key);
             // render falls back to the procedural beam if unset / undecoded.
             _colSprite: cs.sprite || null,
+            _radiance: cs.radiance || null,   // v0.30.x — see the hit resolver
             _sourceLabel: m.name || 'Pillar Strike',
             _zoneAttack: !!(m.isBoss || m.boss),   // v0.29.x — a boss pillar is always drawn, so it always punishes
             _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'heavy') : null,   // v0.29.131 — boss heavy-hit band (null for elites)
           });
           addShake(12); flash(0.18);
           // Ground-impact ring at the foot of the column.
-          for (let _ki = 0; _ki < 10; _ki++) {
-            const _ka = (_ki / 10) * Math.PI * 2;
+          for (let _ki = 0; _ki < 10 * _csLanes.length; _ki++) {
+            const _ka = ((_ki % 10) / 10) * Math.PI * 2;
             if (typeof _budgetedParticlePush === 'function') {
               if (!_budgetedParticlePush({
-                x: m._columnTargetX,
+                x: _csLanes[(_ki / 10) | 0],
                 y: _camY2 + H - 40,
                 vx: Math.cos(_ka) * 5,
                 vy: Math.sin(_ka) * 4 - 2,
@@ -87840,10 +87884,26 @@ function updateProjectiles(dt) {
         // (gap is already priced into p.damage at spawn) without capping
         // against the player's own bar — HP investment keeps full value.
         if (p._normalMob && _projLost > 0) _projLost = Math.min(_projLost, Math.floor((p.damage || dmg) * 1.35));
+        if (p._radiance && _projLost > 0 && !player._god && Math.random() < (p._radiance.chance || 0.2)) {
+          const _rmh = Math.max(1, (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100));
+          let _rg = Math.max(1, Math.floor(_rmh * Math.min(1, p._radiance.frac || 0.99)));
+          if (player.blockTimer > 0) { _rg = Math.max(1, Math.floor(_rg * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
+          if (player.cls === 'warrior' && typeof _warriorDr === 'function') _rg = Math.max(1, Math.floor(_rg * _warriorDr()));
+          if (player._aegis) _rg = Math.max(1, Math.floor(_rg * 0.5));
+          _projLost = (typeof _diffDmg === 'function') ? _diffDmg(_rg, 0, true) : _rg;
+          player._radianceHit = p._radiance.label || 'a pillar of judgment';
+          if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2,
+            text: '-' + _projLost + ' RADIANCE', life: 60, color: p._radiance.color || '#fff3c4', size: 20, big: true });
+          if (typeof addShake === 'function') addShake(20);
+          if (typeof addHitStop === 'function') addHitStop(120);
+          if (typeof flash === 'function') flash(0.6);
+          if (typeof showToast === 'function') showToast('RADIANCE — do not stand under the pillars!', 'danger');
+        }
         player.hp -= _projLost;
         player.lastHitTime = game.time;
         // v0.25.243 (X1) — projectile origin label (or skill name fallback).
-        player._lastDamageSource = p.sourceLabel || p.skill || 'a stray bolt';
+        player._lastDamageSource = player._radianceHit || p.sourceLabel || p.skill || 'a stray bolt';
+        player._radianceHit = null;
         // Zodiac projectile status effects on player
         if (p.freeze)  player.frozenTimer = Math.max(player.frozenTimer || 0, p.freeze);
         if (p.poison)  {
@@ -87967,7 +88027,9 @@ function updateProjectiles(dt) {
     // which on vertical-tower maps killed projectiles the moment they
     // crossed the canvas-bottom-equivalent in world space — way before
     // they'd actually leave the playable world).
-    if (hit || p.life <= 0 || p.x < 0 || p.x > game.mapData.worldWidth || p.y < -50 || p.y > (game.mapData.worldHeight || H) + 50) {
+    if (hit || p.life <= 0 || p.x < 0 || p.x > game.mapData.worldWidth
+        || (p.y < -50 && p.skill !== 'column')   // v0.30.x — see above: columns start above the viewport BY DESIGN
+        || p.y > (game.mapData.worldHeight || H) + 50) {
       game.projectiles.splice(i, 1);
     }
   }
@@ -125163,10 +125225,13 @@ const ZODIAC_AI = {
         // v0.25.622 — added cx (was missing — NaN cascade)
         // v0.25.634 — owner:'enemy' so the resolver targets player not Virgo
         const _vCx = player.x + 14;
-        game.hazards.push({
-          type: 'meteor_warn', x: _vCx, y: 440, cx: _vCx, timer: 55,
-          damage: m.atk * 1.3, color: '#ffeecc', owner: 'enemy', radius: 90,   // v0.26.1033 — match drawn telegraph width (see Leo comet fix)
-        });
+        const _vCs = m.traits && m.traits.columnStrike;
+        if (_vCs) {
+          m._columnFiring = true;
+          m._columnT = _vCs.telegraphMs || 820;
+          m._columnTargetX = _vCx;
+          m._columnLanes = _columnLanesFor(_vCs, _vCx);
+        }
         m._virgoChannel = 0;
         m._virgoChannelHp = null;
       }
@@ -127927,8 +127992,9 @@ function _lxAttackZones() {
         && (m.isBoss || m.boss)) {   // boss pillars ALWAYS mark — user carve-out
       const cs = m.traits.columnStrike;
       const _camY = (game.camera && game.camera.y) || 0;
-      out.push({ kind: 'column',
-        x: m._columnTargetX - cs.width / 2, y: _camY, w: cs.width, h: H,
+      const _zLanes = (m._columnLanes && m._columnLanes.length) ? m._columnLanes : [m._columnTargetX];
+      for (const _zl of _zLanes) out.push({ kind: 'column',
+        x: _zl - cs.width / 2, y: _camY, w: cs.width, h: H,
         prog: Math.max(0, Math.min(1, 1 - m._columnT / (cs.telegraphMs || 1))),
         color: cs.color || '#ffeeaa', dir: 'up',
         // v0.29.x — per-boss telegraph art. An unregistered key is harmless:
