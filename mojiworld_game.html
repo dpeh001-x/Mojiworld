@@ -9845,7 +9845,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.179';
+const GAME_VERSION = 'v0.30.180';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -118042,6 +118042,14 @@ const ZODIAC_CHARGE_FRAMES = Object.create(null);
 // loop, so the lion crossed the arena trotting through the air. Same opt-in
 // shape as charge: a sign without frames falls through untouched.
 const ZODIAC_POUNCE_FRAMES = Object.create(null);
+// v0.30.x - a SIXTH zodiac state, per user: "Virga should be able to transit
+// from walking to flying mode as well and shoot". Her WALK is already a gentle
+// hover (a winged seraph does not stride), so flight needs a visibly different
+// read or the transition is invisible: wings sweeping wide and slow, body
+// tilted, robes streaming. Same opt-in shape as charge and pounce - a sign
+// without frames falls through to walk/idle exactly as before.
+const ZODIAC_FLY_FRAMES = Object.create(null);
+_loadBossFrames(ZODIAC_FLY_FRAMES, 'zodiac/fly', ZODIAC_SPRITE_TYPES);
 _loadBossFrames(ZODIAC_POUNCE_FRAMES, 'zodiac/pounce', ZODIAC_SPRITE_TYPES);
 _loadBossFrames(ZODIAC_CHARGE_FRAMES, 'zodiac/charge', ZODIAC_SPRITE_TYPES);
 _loadBossFrames(ZODIAC_ATTACK_FRAMES, 'zodiac/attack', ZODIAC_SPRITE_TYPES);
@@ -118049,6 +118057,7 @@ _loadBossFrames(ZODIAC_IDLE_FRAMES, 'zodiac/idle', ZODIAC_SPRITE_TYPES);
 _loadBossFrames(ZODIAC_WALK_FRAMES, 'zodiac/walk', ZODIAC_SPRITE_TYPES);
 // state: 'attack' | 'walk' | 'idle'
 function _zodiacFrame(sign, state) {
+  if (state === 'fly')    return _bossLoopFrame(ZODIAC_FLY_FRAMES[sign], _BOSS_WALK_FRAME_MS);
   if (state === 'pounce') return _bossLoopFrame(ZODIAC_POUNCE_FRAMES[sign], _BOSS_ATK_FRAME_MS);
   if (state === 'charge') return _bossLoopFrame(ZODIAC_CHARGE_FRAMES[sign], _BOSS_ATK_FRAME_MS);
   if (state === 'attack') return _bossLoopFrame(ZODIAC_ATTACK_FRAMES[sign], _BOSS_ATK_FRAME_MS);
@@ -118082,6 +118091,7 @@ function _zodiacRelFrame(frames, frameMs, elapsedMs, pingpong) {
   return frames[i < n ? i : seqLen - i];
 }
 function _zodiacStateImg(sign, state, elapsedMs) {
+  if (state === 'fly')    return _zodiacRelFrame(ZODIAC_FLY_FRAMES[sign], _BOSS_WALK_FRAME_MS, elapsedMs, false);
   if (state === 'pounce') return _zodiacRelFrame(ZODIAC_POUNCE_FRAMES[sign], _BOSS_ATK_FRAME_MS, elapsedMs, false);
   if (state === 'charge') return _zodiacRelFrame(ZODIAC_CHARGE_FRAMES[sign], _BOSS_ATK_FRAME_MS, elapsedMs, false);
   if (state === 'attack') return _zodiacRelFrame(ZODIAC_ATTACK_FRAMES[sign], _BOSS_ATK_FRAME_MS, elapsedMs, false);
@@ -118109,9 +118119,12 @@ function _zodiacAnimTick(m, now) {
   // keeps exactly the behaviour it had.
   const _pouncing = !!(!m.onGround && typeof ZODIAC_POUNCE_FRAMES !== 'undefined'
     && ZODIAC_POUNCE_FRAMES[m.zodiacSign] && ZODIAC_POUNCE_FRAMES[m.zodiacSign].length);
+  const _flying = !!(m._zFlying && typeof ZODIAC_FLY_FRAMES !== 'undefined'
+    && ZODIAC_FLY_FRAMES[m.zodiacSign] && ZODIAC_FLY_FRAMES[m.zodiacSign].length);
   const st = _charging ? 'charge'
     : (_pouncing ? 'pounce'
-    : (atk ? 'attack' : ((_dispWalk || (wasWalk ? vx > 0.35 : vx > 0.85)) ? 'walk' : 'idle')));
+    : (_flying ? 'fly'
+    : (atk ? 'attack' : ((_dispWalk || (wasWalk ? vx > 0.35 : vx > 0.85)) ? 'walk' : 'idle'))));
   if (!a) {
     a = m._zAnim = { state: st, since: now, prev: null, prevElapsed: 0, transAt: -1e9 };
   } else if (a.state !== st) {
@@ -125242,6 +125255,64 @@ const ZODIAC_AI = {
     m.vy = Math.sin(game.time * 0.03) * 0.6;
     m.vx += dir * 0.04;
     if (Math.abs(m.vx) > 1.4) m.vx = Math.sign(m.vx) * 1.4;
+    // v0.30.x - FLIGHT MODE.
+    const _vFlyEvery = phase === 1 ? 9200 : phase === 2 ? 7200 : 5400;
+    const _V_RISE = 720, _V_HOLD = 5400, _V_FALL = 900, _V_ALT = 200;
+    if (m._zFlyCd == null) m._zFlyCd = _vFlyEvery * 0.55;
+    if (!m._zFlying) m._zFlyCd -= dt;
+    if (!m._zFlying && m._zFlyCd <= 0 && !(m._virgoChannel > 0) && !m._virgoExecuteFiring) {
+      m._zFlying = true; m._zFlyT = 0;
+      m._zFlyGroundY = m.y;
+      m._noGravity = true;          // physics block honors this
+      m.onGround = false;
+      if (typeof showToast === 'function') showToast('Virga takes wing — the sky is hers.', 'epic');
+      if (typeof addShake === 'function') addShake(7);
+    }
+    if (m._zFlying) {
+      m._zFlyT += dt;
+      m.vy = 0;
+      const _vEase = (t) => t * t * (3 - 2 * t);
+      if (m._zFlyT < _V_RISE) {
+        m.y = m._zFlyGroundY - _V_ALT * _vEase(m._zFlyT / _V_RISE);
+      } else if (m._zFlyT < _V_RISE + _V_HOLD) {
+        m.y = m._zFlyGroundY - _V_ALT + Math.sin(game.time * 0.055) * 8;
+        // SHOOTING FROM ALTITUDE is the point of the mode: she is above you
+        // casting light down, so the pillars come roughly twice as often.
+        // Clamped rather than assigned, so a strike that just fired still
+        // gets its own beat before the next.
+        if (m._columnCd > 2000) m._columnCd = 2000;
+      } else if (m._zFlyT < _V_RISE + _V_HOLD + _V_FALL) {
+        m.y = m._zFlyGroundY - _V_ALT * (1 - _vEase((m._zFlyT - _V_RISE - _V_HOLD) / _V_FALL));
+      } else {
+        m._zFlying = false; m._noGravity = false;
+        m.y = m._zFlyGroundY; m._zFlyCd = _vFlyEvery;
+      }
+      // SOARING is driven as a position, not as a velocity. The first version
+      // accumulated into m.vx the way her grounded gait does, and measured
+      // 30 px of chase in four seconds against a player yanked 567 px away:
+      // something downstream zeroes a _noGravity boss's vx every frame, so all
+      // that ever landed was the one frame's worth of acceleration. Stepping x
+      // directly is immune to that, and the 40 px deadzone stops her jittering
+      // once she is overhead. m.vx is kept in sync so the walk/idle displacement
+      // signal still reads something honest.
+      const _vdx = (player.x + player.w / 2) - (m.x + m.w / 2);
+      const _vStep = (Math.abs(_vdx) > 40)
+        ? Math.sign(_vdx) * Math.min(2.6, Math.abs(_vdx) * 0.05) : 0;
+      m.x += _vStep;
+      m.vx = _vStep;
+      const _vWw = (game.mapData && game.mapData.worldWidth) || 1400;
+      if (m.x < 0) m.x = 0;
+      if (m.x + m.w > _vWw) m.x = _vWw - m.w;
+      m.facing = dir || m.facing;
+      // Drifting feathers, so the altitude reads even against a busy backdrop.
+      if (game.time % 5 === 0 && typeof _budgetedParticlePush === 'function') {
+        _budgetedParticlePush({
+          x: m.x + Math.random() * m.w, y: m.y + m.h * 0.55,
+          vx: (Math.random() - 0.5) * 0.8, vy: 0.7 + Math.random() * 0.9,
+          life: 34 + Math.floor(Math.random() * 14), color: '#ffeecc', size: 2 + Math.random() * 2,
+        });
+      }
+    }
     // Active channel — interruptible.
     if (m._virgoChannel > 0) {
       // v0.26.402 — Banishment is now a COMMITTED ritual. It no longer aborts

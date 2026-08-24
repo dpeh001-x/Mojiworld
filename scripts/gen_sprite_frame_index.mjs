@@ -40,6 +40,8 @@ const FRAME_DIRS = [
   'bosses/zodiac/charge',
   // v0.30.x - Regulus's pounce set.
   'bosses/zodiac/pounce',
+  // v0.30.x - Virga's flight set.
+  'bosses/zodiac/fly',
   'monsters/idle', 'monsters/walk', 'monsters/attack',
   'npc/idle', 'npc/walk',
   'fx/anim', 'vfx/anim', 'projectiles/anim', 'summons/anim',
