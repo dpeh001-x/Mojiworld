@@ -9845,7 +9845,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.172';
+const GAME_VERSION = 'v0.30.173';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -123287,6 +123287,18 @@ function zodiacBossAI(m, dt, distToPlayer) {
 // telegraph is never yanked out from under the player.
 //   noLunge: this sign drives its own approach and must NOT also receive the
 //            shared dash-at-the-player lunge (it would contradict the gait).
+// v0.30.x - SUN POUNCE tunables. Per user: "make it an attack where before
+// pouncing there is a windup signal and when he pounces and lands in the radius
+// which is calibrated near to the players current coordinate the last 2 seconds
+// ago, deals high damage."
+//
+// The two-second lag IS the mechanic: the circle is not where you ARE, it is
+// where you WERE, so standing still is what gets you killed and simply having
+// moved is the counterplay. That also means the radius wants to be generous -
+// it should punish rooting to the spot, not imperfect footwork.
+const LEO_POUNCE_LAG = 120;      // frames of lag. game.time is a 60fps FRAME counter, so 120 == 2.0s
+const LEO_POUNCE_R = 150;        // slam radius, px, measured from the drawn circle
+const LEO_POUNCE_FRAC = 0.6;     // 60% of max HP - high, but deliberately NOT Taur's near-execute
 const _ZODIAC_GAIT = {
   // Ariel — WEAVE. The user's brief: in and out, fast. Rushes to knife range,
   // recoils, rushes again. Never sits still, never commits.
@@ -124709,6 +124721,23 @@ const ZODIAC_AI = {
   // length cut to 400ms to reward players who DID dodge but got grazed.
   // Phase 3 adds solar flare — three random sky comets drop together.
   leo(m, dt, dist, phase, z) {
+    // v0.30.x - SUN POUNCE, part 1: remember where the player has been. The
+    // attack aims at a two-second-old sample out of this ring, so the trail has
+    // to be recorded every tick whatever else he is doing.
+    if (!m._leoTrail) m._leoTrail = [];
+    if (player && player.hp > 0) {
+      m._leoTrail.push({ x: player.x + player.w / 2, y: player.y + player.h / 2, t: game.time | 0 });
+      while (m._leoTrail.length > 240) m._leoTrail.shift();
+    }
+    // The mark belongs to the two pounce states and to nothing else. It is NOT
+    // enough for those states to clean up after themselves: zodiacBossAI snaps
+    // patternState back to 'idle' from outside the machine on every phase cross,
+    // which stranded a live danger circle on the floor with no attack behind it
+    // (caught by the harness, not by eye). Clearing it here makes that whole
+    // class of bug impossible, whoever resets the state.
+    if (m._leoMarking && m.patternState !== 'pounceWindup' && m.patternState !== 'pounceLeap') {
+      m._leoMarking = false; m._leoPounceX = null; m._leoPounceY = null;
+    }
     // v0.26.085 — Per user "Leo Royal Spotlight — Leo marks one player
     // as the challenger. Only that player can interrupt Leo's strongest
     // attacks, but they also take increased damage." Adapted for solo:
@@ -124772,10 +124801,154 @@ const ZODIAC_AI = {
         // flare 30% / roar 38% / comet 32%. P1-P2 weighting is unchanged.
         m.patternState = _zChoose(m, dist, phase, [
           { s: 'flare',      w: 0.30, band: 'any',  when: phase === 3, hard: true },
+          // v0.30.x - the pounce is now a real attack and a frequent one. It is
+          // deliberately band:'any': the leap closes any distance, so unlike the
+          // roar (near) and comet (far) there is no range it does not want.
+          { s: 'pounceWindup', w: 0.55, band: 'any' },
           { s: 'roarWindup', w: 0.50, band: 'near', opener: true },
           { s: 'comet',      w: 0.50, band: 'far' },
         ]);
         m._leoFired = false; m._leoRoarDir = dir;
+      }
+    } else if (m.patternState === 'pounceWindup') {
+      // WINDUP. He plants and crouches - the tell - and the circle is placed on
+      // the floor at once, so the read is the windup PLUS the whole flight, about
+      // 1.3 s to walk out of it. The mark is taken ONCE, here, and never re-aimed:
+      // a leap that tracked you in mid-air would make the two-second lag a lie.
+      m.vx *= 0.55;
+      if (m._leoPounceX == null) {
+        const _cut = (game.time | 0) - LEO_POUNCE_LAG;
+        let _mk = null;
+        for (const _p of m._leoTrail) { if (_p.t <= _cut) _mk = _p; else break; }
+        // Before two seconds of history exists - he opens with this, or the player
+        // only just arrived - fall back to the OLDEST sample held, never to their
+        // live position: the attack must not quietly become a homing missile in
+        // exactly the moment the player has the least information.
+        if (!_mk && m._leoTrail.length) _mk = m._leoTrail[0];
+        m._leoPounceX = _mk ? _mk.x : (player.x + player.w / 2);
+        m._leoPounceY = _mk ? _mk.y : (player.y + player.h / 2);
+        m._leoMarking = true;
+        if (typeof showToast === 'function') showToast('SUN POUNCE - he is aiming where you WERE', 'legendary');
+        if (typeof addShake === 'function') addShake(5);
+      }
+      // the tell: a ring collapsing INTO him as he gathers (the roar's ring
+      // expands - opposite motion, so the two telegraphs never read alike), plus
+      // embers boiling up out of the marked ground.
+      if (m.patternTimer % 4 < dt && typeof _budgetedParticlePush === 'function') {
+        const _r = 34 - Math.min(1, m.patternTimer / 1100) * 20;
+        for (let k = 0; k < 5; k++) {
+          const a = (k / 5) * Math.PI * 2 + game.time * 0.06;
+          _budgetedParticlePush({ x: m.x + m.w / 2 + Math.cos(a) * _r,
+            y: m.y + m.h - 8 + Math.sin(a) * _r * 0.45,
+            vx: 0, vy: -0.4, life: 14, color: '#ffdd66', size: 2.5 });
+        }
+        for (let k = 0; k < 3; k++) {
+          _budgetedParticlePush({ x: m._leoPounceX + (Math.random() - 0.5) * LEO_POUNCE_R * 1.8,
+            y: m._leoPounceY + (Math.random() - 0.5) * 16,
+            vx: 0, vy: -0.9 - Math.random(), life: 20, color: '#ffaa33', size: 2.5 });
+        }
+      }
+      if (m.patternTimer > 1100) {
+        // The ARC SCALES WITH THE GAP. A flat vy = -13 gave a flat ~51 frames of
+        // airtime, and the harness caught him touching down 179 px short of his own
+        // circle on a long pounce - the worst possible failure for an attack whose
+        // entire contract is 'it lands there'. A bigger gap now buys a higher, longer
+        // arc, so the flight is always long enough to cover it.
+        const _gap0 = Math.abs(m._leoPounceX - (m.x + m.w / 2));
+        m.vy = -(11 + Math.min(7, _gap0 / 110));
+        m.facing = (m._leoPounceX >= m.x + m.w / 2) ? 1 : -1;
+        m.patternState = 'pounceLeap'; m.patternTimer = 0;
+        m._leoLanded = false; m._leoWasAir = false; m._leoRecov = 0;
+        if (typeof _gaitPuff === 'function') { try { _gaitPuff(m, z, 0, 10); } catch (e) {} }
+      }
+    } else if (m.patternState === 'pounceLeap') {
+      // FLIGHT. The pounce frames are already on screen - they key off !onGround
+      // (v0.30.170) - so all this owns is steering. vx is DRIVEN at the mark each
+      // frame rather than solved once at launch, because a one-shot ballistic
+      // solve would have to model gravMul() and the 0.94 per-frame vx decay in
+      // updateMonsters, and would be wrong the moment either is retuned. The gait
+      // tick that would otherwise clamp |vx| to 2.4 is already gated off: it
+      // returns early for any patternState that is not 'idle'.
+      if (!m.onGround) m._leoWasAir = true;
+      if (!m._leoLanded) {
+        const _gap = m._leoPounceX - (m.x + m.w / 2);
+        m.vx = Math.max(-24, Math.min(24, _gap * 0.16));
+        m.facing = _gap >= 0 ? 1 : -1;
+        if (game.time % 2 === 0 && typeof _budgetedParticlePush === 'function') {
+          _budgetedParticlePush({ x: m.x + m.w / 2 + (Math.random() - 0.5) * m.w * 0.5,
+            y: m.y + m.h * (0.5 + Math.random() * 0.4), vx: -m.facing * 1.4,
+            vy: 0.6, life: 16, color: '#ffcc55', size: 2.5 });
+        }
+      }
+      if (!m._leoLanded && m._leoWasAir && m.onGround) {
+        m._leoLanded = true; m._leoRecov = 420;
+        m.vx *= 0.1;
+        // The slam resolves at the CIRCLE, not at his body. If terrain stops him
+        // short the drawn ring is still what detonates - a player who left the
+        // marked ground is safe and a player who stayed in it is hit, which is
+        // the only version of this that is honest about its own telegraph.
+        const _lx = m._leoPounceX, _ly = m._leoPounceY;
+        if (typeof addShake === 'function') addShake(20);
+        if (typeof addHitStop === 'function') addHitStop(110);
+        if (typeof flash === 'function') flash(0.42);
+        if (typeof audio !== 'undefined' && audio.play) { try { audio.play('crit'); } catch (e) {} }
+        if (typeof spawnSpriteBurst === 'function') { try { spawnSpriteBurst(_lx, _ly, 'fx_taurus_gore', { size: LEO_POUNCE_R * 2.2, life: 42 }); } catch (e) {} }
+        if (typeof _budgetedParticlePush === 'function') {
+          for (let k = 0; k < 26; k++) {
+            const a = Math.PI + Math.random() * Math.PI;
+            _budgetedParticlePush({ x: _lx + (Math.random() - 0.5) * 40, y: _ly,
+              vx: Math.cos(a) * (2 + Math.random() * 6), vy: Math.sin(a) * (1 + Math.random() * 3.5),
+              life: 22 + Math.random() * 16, color: k % 2 ? '#ffdd66' : '#ff8822',
+              size: 2 + Math.random() * 2 });
+          }
+        }
+        // Co-op: this is boss AI, so the tick may be running with the player
+        // fields swapped to a partner - a direct write to `player` is discarded
+        // on restore. _coopBroadcastBossHit is the hook that re-applies it
+        // POSITIONALLY to the host and forwards it to remotes; the Royal Roar
+        // above goes through the same door.
+        if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(_lx, _ly, LEO_POUNCE_R, 0, LEO_POUNCE_FRAC, 'the Sun Pounce', '#ffdd66');
+        // NOT gated on i-frames, and that is the whole reason this attack works.
+        // He lands ON the circle, so on the tick before touchdown his own body is
+        // already overlapping the player - ordinary contact damage fires, grants
+        // 300 ms of invulnerability, and the 60%-of-max-HP slam it was telegraphing
+        // for 1.3 s is silently swallowed. The harness caught exactly that: a
+        // perfect landing on the mark that dealt nothing. The circle is the
+        // contract - if you are standing in it when it goes off, it hits. Taur's
+        // gore resolves the same way, for the same reason. Double-dipping is not a
+        // risk in the other direction: the contact check runs AFTER bossAI in
+        // updateMonsters, so the 800 ms set here suppresses it on the same tick.
+        if (player && player.hp > 0 && !player._god) {
+          const _pdx = (player.x + player.w / 2) - _lx, _pdy = (player.y + player.h / 2) - _ly;
+          if (Math.hypot(_pdx, _pdy) <= LEO_POUNCE_R) {
+            const _mh = Math.max(1, (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100));
+            let _d = Math.max(1, Math.floor(_mh * LEO_POUNCE_FRAC));
+            if (player.blockTimer > 0) { _d = Math.max(1, Math.floor(_d * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
+            if (player.cls === 'warrior' && typeof _warriorDr === 'function') _d = Math.max(1, Math.floor(_d * _warriorDr()));
+            if (player._aegis) _d = Math.max(1, Math.floor(_d * 0.5));
+            player.hp -= (typeof _diffDmg === 'function') ? _diffDmg(_d, 0, true) : _d;
+            player.lastHitTime = game.time;
+            player.invulnerable = 800;
+            player._lastDamageSource = 'the Sun Pounce';
+            player.vx = (_pdx >= 0 ? 1 : -1) * 13; player.vy = -8;
+            if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: '-' + _d + ' POUNCE', life: 52, color: '#ffdd66', size: 18, big: true });
+            if (typeof showToast === 'function') showToast('SUN POUNCE - caught standing still!', 'danger');
+          }
+        }
+      }
+      if (m._leoLanded) {
+        m.vx *= 0.8;
+        m._leoRecov -= dt;
+        if (m._leoRecov <= 0) {
+          m._leoMarking = false; m._leoPounceX = null; m._leoPounceY = null;
+          m.patternState = 'idle'; m.patternTimer = 0;
+        }
+      } else if (m.patternTimer > 3000) {
+        // Never strand the pattern: if the landing test somehow never fires (a
+        // fly-state boss, a map with no floor under the mark) the state still
+        // has to hand control back.
+        m._leoMarking = false; m._leoPounceX = null; m._leoPounceY = null;
+        m.patternState = 'idle'; m.patternTimer = 0;
       }
     } else if (m.patternState === 'roarWindup') {
       m.vx *= 0.7;
@@ -127727,6 +127900,24 @@ function _lxAttackZones() {
         // undecoded key falls through to the shared chevrons and then to the
         // procedural fill, so this can never blank the warning.
         tg: (typeof LX_FX !== 'undefined' && LX_FX['tg_dash_' + m.type]) ? 'tg_dash_' + m.type : 'tg_dash' });
+    }
+    // v0.30.x - Regulus's Sun Pounce circle. Published the instant the windup
+    // starts and held through the flight, because the whole attack is a promise
+    // about WHERE, made early. prog runs the windup so the ring fills as he
+    // gathers, then sits full while he is in the air.
+    //
+    // No _lxZoneWorthy() gate, and that is deliberate rather than an oversight:
+    // that helper asks whether m.atk * mul clears 30% of the player's max HP, and
+    // this attack does not scale off m.atk at all - it is a flat 60% of max HP,
+    // so it is worthy by construction at every level. Routing it through a test
+    // it structurally cannot fail would only add a way for it to go dark.
+    if (m._leoMarking && m._leoPounceX != null) {
+      const _lp = (m.patternState === 'pounceWindup')
+        ? Math.max(0, Math.min(1, (m.patternTimer || 0) / 1100)) : 1;
+      out.push({ kind: 'smash',
+        x: m._leoPounceX - LEO_POUNCE_R, y: m._leoPounceY - 16,
+        w: LEO_POUNCE_R * 2, h: 32,
+        prog: _lp, color: '#ffdd66', dir: 'center', tg: 'tg_smash' });
     }
     if (m._bigMeleeFiring && m._bigMeleeT > 0 && m.traits && m.traits.bigMelee
         && _lxZoneWorthy(m, (m.traits.bigMelee.dmgMul || 1.5))) {
