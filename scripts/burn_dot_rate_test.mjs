@@ -67,17 +67,19 @@ const R = await page.evaluate(async () => {
   for (let i = 0; i < 12; i++) { const r = (typeof _lxPadModalRoot === 'function') && _lxPadModalRoot(); if (!r) break; r.style.display = 'none'; }
   const out = {
     tickMs: (typeof LX_BURN_TICK_MS !== 'undefined') ? LX_BURN_TICK_MS : null,
-    dpsPct: (typeof LX_BURN_MAXHP_PCT_PER_SEC !== 'undefined') ? LX_BURN_MAXHP_PCT_PER_SEC : null,
+    tickPct: (typeof LX_BURN_TICK_MAXHP_PCT !== 'undefined') ? LX_BURN_TICK_MAXHP_PCT : null,
+    bossPct: (typeof LX_BURN_TICK_MAXHP_PCT_BOSS !== 'undefined') ? LX_BURN_TICK_MAXHP_PCT_BOSS : null,
     dpsMul: (typeof LX_BURN_DPS_MUL !== 'undefined') ? LX_BURN_DPS_MUL : null,
   };
 
   // Watch a burning mob's HP and time the gaps between drops.
-  const run = async (burnDmg, ms) => {
+  const run = async (burnDmg, ms, asBoss) => {
     game.monsters.length = 0;
     const m = spawnMonster(player.x + 320, player.y, 'horny', false);
     if (!m) return null;
     m.atk = 0; m.aggroTarget = null;
     m.maxHp = 200000; m.currentHp = 200000;      // big enough not to die mid-measure
+    if (asBoss) { m.isBoss = true; }
     const gaps = [], hits = [], vis = [];
     let last = m.currentHp, lastT = performance.now(), started = false;
     const t0 = performance.now();
@@ -110,6 +112,8 @@ const R = await page.evaluate(async () => {
   out.normal = await run(50, 9000);
   // An absurd burn, far above any cap: proves the ceiling holds.
   out.huge = await run(999999, 7000);
+  // Same absurd burn against a BOSS-flagged target: the tighter tier must bind.
+  out.hugeBoss = await run(999999, 7000, true);
 
   return out;
 });
@@ -119,9 +123,10 @@ const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 200) });
 const N = R.normal, H = R.huge;
 
-console.log(`  LX_BURN_TICK_MS ${R.tickMs}   dps mul ${R.dpsMul}   ceiling ${R.dpsPct != null ? (R.dpsPct * 100) + '% of maxHp per SECOND' : 'none'}`);
+console.log(`  LX_BURN_TICK_MS ${R.tickMs}   dps mul ${R.dpsMul}   cap ${R.tickPct * 100}%/tick (mobs) · ${R.bossPct * 100}%/tick (bosses)`);
 console.log(`  normal burn (burnDmg 50): ${N && N.ticks} ticks, median gap ${N && N.medianGap}ms, tick ${N && N.tickDmg}`);
-console.log(`  absurd burn (burnDmg 999999): ${H && H.ticks} ticks, biggest tick ${H && H.maxTick} of ${H && H.maxHp} maxHp`);
+console.log(`  absurd burn vs MOB : biggest tick ${H && H.maxTick} of ${H && H.maxHp} maxHp`);
+console.log(`  absurd burn vs BOSS: biggest tick ${R.hugeBoss && R.hugeBoss.maxTick} of ${R.hugeBoss && R.hugeBoss.maxHp} maxHp`);
 
 ok('the tick interval is the configured cadence, not 120ms',
    !!(N && N.medianGap && R.tickMs && Math.abs(N.medianGap - R.tickMs) <= 150),
@@ -132,16 +137,24 @@ ok('consecutive ticks LADDER instead of stacking on one spot',
 ok('CONTROL: burn still actually damages the target',
    !!(N && N.ticks >= 2 && N.tickDmg > 0),
    `${N && N.ticks} ticks of ${N && N.tickDmg} over 9s — nerfed, not disabled`);
-const perTickCap = (R.dpsPct && R.tickMs) ? Math.floor(200000 * R.dpsPct * (R.tickMs / 1000)) : null;
-ok('a single tick cannot exceed the per-second max-HP budget',
-   !!(H && H.maxTick && perTickCap && H.maxTick <= perTickCap + 1),
-   `biggest tick ${H && H.maxTick} vs cap ${perTickCap} (${R.dpsPct * 100}%/s over a ${R.tickMs}ms tick)`);
+const mobCap = R.tickPct ? Math.floor(200000 * R.tickPct) : null;
+const bossCap = R.bossPct ? Math.floor(200000 * R.bossPct) : null;
+const B = R.hugeBoss;
+ok('a burn tick on a MOB never exceeds 0.5% of its max HP',
+   !!(H && H.maxTick && mobCap && H.maxTick <= mobCap + 1),
+   `biggest tick ${H && H.maxTick} vs cap ${mobCap} (${R.tickPct * 100}% of ${H && H.maxHp})`);
+ok('a burn tick on a BOSS never exceeds 0.1% of its max HP',
+   !!(B && B.maxTick && bossCap && B.maxTick <= bossCap + 1),
+   `biggest tick ${B && B.maxTick} vs cap ${bossCap} (${R.bossPct * 100}% of ${B && B.maxHp})`);
+ok('the boss tier really is the tighter of the two',
+   !!(B && H && B.maxTick < H.maxTick),
+   `boss ${B && B.maxTick} vs mob ${H && H.maxTick} on the same absurd burnDmg`);
 ok('...so an absurd burnDmg can no longer delete a mob outright',
    !!(H && H.maxTick && H.maxTick < H.maxHp * 0.5),
    `burnDmg 999999 removed ${H && H.maxTick} of ${H && H.maxHp} in its biggest tick`);
-ok('a kill by burn alone takes a sane number of seconds',
-   !!(R.dpsPct && 1 / R.dpsPct >= 25),
-   `at the ceiling that is ${R.dpsPct ? (1 / R.dpsPct).toFixed(0) : '?'}s of pure burn, independent of the ${R.tickMs}ms cadence`);
+ok('burn alone is no longer a win condition',
+   !!(R.tickPct && R.tickMs && (1 / R.tickPct) * (R.tickMs / 1000) >= 60),
+   `at the mob ceiling a kill by burn alone needs ${R.tickPct ? Math.ceil(1 / R.tickPct) : '?'} ticks = ${R.tickPct && R.tickMs ? ((1 / R.tickPct) * (R.tickMs / 1000)).toFixed(0) : '?'}s`);
 
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }
