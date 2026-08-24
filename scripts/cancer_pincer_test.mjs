@@ -54,7 +54,7 @@ const palette = async (file) => {
 const P = (f) => path.join(ROOT, f);
 const cancer = await palette(P('Sprites/bosses/zodiac/cancer.webp'));
 const pincer = await palette(P('Sprites/projectiles/p_pincer.webp'));
-const claw = await palette(P('Sprites/projectiles/p_claw.webp'));
+const shell = await palette(P('Sprites/projectiles/p_krookshell.webp'));
 const animFiles = (await readdir(P('Sprites/projectiles/anim')))
   .filter((f) => /^pincer_\d+\.webp$/.test(f)).sort();
 const anims = [];
@@ -70,14 +70,15 @@ const NL = /\r?\n/;
 const COMMENT = /^\s*(\/\/|\*)/;
 const src = srcRaw.split(NL).filter((l) => !COMMENT.test(l)).join('\n');
 const pincerFires = (src.match(/skill: *'pincer'/g) || []).length;
-const clawMapped = /claw: *'p_claw\.webp'/.test(src);
+const clawMapped = /claw: *'p_krookshell\.webp'/.test(src);
+const noDangling = !/p_claw\.webp/.test(srcRaw);
 const pincerMapped = /pincer: *'p_pincer\.webp'/.test(src);
 const staleLabel = /Octobaby tentacle pincer/.test(src);
 
 const pc = (v) => (v * 100).toFixed(0) + '%';
 console.log(`  cancer boss    warm ${pc(cancer.warmShare)}  violet ${pc(cancer.violetShare)}  avg ${cancer.avg}`);
 console.log(`  p_pincer       warm ${pc(pincer.warmShare)}  violet ${pc(pincer.violetShare)}  avg ${pincer.avg}`);
-console.log(`  p_claw (Krook) warm ${pc(claw.warmShare)}  violet ${pc(claw.violetShare)}  avg ${claw.avg}`);
+console.log(`  p_krookshell   warm ${pc(shell.warmShare)}  violet ${pc(shell.violetShare)}  avg ${shell.avg}`);
 console.log(`  anim frames    violet: ${anims.map((a) => pc(a.violetShare)).join(' ')}`);
 
 const res = [];
@@ -89,11 +90,16 @@ ok('the pincer is warm-toned like Cancer, not violet',
 ok('every animation frame matches it',
    animFiles.length === 9 && anims.every((a) => a.violetShare < 0.12 && a.warmShare > 0.6),
    `${animFiles.length} frames, worst violet ${pc(Math.max(...anims.map((a) => a.violetShare)))}`);
-ok("CONTROL: King Krook's claw keeps the original violet art",
-   claw.violetShare > 0.4,
-   `p_claw violet ${pc(claw.violetShare)} — untouched, so his swipe did not turn pink`);
-ok('claw is mapped to its own file now', clawMapped && pincerMapped,
-   'claw -> p_claw.webp, pincer -> p_pincer.webp');
+// Krook's shell carries a royal-purple rim ON PURPOSE — it matches his cape —
+// so this asserts warm-DOMINANT rather than violet-free. Demanding zero violet
+// would reject the very detail that ties the shell to him.
+ok('King Krook throws a shell in his own colours, not a tentacle',
+   shell.warmShare > 0.6 && shell.violetShare < 0.35,
+   `p_krookshell warm ${pc(shell.warmShare)} / violet ${pc(shell.violetShare)} — the purple is the cape-matching rim`);
+ok('the two bosses no longer share one projectile file', clawMapped && pincerMapped,
+   'claw -> p_krookshell.webp, pincer -> p_pincer.webp');
+ok('nothing still points at the retired p_claw.webp', noDangling,
+   'the tentacle art is now p_tentacle.webp, unreferenced and free for an Octobaby attack');
 ok('the pincer is fired by exactly one thing (Cancer)', pincerFires === 1,
    `${pincerFires} fire site(s), comments excluded`);
 ok('the misleading Octobaby label is gone', !staleLabel,
