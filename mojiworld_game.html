@@ -9845,7 +9845,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.178';
+const GAME_VERSION = 'v0.30.179';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -40794,7 +40794,46 @@ let _lxPadModUsed = false;          // ...and did the player actually use the la
 let _lxPadTap = null;               // { key, polls } — a queued tap-on-release
 const _LX_STEAM_MOVE_Y_UP = true;   // Steam Input joystick: +Y is UP (browser gamepad: +Y is DOWN)
 const _LX_PAD_STICK_TRUST = 0.15;   // an axis must vary this much before it may move the player
-const _lxPadAxisSeen = Object.create(null);   // padIndex:axis -> { min, max }
+const _lxPadAxisSeen = Object.create(null);   // padIndex:axis -> { min, max, hat }
+// v0.30.x — DEVICE-AGNOSTIC HAT DETECTION.
+//
+// A real analog stick is clamped to [-1, 1]. An axis ever observed outside that
+// range can only be a D-pad hat packed into an axis. That is a property of the
+// HTML5 gamepad data, not of any particular vendor, so it identifies a hat on a
+// device nobody has profiled - which matters because the alternative is a
+// hardcoded vendor id and there is no Sony hardware here to test one against.
+//
+// Two jobs. First, a hat must never drive movement: the older guard trusted any
+// axis that had varied by 0.15, and a hat VARIES - that is what pressing the
+// D-pad does - so one press promoted it to a trusted stick and its ~3.2857
+// resting value became a stick held at full deflection for ever. Measured on a
+// generic pad with its hat at axis 3: 0 while fresh, 3.286 at rest after one
+// press. Second, knowing which axis is the hat lets the D-pad work on a pad no
+// profile matches, where today buttons 12-15 simply never fire.
+function _lxPadScanAxes(pad) {
+  if (!pad) return;
+  const ax = pad.axes || [];
+  for (let i = 0; i < ax.length; i++) {
+    const v = ax[i];
+    if (typeof v !== 'number' || !isFinite(v)) continue;
+    const key = (pad.index | 0) + ':' + i;
+    let seen = _lxPadAxisSeen[key];
+    if (!seen) seen = _lxPadAxisSeen[key] = { min: v, max: v, hat: false };
+    if (v < seen.min) seen.min = v;
+    if (v > seen.max) seen.max = v;
+    if (v < -1.05 || v > 1.05) seen.hat = true;    // sticky: a hat stays a hat
+  }
+}
+// Index of an axis known to be a hat, or -1. Used only when no profile matched.
+function _lxPadHatIndex(pad) {
+  if (!pad) return -1;
+  const n = (pad.axes || []).length;
+  for (let i = 0; i < n; i++) {
+    const seen = _lxPadAxisSeen[(pad.index | 0) + ':' + i];
+    if (seen && seen.hat) return i;
+  }
+  return -1;
+}
 // Known non-standard layouts. Sony pads under DirectInput-style enumeration put
 // the face buttons in a different order and expose the D-pad as a hat axis.
 function _lxPadProfile(pad) {
@@ -40857,6 +40896,10 @@ function _lxPadAxis(pad, which) {
   if (!seen) { seen = _lxPadAxisSeen[key] = { min: v, max: v }; }
   if (v < seen.min) seen.min = v;
   if (v > seen.max) seen.max = v;
+  // v0.30.x — a packed hat is never a stick, however much it has "varied".
+  // This is the check the 0.15 guard below cannot make: pressing the D-pad
+  // moves a hat by more than 0.15, which used to promote it to a trusted stick.
+  if (seen.hat) return 0;
   if ((seen.max - seen.min) < _LX_PAD_STICK_TRUST) return 0;   // never moved => not a stick
   return v;
 }
@@ -40868,6 +40911,13 @@ function _lxPadForget(padIndex) {
 function _lxPadBtn(pad, stdIdx) {
   if (!pad) return false;
   const prof = _lxPadProfile(pad);
+  // v0.30.x — no profile, but the axis scan has identified a hat: decode the
+  // D-pad from it rather than reading buttons 12-15 that this device does not
+  // have. Without this the D-pad is simply dead on any unprofiled pad.
+  if (!prof && stdIdx >= 12 && stdIdx <= 15) {
+    const _hi = _lxPadHatIndex(pad);
+    if (_hi >= 0) return !!_lxPadHat((pad.axes || [])[_hi])[stdIdx];
+  }
   if (prof) {
     if (stdIdx >= 12 && stdIdx <= 15) {
       const ax = pad.axes || [];
@@ -41687,6 +41737,7 @@ function _lxPadPoll() {
     // whenever Steam Input leaves a virtual pad enumerated alongside the
     // physical one. _lxPadPick prefers a standard-mapped device.
     const pad = _lxPadPick(pads);
+    _lxPadScanAxes(pad);   // v0.30.x — keeps the hat/stick classification current
     // Native Steam Input digital states (custom Steam controller configs), ORed in.
     let steamBtns = null;
     if (_steamAvailable() && window.SteamAPI.input && typeof window.SteamAPI.input.snapshot === 'function') {
