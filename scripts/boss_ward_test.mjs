@@ -7,7 +7,10 @@
 //   2. while it holds, every hit lands for exactly 1
 //   3. lifesteal therefore returns ZERO during it — the sustain loop stops
 //   4. it ENDS, and normal damage resumes (a ward that sticks is a soft lock)
-// Plus: regular monsters must never be warded.
+// Plus: regular monsters must never be warded; the window is 3 s; consecutive
+// wards sit 15-20 s apart (a RANGE, so several gaps are sampled, not one);
+// and the shield badge is painted under the boss bar while it holds and not
+// after it lapses.
 //
 //   node scripts/boss_ward_test.mjs [file.html]
 import { chromium } from 'playwright-core';
@@ -65,6 +68,14 @@ const out = await page.evaluate(async () => {
     }
   };
 
+  // Watch for the badge by intercepting the text the boss bar paints.
+  const c2 = document.getElementById("game") || document.querySelector("canvas");
+  const g2 = c2.getContext("2d");
+  const origText = g2.fillText.bind(g2);
+  let sawBadge = false;
+  g2.fillText = function (t, ...rest) { if (t === "WARDED") sawBadge = true; return origText(t, ...rest); };
+  const badgeShown = () => { sawBadge = false; try { drawSuperBossBar(); } catch (e) {} return sawBadge; };
+
   const res = {};
   const boss = mk(true);
   if (!boss) return { err: 'no monster spawned' };
@@ -78,12 +89,41 @@ const out = await page.evaluate(async () => {
   }
   res.wardFiredAfterFrames = firedAt;
   res.duringWard = firedAt >= 0 ? strike(boss) : null;
+  res.badgeDuringWard = firedAt >= 0 ? badgeShown() : false;
+  // Duration, and the gaps between consecutive ward STARTS.
+  //
+  // Start-to-start is the interval the user specified ("every 3s every
+  // 15-20s"), and it is what the code schedules: _wardNextAt is set when a ward
+  // BEGINS. An earlier version of this test measured end-to-start instead and
+  // reported 12-17 s — the same schedule seen through the wrong window, minus
+  // the 3 s the ward was up. Stepping one frame at a time so a start is never
+  // straddled.
+  const wardStarts = [];
+  const isWarded = () => (boss._wardUntil | 0) > (game.time | 0);
+  let wasWarded = isWarded();
+  if (wasWarded) wardStarts.push(game.time | 0);
+  // Duration is timed only from a start this loop actually SAW. The ward
+  // already running at entry was found by a coarse 10-frame scan, so its true
+  // start is up to 9 frames in the past — timing from here reported 171 frames
+  // for a 180-frame window.
+  let durStart = -1;
+  res.duration = -1;
+  for (let f = 0; f < 6000 && wardStarts.length < 5; f++) {
+    tick(1);
+    const w = isWarded();
+    if (w && !wasWarded) { wardStarts.push(game.time | 0); durStart = game.time | 0; }
+    if (!w && wasWarded && res.duration < 0 && durStart >= 0) res.duration = (game.time | 0) - durStart;
+    wasWarded = w;
+  }
+  res.gaps = [];
+  for (let i = 1; i < wardStarts.length; i++) res.gaps.push(wardStarts[i] - wardStarts[i - 1]);
   // Run past the end of the window and confirm damage comes back.
   if (firedAt >= 0) {
     let guard = 0;
     while ((boss._wardUntil | 0) > (game.time | 0) && guard++ < 600) tick(5);
     res.wardEnded = (boss._wardUntil | 0) <= (game.time | 0);
     res.afterWard = strike(boss);
+    res.badgeAfterWard = badgeShown();
   }
   // A regular monster must never raise one.
   const mob = mk(false);
@@ -107,6 +147,10 @@ console.log('\n  ward first fired after      ' + out.wardFiredAfterFrames + ' fr
             (out.wardFiredAfterFrames / 60).toFixed(1) + ' s)');
 console.log('  ward ended on its own       ' + out.wardEnded);
 console.log('  regular monster warded      ' + out.regularMobWarded + '  (must be false)');
+console.log('  ward duration               ' + out.duration + ' frames (~' + (out.duration / 60).toFixed(1) + ' s, want 3.0)');
+console.log('  gaps, ward START to START   ' + (out.gaps || []).map((f) => (f / 60).toFixed(1) + 's').join(', ') + '  (want 15-20 s)');
+console.log('  shield badge during ward    ' + out.badgeDuringWard + '  (must be true)');
+console.log('  shield badge after ward     ' + out.badgeAfterWard + '  (must be false)');
 
 const fails = [];
 if (!(out.beforeWard && out.beforeWard.dealt > 100)) fails.push('no real damage before the ward — nothing was measured');
@@ -116,6 +160,11 @@ if (!out.duringWard || out.duringWard.healed !== 0) fails.push('lifesteal healed
 if (!out.wardEnded) fails.push('the ward never ended');
 if (!(out.afterWard && out.afterWard.dealt > 100)) fails.push('damage did not resume after the ward');
 if (out.regularMobWarded) fails.push('a regular monster raised a ward');
+if (Math.abs((out.duration || 0) - 180) > 2) fails.push('ward duration was ' + out.duration + ' frames, expected 180 (3 s)');
+if (!out.gaps || out.gaps.length < 2) fails.push('could not sample at least two gaps between wards');
+else for (const gp of out.gaps) { if (gp < 895 || gp > 1210) fails.push('gap between wards was ' + (gp / 60).toFixed(1) + ' s, expected 15-20 s'); }
+if (!out.badgeDuringWard) fails.push('the shield badge was not painted under the boss bar during the ward');
+if (out.badgeAfterWard) fails.push('the shield badge was still painted after the ward lapsed');
 
 if (fails.length) { console.error('\nFAIL:'); for (const f of fails) console.error('  - ' + f); process.exit(1); }
 console.log('\nPASS — the ward fires on bosses only, floors damage to 1, zeroes lifesteal, and ends.');

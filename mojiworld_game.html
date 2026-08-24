@@ -9845,7 +9845,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.171';
+const GAME_VERSION = 'v0.30.172';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -78112,21 +78112,28 @@ function mirrorSelfAI(m, dt, distToPlayer) {
 //
 // game.time counts FRAMES at 60fps, matching every other boss timer in this
 // function (the Sovereign's "16 s" cadence is 960).
-const LX_BOSS_WARD_EVERY = 840;   // 14 s between wards
-const LX_BOSS_WARD_LEN   = 210;   // 3.5 s of 1-damage hits — 25% uptime
-const LX_BOSS_WARD_FIRST = 480;   // 8 s of clean opening before the first one
+const LX_BOSS_WARD_LEN     = 180;   // v0.30.x — 3 s of 1-damage hits (was 3.5)
+const LX_BOSS_WARD_GAP_MIN = 900;   // v0.30.x — 15 s
+const LX_BOSS_WARD_GAP_MAX = 1200;  // v0.30.x — 20 s
+const LX_BOSS_WARD_FIRST   = 480;   // 8 s of clean opening before the first one
+// Per user the gap is a RANGE, not a metronome: re-rolled after every ward so
+// the player reads the shield rather than counting to fourteen. Uptime lands
+// between 15% and 20% depending on the roll.
+function _lxBossWardGap() {
+  return LX_BOSS_WARD_GAP_MIN + Math.floor(Math.random() * (LX_BOSS_WARD_GAP_MAX - LX_BOSS_WARD_GAP_MIN + 1));
+}
 function _lxBossWardTick(m) {
   if (!m || !m.isBoss || m.currentHp <= 0) return;
   const now = game.time | 0;
   // The Sovereign's Regalia already IS an invulnerability beat; stacking a
   // second "you cannot hurt me" window on top of it would read as the fight
   // being broken rather than as a mechanic.
-  if (m._sovShielded) { m._wardNextAt = now + LX_BOSS_WARD_EVERY; return; }
+  if (m._sovShielded) { m._wardNextAt = now + _lxBossWardGap(); return; }
   if (m._wardNextAt == null) { m._wardNextAt = now + LX_BOSS_WARD_FIRST; return; }
   if ((m._wardUntil | 0) > now) return;                 // already warded
   if (now < m._wardNextAt) return;
   m._wardUntil  = now + LX_BOSS_WARD_LEN;
-  m._wardNextAt = now + LX_BOSS_WARD_EVERY;
+  m._wardNextAt = now + _lxBossWardGap();
   // Telegraph it. An unannounced damage floor reads as a bug — the player
   // needs to know their hits are being refused, not that the game broke.
   try {
@@ -131760,6 +131767,39 @@ function drawSuperBossBar() {
       try { ctx.letterSpacing = '0px'; } catch (e) {}
       ctx.restore();
     }
+  }
+  // v0.30.x — WARD BADGE (per user: "have a shield icon placed below the boss
+  // health bar to know there is an active shield"). The toast and the WARDED
+  // callout announce the START of the window; this is the part that answers
+  // "is it still up?" while the player is busy not dying. The sliver along the
+  // bottom drains with the remaining time, so it also answers "for how long".
+  if (sb && (sb._wardUntil | 0) > (game.time | 0)) {
+    const _wLeft = (sb._wardUntil | 0) - (game.time | 0);
+    const _wFrac = Math.max(0, Math.min(1, _wLeft / LX_BOSS_WARD_LEN));
+    const _wh = 20, _wy = y + barH + 7;
+    const _wTxt = 'WARDED';
+    ctx.save();
+    ctx.font = '700 12px system-ui, "Segoe UI", sans-serif';
+    const _ww = 26 + ctx.measureText(_wTxt).width + 12;
+    const _wx = Math.round(x + barW / 2 - _ww / 2);
+    ctx.fillStyle = 'rgba(10,20,34,0.86)';
+    ctx.strokeStyle = '#7fd8ff';
+    ctx.lineWidth = 1.5;
+    if (ctx.roundRect) {
+      ctx.beginPath(); ctx.roundRect(_wx, _wy, _ww, _wh, 9); ctx.fill(); ctx.stroke();
+    } else {
+      ctx.fillRect(_wx, _wy, _ww, _wh); ctx.strokeRect(_wx, _wy, _ww, _wh);
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = '13px "Segoe UI Emoji", system-ui, sans-serif';
+    ctx.fillText('🛡', _wx + 8, _wy + _wh / 2 + 1);
+    ctx.font = '700 12px system-ui, "Segoe UI", sans-serif';
+    ctx.fillStyle = '#dff4ff';
+    ctx.fillText(_wTxt, _wx + 26, _wy + _wh / 2 + 1);
+    ctx.fillStyle = '#7fd8ff';
+    ctx.fillRect(_wx + 2, _wy + _wh - 3, (_ww - 4) * _wFrac, 2);
+    ctx.restore();
   }
   ctx.textAlign = 'left';
 }
