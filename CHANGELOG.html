@@ -121,6 +121,44 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.155 <span class="tag"><span class="pill bug">bug</span> Combined lifesteal is capped at 10% of damage dealt</span></h2>
+<p>Per user: <em>nerf max limit of combined lifesteal to only 10% of damage dealt.</em></p>
+
+<h3>Four sources, no combined limit</h3>
+<p>Four independent paths healed off a single hit, each capped separately or not at all &mdash; so nothing anywhere limited the <em>combined</em> rate:</p>
+<table>
+<tr><th>where</th><th>source</th><th>its own cap</th></tr>
+<tr><td><code>hitMonster</code></td><td><code>player.mods.lifesteal</code> + <code>getEquipBonus('lifesteal')</code></td><td>0.50, then <b>doubled to 1.00</b> by the Sanguine Flame synergy</td></tr>
+<tr><td><code>hitMonster</code></td><td><code>talentFx().basicLifesteal</code> (0.025&ndash;0.04)</td><td>none</td></tr>
+<tr><td><code>_msApplyOnHit</code></td><td>temp-fx ult window (0.05&ndash;0.25)</td><td>none</td></tr>
+<tr><td><code>applyEnhOnHit</code></td><td>weapon enhancement</td><td>none</td></tr>
+</table>
+<p>Each looked reasonable on its own, which is why this was never visible at any single site. Measured on the old build with all four stacked, a hit dealing 114,999 returned <b>97,499 health (84.8%)</b> &mdash; and <b>154,999 (134.8%)</b> against a burning target, more health than damage inflicted.</p>
+
+<h3>The worse case: tanky targets</h3>
+<p>Two of the four sites heal off the <em>pre-reduction</em> damage. <code>finalDmg</code> can be a small fraction of the incoming <code>dmg</code> once the <code>K/(DEF+K)</code> armour curve, smithgolem's <code>armorShield</code> and the 0.25 multiplier have applied &mdash; so against a high-DEF target the old build healed <b>574.5% of the damage it actually dealt</b>, nearly six times over. That is also why the fix budgets <b>health, not a rate</b>: a rate-based cap would have left exactly this hole open.</p>
+
+<h3>The fix</h3>
+<p>A shared per-hit ledger rather than a fifth clamp. Every source calls <code>_lxLsTake(dealt, rate)</code> and receives only what remains of 10% of the damage that caller actually dealt; the budget is recomputed from each caller's figure and checked against the running total, so a later site with a smaller, more authoritative number simply finds no room instead of paying out against an inflated one.</p>
+<p>The basic-attack talent steal runs <em>before</em> <code>finalDmg</code> exists, so it now defers its rate and the first site that knows the real damage settles it. The gear/mods block is the guaranteed settlement point &mdash; it fires whenever a deferred rate is waiting, so a build carrying <b>only</b> the basic steal still heals normally.</p>
+
+<h3>Verified &mdash; <code>scripts/lifesteal_cap_test.mjs</code></h3>
+<table>
+<tr><th>scenario (all four sources stacked)</th><th>before</th><th>after</th></tr>
+<tr><td>normal target</td><td>84.78%</td><td><b>10.00%</b></td></tr>
+<tr><td>burning target (Sanguine Flame)</td><td>134.78%</td><td><b>10.00%</b></td></tr>
+<tr><td>high-DEF target</td><td><b>574.52%</b></td><td><b>10.00%</b></td></tr>
+<tr><td>basic-attack steal alone (must still heal)</td><td>3.48%</td><td>4.00%</td></tr>
+</table>
+<p>The test is run against the old build as a control and fails there on all three stacked cases, so it is testing something real.</p>
+
+<h3>Two consequences worth stating</h3>
+<ul>
+<li><b>Sanguine Flame no longer exceeds the cap.</b> Its doubling used to be applied <em>after</em> the clamp, which is what made the true ceiling 1.00 rather than the 0.50 the code appeared to set. It still doubles what that source <em>asks</em> for, so it still outbids weaker sources for the budget &mdash; but it cannot push a hit past 10%.</li>
+<li><b>Stacking lifesteal past 10% now does nothing.</b> Item tooltips still describe each piece's own contribution, which remains accurate as a contribution; there is no combined-total display anywhere that would now be wrong.</li>
+</ul>
+
+
 <h2>v0.30.154 <span class="tag"><span class="pill polish">polish</span> Sprite framing is fixed automatically now, not remembered</h2>
 <p>Per user: <em>ok wire this</em> &mdash; the framing tool from v0.30.152, which was a thing you had to know to run.</p>
 <p>Both art generators call into it now. <code>gen_projectile_restyle.mjs</code> insets every candidate as it writes it, and prints what it did (<code>inset 0.86x (was 0px from the edge)</code>), so whatever gets installed is already safe. <code>regen_anim_from_base.mjs</code> fits its nine frames after generating them. <code>--no-fit</code> opts out of either.</p>

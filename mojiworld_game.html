@@ -9744,7 +9744,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.154';
+const GAME_VERSION = 'v0.30.155';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -18369,7 +18369,10 @@ function _msApplyOnHit(m, finalDmg, isCrit, skill, guestSafe) {
     // LIFESTEAL — off the damage that actually lands.
     if (b.lifesteal > 0 && player.hp > 0) {
       const landed = Math.min(finalDmg, m.currentHp);
-      const heal = Math.max(1, Math.floor(landed * b.lifesteal));
+      // v0.30.x — drawn from the shared per-hit ledger (see _lxLsTake). `landed`
+      // is the tighter figure on a killing blow, and that is the one to budget
+      // against: overkill was never damage dealt.
+      const heal = _lxLsTake(landed, b.lifesteal);
       const before = player.hp;
       // v0.29.463 — was Math.min(player.maxHp, ...). player.maxHp is the RAW
       // base pool; getMaxHp() applies the class multiplier (1.12-1.30), the
@@ -73607,8 +73610,16 @@ function applyEnhOnHit(m, dmg, enh) {
     _applyMobStatus(m, 'freeze', Math.min(enh.slow, 600), { chance: 40 });
   }
   if (enh.lifesteal) {
-    const heal = Math.max(1, Math.floor(dmg * enh.lifesteal));
-    player.hp = Math.min(getMaxHp(), player.hp + heal);
+    // v0.30.x — drawn from the shared per-hit ledger. applyEnhOnHit is called
+    // immediately after hitMonster on the same hit at all three of its call
+    // sites, so the budget opened there is still current.
+    //
+    // It budgets against _lxLsDealt — the damage hitMonster actually applied —
+    // rather than the `dmg` argument, which is the pre-armour figure the
+    // caller computed. On a high-DEF target those differ by a lot, and the
+    // caller's number is the wrong one to take 10% of.
+    const heal = _lxLsTake(_lxLsDealt > 0 ? _lxLsDealt : dmg, enh.lifesteal);
+    if (heal > 0) player.hp = Math.min(getMaxHp(), player.hp + heal);
   }
   // v0.25.604 — Priest "Holy Spark" basic-attack heal. Heals a flat % of
   // maxHP per landed basic hit (independent of damage dealt) so it stays
@@ -82875,7 +82886,58 @@ function _lxPlayerFocus() {
   if (_lxMobUntargetable(t)) return null;
   return t;
 }
+// v0.30.x — COMBINED LIFESTEAL CAP (per user: "nerf max limit of combined
+// lifesteal to only 10% of damage dealt").
+//
+// FOUR independent paths healed off a single hit, each capped separately or
+// not at all, so nothing ever limited the combined rate:
+//
+//   hitMonster      player.mods.lifesteal + getEquipBonus('lifesteal')
+//                   capped at 0.50 alone, then DOUBLED to 1.00 by the
+//                   Sanguine Flame synergy on a burning target
+//   hitMonster      talentFx().basicLifesteal      0.025-0.04, uncapped
+//   _msApplyOnHit   temp-fx window lifesteal       0.05-0.25, uncapped
+//   applyEnhOnHit   weapon enhancement lifesteal   uncapped
+//
+// Measured on the old build with all four stacked: a hit dealing 114,596
+// healed 97,298 (84.9%), and 154,596 on a burning target — 134.9%, more health
+// returned than damage inflicted. Each site looked reasonable on its own,
+// which is why this was never visible at any one of them.
+//
+// This is a shared per-hit ledger rather than a fifth clamp. It budgets HP, not
+// a rate, and every grant is measured against the damage the caller actually
+// dealt — because the four sites see different numbers for the same hit, and
+// two of them see the PRE-REDUCTION damage. finalDmg can be a small fraction of
+// the incoming dmg (the K/(DEF+K) armour curve, smithgolem's armorShield, the
+// 0.25 multiplier), so budgeting the raw rate would have let those two heal far
+// more than 10% of what a tanky target actually took.
+const LX_LIFESTEAL_CAP = 0.10;
+let _lxLsSpentHp = 0;      // HP already granted for this hit
+let _lxLsDealt = 0;        // best-known damage actually dealt
+let _lxLsPending = 0;      // rate deferred from before the damage was known
+function _lxLsReset() { _lxLsSpentHp = 0; _lxLsDealt = 0; _lxLsPending = 0; }
+// The basic-attack talent steal runs early in hitMonster, BEFORE finalDmg
+// exists, so it cannot size its own heal against real damage. It defers its
+// rate here and the first site that knows the damage pays it.
+function _lxLsDefer(frac) { if (frac > 0) _lxLsPending += frac; }
+// Grant HP for one source. `dealt` is that caller's view of the damage; the
+// budget is recomputed from it every time and checked against the running
+// total, so a later caller with a smaller, more authoritative figure simply
+// finds no room rather than paying out against an inflated one.
+function _lxLsTake(dealt, frac) {
+  const d = Math.max(0, Math.floor(dealt));
+  if (d > 0) _lxLsDealt = d;
+  let want = frac > 0 ? frac : 0;
+  if (_lxLsPending > 0) { want += _lxLsPending; _lxLsPending = 0; }
+  if (!(want > 0) || d <= 0) return 0;
+  const room = Math.floor(d * LX_LIFESTEAL_CAP) - _lxLsSpentHp;
+  if (room <= 0) return 0;
+  const give = Math.min(Math.floor(d * want), room);
+  _lxLsSpentHp += give;
+  return give;
+}
 function hitMonster(m, dmg, isCrit, skill) {
+  _lxLsReset();   // v0.30.x — new hit, new lifesteal budget. See _lxLsTake.
   // v0.25.605 — Dead-monster gate. Without this, a delayed projectile or
   // setTimeout-scheduled bonus hit (ninja extraHit, splashOnHit, chain
   // lightning, etc.) lands on a monster that's already at 0 HP, running
@@ -83011,7 +83073,11 @@ function hitMonster(m, dmg, isCrit, skill) {
       if (_tfx.skillDmg && !_basicSkill) dmg = Math.floor(dmg * (1 + _tfx.skillDmg));
       // v0.26.x perf — frame-cached max stats (hitMonster can fire 12+/frame on AOE builds)
       if (game._mxT !== game.time) { game._mxT = game.time; game._mxHp = getMaxHp(); game._mxMp = getMaxMp(); }
-      if (_tfx.basicLifesteal && _basicSkill) player.hp = Math.min(game._mxHp, player.hp + Math.max(1, Math.floor(dmg * _tfx.basicLifesteal)));
+      // v0.30.x — deferred, not paid here. This runs before finalDmg exists,
+      // so healing off `dmg` would ignore the armour curve entirely and could
+      // return well over 10% of what a high-DEF target actually took. The rate
+      // is settled below, against the real damage. See _lxLsDefer.
+      if (_tfx.basicLifesteal && _basicSkill) _lxLsDefer(_tfx.basicLifesteal);
       if (_tfx.critMp && isCrit) {
         // v0.30.129 — critMp is a FRACTION of max MP now. It was the only
         // talent denominated in absolute units, so it decayed to noise as the
@@ -84056,19 +84122,31 @@ function hitMonster(m, dmg, isCrit, skill) {
   // non-lethal mob encounters. Cap at 0.50 (50%) — still meaningful
   // sustain at high gear levels, no longer trivial-infinite. Floor at
   // 0 stays the no-lifesteal default.
-  const totalLS = Math.min(0.50, Math.max(0, player.mods.lifesteal + getEquipBonus('lifesteal')));
-  if (totalLS > 0 && skill !== 'thorns') {
-    // v0.26.261 — Synergy: Sanguine Flame (burn + lifesteal). When the
-    // target is currently burning, the heal portion doubles. Tap into
-    // existing lifesteal pipeline so the 0.50 cap is respected before
-    // the synergy multiplier — net cap becomes 1.0 (full-damage heal)
-    // on burning targets which is the intentional synergy reward.
+  // v0.30.x — this path's private 0.50 cap is gone; the shared
+  // LX_LIFESTEAL_CAP ledger replaces it. For the record, 0.50 was chosen
+  // because end-game stacking (Eclipse Daggers 8% + Wraith Fangs 14% +
+  // Oblivion Whisper 18% + Warlock affix 15% + Berserker tree perk 5%) reached
+  // 60%+ — but it only ever governed THIS source, not the other three.
+  //
+  // The condition also fires when a deferred basic-attack steal is waiting, so
+  // that rate is still paid on a build carrying no gear lifesteal at all. This
+  // block always runs for a non-thorns hit, which makes it the guaranteed
+  // settlement point for _lxLsPending.
+  const rawLS = Math.max(0, player.mods.lifesteal + getEquipBonus('lifesteal'));
+  if ((rawLS > 0 || _lxLsPending > 0) && skill !== 'thorns') {
+    // v0.26.261 — Synergy: Sanguine Flame (burn + lifesteal) doubles the heal
+    // on a burning target.
+    // v0.30.x — the doubling happens INSIDE the shared cap now. It used to be
+    // applied after the clamp, which is what made the real ceiling 1.00 (a
+    // full-damage heal) rather than the 0.50 the old line appeared to set. The
+    // synergy still doubles what this source ASKS for, so it still outbids
+    // weaker sources for the budget, but it can no longer push the hit past 10%.
     let _lsMul = 1;
     if (player._activeSynergies && player._activeSynergies.sanguineFlame && m.burnTimer > 0) {
       _lsMul = 2;
     }
-    const heal = Math.max(1, Math.floor(finalDmg * totalLS * _lsMul));
-    player.hp = Math.min(getMaxHp(), player.hp + heal);
+    const heal = _lxLsTake(finalDmg, rawLS * _lsMul);
+    if (heal > 0) player.hp = Math.min(getMaxHp(), player.hp + heal);
   }
   // Burn (powerup + equipment)
   const totalBurn = player.mods.burn + (getEquipBonus('burn') > 0 ? 1 : 0);
