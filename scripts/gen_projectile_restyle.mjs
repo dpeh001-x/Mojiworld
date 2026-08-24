@@ -371,6 +371,30 @@ const TARGETS = {
       + 'Draw it comfortably INSIDE the frame with clear empty space on all four sides — it must not touch or '
       + 'run off any edge.',
   },
+  // Ariel the Ember Ram's flame-ring and charge-burst motes. They had NO sprite
+  // at all: they spawn as owner:'enemy' skill:'fire', and the enemy draw side
+  // only resolves art through LX_MOB_PROJ + _PROJ_SPRITE_BLIT, neither of which
+  // had a 'fire' key — so a zodiac boss's signature fire was falling through to
+  // the procedural fallback and drawing as plain flat orange discs (which is
+  // what the user photographed).
+  //
+  // It draws around a 14 px hitbox, so the silhouette has to survive being
+  // TINY: one round core, one flame crown, nothing else. Colour matches the
+  // spawn's own #ff6622 so the sprite and the particle trail agree.
+  m_ariesember: {
+    out: 'Sprites/projectiles/m_ariesember.webp',
+    prompt: 'A small blazing ball of fire flying through the air: ONE compact round ember core glowing hot '
+      + 'white-yellow at its centre and falling off through bright orange to deep red at its rim, wrapped in a '
+      + 'short crown of licking flame tongues that curl up and back around it, with three tiny bright sparks '
+      + 'flicking off the edge. Round, dense and self-contained — a burning ball, not a comet and not a '
+      + 'streak, with no tail and nothing trailing behind it.',
+    style: ' Cute chunky cartoon game sprite in the style of a chibi mobile RPG: ONE small fireball centred in '
+      + 'frame, a thick uniform near-black outline round the whole silhouette, soft cel shading, one glossy '
+      + 'white highlight on the core, bright saturated orange and gold. The silhouette must be ROUND and read '
+      + 'instantly as a little ball of fire at TWENTY PIXELS across — so no thin wisps, no long flame tails, no '
+      + 'fine detail that disappears when shrunk. Fully transparent background, no ground shadow, no background '
+      + 'scenery, no text, no border, no frame, not pixel art, not photorealistic.',
+  },
 };
 
 const only = val('--only', null);
