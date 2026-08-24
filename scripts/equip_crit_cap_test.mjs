@@ -1,9 +1,13 @@
 // EQUIPMENT CRIT CAP — no single item may pay more than the cap.
 // ============================================================================
-// Per user: "for crit chance per equipment cap it at 25% maximum".
+// Per user: "for crit chance per equipment cap it at 25% maximum", then
+// "sorry push it down to 20%".
 //
-// The game already had this mechanic at 20 ("Cap any single item's effective
-// crit contribution"); this raises it to 25 and pins the behaviour down.
+// The game already had this mechanic ("Cap any single item's effective crit
+// contribution"). It went 20 -> 25 -> 20; the round trip is why the cap now
+// lives in a named constant instead of a literal buried mid-function, and why
+// this test exists at all. 20 is the v0.26.461 value: at 25 a fully crit-geared
+// Rogue reached the 100% clamp on gear alone, before any boon was counted.
 //
 // The cap applies to the EFFECTIVE contribution -- base x star x tier x class
 // affinity -- not to the number printed on the item, so the interesting cases
@@ -61,13 +65,13 @@ const R = await page.evaluate(() => {
   // crit is a FLAT tier-scaled stat, so a printed roll is multiplied by
   // star x tier BEFORE the cap applies. Derive that multiplier from the game
   // rather than modelling it here: at tier 1 it is already x2, which means the
-  // item that first reaches the 25 cap only PRINTS about 12.5.
+  // item that first reaches the 20 cap only PRINTS about 10.
   out.mult = starMult({}) * _tierMul(undefined);
   out.underCapPassesThrough = equip(mk(9));                       // 9 x mult, still under
-  // Literal 25, not out.cap: on a build without the constant, mk(null) rolls a
+  // Literal, not out.cap: on a build without the constant, mk(null) rolls a
   // null crit and the failure message reads "clamped to 0", which describes the
   // fixture rather than the build under test.
-  out.atCap = equip(mk(25));
+  out.atCap = equip(mk(20));
   out.hugeRollClamped = equip(mk(999));                           // absurd roll -> cap
   out.starScaledClamped = equip(mk(20, { star: 5, tier: 5 }));    // scaling would exceed -> cap
   // Three slots each clamped independently: the cap is PER ITEM, not a total.
@@ -92,9 +96,9 @@ await browser.close(); server.kill();
 
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 170) });
-const CAP = 25;
+const CAP = 20;   // LX_EQUIP_CRIT_CAP_PER_ITEM; raised to 25 briefly, returned to 20
 
-ok('the cap is a named constant set to 25', R.cap === CAP, 'LX_EQUIP_CRIT_CAP_PER_ITEM = ' + R.cap);
+ok('the cap is a named constant set to 20', R.cap === CAP, 'LX_EQUIP_CRIT_CAP_PER_ITEM = ' + R.cap);
 ok('a roll under the cap is scaled but not clamped',
    Math.abs(R.underCapPassesThrough - 9 * R.mult) < 0.001 && R.underCapPassesThrough < CAP,
    `an item printing 9 gives ${R.underCapPassesThrough} (x${R.mult} star/tier), still under the ${CAP} cap`);
@@ -105,7 +109,7 @@ ok('an absurd roll is clamped to the cap', Math.abs(R.hugeRollClamped - CAP) < 0
    'item rolling 999 gives ' + R.hugeRollClamped);
 ok('star/tier scaling cannot carry an item past the cap',
    Math.abs(R.starScaledClamped - CAP) < 0.001,
-   'crit 20 at star 5 / tier 5 gives ' + R.starScaledClamped + ' (uncapped it would exceed 25)');
+   `crit 20 at star 5 / tier 5 gives ${R.starScaledClamped} (uncapped that scaling would far exceed ${CAP})`);
 ok('the cap is PER ITEM, so three slots give 3x it', Math.abs(R.threeSlots - CAP * 3) < 0.001,
    'three capped slots give ' + R.threeSlots + ' (expected ' + CAP * 3 + ')');
 ok('a small roll still contributes in full alongside a capped one',
