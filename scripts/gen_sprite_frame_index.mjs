@@ -38,6 +38,8 @@ const FRAME_DIRS = [
   // v0.30.x - Taur's charge set. A dir absent from this list is invisible to the
   // loader's frame count, so the art sits on disk and the game never asks for it.
   'bosses/zodiac/charge',
+  // v0.30.x - Regulus's pounce set.
+  'bosses/zodiac/pounce',
   'monsters/idle', 'monsters/walk', 'monsters/attack',
   'npc/idle', 'npc/walk',
   'fx/anim', 'vfx/anim', 'projectiles/anim', 'summons/anim',

@@ -125,6 +125,9 @@ window.LX_SPRITE_FRAME_INDEX = {
   "bosses/zodiac/charge": {
    "taurus": 9
   },
+  "bosses/zodiac/pounce": {
+   "leo": 3
+  },
   "monsters/idle": {
    "anglerfish": 9,
    "archon": 9,

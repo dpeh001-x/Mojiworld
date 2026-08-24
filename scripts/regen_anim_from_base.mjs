@@ -117,6 +117,23 @@ const TARGETS = {
       + 'full committed gallop, dust and grit kicking up around the hooves and streaming behind him. He builds '
       + 'from a braced crouch into a full sprint and holds it. He stays the same size and stays centred in frame '
       + '— it is the POSE that changes, not his position. A continuous loop that ends ready to begin again.' },
+  // v0.30.x - REGULUS'S POUNCE (per user: "regulus when jumping should have a
+  // jump sprite" ... "it should be like a pouncing action"). His gait leaps -
+  // vy = -9.5 with a 700ms landing recovery - and the whole airborne arc drew
+  // the walk loop, so the lion crossed the arena trotting through the air.
+  // Frames land in Sprites/bosses/zodiac/pounce/ and drive a new zodiac state.
+  //
+  // The ENGINE owns his position for the whole jump, so the frames must not
+  // move him: the body holds the extended airborne pounce and only the mane,
+  // tail and claws live. Animating the coil-and-launch here would loop into a
+  // flapping motion in mid-air, because the loop plays for the whole arc.
+  leo: { base: 'Sprites/bosses/zodiac/leo.webp', dir: 'Sprites/bosses/zodiac/pounce',
+    motion: 'The lion is caught MID-POUNCE in the air and stays there: body stretched out long and level, ' +
+      'front legs reaching forward with the claws spread wide, back legs trailing extended behind him, head ' +
+      'low and forward with the jaws open. He does NOT land, does NOT crouch, does NOT fold up and does NOT ' +
+      'move across the frame - hold that extended leaping pose the whole way through. What moves is the mane ' +
+      'streaming and rippling back, the tail lashing, the claws flexing, and a few sparks of sun-fire trailing ' +
+      'off his mane. A continuous seamless loop that ends exactly as it began.' },
 };
 
 const only = val('--only', null);

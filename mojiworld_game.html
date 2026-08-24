@@ -9845,7 +9845,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.169';
+const GAME_VERSION = 'v0.30.170';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -117697,6 +117697,7 @@ function _warmMapArt(id, opts) {
       addImg(ZODIAC_SPRITES, sign, sign);
       addSet(ZODIAC_IDLE_FRAMES[sign], sign); addSet(ZODIAC_WALK_FRAMES[sign], sign); addSet(ZODIAC_ATTACK_FRAMES[sign], sign);
       addSet(ZODIAC_CHARGE_FRAMES[sign], sign);   // v0.30.x - Taur's charge set
+      addSet(ZODIAC_POUNCE_FRAMES[sign], sign);   // v0.30.x - Regulus's pounce set
       continue;
     }
     const keys = Object.keys(BOSS_SPRITES || {}).filter((k) => k === sp.type || k.indexOf(sp.type) === 0);
@@ -117851,12 +117852,20 @@ const ZODIAC_WALK_FRAMES = Object.create(null);
 // Sprites/bosses/zodiac/charge/<sign>_N.webp, and a sign without them falls
 // through to its normal attack/walk/idle exactly as before.
 const ZODIAC_CHARGE_FRAMES = Object.create(null);
+// v0.30.x - a FIFTH zodiac state, per user: "regulus when jumping should have
+// a jump sprite ... it should be like a pouncing action". His gait leaps
+// (vy = -9.5, 700ms landing recovery) and the entire airborne arc drew the WALK
+// loop, so the lion crossed the arena trotting through the air. Same opt-in
+// shape as charge: a sign without frames falls through untouched.
+const ZODIAC_POUNCE_FRAMES = Object.create(null);
+_loadBossFrames(ZODIAC_POUNCE_FRAMES, 'zodiac/pounce', ZODIAC_SPRITE_TYPES);
 _loadBossFrames(ZODIAC_CHARGE_FRAMES, 'zodiac/charge', ZODIAC_SPRITE_TYPES);
 _loadBossFrames(ZODIAC_ATTACK_FRAMES, 'zodiac/attack', ZODIAC_SPRITE_TYPES);
 _loadBossFrames(ZODIAC_IDLE_FRAMES, 'zodiac/idle', ZODIAC_SPRITE_TYPES);
 _loadBossFrames(ZODIAC_WALK_FRAMES, 'zodiac/walk', ZODIAC_SPRITE_TYPES);
 // state: 'attack' | 'walk' | 'idle'
 function _zodiacFrame(sign, state) {
+  if (state === 'pounce') return _bossLoopFrame(ZODIAC_POUNCE_FRAMES[sign], _BOSS_ATK_FRAME_MS);
   if (state === 'charge') return _bossLoopFrame(ZODIAC_CHARGE_FRAMES[sign], _BOSS_ATK_FRAME_MS);
   if (state === 'attack') return _bossLoopFrame(ZODIAC_ATTACK_FRAMES[sign], _BOSS_ATK_FRAME_MS);
   if (state === 'walk')   return _bossLoopFrame(ZODIAC_WALK_FRAMES[sign], _BOSS_WALK_FRAME_MS);
@@ -117889,6 +117898,7 @@ function _zodiacRelFrame(frames, frameMs, elapsedMs, pingpong) {
   return frames[i < n ? i : seqLen - i];
 }
 function _zodiacStateImg(sign, state, elapsedMs) {
+  if (state === 'pounce') return _zodiacRelFrame(ZODIAC_POUNCE_FRAMES[sign], _BOSS_ATK_FRAME_MS, elapsedMs, false);
   if (state === 'charge') return _zodiacRelFrame(ZODIAC_CHARGE_FRAMES[sign], _BOSS_ATK_FRAME_MS, elapsedMs, false);
   if (state === 'attack') return _zodiacRelFrame(ZODIAC_ATTACK_FRAMES[sign], _BOSS_ATK_FRAME_MS, elapsedMs, false);
   if (state === 'walk')   return _zodiacRelFrame(ZODIAC_WALK_FRAMES[sign], _BOSS_WALK_FRAME_MS, elapsedMs, false);
@@ -117908,8 +117918,16 @@ function _zodiacAnimTick(m, now) {
   // existing so a sign without a charge set is untouched.
   const _charging = !!(m._braceDashing && typeof ZODIAC_CHARGE_FRAMES !== 'undefined'
     && ZODIAC_CHARGE_FRAMES[m.zodiacSign] && ZODIAC_CHARGE_FRAMES[m.zodiacSign].length);
+  // v0.30.x - POUNCE while airborne. Ranked under charge (a charging bull is
+  // grounded anyway) and OVER attack: being off the ground is the more specific
+  // visual fact, and a lion mid-leap should read as a lion mid-leap even if a
+  // pattern happens to be running. Gated on frames existing, so every other sign
+  // keeps exactly the behaviour it had.
+  const _pouncing = !!(!m.onGround && typeof ZODIAC_POUNCE_FRAMES !== 'undefined'
+    && ZODIAC_POUNCE_FRAMES[m.zodiacSign] && ZODIAC_POUNCE_FRAMES[m.zodiacSign].length);
   const st = _charging ? 'charge'
-    : (atk ? 'attack' : ((_dispWalk || (wasWalk ? vx > 0.35 : vx > 0.85)) ? 'walk' : 'idle'));
+    : (_pouncing ? 'pounce'
+    : (atk ? 'attack' : ((_dispWalk || (wasWalk ? vx > 0.35 : vx > 0.85)) ? 'walk' : 'idle')));
   if (!a) {
     a = m._zAnim = { state: st, since: now, prev: null, prevElapsed: 0, transAt: -1e9 };
   } else if (a.state !== st) {
