@@ -9744,7 +9744,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.158';
+const GAME_VERSION = 'v0.30.159';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10485,6 +10485,21 @@ const LX_TILES = (() => {
     img.decoding = 'async';
     if ('fetchPriority' in img) img.fetchPriority = 'low';   // v0.27.11 — parse-time bulk load; yield to the boot-gated first-paint set
     img.crossOrigin = 'anonymous';
+    // v0.30.x — file:// RESCUE (found verifying the world-map taint fix in real
+    // Chrome: 23 tiles, every one net::ERR_FAILED). On a file:// origin the
+    // origin is 'null', so this CORS request is rejected outright and the tile
+    // never loads AT ALL — the whole terrain renders untextured. Retry once
+    // without the attribute: the plain load succeeds, and the only thing lost
+    // is the seamless bake for 'auto' tiles, which is already failure-tolerant
+    // (_lxBakeSeamlessTile is try-wrapped and the caller keeps the raw image).
+    // Kept rather than dropped outright so a CORS-enabled CDN host still bakes.
+    // The same hazard was fixed one loader down in v0.25.598; this one was missed.
+    img.onerror = () => {
+      if (img._lxNoCorsRetry) return;
+      img._lxNoCorsRetry = true;
+      img.removeAttribute('crossorigin');
+      img.src = base + cfg.file;
+    };
     img.onload = () => {
       // After load, bake a seamless single-tile source if requested.
       // If baking fails (CORS, no opaque region) the original img is
