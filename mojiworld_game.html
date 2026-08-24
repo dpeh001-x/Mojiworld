@@ -17987,6 +17987,18 @@ const SKILL_RANK_BONUS_LV10 = 0.20;    // v0.30.116 - extra additive at rank 10 
 // hardcode the same 9x5+10 arithmetic independently.
 const SKILL_RANK_MAX_PCT  = Math.round((SKILL_RANK_BONUS_PER * SKILL_RANK_CAP + SKILL_RANK_BONUS_LV10) * 100);
 const SKILL_RANK_LV10_PCT = Math.round((SKILL_RANK_BONUS_PER + SKILL_RANK_BONUS_LV10) * 100);
+// v0.30.x — BASIC ATTACKS RANK AT 2%, NOT 5% (per user: "for warriors, rogue
+// and archers ... each level up to the basic attack should only +2% of damage,
+// max level 10", clarified to "RP only at 2%/rank, reaching +20% at rank 10").
+// These three skip the ordinary curve AND the rank-10 kicker, so rank 10 is
+// exactly +20% instead of +70%. The mage's magicBolt is deliberately NOT in
+// this set -- the user asked for it to stay as it was.
+const LX_BASIC_ATK_RANK_IDS = new Set(['slash', 'stab', 'arrowShot']);
+const LX_BASIC_ATK_RANK_PER = 0.02;
+// The basic Z attack lands tagged 'melee' for every class (melee SKILLS tag
+// 'meleeSkill'), so the tag alone cannot say whose basic it was. Resolved by
+// class -- see the note in getSkillRankMul for why this had to exist at all.
+const LX_BASIC_MELEE_ID_BY_CLS = { warrior: 'slash', rogue: 'stab' };
 const SKILL_RANK_BLACKLIST = new Set([
   'melee', 'thorns', 'burn', 'minion', 'pet', 'pack', 'afterimage'
 ]);
@@ -18012,6 +18024,8 @@ function getSkillRank(id) {
 // its rank 10 is r9 x 1.30 = 1.885, NOT the additive 1.70.
 function _skillRankMulAt(id, r) {
   if (!(r > 0)) return 1;
+  // v0.30.x — flat 2% a rank, no rank-10 kicker: rank 10 is exactly +20%.
+  if (LX_BASIC_ATK_RANK_IDS.has(id)) return 1 + LX_BASIC_ATK_RANK_PER * Math.min(r, SKILL_RANK_CAP);
   if (r >= SKILL_RANK_CAP) {
     const lv10 = (typeof SKILL_LV10_BONUS !== 'undefined') ? SKILL_LV10_BONUS : null;
     const ov = lv10 && lv10[id] && lv10[id].dmgOverride;
@@ -18021,6 +18035,29 @@ function _skillRankMulAt(id, r) {
   return 1 + r * SKILL_RANK_BONUS_PER;
 }
 function getSkillRankMul(tag) {
+  // v0.30.x — THE WARRIOR/ROGUE BASIC WAS AN RP BLACK HOLE. 'melee' is in
+  // SKILL_RANK_BLACKLIST and there is no 'melee' entry in the tag bridge, so
+  // getSkillRankMul('melee') returned 1 no matter what -- while the skills
+  // panel happily sold ranks in slash/stab, because the RP spend path gates on
+  // the blacklist by DEF ID and neither id is in it. Measured on the build
+  // before this change, at rank 10:
+  //
+  //     slash via 'melee'      1.0   (+0%)   <- 10 RP bought nothing
+  //     stab  via 'melee'      1.0   (+0%)   <- ditto
+  //     arrowShot via 'arrow'  1.7  (+70%)
+  //
+  // So warriors and rogues could pour ten points into their basic attack and
+  // receive literally no damage for it. Resolved here, ahead of the blacklist,
+  // so the rank the player paid for is the rank they get.
+  //
+  // Scope worth knowing: two other effects deliberately borrow the 'melee'
+  // tag -- the rogue parry counter and Kage Rush -- and now pick up the same
+  // (capped, +20%) bonus. The mage spell-echo also tags 'melee' but is
+  // unaffected, because no mage basic id exists in the map above.
+  if (tag === 'melee') {
+    const _bid = LX_BASIC_MELEE_ID_BY_CLS[(typeof player !== 'undefined' && player && player.cls) || ''];
+    if (_bid) return _skillRankMulAt(_bid, getSkillRank(_bid));
+  }
   if (!tag || SKILL_RANK_BLACKLIST.has(tag)) return 1;
   // Try direct id match first; fall back to the alias bridge.
   let r = getSkillRank(tag);
