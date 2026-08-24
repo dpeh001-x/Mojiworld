@@ -76557,6 +76557,20 @@ function updateMonsters(dt) {
     // and any authored vertical leap are untouched, and a mob shoved
     // mid-cast still slides from the hit (that impact should read).
     if (typeof _mobCasting === 'function' && _mobCasting(m)) m.vx = 0;
+    // v0.30.x — the other half of "only move horizontally when the walking
+    // sprite plays". If the mob is not walking, any locomotion left below the
+    // walk latch's own ON threshold is drift, and it is what slid the mob
+    // around under idle art. Because the kill uses the SAME threshold the
+    // latch engages on, there is no longer a speed at which a mob can travel
+    // without animating: above it the latch is on, below it the velocity is
+    // gone.
+    //
+    // Knockback is deliberately untouched and cannot be caught here: an
+    // impact enters at vx >= 1.2 and up to 9 on a heavy skill, far above any
+    // mob's walk threshold, so a shoved mob still slides from the hit.
+    // Zeroing vx outright would have flattened every knockback in the game.
+    else if (typeof _mobWalking === 'function' && !_mobWalking(m)
+             && Math.abs(m.vx || 0) < _lxMobWalkOn(m)) m.vx = 0;
     // v0.29.x — braceDash outranks the cast-plant AND the boss chase AI:
     // dead still through the brace, the full committed vx through the dash.
     if (m._braceDashing) m.vx = (m._bdPhase === 'dash') ? m._bdVx : 0;
@@ -116969,6 +116983,12 @@ function _bossIdleFrame(key, m) { return _bossPingPongFrame(BOSS_IDLE_FRAMES[key
 const BOSS_WALK_FRAMES = Object.create(null);
 _loadBossFrames(BOSS_WALK_FRAMES, 'walk');
 const _BOSS_WALK_FRAME_MS = 80;    // brisker than idle
+// v0.30.x — per user "make the walking animation time gap quicker". Bosses
+// already stride at 50-64 ms via _bossWalkMsFor (added when the same request
+// was made of them); ordinary monsters were still on the flat 80 ms base, so
+// the roster walked visibly slower than its own bosses. 55 ms is a ~31%
+// quicker cadence.
+const _LX_MOB_WALK_FRAME_MS = 55;
 // v0.30.x — WALK RE-TIMING (per user: "regenerate krook walk animation as well
 // to something smoother"). The art is not broken: nine unique frames, no
 // ping-pong, a clean loop. The FRAMES ARE SPACED UNEVENLY — Krook's steps move
@@ -117159,13 +117179,34 @@ function _bossWalkPair(key, m) {
 // flip snapped the animation to an arbitrary frame. Enter walk at the old
 // threshold; LEAVE only once clearly below it (vx < 0.35 and _animXV < 0.15).
 // A mob hovering in the band between the two now holds its current state.
+// v0.30.x — per user "make sure monsters only move horizontally when the
+// walking sprite plays". The thresholds below used to be ABSOLUTE: the latch
+// engaged at vx > 0.6 and released at vx < 0.35. Two problems followed from
+// that, and the first is the reported one:
+//
+//   * the band 0.35 -> 0.6 was a dead zone. A mob travelling in it was too
+//     slow to engage the walk latch and too fast to have been released by it,
+//     so it slid under IDLE art. Measured at up to 0.55 px/frame -- about
+//     33 px/s of travel beneath a static sprite, which is the slide.
+//   * the roster has mobs with speed 0.5 and lower, so ANY fixed cutoff that
+//     is high enough to catch the drift is also high enough to freeze them
+//     outright. That is why this is a fraction of the mob's own speed
+//     rather than a constant.
+//
+// ON at 35% of the mob's own speed, OFF at 60% of that (hysteresis, so the
+// animation does not flicker at the edge). The paired drift-kill in the
+// movement step zeroes anything below the ON threshold, which closes the
+// dead band completely: a mob is either walking, or it is not moving.
+const _LX_MOB_WALK_ON_FRAC = 0.35;
+function _lxMobWalkOn(m) { return Math.max(0.05, (((m && m.speed) || 0.8) * _LX_MOB_WALK_ON_FRAC)); }
 function _mobWalking(m) {
   if (!m) return false;
   const vx = Math.abs(m.vx || 0), xv = m._animXV || 0;
+  const on = _lxMobWalkOn(m), off = on * 0.6;
   if (m._walkLatch) {
-    if (vx < 0.35 && xv < 0.15) m._walkLatch = false;
+    if (vx < off && xv < off * 0.5) m._walkLatch = false;
   } else {
-    if (vx > 0.6 || xv > 0.25) m._walkLatch = true;
+    if (vx > on || xv > on * 0.8) m._walkLatch = true;
   }
   return m._walkLatch;
 }
@@ -118802,8 +118843,27 @@ function _monsterStateFrame(m) {
   // entry (the windup finally plays), walk starts on its first stride, and
   // idle/walk carry a per-mob seed so a pack doesn't animate in lockstep.
   const _mfb = _mobFrameBase(m);   // v0.29.707 — per-type bake base (see above)
-  if (attacking) return _bossLoopFrame(set.attack, _atkMs, _mfb, _mobAnimPhase(m, 'attack', false));
-  if (_mobWalking(m)) return _bossLoopFrame(set.walk, _BOSS_WALK_FRAME_MS, _mfb, _mobAnimPhase(m, 'walk', true));   // v0.29.273 — displacement-aware (slow mobs glided)
+  // v0.30.x — WALK OUTRANKS THE INCIDENTAL ATTACK POSE (per user: "make sure
+  // monsters only move horizontally when the walking sprite plays"). Killing
+  // the sub-threshold drift fixed the idle case, but not this one: a mob that
+  // brushes the player gets atkAnimUntil stamped for 650 ms and keeps CHASING
+  // at full speed underneath it, so the attack pose slid. Measured at up to
+  // 0.36 px/frame across 45 frames in one run.
+  //
+  // Rooting it instead is not an option and the reason is written into
+  // _mobCasting: atkAnimUntil is stamped on every contact hit, so freezing on
+  // it would stall a mob for two thirds of a second every time it touched the
+  // player -- a combat change nobody asked for. So the ART yields instead of
+  // the MOVEMENT: if the mob is genuinely walking, it is drawn walking.
+  //
+  // Deliberate attacks are unaffected. _mobCasting (shot windups, heavy-swing
+  // telegraphs, the post-shot beat) already plants the mob at vx = 0, so it is
+  // not walking and keeps its attack frames -- which is the case where the
+  // pose actually carries information the player needs to read.
+  if (attacking && !(typeof _mobWalking === 'function' && _mobWalking(m))) {
+    return _bossLoopFrame(set.attack, _atkMs, _mfb, _mobAnimPhase(m, 'attack', false));
+  }
+  if (_mobWalking(m)) return _bossLoopFrame(set.walk, _LX_MOB_WALK_FRAME_MS, _mfb, _mobAnimPhase(m, 'walk', true));   // v0.29.273 — displacement-aware (slow mobs glided); v0.30.x — quicker stride
   return _bossPingPongFrame(set.idle, _BOSS_IDLE_FRAME_MS, _mfb, _mobAnimPhase(m, 'idle', true));
 }
 // v0.26.351 — Per-type draw-box multiplier for padded weapon-swing attack
