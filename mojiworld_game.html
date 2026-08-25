@@ -119242,9 +119242,36 @@ function _zodiacRelFrame(frames, frameMs, elapsedMs, pingpong) {
   const i = step % seqLen;
   return frames[i < n ? i : seqLen - i];
 }
-function _zodiacStateImg(sign, state, elapsedMs) {
+// v0.30.x — A POUNCE IS AN ARC, NOT A LOOP (per user: "the pounce sprite
+// appears to be ping ponged rather than clean 9 sequence").
+//
+// Every other zodiac state is a cycle, so pounce inherited the wall-clock
+// modulo picker. It is not a cycle. v0.30.170 deliberately kept only the three
+// genuinely AIRBORNE frames and threw away ludo's standing ones — the right
+// call — but three frames at 48ms is a complete cycle every 144ms, so across a
+// ~1s leap the lion ran the set about seven times and snapped 2->0 on each,
+// which is exactly the ping-pong flutter in the report.
+//
+// The fix is to stop treating flight time as loop time. The frame is chosen by
+// where he IS in the jump, read off vertical velocity: hard negative at launch,
+// through zero at the apex, positive on the way down. Frame 0 is the launch,
+// the last frame is the descent, and it cannot repeat because vy does not.
+// Any frame count reads cleanly under this — three phases or nine.
+const LX_POUNCE_VY_SPAN = 10;   // |vy| at launch/landing; his gait sets vy = -9.5
+function _lxPounceArcFrame(frames, m) {
+  if (!frames) return null;
+  let n = frames._readyN || 0;
+  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
+  frames._readyN = n;
+  if (n === 0) return null;
+  if (n === 1) return frames[0];
+  const vy = (m && typeof m.vy === 'number') ? m.vy : 0;
+  const t = Math.max(0, Math.min(1, (vy + LX_POUNCE_VY_SPAN) / (2 * LX_POUNCE_VY_SPAN)));
+  return frames[Math.max(0, Math.min(n - 1, Math.floor(t * n)))];
+}
+function _zodiacStateImg(sign, state, elapsedMs, m) {
   if (state === 'fly')    return _zodiacRelFrame(ZODIAC_FLY_FRAMES[sign], _BOSS_WALK_FRAME_MS, elapsedMs, false);
-  if (state === 'pounce') return _zodiacRelFrame(ZODIAC_POUNCE_FRAMES[sign], _BOSS_ATK_FRAME_MS, elapsedMs, false);
+  if (state === 'pounce') return _lxPounceArcFrame(ZODIAC_POUNCE_FRAMES[sign], m);
   if (state === 'charge') return _zodiacRelFrame(ZODIAC_CHARGE_FRAMES[sign], _BOSS_ATK_FRAME_MS, elapsedMs, false);
   if (state === 'attack') return _zodiacRelFrame(ZODIAC_ATTACK_FRAMES[sign], _BOSS_ATK_FRAME_MS, elapsedMs, false);
   if (state === 'walk')   return _zodiacRelFrame(ZODIAC_WALK_FRAMES[sign], _BOSS_WALK_FRAME_MS, elapsedMs, false);
@@ -121543,11 +121570,11 @@ function drawMonster(m) {
     // over the incoming animation instead of a hard swap. _nowAtk is the
     // performance.now() computed above for the attack-window check.
     const _za = _zodiacAnimTick(m, _nowAtk);
-    const _zCur = _zodiacStateImg(m.zodiacSign, _za.state, _nowAtk - _za.since) || ZODIAC_SPRITES[m.zodiacSign];
+    const _zCur = _zodiacStateImg(m.zodiacSign, _za.state, _nowAtk - _za.since, m) || ZODIAC_SPRITES[m.zodiacSign];
     _drawBossSprite(_zCur, m, sx, sy, _za.state === 'attack', true);
     const _zT = (_nowAtk - _za.transAt) / _Z_XFADE_MS;
     if (_za.prev && _zT >= 0 && _zT < 1) {
-      const _zPrev = _zodiacStateImg(m.zodiacSign, _za.prev, _za.prevElapsed);
+      const _zPrev = _zodiacStateImg(m.zodiacSign, _za.prev, _za.prevElapsed, m);
       if (_zPrev && _zPrev !== _zCur) {
         const _kvW = m._visW, _kvH = m._visH;   // keep the CURRENT frame's visual box authoritative for hit-region math
         ctx.save();
