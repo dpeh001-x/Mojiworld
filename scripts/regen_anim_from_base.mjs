@@ -218,6 +218,52 @@ const TARGETS = {
       'orb at the tail tip pulses softly brighter and dimmer, its head tilts a little and its jaw and horns catch ' +
       'the light. A calm creature at rest, holding its ground. A CONTINUOUS SEAMLESS LOOP - the last frame flows ' +
       'back into the first with no jump.' + FULLBODY },
+  // v0.30.x - AETHERION'S WALK, made consistent (per user, straight after the
+  // idle). The walk set was the anatomy reference for that idle rebuild, and
+  // measuring it is what exposed its own fault: walk_1..7 draw all four legs,
+  // but walk_0 and walk_8 drop back to the near foreleg and near hindleg only.
+  // Those two are the FIRST and LAST frames, so the loop pops from four legs to
+  // two exactly at its seam, every cycle.
+  //
+  // Fitted to walk_2 rather than the base: that is the framing the walk
+  // calibration (s 1.0457, dx -0.02) is already tuned against, and the set's own
+  // frames run 659-905 px of content with the bulk near 900, so walk_2's box is
+  // the one the existing numbers expect.
+  aetherion_walk: { base: 'Sprites/bosses/walk/aetherion_2.webp', dir: 'Sprites/bosses/walk',
+    stem: 'aetherion', pad: 0.2,
+    motion: 'This crystalline white-and-gold dragon WALKS on all four legs, seen from the side. All FOUR legs stay ' +
+      'drawn and distinct in every single frame - the two near legs and the two far legs on the other side of its ' +
+      'body - and they move in a proper four-legged walking gait, each foot lifting, swinging forward, planting and ' +
+      'pushing off in turn, so at any moment some feet are down and others are mid-step. Its body rocks gently with ' +
+      'the stride, its head bobs slightly, its folded wings shift with the motion, and its long tail sways behind it ' +
+      'with the glowing orb at the tip trailing after. It walks IN PLACE - it does not travel across the frame, does ' +
+      'not slide, and does not get closer or further away. A CONTINUOUS SEAMLESS LOOP: the last frame flows straight ' +
+      'back into the first with no jump and no change in the number of legs.' + FULLBODY },
+  // v0.30.x - AETHERION'S ASTRAL JUDGEMENT (per user: "give aetherion a new
+  // attacking sprite sequence for its unique attack").
+  //
+  // The attack is named in the AI: ASTRAL JUDGEMENT, his signature - a 1500 ms
+  // telegraph that drains 99% of MP and takes 59% of max HP. What the engine
+  // actually draws during that telegraph is a VIOLET AND GOLD SPIRAL COLLAPSING
+  // INWARD onto him: particles seeded at radius 520 and pulled to the centre,
+  // alternating #c8a8ff violet and #ffe899 gold. The shipped set is a generic
+  // gold roar with a breath-burst - a good drawing of a different attack. This
+  // set is that spiral, so the sprite and the particle telegraph finally agree.
+  //
+  // Built from attack_4, the existing set's own rear-up: it is the widest frame
+  // at 958x764, so fitting back to it keeps the union the attack calibration
+  // (s 1.6) is already tuned against.
+  aetherion_attack: { base: 'Sprites/bosses/attack/aetherion_4.webp', dir: 'Sprites/bosses/attack',
+    stem: 'aetherion', pad: 0.2,
+    motion: 'This crystalline white-and-gold dragon calls down a single devastating spell, and the nine frames are ' +
+      'one cast from start to finish. Frames 1-3: he plants his hind legs and rears up, wings sweeping wide open, ' +
+      'head lifting and jaws parting, while faint VIOLET and GOLD motes wink into being far out around him. ' +
+      'Frames 4-6: those motes become a dense spiral of violet and gold energy rushing INWARD from every side and ' +
+      'converging on his chest - the ribbons curve as they come, his scales light from within, and his eyes blaze ' +
+      'white. Frames 7-9: the gathered power detonates outward from him in a blinding white-gold flare with violet ' +
+      'shards riding it, wings at full spread, head thrown back, and he HOLDS that final pose. He is rooted the ' +
+      'whole time - he does not walk, step or leave the spot, and all FOUR of his limbs stay drawn: both hind legs ' +
+      'planted and both forelegs raised and clawing the air. Violet and gold only - no red, no orange fire.' + FULLBODY },
 };
 
 const only = val('--only', null);
@@ -228,7 +274,7 @@ if (!argv.includes('--generate')) {
   console.log(`regen ${keys.length} animation set(s), ${FRAMES} frames @ ${SIZE}\n`);
   for (const k of keys) {
     const t = TARGETS[k];
-    console.log(`=== ${k}  base ${t.base}  ->  ${t.dir}/${k}_0..8`);
+    console.log(`=== ${k}  base ${t.base}  ->  ${t.dir}/${t.stem || k}_0..8`);
     console.log(t.motion + HOLD + '\n');
   }
   console.log('Re-run with --generate. Writes candidates only; install is separate.');
@@ -326,7 +372,14 @@ for (const k of keys) {
       };
       const _written = [];
       for (let i = 0; i < FRAMES; i++) {
-        const _f = join(outDir, `${k}_${i}.webp`);
+        // v0.30.x — `stem` lets the TARGET KEY and the OUTPUT FILENAME differ.
+        // Keys have to be unique, but one creature can own several sets that all
+        // write <creature>_0..8 into different directories — Aetherion's idle and
+        // walk are exactly that. Without this the second target would have to be
+        // keyed 'aetherion_walk' and would write aetherion_walk_0.webp, which no
+        // loader asks for. Defaults to the key, so every existing target is
+        // untouched.
+        const _f = join(outDir, `${t.stem || k}_${i}.webp`);
         await writeFile(_f, await normalise(await _unpad(bufs[i]), _bm.width, _bm.height));
         _written.push(_f);
       }
