@@ -133,6 +133,78 @@ const afterSpam = await page.evaluate(() => {
     fxParent: fx.parentElement.tagName, cardStuck: el.classList.contains('go') };
 });
 
+
+// ---- 6) the grind loop: one click per attempt, with REAL mouse clicks ----
+// The boot overlay covers the modal until a session starts, so it has to go
+// before any coordinate-based click means anything.
+await page.evaluate(() => { const o = document.getElementById("loading-overlay"); if (o) o.remove(); });
+const loop = await page.evaluate(() => {
+  const it = window._UX.it; it.stars = 6; it._pity = 0;
+  player.mojicoins = 99999999;
+  window._UX.realRandom = Math.random; Math.random = () => 0.999;   // always fail, so stars never move
+  openEnhancementModal(); renderEnhancementModal(it);
+  return { coins: player.mojicoins, cost: STAR_COSTS[it.stars] };
+});
+await page.waitForTimeout(60);   // the button handler is wired on a setTimeout(0)
+// A ★6 preview is tall enough to push the Forge button below the fold at this
+// viewport, and a coordinate click there lands outside the window entirely -
+// elementFromPoint returned null and the first cut of this file read that as
+// "the feature does not work". Scroll it into view before measuring anything.
+await page.locator('#do-enhance').scrollIntoViewIfNeeded();
+const btnBox = await page.evaluate(() => {
+  const b = document.getElementById("do-enhance"); const r = b.getBoundingClientRect();
+  const x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2);
+  const hit = document.elementFromPoint(x, y);
+  // A point inside the modal but well away from the Forge button, for the
+  // "clicking elsewhere only dismisses" case. The celebration overlay is
+  // absolutely positioned INSIDE the modal, not over the viewport, so a click
+  // at the top-left of the screen never touches it - which is what the first
+  // cut of this file got wrong.
+  const mr = document.querySelector('#enhance-modal .modal').getBoundingClientRect();
+  return { x, y, hitId: hit ? (hit.id || hit.tagName) : null,
+    awayX: Math.round(mr.left + 30), awayY: Math.round(mr.top + mr.height * 0.75) };
+});
+await page.mouse.click(btnBox.x, btnBox.y);          // 1st attempt
+await page.waitForTimeout(900);                      // anvil done, card up
+const cardUp = await page.evaluate(() => ({
+  up: document.getElementById("enhance-celebration").classList.contains("go"),
+  coins: player.mojicoins,
+}));
+await page.mouse.click(btnBox.x, btnBox.y);          // same spot again
+await page.waitForTimeout(120);
+const afterSecond = await page.evaluate(() => ({
+  up: document.getElementById("enhance-celebration").classList.contains("go"),
+  coins: player.mojicoins,
+}));
+// a click somewhere ELSE on the card must only dismiss
+await page.waitForTimeout(1200);
+const elsewhere = await page.evaluate(() => {
+  const it = window._UX.it; player.mojicoins = 99999999;
+  attemptEnhance(it); return { coins: player.mojicoins };
+});
+await page.waitForTimeout(900);
+await page.mouse.click(btnBox.awayX, btnBox.awayY);   // inside the modal, away from the button
+await page.waitForTimeout(150);
+const afterElsewhere = await page.evaluate(() => {
+  const o = { up: document.getElementById("enhance-celebration").classList.contains("go"), coins: player.mojicoins };
+  Math.random = window._UX.realRandom;
+  return o;
+});
+
+// ---- 7) the transcendence panel quotes the live curve ----
+const trans = await page.evaluate(() => {
+  const it = window._UX.it; it.stars = MAX_STARS; it.transcended = false;
+  renderEnhancementModal(it);
+  const h = document.getElementById("enhance-preview").innerHTML;
+  const nums = [...h.matchAll(/~\+(\d+)%/g)].map(m => +m[1]);
+  const keep = Math.pow(STAR_GROWTH, MAX_STARS) * 0.5;
+  it.stars = 6;
+  return { shown: nums,
+    trueSig: Math.round((keep * starSigMult({ stars: MAX_STARS }) - 1) * 100),
+    trueOrd: Math.round((keep * starMult({ stars: MAX_STARS }) - 1) * 100),
+    staleFlat: Math.round((keep * Math.pow(STAR_GROWTH, MAX_STARS) - 1) * 100) };
+});
+
 const badRate = rungs.filter(r => r.shownRate !== r.trueRate);
 const badCost = rungs.filter(r => r.shownCost !== r.trueCost);
 
@@ -164,6 +236,18 @@ ok('hammering the button leaves exactly one animation running, then none',
   { duringSpam: spam.timerAlive, after: afterSpam.timerAlive, fxDisplay: afterSpam.fxDisplay });
 ok('...and no result card is left stuck on screen', afterSpam.cardStuck === false,
   { cardStuck: afterSpam.cardStuck });
+ok('a click on the Forge button while the card is up FORGES - one click per attempt',
+  cardUp.up === true && afterSecond.up === false && afterSecond.coins < cardUp.coins,
+  { cardWasUp: cardUp.up, cardClearedByTheClick: !afterSecond.up,
+    coinsBefore: cardUp.coins, coinsAfter: afterSecond.coins, spentAgain: cardUp.coins - afterSecond.coins,
+    whatIsUnderTheButtonPoint: btnBox.hitId });
+ok('...while a click anywhere else on the card only dismisses it',
+  afterElsewhere.up === false && afterElsewhere.coins === elsewhere.coins,
+  { dismissed: !afterElsewhere.up, coinsUnchanged: afterElsewhere.coins === elsewhere.coins });
+ok('the transcendence panel quotes the LIVE curve, not the retired flat one',
+  trans.shown.includes(trans.trueSig) && trans.shown.includes(trans.trueOrd)
+  && !trans.shown.includes(trans.staleFlat),
+  { shown: trans.shown, trueSignaturePeak: trans.trueSig, trueOrdinaryPeak: trans.trueOrd, staleFlatValue: trans.staleFlat });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 for (const q of results) console.log((q.pass ? 'PASS ' : 'FAIL ') + ' ' + q.n + '  ' + JSON.stringify(q.x ?? ''));

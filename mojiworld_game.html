@@ -9904,7 +9904,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.195';
+const GAME_VERSION = 'v0.30.196';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -93730,6 +93730,28 @@ function _playForgeAnim(kind) {
 // forge_failure_card_test.mjs, which is exactly what it would look like in
 // the hands of someone spamming the anvil.
 let _ecDismissTimer = null;
+// v0.30.x - ONE CLICK PER ATTEMPT (per user: "work on improving this smoothness
+// even more"). The result card covers the whole panel with pointer-events:auto,
+// so while it is up the Forge button is unreachable - measured with
+// elementFromPoint, the button simply is not there to hit. Every attempt
+// therefore cost two clicks: one to clear the card, one to forge again. At ★9,
+// where the odds are 15%, that is roughly seven wasted clicks per success on a
+// button the player never moved the cursor off.
+//
+// Clearing the card removes .go, which hides the overlay outright - so by the
+// time this looks, the button underneath is genuinely hittable and this is a
+// real hit test rather than a guess at coordinates.
+function _ecClickDismiss(dismiss) {
+  return function (ev) {
+    dismiss();
+    try {
+      if (!ev || typeof ev.clientX !== 'number') return;
+      const under = document.elementFromPoint(ev.clientX, ev.clientY);
+      const btn = (under && under.closest) ? under.closest('#do-enhance') : null;
+      if (btn && !btn.disabled) btn.click();
+    } catch (e) {}
+  };
+}
 function _ecArmDismiss(fn, ms) {
   if (_ecDismissTimer) { clearTimeout(_ecDismissTimer); _ecDismissTimer = null; }
   _ecDismissTimer = setTimeout(() => { _ecDismissTimer = null; fn(); }, ms);
@@ -93803,7 +93825,7 @@ function _showEnhanceCelebration(item, newStars) {
     el.classList.remove('go');
     confetti.innerHTML = '';   // free the DOM nodes
   };
-  el.addEventListener('click', _dismiss, { once: true });
+  el.addEventListener('click', _ecClickDismiss(_dismiss), { once: true });
   _ecArmDismiss(_dismiss, isMax ? 3000 : isMilestone ? 2600 : 2200);
 }
 
@@ -93872,7 +93894,7 @@ function _showEnhanceFailure(item, opts) {
     if (confetti) confetti.innerHTML = '';
     if (pity) pity.textContent = '';
   };
-  el.addEventListener('click', _dismiss, { once: true });
+  el.addEventListener('click', _ecClickDismiss(_dismiss), { once: true });
   _ecArmDismiss(_dismiss, lost ? 2600 : 2000);
 }
 
@@ -94050,15 +94072,24 @@ function renderEnhancementModal(selectedItem) {
       prev.style.display = 'block';
       const _tHave = player.setshards || 0;
       const _tAfford = _tHave >= TRANSCEND_COST;
+      // v0.30.x - the PEAK figure was computed off the flat 1.08 curve, which
+      // stopped being what a ★10 piece is worth when the curve went two-band in
+      // v0.30.190. It read +133% while a weapon's ATK actually peaks at +312%
+      // and its other stats at +181% - the endgame's most expensive spend
+      // undersold by more than half. The keep multiplier itself is untouched and
+      // deliberately so: it is the RATIO that defines this feature (+8% above
+      // the cap, per the v0.26.836 design note), and that ratio is the same
+      // whatever the star curve does, because both sides of it move together.
       const _tKeep = Math.pow(STAR_GROWTH, MAX_STARS) * 0.5;
-      const _tPeak = Math.round((_tKeep * Math.pow(STAR_GROWTH, MAX_STARS) - 1) * 100);
+      const _tPeakSig = Math.round((_tKeep * starSigMult({ stars: MAX_STARS }) - 1) * 100);
+      const _tPeakOrd = Math.round((_tKeep * starMult({ stars: MAX_STARS }) - 1) * 100);
       const _tBody = selectedItem.transcended
         ? `<div style="text-align:center; margin-top:8px; padding:8px 10px; border-radius:6px; background:linear-gradient(90deg, rgba(255,120,60,0.14), rgba(190,90,255,0.14)); border:1px solid rgba(255,150,90,0.45); color:#ffc9a3; font-weight:bold;">🜂 TRANSCENDED — this equipment has reached its final form.</div>`
         : `<div style="margin-top:8px; padding:8px 10px; border-radius:6px; background:linear-gradient(90deg, rgba(255,120,60,0.12), rgba(190,90,255,0.12)); border:1px solid rgba(255,150,90,0.40);">
             <div style="font-weight:bold; color:#ffb380; letter-spacing:1px; margin-bottom:4px;">🜂 TRANSCENDENCE</div>
             <div style="font-size:11px; color:#e8d8cc; line-height:1.5;">
               • Resets to ★0 — but keeps <b>50% of its current ★${MAX_STARS} stats as new BASE stats</b> (≈ +${Math.round((_tKeep - 1) * 100)}% over the original base).<br>
-              • Forged back to ★${MAX_STARS}, it peaks at <b style="color:#ffd9a0;">~+${_tPeak}%</b> — beyond today's cap.<br>
+              • Forged back to ★${MAX_STARS}, it peaks at <b style="color:#ffd9a0;">~+${_tPeakSig}%</b> on this slot’s own stat and <b style="color:#ffd9a0;">~+${_tPeakOrd}%</b> on the rest — beyond today’s cap.<br>
               • <b>Once per equipment.</b> Irreversible.
             </div>
             <div style="margin:6px 0 8px; font-size:11px; color:${_tAfford ? '#cfd4dc' : '#ff8888'};">Cost: ◈ ${TRANSCEND_COST.toLocaleString()} setshards ${_tAfford ? `(you have ${_tHave.toLocaleString()}◈)` : `(need ${(TRANSCEND_COST - _tHave).toLocaleString()}◈ more — you have ${_tHave.toLocaleString()}◈)`}</div>
@@ -94228,12 +94259,16 @@ async function transcendItem(it) {
   if (!it || (it.stars || 0) < MAX_STARS) { showToast('Only ★' + MAX_STARS + ' gear can transcend.', 'rare'); return; }
   if (it.transcended) { showToast('🜂 Already transcended — once per item.', 'rare'); return; }
   if ((player.setshards || 0) < TRANSCEND_COST) { showToast('Need ' + TRANSCEND_COST + '◈ setshards (you have ' + (player.setshards || 0) + '◈).', 'rare'); return; }
-  const _keepMul = Math.pow(STAR_GROWTH, MAX_STARS) * 0.5;          // ≈ 1.079 — 50% of ★10 totals as new base
-  const _newPeakPct = Math.round((_keepMul * Math.pow(STAR_GROWTH, MAX_STARS) - 1) * 100);
+  const _keepMul = Math.pow(STAR_GROWTH, MAX_STARS) * 0.5;          // ≈ 1.079 — the +8%-above-the-cap ratio (see v0.26.836)
+  // v0.30.x — quoted off the LIVE curve, not the flat one. Same fix as the
+  // panel above: this dialog is the last thing a player reads before an
+  // irreversible spend, so its numbers have to be the ones they will get.
+  const _newPeakSig = Math.round((_keepMul * starSigMult({ stars: MAX_STARS }) - 1) * 100);
+  const _newPeakOrd = Math.round((_keepMul * starMult({ stars: MAX_STARS }) - 1) * 100);
   const _body =
     'Transcendence reforges ' + (it.name || 'this item') + ' beyond its limits.\n\n' +
     '• ★ resets to 0 — but the new BASE stats are 50% of its current ★' + MAX_STARS + ' totals (≈ +' + Math.round((_keepMul - 1) * 100) + '% over the original base).\n' +
-    '• Forged back to ★' + MAX_STARS + ', it peaks at ~+' + _newPeakPct + '% over original base — beyond the old cap.\n' +
+    '• Forged back to ★' + MAX_STARS + ', it peaks at ~+' + _newPeakSig + '% over original base on this slot\u2019s own stat (+' + _newPeakOrd + '% on the rest) — beyond the old cap.\n' +
     '• ONCE per equipment. Irreversible.\n' +
     '• Cost: ' + TRANSCEND_COST + '◈ setshards  (you have ' + (player.setshards || 0) + '◈)';
   const _ok = (typeof uiConfirm === 'function')
