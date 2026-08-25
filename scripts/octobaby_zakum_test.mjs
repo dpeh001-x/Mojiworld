@@ -175,6 +175,44 @@ const R = await page.evaluate(async () => {
   };
   out.moodCount = Object.values(out.moods).filter(v => v > 0).length;
 
+  // --- the MOOD LANCE ----------------------------------------------------
+  // Fired through the real _lxOctoMaybeLance path on a live arm, then the
+  // resulting projectile is inspected: every 4th shot must be the upgraded one,
+  // and it must be non-homing (a homing 33% hit would be undodgeable).
+  out.lanceEvery = (typeof LX_OCTO_LANCE_EVERY !== 'undefined') ? LX_OCTO_LANCE_EVERY : null;
+  out.lanceFrac = (typeof LX_OCTO_LANCE_HP_FRAC !== 'undefined') ? LX_OCTO_LANCE_HP_FRAC : null;
+  {
+    const arm = head._legRefs[0];
+    const seen = [];
+    for (let k = 0; k < 8; k++) {
+      const p = { vx: 2, vy: 0, w: 30, h: 30, color: '#ffee44', homing: true };
+      const up = _lxOctoMaybeLance(arm, p);
+      seen.push(up ? 1 : 0);
+      if (up) out.lanceProj = { homing: !!p.homing, frac: p._radiance && p._radiance.frac,
+                                stun: p.stunHit || 0, w: p.w, chance: p._radiance && p._radiance.chance };
+    }
+    out.lancePattern = seen.join('');
+  }
+  // What a lance actually costs the player, through the real damage path.
+  {
+    player._god = false;
+    const before = player.hp = getMaxHp();
+    const mh = getMaxHp();
+    player.invulnerable = 0; player.blockTimer = 0;
+    const arm = head._legRefs[0];
+    const p = { x: player.x, y: player.y, w: 46, h: 46, vx: 0, vy: 0, life: 60,
+                owner: 'enemy', skill: 'octoLeg', damage: 10, homing: false };
+    _lxOctoMaybeLance(arm, p);            // arm shot count is already at a multiple
+    for (let k = 0; k < 3 && !p._radiance; k++) _lxOctoMaybeLance(arm, p);
+    game.projectiles.push(p);
+    const _l0 = performance.now();
+    while (performance.now() - _l0 < 2500 && player.hp >= before) { game.paused = false; await frame(); }
+    out.lanceHpLost = before - player.hp;
+    out.lanceHpFracActual = +(out.lanceHpLost / mh).toFixed(3);
+    out.lanceStunned = (player.hitStun || 0) > 0 || (player.stunTimer || 0) > 0;
+    player._god = true; player.hp = getMaxHp();
+  }
+
   // --- CONTROL: an ordinary monster is untouched by any of this ----------
   const mob = spawnMonster(player.x + 200, player.y, 'horny', false);
   mob.def = 0; mob.maxHp = 4000000; mob.currentHp = 4000000;
@@ -214,8 +252,19 @@ ok('each generation is weaker, so the loop converges', R.armHpGen1 != null && R.
 // was reporting the gate re-armed when nothing had.
 ok('...and the gate re-arms once they are back', R.regrownCount === 4 && (R.dmgAfterRegrow / rNeutral) < 0.2,
    `${(R.dmgAfterRegrow / rNeutral).toFixed(3)}x with ${R.regrownCount} new arms up`);
-ok('the tentacles are way tankier', R.armHp0 >= 200000,
+ok('the tentacles are way tankier', R.armHp0 >= 600000,
    `${R.armHp0} HP each — they were 50,000, a speed bump next to a 3.04M head`);
+ok('every 4th shot from an arm is a MOOD LANCE', R.lancePattern === '00010001',
+   `pattern over 8 shots: ${R.lancePattern} (1 = lance), LX_OCTO_LANCE_EVERY = ${R.lanceEvery}`);
+ok('the lance is NOT homing — a 33% hit has to be dodgeable',
+   !!(R.lanceProj && R.lanceProj.homing === false),
+   `homing=${R.lanceProj && R.lanceProj.homing}, w=${R.lanceProj && R.lanceProj.w} (the ordinary status shot still homes)`);
+ok('the lance is declared at 33% of max HP and always applies',
+   !!(R.lanceProj && R.lanceProj.frac === 0.33 && R.lanceProj.chance === 1),
+   `frac=${R.lanceProj && R.lanceProj.frac}, chance=${R.lanceProj && R.lanceProj.chance}`);
+ok('a landed lance really costs about a third of the bar', R.lanceHpFracActual >= 0.25 && R.lanceHpFracActual <= 0.40,
+   `took ${R.lanceHpLost} HP = ${(R.lanceHpFracActual * 100).toFixed(1)}% of max`);
+ok('...and it stuns', R.lanceStunned, `hitStun/stunTimer set after the hit`);
 ok('the mood pulse runs on a 30s cadence', R.ailmentMs === 30000, `LX_OCTO_AILMENT_MS = ${R.ailmentMs}`);
 ok('every living arm inflicts its own ailment on the pulse', R.moodCount === 4,
    `${R.moodCount}/4 landed — ${JSON.stringify(R.moods)}`);
