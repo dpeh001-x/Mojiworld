@@ -127,7 +127,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "taurus": 9
   },
   "bosses/zodiac/pounce": {
-   "leo": 3
+   "leo": 8
   },
   "bosses/zodiac/fly": {
    "virgo": 9
@@ -585,6 +585,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "poison_cloud": 9,
    "quake_plume": 9,
    "quake_ring": 9,
+   "scorpio_venompool": 9,
    "shock_ring": 9
   },
   "projectiles/anim": {
@@ -673,6 +674,8 @@ window.LX_SPRITE_FRAME_INDEX = {
   "gravitos3": "gravitos3.webp",
   "gravitos2star": "gravitos2star.webp",
   "gravitos3star": "gravitos3star.webp",
+  "gravitos3punch": "gravitos3punch.webp",
+  "gravitos3soul": "gravitos3soul.webp",
   "sundered_smith": "sundered_smith.webp",
   "pqConductor": "pqConductor.webp",
   "legosaurus": "legosaurus.webp"
