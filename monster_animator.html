@@ -14,6 +14,12 @@
   #side header { padding:10px 12px; border-bottom:1px solid var(--line); }
   #q { width:100%; margin-top:8px; background:var(--panel2); border:1px solid var(--line); color:var(--txt); border-radius:7px; padding:6px 9px; font-size:12px; }
   #list { overflow:auto; flex:1; padding:6px; }
+  /* v0.30.x — variant rows sit under their boss with a rule down the left, so a
+     per-attack set reads as "one of this boss's" rather than as another boss. */
+  #list .row.kid { margin-left:14px; border-left:2px solid #2a3550; padding-left:8px; }
+  #list .row.kid .nm { color:#9fb4d8; }
+  #list .row.kid .vsfx { color:#e8c88a; font-weight:600; }
+  #list .grp-end { height:5px; }
   .row { padding:7px 9px; border-radius:7px; cursor:pointer; display:flex; align-items:center; gap:7px; }
   .row:hover { background:var(--panel2); }
   .row.sel { background:#26314a; outline:1px solid var(--acc); }
@@ -77,7 +83,7 @@
       <div class="mut" style="font-size:11px;margin-top:3px">renders EXACTLY what the game renders</div>
       <!-- build badge: bump alongside GAME_VERSION on every animator change,
            so a stale cached copy is identifiable at a glance -->
-      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.189</span>
+      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.191</span>
         <a id="lx-latest-link" href="animator.html" title="Cache-proof launcher: resolves main's current commit via the GitHub API and opens that exact build — use this if the badge looks old" style="color:#5b8cff;margin-left:6px">latest&#8599;</a></div>
       <script>
       // v0.29.246 — LIVE badge freshness probe. The static build string only
@@ -622,19 +628,64 @@
     if (MAN[a].group !== MAN[b].group) return MAN[a].group === 'boss' ? -1 : 1;
     return a.localeCompare(b);
   });
+  // v0.30.x — VARIANT GROUPING. A type is a variant of the LONGEST existing
+  // type it starts with, provided the remainder begins lowercase or with a
+  // digit. The uppercase test is load-bearing: kingKrook starts with king, but
+  // "Krook" is a different boss, not an attack set. Computed once - the
+  // manifest does not change while the page is open.
+  const _parentOf = (() => {
+    const isSfx = (s) => s.length > 0 && /^[a-z0-9]/.test(s);
+    const par = {};
+    for (const t of allTypes) {
+      let best = null;
+      for (const p of allTypes) {
+        if (p === t || !t.startsWith(p) || !isSfx(t.slice(p.length))) continue;
+        if (!best || p.length > best.length) best = p;
+      }
+      par[t] = best;
+    }
+    return par;
+  })();
+  const _rootOf = (t) => { let c = t, n = 0; while (_parentOf[c] && n++ < 8) c = _parentOf[c]; return c; };
+  const _kids = (() => {
+    const m = {};
+    for (const t of allTypes) { const r = _rootOf(t); if (r !== t) (m[r] = m[r] || []).push(t); }
+    return m;
+  })();
+
   function buildList(filter) {
     const f = (filter || '').trim().toLowerCase();
     listEl.innerHTML = '';
-    for (const t of allTypes) {
-      if (f && !t.toLowerCase().includes(f) && MAN[t].group.indexOf(f) < 0) continue;
+    const hit = (t) => !f || t.toLowerCase().includes(f) || MAN[t].group.indexOf(f) < 0 === false || MAN[t].group.indexOf(f) >= 0;
+    const matches = (t) => !f || t.toLowerCase().includes(f) || MAN[t].group.indexOf(f) >= 0;
+    const mkRow = (t, kid) => {
       const ent = MAN[t];
       const row = document.createElement('div');
-      row.className = 'row' + (t === cur ? ' sel' : '');
+      row.className = 'row' + (t === cur ? ' sel' : '') + (kid ? ' kid' : '');
       const have = STATES.filter(s => ent.states[s]).map(s => `<i class="dot" style="background:${COL[s]}"></i>`).join('');
+      // A variant row shows only what it adds - "stomp", "volley", "2 punch" -
+      // because the boss's name is already the row above it.
+      let label = t;
+      if (kid) {
+        const root = _rootOf(t);
+        label = '<span class="vsfx">' + t.slice(root.length).replace(/^([0-9]+)/, '$1 ') + '</span>';
+      }
+      row.title = t;
       row.innerHTML = `<span class="tag ${ent.group}">${ent.group === 'boss' ? 'B' : 'M'}</span>` +
-        `<span class="nm">${t}</span><span style="margin-left:auto;display:flex;gap:3px">${have}</span>`;
+        `<span class="nm">${label}</span><span style="margin-left:auto;display:flex;gap:3px">${have}</span>`;
       row.onclick = () => select(t);
-      listEl.appendChild(row);
+      return row;
+    };
+    for (const t of allTypes) {
+      if (_rootOf(t) !== t) continue;                 // variants are drawn under their root
+      const kids = (_kids[t] || []);
+      // A filter keeps the whole family when the boss OR any of its sets match,
+      // so searching "drain" still shows you which boss it belongs to.
+      const famHit = matches(t) || kids.some(matches);
+      if (!famHit) continue;
+      listEl.appendChild(mkRow(t, false));
+      for (const k of kids) listEl.appendChild(mkRow(k, true));
+      if (kids.length) { const sp = document.createElement('div'); sp.className = 'grp-end'; listEl.appendChild(sp); }
     }
   }
 
