@@ -9904,7 +9904,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.224';
+const GAME_VERSION = 'v0.30.225';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -84329,15 +84329,48 @@ function _lxOctoSpawnArms(m, gen) {
 // all of it: on Gravitos at DEF 1200 a Siege Volley arrow landed for 5x what
 // every other attack in the game managed.
 const LX_MAX_DEF_PIERCE = 0.75;
-// Skill tags that pierce, and by how much BEFORE the cap. 'breakDef' is
+// v0.30.x — PIERCE RAMPS WITH RP (per user: "for skills only higher def pierce
+// at higher RP in a ramp up gradual fashion"). A piercing skill used to arrive
+// at the full ceiling the moment it was cast, at any rank; it now climbs
+// linearly with the ranks invested in it — six points a rank:
+//
+//   rank  0   15%        rank  5   45%        rank 10   75%
+//
+// Skill tags that pierce, and their ceiling AT MAX RANK. 'breakDef' is
 // currently unreferenced by any skill; it is listed so that wiring it up later
-// inherits the cap instead of re-inheriting the old full bypass.
+// inherits the cap and the ramp instead of the old full bypass.
 const _LX_DEF_PIERCE = { siege: 0.75, breakDef: 0.75 };
+const LX_PIERCE_AT_RANK0 = 0.15;
+// The runtime hit-tag is NOT the id the rank panel invests in: shots are tagged
+// 'siege' while the skill is 'ballista_volley'. There is no 'siege' in
+// SKILL_DEFS and none in SKILL_HIT_TAG_TO_DEF_ID, so getSkillRank('siege')
+// returns 0 for ever — without this map the ramp would pin every Siege Volley
+// at the rank-0 floor however much RP went in, and look like it was working.
+//
+// Deliberately a LOCAL map rather than an entry in SKILL_HIT_TAG_TO_DEF_ID:
+// that bridge also feeds getSkillRankMul, so adding 'siege' there would hand
+// Siege Volley a +5%-per-rank DAMAGE bonus it has never had.
+const _LX_PIERCE_TAG_ID = { siege: 'ballista_volley' };
+function _lxPierceRank(skill) {
+  try {
+    const id = _LX_PIERCE_TAG_ID[skill] || skill;
+    if (typeof getSkillRank !== 'function') return 0;
+    return getSkillRank(id) | 0;
+  } catch (e) { return 0; }
+}
 function _lxDefPierce(skill) {
-  let p = (skill && _LX_DEF_PIERCE[skill]) || 0;
+  let p = 0;
+  const atMax = (skill && _LX_DEF_PIERCE[skill]) || 0;
+  if (atMax > 0) {
+    const cap = (typeof SKILL_RANK_CAP === 'number' && SKILL_RANK_CAP > 0) ? SKILL_RANK_CAP : 10;
+    const t = Math.max(0, Math.min(1, _lxPierceRank(skill) / cap));
+    const floor = Math.min(LX_PIERCE_AT_RANK0, atMax);
+    p = floor + (atMax - floor) * t;
+  }
   // Boon and gear contributions. Neither stat exists yet, so both read 0 — the
   // point is that when one is added it arrives already capped, and stacking it
-  // with a piercing skill cannot exceed the ceiling either.
+  // with a piercing skill cannot exceed the ceiling either. These do NOT ramp:
+  // the request scoped the RP ramp to skills.
   try {
     if (typeof player !== 'undefined' && player && player.mods) p += (+player.mods.defPierce || 0);
     if (typeof getEquipBonus === 'function') p += (+getEquipBonus('defPierce') || 0);

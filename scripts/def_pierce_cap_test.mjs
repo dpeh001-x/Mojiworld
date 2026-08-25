@@ -48,6 +48,11 @@ const out = await page.evaluate(async ({ CAP }) => {
   // Level-matched: _lvGapDefAdd bolts extra defence onto a monster that
   // out-levels you, and it lands on the base before the curve.
   player.cls = 'warrior'; player.level = 50; player._god = true; game.paused = false;
+  // MAX RANK. Pierce ramps with the RP invested in the skill (v0.30.x), so a
+  // rank-0 Siege Volley now sits at the 15% floor - this file is about the
+  // CEILING, and must measure where the ceiling actually applies.
+  player.skillRanks = player.skillRanks || {};
+  player.skillRanks.ballista_volley = (typeof SKILL_RANK_CAP === 'number') ? SKILL_RANK_CAP : 10;
 
   const res = [];
   const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 150) });
