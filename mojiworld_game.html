@@ -9904,7 +9904,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.191';
+const GAME_VERSION = 'v0.30.192';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -93463,6 +93463,17 @@ function _playForgeFxAnim(kind) {
   el.style.display = 'block';
   el.style.backgroundImage = 'url("' + base + '0.webp")';
   _forgeFxTimer = setInterval(() => {
+    // v0.30.x - STOP IF THE FORGE IS GONE. This element is reparented to <body>
+    // and positioned `fixed` so it can out-rank the toast layer, which means
+    // closing the modal does NOT hide it: measured, a player who shut the forge
+    // mid-strike left a smoking anvil floating over the gameplay for the rest of
+    // the loop. Polling the modal here rather than hooking every close path (the
+    // X, Escape, and two separate close-everything sweeps) means a close route
+    // added later cannot reintroduce it.
+    const _m = document.getElementById('enhance-modal');
+    if (!_m || _m.style.display === 'none' || _m.style.display === '') {
+      clearInterval(_forgeFxTimer); _forgeFxTimer = null; _restore(); return;
+    }
     f++;
     if (f > _FORGE_FX_FRAMES - 1) { clearInterval(_forgeFxTimer); _forgeFxTimer = null; _restore(); return; }
     el.style.backgroundImage = 'url("' + base + f + '.webp")';
@@ -93847,8 +93858,12 @@ function renderEnhancementModal(selectedItem) {
     const risky = canDowngradeOnFail(s);
     // v0.26.259 — Three-zone risk classification used by the badge below.
     // 'safe'      → ★0 → ★1 (no downgrade risk + highest success rate)
-    // 'risky'     → ★1 → ★5 (50-65 % success, may drop ★)
-    // 'dangerous' → ★5 → ★10 (25-45 % success, may drop ★)
+    // 'risky'     → ★1 → ★5 (55-87 % success, ★5 is the first that may drop)
+    // 'dangerous' → ★5 → ★10 (55 % falling to 15 %, may drop ★)
+    // v0.30.x — the bands are keyed to STAR LOSS, not to the rate, which is why
+    // they did not move when the odds steepened at ★6: 'dangerous' begins where
+    // canDowngradeOnFail does, and that is still ★5. Only the percentages in
+    // this comment were stale.
     const _riskZone = s === 0 ? 'safe' : s < 5 ? 'risky' : 'dangerous';
     const _riskLabel = _riskZone === 'safe' ? '✓ Safe' : _riskZone === 'risky' ? '⚠ Risky' : '⛔ Dangerous';
     const _riskColor = _riskZone === 'safe' ? '#88ff88' : _riskZone === 'risky' ? '#ffcc44' : '#ff8888';
@@ -93965,6 +93980,14 @@ function openEnhancementModal() {
   renderEnhancementModal(null);
   document.getElementById('enhance-modal').style.display = 'flex';
   game.paused = true;
+  // v0.30.x - WARM BOTH ANIMATIONS ON OPEN. _preloadForgeFx was only ever
+  // called from inside the play function, i.e. at the exact moment the frames
+  // were needed, so the FIRST strike of a session flipped through images the
+  // browser had not decoded yet - 70 ms a frame with nothing to show. Measured:
+  // the preload map was still empty after the modal had been opened and drawn.
+  // Doing it here costs 18 cached images at a moment the player is reading, and
+  // the flag makes every later open a no-op.
+  try { _preloadForgeFx('success'); _preloadForgeFx('fail'); } catch (e) {}
 }
 
 // =========================================================================
