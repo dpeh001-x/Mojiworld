@@ -90,7 +90,7 @@
       <div class="mut" style="font-size:11px;margin-top:3px">renders EXACTLY what the game renders</div>
       <!-- build badge: bump alongside GAME_VERSION on every animator change,
            so a stale cached copy is identifiable at a glance -->
-      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.208</span>
+      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.219</span>
         <a id="lx-latest-link" href="animator.html" title="Cache-proof launcher: resolves main's current commit via the GitHub API and opens that exact build — use this if the badge looks old" style="color:#5b8cff;margin-left:6px">latest&#8599;</a></div>
       <script>
       // v0.29.246 — LIVE badge freshness probe. The static build string only
@@ -663,6 +663,14 @@
   // v0.30.x — FRAME HOLD. null = play; an integer = show exactly that frame,
   // so a single frame can be inspected and tuned without chasing it.
   let pinFrame = null;
+  // v0.30.x — ART-SET OWNER. A set whose frames the game draws using another
+  // entity's geometry, calibration and content-norm reference. aetherionastral
+  // is picked by _aetherionAstralKey, which is not in _drawBossSprite's art-key
+  // chain, so the frames are its own and everything else stays Aetherion's -
+  // measured, the game stamps 1024x819 where treating it as a standalone entity
+  // previews 640x512. Not a naming rule: gravitospunch IS keyed on itself.
+  const ART_OWNER = { aetherionastral: 'aetherion' };
+  const ownerOf = (t) => ART_OWNER[t] || t;
   // v0.30.x — IDLE REFERENCE. The ghost is the family ROOT's idle: a per-attack
   // set has no idle of its own, and the size it has to match is the boss's.
   let idleRef = false;
@@ -689,14 +697,18 @@
       const i = pickFrame(st, FR[st]);
       img = (i >= 0 && FR[st][i] && FR[st][i].complete && FR[st][i].naturalWidth) ? FR[st][i] : null;
     }
-    return C.geometry(T, st, img, FR.idle);
+    // an owned set keeps its own IMAGE but borrows the owner's geometry and
+    // content-norm reference, which is exactly what the game does with it
+    const O = ownerOf(T);
+    const ref = (O === T) ? FR.idle : (_grpFramesFor(O) || {}).idle;
+    return C.geometry(O, st, img, ref);
   }
 
   // consolidated in-game render metrics per state (drives the 📐 card)
   function gameMetrics(st) {
     const ent = MAN[cur]; if (!ent || !ent.states[st]) return null;
     const g = geomFor(st); if (!g) return null;
-    const c = (CALIB[cur] && CALIB[cur][st]) || { s: 1 };
+    const c = (CALIB[ownerOf(cur)] && CALIB[ownerOf(cur)][st]) || { s: 1 };
     const arr = frames[st];
     return {
       state: st,
@@ -833,7 +845,7 @@
     const img = arr[idx];
     if (!img.complete || !img.naturalWidth) return;
     const g = geomFor(st, img, T, FR); if (!g) return;
-    const c = (CALIB[T] && CALIB[T][st]) || { s: 1, dx: 0, dy: 0 };
+    const c = (CALIB[ownerOf(T)] && CALIB[ownerOf(T)][st]) || { s: 1, dx: 0, dy: 0 };
     // per-frame scale (fs[idx]) folds into s — game parity (see _drawBossSprite)
     const _pf = (c.fs && c.fs[idx] > 0) ? c.fs[idx] : 1;
     ctx.save();
@@ -972,7 +984,7 @@
         // measured through the same geometry + calib the draw uses, so the grid
         // is sized in game px and never clips a member
         const gg = geomFor(st, undefined, t, fr);
-        const c = (CALIB[t] && CALIB[t][st]) || { s: 1 };
+        const c = (CALIB[ownerOf(t)] && CALIB[ownerOf(t)][st]) || { s: 1 };
         const am = gg ? (gg.atkMul || 1) : 1;
         out.push({
           t, st, fr,
@@ -1371,6 +1383,7 @@
     // v0.29.x — in-game wiring notes for override-key sets: say WHERE a
     // dedicated attack set actually plays, so the preview isn't a mystery.
     const WIRING = {
+      aetherionastral: '\u{2728} plays in-game as Aetherion’s ASTRAL JUDGEMENT — a 1500 ms telegraph with the burst on FRAME 6, then ~420 ms of aftermath. Form 2 falls back to the generic attack pose until an aetherion2astral set ships. NOTE: the game draws these frames with AETHERION’s geometry and calibration, not this set’s — so the sliders here move his attack calib, and the size shown is his.',
       gravitospunch: '\u{1F94A} plays in-game on form-1 Gravitos: Gravity Crush · Body Slam · Zip charge — once through per pattern window',
       gravitos2star: '\u{2600}\u{FE0F} plays in-game while form-2 Gravitos casts the Singularity / Collapse Rain supernova',
       gravitos3star: '\u{2600}\u{FE0F} plays in-game while form-3 Gravitos casts the Singularity / Collapse Rain supernova',
