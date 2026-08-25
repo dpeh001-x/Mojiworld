@@ -593,6 +593,13 @@ window.LX_ANIM_CALIB = {
       "dx": 0,
       "dy": 0.28
     }
+  },
+  "zodiac_taurus": {
+    "zodiac/charge": {
+      "s": 1.13,
+      "dx": 0,
+      "dy": 0.035
+    }
   }
 };
 window.LX_ATK_HITBOX = {
