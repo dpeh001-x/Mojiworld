@@ -58,7 +58,12 @@ const CHAR_H = Math.round(CANVAS * CHAR_FRAC);
 // play (the renderer re-anchors each padded attack frame on its own content
 // bottom) and NOT affordable once it is removed, because then every state is
 // anchored from the static sprite and a drifting foot line simply bobs.
-const FLOOR_MARGIN = 96;                 // px of canvas below the feet
+// px of canvas below the feet. Kept SMALL on purpose. _lxMobPlantDy clamps the
+// canvas bottom to 6 px below the foot line, and floor padding is spent out of
+// that same budget - at 96 the golem overran it by 7.7 px and the clamp lifted
+// the whole box, feet included, so the mob visibly hovered. Every healthy mob
+// measured has ZERO empty rows under its ink. See scripts/mob_float_clamp_test.mjs.
+const FLOOR_MARGIN = 11;
 const FRAMES = 9, ALPHA = 12;
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
