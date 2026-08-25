@@ -218,9 +218,9 @@ window.LX_ANIM_CALIB = {
       "dy": 0.045
     },
     "attack": {
-      "s": 1,
-      "dx": 0,
-      "dy": 0.025
+      "s": 1.04,
+      "dx": 0.0035,
+      "dy": 0.03
     }
   },
   "gravitos2star": {
@@ -254,7 +254,18 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.12,
       "dx": 0,
-      "dy": 0.04
+      "dy": 0.04,
+      "fs": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1.23,
+        1,
+        1.23,
+        1
+      ]
     }
   },
   "gravitos3star": {
@@ -271,7 +282,7 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 2.8,
       "dx": 0.0105,
-      "dy": 0.3875
+      "dy": 0.41
     }
   },
   "gravitos": {
@@ -517,28 +528,28 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1,
       "dx": 0.0249,
-      "dy": 0.0805
+      "dy": 0.065
     }
   },
   "gravitos2laser": {
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.0298
+      "dy": 0.035
     }
   },
   "gravitos2punch": {
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.0298
+      "dy": 0.035
     }
   },
   "gravitos2soul": {
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.0294
+      "dy": 0.035
     }
   },
   "towerSovereignswing": {
@@ -574,6 +585,13 @@ window.LX_ANIM_CALIB = {
       "s": 1.0109,
       "dx": -0.0458,
       "dy": 0
+    }
+  },
+  "kingKrookstomp": {
+    "attack": {
+      "s": 2.4,
+      "dx": 0,
+      "dy": 0.28
     }
   }
 };
