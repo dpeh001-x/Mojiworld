@@ -253,8 +253,12 @@ const TARGETS = {
   // Built from attack_4, the existing set's own rear-up: it is the widest frame
   // at 958x764, so fitting back to it keeps the union the attack calibration
   // (s 1.6) is already tuned against.
-  aetherion_attack: { base: 'Sprites/bosses/attack/aetherion_4.webp', dir: 'Sprites/bosses/attack',
-    stem: 'aetherion', pad: 0.2,
+  // v0.30.x - retargeted: this set is Aetherion's ASTRAL JUDGEMENT, not his
+  // generic attack. The generic set went back to the original art (per user: the
+  // regenerated one varied too much), and this one is now wired to the special
+  // attack alone, so the stem writes aetherionastral_0..8.
+  aetherion_astral: { base: 'Sprites/bosses/attack/aetherion_4.webp', dir: 'Sprites/bosses/attack',
+    stem: 'aetherionastral', pad: 0.2,
     motion: 'This crystalline white-and-gold dragon calls down a single devastating spell, and the nine frames are ' +
       'one cast from start to finish. Frames 1-3: he plants his hind legs and rears up, wings sweeping wide open, ' +
       'head lifting and jaws parting, while faint VIOLET and GOLD motes wink into being far out around him. ' +

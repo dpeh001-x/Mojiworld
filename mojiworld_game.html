@@ -9904,7 +9904,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.213';
+const GAME_VERSION = 'v0.30.214';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -118241,6 +118241,14 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
   // played ONCE across the pattern window (see _gravitosPunchFrame). Registered
   // here so the frames + static pose load; idle/walk sets don't exist (the key
   // is only ever active mid-attack).
+  // v0.30.x - AETHERION'S ASTRAL JUDGEMENT set
+  // (Sprites/bosses/attack/aetherionastral_0..8). His signature cast had been
+  // drawing the generic attack pose - a gold roar, which is a fine drawing of a
+  // different move. This set is the cast the engine actually telegraphs: the
+  // violet-and-gold spiral collapsing inward, then the detonation. Frames-only,
+  // like the Gravitos cast sets - the key is never active outside the attack, so
+  // it has no idle or walk of its own.
+  'aetherionastral',
   'gravitospunch',
   // v0.29.560 — Gravitos SOUL set (Sprites/bosses/attack/gravitossoul_0..8).
   // The art shipped but nothing referenced it, so it never loaded and never
@@ -118624,6 +118632,41 @@ function _gravitosPunchPair(m) {
   const idxF = tE * (n - 1);
   const i = Math.min(n - 1, Math.floor(idxF));
   return { a: frames[i], b: frames[Math.min(n - 1, i + 1)], f: Math.min(1, idxF - i), i, n };
+}
+// v0.30.x - ASTRAL JUDGEMENT playback. Deliberately NOT the shared attack
+// loop: _bossAttackFrame runs a set at _BOSS_ATK_FRAME_MS and cycles it every
+// ~432 ms, which for a 1500 ms cast would fire the detonation three and a half
+// times. This plays the nine frames ONCE across the cast and holds the tail.
+//
+// The mapping is the point. The set builds to its detonation at frame 6, and
+// the damage resolves at exactly patternTimer 1500 - so frames 0-6 are spread
+// across the telegraph to put the burst ON the hit rather than a third of a
+// second early, and 7-8 play out afterwards as the aftermath. Reading it as a
+// flat 0-8 over 1500 ms would land the flash while the player still had time
+// to dodge, and show them the fade at the moment they were struck.
+const _AE_ASTRAL_BURST = 6, _AE_ASTRAL_TELE = 1500, _AE_ASTRAL_TAIL = 420;
+function _aetherionAstralKey(m) {
+  // Form 2 may ship its own set later; until it does the key will not resolve
+  // and the caller falls back to the generic attack pose, exactly as today.
+  return (m && m._aetherionEvolved) ? 'aetherion2astral' : 'aetherionastral';
+}
+function _aetherionAstralFrame(m) {
+  const frames = (typeof BOSS_ATTACK_FRAMES !== 'undefined') ? BOSS_ATTACK_FRAMES[_aetherionAstralKey(m)] : null;
+  if (!frames || !frames.length) return null;
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);
+  let n = frames._readyN || 0;
+  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
+  frames._readyN = n;
+  if (n === 0) return null;                       // undecoded - caller falls back
+  const pt = m.patternTimer || 0;
+  const burst = Math.min(n - 1, _AE_ASTRAL_BURST);
+  let i;
+  if (pt <= _AE_ASTRAL_TELE) {
+    i = Math.min(burst, Math.floor((pt / _AE_ASTRAL_TELE) * (burst + 1)));
+  } else {
+    i = Math.min(n - 1, burst + 1 + Math.floor(((pt - _AE_ASTRAL_TELE) / _AE_ASTRAL_TAIL) * (n - burst - 1)));
+  }
+  return frames[Math.max(0, Math.min(n - 1, i))];
 }
 function _gravitosPunchFrame(m) {
   const p = _gravitosPunchPair(m);
@@ -121429,6 +121472,13 @@ function drawMonster(m) {
   if (!m._gravStarKey && _gravitosUsesSoul(m) && _gravitosSoulFrame(m)) {
     m._gravStarKey = _gravCastKey(m, 'soul');
   }
+  // v0.30.x - ASTRAL JUDGEMENT owns the sprite for the length of its cast.
+  // Guarded on the frame picker returning something, so an undecoded or missing
+  // set leaves the generic attack pose in place rather than blanking the boss.
+  m._aeAstralKey = null;
+  if (m.type === 'aetherion' && m.patternState === 'astral' && _aetherionAstralFrame(m)) {
+    m._aeAstralKey = _aetherionAstralKey(m);
+  }
   // v0.29.570 — form-1 LASER SWEEP set.
   if (m.type === 'gravitos' && !m._gravStarKey &&
       m.patternState === 'laser' && _gravitosLaserFrame(m)) {
@@ -121441,7 +121491,7 @@ function drawMonster(m) {
   // instead of a blank boss.
   const _spriteKey = (m._braceDashing && BOSS_ATTACK_FRAMES.legosaurusdash && BOSS_ATTACK_FRAMES.legosaurusdash.length)
     ? 'legosaurusdash'
-    : (_sovAtkLive ? m._sovAtkKey : (m._gravStarKey || m._phaseSprite || m.type));   // v0.30.89 — per-attack Sovereign set
+    : (_sovAtkLive ? m._sovAtkKey : (m._aeAstralKey || m._gravStarKey || m._phaseSprite || m.type));   // v0.30.x - Astral · v0.30.89 — per-attack Sovereign set
   // v0.26.310 — prefer the 4-frame attack animation when its frames have
   // decoded; otherwise the single static attack pose, then idle.
   // v0.29.418 — pass m so the boss's cycle is phased per entity: an attack
@@ -121454,6 +121504,7 @@ function drawMonster(m) {
     ? ((/punch$/.test(_spriteKey) && _gravitosPunchFrame(m))
        || (/laser$/.test(_spriteKey) && _gravitosLaserFrame(m))
        || (/soul$/.test(_spriteKey) && _gravitosSoulFrame(m))   // v0.29.560 — once-through, then holds
+       || (/astral$/.test(_spriteKey) && _aetherionAstralFrame(m))   // v0.30.x - burst timed to the resolve
        || _bossAttackFrame(_spriteKey, m) || BOSS_ATTACK_SPRITES[_spriteKey])
     : null;
   const _bodyKey = m._phaseSprite || m.type;   // v0.29.x — walk/idle sets are keyed by the BODY, never by an attack override

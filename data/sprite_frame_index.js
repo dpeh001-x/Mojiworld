@@ -8,6 +8,7 @@ window.LX_SPRITE_FRAME_INDEX = {
  "frames": {
   "bosses/attack": {
    "aetherion2": 9,
+   "aetherionastral": 9,
    "aetherion": 9,
    "gravitos2laser": 9,
    "gravitos2punch": 9,
