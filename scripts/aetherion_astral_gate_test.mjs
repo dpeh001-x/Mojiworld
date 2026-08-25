@@ -115,6 +115,12 @@ const R = await page.evaluate(async () => {
   for (const p of ['volley', 'tear', 'rain', 'beam', 'teleport', 'deathOrbs', 'idle']) {
     out.f1_others[p] = await probe(false, p);
   }
+  // v0.30.x — the two sets must resolve DIFFERENT calib entries. Before the
+  // boss calib chain learned _aeAstralKey, both read aetherion.attack, so
+  // tuning Astral Judgement resized his ordinary swing with it.
+  out.calibAe = JSON.stringify(_lxAnimCalib('aetherion', 'attack'));
+  out.calibAstral = JSON.stringify(_lxAnimCalib('aetherionastral', 'attack'));
+  out.chainHasAstral = /_aeAstralKey/.test(String(typeof drawMonster === 'function' ? drawMonster : ''));
   return out;
 });
 await browser.close(); server.kill();
@@ -122,6 +128,7 @@ await browser.close(); server.kill();
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 210) });
 
+console.log(`  calib aetherion.attack = ${R.calibAe}   aetherionastral.attack = ${R.calibAstral}`);
 console.log(`  aetherionastral frames: ${R.astralArt} (decoded ${R.decoded})   aetherion2astral frames: ${R.form2Art}`);
 console.log(`  form 1 + astral -> ${R.f1_astral.keys}   (drawn ${R.f1_astral.drawn} frames)`);
 console.log(`  form 2 + astral -> ${R.f2_astral.keys}   (drawn ${R.f2_astral.drawn} frames)`);
@@ -141,6 +148,21 @@ const others = Object.entries(R.f1_others || {});
 const leaked = others.filter(([, v]) => v.keys !== 'null').map(([k]) => k);
 ok('no OTHER form-1 pattern plays it', leaked.length === 0,
    leaked.length ? 'leaked on: ' + leaked.join(', ') : `clean across ${others.length} patterns`);
+// The two sets must resolve DIFFERENT calib entries. Before the boss calib
+// key chain learned _aeAstralKey they both read aetherion.attack, so tuning
+// Astral Judgement resized his ordinary swing with it.
+ok('the astral set has its OWN calib entry',
+   !!(R.calibAstral && R.calibAe && R.calibAstral !== R.calibAe),
+   `aetherion.attack ${R.calibAe}  vs  aetherionastral.attack ${R.calibAstral}`);
+// Parsed, not pattern-matched. The regex form could not match: /s:1.6/ never
+// matches "s":1.6 because of the quote between them, and it reported a
+// correct build as broken.
+ok('...so tuning the spell cannot resize his ordinary attack',
+   (() => { try { return JSON.parse(R.calibAe).s === 1.6; } catch (e) { return false; } })(),
+   `aetherion.attack is back to its pre-patch scale: ${R.calibAe}`);
+ok('...and the spell keeps the tuned scale',
+   (() => { try { return JSON.parse(R.calibAstral).s === 1.94; } catch (e) { return false; } })(),
+   `aetherionastral.attack: ${R.calibAstral}`);
 ok('CONTROL: the probe can tell the two apart', R.f1_astral.keys !== R.f2_astral.keys,
    'if these matched, the test could not distinguish a gate from a no-op');
 
