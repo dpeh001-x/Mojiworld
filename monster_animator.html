@@ -83,7 +83,7 @@
       <div class="mut" style="font-size:11px;margin-top:3px">renders EXACTLY what the game renders</div>
       <!-- build badge: bump alongside GAME_VERSION on every animator change,
            so a stale cached copy is identifiable at a glance -->
-      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.191</span>
+      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.193</span>
         <a id="lx-latest-link" href="animator.html" title="Cache-proof launcher: resolves main's current commit via the GitHub API and opens that exact build — use this if the badge looks old" style="color:#5b8cff;margin-left:6px">latest&#8599;</a></div>
       <script>
       // v0.29.246 — LIVE badge freshness probe. The static build string only
@@ -149,6 +149,7 @@
       <label title="Overlay this entity's states on one spot"><input type="checkbox" id="overlay" />overlay</label>
       <label title="Compose different sprites on one stage; click list entries to add layers"><input type="checkbox" id="compose" />compose</label>
       <label title="Show + edit THE attack hitbox (drag = move, corner/wheel = resize)"><input type="checkbox" id="hitbox" />hitbox</label>
+      <label title="Every animation this boss owns, on one page, each at its real in-game size"><input type="checkbox" id="groupview" />group</label>
       <label title="Idle ping-pongs 130ms, walk 80ms, attack 48ms — the game's exact clocks"><input type="checkbox" id="gametiming" checked />game timing</label>
       <label title="1 stage px == 1 game px (the game's exact on-screen size)"><input type="checkbox" id="gamescale" checked />game scale 1:1</label>
       <span id="fpswrap" style="opacity:.35">fps<input type="range" id="fps" min="3" max="18" value="8" style="width:80px" disabled /><span id="fpsv">8</span></span>
@@ -591,16 +592,26 @@
   // ---- runtime state ----
   let cur = null, frames = {}, frameIdx = 0, fps = 8, lastT = 0, nowT = 0;
   let overlay = false, focusState = 'idle', gameTiming = true, hbEdit = false, compose = false;
+  // v0.30.x — GROUP VIEW. Frames are cached per type: paint() runs every rAF
+  // and loadFrames() mints new Image objects, so calling it per tile per frame
+  // would allocate a fresh element for every frame of every set, forever.
+  let groupView = false;
+  const _grpFrames = Object.create(null);
+  const _grpFramesFor = (t) => (_grpFrames[t] = _grpFrames[t] || loadFrames(MAN[t]));
 
   // geometry for the CURRENT entity's state — defaults to the live playing
   // frame (content-norm needs the actual image, exactly like the game).
-  function geomFor(st, img) {
-    if (!cur) return null;
-    if (img === undefined && frames[st] && frames[st].length) {
-      const i = gameTiming ? C.gameFrameIndex(st, frames[st], nowT) : (frameIdx % frames[st].length);
-      img = (i >= 0 && frames[st][i] && frames[st][i].complete && frames[st][i].naturalWidth) ? frames[st][i] : null;
+  // v0.30.x — T/FR let the group view ask for ANOTHER entity's geometry.
+  // Omitted, they fall back to the selected entity, so every existing caller is
+  // unchanged.
+  function geomFor(st, img, T, FR) {
+    T = T || cur; FR = FR || frames;
+    if (!T) return null;
+    if (img === undefined && FR[st] && FR[st].length) {
+      const i = gameTiming ? C.gameFrameIndex(st, FR[st], nowT) : (frameIdx % FR[st].length);
+      img = (i >= 0 && FR[st][i] && FR[st][i].complete && FR[st][i].naturalWidth) ? FR[st][i] : null;
     }
-    return C.geometry(cur, st, img, frames.idle);
+    return C.geometry(T, st, img, FR.idle);
   }
 
   // consolidated in-game render metrics per state (drives the 📐 card)
@@ -647,6 +658,8 @@
     return par;
   })();
   const _rootOf = (t) => { let c = t, n = 0; while (_parentOf[c] && n++ < 8) c = _parentOf[c]; return c; };
+  // every set sharing a root with t — the boss itself first, then its variants
+  const _familyOf = (t) => { const r = _rootOf(t); return allTypes.filter((x) => _rootOf(x) === r); };
   const _kids = (() => {
     const m = {};
     for (const t of allTypes) { const r = _rootOf(t); if (r !== t) (m[r] = m[r] || []).push(t); }
@@ -728,18 +741,20 @@
   function fit() {
     const w = document.getElementById('stagewrap').clientWidth - 4;
     cv.width = Math.max(560, w); cv.height = document.getElementById('stagewrap').clientHeight - 4;
+    cv.style.margin = '0 auto';   // v0.30.x — group view may have pinned it left
   }
   // draw one state EXACTLY like the game: __core.geometry supplies previewH /
   // drawW / anchorY (full anchor chain); calib transform + monster attack
   // multiplier applied the same way drawMonster does (_bW/_bH/_bDy).
-  function drawState(ent, st, cx, groundY, alpha) {
-    const arr = frames[st]; if (!arr || !arr.length) return;
+  function drawState(ent, st, cx, groundY, alpha, T, FR) {
+    T = T || cur; FR = FR || frames;      // v0.30.x — group view draws other entities through THIS function
+    const arr = FR[st]; if (!arr || !arr.length) return;
     const idx = gameTiming ? C.gameFrameIndex(st, arr, nowT) : (frameIdx % arr.length);
     if (idx < 0) return;
     const img = arr[idx];
     if (!img.complete || !img.naturalWidth) return;
-    const g = geomFor(st, img); if (!g) return;
-    const c = CALIB[cur][st];
+    const g = geomFor(st, img, T, FR); if (!g) return;
+    const c = (CALIB[T] && CALIB[T][st]) || { s: 1, dx: 0, dy: 0 };
     // per-frame scale (fs[idx]) folds into s — game parity (see _drawBossSprite)
     const _pf = (c.fs && c.fs[idx] > 0) ? c.fs[idx] : 1;
     ctx.save();
@@ -860,6 +875,100 @@
     ctx.restore();
   }
 
+  // v0.30.x — GROUP VIEW: one tile per (set, state) across the current boss's
+  // family, wrapped into a grid and drawn at scale 1 through drawState, so the
+  // pixels on the stage are the pixels in the game. Nothing is fitted to its
+  // cell; the cells are sized from the largest member, which is the whole point
+  // — a sprite that towers over its siblings has to look like it does.
+  function groupTiles() {
+    const out = [];
+    for (const t of _familyOf(cur)) {
+      const ent = MAN[t]; if (!ent) continue;
+      const fr = _grpFramesFor(t);
+      for (const st of STATES) {
+        if (!ent.states[st]) continue;
+        // measured through the same geometry + calib the draw uses, so the grid
+        // is sized in game px and never clips a member
+        const gg = geomFor(st, undefined, t, fr);
+        const c = (CALIB[t] && CALIB[t][st]) || { s: 1 };
+        const am = gg ? (gg.atkMul || 1) : 1;
+        out.push({
+          t, st, fr,
+          w: gg ? (gg.drawW != null ? gg.drawW : gg.targetW) * c.s * am : 0,
+          h: gg ? gg.previewH * c.s * am : 0,
+        });
+      }
+    }
+    return out;
+  }
+  const GRP_PAD_X = 34, GRP_LABELS_H = 76, GRP_TOP = 22, GRP_CAP_H = 20;
+  // Rows are packed greedily at each tile's OWN width and are as tall as their
+  // own tallest member. Uniform cells sized from the family maximum looked
+  // tidier and were unusable: gravitos3star is 2206x1618, so it set the cell
+  // size for all twenty of gravitos' animations and turned the page into a
+  // single 34,000px column. The sprite is never scaled to fit — the canvas
+  // widens instead, and #stagewrap scrolls.
+  function groupLayout(tiles, viewW) {
+    const tw = tiles.map((x) => Math.ceil(Math.max(120, x.w)) + GRP_PAD_X);
+    const th = tiles.map((x) => Math.ceil(Math.max(80, x.h)) + GRP_LABELS_H + GRP_CAP_H);
+    const W = Math.max(viewW, ...tw);
+    const rows = []; let row = [], used = 0;
+    tiles.forEach((_, i) => {
+      if (row.length && used + tw[i] > W) { rows.push(row); row = []; used = 0; }
+      row.push(i); used += tw[i];
+    });
+    if (row.length) rows.push(row);
+    const rowH = rows.map((r) => Math.max(...r.map((i) => th[i])));
+    return { tw, th, W, rows, rowH, H: GRP_TOP + rowH.reduce((p, q) => p + q, 0) + 10 };
+  }
+  function paintGroup() {
+    const tiles = groupTiles();
+    if (!tiles.length) return;
+    const viewW = Math.max(560, document.getElementById('stagewrap').clientWidth - 4);
+    const L = groupLayout(tiles, viewW);
+    if (cv.width !== L.W || cv.height !== L.H) {
+      cv.width = L.W; cv.height = L.H;
+      ctx.clearRect(0, 0, cv.width, cv.height);
+    }
+    // a canvas wider than the pane must not be centred — auto margins put the
+    // overflow out of reach of the scrollbar on the left-hand side
+    cv.style.margin = (L.W > viewW) ? '0' : '0 auto';
+    // labels are per-tile here, and the overlay's focus-only gate inside
+    // drawState would blank all but one of them — suppress it for this draw.
+    const _ov = overlay; overlay = false;
+    let y = GRP_TOP;
+    L.rows.forEach((r, ri) => {
+      // one shared baseline per row: a size comparison is read off the feet
+      const gy = y + L.rowH[ri] - GRP_LABELS_H;
+      let x0 = Math.max(0, (L.W - r.reduce((p, i) => p + L.tw[i], 0)) / 2);
+      for (const i of r) {
+        const x = tiles[i], cx = x0 + L.tw[i] / 2;
+        const root = _rootOf(x.t);
+        // the boss's name is in the header, so a variant tile is labelled by
+        // only what it adds: "stomp", "column", "2 punch"
+        const vl = (x.t === root) ? x.t : x.t.slice(root.length).replace(/^([0-9]+)/, '$1 ');
+        drawGround(cx, gy, L.tw[i] * 0.86, '', null);
+        drawState(MAN[x.t], x.st, cx, gy, 1, x.t, x.fr);
+        // caption ABOVE the sprite: feet are drawn below the baseline, so a
+        // caption under it gets painted over, and in a tall row a short set's
+        // name would otherwise strand itself at the bottom of the cell
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.fillStyle = COL[x.st]; ctx.font = '700 12px system-ui';
+        ctx.fillText(vl + '  ' + x.st, cx, Math.max(y + 13, gy - Math.max(x.h, 36) - 9));
+        ctx.restore();
+        x0 += L.tw[i];
+      }
+      y += L.rowH[ri];
+    });
+    overlay = _ov;
+    ctx.save();
+    ctx.textAlign = 'left'; ctx.fillStyle = '#8a97ad'; ctx.font = '11px system-ui';
+    ctx.fillText(_rootOf(cur) + '  —  ' + tiles.length + ' animations, every one at its real in-game size'
+      + '  ·  drag-tuning is off in this view', 8, 14);
+    ctx.restore();
+  }
+
   let columns = [];   // [{state, cx, groundY}] — this paint's layout
   let hbRects = [];   // [{x,y,w,h,st,previewH}] — this paint's hitbox rects
   function paint() {
@@ -867,6 +976,9 @@
     columns = []; hbRects = [];
     if (compose && window.__compose) { window.__compose.paint(ctx, cv, frameIdx); return; }
     if (!cur) return;
+    // group view replaces the single-entity layout, but only when the boss owns
+    // more than one set — otherwise it is the same picture with less room.
+    if (groupView && _familyOf(cur).length > 1) { paintGroup(); return; }
     const ent = MAN[cur];
     const states = STATES.filter(s => ent.states[s]);
     const groundY = cv.height - 64;
@@ -913,6 +1025,9 @@
     setGameTiming: v => { gameTiming = !!v; }, getGameTiming: () => gameTiming,
     setGameScale: v => { C.setGameScale(v); }, getGameScale: () => C.getGameScale(),
     setHbEdit: v => { hbEdit = v; }, setCompose: v => { compose = v; }, getCompose: () => compose,
+    setGroupView: v => { groupView = !!v; fit(); paint(); }, getGroupView: () => groupView,
+    groupTiles: () => (cur ? groupTiles() : []), familyOf: (t) => _familyOf(t),
+    groupLayout: () => (cur ? groupLayout(groupTiles(), Math.max(560, document.getElementById('stagewrap').clientWidth - 4)) : null),
     gameFrameIndex: (st, arr) => C.gameFrameIndex(st, arr, nowT),   // compose shares the clock
     plantScale: C.plantScale, plantYOff: C.plantYOff,
     fit, paint: () => paint(), step: () => { frameIdx++; paint(); },
@@ -922,6 +1037,12 @@
 
   buildList('');
   fit();
+  {
+    // fit() restores the viewport-sized canvas when the view is switched off;
+    // paintGroup() grows it again when it is switched on.
+    const _gv = document.getElementById('groupview');
+    if (_gv) _gv.addEventListener('change', () => { groupView = _gv.checked; fit(); paint(); });
+  }
   window.addEventListener('resize', fit);
 })();
   </script>
