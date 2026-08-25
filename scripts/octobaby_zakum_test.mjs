@@ -122,10 +122,17 @@ const R = await page.evaluate(async () => {
     leg.traits = null; leg.def = 0; leg.evasion = 0;
     for (let k = 0; k < 12 && leg.currentHp > 0; k++) hitMonster(leg, leg.maxHp + 1000, false, 'test');
   }
-  await wait(900);
+  // Killing the last arm makes the head REEL for 1.3s (the pre-existing
+  // "a tentacle falls — Octobaby REELS" stagger), and bossAI returns early
+  // while staggered — so the exposed window cannot open inside it. Sampling at
+  // a flat 900ms therefore reported "the window never opens" for a window that
+  // simply had not been reached yet. Wait for the state, with a ceiling.
+  await wait(300);
   out.armsAfterCull = head._legRefs.length;
+  const _bw = performance.now();
+  while (performance.now() - _bw < 6000 && !((head._octoBreakT || 0) > 0)) { keepAlive(); await frame(); }
   out.breakOpened = (head._octoBreakT || 0) > 0;
-  reset();
+  out.breakOpenedAfterMs = Math.round(performance.now() - _bw);
   out.dmgDuringBreak = probe();
 
   // Ride out the exposed window and the regrowth delay.
@@ -144,6 +151,30 @@ const R = await page.evaluate(async () => {
   reset();
   out.dmgAfterRegrow = probe();
 
+  // --- the 30s mood pulse ------------------------------------------------
+  // Driven by fast-forwarding the head's own cadence timer to just under the
+  // threshold rather than idling for 30s of wall clock: the pulse still fires
+  // through the real AI path, and the cadence VALUE is asserted separately so
+  // shortening it in the source cannot pass unnoticed.
+  out.ailmentMs = (typeof LX_OCTO_AILMENT_MS !== 'undefined') ? LX_OCTO_AILMENT_MS : null;
+  player._poisonTimer = 0; player.freezeTimer = 0; player._skillLockTimer = 0; player.stunTimer = 0;
+  head._octoMoodT = LX_OCTO_AILMENT_MS - 40;
+  head._octoMoodTele = true;
+  const _m0 = performance.now();
+  while (performance.now() - _m0 < 4000) {
+    player.hp = getMaxHp(); game.paused = false;
+    if ((player._poisonTimer | 0) > 0 || (player.freezeTimer | 0) > 0
+        || (player._skillLockTimer | 0) > 0 || (player.stunTimer | 0) > 0) break;
+    await frame();
+  }
+  out.moods = {
+    poison: Math.round(player._poisonTimer || 0),
+    freeze: Math.round(player.freezeTimer || 0),
+    silence: Math.round(player._skillLockTimer || 0),
+    stun: Math.round(player.stunTimer || 0),
+  };
+  out.moodCount = Object.values(out.moods).filter(v => v > 0).length;
+
   // --- CONTROL: an ordinary monster is untouched by any of this ----------
   const mob = spawnMonster(player.x + 200, player.y, 'horny', false);
   mob.def = 0; mob.maxHp = 4000000; mob.currentHp = 4000000;
@@ -161,6 +192,7 @@ const r4 = R.dmg4Arms / rNeutral, rExp = R.dmgExposed / rNeutral, rBreak = R.dmg
 console.log(`  arms at start ${R.armsAtStart} (each ${R.armHp0} HP)`);
 console.log(`  head damage — 4 arms ${R.dmg4Arms} (${r4.toFixed(3)}x) · neutral ${R.dmgNeutral} (1.000x) · exposed ${R.dmgExposed} (${rExp.toFixed(3)}x)`);
 console.log(`  after severing all 4: ${R.armsAfterCull} left, break window ${R.breakOpened ? 'OPEN' : 'closed'}, damage ${rBreak.toFixed(3)}x`);
+console.log(`  moods: ${JSON.stringify(R.moods)} on a ${R.ailmentMs}ms cadence, arms ${R.armHp0} HP each`);
 console.log(`  regrowth: ${R.regrownCount} arms, generation ${R.armGen}, ${R.armHpGen1} HP each (gen0 was ${R.armHp0})`);
 
 ok('the fight starts with 4 arms', R.armsAtStart === 4, `${R.armsAtStart} arms`);
@@ -176,8 +208,17 @@ ok('there is a telegraphed regrow delay, not an instant respawn', R.sawRegrowDel
    'the stumps-writhe window was observed before the new arms rose');
 ok('each generation is weaker, so the loop converges', R.armHpGen1 != null && R.armHpGen1 < R.armHp0,
    `gen1 arms ${R.armHpGen1} HP vs gen0 ${R.armHp0}`);
-ok('...and the gate re-arms once they are back', R.dmgAfterRegrow < R.dmgNeutral,
-   `${(R.dmgAfterRegrow / rNeutral).toFixed(3)}x with the new arms up`);
+// Guarded on the regrowth actually happening, and on the same <0.2 threshold as
+// the opening gate check. As a bare "less than neutral" it passed on a run where
+// ZERO arms had regrown — ordinary damage variance cleared the bar, so the check
+// was reporting the gate re-armed when nothing had.
+ok('...and the gate re-arms once they are back', R.regrownCount === 4 && (R.dmgAfterRegrow / rNeutral) < 0.2,
+   `${(R.dmgAfterRegrow / rNeutral).toFixed(3)}x with ${R.regrownCount} new arms up`);
+ok('the tentacles are way tankier', R.armHp0 >= 200000,
+   `${R.armHp0} HP each — they were 50,000, a speed bump next to a 3.04M head`);
+ok('the mood pulse runs on a 30s cadence', R.ailmentMs === 30000, `LX_OCTO_AILMENT_MS = ${R.ailmentMs}`);
+ok('every living arm inflicts its own ailment on the pulse', R.moodCount === 4,
+   `${R.moodCount}/4 landed — ${JSON.stringify(R.moods)}`);
 ok('CONTROL: an ordinary monster is unaffected', R.dmgPlainMob > 0 && Math.abs(R.dmgPlainMob - R.dmgNeutral) / rNeutral < 0.25,
    `plain mob took ${R.dmgPlainMob} vs the head's neutral ${R.dmgNeutral} — the gate is octobaby-only`);
 
