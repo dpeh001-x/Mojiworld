@@ -83,7 +83,7 @@
       <div class="mut" style="font-size:11px;margin-top:3px">renders EXACTLY what the game renders</div>
       <!-- build badge: bump alongside GAME_VERSION on every animator change,
            so a stale cached copy is identifiable at a glance -->
-      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.193</span>
+      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.197</span>
         <a id="lx-latest-link" href="animator.html" title="Cache-proof launcher: resolves main's current commit via the GitHub API and opens that exact build — use this if the badge looks old" style="color:#5b8cff;margin-left:6px">latest&#8599;</a></div>
       <script>
       // v0.29.246 — LIVE badge freshness probe. The static build string only
@@ -148,8 +148,9 @@
       </div>
       <label title="Overlay this entity's states on one spot"><input type="checkbox" id="overlay" />overlay</label>
       <label title="Compose different sprites on one stage; click list entries to add layers"><input type="checkbox" id="compose" />compose</label>
-      <label title="Show + edit THE attack hitbox (drag = move, corner/wheel = resize)"><input type="checkbox" id="hitbox" />hitbox</label>
+      <label title="Show + edit THE attack hitbox (drag = move, corner / Alt+wheel = resize)"><input type="checkbox" id="hitbox" />hitbox</label>
       <label title="Every animation this boss owns, on one page, each at its real in-game size"><input type="checkbox" id="groupview" />group</label>
+      <label title="Ghost the boss's idle sprite behind every animation, with a rule at its top edge, to size against"><input type="checkbox" id="idleref" />idle ref</label>
       <label title="Idle ping-pongs 130ms, walk 80ms, attack 48ms — the game's exact clocks"><input type="checkbox" id="gametiming" checked />game timing</label>
       <label title="1 stage px == 1 game px (the game's exact on-screen size)"><input type="checkbox" id="gamescale" checked />game scale 1:1</label>
       <span id="fpswrap" style="opacity:.35">fps<input type="range" id="fps" min="3" max="18" value="8" style="width:80px" disabled /><span id="fpsv">8</span></span>
@@ -161,7 +162,7 @@
     </div>
     <div id="stagewrap">
       <canvas id="stage" width="900" height="520"></canvas>
-      <div id="hint">Drag a sprite to nudge dx/dy · scroll-wheel over it to scale · numbers on the right are the exact in-game render</div>
+      <div id="hint">Drag a sprite to nudge dx/dy · Alt + scroll-wheel to scale · numbers on the right are the exact in-game render</div>
     </div>
     <div id="sfxboard" style="display:none"></div>
   </main>
@@ -596,6 +597,9 @@
   // and loadFrames() mints new Image objects, so calling it per tile per frame
   // would allocate a fresh element for every frame of every set, forever.
   let groupView = false;
+  // v0.30.x — IDLE REFERENCE. The ghost is the family ROOT's idle: a per-attack
+  // set has no idle of its own, and the size it has to match is the boss's.
+  let idleRef = false;
   const _grpFrames = Object.create(null);
   const _grpFramesFor = (t) => (_grpFrames[t] = _grpFrames[t] || loadFrames(MAN[t]));
 
@@ -901,6 +905,61 @@
     }
     return out;
   }
+  // v0.30.x — the reference ghost. Same transform chain as drawState (calib
+  // s/dx/dy, per-frame fs, whole-px blit) so the thing you size against is the
+  // real in-game idle, not an approximation of it. Returns its canvas rect.
+  // measurement, split from the draw so the LAYOUT and the PAINT cannot drift:
+  // a cell has to be sized for the ghost, and the ghost is routinely bigger
+  // than the sprite it is ghosted onto.
+  function _idleRefCalc() {
+    if (!cur) return null;
+    const r = _rootOf(cur);
+    const ent = MAN[r]; if (!ent || !ent.states.idle) return null;
+    const fr = _grpFramesFor(r);
+    const arr = fr.idle; if (!arr || !arr.length) return null;
+    const i = gameTiming ? C.gameFrameIndex('idle', arr, nowT) : (frameIdx % arr.length);
+    const img = arr[i >= 0 ? i : 0];
+    if (!img || !img.complete || !img.naturalWidth) return null;
+    const gm = C.geometry(r, 'idle', img, fr.idle); if (!gm) return null;
+    const c = (CALIB[r] && CALIB[r].idle) || { s: 1, dx: 0, dy: 0 };
+    const pf = (c.fs && c.fs[i] > 0) ? c.fs[i] : 1;
+    const k = c.s * pf;
+    const am = gm.atkMul || 1, dw = gm.drawW != null ? gm.drawW : gm.targetW;
+    let bw = dw * am, bh = gm.previewH * am, bx = -bw / 2, by = gm.anchorY * am;
+    if (gm.roundMode) { if (am !== 1) { bw = Math.round(bw); bh = Math.round(bh); } bx = Math.round(-bw / 2); by = Math.round(by); }
+    return { root: r, img, gm, c, k, bx, by, bw, bh, W: bw * k, H: bh * k };
+  }
+  const idleRefSize = () => { const q = _idleRefCalc(); return q ? { w: q.W, h: q.H } : null; };
+  function drawIdleRef(cx, groundY, spanW) {
+    const q = _idleRefCalc(); if (!q) return null;
+    const { gm, c, k, bx, by, bw, bh, img } = q;
+    ctx.save();
+    ctx.globalAlpha = 0.30;
+    ctx.translate(cx + c.dx * gm.previewH, groundY + c.dy * gm.previewH);
+    ctx.scale(k, k);
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    C.softDraw(ctx, img, bx, by, bw, bh);
+    ctx.restore();
+    // the rect in canvas space, so the rules below need no transform
+    const X = cx + c.dx * gm.previewH + bx * k, Y = groundY + c.dy * gm.previewH + by * k;
+    const W = q.W, H = q.H;
+    // the rule stays inside its own cell: the caller sizes the cell for the
+    // ghost, so spanning the ghost's full width would just cross the neighbour
+    const half = (spanW || W) / 2;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(125,219,160,0.75)'; ctx.lineWidth = 1; ctx.setLineDash([5, 5]);
+    ctx.beginPath(); ctx.moveTo(cx - half, Y + 0.5); ctx.lineTo(cx + half, Y + 0.5); ctx.stroke();
+    ctx.strokeStyle = 'rgba(125,219,160,0.35)';
+    ctx.beginPath();
+    ctx.moveTo(X + 0.5, Y); ctx.lineTo(X + 0.5, groundY);
+    ctx.moveTo(X + W - 0.5, Y); ctx.lineTo(X + W - 0.5, groundY);
+    ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#7ddba0'; ctx.font = '600 10px system-ui'; ctx.textAlign = 'left';
+    ctx.fillText('idle ref  ' + Math.round(W) + ' × ' + Math.round(H) + ' px', cx - half + 4, Y - 4);
+    ctx.restore();
+    return { x: X, y: Y, w: W, h: H };
+  }
+
   const GRP_PAD_X = 34, GRP_LABELS_H = 76, GRP_TOP = 22, GRP_CAP_H = 20;
   // Rows are packed greedily at each tile's OWN width and are as tall as their
   // own tallest member. Uniform cells sized from the family maximum looked
@@ -908,9 +967,10 @@
   // size for all twenty of gravitos' animations and turned the page into a
   // single 34,000px column. The sprite is never scaled to fit — the canvas
   // widens instead, and #stagewrap scrolls.
-  function groupLayout(tiles, viewW) {
-    const tw = tiles.map((x) => Math.ceil(Math.max(120, x.w)) + GRP_PAD_X);
-    const th = tiles.map((x) => Math.ceil(Math.max(80, x.h)) + GRP_LABELS_H + GRP_CAP_H);
+  function groupLayout(tiles, viewW, ref) {
+    const rw = ref ? ref.w : 0, rh = ref ? ref.h : 0;
+    const tw = tiles.map((x) => Math.ceil(Math.max(120, x.w, rw)) + GRP_PAD_X);
+    const th = tiles.map((x) => Math.ceil(Math.max(80, x.h, rh)) + GRP_LABELS_H + GRP_CAP_H);
     const W = Math.max(viewW, ...tw);
     const rows = []; let row = [], used = 0;
     tiles.forEach((_, i) => {
@@ -925,7 +985,9 @@
     const tiles = groupTiles();
     if (!tiles.length) return;
     const viewW = Math.max(560, document.getElementById('stagewrap').clientWidth - 4);
-    const L = groupLayout(tiles, viewW);
+    // the reference is the same for every tile in the family, so measure once
+    const ref = idleRef ? idleRefSize() : null;
+    const L = groupLayout(tiles, viewW, ref);
     if (cv.width !== L.W || cv.height !== L.H) {
       cv.width = L.W; cv.height = L.H;
       ctx.clearRect(0, 0, cv.width, cv.height);
@@ -948,6 +1010,9 @@
         // only what it adds: "stomp", "column", "2 punch"
         const vl = (x.t === root) ? x.t : x.t.slice(root.length).replace(/^([0-9]+)/, '$1 ');
         drawGround(cx, gy, L.tw[i] * 0.86, '', null);
+        // not on the reference's own tile - a ghost exactly under its source is
+        // just a blurrier copy of it
+        if (idleRef && !(x.t === _rootOf(cur) && x.st === 'idle')) drawIdleRef(cx, gy, L.tw[i] * 0.86);
         drawState(MAN[x.t], x.st, cx, gy, 1, x.t, x.fr);
         // caption ABOVE the sprite: feet are drawn below the baseline, so a
         // caption under it gets painted over, and in a tall row a short set's
@@ -955,7 +1020,7 @@
         ctx.save();
         ctx.textAlign = 'center';
         ctx.fillStyle = COL[x.st]; ctx.font = '700 12px system-ui';
-        ctx.fillText(vl + '  ' + x.st, cx, Math.max(y + 13, gy - Math.max(x.h, 36) - 9));
+        ctx.fillText(vl + '  ' + x.st, cx, Math.max(y + 13, gy - Math.max(x.h, ref ? ref.h : 0, 36) - 22));
         ctx.restore();
         x0 += L.tw[i];
       }
@@ -985,6 +1050,7 @@
     if (overlay) {
       const cx = cv.width / 2;
       drawGround(cx, groundY, cv.width * 0.8, '', '#fff');
+      if (idleRef) drawIdleRef(cx, groundY, cv.width * 0.8);
       for (const st of states) { drawState(ent, st, cx, groundY, st === focusState ? 1 : 0.4); columns.push({ state: st, cx, groundY }); }
       if (hbEdit && ent.states[focusState]) { const r = drawAtkHitbox(ent, focusState, cx, groundY); if (r) hbRects.push(r); }
       ctx.fillStyle = COL[focusState]; ctx.font = '600 12px system-ui'; ctx.textAlign = 'center';
@@ -993,6 +1059,7 @@
       const n = states.length, slotW = cv.width / n;
       states.forEach((st, i) => {
         const cx = slotW * (i + 0.5);
+        if (idleRef && !(cur === _rootOf(cur) && st === 'idle')) drawIdleRef(cx, groundY, slotW * 0.86);
         drawState(ent, st, cx, groundY, 1);
         if (hbEdit) { const r = drawAtkHitbox(ent, st, cx, groundY); if (r) hbRects.push(r); }
         drawGround(cx, groundY, slotW * 0.86, st, COL[st]);
@@ -1026,8 +1093,11 @@
     setGameScale: v => { C.setGameScale(v); }, getGameScale: () => C.getGameScale(),
     setHbEdit: v => { hbEdit = v; }, setCompose: v => { compose = v; }, getCompose: () => compose,
     setGroupView: v => { groupView = !!v; fit(); paint(); }, getGroupView: () => groupView,
+    setIdleRef: v => { idleRef = !!v; paint(); }, getIdleRef: () => idleRef,
+    idleRefRect: (cx, gy) => drawIdleRef(cx == null ? cv.width / 2 : cx, gy == null ? cv.height - 64 : gy, 0),
     groupTiles: () => (cur ? groupTiles() : []), familyOf: (t) => _familyOf(t),
-    groupLayout: () => (cur ? groupLayout(groupTiles(), Math.max(560, document.getElementById('stagewrap').clientWidth - 4)) : null),
+    groupLayout: () => (cur ? groupLayout(groupTiles(), Math.max(560, document.getElementById('stagewrap').clientWidth - 4), idleRef ? idleRefSize() : null) : null),
+    idleRefSize: () => idleRefSize(),
     gameFrameIndex: (st, arr) => C.gameFrameIndex(st, arr, nowT),   // compose shares the clock
     plantScale: C.plantScale, plantYOff: C.plantYOff,
     fit, paint: () => paint(), step: () => { frameIdx++; paint(); },
@@ -1042,6 +1112,8 @@
     // paintGroup() grows it again when it is switched on.
     const _gv = document.getElementById('groupview');
     if (_gv) _gv.addEventListener('change', () => { groupView = _gv.checked; fit(); paint(); });
+    const _ir = document.getElementById('idleref');
+    if (_ir) _ir.addEventListener('change', () => { idleRef = _ir.checked; paint(); });
   }
   window.addEventListener('resize', fit);
 })();
@@ -1330,6 +1402,12 @@
   });
 
   cv.addEventListener('wheel', e => {
+    // v0.30.x — a bare wheel SCROLLS. It used to edit calib s unconditionally,
+    // which only looked harmless while the stage was one viewport tall; the
+    // group view makes it thousands of px, so scrolling to see a family was
+    // quietly rescaling whatever sat under the pointer. Alt, not Ctrl —
+    // Ctrl+wheel is browser zoom.
+    if (!e.altKey) return;              // no preventDefault: let the pane scroll
     if (!A.cur) return; e.preventDefault();
     const p = evtXY(e); const st = stateAt(p.x); if (!st) return;
     const cl = (v, r) => Math.max(r[0], Math.min(r[1], v));
@@ -1408,8 +1486,8 @@
   document.getElementById('q').addEventListener('input', e => A.buildList(e.target.value));
   document.getElementById('overlay').addEventListener('change', e => A.setOverlay(e.target.checked));
   const hintEl = document.getElementById('hint');
-  const HINT_SPRITE = 'Drag a sprite to nudge dx/dy · scroll-wheel over it to scale · numbers on the right are the exact in-game render';
-  const HINT_HB = 'HITBOX: drag anywhere in a column to move that state’s box · drag the orange corner handle to resize · scroll-wheel to scale the box';
+  const HINT_SPRITE = 'Drag a sprite to nudge dx/dy · Alt + scroll-wheel to scale · numbers on the right are the exact in-game render';
+  const HINT_HB = 'HITBOX: drag anywhere in a column to move that state’s box · drag the orange corner handle to resize · Alt + scroll-wheel to scale the box';
   document.getElementById('hitbox').addEventListener('change', e => {
     A.setHbEdit(e.target.checked);
     if (hintEl) hintEl.textContent = e.target.checked ? HINT_HB : HINT_SPRITE;
@@ -1560,6 +1638,7 @@
   window.addEventListener('mouseup', () => { if (drag) { save(); drag = null; } }, true);
   cv.addEventListener('wheel', e => {
     if (!A.getCompose()) return;
+    if (!e.altKey) return;              // v0.30.x — bare wheel scrolls the pane
     e.stopImmediatePropagation(); e.preventDefault();
     const p = xy(e); let i = layerAt(p); if (i < 0) i = active; if (i < 0) return;
     const L = LAYERS[i];
@@ -1580,7 +1659,7 @@
       if (hint) hint.textContent = 'COMPOSE: click entities (left) to add layers · drag to move · scroll to scale · adjust the active layer on the right';
     } else {
       window.__buildControls();
-      if (hint) hint.textContent = 'Drag a sprite to nudge dx/dy · scroll-wheel over it to scale · numbers on the right are the exact in-game render';
+      if (hint) hint.textContent = 'Drag a sprite to nudge dx/dy · Alt + scroll-wheel to scale · numbers on the right are the exact in-game render';
     }
   });
   window.__compose = { addLayer, paint, layers: () => LAYERS };
