@@ -487,17 +487,17 @@ window.LX_ANIM_CALIB = {
     }
   },
   "zodiac_capricorn": {
-    "idle": {
+    "zodiac/idle": {
       "s": 1,
       "dx": 0,
       "dy": 0.0682
     },
-    "walk": {
+    "zodiac/walk": {
       "s": 1,
       "dx": 0,
       "dy": 0.0682
     },
-    "attack": {
+    "zodiac/attack": {
       "s": 1,
       "dx": 0,
       "dy": 0.0682
