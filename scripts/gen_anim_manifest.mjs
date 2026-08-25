@@ -73,7 +73,11 @@ async function frameBox(path) {
   } catch { return null; }
 }
 
-async function scanGroup(group, dir) {
+// opts.urlBase overrides the served path prefix, opts.keyPrefix the entity key.
+// Both default to the old behaviour, so the two original calls are unchanged.
+async function scanGroup(group, dir, opts = {}) {
+  const urlBase = opts.urlBase || `Sprites/${group === 'boss' ? 'bosses' : 'monsters'}`;
+  const keyPrefix = opts.keyPrefix || '';
   // discover entity types from the idle/walk/attack subdirs
   const types = new Set();
   for (const st of STATES) {
@@ -92,7 +96,7 @@ async function scanGroup(group, dir) {
     for (const name of [type, BASE_ALIASES[type]].filter(Boolean)) {
       for (const ext of ['.png', '.webp']) {
         const p = join(dir, name + ext);
-        if (await exists(p)) { base = await baseInfo(p); basePath = `Sprites/${group === 'boss' ? 'bosses' : 'monsters'}/${name}${ext}`; break; }
+        if (await exists(p)) { base = await baseInfo(p); basePath = `${urlBase}/${name}${ext}`; break; }
       }
       if (base) break;
     }
@@ -105,9 +109,9 @@ async function scanGroup(group, dir) {
         cb.push(await frameBox(fp));
         count++;
       }
-      if (count) states[st] = { count, ...(dims || {}), dir: `Sprites/${group === 'boss' ? 'bosses' : 'monsters'}/${st}/${type}`, cb };
+      if (count) states[st] = { count, ...(dims || {}), dir: `${urlBase}/${st}/${type}`, cb };
     }
-    if (Object.keys(states).length) out[type] = { group, base, basePath, states };
+    if (Object.keys(states).length) out[keyPrefix + type] = { group, base, basePath, states };
   }
   return out;
 }
@@ -115,6 +119,12 @@ async function scanGroup(group, dir) {
 const manifest = {
   ...(await scanGroup('monster', join(root, 'Sprites', 'monsters'))),
   ...(await scanGroup('boss', join(root, 'Sprites', 'bosses'))),
+  // v0.30.x — the twelve zodiac bosses. Their art is one level down and their
+  // statics sit beside it, and the game keys their calibration on
+  // 'zodiac_' + sign, so the manifest key has to match or an exported
+  // calibration would land under a key the game never reads.
+  ...(await scanGroup('boss', join(root, 'Sprites', 'bosses', 'zodiac'),
+    { urlBase: 'Sprites/bosses/zodiac', keyPrefix: 'zodiac_' })),
 };
 const n = Object.keys(manifest).length;
 // v0.29.179 — BAKE-TIME CANVAS VALIDATION. A BOSS whose static sprite lives on

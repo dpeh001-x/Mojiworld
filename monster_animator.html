@@ -90,7 +90,7 @@
       <div class="mut" style="font-size:11px;margin-top:3px">renders EXACTLY what the game renders</div>
       <!-- build badge: bump alongside GAME_VERSION on every animator change,
            so a stale cached copy is identifiable at a glance -->
-      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.199</span>
+      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.206</span>
         <a id="lx-latest-link" href="animator.html" title="Cache-proof launcher: resolves main's current commit via the GitHub API and opens that exact build — use this if the badge looks old" style="color:#5b8cff;margin-left:6px">latest&#8599;</a></div>
       <script>
       // v0.29.246 — LIVE badge freshness probe. The static build string only
@@ -426,7 +426,12 @@
              : ((bim && bim.naturalHeight) || (ent.base && ent.base.h) || info.h);
     const sf = sizeFactor(ent.group, fw, fh);
     const mul = isBoss ? ((hb && hb.mul) || 2.0) : 1.5;
-    const gameBase = (gameScale && hb && hb.h) ? hb.h * mul : null;
+    // v0.30.x — hb.zmul is the game's _zSizeMul (_ZODIAC_SPRITE_FX[sign].sizeMul),
+    // applied at exactly the point _drawBossSprite applies it: alongside the
+    // draw multiplier, before sizeFactor. Without it scorpio previews 20% small
+    // and capricorn 30% small.
+    const zmul = (hb && +hb.zmul > 0) ? +hb.zmul : 1;
+    const gameBase = (gameScale && hb && hb.h) ? hb.h * mul * zmul : null;
     const baseK = DISPLAY_H / sizeFactor(ent.group, (ent.base && ent.base.w) || fw, (ent.base && ent.base.h) || fh);
     // v0.29.x — game-exact whole-px rounding (_lxWholeSize) at the SAME points
     // the game rounds. Without it the preview drifted 1-2px on chained
@@ -459,8 +464,11 @@
     const atkMul = (!isBoss && st === 'attack' && ATK_FRAME_SCALE[type]) || 1;
     // world-px ratio for the pixel-valued chain constants + key-3 offset
     const pxR = gameBase != null ? 1
-      : (hb && hb.h) ? DISPLAY_H / (hb.h * mul * sizeFactor(ent.group, (ent.base && ent.base.w) || fw, baseH)) : 1;
-    const yoffPx = plantYOff(type) * pxR;
+      : (hb && hb.h) ? DISPLAY_H / (hb.h * mul * zmul * sizeFactor(ent.group, (ent.base && ent.base.w) || fw, baseH)) : 1;
+    // v0.30.x — hb.dy is the game's _ZODIAC_SPRITE_FX[sign].dyPx (scorpio +40).
+    // gameAnchorY adds yoffPx last, which is where the game applies dyPx too:
+    // after the floor clamp, so the clamp cannot undo it.
+    const yoffPx = plantYOff(type) * pxR + ((hb && +hb.dy) ? +hb.dy * pxR : 0);
     const anchorY = gameAnchorY(isBoss, type, !!(hb && hb.f), previewH, usedBotFrac, !!nm, pxR, yoffPx);
     // draw width follows the state frame's own aspect (game v0.29.160), monsters only
     const drawW = (!isBoss && img && img.naturalWidth) ? R(previewH * (img.naturalWidth / img.naturalHeight)) : targetW;
@@ -576,13 +584,27 @@
 
   // ---- calibration model: localStorage > baked anim_calib.js > defaults ----
   // (one-time merge at boot; edits live in memory, shipped only via Export)
+  // v0.30.x — the calib key the GAME stores a state under. Boss frames are
+  // tagged with their source subdirectory (img._lxSt = subdir) and
+  // _drawBossSprite looks calibration up under that tag; zodiac art loads from
+  // 'zodiac/idle' etc., so that is the key. Everything else is unprefixed.
+  const calibKey = (t, st) => (t.indexOf('zodiac_') === 0 ? 'zodiac/' + st : st);
+  window.__lxCalibKey = calibKey;   // exposed for verification
   function loadCalib() {
     let ls = null; try { ls = JSON.parse(localStorage.getItem('lx_anim_calib') || 'null'); } catch (_) {}
     const out = {};
     for (const t of Object.keys(MAN)) {
       out[t] = {};
       for (const s of STATES) {
-        const e = (ls && ls[t] && ls[t][s]) || (C.BAKED_CALIB[t] && C.BAKED_CALIB[t][s]) || DEF();
+        // read ONLY the key the game reads. A fallback to the bare state looked
+        // harmless and was not: data/anim_calib.js carries a zodiac_capricorn block
+        // under idle/walk/attack with dy 0.0682, which the game has never applied.
+        // Honouring it here would draw Capricorn 6.8% of its height below where the
+        // game draws it - a parity break invented by the tool, in the same week it
+        // was fixed everywhere else. The stale block stays inert until it is
+        // re-authored, which now writes the live key.
+        const k = calibKey(t, s);
+        const e = (ls && ls[t] && ls[t][k]) || (C.BAKED_CALIB[t] && C.BAKED_CALIB[t][k]) || DEF();
         out[t][s] = { s: +e.s > 0 ? +e.s : 1, dx: +e.dx || 0, dy: +e.dy || 0 };
         // per-frame scale array (game parity) — rides along untouched by the sliders
         if (Array.isArray(e.fs)) out[t][s].fs = e.fs.map(v => +v > 0 ? +v : 1);
@@ -1134,6 +1156,7 @@
     setHB: (t, st, v) => { (HBX[t] = HBX[t] || {})[st] = v; },
     clearHB: (t, st) => { if (HBX[t]) delete HBX[t][st]; },
     geomFor, gameMetrics, columns: () => columns, hbRects: () => hbRects,
+    calibKey,
     setFps: v => { fps = v; }, setOverlay: v => { overlay = v; }, setFocus: v => { focusState = v; },
     setGameTiming: v => { gameTiming = !!v; }, getGameTiming: () => gameTiming,
     setGameScale: v => { C.setGameScale(v); }, getGameScale: () => C.getGameScale(),
@@ -1228,8 +1251,9 @@
         const v = CC[t][s]; if (!v) continue;
         const hasFs = Array.isArray(v.fs) && v.fs.some(f => +f !== 1);
         if (isDefault(v) && !hasFs) continue;
-        st[s] = { s: +v.s.toFixed(4), dx: +v.dx.toFixed(4), dy: +v.dy.toFixed(4) };
-        if (hasFs) st[s].fs = v.fs.map(f => +(+f).toFixed(4));
+        const k = A.calibKey(t, s);   // zodiac states store as 'zodiac/<state>'
+        st[k] = { s: +v.s.toFixed(4), dx: +v.dx.toFixed(4), dy: +v.dy.toFixed(4) };
+        if (hasFs) st[k].fs = v.fs.map(f => +(+f).toFixed(4));
       }
       if (Object.keys(st).length) out[t] = st;
     }
@@ -1615,8 +1639,9 @@
     const calib = {}, hitbox = {};
     for (const st of A.STATES) {
       if (C[st]) {
-        calib[st] = { s: r4(C[st].s), dx: r4(C[st].dx), dy: r4(C[st].dy) };
-        if (Array.isArray(C[st].fs) && C[st].fs.some(f => +f !== 1)) calib[st].fs = C[st].fs.map(r4);
+        const k = A.calibKey(cur, st);   // zodiac states store as 'zodiac/<state>'
+        calib[k] = { s: r4(C[st].s), dx: r4(C[st].dx), dy: r4(C[st].dy) };
+        if (Array.isArray(C[st].fs) && C[st].fs.some(f => +f !== 1)) calib[k].fs = C[st].fs.map(r4);
       }
       if (H[st]) hitbox[st] = { w: r4(H[st].w), h: r4(H[st].h), ox: r4(H[st].ox), oy: r4(H[st].oy) };
     }

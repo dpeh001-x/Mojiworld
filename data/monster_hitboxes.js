@@ -69,4 +69,18 @@ young_bloodthirsty_vermillion:{w:60,h:74,mul:1.5}, young_confused_barnaby:{w:120
 zombie:{w:58,h:66,mul:1.32},
 // v0.26.902 — L60-70 mid-boss elites (dedicated art; values from the live game)
 blightElder:{w:130,h:150,mul:1.5}, ossuaryTyrant:{w:110,h:130,mul:1.5},
+// --- zodiac bosses (generated: scripts/gen_zodiac_hitboxes.mjs) ---
+zodiac_aries:{w:114,h:114,mul:2},
+zodiac_taurus:{w:118,h:118,mul:2},
+zodiac_gemini:{w:122,h:122,mul:2,f:1},
+zodiac_cancer:{w:126,h:126,mul:2},
+zodiac_leo:{w:130,h:130,mul:2},
+zodiac_virgo:{w:134,h:134,mul:2,f:1},
+zodiac_libra:{w:138,h:138,mul:2},
+zodiac_scorpio:{w:142,h:142,mul:2,zmul:1.2,dy:40},
+zodiac_sagittarius:{w:146,h:146,mul:2},
+zodiac_capricorn:{w:150,h:150,mul:2,zmul:1.3},
+zodiac_aquarius:{w:154,h:154,mul:2},
+zodiac_pisces:{w:158,h:158,mul:2,f:1},
+// --- end zodiac ---
 };
