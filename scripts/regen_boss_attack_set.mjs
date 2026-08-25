@@ -87,37 +87,79 @@ const arg = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : nu
 //
 // So the gate is a ratio-spread MINIMUM, calibrated on those three numbers
 // rather than guessed, and correlation is not used at all.
+// FX LOAD is the fourth thing a lunge set has to answer for, per user: "do not
+// need so much special effect". Of the opaque pixels, what fraction is bright
+// flame rather than dark armoured body?
+//
+// The reference is NOT the yardstick for this one. gravitospunch measures 0.1%
+// on an orange-flame detector because that character is CYAN energy - the
+// metric simply does not see its effects, and treating 0.1% as a target would
+// mean deleting the fire from a fire demon. The honest baseline is the same
+// character's other attack: gravitos3soul runs 13.6% mean, 15.1% peak, and
+// reads as a flaming demon without drowning in it.
+//
+// The punch that prompted this measured 27.5% mean and 51.9% PEAK - at the
+// impact frame, over half of everything visible was fire and the titan was
+// somewhere inside it. The caps below sit just above the soul set's resting
+// level, so the character keeps its aura and loses the bonfire.
 const PROFILES = {
   planted: { normalise: true,  maxBodyDrift: 0.03 },
-  lunge:   { normalise: false, minReach: 0.25, minWeight: 0.08, minShapeChange: 0.20 },
+  // minCrouch, not minWeight. The first version of this gate used the spread of
+  // the dark-armour BOX HEIGHT, and it rejected five straight rolls for having
+  // "no crouch" when they crouch as deeply as the reference does. The wings are
+  // dark armour too, and spread wings hold the box tall no matter what the legs
+  // are doing, so the box height cannot see a crouch on THIS boss at all.
+  // The centroid of the dark mass can: it falls when the body sinks and barely
+  // moves when wings open sideways. Measured on the same nine frames -
+  //
+  //     reference gravitospunch   box 14.7%   centroid 13.7%
+  //     a rejected roll           box 10.0%   centroid 13.9%
+  //     another rejected roll     box  8.2%   centroid 12.7%
+  //
+  // - the box column says those rolls are stiff and the centroid column says
+  // they match the reference. The centroid is the one describing the crouch.
+  lunge:   { normalise: false, minReach: 0.25, minCrouch: 0.12, minShapeChange: 0.20,
+             maxFxMean: 0.19, maxFxPeak: 0.28 },
 };
 
 const KEYS = {
   gravitos3punch: {
     profile: 'lunge',
-    // Beat-by-beat, in order, because "throw a punch" produced a standing
-    // figure with a flame burst three rolls running. Naming what the SILHOUETTE
-    // does at each beat is what the reference animation actually varies.
+    // Beat-by-beat, in order. Two things this brief has to fight, both of
+    // them learned the expensive way:
+    //   * "throw a punch" produces a STANDING figure with a flame burst. The
+    //     silhouette has to be described at each beat or the model animates the
+    //     arm and leaves the body alone.
+    //   * the fire runs away with the frame. The previous set peaked at 51.9%
+    //     of visible pixels being flame, so the titan vanished into its own
+    //     effect. The fire is now demoted explicitly, repeatedly, and the
+    //     BODY is named as the subject.
     motion:
-      'A nine-beat PUNCH by the winged crimson demon titan. Play these beats IN THIS ORDER, one per '
-      + 'frame, and change the SILHOUETTE at every one: '
-      + '(1) it stands square, fists low. '
-      + '(2) it COILS - knees bend, shoulders drop, the whole body sinks LOWER and pulls back, one fist '
-      + 'cocked back beside the hip as fire gathers around it. '
-      + '(3) coiled tighter and lower still, the cocked fist now a blazing ball of flame, the body '
-      + 'compact and wound like a spring. '
-      + '(4) it EXPLODES forward - the back leg drives, the hips and shoulders whip through, the flaming '
-      + 'fist starts travelling, the body pitching FORWARD and leaning out. '
-      + '(5) FULL EXTENSION - the arm is rammed out straight and the torso is stretched long and low '
-      + 'behind it in a deep lunge, the body reaching far ACROSS the frame, much WIDER and lower than '
-      + 'it stands, with fire blasting off the knuckles in a cone. '
-      + '(6) the impact burst at maximum - still fully extended and lunging, flame erupting outward. '
-      + '(7) the fire tears away as the arm begins to pull back, body still leaning. '
-      + '(8) recovering - the arm draws in, the torso rises and comes back over its feet. '
-      + '(9) upright and square again, fists low, only embers left. '
-      + 'THE BODY MUST TRAVEL, not just the arm. Compact and crouched at beats 2-3, stretched long, '
-      + 'wide and low at beats 5-6, upright at 1 and 9. No plain rectangles, panels or boxes anywhere '
-      + 'in any frame - the background is fully transparent.',
+      'A nine-beat FULL-LENGTH POWER PUNCH by the winged crimson demon titan. The subject is the '
+      + 'TITAN AND ITS BODY - the fire is a thin aura clinging to its plating, never the main event. '
+      + 'Play these beats IN THIS ORDER, one per frame, changing the SILHOUETTE at every one: '
+      + '(1) standing square and tall, fists low, weight even. '
+      + '(2) it COILS - knees bend deeply, the whole body sinks visibly LOWER, torso twisting back, '
+      + 'the far fist drawn back past the hip. '
+      + '(3) coiled to its lowest and most compact, crouched right down over the back leg, the fist '
+      + 'cocked all the way back, the body wound tight like a spring. '
+      + '(4) it EXPLODES forward - back leg driving hard, hips and shoulders whipping through, the '
+      + 'fist beginning to travel, the torso pitching FORWARD and low. '
+      + '(5) FULL EXTENSION - the arm is rammed out perfectly straight and the whole body is stretched '
+      + 'long, low and WIDE behind it in a deep committed lunge, front knee bent, back leg trailing '
+      + 'straight out, reaching right across the frame. This is the money frame: a long, powerful, '
+      + 'fully extended punch. '
+      + '(6) still at full extension, the impact landing - a small tight burst at the knuckles only. '
+      + '(7) the arm starts to pull back, body still leaning low and long. '
+      + '(8) recovering - arm drawing in, torso rising back up over the feet. '
+      + '(9) standing square and tall again, fists low. '
+      + 'THE BODY MUST TRAVEL: crouched and compact at beats 2-3, stretched long, low and wide at '
+      + 'beats 5-6, upright at 1 and 9. '
+      + 'KEEP THE FIRE MINIMAL: only a thin flame outline hugging the armour plus a small burst at the '
+      + 'knuckles on the impact frame. No large flame clouds, no fireballs, no billowing sheets of '
+      + 'fire, nothing that hides the titan or fills the frame. The demon must be clearly readable in '
+      + 'every single frame, never swallowed by its own effect. '
+      + 'No plain rectangles, panels or boxes anywhere; the background is fully transparent.',
   },
   gravitos3soul: {
     motion:
@@ -152,9 +194,23 @@ async function measure(buf) {
     }
   }
   if (x1 < 0) return null;
+  let ink = 0, flame = 0, comSum = 0, comN = 0;
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const i = (y * w + x) * c;
+    if (data[i + 3] < 160) continue;
+    ink++;
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    const lum = r * 0.299 + g * 0.587 + b * 0.114;
+    if (lum > BODY_LUM && r > 150 && r - b > 50) flame++;
+    if (lum <= BODY_LUM) { comSum += y; comN++; }
+  }
   return { w, h, x0, y0, x1, y1, bw: x1 - x0 + 1, bh: y1 - y0 + 1, border,
     body: by1 < 0 ? null : by1 - by0 + 1, bodyW: bx1 < 0 ? null : bx1 - bx0 + 1,
-    bodyMidX: bx1 < 0 ? null : (bx0 + bx1) / 2, feet: y1 };
+    bodyMidX: bx1 < 0 ? null : (bx0 + bx1) / 2, feet: y1,
+    fx: ink ? flame / ink : 0,
+    // Vertical centroid of the dark mass, measured up from the feet. Drops on a
+    // crouch; unmoved by wings opening sideways.
+    com: comN ? y1 - comSum / comN : 0 };
 }
 
 async function motionOf(bufs) {
@@ -277,6 +333,9 @@ async function gradeSet(out) {
     // How much the silhouette CHANGES SHAPE. Immune to uniform scaling by
     // construction: a zoom cannot move a ratio.
     shape: spread(widths.map((w2, i) => w2 / bodies[i])),
+    crouch: spread(ms.map((m) => m.com)),
+    fxMean: ms.reduce((a, m) => a + m.fx, 0) / ms.length,
+    fxPeak: Math.max(...ms.map((m) => m.fx)),
     corr: (dw && dh) ? num / Math.sqrt(dw * dh) : 0,
     footSpread: Math.max(...feet) - Math.min(...feet),
     motion: await motionOf(out),
@@ -294,8 +353,10 @@ function verdict(prof, g) {
     if (g.bodySpread > prof.maxBodyDrift) bad.push(`body drift ${(g.bodySpread * 100).toFixed(1)}%`);
   } else {
     if (g.reach < prof.minReach) bad.push(`reach ${(g.reach * 100).toFixed(1)}% < ${prof.minReach * 100}% (waving, not punching)`);
-    if (g.bodySpread < prof.minWeight) bad.push(`weight ${(g.bodySpread * 100).toFixed(1)}% < ${prof.minWeight * 100}% (no crouch, no lean)`);
+    if (g.crouch < prof.minCrouch) bad.push(`crouch ${(g.crouch * 100).toFixed(1)}% < ${prof.minCrouch * 100}% (the body never sinks; reference is 13.7%)`);
     if (g.shape < prof.minShapeChange) bad.push(`shape change ${(g.shape * 100).toFixed(1)}% < ${prof.minShapeChange * 100}% (the silhouette barely moves; reference is 36.7%)`);
+    if (g.fxMean > prof.maxFxMean) bad.push(`flame ${(g.fxMean * 100).toFixed(1)}% mean > ${prof.maxFxMean * 100}% (too much fire; this demon rests at 13.6%)`);
+    if (g.fxPeak > prof.maxFxPeak) bad.push(`flame ${(g.fxPeak * 100).toFixed(1)}% peak > ${prof.maxFxPeak * 100}% (the titan disappears into the burst)`);
   }
   return bad;
 }
@@ -322,7 +383,7 @@ for (let i = 0; i < FRAMES; i++) {
   const g = gitFrame(i);
   oldMs.push(await measure(g || await readFile(framePath(i))));
 }
-const target = { body: Math.max(...oldMs.map((m) => m.body)), bodyMidX: oldMs[0].bodyMidX,
+const target = { body: oldMs[0].body, bodyMidX: oldMs[0].bodyMidX,
                  feet: oldMs[0].feet, w: oldMs[0].w, h: oldMs[0].h };
 const prof = PROFILES[KEYS[KEY].profile || 'planted'];
 console.log(`${KEY}: profile ${KEYS[KEY].profile || 'planted'}, target body ${target.body}px, feet y=${target.feet}, canvas ${target.w}x${target.h}`);
@@ -334,7 +395,7 @@ if (has('--bake')) {
   const { out, canvas, grew } = await fitSet(bufs, target, prof);
   const g = await gradeSet(out);
   const bad = verdict(prof, g);
-  console.log(`  canvas ${canvas} (grew x${grew.x} top${grew.top} bot${grew.bottom})  distinct ${g.distinct}/9  border ${g.border}  reach ${(g.reach * 100).toFixed(1)}%  weight ${(g.bodySpread * 100).toFixed(1)}%  shape ${(g.shape * 100).toFixed(1)}%  feet ${g.footSpread}px  motion ${g.motion.toFixed(1)}`);
+  console.log(`  canvas ${canvas} (grew x${grew.x} top${grew.top} bot${grew.bottom})  distinct ${g.distinct}/9  border ${g.border}  reach ${(g.reach * 100).toFixed(1)}%  crouch ${(g.crouch * 100).toFixed(1)}%  shape ${(g.shape * 100).toFixed(1)}%  fx ${(g.fxMean * 100).toFixed(0)}/${(g.fxPeak * 100).toFixed(0)}%  feet ${g.footSpread}px  motion ${g.motion.toFixed(1)}`);
   if (bad.length && !has('--force')) { console.error('  rejected: ' + bad.join(', ')); process.exit(2); }
   for (let i = 0; i < FRAMES; i++) await writeFile(framePath(i), out[i]);
   await writeFile(join(SET, `${KEY}.webp`), out[FRAMES - 1]);
@@ -382,11 +443,11 @@ for (let r = 1; r <= ROLLS; r++) {
   const { out, canvas, grew } = await fitSet(bufs, target, prof);
   const g = await gradeSet(out);
   const bad = verdict(prof, g);
-  console.log(`canvas ${canvas}  distinct ${g.distinct}/9  border ${g.border}  reach ${(g.reach * 100).toFixed(1)}%  weight ${(g.bodySpread * 100).toFixed(1)}%  shape ${(g.shape * 100).toFixed(1)}%  feet ${g.footSpread}px  motion ${g.motion.toFixed(1)}${bad.length ? '  GATED: ' + bad.join('; ') : ''}`);
+  console.log(`canvas ${canvas}  distinct ${g.distinct}/9  border ${g.border}  reach ${(g.reach * 100).toFixed(1)}%  crouch ${(g.crouch * 100).toFixed(1)}%  shape ${(g.shape * 100).toFixed(1)}%  fx ${(g.fxMean * 100).toFixed(0)}/${(g.fxPeak * 100).toFixed(0)}%  feet ${g.footSpread}px  motion ${g.motion.toFixed(1)}${bad.length ? '  GATED: ' + bad.join('; ') : ''}`);
   if (bad.length) continue;
   if (!best || g.motion > best.g.motion) best = { out, g, canvas, grew };
 }
 if (!best) { console.error('  no clean roll — re-run, or --bake a saved roll'); process.exit(2); }
 for (let i = 0; i < FRAMES; i++) await writeFile(framePath(i), best.out[i]);
 await writeFile(join(SET, `${KEY}.webp`), best.out[FRAMES - 1]);
-console.log(`  wrote 9 frames + ${KEY}.webp  canvas ${best.canvas}  distinct 9/9  border 0  reach ${(best.g.reach * 100).toFixed(1)}%  weight ${(best.g.bodySpread * 100).toFixed(1)}%  shape ${(best.g.shape * 100).toFixed(1)}%  motion ${best.g.motion.toFixed(1)}`);
+console.log(`  wrote 9 frames + ${KEY}.webp  canvas ${best.canvas}  distinct 9/9  border 0  reach ${(best.g.reach * 100).toFixed(1)}%  crouch ${(best.g.crouch * 100).toFixed(1)}%  shape ${(best.g.shape * 100).toFixed(1)}%  fx ${(best.g.fxMean * 100).toFixed(0)}/${(best.g.fxPeak * 100).toFixed(0)}%  motion ${best.g.motion.toFixed(1)}`);
