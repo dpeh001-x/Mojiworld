@@ -80,7 +80,12 @@ const R = await page.evaluate(async () => {
   for (let i = 0; i < 3; i++) raiseMinion(px + 40 + i * 30, py, i % 2 ? 'zombie' : 'skeleton', 999000);
   let maxReach = 0, recalls = 0;
   const prevX = new Map();
-  for (let f = 0; f < 60 * 22; f++) {                 // ~22 s of hunting
+  // WALL CLOCK, not a frame count. requestAnimationFrame fires at ~174/s in
+  // this harness while the game's own loop runs at 60 — so "60 * 22 frames"
+  // bought 7.6 s of hunting, not 22, and the first read of this test
+  // under-reported how far the pack gets before the recall grabs it.
+  const _t0 = performance.now();
+  while (performance.now() - _t0 < 25000) {
     player.x = px; player.y = py;                     // the master stands still
     player.hp = getMaxHp(); player.invulnerable = 400;
     prey.x = px + FAR; prey.aggroTarget = null;       // and the prey holds its ground
@@ -106,9 +111,31 @@ const R = await page.evaluate(async () => {
   const pitted = game.minions[0];
   pitted.spawn = 0;
   pitted.y = py + 3000;                               // fell down a hole
-  for (let f = 0; f < 90; f++) { player.x = px; player.y = py; await frame(); }
+  const _p0 = performance.now();
+  while (performance.now() - _p0 < 1500) { player.x = px; player.y = py; await frame(); }
   out.pitRescued = Math.abs(pitted.y - py) < 700;
   out.pitDy = Math.round(pitted.y - py);
+
+  // ---- D. CONTROL: the MojiMon companion is NOT a hunter ----------------
+  // It shares every line changed here, so widening the undead's leash could
+  // silently send someone's pet marching across the map. Each use is gated on
+  // !mn.mojimon; this proves the gate rather than trusting it.
+  game.minions = []; game.monsters.length = 0;
+  const pet = spawnMonster(px + 1700, py, 'horny', false);
+  pet.atk = 0; pet.maxHp = 40000; pet.currentHp = 40000;
+  raiseMinion(px + 40, py, 'skeleton', 999000);
+  const companion = game.minions[0];
+  companion.mojimon = true;                          // wear the pet's gating flag
+  companion.spawn = 0;
+  let petReach = 0;
+  const _c0 = performance.now();
+  while (performance.now() - _c0 < 12000) {
+    player.x = px; player.y = py; player.hp = getMaxHp(); player.invulnerable = 400;
+    pet.x = px + 1700; pet.aggroTarget = null;
+    try { await frame(); } catch (e) { out.petErr = String(e).slice(0, 80); break; }
+    petReach = Math.max(petReach, companion.x - px);
+  }
+  out.petReach = Math.round(petReach);
 
   return out;
 });
@@ -132,6 +159,8 @@ ok('no minion is snapped home while legitimately pursuing', R.recalls === 0,
 ok('CONTROL: the pack survived the trip (not culled)', R.alive === 3, `${R.alive}/3 alive`);
 ok('CONTROL: a minion that falls into a pit is still rescued', R.pitRescued,
    `ended ${R.pitDy}px below — the safety net is split, not deleted`);
+ok('CONTROL: the MojiMon companion stays leashed, it did not become a hunter', R.petReach < 1100,
+   `pet reached ${R.petReach}px toward the same 1700px prey${R.petErr ? ' — err ' + R.petErr : ''}`);
 
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }

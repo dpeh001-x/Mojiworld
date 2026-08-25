@@ -17548,7 +17548,7 @@ const SKILLS = {
   elemental:    { name:'Elemental Convergence', icon:'🌟', cls:'mage', job:'archmage', slot:'c', mp:55, cd:14000, desc:'Ultimate: lightning that chains between enemies, stunning and burning each.' },
   // Warlock
   soulSiphon:   { name:'Soul Siphon',    icon:'💀', cls:'mage', job:'warlock',  slot:'q', mp:12, cd:20000, desc:'Drain nearby foes (2× ATK) into MP and HP, raise 1 undead thrall (skeleton or zombie, 16s) from the first victim, and call up soul orbs (2 to start, +1 every 1.5s, max 5) that orbit you for 12s and hunt — each homes into a foe within 380px and detonates (6× ATK).' },   // v0.29.671 — per user (Dark Pulse report): the raise was never in the tooltip. It also hid the damage and the self-heal; the description said only "Drain HP from enemies → MP".
-  darkPulse:    { name:'Dark Pulse',     icon:'🖤', cls:'mage', job:'warlock',  slot:'c', mp:45, cd:26000,  desc:'Ultimate: large void AoE (3.5× ATK), then summon 3 undead that fight for you for 30s — each at 100% of your ATK, and killable by monsters.' },   // v0.29.x — the raise was never in the tooltip (per user: the description did not match what it does)
+  darkPulse:    { name:'Dark Pulse',     icon:'🖤', cls:'mage', job:'warlock',  slot:'c', mp:45, cd:26000,  desc:'Ultimate: large void AoE (3.5× ATK), then summon 3 undead that hunt across the map for 30s — each at 100% of your ATK, and killable by monsters.' },   // v0.29.x — the raise was never in the tooltip (per user: the description did not match what it does)
   // v0.25.514 — Priest F-slot signature: Holy Light. Self-heal scaling
   // on the player's ATK stat. 25 % maxHP at ATK 0, ramps linearly to
   // 100 % maxHP at ATK ≥ 100. Also tops up MP by half the heal % and
@@ -66129,6 +66129,19 @@ function gravMul() {
 // wolf finishes what it started instead of swapping prey whenever two monsters
 // trade places by a pixel. Returns -1 for "not a valid target".
 const _ALLY_DY_MAX = 200, _ALLY_DY_COST = 3.5, _ALLY_LEASH = 720, _ALLY_STICKY = 0.6;
+// v0.30.x — UNDEAD HUNTING GROUND (per user: "make their AI smart to roam and
+// search for monsters to kill throughout the map"). Sized off the MAP rather
+// than a fixed number: worldWidth runs 800 (The Void) to 3200 (the beginner
+// maps), so any one constant either strands them on the big maps or marches
+// them off the edge of the small ones. The floor keeps a cramped map from
+// collapsing the range to nothing.
+// ONLY the warlock undead hunt this wide. The MojiMon companion shares this
+// code but is a pet that should stay at your side, so every use below is
+// gated on !mn.mojimon and it keeps the original 700/1000px behaviour.
+function _lxUndeadRange() {
+  const _ww = (typeof game !== 'undefined' && game.mapData && game.mapData.worldWidth) || 1400;
+  return Math.max(900, _ww);
+}
 // v0.29.830 — LINE OF SIGHT. Segment-vs-AABB (slab method) against the map's
 // SOLID slabs, used by Soul Drain so the player can hide behind terrain.
 // Only real platforms count, never the ground: Gravitos is floor-pinned, so
@@ -67130,6 +67143,17 @@ function _lxSummonHp() {
   return Math.max(1, Math.floor(_base * 15));
 }
 function updateMinions(dt) {
+  // v0.30.x — PLAYER TELEPORT DETECTOR, once per frame (not per minion).
+  // The recall below no longer fires on horizontal distance alone, so the
+  // case that distance was standing in for — a launch pad / in-map portal /
+  // long fall leaving the pack stranded behind (v0.29.690: 2618px behind and
+  // still walking) — is now detected directly, as a jump in the MASTER's own
+  // position that no walking creature could have made in one frame.
+  // Tracked above the early return so it never goes stale while the array is
+  // empty, which would read as a teleport on the next raise.
+  const _mnPX = (typeof player !== 'undefined' && player) ? player.x : 0;
+  const _mnPlayerJump = (game._lxLastPX == null) ? 0 : Math.abs(_mnPX - game._lxLastPX);
+  game._lxLastPX = _mnPX;
   if (!game.minions) return;
   for (let i = game.minions.length - 1; i >= 0; i--) {
     const mn = game.minions[i];
@@ -67165,10 +67189,36 @@ function updateMinions(dt) {
     // pit case (a fall clears 700px vertical almost immediately).
     // The MojiMon path keeps its OWN copy below, deliberately untouched —
     // it is ordered after that system's movement and recently tuned.
-    if (!mn.mojimon && (Math.abs(player.x - mn.x) > 1000 || Math.abs(player.y - mn.y) > 700)) {
-      mn.x = player.x - player.facing * 46; mn.y = player.y - 8;
-      mn.vx = 0; mn.vy = 0;
-      for (let _p = 0; _p < 8; _p++) game.particles.push({ x: mn.x + mn.w / 2, y: mn.y + mn.h / 2, vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3, life: 20, color: '#9944cc', size: 2 });
+    // v0.30.x — THE RECALL IS SPLIT, NOT DELETED (per user: "make their AI
+    // smart to roam and search for monsters to kill throughout the map").
+    // The old rule blinked an undead home the moment it was 1000px away
+    // horizontally, which is the single reason none of them could ever hunt:
+    // measured, three minions chasing prey 1700px off reached exactly 1002px
+    // and were snapped back 9 times in 25s, landing 0 damage.
+    // Every reason the rule was added is kept — none of them was ever really
+    // about walking under its own feet:
+    //   FELL      a minion nudged into a pit fell 3246px and kept falling
+    //   TELEPORT  a launch pad / portal left the pack far behind, walking
+    //   OFF-MAP   past the edge of the map there is nothing to hunt
+    //   STUCK     grinding terrain it cannot path around, gaining no ground
+    // Deliberate pursuit inside the map is no longer one of them.
+    if (!mn.mojimon) {
+      const _hx = Math.abs(player.x - mn.x);
+      const _q = (mn._mnTgt && mn._mnTgt.currentHp > 0) ? mn._mnTgt : null;
+      let _stuck = false;
+      if (_q) {
+        const _qd = Math.abs((_q.x + _q.w / 2) - (mn.x + mn.w / 2));
+        if (mn._huntBest == null || _qd < mn._huntBest - 8) { mn._huntBest = _qd; mn._huntSince = game.time; }
+        // In contact it is FIGHTING, not stuck — the distance stops falling by
+        // design once it is swinging, so the watchdog must not count that.
+        _stuck = _qd > 60 && (game.time - (mn._huntSince || 0)) > 300;   // 5s of no ground gained
+      } else { mn._huntBest = null; mn._huntSince = game.time; }
+      if (Math.abs(player.y - mn.y) > 700 || _mnPlayerJump > 600
+          || _hx > _lxUndeadRange() + 200 || _stuck) {
+        mn.x = player.x - player.facing * 46; mn.y = player.y - 8;
+        mn.vx = 0; mn.vy = 0; mn._huntBest = null; mn._huntSince = game.time;
+        for (let _p = 0; _p < 8; _p++) game.particles.push({ x: mn.x + mn.w / 2, y: mn.y + mn.h / 2, vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3, life: 20, color: '#9944cc', size: 2 });
+      }
     }
     const _mnCx = mn.x + mn.w/2, _mnCy = mn.y + mn.h/2;
     const _mnTakeHit = (mn.dmgCD <= 0);
@@ -67181,7 +67231,15 @@ function updateMinions(dt) {
     //   FOCUS  — among leashed foes, weight the score by remaining HP so they
     //            finish the wounded instead of each picking a fresh target.
     const _pcx = player.x + player.w/2, _pcy = player.y + player.h/2;
-    const _MN_LEASH_SQ = 700 * 700;
+    // v0.30.x — the undead's leash is the MAP; the MojiMon companion keeps the
+    // original 700px. Lifting the recall alone would not have made them hunt:
+    // a foe outside this radius is not prey at all, so with the leash left at
+    // 700 they had no reason to set off, and the two widened fallbacks below
+    // only run when this pass comes back empty — i.e. never, while anything at
+    // all was near you. The pack would still have clustered on the nearest
+    // body while the rest of the map went unhunted.
+    const _MN_LEASH = mn.mojimon ? 700 : _lxUndeadRange();
+    const _MN_LEASH_SQ = _MN_LEASH * _MN_LEASH;
     let _bestScore = Infinity;
     // v0.26.x perf — live-mob list built once per updateMinions call (was a
     // dead-check on every monster PER MINION; dead mobs are 40%+ mid-wave).
@@ -67331,13 +67389,37 @@ function updateMinions(dt) {
         // point and they still spread), just leashed nearer the player: a
         // 420px random walk was the other half of the vanishing report,
         // marching them off ledges into gaps while you fought elsewhere.
-        mn._roamTX = (player.x + player.w / 2) + (Math.random() * 2 - 1) * 200;   // per-minion roam point, player-leashed
+        if (mn.mojimon) {
+          mn._roamTX = (player.x + player.w / 2) + (Math.random() * 2 - 1) * 200;   // pet: stays with you
+        } else {
+          // v0.30.x — PATROL, not pacing (per user: "roam and search for
+          // monsters to kill throughout the map"). The old rule re-rolled a
+          // random point within 200px of the player every few seconds, so an
+          // undead with nothing to hunt shuffled around your feet and never
+          // found the pack two screens away — a random walk that re-centres on
+          // you covers no ground by construction. Now each one holds a heading
+          // and sweeps, turning only at the map edge, so the three of them rake
+          // outward in different directions and actually turn up new prey.
+          const _ww = (game.mapData && game.mapData.worldWidth) || 1400;
+          if (!mn._roamDir) mn._roamDir = (game.minions.indexOf(mn) % 2) ? -1 : 1;
+          let _next = _mnCx + mn._roamDir * (340 + Math.random() * 320);
+          if (_next < 60 || _next > _ww - 60) {          // hit the world edge — turn around
+            mn._roamDir *= -1;
+            _next = _mnCx + mn._roamDir * (340 + Math.random() * 320);
+          }
+          mn._roamTX = Math.max(60, Math.min(_ww - 60, _next));
+        }
         mn._roamUntil = _t + 120 + Math.floor(Math.random() * 180);               // hold ~2-5s before repicking
       }
       const rdx = mn._roamTX - _mnCx;
       mn.facing = Math.sign(rdx) || mn.facing || 1;
       mn.vx += Math.sign(rdx) * 0.12;
-      if (Math.abs(mn.vx) > 1.4) mn.vx = Math.sign(mn.vx) * 1.4;                   // gentle amble
+      // v0.30.x — a searching undead moves with purpose; the pet still ambles.
+      // 1.4px/frame is 84px/s, so one sweep of a 3200px map would take most of
+      // a minute — longer than the 30s they live. 1.9 keeps them visibly
+      // slower than a committed chase (2.2) while covering ground worth covering.
+      const _roamCap = mn.mojimon ? 1.4 : 1.9;
+      if (Math.abs(mn.vx) > _roamCap) mn.vx = Math.sign(mn.vx) * _roamCap;
     }
     // v0.26.092 — Replaced the flat gravity-only step with the shared
     // _allyPlatformStep helper so skeletons / zombies now JUMP when
