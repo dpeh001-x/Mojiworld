@@ -157,7 +157,15 @@ window.LX_MONSTER_STATS = {
   // ---- Bosses ----
   king:                           { lv: 10, hp:   10000, atk:   85, def:  5, exp:    550, coin:   170 },
   mooma:                          { lv: 16, hp:   50000, atk:  118, def:  6, exp:   2750, coin:   850 },
-  aetherion:                      { lv: 65, hp: 1954000, atk: 2080, def: 27, exp: 107500, coin: 33200 },
+  // v0.30.x — per user "increase difficulty... deadlier... he needs to be tanky".
+  // DEF 27 was the defect: a Lv-65 superBoss with LESS armour than kingKrook
+  // (Lv 50, def 31) and under a quarter of legosaurus (Lv 59, def 120). Now 180 per user ("at least 180"),
+  // above taurus (128) and below capricorn (199). The absorb curve is asymptotic,
+  // so 110 -> 180 costs only about 10% more fight length. HP x2.15 lands him above
+  // aries (2,621,718) and below taurus (4,593,750) — a superBoss gate should be a
+  // wall. ATK x1.73 stays under aries's 4,339. exp/coin recomputed from this
+  // file's own boss rule (hp x0.055 / hp x0.017).
+  aetherion:                      { lv: 65, hp: 4200000, atk: 3600, def: 180, exp: 231000, coin: 71400 },
   gravitos:                       { lv:100, hp:22050000, atk:20314, def: 55, exp:1212800, coin:374900 },
   octobaby:                       { lv: 50, hp:  800000, atk:  961, def: 10, exp:  44000, coin: 13600 },
   pqConductor:                    { lv: 30, hp:   15000, atk:  284, def: 42, exp:    825, coin:   255 },
