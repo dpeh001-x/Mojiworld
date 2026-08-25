@@ -83,7 +83,7 @@
       <div class="mut" style="font-size:11px;margin-top:3px">renders EXACTLY what the game renders</div>
       <!-- build badge: bump alongside GAME_VERSION on every animator change,
            so a stale cached copy is identifiable at a glance -->
-      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.196</span>
+      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.198</span>
         <a id="lx-latest-link" href="animator.html" title="Cache-proof launcher: resolves main's current commit via the GitHub API and opens that exact build — use this if the badge looks old" style="color:#5b8cff;margin-left:6px">latest&#8599;</a></div>
       <script>
       // v0.29.246 — LIVE badge freshness probe. The static build string only
@@ -205,6 +205,29 @@
   'use strict';
   const MAN = window.LX_ANIM_MANIFEST || {};
   const HB = window.LX_MOB_HITBOX || {};
+  // v0.30.x — LX_MOB_HITBOX is keyed on the game's MONSTER TYPES, and a
+  // per-attack set is not one: kingKrookstomp, gravitospunch and
+  // towerSovereigncolumn have no entry, so geometry() lost its game base and
+  // fell back to the 220px normalized preview while still labelling the result
+  // "in-game". The GAME sizes from m.h of the live monster — the boss — no
+  // matter which art set it draws, so gravitos punching is gravitos-sized.
+  // Fall back to the longest hitbox key this type starts with, provided the
+  // remainder begins lowercase or with a digit (which keeps kingKrook clear of
+  // king). Resolves all 16 per-attack sets; memoized, the table is static.
+  const _hbRootMemo = Object.create(null);
+  function hbFallback(type) {
+    if (type in _hbRootMemo) return _hbRootMemo[type];
+    let best = null;
+    if (!HB[type]) {
+      for (const p in HB) {
+        if (p === type || !type.startsWith(p)) continue;
+        const rest = type.slice(p.length);
+        if (!rest || !/^[a-z0-9]/.test(rest)) continue;
+        if (!best || p.length > best.length) best = p;
+      }
+    }
+    return (_hbRootMemo[type] = best ? HB[best] : null);
+  }
   const BAKED_CALIB = window.LX_ANIM_CALIB || {};
   const BAKED_HB = window.LX_ATK_HITBOX || {};
   const STATES = ['idle', 'walk', 'attack'];
@@ -384,7 +407,7 @@
     const ent = MAN[type]; if (!ent) return null;
     const info = ent.states[st]; if (!info) return null;
     const isBoss = ent.group === 'boss';
-    const hb = HB[type];
+    const hb = HB[type] || hbFallback(type);
     const _ps = plantScale(type);
     // dims source: BOSS = the live current frame (the game passes the state
     // image into _drawBossSprite); MONSTER = the live STATIC BASE sprite
@@ -628,6 +651,7 @@
       state: st,
       gameW: Math.round((g.drawW != null ? g.drawW : g.targetW) * c.s * (g.atkMul || 1)),
       gameH: Math.round(g.previewH * c.s * (g.atkMul || 1)),
+      isGameSize: !!g.roundMode,   // false = normalized preview, not the game's px
       calibS: +(+c.s).toFixed(3),
       srcW: g.diag.fw, srcH: g.diag.fh, contentH: g.diag.contentH,
       sizeFactor: g.diag.sf, normScale: g.diag.normScale, atkScale: g.diag.atkScale,
@@ -778,7 +802,10 @@
       const gw = Math.round(dw * c.s * am), gh = Math.round(g.previewH * c.s * am);
       ctx.save();
       ctx.textAlign = 'center'; ctx.fillStyle = COL[st]; ctx.font = '700 12px system-ui';
-      ctx.fillText('in-game  ' + gw + ' × ' + gh + ' px', cx, groundY + 36);
+      // roundMode is true only when a real game base was found AND game-scale
+      // is on. Otherwise this number is the tool's normalized preview, and
+      // saying "in-game" would be the tool lying about its own subtitle.
+      ctx.fillText((g.roundMode ? 'in-game  ' : 'preview  ') + gw + ' × ' + gh + ' px', cx, groundY + 36);
       ctx.fillStyle = '#8a97ad'; ctx.font = '10px system-ui';
       ctx.fillText('src ' + g.diag.fw + '×' + g.diag.fh
         + ' · content ' + (g.diag.contentH != null ? g.diag.contentH + 'px' : '—')
