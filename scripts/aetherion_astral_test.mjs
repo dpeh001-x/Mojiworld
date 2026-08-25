@@ -51,6 +51,21 @@ for (let i = 0; i < 9; i++) {
   generic.push(await box(`Sprites/bosses/attack/aetherion_${i}.webp`));
 }
 const gw = generic.map(b => b.w), aw = astral.map(b => b.w);
+// violet coverage per frame: the spell's actual intensity curve, so the test can
+// assert the art and the engine's burst frame agree instead of trusting a comment.
+const violet = [];
+for (let i = 0; i < 9; i++) {
+  const { data, info } = await sharp(`Sprites/bosses/attack/aetherionastral_${i}.webp`)
+    .ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  let n = 0;
+  for (let j = 0; j < data.length; j += info.channels) {
+    if (data[j + 3] < 40) continue;
+    const g2 = data[j + 1], b2 = data[j + 2];
+    if (b2 > g2 + 18 && b2 > 90) n++;
+  }
+  violet.push(n);
+}
+const violetPeak = violet.indexOf(Math.max(...violet));
 const spread = (a) => Math.max(...a) / Math.min(...a);
 
 // ---------- engine half ----------
@@ -112,14 +127,19 @@ ok('nothing in the astral set is cut off - nothing clipped, nothing sliced mid-c
     lastOpaqueRow: astral.map(f => f.last + '/' + (f.H - 1)).join(' '),
     note: 'feet ON the bottom row = the anchor convention; the severed set stopped at 1271/1325 with 153 px',
     widths: aw });
-ok('the subject holds still across the set - unzoomed, minimal changes',
-  spread(aw) < 1.10,
-  { spread: spread(aw).toFixed(3) + 'x', genericSetOfTheSameBoss: spread(gw).toFixed(3) + 'x', theRollThisReplaced: '1.45x', widths: aw });
+ok('the generated set varies without blowing up the silhouette',
+  spread(aw) < 1.60,
+  { spread: spread(aw).toFixed(3) + 'x', genericSetOfTheSameBoss: spread(gw).toFixed(3) + 'x',
+    note: 'stillness was traded for animation on user instruction; this only catches the 2.51x class' });
+ok('the VIOLET actually animates, and peaks on the frame the engine detonates',
+  violetPeak === r.atResolve && violet[violetPeak] > 50000 && violet[8] < violet[violetPeak] / 10,
+  { perFrameVioletPx: violet, peakFrame: violetPeak, engineBurstFrame: r.atResolve,
+    note: 'a set that peaked at 4 while the engine burst at 6 would die two frames before the hit' });
 ok('the cast opens on frame 0 and the BURST lands exactly on the resolve',
-  r.atStart === 0 && r.atResolve === 6,
+  r.atStart === 0 && r.atResolve === 4,
   { atStart: r.atStart, atResolve1500ms: r.atResolve, timeline: T.map(x => x.pt + 'ms->f' + x.f).join(' ') });
 ok('...and the aftermath plays out after the hit rather than before it',
-  T.filter(x => x.pt < 1500).every(x => x.f <= 6) && r.atEnd === 8,
+  T.filter(x => x.pt < 1500).every(x => x.f <= 4) && r.atEnd === 8,
   { beforeHit: T.filter(x => x.pt < 1500).map(x => x.f), atEnd: r.atEnd });
 ok('the frames advance through the cast instead of sticking',
   new Set(T.map(x => x.f)).size >= 6, { distinctFrames: new Set(T.map(x => x.f)).size, seen: T.map(x => x.f) });

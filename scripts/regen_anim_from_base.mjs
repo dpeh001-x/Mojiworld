@@ -268,6 +268,34 @@ const TARGETS = {
       'shards riding it, wings at full spread, head thrown back, and he HOLDS that final pose. He is rooted the ' +
       'whole time - he does not walk, step or leave the spot, and all FOUR of his limbs stay drawn: both hind legs ' +
       'planted and both forelegs raised and clawing the air. Violet and gold only - no red, no orange fire.' + FULLBODY },
+
+  // v0.30.x - ASTRAL JUDGEMENT, take 2, after the user rejected the composite
+  // ("change it to a much nicer sprite with animation using ludo.ai").
+  //
+  // Three rolls of aetherion_astral failed the same way: they asked the animator
+  // to rear him up, sweep the wings, converge a spiral AND detonate it across
+  // nine frames. That much requested change licenses it to redraw the whole
+  // composition - it re-posed him side-on to front-on and pushed the camera in.
+  // The idle and walk regenerations succeeded on this same boss because they
+  // asked for SMALL change.
+  //
+  // So the body no longer moves. attack_4 is ALREADY the cast pose - reared up,
+  // wings at full spread, jaws open, all four limbs drawn - so the prompt freezes
+  // it there and spends every frame of change on the SPELL instead. That is also
+  // what the engine telegraphs, and it is still real animation: the spiral
+  // travels, the light builds, the wings tremble. The base is gold only, so the
+  // violet has to be introduced - a colour change, which does not move him.
+  aetherion_astral2: { base: 'Sprites/bosses/attack/aetherion_4.webp', dir: 'Sprites/bosses/attack',
+    stem: 'aetherionastral', pad: 0.35,
+    motion: 'A crystalline white-and-gold dragon, reared up on his hind legs with both wings spread wide and his ' +
+      'jaws open, is CASTING A SPELL and holding that pose. HIS BODY DOES NOT MOVE: identical stance in all nine ' +
+      'frames, same angle, same size, same position, both hind legs planted, both forelegs raised, wings at the ' +
+      'same full spread. Do not re-pose him, do not turn him, do not change his size. What CHANGES is the magic. ' +
+      'Frames 1-3: sparse VIOLET and GOLD motes wink into being in the empty air far out around him. Frames 4-6: ' +
+      'they thicken into ribbons of violet and gold light that curve INWARD from every side and converge on his ' +
+      'chest, his scales lighting from within and his eyes brightening. Frames 7-9: the gathered light blazes at ' +
+      'his chest and bursts outward in a violet-and-gold flare. Across all of it his wings only tremble slightly ' +
+      'and the glow pulses - nothing else about him alters. Violet and gold only: no red, no orange, no fire.' + FULLBODY },
 };
 
 const only = val('--only', null);
