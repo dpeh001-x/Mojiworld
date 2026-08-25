@@ -84,7 +84,16 @@ window.LX_SPRITE_FRAME_INDEX = ${JSON.stringify({ frames, attackBase }, null, 1)
 
 if (CHECK) {
   const cur = existsSync(OUT) ? readFileSync(OUT, 'utf8') : '';
-  if (cur.trim() !== body.trim()) {
+  // CRLF-tolerant. core.autocrlf=true on Windows smudges this file to CRLF on
+  // checkout while the blob and this generator both stay LF, so a raw compare
+  // reported STALE on a freshly checked-out tree whose index was byte-identical
+  // to the committed blob. That is the worst way for a gate to fail: it fires
+  // exactly in the clean-worktree flow the project pushes you toward for
+  // regenerating derived data, and a gate that cries wolf is one people learn to
+  // wave through - which is how a REAL stale index eventually ships.
+  const _lf = (x) => x.split(String.fromCharCode(13) + String.fromCharCode(10))
+    .join(String.fromCharCode(10)).trim();
+  if (_lf(cur) !== _lf(body)) {
     console.error('STALE: ' + OUT + ' does not match disk. Run: node scripts/gen_sprite_frame_index.mjs');
     process.exit(1);
   }
