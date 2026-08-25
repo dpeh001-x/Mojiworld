@@ -9904,7 +9904,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.235';
+const GAME_VERSION = 'v0.30.236';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -82791,6 +82791,10 @@ function bossAI(m, dt, distToPlayer) {
         const _kPend = (m._kString && m._kString.length) ? m._kString : null;
         m._kString = null;
         const _kUlt = Math.random();   // v0.29.832 — roll for the uncapped ultimates
+        // v0.30.236 — TYRANT'S STOMP cooldown. game.time is a 60fps FRAME
+        // counter, so 15 s is 900 — the same frames-not-ms trap that had
+        // Taurus's Immovable Stance firing every 233 s until v0.26.367.
+        const _stompReady = (_now - (m._lastStompAt || 0)) > 900;
         // Pick the next attack. v0.26.078 added megaFireball — a slow
         // huge OHKO projectile (~1/3 screen) gated on its own 18 s
         // cooldown so it doesn't dominate the cycle. Falls into the
@@ -82870,6 +82874,14 @@ function bossAI(m, dt, distToPlayer) {
         // restores their per-attack cadence exactly. The 15/15 split is the
         // same one they had inside the ladder's 0.70-0.85-1.00 bands, and the
         // airborne case still falls through to rain exactly as before.
+        // v0.30.236 — TYRANT'S STOMP sits ABOVE the earthquake. Both are
+        // grounded slams off the same _kUlt roll, so whichever is second only
+        // sees the roll when the first declines it; below the quake's 0.15 band
+        // the new move would fire on 0.15-0.14 = never. Its own 15 s cooldown
+        // is what keeps it from crowding the quake out instead.
+        else if (_stompReady && _kUlt < 0.14 && m.onGround) {
+          m.patternState = 'stomp'; m._lastStompAt = _now; _bossSpecialFired(m, _now);
+        }
         else if (_kUlt < 0.15 && m.onGround) { m.patternState = 'earthquake'; _bossSpecialFired(m, _now); }
         else if (_kUlt < 0.30) { m.patternState = 'fireballRain'; _bossSpecialFired(m, _now); }
         // v0.29.832 — nothing special claimed this slot, so honour the combo in
@@ -83147,6 +83159,60 @@ function bossAI(m, dt, distToPlayer) {
         }
       }
       if (t > 1600) { m.patternState = 'idle'; m.patternTimer = 0; }
+    } else if (m.patternState === 'stomp') {
+      // v0.30.236 — TYRANT'S STOMP: the CONTROL twin of the earthquake above.
+      // That one is a damage execute (55% max HP + all MP); this one takes a
+      // fraction of the HP and the player's next three seconds instead. Same
+      // contract as every slam he owns — announced, and off the ground clears
+      // it outright. 1100 ms windup, 100 ms less than the quake's, because the
+      // punish here is a stun rather than most of the health bar.
+      m.vx = 0;
+      if (!m._kAnnounced && t < 100) {
+        m._kAnnounced = true;
+        showToast('🦶 TYRANT’S STOMP — get off the ground!', 'legendary');
+        flash(0.14); audio.play('hit');
+      }
+      // Windup dust, heavier and lower than the quake's, so the two slams are
+      // told apart while they are still winding up rather than on the payoff.
+      if (t < 1100 && game.time % 3 === 0) {
+        game.particles.push({
+          x: m.x + m.w / 2 + (Math.random() - 0.5) * m.w * 1.3,
+          y: m.y + m.h - 2,
+          vx: (Math.random() - 0.5) * 4, vy: -1 - Math.random() * 1.5,
+          life: 30, color: '#c8a06a', size: 3 + Math.random() * 3,
+        });
+      }
+      if (t >= 1100 && !m._kFired) {
+        m._kFired = true;
+        addShake(26); flash(0.3);
+        for (let _i = 0; _i < 22; _i++) {
+          const _ang = (_i / 22) * Math.PI * 2;
+          game.particles.push({
+            x: m.x + m.w / 2, y: m.y + m.h - 2,
+            vx: Math.cos(_ang) * (5 + Math.random() * 3), vy: Math.sin(_ang) * 1.2 - 1,
+            life: 32, color: '#e0b070', size: 4,
+          });
+        }
+        if (player.onGround && player.hp > 0 && (player.invulnerable | 0) <= 0) {   // i-frames honoured, like his other executes
+          const dmg = Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp) * 0.22);
+          player.hp = Math.max(1, player.hp - (player._god ? 0 : dmg));
+          // The point of the move. Routed through stun resistance the way
+          // Octobaby's shock tentacle is, so gear that claims to resist stun
+          // resists this one too instead of the stat being decorative.
+          const _mul = (typeof getStunResist === 'function') ? (1 - getStunResist()) : 1;
+          const _ms = Math.floor(3000 * Math.max(0, _mul));
+          if (_ms > 0 && !player._god) player.stunTimer = Math.max(player.stunTimer || 0, _ms);
+          game.damageNumbers.push({
+            x: player.x + 14, y: player.y - 10, vy: -2,
+            text: '-' + dmg + ' STOMP', life: 60, color: '#e0b070', size: 18,
+          });
+          if (_ms > 0 && !player._god) showToast('💫 STUNNED for ' + (_ms / 1000).toFixed(1) + 's!', 'legendary');
+          player._lastDamageSource = 'King Krook\'s Tyrant\'s Stomp';
+        } else {
+          showToast('🦘 Stomp evaded!', 'epic');
+        }
+      }
+      if (t > 1700) { m.patternState = 'idle'; m.patternTimer = 0; }
     } else if (m.patternState === 'fireballRain') {
       // Catastrophic ultimate. 1500 ms warning, then 12 diagonal
       // fireballs over 1500 ms.
@@ -118328,6 +118394,13 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
   // like the Gravitos cast sets - the key is never active outside the attack, so
   // it has no idle or walk of its own.
   'aetherionastral',
+  // v0.30.236 — King Krook's TYRANT'S STOMP set
+  // (Sprites/bosses/attack/kingKrookstomp_0..8). The art shipped and nothing
+  // referenced it, so the frames never loaded and never drew — the same defect
+  // the SOUL set had. Registered here and driven by _krookStompFrame while the
+  // stomp pattern runs. Frames-only, like the Gravitos cast sets: the key is
+  // never active outside the attack, so it has no idle or walk of its own.
+  'kingKrookstomp',
   'gravitospunch',
   // v0.29.560 — Gravitos SOUL set (Sprites/bosses/attack/gravitossoul_0..8).
   // The art shipped but nothing referenced it, so it never loaded and never
@@ -118623,6 +118696,27 @@ function _bossAnimPhase(frames, m, state, desync) {
   return _mobAnimPhase(m, state, desync);
 }
 function _bossAttackFrame(key, m) { return _bossLoopFrame(BOSS_ATTACK_FRAMES[key], _BOSS_ATK_FRAME_MS, undefined, _bossAnimPhase(BOSS_ATTACK_FRAMES[key], m, 'attack', false)); }
+// v0.30.236 — TYRANT'S STOMP playback. Deliberately NOT _bossAttackFrame: at
+// 48 ms a nine-frame set is over in 432 ms, so across the 1700 ms pattern the
+// loop would play the stomp four times — a tap-dance, not a slam. Instead the
+// nine frames are spread across the WINDUP and land on the final frame exactly
+// when the shockwave fires, then hold it through the aftershock. Same shape as
+// _gravitosPunchFrame, minus the crossfade (nine heavy frames on a 1100 ms
+// windup already average 122 ms apart; the punch needed it at 105 ms).
+const _KROOK_STOMP_HIT = 1100;   // ms into the pattern that the ground breaks
+function _krookStompFrame(m) {
+  const frames = BOSS_ATTACK_FRAMES.kingKrookstomp;
+  if (!frames) return null;
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);   // same base as every other boss set
+  let n = frames._readyN || 0;
+  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
+  frames._readyN = n;
+  if (n === 0) return null;
+  const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / _KROOK_STOMP_HIT));
+  // t^1.35: he hangs on the rear-back a beat, then drops. Linear made the
+  // raised foot travel at the same speed as the slam, which reads weightless.
+  return frames[Math.min(n - 1, Math.floor(Math.pow(t, 1.35) * n))];
+}
 // v0.29.x — Gravitos form-1 GRAVITY CRUSH punch. Plays the 9-frame punch ONCE
 // across the pattern's 1500 ms window, driven by m.patternTimer instead of the
 // generic 48 ms wall-clock loop (which would replay the punch ~3.5×): windup
@@ -121585,6 +121679,15 @@ function drawMonster(m) {
   if (m.type === 'gravitos' && _GRAV_PUNCH_PATTERNS[m.patternState] && _gravitosPunchFrame(m)) {
     m._gravStarKey = _gravCastKey(m, 'punch');
   }
+  // v0.30.236 — King Krook's TYRANT'S STOMP plays its own nine-frame set for
+  // the length of the pattern. _gravStarKey is the GENERIC per-attack art
+  // override in spite of its name — it is the slot the draw path checks after
+  // the Sovereign's — so a crocodile borrowing it is deliberate, not a stray
+  // copy-paste. Guarded on the frames decoding, so a build without the art
+  // falls back to his generic attack pose rather than drawing nothing.
+  if (m.type === 'kingKrook' && m.patternState === 'stomp' && _krookStompFrame(m)) {
+    m._gravStarKey = 'kingKrookstomp';
+  }
   // v0.29.560 — SOUL set for the channelled casts (see _gravitosUsesSoul).
   // Placed AFTER the star block deliberately and guarded on `!m._gravStarKey`,
   // so a form-2/3 Singularity keeps its authored gravitos2star/3star art and
@@ -121626,6 +121729,7 @@ function drawMonster(m) {
        || (/laser$/.test(_spriteKey) && _gravitosLaserFrame(m))
        || (/soul$/.test(_spriteKey) && _gravitosSoulFrame(m))   // v0.29.560 — once-through, then holds
        || (/astral$/.test(_spriteKey) && _aetherionAstralFrame(m))   // v0.30.x - burst timed to the resolve
+       || (/stomp$/.test(_spriteKey) && _krookStompFrame(m))   // v0.30.236 — once-through, lands on the slam
        || _bossAttackFrame(_spriteKey, m) || BOSS_ATTACK_SPRITES[_spriteKey])
     : null;
   const _bodyKey = m._phaseSprite || m.type;   // v0.29.x — walk/idle sets are keyed by the BODY, never by an attack override
@@ -123685,7 +123789,7 @@ function drawKingKrook(m, sx, sy) {
   const shell = m.shell || '#aa5522';               // orange shell + spikes
   const tan = '#ffd9a8';                            // belly tan
   const f = m.facing || 1;
-  const winding = m.patternState === 'fireballRain' || m.patternState === 'earthquake';
+  const winding = m.patternState === 'fireballRain' || m.patternState === 'earthquake' || m.patternState === 'stomp';   // v0.30.236 — the stomp winds up like the quake
   const isFireRain = m.patternState === 'fireballRain';
   ctx.save();
   if (f < 0) { ctx.translate(cx * 2, 0); ctx.scale(-1, 1); }
