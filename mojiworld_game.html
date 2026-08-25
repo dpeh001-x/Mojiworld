@@ -9904,7 +9904,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.186';
+const GAME_VERSION = 'v0.30.187';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11327,6 +11327,11 @@ const _PROJ_ANIM_KEYS = new Set(['goo','bubble','pincer','splash','quake','stala
   // applies to the KEYS around it, which are fired projectiles oriented to
   // their velocity; a hovering ward orb has no velocity to point at.
   'p_necromancer_soulorb',
+  // v0.30.x — Grand Hex ward-orb loop (anim/p_hexmaster_hexorb_0..8, ludo.ai via
+  // scripts/gen_hexorb_ward.mjs). Same rule as the soul orb beneath it: the
+  // engine draws this one upright, so the frames animate what a rotation cannot
+  // — the pupil focusing, the rune halo turning, the venom wisps curling.
+  'p_hexmaster_hexorb',
   // v0.26.x — Mage Z (magicBolt) energy orb: cute electric-crackle loop. Frames
   // at anim/bolt_*.webp; drawn in the player-projectile branch via _projAnimFrame.
   'bolt',
@@ -11440,6 +11445,12 @@ const LX_BULT_PROJ = (() => {
     bloodlust_wave:    'p_bloodlust_shockwave.webp', // v0.29.694 — Bloodlust swing-rider's own crescent (was borrowing bult_doombringer). NOT bult_-prefixed: the rider is a basic-swing side-effect, so the multishot mod may echo it like any basic projectile — the exemption it had was an accident of the borrowed key.
     bult_hexorb:       'p_ult_hexorb.webp',       // v0.29.693 Pandemic Hex — void orb, hex runes + poison wisps (ludo.ai)
     bult_holyorb:      'p_ult_holyorb.webp',
+    // v0.30.x — Grand Hex's WATCHING EYE ward orbs. Its own art rather than a
+    // reuse of bult_hexorb above: that one is Pandemic Hex's black void sphere,
+    // and two orbs on one class that read the same teach the player nothing.
+    // Blue with a green venom tinge (per user), which also puts it clear of the
+    // necromancer's teal soul-flame below.
+    hexmaster_hexorb:         'p_hexmaster_hexorb.webp',        // v0.30.x Grand Hex ward orbs — cobalt hex-eye, rune halo, venom wisps (ludo.ai)
     necromancer_soulorb:      'p_necromancer_soulorb.webp',     // v0.29.911 Soul Ward orbs — spectral teal soul-flame (ludo.ai). Not bult_-prefixed: drawn by drawNecromancerOrbs, never fired as a projectile.      // v0.29.710 Judgement orbs — golden aegis orb, sapphire core (ludo.ai)
     bult_dragoon:      'p_ult_dragoon.webp',       // Skyfall Dominion — descending dragon-lance
     bult_nightreaper:  'p_ult_nightreaper.webp',   // Bloodmoon Domain — blood-red soul scythe
@@ -18784,6 +18795,34 @@ const LX_GRANDHEX_FREEZE_MS = 1200;     // unchanged, non-boss, now radius-only
 // rupture, the live ceiling is 4 stacks = +16%. DoT tags are excluded on
 // purpose -- the DOT already scales with the same stack count, so letting it
 // read the multiplier too would make curse damage grow quadratically.
+// v0.30.x — HEX WARD ORBS. Per user: "for grand hex skill add in a similar
+// mechanics to soul siphon orbs whereby there are orbs that get summoned, up to
+// 3, these special orbs can hoam after hitting 1 monster (up to 3 times)".
+//
+// The Soul Ward (soulSiphon) is the shape this borrows: orbs that orbit the
+// caster and home into a target. What makes these the Hexmaster's rather than a
+// reskin is what happens on contact. A soul orb is SPENT when it lands. A hex
+// orb CHAINS: it strikes, hands the victim a hex stack, then peels off and goes
+// looking for someone ELSE, up to three strikes before it burns out. Three orbs
+// x three strikes is up to nine hex stacks placed around the room per cast,
+// which is the class signature ("curses spread; 5 stacks = massive damage")
+// doing the spreading by itself.
+const LX_HEXORB_COUNT = 3;              // "up to 3" — a recast tops up, never stacks past it
+const LX_HEXORB_HITS = 3;               // strikes per orb before it burns out
+const LX_HEXORB_LIFE_MS = 7000;
+// Acquisition reach measured from the ORB, not the caster — see the engine.
+// The Soul Ward measures from the player because it never leaves its orbit;
+// this one is a seeking missile and its sight has to travel with it.
+const LX_HEXORB_RANGE = 400;
+const LX_HEXORB_DMG_MUL = 1.8;          // per strike; the hex stack is the real payload
+const LX_HEXORB_SPEED = 8;              // px/frame, steered — trackable, not hitscan
+const LX_HEXORB_STRIKE = 34;            // contact radius (the soul ward's number)
+// After a strike the orb has to visibly LEAVE before it can pick again.
+// Without this it re-acquires on the very next frame and, in a boss fight where
+// there is only one target, machine-guns all three strikes into one body in
+// under a tenth of a second — the chain becomes a damage multiplier you cannot
+// see. The re-arm makes it arc away and come back.
+const LX_HEXORB_REARM_MS = 280;
 const LX_HEX_VULN_PER_STACK = 0.04;
 const LX_HEX_VULN_SKIP = new Set(['burn', 'thorns', 'poison']);
 // Rupture is no longer a private event between one mob and the player. It
@@ -43823,6 +43862,7 @@ function loadState() {
     player._bloodstormNextTick = 0;
     player._aegis = null;
     player._necromancerOrbs = null;   // v0.29.911 — Soul Ward orbs die with their caster
+    player._hexOrbs = null;           // v0.30.x — ...and so do the Grand Hex ward orbs
     player._clones = null;
     player._shade = null;               // v0.30.x — the Sovereign Shade does not survive a load either
     player._ballistaTurrets = null;     // v0.26.x — clear War Machine turrets on save load
@@ -58924,6 +58964,7 @@ function loadMap(id, entryX, entryY) {
     player._bloodstormNextTick = 0;
     player._aegis = null;
     player._necromancerOrbs = null;   // v0.29.911 — Soul Ward orbs die with their caster
+    player._hexOrbs = null;           // v0.30.x — ...and so do the Grand Hex ward orbs
     player._clones = null;
     player._shade = null;
     player._ballistaTurrets = null;
@@ -62554,6 +62595,119 @@ function updatePlayer(dt) {
           orb.y += (dy / d) * sp;
         }
       }
+    }
+  }
+  // v0.30.x — GRAND HEX WARD ORBS. Deliberately a sibling of the Soul Ward
+  // above rather than a branch inside it: they share an orbit-and-home shape
+  // and nothing else. A soul orb is spent on contact; a hex orb chains.
+  if (player._hexOrbs) {
+    const hw = player._hexOrbs;
+    hw.life -= dt;
+    if (hw.life <= 0) {
+      player._hexOrbs = null;
+    } else {
+      const t = game.time * 0.06;
+      const cx = player.x + player.w / 2;
+      const cy = player.y + player.h / 2;
+      for (let oi = hw.orbs.length - 1; oi >= 0; oi--) {
+        const orb = hw.orbs[oi];
+        if (orb.rearm > 0) orb.rearm -= dt;
+        // Orbit — tighter and turning the other way from the Soul Ward's, so a
+        // warlock running both can still tell them apart at a glance.
+        const _r = 118 + Math.sin(t + orb.phase) * 58;
+        const _ang = orb.baseAng + t * 0.5;
+        const _ox = cx + Math.cos(_ang) * _r, _oy = cy + Math.sin(_ang) * _r * 0.6;
+        if (orb.x === undefined) { orb.x = _ox; orb.y = _oy; }
+        if (!orb.tgt) {
+          if (orb.rearm > 0) {
+            // COAST where it struck, on a small recoil, rather than heading
+            // home. Returning to the orbit during the re-arm was measured
+            // walking the chain BACKWARDS: by the time the orb could look
+            // again it was beside the player, so it re-picked the nearest
+            // body and nine strikes landed on only two monsters. Holding
+            // position is what makes orb-centred sight mean anything — the
+            // orb looks for its next victim from where it left the last one.
+            orb.x += (orb.rvx || 0) * (dt / 16.67);
+            orb.y += (orb.rvy || 0) * (dt / 16.67);
+          } else {
+            // ACQUIRE from where the ORB is, not from where the player is.
+            // The Soul Ward measures its reach from the caster so the number
+            // is one the player can learn, and for a ward that never leaves
+            // the orbit that is right. This is a seeking missile: after a
+            // strike it is standing on its victim, halfway across the room,
+            // and player-centred sight would blind it to the monster directly
+            // beside it while it re-targeted something near the caster. Sight
+            // travels with the seeker.
+            //
+            // Targets are ranked in three tiers, and the tiers are the whole
+            // mechanic. Excluding only the LAST victim was measured landing
+            // all nine strikes on two bodies: from monster A the nearest
+            // not-A is B, and from B the nearest not-B is A again, so the
+            // chain ping-pongs instead of walking. Excluding EVERY monster
+            // this orb has already struck makes it move on, which is what
+            // "from one monster to the next" asks for.
+            //   1. never struck by this orb  — the chain walks
+            //   2. struck before, but not the one it just left
+            //   3. the one it just left      — a boss fight has exactly ONE
+            //      monster, and an orb that refused to re-engage would be dead
+            //      weight precisely where the skill matters most
+            let fresh = null, fbd = Infinity, older = null, od = Infinity, lastOne = null, ld = Infinity;
+            const reach2 = LX_HEXORB_RANGE * LX_HEXORB_RANGE;
+            for (const m of game.monsters) {
+              if (!m || m.currentHp <= 0) continue;
+              const dx = (m.x + m.w / 2) - orb.x, dy = (m.y + m.h / 2) - orb.y;
+              const d2 = dx * dx + dy * dy;
+              if (d2 >= reach2) continue;
+              if (m === orb.lastTgt) { if (d2 < ld) { ld = d2; lastOne = m; } }
+              else if (orb.seen && orb.seen.indexOf(m) >= 0) { if (d2 < od) { od = d2; older = m; } }
+              else if (d2 < fbd) { fbd = d2; fresh = m; }
+            }
+            orb.tgt = fresh || older || lastOne;
+            if (!orb.tgt) {
+              // Nothing in sight — go home and keep orbiting until something
+              // wanders into range. Drift, never snap: an orb that teleports
+              // to its orbit point reads as a glitch rather than as a ward.
+              const k = Math.min(1, 0.12 * (dt / 16.67));
+              orb.x += (_ox - orb.x) * k;
+              orb.y += (_oy - orb.y) * k;
+            }
+          }
+        }
+        if (orb.tgt) {
+          const m = orb.tgt;
+          if (!m || m.currentHp <= 0) { orb.tgt = null; continue; }   // released back to orbit
+          const dx = (m.x + m.w / 2) - orb.x, dy = (m.y + m.h / 2) - orb.y;
+          const d = Math.sqrt(dx * dx + dy * dy) || 1;
+          if (d < LX_HEXORB_STRIKE) {
+            const _c = (typeof rollCrit === 'function') && rollCrit();
+            const _dmg = Math.floor(getAtk() * LX_HEXORB_DMG_MUL * (_c && typeof getCritDmg === 'function' ? getCritDmg() : 1));
+            if (typeof hitMonster === 'function') hitMonster(m, _dmg, _c, 'hexorb');
+            // The curse is the point. _hexAdd can rupture and killMonster
+            // splices game.monsters — safe here because this loop walks
+            // hw.orbs, and a dead orb.tgt is caught by the currentHp gate above.
+            if (m.currentHp > 0 && typeof _hexAdd === 'function') _hexAdd(m, 1);
+            if (typeof spawnSmoothImpact === 'function') spawnSmoothImpact(orb.x, orb.y, '#66ccff');
+            for (let _pi = 0; _pi < 5; _pi++) {
+              game.particles.push({ x: orb.x, y: orb.y,
+                vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4 - 0.6,
+                life: 22, color: _pi % 2 ? '#66ccff' : '#88ff44', size: 2 });
+            }
+            orb.hits++;
+            if (orb.hits >= LX_HEXORB_HITS) { hw.orbs.splice(oi, 1); continue; }
+            orb.lastTgt = m; orb.tgt = null; orb.rearm = LX_HEXORB_REARM_MS;
+            if (orb.seen.indexOf(m) < 0) orb.seen.push(m);
+            // Recoil: bounce back along the approach so the peel-off is
+            // visible, and so the orb sits just off its victim while it looks
+            // for the next one rather than inside it.
+            orb.rvx = -(dx / d) * 2.4; orb.rvy = -(dy / d) * 2.4 - 0.8;
+            continue;
+          }
+          const sp = LX_HEXORB_SPEED * (dt / 16.67);
+          orb.x += (dx / d) * sp;
+          orb.y += (dy / d) * sp;
+        }
+      }
+      if (!hw.orbs.length) player._hexOrbs = null;   // all three burned out
     }
   }
   if (player._aegis) {
@@ -72982,6 +73136,21 @@ const SKILL_FNS = {
           life: 30, color: i % 2 ? '#88ff44' : '#aa66cc', size: 2
         });
       }
+    }
+    // Summon the ward. "up to 3" is a CAP, not an addition: a recast refreshes
+    // the timer and tops the flight back up to three rather than stacking six.
+    {
+      const _hw = player._hexOrbs || { life: 0, maxLife: LX_HEXORB_LIFE_MS, orbs: [] };
+      _hw.life = LX_HEXORB_LIFE_MS; _hw.maxLife = LX_HEXORB_LIFE_MS;
+      while (_hw.orbs.length < LX_HEXORB_COUNT) {
+        const _i = _hw.orbs.length;
+        _hw.orbs.push({
+          baseAng: (_i / LX_HEXORB_COUNT) * Math.PI * 2,     // evenly spaced around the caster
+          phase:   (_i / LX_HEXORB_COUNT) * Math.PI * 2,     // ...and spread across the flame loop
+          hits: 0, tgt: null, lastTgt: null, rearm: 0, seen: [],   // seen = every body this orb has already struck
+        });
+      }
+      player._hexOrbs = _hw;
     }
     showToast('GRAND HEX ×' + count + (ruptures ? ' — ' + ruptures + ' RUPTURE' + (ruptures > 1 ? 'S' : '') : ''), 'legendary');
     // v0.30.x — ECHO PULSE (tester: "not enough space to catch a lot of mobs").
@@ -109175,6 +109344,43 @@ function _drawPlayerNameTag(sx, sy) {
 // v0.29.911 — Soul Ward orbs. Same structure as drawAegisOrbs below: prefer
 // the authored sprite once decoded, procedural glow until then, additive halo
 // under source-over art so the teal core is not blown to white.
+// v0.30.x — Grand Hex ward orbs. Drawn upright, never rotated: this one is an
+// EYE, and an eye that tumbles reads as debris rather than as something
+// watching. The per-orb phase offset staggers the shared 9-frame loop so three
+// orbs sit at different points of the same blink instead of pulsing in unison —
+// the same trick drawNecromancerOrbs uses beneath.
+function drawHexOrbs() {
+  if (!player._hexOrbs) return;
+  const camX = game.camera.x;
+  const fade = player._hexOrbs.life < 600 ? player._hexOrbs.life / 600 : 1;
+  const _img = (typeof LX_BULT_PROJ !== 'undefined' && LX_BULT_PROJ.hexmaster_hexorb
+                && _lxPlayerProjReady(LX_BULT_PROJ.hexmaster_hexorb)) ? LX_BULT_PROJ.hexmaster_hexorb : null;
+  ctx.save();
+  for (const orb of player._hexOrbs.orbs) {
+    if (orb.x === undefined) continue;
+    const sx = orb.x - camX, sy = orb.y;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = `rgba(90,170,255,${(_img ? 0.24 : 0.30) * fade})`;
+    ctx.beginPath(); ctx.arc(sx, sy, _img ? 20 : 16, 0, Math.PI * 2); ctx.fill();
+    if (_img) {
+      const SZ = 40;   // 40px art against the 34px strike radius, as the ward above
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.save();
+      ctx.globalAlpha = fade;
+      ctx.translate(sx, sy);
+      if (typeof _lxUseEntityImageQuality === 'function') _lxUseEntityImageQuality(ctx);
+      const _fr = (typeof _projAnimFrame === 'function') ? _projAnimFrame('p_hexmaster_hexorb', (orb.phase || 0) * 69) : null;
+      ctx.drawImage(_fr || _img, -SZ / 2, -SZ / 2, SZ, SZ);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = `rgba(150,210,255,${0.85 * fade})`;
+      ctx.beginPath(); ctx.arc(sx, sy, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = `rgba(235,250,255,${0.95 * fade})`;
+      ctx.beginPath(); ctx.arc(sx, sy, 3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
 function drawNecromancerOrbs() {
   if (!player._necromancerOrbs) return;
   const camX = game.camera.x;
@@ -132297,6 +132503,7 @@ function loop(time) {
   drawPlayer();
   drawAegisOrbs();
   drawNecromancerOrbs();   // v0.29.911 — Soul Ward orbs (necromancer)
+  drawHexOrbs();           // v0.30.x — Grand Hex ward orbs (hexmaster)
   drawPet();
   drawClassIdentityHUD();
   drawParticles();
