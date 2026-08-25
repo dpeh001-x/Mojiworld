@@ -9224,7 +9224,7 @@ The sleeping world is listening.</div>
         <span><b style="color:#ffcc44;">★5-8</b> may drop ★</span>
         <span><b style="color:#ff8888;">★8-10</b> dangerous</span>
         <span class="sep">·</span>
-        <span>each ★ = ×1.08 all stats</span>
+        <span>each ★ = ×1.12 the slot's own stat · ×1.08 the rest</span>
       </div>
       <div id="enhance-body">
         <div id="enhance-list"></div>
@@ -9904,7 +9904,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.187';
+const GAME_VERSION = 'v0.30.188';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -19781,7 +19781,10 @@ const SUFFIX_IDS = Object.keys(SUFFIXES);
 // late stars are a climb, not a wall. ★7 sits at 18000 (old 16000) so the
 // curve stays strictly increasing under the 25000 cap above it.
 // Old: [100, 250, 600, 1400, 3200, 7000, 16000, 40000, 90000, 210000] (cum. 368,550; new cum. 149,400).
-const STAR_COSTS    = [100, 400, 1000, 2400, 5500, 12000, 18000, 25000, 35000, 50000];  // v0.26.447 — enhancement cost increased (~2-3x) per user. Old: 50/120/250/500/1200/2500/5000/14000/32000/60000
+// v0.30.x - per user: "reduce the mojicoins requirement slightly". Every rung
+// comes down 15%, so the shape of the curve is untouched and only its height
+// moves: a full 0 -> 10 run costs 127,035 where it cost 149,400.
+const STAR_COSTS    = [85, 340, 850, 2050, 4700, 10200, 15300, 21250, 29750, 42500];  // v0.30.x -15% · v0.26.447 was 100/400/1000/2400/5500/12000/18000/25000/35000/50000
 // v0.25.826 — Exponential enhancement scaling. Old linear curve added
 // a flat +10 % per star; the new curve compounds so each star is
 // meaningfully bigger than the last.
@@ -19807,7 +19810,39 @@ const MAX_STARS     = 10;
 // the odds fall off steeply, so high stars are a real gamble on top of the
 // steep coin cost. ★0→1 95% · ★1→2 87% · ★2→3 79% · ★4→5 63% · ★7→8 39% · ★9→10 23%.
 function starSuccessRate(star) { return Math.max(12, 95 - star * 8); }
+// v0.30.x - A STAR MEANS MOST WHERE THE SLOT MEANS MOST (per user: "weapons -
+// more base attack, armor - more defence, accesory - other miscellaneous
+// stats"). Every star used to multiply every stat on every piece by the same
+// 1.08, so forging a weapon raised its Greed and its Jump exactly as much as
+// its ATK, and a ten-star run never changed what the piece was FOR.
+//
+// One stat family per slot now grows on a steeper curve. 1.12 is not a new
+// number: it is the value STAR_GROWTH itself carried until v0.25.834, when it
+// was cut to 1.08 across the board. This gives that curve back, narrowly - to
+// the stat the slot exists to provide - while everything else on the piece
+// stays exactly where it is. At ★9 the signature stat lands ~44% higher than
+// it does today; nothing else on any item moves at all.
+const STAR_SIG_GROWTH = 1.12;
+// The accessory rule is the complement rather than a list: an accessory is the
+// slot you wear for everything that is not raw ATK or DEF, so its signature is
+// defined by exclusion and a future stat is covered the day it is added.
+function _starSignatureStat(item, k) {
+  if (!item || !k) return false;
+  const slot = (item.slot === 'accessorie') ? 'accessory' : item.slot;   // pre-v0.25.945 saves
+  if (slot === 'weapon')    return k === 'atk';
+  if (slot === 'armor')     return k === 'def';
+  if (slot === 'accessory') return k !== 'atk' && k !== 'def';
+  return false;
+}
+function _starStatMult(item, k) {
+  const st = (item && item.stars) || 0;
+  if (!st) return 1;
+  return Math.pow(_starSignatureStat(item, k) ? STAR_SIG_GROWTH : STAR_GROWTH, st);
+}
+// The flat curve, for the places that still need ONE number for a whole item
+// (the star-bonus label, save-compat helpers). Per-stat truth is _starStatMult.
 function starMult(item)        { return Math.pow(STAR_GROWTH, (item.stars || 0)); }
+function starSigMult(item)     { return Math.pow(STAR_SIG_GROWTH, (item.stars || 0)); }
 // v0.25.826 — Helper used by all UI displays so the per-star bonus
 // percentage stays in sync with starMult() automatically.
 function starBonusPct(stars)   { return Math.round((Math.pow(STAR_GROWTH, stars) - 1) * 100); }
@@ -19843,16 +19878,24 @@ function itemScore(it) {
   // items the engine never actually pays out on. Star still applies to the whole
   // scalable sum, exactly as before — only the tier half is split.
   const tierPctMul = (typeof _tierPctMul === 'function') ? _tierPctMul(it.tier) : 1;
+  // v0.30.x - the star half is split by SIGNATURE as well, for the same reason
+  // v0.29.430 split the tier half: a score that multiplied the whole sum by the
+  // flat 1.08 curve would under-value a forged weapon's ATK and over-value its
+  // trimmings, and auto-equip would chase items the engine does not pay out on.
   let vFlatStat = 0, vPctStat = 0, vNoScale = 0;
+  let vFlatSig = 0, vPctSig = 0;
   for (const k in ITEM_STAT_WEIGHTS) {
     const _w = (it[k] || 0) * ITEM_STAT_WEIGHTS[k];
     if (!_w) continue;
+    const _sig = (typeof _starSignatureStat === 'function') && _starSignatureStat(it, k);
     if ((typeof _AFFIX_NO_SCALE !== 'undefined') && _AFFIX_NO_SCALE.has(k)) vNoScale += _w;
-    else if ((typeof _TIER_FLAT_STATS !== 'undefined') && _TIER_FLAT_STATS.has(k)) vFlatStat += _w;
-    else vPctStat += _w;
+    else if ((typeof _TIER_FLAT_STATS !== 'undefined') && _TIER_FLAT_STATS.has(k)) { if (_sig) vFlatSig += _w; else vFlatStat += _w; }
+    else { if (_sig) vPctSig += _w; else vPctStat += _w; }
   }
   const _clsAff = (it.cls && it.cls !== 'any') ? (it.cls === player.cls ? 1.20 : 0.75) : 1;   // v0.26.1030 — match getEquipBonus so off-class drops aren't mis-scored as upgrades
-  return ((vFlatStat * tierMul + vPctStat * tierPctMul) * starMult(it) + vNoScale) * rarityW * _clsAff;
+  const _sMul = starMult(it), _sSig = (typeof starSigMult === 'function') ? starSigMult(it) : _sMul;
+  return (((vFlatStat * tierMul + vPctStat * tierPctMul) * _sMul
+         + (vFlatSig  * tierMul + vPctSig  * tierPctMul) * _sSig) + vNoScale) * rarityW * _clsAff;
 }
 
 // Pretty labels for gear-change toast
@@ -19871,8 +19914,10 @@ function gearDeltas(oldIt, newIt) {
   const keys = new Set([...Object.keys(oldIt || {}), ...Object.keys(newIt || {})]);
   for (const k of keys) {
     if (!(k in ITEM_STAT_WEIGHTS)) continue;
-    const oldV = ((oldIt && oldIt[k]) || 0) * (oldIt ? starMult(oldIt) : 1);
-    const newV = ((newIt && newIt[k]) || 0) * (newIt ? starMult(newIt) : 1);
+    // v0.30.x - per-stat star curve, so a forged weapon's ATK delta is the one
+    // the engine will actually apply rather than the flat-curve approximation.
+    const oldV = ((oldIt && oldIt[k]) || 0) * (oldIt ? _starStatMult(oldIt, k) : 1);
+    const newV = ((newIt && newIt[k]) || 0) * (newIt ? _starStatMult(newIt, k) : 1);
     const d = newV - oldV;
     if (Math.abs(d) < 0.001) continue;
     deltas.push({ key: k, label: STAT_LABEL[k] || k, delta: d });
@@ -33418,7 +33463,11 @@ function getEquipBonus(key) {
     for (const slot of ['weapon','armor','accessory']) {
       const it = player.equipped[slot];
       if (!it) continue;
-      const mul = starMult(it);
+      // v0.30.x - the star multiplier is resolved PER STAT now (see
+      // _starStatMult), because a weapon's ATK and its Greed no longer grow on
+      // the same curve. Everything downstream of it - the percent-family
+      // softening, the tier curve, the crit cap - is untouched and simply reads
+      // whichever multiplier this key earned.
       // v0.26.273 — Tier multiplier on flat stats only.
       const tMul = _tierMul(it.tier);
       const tPctMul = _tierPctMul(it.tier);   // v0.29.430 — marginal tier curve for % stats
@@ -33451,6 +33500,7 @@ function getEquipBonus(key) {
           // scaling — they are not a magnitude family we want tier touching.
           const _isPct = (typeof _AFFIX_PCT_STATS !== 'undefined' &&
             (_AFFIX_PCT_STATS.has(k) || k === 'hpPct' || k === 'speed'));
+          const mul = _starStatMult(it, k);
           const _pctSoft = _isPct ? (1 + (mul - 1) * 0.35) * tPctMul : mul;
           const _effMul = _noScale ? 1 : (_TIER_FLAT_STATS.has(k) ? mul * tMul : _pctSoft);
           let _contrib = it[k] * _effMul * (_noScale ? 1 : _clsAff);
@@ -93794,8 +93844,12 @@ function renderEnhancementModal(selectedItem) {
         burnResist:'Burn Res', poisonResist:'Poison Res', electricResist:'Electric Res',
         freezeResist:'Freeze Res', slowResist:'Slow Res',
       };
-      const curMul  = Math.pow(STAR_GROWTH, s);
-      const nextMul = Math.pow(STAR_GROWTH, s + 1);
+      // v0.30.x - resolved per stat inside the loop below: this preview is the
+      // one place a player reads what a star is worth to THIS piece, so it has
+      // to show the signature curve rather than the flat one.
+      const _mulFor = (k, n) => Math.pow(
+        (typeof _starSignatureStat === 'function' && _starSignatureStat(selectedItem, k))
+          ? STAR_SIG_GROWTH : STAR_GROWTH, n);
       // v0.26.273 — Tier multiplier composed multiplicatively with the
       // star multiplier for flat stats only. Percent stats pass through
       // unchanged (they hit caps elsewhere).
@@ -93811,8 +93865,8 @@ function renderEnhancementModal(selectedItem) {
         // v0.26.273 — Flat stats get tier mul × star mul; percent stats
         // get star mul only (their caps prevent unbounded scaling).
         const _statMul = _isTierStat(k) ? _tMul : 1;
-        const curVal  = base * curMul  * _statMul;
-        const nextVal = base * nextMul * _statMul;
+        const curVal  = base * _mulFor(k, s)     * _statMul;
+        const nextVal = base * _mulFor(k, s + 1) * _statMul;
         const fmt = (v) => STATS_PCT.has(k) ? `${(v*100).toFixed(1)} %` : (v < 5 ? v.toFixed(1) : Math.round(v));
         const delta = nextVal - curVal;
         const _deltaStr = STATS_PCT.has(k) ? `+${(delta*100).toFixed(1)} %` : (delta < 5 ? `+${delta.toFixed(1)}` : `+${Math.round(delta)}`);
