@@ -77,9 +77,19 @@ const STYLE =
 
 const STATES = {
   idle: {
-    motion: 'The stone golem IDLES in place: it breathes with a slow heavy rock-and-settle, the molten '
-      + 'hammer head pulses brighter and dimmer, its red eyes flicker, and a few embers drift off the '
-      + 'hammer. It does NOT walk, step, turn or swing.',
+    // "the hammer PULSES brighter and dimmer" was read as permission to set the
+    // golem on fire: frames 4-6 of the first idle erupted in flame and sparks,
+    // swinging the silhouette width 1.23x. In a loop that plays constantly that
+    // does not read as a highlight, it reads as the monster throbbing. So the
+    // brief now forbids every kind of flare and asks for almost nothing.
+    motion: 'The stone golem stands STILL and merely BREATHES: a very subtle, slow rise and settle of its '
+      + 'shoulders, and nothing else. Its arms do not move. The hammer is held in the same place the '
+      + 'whole time and does not swing, lift, turn or change. '
+      + 'ABSOLUTELY NO flames, NO fire bursts, NO flare-ups, NO explosions, NO sparks, NO embers, NO '
+      + 'glowing pulses and NO light flashes anywhere in any frame. The lava in the hammer head stays '
+      + 'exactly as bright as it is in every single frame. '
+      + 'It does NOT walk, step, turn, lean or swing. The change between one frame and the next should '
+      + 'be barely perceptible.',
     loop: true,
   },
   walk: {
@@ -240,11 +250,19 @@ async function report(label, bufs) {
   const H = ms.map((m) => m.bodyH);
   const feet = ms.map((m) => m.bodyBottom);
   const swing = Math.max(...H) / Math.min(...H);
+  // SILHOUETTE WIDTH. Body height alone said the first idle was fine at 1.019x
+  // while it was erupting in flame every third frame - the flare is wide, not
+  // tall. Width is what catches it.
+  const Wd = ms.map((m) => m.ink.x1 - m.ink.x0 + 1);
+  const wSwing = Math.max(...Wd) / Math.min(...Wd);
   const border = ms.reduce((a, m) => a + m.border, 0);
   const footSpread = Math.max(...feet) - Math.min(...feet);
   const frac = (Math.max(...H) / ms[0].h);
-  console.log(`  ${label.padEnd(9)} canvas ${ms[0].w}x${ms[0].h}  body ${Math.min(...H)}..${Math.max(...H)} (${(frac * 100).toFixed(1)}% of canvas)  swing ${swing.toFixed(3)}x  feet ${footSpread}px  clipped ${border}`);
-  return { swing, border, footSpread, ok: swing <= 1.05 && border === 0 && footSpread <= 8 };
+  console.log(`  ${label.padEnd(9)} canvas ${ms[0].w}x${ms[0].h}  body ${Math.min(...H)}..${Math.max(...H)} (${(frac * 100).toFixed(1)}% of canvas)  swing ${swing.toFixed(3)}x  width ${wSwing.toFixed(3)}x  feet ${footSpread}px  clipped ${border}`);
+  // Idle and walk must hold their silhouette; a swing set obviously cannot.
+  const wCap = /attack/.test(label) ? 99 : (/walk/.test(label) ? 1.15 : 1.06);
+  return { swing, wSwing, border, footSpread,
+    ok: swing <= 1.05 && border === 0 && footSpread <= 8 && wSwing <= wCap };
 }
 
 if (has('--check')) {
