@@ -9904,7 +9904,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.190';
+const GAME_VERSION = 'v0.30.191';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -41117,6 +41117,14 @@ function _lxPadAxis(pad, which) {
   // moves a hat by more than 0.15, which used to promote it to a trusted stick.
   if (seen.hat) return 0;
   if ((seen.max - seen.min) < _LX_PAD_STICK_TRUST) return 0;   // never moved => not a stick
+  // v0.30.x — nor is a TRIGGER a stick. On the Sony layout the right-stick
+  // indices sit next to L2/R2, which rest at -1 and rise to +1 when pulled.
+  // The range guard above passes them the moment the trigger is used once, and
+  // from then on a resting trigger reads as a stick held hard in one direction
+  // -- the same permanent-input failure as the hat, arriving later. A trigger
+  // never goes below its resting floor, so a range that hugs -1 at the bottom
+  // and has never gone meaningfully negative-from-centre is not a stick.
+  if (seen.min <= -0.95 && seen.max > -0.95 && v <= -0.5) return 0;
   return v;
 }
 function _lxPadForget(padIndex) {
@@ -41137,7 +41145,9 @@ function _lxPadBtn(pad, stdIdx) {
   if (prof) {
     if (stdIdx >= 12 && stdIdx <= 15) {
       const ax = pad.axes || [];
-      return !!_lxPadHat(ax[prof.hat])[stdIdx];
+      // v0.30.x — trust the DETECTED hat over the profile's DualShock-4 guess.
+      const _det = _lxPadHatIndex(pad);
+      return !!_lxPadHat(ax[_det >= 0 ? _det : prof.hat])[stdIdx];
     }
     const mapped = prof.btn[stdIdx];
     if (mapped == null) return false;
@@ -41147,18 +41157,56 @@ function _lxPadBtn(pad, stdIdx) {
   const b = pad.buttons[stdIdx];
   return !!(b && (b.pressed || b.value > 0.5));
 }
-// Prefer a standard-mapped pad, then one we have a profile for, then anything.
-// Steam Input can leave a virtual pad and the physical device both enumerated,
-// and "first connected" is a coin flip between them.
+// v0.30.x — is this pad producing input RIGHT NOW? Buttons are unambiguous.
+// For axes, a value far from centre only counts once that axis has been seen
+// to move, so a trigger resting at -1 (or a hat resting at 3.2857) can never
+// be mistaken for a player holding a stick — which is the same trap the
+// stuck-axis guard in _lxPadAxis exists for.
+function _lxPadHasInput(p) {
+  if (!p) return false;
+  const bs = p.buttons || [];
+  for (let i = 0; i < bs.length; i++) {
+    const b = bs[i];
+    if (b && (b.pressed || b.value > 0.5)) return true;
+  }
+  const ax = p.axes || [];
+  for (let i = 0; i < ax.length; i++) {
+    const v = ax[i];
+    if (typeof v !== 'number' || !isFinite(v)) continue;
+    const seen = _lxPadAxisSeen[(p.index | 0) + ':' + i];
+    if (!seen || seen.hat) continue;
+    if ((seen.max - seen.min) > 0.30 && Math.abs(v) > 0.50) return true;
+  }
+  return false;
+}
+const _lxPadActAt = {};          // pad index -> perf.now() of its last real input
+const _LX_PAD_ACT_WINDOW = 10000;
+// Prefer the pad that is actually being used; then a standard-mapped one; then
+// one we have a profile for; then anything.
+//
+// v0.30.x — the activity term is new and it is the important one. Under Steam's
+// PlayStation Controller Support the physical DualSense and Steam's virtual
+// XInput pad are BOTH enumerated and BOTH standard-mapped, so the previous
+// scoring tied and fell back to enumeration order. Half the time that selects
+// the device the player is not holding, and the pad reads as having no
+// functionality at all.
 function _lxPadPick(pads) {
   let best = null, bestScore = -1;
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   for (let i = 0; i < (pads ? pads.length : 0); i++) {
     const p = pads[i];
     if (!p || !p.connected) continue;
     if (!p.buttons || !p.buttons.length) continue;          // not an input device we can use
+    // Range-track EVERY pad, not just the chosen one: the activity test above
+    // needs to know an axis has moved, and a pad that is never picked would
+    // otherwise never be scanned and so could never win.
+    _lxPadScanAxes(p);
+    if (_lxPadHasInput(p)) _lxPadActAt[p.index | 0] = now;
     let score = 1;
     if (p.mapping === 'standard') score = 3;
     else if (_lxPadProfile(p)) score = 2;
+    const act = _lxPadActAt[p.index | 0];
+    if (act && (now - act) < _LX_PAD_ACT_WINDOW) score += 10;
     if (score > bestScore) { bestScore = score; best = p; }
   }
   return best;

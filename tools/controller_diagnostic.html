@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mojiworld — Controller Diagnostic</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; padding:20px 22px 40px; background:#0e0a18; color:#e8ecff;
+         font:14px/1.5 Inter, "Segoe UI", system-ui, sans-serif; }
+  h1 { font-size:19px; margin:0 0 4px; color:#cbb4ff; }
+  .sub { color:#9990b8; font-size:12.5px; margin:0 0 18px; }
+  .card { background:rgba(255,255,255,0.04); border:1px solid rgba(180,140,255,0.22);
+          border-radius:10px; padding:14px 16px; margin:0 0 14px; }
+  .k { color:#9990b8; }
+  code { background:rgba(0,0,0,0.35); padding:1px 5px; border-radius:4px; color:#ffd479; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { text-align:left; padding:3px 8px; border-bottom:1px solid rgba(255,255,255,0.06); }
+  th { color:#9990b8; font-weight:600; }
+  .bar { height:9px; background:rgba(255,255,255,0.08); border-radius:5px; position:relative; min-width:150px; }
+  .bar i { position:absolute; top:0; bottom:0; background:#7fd8ff; border-radius:5px; }
+  .mid { position:absolute; top:-2px; bottom:-2px; width:1px; left:50%; background:rgba(255,255,255,0.35); }
+  .on { color:#7dff9b; font-weight:700; }
+  .off { color:#5a5470; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:999px; font-size:11px; font-weight:700; }
+  .good { background:rgba(60,180,90,0.22); color:#8dffb0; }
+  .warn { background:rgba(220,150,40,0.20); color:#ffcf7a; }
+  .bad  { background:rgba(220,70,70,0.20); color:#ff9b9b; }
+  button { padding:9px 16px; border-radius:8px; cursor:pointer; background:#4a2a7a; color:#fff;
+           border:1px solid #8a5ac8; font:600 13px Inter, sans-serif; }
+  textarea { width:100%; height:150px; margin-top:10px; background:#07050e; color:#cfe6ff;
+             border:1px solid rgba(180,140,255,0.25); border-radius:8px; padding:10px;
+             font:12px/1.45 ui-monospace, Consolas, monospace; }
+</style>
+</head>
+<body>
+<h1>Controller Diagnostic</h1>
+<p class="sub">Plug the pad in and <b>press every button and move both sticks</b>. Nothing is sent anywhere &mdash;
+use <b>Copy report</b> at the bottom and paste it back into the chat.</p>
+
+<div class="card" id="none">No gamepad seen yet. Press a button on the controller &mdash; browsers hide pads until one is pressed.</div>
+<div id="pads"></div>
+
+<div class="card">
+  <button id="copy">📋 Copy report</button>
+  <span class="k" id="copied" style="margin-left:10px;"></span>
+  <textarea id="out" readonly placeholder="the report appears here"></textarea>
+</div>
+
+<script>
+// What the game needs to know about a pad, and cannot guess reliably:
+//   - id + mapping  : whether Chromium standard-maps it at all
+//   - axis rest/range: which axes are STICKS (rest ~0, swing both ways),
+//                      which are TRIGGERS (rest -1, rise only), and which is
+//                      the HAT (rests outside -1..1, commonly 3.2857)
+//   - button count/order
+// The game's Sony profile hardcodes a DualShock-4 layout; a DualSense differs,
+// and this page is how we find out by how much rather than by guessing.
+const seen = {};   // padIndex:axis -> {min,max,rest}
+function track(p) {
+  (p.axes || []).forEach((v, i) => {
+    if (typeof v !== 'number' || !isFinite(v)) return;
+    const k = p.index + ':' + i;
+    if (!seen[k]) seen[k] = { min: v, max: v, rest: v };
+    if (v < seen[k].min) seen[k].min = v;
+    if (v > seen[k].max) seen[k].max = v;
+  });
+}
+function classify(s) {
+  if (!s) return ['—', ''];
+  if (s.min < -1.05 || s.max > 1.05) return ['HAT (D-pad)', 'good'];
+  const moved = s.max - s.min;
+  if (moved < 0.15) return ['idle — never moved', ''];
+  if (s.rest <= -0.85 && s.min >= -1.05 && s.max > -0.5) return ['TRIGGER (rests -1)', 'warn'];
+  if (Math.abs(s.rest) < 0.3 && s.min < -0.5 && s.max > 0.5) return ['STICK', 'good'];
+  return ['moves, unclear', 'warn'];
+}
+function render() {
+  const pads = [...(navigator.getGamepads ? navigator.getGamepads() : [])].filter(Boolean);
+  document.getElementById('none').style.display = pads.length ? 'none' : '';
+  const host = document.getElementById('pads');
+  let html = '';
+  for (const p of pads) {
+    track(p);
+    const std = p.mapping === 'standard';
+    html += '<div class="card"><div style="margin-bottom:8px;"><span class="tag ' + (std ? 'good' : 'bad') + '">' +
+            (std ? 'standard mapping' : 'NON-standard mapping') + '</span> ' +
+            '<span class="k">index ' + p.index + ' · ' + (p.axes || []).length + ' axes · ' +
+            (p.buttons || []).length + ' buttons</span></div>' +
+            '<div style="margin-bottom:10px;"><code>' + String(p.id).replace(/[<>&]/g, '') + '</code></div>';
+    html += '<table><tr><th style="width:52px;">axis</th><th style="width:70px;">value</th><th>range seen</th><th style="width:150px;">looks like</th></tr>';
+    (p.axes || []).forEach((v, i) => {
+      const s = seen[p.index + ':' + i] || { min: v, max: v };
+      const [what, cls] = classify(s);
+      const pct = Math.max(0, Math.min(100, (v + 1) / 2 * 100));
+      html += '<tr><td>' + i + '</td><td>' + v.toFixed(3) + '</td>' +
+              '<td><div class="bar"><span class="mid"></span><i style="left:' + Math.min(pct, 50) + '%;width:' + Math.abs(pct - 50) + '%"></i></div>' +
+              '<span class="k" style="font-size:11px;">' + s.min.toFixed(2) + ' … ' + s.max.toFixed(2) + '</span></td>' +
+              '<td><span class="tag ' + cls + '">' + what + '</span></td></tr>';
+    });
+    html += '</table><div style="margin-top:10px;" class="k">buttons pressed:</div><div style="font-size:13px;">';
+    (p.buttons || []).forEach((b, i) => {
+      const on = b && (b.pressed || b.value > 0.5);
+      html += '<span class="' + (on ? 'on' : 'off') + '" style="display:inline-block;width:44px;">' + i + (on ? '●' : '·') + '</span>';
+    });
+    html += '</div></div>';
+  }
+  host.innerHTML = html;
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+document.getElementById('copy').onclick = () => {
+  const pads = [...(navigator.getGamepads ? navigator.getGamepads() : [])].filter(Boolean);
+  const rep = pads.map((p) => ({
+    id: p.id, mapping: p.mapping, index: p.index,
+    axisCount: (p.axes || []).length, buttonCount: (p.buttons || []).length,
+    axes: (p.axes || []).map((v, i) => {
+      const s = seen[p.index + ':' + i] || { min: v, max: v };
+      return { i, now: +v.toFixed(3), min: +s.min.toFixed(3), max: +s.max.toFixed(3), looksLike: classify(s)[0] };
+    }),
+    pressedNow: (p.buttons || []).map((b, i) => (b && (b.pressed || b.value > 0.5)) ? i : -1).filter((i) => i >= 0),
+  }));
+  const txt = 'MOJIWORLD CONTROLLER REPORT\nuserAgent: ' + navigator.userAgent + '\n\n' + JSON.stringify(rep, null, 2);
+  document.getElementById('out').value = txt;
+  try { navigator.clipboard.writeText(txt); document.getElementById('copied').textContent = 'copied'; }
+  catch (e) { document.getElementById('copied').textContent = 'select the box and copy'; }
+};
+</script>
+</body>
+</html>
