@@ -56,8 +56,14 @@ const r = await page.evaluate(() => {
     out.grow[slot] = {};
     for (const k of PROBE) out.grow[slot][k] = a[k] > 0 ? +(z[k] / a[k]).toFixed(4) : null;
   }
-  out.expectSig  = +Math.pow(STAR_SIG_GROWTH, 10).toFixed(4);
-  out.expectBase = +Math.pow(STAR_GROWTH, 10).toFixed(4);
+  // The curve is piecewise as of the two-band change: stars above STAR_LATE_FROM
+  // grow on their own steeper factor. Restated here from the thresholds rather
+  // than read back out of _starCurve, so this stays a check and not an echo -
+  // and so the SLOT is still the only variable this file is testing.
+  const band = (g, gl, n) => { const e = Math.min(n, STAR_LATE_FROM);
+    return Math.pow(g, e) * Math.pow(gl, n - e); };
+  out.expectSig  = +band(STAR_SIG_GROWTH, STAR_SIG_LATE_GROWTH, 10).toFixed(4);
+  out.expectBase = +band(STAR_GROWTH, STAR_LATE_GROWTH, 10).toFixed(4);
 
   // What the forge itself shows the player for a weapon: the ATK row must
   // advance further than the DEF row for identical base values.

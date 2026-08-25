@@ -9224,7 +9224,7 @@ The sleeping world is listening.</div>
         <span><b style="color:#ffcc44;">★5-8</b> may drop ★</span>
         <span><b style="color:#ff8888;">★8-10</b> dangerous</span>
         <span class="sep">·</span>
-        <span>each ★ = ×1.12 the slot's own stat · ×1.08 the rest</span>
+        <span>each ★ = ×1.12 the slot's own stat · ×1.08 the rest · ★8+ ×1.20 / ×1.15</span>
       </div>
       <div id="enhance-body">
         <div id="enhance-list"></div>
@@ -9904,7 +9904,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.189';
+const GAME_VERSION = 'v0.30.190';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -19809,7 +19809,26 @@ const MAX_STARS     = 10;
 // (a flat 70% even on the first star). Now early stars are near-guaranteed and
 // the odds fall off steeply, so high stars are a real gamble on top of the
 // steep coin cost. ★0→1 95% · ★1→2 87% · ★2→3 79% · ★4→5 63% · ★7→8 39% · ★9→10 23%.
-function starSuccessRate(star) { return Math.max(12, 95 - star * 8); }
+// v0.30.x - THE ODDS BREAK AT SIX (per user: "the fail rate should be higher
+// after level 6 of enhancement"). The old curve was a single straight line, 8
+// points of success per star all the way up, so the last rungs were just more
+// of the same slope. From the ★6 attempt onward it falls 10 a star instead.
+// The two halves meet exactly at star 5 (95 - 40 = 55), so nothing below six
+// moves by a single point and the change is entirely where the user put it.
+//
+//   attempt   ★0  ★1  ★2  ★3  ★4  ★5  ★6  ★7  ★8  ★9
+//   was       95  87  79  71  63  55  47  39  31  23
+//   now       95  87  79  71  63  55  45  35  25  15
+//
+// Every rung still clears the 12% floor, so the pity system (+6% a failure,
+// capped +30%) remains the thing that carries a long grind rather than the
+// floor doing it - at ★9 that is 15% climbing to 45%.
+const STAR_RISK_FROM = 6;   // the first attempt on the steeper half
+function starSuccessRate(star) {
+  const st = star | 0;
+  if (st < STAR_RISK_FROM) return Math.max(12, 95 - st * 8);
+  return Math.max(12, (95 - (STAR_RISK_FROM - 1) * 8) - (st - (STAR_RISK_FROM - 1)) * 10);
+}
 // v0.30.x - A STAR MEANS MOST WHERE THE SLOT MEANS MOST (per user: "weapons -
 // more base attack, armor - more defence, accesory - other miscellaneous
 // stats"). Every star used to multiply every stat on every piece by the same
@@ -19823,6 +19842,27 @@ function starSuccessRate(star) { return Math.max(12, 95 - star * 8); }
 // stays exactly where it is. At ★9 the signature stat lands ~44% higher than
 // it does today; nothing else on any item moves at all.
 const STAR_SIG_GROWTH = 1.12;
+// v0.30.x - AND IT PAYS BETTER PAST SEVEN (per user: "after level 7 enhancement
+// adds more increased value to stat"). Stars 8, 9 and 10 grow on a steeper
+// curve than the seven below them, so the deep end of the forge is worth the
+// odds it now asks for.
+//
+// The two thresholds are deliberately one apart, and that gap is the design:
+// risk rises at six, reward rises at seven, so ★6→★7 is the rung you pay for
+// with nothing extra in hand - the wall you have to want to cross - and ★8
+// onward is where crossing it starts paying. A ★10 signature stat lands at
+// x3.82 where it was x3.11, and an ordinary stat at x2.61 where it was x2.16.
+const STAR_LATE_FROM = 7;          // stars ABOVE this grow on the late curve
+const STAR_LATE_GROWTH = 1.15;     // ordinary stats, stars 8-10
+const STAR_SIG_LATE_GROWTH = 1.20; // the slot's own stat, stars 8-10
+// One curve, so every reader of it - the engine, the score, the forge preview,
+// the star-bonus label - cannot drift from each other.
+function _starCurve(growth, lateGrowth, stars) {
+  const st = Math.max(0, stars | 0);
+  if (!st) return 1;
+  const early = Math.min(st, STAR_LATE_FROM);
+  return Math.pow(growth, early) * Math.pow(lateGrowth, st - early);
+}
 // The accessory rule is the complement rather than a list: an accessory is the
 // slot you wear for everything that is not raw ATK or DEF, so its signature is
 // defined by exclusion and a future stat is covered the day it is added.
@@ -19837,15 +19877,17 @@ function _starSignatureStat(item, k) {
 function _starStatMult(item, k) {
   const st = (item && item.stars) || 0;
   if (!st) return 1;
-  return Math.pow(_starSignatureStat(item, k) ? STAR_SIG_GROWTH : STAR_GROWTH, st);
+  return _starSignatureStat(item, k)
+    ? _starCurve(STAR_SIG_GROWTH, STAR_SIG_LATE_GROWTH, st)
+    : _starCurve(STAR_GROWTH, STAR_LATE_GROWTH, st);
 }
 // The flat curve, for the places that still need ONE number for a whole item
 // (the star-bonus label, save-compat helpers). Per-stat truth is _starStatMult.
-function starMult(item)        { return Math.pow(STAR_GROWTH, (item.stars || 0)); }
-function starSigMult(item)     { return Math.pow(STAR_SIG_GROWTH, (item.stars || 0)); }
+function starMult(item)        { return _starCurve(STAR_GROWTH, STAR_LATE_GROWTH, (item.stars || 0)); }
+function starSigMult(item)     { return _starCurve(STAR_SIG_GROWTH, STAR_SIG_LATE_GROWTH, (item.stars || 0)); }
 // v0.25.826 — Helper used by all UI displays so the per-star bonus
 // percentage stays in sync with starMult() automatically.
-function starBonusPct(stars)   { return Math.round((Math.pow(STAR_GROWTH, stars) - 1) * 100); }
+function starBonusPct(stars)   { return Math.round((_starCurve(STAR_GROWTH, STAR_LATE_GROWTH, stars) - 1) * 100); }
 
 // Item power score — higher = better. Used for auto-equip comparison.
 const ITEM_STAT_WEIGHTS = {
@@ -93847,9 +93889,10 @@ function renderEnhancementModal(selectedItem) {
       // v0.30.x - resolved per stat inside the loop below: this preview is the
       // one place a player reads what a star is worth to THIS piece, so it has
       // to show the signature curve rather than the flat one.
-      const _mulFor = (k, n) => Math.pow(
+      const _mulFor = (k, n) =>
         (typeof _starSignatureStat === 'function' && _starSignatureStat(selectedItem, k))
-          ? STAR_SIG_GROWTH : STAR_GROWTH, n);
+          ? _starCurve(STAR_SIG_GROWTH, STAR_SIG_LATE_GROWTH, n)
+          : _starCurve(STAR_GROWTH, STAR_LATE_GROWTH, n);
       // v0.26.273 — Tier multiplier composed multiplicatively with the
       // star multiplier for flat stats only. Percent stats pass through
       // unchanged (they hit caps elsewhere).
