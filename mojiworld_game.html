@@ -9904,7 +9904,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.220';
+const GAME_VERSION = 'v0.30.221';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -120675,7 +120675,33 @@ function _monsterStateFrame(m) {
   // v0.26.351 — record the current frame state so the renderer can apply the
   // per-type attack-frame box scale (padded swing/smash frames) to the attack
   // state only — never to idle/walk.
-  m._frameIsAttack = !!attacking;
+  // v0.30.x — THE FLAG MUST DESCRIBE THE FRAME, NOT THE INTENT.
+  //
+  // Per user: "forgewight and smithgolem suddenly have frames in which the
+  // subject monster becomes significantly large".
+  //
+  // Seven mob types author padded swing frames and the renderer corrects for
+  // the padding with _ATK_FRAME_SCALE — a per-type box multiplier of 1.6x to
+  // 2.3x, applied whenever this flag is set. It is only ever safe to apply to
+  // an ATTACK frame, because only those frames are padded.
+  //
+  // This line used to read '!!attacking', which is the INTENT. The frame
+  // returned below needs more than that: the v0.30.x "walk outranks the
+  // incidental attack pose" rule hands back a WALK frame when the mob is
+  // moving, even while attacking. Walk frames are authored at full size, so the
+  // multiplier landed on art that never needed it and the mob rendered at
+  // roughly twice its size — 2.327x for forgewight, 1.881x for the smith golem.
+  //
+  // It only fires when an attack window overlaps real movement, which is why it
+  // looks intermittent rather than broken: the PROXIMITY path cannot cause it
+  // (it is itself gated on !_mobWalking), so the way in is a contact hit
+  // stamping atkAnimUntil for 650 ms while the mob keeps chasing. Measured on a
+  // chasing pair with that stamp applied: 23.3% of forgewight frames and 25.9%
+  // of smith-golem frames drew at the inflated size.
+  //
+  // The condition below is now identical to the one guarding the attack-frame
+  // return, so the flag and the frame can no longer disagree.
+  m._frameIsAttack = !!attacking && !(typeof _mobWalking === 'function' && _mobWalking(m));
   // v0.29.293 — MOB SHRINK BASE. These sets were flowing through the boss
   // getters with the boss default (720 logical -> an 828 px cap at DPR 1), and
   // monster art is authored 709-850 px square — just UNDER that cap, so not a
