@@ -201,9 +201,9 @@ window.LX_ANIM_CALIB = {
       "dy": 0.02
     },
     "attack": {
-      "s": 1.6,
-      "dx": 0,
-      "dy": 0.01
+      "s": 1.94,
+      "dx": 0.025,
+      "dy": 0.095
     }
   },
   "gravitos2": {

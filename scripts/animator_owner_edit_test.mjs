@@ -81,6 +81,7 @@ const R = await page.evaluate(async () => {
   } catch (e) {}
   const btn = document.getElementById('copycur');
   if (btn) { btn.click(); await new Promise(r => setTimeout(r, 400)); }
+  out.ownerHbStates = Object.keys((A.HBX()[A.ownerOf('aetherionastral')]) || {}).length;
   out.patchRaw = copied;
   try { out.patch = copied ? JSON.parse(copied) : null; } catch (e) { out.patch = null; }
   return out;
@@ -93,7 +94,7 @@ const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined 
 console.log(`  ownerOf('aetherionastral') = ${R.owner}   ownerOf('king') = ${R.selfOwner}`);
 console.log(`  astral slider -> owner ${R.astral && R.astral.onOwner}, self ${R.astral && R.astral.onSelf}`);
 console.log(`  king  slider -> owner ${R.king && R.king.onOwner}, self ${R.king && R.king.onSelf}`);
-console.log(`  patch type: ${R.patch && R.patch.type}`);
+console.log(`  patch type: ${R.patch && R.patch.type}  calib states ${R.patch && R.patch.calib ? Object.keys(R.patch.calib).length : 0}  hitbox states ${R.patch && R.patch.hitbox ? Object.keys(R.patch.hitbox).length : 0} (owner has ${R.ownerHbStates})`);
 
 ok('ownerOf is exposed to the controls layer', R.ownerExported,
    'without it the edit path cannot know which entity it is really editing');
@@ -109,6 +110,13 @@ ok('the copy-patch names the OWNER', !!(R.patch && R.patch.type === 'aetherion')
 ok('...and carries a full calib block, not a partial one',
    !!(R.patch && R.patch.calib && Object.keys(R.patch.calib).length >= 2),
    `${R.patch && R.patch.calib ? Object.keys(R.patch.calib).length : 0} states — the baker replaces the block, so a partial one would drop the rest`);
+// This one is not hypothetical. The first version read calib from the owner but
+// HITBOXES from the selected set: aetherionastral has none, so the patch carried
+// no hitbox block, and the baker's "removed when absent" rule then deleted all
+// three of Aetherion's authored hitboxes when the patch was applied for real.
+ok('...and the OWNER hitboxes, so baking cannot delete them',
+   !!(R.patch && R.patch.hitbox && Object.keys(R.patch.hitbox).length >= 3),
+   `${R.patch && R.patch.hitbox ? Object.keys(R.patch.hitbox).length : 0} hitbox states in the patch; the owner has ${R.ownerHbStates} — absent means DELETED at bake time`);
 ok('CONTROL: no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
 
 let bad = 0;
