@@ -24,6 +24,17 @@ const FRAMES = 9, SIZE = 768;
 const HOLD = ' The effect stays CENTRED in frame throughout — no drifting, no camera move, no new objects entering, ' +
   'and nothing is cropped at the edges. Fully transparent background, consistent art style across every frame.';
 
+// v0.30.x — framing stated in terms of the BODY, not "the effect". The shared
+// HOLD line says the effect stays centred and uncropped, which the animator read
+// as being about the flames while it pushed the camera into the character. This
+// names the two extremes that must survive — the top of the head and the soles
+// of the feet — and forbids the specific move that broke both Gravitos-3 sets.
+const FULLBODY = ' FRAMING, and this matters more than anything else: the ENTIRE figure stays inside the frame in ' +
+  'every single frame, from the tips of the horns down to the soles of the feet and out to both wingtips. The ' +
+  'camera does NOT push in, zoom, crop or move closer across the sequence - it is locked off. The character ' +
+  'occupies the same fraction of the frame in the last image as in the first, with the same empty margin around ' +
+  'him. Never a close-up, never cropped at any edge.';
+
 const TARGETS = {
   comet: { base: 'Sprites/projectiles/p_comet.webp', dir: 'Sprites/projectiles/anim',
     motion: 'The comet hurtles forward: its burning tail streams and flickers behind it, the icy core pulses brighter and dimmer, ' +
@@ -149,6 +160,37 @@ const TARGETS = {
       'The anvil itself does NOT move, tip, break apart or change shape - it is the same anvil in the same ' +
       'position in every frame, seen from the same angle; only the glow, the cracks, the smoke and the embers ' +
       'change. Keep the smoke SMALL and close to the anvil - no towering plume, no face in the smoke.' },
+  // v0.30.x - GRAVITOS FORM 3, both cast sets rebuilt from their own bases.
+  // Two different faults. The punch set had drifted OFF-MODEL: the base is a
+  // four-armed winged demon and the shipped frames show a TWO-armed figure with
+  // one wing swung round - a different character mid-attack. The soul set is
+  // on-model but barely moves across a 1,900 ms channel, so the boss reads as
+  // frozen exactly when it is supposed to be drawing power out of you.
+  //
+  // Both prompts carry the same two hard constraints, because the engine owns
+  // the boss's position and size: FOUR arms and BOTH wings in every frame, and
+  // no drifting or rescaling - only the pose changes.
+  gravitos3punch: { base: 'Sprites/bosses/gravitos3punch.webp', dir: 'Sprites/bosses/attack', pad: 0.35,
+    motion: 'This four-armed winged demon throws a single colossal PUNCH, and the nine frames are one strike ' +
+      'from beginning to end. Frames 1-3: he plants, hauls his upper fists back and low, shoulders coiling, ' +
+      'the round golden core in his chest flaring brighter and the red lava veins running hotter. Frames 4-6: ' +
+      'the strike is thrown - the upper fists drive FORWARD and DOWN toward the viewer, the body torquing behind ' +
+      'them, flame tearing off the knuckles. Frames 7-9: the blow has landed and he HOLDS there, fists extended, ' +
+      'chest core at its brightest, fire still streaming off him. He keeps ALL FOUR arms and BOTH wings in every ' +
+      'single frame - the lower pair of arms stays braced at his sides, the wings stay spread behind him. He does ' +
+      'NOT step, walk, turn around, shrink, grow or drift across the frame, and he never becomes a two-armed ' +
+      'figure. Same demon, same size, same place - only the pose moves.' + FULLBODY },
+  gravitos3soul: { base: 'Sprites/bosses/gravitos3soul.webp', dir: 'Sprites/bosses/attack',
+    motion: 'This four-armed winged demon stands his ground and CHANNELS, dragging the life out of everything ' +
+      'around him. He is rooted - both feet planted, never taking a step. What builds across the nine frames is ' +
+      'power: the round golden core in his chest swells and burns from a dull ember to a blinding white-gold ' +
+      'sun, the red lava veins across his armour brighten and pulse outward from it, and the white-and-red flame ' +
+      'around his body grows taller and streams upward. His four arms spread wider and lift, clawed fists ' +
+      'opening as if pulling something invisible toward him, and his wings flare open wider behind him. Thin ' +
+      'ribbons of stolen red energy spiral inward toward the chest core. The LAST frame is the peak of the ' +
+      'channel and must be a strong sustained pose, because it is held. He keeps ALL FOUR arms and BOTH wings ' +
+      'in every frame, and does NOT step, walk, turn, shrink, grow or drift - same demon, same size, same ' +
+      'place, only the pose and the light change.' + FULLBODY },
 };
 
 const only = val('--only', null);
@@ -201,8 +243,26 @@ for (const k of keys) {
   if (!existsSync(basePath)) { console.log('SKIP ' + k + ' — base missing: ' + t.base); continue; }
   const outDir = join(OUT_ROOT, k);
   await mkdir(outDir, { recursive: true });
+  // v0.30.x — HEADROOM AGAINST A CAMERA PUSH. `pad` extends the base canvas with
+  // transparent margin on every side before it is sent. The animator has a habit
+  // of drifting the camera IN across a sequence, and on a tall full-body
+  // character that crops the legs and wingtips clean off — measured on both
+  // Gravitos-3 cast sets, where frame 0 was perfect and frame 5 was a chest-up
+  // close-up with the feet gone. Prompt wording alone did not hold it. Margin
+  // does: a zoom of up to (1 + 2*pad) still lands inside the frame. It costs
+  // nothing downstream because fitFramesToBase re-maps the finished frames onto
+  // the base's own box, so the padding is normalised straight back out.
+  const _padded = await (async () => {
+    const raw = await readFile(basePath);
+    const p = +t.pad || 0;
+    if (!(p > 0)) return raw;
+    const m = await sharp(raw).metadata();
+    const dx = Math.round(m.width * p), dy = Math.round(m.height * p);
+    return sharp(raw).extend({ top: dy, bottom: dy, left: dx, right: dx,
+      background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+  })();
   const uri = 'data:image/png;base64,' +
-    (await sharp(await readFile(basePath)).resize(990, 990, { fit: 'inside', withoutEnlargement: true }).png().toBuffer()).toString('base64');
+    (await sharp(_padded).resize(990, 990, { fit: 'inside', withoutEnlargement: true }).png().toBuffer()).toString('base64');
   let done = false, last;
   for (let attempt = 1; attempt <= 3 && !done; attempt++) {
     try {
@@ -220,10 +280,27 @@ for (const k of keys) {
       // render visibly smaller than the static sprite they replace — a size pop
       // the instant the animation takes over.
       const _bm = await sharp(basePath).metadata();
+      // v0.30.x — UNDO THE PADDING. `pad` bought headroom against a camera push
+      // by sending a base with transparent margin; the frames come back with the
+      // character sitting in that same smaller fraction of the canvas. Cropping
+      // the identical fraction back out restores the base's framing exactly, so
+      // the margin never reaches the sprite sheet and fitFramesToBase downstream
+      // sees inputs the size it has always seen.
+      const _unpad = async (buf) => {
+        const p = +t.pad || 0;
+        if (!(p > 0)) return buf;
+        const m = await sharp(buf).metadata();
+        const keep = 1 / (1 + 2 * p);
+        const w = Math.round(m.width * keep), h = Math.round(m.height * keep);
+        return sharp(buf).extract({
+          left: Math.round((m.width - w) / 2), top: Math.round((m.height - h) / 2),
+          width: w, height: h,
+        }).png().toBuffer();
+      };
       const _written = [];
       for (let i = 0; i < FRAMES; i++) {
         const _f = join(outDir, `${k}_${i}.webp`);
-        await writeFile(_f, await normalise(bufs[i], _bm.width, _bm.height));
+        await writeFile(_f, await normalise(await _unpad(bufs[i]), _bm.width, _bm.height));
         _written.push(_f);
       }
       console.log(`OK — ${FRAMES} frames`);
