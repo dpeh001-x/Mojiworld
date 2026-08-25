@@ -134,6 +134,21 @@ const TARGETS = {
       'move across the frame - hold that extended leaping pose the whole way through. What moves is the mane ' +
       'streaming and rippling back, the tail lashing, the claws flexing, and a few sparks of sun-fire trailing ' +
       'off his mane. A continuous seamless loop that ends exactly as it began.' },
+  // v0.30.x - THE FAILED FORGE, REBUILT FROM THE SUCCESS ANVIL (per user:
+  // "when regenerating the ludo.ai for failure animation use the success sprite
+  // anvil as the base sprite"). The shipped fail set was drawn from a different
+  // anvil entirely - lighter, chunkier, wearing a big cartoon smoke face - so
+  // the two outcomes of the same action did not look like the same forge, and
+  // the smoke plume was tall enough to cover the modal's own title. Same anvil,
+  // same framing, only the outcome differs.
+  forge_fail: { base: 'Sprites/fx/forge_success.webp', dir: 'Sprites/fx/anim',
+    motion: 'A hammer blow lands on this anvil and the work FAILS. The bright molten glow along the anvil\'s top ' +
+      'face flares white-hot for an instant, then gutters down to a dull dying red and goes out. Hairline cracks ' +
+      'spread across the anvil face and darken. A short plume of grey smoke rises straight up from the anvil top ' +
+      'and thins away, and a scatter of orange embers is thrown out sideways and falls, fading as they drop. ' +
+      'The anvil itself does NOT move, tip, break apart or change shape - it is the same anvil in the same ' +
+      'position in every frame, seen from the same angle; only the glow, the cracks, the smoke and the embers ' +
+      'change. Keep the smoke SMALL and close to the anvil - no towering plume, no face in the smoke.' },
 };
 
 const only = val('--only', null);

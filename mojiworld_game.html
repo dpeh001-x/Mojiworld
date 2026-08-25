@@ -7147,6 +7147,64 @@
     35%      { box-shadow: 0 0 40px rgba(255,80,80,0.85), inset 0 0 80px rgba(255,40,40,0.2); }
   }
 
+  /* v0.30.x - THE FAILURE CARD (per user: "Failure on enhancement is very
+     slipshod unlike success that has a message that popups"). A win threw a
+     full-screen card with a heading, the star bar, the item name and a line of
+     Brok's voice; a loss threw a toast that was gone in two seconds. Same
+     overlay, same shape, cooled from gold to ash - so the two outcomes of the
+     same action are told with the same weight. */
+  #enhance-celebration.fail::before {
+    background: radial-gradient(ellipse at center,
+      rgba(255, 90, 70, 0.14) 0%,
+      rgba(30, 12, 26, 0.72) 45%,
+      rgba(8,   3, 10, 0.90) 100%);
+  }
+  #enhance-celebration.fail .ec-shaft { display: none; }   /* no shaft of light for a failure */
+  #enhance-celebration.fail .ec-card {
+    background: linear-gradient(180deg, rgba(52, 22, 30, 0.96), rgba(18, 8, 14, 0.96));
+    border-color: #c25a5a;
+    box-shadow:
+      0 0 40px rgba(220, 70, 60, 0.35),
+      0 0 80px rgba(120, 30, 30, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      inset 0 -2px 0 rgba(0, 0, 0, 0.60);
+  }
+  #enhance-celebration.fail .ec-heading {
+    /* background-IMAGE, not the `background` shorthand: the shorthand resets
+       background-clip back to border-box, and the base rule's clip:text is
+       declared earlier, so overriding with the shorthand painted the gradient
+       as a solid bar with the letters knocked out transparent. The screenshot
+       check is what caught it - every DOM assertion was already green. */
+    background-image: linear-gradient(110deg, #8e6b6b 0%, #d99a90 40%, #f3ded6 50%, #d99a90 60%, #8e6b6b 100%);
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    filter: drop-shadow(0 0 10px rgba(220, 90, 70, 0.45));
+  }
+  #enhance-celebration.fail .ec-stars { text-shadow: 0 0 10px rgba(220, 90, 70, 0.50); }
+  #enhance-celebration.fail .ec-name  { color: #e6c0b4; }
+  /* Embers FALL and cool, where the win's confetti bursts upward and spins. */
+  #enhance-celebration.fail .ec-confetti span {
+    top: 38%;
+    border-radius: 50%;
+    animation-name: ecEmber;
+    animation-duration: 1.6s;
+  }
+  @keyframes ecEmber {
+    0%   { opacity: 0; transform: translate(0, 0) scale(1); }
+    10%  { opacity: 1; }
+    100% { opacity: 0; transform: translate(var(--xend, 0px), 220px) scale(0.4); }
+  }
+  /* The pity bonus is real, useful information that only ever lived in the
+     toast that vanished. It belongs on the card. */
+  #enhance-celebration .ec-pity {
+    margin-top: 10px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    color: #ffcf8a;
+  }
+
   /* Polished enhance-item card (selected state) */
   .enhance-item {
     position: relative;
@@ -9203,6 +9261,7 @@ The sleeping world is listening.</div>
           <div class="ec-stars" id="ec-stars"></div>
           <div class="ec-name" id="ec-name"></div>
           <div class="ec-flavor" id="ec-flavor"></div>
+          <div class="ec-pity" id="ec-pity"></div>
         </div>
       </div>
     </div>
@@ -9845,7 +9904,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.184';
+const GAME_VERSION = 'v0.30.185';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -93070,6 +93129,22 @@ function _classBadgeHtml(it) {
 // #enhance-forge-fx overlay, then hides it. Frames preloaded on first use so
 // the play is smooth; silent no-op if the overlay/frames are absent.
 let _forgeFxTimer = null;
+// v0.30.x - the anvil animation's length, in one place. The result card is
+// held until the animation finishes, so the two cannot be read off separate
+// magic numbers and drift apart. Both are now centred in the modal, so showing
+// them at once would put the card on top of the anvil.
+const _FORGE_FX_FRAMES = 9, _FORGE_FX_FRAME_MS = 70;
+const _FORGE_FX_MS = _FORGE_FX_FRAMES * _FORGE_FX_FRAME_MS;
+// Runs `fn` once the anvil has finished, and only if the forge is still open -
+// a player who closes the modal mid-swing must not have a card waiting for them
+// the next time they walk up to it.
+function _afterForgeFx(fn) {
+  setTimeout(() => {
+    const m = document.getElementById('enhance-modal');
+    if (!m || m.style.display === 'none' || m.style.display === '') return;
+    try { fn(); } catch (e) {}
+  }, _FORGE_FX_MS);
+}
 const _forgeFxPreloaded = {};
 function _preloadForgeFx(kind) {
   if (_forgeFxPreloaded[kind]) return;
@@ -93101,12 +93176,16 @@ function _playForgeFxAnim(kind) {
     el.style.zIndex = '600';                               // above --moji-z-toast (400)
     el.style.width = sz + 'px';
     el.style.height = sz + 'px';
-    el.style.left = Math.round(r.left + r.width / 2 - sz / 2 + 10) + 'px';   // centred + 10px right
-    el.style.top  = Math.round(r.top) + 'px';                                // over the header
+    // v0.30.x - CENTRED, both axes (per user: "central positioning of the
+    // animation"). It was pinned to the top of the modal and nudged 10px right,
+    // which put a smoking anvil squarely over the modal's own title - the user's
+    // screenshot shows "Enhan____Forge" with the middle of the word behind smoke.
+    el.style.left = Math.round(r.left + r.width / 2 - sz / 2) + 'px';
+    el.style.top  = Math.round(r.top + r.height / 2 - sz / 2) + 'px';
     el.style.transform = 'none';
     el.style.backgroundSize = 'contain';
     el.style.backgroundRepeat = 'no-repeat';
-    el.style.backgroundPosition = 'center top';
+    el.style.backgroundPosition = 'center center';
     el.style.pointerEvents = 'none';
     el.style.filter = 'drop-shadow(0 0 18px rgba(255,200,90,0.45))';
   }
@@ -93124,9 +93203,9 @@ function _playForgeFxAnim(kind) {
   el.style.backgroundImage = 'url("' + base + '0.webp")';
   _forgeFxTimer = setInterval(() => {
     f++;
-    if (f > 8) { clearInterval(_forgeFxTimer); _forgeFxTimer = null; _restore(); return; }
+    if (f > _FORGE_FX_FRAMES - 1) { clearInterval(_forgeFxTimer); _forgeFxTimer = null; _restore(); return; }
     el.style.backgroundImage = 'url("' + base + f + '.webp")';
-  }, 70);
+  }, _FORGE_FX_FRAME_MS);
 }
 function _playForgeAnim(kind) {
   const modal  = document.getElementById('enhance-modal');
@@ -93148,6 +93227,18 @@ function _playForgeAnim(kind) {
 // stars (★5 / ★8 / ★10): rainbow border, sustained particles, bigger
 // heading text. The card auto-hides via setTimeout; clicking anywhere
 // inside the overlay also dismisses early.
+// v0.30.x - ONE PENDING DISMISS AT A TIME. Both result cards armed a
+// setTimeout to hide themselves and nothing ever cancelled it, so forging
+// twice in quick succession let the FIRST card's timer fire on top of the
+// SECOND card and blank it early - the new result flashing up and vanishing
+// for no reason the player could see. Caught as an intermittent red in
+// forge_failure_card_test.mjs, which is exactly what it would look like in
+// the hands of someone spamming the anvil.
+let _ecDismissTimer = null;
+function _ecArmDismiss(fn, ms) {
+  if (_ecDismissTimer) { clearTimeout(_ecDismissTimer); _ecDismissTimer = null; }
+  _ecDismissTimer = setTimeout(() => { _ecDismissTimer = null; fn(); }, ms);
+}
 function _showEnhanceCelebration(item, newStars) {
   const el = document.getElementById('enhance-celebration');
   if (!el) return;
@@ -93184,6 +93275,11 @@ function _showEnhanceCelebration(item, newStars) {
     flavor.innerHTML = '<i>A milestone. Steel and intent meet in the middle, and the gear answers.</i>';
   else
     flavor.innerHTML = '<i>Brok strikes the anvil, the metal glows, and the gear holds the new weight.</i>';
+  // v0.30.x - the failure card shares this DOM, so its state has to be cleared
+  // or a win right after a loss inherits the ash palette and the stale pity line.
+  el.classList.remove('fail');
+  const _pitySucc = document.getElementById('ec-pity');
+  if (_pitySucc) _pitySucc.textContent = '';
   // Set milestone class for the rainbow border treatment.
   el.classList.remove('milestone');
   if (isMilestone || isMax) el.classList.add('milestone');
@@ -93213,7 +93309,76 @@ function _showEnhanceCelebration(item, newStars) {
     confetti.innerHTML = '';   // free the DOM nodes
   };
   el.addEventListener('click', _dismiss, { once: true });
-  setTimeout(_dismiss, isMax ? 3000 : isMilestone ? 2600 : 2200);
+  _ecArmDismiss(_dismiss, isMax ? 3000 : isMilestone ? 2600 : 2200);
+}
+
+// v0.30.x - THE FAILURE CARD (per user: "Failure on enhancement is very slipshod
+// unlike success that has a message that popups"). Deliberately the same shape
+// as _showEnhanceCelebration and driven off the same DOM: a heading, the star
+// bar, the item's name, a line in Brok's voice, and - new to both - the pity
+// bonus, which is the single most useful thing the game can tell you at the
+// moment you have just lost a forge and are deciding whether to go again.
+function _showEnhanceFailure(item, opts) {
+  const el = document.getElementById('enhance-celebration');
+  if (!el) return;
+  const o = opts || {};
+  const heading = document.getElementById('ec-heading');
+  const stars   = document.getElementById('ec-stars');
+  const name    = document.getElementById('ec-name');
+  const flavor  = document.getElementById('ec-flavor');
+  const pity    = document.getElementById('ec-pity');
+  const confetti = document.getElementById('ec-confetti');
+  const now = item.stars | 0;
+  const lost = !!o.lostStar;
+  if (heading) heading.textContent = lost ? '\u2715 THE METAL BREAKS \u2715' : '\u2715 THE STRIKE FAILS \u2715';
+  // Same 10-star bar the win uses, so the two read against each other at a
+  // glance. A star that was just lost is drawn in its old slot, in ember red,
+  // rather than silently disappearing.
+  if (stars) {
+    let bar = '';
+    for (let i = 1; i <= 10; i++) {
+      const filled = i <= now;
+      const justLost = lost && i === now + 1;
+      const col = justLost ? '#ff7766' : filled ? '#c9a86a' : '#3a2c4a';
+      const glow = justLost ? 'text-shadow:0 0 14px #ff5544;' : '';
+      bar += '<span style="color:' + col + '; ' + glow + '">' + (filled ? '\u2605' : '\u2606') + '</span>';
+    }
+    stars.innerHTML = bar;
+  }
+  if (name) name.textContent = item.name || 'Item';
+  if (flavor) {
+    flavor.innerHTML = lost
+      ? '<i>The hammer falls wrong. A star\u2019s worth of work goes back into the fire, and Brok says nothing at all.</i>'
+      : '<i>Brok lifts the hammer, studies the seam, and shakes his head. The metal is not ready \u2014 but it remembers the attempt.</i>';
+  }
+  if (pity) pity.textContent = (o.pity > 0)
+    ? ('Next attempt on this piece: +' + o.pity + '% success')
+    : '';
+  el.classList.remove('milestone');
+  el.classList.add('fail');
+  // Embers, not confetti: fewer, rounder, and they fall.
+  if (confetti) {
+    const cols = ['#ff8844', '#ff5533', '#c9662e', '#ffb066'];
+    let html = '';
+    for (let i = 0; i < 22; i++) {
+      const xend = (Math.random() - 0.5) * 300;
+      const delay = Math.floor(Math.random() * 500);
+      const col = cols[Math.floor(Math.random() * cols.length)];
+      const d = 4 + Math.floor(Math.random() * 5);
+      html += '<span style="--xend:' + xend + 'px; --delay:' + delay + 'ms; --color:' + col
+        + '; width:' + d + 'px; height:' + d + 'px; left:' + (48 + (Math.random() - 0.5) * 34) + '%;"></span>';
+    }
+    confetti.innerHTML = html;
+  }
+  el.classList.add('go');
+  const _dismiss = () => {
+    el.classList.remove('go');
+    el.classList.remove('fail');
+    if (confetti) confetti.innerHTML = '';
+    if (pity) pity.textContent = '';
+  };
+  el.addEventListener('click', _dismiss, { once: true });
+  _ecArmDismiss(_dismiss, lost ? 2600 : 2000);
 }
 
 function attemptEnhance(item) {
@@ -93261,8 +93426,12 @@ function attemptEnhance(item) {
     // so the anvil-strike still plays first; the celebration card slides
     // in over the modal interior. Milestone tiers (★5 / ★8 / ★10) get
     // escalated visuals via the milestone class on the overlay element.
+    // v0.30.x - held until the anvil has finished swinging. Both are centred in
+    // the modal now, so playing them together would drop the card on the anvil.
     if (typeof _showEnhanceCelebration === 'function') {
-      _showEnhanceCelebration(item, item.stars);
+      const _st = item.stars;
+      if (typeof _afterForgeFx === 'function') _afterForgeFx(() => _showEnhanceCelebration(item, _st));
+      else _showEnhanceCelebration(item, _st);
     }
     // v0.25.800 — Equipment upgrade success SFX. File: audio/ui/upgrade_success.mp3.
     if (typeof _playUiSfx === 'function') _playUiSfx('upgrade_success');
@@ -93289,6 +93458,9 @@ function attemptEnhance(item) {
       showToast(`✗ FAILED — dropped to ★${item.stars}! (pity +${_nextPity}% next try)`, 'rare');
       flash(0.3); addShake(6);
       _playForgeAnim('fail');
+      if (typeof _afterForgeFx === 'function' && typeof _showEnhanceFailure === 'function') {
+        _afterForgeFx(() => _showEnhanceFailure(item, { lostStar: true, pity: _nextPity }));
+      }
       if (typeof _playUiSfx === 'function') _playUiSfx('enhance_fail');   // v0.26.x — failure finally has a voice
       for (let i = 0; i < 3; i++) {
         game.particles.push({
@@ -93301,6 +93473,9 @@ function attemptEnhance(item) {
       showToast(`✗ Enhancement failed. (pity +${_nextPity}% next try)`);
       flash(0.15);
       _playForgeAnim('fail');
+      if (typeof _afterForgeFx === 'function' && typeof _showEnhanceFailure === 'function') {
+        _afterForgeFx(() => _showEnhanceFailure(item, { lostStar: false, pity: _nextPity }));
+      }
       if (typeof _playUiSfx === 'function') _playUiSfx('enhance_fail');   // v0.26.x — failure finally has a voice
     }
   }
