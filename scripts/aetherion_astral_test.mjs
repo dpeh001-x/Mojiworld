@@ -25,8 +25,12 @@ const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 // did not. Two signals that actually work, both on STRONGLY opaque pixels
 // (alpha > 128) so stray motes cannot vote:
 //   edge   - opaque pixels sitting on the canvas border, i.e. art run out of room
-//   flat   - opaque pixels still in the LAST row that has any. A real foot or
-//            wingtip tapers to a handful; a straight cut leaves a wide band.
+//   flat   - opaque pixels still in the LAST row that has any, AND WHERE that
+//            row is. Feet resting ON the canvas bottom is this project's anchor
+//            convention - generic frame 5 puts 189 opaque px there and is fine.
+//            A cut is a wide band ending in MID-CANVAS with empty rows below it,
+//            which is exactly what the severed set did: 153 px stopping at row
+//            1271 of 1325, in all nine frames.
 const box = async (f) => {
   const { data, info } = await sharp(f).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const { width: W, height: H, channels: C } = info;
@@ -38,7 +42,8 @@ const box = async (f) => {
   for (let y = 0; y < H; y++) { let n = 0; for (let x = 0; x < W; x++) if (op(x, y)) n++; rows.push(n); }
   let last = -1; for (let y = H - 1; y >= 0; y--) if (rows[y] > 0) { last = y; break; }
   const { info: tr } = await sharp(f).trim({ threshold: 10 }).toBuffer({ resolveWithObject: true });
-  return { w: tr.width, edge: Math.max(top, left, right), bottomEdge: bottom, flat: last >= 0 ? rows[last] : 0 };
+  return { w: tr.width, h: tr.height, edge: Math.max(top, left, right), bottomEdge: bottom,
+    flat: last >= 0 ? rows[last] : 0, last, H };
 };
 const astral = [], generic = [];
 for (let i = 0; i < 9; i++) {
@@ -101,10 +106,15 @@ const r = await page.evaluate(() => {
 const T = r.timeline || [];
 ok('the astral set loads and decodes as its own 9-frame sprite',
   r.loaded && r.count === 9 && r.decoded, { frames: r.count, decoded: r.decoded, key: r.key });
-ok('nothing in the astral set is cut off - no edge contact, no flat slice',
-  astral.every(f => f.edge === 0 && f.bottomEdge === 0 && f.flat <= 30),
-  { worstEdgePixels: Math.max(...astral.map(f => Math.max(f.edge, f.bottomEdge))),
-    worstLastRow: Math.max(...astral.map(f => f.flat)) + ' opaque px (a straight cut left 153)', widths: aw });
+ok('nothing in the astral set is cut off - nothing clipped, nothing sliced mid-canvas',
+  astral.every(f => f.edge === 0 && (f.last === f.H - 1 || f.flat <= 30)),
+  { clippedSides: Math.max(...astral.map(f => f.edge)),
+    lastOpaqueRow: astral.map(f => f.last + '/' + (f.H - 1)).join(' '),
+    note: 'feet ON the bottom row = the anchor convention; the severed set stopped at 1271/1325 with 153 px',
+    widths: aw });
+ok('the subject holds still across the set - unzoomed, minimal changes',
+  spread(aw) < 1.10,
+  { spread: spread(aw).toFixed(3) + 'x', genericSetOfTheSameBoss: spread(gw).toFixed(3) + 'x', theRollThisReplaced: '1.45x', widths: aw });
 ok('the cast opens on frame 0 and the BURST lands exactly on the resolve',
   r.atStart === 0 && r.atResolve === 6,
   { atStart: r.atStart, atResolve1500ms: r.atResolve, timeline: T.map(x => x.pt + 'ms->f' + x.f).join(' ') });
