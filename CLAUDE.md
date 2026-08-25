@@ -175,6 +175,52 @@ states dropped; hitbox block replaced, or removed when absent); all other
 entities are untouched. After baking: `node --check anim_calib.js`, commit,
 push per the sync-first rule. Never hand-edit the values in transit.
 
+## Animator parity (durable, HARD — do not wait to be asked)
+
+`monster_animator.html` promises "renders EXACTLY what the game renders". Three
+separate ways of breaking that promise have already shipped, each found only
+because someone happened to look:
+
+- **new art absent from the manifest** — `aetherionastral` was a complete,
+  committed, tested nine-frame set the animator could not show at all;
+- **no hitbox row → no game size** — a type missing from
+  `data/monster_hitboxes.js` has no `m.h`, so `geometry()` loses its game base
+  and silently falls back to the 220px preview *while still printing the number
+  under the heading "in-game"*. The twelve zodiac bosses and four plant mobs
+  were all in this state;
+- **stale or degenerate content boxes** — the manifest bakes a per-frame content
+  box that drives content-normalisation. Redraw art without re-running the
+  generator and the tool normalises against boxes that no longer describe the
+  pixels. Worse, one bake produced *nine identical boxes* for a nine-frame set
+  (a bad read, reproducible-good on a re-run) and shipped silently.
+
+**After ANY art drop under `Sprites/`, and after any change to
+`monster_animator.html` or the `data/` tables, run:**
+
+```bash
+node scripts/animator_parity_check.mjs
+```
+
+It exits non-zero on any of the above. Fix what it names — it prints the exact
+generator to run — and do not report the work finished while it fails. Two
+generators back it up and are the fixes it points at:
+
+- `node scripts/gen_mob_hitboxes.mjs` — the generator `monster_hitboxes.js`
+  always claimed to have. Reads the RUNTIME (`monsterTypes` + `_lxMobScale` +
+  `BOSS_DRAW_SCALE`), because the zodiac types are synthesised at boot and no
+  source-side extraction can see them. Add-only, and it asserts only `w`/`h`,
+  which are the fields it can prove; `--check` for CI.
+- `node scripts/gen_anim_manifest.mjs` — now **refuses to write** when a
+  multi-frame state bakes one identical content box for every frame, which is
+  what the degenerate bake looked like. `--allow-degenerate` overrides.
+
+A set the game draws under ANOTHER entity's key needs an `ART_OWNER` entry in
+the animator (e.g. `aetherionastral` borrows Aetherion's geometry and calib,
+because `_aetherionAstralKey` sits outside `_drawBossSprite`'s art-key chain).
+Ownership is a per-set fact, not a naming pattern — `gravitospunch` *is* keyed
+on itself. Verify by hooking `_lxAnimCalib` in the running game and reading
+which key it is asked for.
+
 ## Changelog policy (durable)
 
 **Always update `CHANGELOG.html` whenever a new implementation lands.**

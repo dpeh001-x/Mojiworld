@@ -83,4 +83,10 @@ zodiac_capricorn:{w:150,h:150,mul:2,zmul:1.3},
 zodiac_aquarius:{w:154,h:154,mul:2},
 zodiac_pisces:{w:158,h:158,mul:2,f:1},
 // --- end zodiac ---
+// --- added from the live game (scripts/gen_mob_hitboxes.mjs) ---
+elderbark:{w:130,h:150,mul:1.575},
+meloncholy:{w:112,h:88,mul:1.875},
+pinechad:{w:96,h:104,mul:1.815},
+thornmaw:{w:88,h:78,mul:1.875},
+// --- end live-extracted ---
 };
