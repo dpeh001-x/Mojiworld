@@ -9904,7 +9904,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.221';
+const GAME_VERSION = 'v0.30.223';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -84320,6 +84320,31 @@ function _lxOctoSpawnArms(m, gen) {
     m._legRefs.push(leg);
   }
 }
+// v0.30.x — DEF PIERCE CAP (per user: nothing may pierce more than 75% of a
+// monster's DEF).
+//
+// Before this, 'siege' and 'breakDef' did not reduce defence — they SKIPPED the
+// armour curve entirely, which is a 100% pierce. Against the post-v0.30.222
+// roster that is the difference between taking 20% of your damage and taking
+// all of it: on Gravitos at DEF 1200 a Siege Volley arrow landed for 5x what
+// every other attack in the game managed.
+const LX_MAX_DEF_PIERCE = 0.75;
+// Skill tags that pierce, and by how much BEFORE the cap. 'breakDef' is
+// currently unreferenced by any skill; it is listed so that wiring it up later
+// inherits the cap instead of re-inheriting the old full bypass.
+const _LX_DEF_PIERCE = { siege: 0.75, breakDef: 0.75 };
+function _lxDefPierce(skill) {
+  let p = (skill && _LX_DEF_PIERCE[skill]) || 0;
+  // Boon and gear contributions. Neither stat exists yet, so both read 0 — the
+  // point is that when one is added it arrives already capped, and stacking it
+  // with a piercing skill cannot exceed the ceiling either.
+  try {
+    if (typeof player !== 'undefined' && player && player.mods) p += (+player.mods.defPierce || 0);
+    if (typeof getEquipBonus === 'function') p += (+getEquipBonus('defPierce') || 0);
+  } catch (e) {}
+  if (!(p > 0)) return 0;
+  return Math.min(LX_MAX_DEF_PIERCE, p);
+}
 function hitMonster(m, dmg, isCrit, skill) {
   _lxLsReset();   // v0.30.x — new hit, new lifesteal budget. See _lxLsTake.
   // v0.25.605 — Dead-monster gate. Without this, a delayed projectile or
@@ -85042,9 +85067,16 @@ function hitMonster(m, dmg, isCrit, skill) {
     if (m.isElite)     defVal *= 1.4;
     if (m.isMiniBoss)  defVal *= 1.8;
     if (m.isBoss)      defVal *= 2.2;
-    if (skill !== 'breakDef' && skill !== 'siege') {   // v0.26.458 - tag is 'siege' (Siege Volley); 'siegeVolley' never matched so the advertised def-shred was dead
+    // v0.30.x — the curve now ALWAYS runs; piercing shrinks the defence it
+    // runs against instead of skipping it. At the 75% cap a target keeps a
+    // quarter of its defence no matter what hits it, so the armour curve can
+    // never be switched off outright.
+    // (v0.26.458 note kept: the tag is 'siege' — 'siegeVolley' never matched,
+    // so the advertised def-shred was dead long before this.)
+    {
       const _DEF_K = 300;
-      const _defScale = _DEF_K / (defVal + _DEF_K);
+      const _pierce = (typeof _lxDefPierce === 'function') ? _lxDefPierce(skill) : 0;
+      const _defScale = _DEF_K / (defVal * (1 - _pierce) + _DEF_K);
       finalDmg = Math.max(1, Math.floor(finalDmg * _defScale));
     }
   }
