@@ -36,6 +36,7 @@ import sharp from 'sharp';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 sharp.cache(false);
@@ -49,15 +50,74 @@ const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 const arg = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
 
+// ATTACK PROFILES, and the reason they exist.
+//
+// The first version of this script held every set to "the titan is one size all
+// the way through", <=3% body-height drift. That is right for a PLANTED attack
+// like the star charge, where the boss stands and channels. Applied to a PUNCH
+// it is actively harmful, and it produced exactly that: a gravitos3punch whose
+// body height varied 0.3% - a figure standing perfectly still while an arm and
+// some flame moved around it.
+//
+// The reference the user pointed at, gravitospunch, FAILS that gate outright:
+//
+//     body width   652 .. 970   32.8% spread   <- the reach
+//     body height  773 .. 906   14.7% spread   <- the crouch and extend
+//
+// A punch that keeps a constant body height is a punch with no weight in it.
+// So 'lunge' inverts the test: reach and weight are now MINIMUMS, and the
+// per-frame body normalisation is skipped, because normalising the height is
+// precisely what flattens a crouch.
+//
+// Anti-zoom still has to be enforced, and the first attempt at it measured the
+// wrong thing - the third time in this session. It used the CORRELATION between
+// body width and height, on the theory that a zoom moves them together (+1)
+// while a lunge trades them (negative). The reference does measure -0.24, but
+// four regenerated rolls came back at +0.75 to +0.98 and were all rejected as
+// "zooms" when they were nothing of the kind: this boss has WINGS, and the
+// wings flare as it rises, so width and height genuinely do trend together
+// without the figure being scaled at all.
+//
+// The honest discriminator is the W/H RATIO. A uniform scale leaves the ratio
+// untouched by definition; any change of shape moves it. Measured:
+//
+//     reference gravitospunch   ratio spread 36.7%   (a real lunge)
+//     a rejected roll           ratio spread 21.3%   (also a real lunge)
+//     the stiff shipped set     ratio spread 12.5%   (a standing figure)
+//
+// So the gate is a ratio-spread MINIMUM, calibrated on those three numbers
+// rather than guessed, and correlation is not used at all.
+const PROFILES = {
+  planted: { normalise: true,  maxBodyDrift: 0.03 },
+  lunge:   { normalise: false, minReach: 0.25, minWeight: 0.08, minShapeChange: 0.20 },
+};
+
 const KEYS = {
   gravitos3punch: {
+    profile: 'lunge',
+    // Beat-by-beat, in order, because "throw a punch" produced a standing
+    // figure with a flame burst three rolls running. Naming what the SILHOUETTE
+    // does at each beat is what the reference animation actually varies.
     motion:
-      'The winged crimson demon titan throws a single devastating FLAMING PUNCH, as one continuous '
-      + 'motion: it drops its shoulder and hauls one huge fist back as fire spirals up that arm, then '
-      + 'drives the fist FORWARD across its body in a heavy committed swing, the flame trailing off the '
-      + 'knuckles in a whipping arc and bursting outward at full extension, before the arm settles and '
-      + 'the fire dies back. Its great bat wings flare wide as it turns into the blow. '
-      + 'Every frame must be clearly different from the last - this is one violent swing, not a pose.',
+      'A nine-beat PUNCH by the winged crimson demon titan. Play these beats IN THIS ORDER, one per '
+      + 'frame, and change the SILHOUETTE at every one: '
+      + '(1) it stands square, fists low. '
+      + '(2) it COILS - knees bend, shoulders drop, the whole body sinks LOWER and pulls back, one fist '
+      + 'cocked back beside the hip as fire gathers around it. '
+      + '(3) coiled tighter and lower still, the cocked fist now a blazing ball of flame, the body '
+      + 'compact and wound like a spring. '
+      + '(4) it EXPLODES forward - the back leg drives, the hips and shoulders whip through, the flaming '
+      + 'fist starts travelling, the body pitching FORWARD and leaning out. '
+      + '(5) FULL EXTENSION - the arm is rammed out straight and the torso is stretched long and low '
+      + 'behind it in a deep lunge, the body reaching far ACROSS the frame, much WIDER and lower than '
+      + 'it stands, with fire blasting off the knuckles in a cone. '
+      + '(6) the impact burst at maximum - still fully extended and lunging, flame erupting outward. '
+      + '(7) the fire tears away as the arm begins to pull back, body still leaning. '
+      + '(8) recovering - the arm draws in, the torso rises and comes back over its feet. '
+      + '(9) upright and square again, fists low, only embers left. '
+      + 'THE BODY MUST TRAVEL, not just the arm. Compact and crouched at beats 2-3, stretched long, '
+      + 'wide and low at beats 5-6, upright at 1 and 9. No plain rectangles, panels or boxes anywhere '
+      + 'in any frame - the background is fully transparent.',
   },
   gravitos3soul: {
     motion:
@@ -93,7 +153,8 @@ async function measure(buf) {
   }
   if (x1 < 0) return null;
   return { w, h, x0, y0, x1, y1, bw: x1 - x0 + 1, bh: y1 - y0 + 1, border,
-    body: by1 < 0 ? null : by1 - by0 + 1, bodyMidX: bx1 < 0 ? null : (bx0 + bx1) / 2, feet: y1 };
+    body: by1 < 0 ? null : by1 - by0 + 1, bodyW: bx1 < 0 ? null : bx1 - bx0 + 1,
+    bodyMidX: bx1 < 0 ? null : (bx0 + bx1) / 2, feet: y1 };
 }
 
 async function motionOf(bufs) {
@@ -145,14 +206,18 @@ const framePath = (i) => join(SET, `${KEY}_${i}.webp`);
 
 // One scale + one offset for the set, then per-frame scale-only normalisation.
 // Canvas grows to whatever the set needs; it never shrinks the titan to fit.
-async function fitSet(bufs, target) {
+async function fitSet(bufs, target, prof) {
   const ms = [];
   for (const b of bufs) ms.push(await measure(b));
   const sc = target.body / ms[0].body;               // preserve the DRAWN size of the titan
   const stage = [];
   for (let i = 0; i < bufs.length; i++) {
-    const per = target.body / ms[i].body;            // per-frame: kill drift, keep the pose
-    const k = (i === 0) ? sc : per;
+    // PLANTED sets get per-frame normalisation, which kills model drift on a
+    // boss that is supposed to stand still. LUNGE sets get the single set scale
+    // only: normalising per frame would iron the crouch and the extension flat,
+    // which is the whole animation.
+    const per = target.body / ms[i].body;
+    const k = (i === 0 || !prof.normalise) ? sc : per;
     const sw = Math.max(1, Math.round(ms[i].w * k)), sh = Math.max(1, Math.round(ms[i].h * k));
     stage.push(await sharp(bufs[i]).ensureAlpha().resize(sw, sh, { fit: 'fill' }).png().toBuffer());
   }
@@ -191,33 +256,86 @@ async function gradeSet(out) {
   for (const b of out) ms.push(await measure(b));
   const hashes = out.map((b) => createHash('sha1').update(b).digest('hex'));
   const bodies = ms.map((m) => m.body);
+  const widths = ms.map((m) => m.bodyW);
   const feet = ms.map((m) => m.feet);
+  const spread = (a) => (Math.max(...a) - Math.min(...a)) / Math.max(...a);
+  // Pearson correlation between body width and body height across the set.
+  // A ZOOM moves both together (-> +1). A LUNGE trades one against the other:
+  // reaching out makes the body wider and shorter (-> negative).
+  const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+  const mw = mean(widths), mh = mean(bodies);
+  let num = 0, dw = 0, dh = 0;
+  for (let i = 0; i < widths.length; i++) {
+    num += (widths[i] - mw) * (bodies[i] - mh);
+    dw += (widths[i] - mw) ** 2; dh += (bodies[i] - mh) ** 2;
+  }
   return {
     distinct: new Set(hashes).size,
     border: ms.reduce((a, m) => a + m.border, 0),
-    bodySpread: (Math.max(...bodies) - Math.min(...bodies)) / Math.max(...bodies),
+    bodySpread: spread(bodies),
+    reach: spread(widths),
+    // How much the silhouette CHANGES SHAPE. Immune to uniform scaling by
+    // construction: a zoom cannot move a ratio.
+    shape: spread(widths.map((w2, i) => w2 / bodies[i])),
+    corr: (dw && dh) ? num / Math.sqrt(dw * dh) : 0,
     footSpread: Math.max(...feet) - Math.min(...feet),
     motion: await motionOf(out),
     ms,
   };
 }
 
-// The target the new set has to land on: the OLD set's drawn body height, body
-// centre and feet line, so data/anim_calib.js stays valid without a retune.
+// One place decides whether a set is acceptable FOR ITS PROFILE.
+function verdict(prof, g) {
+  const bad = [];
+  if (g.distinct < FRAMES) bad.push(`only ${g.distinct}/9 distinct frames`);
+  if (g.border > 0) bad.push(`${g.border}px clipped`);
+  if (g.footSpread > 12) bad.push(`feet wander ${g.footSpread}px`);
+  if (prof.normalise) {
+    if (g.bodySpread > prof.maxBodyDrift) bad.push(`body drift ${(g.bodySpread * 100).toFixed(1)}%`);
+  } else {
+    if (g.reach < prof.minReach) bad.push(`reach ${(g.reach * 100).toFixed(1)}% < ${prof.minReach * 100}% (waving, not punching)`);
+    if (g.bodySpread < prof.minWeight) bad.push(`weight ${(g.bodySpread * 100).toFixed(1)}% < ${prof.minWeight * 100}% (no crouch, no lean)`);
+    if (g.shape < prof.minShapeChange) bad.push(`shape change ${(g.shape * 100).toFixed(1)}% < ${prof.minShapeChange * 100}% (the silhouette barely moves; reference is 36.7%)`);
+  }
+  return bad;
+}
+
+// The target the new set has to land on: the drawn body height, body centre and
+// feet line of the set IN GIT, so data/anim_calib.js stays valid without a
+// retune.
+//
+// Read from git, NOT from disk, and that is a bug fix rather than a preference.
+// Reading the live files means each regeneration inherits whatever the previous
+// one left there - and since the canvas GROWS to fit each new set, re-baking a
+// few candidates in a row compounded it: 1238 -> 1540 -> 2340 -> 2835 px tall,
+// the titan doubling in stored size while every printed metric still looked
+// fine, because each run was measuring itself against its own predecessor.
+// origin/main is a fixed point; the working copy is not.
+function gitFrame(i) {
+  try {
+    return execFileSync('git', ['cat-file', '-p', `origin/main:Sprites/bosses/attack/${KEY}_${i}.webp`],
+      { cwd: repoRoot, maxBuffer: 1 << 28 });
+  } catch (e) { return null; }
+}
 const oldMs = [];
-for (let i = 0; i < FRAMES; i++) oldMs.push(await measure(await readFile(framePath(i))));
+for (let i = 0; i < FRAMES; i++) {
+  const g = gitFrame(i);
+  oldMs.push(await measure(g || await readFile(framePath(i))));
+}
 const target = { body: Math.max(...oldMs.map((m) => m.body)), bodyMidX: oldMs[0].bodyMidX,
                  feet: oldMs[0].feet, w: oldMs[0].w, h: oldMs[0].h };
-console.log(`${KEY}: target body ${target.body}px, feet y=${target.feet}, canvas ${target.w}x${target.h}`);
+const prof = PROFILES[KEYS[KEY].profile || 'planted'];
+console.log(`${KEY}: profile ${KEYS[KEY].profile || 'planted'}, target body ${target.body}px, feet y=${target.feet}, canvas ${target.w}x${target.h}`);
 
 if (has('--bake')) {
   const n = arg('--bake');
   const bufs = [];
   for (let i = 0; i < FRAMES; i++) bufs.push(await readFile(join(KEEP, `${KEY}_r${n}_${i}.png`)));
-  const { out, canvas, grew } = await fitSet(bufs, target);
+  const { out, canvas, grew } = await fitSet(bufs, target, prof);
   const g = await gradeSet(out);
-  console.log(`  canvas ${canvas} (grew x${grew.x} top${grew.top} bot${grew.bottom})  distinct ${g.distinct}/9  border ${g.border}  body ${(g.bodySpread * 100).toFixed(1)}%  feet ${g.footSpread}px  motion ${g.motion.toFixed(1)}`);
-  if (g.border > 0 || g.distinct < FRAMES) { console.error('  rejected'); process.exit(2); }
+  const bad = verdict(prof, g);
+  console.log(`  canvas ${canvas} (grew x${grew.x} top${grew.top} bot${grew.bottom})  distinct ${g.distinct}/9  border ${g.border}  reach ${(g.reach * 100).toFixed(1)}%  weight ${(g.bodySpread * 100).toFixed(1)}%  shape ${(g.shape * 100).toFixed(1)}%  feet ${g.footSpread}px  motion ${g.motion.toFixed(1)}`);
+  if (bad.length && !has('--force')) { console.error('  rejected: ' + bad.join(', ')); process.exit(2); }
   for (let i = 0; i < FRAMES; i++) await writeFile(framePath(i), out[i]);
   await writeFile(join(SET, `${KEY}.webp`), out[FRAMES - 1]);
   console.log('  baked');
@@ -261,14 +379,14 @@ for (let r = 1; r <= ROLLS; r++) {
   } catch (e) { console.log('FAIL ' + e.message); continue; }
   for (let i = 0; i < bufs.length; i++) await writeFile(join(KEEP, `${KEY}_r${r}_${i}.png`), bufs[i]);
 
-  const { out, canvas, grew } = await fitSet(bufs, target);
+  const { out, canvas, grew } = await fitSet(bufs, target, prof);
   const g = await gradeSet(out);
-  const clean = g.border === 0 && g.distinct === FRAMES && g.bodySpread <= 0.03;
-  console.log(`canvas ${canvas} (grew x${grew.x} t${grew.top} b${grew.bottom})  distinct ${g.distinct}/9  border ${g.border}  body ${(g.bodySpread * 100).toFixed(1)}%  feet ${g.footSpread}px  motion ${g.motion.toFixed(1)} ${clean ? '' : ' GATED'}`);
-  if (!clean) continue;
+  const bad = verdict(prof, g);
+  console.log(`canvas ${canvas}  distinct ${g.distinct}/9  border ${g.border}  reach ${(g.reach * 100).toFixed(1)}%  weight ${(g.bodySpread * 100).toFixed(1)}%  shape ${(g.shape * 100).toFixed(1)}%  feet ${g.footSpread}px  motion ${g.motion.toFixed(1)}${bad.length ? '  GATED: ' + bad.join('; ') : ''}`);
+  if (bad.length) continue;
   if (!best || g.motion > best.g.motion) best = { out, g, canvas, grew };
 }
 if (!best) { console.error('  no clean roll — re-run, or --bake a saved roll'); process.exit(2); }
 for (let i = 0; i < FRAMES; i++) await writeFile(framePath(i), best.out[i]);
 await writeFile(join(SET, `${KEY}.webp`), best.out[FRAMES - 1]);
-console.log(`  wrote 9 frames + ${KEY}.webp  canvas ${best.canvas}  distinct 9/9  border 0  body ${(best.g.bodySpread * 100).toFixed(1)}%  motion ${best.g.motion.toFixed(1)}`);
+console.log(`  wrote 9 frames + ${KEY}.webp  canvas ${best.canvas}  distinct 9/9  border 0  reach ${(best.g.reach * 100).toFixed(1)}%  weight ${(best.g.bodySpread * 100).toFixed(1)}%  shape ${(best.g.shape * 100).toFixed(1)}%  motion ${best.g.motion.toFixed(1)}`);
