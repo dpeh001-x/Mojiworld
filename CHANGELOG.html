@@ -121,6 +121,19 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.228 <span class="tag"><span class="pill bug">bug</span> The animator's sliders wrote to a key nothing reads</h2>
+<p>Per user, on the <code>aetherionastral</code> entry: <em>I cant seem to edit this.</em></p>
+<p><code>aetherionastral</code> is an <b>owned</b> set. <code>ART_OWNER</code> maps it to <code>aetherion</code> because the game takes its <em>frames</em> from <code>_aetherionAstralKey</code> but draws them through <code>_drawBossSprite</code> with <code>m.type === 'aetherion'</code> — so the geometry and calibration are his. The animator's own panel note says exactly that: <em>“the sliders here move his attack calib.”</em></p>
+<p><b>They did not.</b> Every read resolved through the owner —</p>
+<pre style="background:#0d0b14;border:1px solid #2a2438;border-radius:6px;padding:10px;overflow-x:auto"><code>const c = (CALIB[ownerOf(cur)] &amp;&amp; CALIB[ownerOf(cur)][st]) || ...</code></pre>
+<p>— while every write went to the selected entity:</p>
+<pre style="background:#0d0b14;border:1px solid #2a2438;border-radius:6px;padding:10px;overflow-x:auto"><code>A.CALIB()[A.cur][st][k] = ...</code></pre>
+<p>So dragging a slider on <code>aetherionastral</code> stored the value under <code>aetherionastral</code>, which nothing reads, and the preview never moved. The control was never disabled — it was writing to a key with no readers. <code>ownerOf</code> was not even exposed to the controls layer, so the edit path had no way to know which entity it was really editing. It is now, and all <b>11</b> calib sites route through it.</p>
+<p><b>The Copy-patch button had the same flaw and a worse consequence:</b> it emitted <code>type: cur</code>, so a patch from this entry would have hardbaked under <code>aetherionastral</code> — a key the game never consults for calibration. It now emits the owner, and reads the owner's block, so the patch carries Aetherion's <em>complete</em> calib. That last part matters: the baker replaces an entity's calib block wholesale, so a partial patch under his name would have dropped his other states.</p>
+<p>The reset button is relabelled on an owned set too — <em>“Reset aetherionastral to defaults”</em> in fact resets <b>Aetherion's</b> calibration, and that should not be a surprise.</p>
+<p><b>Hitboxes are deliberately not redirected.</b> The <code>ART_OWNER</code> note claims geometry, calibration and the content-norm reference; it says nothing about hitboxes, and redirecting them on a guess could silently overwrite Aetherion's. Left alone and flagged.</p>
+<p><code>scripts/animator_owner_edit_test.mjs</code> — 7 checks, driving the real slider element with a real <code>input</code> event rather than calling <code>setVal</code>, so it exercises the path a person actually uses. Measured after the fix: <code>aetherion.attack.s</code> moves 1.6 → 1.23 while <code>aetherionastral</code> stays untouched, and an ordinary entity (<code>king</code>) still edits itself. One control catches the trap the first run fell into: the slider quantises to its step, so asking for 1.234 stores 1.23 — the assertion compares against the control's own value, not the number typed in.</p>
+
 <h2>v0.30.227 <span class="tag"><span class="pill feat">feat</span> Gravitos's idle, animated by ludo.ai with the chosen pose pinned at frame 4</span></h2>
 <p>Per user: <em>revert to gravitos old idle animation what i meant is that this attach image should be the frame 4 of a 9 frame animation, please regenerate with ludo.ai accordingly.</em></p>
 <p><b>The previous attempt is reverted first.</b> It composited the pose and computed a breath around it &mdash; which made "frame 4 is this pose" true by construction, and was not an animation. The nine idle frames are restored from <code>33cf7a46</code> (v0.29.404) before anything else, verified 9/9 byte-identical to the art that shipped then.</p>

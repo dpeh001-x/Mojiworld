@@ -90,7 +90,7 @@
       <div class="mut" style="font-size:11px;margin-top:3px">renders EXACTLY what the game renders</div>
       <!-- build badge: bump alongside GAME_VERSION on every animator change,
            so a stale cached copy is identifiable at a glance -->
-      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.226</span>
+      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.228</span>
         <a id="lx-latest-link" href="animator.html" title="Cache-proof launcher: resolves main's current commit via the GitHub API and opens that exact build — use this if the badge looks old" style="color:#5b8cff;margin-left:6px">latest&#8599;</a></div>
       <script>
       // v0.29.246 — LIVE badge freshness probe. The static build string only
@@ -1186,6 +1186,10 @@
     MAN, STATES, COL, DEF,
     buildList, select, loadFramesFor: (t) => loadFrames(MAN[t]),
     CALIB: () => CALIB, HBX: () => HBX,
+    // v0.30.x — the controls layer needs this to EDIT the right entity. Reads
+    // already resolved through ownerOf(); writes did not, so an owned set's
+    // sliders wrote to a key nothing reads. See scripts/apply_animator_owner_fix.mjs.
+    ownerOf,
     reloadCalib: () => { CALIB = loadCalib(); },
     restore: (c, h) => { if (c) CALIB = c; if (h) HBX = h; },   // undo support
     hbFor, defaultHB,
@@ -1328,7 +1332,7 @@
     const pin = A.getPinFrame();
     const held = pin != null;
     const i = held ? Math.max(0, Math.min(pin, n - 1)) : (A.shownFrame(st) || 0);
-    const v = A.CALIB()[A.cur][st];
+    const v = A.CALIB()[A.owner()][st];
     const cur = (v.fs && v.fs[i] > 0) ? +v.fs[i] : 1;
     const tuned = Array.isArray(v.fs) ? v.fs.filter(f => +f !== 1).length : 0;
     let h = `<div class="scard${held ? ' held' : ''}" id="fr-card">` +
@@ -1410,7 +1414,10 @@
       html += `<div class="mut" style="font-size:11px;margin:8px 0 6px">HITBOX — the region player attacks can hit. All scaling (size factor + Monster Plant) is baked into the box you see. w/h/ox/oy are fractions of sprite height; oy = bottom offset from the feet (+down). Drag the box in the stage, or its corner handle to resize.</div>`;
       for (const st of A.STATES) if (ent.states[st]) html += hbCard(st);
     }
-    html += `<button class="warn reset" id="resetAll" style="width:100%;margin-top:2px">Reset ${cur} to defaults</button>`;
+    // v0.30.x — on an owned set this resets the OWNER's calibration, so the
+    // label has to say so rather than name the set you have selected.
+    const _rsTarget = A.ownerOf(cur);
+    html += `<button class="warn reset" id="resetAll" style="width:100%;margin-top:2px">Reset ${_rsTarget}${_rsTarget !== cur ? ' (owns ' + cur + ')' : ''} to defaults</button>`;
     body.innerHTML = html;
     wire();
   };
@@ -1430,7 +1437,7 @@
     const i = Math.max(0, Math.min(pin, n - 1));
     let val = +raw; if (!isFinite(val)) return;
     val = Math.max(0.5, Math.min(2, val));
-    const v = A.CALIB()[A.cur][st];
+    const v = A.CALIB()[A.owner()][st];
     if (!Array.isArray(v.fs)) v.fs = new Array(n).fill(1);
     while (v.fs.length < n) v.fs.push(1);
     v.fs[i] = val;
@@ -1458,26 +1465,30 @@
     if (rst) rst.onclick = () => {
       snapshot();
       const st = A.focusState, pin = A.getPinFrame();
-      const v = A.CALIB()[A.cur][st];
+      const v = A.CALIB()[A.owner()][st];
       if (Array.isArray(v.fs) && pin != null) { v.fs[Math.max(0, Math.min(pin, v.fs.length - 1))] = 1; }
       markDirty(); window.__buildControls(); toast('frame reset');
     };
     const clr = document.getElementById('fr-clear');
     if (clr) clr.onclick = () => {
       snapshot();
-      const v = A.CALIB()[A.cur][A.focusState];
+      const v = A.CALIB()[A.owner()][A.focusState];
       delete v.fs;
       markDirty(); window.__buildControls(); toast('per-frame scales cleared');
     };
   }
 
   function syncCard(st) {
-    const v = A.CALIB()[A.cur][st];
+    const v = A.CALIB()[A.owner()][st];
     ['s', 'dx', 'dy'].forEach(k => document.querySelectorAll(`[data-st="${st}"][data-k="${k}"]`).forEach(el => { el.value = v[k]; }));
   }
+  // v0.30.x — the entity whose CALIB the current selection actually edits.
+  // For an owned set (aetherionastral -> aetherion) that is the owner, because
+  // the game resolves geometry and calibration on the owner's type.
+  A.owner = () => A.ownerOf(A.cur);
   function setVal(st, k, raw) {
     const [mn, mx] = RANGES[k]; let v = +raw; if (!isFinite(v)) return;
-    A.CALIB()[A.cur][st][k] = Math.max(mn, Math.min(mx, v));
+    A.CALIB()[A.owner()][st][k] = Math.max(mn, Math.min(mx, v));
     syncCard(st); markDirty();
   }
   // hitbox numeric edit: materialize from default on first touch, then mutate
@@ -1529,7 +1540,7 @@
     });
     document.querySelectorAll('[data-reset]').forEach(b => b.onclick = () => {
       snapshot();
-      const st = b.dataset.reset; A.CALIB()[A.cur][st] = A.DEF(); syncCard(st); markDirty(); toast(st + ' reset');
+      const st = b.dataset.reset; A.CALIB()[A.owner()][st] = A.DEF(); syncCard(st); markDirty(); toast(st + ' reset');
     });
     document.querySelectorAll('[data-hbreset]').forEach(b => b.onclick = () => {
       snapshot();
@@ -1540,7 +1551,7 @@
     const ra = document.getElementById('resetAll');
     if (ra) ra.onclick = () => {
       snapshot();
-      for (const s of A.STATES) { A.CALIB()[A.cur][s] = A.DEF(); A.clearHB(A.cur, s); }
+      for (const s of A.STATES) { A.CALIB()[A.owner()][s] = A.DEF(); A.clearHB(A.cur, s); }
       window.__buildControls(); markDirty(); toast(A.cur + ' reset');
     };
   }
@@ -1576,7 +1587,7 @@
     }
     const st = stateAt(p.x); if (!st) return;
     snapshot();
-    const g = A.geomFor(st); const v = A.CALIB()[A.cur][st];
+    const g = A.geomFor(st); const v = A.CALIB()[A.owner()][st];
     drag = { kind: 'sprite', st, x: p.x, y: p.y, dx0: v.dx, dy0: v.dy, ph: g.previewH };
     A.setFocus(st);
   });
@@ -1600,7 +1611,7 @@
         document.querySelectorAll(`[data-hbst="${drag.st}"][data-k="${k}"]`).forEach(el => { el.value = hb[k]; }));
       return;
     }
-    const v = A.CALIB()[A.cur][drag.st];
+    const v = A.CALIB()[A.owner()][drag.st];
     v.dx = cl(drag.dx0 + ddx, RANGES.dx);
     v.dy = cl(drag.dy0 + ddy, RANGES.dy);
     syncCard(drag.st);
@@ -1637,7 +1648,7 @@
       return;
     }
     if (!cv._w) snapshot();              // one undo step per wheel burst
-    const v = A.CALIB()[A.cur][st];
+    const v = A.CALIB()[A.owner()][st];
     v.s = cl(v.s + (e.deltaY < 0 ? 0.03 : -0.03), RANGES.s);
     A.setFocus(st); syncCard(st);
     clearTimeout(cv._w); cv._w = setTimeout(() => { markDirty(); cv._w = null; }, 250);
@@ -1671,18 +1682,23 @@
   function copyCurrentPatch() {
     const cur = A.cur;
     if (!cur) { toast('Pick a monster first'); return; }
-    const C = A.CALIB()[cur] || {}, H = A.HBX()[cur] || {};
+    // v0.30.x — an owned set's calib lives under its OWNER, and the baker
+    // replaces an entity's calib block wholesale, so the patch has to carry the
+    // owner's complete block under the owner's name. Emitting it under
+    // 'aetherionastral' hardbaked a key the game never reads for calib.
+    const owner = A.ownerOf(cur);
+    const C = A.CALIB()[owner] || {}, H = A.HBX()[cur] || {};
     const r4 = v => +(+v).toFixed(4);
     const calib = {}, hitbox = {};
     for (const st of A.STATES) {
       if (C[st]) {
-        const k = A.calibKey(cur, st);   // zodiac states store as 'zodiac/<state>'
+        const k = A.calibKey(owner, st);   // zodiac states store as 'zodiac/<state>'
         calib[k] = { s: r4(C[st].s), dx: r4(C[st].dx), dy: r4(C[st].dy) };
         if (Array.isArray(C[st].fs) && C[st].fs.some(f => +f !== 1)) calib[k].fs = C[st].fs.map(r4);
       }
       if (H[st]) hitbox[st] = { w: r4(H[st].w), h: r4(H[st].h), ox: r4(H[st].ox), oy: r4(H[st].oy) };
     }
-    const patch = { LX_ANIM_PATCH: 1, type: cur, calib };
+    const patch = { LX_ANIM_PATCH: 1, type: owner, calib };
     if (Object.keys(hitbox).length) patch.hitbox = hitbox;
     const txt = JSON.stringify(patch);
     const done = () => toast('Patch for ' + cur + ' copied — paste it in chat to hardbake');
