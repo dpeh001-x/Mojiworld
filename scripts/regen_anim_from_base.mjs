@@ -363,17 +363,40 @@ for (const k of keys) {
       // the identical fraction back out restores the base's framing exactly, so
       // the margin never reaches the sprite sheet and fitFramesToBase downstream
       // sees inputs the size it has always seen.
-      const _unpad = async (buf) => {
+      // v0.30.x — THE UN-PAD MAY NEVER REMOVE ART. Cropping a fixed central
+      // fraction assumes the animator centred the subject in the padded canvas;
+      // it does not. On Aetherion's Astral Judgement it drew the dragon low, and
+      // the fixed crop sliced its legs off at a flat line 54 px up — identically
+      // in all nine frames, which is what a straight cut looks like and what the
+      // user saw. Worse, the numeric check missed it: faint particle motes drift
+      // below the body, so the trimmed bbox still reported a healthy margin while
+      // the legs were severed inside it.
+      //
+      // So the crop rectangle is now computed ONCE for the whole set: start from
+      // the intended central window, then expand it until it contains the UNION
+      // of every frame's content. One shared rectangle keeps the set's relative
+      // motion intact (the reason this pipeline avoids per-frame trimming), and
+      // the union guarantees the crop can only ever remove transparency.
+      const _cropRect = await (async () => {
         const p = +t.pad || 0;
-        if (!(p > 0)) return buf;
-        const m = await sharp(buf).metadata();
+        if (!(p > 0)) return null;
+        const m0 = await sharp(bufs[0]).metadata();
         const keep = 1 / (1 + 2 * p);
-        const w = Math.round(m.width * keep), h = Math.round(m.height * keep);
-        return sharp(buf).extract({
-          left: Math.round((m.width - w) / 2), top: Math.round((m.height - h) / 2),
-          width: w, height: h,
-        }).png().toBuffer();
-      };
+        const w = Math.round(m0.width * keep), h = Math.round(m0.height * keep);
+        let L = Math.round((m0.width - w) / 2), T = Math.round((m0.height - h) / 2);
+        let R = L + w, B = T + h;
+        for (const buf of bufs) {
+          const { info } = await sharp(buf).trim({ threshold: 10 }).toBuffer({ resolveWithObject: true });
+          const cl = -info.trimOffsetLeft, ct = -info.trimOffsetTop;
+          L = Math.min(L, cl); T = Math.min(T, ct);
+          R = Math.max(R, cl + info.width); B = Math.max(B, ct + info.height);
+        }
+        L = Math.max(0, L); T = Math.max(0, T);
+        R = Math.min(m0.width, R); B = Math.min(m0.height, B);
+        return { left: L, top: T, width: R - L, height: B - T };
+      })();
+      if (_cropRect) console.log(`  unpad: shared crop ${_cropRect.width}x${_cropRect.height} at ${_cropRect.left},${_cropRect.top} (expanded to hold every frame)`);
+      const _unpad = async (buf) => (_cropRect ? sharp(buf).extract(_cropRect).png().toBuffer() : buf);
       const _written = [];
       for (let i = 0; i < FRAMES; i++) {
         // v0.30.x — `stem` lets the TARGET KEY and the OUTPUT FILENAME differ.

@@ -19,17 +19,26 @@ const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 
 // ---------- image half ----------
+// A trimmed bounding box CANNOT answer "is it cut off". Faint particle motes
+// drift below the body, so the bbox reported a healthy 53 px bottom margin on a
+// set whose legs were sliced clean off inside it - the user saw it, this file
+// did not. Two signals that actually work, both on STRONGLY opaque pixels
+// (alpha > 128) so stray motes cannot vote:
+//   edge   - opaque pixels sitting on the canvas border, i.e. art run out of room
+//   flat   - opaque pixels still in the LAST row that has any. A real foot or
+//            wingtip tapers to a handful; a straight cut leaves a wide band.
 const box = async (f) => {
-  const im = sharp(f); const m = await im.metadata();
-  const { info } = await im.trim({ threshold: 10 }).toBuffer({ resolveWithObject: true });
-  const left = -info.trimOffsetLeft, top = -info.trimOffsetTop;
-  // 'Cut off' means the art runs out of canvas - LEFT, TOP or RIGHT. The BOTTOM
-  // is flush by design on every one of these sprites, original art included: the
-  // draw path anchors the lowest opaque pixel to the foot line, so a standing
-  // character's feet sit exactly on the canvas edge. Counting that as clipping
-  // failed all nine untouched frames and said nothing about the real question.
-  return { w: info.width, h: info.height, bottom: m.height - (top + info.height),
-    margin: Math.min(left, top, m.width - (left + info.width)) };
+  const { data, info } = await sharp(f).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width: W, height: H, channels: C } = info;
+  const op = (x, y) => data[(y * W + x) * C + 3] > 128;
+  let top = 0, bottom = 0, left = 0, right = 0;
+  for (let x = 0; x < W; x++) { if (op(x, 0)) top++; if (op(x, H - 1)) bottom++; }
+  for (let y = 0; y < H; y++) { if (op(0, y)) left++; if (op(W - 1, y)) right++; }
+  const rows = [];
+  for (let y = 0; y < H; y++) { let n = 0; for (let x = 0; x < W; x++) if (op(x, y)) n++; rows.push(n); }
+  let last = -1; for (let y = H - 1; y >= 0; y--) if (rows[y] > 0) { last = y; break; }
+  const { info: tr } = await sharp(f).trim({ threshold: 10 }).toBuffer({ resolveWithObject: true });
+  return { w: tr.width, edge: Math.max(top, left, right), bottomEdge: bottom, flat: last >= 0 ? rows[last] : 0 };
 };
 const astral = [], generic = [];
 for (let i = 0; i < 9; i++) {
@@ -92,9 +101,10 @@ const r = await page.evaluate(() => {
 const T = r.timeline || [];
 ok('the astral set loads and decodes as its own 9-frame sprite',
   r.loaded && r.count === 9 && r.decoded, { frames: r.count, decoded: r.decoded, key: r.key });
-ok('nothing in the astral set is cut off - every frame clears the canvas edge',
-  astral.every(f => f.margin > 5),
-  { smallestMargin: Math.min(...astral.map(f => f.margin)) + 'px', widths: aw });
+ok('nothing in the astral set is cut off - no edge contact, no flat slice',
+  astral.every(f => f.edge === 0 && f.bottomEdge === 0 && f.flat <= 30),
+  { worstEdgePixels: Math.max(...astral.map(f => Math.max(f.edge, f.bottomEdge))),
+    worstLastRow: Math.max(...astral.map(f => f.flat)) + ' opaque px (a straight cut left 153)', widths: aw });
 ok('the cast opens on frame 0 and the BURST lands exactly on the resolve',
   r.atStart === 0 && r.atResolve === 6,
   { atStart: r.atStart, atResolve1500ms: r.atResolve, timeline: T.map(x => x.pt + 'ms->f' + x.f).join(' ') });
@@ -110,8 +120,10 @@ ok('the generic attack set no longer carries the tiny two-limbed outliers',
 ok('...so its frame-to-frame variation is tight, not a 2.5x jump',
   spread(gw) < 1.2,
   { spreadNow: spread(gw).toFixed(2) + 'x', spreadBefore: (958 / 381).toFixed(2) + 'x' });
-ok('the generic set is not cut off either', generic.every(f => f.margin > 5),
-  { smallestMargin: Math.min(...generic.map(f => f.margin)) + 'px' });
+ok('the generic set has no art running off the left, top or right',
+  generic.every(f => f.edge === 0),
+  { worstEdgePixels: Math.max(...generic.map(f => f.edge)),
+    note: 'the BOTTOM is flush by design on this set - feet anchored to the foot line' });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 for (const q of results) console.log((q.pass ? 'PASS ' : 'FAIL ') + ' ' + q.n + '  ' + JSON.stringify(q.x ?? ''));
