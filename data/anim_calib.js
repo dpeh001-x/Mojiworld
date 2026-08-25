@@ -191,14 +191,14 @@ window.LX_ANIM_CALIB = {
   },
   "aetherion": {
     "idle": {
-      "s": 1,
+      "s": 1.58,
       "dx": 0,
-      "dy": 0.01
+      "dy": 0.165
     },
     "walk": {
       "s": 1.0457,
       "dx": -0.02,
-      "dy": 0.01
+      "dy": 0.02
     },
     "attack": {
       "s": 1.6,
@@ -237,7 +237,7 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 0.965,
       "dx": 0,
-      "dy": 0.0294
+      "dy": 0.13
     }
   },
   "gravitos3": {
@@ -280,7 +280,7 @@ window.LX_ANIM_CALIB = {
       "dy": 0.05
     },
     "attack": {
-      "s": 2.8,
+      "s": 2.52,
       "dx": 0.0105,
       "dy": 0.41
     }
@@ -519,7 +519,7 @@ window.LX_ANIM_CALIB = {
   },
   "gravitos3soul": {
     "attack": {
-      "s": 1.0432,
+      "s": 1.12,
       "dx": 0,
       "dy": 0.0294
     }
@@ -556,14 +556,14 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1,
       "dx": -0.0469,
-      "dy": 0
+      "dy": 0.02
     }
   },
   "towerSovereigncolumn": {
     "attack": {
       "s": 1,
       "dx": -0.0427,
-      "dy": 0
+      "dy": 0.015
     }
   },
   "towerSovereigncollapse": {
@@ -577,14 +577,14 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1,
       "dx": -0.0552,
-      "dy": 0
+      "dy": 0.015
     }
   },
   "towerSovereigndrain": {
     "attack": {
       "s": 1.0109,
       "dx": -0.0458,
-      "dy": 0
+      "dy": 0.06
     }
   },
   "kingKrookstomp": {
