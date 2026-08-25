@@ -191,6 +191,33 @@ const TARGETS = {
       'channel and must be a strong sustained pose, because it is held. He keeps ALL FOUR arms and BOTH wings ' +
       'in every frame, and does NOT step, walk, turn, shrink, grow or drift - same demon, same size, same ' +
       'place, only the pose and the light change.' + FULLBODY },
+  // v0.30.x - AETHERION'S IDLE, REBUILT WITH FOUR LEGS (per user: "regenerate
+  // aetherion idle sprite animations to make sure aetherion has 4 limbs with
+  // reference to the walking sprite").
+  //
+  // Measured across all 18 frames: every one of the nine IDLE frames draws the
+  // dragon with only the near foreleg and near hindleg - the far pair is simply
+  // absent, so a quadruped reads as standing on two. The base sprite has the
+  // same fault and the idle set faithfully inherited it. The WALK set is the
+  // only art that gets it right, and only in its mid-stride frames, where the
+  // legs separate enough to be drawn individually (walk_0 and walk_8 are
+  // two-legged like the idle; walk_1..7 are not).
+  //
+  // So the anatomy reference is walk_2, the widest-stance frame at 905 px of
+  // content, and the FRAMING reference is the canonical base - see fitBase.
+  // Fitting to walk_2 instead would hand the idle a 905 px box in place of the
+  // ~660 px one its calibration was tuned against, and quietly resize Aetherion
+  // every time it stopped moving.
+  aetherion: { base: 'Sprites/bosses/walk/aetherion_2.webp', dir: 'Sprites/bosses/idle',
+    fitBase: 'Sprites/bosses/aetherion.webp', pad: 0.2,
+    motion: 'This crystalline white-and-gold dragon stands STILL and breathes - a calm idle, not a walk. All FOUR ' +
+      'of its legs stay planted flat on the ground and clearly visible for the whole loop: the two near legs and ' +
+      'the two far legs on the other side of its body, four separate feet on the ground at all times. It does NOT ' +
+      'take a step, lift a foot, walk or move from the spot. What moves is quiet and small: its ribcage swells and ' +
+      'settles with slow breathing, its folded wings shift and resettle, its long tail sways gently and the glowing ' +
+      'orb at the tail tip pulses softly brighter and dimmer, its head tilts a little and its jaw and horns catch ' +
+      'the light. A calm creature at rest, holding its ground. A CONTINUOUS SEAMLESS LOOP - the last frame flows ' +
+      'back into the first with no jump.' + FULLBODY },
 };
 
 const only = val('--only', null);
@@ -315,7 +342,15 @@ for (const k of keys) {
       if (!argv.includes('--no-fit')) {
         try {
           const { fitFramesToBase } = await import('./fit_sprite_frames.mjs');
-          await fitFramesToBase(basePath, _written, { write: true, log: (m) => console.log('  ' + m) });
+          // v0.30.x — `fitBase` separates ANATOMY from FRAMING. A target can now
+          // animate from one sprite and be fitted to the box of another, which is
+          // what lets a set be rebuilt off a reference that draws the creature
+          // correctly without inheriting that reference's framing — and so
+          // without invalidating the calibration the game already holds for the
+          // set being replaced. Defaults to the base, so every existing target
+          // behaves exactly as before.
+          const _fitTo = t.fitBase ? join(repoRoot, t.fitBase) : basePath;
+          await fitFramesToBase(_fitTo, _written, { write: true, log: (m) => console.log('  ' + m) });
         } catch (e) { console.log('  fit skipped: ' + String(e.message).slice(0, 100)); }
       }
       done = true;
