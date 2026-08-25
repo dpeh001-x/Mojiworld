@@ -63,7 +63,7 @@ function _lxOctoMaybeLance(leg, proj) {
   proj.stun = LX_OCTO_LANCE_STUN_MS;
   proj.stunHit = LX_OCTO_LANCE_STUN_MS;
   proj._octoLance = true;
-  proj._radiance = { chance: 1, frac: LX_OCTO_LANCE_HP_FRAC,
+  proj._radiance = { chance: 1, frac: LX_OCTO_LANCE_HP_FRAC, flat: true,
                      label: 'a mood lance', color: '#ff8fa3' };
   if (typeof showToast === 'function') showToast('\u{1F991} MOOD LANCE \u2014 dodge it', 'epic');
   if (typeof addShake === 'function') addShake(6);
