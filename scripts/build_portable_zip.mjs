@@ -80,7 +80,11 @@ fs.writeFileSync(path.join(STAGE, 'PLAY_ME_FIRST.txt'), [
 // ---- verify the stage is playable ------------------------------------------
 const must = ['mojiworld_game.html', 'serve.js', 'Mojiworld.cmd', 'node/node.exe',
   'data/anim_calib.js', 'sw.js', 'steam/higgsfield/cinematics/clip_prologue_pov.mp4',
-  'Sprites/ui/block_shield.png', 'PLAY_ME_FIRST.txt'];
+  // v0.30.x — .webp, not .png. This post-stage check asserted a file that has
+  // never existed in the repo, so the portable zip aborted every time it was
+  // built. The asset is Sprites/ui/block_shield.webp and the game asks for the
+  // .webp too (with an emoji onerror fallback), so only this list was wrong.
+  'Sprites/ui/block_shield.webp', 'PLAY_ME_FIRST.txt'];
 for (const rel of must) {
   if (!fs.existsSync(path.join(STAGE, rel))) { console.error('ABORT: staged file missing: ' + rel); process.exit(1); }
 }
