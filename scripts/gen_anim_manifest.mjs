@@ -15,6 +15,12 @@ sharp.cache(false);
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
 const STATES = ['idle', 'walk', 'attack'];
+// v0.30.x — states only some entities own. Barnaby's evade pair lives under
+// Sprites/bosses/{duck,weave}/; the zodiac trio under
+// Sprites/bosses/zodiac/{charge,fly,pounce}/. Scanning for a state whose
+// directory does not exist is a no-op, so each group can simply ask for more.
+const BOSS_EXTRA = ['duck', 'weave'];
+const ZODIAC_EXTRA = ['charge', 'fly', 'pounce'];
 
 // Alpha bbox-bottom fraction of a sprite (mirrors the game's foot anchor).
 // v0.29.x — EXACT mirror of the game's _detectSpriteBboxBottom: alpha > 64
@@ -78,9 +84,10 @@ async function frameBox(path) {
 async function scanGroup(group, dir, opts = {}) {
   const urlBase = opts.urlBase || `Sprites/${group === 'boss' ? 'bosses' : 'monsters'}`;
   const keyPrefix = opts.keyPrefix || '';
+  const states = opts.states || STATES;
   // discover entity types from the idle/walk/attack subdirs
   const types = new Set();
-  for (const st of STATES) {
+  for (const st of states) {
     const sdir = join(dir, st);
     if (!(await exists(sdir))) continue;
     for (const f of await readdir(sdir)) {
@@ -100,8 +107,8 @@ async function scanGroup(group, dir, opts = {}) {
       }
       if (base) break;
     }
-    const states = {};
-    for (const st of STATES) {
+    const found = {};
+    for (const st of states) {
       let count = 0; let dims = null; const cb = [];
       while (await exists(join(dir, st, `${type}_${count}.webp`))) {
         const fp = join(dir, st, `${type}_${count}.webp`);
@@ -109,22 +116,22 @@ async function scanGroup(group, dir, opts = {}) {
         cb.push(await frameBox(fp));
         count++;
       }
-      if (count) states[st] = { count, ...(dims || {}), dir: `${urlBase}/${st}/${type}`, cb };
+      if (count) found[st] = { count, ...(dims || {}), dir: `${urlBase}/${st}/${type}`, cb };
     }
-    if (Object.keys(states).length) out[keyPrefix + type] = { group, base, basePath, states };
+    if (Object.keys(found).length) out[keyPrefix + type] = { group, base, basePath, states: found };
   }
   return out;
 }
 
 const manifest = {
   ...(await scanGroup('monster', join(root, 'Sprites', 'monsters'))),
-  ...(await scanGroup('boss', join(root, 'Sprites', 'bosses'))),
+  ...(await scanGroup('boss', join(root, 'Sprites', 'bosses'), { states: [...STATES, ...BOSS_EXTRA] })),
   // v0.30.x — the twelve zodiac bosses. Their art is one level down and their
   // statics sit beside it, and the game keys their calibration on
   // 'zodiac_' + sign, so the manifest key has to match or an exported
   // calibration would land under a key the game never reads.
   ...(await scanGroup('boss', join(root, 'Sprites', 'bosses', 'zodiac'),
-    { urlBase: 'Sprites/bosses/zodiac', keyPrefix: 'zodiac_' })),
+    { urlBase: 'Sprites/bosses/zodiac', keyPrefix: 'zodiac_', states: [...STATES, ...ZODIAC_EXTRA] })),
 };
 const n = Object.keys(manifest).length;
 // v0.29.179 — BAKE-TIME CANVAS VALIDATION. A BOSS whose static sprite lives on
