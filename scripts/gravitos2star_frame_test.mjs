@@ -14,11 +14,23 @@
 //     different height. Disagree about where the floor is and the boss hops.
 //
 // So the opening beat is pinned against its neighbour on both, and the whole
-// set is pinned against the canvas edge. What is NOT asserted here is the
-// 1->2 step: frames 2..8 really are ~11% larger than 0..1 (body measured star-
-// to-feet: 750px at _1, 861px at _2), which is a set-wide retune rather than
-// anything this frame can fix, and asserting it would fail on art nobody has
-// been asked to change yet.
+// set is pinned against the canvas edge.
+//
+// CORRECTION, and the reason bodyHeight() below exists. An earlier version of
+// this file claimed frames 2..8 were "~11% larger" than 0..1 and called it a
+// zoom. That was wrong, in the way this project keeps rediscovering: the metric
+// measured the wrong thing. The content box DOES grow across the set — because
+// the lightning sprawls, not because the titan does. The follow-up measurement,
+// star-to-feet, was contaminated by the same lightning: the arcs are blue-white
+// too, so on the discharge frames they dragged the "star" centroid and made the
+// body look like it was moving as well.
+//
+// Measured on the DARK ARMOUR alone — luminance under 120, which neither the
+// lightning nor the chest star can reach — the shipped set is rock steady:
+// body heights 1216..1224 across all nine frames, a 0.7% spread. There is no
+// zoom. That stability is asserted below, because a regenerated set can destroy
+// it: a full-sequence regeneration attempted immediately after measured 5.6%
+// (a -5.6% step at 1->2) and was discarded on exactly these numbers.
 //
 //   node scripts/gravitos2star_frame_test.mjs
 // ============================================================================
@@ -37,6 +49,22 @@ const ok = (name, cond, detail = '') => {
   if (cond) { pass++; console.log(`  PASS  ${name}`); }
   else { fail++; console.log(`  FAIL  ${name}${detail ? '  — ' + detail : ''}`); }
 };
+
+// Body height from the dark armour alone. Lightning and the chest star are
+// BRIGHT, so a luminance ceiling excludes them and leaves the titan behind.
+// This is the only scale metric here that a discharge frame cannot fool.
+async function bodyHeight(p) {
+  const { data, info } = await sharp(p).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width: w, height: h, channels: c } = info;
+  let y0 = h, y1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * c;
+    if (data[i + 3] < 160) continue;
+    if (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 > 120) continue;
+    if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  return y1 < 0 ? null : y1 - y0 + 1;
+}
 
 async function measure(p) {
   const { data, info } = await sharp(p).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
@@ -87,13 +115,26 @@ const bodyDelta = (a.starToFeet && b.starToFeet) ? Math.abs(a.starToFeet - b.sta
 ok('_0 and _1 are the same titan, not two sizes of it', bodyDelta <= 0.05,
   `star-to-feet ${Math.round(a.starToFeet)} vs ${Math.round(b.starToFeet)} — ${(bodyDelta * 100).toFixed(1)}%`);
 
+// ---- the titan is one size all the way through -----------------------------
+const bodies = [];
+for (let i = 0; i < 9; i++) bodies.push(await bodyHeight(join(SET, `${KEY}_${i}.webp`)));
+const bodySpread = (Math.max(...bodies) - Math.min(...bodies)) / Math.max(...bodies);
+ok('the titan does not change size across the attack', bodySpread <= 0.03,
+  `dark-armour body heights ${Math.min(...bodies)}..${Math.max(...bodies)} = ${(bodySpread * 100).toFixed(1)}% spread`);
+const steps = bodies.slice(1).map((v, i) => Math.abs(v - bodies[i]) / bodies[i]);
+const worstStep = Math.max(...steps);
+ok('no single frame resizes the titan', worstStep <= 0.03,
+  `biggest step ${(worstStep * 100).toFixed(1)}% at ${steps.indexOf(worstStep)}->${steps.indexOf(worstStep) + 1}`);
+
 // ---- the generator that made it stays reproducible --------------------------
 ok('the regenerator is in the repo', existsSync(join(root, 'scripts', 'regen_gravitos2star_frame.mjs')));
 
 console.log(`\n${pass}/${pass + fail} checks passed`);
-// Informational: the set-wide step this frame deliberately does not touch.
+// Informational, and deliberately printed right after the body assertion so the
+// two can never be confused again: the CONTENT BOX does swing across the set,
+// and that swing is the lightning, not the titan.
 const hs = F.map((f) => f.bh);
 const jumps = hs.slice(1).map((v, i) => ({ at: `${i}->${i + 1}`, pct: (v - hs[i]) / hs[i] * 100 }));
 const worst = jumps.reduce((p, q) => Math.abs(q.pct) > Math.abs(p.pct) ? q : p);
-console.log(`note: largest remaining frame-to-frame box step is ${worst.at} at ${worst.pct > 0 ? '+' : ''}${worst.pct.toFixed(1)}% — a set-wide retune, not this frame's to fix`);
+console.log(`note: content box swings ${worst.pct > 0 ? '+' : ''}${worst.pct.toFixed(1)}% (${worst.at}) while the body holds to ${(bodySpread * 100).toFixed(1)}% — that gap IS the lightning`);
 process.exit(fail ? 1 : 0);

@@ -15,10 +15,18 @@
 //   _8     1015 x 1260
 //
 // Nothing is clipped anywhere in the set (border ink is 0 on all nine), so the
-// "cutoff" risk is prospective rather than present. The ZOOM is real and
-// present: the boss renderer sizes a frame from its content box, so a set whose
-// box grows 11% between two consecutive frames draws a boss that swells
-// partway through its own attack.
+// "cutoff" risk is prospective rather than present.
+//
+// AND NEITHER IS THE ZOOM — a correction to what this comment used to say. The
+// content box really does grow 11% at 1->2, and that is the lightning
+// sprawling, not the titan. Measured on the dark armour alone (luminance under
+// 120, which neither the lightning nor the chest star reaches) the set is
+// steady at a 0.7% spread across all nine frames. The follow-up metric that
+// seemed to confirm a body zoom, star-to-feet, was contaminated by the same
+// lightning: the arcs are blue-white, so on the discharge frames they dragged
+// the "star" centroid. Two metrics agreeing is worth nothing when they share a
+// blind spot. scripts/gravitos2star_frame_test.mjs now asserts the dark-armour
+// stability directly.
 //
 // That is why a regenerated frame cannot simply be dropped in at whatever scale
 // the model returns. Two things are enforced here:
@@ -53,6 +61,22 @@ const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 const arg = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
 const framePath = (i) => join(SET, `${KEY}_${i}.webp`);
+
+// The whole attack, for --set. The single-frame MOTION below describes only the
+// wind-up; a nine-frame sequence needs the release too, or the set peaks in the
+// middle and then just sits there.
+const SET_MOTION =
+  'The armoured demon titan CHARGES AND RELEASES the star at its chest, as one continuous attack: it '
+  + 'plants its feet and hauls both fists up and outward, the molten orange veins in its plating flare '
+  + 'brighter and brighter, the white-blue star on its chest swells and begins to crackle, then arcs of '
+  + 'blue-white lightning burst outward from it across the whole body and lash out in jagged '
+  + 'bolts, the star blazing to a blinding flare at the peak before the arcs die back down. '
+  + 'Every frame should look clearly different from the last - this is a violent build and discharge. '
+  + 'CRITICAL FRAMING, these override the motion: the TITAN stays EXACTLY the same SIZE in every frame '
+  + '- no zoom in, no zoom out, no camera push, it never grows or shrinks. It stays CENTRED and its '
+  + 'FEET STAY ON THE SAME LINE, planted on the ground, in every single frame. Keep the EXACT same '
+  + 'character, the same left/right facing, the same armour, the same colours and the same art style '
+  + 'throughout. Never mirror or flip.';
 
 const MOTION =
   'The armoured demon titan BEGINS to charge the star at its chest: it plants its feet, hauls both '
@@ -114,6 +138,74 @@ async function iouWith(buf, refBuf) {
   return inter / Math.max(1, uni);
 }
 
+// ---------------------------------------------------------------------------
+// SET MODE. Regenerate all nine frames from the current frame 0.
+//
+// The transform is derived from frame 0 ALONE and then applied unchanged to
+// every frame. That is the whole anti-zoom mechanism: one scale and one offset
+// for the set means the titan cannot grow between frames, while everything the
+// animation actually does - leaning, crouching, throwing its arms out, the
+// lightning sprawling - survives intact, because those are changes WITHIN the
+// shared frame, not changes to it.
+//
+// Two things it deliberately preserves, because data/anim_calib.js carries a
+// hand-tuned "gravitos2star".attack entry (s 0.965, dy 0.0294) fitted to the
+// art that is there now:
+//   * the PIXEL SCALE of frame 0's body, so that calibration stays valid;
+//   * the FLOOR LINE - 147px of canvas below the feet - so the boss does not
+//     jump when the new set lands.
+//
+// And when a frame needs more room than the canvas has (the lightning frames
+// sprawl far wider than the body), the canvas GROWS rather than the titan
+// shrinking. Shrinking to fit would be a zoom by another name, and would
+// silently invalidate the calibration above. Per user: "if needed expand the
+// canvas so there are no cutoffs".
+async function refitSetAnchoredOnFirst(bufs, anchor) {
+  const ms = [];
+  for (const b of bufs) ms.push(await measure(b));
+  // one scale, from frame 0's body against the anchor's body
+  const sc = Math.min(anchor.bw / ms[0].bw, anchor.bh / ms[0].bh);
+  const scaled = [];
+  for (let i = 0; i < bufs.length; i++) {
+    const sw = Math.max(1, Math.round(ms[i].w * sc)), sh = Math.max(1, Math.round(ms[i].h * sc));
+    scaled.push(await sharp(bufs[i]).ensureAlpha().resize(sw, sh, { fit: 'fill' }).png().toBuffer());
+  }
+  const sm = [];
+  for (const b of scaled) sm.push(await measure(b));
+  // one offset, so frame 0's feet land on the anchor's floor line and its body
+  // is centred where the anchor's was
+  const dx = (anchor.x0 + anchor.bw / 2) - (sm[0].x0 + sm[0].bw / 2);
+  const dy = anchor.y1 - sm[0].y1;
+  // where does the whole set reach once transformed?
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const m of sm) {
+    minX = Math.min(minX, m.x0 + dx); maxX = Math.max(maxX, m.x1 + dx);
+    minY = Math.min(minY, m.y0 + dy); maxY = Math.max(maxY, m.y1 + dy);
+  }
+  const MARGIN = 24;
+  // grow the canvas, never shrink the titan. Bottom margin is held at the
+  // anchor's so the floor line is unchanged in canvas-relative terms.
+  const bottomMargin = anchor.h - 1 - anchor.y1;
+  const growL = Math.max(0, Math.ceil(MARGIN - minX));
+  const growR = Math.max(0, Math.ceil(maxX - (anchor.w - 1) + MARGIN));
+  const growT = Math.max(0, Math.ceil(MARGIN - minY));
+  const growB = Math.max(0, Math.ceil(maxY + bottomMargin - (anchor.h - 1)));
+  const grow = Math.max(growL, growR);            // keep it horizontally symmetric
+  const outW = anchor.w + 2 * grow, outH = anchor.h + growT + growB;
+  const out = [];
+  for (let i = 0; i < scaled.length; i++) {
+    const left = Math.round(dx + grow), top = Math.round(dy + growT);
+    const cropL = Math.max(0, -left), cropT = Math.max(0, -top);
+    const availW = Math.min(sm[i].w - cropL, outW - Math.max(0, left));
+    const availH = Math.min(sm[i].h - cropT, outH - Math.max(0, top));
+    const piece = await sharp(scaled[i])
+      .extract({ left: cropL, top: cropT, width: Math.max(1, availW), height: Math.max(1, availH) }).png().toBuffer();
+    out.push(await sharp({ create: { width: outW, height: outH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .composite([{ input: piece, left: Math.max(0, left), top: Math.max(0, top) }]).webp({ quality: 94 }).toBuffer());
+  }
+  return { out, grew: { x: grow, top: growT, bottom: growB }, scale: sc };
+}
+
 if (has('--report')) {
   console.log('  frame   canvas        content box     at        border');
   const b = await measure(await readFile(BASE));
@@ -130,6 +222,87 @@ if (has('--report')) {
   const worst = jumps.reduce((p, q) => Math.abs(q.pct) > Math.abs(p.pct) ? q : p);
   console.log(`  biggest single-frame jump: ${worst.at}  ${worst.pct > 0 ? '+' : ''}${worst.pct.toFixed(1)}%`);
   console.log(`  frames with ink on the canvas edge: ${boxes.filter((m) => m.border > 0).length}`);
+  process.exit(0);
+}
+
+if (has('--set')) {
+  const key = process.env.LUDO_API_KEY;
+  if (!key || !has('--generate')) { console.error('usage: --set --generate [--rolls N]'); process.exit(1); }
+  const API = process.env.LUDO_API_BASE || 'https://api.ludo.ai/api';
+  const ROLLS = Number(arg('--rolls') || 3);
+  const PAD = Number(arg('--pad') || 0.18);
+  const hdr = { Authorization: `ApiKey ${key}`, 'Content-Type': 'application/json' };
+  const fetchBuf = async (u) => Buffer.from(await (await fetch(u, { signal: AbortSignal.timeout(180000) })).arrayBuffer());
+
+  // The seed is the CURRENT frame 0 - the one just regenerated - per user.
+  const seedBuf = await readFile(framePath(0));
+  const anchor = await measure(seedBuf);
+  console.log(`seeding from ${KEY}_0 (box ${anchor.bw}x${anchor.bh}, floor at y=${anchor.y1} on a ${anchor.w}x${anchor.h} canvas)`);
+
+  const padded = await sharp({ create: { width: anchor.w, height: anchor.h, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: await sharp(seedBuf).resize(Math.round(anchor.w * (1 - 2 * PAD)), Math.round(anchor.h * (1 - 2 * PAD)), { fit: 'inside' }).png().toBuffer(), gravity: 'centre' }])
+    .png().toBuffer();
+  const uri = 'data:image/png;base64,'
+    + (await sharp(padded).resize(940, 940, { fit: 'inside', withoutEnlargement: true }).png().toBuffer()).toString('base64');
+
+  await mkdir(KEEP, { recursive: true });
+  let best = null;
+  for (let r = 1; r <= ROLLS; r++) {
+    process.stdout.write(`roll ${r}/${ROLLS} ... `);
+    let bufs;
+    try {
+      const res = await fetch(`${API}/assets/sprite/animate`, {
+        method: 'POST', headers: hdr, signal: AbortSignal.timeout(300000),
+        body: JSON.stringify({ initial_image: uri, motion_prompt: SET_MOTION, frames: FRAMES,
+          frame_size: -9, model: 'eagle', individual_frames: true, loop: false, image_type: 'sprite' }),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 160)}`);
+      const d = await res.json();
+      const urls = d.individual_frame_urls || [];
+      if (urls.length < FRAMES) throw new Error(`got ${urls.length} frames`);
+      bufs = await Promise.all(urls.slice(0, FRAMES).map(fetchBuf));
+    } catch (e) { console.log('FAIL ' + e.message); continue; }
+    for (let i = 0; i < bufs.length; i++) await writeFile(join(KEEP, `set_r${r}_${i}.png`), bufs[i]);
+
+    const { out, grew, scale } = await refitSetAnchoredOnFirst(bufs, anchor);
+    const fm = [];
+    for (const b of out) fm.push(await measure(b));
+    const border = fm.reduce((a2, m) => a2 + m.border, 0);
+    // The zoom check, on the BODY rather than the box: the box legitimately
+    // grows when lightning sprawls, the body does not.
+    const bodies = fm.map((m) => m.bh);
+    const spread = (Math.max(...bodies) - Math.min(...bodies)) / Math.max(...bodies);
+    // Feet on one line - the renderer is bbox-bottom anchored.
+    const feet = fm.map((m) => m.y1);
+    const footSpread = Math.max(...feet) - Math.min(...feet);
+    // ...and it has to actually animate.
+    let motion = 0;
+    for (let i = 0; i + 1 < out.length; i++) {
+      const a2 = await sharp(out[i]).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      const b2 = await sharp(out[i + 1]).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      let sum = 0, n = 0;
+      for (let px = 0; px < a2.info.width * a2.info.height; px++) {
+        const ia = px * a2.info.channels, ib = px * b2.info.channels;
+        if (a2.data[ia + 3] <= 128 || b2.data[ib + 3] <= 128) continue;
+        sum += Math.abs((a2.data[ia] * 0.299 + a2.data[ia + 1] * 0.587 + a2.data[ia + 2] * 0.114)
+                      - (b2.data[ib] * 0.299 + b2.data[ib + 1] * 0.587 + b2.data[ib + 2] * 0.114));
+        n++;
+      }
+      motion += sum / Math.max(1, n);
+    }
+    motion /= (out.length - 1);
+    const okRoll = border === 0;
+    console.log(`canvas ${fm[0].w}x${fm[0].h} (grew x${grew.x} top${grew.top} bot${grew.bottom})  border ${border}  boxSpread ${(spread * 100).toFixed(1)}%  footSpread ${footSpread}px  motion ${motion.toFixed(1)} ${okRoll ? '' : ' CLIPPED'}`);
+    if (!okRoll) continue;
+    // Prefer the liveliest set that is clean and tight on its feet.
+    const score = motion - footSpread * 0.05 - spread * 60;
+    if (!best || score > best.score) best = { out, score, border, spread, footSpread, motion, fm, grew };
+  }
+  if (!best) { console.error('no clean roll - re-run'); process.exit(2); }
+  for (let i = 0; i < FRAMES; i++) await writeFile(framePath(i), best.out[i]);
+  // The attack-dir base pose mirrors the final frame in this set; keep it so.
+  await writeFile(join(SET, `${KEY}.webp`), best.out[FRAMES - 1]);
+  console.log(`wrote ${FRAMES} frames + ${KEY}.webp  canvas ${best.fm[0].w}x${best.fm[0].h}  border 0  boxSpread ${(best.spread * 100).toFixed(1)}%  footSpread ${best.footSpread}px  motion ${best.motion.toFixed(1)}`);
   process.exit(0);
 }
 
