@@ -9904,7 +9904,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.193';
+const GAME_VERSION = 'v0.30.192';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11335,12 +11335,6 @@ const _PROJ_ANIM_KEYS = new Set(['goo','bubble','pincer','splash','quake','stala
   // v0.26.x — Mage Z (magicBolt) energy orb: cute electric-crackle loop. Frames
   // at anim/bolt_*.webp; drawn in the player-projectile branch via _projAnimFrame.
   'bolt',
-  // v0.30.x — the mage's fireball and ice spike finally animate. Both were
-  // static stills under render modes that MOVE them: fire is spun procedurally
-  // at 0.40 rad/frame, ice is rotated to its velocity vector. The frames
-  // therefore animate only what a rotation cannot — the fire churning inside a
-  // fixed outline, the glints and frost plume on a shard that never turns.
-  'p_fireball', 'p_icespike',
   // v0.30.x — the shared warrior shockwave crescent (anim/shockwave_0..8.webp,
   // ludo.ai from the new Bloodlust-style base). Drawn in the generic
   // player-projectile branch below, keyed through _GEN_PROJ_ANIM.
@@ -11433,8 +11427,6 @@ const _LX_PROJ_FOR_SKILL = {
 // so a missing file is a fallback and not a hole.
 const _GEN_PROJ_ANIM = {
   bolt:      'bolt',
-  fire:      'p_fireball',    // v0.30.x — mage X, spun; the loop is the churn
-  ice:       'p_icespike',    // v0.30.x — mage ice spike, oriented; the loop is the frost
   shockwave: 'shockwave',
   bloodwave: 'shockwave',
 };
@@ -22005,10 +21997,10 @@ const monsterTypes = {
   // trait flips the AI jump-roll from 2% / frame to 9% / frame so he
   // hop-strides instead of pacing.
   young_confused_barnaby:         { name:'Young Confused Barnaby, the Lost Sentinel', w:120, h:140, color:'#d8c878', shell:'#6a4a18', hp:1598872, atk:225, def:76, evasion:126, exp:17454, mojicoins:6241, speed:2.1, jump:8, boss:true, level: 40, shoot:'mquery', shootCd:2400, jumpCdMs:1100, signature:'A young Barnaby who never picked which wall to defend. Lashes out in two directions at once.', traits:{ activeBoss:true, bigMelee:{ kind:'swing', dmgMul:2.0, range:175, swingW:265, swingH:115, cdMs:5200, telegraphMs:620 }, columnStrike:{ dmgMul:1.6, width:115, range:540, cdMs:8200, telegraphMs:720 } } },
-  octoLegPoison:    { name:'Venom Tentacle',     w:80, h:60, color:'#cc66ee', shell:'#5a2078', hp:50000,  atk:120, def:120, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
-  octoLegFreeze:    { name:'Frostbite Tentacle', w:80, h:60, color:'#88ccff', shell:'#3a5a88', hp:50000,  atk:120, def:120, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
-  octoLegSkillLock: { name:'Silence Tentacle',   w:80, h:60, color:'#ffaa44', shell:'#aa6622', hp:50000,  atk:120, def:120, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
-  octoLegStun:      { name:'Shock Tentacle',     w:80, h:60, color:'#ffee44', shell:'#aa8822', hp:50000,  atk:120, def:120, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
+  octoLegPoison:    { name:'Venom Tentacle',     w:80, h:60, color:'#cc66ee', shell:'#5a2078', hp:400000,  atk:120, def:120, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
+  octoLegFreeze:    { name:'Frostbite Tentacle', w:80, h:60, color:'#88ccff', shell:'#3a5a88', hp:400000,  atk:120, def:120, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
+  octoLegSkillLock: { name:'Silence Tentacle',   w:80, h:60, color:'#ffaa44', shell:'#aa6622', hp:400000,  atk:120, def:120, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
+  octoLegStun:      { name:'Shock Tentacle',     w:80, h:60, color:'#ffee44', shell:'#aa8822', hp:400000,  atk:120, def:120, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
   // v0.25.487 — Sauro Slope (east of Lava Cavern, Lv 28-30 zone). Cute
   // chunky fire-breathing fauna leading up to the King Krook boss arena.
   // v0.25.620 — Re-leveled (was ~Lv 28-30 → 38-41) for the Lv 40-49 gap fill.
@@ -83592,6 +83584,19 @@ function bossAI(m, dt, distToPlayer) {
     // refreshing it while the condition holds; it self-clears the instant the
     // player backs off (or if the head somehow had no legs yet — guarded by
     // _octoInit so the pre-spawn empty _legRefs doesn't count).
+    // v0.30.x — mood cadence. Ticked here, inside the same block as the Zakum
+    // loop, so it shares the head's AI gating: a staggered or submerged head is
+    // not silently building toward a pulse the player cannot see coming.
+    m._octoMoodT = (m._octoMoodT || 0) + dt;
+    if (!m._octoMoodTele && m._octoMoodT >= LX_OCTO_AILMENT_MS - LX_OCTO_AILMENT_TELE_MS) {
+      m._octoMoodTele = true;
+      showToast('🐙 THE MOODS RISE — brace', 'epic');
+      addShake(3);
+    }
+    if (m._octoMoodT >= LX_OCTO_AILMENT_MS) {
+      m._octoMoodT = 0; m._octoMoodTele = false;
+      _lxOctoMoodPulse(m);
+    }
     // ── v0.30.x — THE ZAKUM LOOP. Clear the arms, burst the exposed body,
     // the arms come back. Before this, severing all four ended the fight's
     // structure: the head's own comment said "Killed legs simply die and stop
@@ -84095,6 +84100,58 @@ const LX_OCTO_BREAK_MUL = 2.0;     // arms all down: the exposed body takes doub
 const LX_OCTO_BREAK_MS  = 9000;    // how long that exposed window stays open
 const LX_OCTO_REGROW_MS = 7000;    // ...then the stumps writhe for this long
 const LX_OCTO_ARM_GEN_HP = 0.7;    // each regrown generation is weaker, so the loop CONVERGES
+// v0.30.x — THE EIGHT MOODS (per user: the tentacles should "occasionally
+// inflict status ailments to player every 30 seconds"). Each arm already owned
+// a status, but only ever delivered it on a dodgeable projectile every 5.5s —
+// so a player who kept moving could take an entire Octobaby fight without ever
+// being poisoned, frozen, silenced or shocked, and the boss's whole identity as
+// the Eight-Mood Tyrant never actually landed.
+// This is a scheduled PULSE instead: on the cadence below every LIVING arm
+// speaks its mood at once. Telegraphed 1.2s ahead so it is a brace-and-cleanse
+// moment rather than an ambush, and it scales with the fight — clear the arms
+// and there is nothing left to inflict anything, which is the same lesson the
+// damage gate teaches. The stun leg still honours getStunResist(), so stun
+// resistance keeps meaning what it means everywhere else.
+const LX_OCTO_AILMENT_MS = 30000;   // one pulse every 30s
+const LX_OCTO_AILMENT_TELE_MS = 1200;
+function _lxOctoMoodPulse(head) {
+  const arms = Array.isArray(head._legRefs) ? head._legRefs : [];
+  if (!arms.length) return 0;
+  if (typeof player === 'undefined' || !player || player.hp <= 0) return 0;
+  const spoke = [];
+  for (const leg of arms) {
+    if (!leg || leg.currentHp <= 0) continue;
+    if (leg.type === 'octoLegPoison') {
+      player._poisonTimer = Math.max(player._poisonTimer || 0, 5000);
+      player._poisonDmg = Math.max(player._poisonDmg || 0, Math.max(1, Math.floor((leg.atk || 120) * 0.25)));
+      spoke.push('☠ POISON');
+    } else if (leg.type === 'octoLegFreeze') {
+      player.freezeTimer = Math.max(player.freezeTimer || 0, 1400);
+      spoke.push('❄ FREEZE');
+    } else if (leg.type === 'octoLegSkillLock') {
+      player._skillLockTimer = Math.max(player._skillLockTimer || 0, 3500);
+      spoke.push('🔒 SILENCE');
+    } else {
+      const _mul = (typeof getStunResist === 'function') ? (1 - getStunResist()) : 1;
+      const _ms = Math.floor(1500 * Math.max(0, _mul));
+      if (_ms > 0) player.stunTimer = Math.max(player.stunTimer || 0, _ms);
+      spoke.push('⚡ SHOCK');
+    }
+    leg._octoFireFlash = 12;
+    for (let _p = 0; _p < 10; _p++) {
+      game.particles.push({
+        x: leg.x + leg.w / 2, y: leg.y + leg.h / 2,
+        vx: (Math.random() - 0.5) * 6, vy: -1 - Math.random() * 3,
+        life: 30, color: leg.color || '#cc66ee', size: 3,
+      });
+    }
+  }
+  if (spoke.length) {
+    showToast('🐙 EIGHT MOODS: ' + spoke.join('  '), 'legendary');
+    addShake(7); flash(0.18);
+  }
+  return spoke.length;
+}
 // Living arms. _legRefs is spliced by the death handler, so its length is the
 // count — but read defensively: it is empty for one tick before _octoInit runs.
 function _lxOctoArmsAlive(m) {
@@ -128275,7 +128332,7 @@ function drawProjectiles() {
         // `bolt` (mage Z / magicBolt, p.w=20) → 3.2 multiplier so the
         // rendered sprite jumps from ~32 px to ~64 px (~2×). Hitboxes
         // unchanged — visual-only bump.
-        const _spriteScale = (p.skill === 'ice')  ? 3.2
+        const _spriteScale = (p.skill === 'ice')  ? 2.4
                            : (p.skill === 'fire') ? 3.6
                            : (p.skill === 'bolt') ? 3.2
                            : 1.6;
@@ -128290,8 +128347,7 @@ function drawProjectiles() {
         // v0.26.x — bolt (mage Z) plays a cute electric-crackle anim loop when its
         // frames have decoded; falls back to the static orb otherwise.
         const _pAnimKey = (typeof _GEN_PROJ_ANIM !== 'undefined') ? _GEN_PROJ_ANIM[p.skill] : null;
-        if (_pAnimKey && p._animOff === undefined) p._animOff = Math.random() * 600;
-        const _pAnim = (_pAnimKey && typeof _projAnimFrame === 'function') ? _projAnimFrame(_pAnimKey, p._animOff) : null;
+        const _pAnim = (_pAnimKey && typeof _projAnimFrame === 'function') ? _projAnimFrame(_pAnimKey) : null;
         // v0.26.x — Per user: the arcane Magic Bolt fades to transparent as it
         // ages — full opacity for the first ~30% of flight, then a linear fade
         // to 0 over the rest. Inside this save/restore, so globalAlpha auto-resets.
