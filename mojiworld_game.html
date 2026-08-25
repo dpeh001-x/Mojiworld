@@ -9984,7 +9984,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.237';
+const GAME_VERSION = 'v0.30.238';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10126,13 +10126,45 @@ const _LX_RSCALE = (() => {
     return (v >= 0.5 && v <= 2) ? v : null;
   } catch (e) { return null; }
 })();
-const _LX_DPR = (_LX_RSCALE != null) ? _LX_RSCALE : Math.min(
-  _LX_IS_MOBILE ? 1 : 1.5,
-  Math.max(1, (typeof window !== 'undefined' && window.devicePixelRatio) || 1)
-);
-(() => {
-  const dpr = _LX_DPR;
-  if (dpr === 1) return;   // v0.29.5xx — was dpr <= 1: sub-1 render scales must apply too
+// v0.30.238 — THE FULLSCREEN FIT COUNTS TOWARD THE BACKING STORE.
+// _fitGameToViewport CSS-scales the fixed 960x560 wrapper to fill the screen,
+// so the device pixels a game pixel occupies are devicePixelRatio × fitScale,
+// not devicePixelRatio alone. Consulting only the device meant an ordinary
+// 1080p monitor (DPR 1) resolved to 1 and rendered 960x560 into a 1851x1080
+// box: a measured 1.93x upscale of the whole game.
+// Overestimating here is harmless (a hair of DOWN-scale); underestimating is
+// the bug — so body padding is deliberately not subtracted.
+function _lxFitScale() {
+  try {
+    const vv = (typeof window !== 'undefined') ? window.visualViewport : null;
+    const vw = (vv && vv.scale === 1) ? vv.width  : window.innerWidth;
+    const vh = (vv && vv.scale === 1) ? vv.height : window.innerHeight;
+    const s = Math.min(vw / W, vh / H);
+    return (isFinite(s) && s > 0) ? s : 1;
+  } catch (e) { return 1; }
+}
+// Desktop cap raised 1.5 -> 2: 1.5 still leaves a 1.29x upscale at 1080p, and
+// 2 is exactly 1:1 there. Measured cost in a live King Krook fight (headless
+// CPU raster — the pessimistic case): mean frame 7.56 -> 8.99 ms, p95
+// unchanged at ~19 ms. 4K stays capped at 2 rather than chasing 4, which would
+// be 4x the fill for a screen already only 2x off.
+// MOBILE IS UNCHANGED at 1 — that budget belongs to the mobile branch.
+function _lxTargetDpr() {
+  if (_LX_RSCALE != null) return _LX_RSCALE;
+  const dev = Math.max(1, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
+  return Math.min(_LX_IS_MOBILE ? 1 : 2, Math.max(1, dev * _lxFitScale()));
+}
+let _LX_DPR = _lxTargetDpr();
+let _lxScaledOnce = false;
+function _lxApplyRenderScale(dpr) {
+  if (!(dpr > 0)) return;
+  _LX_DPR = dpr;
+  // At exactly 1 with the canvas never touched, do NOTHING — byte-for-byte the
+  // pre-v0.30.238 path. Mobile lands here, and mobile CSS owns the element's
+  // box; writing inline width/height would be this change reaching onto the
+  // mobile branch's turf for no gain.
+  if (dpr === 1 && !_lxScaledOnce) return;
+  _lxScaledOnce = true;
   canvas.width  = W * dpr;
   canvas.height = H * dpr;
   canvas.style.width  = W + 'px';
@@ -10148,6 +10180,32 @@ const _LX_DPR = (_LX_RSCALE != null) ? _LX_RSCALE : Math.min(
   // artefacts the user reported.
   ctx.imageSmoothingEnabled = true;
   if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
+}
+_lxApplyRenderScale(_LX_DPR);
+// The fit scale changes on resize and on entering fullscreen, and fullscreen is
+// the commonest way to end up on a big screen — fixing only the initial size
+// would have left the loudest case looking exactly as before. Debounced, and
+// only when the target moves >5%, because re-assigning canvas.width resets ALL
+// 2D context state (see the note above) and is not a per-event operation.
+// Its own listener rather than a hook inside _fitGameToViewport, which is
+// mobile-branch territory.
+// Frames already baked under the old _lxShrinkCap keep their size (a baked
+// canvas is never re-opened); new sets bake at the new cap. Sharpening those
+// too would mean re-decoding every source mid-session, which is the stutter
+// _lxShrinkFrames exists to avoid.
+(() => {
+  if (typeof window === 'undefined' || !window.addEventListener) return;
+  let t = 0;
+  const bump = () => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      const want = _lxTargetDpr();
+      if (Math.abs(want - _LX_DPR) / Math.max(_LX_DPR, 0.001) > 0.05) _lxApplyRenderScale(want);
+    }, 220);
+  };
+  window.addEventListener('resize', bump, { passive: true });
+  document.addEventListener('fullscreenchange', bump);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', bump, { passive: true });
 })();
 
 // Lightweight adaptive visual budget. It only gates eye-candy work; gameplay

@@ -121,6 +121,21 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.238 <span class="tag"><span class="pill bug">bug</span> King Krook was not pixelated &mdash; the whole framebuffer was</span></h2>
+<p>Per user: <em>&ldquo;kingkrook somehow looks very pixelated, could you figure out and rectify&rdquo;</em>. He is drawn from the same art as before; what was wrong sat one layer under him, and under everything else too.</p>
+<p><b>The game renders a fixed 960&times;560 canvas and CSS-scales the wrapper to fill the screen.</b> How many <em>device</em> pixels one game pixel occupies is therefore <code>devicePixelRatio &times; fitScale</code>. <code>_LX_DPR</code> only ever consulted the first half:</p>
+<pre style="background:#0d0b14;border:1px solid #2a2438;border-radius:6px;padding:10px;overflow-x:auto"><code>Math.min(_LX_IS_MOBILE ? 1 : 1.5, Math.max(1, window.devicePixelRatio || 1))</code></pre>
+<p>On an ordinary 1080p monitor that is <code>min(1.5, 1)</code> = <b>1</b>, which took the early return and left the backing store at 960&times;560 while the canvas was <em>displayed</em> across 1851&times;1080 device pixels. Measured off the DOM: a <b>1.93&times; upscale of every pixel in the game</b>, with <code>image-rendering: -webkit-optimize-contrast</code> hardening the edges rather than smoothing them. That is what &ldquo;pixelated&rdquo; is, and a large, detailed boss is simply where it becomes impossible to miss.</p>
+<table>
+<tr><th>maximised 1080p window</th><th>backing store</th><th>displayed</th><th>upscale</th></tr>
+<tr><td>before</td><td>960&times;560</td><td>1851&times;1080</td><td><b>1.93&times;</b></td></tr>
+<tr><td>after</td><td><b>1851&times;1080</b></td><td>1851&times;1080</td><td><b>1.00&times;</b></td></tr>
+</table>
+<p><b>The fit scale now counts toward the backing store</b>, and the desktop cap moves 1.5&nbsp;&rarr;&nbsp;2 &mdash; at 1080p a cap of 1.5 would still leave a 1.29&times; upscale, while 2 is exactly 1:1. A 4K screen stays capped at 2 rather than chasing 4, which would be four times the fill cost for a display already only 2&times; off. <b>Mobile is untouched at 1</b>; that budget belongs to the mobile branch.</p>
+<p><b>Resize and fullscreen are handled too.</b> Entering fullscreen is the commonest way to end up on a big screen, so fixing only the initial size would have left the loudest case looking exactly as before. A debounced listener re-applies the scale when the target moves more than 5&#37; &mdash; re-assigning <code>canvas.width</code> resets all 2D context state, so it is not a per-event operation. Frames already baked under the old <code>_lxShrinkCap</code> keep their size; re-sharpening those mid-session would mean re-decoding every source, which is the stutter that whole subsystem exists to avoid.</p>
+<p><b>The cost was measured, not assumed</b>, because this project has explicit <em>&ldquo;reduce the lag at each boss fight&rdquo;</em> history. In a live King Krook fight under headless CPU rasterisation &mdash; the pessimistic case &mdash; mean frame time goes <b>7.56&nbsp;&rarr;&nbsp;8.99&nbsp;ms</b> and p95 is unchanged at ~19&nbsp;ms. <code>localStorage.lx_render_scale</code> still overrides everything, so anyone on a weak GPU can pin it back to <code>1</code>.</p>
+<p>Pinned by <code>scripts/render_scale_test.mjs</code> &mdash; 7 checks across a 1080p window, a 1440&times;900 laptop, a window barely larger than the logical canvas, a HiDPI screen, the override, and a live resize. The invariant is read off the DOM (<code>canvas.width</code> against the CSS box) rather than from the rendered image on purpose: three separate attempts to measure this from screenshots pointed the crop at the loading mascot, at UI text, and at a death overlay, and each produced a confident number about the wrong thing.</p>
+
 <h2>v0.30.237 <span class="tag"><span class="pill polish">polish</span> The story cards get a face &mdash; and Gravitos mentions a bird</span></h2>
 <p>Per user, on the two Gravitos dialogue cards: <em>make improve on the font and impactfulness, there should be some hints on the 3rd form that guguma is part of all this, make this look grander and not so basic.</em></p>
 
