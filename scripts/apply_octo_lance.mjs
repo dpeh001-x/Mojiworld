@@ -19,12 +19,15 @@ const hpN = s.split('hp:400000,').length - 1;
 if (hpN !== 4) { console.error(`ABORT: expected 4 'hp:400000,', found ${hpN}`); process.exit(1); }
 s = s.split('hp:400000,').join('hp:600000,');
 
-// ---- 2. DEF 120 -> 600, ONLY on the four tentacle rows ---------------------
+// ---- 2. DEF 120 -> 160, ONLY on the four tentacle rows ---------------------
 // 'def:120,' occurs 8 times in the file; half of those are other monsters, so
 // this is scoped to the octoLeg* rows by name rather than replaced globally.
+// This first shipped as 600 and was set to 160 by the user immediately after;
+// the target is corrected here rather than left for a second script to undo,
+// so a fresh run of this file reproduces what is actually on main.
 let defHits = 0;
 s = s.replace(/(octoLeg(?:Poison|Freeze|SkillLock|Stun):\s*\{[^}]*?)def:120,/g,
-  (_m, pre) => { defHits++; return pre + 'def:600,'; });
+  (_m, pre) => { defHits++; return pre + 'def:160,'; });
 if (defHits !== 4) { console.error(`ABORT: expected 4 tentacle def rows, rewrote ${defHits}`); process.exit(1); }
 
 // ---- 3. the MOOD LANCE ----------------------------------------------------
@@ -97,5 +100,5 @@ if (n <= n0) { console.error(`ABORT: tmp ${n}B not larger than ${n0}B`); process
 renameSync(F + '.tmp', F);
 console.log(`applied: ${n0} -> ${s.length} chars (+${s.length - n0})`);
 console.log('  tentacle HP  400000 -> 600000 (+50%)');
-console.log(`  tentacle DEF 120 -> 600 on ${defHits} rows`);
+console.log(`  tentacle DEF 120 -> 160 on ${defHits} rows`);
 console.log('  MOOD LANCE: every 4th shot, 33% max HP + 900ms stun, non-homing');
