@@ -50,6 +50,13 @@
   .sl input[type=number] { width:100%; background:var(--bg); border:1px solid var(--line); color:var(--txt); border-radius:6px; padding:3px 5px; font-size:11px; }
   .srow { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
   .reset { font-size:10px; padding:3px 7px; }
+  /* v0.30.x — frame-by-frame editor */
+  .frnav { display:flex; align-items:center; gap:6px; margin:4px 0 6px; }
+  .frnav button { padding:2px 9px; font-size:13px; line-height:1.2; }
+  .frnav input[type=range] { flex:1; min-width:60px; }
+  .frnav .lbl { font-size:11px; color:var(--mut); min-width:52px; text-align:right; font-variant-numeric:tabular-nums; }
+  #fr-card.held { border-color:#7ddba0; }
+  #fr-card .held-note { font-size:11px; color:#7ddba0; }
   .empty { padding:40px 16px; text-align:center; color:var(--mut); }
   code { background:#0a0d14; padding:1px 5px; border-radius:5px; font-size:11px; }
   #toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#1c2740; border:1px solid var(--acc); color:#fff; padding:9px 16px; border-radius:9px; font-size:12px; opacity:0; transition:opacity .2s; pointer-events:none; }
@@ -83,7 +90,7 @@
       <div class="mut" style="font-size:11px;margin-top:3px">renders EXACTLY what the game renders</div>
       <!-- build badge: bump alongside GAME_VERSION on every animator change,
            so a stale cached copy is identifiable at a glance -->
-      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.198</span>
+      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.199</span>
         <a id="lx-latest-link" href="animator.html" title="Cache-proof launcher: resolves main's current commit via the GitHub API and opens that exact build — use this if the badge looks old" style="color:#5b8cff;margin-left:6px">latest&#8599;</a></div>
       <script>
       // v0.29.246 — LIVE badge freshness probe. The static build string only
@@ -620,6 +627,9 @@
   // and loadFrames() mints new Image objects, so calling it per tile per frame
   // would allocate a fresh element for every frame of every set, forever.
   let groupView = false;
+  // v0.30.x — FRAME HOLD. null = play; an integer = show exactly that frame,
+  // so a single frame can be inspected and tuned without chasing it.
+  let pinFrame = null;
   // v0.30.x — IDLE REFERENCE. The ghost is the family ROOT's idle: a per-attack
   // set has no idle of its own, and the size it has to match is the boss's.
   let idleRef = false;
@@ -631,11 +641,19 @@
   // v0.30.x — T/FR let the group view ask for ANOTHER entity's geometry.
   // Omitted, they fall back to the selected entity, so every existing caller is
   // unchanged.
+  // the ONE place that decides which frame is on screen — the preview, the
+  // metrics readout and the frame editor have to agree on it or you would be
+  // tuning a frame you cannot see
+  function pickFrame(st, arr) {
+    if (!arr || !arr.length) return -1;
+    if (pinFrame != null) return Math.max(0, Math.min(pinFrame, arr.length - 1));
+    return gameTiming ? C.gameFrameIndex(st, arr, nowT) : (frameIdx % arr.length);
+  }
   function geomFor(st, img, T, FR) {
     T = T || cur; FR = FR || frames;
     if (!T) return null;
     if (img === undefined && FR[st] && FR[st].length) {
-      const i = gameTiming ? C.gameFrameIndex(st, FR[st], nowT) : (frameIdx % FR[st].length);
+      const i = pickFrame(st, FR[st]);
       img = (i >= 0 && FR[st][i] && FR[st][i].complete && FR[st][i].naturalWidth) ? FR[st][i] : null;
     }
     return C.geometry(T, st, img, FR.idle);
@@ -777,7 +795,7 @@
   function drawState(ent, st, cx, groundY, alpha, T, FR) {
     T = T || cur; FR = FR || frames;      // v0.30.x — group view draws other entities through THIS function
     const arr = FR[st]; if (!arr || !arr.length) return;
-    const idx = gameTiming ? C.gameFrameIndex(st, arr, nowT) : (frameIdx % arr.length);
+    const idx = pickFrame(st, arr);
     if (idx < 0) return;
     const img = arr[idx];
     if (!img.complete || !img.naturalWidth) return;
@@ -944,7 +962,8 @@
     const ent = MAN[r]; if (!ent || !ent.states.idle) return null;
     const fr = _grpFramesFor(r);
     const arr = fr.idle; if (!arr || !arr.length) return null;
-    const i = gameTiming ? C.gameFrameIndex('idle', arr, nowT) : (frameIdx % arr.length);
+    // held: the reference stays on one pose so it is not moving while you tune
+    const i = (pinFrame != null) ? 0 : (gameTiming ? C.gameFrameIndex('idle', arr, nowT) : (frameIdx % arr.length));
     const img = arr[i >= 0 ? i : 0];
     if (!img || !img.complete || !img.naturalWidth) return null;
     const gm = C.geometry(r, 'idle', img, fr.idle); if (!gm) return null;
@@ -1121,6 +1140,9 @@
     setHbEdit: v => { hbEdit = v; }, setCompose: v => { compose = v; }, getCompose: () => compose,
     setGroupView: v => { groupView = !!v; fit(); paint(); }, getGroupView: () => groupView,
     setIdleRef: v => { idleRef = !!v; paint(); }, getIdleRef: () => idleRef,
+    setPinFrame: (i) => { pinFrame = (i == null) ? null : (i | 0); paint(); }, getPinFrame: () => pinFrame,
+    frameCount: (st) => ((frames[st] && frames[st].length) || 0),
+    shownFrame: (st) => pickFrame(st, frames[st]),
     idleRefRect: (cx, gy) => drawIdleRef(cx == null ? cv.width / 2 : cx, gy == null ? cv.height - 64 : gy, 0),
     groupTiles: () => (cur ? groupTiles() : []), familyOf: (t) => _familyOf(t),
     groupLayout: () => (cur ? groupLayout(groupTiles(), Math.max(560, document.getElementById('stagewrap').clientWidth - 4), idleRef ? idleRefSize() : null) : null),
@@ -1230,6 +1252,49 @@
       `<input type="range" data-st="${st}" data-k="${k}" min="${mn}" max="${mx}" step="${step}" value="${v}" />` +
       `<input type="number" data-st="${st}" data-k="${k}" min="${mn}" max="${mx}" step="${step}" value="${v}" /></div>`;
   }
+  // v0.30.x — FRAME-BY-FRAME. fs[] (per-frame scale) has been in the calib
+  // format, the loader, the renderer and the exporter all along with no way to
+  // author a value. This is the way in: hold a frame, then scale that frame.
+  //
+  // Bosses only, and the card says so for a monster rather than offering the
+  // control anyway. The game applies fs in _drawBossSprite alone - drawMonster
+  // has no frame index at the point it applies calibration - so a monster knob
+  // would move the preview and nothing in the game, which is the bug fixed one
+  // version ago wearing a different hat.
+  function frameCard() {
+    const st = A.focusState, n = A.frameCount(st);
+    const isBoss = A.MAN[A.cur] && A.MAN[A.cur].group === 'boss';
+    if (!n) return '';
+    const pin = A.getPinFrame();
+    const held = pin != null;
+    const i = held ? Math.max(0, Math.min(pin, n - 1)) : (A.shownFrame(st) || 0);
+    const v = A.CALIB()[A.cur][st];
+    const cur = (v.fs && v.fs[i] > 0) ? +v.fs[i] : 1;
+    const tuned = Array.isArray(v.fs) ? v.fs.filter(f => +f !== 1).length : 0;
+    let h = `<div class="scard${held ? ' held' : ''}" id="fr-card">` +
+      `<div class="srow"><h3>\u{1F39E}\u{FE0F} frame \u00b7 ${st}${tuned ? ` <span class="mut">(${tuned} tuned)</span>` : ''}</h3>` +
+      `<button class="reset" id="fr-clear">clear all</button></div>` +
+      `<div class="frnav">` +
+        `<button id="fr-prev" title="previous frame (,)">\u25c0</button>` +
+        `<input type="range" id="fr-idx" min="0" max="${n - 1}" step="1" value="${i}" />` +
+        `<button id="fr-next" title="next frame (.)">\u25b6</button>` +
+        `<span class="lbl" id="fr-lbl">${i + 1} / ${n}</span></div>` +
+      `<label style="font-size:11px;display:flex;gap:6px;align-items:center;margin-bottom:6px">` +
+        `<input type="checkbox" id="fr-hold"${held ? ' checked' : ''} /> hold this frame ` +
+        `<span class="mut">(stepping holds automatically)</span></label>`;
+    if (isBoss) {
+      h += `<div class="sl"><label>scale</label>` +
+        `<input type="range" id="fr-fs" min="0.5" max="2" step="0.005" value="${cur}" />` +
+        `<input type="number" id="fr-fs-n" min="0.5" max="2" step="0.005" value="${cur}" /></div>` +
+        `<button class="reset" id="fr-reset" style="width:100%">reset frame ${i + 1}</button>`;
+    } else {
+      h += `<div class="mut" style="font-size:11px;color:#e8c88a">Per-frame scale is a BOSS-only path in the game ` +
+        `(<code>_drawBossSprite</code> applies <code>fs</code>; <code>drawMonster</code> has no frame index there). ` +
+        `Stepping still works for inspection, but a per-frame value would not reach the game, so it is not offered.</div>`;
+    }
+    return h + '</div>';
+  }
+
   function card(st, v) {
     return `<div class="scard" data-card="${st}">` +
       `<div class="srow"><h3><i class="dot" style="background:${A.COL[st]}"></i>${st}</h3>` +
@@ -1278,6 +1343,7 @@
     };
     if (WIRING[cur]) html += `<div class="mut" style="font-size:11px;margin-bottom:10px;color:#7ddba0">${WIRING[cur]}</div>`;
     html += `<div class="scard" id="gm-card"><h3>\u{1F4D0} Game metrics (live)</h3><div id="gm-body" class="mut" style="font-size:11px;line-height:1.55">measuring…</div></div>`;
+    html += frameCard();
     for (const st of A.STATES) if (ent.states[st]) html += card(st, CC[st]);
     if (A.hbEdit) {
       html += `<div class="mut" style="font-size:11px;margin:8px 0 6px">HITBOX — the region player attacks can hit. All scaling (size factor + Monster Plant) is baked into the box you see. w/h/ox/oy are fractions of sprite height; oy = bottom offset from the feet (+down). Drag the box in the stage, or its corner handle to resize.</div>`;
@@ -1287,6 +1353,62 @@
     body.innerHTML = html;
     wire();
   };
+
+  // v0.30.x — frame editor wiring. Stepping implies holding: you cannot tune a
+  // frame that is sliding past you.
+  function stepFrame(d) {
+    const st = A.focusState, n = A.frameCount(st); if (!n) return;
+    const at = A.getPinFrame();
+    const from = (at != null) ? at : (A.shownFrame(st) || 0);
+    A.setPinFrame(((from + d) % n + n) % n);
+    window.__buildControls();
+  }
+  function setFrameScale(raw) {
+    const st = A.focusState, n = A.frameCount(st); if (!n) return;
+    const pin = A.getPinFrame(); if (pin == null) return;
+    const i = Math.max(0, Math.min(pin, n - 1));
+    let val = +raw; if (!isFinite(val)) return;
+    val = Math.max(0.5, Math.min(2, val));
+    const v = A.CALIB()[A.cur][st];
+    if (!Array.isArray(v.fs)) v.fs = new Array(n).fill(1);
+    while (v.fs.length < n) v.fs.push(1);
+    v.fs[i] = val;
+    const r = document.getElementById('fr-fs'), b = document.getElementById('fr-fs-n');
+    if (r) r.value = val; if (b) b.value = val;
+    markDirty();
+  }
+  function wireFrameCard() {
+    const idx = document.getElementById('fr-idx');
+    const hold = document.getElementById('fr-hold');
+    const prev = document.getElementById('fr-prev'), next = document.getElementById('fr-next');
+    if (prev) prev.onclick = () => stepFrame(-1);
+    if (next) next.onclick = () => stepFrame(1);
+    if (idx) idx.addEventListener('input', () => { A.setPinFrame(+idx.value); window.__buildControls(); });
+    if (hold) hold.addEventListener('change', () => {
+      A.setPinFrame(hold.checked ? (A.shownFrame(A.focusState) || 0) : null);
+      window.__buildControls();
+    });
+    for (const id of ['fr-fs', 'fr-fs-n']) {
+      const el = document.getElementById(id); if (!el) continue;
+      el.addEventListener('focus', snapshot, { once: true });
+      el.addEventListener('input', () => setFrameScale(el.value));
+    }
+    const rst = document.getElementById('fr-reset');
+    if (rst) rst.onclick = () => {
+      snapshot();
+      const st = A.focusState, pin = A.getPinFrame();
+      const v = A.CALIB()[A.cur][st];
+      if (Array.isArray(v.fs) && pin != null) { v.fs[Math.max(0, Math.min(pin, v.fs.length - 1))] = 1; }
+      markDirty(); window.__buildControls(); toast('frame reset');
+    };
+    const clr = document.getElementById('fr-clear');
+    if (clr) clr.onclick = () => {
+      snapshot();
+      const v = A.CALIB()[A.cur][A.focusState];
+      delete v.fs;
+      markDirty(); window.__buildControls(); toast('per-frame scales cleared');
+    };
+  }
 
   function syncCard(st) {
     const v = A.CALIB()[A.cur][st];
@@ -1352,6 +1474,7 @@
       snapshot();
       const st = b.dataset.hbreset; A.clearHB(A.cur, st); markDirty(); window.__buildControls(); toast(st + ' hitbox -> game default');
     });
+    wireFrameCard();
     document.querySelectorAll('[data-card]').forEach(c => c.addEventListener('mousedown', () => A.setFocus(c.dataset.card)));
     const ra = document.getElementById('resetAll');
     if (ra) ra.onclick = () => {
