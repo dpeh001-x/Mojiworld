@@ -121,6 +121,36 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.x <span class="tag"><span class="pill bug">bug</span> Steam Input called functions that do not exist &mdash; the whole bridge was inert</span></h2>
+<p>Steam re-review: <em>"the game does not appear to support the controller in gameplay &hellip; Dual Shock and Dual Sense controllers have no functionality."</em></p>
+
+<h3>The raw-gamepad half was already fixed. This is the other path.</h3>
+<p>v0.30.177 / .179 / .181 fixed the raw <code>navigator.getGamepads</code> path, and its two suites pass &mdash; <b>26/26</b> on <code>steam_controller_test.mjs</code> (including <em>"a pinned axis never walks the player down-and-right"</em> and the Sony hat cases) and <b>8/8</b> on <code>controller_coverage_test.mjs</code> (all 20 gameplay functions reachable, both capstone skills included).</p>
+<p>But with a Game Actions File uploaded &mdash; which <code>game_actions_4842650.vdf</code> is &mdash; Steam translates any pad into named actions <em>before the game sees it</em>, and can take the pad exclusively. On that path <code>steam_integration.js</code> is the only thing feeding the game, and <b>every call it made into steamworks.js named a function the library does not export</b>:</p>
+<table>
+<tr><th>the bridge called</th><th>steamworks.js actually exports</th></tr>
+<tr><td><code>getDigitalActionHandle(a)</code></td><td><code>getDigitalAction(a)</code></td></tr>
+<tr><td><code>c.getDigitalActionData(h)</code></td><td><code>c.isDigitalActionPressed(h)</code></td></tr>
+<tr><td>&mdash; nothing &mdash;</td><td><code>getActionSet(name)</code></td></tr>
+<tr><td>&mdash; nothing &mdash;</td><td><code>c.activateActionSet(h)</code></td></tr>
+<tr><td>&mdash; nothing &mdash;</td><td><code>getAnalogAction</code> + <code>c.getAnalogActionVector</code></td></tr>
+</table>
+<p>Every one of those calls was <code>?:</code>-guarded, so nothing ever threw: <code>actionHandles</code> stayed empty and <code>snapshot()</code> returned <code>{}</code> for ever. <b>Under a Steam Input configuration the game received nothing from the controller</b> &mdash; the reported failure, in the path v0.30.181's own note calls <em>"the strongest answer to the controller review"</em>.</p>
+
+<h3>Why no test caught it</h3>
+<p><code>scripts/steam_input_test.mjs</code> mocked <em>the same imagined API</em>. The mock and the bridge agreed with each other while neither agreed with the library, so the suite went green against a fiction. A green test asserting something that cannot happen is worse than no test at all.</p>
+<p>Its first check is now a guard against exactly that: every function the mock fakes is looked up in the <b>shipped <code>steamworks.js</code> typings</b>, and the suite fails before testing anything else if the mock has drifted back into invention.</p>
+
+<h3>Fixed</h3>
+<ul>
+<li>Digital actions resolve through <code>getDigitalAction</code> and read through <code>isDigitalActionPressed</code>. All <b>25</b> declared actions now resolve &mdash; the capstones <code>g</code> and <code>b</code> among them.</li>
+<li>The <code>InGameControls</code> action set is resolved by the name in the VDF and <b>re-activated on every poll</b>. ISteamInput reports data only for an <em>active</em> set, and Steam drops the activation on overlay open, focus loss and reconnect; unactivated data is not "all false", it is undefined.</li>
+<li>Analog <code>Move</code> is read and surfaced as <code>_moveX</code>/<code>_moveY</code>. The game has always consumed those (with its own +Y-is-up sign convention) &mdash; nothing was producing them.</li>
+<li>With no resolvable action set, <code>snapshot()</code> returns <code>null</code> rather than <code>{}</code>, so <code>_lxPadPoll</code>'s <code>if (!pad &amp;&amp; !steamBtns) return</code> leaves the raw-gamepad path in charge instead of an empty snapshot masquerading as live input.</li>
+</ul>
+<p><b>12/12</b> now pass; the same suite fails <b>8/12</b> against the previous build. <code>mojiworld_game.html</code> is deliberately untouched &mdash; the whole defect is in the Electron bridge, and the game side was already correct.</p>
+
+
 <h2>v0.30.186 <span class="tag"><span class="pill art">art</span> King Krook gets a stomp &mdash; nine frames, not yet wired</span></h2>
 <p>Per user: <em>using ludo.ai generate stomp attack animation for krook boss, eventually this will be wired in game as a new strong attack with huge stun.</em></p>
 <p>Nine frames at <code>Sprites/bosses/attack/kingKrookstomp_0..8.webp</code> &mdash; the engine's convention for a per-attack set, the same shape as <code>gravitospunch</code>, <code>gravitossoul</code> and <code>towerSovereignvolley</code>. He coils across frames 0&ndash;2, slams through 3&ndash;5 with a dust burst and flying rock, then settles over 6&ndash;8 on cracked ground. <b>The art only:</b> the attack itself is not wired, so nothing in the fight has changed &mdash; the sprite key still needs choosing at the attack site when the move is built.</p>

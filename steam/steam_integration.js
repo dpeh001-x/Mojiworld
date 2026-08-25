@@ -78,6 +78,8 @@ function init() {
   }
   // Steam Input: init + resolve the digital-action handles once (best-effort).
   let inputReady = false;
+  let actionSetHandle = null;   // ISteamInput action set ("InGameControls")
+  let moveHandle = null;        // the analog "Move" action from the same VDF
   const actionHandles = {};
   // The invite lobby we currently host (party-code carrier; null = none).
   let curLobby = null;
@@ -92,9 +94,27 @@ function init() {
     if (client.input && typeof client.input.init === 'function') {
       client.input.init();
       inputReady = true;
-      for (const a of INPUT_ACTIONS) {
-        try { const h = client.input.getDigitalActionHandle ? client.input.getDigitalActionHandle(a) : null; if (h) actionHandles[a] = h; } catch (_) {}
+      // steamworks.js names these getDigitalAction / getActionSet /
+      // getAnalogAction. The *Handle spellings are tried second only so a
+      // future rename cannot silently zero the bridge again — but the real
+      // name has to come first, because the old code probed ONLY the
+      // spellings that do not exist and every probe was ?:-guarded, so it
+      // failed silently and for ever.
+      const _pick = (o, ...names) => { for (const n of names) if (typeof o[n] === 'function') return o[n].bind(o); return null; };
+      const _getDigital = _pick(client.input, 'getDigitalAction', 'getDigitalActionHandle');
+      const _getSet     = _pick(client.input, 'getActionSet', 'getActionSetHandle');
+      const _getAnalog  = _pick(client.input, 'getAnalogAction', 'getAnalogActionHandle');
+      if (_getDigital) {
+        for (const a of INPUT_ACTIONS) {
+          try { const h = _getDigital(a); if (h) actionHandles[a] = h; } catch (_) {}
+        }
       }
+      // "InGameControls" is the action set declared in
+      // steam/controller_config/game_actions_<appid>.vdf. A name that does not
+      // match the VDF resolves no handle, the set is never activated, and every
+      // digital read below is undefined rather than false.
+      if (_getSet) { try { actionSetHandle = _getSet('InGameControls') || null; } catch (_) { actionSetHandle = null; } }
+      if (_getAnalog) { try { moveHandle = _getAnalog('Move') || null; } catch (_) { moveHandle = null; } }
     }
   } catch (e) { inputReady = false; }
 
@@ -284,10 +304,42 @@ function init() {
           const controllers = client.input.getControllers ? client.input.getControllers() : [];
           if (!controllers || !controllers.length) return null;
           const c0 = controllers[0];
+          // ACTIVATE EVERY POLL. ISteamInput reports action data only for an
+          // ACTIVE set, and Steam drops the activation on overlay open, focus
+          // loss and controller reconnect. Unactivated data is not "all
+          // false" — it is undefined, which is why a bridge that never
+          // activated could look like a pad with no functionality.
+          if (actionSetHandle) { try { c0.activateActionSet(actionSetHandle); } catch (_) {} }
           const out = {};
-          for (const a in actionHandles) {
-            try { const d = c0.getDigitalActionData ? c0.getDigitalActionData(actionHandles[a]) : null; if (d && d.state) out[a] = true; } catch (_) {}
+          const _pressed = (typeof c0.isDigitalActionPressed === 'function')
+            ? (h) => !!c0.isDigitalActionPressed(h)
+            : (typeof c0.getDigitalActionData === 'function')
+              ? (h) => { const d = c0.getDigitalActionData(h); return !!(d && d.state && (d.active === undefined || d.active)); }
+              : null;
+          if (_pressed) {
+            for (const a in actionHandles) {
+              try { if (_pressed(actionHandles[a])) out[a] = true; } catch (_) {}
+            }
           }
+          // Analog Move. The game already reads _moveX/_moveY (see the
+          // steamBtns block in _lxPadPoll) and applies the +Y-is-up sign
+          // convention itself; nothing was ever producing them.
+          if (moveHandle) {
+            try {
+              const v = (typeof c0.getAnalogActionVector === 'function') ? c0.getAnalogActionVector(moveHandle)
+                      : (typeof c0.getAnalogActionData === 'function') ? c0.getAnalogActionData(moveHandle)
+                      : null;
+              if (v && (typeof v.x === 'number' || typeof v.y === 'number')) {
+                out._moveX = +v.x || 0;
+                out._moveY = +v.y || 0;
+              }
+            } catch (_) {}
+          }
+          // No resolvable action set means Steam Input is not driving this
+          // session. Report null rather than {} so _lxPadPoll's
+          // "if (!pad && !steamBtns) return" leaves the raw-gamepad path in
+          // charge instead of a permanently empty snapshot masquerading as one.
+          if (!actionSetHandle && !Object.keys(out).length) return null;
           return out;
         } catch (e) { return null; }
       },
