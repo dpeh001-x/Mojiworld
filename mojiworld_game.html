@@ -21997,10 +21997,10 @@ const monsterTypes = {
   // trait flips the AI jump-roll from 2% / frame to 9% / frame so he
   // hop-strides instead of pacing.
   young_confused_barnaby:         { name:'Young Confused Barnaby, the Lost Sentinel', w:120, h:140, color:'#d8c878', shell:'#6a4a18', hp:1598872, atk:225, def:76, evasion:126, exp:17454, mojicoins:6241, speed:2.1, jump:8, boss:true, level: 40, shoot:'mquery', shootCd:2400, jumpCdMs:1100, signature:'A young Barnaby who never picked which wall to defend. Lashes out in two directions at once.', traits:{ activeBoss:true, bigMelee:{ kind:'swing', dmgMul:2.0, range:175, swingW:265, swingH:115, cdMs:5200, telegraphMs:620 }, columnStrike:{ dmgMul:1.6, width:115, range:540, cdMs:8200, telegraphMs:720 } } },
-  octoLegPoison:    { name:'Venom Tentacle',     w:80, h:60, color:'#cc66ee', shell:'#5a2078', hp:400000,  atk:120, def:120, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
-  octoLegFreeze:    { name:'Frostbite Tentacle', w:80, h:60, color:'#88ccff', shell:'#3a5a88', hp:400000,  atk:120, def:120, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
-  octoLegSkillLock: { name:'Silence Tentacle',   w:80, h:60, color:'#ffaa44', shell:'#aa6622', hp:400000,  atk:120, def:120, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
-  octoLegStun:      { name:'Shock Tentacle',     w:80, h:60, color:'#ffee44', shell:'#aa8822', hp:400000,  atk:120, def:120, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
+  octoLegPoison:    { name:'Venom Tentacle',     w:80, h:60, color:'#cc66ee', shell:'#5a2078', hp:600000,  atk:120, def:600, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
+  octoLegFreeze:    { name:'Frostbite Tentacle', w:80, h:60, color:'#88ccff', shell:'#3a5a88', hp:600000,  atk:120, def:600, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
+  octoLegSkillLock: { name:'Silence Tentacle',   w:80, h:60, color:'#ffaa44', shell:'#aa6622', hp:600000,  atk:120, def:600, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
+  octoLegStun:      { name:'Shock Tentacle',     w:80, h:60, color:'#ffee44', shell:'#aa8822', hp:600000,  atk:120, def:600, evasion:90,  exp:4200, mojicoins:1800, speed:0,   jump:0 },
   // v0.25.487 — Sauro Slope (east of Lava Cavern, Lv 28-30 zone). Cute
   // chunky fire-breathing fauna leading up to the King Krook boss arena.
   // v0.25.620 — Re-leveled (was ~Lv 28-30 → 38-41) for the Lv 40-49 gap fill.
@@ -77046,6 +77046,7 @@ function updateMonsters(dt) {
         else if (m.type === 'octoLegFreeze')    { _proj.color = '#88ccff'; _proj.freeze = 1500; }
         else if (m.type === 'octoLegSkillLock') { _proj.color = '#ffaa44'; _proj.skillLock = 3500; }
         else                                     { _proj.color = '#ffee44'; _proj.stun = 1800; }
+        _lxOctoMaybeLance(m, _proj);
         game.projectiles.push(_proj);
         if (typeof addShake === 'function') addShake(2);
       }
@@ -83770,6 +83771,7 @@ function bossAI(m, dt, distToPlayer) {
       else if (m.type === 'octoLegFreeze')    { proj.color = '#88ccff'; proj.freeze = 1500; }
       else if (m.type === 'octoLegSkillLock') { proj.color = '#ffaa44'; proj.skillLock = 3500; }
       else                                     { proj.color = '#ffee44'; proj.stun = 1800; }
+      _lxOctoMaybeLance(m, proj);
       game.projectiles.push(proj);
       addShake(2);
     }
@@ -84162,6 +84164,45 @@ const LX_OCTO_ARM_GEN_HP = 0.7;    // each regrown generation is weaker, so the 
 // resistance keeps meaning what it means everywhere else.
 const LX_OCTO_AILMENT_MS = 30000;   // one pulse every 30s
 const LX_OCTO_AILMENT_TELE_MS = 1200;
+// v0.30.x — THE MOOD LANCE (per user: the tentacles should "occasional shoot
+// projectiles that stun and deal 33% HP damage").
+//
+// Every 4th shot from a given arm is upgraded instead of adding a second
+// firing timer: the arms already stagger their cadence against each other via
+// _octoFireT, so counting per-arm inherits that spread for free and the four
+// lances never arrive together.
+//
+// Damage rides the EXISTING _radiance channel rather than a new one. That is
+// the pillar-of-judgment path, and it already does exactly what was asked —
+// a flat fraction of the player's CURRENT max HP — while routing through
+// block, warrior DR and Aegis, so the hit stays mitigable and the player has
+// counterplay instead of a flat unavoidable third of their bar.
+//
+// Homing is deliberately switched OFF for the lance. The ordinary status shot
+// homes, which is fine at 0.7x ATK; a homing 33% hit would be undodgeable by
+// construction. This one has to be side-stepped, which is what makes a hit
+// feel earned rather than taxed.
+const LX_OCTO_LANCE_EVERY = 4;       // every 4th shot from that arm
+const LX_OCTO_LANCE_HP_FRAC = 0.33;  // 33% of max HP
+const LX_OCTO_LANCE_STUN_MS = 900;
+function _lxOctoMaybeLance(leg, proj) {
+  if (!leg || !proj) return false;
+  leg._octoShots = (leg._octoShots | 0) + 1;
+  if (leg._octoShots % LX_OCTO_LANCE_EVERY !== 0) return false;
+  proj.color = '#ff4d6d';
+  proj.w = 46; proj.h = 46;
+  proj.homing = false;                 // must be dodgeable — see above
+  proj.vx *= 0.75; proj.vy *= 0.75;    // slower, so the read is fair
+  proj.stun = LX_OCTO_LANCE_STUN_MS;
+  proj.stunHit = LX_OCTO_LANCE_STUN_MS;
+  proj._octoLance = true;
+  proj._radiance = { chance: 1, frac: LX_OCTO_LANCE_HP_FRAC,
+                     label: 'a mood lance', color: '#ff8fa3' };
+  if (typeof showToast === 'function') showToast('🦑 MOOD LANCE — dodge it', 'epic');
+  if (typeof addShake === 'function') addShake(6);
+  if (typeof audio !== 'undefined' && audio.play) audio.play('crit');
+  return true;
+}
 function _lxOctoMoodPulse(head) {
   const arms = Array.isArray(head._legRefs) ? head._legRefs : [];
   if (!arms.length) return 0;
