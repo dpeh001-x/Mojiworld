@@ -121,6 +121,35 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.219 <span class="tag"><span class="pill polish">balance</span> Monster difficulty ramps with level &mdash; and an audit of why the 40s felt soft</span></h2>
+<p>Per user, after a tester reported the 40&ndash;50 band was too easy: <em>a linear increase in difficulty so lower level maps receive less of a bump up, but higher level monsters especially after 40 receive a higher gradual linear bump (increase raw DEF and HP more than ATK in proportion).</em></p>
+
+<h3>The ramp</h3>
+<p>Piecewise linear with the knee at 40, so the slope above 40 is <b>twice</b> the slope below it. Levels 1&ndash;10 are untouched &mdash; the starter maps were never the complaint.</p>
+<table>
+<tr><th></th><th>@10</th><th>@40</th><th>@50</th><th>@100</th></tr>
+<tr><td><b>DEF</b></td><td>&times;1.00</td><td>&times;1.60</td><td>&times;2.00</td><td>&times;4.00</td></tr>
+<tr><td><b>HP</b></td><td>&times;1.00</td><td>&times;1.35</td><td>&times;1.58</td><td>&times;2.75</td></tr>
+<tr><td>ATK</td><td>&times;1.00</td><td>&times;1.12</td><td>&times;1.20</td><td>&times;1.60</td></tr>
+</table>
+<p>126 of 135 entries rewritten. The numbers are <b>baked into the table</b>, not applied at spawn: <code>data/monster_stats.js</code> opens by promising that every number in it is the stat a monster actually spawns with and that nothing is scaled behind your back, and a runtime curve would have made that header a lie. EXP and coin are recomputed from the new HP at each entry's own existing ratio, so XP per kill tracks the longer kill rather than being quietly cut.</p>
+
+<h3>The audit that prompted it &mdash; and the part this does NOT fix</h3>
+<p>Measured through the real <code>hitMonster</code> pipeline with a Lv 45 warrior whose SP is spent (ATK 315), the 40s are soft for a specific reason: <b>bosses are softer than the trash standing next to them.</b></p>
+<table>
+<tr><th>Lv 45 player vs&hellip;</th><th>you hit it for</th><th>it hits you for</th></tr>
+<tr><td>King Krook (boss, 50)</td><td><b>1,348</b></td><td>888</td></tr>
+<tr><td>Octobaby (boss, 50)</td><td><b>1,408</b></td><td>677</td></tr>
+<tr><td>thornmaw (<em>trash</em>, 51)</td><td>286</td><td><b>1,615</b></td></tr>
+<tr><td>vigil_vermillion (<em>trash</em>, 47)</td><td>167</td><td><b>1,365</b></td></tr>
+</table>
+<p>The cause is a defence rank that does not exist. <code>hitMonster</code> documents <em>"Variant multipliers (elite &times; 1.4, miniboss &times; 1.8, boss &times; 2.2) apply to defVal BEFORE the curve"</em> &mdash; but <code>LX_MONSTER_VARIANTS</code> contains only <code>elite</code> and <code>elder</code>, <b>both with <code>def: 1</code></b>, and no boss rank at all. Bosses fight with their raw table DEF of 10&ndash;31, against a same-level trash median of 46 and a max of 126.</p>
+<p><b>This ramp does not fix that.</b> Scaling everything by level preserves the ratio: boss DEF goes 24&nbsp;&rarr;&nbsp;44 while the toughest trash goes 126&nbsp;&rarr;&nbsp;257. Bosses are now harder in absolute terms &mdash; King Krook takes 496&nbsp;&rarr;&nbsp;775 basic hits and deals 888&nbsp;&rarr;&nbsp;1,065 &mdash; but they are still the squishiest thing in their own band, and the extra difficulty arrives mostly as a bigger HP pool, which is the shape the tester already called out. Adding the missing boss rank is the follow-up that actually closes it.</p>
+
+<h3>Verified</h3>
+<p>New <code>scripts/monster_difficulty_check.mjs</code> reports the whole band before and after. It levels through <code>_maybeLevelUp</code> and spends the SP, because neither is optional: assigning <code>player.level</code> applies no growth at all (a first pass measured a "Lv 45" warrior at ATK 13 / HP 195), and the skill tree absorbs only ~11 of ~150 points &mdash; the rest go through the trainer at 1&nbsp;SP&nbsp;=&nbsp;+1&nbsp;ATK, which nearly doubles attack. Table re-checked after the rewrite: 135 entries, none malformed, 40/40 spawn without throwing, zero page errors.</p>
+
+
 <h2>v0.30.218 <span class="tag"><span class="pill feat">feat</span> Gravitos idles in the pose you picked &mdash; rebuilt around it as the midframe</span></h2>
 <p>Per user: <em>this frame should be gravitos midframe idle animation, please regenerate the idle sequence with this as the midframe idle frame.</em> The frame is <code>Sprites/bosses/attack/gravitos.webp</code> &mdash; the wide planted stance, fists up.</p>
 <p><b>It composites rather than animates, and that is the whole reason it works.</b> The obvious tool is the Ludo <code>animateSprite</code> runner that built the original idle sets, and this repo has already paid to learn it is the wrong instrument for "hold this pose": <code>gen_aetherion_astral.mjs</code> records three rolls that could not &mdash; told to trace the same drawing every frame, frame 0 came back a side-on rear-up, frame 8 had turned front-on and grown, and two frames had their legs sliced off by the crop. An idle <em>is</em> "hold absolutely still and breathe", and the request names an exact frame that has to survive intact. So the pose is a fixed layer and only the breath is computed &mdash; which makes "this frame is the midframe" true by construction instead of by hope, and makes a re-pose or a crop impossible.</p>
