@@ -27,6 +27,15 @@
 //     fixed and is exactly as invisible.
 //   * REGISTERED WITH A STALE CONSTANT. The entry exists but the art moved
 //     under it, so the correction over- or under-shoots.
+//   * THE SET DISAGREES WITH ITSELF. Added after the first version of this
+//     audit missed exactly that: it compared each attack set's MEDIAN frame
+//     against idle, which is blind to a set whose own frames differ. The user
+//     spotted two by eye that the median test had waved through - smithgolem
+//     swings between 256 and 328 px of character height (1.28x) and
+//     deranged_kuro between 547 and 671 (1.23x). A constant multiplier cannot
+//     correct a set that is not constant, so the mob grows and shrinks inside
+//     its own swing. SWING below is that number, and it is the one that
+//     matches what a player actually notices.
 //
 // The ratio printed below is what the player sees: attack-state character
 // height divided by idle-state character height. 1.00 is correct. 0.5 means the
@@ -101,7 +110,9 @@ async function stateFrac(type, state) {
   if (!byH.length) return null;
   const med = (a) => { const q = a.slice().sort((x, y) => x - y); return q[q.length >> 1]; };
   return { med: med(byH), medA: med(byA), n: byH.length,
-    spread: (Math.max(...byH) - Math.min(...byH)) / Math.max(...byH) };
+    // WITHIN-SET swing: biggest frame over smallest, on both measures.
+    swingH: Math.max(...byH) / Math.min(...byH),
+    swingA: Math.max(...byA) / Math.min(...byA) };
 }
 
 const files = await readdir(join(MOB, 'attack'));
@@ -116,11 +127,18 @@ for (const t of types) {
   const drawn = (atk.med * scale) / idle.med;           // by HEIGHT
   const drawnA = (atk.medA * scale) / idle.medA;        // by AREA (pose-robust)
   const needed = idle.med / atk.med;
-  rows.push({ t, drawn, drawnA, scale, needed, atkSpread: atk.spread, registered: t in SCALES });
+  rows.push({ t, drawn, drawnA, scale, needed,
+    swingH: atk.swingH, swingA: atk.swingA, registered: t in SCALES });
 }
 
+// OFFSET: the whole attack set sits at the wrong size against idle.
 const bad = rows.filter((r) => Math.abs(r.drawn - 1) > TOL && Math.abs(r.drawnA - 1) > TOL)
   .sort((a, b) => Math.abs(b.drawnA - 1) - Math.abs(a.drawnA - 1));
+// SWING: the set disagrees with itself, so no constant can correct it. Both
+// measures again, so a mob that merely rears mid-swing is not reported.
+const SWING_TOL = 1.15;
+const swingy = rows.filter((r) => r.swingH > SWING_TOL && r.swingA > SWING_TOL)
+  .sort((a, b) => b.swingH - a.swingH);
 const poseOnly = rows.filter((r) => Math.abs(r.drawn - 1) > TOL && Math.abs(r.drawnA - 1) <= TOL)
   .sort((a, b) => Math.abs(b.drawn - 1) - Math.abs(a.drawn - 1));
 const show = SHOW_ALL ? rows.sort((a, b) => Math.abs(b.drawn - 1) - Math.abs(a.drawn - 1)) : bad;
@@ -142,7 +160,16 @@ for (const r of show) {
 if (!bad.length) console.log('  (none — every monster draws within ' + (TOL * 100).toFixed(0) + '% of its idle size while attacking)');
 console.log(`\n  ${bad.length} of ${rows.length} types change size by more than ${(TOL * 100).toFixed(0)}% on BOTH measures.`);
 if (poseOnly.length) {
-  console.log(`  ${poseOnly.length} more move on height but not on area — a taller POSE, not a bigger monster:`);
+  console.log(`  ${poseOnly.length} more sit off on height but not on area — a taller POSE, not a bigger monster:`);
   console.log('    ' + poseOnly.map((r) => `${r.t} (${r.drawn.toFixed(2)}x h / ${r.drawnA.toFixed(2)}x a)`).join(', '));
 }
-process.exit(bad.length ? 1 : 0);
+console.log(`
+  SWING — attack sets that disagree with THEMSELVES, on both measures`);
+console.log('  (a constant multiplier cannot correct a set that is not constant)');
+if (!swingy.length) console.log('    (none)');
+for (const r of swingy) {
+  console.log('    ' + r.t.padEnd(20) + (r.swingH.toFixed(2) + 'x h').padStart(9) + (r.swingA.toFixed(2) + 'x a').padStart(10)
+    + (r.registered ? '   (registered)' : ''));
+}
+process.exitCode = (bad.length || swingy.length) ? 1 : 0;
+
