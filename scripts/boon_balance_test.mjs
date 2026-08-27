@@ -13,7 +13,19 @@
 //       shipped synergies that were advertised but never applied).
 // Run: node scripts/boon_balance_test.mjs   (MOJI_PW_EXE overrides Chrome)
 import { chromium } from 'playwright-core';
-const EXE = process.env.MOJI_PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+import { existsSync } from 'node:fs';
+// Resolve a browser that actually EXISTS. The Linux path stays first so CI is
+// untouched, but it is the only candidate this line used to have - and with
+// MOJI_PW_EXE unset on a dev machine that made the launch throw before a single
+// assertion ran. 66 scripts shared the line, so 66 gates were passing by never
+// executing. Falling through to the local Chrome is what the tests that do run
+// already rely on (they pass channel:'chrome').
+const EXE = [process.env.MOJI_PW_EXE,
+  '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+  'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+  '/usr/bin/google-chrome', '/usr/bin/chromium',
+].find((p) => p && existsSync(p));
 const URL = process.env.MOJI_GAME_URL || 'http://localhost:8080/mojiworld_game.html';
 const R = []; const ok = (n, c, x) => R.push({ n, pass: !!c, x });
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--disable-gpu', '--mute-audio'] });

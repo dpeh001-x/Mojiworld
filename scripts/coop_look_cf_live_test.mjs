@@ -7,12 +7,24 @@
 //     worker's exact old whitelist (state stripped of look/eq/v): proves the
 //     carrier alone delivers the full avatar to the peer draw.
 import { chromium } from 'playwright-core';
+import { existsSync } from 'node:fs';
 import { readFile, writeFile, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+// Resolve a browser that actually EXISTS. The Linux path stays first so CI is
+// untouched, but it is the only candidate this line used to have - and with
+// PW_EXE unset on a dev machine that made the launch throw before a single
+// assertion ran. 66 scripts shared the line, so 66 gates were passing by never
+// executing. Falling through to the local Chrome is what the tests that do run
+// already rely on (they pass channel:'chrome').
+const EXE = [process.env.PW_EXE,
+  '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+  'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+  '/usr/bin/google-chrome', '/usr/bin/chromium',
+].find((p) => p && existsSync(p));
 const URL = 'http://localhost:8080/mojiworld_game.html';
 const CF_WS = process.env.CF_WS || 'wss://mojiworld-mp.dpeh001.workers.dev';
 const STRIP_PORT = 8081;

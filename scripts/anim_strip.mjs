@@ -6,7 +6,19 @@
 //   node scripts/anim_strip.mjs <type> <out.png>
 // Needs the local server: PORT=8080 node mp/server.mjs
 import { chromium } from 'playwright-core';
-const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+import { existsSync } from 'node:fs';
+// Resolve a browser that actually EXISTS. The Linux path stays first so CI is
+// untouched, but it is the only candidate this line used to have - and with
+// PW_EXE unset on a dev machine that made the launch throw before a single
+// assertion ran. 66 scripts shared the line, so 66 gates were passing by never
+// executing. Falling through to the local Chrome is what the tests that do run
+// already rely on (they pass channel:'chrome').
+const EXE = [process.env.PW_EXE,
+  '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+  'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+  '/usr/bin/google-chrome', '/usr/bin/chromium',
+].find((p) => p && existsSync(p));
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--disable-gpu', '--mute-audio'] });
 const ctx = await b.newContext({ serviceWorkers: 'block', viewport: { width: 1440, height: 900 } });
 const p = await ctx.newPage();

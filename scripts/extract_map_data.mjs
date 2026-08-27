@@ -3,8 +3,20 @@
 // dropdown and a W-key world-map switcher with the game's own node layout.
 // Writes scripts/map_data.json (consumed by the embed step below).
 import { chromium } from 'playwright-core';
+import { existsSync } from 'node:fs';
 import { writeFileSync } from 'fs';
-const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+// Resolve a browser that actually EXISTS. The Linux path stays first so CI is
+// untouched, but it is the only candidate this line used to have - and with
+// PW_EXE unset on a dev machine that made the launch throw before a single
+// assertion ran. 66 scripts shared the line, so 66 gates were passing by never
+// executing. Falling through to the local Chrome is what the tests that do run
+// already rely on (they pass channel:'chrome').
+const EXE = [process.env.PW_EXE,
+  '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+  'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+  '/usr/bin/google-chrome', '/usr/bin/chromium',
+].find((p) => p && existsSync(p));
 const URL = 'file:///home/user/Mojiworld/mojiworld_game.html';
 
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--disable-gpu', '--mute-audio'] });

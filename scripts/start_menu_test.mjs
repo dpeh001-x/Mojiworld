@@ -3,7 +3,19 @@
 // (party code), Settings (hoisted above the gate), Save Backups (slot modal).
 // Run serve.js (localhost:8765) first, then: node scripts/start_menu_test.mjs
 import { chromium } from 'playwright-core';
-const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+import { existsSync } from 'node:fs';
+// Resolve a browser that actually EXISTS. The Linux path stays first so CI is
+// untouched, but it is the only candidate this line used to have - and with
+// PW_EXE unset on a dev machine that made the launch throw before a single
+// assertion ran. 66 scripts shared the line, so 66 gates were passing by never
+// executing. Falling through to the local Chrome is what the tests that do run
+// already rely on (they pass channel:'chrome').
+const EXE = [process.env.PW_EXE,
+  '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+  'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+  '/usr/bin/google-chrome', '/usr/bin/chromium',
+].find((p) => p && existsSync(p));
 const URL = process.env.MOJI_URL || 'http://localhost:8765/mojiworld_game.html';
 const results = [];
 const ok = (n, c, extra) => { results.push({ n, pass: !!c, extra }); console.log((c ? 'PASS ' : 'FAIL ') + n + (extra ? ' — ' + extra : '')); };

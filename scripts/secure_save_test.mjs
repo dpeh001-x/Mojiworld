@@ -1,9 +1,21 @@
 // Headless certification of the SECURE SAVE feature: signed export, import
 // verification, tamper detection, and cross-impl consistency with Node's HMAC.
 import { chromium } from 'playwright-core';
+import { existsSync } from 'node:fs';
 import crypto from 'node:crypto';
 const URL = 'http://localhost:8080/mojiworld_game.html';
-const EXE = process.env.PW_EXE || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+// Resolve a browser that actually EXISTS. The Linux path stays first so CI is
+// untouched, but it is the only candidate this line used to have - and with
+// PW_EXE unset on a dev machine that made the launch throw before a single
+// assertion ran. 66 scripts shared the line, so 66 gates were passing by never
+// executing. Falling through to the local Chrome is what the tests that do run
+// already rely on (they pass channel:'chrome').
+const EXE = [process.env.PW_EXE,
+  '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+  'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+  '/usr/bin/google-chrome', '/usr/bin/chromium',
+].find((p) => p && existsSync(p));
 const browser = await chromium.launch({ executablePath: EXE, args: ['--no-sandbox'] });
 const page = await (await browser.newContext({ acceptDownloads: true })).newPage();
 const errs = []; page.on('pageerror', e => errs.push(String(e)));
