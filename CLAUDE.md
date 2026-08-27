@@ -83,6 +83,31 @@ If the rebase hits a conflict, **resolve it** (read both sides, merge the intent
 
 Force-pushes are reserved for: (i) feature-branch resyncs after a clean rebase where the only change was rewriting your own commit hashes, and (ii) explicit user instruction. Always use `--force-with-lease`, never bare `--force`. Never force-push the default branch.
 
+## Push clobber gate (automated, HARD — 2026-08-27)
+
+A PreToolUse hook (`.claude/hooks/push-clobber-gate.js`, registered in
+`.claude/settings.json` for Bash and PowerShell) BLOCKS any push to main
+whose blobs are missing markers listed in `scripts/landed_fixes.json`.
+
+Why it exists: the Sky Lance chain fix was silently reverted TWICE in one
+day (`940557ce`, `8acd2b7e`) by parallel sessions that rebuilt
+`mojiworld_game.html` from a snapshot read before the fix landed and
+pushed it wholesale. Nothing conflicted; the file just went backwards.
+
+Rules:
+
+- **After landing a fix in a hot file via a rebuild pipeline, add a marker
+  entry to `scripts/landed_fixes.json`** (a unique string + its count in
+  your shipped blob). That is what protects your fix from the next stale
+  rebuild.
+- If the gate blocks you and you did NOT mean to remove that fix: your base
+  is stale — `git fetch origin`, rebuild from the CURRENT tip, re-apply.
+- Intentional removals are a two-step dance (manifest-only push first);
+  the manifest's `_readme` documents it.
+- The hook is Node because this machine has no Python (the .py mobile hooks
+  no-op here for the same reason). Keep it fail-open: it targets one known
+  failure mode and must never brick an unrelated push.
+
 ## Mobile UI branch (automated)
 
 ### Hard rule: never touch non-mobile code on this branch
