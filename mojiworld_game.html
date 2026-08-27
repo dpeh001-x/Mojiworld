@@ -9985,7 +9985,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.260';
+const GAME_VERSION = 'v0.30.261';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10603,6 +10603,19 @@ function _detectSpriteBboxTop(img) {
   {
     const _t = _lxBboxFromTable(img);
     if (_t) { img._lxBboxTop = _t.top; return _t.top; }
+  }
+  // v0.30.261 perf — a derived canvas (tint bake, and any future same-size
+  // copy) answers from its SOURCE instead of scanning its own pixels. Guarded
+  // on identical dimensions: a copy that changed size would need scaling, and
+  // none of the same-size copies ever change the alpha this scan measures.
+  {
+    const _src = img._lxBboxSrc || img._lxEdgeSrc;
+    if (_src && _src !== img
+        && (_src.naturalWidth || _src.width) === (img.naturalWidth || img.width)
+        && (_src.naturalHeight || _src.height) === (img.naturalHeight || img.height)) {
+      const _v = _detectSpriteBboxTop(_src);
+      if (_v !== null && _v !== undefined) { img._lxBboxTop = _v; return _v; }
+    }
   }
   const _r = _detectSpriteBboxTopRaw(img);
   if (_r !== null && img && img.naturalWidth) img._lxBboxTop = _r;
@@ -55937,6 +55950,68 @@ function startDodge() {
     });
   }
 }
+// v0.30.261 perf — PAY THE FIRST-SIGHT BILL DURING THE INTRO CARD.
+// Profiled under 4x CPU throttle, a boss fight stutters in ~1.5s BURSTS of
+// 60-160ms frames, recurring at the cast cadence: the first time each attack
+// set plays (and the first time it plays under each tint filter), every frame
+// pays decode + shrink + foot-anchor detection (a pipeline-flushing readback)
+// + tint bake, right as the player must dodge. The intro card shows for 3.5
+// seconds while the CPU does nothing - so the bill is paid there instead.
+//
+// Every frame set whose store key starts with the boss's type (which sweeps
+// the gravitos form/cast sets and Krook's stomp in one pass), plus the zodiac
+// stores by sign, is walked in <=6ms slices: decode, shrink, edge probe, both
+// bbox detections, and the two flash tints that combat actually uses. A slot
+// whose array has not finished shrinking is re-queued so the warm lands on
+// the canvas the fight will really draw, not the image it replaced. Bounded
+// passes, everything try-wrapped: at worst the prewarm silently gives up and
+// the fight behaves exactly as before.
+function _lxPrewarmBossSets(type, zodiacSign) {
+  try {
+    if (!type) return;
+    const stores = [];
+    const add = (S) => { if (typeof S !== 'undefined' && S) stores.push(S); };
+    try { add(BOSS_IDLE_FRAMES); } catch (e) {}
+    try { add(BOSS_WALK_FRAMES); } catch (e) {}
+    try { add(BOSS_ATTACK_FRAMES); } catch (e) {}
+    const zstores = [];
+    if (zodiacSign) {
+      try { zstores.push(ZODIAC_IDLE_FRAMES, ZODIAC_WALK_FRAMES, ZODIAC_ATTACK_FRAMES, ZODIAC_CHARGE_FRAMES); } catch (e) {}
+    }
+    const arrs = [];
+    for (const st of stores) for (const k in st) if (k.indexOf(type) === 0 && Array.isArray(st[k])) arrs.push(st[k]);
+    for (const st of zstores) if (st && Array.isArray(st[zodiacSign])) arrs.push(st[zodiacSign]);
+    if (!arrs.length) return;
+    const FLASHES = ['brightness(2.5)', 'brightness(2.0) hue-rotate(60deg) saturate(1.15)'];
+    const jobs = [];
+    for (const a of arrs) for (let i = 0; i < a.length; i++) jobs.push({ a, i, tries: 0 });
+    let idx = 0, passesLeft = jobs.length * 6;
+    const step = () => {
+      const t0 = performance.now();
+      while (idx < jobs.length && performance.now() - t0 < 6 && passesLeft-- > 0) {
+        const j = jobs[idx++];
+        const im = j.a[j.i];
+        if (!im) continue;
+        try {
+          if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(j.a, 720);
+          const ready = !(im.complete === false) && ((im.naturalWidth || im.width) > 0);
+          const settled = j.a._lxShrunk || j.tries > 8;
+          if (!ready || !settled) {
+            if (j.tries++ < 12) jobs.push(j);      // come back once decoded/shrunk
+            continue;
+          }
+          const cur = j.a[j.i] || im;               // the slot may now hold the bake
+          _lxEdgesTouched(cur);
+          _detectSpriteBboxTop(cur);
+          _detectSpriteBboxBottom(cur);
+          for (const f of FLASHES) _lxTintBake(cur, f);
+        } catch (e) {}
+      }
+      if (idx < jobs.length && passesLeft > 0) setTimeout(step, 45);
+    };
+    setTimeout(step, 80);
+  } catch (e) {}
+}
 function spawnBossIntro(name, sub) {
   const el = document.getElementById('boss-intro');
   document.getElementById('boss-name-text').textContent = name.toUpperCase();
@@ -61363,6 +61438,7 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
       towerSovereign:         'The Sovereign at the Spire\'s apex, crowned by everyone who climbed this far and then stopped. The last excuse, wearing a crown. A sapphire signet sits on one still hand, worn smooth, never once removed.',
     };
     // Zodiac bosses read their intro from the config
+    if (typeof _lxPrewarmBossSets === 'function') _lxPrewarmBossSets(type, t.zodiacSign || null);   // v0.30.261 — see the function
     if (t.zodiacBoss) {
       const z = ZODIAC_SIGNS.find(s => s.id === t.zodiacSign);
       if (z) spawnBossIntro(z.glyph + ' ' + z.name, z.desc);
@@ -118194,6 +118270,17 @@ function _detectSpriteBboxBottom(img) {
     const _t = _lxBboxFromTable(img);
     if (_t) { img._lxBboxBot = _t.bottom; return _t.bottom; }
   }
+  // v0.30.261 perf — resolve through the source for same-size derived
+  // canvases; see the identical block in _detectSpriteBboxTop.
+  {
+    const _src = img && (img._lxBboxSrc || img._lxEdgeSrc);
+    if (_src && _src !== img
+        && (_src.naturalWidth || _src.width) === (img.naturalWidth || img.width)
+        && (_src.naturalHeight || _src.height) === (img.naturalHeight || img.height)) {
+      const _v = _detectSpriteBboxBottom(_src);
+      if (_v !== null && _v !== undefined) { img._lxBboxBot = _v; return _v; }
+    }
+  }
   const _r = _detectSpriteBboxBottomRaw(img);
   if (_r !== null && img && img.naturalWidth) img._lxBboxBot = _r;
   return _r;
@@ -121197,6 +121284,23 @@ function _lxTintBake(img, filterStr) {
     // the tint changed their colour.
     if (img._lxEdges !== undefined) cv._lxEdges = img._lxEdges;
     else cv._lxEdgeSrc = img;   // v0.30.x perf — see _lxEdgesTouched
+    // v0.30.261 perf — CARRY THE FOOT-ANCHOR MEMOS by the same argument. The
+    // v0.30.65 note above proves the alpha geometry is byte-identical, and the
+    // bbox scan measures nothing but alpha - yet only _lxEdges was carried, so
+    // the FIRST flash-draw of each frame in a boss cast re-ran the full
+    // detection on the 1656px tint copy: a full-size draw plus a pipeline-
+    // flushing readback, nine frames per cast, and again for every distinct
+    // filter combination (flash, freeze+flash, status wash). Profiled under
+    // 4x CPU throttle as 60-100ms long-task BURSTS lasting ~1.5s exactly while
+    // the player is hitting the boss - which in a fight is all the time. The
+    // burst recurred at every first sight of a new (frame x filter) pair;
+    // with the memos carried it cannot fire at all.
+    if (img._lxBboxTop !== undefined) cv._lxBboxTop = img._lxBboxTop;
+    if (img._lxBboxBot !== undefined) cv._lxBboxBot = img._lxBboxBot;
+    cv._lxBboxSrc = img;   // resolver of last resort — see _detectSpriteBboxBottom
+    // v0.30.261 perf — a HIT FLASH is 2-3 frames of near-white blowout; see
+    // the flash-direct branch in _lxDrawSoft for why these skip the feather.
+    cv._lxIsFlash = /^brightness\(2\.[05]\)/.test(filterStr);
   } catch (e) { cv = null; }
   bakes[filterStr] = cv;
   return cv;
@@ -121221,6 +121325,19 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
     if (_tb) img = _tb;
   }
   if (dw == null) { dw = img._lxDrawW || img.width; dh = img._lxDrawH || img.height; }   // v0.30.255 — device-res bakes carry their logical size
+  // v0.30.261 perf — FLASH FRAMES DRAW DIRECT. The feather cache is keyed on
+  // the source canvas, and a hit-flash tint bake is a fresh canvas per (frame,
+  // filter) - so every hit on an animated boss minted a new full feather
+  // composite (canvas alloc + gradients + first-use upload) per frame of the
+  // swing, profiled at 39-41ms per mint under 4x throttle, in bursts exactly
+  // when the player lands hits. The v0.30.65 note is right that the composite
+  // cannot be carried across a tint (it holds real pixels); what CAN change is
+  // needing it at all: a flash is 2-3 frames of brightness(2.5) white blowout,
+  // and a soft edge under a white blowout is imperceptible. Flash frames blit
+  // straight from the tint bake - zero mints, zero caches. Status washes
+  // (freeze/burn/stun) persist for seconds and DO keep their feather: their
+  // filter strings are stable, so their composites cache once and stay.
+  if (img._lxIsFlash) { c.drawImage(img, dx, dy, dw, dh); return; }
   let e = _lxEdgesTouched(_edgeSrc);
   // force: fill in any edge the probe missed (partial detections keep their
   // measured span; sides the glow defeated get the full-span fallback).
