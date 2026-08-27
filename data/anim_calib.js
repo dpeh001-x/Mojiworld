@@ -247,25 +247,14 @@ window.LX_ANIM_CALIB = {
       "dy": 0.03
     },
     "walk": {
-      "s": 1.22,
+      "s": 1.021,
       "dx": 0,
       "dy": 0.05
     },
     "attack": {
-      "s": 1.06,
+      "s": 1.019,
       "dx": 0,
-      "dy": 0.04,
-      "fs": [
-        1,
-        1,
-        1,
-        1,
-        1,
-        1.23,
-        1,
-        1.23,
-        1
-      ]
+      "dy": 0.04
     }
   },
   "gravitos3star": {
@@ -505,21 +494,21 @@ window.LX_ANIM_CALIB = {
   },
   "gravitos3laser": {
     "attack": {
-      "s": 1.0658,
+      "s": 1.002,
       "dx": 0,
       "dy": 0.026
     }
   },
   "gravitos3punch": {
     "attack": {
-      "s": 1.0478,
+      "s": 1.059,
       "dx": 0,
       "dy": 0.0294
     }
   },
   "gravitos3soul": {
     "attack": {
-      "s": 1.12,
+      "s": 1.062,
       "dx": 0,
       "dy": 0.0294
     }

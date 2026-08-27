@@ -154,6 +154,8 @@ async function placeSet(raws) {
   for (const m of ms) overhang = Math.max(overhang, (m.ink.y1 - m.dragon.y1) * g);
   const FOOT_ROW = Math.round(FOOT_ROW_MAX - overhang);
 
+  if (g > 1.25) console.log('    NOTE: placing at ' + g.toFixed(2) + 'x — upscaling blurs; seed the model larger');
+  else console.log('    placement scale ' + g.toFixed(3) + 'x');
   const out = [];
   for (let i = 0; i < ms.length; i++) {
     const m = ms[i];
@@ -293,16 +295,39 @@ if (has('--bake')) {
   process.exit(0);
 }
 
-// Pad the seed on the way out: frame_size:-9 is True Size, so the margin
-// composited here is the room the spiral gets in every returned frame.
+// SPEND THE MEGAPIXEL ON THE DRAGON.
+//
+// The first version composited the whole 1656x1325 plate onto a padded canvas
+// and then shrank it to 940 wide, which reduced the dragon TWICE. He came back
+// 199px tall inside a 752px frame - 26% of the resolution being paid for - and
+// getting him to his authored 680px then meant a 3.42x upscale. That is the
+// blur the user reported: measured edge energy 10.9-21.4 against 23.4 for the
+// seed he was made from and 34.2 for the idle frames beside him.
+//
+// frame_size:-9 (True Size) returns frames at the source's own dimensions and
+// refuses anything over 1 megapixel, so the budget is fixed at ~1e6 px. Spend
+// it on the subject: crop to the dragon's own ink, add a margin for the spell
+// to occupy, and fill the megapixel with THAT. The dragon now comes back near
+// his final size, so the placement scale lands close to 1.0 and no upscale blur
+// is introduced at all.
 const seedBuf = await readFile(SEED);
-const PAD = Number(arg('--pad') || 0.22);
-const inner = Math.round(Math.min(CANVAS_W, CANVAS_H) * (1 - 2 * PAD));
-const seedImg = await sharp({ create: { width: CANVAS_W, height: CANVAS_H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
-  .composite([{ input: await sharp(seedBuf).resize(inner, inner, { fit: 'inside' }).png().toBuffer(), gravity: 'centre' }])
+const MARGIN = Number(arg('--margin') || 0.30);   // room around the dragon for the spell
+const sm = await scan(seedBuf);
+const iw = sm.ink.x1 - sm.ink.x0 + 1, ih = sm.ink.y1 - sm.ink.y0 + 1;
+let boxW = Math.round(iw * (1 + 2 * MARGIN)), boxH = Math.round(ih * (1 + 2 * MARGIN));
+const MP = 999000;                                 // stay under the API's 1 MP ceiling
+if (boxW * boxH > MP) { const k = Math.sqrt(MP / (boxW * boxH)); boxW = Math.floor(boxW * k); boxH = Math.floor(boxH * k); }
+const fit = Math.min(boxW / (iw * (1 + 2 * MARGIN)), boxH / (ih * (1 + 2 * MARGIN)));
+const cropped = await sharp(seedBuf)
+  .extract({ left: sm.ink.x0, top: sm.ink.y0, width: iw, height: ih })
+  .resize(Math.max(1, Math.round(iw * fit)), Math.max(1, Math.round(ih * fit)), { fit: 'fill' })
   .png().toBuffer();
-const uri = 'data:image/png;base64,'
-  + (await sharp(seedImg).resize(940, 940, { fit: 'inside', withoutEnlargement: true }).png().toBuffer()).toString('base64');
+const seedImg = await sharp({ create: { width: boxW, height: boxH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+  .composite([{ input: cropped, gravity: 'centre' }]).png().toBuffer();
+console.log('seed: dragon ' + iw + 'x' + ih + ' -> sent at ' + boxW + 'x' + boxH
+  + ' (' + ((boxW * boxH) / 1e6).toFixed(2) + ' MP, dragon fills '
+  + ((ih * fit / boxH) * 100).toFixed(0) + '% of frame height)');
+const uri = 'data:image/png;base64,' + seedImg.toString('base64');
 
 const ROLLS = Number(arg('--rolls') || 3);
 let best = null;
