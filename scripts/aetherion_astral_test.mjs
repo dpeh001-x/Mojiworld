@@ -109,6 +109,8 @@ const r = await page.evaluate(() => {
   out.atResolve = at(1500);
   out.atStart = at(0);
   out.atEnd = at(2400);
+  // The engine's own burst index, read rather than assumed — see the assertion.
+  out.burstConst = (typeof _AE_ASTRAL_BURST === 'number') ? _AE_ASTRAL_BURST : null;
   // and it must not claim the sprite for any OTHER pattern
   m.patternState = 'volley'; m.patternTimer = 400;
   out.volleyUsesAstral = !!(m.patternState === 'astral');
@@ -135,9 +137,17 @@ ok('the VIOLET actually animates, and peaks on the frame the engine detonates',
   violetPeak === r.atResolve && violet[violetPeak] > 50000 && violet[8] < violet[violetPeak] / 10,
   { perFrameVioletPx: violet, peakFrame: violetPeak, engineBurstFrame: r.atResolve,
     note: 'a set that peaked at 4 while the engine burst at 6 would die two frames before the hit' });
+// The 4 that used to be hard-coded here contradicted the assertion above, which
+// ties the art's violet peak to whatever the engine's burst index actually is.
+// When the set was regenerated and peaked a frame later, _AE_ASTRAL_BURST moved
+// to 5 with it — exactly as the constant's own comment instructs — and this line
+// would then have failed a correct build. Read the constant instead: the thing
+// worth asserting is that the frame shown at the resolve IS the burst frame, not
+// that the burst frame is any particular number.
 ok('the cast opens on frame 0 and the BURST lands exactly on the resolve',
-  r.atStart === 0 && r.atResolve === 4,
-  { atStart: r.atStart, atResolve1500ms: r.atResolve, timeline: T.map(x => x.pt + 'ms->f' + x.f).join(' ') });
+  r.atStart === 0 && r.burstConst !== null && r.atResolve === r.burstConst,
+  { atStart: r.atStart, atResolve1500ms: r.atResolve, engineBurstConst: r.burstConst,
+    timeline: T.map(x => x.pt + 'ms->f' + x.f).join(' ') });
 ok('...and the aftermath plays out after the hit rather than before it',
   T.filter(x => x.pt < 1500).every(x => x.f <= 4) && r.atEnd === 8,
   { beforeHit: T.filter(x => x.pt < 1500).map(x => x.f), atEnd: r.atEnd });
