@@ -9969,6 +9969,7 @@ The sleeping world is listening.</div>
 <script src="data/sprite_frame_index.js"></script>
   <script src="data/sprite_bbox.js"></script>
   <script src="data/sprite_edges.js"></script>
+  <script src="data/tile_crops.js"></script>
 <script>
 // v0.29.519 — Frame count for <dir>/<key>_0.. from the baked index, or
 // `fallback` when the index (or that entry) is absent. Function declaration
@@ -9984,7 +9985,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.252';
+const GAME_VERSION = 'v0.30.253';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -17517,10 +17518,44 @@ function _lxTileReady(src) {
 // image height) onto an offscreen canvas. The result is a seamless
 // single-tile source that drawImage can repeat without showing the
 // transparent gaps from the original asset's multi-tile layout.
+// v0.30.253 perf — the crop rect comes from data/tile_crops.js when the table
+// knows this image, and the whole readback below is skipped. The rect was the
+// ONLY thing the readbacks computed; the bake itself is one cheap drawImage
+// crop. Measured at boot: 164 bakes costing 713-2247 ms, and the cost is per
+// CALL, not per pixel — the first getImageData after a drawImage flushes the
+// GPU pipeline (~14 ms) even for a one-row read, which is why the v0.30.245
+// band-scan barely dented this caller. The only fix is to not read back at
+// all. Rows carry the source dimensions and are rejected on mismatch, so
+// redrawn art falls through to the live detection below and is merely slow,
+// never wrong. A miss behaves exactly as before. As a bonus the table path
+// works under file:// taint, where the readback path could only fail.
+function _lxTileCropFromTable(img, mode) {
+  const T = (typeof window !== 'undefined') && window.LX_TILE_CROPS;
+  if (!T || mode !== 'auto') return undefined;      // only 'auto' ever reads back
+  let k = img.src || '';
+  const o = k.indexOf('/', k.indexOf('//') + 2);    // strip origin
+  if (o > 0) k = k.slice(o + 1);
+  const q = k.indexOf('?');
+  if (q >= 0) k = k.slice(0, q);
+  try { k = decodeURIComponent(k); } catch (e) {}
+  const v = T[k];
+  if (v === undefined) return undefined;            // unknown image
+  if (!Array.isArray(v) || v.length < 2) return undefined;
+  if (v[0] !== img.naturalWidth || v[1] !== img.naturalHeight) return undefined;   // stale row — art moved under the table
+  return v;                                          // [w, h] = null-result memo; [w, h, sx, sy, sw, sh] = crop
+}
 function _lxBakeSeamlessTile(img, mode) {
   try {
     const w = img.naturalWidth, h = img.naturalHeight;
     if (!w || !h) return null;
+    const _t = _lxTileCropFromTable(img, mode);
+    if (_t !== undefined) {
+      if (_t.length < 6) return null;               // detection found no clean tile — memoised
+      const out = document.createElement('canvas');
+      out.width = _t[4]; out.height = _t[5];
+      out.getContext('2d').drawImage(img, _t[2], _t[3], _t[4], _t[5], 0, 0, _t[4], _t[5]);
+      return out;
+    }
     if (mode && mode.startsWith('grid:')) {
       // mode: 'grid:CxR' — crop top-left cell
       const m = mode.match(/grid:(\d+)x(\d+)/);
@@ -17570,6 +17605,15 @@ function _lxBakeSeamlessTile(img, mode) {
     // makes the visible top of the tile == the player's foot line.
     const _e = _lxEdgeRows(pctx, start, 0, tileW, h, 30);
     const yTop = _e ? _e.top : -1, yBot = _e ? _e.bottom : -1;
+    // v0.30.253 — record what the live detection decided, so
+    // scripts/gen_tile_crops.mjs can harvest real runtime answers instead of
+    // re-implementing this algorithm (reimplementation drift is how the
+    // sprite-bbox generator got its dimension guard). Null results are logged
+    // by the catch-all in the callers keeping the raw image, not here.
+    if (typeof window !== 'undefined') {
+      (window._lxTileCropLog = window._lxTileCropLog || []).push(
+        { src: img.src, w, h, rect: (yTop < 0 || yBot <= yTop) ? null : [start, yTop, end - start + 1, yBot - yTop + 1] });
+    }
     if (yTop < 0 || yBot <= yTop) return null;
     const tileH = yBot - yTop + 1;
     const out = document.createElement('canvas');
