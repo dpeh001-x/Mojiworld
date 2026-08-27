@@ -108820,16 +108820,75 @@ function _getBossHaloCanvas() {
   _bossHaloCanvas = cv;
   return cv;
 }
+// v0.30.252 perf — the bake now fixes the SIZE as well as the filter. It was
+// minted at img.naturalWidth (the portal art is 768x768) and then rescaled to
+// 110x156 by every per-frame blit: 590K source pixels resampled to paint 17K,
+// for a static image, per portal, forever — the v0.30.246 backdrop fault, one
+// object over. Baked at 220x312 (2x the drawn size, matching the render-scale
+// cap of 2 from v0.30.238) the blit is a near-1:1 copy at every zoom the game
+// can reach: nothing lost visually, ~8.6x less resampling. Town and PLAIN
+// portals below get the same; the plain one had no bake at all.
+const _LX_PORTAL_BAKE_W = 220, _LX_PORTAL_BAKE_H = 312;
 let _bossPortalImg = null;
 function _getBossPortalImg(img) {
   if (_bossPortalImg) return _bossPortalImg;
   const cv = document.createElement('canvas');
-  cv.width = img.naturalWidth || 320; cv.height = img.naturalHeight || 420;
+  cv.width = _LX_PORTAL_BAKE_W; cv.height = _LX_PORTAL_BAKE_H;
   const c = cv.getContext('2d');
+  c.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in c) c.imageSmoothingQuality = 'high';
   c.filter = 'brightness(0.55) sepia(1) saturate(6) hue-rotate(-48deg)';
   c.drawImage(img, 0, 0, cv.width, cv.height);
   _bossPortalImg = cv;
   return cv;
+}
+let _plainPortalImg = null;
+function _getPlainPortalImg(img) {
+  if (_plainPortalImg) return _plainPortalImg;
+  const cv = document.createElement('canvas');
+  cv.width = _LX_PORTAL_BAKE_W; cv.height = _LX_PORTAL_BAKE_H;
+  const c = cv.getContext('2d');
+  c.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in c) c.imageSmoothingQuality = 'high';
+  c.drawImage(img, 0, 0, cv.width, cv.height);
+  _plainPortalImg = cv;
+  return cv;
+}
+// v0.30.252 perf — ONE downscale cache for anything projectile-shaped.
+// Projectile art is authored big (the ludo sets are 474x474, some 768) and was
+// resampled to its ~50-90px draw box on every blit of every projectile of
+// every frame, across ~15 separate draw sites. The bake keeps 2x the draw box
+// (capped at native) because projectiles ROTATE: rotation resamples its
+// source, and a 2x source under the render-scale-2 ceiling keeps that
+// resample visually lossless. Bucketed to 10px so near sizes share one bake;
+// a source already within 2.2x of the box is returned untouched (no win).
+// Per-image slot map, tiny FIFO, exactly the _lxPlainCache recipe (v0.29.735).
+function _lxProjScaled(img, boxPx) {
+  if (!img) return img;
+  const nw = img.naturalWidth || img.width || 0, nh = img.naturalHeight || img.height || 0;
+  const box = boxPx | 0;
+  if (!nw || !nh || box < 14 || Math.max(nw, nh) <= box * 2.2) return img;
+  const key = Math.ceil((box * 2) / 10) * 10;
+  let m = img._lxProjCache;
+  if (!m) m = img._lxProjCache = {};
+  let c = m[key];
+  if (c === undefined) {
+    if ((m._n || 0) > 4) m = img._lxProjCache = {};
+    try {
+      const cv = document.createElement('canvas');
+      const k = key / Math.max(nw, nh);
+      cv.width = Math.max(1, Math.round(nw * k));
+      cv.height = Math.max(1, Math.round(nh * k));
+      const g = cv.getContext('2d');
+      g.imageSmoothingEnabled = true;
+      if ('imageSmoothingQuality' in g) g.imageSmoothingQuality = 'high';
+      g.drawImage(img, 0, 0, cv.width, cv.height);
+      c = cv;
+    } catch (e) { c = null; }
+    m[key] = c;
+    m._n = (m._n || 0) + 1;
+  }
+  return c || img;
 }
 // v0.29.726 — TOWN PORTALS READ GREEN (per user: "for portals leading to town
 // tint them slightly greenish to indicate to player"). Same machinery as the
@@ -108859,8 +108918,10 @@ let _townPortalImg = null;
 function _getTownPortalImg(img) {
   if (_townPortalImg) return _townPortalImg;
   const cv = document.createElement('canvas');
-  cv.width = img.naturalWidth || 320; cv.height = img.naturalHeight || 420;
+  cv.width = _LX_PORTAL_BAKE_W; cv.height = _LX_PORTAL_BAKE_H;   // v0.30.252 perf — draw-size bake, see _getBossPortalImg
   const c = cv.getContext('2d');
+  c.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in c) c.imageSmoothingQuality = 'high';
   c.drawImage(img, 0, 0, cv.width, cv.height);
   c.globalAlpha = 0.62;   // partial wash: a cast, not a repaint
   c.filter = 'brightness(0.98) sepia(1) saturate(2.2) hue-rotate(58deg)';
@@ -108987,7 +109048,7 @@ function drawPortals() {
       // the scene rather than reading as a solid sprite.
       ctx.save();
       ctx.globalAlpha = 0.65;
-      ctx.drawImage(_isBoss ? _getBossPortalImg(img) : _isTown ? _getTownPortalImg(img) : img, -55, -78, 110, 156);   // v0.26.x perf — pre-filtered bake
+      ctx.drawImage(_isBoss ? _getBossPortalImg(img) : _isTown ? _getTownPortalImg(img) : _getPlainPortalImg(img), -55, -78, 110, 156);   // v0.26.x perf — pre-filtered bake
       ctx.restore();
     } else {
       // Fallback: tinted ellipse so the portal isn't invisible while
@@ -129036,7 +129097,8 @@ function drawProjectiles() {
       // v0.26.x — prefer the ludo.ai animation frame (e.g. the warlord banner's
       // waving flag) when its frame set has decoded; else the static sprite.
       const _bAnimKey = (typeof _BULT_ANIM_KEY !== 'undefined') ? _BULT_ANIM_KEY[p.bspr] : null;
-      const _bdraw = (_bAnimKey && typeof _projAnimFrame === 'function' && _projAnimFrame(_bAnimKey)) || _bi;
+      let _bdraw = (_bAnimKey && typeof _projAnimFrame === 'function' && _projAnimFrame(_bAnimKey)) || _bi;
+      _bdraw = _lxProjScaled(_bdraw, Math.max(_bw | 0, _bh | 0));   // v0.30.252 perf
       // v0.26.x — FIX: drawProjectiles runs INSIDE the world render's
       // `ctx.translate(0, -camera.y)` (see drawGame), so world-Y is drawn
       // directly — exactly like the generic/arrow/procedural branches below
@@ -129166,7 +129228,7 @@ function drawProjectiles() {
         // and what can hurt them are one fact. Solid for the first 70% of
         // flight, then an honest dissolve that deals no damage (_BOLT_HIT_ALPHA).
         if (p.skill === 'bolt') ctx.globalAlpha *= _boltAlpha(p);
-        ctx.drawImage(_pAnim || _spriteForSkill, Math.round(-sw/2), Math.round(-sh/2), Math.round(sw), Math.round(sh));   // v0.26.x perf — integer blit
+        ctx.drawImage(_lxProjScaled(_pAnim || _spriteForSkill, Math.max(Math.round(sw), Math.round(sh))), Math.round(-sw/2), Math.round(-sh/2), Math.round(sw), Math.round(sh));   // v0.30.252 perf   // v0.26.x perf — integer blit
         ctx.restore();
         continue;   // skip the procedural branch below for this projectile
       }
@@ -129508,7 +129570,7 @@ function drawProjectiles() {
         if (_lxMobProjReady(_sprite)) {
           const _ar = _sprite.naturalWidth / (_sprite.naturalHeight || _sprite.naturalWidth);
           const _dw = r * 2, _dh = (_ar > 0 ? _dw / _ar : _dw);
-          ctx.drawImage(_sprite, -_dw / 2, -_dh / 2, _dw, _dh);   // no procedural-circle fallback; skip until decoded
+          ctx.drawImage(_lxProjScaled(_sprite, Math.max(_dw, _dh)), -_dw / 2, -_dh / 2, _dw, _dh);   // v0.30.252 perf   // no procedural-circle fallback; skip until decoded
         }
         ctx.restore();
       } else if (p.skill === 'smash' && _lxFxReady(LX_FX.fx_groundshock)) {
@@ -129669,7 +129731,7 @@ function drawProjectiles() {
           // biggest pre-fix gap, mismatch was ~2.6×).
           const r = p.w * 0.5;
           const _fbImg = (typeof _projAnimFrame === 'function' && _projAnimFrame('firebomb')) || LX_MOB_PROJ.mfirebomb;
-          ctx.drawImage(_fbImg, -r, -r, r * 2, r * 2);
+          ctx.drawImage(_lxProjScaled(_fbImg, r * 2), -r, -r, r * 2, r * 2);   // v0.30.252 perf
         }   // procedural circle fallback removed — m_firebomb always present
         ctx.restore();
       } else {
