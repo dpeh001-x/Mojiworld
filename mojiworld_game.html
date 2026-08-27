@@ -9985,7 +9985,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.255';
+const GAME_VERSION = 'v0.30.256';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -13431,11 +13431,33 @@ function _lxAsyncBake(frames, idx, im, maxLong) {
 // array and so never reached the array shrink.
 function _lxShrinkSlot(holder, key, baseLogical) {
   const im = holder && holder[key];
-  if (!im || im.tagName === 'CANVAS' || im._lxNoShrink || im._lxBaking) return;
-  if (!(im.complete && im.naturalWidth > 0)) return;
+  if (!im || im._lxBaking) return;
   const maxLong = _lxShrinkCap(baseLogical);
+  // v0.30.256 — same staleness as the frame arrays (see _lxShrinkFrames): an
+  // installed canvas was skipped forever, so a render-scale increase left the
+  // static mob sprites at the old resolution. Retire it the same way.
+  if (im.tagName === 'CANVAS') {
+    const _src = im._lxSrc;
+    if (_src && _src.naturalWidth > 0) {
+      const _srcLong = Math.max(_src.naturalWidth, _src.naturalHeight);
+      const _want = Math.min(_srcLong, maxLong);
+      if (_want > Math.max(im.width, im.height) * 1.05) {
+        if (_src._lxBakedCv === im) _src._lxBakedCv = null;
+        holder[key] = _src;
+        if (_srcLong > maxLong && typeof createImageBitmap === 'function'
+            && _lxBakeInFlight < _lxBakeBudget()) _lxAsyncBake(holder, key, _src, maxLong);
+      }
+    }
+    return;
+  }
+  if (im._lxNoShrink) return;
+  if (!(im.complete && im.naturalWidth > 0)) return;
   if (Math.max(im.naturalWidth, im.naturalHeight) <= maxLong) { im._lxNoShrink = true; return; }
-  if (im._lxBakedCv && Math.max(im._lxBakedCv.width, im._lxBakedCv.height) <= maxLong) { holder[key] = im._lxBakedCv; return; }   // v0.29.742 — reuse a finished bake
+  if (im._lxBakedCv) {
+    const _bl = Math.max(im._lxBakedCv.width, im._lxBakedCv.height);
+    const _wl = Math.min(Math.max(im.naturalWidth, im.naturalHeight), maxLong);
+    if (_bl <= maxLong && _bl >= _wl * 0.95) { holder[key] = im._lxBakedCv; return; }   // v0.29.742 reuse, v0.30.256 not-too-small
+  }
   if (typeof createImageBitmap === 'function') {
     if (_lxBakeInFlight >= _lxBakeBudget()) return;
     _lxAsyncBake(holder, key, im, maxLong);
@@ -13447,6 +13469,7 @@ function _lxShrinkSlot(holder, key, baseLogical) {
 }
 function _lxShrinkFrames(frames, baseLogical) {
   if (!frames) return frames;
+  frames._lxBase = baseLogical;   // v0.30.256 — audit hook: which cap family governs this set
   const maxLong = _lxShrinkCap(baseLogical);
   // v0.29.707 — LAG FIX: the "shrunk"/"noShrink" marks are now versioned by
   // the cap that stamped them. They used to be sticky booleans, so once a set
@@ -13454,7 +13477,16 @@ function _lxShrinkFrames(frames, baseLogical) {
   // later caller with a SMALLER cap could never re-open it, and the mob-frame
   // right-sizing below would have been a silent no-op on any set the old
   // 480-base scan had already marked.
-  if (frames._lxShrunk && maxLong >= (frames._lxShrunkCap || 0)) return frames;
+  // v0.30.256 — equality, not >=. The v0.29.707 versioning re-opened a set when
+  // a SMALLER cap arrived; a LARGER one returned early and kept the low-res
+  // bakes. That is exactly the mid-session render-scale increase: boot in a
+  // window at scale 1.5, Aetherion's 1656px frames shrink to 1242, enter
+  // fullscreen (scale 2, cap 1656) - and the early return froze him at 1242,
+  // his ~750px body upscaled 1.54x across 1156 device px. Blur, from the same
+  // family as the v0.30.255 cache bug: a store that grew under bakes that
+  // did not. On equality the scan re-runs once per cap change, the canvas
+  // branch below re-bakes anything now undersized, and the set re-stamps.
+  if (frames._lxShrunk && maxLong === (frames._lxShrunkCap || 0)) return frames;
   const t = (typeof game !== 'undefined' && game) ? game.time : 0;
   if (t !== _lxShrinkStamp) { _lxShrinkStamp = t; _lxShrinkUsed = 0; }
   const canAsync = (typeof createImageBitmap === 'function');
@@ -13462,7 +13494,32 @@ function _lxShrinkFrames(frames, baseLogical) {
   for (let i = 0; i < frames.length; i++) {
     const im = frames[i];
     if (!im) { pending = true; continue; }
-    if (im.tagName === 'CANVAS' || (im._lxNoShrink && maxLong >= (im._lxNoShrinkCap || 0))) continue;
+    if (im.tagName === 'CANVAS') {
+      // v0.30.256 — a bake is only valid while the cap that minted it stands.
+      // Every bake keeps its source addressable (cv._lxSrc — the comment on it
+      // said "future re-bake", and this is that future). When the cap has
+      // outgrown the canvas by more than 5%, put the ORIGINAL back in the slot
+      // (full-res and sharp immediately, slightly dearer to draw for a beat)
+      // and, if the source still exceeds the new cap, queue a fresh async bake
+      // at it. The stale memo on the source is cleared first, or the reuse
+      // branch below would reinstall the very canvas being retired.
+      const _src = im._lxSrc;
+      if (_src && _src.naturalWidth > 0) {
+        const _srcLong = Math.max(_src.naturalWidth, _src.naturalHeight);
+        const _want = Math.min(_srcLong, maxLong);
+        if (_want > Math.max(im.width, im.height) * 1.05) {
+          if (_src._lxBakedCv === im) _src._lxBakedCv = null;
+          frames[i] = _src; frames._readyN = 0;
+          if (_srcLong > maxLong) {
+            if (canAsync && _lxBakeInFlight < _lxBakeBudget()) _lxAsyncBake(frames, i, _src, maxLong);
+            pending = true;
+          }
+          continue;
+        }
+      }
+      continue;
+    }
+    if (im._lxNoShrink && maxLong >= (im._lxNoShrinkCap || 0)) continue;
     if (im._lxBaking) { pending = true; continue; }
     if (!(im.complete && im.naturalWidth > 0)) {
       // v0.29.x perf — loaded-with-zero-width is a 404 and can never gain
@@ -13475,8 +13532,14 @@ function _lxShrinkFrames(frames, baseLogical) {
     // v0.29.742 — another array already paid for this source's bake; reuse it
     // when it fits this caller's cap instead of decoding the giant original
     // again. (A smaller cap still re-bakes — right-sizing is preserved.)
-    if (im._lxBakedCv && Math.max(im._lxBakedCv.width, im._lxBakedCv.height) <= maxLong) {
-      frames[i] = im._lxBakedCv; frames._readyN = 0; continue;
+    if (im._lxBakedCv) {
+      // v0.30.256 — "fits under the cap" is only half the test: an 828px bake
+      // fits a 1656 cap and would still be an upscale on screen. Reuse only a
+      // memo within 5% of what a fresh bake would produce; anything smaller
+      // falls through and is re-baked (which overwrites the memo).
+      const _bl = Math.max(im._lxBakedCv.width, im._lxBakedCv.height);
+      const _wl = Math.min(Math.max(im.naturalWidth, im.naturalHeight), maxLong);
+      if (_bl <= maxLong && _bl >= _wl * 0.95) { frames[i] = im._lxBakedCv; frames._readyN = 0; continue; }
     }
     if (canAsync) {
       if (_lxBakeInFlight >= _lxBakeBudget()) { pending = true; break; }
