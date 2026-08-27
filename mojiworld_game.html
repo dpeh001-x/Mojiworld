@@ -69663,39 +69663,6 @@ function _lxSkyLanceApex() {
 // Thin wrapper so any other call site still gets a plain Y and cannot
 // reintroduce the platform hunt.
 function _lxSkyLanceApexY() { return _lxSkyLanceApex().y; }
-// v0.30.x — CHAINED DIVES MUST NOT ABORT THE DIVE IN FLIGHT.
-//
-// Sky Lance books its follow-up dives with scheduleSkillTimer, which is
-// setTimeout — a WALL CLOCK — while the dive itself is frame-based gravity.
-// From the apex the drop is ~23 frames: 383 ms at 60 fps, comfortably inside
-// the 700 ms chain, but 767 ms at 30 fps, which is not. Below ~33 fps the
-// follow-up teleports the player back to the apex before the first dive has
-// landed, and that dive's impact never resolves at all — the skill silently
-// loses a third to a half of its damage exactly when the frame rate is under
-// pressure, which is to say in the boss fights it exists for. Measured on a
-// live cast: the chain fired at +940 ms with the player 126 px off the deck.
-//
-// This is the same failure v0.30.26 fixed UNDERWATER, where buoyancy made the
-// fall slow enough to lose the race on every machine; its note reads "the
-// chained dives re-teleport him before the first one ever lands, so the impact
-// never fires at all". That fix boosted slam gravity and declared land safe
-// because "its gravity is already above the floor" — true of the gravity, but
-// the race is against a wall clock, so a low frame rate reopens it.
-//
-// Waiting on dragoonSlam costs nothing when the dive has already landed (the
-// flag is clear, fn runs immediately on the original schedule) and preserves
-// the intended cadence. The deadline is in FRAMES, so it scales with the frame
-// rate it is protecting against, and exists only so a player held airborne by
-// something else cannot leave a dive queued forever.
-function _lxSkyLanceChain(fn, delay) {
-  const _deadline = (typeof game !== 'undefined' && game ? game.time : 0) + 180;
-  const _go = () => {
-    if (player.hp <= 0 || game.paused) return;
-    if (player.dragoonSlam && game.time < _deadline) { scheduleSkillTimer(_go, 90); return; }
-    fn();
-  };
-  scheduleSkillTimer(_go, delay);
-}
 function _lxSkyLanceApexY_UNUSED_platformVersion() {
   const camY = (game.camera && game.camera.y) || 0;
   const camX = (game.camera && game.camera.x) || 0;
@@ -72745,7 +72712,7 @@ const SKILL_FNS = {
       const _slBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('dragoon_skylance') : null;
       if (_slBonus && _slBonus.extraHit) {
         player._dragoonExtraSlam = _slBonus.extraHit;
-        _lxSkyLanceChain(() => {
+        scheduleSkillTimer(() => {
           if (player.hp <= 0 || game.paused) return;
           if (!game.monsters.some(m => m && m.currentHp > 0)) return;   // v0.30.x — no prey, no ghost dive (tester: "awfully clunky")
           // Chain a second leap-and-slam.
@@ -72766,7 +72733,7 @@ const SKILL_FNS = {
     // v0.25.557 — 3rd dive 1 000 ms after the cast, repositions the
     // player to the nearest on-screen mob's X before slamming. Reads as
     // "chase + finisher" — visually distinct from the 700 ms L10 chain.
-    _lxSkyLanceChain(() => {
+    scheduleSkillTimer(() => {
       if (player.hp <= 0 || game.paused) return;
       const _camX = game.camera.x;
       const _camY = (game.camera && game.camera.y) || 0;
@@ -102827,20 +102794,26 @@ function drawSkyLifeOverlay() {
 // 1.45x) and any canvas resize simply re-bake.
 function _lxBgScaled(img, w, h) {
   if (!img || !(w > 0) || !(h > 0)) return img;
-  const _key = (w | 0) + 'x' + (h | 0);
+  // v0.30.255 — bake at DEVICE resolution (see _lxBakeDpr). The v0.30.246 bake
+  // was minted at the drawn LOGICAL size, which was exact at render scale 1
+  // and a 2x upscale of the whole backdrop at the scale-2 store v0.30.238
+  // introduced. The blit passes explicit dims, so only the mint changes.
+  const _bDpr = (typeof _lxBakeDpr === 'function') ? _lxBakeDpr() : 1;
+  const _dw = Math.round(w * _bDpr), _dh = Math.round(h * _bDpr);
+  const _key = _dw + 'x' + _dh;
   const _c = img._lxBgS;
   if (_c && _c._lxKey === _key) return _c;
   // Never worth it when the plate is already at (or below) the drawn size.
   const _nw = img.naturalWidth || img.width || 0, _nh = img.naturalHeight || img.height || 0;
-  if (!_nw || !_nh || (_nw <= w * 1.1 && _nh <= h * 1.1)) return img;
+  if (!_nw || !_nh || (_nw <= _dw * 1.1 && _nh <= _dh * 1.1)) return img;
   try {
     const cv = document.createElement('canvas');
-    cv.width = w | 0; cv.height = h | 0;
+    cv.width = _dw; cv.height = _dh;
     const g = cv.getContext('2d');
     if (!g) return img;
     g.imageSmoothingEnabled = true;
     if ('imageSmoothingQuality' in g) g.imageSmoothingQuality = 'high';
-    g.drawImage(img, 0, 0, w | 0, h | 0);
+    g.drawImage(img, 0, 0, _dw, _dh);
     cv._lxKey = _key;
     img._lxBgS = cv;
     return cv;
@@ -121072,7 +121045,7 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
     const _tb = _lxTintBake(img, _lxMobTintFilter);
     if (_tb) img = _tb;
   }
-  if (dw == null) { dw = img.width; dh = img.height; }
+  if (dw == null) { dw = img._lxDrawW || img.width; dh = img._lxDrawH || img.height; }   // v0.30.255 — device-res bakes carry their logical size
   let e = _lxEdgesTouched(_edgeSrc);
   // force: fill in any edge the probe missed (partial detections keep their
   // measured span; sides the glow defeated get the full-span fallback).
@@ -121094,8 +121067,13 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
     // 29-mob fight. Same 10px bucketing; one small per-image cache keyed by
     // bucket so same-type mobs at ±5% spawn sizes don't thrash a single slot.
     const _sw0 = img.naturalWidth || img.width || 0;
-    if (_sw0 >= dw * 2 && dw >= 14 && dh >= 14) {
-      const _pw = Math.ceil(dw / 10) * 10, _ph = Math.ceil(dh / 10) * 10;
+    // v0.30.255 — bucket in DEVICE pixels (see _lxBakeDpr). The bake is still
+    // drawn at dw x dh logical, so a bigger canvas lands 1:1 on the scaled
+    // store instead of upscaling. The no-win gate compares the source against
+    // the DEVICE bucket: baking only pays when it is a real downscale.
+    const _pDpr = _lxBakeDpr();
+    const _pw = Math.ceil((dw * _pDpr) / 10) * 10, _ph = Math.ceil((dh * _pDpr) / 10) * 10;
+    if (_sw0 >= _pw * 1.5 && dw >= 14 && dh >= 14) {
       const _pk = (_pw << 16) | _ph;
       let _pcM = img._lxPlainCache;
       if (!_pcM) _pcM = img._lxPlainCache = {};
@@ -121133,7 +121111,13 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
   // BUILT at a 10px-bucketed size and drawn scaled to the requested size —
   // which the draw call below always did anyway, so the only change is that
   // the whole size-variance band shares one entry.
-  const _bw = Math.max(14, Math.round(dw / 10) * 10), _bh = Math.max(14, Math.round(dh / 10) * 10);
+  // v0.30.255 — bucket in DEVICE pixels; the composite is drawn back at
+  // dw x dh logical (it always was), so the only change is the resolution it
+  // is built at. The gradient spans are W2/H2-relative and scale with it.
+  // A render-scale change shifts the buckets, so stale-dpr entries age out of
+  // the 8-slot FIFO on their own.
+  const _fDpr = _lxBakeDpr();
+  const _bw = Math.max(14, Math.round((dw * _fDpr) / 10) * 10), _bh = Math.max(14, Math.round((dh * _fDpr) / 10) * 10);
   // v0.29.735 perf — integer key, not a 5-way string concat per blit per frame.
   // _bw/_bh are 10px buckets far below 65535 so the packing cannot collide;
   // the old string keys simply age out of the FIFO once, self-healing.
@@ -121190,6 +121174,23 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
 // larger (up to ~280 px for ground bosses, ~360 for the largest like
 // gravitos3) so the cache cap was bumped 256 → 400 to admit them.
 const _MOB_SPRITE_CACHE = new Map();
+// v0.30.255 — BAKE AT DEVICE RESOLUTION. v0.30.238 fixed "King Krook looks
+// pixelated" by letting the backing store follow devicePixelRatio x fitScale
+// (cap 2) - and quietly created the OPPOSITE bug one layer up, which the
+// tester then filmed: every pre-scaled cache in the draw path still baked at
+// LOGICAL size, so its canvas was upscaled ~2x onto the sharpened store.
+// Procedural art (bricks, lava, UI) got crisper while every cached sprite -
+// most visibly a 350-logical-px King Krook sitting in his static pose - went
+// soft. The animation-frame path was already correct (_lxShrinkCap multiplies
+// by DPR); the caches were the gap. Every bake below now happens at
+// logical x _lxBakeDpr() and is drawn back at its logical size, so the final
+// blit is 1:1 (or a downscale) on the device store at every render scale.
+// The dpr is bucketed to quarter steps so a fractional fitScale cannot mint a
+// new cache generation per pixel of window resize.
+function _lxBakeDpr() {
+  const d = (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? Math.min(3, _LX_DPR) : 1;
+  return Math.max(1, Math.round(d * 4) / 4);
+}
 function _getCachedScaledSprite(keyPrefix, sprite, srcW, srcH, targetW, targetH) {
   // Bail if dimensions invalid (defensive — callers shouldn't pass these
   // but the cache key would be poisoned).
@@ -121197,8 +121198,10 @@ function _getCachedScaledSprite(keyPrefix, sprite, srcW, srcH, targetW, targetH)
   // Skip cache for very large sprites — extreme bosses (gravitos3 final
   // phase) can render at 400+ px. Caching a 400×400 RGBA canvas is 640 KB
   // each; for sprites that rare we'd rather pay the per-frame downscale.
-  if (targetW > 400 || targetH > 400) return null;
-  const key = keyPrefix + '_' + targetW + '_' + targetH;
+  if (targetW > 400 || targetH > 400) return null;   // cap stays LOGICAL — same eligibility as before
+  const _dprB = _lxBakeDpr();
+  const _bkW = Math.max(1, Math.round(targetW * _dprB)), _bkH = Math.max(1, Math.round(targetH * _dprB));
+  const key = keyPrefix + '_' + _bkW + '_' + _bkH;
   let cached = _MOB_SPRITE_CACHE.get(key);
   if (cached) return cached;
   // First-time bake. Use the multi-step _lxBakeDownscaled helper for
@@ -121207,23 +121210,27 @@ function _getCachedScaledSprite(keyPrefix, sprite, srcW, srcH, targetW, targetH)
   let baked = null;
   try {
     if (typeof _lxBakeDownscaled === 'function') {
-      baked = _lxBakeDownscaled(sprite, targetW, targetH);
+      baked = _lxBakeDownscaled(sprite, _bkW, _bkH);
     }
     // Fallback to a single-pass bake if the multi-step helper isn't
     // available (defensive — should always exist post-v0.25.862).
     if (!baked) {
       baked = document.createElement('canvas');
-      baked.width  = targetW;
-      baked.height = targetH;
+      baked.width  = _bkW;
+      baked.height = _bkH;
       const cx = baked.getContext('2d');
       if (cx) {
         cx.imageSmoothingEnabled = true;
         if ('imageSmoothingQuality' in cx) cx.imageSmoothingQuality = 'high';
-        cx.drawImage(sprite, 0, 0, targetW, targetH);
+        cx.drawImage(sprite, 0, 0, _bkW, _bkH);
       }
     }
   } catch (_) { baked = null; }
   if (!baked) return null;
+  // Both consumers draw this canvas with NO explicit dims, so _lxDrawSoft's
+  // fallback must know the LOGICAL size — a device-res bake drawn at its own
+  // pixel size would render the sprite _dprB times too large on screen.
+  baked._lxDrawW = targetW; baked._lxDrawH = targetH;
   if (_MOB_SPRITE_CACHE.size >= 400) { _MOB_SPRITE_CACHE.delete(_MOB_SPRITE_CACHE.keys().next().value); }   // v0.26.1019 — FIFO cap
   _MOB_SPRITE_CACHE.set(key, baked);
   return baked;
