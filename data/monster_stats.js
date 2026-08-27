@@ -172,7 +172,7 @@ window.LX_MONSTER_STATS = {
   legosaurus:                     { lv: 59, hp:   730398, atk: 8221, def:  702, exp:  40172, coin:  12417 },
   young_confused_barnaby:         { lv: 40, hp:  282236, atk:  2508, def: 362, exp:  15523, coin:  4798 },
   kingKrook:                      { lv: 50, hp:   431523, atk: 5532, def: 587, exp:  23715, coin:  7367 },
-  mirrorSelf:                     { lv: 20, hp:  288000, atk:   21, def:  4, exp:  11725, coin:  3622 },   // v0.30.x — hp 213116 -> 288000 (+35%) per user "more difficult ... higher hp"; evasion/speed live in the game literal
+  mirrorSelf:                     { lv: 20, hp:  250000, atk:   21, def:  4, exp:  11725, coin:  3622 },   // v0.30.x — hp 213116 -> 288000 (+35%) per user, then -> 250000 per user on playtest; evasion/speed live in the game literal
   sundered_smith:                 { lv: 48, hp:  308547, atk:  4848, def: 515, exp:  16962, coin:   5245 },
   zodiac_aries:                   { lv: 70, hp: 2417070, atk: 13342, def:  983, exp:  132944, coin: 41119 },
   zodiac_taurus:                  { lv: 72, hp: 4837473, atk: 14570, def:1032, exp: 266107, coin:  82244 },
