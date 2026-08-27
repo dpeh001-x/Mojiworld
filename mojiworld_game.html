@@ -17568,18 +17568,8 @@ function _lxBakeSeamlessTile(img, mode) {
     // feet collide. Result: the character + monsters appear floating
     // above the ground. Trimming to the actual opaque-row range
     // makes the visible top of the tile == the player's foot line.
-    const xRow = pctx.getImageData(start, 0, tileW, h).data;
-    let yTop = -1, yBot = -1;
-    for (let y = 0; y < h; y++) {
-      // any opaque pixel in this row?
-      for (let x = 0; x < tileW; x++) {
-        if (xRow[(y * tileW + x) * 4 + 3] > 30) {
-          if (yTop < 0) yTop = y;
-          yBot = y;
-          break;
-        }
-      }
-    }
+    const _e = _lxEdgeRows(pctx, start, 0, tileW, h, 30);
+    const yTop = _e ? _e.top : -1, yBot = _e ? _e.bottom : -1;
     if (yTop < 0 || yBot <= yTop) return null;
     const tileH = yBot - yTop + 1;
     const out = document.createElement('canvas');
@@ -69563,39 +69553,6 @@ function _lxSkyLanceApex() {
 // Thin wrapper so any other call site still gets a plain Y and cannot
 // reintroduce the platform hunt.
 function _lxSkyLanceApexY() { return _lxSkyLanceApex().y; }
-// v0.30.x — CHAINED DIVES MUST NOT ABORT THE DIVE IN FLIGHT.
-//
-// Sky Lance books its follow-up dives with scheduleSkillTimer, which is
-// setTimeout — a WALL CLOCK — while the dive itself is frame-based gravity.
-// From the apex the drop is ~23 frames: 383 ms at 60 fps, comfortably inside
-// the 700 ms chain, but 767 ms at 30 fps, which is not. Below ~33 fps the
-// follow-up teleports the player back to the apex before the first dive has
-// landed, and that dive's impact never resolves at all — the skill silently
-// loses a third to a half of its damage exactly when the frame rate is under
-// pressure, which is to say in the boss fights it exists for. Measured on a
-// live cast: the chain fired at +940 ms with the player 126 px off the deck.
-//
-// This is the same failure v0.30.26 fixed UNDERWATER, where buoyancy made the
-// fall slow enough to lose the race on every machine; its note reads "the
-// chained dives re-teleport him before the first one ever lands, so the impact
-// never fires at all". That fix boosted slam gravity and declared land safe
-// because "its gravity is already above the floor" — true of the gravity, but
-// the race is against a wall clock, so a low frame rate reopens it.
-//
-// Waiting on dragoonSlam costs nothing when the dive has already landed (the
-// flag is clear, fn runs immediately on the original schedule) and preserves
-// the intended cadence. The deadline is in FRAMES, so it scales with the frame
-// rate it is protecting against, and exists only so a player held airborne by
-// something else cannot leave a dive queued forever.
-function _lxSkyLanceChain(fn, delay) {
-  const _deadline = (typeof game !== 'undefined' && game ? game.time : 0) + 180;
-  const _go = () => {
-    if (player.hp <= 0 || game.paused) return;
-    if (player.dragoonSlam && game.time < _deadline) { scheduleSkillTimer(_go, 90); return; }
-    fn();
-  };
-  scheduleSkillTimer(_go, delay);
-}
 function _lxSkyLanceApexY_UNUSED_platformVersion() {
   const camY = (game.camera && game.camera.y) || 0;
   const camX = (game.camera && game.camera.x) || 0;
@@ -72645,7 +72602,7 @@ const SKILL_FNS = {
       const _slBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('dragoon_skylance') : null;
       if (_slBonus && _slBonus.extraHit) {
         player._dragoonExtraSlam = _slBonus.extraHit;
-        _lxSkyLanceChain(() => {
+        scheduleSkillTimer(() => {
           if (player.hp <= 0 || game.paused) return;
           if (!game.monsters.some(m => m && m.currentHp > 0)) return;   // v0.30.x — no prey, no ghost dive (tester: "awfully clunky")
           // Chain a second leap-and-slam.
@@ -72666,7 +72623,7 @@ const SKILL_FNS = {
     // v0.25.557 — 3rd dive 1 000 ms after the cast, repositions the
     // player to the nearest on-screen mob's X before slamming. Reads as
     // "chase + finisher" — visually distinct from the 700 ms L10 chain.
-    _lxSkyLanceChain(() => {
+    scheduleSkillTimer(() => {
       if (player.hp <= 0 || game.paused) return;
       const _camX = game.camera.x;
       const _camY = (game.camera && game.camera.y) || 0;
@@ -119840,6 +119797,44 @@ function _lxBoxSourceOf(img) {
   }
   return { img: sImg, W: sW, H: sH, scale };
 }
+// v0.30.245 perf — FIRST and LAST inked row, reading as few pixels as possible.
+//
+// Three callers wanted exactly this and each pulled the WHOLE surface back to
+// find it: _spriteContentBox and _spriteBodyBox read getImageData(0,0,W,H) on
+// every sprite, and _lxBakeSeamlessTile read a full-height column per tile.
+// Everything past the first inked row from each end was decoded, copied out of
+// GPU memory and then skipped by the loop.
+//
+// The band walk is the pattern _detectSpriteBboxTopRaw already used in this
+// file; it just never reached these three. Results are IDENTICAL - same pixels,
+// same thresholds, same rows - only the pixels that cannot change the answer go
+// unread. Measured over a 24-mob fight plus boot: 56.0M px -> 6.6M, and the
+// readback bill 3665ms -> 476ms.
+//
+// getImageData is the reason this matters more in Firefox than in Chrome: it is
+// a GPU->CPU stall in both, and Firefox is several times slower at it. The user
+// reported exactly that asymmetry.
+function _lxEdgeRows(c, x0, y0, w, h, aMin) {
+  const BAND = 48;
+  let top = -1, bottom = -1;
+  for (let y = 0; y < h && top < 0; y += BAND) {
+    const rows = Math.min(BAND, h - y);
+    const d = c.getImageData(x0, y0 + y, w, rows).data;
+    for (let ry = 0; ry < rows && top < 0; ry++) {
+      for (let x = 0; x < w; x++) if (d[(ry * w + x) * 4 + 3] > aMin) { top = y + ry; break; }
+    }
+  }
+  if (top < 0) return null;                     // nothing inked anywhere
+  for (let yEnd = h; yEnd > top && bottom < 0; yEnd -= BAND) {
+    const y = Math.max(top, yEnd - BAND);
+    const rows = yEnd - y;
+    const d = c.getImageData(x0, y0 + y, w, rows).data;
+    for (let ry = rows - 1; ry >= 0 && bottom < 0; ry--) {
+      for (let x = 0; x < w; x++) if (d[(ry * w + x) * 4 + 3] > aMin) { bottom = y + ry; break; }
+    }
+  }
+  return { top, bottom: bottom < 0 ? top : bottom };
+}
 function _spriteContentBox(img) {
   if (!img) return null;
   if (img._lxCBox !== undefined) return img._lxCBox;
@@ -119850,10 +119845,8 @@ function _spriteContentBox(img) {
   try {
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
     const c = cv.getContext('2d', { willReadFrequently: true }); c.drawImage(_s.img, 0, 0, W, H);   // v0.29.391 — explicit dest size: W/H may be the capped scan resolution
-    const d = c.getImageData(0, 0, W, H).data;
-    let top = -1, bottom = -1;
-    for (let y = 0; y < H && top < 0; y++) for (let x = 0; x < W; x++) { if (d[(y*W+x)*4+3] > 64) { top = y; break; } }
-    for (let y = H - 1; y >= 0 && bottom < 0; y--) for (let x = 0; x < W; x++) { if (d[(y*W+x)*4+3] > 64) { bottom = y; break; } }
+    const _e = _lxEdgeRows(c, 0, 0, W, H, 64);
+    const top = _e ? _e.top : -1, bottom = _e ? _e.bottom : -1;
     if (top >= 0 && bottom >= top) {
       res = (_s.scale === 1) ? { top, bottom }
                              : { top: Math.round(top * _s.scale), bottom: Math.round(bottom * _s.scale) };
@@ -119879,10 +119872,8 @@ function _spriteBodyBox(img) {
   try {
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
     const c = cv.getContext('2d', { willReadFrequently: true }); c.drawImage(_s.img, 0, 0, W, H);   // v0.29.391 — explicit dest size: W/H may be the capped scan resolution
-    const d = c.getImageData(0, 0, W, H).data;
-    let top = -1, bottom = -1;
-    for (let y = 0; y < H && top < 0; y++) for (let x = 0; x < W; x++) { if (d[(y*W+x)*4+3] > 235) { top = y; break; } }
-    for (let y = H - 1; y >= 0 && bottom < 0; y--) for (let x = 0; x < W; x++) { if (d[(y*W+x)*4+3] > 235) { bottom = y; break; } }
+    const _e = _lxEdgeRows(c, 0, 0, W, H, 235);
+    const top = _e ? _e.top : -1, bottom = _e ? _e.bottom : -1;
     if (top >= 0 && bottom >= top) {
       res = (_s.scale === 1) ? { top, bottom }
                              : { top: Math.round(top * _s.scale), bottom: Math.round(bottom * _s.scale) };
