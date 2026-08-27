@@ -121,21 +121,27 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
-<h2>v0.30.246 <span class="tag"><span class="pill balance">balance</span> King Krook bites back, and the last three stars bite harder</span></h2>
-<p>Per user: <em>increase the stats of krook to make him more difficult</em>, and <em>reduce chance of success of enhancement from 8 to 10 stars.</em></p>
-<p><b>Krook was the softer half of his own tier.</b> He sits beside Octobaby — both Lv50 — and carried <b>2,520,000</b> HP to her 3,037,500, despite being the later wall for most players. Raised across the line, with the payout moved up so a harder fight is not also a worse-paying one:</p>
-<pre style="background:#0d0b14;border:1px solid #2a2438;border-radius:6px;padding:10px;overflow-x:auto"><code>hp        2,520,000 → 3,600,000   (+43%, now above Octobaby)
-atk       355 → 455               (+28%)
-evasion   108 → 130
-speed     1.3 → 1.55
-exp       365,000 → 470,000   ·   mojicoins  13,600 → 18,000</code></pre>
-<p><b>DEF is deliberately barely moved</b> (105 → 125). Monster DEF in this engine is a <em>flat</em> subtraction applied at each attack's call site (<code>defRed = def × 0.5</code>), not a percentage — the same thing measured on the Octobaby tentacles. 105 → 125 is ten more damage absorbed per hit, which against endgame numbers is nothing; raising it far enough to matter would take five figures and distort every DEF-reading display. HP and ATK are the levers, and the DEF nudge is not pretending otherwise.</p>
-<p><b>The star ladder breaks a third time.</b> A new band from the ★7 attempt — the one that produces ★8 — falls 15 a star instead of 10. The bands meet exactly at the ★6 attempt (45), the same way the existing two meet at ★5, so <em>nothing at ★7 or below moves by a single point</em>:</p>
-<pre style="background:#0d0b14;border:1px solid #2a2438;border-radius:6px;padding:10px;overflow-x:auto"><code>attempt   ★0  ★1  ★2  ★3  ★4  ★5  ★6  ★7  ★8  ★9
-was       95  87  79  71  63  55  45  35  25  15
-now       95  87  79  71  63  55  45  30  15   8</code></pre>
-<p>The floor comes down <b>12 → 8</b> so the ★9 rung is an authored number rather than a clamp. Worth stating plainly: that rung now <em>sits on</em> the floor, so the older comment's claim that “every rung still clears the 12% floor” has stopped being true and was removed rather than left standing. The pity system still carries the grind — +6% per failure, capped +30% — so a ★9 attempt climbs from 8% to 38%.</p>
-<p><code>scripts/krook_star_odds_test.mjs</code> — 10 checks. The one that earns its place asserts rungs <b>→★1 through →★7 are byte-identical to their shipped values</b>: the ask names a range, and the easy way to get it wrong is to move the whole curve. It also pins monotonicity (no later star easier than an earlier one), the floor, and Krook now out-bulking his same-tier peer.</p>
+<h2>v0.30.246 <span class="tag"><span class="pill bug">bug</span> The backdrop was resampled from 4.75 megapixels twice a frame</span></h2>
+<p>Second half of the lag the user reported (<em>&ldquo;worse on firefox better with chrome&rdquo;</em>). v0.30.246 follows <b>v0.30.245</b>, which fixed the readback side; this is the raster side, and it was the larger of the two.</p>
+<p><b>Attributing every <code>drawImage</code> by caller made it obvious.</b> Over a 24-mob fight, source pixels per frame:</p>
+<table>
+<tr><th>caller</th><th>calls / frame</th><th>source Mpx / frame</th></tr>
+<tr><td><code>drawBackground</code></td><td>0.6</td><td><b>2.71</b></td></tr>
+<tr><td><code>_lxDrawSoft</code> (all 24 mobs)</td><td>6.0</td><td>0.29</td></tr>
+<tr><td><code>drawProjectiles</code></td><td>0.7</td><td>0.22</td></tr>
+<tr><td><code>drawPortals</code></td><td>0.3</td><td>0.17</td></tr>
+</table>
+<p>The backdrop was <b>76&#37;</b> of all raster input, from barely half a call per frame. The mobs — the thing a player assumes is expensive — were 8&#37;, because the sprite path has had a scaled cache since v0.29.735. The backdrop never got one.</p>
+<p><b>The plates are big.</b> <code>bg_v3_innerDimension</code> is <b>2912&times;1632 — 4.75 megapixels</b> — and it was handed to <code>drawImage</code> at 960&times;560 <em>twice</em> every frame: once for the normal copy and once for the mirrored seam copy. That is roughly <b>9.5M source pixels of high-quality resampling per frame</b>, forever, for an image that never changes.</p>
+<p>It is now scaled once, to the size it is drawn at, and both blits become 1:1 copies with no filter. Measured on the same fight:</p>
+<table>
+<tr><th></th><th>source px / frame</th><th>p99 frame</th><th>worst frame</th></tr>
+<tr><td>before</td><td>3.44M</td><td>22.0&nbsp;ms</td><td>175&nbsp;ms</td></tr>
+<tr><td>after</td><td><b>0.96M</b></td><td><b>12.1&nbsp;ms</b></td><td><b>152&nbsp;ms</b></td></tr>
+</table>
+<p><b>The pixels are identical, and that is checked rather than assumed.</b> Rendering the two paths side by side into matching canvases and differencing them gives <b>0 differing pixels of 537,600</b> — same downscale, same smoothing, done once instead of every frame. (A naive before/after screenshot diff shows ~55&#37; of pixels differing, which is the animated sky-life between two runs, not the backdrop. Worth recording: the obvious comparison measures the wrong thing here.)</p>
+<p>Keyed on the drawn size, so the vertical-tower path — which draws at 1.45&times; — and any canvas resize simply re-bake. A plate already at or below the drawn size is left alone rather than pointlessly copied, and a tainted canvas under <code>file://</code> falls through to the original image.</p>
+<p><b>Why Firefox was worse:</b> both halves of this were browser work, not JavaScript — a GPU&rarr;CPU readback stall in v0.30.245, and filtered image scaling here. Firefox is slower at both, so the same frame budget ran out there first.</p>
 
 <h2>v0.30.245 <span class="tag"><span class="pill bug">bug</span> Three scanners read every pixel to find two rows</span></h2>
 <p>Per user: <em>&ldquo;the game is now horribly laggy, worse on firefox better with chrome&rdquo;</em>. That asymmetry is the tell. <code>getImageData</code> is a synchronous GPU&rarr;CPU stall in every browser and Firefox is several times slower at it, so a readback-heavy frame degrades there first.</p>

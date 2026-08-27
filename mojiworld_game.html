@@ -19951,32 +19951,14 @@ const MAX_STARS     = 10;
 //   was       95  87  79  71  63  55  47  39  31  23
 //   now       95  87  79  71  63  55  45  35  25  15
 //
-// v0.30.x - AND AGAIN AT EIGHT (per user: "reduce chance of success of
-// enhancement from 8 to 10 stars"). A third band from the ★7 attempt - the one
-// that produces ★8 - drops 15 a star instead of 10. The bands meet exactly at
-// the ★6 attempt (45) the same way the first two meet at ★5, so nothing at ★7
-// or below moves by a single point.
-//
-//   attempt   ★0  ★1  ★2  ★3  ★4  ★5  ★6  ★7  ★8  ★9
-//   v0.30.x   95  87  79  71  63  55  45  35  25  15
-//   now       95  87  79  71  63  55  45  30  15   8
-//
-// The floor comes down 12 -> 8 so the ★9 rung is an authored number rather than
-// a clamp. Note the honest consequence: the ★9 rung now SITS on the floor, so
-// the older claim that "every rung still clears the floor" no longer holds and
-// has been removed rather than left standing as a false comment. The pity
-// system still carries the grind - +6% a failure, capped +30% - so a ★9 attempt
-// climbs from 8% to 38%.
-const STAR_RATE_FLOOR = 8;
-const STAR_RISK_FROM  = 6;   // the first attempt on the steeper half
-const STAR_RISK2_FROM = 7;   // ...and the first on the steepest, the ★8 rung
+// Every rung still clears the 12% floor, so the pity system (+6% a failure,
+// capped +30%) remains the thing that carries a long grind rather than the
+// floor doing it - at ★9 that is 15% climbing to 45%.
+const STAR_RISK_FROM = 6;   // the first attempt on the steeper half
 function starSuccessRate(star) {
   const st = star | 0;
-  if (st < STAR_RISK_FROM)  return Math.max(STAR_RATE_FLOOR, 95 - st * 8);
-  const atRiskStart = 95 - (STAR_RISK_FROM - 1) * 8;                      // 55 at ★5
-  if (st < STAR_RISK2_FROM) return Math.max(STAR_RATE_FLOOR, atRiskStart - (st - (STAR_RISK_FROM - 1)) * 10);
-  const atRisk2Start = atRiskStart - (STAR_RISK2_FROM - 1 - (STAR_RISK_FROM - 1)) * 10;   // 45 at ★6
-  return Math.max(STAR_RATE_FLOOR, atRisk2Start - (st - (STAR_RISK2_FROM - 1)) * 15);
+  if (st < STAR_RISK_FROM) return Math.max(12, 95 - st * 8);
+  return Math.max(12, (95 - (STAR_RISK_FROM - 1) * 8) - (st - (STAR_RISK_FROM - 1)) * 10);
 }
 // v0.30.x - A STAR MEANS MOST WHERE THE SLOT MEANS MOST (per user: "weapons -
 // more base attack, armor - more defence, accesory - other miscellaneous
@@ -22203,16 +22185,7 @@ const monsterTypes = {
   //   curve is 300/(def*2.2+300), so returns diminish fast — a 100k raw hit
   //   lands 34,716 at def 29 and 28,600 at def 105 (-17.6%). A smaller bump
   //   would not have been felt.
-  // v0.30.x - per user "increase the stats of krook to make him more difficult".
-  // He sat BELOW Octobaby (also Lv50) at 2.52M vs 3.04M HP despite being the
-  // later wall for most players. HP +43%, ATK +28%, evasion and speed up so he
-  // whiffs less and gives less downtime; exp/mojicoins raised with him so a
-  // harder fight is not also a worse-paying one.
-  // DEF barely moves ON PURPOSE (105 -> 125): monster DEF here is a FLAT
-  // subtraction at each attack's call site (defRed = def * 0.5), not a percent,
-  // so this is ten more damage absorbed per hit and nothing against endgame
-  // numbers. HP and ATK are the levers; the DEF nudge is not pretending to be.
-  kingKrook:   { name:'King Krook, the Ember Tyrant', w:120, h:130, color:'#c43b2a', shell:'#5b2a86', hp:3600000, atk:455, def:125, evasion:130, exp:470000, mojicoins:18000, speed:1.55, jump:13, boss:true, level:50 },   // v0.29.136 — King Krook palette: red croc hide + purple royal cape (was basalt/ember)
+  kingKrook:   { name:'King Krook, the Ember Tyrant', w:120, h:130, color:'#c43b2a', shell:'#5b2a86', hp:2520000, atk:355, def:105, evasion:108, exp:365000, mojicoins:13600, speed:1.3, jump:13, boss:true, level:50 },   // v0.29.136 — King Krook palette: red croc hide + purple royal cape (was basalt/ember)
   // v0.25.778 — Mirror Self (Inner Dimension trial). Player's reflection,
   // bound by the Inner Dimension. Stats are PLACEHOLDERS — the spawn path
   // in spawnMonster() overrides:
@@ -102695,6 +102668,41 @@ function drawSkyLifeOverlay() {
   ctx.restore();
 }
 
+// v0.30.246 perf — the backdrop, pre-scaled ONCE to the size it is drawn at.
+//
+// The authored plates are big: innerDimension is 2912x1632, 4.75M pixels, and
+// it was handed to drawImage at 960x560 TWICE a frame (the normal copy and the
+// mirrored seam copy). That is ~9.5M source pixels of high-quality resampling
+// per frame, forever, for an image that never changes - and it dwarfed
+// everything else in the frame: 2.71M of the 3.55M drawImage source pixels per
+// frame came from drawBackground, against 0.29M for all 24 mobs put together,
+// which have had a scaled cache since v0.29.735.
+//
+// Baking once turns both blits into 1:1 copies with no filter. Same pixels: the
+// same downscale with the same smoothing, done a single time instead of every
+// frame. Keyed on the drawn size, so the vertical-tower path (which draws at
+// 1.45x) and any canvas resize simply re-bake.
+function _lxBgScaled(img, w, h) {
+  if (!img || !(w > 0) || !(h > 0)) return img;
+  const _key = (w | 0) + 'x' + (h | 0);
+  const _c = img._lxBgS;
+  if (_c && _c._lxKey === _key) return _c;
+  // Never worth it when the plate is already at (or below) the drawn size.
+  const _nw = img.naturalWidth || img.width || 0, _nh = img.naturalHeight || img.height || 0;
+  if (!_nw || !_nh || (_nw <= w * 1.1 && _nh <= h * 1.1)) return img;
+  try {
+    const cv = document.createElement('canvas');
+    cv.width = w | 0; cv.height = h | 0;
+    const g = cv.getContext('2d');
+    if (!g) return img;
+    g.imageSmoothingEnabled = true;
+    if ('imageSmoothingQuality' in g) g.imageSmoothingQuality = 'high';
+    g.drawImage(img, 0, 0, w | 0, h | 0);
+    cv._lxKey = _key;
+    img._lxBgS = cv;
+    return cv;
+  } catch (e) { return img; }   // tainted canvas under file:// — draw unscaled
+}
 function drawBackground() {
   // v0.25.16 — Phaser handles the bg image + sky + haze when active.
   // Vanilla just clears to transparent here so the Phaser layer shows
@@ -102815,7 +102823,8 @@ function drawBackground() {
     // First copy — drawn normally. Coverage for any shift in [0, _bgW): this
     // copy spans [-shift, _bgW - shift] and the mirror spans on from there to
     // 2*_bgW - shift, so together they always cover the whole [0, W] screen.
-    ctx.drawImage(bgPick, -shift, _bgY, _bgW, _bgH);
+    const _bgSrc = _lxBgScaled(bgPick, _bgW, _bgH);
+    ctx.drawImage(_bgSrc, -shift, _bgY, _bgW, _bgH);
     // Second copy — mirrored. Translating to (2*_bgW - shift) puts its right
     // edge at x=(2*_bgW-shift) and after scale(-1,1) its left edge ends up at
     // x=(_bgW-shift), exactly where the first copy's right edge lands. Pixels
@@ -102823,7 +102832,7 @@ function drawBackground() {
     ctx.save();
     ctx.translate(2 * _bgW - shift, 0);
     ctx.scale(-1, 1);
-    ctx.drawImage(bgPick, 0, _bgY, _bgW, _bgH);
+    ctx.drawImage(_bgSrc, 0, _bgY, _bgW, _bgH);
     ctx.restore();
     // v0.29.86 — optional per-map darkening tint over the authored bg.
     // Drawn on top of the backdrop only (boss decor, sky-life, and every
