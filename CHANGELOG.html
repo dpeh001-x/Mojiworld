@@ -121,6 +121,17 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.242 <span class="tag"><span class="pill bug">bug</span> Taur the Granite Bull charged at you as a green stegosaurus</span></h2>
+<p>Per user, with a screenshot of Legosaurus wearing Taur's health bar: <em>&ldquo;Taur is using the wrong sprite, taur should be using his own boss sprite&rdquo;</em>.</p>
+<p><b>Nothing was missing.</b> Taur's nine charge frames ship at <code>Sprites/bosses/zodiac/charge/taurus_0..8</code>, and <code>_zodiacAnimTick</code> already ranks <code>charge</code> above every other zodiac state — &ldquo;CHARGE outranks everything while the brace-dash owns the body&rdquo;. The art was simply unreachable.</p>
+<p><b>One line decided it, and it never asked which boss it was looking at:</b></p>
+<pre><code>const _spriteKey = (m._braceDashing &amp;&amp; BOSS_ATTACK_FRAMES.legosaurusdash &amp;&amp; …)
+  ? 'legosaurusdash' : …</code></pre>
+<p><code>legosaurusdash</code> is Legosaurus's own authored sprint, but <code>braceDash</code> is a <em>shared engine trait</em> — and the test was only &ldquo;is something brace-dashing&rdquo;. Taur opts into it for his goring charge, precisely because it is the existing trait for that shape: a long dead-still brace with the direction locked, then a committed sprint. So he inherited another boss's body along with the behaviour.</p>
+<p>The damage was done by draw ORDER. That key feeds <code>_bossAttackImg</code>, whose branch sits <b>above</b> the zodiac branch in the dispatch chain, so it resolved to Legosaurus art and the zodiac case — the one that knows about Taur's charge frames — was never reached. It also could not fail quietly: <code>_bossAttacking</code> is explicitly true while brace-dashing, so the fallback was live for the entire charge rather than a frame or two.</p>
+<p>Now gated on <code>m.type === 'legosaurus'</code>. Keyed on identity rather than on &ldquo;has no charge art of its own&rdquo;, because the sprite belongs to one boss and no other should reach for it — a sign that later ships charge frames is then fixed by shipping them, not by remembering this line. Every other zodiac sign is untouched: none sets <code>_braceDashing</code>, so none ever took this branch.</p>
+<p>Pinned by <code>scripts/taur_charge_sprite_test.mjs</code>, which drives a real Taur into a brace-dash and asserts the blitted image is his own art. It fails on the previous build.</p>
+
 <h2>v0.30.241 <span class="tag"><span class="pill bug">bug</span> Astral Judgement asked for a body sprite that has never existed</span></h2>
 <p>Found by the playtest boot check while packaging a tester build, which failed <b>15/16</b> on <em>&ldquo;NO 404s across the whole boot&rdquo;</em>.</p>
 <p>Astral Judgement got its own nine-frame set in v0.30.214 and its key was registered in <code>BOSS_SPRITE_TYPES</code> so the frames would load. That list's loader also probes for a matching <code>Sprites/bosses/&lt;key&gt;.webp</code> body sprite — and <code>aetherionastral.webp</code> <b>has never existed in any commit</b>. Every cold boot spent <b>6 guaranteed 404s</b> on it, 3 webp and 3 png through the fallback chain.</p>
