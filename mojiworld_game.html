@@ -9985,7 +9985,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.253';
+const GAME_VERSION = 'v0.30.254';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -23574,7 +23574,7 @@ function _generateBestiaryQuests() {
     //     codex thickens exactly where the user wants the pull.
     const _lvlReq = isBossQ ? Math.max(1, lvl - 10) : Math.max(1, lvl - 2);
     if (!isBossQ && _lvlReq < 10) continue;
-    const count = isBossQ ? (cfg.count || 1) : _bestiaryHuntCount(monId, _lvlReq);
+    const count = isBossQ ? (cfg.count || 1) : _lxHuntSupplyCap(monId, _bestiaryHuntCount(monId, _lvlReq));   // v0.30.254 — supply-capped
     // v0.29.315 — TIER COUNTS ARE ORDERED. Each tier rolls inside its own
     // level band, and the rolls are independent, so 22 of 26 creatures ended up
     // with an "Apex Study" asking for FEWER kills than the study before it
@@ -23642,7 +23642,9 @@ function _generateBestiaryQuests() {
     // back half of the game while the opening hours stay story-led.
     if (!isBossQ && lvl >= 30) {
       const _gLv = Math.max(_lvlReq + 5, lvl + 3);
-      const gCount = _tierFloor(_bestiaryHuntCount(monId + "_greater", _gLv), count + 100, _gLv);
+      // v0.30.254 — supply cap applies after the tier floor; tiers may TIE at
+      // the cap (the v0.29.315 ordering rule already allows ties, never drops).
+      const gCount = _lxHuntSupplyCap(monId, _tierFloor(_bestiaryHuntCount(monId + "_greater", _gLv), count + 100, _gLv));
       QUESTS[qid + '_greater'] = {
         name: '📖 ' + (mt.name || monId) + ' — Greater Study',
         icon: '📕',
@@ -23664,8 +23666,8 @@ function _generateBestiaryQuests() {
     // sent at something wildly off your own tier.
     if (!isBossQ && lvl >= LX_CODEX_HIGH_LV) {
       const aLv = lvl + 6;
-      const aCount = _tierFloor(_bestiaryHuntCount(monId + "_apex", aLv),
-                                 (QUESTS[qid + '_greater'] ? QUESTS[qid + '_greater'].count : count) + 100, aLv);
+      const aCount = _lxHuntSupplyCap(monId, _tierFloor(_bestiaryHuntCount(monId + "_apex", aLv),
+                                 (QUESTS[qid + '_greater'] ? QUESTS[qid + '_greater'].count : count) + 100, aLv));   // v0.30.254 — supply-capped
       QUESTS[qid + '_apex'] = {
         name: '📖 ' + (mt.name || monId) + ' — Apex Study',
         icon: '📗',
@@ -25893,9 +25895,15 @@ const MAPS = {
         // v0.29.988 — queue scaled with the cap (25 -> 29), keeping the
         // documented rule that the backfill matches the ceiling rather than
         // respawning the same wall more slowly.
-        { type: 'honeyBuzz',  count: 14 },
-        { type: 'nougatBear', count: 10 },
-        { type: 'orange',     count: 5 },
+        // v0.30.254 — per the tester, mid-hunt on this map: "the map has too
+        // few sunbuns". Sunbun spawns NOWHERE else in the world, so these five
+        // were the species' entire global supply, against codex hunts sized by
+        // level band alone. Composition shifts toward the starved species while
+        // the total stays 29, so the v0.29.988 queue/cap pacing is untouched
+        // and the map still reads as bee-dominated hive.
+        { type: 'honeyBuzz',  count: 13 },
+        { type: 'nougatBear', count: 9 },
+        { type: 'orange',     count: 7 },
       ],
     };
   })(),
@@ -40459,6 +40467,42 @@ function _lxHuntCount(key, lv) {
   const pick = steps > 0 ? ((h >>> 0) % (steps + 1)) : 0;
   return b.min + pick * 100;
 }
+// v0.30.254 — A HUNT CANNOT ASK FOR MORE THAN THE WORLD CAN SUPPLY.
+// Found by a tester at 113/500 on the Sunbun codex study: the level band
+// (200-500 under Lv 30) sized the hunt with no idea that Sunbun spawns on ONE
+// map, five at a time - the request was ~100 full respawn cycles of the whole
+// species, while Buzzbee's 400 on the same screen was merely 29. The cap is
+// expressed in that physical unit: a kill quest may ask for at most
+// LX_HUNT_CYCLES respawn cycles of its target's total world supply (summed
+// across every map's spawn table), floored at 100 so thin-supply hunts stay
+// hunts, snapped down to a round 25. A type with NO static spawn entry
+// (bosses, event spawns, affix-conjured mobs) is left entirely alone - no
+// supply figure means no basis to clamp. Snapped DOWN to a round TEN, not
+// 25: _lxNormaliseQuestCounts later rewrites every kill count through
+// ROUND(n)=round(n/10)*10, and a 225 cap came back as 230 - five kills past
+// its own ceiling. A multiple of 10 under 500 is a fixed point of that pass. Cookie, skeleton and mayo (supply 6)
+// carried the same latent defect; this catches every one of them at once.
+const LX_HUNT_CYCLES = 30;
+function _lxWorldSupplyOf(type) {
+  let c = _lxWorldSupplyOf._c;
+  if (!c) {
+    c = _lxWorldSupplyOf._c = Object.create(null);
+    try {
+      for (const mid in MAPS) {
+        const sp = MAPS[mid] && MAPS[mid].spawns;
+        if (!Array.isArray(sp)) continue;
+        for (const e of sp) if (e && e.type) c[e.type] = (c[e.type] || 0) + (e.count | 0);
+      }
+    } catch (e) { _lxWorldSupplyOf._c = null; return 0; }
+  }
+  return (c[type] | 0);
+}
+function _lxHuntSupplyCap(type, n) {
+  const su = type ? _lxWorldSupplyOf(type) : 0;
+  if (!su) return n;
+  const cap = Math.max(100, Math.floor((su * LX_HUNT_CYCLES) / 10) * 10);
+  return Math.min(n, cap);
+}
 const LX_HUNT_MIN = 200, LX_HUNT_MAX = 5000, LX_HUNT_TOP_LV = 90;
 // v0.29.307 — the curve starts AT Lv 10. Below that the game is meant to be
 // lore and a gentle on-ramp (per user: "quests lower than level 10 should
@@ -40475,7 +40519,8 @@ function _lxQuestKillTarget(q) {
   // quests share a name across the four classes and therefore share a count,
   // which is what we want — the warrior and mage versions of "Timberwatch"
   // should be the same job.
-  return _lxHuntCount(((q && q.name) || '') + '#' + L + '#' + ((q && q.target) || ''), L);   // v0.29.309 — banded
+  return _lxHuntSupplyCap((q && q.target) || null,
+    _lxHuntCount(((q && q.name) || '') + '#' + L + '#' + ((q && q.target) || ''), L));   // v0.29.309 — banded · v0.30.254 — supply-capped
 }
 // "Great rewards accordingly": a hunt that asks ~9× the authored work pays
 // ~9× the authored reward. The ratio is captured at ACCEPT time (the authored
@@ -43896,6 +43941,27 @@ function loadState() {
         if (_a && _authored > 0 && _a.targetCount != null && _a.targetCount > _authored) {
           delete _a.targetCount;
           delete _a.rewardScale;
+        }
+      }
+    } catch (e) {}
+    // v0.30.254 — SUPPLY-CAP migration. Hand-written hunts bake their banded
+    // roll into a.targetCount at accept, so the tester mid-grind on Nougat
+    // Reckoning 201/400 would have stayed at 400 forever without this. Clamp
+    // the stored target to the new supply cap; rewardScale is left as banked,
+    // which slightly overpays the migrated player - favouring them once beats
+    // recomputing pay for work already partly done. Codex studies never bake
+    // targetCount (they read q.count, regenerated each boot), so they migrate
+    // themselves. Same guarded shape as the PQ unwind above.
+    try {
+      if (typeof _lxHuntSupplyCap === 'function') {
+        const _act2 = (player.quests && player.quests.active) || {};
+        for (const _id in _act2) {
+          const _a2 = _act2[_id];
+          const _q2 = (typeof QUESTS !== 'undefined') ? QUESTS[_id] : null;
+          if (!_a2 || !_q2 || _q2.kind !== 'kill' || !_q2.target) continue;
+          if (_a2.targetCount == null) continue;
+          const _cap2 = _lxHuntSupplyCap(_q2.target, _a2.targetCount);
+          if (_cap2 < _a2.targetCount) _a2.targetCount = _cap2;
         }
       }
     } catch (e) {}
