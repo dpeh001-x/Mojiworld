@@ -12,7 +12,14 @@
 //      boon at low level;
 //   3. extraJumps is exempt (an integer max — 20% of a jump is not a jump);
 //   4. levelling up recomputes mods without touching the boon panel — the
-//      potency a boon was equipped at must not fossilise.
+//      potency a boon was equipped at must not fossilise;
+//   5. (v0.30.270) Double Shot's COUNT is exempt — the extra shot arrives
+//      whole; the level nerf lives on echo DAMAGE (0.5 x potency, all six
+//      echo lanes — pinned by a source count against the served build);
+//   6. (v0.30.270) skinCd is INVERTED (cooldown seconds, lower = better) —
+//      partial potency must LENGTHEN it, never shorten it;
+//   7. (v0.30.270) rampStacks never scales below one stack — its consumer
+//      Math.round()s, so 0.6 of a stack would round to a dead boon.
 //
 //   node scripts/boon_potency_test.mjs [page] [port]
 // ============================================================================
@@ -51,6 +58,9 @@ const R = await page.evaluate(() => {
   const pick = (pred) => POWERUPS.find(pred);
   const pct = pick((p) => p.stat === 'atkPct');
   const jump = pick((p) => p.stat === 'extraJumps');
+  const multi = pick((p) => p.stat === 'multishot');
+  const skin = pick((p) => p.stat === 'skinCd');
+  const ramp = pick((p) => p.stat === 'rampStacks');
   player.boons = []; player.boonsEquipped = [];
   const equip = (def) => {
     if (!def) return null;
@@ -61,9 +71,15 @@ const R = await page.evaluate(() => {
   };
   const pctFull = equip(pct);
   const jumpFull = equip(jump);
+  const multiFull = equip(multi);
+  const skinFull = equip(skin);
+  const rampFull = equip(ramp);
 
-  const modsAt = (lv) => { player.level = lv; _applyEquippedBoons(); return { pct: player.mods[pct.stat], jump: jump ? player.mods[jump.stat] : null }; };
-  out.full = { pctFull, jumpFull };
+  const modsAt = (lv) => { player.level = lv; _applyEquippedBoons(); return {
+    pct: player.mods[pct.stat], jump: jump ? player.mods[jump.stat] : null,
+    multi: player.mods.multishot, skin: player.mods.skinCd, ramp: player.mods.rampStacks }; };
+  out.full = { pctFull, jumpFull, multiFull, skinFull, rampFull };
+  out.at3 = modsAt(3);
   out.at10 = modsAt(10);
   out.at25 = modsAt(25);
   out.at50 = modsAt(50);
@@ -98,6 +114,23 @@ if (R.hasCurve) {
   ok('levelling up recomputes potency without touching the boon panel',
     R.levelUp.lvAfter === 50 && near(R.levelUp.after, R.full.pctFull) && R.levelUp.after > R.levelUp.before,
     R.levelUp);
+  // v0.30.270 — the count/magnitude split (per user: "for double shot wise -
+  // the damage will be nerfed as per the level of the player").
+  ok('Double Shot COUNT is exempt — the extra shot arrives whole at every level',
+    R.full.multiFull == null || (R.at10.multi === R.full.multiFull && R.at50.multi === R.full.multiFull),
+    { full: R.full.multiFull, at10: R.at10.multi });
+  ok('Second Skin (skinCd, inverted) gets a LONGER cooldown at low level, never shorter',
+    R.full.skinFull == null || (near(R.at10.skin, R.full.skinFull / 0.2) && near(R.at50.skin, R.full.skinFull)),
+    { full: R.full.skinFull, at10: R.at10.skin });
+  ok('Rampage never scales below one whole stack',
+    R.full.rampFull == null || (R.at3.ramp >= 1 && near(R.at25.ramp, Math.max(1, R.full.rampFull * 0.5)) && near(R.at50.ramp, R.full.rampFull)),
+    { full: R.full.rampFull, at3: R.at3.ramp, at25: R.at25.ramp });
+  // Echo-damage lanes: pinned against the SERVED build's source — six lanes
+  // (universal duplicator, dagger fan, multiShot, chargedShot, arrowRain,
+  // elemArrow) must each scale their 0.5 boon echo by potency.
+  const _html = await (await fetch(`http://localhost:${PORT}/${PAGE}`)).text();
+  const _lanes = _html.split('0.5 * _lxBoonPotency()').length - 1;
+  ok('all six boon-echo damage lanes carry the potency factor', _lanes === 6, { lanes: _lanes });
 }
 console.log(`\n${pass}/${pass + fail} checks passed`);
 process.exit(fail ? 1 : 0);

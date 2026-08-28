@@ -203,8 +203,13 @@ try {
   ok('Shatter Point synergy is detected when freeze+critd are equipped', out.shatterDetected === true);
   ok('Shatter Point: a hit on a FROZEN target crits (more damage than unfrozen)',
     out.shatter.frozenHit > out.shatter.normalHit, out.shatter);
-  ok('Double Shot is capped at +2 projectiles even when stacked',
-    out.multiStacked === 2, { stacked: out.multiStacked });
+  // v0.30.270 — expectation corrected 2 -> 1. v0.29.304 set the cap back to 1
+  // (measured: even a MIN-roll +1 bought +96% DPS, beating every other boon's
+  // best roll — the cap comment above _applyEquippedBoons has the numbers)
+  // and this assertion was never updated; it has been the suite's standing
+  // 13/14 failure ever since. The test was stale, not the game.
+  ok('Double Shot is capped at +1 projectile even when stacked',
+    out.multiStacked === 1, { stacked: out.multiStacked });
   ok('Double Shot roll range matches its cap (no silently-inert half-range)',
     out.multiRange.max === out.multiStacked, { range: out.multiRange, cap: out.multiStacked });
   // Roll-independent: whatever the roll, each EXTRA projectile must be a
