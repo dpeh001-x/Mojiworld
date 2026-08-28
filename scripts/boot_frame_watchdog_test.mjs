@@ -33,6 +33,8 @@ const SNAP = () => new Promise((done) => {
       fps: +(n / ((performance.now() - t0) / 1000)).toFixed(1),
       nobackdrop: document.documentElement.classList.contains('lx-nobackdrop'),
       grade: (() => { const g = document.getElementById('game'); return g ? getComputedStyle(g).filter : 'absent'; })(),
+      shadow: (() => { const s = document.getElementById('stats'); if (!s) return 'absent';
+        return getComputedStyle(s).boxShadow; })(),
       blur: (() => { const s = document.getElementById('stats'); if (!s) return 'absent';
         const c = getComputedStyle(s); return (c.backdropFilter || c.webkitBackdropFilter || 'none'); })(),
     }); };
@@ -45,6 +47,7 @@ const run = async (launch) => {
   const perf = [];
   page.on('console', (m) => { const t = m.text(); if (t.includes('[perf]')) perf.push(t.slice(0, 90)); });
   await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || String.fromCharCode(109,111,106,105,119,111,114,108,100,95,103,97,109,101,46,104,116,109,108)}`, { waitUntil: 'load', timeout: 90000 });
+  await page.bringToFront().catch(() => {});   // Firefox suspends rAF for occluded windows — 0 fps and a hang, not a measurement
   await page.waitForTimeout(16000);           // past START_AFTER + two windows
   const s = await page.evaluate(SNAP);
   await b.close();
@@ -53,6 +56,17 @@ const run = async (launch) => {
 
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 200) });
+
+// ---- the v0.30.273 watchdog guards are wired (source check) ----------------
+// The false-positive this guards against (the watchdog firing on the
+// prologue's cutscene dips, then stripping effects from a machine that does
+// 85 fps in town) needs a 60s prologue walk to reproduce in-browser; the
+// wiring check keeps the guard from being silently lost in a refactor.
+try {
+  const src = await (await fetch(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}`)).text();
+  ok('watchdog retires once real play begins (guard present)', src.includes('game.paused === false) return;') && src.includes('watchdog retires'));
+  ok('prologue time counts like hidden-tab time (guard present)', src.includes('window._prologueActive) { frames = 0;'));
+} catch (e) { ok('watchdog guard source check', false, String(e.message).slice(0, 80)); }
 
 // ---- Chromium: healthy, must be left alone ---------------------------------
 let cr = null;
@@ -65,6 +79,7 @@ if (cr) {
      'firing here would strip the blurs from every machine that can afford them');
   ok('...so the storybook colour grade survives', String(cr.grade).includes('saturate'), `#game filter "${cr.grade}"`);
   ok('...and the HUD keeps its backdrop blur', String(cr.blur).includes('blur'), `#stats backdrop-filter "${cr.blur}"`);
+  ok('...and its box-shadows (v0.30.274: only degraded mode sheds them)', String(cr.shadow) !== 'none', `#stats box-shadow "${String(cr.shadow).slice(0, 60)}"`);
 }
 
 // ---- Firefox: slow here, must be rescued -----------------------------------
@@ -88,6 +103,7 @@ if (!existsSync(FF)) {
       ok('...and said so, with the measured rate', ff.perf.some((p) => /boot frame watchdog/.test(p)),
          ff.perf.join(' | ') || 'no [perf] line');
       ok('...and the colour grade came off with the blurs', String(ff.grade) === 'none', `#game filter "${ff.grade}"`);
+      ok('...and the box-shadows came off too (v0.30.274)', String(ff.shadow) === 'none', `#stats box-shadow "${String(ff.shadow).slice(0, 60)}"`);
       ok('...and the frame rate actually recovered', ff.fps >= 20,
          `${ff.fps} fps after the class engaged (was 13.8-14.7 before this change)`);
     }
