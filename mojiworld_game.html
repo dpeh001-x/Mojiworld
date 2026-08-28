@@ -9985,7 +9985,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.263';
+const GAME_VERSION = 'v0.30.264';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10200,7 +10200,13 @@ _lxApplyRenderScale(_LX_DPR);
   const bump = () => {
     clearTimeout(t);
     t = setTimeout(() => {
-      const want = _lxTargetDpr();
+      // v0.30.264 — while the resolution governor holds a reduction, a window
+      // resize re-fits to the SMALLER of the fit target and the governed scale;
+      // the governor itself steps back up when the machine earns it. Without
+      // this, any resize instantly undid the reduction and the fight lagged
+      // again until the next 5s of overload re-triggered it.
+      let want = _lxTargetDpr();
+      if (typeof LX_DRS !== 'undefined' && LX_DRS.active) want = Math.min(want, _LX_DPR);
       if (Math.abs(want - _LX_DPR) / Math.max(_LX_DPR, 0.001) > 0.05) _lxApplyRenderScale(want);
     }, 220);
   };
@@ -10339,6 +10345,82 @@ function _lxRendererIsSoftware() {
   } catch (e) { return false; }
 }
 try { if (_lxRendererIsSoftware()) _lxSetNoBackdrop('software renderer'); } catch (e) {}
+// v0.30.264 — DYNAMIC RESOLUTION, the third rung of the perf ladder.
+// lowFx trims eye-candy, veryLowFx culls decorative overlays - and when a
+// machine is STILL over budget after both, the only meaningful cost left is
+// fill: at render scale 2 every pixel is painted four times over scale 1.
+// So the render scale itself now steps down a quarter at a time, and back up
+// when the machine proves it can hold the line. Resolution is deliberately
+// the LAST resort: the down-step requires veryLowFx to already be engaged
+// and a stricter slow-frame count than veryLowFx itself needed, so the FX
+// tiers always get their chance first.
+//
+// Safe to do mid-session BECAUSE of v0.30.255/256: every cache bakes at the
+// bucketed live scale and re-keys on change, and the frame shrinker retires
+// and re-bakes canvases whenever its cap moves, in either direction. Those
+// two changes are what turn "changing _LX_DPR at runtime" from a blur
+// factory into a lever.
+//
+// Steps are quarters because _lxBakeDpr() quarter-buckets the scale - every
+// step lands exactly on a cache generation. Floor 1.0, ceiling _lxTargetDpr()
+// (so a machine that never struggles never changes, and mobile - capped at 1
+// - is untouched by construction). A manual localStorage.lx_render_scale
+// override disables the governor entirely, and localStorage.lx_drs='off'
+// turns it off on its own. Map changes get a grace window so a load hitch is
+// not mistaken for sustained overload.
+let _lxRealDtMs = 16.7;   // v0.30.264 — real wall dt, written by the loop gate
+const LX_DRS = {
+  floor: 1.0,
+  downAvg: 22, downSlow: 10, downCooldownMs: 5000,
+  upAvg: 13, upHoldMs: 20000, upCooldownMs: 20000,
+  lastChange: 0, healthySince: 0, graceUntil: 0, active: false, _map: null,
+  _announced: false,
+};
+function _lxDrsEnabled() {
+  if (_LX_RSCALE != null) return false;             // manual scale override wins outright
+  try { if (localStorage.getItem('lx_drs') === 'off') return false; } catch (e) {}
+  return true;
+}
+function _lxDrsTick(frame, time) {
+  if (!_lxDrsEnabled()) return;
+  const ceil = _lxTargetDpr();
+  if (ceil <= 1.01) return;                          // nothing to trade at scale 1
+  if (typeof game !== 'undefined' && game && game.currentMap !== LX_DRS._map) {
+    LX_DRS._map = game.currentMap;
+    LX_DRS.graceUntil = time + 4000;                 // a map-load hitch is not overload
+    LX_DRS.healthySince = 0;
+  }
+  if (time < LX_DRS.graceUntil) return;
+  const cur = _LX_DPR;
+  // DOWN — only after the FX tiers already failed.
+  if (cur > LX_DRS.floor + 0.01
+      && LX_PERF.veryLowFx
+      && LX_PERF.slowFrames >= LX_DRS.downSlow
+      && LX_PERF.avgFrame > LX_DRS.downAvg
+      && time - LX_DRS.lastChange > LX_DRS.downCooldownMs) {
+    const next = Math.max(LX_DRS.floor, Math.round((cur - 0.25) * 4) / 4);
+    _lxApplyRenderScale(next);
+    LX_DRS.lastChange = time; LX_DRS.healthySince = 0; LX_DRS.active = true;
+    if (!LX_DRS._announced && typeof showToast === 'function') {
+      LX_DRS._announced = true;
+      showToast('⚡ Resolution eased for smoother frames — it restores itself when the pace recovers', 'common');
+    }
+    return;
+  }
+  // UP — a long clean stretch earns a quarter back.
+  if (LX_DRS.active && cur < ceil - 0.01) {
+    if (LX_PERF.avgFrame < LX_DRS.upAvg && LX_PERF.slowFrames === 0) {
+      if (!LX_DRS.healthySince) LX_DRS.healthySince = time;
+      if (time - LX_DRS.healthySince > LX_DRS.upHoldMs
+          && time - LX_DRS.lastChange > LX_DRS.upCooldownMs) {
+        const next = Math.min(ceil, cur + 0.25);
+        _lxApplyRenderScale(next);
+        LX_DRS.lastChange = time; LX_DRS.healthySince = 0;
+        if (next >= ceil - 0.01) LX_DRS.active = false;   // fully recovered
+      }
+    } else LX_DRS.healthySince = 0;
+  }
+}
 function _perfTick(dt, time) {
   const frame = Math.min(80, Math.max(0, dt || 16.7));
   LX_PERF.avgFrame += (frame - LX_PERF.avgFrame) * 0.06;
@@ -10400,6 +10482,7 @@ function _perfTick(dt, time) {
              LX_PERF.avgFrame < 18 && LX_PERF.slowFrames <= 1) {
     LX_PERF.veryLowFx = false;
   }
+  _lxDrsTick(frame, time);   // v0.30.264 — resolution governor, see LX_DRS above
   // v0.25.806 — Phaser pause/wake bridge removed alongside the Phaser
   // bootstrap. Was the v0.25.264 perf optimisation that called
   // __LX_PHASER_BG.loop.sleep() / wake() on pause transitions. Vanilla
@@ -133771,6 +133854,9 @@ function loop(time) {
   // regardless of monitor refresh instead of fast-forwarding.
   {
     const _elapsed = Math.max(0, Math.min(100, time - lastTime));
+    // v0.30.264 — keep the REAL wall-clock frame time visible to the perf
+    // monitor. See the _perfTick call below for the bug this repairs.
+    _lxRealDtMs = _elapsed;
     lastTime = time;
     _lxSimAccumMs += _elapsed;
     if (_lxSimAccumMs < _LX_SIM_STEP_MS) { _lxNextFrame(); return; }
@@ -133847,7 +133933,25 @@ function loop(time) {
   // _perfLowFx()-gated optimisation was dead code. Now mobile / slow
   // hardware gets the ambient cull + projectile-trail skip + (below)
   // single-pass hair fallback as soon as frame time spikes past 28 ms.
-  _perfTick(dt, time);
+  // v0.30.264 — feed the monitor WALL time, not the fixed step. The v0.28.3
+  // fixed-timestep change made `dt` the constant 16.7 here, which silently
+  // killed the ENTIRE adaptive-perf watchdog: avgFrame could never leave 16.7,
+  // `frame > 22` could never be true, and lowFx / veryLowFx have been unable
+  // to auto-engage since — on every machine, for every player, including the
+  // ones reporting boss fights as unplayable. (The v0.25.160 comment above
+  // records the previous time this monitor was dead; this is the second.)
+  // The resolution governor added in this same version sits on top of that
+  // monitor, which is how the corpse was found: a 30ms-per-frame synthetic
+  // load could not flip lowFx on. The sim keeps its fixed step — only the
+  // MEASUREMENT reads the clock.
+  //
+  // Armed 3s after the first live frame: the frames right behind the boot
+  // gate carry first-draw decodes and cache mints on EVERY machine, and a
+  // freshly revived watchdog would read that one-time storm as a slow device
+  // and toast "Performance mode" at healthy players. Overload that matters
+  // is still overload three seconds later.
+  if (!loop._lxPerfArmAt) loop._lxPerfArmAt = time + 3000;
+  if (time > loop._lxPerfArmAt) _perfTick(_lxRealDtMs, time);
 
   // Throttled autosave (every ~15s of wall time) — only after a class is chosen
   if (player.cls && !game._resetting && (time - (game._lastSave || 0) > 15000)) {
