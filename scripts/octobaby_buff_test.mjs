@@ -64,12 +64,23 @@ ok('CONTROL: all four tentacles still share one stat line',
    L.length === 4 && L.every(l => l && JSON.stringify(l) === JSON.stringify(L[0])),
    'they are authored identically; a partial edit would show here');
 
+// The head takes all four as +20% derivations.
 for (const [k, label] of [['hp', 'HP'], ['atk', 'ATK'], ['def', 'DEF'], ['eva', 'evasion']]) {
   ok(`Octobaby ${label} is +20%`, near(H[k], WAS_HEAD[k] * 1.2),
      `${WAS_HEAD[k]} -> ${H[k]} (x${(H[k] / WAS_HEAD[k]).toFixed(3)})`);
+}
+// Tentacle HP and DEF are still the +20% derivation...
+for (const [k, label] of [['hp', 'HP'], ['def', 'DEF']]) {
   ok(`tentacle ${label} is +20%`, near(L[0][k], WAS_LEG[k] * 1.2),
      `${WAS_LEG[k]} -> ${L[0][k]} (x${(L[0][k] / WAS_LEG[k]).toFixed(3)})`);
 }
+// ...but ATK and evasion are AUTHORED. The user set them outright after the
+// +20% pass, so asserting a ratio here would encode a relationship that is no
+// longer the intent and would fail a build that is exactly what was asked for.
+ok('tentacle ATK is the authored 500', L[0].atk === 500,
+   `atk ${L[0].atk} (was 144, a +20% derivation; now set outright)`);
+ok('tentacle evasion is the authored 180', L[0].eva === 180,
+   `evasion ${L[0].eva} (was 108, a +20% derivation; now set outright)`);
 
 // The ask said STATS. Rewards and movement were left alone on purpose; if that
 // is ever revisited it should be a decision, not a drift.
