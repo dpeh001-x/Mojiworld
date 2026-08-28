@@ -6088,27 +6088,12 @@
   @keyframes cs-spin   { to { transform: rotate(360deg); } }
   @keyframes cs-twinkle { 0%   { opacity: 0.35; } 100% { opacity: 0.85; } }
 
-  /* =====================================================================
-     FIREFOX / GECKO COMPOSITING — v0.30.271
-
-     Gecko pays far more than Blink for animating a very large layer. These
-     three are the biggest surfaces in the game and all three are purely
-     ambient: a conic-gradient ray field rotating across 1,575,406px2, a
-     ken-burns pan across 1,176,990px2, and a twinkle across 750,723px2.
-
-     Measured headed, real GPU, character-select page:  46.2 -> 123.5 fps.
-     Chromium loses ~16 fps of 157 to the same three, so it keeps them.
-
-     @supports (-moz-appearance: none) is Gecko-only — verified TRUE on
-     Firefox 153 and false on Chromium — so this is a capability gate, not
-     a user-agent sniff. Only ambient motion is dropped; the gradients and
-     the starfield still render, they just hold still. Every functional
-     animation in the UI is untouched.
-     ===================================================================== */
-  @supports (-moz-appearance: none) {
-    .cs-rays, .cs-stars,
-    #loading-overlay .lo-bg, #loading-overlay .lo-embers { animation: none !important; }
-  }
+  /* v0.30.272 — a Gecko-only rule stopping these three animations lived here
+     in v0.30.271. It was measured again with an A/B/A rig and does nothing:
+     11.7 / 11.7 / 12.2 fps with it off, on, off. Turning off ALL 40 running
+     animations across 76 elements does nothing either. The cost is the
+     backdrop blurs, which html.lx-nobackdrop already handles. Please do not
+     re-add it on the strength of how large these layers look. */
   .cs-epic > *:not(.cs-rays):not(.cs-stars) { position: relative; z-index: 1; }
   /* v0.26.x — Per user: faint Guguma silhouette watermark in the modal's
      bottom-right. brightness(0) flattens the sprite to a black silhouette;
@@ -10018,7 +10003,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.271';
+const GAME_VERSION = 'v0.30.272';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10378,6 +10363,58 @@ function _lxRendererIsSoftware() {
   } catch (e) { return false; }
 }
 try { if (_lxRendererIsSoftware()) _lxSetNoBackdrop('software renderer'); } catch (e) {}
+
+// v0.30.272 — BOOT FRAME WATCHDOG.
+//
+// The two paths above miss the case that prompted this: a machine reporting
+// a real GPU that is nevertheless too slow to composite the page. Firefox
+// 153 on Intel HD graphics runs the title screen at 11 fps with all 110
+// backdrop blurs live, reports "ANGLE (Intel(R) HD Graphics)" so the
+// software probe passes it, and never reaches _perfTick — that only runs
+// inside the gameplay loop, so at 20 s on the title screen LX_PERF still
+// read avgFrame 16.7 and slowFrames 0. Nothing was watching.
+//
+// This watches presented frames from boot, menus included. Engaging
+// html.lx-nobackdrop there measured 11.9 -> 28.7 fps, bracketed by
+// baselines of 11.9 and 11.7 so it is the class and not drift.
+//
+// Not a browser check — it measures the machine in front of it, so the
+// "even a computer without graphics card" case this feature was written
+// for is now covered from boot rather than only once combat starts.
+(function _lxBootFrameWatch() {
+  if (typeof requestAnimationFrame !== 'function') return;
+  // Windowed fps, NOT per-frame scoring. The first version scored each
+  // frame +1 when slower than 40ms and -1 otherwise, and never fired:
+  // Firefox delivers rAF in alternating pairs — measured 4.2, 87.5, 4.2,
+  // 108.3, 4.2, 87.5 — so every slow frame was cancelled by the fast one
+  // beside it and the score stayed at 1 across 106 frames whose MEDIAN was
+  // 87.5ms. Counting frames per window is immune to that shape.
+  const START_AFTER = 6000;   // the initial sprite burst stalls frames honestly
+  const WINDOW_MS   = 2000;
+  const MIN_FPS     = 25;     // far below any machine that can afford the blurs
+  const NEED_BAD    = 2;      // consecutive bad windows, so one alt-tab is not enough
+  const GIVE_UP     = 30;     // ~1 min; after that the gameplay loop owns the call
+  let t0 = 0, wStart = 0, frames = 0, bad = 0, windows = 0;
+  const tick = (t) => {
+    if (_lxNoBackdropOn) return;              // sticky, and already decided
+    if (!t0) { t0 = t; wStart = t; }
+    if ((t - t0) > START_AFTER) {
+      if (document.hidden) { frames = 0; wStart = t; }   // a hidden tab is not a slow one
+      else {
+        frames++;
+        if ((t - wStart) >= WINDOW_MS) {
+          const fps = frames * 1000 / (t - wStart);
+          bad = (fps < MIN_FPS) ? bad + 1 : 0;
+          if (bad >= NEED_BAD) { try { _lxSetNoBackdrop('boot frame watchdog ' + fps.toFixed(1) + ' fps'); } catch (e) {} return; }
+          if (++windows > GIVE_UP) return;
+          frames = 0; wStart = t;
+        }
+      }
+    }
+    requestAnimationFrame(tick);
+  };
+  try { requestAnimationFrame(tick); } catch (e) {}
+})();
 // v0.30.264 — DYNAMIC RESOLUTION, the third rung of the perf ladder.
 // lowFx trims eye-candy, veryLowFx culls decorative overlays - and when a
 // machine is STILL over budget after both, the only meaningful cost left is
