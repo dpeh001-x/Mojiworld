@@ -67,8 +67,15 @@ ok('nothing drops below the floor', R.floor != null && NOW.every(v => v >= R.flo
 ok('CONTROL: Krook still exists and is Lv50', !!(R.krook && R.krook.lvl === 50));
 ok('Krook hits harder and lasts longer', !!(R.krook && R.krook.hp > 2520000 && R.krook.atk > 355),
    `hp ${R.krook && R.krook.hp} (was 2,520,000), atk ${R.krook && R.krook.atk} (was 355)`);
-ok('...and now out-bulks his same-tier peer', !!(R.krook && R.octoHp && R.krook.hp > R.octoHp),
-   `krook ${R.krook && R.krook.hp} vs octobaby ${R.octoHp} — he was the softer of the pair`);
+// NOT 'Krook out-bulks Octobaby'. That was true when this test was written
+// and it was never a rule — it was the rationale for how far to raise him.
+// Octobaby was later buffed +20% by explicit request and now sits above him,
+// which failed a build that was exactly what had been asked for. What is
+// worth guarding is that the two Lv50 bosses stay in one bulk BAND, so
+// neither drifts into another tier's weight class unnoticed.
+ok('...and stays in the same bulk band as his tier peer',
+   !!(R.krook && R.octoHp && Math.max(R.krook.hp, R.octoHp) / Math.min(R.krook.hp, R.octoHp) <= 1.5),
+   `krook ${R.krook && R.krook.hp} vs octobaby ${R.octoHp} — ratio ${(Math.max(R.krook.hp, R.octoHp) / Math.min(R.krook.hp, R.octoHp)).toFixed(2)}x, both Lv50`);
 ok('the reward moved with the difficulty', !!(R.krook && R.krook.exp > 365000 && R.krook.coins > 13600),
    `exp ${R.krook && R.krook.exp}, coins ${R.krook && R.krook.coins}`);
 
