@@ -9985,7 +9985,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.268';
+const GAME_VERSION = 'v0.30.269';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -20890,6 +20890,19 @@ function boonRerollCost(boon) {
 }
 // Recompute player.mods from scratch based on equipped boons. Called every
 // time equip / unequip / reroll changes the loadout.
+// v0.30.269 — BOON POTENCY GROWS WITH LEVEL (per user: "players under level
+// 50 will only experience partial of the boon stats or effect or damage: i.e
+// Level 10 will only experience 20%, level 20 experience 40% (+2% per level)").
+// potency = min(100%, level x 2%), so Lv 50 is exactly full strength and the
+// curve needs no cap table. Applied at the ONE point every boon's contribution
+// flows through — the val written into player.mods below — so % boons, flat
+// boons, chance boons and the action boons all scale together, and every
+// consumer downstream (damage, lifesteal, cooldowns, drop rates) inherits it
+// without being touched.
+function _lxBoonPotency() {
+  const lv = (typeof player !== 'undefined' && player && player.level) | 0;
+  return Math.min(1, Math.max(0, lv * 0.02));
+}
 function _applyEquippedBoons() {
   if (!player.mods) return;
   const M = player.mods;
@@ -20935,11 +20948,17 @@ function _applyEquippedBoons() {
     }
     if (_seenBoonIds.has(def.id)) continue;   // duplicate type — ignore
     _seenBoonIds.add(def.id);
-    const val = def.scale(boon.roll);
+    let val = def.scale(boon.roll);
     if (def.stat === 'extraJumps') {
+      // v0.30.269 — extraJumps is EXEMPT from the potency curve. It is an
+      // integer max, and 20% of one jump is not a smaller jump — it is either
+      // a jump or it is not. Scaling-and-flooring would silently delete the
+      // boon until Lv 50, which reads as a bug, not a curve. The player-
+      // favouring reading of "partial effect" is: countable abilities arrive
+      // whole, magnitudes arrive scaled.
       M[def.stat] = Math.max(M[def.stat] || 0, val);
     } else {
-      M[def.stat] = (M[def.stat] || 0) + val;
+      M[def.stat] = (M[def.stat] || 0) + val * _lxBoonPotency();   // v0.30.269 — see the curve above
     }
   }
   // v0.26.223 — Toast once per session if any legacy boons were silently
@@ -86645,6 +86664,11 @@ function _maybeLevelUp() {
   if (player.exp < player.expToNext) return;
   player.exp -= player.expToNext;
   player.level++;
+  // v0.30.269 — boon potency is a function of level, and mods only ever
+  // recomputed on equip/unequip/reroll. Without this, a boon equipped at Lv 10
+  // stayed at 20% potency for forty levels unless the player happened to touch
+  // the boon panel. Cheap (sums a handful of numbers), fires once per level.
+  try { if (typeof _applyEquippedBoons === 'function') _applyEquippedBoons(); } catch (e) {}
   // v0.25.941 — lv_50_milestone story beat fires the moment the player
   // crosses to Lv 50. Halfway-along-the-road introspection — "The Pause
   // looks back at you for the first time". First-time-only via the
@@ -97920,7 +97944,14 @@ function renderBoonPanel() {
       }
     }
   } catch (e) {}
-  host.innerHTML = `${_talentLine}<h3 style="margin:0 0 6px 0; color:#c8a8ff; font-size:14px;">◈ Boon Loadout <span style="color:#888; font-size:11px; font-weight:normal;">(${equipped.length} / ${BOON_EQUIP_CAP} equipped · <span style="color:${bagColor};">${player.boons.length} / ${BOON_INVENTORY_CAP}</span> in bag)</span></h3><div style="display:grid; grid-template-columns:repeat(${BOON_EQUIP_CAP}, 1fr); gap:6px; margin-bottom:10px;">${slotsHtml.join('')}</div>${(typeof _synergyPanelHtml === 'function') ? _synergyPanelHtml() : ''}${toolbar}<div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:6px; max-height:260px; overflow-y:auto;">${invHtml.join('')}</div><div style="margin-top:6px; font-size:10px; color:#888; text-align:center;"><span class="coin-ico"></span> ${player.mojicoins} Mojicoins · Bag ${bagPct}% full · ${bulk ? 'tick boons, then Discard selected' : 'use 🗑 Bulk discard to clear several at once'}</div>`;
+  // v0.30.269 — say the potency out loud. A Lv-20 player whose +25% ATK boon
+  // delivers +10% would otherwise file it as a bug — because without this
+  // line, it would be indistinguishable from one.
+  const _potPct = (typeof _lxBoonPotency === 'function') ? Math.round(_lxBoonPotency() * 100) : 100;
+  const _potLine = _potPct < 100
+    ? `<div style="margin:0 0 6px 0; padding:5px 8px; background:rgba(255,209,102,0.08); border:1px solid rgba(255,209,102,0.35); border-radius:6px; font-size:11px; color:#ffd166;">⚖ Boon potency: <b>${_potPct}%</b> — grows +2% per level, full strength at Lv 50. <span style="color:#a89a6a">(Extra-jump boons always count in full.)</span></div>`
+    : '';
+  host.innerHTML = `${_talentLine}${_potLine}<h3 style="margin:0 0 6px 0; color:#c8a8ff; font-size:14px;">◈ Boon Loadout <span style="color:#888; font-size:11px; font-weight:normal;">(${equipped.length} / ${BOON_EQUIP_CAP} equipped · <span style="color:${bagColor};">${player.boons.length} / ${BOON_INVENTORY_CAP}</span> in bag)</span></h3><div style="display:grid; grid-template-columns:repeat(${BOON_EQUIP_CAP}, 1fr); gap:6px; margin-bottom:10px;">${slotsHtml.join('')}</div>${(typeof _synergyPanelHtml === 'function') ? _synergyPanelHtml() : ''}${toolbar}<div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:6px; max-height:260px; overflow-y:auto;">${invHtml.join('')}</div><div style="margin-top:6px; font-size:10px; color:#888; text-align:center;"><span class="coin-ico"></span> ${player.mojicoins} Mojicoins · Bag ${bagPct}% full · ${bulk ? 'tick boons, then Discard selected' : 'use 🗑 Bulk discard to clear several at once'}</div>`;
   const refresh = () => { renderBoonPanel(); renderLevelUp(); updateUI(); saveState(); };
   host.querySelectorAll('[data-equip]').forEach(btn => btn.onclick = () => { if (equipBoon(+btn.dataset.equip)) refresh(); });
   host.querySelectorAll('[data-unequip]').forEach(btn => btn.onclick = () => { if (unequipBoon(+btn.dataset.unequip)) refresh(); });
