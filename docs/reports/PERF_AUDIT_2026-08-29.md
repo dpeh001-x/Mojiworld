@@ -150,3 +150,21 @@ synthesizer's second-tier list (hazard alpha-out-of-gradient, nameplate gradient
 checkPlatformCollision bucket reuse — its double slam-pierce caveat is real).
 
 Suites added cycle 2: `perf_ladder_test` (9), `perf_blit_route_test` (8).
+
+---
+
+## 9. Pool closeout (v0.30.296)
+
+| Item | Outcome |
+| --- | --- |
+| Dyed-hair live `ctx.filter` per hero draw (4-5× in co-op) | **v0.30.296** — `_lxTintBake` per (sprite, hue); composed-filter decoy branch and pre-decode keep the live filter. Fix-side render visually verified; equivalence by construction (identical filter string, the shipped mob flash-tint mechanism) |
+| `_qnavDrawKey` per-frame `style.display` writes | **v0.30.296** — change-gated, element-identity keyed; gate behavior proven directly |
+| Skill-bar cooldown toFixed churn (2 sites) + slot array | **v0.30.296** — integer-quantized gates, rendered format asserted identical |
+| `_buffBarMax` object+delete dictionary mode | **v0.30.296** — Map, legacy object converts in place |
+| Ambient pass-1 stamp key churn | **v0.30.296** — constant stamps hoisted, per-color stamps pinned |
+| Ambient pass-2 lastColor guard | SKIPPED deliberately — 7+ mid-loop fillStyle overrides; a missed reset ships a visible wrong-color bug for a modest win |
+
+Still unlanded (second-tier, all med risk): hazard alpha-out-of-gradient, title-nameplate
+gradient+shadowBlur bake, checkPlatformCollision bucket reuse (double slam-pierce caveat),
+clone/turret facing-scan throttle, `_qnavKeyHome` reflow throttle, zodiac-badge glow bake,
+Hallowed Field unit gradient. Suite added: `perf_hud_pool_test` (8).
