@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.305';
+const GAME_VERSION = 'v0.30.306';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -91834,8 +91834,30 @@ const LX_BURN_TICK_MAXHP_PCT_BOSS = 0.001;
 // `mobile` figure assumes a 4 × 16 ms budget for projectile work.
 const MAX_ENEMY_PROJECTILES  = _IS_MOBILE_AT_LOAD ? 40 : 90;
 
+// v0.30.x - COMBAT-GRADUATED (per user: "in boss fights and fights with
+// multiple monsters, cap the particles and reduce lag without affecting
+// sprite resolution"). This cap is the one lever that catches everything:
+// ~280 spawn sites push straight into game.particles past the per-frame
+// admission budget, and updateParticles sheds oldest-first down to this
+// figure. It scaled only with the flat lowFx bit - which auto-engages the
+// moment ANY boss is alive or 15+ mobs are up, so a 1-boss duel and a
+// 3-boss bullet-hell paid the same 137. Now the load itself sets the cap
+// (desktop): no combat 250 | boss fight 110 | 2+ bosses or tier-2 82 |
+// boss + 20-mob swarm 93. Counts come from the per-frame _lowFxCache scan
+// that already exists - no new work per frame. Sprites are untouched: this
+// file draws fewer RECTANGLES, never a smaller sprite.
 function _particleCap() {
-  return Math.max(80, Math.floor(MAX_PARTICLES * (_perfLowFx() ? 0.55 : 1)));
+  const low = _perfLowFx();   // also refreshes the cache the counts read
+  const boss = (game && game._lowFxCache && game._lowFxCache.bossCount) || 0;
+  const mobs = (game && game._lowFxCache && game._lowFxCache.mobCount) || 0;
+  let mul = low ? 0.55 : 1;
+  if (boss >= 2 || (typeof _perfVeryLowFx === 'function' && _perfVeryLowFx())) mul *= 0.6;
+  else if (boss >= 1) mul *= 0.8;
+  if (mobs > 20) mul *= 0.85;
+  // Floor lowered 80 -> 64: at 80 the mobile tier could never scale at all
+  // (120 x 0.55 already clamped), so boss fights on the weakest devices kept
+  // the same particle load as town.
+  return Math.max(64, Math.floor(MAX_PARTICLES * mul));
 }
 
 function _damageNumberCap() {
@@ -91983,8 +92005,13 @@ const _FRAME_PARTICLE_BUDGET_MOBILE  = 60;
 // field from a previous life can never leak into the next one.
 const _LX_PART_POOL = [];
 function _budgetedParticlePush(p) {
-  const cap = _IS_MOBILE_AT_LOAD || _perfLowFx()
+  let cap = _IS_MOBILE_AT_LOAD || _perfLowFx()
     ? _FRAME_PARTICLE_BUDGET_MOBILE : _FRAME_PARTICLE_BUDGET_DESKTOP;
+  // v0.30.x - multi-boss arenas admit fewer decorative spawns per frame on
+  // top of the total-cap scaling: shedding at update time still paid a full
+  // frame of allocation + one draw for particles the cap then discarded.
+  if ((typeof _perfBossCount === 'function' && _perfBossCount() >= 2)
+      || (typeof _perfVeryLowFx === 'function' && _perfVeryLowFx())) cap = Math.min(cap, 40);
   if (_frameParticleCount >= cap) return false;
   _frameParticleCount++;
   const q = _LX_PART_POOL.pop();
