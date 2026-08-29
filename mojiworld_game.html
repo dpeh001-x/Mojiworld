@@ -10007,7 +10007,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.276';
+const GAME_VERSION = 'v0.30.277';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -56620,10 +56620,25 @@ function _renderMasteryBar(m, kills, starUp) {
   el.style.display = 'block';
   // Force a reflow so re-triggering .mb-show on consecutive kills replays the
   // pop-in instead of being coalesced away by the transition.
-  void el.offsetWidth;
-  el.classList.add('mb-show');
-  if (starUp) {
-    el.classList.remove('mb-pop'); void el.offsetWidth; el.classList.add('mb-pop');
+  // v0.30.277 — ONCE PER FRAME. This runs per kill, and the forced reflow
+  // lands right after the DOM writes above — so a 40-kill wipe paid 40
+  // write->layout cycles in ONE task, profiled at 26-34ms of `get
+  // offsetWidth` inside a ~55ms multikill stall (the largest line in it).
+  // Nothing paints between same-frame calls, so the skipped replays were
+  // invisible by definition; kills on later frames replay exactly as
+  // before. The number/fill writes above still run every call, so the
+  // frame shows the LAST kill's totals.
+  const _mbNow = (typeof game !== 'undefined' && game && game.time) || 0;
+  if (el._mbFrame !== _mbNow) {
+    el._mbFrame = _mbNow;
+    void el.offsetWidth;
+    el.classList.add('mb-show');
+    if (starUp) {
+      el.classList.remove('mb-pop'); void el.offsetWidth; el.classList.add('mb-pop');
+    }
+  } else if (starUp && !el.classList.contains('mb-pop')) {
+    // A same-frame star-up still pops: first add needs no reflow trick.
+    el.classList.add('mb-pop');
   }
   // Linger longer on a star-up so the milestone is readable.
   if (_lxMasteryHideTimer) clearTimeout(_lxMasteryHideTimer);
@@ -101731,6 +101746,23 @@ function showCoinToast(amt, rarity) {
 function showKillToast(expGain, mojicoinGain) {
   const host = document.getElementById('coin-toast-zone');
   if (!host) return;
+  // v0.30.277 — same-frame kills merge into ONE toast showing the sums. A
+  // 40-kill wipe minted 40 toasts in one task (40 innerHTML parses +
+  // appends) and the 4-toast cap evicted 36 of them unseen; the merged
+  // toast reads better anyway. Later-frame kills toast exactly as before.
+  const _tNow = (typeof game !== 'undefined' && game && game.time) || 0;
+  const _ag = host._lxAgg;
+  if (_ag && _ag.t === _tNow && _ag.el && _ag.el.parentNode) {
+    _ag.exp += Math.max(0, Math.floor(expGain || 0));
+    _ag.moj += Math.max(0, Math.floor(mojicoinGain || 0));
+    const _ksA = (typeof game !== 'undefined' && (game.mapKillStreak | 0) >= 25)
+      ? `<span class="kill-sep">·</span><span class="kill-streak">💀${(game.mapKillStreak | 0).toLocaleString()}</span>` : '';
+    _ag.el.innerHTML =
+      `<span class="kill-exp">+${_ag.exp}<span class="kill-exp-tag"> XP</span></span>` +
+      `<span class="kill-sep">·</span>` +
+      `<span class="coin-amt">+${_ag.moj}</span><span class="coin-icon">🪙</span>` + _ksA;
+    return;
+  }
   const COIN_CAP = 4;
   const live = host.querySelectorAll('.coin-toast');
   for (let i = 0; i < live.length - (COIN_CAP - 1); i++) {
@@ -101753,6 +101785,7 @@ function showKillToast(expGain, mojicoinGain) {
     `<span class="kill-sep">·</span>` +
     `<span class="coin-amt">+${_moj}</span><span class="coin-icon">🪙</span>` + _ks;
   host.appendChild(t);
+  host._lxAgg = { t: _tNow, el: t, exp: _exp, moj: _moj };   // v0.30.277 — same-frame merge target
   setTimeout(() => { if (t && t.parentNode) t.parentNode.removeChild(t); }, 3200);
 }
 // =========================================================================
