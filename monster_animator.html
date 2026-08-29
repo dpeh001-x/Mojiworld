@@ -90,7 +90,7 @@
       <div class="mut" style="font-size:11px;margin-top:3px">renders EXACTLY what the game renders</div>
       <!-- build badge: bump alongside GAME_VERSION on every animator change,
            so a stale cached copy is identifiable at a glance -->
-      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.252</span>
+      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.296</span>
         <a id="lx-latest-link" href="animator.html" title="Cache-proof launcher: resolves main's current commit via the GitHub API and opens that exact build — use this if the badge looks old" style="color:#5b8cff;margin-left:6px">latest&#8599;</a></div>
       <script>
       // v0.29.246 — LIVE badge freshness probe. The static build string only
@@ -1206,6 +1206,7 @@
     setIdleRef: v => { idleRef = !!v; paint(); }, getIdleRef: () => idleRef,
     setPinFrame: (i) => { pinFrame = (i == null) ? null : (i | 0); paint(); }, getPinFrame: () => pinFrame,
     frameCount: (st) => ((frames[st] && frames[st].length) || 0),
+    framesOf: (st) => (frames[st] || []),   // v0.30.x - the head+body leveller measures these
     shownFrame: (st) => pickFrame(st, frames[st]),
     idleRefRect: (cx, gy) => drawIdleRef(cx == null ? cv.width / 2 : cx, gy == null ? cv.height - 64 : gy, 0),
     groupTiles: () => (cur ? groupTiles() : []), familyOf: (t) => _familyOf(t),
@@ -1351,7 +1352,17 @@
       h += `<div class="sl"><label>scale</label>` +
         `<input type="range" id="fr-fs" min="0.5" max="2" step="0.005" value="${cur}" />` +
         `<input type="number" id="fr-fs-n" min="0.5" max="2" step="0.005" value="${cur}" /></div>` +
-        `<button class="reset" id="fr-reset" style="width:100%">reset frame ${i + 1}</button>`;
+        `<button class="reset" id="fr-reset" style="width:100%">reset frame ${i + 1}</button>` +
+        `<div class="srow" style="margin-top:8px"><h3 style="font-size:11px">\u2696\uFE0F level on head + body</h3></div>` +
+        `<div class="mut" style="font-size:11px;margin-bottom:6px">Measures each frame's HEAD AND BODY - opaque and dark, ` +
+          `inside a central band - so wings, flame crests and lava veins do not vote, then fills <code>fs[]</code> ` +
+          `so the drawn body holds still. Content-height normalisation cannot do this: it keys on the whole ` +
+          `silhouette, so a wing flap reads as the titan changing size.</div>` +
+        `<div class="sl"><label>band</label>` +
+          `<input type="range" id="fr-band" min="0.2" max="1" step="0.05" value="0.4" />` +
+          `<input type="number" id="fr-band-n" min="0.2" max="1" step="0.05" value="0.4" /></div>` +
+        `<div class="mut" id="fr-hb" style="font-size:11px;margin-bottom:6px">\u2014</div>` +
+        `<button class="reset" id="fr-level" style="width:100%">level ${st} from head + body</button>`;
     } else {
       h += `<div class="mut" style="font-size:11px;color:#e8c88a">Per-frame scale is a BOSS-only path in the game ` +
         `(<code>_drawBossSprite</code> applies <code>fs</code>; <code>drawMonster</code> has no frame index there). ` +
@@ -1473,6 +1484,68 @@
     if (r) r.value = val; if (b) b.value = val;
     markDirty();
   }
+  // v0.30.x - HEAD-AND-BODY LEVELLER (per user: "gravitos3 has wings so that
+  // can affect the size calibration, the calibration should be based on the
+  // head and body").
+  //
+  // A boss in _BOSS_SIZE_STRICT is rescaled so its CONTENT height lands on a
+  // reference, and content is the entire silhouette. On Gravitos-3 the wings
+  // swing far more than he does - measured span spread 1.079x idle, 1.901x walk
+  // against 1.055x / 1.252x for the head and body - so that normalisation is
+  // tracking the flap, not the titan. Worse, on his idle the content height is
+  // FLAT, so it corrects nothing at all and the body variation inside the box
+  // reaches the screen untouched.
+  //
+  // The mask is two rules, both narrow on purpose:
+  //   dark   - opaque AND luminance < 95. Plate armour is near-black; the lava
+  //            veins, the flame crest and the wing membranes are bright.
+  //   central- a band of the armour span around its centre of mass. Wings are
+  //            what reach sideways, so a central band drops them and keeps the
+  //            head, horns, torso and legs.
+  // Their vertical extent is levelled to the MEDIAN, so the boss neither grows
+  // nor shrinks overall - only the pulse goes.
+  function headBodyHeights(st, band) {
+    const arr = A.framesOf(st);
+    if (!arr || !arr.length) return null;
+    const out = [];
+    const cv = document.createElement("canvas"), cx2 = cv.getContext("2d", { willReadFrequently: true });
+    for (const im of arr) {
+      if (!im || !im.complete || !im.naturalWidth) return null;
+      const W = im.naturalWidth, H = im.naturalHeight;
+      cv.width = W; cv.height = H;
+      cx2.clearRect(0, 0, W, H); cx2.drawImage(im, 0, 0);
+      const d = cx2.getImageData(0, 0, W, H).data;
+      const arm = (x, y) => { const j = (y * W + x) * 4;
+        return d[j + 3] >= 160 && (0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2]) < 95; };
+      let sx = 0, n = 0, lo = 1e9, hi = -1;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (arm(x, y)) { sx += x; n++; if (x < lo) lo = x; if (x > hi) hi = x; }
+      if (!n) return null;
+      const c = sx / n, half = (hi - lo) * band / 2;
+      const x0 = Math.max(0, Math.round(c - half)), x1 = Math.min(W - 1, Math.round(c + half));
+      let top = -1, bot = -1;
+      for (let y = 0; y < H; y++) for (let x = x0; x <= x1; x++) if (arm(x, y)) { if (top < 0) top = y; bot = y; break; }
+      out.push(bot - top);
+    }
+    return out;
+  }
+  function frBand() {
+    const el = document.getElementById("fr-band");
+    return el ? Math.max(0.2, Math.min(1, +el.value || 0.4)) : 0.4;
+  }
+  function refreshHb() {
+    const el = document.getElementById("fr-hb"); if (!el) return;
+    const st = A.focusState;
+    const hs = headBodyHeights(st, frBand());
+    if (!hs) { el.textContent = "frames still decoding\u2026"; return; }
+    const v = A.CALIB()[A.owner()][st];
+    const drawn = hs.map((h, i) => h * ((v.fs && v.fs[i] > 0) ? v.fs[i] : 1));
+    const sp = (a) => Math.max.apply(null, a) / Math.min.apply(null, a);
+    const now = sp(drawn), raw = sp(hs);
+    el.innerHTML = "head+body spread <b>" + now.toFixed(3) + "x</b>" +
+      (Math.abs(now - raw) > 0.0005 ? " <span class=\"mut\">(art alone " + raw.toFixed(3) + "x)</span>" : "") +
+      (now < 1.005 ? " \u2014 level" : "");
+    el.style.color = now < 1.005 ? "#9dff4d" : (now > 1.05 ? "#ff9e3d" : "");
+  }
   function wireFrameCard() {
     const idx = document.getElementById('fr-idx');
     const hold = document.getElementById('fr-hold');
@@ -1497,6 +1570,27 @@
       if (Array.isArray(v.fs) && pin != null) { v.fs[Math.max(0, Math.min(pin, v.fs.length - 1))] = 1; }
       markDirty(); window.__buildControls(); toast('frame reset');
     };
+    for (const id of ['fr-band', 'fr-band-n']) {
+      const el = document.getElementById(id); if (!el) continue;
+      el.addEventListener('input', () => {
+        const other = document.getElementById(id === 'fr-band' ? 'fr-band-n' : 'fr-band');
+        if (other) other.value = el.value;
+        refreshHb();
+      });
+    }
+    const lvl = document.getElementById('fr-level');
+    if (lvl) lvl.onclick = () => {
+      const st = A.focusState, n = A.frameCount(st);
+      const hs = headBodyHeights(st, frBand());
+      if (!hs || hs.length !== n) { toast('frames not decoded yet'); return; }
+      snapshot();
+      const med = hs.slice().sort((a, b) => a - b)[hs.length >> 1];
+      const v = A.CALIB()[A.owner()][st];
+      v.fs = hs.map(h => +(med / h).toFixed(4));
+      markDirty(); window.__buildControls();
+      toast('levelled ' + st + ' on head + body');
+    };
+    refreshHb();
     const clr = document.getElementById('fr-clear');
     if (clr) clr.onclick = () => {
       snapshot();

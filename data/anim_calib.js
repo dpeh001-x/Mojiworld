@@ -244,7 +244,18 @@ window.LX_ANIM_CALIB = {
     "idle": {
       "s": 1.02,
       "dx": 0,
-      "dy": 0.03
+      "dy": 0.03,
+      "fs": [
+        0.9907,
+        1.0154,
+        0.9828,
+        1,
+        1.0191,
+        1.0314,
+        0.993,
+        1.0364,
+        0.9919
+      ]
     },
     "walk": {
       "s": 1.021,
@@ -584,9 +595,21 @@ window.LX_ANIM_CALIB = {
     }
   },
   "zodiac_virgo": {
-    "zodiac/idle":   { "s": 1.095, "dx": 0, "dy": 0 },
-    "zodiac/walk":   { "s": 1.095, "dx": 0, "dy": 0 },
-    "zodiac/attack": { "s": 1.095, "dx": 0, "dy": 0 }
+    "zodiac/idle": {
+      "s": 1.095,
+      "dx": 0,
+      "dy": 0
+    },
+    "zodiac/walk": {
+      "s": 1.095,
+      "dx": 0,
+      "dy": 0
+    },
+    "zodiac/attack": {
+      "s": 1.095,
+      "dx": 0,
+      "dy": 0
+    }
   },
   "zodiac_taurus": {
     "zodiac/charge": {
