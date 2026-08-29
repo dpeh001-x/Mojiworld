@@ -542,6 +542,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "elementalist_ult": 9,
    "forge_fail": 9,
    "forge_success": 9,
+   "fx_leo_slam": 9,
    "fx_shard": 9,
    "fx_voidbeam": 9,
    "hexmaster_grandhex": 1,
