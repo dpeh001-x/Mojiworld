@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.306';
+const GAME_VERSION = 'v0.30.307';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -48460,17 +48460,14 @@ function _mpDrawPeers() {
       try { ctx.letterSpacing = '1.2px'; } catch (e) {}
       const _ptk = _pt + '|' + (window._lxBossFontReady ? 1 : 0);
       if (p._tiCache !== _ptk) { p._tiCache = _ptk; p._tiTw = ctx.measureText(_pt).width; }
-      ctx.lineJoin = 'round';
-      ctx.miterLimit = 2;
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = 'rgba(10,5,2,0.92)';
-      ctx.strokeText(_pt, sx + 14, sy + 80);
+      // v0.30.x - stroke + halo from the bake (see _lxTitleGlowLayer); the
+      // shimmer gradient stays live. One bake serves every peer with the title.
+      ctx.textBaseline = 'alphabetic';   // match the bake
+      const _pg = _lxTitleGlowLayer(_pt, !!window._lxBossFontReady);
+      ctx.drawImage(_pg.cv, sx + 14 - _pg.ox, sy + 80 - _pg.oy);
       ctx.fillStyle = (typeof _lxTitleGradient === 'function')
         ? _lxTitleGradient(sx + 14, Math.max(28, p._tiTw || 28)) : '#f2d489';
-      ctx.shadowColor = 'rgba(255,190,80,0.75)';
-      ctx.shadowBlur = 7;
       ctx.fillText(_pt, sx + 14, sy + 80);
-      ctx.shadowBlur = 0;
       try { ctx.letterSpacing = '0px'; } catch (e) {}
     }
     ctx.restore();
@@ -91860,12 +91857,38 @@ function _particleCap() {
   return Math.max(64, Math.floor(MAX_PARTICLES * mul));
 }
 
+// v0.30.x - the remaining combat arrays graduate the way _particleCap did
+// (per user: "lets do 2" from the perf backlog). Same cached per-frame scan,
+// zero new work; the flat lowFx bit alone could not tell a 1-boss duel from a
+// 3-boss bullet-hell. Enemy PROJECTILES are deliberately NOT graduated -
+// they are gameplay (dodge patterns), and capping them changes difficulty.
+function _lxCombatLoadMul(bossHeavy, bossLight, swarm) {
+  const boss = (game && game._lowFxCache && game._lowFxCache.bossCount) || 0;
+  const mobs = (game && game._lowFxCache && game._lowFxCache.mobCount) || 0;
+  let mul = 1;
+  if (boss >= 2 || (typeof _perfVeryLowFx === 'function' && _perfVeryLowFx())) mul *= bossHeavy;
+  else if (boss >= 1) mul *= bossLight;
+  if (mobs > 20) mul *= swarm;
+  return mul;
+}
 function _damageNumberCap() {
-  return Math.max(16, Math.floor(MAX_DMG_NUMBERS * (_perfLowFx() ? 0.70 : 1)));
+  // Floor 10, deliberately higher than the others' floors: damage numbers are
+  // FEEDBACK the player reads, not decoration - cut too hard and hits look
+  // like they stopped registering.
+  const low = _perfLowFx();
+  return Math.max(10, Math.floor(MAX_DMG_NUMBERS * (low ? 0.70 : 1) * _lxCombatLoadMul(0.7, 0.85, 0.85)));
 }
 
 function _afterImageCap() {
-  return Math.max(6, Math.floor(MAX_AFTERIMAGES * (_perfLowFx() ? 0.55 : 1)));
+  const low = _perfLowFx();
+  return Math.max(4, Math.floor(MAX_AFTERIMAGES * (low ? 0.55 : 1) * _lxCombatLoadMul(0.6, 0.8, 1)));
+}
+
+// v0.30.x - smoothFx joins too. Was a bare const at the eviction site, so the
+// slash/burst layer was the one combat array with NO load response at all.
+function _smoothFxCap() {
+  const low = _perfLowFx();
+  return Math.max(6, Math.floor(MAX_SMOOTH_FX * (low ? 0.7 : 1) * _lxCombatLoadMul(0.7, 1, 0.85)));
 }
 
 // v0.29.x perf — hazard types the cap must NEVER drop: arena mechanics that
@@ -91969,11 +91992,12 @@ function _trimVisualQueues() {
   // v0.25.460 — smooth-FX cap. Drops oldest entries when a boss phase
   // spam-spawns 5+ explosions in a single beat. The ones evicted are
   // older than the visible animation window anyway, so visually a no-op.
-  if (game.smoothFx && game.smoothFx.length > MAX_SMOOTH_FX) {
+  const _sfxCap = (typeof _smoothFxCap === 'function') ? _smoothFxCap() : MAX_SMOOTH_FX;   // v0.30.x - graduated
+  if (game.smoothFx && game.smoothFx.length > _sfxCap) {
     // v0.30.34 - evict the oldest NON-sticky entries. The Eclipse moon (180
     // frames, sticky) used to be the oldest entry on the frame its own
     // dagger wave overflowed the cap, so it was dropped one frame in.
-    let _over = game.smoothFx.length - MAX_SMOOTH_FX, _w = 0;
+    let _over = game.smoothFx.length - _sfxCap, _w = 0;
     for (let _r = 0; _r < game.smoothFx.length; _r++) {
       const _fx = game.smoothFx[_r];
       if (_over > 0 && !_fx.sticky) { _over--; continue; }
@@ -108775,14 +108799,24 @@ function drawChests() {
       // visibility consistent regardless of which chest art is loaded.
       // v0.27.19 — closed-only: an opened chest's piece is already taken.
       if (c._pqPuzzlePiece && !c.opened) {
+        // v0.30.x - baked badge, shared with the procedural branch below;
+        // this sprite-path copy is the one that draws in practice (the
+        // fallback is skipped via the continue when chest art is loaded).
+        if (!window._lxPzBadgeCv) {
+          const _bc = document.createElement('canvas');
+          _bc.width = 44; _bc.height = 44;
+          const _b2 = _bc.getContext('2d');
+          _b2.font = '18px sans-serif';
+          _b2.textAlign = 'center'; _b2.textBaseline = 'middle';
+          _b2.shadowColor = '#aa66ff';
+          _b2.shadowBlur = 8;
+          _b2.fillText('🧩', 22, 24);
+          window._lxPzBadgeCv = _bc;
+        }
         const _puls = 1 + Math.sin(game.time * 0.10) * 0.10;
-        ctx.save();
-        ctx.font = `${Math.round(18 * _puls)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.shadowColor = '#aa66ff';
-        ctx.shadowBlur = 8;
-        ctx.fillText('🧩', sx + c.w/2, c.y - 22 + Math.sin(game.time * 0.08) * 2);
-        ctx.restore();
+        const _bw = 44 * _puls;
+        ctx.drawImage(window._lxPzBadgeCv, sx + c.w / 2 - _bw / 2,
+          c.y - 22 + Math.sin(game.time * 0.08) * 2 - 24 * _puls, _bw, _bw);
       }
       continue;  // skip the procedural fallback below
     }
@@ -108886,14 +108920,25 @@ function drawChests() {
       // renders for `_pqPuzzlePiece` chests in the procedural-draw
       // fallback path; the sprite-path equivalent is handled below.
       if (c._pqPuzzlePiece) {
+        // v0.30.x - the glowing piece badge bakes once (emoji + shadowBlur 8
+        // halo) and the pulse becomes a scaled blit: this ran a shadowed
+        // fillText per chest per frame, re-parsing a new font string each time
+        // the pulse changed the size.
+        if (!window._lxPzBadgeCv) {
+          const _bc = document.createElement('canvas');
+          _bc.width = 44; _bc.height = 44;
+          const _b2 = _bc.getContext('2d');
+          _b2.font = '18px sans-serif';
+          _b2.textAlign = 'center'; _b2.textBaseline = 'middle';
+          _b2.shadowColor = '#aa66ff';
+          _b2.shadowBlur = 8;
+          _b2.fillText('🧩', 22, 24);
+          window._lxPzBadgeCv = _bc;
+        }
         const _puls = 1 + Math.sin(game.time * 0.10) * 0.10;
-        ctx.save();
-        ctx.font = `${Math.round(18 * _puls)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.shadowColor = '#aa66ff';
-        ctx.shadowBlur = 8;
-        ctx.fillText('🧩', sx + c.w/2, c.y - 18 + Math.sin(game.time * 0.08) * 2);
-        ctx.restore();
+        const _bw = 44 * _puls;
+        ctx.drawImage(window._lxPzBadgeCv, sx + c.w / 2 - _bw / 2,
+          c.y - 18 + Math.sin(game.time * 0.08) * 2 - 24 * _puls, _bw, _bw);
       }
     } else {
       // ---- Opened — flipped lid + dark interior ----
@@ -111555,6 +111600,44 @@ function _lxEquippedTitle() {
 // Gold leaf with a highlight travelling across the letters — the one piece of
 // motion that separates regalia from another HUD label. 3.2s loop, matched to
 // the CSS shimmer on the HUD copy so the two read as the same object.
+// v0.30.x - the title bake (per user: "limit the shadowblur / gradient
+// bakes"). shadowBlur measured 12x a plain blit on this GPU, and
+// this one ran per titled entity per frame - the local player plus every
+// co-op peer. The glow keys off glyph ALPHA with a constant colour, so it is
+// identical whether the fill under it is flat gold or the travelling
+// gradient: bake stroke + halo once per (text, font-ready), then repaint
+// only the gradient fill live. Both call sites draw centred.
+const _lxTitleGlowCache = new Map();
+function _lxTitleGlowLayer(text, fontReady) {
+  const key = text + '|' + (fontReady ? 1 : 0);
+  let e = _lxTitleGlowCache.get(key);
+  if (e) return e;
+  const cv = document.createElement('canvas');
+  let c2 = cv.getContext('2d');
+  const FONT = '700 9px LXBossTitle, Cinzel, "Palatino Linotype", Georgia, serif';
+  c2.font = FONT;
+  try { c2.letterSpacing = '1.2px'; } catch (e2) {}
+  const tw = c2.measureText(text).width;
+  const PAD = 14;                       // blur 7 + stroke 3 headroom
+  cv.width = Math.ceil(tw + PAD * 2);
+  cv.height = PAD * 2 + 14;
+  c2 = cv.getContext('2d');            // resize reset the state - re-set it all
+  c2.font = FONT;
+  try { c2.letterSpacing = '1.2px'; } catch (e2) {}
+  c2.textAlign = 'center';
+  const ox = cv.width / 2, oy = PAD + 8;
+  c2.lineJoin = 'round'; c2.miterLimit = 2; c2.lineWidth = 3;
+  c2.strokeStyle = 'rgba(10,5,2,0.92)';
+  c2.strokeText(text, ox, oy);
+  c2.shadowColor = 'rgba(255,190,80,0.75)';
+  c2.shadowBlur = 7;
+  c2.fillStyle = '#e8c060';            // flat under-fill: the live gradient repaints the glyphs over it
+  c2.fillText(text, ox, oy);
+  e = { cv, ox, oy, tw };
+  if (_lxTitleGlowCache.size > 24) _lxTitleGlowCache.clear();   // co-op titles churn; keep it tiny
+  _lxTitleGlowCache.set(key, e);
+  return e;
+}
 function _lxTitleGradient(cx, w) {
   const gd = ctx.createLinearGradient(cx - w / 2, 0, cx + w / 2, 0);
   const p = ((typeof performance !== 'undefined' ? performance.now() : 0) % 3200) / 3200;
@@ -111624,16 +111707,12 @@ function _drawPlayerNameTag(sx, sy) {
       _titleTagCache.tw  = ctx.measureText(_tt).width;
     }
     const _tty = ty + 12;
-    ctx.lineJoin = 'round';
-    ctx.miterLimit = 2;
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(10,5,2,0.92)';
-    ctx.strokeText(_tt, tx, _tty);
+    // v0.30.x - stroke + halo come from the bake; only the shimmer is live.
+    ctx.textBaseline = 'alphabetic';   // the bake is alphabetic - pin the live text to match
+    const _tg = _lxTitleGlowLayer(_tt, !!window._lxBossFontReady);
+    ctx.drawImage(_tg.cv, tx - _tg.ox, _tty - _tg.oy);
     ctx.fillStyle = _lxTitleGradient(tx, Math.max(28, _titleTagCache.tw));
-    ctx.shadowColor = 'rgba(255,190,80,0.75)';
-    ctx.shadowBlur = 7;
     ctx.fillText(_tt, tx, _tty);
-    ctx.shadowBlur = 0;
     try { ctx.letterSpacing = '0px'; } catch (e) {}
   }
   ctx.restore();
@@ -115635,14 +115714,23 @@ function drawPlayer() {
     const _hr = (player.w * 1.6) * _hpulse;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    const _hgrad = ctx.createRadialGradient(_hcx, _hcy, _hr * 0.25, _hcx, _hcy, _hr);
-    _hgrad.addColorStop(0,   'rgba(255,238,170,0.45)');
-    _hgrad.addColorStop(0.5, 'rgba(255,210,120,0.22)');
-    _hgrad.addColorStop(1,   'rgba(255,210,120,0)');
-    ctx.fillStyle = _hgrad;
+    // v0.30.x - unit gradient, built once; the transform carries position and
+    // pulse (same idiom as the charge halo, audit item 8). The stops are
+    // constant, so a fresh gradient per frame bought nothing.
+    if (!window._lxHallowedGrad) {
+      const _g0 = ctx.createRadialGradient(0, 0, 0.25, 0, 0, 1);
+      _g0.addColorStop(0,   'rgba(255,238,170,0.45)');
+      _g0.addColorStop(0.5, 'rgba(255,210,120,0.22)');
+      _g0.addColorStop(1,   'rgba(255,210,120,0)');
+      window._lxHallowedGrad = _g0;
+    }
+    ctx.translate(_hcx, _hcy);
+    ctx.scale(_hr, _hr);
+    ctx.fillStyle = window._lxHallowedGrad;
     ctx.beginPath();
-    ctx.arc(_hcx, _hcy, _hr, 0, Math.PI * 2);
+    ctx.arc(0, 0, 1, 0, Math.PI * 2);
     ctx.fill();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);   // ring below draws in screen space
     // Faint thin ring around the halo for a soft edge cue
     ctx.strokeStyle = 'rgba(255,235,170,0.30)';
     ctx.lineWidth = 1.5;
