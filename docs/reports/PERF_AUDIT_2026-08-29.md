@@ -126,3 +126,27 @@ Static analysis run: 8 lenses, 47 raw findings, 1.5M tokens, all cadence-gated p
 Suites added: `low_preset_perf_css_test` (10), `perf_loop_smoke_test` (8),
 `perf_draw_smoke_test` (10), `perf_needslook_test` (9), `perf_bossbar_minion_test` (6)
 — all auto-discovered by `run_all_tests.mjs`.
+
+---
+
+## 8. Cycle 2 (same day, "more ways while maintaining high graphics")
+
+Fresh 8-lens sweep with everything landed on the avoid list: 47 raw findings → 15 ranked.
+
+| Item | Outcome |
+| --- | --- |
+| **`_perfVeryLowFx` stale cache — the auto tier-2 FX ladder NEVER engaged** (2+ bosses / >22 mobs / bullet-hell ≥40 projectiles all dead; only the oscillating reactive path worked) | **v0.30.292** — one line: clear `veryValue` with the frame stamp. A/B: tier 2 off at 25 mobs and 2 bosses on the old build, engages on the fix |
+| Ward orbs + ballista blits, cuteMob Set/blend memo, minimap ground memo, daily Map, 9× double `_lxVfxFrame` calls | **v0.30.292** |
+| Enemy trails through the particle budget + pool; desktop budget 120→90 (sanctioned particle trim) | **v0.30.291** |
+| Mob-projectile statics, slash/burst art (2× per frame), meteors (7 resamples → 1 bake), small-box hazard frames, `_pickBGImage` memo | **v0.30.294** |
+| CSS `contain: layout paint` on HUD panels | **REJECTED, measured**: −77% fps town / −19% forest (defeats existing layerization). `will-change: transform`: +2–5%, inside noise |
+| Pad poll chain | Already presence-gated for keyboard players (early-out + 2s reprobe); pad-connected cost needs a physical controller |
+| `_drawMonsterSprite` geometry memo | Re-reviewed: all helpers are O(1) memoized lookups; the audit overestimated it. Dropped |
+
+Remaining pool (documented, unlanded): drawAmbient lastColor/stamp memos (5 override
+branches to keep straight), renderSkillBar quantized cooldown gates, `_qnavDrawKey`
+CSSOM gate, `_buffBarMax` Map, dyed-hair tint bake (needs visual diff), and the
+synthesizer's second-tier list (hazard alpha-out-of-gradient, nameplate gradient,
+checkPlatformCollision bucket reuse — its double slam-pierce caveat is real).
+
+Suites added cycle 2: `perf_ladder_test` (9), `perf_blit_route_test` (8).
