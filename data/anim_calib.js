@@ -258,12 +258,12 @@ window.LX_ANIM_CALIB = {
       ]
     },
     "walk": {
-      "s": 1.021,
+      "s": 1.29,
       "dx": 0,
       "dy": 0.05
     },
     "attack": {
-      "s": 1.019,
+      "s": 1.13,
       "dx": 0,
       "dy": 0.04
     }
@@ -417,7 +417,7 @@ window.LX_ANIM_CALIB = {
   "gravitospunch": {
     "attack": {
       "s": 1.01,
-      "dx": 0,
+      "dx": 0.11,
       "dy": 0.015
     }
   },
@@ -506,7 +506,7 @@ window.LX_ANIM_CALIB = {
   "gravitos3laser": {
     "attack": {
       "s": 1.002,
-      "dx": 0,
+      "dx": 0.125,
       "dy": 0.026
     }
   },
@@ -519,7 +519,7 @@ window.LX_ANIM_CALIB = {
   },
   "gravitos3soul": {
     "attack": {
-      "s": 1.062,
+      "s": 1.12,
       "dx": 0,
       "dy": 0.0294
     }
@@ -609,6 +609,11 @@ window.LX_ANIM_CALIB = {
       "s": 1.095,
       "dx": 0,
       "dy": 0
+    },
+    "zodiac/fly": {
+      "s": 1.14,
+      "dx": 0,
+      "dy": -0.035
     }
   },
   "zodiac_taurus": {
@@ -620,9 +625,16 @@ window.LX_ANIM_CALIB = {
   },
   "aetherionastral": {
     "attack": {
-      "s": 1.94,
-      "dx": 0.025,
-      "dy": 0.095
+      "s": 1.28,
+      "dx": 0.06,
+      "dy": -0.005
+    }
+  },
+  "zodiac_leo": {
+    "zodiac/pounce": {
+      "s": 1.55,
+      "dx": 0.06,
+      "dy": 0.41
     }
   }
 };
