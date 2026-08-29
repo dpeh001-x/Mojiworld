@@ -81,16 +81,39 @@ const files = (await readdir(STAGE)).filter(f => /^leo_\d+\.webp$/.test(f))
   .sort((a, b) => (+a.match(/\d+/)[0]) - (+b.match(/\d+/)[0]));
 if (!files.length) { console.error('ABORT: no staged frames'); process.exit(1); }
 
-console.log('frame  aspect  leftH  rightH  faces   verdict');
-const keep = [];
+// v0.30.x — MARGIN-AWARE FACING. Thickness assumes "deep at the head, thin at
+// the tail", which holds for a gathered pose but not at FULL EXTENSION: there
+// the mane streams horizontally along the body and the tail flame adds height
+// at the far end, so the two outer thirds measure within a few percent of each
+// other — noise — and the raw comparison mirrored four visibly-left-facing
+// frames (which would flip the lion around four times through one arc, the
+// exact bug this pass exists to prevent). A frame's own read now counts only
+// when decisive (>15% margin); near-even frames follow the majority of the
+// decisive ones, because sprite-animate flips WHOLE runs, not single frames.
+const DECISIVE = 1.15;
+const measured = [];
 for (const f of files) {
   const m = await measure(join(STAGE, f));
-  if (!m) { console.log(`${f.padEnd(12)} (unreadable)  DROP`); continue; }
-  const airborne = m.ar >= AIRBORNE_MIN;
-  const verdict = airborne ? (m.facesLeft ? 'keep' : 'keep (mirror)') : 'DROP — reared';
-  console.log(`${f.padEnd(12)} ${m.ar.toFixed(2)}  ${m.leftH.toFixed(0).padStart(5)}  ${m.rightH.toFixed(0).padStart(6)}  ${(m.facesLeft ? 'left' : 'right').padEnd(6)} ${verdict}`);
-  if (airborne) keep.push({ f, mirror: !m.facesLeft });
+  measured.push({ f, m });
 }
+const decisive = measured.filter(({ m }) => m && (m.leftH > m.rightH * DECISIVE || m.rightH > m.leftH * DECISIVE));
+const majorityLeft = decisive.length
+  ? decisive.filter(({ m }) => m.facesLeft).length * 2 >= decisive.length
+  : true;
+console.log(`majority facing (from ${decisive.length} decisive frame(s)): ${majorityLeft ? 'left' : 'right'}`);
+console.log('frame  aspect  leftH  rightH  faces      verdict');
+const keep = [];
+for (const { f, m } of measured) {
+  if (!m) { console.log(`${f.padEnd(12)} (unreadable)  DROP`); continue; }
+  const isDecisive = m.leftH > m.rightH * DECISIVE || m.rightH > m.leftH * DECISIVE;
+  const facesLeft = isDecisive ? m.facesLeft : majorityLeft;
+  const airborne = m.ar >= AIRBORNE_MIN;
+  const verdict = airborne ? (facesLeft ? 'keep' : 'keep (mirror)') : 'DROP — reared';
+  const faceLabel = (facesLeft ? 'left' : 'right') + (isDecisive ? '' : '*');
+  console.log(`${f.padEnd(12)} ${m.ar.toFixed(2)}  ${m.leftH.toFixed(0).padStart(5)}  ${m.rightH.toFixed(0).padStart(6)}  ${faceLabel.padEnd(9)} ${verdict}`);
+  if (airborne) keep.push({ f, mirror: !facesLeft });
+}
+if (decisive.length < measured.length) console.log('(* = near-even read, followed the majority)');
 console.log(`\n${keep.length} of ${files.length} survive; ${keep.filter(k => k.mirror).length} need mirroring`);
 if (!WRITE) { console.log('(report only — re-run with --write)'); process.exit(0); }
 

@@ -39,20 +39,30 @@ const arg = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : nu
 const TRIES = Math.max(1, Number(arg('--tries') || 4));
 const FRAMES = 9;
 
+// v0.30.x — THE KEYFRAME IS AN EDIT OF THE PORTRAIT, NOT A TEXT ROLL.
+// The first version of this tool generated the airborne base from a bare text
+// prompt (/assets/image). The pose gate passed — and the set shipped as a
+// DIFFERENT LION: soft painterly style, plain brown mane, no fire mane, no
+// flame-tipped tail (per user: regenerate "of the correct scale and size with
+// attack sprite frame"). Text described the identity; nothing enforced it.
+// /assets/image/edit is handed the actual portrait, so the fire mane, the
+// tail flame, the rosettes and the keyline style survive by construction, and
+// the prompt only has to move the POSE. The identity language is kept anyway
+// as belt and braces against an aggressive edit.
 const BASE_PROMPT =
-  'A majestic golden LION IN MID-LEAP, seen from the side, flying LEFT TO ' +
-  'RIGHT through empty air. His body is stretched out HORIZONTALLY like a big ' +
-  'cat at full extension, forelegs reaching far forward with claws spread, ' +
-  'hind legs trailing straight out behind him. ALL FOUR PAWS ARE HIGH OFF THE ' +
-  'GROUND. Jaws open in a roar, blazing orange-and-red flame mane streaming ' +
-  'backward, golden fur with soft amber rosette spots, a fire-tipped tail ' +
-  'trailing behind, small sun-fire embers streaming off his paws and tail. ' +
-  'Bold black keyline, cel-shaded painterly fantasy game sprite, vibrant ' +
-  'saturated golds and oranges. ' +
+  'Redraw this exact same character — same blazing flame mane, same golden ' +
+  'fur with amber rosette spots, same fire-tipped tail, same bold keyline and ' +
+  'cel-shaded style, same colours — but now caught IN MID-LEAP, seen from the ' +
+  'side, flying through empty air. His body is stretched out HORIZONTALLY ' +
+  'like a big cat at full extension, forelegs reaching far forward with claws ' +
+  'spread, hind legs trailing straight out behind him. ALL FOUR PAWS ARE HIGH ' +
+  'OFF THE GROUND. Jaws open in a roar, flame mane streaming backward, small ' +
+  'sun-fire embers streaming off his paws and tail. ' +
   'He is FLYING THROUGH THE AIR. There is NO GROUND, NO FLOOR, NO GROUND LINE, ' +
   'NO SHADOW beneath him, and he is NOT standing, NOT sitting, NOT rearing up ' +
-  'on his hind legs, NOT crouching. Fully transparent background, single ' +
-  'character centred, no text, no UI.';
+  'on his hind legs, NOT crouching. Keep his body the SAME SIZE relative to ' +
+  'the canvas as the original. Fully transparent background, single character ' +
+  'centred, no text, no UI.';
 
 const MOTION =
   'the leaping lion sails through the air in one continuous pounce: his body ' +
@@ -127,12 +137,18 @@ const W = refMeta.width, H = refMeta.height;
 const refAr = await aspect(await readFile(REF));
 console.log(`shipped leo_0 silhouette aspect ${refAr.ar.toFixed(2)} (${refAr.w}x${refAr.h}) — the rear we are replacing`);
 
-// ---- 1. an airborne base ---------------------------------------------------
+// ---- 1. an airborne base, EDITED FROM THE PORTRAIT --------------------------
+// The portrait is the identity; the edit only has to move the pose. Sent
+// downsized under the endpoint's megapixel comfort zone, same as the animate
+// call below does for its own input.
+const PORTRAIT = join(ROOT, 'Sprites', 'bosses', 'zodiac', 'leo.webp');
+const _portraitUri = 'data:image/png;base64,' +
+  (await sharp(await readFile(PORTRAIT)).resize(990, 990, { fit: 'inside', withoutEnlargement: true })
+    .png().toBuffer()).toString('base64');
 let base = null, bestAr = 0;
 for (let attempt = 1; attempt <= TRIES; attempt++) {
-  const data = await post('/assets/image', {
-    image_type: 'sprite', prompt: BASE_PROMPT, art_style: 'Hand-Painted',
-    perspective: 'Side-Scroll', aspect_ratio: 'ar_1_1', n: 1, augment_prompt: false,
+  const data = await post('/assets/image/edit', {
+    image: _portraitUri, prompt: BASE_PROMPT, n: 1, augment_prompt: false,
   });
   const url = Array.isArray(data) ? data[0]?.url : (data?.url || data?.images?.[0]?.url);
   if (!url) throw new Error('no url');

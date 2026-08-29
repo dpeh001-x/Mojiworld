@@ -128,7 +128,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "taurus": 9
   },
   "bosses/zodiac/pounce": {
-   "leo": 8
+   "leo": 9
   },
   "bosses/zodiac/fly": {
    "virgo": 9
