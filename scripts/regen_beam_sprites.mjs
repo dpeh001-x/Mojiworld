@@ -88,6 +88,28 @@ const ITEMS = {
   // Sized and coloured off the live projectile: 16x14 at #aaeeff, drawn in
   // orient mode so it points along its velocity - the art therefore has to aim
   // RIGHT along its long axis.
+  // v0.30.x - GRAVITOS BOSS-INTRO STRIP BACKDROP (per user: "this strip
+  // should be specially tailored in the gravitos map, generate an image that
+  // fits the theme and remove the gravitos sprite" / "make the gravitos intro
+  // strip more impactful"). A filled band, not a sprite: the strip shows it
+  // via CSS cover with a legibility gradient over the left and right thirds,
+  // so the art must carry its drama in the middle and stay dark at the edges.
+  // No figure in it - the sprite removal is the point.
+  bis_gravitos_bg: {
+    dest: join(repoRoot, 'Sprites', 'fx', 'bis_gravitos_bg.webp'),
+    fmt: 'webp', kind: 'banner',
+    prefix: 'Cinematic WIDE landscape banner artwork for a 2D game boss introduction. Painterly, dramatic, ' +
+      'high contrast, FILLED background (no transparency). NO text, NO letters, NO logo, NO frame, NO border, ' +
+      'NO characters, NO creatures, NO figures of any kind. ',
+    prompt:
+      'The event horizon of a COLLAPSING SINGULARITY in deep void-space, seen edge-on across the middle of the ' +
+      'frame: a massive black sphere of nothing at centre-right, wrapped in a blazing thin ACCRETION RING of ' +
+      'violet and magenta light (#6634a8, #cc66ff), with two or three concentric CRIMSON gravity shock-rings ' +
+      'rippling outward from it. Shattered rock shards and dust are dragged inward, stretching into thin ' +
+      'luminous streaks as they fall. Far background: a near-black indigo starfield (#1a0a2e) with faint cold ' +
+      'stars. The left and right edges of the frame fade to near-black so overlaid text stays readable. ' +
+      'Oppressive, heavy, silent - the weight of a dying star, not an explosion.',
+  },
   p_capricorn_ice: {
     dest: join(repoRoot, 'Sprites', 'projectiles', 'p_capricorn_ice.webp'),
     fmt: 'webp', kind: 'proj', prefix: PROJ_PREFIX, cleanAlpha: true,
@@ -163,6 +185,26 @@ async function shape(raw, kind, fmt, cleanAlpha) {
   let src = raw;
   if (cleanAlpha) src = await cleanGlowAlpha(raw);
   let content; try { content = await sharp(src).trim().toBuffer(); } catch { content = src; }
+  if (kind === 'banner') {
+    // Boss-intro strip backdrop: a filled cinematic band. Cover-crop the raw
+    // generation to 1536x384 (the strip is ~10:1 but shows the middle of this
+    // 4:1 band via CSS cover, so the art keeps context above and below).
+    const BW = 1536, BH = 384;
+    const band = await sharp(raw).resize(BW, BH, { fit: 'cover', position: 'centre' }).png().toBuffer();
+    // Edge-darkening multiply ramp: the strip overlays its name on the left
+    // third, and the first roll came back with that third blown-out WHITE
+    // despite the prompt asking for dark edges. Prompts request; this ramp
+    // guarantees - void-violet at both edges, no-op through the middle.
+    const _rsvg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + BW + '" height="' + BH + '">' +
+      '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0">' +
+      '<stop offset="0" stop-color="#171028"/><stop offset="0.30" stop-color="#3a2a55"/>' +
+      '<stop offset="0.46" stop-color="#ffffff"/><stop offset="0.66" stop-color="#ffffff"/>' +
+      '<stop offset="0.86" stop-color="#4a3868"/><stop offset="1" stop-color="#201636"/>' +
+      '</linearGradient></defs><rect width="' + BW + '" height="' + BH + '" fill="url(#g)"/></svg>';
+    const _ramp = await sharp(Buffer.from(_rsvg)).png().toBuffer();
+    const pipe = sharp(band).composite([{ input: _ramp, blend: 'multiply' }]);
+    return await (fmt === 'webp' ? pipe.webp({ quality: 90 }) : pipe.png()).toBuffer();
+  }
   if (kind === 'column') {
     // Beam: stretch the trimmed column to fill a tall 256x1024 box (the engine
     // stretches to the beam box anyway; a full-height source reads cleanest).
