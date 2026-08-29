@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.282';
+const GAME_VERSION = 'v0.30.283';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -64646,17 +64646,22 @@ function updatePlayer(dt) {
   let mpRate = 30 - (player.mods.mpRegen * 10);
   if (player.cls === 'mage') mpRate = Math.max(3, Math.floor(mpRate / 2));
   const inTown = !!(game.mapData && game.mapData.isTown);
+  // v0.30.283 perf — max pools are invariant across this regen block (only
+  // hp/mp themselves change in it); each avoided call skips the equip-bonus
+  // walk, class multipliers and talent lookups. Same memo idiom as v0.26.x's
+  // frame caches.
+  const _maxHpR = getMaxHp(), _maxMpR = getMaxMp();
   // v0.26.434 — Town safe-haven regen is a flat 10% of max MP PER SECOND
   // (per user). game.time ticks at 60 fps, so once every 60 ticks we top up
   // by 10% of the pool — a full refill in ~10 s of resting in any hub.
   // Out of town, MP keeps the existing tiered passive drip.
   if (inTown) {
-    if (game.time % 60 === 0 && player.mp < getMaxMp()) {
-      player.mp = Math.min(getMaxMp(), player.mp + Math.max(1, Math.ceil(getMaxMp() * 0.10)));
+    if (game.time % 60 === 0 && player.mp < _maxMpR) {
+      player.mp = Math.min(_maxMpR, player.mp + Math.max(1, Math.ceil(_maxMpR * 0.10)));
     }
   } else {
     const mpRateSafe = mpRate < 1 ? 1 : mpRate;
-    if (game.time % mpRateSafe === 0 && player.mp < getMaxMp()) {
+    if (game.time % mpRateSafe === 0 && player.mp < _maxMpR) {
       player.mp += 1;
     }
   }
@@ -64674,22 +64679,22 @@ function updatePlayer(dt) {
   // subtracts from hpRate could push it to 0 or negative — `x % 0` returns
   // NaN, `NaN === 0` is false so regen would silently stop. Guard kept.
   if (inTown) {
-    if (game.time % 60 === 0 && player.hp < getMaxHp()) {
-      player.hp = Math.min(getMaxHp(), player.hp + Math.max(1, Math.ceil(getMaxHp() * 0.10)));
+    if (game.time % 60 === 0 && player.hp < _maxHpR) {
+      player.hp = Math.min(_maxHpR, player.hp + Math.max(1, Math.ceil(_maxHpR * 0.10)));
     }
   } else {
     const hpRateSafe = hpRate < 1 ? 1 : hpRate;
-    if (game.time % hpRateSafe === 0 && player.hp < getMaxHp()) {
+    if (game.time % hpRateSafe === 0 && player.hp < _maxHpR) {
       player.hp += 1;
     }
   }
   // Equipment hpRegen (per second)
   const hpR = getEquipBonus('hpRegen');
-  if (hpR > 0 && game.time % 60 === 0 && player.hp < getMaxHp()) {
-    player.hp = Math.min(getMaxHp(), player.hp + hpR);
+  if (hpR > 0 && game.time % 60 === 0 && player.hp < _maxHpR) {
+    player.hp = Math.min(_maxHpR, player.hp + hpR);
   }
-  if (player.mp > getMaxMp()) player.mp = getMaxMp();
-  if (player.hp > getMaxHp()) player.hp = getMaxHp();
+  if (player.mp > _maxMpR) player.mp = _maxMpR;
+  if (player.hp > _maxHpR) player.hp = _maxHpR;
 
   // Animation
   player.animTimer += dt;
@@ -65333,10 +65338,16 @@ function updatePlayer(dt) {
     }
   }
   // Apply afterimage damage to monsters
+  // v0.30.283 perf — reused scratch box (it never escapes the iteration) and
+  // an X-axis pre-reject: the first clause aabb evaluates anyway, run before
+  // the per-mob Set lookup so off-axis pairs skip it. Same reorder licence
+  // as the v0.29.477 projectile pass — all three checks are side-effect-free.
+  const _aiHb = (window._AI_HB = window._AI_HB || { x: 0, y: 0, w: 0, h: 0 });
   for (const ai of game.afterImages) {
     if (!ai.dmg) continue;
-    const hb = { x: ai.x, y: ai.y, w: player.w, h: player.h };
+    const hb = _aiHb; hb.x = ai.x; hb.y = ai.y; hb.w = player.w; hb.h = player.h;
     for (const m of game.monsters) {
+      if (m.x >= hb.x + hb.w || m.x + m.w <= hb.x) continue;
       if (m.currentHp <= 0) continue;
       if (ai.hitIds.has(m)) continue;
       if (aabb(hb, m)) {
@@ -68487,6 +68498,13 @@ function updateMinions(dt) {
       _lv.length = 0;
       for (const _m of game.monsters) if (_m.currentHp > 0) _lv.push(_m);
     }
+    // v0.30.283 perf — the crowding tally below was a full pack scan PER MOB
+    // per minion (pack² × mobs each frame; 10 minions × 30 mobs = 3,000
+    // inner iterations). No minion's _mnTgt re-stamps until ITS scan ends,
+    // so one tally pass per minion sees exactly what the inner loop saw.
+    const _claimBy = (game._mnClaimMap = game._mnClaimMap || new Map());
+    _claimBy.clear();
+    for (const _o of game.minions) { if (_o !== mn && _o._mnTgt) _claimBy.set(_o._mnTgt, (_claimBy.get(_o._mnTgt) || 0) + 1); }
     for (const m of game._mnLive) {
       const dx = (m.x + m.w/2) - _mnCx, dy = (m.y + m.h/2) - _mnCy;
       const sq = dx*dx + dy*dy;
@@ -68513,8 +68531,7 @@ function updateMinions(dt) {
         // construction. A crowding penalty makes an already-claimed target
         // progressively less attractive, so the pack spreads across whatever
         // else is in range and only doubles up when there is nothing else left.
-        let _claims = 0;
-        for (const _o of game.minions) { if (_o !== mn && _o._mnTgt === m) _claims++; }
+        const _claims = _claimBy.get(m) || 0;
         // v0.29.890 — height is PRICED IN rather than treated as free ground.
         // sq is a straight 2D distance, so something directly overhead read as
         // closer than a foe a little further along the same floor. Cost basis
@@ -68558,8 +68575,7 @@ function updateMinions(dt) {
           const _pdx = (m.x + m.w / 2) - _pcx, _pdy = (m.y + m.h / 2) - _pcy;
           if (_pdx * _pdx + _pdy * _pdy > _MN_LEASH_SQ * _rx * _rx) continue;
           const _hpF = (m.maxHp > 0) ? Math.max(0, Math.min(1, m.currentHp / m.maxHp)) : 1;
-          let _claims = 0;
-          for (const _o of game.minions) { if (_o !== mn && _o._mnTgt === m) _claims++; }
+          const _claims = _claimBy.get(m) || 0;
           const _reach = Math.abs(dx) + _dyAbs * _mnDyCost;
           const _score = _reach * (0.55 + 0.45 * _hpF) * (1 + _claims * 2.6);
           if (_score < _fbScore) { _fbScore = _score; bestSq = dx * dx + dy * dy; tgt = m; }
@@ -76224,6 +76240,18 @@ function updateMonsters(dt) {
   const _playerCx = (typeof player !== 'undefined' && player) ? (player.x + player.w / 2) : 0;
   const _playerCy = (typeof player !== 'undefined' && player) ? (player.y + player.h / 2) : 0;
   const _ww       = (game.mapData && game.mapData.worldWidth) || 2400;
+  // v0.30.283 perf — ally-roster flags hoisted from the per-mob targeting
+  // block: nothing writes these rosters inside the monster loop (pack /
+  // minion splices happen in updatePlayer / updateMinions), so the per-mob
+  // rereads were pure waste. The B-ult summon and undead minions draw
+  // aggro like pets; the Mirror Step decoy joins the pool until its expiry
+  // (handled in _updateDashTrail — the flag re-derives next frame).
+  const _plrA = (typeof player !== 'undefined' && player) ? player : null;
+  const _hasPet = !!(_plrA && _plrA.pet && _plrA.pet.hp > 0);
+  const _hasUlt = !!(_plrA && _plrA.ultPet && _plrA.ultPet.hp > 0);
+  const _hasPack = !!(_plrA && _plrA.pack && _plrA.pack.length);
+  const _hasMinions = !!(game.minions && game.minions.length);
+  const _hasDecoy = !!(game._mirrorDecoy && (game._mirrorDecoy.until | 0) > (game.time | 0));
   const camX = game.camera.x;
   // v0.25.506 — Y-axis component on the active-mob test. The pre-existing
   // X-only `far` check left mobs above/below the viewport on tall maps
@@ -76553,33 +76581,6 @@ function updateMonsters(dt) {
       // literally; only `undefined` triggers the fallthrough.
       const _shootMaxX = (m.shootRangeOverride !== undefined) ? m.shootRangeOverride : (m.flies ? 700 : 380);
       const _shootMaxY = m.flies ? 400 : 260;
-      // v0.26.x — Spawn the actual projectile(s). Hoisted into a closure so it
-      // can fire either instantly (mobs without attack art) or at the strike
-      // point of a wind-up (mobs that have attack frames).
-      const _fireShot = () => {
-        // v0.25.53 — empowered cookie fires a 3-shot mspore spread.
-        if (m._empoweredSpread) {
-          fireMonsterProjectile(m, -0.40);
-          fireMonsterProjectile(m,  0.00);
-          fireMonsterProjectile(m,  0.40);
-        } else if (m.traits && m.traits.volleyShot && m.traits.volleyShot > 1) {
-          // v0.25.991 — `volleyShot` trait fires an N-arrow spread on
-          // every shoot tick (e.g. spectreCannoneer's triple shadow
-          // volley, vigil_vermillion's three-arrow burst). Spread fans
-          // ±0.18 rad per outer shot, centered on the standard aim,
-          // so a 3-shot reads as a clean fan and a 5-shot reads as a
-          // wider barrage. Trait was declared on existing mob defs
-          // since v0.25.x but never wired into the engine — fixed here.
-          const _n = m.traits.volleyShot | 0;
-          const _step = 0.18;                              // radian-ish offset per outer shot
-          const _half = (_n - 1) / 2;
-          for (let _vi = 0; _vi < _n; _vi++) {
-            fireMonsterProjectile(m, (_vi - _half) * _step);
-          }
-        } else {
-          fireMonsterProjectile(m);
-        }
-      };
       // v0.26.x — Attack-animation WIND-UP before throwing a projectile (per
       // user). A mob with decoded attack frames now plays its attack animation
       // first: the shoot tick starts a short wind-up that drives m.atkAnimUntil
@@ -78058,21 +78059,10 @@ function updateMonsters(dt) {
     // and use SQUARED distance compares (no Math.hypot) inside the
     // loop — saves ~300 hypot calls/frame on a Beastmaster with a
     // full pack and 50 mobs nearby.
-    let _tgtX = player.x + player.w/2;
-    let _tgtY = player.y + player.h/2;
+    let _tgtX = _playerCx;
+    let _tgtY = _playerCy;
     let _tgtRef = player;
-    const _hasPet = !!(player.pet && player.pet.hp > 0);
-    const _hasUlt = !!(player.ultPet && player.ultPet.hp > 0);   // v0.26.x — B-ult summon draws aggro too
-    const _hasPack = !!(player.pack && player.pack.length);
-    // v0.26.x - Per user "make monsters move towards and attack the summoned
-    // creatures also". Undead minions (warlock/necromancer) now draw aggro like wolves.
-    const _hasMinions = !!(game.minions && game.minions.length);
-    // v0.29.362 — Mirror Step decoy joins the ally-target pool. Dropped at
-    // the dash origin (where this monster was already heading), no 60px
-    // player bias, so it wins the closest-target compare exactly when the
-    // player dashed AWAY from the pack — the taunt promise. Expiry is
-    // handled in _updateDashTrail; the null check here sees it vanish.
-    const _hasDecoy = !!(game._mirrorDecoy && (game._mirrorDecoy.until | 0) > (game.time | 0));
+    // (_has* ally flags hoisted to frame top — v0.30.283 perf)
     if (!m.isBoss && (_hasPet || _hasPack || _hasUlt || _hasMinions || _aggroPeers || _hasDecoy)) {
       const _mcx = m.x + m.w/2, _mcy = m.y + m.h/2;
       // Player score: squared distance with a 60 px subtracted-distance
@@ -78092,30 +78082,40 @@ function updateMonsters(dt) {
       let _playerEff = Math.sqrt(_bestSq) - 60;
       if (_playerEff < 0) _playerEff = 0;
       _bestSq = _playerEff * _playerEff;
-      const _consider = (cx, cy, ref) => {
-        const dx = cx - _mcx, dy = cy - _mcy;
-        const sq = dx * dx + dy * dy;
-        if (sq < _bestSq) { _bestSq = sq; _tgtX = cx; _tgtY = cy; _tgtRef = ref; }
-      };
+      // v0.30.283 perf — _consider closure inlined at its six call sites: the
+      // closure captured per-mob state, so it re-allocated for every non-boss
+      // mob every frame the roster gate passed. Arithmetic is verbatim.
       if (_hasDecoy) {
         const _dc = game._mirrorDecoy;
-        _consider(_dc.x + _dc.w / 2, _dc.y + _dc.h / 2, _dc);
+        const _acx = _dc.x + _dc.w / 2, _acy = _dc.y + _dc.h / 2;
+        const _adx = _acx - _mcx, _ady = _acy - _mcy, _asq = _adx * _adx + _ady * _ady;
+        if (_asq < _bestSq) { _bestSq = _asq; _tgtX = _acx; _tgtY = _acy; _tgtRef = _dc; }
       }
       if (_hasPet) {
-        _consider(player.pet.x + 20, player.pet.y + 18, player.pet);
+        const _acx = player.pet.x + 20, _acy = player.pet.y + 18;
+        const _adx = _acx - _mcx, _ady = _acy - _mcy, _asq = _adx * _adx + _ady * _ady;
+        if (_asq < _bestSq) { _bestSq = _asq; _tgtX = _acx; _tgtY = _acy; _tgtRef = player.pet; }
       }
       if (_hasUlt) {
-        _consider(player.ultPet.x + 20, player.ultPet.y + 18, player.ultPet);
+        const _acx = player.ultPet.x + 20, _acy = player.ultPet.y + 18;
+        const _adx = _acx - _mcx, _ady = _acy - _mcy, _asq = _adx * _adx + _ady * _ady;
+        if (_asq < _bestSq) { _bestSq = _asq; _tgtX = _acx; _tgtY = _acy; _tgtRef = player.ultPet; }
       }
       if (_hasPack) {
         for (const w of player.pack) {
-          if (w && w.hp > 0) _consider(w.x + 20, w.y + 18, w);
+          if (w && w.hp > 0) {
+            const _acx = w.x + 20, _acy = w.y + 18;
+            const _adx = _acx - _mcx, _ady = _acy - _mcy, _asq = _adx * _adx + _ady * _ady;
+            if (_asq < _bestSq) { _bestSq = _asq; _tgtX = _acx; _tgtY = _acy; _tgtRef = w; }
+          }
         }
       }
       if (_hasMinions) {
         for (const mn of game.minions) {
           if (mn && (mn.spawn || 0) <= 0 && (mn.currentHp == null || mn.currentHp > 0)) {
-            _consider(mn.x + mn.w/2, mn.y + mn.h/2, mn);
+            const _acx = mn.x + mn.w/2, _acy = mn.y + mn.h/2;
+            const _adx = _acx - _mcx, _ady = _acy - _mcy, _asq = _adx * _adx + _ady * _ady;
+            if (_asq < _bestSq) { _bestSq = _asq; _tgtX = _acx; _tgtY = _acy; _tgtRef = mn; }
           }
         }
       }
@@ -78123,7 +78123,11 @@ function updateMonsters(dt) {
       // like pets), so mobs chase whichever player is actually closest —
       // the guest stops being invisible to the host-simulated world.
       if (_aggroPeers) {
-        for (const _q of _aggroPeers) _consider(_q.x + 14, _q.y + 22, _q);
+        for (const _q of _aggroPeers) {
+          const _acx = _q.x + 14, _acy = _q.y + 22;
+          const _adx = _acx - _mcx, _ady = _acy - _mcy, _asq = _adx * _adx + _ady * _ady;
+          if (_asq < _bestSq) { _bestSq = _asq; _tgtX = _acx; _tgtY = _acy; _tgtRef = _q; }
+        }
       }
     }
     const distToPlayer = Math.abs(_tgtX - (m.x + m.w/2));
@@ -89496,7 +89500,11 @@ function updateProjectiles(dt) {
       // v0.26.217 — Iterate pre-filtered _liveMobs (built once at top of
       // updateProjectiles). Saves the per-projectile dead-mob skip cost.
       const hitIds = p._hitIds = p._hitIds || new Set();
-      for (const m of _liveMobs) {
+      // v0.30.283 perf — _boltSpent depends only on the projectile's own fade
+      // (nothing in this loop writes its inputs), so one check gates the
+      // whole pair loop. A faded bolt is smoke: it connects with nothing
+      // and cannot consume a pierce charge on the way past.
+      if (!_boltSpent(p)) for (const m of _liveMobs) {
         // v0.29.477 (perf-pass) — geometric reject FIRST. This loop runs for
         // every (player projectile × live mob) pair every frame; at 40×40
         // that was ~1,600 object-keyed Set lookups/frame spent on pairs the
@@ -89504,10 +89512,6 @@ function updateProjectiles(dt) {
         // free predicates (the _atkMonBoxCached memo write is idempotent and
         // frame-keyed), so the reorder is behavior-identical.
         if (m.currentHp <= 0 || m._dying) continue;   // v0.26.1027 — _liveMobs is a once-built snapshot; skip an intra-frame corpse so a non-piercing shot isn't consumed by it
-        // v0.29.x — a bolt that has faded out is smoke: it connects with
-        // nothing. Checked before the aabb so a spent bolt is not merely
-        // harmless but cannot consume a pierce charge on the way past either.
-        if (_boltSpent(p)) break;
         if (!aabb(p, _atkMonBoxCached(m))) continue;
         if (hitIds.has(m)) continue;
         {
