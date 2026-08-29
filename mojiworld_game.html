@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.288';
+const GAME_VERSION = 'v0.30.289';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -26634,11 +26634,28 @@ const MAPS = {
     // on a plain jump and 112 px spending the air jump, so a 20-80 px band
     // leaves headroom on every floor while still asking for a real jump.
     const SP_GAP_MIN = 20;
-    const SP_GAP_MAX = 55;   // v0.30.281 — was 80, sized for the air jump (112px reach) the one-jump rule removes; 55 sits inside the measured 62px plain-jump reach
+    // v0.30.x - the crossing budget now has to survive DRIFT, not just spawn.
+    // Two consecutive floors sliding out of phase open a gap WIDER than the one
+    // they were built with, so a budget checked only at generation time would be
+    // a lie the moment the tower started moving. The budget is cut by the
+    // worst-case neighbour differential the drift below can produce -
+    // 2*AMP*sin(DPHASE/2), about 8 px - so 46 + 8 lands back on the 55 that was
+    // measured safe against the 62 px plain-jump reach.
+    const SP_GAP_MAX = 46;
+    // v0.30.x - per user "make the platforms drift horizontally left and right".
+    // AMP is RESERVED out of the placement band below rather than clamped at the
+    // wall: a platform pinned to the edge would stop while its neighbour kept
+    // travelling, and that phase break is exactly what the gap budget cannot
+    // absorb. DPHASE is deliberately small so neighbours move almost together -
+    // a slow wave up the tower - because it is the NEIGHBOUR DIFFERENTIAL, not
+    // the amplitude, that a jump has to pay for. 36 px of sway costs 8 px of gap.
+    const SP_DRIFT_AMP = 36;
+    const SP_DRIFT_DPHASE = 0.22;
     let _spSeed = 0x6c6b78a1;
     // v0.29.849 — current step direction for the bounded stepper below.
     // Flips every 2 floors, and on a wall bounce.
     let _spDir = 1;
+    let _spFlipIn = 2;   // v0.30.x - floors remaining before the side flips
     const _spRand = () => {
       _spSeed = (_spSeed + 0x6d2b79f5) | 0;
       let t = _spSeed;
@@ -26661,9 +26678,17 @@ const MAPS = {
       // the bottom is a touch harder, the middle relaxes, and the top
       // tightens again (but to 120, not the old precision-parkour 50).
       const _midF = (SP_NUM_FLOORS - 1) / 2;
-      const w = (i <= _midF)
-        ? Math.round(150 + (240 - 150) * (i / _midF))
-        : Math.round(240 - (240 - 120) * ((i - _midF) / (SP_NUM_FLOORS - 1 - _midF)));
+      // v0.30.x - per user "make the platforms appear slightly randomised".
+      // The arch profile was exact, so every floor width was predictable from
+      // its index. A bounded jitter breaks that read without touching
+      // reachability: width is not part of the crossing budget - the stepper
+      // below measures the gap EDGE TO EDGE, so a narrower shelf moves the next
+      // floor in with it rather than stretching the jump.
+      const w = Math.max(110, Math.min(250, Math.round(
+        ((i <= _midF)
+          ? 150 + (240 - 150) * (i / _midF)
+          : 240 - (240 - 120) * ((i - _midF) / (SP_NUM_FLOORS - 1 - _midF)))
+        + (_spRand() * 2 - 1) * 16)));
       // v0.29.849 — BOUNDED STEP (was: sideBias 0.00-0.35 / 0.65-1.00
       // wall-to-wall placement + a corrective clamp). Placing each floor
       // independently and snapping the unreachable ones back left the climb
@@ -26677,7 +26702,11 @@ const MAPS = {
       // Reachability is therefore structural, not corrective: no crossing can
       // exceed the budget in the first place. Measured against the previous
       // build: gap sd 44 -> 18, centre-step sd 115 -> 33, max gap 100 -> 79.
-      const xMax = SP_WORLD_W - w - 40;
+      // v0.30.x - the band is inset by SP_DRIFT_AMP on BOTH sides so the full
+      // sway stays inside the world and no platform ever has to be clamped
+      // mid-drift. Everything below reads _xLo/_xHi instead of 40/xMax.
+      const _xLo = 40 + SP_DRIFT_AMP;
+      const xMax = SP_WORLD_W - w - 40 - SP_DRIFT_AMP;
       let x;
       const _prev = platforms[platforms.length - 1];
       if (!_prev || _prev.type === 'ground') {
@@ -26688,14 +26717,24 @@ const MAPS = {
         // Bounce: if this step would leave the world, turn around and step
         // the other way by the same gap rather than clamping flat to the wall
         // (which would stack floors on top of each other at the edges).
-        if (_cand > xMax || _cand < 40) {
+        if (_cand > xMax || _cand < _xLo) {
           _spDir = -_spDir;
           _cand = (_spDir > 0) ? (_prev.x + _prev.w + _gap) : (_prev.x - _gap - w);
         }
-        x = Math.max(40, Math.min(Math.floor(_cand), xMax));
+        x = Math.max(_xLo, Math.min(Math.floor(_cand), xMax));
       }
-      if (i % 2 === 1) _spDir = -_spDir;   // flip every 2 floors, as before
-      platforms.push({ x, y, w, h: 12, type: 'platform' });
+      // v0.30.x - the side flip was every 2 floors exactly, which is most of why
+      // the climb read as a repeating zigzag. Cadence is now 2 or 3, drawn from
+      // the same seeded stream, so the rhythm varies while the stepper keeps
+      // every crossing inside the budget by construction.
+      if (--_spFlipIn <= 0) { _spDir = -_spDir; _spFlipIn = 2 + (_spRand() < 0.4 ? 1 : 0); }
+      // v0.30.x - drift bookkeeping. _driftBaseX is the authored position the
+      // sway swings around; the runtime never accumulates onto p.x, it
+      // recomputes from the base each frame so rounding cannot walk a platform
+      // off its own track over a long climb.
+      platforms.push({ x, y, w, h: 12, type: 'platform',
+        _spireFloor: platforms.length,
+        _driftBaseX: x, _driftAmp: SP_DRIFT_AMP, _driftPhase: i * SP_DRIFT_DPHASE });
     }
     // Top platform: wider summit landing where the Master Conductor's
     // ticket-machine effigy stood. Player completes the stage by
@@ -26726,7 +26765,8 @@ const MAPS = {
     const _pieceFloors = [8, 18, 28, 38];   // v0.26.374 — re-spaced for the 40-floor tower (0-indexed; skip ground at idx 0)
     const _pqChestPieces = _pieceFloors.map(fi => {
       const p = platforms[fi + 1];   // +1 to skip ground at index 0
-      return { x: p.x + p.w/2 - 18, y: p.y - 28, pieceIndex: fi };
+      // floor rides along so the spawned chest can be tied to the drifting shelf
+      return { x: p.x + p.w/2 - 18, y: p.y - 28, pieceIndex: fi, floor: fi + 1 };
     });
     // v0.26.332 — Per user "make there obstacles". Spawn 8 stationary
     // void-tear hazards at semi-random heights so the climb has real
@@ -26772,7 +26812,7 @@ const MAPS = {
       // platform they just landed on. 104 is the floor here, keeping the
       // "standing is safe, jumping through is not" rule the flat 110 had.
       const _hy = p.y - (104 + Math.floor(_spRand() * 33));
-      _spireHazards.push({ x: _hx, y: _hy, w: 100, h: 90 });
+      _spireHazards.push({ x: _hx, y: _hy, w: 100, h: 90, floor: _flr });
     }
     return {
       name: 'Clockwork Spire — Ticket Pieces',
@@ -59529,6 +59569,7 @@ function loadMap(id, entryX, entryY) {
           if (_ch) {
             _ch._pqPuzzlePiece = true;
             _ch._pqPieceIndex  = cfg.pieceIndex;
+            _ch._spireFloor    = cfg.floor;   // v0.30.x - ride the drifting platform
           }
         }
       }
@@ -59554,6 +59595,7 @@ function loadMap(id, entryX, entryY) {
             type: 'void_tear',
             x: hc.x, y: hc.y, w: hc.w, h: hc.h,
             cx: hc.x + hc.w / 2,
+            _spireFloor: hc.floor,   // v0.30.x - ride the drifting platform
             life: 60000, maxLife: 60000,
             atk: Math.max(20, Math.floor((player && player.level || 25) * 1.8)),
             _sourceLabel: 'a Spire void-tear',
@@ -89357,6 +89399,53 @@ function _boltAlpha(p) {
   return Math.max(0, Math.min(1, p.life / Math.max(1, _ml * _BOLT_FADE_FRAC)));
 }
 function _boltSpent(p) { return p.skill === 'bolt' && _boltAlpha(p) < _BOLT_HIT_ALPHA; }
+// v0.30.x - SPIRE PLATFORM DRIFT (per user: "make the platforms drift
+// horizontally left and right"). The engine had no moving-platform support at
+// all; player/platform collision reads p.x live, so simply moving p.x makes
+// landing and standing work for free - but NOT the carry. Without the block
+// below the shelf slides out from under a standing player, which reads as the
+// player being shoved rather than as the platform moving.
+//
+// Position is RECOMPUTED from _driftBaseX every frame rather than accumulated
+// onto p.x, so float error cannot walk a platform off its own track across a
+// long climb. Ground and summit are excluded (they carry no _driftAmp): the
+// summit return portal spawns at a FIXED world x, not anchored to the platform,
+// so a drifting summit would slide out from under the exit.
+function _tickSpireDrift() {
+  if (game.currentMap !== 'clockworkSpire') return;
+  const md = game.mapData;
+  if (!md || !Array.isArray(md.platforms)) return;
+  const T = (game.time || 0) * (Math.PI * 2 / 360);   // ~6 s per full sweep at 60 fps
+  const moved = Object.create(null);
+  for (const p of md.platforms) {
+    if (!p || !p._driftAmp) continue;
+    const nx = p._driftBaseX + p._driftAmp * Math.sin(T + (p._driftPhase || 0));
+    const dx = nx - p.x;
+    if (!dx) continue;
+    const oldX = p.x;
+    p.x = nx;
+    moved[p._spireFloor] = (moved[p._spireFloor] || 0) + dx;
+    // Carry anything resting on it. Tested against the platform's OLD span,
+    // because that is where the rider was standing when the frame began.
+    if (player && player.hp > 0 && player.onGround &&
+        player.x + player.w > oldX && player.x < oldX + p.w &&
+        Math.abs((player.y + player.h) - p.y) <= 3) {
+      player.x += dx;
+    }
+  }
+  // The puzzle chests and the void-tears are placed FROM platform coordinates
+  // at spawn, so they have to travel with them or the anchoring is decorative:
+  // a chest would hang in the air beside its shelf and the tears would drift
+  // back off into the empty column they were just moved out of.
+  if (Array.isArray(game.chests)) for (const c of game.chests) {
+    const d = c && c._spireFloor != null ? moved[c._spireFloor] : 0;
+    if (d) c.x += d;
+  }
+  if (Array.isArray(game.hazards)) for (const h of game.hazards) {
+    const d = h && h._spireFloor != null ? moved[h._spireFloor] : 0;
+    if (d) { h.x += d; if (h.cx != null) h.cx += d; }
+  }
+}
 function updateProjectiles(dt) {
   // v0.26.217 — Pre-filter live mobs once per frame for the per-projectile
   // collision loops below. Pre-fix every projectile iterated game.monsters
@@ -134753,6 +134842,10 @@ function loop(time) {
   }
 
   if (player.hp > 0 && !game.paused && !frozen) {
+    // Before updatePlayer: the carry adjusts player.x, and the player's own
+    // movement and collision for this frame must resolve against where the
+    // platforms actually ARE now, not where they were last frame.
+    if (typeof _tickSpireDrift === 'function') _tickSpireDrift();
     updatePlayer(dt);
     if (typeof _tickZodiacDodgeReward === 'function') _tickZodiacDodgeReward(dt);   // v0.26.x — zodiac perfect-dodge reward
     if (typeof _tickBossCourage === 'function') _tickBossCourage(dt);               // v0.26.x — low-level-boss Brave Dodge / Counter
