@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.287';
+const GAME_VERSION = 'v0.30.288';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -69034,12 +69034,19 @@ function drawMinions() {
       const _drawY = Math.round(yOff + mn.h - _targetH * _botFrac + 6 + _SUMMON_PUSH_DOWN);   // content bottom on the foot line (+6px floor nudge, +global push-down; the -13px minion lift is folded into yOff above)
       // v0.26.x — Per user: flip the sprite to face the move/walk direction
       // (undead summons are authored facing right; mirror when heading left).
+      // v0.30.288 perf — blit through the non-mutating downscale cache: the
+      // summon art is authored at 768px and was resampled into a ~72px box
+      // per minion per frame. Every geometry read above (content box, foot
+      // anchor, _srcW/_srcH) still sees the ORIGINAL sprite, so sizes and
+      // the planted feet are byte-identical; only the blit source shrinks.
+      const _mnDraw = (typeof _lxProjScaled === 'function')
+        ? _lxProjScaled(_sprite, Math.max(_targetW, _targetH) | 0) : _sprite;
       ctx.save();
       if ((mn.facing | 0) < 0) {
         ctx.translate(_drawX + _targetW, _drawY); ctx.scale(-1, 1);
-        ctx.drawImage(_sprite, 0, 0, _targetW, _targetH);
+        ctx.drawImage(_mnDraw, 0, 0, _targetW, _targetH);
       } else {
-        ctx.drawImage(_sprite, _drawX, _drawY, _targetW, _targetH);
+        ctx.drawImage(_mnDraw, _drawX, _drawY, _targetW, _targetH);
       }
       ctx.restore();
     } else if (mn.type === 'skeleton') {
@@ -135243,8 +135250,19 @@ function drawSuperBossBar() {
     // Nothing new is introduced here — the same renderer is simply pointed at
     // the tier it was always describing. A super boss still wins the slot when
     // both are alive, so a Gravitos fight is unchanged.
-    sb = game.monsters.find(m => m.superBoss && m.currentHp > 0)
-      || game.monsters.find(m => (m.isBoss || m.boss) && m.currentHp > 0 && !m._dying);
+    // v0.30.288 perf — one pass instead of two .find() scans; both used to run
+    // in FULL every frame on every boss-less map (the common case — the
+    // cached ref above only helps once a boss exists). Preference preserved
+    // exactly: the first live superBoss wins outright, else the first live
+    // (isBoss || boss) non-dying mob.
+    let _sbAny = null;
+    for (let _i = 0; _i < game.monsters.length; _i++) {
+      const _m = game.monsters[_i];
+      if (_m.currentHp <= 0) continue;
+      if (_m.superBoss) { sb = _m; break; }
+      if (!_sbAny && (_m.isBoss || _m.boss) && !_m._dying) _sbAny = _m;
+    }
+    if (!sb) sb = _sbAny;
     if (sb) game._superBossRef = sb;
   }
   if (!sb) return;
