@@ -37,7 +37,14 @@
 // abyssalTrench, worldmap_bg). That is precisely the "REPLACES a filename"
 // case above, so without this bump every returning browser keeps serving the
 // old art indefinitely - silently, because SWR serves stale first.
-const CACHE = 'mojiworld-assets-v6';
+// v0.30.311 - v6 -> v7. This week's drops REPLACED many filenames without a
+// bump: the Regulus pounce re-roll (leo_0..8), Virga's idle redraw, the
+// star-beam redraw, the Caprikor ice shot - so returning browsers served
+// stale (or MIXED stale/new) frames until a hard refresh, which is exactly
+// what the user hit. The bump is now ENFORCED at push time by
+// .claude/hooks/push-clobber-gate.js: a push that modifies existing art
+// bytes without changing this line is blocked.
+const CACHE = 'mojiworld-assets-v7';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());

@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.311';
+const GAME_VERSION = 'v0.30.312';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -120836,6 +120836,35 @@ function _gravitosOnceFrame(m, key) {
   const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / _dur));
   return frames[Math.min(n - 1, Math.floor(t * n))];
 }
+// v0.30.312 — CONTACT-MELEE PLAYBACK (per user: "gravitos seem to run the
+// attack sprite consecutively too quickly ... hold these frames longer").
+// Grinding against the player keeps patternState at 'idle' while the
+// atkAnimUntil window re-stamps on every touch, and that path was the last
+// gravitos route on the generic 48 ms loop (~432 ms per nine-frame cycle,
+// back to back). This loop is WEIGHTED: base 130 ms per frame, with the
+// strike frames the user pointed at — the arms-spread impact and the two
+// fist-thrusts (indices 5-7) — dwelling 2.2-2.6x longer, and the recovery
+// (8) a touch longer. One cycle lands at ~1.8 s and reads as deliberate
+// blows instead of a flip-book.
+const _GRAV_ATK_FRAME_MS = 130;
+const _GRAV_ATK_WEIGHTS = [1, 1, 1, 1, 1, 2.2, 2.6, 2.6, 1.4];
+function _gravitosContactFrame(m, key) {
+  const frames = BOSS_ATTACK_FRAMES[key];
+  if (!frames) return null;
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);
+  let n = frames._readyN || 0;
+  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
+  frames._readyN = n;
+  if (n === 0) return null;
+  if (n === 1) return frames[0];
+  let _total = 0;
+  for (let i = 0; i < n; i++) _total += (_GRAV_ATK_WEIGHTS[i] || 1);
+  const _now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const _off = _bossAnimPhase(frames, m, 'attack', false) || 0;
+  let _t = (Math.max(0, _now + _off) / _GRAV_ATK_FRAME_MS) % _total;
+  for (let i = 0; i < n; i++) { _t -= (_GRAV_ATK_WEIGHTS[i] || 1); if (_t < 0) return frames[i]; }
+  return frames[n - 1];
+}
 // === BOSS IDLE ANIMATION (v0.26.314) === optional 4-frame gentle idle loop per
 // boss, from Sprites/bosses/idle/<type>_0..3.webp. Played (slower than the
 // attack) while the boss is NOT attacking; falls back to the static idle sprite
@@ -123806,6 +123835,7 @@ function drawMonster(m) {
        || (/astral$/.test(_spriteKey) && _aetherionAstralFrame(m))   // v0.30.x - burst timed to the resolve
        || (/stomp$/.test(_spriteKey) && _krookStompFrame(m))   // v0.30.236 — once-through, lands on the slam
        || (m.type === 'gravitos' && m.patternState && m.patternState !== 'idle' && _gravitosOnceFrame(m, _spriteKey))   // v0.30.309 — no looping sets on Gravitos
+       || (m.type === 'gravitos' && _gravitosContactFrame(m, _spriteKey))   // v0.30.312 — weighted strike-holds for contact melee (the last 48 ms path)
        || _bossAttackFrame(_spriteKey, m) || BOSS_ATTACK_SPRITES[_spriteKey])
     : null;
   const _bodyKey = m._phaseSprite || m.type;   // v0.29.x — walk/idle sets are keyed by the BODY, never by an attack override
@@ -138074,6 +138104,31 @@ try {
     }
   } else if ('serviceWorker' in navigator &&
       (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+    // v0.30.312 — MID-SESSION SPRITE STALENESS (per user: "the bug of not
+    // loading the sprites properly"). When an UPDATED sw.js (new cache
+    // generation, e.g. after an art drop) takes control during boot,
+    // everything fetched before the takeover came from the old generation
+    // and everything after comes fresh — one animation can mix old and new
+    // frames for the whole session. While the loading overlay is still up a
+    // single reload is invisible and lands the entire session on the new
+    // generation; after boot we let the session finish and the next visit
+    // is clean. Update-only (a first install has no prior controller) and
+    // one-shot per tab via sessionStorage, so it can never loop.
+    const _lxHadSw = !!navigator.serviceWorker.controller;
+    window._lxSwReloadArmed = true;
+    try {
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        try {
+          if (!_lxHadSw) return;                                   // first install, nothing stale
+          if (sessionStorage.getItem('_lxSwReloaded')) return;     // one-shot
+          const _ov = document.getElementById('loading-overlay');
+          const _booting = _ov && _ov.style.display !== 'none' && !window._lxBootGateDone;
+          if (!_booting) return;                                   // mid-play: never yank the player
+          sessionStorage.setItem('_lxSwReloaded', '1');
+          location.reload();
+        } catch (e) {}
+      });
+    } catch (e) {}
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 } catch (e) {}
