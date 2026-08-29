@@ -10007,7 +10007,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.275';
+const GAME_VERSION = 'v0.30.276';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -49146,6 +49146,7 @@ function tickQuestUnlocks() {
     }
   }
   _lxRepairMirrorQuests();   // v0.30.x — unstick Mirror quests stranded behind the sealed Inner Dimension
+  _lxRepairDynamicTargets(); // v0.30.276 — clamp curve-inflated Express targets (500 -> the authored 99 ceiling)
   for (const id in QUESTS) {
     const q = QUESTS[id];
     if (player.quests.unlocked[id] || player.quests.completed[id]) continue;
@@ -49341,6 +49342,36 @@ function _npcQuestMarker(npc) {
 // sealed and the kill has already happened. Credit what was earned and route
 // it to its hand-in, so Auron still pays in person. Runs on the unlock tick,
 // which fires on boot and on every level-up.
+// v0.30.276 — REPAIR PASS for dynamic-count targets inflated past their roll
+// ceiling. q_clockwork_express rolls its per-accept target inside
+// dynamicCountRange (45-99), but a save that accepted it before the
+// hunt-curve exemptions carries a curve-retargeted 500 — and the abandon-bank
+// restores that number on every re-accept, forever. Seen live (tester video):
+// a 500-kill Express run at 450/500 whose active quest also hijacked Milo's
+// town dialog (fixed in the same version), reading as "the PQ can't continue
+// until I finish this quest". Clamp DOWN to the authored ceiling only, never
+// up — v0.28.12 raised the floor, and an old min-roll must keep the smaller
+// ask it was accepted at. If the clamp reveals the run is already earned
+// (progress >= the real ceiling), complete it on the spot: the player did the
+// work several times over. Safe against the _completeQuest -> tickQuestUnlocks
+// re-entry because completion deletes the active entry before it re-ticks.
+function _lxRepairDynamicTargets() {
+  try {
+    if (typeof QUESTS !== 'object' || !player || !player.quests) return;
+    for (const id in QUESTS) {
+      const q = QUESTS[id];
+      if (!q || !Array.isArray(q.dynamicCountRange) || q.dynamicCountRange.length !== 2) continue;
+      const hi = q.dynamicCountRange[1];
+      const a = player.quests.active && player.quests.active[id];
+      if (a && a.targetCount != null && a.targetCount > hi) {
+        a.targetCount = hi;
+        if ((a.progress || 0) >= hi && typeof _completeQuest === 'function') _completeQuest(id);
+      }
+      const b = player._qBank && player._qBank[id];
+      if (b && b.targetCount != null && b.targetCount > hi) b.targetCount = hi;
+    }
+  } catch (e) {}
+}
 function _lxRepairMirrorQuests() {
   try {
     if (typeof QUESTS !== 'object' || !player || !player.quests) return;
@@ -93289,6 +93320,19 @@ So.. do you need a lift?`;
           if (typeof loadMap === 'function') loadMap('clockworkExpress', 100);
         }});
       }
+      // v0.30.276 — two dead-ends healed. (1) With an Express run open, no
+      // in-PQ-map branch mentioned it — from the lobby/spire/tower the run
+      // was unreachable (its map is Milo-dialog-only). (2) With all four
+      // stages done, this dialog offered ONLY the ride home (tester video) —
+      // the "Run again" reset lived exclusively town-side, behind the very
+      // dialog the Express hijack made unreachable.
+      const _exA2 = player.quests && player.quests.active && player.quests.active.q_clockwork_express;
+      if (_exA2 && game.currentMap !== 'clockworkExpress') {
+        opts.push({ t:'🚄 Continue the Endless Express run', cb:() => { closeDialog(); if (typeof loadMap === 'function') loadMap('clockworkExpress', 100); } });
+      }
+      if (_pqDoneQ('q_pq_finale')) {
+        opts.push({ t:'🎫 Run the Ticket Rush again ✦', cb:() => { if (typeof _lxPqRestartChain === 'function') _lxPqRestartChain(); } });
+      }
       // Always offer the ride home + close.
       opts.push({ t:'🏛 Ride back to Everdawn Central', cb:() => {
         closeDialog();
@@ -93319,7 +93363,6 @@ So.. do you need a lift?`;
       (player.quests.active.q_clockwork_underpass ||
        player.quests.active.q_pq_spire ||
        player.quests.active.q_pq_carriage ||
-       player.quests.active.q_clockwork_express ||
        player.quests.active.q_pq_finale));
     if (_pqActiveOnEnter && typeof loadMap === 'function') {
       let _autoMap = null;
@@ -93340,10 +93383,19 @@ So.. do you need a lift?`;
       } else if (player.quests.active.q_pq_carriage) {
         _autoMap = 'tower';
         _autoX = 380;
-      } else if (player.quests.active.q_clockwork_express) {
-        _autoMap = 'clockworkExpress';
-        _autoX = 100;
       } else if (player.quests.active.q_pq_finale) {
+        // v0.30.276 — q_clockwork_express REMOVED from this router (it sat right
+        // here, above the finale). The Express is the OPTIONAL repeatable
+        // side-run, not a stage — but the auto-warp ranked it as one, so a
+        // player with an Express run open could never reach Milo's dialog at
+        // all: town Milo warped them straight into the Express, and the
+        // Express-side dialog offers no stage options. Every PQ path — stage
+        // offers, "Run again", the Stage-1 reset — was unreachable until the
+        // side-run was finished or abandoned (tester video: "I need to finish
+        // a quest first before the PQ can continue", staring down a 500-kill
+        // target the repair pass above now clamps). The run stays reachable
+        // through an explicit dialog option instead; the four chain stages
+        // keep their auto-warp, which was the v0.26.087 request.
         _autoMap = 'clockworkExpress';
         _autoX = 100;
         // Mark a pending boss spawn so loadMap can drop the Conductor
@@ -93491,6 +93543,18 @@ So.. do you need a lift?`;
         text = '*Milo squints at his clipboard, flips a page, flips it back.*\n\nHmm — your record isn\'t in my logbook. Maybe try checking your quest journal (J key)? If the Clockwork Underpass entry isn\'t there, blame the filing clerks. Sorry, friend — my first month and already the system\'s testing me.';
       }
     }
+    // v0.30.276 — the Express hijack's replacement: an explicit option, offered
+    // alongside whatever stage/restart options the branches above built. The
+    // Express map has no walk-in portals (v0.26.306 severed them), so without
+    // this the router removal would have stranded an open run entirely.
+    try {
+      const _exA = player.quests && player.quests.active && player.quests.active.q_clockwork_express;
+      if (_exA) {
+        const _exT = (_exA.targetCount != null) ? _exA.targetCount : ((QUESTS.q_clockwork_express && QUESTS.q_clockwork_express.count) || 99);
+        const _exLeft = Math.max(0, _exT - (_exA.progress || 0));
+        opts.push({ t:'🚄 Continue the Endless Express run (' + _exLeft + ' left)', cb:() => { closeDialog(); if (typeof loadMap === 'function') loadMap('clockworkExpress', 100); } });
+      }
+    } catch (e) {}
     }  // v0.26.114 — close `else {` opened at the top of the usher branch
        // (wraps every town-side quest-state code path; in-PQ-map case
        // skipped all of this and fell straight to the dialog render).
