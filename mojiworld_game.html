@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.285';
+const GAME_VERSION = 'v0.30.286';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -26743,10 +26743,36 @@ const MAPS = {
       const _flr = _hazardFloors[h];
       const p = platforms[_flr];
       if (!p) continue;
-      // Bias toward the OPPOSITE side of the platform so the player
-      // jumping from neighbour platform passes through the hazard band.
-      const _hx = (p.x < SP_WORLD_W / 2) ? (SP_WORLD_W - 220) : 60;
-      _spireHazards.push({ x: _hx, y: p.y - 110, w: 100, h: 90 });
+      // v0.30.x - per user: "the rifts are in all the same vertical line,
+      // randomise their placements near the platforms". They were, exactly:
+      // all eight baked to x=500. The old line read
+      //   const _hx = (p.x < SP_WORLD_W / 2) ? (SP_WORLD_W - 220) : 60;
+      // which compares the platform LEFT EDGE against the world centre (360).
+      // Every hazard-floor platform is wide and roughly centred - measured left
+      // edges 272, 250, 212, 175, 154, 167, 187, 189 - so the test is true every
+      // time and the ternary never once takes its other branch. Two candidate
+      // positions on paper, one in practice. x=500..600 is not near anything
+      // either: those platforms span 154..390, so the tears hung in empty air
+      // off to the right, which makes the old comment about biasing to the
+      // centreline where the player lands untrue as well.
+      //
+      // Anchored to the platform now, and drawn from _spRand rather than
+      // Math.random: the Spire is an authored PQ layout, so the climb has to be
+      // the same climb on every entry. Safe to draw here - this loop runs after
+      // platform generation has finished, so consuming the stream cannot shift
+      // the ladder itself.
+      // The span runs from hanging off the left end of the platform to hanging
+      // off the right, so a tear can sit over the landing, over the take-off, or
+      // in the gap between - all in the path, none of them in a column.
+      const _hx = Math.max(16, Math.min(SP_WORLD_W - 116,
+        Math.round(p.x - 70 + _spRand() * (p.w + 40))));
+      // Height jitter too, but bounded. The band test damages a player whose
+      // FEET sit between h.y and h.y + h.h + 10, so at h = 90 an offset below
+      // 100 would start ticking damage on someone simply standing on the
+      // platform they just landed on. 104 is the floor here, keeping the
+      // "standing is safe, jumping through is not" rule the flat 110 had.
+      const _hy = p.y - (104 + Math.floor(_spRand() * 33));
+      _spireHazards.push({ x: _hx, y: _hy, w: 100, h: 90 });
     }
     return {
       name: 'Clockwork Spire — Ticket Pieces',
@@ -64116,6 +64142,13 @@ function updatePlayer(dt) {
   if (player.mods && player.mods.dashBlink > 0 && (player._blinkPhaseUntil | 0) > (game.time | 0)) {
     _hCap = Math.max(_hCap, _hCap * (1 + player.mods.dashBlink));
   }
+  // v0.30.x - RIFT SURGE exemption. A Spire void-tear shove is meant to throw
+  // the player off the ledge, which the normal cap of 10 quietly prevented:
+  // every surge velocity above 10 was clipped back the same frame, so the shove
+  // was the same shove no matter what number it was given. Same shape as the
+  // Blossom Dash and launch-pad exemptions above, and time-scoped so it lapses
+  // by itself ~0.7 s after the hit.
+  if ((player._riftSurgeUntil | 0) > (game.time | 0)) _hCap = Math.max(_hCap, 18);
   if (player.vx >  _hCap) player.vx =  _hCap;
   if (player.vx < -_hCap) player.vx = -_hCap;
   if (player.vy < -_jCap) player.vy = -_jCap;
@@ -90774,9 +90807,18 @@ function updateProjectiles(dt) {
             // a small pop, enough to carry a player off a narrow floor.
             if (h._sourceLabel === 'a Spire void-tear' && Math.random() < 0.35) {
               const _kdir = ((player.x + player.w / 2) >= h.cx) ? 1 : -1;
-              player.vx = _kdir * (7 + Math.random() * 4);
-              player.vy = Math.min(player.vy || 0, -3.5);
-              if (typeof addShake === 'function') addShake(4);
+              // v0.30.x - per user "make them have a larger knockback".
+              // Raising vx here is NOT enough on its own and the file already
+              // says so twice: PLAYER_SPEED_HARD_CAP (10) is applied immediately
+              // before x += vx, so it is the true governor. Measured before
+              // adding the exemption below - vx 12, 15, 18 and 22 all landed the
+              // player at the same spot, peak speed pinned at exactly 10.0.
+              // Hence _riftSurgeUntil, scoped like Blossom Dash and the pad
+              // launch so it expires on its own and cannot leak into running.
+              player._riftSurgeUntil = game.time + 40;
+              player.vx = _kdir * (12 + Math.random() * 6);
+              player.vy = Math.min(player.vy || 0, -6.5);
+              if (typeof addShake === 'function') addShake(7);
               if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 10, y: player.y - 12, vy: -2, text: 'RIFT SURGE!', life: 34, color: '#cc66ff', size: 12 });
             }
             player._lastDamageSource = h._sourceLabel || "Aetherion's void tear";
