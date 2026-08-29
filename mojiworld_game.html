@@ -10007,7 +10007,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.277';
+const GAME_VERSION = 'v0.30.278';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10450,7 +10450,8 @@ try { if (_lxRendererIsSoftware()) _lxSetNoBackdrop('software renderer'); } catc
 // not mistaken for sustained overload.
 let _lxRealDtMs = 16.7;   // v0.30.264 — real wall dt, written by the loop gate
 const LX_DRS = {
-  floor: 1.0,
+  floor: 1.0,          // mobile floor — desktop resolves via _lxDrsFloorNow() (v0.30.278)
+  floorDesktop: 0.75,  // v0.30.278 — one rung below native: 44% fewer pixels, the last resort after veryLowFx
   downAvg: 22, downSlow: 10, downCooldownMs: 5000,
   upAvg: 13, upHoldMs: 20000, upCooldownMs: 20000,
   lastChange: 0, healthySince: 0, graceUntil: 0, active: false, _map: null,
@@ -10461,10 +10462,18 @@ function _lxDrsEnabled() {
   try { if (localStorage.getItem('lx_drs') === 'off') return false; } catch (e) {}
   return true;
 }
+function _lxDrsFloorNow() {
+  return (typeof _IS_MOBILE_AT_LOAD !== 'undefined' && _IS_MOBILE_AT_LOAD) ? LX_DRS.floor : LX_DRS.floorDesktop;
+}
 function _lxDrsTick(frame, time) {
   if (!_lxDrsEnabled()) return;
   const ceil = _lxTargetDpr();
-  if (ceil <= 1.01) return;                          // nothing to trade at scale 1
+  // v0.30.278 — the effective floor. Desktop may go BELOW native scale as a
+  // true last resort (the down-step still requires veryLowFx + sustained
+  // >22ms frames first); mobile keeps 1.0 by construction. Resolved here,
+  // not in the initializer: _IS_MOBILE_AT_LOAD declares later in the file.
+  const _floorNow = _lxDrsFloorNow();
+  if (ceil <= 1.01 && _floorNow >= 0.99) return;   // nothing to trade at scale 1 (mobile)
   if (typeof game !== 'undefined' && game && game.currentMap !== LX_DRS._map) {
     LX_DRS._map = game.currentMap;
     LX_DRS.graceUntil = time + 4000;                 // a map-load hitch is not overload
@@ -10473,12 +10482,12 @@ function _lxDrsTick(frame, time) {
   if (time < LX_DRS.graceUntil) return;
   const cur = _LX_DPR;
   // DOWN — only after the FX tiers already failed.
-  if (cur > LX_DRS.floor + 0.01
+  if (cur > _floorNow + 0.01
       && LX_PERF.veryLowFx
       && LX_PERF.slowFrames >= LX_DRS.downSlow
       && LX_PERF.avgFrame > LX_DRS.downAvg
       && time - LX_DRS.lastChange > LX_DRS.downCooldownMs) {
-    const next = Math.max(LX_DRS.floor, Math.round((cur - 0.25) * 4) / 4);
+    const next = Math.max(_floorNow, Math.round((cur - 0.25) * 4) / 4);
     _lxApplyRenderScale(next);
     LX_DRS.lastChange = time; LX_DRS.healthySince = 0; LX_DRS.active = true;
     if (!LX_DRS._announced && typeof showToast === 'function') {
@@ -91465,6 +91474,23 @@ function _trimVisualQueues() {
   // v0.26.1021 — death-fade monster list (drained only by age) had no count
   // cap; a 30+ kill AoE burst pinned that many full monster objects, redrawn
   // uncapped each frame. Drop the oldest (furthest into fade) beyond 24.
+  // v0.30.278 — drop-pile cap. drops was the ONE combat queue with no cap:
+  // an 80-kill wipe leaves ~300 on the ground and a farm session grows the
+  // pile without limit, paying draw + magnet-scan cost per coin per frame.
+  // Over 240, the oldest COIN merges its value into the next-oldest coin —
+  // the total the player earned is preserved exactly; items, potions and
+  // boss walk-over loot are never touched.
+  if (game.drops && game.drops.length > 240) {
+    for (let _di = 0; _di < game.drops.length - 1 && game.drops.length > 240; ) {
+      const _da = game.drops[_di];
+      if (!_da || _da.type !== 'mojicoin') { _di++; continue; }
+      let _dj = _di + 1;
+      while (_dj < game.drops.length && (!game.drops[_dj] || game.drops[_dj].type !== 'mojicoin')) _dj++;
+      if (_dj >= game.drops.length) break;   // fewer than two coins left — nothing mergeable
+      game.drops[_dj].value = (game.drops[_dj].value || 0) + (_da.value || 0);
+      game.drops.splice(_di, 1);
+    }
+  }
   if (game._fadingMonsters && game._fadingMonsters.length > 24) {
     game._fadingMonsters.splice(0, game._fadingMonsters.length - 24);
   }
@@ -132279,6 +132305,11 @@ function drawDrops() {
   let _lastDropFont = '';
   for (const d of game.drops) {
     const sx = d.x - game.camera.x;
+    // v0.30.278 — off-camera drops draw nothing, like every sibling pass.
+    // Measured: 1.31ms/call at a 300-coin pile (~4.5ms on a weak machine),
+    // and drops sit in fixed piles so most of a big farm pile is off-screen
+    // the moment the player walks on.
+    if (sx < -40 || sx > W + 40) continue;
     const blink = d.life < 1600 && Math.floor(d.life / 160) % 2 === 0;
     if (blink) continue;
     if (d.type === 'mojicoin') {
