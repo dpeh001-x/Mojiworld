@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.295';
+const GAME_VERSION = 'v0.30.296';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -15832,13 +15832,23 @@ function _qnavKeyHome() {
 }
 
 function _qnavDrawKey() {
+  // v0.30.296 perf — the display writes ran EVERY frame (a CSSOM write per rAF
+  // tick, on and off alike). Gated on the last value, keyed to the element
+  // identity so a recreated node can never inherit a stale gate.
+  const _qkHide = () => {
+    if (_LX_QK.el && !(_LX_QK._dispEl === _LX_QK.el && _LX_QK._disp === 'none')) {
+      _LX_QK.el.style.display = 'none'; _LX_QK._dispEl = _LX_QK.el; _LX_QK._disp = 'none';
+    }
+  };
   const on = (typeof game !== 'undefined') && !!game.qnav;
-  if (!on) { if (_LX_QK.el) _LX_QK.el.style.display = 'none'; return; }
+  if (!on) { _qkHide(); return; }
   const d = _qnavLiveDest();
-  if (!d) { if (_LX_QK.el) _LX_QK.el.style.display = 'none'; return; }
+  if (!d) { _qkHide(); return; }
 
   const el = _qnavKeyEnsure();
-  el.style.display = 'flex';
+  if (!(_LX_QK._dispEl === el && _LX_QK._disp === 'flex')) {
+    el.style.display = 'flex'; _LX_QK._dispEl = el; _LX_QK._disp = 'flex';
+  }
   if (!_LX_QK.placed || !el.style.left) _qnavKeyHome();
 
   const mob = (typeof monsterTypes !== 'undefined' && monsterTypes[d.who] && monsterTypes[d.who].name) || d.who;
@@ -109693,6 +109703,10 @@ function drawAmbient() {
   if (!lowFx && _hasGlow) {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
+    // v0.30.296 perf — constant-argument stamps hoisted out of the loop; the
+    // per-call key concat + Map hash ran per glow particle per frame.
+    const _emberG = LX_FX_SOFT ? _fxStamp('glow', '#ff8028', 12) : null;
+    const _fdDot = LX_FX_SOFT ? _fxStamp('dot', '#fffac8', 5) : null;
     for (const p of game.ambient) {
       // v0.26.240 — firefly_dense joins the glow pass with a brighter, wider
     // halo + tighter pulse. Render cost is one extra fillRect per particle,
@@ -109707,7 +109721,7 @@ function drawAmbient() {
         // FX STAMP FACTORY note). Alpha multiplied, not set: pass 1 already
         // stamped the life fade into globalAlpha, and the next particle
         // re-sets it, so no restore is needed.
-        if (LX_FX_SOFT) { ctx.globalAlpha *= 0.55; ctx.drawImage(_fxStamp('glow', '#ff8028', 12), sx - 6, p.y - 6, 12, 12); }
+        if (LX_FX_SOFT) { ctx.globalAlpha *= 0.55; ctx.drawImage(_emberG, sx - 6, p.y - 6, 12, 12); }
         else { ctx.fillStyle = 'rgba(255,128,40,0.35)'; ctx.fillRect(sx - 2, p.y - 2, 5, 5); }
       } else if (p.type === 'firefly') {
         const pul = 0.5 + Math.sin(p.pulse) * 0.5;
@@ -109724,7 +109738,7 @@ function drawAmbient() {
           ctx.globalAlpha *= 0.70;
           const _d = 2 * Math.round(r);
           ctx.drawImage(_fxStamp('glow', '#ffeea0', _d), sx - r, p.y - r, r * 2, r * 2);
-          if (pul > 0.85) ctx.drawImage(_fxStamp('dot', '#fffac8', 5), sx - 2.5, p.y - 2.5, 5, 5);
+          if (pul > 0.85) ctx.drawImage(_fdDot, sx - 2.5, p.y - 2.5, 5, 5);
         } else {
           ctx.fillStyle = 'rgba(255,238,160,0.50)';
           ctx.fillRect(sx - r, p.y - r, r * 2, r * 2);
@@ -109734,7 +109748,7 @@ function drawAmbient() {
           }
         }
       } else /* wisp */ {
-        if (LX_FX_SOFT) { ctx.globalAlpha *= 0.50; ctx.drawImage(_fxStamp('glow', p.color, 12), sx - 6, p.y - 6, 12, 12); }
+        if (LX_FX_SOFT) { ctx.globalAlpha *= 0.50; ctx.drawImage(p._sg12 || (p._sg12 = _fxStamp('glow', p.color, 12)), sx - 6, p.y - 6, 12, 12); }   // v0.30.296 perf — p.color is stable for the particle's life
         else { ctx.fillStyle = p.color + '55'; ctx.fillRect(sx - 4, p.y - 4, 9, 9); }
       }
     }
@@ -109804,14 +109818,14 @@ function drawAmbient() {
     } else if (p.type === 'firefly_dense') {
       // v0.26.240 — Crisp core for firefly_dense (halo lives in pass 1).
       // v0.29.417 — 3 px reads as a square at DPR; round dot instead.
-      if (LX_FX_SOFT) ctx.drawImage(_fxStamp('dot', p.color, 4), sx - 2, p.y - 2, 4, 4);
+      if (LX_FX_SOFT) ctx.drawImage(p._sd4 || (p._sd4 = _fxStamp('dot', p.color, 4)), sx - 2, p.y - 2, 4, 4);   // v0.30.296 perf
       else ctx.fillRect(sx, p.y, 3, 3);
     } else if (p.type === 'wisp') {
       // Crisp wisp core (halo lives in pass 1).
       const pul = 0.6 + Math.sin(p.pulse * 0.5) * 0.4;
       ctx.fillRect(sx, p.y, 2, 2);
       if (pul > 0.8) {
-        if (LX_FX_SOFT) ctx.drawImage(_fxStamp('dot', p.color, 5), sx - 2.5, p.y - 2.5, 5, 5);   // v0.29.417
+        if (LX_FX_SOFT) ctx.drawImage(p._sd5 || (p._sd5 = _fxStamp('dot', p.color, 5)), sx - 2.5, p.y - 2.5, 5, 5);   // v0.29.417   // v0.30.296 perf
         else ctx.fillRect(sx - 1, p.y - 1, 4, 4);
       }
     } else if (p.type === 'sand') {
@@ -115124,16 +115138,31 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
       // touch so the dye reads as vivid rather than washed-out.
       const _hairHue = (lookCustom && (lookCustom.hairHue | 0)) || 0;
       const _hairPrevFilter = ctx.filter;
-      if (_hairHue) {
-        if (!_hairPrevFilter || _hairPrevFilter === 'none') {
-          const _hfc = game._hairFilterCache || (game._hairFilterCache = {});
-          ctx.filter = _hfc[_hairHue] || (_hfc[_hairHue] = 'hue-rotate(' + _hairHue + 'deg) saturate(1.4)');
+      const _hairSrc = _lxFaceLayerSrc(_hairSprite);
+      if (_hairHue && (!_hairPrevFilter || _hairPrevFilter === 'none')) {
+        // v0.30.296 perf — bake the dye once per (sprite, hue) instead of a live
+        // ctx.filter on the main canvas every hero draw (the drawMonster path
+        // documents the same anti-pattern stalling the compositor once per
+        // filtered draw; this one was paid 4-5x in co-op). hue-rotate +
+        // saturate are colour-only, so the bake's alpha geometry is identical.
+        // Falls back to the live filter until the sprite decodes.
+        const _hfc = game._hairFilterCache || (game._hairFilterCache = {});
+        const _hfStr = _hfc[_hairHue] || (_hfc[_hairHue] = 'hue-rotate(' + _hairHue + 'deg) saturate(1.4)');
+        const _hairBaked = (typeof _lxTintBake === 'function') ? _lxTintBake(_hairSrc, _hfStr) : null;
+        if (_hairBaked) {
+          ctx.drawImage(_hairBaked, -58, -52, 108, 108);
         } else {
-          ctx.filter = _hairPrevFilter + ' hue-rotate(' + _hairHue + 'deg) saturate(1.4)';
+          ctx.filter = _hfStr;
+          ctx.drawImage(_hairSrc, -58, -52, 108, 108);
+          ctx.filter = _hairPrevFilter || 'none';
         }
+      } else {
+        // composed-filter case (mirror decoy ghosting) keeps the live filter:
+        // its base filter varies per frame, so a bake key would never hit.
+        if (_hairHue) ctx.filter = _hairPrevFilter + ' hue-rotate(' + _hairHue + 'deg) saturate(1.4)';
+        ctx.drawImage(_hairSrc, -58, -52, 108, 108);
+        if (_hairHue) ctx.filter = _hairPrevFilter || 'none';
       }
-      ctx.drawImage(_lxFaceLayerSrc(_hairSprite), -58, -52, 108, 108);
-      if (_hairHue) ctx.filter = _hairPrevFilter || 'none';
     }
     // v0.25.832 — Vector front-hair fallback removed (see comment at the
     // back-pass branch above). When _hairSprite hasn't decoded yet the
@@ -133612,7 +133641,7 @@ function _sbBuild() {
   };
   // Skill slots
   const kit = skillsForClass(player.cls, player.job, player.master);
-  for (const slotId of ['d','s','a','e','w','q','c','x','b']) {
+  for (const slotId of _SB_SLOT_IDS) {   // v0.30.296 perf — was a fresh array per call
     const displayKey = SLOT_TO_KEY[slotId] || slotId.toUpperCase();
     let matched = null, matchId = null;
     for (const id in kit) if (kit[id].slot === slotId) { matched = kit[id]; matchId = id; break; }
@@ -133734,6 +133763,7 @@ function _applySkillIcon(el, id, emoji) {
     if (el.textContent !== (emoji || '')) el.textContent = (emoji || '');
   }
 }
+const _SB_SLOT_IDS = ['d','s','a','e','w','q','c','x','b'];   // v0.30.296 perf
 function renderSkillBar() {
   const signature = `${player.cls}|${player.job}|${player.master}`;
   if (_sbBuiltFor !== signature) _sbBuild();
@@ -133774,26 +133804,29 @@ function renderSkillBar() {
       }
       // v0.25.35 — drive --cd-pct on the slot root for the conic-gradient
       // pie-wipe overlay (was cdEl.style.height for the old vertical bar).
-      const pctTxt = (frac * 100).toFixed(1);
-      const cdTxt = (player.blockCD / 1000).toFixed(1);
-      if (bs._cdPct !== pctTxt) {
-        bs._cdPct = pctTxt;
-        bs.root.style.setProperty('--cd-pct', pctTxt);
+      // v0.30.296 perf — integer gate BEFORE the string: the old compare built
+      // (and discarded) two toFixed strings per cooling slot per HUD tick.
+      // Rendered text is identical (both were already one decimal).
+      const pctQ = Math.round(frac * 1000);
+      const cdQ = Math.round(player.blockCD / 100);
+      if (bs._cdPctQ !== pctQ) {
+        bs._cdPctQ = pctQ;
+        bs.root.style.setProperty('--cd-pct', (pctQ / 10).toFixed(1));
       }
-      if (bs._cdTxt !== cdTxt) {
-        bs._cdTxt = cdTxt;
-        bs.cdEl.textContent = cdTxt;
+      if (bs._cdTxtQ !== cdQ) {
+        bs._cdTxtQ = cdQ;
+        bs.cdEl.textContent = (cdQ / 10).toFixed(1);
       }
     } else if (bs._cd) {
       bs._cd = false;
-      bs._cdPct = null;
-      bs._cdTxt = null;
+      bs._cdPctQ = null;
+      bs._cdTxtQ = null;
       bs.cdEl.style.display = 'none';
       bs.root.style.removeProperty('--cd-pct');
     }
   }
   // -- Skill slots (live) --
-  for (const slotId of ['d','s','a','e','w','q','c','x','b']) {
+  for (const slotId of _SB_SLOT_IDS) {   // v0.30.296 perf — was a fresh array per call
     const s = _sbSlots[slotId];
     if (!s) continue;
     const matched = s.skill, matchId = s.skillId;
@@ -133843,20 +133876,20 @@ function renderSkillBar() {
       }
       const frac = (matched.cd > 0) ? Math.min(1, cd / matched.cd) : 1;   // guard cd:0/undefined -> no Infinity/NaN width (mirrors the HUD-deck path)
       // v0.25.35 — conic-gradient pie-wipe via --cd-pct (was height fill)
-      const pctTxt = (frac * 100).toFixed(1);
-      const cdTxt = (cd / 1000).toFixed(1);
-      if (s._cdPct !== pctTxt) {
-        s._cdPct = pctTxt;
-        s.root.style.setProperty('--cd-pct', pctTxt);
+      const pctQ = Math.round(frac * 1000);   // v0.30.296 perf — same integer gate as the block slot
+      const cdQ = Math.round(cd / 100);
+      if (s._cdPctQ !== pctQ) {
+        s._cdPctQ = pctQ;
+        s.root.style.setProperty('--cd-pct', (pctQ / 10).toFixed(1));
       }
-      if (s._cdTxt !== cdTxt) {
-        s._cdTxt = cdTxt;
-        s.cdEl.textContent = cdTxt;
+      if (s._cdTxtQ !== cdQ) {
+        s._cdTxtQ = cdQ;
+        s.cdEl.textContent = (cdQ / 10).toFixed(1);
       }
     } else if (s._cdShown) {
       s._cdShown = false;
-      s._cdPct = null;
-      s._cdTxt = null;
+      s._cdPctQ = null;
+      s._cdTxtQ = null;
       s.cdEl.style.display = 'none';
       s.root.style.removeProperty('--cd-pct');
     }
@@ -134007,15 +134040,18 @@ function _updateBuffRow() {
   // v0.26.1026 — peak-track each buff's timer (raised on cast/refresh, pruned when
   // it drops) and divide by that instead of the static BUFF_META.dur, so the bar
   // always opens at 100% and drains truthfully regardless of rank / Lv10 bonus.
-  if (!game._buffBarMax) game._buffBarMax = {};
+  // v0.30.296 perf — `delete` forced the object into dictionary mode and the
+  // for-in sweep materialised a key list every HUD tick during combat.
+  if (!(game._buffBarMax instanceof Map)) game._buffBarMax = new Map();
   _bbToken++;
   for (let i = 0; i < _buffActiveN && i < pills.length; i++) {
     const a = _buffActive[i];
     const t = a.timer;
     const _bk = a.meta.key;
     _bbSeen[_bk] = _bbToken;
-    if (!(game._buffBarMax[_bk] > 0) || t > game._buffBarMax[_bk]) game._buffBarMax[_bk] = t;
-    const _den = game._buffBarMax[_bk] || a.meta.dur || 1;
+    const _bmPrev = game._buffBarMax.get(_bk);
+    if (!(_bmPrev > 0) || t > _bmPrev) game._buffBarMax.set(_bk, t);
+    const _den = game._buffBarMax.get(_bk) || a.meta.dur || 1;
     const pct = Math.max(0, Math.min(100, (t / _den) * 100));
     const _pill = pills[i];
     // v0.29.5xx — REAL SKILL ART (per user "wire the rendered skill-sprite
@@ -134060,7 +134096,7 @@ function _updateBuffRow() {
       _pill.classList.toggle('buff-expiring', _crit);
     }
   }
-  for (const _bk in game._buffBarMax) { if (_bbSeen[_bk] !== _bbToken) delete game._buffBarMax[_bk]; }
+  for (const _bk of game._buffBarMax.keys()) { if (_bbSeen[_bk] !== _bbToken) game._buffBarMax.delete(_bk); }
 }
 let _LX_CACHED_BUFF_ROW = null;
 function _uiSetStyle(el, prop, val) {
