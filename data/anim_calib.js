@@ -242,9 +242,9 @@ window.LX_ANIM_CALIB = {
   },
   "gravitos3": {
     "idle": {
-      "s": 1.02,
+      "s": 1.04,
       "dx": 0,
-      "dy": 0.03
+      "dy": 0.025
     },
     "walk": {
       "s": 1.29,
@@ -269,9 +269,9 @@ window.LX_ANIM_CALIB = {
       "dy": 0.05
     },
     "attack": {
-      "s": 2.52,
+      "s": 1.62,
       "dx": 0.0105,
-      "dy": 0.41
+      "dy": 0.165
     }
   },
   "gravitos": {
@@ -406,7 +406,7 @@ window.LX_ANIM_CALIB = {
   "gravitospunch": {
     "attack": {
       "s": 1.01,
-      "dx": 0.11,
+      "dx": 0.14,
       "dy": 0.015
     }
   },
@@ -621,9 +621,16 @@ window.LX_ANIM_CALIB = {
   },
   "zodiac_leo": {
     "zodiac/pounce": {
-      "s": 1.55,
+      "s": 1.45,
       "dx": 0.06,
-      "dy": 0.41
+      "dy": 0.325
+    }
+  },
+  "gravitoslaser": {
+    "attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.01
     }
   }
 };
