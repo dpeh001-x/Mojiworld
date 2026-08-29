@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.284';
+const GAME_VERSION = 'v0.30.285';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10485,10 +10485,13 @@ const LX_DRS = {
   lastChange: 0, healthySince: 0, graceUntil: 0, active: false, _map: null,
   _announced: false,
 };
+// v0.30.285 perf — 'lx_drs' is a console-set-then-reload debug switch (nothing
+// in the file ever writes the key), yet the old read hit synchronous,
+// disk-backed localStorage EVERY frame via _lxDrsTick → _perfTick. Read it
+// once at boot; the reload the switch already requires picks up changes.
+const _LX_DRS_OFF = (() => { try { return localStorage.getItem('lx_drs') === 'off'; } catch (e) { return false; } })();
 function _lxDrsEnabled() {
-  if (_LX_RSCALE != null) return false;             // manual scale override wins outright
-  try { if (localStorage.getItem('lx_drs') === 'off') return false; } catch (e) {}
-  return true;
+  return _LX_RSCALE == null && !_LX_DRS_OFF;        // manual scale override wins outright
 }
 function _lxDrsFloorNow() {
   return (typeof _IS_MOBILE_AT_LOAD !== 'undefined' && _IS_MOBILE_AT_LOAD) ? LX_DRS.floor : LX_DRS.floorDesktop;
@@ -16062,11 +16065,21 @@ function _qnavDrawCompass() {
 
   // Banner — always, so the player can read the goal without opening the panel.
   const label = `🧭 ${title}`;
-  ctx.font = '700 13px system-ui, sans-serif';
-  const w1 = ctx.measureText(label).width;
-  ctx.font = '11px system-ui, sans-serif';
-  const w2 = ctx.measureText(sub).width;
-  const bw = Math.min(W - 24, Math.max(w1, w2) + 24);
+  // v0.30.285 perf — font reparse + measureText are among the costlier Canvas2D
+  // state ops, and this ran twice per frame for text that only changes on a
+  // quest / map / route hop. Single-entry memo on _LX_QC, keyed by both
+  // strings and the canvas width (same idiom as _playerNameTagCache).
+  const _qbKey = label + '\u0000' + sub + '|' + W;
+  let bw;
+  if (_LX_QC._bKey === _qbKey) bw = _LX_QC._bW;
+  else {
+    ctx.font = '700 13px system-ui, sans-serif';
+    const w1 = ctx.measureText(label).width;
+    ctx.font = '11px system-ui, sans-serif';
+    const w2 = ctx.measureText(sub).width;
+    bw = Math.min(W - 24, Math.max(w1, w2) + 24);
+    _LX_QC._bKey = _qbKey; _LX_QC._bW = bw;
+  }
   // Sits BELOW the map-name pill, which is an HTML element centred at the top
   // of the canvas — at by:12 the two overlapped and both became unreadable.
   const bx = (W - bw) / 2, by = 64;
@@ -66514,16 +66527,27 @@ function drawClassIdentityHUD() {
     const r = 36;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    const halo = ctx.createRadialGradient(cx, cy, 8, cx, cy, r + 14);
+    // v0.30.285 perf — the three stop alphas are exact multiples of `intensity`
+    // (1 / 0.5 / 0), so intensity factors into globalAlpha and ONE unit
+    // gradient per class serves every frame of every charge hold — was a
+    // createRadialGradient + 3 addColorStop + 2 rgba strings per frame.
+    // Pixel-identical; same idiom as _beamGradCache / _MELEE_GRAD_CACHE.
+    const _chm = window._chargeHaloCache || (window._chargeHaloCache = {});
+    const _chKey = isArcher ? 'a' : 'w';
+    let halo = _chm[_chKey];
+    if (!halo) {
+      halo = ctx.createRadialGradient(0, 0, 8, 0, 0, r + 14);
+      halo.addColorStop(0, isArcher ? 'rgba(120,255,200,1)' : 'rgba(255,180,80,1)');
+      halo.addColorStop(0.6, isArcher ? 'rgba(60,200,140,0.5)' : 'rgba(255,120,40,0.5)');
+      halo.addColorStop(1, 'rgba(20,30,20,0)');
+      _chm[_chKey] = halo;
+    }
     const intensity = 0.20 + p * 0.35;
-    const haloA = isArcher ? `rgba(120,255,200,${intensity})`   : `rgba(255,180,80,${intensity})`;
-    const haloB = isArcher ? `rgba(60,200,140,${intensity * 0.5})` : `rgba(255,120,40,${intensity * 0.5})`;
-    halo.addColorStop(0, haloA);
-    halo.addColorStop(0.6, haloB);
-    halo.addColorStop(1, 'rgba(20,30,20,0)');
+    ctx.globalAlpha = intensity;
+    ctx.translate(cx, cy);
     ctx.fillStyle = halo;
     ctx.beginPath();
-    ctx.arc(cx, cy, r + 14, 0, Math.PI * 2);
+    ctx.arc(0, 0, r + 14, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
     // Base ring
@@ -69521,6 +69545,9 @@ function updateSmoothFx(dt) {
 function drawSmoothFx(_behindPass) {
   if (!game.smoothFx || !game.smoothFx.length) return;
   const camX = game.camera.x;
+  // v0.30.285 perf — hoisted out of the per-FX loop: the flag cannot change
+  // mid-frame, and the loop asked twice per live slash (behind + front).
+  const _sfLow = (typeof _perfLowFx === 'function') && _perfLowFx();
   ctx.save();
   for (const fx of game.smoothFx) {
     if (!!fx.behind !== !!_behindPass) continue;
@@ -69662,8 +69689,12 @@ function drawSmoothFx(_behindPass) {
           if (_MELEE_GRAD_CACHE.size >= 48) _MELEE_GRAD_CACHE.delete(_MELEE_GRAD_CACHE.keys().next().value);
           _MELEE_GRAD_CACHE.set(_gk, g);
         }
-        ctx.shadowColor = 'rgba(255,255,255,' + (0.18 * _bk).toFixed(3) + ')';   // v0.29.542 — 0.26→0.18   // v0.29.540 — halo 0.55→0.26 (per user "reduce the opacity on the white area")
-        ctx.shadowBlur = (typeof _perfLowFx === 'function' && _perfLowFx()) ? 0 : 10;   // v0.29.744 — halo off on low-fx
+        // v0.30.285 perf — rgba string memo by quantized alpha (≤181 keys), the
+        // game._fqWhiteStr idiom: was two string allocations per slash frame.
+        const _shA = (0.18 * _bk).toFixed(3);
+        const _shm = window._sfxShadowStr || (window._sfxShadowStr = {});
+        ctx.shadowColor = _shm[_shA] || (_shm[_shA] = 'rgba(255,255,255,' + _shA + ')');   // v0.29.542 — 0.26→0.18   // v0.29.540 — halo 0.55→0.26 (per user "reduce the opacity on the white area")
+        ctx.shadowBlur = _sfLow ? 0 : 10;   // v0.29.744 — halo off on low-fx
         ctx.globalAlpha = alpha * _ba;
         ctx.fillStyle = g;
         ctx.fill();
@@ -69733,7 +69764,7 @@ function drawSmoothFx(_behindPass) {
         _MELEE_GRAD_CACHE.set(_lk, lg);
       }
       ctx.shadowColor = 'rgba(255,255,255,0.10)';   // v0.29.542 — 0.14→0.10   // v0.29.540 — halo halved again (0.30→0.14)
-      ctx.shadowBlur = (typeof _perfLowFx === 'function' && _perfLowFx()) ? 0 : 8;   // v0.29.744 — halo off on low-fx
+      ctx.shadowBlur = _sfLow ? 0 : 8;   // v0.29.744 — halo off on low-fx
       ctx.globalAlpha = alpha * 0.58;                 // v0.29.549 — 0.9 -> 0.58
       ctx.fillStyle = lg;
       ctx.fill();
@@ -91739,7 +91770,17 @@ function updateParticles(dt) {
 // a jump-apex and the mobile F-button (also hardcoded 480) never lit. Deriving
 // from the ground fixes that whole class (480-ground maps are unchanged).
 function _defaultPortalY(x) {
-  const gs = (game.mapData && game.mapData.platforms || []).filter(p => p.type === 'ground');
+  // v0.30.285 perf — joins the platforms-identity ground-slab cache (the same
+  // keys the flier floor clamp maintains, so coherence across
+  // _buildTowerMaps regeneration is inherited) instead of running a fresh
+  // .filter() per call — drawPortals asks up to four times per portal per frame.
+  const md = game.mapData;
+  const _plats = (md && md.platforms) || [];
+  let gs = md && md._lxGroundSlabs;
+  if (!gs || md._lxGroundSlabsSrc !== _plats) {
+    gs = _plats.filter(p => p.type === 'ground');
+    if (md) { md._lxGroundSlabs = gs; md._lxGroundSlabsSrc = _plats; }
+  }
   if (!gs.length) return 480;
   // v0.29.996 — resolve the ground slab UNDER x rather than simply the first
   // one. Most maps floor themselves with a single slab and are unaffected, but
@@ -113175,7 +113216,14 @@ const HERO_VEC_WALK_GAIT_KEYS = [
   { p: 0.875, legR: -0.46, legL:  0.32, bodyY: -1.5, legRSy: 0.92, legLSy: 1.08, legRY: -1.3, legLY: -0.1 },
   { p: 1.000, legR: -0.50, legL:  0.52, bodyY:  0.0, legRSy: 1.06, legLSy: 1.02, legRY:  0.0, legLY:  0.0 },
 ];
+// v0.30.285 perf — single-entry memo: within one hero draw the same t is asked
+// for ~13 times (legs, bobs, deforms; local player, co-op peers and Mirror
+// Self all via _drawVectorHero), each call interpolating a fresh 7-field
+// pose object. Pure in t, and callers only read fields — the out-of-range
+// path below already returns the SHARED keys[0] const, proving aliasing safe.
+let _LX_GAIT_T = NaN, _LX_GAIT_V = null;
 function _heroVecWalkGait(t) {
+  if (t === _LX_GAIT_T && _LX_GAIT_V) return _LX_GAIT_V;
   const p = _heroVecWalkPhase(t);
   const keys = HERO_VEC_WALK_GAIT_KEYS;
   for (let i = 0; i < keys.length - 1; i++) {
@@ -113183,7 +113231,8 @@ function _heroVecWalkGait(t) {
     const b = keys[i + 1];
     if (p >= a.p && p <= b.p) {
       const u = (p - a.p) / (b.p - a.p || 1);
-      return {
+      _LX_GAIT_T = t;
+      return (_LX_GAIT_V = {
         legR: _heroVecWalkPoseLerp(a.legR, b.legR, u),
         legL: _heroVecWalkPoseLerp(a.legL, b.legL, u),
         bodyY: _heroVecWalkPoseLerp(a.bodyY, b.bodyY, u),
@@ -113191,10 +113240,11 @@ function _heroVecWalkGait(t) {
         legLSy: _heroVecWalkPoseLerp(a.legLSy, b.legLSy, u),
         legRY: _heroVecWalkPoseLerp(a.legRY, b.legRY, u),
         legLY: _heroVecWalkPoseLerp(a.legLY, b.legLY, u),
-      };
+      });
     }
   }
-  return keys[0];
+  _LX_GAIT_T = t;
+  return (_LX_GAIT_V = keys[0]);
 }
 function _heroVecWalkLegAngle(t, side) {
   const gait = _heroVecWalkGait(t);
