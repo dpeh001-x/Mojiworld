@@ -107,3 +107,22 @@ in the file (`_lxProjScaled`, `_EXPLO_GRAD_CACHE`, `_lxGroundSlabs`, single-entr
 4. Manual-review list as separate, individually-tested changes.
 
 Static analysis run: 8 lenses, 47 raw findings, 1.5M tokens, all cadence-gated per-frame.
+
+---
+
+## 7. Disposition (landed same day)
+
+| Item | Outcome |
+| --- | --- |
+| R1 box-shadow kill switch | Already existed — v0.30.274 folded box-shadow + grade into `lx-nobackdrop`; the audit missed it by grepping for a separate class |
+| R2 honest Low preset + R3 HUD pulse pause | **v0.30.282** — Low engages `lx-nobackdrop` immediately; both infinite HUD pulses pause under it |
+| Auto-safe 1–6 (update loop) | **v0.30.283** (clobbered by a parallel stale rebuild the same hour; re-landed by that session in v0.30.284) |
+| Auto-safe 7–12 (draw path) | **v0.30.285** |
+| Needs-a-look 1–4 (settings scalars, chest, drops, groundBelow index) | **v0.30.287** — chest sharpness A/B eyeballed (indistinguishable); groundBelow equivalence asserted at 500+ points |
+| Manual 5 (boss bar double .find) + 8 (minion sprite downscale) | **v0.30.288** |
+| Manual 7 (meteor spreads) | REJECTED — snapshots are load-bearing vs kill+splice mid-loop (index-walking after a lower-index splice can double-hit a live mob) |
+| Manual 1, 2, 3, 4, 6 | DEFERRED — geometry/focus memos risk the live Monster Plant editor & killMonster invalidation; pad poll needs a physical controller; trail shedding is a design call; particle pool needs a spawn-site field audit |
+
+Suites added: `low_preset_perf_css_test` (10), `perf_loop_smoke_test` (8),
+`perf_draw_smoke_test` (10), `perf_needslook_test` (9), `perf_bossbar_minion_test` (6)
+— all auto-discovered by `run_all_tests.mjs`.
