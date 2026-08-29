@@ -10007,7 +10007,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.280';
+const GAME_VERSION = 'v0.30.281';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -22299,6 +22299,11 @@ const monsterTypes = {
       activeBoss:true,
       revivesOnce:{ hpPct:0.25 },
       bigMelee:{ kind:'swing', dmgMul:2.6, range:170, swingW:260, swingH:100, cdMs:4800, telegraphMs:550 },
+      // v0.30.281 — DEPARTURE SIGNAL (per user: 'special attack that dish
+      // high damage'). Proven columnStrike machinery; dmgMul 3.2 out-hits
+      // his 2.6x swing, telegraphed 700ms so it is dodged, not eaten.
+      // Arbiter's golden column art — the judgment of a missed departure.
+      columnStrike:{ dmgMul:3.2, width:130, range:620, cdMs:6500, telegraphMs:700, color:'#ffd866', sprite:'fx_col_arbiter' },
       hourglassCharge:2200,
     },
   },
@@ -26588,7 +26593,7 @@ const MAPS = {
     // on a plain jump and 112 px spending the air jump, so a 20-80 px band
     // leaves headroom on every floor while still asking for a real jump.
     const SP_GAP_MIN = 20;
-    const SP_GAP_MAX = 80;
+    const SP_GAP_MAX = 55;   // v0.30.281 — was 80, sized for the air jump (112px reach) the one-jump rule removes; 55 sits inside the measured 62px plain-jump reach
     let _spSeed = 0x6c6b78a1;
     // v0.29.849 — current step direction for the bounded stepper below.
     // Flips every 2 floors, and on a wall bounce.
@@ -62467,6 +62472,11 @@ function _playerGravityStep() {
 const LX_UNDERWATER_AIR_JUMPS = 5;
 function _lxAirJumpCap() {
   const md = game.mapData;
+  // v0.30.281 — the Spire jump quest is a ONE-JUMP discipline (per user:
+  // 'the player is only limited to 1 jump'). No air jumps from gear, mods
+  // or map bonuses; the gap band is refit to plain-jump reach (SP_GAP_MAX
+  // 80 -> 55 against the measured 62px plain reach) so it stays fair.
+  if (game && game.currentMap === 'clockworkSpire') return 0;
   const own = 1 + ((player.mods && player.mods.extraJumps) || 0) + ((md && md.bonusJumps) || 0);
   return (md && md.isUnderwater) ? Math.max(own, LX_UNDERWATER_AIR_JUMPS) : own;
 }
@@ -81304,6 +81314,23 @@ function bossAI(m, dt, distToPlayer) {
         m.patternTimer = 0;
       }
     }
+  } else if (m.type === 'pqConductor') {
+    // v0.30.281 - EXPRESS PURSUIT (per user: 'chase player aggressively').
+    // He had storms, summons and two melee specials but no drive of his
+    // own. Boxer-style (the barnaby pattern one branch down): close hard
+    // from range, keep rolling pressure inside it so bigMelee + the
+    // hourglass lunge connect.
+    if (m.currentHp > 0 && player && player.hp > 0
+        && (m.stunTimer || 0) <= 0 && (m.freezeTimer || 0) <= 0) {
+      const _ccPcx = (player.x || 0) + (player.w || 28) / 2;
+      const _ccDx = _ccPcx - (m.x + m.w / 2);
+      const _ccTo = _ccDx >= 0 ? 1 : -1;
+      const _ccAdx = Math.abs(_ccDx);
+      m.facing = _ccTo;
+      m.patternState = 'chase';
+      if (_ccAdx > 210)     m.vx = _ccTo * (m.speed || 2.6) * 2.2;
+      else if (_ccAdx > 90) m.vx = _ccTo * (m.speed || 2.6) * 0.9;
+    }
   } else if (m.type === 'young_confused_barnaby') {
     // ==== BARNABY — THE BOXER (v0.29.601, per user) ====
     // "slightly sticky with fast movements, dash in, fade out boxer style".
@@ -90674,6 +90701,19 @@ function updateProjectiles(dt) {
             player.hp -= (player._god ? 0 : _diffDmg(dmg));
             player.lastHitTime = game.time;
             player.invulnerable = Math.max(player.invulnerable, 400);
+            // v0.30.281 — RIFT SURGE (per user: 'randomised to occasionally
+            // knock players off the ledge'). Spire tears only — the
+            // _sourceLabel guards Aetherion's cast tears, which live on
+            // arena ground where a shove would be noise. 35% per damage
+            // tick: a hard horizontal push away from the rift centre plus
+            // a small pop, enough to carry a player off a narrow floor.
+            if (h._sourceLabel === 'a Spire void-tear' && Math.random() < 0.35) {
+              const _kdir = ((player.x + player.w / 2) >= h.cx) ? 1 : -1;
+              player.vx = _kdir * (7 + Math.random() * 4);
+              player.vy = Math.min(player.vy || 0, -3.5);
+              if (typeof addShake === 'function') addShake(4);
+              if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 10, y: player.y - 12, vy: -2, text: 'RIFT SURGE!', life: 34, color: '#cc66ff', size: 12 });
+            }
             player._lastDamageSource = h._sourceLabel || "Aetherion's void tear";
             if (game.damageNumbers) {
               game.damageNumbers.push({
@@ -91329,7 +91369,18 @@ const MAX_ONSCREEN_MONSTERS = _IS_MOBILE_AT_LOAD ? 22 : 36;
 const _SPAWN_VAR_KEEP = 0.85;
 function _normMonsterCap(raw) {
   const base = raw || 15;
-  return Math.round(15 + (base - 15) * _SPAWN_VAR_KEEP);
+  let _cap = Math.round(15 + (base - 15) * _SPAWN_VAR_KEEP);
+  // v0.30.281 — STAGE-1 SWARM RELIEF (per user: 'there is alot of lag in
+  // the 1st stage'). The Underpass runs the densest swarm in the game and
+  // measured p95 25ms vs the forest's 8ms. When lowFx is engaged — the
+  // machine is already struggling — hold 16 mechs alive instead of 24;
+  // the respawn drip backfills each kill, so the 150-kill grind paces
+  // almost identically with a third less to draw and tick per frame.
+  // Healthy machines keep the full Ticket-Panic density.
+  if (_cap > 16
+      && typeof game !== 'undefined' && game && game.currentMap === 'clockworkUnderpassLobby'
+      && typeof _perfLowFx === 'function' && _perfLowFx()) _cap = 16;
+  return _cap;
 }
 function _normRespawnMul(raw) {
   const base = raw || 1;
