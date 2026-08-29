@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.291';
+const GAME_VERSION = 'v0.30.292';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10638,6 +10638,13 @@ function _perfLowFx() {
   const auto = (bossCount > 0) || (mobCount > 14);
   if (!game._lowFxCache) game._lowFxCache = {};
   game._lowFxCache.frame = game.time;
+  // v0.30.292 — clear the tier-2 answer with the new frame stamp. Without this,
+  // _perfVeryLowFx's "frame is current AND veryValue != null" fast path kept
+  // returning a value computed on whatever EARLIER frame happened to query
+  // tier 2 before tier 1 — in practice never recomputed, so the auto tier-2
+  // triggers (2+ bosses / >22 mobs / boss + 40 projectiles, v0.29.391) never
+  // engaged and heavy scenes were left to the oscillating reactive path.
+  game._lowFxCache.veryValue = null;
   game._lowFxCache.value = auto;
   game._lowFxCache.bossCount = bossCount;
   game._lowFxCache.mobCount  = mobCount;
@@ -55089,9 +55096,12 @@ function checkDaily() {
   }
   tickDaily('level', player.level);
 }
+// v0.30.292 perf — id lookup ran a .find over the table every HUD tick for a
+// value that changes once per day.
+const _DAILY_BY_ID = new Map(DAILY_CHALLENGES.map(c => [c.id, c]));
 function tickDaily(kind, n) {
   const d = game.dailyState; if (!d || d.claimed) return;
-  const c = DAILY_CHALLENGES.find(x => x.id === d.challenge);
+  const c = _DAILY_BY_ID.get(d.challenge);
   if (!c || c.track !== kind) return;
   // v0.26.x audit FIX — honor a challenge's `target` filter (gravitos1 targets
   // the gravitos boss). startsWith so a multi-form boss (final form 'gravitos3')
@@ -99752,7 +99762,11 @@ function drawMinimap() {
   // read as "no platforms in between". Now the ground fills from its true
   // scaled top to the canvas bottom, and every climb platform shows clearly
   // above it.
-  const _gp = (game.mapData.platforms || []).find(p => p.type === 'ground');
+  // v0.30.292 perf — per-map invariant; the .find ran a 200+ platform scan at
+  // ~15Hz on tower maps. Cache lives on mapData so map changes reset it.
+  const _mmMd = game.mapData;
+  if (_mmMd._mmGroundP === undefined) _mmMd._mmGroundP = (_mmMd.platforms || []).find(p => p.type === 'ground') || null;
+  const _gp = _mmMd._mmGroundP;
   const _gMy = _gp ? Math.min(mh - 2 * S, _gp.y * scaleY) : (mh - 10 * S);
   mctx.fillStyle = 'rgba(80,120,80,0.5)';
   mctx.fillRect(0, _gMy, mw, mh - _gMy);
@@ -111447,7 +111461,7 @@ function drawHexOrbs() {
       ctx.translate(sx, sy);
       if (typeof _lxUseEntityImageQuality === 'function') _lxUseEntityImageQuality(ctx);
       const _fr = (typeof _projAnimFrame === 'function') ? _projAnimFrame('p_hexmaster_hexorb', (orb.phase || 0) * 69) : null;
-      ctx.drawImage(_fr || _img, -SZ / 2, -SZ / 2, SZ, SZ);
+      ctx.drawImage((typeof _lxProjScaled === 'function') ? _lxProjScaled(_fr || _img, SZ) : (_fr || _img), -SZ / 2, -SZ / 2, SZ, SZ);   // v0.30.292 perf — orb art is 474-768px, box ~34-40px
       ctx.restore();
     } else {
       ctx.fillStyle = `rgba(150,210,255,${0.85 * fade})`;
@@ -111499,7 +111513,7 @@ function drawNecromancerOrbs() {
       // the ward's orbs sit at evenly spread points of the same flame instead
       // of pulsing in unison.
       const _fr = (typeof _projAnimFrame === 'function') ? _projAnimFrame('p_necromancer_soulorb', (orb.phase || 0) * 69) : null;
-      ctx.drawImage(_fr || _img, -SZ / 2, -SZ / 2, SZ, SZ);
+      ctx.drawImage((typeof _lxProjScaled === 'function') ? _lxProjScaled(_fr || _img, SZ) : (_fr || _img), -SZ / 2, -SZ / 2, SZ, SZ);   // v0.30.292 perf — orb art is 474-768px, box ~34-40px
       ctx.restore();
     } else {
       ctx.fillStyle = `rgba(190,255,235,${0.85 * fade})`;
@@ -111561,7 +111575,7 @@ function drawAegisOrbs() {
       // identical sprites at one angle read as five stamps.
       ctx.rotate(game.time * 0.05 + (orb.phase || 0));
       if (typeof _lxUseEntityImageQuality === 'function') _lxUseEntityImageQuality(ctx);
-      ctx.drawImage(_orbImg, -SZ / 2, -SZ / 2, SZ, SZ);
+      ctx.drawImage((typeof _lxProjScaled === 'function') ? _lxProjScaled(_orbImg, SZ) : _orbImg, -SZ / 2, -SZ / 2, SZ, SZ);   // v0.30.292 perf — same as the animated orbs
       ctx.restore();
     } else {
       ctx.fillStyle = `rgba(255,255,220,${0.85 * fade})`;
@@ -111601,7 +111615,7 @@ function drawBallistaTurrets() {
       ctx.save();
       if (f < 0) { ctx.translate(2 * sx, 0); ctx.scale(-1, 1); }
       if (typeof _lxUseEntityImageQuality === 'function') _lxUseEntityImageQuality(ctx);
-      ctx.drawImage(_tspr, drawX, drawY, SZ, SZ);
+      ctx.drawImage((typeof _lxProjScaled === 'function') ? _lxProjScaled(_tspr, SZ) : _tspr, drawX, drawY, SZ, SZ);   // v0.30.292 perf — turret art through the downscale cache
       ctx.restore();
     } else {
       // Procedural fallback — dark-steel mount + pivoting crossbow + core.
@@ -117534,6 +117548,8 @@ function _celEye(cx, cy, r, f, stroke, pupilCol, evil) {
   ctx.beginPath(); ctx.arc(px + r * 0.25, py + r * 0.25, r * 0.12, 0, Math.PI * 2); ctx.fill();
 }
 
+// v0.30.292 perf — was allocated per mob per frame inside drawCuteMob.
+const _DQ_MEAN_TYPES = new Set(['horny','stump','zombie','skeleton','scorpion','wraith','mummy']);
 function drawCuteMob(m, sx, sy) {
   // v0.25.22 — Phase 4d-1 gate. Skip the body draw when LXMonsterScene
   // owns this type. HP bar / name / burn FX still draw on vanilla after
@@ -117545,12 +117561,20 @@ function drawCuteMob(m, sx, sy) {
   const cx     = sx + m.w / 2;
   const cy     = sy + m.h / 2 + bob;
   const base   = m.color || '#a0c890';
-  const shade  = _mixHex(base, '#1a0818', 0.40);   // cel-shade tone (not pure black)
+  // v0.30.292 perf — the three _mixHex blends are pure in (base, m.shell) and
+  // both are stable for a mob's life; memoized on the monster (~9 short-lived
+  // strings per procedurally-drawn mob per frame -> zero steady-state).
+  if (m._dqBase !== base || m._dqShellK !== m.shell) {
+    m._dqBase = base; m._dqShellK = m.shell;
+    m._dqShade = _mixHex(base, '#1a0818', 0.40);
+    m._dqAcc = m.shell || _mixHex(base, '#000000', 0.45);
+    m._dqAccS = _mixHex(m._dqAcc, '#1a0818', 0.40);
+  }
+  const shade  = m._dqShade;                        // cel-shade tone (not pure black)
   const stroke = '#1a0818';                         // near-black outline
-  const acc    = m.shell || _mixHex(base, '#000000', 0.45);
-  const accShd = _mixHex(acc, '#1a0818', 0.40);
-  const meanTypes = new Set(['horny','stump','zombie','skeleton','scorpion','wraith','mummy']);
-  const evil = meanTypes.has(t);
+  const acc    = m._dqAcc;
+  const accShd = m._dqAccS;
+  const evil = _DQ_MEAN_TYPES.has(t);
 
   // ===== DISPATCH — each type gets an iconic silhouette =====
   if (t === 'slime') { _drawDQSlime(m, sx, sy, cx, cy, f, base, shade, stroke, evil); return; }
@@ -131529,6 +131553,7 @@ function _lxScorpioDeluge(m, dt) {
 }
 function drawHazards(_behindPass) {
   if (!game.hazards || game.hazards.length === 0) return;   // v0.25.451: empty-list early-out
+  let _vfHz = null;   // v0.30.292 perf — each guard+draw pair below called _lxVfxFrame twice (and could land on different animation frames)
   const _camYH = (game.camera && game.camera.y) || 0;   // v0.29.x — world->screen Y for the planted banner
   for (const h of game.hazards) {
     const sx = h.cx - game.camera.x;
@@ -131606,8 +131631,8 @@ function drawHazards(_behindPass) {
       if (!h._landed) {
         ctx.fillStyle = 'rgba(255,80,0,0.28)';
         ctx.beginPath(); ctx.ellipse(lx, h._groundY - 2, h.w * 0.55, 6, 0, 0, Math.PI * 2); ctx.fill();
-        if (typeof _lxVfxReady === 'function' && _lxVfxReady(_lxVfxFrame('lavaDrop'))) {
-          ctx.drawImage(_lxVfxFrame('lavaDrop'), lx - h.w * 0.8, h.y - h.h * 0.3, h.w * 1.6, h.h * 1.6);
+        if (typeof _lxVfxReady === 'function' && _lxVfxReady((_vfHz = _lxVfxFrame('lavaDrop')))) {
+          ctx.drawImage(_vfHz, lx - h.w * 0.8, h.y - h.h * 0.3, h.w * 1.6, h.h * 1.6);
         } else {
           ctx.fillStyle = '#ffcc33';
           ctx.beginPath(); ctx.ellipse(lx, h.y + h.h/2, h.w*0.5, h.h*0.6, 0, 0, Math.PI*2); ctx.fill();
@@ -131617,9 +131642,9 @@ function drawHazards(_behindPass) {
       } else {
         const _fade = Math.min(1, h.life / 30);
         const _pw = h.w * 1.7;
-        if (typeof _lxVfxReady === 'function' && _lxVfxReady(_lxVfxFrame('lavaPool'))) {
+        if (typeof _lxVfxReady === 'function' && _lxVfxReady((_vfHz = _lxVfxFrame('lavaPool')))) {
           ctx.globalAlpha = 0.85 * _fade;
-          ctx.drawImage(_lxVfxFrame('lavaPool'), lx - _pw/2, h._groundY - _pw*0.22, _pw, _pw*0.44);
+          ctx.drawImage(_vfHz, lx - _pw/2, h._groundY - _pw*0.22, _pw, _pw*0.44);
           ctx.globalAlpha = 1;
         } else {
           ctx.fillStyle = `rgba(255,90,20,${0.65 * _fade})`;
@@ -131675,13 +131700,13 @@ function drawHazards(_behindPass) {
       // original gradient rect kept below as the pre-decode fallback.
       // The art is deliberately a soft band of vertical rays with no central
       // emblem, so stretching it to the field's 5.5:1 box reads clean.
-      if (_lxVfxReady(_lxVfxFrame('auroraField'))) {
+      if (_lxVfxReady((_vfHz = _lxVfxFrame('auroraField')))) {
         ctx.save();
         ctx.globalAlpha = Math.min(1, 0.85 * fade);
         // slight vertical overdraw so the rays rise a little past the band,
         // anchored to the field's floor line rather than centred in the box
         const _ah = h.h * 1.6;
-        ctx.drawImage(_lxVfxFrame('auroraField'), h.x - game.camera.x, (h.y + h.h) - _ah, h.w, _ah);
+        ctx.drawImage(_vfHz, h.x - game.camera.x, (h.y + h.h) - _ah, h.w, _ah);
         // keep the gold rim: it is what makes the heal FOOTPRINT readable
         ctx.globalAlpha = 1;
         ctx.fillStyle = `rgba(255,210,120,${0.5 * fade})`;
@@ -131807,10 +131832,10 @@ function drawHazards(_behindPass) {
       const fade = Math.min(1, h.life / 60);
       // v0.26.x — authored sprite when present (Sprites/vfx/poison_cloud.webp);
       // else the procedural puddle below. Ground-projected (squashed) ellipse.
-      if (_lxVfxReady(_lxVfxFrame('poisonCloud'))) {
+      if (_lxVfxReady((_vfHz = _lxVfxFrame('poisonCloud')))) {
         const _w = h.w * 1.2, _hh = _w * 0.42;
         ctx.save(); ctx.globalAlpha = 0.92 * fade;
-        ctx.drawImage(_lxVfxFrame('poisonCloud'), sx - _w / 2, h.y + 8 - _hh * 0.62, _w, _hh);
+        ctx.drawImage(_vfHz, sx - _w / 2, h.y + 8 - _hh * 0.62, _w, _hh);
         ctx.restore();
         continue;
       }
@@ -131846,10 +131871,10 @@ function drawHazards(_behindPass) {
       const cy = h.cy;
       // v0.26.x — authored ring sprite (Sprites/vfx/shock_ring.webp) scaled to
       // the current expanding radius; else the procedural rings below.
-      if (_lxVfxReady(_lxVfxFrame('shockRing'))) {
+      if (_lxVfxReady((_vfHz = _lxVfxFrame('shockRing')))) {
         const _d = (r + 6) * 2;
         ctx.save(); ctx.globalAlpha = Math.max(0, fade);
-        ctx.drawImage(_lxVfxFrame('shockRing'), sx - _d / 2, cy - _d * 0.32, _d, _d * 0.64);
+        ctx.drawImage(_vfHz, sx - _d / 2, cy - _d * 0.32, _d, _d * 0.64);
         ctx.restore();
         continue;
       }
@@ -131903,10 +131928,10 @@ function drawHazards(_behindPass) {
         const fade = Math.max(0, 1 - since / h.tele);
         // v0.26.x — authored pillar sprite (Sprites/vfx/lightning_pillar.webp)
         // as the vertical strike column; else the procedural jagged bolt below.
-        if (_lxVfxReady(_lxVfxFrame('lightningPillar'))) {
+        if (_lxVfxReady((_vfHz = _lxVfxFrame('lightningPillar')))) {
           const _pw = 64;
           ctx.save(); ctx.globalAlpha = Math.max(0.2, fade);
-          ctx.drawImage(_lxVfxFrame('lightningPillar'), sx - _pw / 2, 0, _pw, 480);
+          ctx.drawImage(_vfHz, sx - _pw / 2, 0, _pw, 480);
           ctx.restore();
           continue;
         }
@@ -131952,7 +131977,7 @@ function drawHazards(_behindPass) {
         : 0.65 + 0.35 * Math.abs(Math.sin(h.life * 0.45));
       ctx.save();
       ctx.globalAlpha = a;
-      if (_lxVfxReady(_lxVfxFrame('frostBeam'))) {
+      if (_lxVfxReady((_vfHz = _lxVfxFrame('frostBeam')))) {
         // v0.29.241 — The source art is a chunky ice shard (~1.6:1), but the
         // hazard box is 280x32 (8.75:1), so drawing it box-tight squashed the
         // shard into a flat horizontal smear. Draw the sprite 3.4x taller than
@@ -131963,9 +131988,9 @@ function drawHazards(_behindPass) {
         if (h.dir < 0) {
           ctx.translate(beamSx + h.w, vy);
           ctx.scale(-1, 1);
-          ctx.drawImage(_lxVfxFrame('frostBeam'), 0, 0, h.w, vh);
+          ctx.drawImage(_vfHz, 0, 0, h.w, vh);
         } else {
-          ctx.drawImage(_lxVfxFrame('frostBeam'), beamSx, vy, h.w, vh);
+          ctx.drawImage(_vfHz, beamSx, vy, h.w, vh);
         }
       } else {
         // v0.25.757 — Procedural frost-cone fallback rewritten. The
@@ -132076,8 +132101,8 @@ function drawHazards(_behindPass) {
       const pulse = warning ? 0.55 + Math.sin((game.time || 0) * 0.3) * 0.2 : 0.92;
       ctx.globalAlpha = pulse * fade;
       const cw = h.radius * 2.3, ch = cw * 0.78;
-      if (_lxVfxReady(_lxVfxFrame('cloudburst'))) {
-        ctx.drawImage(_lxVfxFrame('cloudburst'), sx - cw / 2, cy - ch / 2 + bob, cw, ch);
+      if (_lxVfxReady((_vfHz = _lxVfxFrame('cloudburst')))) {
+        ctx.drawImage(_vfHz, sx - cw / 2, cy - ch / 2 + bob, cw, ch);
       } else {
         // Fallback: a puffy three-lobe cloud, still side-on.
         ctx.fillStyle = `rgba(210,232,255,${0.85 * fade})`;
@@ -134348,7 +134373,7 @@ function updateUI() {
   if (d['daily-banner']) {
     const ds = game.dailyState;
     if (ds && player.cls) {
-      const c = DAILY_CHALLENGES.find(x => x.id === ds.challenge);
+      const c = _DAILY_BY_ID.get(ds.challenge);
       if (c) {
         _uiSetStyle(d['daily-banner'], 'display', 'block');
         const pct = Math.min(100, (ds.progress / c.goal) * 100);
