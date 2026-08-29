@@ -36,6 +36,31 @@ const FULLBODY = ' FRAMING, and this matters more than anything else: the ENTIRE
   'him. Never a close-up, never cropped at any edge.';
 
 const TARGETS = {
+  // v0.30.x - CAPRIKOR'S ICE SHOT and the STAR-BEAM, both keyed by SKILL name.
+  // _projAnimFrame(p.skill) looks the frames up by the skill the projectile was
+  // fired with, not by the sprite filename, so the stems here must read `ice`
+  // and `starbeam` or the animation is loaded by nobody. That is also why the
+  // ice set cannot simply be called p_capricorn_ice.
+  //
+  // Both are drawn in orient mode - the engine rotates them to velocity - so
+  // the art points RIGHT along its long axis and must KEEP pointing right in
+  // every frame. A frame that turns is a projectile that flies sideways.
+  ice: { base: 'Sprites/projectiles/p_capricorn_ice.webp', dir: 'Sprites/projectiles/anim',
+    motion: 'A crystalline pale-blue ice shard flying to the RIGHT. The shard itself does NOT ' +
+      'rotate, tumble, turn or change shape - it holds the same faceted dart pointing the same ' +
+      'way, the same size, in the centre of the frame, every frame. What moves is the cold ' +
+      'around it: the frost-vapour wisp behind it streams and curls, the ice flecks drift back ' +
+      'and fade, the white-blue core pulses gently brighter and dimmer, and light glints travel ' +
+      'across its facets. A CONTINUOUS SEAMLESS LOOP - the last frame flows back into the first ' +
+      'with no jump. Pale glacial blue and white only - no orange, no fire, no purple.' },
+  starbeam: { base: 'Sprites/projectiles/p_starbeam.webp', dir: 'Sprites/projectiles/anim',
+    motion: 'A radiant golden star-beam lance flying to the RIGHT. The bolt itself does NOT ' +
+      'rotate, turn, bend or change shape - it holds the same straight shaft with its sharp tip ' +
+      'on the right, the same size, centred, in every frame. What moves is the light: the ' +
+      'white-hot core pulses along its length, the golden glow breathes, the sparkle star-motes ' +
+      'twinkle in and out and drift backwards, and the trailing streak flickers as it is drawn ' +
+      'out behind. A CONTINUOUS SEAMLESS LOOP - the last frame flows back into the first with no ' +
+      'jump. Gold and white starlight only - no red, no green, no smoke.' },
   comet: { base: 'Sprites/projectiles/p_comet.webp', dir: 'Sprites/projectiles/anim',
     motion: 'The comet hurtles forward: its burning tail streams and flickers behind it, the icy core pulses brighter and dimmer, ' +
       'small sparks and debris peel off the trail, and the whole rock rotates very slightly as it flies.' },
@@ -296,6 +321,36 @@ const TARGETS = {
       'chest, his scales lighting from within and his eyes brightening. Frames 7-9: the gathered light blazes at ' +
       'his chest and bursts outward in a violet-and-gold flare. Across all of it his wings only tremble slightly ' +
       'and the glow pulses - nothing else about him alters. Violet and gold only: no red, no orange, no fire.' + FULLBODY },
+
+  // v0.30.x - SAGITTA THE STARCHASER (per user: "regenerate the sprites that
+  // boss sagitta uses"). Three sets: idle, walk, attack.
+  //
+  // WHAT THE REGENERATION IS FOR. She is the ARCHER - id sagittarius, element
+  // 'arrow', and her cast fires a real arcing arrow projectile (skill:'arrow')
+  // whose code comment says the telegraph dust plays "at the bow tip". She does
+  // own a bow in the art: an ivory antler limb across her shoulder strung with a
+  // starlight ribbon. It just does not READ as one, and the shipped attack set
+  // never draws it - it blooms a gold light-burst at her chest instead, which is
+  // a good drawing of a different attack. These prompts make the bow legible and
+  // spend the attack on a nock-draw-loose.
+  //
+  // Small asks, deliberately. The Aetherion astral rolls established on this
+  // same pipeline that a prompt demanding a big pose change licenses the
+  // animator to redraw the whole composition; the idle and walk rolls that
+  // succeeded asked for very little. So the body is pinned in all three and the
+  // motion is spent on what actually needs to move.
+  sagitta_idle: { base: 'Sprites/bosses/zodiac/sagittarius.webp', dir: 'Sprites/bosses/zodiac/idle',
+    stem: 'sagittarius', pad: 0.2,
+    motion: 'The character is a celestial stag-horse: a deep NAVY BLUE body flecked with white stars and thin gold constellation lines, a large sweeping CREAM-IVORY ANTLER CROWN with gold accents, glowing white eyes, gold hooves, and an ivory antler-like BOW curving across her shoulder strung with a ribbon of white starlight. Keep every one of those features in every frame - same colours, same antler shape, same markings. ' +
+      'She stands in profile and BREATHES - a restless archer at rest, not a statue. All FOUR legs stay planted and clearly drawn the whole loop; she does NOT step, walk or leave the spot, and her body does not change size or angle. What moves is small: her ribcage rises and settles, her head lifts and tilts a little as she scans the sky, an ear flicks, the tail sways, the starlight ribbon strung on her antler bow drifts and curls, and the white stars across her flank twinkle in and out. A CONTINUOUS SEAMLESS LOOP - the last frame flows back into the first with no jump.' + FULLBODY },
+  sagitta_walk: { base: 'Sprites/bosses/zodiac/sagittarius.webp', dir: 'Sprites/bosses/zodiac/walk',
+    stem: 'sagittarius', pad: 0.2,
+    motion: 'The character is a celestial stag-horse: a deep NAVY BLUE body flecked with white stars and thin gold constellation lines, a large sweeping CREAM-IVORY ANTLER CROWN with gold accents, glowing white eyes, gold hooves, and an ivory antler-like BOW curving across her shoulder strung with a ribbon of white starlight. Keep every one of those features in every frame - same colours, same antler shape, same markings. ' +
+      'She WALKS on all four legs, seen from the side. All FOUR legs stay drawn and distinct in every frame - the two near legs and the two far legs - moving in a proper four-legged gait, each hoof lifting, swinging forward, planting and pushing off in turn, so at any moment some hooves are down and others are mid-step. Her body rocks gently with the stride, her head bobs, the antler crown sways, the tail trails behind and the starlight ribbon on her bow streams back. She walks IN PLACE - she does not travel across the frame, does not slide, and does not get closer or further away. A CONTINUOUS SEAMLESS LOOP: the last frame flows straight back into the first with no jump and no change in the number of legs.' + FULLBODY },
+  sagitta_attack: { base: 'Sprites/bosses/zodiac/sagittarius.webp', dir: 'Sprites/bosses/zodiac/attack',
+    stem: 'sagittarius', pad: 0.3,
+    motion: 'The character is a celestial stag-horse: a deep NAVY BLUE body flecked with white stars and thin gold constellation lines, a large sweeping CREAM-IVORY ANTLER CROWN with gold accents, glowing white eyes, gold hooves, and an ivory antler-like BOW curving across her shoulder strung with a ribbon of white starlight. Keep every one of those features in every frame - same colours, same antler shape, same markings. ' +
+      'She SHOOTS, and the nine frames are one shot from start to finish. HER BODY BARELY MOVES: she stays in the same profile stance, all four hooves planted, same size and same position in every frame - she does not rear, turn, walk or change scale. What changes is the BOW AND THE ARROW. Frames 1-3: the ivory antler bow at her shoulder brightens and its starlight string pulls taut, and an ARROW MADE OF WHITE-GOLD LIGHT forms nocked against it, her head lowering to sight along it. Frames 4-6: the string is at full draw, the bow blazing, the arrow at its brightest with sparks shedding off the shaft. Frames 7-9: the arrow is LOOSED - it streaks away forward out of frame leaving a thin white-gold trail, the string snaps back and a few motes scatter from the bow. The bow and the arrow are clearly readable as a bow and an arrow. White, gold and pale blue starlight only - no red, no orange fire, no explosion at her chest.' + FULLBODY },
 };
 
 const only = val('--only', null);

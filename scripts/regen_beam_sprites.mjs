@@ -74,9 +74,42 @@ const ITEMS = {
       'grey, NOT cluttered. NO skulls, NO gore, NO debris pile — just clean bright ' +
       'bone-pale light with a few drifting shards.',
   },
+  // v0.30.x - CAPRIKOR THE PEAKLORD'S ICE SHOT (per user: "ensure that
+  // capricorn's projectile has sprites, generate with ludo.ai").
+  //
+  // Measured first: driven through all three phases he emits exactly two
+  // projectile skills, `ice` and `swing`, and `ice` drew NOTHING - the enemy
+  // blit branch needs the skill in BOTH LX_MOB_PROJ and _PROJ_SPRITE_BLIT and
+  // `ice` was in neither, so his main shot rendered as a bare coloured ellipse.
+  // (p_icespike.webp exists but belongs to the PLAYER's ice branch, which runs
+  // first and is unaffected; icePillar is authored and animated but no boss
+  // ever fires it.) Hence a dedicated file rather than borrowing either.
+  //
+  // Sized and coloured off the live projectile: 16x14 at #aaeeff, drawn in
+  // orient mode so it points along its velocity - the art therefore has to aim
+  // RIGHT along its long axis.
+  p_capricorn_ice: {
+    dest: join(repoRoot, 'Sprites', 'projectiles', 'p_capricorn_ice.webp'),
+    fmt: 'webp', kind: 'proj', prefix: PROJ_PREFIX, cleanAlpha: true,
+    prompt:
+      'A sharp CRYSTALLINE ICE SHARD bolt pointing toward the RIGHT - a clean faceted ' +
+      'dart of pale glacial blue ice (#aaeeff) with a brilliant white-blue hot core down ' +
+      'its length, tapering to a keen point on the right and a short frost-vapour wisp ' +
+      'trailing off the left. A FEW crisp frost motes and tiny ice flecks around it. ' +
+      'Cold, hard-edged, luminous and SIMPLE - a single shard, not a cluster, not a ' +
+      'snowflake, not a spike pillar. ' +
+      'CRITICAL: absolutely NO drop shadow, NO cast shadow, NO grey shadow blob under or ' +
+      'behind the shard; NO dark smudge, NO muddy halo. Keep the alpha 100% CLEAN - no ' +
+      'noise, no speckle, no stray dots, no grungy texture, no rough dirty edges. Crisp, ' +
+      'smooth anti-aliased edges on pure empty transparency. Bright and cold, not dark.',
+  },
   p_starbeam: {
-    dest: join(repoRoot, 'Sprites', 'projectiles', 'p_starbeam.png'),
-    fmt: 'png', kind: 'proj', prefix: PROJ_PREFIX, cleanAlpha: true,
+    // v0.30.x - was p_starbeam.PNG, which the game does not load: LX_MOB_PROJ
+    // names p_starbeam.webp and only the .webp exists on disk. Regenerating
+    // through this entry therefore wrote a file nothing read, and the shipped
+    // beam would have looked unchanged no matter how many times it was run.
+    dest: join(repoRoot, 'Sprites', 'projectiles', 'p_starbeam.webp'),
+    fmt: 'webp', kind: 'proj', prefix: PROJ_PREFIX, cleanAlpha: true,
     prompt:
       'A radiant golden cosmic BEAM-BOLT lance (Leo) pointing toward the RIGHT — a sleek, ' +
       'CLEAN horizontal shaft of brilliant golden starlight with a smooth white-hot core ' +

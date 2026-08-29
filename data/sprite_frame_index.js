@@ -600,6 +600,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "goo": 9,
    "gravdrop": 9,
    "icePillar": 9,
+   "ice": 9,
    "markedShot": 9,
    "mbloodbolt": 9,
    "mbonechip": 9,
