@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.296';
+const GAME_VERSION = 'v0.30.297';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -76276,6 +76276,7 @@ function fireMonsterProjectile(m, angleOffset) {
     // so the empowered-hit roll can fire on EVERY zodiac-sourced projectile,
     // not just the dedicated zodiac/zodiacHoming spawns.
     _zodiacAttacker: !!m.zodiacBoss,
+    _zodiacSign: m.zodiacSign || null,   // v0.30.297 — per-sign projectile rules read this at impact
     // v0.26.354 — tag standard field-mob (non-boss) projectiles so the
     // impact resolver can clamp their damage (see L50305-area cap). True
     // bosses (boss / zodiacBoss) are exempt and keep full punch.
@@ -77388,6 +77389,7 @@ function updateMonsters(dt) {
             vx: 0, vy: 0,
             w: cs.width, h: _colH, life: 22,
             damage: _csDmg, owner: 'enemy', skill: 'column',
+            _zodiacSign: m.zodiacSign || null,   // v0.30.297 — a pillar is a projectile too
             _defPierce: (typeof _defPierceMul === 'function') ? _defPierceMul(m) : 1,   // v0.29.265
             color: cs.color || '#ffeeaa',
             noGravity: true,
@@ -79210,6 +79212,16 @@ function updateMonsters(dt) {
         // players still feel the floor. Same final-loss idiom as above.
         const _bb = _bossHitBand(m, 'touch');
         if (_bb) _shownDmg = _gravBandClamp(dmg, _bb);
+      }
+      // v0.30.297 — SCORPIO CONTACT FLOOR (per user: "at least 40% of
+      // players max HP"). The zodiac touch band above is a fraction of the
+      // level reference, not of the player's pool, so the floor is applied
+      // here against getMaxHp(). After mitigation, as with every other rule
+      // in this pass.
+      if (m.zodiacSign === 'scorpio' && !player._god && _shownDmg > 0) {
+        const _scMax = (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100);
+        const _scFloor = Math.max(1, Math.floor(_scMax * 0.40));
+        if (_shownDmg < _scFloor) _shownDmg = _scFloor;
       }
       player.hp -= (player._god ? 0 : _shownDmg);
       player.lastHitTime = game.time;
@@ -90083,6 +90095,28 @@ function updateProjectiles(dt) {
         // (gap is already priced into p.damage at spawn) without capping
         // against the player's own bar — HP investment keeps full value.
         if (p._normalMob && _projLost > 0) _projLost = Math.min(_projLost, Math.floor((p.damage || dmg) * 1.35));
+        // v0.30.297 — PER-SIGN PROJECTILE RULES (per user). Applied AFTER the
+        // band clamps above, so block / warrior DR / aegis still mitigate
+        // first; this raises the floor rather than bypassing defence. Keyed
+        // on the sign stamped at every zodiac projectile spawn.
+        if (p._zodiacSign === 'capricorn' && !player._god && _projLost > 0) {
+          // "capricor projectiles deal at least 32% of players max HP"
+          const _capMax = (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100);
+          const _capFloor = Math.max(1, Math.floor(_capMax * 0.32));
+          if (_projLost < _capFloor) _projLost = _capFloor;
+        }
+        if (p._zodiacSign === 'aquarius' && !player._god) {
+          // "if touched by some projectiles, players are unable to use
+          // potions for 45 seconds". game.time is the 60Hz sim counter, the
+          // same clock the potion cooldown already uses, so the seal pauses
+          // with the game instead of draining behind a menu.
+          const _seal = (game.time | 0) + 2700;
+          if ((player._potionLockUntil | 0) < _seal) {
+            const _wasSealed = (player._potionLockUntil | 0) > (game.time | 0);
+            player._potionLockUntil = _seal;
+            if (!_wasSealed && typeof showToast === 'function') showToast('🧪 POTIONS SEALED — 45s', 'epic');
+          }
+        }
         if (p._radiance && _projLost > 0 && !player._god && Math.random() < (p._radiance.chance || 0.2)) {
           const _rmh = Math.max(1, (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100));
           let _rg = Math.max(1, Math.floor(_rmh * Math.min(1, p._radiance.frac || 0.99)));
@@ -101203,6 +101237,16 @@ function useConsumable(id) {
   // "drink-your-way-through" exploit while keeping the gameplay loop
   // honest. Inventory click + R/T quick keys + bound-potion dispatch
   // all funnel through here, so the gate covers every path.
+  // v0.30.297 — AQUARIUS POTION SEAL. Placed beside the map noPotion gate,
+  // which is the same shape and already covers every potion path: this
+  // function and useQuickPotion are the two chokepoints _useBoundPotion and
+  // the inventory both route through.
+  if ((player._potionLockUntil | 0) > (game.time | 0)) {
+    const _left = Math.ceil(((player._potionLockUntil | 0) - (game.time | 0)) / 60);
+    if (typeof showToast === 'function') showToast('🧪 Potions sealed by the Tidesworn — ' + _left + 's', 'common');
+    if (typeof audio !== 'undefined' && audio && audio.play) audio.play('hit');
+    return;
+  }
   if (game.mapData && game.mapData.noPotion) {
     if (typeof showToast === 'function') showToast('🚫 No potions inside the carriage — fight clean!', 'common');
     if (audio && audio.play) audio.play('hit');
@@ -101322,6 +101366,16 @@ function _setPotionCd(which) {
 function useQuickPotion(which, preferElixir) {
   // v0.26.1023 — noPotion map lockout at the entry (the auto-buy fallback path
   // bypassed useConsumable's gate and healed with gold + empty stock).
+  // v0.30.297 — AQUARIUS POTION SEAL. Placed beside the map noPotion gate,
+  // which is the same shape and already covers every potion path: this
+  // function and useQuickPotion are the two chokepoints _useBoundPotion and
+  // the inventory both route through.
+  if ((player._potionLockUntil | 0) > (game.time | 0)) {
+    const _left = Math.ceil(((player._potionLockUntil | 0) - (game.time | 0)) / 60);
+    if (typeof showToast === 'function') showToast('🧪 Potions sealed by the Tidesworn — ' + _left + 's', 'common');
+    if (typeof audio !== 'undefined' && audio && audio.play) audio.play('hit');
+    return;
+  }
   if (game.mapData && game.mapData.noPotion) {
     if (typeof showToast === 'function') showToast('🚫 No potions inside the carriage — fight clean!', 'common');
     if (typeof audio !== 'undefined' && audio && audio.play) audio.play('hit');
@@ -126483,6 +126537,7 @@ function zodiacBossAI(m, dt, distToPlayer) {
           owner: 'enemy', skill: 'zodiac', color: z.colors.aura,
           noGravity: true,
           _zodiacAttacker: true,
+          _zodiacSign: m.zodiacSign || null,   // v0.30.297
         });
       }
       m.atkAnimUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + 700;
@@ -127100,7 +127155,8 @@ function _zodiacAiGeneric(m, dt, distToPlayer, phase, z) {
           damage: m.atk * 0.85,
           owner: 'enemy', skill: 'zodiacHoming', color: z.colors.hi || z.colors.aura,
           homing: true, noGravity: true,
-          _zodiacAttacker: true,  // v0.25.822 — flag for empowered-hit roll at impact
+          _zodiacAttacker: true,
+          _zodiacSign: m.zodiacSign || null,   // v0.30.297  // v0.25.822 — flag for empowered-hit roll at impact
         });
       }
       // Brief toast — sign-themed so each zodiac feels distinct
