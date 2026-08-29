@@ -42,6 +42,10 @@ const hitbox = JSON.parse(m[3]);
 const isDefault = v => +v.s === 1 && +v.dx === 0 && +v.dy === 0;
 const entity = {};
 const hasFs = (a) => Array.isArray(a) && a.some(f => +f !== 1);
+// v0.30.314 — per-frame INTERVAL array (ms), from the animator's frame-timing
+// editor. Valid when it has 1-12 entries in [16, 2000]; entries are rounded.
+const hasFt = (a) => Array.isArray(a) && a.length >= 1 && a.length <= 12
+  && a.every(x => isFinite(+x) && +x >= 16 && +x <= 2000);
 for (const [st, v] of Object.entries(patch.calib)) {
   const e = { s: +v.s, dx: +v.dx, dy: +v.dy };
   // per-frame scale array: take the patch's, else preserve the baked one —
@@ -49,7 +53,11 @@ for (const [st, v] of Object.entries(patch.calib)) {
   const fs = hasFs(v.fs) ? v.fs.map(Number)
     : (calib[t] && calib[t][st] && hasFs(calib[t][st].fs) ? calib[t][st].fs : null);
   if (fs) e.fs = fs;
-  if (!isDefault(e) || e.fs) entity[st] = e;
+  // frame timing rides the same preserve-unless-replaced rule as fs
+  const ft = hasFt(v.ft) ? v.ft.map(x => Math.round(+x))
+    : (calib[t] && calib[t][st] && hasFt(calib[t][st].ft) ? calib[t][st].ft : null);
+  if (ft) e.ft = ft;
+  if (!isDefault(e) || e.fs || e.ft) entity[st] = e;
 }
 const before = JSON.stringify({ c: calib[t] || null, h: hitbox[t] || null });
 if (Object.keys(entity).length) calib[t] = entity; else delete calib[t];

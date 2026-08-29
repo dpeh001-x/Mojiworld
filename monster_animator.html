@@ -90,7 +90,7 @@
       <div class="mut" style="font-size:11px;margin-top:3px">renders EXACTLY what the game renders</div>
       <!-- build badge: bump alongside GAME_VERSION on every animator change,
            so a stale cached copy is identifiable at a glance -->
-      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.296</span>
+      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.315</span>
         <a id="lx-latest-link" href="animator.html" title="Cache-proof launcher: resolves main's current commit via the GitHub API and opens that exact build — use this if the badge looks old" style="color:#5b8cff;margin-left:6px">latest&#8599;</a></div>
       <script>
       // v0.29.246 — LIVE badge freshness probe. The static build string only
@@ -564,6 +564,20 @@
     const n = decodedN(arr);
     if (n === 0) return -1;
     if (n === 1) return 0;
+    // v0.30.314 — FRAME TIMING: when the app feeds a per-frame interval array
+    // (the frame-timing editor, boss attack/idle only — mirrors the game's
+    // _lxFtWalk), step by cumulative dwells instead of the fixed clock.
+    const ft = (window.__core && window.__core._ftFor) ? window.__core._ftFor(st) : null;
+    if (Array.isArray(ft)) {
+      const pp = st === 'idle';
+      const seqLen = pp ? 2 * n - 2 : n;
+      const base = GAME_FRAME_MS[st] || 48;
+      let total = 0;
+      for (let i = 0; i < seqLen; i++) { const fi = (!pp || i < n) ? i : seqLen - i; total += (ft[fi] > 0 ? ft[fi] : base); }
+      let tt = t % total;
+      for (let i = 0; i < seqLen; i++) { const fi = (!pp || i < n) ? i : seqLen - i; tt -= (ft[fi] > 0 ? ft[fi] : base); if (tt < 0) return fi; }
+      return 0;
+    }
     if (st === 'idle') {
       const seqLen = 2 * n - 2;
       const i = Math.floor(t / GAME_FRAME_MS.idle) % seqLen;
@@ -619,6 +633,9 @@
         out[t][s] = { s: +e.s > 0 ? +e.s : 1, dx: +e.dx || 0, dy: +e.dy || 0 };
         // per-frame scale array (game parity) — rides along untouched by the sliders
         if (Array.isArray(e.fs)) out[t][s].fs = e.fs.map(v => +v > 0 ? +v : 1);
+        // v0.30.314 — per-frame INTERVAL array (ms), authored in the frame-
+        // timing editor; the game's boss pickers honor it (see _lxCalibFt)
+        if (Array.isArray(e.ft)) out[t][s].ft = e.ft.map(v => +v >= 16 ? Math.round(+v) : 48);
       }
     }
     return out;
@@ -1292,10 +1309,12 @@
       for (const s of A.STATES) {
         const v = CC[t][s]; if (!v) continue;
         const hasFs = Array.isArray(v.fs) && v.fs.some(f => +f !== 1);
-        if (isDefault(v) && !hasFs) continue;
+        const hasFt = Array.isArray(v.ft) && v.ft.length;   // v0.30.314 — frame timing
+        if (isDefault(v) && !hasFs && !hasFt) continue;
         const k = A.calibKey(t, s);   // zodiac states store as 'zodiac/<state>'
         st[k] = { s: +v.s.toFixed(4), dx: +v.dx.toFixed(4), dy: +v.dy.toFixed(4) };
         if (hasFs) st[k].fs = v.fs.map(f => +(+f).toFixed(4));
+        if (hasFt) st[k].ft = v.ft.map(x => Math.round(+x));
       }
       if (Object.keys(st).length) out[t] = st;
     }
@@ -1349,10 +1368,30 @@
         `<input type="checkbox" id="fr-hold"${held ? ' checked' : ''} /> hold this frame ` +
         `<span class="mut">(stepping holds automatically)</span></label>`;
     if (isBoss) {
+      // v0.30.314 — FRAME TIMING (per user: "edit the interval from 1 frame
+      // to another, for boss monsters only"). The preview plays it live at
+      // in-game size; the game honors ft[] on the boss attack loop and idle
+      // ping-pong, and the gravitos punch/contact playback reads the values
+      // as relative weights inside its pattern window.
+      const baseMs = (window.__core.GAME_FRAME_MS && window.__core.GAME_FRAME_MS[st]) || 48;
+      const ftArr = Array.isArray(v.ft) ? v.ft : null;
+      const curFt = (ftArr && ftArr[i] >= 16) ? ftArr[i] : baseMs;
+      const ftTuned = ftArr ? ftArr.filter(x => Math.round(+x) !== baseMs).length : 0;
+      const ftOk = (st === 'attack' || st === 'idle');
       h += `<div class="sl"><label>scale</label>` +
         `<input type="range" id="fr-fs" min="0.5" max="2" step="0.005" value="${cur}" />` +
-        `<input type="number" id="fr-fs-n" min="0.5" max="2" step="0.005" value="${cur}" /></div>` +
-        `<button class="reset" id="fr-reset" style="width:100%">reset frame ${i + 1}</button>` +
+        `<input type="number" id="fr-fs-n" min="0.5" max="2" step="0.005" value="${cur}" /></div>`;
+      if (ftOk) {
+        h += `<div class="sl" title="how long frame ${i + 1} stays on screen before the next frame (game default ${baseMs}ms)"><label>⏱ ms</label>` +
+          `<input type="range" id="fr-ft" min="30" max="600" step="5" value="${curFt}" />` +
+          `<input type="number" id="fr-ft-n" min="16" max="2000" step="5" value="${curFt}" /></div>` +
+          `<div class="mut" style="font-size:11px;margin-bottom:6px">interval → next frame` +
+          `${ftTuned ? ` · <b>${ftTuned} tuned</b>` : ` · game default ${baseMs}ms`}` +
+          ` <button class="reset" id="fr-ft-clear" style="float:right">clear timing</button></div>`;
+      } else {
+        h += `<div class="mut" style="font-size:11px;margin-bottom:6px">⏱ frame timing is honored in-game for <b>attack</b> and <b>idle</b> only; this state keeps the engine clock.</div>`;
+      }
+      h += `<button class="reset" id="fr-reset" style="width:100%">reset frame ${i + 1}</button>` +
         `<div class="srow" style="margin-top:8px"><h3 style="font-size:11px">\u2696\uFE0F level on head + body</h3></div>` +
         `<div class="mut" style="font-size:11px;margin-bottom:6px">Measures each frame's HEAD AND BODY - opaque and dark, ` +
           `inside a central band - so wings, flame crests and lava veins do not vote, then fills <code>fs[]</code> ` +
@@ -1562,6 +1601,36 @@
       el.addEventListener('focus', snapshot, { once: true });
       el.addEventListener('input', () => setFrameScale(el.value));
     }
+    // v0.30.314 — frame-timing controls (boss attack/idle). Editing ANY
+    // frame materialises ft[] at the state's game default so untouched
+    // frames keep the engine pace; the live preview re-times instantly
+    // because gameFrameIndex reads the same array through _ftFor.
+    for (const id of ['fr-ft', 'fr-ft-n']) {
+      const el = document.getElementById(id); if (!el) continue;
+      el.addEventListener('focus', snapshot, { once: true });
+      el.addEventListener('input', () => {
+        const st = A.focusState, n = A.frameCount(st); if (!n) return;
+        const pin = A.getPinFrame();
+        const i = (pin != null) ? Math.max(0, Math.min(pin, n - 1)) : (A.shownFrame(st) || 0);
+        let val = Math.round(+el.value); if (!isFinite(val)) return;
+        val = Math.max(16, Math.min(2000, val));
+        const baseMs = (window.__core.GAME_FRAME_MS && window.__core.GAME_FRAME_MS[st]) || 48;
+        const v = A.CALIB()[A.owner()][st];
+        if (!Array.isArray(v.ft)) v.ft = new Array(n).fill(baseMs);
+        while (v.ft.length < n) v.ft.push(baseMs);
+        v.ft[i] = val;
+        const r = document.getElementById('fr-ft'), b = document.getElementById('fr-ft-n');
+        if (r) r.value = Math.max(30, Math.min(600, val)); if (b) b.value = val;
+        markDirty();
+      });
+    }
+    const ftClr = document.getElementById('fr-ft-clear');
+    if (ftClr) ftClr.onclick = () => {
+      snapshot();
+      const v = A.CALIB()[A.owner()][A.focusState];
+      delete v.ft;
+      markDirty(); window.__buildControls(); toast('frame timing cleared — engine clock restored');
+    };
     const rst = document.getElementById('fr-reset');
     if (rst) rst.onclick = () => {
       snapshot();
@@ -1599,6 +1668,18 @@
       markDirty(); window.__buildControls(); toast('per-frame scales cleared');
     };
   }
+
+  // v0.30.314 — feed the core clock the current entity's frame-timing array,
+  // gated exactly like the game: bosses only, attack + idle states only.
+  window.__core._ftFor = (st) => {
+    const ap = window.__app; if (!ap || !ap.cur) return null;
+    if (st !== 'attack' && st !== 'idle') return null;
+    const man = ap.MAN && ap.MAN[ap.cur];
+    if (!man || man.group !== 'boss') return null;
+    const cc = ap.CALIB()[ap.owner()];
+    const v = cc && cc[st];
+    return (v && Array.isArray(v.ft)) ? v.ft : null;
+  };
 
   function syncCard(st) {
     const v = A.CALIB()[A.owner()][st];
@@ -1826,6 +1907,7 @@
         const k = A.calibKey(owner, st);   // zodiac states store as 'zodiac/<state>'
         calib[k] = { s: r4(C[st].s), dx: r4(C[st].dx), dy: r4(C[st].dy) };
         if (Array.isArray(C[st].fs) && C[st].fs.some(f => +f !== 1)) calib[k].fs = C[st].fs.map(r4);
+        if (Array.isArray(C[st].ft) && C[st].ft.length) calib[k].ft = C[st].ft.map(x => Math.round(+x));   // v0.30.314 — frame timing
       }
       if (H[st]) hitbox[st] = { w: r4(H[st].w), h: r4(H[st].h), ox: r4(H[st].ox), oy: r4(H[st].oy) };
     }

@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.314';
+const GAME_VERSION = 'v0.30.315';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -14347,6 +14347,14 @@ function _lxAnimCalib(type, state) {
     if (Array.isArray(e.fs)) {
       const _fs = e.fs.map(v => { v = +v; return (v > 0) ? Math.max(0.2, Math.min(5, v)) : 1; });
       if (_fs.some(v => v !== 1)) res.fs = _fs;
+    }
+    // v0.30.315 — optional per-frame INTERVAL array (ft[frameIdx], ms), authored
+    // in the animator's frame-timing editor. Consumed by the BOSS pickers
+    // only: the attack loop and idle ping-pong step by these dwells, and the
+    // gravitos punch/contact playback reads them as relative weights.
+    if (Array.isArray(e.ft)) {
+      const _ft = e.ft.map(v => { v = +v; return (v >= 16 && v <= 2000) ? Math.round(v) : 0; });
+      if (_ft.some(v => v > 0)) res.ft = _ft.map(v => v > 0 ? v : 48);
     }
   }
   (_tc || (_LX_ANIM_CALIB_CACHE[type] = Object.create(null)))[state] = res;
@@ -120455,6 +120463,34 @@ function _loadBossFrames(map, subdir, types) {
 // track a phase pass offsetMs = seed − stateStart, so each state begins at
 // frame 0 the moment it is entered and idle herds spread out. Omitted → old
 // behaviour, so the dozens of legacy call sites are untouched.
+// v0.30.315 — FRAME TIMING. _lxCalibFt fetches the animator-authored per-frame
+// interval array for a boss (key, state), or null; _lxFtWalk steps a frame
+// sequence (straight or ping-pong) by those cumulative dwells instead of a
+// fixed frameMs. Boss-only by construction: only the boss pickers call it.
+function _lxCalibFt(key, state) {
+  const c = (typeof _lxAnimCalib === 'function') ? _lxAnimCalib(key, state) : null;
+  return (c && Array.isArray(c.ft)) ? c.ft : null;
+}
+function _lxFtWalk(frames, n, ft, offsetMs, pingpong) {
+  const seqLen = pingpong ? (2 * n - 2) : n;
+  let _total = 0;
+  for (let i = 0; i < seqLen; i++) { const fi = (!pingpong || i < n) ? i : seqLen - i; _total += (ft[fi] > 0 ? ft[fi] : 48); }
+  const _now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  let _t = Math.max(0, _now + (offsetMs || 0)) % _total;
+  for (let i = 0; i < seqLen; i++) {
+    const fi = (!pingpong || i < n) ? i : seqLen - i;
+    _t -= (ft[fi] > 0 ? ft[fi] : 48);
+    if (_t < 0) return frames[fi];
+  }
+  return frames[0];
+}
+function _lxFtReadyN(frames) {
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);
+  let n = frames._readyN || 0;
+  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
+  frames._readyN = n;
+  return n;
+}
 function _bossPingPongFrame(frames, frameMs, maxLong, offsetMs) {
   if (frames && typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, maxLong || 720);   // v0.29.284 — base 720 logical = measured max boss draw (incl. star-form calib scale)
   if (!frames) return null;
@@ -120535,7 +120571,17 @@ function _bossAnimPhase(frames, m, state, desync) {
   if (!m || !frames || !frames.length) return 0;
   return _mobAnimPhase(m, state, desync);
 }
-function _bossAttackFrame(key, m) { return _bossLoopFrame(BOSS_ATTACK_FRAMES[key], _BOSS_ATK_FRAME_MS, undefined, _bossAnimPhase(BOSS_ATTACK_FRAMES[key], m, 'attack', false)); }
+function _bossAttackFrame(key, m) {
+  const _fr = BOSS_ATTACK_FRAMES[key];
+  const _ft = _fr ? _lxCalibFt(key, 'attack') : null;   // v0.30.315 — animator frame timing
+  if (_ft) {
+    const n = _lxFtReadyN(_fr);
+    if (n === 0) return null;
+    if (n === 1) return _fr[0];
+    return _lxFtWalk(_fr, n, _ft, _bossAnimPhase(_fr, m, 'attack', false), false);
+  }
+  return _bossLoopFrame(_fr, _BOSS_ATK_FRAME_MS, undefined, _bossAnimPhase(_fr, m, 'attack', false));
+}
 // v0.30.236 — TYRANT'S STOMP playback. Deliberately NOT _bossAttackFrame: at
 // 48 ms a nine-frame set is over in 432 ms, so across the 1700 ms pattern the
 // loop would play the stomp four times — a tap-dance, not a slam. Instead the
@@ -120675,7 +120721,23 @@ function _gravitosPunchPair(m) {
   //         1.2 keeps a little acceleration into the strike without it.
   // Measured after, on the crush: gaps 159,124,114,108,103,100,97,95 (max
   // halved from 333) and the last frame holds 600 ms instead of 225.
-  const tE = Math.pow(Math.min(1, t / _GRAV_PUNCH_PLAY), _GRAV_PUNCH_EASE);
+  // v0.30.315 — animator frame timing: when ft[] exists for this punch set,
+  // the values act as RELATIVE weights across the same play window,
+  // replacing the power-curve spacing. Window + tail hold are unchanged.
+  const _ftp = _lxCalibFt(_gravCastKey(m, 'punch'), 'attack');
+  const tW = Math.min(1, t / _GRAV_PUNCH_PLAY);
+  if (_ftp) {
+    let _tot = 0;
+    for (let i2 = 0; i2 < n; i2++) _tot += (_ftp[i2] > 0 ? _ftp[i2] : 48);
+    let _i = n - 1, _f = 1, _acc = 0;
+    for (let i2 = 0; i2 < n; i2++) {
+      const _w = (_ftp[i2] > 0 ? _ftp[i2] : 48) / _tot;
+      if (tW < _acc + _w) { _i = i2; _f = (_w > 0) ? (tW - _acc) / _w : 1; break; }
+      _acc += _w;
+    }
+    return { a: frames[_i], b: frames[Math.min(n - 1, _i + 1)], f: Math.min(1, _f), i: _i, n };
+  }
+  const tE = Math.pow(tW, _GRAV_PUNCH_EASE);
   const idxF = tE * (n - 1);
   const i = Math.min(n - 1, Math.floor(idxF));
   return { a: frames[i], b: frames[Math.min(n - 1, i + 1)], f: Math.min(1, idxF - i), i, n };
@@ -120834,12 +120896,15 @@ function _gravitosContactFrame(m, key) {
   frames._readyN = n;
   if (n === 0) return null;
   if (n === 1) return frames[0];
+  // v0.30.315 — animator frame timing wins over the built-in strike weights
+  const _ftw = _lxCalibFt(key, 'attack');
+  const _wOf = (i) => _ftw ? ((_ftw[i] > 0 ? _ftw[i] : _GRAV_ATK_FRAME_MS) / _GRAV_ATK_FRAME_MS) : (_GRAV_ATK_WEIGHTS[i] || 1);
   let _total = 0;
-  for (let i = 0; i < n; i++) _total += (_GRAV_ATK_WEIGHTS[i] || 1);
+  for (let i = 0; i < n; i++) _total += _wOf(i);
   const _now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const _off = _bossAnimPhase(frames, m, 'attack', false) || 0;
   let _t = (Math.max(0, _now + _off) / _GRAV_ATK_FRAME_MS) % _total;
-  for (let i = 0; i < n; i++) { _t -= (_GRAV_ATK_WEIGHTS[i] || 1); if (_t < 0) return frames[i]; }
+  for (let i = 0; i < n; i++) { _t -= _wOf(i); if (_t < 0) return frames[i]; }
   return frames[n - 1];
 }
 // === BOSS IDLE ANIMATION (v0.26.314) === optional 4-frame gentle idle loop per
@@ -120850,7 +120915,17 @@ function _gravitosContactFrame(m, key) {
 const BOSS_IDLE_FRAMES = Object.create(null);
 _loadBossFrames(BOSS_IDLE_FRAMES, 'idle');
 const _BOSS_IDLE_FRAME_MS = 130;   // slower than attack — relaxed breathing (~2s cycle at 9 frames)
-function _bossIdleFrame(key, m) { return _bossPingPongFrame(BOSS_IDLE_FRAMES[key], _BOSS_IDLE_FRAME_MS, undefined, _bossAnimPhase(BOSS_IDLE_FRAMES[key], m, 'idle', true)); }   // v0.29.418 — optional m: per-entity phase
+function _bossIdleFrame(key, m) {   // v0.29.418 — optional m: per-entity phase
+  const _fr = BOSS_IDLE_FRAMES[key];
+  const _ft = _fr ? _lxCalibFt(key, 'idle') : null;   // v0.30.315 — animator frame timing
+  if (_ft) {
+    const n = _lxFtReadyN(_fr);
+    if (n === 0) return null;
+    if (n === 1) return _fr[0];
+    return _lxFtWalk(_fr, n, _ft, _bossAnimPhase(_fr, m, 'idle', true), true);
+  }
+  return _bossPingPongFrame(_fr, _BOSS_IDLE_FRAME_MS, undefined, _bossAnimPhase(_fr, m, 'idle', true));
+}
 // v0.26.322 — walk cycle, played while the boss is moving horizontally (and not
 // attacking). Falls back to idle, then the static sprite, when absent.
 const BOSS_WALK_FRAMES = Object.create(null);
