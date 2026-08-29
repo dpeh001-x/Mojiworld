@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.293';
+const GAME_VERSION = 'v0.30.294';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -69711,7 +69711,7 @@ function drawSmoothFx(_behindPass) {
         ctx.rotate(fx.angle);
         // Sprite faces "open-right" — translate so the swing emanates
         // from the cast point and arcs outward.
-        ctx.drawImage(_slashSprite, Math.round(-sz * 0.15), Math.round(-sz / 2), Math.round(sz), Math.round(sz));   // v0.26.x perf — integer blit
+        ctx.drawImage(_lxProjScaled(_slashSprite, Math.round(sz)), Math.round(-sz * 0.15), Math.round(-sz / 2), Math.round(sz), Math.round(sz));   // v0.26.x perf — integer blit   // v0.30.294 perf — 768px art, drawn twice per frame per slash
         ctx.restore();
         continue;
       }
@@ -69947,10 +69947,10 @@ function drawSmoothFx(_behindPass) {
           ctx.save();
           ctx.translate(sx, fx.y);
           ctx.rotate(_age * fx.spin);
-          ctx.drawImage(_explosionSprite, -sz / 2, -sz / 2, sz, sz);
+          ctx.drawImage(_lxProjScaled(_explosionSprite, Math.round(sz)), -sz / 2, -sz / 2, sz, sz);   // v0.30.294 perf
           ctx.restore();
         } else {
-          ctx.drawImage(_explosionSprite, sx - sz / 2, fx.y - sz / 2, sz, sz);
+          ctx.drawImage(_lxProjScaled(_explosionSprite, Math.round(sz)), sx - sz / 2, fx.y - sz / 2, sz, sz);   // v0.30.294 perf
         }
         ctx.globalAlpha = 1;
         continue;
@@ -103547,6 +103547,9 @@ function _hashStr(s) {
 }
 
 // Pick the right bitmap for the current map. Returns an Image or null.
+// v0.30.294 perf — see the memo inside _pickBGImage; _loaded only ever flips
+// false->true, so allocation-free loaded-counts are a sufficient cache key.
+const _PICKBG_MEMO = { md: null, cineN: -1, cycN: -1, result: null };
 function _pickBGImage() {
   const md = game && game.mapData;
   if (!md) return null;
@@ -103567,25 +103570,33 @@ function _pickBGImage() {
     if (BG_IMAGES.everdawnMegamall._loaded) return BG_IMAGES.everdawnMegamall;
     if (BG_IMAGES.valley._loaded) return BG_IMAGES.valley;
   }
+  // v0.30.294 perf — the tail below used to run two .filter() allocations plus
+  // a string hash EVERY frame. The pick depends only on the map, the art
+  // pack, and WHICH images have loaded; loaded counts are cheap to take and
+  // sufficient as a key, and the memo self-heals as images finish decoding.
+  let _cineN = 0;
+  if (_ART_PACK === 'cinematic') { for (const img of BG_CINEMATIC_VARIANTS) if (img && img._loaded) _cineN++; }
+  let _cycN = 0;
+  for (let _bi = 0; _bi < _BG_CYCLE.length; _bi++) { const k = _BG_CYCLE[_bi]; if (BG_IMAGES[k] && BG_IMAGES[k]._loaded) _cycN++; }
+  if (_PICKBG_MEMO.md === md && _PICKBG_MEMO.cineN === _cineN && _PICKBG_MEMO.cycN === _cycN) return _PICKBG_MEMO.result;
+  let _res = null;
   // Optional cinematic art pack for non-town traversal maps. This runs
   // after explicit/town rules so authored map intent still wins.
   if (_ART_PACK === 'cinematic' && !md.isTown && !md.isBossArena) {
     const loaded = BG_CINEMATIC_VARIANTS.filter(img => img && img._loaded);
-    if (loaded.length) return loaded[_hashStr((md.id || md.name || '') + ':cinematic') % loaded.length];
+    if (loaded.length) _res = loaded[_hashStr((md.id || md.name || '') + ':cinematic') % loaded.length];
   }
   // Combat maps: cycle the loaded slots by map-ID hash so different
   // maps get different backdrops automatically. Ensures variety even
   // if none of the maps have a manual `bg` override set.
-  if (!md.isTown) {
+  if (!_res && !md.isTown) {
     const loaded = _BG_CYCLE.filter(k => BG_IMAGES[k] && BG_IMAGES[k]._loaded);
-    if (loaded.length) {
-      const pick = loaded[_hashStr(md.id || md.name || '') % loaded.length];
-      return BG_IMAGES[pick];
-    }
+    if (loaded.length) _res = BG_IMAGES[loaded[_hashStr(md.id || md.name || '') % loaded.length]];
   }
   // Final fallback: legacy main slot.
-  if (BG_IMAGES.main && BG_IMAGES.main._loaded) return BG_IMAGES.main;
-  return null;
+  if (!_res && BG_IMAGES.main && BG_IMAGES.main._loaded) _res = BG_IMAGES.main;
+  _PICKBG_MEMO.md = md; _PICKBG_MEMO.cineN = _cineN; _PICKBG_MEMO.cycN = _cycN; _PICKBG_MEMO.result = _res;
+  return _res;
 }
 
 // Cache the sky gradient across frames — only rebuild when the map (or
@@ -130681,14 +130692,14 @@ function drawProjectiles() {
           // v0.26.170 — multiplier 1.1 → 0.5 (hitbox grew to match
           // rendered diameter; visual stays at ~31 px).
           const r = p.w * 0.5;
-          ctx.drawImage(LX_MOB_PROJ.mspore, cx - r, cy - r, r * 2, r * 2);
+          ctx.drawImage(_lxProjScaled(LX_MOB_PROJ.mspore, Math.round(r * 2)), cx - r, cy - r, r * 2, r * 2);   // v0.30.294 perf
         }   // procedural circle fallback removed — sprite always present
         // v0.25.21 — dust emission extracted to emitProjectileTrails()
       } else if (p.skill === 'mdark') {
         if (_lxMobProjReady(LX_MOB_PROJ.mdark)) {
           // v0.26.170 — multiplier 1.1 → 0.5.
           const r = p.w * 0.5;
-          ctx.drawImage(_projAnimFrame('mdark') || LX_MOB_PROJ.mdark, cx - r, cy - r, r * 2, r * 2);
+          ctx.drawImage(_lxProjScaled(_projAnimFrame('mdark') || LX_MOB_PROJ.mdark, Math.round(r * 2)), cx - r, cy - r, r * 2, r * 2);   // v0.30.294 perf
         }   // procedural circle fallback removed — sprite always present
         // v0.25.21 — sparkle emission extracted to emitProjectileTrails()
       } else if (p.skill === 'msplinter') {
@@ -130701,7 +130712,7 @@ function drawProjectiles() {
           // 1.5:1 aspect ratio at the new larger p.w; rendered size
           // stays ~31×21 px).
           const w = p.w * 1.0, h = p.w * 0.667;
-          ctx.drawImage(_projAnimFrame('msplinter') || LX_MOB_PROJ.msplinter, -w / 2, -h / 2, w, h);
+          ctx.drawImage(_lxProjScaled(_projAnimFrame('msplinter') || LX_MOB_PROJ.msplinter, Math.round(Math.max(w, h))), -w / 2, -h / 2, w, h);   // v0.30.294 perf
         } else {
           // Procedural fallback (wooden shard).
           ctx.fillStyle = '#4a2a0a';
@@ -130722,7 +130733,7 @@ function drawProjectiles() {
         if (_lxMobProjReady(LX_MOB_PROJ.mtoxic)) {
           // v0.26.170 — multiplier 1.15 → 0.5.
           const r = p.w * 0.5;
-          ctx.drawImage(LX_MOB_PROJ.mtoxic, cx - r, cy - r, r * 2, r * 2);
+          ctx.drawImage(_lxProjScaled(LX_MOB_PROJ.mtoxic, Math.round(r * 2)), cx - r, cy - r, r * 2, r * 2);   // v0.30.294 perf
         }   // procedural circle fallback removed — sprite always present
         // v0.25.21 — drip emission extracted to emitProjectileTrails()
       } else if (p.skill === 'shard') {
@@ -130942,7 +130953,7 @@ function drawProjectiles() {
           // v0.26.170 — multipliers 2.2/1.3 → 1.0/0.59 (preserves
           // 1.69:1 aspect at the new larger p.w; rendered ~40×24 px).
           const w = p.w * 1.0, h = p.w * 0.59;
-          ctx.drawImage(LX_MOB_PROJ.mticket, -w / 2, -h / 2, w, h);
+          ctx.drawImage(_lxProjScaled(LX_MOB_PROJ.mticket, Math.round(Math.max(w, h))), -w / 2, -h / 2, w, h);   // v0.30.294 perf
         } else {
           // Procedural ticket stub: gold body, dark perforation edge, red stamp.
           const tw = p.w * 2.0, th = p.w * 1.1;
@@ -131632,7 +131643,7 @@ function drawHazards(_behindPass) {
         ctx.fillStyle = 'rgba(255,80,0,0.28)';
         ctx.beginPath(); ctx.ellipse(lx, h._groundY - 2, h.w * 0.55, 6, 0, 0, Math.PI * 2); ctx.fill();
         if (typeof _lxVfxReady === 'function' && _lxVfxReady((_vfHz = _lxVfxFrame('lavaDrop')))) {
-          ctx.drawImage(_vfHz, lx - h.w * 0.8, h.y - h.h * 0.3, h.w * 1.6, h.h * 1.6);
+          ctx.drawImage(_lxProjScaled(_vfHz, Math.round(Math.max(h.w, h.h) * 1.6)), lx - h.w * 0.8, h.y - h.h * 0.3, h.w * 1.6, h.h * 1.6);   // v0.30.294 perf
         } else {
           ctx.fillStyle = '#ffcc33';
           ctx.beginPath(); ctx.ellipse(lx, h.y + h.h/2, h.w*0.5, h.h*0.6, 0, 0, Math.PI*2); ctx.fill();
@@ -131835,7 +131846,7 @@ function drawHazards(_behindPass) {
       if (_lxVfxReady((_vfHz = _lxVfxFrame('poisonCloud')))) {
         const _w = h.w * 1.2, _hh = _w * 0.42;
         ctx.save(); ctx.globalAlpha = 0.92 * fade;
-        ctx.drawImage(_vfHz, sx - _w / 2, h.y + 8 - _hh * 0.62, _w, _hh);
+        ctx.drawImage(_lxProjScaled(_vfHz, Math.round(Math.max(_w, _hh))), sx - _w / 2, h.y + 8 - _hh * 0.62, _w, _hh);   // v0.30.294 perf
         ctx.restore();
         continue;
       }
@@ -131874,7 +131885,7 @@ function drawHazards(_behindPass) {
       if (_lxVfxReady((_vfHz = _lxVfxFrame('shockRing')))) {
         const _d = (r + 6) * 2;
         ctx.save(); ctx.globalAlpha = Math.max(0, fade);
-        ctx.drawImage(_vfHz, sx - _d / 2, cy - _d * 0.32, _d, _d * 0.64);
+        ctx.drawImage(_lxProjScaled(_vfHz, Math.round(_d)), sx - _d / 2, cy - _d * 0.32, _d, _d * 0.64);   // v0.30.294 perf
         ctx.restore();
         continue;
       }
@@ -132102,7 +132113,7 @@ function drawHazards(_behindPass) {
       ctx.globalAlpha = pulse * fade;
       const cw = h.radius * 2.3, ch = cw * 0.78;
       if (_lxVfxReady((_vfHz = _lxVfxFrame('cloudburst')))) {
-        ctx.drawImage(_vfHz, sx - cw / 2, cy - ch / 2 + bob, cw, ch);
+        ctx.drawImage(_lxProjScaled(_vfHz, Math.round(Math.max(cw, ch))), sx - cw / 2, cy - ch / 2 + bob, cw, ch);   // v0.30.294 perf
       } else {
         // Fallback: a puffy three-lobe cloud, still side-on.
         ctx.fillStyle = `rgba(210,232,255,${0.85 * fade})`;
@@ -132633,12 +132644,16 @@ function drawHazards(_behindPass) {
       const meteorY = _topY + prog * 400;
       if (_lxPlayerProjReady(_meteorSprite)) {
         const sz = 100 + prog * 70;
-        ctx.drawImage(_meteorSprite, sx - sz/2, meteorY - sz/2, sz, sz);
+        // v0.30.294 perf — one bake serves the head and all six trail copies:
+        // a meteor shower kept many of these alive at once, each doing
+        // seven full-resolution resamples per frame.
+        const _msDraw = _lxProjScaled(_meteorSprite, Math.round(sz));
+        ctx.drawImage(_msDraw, sx - sz/2, meteorY - sz/2, sz, sz);
         // Fiery wisp trail behind it
         for (let i = 1; i <= 6; i++) {
           ctx.globalAlpha = 0.45 - i * 0.06;
           const tsz = sz * (1 - i * 0.10);
-          ctx.drawImage(_meteorSprite, sx - tsz/2 + (Math.random() - 0.5) * 8, meteorY - tsz/2 - i * 22, tsz, tsz);
+          ctx.drawImage(_msDraw, sx - tsz/2 + (Math.random() - 0.5) * 8, meteorY - tsz/2 - i * 22, tsz, tsz);
         }
         ctx.globalAlpha = 1;
       } else {
