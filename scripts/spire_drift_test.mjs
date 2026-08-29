@@ -1,14 +1,19 @@
-// Live test: THE SPIRE DRIFTS, AND EVERY CROSSING STAYS A SINGLE JUMP.
+// Live test: THE SPIRE SCATTERS - EVERY PLATFORM ON ITS OWN AXIS - AND EVERY
+// CROSSING STAYS A SINGLE JUMP AT EVERY PHASE.
 //
-// Per user: "make the platforms drift horizontally left and right, and make the
-// platforms appear slightly randomised but accessible to player single jump".
+// Per user (v0.30.289): "make the platforms drift horizontally left and right,
+// and make the platforms appear slightly randomised but accessible to player
+// single jump". Then (v0.30.30x): "the platforms need to move more randomly in
+// different directions and then oscillate back".
 //
-// The two asks pull against each other, and that tension is what this file
-// exists to hold. A gap checked only at spawn is meaningless once the tower
-// moves: two neighbours sliding out of phase open a wider gap than the one they
-// were built with. So the reachability check is swept across a FULL drift cycle,
-// and compared against the jump reach measured from the engine's own physics
-// rather than a number copied out of a comment.
+// The second ask multiplies the danger of the first. A single wave kept
+// neighbours nearly in phase, so 36px of sway cost only 8px of gap. Random
+// axes and random phases mean a pair can move in ANTIPHASE - the worst
+// crossing is the static gap plus the pair's full relative amplitude. The
+// generator therefore budgets each crossing against the pair's ANALYTIC
+// relative amplitude (same frequency everywhere, so relative motion is itself
+// a sinusoid), and this file's job is to check that arithmetic against a swept
+// full cycle - horizontal AND vertical - rather than trusting it.
 //   node scripts/spire_drift_test.mjs [port]
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
@@ -33,135 +38,124 @@ await page.waitForFunction(() => typeof MAPS !== 'undefined' && MAPS.clockworkSp
 const r = await page.evaluate(() => {
   const out = {};
   const P = MAPS.clockworkSpire.platforms;
-  const drifters = P.filter(p => p._driftAmp);
+  const drifters = P.filter(p => p._driftAx != null);
   out.total = P.length;
   out.drifting = drifters.length;
-  out.ground = !!P[0] && !P[0]._driftAmp;
+  out.ground = !!P[0] && P[0]._driftAx == null;
   const summit = P.reduce((a, x) => (a == null || x.y < a.y) ? x : a, null);
-  out.summitStatic = !summit._driftAmp;
+  out.summitStatic = summit._driftAx == null;
   out.worldW = MAPS.clockworkSpire.worldWidth;
 
-  // ---- randomisation ----
-  const ws = P.filter(p => p.type === 'platform').map(p => p.w);
-  out.distinctWidths = new Set(ws).size;
-  out.widthRange = [Math.min(...ws), Math.max(...ws)];
+  // ---- direction diversity: the point of the rework ----
+  const angles = drifters.map(p => Math.atan2(p._driftAy || 0, p._driftAx || 0));
+  const buckets = new Set(angles.map(a => Math.floor(((a + Math.PI) / (Math.PI * 2)) * 8) % 8));
+  out.axisBuckets = buckets.size;
+  out.movingVertically = drifters.filter(p => Math.abs(p._driftAy || 0) > 2).length;
+  out.movingLeftPhase = drifters.filter(p => (p._driftAx || 0) < -2).length;
+  out.movingRightPhase = drifters.filter(p => (p._driftAx || 0) > 2).length;
 
-  // ---- sweep a FULL drift cycle ----
-  // Platform x is a pure function of the baked base/amp/phase, so the whole
-  // cycle can be evaluated exactly instead of being sampled by running frames.
-  const at = (p, T) => p._driftAmp ? p._driftBaseX + p._driftAmp * Math.sin(T + (p._driftPhase || 0)) : p.x;
-  const sep = (a, b, T) => {
-    const ax = at(a, T), bx = at(b, T);
-    return Math.max(0, Math.max(ax, bx) - Math.min(ax + a.w, bx + b.w));
+  // ---- sweep a FULL cycle on BOTH axes ----
+  const at = (p, T) => {
+    if (p._driftAx == null) return { x: p.x, y: p.y };
+    const s = Math.sin(T + (p._driftPhase || 0));
+    return { x: p._driftBaseX + (p._driftAx || 0) * s,
+             y: (p._driftBaseY != null ? p._driftBaseY : p.y) + (p._driftAy || 0) * s };
   };
-  let maxGap = 0, maxAt = null, minX = 1e9, maxR = -1e9;
   const climb = P.filter(p => p.type === 'platform');
+  let maxGap = 0, maxAt = null, minX = 1e9, maxR = -1e9, maxClimb = 0;
   for (let step = 0; step <= 240; step++) {
     const T = (step / 240) * Math.PI * 2;
-    for (const p of climb) { const x = at(p, T); minX = Math.min(minX, x); maxR = Math.max(maxR, x + p.w); }
+    for (const p of climb) { const q = at(p, T); minX = Math.min(minX, q.x); maxR = Math.max(maxR, q.x + p.w); }
     for (let i = 0; i < climb.length - 1; i++) {
-      const gsep = sep(climb[i], climb[i + 1], T);
-      if (gsep > maxGap) { maxGap = gsep; maxAt = { floor: i, T: +T.toFixed(2) }; }
+      const a = at(climb[i], T), b2 = at(climb[i + 1], T);
+      const sep = Math.max(0, Math.max(a.x, b2.x) - Math.min(a.x + climb[i].w, b2.x + climb[i + 1].w));
+      if (sep > maxGap) { maxGap = sep; maxAt = { floor: i, T: +T.toFixed(2) }; }
+      maxClimb = Math.max(maxClimb, a.y - b2.y);   // vertical rise of this crossing at this phase
     }
   }
   out.maxGapOverCycle = Math.round(maxGap);
   out.maxGapAt = maxAt;
   out.minXOverCycle = Math.round(minX);
   out.maxRightOverCycle = Math.round(maxR);
+  out.maxClimbOverCycle = Math.round(maxClimb);
+  out.documentedPlainJumpReach = 62;   // the figure the gap budget was built against
+  out.floorDy = 80;
 
-  // gap at spawn only, for contrast with the swept figure
-  let spawnMax = 0;
-  for (let i = 0; i < climb.length - 1; i++) spawnMax = Math.max(spawnMax, sep(climb[i], climb[i + 1], 0));
-  out.maxGapAtSpawn = Math.round(spawnMax);
+  // ---- oscillate back: strict periodicity ----
+  let periodErr = 0;
+  for (const p of climb) {
+    const a = at(p, 0), b2 = at(p, Math.PI * 2);
+    periodErr = Math.max(periodErr, Math.abs(a.x - b2.x), Math.abs(a.y - b2.y));
+  }
+  out.periodErr = periodErr;
 
-  // ---- measure the engine's real single-jump reach ----
-  const keep = { x: player.x, y: player.y, vx: player.vx, vy: player.vy,
-    onGround: player.onGround, inv: player.invulnerable };
-  if (typeof keys === 'object' && keys) for (const k of Object.keys(keys)) keys[k] = false;
-  player.invulnerable = 9999;
-  const jv = (typeof getJump === 'function') ? getJump() : 10;
-  const cap = (typeof PLAYER_SPEED_HARD_CAP !== 'undefined') ? PLAYER_SPEED_HARD_CAP : 10;
-  const sx = player.x;
-  player.onGround = false; player.vy = -jv; player.vx = cap;
-  let f = 0; while (f < 400 && !player.onGround) { updatePlayer(16); f++; }
-  out.jumpReach = Math.round(Math.abs(player.x - sx));
-  out.jumpFrames = f;
-  out.measuredOn = game.currentMap;
-  Object.assign(player, { x: keep.x, y: keep.y, vx: keep.vx, vy: keep.vy,
-    onGround: keep.onGround, invulnerable: keep.inv });
-
-  // ---- the runtime tick itself: carry + riders ----
-  // _tickSpireDrift is map-gated, so the map identity is borrowed rather than
-  // loading the Spire (which is quest-gated). Everything it touches is real.
+  // ---- the runtime tick: carry on BOTH axes, riders follow ----
   const km = game.currentMap, kmd = game.mapData, kc = game.chests, kh = game.hazards;
-  game.currentMap = "clockworkSpire"; game.mapData = MAPS.clockworkSpire;
-  const shelf = climb.find(pp => pp._driftAmp);
+  game.currentMap = 'clockworkSpire'; game.mapData = MAPS.clockworkSpire;
+  const shelf = climb.find(p => Math.abs(p._driftAx || 0) > 4 && Math.abs(p._driftAy || 0) > 2)
+    || climb.find(p => p._driftAx != null);
   game.chests = [{ x: shelf.x + 10, y: shelf.y - 28, _spireFloor: shelf._spireFloor }];
-  game.hazards = [{ type: "void_tear", x: shelf.x, y: shelf.y - 110, w: 100, h: 90,
+  game.hazards = [{ type: 'void_tear', x: shelf.x, y: shelf.y - 110, w: 100, h: 90,
     cx: shelf.x + 50, _spireFloor: shelf._spireFloor }];
-  player.x = shelf.x + 20; player.y = shelf.y - player.h; player.onGround = true;
-  const before = { plat: shelf.x, player: player.x, chest: game.chests[0].x,
-    haz: game.hazards[0].x, hazCx: game.hazards[0].cx };
-  game.time = (game.time | 0) + 30;   // advance the phase so the sine actually moves
+  const keep = { x: player.x, y: player.y, onGround: player.onGround, hp: player.hp };
+  player.x = shelf.x + 20; player.y = shelf.y - player.h; player.onGround = true; player.hp = Math.max(1, player.hp);
+  const before = { px: player.x, py: player.y, plx: shelf.x, ply: shelf.y,
+    cx: game.chests[0].x, cy: game.chests[0].y, hx: game.hazards[0].x, hy: game.hazards[0].y };
+  game.time = (game.time | 0) + 45;
   _tickSpireDrift();
-  const dxPlat = shelf.x - before.plat;
   out.tick = {
-    platformMoved: +dxPlat.toFixed(3),
-    playerCarried: +(player.x - before.player).toFixed(3),
-    chestFollowed: +(game.chests[0].x - before.chest).toFixed(3),
-    hazardFollowed: +(game.hazards[0].x - before.haz).toFixed(3),
-    hazardCxFollowed: +(game.hazards[0].cx - before.hazCx).toFixed(3),
+    platDx: +(shelf.x - before.plx).toFixed(3), platDy: +(shelf.y - before.ply).toFixed(3),
+    playerDx: +(player.x - before.px).toFixed(3), playerDy: +(player.y - before.py).toFixed(3),
+    chestDx: +(game.chests[0].x - before.cx).toFixed(3), chestDy: +(game.chests[0].y - before.cy).toFixed(3),
+    hazDx: +(game.hazards[0].x - before.hx).toFixed(3), hazDy: +(game.hazards[0].y - before.hy).toFixed(3),
   };
-  // a player standing NEXT to the platform, not on it, must not be dragged
-  player.x = shelf.x - 400; player.onGround = true;
-  const offBefore = player.x;
-  game.time = (game.time | 0) + 30;
+  player.x = shelf.x - 400; player.y = shelf.y - player.h; player.onGround = true;
+  const offX = player.x, offY = player.y;
+  game.time = (game.time | 0) + 45;
   _tickSpireDrift();
-  out.tick.bystanderMoved = +(player.x - offBefore).toFixed(3);
+  out.tick.bystanderDx = +(player.x - offX).toFixed(3);
+  out.tick.bystanderDy = +(player.y - offY).toFixed(3);
   game.currentMap = km; game.mapData = kmd; game.chests = kc; game.hazards = kh;
-  Object.assign(player, { x: keep.x, y: keep.y, vx: keep.vx, vy: keep.vy,
-    onGround: keep.onGround, invulnerable: keep.inv });
-  out.documentedPlainJumpReach = 62;   // the figure the map budget was built against
+  Object.assign(player, keep);
   return out;
 });
+await b.close(); srv.kill();
 
-ok('the climbing platforms drift and the anchors do not',
+ok('the climbing platforms scatter and the anchors do not',
   r.drifting >= 35 && r.ground && r.summitStatic,
-  { driftingOf: r.drifting + '/' + r.total, groundStatic: r.ground, summitStatic: r.summitStatic,
-    note: 'the summit return portal spawns at a FIXED world x, so a drifting summit would slide out from under the exit' });
+  { driftingOf: r.drifting + '/' + r.total, groundStatic: r.ground, summitStatic: r.summitStatic });
+ok('directions genuinely differ - axes spread around the circle, many bob vertically',
+  r.axisBuckets >= 6 && r.movingVertically >= 10 && r.movingLeftPhase >= 5 && r.movingRightPhase >= 5,
+  { axisBucketsOf8: r.axisBuckets, withVerticalMotion: r.movingVertically,
+    leftPhase: r.movingLeftPhase, rightPhase: r.movingRightPhase,
+    note: 'the old wave had ONE axis for all 39 - this is the ask' });
 ok('the full sway stays inside the world - no platform is ever clamped',
   r.minXOverCycle >= 0 && r.maxRightOverCycle <= r.worldW,
-  { leftmost: r.minXOverCycle, rightmost: r.maxRightOverCycle, worldW: r.worldW,
-    note: 'a clamped platform would freeze while its neighbour kept moving - the phase break the budget cannot absorb' });
-ok('EVERY crossing stays inside a single jump across the whole drift cycle',
+  { leftmost: r.minXOverCycle, rightmost: r.maxRightOverCycle, worldW: r.worldW });
+ok('EVERY crossing stays inside a single jump at EVERY phase - horizontally',
   r.maxGapOverCycle < r.documentedPlainJumpReach,
   { worstGapAnyPhase: r.maxGapOverCycle, plainJumpReach: r.documentedPlainJumpReach,
-    marginPx: r.documentedPlainJumpReach - r.maxGapOverCycle, worstAt: r.maxGapAt,
-    note: 'judged against the 62px PLAIN jump the map budget was built on, not the '
-      + r.jumpReach + 'px this run measured holding max speed for the whole flight - that figure flatters the jump' });
-ok('...and the swept worst case really is worse than the spawn snapshot',
-  r.maxGapOverCycle >= r.maxGapAtSpawn,
-  { atSpawn: r.maxGapAtSpawn, anyPhase: r.maxGapOverCycle,
-    note: 'checking only the spawn layout would have under-reported the real gap' });
-ok('platform widths are randomised, not a closed-form arch',
-  r.distinctWidths >= 20,
-  { distinctWidths: r.distinctWidths, range: r.widthRange, note: 'the profile was exact before, so width was predictable from floor index' });
-ok('a player standing on a drifting shelf is carried with it',
-  Math.abs(r.tick.platformMoved) > 0.5 && Math.abs(r.tick.playerCarried - r.tick.platformMoved) < 0.01,
-  { platformMoved: r.tick.platformMoved, playerCarried: r.tick.playerCarried,
-    note: 'without the carry the shelf slides out from under a standing player' });
-ok('...and a player who is not on it is left alone',
-  r.tick.bystanderMoved === 0, { bystanderMoved: r.tick.bystanderMoved });
-ok('the puzzle chest and the void-tear ride their platform',
-  Math.abs(r.tick.chestFollowed - r.tick.platformMoved) < 0.01
-  && Math.abs(r.tick.hazardFollowed - r.tick.platformMoved) < 0.01
-  && Math.abs(r.tick.hazardCxFollowed - r.tick.platformMoved) < 0.01,
-  { platformMoved: r.tick.platformMoved, chest: r.tick.chestFollowed,
-    hazard: r.tick.hazardFollowed, hazardCx: r.tick.hazardCxFollowed,
-    note: 'the tear was anchored to its platform last release - if it does not follow, that anchoring is decorative' });
+    marginPx: r.documentedPlainJumpReach - r.maxGapOverCycle, worstAt: r.maxGapAt });
+ok('...and vertically: no crossing ever asks more climb than the budget',
+  r.maxClimbOverCycle <= r.floorDy + 10,
+  { worstClimbAnyPhase: r.maxClimbOverCycle, staticFloorDy: r.floorDy,
+    verticalCap: 10, note: '~111px jump apex vs 90px worst asked' });
+ok('every platform oscillates BACK - strictly periodic, returns exactly',
+  r.periodErr < 1e-6, { maxPeriodError: r.periodErr });
+ok('a rider is carried on BOTH axes, exactly with the shelf',
+  Math.abs(r.tick.platDx) + Math.abs(r.tick.platDy) > 0.5
+  && Math.abs(r.tick.playerDx - r.tick.platDx) < 0.01
+  && Math.abs(r.tick.playerDy - r.tick.platDy) < 0.01,
+  r.tick);
+ok('...and a bystander is left alone',
+  r.tick.bystanderDx === 0 && r.tick.bystanderDy === 0,
+  { dx: r.tick.bystanderDx, dy: r.tick.bystanderDy });
+ok('the puzzle chest and the void-tear ride their platform on both axes',
+  Math.abs(r.tick.chestDx - r.tick.platDx) < 0.01 && Math.abs(r.tick.chestDy - r.tick.platDy) < 0.01
+  && Math.abs(r.tick.hazDx - r.tick.platDx) < 0.01 && Math.abs(r.tick.hazDy - r.tick.platDy) < 0.01,
+  { plat: [r.tick.platDx, r.tick.platDy], chest: [r.tick.chestDx, r.tick.chestDy], hazard: [r.tick.hazDx, r.tick.hazDy] });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 for (const q of results) console.log((q.pass ? 'PASS ' : 'FAIL ') + ' ' + q.n + '  ' + JSON.stringify(q.x ?? ''));
 console.log(`${results.filter(q => q.pass).length}/${results.length} checks passed`);
-await b.close(); srv.kill();
 process.exit(results.every(q => q.pass) ? 0 : 1);

@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.303';
+const GAME_VERSION = 'v0.30.304';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -26672,15 +26672,25 @@ const MAPS = {
     // 2*AMP*sin(DPHASE/2), about 8 px - so 46 + 8 lands back on the 55 that was
     // measured safe against the 62 px plain-jump reach.
     const SP_GAP_MAX = 46;
-    // v0.30.x - per user "make the platforms drift horizontally left and right".
-    // AMP is RESERVED out of the placement band below rather than clamped at the
-    // wall: a platform pinned to the edge would stop while its neighbour kept
-    // travelling, and that phase break is exactly what the gap budget cannot
-    // absorb. DPHASE is deliberately small so neighbours move almost together -
-    // a slow wave up the tower - because it is the NEIGHBOUR DIFFERENTIAL, not
-    // the amplitude, that a jump has to pay for. 36 px of sway costs 8 px of gap.
-    const SP_DRIFT_AMP = 36;
-    const SP_DRIFT_DPHASE = 0.22;
+    // v0.30.x - per user: "the platforms need to move more randomly in
+    // different directions and then oscillate back". The v0.30.289 drift was a
+    // single horizontal wave - every floor on the same axis, phases marching in
+    // 0.22 rad steps. Now every platform gets its OWN oscillation axis (a
+    // seeded angle, so some slide, some bob, most move diagonally), its own
+    // amplitude and a fully random phase. One shared angular frequency keeps
+    // two guarantees the wave had: everything returns exactly to base each
+    // period ("oscillate back"), and any pair's RELATIVE motion is itself a
+    // same-frequency sinusoid - which makes the worst-case gap ANALYTIC:
+    //   relAmp = |v_i - v_j|  for  v = (ax*cos(phase), ax*sin(phase))
+    // so reachability is enforced per neighbour pair at generation time, not
+    // hoped for. AMP is still RESERVED out of the placement band (a platform
+    // clamped at a wall mid-swing would break phase with its neighbour, the
+    // one thing the budget cannot absorb).
+    const SP_DRIFT_AMP_MIN = 14, SP_DRIFT_AMP_MAX = 26;
+    const SP_DRIFT_VFLAT = 0.35;      // vertical component flattened: the climb budget is tighter than the jump reach
+    const SP_PAIR_H_CAP = 32;         // max relative horizontal amplitude between neighbours
+    const SP_PAIR_V_CAP = 10;         // max relative vertical amplitude (80px floors vs ~111px jump apex)
+    const SP_WORST_CROSSING = 54;     // staticGap + relH must stay inside this - 53 measured safe vs the 62px plain jump
     let _spSeed = 0x6c6b78a1;
     // v0.29.849 — current step direction for the bounded stepper below.
     // Flips every 2 floors, and on a wall bounce.
@@ -26732,17 +26742,36 @@ const MAPS = {
       // Reachability is therefore structural, not corrective: no crossing can
       // exceed the budget in the first place. Measured against the previous
       // build: gap sd 44 -> 18, centre-step sd 115 -> 33, max gap 100 -> 79.
-      // v0.30.x - the band is inset by SP_DRIFT_AMP on BOTH sides so the full
-      // sway stays inside the world and no platform ever has to be clamped
-      // mid-drift. Everything below reads _xLo/_xHi instead of 40/xMax.
-      const _xLo = 40 + SP_DRIFT_AMP;
-      const xMax = SP_WORLD_W - w - 40 - SP_DRIFT_AMP;
-      let x;
+      const _xLo = 40 + SP_DRIFT_AMP_MAX;
+      const xMax = SP_WORLD_W - w - 40 - SP_DRIFT_AMP_MAX;
+      // Draw this platform's motion FIRST, because the gap budget depends on
+      // it. Axis angle from the full circle, so directions genuinely differ.
+      const _mA = SP_DRIFT_AMP_MIN + _spRand() * (SP_DRIFT_AMP_MAX - SP_DRIFT_AMP_MIN);
+      const _mTh = _spRand() * Math.PI * 2;
+      const _mPh = _spRand() * Math.PI * 2;
+      let _ax = _mA * Math.cos(_mTh);
+      let _ay = _mA * Math.sin(_mTh) * SP_DRIFT_VFLAT;
       const _prev = platforms[platforms.length - 1];
+      // Relative-motion caps vs the floor below. Same frequency, so the pair's
+      // relative amplitude is |v_i - v_prev| per axis; shrink THIS platform's
+      // component until the pair fits. k=0 always satisfies (the parent was
+      // capped the same way, inductively from the static ground), so the loop
+      // terminates. Deterministic - no Math.random anywhere in here.
+      const _pAx = (_prev && _prev._driftAx) || 0, _pAy = (_prev && _prev._driftAy) || 0;
+      const _pPh = (_prev && _prev._driftPhase) || 0;
+      const _rel = (a1, p1, a2, p2) => Math.hypot(a1 * Math.cos(p1) - a2 * Math.cos(p2), a1 * Math.sin(p1) - a2 * Math.sin(p2));
+      for (let k = 0; k < 24 && _rel(_ax, _mPh, _pAx, _pPh) > SP_PAIR_H_CAP; k++) _ax *= 0.85;
+      for (let k = 0; k < 24 && _rel(_ay, _mPh, _pAy, _pPh) > SP_PAIR_V_CAP; k++) _ay *= 0.85;
+      const _relH = _rel(_ax, _mPh, _pAx, _pPh);
+      let x;
       if (!_prev || _prev.type === 'ground') {
         x = Math.floor((SP_WORLD_W - w) / 2);   // first floor: centred over the ground
       } else {
-        const _gap = Math.round(SP_GAP_MIN + _spRand() * (SP_GAP_MAX - SP_GAP_MIN));
+        // The static gap spends what the pair's relative sway leaves over, so
+        // the worst crossing at ANY phase is <= SP_WORST_CROSSING by
+        // construction. The caps above guarantee the band is never empty.
+        const _gapHi = Math.max(SP_GAP_MIN, SP_WORST_CROSSING - _relH);
+        const _gap = Math.round(SP_GAP_MIN + _spRand() * (_gapHi - SP_GAP_MIN));
         let _cand = (_spDir > 0) ? (_prev.x + _prev.w + _gap) : (_prev.x - _gap - w);
         // Bounce: if this step would leave the world, turn around and step
         // the other way by the same gap rather than clamping flat to the wall
@@ -26764,7 +26793,8 @@ const MAPS = {
       // off its own track over a long climb.
       platforms.push({ x, y, w, h: 12, type: 'platform',
         _spireFloor: platforms.length,
-        _driftBaseX: x, _driftAmp: SP_DRIFT_AMP, _driftPhase: i * SP_DRIFT_DPHASE });
+        _driftBaseX: x, _driftBaseY: y,
+        _driftAx: _ax, _driftAy: _ay, _driftPhase: _mPh });
     }
     // Top platform: wider summit landing where the Master Conductor's
     // ticket-machine effigy stood. Player completes the stage by
@@ -26790,6 +26820,21 @@ const MAPS = {
       y: _topY,
       w: 120, h: 14, type: 'platform', tag: 'summit',
     };
+    // v0.30.x - the summit does not drift (its return portal spawns at a fixed
+    // world x), so the pair below it is HALF static: the below-summit sway IS
+    // the pair's whole relative amplitude. Cap it against the actual clamped
+    // summit gap the same way every other crossing was budgeted - this pair
+    // previously relied on the seed being kind rather than on arithmetic.
+    {
+      const _sp = platforms[platforms.length - 1];
+      const _bs = platforms[platforms.length - 2];
+      if (_bs && _bs._driftAx != null) {
+        const _sGap = Math.max(0, Math.max(_bs.x - (_sp.x + _sp.w), _sp.x - (_bs.x + _bs.w)));
+        const _room = Math.max(0, SP_WORST_CROSSING - _sGap);
+        for (let k = 0; k < 24 && Math.abs(_bs._driftAx) > _room; k++) _bs._driftAx *= 0.85;
+        for (let k = 0; k < 24 && Math.abs(_bs._driftAy) > SP_PAIR_V_CAP; k++) _bs._driftAy *= 0.85;
+      }
+    }
     // v0.26.332 — Puzzle-piece chests re-spaced across the new 50-
     // floor count: roughly quartiles + a final stretch (10, 22, 34, 45).
     const _pieceFloors = [8, 18, 28, 38];   // v0.26.374 — re-spaced for the 40-floor tower (0-indexed; skip ground at idx 0)
@@ -89475,19 +89520,28 @@ function _tickSpireDrift() {
   const T = (game.time || 0) * (Math.PI * 2 / 360);   // ~6 s per full sweep at 60 fps
   const moved = Object.create(null);
   for (const p of md.platforms) {
-    if (!p || !p._driftAmp) continue;
-    const nx = p._driftBaseX + p._driftAmp * Math.sin(T + (p._driftPhase || 0));
-    const dx = nx - p.x;
-    if (!dx) continue;
-    const oldX = p.x;
-    p.x = nx;
-    moved[p._spireFloor] = (moved[p._spireFloor] || 0) + dx;
-    // Carry anything resting on it. Tested against the platform's OLD span,
-    // because that is where the rider was standing when the frame began.
+    // v0.30.x - scatter drift: each platform oscillates on its OWN axis
+    // (_driftAx/_driftAy, per-platform phase), recomputed from base every
+    // frame so rounding cannot walk it off its track. sin returns to 0 each
+    // period, so every platform oscillates back to its authored spot.
+    if (!p || (p._driftAx == null && p._driftAy == null)) continue;
+    const _s = Math.sin(T + (p._driftPhase || 0));
+    const nx = p._driftBaseX + (p._driftAx || 0) * _s;
+    const ny = (p._driftBaseY != null ? p._driftBaseY : p.y) + (p._driftAy || 0) * _s;
+    const dx = nx - p.x, dy = ny - p.y;
+    if (!dx && !dy) continue;
+    const oldX = p.x, oldY = p.y;
+    p.x = nx; p.y = ny;
+    const _mv = moved[p._spireFloor] || (moved[p._spireFloor] = { dx: 0, dy: 0 });
+    _mv.dx += dx; _mv.dy += dy;
+    // Carry anything resting on it - BOTH axes now, or a rising shelf pushes
+    // through the rider and a sinking one leaves them floating. Tested
+    // against the OLD span, where the rider actually stood this frame.
     if (player && player.hp > 0 && player.onGround &&
         player.x + player.w > oldX && player.x < oldX + p.w &&
-        Math.abs((player.y + player.h) - p.y) <= 3) {
+        Math.abs((player.y + player.h) - oldY) <= 3) {
       player.x += dx;
+      player.y += dy;
     }
   }
   // The puzzle chests and the void-tears are placed FROM platform coordinates
@@ -89495,12 +89549,12 @@ function _tickSpireDrift() {
   // a chest would hang in the air beside its shelf and the tears would drift
   // back off into the empty column they were just moved out of.
   if (Array.isArray(game.chests)) for (const c of game.chests) {
-    const d = c && c._spireFloor != null ? moved[c._spireFloor] : 0;
-    if (d) c.x += d;
+    const d = c && c._spireFloor != null ? moved[c._spireFloor] : null;
+    if (d) { c.x += d.dx; c.y += d.dy; }
   }
   if (Array.isArray(game.hazards)) for (const h of game.hazards) {
-    const d = h && h._spireFloor != null ? moved[h._spireFloor] : 0;
-    if (d) { h.x += d; if (h.cx != null) h.cx += d; }
+    const d = h && h._spireFloor != null ? moved[h._spireFloor] : null;
+    if (d) { h.x += d.dx; h.y += d.dy; if (h.cx != null) h.cx += d.dx; }
   }
 }
 function updateProjectiles(dt) {
