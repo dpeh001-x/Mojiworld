@@ -166,26 +166,26 @@ window.LX_MONSTER_STATS = {
   // wall. ATK x1.73 stays under aries's 4,339. exp/coin recomputed from this
   // file's own boss rule (hp x0.055 / hp x0.017).
   aetherion:                      { lv: 65, hp: 5790306, atk: 10706, def:  777, exp: 318467, coin:  98436 },
-  gravitos:                       { lv:100, hp: 21021001, atk:49971, def: 1200, exp: 1156202, coin: 357406 },
-  octobaby:                       { lv: 50, hp:   470224, atk:  5294, def: 562, exp:  25862, coin:  7994 },
-  pqConductor:                    { lv: 30, hp:   12461, atk:  1615, def: 233, exp:     686, coin:   212 },
-  legosaurus:                     { lv: 59, hp:   730398, atk: 8221, def:  702, exp:  40172, coin:  12417 },
-  young_confused_barnaby:         { lv: 40, hp:  282236, atk:  2508, def: 362, exp:  15523, coin:  4798 },
-  kingKrook:                      { lv: 50, hp:   431523, atk: 5532, def: 587, exp:  23715, coin:  7367 },
+  gravitos:                       { lv:100, hp: 21021001, atk:49971, def: 1540, exp: 1156202, coin: 357406 },   // v0.30.280 — def stays above the five zodiacs now at 1,441: the apex keeps the best armour
+  octobaby:                       { lv: 50, hp: 1192100, atk:  5820, def: 562, exp:  65566, coin:  20266 },   // v0.30.280 floors: hp 8.2x, atk 2.1x thornmaw 2,770 (was 1.91x)
+  pqConductor:                    { lv: 30, hp:   73900, atk:  1615, def: 233, exp:   4065, coin:  1256 },   // v0.30.280 floors: hp 8.2x band max (mummy 9,011; was 1.38x)
+  legosaurus:                     { lv: 59, hp: 1249000, atk:  8780, def: 745, exp:  68695, coin:  21233 },   // v0.30.280 floors: hp 8.2x forgewight, atk 2.1x, def 2.1x elderbark
+  young_confused_barnaby:         { lv: 40, hp:  419400, atk:  2508, def: 362, exp:  23067, coin:  7130 },   // v0.30.280 floors: hp 8.2x band max (drownedCurator 51,146)
+  kingKrook:                      { lv: 50, hp: 1192100, atk:  5820, def: 587, exp:  65566, coin:  20266 },   // v0.30.280 floors: hp 8.2x; = octobaby, so the Lv-50 bulk band holds
   mirrorSelf:                     { lv: 20, hp:  250000, atk:   21, def:  4, exp:  11725, coin:  3622 },   // v0.30.x — hp 213116 -> 288000 (+35%) per user, then -> 250000 per user on playtest; evasion/speed live in the game literal
-  sundered_smith:                 { lv: 48, hp:  308547, atk:  4848, def: 515, exp:  16962, coin:   5245 },
-  zodiac_aries:                   { lv: 70, hp: 2417070, atk: 13342, def:  983, exp:  132944, coin: 41119 },
-  zodiac_taurus:                  { lv: 72, hp: 4837473, atk: 14570, def:1032, exp: 266107, coin:  82244 },
-  zodiac_gemini:                  { lv: 74, hp: 2756659, atk: 15911, def: 1085, exp:  151626, coin:  46854 },
-  zodiac_cancer:                  { lv: 76, hp:  6726755, atk: 17375, def:1200, exp: 370008, coin: 114360 },
-  zodiac_leo:                     { lv: 78, hp:  5664210, atk: 18974, def:1200, exp: 311497, coin: 96333 },
-  zodiac_virgo:                   { lv: 80, hp:  4343391, atk: 20720, def: 1200, exp: 238927, coin:  73803 },
-  zodiac_libra:                   { lv: 82, hp:  7104023, atk: 22627, def:1200, exp: 390671, coin: 120793 },
-  zodiac_scorpio:                 { lv: 84, hp:  6002510, atk: 24709, def:1200, exp: 330113, coin:  102068 },
-  zodiac_sagittarius:             { lv: 86, hp:  7088567, atk: 26983, def:1200, exp: 389885, coin: 120457 },
-  zodiac_capricorn:               { lv: 88, hp: 19364800, atk:29466, def:1200, exp:  1065064, coin:329168 },
-  zodiac_aquarius:                { lv: 90, hp: 17105563, atk:32178, def:1200, exp:  940871, coin:290745 },
-  zodiac_pisces:                  { lv: 92, hp: 13814146, atk:35139, def:1200, exp:  759823, coin:234881 },
+  sundered_smith:                 { lv: 48, hp: 1192100, atk:  4848, def: 515, exp:  65566, coin:  20266 },   // v0.30.280 floors: hp 8.2x band max (octoLegSkillLock 145,382)
+  zodiac_aries:                   { lv: 70, hp: 8119500, atk: 13342, def: 1080, exp: 446573, coin: 138032 },   // v0.30.280 floors: hp 8.2x blightElder 990,182 (was 2.44x), def 2.1x
+  zodiac_taurus:                  { lv: 72, hp: 8119500, atk: 14570, def: 1080, exp: 446573, coin: 138032 },   // v0.30.280 floors
+  zodiac_gemini:                  { lv: 74, hp: 8119500, atk: 15911, def: 1085, exp: 446573, coin: 138032 },   // v0.30.280 floors: hp was 2.78x band
+  zodiac_cancer:                  { lv: 76, hp: 9907500, atk: 17375, def:1200, exp: 544913, coin: 168428 },   // v0.30.280 floors: hp 8.2x echoKnight 1,208,237
+  zodiac_leo:                     { lv: 78, hp: 19392000, atk: 18974, def: 1441, exp: 1066560, coin: 329664 },   // v0.30.280 floors: hp 8.2x pathsBane 2,364,882 (was 2.40x), def 2.1x ossuaryTyrant
+  zodiac_virgo:                   { lv: 80, hp: 19392000, atk: 20720, def: 1441, exp: 1066560, coin: 329664 },   // v0.30.280 floors: hp was 1.84x band — the worst zodiac
+  zodiac_libra:                   { lv: 82, hp: 19392000, atk: 22627, def: 1441, exp: 1066560, coin: 329664 },   // v0.30.280 floors
+  zodiac_scorpio:                 { lv: 84, hp: 19392000, atk: 24709, def: 1441, exp: 1066560, coin: 329664 },   // v0.30.280 floors
+  zodiac_sagittarius:             { lv: 86, hp: 19392000, atk: 26983, def: 1441, exp: 1066560, coin: 329664 },   // v0.30.280 floors
+  zodiac_capricorn:               { lv: 88, hp: 19392000, atk:29466, def:1200, exp: 1066560, coin: 329664 },   // v0.30.280 floors (hp was 8.19x — a hair under)
+  zodiac_aquarius:                { lv: 90, hp: 19392000, atk:32178, def:1200, exp: 1066560, coin: 329664 },   // v0.30.280 floors
+  zodiac_pisces:                  { lv: 92, hp: 19392000, atk:35139, def:1200, exp: 1066560, coin: 329664 },   // v0.30.280 floors
   towerArbiter:                   { lv:  1, hp:   17199, atk:   69, def: 34, exp:    946, coin:     0 },
   towerSovereign:                 { lv:  1, hp:   90090, atk:   69, def: 80, exp:   4955, coin:     0 },
 };
