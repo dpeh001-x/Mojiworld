@@ -583,6 +583,11 @@ window.LX_ANIM_CALIB = {
       "dy": 0.28
     }
   },
+  "zodiac_virgo": {
+    "zodiac/idle":   { "s": 1.095, "dx": 0, "dy": 0 },
+    "zodiac/walk":   { "s": 1.095, "dx": 0, "dy": 0 },
+    "zodiac/attack": { "s": 1.095, "dx": 0, "dy": 0 }
+  },
   "zodiac_taurus": {
     "zodiac/charge": {
       "s": 1.13,
