@@ -66,12 +66,18 @@ const r = await page.evaluate(async () => {
   out.portalYMatch = xs.every((x) => _defaultPortalY(x) === expectY(x));
   out.portalYSample = xs.map((x) => _defaultPortalY(x));
 
-  // charge halo: warrior hold draws via the cached unit gradient
+  // charge halo: warrior hold draws via the cached unit gradient.
+  // v0.30.313 — the fabricated charge now carries a HELD slotKey: the
+  // v0.26.1033 key-flush cancel in _tickClassIdentity nulls any charge whose
+  // key is not down in game.keys, which silently wiped the old fixture.
   player.cls = 'warrior'; player.level = 30; player._god = true;
-  player._warCharge = { power: 0.6 };
-  await new Promise((res) => { let n = 0; const t = () => { game.paused = false; player._warCharge = player._warCharge || { power: 0.6 }; if (++n > 40) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
+  game.keys = game.keys || {};
+  const _mkCharge = () => ({ power: 0.6, start: game.time - 200, frames: 60, slotKey: 'x', cls: 'warrior' });
+  game.keys.x = true; player._warCharge = _mkCharge();
+  await new Promise((res) => { let n = 0; const t = () => { game.paused = false; game.keys.x = true;
+    player._warCharge = player._warCharge || _mkCharge(); if (++n > 40) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
   out.haloCached = !!(window._chargeHaloCache && window._chargeHaloCache.w);
-  player._warCharge = null;
+  player._warCharge = null; game.keys.x = false;
 
   // smoothFx melee arc: a real slash near a mob runs the shadow-string memo
   game.monsters = [];
