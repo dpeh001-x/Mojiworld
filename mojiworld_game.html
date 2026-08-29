@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.286';
+const GAME_VERSION = 'v0.30.287';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -36546,7 +36546,24 @@ function _lxGetSettings() {
 }
 function _lxSaveSettings(s) {
   try { localStorage.setItem('LX_SETTINGS', JSON.stringify(s)); } catch (e) {}
+  _lxPerFrameSettingsSync(s);
 }
+// v0.30.287 perf — the only PER-FRAME consumers of settings are these two
+// booleans (drawCalibrationGrid's gate and the chibi weight's Reduce Motion
+// check); everything else reads on events. The old reads cost a synchronous
+// disk-backed localStorage hit + two object spreads + five Number coercions,
+// twice per frame. Mirrored here; refreshed by every write (_lxSaveSettings
+// is the single write choke point) and by every _applySettings pass (which
+// boot and the settings panel both run), so the pair cannot go stale from
+// inside this page. A settings edit made by ANOTHER tab now lands on the
+// next save/boot instead of mid-frame — the grid is a dev overlay and cross-
+// tab live toggling was never a supported path.
+let _LX_GRID_ON = false, _LX_REDUCE_MOTION = false;
+function _lxPerFrameSettingsSync(s) {
+  _LX_GRID_ON = !!(s && s.grid);
+  _LX_REDUCE_MOTION = !!(s && s.reduceMotion);
+}
+try { _lxPerFrameSettingsSync(_lxGetSettings()); } catch (e) {}
 // Picking a preset stamps its switches onto the UI; touching a switch flips the
 // dropdown to Custom. Without this pair the two controls drift apart and the
 // panel lies about what is actually on.
@@ -36946,6 +36963,7 @@ function applySettingsLive() {
   _applySettings(s);
 }
 function _applySettings(s) {
+  _lxPerFrameSettingsSync(s);   // v0.30.287 perf — keep the frame-loop mirror fresh
   // BGM volume — v0.26.x audit FIX — apply to ALL three BGM pools (default,
   // boss, per-map), not just _bgmEl, so a live slider drag affects the music
   // you're actually hearing. _bgmTargetVol() reads this same value, so the
@@ -108222,9 +108240,10 @@ function drawWorldProps() {
 // spacing differs, there's a real rendering bug and we can localize it. Gated
 // on LX_SETTINGS.grid — off by default.
 function drawCalibrationGrid() {
-  let _s = null;
-  try { _s = (typeof _lxGetSettings === 'function') ? _lxGetSettings() : null; } catch (e) {}
-  if (!_s || !_s.grid) return;
+  // v0.30.287 perf — mirrored scalar (see _lxPerFrameSettingsSync): this gate
+  // ran a synchronous localStorage read every frame for a debug overlay
+  // that is off for 100% of players.
+  if (!_LX_GRID_ON) return;
   const camX = (game.camera && game.camera.x) || 0;
   const camY = (game.camera && game.camera.y) || 0;
   ctx.save();
@@ -108416,7 +108435,15 @@ function drawChests() {
       ctx.imageSmoothingEnabled = true;
       if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
       const _lidExtra = c.opened ? Math.round((c.h + 10) * 0.45) : 0;
-      ctx.drawImage(_chestSprite, sx - 4, c.y - 6 - _lidExtra + by, c.w + 8, c.h + 10 + _lidExtra);
+      // v0.30.287 perf — route the 768×768 chest art through _lxProjScaled: the
+      // raw blit resampled ~590K px to paint ~1.7K, per chest, per frame —
+      // the fault class v0.30.252 fixed for portals, 34× worse per pixel.
+      // Non-mutating side-canvas, so naturalWidth stays honest for the
+      // shadow-anchor ratio and every LX_OBJECTS_META consumer.
+      const _cDraw = (typeof _lxProjScaled === 'function')
+        ? _lxProjScaled(_chestSprite, Math.max(c.w + 8, c.h + 10 + _lidExtra) | 0)
+        : _chestSprite;
+      ctx.drawImage(_cDraw, sx - 4, c.y - 6 - _lidExtra + by, c.w + 8, c.h + 10 + _lidExtra);
       ctx.imageSmoothingEnabled = _prevSmooth;
       // Prompt when near (matches procedural path; closed chests only)
       const near = !c.opened && Math.abs((player.x + player.w/2) - (c.x + c.w/2)) < 60;
@@ -111058,7 +111085,7 @@ function _heroBlinkFactor() {
 function _computeChibiWeight() {
   try {
     if (window._prologueActive) return null;
-    if (typeof _lxGetSettings === 'function' && _lxGetSettings().reduceMotion) return null;
+    if (_LX_REDUCE_MOTION) return null;   // v0.30.287 perf — mirrored scalar, see _lxPerFrameSettingsSync
   } catch (e) {}
   const t = game.time;
   // Rising-edge attack stamp — covers every attack path (melee / ranged /
@@ -122704,12 +122731,38 @@ let LX_ENTITY_SHADOWS = (typeof LX_GFX === 'undefined') || LX_GFX.shadows !== fa
 function _lxGroundBelow(wx, w, feetY) {
   const md = (typeof game !== 'undefined' && game) ? game.mapData : null;
   if (!md || !md.platforms) return null;
+  // v0.30.287 perf — 256px x-bucket index, keyed on the platforms ARRAY
+  // IDENTITY plus its length (the _lxGroundSlabs pattern; every runtime
+  // platforms.push happens at map BUILD, and _buildTowerMaps regeneration
+  // swaps the array). A platform spanning several buckets is inserted into
+  // each; a duplicate visit re-tests the same p and cannot change `best`,
+  // so the answer is identical to the full scan. Tower maps carry 200+
+  // platforms and this ran per visible entity per frame.
+  const _plats = md.platforms;
+  let _idx = md._lxPlatIdx;
+  if (!_idx || md._lxPlatIdxSrc !== _plats || md._lxPlatIdxN !== _plats.length) {
+    _idx = new Map();
+    for (let i = 0; i < _plats.length; i++) {
+      const p = _plats[i];
+      const b1 = Math.floor((p.x + p.w) / 256);
+      for (let b = Math.floor(p.x / 256); b <= b1; b++) {
+        let arr = _idx.get(b); if (!arr) _idx.set(b, arr = []);
+        arr.push(p);
+      }
+    }
+    md._lxPlatIdx = _idx; md._lxPlatIdxSrc = _plats; md._lxPlatIdxN = _plats.length;
+  }
   let best = null;
-  for (let i = 0; i < md.platforms.length; i++) {
-    const p = md.platforms[i];
-    if (p.y < feetY - 4) continue;                 // only at or below the feet
-    if (wx + w < p.x || wx > p.x + p.w) continue;  // horizontal overlap
-    if (best === null || p.y < best) best = p.y;
+  const _qb1 = Math.floor((wx + w) / 256);
+  for (let b = Math.floor(wx / 256); b <= _qb1; b++) {
+    const arr = _idx.get(b);
+    if (!arr) continue;
+    for (let i = 0; i < arr.length; i++) {
+      const p = arr[i];
+      if (p.y < feetY - 4) continue;                 // only at or below the feet
+      if (wx + w < p.x || wx > p.x + p.w) continue;  // horizontal overlap
+      if (best === null || p.y < best) best = p.y;
+    }
   }
   return best;
 }
@@ -132520,7 +132573,12 @@ function drawDrops() {
       // inventory already shows. _itemSprite returns null until the file
       // decodes (or forever, for an item with no authored art), and the emoji
       // still covers that case, so a drop is never a blank orb.
-      const _dImg = (typeof _itemSprite === 'function') ? _itemSprite(d.item) : null;
+      let _dImg = (typeof _itemSprite === 'function') ? _itemSprite(d.item) : null;
+      // v0.30.287 perf — bucket the full-res equipment art down to the 22px orb
+      // once per item type (_lxProjScaled: 2× bake, FIFO-capped per image;
+      // art already small enough returns untouched). A farm-run pile was
+      // 10-30 full-res resamples per frame for as long as it stood.
+      if (_dImg && typeof _lxProjScaled === 'function') _dImg = _lxProjScaled(_dImg, 22);
       if (_dImg) {
         const _dz = 22;   // sits over the r=9 core, inside the r=14 glow
         ctx.drawImage(_dImg, Math.round(sx - _dz / 2), Math.round(d.y - _dz / 2), _dz, _dz);
