@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.325';
+const GAME_VERSION = 'v0.30.326';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -80953,6 +80953,37 @@ function _bossFillBreak(m, dmg) {
 const BOSS_STAGGER_COOLDOWN = 5200;      // min gap after a window before the next
 // Cheap / movement states that should NOT earn a punish window when they end.
 const _BOSS_NO_PUNISH_STATES = new Set(['idle','walk','airborne','reposition','hover','chase','move','jab','claw','volley','seek','land','leap']);
+// v0.30.325 — PER-CYCLE PATTERN LATCHES, cleared when a stagger cancels a live
+// pattern. Every flag here is a one-shot "announced/fired this cycle" guard
+// (or a mid-flight step marker) whose only other reset is the cleanup the
+// cancel just skipped. Stranded, they disarm the boss's NEXT cast of that
+// pattern: no banner before a lethal special, or a silent dud (the Mooma
+// earthquake bug, v0.30.324 — this is the roster-wide version). Stance and
+// phase flags (_summonedThisPhase, _enraged, _geminiLying, _piscesDreamActive,
+// _huntMarkArmed, _tidalArmed, _split, _mergeArmed, _zFlying, ...) are
+// deliberately NOT here: their meaning outlives one cycle.
+const _LX_BOSS_CYCLE_LATCHES = [
+  // King Gloopaloo
+  '_quakeAnnounced', '_quakeFired', '_glueAnnounced', '_gooAnnounced', '_volleyFired',
+  '_teleportAnnounced', '_teleportVanished', '_teleportFired', '_teleported',
+  '_teleporting',   // set at vanish, cleared only at reappear — a mid-warp
+                    // stagger left him flagged mid-warp forever (kills his
+                    // Brimming Leak puddles for the rest of the fight)
+  // Aetherion
+  '_tearFired', '_beamFired', '_astralAnnounced', '_astralFired', '_orbsAnnounced', '_orbsFired',
+  // King Krook (shared _kAnnounced/_kFired guard his whole kit)
+  '_kAnnounced', '_kFired', '_megaAnnounced', '_fireAnnounced',
+  // Mooma (quake/summon also reset at entry since v0.30.324; this covers her
+  // slam and groundShake steps, and is harmless belt-over-braces for the rest)
+  '_summonFired', '_shakeAnnounced', '_shakeJumped', '_shakeFired',
+  '_slamGather', '_slamPrep', '_slamHit',
+  // Zodiacs — per-cycle latches only
+  '_chargeBurst', '_plantAnnounced', '_taurusFired', '_leoFired', '_cancerFired',
+  '_stung', '_erupted', '_sagFired', '_caprFired', '_aquaFired',
+];
+function _lxBossCycleLatchClear(m) {
+  for (const f of _LX_BOSS_CYCLE_LATCHES) if (m[f]) m[f] = false;
+}
 function _bossCanPunish(m) {
   if (!m || !m.isBoss) return false;
   const t = m.type;
@@ -81154,6 +81185,10 @@ function bossAI(m, dt, distToPlayer) {
     // read as the earthquake being broken (per user video). This fires at most
     // once per stagger for free — patternState is forced to 'idle' on this
     // same line, so the condition cannot be true on the next frame.
+    // v0.30.325 — the cancel now also clears the aborted cycle's latches,
+    // roster-wide. Without this, the flags the skipped cleanup owned stayed
+    // stranded and disarmed the boss's next cast of the same pattern.
+    if (m.patternState !== 'idle') _lxBossCycleLatchClear(m);
     if (m.patternState !== 'idle' && typeof showToast === 'function') {
       showToast('⚡ ' + (m.name || 'The boss') + "'s attack is broken off!", 'rare');
     }
