@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.323';
+const GAME_VERSION = 'v0.30.324';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -81148,6 +81148,15 @@ function bossAI(m, dt, distToPlayer) {
   // the updateMonsters block that rolls it.
   if (m._stagger > 0 || m._dirOpenT > 0) {
     if (m._stagger > 0) m._stagger -= dt;
+    // v0.30.324 — say so when the freeze cancels a pattern mid-flight. The
+    // cancel is the break system's reward, but it was silent: Mooma's quake
+    // banner ("JUMP!") kept hanging over a boss that would never quake, which
+    // read as the earthquake being broken (per user video). This fires at most
+    // once per stagger for free — patternState is forced to 'idle' on this
+    // same line, so the condition cannot be true on the next frame.
+    if (m.patternState !== 'idle' && typeof showToast === 'function') {
+      showToast('⚡ ' + (m.name || 'The boss') + "'s attack is broken off!", 'rare');
+    }
     m.patternState = 'idle'; m.patternTimer = 0; m.vx = 0;
     if (m.vy < 0) m.vy = 0;   // v0.26.x — a staggered AIRBORNE boss must not keep rising; gravity still pulls it down
     return;
@@ -83774,14 +83783,22 @@ function bossAI(m, dt, distToPlayer) {
           } else if (_quakeReady) {
             m._lastQuakeAt = _now;
             m.patternState = 'quake';
+            // v0.30.324 — latches initialised at ENTRY (Gloopaloo's idiom): a
+            // stagger cancels the pattern without running its cleanup, and a
+            // stranded _quakeAnnounced=true made the NEXT quake detonate for
+            // 50% maxHP with no JUMP banner (per user's Mooma video).
+            m._quakeAnnounced = false;
+            m._quakeFired = false;
           } else {
             m._lastSummonAt = _now;
             m.patternState = 'summon';
+            m._summonFired = false;   // v0.30.324 — same strand as the quake
           }
         } else if (_summonReady && choice < 0.18) {
           m._lastSummonAt = _now;
           _bossSpecialFired(m, _now);
           m.patternState = 'summon';
+          m._summonFired = false;   // v0.30.324 — same strand as the quake
         } else if (_shakeReady && choice < 0.34) {
           m._lastShakeAt = _now;
           _bossSpecialFired(m, _now);
@@ -83793,6 +83810,8 @@ function bossAI(m, dt, distToPlayer) {
           m._lastQuakeAt = _now;
           _bossSpecialFired(m, _now);
           m.patternState = 'quake';
+          m._quakeAnnounced = false;   // v0.30.324 — see the entry above
+          m._quakeFired = false;
         } else {
           // v0.29.286 — the regular pool now rolls its OWN number. It used to
           // share `choice` with the special ladder above, where quake's

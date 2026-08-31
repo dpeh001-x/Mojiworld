@@ -121,6 +121,34 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.324 <span class="tag"><span class="pill bug">bug</span> Mooma's stranded earthquake &mdash; a stagger could disarm her next quake</span></h2>
+<p>Per user: <em>For mooma boss just a weird frame where earthquake doesnt seem to work around 22 seconds</em> (video, v0.30.315).</p>
+
+<h3>What the video shows</h3>
+<p><b>&ldquo;MOOMA RAISES THE LOAM &mdash; JUMP!&rdquo;</b> fires, the break meter staggers her mid-telegraph (&ldquo;STAGGERED &mdash; punish it!&rdquo; lands right on top of the quake banner), and then&hellip; nothing. No quake, no shake, no explanation &mdash; a JUMP! warning hanging over a boss who will never jump anything.</p>
+
+<h3>The strand</h3>
+<p>The stagger branch in <code>bossAI</code> cancels the running pattern &mdash; deliberately; that is the break system's reward &mdash; by forcing <code>patternState = 'idle'</code>. But it never clears the pattern's <b>one-shot latch flags</b>, and Mooma's quake only resets <code>_quakeAnnounced</code> / <code>_quakeFired</code> in its own end-of-pattern cleanup, which the cancel just skipped. So the flags stay stranded across the cancel:</p>
+<table>
+<tr><th>stagger lands&hellip;</th><th>the NEXT quake</th></tr>
+<tr><td>during the telegraph</td><td>detonates for <b>50% max&nbsp;HP with no JUMP banner</b></td></tr>
+<tr><td>in the 1200&ndash;1700&nbsp;ms tail</td><td><b>complete dud</b> &mdash; no banner <em>and</em> no detonation</td></tr>
+</table>
+<p>Her summon had the same hole (<code>_summonFired</code>). Her groundShake did not &mdash; its entries already re-initialise all three of its flags &mdash; and King Gloopaloo's quake resets its latches inline at pattern entry for exactly this reason. The fix is that same idiom, applied to both of Mooma's bare entries: <b>latches are initialised at pattern entry</b>, so a cancelled pattern can strand nothing.</p>
+
+<h3>And the cancel now says so</h3>
+<p>The &ldquo;weird frame&rdquo; itself &mdash; a hanging JUMP! banner with no consequence &mdash; was the break system cancelling the quake <em>silently</em>. The freeze branch now toasts <b>&ldquo;&#9889; Mooma, the Cradle-Veiled's attack is broken off!&rdquo;</b> on the frame it cancels a mid-pattern boss, for every boss. It fires at most once per stagger for free: <code>patternState</code> is forced to <code>'idle'</code> on the same line, so the condition cannot hold two frames running.</p>
+
+<h3>Verified &mdash; <code>scripts/mooma_quake_strand_test.mjs</code></h3>
+<p>Reproduces the video against a live Mooma through the <em>real</em> pattern picker (quake off cooldown, the other specials on cooldown, special-due clock expired), staggers her mid-telegraph the way the break system does, then forces the next quakes and counts actual toast arrivals via a MutationObserver:</p>
+<table>
+<tr><th></th><th>interrupt announced</th><th>next quake banners</th><th>next quake detonates</th></tr>
+<tr><td>v0.30.323</td><td>silent</td><td><b>missing</b></td><td><b>no &mdash; total dud</b></td></tr>
+<tr><td>this build</td><td>&ldquo;attack is broken off!&rdquo;</td><td>present, every time</td><td>yes &mdash; including after a tail-stagger</td></tr>
+</table>
+<p>8/8 pass on this build; 4/8 fail on the previous one, including the exact &ldquo;quake that neither announces nor detonates&rdquo; the report describes.</p>
+
+
 <h2>v0.30.323 <span class="tag"><span class="pill bug">bug</span> The rush was never re-paced &mdash; the dash owns its own art set, now with its own timing</span></h2>
 <p><b>Correction to v0.30.320</b>, which claimed the rush was fixed for free by the swing&rsquo;s frame timing. It wasn&rsquo;t: while brace-dashing, the frame picker redirects to the dedicated <code>legosaurusdash</code> sprint set and reads frame timing under <em>that</em> key &mdash; so the swing slowed down and the rush kept strobing at a flat 48&nbsp;ms.</p>
 <p><b>The rush timing is authored to the move, not to a loop.</b> The brace-dash is 850&nbsp;ms of dead-still brace then a 380&nbsp;ms committed sprint, and the animation clock re-anchors at move start &mdash; so one 1230&nbsp;ms pass now maps frame-for-phase: the planted glare <em>holds</em> through the tell, the rear-up (jaws open) fires 150&nbsp;ms before launch, the sprint frames churn through the dash window, and the settle pose lands at the stop. Before, the nine frames looped ~2.85&times; across the move &mdash; he sprinted in place while braced motionless, which is exactly the &ldquo;very weird&rdquo; rush from the report. The animator&rsquo;s authored position offsets on the entry are preserved.</p>
