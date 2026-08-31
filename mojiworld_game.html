@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.330';
+const GAME_VERSION = 'v0.30.331';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -75361,9 +75361,44 @@ const SKILL_FNS = {
     player.invulnerable = Math.max(player.invulnerable, 300);   // v0.26.x — very short i-frame per user (was 1300)
     const bx = player.x, by = player.y, W = 165, H = 210;
     const nodes = [[-W, 0], [W, 0], [-W, -H], [W, -H]];        // Z traced bottom → up
+    // v0.30.331 — THE DANCE STICKS TO THE CLOSEST ENEMY (per user: "Shinobi's B
+    // does not track the enemy, so sometimes the skill doesnt work as
+    // intended", then sharpened: "the multiple explosion one should stick to
+    // the closest enemy and not in front"). The Z was traced over FIXED
+    // offsets from the cast point — a target two body-lengths away, or one
+    // that simply walked, watched all four slashes hit air. Each dash now
+    // re-resolves the CLOSEST living enemy at the moment it fires, so the
+    // whole dance stays glued to one victim, follows it while it moves, and
+    // rolls over to the next-closest only if it dies mid-dance. The authored
+    // Z offsets survive as the per-dash fallback, so an empty-room cast looks
+    // exactly as it always did.
+    const _snClosest = () => {
+      const cx = player.x + player.w / 2, cy = player.y + player.h / 2;
+      let best = null, bd = Infinity;
+      for (const m of game.monsters) {
+        if (!m || m.currentHp <= 0 || m._coopMirror) continue;
+        const dx = (m.x + m.w / 2) - cx, dy = (m.y + m.h / 2) - cy;
+        if (Math.abs(dx) > 700 || Math.abs(dy) > 460) continue;
+        const d = dx * dx + dy * dy;
+        if (d < bd) { bd = d; best = m; }
+      }
+      return best;
+    };
     for (let i = 0; i < nodes.length; i++) scheduleSkillTimer(() => {
       if (player.hp <= 0) return;
-      player.x = bx + nodes[i][0]; player.y = by + nodes[i][1]; player.vy = 0;
+      const _snT = _snClosest();
+      if (_snT) {
+        // glue the slash to the victim: centred on it, feet on its baseline,
+        // a half-body to the side alternating so four hits on one boss still
+        // read as a dance around it rather than four identical stamps
+        const _snSide = (i % 2 === 0 ? -1 : 1) * Math.max(24, _snT.w * 0.35);
+        player.x = _snT.x + _snT.w / 2 - player.w / 2 + _snSide;
+        player.y = _snT.y + _snT.h - player.h;
+        player.facing = _snSide < 0 ? 1 : -1;   // face INTO the enemy from whichever side
+      } else {
+        player.x = bx + nodes[i][0]; player.y = by + nodes[i][1];
+      }
+      player.vy = 0;
       spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'shinobi_ult', { size: 250, life: 26, spin: Math.PI * 2, scaleStartX: 0.8, scaleEndX: 1.25, scaleStartY: 0.8, scaleEndY: 1.25, fadeOut: 0.8 });   // v0.26.x — 360° CW spin + enlarge + fade per user
       performAround(175, 2.4, { color: '#d9a8f0', kb: 5 }); addHitStop(16);   // v0.30.x — light orchid, sampled from the sakura mandala that replaced the blue art
     }, 100 + i * 115);
@@ -121883,7 +121918,31 @@ function _lxPounceArcFrame(frames, m) {
 function _zodiacStateImg(sign, state, elapsedMs, m) {
   if (state === 'fly')    return _zodiacRelFrame(ZODIAC_FLY_FRAMES[sign], _BOSS_WALK_FRAME_MS, elapsedMs, false);
   if (state === 'pounce') return _lxPounceArcFrame(ZODIAC_POUNCE_FRAMES[sign], m);
-  if (state === 'charge') return _zodiacRelFrame(ZODIAC_CHARGE_FRAMES[sign], _BOSS_ATK_FRAME_MS, elapsedMs, false);
+  if (state === 'charge') {
+    // v0.30.331 — BRACE ONCE, GALLOP FOREVER (per user, with video: "Taurus has
+    // some very weird animations esp with it charging"). The charge set is
+    // authored brace(0-2) -> gallop(3-8), and the plain relative loop wrapped
+    // ALL NINE: every ~9 frames of a sprint the bull snapped back to standing
+    // and reared again mid-dash. The brace now plays exactly once on state
+    // entry and the loop cycles only the gallop frames. Frame counts are read
+    // from the set (first third = brace) so a future re-authored set with a
+    // different length keeps working; a set too short to split falls back to
+    // the plain loop.
+    const _cf = ZODIAC_CHARGE_FRAMES[sign];
+    if (_cf && _cf.length >= 6) {
+      let _n = _cf._readyN || 0;
+      while (_n < _cf.length && _cf[_n] && _cf[_n].complete && _cf[_n].naturalWidth > 0) _n++;
+      _cf._readyN = _n;
+      if (_n >= 6) {
+        const _brace = Math.max(1, Math.floor(_cf.length / 3));
+        const _step = Math.max(0, Math.floor(elapsedMs / _BOSS_ATK_FRAME_MS));
+        const _idx = _step < _brace ? _step : _brace + ((_step - _brace) % (_n - _brace));
+        const _fr = _cf[Math.min(_n - 1, _idx)];
+        if (_fr && _fr.complete && _fr.naturalWidth > 0) return _fr;
+      }
+    }
+    return _zodiacRelFrame(_cf, _BOSS_ATK_FRAME_MS, elapsedMs, false);
+  }
   if (state === 'attack') return _zodiacRelFrame(ZODIAC_ATTACK_FRAMES[sign], _BOSS_ATK_FRAME_MS, elapsedMs, false);
   if (state === 'walk')   return _zodiacRelFrame(ZODIAC_WALK_FRAMES[sign], _BOSS_WALK_FRAME_MS, elapsedMs, false);
   return _zodiacRelFrame(ZODIAC_IDLE_FRAMES[sign], _BOSS_IDLE_FRAME_MS, elapsedMs, true);
