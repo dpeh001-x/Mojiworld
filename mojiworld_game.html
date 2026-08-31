@@ -91683,6 +91683,15 @@ function updateProjectiles(dt) {
       // v0.26.x - snapshot so a kill+splice can't skip the next target.
       // v0.29.x perf - refill a persistent scratch instead of spreading a fresh
       // array copy EVERY frame the vortex is alive (a multi-second channel).
+      // v0.30.x — ON-SCREEN GATE (per user: "do not affect monsters that
+      // are not seen on the screen"). The suck ellipse is 860x600px, so a
+      // pool near a screen edge reached ~430px into off-screen territory;
+      // measured 335px of drag on an off-screen mob before this gate.
+      // 40px margin keeps a half-visible mob at the edge pulling.
+      const _vxViewL = (game.camera.x || 0) - 40;
+      const _vxViewR = (game.camera.x || 0) + W + 40;
+      const _vxViewT = ((game.camera && game.camera.y) || 0) - 40;
+      const _vxViewB = ((game.camera && game.camera.y) || 0) + H + 40;
       const _vsc = game._vortexScratch || (game._vortexScratch = []);
       _vsc.length = 0;
       for (let _vi = 0; _vi < game.monsters.length; _vi++) _vsc[_vi] = game.monsters[_vi];
@@ -91698,6 +91707,11 @@ function updateProjectiles(dt) {
         // box, not to its centre: a 200 px-tall boss standing in the pool then
         // reads as distance ~0 like everything else, instead of being measured
         // from a midpoint 100 px up and falling out of the region entirely.
+        // v0.30.x — off-screen mobs are not vacuumed (see the gate above).
+        if (m.x + m.w < _vxViewL || m.x > _vxViewR || m.y + m.h < _vxViewT || m.y > _vxViewB) {
+          if (m._vxSuckDrop) { m.dropThrough = false; m._vxSuckDrop = false; }   // release: never strand a drop-through flag
+          continue;
+        }
         const _vdx = cx - Math.max(m.x, Math.min(cx, m.x + m.w));
         const _vdy = cy - Math.max(m.y, Math.min(cy, m.y + m.h));
         const _vnx = _vdx / RX, _vny = _vdy / RY;
@@ -91728,6 +91742,17 @@ function updateProjectiles(dt) {
           const _sIsBoss = m.isBoss || m.isMiniBoss || m.boss;
           let _sstep = LX_VORTEX_SUCK_PULL + (_pullRim - LX_VORTEX_SUCK_PULL) * (1 - _sn);
           if (_sIsBoss) _sstep *= 0.30;   // bosses lean, they don't get vacuumed
+          // v0.30.x — the ring now counters the mob's own motion the way the
+          // inner pool always has. Without it, grounded AI's per-frame
+          // `m.vx = facing * speed` fought the 2.8px/f rim pull with the whole
+          // walk speed and mobs crawled or stalled at the rim.
+          // POSITION space for both cases: a flier's AI rewrites vx/vy every
+          // frame BEFORE this tick runs, so damping velocity is a no-op — the
+          // frame's own motion must be undone where it landed.
+          if (!_sIsBoss) {
+            m.x -= (m.vx || 0) * 0.8;
+            if (m.flies) m.y -= (m.vy || 0) * 0.8;
+          }
           m.x += (_sdx / _sd) * _sstep;
           if (!_sIsBoss) {
             // Vertical pull for EVERYTHING out here — this is what "sucks
