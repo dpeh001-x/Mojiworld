@@ -121,6 +121,23 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.343 <span class="tag"><span class="pill feat">perf</span> Monster-fight lag, round two &mdash; zero slow frames in a 16,000-frame fight</span></h2>
+<p>Per user: <em>work more on the lag to do with fighting monsters &mdash; that is the main thing.</em> A new attribution probe (per-subsystem timers wrapped around every update/draw call, driven by real held-key input against a 12-mob pack) pinned what v0.30.342 left behind, and this round removes it. <b>A/B on the identical probe: v0.30.342 had 7 frames over 25&nbsp;ms (worst 49&nbsp;ms); this build has 0 in 16,440 attack frames</b>, every subsystem averaging under 0.02&nbsp;ms/frame.</p>
+
+<h3>What the probe caught</h3>
+<table>
+<tr><th>spike</th><th>cost</th><th>cause</th></tr>
+<tr><td><code>drawProjectiles</code></td><td>up to 14.2&nbsp;ms</td><td>the <b>static</b> projectile/vfx/summon singles never got the v0.30.342 <code>decode()</code> treatment &mdash; only the anim sets did; the first cast of each skill sync-decoded its bolt art</td></tr>
+<tr><td><code>drawMonster</code></td><td>7&ndash;12&nbsp;ms</td><td>the first hit on each mob type minted its <code>brightness(2.5)</code> hit-flash tint bake per visible frame, right when the player starts attacking</td></tr>
+<tr><td><code>drawDamageNumbers</code></td><td>2.4&ndash;3.4&nbsp;ms</td><td>an AOE spawns its numbers on one frame, so they all crossed the v0.30.342 settle gate together &mdash; a dozen bitmap bakes in a single frame</td></tr>
+</table>
+
+<h3>The fixes</h3>
+<p><b>Static art decodes off-thread.</b> <code>decode()</code> added to the three combat-facing static loaders (projectiles &times;3, vfx, summons). The ~4000 world sprites deliberately stay lazy &mdash; these families are small and every one of them gates a live combat effect.</p>
+<p><b>Hit-flash tints pre-bake in idle time.</b> After map entry, the map's own spawn roster drains through a <code>requestIdleCallback</code> queue that runs <code>_lxTintBake(frame, 'brightness(2.5)')</code> for every idle/walk/attack frame plus the static &mdash; a few images per idle slice, images still fetching rotate to the back. The bake cache is per (image&nbsp;&times;&nbsp;filter) and memoized, so the fight finds every flash variant already hot. Mobs spawned outside the roster (boss adds, summons) now at least warm their frames and static at <code>spawnMonster</code> time.</p>
+<p><b>Damage-number bakes get a budget.</b> At most 3 bitmap bakes per frame; numbers past the budget simply keep the live path for a frame or two until their turn. An AOE's twelve simultaneous settlers now spread their bake cost invisibly instead of stacking it.</p>
+
+
 <h2>v0.30.342 <span class="tag"><span class="pill feat">perf</span> Combat stops stuttering &mdash; decode off-thread, bake the numbers, brake the bosses</span></h2>
 <p>Per user: <em>slow down the pace of certain bosses to let the player breathe without lagging the screen &mdash; and when attacking monsters, the inputs and damage generation cause severe lag; fix it and keep the frame rate stable.</em> Four changes, each measured.</p>
 

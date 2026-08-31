@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.342';
+const GAME_VERSION = 'v0.30.343';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11196,6 +11196,7 @@ const LX_VFX = (() => {
     const img = new Image();
     img.decoding = 'async';
     img.src = 'Sprites/vfx/' + f;
+    if (img.decode) img.decode().catch(() => {});   // v0.30.343 — combat-facing static: sync-decoded up to 14 ms at first draw mid-fight
     out[k] = img;
   }
   return out;
@@ -11534,6 +11535,7 @@ const LX_MOB_PROJ = (() => {
     const img = new Image();
     img.decoding = 'async';
     img.src = 'Sprites/projectiles/' + f;
+    if (img.decode) img.decode().catch(() => {});   // v0.30.343 — see vfx static loader
     out[k] = img;
   }
   return out;
@@ -11788,6 +11790,7 @@ const LX_PLAYER_PROJ = (() => {
     const img = new Image();
     img.decoding = 'async';
     img.src = 'Sprites/projectiles/' + f;
+    if (img.decode) img.decode().catch(() => {});   // v0.30.343 — see vfx static loader
     out[k] = img;
   }
   return out;
@@ -11880,6 +11883,7 @@ const LX_BULT_PROJ = (() => {
     const img = new Image();
     img.decoding = 'async';
     img.src = 'Sprites/projectiles/' + f;
+    if (img.decode) img.decode().catch(() => {});   // v0.30.343 — see vfx static loader
     out[k] = img;
   }
   return out;
@@ -11936,6 +11940,7 @@ const LX_SUMMON = (() => {
     const img = new Image();
     img.decoding = 'async';
     img.src = 'Sprites/summons/' + f;
+    if (img.decode) img.decode().catch(() => {});   // v0.30.343 — see vfx static loader
     out[k] = img;
   }
   return out;
@@ -59371,6 +59376,41 @@ function loadMap(id, entryX, entryY) {
             const _st = (typeof MONSTER_SPRITES !== 'undefined') ? MONSTER_SPRITES[_sp.type] : null;
             if (_st && _st.decode) _st.decode().catch(() => {});
           }
+          // v0.30.343 — PRE-BAKE THE HIT-FLASH TINT in idle time. The first
+          // hit on each type minted brightness(2.5) bakes per visible frame
+          // inside drawMonster — 7-12 ms one-shots exactly when the player
+          // starts attacking. _lxTintBake memoizes per (image x filter), so
+          // draining the roster here means the fight finds them hot. Images
+          // still loading rotate to the back of the queue; the per-callback
+          // cap keeps each idle slice under a few ms.
+          if (typeof _lxTintBake === 'function' && typeof _monsterFramesFor === 'function') {
+            const _fq = [];
+            for (const _sp of _wmd.spawns) {
+              if (!_sp || !_sp.type) continue;
+              const _set = _monsterFramesFor(_sp.type) || {};
+              for (const _md of ['idle', 'walk', 'attack']) for (const _im of (_set[_md] || [])) if (_im) _fq.push(_im);
+              const _st2 = (typeof MONSTER_SPRITES !== 'undefined') ? MONSTER_SPRITES[_sp.type] : null;
+              if (_st2) _fq.push(_st2);
+            }
+            let _spins = 0;
+            const _drain = (ddl) => {
+              let n = 0;
+              while (_fq.length && n < 4 && (!ddl || !ddl.timeRemaining || ddl.timeRemaining() > 4)) {
+                const _im = _fq.shift(); n++;
+                if (_im && _im.complete === false) {   // still fetching — rotate, bounded
+                  if (++_spins < 4000) _fq.push(_im);
+                  continue;
+                }
+                try { _lxTintBake(_im, 'brightness(2.5)'); } catch (e) {}
+              }
+              if (_fq.length) {
+                if (window.requestIdleCallback) requestIdleCallback(_drain, { timeout: 2000 });
+                else setTimeout(_drain, 120);
+              }
+            };
+            if (window.requestIdleCallback) requestIdleCallback(_drain, { timeout: 2000 });
+            else setTimeout(_drain, 300);
+          }
         } catch (e) {}
       }, 60);
     }
@@ -61557,6 +61597,15 @@ function _lxIsWildHostile(m) {
   return true;
 }
 function spawnMonster(x, y, type, isBoss, isMiniBoss) {
+  // v0.30.343 — warm this type's art NOW. The map-entry warm only covers the
+  // map's own spawn list; boss adds / summons / event spawns arrived cold and
+  // paid a sync decode + first-draw bake mid-fight (measured 8-9 ms inside
+  // drawMonster). Both calls are memoized, so repeat spawns cost nothing.
+  try {
+    if (typeof _monsterFramesFor === 'function') _monsterFramesFor(type);
+    const _st = (typeof MONSTER_SPRITES !== 'undefined') ? MONSTER_SPRITES[type] : null;
+    if (_st && _st.decode) _st.decode().catch(() => {});
+  } catch (e) {}
   // v0.29.619 — no wild spawn may land in a town, whatever called us. Returns the
   // same stub shape as the co-op guard below so callers that set fields on the
   // result do not crash.
@@ -134612,6 +134661,9 @@ function drawDamageNumbers() {
   // re-set when the integer pixel size actually changes (~3-5 distinct
   // sizes / frame typical).
   let _lastFontSize = -1;
+  // v0.30.343 — see the bake gate below: cap bakes per frame so an AOE's
+  // simultaneous settlers spread their bake cost over a few frames.
+  let _dnBakeBudget = 3;
   const _dnLowFx_top = (typeof _perfLowFx === 'function' && _perfLowFx());
   for (const d of game.damageNumbers) {
     const sx = d.x - camX;
@@ -134680,7 +134732,7 @@ function drawDamageNumbers() {
     // don't retry every frame, just stay live.
     if (age >= 10 && !rot && scale > 0.88 && scale < 1.12) {
       let _bk = d._bk;
-      if (_bk === undefined) _bk = d._bk = _dnBake(d, txt, col, baseSize);
+      if (_bk === undefined && _dnBakeBudget > 0) { _dnBakeBudget--; _bk = d._bk = _dnBake(d, txt, col, baseSize); }
       if (_bk) {
         ctx.drawImage(_bk.cv, -_bk.ax, -_bk.ay);
         ctx.restore();
