@@ -121,6 +121,32 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.321 <span class="tag"><span class="pill bug">bug</span> The Krook lag was an exception storm &mdash; and his whole kit was dead</span></h2>
+<p>Per user: <em>Massive lag when fighting bosses such as krook</em> (video, recorded on v0.30.316).</p>
+
+<h3>One line, thrown every frame, swallowed every time</h3>
+<p>King Krook's attack-decision block read <code>_now</code> <b>seven lines before</b> <code>const _now = game.time | 0;</code> was declared. Reading a <code>const</code> in its temporal dead zone throws &mdash; so every decision beat raised <code>ReferenceError: Cannot access '_now' before initialization</code>. The bug shipped <b>inside TYRANT'S STOMP itself</b> (v0.30.236): the stomp's cooldown check was inserted above the attack-pick logic, but the <code>_now</code> it reads was declared below it and never hoisted.</p>
+<p>Why nobody saw an error: the call site is <code>try { bossAI(m, dt, _bDist); } <b>finally</b> {...}</code> &mdash; a try/finally with <b>no catch</b> &mdash; so the throw escaped the entire monster update and landed in the unkillable frame loop's catch, which reschedules without logging. And because the throw fires <em>before</em> the decision resets any pattern state, the gate stayed open and it threw again next frame, forever. Measured live: <b>452 ReferenceErrors in 12 seconds</b>, zero surfacing anywhere.</p>
+
+<h3>Two symptoms, both in the video</h3>
+<table>
+<tr><th>symptom</th><th>mechanism</th></tr>
+<tr><td><b>the lag</b></td><td>each throw aborts the rest of that frame's update mid-flight. The CPU profile put this single line at <b>769 self-ticks &mdash; the hottest line in the entire game</b> (V8 constructs the error object and stack trace every frame).</td></tr>
+<tr><td><b>a passive boss</b></td><td>everything below the throw was unreachable: <b>no TYRANT'S STOMP, no megaFireball, no firebomb, no combo strings</b> &mdash; Krook has fought with contact damage and generic traits only, on every build since v0.30.236. In the video he mostly stands there while being hit; that was not a design choice.</td></tr>
+</table>
+
+<h3>The fix, and the verification</h3>
+<p><code>const _now</code> now sits above its first reader; the later duplicate declaration is removed. Nothing else in the decision block changed.</p>
+<p>New <code>scripts/krook_ai_alive_test.mjs</code> wraps <code>bossAI</code> in a counting shim (page-error listeners alone read 0 even mid-storm &mdash; the loop eats the throws upstream), fights a live Krook for 12&nbsp;s and asserts zero escaping throws and an actually-picked attack:</p>
+<table>
+<tr><th></th><th>throws escaping bossAI</th><th>attacks picked</th></tr>
+<tr><td>v0.30.319</td><td><b>452</b></td><td>none &mdash; pinned in <code>idle</code>, timer 2773 past a ~200 gate</td></tr>
+<tr><td>this build</td><td><b>0</b></td><td>TYRANT'S STOMP <em>and</em> megaFireball inside the same 12&nbsp;s</td></tr>
+</table>
+<p>One honest caveat: with his kit resurrected, a profiled fight's median frame cost <em>rises</em> (1.9&nbsp;ms &rarr; 2.5&nbsp;ms headless) &mdash; fire breath, stomps and mega fireballs cost more than a throw-loop that skipped half the engine. The stutter is gone because frames now <em>complete</em>; the fight is also simply back, which means <b>Krook is harder than anyone has experienced him since v0.30.236</b>. If Nightmare Krook now overshoots, that is a tuning question, not a regression.</p>
+<p>Found with <code>scripts/profile_fight.mjs</code> (the v0.30.318 harness) re-pointed at the video's exact scene &mdash; Krook Throne, Nightmare tier. The v0.30.318 reflow fix is confirmed live in the same profile: <code>_lxFitScale</code> 212&nbsp;&micro;s/call before, 1.2&nbsp;&micro;s after.</p>
+
+
 <h2>v0.30.320 <span class="tag"><span class="pill feat">feat</span> Legosaurus swings slower &mdash; and the hit actually lands</span></h2>
 <p>Per user: <em>&ldquo;the attacks dont feel impactful, also the rush animation and attack is very weird, slow down the pace for stegosaurus attack and rush sprites animation.&rdquo;</em> (Legosaurus &mdash; the Block-land tyrant, drawn as a green stegosaurus.)</p>
 <p><b>The pacing fix is data, not engine.</b> v0.30.315 gave every boss per-frame animation timing; nobody had authored one for him, so his nine-frame swing strobed through at a flat 48&nbsp;ms/frame &mdash; 400&nbsp;ms in, the whole animation was already on its last frame. His attack now carries a weighted dwell array (775&nbsp;ms per cycle, ~1.8&times; slower) with the longest holds on the apex frames, so the swing visibly <em>arrives</em>. The rush is fixed by the same array for free: the brace-dash plays the attack set through both phases.</p>
