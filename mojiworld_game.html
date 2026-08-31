@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.335';
+const GAME_VERSION = 'v0.30.336';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -56827,7 +56827,17 @@ function _variedMapData(id) {
   // means future tower maps don't have to remember both flags — the
   // single declarative `isVerticalTower: true` is now sufficient.
   if (base.isTown || base.isBossArena || base.isTower || base.isVerticalTower || base.fixedLayout) {
-    return { ...base, platforms: base.platforms.slice() };
+    // v0.30.x — DEEP copy, not .slice(). The array was already copied, but the
+    // platform objects inside it were shared with MAPS, so any per-fight state
+    // written to one (see the Singularity collapse below) would persist into the
+    // source table and the arena would stay broken for the whole session.
+    // launchPads is cloned for the same reason: pads ride platforms and fall
+    // with them.
+    return {
+      ...base,
+      platforms: base.platforms.map((p) => ({ ...p })),
+      launchPads: (base.launchPads || []).map((q) => ({ ...q })),
+    };
   }
   // Clone platforms so per-load jitter doesn't corrupt the source
   const plats = base.platforms.map(p => ({ ...p }));
@@ -60181,6 +60191,7 @@ function loadMap(id, entryX, entryY) {
   const _lxFromMap = game.currentMap;
   game.currentMap = id;
   game.mapData = _variedMapData(id);
+  if (typeof _lxGravArenaReset === 'function') _lxGravArenaReset();   // v0.30.x — intact Singularity on every entry
   // v0.30.x — pre-decode Gravitos's sprite sets while the entry beat plays,
   // so his first cast doesn't pay a synchronous first-use decode (perf).
   if (id === 'gravitosArena' && typeof _lxGravWarmSets === 'function') { try { _lxGravWarmSets(); } catch (e) {} }
@@ -88166,6 +88177,8 @@ function killMonster(m) {
         })) break;
       }
     }
+    // v0.30.x — the arena loses a tier and the lights go down one more step.
+    if (typeof _lxGravCollapse === 'function') _lxGravCollapse(m._gravitosPhase);
     const _label = (m._gravitosPhase === 2)
       ? '💥 GRAVITOS AWAKENS — Phase 2 (stronger + faster)'
       : '💥💥 GRAVITOS ASCENDS — Phase 3 (DOUBLED + relentless)';
@@ -104667,7 +104680,18 @@ function drawBackground() {
     // Drawn on top of the backdrop only (boss decor, sky-life, and every
     // entity render later in the frame, so they stay full-brightness).
     // Used to deepen the Gravitos arena (bgTint on gravitosArena).
-    if (_md.bgTint) { ctx.fillStyle = _md.bgTint; ctx.fillRect(0, 0, W, H); }
+    // v0.30.x — the Singularity darkens with each Gravitos form (per user:
+    // "darker with gravitos2 and even darker with gravitos3"). The authored
+    // 0.42 is form 1; the target is set at each form transition and eased here.
+    if (_md.bgTint) {
+      let _tint = _md.bgTint;
+      if (game.currentMap === 'gravitosArena' && typeof _lxGravTintTo === 'number') {
+        if (_lxGravTintCur == null) _lxGravTintCur = _lxGravTintTo;
+        _lxGravTintCur += (_lxGravTintTo - _lxGravTintCur) * 0.035;   // ~1.2 s to settle
+        _tint = 'rgba(0,0,8,' + _lxGravTintCur.toFixed(3) + ')';
+      }
+      ctx.fillStyle = _tint; ctx.fillRect(0, 0, W, H);
+    }
     // v0.29.x — mid-ground parallax ridges: the derived depth layers between
     // the 0.12 backdrop and the 1.0 play field (see _lxMidgroundFor above).
     // Drawn after the tint so they sit IN the scene, before sky-life/props so
@@ -109073,6 +109097,187 @@ function drawCalibrationGrid() {
     ctx.fillText('GROUND Y=' + _ground.y, 4, _ground.y - camY - 14);
   }
   ctx.restore();
+}
+
+// ===========================================================================
+// v0.30.x — THE SINGULARITY COLLAPSES (per user: option 10, "the arena fights
+// back", scoped to Gravitos, plus "make the map background tint darker with
+// gravitos2 and even darker with gravitos3").
+//
+// KEYED ON THE FORM, NOT THE HP BAND. Gravitos has two functions that both
+// look like "which phase is this":
+//   _gravPhaseOf(m)   66%/33% of the CURRENT pool — a damage-band helper that
+//                     cycles 1-2-3 inside every form.
+//   m._gravitosPhase  the actual form. Gravitos is a multi-life boss: each
+//                     form's death respawns him with a fresh pool (form 2 =
+//                     50% of base at +25% stats, form 3 = 100% at +100%).
+// The tint and the collapse hook _gravitosPhase, so they fire exactly twice a
+// fight — as Awakened lands, and as Ascendant does. Keyed on _gravPhaseOf they
+// would have fired up to nine times and darkened the arena to pitch black
+// during form 1.
+//
+// WHAT COLLAPSES, AND WHAT DELIBERATELY DOES NOT. The arena authors eight
+// platforms; only four are eligible:
+//   phase 2   the y:180 pair (x340, x1700)  — the high perches
+//   phase 3   the y:320 pair (x500, x1500)  — and the two launch pads on them
+// Excluded on purpose:
+//   y:480 ground  a full-width floor is the only thing between the player and
+//                 an unrecoverable fall at this map's 3x gravity.
+//   y:260 centre  collapseRain hard-codes midPlatY = 260 when it picks safe
+//                 boxes. Drop it and 40% of that pattern's MANDATORY dodge
+//                 targets hang in mid-air over a 3x-gravity pit — an OHKO the
+//                 player cannot answer.
+//   y:380 pair    the low edge ledges; kept so the arena still has mid-height
+//                 footing once the top two tiers are gone.
+// Floating platforms go 7 -> 5 -> 3 and the three GROUND launch pads always
+// survive, so the arena is still fully traversable at its darkest.
+const _LX_GRAV_COLLAPSE = {
+  2: [{ x: 340, y: 180 }, { x: 1700, y: 180 }],
+  3: [{ x: 500, y: 320 }, { x: 1500, y: 320 }],
+};
+// Form 1 is the authored 0.42 (v0.29.86, "deepen the arena backdrop").
+const _LX_GRAV_TINT = { 1: 0.42, 2: 0.62, 3: 0.78 };
+const _LX_GRAV_TELL_MS = 900;    // cracks + shudder BEFORE it drops
+let _lxGravDebris = [];          // slabs mid-fall: drawn, no longer solid
+let _lxGravTintCur = null;       // eased alpha, null until the arena is entered
+let _lxGravTintTo = 0.42;
+
+function _lxGravArenaReset() {
+  _lxGravDebris = [];
+  _lxGravTintCur = null;
+  _lxGravTintTo = _LX_GRAV_TINT[1];
+}
+
+// Mark this form's platforms as doomed. They stay SOLID through the telegraph:
+// the player is never dropped without warning, and standing on one as it goes
+// is survivable because the full-width ground is always below.
+function _lxGravCollapse(phase) {
+  try {
+    _lxGravTintTo = _LX_GRAV_TINT[phase | 0] || _LX_GRAV_TINT[3];
+    if (typeof game === 'undefined' || !game.mapData || game.currentMap !== 'gravitosArena') return;
+    const want = _LX_GRAV_COLLAPSE[phase | 0];
+    if (!want) return;
+    let n = 0;
+    for (const t of want) {
+      // Matched on authored coordinates rather than an index, so a future edit
+      // to the platform list cannot silently collapse the wrong slab: a
+      // platform that is not found is simply skipped.
+      const p = (game.mapData.platforms || []).find(
+        (q) => q && q.x === t.x && q.y === t.y && !q._lxDoomed);
+      if (!p) continue;
+      p._lxDoomed = _LX_GRAV_TELL_MS;
+      n++;
+    }
+    if (n) {
+      if (typeof showToast === 'function') showToast('⚠ THE ARENA IS COLLAPSING', 'legendary');
+      if (typeof addShake === 'function') addShake(10);
+    }
+  } catch (e) {}
+}
+
+function _lxGravArenaTick(dt) {
+  try {
+    // Debris falls unconditionally — a portal taken mid-collapse must not
+    // leave slabs frozen in the sky of the next map.
+    for (let i = _lxGravDebris.length - 1; i >= 0; i--) {
+      const d = _lxGravDebris[i];
+      d.vy += 0.9; d.y += d.vy; d.rot += d.spin; d.life -= 1;
+      if (d.life <= 0 || d.y > 4000) _lxGravDebris.splice(i, 1);
+    }
+    if (typeof game === 'undefined' || !game.mapData || game.currentMap !== 'gravitosArena') return;
+    const plats = game.mapData.platforms || [];
+    for (let i = plats.length - 1; i >= 0; i--) {
+      const p = plats[i];
+      if (!p || !p._lxDoomed) continue;
+      p._lxDoomed -= dt;
+      if (p._lxDoomed > 0) continue;
+      // DROP. Splicing out of game.mapData.platforms is what actually makes it
+      // stop being ground — every collision site in the file iterates that
+      // array, so removing it from the array is the single point of truth. The
+      // slab then belongs to the debris list purely as a visual.
+      plats.splice(i, 1);
+      _lxGravDebris.push({
+        x: p.x, y: p.y, w: p.w, h: p.h,
+        vy: 0, rot: 0, spin: (Math.random() - 0.5) * 0.05, life: 120,
+      });
+      // Any launch pad riding this platform falls with it. Left behind it would
+      // be a pad hanging over a hole, still launching.
+      const pads = game.mapData.launchPads;
+      if (pads) {
+        for (let k = pads.length - 1; k >= 0; k--) {
+          const q = pads[k];
+          if (q && q.y === p.y && q.x >= p.x - 4 && (q.x + q.w) <= (p.x + p.w + 4)) pads.splice(k, 1);
+        }
+      }
+      if (typeof addShake === 'function') addShake(16);
+      if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('crit'); } catch (e) {} }
+      if (typeof _budgetedParticlePush === 'function') {
+        for (let k = 0; k < 26; k++) {
+          if (!_budgetedParticlePush({
+            x: p.x + Math.random() * p.w,
+            y: p.y + p.h * 0.5,
+            vx: (Math.random() - 0.5) * 4,
+            vy: Math.random() * 2,
+            life: 40 + Math.floor(Math.random() * 20),
+            color: k % 3 === 0 ? '#6634a8' : k % 3 === 1 ? '#2a1440' : '#aa88dd',
+            size: 2 + Math.random() * 3,
+          })) break;
+        }
+      }
+    }
+  } catch (e) {}
+}
+
+// Cracks on the doomed, and the slabs already falling. Called straight after
+// drawPlatforms so it paints over the platform art it is cracking.
+function _lxGravArenaDraw() {
+  try {
+    if (typeof game === 'undefined' || !game.mapData) return;
+    const camX = (game.camera && game.camera.x) || 0;
+    for (const d of _lxGravDebris) {
+      const sx = d.x - camX;
+      if (sx + d.w < -80 || sx > W + 80) continue;
+      const a = Math.max(0, Math.min(1, d.life / 120));
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.translate(sx + d.w / 2, d.y + d.h / 2);
+      ctx.rotate(d.rot);
+      ctx.fillStyle = '#2a1440';
+      ctx.fillRect(-d.w / 2, -d.h / 2, d.w, d.h);
+      ctx.strokeStyle = '#6634a8';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(-d.w / 2, -d.h / 2, d.w, d.h);
+      ctx.restore();
+    }
+    if (game.currentMap !== 'gravitosArena') return;
+    for (const p of (game.mapData.platforms || [])) {
+      if (!p || !p._lxDoomed) continue;
+      const sx = p.x - camX;
+      if (sx + p.w < 0 || sx > W) continue;
+      // Shudder grows as the drop approaches; the flashing rim is the read.
+      const t = 1 - Math.max(0, Math.min(1, p._lxDoomed / _LX_GRAV_TELL_MS));
+      const jx = (Math.random() - 0.5) * 5 * t;
+      const jy = (Math.random() - 0.5) * 3 * t;
+      ctx.save();
+      ctx.translate(jx, jy);
+      ctx.globalAlpha = 0.35 + 0.5 * t;
+      ctx.strokeStyle = '#cc66ff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(sx, p.y, p.w, p.h);
+      // Fracture lines spreading across the slab.
+      ctx.globalAlpha = 0.5 + 0.45 * t;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      const seg = Math.max(2, Math.floor(p.w / 46));
+      for (let k = 1; k < seg; k++) {
+        const fx = sx + (p.w * k) / seg;
+        ctx.moveTo(fx, p.y);
+        ctx.lineTo(fx + (k % 2 ? 6 : -6) * t, p.y + p.h);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+  } catch (e) {}
 }
 
 function drawPlatforms() {
@@ -135903,6 +136108,7 @@ function loop(time) {
     updateAmbient();
     if (typeof _lxWxTick === 'function') _lxWxTick();   // v0.29.423 — weather advances on both sim paths, like ambient
     updateMapEvents(dt);
+    if (typeof _lxGravArenaTick === 'function') _lxGravArenaTick(dt);   // v0.30.x — Singularity collapse
     updateTower(dt);
     if (typeof updateCarriage === 'function') updateCarriage(dt);
     if (typeof updateSpireFireballs === 'function') updateSpireFireballs(dt);   // v0.26.127
@@ -136106,6 +136312,7 @@ function loop(time) {
   const _pp = game._photoMode && game._photoPan;
   if (_pp && (_pp.x || _pp.y)) ctx.translate(-Math.round(_pp.x), -Math.round(_pp.y));
   drawPlatforms();
+  if (typeof _lxGravArenaDraw === 'function') _lxGravArenaDraw();   // v0.30.x — cracks + falling slabs, over the platform art
   drawPotholes();      // v0.25.850 — depressions on the ground at pothole x-positions
   drawLaunchPads();    // v0.26.345 — hyper-jump launch pads
   drawWorldProps();    // v0.25.463 — static map props (banners, anvils, fountains, etc.)
