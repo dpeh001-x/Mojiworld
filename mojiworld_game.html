@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.343';
+const GAME_VERSION = 'v0.30.344';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -33358,7 +33358,7 @@ for (const z of ZODIAC_SIGNS) {
   const _Z_PROFILE = {
     aries:       { hp: 0.85, atk: 1.45, def: 0.85, eva: 0.60 },   // burned too hot, too fast — glass cannon
     taurus:      { hp: 1.25, atk: 1.10, def: 1.45, eva: 0.55 },   // granite bull — immovable, never dodges
-    gemini:      { hp: 0.80, atk: 1.00, def: 0.80, eva: 1.55 },   // twinstar — two targets, neither quite there
+    gemini:      { hp: 0.80, atk: 1.00, def: 0.64, eva: 1.55 },   // twinstar — two targets, neither quite there. v0.30.344: def -20% (0.80 -> 0.64) per user
     cancer:      { hp: 1.25, atk: 0.85, def: 1.50, eva: 0.70 },   // tidecaller — shell first, claws second
     leo:         { hp: 1.10, atk: 1.25, def: 1.00, eva: 0.95 },   // sunmane — proud, front-footed, no tricks
     virgo:       { hp: 0.85, atk: 1.00, def: 1.15, eva: 1.35 },   // seraph — precise, hard to pin down
@@ -127827,7 +127827,26 @@ const _ZODIAC_GAIT = {
   } },
   // Gem & Mini — SIDE-SWAP. Blinks across to the player's other flank, so the
   // side you are guarding is never the side it arrives on.
-  gemini: { noLunge: false, fn: (m, dt, dist, phase, z, dir) => {
+  // v0.30.344 — noLunge FALSE -> TRUE, and this was the real chase speed. The
+  // shared reposition lunge runs AFTER every sign's handler and, by design,
+  // "wins over the handler's drift": it writes m.vx outright at
+  // dir x (5 + phase x 0.9) — 5.9 rising to 7.7 — with a 300 ms window and no
+  // telegraph. It exists because the twelve signs "drift at ~0.8 speed", which
+  // is true of the GROUNDED ones.
+  //
+  // Gemini is not one of them. It flies, and _zodiacGaitTick returns early on
+  // _noGravity — so its own gait below never actually runs, while the lunge,
+  // gated only on this flag, ran anyway. The result was a grounded boss's
+  // dash system bolted onto a flier that already has a full pursuit of its
+  // own, and it overrode the orbit cap every few seconds: measured at 5.5-8.8
+  // against a paced cap of 2.8-5.4. Every attempt to slow the chase in the
+  // pattern was silently undone here, which is why the reduction has to
+  // happen at this flag and not only in the numbers.
+  //
+  // The flag's own doc says it: "this sign drives its own approach and must
+  // NOT also receive the shared lunge". Gemini keeps its committed, TELEGRAPHED
+  // dive-cross as its burst; what it loses is the untelegraphed one.
+  gemini: { noLunge: true, fn: (m, dt, dist, phase, z, dir) => {
     // Drift between blinks — a blink-only gait left the twins standing
     // perfectly still for seconds at a time (caught by the gait harness).
     m.vx += dir * 0.09;
@@ -128805,7 +128824,40 @@ const ZODIAC_AI = {
     // computes a different phase -- two different angular speeds, and the
     // antiphase decays within seconds (measured: on opposite sides only 46% of
     // the time, worse than chance). The twin reads the parent's value.
-    let _orbSpd = phase === 1 ? 0.019 : phase === 2 ? 0.026 : 0.034;
+    // v0.30.344 — THE CHASE BREATHES (per user: "reducing the chase speed of
+    // gemini boss, vary it at different slowness and speed up rates"). Two
+    // changes, and they are separate things.
+    //
+    // SLOWER: the orbit's angular rate drops ~30% and the velocity cap ~27%
+    // (below). Gemini flies with no gravity and tracks the player's centre, so
+    // its old flat cap of 6.2/7.4 was a pursuit the player simply could not
+    // out-walk — the pressure never let up because the SPEED never changed.
+    //
+    // VARIED: a shared pace multiplier that eases between a long slow drift
+    // and a brief surge, rather than a constant. The curve is a cosine (so it
+    // eases in and out instead of snapping) raised to a power, which is what
+    // makes the cycle spend most of its time near the SLOW end and only
+    // briefly touch the peak — the "different slowness and speed up rates"
+    // asked for, and readable: the lulls are when you reposition, the surges
+    // are when you commit.
+    //
+    // Derived purely from the shared game clock, so both twins compute the
+    // identical value with no cross-reads. That matters here: the comment on
+    // _orbSpd below records that keying orbit speed per-twin decayed the
+    // antiphase within seconds because the twin's differing HP gave it a
+    // different phase. A clock-derived pace cannot drift apart by construction.
+    // Period is in FRAMES on the shared clock: 324 ~= 5.4s at 60fps — long
+    // enough that a lull is usable, short enough that the rhythm is legible
+    // inside one phase. Declared local to the pattern rather than beside
+    // _Z_PROFILE, which is scoped to the zodiac-type builder and not visible
+    // from here.
+    const _GEM_PACE_PERIOD = 324, _GEM_PACE_MIN = 0.62, _GEM_PACE_MAX = 1.20, _GEM_PACE_SHAPE = 2.2;
+    const _gemCyc = ((game.time || 0) % _GEM_PACE_PERIOD) / _GEM_PACE_PERIOD;
+    const _gemSurge = 0.5 - 0.5 * Math.cos(_gemCyc * Math.PI * 2);          // 0..1..0
+    const _gemPace = _GEM_PACE_MIN
+      + (_GEM_PACE_MAX - _GEM_PACE_MIN) * Math.pow(_gemSurge, _GEM_PACE_SHAPE);
+    m._gemPace = _gemPace;   // read by the cap below and by the regression suite
+    let _orbSpd = (phase === 1 ? 0.0133 : phase === 2 ? 0.0182 : 0.0238) * _gemPace;
     if (m._isTwin && m._twinParent && m._twinParent._orbSpd > 0) _orbSpd = m._twinParent._orbSpd;
     else m._orbSpd = _orbSpd;
     const _ang = (game.time || 0) * _orbSpd + (m._isTwin ? Math.PI : 0);
@@ -128814,9 +128866,24 @@ const ZODIAC_AI = {
       // Flatter vertically than horizontally, and biased ABOVE the player so
       // the fight reads as something circling overhead rather than swimming.
       const _ty = (_pcy - 74) + Math.sin(_ang) * _orbR * 0.52 - m.h / 2;
-      m.vx += Math.max(-0.9, Math.min(0.9, (_tx - m.x) * 0.010));
-      m.vy += Math.max(-0.9, Math.min(0.9, (_ty - m.y) * 0.010));
-      const _cap = _twinsUp ? 6.2 : 7.4;
+      // v0.30.344 — the same pace scales the approach, not just the angle. Without
+      // this the twins still CLOSED at the old rate and only swung around the
+      // player more slowly, which reads as sluggish rather than as breathing.
+      const _acc = 0.9 * _gemPace;
+      m.vx += Math.max(-_acc, Math.min(_acc, (_tx - m.x) * 0.010 * _gemPace));
+      m.vy += Math.max(-_acc, Math.min(_acc, (_ty - m.y) * 0.010 * _gemPace));
+      // v0.30.344 — 6.2/7.4 -> 4.5/5.4, then paced.
+      //
+      // AND CLAMPED AS A VECTOR, which is the other half of the reduction. The
+      // old clamp was PER AXIS, so a boss travelling diagonally — which a
+      // circling flier does most of the time — moved at cap x sqrt(2). The
+      // "6.2 cap" was really 8.8 on the diagonal, measured live at 8.80 with
+      // vx -6.22 / vy 6.22. Clamping the magnitude makes the number mean what
+      // it says: peak is now 5.4 x 1.20 = 6.5 at its absolute fastest, against
+      // a measured 8.8 before, and the lull is 4.5 x 0.62 = 2.8.
+      const _cap = (_twinsUp ? 4.5 : 5.4) * _gemPace;
+      const _spNow = Math.hypot(m.vx || 0, m.vy || 0);
+      if (_spNow > _cap) { const _k = _cap / _spNow; m.vx *= _k; m.vy *= _k; }
       if (Math.abs(m.vx) > _cap) m.vx = Math.sign(m.vx) * _cap;
       if (Math.abs(m.vy) > _cap) m.vy = Math.sign(m.vy) * _cap;
     }
@@ -128913,7 +128980,20 @@ const ZODIAC_AI = {
         }
       } else {
         m.vx = m._gemDiveVx; m.vy = m._gemDiveVy;
-        if (m._gemDiveT > 620) { m._gemDive = null; m.patternState = 'idle'; }
+        if (m._gemDiveT > 620) {
+          m._gemDive = null; m.patternState = 'idle';
+          // v0.30.344 — BLEED THE DIVE BACK TO THE CHASE CAP ON EXIT. The dive
+          // branch returns before the orbit clamp, so a dive ended by leaving
+          // the boss coasting at its dive speed for the frames it took the
+          // flier damping to wash out — measured at 7.60, above even the OLD
+          // constant cap of 6.2, which quietly undid the whole reduction right
+          // after every dive. The dive itself is untouched: it is telegraphed,
+          // committed and readable, and it is meant to be fast. What is capped
+          // is the coast AFTERWARDS, which is chase, not attack.
+          const _exitCap = (_twinsUp ? 4.5 : 5.4) * _gemPace;
+          const _exitSp = Math.hypot(m.vx || 0, m.vy || 0);
+          if (_exitSp > _exitCap) { const _k = _exitCap / _exitSp; m.vx *= _k; m.vy *= _k; }
+        }
       }
       return;
     }
