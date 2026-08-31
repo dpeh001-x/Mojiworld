@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.326';
+const GAME_VERSION = 'v0.30.327';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -22495,7 +22495,7 @@ const monsterTypes = {
   legosaurus:    { name:'Legosaurus, the Warped Tyrant', w:224, h:238, color:'#3f7a3a', shell:'#cc2222', hp:2987442, atk:383, def:120, evasion:126, exp:1261365, mojicoins:8218, speed:1.6, jump:2, boss:true, level: 59,
                   shoot:'mfirespit', shootCd:2000,
                   signature:'The block-king. Once a child\'s favorite toy — now a tyrant of bricks.',
-                  traits:{ activeBoss:true, revivesOnce:{ hpPct:0.30 }, bigMelee:{ kind:'swing', dmgMul:2.2, range:180, swingW:280, swingH:110, cdMs:4200, telegraphMs:550, impactMs:110, impactShake:9 }, columnStrike:{ dmgMul:1.8, width:110, range:560, cdMs:6000, telegraphMs:650, color:'#ff8844', sprite:'fx_col_legosaurus' }, braceDash:{ range:700, minRange:120, cdMs:6500, telegraphMs:850, dashMs:380, distance:520 } } },   // v0.29.x - brace-dash per user · v0.30.x - impactMs/impactShake: hit-stop + shake when the swing CONNECTS (per user: attacks dont feel impactful)
+                  traits:{ activeBoss:true, revivesOnce:{ hpPct:0.30 }, bigMelee:{ kind:'swing', dmgMul:2.2, range:180, swingW:280, swingH:110, cdMs:4200, telegraphMs:550, impactMs:110, impactShake:9, stickMul:0.55 /* v0.30.x per user: creeps toward the player through the windup instead of dead-rooting */ }, columnStrike:{ dmgMul:1.8, width:110, range:560, cdMs:6000, telegraphMs:650, color:'#ff8844', sprite:'fx_col_legosaurus' }, braceDash:{ range:700, minRange:120, cdMs:6500, telegraphMs:850, dashMs:380, distance:520, gore:{ frac:0.50, label:"Legosaurus's goring charge", color:'#ff8844' } /* v0.30.x per user: charge deals 50% of player's max HP on touch */ } } },   // v0.29.x - brace-dash per user · v0.30.x - impactMs/impactShake: hit-stop + shake when the swing CONNECTS (per user: attacks dont feel impactful)
   // v0.25.955 — DISTORTED PORTAL roster (Lv 35-45 alternate-dimension
   // map chain). Five normals + one chamber boss. Each entry is a
   // "distorted" reflection of an existing canonical NPC — deranged
@@ -77172,7 +77172,7 @@ function updateMonsters(dt) {
       if (!m._bigMeleeFiring && m._bigMeleeCd <= 0 && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && _bmInRange && _bmOnScreen) {   // v0.29.263 — winded bosses can't start a heavy · v0.29.x — nor a retreating one
         m._bigMeleeFiring = true;
         m._bigMeleeT = bm.telegraphMs;
-        m.vx = 0;   // root during windup
+        m.vx = 0;   // root during windup (stickMul bosses start creeping next tick)
         if (typeof _lxSovAtkPose === 'function') _lxSovAtkPose(m, 'swing', 60);   // v0.30.89
         // v0.26.x — drive the per-type weapon-swing ANIMATION (Sprites/monsters/
         // attack/<type>_*.webp) through the windup→strike so the morph swing
@@ -77185,7 +77185,33 @@ function updateMonsters(dt) {
       // PHASE 2 — telegraph tick (particles + flash).
       if (m._bigMeleeFiring && m._bigMeleeT > 0) {
         m._bigMeleeT -= dt;
+        // v0.30.x — STICKY WINDUP (per user: "legosaurus should be abit more
+        // sticky when attacking phase"). Opt-in per config: with stickMul set,
+        // the boss creeps toward the player's LIVE position through the
+        // telegraph instead of dead-rooting, so a single step back no longer
+        // turns every swing into a whiff — and the stop-start snap around
+        // each swing (full stride -> statue -> full stride) is gone, which is
+        // most of what made his fight read as jerky. The creep stops inside
+        // 40px of body overlap so he cannot shove through the player, and
+        // facing follows the creep so the swing lands where he is looking.
+        // Bosses without stickMul keep the exact old behaviour.
+        //
+        // The creep moves POSITION directly rather than writing m.vx: the
+        // chase block runs later in the same tick and re-zeroes a rooted
+        // boss's velocity at this range, so a vx-based creep measured 0px of
+        // travel over a full forced windup. Chase only ever writes velocity,
+        // so a direct x nudge survives the ordering; at under a pixel per
+        // frame it is exactly what the vx integration would have produced.
         m.vx = 0;
+        if (bm.stickMul > 0) {
+          const _stDx = _playerCx - (m.x + m.w / 2);
+          const _stGap = Math.abs(_stDx) - (m.w + player.w) / 2;
+          if (_stGap > 40) {
+            const _stDir = _stDx > 0 ? 1 : -1;
+            m.x += _stDir * (m.speed || 1) * bm.stickMul * (dt / 16.67);
+            m.facing = _stDir;
+          }
+        }
         // Visible windup — red embers around the mob's hands/feet.
         if (game.time % 3 === 0 && typeof _budgetedParticlePush === 'function') {
           _budgetedParticlePush({
@@ -77486,7 +77512,7 @@ function updateMonsters(dt) {
             if (player.blockTimer > 0) { _g = Math.max(1, Math.floor(_g * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
             if (player.cls === 'warrior' && typeof _warriorDr === 'function') _g = Math.max(1, Math.floor(_g * _warriorDr()));
             if (player._aegis) _g = Math.max(1, Math.floor(_g * 0.5));
-            player.hp -= (typeof _diffDmg === 'function') ? _diffDmg(_g, 0, true) : _g;
+            player.hp -= (typeof _diffDmg === 'function') ? _diffDmg(_g, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0, true) : _g;   // v0.30.x — real level, not the untrustworthy levelReq fallback (x2.5 punish measured)
             player.lastHitTime = game.time;
             player.invulnerable = 900;
             player._lastDamageSource = bd.gore.label || 'a goring charge';
