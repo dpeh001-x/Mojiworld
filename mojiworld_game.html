@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.315';
+const GAME_VERSION = 'v0.30.316';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -29413,7 +29413,15 @@ const MAPS = {
     //   • carriageThrills wires the new updateCarriage tick — random
     //     rumble shakes + shooting-star sparkles + kill-count event
     //     toasts ("Banking left!" / "Final stretch!" / "Ticket inspector").
-    noPotion: true,
+    // v0.30.316 — POTION LOCK REMOVED (per user: "bug with PQ, unable to use
+    // potions"). The lock was v0.25.987, and correct for what this map was
+    // then: a long mob grind where drinking through it was the exploit. Two
+    // things changed underneath it. v0.26.309 cut Stage 3 to EIGHT kills, so
+    // there is no grind left to drink through; and v0.26.400 started paying
+    // hp_m x3 as this very stage's completion reward — the chain hands you
+    // potions for a map that forbade them. The flag itself stays in the
+    // engine (see the useConsumable / useQuickPotion gates) for any map that
+    // wants it later; it is just no longer set here.
     carriageThrills: true,
     platforms: [
       // ── Ground (carriage floor) ──
@@ -29485,7 +29493,13 @@ const MAPS = {
     isTower: true,
     isCarriage: true,
     taxiAccessible: false,
-    noPotion: true,
+    // v0.30.316 — POTION LOCK REMOVED, and this one was the sharper edge. When
+    // Halcyon's "the express judges your kit, not your stockpile" rule was
+    // written, this map was an optional repeatable grind. v0.26.309 made it
+    // the STAGE 4 ARENA — the Master Conductor duel, against a boss that
+    // re-stats to the player's own level (_pqFinaleArena below). A
+    // level-scaling boss duel with healing switched off is not a difficulty
+    // knob, it is a wall, and the toast even called this map "the carriage".
     carriageThrills: true,
     expressScaling: true,
     // v0.29.885 — the duel arena stops refilling once the Conductor is
@@ -50232,6 +50246,40 @@ function _bossEpitaph(type, m) {
 const LX_PQ_CHAIN = ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale'];
 const LX_PQ_RUN_AT_40 = 0.50;   // share of one level for a full 4-stage run
 const LX_PQ_RUN_AT_70 = 0.15;
+// v0.30.316 — PER-STAGE EXP CAP (per user: "currently doing pq past level 40 is
+// giving me ALOT of exp, cap each stage to 4% of EXP and tail down to 1%
+// after level 80").
+//
+// A CEILING, not a new payout rule: the budget maths above still decides what
+// a stage is worth and the cap only bites when that exceeds it. It is applied
+// to the FINAL number beside the existing 80%-of-a-level ceiling, because the
+// payout is max(authored, floor) — clamping either input alone would leave the
+// other free to sail past the cap.
+//
+// Deliberately applied at EVERY level, not only past 40. The complaint is
+// about post-40, but the pre-40 path pays a PQ stage its ordinary
+// design-level share, which for the finale resolves to the 0.50 clamp — half
+// a level for one stage. Capping only above 40 would have made the PQ pay
+// dramatically better at 39 than at 41, i.e. built a reason to stop levelling
+// before running it. One ceiling at every level is the only version of this
+// that does not create that incentive.
+//
+// The Endless Express is capped as one of them. It is the repeatable side-run
+// rather than a numbered stage, so it is not in LX_PQ_CHAIN — but capping the
+// four stages and leaving the farmable one uncapped would just move the farm.
+const LX_PQ_STAGE_CAP = 0.04;          // share of one level, per stage, to Lv 80
+const LX_PQ_STAGE_CAP_LATE = 0.01;     // ...and past the taper
+const LX_PQ_CAP_TAPER_FROM = 80;
+const LX_PQ_CAP_TAPER_TO = 100;        // straight line 4% -> 1% across these, flat after
+const LX_PQ_CAPPED_QUESTS = new Set(['q_clockwork_underpass', 'q_pq_spire',
+  'q_pq_carriage', 'q_pq_finale', 'q_clockwork_express']);
+function _lxPqStageCapFrac(L) {
+  const lv = Math.max(1, Math.floor(L || 1));
+  if (lv <= LX_PQ_CAP_TAPER_FROM) return LX_PQ_STAGE_CAP;
+  if (lv >= LX_PQ_CAP_TAPER_TO) return LX_PQ_STAGE_CAP_LATE;
+  const t = (lv - LX_PQ_CAP_TAPER_FROM) / (LX_PQ_CAP_TAPER_TO - LX_PQ_CAP_TAPER_FROM);
+  return LX_PQ_STAGE_CAP + t * (LX_PQ_STAGE_CAP_LATE - LX_PQ_STAGE_CAP);
+}
 // Past 70 the run keeps scaling DOWN rather than holding flat (per user:
 // "after level 70 it is still available but EXP rewards scale down"). The PQ
 // was never gated, so "still available" needs no code — what needed fixing is
@@ -50458,6 +50506,13 @@ function _completeQuest(id) {
       if (typeof _lxLevelCost === 'function') {
         const _cap = Math.floor(_lxLevelCost(player.level || 1) * 0.80);
         if (_cap > 0 && _questExp > _cap) _questExp = _cap;
+        // v0.30.316 — and the tighter PQ ceiling on top of it. Same shape, same
+        // live level cost, so the two cannot drift; see _lxPqStageCapFrac.
+        if (typeof LX_PQ_CAPPED_QUESTS !== 'undefined' && LX_PQ_CAPPED_QUESTS.has(id)
+            && typeof _lxPqStageCapFrac === 'function') {
+          const _pqCap = Math.floor(_lxLevelCost(player.level || 1) * _lxPqStageCapFrac(player.level || 1));
+          if (_pqCap > 0 && _questExp > _pqCap) _questExp = _pqCap;
+        }
       }
     } catch (e) {}
     player.exp += _questExp;
