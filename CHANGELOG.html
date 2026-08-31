@@ -121,6 +121,29 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.328 <span class="tag"><span class="pill polish">perf</span> Gravitos: the entry hitch pre-decodes away &mdash; and his big casts stop rushing</span></h2>
+<p>Per user: <em>work on making Gravitos fight less laggy as well</em>, and: <em>lengthen the time intervals for sprite some of the bigger longer boss attacks if not they look too rushed, but make sure it is smooth still.</em></p>
+
+<h3>Measured first: the fight itself is already clean</h3>
+<p>Profiling the real Singularity fight (CDP sampler + a per-frame recorder tagged with his pattern state): steady-state combat runs at a <b>0.5&ndash;0.7&nbsp;ms median frame</b> even in headless software rendering, p99 3&ndash;4&nbsp;ms, zero exceptions escaping <code>bossAI</code>, and no scripted function above 1% self-time &mdash; the v0.30.318 reflow fix and the recent exception work already cover this fight's per-frame costs. What remained was a <b>single giant frame near fight start</b>: 0.2&nbsp;s on a good run, up to <b>1.4&nbsp;s</b> on a bad one, always in the opening seconds with the scene nearly empty.</p>
+
+<h3>The fix: decode before the fight, not during it</h3>
+<p>Gravitos is the heaviest sprite consumer in the game &mdash; nine full frame sets across his three forms plus the star / laser / soul / punch cast sets. The images load at boot, but nothing <em>decodes</em> them until the first <code>drawImage</code>, so the fight's opening seconds paid the decode of whichever giant set his first pattern reached for. Entering the Singularity now kicks <code>img.decode()</code> across every loaded <code>gravitos*</code> frame (180 frames measured) &mdash; async, off the main thread, resolved while the entry beat plays. Verified live: <b>126/126 attack frames decoded within 3&nbsp;s of entry</b>, before combat begins.</p>
+
+<h3>Big casts breathe: animator ft pacing for the dedicated cast sets</h3>
+<p>Boss attack sets step at a flat 48&nbsp;ms/frame &mdash; a nine-frame cast finishes in 432&nbsp;ms, then loops. Inside casts that run two-to-four seconds (the laser beam, the soul drain, the star-form singularity casts, Astral Judgement) that reads as a rushed loop rather than one heavy cast. The five <b>dedicated big-cast art keys</b> now carry animator-authored per-frame intervals (the v0.30.315 <code>ft</code> system): <code>[110,110,120,140,170,170,140,120,110]</code> &mdash; 1.23&nbsp;s per pass, longest holds on the apex frames, every dwell &le;170&nbsp;ms so motion stays continuous.</p>
+<table>
+<tr><th>set</th><th>cast</th><th>cycle</th></tr>
+<tr><td><code>gravitoslaser</code> / <code>gravitossoul</code></td><td>laser beam / soul drain</td><td rowspan="3">432&nbsp;ms &rarr; <b>1.23&nbsp;s</b></td></tr>
+<tr><td><code>gravitos2star</code> / <code>gravitos3star</code></td><td>star-form singularity casts</td></tr>
+<tr><td><code>aetherionastral</code></td><td>Astral Judgement</td></tr>
+</table>
+<p>Scoped to dedicated cast keys on purpose: shared per-boss attack sets (Krook's one set covers his quick claw <em>and</em> his mega) stay at the tuned 48&nbsp;ms so nothing fast gets dragged.</p>
+
+<h3>Verified &mdash; <code>scripts/grav_warm_pacing_test.mjs</code></h3>
+<p>6/6 on this build (warm fires, 126/126 decoded, 5/5 sets served <code>ft</code> through the live resolver, measured dwell avg 130&nbsp;ms / max 173&nbsp;ms on a real clock); 4/4 fail on the previous build. <code>animator_parity_check</code> passes 9/9 &mdash; including regenerating <code>anim_calib_manifest.js</code> for the <code>aetherionastral</code> / <code>gravitos2laser</code> / <code>gravitos2punch</code> sets flagged stale from the last art drop.</p>
+
+
 <h2>v0.30.327 <span class="tag"><span class="pill feat">feat</span> Legosaurus fights sticky &mdash; and his charge finally gores</span></h2>
 <p>Per user: <em>For legosaurus make fights smoother, and have him deal 50% of player's max HP when charging, legosaurus should be abit more sticky when attacking phase.</em></p>
 

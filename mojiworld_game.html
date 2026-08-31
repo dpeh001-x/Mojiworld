@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.327';
+const GAME_VERSION = 'v0.30.328';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -60161,6 +60161,9 @@ function loadMap(id, entryX, entryY) {
   const _lxFromMap = game.currentMap;
   game.currentMap = id;
   game.mapData = _variedMapData(id);
+  // v0.30.x — pre-decode Gravitos's sprite sets while the entry beat plays,
+  // so his first cast doesn't pay a synchronous first-use decode (perf).
+  if (id === 'gravitosArena' && typeof _lxGravWarmSets === 'function') { try { _lxGravWarmSets(); } catch (e) {} }
   // v0.29.x — PQ OBJECTIVE PIN, rendered AFTER game.currentMap is the map we
   // arrived in (per user: "I left the PQ and somehow the message still persist
   // outside of the PQ"). The v0.26.301 call for this lived far above the line
@@ -121249,6 +121252,30 @@ function _gravitosContactFrame(m, key) {
 // attack) while the boss is NOT attacking; falls back to the static idle sprite
 // (BOSS_SPRITES) when frames are absent / not yet decoded. Same ping-pong so a
 // breathing loop reads as inhale/exhale.
+// v0.30.x — GRAVITOS SET WARM-UP (perf; see the loadMap hook). Kicks an
+// async decode of every loaded gravitos* frame so the fight's first cast
+// draws pre-decoded bitmaps instead of paying a first-use decode stall
+// (measured: one 0.2-1.4 s frame within seconds of combat starting).
+function _lxGravWarmSets() {
+  try {
+    const maps = [
+      (typeof BOSS_ATTACK_FRAMES !== 'undefined') ? BOSS_ATTACK_FRAMES : null,
+      (typeof BOSS_IDLE_FRAMES !== 'undefined') ? BOSS_IDLE_FRAMES : null,
+      (typeof BOSS_WALK_FRAMES !== 'undefined') ? BOSS_WALK_FRAMES : null,
+    ];
+    let n = 0;
+    for (const map of maps) {
+      if (!map) continue;
+      for (const k in map) {
+        if (k.indexOf('gravitos') !== 0) continue;
+        for (const im of (map[k] || [])) {
+          if (im && typeof im.decode === 'function') { im.decode().catch(() => {}); n++; }
+        }
+      }
+    }
+    return n;
+  } catch (e) { return 0; }
+}
 const BOSS_IDLE_FRAMES = Object.create(null);
 _loadBossFrames(BOSS_IDLE_FRAMES, 'idle');
 const _BOSS_IDLE_FRAME_MS = 130;   // slower than attack — relaxed breathing (~2s cycle at 9 frames)
