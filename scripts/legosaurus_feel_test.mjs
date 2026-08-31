@@ -40,7 +40,7 @@ await page.waitForFunction(() => typeof BOSS_ATTACK_FRAMES !== 'undefined' && ty
   && BOSS_ATTACK_FRAMES.legosaurusdash && _lxFtReadyN(BOSS_ATTACK_FRAMES.legosaurusdash) === 9,
   null, { timeout: 60000 });
 
-const r = await page.evaluate(() => {
+const r = await page.evaluate(async () => {
   if (typeof _lxIsSanctuary === 'function') { try { window._lxIsSanctuary = () => false; } catch (e) {} }
   if (!game.camera) game.camera = { x: 0, y: 0 };
   const out = {};
@@ -87,6 +87,75 @@ const r = await page.evaluate(() => {
     out.dash = { at0: dAt(0), at400: dAt(400), at699: dAt(699), at720: dAt(720), at860: dAt(860), at1229: dAt(1229) };
     performance.now = realNow2;
   }
+
+  // ---- hit-region coverage: the player-attack box must cover the pixels the
+  // ---- player actually sees. Measured live: drawMonster driven directly,
+  // ---- drawImage spy -> world rects via the scene transform (shadow draw
+  // ---- carries the pure view transform), alpha-scanned opaque union. Facing
+  // ---- forced RIGHT = the authored (unmirrored) basis. Before v0.30.325 the
+  // ---- idle box covered 296px of a 517px-wide dino - 145px of tail and 76px
+  // ---- of head were unhittable air, and ox leaned the box toward the head
+  // ---- while the art is tail-heavy.
+  const coverage = async (stName, force) => {
+    game.monsters = [];
+    spawnMonster(600, 380, 'legosaurus', true);
+    game.paused = false;
+    { const _o = document.getElementById('boss-intro-overlay'); if (_o) _o.classList.remove('on'); }
+    const mb = game.monsters[0];
+    game.camera.x = 0; game.camera.y = 0;
+    player.x = 1400; player.y = 400;
+    const P = CanvasRenderingContext2D.prototype.drawImage;
+    const main = document.getElementById('game');
+    let un = null;
+    // deterministic frame walk: pin the clock and step 53ms (< the shortest
+    // authored dwell), re-anchoring the state each step - time-based sampling
+    // is dwell-weighted and misses short frames, under-reading the union
+    const realNowC = performance.now.bind(performance);
+    const BASEC = 9000000;
+    for (let i = 0; i < 18; i++) {
+      performance.now = () => BASEC + i * 53;
+      force(mb);
+      mb._animSt = stName; mb._animStAt = BASEC; mb._animSeed = 0;
+      const recs = [];
+      CanvasRenderingContext2D.prototype.drawImage = function (img) {
+        const a = arguments, t = this.getTransform();
+        if (this.canvas === main) recs.push({ img, d: [...a].slice(1), tr: [t.a, t.d, t.e, t.f] });
+        return P.apply(this, arguments);
+      };
+      mb.facing = 1;
+      try { drawMonster(mb); } finally { CanvasRenderingContext2D.prototype.drawImage = P; }
+      const fr = recs.find(q => q.img && q.img.src && /legosaurus/.test(q.img.src) && q.d.length >= 4);
+      const sh = recs.find(q => q !== fr);
+      if (!fr || !sh) continue;
+      const Vs = sh.tr[0], Ve = sh.tr[2], Vf = sh.tr[3];
+      const lx = fr.tr[0] / Vs, ly = fr.tr[1] / Vs;
+      const wx = (fr.tr[2] - Ve) / Vs, wy = (fr.tr[3] - Vf) / Vs;
+      const dn = fr.d.length, dx = fr.d[dn - 4], dy = fr.d[dn - 3], dw = fr.d[dn - 2], dh = fr.d[dn - 1];
+      const e1 = wx + lx * dx, e2 = wx + lx * (dx + dw), f1 = wy + ly * dy, f2 = wy + ly * (dy + dh);
+      const c = document.createElement('canvas'); c.width = fr.img.naturalWidth; c.height = fr.img.naturalHeight;
+      const x2 = c.getContext('2d', { willReadFrequently: true }); x2.drawImage(fr.img, 0, 0);
+      const d2 = x2.getImageData(0, 0, c.width, c.height).data;
+      let L = 1e9, R = -1;
+      for (let y = 0; y < c.height; y += 3) for (let xx = 0; xx < c.width; xx += 2)
+        if (d2[(y * c.width + xx) * 4 + 3] > 10) { if (xx < L) L = xx; if (xx > R) R = xx; }
+      if (R < 0) continue;
+      const gx1 = Math.min(e1, e2) + (L / c.width) * Math.abs(e2 - e1);
+      const gx2 = Math.min(e1, e2) + ((R + 1) / c.width) * Math.abs(e2 - e1);
+      un = un ? { x1: Math.min(un.x1, gx1), x2: Math.max(un.x2, gx2) } : { x1: gx1, x2: gx2 };
+    }
+    performance.now = realNowC;
+    mb._abFrame = -1;
+    const box = _atkMonBox(mb);
+    game.monsters = [];
+    if (!un || !box) return null;
+    const ix = Math.max(0, Math.min(un.x2, box.x + box.w) - Math.max(un.x1, box.x));
+    return { artW: Math.round(un.x2 - un.x1), boxW: Math.round(box.w),
+      covered: Math.round(1000 * ix / (un.x2 - un.x1)) / 1000,
+      ratio: Math.round(1000 * box.w / (un.x2 - un.x1)) / 1000 };
+  };
+  out.covIdle = await coverage('idle', (mb) => { mb.vx = 0; mb.atkAnimUntil = 0; mb._frameIsAttack = false; });
+  out.covAttack = await coverage('attack', (mb) => { mb.atkAnimUntil = performance.now() + 5000; mb._frameIsAttack = true; });
+  out.hbNow = { idle: _lxAtkHitbox('legosaurus', 'idle'), attack: _lxAtkHitbox('legosaurus', 'attack') };
 
   // ---- impact config reaches the projectile through the REAL swing ----
   game.monsters = []; game.projectiles = [];
@@ -154,6 +223,16 @@ ok('the trait declares the impact and the REAL swing projectile carries it',
   r.spawned && r.trait && r.trait.impactMs === 110 && r.trait.impactShake === 9
   && r.swingCarries && r.swingCarries.impactMs === 110,
   { trait: r.trait, projectile: r.swingCarries });
+ok('the hit-region fractions are the measured v0.30.325 bake, tail-shifted',
+  r.hbNow && r.hbNow.idle && r.hbNow.idle.w === 1.088 && r.hbNow.idle.ox === -0.0567
+  && r.hbNow.attack && r.hbNow.attack.w === 1.374 && r.hbNow.attack.ox === 0.0238,
+  r.hbNow);
+ok('IDLE: the player-attack box covers >=85% of the visible dino and is not ballooned',
+  r.covIdle && r.covIdle.covered >= 0.85 && r.covIdle.ratio >= 0.8 && r.covIdle.ratio <= 1.05,
+  Object.assign({ was: 'box 296px on a 517px dino - 145px of tail + 76px of head whiffed' }, r.covIdle));
+ok('ATTACK: the box tracks the wider swing poses the same way',
+  r.covAttack && r.covAttack.covered >= 0.82 && r.covAttack.ratio >= 0.75 && r.covAttack.ratio <= 1.05,
+  r.covAttack);
 ok('a LANDED swing spends the impact - hit-stop 110 and shake 9',
   r.landed.lost > 0 && r.landed.stops.includes(110) && r.landed.shakes.includes(9),
   r.landed);
