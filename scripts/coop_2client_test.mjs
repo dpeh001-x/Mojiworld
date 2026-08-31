@@ -94,6 +94,15 @@ try {
   const bUids = (await ev(B, () => game.monsters.filter(m => m._coopMirror).map(m => m.uid))).sort((x, y) => x - y);
   ok('mirror uid set == host uid set', JSON.stringify(aUids) === JSON.stringify(bUids), { host: aUids.length, mirror: bUids.length });
 
+  // v0.30.x — LEVEL THE FIXTURE. These certs ran fresh Lv-1 characters, and
+  // the accuracy system (correctly) makes a Lv-1 swing MISS a Lv-40 steppe
+  // mob near-always — on the guest that MISS returns before the co-op damage
+  // forward, so four shared-damage/kill checks failed with `sent: 0` while
+  // the wire path itself was healthy. The miss is the game working as
+  // designed; the cert's job is the WIRE, so the attackers are levelled to
+  // hit what they aim at.
+  await ev(A, () => { player.level = 60; player.baseAcc = 500; });
+  await ev(B, () => { player.level = 60; player.baseAcc = 500; });
   // SHARED DAMAGE: non-host bloodies (not kills) a mirror; host's same-uid HP drops.
   const tUid = bUids[0];
   const hpBefore = await ev(A, (u) => { const m = game.monsters.find(x => x.uid === u); return m ? m.currentHp : null; }, tUid);

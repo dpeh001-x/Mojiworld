@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.321';
+const GAME_VERSION = 'v0.30.322';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -45545,6 +45545,29 @@ function _lxPartyExpMul(allies, inPq) {
 // Count co-op peers standing in the 400px wedge around (cx, cy) on MY map.
 // One definition, used by the killer's multiplier, the ally-kill share and the
 // PQ pin, so the number the player is shown is the number they are paid.
+// v0.30.322 — players in THIS map, including me. The spawn-rate scaler below
+// wants "people in the map", which is a different question from
+// _lxCoopAlliesNear's "allies within 400px of a kill": a partner farming the
+// far side of the map should still count toward the map's spawn pressure.
+// Reuses the same two trust gates — the peer's own map broadcast, and the
+// v0.25.699 stale-peer cutoff, so a crashed partner stops paying into the
+// rate within 15s exactly as they stop earning the party EXP share.
+function _lxCoopSameMapCount() {
+  let n = 1;
+  try {
+    if (typeof net === 'undefined' || !net || !net.connected || !net.peers) return 1;
+    const myMap = game.currentMap || 'town';
+    const _cut = ((typeof performance !== 'undefined' && performance.now)
+      ? performance.now() : Date.now()) - 15000;
+    for (const id in net.peers) {
+      const p = net.peers[id];
+      if (!p || p.map !== myMap) continue;
+      if (typeof p._last === 'number' && p._last < _cut) continue;
+      n++;
+    }
+  } catch (e) {}
+  return n;
+}
 function _lxCoopAlliesNear(cx, cy, excludeId) {
   if (typeof net === 'undefined' || !net || !net.connected || !net.peers) return 0;
   const myMap = game.currentMap || 'town';
@@ -89034,6 +89057,18 @@ function killMonster(m) {
     // 25% of their mojicoins. Tracked via player._spawnBoostUntil (ms in
     // game.time domain).
     const _boostMul = (player._spawnBoostUntil && game.time < player._spawnBoostUntil) ? 0.5 : 1;
+    // v0.30.322 — CO-OP SPAWN PRESSURE (per user: "spawn rate is faster by 10%
+    // for each additional person in the map"). Rate +10% per extra player ->
+    // the delay divides by (1 + 0.10 x extras): solo is exactly x1 (the
+    // whole term vanishes), a duo refills ~9% sooner, a full room noticeably
+    // faster without doubling. Extras capped at 8 (x1.8 rate) so a stress
+    // room cannot spin the drip into a spam cannon. Counted at schedule time
+    // from the same peer map/staleness gates the EXP share trusts, and only
+    // the HOST's drip matters in co-op — guests receive spawns over the
+    // wire, so there is no double-scheduling to compound.
+    const _coopSpawnMul = (typeof _lxCoopSameMapCount === 'function')
+      ? 1 / (1 + 0.10 * Math.min(8, Math.max(0, _lxCoopSameMapCount() - 1)))
+      : 1;
     setTimeout(() => {
       const mapId = game.currentMap;
       const mapD = MAPS[mapId];
@@ -89082,7 +89117,7 @@ function killMonster(m) {
           spawnFromMap(_sp.type, false);
         }
       }
-    }, (1200 + Math.random() * 1400) * _delayMul * _boostMul);
+    }, (1200 + Math.random() * 1400) * _delayMul * _boostMul * _coopSpawnMul);
   }
 }
 
