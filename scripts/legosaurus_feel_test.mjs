@@ -4,10 +4,16 @@
 // pace for stegosaurus attack and rush sprites animation." (Legosaurus - the
 // Block-land tyrant, drawn as a green stegosaurus.)
 //
-// The rush needs no separate fix: braceDash holds atkAnimUntil through both
-// phases, so the dash PLAYS the attack set - one ft array on legosaurus.attack
-// re-paces both. Impact fires where damage APPLIES, not at swing launch, so a
-// whiffed swing stays quiet - asserted via spies on addHitStop/addShake.
+// The rush needed its OWN fix - v0.30.320 claimed it came free with the swing
+// ft, and that was wrong: while _braceDashing the frame picker redirects to
+// the dedicated `legosaurusdash` set and asks _lxCalibFt with THAT key, so
+// legosaurus.attack.ft never touched it. v0.30.322 authors
+// legosaurusdash.attack.ft as ONE pass over the real move: 850ms brace
+// (700 dead-still tell + 150 rear-up) then the 380ms dash as sprint churn -
+// at the old flat 48ms the 9 frames looped ~2.85x across the move, sprinting
+// in place mid-brace, which is the reported "very weird". Impact fires where
+// damage APPLIES, not at swing launch, so a whiffed swing stays quiet -
+// asserted via spies on addHitStop/addShake.
 //   node scripts/legosaurus_feel_test.mjs [port]
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
@@ -29,6 +35,10 @@ await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'do
 await page.waitForFunction(() => typeof spawnMonster === 'function' && typeof _lxCalibFt === 'function'
   && typeof _lxFtWalk === 'function' && typeof updateProjectiles === 'function', null, { timeout: 120000 });
 await page.waitForTimeout(2500);
+// the dash checks walk the REAL frame images - wait for all 9 to decode
+await page.waitForFunction(() => typeof BOSS_ATTACK_FRAMES !== 'undefined' && typeof _lxFtReadyN === 'function'
+  && BOSS_ATTACK_FRAMES.legosaurusdash && _lxFtReadyN(BOSS_ATTACK_FRAMES.legosaurusdash) === 9,
+  null, { timeout: 60000 });
 
 const r = await page.evaluate(() => {
   if (typeof _lxIsSanctuary === 'function') { try { window._lxIsSanctuary = () => false; } catch (e) {} }
@@ -53,6 +63,30 @@ const r = await page.evaluate(() => {
   }
   // old flat pacing for contrast: 48ms/frame puts 400ms at frame 8
   out.oldFrameAt400 = Math.floor(400 / 48);
+
+  // ---- the RUSH: the dedicated legosaurusdash set has its own ft, and the
+  // ---- REAL picker path (_bossAttackFrame, asked with the dash key exactly
+  // ---- as the draw redirect asks it) walks one pass over the 1230ms move ----
+  out.dashFt = _lxCalibFt('legosaurusdash', 'attack');
+  out.dashSum = Array.isArray(out.dashFt) ? out.dashFt.reduce((a, c2) => a + c2, 0) : 0;
+  out.dashReady = (typeof BOSS_ATTACK_FRAMES !== 'undefined' && BOSS_ATTACK_FRAMES.legosaurusdash)
+    ? _lxFtReadyN(BOSS_ATTACK_FRAMES.legosaurusdash) : -1;
+  if (Array.isArray(out.dashFt) && out.dashReady === 9) {
+    const realNow2 = performance.now.bind(performance);
+    const NOW2 = 5000000;
+    performance.now = () => NOW2;
+    // _mobAnimPhase returns -_animStAt (walker adds its own now), so a stub
+    // anchored at NOW2-offset reads as "offset ms into the attack state"
+    const dAt = (off) => {
+      const stub = { _animSt: 'attack', _animStAt: NOW2 - off, _animSeed: 0 };
+      const img = _bossAttackFrame('legosaurusdash', stub);
+      const fr = BOSS_ATTACK_FRAMES.legosaurusdash;
+      for (let i = 0; i < fr.length; i++) if (fr[i] === img) return i;
+      return -1;
+    };
+    out.dash = { at0: dAt(0), at400: dAt(400), at699: dAt(699), at720: dAt(720), at860: dAt(860), at1229: dAt(1229) };
+    performance.now = realNow2;
+  }
 
   // ---- impact config reaches the projectile through the REAL swing ----
   game.monsters = []; game.projectiles = [];
@@ -108,6 +142,14 @@ ok('the walker honours the dwells - frame boundaries land where the array says',
   r.frameAt0 === 0 && r.frameAt69 === 0 && r.frameAt71 === 1 && r.frameAt400 === 4,
   { at0: r.frameAt0, at69: r.frameAt69, at71: r.frameAt71, at400: r.frameAt400,
     note: 'the old flat 48ms put 400ms at frame ' + r.oldFrameAt400 + ' - the whole swing was over before it read' });
+ok('the RUSH set carries its own ft - one 1230ms pass = 850 brace + 380 dash',
+  Array.isArray(r.dashFt) && r.dashFt.length === 9 && r.dashSum === 1230 && r.dashReady === 9,
+  { ft: r.dashFt, sumMs: r.dashSum, framesReady: r.dashReady,
+    was: 'flat 48ms = the 9 frames looped ~2.85x across the move, sprinting in place mid-brace' });
+ok('the real picker walks it: dead-still tell, rear-up at 700, sprint through the dash, settle at the end',
+  r.dash && r.dash.at0 === 0 && r.dash.at400 === 0 && r.dash.at699 === 0
+  && r.dash.at720 === 1 && r.dash.at860 === 2 && r.dash.at1229 === 8,
+  r.dash);
 ok('the trait declares the impact and the REAL swing projectile carries it',
   r.spawned && r.trait && r.trait.impactMs === 110 && r.trait.impactShake === 9
   && r.swingCarries && r.swingCarries.impactMs === 110,
