@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.317';
+const GAME_VERSION = 'v0.30.318';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10166,7 +10166,21 @@ const _LX_RSCALE = (() => {
 // box: a measured 1.93x upscale of the whole game.
 // Overestimating here is harmless (a hair of DOWN-scale); underestimating is
 // the bug — so body padding is deliberately not subtracted.
-function _lxFitScale() {
+// v0.30.318 perf — CACHED, because the read is a FORCED REFLOW mid-fight. The
+// resolution governor (_lxDrsTick) calls this through _lxTargetDpr on every
+// frame, and window.innerWidth / visualViewport.width are not plain numbers:
+// when layout is dirty — which mid-combat it always is, the HUD writes styles
+// every frame — reading them forces a synchronous style-and-layout pass.
+// Measured on a 28-mob double-boss fight: 528us per call against dirty
+// layout, 0.9us against clean; 176ms of pure reflow across a 10s fight,
+// ~0.5ms added to EVERY frame (CPU-sampled: the single largest addressable
+// JS cost in the profile, above drawMonster). The answer only changes when
+// the window does, so it is computed once and invalidated by the same three
+// events the debounced re-fit listener below already watches. The pinch-zoom
+// scale!==1 branch is inside the recompute, and visualViewport fires
+// 'resize' on pinch, so zoom states invalidate like everything else.
+let _lxFitScaleCached = 0;   // 0 = stale, recompute on next read
+function _lxFitScaleRecalc() {
   try {
     const vv = (typeof window !== 'undefined') ? window.visualViewport : null;
     const vw = (vv && vv.scale === 1) ? vv.width  : window.innerWidth;
@@ -10175,6 +10189,17 @@ function _lxFitScale() {
     return (isFinite(s) && s > 0) ? s : 1;
   } catch (e) { return 1; }
 }
+function _lxFitScale() {
+  if (_lxFitScaleCached > 0) return _lxFitScaleCached;
+  return (_lxFitScaleCached = _lxFitScaleRecalc());
+}
+(() => {
+  if (typeof window === 'undefined' || !window.addEventListener) return;
+  const stale = () => { _lxFitScaleCached = 0; };
+  window.addEventListener('resize', stale, { passive: true });
+  document.addEventListener('fullscreenchange', stale);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', stale, { passive: true });
+})();
 // Desktop cap raised 1.5 -> 2: 1.5 still leaves a 1.29x upscale at 1080p, and
 // 2 is exactly 1:1 there. Measured cost in a live King Krook fight (headless
 // CPU raster — the pessimistic case): mean frame 7.56 -> 8.99 ms, p95
