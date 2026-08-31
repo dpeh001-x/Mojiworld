@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.328';
+const GAME_VERSION = 'v0.30.330';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -19291,6 +19291,7 @@ const LX_GRANDHEX_RADIUS = 520;         // the ring you see is the area you get
 const LX_GRANDHEX_STACK_MS = 22000;     // hex lifetime -- MUST outlive the 16.2s played cooldown
 const LX_GRANDHEX_RUPTURE_AT = 5;       // the signature's "5 stacks"
 const LX_GRANDHEX_RUPTURE_MUL = 3.5;    // v0.30.284 nerf per user — was 5.5 (and 4.0 before that); ruptures chain on kills via the hex spread, so the cascade multiplied every point here
+const LX_GRANDHEX_RUPTURE_ICD = 180;    // v0.30.330 — frames (3 s) a target cannot rupture again; audit measured a 10.7-16.7M DPS splash-rupture chain among adjacent high-HP targets
 const LX_GRANDHEX_DOT_PER_STACK = 0.30; // ATK per poison tick per stack
 const LX_GRANDHEX_BURST_MUL = 1.0;      // v0.30.284 nerf per user — was 1.5 (and 1.2 before that); the echo burst (x0.8) rides this automatically
 const LX_GRANDHEX_SPREAD_RANGE = 280;   // death-jump reach
@@ -19368,12 +19369,26 @@ const LX_PANDEMIC_FINALE_PER_STACK = 0.35;  // ...plus this per hex stack on the
 const LX_PANDEMIC_FINALE_CAP = 16.0;    // ...capped, so a huge pack cannot run away with it
 // Add n hex stacks. Returns the resulting count; returns LX_GRANDHEX_RUPTURE_AT
 // when the addition tipped the mob over and the rupture fired (stacks consumed).
-function _hexAdd(m, n) {
+function _hexAdd(m, n, viaSplash) {
   if (!m || m.currentHp <= 0 || !n) return 0;
   const now = game.time || 0;
   const curSt = (now <= (m._hexUntil || 0)) ? (m._hexStacks | 0) : 0;
   const next = curSt + n;
+  // v0.30.330 — CASCADE BREAKERS (audit). A rupture's splash cannot supply the
+  // tipping stack, and a target that just ruptured cannot rupture again for
+  // LX_GRANDHEX_RUPTURE_ICD frames: in both cases the pile clamps at 4 with
+  // the DOT still running, instead of detonating. Direct casts, ring pulses
+  // and on-death jumps still tip normally — only the self-feeding
+  // splash-rupture-splash loop is severed.
+  if (next >= LX_GRANDHEX_RUPTURE_AT &&
+      (viaSplash || (now - (m._hexRuptureAt || -1e9)) < LX_GRANDHEX_RUPTURE_ICD)) {
+    m._hexStacks = LX_GRANDHEX_RUPTURE_AT - 1;
+    m._hexUntil = now + _msFrames(LX_GRANDHEX_STACK_MS);
+    m.burnDmg = Math.max(3, Math.floor(getAtk() * LX_GRANDHEX_DOT_PER_STACK * m._hexStacks));
+    return m._hexStacks;
+  }
   if (next >= LX_GRANDHEX_RUPTURE_AT) {
+    m._hexRuptureAt = now;   // v0.30.330 — starts the per-target rupture ICD
     m._hexStacks = 0; m._hexUntil = 0;
     const _c = (typeof rollCrit === 'function') && rollCrit();
     const dmg = Math.floor(getAtk() * LX_GRANDHEX_RUPTURE_MUL * (_c && typeof getCritDmg === 'function' ? getCritDmg() : 1));
@@ -19405,7 +19420,7 @@ function _hexAdd(m, n) {
         if (typeof hitMonster === 'function') hitMonster(o, _sdmg, false, 'grandhex');
         if (o.currentHp > 0) {
           if (typeof _applyMobStatus === 'function') _applyMobStatus(o, 'poison', LX_GRANDHEX_STACK_MS, { chance: 100 });
-          _hexAdd(o, 1);
+          _hexAdd(o, 1, true);   // v0.30.330 — splash-granted: cannot tip a rupture
         }
       }
     }
@@ -34779,7 +34794,7 @@ function getAtk()  {
   const base = player.baseAtk + player.mods.atk + getEquipBonus('atk') + ((game.dexPerm && game.dexPerm.atk) || 0);   // v0.29.x — Mojidex completion perm-bonus
   let pct = 1 + player.mods.atkPct + (getEquipBonus('atkPct') || 0) + (player.inRage ? 0.3 : 0);
   if (player.buffs.warCry > 0)   pct += 0.55;
-  if (player.buffs.bloodlust > 0) pct += 0.4;
+  if (player.buffs.bloodlust > 0) pct += 0.3;   // v0.30.330 audit nerf — was 0.4; the berserker self-buff stack put both its masters 2x+ over median
   if (player.buffs.rampage > 0)   pct += 0.8;
   if (player.buffs.comboAtk > 0)  pct += 0.5;
   // v0.29.362 — Rampage Engine (Tier-1): +2% per fury stack while the 5 s
@@ -73505,7 +73520,9 @@ const SKILL_FNS = {
             // cast, 110% over master-X target 6-8×. Trimmed per-strike
             // to 1.0× = ~10× total, comfortable in master-X budget for
             // an 18 s cd. Final-strike crit guarantee preserved.
-            const dmg = Math.floor(getAtk() * 1.0 * (crit ? getCritDmg() : 1));
+            // v0.30.330 audit nerf — 1.0x -> 0.8x (~8x per cast): doombringer
+            // measured 2.45x the median master line at equal stats.
+            const dmg = Math.floor(getAtk() * 0.8 * (crit ? getCritDmg() : 1));
             hitMonster(m, dmg, crit, 'apoc');
             m.vx += dir * 5;
             m.vy -= 2;
@@ -75141,7 +75158,7 @@ const SKILL_FNS = {
         x: cx + dir * 8 + side * 26, y: cy - 96 - (i % 3) * 24,
         vx: dir * 2 + side * 1.6, vy: -3.4 - (i % 3) * 0.5,
         w: 60, h: 60, life: 150,
-        damage: getAtk() * 4.6 * _heatMul + 24,
+        damage: getAtk() * 3.7 * _heatMul + 24,   // v0.30.330 audit nerf — was 4.6 (7 fires ~32x ATK base -> ~26x)
         owner: 'player', skill: 'fire', doomBrand: 1,
         bspr: 'bult_doomfire', sprScale: 1.5, spin: 0,
         homing: t, retarget: true,
@@ -113149,7 +113166,7 @@ const _LX_HERO_IDLE_BAKE_CACHE = new Map();
 // A 60 s cooldown bought 12 s of partner: 20% uptime for a rogue ultimate.
 const LX_SHADE_LIFE        = 20000;   // ms the shade stands
 const LX_SHADE_ECHO_FRAMES = 7;       // ~115ms behind the original hit
-const LX_SHADE_ECHO_MULT   = 1.0;     // "doubles up" — a true double
+const LX_SHADE_ECHO_MULT   = 0.85;    // v0.30.330 audit nerf — was 1.0 ("a true double"): the echo alone was 47% of shadowlord's output, 1.82x median overall
 const LX_SHADE_QUEUE_CAP   = 48;
 // v0.30.57 — MIMICRY (per user: "the shadow should mimic the player's every
 // movement"). The delay is deliberately LX_SHADE_ECHO_FRAMES: the shade's

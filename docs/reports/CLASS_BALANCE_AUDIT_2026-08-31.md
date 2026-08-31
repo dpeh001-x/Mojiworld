@@ -41,7 +41,7 @@ necromancer vortex measured near zero. This retroactively explains the
 | 14 | archbishop | mage→priest | 2,348 | 0.76× |
 | 15 | elementalist | mage→archmage | 1,858 | 0.60× |
 | 16 | sage | mage→archmage | 1,672 | 0.54× |
-| 17 | crusader | warrior→knight | 261 | **broken** (see bugs) |
+| 17* | crusader | warrior→knight | ~3,808 | 1.24× (corrected) |
 
 \* single-target only — see the cascade finding.
 
@@ -72,9 +72,14 @@ Measured: **10.7–16.7M DPS** on an 8-pack of high-HP dummies, 100% from
 but boss-plus-adds and elite pairs are exactly the dense long-lived clusters
 the cascade needs.
 
-**4. Bugs found in passing:** `crusader_ult` never successfully casts (its
-cooldown never sets; crusader lands at 261 DPS — last by 10×); `lich` exists
-as a `master:'lich'` skill entry with no `MASTERS` row (dangling, unpickable).
+**4. Bugs found in passing — one CORRECTED (v0.30.330):** the original audit
+claimed crusader_ult 'never successfully casts'. That was the HARNESS, not the
+game: the skill is a deliberate two-tap (arm, then release on a distinct
+press), and the bot's every-frame spam kept re-hitting the still-held guard.
+Verified live: arm -> release works, 60 s cooldown applies, the aegis shield
+lands. With a two-tap-aware bot crusader measures ~3,808 DPS - mid-pack,
+appropriate for the defensive master. `lich` remains a dangling
+`master:'lich'` skill entry with no MASTERS row (unpickable).
 
 ## Suggested nerf list (in priority order)
 

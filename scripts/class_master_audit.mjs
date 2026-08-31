@@ -196,6 +196,7 @@ for (const line of lines) {
     // cast diagnostics: which skills ever set a cooldown (proxy for a
     // successful cast) vs never fired at all
     const castTried = {}, castOk = {};
+    let botFrame = 0;
     let dealt = 0, healed = 0, taken = 0, lastTargetHp = m.maxHp, lastHp = player.hp;
     const gt0 = game.time;
     let running = true;
@@ -215,7 +216,15 @@ for (const line of lines) {
         if (player.hp <= 0) player.hp = getMaxHp();
         lastHp = player.hp;
         try { game.comboMult = 1; game.combo = 0; game.comboTimer = 0; } catch (e) {}
+        botFrame++;
         for (const id of ids) {
+          // crusader_ult is a TWO-TAP: arming and releasing must be distinct
+          // presses with the held-edge cleared between them. Spamming it every
+          // frame kept re-hitting the still-held guard, which is why the first
+          // audit mis-read it as "never casts" — the live skill is fine
+          // (verified: arm → release → 60s cd + aegis shield). One attempt
+          // every 30 frames arms on one visit and releases on the next.
+          if (id === 'crusader_ult' && (botFrame % 30) !== 0) continue;
           if (((player.skillCooldowns && player.skillCooldowns[id]) || 0) <= 0) {
             castTried[id] = (castTried[id] || 0) + 1;
             try { castSkill(id); } catch (e) { castOk[id] = 'THREW ' + String(e).slice(0, 60); continue; }
