@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.345';
+const GAME_VERSION = 'v0.30.346';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -112434,27 +112434,47 @@ function _drawPlayerNameTag(sx, sy) {
   }
   if (!name) return;
   ctx.save();
-  ctx.font = 'bold 11px "Trebuchet MS", sans-serif';
-  ctx.textAlign = 'center';
-  // v0.25.9 — cache the measureText result between frames. Invalidates
-  // only when the display name actually changes (renaming, class swap).
-  if (_playerNameTagCache.name !== name) {
-    _playerNameTagCache.name = name;
-    _playerNameTagCache.tw   = ctx.measureText(name).width + 10;
-  }
-  const tw = _playerNameTagCache.tw;
+  ctx.textAlign = 'center';   // the title line below still relies on this
   const tx = sx + player.w / 2;
   // Place ~14 px below the sprite feet — sprite height ≈ SPRITE_H (44)
   const ty = sy + (player.h || 44) + 14;
-  // Tag backdrop
-  ctx.fillStyle = 'rgba(20,14,30,0.72)';
-  ctx.fillRect(tx - tw / 2, ty - 10, tw, 14);
-  ctx.strokeStyle = 'rgba(255,220,140,0.55)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(tx - tw / 2 + 0.5, ty - 10 + 0.5, tw - 1, 13);
-  // Text
-  ctx.fillStyle = '#ffeeaa';
-  ctx.fillText(name, tx, ty);
+  // v0.30.346 perf — THE PLATE IS A BAKE, and this was the Krook-fight lag report's
+  // one real JS cost. Profiled in a live King Krook fight, this function was
+  // the TOP self-time entry (2.88% of all samples — above drawSuperBossBar,
+  // above every draw function), because every frame re-assigned ctx.font
+  // (a string re-parse + font match per assignment) and repainted
+  // backdrop + border + text for a label that changes only on rename. The
+  // plate now bakes once per (name, dpr) into an offscreen canvas — at the
+  // render scale, so it stays crisp on DPR-2 — and the per-frame cost is one
+  // drawImage. The equipped-title line below keeps its existing bake +
+  // live-shimmer path untouched.
+  const _tagDpr = (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? Math.min(2, _LX_DPR) : 1;
+  const _tagKey = name + '|' + _tagDpr;
+  if (_playerNameTagCache.key !== _tagKey || !_playerNameTagCache.cv) {
+    const _mc = document.createElement('canvas');
+    const _mg = _mc.getContext('2d');
+    _mg.font = 'bold 11px "Trebuchet MS", sans-serif';
+    const _twm = Math.ceil(_mg.measureText(name).width) + 10;
+    _mc.width = Math.ceil((_twm + 2) * _tagDpr); _mc.height = Math.ceil(16 * _tagDpr);
+    _mg.scale(_tagDpr, _tagDpr);                 // resize wiped state — rescale
+    _mg.font = 'bold 11px "Trebuchet MS", sans-serif';
+    _mg.textAlign = 'center';
+    _mg.fillStyle = 'rgba(20,14,30,0.72)';
+    _mg.fillRect(1, 0, _twm, 14);
+    _mg.strokeStyle = 'rgba(255,220,140,0.55)';
+    _mg.lineWidth = 1;
+    _mg.strokeRect(1.5, 0.5, _twm - 1, 13);
+    _mg.fillStyle = '#ffeeaa';
+    _mg.fillText(name, 1 + _twm / 2, 10);
+    _playerNameTagCache.key = _tagKey;
+    _playerNameTagCache.name = name;
+    _playerNameTagCache.cv = _mc;
+    _playerNameTagCache.tw = _twm;
+    _playerNameTagCache.lw = _twm + 2;           // logical width for the blit
+  }
+  ctx.drawImage(_playerNameTagCache.cv,
+    Math.round(tx - _playerNameTagCache.lw / 2), Math.round(ty - 10),
+    _playerNameTagCache.lw, 16);
   // v0.29.x — the earned title, one line UNDER the name. Drawn in the boss-card
   // face (LXBossTitle / Cinzel) with flanking diamonds, a heavy dark round-join
   // outline for legibility over any ground, and the travelling gold shimmer:
@@ -116669,20 +116689,36 @@ function _drawPlayerStatusIcons(sx, sy) {
   const bob   = Math.sin(game.time * 0.12) * 1.5;
   const pulse = 0.75 + Math.sin(game.time * 0.18) * 0.25;
   ctx.globalAlpha = pulse;
-  ctx.font = '12px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  // v0.30.346 perf — EMOJI ARE BAKED, halo included. This ran second only to the
+  // name plate in the Krook-fight profile (1.39% self-time) for the same
+  // reason at higher cost: a per-frame ctx.font parse plus fillText of EMOJI,
+  // and emoji glyph rasterization is among the most expensive text a canvas
+  // can draw. Mid-boss-fight the ✨ i-frame icon is active most of the time,
+  // so this path ran nearly every frame. Each (emoji, tint, dpr) now bakes
+  // once into a small canvas — halo dot and glyph together — and the frame
+  // pays one drawImage per icon. Bob and pulse stay live at blit time, so the
+  // motion is untouched.
+  if (typeof window._lxStatusIconBakes === 'undefined') window._lxStatusIconBakes = new Map();
+  const _ibDpr = (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? Math.min(2, Math.max(1, _LX_DPR)) : 1;
   for (let i = 0; i < icons.length; i++) {
     const ix = rowX + i * 14 + 7;
     const iy = rowY + bob;
-    // Soft glow halo behind each icon (tinted dot)
-    ctx.fillStyle = icons[i].tint + (icons[i].tint.length === 7 ? '55' : '');  // 33% alpha
-    ctx.beginPath();
-    ctx.arc(ix, iy, 8, 0, Math.PI * 2);
-    ctx.fill();
-    // Emoji
-    ctx.fillStyle = '#fff';
-    ctx.fillText(icons[i].emoji, ix, iy);
+    const _ibKey = icons[i].emoji + '|' + icons[i].tint + '|' + _ibDpr;
+    let _ib = window._lxStatusIconBakes.get(_ibKey);
+    if (!_ib) {
+      _ib = document.createElement('canvas');
+      _ib.width = Math.ceil(20 * _ibDpr); _ib.height = Math.ceil(20 * _ibDpr);
+      const _ig = _ib.getContext('2d');
+      _ig.scale(_ibDpr, _ibDpr);
+      _ig.fillStyle = icons[i].tint + (icons[i].tint.length === 7 ? '55' : '');
+      _ig.beginPath(); _ig.arc(10, 10, 8, 0, Math.PI * 2); _ig.fill();
+      _ig.font = '12px sans-serif';
+      _ig.textAlign = 'center'; _ig.textBaseline = 'middle';
+      _ig.fillStyle = '#fff';
+      _ig.fillText(icons[i].emoji, 10, 10.5);
+      window._lxStatusIconBakes.set(_ibKey, _ib);
+    }
+    ctx.drawImage(_ib, ix - 10, iy - 10, 20, 20);
   }
   ctx.restore();
 }
