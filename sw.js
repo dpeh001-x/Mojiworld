@@ -44,7 +44,11 @@
 // what the user hit. The bump is now ENFORCED at push time by
 // .claude/hooks/push-clobber-gate.js: a push that modifies existing art
 // bytes without changing this line is blocked.
-const CACHE = 'mojiworld-assets-v7';
+// v0.30.316 - v7 -> v8. gravitos_laserring.webp was REPLACED (regenerated at
+// 768 with real margin), so returning browsers would serve the old 513 crop
+// from the v7 generation. This is the enforced rule, not a courtesy: the push
+// gate blocks a commit that modifies art bytes without bumping this line.
+const CACHE = 'mojiworld-assets-v8';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
