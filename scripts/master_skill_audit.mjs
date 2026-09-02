@@ -16,14 +16,15 @@
 // skill hitting for the same is a balance fault. Ranking raw damage would put
 // every ultimate at the top and tell you nothing.
 //
-// ISOLATION is a page reload per MASTER, and residue is measured rather than
-// assumed: after each skill's window the harness clears the field and watches a
-// further second with no casts at all. That residue is reported per skill, so a
-// number inflated by the previous skill's leftovers is visible instead of
-// silently believed — an earlier draft of the per-master audit was wrong in
-// exactly this way and read Hexmaster at 5x its true output.
+// ISOLATION is a page reload per SKILL (v0.30.357 — it was per MASTER, and that
+// was wrong; see the note above the measurement loop). Residue is measured
+// rather than assumed: after each window the harness clears the field and
+// watches a further second with no casts at all.
 //
-//   node scripts/master_skill_audit.mjs [--secs N] [--mobs N] [--only a,b] [--json]
+//   node scripts/master_skill_audit.mjs [--secs N] [--mobs N] [--only a,b]
+//                                       [--skills id,id] [--reps N] [--json]
+// --reps averages N independent runs and prints the spread; use it for anything
+// with homing or autonomous entities, where one draw is not a measurement.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +38,20 @@ const arg = (k, d) => { const a = argv.find((x) => x.startsWith(`--${k}=`)); ret
 const SECS = Number(arg('secs', 8)) || 8;
 const MOBS = Number(arg('mobs', 6)) || 6;
 const ONLY = arg('only', '');
+// v0.30.357 — measure named skills only. Needed because some skills OUTLIVE
+// their measurement window: Ballista's volley spawns arrows for 8 full seconds
+// from player state that `wipe` cannot reach, so measuring its ult straight
+// afterwards counts the volley too. That is not hypothetical — it is why the
+// first audit read War Machine at 346.6 xATK and flagged it as an anomaly.
+const SKILLS_ONLY = (arg('skills', '') || '').split(',').filter(Boolean);
+// v0.30.357 — REPEATS, because one draw is not a measurement for every skill.
+// Tuning Ballista's War Machine exposed this: three turrets whose homing paths
+// are chaotic measured 171.1, 248.2, 327.9 and 384.6 xATK for the SAME build —
+// a 2.2x spread. A single reading of 346.6 was what the first audit reported,
+// and a 42% damage cut then read as an 11% INCREASE. Skills with deterministic
+// hit patterns (novas, fixed batches) barely move between runs; anything with
+// homing, travel time or autonomous entities needs the mean.
+const REPS = Math.max(1, Number(arg('reps', 1)) || 1);
 const AS_JSON = argv.includes('--json');
 const PORT = Number(process.env.PORT || 9966);
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
@@ -87,7 +102,7 @@ const masters = await page.evaluate(() => {
   return by;
 });
 
-const runMaster = async (master, info) => page.evaluate(async ({ master, info, SECS, MOBS }) => {
+const runMaster = async (master, info) => page.evaluate(async ({ master, info, SECS, MOBS, SKILLS_ONLY }) => {
   const sleepF = async (n) => { for (let i = 0; i < n; i++) await new Promise((r) => requestAnimationFrame(r)); };
   const wipe = () => {
     game.monsters = [];
@@ -137,8 +152,14 @@ const runMaster = async (master, info) => page.evaluate(async ({ master, info, S
     return { dealt: Math.round(dealt), castErr, by, atk: getAtk() };
   };
 
+  // ONE rep of each skill per page load. Repeats are driven from OUTSIDE, by
+  // re-booting — an in-page repeat loop was tried first and was wrong: rep 2
+  // inherited rep 1's turrets, volley spawners and scheduled timers (which
+  // `wipe` cannot reach), and Ballista's volley read 307 xATK against a true
+  // ~40. The page reload is the isolation; repeating inside it defeats it.
   const out = [];
   for (const sk of info.skills) {
+    if (SKILLS_ONLY.length && !SKILLS_ONLY.includes(sk.id)) continue;
     const r = await measure(sk.id, Math.round(SECS * 60));
     // residue: same window, nothing cast. Anything landing here is the previous
     // skill's leftovers, and it is reported rather than assumed to be zero.
@@ -153,15 +174,49 @@ const runMaster = async (master, info) => page.evaluate(async ({ master, info, S
   }
   wipe();
   return out;
-}, { master, info, SECS, MOBS });
+}, { master, info, SECS, MOBS, SKILLS_ONLY });
 
-const rows = [];
+// v0.30.357 — ONE PAGE LOAD PER SKILL, not per master. This was the audit's
+// worst flaw and it survived a residue check that was pointing straight at it.
+// Measuring a master's two skills back to back in one page inflates the SECOND
+// one by whatever the first left running, and `wipe` cannot reach state held on
+// the player (turret arrays, volley spawners, scheduled skill timers). Measured
+// against isolated re-runs, every second-measured skill was wrong and every
+// first-measured skill was right:
+//     nightreaper.x  164.1 -> 160.9 clean   (first, accurate)
+//     dragoon.x       55.6 ->  56.6 clean   (first, accurate)
+//     nightreaper.b  441.9 -> 177.1 clean   (second, 2.5x inflated)
+//     ballista.b     346.6 ->   3.0 clean   (second, it was measuring the volley)
+// Ballista's War Machine was reported as a 5.4x anomaly on the strength of that
+// number and is in fact one of the weakest buttons in the game.
+const byKey = new Map();
 const wanted = Object.keys(masters).filter((m) => !ONLY || ONLY.split(',').includes(m));
+const pairs = [];
 for (const m of wanted) {
-  try { await boot(); rows.push(...await runMaster(m, masters[m])); }
-  catch (e) { console.error(`  ${m}: ${String(e).slice(0, 110)}`); }
-  console.error(`  measured ${m} (${rows.length} skills so far)`);
+  for (const sk of masters[m].skills) {
+    if (SKILLS_ONLY.length && !SKILLS_ONLY.includes(sk.id)) continue;
+    pairs.push([m, sk.id]);
+  }
 }
+for (let rep = 0; rep < REPS; rep++) {
+  for (const [m, skId] of pairs) {
+    try {
+      await boot();
+      for (const r of await runMaster(m, { ...masters[m], skills: masters[m].skills.filter((s) => s.id === skId) })) {
+        const k = r.master + '.' + r.slot;
+        const prev = byKey.get(k);
+        if (!prev) byKey.set(k, { ...r, draws: [r.dealt] });
+        else { prev.draws.push(r.dealt); prev.residue = Math.max(prev.residue, r.residue); if (r.by) prev.by = r.by; }
+      }
+    } catch (e) { console.error(`  ${m}.${skId}: ${String(e).slice(0, 110)}`); }
+    console.error(`  measured ${skId}${REPS > 1 ? ` (rep ${rep + 1}/${REPS})` : ''}`);
+  }
+}
+const rows = [...byKey.values()].map((r) => {
+  const mean = Math.round(r.draws.reduce((a, b) => a + b, 0) / r.draws.length);
+  return { ...r, dealt: mean,
+    spread: r.draws.length > 1 && mean ? +((Math.max(...r.draws) - Math.min(...r.draws)) / mean).toFixed(2) : 0 };
+});
 await browser.close(); server.kill();
 
 for (const r of rows) {
@@ -174,7 +229,8 @@ if (AS_JSON) { console.log(JSON.stringify({ secs: SECS, mobs: MOBS, rows }, null
 const good = rows.filter((r) => r.dealt > 0).sort((a, b) => b.sust - a.sust);
 const vals = good.map((r) => r.sust).sort((a, b) => a - b);
 const med = vals[Math.floor(vals.length / 2)] || 1;
-console.log(`\nMASTER SKILL AUDIT — one cast, ${SECS}s window, ${MOBS} pinned immortal dummies, Lv 50 ATK 400, crit off, DEF 0`);
+console.log(`\nMASTER SKILL AUDIT — one cast, ${SECS}s window, ${MOBS} pinned immortal dummies, Lv 50 ATK 400, crit off, DEF 0`
+  + (REPS > 1 ? `\n${REPS} repeats per skill; xATK is the MEAN and "spread" is (max-min)/mean.` : ''));
 console.log('Sustained = damage-per-cast (in xATK) divided by cooldown seconds. A big ultimate on a long');
 console.log('cooldown is fine; the same damage on a short one is not. Median sustained is the yardstick.\n');
 console.log('  xATK/cast   cd    SUSTAINED  xmed   skill                          sources');
@@ -184,7 +240,8 @@ for (const r of good) {
   const flag = x >= 3 ? '  <<< ANOMALY' : (x >= 2 ? '  <<< high' : '');
   console.log('  ' + String(r.xatk).padStart(9) + '  ' + (r.cds + 's').padStart(5) + '   '
     + String(r.sust).padStart(9) + '  ' + x.toFixed(2).padStart(5) + '   '
-    + (r.master + '.' + r.slot).padEnd(30) + ' ' + r.by + flag);
+    + (r.master + '.' + r.slot).padEnd(30) + ' ' + r.by
+    + (REPS > 1 ? `  [spread ${(r.spread * 100).toFixed(0)}%]` : '') + flag);
 }
 const dead = rows.filter((r) => r.dealt === 0);
 console.log(`\nmedian sustained ${med} xATK/s across ${good.length} skills`
