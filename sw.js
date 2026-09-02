@@ -48,7 +48,11 @@
 // 768 with real margin), so returning browsers would serve the old 513 crop
 // from the v7 generation. This is the enforced rule, not a courtesy: the push
 // gate blocks a commit that modifies art bytes without bumping this line.
-const CACHE = 'mojiworld-assets-v8';
+// v0.30.348 - v8 -> v9. The QTE shackle sigil was REPLACED: the 768 static
+// AND all nine 952px animated frames (Sprites/fx/anim/qte_chains_0..8), which
+// are what actually render during a shackle QTE. Without the bump a returning
+// browser mixes the new static with the old frames.
+const CACHE = 'mojiworld-assets-v9';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
