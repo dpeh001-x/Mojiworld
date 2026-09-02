@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.353';
+const GAME_VERSION = 'v0.30.354';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -19360,18 +19360,36 @@ const LX_PANDEMIC_ORB_HEX = 1;          // every orb also lands a hex stack
 // finale hit harder, so stacking the room with Grand Hex first is rewarded
 // instead of being a parallel activity. Capped so a swarm cannot run away.
 function _lxPandemicFinaleMul() {
-  let stacks = 0;
+  // v0.30.354 nerf per user ("hexmaster does too much damage") — AVERAGE curse
+  // depth, not the field TOTAL. The sum was the whole problem: it grew with
+  // how many enemies were on screen, and performAround then paid that grown
+  // number out to every one of them, so per-head damage rose with the size of
+  // the pack. Measured on a pinned crowd at ATK 732: 3.5x ATK per enemy solo,
+  // 10.2x at four, 14.4x at eight — the finale multiplied by the crowd and
+  // then multiplied across it. A mean over the cursed cannot do that. It also
+  // rewards what the skill is actually about: stacking a target deep, which a
+  // sum could never distinguish from simply standing in a bigger room.
+  let stacks = 0, cursed = 0;
   const now = game.time || 0;
   for (const m of game.monsters) {
-    if (m && m.currentHp > 0 && now <= (m._hexUntil || 0)) stacks += (m._hexStacks | 0);
+    if (m && m.currentHp > 0 && now <= (m._hexUntil || 0)) { stacks += (m._hexStacks | 0); cursed++; }
   }
-  return Math.min(LX_PANDEMIC_FINALE_CAP, LX_PANDEMIC_FINALE_BASE + LX_PANDEMIC_FINALE_PER_STACK * stacks);
+  const depth = cursed ? (stacks / cursed) : 0;   // 0..LX_GRANDHEX_RUPTURE_AT-1
+  return Math.min(LX_PANDEMIC_FINALE_CAP, LX_PANDEMIC_FINALE_BASE + LX_PANDEMIC_FINALE_PER_STACK * depth);
 }
 const LX_PANDEMIC_WINDOW_MS = 9000;     // how long the plague runs
 const LX_PANDEMIC_WEAKEN = 0.35;        // cursed foes hit 35% softer -- the promised weaken
-const LX_PANDEMIC_FINALE_BASE = 10.0;   // the eruption's floor (was a flat 9.0)
-const LX_PANDEMIC_FINALE_PER_STACK = 0.35;  // ...plus this per hex stack on the field
-const LX_PANDEMIC_FINALE_CAP = 16.0;    // ...capped, so a huge pack cannot run away with it
+// v0.30.354 — AND THE BAND COMES DOWN. Every performAround multiplier in the game
+// was listed and sorted: the next-largest area hit anywhere is 7.5x at radius
+// 460, and this one was 10.0-16.0x at radius 560 — more than twice the runner
+// up, at nearly the widest reach in the game, on the class capstone. 5.0-9.0
+// leaves it the single biggest nova there is without being double the field.
+// Per-stack is now per AVERAGE stack (0-4, see _lxPandemicFinaleMul), so 1.0
+// spans the same distance 0.35-per-field-stack used to span, minus the crowd
+// term: an uncursed field erupts for 5.0x, a fully cursed one for 9.0x.
+const LX_PANDEMIC_FINALE_BASE = 5.0;    // the eruption's floor (was 10.0)
+const LX_PANDEMIC_FINALE_PER_STACK = 1.0;   // ...plus this per AVERAGE hex stack (was 0.35 per field stack)
+const LX_PANDEMIC_FINALE_CAP = 9.5;     // ...capped (was 16.0)
 // Add n hex stacks. Returns the resulting count; returns LX_GRANDHEX_RUPTURE_AT
 // when the addition tipped the mob over and the rupture fired (stacks consumed).
 function _hexAdd(m, n, viaSplash) {
