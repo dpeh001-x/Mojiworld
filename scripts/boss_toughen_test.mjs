@@ -60,10 +60,13 @@ const stats = await page.evaluate(() => ({
   barn: { hp: monsterTypes.young_confused_barnaby.hp, atk: monsterTypes.young_confused_barnaby.atk, def: monsterTypes.young_confused_barnaby.def },
   smith: { hp: monsterTypes.sundered_smith.hp, atk: monsterTypes.sundered_smith.atk, def: monsterTypes.sundered_smith.def },
 }));
-ok('Barnaby is tougher: HP 2.2M, ATK 290, DEF 190 (was 1.6M/225/76)',
-  stats.barn.hp === 2200000 && stats.barn.atk === 290 && stats.barn.def === 190, JSON.stringify(stats.barn));
-ok('the Smith is tougher: HP 2.6M, ATK 350, DEF 210 (was 1.8M/275/63)',
-  stats.smith.hp === 2600000 && stats.smith.atk === 350 && stats.smith.def === 210, JSON.stringify(stats.smith));
+// DEF values follow the later explicit DEF pass (per user: "Barnaby DEF to
+// 100 / Sundered smith to 120"), which superseded the 190/210 this file first
+// asserted; the HP/ATK toughening stands.
+ok('Barnaby is tougher: HP 2.2M, ATK 290, DEF 100 (was 1.6M/225/76)',
+  stats.barn.hp === 2200000 && stats.barn.atk === 290 && stats.barn.def === 100, JSON.stringify(stats.barn));
+ok('the Smith is tougher: HP 2.6M, ATK 350, DEF 120 (was 1.8M/275/63)',
+  stats.smith.hp === 2600000 && stats.smith.atk === 350 && stats.smith.def === 120, JSON.stringify(stats.smith));
 
 // ---- deterministic wave inspection ------------------------------------------
 const waves = await page.evaluate(async () => {

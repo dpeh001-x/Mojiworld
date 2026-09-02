@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.361';
+const GAME_VERSION = 'v0.30.362';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -80452,6 +80452,219 @@ function _lxBossWardTick(m) {
     if (typeof addShake === 'function') addShake(4);
   } catch (e) {}
 }
+// v0.30.362 — AETHERION, THE SHARDFATHER: a boss who reads the fight.
+// Per user: "improve on the AIs of aetherion boss fight ... he should be a
+// relatively powerful and smart boss".
+//
+// Before this he walked at the player and fired one homing Shard Lance every
+// ten seconds; everything else he did was the shared combat director's
+// stances. He is excluded from the generic pattern gate, so this is his own
+// machine, on the zodiac conventions: patternState / patternTimer (ms), a
+// weighted chooser, a toast and a marker at every windup, a flash at fire.
+//
+// SMART means he keeps a small read on the player and lets it steer the
+// chooser - never the damage:
+//   dist    EMA of range        -> far: Shard Lances, led to where you will be
+//   air     EMA of airtime      -> jumper: Shardfall on your landing spot
+//   hitsL/R hit-side pressure   -> hugging one flank: Echo Step to the other
+//   dodge   EMA of your x-velocity while a lance is in flight
+//                               -> Sky-Break's gap lands against your habit
+//   heal    a >=15% HP jump     -> he answers the heal with a fast lance
+// Cornered, he Echo Steps instead of fleeing. Every pattern is telegraphed
+// (350ms at the fastest, 1.5s for the astral salvo), nothing is unavoidable,
+// and he does nothing while staggered - that window stays the player's.
+//
+// POWERFUL means the tempo rises through his phases (idle gap 1300 / 950 /
+// 650 ms at >50% / evolved / <25%), the lance fans out to two and three, and
+// the evolved form gets Sky-Break (a wall with one gap) and, under 25%, the
+// Astral Echo - the existing astral art, finally wired to a five-lance salvo.
+const _AE_GAP_MS = [0, 1300, 950, 650];
+function _aeBaseSpeed(m) {
+  const t = (typeof monsterTypes !== 'undefined' && monsterTypes.aetherion) ? monsterTypes.aetherion.speed : 0.8;
+  return (t || 0.8) * (m._bossPhase2 ? 1.10 : 1) * (m._enraged ? 1.20 : 1);   // exact even if a phase multiplier hit a held 0
+}
+function _aeChoose(opts) {
+  let total = 0; for (const o of opts) if (o.w > 0) total += o.w;
+  if (!(total > 0)) return null;
+  let r = Math.random() * total;
+  for (const o of opts) { if (!(o.w > 0)) continue; r -= o.w; if (r <= 0) return o.s; }
+  return opts[opts.length - 1].s;
+}
+function _aeColumn(cx, colW, telegraphFrames, damage, label, kb, color) {
+  game.hazards.push({
+    type: 'meteor_warn', cx, x: cx - colW / 2, y: 0, w: colW, h: H, radius: colW / 2,
+    life: telegraphFrames, maxLife: telegraphFrames, fireAt: telegraphFrames,
+    owner: 'enemy', damage: Math.max(1, Math.floor(damage)), color: color || '#c8a8ff',
+    _sourceLabel: label, _pctCap: true, _kb: kb || 0,
+  });
+}
+function _aeLance(m, ang, speed, dmgMul, floorPct) {
+  const cx = m.x + m.w / 2, cy = m.y + m.h / 2;
+  game.projectiles.push({
+    x: cx, y: cy, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed,
+    w: 46, h: 46, life: 175, damage: Math.floor((m.atk || 460) * dmgMul),
+    owner: 'enemy', skill: 'mdark', color: '#aa66ff', homing: true, noGravity: true,
+    _heavyFloorPct: floorPct, _sourceLabel: "Aetherion's Shard Lance",
+  });
+}
+function _aeMark(m, text, color) {
+  try { if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2, y: m.y - 8, vy: -1.2, text, life: 60, color: color || '#c8a8ff', big: true }); } catch (e) {}
+}
+function _aetherionTick(m, dt) {
+  if (!m || m.currentHp <= 0 || !player || player.hp <= 0 || !game.projectiles) return;
+  if (window._prologueActive || (typeof _cineOwnsMix !== 'undefined' && _cineOwnsMix)) return;   // his own intro is not a turn
+  const now = game.time | 0;
+  let A = m._ae;
+  if (!A) A = m._ae = { dist: 300, air: 0, hitsL: 0, hitsR: 0, dodge: 0, lanceLive: 0, healAt: -1e9, lastHp: player.hp, lastBossHp: m.currentHp, recent: [], cd: {}, fired: 0, log: [], lastTick: null };
+  // Boss specials are not called every sim frame (measured: about one call in
+  // four), so the passed dt would run his clock at a quarter of real time -
+  // a 1.3s gap became 5s and the whole fight crawled. Elapsed time comes from
+  // game.time, the sim frame counter, which is right under any call cadence.
+  const _step = (typeof _LX_SIM_STEP_MS === 'number' && _LX_SIM_STEP_MS > 0) ? _LX_SIM_STEP_MS : 1000 / 60;
+  if (A.lastTick != null && now > A.lastTick) dt = Math.min(250, (now - A.lastTick) * _step);
+  A.lastTick = now;
+  const pcx = player.x + player.w / 2, bcx = m.x + m.w / 2;
+  const dist = Math.abs(pcx - bcx);
+  // ---- the read ------------------------------------------------------------
+  A.dist += (dist - A.dist) * 0.05;
+  A.air += ((player.onGround === false ? 1 : 0) - A.air) * 0.05;
+  const decay = Math.max(0, 1 - dt / 3000);
+  A.hitsL *= decay; A.hitsR *= decay;
+  if (m.currentHp < A.lastBossHp) { if (pcx < bcx) A.hitsL += 1; else A.hitsR += 1; }
+  A.lastBossHp = m.currentHp;
+  if (A.lanceLive > now && Math.abs(player.vx || 0) > 1) A.dodge += (Math.sign(player.vx) - A.dodge) * 0.1;
+  const maxHp = (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 1);
+  if (player.hp - A.lastHp >= maxHp * 0.15) A.healAt = now;
+  A.lastHp = player.hp;
+  // ---- phase, hold, gates ----------------------------------------------------
+  const hpFrac = m.currentHp / Math.max(1, m.maxHp || 1);
+  const phase = m._aetherionEvolved ? (hpFrac < 0.25 ? 3 : 2) : 1;
+  // The machine's state and clock live on his own record: the shared boss
+  // code resets patternState/patternTimer from outside (measured: windups
+  // cancelled by every hit, half the expected pattern rate). patternState is
+  // only MIRRORED, as 'astral', so the existing astral art plays.
+  const st = A.st || 'idle';
+  if (st === 'idle') { if (m.speed === 0) m.speed = _aeBaseSpeed(m); }
+  else { if (m.speed !== 0) m.speed = 0; m.vx = 0; }
+  if (m._dirOpenT > 0) {   // staggered: the player's window - nothing starts, and a windup in progress is broken off
+    if (st !== 'idle') {
+      A.st = 'idle'; A.t = 0; A.astralFired = false;
+      if (typeof showToast === 'function') showToast("⚡ Aetherion's attack is broken off!", 'rare');
+    }
+    m.patternState = 'idle'; m.patternTimer = 0;
+    return;
+  }
+  A.t = (A.t || 0) + dt;
+  m.patternState = (st === 'astral') ? 'astral' : 'idle';
+  m.patternTimer = A.t;
+  const face = () => { m.facing = pcx > bcx ? 1 : -1; };
+  const start = (s, why) => { A.st = s; A.t = 0; face(); m._dirFleeT = 0; A.recent.push(s); if (A.recent.length > 3) A.recent.shift(); A.log.push({ s, at: now, why: why || '' }); if (A.log.length > 40) A.log.shift(); };
+  const finish = () => { A.st = 'idle'; A.t = 0; };
+  const gY = (() => { const g = (game.mapData && game.mapData.platforms || []).find((p) => p && p.type === 'ground'); return g ? g.y : (m.y + m.h); })();
+  if (st === 'idle') {
+    // cornered: an Echo Step instead of the director's flee
+    if (m._dirFleeT > 0 && !(A.cd.echo > now)) { A.cd.echo = now + 360; start('echoWind', 'cornered'); return; }
+    // the heal, answered
+    if (now - A.healAt < 40 && !(A.cd.heal > now)) { A.cd.heal = now + 300; A.fast = true; start('lanceWind', 'heal'); return; }
+    if (A.t < _AE_GAP_MS[phase]) return;
+    const side = Math.max(A.hitsL, A.hitsR), tot = A.hitsL + A.hitsR;
+    const pressed = side >= 4 && side / Math.max(1, tot) >= 0.75;
+    const last2 = A.recent.length >= 2 && A.recent[A.recent.length - 1] === A.recent[A.recent.length - 2] ? A.recent[A.recent.length - 1] : null;
+    const w = (s, base) => (last2 === s ? 0 : base);
+    // a new phase announces itself: the evolved form opens with Sky-Break, the
+    // last quarter with the Astral Echo
+    let pick = null;
+    if (A.opened !== phase) {
+      A.opened = phase;
+      if (phase === 2 && !(A.cd.skybreak > now)) pick = 'skybreakWind';
+      if (phase === 3 && !(A.cd.astral > now)) pick = 'astral';
+    }
+    if (!pick) pick = _aeChoose([
+      { s: 'lanceWind',     w: w('lanceWind',     3 + (A.dist > 360 ? 5 : 0)) },
+      { s: 'fractureWind',  w: w('fractureWind',  (A.dist > 360 ? 1 : 2) + (A.dist < 170 && !pressed ? 3 : 0)) },
+      { s: 'shardfallWind', w: w('shardfallWind', 2 + (A.air > 0.35 ? 4 : 0)) },
+      { s: 'echoWind',      w: (A.cd.echo > now) ? 0 : w('echoWind', 1 + (pressed ? 7 : 0)) },
+      { s: 'skybreakWind',  w: (phase < 2 || A.cd.skybreak > now) ? 0 : w('skybreakWind', (phase === 3 ? 3 : 2) + (Math.abs(A.dodge) > 0.3 ? 2 : 0)) },
+      { s: 'astral',        w: (phase < 3 || A.cd.astral > now) ? 0 : 3 },
+    ]);
+    if (!pick) return;
+    A.fast = false;
+    if (pick === 'echoWind') A.cd.echo = now + 360;
+    if (pick === 'skybreakWind') A.cd.skybreak = now + 540;
+    if (pick === 'astral') A.cd.astral = now + 840;
+    start(pick, pressed ? 'pressed' : (A.dist > 360 ? 'far' : (A.dist < 170 ? 'close' : (A.air > 0.35 ? 'air' : ''))));
+    const label = { lanceWind: '🔮 SHARD LANCE — dodge it!', fractureWind: '✦ FRACTURE', shardfallWind: '✦ SHARDFALL', echoWind: '✦ ECHO STEP', skybreakWind: '✦ SKY-BREAK — find the gap', astral: '✦ ASTRAL ECHO' }[pick];
+    if (typeof showToast === 'function') showToast(A.fast ? '✦ He reads the heal' : label, pick === 'astral' || pick === 'skybreakWind' ? 'legendary' : 'epic');
+    _aeMark(m, label.replace(/^[^A-Z]*/, '').split(' —')[0]);
+    if (typeof addShake === 'function') addShake(3);
+    return;
+  }
+  const t = A.t;
+  const fire = () => { A.fired++; (A.fires = A.fires || []).push({ at: now, s: st, wind: A.t }); if (A.fires.length > 60) A.fires.shift(); if (typeof flash === 'function') flash(0.14); if (typeof addShake === 'function') addShake(7); };
+  if (st === 'lanceWind') {
+    if (t < (A.fast ? 300 : (phase === 3 ? 500 : 650))) return;
+    const n = phase;                                  // 1 / 2 / 3 lances
+    const lead = pcx + (player.vx || 0) * 22, ly = player.y + player.h / 2;
+    const base = Math.atan2(ly - (m.y + m.h / 2), lead - bcx);
+    for (let i = 0; i < n; i++) _aeLance(m, base + (i - (n - 1) / 2) * 0.18, 4.6 + phase * 0.3, 1.0, m._aetherionEvolved ? 0.5 : 0.45);
+    A.lanceLive = now + 70; fire(); finish(); return;
+  }
+  if (st === 'fractureWind') {
+    if (t < 500) return;
+    const dir = pcx > bcx ? 1 : -1, k = 2 + phase;    // 3 / 4 / 5 columns marching at the player
+    for (let i = 0; i < k; i++) _aeColumn(bcx + dir * (90 + i * 120), 118, 42 + i * 4, (m.atk || 460) * 0.95, "Aetherion's Fracture", 14, '#c8a8ff');
+    fire(); finish(); return;
+  }
+  if (st === 'shardfallWind') {
+    if (t < 450) return;
+    const x0 = pcx + (player.vx || 0) * 28;           // where you will land, not where you are
+    const offs = phase >= 2 ? [0, -95, 95, -190, 190] : [0, -95, 95];
+    for (const o of offs) _aeColumn(x0 + o, 96, 48, (m.atk || 460) * 0.85, "Aetherion's Shardfall", 10, '#e0d0ff');
+    fire(); finish(); return;
+  }
+  if (st === 'echoWind') {
+    if (t < 480) { m.invulnerable = Math.max(m.invulnerable | 0, 30); if ((now & 3) === 0 && typeof _budgetedParticlePush === 'function') _budgetedParticlePush({ x: m.x + m.w * Math.random(), y: m.y + m.h * Math.random(), vx: 0, vy: -1.5, life: 18, color: '#c8a8ff', size: 3 }); return; }
+    const ww = (game.mapData && game.mapData.worldWidth) || 2000;
+    const toRight = pcx >= bcx;                         // he was on your left -> he lands on your right
+    m.x = Math.max(40, Math.min(ww - m.w - 40, toRight ? player.x + player.w + 90 : player.x - m.w - 90));
+    m.y = gY - m.h; m.vy = 0; face();
+    const cx = m.x + m.w / 2, cy = m.y + m.h - 4;
+    game.hazards.push({ type: 'mob_shockwave', cx, cy, x: cx - 60, y: cy - 30, w: 120, h: 60, life: 50, maxLife: 50,
+      damage: Math.max(5, Math.floor((m.atk || 460) * 0.8)), maxRadius: 170, color: '#c8a8ff', _sourceLabel: "Aetherion's Echo Step" });
+    fire(); finish(); return;
+  }
+  if (st === 'skybreakWind') {
+    if (t < 1200) { if ((now & 1) === 0 && typeof _budgetedParticlePush === 'function') _budgetedParticlePush({ x: m.x + m.w * Math.random(), y: m.y - 10, vx: (Math.random() - 0.5) * 2, vy: -2.4, life: 22, color: '#ffffff', size: 3 }); return; }
+    const ww = (game.mapData && game.mapData.worldWidth) || 2000;
+    const slots = 8, usable = ww - 160, slotW = usable / slots;
+    // the gap sits against the habit: a right-dodger finds it on the left
+    const gapX = Math.abs(A.dodge) > 0.2 ? pcx - Math.sign(A.dodge) * 170 : bcx;
+    // the two-slot gap is CENTRED on gapX (not started there), so its middle
+    // sits a full 170px against the habit rather than drifting back toward you
+    const gapSlot = Math.max(0, Math.min(slots - 2, Math.round((gapX - 80) / slotW) - 1));
+    for (let i = 0; i < slots; i++) {
+      if (i === gapSlot || i === gapSlot + 1) continue;
+      _aeColumn(80 + slotW * (i + 0.5), slotW * 0.92, 60, (m.atk || 460) * 1.5, "Aetherion's Sky-Break", 22, '#ffffff');
+    }
+    A.lastGap = { x0: 80 + slotW * gapSlot, x1: 80 + slotW * (gapSlot + 2), px: pcx };
+    fire(); finish(); return;
+  }
+  if (st === 'astral') {
+    m.invulnerable = Math.max(m.invulnerable | 0, 40);
+    if (t < _AE_ASTRAL_TELE) return;
+    if (!A.astralFired) {
+      A.astralFired = true;
+      const base = Math.atan2((player.y + player.h / 2) - (m.y + m.h / 2), pcx - bcx);
+      for (let i = 0; i < _AE_ASTRAL_BURST; i++) _aeLance(m, base + (i - (_AE_ASTRAL_BURST - 1) / 2) * 0.17, 5.2, 1.1, 0.4);
+      fire();
+    }
+    if (t < _AE_ASTRAL_TELE + _AE_ASTRAL_TAIL) return;
+    A.astralFired = false; finish(); return;
+  }
+  finish();   // an unknown state (a save restored mid-pattern, say) resolves to idle
+}
+window._aetherionTick = _aetherionTick;
+
 function _bossSpecialAttacks(m, dt) {
   if (!m || m.currentHp <= 0) return;
   const now = game.time | 0;
@@ -80795,27 +81008,9 @@ function _bossSpecialAttacks(m, dt) {
       if (typeof addShake === 'function') addShake(8);
     }
   }
-  if (m.type === 'aetherion' && m.currentHp > 0 && player && player.hp > 0 && game.projectiles) {
-    if (m._aethHeavyAt == null) m._aethHeavyAt = (game.time | 0) + 360;   // v0.30.x — first ~6 s (was ~7)
-    if ((game.time | 0) >= m._aethHeavyAt) {
-      m._aethHeavyAt = (game.time | 0) + 600;                             // v0.30.x — ~10 s (was ~12)
-      const _cx = m.x + m.w/2, _cy = m.y + m.h/2;
-      const _dx = (player.x + player.w/2) - _cx, _dy = (player.y + player.h/2) - _cy;
-      const _d = (Math.sqrt(_dx*_dx + _dy*_dy) || 1);
-      game.projectiles.push({
-        x: _cx, y: _cy, vx: (_dx/_d) * 4.4, vy: (_dy/_d) * 4.4,
-        w: 46, h: 46, life: 175, damage: (m.atk || 460),   // v0.26.487 — slightly larger (was 36×36)
-        owner: 'enemy', skill: 'mdark', color: '#aa66ff',
-        // v0.30.x — floor 0.35 -> 0.45. This is his answer to a fully-geared
-        // player, and 35% of max HP was comfortable enough to face-tank.
-        homing: true, noGravity: true, _heavyFloorPct: 0.45,
-        _sourceLabel: "Aetherion's Shard Lance",
-      });
-      if (typeof showToast === 'function') showToast('🔮 SHARD LANCE — dodge it!', 'epic');
-      if (typeof flash === 'function') flash(0.25);
-      if (typeof addShake === 'function') addShake(8);
-    }
-  }
+  // v0.30.362 — Aetherion's fight is its own machine now; see _aetherionTick above.
+  // (This was one homing Shard Lance every ten seconds and nothing else.)
+  if (m.type === 'aetherion') { try { _aetherionTick(m, dt); } catch (e) {} }
   if (m.type === 'pqConductor') {
     if (m._stormAt == null) m._stormAt = (game.time | 0) + 240;
     if ((game.time | 0) >= m._stormAt && player && player.hp > 0) {
