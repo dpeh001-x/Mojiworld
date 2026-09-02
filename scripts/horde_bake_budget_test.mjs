@@ -196,12 +196,18 @@ const horde = await ev(async () => {
   for (const m of game.monsters) { m.maxHp = m.currentHp = 9e12; m._px = m.x; m._py = m.y; }
   // count EXPENSIVE mints per frame: canvases created from _lxDrawSoft/_lxTintBake
   // stacks that did NOT go through _lxPlainOf (plain bakes are exempt by design)
-  let cur = 0, maxPerFrame = 0, total = 0, lateTint = 0, lateOther = 0, frames = 0;
+  // The budget resets per GAME tick (game.time), and a fixed-timestep catch-up
+  // can run two sim ticks inside one rAF — so the per-frame count must bucket
+  // by game.time, not by rAF, or a legitimate 2 x 12 reads as a breach. A run
+  // on the composed tip read 13 against the cap of 12 for exactly that reason.
+  let cur = 0, curT = -1, maxPerFrame = 0, total = 0, lateTint = 0, lateOther = 0, frames = 0;
   const oCE = document.createElement.bind(document);
   document.createElement = function (t) {
     if (t === 'canvas') {
       const st = new Error().stack || '';
       if (/_lxTintBake|_lxDrawSoft/.test(st) && !/_lxPlainOf/.test(st)) {
+        const gt = game.time | 0;
+        if (gt !== curT) { if (cur > maxPerFrame) maxPerFrame = cur; cur = 0; curT = gt; }
         cur++; total++;
         if (frames > 360) { if (/_lxTintBake/.test(st)) lateTint++; else lateOther++; }
       }
@@ -215,8 +221,9 @@ const horde = await ev(async () => {
   }, 60);
   for (let i = 0; i < 600; i++) {
     await new Promise((r) => requestAnimationFrame(r));
-    frames++; maxPerFrame = Math.max(maxPerFrame, cur); cur = 0;
+    frames++;
   }
+  if (cur > maxPerFrame) maxPerFrame = cur;
   clearInterval(drv); document.createElement = oCE;
   const cap = 12;   // _lxMintBudget's ceiling
   game.monsters = [];
