@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.360';
+const GAME_VERSION = 'v0.30.361';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -59645,8 +59645,21 @@ function loadMap(id, entryX, entryY) {
       const _mapDefW = (typeof MAPS === 'object' && MAPS[id]) || null;
       const _isBossMap = !!(_mapDefW && (_mapDefW.isBossArena || _mapDefW.bossType ||
         (_mapDefW.spawns || []).some((sp) => sp && sp.boss) || (_mapDefW.bossSequence || []).length));
-      try { _warmMapArt(id, (id === 'gravitosArena') ? { skip: /^gravitos[23]/ } : undefined).then(_fadeGo, _fadeGo); } catch (e) { _fadeGo(); }   // v0.29.742 — the prologue's own staging: warm the base phase now, let the lazy shrink trickle the 2★/3★ sets in-fight
-      setTimeout(_fadeGo, _isBossMap ? 4200 : 1400);
+      // v0.30.361 — the veil now holds for the FULL readiness gate (decode, shrink,
+      // size-keyed bakes, backdrop, music), not just the decode+shrink it held
+      // for before; see _lxReadyGate. The gate runs _warmMapArt itself, with the
+      // same gravitosArena staging (v0.29.742: warm the base phase, trickle the
+      // 2★/3★ sets in-fight). Caps: 4s field maps, 6s boss arenas - the map
+      // whose boot gate already warmed it releases in a few ms.
+      // The void placeholder has nothing to ready and used to release at the
+      // 320ms floor; gating it measured 1.6s of decoding the player's own gear
+      // for an empty map, so it keeps the old behaviour.
+      if (id === 'void') { _fadeGo(); }
+      else {
+        const _gateCap = _isBossMap ? 6000 : 4000;
+        try { _lxReadyGate(id, { cap: _gateCap, skip: (id === 'gravitosArena') ? /^gravitos[23]/ : null }).then(_fadeGo, _fadeGo); } catch (e) { _fadeGo(); }
+        setTimeout(_fadeGo, _gateCap + 250);
+      }
     } else _fadeRelease();
   }
   // v0.25.566 — guard against unknown / removed map keys. Was throwing a
@@ -123705,6 +123718,7 @@ function _lxMintBudget() {
   return a <= 11 ? 12 : a <= 17 ? 6 : a <= 26 ? 3 : a <= 40 ? 2 : 1;
 }
 function _lxMintPeek() {
+  if (window._lxMintBypass) return true;   // v0.30.361 — behind the boot overlay or the map veil every hitch is invisible; bake everything
   const t = (typeof game === 'object' && game) ? (game.time | 0) : 0;
   if (t !== _lxMintFrame) { _lxMintFrame = t; _lxMintN = 0; }
   return _lxMintN < _lxMintBudget();
@@ -123743,21 +123757,28 @@ function _lxPrewarmMobBakes(type) {
     }
   } catch (e) {}
 }
-function _lxPrewarmDrain() {
+function _lxPrewarmDrain(force) {
   if (!_LX_PREWARM_Q.length) return;
   if (!_lxPrewarmScratch) {
     try { const cv = document.createElement('canvas'); cv.width = 4; cv.height = 4; _lxPrewarmScratch = cv.getContext('2d'); } catch (e) {}
     if (!_lxPrewarmScratch) { _LX_PREWARM_Q.length = 0; return; }
   }
   let looked = 0, drained = 0;
-  const _cap = _lxMintBudget();
-  while (_LX_PREWARM_Q.length && looked++ < 24 && drained < _cap) {
+  const _cap = force ? 40 : _lxMintBudget();          // v0.30.361 — a readiness gate drains in 40-job slices between paints
+  const _look = force ? 400 : 24;
+  while (_LX_PREWARM_Q.length && looked++ < _look && drained < _cap) {
     const j = _LX_PREWARM_Q.shift();
     let im = j.arr[j.i];
     if (!im) continue;
     const decoded = !(im.complete === false) && ((im.naturalWidth || im.width) > 0);
-    const final = im.tagName === 'CANVAS' || im._lxNoShrink || j.tries > 240;
+    // a size-explicit job (NPC idle frames) is never shrink-swapped, so it is final at once
+    const final = im.tagName === 'CANVAS' || im._lxNoShrink || j.tw > 0 || j.tries > 240 || (force && j.tries > 20);
     if (!decoded || !final) { if (j.tries++ < 600) _LX_PREWARM_Q.push(j); continue; }
+    if (j.tw > 0 && j.th > 0) {   // v0.30.361 — a size-explicit job (NPC frames, see _lxPrewarmNpcBakes)
+      try { _lxDrawSoft(_lxPrewarmScratch, im, 0, 0, j.tw, j.th); } catch (e) {}
+      drained++;
+      continue;
+    }
     try {
       // the draw's own sizing (see _drawMonsterSprite), on the type's h
       const sprite = (typeof MONSTER_SPRITES !== 'undefined') ? MONSTER_SPRITES[j.type] : null;
@@ -140802,6 +140823,24 @@ try { window.LXAuth = LXAuth; } catch (e) {}
       window._lxSpriteGateDone = true;
       try { console.log('[boot] commence gate: all ' + (window._lxSpriteWatch || []).length + ' sprites ready at click'); } catch (e) {}
     }
+    // v0.30.361 — READINESS GATE. Bytes are in; now decode, bake and buffer behind
+    // the overlay for the map the player is about to enter, then re-enter
+    // exactly as the sprite hold above does. The holding flag keeps the loop's
+    // BootGate failsafe from forcing the overlay open mid-gate; the gate's own
+    // cap guarantees the release.
+    if (!window._lxReadyGateDone && typeof _lxReadyGate === 'function') {
+      if (window._lxReadyGateRunning) return;
+      window._lxReadyGateRunning = true;
+      window._lxSpriteGateHolding = true;
+      const _release = () => {
+        window._lxReadyGateDone = true;
+        window._lxReadyGateRunning = false;
+        window._lxSpriteGateHolding = false;
+        _finishHide(session);
+      };
+      _lxReadyGate(_lxPredictStartMap(), { boot: true, cap: 20000 }).then(_release, _release);
+      return;
+    }
     // v0.30.x — the held path re-enters _finishHide after release, so this
     // single line arms the post-boot self-heal for every way through the door
     try { if (typeof _lxSpriteHealStart === 'function') _lxSpriteHealStart(); } catch (e) {}
@@ -143084,6 +143123,191 @@ function _setBossBgm(isBoss, mapId) {
   _bgmFade(_bgmEl, _bgmTargetVol(), _BGM_FADE_MS);
   if (typeof _markBgmHeard === 'function') _markBgmHeard('audio/bgm_mojiworld.mp3');   // v0.29.73 — jukebox discovery
 }
+// v0.30.361 — THE READINESS GATE. Per user: "ensure that the sprites, bgm and
+// background load prior to starting the game mainscreen proper ... ensure that
+// this preloading helps reduce in game lag".
+//
+// Two holds already existed and both stopped short. The boot overlay's
+// commence gate held until the sprite BYTES had arrived; loadMap's transition
+// veil held until _warmMapArt had decoded and shrink-baked the incoming map,
+// capped at 1.4s (4.2s for boss arenas). Neither did the size-keyed sprite
+// bakes - the mint storm v0.30.358 metered (metering spreads it across the
+// first seconds of play; this removes it from play) - nor primed the
+// device-resolution backdrop plate, nor buffered the music: the BGM element
+// was created with preload='none' and only began loading at startBgm(),
+// after the fade, so the world revealed in silence.
+//
+// One gate now runs in both places, for the map that is ACTUALLY coming:
+//   1. decode      _lxPreloadMapAssets  (bytes + decode, progress on the overlay)
+//   2. shrink      _warmMapArt          (the sets bake to draw resolution)
+//   3. bake        _lxPrewarmMobBakes + _lxPrewarmDrain(force), budget bypassed
+//   4. backdrop    _lxPrimeBackdrop      (the same _lxBgScaled call drawBackground makes)
+//   5. music       the map's element (or the default) buffered to canplay
+// Every stage is capped and the whole gate is capped, so a slow disk or
+// network never traps the player - the gate is a floor on smoothness, not a
+// ceiling on patience. The boot overlay warms the PREDICTED first map (the
+// save's map, or town) while the game still sits in the void placeholder,
+// which is why the first real entry's veil then releases almost at once.
+const _LX_MAP_MIGRATE = { koopaThrone: 'krookThrone', everdawn_marketplace: 'everdawn_megamall', void: 'town', shadowSlums: 'shadowWovenHood' };
+function _lxPredictStartMap() {
+  let m = null;
+  try {
+    const raw = (typeof SAVE_KEY !== 'undefined') ? localStorage.getItem(SAVE_KEY) : null;
+    if (raw) { const sv = JSON.parse(raw); m = (sv && (sv.currentMap || (sv.game && sv.game.currentMap))) || null; }
+  } catch (e) { m = null; }
+  if (m && _LX_MAP_MIGRATE[m]) m = _LX_MAP_MIGRATE[m];
+  if (!m || typeof MAPS !== 'object' || !MAPS[m]) m = 'town';
+  return m;
+}
+function _lxPrimeBackdrop(id) {
+  try {
+    const md = (typeof _variedMapData === 'function') ? _variedMapData(id) : null;
+    if (!md || !md.bg || typeof BG_IMAGES === 'undefined' || !BG_IMAGES[md.bg]) return false;
+    const img = BG_IMAGES[md.bg];
+    if (!(img.naturalWidth > 0) || typeof _lxBgScaled !== 'function') return false;
+    // the exact sizing drawBackground uses, so this IS the cache it will hit
+    let bgW = W, bgH = H;
+    if (md.isVerticalTower && md.worldHeight && md.worldHeight > H) { bgH = Math.round(H * 1.45); bgW = Math.round(W * 1.45); }
+    _lxBgScaled(img, bgW, bgH);
+    return true;
+  } catch (e) { return false; }
+}
+function _lxDecodeMapFrames(id) {
+  const imgs = [];
+  try {
+    const md = (typeof _variedMapData === 'function') ? _variedMapData(id) : null;
+    if (!md) return Promise.resolve(0);
+    const seen = new Set();
+    for (const sp of (md.spawns || [])) {
+      if (!sp || !sp.type || seen.has(sp.type)) continue;
+      seen.add(sp.type);
+      if (typeof MONSTER_SPRITES !== 'undefined' && MONSTER_SPRITES[sp.type]) imgs.push(MONSTER_SPRITES[sp.type]);
+      const set = (typeof _monsterFramesFor === 'function') ? _monsterFramesFor(sp.type) : null;
+      if (set) for (const mode in set) for (const im of (set[mode] || [])) if (im) imgs.push(im);
+    }
+    if (md.bg && typeof BG_IMAGES !== 'undefined' && BG_IMAGES[md.bg]) imgs.push(BG_IMAGES[md.bg]);
+  } catch (e) {}
+  // only images that HAVE loaded (a shrink-baked canvas has no decode(); a
+  // broken image is skipped rather than waited on)
+  const ready = imgs.filter((im) => im && typeof im.decode === 'function' && im.complete !== false && (im.naturalWidth || im.width) > 0);
+  return Promise.all(ready.map((im) => im.decode().catch(() => {}))).then(() => ready.length);
+}
+// v0.30.361 — NPCs are the other thing a map draws on entry, and they were the
+// whole of town's first-frames cost once the mobs were covered: nine NPCs,
+// 29 plain bakes, a 135ms frame. Their draw size is fully determined by
+// _drawNpcSprite's own formula, so each idle frame is queued at exactly that
+// size into the same pre-warm queue the mobs use.
+function _lxPrewarmNpcBakes(id) {
+  try {
+    const md = (typeof _variedMapData === 'function') ? _variedMapData(id) : null;
+    if (!md || typeof NPC_SPRITES === 'undefined' || typeof NPC_SPRITE_FILES === 'undefined') return;
+    for (const n of (md.npcs || [])) {
+      if (!n || !n.name || _LX_PREWARM_SEEN.has('npc:' + n.name)) continue;
+      const sprite = NPC_SPRITES[n.name];
+      const sw = sprite && (sprite.naturalWidth || sprite.width), sh = sprite && (sprite.naturalHeight || sprite.height);
+      if (!(sw > 0 && sh > 0)) continue;   // not decoded yet: the draw cannot size it either; a later gate retries
+      _LX_PREWARM_SEEN.add('npc:' + n.name);
+      const th = _lxWholeSize(_npcSpriteTargetHeight(n.name) * ((typeof _lxNpcScale === 'function') ? _lxNpcScale(n.name) : 1));
+      const tw = _lxWholeSize(th * (sw / sh));
+      try { if (typeof _npcIdleFrame === 'function') _npcIdleFrame(n.name); } catch (e) {}   // registers the idle set
+      const file = NPC_SPRITE_FILES[n.name];
+      const base = file ? file.replace(/\.(png|webp|jpg|jpeg)$/i, '') : null;
+      const arr = (base && typeof NPC_IDLE_FRAMES !== 'undefined') ? NPC_IDLE_FRAMES[base] : null;
+      if (Array.isArray(arr) && arr.length) { for (let i = 0; i < arr.length; i++) _LX_PREWARM_Q.push({ type: 'npc:' + n.name, arr, i, h: 0, tw, th, tries: 0 }); }
+      else _LX_PREWARM_Q.push({ type: 'npc:' + n.name, arr: NPC_SPRITES, i: n.name, h: 0, tw, th, tries: 0 });   // no idle set: the static sprite is what draws
+    }
+  } catch (e) {}
+}
+window._lxReadyGateLog = [];
+function _lxReadyGate(mapId, opts) {
+  opts = opts || {};
+  const id = mapId || (typeof game !== 'undefined' && game && game.currentMap) || 'town';
+  const CAP = opts.cap || 20000;
+  const st = document.getElementById('loading-status');
+  const paint = (pct, msg) => { try { if (st) st.innerHTML = '<span class="pct">' + Math.round(pct) + '%</span> · <span class="pulse">' + msg + '</span>'; } catch (e) {} };
+  const raf = () => new Promise((r) => requestAnimationFrame(r));
+  const capped = (p, ms) => Promise.race([Promise.resolve(p), new Promise((r) => setTimeout(r, ms))]);
+  const t0 = Date.now();
+  const rec = { id, boot: !!opts.boot, decodeMs: 0, shrinkMs: 0, baked: 0, bakeMs: 0, backdrop: false, bgm: -1, ms: 0, capped: false };
+  const run = (async () => {
+    let t = Date.now();
+    paint(5, 'Decoding sprites…');
+    // For the WHOLE gate, not just the drain: every frame the game draws under
+    // the veil bakes unmetered, so NPCs, the player and anything in view are
+    // cached at their exact draw size before the veil lifts. Cleared at release.
+    window._lxMintBypass = true;
+    try {
+      if (opts.boot) {
+        // boot: the full preloader (bytes + decode for spawns, NPCs, gear and the
+        // backdrop) - time is cheap behind the opaque overlay
+        const before = (window._lxSpriteWatch || []).length;
+        await capped(_lxPreloadMapAssets(id, (done, total) => paint(5 + 25 * (done / Math.max(1, total)), 'Decoding sprites… ' + done + '/' + total), 'high'), CAP * 0.4);
+        try { if (window._lxSpriteWatch && window._lxSpriteWatch.length > before) window._lxSpriteWatch.length = before; } catch (e) {}
+      } else {
+        // a map change: decode only what this map draws, and never wait on a
+        // broken image. The full preloader's per-image load timeout put a 1.6s
+        // floor under EVERY veil whenever any tracked sprite had errored -
+        // measured on town, already decoded at boot, held 1602ms for nothing.
+        await capped(_lxDecodeMapFrames(id), CAP * 0.3);
+      }
+    } catch (e) {}
+    rec.decodeMs = Date.now() - t; t = Date.now();
+    paint(32, 'Preparing monsters…');
+    try { if (typeof _warmMapArt === 'function') await capped(_warmMapArt(id, opts.skip ? { skip: opts.skip } : undefined), CAP * 0.3); } catch (e) {}
+    rec.shrinkMs = Date.now() - t; t = Date.now();
+    try {
+      const md = (typeof _variedMapData === 'function') ? _variedMapData(id) : null;
+      const types = [];
+      if (md) for (const sp of (md.spawns || [])) if (sp && sp.type && !sp.boss && types.indexOf(sp.type) < 0) types.push(sp.type);
+      if (typeof _lxPrewarmMobBakes === 'function') for (const ty of types) _lxPrewarmMobBakes(ty);
+      if (typeof _lxPrewarmNpcBakes === 'function') _lxPrewarmNpcBakes(id);
+      const total = (typeof _LX_PREWARM_Q !== 'undefined') ? _LX_PREWARM_Q.length : 0;
+      window._lxMintBypass = true;
+      const t1 = Date.now();
+      while (typeof _LX_PREWARM_Q !== 'undefined' && _LX_PREWARM_Q.length && Date.now() - t1 < CAP * 0.3) {
+        _lxPrewarmDrain(true);
+        rec.baked = total - _LX_PREWARM_Q.length;
+        paint(40 + 30 * (rec.baked / Math.max(1, total)), 'Baking sprites… ' + rec.baked + '/' + total);
+        await raf();   // let the overlay paint between slices
+      }
+    } catch (e) {}
+    rec.bakeMs = Date.now() - t; t = Date.now();
+    paint(74, 'Painting the backdrop…');
+    rec.backdrop = _lxPrimeBackdrop(id);
+    paint(82, 'Tuning the music…');
+    try {
+      const el = (typeof _bgmMapEl === 'function' && _bgmMapEl(id)) || (typeof _bgmEl !== 'undefined' ? _bgmEl : null);
+      if (el) {
+        window._lxReadyGateBgm = el;
+        if (el.readyState < 3) {
+          el.preload = 'auto';
+          await capped(new Promise((res) => {
+            const done = () => { el.removeEventListener('canplaythrough', done); el.removeEventListener('canplay', done); el.removeEventListener('error', done); res(); };
+            el.addEventListener('canplaythrough', done, { once: true });
+            el.addEventListener('canplay', done, { once: true });
+            el.addEventListener('error', done, { once: true });
+            try { el.load(); } catch (e) { res(); }
+          }), CAP * 0.3);
+        }
+        rec.bgm = el.readyState;
+      }
+    } catch (e) {}
+    paint(100, 'Ready');
+    // a map change: two real frames drawn under the veil, unmetered, bake the
+    // NPCs, the player and whatever is in view at exactly the size the draw
+    // asks for - the one warm-up no formula can predict. (At boot the loop is
+    // parked; the veil after class select does this for the first map.)
+    if (!opts.boot && window._lxBootGateDone) { await raf(); await raf(); }
+  })();
+  return capped(run, CAP).then(() => {
+    rec.ms = Date.now() - t0;
+    rec.capped = rec.ms >= CAP - 5;
+    window._lxMintBypass = false;   // a capped drain finishes on the budget, not unmetered
+    window._lxReadyGateLog.push(rec);
+    try { console.log('[boot] ready gate ' + id + ': decode ' + rec.decodeMs + 'ms, shrink ' + rec.shrinkMs + 'ms, baked ' + rec.baked + ' in ' + rec.bakeMs + 'ms, backdrop ' + rec.backdrop + ', bgm readyState ' + rec.bgm + (rec.capped ? ' [CAPPED]' : '') + ' — ' + rec.ms + 'ms'); } catch (e) {}
+  });
+}
+window._lxReadyGate = _lxReadyGate;
 function startBgm() {
   if (!_bgmEl) return;
   // v0.26.426 — Play whatever track the player should ACTUALLY hear right now:
