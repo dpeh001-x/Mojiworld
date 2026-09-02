@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.357';
+const GAME_VERSION = 'v0.30.358';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -61681,6 +61681,7 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     if (typeof _monsterFramesFor === 'function') _monsterFramesFor(type);
     const _st = (typeof MONSTER_SPRITES !== 'undefined') ? MONSTER_SPRITES[type] : null;
     if (_st && _st.decode) _st.decode().catch(() => {});
+    if (!isBoss && typeof _lxPrewarmMobBakes === 'function') _lxPrewarmMobBakes(type);   // v0.30.358 — see the function
   } catch (e) {}
   // v0.29.619 — no wild spawn may land in a town, whatever called us. Returns the
   // same stub shape as the co-op guard below so callers that set fields on the
@@ -123594,6 +123595,10 @@ function _lxTintBake(img, filterStr) {
   if (!bakes) bakes = img._lxTintBakes = {};
   let cv = bakes[filterStr];
   if (cv !== undefined) return cv;
+  // v0.30.358 — over this frame's mint budget: no bake, and deliberately NOT
+  // cached as a failure. The caller draws the sprite untinted for one frame
+  // and the bake lands on the next. See _lxMintOk.
+  if (typeof _lxMintOk === 'function' && !_lxMintOk()) return null;
   try {
     cv = document.createElement('canvas');
     cv.width = w; cv.height = h;
@@ -123632,6 +123637,141 @@ function _lxTintBake(img, filterStr) {
   return cv;
 }
 const _LX_FORCED_EDGES = { l: { f: 0.35, a: 0, b: 1 }, r: { f: 0.35, a: 0, b: 1 }, t: { f: 0.35, a: 0, b: 1 } };
+// v0.30.358 perf — SPRITE-BAKE MINT BUDGET (horde lag).
+// Per-frame accounting of a 45-mob + 2-boss fight found the lag is not steady
+// cost, it is BURSTS: spike frames created SIXTEEN canvases against 3.5 on a
+// normal frame, and _lxDrawSoft went 27ms -> 185ms on exactly those frames
+// (worst single frame 575ms, 22 canvases). Attributed by call site, a 14s
+// fight minted 405 feather composites, 221 tint bakes and 39 boss composites.
+// Every one is a canvas allocation, a context, a composite and a first-use GPU
+// upload. A horde's working set is every mob type x every animation frame x
+// every size bucket x every status tint, so the misses do not arrive smoothly -
+// they clump, as a wave of mobs reaches the same new animation frame together.
+// The work is not wasted; it is all landing on one frame.
+//
+// Metered by COUNT, not by elapsed time. A time budget was tried first and did
+// nothing measurable: canvas allocation, context creation, gradient fills and
+// the first-use upload are all DEFERRED by the browser, so a performance.now()
+// span wrapped around the build reads near-zero and the budget never trips.
+// The cost is real - it just does not land inside the span that creates it.
+//
+// And ADAPTIVE, from LX_PERF.avgFrame (the frame-watchdog's EMA), because the
+// same mint costs ~0.3ms on a desktop and ~40ms on the machine that reported
+// the lag. A fixed 2/frame measured as a 9-second warm-up storm on a fast box -
+// it would be ~36s on a slow one, i.e. the whole fight - while a fixed 12
+// would put the slow machine right back at 500ms frames. So: the faster the
+// frames are already coming, the more bakes a frame may absorb.
+//
+// Over budget, the sprite draws without its soft edge (or without its tint) for
+// that ONE frame and mints on a later one. A missing 3-12% edge fade for 16ms
+// is imperceptible; a 575ms hitch is not. Steady state is untouched: once a
+// composite is cached it never re-mints, so this only spreads the WARM-UP -
+// and _lxPrewarmMobBakes (below) front-loads that warm-up before the first draw.
+let _lxMintFrame = -1, _lxMintN = 0;
+function _lxMintBudget() {
+  const a = (typeof LX_PERF !== 'undefined' && LX_PERF && LX_PERF.avgFrame > 0) ? LX_PERF.avgFrame : 16.7;
+  return a <= 11 ? 12 : a <= 17 ? 6 : a <= 26 ? 3 : a <= 40 ? 2 : 1;
+}
+function _lxMintPeek() {
+  const t = (typeof game === 'object' && game) ? (game.time | 0) : 0;
+  if (t !== _lxMintFrame) { _lxMintFrame = t; _lxMintN = 0; }
+  return _lxMintN < _lxMintBudget();
+}
+function _lxMintOk() {
+  if (!_lxMintPeek()) return false;
+  _lxMintN++; return true;
+}
+// v0.30.358 perf — PRE-WARM ON FIRST SPAWN. The budget above bounds the storm; this
+// removes most of it. The first time a mob TYPE is spawned this session, every
+// idle and walk frame is queued to be baked at exactly the size the real draw
+// will ask for (the draw's own formula, below, on the type's uniform h), and
+// the queue drains at the top of each frame THROUGH the same budget - so a
+// fast machine has the whole set cached within a second of the wave landing,
+// and a slow one takes the same one-bake-per-frame it would have paid anyway,
+// but paid BEFORE the mob is on screen and hit, not during. A slot is baked
+// only once it is final: already the shrink-baked canvas, or marked
+// _lxNoShrink. Baking a raw <img> that the shrink pipeline is about to swap out
+// would orphan the cache. After a grace period the raw image is baked anyway -
+// if nothing has shrunk it by then, the raw image IS what the draw will use.
+const _LX_PREWARM_Q = [];
+const _LX_PREWARM_SEEN = new Set();
+let _lxPrewarmScratch = null;
+function _lxPrewarmMobBakes(type) {
+  if (!type || _LX_PREWARM_SEEN.has(type)) return;
+  _LX_PREWARM_SEEN.add(type);
+  try {
+    const t = (typeof monsterTypes !== 'undefined') ? monsterTypes[type] : null;
+    if (!t || !(t.h > 0)) return;
+    const set = (typeof _monsterFramesFor === 'function') ? _monsterFramesFor(type) : null;
+    if (!set) return;
+    for (const mode of ['idle', 'walk']) {
+      const arr = set[mode];
+      if (!Array.isArray(arr)) continue;
+      for (let i = 0; i < arr.length; i++) _LX_PREWARM_Q.push({ type, arr, i, h: t.h, tries: 0 });
+    }
+  } catch (e) {}
+}
+function _lxPrewarmDrain() {
+  if (!_LX_PREWARM_Q.length) return;
+  if (!_lxPrewarmScratch) {
+    try { const cv = document.createElement('canvas'); cv.width = 4; cv.height = 4; _lxPrewarmScratch = cv.getContext('2d'); } catch (e) {}
+    if (!_lxPrewarmScratch) { _LX_PREWARM_Q.length = 0; return; }
+  }
+  let looked = 0, drained = 0;
+  const _cap = _lxMintBudget();
+  while (_LX_PREWARM_Q.length && looked++ < 24 && drained < _cap) {
+    const j = _LX_PREWARM_Q.shift();
+    let im = j.arr[j.i];
+    if (!im) continue;
+    const decoded = !(im.complete === false) && ((im.naturalWidth || im.width) > 0);
+    const final = im.tagName === 'CANVAS' || im._lxNoShrink || j.tries > 240;
+    if (!decoded || !final) { if (j.tries++ < 600) _LX_PREWARM_Q.push(j); continue; }
+    try {
+      // the draw's own sizing (see _drawMonsterSprite), on the type's h
+      const sprite = (typeof MONSTER_SPRITES !== 'undefined') ? MONSTER_SPRITES[j.type] : null;
+      const anim = (typeof MONSTER_ANIMS !== 'undefined') ? MONSTER_ANIMS[j.type] : null;
+      const refImg = sprite || (anim && anim.image);
+      const srcW = (refImg && (refImg.naturalWidth || refImg.width)) || 0;
+      const srcH = (refImg && (refImg.naturalHeight || refImg.height)) || 0;
+      if (!(srcW > 0 && srcH > 0)) { if (j.tries++ < 600) _LX_PREWARM_Q.push(j); continue; }
+      const sourceMaxDim = (refImg && refImg._lxOrigLong) || Math.max(srcW, srcH);
+      const sizeFactor = Math.max(0.85, Math.min(1.20, sourceMaxDim / 768));
+      const targetH = _lxWholeSize(j.h * 1.5 * sizeFactor * _lxMobScale(j.type));
+      const fw = im.naturalWidth || im.width || srcW, fh = im.naturalHeight || im.height || srcH;
+      const frameW = _lxWholeSize(targetH * (fw / fh));
+      _lxDrawSoft(_lxPrewarmScratch, im, 0, 0, frameW, targetH);
+      drained++;
+    } catch (e) {}
+  }
+}
+// v0.30.358 perf — the plain downscale, as a helper, because TWO paths need it.
+// It was inline in _lxDrawSoft's edge-clean branch; the feathered branch, on a
+// budget refusal, fell back to drawing the RAW image - a 650px read for a 50px
+// mob, every frame, until its one-per-frame turn came. The 30s time series
+// showed exactly that: with plain bakes free, refusals near zero, and STILL
+// 80-190 raw oversized draws a second for ten seconds. A refused feather now
+// draws its plain downscale instead - a tiny blit - and feathers later.
+// pw/ph are the plain path's own DEVICE-pixel buckets (ceil to 10), so the
+// entry it mints is the very one the edge-clean path will hit.
+function _lxPlainOf(img, pw, ph) {
+  const _pk = (pw << 16) | ph;
+  let _pcM = img._lxPlainCache;
+  if (!_pcM || !_pcM.get) _pcM = img._lxPlainCache = new Map();
+  let _pc = _pcM.get(_pk);
+  if (_pc === undefined) {
+    if (_pcM.size >= 8) _pcM.delete(_pcM.keys().next().value);        // FIFO, one at a time
+    try {
+      const _cv = document.createElement('canvas');
+      _cv.width = pw; _cv.height = ph;
+      const _g = _cv.getContext('2d');
+      _g.imageSmoothingEnabled = true; _g.imageSmoothingQuality = 'high';
+      _g.drawImage(img, 0, 0, pw, ph);
+      _pc = _cv;
+    } catch (e) { _pc = null; }
+    _pcM.set(_pk, _pc);
+  }
+  return _pc;
+}
 function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
   // v0.30.65 perf — COMBAT LAG. The tint bake mints a NEW canvas per
   // (sprite frame x filter) and the probe below ran on that copy, so every one
@@ -123692,23 +123832,16 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
     const _pDpr = _lxBakeDpr();
     const _pw = Math.ceil((dw * _pDpr) / 10) * 10, _ph = Math.ceil((dh * _pDpr) / 10) * 10;
     if (_sw0 >= _pw * 1.5 && dw >= 14 && dh >= 14) {
-      const _pk = (_pw << 16) | _ph;
-      let _pcM = img._lxPlainCache;
-      if (!_pcM) _pcM = img._lxPlainCache = {};
-      let _pc = _pcM[_pk];
-      if (_pc === undefined) {
-        if (_pcM._n > 6) { img._lxPlainCache = _pcM = {}; }   // unbounded-size guard
-        try {
-          const _cv = document.createElement('canvas');
-          _cv.width = _pw; _cv.height = _ph;
-          const _g = _cv.getContext('2d');
-          _g.imageSmoothingEnabled = true; _g.imageSmoothingQuality = 'high';
-          _g.drawImage(img, 0, 0, _pw, _ph);
-          _pc = _cv;
-        } catch (e) { _pc = null; }
-        _pcM[_pk] = _pc;
-        _pcM._n = (_pcM._n | 0) + 1;
-      }
+      // v0.30.358 — deliberately NOT budgeted (see _lxPlainOf): this bake is one
+      // downscale read of the source, exactly what the raw draw it replaces
+      // costs; refusing it saves nothing this frame and repeats the read next.
+      // Measured: budgeting it kept a 45-mob wave at 6-8 fps for 8-9s, the
+      // adaptive budget throttling to one bake per frame precisely because the
+      // un-baked raw draws were what made the frames slow. Feather composites
+      // and tint bakes are the expensive mints; those stay metered. The
+      // pre-warm drain IS metered for plain bakes - there the bake is added
+      // cost, nothing on screen is being replaced yet.
+      const _pc = _lxPlainOf(img, _pw, _ph);
       if (_pc) { c.drawImage(_pc, dx, dy, dw, dh); return; }
     }
     c.drawImage(img, dx, dy, dw, dh); return;
@@ -123745,6 +123878,19 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
   // composite (canvas + up to 3 gradient fills) every single frame.
   const _fc = img._lxFeatherC;
   if (_fc && _fc.get) { const _hit = _fc.get(_fkey); if (_hit) { c.drawImage(_hit, dx, dy, dw, dh); return; } }
+  // v0.30.358 — over this frame's mint budget: draw the PLAIN downscale this frame
+  // (un-budgeted, see _lxPlainOf) and feather on a later one. Never the raw
+  // image: that is a full-res read per frame for as long as the refusal lasts.
+  if (!_lxMintOk()) {
+    const _rw = img.naturalWidth || img.width || 0;
+    const _rD = _lxBakeDpr();
+    const _rpw = Math.ceil((dw * _rD) / 10) * 10, _rph = Math.ceil((dh * _rD) / 10) * 10;
+    if (_rw >= _rpw * 1.5 && dw >= 14 && dh >= 14) {
+      const _rpc = _lxPlainOf(img, _rpw, _rph);
+      if (_rpc) { c.drawImage(_rpc, dx, dy, dw, dh); return; }
+    }
+    c.drawImage(img, dx, dy, dw, dh); return;
+  }
   try {
     const W2 = _bw, H2 = _bh;   // v0.29.5xx — build at the bucketed size (see _fkey)
     // Build into a per-image canvas sized exactly to this draw, so it can be
@@ -125045,7 +125191,14 @@ function drawMonster(m) {
       // swelling to a peak at the silhouette edge, feathering out to
       // nothing. Same single drawImage cost as the fill it replaced.
       const _d = Math.ceil(Math.max(_vw, _vh) * 1.35 / 16) * 16;   // bucketed stamp size
-      const _rim = _fxStamp('rim', '#ffcc33', _d);
+      // v0.30.358 perf — _fxStamp supersamples (px = 2 x d), which for a radial
+      // gradient buys nothing and made this the single largest source-pixel
+      // reader in a horde profile: a 1472px-square stamp drawn at ~850x600 and
+      // then squashed into ~800x200 for the pool, 1.84 Mpx read per frame for
+      // two staggered bosses. Requesting half the diameter gives a stamp the
+      // size of the draw (px = _d); the pool still squashes it, but reads 4x
+      // fewer pixels doing so. Same gradient, same look.
+      const _rim = _fxStamp('rim', '#ffcc33', _d * 0.5);
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = 0.45 + 0.35 * _pulse;
@@ -133246,7 +133399,7 @@ function drawHazards(_behindPass) {
         const _pw = h.w * 1.7;
         if (typeof _lxVfxReady === 'function' && _lxVfxReady((_vfHz = _lxVfxFrame('lavaPool')))) {
           ctx.globalAlpha = 0.85 * _fade;
-          ctx.drawImage(_vfHz, lx - _pw/2, h._groundY - _pw*0.22, _pw, _pw*0.44);
+          ctx.drawImage(_lxProjScaled(_vfHz, Math.round(_pw)), lx - _pw/2, h._groundY - _pw*0.22, _pw, _pw*0.44);   // v0.30.358 perf — was the raw 1100x500 source at 150-200px, every frame
           ctx.globalAlpha = 1;
         } else {
           ctx.fillStyle = `rgba(255,90,20,${0.65 * _fade})`;
@@ -134588,7 +134741,11 @@ function drawParticles() {
       const r = p.size + 3;
       if (LX_FX_SOFT) {
         // v0.29.417 — round halo stamp (pinned: color+size are fixed per particle)
-        if (!p._sg) p._sg = _fxStamp('glow', p.color, Math.round(r * 2));
+        // v0.30.358 perf — resolution bucketed to 4px. The stamp is drawn at r*2 x r*2
+        // regardless, so its own size only sets sampling resolution; continuous per-
+        // particle radii were minting a near-unique stamp per integer size per colour
+        // (62 in a 14s horde fight) and churning the 512-entry cache.
+        if (!p._sg) p._sg = _fxStamp('glow', p.color, Math.max(8, Math.round(r * 2 / 4) * 4));
         ctx.globalAlpha = alpha * 0.5;
         ctx.drawImage(p._sg, sx - r, p.y - r, r * 2, r * 2);
       } else {
@@ -136386,6 +136543,7 @@ function loop(time) {
   try { ctx.setTransform(_LX_DPR, 0, 0, _LX_DPR, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; } catch (_e) {}
   const dt = _LX_SIM_STEP_MS;   // v0.28.3 — fixed 60 Hz step (the gate above already banked/consumed the real elapsed time and updated lastTime). Replaces the old wall-clock delta so the frame-locked sim is refresh-independent; dt-scaled timers stay real-time because the sim runs at a true 60 steps/sec.
   game.time++;
+  if (_LX_PREWARM_Q.length) _lxPrewarmDrain();   // v0.30.358 — bakes ahead of the draw, through the same budget
   game._playMs = (game._playMs || 0) + dt;   // v0.26.453 - accumulated in-game playtime (ms) for boss respawn gating
   if (player._eclipseRain && !game.paused) _lxEclipseTick(dt);   // v0.30.34 - Eclipse clock: same cadence as game.time, so hit-stop cannot stretch the hold past the moon
   // v0.26.317 — Low-HP audio warning. Fires a one-shot `low_hp` SFX
