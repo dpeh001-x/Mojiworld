@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.358';
+const GAME_VERSION = 'v0.30.359';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -120163,40 +120163,72 @@ function _mobChatTick(m, dt) {
     }
   }
 }
+// v0.30.359 perf — SPEECH BUBBLES ARE BAKED. A steady-state, warm, 4x-throttled
+// line profile of the whole draw path put ONE line sixteen times hotter than
+// any other: the `ctx.font = ...` that used to open this function. Every mob,
+// NPC, player and co-op chat bubble re-set the main context's font (a font
+// string parse plus fallback resolution that Chrome charges for outside the
+// JS line), measured its text, built a rounded rect and a tail, filled and
+// stroked both, and drew the text - every frame it was visible: ~166us a
+// bubble at 1x, ~665us on the throttled machine, ~3 bubbles a frame in a
+// horde. The text comes from a fixed pool of chat lines. Name tags and damage
+// numbers already bake once and blit; bubbles now do the same, keyed by text
+// and style, baked at device resolution, with fade applied as alpha at blit
+// time so a fading bubble never re-bakes. Layout inside the bake: a 2px
+// margin M, the bubble at (M, M), the tail below it, the text centred - the
+// same geometry the direct draw used, exposed on the canvas for the test.
+const _LX_BUBBLE_BAKES = new Map();
+const LX_BUBBLE_BAKE_CAP = 128;
+function _lxBubbleBake(text, opts) {
+  opts = opts || {};
+  const font = opts.font || 'bold 10px sans-serif';
+  const fill = opts.fill || 'rgba(255,255,255,0.96)';
+  const stroke = opts.stroke || 'rgba(60,40,80,0.8)';
+  const color = opts.color || '#1a0820';
+  const dpr = (typeof _lxBakeDpr === 'function') ? _lxBakeDpr() : 1;
+  const key = text + '|' + font + '|' + fill + '|' + stroke + '|' + color + '|' + dpr;
+  let cv = _LX_BUBBLE_BAKES.get(key);
+  if (cv !== undefined) return cv;
+  if (_LX_BUBBLE_BAKES.size >= LX_BUBBLE_BAKE_CAP) _LX_BUBBLE_BAKES.delete(_LX_BUBBLE_BAKES.keys().next().value);
+  cv = null;
+  try {
+    const padX = 6, padY = 4, M = 2, TAIL = 4;
+    cv = document.createElement('canvas');
+    let g = cv.getContext('2d');
+    g.font = font;
+    const tw = g.measureText(text).width;
+    const bw = tw + padX * 2, bh = 14 + padY;
+    const lw = bw + M * 2, lh = bh + TAIL + M * 2;   // logical
+    cv.width = Math.max(1, Math.ceil(lw * dpr)); cv.height = Math.max(1, Math.ceil(lh * dpr));
+    g = cv.getContext('2d');                          // the resize reset the state
+    g.scale(dpr, dpr);
+    g.font = font; g.textAlign = 'center'; g.textBaseline = 'middle';
+    const bx = M, by = M, cx = M + bw / 2;
+    g.fillStyle = fill; g.strokeStyle = stroke; g.lineWidth = 1.2;
+    g.beginPath();
+    if (g.roundRect) g.roundRect(bx, by, bw, bh, 5); else g.rect(bx, by, bw, bh);
+    g.fill(); g.stroke();
+    g.beginPath();
+    g.moveTo(cx - 3, by + bh); g.lineTo(cx, by + bh + TAIL); g.lineTo(cx + 3, by + bh);
+    g.closePath(); g.fill(); g.stroke();
+    g.fillStyle = color;
+    g.fillText(text, cx, by + bh / 2 + 1);
+    cv._lxBw = bw; cv._lxBh = bh; cv._lxM = M; cv._lxLw = lw; cv._lxLh = lh; cv._lxDpr = dpr;
+  } catch (e) { cv = null; }
+  _LX_BUBBLE_BAKES.set(key, cv);
+  return cv;
+}
 function _drawBubble(cx, topY, text, opts) {
   opts = opts || {};
   const fade = opts.fade != null ? opts.fade : 1;
   if (fade <= 0) return;
-  ctx.save();
+  const cv = _lxBubbleBake(text, opts);
+  if (!cv) return;
+  const _pa = ctx.globalAlpha;
   ctx.globalAlpha = 0.9 * fade;
-  ctx.font = opts.font || 'bold 10px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  const padX = 6, padY = 4;
-  const tw = ctx.measureText(text).width;
-  const bw = tw + padX * 2, bh = 14 + padY;
-  const bx = cx - bw/2, by = topY - bh;
-  // Bubble fill + outline
-  ctx.fillStyle = opts.fill || 'rgba(255,255,255,0.96)';
-  ctx.strokeStyle = opts.stroke || 'rgba(60,40,80,0.8)';
-  ctx.lineWidth = 1.2;
-  ctx.beginPath();
-  if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 5);
-  else ctx.rect(bx, by, bw, bh);
-  ctx.fill();
-  ctx.stroke();
-  // Tail
-  ctx.beginPath();
-  ctx.moveTo(cx - 3, by + bh);
-  ctx.lineTo(cx, by + bh + 4);
-  ctx.lineTo(cx + 3, by + bh);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  // Text
-  ctx.fillStyle = opts.color || '#1a0820';
-  ctx.fillText(text, cx, by + bh/2 + 1);
-  ctx.restore();
+  // the bake's bubble sits at (M, M); the direct draw put it at (cx - bw/2, topY - bh)
+  ctx.drawImage(cv, cx - cv._lxBw / 2 - cv._lxM, topY - cv._lxBh - cv._lxM, cv._lxLw, cv._lxLh);
+  ctx.globalAlpha = _pa;
 }
 function _drawMobChat(m) {
   if (!m._chat) return;
@@ -124212,8 +124244,20 @@ function _drawMonsterSprite(m, sx, sy) {
   // ACTUAL feet (lowest opaque pixel) land at the monster's foot line for
   // ground monsters; floating monsters are lifted off the ground.
   const refImg = sprite || (anim && anim.image);
-  const srcW = (refImg && refImg.naturalWidth)  || (refImg && refImg.width)  || 1;
-  const srcH = (refImg && refImg.naturalHeight) || (refImg && refImg.height) || 1;
+  // v0.30.359 perf — naturalWidth/Height are DOM getters, and this function read
+  // them up to five times per mob per frame (here and on the state frame
+  // below): ~200 profile ticks in a 47-mob steady state. Memoised on the image
+  // object once it has real dimensions; a shrink-bake replaces the object, so
+  // a stale memo cannot survive a swap.
+  let srcW = 1, srcH = 1;
+  if (refImg) {
+    if (refImg._lxNW > 1) { srcW = refImg._lxNW; srcH = refImg._lxNH; }
+    else {
+      srcW = refImg.naturalWidth || refImg.width || 1;
+      srcH = refImg.naturalHeight || refImg.height || 1;
+      if (srcW > 1 && srcH > 1) { refImg._lxNW = srcW; refImg._lxNH = srcH; }
+    }
+  }
   // v0.25.821 — Source-pixel-size-aware scaling, matching the boss
   // (v0.25.818) and NPC (v0.25.821) pipelines. Bigger source canvas →
   // larger in-game render. Reference 768 px (typical Ludo monster
@@ -124369,8 +124413,13 @@ function _drawMonsterSprite(m, sx, sy) {
     // Height (and with it the Y anchor and all Monster Plant bakes) is
     // unchanged; only the width now follows the frame being drawn. Types whose
     // frames match the base aspect are untouched (frameW === targetW).
-    const _fsW = _stateImg.naturalWidth || _stateImg.width || srcW;
-    const _fsH = _stateImg.naturalHeight || _stateImg.height || srcH;
+    let _fsW, _fsH;   // v0.30.359 perf — memoised, see srcW above
+    if (_stateImg._lxNW > 1) { _fsW = _stateImg._lxNW; _fsH = _stateImg._lxNH; }
+    else {
+      _fsW = _stateImg.naturalWidth || _stateImg.width || srcW;
+      _fsH = _stateImg.naturalHeight || _stateImg.height || srcH;
+      if (_fsW > 1 && _fsH > 1) { _stateImg._lxNW = _fsW; _stateImg._lxNH = _fsH; }
+    }
     const _frameW = _lxWholeSize(targetH * (_fsW / _fsH));
     const _atkScale = (m._frameIsAttack && _ATK_FRAME_SCALE[m.type]) || 1;
     if (_atkScale !== 1) {
@@ -124566,6 +124615,19 @@ function _lxDrawBlobShadow(cx, syFeet, feetWorldY, wx, w) {
   ctx.ellipse(cx, syFeet + hgt, rx, Math.max(1.5, rx * LX_SHADOW_RY_RATIO), 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
+}
+// v0.30.359 perf — drawMonster read performance.now() twice per mob per frame
+// (~94 calls a frame for a horde, ~110 profile ticks). The animation windows
+// it gates are hundreds of milliseconds wide, so one read per frame is the
+// same answer. Keyed on game.time so it cannot go stale across frames.
+let _lxFrameNowT = -1, _lxFrameNowV = 0;
+function _lxFrameNow() {
+  const t = game.time | 0;
+  if (t !== _lxFrameNowT) {
+    _lxFrameNowT = t;
+    _lxFrameNowV = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  }
+  return _lxFrameNowV;
 }
 function drawMonster(m) {
   const sx = m.x - game.camera.x;
@@ -124901,7 +124963,7 @@ function drawMonster(m) {
   // Smith, Path's Bane, Legosaurus) play their attack-frame animation during the
   // wind-up + release, not just the patternState-driven casters. Time-based,
   // so it self-clears — no risk of the boss freezing on its attack pose.
-  const _nowAtk = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const _nowAtk = _lxFrameNow();   // v0.30.359 perf — one clock read per frame
   // v0.29.938 — two changes, both per the tester's "the whole sprite
   // dashes while doing the animation":
   //   1. Locomotion pattern states are not attacks (_BOSS_MOVE_DRAW_STATES)
@@ -125059,7 +125121,7 @@ function drawMonster(m) {
         || (m.vy || 0) < -3
         || _lxNowEvGate(m));
   const _bossWeaveImg = _bossAirborne ? _bossWeaveFrame(_bodyKey, m) : null;
-  const _lxNowEv = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const _lxNowEv = _lxFrameNow();   // v0.30.359 perf — one clock read per frame
   const _bossDucking = !_bossAttacking && !_bossWeaveImg && m.onGround !== false && _lxNowEv < (m._lxDuckUntil || 0);
   const _bossDuckImg = _bossDucking ? _bossDuckFrame(_bodyKey, m) : null;
   // v0.26.314/322 — when not attacking: walk loop while moving, else idle loop,
