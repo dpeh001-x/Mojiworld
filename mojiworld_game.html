@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.362';
+const GAME_VERSION = 'v0.30.363';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -121663,18 +121663,25 @@ function _lxCalibFt(key, state) {
   const c = (typeof _lxAnimCalib === 'function') ? _lxAnimCalib(key, state) : null;
   return (c && Array.isArray(c.ft)) ? c.ft : null;
 }
-function _lxFtWalk(frames, n, ft, offsetMs, pingpong) {
+// v0.30.363 — the dwell walk as a pure index function of elapsed ms, so a
+// state-relative clock (the zodiac machine) can use the same timing as the
+// wall-clock pickers. Boss attack sets now carry a baked ft (see
+// scripts/gen_attack_timing.mjs): 60ms base, the strike held 2.2x.
+function _lxFtIndex(n, ft, elapsedMs, pingpong) {
   const seqLen = pingpong ? (2 * n - 2) : n;
   let _total = 0;
   for (let i = 0; i < seqLen; i++) { const fi = (!pingpong || i < n) ? i : seqLen - i; _total += (ft[fi] > 0 ? ft[fi] : 48); }
-  const _now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-  let _t = Math.max(0, _now + (offsetMs || 0)) % _total;
+  let _t = Math.max(0, elapsedMs || 0) % _total;
   for (let i = 0; i < seqLen; i++) {
     const fi = (!pingpong || i < n) ? i : seqLen - i;
     _t -= (ft[fi] > 0 ? ft[fi] : 48);
-    if (_t < 0) return frames[fi];
+    if (_t < 0) return fi;
   }
-  return frames[0];
+  return 0;
+}
+function _lxFtWalk(frames, n, ft, offsetMs, pingpong) {
+  const _now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  return frames[_lxFtIndex(n, ft, _now + (offsetMs || 0), pingpong)];
 }
 function _lxFtReadyN(frames) {
   if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);
@@ -122743,7 +122750,21 @@ function _zodiacStateImg(sign, state, elapsedMs, m) {
     }
     return _zodiacRelFrame(_cf, _BOSS_ATK_FRAME_MS, elapsedMs, false);
   }
-  if (state === 'attack') return _zodiacRelFrame(ZODIAC_ATTACK_FRAMES[sign], _BOSS_ATK_FRAME_MS, elapsedMs, false);
+  if (state === 'attack') {
+    // v0.30.363 — walk the baked/authored per-frame timing like every other
+    // boss attack; the flat 48ms cadence is only the fallback.
+    const _zf = ZODIAC_ATTACK_FRAMES[sign];
+    const _zft = _zf ? _lxCalibFt('zodiac_' + sign, 'attack') : null;
+    if (_zft) {
+      let _zn = _zf._readyN || 0;
+      while (_zn < _zf.length && _zf[_zn] && _zf[_zn].complete && _zf[_zn].naturalWidth > 0) _zn++;
+      _zf._readyN = _zn;
+      if (_zn === 0) return null;
+      if (_zn === 1) return _zf[0];
+      return _zf[_lxFtIndex(_zn, _zft, elapsedMs, false)];
+    }
+    return _zodiacRelFrame(_zf, _BOSS_ATK_FRAME_MS, elapsedMs, false);
+  }
   if (state === 'walk')   return _zodiacRelFrame(ZODIAC_WALK_FRAMES[sign], _BOSS_WALK_FRAME_MS, elapsedMs, false);
   return _zodiacRelFrame(ZODIAC_IDLE_FRAMES[sign], _BOSS_IDLE_FRAME_MS, elapsedMs, true);
 }

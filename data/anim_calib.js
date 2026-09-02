@@ -186,7 +186,19 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.1415,
       "dx": 0,
-      "dy": 0.0254
+      "dy": 0.0254,
+      "ft": [
+        72,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "aetherion": {
@@ -203,7 +215,19 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.6,
       "dx": 0,
-      "dy": 0.01
+      "dy": 0.01,
+      "ft": [
+        72,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "gravitos2": {
@@ -220,7 +244,19 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.04,
       "dx": 0.0035,
-      "dy": 0.03
+      "dy": 0.03,
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "gravitos2star": {
@@ -265,7 +301,19 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.13,
       "dx": 0,
-      "dy": 0.04
+      "dy": 0.04,
+      "ft": [
+        72,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "gravitos3star": {
@@ -310,7 +358,19 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.015
+      "dy": 0.015,
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "legosaurus": {
@@ -355,7 +415,19 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.01
+      "dy": 0.01,
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "pqConductor": {
@@ -372,7 +444,19 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.4,
       "dx": 0.1211,
-      "dy": 0.01
+      "dy": 0.01,
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "sundered_smith": {
@@ -389,7 +473,19 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.09,
       "dx": 0.265,
-      "dy": 0
+      "dy": 0,
+      "ft": [
+        72,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "towerSovereign": {
@@ -406,7 +502,19 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 0.72,
       "dx": -0.025,
-      "dy": 0.01
+      "dy": 0.01,
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "young_confused_barnaby": {
@@ -423,7 +531,19 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 0.8617,
       "dx": 0,
-      "dy": -0.01
+      "dy": -0.01,
+      "ft": [
+        72,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
     },
     "duck": {
       "s": 0.9017,
@@ -475,7 +595,19 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.4946,
       "dx": 0,
-      "dy": 0.0532
+      "dy": 0.0532,
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "towerArbiter": {
@@ -492,7 +624,19 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.77,
       "dx": 0.115,
-      "dy": -0.005
+      "dy": -0.005,
+      "ft": [
+        72,
+        60,
+        90,
+        132,
+        90,
+        60,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "octobaby": {
@@ -504,7 +648,19 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.23,
       "dx": 0,
-      "dy": 0
+      "dy": 0,
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "forgewight": {
@@ -523,7 +679,19 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.3152,
       "dx": 0,
-      "dy": 0
+      "dy": 0,
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "zodiac_capricorn": {
@@ -541,27 +709,77 @@ window.LX_ANIM_CALIB = {
       "s": 1,
       "dx": 0,
       "dy": 0.0682
+    },
+    "attack": {
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "gravitos3laser": {
     "attack": {
       "s": 1.002,
       "dx": 0.125,
-      "dy": 0.026
+      "dy": 0.026,
+      "ft": [
+        72,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "gravitos3punch": {
     "attack": {
       "s": 1.059,
       "dx": 0,
-      "dy": 0.0294
+      "dy": 0.0294,
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "gravitos3soul": {
     "attack": {
       "s": 1.12,
       "dx": 0,
-      "dy": 0.0294
+      "dy": 0.0294,
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "legosaurusdash": {
@@ -586,63 +804,171 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.035
+      "dy": 0.035,
+      "ft": [
+        72,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "gravitos2punch": {
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.035
+      "dy": 0.035,
+      "ft": [
+        72,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "gravitos2soul": {
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.035
+      "dy": 0.035,
+      "ft": [
+        72,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "towerSovereignswing": {
     "attack": {
       "s": 1,
       "dx": -0.0469,
-      "dy": 0.02
+      "dy": 0.02,
+      "ft": [
+        72,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "towerSovereigncolumn": {
     "attack": {
       "s": 1,
       "dx": -0.0427,
-      "dy": 0.015
+      "dy": 0.015,
+      "ft": [
+        72,
+        90,
+        132,
+        90,
+        60,
+        60,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "towerSovereigncollapse": {
     "attack": {
       "s": 1,
       "dx": -0.0396,
-      "dy": 0
+      "dy": 0,
+      "ft": [
+        72,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "towerSovereignvolley": {
     "attack": {
       "s": 1,
       "dx": -0.0552,
-      "dy": 0.015
+      "dy": 0.015,
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "towerSovereigndrain": {
     "attack": {
       "s": 1.0109,
       "dx": -0.0458,
-      "dy": 0.06
+      "dy": 0.06,
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "kingKrookstomp": {
     "attack": {
       "s": 2.4,
       "dx": 0,
-      "dy": 0.28
+      "dy": 0.28,
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "zodiac_virgo": {
@@ -665,6 +991,20 @@ window.LX_ANIM_CALIB = {
       "s": 1.14,
       "dx": 0,
       "dy": -0.035
+    },
+    "attack": {
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "zodiac_taurus": {
@@ -672,6 +1012,20 @@ window.LX_ANIM_CALIB = {
       "s": 1.13,
       "dx": 0,
       "dy": 0.035
+    },
+    "attack": {
+      "ft": [
+        72,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "aetherionastral": {
@@ -697,6 +1051,20 @@ window.LX_ANIM_CALIB = {
       "s": 1.45,
       "dx": 0.06,
       "dy": 0.325
+    },
+    "attack": {
+      "ft": [
+        72,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
     }
   },
   "gravitossoul": {
@@ -733,6 +1101,134 @@ window.LX_ANIM_CALIB = {
         120,
         110
       ]
+    }
+  },
+  "zodiac_aquarius": {
+    "attack": {
+      "ft": [
+        72,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
+    }
+  },
+  "zodiac_aries": {
+    "attack": {
+      "ft": [
+        72,
+        90,
+        132,
+        90,
+        60,
+        60,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
+    }
+  },
+  "zodiac_cancer": {
+    "attack": {
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        96
+      ],
+      "ftAuto": true
+    }
+  },
+  "zodiac_gemini": {
+    "attack": {
+      "ft": [
+        72,
+        60,
+        60,
+        90,
+        132,
+        90,
+        60,
+        60,
+        96
+      ],
+      "ftAuto": true
+    }
+  },
+  "zodiac_libra": {
+    "attack": {
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        96
+      ],
+      "ftAuto": true
+    }
+  },
+  "zodiac_pisces": {
+    "attack": {
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        96
+      ],
+      "ftAuto": true
+    }
+  },
+  "zodiac_sagittarius": {
+    "attack": {
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        96
+      ],
+      "ftAuto": true
+    }
+  },
+  "zodiac_scorpio": {
+    "attack": {
+      "ft": [
+        72,
+        60,
+        60,
+        60,
+        60,
+        90,
+        132,
+        90,
+        96
+      ],
+      "ftAuto": true
     }
   }
 };
