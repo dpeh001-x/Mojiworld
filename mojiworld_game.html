@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.351';
+const GAME_VERSION = 'v0.30.352';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -20487,7 +20487,7 @@ function itemScore(it) {
 // Pretty labels for gear-change toast
 const STAT_LABEL = {
   atk:'ATK', def:'DEF', hp:'HP', mp:'MP', crit:'Crit', critDmg:'Crit DMG',
-  atkPct:'ATK%', speed:'Speed', jump:'Jump', lifesteal:'Lifesteal',
+  atkPct:'ATK%', speed:'Speed', jump:'Jump', lifesteal:'Lifesteal', accuracy:'Accuracy',
   burn:'Burn', multishot:'Multishot', thorns:'Thorns', greed:'Mojicoin+',
   xpBoost:'XP+', mpRegen:'MP Regen', hpRegen:'HP Regen',
   dodgeChance:'Dodge%', freezeChance:'Freeze%', chainChance:'Chain%',
@@ -22327,7 +22327,7 @@ const monsterTypes = {
   // note under maxHp in spawnMonster). Measured — setting hp here to 100,000 or to
   // 100,000,000 spawns the same boss. Tune the FIGHT there, not here.
   // evasion is not in that table, so it is still authored here: 243 -> 300.
-  aetherion:{ name:'Aetherion, the Shardfather', w:160, h:160, color:'#7a5aee', shell:'#c8a8ff', hp:3600000, atk:576, def:72, evasion:300, exp:3400000, mojicoins:75000, speed:0.8, jump:0, boss:true, superBoss:true, level:65 },
+  aetherion:{ name:'Aetherion, the Shardfather', w:160, h:160, color:'#7a5aee', shell:'#c8a8ff', hp:3600000, atk:662, def:165, evasion:300, exp:3400000, mojicoins:75000, speed:0.8, jump:0, boss:true, superBoss:true, level:65 },
   // v0.25.528 — Gravitos rebuilt as a Lv 100 ultra-hard endgame boss.
   // Stats roughly 5–6× the v0.25.527 numbers to match the new minimum
   // entry level. The fight gains two ultimates on top of the existing
@@ -89413,6 +89413,58 @@ function _bossLootTierCap(m) {
   if (lv <= LX_BOSS_MID_MAX) return 6;
   return 7;                                               // Aetherion (65), Legosaurus (69)
 }
+// v0.30.352 — AETHERION'S SHARDSIGHT (per user: "let aetherion drop relatively
+// stronger equipment that would be good against the zodiac bosses").
+//
+// "Good against the zodiac" is a specific, mechanical claim here, not a
+// bigger-numbers one. Zodiac evasion runs 216-807 (378 + o*20, times an eva
+// profile up to 1.55) against a player accuracy that starts at 90-130 and has
+// almost nowhere to grow: _rollAccuracyHit sheds hit chance linearly over a
+// 150-point gap, so an unlucky matchup spends the fight at the floor. The
+// counter-stat is ACCURACY — and getEquipBonus('accuracy') has been wired into
+// getAccuracy the whole time with NOT ONE item in the pool carrying it
+// (verified across all three catalogues: zero). Aetherion, who sits at Lv 65
+// immediately below the Lv 68-92 zodiac ladder, becomes the game's only source
+// of it. That makes his loot a key to the next tier rather than a bigger
+// version of the last one.
+//
+// Built on the same shape as _rollGravitosHighTierItem below: draw from the
+// existing T7-8 legendary pool (8 per slot, all four classes — it cannot come
+// back empty), roll it through the normal affix path at his own level, then
+// stamp the accuracy and mark the name. Nothing new enters ITEM_POOL, and
+// accuracy stays off the global affix table so this remains his alone.
+// Roll band is the PRINTED number; accuracy is in _TIER_FLAT_STATS, so a T8
+// drop multiplies it x3.5 before it reaches getAccuracy. Measured on the first
+// build of this: a 111 roll became +389 accuracy from ONE piece, and a
+// three-piece set would have put a player past even Sagitta's 807 evasion —
+// deleting the tier's defining mechanic rather than answering it. At 40-70 a
+// T8 piece is worth ~140-245, so a full set closes most of the gap on a lucky
+// roll and falls short on an unlucky one. That gradient IS the reward.
+const LX_SHARDSIGHT_ACC = [40, 70];   // PRINTED band; x3.0-3.5 after the tier curve
+function _rollAetherionShardgear() {
+  if (typeof ITEM_POOL === 'undefined' || typeof rollAffixedItem !== 'function') return null;
+  const cats = ['weapons', 'armors', 'accessories'];
+  const cat = cats[Math.floor(Math.random() * cats.length)];
+  const pool = (ITEM_POOL[cat] || []).filter((it) => (it.tier | 0) >= 7 && (it.tier | 0) <= 8 && it.rarity === 'legendary');
+  if (!pool.length) return null;
+  const playerCls = (player && player.cls) || 'any';
+  const weighted = [];
+  for (const it of pool) {
+    let w = 1;
+    if (it.cls && it.cls !== 'any') w = (it.cls === playerCls) ? 3 : 1;
+    for (let j = 0; j < w; j++) weighted.push(it);
+  }
+  const chosen = weighted[Math.floor(Math.random() * weighted.length)];
+  const item = rollAffixedItem({ ...chosen, slot: _catToSlot(cat) }, 'legendary', 65);
+  if (!item) return null;
+  const _lo = LX_SHARDSIGHT_ACC[0], _hi = LX_SHARDSIGHT_ACC[1];
+  item.accuracy = (item.accuracy || 0) + Math.floor(_lo + Math.random() * (_hi - _lo));
+  // Prefix rather than suffix: rollAffixedItem already spends the suffix slot,
+  // and the name has to say where this came from at a glance in a six-item pile.
+  item.name = 'Shardsight ' + item.name;
+  item._shardsight = true;
+  return item;
+}
 function _rollGravitosHighTierItem() {
   if (typeof ITEM_POOL === 'undefined' || typeof rollAffixedItem !== 'function') return null;
   const cats = ['weapons', 'armors', 'accessories'];
@@ -89444,6 +89496,10 @@ function triggerSuperBossDeath(m) {
   // super-bosses (Aetherion) keep the existing rollItemDrop path
   // which still grades by mob level but doesn't tier-floor.
   const _isGravitosKill = m && m.type === 'gravitos';
+  // v0.30.352 — Aetherion no longer falls through to the generic roll: his pile is
+  // Shardsight gear, the only accuracy in the game. See the note on
+  // _rollAetherionShardgear above.
+  const _isAetherionKill = m && (m.type === 'aetherion' || m.type === 'aetherion2');
 
   // Massive particle burst (prismatic shards)
   const palette = ['#ffffff','#c8a8ff','#ff88dd','#8ad8ff','#ffd766','#b090ff'];
@@ -89470,7 +89526,9 @@ function triggerSuperBossDeath(m) {
   // Legendary loot pile — 4 guaranteed legendaries + 2 high tier
   for (let i = 0; i < 4; i++) {
     // v0.26.327 — Gravitos kill rolls from the T8+ pool exclusively.
-    const leg = _isGravitosKill ? _rollGravitosHighTierItem() : rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m));
+    const leg = _isGravitosKill ? _rollGravitosHighTierItem()
+      : _isAetherionKill ? _rollAetherionShardgear()
+      : rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m));
     if (leg) {
       leg.rarity = 'legendary';
       game.drops.push({
@@ -89485,7 +89543,9 @@ function triggerSuperBossDeath(m) {
   }
   for (let i = 0; i < 2; i++) {
     // v0.26.327 — Gravitos T8+ pool override (same pattern as legendary loop above).
-    const extra = _isGravitosKill ? _rollGravitosHighTierItem() : rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m));
+    const extra = _isGravitosKill ? _rollGravitosHighTierItem()
+      : _isAetherionKill ? _rollAetherionShardgear()
+      : rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m));
     if (extra) {
       game.drops.push({
         x: m.x + m.w/2 + (Math.random()-0.5)*160,
@@ -95823,6 +95883,11 @@ function itemStatString(it, multiline) {
   if (it.hpPct)        parts.push(`+${Math.round(it.hpPct*_tPctMul*100)}% HP`);   // v0.26.398 — was live (getMaxHp) but never shown
   if (it.mp)           parts.push(`+${_fmt(it.mp * _tMul)} MP`);
   if (it.crit)         parts.push(`+${_fmt(it.crit * _tMul)}% Crit`);
+  // v0.30.352 — accuracy was a SILENT stat: _TIER_FLAT_STATS scales it and
+  // getAccuracy consumes it, but nothing ever printed it, because until now no
+  // item carried any. Shipping Shardsight without this line would have put the
+  // one stat that beats the zodiac on an item that never mentions it.
+  if (it.accuracy)     parts.push(`\u{1F3AF} +${_fmt(it.accuracy * _tMul)} Accuracy`);
   if (it.critDmg)      parts.push(`+${Math.round(it.critDmg*_tPctMul*100)}% Crit DMG`);
   if (it.speed)        parts.push(`+${(it.speed*_tPctMul).toFixed ? (it.speed*_tPctMul).toFixed(1) : it.speed} Spd`);
   if (it.jump)         parts.push(`+${it.jump.toFixed ? it.jump.toFixed(1) : it.jump} Jump`);
@@ -96451,7 +96516,7 @@ function renderEnhancementModal(selectedItem) {
       const STATS_PCT = new Set(['atkPct','critDmg','lifesteal','thorns','greed','xpBoost','chainChance','voidChance','dodgeChance','freezeChance','burnResist','poisonResist','electricResist','freezeResist','slowResist']);
       const STAT_LABEL = {
         atk:'ATK', def:'DEF', hp:'HP', mp:'MP', crit:'Crit', atkPct:'ATK %',
-        critDmg:'Crit DMG', speed:'Spd', jump:'Jump', lifesteal:'Lifesteal',
+        critDmg:'Crit DMG', speed:'Spd', jump:'Jump', lifesteal:'Lifesteal', accuracy:'Accuracy',
         thorns:'Thorns', greed:'Greed', xpBoost:'EXP', chainChance:'Chain',
         voidChance:'Void', dodgeChance:'Dodge', freezeChance:'Freeze',
         hpRegen:'HP Regen', multishot:'Multishot', burn:'Burn',
