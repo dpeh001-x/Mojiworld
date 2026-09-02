@@ -10016,7 +10016,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.356';
+const GAME_VERSION = 'v0.30.357';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -10840,16 +10840,26 @@ function _detectSpriteBboxTop(img) {
     if (_t) { img._lxBboxTop = _t.top; return _t.top; }
   }
   // v0.30.261 perf — a derived canvas (tint bake, and any future same-size
-  // copy) answers from its SOURCE instead of scanning its own pixels. Guarded
-  // on identical dimensions: a copy that changed size would need scaling, and
-  // none of the same-size copies ever change the alpha this scan measures.
+  // copy) answers from its SOURCE instead of scanning its own pixels.
+  // v0.30.357 perf — and a uniformly RESCALED copy (the shrink bake) answers
+  // through the source too, scaled by the ratio — see the identical note in
+  // _detectSpriteBboxBottom, where the mid-fight cost of refusing was measured.
   {
-    const _src = img._lxBboxSrc || img._lxEdgeSrc;
-    if (_src && _src !== img
-        && (_src.naturalWidth || _src.width) === (img.naturalWidth || img.width)
-        && (_src.naturalHeight || _src.height) === (img.naturalHeight || img.height)) {
-      const _v = _detectSpriteBboxTop(_src);
-      if (_v !== null && _v !== undefined) { img._lxBboxTop = _v; return _v; }
+    const _src = img._lxBboxSrc || img._lxEdgeSrc || img._lxSrc;
+    if (_src && _src !== img) {
+      const _sw = _src.naturalWidth || _src.width, _sh = _src.naturalHeight || _src.height;
+      const _iw = img.naturalWidth || img.width, _ih = img.naturalHeight || img.height;
+      if (_sw === _iw && _sh === _ih) {
+        const _v = _detectSpriteBboxTop(_src);
+        if (_v !== null && _v !== undefined) { img._lxBboxTop = _v; return _v; }
+      } else if (_sw > 0 && _sh > 0 && _iw > 0 && _ih > 0 &&
+                 Math.abs(_sw / _sh - _iw / _ih) < 0.02) {
+        const _v = _detectSpriteBboxTop(_src);
+        if (_v !== null && _v !== undefined) {
+          const _sc = Math.max(0, Math.floor(_v * _ih / _sh));
+          img._lxBboxTop = _sc; return _sc;
+        }
+      }
     }
   }
   const _r = _detectSpriteBboxTopRaw(img);
@@ -13612,6 +13622,17 @@ function _lxBitmapToCanvas(bmp, src) {
   if (src._lxEdges !== undefined) cv._lxEdges = src._lxEdges;
   else cv._lxEdgeSrc = src;   // v0.30.x perf — carry the PROMISE of a memo
   if (src._lxFeatherC) cv._lxFeatherC = src._lxFeatherC;
+  // v0.30.357 perf — CARRY THE ROAD BACK TO THE FOOT-ANCHOR. The shrink bake
+  // carried edges and feather but not the bbox, and it CHANGES DIMENSIONS, so
+  // the same-size resolver in _detectSpriteBboxTop/Bottom refused to answer
+  // through the source and the raw getImageData scan ran on the baked canvas
+  // itself — where no table row can ever match (a canvas has no src) and no
+  // cache survives a rebake. Measured mid-Krook-fight: 16 scans at 200-860ms
+  // EACH, one per attack/stomp frame at its first draw, 4.4 seconds of sync
+  // GPU->CPU stalls landing exactly while the player is trading hits. With
+  // this pointer the (now scale-aware) resolver answers from the source's
+  // table row instead, and the scan cannot fire.
+  cv._lxBboxSrc = src;
   return cv;
 }
 // v0.29.749 — OFF-THREAD FOR REAL. createImageBitmap(<img>) re-decodes the
@@ -120361,13 +120382,27 @@ function _detectSpriteBboxBottom(img) {
   }
   // v0.30.261 perf — resolve through the source for same-size derived
   // canvases; see the identical block in _detectSpriteBboxTop.
+  // v0.30.357 perf — and through UNIFORMLY RESCALED ones (the shrink bake), which
+  // the same-size guard used to refuse: a pure rescale scales every alpha
+  // feature by the same ratio, so the source's row maps exactly — this is
+  // arithmetic, not approximation. The aspect check is what proves it was a
+  // uniform rescale and not a crop or a re-layout.
   {
-    const _src = img && (img._lxBboxSrc || img._lxEdgeSrc);
-    if (_src && _src !== img
-        && (_src.naturalWidth || _src.width) === (img.naturalWidth || img.width)
-        && (_src.naturalHeight || _src.height) === (img.naturalHeight || img.height)) {
-      const _v = _detectSpriteBboxBottom(_src);
-      if (_v !== null && _v !== undefined) { img._lxBboxBot = _v; return _v; }
+    const _src = img && (img._lxBboxSrc || img._lxEdgeSrc || img._lxSrc);
+    if (_src && _src !== img) {
+      const _sw = _src.naturalWidth || _src.width, _sh = _src.naturalHeight || _src.height;
+      const _iw = img.naturalWidth || img.width, _ih = img.naturalHeight || img.height;
+      if (_sw === _iw && _sh === _ih) {
+        const _v = _detectSpriteBboxBottom(_src);
+        if (_v !== null && _v !== undefined) { img._lxBboxBot = _v; return _v; }
+      } else if (_sw > 0 && _sh > 0 && _iw > 0 && _ih > 0 &&
+                 Math.abs(_sw / _sh - _iw / _ih) < 0.02) {
+        const _v = _detectSpriteBboxBottom(_src);
+        if (_v !== null && _v !== undefined) {
+          const _sc = Math.min(_ih - 1, Math.round((_v + 1) * _ih / _sh) - 1);
+          img._lxBboxBot = _sc; return _sc;
+        }
+      }
     }
   }
   const _r = _detectSpriteBboxBottomRaw(img);
