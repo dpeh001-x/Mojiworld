@@ -7020,6 +7020,7 @@
     #reforge-rack { flex: 0 0 auto; }
     #reforge-stage { flex: 0 0 130px; }
   }
+  kbd.lx-pad-glyph { letter-spacing: 0; min-width: 1.6em; text-align: center; }   /* v0.30.1 — pad glyph keycaps */
   #enhance-topstrip {
     flex-shrink: 0; display: flex; align-items: center; justify-content: center;
     gap: 12px; flex-wrap: wrap; margin: 2px 0 8px; font-size: 11.5px; color: #aab2c0;
@@ -10127,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.375';
+const GAME_VERSION = 'v0.30.376';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -35627,6 +35628,7 @@ window.addEventListener('keydown', e => {
     if (!_plgOk.includes(e.key.toLowerCase())) { e.preventDefault(); return; }
   }
   const rawKey = e.key.toLowerCase();
+  if (e.isTrusted && typeof _lxNoteInput === 'function') _lxNoteInput('kb');   // v0.30.1 — a real key makes the keyboard the prompt device
   // v0.25.602 — Action-binding translation layer. If the player has
   // remapped (e.g. Jump from Space → R), translate the physical press
   // to its default canonical key (' ') BEFORE the existing handler
@@ -41980,24 +41982,135 @@ function _lxSteamPushStats() {
 // host's sim is the party's world) or during the prologue cinematic chain
 // (its handoffs run on their own timers).
 let _lxSteamOverlayPausedByUs = false;
-function _lxSteamOverlayPause(active) {
+// v0.30.1 — AUTO-PAUSE, made real and visible (Steam review cautions: "when
+// opening the Steam Overlay the game does not pause"; "when the controller is
+// unplugged during gameplay, the game does not automatically pause"). The
+// overlay path set game.paused with nothing on screen, so a reviewer watching
+// idle sprites saw a game that "continues"; the unplug path dispatched Escape,
+// which in this game only CLOSES modals and opens nothing. One shared pause
+// now: it freezes the sim, shows a PAUSED veil that names the reason, and is
+// left by Escape / Enter / Space / a click / the pad's A or Start. The overlay
+// and a lost window focus resume on their own when they end; an unplugged
+// controller waits for the player.
+let _lxAutoPauseReason = null;
+const _LX_AUTOPAUSE_TEXT = {
+  'steam-overlay': ['Steam overlay open', 'The game resumes when the overlay closes.'],
+  'focus':         ['Window lost focus', 'The game resumes when you come back.'],
+  'controller':    ['Controller disconnected', 'Reconnect it, then press Ⓐ / Start — or Esc, Enter or click — to resume.'],
+};
+function _lxAutoPauseVeil() {
+  let v = document.getElementById('lx-autopause');
+  if (v) return v;
+  v = document.createElement('div');
+  v.id = 'lx-autopause';
+  v.style.cssText = 'position:fixed; inset:0; z-index:99990; display:none; align-items:center; justify-content:center; background:rgba(4,6,12,0.66); backdrop-filter:blur(2px); font-family:system-ui,sans-serif; color:#eef1f7; cursor:pointer; text-align:center;';
+  v.innerHTML = '<div style="padding:22px 34px; border:1px solid rgba(255,255,255,0.18); border-radius:14px; background:rgba(16,18,28,0.92); box-shadow:0 12px 40px rgba(0,0,0,0.6);">'
+    + '<div style="font-size:34px; letter-spacing:6px; font-weight:800;">⏸ PAUSED</div>'
+    + '<div id="lx-autopause-why" style="margin-top:8px; font-size:15px; color:#ffd166;"></div>'
+    + '<div id="lx-autopause-how" style="margin-top:6px; font-size:12.5px; color:#aab2c0;"></div></div>';
+  v.addEventListener('click', () => { try { _lxAutoResume(true); } catch (e) {} });
+  document.body.appendChild(v);
+  return v;
+}
+function _lxAutoPause(reason) {
   try {
-    if (typeof game === 'undefined' || !game) return;
-    if (net && net.connected) return;
-    if (window._prologueActive || window._prologuePending) return;
-    if (active) {
-      if (!game.paused) { game.paused = true; _lxSteamOverlayPausedByUs = true; }
-    } else if (_lxSteamOverlayPausedByUs) {
-      _lxSteamOverlayPausedByUs = false;
-      if (!(typeof _lxPadModalRoot === 'function' && _lxPadModalRoot())) game.paused = false;
-    }
-  } catch (e) {}
+    if (typeof game === 'undefined' || !game) return false;
+    if (typeof net !== 'undefined' && net && net.connected) return false;               // never freeze a shared session
+    // NOT gated on _prologuePending: the old overlay hook was, and a fresh hero carries
+    // that flag until the prologue plays — which is exactly the account a reviewer uses.
+    if (window._prologueActive) return false;
+    if (typeof player === 'undefined' || !player || !(player.hp > 0) || !game.mapData) return false;   // title / boot / dead: nothing to pause
+    if (game.paused && !_lxAutoPauseReason) return false;                                  // a modal already owns the pause
+    if (!game.paused) game.paused = true;
+    _lxAutoPauseReason = reason || 'focus';
+    if (typeof _lxSteamOverlayPausedByUs !== 'undefined') _lxSteamOverlayPausedByUs = (_lxAutoPauseReason === 'steam-overlay');
+    const v = _lxAutoPauseVeil(); const t = _LX_AUTOPAUSE_TEXT[_lxAutoPauseReason] || ['Paused', ''];
+    document.getElementById('lx-autopause-why').textContent = t[0];
+    document.getElementById('lx-autopause-how').textContent = t[1];
+    v.style.display = 'flex';
+    return true;
+  } catch (e) { return false; }
+}
+function _lxAutoResume(manual) {
+  try {
+    if (!_lxAutoPauseReason) return false;
+    _lxAutoPauseReason = null;
+    if (typeof _lxSteamOverlayPausedByUs !== 'undefined') _lxSteamOverlayPausedByUs = false;
+    const v = document.getElementById('lx-autopause'); if (v) v.style.display = 'none';
+    game.paused = false;   // we only ever auto-pause from an unpaused game, so the resume is unconditional
+    return true;
+  } catch (e) { return false; }
+}
+function _lxAutoPaused() { return !!_lxAutoPauseReason; }
+// Escape / Enter / Space leave the veil (capture phase, ahead of the game's own Escape = closeAllModals)
+window.addEventListener('keydown', (e) => {
+  if (!_lxAutoPauseReason) return;
+  const k = String(e.key || '').toLowerCase();
+  if (k === 'escape' || k === 'enter' || k === ' ') { e.preventDefault(); e.stopPropagation(); _lxAutoResume(true); }
+}, true);
+// losing the window pauses (the v0.29.668 blur listener routes here); getting it back resumes, only if we paused for that
+window.addEventListener('focus', () => { try { if (_lxAutoPauseReason === 'focus') _lxAutoResume(false); } catch (e) {} });
+function _lxSteamOverlayPause(active) {
+  // v0.30.1 — routes through the shared auto-pause: visible veil, same guards
+  try { if (active) _lxAutoPause('steam-overlay'); else if (_lxAutoPauseReason === 'steam-overlay') _lxAutoResume(false); } catch (e) {}
 }
 try { window._lxSteamPresence = _lxSteamPresence; window._lxSteamTryAutoJoin = _lxSteamTryAutoJoin; window._lxSteamInviteFriends = _lxSteamInviteFriends; window._lxSteamPushStats = _lxSteamPushStats; window._lxSteamLobbySync = _lxSteamLobbySync; window._lxSteamOverlayPause = _lxSteamOverlayPause; } catch (e) {}
 // --- Controller (Gamepad API + optional native Steam Input) ------------------
 // Xbox/standard button index -> game input. {a:'action'} resolves through the
 // player's live rebinds; {k:'key'} is a literal physical key (skill slots /
 // attack / pause aren't in actionBinds). Left stick + D-pad both drive arrows.
+// v0.30.1 — PROMPTS FOLLOW THE DEVICE (Steam review caution: "the in-game
+// prompt displays keyboard prompts when a controller is used to play"). The
+// last device that produced input is tracked (pad button in the poll, key or
+// mouse otherwise); while it is the pad, every prompt that names a key names
+// the pad button bound to it instead, inverted live from _LX_PAD_MAP and the
+// Back-combos, so a remap in Hotkeys carries the glyph with it.
+let _lxInputDevice = 'kb';
+const _LX_PAD_GLYPH = { 0: 'Ⓐ', 1: 'Ⓑ', 2: 'Ⓧ', 3: 'Ⓨ', 4: 'LB', 5: 'RB', 6: 'LT', 7: 'RT', 8: 'Back', 9: 'Start', 10: 'L3', 11: 'R3', 12: '✚▲', 13: '✚▼', 14: '✚◀', 15: '✚▶' };
+const _LX_KEY_LABEL = { ' ': 'Space', 'space': 'Space', 'escape': 'Esc', 'enter': 'Enter', 'shift': 'Shift', 'arrowup': '↑', 'arrowdown': '↓', 'arrowleft': '←', 'arrowright': '→', 'pageup': 'PgUp', 'pagedown': 'PgDn' };
+function _lxNoteInput(dev) {
+  if (dev !== 'pad' && dev !== 'kb') return;
+  if (_lxInputDevice === dev) return;
+  _lxInputDevice = dev;
+  try { _lxRefreshPrompts(); } catch (e) {}
+}
+// the pad button (as a glyph) bound to a keyboard key, or null
+function _lxPadGlyphForKey(key) {
+  const k = String(key || '').toLowerCase(); if (!k) return null;
+  const keyOf = (spec) => { try { return spec && typeof _lxPadResolveKey === 'function' ? String(_lxPadResolveKey(spec) || '').toLowerCase() : (spec && spec.k) || ''; } catch (e) { return (spec && spec.k) || ''; } };
+  if (typeof _LX_PAD_MAP === 'object') for (const idx in _LX_PAD_MAP) {
+    const spec = (typeof _lxPadMapEff === 'function') ? (_lxPadMapEff(Number(idx)) || _LX_PAD_MAP[idx]) : _LX_PAD_MAP[idx];
+    if (keyOf(spec) === k) return _LX_PAD_GLYPH[idx] || null;
+  }
+  if (typeof _LX_PAD_MOD_MAP === 'object') for (const idx in _LX_PAD_MOD_MAP) {
+    if (keyOf(_LX_PAD_MOD_MAP[idx]) === k) return 'Back+' + (_LX_PAD_GLYPH[idx] || '?');
+  }
+  return null;
+}
+function _promptKey(key) {
+  const k = String(key || '').toLowerCase();
+  if (_lxInputDevice === 'pad') { const g = _lxPadGlyphForKey(k); if (g) return g; }
+  return _LX_KEY_LABEL[k] || (k.length === 1 ? k.toUpperCase() : k.charAt(0).toUpperCase() + k.slice(1));
+}
+// rewrite every <kbd>LABEL</kbd> in a snippet for the current device
+function _lxKbdHtml(html) {
+  if (_lxInputDevice !== 'pad') return html;
+  return String(html).replace(/<kbd>([^<]{1,12})<\/kbd>/g, (m, lab) => {
+    const l = lab.trim(); const key = ({ 'Space': ' ', 'Esc': 'escape', 'Enter': 'enter', '↑': 'arrowup', '↓': 'arrowdown', '←': 'arrowleft', '→': 'arrowright', 'PgUp': 'pageup', 'PgDn': 'pagedown', 'Shift': 'shift' })[l] || l.toLowerCase();
+    const g = _lxPadGlyphForKey(key);
+    return g ? '<kbd class="lx-pad-glyph">' + g + '</kbd>' : m;
+  });
+}
+// the HUD strip and the hotkey hint keep their keyboard markup and re-render from it
+function _lxRefreshPrompts() {
+  for (const id of ['controls', 'hotkey-hint']) {
+    const el = document.getElementById(id); if (!el) continue;
+    if (!el.dataset.kbHtml) el.dataset.kbHtml = el.innerHTML;
+    el.innerHTML = _lxKbdHtml(el.dataset.kbHtml);
+  }
+  try { if (typeof _renderQuestTracker === 'function') _renderQuestTracker(); } catch (e) {}
+}
+window.addEventListener('mousedown', () => _lxNoteInput('kb'), true);
 const _LX_PAD_MAP = {
   // v0.29.7xx — B is a SKILL, not a dash (per user: "pressing my controller B
   // key causes a pseudo-dash, remap it to the 1st skill key instead, then
@@ -42758,7 +42871,10 @@ let _lxPadReprobeAt = 0;   // v0.29.7xx — last slow presence reprobe (see the 
 let _lxPadBlurHeld = false;   // v0.29.261 — edge state for the text-field B/Start blur hatch
 let _lxPadVkHeld = false;     // v0.29.727 — edge state for the text-field Ⓐ→virtual-keyboard hatch
 try {
-  window.addEventListener('gamepadconnected', () => { _lxPadPresent = true; });
+  window.addEventListener('gamepadconnected', () => { _lxPadPresent = true;
+    // v0.30.1 — reconnected: keep the pause, tell the player it is safe to resume
+    try { if (typeof _lxAutoPauseReason !== 'undefined' && _lxAutoPauseReason === 'controller') { const h = document.getElementById('lx-autopause-how'); if (h) h.textContent = 'Controller reconnected — press Ⓐ / Start, Esc, Enter or click to resume.'; } } catch (e) {}
+  });
   // v0.29.7xx — TAB-SWITCH RECOVERY (per user: "when changing windows/tabs
   // sometimes the gamepad function doesnt work"). Chrome pauses gamepads for
   // a backgrounded page and usually re-announces on refocus — when that
@@ -42798,7 +42914,7 @@ window.addEventListener('gamepaddisconnected', (e) => {
   // v0.29.668 — auto-pause on unplug (Steam review best-practice): a dead
   // battery mid-fight should not cost the run. Escape both pauses and is
   // ignored on surfaces that are already paused-equivalent (title, modals).
-  try { if (typeof game !== 'undefined' && game && !game.paused && typeof player !== 'undefined' && player && player.hp > 0) _lxPadDispatch('escape', true); } catch (e) {}
+  try { if (typeof game !== 'undefined' && game && !game.paused && typeof player !== 'undefined' && player && player.hp > 0) _lxAutoPause('controller'); } catch (e) {}   // v0.30.1 — was _lxPadDispatch('escape'), which pauses nothing
     try { const ps = navigator.getGamepads ? navigator.getGamepads() : []; _lxPadPresent = Array.prototype.some.call(ps, (g) => g && g.connected); }
     catch (e) { _lxPadPresent = false; }
   });
@@ -42918,7 +43034,7 @@ try {
 //   forever); any real mouse movement brings it straight back.
 try {
   window.addEventListener('blur', () => {
-    try { if (typeof game !== 'undefined' && game && !game.paused && typeof player !== 'undefined' && player && player.hp > 0) _lxPadDispatch('escape', true); } catch (e) {}
+    try { if (typeof game !== 'undefined' && game && !game.paused && typeof player !== 'undefined' && player && player.hp > 0) _lxAutoPause('focus'); } catch (e) {}   // v0.30.1 — a real pause (was an Escape that closes modals)
   });
   const _padCursorCss = document.createElement('style');
   _padCursorCss.textContent = 'body.pad-cursor-hide, body.pad-cursor-hide * { cursor: none !important; }';
@@ -43142,7 +43258,7 @@ function _lxPadPoll() {
     _lxPadMode = 'game';
     // Build the pressed set (resolved physical key -> pressed).
     const pressed = {};
-    const mark = (spec, isDown) => { if (!spec || spec.none) return; const k = _lxPadResolveKey(spec); if (k && isDown) pressed[k] = true; };   // v0.29.670 — {none} = unbound
+    const mark = (spec, isDown) => { if (!spec || spec.none) return; const k = _lxPadResolveKey(spec); if (k && isDown) { pressed[k] = true; _lxNoteInput('pad'); } };   // v0.30.1 — a pad press makes the pad the prompt device   // v0.29.670 — {none} = unbound
     // v0.30.x — modifier layer state (see _LX_PAD_MOD).
     const _lxPadModDown = !!(pad && _lxPadBtn(pad, _LX_PAD_MOD));
     if (_lxPadModDown && !_lxPadModPrev) _lxPadModUsed = false;      // fresh hold
@@ -103762,7 +103878,7 @@ function _questKeyLabel() {
   try {
     const ab = (typeof player !== 'undefined' && player && player.actionBinds) || null;
     const k = (ab && ab.questJournal) || (typeof ACTION_KEY_DEFAULT === 'object' ? ACTION_KEY_DEFAULT.questJournal : 'q');
-    return String(k || 'q').toUpperCase();
+    return (typeof _promptKey === 'function') ? _promptKey(k || 'q') : String(k || 'q').toUpperCase();   // v0.30.1 — the pad's button while a pad is in use
   } catch (e) { return 'Q'; }
 }
 const TUTORIAL_STEPS = [
@@ -104335,7 +104451,7 @@ function _renderTutorialStep() {
         pill.classList.toggle('done', !!step._done);
         pill.innerHTML = '<span class="tt-box">' + (step._done ? '\u2705' : '\u25fb') + '</span>'
           + '<span class="tt-tag">' + (step._done ? 'DONE' : 'TRY IT') + '</span> '
-          + '<span class="tt-txt">' + _tutTouchify(step.tryIt) + '</span>';
+          + '<span class="tt-txt">' + _lxKbdHtml(_tutTouchify(step.tryIt)) + '</span>';
       } else {
         pill.style.display = 'none';
       }
