@@ -63,7 +63,11 @@ const r = await ev(async () => {
   // multipliers, and read every "loss" as an HP delta rather than the input.
   const spawnV = () => { game.monsters = []; game.hazards.length = 0; game.projectiles.length = 0;
     spawnMonster(player.x + 320, player.y, 'zodiac_virgo', true); const m = game.monsters[game.monsters.length - 1];
-    m._bossIntroDone = true; step(120); m.invulnerable = 0; m._stagger = 0; m._dirOpenT = 0; m._shroudUntil = 0; m.currentHp = m.maxHp; m._virgoTaken = 0; return m; };
+    m._bossIntroDone = true; step(120);
+    // she opens with a ritual inside two seconds of spawning — wait it out, or the
+    // fixture's first hit lands mid-ritual and (rightly) breaks it
+    for (let i = 0; i < 400 && (m._virgoChannel > 0 || m._virgoChanneling); i++) step(1);
+    m.invulnerable = 0; m._stagger = 0; m._dirOpenT = 0; m._shroudUntil = 0; m.currentHp = m.maxHp; m._virgoTaken = 0; m._virgoBroken = 0; return m; };
   const waitChannel = (m, max) => { for (let i = 0; i < max && !(m._virgoChannel > 0); i++) { m.patternTimer = 99999; step(1); } if (m._virgoChannel > 0) step(1); return m._virgoChannel > 0; };   // one more tick: the channel DR flag is raised on the tick AFTER the channel opens
   const BIG = (m) => Math.floor(m.maxHp * 0.12);                          // lands as roughly 2% after the formula
   // she evades (eva 1.35) outside her ritual, so hit until one LANDS; returns the HP it took
@@ -96,17 +100,24 @@ const r = await ev(async () => {
   step(80);
   const healed3 = m2.currentHp - hpBefore3;
   window.showToast = _st;
-  return { hitOk, maxHp: m1.maxHp, hp0, afterHit, taken, chunk, started1, healed, lastHeal, started2, hp2, brokeAt, brokenFlag, chan2, hp2broken, hp2after, shotsKept, brokeToast, banishToast, started3, takenBefore3, healed3, sign: m1.zodiacSign };
+  const defRow = (typeof LX_MONSTER_STATS === 'object' && LX_MONSTER_STATS.zodiac_virgo) ? LX_MONSTER_STATS.zodiac_virgo.def : null;
+  const defBump = (typeof _lxHiLvDefBump === 'function') ? _lxHiLvDefBump(80) : 1;
+  const jitter = (typeof LX_MONSTER_JITTER === 'number') ? LX_MONSTER_JITTER : 0;
+  return { hitOk, maxHp: m1.maxHp, hp0, afterHit, taken, chunk, started1, healed, lastHeal, started2, hp2, brokeAt, brokenFlag, chan2, hp2broken, hp2after, shotsKept, brokeToast, banishToast, started3, takenBefore3, healed3, sign: m1.zodiacSign, defRow, defSpawn: m1.def, defBump, jitter };
 });
 ok('Virgo spawns and her ritual starts on the pattern clock', !r.err && r.sign === 'virgo' && r.started1 && r.started2, r.err || JSON.stringify({ sign: r.sign, s1: r.started1, s2: r.started2 }));
 ok('damage through the hit path lands and is booked as "taken since her last ritual"', !r.err && r.hp0 - r.afterHit > 0 && r.taken > 0 && Math.abs(r.taken - (r.hp0 - r.afterHit)) <= 1, r.err || `taken ${r.taken} vs lost ${r.hp0 - r.afterHit}`);
-ok('a ritual left alone heals HALF of what she lost (2% lost -> 1% healed), not a flat 2.5%', !r.err && r.healed > 0 && Math.abs(r.healed - Math.floor((r.hp0 - r.afterHit) * 0.5)) <= 2 && r.healed < r.maxHp * 0.02,
-  r.err || `healed ${r.healed} of ${r.hp0 - r.afterHit} lost (max 2.5% = ${Math.floor(r.maxHp * 0.025)})`);
+// v0.30.369 — the heal is 30% of the loss, capped at 1.5% of max HP (was 50% / 2.5%).
+const HEAL_FRAC = 0.30, HEAL_CAP = 0.015;
+ok('a ritual left alone heals 30% of what she lost, not a flat share of max HP', !r.err && r.healed > 0 && Math.abs(r.healed - Math.floor((r.hp0 - r.afterHit) * HEAL_FRAC)) <= 2 && r.healed < r.maxHp * HEAL_CAP,
+  r.err || `healed ${r.healed} of ${r.hp0 - r.afterHit} lost (cap 1.5% = ${Math.floor(r.maxHp * HEAL_CAP)})`);
+ok('her DEF is halved: the stats row reads 720 (was 1441) and the spawned boss carries it', !r.err && r.defRow === 720 && r.defSpawn > 0 && Math.abs(r.defSpawn / r.defBump - 720) <= 720 * (r.jitter || 0) + 1,
+  r.err || `row ${r.defRow}; spawned ${r.defSpawn} (level bump ${r.defBump && r.defBump.toFixed(3)}, jitter ${r.jitter})`);
 ok('so her HP visibly stays DOWN after the ritual (bar no longer pinned at 100%)', !r.err && r.afterHit + r.healed < r.hp0, r.err || `hp0 ${r.hp0} -> ${r.afterHit + r.healed}`);
 ok('three hits inside the 1.1s window BREAK the ritual', !r.err && r.brokeAt === 0 && !r.chan2 && r.brokenFlag >= 1, r.err || `channel ${r.brokeAt} channeling ${r.chan2} broken ${r.brokenFlag}`);
 ok('a broken ritual heals nothing and banishes nothing', !r.err && r.hp2after <= r.hp2broken && r.shotsKept && !r.banishToast, r.err || `hp at break ${r.hp2broken} -> after ${r.hp2after}; shots kept ${r.shotsKept}; banish ${r.banishToast}`);
 ok('she announces the break', !r.err && /BROKEN/.test(r.brokeToast || ''), r.err || String(r.brokeToast));
-ok('after a broken ritual she tries again, and the next uninterrupted one heals half of everything lost since', !r.err && r.started3 && r.takenBefore3 > 0 && Math.abs(r.healed3 - Math.min(Math.floor(r.maxHp * 0.025), Math.floor(r.takenBefore3 * 0.5))) <= 2,
+ok('after a broken ritual she tries again, and the next uninterrupted one heals 30% of everything lost since', !r.err && r.started3 && r.takenBefore3 > 0 && Math.abs(r.healed3 - Math.min(Math.floor(r.maxHp * HEAL_CAP), Math.floor(r.takenBefore3 * HEAL_FRAC))) <= 2,
   r.err || `retried ${r.started3}; lost since ${r.takenBefore3}; healed ${r.healed3}`);
 ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' · '));
 

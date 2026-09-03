@@ -179,7 +179,8 @@ window.LX_MONSTER_STATS = {
   zodiac_gemini:                  { lv: 74, hp: 8119500, atk: 15911, def: 1085, exp: 446573, coin: 138032 },   // v0.30.280 floors: hp was 2.78x band
   zodiac_cancer:                  { lv: 76, hp: 9907500, atk: 17375, def:1200, exp: 544913, coin: 168428 },   // v0.30.280 floors: hp 8.2x echoKnight 1,208,237
   zodiac_leo:                     { lv: 78, hp: 19392000, atk: 18974, def: 1441, exp: 1066560, coin: 329664 },   // v0.30.280 floors: hp 8.2x pathsBane 2,364,882 (was 2.40x), def 2.1x ossuaryTyrant
-  zodiac_virgo:                   { lv: 80, hp: 19392000, atk: 20720, def: 1441, exp: 1066560, coin: 329664 },   // v0.30.280 floors: hp was 1.84x band — the worst zodiac
+  // v0.30.369 — Virgo DEF 1441 -> 720 (-50%, per user), heal cut alongside (see _vHeal)
+  zodiac_virgo:                   { lv: 80, hp: 19392000, atk: 20720, def:  720, exp: 1066560, coin: 329664 },   // v0.30.280 floors: hp was 1.84x band — the worst zodiac
   zodiac_libra:                   { lv: 82, hp: 19392000, atk: 22627, def: 1441, exp: 1066560, coin: 329664 },   // v0.30.280 floors
   zodiac_scorpio:                 { lv: 84, hp: 19392000, atk: 24709, def: 1441, exp: 1066560, coin: 329664 },   // v0.30.280 floors
   zodiac_sagittarius:             { lv: 86, hp: 19392000, atk: 26983, def: 1441, exp: 1066560, coin: 329664 },   // v0.30.280 floors
