@@ -10127,7 +10127,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.370';
+const GAME_VERSION = 'v0.30.371';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -77532,7 +77532,7 @@ function updateMonsters(dt) {
         if (m.x + m.w < _bcx || m.x > _bcx + W || m.y + m.h < _bcy || m.y > _bcy + H) _bmOnScreen = false;
       }
       // PHASE 1 — start telegraph when cd is up + in range + on screen.
-      if (!m._bigMeleeFiring && m._bigMeleeCd <= 0 && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && _bmInRange && _bmOnScreen) {   // v0.29.263 — winded bosses can't start a heavy · v0.29.x — nor a retreating one
+      if (!m._bigMeleeFiring && m._bigMeleeCd <= 0 && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && !(m._zSpentMs > 0) && _bmInRange && _bmOnScreen) {   // v0.30.371 — not while spent   // v0.29.263 — winded bosses can't start a heavy · v0.29.x — nor a retreating one
         m._bigMeleeFiring = true;
         m._bigMeleeT = bm.telegraphMs;
         m.vx = 0;   // root during windup (stickMul bosses start creeping next tick)
@@ -128904,9 +128904,10 @@ function zodiacBossAI(m, dt, distToPlayer) {
   // deal minimal damage" — this layers a telegraphed, dodgeable, but very
   // punishing move on top of whatever the sign is already doing.
   _zodiacDesperationTick(m, dt, phase, z);
+  const _zSpent = _zodiacSpentTick(m, dt, z);   // v0.30.371 — 8s of no aggression after HEAVENSPLIT
   // Hover / drift behavior by default — specific signs override in their handler
   const fn = ZODIAC_AI[z.id] || _zodiacAiGeneric;
-  fn(m, dt, distToPlayer, phase, z);
+  if (!_zSpent) fn(m, dt, distToPlayer, phase, z);   // v0.30.371 — held while spent
   // v0.29.340 — SIGNATURE GAIT. Per user: each House should carry a unique
   // movement trait on top of its attacks ("Ariel weaving in and out fast
   // towards and away the player"). Attacks were already per-sign, but every
@@ -128920,9 +128921,9 @@ function zodiacBossAI(m, dt, distToPlayer) {
   // the burrow bug at the top of this function is a standing reminder that
   // stranding _noGravity is a near-softlock. Vertical moves here are ordinary
   // hops — gravity always brings them back down.
-  _zodiacGaitTick(m, dt, distToPlayer, phase, z);
+  if (!_zSpent) _zodiacGaitTick(m, dt, distToPlayer, phase, z);   // v0.30.371 — held while spent
   const _zGait = _ZODIAC_GAIT[z.id];
-  if (!(_zGait && _zGait.noLunge)) {
+  if (!(_zGait && _zGait.noLunge) && !_zSpent) {
   // v0.29.74 — SHARED REPOSITION LUNGE. All 12 signs drift at ~0.8 speed, so
   // fights read as a slow float-at-the-player. Every few seconds (tighter in
   // later phases), when the boss is between patterns and the player has range,
@@ -129284,6 +129285,32 @@ function _zodiacGaitTick(m, dt, distToPlayer, phase, z) {
 //
 // HP1 move: damages player to leave them at exactly 1 HP (cannot kill).
 // MP0 move: drains player MP to 0. Both respect block, iframes, godmode.
+// v0.30.371 — SPENT: for this long after HEAVENSPLIT lands, the boss starts no
+// attack, walks away from the player and says so; the pattern clock restarts
+// from zero when it ends, so aggression rebuilds from the normal idle gap.
+// (Per user, on Regulus: the 1-HP strike was followed straight away by the
+// big AoE, with no space to recover. The move is shared by every zodiac boss,
+// so the window is too.)
+const ZODIAC_SPENT_MS = 8000;
+function _zodiacSpentTick(m, dt, z) {
+  if (!(m._zSpentMs > 0)) return false;
+  m._zSpentMs -= dt;
+  if (m.patternState && m.patternState !== 'idle') { m.patternState = 'idle'; m.patternTimer = 0; }
+  m.patternTimer = 0;
+  if (player && player.hp > 0) {
+    const _sdir = Math.sign((player.x + player.w / 2) - (m.x + m.w / 2)) || 1;
+    if (m.onGround) m.vx = -_sdir * 1.4;      // backs off
+    m.facing = _sdir;
+  }
+  if (((game.time | 0) % 36) === 0 && game.damageNumbers) {
+    game.damageNumbers.push({ x: m.x + m.w / 2 - 22, y: m.y - 16, vy: -0.5, text: 'SPENT ' + Math.ceil(m._zSpentMs / 1000) + 's', life: 30, color: '#ffd166', size: 12 });
+  }
+  if (m._zSpentMs <= 0) {
+    m._zSpentMs = 0; m.patternTimer = 0;
+    if (typeof showToast === 'function') showToast(z.glyph + ' ' + z.name.split(' ')[0] + ' gathers its pride again!', 'rare');
+  }
+  return true;
+}
 function _zodiacDesperationTick(m, dt, phase, z) {
   if (!player || player.hp <= 0) return;
   // Phase 1 is "warmup" — no desperation. Reset timers when entering p2/p3.
@@ -129390,6 +129417,11 @@ function _zodiacDesperationFire(m, z) {
   if (move === 'hp1') {
     // HP1 — drop player HP to 1 (cannot kill). Block reduces to 50% loss.
     let beforeHp = player.hp;
+    // v0.30.371 — the boss is SPENT: 8s of no aggression so the player can recover
+    m._zSpentMs = ZODIAC_SPENT_MS; m.patternState = 'idle'; m.patternTimer = 0; m._zLungeMs = 0;
+    if (m._bigMeleeFiring) { m._bigMeleeFiring = false; m._bigMeleeT = 0; }   // a smash already winding up is dropped too
+    m._bigMeleeCd = Math.max(m._bigMeleeCd | 0, ZODIAC_SPENT_MS);
+    if (typeof showToast === 'function') showToast(z.glyph + ' ' + z.name.split(' ')[0] + ' is SPENT — ' + Math.round(ZODIAC_SPENT_MS / 1000) + 's to recover', 'epic');
     if (blocked) {
       // Lose 50% of current HP, floor at 1
       const lost = Math.max(1, Math.floor(player.hp * 0.5));
