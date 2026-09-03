@@ -10127,7 +10127,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.366';
+const GAME_VERSION = 'v0.30.367';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -63408,6 +63408,11 @@ function updatePlayer(dt) {
   }
   if (player._iceFloor && player._iceFloor > 0) player._iceFloor -= dt;
   if (player.frozenTimer && player.frozenTimer > 0) player.frozenTimer -= dt;
+  // v0.30.368 — stunTimer never counted down (a Krook stomp left it at 3000 for
+  // the rest of the map, silently blocking the stun gates). The QTE owns it while
+  // active (it writes remain each frame), so only tick it outside a QTE.
+  if ((player.stunTimer | 0) > 0 && !(typeof _QTE !== 'undefined' && _QTE && _QTE.active)) player.stunTimer -= dt;
+  if (typeof _playerControlWatch === 'function') _playerControlWatch();
   // v0.25.101 — Frostkin's freezeBeam movement-slow timer.
   if (player._slowTimer && player._slowTimer > 0) player._slowTimer -= dt;
   // v0.25.485 — Skill-lock timer (octopus boss "Skill Lock" leg).
@@ -63502,7 +63507,7 @@ function updatePlayer(dt) {
   // even though it correctly freezes mobs). Now it halts voluntary action like
   // hit-stun, honouring god-mode. Mage status-immunity / resists still cut the
   // apply chance + duration upstream.
-  if ((player.frozenTimer | 0) > 0 && !player._god) {
+  if (((player.frozenTimer | 0) > 0 || ((player.stunTimer | 0) > 0 && !(typeof _QTE !== 'undefined' && _QTE && _QTE.active))) && !player._god) {   // v0.30.368 — stun locks too
     player.state = 'idle';
     if (player.onGround) player.vx *= 0.8;
     _playerGravityStep();
@@ -117255,11 +117260,94 @@ function drawPlayer() {
 // nameplate. Each icon also pulses (alpha 0.6→1.0 over 800 ms) so the
 // row reads as "active timers" not just decoration. Cheap: bails early
 // if no statuses are active.
+// v0.30.368 — PLAYER CONTROL STATE, made visible (per user: "for bossing
+// especially cancer boss, give a visual indication when player is stunned to
+// ensure the player are aware about it"). One reader, _playerControlState(),
+// feeds three outputs: a banner above the player's head with the remaining
+// time (and, in a Bubble Prison, the strikes still needed), a screen-edge
+// vignette in the status colour, and a one-shot toast when the state begins.
+// Bastion's armed window rides the same banner, so a crusader always sees
+// that the release is still pending.
+function _playerControlState() {
+  if (!player || player.hp <= 0) return null;
+  const _qte = (typeof _QTE !== 'undefined' && _QTE && _QTE.active);
+  if ((player._cancerBubble | 0) > 0) {
+    const left = Math.max(0, 4 - (player._cancerBubbleHits | 0));
+    return { kind: 'bubble', hard: true, emoji: '🫧', label: 'BUBBLED', detail: 'strike ×' + left + ' to burst', tint: '#66ccff', remain: player._cancerBubble | 0, total: 1500 };
+  }
+  if ((player.frozenTimer | 0) > 0) return { kind: 'frozen', hard: true, emoji: '❄', label: 'FROZEN', tint: '#88ddff', remain: player.frozenTimer | 0, total: player._ctrlTotal_frozen || 1500 };
+  if ((player.stunTimer | 0) > 0 && !_qte) return { kind: 'stun', hard: true, emoji: '💫', label: 'STUNNED', tint: '#ffd166', remain: player.stunTimer | 0, total: player._ctrlTotal_stun || 3000 };
+  if ((player._heavyStunUntil | 0) > (game.time | 0) && (player.hitStun | 0) > 0) return { kind: 'stagger', hard: true, emoji: '💫', label: 'STAGGERED', tint: '#ffd166', remain: ((player._heavyStunUntil | 0) - (game.time | 0)) * 16.7, total: 1000 };
+  if ((player._skillLockTimer | 0) > 0) return { kind: 'silence', hard: true, emoji: '🔒', label: 'SILENCED', detail: 'no skills', tint: '#ff99cc', remain: player._skillLockTimer | 0, total: player._ctrlTotal_silence || 3500 };
+  if ((player._bastionArmedUntil | 0) > (game.time | 0)) return { kind: 'bastion', hard: false, emoji: '⚖', label: 'BASTION ARMED', detail: 'tap B to release', tint: '#ffe08a', remain: ((player._bastionArmedUntil | 0) - (game.time | 0)) * 16.7, total: 15000 };
+  return null;
+}
+// remember each status's opening length so the bar drains from full
+function _playerControlWatch() {
+  if (!player) return;
+  const c = _playerControlState();
+  const kind = c ? c.kind : null;
+  if (kind !== player._ctrlKind) {
+    if (c) {
+      if (c.kind === 'frozen') player._ctrlTotal_frozen = c.remain;
+      if (c.kind === 'stun') player._ctrlTotal_stun = c.remain;
+      if (c.kind === 'silence') player._ctrlTotal_silence = c.remain;
+      if (c.hard && typeof showToast === 'function') {
+        const secs = (c.remain / 1000).toFixed(1).replace(/\.0$/, '');
+        showToast(c.emoji + ' ' + c.label + (c.detail ? ' — ' + c.detail : ' — ' + secs + 's'), 'rare');
+      }
+    }
+    player._ctrlKind = kind;
+  }
+}
+function _drawPlayerControlBanner(sx, sy, c) {
+  if (!c) return;
+  const cx = sx + (player.w || 28) / 2;
+  const y = sy - 30;
+  const secs = (Math.max(0, c.remain) / 1000).toFixed(1);
+  const text = c.emoji + ' ' + c.label + (c.detail ? ' · ' + c.detail : '') + '  ' + secs + 's';
+  ctx.save();
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const w = Math.ceil(ctx.measureText(text).width) + 16, h = 18, r = 6;
+  const x0 = cx - w / 2;
+  const pulse = c.hard ? 0.85 + Math.sin(game.time * 0.35) * 0.15 : 0.9;
+  ctx.globalAlpha = pulse;
+  ctx.fillStyle = 'rgba(0,0,0,0.72)';
+  ctx.beginPath(); ctx.moveTo(x0 + r, y); ctx.arcTo(x0 + w, y, x0 + w, y + h, r); ctx.arcTo(x0 + w, y + h, x0, y + h, r); ctx.arcTo(x0, y + h, x0, y, r); ctx.arcTo(x0, y, x0 + w, y, r); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = c.tint; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = c.tint;
+  ctx.fillText(text, cx, y + h / 2 + 0.5);
+  // drain bar: what is left of the status
+  const frac = c.total > 0 ? Math.max(0, Math.min(1, c.remain / c.total)) : 0;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x0, y + h + 2, w, 3);
+  ctx.fillStyle = c.tint; ctx.fillRect(x0, y + h + 2, w * frac, 3);
+  ctx.restore();
+}
+function _drawControlVignette() {
+  const c = _playerControlState();
+  if (!c || !c.hard) return;
+  if (typeof W !== 'number' || typeof H !== 'number') return;
+  ctx.save();
+  ctx.globalAlpha = 0.22 + Math.sin(game.time * 0.3) * 0.08;
+  if (!window._lxCtrlVigGrad || window._lxCtrlVigGrad._tint !== c.tint || window._lxCtrlVigGrad._w !== W) {
+    const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.72);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, c.tint);
+    g._tint = c.tint; g._w = W;
+    window._lxCtrlVigGrad = g;
+  }
+  ctx.fillStyle = window._lxCtrlVigGrad;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+}
 function _drawPlayerStatusIcons(sx, sy) {
   if (!player || player.hp <= 0) return;
+  const _ctl = (typeof _playerControlState === 'function') ? _playerControlState() : null;   // v0.30.368
+  if (_ctl) _drawPlayerControlBanner(sx, sy, _ctl);
   // v0.29.486 (perf-pass) — flag pre-check before allocating (mirrors the
   // v0.26.244 monster-side fix): a healthy player paid an array per frame.
-  if (!((player.burnTimer | 0) > 0 || (player.frozenTimer | 0) > 0 || (player.freezeTimer | 0) > 0 ||
+  if (!_ctl && !((player.burnTimer | 0) > 0 || (player.frozenTimer | 0) > 0 || (player.freezeTimer | 0) > 0 ||
         (player._poisonTimer | 0) > 0 || (player._slowTimer | 0) > 0 || (player._iceFloor | 0) > 0 ||
         (player._electrocuteTimer | 0) > 0 || (player.invulnerable | 0) > 150 ||
         ((player.hitStun | 0) > 100 && player._lastDamageSource === 'a pothole') ||
@@ -117278,6 +117366,9 @@ function _drawPlayerStatusIcons(sx, sy) {
   // active (>150ms left, so the tail end doesn't flicker). Players previously
   // had ZERO cue for when they could safely tank a hit vs must dodge.
   if ((player.invulnerable | 0) > 150) icons.push({ emoji:'✨', tint:'#ffe9a0' });
+  if ((player.stunTimer | 0) > 0 && !(typeof _QTE !== 'undefined' && _QTE && _QTE.active)) icons.push({ emoji:'💫', tint:'#ffd166' });   // v0.30.368
+  if ((player._cancerBubble | 0) > 0) icons.push({ emoji:'🫧', tint:'#66ccff' });
+  if ((player._skillLockTimer | 0) > 0) icons.push({ emoji:'🔒', tint:'#ff99cc' });
   if ((player.hitStun      | 0) > 100 && player._lastDamageSource === 'a pothole') {
     icons.push({ emoji:'💫', tint:'#ffdd44' });
   }
@@ -137588,6 +137679,7 @@ function loop(time) {
   if (typeof _lxMobStrayCheck === 'function') _lxMobStrayCheck();   // v0.29.619 — BUG11 stray-mob report (self-throttled to 2s)   // v0.29.583 — quest compass (game.qnav)
   drawDamageNumbers();
   drawIceCheer();   // v0.25.458 — Icy Tower combo overlay
+  if (typeof _drawControlVignette === 'function') _drawControlVignette();   // v0.30.368 — stunned / frozen / bubbled edge pulse
   _drawDayNightTint();   // v0.29.415 — dawn/dusk/night grade: one rect, free by day
 
   ctx.restore();
