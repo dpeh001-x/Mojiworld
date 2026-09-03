@@ -55,7 +55,7 @@ const MOCK_CTRL_FNS = ['activateActionSet', 'isDigitalActionPressed', 'getAnalog
 }
 
 // ---- mock steamworks.js, using the real API surface ------------------------
-const calls = { activate: [], setLookup: [], analogLookup: [], digitalLookup: [] };
+const calls = { activate: [], setLookup: [], analogLookup: [], digitalLookup: [], inputInit: 0 };
 function makeController(pressed, vec) {
   return {
     activateActionSet(h) { calls.activate.push(String(h)); },
@@ -66,7 +66,7 @@ function makeController(pressed, vec) {
 function makeClient(controller, opts = {}) {
   return {
     input: {
-      init() {},
+      init() { calls.inputInit++; },
       getControllers() { return controller ? [controller] : []; },
       getActionSet(n) { calls.setLookup.push(n); return opts.noActionSet ? null : 'SET:' + n; },
       getDigitalAction(a) { calls.digitalLookup.push(a); return opts.noDigital ? null : 'D:' + a; },
@@ -86,7 +86,12 @@ const load = () => {
   delete require.cache[require.resolve(p)];
   return require(p);
 };
-const reset = () => { calls.activate.length = 0; calls.setLookup.length = 0; calls.analogLookup.length = 0; calls.digitalLookup.length = 0; };
+const reset = () => { calls.activate.length = 0; calls.setLookup.length = 0; calls.analogLookup.length = 0; calls.digitalLookup.length = 0; calls.inputInit = 0; };
+// v0.30.377 - Steam Input is OPT-IN in the wrapper (Steam's review: an app that
+// calls ISteamInput::Init with no published configuration leaves the controller
+// with nothing bound). Every block below exercises the opted-in path on purpose;
+// the last block checks the default.
+process.env.MOJI_STEAM_INPUT = '1';
 
 // ---- 1. happy path ---------------------------------------------------------
 {
@@ -150,6 +155,21 @@ const reset = () => { calls.activate.length = 0; calls.setLookup.length = 0; cal
   const dirs = snap ? ['moveUp', 'moveDown', 'moveLeft', 'moveRight'].filter((d) => snap[d]) : [];
   ok('THE REPORTED BUG: a resting Steam controller reports no direction', dirs.length === 0,
      'directions asserted while idle: ' + JSON.stringify(dirs));
+}
+
+{
+  delete process.env.MOJI_STEAM_INPUT;
+  reset();
+  CURRENT = makeClient(makeController({ 'D:jump': true }, {}));
+  const api = load().init();
+  const snap = api.input.snapshot();
+  ok('DEFAULT: Steam Input is never initialised (no ISteamInput::Init, so Steam does not expect a config)', calls.inputInit === 0, 'init calls: ' + calls.inputInit);
+  ok('DEFAULT: no action set is looked up or activated', calls.setLookup.length === 0 && calls.activate.length === 0, JSON.stringify({ set: calls.setLookup, act: calls.activate.length }));
+  ok('DEFAULT: input.snapshot() is null, so the raw gamepad wins and the pad works as a plain gamepad', snap === null, JSON.stringify(snap));
+  process.env.MOJI_STEAM_INPUT = '1';
+  reset(); CURRENT = makeClient(makeController({ 'D:jump': true }, {}));
+  load().init().input.snapshot();
+  ok('OPT-IN: MOJI_STEAM_INPUT=1 initialises Steam Input exactly once', calls.inputInit === 1, 'init calls: ' + calls.inputInit);
 }
 
 const pad = Math.max(...res.map((r) => r.n.length));

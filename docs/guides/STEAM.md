@@ -293,7 +293,7 @@ Proton compatibility — the Gamepad API fallback still gives full controller pl
 
 **Deck-verified checklist**
 
-- [ ] Default controller config uploaded (Steam Input `.vdf`) + tested on Deck.
+- [ ] ~~Default controller config uploaded (Steam Input `.vdf`) + tested on Deck.~~ N/A while controller support is off the store page (v0.30.377: Steam Input is opt-in, see §7 Controller).
 - [ ] All text entry pops the floating keyboard (name your hero, party code, chat).
 - [ ] Text legible at 1280×800 from couch distance (in-game UI scale ≥ 100%).
 - [ ] No launcher/DRM prompt before gameplay; single-instance lock verified.
@@ -346,8 +346,21 @@ presents a Steam Controller as a virtual gamepad by default, so this works out o
 the box.** For a custom Steam Input config, the native `ISteamInput` action states
 (from `game_actions_<appid>.vdf`) are ORed in. Default layout: A jump · B dodge ·
 X attack · Y interact · LB/RB/LT/RT + stick-clicks skills · Back character panel ·
-Start pause · D-pad/left-stick move. Enable **Steam Input** for the app and upload
-the Game Actions File under *Edit Steam Input Configuration*.
+Start pause · D-pad/left-stick move.
+
+**Steam Input is OPT-IN as of v0.30.377 (2026-09-03).** The wrapper no longer
+calls `ISteamInput::Init` unless launched with `MOJI_STEAM_INPUT=1`. Calling
+Init makes Steam treat the app as a Steam Input title and expect a published
+configuration; with none, a controller routed through Steam Input has nothing
+bound — which is what Steam's review found ("not able to access any of the
+gameplay functions using the controller"). Controller support was removed from
+the store page; without Init, Steam hands any pad through as a plain gamepad
+and the Gamepad-API layer drives it in full. To bring Steam Input back later:
+(1) Steamworks → App Admin → *Steam Input* → upload the Game Actions File and
+publish a configuration as the Official/Recommended one, (2) launch with
+`MOJI_STEAM_INPUT=1`, (3) re-add the store category. Pinned by
+`scripts/steam_input_test.mjs` (default: Init never called, snapshot null;
+opted in: the full action path).
 
 ### Stats (create these 4 in Steamworks → Stats & Achievements → Stats)
 The game pushes exactly these INT stats; the Steamworks stat **API Name** must

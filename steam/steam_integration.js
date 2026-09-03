@@ -90,8 +90,19 @@ function init() {
     try { if (client.callback && client.callback.SteamCallback) return client.callback.SteamCallback; } catch (e) {}
     return null;
   }
+  // v0.30.377 - Steam Input is NOT initialised unless opted in. Calling
+  // ISteamInput::Init makes Steam treat the app as a Steam Input title and
+  // expect a published configuration; with none, a controller routed through
+  // Steam Input has nothing bound (the 2026-09-03 review: 'not able to access
+  // any of the gameplay functions using the controller'). Controller support
+  // is off the store page; without Init, Steam hands any pad through as a
+  // plain gamepad and the game's Gamepad-API layer drives it in full. To bring
+  // Steam Input back: publish a config in Steamworks and launch with
+  // MOJI_STEAM_INPUT=1.
+  const USE_STEAM_INPUT = process.env.MOJI_STEAM_INPUT === '1';
+  if (!USE_STEAM_INPUT) console.log('[steam] Steam Input not initialised (opt in with MOJI_STEAM_INPUT=1 once a configuration is published)');
   try {
-    if (client.input && typeof client.input.init === 'function') {
+    if (USE_STEAM_INPUT && client.input && typeof client.input.init === 'function') {
       client.input.init();
       inputReady = true;
       // steamworks.js names these getDigitalAction / getActionSet /
