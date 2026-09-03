@@ -102,6 +102,18 @@ const r = await ev((KINDS) => {
   const sg = strip.getContext('2d'); sg.fillStyle = '#1a1d25'; sg.fillRect(0, 0, strip.width, strip.height);
   const tints = { burn: '#ff8844', frozen: '#88ddff', chill: '#aaeeff', poison: '#aa66ee', slow: '#88aacc', ice: '#aaddff', shock: '#ffdd44', shield: '#ffe9a0', stun: '#ffd166', stagger: '#ffd166', bubble: '#66ccff', silence: '#ff99cc', bastion: '#ffe08a' };
   KINDS.forEach((k, i) => { _lxStatusGlyph(sg, k, 40 + i * 64, 38, 26, tints[k], 12); sg.fillStyle = '#cfd4dc'; sg.font = '11px sans-serif'; sg.textAlign = 'center'; sg.fillText(k, 40 + i * 64, 82); });
+  // second row: the on-character overlay composition at true scale (a 28x44 hero silhouette), bubbled / frozen / stunned
+  strip.height = 200; sg.fillStyle = '#1a1d25'; sg.fillRect(0, 0, strip.width, strip.height);
+  KINDS.forEach((k, i) => { _lxStatusGlyph(sg, k, 40 + i * 64, 38, 26, tints[k], 12); sg.fillStyle = '#cfd4dc'; sg.font = '11px sans-serif'; sg.textAlign = 'center'; sg.fillText(k, 40 + i * 64, 82); });
+  const hero = (x, y) => { sg.fillStyle = '#3b2f2f'; sg.fillRect(x, y, 28, 44); sg.fillStyle = '#e0b08a'; sg.fillRect(x + 6, y + 2, 16, 14); sg.fillStyle = '#4a6fa5'; sg.fillRect(x + 4, y + 18, 20, 18); };
+  [['bubble', 'Bubble Prison'], ['frozen', 'Frozen'], ['stun', 'Stunned']].forEach(([k, label], i) => {
+    const x = 60 + i * 170, y = 118; hero(x, y);
+    const cx = x + 14, cy = y + 22;
+    if (k === 'bubble') { const r = 44 * 0.78; const gr = sg.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r); gr.addColorStop(0, 'rgba(200,240,255,0.10)'); gr.addColorStop(0.75, 'rgba(120,200,255,0.16)'); gr.addColorStop(1, 'rgba(140,220,255,0.42)'); sg.fillStyle = gr; sg.beginPath(); sg.arc(cx, cy, r, 0, Math.PI * 2); sg.fill(); sg.lineWidth = 2; sg.strokeStyle = 'rgba(170,230,255,0.95)'; sg.stroke(); sg.lineWidth = 2.5; sg.strokeStyle = 'rgba(255,255,255,0.8)'; sg.beginPath(); sg.arc(cx, cy, r * 0.72, Math.PI * 1.12, Math.PI * 1.5); sg.stroke(); }
+    if (k === 'frozen') { sg.fillStyle = 'rgba(150,220,255,0.28)'; sg.strokeStyle = 'rgba(200,240,255,0.9)'; sg.lineWidth = 2; sg.beginPath(); sg.rect(x - 4, y - 4, 36, 52); sg.fill(); sg.stroke(); }
+    sg.globalAlpha = 0.92; _lxStatusGlyph(sg, k, cx, y + 44 * 0.38, 16, tints[k], 12); sg.globalAlpha = 1;
+    sg.fillStyle = '#cfd4dc'; sg.font = '11px sans-serif'; sg.textAlign = 'center'; sg.fillText(label + ' — on the character, 1x', cx, 190);
+  });
   document.body.appendChild(strip);
   return { has, ops, dupes, spins, texts: texts.slice(0, 8), emojiText, bakeKeys, ovErr, bubbleArcMax, bubbleGlyph, calmArcs, calmGlyphs, ph: player.h || 40 };
 }, KINDS);
@@ -120,15 +132,24 @@ try { const el = await page.$('#_glyph_strip'); if (el) { await el.screenshot({ 
 // the overlay on the real character, rendered by the live frame: bubbled for a moment
 if (OVERLAY) {
   try {
-    await page.evaluate(() => { const s = document.getElementById('_glyph_strip'); if (s) s.remove(); player._cancerBubble = 99999; player._cancerBubbleHits = 1; player._ctrlKind = null; });
-    await page.waitForTimeout(450);
-    const clip = await page.evaluate(() => {
-      const cv = document.querySelector('canvas'); const rc = cv.getBoundingClientRect();
-      const kx = rc.width / (typeof W === 'number' ? W : cv.width), ky = rc.height / (typeof H === 'number' ? H : cv.height);
-      const sx = player.x - game.camera.x, sy = player.y;
-      return { x: Math.max(0, rc.left + (sx - 110) * kx), y: Math.max(0, rc.top + (sy - 70) * ky), width: 260 * kx, height: 190 * ky };
+    await page.evaluate(() => {
+      const s = document.getElementById('_glyph_strip'); if (s) s.remove();
+      // the harness drives the game under the boot menu and class-select DOM; lift them off the canvas for the photo
+      for (const id of ['loading-overlay', 'class-select-modal', 'lo-auth']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+      document.querySelectorAll('.modal-overlay').forEach((el) => { el.style.display = 'none'; });
+      player._cancerBubble = 99999; player._cancerBubbleHits = 1; player._ctrlKind = null;
     });
-    await page.screenshot({ path: OVERLAY, clip });
+    await page.waitForTimeout(450);
+    const info = await page.evaluate(() => {
+      const cv = document.getElementById('game') || document.querySelector('canvas'); const rc = cv.getBoundingClientRect();
+      const kx = rc.width / (typeof W === 'number' ? W : cv.width), ky = rc.height / (typeof H === 'number' ? H : cv.height);
+      const sx = player.x - game.camera.x, sy = player.y - (game.camera.y || 0);
+      return { map: game.currentMap, px: player.x | 0, py: player.y | 0, cx: game.camera.x | 0, cy: game.camera.y | 0, W, H, canvas: cv.id, rect: { l: rc.left | 0, t: rc.top | 0, w: rc.width | 0, h: rc.height | 0 }, kx, ky,
+        clip: { x: Math.max(0, rc.left + (sx - 110) * kx), y: Math.max(0, rc.top + (sy - 70) * ky), width: 260 * kx, height: 190 * ky } };
+    });
+    console.log('overlay photo: ' + JSON.stringify(info));
+    await page.screenshot({ path: OVERLAY.replace(/\.png$/, '.full.png') });
+    await page.screenshot({ path: OVERLAY, clip: info.clip });
     await page.evaluate(() => { player._cancerBubble = 0; });
     console.log('overlay -> ' + OVERLAY);
   } catch (e) { console.log('overlay shot failed: ' + e); }
