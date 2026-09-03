@@ -10127,7 +10127,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.372';
+const GAME_VERSION = 'v0.30.373';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -21004,7 +21004,7 @@ const POWERUPS = [
   // roll elsewhere and would read "12%" for a 1.2% affix.
   { id:'ls', tier:'rare',     name:'Lifesteal',      icon:'🩸', stat:'lifesteal', min:5,  max:15, unit:'',  fmt:r=>`Heal ${(r/10).toFixed(1)}% of damage dealt`, scale:r=>r/1000 },
   // v0.26.225 — min 1 → 2 (×1 was indistinguishable from "no burn").
-  { id:'burn', tier:'rare',   name:'Burning Touch',  icon:'🔥', stat:'burn',      min:2,  max:3,  unit:'×', fmt:r=>`Attacks burn enemies (×${r})`,   scale:r=>r },
+  { id:'burn', tier:'rare',   name:'Burning Touch',  icon:'🔥', stat:'burn',      min:2,  max:3,  unit:'×', fmt:r=>`Hits have a ${Math.min(80, 20 * r)}% chance to burn: ${8 * r}% of the hit per tick for 3s`, scale:r=>r },   // v0.30.373 — says what ×r does (see hitMonster's burn)
   // v0.26.225 — max 1 → 2 (binary roll: ~50 % chance of +2 projectiles).
   // Cap at L10555 raised in tandem so the contribution actually lands.
   // v0.29.304 — roll range 1-2 → 1-1 to match the restored +1 cap (see
@@ -21022,7 +21022,7 @@ const POWERUPS = [
   // the cap clamps its contribution to +1.
   { id:'multi', tier:'rare',  name:'Double Shot',    icon:'🎯', stat:'multishot', min:1,  max:1,  unit:'',  fmt:r=>`+${r} Projectile`,               scale:r=>r },
   // v0.26.225 — min 1 → 2 (tier-1 felt negligible vs tier-5).
-  { id:'mpreg', tier:'common',  name:'Mana Surge',     icon:'♻️', stat:'mpRegen',   min:2,  max:5,  unit:'',  fmt:r=>`+${r} MP regen tier`,            scale:r=>r },
+  { id:'mpreg', tier:'common',  name:'Mana Surge',     icon:'♻️', stat:'mpRegen',   min:2,  max:5,  unit:'',  fmt:r=>`MP regenerates ${Math.round(30 / Math.max(1, 30 - 10 * r))}× faster`, scale:r=>r },   // v0.30.373 — a tier takes 10 frames off the 30-frame regen tick, floored at 1 (tiers 3-5 are equal)
   // v0.26.225 — min 15 → 20 (paired tightening).
   { id:'thorns', tier:'rare', name:'Thorns',         icon:'🌵', stat:'thorns',    min:20, max:50, unit:'%', fmt:r=>`Reflect ${r}% of damage taken`,  scale:r=>r/100 },
   // v0.26.225 — min 10 → 25 (10× swing between min and max was absurd for greed).
@@ -21190,6 +21190,39 @@ function _rollBoonValue(def) {
     return lo + Math.floor(Math.random() * (hi - lo + 1));
   }
   return def.min + Math.floor(Math.random() * (def.max - def.min + 1));
+}
+// v0.30.373 — THE NUMBERS ON A BOON CARD, IN THE SENTENCE'S OWN UNITS (per user,
+// on a Lifesteal card reading "Heal 1.5% of damage dealt / Roll 15 · range 5-15":
+// "i think you mean 0.5 to 1.5%. ensure other boon descriptions are completely
+// accurate"). The roll and range were printed in raw roll units — tenths of a
+// percent for Lifesteal, tenths of a second for Mirror Step, an inverted count
+// for Second Skin. The value is now read off the sentence itself: the token of
+// fmt(r) that changes with the roll. The range follows the level band the roll
+// is actually drawn from (lvlScale boons), and runs low to high.
+function _boonBand(def) {
+  if (def && def.lvlScale === true && typeof player !== 'undefined' && player && typeof player.level === 'number') {
+    const tier = Math.max(0.10, Math.min(1.00, player.level / 90));
+    const lo = Math.max(def.min, Math.floor(def.max * tier * 0.5));
+    const hi = Math.max(lo + 1, Math.floor(def.max * tier));
+    return { lo, hi };
+  }
+  return { lo: def ? def.min : 0, hi: def ? def.max : 0 };
+}
+function _boonValText(def, r) {
+  if (!def || typeof def.fmt !== 'function') return String(r) + ((def && def.unit) || '');
+  const here = String(def.fmt(r));
+  if (def.min === def.max) { const m = here.match(/[+-]?\d+(?:\.\d+)?%?[a-z×]*/i); return m ? m[0] : String(r) + (def.unit || ''); }
+  const other = String(def.fmt(r === def.min ? def.max : def.min));
+  const a = here.split(/(\s+)/), b = other.split(/(\s+)/);
+  const out = [];
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i] && !/^\s+$/.test(a[i])) out.push(a[i].replace(/[,.;:]$/, ''));
+  return out.length === 1 ? out[0] : String(r) + (def.unit || '');   // a sentence that changes in several places: the raw roll + unit
+}
+function _boonRangeText(def) {
+  const b = _boonBand(def);
+  const lo = _boonValText(def, b.lo), hi = _boonValText(def, b.hi);
+  const nl = parseFloat(lo), nh = parseFloat(hi);
+  return (isFinite(nl) && isFinite(nh) && nh < nl) ? (hi + '–' + lo) : (lo + '–' + hi);
 }
 function rollBoonInstance(id) {
   const def = POWERUPS.find(p => p.id === id);
@@ -99864,7 +99897,7 @@ function renderBoonPanel() {
     const boon = (invIdx != null) ? player.boons[invIdx] : null;
     const def = boon ? getBoonDef(boon) : null;
     if (boon && def) {
-      slotsHtml.push(`<div style="padding:8px 10px; background:rgba(180,130,255,0.12); border:1px solid #8866cc; border-radius:6px; display:flex; flex-direction:column; gap:2px;"><div style="display:flex; justify-content:space-between; align-items:center; gap:6px;"><div style="display:flex; gap:6px; align-items:center; min-width:0;">${(typeof boonIconHtml === 'function') ? boonIconHtml(def, 22) : ('<span style="font-size:18px;">' + def.icon + '</span>')}<b style="color:#eddaff; font-size:12px;">${def.name}</b></div><button data-unequip="${invIdx}" style="padding:2px 6px; background:#552277; color:#fff; border:1px solid #aa77cc; border-radius:3px; font-size:10px; cursor:pointer;">Unequip</button></div><div style="font-size:11px; color:#e0d0f0;">${def.fmt(boon.roll)}</div><div style="font-size:10px; color:#aa88cc;">Roll ${boon.roll}${def.unit||''} · range ${def.min}-${def.max}${def.unit||''}</div></div>`);
+      slotsHtml.push(`<div style="padding:8px 10px; background:rgba(180,130,255,0.12); border:1px solid #8866cc; border-radius:6px; display:flex; flex-direction:column; gap:2px;"><div style="display:flex; justify-content:space-between; align-items:center; gap:6px;"><div style="display:flex; gap:6px; align-items:center; min-width:0;">${(typeof boonIconHtml === 'function') ? boonIconHtml(def, 22) : ('<span style="font-size:18px;">' + def.icon + '</span>')}<b style="color:#eddaff; font-size:12px;">${def.name}</b></div><button data-unequip="${invIdx}" style="padding:2px 6px; background:#552277; color:#fff; border:1px solid #aa77cc; border-radius:3px; font-size:10px; cursor:pointer;">Unequip</button></div><div style="font-size:11px; color:#e0d0f0;">${def.fmt(boon.roll)}</div><div style="font-size:10px; color:#aa88cc;">Roll ${_boonValText(def, boon.roll)} · range ${_boonRangeText(def)}</div></div>`);
     } else {
       slotsHtml.push(`<div style="padding:8px 10px; background:rgba(0,0,0,0.25); border:1px dashed #554466; border-radius:6px; color:#776688; font-size:11px; font-style:italic; display:flex; align-items:center; justify-content:center;">— empty slot —</div>`);
     }
@@ -102973,8 +103006,9 @@ function showPowerupChoice(bossInfo) {
   pick.forEach((entry, i) => {
     const pw = entry.def;
     const inst = entry.preview;
-    const range = pw.max - pw.min;
-    const pos = range > 0 ? (inst.roll - pw.min) / range : 0.5;
+    const _band = _boonBand(pw);   // v0.30.373 — the marker sits inside the band the roll came from
+    const range = _band.hi - _band.lo;
+    const pos = range > 0 ? (inst.roll - _band.lo) / range : 0.5;
     const posPct = Math.max(0, Math.min(100, pos * 100));
     const tierClass = pos >= 0.75 ? 'lucky' : pos >= 0.25 ? 'typical' : 'faint';
     const tierLabel = pos >= 0.75 ? '✦ Lucky Roll ✦'
@@ -103000,9 +103034,9 @@ function showPowerupChoice(bossInfo) {
           <div class="pc-roll-marker" style="left:${posPct.toFixed(1)}%"></div>
         </div>
         <div class="pc-roll-meta">
-          <span>${pw.min}${pw.unit || ''}</span>
-          <span class="pc-roll-val">${inst.roll}${pw.unit || ''}</span>
-          <span>${pw.max}${pw.unit || ''}</span>
+          <span>${_boonValText(pw, _boonBand(pw).lo)}</span>
+          <span class="pc-roll-val">${_boonValText(pw, inst.roll)}</span>
+          <span>${_boonValText(pw, _boonBand(pw).hi)}</span>
         </div>
       </div>
       <div class="pc-tier ${tierClass}">${tierLabel}</div>
