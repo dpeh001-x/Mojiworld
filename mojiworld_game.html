@@ -10127,7 +10127,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.365';
+const GAME_VERSION = 'v0.30.366';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -47616,6 +47616,7 @@ function _coopHostApplyDamage(uid, dmg, isCrit, skill) {
   }
   d = Math.min(d, Math.max(1, Math.floor(m.maxHp || m.currentHp)));       // cap: no single peer packet exceeds one HP bar (anti one-shot)
   m.currentHp -= d;
+  if (m.zodiacSign === 'virgo') _virgoTook(m, d);   // v0.30.366 — ritual book-keeping (peer packets too)
   // v0.29.x — was 6 (ms): with dt≈16.7/step the white hit-flash lasted ONE
   // frame on co-op hits vs 3-6 frames (50-90ms) on solo hits. Match solo.
   m.hitFlash = Math.max(m.hitFlash | 0, 50);
@@ -86471,6 +86472,13 @@ function _lxDefPierce(skill) {
   if (!(p > 0)) return 0;
   return Math.min(LX_MAX_DEF_PIERCE, p);
 }
+// v0.30.366 — Virgo book-keeping: damage since her last ritual (what the heal
+// may restore half of) and damage / hits inside the current ritual (what breaks it).
+function _virgoTook(m, amt) {
+  if (!m || !(amt > 0)) return;
+  m._virgoTaken = (m._virgoTaken || 0) + amt;
+  if (m._virgoChanneling) { m._virgoChanDmg = (m._virgoChanDmg || 0) + amt; m._virgoChanHits = (m._virgoChanHits | 0) + 1; }
+}
 function hitMonster(m, dmg, isCrit, skill) {
   _lxLsReset();   // v0.30.x — new hit, new lifesteal budget. See _lxLsTake.
   // v0.25.605 — Dead-monster gate. Without this, a delayed projectile or
@@ -87333,6 +87341,7 @@ function hitMonster(m, dmg, isCrit, skill) {
     _lxShadeQueue(m, _shadeRawDmg, isCrit, skill);   // v0.30.x — guests get their shade too; the host validates the echo like any hit
     _coopSendDamage(m, finalDmg, isCrit, skill);
     m.currentHp = Math.max(0, m.currentHp - finalDmg);
+    if (m.zodiacSign === 'virgo') _virgoTook(m, finalDmg);   // v0.30.366 — the no-overkill write books too
     // v0.29.x — was 6ms (one frame); match the solo 50ms flash duration.
     m.hitFlash = Math.max(m.hitFlash | 0, 50);
     if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2 - 8, y: m.y - 6, vy: -2, text: '' + finalDmg, life: 30, color: isCrit ? '#ffd24a' : '#fff', size: isCrit ? 18 : 14 });
@@ -87346,6 +87355,7 @@ function hitMonster(m, dmg, isCrit, skill) {
   _lxShadeQueue(m, _shadeRawDmg, isCrit, skill);   // v0.30.x — the strike connected: the shade will repeat it
   const _hpBeforeWrite = m.currentHp;   // v0.29.362 — Overflow Valve reads overkill off the authoritative write
   m.currentHp -= finalDmg;
+  if (m.zodiacSign === 'virgo') _virgoTook(m, finalDmg);   // v0.30.366 — ritual book-keeping
   // v0.29.362 — OVERFLOW VALVE (Tier-1). The killing blow's overkill jumps
   // to the nearest other enemy within 400 px. Post-mitigation overkill only
   // (finalDmg is fully pipelined), depth-limited to 1 hop so a chain of
@@ -130774,6 +130784,18 @@ const ZODIAC_AI = {
       // the closing pillar + managing sin, not denying the cast.
       m._virgoChanneling = true;
       m._virgoChannel -= dt;
+      // v0.30.366 — the ritual is INTERRUPTIBLE again (the v0.26.402 "fires reliably"
+      // pass removed the break entirely, so nothing the player did mattered). Three
+      // hits, or half a percent of her HP, inside the 1.1s window breaks it: no heal,
+      // no banish, and she pays the idle gap before the next attempt.
+      if ((m._virgoChanHits | 0) >= 3 || (m._virgoChanDmg || 0) >= m.maxHp * 0.005) {
+        m._virgoChannel = 0; m._virgoChanneling = false; m._virgoChannelHp = null;
+        m._virgoBroken = (m._virgoBroken | 0) + 1;
+        showToast('⚖ Virgo\'s ritual is BROKEN — no heal!', 'epic');
+        if (typeof flash === 'function') flash(0.18);
+        if (typeof _lxBossPip === 'function') { try { _lxBossPip(m, 'ritual broken'); } catch (e) {} }
+        return;
+      }
       // Halo particles
       if (game.time % 3 === 0) {
         const r = 32 + Math.sin(game.time * 0.1) * 4;
@@ -130794,7 +130816,13 @@ const ZODIAC_AI = {
         }
         showToast('Virgo banishes your shots!', 'epic');
         flash(0.3); addShake(6);
-        m.currentHp = Math.min(m.maxHp, m.currentHp + Math.floor(m.maxHp * 0.025));   // v0.26.402 — heal 5%→2.5% (fires reliably now)
+        // v0.30.366 — heal HALF of what she lost since her last ritual, capped at the
+        // old 2.5%. A flat 2.5% of a zodiac HP pool was ~125 of the player's hits every
+        // few seconds, so her bar never left 100% (per user). Sustained damage now
+        // always sticks for at least half.
+        const _vHeal = Math.min(Math.floor(m.maxHp * 0.025), Math.floor((m._virgoTaken || 0) * 0.5));
+        m._virgoLastHeal = _vHeal; m._virgoTaken = 0;
+        m.currentHp = Math.min(m.maxHp, m.currentHp + _vHeal);
         // v0.25.622 — added cx (was missing — NaN cascade)
         // v0.25.634 — owner:'enemy' so the resolver targets player not Virgo
         const _vCx = player.x + 14;
@@ -130817,6 +130845,7 @@ const ZODIAC_AI = {
       m.patternTimer = 0;
       m._virgoChannel = 1100;
       m._virgoChannelHp = m.currentHp;
+      m._virgoChanDmg = 0; m._virgoChanHits = 0;   // v0.30.366 — what she takes DURING the ritual breaks it
       showToast('Virgo channels Banishment!', 'rare');
     }
   },
