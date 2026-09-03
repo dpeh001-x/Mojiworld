@@ -10127,7 +10127,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.367';
+const GAME_VERSION = 'v0.30.368';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -35660,6 +35660,13 @@ window.addEventListener('keydown', e => {
   // Must run before castSkill-style handlers so the poll loop sees the lock.
   if (typeof tryStartWarriorCharge === 'function' && KEY_TO_SLOT && KEY_TO_SLOT[k]) {
     tryStartWarriorCharge(k);
+    // v0.30.367 — an armed Bastion whose release tap is blocked explains itself
+    if (KEY_TO_SLOT[k] === 'b' && player.master === 'crusader' && (player._bastionArmedUntil | 0) > game.time && !player._warCharge
+        && (game.time | 0) - (player._bastionBlockToastAt | 0) > 45) {
+      const _why = ((player.frozenTimer | 0) > 0) ? 'frozen' : ((player._cancerBubble | 0) > 0) ? 'bubbled' : ((player.hitStun | 0) > 0) ? 'staggered'
+        : (typeof _QTE !== 'undefined' && _QTE && _QTE.active) ? 'shackled' : game.paused ? 'paused' : (typeof isReady === 'function' && !isReady('crusader_ult')) ? 'not ready' : null;
+      if (_why && typeof showToast === 'function') { player._bastionBlockToastAt = game.time | 0; showToast('⚖ Bastion is armed — release blocked: ' + _why, 'rare'); }
+    }
   }
 
   // Archer + Warrior basic (Z) is edge-triggered — fire once per press,
@@ -36110,6 +36117,11 @@ window.addEventListener('keydown', e => {
   }
 });
 window.addEventListener('keyup', e => {
+  // v0.30.367 — a key that went DOWN in the game must come UP in the game, even if
+  // focus moved into an input in between; a swallowed keyup left the key (and any
+  // warrior charge on it) stuck, which killed every other slot key.
+  { const _rk = String(e.key || '').toLowerCase(); const _rs = (typeof _resolveActionKey === 'function') ? _resolveActionKey(_rk) : _rk;
+    if (typeof game !== 'undefined' && game && game.keys) { if (game.keys[_rk]) game.keys[_rk] = false; if (_rs !== null && game.keys[_rs]) game.keys[_rs] = false; } }
   // Don't let a keyup delivered to a focused text field clear game-key / charge
   // state (symmetry with the keydown handler's typing guard).
   if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
@@ -66992,7 +67004,10 @@ function tryStartClassCharge(slotKey) {
   if (_LX_NO_CHARGE_SKILLS.has(found.id)) return false;   // v0.29.5xx — casts instantly instead
   if (player.hp <= 0 || game.paused || game.dying > 0) return false;
   if (((player.frozenTimer | 0) > 0 || (typeof _QTE !== 'undefined' && _QTE.active)) && !player._god) return false;  // frozen / shackle-QTE: no voluntary action (poll-loop gate doesn't cover charge)
-  if (player._warCharge) return true;  // already charging
+  if (player._warCharge) {
+    if (player._warCharge.slotKey === slotKey) return true;  // already charging THIS key
+    player._warCharge = null;   // v0.30.367 — a stale charge on another key cannot hold this press hostage
+  }
   player._warCharge = { slotKey, start: game.time, skillId: found.id, power: 0, cls: player.cls,
     frames: WAR_CHARGE_FRAMES };
   return true;
@@ -75480,11 +75495,14 @@ const SKILL_FNS = {
         // ── TAP 1 — ARM ──
         player._bastionArmedUntil = game.time + 900;   // 15 s at 60fps; watcher in updatePlayer erupts it at expiry
         player._bastionArmHeld = true;
+        player._bastionArmAt = game.time | 0;   // v0.30.367 — the guard below is time-based
         spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'crusader_ult', { size: 120, life: 40, spin: 0.2 });
         showToast('⚖ BASTION ARMED — tap again to RELEASE (judgement ×' + Math.max(0, Math.min(5, player._judgeStacks | 0)) + ')', 'epic');
         return '_lxNoCast';   // castSkill refunds the pre-committed cd + MP: arming is free
       }
-      if (player._bastionArmHeld && !(_o && _o.auto)) return '_lxNoCast';   // same physical press still down — not a second tap
+      // v0.30.367 — the same physical press (a poll re-entering within 200ms of the
+      // arm) is not a second tap; anything later IS one, even if a key state is stuck.
+      if (player._bastionArmHeld && !(_o && _o.auto) && ((game.time | 0) - (player._bastionArmAt | 0)) < 12) return '_lxNoCast';
       // ── TAP 2 (or 15 s auto-eruption) — RELEASE ──
       player._bastionArmedUntil = 0;
       player._bastionArmHeld = false;
