@@ -10127,7 +10127,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.369';
+const GAME_VERSION = 'v0.30.370';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -117288,6 +117288,153 @@ function drawPlayer() {
 // vignette in the status colour, and a one-shot toast when the state begins.
 // Bastion's armed window rides the same banner, so a crusader always sees
 // that the release is still pending.
+// v0.30.369 — STATUS GLYPHS (per user: "make small customised icons to show the
+// status affliction"). Every affliction the status row and the control banner
+// show is a small hand-drawn vector icon in one style — dark disc, tinted rim,
+// tinted glyph — drawn on the canvas at any size or DPR, so it stays crisp on
+// a Retina laptop and needs no art file. Static kinds bake once per
+// (kind, tint, dpr); the stun's stars spin, so it draws live.
+const LX_STATUS_GLYPH_ANIM = new Set(['stun']);
+function _lxStatusGlyph(g, kind, cx, cy, r, tint, t) {
+  const T = t || 0;
+  g.save();
+  g.translate(cx, cy);
+  // disc + rim
+  g.beginPath(); g.arc(0, 0, r, 0, Math.PI * 2);
+  g.fillStyle = 'rgba(8,10,16,0.82)'; g.fill();
+  g.lineWidth = Math.max(1, r * 0.14); g.strokeStyle = tint; g.globalAlpha = 0.9; g.stroke(); g.globalAlpha = 1;
+  const s = r * 0.62;                       // glyph radius
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  g.strokeStyle = tint; g.fillStyle = tint; g.lineWidth = Math.max(1, r * 0.16);
+  switch (kind) {
+    case 'burn': {                          // flame: outer teardrop, lighter inner tongue
+      g.beginPath(); g.moveTo(0, s);
+      g.bezierCurveTo(-s * 1.05, s * 0.2, -s * 0.55, -s * 0.35, 0, -s);
+      g.bezierCurveTo(s * 0.15, -s * 0.35, s * 1.05, s * 0.2, 0, s); g.fill();
+      g.fillStyle = 'rgba(255,240,200,0.85)';
+      g.beginPath(); g.moveTo(0, s * 0.85);
+      g.bezierCurveTo(-s * 0.45, s * 0.3, -s * 0.2, -s * 0.05, 0, -s * 0.3);
+      g.bezierCurveTo(s * 0.2, -s * 0.05, s * 0.45, s * 0.3, 0, s * 0.85); g.fill();
+      break;
+    }
+    case 'frozen': case 'chill': {          // snowflake: three spokes, branched tips (chill: thinner)
+      if (kind === 'chill') g.lineWidth = Math.max(1, r * 0.1);
+      for (let i = 0; i < 3; i++) {
+        const a = i * Math.PI / 3;
+        const dx = Math.cos(a), dy = Math.sin(a);
+        g.beginPath(); g.moveTo(-dx * s, -dy * s); g.lineTo(dx * s, dy * s); g.stroke();
+        for (const sg of [1, -1]) {
+          const px = dx * s * 0.62 * sg, py = dy * s * 0.62 * sg;
+          const b1 = a + Math.PI / 3, b2 = a - Math.PI / 3;
+          g.beginPath(); g.moveTo(px, py); g.lineTo(px + Math.cos(b1) * s * 0.32 * sg, py + Math.sin(b1) * s * 0.32 * sg); g.stroke();
+          g.beginPath(); g.moveTo(px, py); g.lineTo(px + Math.cos(b2) * s * 0.32 * sg, py + Math.sin(b2) * s * 0.32 * sg); g.stroke();
+        }
+      }
+      break;
+    }
+    case 'poison': {                        // droplet with a dark core
+      g.beginPath(); g.moveTo(0, -s);
+      g.bezierCurveTo(s * 0.9, s * 0.05, s * 0.75, s, 0, s);
+      g.bezierCurveTo(-s * 0.75, s, -s * 0.9, s * 0.05, 0, -s); g.fill();
+      g.fillStyle = 'rgba(8,10,16,0.7)'; g.beginPath(); g.arc(0, s * 0.3, s * 0.28, 0, Math.PI * 2); g.fill();
+      break;
+    }
+    case 'slow': {                          // hourglass
+      g.beginPath(); g.moveTo(-s * 0.8, -s); g.lineTo(s * 0.8, -s); g.lineTo(0, 0); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(-s * 0.8, s); g.lineTo(s * 0.8, s); g.lineTo(0, 0); g.closePath(); g.fill();
+      break;
+    }
+    case 'ice': {                           // cube with a crack
+      g.lineWidth = Math.max(1, r * 0.13);
+      g.strokeRect(-s * 0.8, -s * 0.8, s * 1.6, s * 1.6);
+      g.beginPath(); g.moveTo(-s * 0.5, -s * 0.8); g.lineTo(-s * 0.1, -s * 0.1); g.lineTo(s * 0.3, s * 0.2); g.lineTo(s * 0.1, s * 0.8); g.stroke();
+      break;
+    }
+    case 'shock': {                         // lightning bolt
+      g.beginPath(); g.moveTo(s * 0.25, -s); g.lineTo(-s * 0.55, s * 0.1); g.lineTo(-s * 0.05, s * 0.1);
+      g.lineTo(-s * 0.3, s); g.lineTo(s * 0.55, -s * 0.15); g.lineTo(s * 0.05, -s * 0.15); g.closePath(); g.fill();
+      break;
+    }
+    case 'shield': case 'bastion': {        // shield; bastion adds the beam of the scales
+      g.beginPath(); g.moveTo(-s * 0.85, -s * 0.75); g.lineTo(s * 0.85, -s * 0.75); g.lineTo(s * 0.85, s * 0.05);
+      g.quadraticCurveTo(s * 0.85, s * 0.75, 0, s); g.quadraticCurveTo(-s * 0.85, s * 0.75, -s * 0.85, s * 0.05); g.closePath();
+      if (kind === 'shield') { g.fill(); g.fillStyle = 'rgba(8,10,16,0.75)'; g.beginPath(); g.arc(0, -s * 0.05, s * 0.22, 0, Math.PI * 2); g.fill(); }
+      else { g.lineWidth = Math.max(1, r * 0.14); g.stroke(); g.beginPath(); g.moveTo(-s * 0.5, -s * 0.15); g.lineTo(s * 0.5, -s * 0.15); g.moveTo(0, -s * 0.45); g.lineTo(0, s * 0.45); g.stroke(); }
+      break;
+    }
+    case 'stun': {                          // dizzy swirl + three orbiting stars
+      g.lineWidth = Math.max(1, r * 0.12);
+      g.beginPath(); for (let i = 0; i <= 28; i++) { const a = i / 28 * Math.PI * 2.4, rr = s * 0.18 + (i / 28) * s * 0.42; const x = Math.cos(a) * rr, y = Math.sin(a) * rr; if (i === 0) g.moveTo(x, y); else g.lineTo(x, y); } g.stroke();
+      for (let k = 0; k < 3; k++) {
+        const a = T * 0.09 + k * Math.PI * 2 / 3, rr = s * 0.98;
+        _lxStar(g, Math.cos(a) * rr, Math.sin(a) * rr, s * 0.3, s * 0.13, T * 0.05);
+      }
+      break;
+    }
+    case 'stagger': {                       // spiral, off-balance
+      g.lineWidth = Math.max(1, r * 0.14);
+      g.beginPath(); for (let i = 0; i <= 40; i++) { const a = i / 40 * Math.PI * 3.6, rr = s * 0.12 + (i / 40) * s * 0.85; const x = Math.cos(a) * rr, y = Math.sin(a) * rr; if (i === 0) g.moveTo(x, y); else g.lineTo(x, y); } g.stroke();
+      break;
+    }
+    case 'bubble': {                        // bubble with a highlight, and a small one beside it
+      g.lineWidth = Math.max(1, r * 0.13);
+      g.beginPath(); g.arc(-s * 0.1, s * 0.1, s * 0.75, 0, Math.PI * 2); g.stroke();
+      g.beginPath(); g.arc(-s * 0.1, s * 0.1, s * 0.48, Math.PI * 1.15, Math.PI * 1.55); g.stroke();
+      g.beginPath(); g.arc(s * 0.62, -s * 0.55, s * 0.24, 0, Math.PI * 2); g.stroke();
+      break;
+    }
+    case 'silence': {                       // padlock
+      g.lineWidth = Math.max(1, r * 0.14);
+      g.beginPath(); g.arc(0, -s * 0.35, s * 0.42, Math.PI, 0); g.stroke();
+      g.fillRect(-s * 0.7, -s * 0.2, s * 1.4, s * 1.1);
+      g.fillStyle = 'rgba(8,10,16,0.8)'; g.beginPath(); g.arc(0, s * 0.25, s * 0.16, 0, Math.PI * 2); g.fill(); g.fillRect(-s * 0.06, s * 0.25, s * 0.12, s * 0.35);
+      break;
+    }
+    default: {                              // unknown kind: a dot, never a missing icon
+      g.beginPath(); g.arc(0, 0, s * 0.35, 0, Math.PI * 2); g.fill();
+    }
+  }
+  g.restore();
+}
+// v0.30.370 — THE AFFLICTION ON THE CHARACTER (per user, with a video: "im under
+// bubble prison but its very hard to tell. Make sure the icon is visible on top
+// of the character"). Drawn in the late pass, after monsters and damage numbers,
+// so nothing covers it: a translucent sphere around the whole sprite for the
+// Bubble Prison, an ice box for a freeze, and for every hard control the
+// affliction's glyph at 32px, pulsing, over the character's chest.
+function _drawPlayerControlOverlay() {
+  const c = (typeof _playerControlState === 'function') ? _playerControlState() : null;
+  if (!c || !c.hard || !player) return;
+  const sx = Math.round(player.x - game.camera.x), sy = Math.round(player.y + (player._sandSink || 0));
+  const w = player.w || 28, h = player.h || 40;
+  const cx = sx + w / 2, cy = sy + h / 2;
+  const t = game.time | 0;
+  ctx.save();
+  if (c.kind === 'bubble') {
+    const r = Math.max(w, h) * 0.78 + Math.sin(t * 0.15) * 1.5;
+    const g = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
+    g.addColorStop(0, 'rgba(200,240,255,0.10)'); g.addColorStop(0.75, 'rgba(120,200,255,0.16)'); g.addColorStop(1, 'rgba(140,220,255,0.42)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(170,230,255,0.95)'; ctx.stroke();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+    ctx.beginPath(); ctx.arc(cx, cy, r * 0.72, Math.PI * 1.12, Math.PI * 1.5); ctx.stroke();
+  } else if (c.kind === 'frozen') {
+    const pad = 4;
+    ctx.fillStyle = 'rgba(150,220,255,0.28)'; ctx.strokeStyle = 'rgba(200,240,255,0.9)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.rect(sx - pad, sy - pad, w + pad * 2, h + pad * 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx - pad + 4, sy - pad + 3); ctx.lineTo(sx + w * 0.4, sy + h * 0.45); ctx.lineTo(sx + w * 0.3, sy + h + pad - 3); ctx.stroke();
+  }
+  // the glyph itself, big and pulsing, over the chest
+  const pulse = 1 + Math.sin(t * 0.25) * 0.08;
+  ctx.globalAlpha = 0.92;
+  _lxStatusGlyph(ctx, c.kind, cx, sy + h * 0.38, 16 * pulse, c.tint, t);
+  ctx.restore();
+}
+function _lxStar(g, x, y, ro, ri, rot) {
+  g.beginPath();
+  for (let i = 0; i < 8; i++) { const a = rot + i * Math.PI / 4, rr = (i % 2 === 0) ? ro : ri; const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr; if (i === 0) g.moveTo(px, py); else g.lineTo(px, py); }
+  g.closePath(); g.fill();
+}
 function _playerControlState() {
   if (!player || player.hp <= 0) return null;
   const _qte = (typeof _QTE !== 'undefined' && _QTE && _QTE.active);
@@ -117325,19 +117472,23 @@ function _drawPlayerControlBanner(sx, sy, c) {
   const cx = sx + (player.w || 28) / 2;
   const y = sy - 30;
   const secs = (Math.max(0, c.remain) / 1000).toFixed(1);
-  const text = c.emoji + ' ' + c.label + (c.detail ? ' · ' + c.detail : '') + '  ' + secs + 's';
+  const text = c.label + (c.detail ? ' · ' + c.detail : '') + '  ' + secs + 's';
   ctx.save();
   ctx.font = 'bold 11px sans-serif';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  const w = Math.ceil(ctx.measureText(text).width) + 16, h = 18, r = 6;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  const tw = Math.ceil(ctx.measureText(text).width);
+  const h = 20, r = 7, ico = 16;
+  const w = tw + ico + 20;
   const x0 = cx - w / 2;
   const pulse = c.hard ? 0.85 + Math.sin(game.time * 0.35) * 0.15 : 0.9;
   ctx.globalAlpha = pulse;
   ctx.fillStyle = 'rgba(0,0,0,0.72)';
   ctx.beginPath(); ctx.moveTo(x0 + r, y); ctx.arcTo(x0 + w, y, x0 + w, y + h, r); ctx.arcTo(x0 + w, y + h, x0, y + h, r); ctx.arcTo(x0, y + h, x0, y, r); ctx.arcTo(x0, y, x0 + w, y, r); ctx.closePath(); ctx.fill();
   ctx.strokeStyle = c.tint; ctx.lineWidth = 1.5; ctx.stroke();
+  // v0.30.370 — the affliction's own glyph (see _lxStatusGlyph) instead of an emoji
+  if (typeof _lxStatusGlyph === 'function') _lxStatusGlyph(ctx, c.kind, x0 + 6 + ico / 2, y + h / 2, ico / 2, c.tint, game.time);
   ctx.fillStyle = c.tint;
-  ctx.fillText(text, cx, y + h / 2 + 0.5);
+  ctx.fillText(text, x0 + ico + 12, y + h / 2 + 0.5);
   // drain bar: what is left of the status
   const frac = c.total > 0 ? Math.max(0, Math.min(1, c.remain / c.total)) : 0;
   ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x0, y + h + 2, w, 3);
@@ -117373,29 +117524,29 @@ function _drawPlayerStatusIcons(sx, sy) {
         ((player.hitStun | 0) > 100 && player._lastDamageSource === 'a pothole') ||
         ((player._heavyStunUntil | 0) > (game.time | 0) && (player.hitStun | 0) > 0))) return;   // v0.29.7xx — heavy-stun marker
   const icons = [];
-  if ((player.burnTimer    | 0) > 0) icons.push({ emoji:'🔥', tint:'#ff8844' });
-  if ((player.frozenTimer  | 0) > 0) icons.push({ emoji:'❄️', tint:'#88ddff' });
-  if ((player.freezeTimer  | 0) > 0 && (player.frozenTimer | 0) <= 0) icons.push({ emoji:'❄️', tint:'#aaeeff' });
-  if ((player._poisonTimer | 0) > 0) icons.push({ emoji:'☠️', tint:'#aa66ee' });
-  if ((player._slowTimer   | 0) > 0) icons.push({ emoji:'🐌', tint:'#88aacc' });
-  if ((player._iceFloor    | 0) > 0) icons.push({ emoji:'🧊', tint:'#aaddff' });
+  if ((player.burnTimer    | 0) > 0) icons.push({ kind:'burn', tint:'#ff8844' });
+  if ((player.frozenTimer  | 0) > 0) icons.push({ kind:'frozen', tint:'#88ddff' });
+  if ((player.freezeTimer  | 0) > 0 && (player.frozenTimer | 0) <= 0) icons.push({ kind:'chill', tint:'#aaeeff' });
+  if ((player._poisonTimer | 0) > 0) icons.push({ kind:'poison', tint:'#aa66ee' });
+  if ((player._slowTimer   | 0) > 0) icons.push({ kind:'slow', tint:'#88aacc' });
+  if ((player._iceFloor    | 0) > 0) icons.push({ kind:'ice', tint:'#aaddff' });
   // v0.26.249 — Electrocution icon. Yellow lightning bolt to match the
   // particle palette used by the player-side spark spawns in updatePlayer.
-  if ((player._electrocuteTimer | 0) > 0) icons.push({ emoji:'⚡', tint:'#ffdd44' });
+  if ((player._electrocuteTimer | 0) > 0) icons.push({ kind:'shock', tint:'#ffdd44' });
   // v0.26.x feel -- i-frame clarity: show a sparkle while invulnerability is
   // active (>150ms left, so the tail end doesn't flicker). Players previously
   // had ZERO cue for when they could safely tank a hit vs must dodge.
-  if ((player.invulnerable | 0) > 150) icons.push({ emoji:'✨', tint:'#ffe9a0' });
-  if ((player.stunTimer | 0) > 0 && !(typeof _QTE !== 'undefined' && _QTE && _QTE.active)) icons.push({ emoji:'💫', tint:'#ffd166' });   // v0.30.368
-  if ((player._cancerBubble | 0) > 0) icons.push({ emoji:'🫧', tint:'#66ccff' });
-  if ((player._skillLockTimer | 0) > 0) icons.push({ emoji:'🔒', tint:'#ff99cc' });
+  if ((player.invulnerable | 0) > 150) icons.push({ kind:'shield', tint:'#ffe9a0' });
+  if ((player.stunTimer | 0) > 0 && !(typeof _QTE !== 'undefined' && _QTE && _QTE.active)) icons.push({ kind:'stun', tint:'#ffd166' });   // v0.30.368
+  if ((player._cancerBubble | 0) > 0) icons.push({ kind:'bubble', tint:'#66ccff' });
+  if ((player._skillLockTimer | 0) > 0) icons.push({ kind:'silence', tint:'#ff99cc' });
   if ((player.hitStun      | 0) > 100 && player._lastDamageSource === 'a pothole') {
-    icons.push({ emoji:'💫', tint:'#ffdd44' });
+    icons.push({ kind:'stagger', tint:'#ffdd44' });
   }
   // v0.29.7xx — heavy-stagger / 1 s stun marker. A second of dead input with
   // no cue reads as a freeze bug; the star sits with the other status icons.
   else if ((player._heavyStunUntil | 0) > (game.time | 0) && (player.hitStun | 0) > 0) {
-    icons.push({ emoji:'💫', tint:'#ffd166' });
+    icons.push({ kind:'stagger', tint:'#ffd166' });
   }
   if (icons.length === 0) return;
   ctx.save();
@@ -117419,24 +117570,23 @@ function _drawPlayerStatusIcons(sx, sy) {
   // once into a small canvas — halo dot and glyph together — and the frame
   // pays one drawImage per icon. Bob and pulse stay live at blit time, so the
   // motion is untouched.
+  // v0.30.370 — hand-drawn glyphs (see _lxStatusGlyph): static kinds bake once per
+  // (kind, tint, dpr); animated kinds (the stun's spinning stars) draw live.
   if (typeof window._lxStatusIconBakes === 'undefined') window._lxStatusIconBakes = new Map();
   const _ibDpr = (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? Math.min(2, Math.max(1, _LX_DPR)) : 1;
   for (let i = 0; i < icons.length; i++) {
     const ix = rowX + i * 14 + 7;
     const iy = rowY + bob;
-    const _ibKey = icons[i].emoji + '|' + icons[i].tint + '|' + _ibDpr;
+    const _kind = icons[i].kind || 'shield';
+    if (LX_STATUS_GLYPH_ANIM.has(_kind)) { _lxStatusGlyph(ctx, _kind, ix, iy, 8, icons[i].tint, game.time); continue; }
+    const _ibKey = _kind + '|' + icons[i].tint + '|' + _ibDpr;
     let _ib = window._lxStatusIconBakes.get(_ibKey);
     if (!_ib) {
       _ib = document.createElement('canvas');
       _ib.width = Math.ceil(20 * _ibDpr); _ib.height = Math.ceil(20 * _ibDpr);
       const _ig = _ib.getContext('2d');
       _ig.scale(_ibDpr, _ibDpr);
-      _ig.fillStyle = icons[i].tint + (icons[i].tint.length === 7 ? '55' : '');
-      _ig.beginPath(); _ig.arc(10, 10, 8, 0, Math.PI * 2); _ig.fill();
-      _ig.font = '12px sans-serif';
-      _ig.textAlign = 'center'; _ig.textBaseline = 'middle';
-      _ig.fillStyle = '#fff';
-      _ig.fillText(icons[i].emoji, 10, 10.5);
+      _lxStatusGlyph(_ig, _kind, 10, 10, 8, icons[i].tint, 0);
       window._lxStatusIconBakes.set(_ibKey, _ib);
     }
     ctx.drawImage(_ib, ix - 10, iy - 10, 20, 20);
@@ -137701,6 +137851,7 @@ function loop(time) {
   drawDamageNumbers();
   drawIceCheer();   // v0.25.458 — Icy Tower combo overlay
   if (typeof _drawControlVignette === 'function') _drawControlVignette();   // v0.30.368 — stunned / frozen / bubbled edge pulse
+  if (typeof _drawPlayerControlOverlay === 'function') _drawPlayerControlOverlay();   // v0.30.370 — the affliction ON the character, drawn late so nothing hides it
   _drawDayNightTint();   // v0.29.415 — dawn/dusk/night grade: one rect, free by day
 
   ctx.restore();
