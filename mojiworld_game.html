@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.381';
+const GAME_VERSION = 'v0.30.382';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -77615,7 +77615,8 @@ function updateMonsters(dt) {
                     : (m.boss || m.isBoss) ? 520 : 240;
           m._shootWindup = _wu;
           const _nowWu = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-          m.atkAnimUntil = _nowWu + _wu + 140;             // hold the pose a touch past release
+          m.atkAnimUntil = _nowWu + _wu + 140;
+          m._atkStrikeMs = _wu; m._animSt = null;   // v0.30.382 — the strike frame lands on the release             // hold the pose a touch past release
           m.shootTimer = 999999;                           // suspend re-trigger; release resets it
         } else {
           _fireShotFor(m);
@@ -77822,6 +77823,7 @@ function updateMonsters(dt) {
         // to the static sprite when no attack frames have decoded.
         const _bmNow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
         m.atkAnimUntil = _bmNow + bm.telegraphMs + 300;
+        m._atkStrikeMs = bm.telegraphMs; m._animSt = null;   // v0.30.382 — the strike frame lands as the telegraph ends
       }
       // PHASE 2 — telegraph tick (particles + flash).
       if (m._bigMeleeFiring && m._bigMeleeT > 0) {
@@ -122463,6 +122465,41 @@ function _lxFtIndex(n, ft, elapsedMs, pingpong) {
   }
   return 0;
 }
+// v0.30.382 — ONE-SHOT SWING HELPERS (per user: "improving the smoothness of the
+// monster animation sprite time interval, it should be well timed with the
+// attack, should not be rushed, and should not be spammy" / "the frames should
+// be individualised per monster"). Every monster attack set now carries its own
+// baked per-frame timing (data/anim_calib.js, scripts/gen_attack_timing.mjs:
+// the strike frame found from the set's own content boxes, held longer the more
+// the pose rises). The picker below walks that timing ONCE per attack rather
+// than looping it, and maps real time onto the walk so the strike frame is on
+// screen at the moment the attack lands:
+//   m._atkStrikeMs === -1  natural — the windup plays first at its baked pace
+//                           (a proximity swing, started as the player closes in)
+//   m._atkStrikeMs  >  0   telegraphed — the windup is stretched or compressed
+//                           to exactly that long, so the strike frame BEGINS as
+//                           the telegraph ends and the damage lands
+//   unset / 0              instant — the hit already happened when the animation
+//                           was asked for, so the walk starts AT the strike frame
+function _lxFtTotal(n, ft) { let t = 0; for (let i = 0; i < n; i++) t += (ft[i] > 0 ? ft[i] : 48); return t; }
+function _lxFtStrike(n, ft) { let s = 0, best = -1; for (let i = 0; i < n; i++) { const v = ft[i] > 0 ? ft[i] : 48; if (v > best) { best = v; s = i; } } return s; }
+function _lxFtPrefix(n, ft, idx) { let t = 0; for (let i = 0; i < Math.min(idx, n); i++) t += (ft[i] > 0 ? ft[i] : 48); return t; }
+function _lxFtIndexOnce(n, ft, t) { let _t = Math.max(0, t || 0); for (let i = 0; i < n; i++) { _t -= (ft[i] > 0 ? ft[i] : 48); if (_t < 0) return i; } return n - 1; }
+function _lxSwingClock(m, n, ft, elapsed) {
+  const strike = _lxFtStrike(n, ft), prefix = _lxFtPrefix(n, ft, strike);
+  const sm = m ? m._atkStrikeMs : undefined;
+  if (sm === -1) return elapsed;
+  if (!(sm > 0) || sm < prefix * 0.5) return prefix + elapsed;
+  if (elapsed < sm) return elapsed * (prefix / sm);
+  return prefix + (elapsed - sm);
+}
+function _lxSwingLength(m, n, ft) {
+  const strike = _lxFtStrike(n, ft), prefix = _lxFtPrefix(n, ft, strike), total = _lxFtTotal(n, ft);
+  const sm = m ? m._atkStrikeMs : undefined;
+  if (sm === -1) return total;
+  if (!(sm > 0) || sm < prefix * 0.5) return total - prefix;
+  return sm + (total - prefix);
+}
 function _lxFtWalk(frames, n, ft, offsetMs, pingpong) {
   const _now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   return frames[_lxFtIndex(n, ft, _now + (offsetMs || 0), pingpong)];
@@ -122512,7 +122549,8 @@ const _BOSS_ATK_FRAME_MS = 48;   // v0.26.645 — shorter inter-frame gap for a 
 // small, numerous, and usually mid-chase, so they need longer to register.
 // 72 ms puts a full cycle at 648 ms, close to the 70 ms the whole game used
 // before v0.26.645, and bosses keep the faster rate they were tuned at.
-const _MOB_ATK_FRAME_MS = 72;    // ~0.65s per 9-frame cycle for non-boss monsters
+const _MOB_ATK_FRAME_MS = 72;    // ~0.65s per 9-frame cycle for non-boss monsters (fallback: every monster in the manifest now carries its own timing)
+const LX_MOB_SWING_REST_MS = 450;   // v0.30.382 — a monster standing next to the player swings once, then rests this long before the next
 // v0.30.x — PER-TYPE attack cadence (per user, of Plumpdrake: "from 1 frame
 // to another increase the length of time pause slightly, lengthening the
 // attack phase"). Plumpdrake's nine frames are a wind-up, a rear and a
@@ -125124,7 +125162,8 @@ function _monsterStateFrame(m) {
   // v0.29.419 — a real attack always wins: a cast (which the physics plant has
   // also rooted, so the swing cannot slide) or the authored attack-animation
   // window that contact hits and parries stamp.
-  let attacking = _mobAttackAnim(m);
+  let attacking = _mobAttackAnim(m) || now < (m._swingUntil || 0);   // v0.30.382 — a started swing plays out in full
+  if (!attacking) m._atkStrikeMs = undefined;   // the next attack states its own timing
   // Bosses keep _BOSS_ATK_FRAME_MS: their pacing was deliberately tuned and a
   // slower boss swing is a balance change, not a readability fix.
   const _atkMs = m.isBoss ? _BOSS_ATK_FRAME_MS : (_MOB_ATK_FRAME_MS_BY_TYPE[m.type] || _MOB_ATK_FRAME_MS);   // v0.30.x — per-type cadence
@@ -125139,17 +125178,31 @@ function _monsterStateFrame(m) {
   // the player at close range used to slide along frozen mid-swing, never
   // showing its walk cycle. Standing next to the player still menaces.
   if (!attacking && !_mobWalking(m) && typeof player !== 'undefined' && player && player.hp > 0) {
-    // v0.29.418 — hysteresis + minimum hold on the proximity trigger. The
-    // single 1.2×w radius flickered attack↔walk every frame while the player
-    // danced on the boundary, and each flip snapped the animation mid-cycle.
-    // Enter at 1.2×w as before; once entered, hold the attack state for at
-    // least one full 9-frame cycle (9 × 48 ms) and release only past 1.5×w.
     const _pdx = Math.abs((m.x + m.w / 2) - (player.x + player.w / 2));
     const _pdy = Math.abs((m.y + m.h / 2) - (player.y + player.h / 2));
     const _inR = m._proxAtk ? (_pdx < m.w * 1.5 && _pdy < m.h * 1.25) : (_pdx < m.w * 1.2 && _pdy < m.h);
-    if (_inR && !m._proxAtk) m._proxAtkMinUntil = now + _atkMs * 9;
-    m._proxAtk = _inR || now < (m._proxAtkMinUntil || 0);
-    attacking = m._proxAtk;
+    const _ftP = _lxCalibFt(m.type, 'attack');
+    if (_ftP) {
+      // v0.30.382 — ONE SWING PER APPROACH, THEN A REST. The old fallback looped the
+      // attack set for as long as the player stood next to the monster (nine frames
+      // minimum), so a monster at your side cycled swings whether or not it was
+      // hitting anything. Now it winds up once as you close in, plays the swing to
+      // its settle, rests, and only then swings again.
+      m._proxAtk = false;
+      if (_inR && now >= (m._proxRestUntil || 0)) {
+        const _np = Math.max(1, set.attack ? (set.attack._readyN || 0) : 0) || _ftP.length;
+        m._atkStrikeMs = -1;
+        m._animSt = null;
+        const _len = _lxSwingLength(m, _np, _ftP);
+        m._swingUntil = now + _len;
+        m._proxRestUntil = now + _len + LX_MOB_SWING_REST_MS;
+        attacking = true;
+      }
+    } else {
+      if (_inR && !m._proxAtk) m._proxAtkMinUntil = now + _atkMs * 9;
+      m._proxAtk = _inR || now < (m._proxAtkMinUntil || 0);
+      attacking = m._proxAtk;
+    }
   }
   // v0.26.351 — record the current frame state so the renderer can apply the
   // per-type attack-frame box scale (padded swing/smash frames) to the attack
@@ -125212,6 +125265,27 @@ function _monsterStateFrame(m) {
   // not walking and keeps its attack frames -- which is the case where the
   // pose actually carries information the player needs to read.
   if (attacking && !(typeof _mobWalking === 'function' && _mobWalking(m))) {
+    const _ftA = _lxCalibFt(m.type, 'attack');
+    if (_ftA && set.attack) {
+      // v0.30.382 — the monster's own timing, walked once
+      if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(set.attack, _mfb);
+      let n = set.attack._readyN || 0;
+      while (n < set.attack.length && set.attack[n] && set.attack[n].complete && set.attack[n].naturalWidth > 0) n++;
+      set.attack._readyN = n;
+      if (n === 0) return null;
+      if (n === 1) return set.attack[0];
+      const _entered = m._animSt !== 'attack';
+      let _elapsed = now + _mobAnimPhase(m, 'attack', false);
+      const _len = _lxSwingLength(m, n, _ftA);
+      if (_entered) { m._swingUntil = Math.max(m._swingUntil || 0, now + _len); m._swingAtkUntil = m.atkAnimUntil || 0; }
+      else if (_elapsed >= _len && (m.atkAnimUntil || 0) > (m._swingAtkUntil || 0) && (m.atkAnimUntil || 0) - now >= _len * 0.5) {
+        // the attack window was pushed out AFTER this swing began (a new hit) and the swing has
+        // finished: swing again. A window that merely outlasts the swing holds the settle; a
+        // swing still playing is never cut.
+        m._animStAt = now; m._swingUntil = now + _len; m._swingAtkUntil = m.atkAnimUntil || 0; _elapsed = 0;
+      }
+      return set.attack[_lxFtIndexOnce(n, _ftA, _lxSwingClock(m, n, _ftA, Math.max(0, _elapsed)))];
+    }
     return _bossLoopFrame(set.attack, _atkMs, _mfb, _mobAnimPhase(m, 'attack', false));
   }
   if (_mobWalking(m)) return _bossLoopFrame(set.walk, _LX_MOB_WALK_FRAME_MS, _mfb, _mobAnimPhase(m, 'walk', true));   // v0.29.273 — displacement-aware (slow mobs glided); v0.30.x — quicker stride

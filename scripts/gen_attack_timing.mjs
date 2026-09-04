@@ -74,6 +74,56 @@ export function defaultAttackFt(n, cb, frameH) {
   return ft;
 }
 
+// v0.30.382 - THE MONSTER RULE, INDIVIDUALISED (per user: "improving the smoothness
+// of the monster animation sprite time interval, it should be well timed with the
+// attack, should not be rushed, and should not be spammy" / "the frames should be
+// individualised per monster so do look into the attack frames especially").
+// Every one of the 110 monster attack sets has per-frame content boxes in the
+// manifest, and the apex (the frame whose content top is highest - a raised claw,
+// a reared body) sits anywhere from frame 0 to 8 across them. So each set gets its
+// own timing from its own frames:
+//   base 72ms (the shared mob cadence; fatDragon keeps its authored 96)
+//   strike = the frame after the apex when the apex is clear (>= 3% of the frame
+//            height); a late apex (the last two frames) makes the strike the frame
+//            before the settle; a flat set (a pulse, a spit) strikes mid-sequence
+//   strike hold = 1.8x + 2.5x the apex prominence, capped at 2.8x - a snail that
+//            rears 39% of its frame holds its strike 2.8x, a squid that barely
+//            moves 1.8x
+//   sides x1.5, first frame x1.2, last x1.6, as the bosses
+// The game walks the result ONCE per attack (v0.30.382, _monsterStateFrame).
+export const LX_MOB_ATK_BASE_MS = 72;
+export const LX_MOB_ATK_BASE_BY_TYPE = { fatDragon: 96 };
+export const LX_MOB_HOLD = { strikeMin: 1.8, strikeSlope: 2.5, strikeMax: 2.8, side: 1.5, first: 1.2, last: 1.6, pulse: 1.8, clearApex: 0.03 };
+export function defaultMobAttackFt(n, cb, frameH, base) {
+  if (!(n > 1)) return null;
+  base = base > 0 ? base : LX_MOB_ATK_BASE_MS;
+  let strike = Math.round((n - 1) / 2), prom = 0;
+  if (Array.isArray(cb) && cb.length === n && frameH > 0) {
+    let apex = -1, best = Infinity, lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const b = cb[i]; if (!Array.isArray(b) || b.length < 2) { apex = -1; break; }
+      const top = +b[0];
+      if (top < best) { best = top; apex = i; }
+      lo = Math.min(lo, top); hi = Math.max(hi, top);
+    }
+    if (apex >= 0) prom = (hi - lo) / frameH;
+    if (prom >= LX_MOB_HOLD.clearApex) {
+      if (apex >= 1 && apex <= n - 3) strike = Math.min(n - 3, Math.max(2, apex + 1));
+      else if (apex >= n - 2) strike = n - 2;
+    }
+  }
+  const strikeHold = prom < LX_MOB_HOLD.clearApex ? LX_MOB_HOLD.pulse : Math.min(LX_MOB_HOLD.strikeMax, LX_MOB_HOLD.strikeMin + prom * LX_MOB_HOLD.strikeSlope);
+  const ft = new Array(n);
+  for (let i = 0; i < n; i++) {
+    let k = 1;
+    if (i === strike) k = strikeHold;
+    else if (Math.abs(i - strike) === 1) k = LX_MOB_HOLD.side;
+    if (i === 0) k = Math.max(k, LX_MOB_HOLD.first);
+    if (i === n - 1) k = Math.max(k, LX_MOB_HOLD.last);
+    ft[i] = Math.round(base * k);
+  }
+  return ft;
+}
 function main() {
   const src = readFileSync(CALIB, 'utf8');
   const m = src.match(/^([\s\S]*?)window\.LX_ANIM_CALIB = ([\s\S]*?);\nwindow\.LX_ATK_HITBOX = ([\s\S]*?);\n$/);
@@ -85,13 +135,13 @@ function main() {
   const report = [];
   for (const key of Object.keys(M).sort()) {
     const e = M[key];
-    if (!e || e.group !== 'boss' || !e.states || !e.states.attack) continue;
+    if (!e || (e.group !== 'boss' && e.group !== 'monster') || !e.states || !e.states.attack) continue;   // v0.30.382 - monsters too
     const st = e.states.attack;
     const n = st.count | 0;
     if (n < 2) continue;
     const cur = calib[key] && calib[key].attack;
     if (cur && Array.isArray(cur.ft) && !cur.ftAuto) { kept++; continue; }   // authored: never touched
-    const ft = defaultAttackFt(n, st.cb, st.h);
+    const ft = e.group === 'boss' ? defaultAttackFt(n, st.cb, st.h) : defaultMobAttackFt(n, st.cb, st.h, LX_MOB_ATK_BASE_BY_TYPE[key]);   // v0.30.382
     if (!ft) continue;
     const same = cur && Array.isArray(cur.ft) && cur.ft.length === ft.length && cur.ft.every((v, i) => v === ft[i]) && cur.ftAuto === true;
     if (same) continue;
@@ -104,7 +154,7 @@ function main() {
     }
   }
   if (CHECK) {
-    if (stale) { console.error(`gen_attack_timing --check: ${stale} boss attack set(s) lack the default timing - run node scripts/gen_attack_timing.mjs`); process.exit(1); }
+    if (stale) { console.error(`gen_attack_timing --check: ${stale} attack set(s) lack the default timing - run node scripts/gen_attack_timing.mjs`); process.exit(1); }
     console.log(`gen_attack_timing --check: ok (${kept} authored kept)`);
     return;
   }
@@ -115,7 +165,7 @@ function main() {
   writeFileSync(tmp, out);
   execFileSync(process.execPath, ['--check', tmp], { stdio: 'inherit' });
   renameSync(tmp, OUT);
-  console.log(`baked ${baked} boss attack timing(s), kept ${kept} authored`);
+  console.log(`baked ${baked} attack timing(s), kept ${kept} authored`);
   for (const r of report) console.log('  ' + r);
 }
 if (process.argv[1] && /gen_attack_timing\.mjs$/.test(process.argv[1])) main();
