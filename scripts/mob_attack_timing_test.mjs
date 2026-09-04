@@ -43,14 +43,15 @@ try {
   await page.waitForFunction(() => typeof game === 'object' && typeof _monsterStateFrame === 'function' && typeof spawnMonster === 'function', null, { timeout: 180000 }); await page.waitForTimeout(6000);
   await page.evaluate(() => { try { _lxBootGateDone = true; } catch (e) {} try { _prologueActive = false; } catch (e) {} for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; } });
   const g = await page.evaluate(async () => {
-    const o = {}; const ft = (typeof _lxCalibFt === 'function') ? _lxCalibFt('snail', 'attack') : null; o.ft = ft;
+    const o = {}; const ft = (typeof _lxCalibFt === 'function') ? _lxCalibFt('echoKnight', 'attack') : null; o.ft = ft;
     if (!ft) return o;
     try { loadMap('forest', 300); } catch (e) { o.mapErr = String(e && e.message); }   // the boot map is a town: no spawns there
     await new Promise((r) => setTimeout(r, 400));
-    const spawnSnail = (dx) => { spawnMonster(player.x + dx, player.y, 'snail'); const list = game.monsters.filter((x) => x && x.type === 'snail'); return list[list.length - 1]; };
-    const set = _monsterFramesFor('snail'); const t0 = performance.now();
+    const spawnSnail = (dx) => { spawnMonster(player.x + dx, player.y, 'echoKnight'); const list = game.monsters.filter((x) => x && x.type === 'echoKnight'); return list[list.length - 1]; };   // per user: the snail has no dedicated attack sprites - the Echo Knight's slash is the gauge
+    const set = _monsterFramesFor('echoKnight'); const t0 = performance.now();
     while (!(set.attack && set.attack[8] && set.attack[8].complete && set.attack[8].naturalWidth > 0) && performance.now() - t0 < 15000) await new Promise((r) => setTimeout(r, 50));
     o.ready = set.attack ? set.attack.filter((f) => f && f.complete && f.naturalWidth > 0).length : 0;
+    game.paused = true;   // the picker runs on the wall clock; the live loop must not hit anyone meanwhile
     const idx = (f) => set.attack.indexOf(f);
     const m = spawnSnail(400); if (!m) return Object.assign(o, { spawnErr: 'no snail spawned' });
     m.vx = 0; m.currentHp = m.maxHp || 100; o.type = m.type;
@@ -60,16 +61,16 @@ try {
     const seq = []; const s0 = performance.now();
     while (performance.now() - s0 < 900) { const f = _monsterStateFrame(m); seq.push([Math.round(performance.now() - s0), idx(f)]); await new Promise((r) => setTimeout(r, 8)); }
     o.instFirst = seq[0][1]; o.instLast = seq[seq.length - 1][1]; o.instMin = Math.min(...seq.map((x) => x[1])); o.instMax = Math.max(...seq.map((x) => x[1]));
-    const on5 = seq.filter((x) => x[1] === 5); o.instStrikeMs = on5.length ? on5[on5.length - 1][0] - on5[0][0] : 0;
+    const after6 = seq.find((x) => x[1] >= 7); o.instStrikeMs = after6 ? after6[0] : -1; o.instLate6 = seq.some((x) => x[0] > 220 && x[1] === 6);   // the strike frame gives way to the follow-through no earlier than its 155ms hold (sampling gaps only push it later)
     o.instMonotone = seq.every((x, i) => i === 0 || x[1] >= seq[i - 1][1]); o.instSamples = seq.filter((x, i) => i % 6 === 0).map((x) => x[0] + ':' + x[1]).join(' ');
     // a telegraphed attack: the strike frame begins as the telegraph ends
     m._animSt = null; m._atkStrikeMs = 450; m._swingUntil = 0; m.atkAnimUntil = performance.now() + 2000;
     const tseq = []; const t1 = performance.now();
     while (performance.now() - t1 < 700) { const f = _monsterStateFrame(m); tseq.push([Math.round(performance.now() - t1), idx(f)]); await new Promise((r) => setTimeout(r, 8)); }
-    const before = tseq.filter((x) => x[0] < 430).map((x) => x[1]); const at = tseq.filter((x) => x[0] >= 465 && x[0] < 640).map((x) => x[1]);
-    o.teleBeforeMax = Math.max(...before); o.teleAtStrike = at.length > 0 && at.every((v) => v === 5); o.teleFirst = tseq[0][1]; o.teleSamples = 'n=' + at.length + ' ' + tseq.filter((x) => x[0] >= 380).map((x) => x[0] + ':' + x[1]).join(' ');
+    const before = tseq.filter((x) => x[0] < 430).map((x) => x[1]); const at = tseq.filter((x) => x[0] >= 465 && x[0] < 590).map((x) => x[1]);
+    o.teleBeforeMax = Math.max(...before); o.teleAtStrike = at.length > 0 && at.every((v) => v === 6); o.teleFirst = tseq[0][1]; o.teleSamples = 'n=' + at.length + ' ' + tseq.filter((x) => x[0] >= 380).map((x) => x[0] + ':' + x[1]).join(' ');
     // proximity: one swing then a rest, not a loop
-    const m2 = spawnSnail(10); if (!m2) return Object.assign(o, { spawnErr: 'no second snail' }); m2.vx = 0; m2.currentHp = m2.maxHp || 100; m2.atkAnimUntil = 0; m2._swingUntil = 0; m2._proxRestUntil = 0;
+    const m2 = spawnSnail(90); if (!m2) return Object.assign(o, { spawnErr: 'no second knight' }); m2.vx = 0;   // centres 125px apart: inside the 1.2x-width (132px) proximity radius, not in contact m2.currentHp = m2.maxHp || 100; m2.atkAnimUntil = 0; m2._swingUntil = 0; m2._proxRestUntil = 0;
     const isAtk = (f) => set.attack.indexOf(f) >= 0;
     const p0 = _monsterStateFrame(m2); o.proxStarts = isAtk(p0); o.proxFirst = idx(p0);
     const swingLen = ft.reduce((a, b) => a + b, 0);
@@ -77,14 +78,15 @@ try {
     const p1 = _monsterStateFrame(m2); o.proxRests = !isAtk(p1);
     await new Promise((r) => setTimeout(r, 500));
     const p2 = _monsterStateFrame(m2); o.proxAgain = isAtk(p2);
+    game.paused = false;
     return o;
   });
-  ok("the game reads the snail's baked timing", !!g.ft && g.ft.length === 9, g.ft && g.ft.join('/'));
-  ok('snail attack frames decoded in the harness', g.ready === 9, String(g.ready));
-  ok('instant hit: the strike frame (5) is on screen at the hit, held ~200ms, then the swing settles', g.instFirst === 5 && g.instStrikeMs >= 150 && g.instLast === 8, JSON.stringify([g.instFirst, g.instStrikeMs, g.instLast]));
-  ok('the swing plays once - frames only ever advance, no wrap back to the windup', g.instMonotone === true && g.instMin === 5 && g.instMax === 8, JSON.stringify([g.instMonotone, g.instMin, g.instMax]) + ' ' + (g.instMonotone ? '' : g.instSamples));
-  ok('telegraphed 450ms attack: windup frames before the telegraph ends, the strike frame right after', g.teleFirst === 0 && g.teleBeforeMax <= 4 && g.teleAtStrike === true, JSON.stringify([g.teleFirst, g.teleBeforeMax, g.teleAtStrike]) + ' ' + (g.teleAtStrike ? '' : g.teleSamples));
-  ok('standing beside the player: one full swing from the windup, then a rest, then another', g.proxStarts === true && g.proxFirst === 0 && g.proxRests === true && g.proxAgain === true, JSON.stringify([g.proxStarts, g.proxFirst, g.proxRests, g.proxAgain]));
+  ok("the game reads the Echo Knight's baked timing (strike frame 6, held 155ms)", !!g.ft && g.ft.length === 9 && g.ft[6] === 155, g.ft && g.ft.join('/'));
+  ok('Echo Knight attack frames decoded in the harness', g.ready === 9, String(g.ready));
+  ok('instant hit: the strike frame (6) is on screen at the hit, held ~155ms, then the swing settles', g.instFirst === 6 && g.instStrikeMs >= 140 && g.instStrikeMs <= 600 && g.instLate6 === false && g.instLast === 8, JSON.stringify([g.instFirst, g.instStrikeMs, g.instLast]));
+  ok('the swing plays once - frames only ever advance, no wrap back to the windup', g.instMonotone === true && g.instMin === 6 && g.instMax === 8, JSON.stringify([g.instMonotone, g.instMin, g.instMax]) + ' ' + (g.instMonotone ? '' : g.instSamples));
+  ok('telegraphed 450ms attack: windup frames before the telegraph ends, the strike frame right after', g.teleFirst === 0 && g.teleBeforeMax <= 5 && g.teleAtStrike === true, JSON.stringify([g.teleFirst, g.teleBeforeMax, g.teleAtStrike]) + ' ' + (g.teleAtStrike ? '' : g.teleSamples));
+  ok('an Echo Knight beside the player: one full swing from the windup, then a rest, then another', g.proxStarts === true && g.proxFirst === 0 && g.proxRests === true && g.proxAgain === true, JSON.stringify([g.proxStarts, g.proxFirst, g.proxRests, g.proxAgain]));
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
 await browser.close(); server.kill();

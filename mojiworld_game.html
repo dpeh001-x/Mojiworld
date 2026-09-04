@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.382';
+const GAME_VERSION = 'v0.30.383';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -79329,6 +79329,8 @@ function updateMonsters(dt) {
       // (ground chase, walk fallback, flier _maxV) inherits the slow with
       // no extra branches.
       const _tSpd = towerSpeedMul() * ((typeof _waltzMulAt === 'function') ? _waltzMulAt(m.x + m.w / 2, m.y + m.h / 2, !!(m.isBoss || m.boss)) : 1);   // v0.29.370 — bosses take half the waltz slow
+      const _planted = _lxMobPlanted(m);   // v0.30.383 — see _lxMobPlanted
+      if (_planted) { m._walkLatch = false; m._animXV = 0; }
       if (m.aggroTarget && distToPlayer < 500 && yDiff < 200) {
         // v0.25.112 — per-monster aggro offset. Without this, every
         // aggroing mob aims at the same pixel (player centre) and the
@@ -79378,13 +79380,23 @@ function updateMonsters(dt) {
           }
         }
         const _accelDB = Math.max(40, (m.w || 32) * 0.7);
-        if (Math.abs(dir) > _accelDB) {
+        if (_planted) {
+          if (!m.flies) m.vx *= 0.5;   // v0.30.383 — planted: no drive, a shove dies out
+        } else if (Math.abs(dir) > _accelDB) {
           // v0.25.771 — Ground-mob vx accel/cap. Fliers now use the
           // destination-seek block below for velocity control, so the
           // regular AI's vx logic is gated to non-fliers — otherwise the
           // seek-driven velocity would get clobbered by the m.facing *
           // accel injection every frame.
           if (!m.flies) {
+            // v0.30.383 — A START FROM REST. The drift kill further down zeroes any
+            // vx below the walk threshold while the walk latch is off, and the latch
+            // engages only above 0.35x speed — so accelerating from rest at 0.1 a tick
+            // was eaten every tick and a chasing monster that had stopped (beside the
+            // player, after a hit, after a planted swing) never moved again. The first
+            // tick of a start now clears the threshold, and the walk cycle begins with it.
+            const _walkOn = _lxMobWalkOn(m) * 1.05;
+            if (Math.abs(m.vx || 0) < _walkOn) m.vx = m.facing * _walkOn;
             m.vx += m.facing * 0.10 * _tSpd;
             if (Math.abs(m.vx) > m.speed * 1.5 * _tSpd) m.vx = m.facing * m.speed * 1.5 * _tSpd;
           }
@@ -79403,7 +79415,7 @@ function updateMonsters(dt) {
         // floor the gap between hops; types that omit it are unaffected.
         const _jcd = (m.jumpCdMs | 0);
         if (_jcd > 0) { m._jumpCdT = Math.max(0, (m._jumpCdT || 0) - dt); }
-        if (m.jump > 0 && m.onGround && !(_jcd > 0 && m._jumpCdT > 0)
+        if (!_planted && m.jump > 0 && m.onGround && !(_jcd > 0 && m._jumpCdT > 0)
             && Math.random() < _jumpP) {
           m.vy = -_mobJumpV(m);
           if (_jcd > 0) m._jumpCdT = _jcd;
@@ -79418,7 +79430,7 @@ function updateMonsters(dt) {
         // (was previously: m.vx = m.facing * m.speed * 1.5 was overwriting
         // the seek's vx assignment every frame, effectively pinning fliers
         // to a horizontal-only patrol pattern).
-        if (!m.flies) m.vx = m.facing * m.speed * _tSpd;
+        if (!m.flies) m.vx = _planted ? m.vx * 0.5 : m.facing * m.speed * _tSpd;   // v0.30.383 — planted: no patrol drive
         if (m.onGround) {
           if (m._edgeFlipCd === undefined) m._edgeFlipCd = 0;
           if (m._edgeFlipCd > 0) m._edgeFlipCd -= dt;
@@ -123237,6 +123249,24 @@ function _mobCasting(m) {
 // True when the mob should be DRAWN attacking: any cast, plus the authored
 // attack-animation window (contact hits, parries, skill pulses). Distinct from
 // _mobCasting on purpose — see above.
+// v0.30.383 — PLANTED FEET (per user: "try to avoid moving horizontally and
+// playing attack frames, try to ensure that monster movement stops before
+// engaging attack and the attacking sprites to make it smooth"). The chase kept
+// accelerating a monster toward the player while its attack animation played, so
+// a swing slid along the ground. While the attack animation is on — an attack
+// window, a shot windup, a big-melee telegraph, a proximity swing — an ordinary
+// grounded monster now plants: the chase stops driving it, its speed halves each
+// tick (a knockback still shoves it, then dies out), it does not jump, and the
+// walk latch is dropped so the attack frames start on a still body. Bosses keep
+// their lunges and dashes; a monster mid-jump finishes the jump first.
+function _lxMobPlanted(m) {
+  if (!m || m.isBoss || m.boss || m.zodiacBoss || m.superBoss || m._rushBoss) return false;
+  if (m._coopMirror || m.ally || m.isSummon || m._playerOwned) return false;
+  if (m._dashing || m._dashT > 0 || m._dashCharging > 0) return false;
+  if (!m.onGround) return false;
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  return _mobAttackAnim(m) || now < (m._swingUntil || 0);
+}
 function _mobAttackAnim(m) {
   if (!m) return false;
   if (_mobCasting(m)) return true;
