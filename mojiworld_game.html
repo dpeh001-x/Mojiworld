@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.379';
+const GAME_VERSION = 'v0.30.380';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -34941,6 +34941,44 @@ function _lxApplyStatTable(mon, type, isBoss, isElite, isMiniBoss) {
 // that same honest number). Grind income (mobs, chests, jackpots) still
 // passes through MOJICOIN_GAIN_MULT, keeping farming modest relative to the
 // now-expensive potion economy. The expedition no-earn guard covers both.
+// v0.30.380 — BANK INTEREST ON THE PLAY CLOCK (per user: "Bank can pay interest
+// but at every 1h of game time of about 0.1%"). Felina used to pay 1.5% a day of
+// WALL-CLOCK time on the first 50,000 on deposit — at most 750 a day, computed
+// from the untrusted client clock and clamped to a day per visit to stop the
+// clock-forward farm. Now the whole balance earns 0.1% for every hour the game is
+// actually running (the same fixed-step clock as boss respawns; paused, closed,
+// or inside the expedition tower does not count), paid on the hour, compounding.
+// The clock survives a reload (bankAccrueMs is saved) and resets when the vault
+// is empty, so a deposit starts a fresh hour. No wall clock is read anywhere.
+const LX_BANK_RATE_PER_HOUR = 0.001;
+const LX_BANK_HOUR_MS = 3600000;
+function _lxBankAccrue(dt) {
+  if (typeof player === 'undefined' || !player) return 0;
+  if (!(player.bankBalance > 0)) { player.bankAccrueMs = 0; return 0; }
+  if (typeof game !== 'undefined' && game.expedition && game.expedition.active) return 0;
+  let acc = (isFinite(player.bankAccrueMs) ? Math.max(0, +player.bankAccrueMs) : 0) + Math.max(0, +dt || 0);
+  let paid = 0, guard = 0;
+  while (acc >= LX_BANK_HOUR_MS && guard++ < 1000) {
+    acc -= LX_BANK_HOUR_MS;
+    const gain = Math.floor(player.bankBalance * LX_BANK_RATE_PER_HOUR);
+    if (gain > 0) { player.bankBalance = Math.min(1e12, player.bankBalance + gain); paid += gain; }
+  }
+  player.bankAccrueMs = acc;
+  if (paid > 0) {
+    player._bankInterestTotal = (player._bankInterestTotal || 0) + paid;
+    try { if (typeof showToast === 'function') showToast('🏦 Mojibank interest: +' + paid.toLocaleString() + ' mojicoins'); } catch (_) {}
+  }
+  return paid;
+}
+function _lxBankInterestLine() {
+  const b = (typeof player !== 'undefined' && player && isFinite(player.bankBalance)) ? Math.max(0, +player.bankBalance) : 0;
+  if (!(b > 0)) return '*Deposit something and the clock starts: 0.1 % of your balance, every hour of play.*';
+  const left = Math.max(0, LX_BANK_HOUR_MS - (((player.bankAccrueMs || 0) % LX_BANK_HOUR_MS) || 0));
+  const mins = Math.max(1, Math.ceil(left / 60000));
+  const next = Math.floor(b * LX_BANK_RATE_PER_HOUR);
+  if (next < 1) return '*You earn 0.1 % of your balance every hour of play — under 1,000 on deposit that rounds to nothing, dear.*';
+  return '*You earn 0.1 % of your balance every hour of play. Next payment: ' + next.toLocaleString() + ' mojicoins in ' + mins + ' min.*';
+}
 function _grantMojicoins(n, opts) {
   if (typeof n !== 'number' || !isFinite(n) || n <= 0) return 0;
   // v0.26.294 — Per user "do not earn mojicoins from monsters from the
@@ -41539,7 +41577,7 @@ const PLAYER_SAVE_FIELDS = [
   // v0.29.311 — the balance is NO LONGER death-proof: percentage coin
   // penalties (death, Reset Stats) size off wallet + bank and collect
   // from both via totalCoins() / chargeCoins().
-  'bankBalance','bankLastTick',
+  'bankBalance','bankLastTick','bankAccrueMs',   // v0.30.380 — play-time interest clock (ms into the current hour)
   // v0.26.258 — Lost-and-Found Curator Marbella. Object mapping
   // 'type:milestone' (e.g. 'snail:100') → true once claimed so the
   // bounty doesn't double-dip on re-visits.
@@ -44781,7 +44819,8 @@ const _SAVE_NUMERIC_GUARDS = [
   ['skillPoints',     0,    0,   1e9],
   ['skillRankPoints', 0,    0,   1e9],
   ['setshards',       0,    0,   1e9],
-  ['bankBalance',     0,    0,   1e12],   // was unguarded — a NaN/Infinity here propagated into the wallet on "Withdraw all"
+  ['bankBalance',     0,    0,   1e12],
+  ['bankAccrueMs',    0,    0,   3600000],   // v0.30.380 — at most one hour banked; a tampered save pays one payment, not a fortune   // was unguarded — a NaN/Infinity here propagated into the wallet on "Withdraw all"
   // v0.26.x — persisted cooldown/boost timestamps: NaN/Infinity from a corrupted
   // save -> 0 (sage ready / spawn-boost off). lo/hi never clamp a valid value.
   ['_sageNextAt',      0,    0,   1e15],
@@ -94631,27 +94670,11 @@ So.. do you need a lift?`;
     // player.bankLastTick (ms epoch).
     if (typeof player.bankBalance !== 'number' || !isFinite(player.bankBalance)) player.bankBalance = 0;
     if (typeof player.bankLastTick !== 'number' || !isFinite(player.bankLastTick)) player.bankLastTick = _monoNow();
-    // Compute accrued interest since last tick.
-    const _BANK_CAP = 50000;
-    const _BANK_RATE = 0.015;   // 1.5 % per day
-    const _nowMs = _monoNow();
-    // v0.26.399 — clamp to a single day per visit. bankLastTick uses the
-    // untrusted client clock; without this clamp a clock-forward rollback
-    // could credit unbounded interest in one visit. Negative deltas already
-    // floor to 0; the cap stops the forward-rollback farm.
-    const _hoursElapsed = Math.min(24, Math.max(0, (_nowMs - player.bankLastTick) / 3600000));
-    // Interest only accrues on the portion within the cap. Anything
-    // above the cap sits dormant — encourages players to redeploy
-    // capital instead of hoarding indefinitely.
-    const _earningBase = Math.min(player.bankBalance, _BANK_CAP);
-    const _interestEarned = Math.floor(_earningBase * _BANK_RATE * (_hoursElapsed / 24));
-    if (_interestEarned > 0) {
-      player.bankBalance = Math.min(1e12, player.bankBalance + _interestEarned);
-      player.bankLastTick = _nowMs;
-    }
-    const _capLine = player.bankBalance >= _BANK_CAP
-      ? '*Your balance is at the interest cap — anything above 50,000 mojicoins sits dormant.*'
-      : `*Each day you earn 1.5 % on the first 50,000 mojicoins on deposit.*`;
+    // v0.30.380 — interest is paid by the play clock (see _lxBankAccrue): 0.1% of the
+    // whole balance per hour of game time, on the hour. Nothing accrues while the
+    // game is closed or paused, so there is no clock to roll forward and no cap.
+    _lxBankAccrue(0);
+    const _capLine = _lxBankInterestLine();
     text = `*Abacus beads click like crickets. She glances up over half-moon spectacles.*\n\nWelcome to the Mojibank, dear. I am Felina — secretary, manager, and the only person in this building who can read both columns. Your savings work harder than you do, given the proper accounts. ${_interestEarned > 0 ? `\n\n*Your account earned ${_interestEarned.toLocaleString()} mojicoins since your last visit.*` : ''}\n\nCurrent balance: ${player.bankBalance.toLocaleString()} mojicoins. Wallet: ${Math.floor(player.mojicoins||0).toLocaleString()} mojicoins.\n\n${_capLine}`;
     opts.push({ t:'Deposit 1,000 mojicoins', cb:() => {
       if ((player.mojicoins||0) < 1000) { document.getElementById('dialog-text').textContent = 'I admire ambition, but the coin pouch needs to contain coins first. Come back when you can spare the 1,000.'; return; }   // v0.26.1033 — was |0: wrapped negative >2.147B, blocking deposits for the richest players
@@ -94677,7 +94700,7 @@ So.. do you need a lift?`;
       if (typeof saveState === 'function') saveState();
       document.getElementById('dialog-text').textContent = `*Felina counts ${_amt.toLocaleString()} mojicoins into a velvet pouch and slides it across the counter.*\n\nDo come back. Your money was very fond of us.`;
     } });
-    opts.push({ t:'How does interest work?', cb:() => { document.getElementById('dialog-text').textContent = '*Felina folds her hands like she\'s explained this twice today already.*\n\nSimple as soup. The first 50,000 mojicoins on deposit earns 1.5 % each day. Money over the cap rests safely, but earns nothing — banks are not charities, dear. Withdraw anytime, no fee. The clock ticks per the day, not per the visit.\n\n*She lowers her voice.*\n\nAnd before you ask, dear — no, the vault is not a hiding place. Death collects its 35 % from your purse first and my ledgers second, and the same is true of the fee for unlearning what you have learned. I keep your money working, not safe from consequence.'; } });
+    opts.push({ t:'How does interest work?', cb:() => { document.getElementById('dialog-text').textContent = '*Felina folds her hands like she\'s explained this twice today already.*\n\nSimple as soup. Every hour you spend out there playing, your whole balance earns 0.1 % — paid on the hour, compounding, no cap. The clock only runs while the game runs: close it or pause it and the beads stop. Withdraw anytime, no fee.\n\n*She lowers her voice.*\n\nAnd before you ask, dear — no, the vault is not a hiding place. Death collects its 35 % from your purse first and my ledgers second, and the same is true of the fee for unlearning what you have learned. I keep your money working, not safe from consequence.'; } });
   } else if (npc.role === 'bravoGuide') {
     // v0.26.289 — Per-floor Bravo. Three states:
     //   1. Player just arrived, quest not yet cleared → flavor flavor,
@@ -137616,7 +137639,8 @@ function loop(time) {
   const dt = _LX_SIM_STEP_MS;   // v0.28.3 — fixed 60 Hz step (the gate above already banked/consumed the real elapsed time and updated lastTime). Replaces the old wall-clock delta so the frame-locked sim is refresh-independent; dt-scaled timers stay real-time because the sim runs at a true 60 steps/sec.
   game.time++;
   if (_LX_PREWARM_Q.length) _lxPrewarmDrain();   // v0.30.358 — bakes ahead of the draw, through the same budget
-  game._playMs = (game._playMs || 0) + dt;   // v0.26.453 - accumulated in-game playtime (ms) for boss respawn gating
+  game._playMs = (game._playMs || 0) + dt;
+  if (!game.paused && typeof _lxBankAccrue === 'function') _lxBankAccrue(dt);   // v0.30.380 — bank interest on play time   // v0.26.453 - accumulated in-game playtime (ms) for boss respawn gating
   if (player._eclipseRain && !game.paused) _lxEclipseTick(dt);   // v0.30.34 - Eclipse clock: same cadence as game.time, so hit-stop cannot stretch the hold past the moon
   // v0.26.317 — Low-HP audio warning. Fires a one-shot `low_hp` SFX
   // when player HP first drops below 25 % of max, then re-arms once
