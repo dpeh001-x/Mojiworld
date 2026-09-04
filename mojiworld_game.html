@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.377';
+const GAME_VERSION = 'v0.30.378';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -34814,6 +34814,28 @@ const _coinGainMult = () => (typeof player !== 'undefined' && player && player.l
 // 2.51x — stacking another x2 here would make them 5x, which is not what was
 // asked for.
 const MONSTER_COIN_MULT = 2.0;
+// v0.30.378 — THE COIN CURVE (per user: "players mention it is too easy to earn
+// mojicoins"). The stats table pays every ordinary monster a flat 7.5% of its HP,
+// and HP climbs ~10x per 15 levels past Lv 40 — so coins per kill climbed just as
+// fast (a Lv 56 elderbark paid 5,785 where a Lv 25 sandhusk paid 284), while the
+// sinks did not. Above a knee the payout now grows with HP^0.45 instead of HP:
+// nothing changes up to ~Lv 25; a Lv 56 kill pays ~970, a Lv 71 elite ~3,100;
+// coins keep rising with level, just far more slowly. Bosses are exempt (their
+// payouts were already 1.7% of HP; the boss-gear cap is the boss lever).
+// Applied ONCE, at the end of spawnMonster, to every monster it returns (table
+// types, legacy types, elites, elders, the special spawns) and flagged; the
+// drop-time reader falls back to the curve for anything built elsewhere.
+const LX_COIN_KNEE_HP = 3000;
+const LX_COIN_EXP = 0.45;
+function _lxCoinCurve(coin, hp, isBoss) {
+  if (isBoss || !(coin > 0) || !(hp > LX_COIN_KNEE_HP)) return coin;
+  return Math.max(1, Math.floor(coin * Math.pow(LX_COIN_KNEE_HP / hp, 1 - LX_COIN_EXP)));
+}
+function _lxMobCoin(m) {
+  if (!m) return 0;
+  const c = m.mojicoins || 0;
+  return m._coinCurved ? c : _lxCoinCurve(c, m.maxHp || 0, !!(m.isBoss || m.boss || m.zodiacBoss));
+}
 function _monsterCoinMult(m) { void m; return MONSTER_COIN_MULT; }
 
 // =========================================================================
@@ -62719,6 +62741,11 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     _spawned.w = Math.floor((_spawned.w || 30) * 1.15);
     _spawned.h = Math.floor((_spawned.h || 26) * 1.15);
   }
+  // v0.30.378 — the coin curve, once, for everything this function returns
+  if (_spawned && !_spawned._coinCurved) {
+    _spawned.mojicoins = _lxCoinCurve(_spawned.mojicoins || 0, _spawned.maxHp || 0, !!(_spawned.isBoss || _spawned.boss || _spawned.zodiacBoss || isBoss));
+    _spawned._coinCurved = true;
+  }
   return _spawned;
 }
 
@@ -89336,7 +89363,7 @@ function killMonster(m) {
     // v0.27.0 — include the Hunter's Bounty (treasureCrits) 2x the actual pickup
     // applies on a lethal-crit kill, else the pill under-reports by half on those kills.
     const _bountyMul = (m._killedByCrit && player._activeSynergies && player._activeSynergies.treasureCrits) ? 2 : 1;
-    const _mojExpected = Math.floor((m.mojicoins || 0) * _monMul * _greedMul * _bountyMul * (typeof MOJICOIN_GAIN_MULT === 'number' ? MOJICOIN_GAIN_MULT : 1) * (typeof _diffCoinMul === 'function' ? _diffCoinMul() : 1) * (typeof _affixCoinMul === 'function' ? _affixCoinMul() : 1));   // v0.28.7 — keep the kill-feed pill in sync with the difficulty coin mul · v0.29.288 world affix
+    const _mojExpected = Math.floor(_lxMobCoin(m) * _monMul * _greedMul * _bountyMul * (typeof MOJICOIN_GAIN_MULT === 'number' ? MOJICOIN_GAIN_MULT : 1) * (typeof _diffCoinMul === 'function' ? _diffCoinMul() : 1) * (typeof _affixCoinMul === 'function' ? _affixCoinMul() : 1));   // v0.28.7 — keep the kill-feed pill in sync with the difficulty coin mul · v0.29.288 world affix
     if (_xpGain > 0 || _mojExpected > 0) showKillToast(_xpGain, _mojExpected);
   }
   if (mpCoopMul > 1 && (game._lastCoopToast | 0) + 6000 < game.time) {
@@ -89405,7 +89432,7 @@ function killMonster(m) {
     game.drops.push({
       x: m.x + m.w/2 + (Math.random() - 0.5) * 20, y: m.y + m.h/2,
       vy: -Math.random() * 4 - 2, type: 'mojicoin',
-      value: Math.ceil(m.mojicoins * _coinMul * (typeof _monsterCoinMult === 'function' ? _monsterCoinMult(m) : 1) * (typeof _diffCoinMul === 'function' ? _diffCoinMul() : 1) * (typeof _affixCoinMul === 'function' ? _affixCoinMul() : 1) / mojicoinCount), life: DROP_LIFE_MS,   // v0.28.7 — difficulty risk/reward coin scaling · v0.29.288 world affix
+      value: Math.ceil(_lxMobCoin(m) * _coinMul * (typeof _monsterCoinMult === 'function' ? _monsterCoinMult(m) : 1) * (typeof _diffCoinMul === 'function' ? _diffCoinMul() : 1) * (typeof _affixCoinMul === 'function' ? _affixCoinMul() : 1) / mojicoinCount), life: DROP_LIFE_MS,   // v0.28.7 — difficulty risk/reward coin scaling · v0.29.288 world affix
     });
   }
 
@@ -89533,7 +89560,7 @@ function killMonster(m) {
     // is the canonical helper — falls back to MOB_NATURAL_LEVEL or
     // map.levelReq if the mob doesn't carry an explicit .level field.
     const item = rollItemDrop(tier, _mobLevel(m), undefined, null, _bossLootTierCap(m));
-    if (item) {
+    if (item && _lxBossGearGate(m, item, true)) {   // v0.30.378 — boss gear budget
       game.drops.push({
         x: m.x + m.w/2, y: m.y + m.h/2, vy: -6,
         type: 'item', item, life: DROP_LIFE_MS,   // v0.26.679 — boss gear lingers ~60s (was 900/~15s) so walk-over pickup is forgiving
@@ -89598,7 +89625,7 @@ function killMonster(m) {
       // v0.25.678 — Boss bonus drops also grade by mob level — the boss's
       // own level dictates how spicy its retinue of extra rolls is.
       const extra = rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m));
-      if (extra) {
+      if (extra && _lxBossGearGate(m, extra, true)) {   // v0.30.378 — boss gear budget
         game.drops.push({
           x: m.x + m.w/2 + (Math.random()-0.5)*60,
           y: m.y + m.h/2, vy: -5 - Math.random()*3,
@@ -90067,7 +90094,41 @@ function _rollGravitosHighTierItem() {
   return rollAffixedItem({ ...chosen, slot: _catToSlot(cat) }, 'legendary', 100);
 }
 
+// v0.30.378 — BOSS GEAR CAP (per user: "cap boss gear drops as well, ensure it is
+// tight and no bugs (as I have tried capping it a lot)"). Every earlier cap sat on
+// the ordinary kill block — one chance roll plus one or two bonus rolls — and never
+// saw THIS routine, which showers a super boss with 4 legendary pieces + 2 extras
+// + 3 more (Aetherion: eleven pieces a kill in the harness). One gate now: a
+// per-fight budget on the boss object — ${LX_BOSS_GEAR_CAP} pieces, ${LX_BOSS_GEAR_CAP_REFIGHT}
+// on a refight — consumed by every boss gear push, whichever routine makes it. A
+// super boss spends its budget on the signature loot below (its ordinary rolls
+// are skipped), so what it does drop is the good stuff. Sigils, scrolls, potions
+// and coin bags are not gear and pass untouched; elders and ordinary monsters are
+// not bosses and are untouched.
+const LX_BOSS_GEAR_CAP = 3;
+const LX_BOSS_GEAR_CAP_REFIGHT = 1;
+function _lxIsGearItem(it) { const sl = it && it.slot; return sl === 'weapon' || sl === 'armor' || sl === 'accessory' || sl === 'accessorie'; }
+function _lxIsSuperBoss(m) { return !!(m && (m.type === 'aetherion' || m.type === 'aetherion2' || m.superBoss) && !m._rushBoss); }
+function _lxBossGearCap(m) { return (typeof _lxIsBossRefight === 'function' && _lxIsBossRefight(m)) ? LX_BOSS_GEAR_CAP_REFIGHT : LX_BOSS_GEAR_CAP; }
+function _lxBossGearGate(m, it, ordinary) {
+  if (!m || !_lxIsGearItem(it)) return true;
+  if (!(m.isBoss || m.boss || m.zodiacBoss)) return true;
+  if (ordinary && _lxIsSuperBoss(m)) return false;
+  if (m._gearBudget == null) m._gearBudget = _lxBossGearCap(m);
+  if (m._gearBudget <= 0) return false;
+  m._gearBudget--;
+  return true;
+}
 function triggerSuperBossDeath(m) {
+  // every push the raw routine makes goes through the gate for the duration of the call
+  const drops = game.drops;
+  drops.push = function (d) {
+    if (d && d.type === 'item' && d.item && !_lxBossGearGate(m, d.item, false)) return drops.length;
+    return Array.prototype.push.apply(drops, arguments);
+  };
+  try { return _triggerSuperBossDeathRaw(m); } finally { delete drops.push; }
+}
+function _triggerSuperBossDeathRaw(m) {
   // Cinematic — shattering crystal, screen flash, slo-mo feel
   flash(0.8);
   addShake(24);
