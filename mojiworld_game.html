@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.384';
+const GAME_VERSION = 'v0.30.385';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -137538,6 +137538,25 @@ let lastTime = 0;
 // step has banked, carrying the remainder so the long-run average is exactly
 // 60 Hz. dt is the fixed step below, so the dt-scaled timers stay real-time.
 let _lxSimAccumMs = 0;
+// v0.30.385 — FRAME PACING (per user: "improve on the lag while fighting, limit the
+// variation in frame rates, keep the game stable"). Measured first: on this machine
+// the combat frame is p50 4ms / p99 24ms with 47% of the CPU inside the browser's
+// own raster work, so on a weaker GPU the frame RATE drops — and what the fixed-step
+// loop did then was the lag. It consumed exactly one 16.7ms step per frame, so at
+// 30 fps the whole game ran at half speed (a debt of up to four steps was banked
+// and never repaid), and a frame that arrived a hair under one step (16.6ms on a
+// 60 Hz panel) stepped nothing and drew nothing — a duplicated frame, periodically,
+// from a rounding error. Two fixes:
+//   CATCH-UP — when a frame leaves a whole step of debt behind, _lxFrame runs ONE
+//   extra sim pass with the draw skipped (_lxSimOnly). The sim is ~1ms; the draw is
+//   the frame. So at 30 fps the game runs at full speed and draws every other step,
+//   and a hitch is repaid within a couple of frames instead of never. Never more
+//   than two steps a frame, so a stall cannot spiral.
+//   VSYNC SNAP — a frame time within 18% of one or two steps is taken as exactly
+//   that: 16.3–19.7ms is one step, 27–36ms is two. The watchdog still sees the
+//   real time. Frames on a 144 Hz panel (6.9ms) are not snapped and accumulate.
+let _lxSimOnly = false;   // true during a catch-up sim pass (no draw, no watchdog sample)
+const _lxPaceStats = { frames: 0, steps: 0, catchUp: 0, snapped: 0, skipped: 0 };
 const _LX_SIM_STEP_MS = 1000 / 60;   // 16.667 ms
 // v0.29.533 — How long loot sits on the floor, in MILLISECONDS (per user:
 // 60 seconds). It lives here because it is only meaningful against the sim
@@ -137696,6 +137715,12 @@ function _lxFrame(time) {
   _LX_RAF_PENDING = false;
   try {
     loop(time);
+    // v0.30.385 — CATCH-UP: a whole step of debt left behind means the frame arrived
+    // late; simulate one more step now, without drawing, so the game keeps real time.
+    if (!_lxSimOnly && _lxSimAccumMs >= _LX_SIM_STEP_MS && typeof game !== 'undefined' && game && !game.paused && window._lxBootGateDone) {
+      _lxSimOnly = true; _lxPaceStats.catchUp++;
+      try { loop(time); } finally { _lxSimOnly = false; }
+    }
   } catch (e) {
     // Never let a thrown frame strand the player behind a blackout.
     try { if (typeof game !== "undefined" && game) { game.blackHoldFrames = 0; game.blackFlashOverlay = 0; } } catch (_e) {}
@@ -137759,16 +137784,22 @@ function loop(time) {
   // rAF ticks now run 0 steps, so the frame-locked sim advances at ~60 fps
   // regardless of monitor refresh instead of fast-forwarding.
   {
-    const _elapsed = Math.max(0, Math.min(100, time - lastTime));
+    let _elapsed = Math.max(0, Math.min(100, time - lastTime));
     // v0.30.264 — keep the REAL wall-clock frame time visible to the perf
     // monitor. See the _perfTick call below for the bug this repairs.
-    _lxRealDtMs = _elapsed;
+    if (!_lxSimOnly) {
+      _lxRealDtMs = _elapsed;   // the watchdog sees the REAL frame time
+      const _ratio = _elapsed / _LX_SIM_STEP_MS, _n = Math.round(_ratio);   // v0.30.385 — vsync snap
+      if (_n >= 1 && _n <= 2 && Math.abs(_ratio - _n) < 0.18) { if (_elapsed !== _n * _LX_SIM_STEP_MS) _lxPaceStats.snapped++; _elapsed = _n * _LX_SIM_STEP_MS; }
+      _lxPaceStats.frames++;
+    }
     lastTime = time;
     _lxSimAccumMs += _elapsed;
-    if (_lxSimAccumMs < _LX_SIM_STEP_MS) { _lxNextFrame(); return; }
+    if (_lxSimAccumMs < _LX_SIM_STEP_MS) { if (!_lxSimOnly) _lxPaceStats.skipped++; _lxNextFrame(); return; }
     _lxSimAccumMs -= _LX_SIM_STEP_MS;
     // Clamp the backlog so a long stall / tab-away can't unleash a burst.
     if (_lxSimAccumMs > _LX_SIM_STEP_MS * 4) _lxSimAccumMs = _LX_SIM_STEP_MS * 4;
+    _lxPaceStats.steps++;
   }
   // v0.25.775 — dt cap bumped 32 → 50 ms. Pre-fix: a 5 s tab-switch
   // replayed as a flood of 32 ms frames, ticking boss-attack windups
@@ -137859,7 +137890,7 @@ function loop(time) {
   // and toast "Performance mode" at healthy players. Overload that matters
   // is still overload three seconds later.
   if (!loop._lxPerfArmAt) loop._lxPerfArmAt = time + 3000;
-  if (time > loop._lxPerfArmAt) _perfTick(_lxRealDtMs, time);
+  if (!_lxSimOnly && time > loop._lxPerfArmAt) _perfTick(_lxRealDtMs, time);   // v0.30.385 — a catch-up pass is not a frame
 
   // Throttled autosave (every ~15s of wall time) — only after a class is chosen
   if (player.cls && !game._resetting && (time - (game._lastSave || 0) > 15000)) {
@@ -138176,6 +138207,7 @@ function loop(time) {
   // brand-new pause starts its 3 s window from zero.
   if (game._pausedSinceMs) game._pausedSinceMs = 0;
 
+  if (!_lxSimOnly) {   // v0.30.385 — a catch-up pass simulates only; the frame is drawn once
   ctx.save();
   // v0.29.x — snap the shake to whole px: a fractional full-scene translate
   // resamples EVERY sprite through bilinear filtering for the entire shake
@@ -138426,6 +138458,7 @@ function loop(time) {
   }
 
   _drawOffscreenThreats();   // v0.26.x -- edge arrows for off-screen boss-tier mobs
+  }   // v0.30.385 — end of the drawn frame
   // v0.29.x PERF — HUD at ~30 Hz. updateUI() (HP/MP bars, coins, skill-bar
   // icons via renderSkillBar → _applySkillIcon, buff row) ran EVERY render
   // frame — the single biggest controllable cost under load (~25% of CPU),
