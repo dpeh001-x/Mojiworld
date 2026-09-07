@@ -48,7 +48,7 @@ try {
   ok('a tentacle\'s stamped shot lands for exactly 15% too', r.leg && !r.leg.err && r.leg.loss === r.floor, JSON.stringify(r.leg));
   ok('the same shot without a source stamp lands for next to nothing (the floor is theirs alone)', r.plain && !r.plain.err && r.plain.loss > 0 && r.plain.loss < r.floor, JSON.stringify(r.plain));
   ok('every creation site is stamped: claw 1, firebomb 4, shock 2, bubble 2, octoHead 1, tidalSweep 1, octoLeg 2, mink 1', r.src.claw === 1 && r.src.firebomb === 4 && r.src.shock === 2 && r.src.bubble === 2 && r.src.octoHead === 1 && r.src.tidalSweep === 1 && r.src.octoLeg === 2 && r.src.mink === 1, JSON.stringify(r.src));
-  ok('the contact path floors before the difficulty scale; the projectile path floors on the stamp', r.src.contact && r.src.proj, JSON.stringify([r.src.contact, r.src.proj]));
+  ok('the contact path floors the landed number beside the Conductor floor; the projectile path floors the landed number on the stamp', r.src.contact && r.src.proj, JSON.stringify([r.src.contact, r.src.proj]));
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
 await browser.close(); server.kill();
