@@ -2449,6 +2449,20 @@ window.LX_ANIM_CALIB = {
   },
   "smithgolem": {
     "attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0,
+      "fs": [
+        1,
+        1,
+        1,
+        1.4,
+        1.34,
+        1.12,
+        1.58,
+        1.51,
+        1
+      ],
       "ft": [
         86,
         72,
@@ -2459,8 +2473,7 @@ window.LX_ANIM_CALIB = {
         72,
         72,
         115
-      ],
-      "ftAuto": true
+      ]
     }
   },
   "snail": {
