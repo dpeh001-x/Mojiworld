@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.393';
+const GAME_VERSION = 'v0.30.394';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -86857,6 +86857,53 @@ function _virgoTook(m, amt) {
   m._virgoTaken = (m._virgoTaken || 0) + amt;
   if (m._virgoChanneling) { m._virgoChanDmg = (m._virgoChanDmg || 0) + amt; m._virgoChanHits = (m._virgoChanHits | 0) + 1; }
 }
+// v0.30.394 — WEAKNESS (per the AAA combat analysis, item 5: "weak to physical /
+// magic"). Every regular monster is either weak to PHYSICAL — beasts, plants,
+// slimes, bugs, fish, elementals, sprites and casters: steel cuts what shrugs
+// off spells — or weak to MAGIC — armour, shell, bone, stone, metal and the
+// spectral undead: blades glance off or pass straight through. A hit of the
+// matching class deals 1.3x and prints WEAK in orange; the other class deals
+// 0.8x and prints RESIST in grey-blue. Bosses, minibosses and the zodiac are
+// exempt (they have the ward). Summons, thorns, co-op relays and the odd
+// untyped tag are neutral. The class of a hit comes from the skill's owner
+// class when the tag is a skill, from a short table for the master-form and
+// boss-form tags that are not, and from the player's own class as the last word.
+const LX_WEAK_MUL = 1.3, LX_RESIST_MUL = 0.8;
+const LX_MOB_WEAK = {
+  // weak to magic
+  snail: 'magic', stump: 'magic', scorpion: 'magic', mummy: 'magic', skeleton: 'magic', zombie: 'magic', wraith: 'magic', stoneling: 'magic', sandhusk: 'magic',
+  thornmaw: 'magic', elderbark: 'magic', pinechad: 'magic', forgewight: 'magic', smithgolem: 'magic', bonebosn: 'magic', spectreCannoneer: 'magic', brinekraken: 'magic',
+  shardlich: 'magic', lichkin: 'magic', boneWraith: 'magic', sepulchreHound: 'magic', ossuaryTyrant: 'magic', tombKeeper: 'magic', mournshade: 'magic', echoKnight: 'magic',
+  pathsBane: 'magic', pufferfish: 'magic', seastar: 'magic', seasponge: 'magic', grumpsquid: 'magic', goblinMauler: 'magic', boneGolem: 'magic', tombWraith: 'magic',
+  graveReaver: 'magic', tidepoolTurtle: 'magic', thunderMole: 'magic', nougatBear: 'magic', horny: 'magic', blightElder: 'magic', drownedCur: 'magic', mirageStalker: 'magic',
+  // weak to physical
+  slime: 'phys', mushroom: 'phys', orange: 'phys', gummy: 'phys', cookie: 'phys', frog: 'phys', axolotl: 'phys', coralImp: 'phys', pearlSprite: 'phys', nimbusFox: 'phys',
+  cosmicMochi: 'phys', honeyBuzz: 'phys', sproutle: 'phys', tideling: 'phys', voltipup: 'phys', frostkin: 'phys', emberling: 'phys', skywisp: 'phys', cherub: 'phys',
+  seraph: 'phys', archon: 'phys', meloncholy: 'phys', cinderling: 'phys', bellowsbat: 'phys', razorgale: 'phys', glasswindHare: 'phys', lanternWisp: 'phys', clownfish: 'phys',
+  jellyfish: 'phys', anglerfish: 'phys', seahorse: 'phys', mayo: 'phys', petalfly: 'phys', mushpup: 'phys', tidefish: 'phys', sparkling: 'phys', cloudbun: 'phys',
+  goblinScout: 'phys', stormKitty: 'phys', sparkSprite: 'phys',
+};
+const _LX_DMG_CLASS_TAG = {
+  melee: 'phys', magic: 'magic', meleeSkill: 'phys', chain: 'magic', lightning: 'magic', bolt: 'magic', meteor: 'magic', nova: 'magic', aurora: 'magic', hexorb: 'magic',
+  grandhex: 'magic', grandhexRupture: 'magic', holyLight: 'magic', holyShield: 'magic', archbishop_grail: 'magic', necromancerorb: 'magic', phantom_nova: 'magic', shade: 'magic',
+  shadow: 'magic', vortex: 'magic', apoc: 'magic', apocSlam: 'magic', bloom: 'magic', splash: 'magic', aoe: 'magic', eclipse_snap: 'magic',
+  railshot: 'phys', backstab: 'phys', dagger: 'phys', flurry: 'phys', smokeDash: 'phys', shadowStrike: 'phys', rush: 'phys', flamedash: 'phys', phantom_cut: 'phys',
+  deathBlossom: 'phys', sleight: 'phys', afterimage: 'phys', blink: 'phys', evade_blast: 'phys', nightreaper_ult: 'phys', warCry: 'phys',
+};
+const _LX_DMG_NEUTRAL = { thorns: 1, pet: 1, minion: 1, mojimon: 1, pack: 1, __coop: 1, bonus: 1, overflow: 1, siphon: 1, aegis: 1 };
+function _lxDmgClass(skill) {
+  if (!skill || _LX_DMG_NEUTRAL[skill]) return null;
+  const def = (typeof SKILLS === 'object' && SKILLS[skill]) || null;
+  if (def && def.cls) return def.cls === 'mage' ? 'magic' : 'phys';
+  if (_LX_DMG_CLASS_TAG[skill]) return _LX_DMG_CLASS_TAG[skill];
+  return (typeof player !== 'undefined' && player && player.cls === 'mage') ? 'magic' : 'phys';
+}
+function _lxWeakAffinity(m, skill) {   // 'weak' | 'resist' | null
+  if (!m || m.isBoss || m.isMiniBoss || m.zodiacBoss) return null;
+  const weak = LX_MOB_WEAK[m.type]; if (!weak) return null;
+  const cls = _lxDmgClass(skill); if (!cls) return null;
+  return cls === weak ? 'weak' : 'resist';
+}
 function hitMonster(m, dmg, isCrit, skill) {
   _lxLsReset();   // v0.30.x — new hit, new lifesteal budget. See _lxLsTake.
   // v0.25.605 — Dead-monster gate. Without this, a delayed projectile or
@@ -87696,6 +87743,10 @@ function hitMonster(m, dmg, isCrit, skill) {
   // _msApplyOnHit, which is where the ult-window lifesteal reads its damage.
   // 'thorns' is exempt — it is the player's own retaliation, not an attack the
   // ward is being raised against.
+  // v0.30.394 — weakness / resistance (see LX_MOB_WEAK); bosses fall through to the ward
+  const _lxAff = _lxWeakAffinity(m, skill);
+  if (_lxAff === 'weak') finalDmg = Math.max(1, Math.floor(finalDmg * LX_WEAK_MUL));
+  else if (_lxAff === 'resist') finalDmg = Math.max(1, Math.floor(finalDmg * LX_RESIST_MUL));
   if (m.isBoss && (m._wardUntil | 0) > (game.time | 0) && skill !== 'thorns') {
     finalDmg = 1;
   }
@@ -87722,7 +87773,12 @@ function hitMonster(m, dmg, isCrit, skill) {
     if (m.zodiacSign === 'virgo') _virgoTook(m, finalDmg);   // v0.30.366 — the no-overkill write books too
     // v0.29.x — was 6ms (one frame); match the solo 50ms flash duration.
     m.hitFlash = Math.max(m.hitFlash | 0, 50);
-    if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2 - 8, y: m.y - 6, vy: -2, text: '' + finalDmg, life: 30, color: isCrit ? '#ffd24a' : '#fff', size: isCrit ? 18 : 14 });
+    if (game.damageNumbers) {   // v0.30.394 — hierarchy: crits pop (the halo flag was never set on the main number), WEAK warm and big, RESIST cool and small
+      const _dn = { x: m.x + m.w / 2 - 8, y: m.y - 6, vy: -2, text: '' + finalDmg, life: 30, color: isCrit ? '#ffd24a' : '#fff', size: isCrit ? 18 : 14, crit: isCrit };
+      if (_lxAff === 'weak') { _dn.color = isCrit ? '#ffb347' : '#ff9a3c'; _dn.size += 2; _dn.big = true; game.damageNumbers.push({ x: _dn.x - 4, y: _dn.y - 16, vy: -2.2, text: 'WEAK', life: 26, color: '#ffb066', size: 10 }); }
+      else if (_lxAff === 'resist') { _dn.color = isCrit ? '#c9d6e8' : '#9fb4c8'; _dn.size = Math.max(11, _dn.size - 2); game.damageNumbers.push({ x: _dn.x - 10, y: _dn.y - 16, vy: -2.2, text: 'RESIST', life: 26, color: '#9fb4c8', size: 10 }); }
+      game.damageNumbers.push(_dn);
+    }
     return;
   }
   // v0.29.296 — milestone on-hit verbs (execute / lifesteal / chain / mark).
@@ -88078,6 +88134,10 @@ function hitMonster(m, dmg, isCrit, skill) {
   if (isCrit && tier >= 4) _suffix = '!!';
   else if (isCrit) _suffix = '!';
   else if (tier >= 4) _suffix = ' ✦';
+  // v0.30.394 — weakness on the number (see LX_MOB_WEAK): WEAK warm, a size up and always big; RESIST cool and a size down
+  let _dnColor = tierColor, _dnSize = isCrit ? critSize : normalSize;
+  if (_lxAff === 'weak') { _suffix += ' WEAK'; _dnColor = isCrit ? '#ffb347' : '#ff9a3c'; _dnSize += 2; }
+  else if (_lxAff === 'resist') { _suffix += ' RESIST'; _dnColor = isCrit ? '#c9d6e8' : '#9fb4c8'; _dnSize = Math.max(11, _dnSize - 2); }
   game.damageNumbers.push({
     x: m.x + m.w/2 + (Math.random() - 0.5) * 12,
     y: m.y - 5,
@@ -88085,10 +88145,10 @@ function hitMonster(m, dmg, isCrit, skill) {
     vy: -2.4 - Math.random() * 0.9 - tier * 0.15,
     text: finalDmg.toLocaleString() + _suffix,
     life, maxLife: life,
-    color: tierColor,
-    size: isCrit ? critSize : normalSize,
+    color: _dnColor,
+    size: _dnSize,
     crit: isCrit,
-    big: tier >= 2,
+    big: tier >= 2 || _lxAff === 'weak',
     tier,
     wobbleDir: Math.random() < 0.5 ? -1 : 1,
   });
