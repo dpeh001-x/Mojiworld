@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.397';
+const GAME_VERSION = 'v0.30.398';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -12609,6 +12609,10 @@ const LX_FX = (() => {
     crescendo_hit:      'crescendo_hit.webp',  // Crescendo — 4th-basic crit starburst
     execute_mark:       'execute_mark.webp',   // Executioner — death stamp on the culled enemy
     skin_ward:          'skin_ward.webp',      // Second Skin — hit-negate barrier flash
+    block_warrior:      'block_warrior.webp',  // v0.30.398 — the A-press stance, per class (anim/block_<cls>_0..8, ludo.ai via gen_block_fx_ludo.mjs)
+    block_rogue:        'block_rogue.webp',
+    block_mage:         'block_mage.webp',
+    block_archer:       'block_archer.webp',
     coin_burst:         'coin_burst.webp',     // Golden Blood — crit-kill coin spray
     doppel_flash:       'doppel_flash.webp',   // Doppel Cast — double spell-circle flash
     rampage_aura:       'rampage_aura.webp',   // Rampage Engine — stack-gain fury flare
@@ -12716,6 +12720,7 @@ function _lxTintedFx(img, color) {
 // lifetime; falls back to the static LX_FX sprite until frames decode.
 const FX_ANIM_FRAMES = Object.create(null);
 const _FX_ANIM_KEYS = new Set([
+  'block_warrior', 'block_rogue', 'block_mage', 'block_archer',   // v0.30.398 — the A-press stance per class
   'bolt_impact',    // v0.30.x - Magic Bolt contact burst (anim/bolt_impact_0..7, ludo.ai via gen_bolt_impact_fx.mjs). Warmed eagerly below: it is a BASIC attack, so it fires long before the staggered boot warmer would reach it.
   'arcane_burst',   // v0.29.946 — mage W detonation star (anim/arcane_burst_0..8, ludo.ai via gen_arcane_burst_fx.mjs)
   'arcane_shockwave',   // v0.29.951 — the AoE ring animates too: runes pulse around the band, arcs snap across it
@@ -56786,15 +56791,15 @@ function quickDash(dir) {
 function getBlockProfile() {
   switch (player.cls) {
     case 'warrior': // lenient — tanky shield stance
-      return { block: 700, parry: 320, cd: 1800, color:'#ffdd88', label:'SHIELD', accent:'#ffbb55' };
+      return { block: 700, parry: 300, cd: 1800, color:'#ffdd88', label:'SHIELD', accent:'#ffbb55' };
     case 'rogue':   // strict — quick backstep evade
-      return { block: 300, parry: 220, cd: 2500, color:'#cc88ff', label:'EVADE',  accent:'#aa44ff' };   // v0.30.396 — parry 110 -> 220 (leeway, per user)
+      return { block: 300, parry: 300, cd: 2500, color:'#cc88ff', label:'EVADE',  accent:'#aa44ff' };   // v0.30.396 — parry 110 -> 220 (leeway, per user)
     case 'mage':    // strict — brief vanish
-      return { block: 320, parry: 220, cd: 2500, color:'#aaccff', label:'VANISH', accent:'#6688ff' };   // v0.30.396 — parry 120 -> 220
+      return { block: 320, parry: 300, cd: 2500, color:'#aaccff', label:'VANISH', accent:'#6688ff' };   // v0.30.396 — parry 120 -> 220
     case 'archer':  // moderate — back roll with parry
-      return { block: 450, parry: 240, cd: 2200, color:'#88ffcc', label:'ROLL',   accent:'#44bb99' };   // v0.30.396 — parry 180 -> 240
+      return { block: 450, parry: 300, cd: 2200, color:'#88ffcc', label:'ROLL',   accent:'#44bb99' };   // v0.30.396 — parry 180 -> 240
     default:
-      return { block: 500, parry: 240, cd: 2000, color:'#88ccff', label:'BLOCK',  accent:'#3388ff' };   // v0.30.396 — parry 200 -> 240
+      return { block: 500, parry: 300, cd: 2000, color:'#88ccff', label:'BLOCK',  accent:'#3388ff' };   // v0.30.396 — parry 200 -> 240
   }
 }
 
@@ -56808,31 +56813,58 @@ function getBlockProfile() {
 //     - pressing A as it arrives counts, not only before it arrives;
 //   - the perfect-dodge Tempo reward (dodge / dash through a big attack) counts
 //     against EVERY boss, not only the zodiac.
-const LX_PARRY_SLOWMO = 20, LX_PARRY_CATCH_PAD = 28;
+// v0.30.398 (per user): every class's perfect window is a flat 300 ms, and the
+// press catches a projectile ABOUT to hit — a straight-line look-ahead of 18 sim
+// steps (the 300 ms window) against the player's box, 12 px of pad; a homing
+// shot is judged by reach instead. Every shot that would land in the window is
+// caught at once by the one parry. The press also plays the class's own stance
+// animation (LX_BLOCK_FX, ludo.ai via scripts/gen_block_fx_ludo.mjs): the
+// warrior's shield of light, the rogue's smoke burst, the mage's arcane veil,
+// the archer's leaf-and-wind roll — nine frames at three steps each, riding the
+// player, mirrored to face the way the player faces.
+const LX_PARRY_SLOWMO = 20, LX_PARRY_CATCH_PAD = 12, LX_PARRY_CATCH_STEPS = 18;
+const LX_BLOCK_FX = { warrior: 'block_warrior', rogue: 'block_rogue', mage: 'block_mage', archer: 'block_archer' };
+function _lxProjWillHit(p, steps, pad) {
+  const px0 = player.x - pad, py0 = player.y - pad, pw = player.w + pad * 2, ph = player.h + pad * 2, w = p.w || 8, h = p.h || 8;
+  if (p.homing) {
+    const cx = p.x + w / 2, cy = p.y + h / 2, tx = player.x + player.w / 2, ty = player.y + player.h / 2;
+    const sp = Math.hypot(p.vx || 0, p.vy || 0) || 2;
+    return Math.hypot(tx - cx, ty - cy) <= sp * steps + Math.max(pw, ph) / 2;
+  }
+  let x = p.x, y = p.y; const vx = p.vx || 0, vy = p.vy || 0;
+  for (let k = 0; k <= steps; k++) { if (x < px0 + pw && x + w > px0 && y < py0 + ph && y + h > py0) return true; x += vx; y += vy; }
+  return false;
+}
 function _lxParryCatch() {
   if (!game.projectiles || !player) return false;
-  const pad = LX_PARRY_CATCH_PAD;
+  let caught = 0;
   for (let i = game.projectiles.length - 1; i >= 0; i--) {
     const p = game.projectiles[i];
     if (!p || p.owner !== 'enemy') continue;
-    if (p.x < player.x + player.w + pad && p.x + (p.w || 8) > player.x - pad && p.y < player.y + player.h + pad && p.y + (p.h || 8) > player.y - pad) {
-      game.projectiles.splice(i, 1);
-      let nearest = null, nd = Infinity;
-      for (const mm of (game.monsters || [])) { if (!mm || mm.currentHp <= 0) continue; const d = Math.abs(mm.x - player.x); if (d < nd) { nd = d; nearest = mm; } }
-      triggerParry(nearest);
-      return true;
-    }
+    if (!_lxProjWillHit(p, LX_PARRY_CATCH_STEPS, LX_PARRY_CATCH_PAD)) continue;
+    game.projectiles.splice(i, 1); caught++;
   }
-  return false;
+  if (!caught) return false;
+  let nearest = null, nd = Infinity;
+  for (const mm of (game.monsters || [])) { if (!mm || mm.currentHp <= 0) continue; const d = Math.abs(mm.x - player.x); if (d < nd) { nd = d; nearest = mm; } }
+  triggerParry(nearest);
+  return true;
+}
+function _lxBlockFx() {
+  if (typeof spawnSpriteBurst !== 'function' || !player) return;
+  const key = LX_BLOCK_FX[player.cls] || 'block_warrior';
+  const size = Math.max(player.w || 40, player.h || 60) * 2.1;
+  spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, key, { size, life: 27, frameGap: 3, follow: player, flipX: (player.facing || 1) < 0, scaleStartX: 1, scaleEndX: 1, scaleStartY: 1, scaleEndY: 1, opacity: 0.95 });
 }
 function startBlock() {
   const P = getBlockProfile();
   player.blockTimer = P.block;
   player.parryWindow = P.parry;
-  player._ohkoParry = 200;   /* v0.30.396 — perfect-parry window (ms) that can negate an OHKO; was 120 (leeway) */
+  player._ohkoParry = 300;   /* v0.30.398 — perfect-parry window (ms) that can negate an OHKO: the same 300 as every class (was 120, then 200) */
   player.blockCD = P.cd;
   player._blockProfile = P;
-  _lxParryCatch();   // v0.30.396 — a projectile already on the player when A lands is parried on the press
+  _lxBlockFx();      // v0.30.398 — the class's stance animation rides the player
+  _lxParryCatch();   // v0.30.398 — every projectile about to hit is parried on the press
   // Class-specific movement on cast
   if (player.cls === 'rogue') {
     // Shadow backstep
@@ -57003,7 +57035,7 @@ function _tickZodiacDodgeReward(dt) {
     if (player._zdMs <= 0) { player._zdMs = 0; player._zdStacks = 0; }
   }
   let boss = null;
-  for (const m of (game.monsters || [])) { if (m.isBoss && m.currentHp > 0) { boss = m; break; } }   // v0.30.396 — any boss, not only the zodiac
+  for (const m of (game.monsters || [])) { if (m.isBoss && m.currentHp > 0 && m.type !== 'gravitos') { boss = m; break; }   /* v0.30.398 — every boss except Gravitos (per user) */ }   // v0.30.396 — any boss, not only the zodiac
   if (!boss) return;
   const inDodge = player.dodgeTimer > 0;
   const inDash  = !!(player._dashEvadeUntil && ((game.time | 0) < player._dashEvadeUntil));
@@ -70384,6 +70416,7 @@ function spawnSpriteBurst(x, y, spriteKey, opts) {
     // v0.30.34 - sticky bursts are never evicted by the MAX_SMOOTH_FX cap (the
     // Eclipse moon; see the cap in the budget pass). Short-lived fx only.
     sticky: !!opts.sticky,
+    follow: opts.follow || null,   // v0.30.398 — an entity to ride: the burst re-centres on it every step
     // v0.25.996 — Per-axis scale transitions. When all four start/end
     // values are provided, the draw branch overrides the uniform
     // 0.5×→1.1× `grow` curve with independent X/Y scales interpolated
@@ -70531,6 +70564,7 @@ function updateSmoothFx(dt) {
   for (let r = 0; r < game.smoothFx.length; r++) {
     const fx = game.smoothFx[r];
     fx.life -= 1;
+    if (fx.follow) { fx.x = fx.follow.x + (fx.follow.w || 0) / 2; fx.y = fx.follow.y + (fx.follow.h || 0) / 2; }   // v0.30.398
     if (fx.type === 'explosion') {
       // Ease-out expansion
       const t = 1 - fx.life / fx.maxLife;

@@ -46,20 +46,21 @@ try {
     game.projectiles.push({ x: player.x + 600, y: player.y, w: 8, h: 8, vx: 0, vy: 0, owner: 'enemy', damage: 10, skill: 'bolt', life: 100 }); o.tellProjFar = cap(() => drawProjectiles()); game.projectiles.length = 0;
     // 5. the Tempo perfect dodge counts against every boss (static)
     const src = await (await fetch(location.pathname)).text();
-    o.src = { anyBoss: src.indexOf('if (m.isBoss && m.currentHp > 0) { boss = m; break; }') >= 0, zodiacFilterGone: src.indexOf("if (!(pr._zodiacAttacker || (typeof pr.skill === 'string' && pr.skill.indexOf('zodiac') === 0))) continue;") < 0, toast: src.indexOf("(boss.name || 'the boss') + ' is staggered. PUNISH!'") >= 0 };
+    o.src = { anyBoss: src.indexOf("if (m.isBoss && m.currentHp > 0 && m.type !== 'gravitos') { boss = m; break; }") >= 0, zodiacFilterGone: src.indexOf("if (!(pr._zodiacAttacker || (typeof pr.skill === 'string' && pr.skill.indexOf('zodiac') === 0))) continue;") < 0, toast: src.indexOf("(boss.name || 'the boss') + ' is staggered. PUNISH!'") >= 0 };
     return o;
   });
   console.log('build ' + r.ver + '  windows ' + JSON.stringify(r.windows) + '  press ' + JSON.stringify(r.press) + (r.blockErr ? '  blockErr ' + r.blockErr : ''));
   ok('the tell and the catch exist', r.has === true);
-  ok('every class has at least a 220 ms perfect window (warrior keeps 320; rogue/mage 220; archer/default 240)', r.windows.warrior === 320 && r.windows.rogue === 220 && r.windows.mage === 220 && r.windows.archer === 240 && r.windows.other === 240, JSON.stringify(r.windows));
-  ok('the press sets a 200 ms OHKO-negating window', r.press.ohko === 200, String(r.press.ohko));
+  // v0.30.398 (per user): a flat 300 ms for every class, and the OHKO window matches
+  ok('every class has a flat 300 ms perfect window', Object.values(r.windows).every((v) => v === 300), JSON.stringify(r.windows));
+  ok('the press sets a 300 ms OHKO-negating window', r.press.ohko === 300, String(r.press.ohko));
   ok('the press catches a projectile already on the player (PARRY!, 20 slow-mo frames, 350 ms i-frames) and leaves the far one alone', r.press.left === 1 && r.press.farLeft && r.press.nums.includes('PARRY!') && r.press.slowmo >= 20 && r.press.inv >= 350, JSON.stringify(r.press));
   ok('a perfect parry buys 20 slow-mo frames on top of its i-frames', r.parry && r.parry.slowmo >= 20 && r.parry.inv >= 350, JSON.stringify(r.parry));
   ok('a monster in its windup wears the yellow A; not otherwise', r.tellMob.yellow && r.tellMob.A && !r.tellMob.err && !r.tellMobOff.A, JSON.stringify([r.tellMob, r.tellMobOff]));
   ok('an enemy meteor marker wears the red cross', r.tellMeteor.red && r.tellMeteor.cross && !r.tellMeteor.err, JSON.stringify(r.tellMeteor));
   ok('a quake band wears the red cross', r.tellQuake.red && r.tellQuake.cross && !r.tellQuake.err, JSON.stringify(r.tellQuake));
   ok('an enemy projectile within reach wears the yellow A; a far one does not', r.tellProjNear.yellow && r.tellProjNear.A && !r.tellProjNear.err && !r.tellProjFar.A, JSON.stringify([r.tellProjNear, r.tellProjFar]));
-  ok('the Tempo perfect dodge counts against every boss and every big enemy projectile', r.src.anyBoss && r.src.zodiacFilterGone && r.src.toast, JSON.stringify(r.src));
+  ok('the Tempo perfect dodge counts against every boss except Gravitos, and every big enemy projectile', r.src.anyBoss && r.src.zodiacFilterGone && r.src.toast, JSON.stringify(r.src));
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
 await browser.close(); server.kill();
