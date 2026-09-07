@@ -5,6 +5,10 @@
 //   EFFECT  — the applied buff drives a REAL stat change on the receiver
 // The third layer is the one that matters: a buff timer that no stat function
 // reads would be a HUD pill with no mechanic behind it.
+// Kept current with: v0.29.472 (the receive path accepts only a known, same-map,
+// living peer under 8 frames/s - frames here come from a registered peer 7) and
+// v0.29.702 (Bastion of Dawn is two-tap: arm, then release - the send check
+// releases an armed Bastion before reading the frames).
 //
 //   node scripts/coop_party_support_test.mjs
 // Env: PW_EXE (browser path) or PW_CHANNEL (default msedge), PORT (default 8843)
@@ -36,30 +40,35 @@ const r = await page.evaluate(() => {
   player.cls = player.cls || 'warrior';
   player.hp = Math.max(player.hp, 1);
   const clear = () => { for (const k in player.buffs) player.buffs[k] = 0; };
+  // v0.29.472 gated the receive path on a LEGITIMATE sender: a known peer, on this map, alive, under 8 frames
+  // a second per kind. Frames here come from a registered peer (id 7), and the per-sender bucket is reset
+  // between frames so the burst below is not rate-limited away.
+  net.peers = net.peers || {}; net.peers[7] = { id: 7, map: MAP, hp: 100, _last: performance.now() };
+  const bf = (frame) => { try { delete _MP_BUCKETS['7|pbf']; } catch (e) {} _coopApplyPartyBuff(Object.assign({ id: 7 }, frame)); };
 
   // ---- RECEIVE: guards -----------------------------------------------------
-  clear(); _coopApplyPartyBuff({ hm: MAP, bl: [['warCry', 7000]] });
+  clear(); bf({ hm: MAP, bl: [['warCry', 7000]] });
   o.recv.applies = player.buffs.warCry === 7000;
-  clear(); _coopApplyPartyBuff({ hm: MAP, bl: [['smokeBomb', 9000]] });
+  clear(); bf({ hm: MAP, bl: [['smokeBomb', 9000]] });
   o.recv.rejectsUnshared = player.buffs.smokeBomb === 0;
-  clear(); _coopApplyPartyBuff({ hm: MAP, bl: [['__proto__', 9000], ['evilKey', 9000]] });
+  clear(); bf({ hm: MAP, bl: [['__proto__', 9000], ['evilKey', 9000]] });
   o.recv.noNewSlots = !('evilKey' in player.buffs);
-  clear(); _coopApplyPartyBuff({ hm: '__nope__', bl: [['guardian', 6000]] });
+  clear(); bf({ hm: '__nope__', bl: [['guardian', 6000]] });
   o.recv.mapScoped = player.buffs.guardian === 0;
   clear(); player.buffs.holyShield = 9000;
-  _coopApplyPartyBuff({ hm: MAP, bl: [['holyShield', 2000]] });
+  bf({ hm: MAP, bl: [['holyShield', 2000]] });
   o.recv.neverShortens = player.buffs.holyShield === 9000;
-  clear(); _coopApplyPartyBuff({ hm: MAP, bl: [['guardian', 999999999]] });
+  clear(); bf({ hm: MAP, bl: [['guardian', 999999999]] });
   o.recv.clamped = player.buffs.guardian === 120000;
-  clear(); _coopApplyPartyBuff({ hm: MAP, bl: [['warCry', 12000], ['bloodlust', 12000]] });
+  clear(); bf({ hm: MAP, bl: [['warCry', 12000], ['bloodlust', 12000]] });
   o.recv.multiInOneFrame = player.buffs.warCry === 12000 && player.buffs.bloodlust === 12000;
-  clear(); _coopApplyPartyBuff({ hm: MAP, bk: 'warCry', bms: 7000 });   // legacy single form
+  clear(); bf({ hm: MAP, bk: 'warCry', bms: 7000 });   // legacy single form
   o.recv.legacyForm = player.buffs.warCry === 7000;
   o.recv.allMetaDeclared = BUFF_META.every(b => b.key in player.buffs);
 
   // ---- EFFECT: buffs delivered over the wire must move real stats ----------
   const snap = () => ({ atk: getAtk(), def: getDef(), crit: getCrit(), spd: +getSpeed().toFixed(3) });
-  const viaWire = (k, ms) => { clear(); _coopApplyPartyBuff({ hm: MAP, bl: [[k, ms]] }); return snap(); };
+  const viaWire = (k, ms) => { clear(); bf({ hm: MAP, bl: [[k, ms]] }); return snap(); };
   clear(); const base = snap();
   const wc = viaWire('warCry', 12000);
   o.effect.warCry = wc.atk > base.atk && wc.def > base.def;
@@ -97,7 +106,7 @@ const r = await page.evaluate(() => {
     ['warlord_ult', 'warrior', 'berserker', 'warlord', ['bloodlust'], true],
     ['beastmaster_ult', 'archer', 'ranger', 'beastmaster', ['bloodlust'], true],
     ['crusader_aegis', 'warrior', 'knight', 'crusader', [], true],
-    ['crusader_ult', 'warrior', 'knight', 'crusader', [], true],
+    ['crusader_ult', 'warrior', 'knight', 'crusader', ['aegisShield'], true],   // v0.29.679: the Bastion's shield is an aegisShield buff that travels to partners
     ['holyLight', 'mage', 'priest', null, [], true],
     ['archbishop_ult', 'mage', 'priest', 'archbishop', [], true],
   ];
@@ -112,6 +121,8 @@ const r = await page.evaluate(() => {
     const fn = SKILL_FNS[id];
     if (typeof fn !== 'function') { o.send[id] = 'NO HANDLER'; continue; }
     try { fn(); } catch (e) { o.send[id] = 'THREW ' + String(e && e.message || e).slice(0, 60); continue; }
+    // v0.29.702: Bastion of Dawn is two-tap - the first press arms (free, no frame), the release erupts it
+    if ((player._bastionArmedUntil | 0) > game.time) { try { fn({ auto: true }); } catch (e) { o.send[id] = 'RELEASE THREW ' + String(e && e.message || e).slice(0, 60); continue; } }
     const buffs = sent.filter(m => m && m.pbf).flatMap(m => (m.bl || []).map(p => p[0]));
     const heals = sent.filter(m => m && m.phl);
     const buffsOk = wantBuffs.every(b => buffs.includes(b)) && buffs.length === wantBuffs.length;
