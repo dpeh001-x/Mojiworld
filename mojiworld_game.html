@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.395';
+const GAME_VERSION = 'v0.30.396';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -56766,23 +56766,51 @@ function getBlockProfile() {
     case 'warrior': // lenient — tanky shield stance
       return { block: 700, parry: 320, cd: 1800, color:'#ffdd88', label:'SHIELD', accent:'#ffbb55' };
     case 'rogue':   // strict — quick backstep evade
-      return { block: 300, parry: 110, cd: 2500, color:'#cc88ff', label:'EVADE',  accent:'#aa44ff' };
+      return { block: 300, parry: 220, cd: 2500, color:'#cc88ff', label:'EVADE',  accent:'#aa44ff' };   // v0.30.396 — parry 110 -> 220 (leeway, per user)
     case 'mage':    // strict — brief vanish
-      return { block: 320, parry: 120, cd: 2500, color:'#aaccff', label:'VANISH', accent:'#6688ff' };
+      return { block: 320, parry: 220, cd: 2500, color:'#aaccff', label:'VANISH', accent:'#6688ff' };   // v0.30.396 — parry 120 -> 220
     case 'archer':  // moderate — back roll with parry
-      return { block: 450, parry: 180, cd: 2200, color:'#88ffcc', label:'ROLL',   accent:'#44bb99' };
+      return { block: 450, parry: 240, cd: 2200, color:'#88ffcc', label:'ROLL',   accent:'#44bb99' };   // v0.30.396 — parry 180 -> 240
     default:
-      return { block: 500, parry: 200, cd: 2000, color:'#88ccff', label:'BLOCK',  accent:'#3388ff' };
+      return { block: 500, parry: 240, cd: 2000, color:'#88ccff', label:'BLOCK',  accent:'#3388ff' };   // v0.30.396 — parry 200 -> 240
   }
 }
 
+// v0.30.396 — PERFECT DODGE (per the AAA combat analysis, item 4; per user:
+// "with A key give more lee-way for timing"). The parry on A already answered
+// melee contact and projectiles; what it lacked was leeway, a beat, and reach:
+//   - every class's perfect window is now at least 220 ms (was 110-200);
+//   - a perfect parry buys 20 frames of slow-motion (a third speed: the
+//     witch-time beat of Bayonetta and Hades) on top of its 350 ms of i-frames;
+//   - the PRESS catches a projectile already overlapping the player (28 px pad)
+//     - pressing A as it arrives counts, not only before it arrives;
+//   - the perfect-dodge Tempo reward (dodge / dash through a big attack) counts
+//     against EVERY boss, not only the zodiac.
+const LX_PARRY_SLOWMO = 20, LX_PARRY_CATCH_PAD = 28;
+function _lxParryCatch() {
+  if (!game.projectiles || !player) return false;
+  const pad = LX_PARRY_CATCH_PAD;
+  for (let i = game.projectiles.length - 1; i >= 0; i--) {
+    const p = game.projectiles[i];
+    if (!p || p.owner !== 'enemy') continue;
+    if (p.x < player.x + player.w + pad && p.x + (p.w || 8) > player.x - pad && p.y < player.y + player.h + pad && p.y + (p.h || 8) > player.y - pad) {
+      game.projectiles.splice(i, 1);
+      let nearest = null, nd = Infinity;
+      for (const mm of (game.monsters || [])) { if (!mm || mm.currentHp <= 0) continue; const d = Math.abs(mm.x - player.x); if (d < nd) { nd = d; nearest = mm; } }
+      triggerParry(nearest);
+      return true;
+    }
+  }
+  return false;
+}
 function startBlock() {
   const P = getBlockProfile();
   player.blockTimer = P.block;
   player.parryWindow = P.parry;
-  player._ohkoParry = 120;   /* tight perfect-parry window (ms) that can negate an OHKO */
+  player._ohkoParry = 200;   /* v0.30.396 — perfect-parry window (ms) that can negate an OHKO; was 120 (leeway) */
   player.blockCD = P.cd;
   player._blockProfile = P;
+  _lxParryCatch();   // v0.30.396 — a projectile already on the player when A lands is parried on the press
   // Class-specific movement on cast
   if (player.cls === 'rogue') {
     // Shadow backstep
@@ -56835,6 +56863,7 @@ function triggerParry(source) {
   player.parryWindow = 0;
   // Visual
   flash(0.4); addHitStop(80);
+  game._slowmoFrames = Math.max(game._slowmoFrames | 0, LX_PARRY_SLOWMO);   // v0.30.396 — 20 frames at a third speed
   game.damageNumbers.push({
     x: player.x + player.w/2 - 20, y: player.y - 6, vy: -2,
     text: 'PARRY!', life: 50, color: P.color, size: 18
@@ -56952,7 +56981,7 @@ function _tickZodiacDodgeReward(dt) {
     if (player._zdMs <= 0) { player._zdMs = 0; player._zdStacks = 0; }
   }
   let boss = null;
-  for (const m of (game.monsters || [])) { if (m.zodiacBoss && m.currentHp > 0) { boss = m; break; } }
+  for (const m of (game.monsters || [])) { if (m.isBoss && m.currentHp > 0) { boss = m; break; } }   // v0.30.396 — any boss, not only the zodiac
   if (!boss) return;
   const inDodge = player.dodgeTimer > 0;
   const inDash  = !!(player._dashEvadeUntil && ((game.time | 0) < player._dashEvadeUntil));
@@ -56969,7 +56998,7 @@ function _tickZodiacDodgeReward(dt) {
   let dodged = false;
   for (const pr of (game.projectiles || [])) {
     if (pr.owner !== 'enemy') continue;
-    if (!(pr._zodiacAttacker || (typeof pr.skill === 'string' && pr.skill.indexOf('zodiac') === 0))) continue;
+    // v0.30.396 — any enemy projectile big enough counts (was zodiac-only)
     if ((pr.damage || 0) < bigThresh) continue;  // only BIG attacks earn Tempo
     if (pr.x < px + pw && pr.x + (pr.w || 8) > px && pr.y < py + ph && pr.y + (pr.h || 8) > py) { dodged = true; break; }
   }
@@ -56988,6 +57017,7 @@ function _tickZodiacDodgeReward(dt) {
     text: player._zdStacks >= 3 ? '\u2726 PERFECT DODGE \u2014 TEMPO BREAK!' : '\u2726 PERFECT DODGE ' + player._zdStacks + '/3',
     life: 40, color: '#7adeff', size: 13 });
   if (typeof addHitStop === 'function') addHitStop(70);
+  game._slowmoFrames = Math.max(game._slowmoFrames | 0, LX_PARRY_SLOWMO);   // v0.30.396 — the same beat as a parry
   if (typeof flash === 'function') flash(0.10);
   if (typeof audio !== 'undefined' && audio && audio.play) audio.play('parry');
   if (player._zdStacks >= 3) {
@@ -56996,7 +57026,7 @@ function _tickZodiacDodgeReward(dt) {
     const _cd = (typeof BOSS_STAGGER_COOLDOWN === 'number') ? BOSS_STAGGER_COOLDOWN : 5200;
     boss._stagger = _ms + 400;          // earned: a touch longer than a natural window
     boss._staggerCd = _ms + 400 + _cd;
-    if (typeof showToast === 'function') showToast('\u2728 TEMPO BREAK \u2014 ' + (boss.name || 'the zodiac') + ' is staggered. PUNISH!', 'epic');
+    if (typeof showToast === 'function') showToast('\u2728 TEMPO BREAK \u2014 ' + (boss.name || 'the boss') + ' is staggered. PUNISH!', 'epic');
     if (typeof addShake === 'function') addShake(7);
   }
 }
@@ -77654,7 +77684,7 @@ function updateMonsters(dt) {
           m._shootWindup = _wu;
           const _nowWu = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
           m.atkAnimUntil = _nowWu + _wu + 140;
-          m._atkStrikeMs = _wu; m._animSt = null;   // v0.30.382 — the strike frame lands on the release             // hold the pose a touch past release
+          m._atkStrikeMs = _wu; m._animSt = null; m._tellUntil = _nowWu + _wu;   /* v0.30.396 — the parry tell shows through the windup */   // v0.30.382 — the strike frame lands on the release             // hold the pose a touch past release
           m.shootTimer = 999999;                           // suspend re-trigger; release resets it
         } else {
           _fireShotFor(m);
@@ -77861,7 +77891,7 @@ function updateMonsters(dt) {
         // to the static sprite when no attack frames have decoded.
         const _bmNow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
         m.atkAnimUntil = _bmNow + bm.telegraphMs + 300;
-        m._atkStrikeMs = bm.telegraphMs; m._animSt = null;   // v0.30.382 — the strike frame lands as the telegraph ends
+        m._atkStrikeMs = bm.telegraphMs; m._animSt = null; m._tellUntil = _bmNow + bm.telegraphMs;   /* v0.30.396 */   // v0.30.382 — the strike frame lands as the telegraph ends
       }
       // PHASE 2 — telegraph tick (particles + flash).
       if (m._bigMeleeFiring && m._bigMeleeT > 0) {
@@ -125977,6 +126007,22 @@ function _lxFrameNow() {
   }
   return _lxFrameNowV;
 }
+// v0.30.396 — COLOUR GRAMMAR. One rule, three places (God of War's yellow and
+// red rings): a YELLOW ring with the A key in it means "parry this with A" — a
+// monster's windup, an enemy projectile within reach; a RED ring with a cross
+// means "move" — the ground telegraphs (the meteor marker, the quake band) that
+// no block or parry answers.
+function _drawTell(x, y, kind, k) {
+  const t = game.time | 0, pulse = 0.5 + 0.5 * Math.sin(t * 0.45);
+  const r = 9 + 2 * pulse, red = kind === 'move';
+  ctx.save();
+  ctx.globalAlpha = (0.55 + 0.45 * pulse) * (k == null ? 1 : Math.max(0.35, Math.min(1, k)));
+  ctx.fillStyle = red ? 'rgba(60,0,0,0.6)' : 'rgba(40,30,0,0.6)'; ctx.beginPath(); ctx.arc(x, y, r - 1, 0, Math.PI * 2); ctx.fill();
+  ctx.lineWidth = 2.5; ctx.strokeStyle = red ? '#ff4d4d' : '#ffd166'; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = red ? '#ffb3b3' : '#ffe9a8'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(red ? '\u2715' : 'A', x, y + 0.5);
+  ctx.restore();
+}
 function _drawBossWardShield(m, sx, sy) {
   const img = (typeof LX_FX !== 'undefined' && LX_FX) ? LX_FX.boss_shield : null;
   if (!img || !img.complete || !img.naturalWidth) return;
@@ -126804,6 +126850,7 @@ function drawMonster(m) {
   // at a boss that was not taking damage. The shield now sits over the sprite for the
   // whole ward, fades in and out, and breathes; the icon is ludo.ai art baked by
   // scripts/gen_boss_shield_ludo.mjs into Sprites/fx/boss_shield.webp.
+  if (m._tellUntil && m.currentHp > 0 && _lxFrameNow() < m._tellUntil) _drawTell(sx + (m.w || 0) / 2, sy - 16, 'parry');   // v0.30.396 — yellow A through the windup
   if (m.isBoss && ((m._wardUntil | 0) > (game.time | 0)) && typeof _drawBossWardShield === 'function') _drawBossWardShield(m, sx, sy);
   else if (m.isBoss && typeof _lxWardBreakActive === 'function' && _lxWardBreakActive(m)) _drawBossWardBreak(m, sx, sy);   // v0.30.395
   if (_phaserHandlingMonsterUI()) return;
@@ -133651,6 +133698,7 @@ function drawProjectiles() {
     // v0.25.556 — Y cull now camera.y aware so vertical-tower maps don't
     // cull visible projectiles.
     if (sx + p.w < -60 || sx > W + 60) continue;
+    if (p.owner === 'enemy' && player && Math.abs(p.x - player.x) < 200 && Math.abs(p.y - player.y) < 140) _drawTell(sx + (p.w || 8) / 2, p.y - _pjCamY - 14, 'parry');   // v0.30.396 — yellow A within reach
     {
       if (p.y + p.h < _pjCamY - 60 || p.y > _pjCamY + H + 60) continue;   // v0.29.x perf — camY hoisted
     }
@@ -135069,6 +135117,7 @@ function drawHazards(_behindPass) {
     // monster's palette + a flashing ! marker right before pulse.
     if (h.type === 'mob_quake') {
       const t = 1 - h.life / h.maxLife;        // 0 → 1 over the telegraph
+      _drawTell(sx, h.y - 12, 'move', t);      // v0.30.396 — red cross: no block or parry answers a quake
       const r = h.w * 0.5 * (0.4 + t * 0.6);
       const a = 0.30 + t * 0.55;
       // v0.29.634 — _LX_QUAKE_FLAIR. The ring alone was invisible against a
@@ -135921,6 +135970,7 @@ function drawHazards(_behindPass) {
       }
       // v0.26.x — marker-only telegraph (mortarLob): draw just the ground rune,
       // not a falling meteor (the mortar's own arcing mlob projectile is visible).
+      if (h.owner === 'enemy') _drawTell(sx, _groundY + _MK_DY + 30, 'move', prog);   // v0.30.396 — red cross on an enemy's meteor marker
       if (h._fireColumn) {
         // v0.30.x - PYRE telegraph: nothing falls. The lane glows hotter and
         // embers rise from the rune through the 16-frame wind-up; the
