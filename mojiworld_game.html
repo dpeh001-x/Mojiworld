@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.389';
+const GAME_VERSION = 'v0.30.390';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -46897,6 +46897,7 @@ function _coopTickMonsters() {
     // host's actual monster deals. One number closes it.
     _e.a = Math.round(m.atk || 0);
     if (m.atkAnimUntil && m.atkAnimUntil > now) _e.aa = Math.min(2000, Math.round(m.atkAnimUntil - now));
+    if (m.isBoss && (m._wardUntil | 0) > (game.time | 0)) _e.wd = Math.min(600, (m._wardUntil | 0) - (game.time | 0));   // v0.30.390 — ward steps left, so guests draw the shield (and gate their own hits) like the host
     if (m.patternState && m.patternState !== 'idle') _e.ps = String(m.patternState).slice(0, 20);
     if (m._phaseSprite) _e.sp = String(m._phaseSprite).slice(0, 20);
     if (m._dreamPhase) _e.dp = 1;
@@ -47791,6 +47792,8 @@ function _coopApplyMonsters(msg) {
       const _nowV = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
       m.atkAnimUntil = Math.max(m.atkAnimUntil || 0, _nowV + Math.min(2000, +e.aa || 0));
     }
+    if (e.wd > 0) m._wardUntil = Math.max(m._wardUntil | 0, (game.time | 0) + Math.min(600, +e.wd | 0));   // v0.30.390 — mirror the host's ward
+    else if ((m._wardUntil | 0) > (game.time | 0)) m._wardUntil = game.time | 0;                              // the host is not warded: drop a stale local ward
     m.patternState = e.ps ? String(e.ps).slice(0, 20) : 'idle';
     if (e.sp) m._phaseSprite = String(e.sp).slice(0, 20);
     m._dreamPhase = !!e.dp;
@@ -123985,7 +123988,23 @@ const _ZODIAC_SPRITE_FX = {
 const _BOSS_SPRITE_PUSH_DOWN = {
   young_confused_barnaby: 6,
 };
+// v0.30.390 — WARD SHIELD ACCURACY (per user: "ensure that the boss wards indicator
+// works well and accurate"). The shield was centred on the monster's collision box;
+// a boss's sprite is drawn from its own scale, content-normalisation and calibration
+// nudges, so on the big bosses the box and the picture do not share a centre. The
+// sprite path now records the rectangle it really blits — read off the canvas
+// transform at blit time, relative to the transform the caller handed it — and the
+// shield centres on that. The box remains the fallback for procedurally drawn bosses.
+function _lxRecordBossRect(m, tr0, x0, y0, w, h) {
+  if (!m || !tr0 || typeof ctx.getTransform !== 'function') return;
+  try {
+    const rel = tr0.inverse().multiply(ctx.getTransform());
+    const p1 = rel.transformPoint(new DOMPoint(x0, y0)), p2 = rel.transformPoint(new DOMPoint(x0 + w, y0 + h));
+    m._lxDrawRect = { x: Math.min(p1.x, p2.x), y: Math.min(p1.y, p2.y), w: Math.abs(p2.x - p1.x), h: Math.abs(p2.y - p1.y), t: game.time | 0 };
+  } catch (e) {}
+}
 function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
+  const _lxTr0 = (typeof ctx.getTransform === 'function') ? ctx.getTransform() : null;   // v0.30.390 — the caller's space
   // v0.29.136 — King Krook "ROYAL CHARGE" (was the turtle SHELL CYCLONE).
   // King Krook is a crocodile king, not a turtle, so his phase-2 dash no longer
   // tucks into a shell. The attack now falls through to his own sprite, which
@@ -124264,8 +124283,10 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
     // every attack frame; _feKey is already the resolved sprite identity.
     softBottom: (typeof _LX_FEATHER_BOTTOM !== 'undefined' && _LX_FEATHER_BOTTOM.has(_feKey)) };
   if (_cachedBossSprite) {
+    _lxRecordBossRect(m, _lxTr0, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);   // v0.30.390
     _lxDrawSoft(ctx, _cachedBossSprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), undefined, undefined, _softOpts);   // v0.29.x — edge feather (clipped-art softening)
   } else {
+    _lxRecordBossRect(m, _lxTr0, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);   // v0.30.390
     _lxDrawSoft(ctx, sprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH, _softOpts);   // v0.29.x — edge feather
   }
   ctx.restore();
@@ -125834,11 +125855,14 @@ function _drawBossWardShield(m, sx, sy) {
   const left = (m._wardUntil | 0) - t;                       // steps of ward remaining
   const len = (typeof LX_BOSS_WARD_LEN === 'number' && LX_BOSS_WARD_LEN > 0) ? LX_BOSS_WARD_LEN : 180;
   const elapsed = Math.max(0, len - left);
-  const fade = Math.min(1, elapsed / 8, left / 18);          // in over 8 steps, out over the last 18
+  const fade = Math.min(1, (elapsed + 1) / 5, left / 6);    // v0.30.390 — on from frame one (20%), full by frame five, off only over the last six; every warded frame shows it
   if (fade <= 0) return;
   const pulse = 1 + 0.05 * Math.sin(t * 0.22);
-  const size = Math.max(72, Math.max(m.w || 0, m.h || 0) * 1.2) * pulse;   // the art is planted centred in a square; its height is the shield's
-  const cx = sx + (m.w || 0) / 2, cy = sy + (m.h || 0) / 2;
+  // v0.30.390 — centre and size on the sprite actually drawn this frame when the sprite path recorded it; the box otherwise
+  const _r = (m._lxDrawRect && m._lxDrawRect.t === t) ? m._lxDrawRect : null;
+  const _bw = _r ? _r.w : (m.w || 0), _bh = _r ? _r.h : (m.h || 0);
+  const size = Math.min(560, Math.max(72, Math.max(_bw, _bh) * 1.15)) * pulse;
+  const cx = _r ? (_r.x + _r.w / 2) : (sx + (m.w || 0) / 2), cy = _r ? (_r.y + _r.h / 2) : (sy + (m.h || 0) / 2);
   ctx.save();
   ctx.globalAlpha = 0.55 * fade;
   ctx.drawImage(img, cx - size / 2, cy - size / 2, size, size);
