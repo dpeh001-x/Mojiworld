@@ -16,7 +16,7 @@ function blobs(mask, W, H) { const lab = new Int32Array(W * H); const out = []; 
 async function gem(p) { const { data, info } = await sharp(p).ensureAlpha().raw().toBuffer({ resolveWithObject: true }); const W = info.width, H = info.height; const red = new Uint8Array(W * H); for (let k = 0; k < W * H; k++) { const r = data[k * 4], g = data[k * 4 + 1], b = data[k * 4 + 2], a = data[k * 4 + 3]; if (a > 128 && r > 170 && g < 90 && b < 90) red[k] = 1; } const bl = blobs(red, W, H).filter((b) => b.n > 800 && Math.abs(b.w / b.h - 1) < 0.5).sort((a, b) => b.n - a.n); return bl[0] ? (bl[0].w + bl[0].h) / 2 : null; }
 const SPR = path.join(SERVE_ROOT, 'Sprites', 'monsters');
 const calibSrc = readFileSync(path.join(SERVE_ROOT, 'data', 'anim_calib.js'), 'utf8');
-const calib = JSON.parse(calibSrc.slice(calibSrc.indexOf('window.LX_ANIM_CALIB = ') + 'window.LX_ANIM_CALIB = '.length, calibSrc.indexOf(';\nwindow.LX_ATK_HITBOX')).replace(/;\s*$/, ''));
+const calib = (() => { const a = calibSrc.indexOf('window.LX_ANIM_CALIB = ') + 'window.LX_ANIM_CALIB = '.length; const b = calibSrc.indexOf('window.LX_ATK_HITBOX', a); return JSON.parse(calibSrc.slice(a, b).replace(/;\s*$/, '')); })();   // CRLF-tolerant (a checked-out copy is smudged to CRLF)
 const FS = (calib.smithgolem && calib.smithgolem.attack && calib.smithgolem.attack.fs) || null;
 const refs = []; for (const st of ['idle', 'walk']) for (let i = 0; i < 9; i++) { const d = await gem(path.join(SPR, st, `smithgolem_${i}.webp`)); if (d) refs.push(d); }
 refs.sort((a, b) => a - b); const REF = refs[refs.length >> 1];
