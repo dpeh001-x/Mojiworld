@@ -428,14 +428,14 @@ window.LX_ANIM_CALIB = {
       "dy": 0.025
     },
     "walk": {
-      "s": 1.29,
+      "s": 1.27,
       "dx": 0,
       "dy": 0.05
     },
     "attack": {
-      "s": 1.13,
+      "s": 1.08,
       "dx": 0,
-      "dy": 0.04,
+      "dy": 0.035,
       "ft": [
         72,
         60,
@@ -511,17 +511,17 @@ window.LX_ANIM_CALIB = {
     "idle": {
       "s": 1,
       "dx": 0,
-      "dy": 0.035
+      "dy": 0.02
     },
     "walk": {
       "s": 0.949,
       "dx": 0,
-      "dy": 0.035
+      "dy": 0.01
     },
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.035,
+      "dy": 0.015,
       "ft": [
         70,
         70,
@@ -722,12 +722,12 @@ window.LX_ANIM_CALIB = {
       "dy": 0.04
     },
     "walk": {
-      "s": 1.655,
+      "s": 1.67,
       "dx": 0,
-      "dy": 0.0797
+      "dy": 0.065
     },
     "attack": {
-      "s": 1.4946,
+      "s": 1.6,
       "dx": 0,
       "dy": 0.0532,
       "ft": [
@@ -889,7 +889,7 @@ window.LX_ANIM_CALIB = {
   },
   "gravitos3punch": {
     "attack": {
-      "s": 1.059,
+      "s": 1.04,
       "dx": 0,
       "dy": 0.0294,
       "ft": [
@@ -897,13 +897,12 @@ window.LX_ANIM_CALIB = {
         60,
         60,
         60,
-        60,
+        66,
         90,
         132,
         90,
         96
-      ],
-      "ftAuto": true
+      ]
     }
   },
   "gravitos3soul": {
@@ -917,19 +916,18 @@ window.LX_ANIM_CALIB = {
         60,
         60,
         90,
-        132,
+        90,
         90,
         60,
         96
-      ],
-      "ftAuto": true
+      ]
     }
   },
   "legosaurusdash": {
     "attack": {
       "s": 1,
       "dx": 0.0249,
-      "dy": 0.065,
+      "dy": 0.025,
       "ft": [
         700,
         150,
@@ -1191,9 +1189,9 @@ window.LX_ANIM_CALIB = {
   },
   "zodiac_leo": {
     "zodiac/pounce": {
-      "s": 1.45,
+      "s": 1.4,
       "dx": 0.06,
-      "dy": 0.325
+      "dy": 0.29
     },
     "attack": {
       "ft": [
