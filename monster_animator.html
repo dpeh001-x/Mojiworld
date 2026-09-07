@@ -90,7 +90,7 @@
       <div class="mut" style="font-size:11px;margin-top:3px">renders EXACTLY what the game renders</div>
       <!-- build badge: bump alongside GAME_VERSION on every animator change,
            so a stale cached copy is identifiable at a glance -->
-      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.315</span>
+      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.417</span>
         <a id="lx-latest-link" href="animator.html" title="Cache-proof launcher: resolves main's current commit via the GitHub API and opens that exact build — use this if the badge looks old" style="color:#5b8cff;margin-left:6px">latest&#8599;</a></div>
       <script>
       // v0.29.246 — LIVE badge freshness probe. The static build string only
@@ -1223,6 +1223,7 @@
     setIdleRef: v => { idleRef = !!v; paint(); }, getIdleRef: () => idleRef,
     setPinFrame: (i) => { pinFrame = (i == null) ? null : (i | 0); paint(); }, getPinFrame: () => pinFrame,
     frameCount: (st) => ((frames[st] && frames[st].length) || 0),
+    framesOf: (st) => (frames[st] || []),   // v0.30.417 — the timing strip draws thumbnails
     framesOf: (st) => (frames[st] || []),   // v0.30.x - the head+body leveller measures these
     shownFrame: (st) => pickFrame(st, frames[st]),
     idleRefRect: (cx, gy) => drawIdleRef(cx == null ? cv.width / 2 : cx, gy == null ? cv.height - 64 : gy, 0),
@@ -1346,6 +1347,37 @@
   // has no frame index at the point it applies calibration - so a monster knob
   // would move the preview and nothing in the game, which is the bug fixed one
   // version ago wearing a different hat.
+  // v0.30.417 — FRAME TIMING for every monster + the TIMING STRIP (per user:
+  // "extend it to normal monsters ... make it even easier to use"). One row:
+  // a thumbnail of every frame with its ms right under it, the shown frame
+  // lit, the cycle length live, and one-click presets. Offered only for the
+  // states the game re-times (bosses: attack/idle; mobs: attack/idle/walk).
+  function ftStates(isBoss) { return isBoss ? ['attack', 'idle'] : ['attack', 'idle', 'walk']; }
+  function ftSection(st, v, i, n, isBoss) {
+    const baseMs = (window.__core.GAME_FRAME_MS && window.__core.GAME_FRAME_MS[st]) || 48;
+    const okList = ftStates(isBoss);
+    if (!okList.includes(st)) return `<div class="mut" style="font-size:11px;margin-bottom:6px">⏱ frame timing is honored in-game for <b>${okList.join(', ')}</b>; this state keeps the engine clock.</div>`;
+    const ftArr = Array.isArray(v.ft) ? v.ft : null;
+    const ms = (k) => (ftArr && ftArr[k] >= 16) ? Math.round(ftArr[k]) : baseMs;
+    const tuned = ftArr ? ftArr.filter(x => Math.round(+x) !== baseMs).length : 0;
+    let total = 0; for (let k = 0; k < n; k++) total += ms(k);
+    const cycle = (st === 'idle' && n > 1) ? total * 2 - ms(0) - ms(n - 1) : total;
+    let cells = '';
+    for (let k = 0; k < n; k++) {
+      cells += `<div class="ftcell" data-i="${k}" title="frame ${k + 1} — click to show it" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:3px;border-radius:6px;cursor:pointer;${k === i ? 'background:#1c2a3a;outline:1px solid #4a7fb8' : ''}">` +
+        `<canvas data-thumb="${k}" width="40" height="40" style="width:40px;height:40px;background:#0b0f16;border-radius:4px"></canvas>` +
+        `<input type="number" class="ftms" data-i="${k}" value="${ms(k)}" min="16" max="2000" step="5" style="width:48px;font-size:10px;text-align:center;padding:1px 2px" title="frame ${k + 1}: ms on screen" /></div>`;
+    }
+    return `<div class="mut" style="font-size:11px;margin:6px 0 2px">⏱ <b>timing</b> · ms each frame stays on screen (game default ${baseMs}) · cycle <b id="ft-total">${cycle}</b> ms${tuned ? ` · <b>${tuned} tuned</b>` : ''}</div>` +
+      `<div id="ft-strip" style="display:flex;gap:2px;overflow-x:auto;padding:4px 0">${cells}</div>` +
+      `<div style="display:flex;flex-wrap:wrap;gap:4px;margin:4px 0 6px">` +
+        `<button class="reset" data-ftp="even" title="every frame back to the game default">even</button>` +
+        `<button class="reset" data-ftp="slower" title="all frames ×1.5">slower</button>` +
+        `<button class="reset" data-ftp="faster" title="all frames ÷1.5">faster</button>` +
+        `<button class="reset" data-ftp="holdlast" title="last frame ×3">hold last</button>` +
+        `<button class="reset" data-ftp="holdthis" title="frame ${i + 1} ×2">hold this</button>` +
+        `<button class="reset" id="fr-ft-clear" title="remove the timing — engine clock">clear</button></div>`;
+  }
   function frameCard() {
     const st = A.focusState, n = A.frameCount(st);
     const isBoss = A.MAN[A.cur] && A.MAN[A.cur].group === 'boss';
@@ -1373,24 +1405,10 @@
       // in-game size; the game honors ft[] on the boss attack loop and idle
       // ping-pong, and the gravitos punch/contact playback reads the values
       // as relative weights inside its pattern window.
-      const baseMs = (window.__core.GAME_FRAME_MS && window.__core.GAME_FRAME_MS[st]) || 48;
-      const ftArr = Array.isArray(v.ft) ? v.ft : null;
-      const curFt = (ftArr && ftArr[i] >= 16) ? ftArr[i] : baseMs;
-      const ftTuned = ftArr ? ftArr.filter(x => Math.round(+x) !== baseMs).length : 0;
-      const ftOk = (st === 'attack' || st === 'idle');
       h += `<div class="sl"><label>scale</label>` +
         `<input type="range" id="fr-fs" min="0.5" max="2" step="0.005" value="${cur}" />` +
         `<input type="number" id="fr-fs-n" min="0.5" max="2" step="0.005" value="${cur}" /></div>`;
-      if (ftOk) {
-        h += `<div class="sl" title="how long frame ${i + 1} stays on screen before the next frame (game default ${baseMs}ms)"><label>⏱ ms</label>` +
-          `<input type="range" id="fr-ft" min="30" max="600" step="5" value="${curFt}" />` +
-          `<input type="number" id="fr-ft-n" min="16" max="2000" step="5" value="${curFt}" /></div>` +
-          `<div class="mut" style="font-size:11px;margin-bottom:6px">interval → next frame` +
-          `${ftTuned ? ` · <b>${ftTuned} tuned</b>` : ` · game default ${baseMs}ms`}` +
-          ` <button class="reset" id="fr-ft-clear" style="float:right">clear timing</button></div>`;
-      } else {
-        h += `<div class="mut" style="font-size:11px;margin-bottom:6px">⏱ frame timing is honored in-game for <b>attack</b> and <b>idle</b> only; this state keeps the engine clock.</div>`;
-      }
+      h += ftSection(st, v, i, n, true);   // v0.30.417 — the timing strip replaces the single slider
       h += `<button class="reset" id="fr-reset" style="width:100%">reset frame ${i + 1}</button>` +
         `<div class="srow" style="margin-top:8px"><h3 style="font-size:11px">\u2696\uFE0F level on head + body</h3></div>` +
         `<div class="mut" style="font-size:11px;margin-bottom:6px">Measures each frame's HEAD AND BODY - opaque and dark, ` +
@@ -1406,6 +1424,9 @@
       h += `<div class="mut" style="font-size:11px;color:#e8c88a">Per-frame scale is a BOSS-only path in the game ` +
         `(<code>_drawBossSprite</code> applies <code>fs</code>; <code>drawMonster</code> has no frame index there). ` +
         `Stepping still works for inspection, but a per-frame value would not reach the game, so it is not offered.</div>`;
+      // v0.30.417 — frame TIMING does reach the game for regular monsters
+      // (attack / idle / walk), so the strip is offered here too.
+      h += ftSection(st, v, i, n, false);
     }
     return h + '</div>';
   }
@@ -1631,6 +1652,39 @@
       delete v.ft;
       markDirty(); window.__buildControls(); toast('frame timing cleared — engine clock restored');
     };
+    // v0.30.417 — TIMING STRIP wiring: inline ms per frame (no rebuild, so the
+    // field keeps focus and the stage re-times as you type), thumbnails from
+    // the live frames, click a cell to show that frame, one-click presets.
+    const strip = document.getElementById('ft-strip');
+    if (strip) {
+      const st = A.focusState, n = A.frameCount(st);
+      const baseMs = (window.__core.GAME_FRAME_MS && window.__core.GAME_FRAME_MS[st]) || 48;
+      const ensureFt = () => { const v = A.CALIB()[A.owner()][st]; if (!Array.isArray(v.ft)) v.ft = new Array(n).fill(baseMs); while (v.ft.length < n) v.ft.push(baseMs); return v; };
+      const refreshTotal = () => { const v = A.CALIB()[A.owner()][st]; const ms = (k) => (v.ft && v.ft[k] >= 16) ? Math.round(v.ft[k]) : baseMs;
+        let t = 0; for (let k = 0; k < n; k++) t += ms(k); const c = (st === 'idle' && n > 1) ? t * 2 - ms(0) - ms(n - 1) : t;
+        const el = document.getElementById('ft-total'); if (el) el.textContent = c; };
+      const fr = (typeof A.framesOf === 'function') ? A.framesOf(st) : [];
+      strip.querySelectorAll('canvas[data-thumb]').forEach((cv) => { const im = fr[+cv.dataset.thumb]; if (!im || !im.naturalWidth) return;
+        const g2 = cv.getContext('2d'); const s = Math.min(38 / im.naturalWidth, 38 / im.naturalHeight);
+        const w = im.naturalWidth * s, hh = im.naturalHeight * s; g2.drawImage(im, (40 - w) / 2, (40 - hh) / 2, w, hh); });
+      strip.querySelectorAll('input.ftms').forEach((inp) => {
+        inp.addEventListener('focus', snapshot, { once: true });
+        inp.addEventListener('input', () => { let val = Math.round(+inp.value); if (!isFinite(val)) return; val = Math.max(16, Math.min(2000, val));
+          const v = ensureFt(); v.ft[+inp.dataset.i] = val; markDirty(); refreshTotal(); });
+      });
+      strip.querySelectorAll('.ftcell').forEach((cell) => { cell.addEventListener('click', (e) => { if (e.target && e.target.tagName === 'INPUT') return;
+        A.setPinFrame(+cell.dataset.i); window.__buildControls(); }); });
+      document.querySelectorAll('button[data-ftp]').forEach((btn) => { btn.onclick = () => {
+        snapshot(); const v = ensureFt(); const p = btn.dataset.ftp; const pin = A.getPinFrame();
+        const i = (pin != null) ? Math.max(0, Math.min(pin, n - 1)) : (A.shownFrame(st) || 0);
+        if (p === 'even') v.ft = new Array(n).fill(baseMs);
+        else if (p === 'slower') v.ft = v.ft.map((x) => Math.min(2000, Math.round(x * 1.5)));
+        else if (p === 'faster') v.ft = v.ft.map((x) => Math.max(16, Math.round(x / 1.5)));
+        else if (p === 'holdlast') v.ft[n - 1] = Math.min(2000, Math.round(baseMs * 3));
+        else if (p === 'holdthis') v.ft[i] = Math.min(2000, Math.round(v.ft[i] * 2));
+        markDirty(); window.__buildControls(); toast('timing: ' + p);
+      }; });
+    }
     const rst = document.getElementById('fr-reset');
     if (rst) rst.onclick = () => {
       snapshot();
@@ -1673,9 +1727,14 @@
   // gated exactly like the game: bosses only, attack + idle states only.
   window.__core._ftFor = (st) => {
     const ap = window.__app; if (!ap || !ap.cur) return null;
-    if (st !== 'attack' && st !== 'idle') return null;
     const man = ap.MAN && ap.MAN[ap.cur];
-    if (!man || man.group !== 'boss') return null;
+    if (!man) return null;
+    // v0.30.417 — every monster, not just bosses (per user). The states are
+    // the ones the GAME honours: bosses re-time attack + idle; regular
+    // monsters attack + idle + walk (_monsterStateFrame). Anything else keeps
+    // the engine clock, so the preview must not pretend otherwise.
+    const okStates = man.group === 'boss' ? ['attack', 'idle'] : ['attack', 'idle', 'walk'];
+    if (!okStates.includes(st)) return null;
     const cc = ap.CALIB()[ap.owner()];
     const v = cc && cc[st];
     return (v && Array.isArray(v.ft)) ? v.ft : null;
